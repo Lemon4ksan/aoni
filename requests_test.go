@@ -5,211 +5,135 @@
 package aoni
 
 import (
-	"context"
 	"encoding/json"
 	"io"
 	"net/http"
-	"net/http/httptest"
 	"testing"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestClient_GetJSON(t *testing.T) {
+	t.Parallel()
 	expected := testPayload{Message: "hello", Status: http.StatusOK}
 
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	_, client := setupTestServer(t, func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(expected)
-	}))
-	defer server.Close()
+	})
 
-	client := NewClient(nil).WithBaseURL(server.URL)
+	result, err := GetJSON[testPayload](t.Context(), client, "/json")
+	require.NoError(t, err)
 
-	result, err := GetJSON[testPayload](context.Background(), client, "/json")
-	if err != nil {
-		t.Fatalf("GetJSON failed: %v", err)
-	}
-
-	if result.Message != expected.Message || result.Status != expected.Status {
-		t.Errorf("decoded struct mismatch. got %+v, want %+v", result, expected)
-	}
+	assert.Equal(t, expected.Message, result.Message)
+	assert.Equal(t, expected.Status, result.Status)
 }
 
 func TestClient_PostJSON(t *testing.T) {
+	t.Parallel()
 	input := testPayload{Message: "sending", Status: 1}
 	response := testPayload{Message: "received", Status: 2}
 
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodPost {
-			t.Errorf("expected POST, got %s", r.Method)
-		}
-
-		if r.Header.Get("Content-Type") != "application/json" {
-			t.Error("expected application/json content type")
-		}
+	_, client := setupTestServer(t, func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, http.MethodPost, r.Method)
+		assert.Equal(t, "application/json", r.Header.Get("Content-Type"))
 
 		var body testPayload
-		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-			t.Errorf("failed to decode request body: %v", err)
-		}
-
-		if body.Message != input.Message {
-			t.Errorf("request body mismatch: got %s, want %s", body.Message, input.Message)
-		}
+		err := json.NewDecoder(r.Body).Decode(&body)
+		require.NoError(t, err)
+		assert.Equal(t, input.Message, body.Message)
 
 		w.WriteHeader(http.StatusAccepted)
 		_ = json.NewEncoder(w).Encode(response)
-	}))
-	defer server.Close()
+	})
 
-	client := NewClient(nil).WithBaseURL(server.URL)
-
-	result, err := PostJSON[testPayload, testPayload](context.Background(), client, "/post", input)
-	if err != nil {
-		t.Fatalf("PostJSON failed: %v", err)
-	}
-
-	if result.Message != response.Message {
-		t.Errorf("response mismatch: got %s, want %s", result.Message, response.Message)
-	}
+	result, err := PostJSON[testPayload, testPayload](t.Context(), client, "/post", input)
+	require.NoError(t, err)
+	assert.Equal(t, response.Message, result.Message)
 }
 
 func TestClient_PutJSON(t *testing.T) {
+	t.Parallel()
 	input := testPayload{Message: "sending-put", Status: 1}
 	response := testPayload{Message: "received-put", Status: 2}
 
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodPut {
-			t.Errorf("expected PUT, got %s", r.Method)
-		}
-
-		if r.Header.Get("Content-Type") != "application/json" {
-			t.Error("expected application/json content type")
-		}
+	_, client := setupTestServer(t, func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, http.MethodPut, r.Method)
+		assert.Equal(t, "application/json", r.Header.Get("Content-Type"))
 
 		var body testPayload
-		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-			t.Errorf("failed to decode request body: %v", err)
-		}
-
-		if body.Message != input.Message {
-			t.Errorf("request body mismatch: got %s, want %s", body.Message, input.Message)
-		}
+		err := json.NewDecoder(r.Body).Decode(&body)
+		require.NoError(t, err)
+		assert.Equal(t, input.Message, body.Message)
 
 		w.WriteHeader(http.StatusAccepted)
 		_ = json.NewEncoder(w).Encode(response)
-	}))
-	defer server.Close()
+	})
 
-	client := NewClient(nil).WithBaseURL(server.URL)
-
-	result, err := PutJSON[testPayload, testPayload](context.Background(), client, "/put", input)
-	if err != nil {
-		t.Fatalf("PutJSON failed: %v", err)
-	}
-
-	if result.Message != response.Message {
-		t.Errorf("response mismatch: got %s, want %s", result.Message, response.Message)
-	}
+	result, err := PutJSON[testPayload, testPayload](t.Context(), client, "/put", input)
+	require.NoError(t, err)
+	assert.Equal(t, response.Message, result.Message)
 }
 
 func TestClient_PatchJSON(t *testing.T) {
+	t.Parallel()
 	input := testPayload{Message: "sending-patch", Status: 1}
 	response := testPayload{Message: "received-patch", Status: 2}
 
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodPatch {
-			t.Errorf("expected PATCH, got %s", r.Method)
-		}
-
-		if r.Header.Get("Content-Type") != "application/json" {
-			t.Error("expected application/json content type")
-		}
+	_, client := setupTestServer(t, func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, http.MethodPatch, r.Method)
+		assert.Equal(t, "application/json", r.Header.Get("Content-Type"))
 
 		var body testPayload
-		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-			t.Errorf("failed to decode request body: %v", err)
-		}
-
-		if body.Message != input.Message {
-			t.Errorf("request body mismatch: got %s, want %s", body.Message, input.Message)
-		}
+		err := json.NewDecoder(r.Body).Decode(&body)
+		require.NoError(t, err)
+		assert.Equal(t, input.Message, body.Message)
 
 		w.WriteHeader(http.StatusAccepted)
 		_ = json.NewEncoder(w).Encode(response)
-	}))
-	defer server.Close()
+	})
 
-	client := NewClient(nil).WithBaseURL(server.URL)
-
-	result, err := PatchJSON[testPayload, testPayload](context.Background(), client, "/patch", input)
-	if err != nil {
-		t.Fatalf("PatchJSON failed: %v", err)
-	}
-
-	if result.Message != response.Message {
-		t.Errorf("response mismatch: got %s, want %s", result.Message, response.Message)
-	}
+	result, err := PatchJSON[testPayload, testPayload](t.Context(), client, "/patch", input)
+	require.NoError(t, err)
+	assert.Equal(t, response.Message, result.Message)
 }
 
 func TestClient_DeleteJSON(t *testing.T) {
+	t.Parallel()
 	input := testPayload{Message: "deleting", Status: 1}
 	response := testPayload{Message: "deleted", Status: 2}
 
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodDelete {
-			t.Errorf("expected DELETE, got %s", r.Method)
-		}
-
-		if r.Header.Get("Content-Type") != "application/json" {
-			t.Error("expected application/json content type")
-		}
+	_, client := setupTestServer(t, func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, http.MethodDelete, r.Method)
+		assert.Equal(t, "application/json", r.Header.Get("Content-Type"))
 
 		var body testPayload
-		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-			t.Errorf("failed to decode request body: %v", err)
-		}
-
-		if body.Message != input.Message {
-			t.Errorf("request body mismatch: got %s, want %s", body.Message, input.Message)
-		}
+		err := json.NewDecoder(r.Body).Decode(&body)
+		require.NoError(t, err)
+		assert.Equal(t, input.Message, body.Message)
 
 		w.WriteHeader(http.StatusOK)
 		_ = json.NewEncoder(w).Encode(response)
-	}))
-	defer server.Close()
+	})
 
-	client := NewClient(nil).WithBaseURL(server.URL)
-
-	result, err := DeleteJSON[testPayload, testPayload](context.Background(), client, "/delete", input)
-	if err != nil {
-		t.Fatalf("DeleteJSON failed: %v", err)
-	}
-
-	if result.Message != response.Message {
-		t.Errorf("response mismatch: got %s, want %s", result.Message, response.Message)
-	}
+	result, err := DeleteJSON[testPayload, testPayload](t.Context(), client, "/delete", input)
+	require.NoError(t, err)
+	assert.Equal(t, response.Message, result.Message)
 }
 
 func TestClient_DeleteJSON_NilPayload(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodDelete {
-			t.Errorf("expected DELETE, got %s", r.Method)
-		}
+	t.Parallel()
+	_, client := setupTestServer(t, func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, http.MethodDelete, r.Method)
 
-		// Check that body is empty
 		var body map[string]any
-		if err := json.NewDecoder(r.Body).Decode(&body); err != io.EOF && err != nil {
-			t.Errorf("expected empty body, got error: %v", err)
-		}
+		err := json.NewDecoder(r.Body).Decode(&body)
+		assert.ErrorIs(t, err, io.EOF)
 
 		w.WriteHeader(http.StatusNoContent)
-	}))
-	defer server.Close()
+	})
 
-	client := NewClient(nil).WithBaseURL(server.URL)
-
-	_, err := DeleteJSON[*testPayload, any](context.Background(), client, "/delete-nil", nil)
-	if err != nil {
-		t.Fatalf("DeleteJSON failed: %v", err)
-	}
+	_, err := DeleteJSON[*testPayload, any](t.Context(), client, "/delete-nil", nil)
+	require.NoError(t, err)
 }

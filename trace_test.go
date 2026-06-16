@@ -5,10 +5,8 @@
 package aoni
 
 import (
-	"context"
 	"io"
 	"net/http"
-	"net/http/httptest"
 	"testing"
 	"time"
 
@@ -17,105 +15,123 @@ import (
 )
 
 func TestTrace(t *testing.T) {
-	t.Run("Capture trace info", func(t *testing.T) {
-		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			_, _ = w.Write([]byte("ok"))
-		}))
-		defer server.Close()
+	t.Parallel()
 
-		client := NewClient(nil).WithBaseURL(server.URL)
+	t.Run("capture_trace_info", func(t *testing.T) {
+		t.Parallel()
+		_, client := setupTestServer(t, func(w http.ResponseWriter, r *http.Request) {
+			_, _ = w.Write([]byte("ok"))
+		})
 
 		var traceInfo TraceInfo
 
-		resp, err := client.Request(context.Background(), http.MethodGet, "/trace", Trace(&traceInfo))
+		resp, err := client.Request(t.Context(), http.MethodGet, "/trace", Trace(&traceInfo))
 		require.NoError(t, err)
-
-		defer resp.Body.Close()
+		t.Cleanup(func() { _ = resp.Body.Close() })
 
 		_, _ = io.ReadAll(resp.Body)
 
-		// Server processing should be measured
 		assert.GreaterOrEqual(t, traceInfo.ServerProcessing, time.Duration(0))
 	})
 
-	t.Run("Nil body request", func(t *testing.T) {
-		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	t.Run("nil_body_request", func(t *testing.T) {
+		t.Parallel()
+		_, client := setupTestServer(t, func(w http.ResponseWriter, r *http.Request) {
 			_, _ = w.Write([]byte("ok"))
-		}))
-		defer server.Close()
-
-		client := NewClient(nil).WithBaseURL(server.URL)
+		})
 
 		var traceInfo TraceInfo
 
-		resp, err := client.Request(context.Background(), http.MethodGet, "/trace", Trace(&traceInfo))
+		resp, err := client.Request(t.Context(), http.MethodGet, "/trace", Trace(&traceInfo))
 		require.NoError(t, err)
-
-		defer resp.Body.Close()
+		t.Cleanup(func() { _ = resp.Body.Close() })
 
 		_, _ = io.ReadAll(resp.Body)
 
-		// Should not panic with nil body
 		assert.GreaterOrEqual(t, traceInfo.Total, time.Duration(0))
 	})
 }
 
 func TestCurlCommand(t *testing.T) {
-	t.Run("Simple GET request", func(t *testing.T) {
-		req, _ := http.NewRequest("GET", "http://example.com/api/test", nil)
-		req.Header.Set("Authorization", "Bearer token123")
+	t.Parallel()
 
-		curl := CurlCommand(req, nil)
-		assert.Contains(t, curl, "curl")
-		assert.Contains(t, curl, "http://example.com/api/test")
-		assert.Contains(t, curl, "Authorization: Bearer token123")
-	})
+	tests := []struct {
+		name    string
+		method  string
+		url     string
+		headers map[string]string
+		body    []byte
+		want    []string
+		notWant []string
+	}{
+		{
+			name:    "simple_get_request",
+			method:  "GET",
+			url:     "http://example.com/api/test",
+			headers: map[string]string{"Authorization": "Bearer token123"},
+			body:    nil,
+			want:    []string{"curl", "http://example.com/api/test", "Authorization: Bearer token123"},
+		},
+		{
+			name:    "post_request_with_body",
+			method:  "POST",
+			url:     "http://example.com/api/test",
+			headers: map[string]string{"Content-Type": "application/json"},
+			body:    []byte(`{"key": "value"}`),
+			want:    []string{"-X POST", "-d '{\"key\": \"value\"}'", "Content-Type: application/json"},
+		},
+		{
+			name:    "get_request_no_method_flag",
+			method:  "GET",
+			url:     "http://example.com/api/test",
+			headers: nil,
+			body:    nil,
+			want:    []string{"http://example.com/api/test"},
+			notWant: []string{"-X GET"},
+		},
+		{
+			name:    "request_with_multiple_headers",
+			method:  "GET",
+			url:     "http://example.com/api/test",
+			headers: map[string]string{"X-Custom1": "value1", "X-Custom2": "value2"},
+			body:    nil,
+			want:    []string{"X-Custom1: value1", "X-Custom2: value2"},
+		},
+	}
 
-	t.Run("POST request with body", func(t *testing.T) {
-		req, _ := http.NewRequest("POST", "http://example.com/api/test", nil)
-		req.Header.Set("Content-Type", "application/json")
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			req, err := http.NewRequestWithContext(t.Context(), tt.method, tt.url, nil)
+			require.NoError(t, err)
 
-		body := []byte(`{"key": "value"}`)
+			for k, v := range tt.headers {
+				req.Header.Set(k, v)
+			}
 
-		curl := CurlCommand(req, body)
-		assert.Contains(t, curl, "-X POST")
-		assert.Contains(t, curl, "-d '{\"key\": \"value\"}'")
-		assert.Contains(t, curl, "Content-Type: application/json")
-	})
-
-	t.Run("GET request (no method flag)", func(t *testing.T) {
-		req, _ := http.NewRequest("GET", "http://example.com/api/test", nil)
-
-		curl := CurlCommand(req, nil)
-		assert.NotContains(t, curl, "-X GET")
-		assert.Contains(t, curl, "http://example.com/api/test")
-	})
-
-	t.Run("Request with multiple headers", func(t *testing.T) {
-		req, _ := http.NewRequest("GET", "http://example.com/api/test", nil)
-		req.Header.Set("X-Custom1", "value1")
-		req.Header.Set("X-Custom2", "value2")
-
-		curl := CurlCommand(req, nil)
-		assert.Contains(t, curl, "X-Custom1: value1")
-		assert.Contains(t, curl, "X-Custom2: value2")
-	})
+			curl := CurlCommand(req, tt.body)
+			for _, w := range tt.want {
+				assert.Contains(t, curl, w)
+			}
+			for _, nw := range tt.notWant {
+				assert.NotContains(t, curl, nw)
+			}
+		})
+	}
 }
 
 func TestAsCurl(t *testing.T) {
-	t.Run("AsCurl modifier", func(t *testing.T) {
-		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	t.Parallel()
+
+	t.Run("as_curl_modifier", func(t *testing.T) {
+		t.Parallel()
+		_, client := setupTestServer(t, func(w http.ResponseWriter, r *http.Request) {
 			_, _ = w.Write([]byte("ok"))
-		}))
-		defer server.Close()
+		})
 
-		client := NewClient(nil).WithBaseURL(server.URL)
-
-		// AsCurl should not panic
-		resp, err := client.Request(context.Background(), http.MethodGet, "/curl", AsCurl())
+		resp, err := client.Request(t.Context(), http.MethodGet, "/curl", AsCurl())
 		require.NoError(t, err)
-
-		defer resp.Body.Close()
+		t.Cleanup(func() { _ = resp.Body.Close() })
 
 		_, _ = io.ReadAll(resp.Body)
 	})

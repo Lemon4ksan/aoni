@@ -68,21 +68,27 @@ func (m *mockDoer) GetCalls() int {
 	return m.calls
 }
 
+type mockRoundTripper struct{}
+
+func (m *mockRoundTripper) RoundTrip(req *http.Request) (*http.Response, error) {
+	return nil, nil
+}
+
 func TestNewProxyClient(t *testing.T) {
-	t.Run("Default timeout", func(t *testing.T) {
+	t.Parallel()
+
+	t.Run("default_timeout", func(t *testing.T) {
+		t.Parallel()
 		cfg := ProxyConfig{}
 
 		client, err := NewProxyClient(cfg)
-		if err != nil {
-			t.Fatal(err)
-		}
+		require.NoError(t, err)
 
-		if client.Timeout != 15*time.Second {
-			t.Errorf("expected default timeout 15s, got %v", client.Timeout)
-		}
+		assert.Equal(t, 15*time.Second, client.Timeout)
 	})
 
-	t.Run("Custom config", func(t *testing.T) {
+	t.Run("custom_config", func(t *testing.T) {
+		t.Parallel()
 		proxyAddr := "http://user:pass@1.2.3.4:8080"
 		cfg := ProxyConfig{
 			ProxyURL:           proxyAddr,
@@ -91,103 +97,85 @@ func TestNewProxyClient(t *testing.T) {
 		}
 
 		client, err := NewProxyClient(cfg)
-		if err != nil {
-			t.Fatal(err)
-		}
+		require.NoError(t, err)
 
-		if client.Timeout != 5*time.Second {
-			t.Errorf("expected timeout 5s, got %v", client.Timeout)
-		}
+		assert.Equal(t, 5*time.Second, client.Timeout)
 
 		transport := client.Transport.(*http.Transport)
-		if !transport.TLSClientConfig.InsecureSkipVerify {
-			t.Error("expected InsecureSkipVerify to be true")
-		}
+		assert.True(t, transport.TLSClientConfig.InsecureSkipVerify)
 
-		req, _ := http.NewRequest("GET", "http://google.com", nil)
+		req, err := http.NewRequestWithContext(t.Context(), "GET", "http://google.com", nil)
+		require.NoError(t, err)
 
 		proxyURL, err := transport.Proxy(req)
-		if err != nil {
-			t.Fatalf("failed to get proxy URL from transport: %v", err)
-		}
-
-		if proxyURL.String() != proxyAddr {
-			t.Errorf("expected proxy %s, got %s", proxyAddr, proxyURL.String())
-		}
+		require.NoError(t, err)
+		assert.Equal(t, proxyAddr, proxyURL.String())
 	})
 
-	t.Run("Invalid proxy URL", func(t *testing.T) {
+	t.Run("invalid_proxy_url", func(t *testing.T) {
+		t.Parallel()
 		cfg := ProxyConfig{
 			ProxyURL: " ://invalid-url",
 		}
 
 		_, err := NewProxyClient(cfg)
-		if err == nil {
-			t.Error("expected error for invalid proxy URL, got nil")
-		}
+		require.Error(t, err)
 	})
 
-	t.Run("No proxy", func(t *testing.T) {
+	t.Run("no_proxy", func(t *testing.T) {
+		t.Parallel()
 		cfg := ProxyConfig{ProxyURL: ""}
 
 		client, err := NewProxyClient(cfg)
-		if err != nil {
-			t.Fatal(err)
-		}
+		require.NoError(t, err)
 
 		transport := client.Transport.(*http.Transport)
 		if transport.Proxy != nil {
-			req, _ := http.NewRequest("GET", "http://google.com", nil)
+			req, err := http.NewRequestWithContext(t.Context(), "GET", "http://google.com", nil)
+			require.NoError(t, err)
 
-			p, _ := transport.Proxy(req)
-			if p != nil {
-				t.Errorf("expected no proxy, got %v", p)
-			}
+			p, err := transport.Proxy(req)
+			require.NoError(t, err)
+			assert.Nil(t, p)
 		}
 	})
 }
 
 func TestProxyRotator(t *testing.T) {
-	t.Run("Empty clients error", func(t *testing.T) {
+	t.Parallel()
+
+	t.Run("empty_clients_error", func(t *testing.T) {
+		t.Parallel()
 		_, err := NewProxyRotator(ProxyRotatorConfig{})
-		if err == nil || err.Error() != "aoni: proxy rotator requires at least one client" {
-			t.Errorf("expected specific error, got %v", err)
-		}
+		require.Error(t, err)
+		assert.Equal(t, "aoni: proxy rotator requires at least one client", err.Error())
 	})
 
-	t.Run("Round-Robin logic", func(t *testing.T) {
+	t.Run("round_robin_logic", func(t *testing.T) {
+		t.Parallel()
 		m1 := &mockDoer{id: 1}
 		m2 := &mockDoer{id: 2}
 		m3 := &mockDoer{id: 3}
 
 		rotator, err := NewProxyRotator(ProxyRotatorConfig{}, m1, m2, m3)
-		if err != nil {
-			t.Fatal(err)
-		}
+		require.NoError(t, err)
+		t.Cleanup(func() { _ = rotator.Close() })
 
-		req, _ := http.NewRequest("GET", "http://test", nil)
+		req, err := http.NewRequestWithContext(t.Context(), "GET", "http://test", nil)
+		require.NoError(t, err)
 
 		for range 4 {
 			_, err := rotator.Do(req)
-			if err != nil {
-				t.Fatal(err)
-			}
+			require.NoError(t, err)
 		}
 
-		if m1.GetCalls() != 1 {
-			t.Errorf("m1 expected 1 call, got %d", m1.GetCalls())
-		}
-
-		if m2.GetCalls() != 2 {
-			t.Errorf("m2 expected 2 calls, got %d", m2.GetCalls())
-		}
-
-		if m3.GetCalls() != 1 {
-			t.Errorf("m3 expected 1 call, got %d", m3.GetCalls())
-		}
+		assert.Equal(t, 1, m1.GetCalls())
+		assert.Equal(t, 2, m2.GetCalls())
+		assert.Equal(t, 1, m3.GetCalls())
 	})
 
-	t.Run("Concurrency safety", func(t *testing.T) {
+	t.Run("concurrency_safety", func(t *testing.T) {
+		t.Parallel()
 		count := 10
 		clients := make([]HTTPDoer, count)
 
@@ -197,14 +185,17 @@ func TestProxyRotator(t *testing.T) {
 			clients[i] = mocks[i]
 		}
 
-		rotator, _ := NewProxyRotator(ProxyRotatorConfig{}, clients...)
+		rotator, err := NewProxyRotator(ProxyRotatorConfig{}, clients...)
+		require.NoError(t, err)
+		t.Cleanup(func() { _ = rotator.Close() })
 
 		var wg sync.WaitGroup
 
 		iterations := 1000
 		wg.Add(iterations)
 
-		req, _ := http.NewRequest("GET", "http://test", nil)
+		req, err := http.NewRequestWithContext(t.Context(), "GET", "http://test", nil)
+		require.NoError(t, err)
 
 		for range iterations {
 			go func() {
@@ -221,13 +212,12 @@ func TestProxyRotator(t *testing.T) {
 			totalCalls += m.GetCalls()
 		}
 
-		if totalCalls != iterations {
-			t.Errorf("expected total %d calls, got %d", iterations, totalCalls)
-		}
+		assert.Equal(t, iterations, totalCalls)
 	})
 }
 
 func TestProxyRotator_HealthCheck(t *testing.T) {
+	t.Parallel()
 	m1 := &mockDoer{id: 1}
 	m2 := &mockDoer{id: 2, forceError: true}
 
@@ -235,9 +225,12 @@ func TestProxyRotator_HealthCheck(t *testing.T) {
 		MaxFails:   2,
 		RetryAfter: 100 * time.Millisecond,
 	}
-	rotator, _ := NewProxyRotator(cfg, m1, m2)
+	rotator, err := NewProxyRotator(cfg, m1, m2)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = rotator.Close() })
 
-	req, _ := http.NewRequest("GET", "http://test", nil)
+	req, err := http.NewRequestWithContext(t.Context(), "GET", "http://test", nil)
+	require.NoError(t, err)
 
 	for range 5 {
 		_, _ = rotator.Do(req)
@@ -258,7 +251,7 @@ func TestProxyRotator_HealthCheck(t *testing.T) {
 
 	foundM2 := false
 	for range 5 {
-		rotator.Do(req)
+		_, _ = rotator.Do(req)
 
 		if m2.GetCalls() > 2 {
 			foundM2 = true
@@ -266,12 +259,11 @@ func TestProxyRotator_HealthCheck(t *testing.T) {
 		}
 	}
 
-	if !foundM2 {
-		t.Error("m2 should have been retried after cooldown")
-	}
+	assert.True(t, foundM2, "m2 should have been retried after cooldown")
 }
 
 func TestProxyRotator_BackgroundHealthCheck(t *testing.T) {
+	t.Parallel()
 	m1 := &mockDoer{id: 1, forceError: true}
 
 	cfg := ProxyRotatorConfig{
@@ -282,77 +274,70 @@ func TestProxyRotator_BackgroundHealthCheck(t *testing.T) {
 	}
 
 	rotator, err := NewProxyRotator(cfg, m1)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer rotator.Close()
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = rotator.Close() })
 
-	req, _ := http.NewRequest("GET", "http://test", nil)
+	req, err := http.NewRequestWithContext(t.Context(), "GET", "http://test", nil)
+	require.NoError(t, err)
 
 	_, _ = rotator.Do(req)
-	if !rotator.clients[0].unhealthy.Load() {
-		t.Fatal("proxy should be unhealthy")
-	}
+	require.True(t, rotator.clients[0].unhealthy.Load(), "proxy should be unhealthy")
 
 	m1.SetForceError(false)
 
 	time.Sleep(150 * time.Millisecond)
 
-	if rotator.clients[0].unhealthy.Load() {
-		t.Error("proxy should be healthy after background check")
-	}
+	assert.False(t, rotator.clients[0].unhealthy.Load(), "proxy should be healthy after background check")
 }
 
 func TestProxyRotator_ContextCancellation(t *testing.T) {
+	t.Parallel()
 	m1 := &mockDoer{id: 1}
-	rotator, _ := NewProxyRotator(ProxyRotatorConfig{}, m1)
+	rotator, err := NewProxyRotator(ProxyRotatorConfig{}, m1)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = rotator.Close() })
 
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(t.Context())
 	cancel()
 
-	req, _ := http.NewRequestWithContext(ctx, "GET", "http://test", nil)
-	_, err := rotator.Do(req)
+	req, err := http.NewRequestWithContext(ctx, "GET", "http://test", nil)
+	require.NoError(t, err)
+	_, err = rotator.Do(req)
 
-	if !errors.Is(err, context.Canceled) {
-		t.Errorf("expected context.Canceled, got %v", err)
-	}
-
-	if rotator.clients[0].unhealthy.Load() {
-		t.Error("proxy should NOT be marked unhealthy on cancellation")
-	}
+	assert.ErrorIs(t, err, context.Canceled)
+	assert.False(t, rotator.clients[0].unhealthy.Load(), "proxy should NOT be marked unhealthy on cancellation")
 }
 
 func TestProxyRotator_RetryOnProxyError(t *testing.T) {
+	t.Parallel()
 	m1 := &mockDoer{id: 1, statusCode: 407}
 	m2 := &mockDoer{id: 2, statusCode: 200}
 
-	rotator, _ := NewProxyRotator(ProxyRotatorConfig{MaxFails: 1}, m1, m2)
+	rotator, err := NewProxyRotator(ProxyRotatorConfig{MaxFails: 1}, m1, m2)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = rotator.Close() })
 
-	req, _ := http.NewRequest("GET", "http://steam", nil)
+	req, err := http.NewRequestWithContext(t.Context(), "GET", "http://steam", nil)
+	require.NoError(t, err)
 
 	resp, err := rotator.Do(req)
-	if err != nil {
-		t.Fatalf("expected success after rotation, got %v", err)
-	}
+	require.NoError(t, err)
+	assert.Equal(t, 200, resp.StatusCode)
 
-	if resp.StatusCode != 200 {
-		t.Errorf("expected 200 from second proxy, got %d", resp.StatusCode)
-	}
+	req2, err := http.NewRequestWithContext(t.Context(), "GET", "http://steam", nil)
+	require.NoError(t, err)
 
-	req, _ = http.NewRequest("GET", "http://steam", nil)
+	_, err = rotator.Do(req2)
+	require.NoError(t, err)
 
-	_, err = rotator.Do(req)
-	if err != nil {
-		t.Fatalf("expected success after rotation, got %v", err)
-	}
-
-	if !rotator.clients[0].unhealthy.Load() {
-		t.Error("proxy 1 should be unhealthy after 407 error")
-	}
+	assert.True(t, rotator.clients[0].unhealthy.Load(), "proxy 1 should be unhealthy after 407 error")
 }
 
 func TestProxyConfig_CustomTransport(t *testing.T) {
-	t.Run("Custom RoundTripper", func(t *testing.T) {
+	t.Parallel()
+
+	t.Run("custom_round_tripper", func(t *testing.T) {
+		t.Parallel()
 		mw := &mockRoundTripper{}
 		cfg := ProxyConfig{
 			Transport: mw,
@@ -362,7 +347,8 @@ func TestProxyConfig_CustomTransport(t *testing.T) {
 		assert.Equal(t, mw, client.Transport)
 	})
 
-	t.Run("Custom RoundTripper Factory", func(t *testing.T) {
+	t.Run("custom_round_tripper_factory", func(t *testing.T) {
+		t.Parallel()
 		mw := &mockRoundTripper{}
 		cfg := ProxyConfig{
 			TransportFactory: func(c ProxyConfig) (http.RoundTripper, error) {
@@ -375,25 +361,20 @@ func TestProxyConfig_CustomTransport(t *testing.T) {
 	})
 }
 
-type mockRoundTripper struct{}
-
-func (m *mockRoundTripper) RoundTrip(req *http.Request) (*http.Response, error) {
-	return nil, nil
-}
-
 func TestProxyRotator_StickySessionCleanup(t *testing.T) {
+	t.Parallel()
 	m1 := &mockDoer{id: 1}
 	r, err := NewProxyRotator(ProxyRotatorConfig{}, m1)
 	require.NoError(t, err)
-
-	defer r.Close()
+	t.Cleanup(func() { _ = r.Close() })
 
 	r.sessionTTL = 10 * time.Millisecond
 	r.stickyKeyFunc = func(req *http.Request) string {
 		return "session1"
 	}
 
-	req, _ := http.NewRequest("GET", "http://test", nil)
+	req, err := http.NewRequestWithContext(t.Context(), "GET", "http://test", nil)
+	require.NoError(t, err)
 	_, err = r.Do(req)
 	require.NoError(t, err)
 
@@ -406,14 +387,12 @@ func TestProxyRotator_StickySessionCleanup(t *testing.T) {
 	time.Sleep(20 * time.Millisecond)
 
 	r.mu.Lock()
-
 	now := time.Now()
 	for k, v := range r.sessions {
 		if now.Sub(v.lastSeen) > r.sessionTTL {
 			delete(r.sessions, k)
 		}
 	}
-
 	r.mu.Unlock()
 
 	r.mu.RLock()
@@ -423,16 +402,15 @@ func TestProxyRotator_StickySessionCleanup(t *testing.T) {
 }
 
 func TestProxyRotator_Prewarm(t *testing.T) {
+	t.Parallel()
 	m1 := &mockDoer{id: 1}
 	m2 := &mockDoer{id: 2}
 
 	r, err := NewProxyRotator(ProxyRotatorConfig{}, m1, m2)
 	require.NoError(t, err)
+	t.Cleanup(func() { _ = r.Close() })
 
-	defer r.Close()
-
-	ctx := context.Background()
-	r.Prewarm(ctx, "http://warmtarget.com")
+	r.Prewarm(t.Context(), "http://warmtarget.com")
 
 	assert.Equal(t, 1, m1.GetCalls())
 	assert.Equal(t, 1, m2.GetCalls())
