@@ -1,0 +1,87 @@
+# Copyright (c) 2026 Lemon4ksan All rights reserved.
+# Use of this source code is governed by a BSD-style
+# license that can be found in the LICENSE file.
+
+version: "2"
+
+run:
+  timeout: 5m
+  modules-download-mode: readonly
+
+formatters:
+  enable:
+    - gci
+    - gofmt
+    - gofumpt
+    - goimports
+    - golines
+
+  settings:
+    gci:
+      sections:
+        - standard
+        - default
+        - prefix(github.com/lemon4ksan/aoni)
+
+    gofumpt:
+      module-path: github.com/lemon4ksan/aoni
+      extra-rules: true
+
+    goimports:
+      local-prefixes:
+        - github.com/lemon4ksan/aoni
+
+    golines:
+      max-len: 120
+
+linters:
+  enable:
+    - errcheck
+    - govet
+    - ineffassign
+    - staticcheck
+    - unused
+    - revive
+    - bodyclose
+    - nilerr
+    - noctx
+    - errorlint
+    - protogetter
+    - gocritic
+    - prealloc
+    - perfsprint
+    - gosec
+    - wsl_v5
+
+  settings:
+    revive:
+      rules:
+        - name: exported
+          severity: warning
+
+    wsl_v5:
+      default: default
+      allow-first-in-block: true
+      allow-whole-block: true
+      branch-max-lines: 3
+      case-max-lines: 5
+      enable:
+        - leading-whitespace
+        - trailing-whitespace
+        - after-block
+        - err
+
+  exclusions:
+    generated: lax
+    presets:
+      - common-false-positives
+      - std-error-handling
+    rules:
+      # Ignoring the lack of comments in tests
+      - linters: [revive]
+        path: "_test\\.go"
+        text: "exported: (exported|comment on exported)"
+
+      # Ignore most linters in tests
+      - linters: [gosec, noctx, bodyclose, errcheck]
+        path: "_test\\.go"

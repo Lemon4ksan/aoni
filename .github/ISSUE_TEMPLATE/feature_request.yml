@@ -1,0 +1,59 @@
+name: Feature Request
+description: Suggest a new feature or improvement for aoni
+title: "feat: "
+labels: ["enhancement"]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Is your feature request related to a problem?
+      description: A clear and concise description of what the problem is.
+      placeholder: "I'm always frustrated when handling fragile proxies because..."
+    validations:
+      required: true
+  - type: textarea
+    id: solution
+    attributes:
+      label: Describe the solution you'd like
+      description: A clear and concise description of what you want to happen.
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: Any alternative solutions or workarounds you've explored.
+  - type: textarea
+    id: core_justification
+    attributes:
+      label: Why should this be part of aoni core?
+      description: |
+        aoni is a generic, middleware-driven HTTP client framework.
+        Explain why this feature benefits a broad range of users and fits the
+        stability/resilience mission of the project, rather than being
+        application-specific business logic.
+      placeholder: "This would benefit all users because..."
+    validations:
+      required: true
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      description: Which part of aoni does this affect?
+      options:
+        - Client core (Request / response pipeline)
+        - Middleware (retry, circuit breaker, chaos, etc.)
+        - Proxy / load balancer
+        - Streaming (NDJSON, SSE)
+        - Codecs (JSON, XML, YAML, Protobuf)
+        - Resilience (hedging, happy eyeballs, adaptive limiter)
+        - Developer experience (helpers, modifiers)
+        - Documentation
+        - Other
+    validations:
+      required: true
+  - type: textarea
+    id: context
+    attributes:
+      label: Additional context
+      description: Add any other context, code snippets, or references here.
