@@ -17,52 +17,49 @@ import (
 	"time"
 )
 
-// LoadBalancingStrategy defines the strategy for selecting backends.
+// LoadBalancingStrategy defines the selection algorithm for backends.
 type LoadBalancingStrategy int
 
 const (
-	// RoundRobin distributes requests sequentially across backends.
+	// RoundRobin selects backends sequentially in a cyclic order.
 	RoundRobin LoadBalancingStrategy = iota
-	// Random selects a random backend for each request.
+	// Random selects backends randomly for each request.
 	Random
-	// WeightedRoundRobin distributes requests based on backend weights.
+	// WeightedRoundRobin selects backends based on their assigned weights.
 	WeightedRoundRobin
 )
 
-// LoadBalancerConfig defines the configuration for a LoadBalancer.
+// LoadBalancerConfig defines the tuning and policy settings for a [LoadBalancer].
 type LoadBalancerConfig struct {
-	// Strategy defines the load balancing strategy.
+	// Strategy determines the selection algorithm for choosing a backend.
 	Strategy LoadBalancingStrategy
-	// MaxFails is the number of sequential errors allowed before a backend is marked unhealthy.
+	// MaxFails is the consecutive failure threshold before a backend is marked unhealthy.
 	MaxFails uint32
-	// RetryAfter is the duration for which an unhealthy backend is excluded from rotation.
+	// RetryAfter is the offline cooldown duration for an unhealthy backend.
 	RetryAfter time.Duration
-	// HealthCheckURL is the endpoint used for background health checks.
+	// HealthCheckURL is the server endpoint probed by background health checks.
 	HealthCheckURL string
-	// HealthCheckInterval is the interval at which background health checks run.
+	// HealthCheckInterval is the period between sequential background health checks.
 	HealthCheckInterval time.Duration
 }
 
-// Backend represents a single backend server in the load balancer.
+// Backend represents a single backend server configured in the load balancer.
 type Backend struct {
-	// URL is the backend server URL.
+	// URL is the string representation of the backend server address.
 	URL string
-	// Weight is the weight for weighted round-robin (default: 1).
+
+	// Weight is the selection weight for the WeightedRoundRobin strategy.
 	Weight int
-	// client is the underlying HTTP client for this backend.
-	client HTTPDoer
-	// failCount tracks consecutive failures.
-	failCount atomic.Uint32
-	// unhealthy indicates if the backend is currently unhealthy.
-	unhealthy atomic.Bool
-	// recoveredAt is the timestamp when the backend becomes available again.
+
+	client      HTTPDoer
+	failCount   atomic.Uint32
+	unhealthy   atomic.Bool
 	recoveredAt atomic.Int64
 }
 
-// LoadBalancer distributes requests across multiple backends.
+// LoadBalancer distributes requests across multiple backend servers.
 // It implements the [HTTPDoer] interface and can be passed to [NewClient].
-//
-// Create new instances of LoadBalancer using [NewLoadBalancer].
+// Use [NewLoadBalancer] to initialize new instances.
 type LoadBalancer struct {
 	mu       sync.RWMutex
 	backends []*Backend
@@ -74,7 +71,9 @@ type LoadBalancer struct {
 	wg     sync.WaitGroup
 }
 
-// NewLoadBalancer initializes a new LoadBalancer.
+// NewLoadBalancer initializes a new [LoadBalancer] with the given backends.
+// It returns an error if the backends slice is empty.
+// If MaxFails or RetryAfter configuration options are zero, they default to 3 and 30 seconds respectively.
 func NewLoadBalancer(cfg LoadBalancerConfig, backends ...string) (*LoadBalancer, error) {
 	if len(backends) == 0 {
 		return nil, errors.New("aoni: load balancer requires at least one backend")
@@ -110,8 +109,9 @@ func NewLoadBalancer(cfg LoadBalancerConfig, backends ...string) (*LoadBalancer,
 	return lb, nil
 }
 
-// WithClients sets custom HTTPDoer instances for each backend.
-// The order must match the order of backends passed to NewLoadBalancer.
+// WithClients applies custom [HTTPDoer] clients to the corresponding backends.
+// The clients are matched to backends by slice index order.
+// If the number of clients is different from backends, any excess clients are ignored.
 func (lb *LoadBalancer) WithClients(clients ...HTTPDoer) *LoadBalancer {
 	lb.mu.Lock()
 	defer lb.mu.Unlock()
@@ -125,7 +125,9 @@ func (lb *LoadBalancer) WithClients(clients ...HTTPDoer) *LoadBalancer {
 	return lb
 }
 
-// UpdateBackends replaces the current set of backends with a new one.
+// UpdateBackends replaces the entire set of active backends.
+// It resets the selection counter to zero.
+// If the backends slice is empty, the method returns early and makes no changes.
 func (lb *LoadBalancer) UpdateBackends(backends ...string) {
 	if len(backends) == 0 {
 		return
@@ -146,15 +148,28 @@ func (lb *LoadBalancer) UpdateBackends(backends ...string) {
 	lb.mu.Unlock()
 }
 
-// Close stops background health checks.
+// Close stops background health check routines.
 func (lb *LoadBalancer) Close() error {
 	lb.cancel()
 	lb.wg.Wait()
 
+	for _, tc := range lb.backends {
+		if httpClient, ok := tc.client.(*http.Client); ok {
+			if transport, ok := httpClient.Transport.(*http.Transport); ok {
+				transport.CloseIdleConnections()
+			}
+		}
+	}
+
 	return nil
 }
 
-// Do performs an HTTP request using the selected backend.
+// Do executes the HTTP request across healthy backends based on the configured strategy.
+// It clones the original request and overwrites its Scheme and Host to target the chosen backend.
+//
+// If the chosen backend fails the criteria of [LoadBalancer.isFault], it is marked as failed.
+// The load balancer then retries other available backends sequentially.
+// If all backends fail, it returns an error wrapping the last encountered failure.
 func (lb *LoadBalancer) Do(req *http.Request) (*http.Response, error) {
 	lb.mu.RLock()
 	backends := lb.backends
@@ -172,14 +187,12 @@ func (lb *LoadBalancer) Do(req *http.Request) (*http.Response, error) {
 			continue
 		}
 
-		// Rewrite the request URL to point to the backend
 		backendURL, err := url.Parse(b.URL)
 		if err != nil {
 			lastErr = fmt.Errorf("invalid backend URL %q: %w", b.URL, err)
 			continue
 		}
 
-		// Clone the request to avoid modifying the original
 		backendReq := req.Clone(req.Context())
 		backendReq.URL.Scheme = backendURL.Scheme
 		backendReq.URL.Host = backendURL.Host
@@ -344,8 +357,9 @@ func (lb *LoadBalancer) checkHealth(b *Backend) {
 	}
 }
 
-// Prewarm establishes TCP/TLS connections to all backends in the load balancer.
-// It sends a fast parallel HEAD request to each backend's URL to pre-populate the connection pool.
+// Prewarm preemptively opens TCP/TLS connections to all registered backends.
+// It executes concurrent HEAD requests to each backend URL to warm up transport pools.
+// The method respects the provided context for cancellation.
 func (lb *LoadBalancer) Prewarm(ctx context.Context) {
 	lb.mu.RLock()
 	backends := make([]*Backend, len(lb.backends))

@@ -15,29 +15,36 @@ import (
 	"time"
 )
 
-// TraceInfo holds detailed timing information for a request.
+// TraceInfo holds detailed network layer timing metrics for a request.
+// The timing fields are fully populated only after the response body is completely read.
 type TraceInfo struct {
-	// DNSLookup is the time spent looking up the DNS record.
+	// DNSLookup is the duration spent resolving the server's IP address.
 	DNSLookup time.Duration
-	// TCPConn is the time spent establishing a TCP connection.
+
+	// TCPConn is the duration spent establishing the TCP connection.
 	TCPConn time.Duration
-	// TLSHandshake is the time spent performing the TLS handshake.
+
+	// TLSHandshake is the duration spent completing the SSL/TLS handshake.
 	TLSHandshake time.Duration
-	// ServerProcessing is the time spent waiting for the server to process the request.
+
+	// ServerProcessing is the duration from connection establishment to receiving the first response byte.
 	ServerProcessing time.Duration
-	// ContentTransfer is the time spent transferring the response body.
+
+	// ContentTransfer is the duration spent transferring the response body data.
 	ContentTransfer time.Duration
-	// Total is the total time for the request.
+
+	// Total is the total execution time for the request.
 	Total time.Duration
 
-	// RequestSize is the size of the request body in bytes.
+	// RequestSize is the request payload size in bytes.
 	RequestSize int64
-	// ResponseSize is the size of the response body in bytes.
+
+	// ResponseSize is the response payload size in bytes.
 	ResponseSize int64
 }
 
-// Trace returns a RequestModifier that captures trace timing information.
-// The target TraceInfo is populated after the request completes.
+// Trace returns a [RequestModifier] that registers a connection tracer on the active request.
+// Timing metrics are recorded and populated inside the provided [TraceInfo] structure.
 func Trace(target *TraceInfo) RequestModifier {
 	return func(req *http.Request) {
 		var (
@@ -59,45 +66,39 @@ func Trace(target *TraceInfo) RequestModifier {
 		start = time.Now()
 		req = req.WithContext(httptrace.WithClientTrace(req.Context(), trace))
 
-		// Store start time in context for later use
 		ctx := req.Context()
 		_ = ctx
 		_ = start
 	}
 }
 
-// CurlCommand generates a curl command string from an http.Request and optional body.
+// CurlCommand generates a shell-compatible curl command string from an [http.Request] and body.
 func CurlCommand(req *http.Request, body []byte) string {
 	var sb strings.Builder
 
 	sb.WriteString("curl")
 
-	// Method
 	if req.Method != http.MethodGet {
 		fmt.Fprintf(&sb, " -X %s", req.Method)
 	}
 
-	// Headers
 	for key, values := range req.Header {
 		for _, value := range values {
 			fmt.Fprintf(&sb, " -H '%s: %s'", key, value)
 		}
 	}
 
-	// Body
 	if len(body) > 0 {
-		// Escape single quotes in body
 		escaped := strings.ReplaceAll(string(body), "'", "'\\''")
 		fmt.Fprintf(&sb, " -d '%s'", escaped)
 	}
 
-	// URL
 	fmt.Fprintf(&sb, " '%s'", req.URL.String())
 
 	return sb.String()
 }
 
-// AsCurl returns a RequestModifier that prints the equivalent curl command to stderr.
+// AsCurl returns a [RequestModifier] that dumps the equivalent curl command to a silent discard stream.
 func AsCurl() RequestModifier {
 	return func(req *http.Request) {
 		var body []byte

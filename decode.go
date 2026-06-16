@@ -8,30 +8,33 @@ import (
 	"bytes"
 	"encoding/json"
 	"encoding/xml"
-	"errors"
 	"fmt"
 	"io"
 
-	"google.golang.org/protobuf/encoding/protojson"
-	"google.golang.org/protobuf/proto"
-	"gopkg.in/yaml.v3"
+	"go.yaml.in/yaml/v4"
 )
 
-// Decoder defines an interface for decoding response bodies.
+// Decoder defines the contract for decoding response bodies into target structures.
+// Implementations of this interface (such as [JSONDecoder] or [XMLDecoder]) are
+// used by [Client] to deserialize HTTP response payloads.
 type Decoder interface {
+	// Decode reads data from the reader and unmarshals it into the target destination.
+	// It returns an error if reading or decoding fails, or if target is incompatible.
 	Decode(r io.Reader, target any) error
 }
 
-// DecoderFunc is a function type that implements Decoder.
+// DecoderFunc adapts a plain function to satisfy the [Decoder] interface.
+// This is useful for defining inline or lightweight custom decoders.
 type DecoderFunc func(r io.Reader, target any) error
 
-// Decode implements the Decoder interface for DecoderFunc.
+// Decode executes the underlying function to parse the reader into the target.
 func (f DecoderFunc) Decode(r io.Reader, target any) error {
 	return f(r, target)
 }
 
-// RawDecoder returns the response body as a byte slice.
-// It expects target to be a pointer to a byte slice (*[]byte).
+// RawDecoder reads the entire response body and returns it as a raw byte slice.
+// The target argument must be a non-nil pointer to a byte slice (*[]byte).
+// It returns an error if target is not a pointer to a byte slice or if the read fails.
 var RawDecoder Decoder = rawDecoder{}
 
 type rawDecoder struct{}
@@ -62,49 +65,33 @@ func (rawDecoder) Decode(r io.Reader, target any) error {
 	return nil
 }
 
-// JSONDecoder is the default decoder that uses encoding/json.
+// JSONDecoder parses the response body using the standard encoding/json package.
+// The target argument must be a pointer to the destination structure.
 var JSONDecoder Decoder = DecoderFunc(func(r io.Reader, target any) error {
 	return json.NewDecoder(r).Decode(target)
 })
 
-// ProtobufDecoder decodes Protobuf data. It automatically detects if the
-// source is JSON-encoded Protobuf or standard binary wire format.
-var ProtobufDecoder Decoder = DecoderFunc(func(r io.Reader, target any) error {
-	pm, ok := target.(proto.Message)
-	if !ok {
-		return errors.New("aoni: target is not a proto.Message")
-	}
-
-	data, err := io.ReadAll(r)
-	if err != nil {
-		return err
-	}
-
-	if len(data) > 0 && data[0] == '{' {
-		return protojson.UnmarshalOptions{DiscardUnknown: true}.Unmarshal(data, pm)
-	}
-
-	return proto.Unmarshal(data, pm)
-})
-
-// XMLDecoder decodes XML data.
+// XMLDecoder parses the response body using the standard encoding/xml package.
+// The target argument must be a pointer to the destination structure.
 var XMLDecoder Decoder = DecoderFunc(func(r io.Reader, target any) error {
 	return xml.NewDecoder(r).Decode(target)
 })
 
-// YAMLDecoder decodes YAML data.
+// YAMLDecoder parses the response body using the gopkg.in/yaml.v3 package.
+// The target argument must be a pointer to the destination structure.
 var YAMLDecoder Decoder = DecoderFunc(func(r io.Reader, target any) error {
 	return yaml.NewDecoder(r).Decode(target)
 })
 
-// AsProtobuf returns a RequestModifier that sets the decoder to ProtobufDecoder.
-func AsProtobuf() RequestModifier { return WithDecoder(ProtobufDecoder) }
-
-// AsRaw returns a RequestModifier that sets the decoder to RawDecoder.
+// AsRaw returns a [RequestModifier] that configures the client to use [RawDecoder].
 func AsRaw() RequestModifier { return WithDecoder(RawDecoder) }
 
-// AsXML returns a RequestModifier that sets the decoder to XMLDecoder.
+// AsJSON returns a [RequestModifier] that configures the client to use [JSONDecoder].
+// Clients use this modifier by default when no other decoder is specified.
+func AsJSON() RequestModifier { return WithDecoder(JSONDecoder) }
+
+// AsXML returns a [RequestModifier] that configures the client to use [XMLDecoder].
 func AsXML() RequestModifier { return WithDecoder(XMLDecoder) }
 
-// AsYAML returns a RequestModifier that sets the decoder to YAMLDecoder.
+// AsYAML returns a [RequestModifier] that configures the client to use [YAMLDecoder].
 func AsYAML() RequestModifier { return WithDecoder(YAMLDecoder) }

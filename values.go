@@ -14,11 +14,11 @@ import (
 	"strings"
 )
 
-// Uint64String handles uint64 values that are sent as strings in JSON.
-// It also handles raw numbers, null, and empty strings.
+// Uint64String handles parsing uint64 values received as string representations in JSON.
+// It parses raw integers, JSON null, or empty string representations safely.
 type Uint64String uint64
 
-// UnmarshalJSON implements json.Unmarshaler.
+// UnmarshalJSON parses JSON byte data into the [Uint64String] target.
 func (u *Uint64String) UnmarshalJSON(b []byte) error {
 	s := strings.Trim(string(b), `"`)
 	if s == "" || s == "null" {
@@ -36,11 +36,11 @@ func (u *Uint64String) UnmarshalJSON(b []byte) error {
 	return nil
 }
 
-// Int64String handles int64 values that are sent as strings in JSON.
-// It also handles raw numbers, null, and empty strings.
+// Int64String handles parsing int64 values received as string representations in JSON.
+// It parses raw integers, JSON null, or empty string representations safely.
 type Int64String int64
 
-// UnmarshalJSON implements json.Unmarshaler.
+// UnmarshalJSON parses JSON byte data into the [Int64String] target.
 func (i *Int64String) UnmarshalJSON(b []byte) error {
 	s := strings.Trim(string(b), `"`)
 	if s == "" || s == "null" {
@@ -58,10 +58,10 @@ func (i *Int64String) UnmarshalJSON(b []byte) error {
 	return nil
 }
 
-// Float64String handles float64 values that are sent as strings in JSON.
+// Float64String handles parsing float64 values received as string representations in JSON.
 type Float64String float64
 
-// UnmarshalJSON implements json.Unmarshaler.
+// UnmarshalJSON parses JSON byte data into the [Float64String] target.
 func (f *Float64String) UnmarshalJSON(b []byte) error {
 	s := strings.Trim(string(b), `"`)
 	if s == "" || s == "null" {
@@ -79,20 +79,9 @@ func (f *Float64String) UnmarshalJSON(b []byte) error {
 	return nil
 }
 
-// StructToValues converts a struct into url.Values using "url" tags.
-// It supports string, int, uint, bool, and float types.
-//
-// Example:
-//
-//	type Params struct {
-//		baseParams // Anonymous embedding
-//		SteamID uint64 `url:"steamid"`
-//		Count   int    `url:"count,omitempty"`
-//		Extra      struct {
-//			Internal string `url:"internal"`
-//		} `url:",inline"` // Explicit inline
-//	}
-//	v, _ := aoni.StructToValues(Params{SteamID: 7656119...})
+// StructToValues encodes a struct's fields into [url.Values] using "url" or "json" tags.
+// It recursively expands inline structures and supports slices, arrays, and standard primitive types.
+// Returns an error if the input kind is not a structure or pointer to a structure.
 func StructToValues(s any) (url.Values, error) {
 	if s == nil {
 		return nil, nil
@@ -119,8 +108,8 @@ func StructToValues(s any) (url.Values, error) {
 	return values, nil
 }
 
-// Validate checks if the struct has all fields marked as "validate:required".
-// It returns a ValidationError for the first missing field found.
+// Validate inspects a struct's fields for the "validate:required" tag.
+// It performs a deep structural verification and returns [ValidationError] for the first missing required field.
 func Validate(s any) error {
 	if s == nil {
 		return nil
@@ -132,7 +121,7 @@ func Validate(s any) error {
 	}
 
 	if v.Kind() != reflect.Struct {
-		return nil // Nothing to validate
+		return nil
 	}
 
 	return validateValue(v, "")
@@ -154,14 +143,12 @@ func validateValue(v reflect.Value, parent string) error {
 			return &ValidationError{Field: name}
 		}
 
-		// Recurse into structs
 		if fieldValue.Kind() == reflect.Struct {
 			if err := validateValue(fieldValue, name); err != nil {
 				return err
 			}
 		}
 
-		// Handle pointers
 		if fieldValue.Kind() == reflect.Pointer && !fieldValue.IsNil() {
 			elem := fieldValue.Elem()
 			if elem.Kind() == reflect.Struct {
@@ -181,7 +168,6 @@ func fillValues(v reflect.Value, values url.Values) error {
 		field := t.Field(i)
 		fieldValue := v.Field(i)
 
-		// Handle Pointer fields by dereferencing them if not nil
 		if fieldValue.Kind() == reflect.Pointer {
 			if fieldValue.IsNil() {
 				continue
@@ -198,10 +184,8 @@ func fillValues(v reflect.Value, values url.Values) error {
 		parts := strings.Split(tag, ",")
 		key := parts[0]
 
-		// Determine if this field should be inlined
 		isInline := slices.Contains(parts[1:], "inline")
 
-		// Handle embedded (anonymous) structs or explicit inline tag
 		if (field.Anonymous || isInline) && fieldValue.Kind() == reflect.Struct {
 			if err := fillValues(fieldValue, values); err != nil {
 				return err
@@ -219,7 +203,6 @@ func fillValues(v reflect.Value, values url.Values) error {
 			continue
 		}
 
-		// Handle Slices/Arrays
 		if fieldValue.Kind() == reflect.Slice || fieldValue.Kind() == reflect.Array {
 			for j := range fieldValue.Len() {
 				val := fieldValue.Index(j)
@@ -242,7 +225,6 @@ func fillValues(v reflect.Value, values url.Values) error {
 			continue
 		}
 
-		// Handle Scalars
 		strValue, err := toString(fieldValue)
 		if err != nil {
 			return fmt.Errorf("field %s: %w", field.Name, err)
@@ -255,7 +237,6 @@ func fillValues(v reflect.Value, values url.Values) error {
 }
 
 func toString(v reflect.Value) (string, error) {
-	// Check if the type implements fmt.Stringer (useful for custom types like id.ID)
 	if v.CanInterface() {
 		if s, ok := v.Interface().(interface{ String() string }); ok {
 			return s.String(), nil

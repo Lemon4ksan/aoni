@@ -22,20 +22,12 @@ import (
 	"golang.org/x/time/rate"
 )
 
-// Middleware wraps an HTTPDoer with additional logic.
+// Middleware wraps an [HTTPDoer] with additional logic.
 type Middleware func(next HTTPDoer) HTTPDoer
 
-// Chain applies a series of middlewares to an HTTPDoer, returning the final HTTPDoer.
-// The first middleware in the list will be the outermost one (called first).
-//
-// Example:
-//
-//	rotator, _ := aoni.NewProxyRotator(cfg, proxy1, proxy2)
-//	logMiddleware := aoni.LoggingMiddleware(logger)
-//
-//	// Build a chain: Client -> Logging -> Proxy Rotator
-//	httpClient := aoni.Chain(rotator, logMiddleware)
-//	client := aoni.NewClient(httpClient)
+// Chain nests multiple [Middleware] layers around an [HTTPDoer] handler.
+// Middlewares are applied from left to right (the first in the slice executes first).
+// If the middlewares slice is empty, it returns the original doer unmodified.
 func Chain(doer HTTPDoer, middlewares ...Middleware) HTTPDoer {
 	for i := len(middlewares) - 1; i >= 0; i-- {
 		doer = middlewares[i](doer)
@@ -44,8 +36,8 @@ func Chain(doer HTTPDoer, middlewares ...Middleware) HTTPDoer {
 	return doer
 }
 
-// RateLimitMiddleware returns a middleware that limits the rate of requests.
-// It uses a token bucket algorithm to control the request frequency.
+// RateLimitMiddleware returns a [Middleware] that limits request rates.
+// It uses a token bucket algorithm based on requests per second (rps) and burst limits.
 func RateLimitMiddleware(rps float64, burst int) Middleware {
 	limiter := rate.NewLimiter(rate.Limit(rps), burst)
 
@@ -64,29 +56,33 @@ func RateLimitMiddleware(rps float64, burst int) Middleware {
 type JitterStrategy int
 
 const (
-	// JitterEqual calculates sleep time as backoff plus a randomized +/- 10% jitter.
+	// JitterEqual calculates sleep time as exponential backoff plus +/- 10% random noise.
 	JitterEqual JitterStrategy = iota
-	// JitterFull calculates sleep time as a completely random value between 0 and backoff (AWS Full Jitter).
+	// JitterFull calculates sleep time as a random duration between 0 and current backoff.
 	JitterFull
 )
 
-// RetryOptions defines the configuration for the [RetryMiddleware].
+// RetryOptions defines retry configuration parameters for [RetryMiddleware].
 type RetryOptions struct {
-	// MaxRetries is the maximum number of attempts before giving up.
+	// MaxRetries is the maximum retry limit before giving up.
 	MaxRetries uint32
-	// Backoff is the initial delay duration before the first retry.
+
+	// Backoff is the initial delay duration applied before the first retry attempt.
 	Backoff time.Duration
-	// JitterStrategy is the strategy used to calculate backoff noise.
+
+	// JitterStrategy is the delay noise calculation algorithm.
 	JitterStrategy JitterStrategy
 }
 
 // RetryCondition is a function that determines whether a request should be retried.
 // It receives the response and error from the failed attempt.
-// Return true to retry, false to return the result immediately.
 type RetryCondition func(resp *http.Response, err error) bool
 
-// RetryMiddleware returns a middleware that retries requests based on the provided condition.
-// It automatically buffers the request body to allow multiple attempts.
+// RetryMiddleware returns a [Middleware] that retries failed requests based on a condition.
+// It fully reads and buffers the request body into memory to allow replay attempts.
+//
+// The middleware automatically honors any standard "Retry-After" header received from the server.
+// If no such header is found, it applies exponential backoff with randomized jitter.
 func RetryMiddleware(opts RetryOptions, condition RetryCondition) Middleware {
 	if opts.MaxRetries == 0 {
 		opts.MaxRetries = 3
@@ -103,7 +99,6 @@ func RetryMiddleware(opts RetryOptions, condition RetryCondition) Middleware {
 				err  error
 			)
 
-			// Buffer body for potential retries
 			if req.Body != nil && req.Body != http.NoBody {
 				body, err = io.ReadAll(req.Body)
 				if err != nil {
@@ -116,7 +111,6 @@ func RetryMiddleware(opts RetryOptions, condition RetryCondition) Middleware {
 			backoff := opts.Backoff
 
 			for i := uint32(0); i <= opts.MaxRetries; i++ {
-				// Re-create body reader for each attempt
 				if body != nil {
 					req.Body = io.NopCloser(bytes.NewReader(body))
 				}
@@ -134,7 +128,6 @@ func RetryMiddleware(opts RetryOptions, condition RetryCondition) Middleware {
 					case hasRetryAfter:
 						sleepTime = retryAfter
 					case opts.JitterStrategy == JitterFull:
-						// AWS Full Jitter: Sleep = random(0, backoff)
 						r, err := rand.Int(rand.Reader, big.NewInt(int64(backoff)))
 						if err != nil {
 							return nil, fmt.Errorf("aoni: failed to generate jitter: %w", err)
@@ -143,7 +136,6 @@ func RetryMiddleware(opts RetryOptions, condition RetryCondition) Middleware {
 						sleepTime = time.Duration(r.Int64())
 
 					default:
-						// JitterEqual: backoff + randomized +/- 10% of backoff
 						r, err := rand.Int(rand.Reader, big.NewInt(int64(backoff/5)))
 						if err != nil {
 							return nil, fmt.Errorf("aoni: failed to generate jitter: %w", err)
@@ -157,7 +149,7 @@ func RetryMiddleware(opts RetryOptions, condition RetryCondition) Middleware {
 					case <-req.Context().Done():
 						return nil, req.Context().Err()
 					case <-time.After(sleepTime):
-						backoff *= 2 // Exponential backoff
+						backoff *= 2
 						continue
 					}
 				}
@@ -170,16 +162,15 @@ func RetryMiddleware(opts RetryOptions, condition RetryCondition) Middleware {
 	}
 }
 
-// ProxyRetryCondition returns a RetryCondition that retries on proxy-related faults.
-// It is a convenience wrapper for use with [ProxyRotator].
+// ProxyRetryCondition returns a [RetryCondition] that triggers retries on proxy failures.
 func ProxyRetryCondition(rotator *ProxyRotator) RetryCondition {
 	return func(resp *http.Response, err error) bool {
 		return rotator.isProxyFault(resp, err)
 	}
 }
 
-// RecoveryMiddleware returns a middleware that catches any panic occurring during request execution.
-// It executes the optional onPanic callback and returns the panic as a standard Go error.
+// RecoveryMiddleware catches panics occurring during request execution.
+// It executes the optional onPanic callback and wraps the panic into a standard Go error.
 func RecoveryMiddleware(onPanic func(any)) Middleware {
 	return func(next HTTPDoer) HTTPDoer {
 		return DoerFunc(func(req *http.Request) (resp *http.Response, err error) {
@@ -198,21 +189,26 @@ func RecoveryMiddleware(onPanic func(any)) Middleware {
 	}
 }
 
-// CircuitState represents the state of a circuit breaker.
+// CircuitState represents the execution state of a host circuit breaker.
 type CircuitState int
 
-// Possible circuit states.
 const (
+	// StateClosed indicates a healthy state allowing all requests to pass.
 	StateClosed CircuitState = iota
+	// StateOpen indicates a failing state where requests are blocked instantly.
 	StateOpen
+	// StateHalfOpen indicates a testing state permitting trial requests to verify recovery.
 	StateHalfOpen
 )
 
-// CircuitBreakerConfig defines configuration for a CircuitBreaker.
+// CircuitBreakerConfig defines performance thresholds for a [CircuitBreaker].
 type CircuitBreakerConfig struct {
+	// FailureThreshold is the consecutive failure limit that triggers an open state.
 	FailureThreshold uint32
+	// SuccessThreshold is the trial success count required to close a half-open breaker.
 	SuccessThreshold uint32
-	Cooldown         time.Duration
+	// Cooldown is the duration the breaker remains open before transitioning to half-open.
+	Cooldown time.Duration
 }
 
 type circuit struct {
@@ -223,14 +219,16 @@ type circuit struct {
 	lastStateChg time.Time
 }
 
-// CircuitBreaker implements the circuit breaker pattern per host.
+// CircuitBreaker tracks connection health per host to prevent cascading failures.
+// It keeps state histories for each host and blocks requests during outages.
 type CircuitBreaker struct {
 	cfg      CircuitBreakerConfig
 	mu       sync.RWMutex
 	circuits map[string]*circuit
 }
 
-// NewCircuitBreaker initializes a CircuitBreaker.
+// NewCircuitBreaker initializes a [CircuitBreaker] instance.
+// If the configuration values are zero, they default to 5 fails, 2 successes, and a 10-second cooldown.
 func NewCircuitBreaker(cfg CircuitBreakerConfig) *CircuitBreaker {
 	if cfg.FailureThreshold == 0 {
 		cfg.FailureThreshold = 5
@@ -334,7 +332,7 @@ func (c *circuit) recordFailure(failureThreshold uint32) {
 	}
 }
 
-// DefaultCircuitBreakerCondition returns true for transport errors and 5xx status codes.
+// DefaultCircuitBreakerCondition reports true for transport errors and HTTP status codes >= 500.
 func DefaultCircuitBreakerCondition(resp *http.Response, err error) bool {
 	if err != nil {
 		return true
@@ -347,8 +345,9 @@ func DefaultCircuitBreakerCondition(resp *http.Response, err error) bool {
 	return false
 }
 
-// CircuitBreakerMiddleware prevents calling failing hosts by instantly rejecting requests
-// once a failure threshold is hit.
+// CircuitBreakerMiddleware returns a [Middleware] wrapping requests in a [CircuitBreaker].
+// If the circuit breaker for a host is in the open state, it returns an error instantly.
+// Successful and failed attempts are recorded dynamically to manage the host's breaker state.
 func CircuitBreakerMiddleware(cb *CircuitBreaker, isFailure func(*http.Response, error) bool) Middleware {
 	if isFailure == nil {
 		isFailure = DefaultCircuitBreakerCondition
@@ -379,9 +378,7 @@ func CircuitBreakerMiddleware(cb *CircuitBreaker, isFailure func(*http.Response,
 // FallbackFunc is a function to provide fallback responses on failure.
 type FallbackFunc func(req *http.Request, origErr error) (*http.Response, error)
 
-type fallbackCtxKey struct{}
-
-// WithFallback returns a RequestModifier that registers a FallbackFunc for a single request.
+// WithFallback returns a [RequestModifier] registering a [FallbackFunc] for a single request.
 func WithFallback(f FallbackFunc) RequestModifier {
 	return func(req *http.Request) {
 		ctx := context.WithValue(req.Context(), fallbackCtxKey{}, f)
@@ -389,7 +386,7 @@ func WithFallback(f FallbackFunc) RequestModifier {
 	}
 }
 
-// FallbackJSON returns a FallbackFunc that generates a mock response with a JSON payload.
+// FallbackJSON returns a [FallbackFunc] that generates a mock response with a JSON payload.
 func FallbackJSON(statusCode int, data any) FallbackFunc {
 	return func(req *http.Request, origErr error) (*http.Response, error) {
 		bodyBytes, err := json.Marshal(data)
@@ -468,22 +465,21 @@ func parseRetryAfter(resp *http.Response) (time.Duration, bool) {
 	return 0, false
 }
 
-// ChaosConfig defines parameters for simulating network instability.
+// ChaosConfig defines metrics for injecting synthetic latency and failure rates.
 type ChaosConfig struct {
-	// FailureRate is the probability (from 0.0 to 1.0) of a request randomly failing with a 503 Service Unavailable.
+	// FailureRate is the probability (0.0 to 1.0) of randomly returning a 503 error.
 	FailureRate float64
-	// LatencyMin is the minimum artificial delay added to the request.
+	// LatencyMin is the minimum artificial delay duration applied to requests.
 	LatencyMin time.Duration
-	// LatencyMax is the maximum artificial delay added to the request.
+	// LatencyMax is the maximum artificial delay duration applied to requests.
 	LatencyMax time.Duration
 }
 
-// ChaosMiddleware returns a middleware that simulates network latency and random server failures.
-// This is extremely useful in testing environments to verify circuit breakers, retries, and fallback logic.
+// ChaosMiddleware returns a [Middleware] that injects synthetic latency and random 503 failures.
+// It is useful in staging or testing environments to verify retries and breaker logic.
 func ChaosMiddleware(cfg ChaosConfig) Middleware {
 	return func(next HTTPDoer) HTTPDoer {
 		return DoerFunc(func(req *http.Request) (*http.Response, error) {
-			// 1. Add latency if configured
 			if cfg.LatencyMax > cfg.LatencyMin && cfg.LatencyMin > 0 {
 				diff := cfg.LatencyMax - cfg.LatencyMin
 
@@ -504,13 +500,11 @@ func ChaosMiddleware(cfg ChaosConfig) Middleware {
 				}
 			}
 
-			// 2. Inject random failure if configured
 			if cfg.FailureRate > 0 {
 				r, err := rand.Int(rand.Reader, big.NewInt(10000))
 				if err == nil {
 					val := float64(r.Int64()) / 10000.0
 					if val < cfg.FailureRate {
-						// Create fake 503 Service Unavailable response
 						return &http.Response{
 							StatusCode: http.StatusServiceUnavailable,
 							Status:     http.StatusText(http.StatusServiceUnavailable),
@@ -530,14 +524,14 @@ func ChaosMiddleware(cfg ChaosConfig) Middleware {
 	}
 }
 
-// AdaptiveLimiter implements Vegas-style adaptive concurrency limiting.
+// AdaptiveLimiter controls concurrency dynamically using a Vegas-style congestion algorithm.
+// It measures round-trip times (RTT) to dynamically adjust the allowed concurrent request limit.
 type AdaptiveLimiter struct {
 	mu          sync.Mutex
 	limit       float64
 	minLimit    float64
 	maxLimit    float64
-	alpha       float64
-	beta        float64
+	alpha, beta float64
 	active      int
 	waitChs     []chan struct{}
 	minRTT      time.Duration
@@ -545,7 +539,7 @@ type AdaptiveLimiter struct {
 	lastReset   time.Time
 }
 
-// NewAdaptiveLimiter initializes an AdaptiveLimiter with Vegas congestion control settings.
+// NewAdaptiveLimiter initializes an [AdaptiveLimiter] instance with default settings.
 func NewAdaptiveLimiter(initialLimit float64) *AdaptiveLimiter {
 	return &AdaptiveLimiter{
 		limit:     initialLimit,
@@ -557,7 +551,8 @@ func NewAdaptiveLimiter(initialLimit float64) *AdaptiveLimiter {
 	}
 }
 
-// Acquire waits for a concurrency slot, or returns an error if the context is cancelled.
+// Acquire blocks until a concurrent execution slot becomes available or context is cancelled.
+// It returns [context.Canceled] or [context.DeadlineExceeded] if the context expires.
 func (l *AdaptiveLimiter) Acquire(ctx context.Context) error {
 	l.mu.Lock()
 	if l.active < int(l.limit) {
@@ -589,7 +584,8 @@ func (l *AdaptiveLimiter) Acquire(ctx context.Context) error {
 	}
 }
 
-// Release updates RTT statistics and adjusts the concurrency limit accordingly.
+// Release registers request completion, updates RTT metrics, and recalculates limits.
+// It adjusts the concurrency limit based on Vegas queuing limits (alpha and beta thresholds).
 func (l *AdaptiveLimiter) Release(rtt time.Duration) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
@@ -631,14 +627,15 @@ func (l *AdaptiveLimiter) Release(rtt time.Duration) {
 	}
 }
 
-// Limit returns the current adaptive limit value.
+// Limit returns the active dynamic concurrency limit.
 func (l *AdaptiveLimiter) Limit() float64 {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	return l.limit
 }
 
-// AdaptiveLimitMiddleware returns a middleware that controls concurrent request execution dynamically.
+// AdaptiveLimitMiddleware returns a [Middleware] wrapping an [AdaptiveLimiter].
+// It locks execution slots during connection handshakes and updates metrics on release.
 func AdaptiveLimitMiddleware(limiter *AdaptiveLimiter) Middleware {
 	return func(next HTTPDoer) HTTPDoer {
 		return DoerFunc(func(req *http.Request) (*http.Response, error) {

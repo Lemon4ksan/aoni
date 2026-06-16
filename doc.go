@@ -3,34 +3,37 @@
 // license that can be found in the LICENSE file.
 
 /*
-Package aoni provides a lightweight, generic, and middleware-driven wrapper
-around net/http with built-in support for proxy rotation, load balancing,
-and robust request modification.
+Package aoni is a generic, middleware-driven HTTP client wrapper around
+the standard net/http package. It is designed to simplify robust API
+interactions, scraping, proxy management, and load balancing.
 
-The package focuses on eliminating repetitive HTTP boilerplate by leveraging Go
-generics for response decoding and utilizing a declarative "RequestModifier" pattern
-for customizing individual requests.
+The package reduces repetitive HTTP boilerplate by leveraging Go generics
+for response decoding and a declarative [RequestModifier] pattern
+to configure individual requests.
 
-# Key Features
+# Architecture Overview
 
-  - Generics-First: Automatic JSON, XML, YAML, and Protobuf decoding via [GetJSON], [PostJSON], etc.
-  - Request Modifiers: Chainable functions like [WithHeader], [WithMultipart], or [WithErrorModel]
-    that modify outgoing requests in a thread-safe manner.
-  - Proxy Rotation & Sticky Sessions: Distribute traffic across an unhealthy-aware proxy pool with
-    optional session persistence (e.g. cookie or header based).
-  - Load Balancing: Built-in [LoadBalancer] supporting Round-Robin, Random, and Weighted Round-Robin
-    strategies with automatic background health checks.
-  - Retry Engine: Highly configurable [RetryMiddleware] supporting custom retry conditions, exponential
-    backoff, and randomized jitter.
-  - Error Model Mapping: Extract structured error JSON into custom Go structs automatically when status
-    codes are non-2xx.
-  - Progress Tracking: Real-time upload and download progress reporting via simple progress callbacks.
-  - Auto-UTF8 Translation: Automatic translation of non-UTF8 charsets (e.g., Windows-1251, Shift-JIS)
-    based on Content-Type declarations.
-  - Latency Hedging: Minimize long-tail latencies by optionally spawning parallel backup requests to
-    multiple backends or proxies.
-  - Network Tracing: Diagnostic tracing of DNS, TCP connect, and TLS handshake times, alongside equivalent
-    cURL command generation.
+  - [Client]: The central, immutable client wrapping [HTTPDoer] with a fluent API.
+  - [LoadBalancer]: A router that distributes requests across multiple backend servers
+    supporting sequential, random, and weighted selection with automated health checking.
+  - [ProxyRotator]: A proxy routing manager with support for sticky sessions, proxy pool
+    rotation, and automatic health monitoring.
+  - [Decoder]: An interface defining custom response deserialization strategies.
+
+# Core Features
+
+  - Generics-First API: Automatic decoding of response payloads into custom types
+    via helper functions like [GetJSON], [PostJSON], and [PutJSON].
+  - Extensible Request Modifiers: Chainable modifiers such as [WithHeader], [WithJSONBody],
+    [WithMultipart], and [WithErrorModel] to customize outgoing requests.
+  - Connection Resilience: Configurable [RetryMiddleware] supporting exponential backoff,
+    randomized jitter, and custom retry conditions, alongside [CircuitBreakerMiddleware].
+  - SSRF Protection: Optional SSRF protection via dialer-level IP filtering.
+  - Latency Hedging: Secondary request spawning to minimize tail latencies under high load.
+  - Content Handling: Automatic UTF-8 transcoding for non-UTF-8 character sets and
+    unwrapping of multi-format compressions (gzip, brotli, zstd).
+  - Transfer Progress: Up-to-the-byte progress tracking for uploads and downloads.
+  - Diagnostic Tracing: Request timing tracking of DNS, TCP, and TLS metrics using [Trace].
 
 # Basic Usage Example
 
@@ -39,9 +42,8 @@ for customizing individual requests.
 	import (
 		"context"
 		"fmt"
-		"net/http"
+		"log"
 		"time"
-
 		"github.com/lemon4ksan/g-man/pkg/aoni"
 	)
 
@@ -51,15 +53,18 @@ for customizing individual requests.
 
 	func main() {
 		ctx := context.Background()
-		httpClient := &http.Client{Timeout: 10 * time.Second}
-		client := aoni.NewClient(httpClient)
+
+		// Initialize client with fluent base URL and timeout configurations
+		client := aoni.NewClient(nil).
+			WithBaseURL("https://time.jsontest.com").
+			WithTimeout(5 * time.Second)
 
 		// Perform a generic, type-safe GET request
-		res, err := aoni.GetJSON[TimeResponse](ctx, client, "https://time.jsontest.com", nil)
+		res, err := aoni.GetJSON[TimeResponse](ctx, client, "/time")
 		if err != nil {
-			fmt.Println("Request failed:", err)
-			return
+			log.Fatalf("Request failed: %v", err)
 		}
+
 		fmt.Println("Server time:", res.Time)
 	}
 */

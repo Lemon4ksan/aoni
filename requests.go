@@ -18,15 +18,15 @@ import (
 	"strings"
 )
 
-// DefaultClient is the shared client instance used by global helper functions.
+// DefaultClient is the shared default client instance used by global helper functions.
 var DefaultClient = NewClient(nil)
 
-// Get performs a global GET request and decodes the JSON response body.
+// Get performs a global GET request using [DefaultClient] and decodes the JSON response body.
 func Get[Resp any](ctx context.Context, path string, mods ...RequestModifier) (*Resp, error) {
 	return GetJSON[Resp](ctx, DefaultClient, path, mods...)
 }
 
-// Post performs a global POST request and decodes the JSON response body.
+// Post performs a global POST request using [DefaultClient] and decodes the JSON response body.
 func Post[Req, Resp any](
 	ctx context.Context,
 	path string,
@@ -36,7 +36,7 @@ func Post[Req, Resp any](
 	return PostJSON[Req, Resp](ctx, DefaultClient, path, payload, mods...)
 }
 
-// Put performs a global PUT request and decodes the JSON response body.
+// Put performs a global PUT request using [DefaultClient] and decodes the JSON response body.
 func Put[Req, Resp any](
 	ctx context.Context,
 	path string,
@@ -46,7 +46,7 @@ func Put[Req, Resp any](
 	return PutJSON[Req, Resp](ctx, DefaultClient, path, payload, mods...)
 }
 
-// Patch performs a global PATCH request and decodes the JSON response body.
+// Patch performs a global PATCH request using [DefaultClient] and decodes the JSON response body.
 func Patch[Req, Resp any](
 	ctx context.Context,
 	path string,
@@ -56,7 +56,7 @@ func Patch[Req, Resp any](
 	return PatchJSON[Req, Resp](ctx, DefaultClient, path, payload, mods...)
 }
 
-// Delete performs a global DELETE request and decodes the JSON response body.
+// Delete performs a global DELETE request using [DefaultClient] and decodes the JSON response body.
 func Delete[Req, Resp any](
 	ctx context.Context,
 	path string,
@@ -67,7 +67,7 @@ func Delete[Req, Resp any](
 }
 
 // GetJSON performs a GET request and decodes the JSON response body into a new instance of Resp.
-// Returns an *APIError if the response status is not 2xx.
+// It returns an [APIError] if the server responds with a non-2xx status code.
 func GetJSON[Resp any](
 	ctx context.Context,
 	c Requester,
@@ -87,8 +87,11 @@ func GetJSON[Resp any](
 	return result, nil
 }
 
-// PostForm marshals the payload to URL values, performs a POST request with
-// application/x-www-form-urlencoded content type, and decodes the response body into Resp.
+// PostForm marshals the payload, performs a POST request with URL-encoded parameters,
+// and decodes the resulting JSON response body into Resp.
+//
+// It validates the payload structure beforehand using [Validate].
+// Returns a [ValidationError] if validation fails.
 func PostForm[Req, Resp any](
 	ctx context.Context,
 	c Requester,
@@ -123,9 +126,11 @@ func PostForm[Req, Resp any](
 	return result, nil
 }
 
-// PostJSON marshals the payload to JSON, performs a POST request, and decodes the
-// response body into a new instance of Resp.
-// It automatically sets the Content-Type and Accept headers to application/json.
+// PostJSON marshals the payload to JSON, executes a POST request, and decodes the response body.
+// It automatically configures the request headers with Content-Type and Accept set to "application/json".
+//
+// It validates the payload structure beforehand using [Validate].
+// Returns a [ValidationError] if validation fails.
 func PostJSON[Req, Resp any](
 	ctx context.Context,
 	c Requester,
@@ -161,9 +166,11 @@ func PostJSON[Req, Resp any](
 	return result, nil
 }
 
-// PutJSON marshals the payload to JSON, performs a PUT request, and decodes the
-// response body into a new instance of Resp.
-// It automatically sets the Content-Type and Accept headers to application/json.
+// PutJSON marshals the payload to JSON, executes a PUT request, and decodes the response body.
+// It automatically configures the request headers with Content-Type and Accept set to "application/json".
+//
+// It validates the payload structure beforehand using [Validate].
+// Returns a [ValidationError] if validation fails.
 func PutJSON[Req, Resp any](
 	ctx context.Context,
 	c Requester,
@@ -199,9 +206,11 @@ func PutJSON[Req, Resp any](
 	return result, nil
 }
 
-// PatchJSON marshals the payload to JSON, performs a PATCH request, and decodes the
-// response body into a new instance of Resp.
-// It automatically sets the Content-Type and Accept headers to application/json.
+// PatchJSON marshals the payload to JSON, executes a PATCH request, and decodes the response body.
+// It automatically configures the request headers with Content-Type and Accept set to "application/json".
+//
+// It validates the payload structure beforehand using [Validate].
+// Returns a [ValidationError] if validation fails.
 func PatchJSON[Req, Resp any](
 	ctx context.Context,
 	c Requester,
@@ -237,8 +246,11 @@ func PatchJSON[Req, Resp any](
 	return result, nil
 }
 
-// DeleteJSON marshals the payload to JSON (if not nil), performs a DELETE request, and decodes the
-// response body into a new instance of Resp.
+// DeleteJSON marshals the payload to JSON, executes a DELETE request, and decodes the response body.
+// It automatically configures the request headers with Content-Type and Accept set to "application/json".
+//
+// It validates the payload structure beforehand using [Validate].
+// Returns a [ValidationError] if validation fails.
 func DeleteJSON[Req, Resp any](
 	ctx context.Context,
 	c Requester,
@@ -305,15 +317,11 @@ func handleResponse(resp *http.Response, target any, requester Requester) error 
 		defer closeResponse(resp)
 	}
 
-	// 1. Download progress callback and 2. Automatic transcoding
-	// are now applied at the level of Client.Request to cover all modes of access.
-
 	resp.Body = &bomStrippingReadCloser{
 		Reader: newBOMStrippingReader(resp.Body),
 		Closer: resp.Body,
 	}
 
-	// Determine which decoder to use
 	decoder := JSONDecoder
 	if resp.Request != nil {
 		if d, ok := resp.Request.Context().Value(decoderCtxKey{}).(Decoder); ok {
@@ -321,7 +329,6 @@ func handleResponse(resp *http.Response, target any, requester Requester) error 
 		}
 	}
 
-	// 2. Content-Type Guard / Cloudflare / Captive Portal Detection
 	if contentType := resp.Header.Get("Content-Type"); contentType != "" {
 		if mediaType, _, err := mime.ParseMediaType(contentType); err == nil {
 			_, isRaw := decoder.(rawDecoder)
@@ -340,7 +347,6 @@ func handleResponse(resp *http.Response, target any, requester Requester) error 
 		}
 	}
 
-	// 3. Status code check (Unsuccessful response)
 	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
 		bodyBytes, _ := io.ReadAll(io.LimitReader(resp.Body, 1024*1024))
 
@@ -356,7 +362,6 @@ func handleResponse(resp *http.Response, target any, requester Requester) error 
 		return apiErr
 	}
 
-	// If target is nil or status is 204 No Content, discard body and return
 	if target == nil || resp.StatusCode == http.StatusNoContent {
 		bufPtr := bytePool.Get().(*[]byte)
 		_, _ = io.CopyBuffer(io.Discard, resp.Body, *bufPtr)
@@ -383,7 +388,7 @@ func handleResponse(resp *http.Response, target any, requester Requester) error 
 
 	err := decoder.Decode(resp.Body, target)
 	if errors.Is(err, io.EOF) {
-		return nil // Success with empty body
+		return nil
 	}
 
 	return err

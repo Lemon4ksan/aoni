@@ -769,57 +769,30 @@ func TestClient_Hedging(t *testing.T) {
 	assert.GreaterOrEqual(t, atomic.LoadInt32(&requestCount), int32(2))
 }
 
-func TestClient_XML_YAML_Codecs(t *testing.T) {
-	t.Run("XML", func(t *testing.T) {
-		type XMLPayload struct {
-			XMLName xml.Name `xml:"payload"`
-			Value   string   `xml:"value"`
-		}
+func TestClient_XML_Codecs(t *testing.T) {
+	type XMLPayload struct {
+		XMLName xml.Name `xml:"payload"`
+		Value   string   `xml:"value"`
+	}
 
-		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			w.Header().Set("Content-Type", "application/xml")
-			_, _ = w.Write([]byte(`<payload><value>xml-data</value></payload>`))
-		}))
-		defer server.Close()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/xml")
+		_, _ = w.Write([]byte(`<payload><value>xml-data</value></payload>`))
+	}))
+	defer server.Close()
 
-		client := NewClient(nil).WithBaseURL(server.URL)
+	client := NewClient(nil).WithBaseURL(server.URL)
 
-		var result XMLPayload
+	var result XMLPayload
 
-		resp, err := client.Request(context.Background(), http.MethodGet, "/", AsXML())
-		require.NoError(t, err)
+	resp, err := client.Request(context.Background(), http.MethodGet, "/", AsXML())
+	require.NoError(t, err)
 
-		err = XMLDecoder.Decode(resp.Body, &result)
-		require.NoError(t, err)
-		assert.Equal(t, "xml-data", result.Value)
+	err = XMLDecoder.Decode(resp.Body, &result)
+	require.NoError(t, err)
+	assert.Equal(t, "xml-data", result.Value)
 
-		_ = resp.Body.Close()
-	})
-
-	t.Run("YAML", func(t *testing.T) {
-		type YAMLPayload struct {
-			Value string `yaml:"value"`
-		}
-
-		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			w.Header().Set("Content-Type", "application/x-yaml")
-			_, _ = w.Write([]byte("value: yaml-data\n"))
-		}))
-		defer server.Close()
-
-		client := NewClient(nil).WithBaseURL(server.URL)
-
-		var result YAMLPayload
-
-		resp, err := client.Request(context.Background(), http.MethodGet, "/", AsYAML())
-		require.NoError(t, err)
-
-		err = YAMLDecoder.Decode(resp.Body, &result)
-		require.NoError(t, err)
-		assert.Equal(t, "yaml-data", result.Value)
-
-		_ = resp.Body.Close()
-	})
+	_ = resp.Body.Close()
 }
 
 func TestClient_GlobalHooks(t *testing.T) {

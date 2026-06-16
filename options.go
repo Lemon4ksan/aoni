@@ -17,12 +17,10 @@ import (
 	"time"
 )
 
-// RequestModifier is a function that can modify an *http.Request before it is sent.
-// This is used for adding one-off headers, authentication tokens, or logging.
+// RequestModifier represents a function that alters an [http.Request] before execution.
 type RequestModifier func(req *http.Request)
 
-// WithVar replaces a placeholder in the path (e.g., "{id}") with a value.
-// The value is automatically URL-escaped.
+// WithVar replaces a single placeholder (e.g. "{key}") in the path with an escaped value.
 func WithVar(key string, value any) RequestModifier {
 	return func(req *http.Request) {
 		placeholder := "{" + key + "}"
@@ -35,10 +33,9 @@ func WithVar(key string, value any) RequestModifier {
 	}
 }
 
-// WithVars replaces multiple placeholders in the path.
-// It accepts pairs of key-value arguments.
-// If the pairs slice has an odd length, the function returns early
-// without modifying the request.
+// WithVars replaces multiple placeholder keys in the path with their respective values.
+// It accepts alternating key-value arguments.
+// If the argument list has an odd length, it returns early and performs no replacements.
 func WithVars(pairs ...any) RequestModifier {
 	return func(req *http.Request) {
 		if len(pairs)%2 != 0 {
@@ -53,7 +50,9 @@ func WithVars(pairs ...any) RequestModifier {
 	}
 }
 
-// WithQuery adds a query string to the request URL.
+// WithQuery encodes a struct or map as URL query parameters and appends them to the request URL.
+// It safely checks for validation errors using [Validate] and serialization failures.
+// Any encountered errors are saved to the request context via queryErrorCtxKey.
 func WithQuery(query any) RequestModifier {
 	return func(req *http.Request) {
 		if query == nil {
@@ -79,56 +78,56 @@ func WithQuery(query any) RequestModifier {
 	}
 }
 
-// WithHeader sets the value of a header on the request.
+// WithHeader sets the key header field to the given value.
 func WithHeader(key, value string) RequestModifier {
 	return func(req *http.Request) {
 		req.Header.Set(key, value)
 	}
 }
 
-// WithBearer adds a "Authorization: Bearer <token>" header.
+// WithBearer applies a Bearer Token authorization header.
 func WithBearer(token string) RequestModifier {
 	return func(req *http.Request) {
 		req.Header.Set("Authorization", "Bearer "+token)
 	}
 }
 
-// WithBasicAuth adds a "Authorization: Basic <base64>" header.
+// WithBasicAuth applies Basic Authorization credentials.
 func WithBasicAuth(username, password string) RequestModifier {
 	return func(req *http.Request) {
 		req.SetBasicAuth(username, password)
 	}
 }
 
-// WithUserAgent sets the "User-Agent" header.
+// WithUserAgent overrides the standard User-Agent header field.
 func WithUserAgent(ua string) RequestModifier {
 	return func(req *http.Request) {
 		req.Header.Set("User-Agent", ua)
 	}
 }
 
-// WithContentType sets the "Content-Type" header.
+// WithContentType overrides the standard Content-Type header field.
 func WithContentType(ct string) RequestModifier {
 	return func(req *http.Request) {
 		req.Header.Set("Content-Type", ct)
 	}
 }
 
-// WithAccept sets the "Accept" header.
+// WithAccept overrides the standard Accept header field.
 func WithAccept(accept string) RequestModifier {
 	return func(req *http.Request) {
 		req.Header.Set("Accept", accept)
 	}
 }
 
-// WithCookie adds a cookie to the request.
+// WithCookie attaches a single cookie to the request.
 func WithCookie(c *http.Cookie) RequestModifier {
 	return func(req *http.Request) {
 		req.AddCookie(c)
 	}
 }
 
-// WithCookies adds multiple cookies to the request from a map.
+// WithCookies attaches multiple cookies from a key-value map.
 func WithCookies(kv map[string]string) RequestModifier {
 	return func(req *http.Request) {
 		for k, v := range kv {
@@ -137,7 +136,7 @@ func WithCookies(kv map[string]string) RequestModifier {
 	}
 }
 
-// WithBody overrides the request body with the provided io.Reader.
+// WithBody replaces the request body stream with the provided reader.
 func WithBody(r io.Reader) RequestModifier {
 	return func(req *http.Request) {
 		rc, ok := r.(io.ReadCloser)
@@ -147,7 +146,6 @@ func WithBody(r io.Reader) RequestModifier {
 
 		req.Body = rc
 
-		// Attempt to set Content-Length if it's a known size type
 		if r != nil {
 			if b, ok := r.(interface{ Len() int }); ok {
 				req.ContentLength = int64(b.Len())
@@ -158,7 +156,9 @@ func WithBody(r io.Reader) RequestModifier {
 	}
 }
 
-// WithJSONBody sets the request body to the JSON representation of the provided payload.
+// WithJSONBody serializes the payload as JSON and configures it as the request body.
+// It sets the Content-Type header to "application/json".
+// Any marshaling errors are written to the request context via bodyErrorCtxKey.
 func WithJSONBody(payload any) RequestModifier {
 	return func(req *http.Request) {
 		bodyBytes, err := json.Marshal(payload)
@@ -174,22 +174,20 @@ func WithJSONBody(payload any) RequestModifier {
 	}
 }
 
-// WithMultipart creates a RequestModifier that sets the request body to a multipart form
-// containing the specified fields and files.
-// It automatically sets the Content-Type header to multipart/form-data with the correct boundary.
+// WithMultipart writes the provided text fields and files into a multipart/form-data body.
+// It automatically computes and sets the Content-Type header with the boundary value.
+// Any write errors during formatting cause the modifier to return early with an incomplete body.
 func WithMultipart(fields map[string]string, files map[string]io.Reader) RequestModifier {
 	return func(req *http.Request) {
 		body := &bytes.Buffer{}
 		writer := multipart.NewWriter(body)
 
-		// Write text fields
 		for k, v := range fields {
 			if err := writer.WriteField(k, v); err != nil {
 				return
 			}
 		}
 
-		// Write files
 		for key, r := range files {
 			part, err := writer.CreateFormFile(key, key)
 			if err != nil {
@@ -215,17 +213,14 @@ func WithMultipart(fields map[string]string, files map[string]io.Reader) Request
 	}
 }
 
-// WithOrigin sets the "Origin" header.
+// WithOrigin overrides the standard Origin header field.
 func WithOrigin(origin string) RequestModifier {
 	return func(req *http.Request) {
 		req.Header.Set("Origin", origin)
 	}
 }
 
-type debugCtxKey struct{}
-
-// Debug returns a modifier that enables verbose logging for the request.
-// It prints the request and response (including headers and body) to stderr.
+// Debug returns a modifier that forces verbose logging of request and response details.
 func Debug() RequestModifier {
 	return func(req *http.Request) {
 		ctx := context.WithValue(req.Context(), debugCtxKey{}, true)
@@ -233,7 +228,7 @@ func Debug() RequestModifier {
 	}
 }
 
-// WithDecoder sets the decoder to use for the response body.
+// WithDecoder sets the response body [Decoder] strategy for the active request.
 func WithDecoder(d Decoder) RequestModifier {
 	return func(req *http.Request) {
 		ctx := context.WithValue(req.Context(), decoderCtxKey{}, d)
@@ -241,8 +236,7 @@ func WithDecoder(d Decoder) RequestModifier {
 	}
 }
 
-// WithErrorModel returns a RequestModifier that sets the target structure
-// for decoding structured error responses when HTTP status is not 2xx.
+// WithErrorModel configures a target structure to parse non-2xx API error responses.
 func WithErrorModel(target any) RequestModifier {
 	return func(req *http.Request) {
 		ctx := context.WithValue(req.Context(), errorModelCtxKey{}, target)
@@ -250,7 +244,7 @@ func WithErrorModel(target any) RequestModifier {
 	}
 }
 
-// WithUploadProgress returns a RequestModifier that tracks upload progress.
+// WithUploadProgress registers a progress callback for monitoring client uploads.
 func WithUploadProgress(onProgress ProgressFunc) RequestModifier {
 	return func(req *http.Request) {
 		if req.Body != nil && req.Body != http.NoBody {
@@ -263,7 +257,7 @@ func WithUploadProgress(onProgress ProgressFunc) RequestModifier {
 	}
 }
 
-// WithDownloadProgress returns a RequestModifier that tracks download progress.
+// WithDownloadProgress registers a progress callback for monitoring server downloads.
 func WithDownloadProgress(onProgress ProgressFunc) RequestModifier {
 	return func(req *http.Request) {
 		ctx := context.WithValue(req.Context(), downloadProgressCtxKey{}, onProgress)
@@ -271,8 +265,7 @@ func WithDownloadProgress(onProgress ProgressFunc) RequestModifier {
 	}
 }
 
-// WithHedging returns a RequestModifier that sets the hedging delay for this request.
-// Hedging is disabled if delay <= 0.
+// WithHedging applies a request-specific hedging timeout.
 func WithHedging(delay time.Duration) RequestModifier {
 	return func(req *http.Request) {
 		ctx := context.WithValue(req.Context(), hedgingCtxKey{}, delay)
@@ -280,12 +273,35 @@ func WithHedging(delay time.Duration) RequestModifier {
 	}
 }
 
-// CaptureResponse returns a modifier that captures the *http.Response
-// of the request. This is useful for accessing headers or cookies
-// when using high-level functions like GetJSON.
+// CaptureResponse captures the resulting [http.Response] structure upon request completion.
 func CaptureResponse(target **http.Response) RequestModifier {
 	return func(req *http.Request) {
 		ctx := context.WithValue(req.Context(), capturerCtxKey{}, target)
 		*req = *req.WithContext(ctx)
+	}
+}
+
+// WithStreamingMultipart applies a streaming multipart request body.
+func WithStreamingMultipart(fields map[string]string, files map[string]io.Reader) RequestModifier {
+	return func(req *http.Request) {
+		pr, pw := io.Pipe()
+		writer := multipart.NewWriter(pw)
+
+		go func() {
+			defer pw.Close()
+			defer writer.Close()
+
+			for k, v := range fields {
+				_ = writer.WriteField(k, v)
+			}
+
+			for key, r := range files {
+				part, _ := writer.CreateFormFile(key, key)
+				_, _ = io.Copy(part, r)
+			}
+		}()
+
+		req.Body = pr
+		req.Header.Set("Content-Type", writer.FormDataContentType())
 	}
 }

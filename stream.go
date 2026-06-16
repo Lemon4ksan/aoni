@@ -15,14 +15,14 @@ import (
 	"strings"
 )
 
-// StreamResponse wraps an http.Response and provides streaming methods.
-// The caller is responsible for closing the response after reading is complete.
+// StreamResponse wraps an [http.Response] and manages connection reading streams.
+// Callers are responsible for calling [StreamResponse.Close] after read operations complete.
 type StreamResponse struct {
 	resp *http.Response
 }
 
-// Stream performs a GET request and returns the raw response body as a StreamResponse.
-// The caller must close the StreamResponse when done.
+// Stream executes a GET request and returns the resulting connection body as [StreamResponse].
+// Callers must ensure the returned stream is closed when done.
 func Stream(
 	ctx context.Context,
 	c Requester,
@@ -42,7 +42,7 @@ func Stream(
 	return &StreamResponse{resp: resp}, nil
 }
 
-// StreamWithBody performs a request with a body and returns the raw response body.
+// StreamWithBody executes an HTTP request with the provided body and returns a raw [StreamResponse].
 func StreamWithBody(
 	ctx context.Context,
 	c Requester,
@@ -63,43 +63,41 @@ func StreamWithBody(
 	return &StreamResponse{resp: resp}, nil
 }
 
-// Read reads from the stream into p.
+// Read reads connection body data into p.
 func (s *StreamResponse) Read(p []byte) (n int, err error) {
 	return s.resp.Body.Read(p)
 }
 
-// Close closes the response body.
+// Close closes the underlying network response body stream.
 func (s *StreamResponse) Close() error {
 	return s.resp.Body.Close()
 }
 
-// ContentLength returns the content length (-1 if unknown).
+// ContentLength returns the response body content length, or -1 if unknown.
 func (s *StreamResponse) ContentLength() int64 {
 	return s.resp.ContentLength
 }
 
-// ContentType returns the Content-Type header.
+// ContentType returns the Content-Type header field value.
 func (s *StreamResponse) ContentType() string {
 	return s.resp.Header.Get("Content-Type")
 }
 
-// StatusCode returns the HTTP status code.
+// StatusCode returns the HTTP status code of the response.
 func (s *StreamResponse) StatusCode() int {
 	return s.resp.StatusCode
 }
 
-// Response returns the underlying http.Response.
-// Use this for advanced access to headers, cookies, etc.
+// Response returns the underlying raw [http.Response] structure.
 func (s *StreamResponse) Response() *http.Response {
 	return s.resp
 }
 
-// io.Reader interface implementation
 var _ io.Reader = (*StreamResponse)(nil)
 
-// StreamNDJSON reads a newline-delimited JSON stream from the response body
-// and sends parsed values to the returned channel.
-// It runs a background goroutine and closes the channel when the stream is exhausted.
+// StreamNDJSON reads a newline-delimited JSON stream from the [StreamResponse] body.
+// It parses values concurrently in a background goroutine and pushes them to the returned channel.
+// It automatically closes channels and connection streams when done or on context cancellation.
 func StreamNDJSON[T any](ctx context.Context, resp *StreamResponse) (<-chan T, <-chan error) {
 	out := make(chan T)
 	errs := make(chan error, 1)
@@ -140,15 +138,23 @@ func StreamNDJSON[T any](ctx context.Context, resp *StreamResponse) (<-chan T, <
 	return out, errs
 }
 
-// SSEEvent represents a single Server-Sent Event.
+// SSEEvent represents a parsed single Server-Sent Event frame.
 type SSEEvent struct {
+	// Event is the event identifier string.
 	Event string
-	Data  string
-	ID    string
+
+	// Data is the data payload buffer string.
+	Data string
+
+	// ID is the unique event tracking ID.
+	ID string
+
+	// Retry is the reconnection timeout value in milliseconds.
 	Retry int
 }
 
-// StreamSSE reads Server-Sent Events from the response body.
+// StreamSSE parses incoming Server-Sent Events from the [StreamResponse] body.
+// It executes a background parsing loop and closes returned channels when done.
 func StreamSSE(ctx context.Context, resp *StreamResponse) (<-chan SSEEvent, <-chan error) {
 	out := make(chan SSEEvent)
 	errs := make(chan error, 1)
