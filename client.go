@@ -80,6 +80,29 @@ var DefaultSensitiveHeaders = []string{
 	"X-Auth-Token",
 }
 
+// Unwrapper is an interface for objects that can be unwrapped to reveal their underlying [Requester] implementation.
+type Unwrapper interface {
+	Unwrap() Requester
+}
+
+// UnwrapClient recursively unwraps any decorator or wrapper layers from the Requester interface,
+// reaching down to the original concrete structure *Client.
+// Returns nil if the passed object is a clean test mock.
+func UnwrapClient(r Requester) *Client {
+	for {
+		if client, ok := r.(*Client); ok {
+			return client
+		}
+
+		u, ok := r.(Unwrapper)
+		if !ok {
+			break
+		}
+		r = u.Unwrap()
+	}
+	return nil
+}
+
 // HTTPDoer defines the interface for objects executing an [http.Request].
 // It is implemented by [http.Client] and can be customized via [DoerFunc].
 type HTTPDoer interface {
