@@ -17,6 +17,7 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -98,8 +99,10 @@ func UnwrapClient(r Requester) *Client {
 		if !ok {
 			break
 		}
+
 		r = u.Unwrap()
 	}
+
 	return nil
 }
 
@@ -1054,7 +1057,11 @@ func dialTLSWithUTLS(
 		host = addr
 	}
 
-	uConfig := &utls.Config{ServerName: host}
+	uConfig := &utls.Config{
+		ServerName: host,
+		NextProtos: []string{"http/1.1"},
+	}
+
 	if tlsConfig != nil {
 		uConfig.InsecureSkipVerify = tlsConfig.InsecureSkipVerify
 		uConfig.RootCAs = tlsConfig.RootCAs
@@ -1065,6 +1072,18 @@ func dialTLSWithUTLS(
 	}
 
 	uConn := utls.UClient(conn, uConfig, spec)
+	if err := uConn.BuildHandshakeState(); err != nil {
+		_ = conn.Close()
+		return nil, err
+	}
+
+	alpnProtos := []string{"http/1.1"}
+	if alpn, ok := ctx.Value(alpnOverrideCtxKey{}).([]string); ok && len(alpn) > 0 {
+		alpnProtos = alpn
+	}
+
+	uConn.Extensions = forceALPN(uConn.Extensions, alpnProtos)
+
 	if err := uConn.HandshakeContext(ctx); err != nil {
 		_ = conn.Close()
 		return nil, err
@@ -1526,6 +1545,35 @@ func happyEyeballsDial(
 			}
 		}
 	}
+}
+
+func forceALPN(extensions []utls.TLSExtension, protos []string) []utls.TLSExtension {
+	found := false
+	filtered := make([]utls.TLSExtension, 0, len(extensions))
+
+	for _, ext := range extensions {
+		switch ext.(type) {
+		case *utls.ALPNExtension:
+			filtered = append(filtered, &utls.ALPNExtension{
+				AlpnProtocols: protos,
+			})
+			found = true
+		case *utls.ApplicationSettingsExtension:
+			if slices.Contains(protos, "h2") {
+				filtered = append(filtered, ext)
+			}
+		default:
+			filtered = append(filtered, ext)
+		}
+	}
+
+	if !found {
+		filtered = append(filtered, &utls.ALPNExtension{
+			AlpnProtocols: protos,
+		})
+	}
+
+	return filtered
 }
 
 type noopLogger struct{}
