@@ -53,6 +53,7 @@ func TestLoadBalancer(t *testing.T) {
 
 	t.Run("empty_backends_error", func(t *testing.T) {
 		t.Parallel()
+
 		_, err := NewLoadBalancer(LoadBalancerConfig{})
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "requires at least one backend")
@@ -76,6 +77,7 @@ func TestLoadBalancer(t *testing.T) {
 
 			resp, err := lb.Do(req)
 			require.NoError(t, err)
+
 			_ = resp.Body.Close()
 		}
 	})
@@ -97,6 +99,7 @@ func TestLoadBalancer(t *testing.T) {
 
 			resp, err := lb.Do(req)
 			require.NoError(t, err)
+
 			_ = resp.Body.Close()
 		}
 	})
@@ -123,12 +126,14 @@ func TestLoadBalancer(t *testing.T) {
 
 			resp, err := lb.Do(req)
 			require.NoError(t, err)
+
 			_ = resp.Body.Close()
 		}
 	})
 
 	t.Run("unhealthy_backend_skipped", func(t *testing.T) {
 		t.Parallel()
+
 		server1 := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			w.WriteHeader(http.StatusBadGateway)
 		}))
@@ -146,12 +151,14 @@ func TestLoadBalancer(t *testing.T) {
 		require.NoError(t, err)
 		resp1, err := lb.Do(req1)
 		require.NoError(t, err)
+
 		_ = resp1.Body.Close()
 
 		req2, err := http.NewRequestWithContext(t.Context(), "GET", "http://test", nil)
 		require.NoError(t, err)
 		resp2, err := lb.Do(req2)
 		require.NoError(t, err)
+
 		_ = resp2.Body.Close()
 
 		assert.True(t, lb.backends[0].unhealthy.Load(), "server1 should be unhealthy after 1 failure")
@@ -213,6 +220,7 @@ func TestLoadBalancer(t *testing.T) {
 
 func TestLoadBalancer_Prewarm(t *testing.T) {
 	t.Parallel()
+
 	m1 := &mockDoer{id: 1}
 	m2 := &mockDoer{id: 2}
 

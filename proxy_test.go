@@ -79,6 +79,7 @@ func TestNewProxyClient(t *testing.T) {
 
 	t.Run("default_timeout", func(t *testing.T) {
 		t.Parallel()
+
 		cfg := ProxyConfig{}
 
 		client, err := NewProxyClient(cfg)
@@ -89,6 +90,7 @@ func TestNewProxyClient(t *testing.T) {
 
 	t.Run("custom_config", func(t *testing.T) {
 		t.Parallel()
+
 		proxyAddr := "http://user:pass@1.2.3.4:8080"
 		cfg := ProxyConfig{
 			ProxyURL:           proxyAddr,
@@ -114,6 +116,7 @@ func TestNewProxyClient(t *testing.T) {
 
 	t.Run("invalid_proxy_url", func(t *testing.T) {
 		t.Parallel()
+
 		cfg := ProxyConfig{
 			ProxyURL: " ://invalid-url",
 		}
@@ -124,6 +127,7 @@ func TestNewProxyClient(t *testing.T) {
 
 	t.Run("no_proxy", func(t *testing.T) {
 		t.Parallel()
+
 		cfg := ProxyConfig{ProxyURL: ""}
 
 		client, err := NewProxyClient(cfg)
@@ -146,6 +150,7 @@ func TestProxyRotator(t *testing.T) {
 
 	t.Run("empty_clients_error", func(t *testing.T) {
 		t.Parallel()
+
 		_, err := NewProxyRotator(ProxyRotatorConfig{})
 		require.Error(t, err)
 		assert.Equal(t, "aoni: proxy rotator requires at least one client", err.Error())
@@ -153,6 +158,7 @@ func TestProxyRotator(t *testing.T) {
 
 	t.Run("round_robin_logic", func(t *testing.T) {
 		t.Parallel()
+
 		m1 := &mockDoer{id: 1}
 		m2 := &mockDoer{id: 2}
 		m3 := &mockDoer{id: 3}
@@ -176,6 +182,7 @@ func TestProxyRotator(t *testing.T) {
 
 	t.Run("concurrency_safety", func(t *testing.T) {
 		t.Parallel()
+
 		count := 10
 		clients := make([]HTTPDoer, count)
 
@@ -218,6 +225,7 @@ func TestProxyRotator(t *testing.T) {
 
 func TestProxyRotator_HealthCheck(t *testing.T) {
 	t.Parallel()
+
 	m1 := &mockDoer{id: 1}
 	m2 := &mockDoer{id: 2, forceError: true}
 
@@ -264,6 +272,7 @@ func TestProxyRotator_HealthCheck(t *testing.T) {
 
 func TestProxyRotator_BackgroundHealthCheck(t *testing.T) {
 	t.Parallel()
+
 	m1 := &mockDoer{id: 1, forceError: true}
 
 	cfg := ProxyRotatorConfig{
@@ -292,6 +301,7 @@ func TestProxyRotator_BackgroundHealthCheck(t *testing.T) {
 
 func TestProxyRotator_ContextCancellation(t *testing.T) {
 	t.Parallel()
+
 	m1 := &mockDoer{id: 1}
 	rotator, err := NewProxyRotator(ProxyRotatorConfig{}, m1)
 	require.NoError(t, err)
@@ -310,6 +320,7 @@ func TestProxyRotator_ContextCancellation(t *testing.T) {
 
 func TestProxyRotator_RetryOnProxyError(t *testing.T) {
 	t.Parallel()
+
 	m1 := &mockDoer{id: 1, statusCode: 407}
 	m2 := &mockDoer{id: 2, statusCode: 200}
 
@@ -338,6 +349,7 @@ func TestProxyConfig_CustomTransport(t *testing.T) {
 
 	t.Run("custom_round_tripper", func(t *testing.T) {
 		t.Parallel()
+
 		mw := &mockRoundTripper{}
 		cfg := ProxyConfig{
 			Transport: mw,
@@ -349,6 +361,7 @@ func TestProxyConfig_CustomTransport(t *testing.T) {
 
 	t.Run("custom_round_tripper_factory", func(t *testing.T) {
 		t.Parallel()
+
 		mw := &mockRoundTripper{}
 		cfg := ProxyConfig{
 			TransportFactory: func(c ProxyConfig) (http.RoundTripper, error) {
@@ -363,6 +376,7 @@ func TestProxyConfig_CustomTransport(t *testing.T) {
 
 func TestProxyRotator_StickySessionCleanup(t *testing.T) {
 	t.Parallel()
+
 	m1 := &mockDoer{id: 1}
 	r, err := NewProxyRotator(ProxyRotatorConfig{}, m1)
 	require.NoError(t, err)
@@ -387,12 +401,14 @@ func TestProxyRotator_StickySessionCleanup(t *testing.T) {
 	time.Sleep(20 * time.Millisecond)
 
 	r.mu.Lock()
+
 	now := time.Now()
 	for k, v := range r.sessions {
 		if now.Sub(v.lastSeen) > r.sessionTTL {
 			delete(r.sessions, k)
 		}
 	}
+
 	r.mu.Unlock()
 
 	r.mu.RLock()
@@ -403,6 +419,7 @@ func TestProxyRotator_StickySessionCleanup(t *testing.T) {
 
 func TestProxyRotator_Prewarm(t *testing.T) {
 	t.Parallel()
+
 	m1 := &mockDoer{id: 1}
 	m2 := &mockDoer{id: 2}
 

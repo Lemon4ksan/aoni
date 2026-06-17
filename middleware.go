@@ -78,6 +78,13 @@ type RetryOptions struct {
 // It receives the response and error from the failed attempt.
 type RetryCondition func(resp *http.Response, err error) bool
 
+// RetryOnErr returns a [RetryCondition] that retries requests based on a nil error condition.
+func RetryOnErr() RetryCondition {
+	return func(resp *http.Response, err error) bool {
+		return err != nil
+	}
+}
+
 // RetryMiddleware returns a [Middleware] that retries failed requests based on a condition.
 // It fully reads and buffers the request body into memory to allow replay attempts.
 //

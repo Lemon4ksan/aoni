@@ -36,6 +36,7 @@ func TestUint64String(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.input, func(t *testing.T) {
 			t.Parallel()
+
 			var v Uint64String
 
 			err := json.Unmarshal([]byte(tt.input), &v)
@@ -66,6 +67,7 @@ func TestInt64String(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.input, func(t *testing.T) {
 			t.Parallel()
+
 			var v Int64String
 
 			err := json.Unmarshal([]byte(tt.input), &v)
@@ -96,6 +98,7 @@ func TestFloat64String(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.input, func(t *testing.T) {
 			t.Parallel()
+
 			var v Float64String
 
 			err := json.Unmarshal([]byte(tt.input), &v)
@@ -114,6 +117,7 @@ func TestStructToValues(t *testing.T) {
 
 	t.Run("nil_input", func(t *testing.T) {
 		t.Parallel()
+
 		res, err := StructToValues(nil)
 		assert.NoError(t, err)
 		assert.Nil(t, res)
@@ -121,6 +125,7 @@ func TestStructToValues(t *testing.T) {
 
 	t.Run("pass_through_url_values", func(t *testing.T) {
 		t.Parallel()
+
 		input := url.Values{"test": {"1"}}
 		res, err := StructToValues(input)
 		assert.NoError(t, err)
@@ -129,6 +134,7 @@ func TestStructToValues(t *testing.T) {
 
 	t.Run("basic_types_and_pointers", func(t *testing.T) {
 		t.Parallel()
+
 		type Params struct {
 			Str   string  `url:"s"`
 			Int   int32   `url:"i"`
@@ -163,6 +169,7 @@ func TestStructToValues(t *testing.T) {
 
 	t.Run("slice_support", func(t *testing.T) {
 		t.Parallel()
+
 		type SliceParams struct {
 			IDs   []int    `url:"ids"`
 			Tags  []string `url:"tags"`
@@ -185,6 +192,7 @@ func TestStructToValues(t *testing.T) {
 
 	t.Run("omitempty_logic", func(t *testing.T) {
 		t.Parallel()
+
 		type OmitParams struct {
 			Show    string `url:"show,omitempty"`
 			Hide    int    `url:"hide,omitempty"`
@@ -209,6 +217,7 @@ func TestStructToValues(t *testing.T) {
 
 	t.Run("error_not_a_struct", func(t *testing.T) {
 		t.Parallel()
+
 		_, err := StructToValues("string is not a struct")
 		assert.Error(t, err)
 		assert.Contains(t, err.Error(), "must be a struct")
@@ -216,6 +225,7 @@ func TestStructToValues(t *testing.T) {
 
 	t.Run("error_unsupported_field_type", func(t *testing.T) {
 		t.Parallel()
+
 		type BadParams struct {
 			Map map[string]string `url:"map"`
 		}
@@ -227,6 +237,7 @@ func TestStructToValues(t *testing.T) {
 
 	t.Run("tag_with_only_key", func(t *testing.T) {
 		t.Parallel()
+
 		type Simple struct {
 			A string `url:"only_key,"`
 		}
@@ -239,6 +250,7 @@ func TestStructToValues(t *testing.T) {
 
 func TestStructToValues_Inline(t *testing.T) {
 	t.Parallel()
+
 	type baseParams struct {
 		DeviceID string `url:"p"`
 		SteamID  mockID `url:"a"`
@@ -275,6 +287,7 @@ func TestStructToValues_Inline(t *testing.T) {
 
 func TestStructToValues_Slices(t *testing.T) {
 	t.Parallel()
+
 	type SliceParams struct {
 		Tags []string `url:"t"`
 	}
@@ -291,12 +304,14 @@ func TestStructToValues_Errors(t *testing.T) {
 
 	t.Run("non_struct_input", func(t *testing.T) {
 		t.Parallel()
+
 		_, err := StructToValues(123)
 		assert.Error(t, err)
 	})
 
 	t.Run("unsupported_type", func(t *testing.T) {
 		t.Parallel()
+
 		type Bad struct {
 			M map[string]string `url:"m"`
 		}

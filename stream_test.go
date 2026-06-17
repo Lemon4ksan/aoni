@@ -56,6 +56,7 @@ func TestStream(t *testing.T) {
 		t.Parallel()
 		_, client := setupTestServer(t, func(w http.ResponseWriter, r *http.Request) {
 			assert.Equal(t, "bar", r.URL.Query().Get("foo"))
+
 			_, _ = w.Write([]byte("ok"))
 		})
 
@@ -65,6 +66,7 @@ func TestStream(t *testing.T) {
 			for k, v := range query {
 				q.Set(k, v)
 			}
+
 			req.URL.RawQuery = q.Encode()
 		})
 		require.NoError(t, err)
@@ -79,6 +81,7 @@ func TestStream(t *testing.T) {
 		t.Parallel()
 		_, client := setupTestServer(t, func(w http.ResponseWriter, r *http.Request) {
 			assert.Equal(t, "Bearer token123", r.Header.Get("Authorization"))
+
 			_, _ = w.Write([]byte("authorized"))
 		})
 
@@ -93,6 +96,7 @@ func TestStream(t *testing.T) {
 
 	t.Run("stream_large_body", func(t *testing.T) {
 		t.Parallel()
+
 		largeBody := strings.Repeat("x", 1024*1024)
 
 		_, client := setupTestServer(t, func(w http.ResponseWriter, r *http.Request) {

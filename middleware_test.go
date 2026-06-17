@@ -53,6 +53,7 @@ func TestRetryMiddleware(t *testing.T) {
 
 	t.Run("retry_on_failure_and_preserve_body", func(t *testing.T) {
 		t.Parallel()
+
 		m1 := &mockDoer{id: 1, statusCode: 502}
 		rotator, err := NewProxyRotator(ProxyRotatorConfig{}, m1)
 		require.NoError(t, err)
@@ -85,6 +86,7 @@ func TestRetryMiddleware(t *testing.T) {
 
 	t.Run("max_retries_exceeded", func(t *testing.T) {
 		t.Parallel()
+
 		m1 := &mockDoer{id: 1, forceError: true}
 		rotator, err := NewProxyRotator(ProxyRotatorConfig{}, m1)
 		require.NoError(t, err)
@@ -106,6 +108,7 @@ func TestRetryMiddleware(t *testing.T) {
 
 	t.Run("custom_condition", func(t *testing.T) {
 		t.Parallel()
+
 		m1 := &mockDoer{id: 1, statusCode: 429}
 
 		opts := RetryOptions{
@@ -141,6 +144,7 @@ func TestRecoveryMiddleware(t *testing.T) {
 
 	t.Run("recover_from_panic_and_return_error", func(t *testing.T) {
 		t.Parallel()
+
 		panicDoer := DoerFunc(func(req *http.Request) (*http.Response, error) {
 			panic("something went terribly wrong")
 		})
@@ -168,6 +172,7 @@ func TestCircuitBreaker(t *testing.T) {
 
 	t.Run("trip_breaker_on_failures_and_allow_recovery", func(t *testing.T) {
 		t.Parallel()
+
 		m := &mockDoer{id: 1, statusCode: 500}
 		cb := NewCircuitBreaker(CircuitBreakerConfig{
 			FailureThreshold: 2,
@@ -210,6 +215,7 @@ func TestFallbackMiddleware(t *testing.T) {
 
 	t.Run("fallback_on_transport_error", func(t *testing.T) {
 		t.Parallel()
+
 		m := &mockDoer{id: 1, forceError: true}
 		fallback := FallbackJSON(http.StatusOK, map[string]string{"message": "fallback-data"})
 
@@ -217,6 +223,7 @@ func TestFallbackMiddleware(t *testing.T) {
 
 		req, err := http.NewRequestWithContext(t.Context(), "GET", "http://localhost", nil)
 		require.NoError(t, err)
+
 		req = req.WithContext(context.WithValue(req.Context(), fallbackCtxKey{}, fallback))
 
 		resp, err := client.Do(req)
@@ -232,6 +239,7 @@ func TestFallbackMiddleware(t *testing.T) {
 
 	t.Run("fallback_on_custom_condition_5xx", func(t *testing.T) {
 		t.Parallel()
+
 		m := &mockDoer{id: 1, statusCode: 503}
 		fallback := FallbackJSON(http.StatusOK, map[string]string{"message": "fallback-5xx"})
 
@@ -242,6 +250,7 @@ func TestFallbackMiddleware(t *testing.T) {
 
 		req, err := http.NewRequestWithContext(t.Context(), "GET", "http://localhost", nil)
 		require.NoError(t, err)
+
 		req = req.WithContext(context.WithValue(req.Context(), fallbackCtxKey{}, fallback))
 
 		resp, err := client.Do(req)
@@ -261,6 +270,7 @@ func TestRetryAfter(t *testing.T) {
 
 	t.Run("respect_retry_after_header", func(t *testing.T) {
 		t.Parallel()
+
 		m := &mockRetryDoer{
 			statusCode: 429,
 			header:     http.Header{"Retry-After": []string{"1"}},
@@ -300,6 +310,7 @@ func TestRetryMiddleware_JitterFull(t *testing.T) {
 
 	t.Run("retry_with_aws_full_jitter_strategy", func(t *testing.T) {
 		t.Parallel()
+
 		m := &mockRetryDoer{statusCode: 502}
 		opts := RetryOptions{
 			MaxRetries:     2,
@@ -336,6 +347,7 @@ func TestChaosMiddleware(t *testing.T) {
 
 	t.Run("injects_latency", func(t *testing.T) {
 		t.Parallel()
+
 		m := &mockDoer{id: 1}
 		cfg := ChaosConfig{
 			LatencyMin: 15 * time.Millisecond,
@@ -360,6 +372,7 @@ func TestChaosMiddleware(t *testing.T) {
 
 	t.Run("injects_failure", func(t *testing.T) {
 		t.Parallel()
+
 		m := &mockDoer{id: 1}
 		cfg := ChaosConfig{
 			FailureRate: 1.0,
@@ -378,6 +391,7 @@ func TestChaosMiddleware(t *testing.T) {
 
 	t.Run("no_failure_injected_when_failure_rate_is_zero", func(t *testing.T) {
 		t.Parallel()
+
 		m := &mockDoer{id: 1}
 		cfg := ChaosConfig{
 			FailureRate: 0.0,
@@ -400,6 +414,7 @@ func TestAdaptiveLimiter(t *testing.T) {
 
 	t.Run("acquire_blocks_when_limit_exceeded", func(t *testing.T) {
 		t.Parallel()
+
 		limiter := NewAdaptiveLimiter(2)
 
 		err := limiter.Acquire(t.Context())
@@ -433,6 +448,7 @@ func TestAdaptiveLimiter(t *testing.T) {
 
 	t.Run("adjusts_limit_dynamically_based_on_rtt", func(t *testing.T) {
 		t.Parallel()
+
 		limiter := NewAdaptiveLimiter(10)
 		limiter.minLimit = 2
 		limiter.maxLimit = 20

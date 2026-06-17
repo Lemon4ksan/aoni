@@ -113,6 +113,7 @@ func TestCurlCommand(t *testing.T) {
 			for _, w := range tt.want {
 				assert.Contains(t, curl, w)
 			}
+
 			for _, nw := range tt.notWant {
 				assert.NotContains(t, curl, nw)
 			}

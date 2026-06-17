@@ -16,6 +16,7 @@ import (
 
 func TestClient_GetJSON(t *testing.T) {
 	t.Parallel()
+
 	expected := testPayload{Message: "hello", Status: http.StatusOK}
 
 	_, client := setupTestServer(t, func(w http.ResponseWriter, r *http.Request) {
@@ -32,6 +33,7 @@ func TestClient_GetJSON(t *testing.T) {
 
 func TestClient_PostJSON(t *testing.T) {
 	t.Parallel()
+
 	input := testPayload{Message: "sending", Status: 1}
 	response := testPayload{Message: "received", Status: 2}
 
@@ -40,6 +42,7 @@ func TestClient_PostJSON(t *testing.T) {
 		assert.Equal(t, "application/json", r.Header.Get("Content-Type"))
 
 		var body testPayload
+
 		err := json.NewDecoder(r.Body).Decode(&body)
 		require.NoError(t, err)
 		assert.Equal(t, input.Message, body.Message)
@@ -55,6 +58,7 @@ func TestClient_PostJSON(t *testing.T) {
 
 func TestClient_PutJSON(t *testing.T) {
 	t.Parallel()
+
 	input := testPayload{Message: "sending-put", Status: 1}
 	response := testPayload{Message: "received-put", Status: 2}
 
@@ -63,6 +67,7 @@ func TestClient_PutJSON(t *testing.T) {
 		assert.Equal(t, "application/json", r.Header.Get("Content-Type"))
 
 		var body testPayload
+
 		err := json.NewDecoder(r.Body).Decode(&body)
 		require.NoError(t, err)
 		assert.Equal(t, input.Message, body.Message)
@@ -78,6 +83,7 @@ func TestClient_PutJSON(t *testing.T) {
 
 func TestClient_PatchJSON(t *testing.T) {
 	t.Parallel()
+
 	input := testPayload{Message: "sending-patch", Status: 1}
 	response := testPayload{Message: "received-patch", Status: 2}
 
@@ -86,6 +92,7 @@ func TestClient_PatchJSON(t *testing.T) {
 		assert.Equal(t, "application/json", r.Header.Get("Content-Type"))
 
 		var body testPayload
+
 		err := json.NewDecoder(r.Body).Decode(&body)
 		require.NoError(t, err)
 		assert.Equal(t, input.Message, body.Message)
@@ -101,6 +108,7 @@ func TestClient_PatchJSON(t *testing.T) {
 
 func TestClient_DeleteJSON(t *testing.T) {
 	t.Parallel()
+
 	input := testPayload{Message: "deleting", Status: 1}
 	response := testPayload{Message: "deleted", Status: 2}
 
@@ -109,6 +117,7 @@ func TestClient_DeleteJSON(t *testing.T) {
 		assert.Equal(t, "application/json", r.Header.Get("Content-Type"))
 
 		var body testPayload
+
 		err := json.NewDecoder(r.Body).Decode(&body)
 		require.NoError(t, err)
 		assert.Equal(t, input.Message, body.Message)
@@ -128,6 +137,7 @@ func TestClient_DeleteJSON_NilPayload(t *testing.T) {
 		assert.Equal(t, http.MethodDelete, r.Method)
 
 		var body map[string]any
+
 		err := json.NewDecoder(r.Body).Decode(&body)
 		assert.ErrorIs(t, err, io.EOF)
 
