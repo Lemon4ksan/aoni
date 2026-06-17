@@ -4,9 +4,9 @@
 
 ### The Ice-Cold Resilience Engine for Go HTTP Networks
 
-[![Go Reference](https://img.shields.io/badge/go-reference-007d9c?logo=go&logoColor=white&style=flat-square)](https://pkg.go.dev/github.com/lemon4ksan/g-man/pkg/aoni)
-[![Go Report Card](https://goreportcard.com/badge/github.com/lemon4ksan/g-man?style=flat-square)](https://goreportcard.com/report/github.com/lemon4ksan/g-man)
-[![License](https://img.shields.io/github/license/lemon4ksan/g-man?style=flat-square)](LICENSE)
+[![Go Reference](https://img.shields.io/badge/go-reference-007d9c?logo=go&logoColor=white&style=flat-square)](https://pkg.go.dev/github.com/lemon4ksan/aoni)
+[![Go Report Card](https://goreportcard.com/badge/github.com/lemon4ksan/aoni?style=flat-square)](https://goreportcard.com/report/github.com/lemon4ksan/aoni)
+[![License](https://img.shields.io/github/license/lemon4ksan/aoni?style=flat-square)](LICENSE)
 
 > _"In networks, chaos is the default. Let aoni be your ice-cold anchor."_
 
