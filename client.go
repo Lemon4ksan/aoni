@@ -182,6 +182,7 @@ type Client struct {
 	hostRewrite      *HostRewriteConfig
 	dotResolver      *DoTResolver
 	p0fSignature     *p0f.Signature
+	h2Settings       *HTTP2Settings
 }
 
 // NewClient initializes a new [Client] instance with [DefaultUserAgent].
@@ -230,12 +231,18 @@ func (c *Client) Clone() *Client {
 		ssrfGuard:          c.ssrfGuard,
 		happyEyeballsDelay: c.happyEyeballsDelay,
 		multiReadThreshold: c.multiReadThreshold,
+		logger:             c.logger,
+		sourceRotator:      c.sourceRotator,
+		dnsResolver:        c.dnsResolver,
+		defaultMods:        c.defaultMods,
+		headersCookieJar:   c.headersCookieJar,
 		ja4Callback:        c.ja4Callback,
 		tlsBrowserID:       c.tlsBrowserID,
 		fragmentConfig:     c.fragmentConfig,
 		hostRewrite:        c.hostRewrite,
 		dotResolver:        c.dotResolver,
 		p0fSignature:       c.p0fSignature,
+		h2Settings:         c.h2Settings,
 	}
 }
 
@@ -851,6 +858,29 @@ func (c *Client) WithDoTResolver(server, hostname string) *Client {
 	return newClient
 }
 
+// WithProxyIsolatedCookieJar returns a new [Client] that uses per-proxy cookie isolation.
+// Each proxy gets its own cookie jar, preventing cross-proxy cookie leakage.
+func (c *Client) WithProxyIsolatedCookieJar(jar *ProxyIsolatedCookieJar) *Client {
+	newClient := c.Clone()
+	newClient.headersCookieJar = jar
+	return newClient
+}
+
+// WithDNSCache returns a new [Client] that wraps the current DNS resolver
+// with an in-memory cache using the specified TTL.
+func (c *Client) WithDNSCache(ttl time.Duration) *Client {
+	newClient := c.Clone()
+	newClient.dnsResolver = NewInMemoryDNSCache(ttl, c.dnsResolver)
+	return newClient
+}
+
+// WithHTTP2Settings returns a new [Client] configured with custom HTTP/2 parameters.
+func (c *Client) WithHTTP2Settings(settings HTTP2Settings) *Client {
+	newClient := c.Clone()
+	newClient.h2Settings = &settings
+	return newClient
+}
+
 // WithP0fSignature configures TCP/IP spoofing based on a p0f signature.
 // After the TCP connection is established, spoofable fields (TTL, DF, window)
 // are applied via syscalls to make the connection appear as the specified OS
@@ -1446,17 +1476,17 @@ func happyEyeballsDial(
 			if res.conn != nil {
 				conn := res.conn
 
-			if cfg, ok := ctx.Value(fragmentCtxKey{}).(FragmentConfig); ok && cfg.ChunkSize > 0 {
-				conn = wrapWithFragmentation(conn, cfg)
-			}
+				if cfg, ok := ctx.Value(fragmentCtxKey{}).(FragmentConfig); ok && cfg.ChunkSize > 0 {
+					conn = wrapWithFragmentation(conn, cfg)
+				}
 
-			// Apply p0f spoofing if configured
-			if cfg, ok := ctx.Value(p0fSignatureCtxKey{}).(*p0f.Signature); ok && cfg != nil {
-				spoofer := p0f.NewSpoofer(cfg)
-				_ = spoofer.Apply(conn) // best-effort
-			}
+				// Apply p0f spoofing if configured
+				if cfg, ok := ctx.Value(p0fSignatureCtxKey{}).(*p0f.Signature); ok && cfg != nil {
+					spoofer := p0f.NewSpoofer(cfg)
+					_ = spoofer.Apply(conn) // best-effort
+				}
 
-			if order, ok := ctx.Value(orderedHeadersCtxKey{}).([]string); ok && len(order) > 0 {
+				if order, ok := ctx.Value(orderedHeadersCtxKey{}).([]string); ok && len(order) > 0 {
 					return &headerOrderingConn{Conn: conn, orderedKeys: order}, nil
 				}
 

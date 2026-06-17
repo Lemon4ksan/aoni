@@ -8,6 +8,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"math/rand/v2"
 	"net"
 	"net/http"
@@ -278,12 +279,25 @@ func (lb *LoadBalancer) markFailed(b *Backend) {
 
 		recoveryTime := time.Now().Add(lb.config.RetryAfter).UnixNano()
 		b.recoveredAt.Store(recoveryTime)
+
+		slog.Warn("backend marked unhealthy", //nolint:gosec
+			"backend", b.URL,
+			"fails", fails,
+			"retry_after", lb.config.RetryAfter,
+		)
 	}
 }
 
 func (lb *LoadBalancer) markSuccess(b *Backend) {
+	wasUnhealthy := b.unhealthy.Load()
 	b.failCount.Store(0)
 	b.unhealthy.Store(false)
+
+	if wasUnhealthy {
+		slog.Info("backend recovered", //nolint:gosec
+			"backend", b.URL,
+		)
+	}
 }
 
 func (lb *LoadBalancer) isFault(resp *http.Response, err error) bool {

@@ -9,6 +9,7 @@ import (
 	"crypto/tls"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net"
 	"net/http"
 	"net/url"
@@ -420,12 +421,25 @@ func (r *ProxyRotator) markFailed(tc *trackedClient) {
 
 		recoveryTime := time.Now().Add(r.config.RetryAfter).UnixNano()
 		tc.recoveredAt.Store(recoveryTime)
+
+		slog.Warn("proxy marked unhealthy", //nolint:gosec
+			"proxy", tc.proxyURL,
+			"fails", fails,
+			"retry_after", r.config.RetryAfter,
+		)
 	}
 }
 
 func (r *ProxyRotator) markSuccess(tc *trackedClient) {
+	wasUnhealthy := tc.unhealthy.Load()
 	tc.failCount.Store(0)
 	tc.unhealthy.Store(false)
+
+	if wasUnhealthy {
+		slog.Info("proxy recovered", //nolint:gosec
+			"proxy", tc.proxyURL,
+		)
+	}
 }
 
 func (r *ProxyRotator) isProxyFault(resp *http.Response, err error) bool {
