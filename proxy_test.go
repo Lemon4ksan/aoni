@@ -163,7 +163,12 @@ func TestProxyRotator(t *testing.T) {
 		m2 := &mockDoer{id: 2}
 		m3 := &mockDoer{id: 3}
 
-		rotator, err := NewProxyRotator(ProxyRotatorConfig{}, m1, m2, m3)
+		rotator, err := NewProxyRotator(
+			ProxyRotatorConfig{},
+			ClientWithProxy{Client: m1},
+			ClientWithProxy{Client: m2},
+			ClientWithProxy{Client: m3},
+		)
 		require.NoError(t, err)
 		t.Cleanup(func() { _ = rotator.Close() })
 
@@ -184,12 +189,12 @@ func TestProxyRotator(t *testing.T) {
 		t.Parallel()
 
 		count := 10
-		clients := make([]HTTPDoer, count)
+		clients := make([]ClientWithProxy, count)
 
 		mocks := make([]*mockDoer, count)
 		for i := range count {
 			mocks[i] = &mockDoer{id: i}
-			clients[i] = mocks[i]
+			clients[i] = ClientWithProxy{Client: mocks[i]}
 		}
 
 		rotator, err := NewProxyRotator(ProxyRotatorConfig{}, clients...)
@@ -233,7 +238,7 @@ func TestProxyRotator_HealthCheck(t *testing.T) {
 		MaxFails:   2,
 		RetryAfter: 100 * time.Millisecond,
 	}
-	rotator, err := NewProxyRotator(cfg, m1, m2)
+	rotator, err := NewProxyRotator(cfg, ClientWithProxy{Client: m1}, ClientWithProxy{Client: m2})
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = rotator.Close() })
 
@@ -282,7 +287,7 @@ func TestProxyRotator_BackgroundHealthCheck(t *testing.T) {
 		HealthCheckInterval: 50 * time.Millisecond,
 	}
 
-	rotator, err := NewProxyRotator(cfg, m1)
+	rotator, err := NewProxyRotator(cfg, ClientWithProxy{Client: m1})
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = rotator.Close() })
 
@@ -303,7 +308,7 @@ func TestProxyRotator_ContextCancellation(t *testing.T) {
 	t.Parallel()
 
 	m1 := &mockDoer{id: 1}
-	rotator, err := NewProxyRotator(ProxyRotatorConfig{}, m1)
+	rotator, err := NewProxyRotator(ProxyRotatorConfig{}, ClientWithProxy{Client: m1})
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = rotator.Close() })
 
@@ -324,7 +329,11 @@ func TestProxyRotator_RetryOnProxyError(t *testing.T) {
 	m1 := &mockDoer{id: 1, statusCode: 407}
 	m2 := &mockDoer{id: 2, statusCode: 200}
 
-	rotator, err := NewProxyRotator(ProxyRotatorConfig{MaxFails: 1}, m1, m2)
+	rotator, err := NewProxyRotator(
+		ProxyRotatorConfig{MaxFails: 1},
+		ClientWithProxy{Client: m1},
+		ClientWithProxy{Client: m2},
+	)
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = rotator.Close() })
 
@@ -378,7 +387,7 @@ func TestProxyRotator_StickySessionCleanup(t *testing.T) {
 	t.Parallel()
 
 	m1 := &mockDoer{id: 1}
-	r, err := NewProxyRotator(ProxyRotatorConfig{}, m1)
+	r, err := NewProxyRotator(ProxyRotatorConfig{}, ClientWithProxy{Client: m1})
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = r.Close() })
 
@@ -423,7 +432,7 @@ func TestProxyRotator_Prewarm(t *testing.T) {
 	m1 := &mockDoer{id: 1}
 	m2 := &mockDoer{id: 2}
 
-	r, err := NewProxyRotator(ProxyRotatorConfig{}, m1, m2)
+	r, err := NewProxyRotator(ProxyRotatorConfig{}, ClientWithProxy{Client: m1}, ClientWithProxy{Client: m2})
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = r.Close() })
 

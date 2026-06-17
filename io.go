@@ -7,8 +7,8 @@ package aoni
 import (
 	"bytes"
 	"context"
-	"fmt"
 	"io"
+	"log/slog"
 	"os"
 	"runtime"
 	"sync"
@@ -40,10 +40,12 @@ func AsReplayable(rc io.ReadCloser) ReplayableBody {
 		if !ok {
 			break
 		}
+
 		curr = u.Unwrap()
 	}
 
 	buf := &bytes.Buffer{}
+
 	return &fallbackReplayableBody{
 		ReadCloser: rc,
 		buf:        buf,
@@ -137,10 +139,7 @@ func newFinalizerReadCloser(rc io.ReadCloser) io.ReadCloser {
 	f := &finalizerReadCloser{ReadCloser: rc}
 	runtime.SetFinalizer(f, func(fr *finalizerReadCloser) {
 		if !fr.closed.Load() {
-			fmt.Fprintln(
-				os.Stderr,
-				"WARNING: aoni: response body was not closed, closing automatically via GC finalizer",
-			)
+			slog.Warn("aoni: response body was not closed, closing automatically via GC finalizer")
 
 			_ = fr.ReadCloser.Close()
 			// Also ensure any temp-files in the chain are cleaned up.

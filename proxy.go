@@ -17,6 +17,12 @@ import (
 	"time"
 )
 
+// ClientWithProxy is a wrapper around an [HTTPDoer] that includes a proxy URL.
+type ClientWithProxy struct {
+	Client   HTTPDoer
+	ProxyURL string
+}
+
 // ProxyConfig defines the configuration parameters for a proxy-supported client.
 type ProxyConfig struct {
 	// ProxyURL is the raw address of the proxy server (e.g. http://user:pass@ip:port).
@@ -106,6 +112,7 @@ type trackedClient struct {
 	failCount   atomic.Uint32
 	unhealthy   atomic.Bool
 	recoveredAt atomic.Int64
+	proxyURL    string
 }
 
 type sessionEntry struct {
@@ -135,7 +142,7 @@ type ProxyRotator struct {
 // NewProxyRotator initializes a new [ProxyRotator] instance.
 // It returns an error if the clients slice is empty.
 // If MaxFails or RetryAfter configuration options are zero, they default to 3 and 30 seconds respectively.
-func NewProxyRotator(config ProxyRotatorConfig, clients ...HTTPDoer) (*ProxyRotator, error) {
+func NewProxyRotator(config ProxyRotatorConfig, clients ...ClientWithProxy) (*ProxyRotator, error) {
 	if len(clients) == 0 {
 		return nil, errors.New("aoni: proxy rotator requires at least one client")
 	}
@@ -150,7 +157,7 @@ func NewProxyRotator(config ProxyRotatorConfig, clients ...HTTPDoer) (*ProxyRota
 
 	tracked := make([]*trackedClient, len(clients))
 	for i, c := range clients {
-		tracked[i] = &trackedClient{client: c}
+		tracked[i] = &trackedClient{client: c.Client, proxyURL: c.ProxyURL}
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -179,14 +186,17 @@ func NewProxyRotator(config ProxyRotatorConfig, clients ...HTTPDoer) (*ProxyRota
 // UpdateClients replaces the active proxy clients with a new pool.
 // It resets all session-to-proxy mappings to prevent indexing errors.
 // If the clients slice is empty, the method returns early and makes no changes.
-func (r *ProxyRotator) UpdateClients(clients ...HTTPDoer) {
+func (r *ProxyRotator) UpdateClients(clients ...ClientWithProxy) {
 	if len(clients) == 0 {
 		return
 	}
 
 	tracked := make([]*trackedClient, len(clients))
-	for i, c := range clients {
-		tracked[i] = &trackedClient{client: c}
+	for i, cp := range clients {
+		tracked[i] = &trackedClient{
+			client:   cp.Client,
+			proxyURL: cp.ProxyURL,
+		}
 	}
 
 	r.mu.Lock()
@@ -354,7 +364,10 @@ func (r *ProxyRotator) Do(req *http.Request) (*http.Response, error) {
 			continue
 		}
 
-		resp, err := tc.client.Do(req)
+		proxyCtx := context.WithValue(req.Context(), proxyCtxKey{}, tc.proxyURL)
+		reqWithProxy := req.WithContext(proxyCtx)
+
+		resp, err := tc.client.Do(reqWithProxy)
 		if r.isProxyFault(resp, err) {
 			r.markFailed(tc)
 

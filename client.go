@@ -45,6 +45,22 @@ var (
 	}
 )
 
+type (
+	capturerCtxKey           struct{}
+	decoderCtxKey            struct{}
+	errorModelCtxKey         struct{}
+	downloadProgressCtxKey   struct{}
+	hedgingCtxKey            struct{}
+	queryErrorCtxKey         struct{}
+	bodyErrorCtxKey          struct{}
+	happyEyeballsDelayCtxKey struct{}
+	multiReadCtxKey          struct{}
+	ssrfGuardCtxKey          struct{}
+	fallbackCtxKey           struct{}
+	debugCtxKey              struct{}
+	orderedHeadersCtxKey     struct{}
+)
+
 // DefaultSensitiveHeaders is the list of sensitive headers that are scrubbed from requests on redirect.
 var DefaultSensitiveHeaders = []string{
 	"Authorization",
@@ -146,8 +162,12 @@ type Client struct {
 	ssrfGuard          bool
 	happyEyeballsDelay time.Duration
 	multiReadThreshold int64
+	logger             Logger
 
-	defaultMods []RequestModifier
+	sourceRotator    *SourceIPRotator
+	dnsResolver      DNSResolver
+	defaultMods      []RequestModifier
+	headersCookieJar http.CookieJar
 }
 
 // NewClient initializes a new [Client] instance with [DefaultUserAgent].
@@ -269,6 +289,15 @@ func (c *Client) Request(
 		hook(req)
 	}
 
+	if isolatedJar, ok := c.headersCookieJar.(*ProxyIsolatedCookieJar); ok {
+		jar := isolatedJar.getJar(ctx)
+		if jar != nil {
+			for _, cookie := range jar.Cookies(req.URL) {
+				req.AddCookie(cookie)
+			}
+		}
+	}
+
 	var (
 		resp   *http.Response
 		reqErr error
@@ -285,6 +314,15 @@ func (c *Client) Request(
 		resp, reqErr = c.executeWithHedging(ctx, hedgingDelay, req)
 	} else {
 		resp, reqErr = c.http.Do(req)
+	}
+
+	if isolatedJar, ok := c.headersCookieJar.(*ProxyIsolatedCookieJar); ok {
+		jar := isolatedJar.getJar(ctx)
+		if jar != nil {
+			if rc := resp.Cookies(); len(rc) > 0 {
+				jar.SetCookies(req.URL, rc)
+			}
+		}
 	}
 
 	for _, hook := range c.afterResponse {
@@ -427,6 +465,13 @@ const (
 	// BrowserSafari emulates Apple Safari TLS fingerprints.
 	BrowserSafari
 )
+
+// WithLogger returns a new [Client] with the given logger.
+func (c *Client) WithLogger(l Logger) *Client {
+	newClient := c.Clone()
+	newClient.logger = l
+	return newClient
+}
 
 // WithModifiers returns a new [Client] with the given request modifiers applied by default.
 func (c *Client) WithModifiers(mods ...RequestModifier) *Client {
@@ -591,6 +636,27 @@ func (c *Client) WithMultiReadBody(threshold int64) *Client {
 	return newClient
 }
 
+// WithLocalAddrPool returns a new [Client] with the given local address pool.
+func (c *Client) WithLocalAddrPool(addrs []string) *Client {
+	rotator, err := NewSourceIPRotator(addrs)
+	if err != nil {
+		return c
+	}
+
+	newClient := c.Clone()
+	newClient.sourceRotator = rotator
+	newClient.applyDialers()
+
+	return newClient
+}
+
+// WithDNSResolver returns a new [Client] with the given DNS resolver.
+func (c *Client) WithDNSResolver(resolver DNSResolver) *Client {
+	newClient := c.Clone()
+	newClient.dnsResolver = resolver
+	return newClient
+}
+
 // WithBeforeRequest returns a new [Client] with the given request hook registered.
 // Before-request hooks are executed in the order they are registered.
 func (c *Client) WithBeforeRequest(hook func(req *http.Request)) *Client {
@@ -690,7 +756,7 @@ func (c *Client) WithTLSFingerprint(browser BrowserID) *Client {
 		if transport != nil {
 			clonedTransport := transport.Clone()
 			clonedTransport.DialTLSContext = func(ctx context.Context, network, addr string) (net.Conn, error) {
-				return dialTLSWithUTLS(ctx, network, addr, browser)
+				return dialTLSWithUTLS(ctx, network, addr, browser, c.sourceRotator, c.dnsResolver)
 			}
 			clonedClient := *httpClient
 			clonedClient.Transport = clonedTransport
@@ -699,6 +765,27 @@ func (c *Client) WithTLSFingerprint(browser BrowserID) *Client {
 	}
 
 	return newClient
+}
+
+// Logger is an interface for logging messages.
+type Logger interface {
+	Debug(msg string, args ...any)
+	DebugContext(ctx context.Context, msg string, args ...any)
+	Info(msg string, args ...any)
+	InfoContext(ctx context.Context, msg string, args ...any)
+	Warn(msg string, args ...any)
+	WarnContext(ctx context.Context, msg string, args ...any)
+	Error(msg string, args ...any)
+	ErrorContext(ctx context.Context, msg string, args ...any)
+}
+
+// Logger returns the logger used by the client.
+// If no logger is set, a no-op logger is returned.
+func (c *Client) Logger() Logger {
+	if c.logger == nil {
+		return &noopLogger{}
+	}
+	return c.logger
 }
 
 // BaseResponse returns a new [BaseResponse] wrapper if a provider is configured on the client.
@@ -757,7 +844,15 @@ func (c *Client) applyDialers() {
 		if transport != nil {
 			clonedTransport := transport.Clone()
 			clonedTransport.DialContext = func(ctx context.Context, network, addr string) (net.Conn, error) {
-				return happyEyeballsDial(ctx, network, addr, c.happyEyeballsDelay, c.ssrfGuard)
+				return happyEyeballsDial(
+					ctx,
+					network,
+					addr,
+					c.happyEyeballsDelay,
+					c.ssrfGuard,
+					c.sourceRotator,
+					c.dnsResolver,
+				)
 			}
 			clonedClient := *httpClient
 			clonedClient.Transport = clonedTransport
@@ -766,7 +861,13 @@ func (c *Client) applyDialers() {
 	}
 }
 
-func dialTLSWithUTLS(ctx context.Context, network, addr string, browser BrowserID) (net.Conn, error) {
+func dialTLSWithUTLS(
+	ctx context.Context,
+	network, addr string,
+	browser BrowserID,
+	sourceRotator *SourceIPRotator,
+	dnsResolver DNSResolver,
+) (net.Conn, error) {
 	ssrfGuard := ctx.Value(ssrfGuardCtxKey{}) != nil
 
 	var delay time.Duration
@@ -776,7 +877,7 @@ func dialTLSWithUTLS(ctx context.Context, network, addr string, browser BrowserI
 		delay = 300 * time.Millisecond
 	}
 
-	conn, err := happyEyeballsDial(ctx, network, addr, delay, ssrfGuard)
+	conn, err := happyEyeballsDial(ctx, network, addr, delay, ssrfGuard, sourceRotator, dnsResolver)
 	if err != nil {
 		return nil, err
 	}
@@ -1025,13 +1126,20 @@ func happyEyeballsDial(
 	network, addr string,
 	delay time.Duration,
 	ssrfGuard bool,
+	rotator *SourceIPRotator,
+	dnsResolver DNSResolver,
 ) (net.Conn, error) {
 	host, port, err := net.SplitHostPort(addr)
 	if err != nil {
 		return nil, err
 	}
 
-	addrs, err := (&net.Resolver{}).LookupIPAddr(ctx, host)
+	resolver := dnsResolver
+	if resolver == nil {
+		resolver = &net.Resolver{}
+	}
+
+	addrs, err := resolver.LookupIPAddr(ctx, host)
 	if err != nil {
 		return nil, err
 	}
@@ -1051,6 +1159,10 @@ func happyEyeballsDial(
 
 	if len(filtered) == 1 || delay <= 0 {
 		dialer := &net.Dialer{Timeout: 30 * time.Second}
+		if rotator != nil {
+			dialer.LocalAddr = &net.TCPAddr{IP: rotator.Next()}
+		}
+
 		return dialer.DialContext(ctx, network, net.JoinHostPort(filtered[0].String(), port))
 	}
 
@@ -1114,6 +1226,10 @@ func happyEyeballsDial(
 			return nil, ctx.Err()
 		case res := <-resultCh:
 			if res.conn != nil {
+				if order, ok := ctx.Value(orderedHeadersCtxKey{}).([]string); ok && len(order) > 0 {
+					return &headerOrderingConn{Conn: res.conn, orderedKeys: order}, nil
+				}
+
 				return res.conn, nil
 			}
 
@@ -1128,3 +1244,14 @@ func happyEyeballsDial(
 		}
 	}
 }
+
+type noopLogger struct {}
+
+func (l noopLogger) Debug(_ string, _ ...any) {}
+func (l noopLogger) DebugContext(_ context.Context, _ string, _ ...any) {}
+func (l noopLogger) Info(_ string, _ ...any) {}
+func (l noopLogger) InfoContext(_ context.Context, _ string, _ ...any) {}
+func (l noopLogger) Warn(_ string, _ ...any) {}
+func (l noopLogger) WarnContext(_ context.Context, _ string, _ ...any) {}
+func (l noopLogger) Error(_ string, _ ...any) {}
+func (l noopLogger) ErrorContext(_ context.Context, _ string, _ ...any) {}

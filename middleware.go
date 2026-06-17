@@ -13,6 +13,7 @@ import (
 	"fmt"
 	"io"
 	"math/big"
+	"net"
 	"net/http"
 	"strconv"
 	"strings"
@@ -82,6 +83,48 @@ type RetryCondition func(resp *http.Response, err error) bool
 func RetryOnErr() RetryCondition {
 	return func(resp *http.Response, err error) bool {
 		return err != nil
+	}
+}
+
+// RetryOnTransientErrors returns a [RetryCondition] that retries requests based on transient errors.
+func RetryOnTransientErrors() RetryCondition {
+	return func(resp *http.Response, err error) bool {
+		if err != nil {
+			var netErr net.Error
+			if errors.As(err, &netErr) {
+				return true
+			}
+
+			errStr := err.Error()
+			if strings.Contains(errStr, "connection refused") ||
+				strings.Contains(errStr, "connection reset") ||
+				strings.Contains(errStr, "broken pipe") {
+				return true
+			}
+
+			return true
+		}
+
+		return false
+	}
+}
+
+// RetryOnRateLimit returns a [RetryCondition] that retries requests based on rate limit errors (HTTP 429).
+func RetryOnRateLimit() RetryCondition {
+	return func(resp *http.Response, err error) bool {
+		return resp != nil && resp.StatusCode == http.StatusTooManyRequests
+	}
+}
+
+// RetryOnGatewayErrors returns a [RetryCondition] that retries requests based on gateway errors (HTTP 502, 503, 504).
+func RetryOnGatewayErrors() RetryCondition {
+	return func(resp *http.Response, err error) bool {
+		if resp != nil {
+			sc := resp.StatusCode
+			return sc == http.StatusBadGateway || sc == http.StatusServiceUnavailable || sc == http.StatusGatewayTimeout
+		}
+
+		return false
 	}
 }
 

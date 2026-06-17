@@ -119,7 +119,7 @@ func (t *UnixTimestamp) UnmarshalJSON(b []byte) error {
 
 	unix, err := strconv.ParseInt(s, 10, 64)
 	if err != nil {
-		return fmt.Errorf("Timestamp: %w", err)
+		return fmt.Errorf("UnixTimestamp: %w", err)
 	}
 
 	*t = UnixTimestamp(time.Unix(unix, 0).UTC())

@@ -55,7 +55,7 @@ func TestRetryMiddleware(t *testing.T) {
 		t.Parallel()
 
 		m1 := &mockDoer{id: 1, statusCode: 502}
-		rotator, err := NewProxyRotator(ProxyRotatorConfig{}, m1)
+		rotator, err := NewProxyRotator(ProxyRotatorConfig{}, ClientWithProxy{Client: m1})
 		require.NoError(t, err)
 		t.Cleanup(func() { _ = rotator.Close() })
 
@@ -88,7 +88,7 @@ func TestRetryMiddleware(t *testing.T) {
 		t.Parallel()
 
 		m1 := &mockDoer{id: 1, forceError: true}
-		rotator, err := NewProxyRotator(ProxyRotatorConfig{}, m1)
+		rotator, err := NewProxyRotator(ProxyRotatorConfig{}, ClientWithProxy{Client: m1})
 		require.NoError(t, err)
 		t.Cleanup(func() { _ = rotator.Close() })
 

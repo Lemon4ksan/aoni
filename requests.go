@@ -332,7 +332,16 @@ func handleResponse(resp *http.Response, target any, requester Requester) error 
 		reqDump, _ := httputil.DumpRequestOut(resp.Request, true)
 		respDump, _ := httputil.DumpResponse(resp, true)
 
-		fmt.Fprintf(os.Stderr, "\n--- HTTP DEBUG ---\n%s\n%s\n------------------\n", string(reqDump), string(respDump))
+		if logger, ok := requester.(interface{ Logger() Logger }); ok {
+			logger.Logger().Debug("Aoni HTTP Diagnostic", "request", string(reqDump), "response", string(respDump))
+		} else {
+			fmt.Fprintf(
+				os.Stderr,
+				"\n--- HTTP DEBUG ---\n%s\n%s\n------------------\n",
+				string(reqDump),
+				string(respDump),
+			)
+		}
 	}
 
 	if resp.Request != nil {

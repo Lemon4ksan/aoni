@@ -7,6 +7,7 @@ package aoni
 import (
 	"bytes"
 	"context"
+	"crypto/tls"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -15,21 +16,8 @@ import (
 	"net/url"
 	"strings"
 	"time"
-)
 
-type (
-	capturerCtxKey           struct{}
-	decoderCtxKey            struct{}
-	errorModelCtxKey         struct{}
-	downloadProgressCtxKey   struct{}
-	hedgingCtxKey            struct{}
-	queryErrorCtxKey         struct{}
-	bodyErrorCtxKey          struct{}
-	happyEyeballsDelayCtxKey struct{}
-	multiReadCtxKey          struct{}
-	ssrfGuardCtxKey          struct{}
-	fallbackCtxKey           struct{}
-	debugCtxKey              struct{}
+	"github.com/quic-go/quic-go/http3"
 )
 
 // RequestModifier represents a function that alters an [http.Request] before execution.
@@ -319,4 +307,29 @@ func WithStreamingMultipart(fields map[string]string, files map[string]io.Reader
 		req.Body = pr
 		req.Header.Set("Content-Type", writer.FormDataContentType())
 	}
+}
+
+// WithOrderedHeaders specifies the exact order of headers for HTTP/1.1 requests.
+func WithOrderedHeaders(order []string) RequestModifier {
+	return func(req *http.Request) {
+		ctx := context.WithValue(req.Context(), orderedHeadersCtxKey{}, order)
+		*req = *req.WithContext(ctx)
+	}
+}
+
+// WithHTTP3 returns a new [Client] that uses HTTP/3 instead of HTTP/1.1.
+func (c *Client) WithHTTP3() *Client {
+	newClient := c.Clone()
+
+	rt := &http3.Transport{
+		TLSClientConfig: &tls.Config{
+			NextProtos: []string{"h3"},
+		},
+	}
+
+	newClient.http = &http.Client{
+		Transport: rt,
+	}
+
+	return newClient
 }
