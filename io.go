@@ -15,6 +15,42 @@ import (
 	"sync/atomic"
 )
 
+// ReplayableBody represents a response stream that can be reset
+// to the beginning for re-reading (for example, after previewing or logging).
+type ReplayableBody interface {
+	io.ReadCloser
+	Reset()
+}
+
+// AsReplayable turns any [io.ReadCloser] into a [ReplayableBody].
+// If there's already a high-performance buffer (multiReadBody) under the hood, it will return it.
+// If not, it will transparently create a lightweight in-memory buffer for repeated reading.
+func AsReplayable(rc io.ReadCloser) ReplayableBody {
+	if rc == nil {
+		return nil
+	}
+
+	curr := io.Closer(rc)
+	for {
+		if rb, ok := curr.(ReplayableBody); ok {
+			return rb
+		}
+
+		u, ok := curr.(interface{ Unwrap() io.Closer })
+		if !ok {
+			break
+		}
+		curr = u.Unwrap()
+	}
+
+	buf := &bytes.Buffer{}
+	return &fallbackReplayableBody{
+		ReadCloser: rc,
+		buf:        buf,
+		reader:     io.TeeReader(rc, buf),
+	}
+}
+
 type progressReader struct {
 	reader     io.Reader
 	total      int64
@@ -278,4 +314,18 @@ func (m *multiReadBody) ReallyClose() {
 		_ = os.Remove(m.tmpFile.Name())
 		m.tmpFile = nil
 	}
+}
+
+type fallbackReplayableBody struct {
+	io.ReadCloser
+	buf    *bytes.Buffer
+	reader io.Reader
+}
+
+func (f *fallbackReplayableBody) Read(p []byte) (int, error) {
+	return f.reader.Read(p)
+}
+
+func (f *fallbackReplayableBody) Reset() {
+	f.reader = io.MultiReader(f.buf, f.ReadCloser)
 }
