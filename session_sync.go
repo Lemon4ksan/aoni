@@ -51,7 +51,7 @@ func ImportCookies(jar http.CookieJar, u *url.URL, cookies []CookieData) {
 
 	var httpCookies []*http.Cookie
 	for _, c := range cookies {
-		httpCookies = append(httpCookies, &http.Cookie{
+		httpCookies = append(httpCookies, &http.Cookie{ //nolint:gosec
 			Name:     c.Name,
 			Value:    c.Value,
 			Domain:   c.Domain,

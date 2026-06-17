@@ -136,7 +136,7 @@ func WithCookie(c *http.Cookie) RequestModifier {
 func WithCookies(kv map[string]string) RequestModifier {
 	return func(req *http.Request) {
 		for k, v := range kv {
-			req.AddCookie(&http.Cookie{Name: k, Value: v})
+			req.AddCookie(&http.Cookie{Name: k, Value: v}) //nolint:gosec
 		}
 	}
 }

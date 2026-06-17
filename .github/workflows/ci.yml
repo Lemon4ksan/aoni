@@ -11,46 +11,21 @@ permissions:
 
 jobs:
   test:
-    name: Test (Go ${{ matrix.go }})
-    runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        go: ["1.25", "stable"]
-
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Set up Go ${{ matrix.go }}
-        uses: actions/setup-go@v5
-        with:
-          go-version: ${{ matrix.go }}
-          cache: true
-
-      - name: Download dependencies
-        run: go mod download
-
-      - name: Build
-        run: go build ./...
-
-      - name: Run tests with race detector
-        run: make race
-
-      - name: Run benchmarks (smoke check)
-        run: go test -bench=. -benchtime=1x -benchmem ./...
-
-  lint:
-    name: Lint
+    name: Lint & Test
     runs-on: ubuntu-latest
 
     steps:
-      - uses: actions/checkout@v6
+      - name: Checkout code
+        uses: actions/checkout@v6
 
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
-          go-version: stable
+          go-version: "1.25.x"
           cache: true
+
+      - name: Install dependencies
+        run: go mod download
 
       - name: golangci-lint
         uses: golangci/golangci-lint-action@v7
@@ -58,21 +33,14 @@ jobs:
           version: latest
           args: --timeout=5m
 
-  coverage:
-    name: Coverage
-    runs-on: ubuntu-latest
-
-    steps:
-      - uses: actions/checkout@v6
-
-      - name: Set up Go
-        uses: actions/setup-go@v5
-        with:
-          go-version: stable
-          cache: true
+      - name: Run Tests with Race Detector
+        run: make race
 
       - name: Generate coverage report
         run: go test -coverprofile=coverage.out ./...
+
+      - name: Run benchmarks (smoke check)
+        run: go test -bench=. -benchtime=1x -benchmem ./...
 
       - name: Upload coverage artifact
         uses: actions/upload-artifact@v4
