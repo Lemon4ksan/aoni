@@ -342,9 +342,9 @@ func (c *wsH2Conn) Read(b []byte) (int, error) {
 				c.readBuf.Write(data)
 				c.writeMu.Lock()
 
-				err = c.framer.WriteWindowUpdate(0, uint32(len(data)))
+				err = c.framer.WriteWindowUpdate(0, uint32(len(data))) //nolint:gosec
 				if err == nil {
-					err = c.framer.WriteWindowUpdate(c.streamID, uint32(len(data)))
+					err = c.framer.WriteWindowUpdate(c.streamID, uint32(len(data))) //nolint:gosec
 				}
 
 				c.writeMu.Unlock()
@@ -497,7 +497,7 @@ func (c *wsH2Conn) clientPreface() error {
 		case *http2.SettingsFrame:
 			if !f.IsAck() {
 				enableConnect := false
-				f.ForeachSetting(func(s http2.Setting) error {
+				_ = f.ForeachSetting(func(s http2.Setting) error {
 					if s.ID == http2.SettingEnableConnectProtocol && s.Val == 1 {
 						enableConnect = true
 					}

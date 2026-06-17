@@ -83,5 +83,8 @@ linters:
         text: "exported: (exported|comment on exported)"
 
       # Ignore most linters in tests
-      - linters: [gosec, noctx, bodyclose, errcheck]
+      - linters: [gosec, noctx, bodyclose, errcheck, prealloc]
         path: "_test\\.go"
+
+    paths:
+      - "examples"
