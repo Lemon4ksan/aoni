@@ -15,11 +15,15 @@ import (
 	"net/http"
 	"net/http/httputil"
 	"os"
+	"reflect"
 	"strings"
 )
 
 // DefaultClient is the shared default client instance used by global helper functions.
 var DefaultClient = NewClient(nil)
+
+// NoResponse is a sentinel type used to indicate a request that does not return a response body.
+type NoResponse struct{}
 
 // Get performs a global GET request using [DefaultClient] and decodes the JSON response body.
 func Get[Resp any](ctx context.Context, path string, mods ...RequestModifier) (*Resp, error) {
@@ -79,6 +83,10 @@ func GetJSON[Resp any](
 		return nil, err
 	}
 
+	if reflect.TypeFor[Resp]() == reflect.TypeFor[NoResponse]() {
+		return nil, err
+	}
+
 	result := new(Resp)
 	if err := handleResponse(resp, result, c); err != nil {
 		return nil, err
@@ -115,6 +123,10 @@ func PostForm[Req, Resp any](
 
 	resp, err := c.Request(ctx, http.MethodPost, path, mods...)
 	if err != nil {
+		return nil, err
+	}
+
+	if reflect.TypeFor[Resp]() == reflect.TypeFor[NoResponse]() {
 		return nil, err
 	}
 
@@ -158,6 +170,10 @@ func PostJSON[Req, Resp any](
 		return nil, err
 	}
 
+	if reflect.TypeFor[Resp]() == reflect.TypeFor[NoResponse]() {
+		return nil, err
+	}
+
 	result := new(Resp)
 	if err := handleResponse(resp, result, c); err != nil {
 		return nil, err
@@ -198,6 +214,10 @@ func PutJSON[Req, Resp any](
 		return nil, err
 	}
 
+	if reflect.TypeFor[Resp]() == reflect.TypeFor[NoResponse]() {
+		return nil, err
+	}
+
 	result := new(Resp)
 	if err := handleResponse(resp, result, c); err != nil {
 		return nil, err
@@ -235,6 +255,10 @@ func PatchJSON[Req, Resp any](
 
 	resp, err := c.Request(ctx, http.MethodPatch, path, mods...)
 	if err != nil {
+		return nil, err
+	}
+
+	if reflect.TypeFor[Resp]() == reflect.TypeFor[NoResponse]() {
 		return nil, err
 	}
 
@@ -284,6 +308,10 @@ func DeleteJSON[Req, Resp any](
 
 	resp, err := c.Request(ctx, http.MethodDelete, path, mods...)
 	if err != nil {
+		return nil, err
+	}
+
+	if reflect.TypeFor[Resp]() == reflect.TypeFor[NoResponse]() {
 		return nil, err
 	}
 
