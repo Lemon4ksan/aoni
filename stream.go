@@ -9,6 +9,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"strconv"
@@ -142,21 +143,17 @@ func StreamNDJSON[T any](ctx context.Context, resp *StreamResponse) (<-chan T, <
 type SSEEvent struct {
 	// Event is the event identifier string.
 	Event string
-
 	// Data is the data payload buffer string.
 	Data string
-
 	// ID is the unique event tracking ID.
 	ID string
-
 	// Retry is the reconnection timeout value in milliseconds.
 	Retry int
 }
 
-// StreamSSE parses incoming Server-Sent Events from the [StreamResponse] body.
-// It executes a background parsing loop and closes returned channels when done.
-func StreamSSE(ctx context.Context, resp *StreamResponse) (<-chan SSEEvent, <-chan error) {
-	out := make(chan SSEEvent)
+// ParseSSE parses a Server-Sent Event stream and returns a channel of parsed events and an error channel.
+func ParseSSE[T any](ctx context.Context, resp *StreamResponse) (<-chan T, <-chan error) {
+	out := make(chan T, 100)
 	errs := make(chan error, 1)
 
 	go func() {
@@ -188,11 +185,24 @@ func StreamSSE(ctx context.Context, resp *StreamResponse) (<-chan SSEEvent, <-ch
 				line = strings.TrimSpace(line)
 				if line == "" {
 					if currentEvent.Data != "" || currentEvent.Event != "" {
+						var val T
+
+						if sse, ok := any(currentEvent).(T); ok {
+							val = sse
+						} else if s, ok := any(currentEvent.Data).(T); ok {
+							val = s
+						} else {
+							if err := json.Unmarshal([]byte(currentEvent.Data), &val); err != nil {
+								errs <- fmt.Errorf("aoni sse: unmarshal failed: %w", err)
+								return
+							}
+						}
+
 						select {
 						case <-ctx.Done():
 							errs <- ctx.Err()
 							return
-						case out <- currentEvent:
+						case out <- val:
 						}
 
 						currentEvent = SSEEvent{}
@@ -235,4 +245,29 @@ func StreamSSE(ctx context.Context, resp *StreamResponse) (<-chan SSEEvent, <-ch
 	}()
 
 	return out, errs
+}
+
+// StreamSSE parses incoming Server-Sent Events from the [StreamResponse] body.
+// It executes a background parsing loop and closes returned channels when done.
+func StreamSSE[T any](
+	ctx context.Context,
+	c Requester,
+	path string,
+	mods ...RequestModifier,
+) (<-chan T, <-chan error, error) {
+	sseMods := []RequestModifier{ //nolint:prealloc
+		WithHeader("Accept", "text/event-stream"),
+		WithHeader("Cache-Control", "no-cache"),
+		WithHeader("Connection", "keep-alive"),
+	}
+	mods = append(sseMods, mods...)
+
+	resp, err := Stream(ctx, c, path, mods...)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	out, errs := ParseSSE[T](ctx, resp)
+
+	return out, errs, nil
 }

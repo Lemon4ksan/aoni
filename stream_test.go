@@ -169,12 +169,14 @@ func TestStreamSSE(t *testing.T) {
 	stream, err := Stream(t.Context(), client, "/")
 	require.NoError(t, err)
 
-	out, errs := StreamSSE(t.Context(), stream)
+	out, errs := ParseSSE[SSEEvent](t.Context(), stream)
 
 	var events []SSEEvent
 	for ev := range out {
 		events = append(events, ev)
 	}
+
+	require.NoError(t, err)
 
 	for err := range errs {
 		require.NoError(t, err)

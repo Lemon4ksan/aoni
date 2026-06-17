@@ -66,7 +66,7 @@ func demoSSE(ctx context.Context, client *aoni.Client) {
 	}
 	defer sseStream.Close()
 
-	events, errs := aoni.StreamSSE(ctx, sseStream)
+	events, errs := aoni.ParseSSE[aoni.SSEEvent](ctx, sseStream)
 	for {
 		select {
 		case event, ok := <-events:
