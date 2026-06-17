@@ -12,8 +12,10 @@ import (
 )
 
 func TestIsGREASE(t *testing.T) {
-	grease := []uint16{0x0a0a, 0x1a1a, 0x2a2a, 0x3a3a, 0x4a4a, 0x5a5a, 0x6a6a, 0x7a7a,
-		0x8a8a, 0x9a9a, 0xaaaa, 0xbaba, 0xcaca, 0xdada, 0xeaea, 0xfafa}
+	grease := []uint16{
+		0x0a0a, 0x1a1a, 0x2a2a, 0x3a3a, 0x4a4a, 0x5a5a, 0x6a6a, 0x7a7a,
+		0x8a8a, 0x9a9a, 0xaaaa, 0xbaba, 0xcaca, 0xdada, 0xeaea, 0xfafa,
+	}
 
 	for _, v := range grease {
 		assert.True(t, IsGREASE(v), "0x%04x should be GREASE", v)
@@ -122,10 +124,10 @@ func TestComputeVersion(t *testing.T) {
 	}{
 		{[]uint16{0x0304}, "13"},
 		{[]uint16{0x0303}, "12"},
-		{[]uint16{0x0304, 0x0303}, "13"},  // highest wins
-		{[]uint16{0x0a0a, 0x0304}, "13"},  // GREASE filtered
+		{[]uint16{0x0304, 0x0303}, "13"}, // highest wins
+		{[]uint16{0x0a0a, 0x0304}, "13"}, // GREASE filtered
 		{nil, "00"},
-		{[]uint16{0x0a0a}, "00"},           // only GREASE
+		{[]uint16{0x0a0a}, "00"}, // only GREASE
 	}
 
 	for _, tt := range tests {

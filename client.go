@@ -24,10 +24,11 @@ import (
 
 	"github.com/andybalholm/brotli"
 	"github.com/klauspost/compress/zstd"
-	"github.com/lemon4ksan/aoni/ja4"
 	utls "github.com/refraction-networking/utls"
 	"golang.org/x/text/encoding/htmlindex"
 	"golang.org/x/text/transform"
+
+	"github.com/lemon4ksan/aoni/ja4"
 )
 
 // DefaultUserAgent is the default User-Agent string used for HTTP requests.
@@ -63,6 +64,7 @@ type (
 	orderedHeadersCtxKey     struct{}
 	ja4ReportCtxKey          struct{}
 	ja4CallbackCtxKey        struct{}
+	alpnOverrideCtxKey       struct{}
 )
 
 // DefaultSensitiveHeaders is the list of sensitive headers that are scrubbed from requests on redirect.
@@ -172,7 +174,11 @@ type Client struct {
 	dnsResolver      DNSResolver
 	defaultMods      []RequestModifier
 	headersCookieJar http.CookieJar
-	ja4Callback      func(ja4.JA4Report)
+	ja4Callback      func(ja4.Report)
+	tlsBrowserID     BrowserID
+	fragmentConfig   *FragmentConfig
+	hostRewrite      *HostRewriteConfig
+	dotResolver      *DoTResolver
 }
 
 // NewClient initializes a new [Client] instance with [DefaultUserAgent].
@@ -222,6 +228,10 @@ func (c *Client) Clone() *Client {
 		happyEyeballsDelay: c.happyEyeballsDelay,
 		multiReadThreshold: c.multiReadThreshold,
 		ja4Callback:        c.ja4Callback,
+		tlsBrowserID:       c.tlsBrowserID,
+		fragmentConfig:     c.fragmentConfig,
+		hostRewrite:        c.hostRewrite,
+		dotResolver:        c.dotResolver,
 	}
 }
 
@@ -328,7 +338,8 @@ func (c *Client) Request(
 
 	// Copy TLS JA4 report from the dialer store to the target TraceInfo.
 	// The store was set by TraceJA4; dialTLSWithUTLS wrote the TLS report during handshake.
-	if store, ok := req.Context().Value(ja4ReportCtxKey{}).(*ja4ReportStore); ok && store.target != nil && store.report != nil {
+	if store, ok := req.Context().Value(ja4ReportCtxKey{}).(*ja4ReportStore); ok && store.target != nil &&
+		store.report != nil {
 		store.target.JA4.JA4 = store.report.JA4
 		store.target.JA4.Protocol = store.report.Protocol
 		store.target.JA4.Version = store.report.Version
@@ -773,13 +784,27 @@ func (c *Client) WithTLSFingerprint(browser BrowserID) *Client {
 		return newClient
 	}
 
+	// Store browser ID on the Client so it works with any HTTPDoer type
+	// (ProxyRotator, LoadBalancer, etc.), not just *http.Client.
+	newClient.tlsBrowserID = browser
+
 	if httpClient, ok := newClient.http.(*http.Client); ok {
 		transport := newClient.Transport()
 		if transport != nil {
 			clonedTransport := transport.Clone()
 			callback := newClient.ja4Callback // capture by value
 			clonedTransport.DialTLSContext = func(ctx context.Context, network, addr string) (net.Conn, error) {
-				return dialTLSWithUTLS(ctx, network, addr, browser, newClient.sourceRotator, newClient.dnsResolver, callback, clonedTransport.TLSClientConfig)
+				return dialTLSWithUTLS(
+					ctx,
+					network,
+					addr,
+					browser,
+					newClient.sourceRotator,
+					newClient.dnsResolver,
+					newClient.dotResolver,
+					callback,
+					clonedTransport.TLSClientConfig,
+				)
 			}
 			clonedClient := *httpClient
 			clonedClient.Transport = clonedTransport
@@ -795,9 +820,36 @@ func (c *Client) WithTLSFingerprint(browser BrowserID) *Client {
 // and, if [TraceJA4] is used, the HTTP (JA4H) fingerprint.
 //
 // This option requires [WithTLSFingerprint] to be enabled.
-func (c *Client) WithJA4Callback(fn func(ja4.JA4Report)) *Client {
+func (c *Client) WithJA4Callback(fn func(ja4.Report)) *Client {
 	newClient := c.Clone()
 	newClient.ja4Callback = fn
+	return newClient
+}
+
+// WithFragmentation returns a new [Client] configured with TLS fragmentation settings.
+// When set, the TLS ClientHello is split into smaller chunks across multiple TCP segments.
+func (c *Client) WithFragmentation(cfg FragmentConfig) *Client {
+	newClient := c.Clone()
+	newClient.fragmentConfig = &cfg
+	return newClient
+}
+
+// WithHostRewrite returns a new [Client] that rewrites hostnames to IP addresses
+// while preserving the original hostname for TLS SNI.
+func (c *Client) WithHostRewrite(rules map[string]string) *Client {
+	newClient := c.Clone()
+	newClient.hostRewrite = &HostRewriteConfig{Rules: rules}
+	return newClient
+}
+
+// WithDoTResolver returns a new [Client] configured to use DNS-over-TLS for resolution.
+func (c *Client) WithDoTResolver(server, hostname string) *Client {
+	newClient := c.Clone()
+	dot := NewDoTResolver(server, hostname)
+	newClient.dotResolver = dot
+	newClient.dnsResolver = dot
+	newClient.applyDialers()
+
 	return newClient
 }
 
@@ -819,6 +871,7 @@ func (c *Client) Logger() Logger {
 	if c.logger == nil {
 		return &noopLogger{}
 	}
+
 	return c.logger
 }
 
@@ -892,6 +945,7 @@ func (c *Client) applyDialers() {
 			if clonedTransport.TLSClientConfig == nil && transport.TLSClientConfig != nil {
 				clonedTransport.TLSClientConfig = transport.TLSClientConfig.Clone()
 			}
+
 			clonedClient := *httpClient
 			clonedClient.Transport = clonedTransport
 			c.http = &clonedClient
@@ -905,12 +959,13 @@ func dialTLSWithUTLS(
 	browser BrowserID,
 	sourceRotator *SourceIPRotator,
 	dnsResolver DNSResolver,
-	ja4Callback func(ja4.JA4Report),
+	dotResolver *DoTResolver,
+	ja4Callback func(ja4.Report),
 	tlsConfig *tls.Config,
 ) (net.Conn, error) {
 	// Read callback from context (set by Client.Request) — the closure-captured
 	// value may be stale if WithJA4Callback was called after WithTLSFingerprint.
-	if cb, ok := ctx.Value(ja4CallbackCtxKey{}).(func(ja4.JA4Report)); ok && cb != nil {
+	if cb, ok := ctx.Value(ja4CallbackCtxKey{}).(func(ja4.Report)); ok && cb != nil {
 		ja4Callback = cb
 	}
 
@@ -923,7 +978,12 @@ func dialTLSWithUTLS(
 		delay = 300 * time.Millisecond
 	}
 
-	conn, err := happyEyeballsDial(ctx, network, addr, delay, ssrfGuard, sourceRotator, dnsResolver)
+	resolver := dnsResolver
+	if dotResolver != nil {
+		resolver = dotResolver
+	}
+
+	conn, err := happyEyeballsDial(ctx, network, addr, delay, ssrfGuard, sourceRotator, resolver)
 	if err != nil {
 		return nil, err
 	}
@@ -949,6 +1009,10 @@ func dialTLSWithUTLS(
 		uConfig.RootCAs = tlsConfig.RootCAs
 	}
 
+	if alpn, ok := ctx.Value(alpnOverrideCtxKey{}).([]string); ok && len(alpn) > 0 {
+		uConfig.NextProtos = alpn
+	}
+
 	uConn := utls.UClient(conn, uConfig, spec)
 	if err := uConn.HandshakeContext(ctx); err != nil {
 		_ = conn.Close()
@@ -971,13 +1035,15 @@ func dialTLSWithUTLS(
 }
 
 // extractJA4FromUConn computes a JA4 fingerprint from a uTLS connection after handshake.
-func extractJA4FromUConn(uConn *utls.UConn, host string) ja4.JA4Report {
+func extractJA4FromUConn(uConn *utls.UConn, _ string) ja4.Report {
 	_ = uConn.BuildHandshakeState()
 
 	hello := uConn.HandshakeState.Hello
 
-	var extensions []uint16
-	var sigAlgorithms []uint16
+	var (
+		extensions    []uint16
+		sigAlgorithms []uint16
+	)
 
 	if len(hello.Raw) > 0 {
 		extensions, sigAlgorithms = ja4.ParseExtensionsFromRaw(hello.Raw)
@@ -999,7 +1065,7 @@ func extractJA4FromUConn(uConn *utls.UConn, host string) ja4.JA4Report {
 		sigAlgos,
 	)
 
-	report := ja4.JA4Report{
+	report := ja4.Report{
 		JA4:         fingerprint,
 		Protocol:    "t",
 		CipherCount: len(ja4.FilterGREASE(hello.CipherSuites)),
@@ -1029,7 +1095,7 @@ func extractJA4FromUConn(uConn *utls.UConn, host string) ja4.JA4Report {
 // ja4ReportStore is a shared pointer that allows dialTLSWithUTLS to write the JA4 report
 // and Client.Request to copy it to the target TraceInfo after the request completes.
 type ja4ReportStore struct {
-	report *ja4.JA4Report
+	report *ja4.Report
 	target *TraceInfo
 }
 
@@ -1261,6 +1327,18 @@ func happyEyeballsDial(
 		return nil, err
 	}
 
+	if cfg, ok := ctx.Value(hostRewriteCtxKey{}).(*HostRewriteConfig); ok && cfg != nil {
+		if rewritten, exists := cfg.Rules[host]; exists {
+			if newHost, newPort, err := net.SplitHostPort(rewritten); err == nil {
+				host = newHost
+
+				if newPort != "" {
+					port = newPort
+				}
+			}
+		}
+	}
+
 	resolver := dnsResolver
 	if resolver == nil {
 		resolver = &net.Resolver{}
@@ -1290,7 +1368,16 @@ func happyEyeballsDial(
 			dialer.LocalAddr = &net.TCPAddr{IP: rotator.Next()}
 		}
 
-		return dialer.DialContext(ctx, network, net.JoinHostPort(filtered[0].String(), port))
+		conn, err := dialer.DialContext(ctx, network, net.JoinHostPort(filtered[0].String(), port))
+		if err != nil {
+			return nil, err
+		}
+
+		if cfg, ok := ctx.Value(fragmentCtxKey{}).(FragmentConfig); ok && cfg.ChunkSize > 0 {
+			conn = wrapWithFragmentation(conn, cfg)
+		}
+
+		return conn, nil
 	}
 
 	type dialResult struct {
@@ -1353,11 +1440,17 @@ func happyEyeballsDial(
 			return nil, ctx.Err()
 		case res := <-resultCh:
 			if res.conn != nil {
-				if order, ok := ctx.Value(orderedHeadersCtxKey{}).([]string); ok && len(order) > 0 {
-					return &headerOrderingConn{Conn: res.conn, orderedKeys: order}, nil
+				conn := res.conn
+
+				if cfg, ok := ctx.Value(fragmentCtxKey{}).(FragmentConfig); ok && cfg.ChunkSize > 0 {
+					conn = wrapWithFragmentation(conn, cfg)
 				}
 
-				return res.conn, nil
+				if order, ok := ctx.Value(orderedHeadersCtxKey{}).([]string); ok && len(order) > 0 {
+					return &headerOrderingConn{Conn: conn, orderedKeys: order}, nil
+				}
+
+				return conn, nil
 			}
 
 			if firstErr == nil {
@@ -1372,13 +1465,13 @@ func happyEyeballsDial(
 	}
 }
 
-type noopLogger struct {}
+type noopLogger struct{}
 
-func (l noopLogger) Debug(_ string, _ ...any) {}
+func (l noopLogger) Debug(_ string, _ ...any)                           {}
 func (l noopLogger) DebugContext(_ context.Context, _ string, _ ...any) {}
-func (l noopLogger) Info(_ string, _ ...any) {}
-func (l noopLogger) InfoContext(_ context.Context, _ string, _ ...any) {}
-func (l noopLogger) Warn(_ string, _ ...any) {}
-func (l noopLogger) WarnContext(_ context.Context, _ string, _ ...any) {}
-func (l noopLogger) Error(_ string, _ ...any) {}
+func (l noopLogger) Info(_ string, _ ...any)                            {}
+func (l noopLogger) InfoContext(_ context.Context, _ string, _ ...any)  {}
+func (l noopLogger) Warn(_ string, _ ...any)                            {}
+func (l noopLogger) WarnContext(_ context.Context, _ string, _ ...any)  {}
+func (l noopLogger) Error(_ string, _ ...any)                           {}
 func (l noopLogger) ErrorContext(_ context.Context, _ string, _ ...any) {}

@@ -47,16 +47,14 @@ type TraceInfo struct {
 
 	// JA4 holds the JA4+ fingerprints computed during the request.
 	// Populated only when [TraceJA4] is used as a request modifier.
-	JA4 *ja4.JA4Report
+	JA4 *ja4.Report
 }
 
 // Trace returns a [RequestModifier] that registers a connection tracer on the active request.
 // Timing metrics are recorded and populated inside the provided [TraceInfo] structure.
 func Trace(target *TraceInfo) RequestModifier {
 	return func(req *http.Request) {
-		var (
-			dnsStart, connectStart, tlsStart, gotConn time.Time
-		)
+		var dnsStart, connectStart, tlsStart, gotConn time.Time
 
 		trace := &httptrace.ClientTrace{
 			DNSStart:             func(_ httptrace.DNSStartInfo) { dnsStart = time.Now() },
@@ -96,7 +94,7 @@ func TraceJA4(target *TraceInfo) RequestModifier {
 		*req = *req.WithContext(ctx)
 
 		// Compute JA4H from request headers (available immediately)
-		target.JA4 = &ja4.JA4Report{JA4H: computeJA4HFromRequest(req)}
+		target.JA4 = &ja4.Report{JA4H: computeJA4HFromRequest(req)}
 	}
 }
 
@@ -107,6 +105,7 @@ func computeJA4HFromRequest(req *http.Request) string {
 
 	// Collect non-Cookie, non-Referer headers
 	var headers []string
+
 	hasCookie := false
 	hasReferer := false
 	acceptLanguage := ""
@@ -128,14 +127,17 @@ func computeJA4HFromRequest(req *http.Request) string {
 	var cookieNames, cookieValues []string
 	if hasCookie {
 		cookies := req.Cookies()
+
 		type kv struct {
 			name  string
 			value string
 		}
+
 		kvs := make([]kv, len(cookies))
 		for i, c := range cookies {
 			kvs[i] = kv{c.Name, c.Value}
 		}
+
 		// Sort by name
 		for i := range kvs {
 			for j := i + 1; j < len(kvs); j++ {
@@ -144,7 +146,9 @@ func computeJA4HFromRequest(req *http.Request) string {
 				}
 			}
 		}
+
 		cookieNames = make([]string, len(kvs))
+
 		cookieValues = make([]string, len(kvs))
 		for i, kv := range kvs {
 			cookieNames[i] = kv.name

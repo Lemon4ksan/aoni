@@ -23,32 +23,32 @@ allowing partial matching on individual parts independently.
 
 The [ComputeJA4] function produces a fingerprint from a TLS ClientHello:
 
-	t13d1516h2_8daaf6152771_e5627efa2ab1
+		t13d1516h2_8daaf6152771_e5627efa2ab1
 
-  - t: protocol (t=TLS, q=QUIC, d=DTLS)
-  - 13: highest TLS version (13=TLS 1.3, 12=TLS 1.2)
-  - d: SNI present (d=domain, i=IP)
-  - 15: cipher suite count (GREASE excluded)
-  - 16: extension count (GREASE excluded)
-  - h2: first+last char of first ALPN protocol
-  - 8daaf6152771: SHA-256 hash of sorted cipher suites (truncated to 12 hex chars)
-  - e5627efa2ab1: SHA-256 hash of sorted extensions + sig algorithms (truncated to 12 hex chars)
+	  - t: protocol (t=TLS, q=QUIC, d=DTLS)
+	  - 13: highest TLS version (13=TLS 1.3, 12=TLS 1.2)
+	  - d: SNI present (d=domain, i=IP)
+	  - 15: cipher suite count (GREASE excluded)
+	  - 16: extension count (GREASE excluded)
+	  - h2: first+last char of first ALPN protocol
+	  - 8daaf6152771: SHA-256 hash of sorted cipher suites (truncated to 12 hex chars)
+	  - e5627efa2ab1: SHA-256 hash of sorted extensions + sig algorithms (truncated to 12 hex chars)
 
 # JA4H — HTTP Client Fingerprint
 
 The [ComputeJA4H] function produces a fingerprint from HTTP request properties:
 
-	ge11nn03enus_1c8f3b0e29d1_000000000000_000000000000
+		ge11nn03enus_1c8f3b0e29d1_000000000000_000000000000
 
-  - ge: first 2 chars of method, lowercased
-  - 11: HTTP version (10=1.0, 11=1.1, 20=2, 30=3)
-  - n: no cookies (c=present)
-  - n: no referer (r=present)
-  - 03: header count (excluding Cookie, Referer)
-  - enus: first 4 chars of Accept-Language
-  - 1c8f3b0e29d1: SHA-256 hash of sorted header names (truncated to 12 hex chars)
-  - 000000000000: SHA-256 hash of sorted cookie names (12 zeros if no cookies)
-  - 000000000000: SHA-256 hash of cookie values in sorted-by-name order
+	  - ge: first 2 chars of method, lowercased
+	  - 11: HTTP version (10=1.0, 11=1.1, 20=2, 30=3)
+	  - n: no cookies (c=present)
+	  - n: no referer (r=present)
+	  - 03: header count (excluding Cookie, Referer)
+	  - enus: first 4 chars of Accept-Language
+	  - 1c8f3b0e29d1: SHA-256 hash of sorted header names (truncated to 12 hex chars)
+	  - 000000000000: SHA-256 hash of sorted cookie names (12 zeros if no cookies)
+	  - 000000000000: SHA-256 hash of cookie values in sorted-by-name order
 
 # GREASE Handling
 
@@ -61,18 +61,20 @@ and [FilterGREASE] to remove them from a slice.
 For automatic JA4 fingerprinting through the aoni HTTP client, use:
 
   - [aoni.WithTLSFingerprint] to emulate browser TLS handshakes
+
   - [aoni.WithJA4Callback] to receive fingerprints via a callback
+
   - [aoni.TraceJA4] to populate [aoni.TraceInfo] with both JA4 and JA4H
 
-	info := &aoni.TraceInfo{}
-	client := aoni.NewClient(nil).
-		WithTLSFingerprint(aoni.BrowserChrome).
-		WithJA4Callback(func(r ja4.JA4Report) {
-			fmt.Println("TLS JA4:", r.JA4)
-		})
+    info := &aoni.TraceInfo{}
+    client := aoni.NewClient(nil).
+    WithTLSFingerprint(aoni.BrowserChrome).
+    WithJA4Callback(func(r ja4.JA4Report) {
+    fmt.Println("TLS JA4:", r.JA4)
+    })
 
-	client.Get(ctx, "/path", aoni.TraceJA4(info))
-	fmt.Println("HTTP JA4H:", info.JA4.JA4H)
+    client.Get(ctx, "/path", aoni.TraceJA4(info))
+    fmt.Println("HTTP JA4H:", info.JA4.JA4H)
 
 # Reference Implementation
 

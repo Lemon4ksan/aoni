@@ -7,6 +7,7 @@ package ja4
 import (
 	"crypto/sha256"
 	"encoding/binary"
+	"encoding/hex"
 	"fmt"
 	"sort"
 	"strings"
@@ -51,8 +52,8 @@ func IsGREASE(v uint16) bool {
 	return greaseValues[v]
 }
 
-// JA4Report holds both TLS (JA4) and HTTP (JA4H) fingerprints computed from a request.
-type JA4Report struct {
+// Report holds both TLS (JA4) and HTTP (JA4H) fingerprints computed from a request.
+type Report struct {
 	// JA4 is the TLS client fingerprint (e.g. "t13d1516h2_8daaf6152771_e5627efa2ab1").
 	JA4 string
 	// JA4H is the HTTP client fingerprint (e.g. "ge11cn04en04_9ed1ff1f7b03_cd8dafe26982").
@@ -192,6 +193,7 @@ func FilterGREASE(vals []uint16) []uint16 {
 			result = append(result, v)
 		}
 	}
+
 	return result
 }
 
@@ -242,17 +244,19 @@ func computeCipherHash(ciphers []uint16) string {
 	}
 
 	sort.Strings(hexes)
+
 	return hash12(strings.Join(hexes, ","))
 }
 
 // computeExtHash computes the JA4 extension hash from filtered extensions and signature algorithms.
-func computeExtHash(extensions []uint16, sigAlgorithms []uint16) string {
+func computeExtHash(extensions, sigAlgorithms []uint16) string {
 	// Filter out SNI (0x0000) and ALPN (0x0010)
 	exts := make([]string, 0, len(extensions))
 	for _, e := range extensions {
 		if e == 0x0000 || e == 0x0010 {
 			continue
 		}
+
 		exts = append(exts, fmt.Sprintf("%04x", e))
 	}
 
@@ -268,6 +272,7 @@ func computeExtHash(extensions []uint16, sigAlgorithms []uint16) string {
 		for i, s := range sigAlgorithms {
 			sigParts[i] = fmt.Sprintf("%04x", s)
 		}
+
 		return hash12(strings.Join(exts, ",") + "_" + strings.Join(sigParts, ","))
 	}
 
@@ -285,6 +290,7 @@ func computeLanguage(lang string) string {
 		if r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9' {
 			return r
 		}
+
 		return -1
 	}, lang)
 
@@ -316,13 +322,14 @@ func computeHeadersHash(headers []string) string {
 	}
 
 	sort.Strings(lower)
+
 	return hash12(strings.Join(lower, ","))
 }
 
 // hash12 returns the first 12 hex characters of the SHA-256 hash of s.
 func hash12(s string) string {
 	h := sha256.Sum256([]byte(s))
-	return fmt.Sprintf("%x", h[:6])
+	return hex.EncodeToString(h[:6])
 }
 
 // ParseExtensionsFromRaw parses extension IDs from a raw TLS ClientHello message
@@ -338,7 +345,7 @@ func hash12(s string) string {
 //	1 byte + compression methods: variable
 //	2 bytes: extensions total length
 //	then: extension entries (2-byte ID + 2-byte length + data)
-func ParseExtensionsFromRaw(raw []byte) (extensions []uint16, sigAlgorithms []uint16) {
+func ParseExtensionsFromRaw(raw []byte) (extensions, sigAlgorithms []uint16) {
 	if len(raw) < 38 { // minimum: type(2) + len(3) + version(2) + random(32) = 39, but we need at least the header
 		return nil, nil
 	}
@@ -349,51 +356,63 @@ func ParseExtensionsFromRaw(raw []byte) (extensions []uint16, sigAlgorithms []ui
 	if offset+2 > len(raw) {
 		return nil, nil
 	}
+
 	offset += 2
 
 	// Random (32 bytes)
 	if offset+32 > len(raw) {
 		return nil, nil
 	}
+
 	offset += 32
 
 	// Session ID (1 byte length + variable)
 	if offset >= len(raw) {
 		return nil, nil
 	}
+
 	sessionIDLen := int(raw[offset])
+
 	offset++
 	if offset+sessionIDLen > len(raw) {
 		return nil, nil
 	}
+
 	offset += sessionIDLen
 
 	// Cipher suites (2 bytes length + variable)
 	if offset+2 > len(raw) {
 		return nil, nil
 	}
+
 	cipherSuitesLen := int(binary.BigEndian.Uint16(raw[offset : offset+2]))
+
 	offset += 2
 	if offset+cipherSuitesLen > len(raw) {
 		return nil, nil
 	}
+
 	offset += cipherSuitesLen
 
 	// Compression methods (1 byte length + variable)
 	if offset >= len(raw) {
 		return nil, nil
 	}
+
 	compMethodsLen := int(raw[offset])
+
 	offset++
 	if offset+compMethodsLen > len(raw) {
 		return nil, nil
 	}
+
 	offset += compMethodsLen
 
 	// Extensions total length (2 bytes)
 	if offset+2 > len(raw) {
 		return nil, nil
 	}
+
 	extTotalLen := int(binary.BigEndian.Uint16(raw[offset : offset+2]))
 	offset += 2
 
@@ -410,6 +429,7 @@ func ParseExtensionsFromRaw(raw []byte) (extensions []uint16, sigAlgorithms []ui
 		// Extract signature algorithms from extension 0x000d
 		if extID == 0x000d && extDataLen >= 2 && offset+extDataLen <= extEnd {
 			sigCount := extDataLen / 2
+
 			sigAlgorithms = make([]uint16, sigCount)
 			for i := range sigCount {
 				sigAlgorithms[i] = binary.BigEndian.Uint16(raw[offset+i*2 : offset+i*2+2])

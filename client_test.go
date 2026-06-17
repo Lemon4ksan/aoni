@@ -31,9 +31,10 @@ import (
 
 	"github.com/andybalholm/brotli"
 	"github.com/klauspost/compress/zstd"
-	"github.com/lemon4ksan/aoni/ja4"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/lemon4ksan/aoni/ja4"
 )
 
 type testPayload struct {
@@ -969,19 +970,23 @@ func TestClient_TLSFingerprint(t *testing.T) {
 func TestClient_WithJA4Callback(t *testing.T) {
 	t.Parallel()
 
-	var called atomic.Bool
-	var report ja4.JA4Report
+	var (
+		called atomic.Bool
+		report ja4.Report
+	)
 
 	client := NewClient(nil).
 		WithTLSFingerprint(BrowserChrome).
-		WithJA4Callback(func(r ja4.JA4Report) {
+		WithJA4Callback(func(r ja4.Report) {
 			called.Store(true)
+
 			report = r
 		})
 
 	assert.NotNil(t, client)
 	// Verify immutability
 	origClient := NewClient(nil)
+
 	origTr := origClient.Transport()
 	if origTr != nil {
 		assert.Nil(t, origTr.DialTLSContext)
@@ -994,7 +999,7 @@ func TestClient_WithJA4Callback(t *testing.T) {
 func TestClient_JA4CallbackImmutability(t *testing.T) {
 	t.Parallel()
 
-	fn := func(r ja4.JA4Report) {}
+	fn := func(r ja4.Report) {}
 
 	client1 := NewClient(nil).WithJA4Callback(fn)
 	client2 := client1.WithTLSFingerprint(BrowserChrome)
@@ -1027,6 +1032,7 @@ func TestTraceJA4(t *testing.T) {
 			if err != nil {
 				return nil, err
 			}
+
 			tlsConn := tls.Client(tcpConn, &tls.Config{
 				InsecureSkipVerify: true,
 				ServerName:         "127.0.0.1",
@@ -1035,15 +1041,17 @@ func TestTraceJA4(t *testing.T) {
 				tcpConn.Close()
 				return nil, err
 			}
+
 			return tlsConn, nil
 		},
 	}
 
 	httpClient := &http.Client{Transport: transport}
 
-	var report *ja4.JA4Report
+	var report *ja4.Report
+
 	client := NewClient(httpClient).
-		WithJA4Callback(func(r ja4.JA4Report) {
+		WithJA4Callback(func(r ja4.Report) {
 			report = &r
 		})
 
@@ -1059,7 +1067,11 @@ func TestTraceJA4(t *testing.T) {
 	// JA4H should always be computed (from request headers)
 	require.NotNil(t, info.JA4, "TraceJA4 should populate JA4 report")
 	assert.NotEmpty(t, info.JA4.JA4H, "JA4H should be computed from request")
-	assert.Regexp(t, `^[a-z]{2}[0-9]{2}[cn][rn][0-9]{2}[a-z0-9]{4}_[a-f0-9]{12}_[a-f0-9]{12}_[a-f0-9]{12}$`, info.JA4.JA4H)
+	assert.Regexp(
+		t,
+		`^[a-z]{2}[0-9]{2}[cn][rn][0-9]{2}[a-z0-9]{4}_[a-f0-9]{12}_[a-f0-9]{12}_[a-f0-9]{12}$`,
+		info.JA4.JA4H,
+	)
 
 	// JA4 (TLS fingerprint) won't be populated because we bypassed uTLS
 	// That's expected - JA4 is only populated when WithTLSFingerprint is used
@@ -1085,14 +1097,16 @@ func TestTraceJA4_WithTLSFingerprint(t *testing.T) {
 		w.WriteHeader(http.StatusOK)
 	}))
 	server.TLS = tlsConfig
+
 	server.StartTLS()
 	defer server.Close()
 
 	// Use WithTLSFingerprint + WithJA4Callback + TraceJA4
-	var callbackReport *ja4.JA4Report
+	var callbackReport *ja4.Report
+
 	client := NewClient(server.Client()).
 		WithTLSFingerprint(BrowserChrome).
-		WithJA4Callback(func(r ja4.JA4Report) {
+		WithJA4Callback(func(r ja4.Report) {
 			callbackReport = &r
 		})
 

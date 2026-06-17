@@ -333,3 +333,27 @@ func (c *Client) WithHTTP3() *Client {
 
 	return newClient
 }
+
+// WithForceHTTP1 returns a [RequestModifier] that forces ALPN to only http/1.1.
+func WithForceHTTP1() RequestModifier {
+	return func(req *http.Request) {
+		ctx := context.WithValue(req.Context(), alpnOverrideCtxKey{}, []string{"http/1.1"})
+		*req = *req.WithContext(ctx)
+	}
+}
+
+// WithForceHTTP2 returns a [RequestModifier] that forces ALPN to only h2.
+func WithForceHTTP2() RequestModifier {
+	return func(req *http.Request) {
+		ctx := context.WithValue(req.Context(), alpnOverrideCtxKey{}, []string{"h2"})
+		*req = *req.WithContext(ctx)
+	}
+}
+
+// WithALPN returns a [RequestModifier] that sets custom ALPN protocols.
+func WithALPN(protocols []string) RequestModifier {
+	return func(req *http.Request) {
+		ctx := context.WithValue(req.Context(), alpnOverrideCtxKey{}, protocols)
+		*req = *req.WithContext(ctx)
+	}
+}
