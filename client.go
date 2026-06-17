@@ -56,21 +56,6 @@ var DefaultSensitiveHeaders = []string{
 	"X-Auth-Token",
 }
 
-type (
-	capturerCtxKey           struct{}
-	decoderCtxKey            struct{}
-	errorModelCtxKey         struct{}
-	downloadProgressCtxKey   struct{}
-	hedgingCtxKey            struct{}
-	queryErrorCtxKey         struct{}
-	bodyErrorCtxKey          struct{}
-	happyEyeballsDelayCtxKey struct{}
-	multiReadCtxKey          struct{}
-	ssrfGuardCtxKey          struct{}
-	fallbackCtxKey           struct{}
-	debugCtxKey              struct{}
-)
-
 // HTTPDoer defines the interface for objects executing an [http.Request].
 // It is implemented by [http.Client] and can be customized via [DoerFunc].
 type HTTPDoer interface {
@@ -161,6 +146,8 @@ type Client struct {
 	ssrfGuard          bool
 	happyEyeballsDelay time.Duration
 	multiReadThreshold int64
+
+	defaultMods []RequestModifier
 }
 
 // NewClient initializes a new [Client] instance with [DefaultUserAgent].
@@ -252,6 +239,12 @@ func (c *Client) Request(
 
 	if req.Header.Get("Accept-Encoding") == "" {
 		req.Header.Set("Accept-Encoding", "zstd, br, gzip")
+	}
+
+	for _, mod := range c.defaultMods {
+		if mod != nil {
+			mod(req)
+		}
 	}
 
 	for _, mod := range mods {
@@ -434,6 +427,13 @@ const (
 	// BrowserSafari emulates Apple Safari TLS fingerprints.
 	BrowserSafari
 )
+
+// WithModifiers returns a new [Client] with the given request modifiers applied by default.
+func (c *Client) WithModifiers(mods ...RequestModifier) *Client {
+	newClient := c.Clone()
+	newClient.defaultMods = append(newClient.defaultMods, mods...)
+	return newClient
+}
 
 // WithMultiReadBody returns a [RequestModifier] setting the body re-readability threshold.
 // Passing a threshold <= 0 disables body caching for the request.

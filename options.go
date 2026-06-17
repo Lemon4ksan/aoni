@@ -17,6 +17,21 @@ import (
 	"time"
 )
 
+type (
+	capturerCtxKey           struct{}
+	decoderCtxKey            struct{}
+	errorModelCtxKey         struct{}
+	downloadProgressCtxKey   struct{}
+	hedgingCtxKey            struct{}
+	queryErrorCtxKey         struct{}
+	bodyErrorCtxKey          struct{}
+	happyEyeballsDelayCtxKey struct{}
+	multiReadCtxKey          struct{}
+	ssrfGuardCtxKey          struct{}
+	fallbackCtxKey           struct{}
+	debugCtxKey              struct{}
+)
+
 // RequestModifier represents a function that alters an [http.Request] before execution.
 type RequestModifier func(req *http.Request)
 
