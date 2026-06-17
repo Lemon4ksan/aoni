@@ -24,6 +24,13 @@ When integrating with unstable APIs, scraping, or working with complex proxy net
 go get github.com/lemon4ksan/aoni
 ```
 
+## 🎯 When to Use Aoni vs. Standard Clients (e.g., Resty)
+
+`aoni` is not designed to replace `net/http` or lightweight wrappers like `resty` for standard, internal corporate microservices where raw, flat throughput over direct, reliable cloud connections is the only concern.
+
+* **Choose `net/http` / `resty`** for: Internal microservices, direct cloud API integrations (AWS/S3, Stripe, Twilio), and standard high-throughput REST APIs where you fully control the destination server and the network environment.
+* **Choose `aoni`** for: Deep-packet inspection (DPI) evasion, scraping/crawling targets behind aggressive firewalls (Cloudflare, Akamai, Imperva), rotating unstable proxy networks with sticky sessions, and real-time WebSockets over HTTP/2. It is your **tactical off-road armor** for uncooperative and chaotic network environments.
+
 ## 🌀 The Pipeline Philosophy
 
 In `aoni`, a request is not a static object—it is a fluid stream processed in four distinct, highly optimized phases:
