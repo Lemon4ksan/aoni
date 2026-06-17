@@ -18,6 +18,8 @@ import (
 	"time"
 
 	"github.com/quic-go/quic-go/http3"
+
+	"github.com/lemon4ksan/aoni/p0f"
 )
 
 // RequestModifier represents a function that alters an [http.Request] before execution.
@@ -354,6 +356,16 @@ func WithForceHTTP2() RequestModifier {
 func WithALPN(protocols []string) RequestModifier {
 	return func(req *http.Request) {
 		ctx := context.WithValue(req.Context(), alpnOverrideCtxKey{}, protocols)
+		*req = *req.WithContext(ctx)
+	}
+}
+
+// WithP0fSignature returns a [RequestModifier] that stores a p0f signature
+// in the request context. When used with [Client.WithP0fSignature], the
+// TCP/IP fields (TTL, DF, window size) are spoofed to match the specified OS.
+func WithP0fSignature(sig *p0f.Signature) RequestModifier {
+	return func(req *http.Request) {
+		ctx := context.WithValue(req.Context(), p0fSignatureCtxKey{}, sig)
 		*req = *req.WithContext(ctx)
 	}
 }

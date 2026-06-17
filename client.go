@@ -29,6 +29,7 @@ import (
 	"golang.org/x/text/transform"
 
 	"github.com/lemon4ksan/aoni/ja4"
+	"github.com/lemon4ksan/aoni/p0f"
 )
 
 // DefaultUserAgent is the default User-Agent string used for HTTP requests.
@@ -65,6 +66,7 @@ type (
 	ja4ReportCtxKey          struct{}
 	ja4CallbackCtxKey        struct{}
 	alpnOverrideCtxKey       struct{}
+	p0fSignatureCtxKey       struct{}
 )
 
 // DefaultSensitiveHeaders is the list of sensitive headers that are scrubbed from requests on redirect.
@@ -179,6 +181,7 @@ type Client struct {
 	fragmentConfig   *FragmentConfig
 	hostRewrite      *HostRewriteConfig
 	dotResolver      *DoTResolver
+	p0fSignature     *p0f.Signature
 }
 
 // NewClient initializes a new [Client] instance with [DefaultUserAgent].
@@ -232,6 +235,7 @@ func (c *Client) Clone() *Client {
 		fragmentConfig:     c.fragmentConfig,
 		hostRewrite:        c.hostRewrite,
 		dotResolver:        c.dotResolver,
+		p0fSignature:       c.p0fSignature,
 	}
 }
 
@@ -261,6 +265,10 @@ func (c *Client) Request(
 
 	if c.ja4Callback != nil {
 		ctx = context.WithValue(ctx, ja4CallbackCtxKey{}, c.ja4Callback)
+	}
+
+	if c.p0fSignature != nil {
+		ctx = context.WithValue(ctx, p0fSignatureCtxKey{}, c.p0fSignature)
 	}
 
 	rel, err := url.Parse(strings.TrimLeft(path, "/"))
@@ -834,12 +842,22 @@ func (c *Client) WithHostRewrite(rules map[string]string) *Client {
 
 // WithDoTResolver returns a new [Client] configured to use DNS-over-TLS for resolution.
 func (c *Client) WithDoTResolver(server, hostname string) *Client {
-	newClient := c.Clone()
 	dot := NewDoTResolver(server, hostname)
+	newClient := c.Clone()
 	newClient.dotResolver = dot
 	newClient.dnsResolver = dot
 	newClient.applyDialers()
 
+	return newClient
+}
+
+// WithP0fSignature configures TCP/IP spoofing based on a p0f signature.
+// After the TCP connection is established, spoofable fields (TTL, DF, window)
+// are applied via syscalls to make the connection appear as the specified OS
+// to passive fingerprinters like p0f.
+func (c *Client) WithP0fSignature(sig *p0f.Signature) *Client {
+	newClient := c.Clone()
+	newClient.p0fSignature = sig
 	return newClient
 }
 
@@ -1357,6 +1375,12 @@ func happyEyeballsDial(
 			conn = wrapWithFragmentation(conn, cfg)
 		}
 
+		// After fragmentation wrapping, apply p0f spoofing if configured
+		if cfg, ok := ctx.Value(p0fSignatureCtxKey{}).(*p0f.Signature); ok && cfg != nil {
+			spoofer := p0f.NewSpoofer(cfg)
+			_ = spoofer.Apply(conn) // best-effort
+		}
+
 		return conn, nil
 	}
 
@@ -1422,11 +1446,17 @@ func happyEyeballsDial(
 			if res.conn != nil {
 				conn := res.conn
 
-				if cfg, ok := ctx.Value(fragmentCtxKey{}).(FragmentConfig); ok && cfg.ChunkSize > 0 {
-					conn = wrapWithFragmentation(conn, cfg)
-				}
+			if cfg, ok := ctx.Value(fragmentCtxKey{}).(FragmentConfig); ok && cfg.ChunkSize > 0 {
+				conn = wrapWithFragmentation(conn, cfg)
+			}
 
-				if order, ok := ctx.Value(orderedHeadersCtxKey{}).([]string); ok && len(order) > 0 {
+			// Apply p0f spoofing if configured
+			if cfg, ok := ctx.Value(p0fSignatureCtxKey{}).(*p0f.Signature); ok && cfg != nil {
+				spoofer := p0f.NewSpoofer(cfg)
+				_ = spoofer.Apply(conn) // best-effort
+			}
+
+			if order, ok := ctx.Value(orderedHeadersCtxKey{}).([]string); ok && len(order) > 0 {
 					return &headerOrderingConn{Conn: conn, orderedKeys: order}, nil
 				}
 
