@@ -109,11 +109,32 @@ func TestRetryMiddleware(t *testing.T) {
 	t.Run("custom_condition", func(t *testing.T) {
 		t.Parallel()
 
-		m1 := &mockDoer{id: 1, statusCode: 429}
+		var (
+			calls int
+			mu    sync.Mutex
+		)
+
+		m1 := DoerFunc(func(req *http.Request) (*http.Response, error) {
+			mu.Lock()
+			calls++
+			currentCalls := calls
+			mu.Unlock()
+
+			statusCode := http.StatusTooManyRequests
+			if currentCalls > 2 {
+				statusCode = http.StatusOK
+			}
+
+			return &http.Response{
+				StatusCode: statusCode,
+				Body:       io.NopCloser(strings.NewReader("")),
+				Request:    req,
+			}, nil
+		})
 
 		opts := RetryOptions{
 			MaxRetries: 2,
-			Backoff:    5 * time.Millisecond,
+			Backoff:    1 * time.Microsecond,
 		}
 
 		condition := func(resp *http.Response, err error) bool {
@@ -125,16 +146,11 @@ func TestRetryMiddleware(t *testing.T) {
 		req, err := http.NewRequestWithContext(t.Context(), "GET", "http://test", nil)
 		require.NoError(t, err)
 
-		go func() {
-			time.Sleep(8 * time.Millisecond)
-			m1.SetStatusCode(200)
-		}()
-
 		resp, err := client.Do(req)
 		require.NoError(t, err)
 		t.Cleanup(func() { _ = resp.Body.Close() })
 
-		assert.GreaterOrEqual(t, m1.GetCalls(), 2)
+		assert.Equal(t, 3, calls)
 		assert.Equal(t, 200, resp.StatusCode)
 	})
 }
