@@ -35,14 +35,18 @@ go get github.com/lemon4ksan/aoni
 
 In `aoni`, a request is not a static object—it is a fluid stream processed in four distinct, highly optimized phases:
 
-```
-  [ RequestModifiers ]      [ HTTP Middlewares ]      [ Transport Layer ]      [ Generic Decoders ]
-     Decorate req              Intercept & Wrap            Execute               Extract output
-  ┌──────────────────┐      ┌──────────────────┐      ┌─────────────────┐      ┌──────────────────┐
-  │  - Headers       │ ───> │  - Rate Limiter  │ ───> │ - HappyEyeballs │ ───> │  - Auto-UTF8     │
-  │  - URL Variables │      │  - CircuitBreaker│      │ - ProxyRotator  │      │  - JSON/XML/YAML │
-  │  - Request Body  │      │  - RetryEngine   │      │ - LoadBalancer  │      │  - Error Models  │
-  └──────────────────┘      └──────────────────┘      └─────────────────┘      └──────────────────┘
+```mermaid
+flowchart LR
+    %% Styling
+    classDef ice fill:#f0f8ff,stroke:#00a3e0,stroke-width:1.5px,color:#003366;
+    linkStyle default stroke:#00a3e0,stroke-width:2px;
+    
+    p1["<b>[ RequestModifiers ]</b><br><i>Decorate req</i><br>━━━━━━━━━━━━━━━━━━<br>• Headers<br>• URL Variables<br>• Request Body"]:::ice
+    p2["<b>[ HTTP Middlewares ]</b><br><i>Intercept & Wrap</i><br>━━━━━━━━━━━━━━━━━━<br>• Rate Limiter<br>• CircuitBreaker<br>• RetryEngine"]:::ice
+    p3["<b>[ Transport Layer ]</b><br><i>Execute</i><br>━━━━━━━━━━━━━━━━━━<br>• HappyEyeballs<br>• ProxyRotator<br>• LoadBalancer"]:::ice
+    p4["<b>[ Generic Decoders ]</b><br><i>Extract output</i><br>━━━━━━━━━━━━━━━━━━<br>• Auto-UTF8<br>• JSON/XML/YAML<br>• Error Models"]:::ice
+    
+    p1 --> p2 --> p3 --> p4
 ```
 
 ## ⚡ The Contrast: Standard Library vs. Aoni
