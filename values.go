@@ -12,6 +12,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"time"
 )
 
 // Uint64String handles parsing uint64 values received as string representations in JSON.
@@ -77,6 +78,58 @@ func (f *Float64String) UnmarshalJSON(b []byte) error {
 	*f = Float64String(val)
 
 	return nil
+}
+
+// BoolInt handles booleans that Steam sends as 1 (true) or 0 (false).
+// It also handles string variations ("1", "0", "true", "false").
+type BoolInt bool
+
+// UnmarshalJSON implements json.Unmarshaler.
+func (bi *BoolInt) UnmarshalJSON(b []byte) error {
+	s := strings.ToLower(strings.Trim(string(b), `"`))
+	switch s {
+	case "1", "true":
+		*bi = true
+	case "0", "false", "", "null":
+		*bi = false
+	default:
+		// Attempt to parse any other number; non-zero is true
+		val, err := strconv.Atoi(s)
+		if err == nil {
+			*bi = val != 0
+			return nil
+		}
+
+		*bi = false
+	}
+
+	return nil
+}
+
+// UnixTimestamp handles Unix timestamps that Steam sends as strings or numbers.
+type UnixTimestamp time.Time
+
+// UnmarshalJSON implements json.Unmarshaler.
+func (t *UnixTimestamp) UnmarshalJSON(b []byte) error {
+	s := strings.Trim(string(b), `"`)
+	if s == "" || s == "null" || s == "0" {
+		*t = UnixTimestamp(time.Time{})
+		return nil
+	}
+
+	unix, err := strconv.ParseInt(s, 10, 64)
+	if err != nil {
+		return fmt.Errorf("Timestamp: %w", err)
+	}
+
+	*t = UnixTimestamp(time.Unix(unix, 0).UTC())
+
+	return nil
+}
+
+// Time returns the underlying time.Time.
+func (t *UnixTimestamp) Time() time.Time {
+	return time.Time(*t)
 }
 
 // StructToValues encodes a struct's fields into [url.Values] using "url" or "json" tags.
@@ -168,8 +221,22 @@ func fillValues(v reflect.Value, values url.Values) error {
 		field := t.Field(i)
 		fieldValue := v.Field(i)
 
+		defaultVal := field.Tag.Get("default")
+
 		if fieldValue.Kind() == reflect.Pointer {
 			if fieldValue.IsNil() {
+				if defaultVal != "" {
+					tag := field.Tag.Get("url")
+					if tag == "" {
+						tag = field.Tag.Get("json")
+					}
+
+					key := strings.Split(tag, ",")[0]
+					if key != "" && key != "-" {
+						values.Set(key, defaultVal)
+					}
+				}
+
 				continue
 			}
 
@@ -185,7 +252,6 @@ func fillValues(v reflect.Value, values url.Values) error {
 		key := parts[0]
 
 		isInline := slices.Contains(parts[1:], "inline")
-
 		if (field.Anonymous || isInline) && fieldValue.Kind() == reflect.Struct {
 			if err := fillValues(fieldValue, values); err != nil {
 				return err
@@ -201,6 +267,17 @@ func fillValues(v reflect.Value, values url.Values) error {
 		omitempty := len(parts) > 1 && (parts[1] == "omitempty" || slices.Contains(parts[1:], "omitempty"))
 		if omitempty && fieldValue.IsZero() {
 			continue
+		}
+
+		if fieldValue.IsZero() {
+			if defaultVal != "" {
+				values.Set(key, defaultVal)
+				continue
+			}
+
+			if omitempty {
+				continue
+			}
 		}
 
 		if fieldValue.Kind() == reflect.Slice || fieldValue.Kind() == reflect.Array {

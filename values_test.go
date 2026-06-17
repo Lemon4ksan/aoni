@@ -18,6 +18,30 @@ type mockID uint64
 
 func (id mockID) String() string { return "id_" + strconv.FormatUint(uint64(id), 10) }
 
+func TestBoolInt(t *testing.T) {
+	tests := []struct {
+		input    string
+		expected bool
+	}{
+		{`1`, true},
+		{`0`, false},
+		{`"1"`, true},
+		{`"0"`, false},
+		{`"true"`, true},
+		{`"FALSE"`, false},
+		{`"2"`, true}, // Non-zero string int
+		{`"not-a-bool"`, false},
+	}
+
+	for _, tt := range tests {
+		var v BoolInt
+
+		err := json.Unmarshal([]byte(tt.input), &v)
+		assert.NoError(t, err)
+		assert.Equal(t, tt.expected, bool(v))
+	}
+}
+
 func TestUint64String(t *testing.T) {
 	t.Parallel()
 
@@ -109,6 +133,37 @@ func TestFloat64String(t *testing.T) {
 				assert.Equal(t, tt.expected, float64(v))
 			}
 		})
+	}
+}
+
+func TestUnixTimestamp(t *testing.T) {
+	tests := []struct {
+		input    string
+		expected int64
+		wantErr  bool
+	}{
+		{`"1704153600"`, 1704153600, false}, // 2024-01-02
+		{`1704153600`, 1704153600, false},
+		{`""`, 0, false},
+		{`0`, 0, false},
+		{`"not-a-date"`, 0, true},
+	}
+
+	for _, tt := range tests {
+		var v UnixTimestamp
+
+		err := json.Unmarshal([]byte(tt.input), &v)
+		if tt.wantErr {
+			assert.Error(t, err)
+		} else {
+			assert.NoError(t, err)
+
+			if tt.expected != 0 {
+				assert.Equal(t, tt.expected, v.Time().Unix())
+			} else {
+				assert.True(t, v.Time().IsZero())
+			}
+		}
 	}
 }
 
