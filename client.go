@@ -604,20 +604,23 @@ func (c *Client) WithLocalAddr(addr string) *Client {
 	newClient := c.Clone()
 	if httpClient, ok := newClient.http.(*http.Client); ok {
 		if transport, ok := httpClient.Transport.(*http.Transport); ok {
-			clonedTransport := transport.Clone()
-
 			localAddr, err := net.ResolveIPAddr("ip", addr)
 			if err == nil {
-				clonedTransport.DialContext = (&net.Dialer{
+				dialer := &net.Dialer{
 					LocalAddr: &net.TCPAddr{IP: localAddr.IP},
 					Timeout:   30 * time.Second,
 					KeepAlive: 30 * time.Second,
-				}).DialContext
-			}
+				}
+				// Wrap existing DialContext instead of cloning the transport.
+				prevDial := transport.DialContext
+				transport.DialContext = func(ctx context.Context, network, addr string) (net.Conn, error) {
+					if prevDial != nil {
+						return prevDial(ctx, network, addr)
+					}
 
-			clonedClient := *httpClient
-			clonedClient.Transport = clonedTransport
-			newClient.http = &clonedClient
+					return dialer.DialContext(ctx, network, addr)
+				}
+			}
 		}
 	}
 
@@ -739,37 +742,28 @@ func (c *Client) WithCookieJar(jar http.CookieJar) *Client {
 // If config fields are <= 0, they are ignored and the original transport settings are kept.
 func (c *Client) WithConnectionPool(cfg ConnectionPoolConfig) *Client {
 	newClient := c.Clone()
-	if httpClient, ok := newClient.http.(*http.Client); ok {
-		clonedClient := *httpClient
-
-		transport := c.Transport()
-		if transport != nil {
-			clonedTransport := transport.Clone()
-
-			if cfg.MaxIdleConns > 0 {
-				clonedTransport.MaxIdleConns = cfg.MaxIdleConns
-			}
-
-			if cfg.MaxIdleConnsPerHost > 0 {
-				clonedTransport.MaxIdleConnsPerHost = cfg.MaxIdleConnsPerHost
-			}
-
-			if cfg.MaxConnsPerHost > 0 {
-				clonedTransport.MaxConnsPerHost = cfg.MaxConnsPerHost
-			}
-
-			if cfg.IdleConnTimeout > 0 {
-				clonedTransport.IdleConnTimeout = cfg.IdleConnTimeout
-			}
-
-			if cfg.ResponseHeaderTimeout > 0 {
-				clonedTransport.ResponseHeaderTimeout = cfg.ResponseHeaderTimeout
-			}
-
-			clonedClient.Transport = clonedTransport
+	if transport := newClient.Transport(); transport != nil {
+		// Pool settings are safe to modify directly — Go's http.Transport
+		// uses atomic operations for these fields. No transport clone needed.
+		if cfg.MaxIdleConns > 0 {
+			transport.MaxIdleConns = cfg.MaxIdleConns
 		}
 
-		newClient.http = &clonedClient
+		if cfg.MaxIdleConnsPerHost > 0 {
+			transport.MaxIdleConnsPerHost = cfg.MaxIdleConnsPerHost
+		}
+
+		if cfg.MaxConnsPerHost > 0 {
+			transport.MaxConnsPerHost = cfg.MaxConnsPerHost
+		}
+
+		if cfg.IdleConnTimeout > 0 {
+			transport.IdleConnTimeout = cfg.IdleConnTimeout
+		}
+
+		if cfg.ResponseHeaderTimeout > 0 {
+			transport.ResponseHeaderTimeout = cfg.ResponseHeaderTimeout
+		}
 	}
 
 	return newClient
@@ -788,27 +782,23 @@ func (c *Client) WithTLSFingerprint(browser BrowserID) *Client {
 	// (ProxyRotator, LoadBalancer, etc.), not just *http.Client.
 	newClient.tlsBrowserID = browser
 
-	if httpClient, ok := newClient.http.(*http.Client); ok {
-		transport := newClient.Transport()
-		if transport != nil {
-			clonedTransport := transport.Clone()
-			callback := newClient.ja4Callback // capture by value
-			clonedTransport.DialTLSContext = func(ctx context.Context, network, addr string) (net.Conn, error) {
-				return dialTLSWithUTLS(
-					ctx,
-					network,
-					addr,
-					browser,
-					newClient.sourceRotator,
-					newClient.dnsResolver,
-					newClient.dotResolver,
-					callback,
-					clonedTransport.TLSClientConfig,
-				)
-			}
-			clonedClient := *httpClient
-			clonedClient.Transport = clonedTransport
-			newClient.http = &clonedClient
+	if transport := newClient.Transport(); transport != nil {
+		callback := newClient.ja4Callback // capture by value
+		tlsConfig := transport.TLSClientConfig
+		// Set DialTLSContext directly — no transport clone needed.
+		// This preserves the existing connection pool.
+		transport.DialTLSContext = func(ctx context.Context, network, addr string) (net.Conn, error) {
+			return dialTLSWithUTLS(
+				ctx,
+				network,
+				addr,
+				browser,
+				newClient.sourceRotator,
+				newClient.dnsResolver,
+				newClient.dotResolver,
+				callback,
+				tlsConfig,
+			)
 		}
 	}
 
@@ -926,29 +916,19 @@ func (c *Client) CloseIdleConnections() {
 }
 
 func (c *Client) applyDialers() {
-	if httpClient, ok := c.http.(*http.Client); ok {
-		transport := c.Transport()
-		if transport != nil {
-			clonedTransport := transport.Clone()
-			clonedTransport.DialContext = func(ctx context.Context, network, addr string) (net.Conn, error) {
-				return happyEyeballsDial(
-					ctx,
-					network,
-					addr,
-					c.happyEyeballsDelay,
-					c.ssrfGuard,
-					c.sourceRotator,
-					c.dnsResolver,
-				)
-			}
-			// Preserve TLSClientConfig from the original transport (Clone may nil it out).
-			if clonedTransport.TLSClientConfig == nil && transport.TLSClientConfig != nil {
-				clonedTransport.TLSClientConfig = transport.TLSClientConfig.Clone()
-			}
-
-			clonedClient := *httpClient
-			clonedClient.Transport = clonedTransport
-			c.http = &clonedClient
+	if transport := c.Transport(); transport != nil {
+		// Set DialContext directly — called once at construction time,
+		// no need to clone the transport and its connection pool.
+		transport.DialContext = func(ctx context.Context, network, addr string) (net.Conn, error) {
+			return happyEyeballsDial(
+				ctx,
+				network,
+				addr,
+				c.happyEyeballsDelay,
+				c.ssrfGuard,
+				c.sourceRotator,
+				c.dnsResolver,
+			)
 		}
 	}
 }
