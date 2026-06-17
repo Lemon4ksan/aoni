@@ -8,6 +8,7 @@ import (
 	"bytes"
 	"compress/gzip"
 	"context"
+	"crypto/tls"
 	"errors"
 	"fmt"
 	"io"
@@ -23,6 +24,7 @@ import (
 
 	"github.com/andybalholm/brotli"
 	"github.com/klauspost/compress/zstd"
+	"github.com/lemon4ksan/aoni/ja4"
 	utls "github.com/refraction-networking/utls"
 	"golang.org/x/text/encoding/htmlindex"
 	"golang.org/x/text/transform"
@@ -59,6 +61,8 @@ type (
 	fallbackCtxKey           struct{}
 	debugCtxKey              struct{}
 	orderedHeadersCtxKey     struct{}
+	ja4ReportCtxKey          struct{}
+	ja4CallbackCtxKey        struct{}
 )
 
 // DefaultSensitiveHeaders is the list of sensitive headers that are scrubbed from requests on redirect.
@@ -168,6 +172,7 @@ type Client struct {
 	dnsResolver      DNSResolver
 	defaultMods      []RequestModifier
 	headersCookieJar http.CookieJar
+	ja4Callback      func(ja4.JA4Report)
 }
 
 // NewClient initializes a new [Client] instance with [DefaultUserAgent].
@@ -216,6 +221,7 @@ func (c *Client) Clone() *Client {
 		ssrfGuard:          c.ssrfGuard,
 		happyEyeballsDelay: c.happyEyeballsDelay,
 		multiReadThreshold: c.multiReadThreshold,
+		ja4Callback:        c.ja4Callback,
 	}
 }
 
@@ -242,6 +248,10 @@ func (c *Client) Request(
 	}
 
 	ctx = context.WithValue(ctx, happyEyeballsDelayCtxKey{}, c.happyEyeballsDelay)
+
+	if c.ja4Callback != nil {
+		ctx = context.WithValue(ctx, ja4CallbackCtxKey{}, c.ja4Callback)
+	}
 
 	rel, err := url.Parse(strings.TrimLeft(path, "/"))
 	if err != nil {
@@ -314,6 +324,18 @@ func (c *Client) Request(
 		resp, reqErr = c.executeWithHedging(ctx, hedgingDelay, req)
 	} else {
 		resp, reqErr = c.http.Do(req)
+	}
+
+	// Copy TLS JA4 report from the dialer store to the target TraceInfo.
+	// The store was set by TraceJA4; dialTLSWithUTLS wrote the TLS report during handshake.
+	if store, ok := req.Context().Value(ja4ReportCtxKey{}).(*ja4ReportStore); ok && store.target != nil && store.report != nil {
+		store.target.JA4.JA4 = store.report.JA4
+		store.target.JA4.Protocol = store.report.Protocol
+		store.target.JA4.Version = store.report.Version
+		store.target.JA4.SNI = store.report.SNI
+		store.target.JA4.CipherCount = store.report.CipherCount
+		store.target.JA4.ExtCount = store.report.ExtCount
+		store.target.JA4.ALPN = store.report.ALPN
 	}
 
 	if isolatedJar, ok := c.headersCookieJar.(*ProxyIsolatedCookieJar); ok {
@@ -755,8 +777,9 @@ func (c *Client) WithTLSFingerprint(browser BrowserID) *Client {
 		transport := newClient.Transport()
 		if transport != nil {
 			clonedTransport := transport.Clone()
+			callback := newClient.ja4Callback // capture by value
 			clonedTransport.DialTLSContext = func(ctx context.Context, network, addr string) (net.Conn, error) {
-				return dialTLSWithUTLS(ctx, network, addr, browser, c.sourceRotator, c.dnsResolver)
+				return dialTLSWithUTLS(ctx, network, addr, browser, newClient.sourceRotator, newClient.dnsResolver, callback, clonedTransport.TLSClientConfig)
 			}
 			clonedClient := *httpClient
 			clonedClient.Transport = clonedTransport
@@ -764,6 +787,17 @@ func (c *Client) WithTLSFingerprint(browser BrowserID) *Client {
 		}
 	}
 
+	return newClient
+}
+
+// WithJA4Callback returns a new [Client] that invokes fn with the JA4 fingerprint
+// after each TLS handshake. The callback receives both the TLS (JA4) fingerprint
+// and, if [TraceJA4] is used, the HTTP (JA4H) fingerprint.
+//
+// This option requires [WithTLSFingerprint] to be enabled.
+func (c *Client) WithJA4Callback(fn func(ja4.JA4Report)) *Client {
+	newClient := c.Clone()
+	newClient.ja4Callback = fn
 	return newClient
 }
 
@@ -854,6 +888,10 @@ func (c *Client) applyDialers() {
 					c.dnsResolver,
 				)
 			}
+			// Preserve TLSClientConfig from the original transport (Clone may nil it out).
+			if clonedTransport.TLSClientConfig == nil && transport.TLSClientConfig != nil {
+				clonedTransport.TLSClientConfig = transport.TLSClientConfig.Clone()
+			}
 			clonedClient := *httpClient
 			clonedClient.Transport = clonedTransport
 			c.http = &clonedClient
@@ -867,7 +905,15 @@ func dialTLSWithUTLS(
 	browser BrowserID,
 	sourceRotator *SourceIPRotator,
 	dnsResolver DNSResolver,
+	ja4Callback func(ja4.JA4Report),
+	tlsConfig *tls.Config,
 ) (net.Conn, error) {
+	// Read callback from context (set by Client.Request) — the closure-captured
+	// value may be stale if WithJA4Callback was called after WithTLSFingerprint.
+	if cb, ok := ctx.Value(ja4CallbackCtxKey{}).(func(ja4.JA4Report)); ok && cb != nil {
+		ja4Callback = cb
+	}
+
 	ssrfGuard := ctx.Value(ssrfGuardCtxKey{}) != nil
 
 	var delay time.Duration
@@ -897,13 +943,94 @@ func dialTLSWithUTLS(
 		host = addr
 	}
 
-	uConn := utls.UClient(conn, &utls.Config{ServerName: host}, spec)
+	uConfig := &utls.Config{ServerName: host}
+	if tlsConfig != nil {
+		uConfig.InsecureSkipVerify = tlsConfig.InsecureSkipVerify
+		uConfig.RootCAs = tlsConfig.RootCAs
+	}
+
+	uConn := utls.UClient(conn, uConfig, spec)
 	if err := uConn.HandshakeContext(ctx); err != nil {
 		_ = conn.Close()
 		return nil, err
 	}
 
+	report := extractJA4FromUConn(uConn, host)
+
+	// Write JA4 report to the store in the request context (set by TraceJA4).
+	// The request context flows through to DialTLSContext.
+	if store, ok := ctx.Value(ja4ReportCtxKey{}).(*ja4ReportStore); ok {
+		store.report = &report
+	}
+
+	if ja4Callback != nil {
+		ja4Callback(report)
+	}
+
 	return uConn, nil
+}
+
+// extractJA4FromUConn computes a JA4 fingerprint from a uTLS connection after handshake.
+func extractJA4FromUConn(uConn *utls.UConn, host string) ja4.JA4Report {
+	_ = uConn.BuildHandshakeState()
+
+	hello := uConn.HandshakeState.Hello
+
+	var extensions []uint16
+	var sigAlgorithms []uint16
+
+	if len(hello.Raw) > 0 {
+		extensions, sigAlgorithms = ja4.ParseExtensionsFromRaw(hello.Raw)
+	}
+
+	// Convert signature algorithms to uint16
+	sigAlgos := make([]uint16, len(sigAlgorithms))
+	for i, s := range sigAlgorithms {
+		sigAlgos[i] = uint16(s)
+	}
+
+	sni := hello.ServerName != ""
+	fingerprint := ja4.ComputeJA4(
+		hello.CipherSuites,
+		extensions,
+		hello.SupportedVersions,
+		sni,
+		hello.AlpnProtocols,
+		sigAlgos,
+	)
+
+	report := ja4.JA4Report{
+		JA4:         fingerprint,
+		Protocol:    "t",
+		CipherCount: len(ja4.FilterGREASE(hello.CipherSuites)),
+		ExtCount:    len(ja4.FilterGREASE(extensions)),
+	}
+
+	// Parse version from fingerprint
+	if len(fingerprint) >= 4 {
+		report.Version = fingerprint[1:3]
+	}
+
+	if sni {
+		report.SNI = "d"
+	} else {
+		report.SNI = "i"
+	}
+
+	if len(hello.AlpnProtocols) > 0 && hello.AlpnProtocols[0] != "" {
+		report.ALPN = string(hello.AlpnProtocols[0][0]) + string(hello.AlpnProtocols[0][len(hello.AlpnProtocols[0])-1])
+	} else {
+		report.ALPN = "00"
+	}
+
+	return report
+}
+
+// ja4ReportStore is a shared pointer that allows dialTLSWithUTLS to write the JA4 report
+// and Client.Request to copy it to the target TraceInfo after the request completes.
+type ja4ReportStore struct {
+	report *ja4.JA4Report
+	target *TraceInfo
 }
 
 func (c *Client) executeWithHedging(

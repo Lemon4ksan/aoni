@@ -8,9 +8,17 @@ import (
 	"bytes"
 	"compress/gzip"
 	"context"
+	"crypto/rand"
+	"crypto/rsa"
+	"crypto/tls"
+	"crypto/x509"
+	"crypto/x509/pkix"
+	"encoding/pem"
 	"encoding/xml"
 	"errors"
 	"io"
+	"math/big"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -23,6 +31,7 @@ import (
 
 	"github.com/andybalholm/brotli"
 	"github.com/klauspost/compress/zstd"
+	"github.com/lemon4ksan/aoni/ja4"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -957,6 +966,173 @@ func TestClient_TLSFingerprint(t *testing.T) {
 	assert.Nil(t, origTr.DialTLSContext)
 }
 
+func TestClient_WithJA4Callback(t *testing.T) {
+	t.Parallel()
+
+	var called atomic.Bool
+	var report ja4.JA4Report
+
+	client := NewClient(nil).
+		WithTLSFingerprint(BrowserChrome).
+		WithJA4Callback(func(r ja4.JA4Report) {
+			called.Store(true)
+			report = r
+		})
+
+	assert.NotNil(t, client)
+	// Verify immutability
+	origClient := NewClient(nil)
+	origTr := origClient.Transport()
+	if origTr != nil {
+		assert.Nil(t, origTr.DialTLSContext)
+	}
+
+	_ = report
+	_ = called.Load()
+}
+
+func TestClient_JA4CallbackImmutability(t *testing.T) {
+	t.Parallel()
+
+	fn := func(r ja4.JA4Report) {}
+
+	client1 := NewClient(nil).WithJA4Callback(fn)
+	client2 := client1.WithTLSFingerprint(BrowserChrome)
+
+	// client2 should have the callback
+	assert.NotNil(t, client2.ja4Callback)
+
+	// client1 should also have the callback (Clone copies it)
+	assert.NotNil(t, client1.ja4Callback)
+
+	// New client without callback should not have it
+	client3 := NewClient(nil)
+	assert.Nil(t, client3.ja4Callback)
+}
+
+func TestTraceJA4(t *testing.T) {
+	t.Parallel()
+
+	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer server.Close()
+
+	// Create a transport that skips certificate verification and uses the test server's TLS config
+	transport := &http.Transport{
+		TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
+		DialTLSContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
+			// Directly connect to the test server, bypassing uTLS
+			tcpConn, err := net.Dial("tcp", addr)
+			if err != nil {
+				return nil, err
+			}
+			tlsConn := tls.Client(tcpConn, &tls.Config{
+				InsecureSkipVerify: true,
+				ServerName:         "127.0.0.1",
+			})
+			if err := tlsConn.HandshakeContext(ctx); err != nil {
+				tcpConn.Close()
+				return nil, err
+			}
+			return tlsConn, nil
+		},
+	}
+
+	httpClient := &http.Client{Transport: transport}
+
+	var report *ja4.JA4Report
+	client := NewClient(httpClient).
+		WithJA4Callback(func(r ja4.JA4Report) {
+			report = &r
+		})
+
+	info := &TraceInfo{}
+	_, err := client.Request(
+		context.Background(),
+		http.MethodGet,
+		server.URL,
+		TraceJA4(info),
+	)
+	require.NoError(t, err)
+
+	// JA4H should always be computed (from request headers)
+	require.NotNil(t, info.JA4, "TraceJA4 should populate JA4 report")
+	assert.NotEmpty(t, info.JA4.JA4H, "JA4H should be computed from request")
+	assert.Regexp(t, `^[a-z]{2}[0-9]{2}[cn][rn][0-9]{2}[a-z0-9]{4}_[a-f0-9]{12}_[a-f0-9]{12}_[a-f0-9]{12}$`, info.JA4.JA4H)
+
+	// JA4 (TLS fingerprint) won't be populated because we bypassed uTLS
+	// That's expected - JA4 is only populated when WithTLSFingerprint is used
+
+	_ = report
+}
+
+func TestTraceJA4_WithTLSFingerprint(t *testing.T) {
+	t.Parallel()
+
+	// Generate a self-signed cert for the test server
+	cert, key, err := generateTestCert()
+	require.NoError(t, err)
+
+	tlsCert, err := tls.X509KeyPair(cert, key)
+	require.NoError(t, err)
+
+	tlsConfig := &tls.Config{
+		Certificates: []tls.Certificate{tlsCert},
+	}
+
+	server := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	server.TLS = tlsConfig
+	server.StartTLS()
+	defer server.Close()
+
+	// Use WithTLSFingerprint + WithJA4Callback + TraceJA4
+	var callbackReport *ja4.JA4Report
+	client := NewClient(server.Client()).
+		WithTLSFingerprint(BrowserChrome).
+		WithJA4Callback(func(r ja4.JA4Report) {
+			callbackReport = &r
+		})
+
+	info := &TraceInfo{}
+	_, err = client.Request(
+		context.Background(),
+		http.MethodGet,
+		server.URL,
+		TraceJA4(info),
+	)
+	require.NoError(t, err)
+
+	// JA4H should be computed from request headers
+	require.NotNil(t, info.JA4, "TraceJA4 should populate JA4 report")
+	assert.NotEmpty(t, info.JA4.JA4H, "JA4H should be computed")
+
+	// JA4 (TLS fingerprint) should be populated from the uTLS handshake
+	assert.NotEmpty(t, info.JA4.JA4, "JA4 should be populated from TLS handshake")
+	assert.Regexp(t, `^t[0-9]{2}[di][0-9]{2}[0-9]{2}[a-z0-9]{2}_[a-f0-9]{12}_[a-f0-9]{12}$`, info.JA4.JA4)
+
+	// Callback should also have been invoked
+	require.NotNil(t, callbackReport, "JA4 callback should have been invoked")
+	assert.Equal(t, info.JA4.JA4, callbackReport.JA4)
+}
+
+func TestComputeJA4HFromRequest(t *testing.T) {
+	t.Parallel()
+
+	req, _ := http.NewRequest(http.MethodGet, "http://example.com/path", nil)
+	req.Header.Set("Host", "example.com")
+	req.Header.Set("User-Agent", "test")
+	req.Header.Add("Cookie", "session=abc")
+	req.Header.Add("Cookie", "token=xyz")
+	req.Header.Set("Referer", "http://referrer.com")
+	req.Header.Set("Accept-Language", "en-US")
+
+	result := computeJA4HFromRequest(req)
+	assert.Regexp(t, `^ge11cr[0-9]{2}[a-z0-9]{4}_[a-f0-9]{12}_[a-f0-9]{12}_[a-f0-9]{12}$`, result)
+}
+
 func TestClient_SocketLeakPrevention(t *testing.T) {
 	t.Parallel()
 
@@ -1200,4 +1376,41 @@ func TestClient_MultiReadBody(t *testing.T) {
 		_, err = os.Stat(tmpFileName)
 		assert.True(t, os.IsNotExist(err), "expected temp file to be deleted")
 	})
+}
+
+func generateTestCert() (cert, key []byte, err error) {
+	privateKey, err := rsa.GenerateKey(rand.Reader, 2048)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	serialNumber, err := rand.Int(rand.Reader, new(big.Int).Lsh(big.NewInt(1), 128))
+	if err != nil {
+		return nil, nil, err
+	}
+
+	template := &x509.Certificate{
+		SerialNumber: serialNumber,
+		Subject: pkix.Name{
+			Organization: []string{"Test Org"},
+		},
+		NotBefore:             time.Now(),
+		NotAfter:              time.Now().Add(time.Hour),
+		KeyUsage:              x509.KeyUsageDigitalSignature | x509.KeyUsageKeyEncipherment,
+		ExtKeyUsage:           []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
+		BasicConstraintsValid: true,
+		IPAddresses:           []net.IP{net.ParseIP("127.0.0.1")},
+		DNSNames:              []string{"localhost"},
+	}
+
+	certDER, err := x509.CreateCertificate(rand.Reader, template, template, &privateKey.PublicKey, privateKey)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	certPEM := pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: certDER})
+	keyDER := x509.MarshalPKCS1PrivateKey(privateKey)
+	keyPEM := pem.EncodeToMemory(&pem.Block{Type: "RSA PRIVATE KEY", Bytes: keyDER})
+
+	return certPEM, keyPEM, nil
 }

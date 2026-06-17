@@ -112,10 +112,9 @@ user, err := aoni.GetJSON[User](ctx, client, "/users/{id}",
 | **Активный Circuit Breaking (Предохранитель)** | ✗ | ✗ | **✓ (Нативный Middleware)** |
 | **Вежливый парсинг заголовка `Retry-After`** | ✗ | ✗ | **✓ (Delta-sec и RFC1123)** |
 | **Преобразование кодировок, отличных от UTF-8** | ✗ | ✗ | **✓ (Автоматическое)** |
-| **Обход TLS-фингерпринтинга (JA3)** | ✗ | ✗ | **✓ (через `uTLS`)** |
+| **Обход TLS-фингерпринтинга (JA3)** | ✗ | ✗ | **✓ (через `uTLS` & Рукопожатие)** |
+| **JA4+ Fingerprinting** | ✗ | ✗ | **✓ (TLS & HTTP, чистый Go)** |
 | **Субмиллисекундная трассировка** | ⚠️ (Громоздкая) | ✗ | **✓ (В один модификатор)** |
-
----
 
 ## 🍳 Рецепты: распространенные сценарии отказоустойчивости
 
@@ -165,16 +164,40 @@ manifest, err := aoni.GetJSON[Manifest](ctx, client, "/legacy-manifest",
 )
 ```
 
-### 4. Диагностическая трассировка и офлайн-отладка
-* **Проблема:** Отслеживать узкие места в сети при работе через прокси сложно, а воссоздание упавших запросов в терминале для ручной проверки отнимает много времени.
-* **Ледяное решение:**
+### 4. Современные способы обхода WAF и дактилоскопия JA4
+* **Проблема:** Современные межсетевые экраны веб-приложений (WAF, такие как Cloudflare или Akamai) блокируют автоматические запросы на основе отпечатков TLS ClientHello (JA3/JA4) и порядка заголовков HTTP (JA4H).
+
+* **Ледяное решение:** `aoni` эмулирует современные рукопожатия TLS в браузерах с использованием `uTLS` и автоматически выравнивает заголовки для генерации чистого, полностью совместимого с браузерами отпечатка. Встроенный подпакет [`ja4`](ja4/) обеспечивает вычисления JA4/JA4H на чистом Go.
+
+```go
+info := &aoni.TraceInfo{}
+
+client := aoni.NewClient(nil).
+    WithTLSFingerprint(aoni.BrowserChrome). // Подмена TLS ClientHello
+    WithJA4Callback(func(r ja4.JA4Report) {
+        fmt.Println("Active TLS Handshake JA4:", r.JA4)
+    })
+
+user, err := aoni.GetJSON[User](ctx, client, "/profile", 
+    aoni.Trace(info), 
+    aoni.TraceJA4(info), // Отслеживает отпечатки TLS (JA4) и HTTP (JA4H).
+)
+
+fmt.Println("Handshake TLS JA4:", info.JA4.JA4)   // "t13d1516h2_8daaf6152771_e5627efa2ab1"
+fmt.Println("Request HTTP JA4H:", info.JA4.JA4H)  // "ge11nn03enus_9ed1ff1f7b03_cd8dafe26982"
+```
+
+### 5. Диагностическая трассировка и автономная отладка
+* **Проблема:** Отслеживание сетевых узких мест между прокси-серверами затруднительно, а воспроизведение неудачных запросов в терминале для ручной проверки занимает время.
+
+* **Ледяное Решение:**
 
 ```go
 var trace aoni.TraceInfo
 
-_, _ = aoni.GetJSON[User](ctx, client, "/debug",
-    aoni.Trace(&trace), // Заполняет подробные метрики DNS, TCP и TLS
-    aoni.AsCurl(),      // Выводит эквивалентную, готовую к запуску команду curl в stderr
+aoni.GetJSON[User](ctx, client, "/debug",
+    aoni.Trace(&trace), // Подробные метрики DNS, TCP и TLS.
+    aoni.AsCurl(),      // Выводит эквивалентную исполняемую команду curl в стандартный поток ошибок
 )
 
 fmt.Printf("DNS: %s | TCP Connect: %s | TLS Handshake: %s | TTFB: %s\n",

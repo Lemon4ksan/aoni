@@ -34,6 +34,8 @@ to configure individual requests.
     unwrapping of multi-format compressions (gzip, brotli, zstd).
   - Transfer Progress: Up-to-the-byte progress tracking for uploads and downloads.
   - Diagnostic Tracing: Request timing tracking of DNS, TCP, and TLS metrics using [Trace].
+  - JA4+ Fingerprinting: Network traffic fingerprinting via the ja4 subpackage, supporting
+    JA4 (TLS client) and JA4H (HTTP client) fingerprints with [TraceJA4] and [WithJA4Callback].
 
 # Basic Usage Example
 

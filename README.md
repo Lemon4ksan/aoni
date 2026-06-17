@@ -20,8 +20,6 @@ When integrating with unstable APIs, scraping, or working with complex proxy net
 
 `aoni` bridges this gap. It models HTTP requests as pipeline flows processed by declarative **RequestModifiers** and standard Go **Middlewares**, leveraging generics for type-safe response decoding. It remains unwavering under network load, just like the blue oni.
 
-The standard `net/http` is like the mighty Oni. It's a stunning, fast, and efficient network engine. Aoni is its iron club (Kanabo).
-
 ```shell
 go get github.com/lemon4ksan/aoni
 ```
@@ -60,8 +58,6 @@ transport := &http.Transport{
     Proxy: http.ProxyURL(proxyURL),
 }
 client := &http.Client{Transport: transport}
-
-url := baseURL + "/users/" + strconv.FormatUint(id, 10)
 
 var lastErr error
 for i := 0; i < 3; i++ {
@@ -112,10 +108,9 @@ This matrix shows where `aoni` focuses its design compared to Go's default capab
 | **Active Circuit Breaking** | ✗ | ✗ | **✓ (Native Middleware)** |
 | **Polite `Retry-After` Parsing** | ✗ | ✗ | **✓ (Delta-sec & RFC1123)** |
 | **Non-UTF8 Charset Translation** | ✗ | ✗ | **✓ (Automatic)** |
-| **TLS Evasion (JA3)** | ✗ | ✗ | **✓ (via `uTLS`)** |
+| **TLS Evasion (JA3/JA4)** | ✗ | ✗ | **✓ (via `uTLS` & Handshake)** |
+| **JA4+ Fingerprinting** | ✗ | ✗ | **✓ (TLS & HTTP, pure Go)** |
 | **Sub-millisecond Tracing** | ⚠️ (Verbose) | ✗ | **✓ (Single-modifier)** |
-
----
 
 ## 🍳 Cookbook: Common Resiliency Recipes
 
@@ -165,16 +160,38 @@ manifest, err := aoni.GetJSON[Manifest](ctx, client, "/legacy-manifest",
 )
 ```
 
-### 4. Diagnostic Tracing & Offline Debugging
+### 4. Modern WAF Evasion & JA4 Fingerprinting
+* **The Problem:** Modern Web Application Firewalls (WAFs like Cloudflare or Akamai) block automated requests based on TLS ClientHello fingerprints (JA3/JA4) and HTTP header ordering (JA4H).
+* **The Ice-Cold Solution:** `aoni` natively emulates modern browser TLS handshakes using `uTLS` and automatically aligns headers to generate a clean, completely browser-compliant fingerprint. The built-in [`ja4`](ja4/) subpackage provides pure-Go JA4/JA4H computation.
+
+```go
+info := &aoni.TraceInfo{}
+
+client := aoni.NewClient(nil).
+    WithTLSFingerprint(aoni.BrowserChrome). // Spoofs TLS ClientHello
+    WithJA4Callback(func(r ja4.JA4Report) {
+        fmt.Println("Active TLS Handshake JA4:", r.JA4)
+    })
+
+user, err := aoni.GetJSON[User](ctx, client, "/profile", 
+    aoni.Trace(info), 
+    aoni.TraceJA4(info), // Traces both TLS (JA4) and HTTP (JA4H) fingerprints
+)
+
+fmt.Println("Handshake TLS JA4:", info.JA4.JA4)   // "t13d1516h2_8daaf6152771_e5627efa2ab1"
+fmt.Println("Request HTTP JA4H:", info.JA4.JA4H)  // "ge11nn03enus_9ed1ff1f7b03_cd8dafe26982"
+```
+
+### 5. Diagnostic Tracing & Offline Debugging
 * **The Problem:** Tracking network bottlenecks across proxies is difficult, and recreating failing requests in terminal for manual verification takes time.
 * **The Ice-Cold Solution:**
 
 ```go
 var trace aoni.TraceInfo
 
-_, _ = aoni.GetJSON[User](ctx, client, "/debug",
-    aoni.Trace(&trace), // Populates detailed DNS, TCP, and TLS metrics
-    aoni.AsCurl(),      // Prints equivalent, fully executable curl command to stderr
+aoni.GetJSON[User](ctx, client, "/debug",
+    aoni.Trace(&trace), // Detailed DNS, TCP, and TLS metrics
+    aoni.AsCurl(),      // Prints equivalent executable curl command to stderr
 )
 
 fmt.Printf("DNS: %s | TCP Connect: %s | TLS Handshake: %s | TTFB: %s\n",
