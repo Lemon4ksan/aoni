@@ -2,7 +2,7 @@
 
 # ❄️ aoni
 
-### The Ice-Cold Resilience Engine for Go HTTP Networks
+### The Ice-Cold Resilience Engine for Go HTTP & Real-Time Networks
 
 [![Go Reference](https://img.shields.io/badge/go-reference-007d9c?logo=go&logoColor=white&style=flat-square)](https://pkg.go.dev/github.com/lemon4ksan/aoni)
 [![Go Report Card](https://goreportcard.com/badge/github.com/lemon4ksan/aoni?style=flat-square)](https://goreportcard.com/report/github.com/lemon4ksan/aoni)
@@ -122,6 +122,9 @@ This matrix shows where `aoni` focuses its design compared to Go's default capab
 | **TLS Evasion (JA3/JA4)** | ✗ | ✗ | **✓ (via `uTLS` & Handshake)** |
 | **JA4+ Fingerprinting** | ✗ | ✗ | **✓ (TLS & HTTP, pure Go)** |
 | **Sub-millisecond Tracing** | ⚠️ (Verbose) | ✗ | **✓ (Single-modifier)** |
+| **Socket.IO / Engine.IO v4 Client** | ✗ | ✗ | **✓ (Complete v5 Spec)** |
+
+---
 
 ## 🍳 Cookbook: Common Resiliency Recipes
 
@@ -193,7 +196,31 @@ fmt.Println("Handshake TLS JA4:", info.JA4.JA4)   // "t13d1516h2_8daaf6152771_e5
 fmt.Println("Request HTTP JA4H:", info.JA4.JA4H)  // "ge11nn03enus_9ed1ff1f7b03_cd8dafe26982"
 ```
 
-### 5. Diagnostic Tracing & Offline Debugging
+### 5. Bulletproof, Real-Time Socket.IO v5 / Engine.IO v4 Streaming
+* **The Problem:** Real-time web sockets on protected servers get blocked during handshake due to standard Go TLS fingerprints, or silent TCP disconnects go unnoticed.
+* **The Ice-Cold Solution:** `aoni` establishes fully authenticated, JA4-spoofed, proxy-routed Socket.IO v5 sessions over standard WebSockets or stealthy HTTP/2 Extended CONNECT tunnels. It includes automatic, jittered backoff reconnection and ping-timeout heartbeats natively.
+
+```go
+cfg := aoni.SocketIOConfig{
+    Reconnection: true,
+    Namespace:    "/realtime-prices",
+    Auth:         map[string]string{"token": "my-secure-token"},
+}
+
+// Automatically inherits proxy rotators, DoT, JA4, and SSRF guards from the client!
+sio, err := aoni.DialSocketIO(ctx, client, "wss://api.pricedb.io", cfg)
+if err != nil {
+    log.Fatal(err)
+}
+
+sio.On("price_update", func(args []json.RawMessage) {
+    var price Price
+    _ = json.Unmarshal(args[0], &price)
+    fmt.Printf("Live Price: %s -> %.2f\n", price.SKU, price.Value)
+})
+```
+
+### 6. Diagnostic Tracing & Offline Debugging
 * **The Problem:** Tracking network bottlenecks across proxies is difficult, and recreating failing requests in terminal for manual verification takes time.
 * **The Ice-Cold Solution:**
 

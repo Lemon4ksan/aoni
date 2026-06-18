@@ -35,7 +35,7 @@ func main() {
 	socketURL := "ws://localhost:3000/socket.io/?EIO=4&transport=websocket"
 
 	// Connect to Socket.IO
-	sio, err := aoni.DialSocketIO(ctx, client, socketURL)
+	sio, err := aoni.DialSocketIO(ctx, client, socketURL, aoni.SocketIOConfig{})
 	if err != nil {
 		log.Fatalf("Failed to connect to Socket.IO: %v", err)
 	}

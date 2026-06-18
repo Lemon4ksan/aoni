@@ -174,7 +174,6 @@ func (c *Client) dialTLSForWS(ctx context.Context, addr string) (net.Conn, error
 			browser,
 			c.sourceRotator,
 			c.dnsResolver,
-			nil,
 			c.ja4Callback,
 			c.tlsClientConfig(),
 		)

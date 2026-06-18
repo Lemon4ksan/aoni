@@ -92,6 +92,7 @@ func (c *wsGorillaConn) Write(b []byte) (int, error) {
 	if utf8.Valid(b) {
 		msgType = websocket.TextMessage
 	}
+
 	if err := c.base.WriteMessage(msgType, b); err != nil {
 		_ = c.close()
 		return 0, err
