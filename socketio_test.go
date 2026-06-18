@@ -5,10 +5,18 @@
 package aoni
 
 import (
+	"bytes"
+	"context"
 	"encoding/json"
+	"io"
+	"net"
+	"net/http"
+	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
+	"github.com/gorilla/websocket"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -664,5 +672,109 @@ func TestBackoffNegativeDuration(t *testing.T) {
 	for range 10 {
 		d := b.nextDuration()
 		assert.True(t, d >= 0, "duration must be non-negative: %v", d)
+	}
+}
+
+func TestReadSingleEIOPacket_GorillaNoEOF(t *testing.T) {
+	t.Parallel()
+
+	upgrader := websocket.Upgrader{}
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		conn, err := upgrader.Upgrade(w, r, nil)
+		require.NoError(t, err)
+
+		defer conn.Close()
+
+		err = conn.WriteMessage(websocket.TextMessage, []byte("42[\"test\"]"))
+		require.NoError(t, err)
+
+		time.Sleep(2 * time.Second)
+	}))
+	defer server.Close()
+
+	wsURL := strings.Replace(server.URL, "http://", "ws://", 1)
+	client := NewClient(server.Client())
+
+	conn, _, err := DialWebSocket(t.Context(), client, wsURL)
+	require.NoError(t, err)
+
+	defer conn.Close()
+
+	ctx, cancel := context.WithTimeout(t.Context(), 500*time.Millisecond)
+	defer cancel()
+
+	type readResult struct {
+		pType   byte
+		payload []byte
+		err     error
+	}
+
+	ch := make(chan readResult, 1)
+
+	go func() {
+		pType, payload, err := readSingleEIOPacket(conn)
+		ch <- readResult{pType, payload, err}
+	}()
+
+	select {
+	case <-ctx.Done():
+		t.Fatal("timed out: readSingleEIOPacket blocked waiting for connection EOF (io.ReadAll bug)!")
+	case res := <-ch:
+		require.NoError(t, res.err)
+		assert.Equal(t, byte('4'), res.pType)
+		assert.Equal(t, []byte("2[\"test\"]"), res.payload)
+	}
+}
+
+type mockCustomConn struct {
+	net.Conn
+	reader io.Reader
+}
+
+func (m *mockCustomConn) Read(b []byte) (int, error) {
+	if m.reader == nil {
+		select {}
+	}
+
+	n, err := m.reader.Read(b)
+	if err == io.EOF {
+		m.reader = nil
+		return n, io.EOF
+	}
+
+	return n, err
+}
+
+func TestReadSingleEIOPacket_StreamNoEOF(t *testing.T) {
+	t.Parallel()
+
+	mockConn := &mockCustomConn{
+		reader: bytes.NewReader([]byte("42[\"custom_frame\"]")),
+	}
+
+	ctx, cancel := context.WithTimeout(t.Context(), 500*time.Millisecond)
+	defer cancel()
+
+	type readResult struct {
+		pType   byte
+		payload []byte
+		err     error
+	}
+
+	ch := make(chan readResult, 1)
+
+	go func() {
+		pType, payload, err := readSingleEIOPacket(mockConn)
+		ch <- readResult{pType, payload, err}
+	}()
+
+	select {
+	case <-ctx.Done():
+		t.Fatal("timed out: readSingleEIOPacket blocked on second Read call (io.ReadAll bug)!")
+	case res := <-ch:
+		require.NoError(t, res.err)
+		assert.Equal(t, byte('4'), res.pType)
+		assert.Equal(t, []byte("2[\"custom_frame\"]"), res.payload)
 	}
 }

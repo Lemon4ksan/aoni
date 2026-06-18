@@ -5,6 +5,7 @@
 package aoni
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -19,6 +20,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/gorilla/websocket"
 )
 
 const (
@@ -894,16 +897,7 @@ func (s *SocketIOConn) reconnectLoop() {
 }
 
 func (s *SocketIOConn) readEIOPacket() (byte, []byte, error) {
-	data, err := io.ReadAll(s.conn)
-	if err != nil {
-		return 0, nil, err
-	}
-
-	if len(data) == 0 {
-		return 0, nil, io.EOF
-	}
-
-	return data[0], data[1:], nil
+	return readSingleEIOPacket(s.conn)
 }
 
 func readEIOPacketCtx(ctx context.Context, conn net.Conn) (byte, []byte, error) {
@@ -915,18 +909,13 @@ func readEIOPacketCtx(ctx context.Context, conn net.Conn) (byte, []byte, error) 
 
 	ch := make(chan result, 1)
 	go func() {
-		data, err := io.ReadAll(conn)
+		pType, payload, err := readSingleEIOPacket(conn)
 		if err != nil {
 			ch <- result{err: err}
 			return
 		}
 
-		if len(data) == 0 {
-			ch <- result{err: io.EOF}
-			return
-		}
-
-		ch <- result{pType: data[0], payload: data[1:]}
+		ch <- result{pType: pType, payload: payload}
 	}()
 
 	select {
@@ -935,6 +924,50 @@ func readEIOPacketCtx(ctx context.Context, conn net.Conn) (byte, []byte, error) 
 	case r := <-ch:
 		return r.pType, r.payload, r.err
 	}
+}
+
+func readSingleEIOPacket(conn net.Conn) (byte, []byte, error) {
+	if wc, ok := conn.(interface{ RawConn() *websocket.Conn }); ok {
+		msgType, data, err := wc.RawConn().ReadMessage()
+		if err != nil {
+			return 0, nil, err
+		}
+
+		if len(data) == 0 {
+			return 0, nil, io.EOF
+		}
+
+		if msgType == websocket.BinaryMessage {
+			return eioBinary, data, nil
+		}
+
+		return data[0], data[1:], nil
+	}
+
+	var buf bytes.Buffer
+
+	tmp := make([]byte, 4096)
+	for {
+		n, err := conn.Read(tmp)
+		if n > 0 {
+			buf.Write(tmp[:n])
+		}
+
+		if err != nil {
+			if errors.Is(err, io.EOF) {
+				break
+			}
+
+			return 0, nil, err
+		}
+	}
+
+	data := buf.Bytes()
+	if len(data) == 0 {
+		return 0, nil, io.EOF
+	}
+
+	return data[0], data[1:], nil
 }
 
 func (s *SocketIOConn) writeEIOPacket(pType byte, payload []byte) error {
