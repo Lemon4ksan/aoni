@@ -309,7 +309,7 @@ func (c *Client) Request(
 
 	u := c.baseURL.ResolveReference(rel)
 
-	req, err := http.NewRequestWithContext(ctx, method, u.String(), http.NoBody)
+	req, err := http.NewRequestWithContext(ctx, method, u.String(), http.NoBody) //nolint:gosec
 	if err != nil {
 		return nil, fmt.Errorf("aoni: failed to create request: %w", err)
 	}

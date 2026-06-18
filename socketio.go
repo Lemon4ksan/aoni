@@ -201,7 +201,7 @@ func DialSocketIO(
 ) (*SocketIOConn, error) {
 	config.resolveDefaults()
 
-	conn, _, err := DialWebSocket(ctx, c, targetURL, mods...)
+	conn, _, err := DialWebSocket(ctx, c, targetURL, mods...) //nolint:bodyclose
 	if err != nil {
 		return nil, fmt.Errorf("aoni sio: dial websocket: %w", err)
 	}
@@ -625,6 +625,7 @@ func (s *SocketIOConn) readLoop() {
 			}
 
 			s.handleSIOPacket(payload)
+
 		case eioBinary:
 			if s.binaryBuf != nil && s.binaryBuf.addBuffer(payload) {
 				pkt, err := s.binaryBuf.reconstruct()
@@ -822,7 +823,7 @@ func (s *SocketIOConn) reconnectLoop() {
 		}
 
 		ctx, cancel := context.WithTimeout(context.Background(), s.config.ConnectTimeout)
-		conn, _, err := DialWebSocket(ctx, s.client, s.targetURL, s.mods...)
+		conn, _, err := DialWebSocket(ctx, s.client, s.targetURL, s.mods...) //nolint:bodyclose
 
 		cancel()
 
@@ -1030,8 +1031,8 @@ func (b *backoff) nextDuration() time.Duration {
 	ms := float64(b.min.Milliseconds()) * math.Pow(b.factor, float64(b.attempts))
 
 	if b.jitter > 0 {
-		deviation := math.Floor(rand.Float64() * b.jitter * ms)
-		if rand.IntN(2) == 0 {
+		deviation := math.Floor(rand.Float64() * b.jitter * ms) //nolint:gosec
+		if rand.IntN(2) == 0 {                                  //nolint:gosec
 			ms -= deviation
 		} else {
 			ms += deviation
@@ -1139,11 +1140,6 @@ func decodeSIOPacket(data []byte) (*sioPacket, error) {
 	}
 
 	return pkt, nil
-}
-
-func isBinary(obj any) bool {
-	_, ok := obj.([]byte)
-	return ok
 }
 
 func hasBinary(obj any) bool {
