@@ -40,7 +40,7 @@ func main() {
 			"httpbin.org": "httpbin.org",
 		}).
 		// Use DNS-over-TLS resolver to prevent ISP DNS snooping
-		WithDoTResolver("1.1.1.1", "cloudflare-dns.com").
+		WithDoT("1.1.1.1", "cloudflare-dns.com").
 		// Force HTTP/1.1 to avoid HTTP/2 fingerprinting
 		WithConnectionPool(aoni.ConnectionPoolConfig{
 			MaxIdleConns:        10,

@@ -206,7 +206,6 @@ type Client struct {
 	tlsBrowserID     BrowserID
 	fragmentConfig   *FragmentConfig
 	hostRewrite      *HostRewriteConfig
-	dotResolver      *DoTResolver
 	p0fSignature     *p0f.Signature
 	h2Settings       *HTTP2Settings
 }
@@ -266,7 +265,6 @@ func (c *Client) Clone() *Client {
 		tlsBrowserID:       c.tlsBrowserID,
 		fragmentConfig:     c.fragmentConfig,
 		hostRewrite:        c.hostRewrite,
-		dotResolver:        c.dotResolver,
 		p0fSignature:       c.p0fSignature,
 		h2Settings:         c.h2Settings,
 	}
@@ -731,7 +729,19 @@ func (c *Client) WithLocalAddrPool(addrs []string) *Client {
 func (c *Client) WithDNSResolver(resolver DNSResolver) *Client {
 	newClient := c.Clone()
 	newClient.dnsResolver = resolver
+	newClient.applyDialers()
+
 	return newClient
+}
+
+// WithDoT returns a new [Client] with the given DNS-over-TLS resolver.
+func (c *Client) WithDoT(endpoint, host string) *Client {
+	return c.WithDNSResolver(NewDoTResolver(endpoint, host))
+}
+
+// WithDoH returns a new [Client] with the given DNS-over-HTTPS resolver.
+func (c *Client) WithDoH(endpoint, host string) *Client {
+	return c.WithDNSResolver(NewDoHResolver(endpoint, host))
 }
 
 // WithBeforeRequest returns a new [Client] with the given request hook registered.
@@ -836,7 +846,6 @@ func (c *Client) WithTLSFingerprint(browser BrowserID) *Client {
 				browser,
 				newClient.sourceRotator,
 				newClient.dnsResolver,
-				newClient.dotResolver,
 				callback,
 				tlsConfig,
 			)
@@ -870,17 +879,6 @@ func (c *Client) WithFragmentation(cfg FragmentConfig) *Client {
 func (c *Client) WithHostRewrite(rules map[string]string) *Client {
 	newClient := c.Clone()
 	newClient.hostRewrite = &HostRewriteConfig{Rules: rules}
-	return newClient
-}
-
-// WithDoTResolver returns a new [Client] configured to use DNS-over-TLS for resolution.
-func (c *Client) WithDoTResolver(server, hostname string) *Client {
-	dot := NewDoTResolver(server, hostname)
-	newClient := c.Clone()
-	newClient.dotResolver = dot
-	newClient.dnsResolver = dot
-	newClient.applyDialers()
-
 	return newClient
 }
 
@@ -1013,7 +1011,6 @@ func dialTLSWithUTLS(
 	browser BrowserID,
 	sourceRotator *SourceIPRotator,
 	dnsResolver DNSResolver,
-	dotResolver *DoTResolver,
 	ja4Callback func(ja4.Report),
 	tlsConfig *tls.Config,
 ) (net.Conn, error) {
@@ -1032,12 +1029,7 @@ func dialTLSWithUTLS(
 		delay = 300 * time.Millisecond
 	}
 
-	resolver := dnsResolver
-	if dotResolver != nil {
-		resolver = dotResolver
-	}
-
-	conn, err := happyEyeballsDial(ctx, network, addr, delay, ssrfGuard, sourceRotator, resolver)
+	conn, err := happyEyeballsDial(ctx, network, addr, delay, ssrfGuard, sourceRotator, dnsResolver)
 	if err != nil {
 		return nil, err
 	}

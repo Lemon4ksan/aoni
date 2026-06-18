@@ -17,12 +17,12 @@ func TestNewDoTResolver(t *testing.T) {
 		t.Fatal("NewDoTResolver returned nil")
 	}
 
-	if resolver.Server != "1.1.1.1:853" {
-		t.Errorf("Server = %q, want %q", resolver.Server, "1.1.1.1:853")
+	if resolver.Endpoint != "1.1.1.1:853" {
+		t.Errorf("Server = %q, want %q", resolver.Endpoint, "1.1.1.1:853")
 	}
 
-	if resolver.Hostname != "cloudflare-dns.com" {
-		t.Errorf("Hostname = %q, want %q", resolver.Hostname, "cloudflare-dns.com")
+	if resolver.Host != "cloudflare-dns.com" {
+		t.Errorf("Hostname = %q, want %q", resolver.Host, "cloudflare-dns.com")
 	}
 
 	if resolver.Timeout != 5*time.Second {
@@ -62,7 +62,7 @@ func TestNewInMemoryDNSCache(t *testing.T) {
 }
 
 func TestNewDoHResolver(t *testing.T) {
-	resolver := aoni.NewDoHResolver("https://cloudflare-dns.com/dns-query")
+	resolver := aoni.NewDoHResolver("https://8.8.8.8/dns-query", "dns.google")
 	if resolver == nil {
 		t.Fatal("NewDoHResolver returned nil")
 	}

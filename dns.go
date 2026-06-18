@@ -75,16 +75,37 @@ func (c *InMemoryDNSCache) LookupIPAddr(ctx context.Context, host string) ([]net
 }
 
 // DoHResolver resolves DNS via HTTPS, supporting both A and AAAA records.
+// Uses an isolated [http.Client] that connects directly to the DoH server by IP,
+// bypassing the system resolver entirely to avoid circular DNS lookups.
 type DoHResolver struct {
-	client   *http.Client
-	endpoint string // e.g. "https://cloudflare-dns.com/dns-query"
+	Endpoint string // IP-based URL, e.g. "https://1.1.1.1/dns-query"
+	Host     string // Host header override, e.g. "cloudflare-dns.com"
+
+	client *http.Client
 }
 
-// NewDoHResolver creates a [DoHResolver] with the given endpoint URL.
-func NewDoHResolver(endpoint string) *DoHResolver {
+// NewDoHResolver creates a [DoHResolver] for Cloudflare's DoH endpoint.
+// The endpoint should be an IP-based URL (e.g. "https://1.1.1.1/dns-query"),
+// and host is the Host header value (e.g. "cloudflare-dns.com").
+func NewDoHResolver(endpoint, host string) *DoHResolver {
+	transport := &http.Transport{
+		TLSClientConfig: &tls.Config{
+			MinVersion: tls.VersionTLS12,
+		},
+		DialContext: (&net.Dialer{
+			Timeout:   5 * time.Second,
+			KeepAlive: 5 * time.Second,
+		}).DialContext,
+		ForceAttemptHTTP2: true,
+	}
+
 	return &DoHResolver{
-		client:   &http.Client{Timeout: 5 * time.Second},
-		endpoint: endpoint,
+		client: &http.Client{
+			Timeout:   5 * time.Second,
+			Transport: transport,
+		},
+		Endpoint: endpoint,
+		Host:     host,
 	}
 }
 
@@ -115,7 +136,7 @@ func (r *DoHResolver) LookupIPAddr(ctx context.Context, host string) ([]net.IPAd
 }
 
 func (r *DoHResolver) query(ctx context.Context, host string, qtype uint16) ([]net.IPAddr, error) {
-	reqURL := fmt.Sprintf("%s?name=%s&type=%d", r.endpoint, host, qtype)
+	reqURL := fmt.Sprintf("%s?name=%s&type=%d", r.Endpoint, host, qtype)
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, reqURL, nil)
 	if err != nil {
@@ -123,6 +144,10 @@ func (r *DoHResolver) query(ctx context.Context, host string, qtype uint16) ([]n
 	}
 
 	req.Header.Set("Accept", "application/dns-json")
+
+	if r.Host != "" {
+		req.Host = r.Host
+	}
 
 	resp, err := r.client.Do(req)
 	if err != nil {
@@ -151,16 +176,16 @@ func (r *DoHResolver) query(ctx context.Context, host string, qtype uint16) ([]n
 // DoTResolver resolves DNS over TLS, querying both A and AAAA records.
 // Uses github.com/miekg/dns for reliable DNS packet construction and parsing.
 type DoTResolver struct {
-	Server   string // e.g. "1.1.1.1:853"
-	Hostname string // TLS SNI, e.g. "cloudflare-dns.com"
+	Endpoint string // e.g. "1.1.1.1:853"
+	Host     string // TLS SNI, e.g. "cloudflare-dns.com"
 	Timeout  time.Duration
 }
 
 // NewDoTResolver creates a [DoTResolver] with the specified server and TLS hostname.
-func NewDoTResolver(server, hostname string) *DoTResolver {
+func NewDoTResolver(endpoint, host string) *DoTResolver {
 	return &DoTResolver{
-		Server:   server,
-		Hostname: hostname,
+		Endpoint: endpoint,
+		Host:     host,
 		Timeout:  5 * time.Second,
 	}
 }
@@ -201,11 +226,11 @@ func (d *DoTResolver) lookup(ctx context.Context, host string, qtype uint16) ([]
 	// TLS dial
 	var dialer tls.Dialer
 
-	dialer.Config = &tls.Config{ServerName: d.Hostname}
+	dialer.Config = &tls.Config{ServerName: d.Host}
 
-	conn, err := dialer.DialContext(ctx, "tcp", d.Server)
+	conn, err := dialer.DialContext(ctx, "tcp", d.Endpoint)
 	if err != nil {
-		return nil, fmt.Errorf("aoni dot: tls dial %s: %w", d.Server, err)
+		return nil, fmt.Errorf("aoni dot: tls dial %s: %w", d.Endpoint, err)
 	}
 	defer conn.Close()
 
