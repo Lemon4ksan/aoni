@@ -49,6 +49,13 @@ type wsGorillaConn struct {
 	once   sync.Once
 }
 
+// RawConn returns the raw pointer to the gorilla library's [websocket.Conn].
+// This is necessary for integration with external socket managers,
+// which require direct access to the gorilla/websocket API.
+func (c *wsGorillaConn) RawConn() *websocket.Conn {
+	return c.base
+}
+
 func (c *wsGorillaConn) Read(b []byte) (int, error) {
 	for {
 		if c.reader != nil {
@@ -155,7 +162,7 @@ func (c *wsRawConn) Read(b []byte) (int, error) {
 			n, err := c.reader.Read(b)
 			if err == io.EOF {
 				c.reader = nil
-				return n, nil
+				return n, io.EOF
 			}
 
 			return n, err
