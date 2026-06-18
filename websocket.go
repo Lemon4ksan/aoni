@@ -109,6 +109,8 @@ func DialWebSocket(
 		return nil, nil, fmt.Errorf("aoni: failed to create ws request: %w", err)
 	}
 
+	maps.Copy(tmpReq.Header, c.headers)
+
 	for _, mod := range mods {
 		if mod != nil {
 			mod(tmpReq)
@@ -312,6 +314,8 @@ func DialWebSocketWithConfig(
 	if err != nil {
 		return nil, nil, fmt.Errorf("aoni: failed to create ws request: %w", err)
 	}
+
+	maps.Copy(tmpReq.Header, c.headers)
 
 	for _, mod := range mods {
 		if mod != nil {

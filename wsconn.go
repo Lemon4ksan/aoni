@@ -135,7 +135,7 @@ func (c *wsRawConn) Read(b []byte) (int, error) {
 		n, err := c.reader.Read(b)
 		if err == io.EOF {
 			c.reader = nil
-			return n, nil
+			return n, io.EOF
 		}
 
 		return n, err
