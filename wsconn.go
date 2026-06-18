@@ -13,6 +13,7 @@ import (
 	"net"
 	"sync"
 	"time"
+	"unicode/utf8"
 
 	"github.com/gorilla/websocket"
 	"golang.org/x/net/http2"
@@ -87,7 +88,11 @@ func (c *wsGorillaConn) Read(b []byte) (int, error) {
 }
 
 func (c *wsGorillaConn) Write(b []byte) (int, error) {
-	if err := c.base.WriteMessage(websocket.BinaryMessage, b); err != nil {
+	msgType := websocket.BinaryMessage
+	if utf8.Valid(b) {
+		msgType = websocket.TextMessage
+	}
+	if err := c.base.WriteMessage(msgType, b); err != nil {
 		_ = c.close()
 		return 0, err
 	}
@@ -186,7 +191,12 @@ func (c *wsRawConn) Write(b []byte) (int, error) {
 	<-c.writeMu
 	defer func() { c.writeMu <- struct{}{} }()
 
-	if err := c.writeFrame(wsFrameBinary, b); err != nil {
+	opcode := byte(wsFrameBinary)
+	if utf8.Valid(b) {
+		opcode = byte(wsFrameText)
+	}
+
+	if err := c.writeFrame(opcode, b); err != nil {
 		_ = c.close()
 		return 0, err
 	}
