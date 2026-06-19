@@ -5,6 +5,7 @@
 package aoni
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
@@ -328,6 +329,16 @@ func handleResponse(resp *http.Response, target any, requester Requester) error 
 		return errors.New("aoni: response is nil")
 	}
 
+	if resp.Request != nil {
+		if targetPtr, ok := resp.Request.Context().Value(capturerCtxKey{}).(**http.Response); ok {
+			*targetPtr = resp
+		} else {
+			defer closeResponse(resp)
+		}
+	} else {
+		defer closeResponse(resp)
+	}
+
 	if resp.Request != nil && resp.Request.Context().Value(debugCtxKey{}) != nil {
 		reqDump, _ := httputil.DumpRequestOut(resp.Request, true)
 		respDump, _ := httputil.DumpResponse(resp, true)
@@ -344,18 +355,10 @@ func handleResponse(resp *http.Response, target any, requester Requester) error 
 		}
 	}
 
-	if resp.Request != nil {
-		if targetPtr, ok := resp.Request.Context().Value(capturerCtxKey{}).(**http.Response); ok {
-			*targetPtr = resp
-		} else {
-			defer closeResponse(resp)
-		}
-	} else {
-		defer closeResponse(resp)
-	}
+	peekableReader := bufio.NewReader(newBOMStrippingReader(resp.Body))
 
 	resp.Body = &bomStrippingReadCloser{
-		Reader: newBOMStrippingReader(resp.Body),
+		Reader: peekableReader,
 		Closer: resp.Body,
 	}
 
@@ -366,9 +369,36 @@ func handleResponse(resp *http.Response, target any, requester Requester) error 
 		}
 	}
 
+	_, isRaw := decoder.(rawDecoder)
+
+	if !isRaw {
+		if peekBytes, err := peekableReader.Peek(128); err == nil || (err == io.EOF && len(peekBytes) > 0) {
+			firstNonSpace := byte(0)
+			for _, b := range peekBytes {
+				if b != ' ' && b != '\t' && b != '\r' && b != '\n' {
+					firstNonSpace = b
+					break
+				}
+			}
+
+			if firstNonSpace == '<' {
+				bodyStr := strings.ToLower(string(peekBytes))
+				isHTML := strings.Contains(bodyStr, "<html") || strings.Contains(bodyStr, "<!doctype html")
+
+				if isHTML {
+					if strings.Contains(bodyStr, "cf-challenge") || strings.Contains(bodyStr, "ray id") ||
+						strings.Contains(bodyStr, "cloudflare") {
+						return ErrCloudflareChallenge
+					}
+
+					return fmt.Errorf("%w: expected structured data but got HTML", ErrUnexpectedContentType)
+				}
+			}
+		}
+	}
+
 	if contentType := resp.Header.Get("Content-Type"); contentType != "" {
 		if mediaType, _, err := mime.ParseMediaType(contentType); err == nil {
-			_, isRaw := decoder.(rawDecoder)
 			if (mediaType == "text/html" || mediaType == "application/xhtml+xml") && !isRaw {
 				bodyBytes, _ := io.ReadAll(io.LimitReader(resp.Body, 100*1024))
 				_ = resp.Body.Close()
