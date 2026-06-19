@@ -85,6 +85,8 @@ func GetJSON[Resp any](
 	}
 
 	if reflect.TypeFor[Resp]() == reflect.TypeFor[NoResponse]() {
+		closeResponse(resp)
+
 		return nil, err
 	}
 
@@ -128,6 +130,8 @@ func PostForm[Req, Resp any](
 	}
 
 	if reflect.TypeFor[Resp]() == reflect.TypeFor[NoResponse]() {
+		closeResponse(resp)
+
 		return nil, err
 	}
 
@@ -172,6 +176,8 @@ func PostJSON[Req, Resp any](
 	}
 
 	if reflect.TypeFor[Resp]() == reflect.TypeFor[NoResponse]() {
+		closeResponse(resp)
+
 		return nil, err
 	}
 
@@ -216,6 +222,8 @@ func PutJSON[Req, Resp any](
 	}
 
 	if reflect.TypeFor[Resp]() == reflect.TypeFor[NoResponse]() {
+		closeResponse(resp)
+
 		return nil, err
 	}
 
@@ -260,6 +268,8 @@ func PatchJSON[Req, Resp any](
 	}
 
 	if reflect.TypeFor[Resp]() == reflect.TypeFor[NoResponse]() {
+		closeResponse(resp)
+
 		return nil, err
 	}
 
@@ -313,6 +323,8 @@ func DeleteJSON[Req, Resp any](
 	}
 
 	if reflect.TypeFor[Resp]() == reflect.TypeFor[NoResponse]() {
+		closeResponse(resp)
+
 		return nil, err
 	}
 
