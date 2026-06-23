@@ -139,7 +139,9 @@ func newFinalizerReadCloser(rc io.ReadCloser) io.ReadCloser {
 	f := &finalizerReadCloser{ReadCloser: rc}
 	runtime.SetFinalizer(f, func(fr *finalizerReadCloser) {
 		if !fr.closed.Load() {
-			slog.Warn("aoni: response body was not closed, closing automatically via GC finalizer")
+			// Log in a separate goroutine so a blocked logger cannot stall
+			// the GC finalizer chain for the entire process.
+			go slog.Warn("aoni: response body was not closed, closing automatically via GC finalizer")
 
 			_ = fr.ReadCloser.Close()
 			// Also ensure any temp-files in the chain are cleaned up.
