@@ -13,6 +13,7 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"slices"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -186,10 +187,22 @@ func (lb *LoadBalancer) Do(req *http.Request) (*http.Response, error) {
 		indices[i] = uint64(i)
 	}
 
-	if lb.config.Strategy == Random {
+	switch lb.config.Strategy {
+	case Random:
 		rand.Shuffle(len(indices), func(i, j int) {
 			indices[i], indices[j] = indices[j], indices[i]
 		})
+	case WeightedRoundRobin:
+		// Sort indices by weight (descending) for weighted selection.
+		slices.SortStableFunc(indices, func(a, b uint64) int {
+			return backends[b].Weight - backends[a].Weight
+		})
+	default:
+		// RoundRobin: start from current position and wrap around.
+		start := lb.current.Add(1) % n
+		for i := range indices {
+			indices[i] = (start + uint64(i)) % n
+		}
 	}
 
 	for _, idx := range indices {
@@ -232,43 +245,6 @@ func (lb *LoadBalancer) Do(req *http.Request) (*http.Response, error) {
 	}
 
 	return nil, errors.New("aoni: no healthy backends available")
-}
-
-func (lb *LoadBalancer) nextIndex(n uint64) uint64 {
-	switch lb.config.Strategy {
-	case Random:
-		return rand.Uint64() % n //nolint:gosec
-	case WeightedRoundRobin:
-		return lb.weightedIndex(n)
-	default:
-		return lb.current.Add(1) % n
-	}
-}
-
-func (lb *LoadBalancer) weightedIndex(n uint64) uint64 {
-	lb.mu.RLock()
-	defer lb.mu.RUnlock()
-
-	totalWeight := 0
-	for _, b := range lb.backends {
-		totalWeight += b.Weight
-	}
-
-	if totalWeight == 0 {
-		return lb.current.Add(1) % n
-	}
-
-	target := rand.IntN(totalWeight) //nolint:gosec
-	cumulative := 0
-
-	for i, b := range lb.backends {
-		cumulative += b.Weight
-		if target < cumulative {
-			return uint64(i)
-		}
-	}
-
-	return 0
 }
 
 func (lb *LoadBalancer) isAvailable(b *Backend) bool {

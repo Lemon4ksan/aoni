@@ -296,8 +296,7 @@ func (c *Client) Clone() *Client {
 	if httpClient, ok := cloned.http.(*http.Client); ok {
 		clonedHTTP := *httpClient
 		if transport, ok := clonedHTTP.Transport.(*http.Transport); ok {
-			clonedTransport := *transport
-			clonedHTTP.Transport = &clonedTransport
+			clonedHTTP.Transport = cloneTransport(transport)
 		}
 
 		cloned.http = &clonedHTTP
@@ -1143,6 +1142,14 @@ func (c *Client) CloseIdleConnections() {
 	if httpClient, ok := c.http.(*http.Client); ok {
 		httpClient.CloseIdleConnections()
 	}
+}
+
+// cloneTransport creates a shallow copy of an http.Transport.
+// The copy is safe because it is performed before any concurrent use.
+func cloneTransport(t *http.Transport) *http.Transport {
+	cloned := new(http.Transport)
+	*cloned = *t //nolint:govet // Safe: copied before any concurrent use.
+	return cloned
 }
 
 func (c *Client) applyDialers() {
