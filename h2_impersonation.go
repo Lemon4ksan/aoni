@@ -8,7 +8,43 @@ import (
 	"bytes"
 	"net"
 	"strings"
+
+	"github.com/lemon4ksan/aoni/profiles"
 )
+
+// HTTP2Settings holds the full set of HTTP/2 connection parameters
+// for browser-grade frame impersonation. Each field maps directly to
+// an HTTP/2 SETTINGS frame parameter or PRIORITY frame value.
+type HTTP2Settings struct {
+	HeaderTableSize      uint32
+	EnablePush           uint32
+	MaxConcurrentStreams uint32
+	InitialWindowSize    uint32
+	MaxFrameSize         uint32
+	MaxHeaderListSize    uint32
+	ConnectionFlow       uint32
+	InitialStreamID      uint32
+	PriorityStreamDep    uint32
+	PriorityExclusive    bool
+	PriorityWeight       uint8
+}
+
+// H2SettingsFromProfile populates HTTP2Settings from a profiles.H2Settings.
+func H2SettingsFromProfile(s profiles.H2Settings) HTTP2Settings {
+	return HTTP2Settings{
+		HeaderTableSize:      s.HeaderTableSize,
+		EnablePush:           s.EnablePush,
+		MaxConcurrentStreams: s.MaxConcurrentStreams,
+		InitialWindowSize:    s.InitialWindowSize,
+		MaxFrameSize:         s.MaxFrameSize,
+		MaxHeaderListSize:    s.MaxHeaderListSize,
+		ConnectionFlow:       s.ConnectionFlow,
+		InitialStreamID:      s.InitialStreamID,
+		PriorityStreamDep:    s.PriorityStreamDep,
+		PriorityExclusive:    s.PriorityExclusive,
+		PriorityWeight:       s.PriorityWeight,
+	}
+}
 
 type headerOrderingConn struct {
 	net.Conn
@@ -86,10 +122,4 @@ func reorderHTTP1Headers(raw []byte, order []string) ([]byte, bool) {
 	newHeaderPart.Write(bodyPart)
 
 	return newHeaderPart.Bytes(), true
-}
-
-// HTTP2Settings holds the settings for an HTTP/2 connection.
-type HTTP2Settings struct {
-	MaxHeaderListSize uint32
-	InitialWindowSize uint32
 }

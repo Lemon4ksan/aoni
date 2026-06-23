@@ -32,6 +32,7 @@ import (
 
 	"github.com/lemon4ksan/aoni/ja4"
 	"github.com/lemon4ksan/aoni/p0f"
+	"github.com/lemon4ksan/aoni/profiles"
 )
 
 // DefaultUserAgent is the default User-Agent string used for HTTP requests.
@@ -916,6 +917,31 @@ func (c *Client) WithHTTP2Settings(settings HTTP2Settings) *Client {
 	newClient := c.Clone()
 	newClient.h2Settings = &settings
 	return newClient
+}
+
+// WithH2FramedTransport returns a new [Client] that wraps the transport to inject
+// browser-specific HTTP/2 SETTINGS and PRIORITY frames during connection setup.
+// This ensures the HTTP/2 fingerprint matches the TLS fingerprint from uTLS.
+func (c *Client) WithH2FramedTransport(settings HTTP2Settings) *Client {
+	newClient := c.Clone()
+	newClient.h2Settings = &settings
+
+	if transport := newClient.Transport(); transport != nil {
+		framed := NewH2FramedTransport(transport, settings)
+		if httpClient, ok := newClient.http.(*http.Client); ok {
+			httpClient.Transport = framed
+		}
+	}
+
+	return newClient
+}
+
+// WithProfileH2Settings returns a new [Client] with HTTP/2 settings extracted
+// from a [profiles.H2Settings]. This ensures the HTTP/2 frame fingerprint
+// matches the browser used in the TLS fingerprint.
+func (c *Client) WithProfileH2Settings(s profiles.H2Settings) *Client {
+	settings := H2SettingsFromProfile(s)
+	return c.WithH2FramedTransport(settings)
 }
 
 // WithP0fSignature configures TCP/IP spoofing based on a p0f signature.
