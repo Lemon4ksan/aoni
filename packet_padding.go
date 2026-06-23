@@ -5,7 +5,7 @@
 package aoni
 
 import (
-	"math/rand"
+	"crypto/rand"
 	"net"
 )
 
@@ -49,10 +49,27 @@ func GeneratePadding(cfg PacketPaddingConfig) []byte {
 		max = min
 	}
 
-	n := min + rand.Intn(max-min+1) //nolint:gosec
+	n := min + randIntn(max-min+1) //nolint:gosec
 	padding := make([]byte, n)
-	rand.Read(padding) //nolint:errcheck
+
+	_, _ = rand.Read(padding)
+
 	return padding
+}
+
+// randIntn returns a cryptographically secure random int in [0, n).
+func randIntn(n int) int {
+	if n <= 0 {
+		return 0
+	}
+
+	var buf [8]byte
+
+	_, _ = rand.Read(buf[:])
+
+	val := uint64(buf[0])<<24 | uint64(buf[1])<<16 | uint64(buf[2])<<8 | uint64(buf[3])
+
+	return int(val % uint64(n)) //nolint:gosec
 }
 
 // PaddingHeaderName returns the header name for padding, defaulting to "X-Padding".

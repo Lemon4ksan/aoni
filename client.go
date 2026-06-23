@@ -10,6 +10,7 @@ import (
 	"context"
 	"crypto/tls"
 	"encoding/base64"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
@@ -389,7 +390,7 @@ func (c *Client) Request(
 	if c.packetPadding != nil {
 		if padding := GeneratePadding(*c.packetPadding); len(padding) > 0 {
 			headerName := PaddingHeaderName(*c.packetPadding)
-			req.Header.Set(headerName, fmt.Sprintf("%x", padding))
+			req.Header.Set(headerName, hex.EncodeToString(padding))
 		}
 	}
 
@@ -410,11 +411,12 @@ func (c *Client) Request(
 	requestStart := time.Now()
 
 	var hedgingDelay time.Duration
-	if req.Context().Value(hedgingCtxKey{}) != nil {
+	switch {
+	case req.Context().Value(hedgingCtxKey{}) != nil:
 		hedgingDelay = req.Context().Value(hedgingCtxKey{}).(time.Duration)
-	} else if c.dynamicHedging != nil {
+	case c.dynamicHedging != nil:
 		hedgingDelay = c.dynamicHedging.ComputeDelay()
-	} else {
+	default:
 		hedgingDelay = c.hedgingDelay
 	}
 
@@ -764,6 +766,7 @@ func (c *Client) WithPacketPadding(cfg PacketPaddingConfig) *Client {
 	newClient := c.Clone()
 	newClient.packetPadding = &cfg
 	newClient.applyDialers()
+
 	return newClient
 }
 
@@ -1050,6 +1053,7 @@ func (c *Client) WithProxyDNS() *Client {
 	newClient := c.Clone()
 	newClient.proxyDNS = true
 	newClient.applyDialers()
+
 	return newClient
 }
 
@@ -1587,7 +1591,8 @@ func happyEyeballsDial(
 		}
 
 		// Apply MSS limiting if configured.
-		if cfg, ok := ctx.Value(packetPaddingCtxKey{}).(*PacketPaddingConfig); ok && cfg != nil && cfg.MaxSegmentSize > 0 {
+		if cfg, ok := ctx.Value(packetPaddingCtxKey{}).(*PacketPaddingConfig); ok && cfg != nil &&
+			cfg.MaxSegmentSize > 0 {
 			conn = wrapWithMSSLimit(conn, cfg.MaxSegmentSize)
 		}
 
@@ -1642,7 +1647,8 @@ func happyEyeballsDial(
 			conn, err := dialer.DialContext(dialCtx, network, net.JoinHostPort(targetIP.String(), port))
 			if err == nil {
 				// Apply MSS limiting if configured.
-				if cfg, ok := dialCtx.Value(packetPaddingCtxKey{}).(*PacketPaddingConfig); ok && cfg != nil && cfg.MaxSegmentSize > 0 {
+				if cfg, ok := dialCtx.Value(packetPaddingCtxKey{}).(*PacketPaddingConfig); ok && cfg != nil &&
+					cfg.MaxSegmentSize > 0 {
 					conn = wrapWithMSSLimit(conn, cfg.MaxSegmentSize)
 				}
 
@@ -1706,7 +1712,7 @@ func happyEyeballsDial(
 func dialViaProxy(ctx context.Context, network, host, port string, proxyURL *url.URL) (net.Conn, error) {
 	proxyAddr := proxyURL.Host
 	if proxyAddr == "" {
-		return nil, fmt.Errorf("aoni: proxy DNS enabled but proxy address is empty")
+		return nil, errors.New("aoni: proxy DNS enabled but proxy address is empty")
 	}
 
 	if net.ParseIP(proxyAddr) == nil {
@@ -1717,6 +1723,7 @@ func dialViaProxy(ctx context.Context, network, host, port string, proxyURL *url
 	}
 
 	dialer := &net.Dialer{Timeout: 30 * time.Second}
+
 	proxyConn, err := dialer.DialContext(ctx, "tcp", proxyAddr)
 	if err != nil {
 		return nil, fmt.Errorf("aoni: dial proxy %s: %w", proxyAddr, err)
@@ -1740,6 +1747,7 @@ func dialViaProxy(ctx context.Context, network, host, port string, proxyURL *url
 	}
 
 	buf := make([]byte, 1024)
+
 	n, err := proxyConn.Read(buf)
 	if err != nil {
 		_ = proxyConn.Close()
@@ -1787,15 +1795,20 @@ func socks5Handshake(conn net.Conn, host, port string, proxyURL *url.URL) error 
 	switch resp[1] {
 	case 0x02: // Username/Password
 		if proxyURL.User == nil {
-			return fmt.Errorf("aoni: socks5 server requires auth but no credentials provided")
+			return errors.New("aoni: socks5 server requires auth but no credentials provided")
 		}
 
 		username := proxyURL.User.Username()
 		password, _ := proxyURL.User.Password()
 
-		auth := []byte{0x01, byte(len(username))}
+		if len(username) > 255 || len(password) > 255 {
+			return errors.New("aoni: socks5 auth credentials exceed 255 byte limit")
+		}
+
+		auth := make([]byte, 0, 2+len(username)+1+len(password))
+		auth = append(auth, 0x01, byte(len(username))) //nolint:gosec
 		auth = append(auth, []byte(username)...)
-		auth = append(auth, byte(len(password)))
+		auth = append(auth, byte(len(password))) //nolint:gosec
 		auth = append(auth, []byte(password)...)
 
 		if _, err := conn.Write(auth); err != nil {
@@ -1817,12 +1830,20 @@ func socks5Handshake(conn net.Conn, host, port string, proxyURL *url.URL) error 
 	}
 
 	// Step 4: Connection request (remote DNS - ATYP=0x03 domain name)
-	req := []byte{0x05, 0x01, 0x00, 0x03} // VER=5, CMD=CONNECT, RSV=0, ATYP=DOMAIN
-	req = append(req, byte(len(host)))
-	req = append(req, []byte(host)...)
+	if len(host) > 255 {
+		return fmt.Errorf("aoni: socks5 hostname exceeds 255 bytes: %s", host)
+	}
 
-	portNum, _ := strconv.Atoi(port)
-	req = append(req, byte(portNum>>8), byte(portNum))
+	portNum, err := strconv.Atoi(port)
+	if err != nil || portNum < 0 || portNum > 65535 {
+		return fmt.Errorf("aoni: socks5 invalid port: %s", port)
+	}
+
+	req := make([]byte, 0, 5+len(host)+2)
+	req = append(req, 0x05, 0x01, 0x00, 0x03) //nolint:gosec // VER=5, CMD=CONNECT, RSV=0, ATYP=DOMAIN
+	req = append(req, byte(len(host)))        //nolint:gosec
+	req = append(req, []byte(host)...)
+	req = append(req, byte(portNum>>8), byte(portNum)) //nolint:gosec
 
 	if _, err := conn.Write(req); err != nil {
 		return fmt.Errorf("aoni: socks5 connect request: %w", err)
@@ -1841,16 +1862,17 @@ func socks5Handshake(conn net.Conn, host, port string, proxyURL *url.URL) error 
 	// Skip the rest of the reply (bind addr + bind port)
 	switch reply[3] {
 	case 0x01: // IPv4
-		io.CopyN(io.Discard, conn, 4+2) //nolint:errcheck
+		_, _ = io.CopyN(io.Discard, conn, 4+2)
 	case 0x03: // Domain
 		domainLen := make([]byte, 1)
 		if _, err := io.ReadFull(conn, domainLen); err != nil {
 			return fmt.Errorf("aoni: socks5 read domain length: %w", err)
 		}
 
-		io.CopyN(io.Discard, conn, int64(domainLen[0])+2) //nolint:errcheck
+		_, _ = io.CopyN(io.Discard, conn, int64(domainLen[0])+2)
+
 	case 0x04: // IPv6
-		io.CopyN(io.Discard, conn, 16+2) //nolint:errcheck
+		_, _ = io.CopyN(io.Discard, conn, 16+2)
 	}
 
 	return nil
