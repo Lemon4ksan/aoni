@@ -7,6 +7,7 @@ package p0f
 import (
 	"net"
 	"slices"
+	"syscall"
 )
 
 // Spoofer applies TCP/IP field spoofing based on a p0f signature.
@@ -35,6 +36,19 @@ func (s *Spoofer) Apply(conn net.Conn) error {
 	raw, err := tcpConn.SyscallConn()
 	if err != nil {
 		return nil //nolint:nilerr
+	}
+
+	applySignature(raw, s.sig)
+
+	return nil
+}
+
+// ApplyToRawConn applies the p0f signature to a syscall.RawConn.
+// This is intended for use with net.Dialer.Control to set socket options
+// before the TCP handshake (SYN packet) is sent.
+func (s *Spoofer) ApplyToRawConn(raw syscall.RawConn) error {
+	if s.sig == nil {
+		return nil
 	}
 
 	applySignature(raw, s.sig)

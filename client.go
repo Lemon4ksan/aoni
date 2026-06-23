@@ -5,6 +5,7 @@
 package aoni
 
 import (
+	"bufio"
 	"bytes"
 	"compress/gzip"
 	"context"
@@ -24,6 +25,7 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
+	"syscall"
 	"time"
 
 	"github.com/andybalholm/brotli"
@@ -280,16 +282,48 @@ func (c *Client) Clone() *Client {
 		headersCookieJar:   c.headersCookieJar,
 		ja4Callback:        c.ja4Callback,
 		tlsBrowserID:       c.tlsBrowserID,
-		fragmentConfig:     c.fragmentConfig,
-		hostRewrite:        c.hostRewrite,
-		p0fSignature:       c.p0fSignature,
-		h2Settings:         c.h2Settings,
 		proxyDNS:           c.proxyDNS,
 		proxyAddr:          c.proxyAddr,
 		dynamicHedging:     c.dynamicHedging,
 		sessionCache:       c.sessionCache,
-		packetPadding:      c.packetPadding,
 		transportProxy:     c.transportProxy,
+	}
+
+	// Deep copy mutable config structs so mutations in one clone don't affect others.
+	if c.fragmentConfig != nil {
+		fragCopy := *c.fragmentConfig
+		cloned.fragmentConfig = &fragCopy
+	}
+
+	if c.hostRewrite != nil && c.hostRewrite.Rules != nil {
+		rulesCopy := make(map[string]string, len(c.hostRewrite.Rules))
+		maps.Copy(rulesCopy, c.hostRewrite.Rules)
+		cloned.hostRewrite = &HostRewriteConfig{Rules: rulesCopy}
+	}
+
+	if c.p0fSignature != nil {
+		sigCopy := *c.p0fSignature
+		if len(sigCopy.Options) > 0 {
+			optsCopy := make([]string, len(sigCopy.Options))
+			copy(optsCopy, sigCopy.Options)
+			sigCopy.Options = optsCopy
+		}
+		if len(sigCopy.Quirks) > 0 {
+			qCopy := make([]string, len(sigCopy.Quirks))
+			copy(qCopy, sigCopy.Quirks)
+			sigCopy.Quirks = qCopy
+		}
+		cloned.p0fSignature = &sigCopy
+	}
+
+	if c.h2Settings != nil {
+		h2Copy := *c.h2Settings
+		cloned.h2Settings = &h2Copy
+	}
+
+	if c.packetPadding != nil {
+		padCopy := *c.packetPadding
+		cloned.packetPadding = &padCopy
 	}
 
 	// Clone the http.Client and its transport so mutations don't affect the original.
@@ -418,6 +452,10 @@ func (c *Client) Request(
 				req.AddCookie(cookie)
 			}
 		}
+		// Set active proxy so SetCookies/Cookies during redirects use the right jar.
+		if proxyURL, ok := ctx.Value(proxyCtxKey{}).(string); ok {
+			isolatedJar.SetActiveProxy(proxyURL)
+		}
 	}
 
 	var (
@@ -441,6 +479,10 @@ func (c *Client) Request(
 		resp, reqErr = c.executeWithHedging(ctx, hedgingDelay, req)
 	} else {
 		resp, reqErr = c.http.Do(req)
+	}
+
+	if isolatedJar, ok := c.headersCookieJar.(*ProxyIsolatedCookieJar); ok {
+		isolatedJar.ClearActiveProxy()
 	}
 
 	// Copy TLS JA4 report from the dialer store to the target TraceInfo.
@@ -718,18 +760,30 @@ func (c *Client) WithLocalAddr(addr string) *Client {
 	if transport := newClient.Transport(); transport != nil {
 		localAddr, err := net.ResolveIPAddr("ip", addr)
 		if err == nil {
-			dialer := &net.Dialer{
-				LocalAddr: &net.TCPAddr{IP: localAddr.IP},
-				Timeout:   30 * time.Second,
-				KeepAlive: 30 * time.Second,
-			}
 			prevDial := transport.DialContext
-			transport.DialContext = func(ctx context.Context, network, addr string) (net.Conn, error) {
-				if prevDial != nil {
-					return prevDial(ctx, network, addr)
+			transport.DialContext = func(ctx context.Context, network, raddr string) (net.Conn, error) {
+				dialer := &net.Dialer{
+					Timeout:   30 * time.Second,
+					KeepAlive: 30 * time.Second,
 				}
 
-				return dialer.DialContext(ctx, network, addr)
+				// Only bind local address if IP families match to avoid EAFNOSUCE.
+				host, _, splitErr := net.SplitHostPort(raddr)
+				if splitErr == nil {
+					if targetIP := net.ParseIP(host); targetIP != nil {
+						localIsV4 := localAddr.IP.To4() != nil
+						targetIsV4 := targetIP.To4() != nil
+						if localIsV4 == targetIsV4 {
+							dialer.LocalAddr = &net.TCPAddr{IP: localAddr.IP}
+						}
+					}
+				}
+
+				if prevDial != nil {
+					return prevDial(ctx, network, raddr)
+				}
+
+				return dialer.DialContext(ctx, network, raddr)
 			}
 		}
 	}
@@ -1608,6 +1662,14 @@ func happyEyeballsDial(
 			dialer.LocalAddr = &net.TCPAddr{IP: rotator.Next()}
 		}
 
+		// Apply p0f spoofing BEFORE the SYN packet is sent, via Dialer.Control.
+		if cfg, ok := ctx.Value(p0fSignatureCtxKey{}).(*p0f.Signature); ok && cfg != nil {
+			spoofer := p0f.NewSpoofer(cfg)
+			dialer.Control = func(network, address string, c syscall.RawConn) error {
+				return spoofer.ApplyToRawConn(c)
+			}
+		}
+
 		conn, err := dialer.DialContext(ctx, network, net.JoinHostPort(filtered[0].String(), port))
 		if err != nil {
 			return nil, err
@@ -1621,12 +1683,6 @@ func happyEyeballsDial(
 
 		if cfg, ok := ctx.Value(fragmentCtxKey{}).(FragmentConfig); ok && cfg.ChunkSize > 0 {
 			conn = wrapWithFragmentation(conn, cfg)
-		}
-
-		// After fragmentation wrapping, apply p0f spoofing if configured
-		if cfg, ok := ctx.Value(p0fSignatureCtxKey{}).(*p0f.Signature); ok && cfg != nil {
-			spoofer := p0f.NewSpoofer(cfg)
-			_ = spoofer.Apply(conn) // best-effort
 		}
 
 		return conn, nil
@@ -1667,6 +1723,14 @@ func happyEyeballsDial(
 
 			dialer := &net.Dialer{Timeout: 30 * time.Second}
 
+			// Apply p0f spoofing BEFORE the SYN packet, via Dialer.Control.
+			if cfg, ok := dialCtx.Value(p0fSignatureCtxKey{}).(*p0f.Signature); ok && cfg != nil {
+				spoofer := p0f.NewSpoofer(cfg)
+				dialer.Control = func(network, address string, c syscall.RawConn) error {
+					return spoofer.ApplyToRawConn(c)
+				}
+			}
+
 			conn, err := dialer.DialContext(dialCtx, network, net.JoinHostPort(targetIP.String(), port))
 			if err == nil {
 				// Apply MSS limiting if configured.
@@ -1702,12 +1766,6 @@ func happyEyeballsDial(
 
 				if cfg, ok := ctx.Value(fragmentCtxKey{}).(FragmentConfig); ok && cfg.ChunkSize > 0 {
 					conn = wrapWithFragmentation(conn, cfg)
-				}
-
-				// Apply p0f spoofing if configured
-				if cfg, ok := ctx.Value(p0fSignatureCtxKey{}).(*p0f.Signature); ok && cfg != nil {
-					spoofer := p0f.NewSpoofer(cfg)
-					_ = spoofer.Apply(conn) // best-effort
 				}
 
 				if order, ok := ctx.Value(orderedHeadersCtxKey{}).([]string); ok && len(order) > 0 {
@@ -1752,12 +1810,20 @@ func dialViaProxy(ctx context.Context, network, host, port string, proxyURL *url
 		return nil, fmt.Errorf("aoni: dial proxy %s: %w", proxyAddr, err)
 	}
 
+	// Set a deadline for the entire handshake phase to prevent goroutine leaks.
+	handshakeDeadline := time.Now().Add(30 * time.Second)
+	if deadline, ok := ctx.Deadline(); ok && deadline.Before(handshakeDeadline) {
+		handshakeDeadline = deadline
+	}
+	_ = proxyConn.SetDeadline(handshakeDeadline)
+
 	if proxyURL.Scheme == "socks5" || proxyURL.Scheme == "socks5h" {
 		if err := socks5Handshake(proxyConn, host, port, proxyURL); err != nil {
 			_ = proxyConn.Close()
 			return nil, err
 		}
 
+		_ = proxyConn.SetDeadline(time.Time{})
 		return proxyConn, nil
 	}
 
@@ -1769,35 +1835,50 @@ func dialViaProxy(ctx context.Context, network, host, port string, proxyURL *url
 		return nil, fmt.Errorf("aoni: send CONNECT to proxy: %w", err)
 	}
 
-	buf := make([]byte, 1024)
-
-	n, err := proxyConn.Read(buf)
+	br := bufio.NewReader(proxyConn)
+	resp, err := http.ReadResponse(br, nil)
 	if err != nil {
 		_ = proxyConn.Close()
 		return nil, fmt.Errorf("aoni: read CONNECT response: %w", err)
 	}
+	resp.Body.Close()
 
-	resp := string(buf[:n])
-	if !strings.HasPrefix(resp, "HTTP/") || len(resp) < 12 {
+	if resp.StatusCode != http.StatusOK {
 		_ = proxyConn.Close()
-		return nil, fmt.Errorf("aoni: invalid CONNECT response: %s", resp)
+		return nil, fmt.Errorf("aoni: CONNECT rejected with status %s", resp.Status)
 	}
 
-	statusCode := resp[9:12]
-	if statusCode[0] != '2' {
-		_ = proxyConn.Close()
-		return nil, fmt.Errorf("aoni: CONNECT rejected with status %s", statusCode)
+	_ = proxyConn.SetDeadline(time.Time{})
+
+	// If bufio.Reader buffered data beyond the HTTP response, wrap the
+	// connection so the leftover bytes are returned before real network data.
+	if br.Buffered() > 0 {
+		return &bufferedConn{Conn: proxyConn, r: br}, nil
 	}
 
 	return proxyConn, nil
 }
 
+// bufferedConn wraps a net.Conn with a bufio.Reader so that leftover bytes
+// buffered during HTTP response parsing are returned before real network data.
+type bufferedConn struct {
+	net.Conn
+	r *bufio.Reader
+}
+
+func (c *bufferedConn) Read(b []byte) (int, error) {
+	if c.r.Buffered() > 0 {
+		return c.r.Read(b)
+	}
+	return c.Conn.Read(b)
+}
+
 // socks5Handshake performs the SOCKS5 protocol handshake with remote DNS resolution.
 func socks5Handshake(conn net.Conn, host, port string, proxyURL *url.URL) error {
-	// Step 1: Greeting
+	// Step 1: Greeting — offer both NO AUTH and USERNAME/PASSWORD when credentials exist.
 	greeting := []byte{0x05, 0x01, 0x00} // VER=5, NMETHODS=1, NO AUTH
 	if proxyURL.User != nil {
-		greeting[2] = 0x02 // USERNAME/PASSWORD
+		greeting = []byte{0x05, 0x02, 0x00, 0x02} // VER=5, NMETHODS=2, [NO AUTH, USERNAME/PASSWORD]
 	}
 
 	if _, err := conn.Write(greeting); err != nil {
