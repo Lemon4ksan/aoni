@@ -166,6 +166,21 @@ func WithBody(r io.Reader) RequestModifier {
 				req.ContentLength = s.Len()
 			}
 		}
+
+		// Set GetBody for hedging support — allows cloning the request body.
+		if r != nil {
+			req.GetBody = func() (io.ReadCloser, error) {
+				if seeker, ok := r.(io.Seeker); ok {
+					if _, err := seeker.Seek(0, io.SeekStart); err != nil {
+						return nil, err
+					}
+
+					return io.NopCloser(r), nil
+				}
+
+				return nil, fmt.Errorf("aoni: body does not support seeking for hedging")
+			}
+		}
 	}
 }
 
@@ -184,6 +199,11 @@ func WithJSONBody(payload any) RequestModifier {
 		req.Body = io.NopCloser(bytes.NewReader(bodyBytes))
 		req.ContentLength = int64(len(bodyBytes))
 		req.Header.Set("Content-Type", "application/json")
+
+		// Set GetBody for hedging support — allows cloning the request body.
+		req.GetBody = func() (io.ReadCloser, error) {
+			return io.NopCloser(bytes.NewReader(bodyBytes)), nil
+		}
 	}
 }
 
