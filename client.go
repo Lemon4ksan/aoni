@@ -74,6 +74,7 @@ type (
 	proxyDNSCtxKey           struct{}
 	proxyAddrCtxKey          struct{}
 	sessionCacheCtxKey       struct{}
+	packetPaddingCtxKey      struct{}
 )
 
 // DefaultSensitiveHeaders is the list of sensitive headers that are scrubbed from requests on redirect.
@@ -220,6 +221,7 @@ type Client struct {
 	proxyAddr        *url.URL
 	dynamicHedging   *DynamicHedgingConfig
 	sessionCache     *ProxyAwareSessionCache
+	packetPadding    *PacketPaddingConfig
 }
 
 // NewClient initializes a new [Client] instance with [DefaultUserAgent].
@@ -283,6 +285,7 @@ func (c *Client) Clone() *Client {
 		proxyAddr:          c.proxyAddr,
 		dynamicHedging:     c.dynamicHedging,
 		sessionCache:       c.sessionCache,
+		packetPadding:      c.packetPadding,
 	}
 }
 
@@ -332,6 +335,10 @@ func (c *Client) Request(
 		}
 	}
 
+	if c.packetPadding != nil {
+		ctx = context.WithValue(ctx, packetPaddingCtxKey{}, c.packetPadding)
+	}
+
 	rel, err := url.Parse(strings.TrimLeft(path, "/"))
 	if err != nil {
 		return nil, fmt.Errorf("aoni: invalid path: %w", err)
@@ -376,6 +383,14 @@ func (c *Client) Request(
 
 	for _, hook := range c.beforeRequest {
 		hook(req)
+	}
+
+	// Apply packet padding: add random padding header to disrupt DPI length analysis.
+	if c.packetPadding != nil {
+		if padding := GeneratePadding(*c.packetPadding); len(padding) > 0 {
+			headerName := PaddingHeaderName(*c.packetPadding)
+			req.Header.Set(headerName, fmt.Sprintf("%x", padding))
+		}
 	}
 
 	if isolatedJar, ok := c.headersCookieJar.(*ProxyIsolatedCookieJar); ok {
@@ -737,6 +752,18 @@ func (c *Client) WithDynamicHedging(config *DynamicHedgingConfig) *Client {
 func (c *Client) WithProxyAwareSessionCache() *Client {
 	newClient := c.Clone()
 	newClient.sessionCache = NewProxyAwareSessionCache()
+	return newClient
+}
+
+// WithPacketPadding returns a new [Client] configured with MTU fragmentation
+// and packet padding to disrupt DPI analysis of packet length patterns.
+// When MaxSegmentSize is set, TCP MSS is constrained at the socket level,
+// forcing smaller packet fragmentation. When padding bytes are configured,
+// random padding is added to request headers to destroy static length signatures.
+func (c *Client) WithPacketPadding(cfg PacketPaddingConfig) *Client {
+	newClient := c.Clone()
+	newClient.packetPadding = &cfg
+	newClient.applyDialers()
 	return newClient
 }
 
@@ -1559,6 +1586,11 @@ func happyEyeballsDial(
 			return nil, err
 		}
 
+		// Apply MSS limiting if configured.
+		if cfg, ok := ctx.Value(packetPaddingCtxKey{}).(*PacketPaddingConfig); ok && cfg != nil && cfg.MaxSegmentSize > 0 {
+			conn = wrapWithMSSLimit(conn, cfg.MaxSegmentSize)
+		}
+
 		if cfg, ok := ctx.Value(fragmentCtxKey{}).(FragmentConfig); ok && cfg.ChunkSize > 0 {
 			conn = wrapWithFragmentation(conn, cfg)
 		}
@@ -1609,6 +1641,11 @@ func happyEyeballsDial(
 
 			conn, err := dialer.DialContext(dialCtx, network, net.JoinHostPort(targetIP.String(), port))
 			if err == nil {
+				// Apply MSS limiting if configured.
+				if cfg, ok := dialCtx.Value(packetPaddingCtxKey{}).(*PacketPaddingConfig); ok && cfg != nil && cfg.MaxSegmentSize > 0 {
+					conn = wrapWithMSSLimit(conn, cfg.MaxSegmentSize)
+				}
+
 				if atomic.CompareAndSwapUint32(&done, 0, 1) {
 					resultCh <- dialResult{conn: conn}
 
