@@ -217,6 +217,7 @@ type Client struct {
 	h2Settings       *HTTP2Settings
 	proxyDNS         bool
 	proxyAddr        *url.URL
+	dynamicHedging   *DynamicHedgingConfig
 }
 
 // NewClient initializes a new [Client] instance with [DefaultUserAgent].
@@ -278,6 +279,7 @@ func (c *Client) Clone() *Client {
 		h2Settings:         c.h2Settings,
 		proxyDNS:           c.proxyDNS,
 		proxyAddr:          c.proxyAddr,
+		dynamicHedging:     c.dynamicHedging,
 	}
 }
 
@@ -380,9 +382,13 @@ func (c *Client) Request(
 		reqErr error
 	)
 
+	requestStart := time.Now()
+
 	var hedgingDelay time.Duration
 	if req.Context().Value(hedgingCtxKey{}) != nil {
 		hedgingDelay = req.Context().Value(hedgingCtxKey{}).(time.Duration)
+	} else if c.dynamicHedging != nil {
+		hedgingDelay = c.dynamicHedging.ComputeDelay()
 	} else {
 		hedgingDelay = c.hedgingDelay
 	}
@@ -421,6 +427,12 @@ func (c *Client) Request(
 
 	if reqErr != nil {
 		return nil, fmt.Errorf("aoni: request failed: %w", reqErr)
+	}
+
+	// Record RTT for dynamic hedging if configured.
+	if c.dynamicHedging != nil && c.dynamicHedging.Tracker != nil {
+		rtt := time.Since(requestStart)
+		c.dynamicHedging.Tracker.Record(rtt)
 	}
 
 	if resp != nil && resp.Body != nil {
@@ -690,6 +702,21 @@ func (c *Client) WithLocalAddr(addr string) *Client {
 func (c *Client) WithHedging(d time.Duration) *Client {
 	newClient := c.Clone()
 	newClient.hedgingDelay = d
+	return newClient
+}
+
+// WithDynamicHedging returns a new [Client] with adaptive hedging based on observed RTT.
+// The hedging delay is dynamically computed from the p95 RTT of recent requests.
+// If config is nil, DefaultDynamicHedgingConfig is used.
+func (c *Client) WithDynamicHedging(config *DynamicHedgingConfig) *Client {
+	newClient := c.Clone()
+	if config == nil {
+		cfg := DefaultDynamicHedgingConfig()
+		newClient.dynamicHedging = &cfg
+	} else {
+		newClient.dynamicHedging = config
+	}
+
 	return newClient
 }
 
