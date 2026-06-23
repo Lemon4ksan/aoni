@@ -144,48 +144,60 @@ type wsRawConn struct {
 }
 
 func (c *wsRawConn) Read(b []byte) (int, error) {
-	if c.reader != nil {
-		n, err := c.reader.Read(b)
-		if err == io.EOF {
-			c.reader = nil
-			return n, io.EOF
-		}
-
-		return n, err
-	}
-
-	for range maxConsecutiveEmptyReads {
-		opcode, payload, err := c.readFrame()
-		if err != nil {
-			_ = c.close()
-			return 0, err
-		}
-
-		switch opcode {
-		case wsFrameBinary, wsFrameText, wsFrameContinuation:
-			c.reader = bytes.NewReader(payload)
-
+	for {
+		if c.reader != nil {
 			n, err := c.reader.Read(b)
 			if err == io.EOF {
 				c.reader = nil
-				return n, io.EOF
+
+				if n > 0 {
+					return n, nil
+				}
+
+				continue
 			}
 
 			return n, err
-
-		case wsFrameClose:
-			_ = c.close()
-			return 0, io.EOF
-		case wsFramePing:
-			_ = c.writeFrame(wsFramePong, payload)
-		case wsFramePong:
-			// ignore
 		}
+
+		for range maxConsecutiveEmptyReads {
+			opcode, payload, err := c.readFrame()
+			if err != nil {
+				_ = c.close()
+				return 0, err
+			}
+
+			switch opcode {
+			case wsFrameBinary, wsFrameText, wsFrameContinuation:
+				c.reader = bytes.NewReader(payload)
+
+				n, err := c.reader.Read(b)
+				if err == io.EOF {
+					c.reader = nil
+
+					if n > 0 {
+						return n, nil
+					}
+
+					continue
+				}
+
+				return n, err
+
+			case wsFrameClose:
+				_ = c.close()
+				return 0, io.EOF
+			case wsFramePing:
+				_ = c.writeFrame(wsFramePong, payload)
+			case wsFramePong:
+				// ignore
+			}
+		}
+
+		_ = c.close()
+
+		return 0, io.EOF
 	}
-
-	_ = c.close()
-
-	return 0, io.EOF
 }
 
 func (c *wsRawConn) Write(b []byte) (int, error) {
