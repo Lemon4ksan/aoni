@@ -63,8 +63,8 @@ type progressReader struct {
 func (pr *progressReader) Read(p []byte) (n int, err error) {
 	n, err = pr.reader.Read(p)
 	if n > 0 {
-		pr.current += int64(n)
-		pr.onProgress(pr.current, pr.total)
+		cur := atomic.AddInt64(&pr.current, int64(n))
+		pr.onProgress(cur, pr.total)
 	}
 
 	return n, err
