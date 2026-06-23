@@ -461,10 +461,21 @@ func dialH2ExtendedConnect(ctx context.Context, conn net.Conn, targetURL, host s
 		closed:   make(chan struct{}),
 	}
 
+	// Set a read deadline from context to prevent goroutine leak in clientPreface.
+	if deadline, ok := ctx.Deadline(); ok {
+		_ = conn.SetReadDeadline(deadline)
+	} else {
+		_ = conn.SetReadDeadline(time.Now().Add(30 * time.Second))
+	}
+
 	// Send HTTP/2 client preface + SETTINGS
 	if err := h2c.clientPreface(); err != nil {
+		_ = conn.SetReadDeadline(time.Time{}) // clear deadline
 		return nil, err
 	}
+
+	// Clear the deadline after preface completes.
+	_ = conn.SetReadDeadline(time.Time{})
 
 	// Parse target URL for CONNECT headers
 	u, err := parseWSURL(targetURL)
