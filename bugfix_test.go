@@ -168,8 +168,11 @@ func TestProgressReader_AtomicIncrement(t *testing.T) {
 		data[i] = byte(i % 256)
 	}
 
-	var totalRead int64
-	var mu sync.Mutex
+	var (
+		totalRead int64
+		mu        sync.Mutex
+	)
+
 	seen := make(map[int64]bool)
 
 	pr := &progressReader{
@@ -206,16 +209,18 @@ func TestProgressReader_ConcurrentSafety(t *testing.T) {
 	// Use a thread-safe reader to test that progressReader.current
 	// uses atomic operations correctly.
 	pr := &progressReader{
-		reader: &threadSafeReader{data: make([]byte, 4096)},
-		total:  4096,
+		reader:     &threadSafeReader{data: make([]byte, 4096)},
+		total:      4096,
 		onProgress: func(_, _ int64) {},
 	}
 
 	var wg sync.WaitGroup
 	for range 10 {
 		wg.Add(1)
+
 		go func() {
 			defer wg.Done()
+
 			buf := make([]byte, 64)
 			for {
 				_, err := pr.Read(buf)
@@ -275,6 +280,7 @@ func TestH2Preface_ContextDeadline(t *testing.T) {
 			if err != nil {
 				return
 			}
+
 			// Accept but never write anything - simulates a hanging server
 			go func() {
 				buf := make([]byte, 4096)
@@ -294,6 +300,7 @@ func TestH2Preface_ContextDeadline(t *testing.T) {
 
 	conn, err := net.DialTimeout("tcp", ln.Addr().String(), time.Second)
 	require.NoError(t, err)
+
 	defer conn.Close()
 
 	start := time.Now()
@@ -318,6 +325,7 @@ func TestH2Preface_ContextCancel(t *testing.T) {
 			if err != nil {
 				return
 			}
+
 			// Accept but don't respond
 			go func() {
 				buf := make([]byte, 4096)
@@ -336,6 +344,7 @@ func TestH2Preface_ContextCancel(t *testing.T) {
 
 	conn, err := net.DialTimeout("tcp", ln.Addr().String(), time.Second)
 	require.NoError(t, err)
+
 	defer conn.Close()
 
 	start := time.Now()
@@ -380,6 +389,7 @@ func TestWithQuery_ComplexMerge(t *testing.T) {
 	type first struct {
 		Name string `url:"name"`
 	}
+
 	type second struct {
 		Age int `url:"age"`
 	}

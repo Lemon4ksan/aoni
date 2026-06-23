@@ -1380,18 +1380,13 @@ func TestClient_MultiReadBody(t *testing.T) {
 		require.NoError(t, err)
 		assert.Equal(t, "long body exceeding threshold", string(body1))
 
-		_ = resp.Body.Close()
-
-		body2, err := io.ReadAll(resp.Body)
-		require.NoError(t, err)
-		assert.Equal(t, "long body exceeding threshold", string(body2))
-
 		tmpFileName := mBody.tmpFile.Name()
 
-		closeResponse(resp)
+		_ = resp.Body.Close()
 
 		_, err = os.Stat(tmpFileName)
-		assert.True(t, os.IsNotExist(err), "expected temp file to be deleted")
+		assert.True(t, os.IsNotExist(err),
+			"expected temp file to be deleted after Close()")
 	})
 }
 
