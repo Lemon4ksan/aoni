@@ -81,6 +81,7 @@ func (t *aoniTransport) RoundTrip(origReq *http.Request) (*http.Response, error)
 		req.TransferEncoding = origReq.TransferEncoding
 		req.Close = origReq.Close
 		req.Host = origReq.Host
+		req.GetBody = origReq.GetBody
 	}
 
 	cloned := t.client.Clone()

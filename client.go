@@ -253,6 +253,7 @@ func NewClient(httpClient HTTPDoer) *Client {
 
 // Clone returns a deep copy of the [Client] instance.
 // It is used internally to maintain immutability across configuration calls.
+// Each clone gets its own transport copy, so mutations are isolated.
 func (c *Client) Clone() *Client {
 	beforeCopy := make([]func(req *http.Request), len(c.beforeRequest))
 	copy(beforeCopy, c.beforeRequest)
@@ -260,7 +261,7 @@ func (c *Client) Clone() *Client {
 	afterCopy := make([]func(resp *http.Response, err error), len(c.afterResponse))
 	copy(afterCopy, c.afterResponse)
 
-	return &Client{
+	cloned := &Client{
 		http:               c.http,
 		baseURL:            c.baseURL,
 		headers:            c.headers.Clone(),
@@ -290,6 +291,19 @@ func (c *Client) Clone() *Client {
 		packetPadding:      c.packetPadding,
 		transportProxy:     c.transportProxy,
 	}
+
+	// Clone the http.Client and its transport so mutations don't affect the original.
+	if httpClient, ok := cloned.http.(*http.Client); ok {
+		clonedHTTP := *httpClient
+		if transport, ok := clonedHTTP.Transport.(*http.Transport); ok {
+			clonedTransport := *transport
+			clonedHTTP.Transport = &clonedTransport
+		}
+
+		cloned.http = &clonedHTTP
+	}
+
+	return cloned
 }
 
 // Request constructs and executes an HTTP request using the configured transport.
@@ -700,26 +714,21 @@ func (c *Client) WithRedirectLimit(max int) *Client {
 // This option is only applied if the underlying [HTTPDoer] is an [http.Client] with an [http.Transport].
 func (c *Client) WithLocalAddr(addr string) *Client {
 	newClient := c.Clone()
-	if httpClient, ok := newClient.http.(*http.Client); ok {
-		if transport, ok := httpClient.Transport.(*http.Transport); ok {
-			localAddr, err := net.ResolveIPAddr("ip", addr)
-			if err == nil {
-				dialer := &net.Dialer{
-					LocalAddr: &net.TCPAddr{IP: localAddr.IP},
-					Timeout:   30 * time.Second,
-					KeepAlive: 30 * time.Second,
-				}
-				cloned := *transport
-				prevDial := cloned.DialContext
-				cloned.DialContext = func(ctx context.Context, network, addr string) (net.Conn, error) {
-					if prevDial != nil {
-						return prevDial(ctx, network, addr)
-					}
-
-					return dialer.DialContext(ctx, network, addr)
+	if transport := newClient.Transport(); transport != nil {
+		localAddr, err := net.ResolveIPAddr("ip", addr)
+		if err == nil {
+			dialer := &net.Dialer{
+				LocalAddr: &net.TCPAddr{IP: localAddr.IP},
+				Timeout:   30 * time.Second,
+				KeepAlive: 30 * time.Second,
+			}
+			prevDial := transport.DialContext
+			transport.DialContext = func(ctx context.Context, network, addr string) (net.Conn, error) {
+				if prevDial != nil {
+					return prevDial(ctx, network, addr)
 				}
 
-				httpClient.Transport = &cloned
+				return dialer.DialContext(ctx, network, addr)
 			}
 		}
 	}
@@ -902,30 +911,25 @@ func (c *Client) WithCookieJar(jar http.CookieJar) *Client {
 // If config fields are <= 0, they are ignored and the original transport settings are kept.
 func (c *Client) WithConnectionPool(cfg ConnectionPoolConfig) *Client {
 	newClient := c.Clone()
-	if httpClient, ok := newClient.http.(*http.Client); ok {
-		if transport, ok := httpClient.Transport.(*http.Transport); ok {
-			cloned := *transport
-			if cfg.MaxIdleConns > 0 {
-				cloned.MaxIdleConns = cfg.MaxIdleConns
-			}
+	if transport := newClient.Transport(); transport != nil {
+		if cfg.MaxIdleConns > 0 {
+			transport.MaxIdleConns = cfg.MaxIdleConns
+		}
 
-			if cfg.MaxIdleConnsPerHost > 0 {
-				cloned.MaxIdleConnsPerHost = cfg.MaxIdleConnsPerHost
-			}
+		if cfg.MaxIdleConnsPerHost > 0 {
+			transport.MaxIdleConnsPerHost = cfg.MaxIdleConnsPerHost
+		}
 
-			if cfg.MaxConnsPerHost > 0 {
-				cloned.MaxConnsPerHost = cfg.MaxConnsPerHost
-			}
+		if cfg.MaxConnsPerHost > 0 {
+			transport.MaxConnsPerHost = cfg.MaxConnsPerHost
+		}
 
-			if cfg.IdleConnTimeout > 0 {
-				cloned.IdleConnTimeout = cfg.IdleConnTimeout
-			}
+		if cfg.IdleConnTimeout > 0 {
+			transport.IdleConnTimeout = cfg.IdleConnTimeout
+		}
 
-			if cfg.ResponseHeaderTimeout > 0 {
-				cloned.ResponseHeaderTimeout = cfg.ResponseHeaderTimeout
-			}
-
-			httpClient.Transport = &cloned
+		if cfg.ResponseHeaderTimeout > 0 {
+			transport.ResponseHeaderTimeout = cfg.ResponseHeaderTimeout
 		}
 	}
 
@@ -945,32 +949,27 @@ func (c *Client) WithTLSFingerprint(browser BrowserID) *Client {
 	// (ProxyRotator, LoadBalancer, etc.), not just *http.Client.
 	newClient.tlsBrowserID = browser
 
-	if httpClient, ok := newClient.http.(*http.Client); ok {
-		if transport, ok := httpClient.Transport.(*http.Transport); ok {
-			cloned := *transport
-			callback := newClient.ja4Callback
-			tlsConfig := cloned.TLSClientConfig
-			proxyFn := cloned.Proxy
-			cloned.DialTLSContext = func(ctx context.Context, network, addr string) (net.Conn, error) {
-				var proxyURL *url.URL
-				if proxyFn != nil {
-					proxyURL, _ = proxyFn(&http.Request{URL: &url.URL{Host: addr}})
-				}
-
-				return dialTLSWithUTLS(
-					ctx,
-					network,
-					addr,
-					browser,
-					newClient.sourceRotator,
-					newClient.dnsResolver,
-					callback,
-					tlsConfig,
-					proxyURL,
-				)
+	if transport := newClient.Transport(); transport != nil {
+		callback := newClient.ja4Callback
+		tlsConfig := transport.TLSClientConfig
+		proxyFn := transport.Proxy
+		transport.DialTLSContext = func(ctx context.Context, network, addr string) (net.Conn, error) {
+			var proxyURL *url.URL
+			if proxyFn != nil {
+				proxyURL, _ = proxyFn(&http.Request{URL: &url.URL{Host: addr}})
 			}
 
-			httpClient.Transport = &cloned
+			return dialTLSWithUTLS(
+				ctx,
+				network,
+				addr,
+				browser,
+				newClient.sourceRotator,
+				newClient.dnsResolver,
+				callback,
+				tlsConfig,
+				proxyURL,
+			)
 		}
 	}
 
@@ -1147,27 +1146,17 @@ func (c *Client) CloseIdleConnections() {
 }
 
 func (c *Client) applyDialers() {
-	if httpClient, ok := c.http.(*http.Client); ok {
-		if transport, ok := httpClient.Transport.(*http.Transport); ok {
-			cloned := *transport
-			cloned.DialContext = func(ctx context.Context, network, addr string) (net.Conn, error) {
-				return happyEyeballsDial(
-					ctx,
-					network,
-					addr,
-					c.happyEyeballsDelay,
-					c.ssrfGuard,
-					c.sourceRotator,
-					c.dnsResolver,
-				)
-			}
-
-			httpClient.Transport = &cloned
-
-			// Capture the proxy function so dialTLSWithUTLS can route through it.
-			if cloned.Proxy != nil {
-				c.transportProxy = cloned.Proxy
-			}
+	if transport := c.Transport(); transport != nil {
+		transport.DialContext = func(ctx context.Context, network, addr string) (net.Conn, error) {
+			return happyEyeballsDial(
+				ctx,
+				network,
+				addr,
+				c.happyEyeballsDelay,
+				c.ssrfGuard,
+				c.sourceRotator,
+				c.dnsResolver,
+			)
 		}
 	}
 }

@@ -180,8 +180,19 @@ func (lb *LoadBalancer) Do(req *http.Request) (*http.Response, error) {
 
 	n := uint64(len(backends))
 
-	for range n {
-		idx := lb.nextIndex(n)
+	// Build iteration order: shuffled indices for Random, sequential for others.
+	indices := make([]uint64, n)
+	for i := range indices {
+		indices[i] = uint64(i)
+	}
+
+	if lb.config.Strategy == Random {
+		rand.Shuffle(len(indices), func(i, j int) {
+			indices[i], indices[j] = indices[j], indices[i]
+		})
+	}
+
+	for _, idx := range indices {
 		b := backends[idx]
 
 		if !lb.isAvailable(b) {
