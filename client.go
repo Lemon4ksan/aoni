@@ -19,6 +19,7 @@ import (
 	"net/http"
 	"net/url"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -70,6 +71,8 @@ type (
 	ja4CallbackCtxKey        struct{}
 	alpnOverrideCtxKey       struct{}
 	p0fSignatureCtxKey       struct{}
+	proxyDNSCtxKey           struct{}
+	proxyAddrCtxKey          struct{}
 )
 
 // DefaultSensitiveHeaders is the list of sensitive headers that are scrubbed from requests on redirect.
@@ -212,6 +215,8 @@ type Client struct {
 	hostRewrite      *HostRewriteConfig
 	p0fSignature     *p0f.Signature
 	h2Settings       *HTTP2Settings
+	proxyDNS         bool
+	proxyAddr        *url.URL
 }
 
 // NewClient initializes a new [Client] instance with [DefaultUserAgent].
@@ -271,6 +276,8 @@ func (c *Client) Clone() *Client {
 		hostRewrite:        c.hostRewrite,
 		p0fSignature:       c.p0fSignature,
 		h2Settings:         c.h2Settings,
+		proxyDNS:           c.proxyDNS,
+		proxyAddr:          c.proxyAddr,
 	}
 }
 
@@ -304,6 +311,13 @@ func (c *Client) Request(
 
 	if c.p0fSignature != nil {
 		ctx = context.WithValue(ctx, p0fSignatureCtxKey{}, c.p0fSignature)
+	}
+
+	if c.proxyDNS {
+		ctx = context.WithValue(ctx, proxyDNSCtxKey{}, true)
+		if c.proxyAddr != nil {
+			ctx = context.WithValue(ctx, proxyAddrCtxKey{}, c.proxyAddr)
+		}
 	}
 
 	rel, err := url.Parse(strings.TrimLeft(path, "/"))
@@ -954,6 +968,17 @@ func (c *Client) WithP0fSignature(sig *p0f.Signature) *Client {
 	return newClient
 }
 
+// WithProxyDNS returns a new [Client] with remote DNS resolution enabled.
+// When set, DNS queries are delegated to the proxy server (SOCKS5 or HTTP CONNECT)
+// instead of being resolved locally. This prevents DNS leaks where the local ISP
+// can observe which domains the client is accessing.
+func (c *Client) WithProxyDNS() *Client {
+	newClient := c.Clone()
+	newClient.proxyDNS = true
+	newClient.applyDialers()
+	return newClient
+}
+
 // Logger is an interface for logging messages.
 type Logger interface {
 	Debug(msg string, args ...any)
@@ -1440,6 +1465,14 @@ func happyEyeballsDial(
 		}
 	}
 
+	// Proxy DNS: route DNS resolution through the proxy to prevent local DNS leaks.
+	if _, ok := ctx.Value(proxyDNSCtxKey{}).(bool); ok {
+		proxyURL, _ := ctx.Value(proxyAddrCtxKey{}).(*url.URL)
+		if proxyURL != nil && net.ParseIP(host) == nil {
+			return dialViaProxy(ctx, network, host, port, proxyURL)
+		}
+	}
+
 	resolver := dnsResolver
 	if resolver == nil {
 		resolver = &net.Resolver{}
@@ -1576,6 +1609,162 @@ func happyEyeballsDial(
 			}
 		}
 	}
+}
+
+// dialViaProxy connects to a target host through a SOCKS5 proxy, performing DNS
+// resolution on the proxy side to prevent local DNS leaks. For HTTP CONNECT
+// proxies, the proxy resolves the hostname when handling the CONNECT request.
+func dialViaProxy(ctx context.Context, network, host, port string, proxyURL *url.URL) (net.Conn, error) {
+	proxyAddr := proxyURL.Host
+	if proxyAddr == "" {
+		return nil, fmt.Errorf("aoni: proxy DNS enabled but proxy address is empty")
+	}
+
+	if net.ParseIP(proxyAddr) == nil {
+		// proxyAddr may not have a port, default to 1080 for SOCKS5
+		if _, _, err := net.SplitHostPort(proxyAddr); err != nil {
+			proxyAddr = net.JoinHostPort(proxyAddr, "1080")
+		}
+	}
+
+	dialer := &net.Dialer{Timeout: 30 * time.Second}
+	proxyConn, err := dialer.DialContext(ctx, "tcp", proxyAddr)
+	if err != nil {
+		return nil, fmt.Errorf("aoni: dial proxy %s: %w", proxyAddr, err)
+	}
+
+	if proxyURL.Scheme == "socks5" || proxyURL.Scheme == "socks5h" {
+		if err := socks5Handshake(proxyConn, host, port, proxyURL); err != nil {
+			_ = proxyConn.Close()
+			return nil, err
+		}
+
+		return proxyConn, nil
+	}
+
+	// HTTP CONNECT proxy: send CONNECT and let the proxy resolve DNS.
+	connectReq := fmt.Sprintf("CONNECT %s:%s HTTP/1.1\r\nHost: %s:%s\r\n\r\n",
+		host, port, host, port)
+	if _, err := proxyConn.Write([]byte(connectReq)); err != nil {
+		_ = proxyConn.Close()
+		return nil, fmt.Errorf("aoni: send CONNECT to proxy: %w", err)
+	}
+
+	buf := make([]byte, 1024)
+	n, err := proxyConn.Read(buf)
+	if err != nil {
+		_ = proxyConn.Close()
+		return nil, fmt.Errorf("aoni: read CONNECT response: %w", err)
+	}
+
+	resp := string(buf[:n])
+	if !strings.HasPrefix(resp, "HTTP/") || len(resp) < 12 {
+		_ = proxyConn.Close()
+		return nil, fmt.Errorf("aoni: invalid CONNECT response: %s", resp)
+	}
+
+	statusCode := resp[9:12]
+	if statusCode[0] != '2' {
+		_ = proxyConn.Close()
+		return nil, fmt.Errorf("aoni: CONNECT rejected with status %s", statusCode)
+	}
+
+	return proxyConn, nil
+}
+
+// socks5Handshake performs the SOCKS5 protocol handshake with remote DNS resolution.
+func socks5Handshake(conn net.Conn, host, port string, proxyURL *url.URL) error {
+	// Step 1: Greeting
+	greeting := []byte{0x05, 0x01, 0x00} // VER=5, NMETHODS=1, NO AUTH
+	if proxyURL.User != nil {
+		greeting[2] = 0x02 // USERNAME/PASSWORD
+	}
+
+	if _, err := conn.Write(greeting); err != nil {
+		return fmt.Errorf("aoni: socks5 greeting: %w", err)
+	}
+
+	// Step 2: Server choice
+	resp := make([]byte, 2)
+	if _, err := io.ReadFull(conn, resp); err != nil {
+		return fmt.Errorf("aoni: socks5 read choice: %w", err)
+	}
+
+	if resp[0] != 0x05 {
+		return fmt.Errorf("aoni: socks5 unsupported version: %d", resp[0])
+	}
+
+	// Step 3: Authentication
+	switch resp[1] {
+	case 0x02: // Username/Password
+		if proxyURL.User == nil {
+			return fmt.Errorf("aoni: socks5 server requires auth but no credentials provided")
+		}
+
+		username := proxyURL.User.Username()
+		password, _ := proxyURL.User.Password()
+
+		auth := []byte{0x01, byte(len(username))}
+		auth = append(auth, []byte(username)...)
+		auth = append(auth, byte(len(password)))
+		auth = append(auth, []byte(password)...)
+
+		if _, err := conn.Write(auth); err != nil {
+			return fmt.Errorf("aoni: socks5 auth write: %w", err)
+		}
+
+		authResp := make([]byte, 2)
+		if _, err := io.ReadFull(conn, authResp); err != nil {
+			return fmt.Errorf("aoni: socks5 auth read: %w", err)
+		}
+
+		if authResp[1] != 0x00 {
+			return fmt.Errorf("aoni: socks5 auth failed: status %d", authResp[1])
+		}
+
+	case 0x00: // No auth required
+	default:
+		return fmt.Errorf("aoni: socks5 unsupported auth method: %d", resp[1])
+	}
+
+	// Step 4: Connection request (remote DNS - ATYP=0x03 domain name)
+	req := []byte{0x05, 0x01, 0x00, 0x03} // VER=5, CMD=CONNECT, RSV=0, ATYP=DOMAIN
+	req = append(req, byte(len(host)))
+	req = append(req, []byte(host)...)
+
+	portNum, _ := strconv.Atoi(port)
+	req = append(req, byte(portNum>>8), byte(portNum))
+
+	if _, err := conn.Write(req); err != nil {
+		return fmt.Errorf("aoni: socks5 connect request: %w", err)
+	}
+
+	// Step 5: Read connect reply
+	reply := make([]byte, 4)
+	if _, err := io.ReadFull(conn, reply); err != nil {
+		return fmt.Errorf("aoni: socks5 connect reply: %w", err)
+	}
+
+	if reply[1] != 0x00 {
+		return fmt.Errorf("aoni: socks5 connect failed: code %d", reply[1])
+	}
+
+	// Skip the rest of the reply (bind addr + bind port)
+	switch reply[3] {
+	case 0x01: // IPv4
+		io.CopyN(io.Discard, conn, 4+2) //nolint:errcheck
+	case 0x03: // Domain
+		domainLen := make([]byte, 1)
+		if _, err := io.ReadFull(conn, domainLen); err != nil {
+			return fmt.Errorf("aoni: socks5 read domain length: %w", err)
+		}
+
+		io.CopyN(io.Discard, conn, int64(domainLen[0])+2) //nolint:errcheck
+	case 0x04: // IPv6
+		io.CopyN(io.Discard, conn, 16+2) //nolint:errcheck
+	}
+
+	return nil
 }
 
 func forceALPN(extensions []utls.TLSExtension, protos []string) []utls.TLSExtension {

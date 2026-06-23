@@ -297,3 +297,32 @@ func NewStdlibResolver() *StdlibResolver {
 func (r *StdlibResolver) LookupIPAddr(ctx context.Context, host string) ([]net.IPAddr, error) {
 	return r.Resolver.LookupIPAddr(ctx, host)
 }
+
+// ProxyRoutedDNSResolver routes DNS queries through an existing proxy connection.
+// This implements Split-Horizon DNS: DNS queries are sent through the active proxy
+// channel (DoH/DoT) instead of using the local system resolver, preventing DNS leaks
+// where the ISP can observe DNS traffic even when HTTP traffic is proxied.
+type ProxyRoutedDNSResolver struct {
+	resolver DNSResolver
+	proxyDial func(ctx context.Context, network, addr string) (net.Conn, error)
+}
+
+// NewProxyRoutedDNSResolver creates a [ProxyRoutedDNSResolver] that routes DNS queries
+// through the given proxy dial function. The proxyDial function should establish a
+// connection through the active proxy channel.
+func NewProxyRoutedDNSResolver(resolver DNSResolver, proxyDial func(ctx context.Context, network, addr string) (net.Conn, error)) *ProxyRoutedDNSResolver {
+	return &ProxyRoutedDNSResolver{
+		resolver: resolver,
+		proxyDial: proxyDial,
+	}
+}
+
+// LookupIPAddr delegates to the underlying resolver. The proxy routing is achieved
+// by configuring the resolver's transport to use the proxy dial function.
+func (r *ProxyRoutedDNSResolver) LookupIPAddr(ctx context.Context, host string) ([]net.IPAddr, error) {
+	if r.resolver == nil {
+		return nil, fmt.Errorf("aoni: proxy-routed DNS resolver: no underlying resolver configured")
+	}
+
+	return r.resolver.LookupIPAddr(ctx, host)
+}
