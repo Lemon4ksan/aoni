@@ -59,6 +59,7 @@ func WithVars(pairs ...any) RequestModifier {
 // WithQuery encodes a struct or map as URL query parameters and appends them to the request URL.
 // It safely checks for validation errors using [Validate] and serialization failures.
 // Any encountered errors are saved to the request context via queryErrorCtxKey.
+// Existing query parameters in the URL are preserved and merged with the new values.
 func WithQuery(query any) RequestModifier {
 	return func(req *http.Request) {
 		if query == nil {
@@ -79,7 +80,13 @@ func WithQuery(query any) RequestModifier {
 		}
 
 		if len(qValues) > 0 {
-			req.URL.RawQuery = qValues.Encode()
+			existing := req.URL.Query()
+
+			for k, vs := range qValues {
+				existing[k] = vs
+			}
+
+			req.URL.RawQuery = existing.Encode()
 		}
 	}
 }
