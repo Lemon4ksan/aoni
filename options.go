@@ -17,6 +17,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/quic-go/quic-go"
 	"github.com/quic-go/quic-go/http3"
 
 	"github.com/lemon4ksan/aoni/p0f"
@@ -319,14 +320,72 @@ func WithOrderedHeaders(order []string) RequestModifier {
 	}
 }
 
+// QUICMigrationConfig configures QUIC Connection Migration behavior for HTTP/3.
+// Connection Migration allows a QUIC connection to survive network interface changes
+// (e.g., Wi-Fi to LTE) by using Connection IDs instead of IP:Port binding.
+type QUICMigrationConfig struct {
+	// EnableMigration enables QUIC Connection Migration (default: true).
+	// When enabled, the client can survive IP address changes without renegotiating.
+	EnableMigration bool
+	// KeepAlivePeriod sends periodic keepalive packets to maintain the connection
+	// during network transitions. Set to 0 to disable (default: 15s).
+	KeepAlivePeriod time.Duration
+	// MaxIdleTimeout is the maximum duration without network activity before
+	// the connection is closed. Longer values allow more time for migration
+	// but consume resources (default: 30s).
+	MaxIdleTimeout time.Duration
+	// DisablePathMTUDiscovery disables Path MTU Discovery during migration.
+	// Disable if the network path is unreliable (default: false).
+	DisablePathMTUDiscovery bool
+	// InitialPacketSize sets the initial QUIC packet size (default: 1200).
+	// Lower values improve compatibility with restrictive networks.
+	InitialPacketSize uint16
+}
+
+// DefaultQUICMigrationConfig returns sensible defaults for Connection Migration.
+func DefaultQUICMigrationConfig() QUICMigrationConfig {
+	return QUICMigrationConfig{
+		EnableMigration:    true,
+		KeepAlivePeriod:    15 * time.Second,
+		MaxIdleTimeout:     30 * time.Second,
+		InitialPacketSize:  1200,
+	}
+}
+
 // WithHTTP3 returns a new [Client] that uses HTTP/3 instead of HTTP/1.1.
 func (c *Client) WithHTTP3() *Client {
+	return c.WithHTTP3Config(nil)
+}
+
+// WithHTTP3Config returns a new [Client] that uses HTTP/3 with Connection Migration support.
+// If config is nil, DefaultQUICMigrationConfig is used.
+func (c *Client) WithHTTP3Config(config *QUICMigrationConfig) *Client {
 	newClient := c.Clone()
+
+	if config == nil {
+		cfg := DefaultQUICMigrationConfig()
+		config = &cfg
+	}
+
+	quicCfg := &quic.Config{
+		EnableDatagrams:           true,
+		DisablePathMTUDiscovery:   config.DisablePathMTUDiscovery,
+		InitialPacketSize:         config.InitialPacketSize,
+	}
+
+	if config.KeepAlivePeriod > 0 {
+		quicCfg.KeepAlivePeriod = config.KeepAlivePeriod
+	}
+
+	if config.MaxIdleTimeout > 0 {
+		quicCfg.MaxIdleTimeout = config.MaxIdleTimeout
+	}
 
 	rt := &http3.Transport{
 		TLSClientConfig: &tls.Config{
 			NextProtos: []string{"h3"},
 		},
+		QUICConfig: quicCfg,
 	}
 
 	newClient.http = &http.Client{
