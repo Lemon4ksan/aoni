@@ -5,6 +5,7 @@
 package aoni
 
 import (
+	"context"
 	"io"
 	"net"
 	"testing"
@@ -150,4 +151,87 @@ func TestWSConn_ImplementsNetConn(t *testing.T) {
 		_ net.Conn = (*wsRawConn)(nil)
 		_ net.Conn = (*wsH2Conn)(nil)
 	)
+}
+
+func TestH2Preface_ContextDeadline(t *testing.T) {
+	t.Parallel()
+
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	require.NoError(t, err)
+	t.Cleanup(func() { ln.Close() })
+
+	go func() {
+		for {
+			conn, err := ln.Accept()
+			if err != nil {
+				return
+			}
+
+			go func() {
+				buf := make([]byte, 4096)
+				for {
+					_, err := conn.Read(buf)
+					if err != nil {
+						return
+					}
+				}
+			}()
+		}
+	}()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
+	defer cancel()
+
+	conn, err := net.DialTimeout("tcp", ln.Addr().String(), time.Second)
+	require.NoError(t, err)
+
+	defer conn.Close()
+
+	start := time.Now()
+	_, err = dialH2ExtendedConnect(ctx, conn, "ws://example.com/ws", "example.com")
+	elapsed := time.Since(start)
+
+	assert.Error(t, err)
+	assert.Less(t, elapsed, 2*time.Second)
+}
+
+func TestH2Preface_ContextCancel(t *testing.T) {
+	t.Parallel()
+
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	require.NoError(t, err)
+	t.Cleanup(func() { ln.Close() })
+
+	go func() {
+		for {
+			conn, err := ln.Accept()
+			if err != nil {
+				return
+			}
+
+			go func() {
+				buf := make([]byte, 4096)
+				for {
+					if _, err := conn.Read(buf); err != nil {
+						return
+					}
+				}
+			}()
+		}
+	}()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
+	defer cancel()
+
+	conn, err := net.DialTimeout("tcp", ln.Addr().String(), time.Second)
+	require.NoError(t, err)
+
+	defer conn.Close()
+
+	start := time.Now()
+	_, err = dialH2ExtendedConnect(ctx, conn, "ws://example.com/ws", "example.com")
+	elapsed := time.Since(start)
+
+	assert.Error(t, err)
+	assert.Less(t, elapsed, 2*time.Second)
 }

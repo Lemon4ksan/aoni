@@ -10,46 +10,48 @@ import (
 )
 
 var (
-	// ErrUnexpectedContentType is returned when the response content type does not match the expected format.
-	// This often indicates a captive portal or unexpected network interception.
+	// ErrUnexpectedContentType indicates the response content type
+	// does not match the expected format. A captive portal or
+	// transparent proxy often causes this.
 	ErrUnexpectedContentType = errors.New("aoni: unexpected content-type (possible captive portal or intercept)")
 
-	// ErrCloudflareChallenge is returned when a Cloudflare JS challenge or CAPTCHA is detected in the response body.
+	// ErrCloudflareChallenge indicates a Cloudflare JS challenge or
+	// CAPTCHA was detected in the response body.
 	ErrCloudflareChallenge = errors.New("aoni: cloudflare challenge detected")
 
-	// ErrResponseTooLarge is returned when the response size exceeds the configured maximum limit.
-	// It is returned by [Client.Request] if response size checking is active.
+	// ErrResponseTooLarge indicates the response exceeded the size
+	// limit configured via [Client.WithMaxResponseSize].
 	ErrResponseTooLarge = errors.New("aoni: response size limit exceeded")
 
-	// ErrSSRFBlocked is returned when a request is blocked because it resolved to a private or local IP address.
-	// It is returned by [Client.Request] if SSRF protection is enabled.
+	// ErrSSRFBlocked indicates the request was blocked because the
+	// target resolved to a private or loopback address. Returned by
+	// [Client.Request] when [Client.WithSSRFGuard] is enabled.
 	ErrSSRFBlocked = errors.New("aoni: request blocked by SSRF guard")
 )
 
-// APIError represents an unsuccessful HTTP response with a status code outside the 2xx range.
-// It contains the raw response body and a deserialized error model if a custom error model
-// was configured on the [Client]. Inspect this error using [errors.As] to handle API failures.
+// APIError wraps a non-2xx HTTP response. StatusCode holds the
+// status code, Body holds the raw response, and Model holds the
+// deserialized error structure when [WithErrorModel] was used.
+// Inspect with [errors.As].
 type APIError struct {
-	// StatusCode is the HTTP status code returned by the server.
 	StatusCode int
-	// Body is the raw response body.
-	Body []byte
-	// Model is the deserialized error structure, if any.
-	Model any
+	Body       []byte
+	Model      any
 }
 
-// Error returns a formatted string representation of the [APIError].
+// Error returns a human-readable representation of e.
 func (e *APIError) Error() string {
 	return fmt.Sprintf("aoni: status %d", e.StatusCode)
 }
 
-// ValidationError is returned when a request structure fails validation.
-// Inspect this error using [errors.As] to determine which field triggered the validation failure.
+// ValidationError reports that a required field was missing or
+// invalid during request validation. Inspect with [errors.As] to
+// access Field.
 type ValidationError struct {
-	// Field is the name of the missing or invalid struct field.
 	Field string
 }
 
+// Error returns a human-readable description of the validation failure.
 func (e *ValidationError) Error() string {
 	return "aoni: missing required field: " + e.Field
 }

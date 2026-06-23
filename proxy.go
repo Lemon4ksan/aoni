@@ -18,28 +18,28 @@ import (
 	"time"
 )
 
-// ClientWithProxy is a wrapper around an [HTTPDoer] that includes a proxy URL.
+// ClientWithProxy pairs an [HTTPDoer] with a proxy URL.
 type ClientWithProxy struct {
 	Client   HTTPDoer
 	ProxyURL string
 }
 
-// ProxyConfig defines the configuration parameters for a proxy-supported client.
+// ProxyConfig configures a proxy-supported HTTP client.
 type ProxyConfig struct {
-	// ProxyURL is the raw address of the proxy server (e.g. http://user:pass@ip:port).
+	// ProxyURL is the address of the proxy server (e.g. http://user:pass@ip:port).
 	ProxyURL string
 	// Timeout is the overall request timeout.
 	Timeout time.Duration
 	// InsecureSkipVerify controls whether SSL/TLS certificate verification is bypassed.
 	InsecureSkipVerify bool
-	// Transport is a custom round tripper that overrides the default transport settings.
+	// Transport overrides the default transport settings.
 	Transport http.RoundTripper
-	// TransportFactory is a custom factory function used to initialize a new round tripper.
+	// TransportFactory creates a custom [http.RoundTripper].
 	TransportFactory func(ProxyConfig) (http.RoundTripper, error)
 }
 
-// NewProxyClient initializes a standard [http.Client] configured with proxy transport.
-// It prioritizes [ProxyConfig.TransportFactory] first, then [ProxyConfig.Transport],
+// NewProxyClient creates an [http.Client] configured with proxy transport.
+// It prioritizes [ProxyConfig.TransportFactory], then [ProxyConfig.Transport],
 // and falls back to a default [http.Transport] if neither is provided.
 //
 // If [ProxyConfig.ProxyURL] is empty, no proxy routing is applied.
@@ -92,20 +92,20 @@ func NewProxyClient(cfg ProxyConfig) (*http.Client, error) {
 	}, nil
 }
 
-// ProxyRotatorConfig defines health-checking and recovery limits for a [ProxyRotator].
+// ProxyRotatorConfig configures health-checking and recovery for a [ProxyRotator].
 type ProxyRotatorConfig struct {
 	// MaxFails is the consecutive error limit before a client is marked unhealthy.
 	MaxFails uint32
 	// RetryAfter is the duration for which an unhealthy client is kept offline.
 	RetryAfter time.Duration
-	// HealthCheckURL is the endpoint probed by background health checks.
+	// HealthCheckURL is the endpoint probed during background health checks.
 	HealthCheckURL string
-	// HealthCheckInterval is the execution period of background health checks.
+	// HealthCheckInterval sets the frequency of background health checks.
 	HealthCheckInterval time.Duration
 }
 
-// StickyKeyFunc extracts a session identifier from a request to support sticky routing.
-// Returning an empty string falls back to default round-robin rotation.
+// StickyKeyFunc extracts a session identifier from a request for sticky routing.
+// Return an empty string to fall back to round-robin rotation.
 type StickyKeyFunc func(req *http.Request) string
 
 type trackedClient struct {
@@ -122,10 +122,10 @@ type sessionEntry struct {
 }
 
 // ProxyRotator distributes HTTP requests across a pool of proxy clients.
-// It implements the [HTTPDoer] interface and can be passed to [NewClient].
+// It implements [HTTPDoer] and supports sticky routing, health monitoring,
+// and dynamic pool replacement.
 //
-// Use [NewProxyRotator] to initialize new instances.
-// It supports sticky routing, health monitoring, and dynamic pool replacement.
+// Create instances with [NewProxyRotator].
 type ProxyRotator struct {
 	mu            sync.RWMutex
 	clients       []*trackedClient
@@ -140,9 +140,9 @@ type ProxyRotator struct {
 	wg     sync.WaitGroup
 }
 
-// NewProxyRotator initializes a new [ProxyRotator] instance.
-// It returns an error if the clients slice is empty.
-// If MaxFails or RetryAfter configuration options are zero, they default to 3 and 30 seconds respectively.
+// NewProxyRotator creates a [ProxyRotator] from the given config and clients.
+// It returns an error if clients is empty.
+// Default [ProxyRotatorConfig.MaxFails] is 3; default [ProxyRotatorConfig.RetryAfter] is 30 seconds.
 func NewProxyRotator(config ProxyRotatorConfig, clients ...ClientWithProxy) (*ProxyRotator, error) {
 	if len(clients) == 0 {
 		return nil, errors.New("aoni: proxy rotator requires at least one client")
@@ -184,9 +184,8 @@ func NewProxyRotator(config ProxyRotatorConfig, clients ...ClientWithProxy) (*Pr
 	return r, nil
 }
 
-// UpdateClients replaces the active proxy clients with a new pool.
-// It resets all session-to-proxy mappings to prevent indexing errors.
-// If the clients slice is empty, the method returns early and makes no changes.
+// UpdateClients replaces the active pool and resets all session mappings.
+// If clients is empty, it returns without changes.
 func (r *ProxyRotator) UpdateClients(clients ...ClientWithProxy) {
 	if len(clients) == 0 {
 		return
@@ -207,7 +206,7 @@ func (r *ProxyRotator) UpdateClients(clients ...ClientWithProxy) {
 	r.mu.Unlock()
 }
 
-// Close stops background health check and session cleanup routines.
+// Close stops background routines and closes idle connections.
 func (r *ProxyRotator) Close() error {
 	r.cancel()
 	r.wg.Wait()
@@ -284,8 +283,7 @@ func (r *ProxyRotator) cleanupSessionsLoop() {
 	}
 }
 
-// WithStickySessions enables session persistence using the provided key extractor.
-// It returns a copy of the [ProxyRotator] configured with the sticky function.
+// WithStickySessions returns a copy of r configured with the given key extractor.
 func (r *ProxyRotator) WithStickySessions(f StickyKeyFunc) *ProxyRotator {
 	c := &ProxyRotator{
 		ctx:           r.ctx,
@@ -302,13 +300,9 @@ func (r *ProxyRotator) WithStickySessions(f StickyKeyFunc) *ProxyRotator {
 	return c
 }
 
-// Do performs an HTTP request using the next available client in the rotation pool.
-//
-// It attempts sticky routing first. If the sticky client is offline or fails,
-// it falls back to standard round-robin selection.
-//
-// On proxy connection faults, the client is flagged and marked as failed.
-// If all clients fail or are marked unhealthy, Do returns an error.
+// Do performs an HTTP request using the next available client in the pool.
+// It attempts sticky routing first, then falls back to round-robin selection.
+// If a client faults, it is marked unhealthy. Returns an error if all clients fail.
 func (r *ProxyRotator) Do(req *http.Request) (*http.Response, error) {
 	r.mu.RLock()
 	clients := r.clients
@@ -477,8 +471,8 @@ func (r *ProxyRotator) isProxyFault(resp *http.Response, err error) bool {
 	return false
 }
 
-// Prewarm preemptively opens TCP/TLS connections to targetURL through all proxy clients.
-// It sends concurrent HEAD requests to the target URL to pre-populate transport connection pools.
+// Prewarm opens TCP/TLS connections to targetURL through all proxy clients.
+// It sends concurrent HEAD requests to pre-populate transport connection pools.
 func (r *ProxyRotator) Prewarm(ctx context.Context, targetURL string) {
 	r.mu.RLock()
 	clients := make([]*trackedClient, len(r.clients))

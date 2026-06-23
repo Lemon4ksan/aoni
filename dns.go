@@ -19,7 +19,7 @@ import (
 	"github.com/miekg/dns"
 )
 
-// DNSResolver is an interface for DNS resolution.
+// DNSResolver resolves hostnames to IP addresses.
 type DNSResolver interface {
 	LookupIPAddr(ctx context.Context, host string) ([]net.IPAddr, error)
 }
@@ -29,7 +29,7 @@ type dnsCacheEntry struct {
 	expiry time.Time
 }
 
-// InMemoryDNSCache is an in-memory DNS cache that implements the [DNSResolver] interface.
+// InMemoryDNSCache caches DNS results in memory for the configured TTL.
 type InMemoryDNSCache struct {
 	mu       sync.RWMutex
 	cache    map[string]dnsCacheEntry
@@ -85,7 +85,7 @@ type DoHResolver struct {
 	client *http.Client
 }
 
-// NewDoHResolver creates a [DoHResolver] for Cloudflare's DoH endpoint.
+// NewDoHResolver creates a [DoHResolver] that queries the given IP-based endpoint.
 // The endpoint should be an IP-based URL (e.g. "https://1.1.1.1/dns-query"),
 // and host is the Host header value (e.g. "cloudflare-dns.com").
 func NewDoHResolver(endpoint, host string) *DoHResolver {
@@ -283,8 +283,7 @@ func (d *DoTResolver) lookup(ctx context.Context, host string, qtype uint16) ([]
 	return ips, nil
 }
 
-// StdlibResolver wraps Go's standard [net.Resolver] to implement [DNSResolver].
-// This is the default resolver used when no custom resolver is configured.
+// StdlibResolver delegates DNS resolution to the system resolver via [net.Resolver].
 type StdlibResolver struct {
 	Resolver *net.Resolver
 }
@@ -299,18 +298,14 @@ func (r *StdlibResolver) LookupIPAddr(ctx context.Context, host string) ([]net.I
 	return r.Resolver.LookupIPAddr(ctx, host)
 }
 
-// ProxyRoutedDNSResolver routes DNS queries through an existing proxy connection.
-// This implements Split-Horizon DNS: DNS queries are sent through the active proxy
-// channel (DoH/DoT) instead of using the local system resolver, preventing DNS leaks
-// where the ISP can observe DNS traffic even when HTTP traffic is proxied.
+// ProxyRoutedDNSResolver sends DNS queries through a proxy connection to prevent leaks.
 type ProxyRoutedDNSResolver struct {
 	resolver  DNSResolver
 	proxyDial func(ctx context.Context, network, addr string) (net.Conn, error)
 }
 
 // NewProxyRoutedDNSResolver creates a [ProxyRoutedDNSResolver] that routes DNS queries
-// through the given proxy dial function. The proxyDial function should establish a
-// connection through the active proxy channel.
+// through the given proxy dial function.
 func NewProxyRoutedDNSResolver(
 	resolver DNSResolver,
 	proxyDial func(ctx context.Context, network, addr string) (net.Conn, error),
@@ -321,8 +316,7 @@ func NewProxyRoutedDNSResolver(
 	}
 }
 
-// LookupIPAddr delegates to the underlying resolver. The proxy routing is achieved
-// by configuring the resolver's transport to use the proxy dial function.
+// LookupIPAddr resolves the host by delegating to the proxy-routed resolver.
 func (r *ProxyRoutedDNSResolver) LookupIPAddr(ctx context.Context, host string) ([]net.IPAddr, error) {
 	if r.resolver == nil {
 		return nil, errors.New("aoni: proxy-routed DNS resolver: no underlying resolver configured")

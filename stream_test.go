@@ -5,10 +5,15 @@
 package aoni
 
 import (
+	"bytes"
 	"io"
 	"net/http"
+	"os"
+	"runtime"
 	"strings"
+	"sync"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -189,4 +194,198 @@ func TestStreamSSE(t *testing.T) {
 
 	assert.Equal(t, "second", events[1].Event)
 	assert.Equal(t, "value2", events[1].Data)
+}
+
+func TestMultiReadBody_FileCleanup(t *testing.T) {
+	t.Parallel()
+
+	data := strings.Repeat("x", 64*1024)
+
+	body := io.NopCloser(strings.NewReader(data))
+	mrb, err := newMultiReadBody(body, 32*1024)
+	require.NoError(t, err)
+
+	mrc := mrb.(*multiReadBody)
+	require.NotNil(t, mrc.tmpFile)
+
+	tmpPath := mrc.tmpFile.Name()
+
+	buf := make([]byte, len(data))
+	n, err := io.ReadFull(mrc, buf)
+	require.NoError(t, err)
+	assert.Equal(t, len(data), n)
+
+	err = mrc.Close()
+	require.NoError(t, err)
+
+	_, err = os.Stat(tmpPath)
+	assert.NoError(t, err)
+
+	mrc.ReallyClose()
+
+	_, err = os.Stat(tmpPath)
+	assert.True(t, os.IsNotExist(err))
+}
+
+func TestFinalizerReadCloser_CallsReallyClose(t *testing.T) {
+	t.Parallel()
+
+	data := strings.Repeat("y", 64*1024)
+
+	body := io.NopCloser(strings.NewReader(data))
+	mrb, err := newMultiReadBody(body, 32*1024)
+	require.NoError(t, err)
+
+	mrc := mrb.(*multiReadBody)
+	require.NotNil(t, mrc.tmpFile)
+	tmpPath := mrc.tmpFile.Name()
+
+	frc := newFinalizerReadCloser(mrb)
+
+	err = frc.Close()
+	require.NoError(t, err)
+
+	_, err = os.Stat(tmpPath)
+	assert.True(t, os.IsNotExist(err))
+}
+
+func TestMultiReadBody_InMemory_NoTmpFile(t *testing.T) {
+	t.Parallel()
+
+	data := "small data"
+	body := io.NopCloser(strings.NewReader(data))
+	mrb, err := newMultiReadBody(body, 1024)
+	require.NoError(t, err)
+
+	mrc := mrb.(*multiReadBody)
+	assert.Nil(t, mrc.tmpFile)
+
+	buf, err := io.ReadAll(mrc)
+	require.NoError(t, err)
+	assert.Equal(t, data, string(buf))
+
+	err = mrc.Close()
+	require.NoError(t, err)
+
+	mrc.ReallyClose()
+}
+
+func TestProgressReader_AtomicIncrement(t *testing.T) {
+	t.Parallel()
+
+	data := make([]byte, 1024*1024)
+	for i := range data {
+		data[i] = byte(i % 256)
+	}
+
+	var (
+		totalRead int64
+		mu        sync.Mutex
+	)
+
+	seen := make(map[int64]bool)
+
+	pr := &progressReader{
+		reader: bytes.NewReader(data),
+		total:  int64(len(data)),
+		onProgress: func(current, total int64) {
+			mu.Lock()
+			seen[current] = true
+			totalRead = current
+			mu.Unlock()
+		},
+	}
+
+	buf := make([]byte, 256)
+	for {
+		n, err := pr.Read(buf)
+		if err != nil {
+			break
+		}
+
+		_ = n
+	}
+
+	mu.Lock()
+	assert.Equal(t, int64(len(data)), totalRead)
+	assert.True(t, len(seen) > 0)
+	mu.Unlock()
+}
+
+func TestProgressReader_ConcurrentSafety(t *testing.T) {
+	t.Parallel()
+
+	pr := &progressReader{
+		reader:     &threadSafeReader{data: make([]byte, 4096)},
+		total:      4096,
+		onProgress: func(_, _ int64) {},
+	}
+
+	var wg sync.WaitGroup
+	for range 10 {
+		wg.Go(func() {
+			buf := make([]byte, 64)
+			for {
+				_, err := pr.Read(buf)
+				if err != nil {
+					return
+				}
+			}
+		})
+	}
+
+	done := make(chan struct{})
+	go func() {
+		wg.Wait()
+		close(done)
+	}()
+
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("timed out waiting for concurrent reads")
+	}
+}
+
+type threadSafeReader struct {
+	mu   sync.Mutex
+	data []byte
+	pos  int
+}
+
+func (r *threadSafeReader) Read(p []byte) (int, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	if r.pos >= len(r.data) {
+		return 0, io.EOF
+	}
+
+	n := copy(p, r.data[r.pos:])
+	r.pos += n
+
+	return n, nil
+}
+
+func TestMultiReadBody_GC_FinalizerCleanup(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping GC test in short mode")
+	}
+
+	data := strings.Repeat("z", 64*1024)
+
+	for range 5 {
+		body := io.NopCloser(strings.NewReader(data))
+		mrb, _ := newMultiReadBody(body, 32*1024)
+		mrc := mrb.(*multiReadBody)
+
+		buf := make([]byte, 1024)
+		_, _ = mrc.Read(buf)
+
+		_ = mrc
+	}
+
+	runtime.GC()
+	runtime.Gosched()
+	time.Sleep(100 * time.Millisecond)
 }

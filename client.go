@@ -80,7 +80,8 @@ type (
 	packetPaddingCtxKey      struct{}
 )
 
-// DefaultSensitiveHeaders is the list of sensitive headers that are scrubbed from requests on redirect.
+// DefaultSensitiveHeaders lists headers removed from requests during
+// cross-origin redirects. Used by [DefaultRedirectPolicy].
 var DefaultSensitiveHeaders = []string{
 	"Authorization",
 	"Cookie",
@@ -91,14 +92,16 @@ var DefaultSensitiveHeaders = []string{
 	"X-Auth-Token",
 }
 
-// Unwrapper is an interface for objects that can be unwrapped to reveal their underlying [Requester] implementation.
+// Unwrapper allows nested decorators to be peeled away to reach the
+// underlying [Requester]. [Client] does not implement this interface;
+// wrapper types returned by [NewStdClient] or [Chain] do.
 type Unwrapper interface {
 	Unwrap() Requester
 }
 
-// UnwrapClient recursively unwraps any decorator or wrapper layers from the Requester interface,
-// reaching down to the original concrete structure *Client.
-// Returns nil if the passed object is a clean test mock.
+// UnwrapClient strips all [Unwrapper] layers from r and returns the
+// innermost [Client]. Returns nil if r is not a *Client and no
+// Unwrapper chain leads to one.
 func UnwrapClient(r Requester) *Client {
 	for {
 		if client, ok := r.(*Client); ok {
@@ -116,23 +119,24 @@ func UnwrapClient(r Requester) *Client {
 	return nil
 }
 
-// HTTPDoer defines the interface for objects executing an [http.Request].
-// It is implemented by [http.Client] and can be customized via [DoerFunc].
+// HTTPDoer executes an [http.Request] and returns a response.
+// [http.Client] satisfies this interface. Pass a [DoerFunc] to adapt
+// a plain function.
 type HTTPDoer interface {
 	Do(req *http.Request) (*http.Response, error)
 }
 
-// DoerFunc is an adapter allowing ordinary functions to act as an [HTTPDoer].
+// DoerFunc adapts a function to the [HTTPDoer] interface.
 type DoerFunc func(req *http.Request) (*http.Response, error)
 
-// Do executes the HTTP request by calling the underlying function.
-// It returns an [http.Response] or an error if the request fails.
+// Do calls f(req).
 func (f DoerFunc) Do(req *http.Request) (*http.Response, error) {
 	return f(req)
 }
 
-// Requester defines the contract for executing raw HTTP requests.
-// It supports relative paths joining, query encoding, and custom modifiers.
+// Requester sends an HTTP request and returns the response.
+// [Client] is the primary implementation. Relative paths are resolved
+// against the base URL. Request modifiers are applied before execution.
 type Requester interface {
 	Request(
 		ctx context.Context,
@@ -141,20 +145,21 @@ type Requester interface {
 	) (*http.Response, error)
 }
 
-// BaseResponseProvider defines an optional interface for a [Requester]
-// to provide a [BaseResponse] wrapper for structured decoding.
+// BaseResponseProvider optionally provides a [BaseResponse] for
+// structured decoding. Implemented by response wrapper types used
+// with [Client.WithBaseResponse].
 type BaseResponseProvider interface {
 	BaseResponse() BaseResponse
 }
 
-// ProgressFunc defines the callback signature for tracking transfer progress.
-// The total parameter represents the content length, or -1 if unknown.
+// ProgressFunc is called periodically during response body reads.
+// current is the bytes read so far; total is the Content-Length
+// value or -1 if unknown.
 type ProgressFunc func(current, total int64)
 
-// BaseResponse defines the contract for structured response wrappers.
-// It handles success status checking and decoding destination binding.
-// It is passed to the json decoder to unmarshal the response body into the target data structure.
-// Implement UnmarshalJSON to handle the actual JSON decoding logic.
+// BaseResponse is implemented by user-defined response wrappers that
+// participate in [GetJSON] and similar generic request helpers. The
+// decoder calls IsSuccess, SetData, and Error to route the result.
 type BaseResponse interface {
 	// IsSuccess reports whether the response indicates a successful operation.
 	IsSuccess() bool
@@ -164,8 +169,10 @@ type BaseResponse interface {
 	SetData(data any)
 }
 
-// DefaultRedirectPolicy returns a redirect policy function that stops after maxRedirects,
-// and scrubs sensitiveHeaders from the request. If sensitiveHeaders is empty, [DefaultSensitiveHeaders] are used.
+// DefaultRedirectPolicy returns a function suitable for
+// [http.Client.CheckRedirect]. It stops after maxRedirects and strips
+// sensitiveHeaders on cross-origin redirects. When sensitiveHeaders
+// is empty, [DefaultSensitiveHeaders] is used.
 func DefaultRedirectPolicy(
 	maxRedirects int,
 	sensitiveHeaders ...string,
@@ -193,9 +200,9 @@ func DefaultRedirectPolicy(
 	}
 }
 
-// Client is a thread-safe, immutable HTTP client implementing [Requester].
-// It manages base URLs, default headers, and custom transport options.
-// Use [NewClient] to initialize a new instance.
+// Client is an immutable, concurrency-safe HTTP client built on [HTTPDoer].
+// Every With* method returns a new clone, so the original remains usable
+// by other goroutines. Use [NewClient] to create the first instance.
 type Client struct {
 	http               HTTPDoer
 	baseURL            *url.URL
@@ -228,10 +235,11 @@ type Client struct {
 	transportProxy   func(*http.Request) (*url.URL, error)
 }
 
-// NewClient initializes a new [Client] instance with [DefaultUserAgent].
-// If the provided httpClient is nil, a default [http.Client] is used.
-// The default client has a 15-second timeout and scrubs sensitive
-// headers on redirect using [DefaultRedirectPolicy].
+// NewClient creates a [Client] wrapping httpClient. When httpClient
+// is nil a default [http.Client] with a 15-second timeout and
+// [DefaultRedirectPolicy] (10 hops) is used. The returned client
+// has [DefaultUserAgent] set and a transport dialer configured for
+// Happy Eyeballs.
 func NewClient(httpClient HTTPDoer) *Client {
 	if httpClient == nil {
 		httpClient = &http.Client{
@@ -253,9 +261,9 @@ func NewClient(httpClient HTTPDoer) *Client {
 	return c.WithUserAgent(DefaultUserAgent)
 }
 
-// Clone returns a deep copy of the [Client] instance.
-// It is used internally to maintain immutability across configuration calls.
-// Each clone gets its own transport copy, so mutations are isolated.
+// Clone returns a deep copy of c. The cloned client shares nothing
+// mutable with the original - transport, cookie jar, and config
+// structs are all independently copied.
 func (c *Client) Clone() *Client {
 	beforeCopy := make([]func(req *http.Request), len(c.beforeRequest))
 	copy(beforeCopy, c.beforeRequest)
@@ -343,19 +351,19 @@ func (c *Client) Clone() *Client {
 	return cloned
 }
 
-// Request constructs and executes an HTTP request using the configured transport.
-// It resolves relative paths against the configured base URL.
+// Request sends an HTTP request and returns the response. path is
+// resolved against [Client.WithBaseURL] when set; an empty path
+// targets the base URL directly. Nil modifiers are ignored.
 //
-// Context cancellation or timeouts are fully propagated to the underlying transport.
-// If SSRF guarding is enabled, requests resolving to private or loopback IPs return [ErrSSRFBlocked].
-// If response size limits are set, reading past the limit returns [ErrResponseTooLarge].
+// Decompression (gzip, brotli, zstd) and charset transcoding to
+// UTF-8 are applied automatically. The response body is wrapped
+// with a GC finalizer so that unclosed bodies eventually release
+// the underlying connection.
 //
-// If path is empty, it resolves directly to the base URL.
-// Nil modifiers in the mods slice are safely ignored.
-//
-// The method performs automatic decompression (brotli, zstd, gzip) and content-type
-// charset transcoding to UTF-8. It registers a garbage collection finalizer on the
-// response body to prevent socket leaks, and caches responses below the multi-read threshold.
+// Returns [ErrSSRFBlocked] when SSRF guarding is on and the target
+// resolves to a private or loopback address. Returns
+// [ErrResponseTooLarge] when a response size limit is configured
+// and the body exceeds it.
 func (c *Client) Request(
 	ctx context.Context,
 	method, path string,
@@ -627,8 +635,8 @@ func (c *Client) Request(
 	return resp, nil
 }
 
-// ConnectionPoolConfig defines tuning parameters for the client's connection pool.
-// Apply these settings to a client using [Client.WithConnectionPool].
+// ConnectionPoolConfig tunes the [http.Transport] connection pool.
+// Apply it with [Client.WithConnectionPool].
 type ConnectionPoolConfig struct {
 	// MaxIdleConns is the maximum number of idle connections across all hosts.
 	MaxIdleConns int
@@ -642,8 +650,8 @@ type ConnectionPoolConfig struct {
 	ResponseHeaderTimeout time.Duration
 }
 
-// BrowserID defines browser TLS configurations used for JA3 fingerprint evasion.
-// Pass these identifiers to [Client.WithTLSFingerprint].
+// BrowserID selects a uTLS ClientHello profile for JA3 fingerprint
+// emulation. Pass to [Client.WithTLSFingerprint].
 type BrowserID int
 
 const (
@@ -657,22 +665,25 @@ const (
 	BrowserSafari
 )
 
-// WithLogger returns a new [Client] with the given logger.
+// WithLogger returns a clone of c that logs diagnostics through l.
 func (c *Client) WithLogger(l Logger) *Client {
 	newClient := c.Clone()
 	newClient.logger = l
 	return newClient
 }
 
-// WithModifiers returns a new [Client] with the given request modifiers applied by default.
+// WithModifiers returns a clone of c that applies mods to every
+// outgoing request before the middleware chain.
 func (c *Client) WithModifiers(mods ...RequestModifier) *Client {
 	newClient := c.Clone()
 	newClient.defaultMods = append(newClient.defaultMods, mods...)
 	return newClient
 }
 
-// WithMultiReadBody returns a [RequestModifier] setting the body re-readability threshold.
-// Passing a threshold <= 0 disables body caching for the request.
+// WithMultiReadBody returns a [RequestModifier] that overrides the
+// body caching threshold for a single request. Responses smaller
+// than threshold are buffered in memory so the body can be read
+// multiple times. A value <= 0 disables caching for the request.
 func WithMultiReadBody(threshold int64) RequestModifier {
 	return func(req *http.Request) {
 		ctx := context.WithValue(req.Context(), multiReadCtxKey{}, threshold)
@@ -680,17 +691,16 @@ func WithMultiReadBody(threshold int64) RequestModifier {
 	}
 }
 
-// WithBaseResponse returns a new [Client] utilizing the given provider for responses.
-// Pass nil to clear any previously configured provider.
+// WithBaseResponse returns a clone of c that uses provider to create
+// [BaseResponse] wrappers for structured decoding. Pass nil to clear.
 func (c *Client) WithBaseResponse(provider func() BaseResponse) *Client {
 	newClient := c.Clone()
 	newClient.baseResponse = provider
 	return newClient
 }
 
-// WithBaseURL returns a new [Client] with the specified base URL.
-// An empty raw string clears the base URL.
-// Relative paths in [Client.Request] are resolved against this base URL.
+// WithBaseURL returns a clone of c that resolves relative paths in
+// [Client.Request] against raw. An empty string clears the base URL.
 func (c *Client) WithBaseURL(raw string) *Client {
 	if raw == "" {
 		newClient := c.Clone()
@@ -710,17 +720,17 @@ func (c *Client) WithBaseURL(raw string) *Client {
 	return newClient
 }
 
-// WithHeader returns a new [Client] with the given default header set.
-// It overwrites any existing header with the same key.
+// WithHeader returns a clone of c with key set to value on every
+// outgoing request. Overwrites any existing value for key.
 func (c *Client) WithHeader(key, value string) *Client {
 	newClient := c.Clone()
 	newClient.headers.Set(key, value)
 	return newClient
 }
 
-// WithTimeout returns a new [Client] configured with the specified request timeout.
-// This configuration is only applied if the underlying [HTTPDoer] is an [http.Client].
-// A duration <= 0 represents no timeout.
+// WithTimeout returns a clone of c whose requests time out after d.
+// Only works when the underlying [HTTPDoer] is an [http.Client].
+// A duration <= 0 means no timeout.
 func (c *Client) WithTimeout(d time.Duration) *Client {
 	newClient := c.Clone()
 	if httpClient, ok := newClient.http.(*http.Client); ok {
@@ -732,8 +742,9 @@ func (c *Client) WithTimeout(d time.Duration) *Client {
 	return newClient
 }
 
-// WithRedirectLimit returns a new [Client] with a custom redirect handling limit.
-// A max value of 0 disables redirects. A negative value restores default Go behavior.
+// WithRedirectLimit returns a clone of c that stops following
+// redirects after max. A value of 0 disables redirects entirely.
+// A negative value restores Go's default behavior (10 hops).
 func (c *Client) WithRedirectLimit(max int) *Client {
 	newClient := c.Clone()
 	if httpClient, ok := newClient.http.(*http.Client); ok {
@@ -755,9 +766,10 @@ func (c *Client) WithRedirectLimit(max int) *Client {
 	return newClient
 }
 
-// WithLocalAddr returns a new [Client] bound to the specified local IP address.
-// An invalid IP address string will prevent the custom dialer from binding.
-// This option is only applied if the underlying [HTTPDoer] is an [http.Client] with an [http.Transport].
+// WithLocalAddr returns a clone of c that binds outgoing connections
+// to addr. The local address is only used when its IP family
+// (v4/v6) matches the target's family. Ignored when the underlying
+// [HTTPDoer] is not an [http.Client] with an [http.Transport].
 func (c *Client) WithLocalAddr(addr string) *Client {
 	newClient := c.Clone()
 	if transport := newClient.Transport(); transport != nil {
@@ -795,18 +807,18 @@ func (c *Client) WithLocalAddr(addr string) *Client {
 	return newClient
 }
 
-// WithHedging returns a new [Client] configured with the specified hedging delay.
-// Hedging sends a secondary request if the primary request does not respond within the delay.
-// A delay <= 0 disables request hedging.
+// WithHedging returns a clone of c that dispatches a second request
+// after d if the first has not completed. A duration <= 0 disables
+// hedging.
 func (c *Client) WithHedging(d time.Duration) *Client {
 	newClient := c.Clone()
 	newClient.hedgingDelay = d
 	return newClient
 }
 
-// WithDynamicHedging returns a new [Client] with adaptive hedging based on observed RTT.
-// The hedging delay is dynamically computed from the p95 RTT of recent requests.
-// If config is nil, DefaultDynamicHedgingConfig is used.
+// WithDynamicHedging returns a clone of c that computes the hedging
+// delay dynamically from the p95 RTT of recent requests. When config
+// is nil, [DefaultDynamicHedgingConfig] values are used.
 func (c *Client) WithDynamicHedging(config *DynamicHedgingConfig) *Client {
 	newClient := c.Clone()
 	if config == nil {
@@ -819,21 +831,19 @@ func (c *Client) WithDynamicHedging(config *DynamicHedgingConfig) *Client {
 	return newClient
 }
 
-// WithProxyAwareSessionCache returns a new [Client] that uses a [ProxyAwareSessionCache]
-// for TLS session resumption. When the proxy or source IP changes, the session cache
-// is automatically invalidated to prevent server-side session ticket correlation
-// across different exit IPs.
+// WithProxyAwareSessionCache returns a clone of c that resumes TLS
+// sessions via a [ProxyAwareSessionCache]. The cache is invalidated
+// automatically when the proxy or source IP changes, preventing
+// servers from correlating sessions across different exit nodes.
 func (c *Client) WithProxyAwareSessionCache() *Client {
 	newClient := c.Clone()
 	newClient.sessionCache = NewProxyAwareSessionCache()
 	return newClient
 }
 
-// WithPacketPadding returns a new [Client] configured with MTU fragmentation
-// and packet padding to disrupt DPI analysis of packet length patterns.
-// When MaxSegmentSize is set, TCP MSS is constrained at the socket level,
-// forcing smaller packet fragmentation. When padding bytes are configured,
-// random padding is added to request headers to destroy static length signatures.
+// WithPacketPadding returns a clone of c that constrains TCP MSS and
+// adds random padding headers to disrupt DPI length analysis. See
+// [PacketPaddingConfig] for available fields.
 func (c *Client) WithPacketPadding(cfg PacketPaddingConfig) *Client {
 	newClient := c.Clone()
 	newClient.packetPadding = &cfg
@@ -842,16 +852,17 @@ func (c *Client) WithPacketPadding(cfg PacketPaddingConfig) *Client {
 	return newClient
 }
 
-// WithMaxResponseSize returns a new [Client] enforcing the specified maximum response size.
-// Setting size <= 0 disables any response size limits.
+// WithMaxResponseSize returns a clone of c that rejects response
+// bodies larger than size bytes. A value <= 0 removes the limit.
 func (c *Client) WithMaxResponseSize(size int64) *Client {
 	newClient := c.Clone()
 	newClient.maxResponseSize = size
 	return newClient
 }
 
-// WithSSRFGuard returns a new [Client] with SSRF protection enabled.
-// When enabled, requests resolving to private or loopback IP ranges are blocked.
+// WithSSRFGuard returns a clone of c that blocks requests resolving
+// to private or loopback IP addresses. Returns [ErrSSRFBlocked]
+// from [Client.Request] when triggered.
 func (c *Client) WithSSRFGuard() *Client {
 	newClient := c.Clone()
 	newClient.ssrfGuard = true
@@ -860,8 +871,9 @@ func (c *Client) WithSSRFGuard() *Client {
 	return newClient
 }
 
-// WithHappyEyeballs returns a new [Client] configured with a Happy Eyeballs staggered delay.
-// Setting delay <= 0 disables staggered dialing and uses a single connection attempt.
+// WithHappyEyeballs returns a clone of c that staggers parallel
+// connection attempts by delay per address. A duration <= 0
+// disables staggering and tries all addresses simultaneously.
 func (c *Client) WithHappyEyeballs(delay time.Duration) *Client {
 	newClient := c.Clone()
 	newClient.happyEyeballsDelay = delay
@@ -870,15 +882,18 @@ func (c *Client) WithHappyEyeballs(delay time.Duration) *Client {
 	return newClient
 }
 
-// WithMultiReadBody returns a new [Client] with the default response body caching threshold.
-// Setting threshold <= 0 disables automatic response body caching.
+// WithMultiReadBody returns a clone of c that caches response bodies
+// smaller than threshold bytes so they can be re-read. A value <= 0
+// disables caching.
 func (c *Client) WithMultiReadBody(threshold int64) *Client {
 	newClient := c.Clone()
 	newClient.multiReadThreshold = threshold
 	return newClient
 }
 
-// WithLocalAddrPool returns a new [Client] with the given local address pool.
+// WithLocalAddrPool returns a clone of c that round-robins source IP
+// addresses from addrs. Each outgoing connection binds to the next
+// address in the pool. Invalid addresses are silently ignored.
 func (c *Client) WithLocalAddrPool(addrs []string) *Client {
 	rotator, err := NewSourceIPRotator(addrs)
 	if err != nil {
@@ -892,7 +907,8 @@ func (c *Client) WithLocalAddrPool(addrs []string) *Client {
 	return newClient
 }
 
-// WithDNSResolver returns a new [Client] with the given DNS resolver.
+// WithDNSResolver returns a clone of c that resolves hostnames
+// through resolver instead of the system resolver.
 func (c *Client) WithDNSResolver(resolver DNSResolver) *Client {
 	newClient := c.Clone()
 	newClient.dnsResolver = resolver
@@ -901,59 +917,68 @@ func (c *Client) WithDNSResolver(resolver DNSResolver) *Client {
 	return newClient
 }
 
-// WithDoT returns a new [Client] with the given DNS-over-TLS resolver.
+// WithDoT returns a clone of c that resolves DNS via
+// DNS-over-TLS using endpoint as the resolver address and host as
+// the TLS server name. See [NewDoTResolver].
 func (c *Client) WithDoT(endpoint, host string) *Client {
 	return c.WithDNSResolver(NewDoTResolver(endpoint, host))
 }
 
-// WithDoH returns a new [Client] with the given DNS-over-HTTPS resolver.
+// WithDoH returns a clone of c that resolves DNS via
+// DNS-over-HTTPS using endpoint as the resolver URL and host as
+// the HTTP Host header. See [NewDoHResolver].
 func (c *Client) WithDoH(endpoint, host string) *Client {
 	return c.WithDNSResolver(NewDoHResolver(endpoint, host))
 }
 
-// WithBeforeRequest returns a new [Client] with the given request hook registered.
-// Before-request hooks are executed in the order they are registered.
+// WithBeforeRequest returns a clone of c that calls hook before
+// every request. Hooks execute in registration order.
 func (c *Client) WithBeforeRequest(hook func(req *http.Request)) *Client {
 	newClient := c.Clone()
 	newClient.beforeRequest = append(newClient.beforeRequest, hook)
 	return newClient
 }
 
-// WithAfterResponse returns a new [Client] with the given response hook registered.
-// After-response hooks are executed regardless of whether the request succeeded or failed.
+// WithAfterResponse returns a clone of c that calls hook after every
+// request, regardless of success or failure.
 func (c *Client) WithAfterResponse(hook func(resp *http.Response, err error)) *Client {
 	newClient := c.Clone()
 	newClient.afterResponse = append(newClient.afterResponse, hook) //nolint:bodyclose
 	return newClient
 }
 
-// WithUserAgent returns a new [Client] with the specified User-Agent header.
+// WithUserAgent returns a clone of c that sends ua as the
+// User-Agent header on every request.
 func (c *Client) WithUserAgent(ua string) *Client {
 	return c.WithHeader("User-Agent", ua)
 }
 
-// UserAgent returns the default User-Agent header value configured on the client.
+// UserAgent returns the User-Agent header configured on c.
 func (c *Client) UserAgent() string {
 	return c.headers.Get("User-Agent")
 }
 
-// WithOrigin returns a new [Client] configured with the specified Origin header.
+// WithOrigin returns a clone of c that sends origin as the Origin
+// header on every request.
 func (c *Client) WithOrigin(origin string) *Client {
 	return c.WithHeader("Origin", origin)
 }
 
-// WithBearer returns a new [Client] configured with the specified Bearer token.
+// WithBearer returns a clone of c that sends token as a Bearer
+// Authorization header on every request.
 func (c *Client) WithBearer(token string) *Client {
 	return c.WithHeader("Authorization", "Bearer "+token)
 }
 
-// WithBasicAuth returns a new [Client] configured with the specified Basic Auth credentials.
+// WithBasicAuth returns a clone of c that sends Basic authentication
+// credentials on every request.
 func (c *Client) WithBasicAuth(username, password string) *Client {
 	return c.WithHeader("Authorization", "Basic "+base64.StdEncoding.EncodeToString([]byte(username+":"+password)))
 }
 
-// WithCookieJar returns a new [Client] configured with the specified cookie jar.
-// This configuration is only applied if the underlying [HTTPDoer] is an [http.Client].
+// WithCookieJar returns a clone of c that stores and sends cookies
+// through jar. Only effective when the underlying [HTTPDoer] is an
+// [http.Client].
 func (c *Client) WithCookieJar(jar http.CookieJar) *Client {
 	newClient := c.Clone()
 	if httpClient, ok := newClient.http.(*http.Client); ok {
@@ -965,9 +990,10 @@ func (c *Client) WithCookieJar(jar http.CookieJar) *Client {
 	return newClient
 }
 
-// WithConnectionPool returns a new [Client] with the transport pool tuned to the given configuration.
-// It is only effective if the client is using an [http.Client] with an [http.Transport].
-// If config fields are <= 0, they are ignored and the original transport settings are kept.
+// WithConnectionPool returns a clone of c with the transport pool
+// tuned to cfg. Fields left at zero keep the existing transport
+// settings. Only effective when the underlying [HTTPDoer] is an
+// [http.Client] with an [http.Transport].
 func (c *Client) WithConnectionPool(cfg ConnectionPoolConfig) *Client {
 	newClient := c.Clone()
 	if transport := newClient.Transport(); transport != nil {
@@ -995,9 +1021,10 @@ func (c *Client) WithConnectionPool(cfg ConnectionPoolConfig) *Client {
 	return newClient
 }
 
-// WithTLSFingerprint returns a new [Client] configured to use uTLS for JA3 signature evasion.
-// Passing [BrowserNone] disables TLS fingerprint emulation.
-// This option is only effective if the client is using an [http.Client] with an [http.Transport].
+// WithTLSFingerprint returns a clone of c that uses uTLS to emulate
+// a browser's TLS ClientHello. [BrowserNone] disables emulation.
+// Only effective when the underlying [HTTPDoer] is an [http.Client]
+// with an [http.Transport].
 func (c *Client) WithTLSFingerprint(browser BrowserID) *Client {
 	newClient := c.Clone()
 	if browser == BrowserNone {
@@ -1035,59 +1062,64 @@ func (c *Client) WithTLSFingerprint(browser BrowserID) *Client {
 	return newClient
 }
 
-// WithJA4Callback returns a new [Client] that invokes fn with the JA4 fingerprint
-// after each TLS handshake. The callback receives both the TLS (JA4) fingerprint
-// and, if [TraceJA4] is used, the HTTP (JA4H) fingerprint.
-//
-// This option requires [WithTLSFingerprint] to be enabled.
+// WithJA4Callback returns a clone of c that calls fn after each TLS
+// handshake with the [ja4.Report]. Requires [Client.WithTLSFingerprint]
+// to be enabled.
 func (c *Client) WithJA4Callback(fn func(ja4.Report)) *Client {
 	newClient := c.Clone()
 	newClient.ja4Callback = fn
 	return newClient
 }
 
-// WithFragmentation returns a new [Client] configured with TLS fragmentation settings.
-// When set, the TLS ClientHello is split into smaller chunks across multiple TCP segments.
+// WithFragmentation returns a clone of c that splits the TLS
+// ClientHello across multiple TCP segments according to cfg. See
+// [FragmentConfig].
 func (c *Client) WithFragmentation(cfg FragmentConfig) *Client {
 	newClient := c.Clone()
 	newClient.fragmentConfig = &cfg
 	return newClient
 }
 
-// WithHostRewrite returns a new [Client] that rewrites hostnames to IP addresses
-// while preserving the original hostname for TLS SNI.
+// WithHostRewrite returns a clone of c that resolves hostnames in
+// requests according to rules (host -> ip), while keeping the
+// original hostname for TLS SNI.
 func (c *Client) WithHostRewrite(rules map[string]string) *Client {
 	newClient := c.Clone()
 	newClient.hostRewrite = &HostRewriteConfig{Rules: rules}
 	return newClient
 }
 
-// WithProxyIsolatedCookieJar returns a new [Client] that uses per-proxy cookie isolation.
-// Each proxy gets its own cookie jar, preventing cross-proxy cookie leakage.
+// WithProxyIsolatedCookieJar returns a clone of c that stores
+// cookies per proxy URL in jar, preventing cross-proxy session
+// leakage. See [ProxyIsolatedCookieJar].
 func (c *Client) WithProxyIsolatedCookieJar(jar *ProxyIsolatedCookieJar) *Client {
 	newClient := c.Clone()
 	newClient.headersCookieJar = jar
 	return newClient
 }
 
-// WithDNSCache returns a new [Client] that wraps the current DNS resolver
-// with an in-memory cache using the specified TTL.
+// WithDNSCache returns a clone of c that caches DNS results for ttl.
+// The cache wraps the current DNS resolver.
 func (c *Client) WithDNSCache(ttl time.Duration) *Client {
 	newClient := c.Clone()
 	newClient.dnsResolver = NewInMemoryDNSCache(ttl, c.dnsResolver)
 	return newClient
 }
 
-// WithHTTP2Settings returns a new [Client] configured with custom HTTP/2 parameters.
+// WithHTTP2Settings returns a clone of c with custom HTTP/2
+// connection parameters. These values are stored on the client
+// but only take effect when [Client.WithH2FramedTransport] is also
+// configured.
 func (c *Client) WithHTTP2Settings(settings HTTP2Settings) *Client {
 	newClient := c.Clone()
 	newClient.h2Settings = &settings
 	return newClient
 }
 
-// WithH2FramedTransport returns a new [Client] that wraps the transport to inject
-// browser-specific HTTP/2 SETTINGS and PRIORITY frames during connection setup.
-// This ensures the HTTP/2 fingerprint matches the TLS fingerprint from uTLS.
+// WithH2FramedTransport returns a clone of c that injects browser-
+// specific SETTINGS and PRIORITY frames into the HTTP/2 connection
+// preface. This makes the HTTP/2 fingerprint match the TLS profile
+// set by [Client.WithTLSFingerprint].
 func (c *Client) WithH2FramedTransport(settings HTTP2Settings) *Client {
 	newClient := c.Clone()
 	newClient.h2Settings = &settings
@@ -1102,28 +1134,28 @@ func (c *Client) WithH2FramedTransport(settings HTTP2Settings) *Client {
 	return newClient
 }
 
-// WithProfileH2Settings returns a new [Client] with HTTP/2 settings extracted
-// from a [profiles.H2Settings]. This ensures the HTTP/2 frame fingerprint
-// matches the browser used in the TLS fingerprint.
+// WithProfileH2Settings returns a clone of c with HTTP/2 settings
+// extracted from s. See [H2SettingsFromProfile].
 func (c *Client) WithProfileH2Settings(s profiles.H2Settings) *Client {
 	settings := H2SettingsFromProfile(s)
 	return c.WithH2FramedTransport(settings)
 }
 
-// WithP0fSignature configures TCP/IP spoofing based on a p0f signature.
-// After the TCP connection is established, spoofable fields (TTL, DF, window)
-// are applied via syscalls to make the connection appear as the specified OS
-// to passive fingerprinters like p0f.
+// WithP0fSignature returns a clone of c that spoofs TCP/IP fields
+// (TTL, Don't Fragment, window size) to match sig. The spoofing is
+// applied via Dialer.Control before the SYN packet is sent, making
+// the connection appear as the OS described by sig to passive
+// fingerprinters such as p0f.
 func (c *Client) WithP0fSignature(sig *p0f.Signature) *Client {
 	newClient := c.Clone()
 	newClient.p0fSignature = sig
 	return newClient
 }
 
-// WithProxyDNS returns a new [Client] with remote DNS resolution enabled.
-// When set, DNS queries are delegated to the proxy server (SOCKS5 or HTTP CONNECT)
-// instead of being resolved locally. This prevents DNS leaks where the local ISP
-// can observe which domains the client is accessing.
+// WithProxyDNS returns a clone of c that resolves hostnames through
+// the configured SOCKS5 or HTTP CONNECT proxy instead of the local
+// system resolver. This prevents the local ISP from observing DNS
+// queries.
 func (c *Client) WithProxyDNS() *Client {
 	newClient := c.Clone()
 	newClient.proxyDNS = true

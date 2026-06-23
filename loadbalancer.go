@@ -45,12 +45,12 @@ type LoadBalancerConfig struct {
 	HealthCheckInterval time.Duration
 }
 
-// Backend represents a single backend server configured in the load balancer.
+// Backend tracks the health and connection state of a single server in the load balancer.
 type Backend struct {
-	// URL is the string representation of the backend server address.
+	// URL is the address of the backend server.
 	URL string
 
-	// Weight is the selection weight for the WeightedRoundRobin strategy.
+	// Weight is the selection weight for the [WeightedRoundRobin] strategy.
 	Weight int
 
 	client      HTTPDoer
@@ -169,7 +169,7 @@ func (lb *LoadBalancer) Close() error {
 // Do executes the HTTP request across healthy backends based on the configured strategy.
 // It clones the original request and overwrites its Scheme and Host to target the chosen backend.
 //
-// If the chosen backend fails the criteria of [LoadBalancer.isFault], it is marked as failed.
+// If the chosen backend fails health checks, it is marked as failed.
 // The load balancer then retries other available backends sequentially.
 // If all backends fail, it returns an error wrapping the last encountered failure.
 func (lb *LoadBalancer) Do(req *http.Request) (*http.Response, error) {
@@ -358,9 +358,8 @@ func (lb *LoadBalancer) checkHealth(b *Backend) {
 	}
 }
 
-// Prewarm preemptively opens TCP/TLS connections to all registered backends.
-// It executes concurrent HEAD requests to each backend URL to warm up transport pools.
-// The method respects the provided context for cancellation.
+// Prewarm opens TCP/TLS connections to all registered backends by executing
+// concurrent HEAD requests to each backend URL.
 func (lb *LoadBalancer) Prewarm(ctx context.Context) {
 	lb.mu.RLock()
 	backends := make([]*Backend, len(lb.backends))

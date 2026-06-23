@@ -13,10 +13,10 @@ import (
 // modsCtxKey is the context key for carrying RequestModifiers through context.
 type modsCtxKey struct{}
 
-// NewStdClient returns a standard [*http.Client] whose transport routes all
+// NewStdClient returns a standard [http.Client] whose transport routes all
 // requests through the configured aoni [Client] pipeline.
 //
-// The returned client has Jar set to nil to avoid double cookie handling —
+// The returned client has Jar set to nil to avoid double cookie handling -
 // the aoni [ProxyIsolatedCookieJar] manages cookies internally.
 //
 // Usage:

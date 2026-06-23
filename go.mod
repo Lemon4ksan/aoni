@@ -2,7 +2,10 @@ module github.com/lemon4ksan/aoni
 
 go 1.25.4
 
+replace github.com/lemon4ksan/miyako => ./../miyako
+
 require (
+	github.com/lemon4ksan/miyako v0.2.0
 	github.com/andybalholm/brotli v1.2.1
 	github.com/gorilla/websocket v1.5.3
 	github.com/klauspost/compress v1.18.6

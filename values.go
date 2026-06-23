@@ -15,8 +15,8 @@ import (
 	"time"
 )
 
-// Uint64String handles parsing uint64 values received as string representations in JSON.
-// It parses raw integers, JSON null, or empty string representations safely.
+// Uint64String parses uint64 values from string representations in JSON.
+// It safely handles raw integers, JSON null, or empty strings.
 type Uint64String uint64
 
 // UnmarshalJSON parses JSON byte data into the [Uint64String] target.
@@ -37,8 +37,8 @@ func (u *Uint64String) UnmarshalJSON(b []byte) error {
 	return nil
 }
 
-// Int64String handles parsing int64 values received as string representations in JSON.
-// It parses raw integers, JSON null, or empty string representations safely.
+// Int64String parses int64 values from string representations in JSON.
+// It safely handles raw integers, JSON null, or empty strings.
 type Int64String int64
 
 // UnmarshalJSON parses JSON byte data into the [Int64String] target.
@@ -59,7 +59,7 @@ func (i *Int64String) UnmarshalJSON(b []byte) error {
 	return nil
 }
 
-// Float64String handles parsing float64 values received as string representations in JSON.
+// Float64String parses float64 values from string representations in JSON.
 type Float64String float64
 
 // UnmarshalJSON parses JSON byte data into the [Float64String] target.
@@ -80,8 +80,8 @@ func (f *Float64String) UnmarshalJSON(b []byte) error {
 	return nil
 }
 
-// BoolInt handles booleans that Steam sends as 1 (true) or 0 (false).
-// It also handles string variations ("1", "0", "true", "false").
+// BoolInt parses booleans from integers or strings in JSON.
+// It maps 1, "1", "true" to true and 0, "0", "false", "null" to false.
 type BoolInt bool
 
 // UnmarshalJSON implements json.Unmarshaler.
@@ -106,7 +106,7 @@ func (bi *BoolInt) UnmarshalJSON(b []byte) error {
 	return nil
 }
 
-// UnixTimestamp handles Unix timestamps that Steam sends as strings or numbers.
+// UnixTimestamp parses Unix timestamps from strings or numbers in JSON.
 type UnixTimestamp time.Time
 
 // UnmarshalJSON implements json.Unmarshaler.
@@ -127,14 +127,14 @@ func (t *UnixTimestamp) UnmarshalJSON(b []byte) error {
 	return nil
 }
 
-// Time returns the underlying time.Time.
+// Time returns the [time.Time] value.
 func (t *UnixTimestamp) Time() time.Time {
 	return time.Time(*t)
 }
 
-// StructToValues encodes a struct's fields into [url.Values] using "url" or "json" tags.
-// It recursively expands inline structures and supports slices, arrays, and standard primitive types.
-// Returns an error if the input kind is not a structure or pointer to a structure.
+// StructToValues encodes a struct into [url.Values] using "url" or "json" tags.
+// It expands inline structs recursively and supports slices, arrays, and primitive types.
+// Returns an error if the input is not a struct or pointer to a struct.
 func StructToValues(s any) (url.Values, error) {
 	if s == nil {
 		return nil, nil
@@ -161,8 +161,8 @@ func StructToValues(s any) (url.Values, error) {
 	return values, nil
 }
 
-// Validate inspects a struct's fields for the "validate:required" tag.
-// It performs a deep structural verification and returns [ValidationError] for the first missing required field.
+// Validate checks struct fields for the "validate:required" tag.
+// It returns a [ValidationError] for the first missing required field.
 func Validate(s any) error {
 	if s == nil {
 		return nil

@@ -1425,3 +1425,82 @@ func generateTestCert() (cert, key []byte, err error) {
 
 	return certPEM, keyPEM, nil
 }
+
+func TestWithQuery_MergesExistingParams(t *testing.T) {
+	t.Parallel()
+
+	type additional struct {
+		Page int `url:"page"`
+	}
+
+	req := &http.Request{
+		URL: &url.URL{
+			RawQuery: "existing=value&foo=bar",
+		},
+	}
+
+	mod := WithQuery(additional{Page: 2})
+	mod(req)
+
+	q := req.URL.Query()
+	assert.Equal(t, "value", q.Get("existing"))
+	assert.Equal(t, "bar", q.Get("foo"))
+	assert.Equal(t, "2", q.Get("page"))
+}
+
+func TestWithQuery_OverwritesSameKey(t *testing.T) {
+	t.Parallel()
+
+	type params struct {
+		Foo string `url:"foo"`
+	}
+
+	req := &http.Request{
+		URL: &url.URL{
+			RawQuery: "foo=old&bar=keep",
+		},
+	}
+
+	mod := WithQuery(params{Foo: "new"})
+	mod(req)
+
+	q := req.URL.Query()
+	assert.Equal(t, "new", q.Get("foo"))
+	assert.Equal(t, "keep", q.Get("bar"))
+}
+
+func TestWithQuery_NilQueryNoop(t *testing.T) {
+	t.Parallel()
+
+	req := &http.Request{
+		URL: &url.URL{RawQuery: "keep=this"},
+	}
+
+	WithQuery(nil)(req)
+	assert.Equal(t, "keep=this", req.URL.RawQuery)
+}
+
+func TestWithQuery_ComplexMerge(t *testing.T) {
+	t.Parallel()
+
+	type first struct {
+		Name string `url:"name"`
+	}
+
+	type second struct {
+		Age int `url:"age"`
+	}
+
+	req := &http.Request{
+		URL: &url.URL{RawQuery: "name=alice"},
+	}
+
+	WithQuery(first{Name: "bob"})(req)
+	q := req.URL.Query()
+	assert.Equal(t, "bob", q.Get("name"))
+
+	WithQuery(second{Age: 30})(req)
+	q = req.URL.Query()
+	assert.Equal(t, "bob", q.Get("name"))
+	assert.Equal(t, "30", q.Get("age"))
+}

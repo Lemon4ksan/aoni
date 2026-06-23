@@ -13,7 +13,7 @@ import (
 
 type fragmentCtxKey struct{}
 
-// FragmentConfig holds the configuration for fragmentation.
+// FragmentConfig specifies the chunk size and inter-chunk delay for connection fragmentation.
 type FragmentConfig struct {
 	ChunkSize int
 	MaxDelay  time.Duration

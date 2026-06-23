@@ -185,9 +185,10 @@ func WithBody(r io.Reader) RequestModifier {
 	}
 }
 
-// WithJSONBody serializes the payload as JSON and configures it as the request body.
-// It sets the Content-Type header to "application/json".
-// Any marshaling errors are written to the request context via bodyErrorCtxKey.
+// WithJSONBody serializes payload as JSON, sets the request body,
+// and adds a Content-Type: application/json header. Marshaling
+// errors are stored in the request context and retrievable via
+// the body error hook.
 func WithJSONBody(payload any) RequestModifier {
 	return func(req *http.Request) {
 		bodyBytes, err := json.Marshal(payload)
@@ -208,9 +209,10 @@ func WithJSONBody(payload any) RequestModifier {
 	}
 }
 
-// WithMultipart writes the provided text fields and files into a multipart/form-data body.
-// It automatically computes and sets the Content-Type header with the boundary value.
-// Any write errors during formatting cause the modifier to return early with an incomplete body.
+// WithMultipart builds a multipart/form-data body from fields and
+// files, sets Content-Length and Content-Type (with boundary). A
+// write error during formatting silently returns with an incomplete
+// body.
 func WithMultipart(fields map[string]string, files map[string]io.Reader) RequestModifier {
 	return func(req *http.Request) {
 		body := &bytes.Buffer{}
@@ -254,7 +256,9 @@ func WithOrigin(origin string) RequestModifier {
 	}
 }
 
-// Debug returns a modifier that forces verbose logging of request and response details.
+// Debug returns a [RequestModifier] that tags the request for
+// verbose logging. The [Client] must have a [Logger] set via
+// [Client.WithLogger] for output to appear.
 func Debug() RequestModifier {
 	return func(req *http.Request) {
 		ctx := context.WithValue(req.Context(), debugCtxKey{}, true)
@@ -262,7 +266,9 @@ func Debug() RequestModifier {
 	}
 }
 
-// WithDecoder sets the response body [Decoder] strategy for the active request.
+// WithDecoder overrides the response [Decoder] for this request.
+// The client-level decoder set via [Client.WithBaseResponse] is
+// ignored when this modifier is present.
 func WithDecoder(d Decoder) RequestModifier {
 	return func(req *http.Request) {
 		ctx := context.WithValue(req.Context(), decoderCtxKey{}, d)
@@ -270,7 +276,9 @@ func WithDecoder(d Decoder) RequestModifier {
 	}
 }
 
-// WithErrorModel configures a target structure to parse non-2xx API error responses.
+// WithErrorModel tells [Client.Request] to deserialize non-2xx
+// response bodies into target. Inspect the result with
+// [errors.As] against [APIError].
 func WithErrorModel(target any) RequestModifier {
 	return func(req *http.Request) {
 		ctx := context.WithValue(req.Context(), errorModelCtxKey{}, target)
@@ -278,7 +286,9 @@ func WithErrorModel(target any) RequestModifier {
 	}
 }
 
-// WithUploadProgress registers a progress callback for monitoring client uploads.
+// WithUploadProgress wraps the request body with a [progressReader]
+// that calls onProgress during reads. The total parameter is
+// Content-Length or -1 when unknown.
 func WithUploadProgress(onProgress ProgressFunc) RequestModifier {
 	return func(req *http.Request) {
 		if req.Body != nil && req.Body != http.NoBody {
@@ -291,7 +301,9 @@ func WithUploadProgress(onProgress ProgressFunc) RequestModifier {
 	}
 }
 
-// WithDownloadProgress registers a progress callback for monitoring server downloads.
+// WithDownloadProgress registers onProgress to be called during
+// response body reads. The callback fires with the bytes-read
+// total and the Content-Length value.
 func WithDownloadProgress(onProgress ProgressFunc) RequestModifier {
 	return func(req *http.Request) {
 		ctx := context.WithValue(req.Context(), downloadProgressCtxKey{}, onProgress)
@@ -299,7 +311,8 @@ func WithDownloadProgress(onProgress ProgressFunc) RequestModifier {
 	}
 }
 
-// WithHedging applies a request-specific hedging timeout.
+// WithHedging overrides the client-level hedging delay for this
+// request. A duration <= 0 disables hedging for the request.
 func WithHedging(delay time.Duration) RequestModifier {
 	return func(req *http.Request) {
 		ctx := context.WithValue(req.Context(), hedgingCtxKey{}, delay)
@@ -307,7 +320,9 @@ func WithHedging(delay time.Duration) RequestModifier {
 	}
 }
 
-// CaptureResponse captures the resulting [http.Response] structure upon request completion.
+// CaptureResponse stores the final [http.Response] pointer in
+// target after the request completes. Useful for inspecting
+// headers or status codes in middleware hooks.
 func CaptureResponse(target **http.Response) RequestModifier {
 	return func(req *http.Request) {
 		ctx := context.WithValue(req.Context(), capturerCtxKey{}, target)
@@ -315,7 +330,10 @@ func CaptureResponse(target **http.Response) RequestModifier {
 	}
 }
 
-// WithStreamingMultipart applies a streaming multipart request body.
+// WithStreamingMultipart builds a multipart/form-data body using an
+// [io.Pipe] so that file data is streamed rather than buffered in
+// memory. Content-Length is not set because the total size is
+// unknown until writing completes.
 func WithStreamingMultipart(fields map[string]string, files map[string]io.Reader) RequestModifier {
 	return func(req *http.Request) {
 		pr, pw := io.Pipe()
@@ -340,7 +358,8 @@ func WithStreamingMultipart(fields map[string]string, files map[string]io.Reader
 	}
 }
 
-// WithOrderedHeaders specifies the exact order of headers for HTTP/1.1 requests.
+// WithOrderedHeaders sets the header serialization order for this
+// HTTP/1.1 request. For HTTP/2, use [H2FramedTransport] instead.
 func WithOrderedHeaders(order []string) RequestModifier {
 	return func(req *http.Request) {
 		ctx := context.WithValue(req.Context(), orderedHeadersCtxKey{}, order)
@@ -348,9 +367,10 @@ func WithOrderedHeaders(order []string) RequestModifier {
 	}
 }
 
-// QUICMigrationConfig configures QUIC Connection Migration behavior for HTTP/3.
-// Connection Migration allows a QUIC connection to survive network interface changes
-// (e.g., Wi-Fi to LTE) by using Connection IDs instead of IP:Port binding.
+// QUICMigrationConfig controls QUIC Connection Migration for HTTP/3.
+// Migration lets a QUIC connection survive network interface changes
+// (e.g. Wi-Fi to cellular) by tracking connection IDs instead of
+// IP:port tuples. See [DefaultQUICMigrationConfig].
 type QUICMigrationConfig struct {
 	// EnableMigration enables QUIC Connection Migration (default: true).
 	// When enabled, the client can survive IP address changes without renegotiating.
@@ -370,7 +390,8 @@ type QUICMigrationConfig struct {
 	InitialPacketSize uint16
 }
 
-// DefaultQUICMigrationConfig returns sensible defaults for Connection Migration.
+// DefaultQUICMigrationConfig returns a [QUICMigrationConfig] with
+// production-ready defaults.
 func DefaultQUICMigrationConfig() QUICMigrationConfig {
 	return QUICMigrationConfig{
 		EnableMigration:   true,
@@ -380,13 +401,15 @@ func DefaultQUICMigrationConfig() QUICMigrationConfig {
 	}
 }
 
-// WithHTTP3 returns a new [Client] that uses HTTP/3 instead of HTTP/1.1.
+// WithHTTP3 returns a clone of c that sends requests over HTTP/3
+// (QUIC). Uses [DefaultQUICMigrationConfig] for migration settings.
 func (c *Client) WithHTTP3() *Client {
 	return c.WithHTTP3Config(nil)
 }
 
-// WithHTTP3Config returns a new [Client] that uses HTTP/3 with Connection Migration support.
-// If config is nil, DefaultQUICMigrationConfig is used.
+// WithHTTP3Config returns a clone of c that sends requests over
+// HTTP/3 (QUIC) with migration settings from config. When config
+// is nil, [DefaultQUICMigrationConfig] values are used.
 func (c *Client) WithHTTP3Config(config *QUICMigrationConfig) *Client {
 	newClient := c.Clone()
 
@@ -423,7 +446,8 @@ func (c *Client) WithHTTP3Config(config *QUICMigrationConfig) *Client {
 	return newClient
 }
 
-// WithForceHTTP1 returns a [RequestModifier] that forces ALPN to only http/1.1.
+// WithForceHTTP1 returns a [RequestModifier] that advertises only
+// http/1.1 in ALPN, preventing the server from upgrading to HTTP/2.
 func WithForceHTTP1() RequestModifier {
 	return func(req *http.Request) {
 		ctx := context.WithValue(req.Context(), alpnOverrideCtxKey{}, []string{"http/1.1"})
@@ -431,7 +455,8 @@ func WithForceHTTP1() RequestModifier {
 	}
 }
 
-// WithForceHTTP2 returns a [RequestModifier] that forces ALPN to only h2.
+// WithForceHTTP2 returns a [RequestModifier] that advertises only
+// h2 in ALPN, forcing the server to use HTTP/2.
 func WithForceHTTP2() RequestModifier {
 	return func(req *http.Request) {
 		ctx := context.WithValue(req.Context(), alpnOverrideCtxKey{}, []string{"h2"})

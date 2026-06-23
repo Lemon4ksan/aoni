@@ -139,7 +139,7 @@ func StreamNDJSON[T any](ctx context.Context, resp *StreamResponse) (<-chan T, <
 	return out, errs
 }
 
-// SSEEvent represents a parsed single Server-Sent Event frame.
+// SSEEvent holds the parsed fields of a Server-Sent Event.
 type SSEEvent struct {
 	// Event is the event identifier string.
 	Event string

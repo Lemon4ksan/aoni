@@ -18,40 +18,40 @@ import (
 	"github.com/lemon4ksan/aoni/ja4"
 )
 
-// TraceInfo holds detailed network layer timing metrics for a request.
-// The timing fields are fully populated only after the response body is completely read.
+// TraceInfo records network layer timing metrics for a request.
+// Timing fields are fully populated only after the response body is completely read.
 type TraceInfo struct {
-	// DNSLookup is the duration spent resolving the server's IP address.
+	// DNSLookup records the time spent resolving the server's IP address.
 	DNSLookup time.Duration
 
-	// TCPConn is the duration spent establishing the TCP connection.
+	// TCPConn records the time spent establishing the TCP connection.
 	TCPConn time.Duration
 
-	// TLSHandshake is the duration spent completing the SSL/TLS handshake.
+	// TLSHandshake records the time spent completing the SSL/TLS handshake.
 	TLSHandshake time.Duration
 
-	// ServerProcessing is the duration from connection establishment to receiving the first response byte.
+	// ServerProcessing records the time from connection establishment to receiving the first response byte.
 	ServerProcessing time.Duration
 
-	// ContentTransfer is the duration spent transferring the response body data.
+	// ContentTransfer records the time spent transferring the response body data.
 	ContentTransfer time.Duration
 
-	// Total is the total execution time for the request.
+	// Total records the total execution time for the request.
 	Total time.Duration
 
-	// RequestSize is the request payload size in bytes.
+	// RequestSize records the request payload size in bytes.
 	RequestSize int64
 
-	// ResponseSize is the response payload size in bytes.
+	// ResponseSize records the response payload size in bytes.
 	ResponseSize int64
 
-	// JA4 holds the JA4+ fingerprints computed during the request.
+	// JA4 holds the JA4 fingerprints computed during the request.
 	// Populated only when [TraceJA4] is used as a request modifier.
 	JA4 *ja4.Report
 }
 
 // Trace returns a [RequestModifier] that registers a connection tracer on the active request.
-// Timing metrics are recorded and populated inside the provided [TraceInfo] structure.
+// Timing metrics are populated inside the provided [TraceInfo] structure.
 func Trace(target *TraceInfo) RequestModifier {
 	return func(req *http.Request) {
 		var dnsStart, connectStart, tlsStart, gotConn time.Time
@@ -79,7 +79,7 @@ func Trace(target *TraceInfo) RequestModifier {
 // The JA4 report is fully populated after the request completes. The TLS fingerprint (JA4)
 // requires [Client.WithTLSFingerprint] to be enabled.
 //
-// Use this modifier alongside [Trace] for complete timing + fingerprint data:
+// Use this modifier alongside [Trace] for complete timing and fingerprint data:
 //
 //	info := &aoni.TraceInfo{}
 //	client.Get(ctx, "/path", aoni.Trace(info), aoni.TraceJA4(info))
