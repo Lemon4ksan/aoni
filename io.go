@@ -155,7 +155,15 @@ func newFinalizerReadCloser(rc io.ReadCloser) io.ReadCloser {
 func (f *finalizerReadCloser) Close() error {
 	if f.closed.CompareAndSwap(false, true) {
 		runtime.SetFinalizer(f, nil)
-		return f.ReadCloser.Close()
+
+		err := f.ReadCloser.Close()
+
+		// Ensure any temp-files in the chain are cleaned up even on normal close.
+		if rb, ok := unwrapBody(f.ReadCloser).(interface{ ReallyClose() }); ok {
+			rb.ReallyClose()
+		}
+
+		return err
 	}
 
 	return nil
