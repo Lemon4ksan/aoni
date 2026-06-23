@@ -124,6 +124,7 @@ user, err := aoni.GetJSON[User](ctx, client, "/users/{id}",
 | **Обход TLS-фингерпринтинга (JA3)** | ✗ | ✗ | **✓ (через `uTLS` & Рукопожатие)** |
 | **JA4+ Fingerprinting** | ✗ | ✗ | **✓ (TLS & HTTP, чистый Go)** |
 | **Субмиллисекундная трассировка** | ⚠️ (Громоздкая) | ✗ | **✓ (В один модификатор)** |
+| **Структурированное распаковывание ответов** | ✗ | ✗ | **✓ (`WithBaseResponse`)** |
 | **Socket.IO / Engine.IO v4 клиент** | ✗ | ✗ | **✓ (Полная поддержка v5)** |
 
 ## 🍳 Рецепты: распространенные сценарии отказоустойчивости
@@ -237,6 +238,45 @@ aoni.GetJSON[User](ctx, client, "/debug",
 
 fmt.Printf("DNS: %s | TCP Connect: %s | TLS Handshake: %s | TTFB: %s\n",
     trace.DNSLookup, trace.TCPConn, trace.TLSHandshake, trace.ServerProcessing)
+```
+
+### 7. Структурированное распаковывание ответов API с помощью `WithBaseResponse`
+* **Проблема:** Многие API оборачивают данные в конверт (envelope): `{"success":true,"data":{...}}` или `{"status":"ok","result":{...}}`. Ручное распаковывание таких конвертов, проверка флагов успеха и извлечение ошибок — это повторяющийся шаблонный код.
+* **Ледяное решение:** Реализуйте интерфейс `BaseResponse` (`IsSuccess`, `Error`, `SetData`, `UnmarshalJSON`) и настройте клиент через `WithBaseResponse`. Декодер автоматически декодирует в вашу обёртку, проверяет флаг успеха, извлекает ошибки и распаковывает вложенные данные — всё за один проход.
+
+```go
+// 1. Определяем обёртку (envelope)
+type apiResponse struct {
+	Success bool   `json:"success"`
+	Message string `json:"message,omitempty"`
+	target  any
+}
+
+func (r *apiResponse) IsSuccess() bool            { return r.Success }
+func (r *apiResponse) Error() error               { return errors.New(r.Message) }
+func (r *apiResponse) SetData(data any)           { r.target = data }
+func (r *apiResponse) UnmarshalJSON(data []byte) error {
+	type Alias apiResponse
+	var aux Alias
+	if err := json.Unmarshal(data, &aux); err != nil {
+		return err
+	}
+	r.Success, r.Message = aux.Success, aux.Message
+	if r.target != nil {
+		return json.Unmarshal(data, r.target)
+	}
+	return nil
+}
+
+// 2. Настраиваем клиент — каждый JSON-запрос проходит через эту обёртку
+client := aoni.NewClient(nil).
+	WithBaseURL("https://api.example.com").
+	WithBaseResponse(func() aoni.BaseResponse { return &apiResponse{} })
+
+// 3. Используем — декодер автоматически распаковывает конверт
+user, err := aoni.GetJSON[User](ctx, client, "/users/1")
+// Если API вернул {"success":false,"message":"not found"}, err != nil
+// Если API вернул {"success":true,"data":{"name":"Alice"}}, user.Name == "Alice"
 ```
 
 ## 🎨 Потребление памяти и ресурсов

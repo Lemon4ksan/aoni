@@ -122,9 +122,8 @@ This matrix shows where `aoni` focuses its design compared to Go's default capab
 | **TLS Evasion (JA3/JA4)** | ✗ | ✗ | **✓ (via `uTLS` & Handshake)** |
 | **JA4+ Fingerprinting** | ✗ | ✗ | **✓ (TLS & HTTP, pure Go)** |
 | **Sub-millisecond Tracing** | ⚠️ (Verbose) | ✗ | **✓ (Single-modifier)** |
+| **Structured Response Unwrapping** | ✗ | ✗ | **✓ (`WithBaseResponse`)** |
 | **Socket.IO / Engine.IO v4 Client** | ✗ | ✗ | **✓ (Complete v5 Spec)** |
-
----
 
 ## 🍳 Cookbook: Common Resiliency Recipes
 
@@ -234,6 +233,45 @@ aoni.GetJSON[User](ctx, client, "/debug",
 
 fmt.Printf("DNS: %s | TCP Connect: %s | TLS Handshake: %s | TTFB: %s\n",
     trace.DNSLookup, trace.TCPConn, trace.TLSHandshake, trace.ServerProcessing)
+```
+
+### 7. Structured API Response Unwrapping with `WithBaseResponse`
+* **The Problem:** Many APIs wrap successful data in an envelope object like `{"success":true,"data":{...}}` or `{"status":"ok","result":{...}}`. Manually unwrapping these envelopes, checking success flags, and extracting errors is repetitive boilerplate.
+* **The Ice-Cold Solution:** Implement the `BaseResponse` interface (`IsSuccess`, `Error`, `SetData`, `UnmarshalJSON`) and configure the client with `WithBaseResponse`. The decoder automatically decodes into your wrapper, checks the success flag, extracts errors, and unwraps the inner payload — all in one pass.
+
+```go
+// 1. Define your envelope wrapper
+type apiResponse struct {
+	Success bool   `json:"success"`
+	Message string `json:"message,omitempty"`
+	target  any
+}
+
+func (r *apiResponse) IsSuccess() bool            { return r.Success }
+func (r *apiResponse) Error() error               { return errors.New(r.Message) }
+func (r *apiResponse) SetData(data any)           { r.target = data }
+func (r *apiResponse) UnmarshalJSON(data []byte) error {
+	type Alias apiResponse
+	var aux Alias
+	if err := json.Unmarshal(data, &aux); err != nil {
+		return err
+	}
+	r.Success, r.Message = aux.Success, aux.Message
+	if r.target != nil {
+		return json.Unmarshal(data, r.target)
+	}
+	return nil
+}
+
+// 2. Configure the client — every JSON request unwraps through this envelope
+client := aoni.NewClient(nil).
+	WithBaseURL("https://api.example.com").
+	WithBaseResponse(func() aoni.BaseResponse { return &apiResponse{} })
+
+// 3. Use it — the decoder handles envelope unwrapping automatically
+user, err := aoni.GetJSON[User](ctx, client, "/users/1")
+// If API returns {"success":false,"message":"not found"}, err is non-nil
+// If API returns {"success":true,"data":{"name":"Alice"}}, user.Name == "Alice"
 ```
 
 ## 🎨 Memory & Resource Footprint

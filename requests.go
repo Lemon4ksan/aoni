@@ -32,43 +32,43 @@ func Get[Resp any](ctx context.Context, path string, mods ...RequestModifier) (*
 }
 
 // Post performs a global POST request using [DefaultClient] and decodes the JSON response body.
-func Post[Req, Resp any](
+func Post[Resp any](
 	ctx context.Context,
 	path string,
-	payload Req,
+	payload any,
 	mods ...RequestModifier,
 ) (*Resp, error) {
-	return PostJSON[Req, Resp](ctx, DefaultClient, path, payload, mods...)
+	return PostJSON[Resp](ctx, DefaultClient, path, payload, mods...)
 }
 
 // Put performs a global PUT request using [DefaultClient] and decodes the JSON response body.
-func Put[Req, Resp any](
+func Put[Resp any](
 	ctx context.Context,
 	path string,
-	payload Req,
+	payload any,
 	mods ...RequestModifier,
 ) (*Resp, error) {
-	return PutJSON[Req, Resp](ctx, DefaultClient, path, payload, mods...)
+	return PutJSON[Resp](ctx, DefaultClient, path, payload, mods...)
 }
 
 // Patch performs a global PATCH request using [DefaultClient] and decodes the JSON response body.
-func Patch[Req, Resp any](
+func Patch[Resp any](
 	ctx context.Context,
 	path string,
-	payload Req,
+	payload any,
 	mods ...RequestModifier,
 ) (*Resp, error) {
-	return PatchJSON[Req, Resp](ctx, DefaultClient, path, payload, mods...)
+	return PatchJSON[Resp](ctx, DefaultClient, path, payload, mods...)
 }
 
 // Delete performs a global DELETE request using [DefaultClient] and decodes the JSON response body.
-func Delete[Req, Resp any](
+func Delete[Resp any](
 	ctx context.Context,
 	path string,
-	payload Req,
+	payload any,
 	mods ...RequestModifier,
 ) (*Resp, error) {
-	return DeleteJSON[Req, Resp](ctx, DefaultClient, path, payload, mods...)
+	return DeleteJSON[Resp](ctx, DefaultClient, path, payload, mods...)
 }
 
 // GetJSON performs a GET request and decodes the JSON response body into a new instance of Resp.
@@ -103,11 +103,11 @@ func GetJSON[Resp any](
 //
 // It validates the payload structure beforehand using [Validate].
 // Returns a [ValidationError] if validation fails.
-func PostForm[Req, Resp any](
+func PostForm[Resp any](
 	ctx context.Context,
 	c Requester,
 	path string,
-	payload Req,
+	payload any,
 	mods ...RequestModifier,
 ) (*Resp, error) {
 	if err := Validate(payload); err != nil {
@@ -148,11 +148,11 @@ func PostForm[Req, Resp any](
 //
 // It validates the payload structure beforehand using [Validate].
 // Returns a [ValidationError] if validation fails.
-func PostJSON[Req, Resp any](
+func PostJSON[Resp any](
 	ctx context.Context,
 	c Requester,
 	path string,
-	payload Req,
+	payload any,
 	mods ...RequestModifier,
 ) (*Resp, error) {
 	if err := Validate(payload); err != nil {
@@ -194,11 +194,11 @@ func PostJSON[Req, Resp any](
 //
 // It validates the payload structure beforehand using [Validate].
 // Returns a [ValidationError] if validation fails.
-func PutJSON[Req, Resp any](
+func PutJSON[Resp any](
 	ctx context.Context,
 	c Requester,
 	path string,
-	payload Req,
+	payload any,
 	mods ...RequestModifier,
 ) (*Resp, error) {
 	if err := Validate(payload); err != nil {
@@ -240,11 +240,11 @@ func PutJSON[Req, Resp any](
 //
 // It validates the payload structure beforehand using [Validate].
 // Returns a [ValidationError] if validation fails.
-func PatchJSON[Req, Resp any](
+func PatchJSON[Resp any](
 	ctx context.Context,
 	c Requester,
 	path string,
-	payload Req,
+	payload any,
 	mods ...RequestModifier,
 ) (*Resp, error) {
 	if err := Validate(payload); err != nil {
@@ -286,11 +286,11 @@ func PatchJSON[Req, Resp any](
 //
 // It validates the payload structure beforehand using [Validate].
 // Returns a [ValidationError] if validation fails.
-func DeleteJSON[Req, Resp any](
+func DeleteJSON[Resp any](
 	ctx context.Context,
 	c Requester,
 	path string,
-	payload Req,
+	payload any,
 	mods ...RequestModifier,
 ) (*Resp, error) {
 	if err := Validate(payload); err != nil {

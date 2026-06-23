@@ -51,7 +51,7 @@ func TestClient_PostJSON(t *testing.T) {
 		_ = json.NewEncoder(w).Encode(response)
 	})
 
-	result, err := PostJSON[testPayload, testPayload](t.Context(), client, "/post", input)
+	result, err := PostJSON[testPayload](t.Context(), client, "/post", input)
 	require.NoError(t, err)
 	assert.Equal(t, response.Message, result.Message)
 }
@@ -76,7 +76,7 @@ func TestClient_PutJSON(t *testing.T) {
 		_ = json.NewEncoder(w).Encode(response)
 	})
 
-	result, err := PutJSON[testPayload, testPayload](t.Context(), client, "/put", input)
+	result, err := PutJSON[testPayload](t.Context(), client, "/put", input)
 	require.NoError(t, err)
 	assert.Equal(t, response.Message, result.Message)
 }
@@ -101,7 +101,7 @@ func TestClient_PatchJSON(t *testing.T) {
 		_ = json.NewEncoder(w).Encode(response)
 	})
 
-	result, err := PatchJSON[testPayload, testPayload](t.Context(), client, "/patch", input)
+	result, err := PatchJSON[testPayload](t.Context(), client, "/patch", input)
 	require.NoError(t, err)
 	assert.Equal(t, response.Message, result.Message)
 }
@@ -126,7 +126,7 @@ func TestClient_DeleteJSON(t *testing.T) {
 		_ = json.NewEncoder(w).Encode(response)
 	})
 
-	result, err := DeleteJSON[testPayload, testPayload](t.Context(), client, "/delete", input)
+	result, err := DeleteJSON[testPayload](t.Context(), client, "/delete", input)
 	require.NoError(t, err)
 	assert.Equal(t, response.Message, result.Message)
 }
@@ -144,6 +144,6 @@ func TestClient_DeleteJSON_NilPayload(t *testing.T) {
 		w.WriteHeader(http.StatusNoContent)
 	})
 
-	_, err := DeleteJSON[*testPayload, any](t.Context(), client, "/delete-nil", nil)
+	_, err := DeleteJSON[any](t.Context(), client, "/delete-nil", nil)
 	require.NoError(t, err)
 }

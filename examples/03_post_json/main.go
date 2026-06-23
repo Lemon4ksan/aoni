@@ -48,7 +48,7 @@ func main() {
 		UserID: 1,
 	}
 
-	result, err := aoni.PostJSON[CreatePostRequest, PostResponse](
+	result, err := aoni.PostJSON[PostResponse](
 		ctx, client, "/posts", payload,
 		aoni.WithErrorModel(&ErrorResponse{}),
 	)

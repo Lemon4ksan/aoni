@@ -279,7 +279,7 @@ func TestClient_Validation(t *testing.T) {
 
 	t.Run("missing_payload_field", func(t *testing.T) {
 		payload := RequiredPayload{}
-		_, err := PostJSON[RequiredPayload, any](t.Context(), client, "/test", payload)
+		_, err := PostJSON[any](t.Context(), client, "/test", payload)
 		require.Error(t, err)
 
 		var valErr *ValidationError
@@ -315,7 +315,7 @@ func TestClient_PostForm(t *testing.T) {
 		_, _ = w.Write([]byte(`{"status": 200}`))
 	})
 
-	_, err := PostForm[Params, any](t.Context(), client, "/form", Params{ID: 123, Name: "bob"})
+	_, err := PostForm[Params](t.Context(), client, "/form", Params{ID: 123, Name: "bob"})
 	assert.NoError(t, err)
 }
 
@@ -399,7 +399,7 @@ func TestClient_DX_Helpers(t *testing.T) {
 	t.Run("global_put", func(t *testing.T) {
 		var raw *http.Response
 
-		_, err := Put[testPayload, testPayload](
+		_, err := Put[testPayload](
 			t.Context(),
 			"/put",
 			testPayload{Message: "put-body"},
@@ -417,7 +417,7 @@ func TestClient_DX_Helpers(t *testing.T) {
 	t.Run("global_patch", func(t *testing.T) {
 		var raw *http.Response
 
-		_, err := Patch[testPayload, testPayload](
+		_, err := Patch[testPayload](
 			t.Context(),
 			"/patch",
 			testPayload{Message: "patch-body"},
@@ -435,7 +435,7 @@ func TestClient_DX_Helpers(t *testing.T) {
 	t.Run("global_delete", func(t *testing.T) {
 		var raw *http.Response
 
-		_, err := Delete[testPayload, testPayload](
+		_, err := Delete[testPayload](
 			t.Context(),
 			"/delete",
 			testPayload{Message: "delete-body"},

@@ -9,6 +9,7 @@ import (
 	"compress/gzip"
 	"context"
 	"crypto/tls"
+	"encoding/base64"
 	"errors"
 	"fmt"
 	"io"
@@ -143,12 +144,14 @@ type ProgressFunc func(current, total int64)
 
 // BaseResponse defines the contract for structured response wrappers.
 // It handles success status checking and decoding destination binding.
+// It is passed to the json decoder to unmarshal the response body into the target data structure.
+// Implement UnmarshalJSON to handle the actual JSON decoding logic.
 type BaseResponse interface {
 	// IsSuccess reports whether the response indicates a successful operation.
 	IsSuccess() bool
 	// Error returns an error representation if IsSuccess returns false.
 	Error() error
-	// SetData registers the destination pointer where the payload is decoded.
+	// SetData sets the data into the response.
 	SetData(data any)
 }
 
@@ -773,6 +776,16 @@ func (c *Client) UserAgent() string {
 // WithOrigin returns a new [Client] configured with the specified Origin header.
 func (c *Client) WithOrigin(origin string) *Client {
 	return c.WithHeader("Origin", origin)
+}
+
+// WithBearer returns a new [Client] configured with the specified Bearer token.
+func (c *Client) WithBearer(token string) *Client {
+	return c.WithHeader("Authorization", "Bearer "+token)
+}
+
+// WithBasicAuth returns a new [Client] configured with the specified Basic Auth credentials.
+func (c *Client) WithBasicAuth(username, password string) *Client {
+	return c.WithHeader("Authorization", "Basic "+base64.StdEncoding.EncodeToString([]byte(username+":"+password)))
 }
 
 // WithCookieJar returns a new [Client] configured with the specified cookie jar.
