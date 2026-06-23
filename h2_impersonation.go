@@ -46,15 +46,25 @@ func H2SettingsFromProfile(s profiles.H2Settings) HTTP2Settings {
 	}
 }
 
+// headerOrderingConn wraps a [net.Conn] to reorder HTTP/1.1 headers before
+// they reach the wire. It operates at the TCP level, sitting between the raw
+// socket and the TLS layer (e.g. [tls.Conn] or [utls.UConn]).
+//
+// This placement is critical: TLS calls Write() on the wrapped connection
+// with plaintext data before encrypting. So headerOrderingConn sees and
+// reorders plaintext HTTP headers, not encrypted TLS records.
+//
+// Wrapping order: TCP → headerOrderingConn → TLS → Go HTTP client
 type headerOrderingConn struct {
 	net.Conn
 	orderedKeys []string
 }
 
+// Write intercepts serialized HTTP/1.1 requests and reorders headers
+// according to the configured order. Detection is based on the presence
+// of the HTTP header terminator \r\n\r\n in the written bytes.
 func (c *headerOrderingConn) Write(b []byte) (n int, err error) {
-	if len(c.orderedKeys) > 0 && (bytes.HasPrefix(b, []byte("GET ")) ||
-		bytes.HasPrefix(b, []byte("POST ")) || bytes.HasPrefix(b, []byte("PUT ")) ||
-		bytes.HasPrefix(b, []byte("DELETE ")) || bytes.HasPrefix(b, []byte("PATCH "))) {
+	if len(c.orderedKeys) > 0 && bytes.Contains(b, []byte("\r\n\r\n")) {
 		if rewritten, ok := reorderHTTP1Headers(b, c.orderedKeys); ok {
 			b = rewritten
 		}
@@ -70,7 +80,8 @@ func reorderHTTP1Headers(raw []byte, order []string) ([]byte, bool) {
 	}
 
 	headerPart := raw[:headerEnd]
-	bodyPart := raw[headerEnd:]
+	// Skip the \r\n\r\n separator; we'll re-add it after all headers.
+	bodyPart := raw[headerEnd+4:]
 
 	lines := bytes.Split(headerPart, []byte("\r\n"))
 	if len(lines) < 2 {
@@ -119,6 +130,8 @@ func reorderHTTP1Headers(raw []byte, order []string) ([]byte, bool) {
 		}
 	}
 
+	// Write the \r\n header terminator + body.
+	newHeaderPart.Write([]byte("\r\n"))
 	newHeaderPart.Write(bodyPart)
 
 	return newHeaderPart.Bytes(), true

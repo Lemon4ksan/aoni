@@ -338,6 +338,7 @@ func (r *ProxyRotator) Do(req *http.Request) (*http.Response, error) {
 		tc := clients[stickyIdx]
 		if r.isAvailable(tc) {
 			proxyCtx := context.WithValue(req.Context(), proxyCtxKey{}, tc.proxyURL)
+
 			resp, err := tc.client.Do(req.WithContext(proxyCtx))
 			if !r.isProxyFault(resp, err) {
 				r.markSuccess(tc)

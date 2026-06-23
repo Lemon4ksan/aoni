@@ -9,6 +9,7 @@ import (
 	"context"
 	"crypto/tls"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"mime/multipart"
@@ -178,7 +179,7 @@ func WithBody(r io.Reader) RequestModifier {
 					return io.NopCloser(r), nil
 				}
 
-				return nil, fmt.Errorf("aoni: body does not support seeking for hedging")
+				return nil, errors.New("aoni: body does not support seeking for hedging")
 			}
 		}
 	}

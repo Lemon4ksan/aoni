@@ -16,10 +16,10 @@ type proxyCtxKey struct{}
 
 // ProxyIsolatedCookieJar is an isolated cookie jar that stores cookies per proxy URL.
 type ProxyIsolatedCookieJar struct {
-	mu           sync.RWMutex
-	jars         map[string]http.CookieJar
-	activeProxy  string
-	hasActive    bool
+	mu          sync.RWMutex
+	jars        map[string]http.CookieJar
+	activeProxy string
+	hasActive   bool
 }
 
 // NewProxyIsolatedCookieJar creates a new ProxyIsolatedCookieJar.

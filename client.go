@@ -308,11 +308,13 @@ func (c *Client) Clone() *Client {
 			copy(optsCopy, sigCopy.Options)
 			sigCopy.Options = optsCopy
 		}
+
 		if len(sigCopy.Quirks) > 0 {
 			qCopy := make([]string, len(sigCopy.Quirks))
 			copy(qCopy, sigCopy.Quirks)
 			sigCopy.Quirks = qCopy
 		}
+
 		cloned.p0fSignature = &sigCopy
 	}
 
@@ -452,6 +454,7 @@ func (c *Client) Request(
 				req.AddCookie(cookie)
 			}
 		}
+
 		// Set active proxy so SetCookies/Cookies during redirects use the right jar.
 		if proxyURL, ok := ctx.Value(proxyCtxKey{}).(string); ok {
 			isolatedJar.SetActiveProxy(proxyURL)
@@ -772,6 +775,7 @@ func (c *Client) WithLocalAddr(addr string) *Client {
 				if splitErr == nil {
 					if targetIP := net.ParseIP(host); targetIP != nil {
 						localIsV4 := localAddr.IP.To4() != nil
+
 						targetIsV4 := targetIP.To4() != nil
 						if localIsV4 == targetIsV4 {
 							dialer.LocalAddr = &net.TCPAddr{IP: localAddr.IP}
@@ -1600,6 +1604,26 @@ func isBlockedIP(ip net.IP) bool {
 	return false
 }
 
+// wrapConn applies connection-level wrappers (MSS limiting, fragmentation,
+// header ordering) based on the request context. It is called after dialing
+// a TCP connection, before any TLS handshake.
+func wrapConn(ctx context.Context, conn net.Conn) net.Conn {
+	if cfg, ok := ctx.Value(packetPaddingCtxKey{}).(*PacketPaddingConfig); ok && cfg != nil &&
+		cfg.MaxSegmentSize > 0 {
+		conn = wrapWithMSSLimit(conn, cfg.MaxSegmentSize)
+	}
+
+	if cfg, ok := ctx.Value(fragmentCtxKey{}).(FragmentConfig); ok && cfg.ChunkSize > 0 {
+		conn = wrapWithFragmentation(conn, cfg)
+	}
+
+	if order, ok := ctx.Value(orderedHeadersCtxKey{}).([]string); ok && len(order) > 0 {
+		conn = &headerOrderingConn{Conn: conn, orderedKeys: order}
+	}
+
+	return conn
+}
+
 func happyEyeballsDial(
 	ctx context.Context,
 	network, addr string,
@@ -1675,17 +1699,7 @@ func happyEyeballsDial(
 			return nil, err
 		}
 
-		// Apply MSS limiting if configured.
-		if cfg, ok := ctx.Value(packetPaddingCtxKey{}).(*PacketPaddingConfig); ok && cfg != nil &&
-			cfg.MaxSegmentSize > 0 {
-			conn = wrapWithMSSLimit(conn, cfg.MaxSegmentSize)
-		}
-
-		if cfg, ok := ctx.Value(fragmentCtxKey{}).(FragmentConfig); ok && cfg.ChunkSize > 0 {
-			conn = wrapWithFragmentation(conn, cfg)
-		}
-
-		return conn, nil
+		return wrapConn(ctx, conn), nil
 	}
 
 	type dialResult struct {
@@ -1733,12 +1747,6 @@ func happyEyeballsDial(
 
 			conn, err := dialer.DialContext(dialCtx, network, net.JoinHostPort(targetIP.String(), port))
 			if err == nil {
-				// Apply MSS limiting if configured.
-				if cfg, ok := dialCtx.Value(packetPaddingCtxKey{}).(*PacketPaddingConfig); ok && cfg != nil &&
-					cfg.MaxSegmentSize > 0 {
-					conn = wrapWithMSSLimit(conn, cfg.MaxSegmentSize)
-				}
-
 				if atomic.CompareAndSwapUint32(&done, 0, 1) {
 					resultCh <- dialResult{conn: conn}
 
@@ -1762,17 +1770,7 @@ func happyEyeballsDial(
 			return nil, ctx.Err()
 		case res := <-resultCh:
 			if res.conn != nil {
-				conn := res.conn
-
-				if cfg, ok := ctx.Value(fragmentCtxKey{}).(FragmentConfig); ok && cfg.ChunkSize > 0 {
-					conn = wrapWithFragmentation(conn, cfg)
-				}
-
-				if order, ok := ctx.Value(orderedHeadersCtxKey{}).([]string); ok && len(order) > 0 {
-					return &headerOrderingConn{Conn: conn, orderedKeys: order}, nil
-				}
-
-				return conn, nil
+				return wrapConn(ctx, res.conn), nil
 			}
 
 			if firstErr == nil {
@@ -1815,6 +1813,7 @@ func dialViaProxy(ctx context.Context, network, host, port string, proxyURL *url
 	if deadline, ok := ctx.Deadline(); ok && deadline.Before(handshakeDeadline) {
 		handshakeDeadline = deadline
 	}
+
 	_ = proxyConn.SetDeadline(handshakeDeadline)
 
 	if proxyURL.Scheme == "socks5" || proxyURL.Scheme == "socks5h" {
@@ -1824,6 +1823,7 @@ func dialViaProxy(ctx context.Context, network, host, port string, proxyURL *url
 		}
 
 		_ = proxyConn.SetDeadline(time.Time{})
+
 		return proxyConn, nil
 	}
 
@@ -1836,12 +1836,14 @@ func dialViaProxy(ctx context.Context, network, host, port string, proxyURL *url
 	}
 
 	br := bufio.NewReader(proxyConn)
+
 	resp, err := http.ReadResponse(br, nil)
 	if err != nil {
 		_ = proxyConn.Close()
 		return nil, fmt.Errorf("aoni: read CONNECT response: %w", err)
 	}
-	resp.Body.Close()
+
+	_ = resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
 		_ = proxyConn.Close()
@@ -1870,6 +1872,7 @@ func (c *bufferedConn) Read(b []byte) (int, error) {
 	if c.r.Buffered() > 0 {
 		return c.r.Read(b)
 	}
+
 	return c.Conn.Read(b)
 }
 
