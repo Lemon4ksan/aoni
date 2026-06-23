@@ -167,6 +167,11 @@ func (c *Client) dialTLSForWS(ctx context.Context, addr string) (net.Conn, error
 	// No custom DialTLSContext — use browser ID for uTLS if available.
 	browser := c.browserID()
 	if browser != BrowserNone {
+		var proxyURL *url.URL
+		if c.transportProxy != nil {
+			proxyURL, _ = c.transportProxy(&http.Request{URL: &url.URL{Host: addr}})
+		}
+
 		return dialTLSWithUTLS(
 			ctx,
 			"tcp",
@@ -176,6 +181,7 @@ func (c *Client) dialTLSForWS(ctx context.Context, addr string) (net.Conn, error
 			c.dnsResolver,
 			c.ja4Callback,
 			c.tlsClientConfig(),
+			proxyURL,
 		)
 	}
 

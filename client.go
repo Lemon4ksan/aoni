@@ -223,6 +223,7 @@ type Client struct {
 	dynamicHedging   *DynamicHedgingConfig
 	sessionCache     *ProxyAwareSessionCache
 	packetPadding    *PacketPaddingConfig
+	transportProxy   func(*http.Request) (*url.URL, error)
 }
 
 // NewClient initializes a new [Client] instance with [DefaultUserAgent].
@@ -287,6 +288,7 @@ func (c *Client) Clone() *Client {
 		dynamicHedging:     c.dynamicHedging,
 		sessionCache:       c.sessionCache,
 		packetPadding:      c.packetPadding,
+		transportProxy:     c.transportProxy,
 	}
 }
 
@@ -948,7 +950,13 @@ func (c *Client) WithTLSFingerprint(browser BrowserID) *Client {
 			cloned := *transport
 			callback := newClient.ja4Callback
 			tlsConfig := cloned.TLSClientConfig
+			proxyFn := cloned.Proxy
 			cloned.DialTLSContext = func(ctx context.Context, network, addr string) (net.Conn, error) {
+				var proxyURL *url.URL
+				if proxyFn != nil {
+					proxyURL, _ = proxyFn(&http.Request{URL: &url.URL{Host: addr}})
+				}
+
 				return dialTLSWithUTLS(
 					ctx,
 					network,
@@ -958,6 +966,7 @@ func (c *Client) WithTLSFingerprint(browser BrowserID) *Client {
 					newClient.dnsResolver,
 					callback,
 					tlsConfig,
+					proxyURL,
 				)
 			}
 
@@ -1154,6 +1163,11 @@ func (c *Client) applyDialers() {
 			}
 
 			httpClient.Transport = &cloned
+
+			// Capture the proxy function so dialTLSWithUTLS can route through it.
+			if cloned.Proxy != nil {
+				c.transportProxy = cloned.Proxy
+			}
 		}
 	}
 }
@@ -1166,6 +1180,7 @@ func dialTLSWithUTLS(
 	dnsResolver DNSResolver,
 	ja4Callback func(ja4.Report),
 	tlsConfig *tls.Config,
+	proxyURL *url.URL,
 ) (net.Conn, error) {
 	// Read callback from context (set by Client.Request) — the closure-captured
 	// value may be stale if WithJA4Callback was called after WithTLSFingerprint.
@@ -1175,6 +1190,11 @@ func dialTLSWithUTLS(
 
 	ssrfGuard := ctx.Value(ssrfGuardCtxKey{}) != nil
 
+	host, port, err := net.SplitHostPort(addr)
+	if err != nil {
+		host = addr
+	}
+
 	var delay time.Duration
 	if val := ctx.Value(happyEyeballsDelayCtxKey{}); val != nil {
 		delay = val.(time.Duration)
@@ -1182,7 +1202,14 @@ func dialTLSWithUTLS(
 		delay = 300 * time.Millisecond
 	}
 
-	conn, err := happyEyeballsDial(ctx, network, addr, delay, ssrfGuard, sourceRotator, dnsResolver)
+	// Route through proxy if configured — prevents direct IP leak.
+	var conn net.Conn
+	if proxyURL != nil {
+		conn, err = dialViaProxy(ctx, network, host, port, proxyURL)
+	} else {
+		conn, err = happyEyeballsDial(ctx, network, addr, delay, ssrfGuard, sourceRotator, dnsResolver)
+	}
+
 	if err != nil {
 		return nil, err
 	}
@@ -1195,11 +1222,6 @@ func dialTLSWithUTLS(
 		spec = utls.HelloSafari_Auto
 	default:
 		spec = utls.HelloChrome_Auto
-	}
-
-	host, _, err := net.SplitHostPort(addr)
-	if err != nil {
-		host = addr
 	}
 
 	uConfig := &utls.Config{
