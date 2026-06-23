@@ -345,10 +345,10 @@ type QUICMigrationConfig struct {
 // DefaultQUICMigrationConfig returns sensible defaults for Connection Migration.
 func DefaultQUICMigrationConfig() QUICMigrationConfig {
 	return QUICMigrationConfig{
-		EnableMigration:    true,
-		KeepAlivePeriod:    15 * time.Second,
-		MaxIdleTimeout:     30 * time.Second,
-		InitialPacketSize:  1200,
+		EnableMigration:   true,
+		KeepAlivePeriod:   15 * time.Second,
+		MaxIdleTimeout:    30 * time.Second,
+		InitialPacketSize: 1200,
 	}
 }
 
@@ -368,9 +368,9 @@ func (c *Client) WithHTTP3Config(config *QUICMigrationConfig) *Client {
 	}
 
 	quicCfg := &quic.Config{
-		EnableDatagrams:           true,
-		DisablePathMTUDiscovery:   config.DisablePathMTUDiscovery,
-		InitialPacketSize:         config.InitialPacketSize,
+		EnableDatagrams:         true,
+		DisablePathMTUDiscovery: config.DisablePathMTUDiscovery,
+		InitialPacketSize:       config.InitialPacketSize,
 	}
 
 	if config.KeepAlivePeriod > 0 {

@@ -68,12 +68,15 @@ func (c *h2framedConn) Write(b []byte) (int, error) {
 
 	// Check if there's a PRIORITY frame after SETTINGS (Firefox sends one)
 	remaining := settingsFrame[9+payloadLen:]
+
 	var newRemaining []byte
 
 	if len(remaining) >= 9 {
 		nextFrameType := remaining[3]
 		if nextFrameType == 0x2 { // PRIORITY frame
-			newRemaining = c.buildPriorityFrame(remaining[:9+int(remaining[0])<<16|int(remaining[1])<<8|int(remaining[2])])
+			newRemaining = c.buildPriorityFrame(
+				remaining[:9+int(remaining[0])<<16|int(remaining[1])<<8|int(remaining[2])],
+			)
 			remaining = remaining[9+int(remaining[0])<<16|int(remaining[1])<<8|int(remaining[2]):]
 		}
 	}
@@ -81,10 +84,12 @@ func (c *h2framedConn) Write(b []byte) (int, error) {
 	// Assemble: preface + replacement settings + modified remaining + untouched remaining
 	result := make([]byte, 0, len(b)+64)
 	result = append(result, preface...)
+
 	result = append(result, replacement...)
 	if len(newRemaining) > 0 {
 		result = append(result, newRemaining...)
 	}
+
 	result = append(result, remaining...)
 	result = append(result, b[len(b):]...) // any trailing bytes (none expected, but safe)
 
@@ -94,6 +99,7 @@ func (c *h2framedConn) Write(b []byte) (int, error) {
 	}
 
 	c.prefaceWritten = true
+
 	return len(b), nil
 }
 
@@ -161,15 +167,18 @@ func (c *h2framedConn) buildPriorityFrame(original []byte) []byte {
 	// PRIORITY frame: 5-byte payload (stream dependency + weight)
 	// Reconstruct with browser-specific values
 	payload := make([]byte, 5)
+
 	streamDep := c.settings.PriorityStreamDep
 	if streamDep == 0 {
 		streamDep = 0
 	}
 
 	binary.BigEndian.PutUint32(payload[0:4], streamDep&0x7FFFFFFF)
+
 	if c.settings.PriorityExclusive {
 		payload[0] |= 0x80
 	}
+
 	payload[4] = c.settings.PriorityWeight
 
 	frame := make([]byte, 9+5)
@@ -190,13 +199,14 @@ func (c *h2framedConn) buildPriorityFrame(original []byte) []byte {
 
 func writeSettingEntry(w io.Writer, id uint16, value uint32) {
 	var buf [6]byte
+
 	buf[0] = byte(id >> 8)     //nolint:gosec
 	buf[1] = byte(id)          //nolint:gosec
 	buf[2] = byte(value >> 24) //nolint:gosec
 	buf[3] = byte(value >> 16) //nolint:gosec
 	buf[4] = byte(value >> 8)  //nolint:gosec
 	buf[5] = byte(value)       //nolint:gosec
-	w.Write(buf[:])
+	_, _ = w.Write(buf[:])
 }
 
 // H2FramedTransport wraps an *http.Transport to apply HTTP/2 frame impersonation.
@@ -218,9 +228,11 @@ func NewH2FramedTransport(base *http.Transport, settings HTTP2Settings) *H2Frame
 
 	if base != nil {
 		prevDialTLS := base.DialTLSContext
-		ft.Transport.DialTLSContext = func(ctx context.Context, network, addr string) (net.Conn, error) {
-			var conn net.Conn
-			var err error
+		ft.DialTLSContext = func(ctx context.Context, network, addr string) (net.Conn, error) {
+			var (
+				conn net.Conn
+				err  error
+			)
 
 			if prevDialTLS != nil {
 				conn, err = prevDialTLS(ctx, network, addr)
