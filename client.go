@@ -73,6 +73,7 @@ type (
 	p0fSignatureCtxKey       struct{}
 	proxyDNSCtxKey           struct{}
 	proxyAddrCtxKey          struct{}
+	sessionCacheCtxKey       struct{}
 )
 
 // DefaultSensitiveHeaders is the list of sensitive headers that are scrubbed from requests on redirect.
@@ -218,6 +219,7 @@ type Client struct {
 	proxyDNS         bool
 	proxyAddr        *url.URL
 	dynamicHedging   *DynamicHedgingConfig
+	sessionCache     *ProxyAwareSessionCache
 }
 
 // NewClient initializes a new [Client] instance with [DefaultUserAgent].
@@ -280,6 +282,7 @@ func (c *Client) Clone() *Client {
 		proxyDNS:           c.proxyDNS,
 		proxyAddr:          c.proxyAddr,
 		dynamicHedging:     c.dynamicHedging,
+		sessionCache:       c.sessionCache,
 	}
 }
 
@@ -319,6 +322,13 @@ func (c *Client) Request(
 		ctx = context.WithValue(ctx, proxyDNSCtxKey{}, true)
 		if c.proxyAddr != nil {
 			ctx = context.WithValue(ctx, proxyAddrCtxKey{}, c.proxyAddr)
+		}
+	}
+
+	if c.sessionCache != nil {
+		ctx = context.WithValue(ctx, sessionCacheCtxKey{}, c.sessionCache)
+		if c.proxyAddr != nil {
+			c.sessionCache.SetProxyKey(c.proxyAddr.String())
 		}
 	}
 
@@ -717,6 +727,16 @@ func (c *Client) WithDynamicHedging(config *DynamicHedgingConfig) *Client {
 		newClient.dynamicHedging = config
 	}
 
+	return newClient
+}
+
+// WithProxyAwareSessionCache returns a new [Client] that uses a [ProxyAwareSessionCache]
+// for TLS session resumption. When the proxy or source IP changes, the session cache
+// is automatically invalidated to prevent server-side session ticket correlation
+// across different exit IPs.
+func (c *Client) WithProxyAwareSessionCache() *Client {
+	newClient := c.Clone()
+	newClient.sessionCache = NewProxyAwareSessionCache()
 	return newClient
 }
 
@@ -1148,6 +1168,11 @@ func dialTLSWithUTLS(
 	if tlsConfig != nil {
 		uConfig.InsecureSkipVerify = tlsConfig.InsecureSkipVerify
 		uConfig.RootCAs = tlsConfig.RootCAs
+	}
+
+	// Use proxy-aware session cache if available in context.
+	if cache, ok := ctx.Value(sessionCacheCtxKey{}).(*ProxyAwareSessionCache); ok && cache != nil {
+		uConfig.ClientSessionCache = cache
 	}
 
 	if alpn, ok := ctx.Value(alpnOverrideCtxKey{}).([]string); ok && len(alpn) > 0 {
