@@ -628,6 +628,8 @@ func (s *SocketIOConn) setNamespaceHandler(nsp, event string, handler func(args 
 
 func (s *SocketIOConn) readLoop() {
 	defer func() {
+		// Transition FSM: Open -> Closing -> Closed (two-step close).
+		_ = s.fsm.Transition(context.Background(), sioEventTypeClose)
 		_ = s.fsm.Transition(context.Background(), sioEventTypeClose)
 
 		s.stateMu.Lock()
@@ -967,8 +969,9 @@ func readEIOPacketCtx(ctx context.Context, conn net.Conn) (byte, []byte, error) 
 
 	select {
 	case <-ctx.Done():
-		// Set a deadline to unblock the goroutine's conn.Read.
-		_ = conn.SetReadDeadline(time.Now())
+		// Close the connection to unblock the goroutine's conn.Read
+		// immediately, preventing zombie goroutine accumulation.
+		_ = conn.Close()
 
 		return 0, nil, ctx.Err()
 	case r := <-ch:

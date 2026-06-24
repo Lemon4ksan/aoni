@@ -303,6 +303,36 @@ func (c *Client) Clone() *Client {
 		transportProxy:     c.transportProxy,
 	}
 
+	// Clone http.Client and its transport to avoid race conditions.
+	// If the transport is wrapped in cookieJarTransport, unwrap, clone the
+	// base transport, and re-wrap to preserve the cookie jar binding.
+	if httpClient, ok := cloned.http.(*http.Client); ok {
+		clonedHTTP := *httpClient
+		baseTransport := clonedHTTP.Transport
+
+		var wrappedJar *ProxyIsolatedCookieJar
+
+		if cjTrans, ok := baseTransport.(*cookieJarTransport); ok {
+			wrappedJar = cjTrans.cookieJar
+			baseTransport = cjTrans.next
+		}
+
+		if transport, ok := baseTransport.(*http.Transport); ok && transport != nil {
+			baseTransport = transport.Clone()
+		}
+
+		if wrappedJar != nil {
+			clonedHTTP.Transport = &cookieJarTransport{
+				next:      baseTransport,
+				cookieJar: wrappedJar,
+			}
+		} else {
+			clonedHTTP.Transport = baseTransport
+		}
+
+		cloned.http = &clonedHTTP
+	}
+
 	if c.dynamicHedging != nil {
 		dhCopy := *c.dynamicHedging
 		cloned.dynamicHedging = &dhCopy
@@ -457,20 +487,6 @@ func (c *Client) Request(
 		}
 	}
 
-	if isolatedJar, ok := c.headersCookieJar.(*ProxyIsolatedCookieJar); ok {
-		jar := isolatedJar.getJar(ctx)
-		if jar != nil {
-			for _, cookie := range jar.Cookies(req.URL) {
-				req.AddCookie(cookie)
-			}
-		}
-
-		// Set active proxy so SetCookies/Cookies during redirects use the right jar.
-		if proxyURL, ok := ctx.Value(proxyCtxKey{}).(string); ok {
-			isolatedJar.SetActiveProxy(proxyURL)
-		}
-	}
-
 	var (
 		resp   *http.Response
 		reqErr error
@@ -494,10 +510,6 @@ func (c *Client) Request(
 		resp, reqErr = c.http.Do(req)
 	}
 
-	if isolatedJar, ok := c.headersCookieJar.(*ProxyIsolatedCookieJar); ok {
-		isolatedJar.ClearActiveProxy()
-	}
-
 	// Copy TLS JA4 report from the dialer store to the target TraceInfo.
 	// The store was set by TraceJA4; dialTLSWithUTLS wrote the TLS report during handshake.
 	if store, ok := req.Context().Value(ja4ReportCtxKey{}).(*ja4ReportStore); ok && store.target != nil &&
@@ -509,15 +521,6 @@ func (c *Client) Request(
 		store.target.JA4.CipherCount = store.report.CipherCount
 		store.target.JA4.ExtCount = store.report.ExtCount
 		store.target.JA4.ALPN = store.report.ALPN
-	}
-
-	if isolatedJar, ok := c.headersCookieJar.(*ProxyIsolatedCookieJar); ok && resp != nil {
-		jar := isolatedJar.getJar(ctx)
-		if jar != nil {
-			if rc := resp.Cookies(); len(rc) > 0 {
-				jar.SetCookies(req.URL, rc)
-			}
-		}
 	}
 
 	for _, hook := range c.afterResponse {
@@ -1091,6 +1094,27 @@ func (c *Client) WithHostRewrite(rules map[string]string) *Client {
 func (c *Client) WithProxyIsolatedCookieJar(jar *ProxyIsolatedCookieJar) *Client {
 	newClient := c.Clone()
 	newClient.headersCookieJar = jar
+
+	if httpClient, ok := newClient.http.(*http.Client); ok {
+		clonedHTTP := *httpClient
+
+		baseTransport := clonedHTTP.Transport
+		if baseTransport == nil {
+			baseTransport = http.DefaultTransport
+		}
+
+		// Unwrap existing cookieJarTransport to avoid stacking wrappers.
+		if cjTrans, ok := baseTransport.(*cookieJarTransport); ok {
+			baseTransport = cjTrans.next
+		}
+
+		clonedHTTP.Transport = &cookieJarTransport{
+			next:      baseTransport,
+			cookieJar: jar,
+		}
+		newClient.http = &clonedHTTP
+	}
+
 	return newClient
 }
 
@@ -1639,7 +1663,8 @@ func closeResponse(resp *http.Response) {
 }
 
 func isBlockedIP(ip net.IP) bool {
-	if ip.IsLoopback() || ip.IsLinkLocalUnicast() || ip.IsLinkLocalMulticast() || ip.IsInterfaceLocalMulticast() {
+	if ip.IsUnspecified() || ip.IsLoopback() || ip.IsLinkLocalUnicast() || ip.IsLinkLocalMulticast() ||
+		ip.IsInterfaceLocalMulticast() {
 		return true
 	}
 
@@ -1869,7 +1894,10 @@ func dialViaProxy(ctx context.Context, network, host, port string, proxyURL *url
 		handshakeDeadline = deadline
 	}
 
-	_ = proxyConn.SetDeadline(handshakeDeadline)
+	if err := proxyConn.SetDeadline(handshakeDeadline); err != nil {
+		_ = proxyConn.Close()
+		return nil, fmt.Errorf("aoni: set proxy handshake deadline: %w", err)
+	}
 
 	if proxyURL.Scheme == "socks5" || proxyURL.Scheme == "socks5h" {
 		if err := socks5Handshake(proxyConn, host, port, proxyURL); err != nil {

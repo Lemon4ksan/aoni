@@ -35,10 +35,10 @@ func (c *h2framedConn) Write(b []byte) (int, error) {
 	defer c.mu.Unlock()
 
 	if c.prefaceSent {
-		if len(c.orderedKeys) > 0 {
-			return c.writeWithHeaderReorder(b)
-		}
-
+		// Header reordering is not supported with H2 framed transport because
+		// HPACK is stateful: creating fresh encoders/decoders desynchronizes
+		// the dynamic table from Go's HTTP/2 transport, causing COMPRESSION_ERROR.
+		// Users should use ordered headers with non-H2 transports only.
 		return c.Conn.Write(b)
 	}
 
@@ -216,51 +216,6 @@ func writeSettingEntry(w io.Writer, id uint16, value uint32) {
 	buf[4] = byte(value >> 8)  //nolint:gosec
 	buf[5] = byte(value)       //nolint:gosec
 	_, _ = w.Write(buf[:])
-}
-
-// writeWithHeaderReorder intercepts HEADERS frames and reorders their
-// HPACK-encoded header fields according to orderedKeys.
-func (c *h2framedConn) writeWithHeaderReorder(b []byte) (int, error) {
-	// Process all complete HTTP/2 frames in the buffer.
-	var (
-		result []byte
-		pos    int
-	)
-
-	for pos < len(b) {
-		if len(b)-pos < 9 {
-			// Incomplete frame header, pass through.
-			result = append(result, b[pos:]...)
-			break
-		}
-
-		frameLen := int(b[pos])<<16 | int(b[pos+1])<<8 | int(b[pos+2])
-		frameType := b[pos+3]
-		frameFlags := b[pos+4]
-
-		if len(b)-pos < 9+frameLen {
-			// Incomplete frame payload, pass through.
-			result = append(result, b[pos:]...)
-			break
-		}
-
-		frameData := b[pos : pos+9+frameLen]
-
-		if frameType == 0x1 && len(c.orderedKeys) > 0 {
-			// HEADERS frame — attempt to reorder.
-			if reordered, ok := reorderH2Headers(frameData, frameFlags, c.orderedKeys); ok {
-				result = append(result, reordered...)
-			} else {
-				result = append(result, frameData...)
-			}
-		} else {
-			result = append(result, frameData...)
-		}
-
-		pos += 9 + frameLen
-	}
-
-	return c.Conn.Write(result)
 }
 
 // reorderH2Headers decodes an HTTP/2 HEADERS frame, reorders the HPACK-encoded

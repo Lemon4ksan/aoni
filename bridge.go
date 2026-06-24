@@ -74,21 +74,35 @@ type aoniTransport struct {
 func (t *aoniTransport) RoundTrip(origReq *http.Request) (*http.Response, error) {
 	ctxMods := ContextModifiers(origReq.Context())
 
+	// syncModifier copies request metadata from the original request.
+	// Headers are MERGED: origReq headers are added on top of aoni's
+	// defaults, so both global config and per-request headers are preserved.
 	syncModifier := func(req *http.Request) {
-		req.Header = origReq.Header.Clone()
+		// Copy non-header fields.
+		req.Method = origReq.Method
 		req.Body = origReq.Body
 		req.ContentLength = origReq.ContentLength
 		req.TransferEncoding = origReq.TransferEncoding
 		req.Close = origReq.Close
 		req.Host = origReq.Host
 		req.GetBody = origReq.GetBody
+		req.URL = origReq.URL
+
+		// Merge headers: origReq headers overwrite aoni defaults for the
+		// same key, but aoni-only headers are preserved.
+		for key, values := range origReq.Header {
+			req.Header[key] = values
+		}
 	}
 
 	cloned := t.client.Clone()
 
-	cloned.baseURL = &url.URL{
-		Scheme: origReq.URL.Scheme,
-		Host:   origReq.URL.Host,
+	// Preserve the original request's full URL path for relative resolution.
+	if origReq.URL != nil {
+		cloned.baseURL = &url.URL{
+			Scheme: origReq.URL.Scheme,
+			Host:   origReq.URL.Host,
+		}
 	}
 
 	allMods := make([]RequestModifier, 0, 1+len(ctxMods))

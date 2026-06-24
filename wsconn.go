@@ -346,14 +346,15 @@ func wrapRawConn(conn net.Conn, isClient bool) *wsRawConn {
 
 // wsH2Conn wraps an HTTP/2 stream as a net.Conn for WebSocket over H2.
 type wsH2Conn struct {
-	base     net.Conn
-	framer   *http2.Framer
-	streamID uint32
-	readBuf  bytes.Buffer
-	readMu   sync.Mutex
-	writeMu  sync.Mutex
-	closed   chan struct{}
-	once     sync.Once
+	base        net.Conn
+	framer      *http2.Framer
+	streamID    uint32
+	readBuf     bytes.Buffer
+	streamEnded bool
+	readMu      sync.Mutex
+	writeMu     sync.Mutex
+	closed      chan struct{}
+	once        sync.Once
 }
 
 func (c *wsH2Conn) Read(b []byte) (int, error) {
@@ -361,6 +362,10 @@ func (c *wsH2Conn) Read(b []byte) (int, error) {
 	defer c.readMu.Unlock()
 
 	for c.readBuf.Len() == 0 {
+		if c.streamEnded {
+			return 0, io.EOF
+		}
+
 		frame, err := c.framer.ReadFrame()
 		if err != nil {
 			return 0, err
@@ -388,7 +393,14 @@ func (c *wsH2Conn) Read(b []byte) (int, error) {
 				}
 			}
 
-			if f.StreamEnded() && c.readBuf.Len() == 0 {
+			if f.StreamEnded() {
+				c.streamEnded = true
+
+				if c.readBuf.Len() > 0 {
+					n, _ := c.readBuf.Read(b)
+					return n, nil
+				}
+
 				return 0, io.EOF
 			}
 
