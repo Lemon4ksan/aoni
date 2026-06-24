@@ -521,7 +521,7 @@ func (s *SocketIOConn) emitNS(nsp, event string, args ...any) error {
 
 	if ackFn != nil {
 		id := s.ackMgr.NextID()
-		pkt.ID = generic.Ptr(id)
+		pkt.ID = &id
 		_ = s.ackMgr.Add(id, func(ctx context.Context, response []json.RawMessage, err error) {
 			if err == nil {
 				ackFn(response)
@@ -551,7 +551,7 @@ func (s *SocketIOConn) emitBinaryNS(nsp string, data any, ackFn func(args []json
 
 	if ackFn != nil {
 		id := s.ackMgr.NextID()
-		pkt.ID = generic.Ptr(id)
+		pkt.ID = &id
 		_ = s.ackMgr.Add(id, func(ctx context.Context, response []json.RawMessage, err error) {
 			if err == nil {
 				ackFn(response)

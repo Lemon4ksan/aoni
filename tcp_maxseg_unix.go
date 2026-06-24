@@ -10,5 +10,5 @@ import "syscall"
 
 // setTCPMaxSeg sets the TCP_MAXSEG socket option on Linux/Darwin.
 func setTCPMaxSeg(fd uintptr, mss int) {
-	syscall.SetsockoptInt(int(fd), syscall.IPPROTO_TCP, syscall.TCP_MAXSEG, mss) //nolint:errcheck
+	syscall.SetsockoptInt(int(fd), syscall.IPPROTO_TCP, syscall.TCP_MAXSEG, mss) //nolint:errcheck,gosec
 }
