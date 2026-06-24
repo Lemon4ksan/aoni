@@ -9,6 +9,7 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/binary"
+	"fmt"
 	"io"
 	"net"
 	"sync"
@@ -225,6 +226,10 @@ func (c *wsRawConn) close() error {
 	return c.base.Close()
 }
 
+// maxWebSocketFrameSize is the maximum allowed WebSocket frame payload size (16 MiB).
+// Frames exceeding this limit are rejected to prevent OOM from malicious servers.
+const maxWebSocketFrameSize = 16 * 1024 * 1024
+
 func (c *wsRawConn) readFrame() (byte, []byte, error) {
 	header := make([]byte, 2)
 	if _, err := io.ReadFull(c.base, header); err != nil {
@@ -251,6 +256,10 @@ func (c *wsRawConn) readFrame() (byte, []byte, error) {
 		}
 
 		length = binary.BigEndian.Uint64(extended)
+	}
+
+	if length > maxWebSocketFrameSize {
+		return 0, nil, fmt.Errorf("aoni ws: frame payload too large: %d bytes (max %d)", length, maxWebSocketFrameSize)
 	}
 
 	var mask [4]byte

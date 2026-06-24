@@ -350,7 +350,19 @@ func DialWebSocketWithConfig(
 				return nil, nil, err
 			}
 
-			return wsConn, nil, nil
+			// Return a synthetic response for HTTP/2 Extended CONNECT
+			// so callers can read handshake headers without nil dereference.
+			resp := &http.Response{
+				StatusCode: http.StatusOK,
+				Proto:      "HTTP/2.0",
+				ProtoMajor: 2,
+				ProtoMinor: 0,
+				Header:     make(http.Header),
+				Body:       http.NoBody,
+				Request:    tmpReq,
+			}
+
+			return wsConn, resp, nil
 		}
 	}
 

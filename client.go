@@ -272,6 +272,12 @@ func (c *Client) Clone() *Client {
 	afterCopy := make([]func(resp *http.Response, err error), len(c.afterResponse))
 	copy(afterCopy, c.afterResponse)
 
+	var defaultModsCopy []RequestModifier
+	if c.defaultMods != nil {
+		defaultModsCopy = make([]RequestModifier, len(c.defaultMods))
+		copy(defaultModsCopy, c.defaultMods)
+	}
+
 	cloned := &Client{
 		http:               c.http,
 		baseURL:            c.baseURL,
@@ -287,15 +293,19 @@ func (c *Client) Clone() *Client {
 		logger:             c.logger,
 		sourceRotator:      c.sourceRotator,
 		dnsResolver:        c.dnsResolver,
-		defaultMods:        c.defaultMods,
+		defaultMods:        defaultModsCopy,
 		headersCookieJar:   c.headersCookieJar,
 		ja4Callback:        c.ja4Callback,
 		tlsBrowserID:       c.tlsBrowserID,
 		proxyDNS:           c.proxyDNS,
 		proxyAddr:          c.proxyAddr,
-		dynamicHedging:     c.dynamicHedging,
 		sessionCache:       c.sessionCache,
 		transportProxy:     c.transportProxy,
+	}
+
+	if c.dynamicHedging != nil {
+		dhCopy := *c.dynamicHedging
+		cloned.dynamicHedging = &dhCopy
 	}
 
 	// Deep copy mutable config structs so mutations in one clone don't affect others.
@@ -501,7 +511,7 @@ func (c *Client) Request(
 		store.target.JA4.ALPN = store.report.ALPN
 	}
 
-	if isolatedJar, ok := c.headersCookieJar.(*ProxyIsolatedCookieJar); ok {
+	if isolatedJar, ok := c.headersCookieJar.(*ProxyIsolatedCookieJar); ok && resp != nil {
 		jar := isolatedJar.getJar(ctx)
 		if jar != nil {
 			if rc := resp.Cookies(); len(rc) > 0 {
@@ -555,6 +565,8 @@ func (c *Client) Request(
 				resp.Header.Del("Content-Encoding")
 				resp.Header.Del("Content-Length")
 				resp.ContentLength = -1
+			} else {
+				resp.Header.Del("Content-Encoding")
 			}
 
 		case "gzip":
@@ -567,6 +579,8 @@ func (c *Client) Request(
 				resp.Header.Del("Content-Encoding")
 				resp.Header.Del("Content-Length")
 				resp.ContentLength = -1
+			} else {
+				resp.Header.Del("Content-Encoding")
 			}
 		}
 
@@ -693,6 +707,7 @@ func (c *Client) WithBaseResponse(provider func() BaseResponse) *Client {
 
 // WithBaseURL returns a clone of c that resolves relative paths in
 // [Client.Request] against raw. An empty string clears the base URL.
+// If raw is not a valid URL, the original client is returned unchanged.
 func (c *Client) WithBaseURL(raw string) *Client {
 	if raw == "" {
 		newClient := c.Clone()
@@ -704,7 +719,10 @@ func (c *Client) WithBaseURL(raw string) *Client {
 		raw += "/"
 	}
 
-	baseURL, _ := url.Parse(raw)
+	baseURL, err := url.Parse(raw)
+	if err != nil {
+		return c
+	}
 
 	newClient := c.Clone()
 	newClient.baseURL = baseURL
@@ -1142,6 +1160,22 @@ func (c *Client) WithProxyDNS() *Client {
 	return newClient
 }
 
+// WithProxy returns a clone of c configured to route requests through proxyURL.
+// Supported schemes: http, socks5, socks5h (for remote DNS resolution).
+// When proxyURL is nil, proxy routing is disabled.
+func (c *Client) WithProxy(proxyURL *url.URL) *Client {
+	newClient := c.Clone()
+	newClient.proxyAddr = proxyURL
+
+	if proxyURL != nil {
+		newClient.transportProxy = http.ProxyURL(proxyURL)
+	}
+
+	newClient.applyDialers()
+
+	return newClient
+}
+
 // Logger is an interface for logging messages.
 type Logger interface {
 	Debug(msg string, args ...any)
@@ -1290,6 +1324,16 @@ func dialTLSWithUTLS(
 	if tlsConfig != nil {
 		uConfig.InsecureSkipVerify = tlsConfig.InsecureSkipVerify
 		uConfig.RootCAs = tlsConfig.RootCAs
+		uConfig.MinVersion = tlsConfig.MinVersion
+		uConfig.MaxVersion = tlsConfig.MaxVersion
+		uConfig.CipherSuites = tlsConfig.CipherSuites
+
+		if len(tlsConfig.CurvePreferences) > 0 {
+			uConfig.CurvePreferences = make([]utls.CurveID, len(tlsConfig.CurvePreferences))
+			for i, id := range tlsConfig.CurvePreferences {
+				uConfig.CurvePreferences[i] = utls.CurveID(id)
+			}
+		}
 	}
 
 	// Use proxy-aware session cache if available in context.
@@ -1601,7 +1645,8 @@ func isBlockedIP(ip net.IP) bool {
 
 	// Check private IP ranges.
 	if ip4 := ip.To4(); ip4 != nil {
-		return ip4[0] == 10 ||
+		return ip4[0] == 0 ||
+			ip4[0] == 10 ||
 			(ip4[0] == 172 && ip4[1] >= 16 && ip4[1] <= 31) ||
 			(ip4[0] == 192 && ip4[1] == 168)
 	}

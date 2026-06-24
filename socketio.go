@@ -17,6 +17,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/gorilla/websocket"
@@ -135,7 +136,7 @@ func (ns *NamespaceSocket) EmitVolatile(event string, args ...any) error {
 // Supports event-based communication, namespace multiplexing, acknowledgements,
 // binary data, and automatic reconnection.
 type SocketIOConn struct {
-	conn net.Conn
+	conn atomic.Pointer[net.Conn]
 	sid  string
 
 	writeMu sync.Mutex
@@ -174,6 +175,7 @@ type SocketIOConn struct {
 	pingInterval  time.Duration
 
 	// Ping timeout
+	pongMu sync.Mutex
 	pongCh chan struct{}
 
 	// Binary reconstruction
@@ -202,7 +204,6 @@ func DialSocketIO(
 	}
 
 	sio := &SocketIOConn{
-		conn:          conn,
 		config:        config,
 		namespace:     config.Namespace,
 		nsEvents:      make(map[string]map[string]func(args []json.RawMessage)),
@@ -215,6 +216,8 @@ func DialSocketIO(
 		backoff:       newBackoff(config),
 	}
 
+	sio.conn.Store(&conn)
+
 	sio.fsm = kata.NewFSM[sioConnState, sioEventType](sioStateClosed)
 	sio.fsm.AddRules(
 		kata.TransitionRule[sioConnState, sioEventType]{
@@ -225,7 +228,7 @@ func DialSocketIO(
 		kata.TransitionRule[sioConnState, sioEventType]{
 			From:  sioStateOpen,
 			Event: sioEventTypeClose,
-			To:    sioStateClosed,
+			To:    sioStateClosing,
 		},
 		kata.TransitionRule[sioConnState, sioEventType]{
 			From:  sioStateClosed,
@@ -243,11 +246,6 @@ func DialSocketIO(
 			To:    sioStateClosed,
 		},
 		kata.TransitionRule[sioConnState, sioEventType]{
-			From:  sioStateOpen,
-			Event: sioEventTypeClose,
-			To:    sioStateClosing,
-		},
-		kata.TransitionRule[sioConnState, sioEventType]{
 			From:  sioStateClosing,
 			Event: sioEventTypeClose,
 			To:    sioStateClosed,
@@ -260,7 +258,10 @@ func DialSocketIO(
 	}
 
 	_ = sio.fsm.Transition(context.Background(), sioEventTypeOpen)
+
+	sio.stateMu.Lock()
 	sio.state = sioStateOpen
+	sio.stateMu.Unlock()
 
 	go sio.readLoop()
 	go sio.heartbeatLoop()
@@ -271,7 +272,12 @@ func DialSocketIO(
 // doHandshake performs the EIO open + SIO CONNECT handshake.
 func (s *SocketIOConn) doHandshake(ctx context.Context) error {
 	// Read EIO OPEN packet
-	pType, payload, err := readEIOPacketCtx(ctx, s.conn)
+	conn := s.conn.Load()
+	if conn == nil {
+		return errors.New("aoni sio: handshake failed: connection closed")
+	}
+
+	pType, payload, err := readEIOPacketCtx(ctx, *conn)
 	if err != nil {
 		return fmt.Errorf("aoni sio: handshake failed: %w", err)
 	}
@@ -298,7 +304,7 @@ func (s *SocketIOConn) doHandshake(ctx context.Context) error {
 	}
 
 	// Read SIO CONNECT response
-	pType, payload, err = readEIOPacketCtx(ctx, s.conn)
+	pType, payload, err = readEIOPacketCtx(ctx, *conn)
 	if err != nil {
 		return fmt.Errorf("aoni sio: read connect response: %w", err)
 	}
@@ -451,7 +457,11 @@ func (s *SocketIOConn) Close() error {
 	// Send EIO CLOSE.
 	_ = s.writeEIOPacket(eioClose, nil)
 
-	return s.conn.Close()
+	if c := s.conn.Load(); c != nil {
+		return (*c).Close()
+	}
+
+	return nil
 }
 
 // SID returns the server-assigned session ID.
@@ -619,9 +629,14 @@ func (s *SocketIOConn) setNamespaceHandler(nsp, event string, handler func(args 
 func (s *SocketIOConn) readLoop() {
 	defer func() {
 		_ = s.fsm.Transition(context.Background(), sioEventTypeClose)
-		s.state = sioStateClosed
 
-		_ = s.conn.Close()
+		s.stateMu.Lock()
+		s.state = sioStateClosed
+		s.stateMu.Unlock()
+
+		if c := s.conn.Load(); c != nil {
+			_ = (*c).Close()
+		}
 
 		s.mu.RLock()
 		cb := s.onClose
@@ -648,10 +663,17 @@ func (s *SocketIOConn) readLoop() {
 			return
 		case eioPong:
 			// Signal pong received.
-			select {
-			case s.pongCh <- struct{}{}:
-			default:
+			s.pongMu.Lock()
+			ch := s.pongCh
+			s.pongMu.Unlock()
+
+			if ch != nil {
+				select {
+				case ch <- struct{}{}:
+				default:
+				}
 			}
+
 		case eioMessage:
 			if len(payload) == 0 {
 				continue
@@ -784,14 +806,17 @@ func (s *SocketIOConn) heartbeatLoop() {
 		case <-s.closed:
 			return
 		case <-ticker.C:
+			s.pongMu.Lock()
 			s.pongCh = make(chan struct{}, 1)
+			ch := s.pongCh
+			s.pongMu.Unlock()
 
 			if err := s.writeEIOPacket(eioPing, nil); err != nil {
 				return
 			}
 
 			select {
-			case <-s.pongCh:
+			case <-ch:
 				// Pong received in time.
 			case <-time.After(s.config.PingTimeout):
 				// Ping timeout — trigger reconnection.
@@ -861,7 +886,7 @@ func (s *SocketIOConn) reconnectLoop() {
 		}
 
 		// Perform handshake on the new connection
-		s.conn = conn
+		s.conn.Store(&conn)
 
 		// Reset closed channel for the new connection
 		s.mu.Lock()
@@ -890,7 +915,10 @@ func (s *SocketIOConn) reconnectLoop() {
 		}
 
 		_ = s.fsm.Transition(context.Background(), sioEventTypeReconnect)
+
+		s.stateMu.Lock()
 		s.state = sioStateOpen
+		s.stateMu.Unlock()
 
 		s.backoff.Reset()
 		s.attemptCount = 0
@@ -911,7 +939,12 @@ func (s *SocketIOConn) reconnectLoop() {
 }
 
 func (s *SocketIOConn) readEIOPacket() (byte, []byte, error) {
-	return readSingleEIOPacket(s.conn)
+	conn := s.conn.Load()
+	if conn == nil {
+		return 0, nil, errors.New("aoni sio: connection closed")
+	}
+
+	return readSingleEIOPacket(*conn)
 }
 
 func readEIOPacketCtx(ctx context.Context, conn net.Conn) (byte, []byte, error) {
@@ -934,6 +967,9 @@ func readEIOPacketCtx(ctx context.Context, conn net.Conn) (byte, []byte, error) 
 
 	select {
 	case <-ctx.Done():
+		// Set a deadline to unblock the goroutine's conn.Read.
+		_ = conn.SetReadDeadline(time.Now())
+
 		return 0, nil, ctx.Err()
 	case r := <-ch:
 		return r.pType, r.payload, r.err
@@ -967,6 +1003,10 @@ func readSingleEIOPacket(conn net.Conn) (byte, []byte, error) {
 			buf.Write(tmp[:n])
 		}
 
+		if buf.Len() > maxEIOPacketSize {
+			return 0, nil, fmt.Errorf("aoni eio: packet too large (exceeds %d bytes)", maxEIOPacketSize)
+		}
+
 		if err != nil {
 			if errors.Is(err, io.EOF) {
 				break
@@ -988,11 +1028,16 @@ func (s *SocketIOConn) writeEIOPacket(pType byte, payload []byte) error {
 	s.writeMu.Lock()
 	defer s.writeMu.Unlock()
 
+	conn := s.conn.Load()
+	if conn == nil {
+		return errors.New("aoni sio: connection closed")
+	}
+
 	data := make([]byte, 1+len(payload))
 	data[0] = pType
 	copy(data[1:], payload)
 
-	_, err := s.conn.Write(data)
+	_, err := (*conn).Write(data)
 
 	return err
 }
@@ -1012,7 +1057,20 @@ type binaryReconstructor struct {
 	packet      *sioPacket
 }
 
+const (
+	// maxBinaryAttachments is the maximum number of binary attachments allowed per Socket.IO packet.
+	maxBinaryAttachments = 64
+	// maxBinaryBufferSize is the maximum total size of all binary attachments (32 MiB).
+	maxBinaryBufferSize = 32 * 1024 * 1024
+	// maxEIOPacketSize is the maximum size of a single Engine.IO packet (8 MiB).
+	maxEIOPacketSize = 8 * 1024 * 1024
+)
+
 func newBinaryReconstructor(attachments int, pkt *sioPacket) *binaryReconstructor {
+	if attachments > maxBinaryAttachments {
+		attachments = maxBinaryAttachments
+	}
+
 	return &binaryReconstructor{
 		attachments: attachments,
 		packet:      pkt,
@@ -1021,6 +1079,15 @@ func newBinaryReconstructor(attachments int, pkt *sioPacket) *binaryReconstructo
 
 func (br *binaryReconstructor) addBuffer(data []byte) bool {
 	br.buffers = append(br.buffers, data)
+
+	totalSize := 0
+	for _, buf := range br.buffers {
+		totalSize += len(buf)
+		if totalSize > maxBinaryBufferSize {
+			return true
+		}
+	}
+
 	return len(br.buffers) >= br.attachments
 }
 
@@ -1101,7 +1168,13 @@ func decodeSIOPacket(data []byte) (*sioPacket, error) {
 			i++
 		}
 
-		pkt.Attachments, _ = strconv.Atoi(string(data[start:i]))
+		attachments, err := strconv.Atoi(string(data[start:i]))
+		if err != nil || attachments < 0 || attachments > maxBinaryAttachments {
+			return nil, fmt.Errorf("aoni sio: invalid attachment count: %q", string(data[start:i]))
+		}
+
+		pkt.Attachments = attachments
+
 		if i < len(data) {
 			i++ // skip '-'
 		}

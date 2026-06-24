@@ -13,6 +13,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"net/url"
 	"sync"
 	"time"
 
@@ -37,18 +38,55 @@ type InMemoryDNSCache struct {
 	ttl      time.Duration
 	resolver DNSResolver
 	sflight  batto.Group[string, []net.IPAddr]
+	cancel   context.CancelFunc
 }
 
 // NewInMemoryDNSCache creates a new [InMemoryDNSCache] with the given TTL and resolver.
+// A background goroutine periodically evicts expired entries.
 func NewInMemoryDNSCache(ttl time.Duration, r DNSResolver) *InMemoryDNSCache {
 	if r == nil {
 		r = &net.Resolver{}
 	}
 
-	return &InMemoryDNSCache{
+	ctx, cancel := context.WithCancel(context.Background())
+
+	c := &InMemoryDNSCache{
 		cache:    make(map[string]dnsCacheEntry),
 		ttl:      ttl,
 		resolver: r,
+		cancel:   cancel,
+	}
+
+	go c.evictionLoop(ctx)
+
+	return c
+}
+
+// Close stops the background eviction goroutine.
+func (c *InMemoryDNSCache) Close() {
+	c.cancel()
+}
+
+func (c *InMemoryDNSCache) evictionLoop(ctx context.Context) {
+	ticker := time.NewTicker(time.Minute)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			c.mu.Lock()
+
+			now := time.Now()
+			for k, v := range c.cache {
+				if now.After(v.expiry) {
+					delete(c.cache, k)
+				}
+			}
+
+			c.mu.Unlock()
+		}
 	}
 }
 
@@ -141,7 +179,7 @@ func (r *DoHResolver) LookupIPAddr(ctx context.Context, host string) ([]net.IPAd
 }
 
 func (r *DoHResolver) query(ctx context.Context, host string, qtype uint16) ([]net.IPAddr, error) {
-	reqURL := fmt.Sprintf("%s?name=%s&type=%d", r.Endpoint, host, qtype)
+	reqURL := fmt.Sprintf("%s?name=%s&type=%d", r.Endpoint, url.QueryEscape(host), qtype)
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, reqURL, nil)
 	if err != nil {
@@ -231,7 +269,10 @@ func (d *DoTResolver) lookup(ctx context.Context, host string, qtype uint16) ([]
 	// TLS dial
 	var dialer tls.Dialer
 
-	dialer.Config = &tls.Config{ServerName: d.Host}
+	dialer.Config = &tls.Config{
+		ServerName: d.Host,
+		MinVersion: tls.VersionTLS12,
+	}
 
 	conn, err := dialer.DialContext(ctx, "tcp", d.Endpoint)
 	if err != nil {

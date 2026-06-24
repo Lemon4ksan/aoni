@@ -20,6 +20,28 @@ import (
 	"strings"
 )
 
+var sensitiveHeaders = map[string]bool{
+	"authorization":       true,
+	"cookie":              true,
+	"set-cookie":          true,
+	"proxy-authorization": true,
+}
+
+func redactHeaders(raw []byte) []byte {
+	lines := strings.Split(string(raw), "\r\n")
+	for i, line := range lines {
+		for header := range sensitiveHeaders {
+			prefix := header + ":"
+			if strings.HasPrefix(strings.ToLower(line), prefix) {
+				lines[i] = header + ": <redacted>"
+				break
+			}
+		}
+	}
+
+	return []byte(strings.Join(lines, "\r\n"))
+}
+
 // DefaultClient is the shared default client instance used by global helper functions.
 var DefaultClient = NewClient(nil)
 
@@ -354,6 +376,9 @@ func handleResponse(resp *http.Response, target any, requester Requester) error 
 	if resp.Request != nil && resp.Request.Context().Value(debugCtxKey{}) != nil {
 		reqDump, _ := httputil.DumpRequestOut(resp.Request, true)
 		respDump, _ := httputil.DumpResponse(resp, true)
+
+		reqDump = redactHeaders(reqDump)
+		respDump = redactHeaders(respDump)
 
 		if logger, ok := requester.(interface{ Logger() Logger }); ok {
 			logger.Logger().Debug("Aoni HTTP Diagnostic", "request", string(reqDump), "response", string(respDump))

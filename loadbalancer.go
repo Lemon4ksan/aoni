@@ -172,7 +172,11 @@ func (lb *LoadBalancer) Close() error {
 	lb.cancel()
 	lb.wg.Wait()
 
-	for _, tc := range lb.backends {
+	lb.mu.RLock()
+	backends := lb.backends
+	lb.mu.RUnlock()
+
+	for _, tc := range backends {
 		if httpClient, ok := tc.client.(*http.Client); ok {
 			if transport, ok := httpClient.Transport.(*http.Transport); ok {
 				transport.CloseIdleConnections()

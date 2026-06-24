@@ -12,6 +12,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptrace"
+	"os"
 	"strings"
 	"time"
 
@@ -167,7 +168,9 @@ func CurlCommand(req *http.Request, body []byte) string {
 
 	for key, values := range req.Header {
 		for _, value := range values {
-			fmt.Fprintf(&sb, " -H '%s: %s'", key, value)
+			escapedKey := strings.ReplaceAll(key, "'", "'\\''")
+			escapedVal := strings.ReplaceAll(value, "'", "'\\''")
+			fmt.Fprintf(&sb, " -H '%s: %s'", escapedKey, escapedVal)
 		}
 	}
 
@@ -176,12 +179,13 @@ func CurlCommand(req *http.Request, body []byte) string {
 		fmt.Fprintf(&sb, " -d '%s'", escaped)
 	}
 
-	fmt.Fprintf(&sb, " '%s'", req.URL.String())
+	escapedURL := strings.ReplaceAll(req.URL.String(), "'", "'\\''")
+	fmt.Fprintf(&sb, " '%s'", escapedURL)
 
 	return sb.String()
 }
 
-// AsCurl returns a [RequestModifier] that dumps the equivalent curl command to a silent discard stream.
+// AsCurl returns a [RequestModifier] that dumps the equivalent curl command to stderr.
 func AsCurl() RequestModifier {
 	return func(req *http.Request) {
 		var body []byte
@@ -195,6 +199,6 @@ func AsCurl() RequestModifier {
 		}
 
 		curl := CurlCommand(req, body)
-		fmt.Fprintf(io.Discard, "%s\n", curl)
+		fmt.Fprintf(os.Stderr, "%s\n", curl)
 	}
 }

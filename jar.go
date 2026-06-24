@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/http/cookiejar"
 	"net/url"
+	"runtime"
 	"sync"
 
 	"github.com/lemon4ksan/miyako/sync/keylock"
@@ -17,12 +18,16 @@ import (
 type proxyCtxKey struct{}
 
 // ProxyIsolatedCookieJar is an isolated cookie jar that stores cookies per proxy URL.
+// It is safe for concurrent use by multiple goroutines.
 type ProxyIsolatedCookieJar struct {
-	mu          sync.RWMutex
-	jars        map[string]http.CookieJar
-	km          keylock.KeyMutex[string]
-	activeProxy string
-	hasActive   bool
+	mu   sync.RWMutex
+	jars map[string]http.CookieJar
+	km   keylock.KeyMutex[string]
+
+	// goroutineProxies stores per-goroutine active proxy URLs.
+	// Key: goroutine ID (string), Value: proxy URL string.
+	// This eliminates the race condition of a single shared activeProxy field.
+	goroutineProxies sync.Map
 }
 
 // NewProxyIsolatedCookieJar creates a new ProxyIsolatedCookieJar.
@@ -32,35 +37,36 @@ func NewProxyIsolatedCookieJar() *ProxyIsolatedCookieJar {
 	}
 }
 
-// SetActiveProxy sets the proxy URL used for SetCookies/Cookies fallback calls
-// (e.g. during http.Client redirects where context is unavailable).
-// The caller MUST call ClearActiveProxy after the request completes.
-func (p *ProxyIsolatedCookieJar) SetActiveProxy(proxyURL string) {
-	p.mu.Lock()
-	p.activeProxy = proxyURL
-	p.hasActive = true
-	p.mu.Unlock()
+// goroutineID returns a unique identifier for the current goroutine.
+func goroutineID() string {
+	var buf [64]byte
+
+	n := runtime.Stack(buf[:], false)
+
+	// Stack format: "goroutine 18 [running]:\n..."
+	// Extract the number after "goroutine ".
+	id := buf[len("goroutine ") : n-3]
+
+	return string(id)
 }
 
-// ClearActiveProxy clears the active proxy set by SetActiveProxy.
+// SetActiveProxy sets the proxy URL used for SetCookies/Cookies fallback calls
+// (e.g. during http.Client redirects where context is unavailable).
+// Safe for concurrent use: each goroutine's proxy is stored independently.
+// The caller MUST call ClearActiveProxy after the request completes.
+func (p *ProxyIsolatedCookieJar) SetActiveProxy(proxyURL string) {
+	p.goroutineProxies.Store(goroutineID(), proxyURL)
+}
+
+// ClearActiveProxy clears the active proxy for the current goroutine.
 func (p *ProxyIsolatedCookieJar) ClearActiveProxy() {
-	p.mu.Lock()
-	p.activeProxy = ""
-	p.hasActive = false
-	p.mu.Unlock()
+	p.goroutineProxies.Delete(goroutineID())
 }
 
 // SetCookies implements the http.CookieJar interface.
 // Used as fallback when http.Client calls during redirects have no context.
 func (p *ProxyIsolatedCookieJar) SetCookies(u *url.URL, cookies []*http.Cookie) {
-	p.mu.RLock()
-	proxy := p.activeProxy
-	active := p.hasActive
-	p.mu.RUnlock()
-
-	if !active {
-		proxy = ""
-	}
+	proxy := p.activeProxyForCurrentGoroutine()
 
 	jar := p.getJarByProxy(proxy)
 	if jar != nil {
@@ -71,14 +77,7 @@ func (p *ProxyIsolatedCookieJar) SetCookies(u *url.URL, cookies []*http.Cookie) 
 // Cookies implements the http.CookieJar interface.
 // Used as fallback when http.Client calls during redirects have no context.
 func (p *ProxyIsolatedCookieJar) Cookies(u *url.URL) []*http.Cookie {
-	p.mu.RLock()
-	proxy := p.activeProxy
-	active := p.hasActive
-	p.mu.RUnlock()
-
-	if !active {
-		proxy = ""
-	}
+	proxy := p.activeProxyForCurrentGoroutine()
 
 	jar := p.getJarByProxy(proxy)
 	if jar != nil {
@@ -86,6 +85,15 @@ func (p *ProxyIsolatedCookieJar) Cookies(u *url.URL) []*http.Cookie {
 	}
 
 	return nil
+}
+
+func (p *ProxyIsolatedCookieJar) activeProxyForCurrentGoroutine() string {
+	val, ok := p.goroutineProxies.Load(goroutineID())
+	if !ok {
+		return ""
+	}
+
+	return val.(string)
 }
 
 // getJar returns the cookie jar for the given context, creating it if necessary.

@@ -244,7 +244,11 @@ func (r *ProxyRotator) Close() error {
 	r.cancel()
 	r.wg.Wait()
 
-	for _, tc := range r.clients {
+	r.mu.RLock()
+	clients := r.clients
+	r.mu.RUnlock()
+
+	for _, tc := range clients {
 		if httpClient, ok := tc.client.(*http.Client); ok {
 			if transport, ok := httpClient.Transport.(*http.Transport); ok {
 				transport.CloseIdleConnections()
@@ -256,6 +260,10 @@ func (r *ProxyRotator) Close() error {
 }
 
 func (r *ProxyRotator) healthCheckLoop() {
+	if r.config.HealthCheckURL == "" {
+		return
+	}
+
 	ticker := time.NewTicker(r.config.HealthCheckInterval)
 	defer ticker.Stop()
 

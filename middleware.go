@@ -12,6 +12,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"math/big"
 	"net"
 	"net/http"
@@ -46,6 +47,14 @@ func Chain(doer HTTPDoer, middlewares ...Middleware) HTTPDoer {
 // request rate exceeds rps with burst tolerance. The limiter uses
 // a token bucket algorithm from [golang.org/x/time/rate].
 func RateLimitMiddleware(rps float64, burst int) Middleware {
+	if rps < 0 {
+		rps = 0
+	}
+
+	if burst < 0 {
+		burst = 0
+	}
+
 	limiter := rate.NewLimiter(rate.Limit(rps), burst)
 
 	return func(next HTTPDoer) HTTPDoer {
@@ -103,13 +112,10 @@ func RetryOnTransientErrors() RetryCondition {
 			}
 
 			errStr := err.Error()
-			if strings.Contains(errStr, "connection refused") ||
-				strings.Contains(errStr, "connection reset") ||
-				strings.Contains(errStr, "broken pipe") {
-				return true
-			}
 
-			return true
+			return strings.Contains(errStr, "connection refused") ||
+				strings.Contains(errStr, "connection reset") ||
+				strings.Contains(errStr, "broken pipe")
 		}
 
 		return false
@@ -144,6 +150,10 @@ func RetryOnGatewayErrors() RetryCondition {
 func RetryMiddleware(opts RetryOptions, condition RetryCondition) Middleware {
 	opts.MaxRetries = generic.Coalesce(opts.MaxRetries, 3)
 	opts.Backoff = generic.Coalesce(opts.Backoff, 1*time.Second)
+
+	if opts.Backoff < 0 {
+		opts.Backoff = 0
+	}
 
 	return func(next HTTPDoer) HTTPDoer {
 		return DoerFunc(func(req *http.Request) (*http.Response, error) {
@@ -262,7 +272,7 @@ type CircuitBreaker struct {
 // fields default to 50% failure threshold, 10s window, 5 min requests,
 // and 5s cooldown.
 func NewCircuitBreaker(cfg CircuitBreakerConfig) *CircuitBreaker {
-	if cfg.FailureThreshold <= 0 || cfg.FailureThreshold > 1.0 {
+	if cfg.FailureThreshold <= 0 || cfg.FailureThreshold > 1.0 || math.IsNaN(cfg.FailureThreshold) {
 		cfg.FailureThreshold = 0.5
 	}
 
@@ -352,7 +362,7 @@ func CircuitBreakerMiddleware(cb *CircuitBreaker, isFailure func(*http.Response,
 
 				resultResp = resp
 
-				body, _ := io.ReadAll(resp.Body)
+				body, _ := io.ReadAll(io.LimitReader(resp.Body, 16*1024*1024))
 				_ = resp.Body.Close()
 
 				if isFailure(resp, nil) {

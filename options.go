@@ -211,9 +211,9 @@ func WithJSONBody(payload any) RequestModifier {
 }
 
 // WithMultipart builds a multipart/form-data body from fields and
-// files, sets Content-Length and Content-Type (with boundary). A
-// write error during formatting silently returns with an incomplete
-// body.
+// files, sets Content-Length and Content-Type (with boundary).
+// Encoding errors are stored in the request context and retrievable
+// via the body error hook (same as [WithJSONBody]).
 func WithMultipart(fields map[string]string, files map[string]io.Reader) RequestModifier {
 	return func(req *http.Request) {
 		body := &bytes.Buffer{}
@@ -221,6 +221,9 @@ func WithMultipart(fields map[string]string, files map[string]io.Reader) Request
 
 		for k, v := range fields {
 			if err := writer.WriteField(k, v); err != nil {
+				ctx := context.WithValue(req.Context(), bodyErrorCtxKey{}, err)
+				*req = *req.WithContext(ctx)
+
 				return
 			}
 		}
@@ -228,6 +231,9 @@ func WithMultipart(fields map[string]string, files map[string]io.Reader) Request
 		for key, r := range files {
 			part, err := writer.CreateFormFile(key, key)
 			if err != nil {
+				ctx := context.WithValue(req.Context(), bodyErrorCtxKey{}, err)
+				*req = *req.WithContext(ctx)
+
 				return
 			}
 
@@ -236,11 +242,17 @@ func WithMultipart(fields map[string]string, files map[string]io.Reader) Request
 			bytePool.Put(bufPtr)
 
 			if err != nil {
+				ctx := context.WithValue(req.Context(), bodyErrorCtxKey{}, err)
+				*req = *req.WithContext(ctx)
+
 				return
 			}
 		}
 
 		if err := writer.Close(); err != nil {
+			ctx := context.WithValue(req.Context(), bodyErrorCtxKey{}, err)
+			*req = *req.WithContext(ctx)
+
 			return
 		}
 

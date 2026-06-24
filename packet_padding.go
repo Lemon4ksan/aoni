@@ -6,6 +6,7 @@ package aoni
 
 import (
 	"crypto/rand"
+	"encoding/binary"
 	"net"
 )
 
@@ -84,7 +85,7 @@ func randIntn(n int) int {
 
 	_, _ = rand.Read(buf[:])
 
-	val := uint64(buf[0])<<24 | uint64(buf[1])<<16 | uint64(buf[2])<<8 | uint64(buf[3])
+	val := binary.BigEndian.Uint64(buf[:])
 
 	return int(val % uint64(n)) //nolint:gosec
 }
