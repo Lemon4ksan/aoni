@@ -27,9 +27,26 @@ type PacketPaddingConfig struct {
 	MaxPaddingBytes int
 
 	// PaddingHeader is the name of a custom header used to carry padding data.
-	// If empty, a default name "X-Padding" is used. The header value contains
-	// random bytes encoded as hex.
+	// If empty and HeaderPool is empty, a default name "X-Padding" is used.
+	// Ignored when HeaderPool is non-empty.
 	PaddingHeader string
+
+	// HeaderPool is a list of header names used to carry padding data.
+	// On each request a random name is picked from this pool, making the
+	// padding header indistinguishable from legitimate CDN or cloud tracing
+	// headers. When non-empty this field takes precedence over PaddingHeader.
+	//
+	// Example:
+	//
+	//	[]string{
+	//	    "X-Amz-Trace-Id",
+	//	    "X-Cloud-Trace-Context",
+	//	    "CF-RAY",
+	//	    "X-Edge-Cache-Id",
+	//	    "X-Request-ID",
+	//	    "X-Trace-ID",
+	//	}
+	HeaderPool []string
 }
 
 // GeneratePadding returns random padding bytes of the configured length range.
@@ -72,8 +89,15 @@ func randIntn(n int) int {
 	return int(val % uint64(n)) //nolint:gosec
 }
 
-// PaddingHeaderName returns the header name for padding, defaulting to "X-Padding".
+// PaddingHeaderName returns a header name for padding.
+// If HeaderPool is configured, a random entry is selected to avoid
+// creating a static DPI fingerprint. Otherwise PaddingHeader is used,
+// falling back to "X-Padding".
 func PaddingHeaderName(cfg PacketPaddingConfig) string {
+	if len(cfg.HeaderPool) > 0 {
+		return cfg.HeaderPool[randIntn(len(cfg.HeaderPool))]
+	}
+
 	if cfg.PaddingHeader != "" {
 		return cfg.PaddingHeader
 	}
