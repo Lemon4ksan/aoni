@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/gorilla/websocket"
+	"github.com/lemon4ksan/miyako/generic"
 	utls "github.com/refraction-networking/utls"
 )
 
@@ -48,27 +49,11 @@ func parseWSURL(rawURL string) (*parsedURL, error) {
 		return nil, fmt.Errorf("aoni: unsupported websocket scheme %q (want ws or wss)", scheme)
 	}
 
-	host := u.Hostname()
-	port := u.Port()
-
-	if port == "" {
-		if scheme == "wss" {
-			port = "443"
-		} else {
-			port = "80"
-		}
-	}
-
-	path := u.RequestURI()
-	if path == "" {
-		path = "/"
-	}
-
 	return &parsedURL{
 		scheme: scheme,
-		host:   host,
-		port:   port,
-		Path:   path,
+		host:   u.Hostname(),
+		port:   generic.Coalesce(u.Port(), generic.Ternary(scheme == "wss", "443", "80")),
+		Path:   generic.Coalesce(u.RequestURI(), "/"),
 	}, nil
 }
 

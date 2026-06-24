@@ -6,6 +6,8 @@
 //
 // Demonstrates NewCircuitBreaker, CircuitBreakerMiddleware, and
 // DefaultCircuitBreakerCondition for graceful degradation.
+// Uses a sliding window: if 50%+ of requests within a 10s window
+// fail, the circuit opens for the cooldown period.
 package main
 
 import (
@@ -24,12 +26,13 @@ func main() {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
-	// Create a circuit breaker: open after 5 failures, close after 3 successes,
-	// with a 30-second cooldown
+	// Create a circuit breaker: open when 50% of requests in a 10s window fail,
+	// with a 30-second cooldown and minimum 5 requests before evaluation
 	cb := aoni.NewCircuitBreaker(aoni.CircuitBreakerConfig{
-		FailureThreshold: 5,
-		SuccessThreshold: 3,
+		FailureThreshold: 0.5,
+		MinRequests:      5,
 		Cooldown:         30 * time.Second,
+		Window:           10 * time.Second,
 	})
 
 	// Wrap client with circuit breaker middleware using the default condition
@@ -41,7 +44,7 @@ func main() {
 	client := aoni.NewClient(doer).
 		WithBaseURL("https://httpbin.org")
 
-	// Make requests; once too many failures occur, the circuit opens
+	// Make requests; once the failure ratio exceeds the threshold, the circuit opens
 	// and all subsequent requests fail fast with a circuit-open error
 	for i := 0; i < 10; i++ {
 		res, err := aoni.GetJSON[StatusResponse](ctx, client, "/status/200")

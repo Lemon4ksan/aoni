@@ -3,7 +3,7 @@
 // license that can be found in the LICENSE file.
 
 // Example: Socket.IO client
-// 
+//
 // Demonstrates a simple Socket.IO client that connects to a server and listens for price updates.
 package main
 

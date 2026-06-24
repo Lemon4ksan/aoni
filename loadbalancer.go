@@ -17,6 +17,8 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"github.com/lemon4ksan/miyako/generic"
 )
 
 // LoadBalancingStrategy defines the selection algorithm for backends.
@@ -53,10 +55,8 @@ type Backend struct {
 	// Weight is the selection weight for the [WeightedRoundRobin] strategy.
 	Weight int
 
-	client      HTTPDoer
-	failCount   atomic.Uint32
-	unhealthy   atomic.Bool
-	recoveredAt atomic.Int64
+	client HTTPDoer
+	*HealthTracker
 }
 
 // LoadBalancer distributes requests across multiple backend servers.
@@ -81,22 +81,28 @@ func NewLoadBalancer(cfg LoadBalancerConfig, backends ...string) (*LoadBalancer,
 		return nil, errors.New("aoni: load balancer requires at least one backend")
 	}
 
-	if cfg.MaxFails == 0 {
-		cfg.MaxFails = 3
-	}
+	cfg.MaxFails = generic.Coalesce(cfg.MaxFails, 3)
+	cfg.RetryAfter = generic.Coalesce(cfg.RetryAfter, 30*time.Second)
 
-	if cfg.RetryAfter == 0 {
-		cfg.RetryAfter = 30 * time.Second
-	}
-
-	tracked := make([]*Backend, len(backends))
-	for i, u := range backends {
-		tracked[i] = &Backend{
+	tracked := generic.Map(backends, func(u string) *Backend {
+		b := &Backend{
 			URL:    u,
 			Weight: 1,
 			client: &http.Client{Timeout: 15 * time.Second},
 		}
-	}
+		b.HealthTracker = NewHealthTracker(u, cfg.MaxFails, cfg.RetryAfter,
+			func(name string, fails uint32, retryAfter time.Duration) {
+				slog.Warn("backend marked unhealthy", //nolint:gosec
+					"backend", name, "fails", fails, "retry_after", retryAfter)
+			},
+			func(name string) {
+				slog.Info("backend recovered", //nolint:gosec
+					"backend", name)
+			},
+		)
+
+		return b
+	})
 
 	ctx, cancel := context.WithCancel(context.Background())
 	lb := &LoadBalancer{
@@ -135,14 +141,25 @@ func (lb *LoadBalancer) UpdateBackends(backends ...string) {
 		return
 	}
 
-	tracked := make([]*Backend, len(backends))
-	for i, u := range backends {
-		tracked[i] = &Backend{
+	tracked := generic.Map(backends, func(u string) *Backend {
+		b := &Backend{
 			URL:    u,
 			Weight: 1,
 			client: &http.Client{Timeout: 15 * time.Second},
 		}
-	}
+		b.HealthTracker = NewHealthTracker(u, lb.config.MaxFails, lb.config.RetryAfter,
+			func(name string, fails uint32, retryAfter time.Duration) {
+				slog.Warn("backend marked unhealthy", //nolint:gosec
+					"backend", name, "fails", fails, "retry_after", retryAfter)
+			},
+			func(name string) {
+				slog.Info("backend recovered", //nolint:gosec
+					"backend", name)
+			},
+		)
+
+		return b
+	})
 
 	lb.mu.Lock()
 	lb.backends = tracked
@@ -248,43 +265,15 @@ func (lb *LoadBalancer) Do(req *http.Request) (*http.Response, error) {
 }
 
 func (lb *LoadBalancer) isAvailable(b *Backend) bool {
-	if !b.unhealthy.Load() {
-		return true
-	}
-
-	if time.Now().UnixNano() >= b.recoveredAt.Load() {
-		return true
-	}
-
-	return false
+	return b.IsAvailable()
 }
 
 func (lb *LoadBalancer) markFailed(b *Backend) {
-	fails := b.failCount.Add(1)
-	if fails >= lb.config.MaxFails {
-		b.unhealthy.Store(true)
-
-		recoveryTime := time.Now().Add(lb.config.RetryAfter).UnixNano()
-		b.recoveredAt.Store(recoveryTime)
-
-		slog.Warn("backend marked unhealthy", //nolint:gosec
-			"backend", b.URL,
-			"fails", fails,
-			"retry_after", lb.config.RetryAfter,
-		)
-	}
+	b.MarkFailed()
 }
 
 func (lb *LoadBalancer) markSuccess(b *Backend) {
-	wasUnhealthy := b.unhealthy.Load()
-	b.failCount.Store(0)
-	b.unhealthy.Store(false)
-
-	if wasUnhealthy {
-		slog.Info("backend recovered", //nolint:gosec
-			"backend", b.URL,
-		)
-	}
+	b.MarkSuccess()
 }
 
 func (lb *LoadBalancer) isFault(resp *http.Response, err error) bool {
@@ -317,9 +306,7 @@ func (lb *LoadBalancer) healthCheckLoop() {
 		return
 	}
 
-	if lb.config.HealthCheckInterval == 0 {
-		lb.config.HealthCheckInterval = 1 * time.Minute
-	}
+	lb.config.HealthCheckInterval = generic.Coalesce(lb.config.HealthCheckInterval, time.Minute)
 
 	ticker := time.NewTicker(lb.config.HealthCheckInterval)
 	defer ticker.Stop()
@@ -367,6 +354,7 @@ func (lb *LoadBalancer) Prewarm(ctx context.Context) {
 	lb.mu.RUnlock()
 
 	var wg sync.WaitGroup
+
 	for _, b := range backends {
 		wg.Add(1)
 

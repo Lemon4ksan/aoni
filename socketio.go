@@ -12,8 +12,6 @@ import (
 	"fmt"
 	"io"
 	"maps"
-	"math"
-	"math/rand/v2"
 	"net"
 	"slices"
 	"strconv"
@@ -22,6 +20,9 @@ import (
 	"time"
 
 	"github.com/gorilla/websocket"
+	"github.com/lemon4ksan/miyako/generic"
+	"github.com/lemon4ksan/miyako/jobs"
+	"github.com/lemon4ksan/miyako/kata"
 )
 
 const (
@@ -52,6 +53,14 @@ const (
 	sioStateOpening
 	sioStateOpen
 	sioStateClosing
+)
+
+type sioEventType int
+
+const (
+	sioEventTypeOpen sioEventType = iota
+	sioEventTypeClose
+	sioEventTypeReconnect
 )
 
 // SocketIOConfig holds all configurable parameters for a Socket.IO connection.
@@ -86,29 +95,12 @@ type SocketIOConfig struct {
 
 // resolveDefaults fills zero-valued config fields with sensible defaults.
 func (cfg *SocketIOConfig) resolveDefaults() {
-	if cfg.ReconnectionDelay == 0 {
-		cfg.ReconnectionDelay = time.Second
-	}
-
-	if cfg.ReconnectionDelayMax == 0 {
-		cfg.ReconnectionDelayMax = 30 * time.Second
-	}
-
-	if cfg.JitterFactor == 0 {
-		cfg.JitterFactor = 0.5
-	}
-
-	if cfg.ConnectTimeout == 0 {
-		cfg.ConnectTimeout = 20 * time.Second
-	}
-
-	if cfg.PingTimeout == 0 {
-		cfg.PingTimeout = 20 * time.Second
-	}
-
-	if cfg.Namespace == "" {
-		cfg.Namespace = "/"
-	}
+	cfg.ReconnectionDelay = generic.Coalesce(cfg.ReconnectionDelay, time.Second)
+	cfg.ReconnectionDelayMax = generic.Coalesce(cfg.ReconnectionDelayMax, 30*time.Second)
+	cfg.JitterFactor = generic.Coalesce(cfg.JitterFactor, 0.5)
+	cfg.ConnectTimeout = generic.Coalesce(cfg.ConnectTimeout, 20*time.Second)
+	cfg.PingTimeout = generic.Coalesce(cfg.PingTimeout, 20*time.Second)
+	cfg.Namespace = generic.Coalesce(cfg.Namespace, "/")
 }
 
 // NamespaceSocket is a namespace-scoped event emitter.
@@ -164,16 +156,16 @@ type SocketIOConn struct {
 	onReconnectFailed func()
 
 	// ACK system
-	ackMu  sync.Mutex
-	acks   map[int64]*ackEntry
-	ackSeq int64
+	ackMgr *jobs.Manager[int64, []json.RawMessage]
 
 	// State
 	state   sioConnState
 	stateMu sync.RWMutex
+	fsm     *kata.FSM[sioConnState, sioEventType]
 
 	// Reconnection
-	backoff       *backoff
+	backoff       *generic.Backoff
+	attemptCount  int
 	skipReconnect bool
 	reconnectStop chan struct{}
 	client        *Client
@@ -214,7 +206,7 @@ func DialSocketIO(
 		config:        config,
 		namespace:     config.Namespace,
 		nsEvents:      make(map[string]map[string]func(args []json.RawMessage)),
-		acks:          make(map[int64]*ackEntry),
+		ackMgr:        jobs.NewManager[int64, []json.RawMessage](0),
 		closed:        make(chan struct{}),
 		reconnectStop: make(chan struct{}),
 		client:        c,
@@ -223,14 +215,52 @@ func DialSocketIO(
 		backoff:       newBackoff(config),
 	}
 
+	sio.fsm = kata.NewFSM[sioConnState, sioEventType](sioStateClosed)
+	sio.fsm.AddRules(
+		kata.TransitionRule[sioConnState, sioEventType]{
+			From:  sioStateClosed,
+			Event: sioEventTypeOpen,
+			To:    sioStateOpen,
+		},
+		kata.TransitionRule[sioConnState, sioEventType]{
+			From:  sioStateOpen,
+			Event: sioEventTypeClose,
+			To:    sioStateClosed,
+		},
+		kata.TransitionRule[sioConnState, sioEventType]{
+			From:  sioStateClosed,
+			Event: sioEventTypeReconnect,
+			To:    sioStateOpen,
+		},
+		kata.TransitionRule[sioConnState, sioEventType]{
+			From:  sioStateOpening,
+			Event: sioEventTypeOpen,
+			To:    sioStateOpen,
+		},
+		kata.TransitionRule[sioConnState, sioEventType]{
+			From:  sioStateOpening,
+			Event: sioEventTypeClose,
+			To:    sioStateClosed,
+		},
+		kata.TransitionRule[sioConnState, sioEventType]{
+			From:  sioStateOpen,
+			Event: sioEventTypeClose,
+			To:    sioStateClosing,
+		},
+		kata.TransitionRule[sioConnState, sioEventType]{
+			From:  sioStateClosing,
+			Event: sioEventTypeClose,
+			To:    sioStateClosed,
+		},
+	)
+
 	if err := sio.doHandshake(ctx); err != nil {
 		_ = conn.Close()
 		return nil, err
 	}
 
-	sio.stateMu.Lock()
+	_ = sio.fsm.Transition(context.Background(), sioEventTypeOpen)
 	sio.state = sioStateOpen
-	sio.stateMu.Unlock()
 
 	go sio.readLoop()
 	go sio.heartbeatLoop()
@@ -480,12 +510,13 @@ func (s *SocketIOConn) emitNS(nsp, event string, args ...any) error {
 	}
 
 	if ackFn != nil {
-		s.ackMu.Lock()
-		id := s.ackSeq
-		s.ackSeq++
-		pkt.ID = &id
-		s.acks[id] = &ackEntry{fn: ackFn}
-		s.ackMu.Unlock()
+		id := s.ackMgr.NextID()
+		pkt.ID = generic.Ptr(id)
+		_ = s.ackMgr.Add(id, func(ctx context.Context, response []json.RawMessage, err error) {
+			if err == nil {
+				ackFn(response)
+			}
+		}, jobs.WithTimeout[[]json.RawMessage](30*time.Second))
 	}
 
 	encoded := encodeSIOPacket(pkt)
@@ -509,12 +540,13 @@ func (s *SocketIOConn) emitBinaryNS(nsp string, data any, ackFn func(args []json
 	}
 
 	if ackFn != nil {
-		s.ackMu.Lock()
-		id := s.ackSeq
-		s.ackSeq++
-		pkt.ID = &id
-		s.acks[id] = &ackEntry{fn: ackFn}
-		s.ackMu.Unlock()
+		id := s.ackMgr.NextID()
+		pkt.ID = generic.Ptr(id)
+		_ = s.ackMgr.Add(id, func(ctx context.Context, response []json.RawMessage, err error) {
+			if err == nil {
+				ackFn(response)
+			}
+		}, jobs.WithTimeout[[]json.RawMessage](30*time.Second))
 	}
 
 	encoded := encodeSIOPacket(pkt)
@@ -532,32 +564,31 @@ func (s *SocketIOConn) emitBinaryNS(nsp string, data any, ackFn func(args []json
 }
 
 func (s *SocketIOConn) emitWithAckNS(ctx context.Context, nsp, event string, args ...any) ([]json.RawMessage, error) {
-	ch := make(chan []json.RawMessage, 1)
-	errCh := make(chan error, 1)
+	id := s.ackMgr.NextID()
 
-	callback := func(rawArgs []json.RawMessage) {
-		select {
-		case ch <- rawArgs:
-		default:
-		}
-	}
+	_ = s.ackMgr.Add(id, nil,
+		jobs.WithWait[[]json.RawMessage](),
+		jobs.WithContext[[]json.RawMessage](ctx),
+		jobs.WithTimeout[[]json.RawMessage](30*time.Second),
+	)
 
 	emitArgs := make([]any, len(args)+1)
 	copy(emitArgs, args)
-	emitArgs[len(args)] = callback
+	emitArgs[len(args)] = func(rawArgs []json.RawMessage) {
+		s.ackMgr.Resolve(id, rawArgs, nil)
+	}
 
 	if err := s.emitNS(nsp, event, emitArgs...); err != nil {
+		s.ackMgr.Remove(id)
 		return nil, err
 	}
 
-	select {
-	case <-ctx.Done():
-		return nil, ctx.Err()
-	case result := <-ch:
-		return result, nil
-	case err := <-errCh:
+	result, err := s.ackMgr.WaitFor(ctx, id)
+	if err != nil {
 		return nil, err
 	}
+
+	return result, nil
 }
 
 func (s *SocketIOConn) emitVolatileNS(nsp, event string, args ...any) error {
@@ -587,9 +618,8 @@ func (s *SocketIOConn) setNamespaceHandler(nsp, event string, handler func(args 
 
 func (s *SocketIOConn) readLoop() {
 	defer func() {
-		s.stateMu.Lock()
+		_ = s.fsm.Transition(context.Background(), sioEventTypeClose)
 		s.state = sioStateClosed
-		s.stateMu.Unlock()
 
 		_ = s.conn.Close()
 
@@ -737,29 +767,12 @@ func (s *SocketIOConn) dispatchPacket(pkt *sioPacket) {
 }
 
 func (s *SocketIOConn) handleAck(id int64, data json.RawMessage) {
-	s.ackMu.Lock()
-
-	entry, ok := s.acks[id]
-	if ok {
-		delete(s.acks, id)
-	}
-
-	s.ackMu.Unlock()
-
-	if !ok {
-		return
-	}
-
-	if entry.timer != nil {
-		entry.timer.Stop()
-	}
-
 	var args []json.RawMessage
 	if err := json.Unmarshal(data, &args); err != nil {
 		return
 	}
 
-	go entry.fn(args)
+	s.ackMgr.Resolve(id, args, nil)
 }
 
 func (s *SocketIOConn) heartbeatLoop() {
@@ -806,7 +819,8 @@ func (s *SocketIOConn) reconnectLoop() {
 		default:
 		}
 
-		delay := s.backoff.nextDuration()
+		delay := s.backoff.Next()
+		s.attemptCount++
 
 		timer := time.NewTimer(delay)
 		select {
@@ -818,7 +832,7 @@ func (s *SocketIOConn) reconnectLoop() {
 
 		s.mu.RLock()
 		cb := s.onReconnecting
-		attempt := s.backoff.attempts
+		attempt := s.attemptCount
 		s.mu.RUnlock()
 
 		if cb != nil {
@@ -831,7 +845,7 @@ func (s *SocketIOConn) reconnectLoop() {
 		cancel()
 
 		if err != nil {
-			if s.config.ReconnectionAttempts > 0 && s.backoff.attempts >= s.config.ReconnectionAttempts {
+			if s.config.ReconnectionAttempts > 0 && s.attemptCount >= s.config.ReconnectionAttempts {
 				s.mu.RLock()
 				failCb := s.onReconnectFailed
 				s.mu.RUnlock()
@@ -860,7 +874,7 @@ func (s *SocketIOConn) reconnectLoop() {
 		if err := s.doHandshake(context.Background()); err != nil {
 			_ = conn.Close()
 
-			if s.config.ReconnectionAttempts > 0 && s.backoff.attempts >= s.config.ReconnectionAttempts {
+			if s.config.ReconnectionAttempts > 0 && s.attemptCount >= s.config.ReconnectionAttempts {
 				s.mu.RLock()
 				failCb := s.onReconnectFailed
 				s.mu.RUnlock()
@@ -875,11 +889,11 @@ func (s *SocketIOConn) reconnectLoop() {
 			continue
 		}
 
-		s.stateMu.Lock()
+		_ = s.fsm.Transition(context.Background(), sioEventTypeReconnect)
 		s.state = sioStateOpen
-		s.stateMu.Unlock()
 
-		s.backoff.reset()
+		s.backoff.Reset()
+		s.attemptCount = 0
 
 		s.mu.RLock()
 		reconnectedCb := s.onReconnected
@@ -992,11 +1006,6 @@ type sioPacket struct {
 	Data        json.RawMessage
 }
 
-type ackEntry struct {
-	fn    func(args []json.RawMessage)
-	timer *time.Timer
-}
-
 type binaryReconstructor struct {
 	attachments int
 	buffers     [][]byte
@@ -1043,50 +1052,8 @@ func (br *binaryReconstructor) reconstruct() (*sioPacket, error) {
 	return &pkt, nil
 }
 
-type backoff struct {
-	min      time.Duration
-	max      time.Duration
-	factor   float64
-	jitter   float64
-	attempts int
-}
-
-func newBackoff(cfg SocketIOConfig) *backoff {
-	return &backoff{
-		min:    cfg.ReconnectionDelay,
-		max:    cfg.ReconnectionDelayMax,
-		factor: 2,
-		jitter: cfg.JitterFactor,
-	}
-}
-
-func (b *backoff) nextDuration() time.Duration {
-	ms := float64(b.min.Milliseconds()) * math.Pow(b.factor, float64(b.attempts))
-
-	if b.jitter > 0 {
-		deviation := math.Floor(rand.Float64() * b.jitter * ms) //nolint:gosec
-		if rand.IntN(2) == 0 {                                  //nolint:gosec
-			ms -= deviation
-		} else {
-			ms += deviation
-		}
-	}
-
-	b.attempts++
-
-	if ms > float64(b.max.Milliseconds()) {
-		ms = float64(b.max.Milliseconds())
-	}
-
-	if ms < 0 {
-		ms = 0
-	}
-
-	return time.Duration(ms) * time.Millisecond
-}
-
-func (b *backoff) reset() {
-	b.attempts = 0
+func newBackoff(cfg SocketIOConfig) *generic.Backoff {
+	return generic.NewBackoff(cfg.ReconnectionDelay, cfg.ReconnectionDelayMax, 2, cfg.JitterFactor)
 }
 
 func encodeSIOPacket(pkt sioPacket) []byte {

@@ -15,6 +15,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/lemon4ksan/miyako/generic"
+
 	"github.com/lemon4ksan/aoni/ja4"
 )
 
@@ -133,10 +135,9 @@ func computeJA4HFromRequest(req *http.Request) string {
 			value string
 		}
 
-		kvs := make([]kv, len(cookies))
-		for i, c := range cookies {
-			kvs[i] = kv{c.Name, c.Value}
-		}
+		kvs := generic.Map(cookies, func(c *http.Cookie) kv {
+			return kv{c.Name, c.Value}
+		})
 
 		// Sort by name
 		for i := range kvs {
@@ -147,13 +148,8 @@ func computeJA4HFromRequest(req *http.Request) string {
 			}
 		}
 
-		cookieNames = make([]string, len(kvs))
-
-		cookieValues = make([]string, len(kvs))
-		for i, kv := range kvs {
-			cookieNames[i] = kv.name
-			cookieValues[i] = kv.value
-		}
+		cookieNames = generic.Map(kvs, func(k kv) string { return k.name })
+		cookieValues = generic.Map(kvs, func(k kv) string { return k.value })
 	}
 
 	return ja4.ComputeJA4H(method, proto, headers, hasCookie, hasReferer, acceptLanguage, cookieNames, cookieValues)

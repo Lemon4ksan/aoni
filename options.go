@@ -18,6 +18,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/lemon4ksan/miyako/generic"
 	"github.com/quic-go/quic-go"
 	"github.com/quic-go/quic-go/http3"
 
@@ -25,7 +26,7 @@ import (
 )
 
 // RequestModifier represents a function that alters an [http.Request] before execution.
-type RequestModifier func(req *http.Request)
+type RequestModifier = generic.Option[*http.Request]
 
 // WithVar replaces a single placeholder (e.g. "{key}") in the path with an escaped value.
 func WithVar(key string, value any) RequestModifier {

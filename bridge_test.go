@@ -14,6 +14,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -227,9 +228,10 @@ func TestBridge_WithCircuitBreaker(t *testing.T) {
 	t.Parallel()
 
 	cb := NewCircuitBreaker(CircuitBreakerConfig{
-		FailureThreshold: 2,
-		SuccessThreshold: 1,
+		FailureThreshold: 0.5,
+		MinRequests:      2,
 		Cooldown:         0,
+		Window:           10 * time.Second,
 	})
 
 	var attempts atomic.Int32

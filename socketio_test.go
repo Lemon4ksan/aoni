@@ -389,19 +389,19 @@ func TestBackoffDuration(t *testing.T) {
 	b := newBackoff(cfg)
 
 	// Attempt 0: 100ms * 2^0 = 100ms
-	d := b.nextDuration()
+	d := b.Next()
 	assert.Equal(t, 100*time.Millisecond, d)
 
 	// Attempt 1: 100ms * 2^1 = 200ms
-	d = b.nextDuration()
+	d = b.Next()
 	assert.Equal(t, 200*time.Millisecond, d)
 
 	// Attempt 2: 100ms * 2^2 = 400ms
-	d = b.nextDuration()
+	d = b.Next()
 	assert.Equal(t, 400*time.Millisecond, d)
 
 	// Attempt 3: 100ms * 2^3 = 800ms
-	d = b.nextDuration()
+	d = b.Next()
 	assert.Equal(t, 800*time.Millisecond, d)
 }
 
@@ -418,11 +418,11 @@ func TestBackoffMaxCap(t *testing.T) {
 
 	// Skip to attempt where delay exceeds max.
 	for range 5 {
-		b.nextDuration()
+		b.Next()
 	}
 
 	// Attempt 5: 1s * 2^5 = 32s, but capped at 5s.
-	d := b.nextDuration()
+	d := b.Next()
 	assert.Equal(t, 5*time.Second, d)
 }
 
@@ -437,15 +437,13 @@ func TestBackoffReset(t *testing.T) {
 
 	b := newBackoff(cfg)
 
-	b.nextDuration()
-	b.nextDuration()
-	b.nextDuration()
-	assert.Equal(t, 3, b.attempts)
+	b.Next()
+	b.Next()
+	b.Next()
 
-	b.reset()
-	assert.Equal(t, 0, b.attempts)
+	b.Reset()
 
-	d := b.nextDuration()
+	d := b.Next()
 	assert.Equal(t, 100*time.Millisecond, d)
 }
 
@@ -461,7 +459,7 @@ func TestBackoffJitterBounds(t *testing.T) {
 	// Run many times with fresh backoff to verify jitter stays within bounds.
 	for range 100 {
 		b := newBackoff(cfg)
-		d := b.nextDuration()
+		d := b.Next()
 		// With jitter 0.5, deviation can be up to 50% of base (1s).
 		// So range should be roughly 500ms-1500ms.
 		assert.True(t, d >= 0, "duration must be non-negative: %v", d)
@@ -670,7 +668,7 @@ func TestBackoffNegativeDuration(t *testing.T) {
 
 	// min=1s, max=30s, but with jitter, duration should still be non-negative.
 	for range 10 {
-		d := b.nextDuration()
+		d := b.Next()
 		assert.True(t, d >= 0, "duration must be non-negative: %v", d)
 	}
 }

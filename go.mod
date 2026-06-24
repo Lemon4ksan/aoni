@@ -5,10 +5,10 @@ go 1.25.4
 replace github.com/lemon4ksan/miyako => ./../miyako
 
 require (
-	github.com/lemon4ksan/miyako v0.2.0
 	github.com/andybalholm/brotli v1.2.1
 	github.com/gorilla/websocket v1.5.3
 	github.com/klauspost/compress v1.18.6
+	github.com/lemon4ksan/miyako v0.0.0-00010101000000-000000000000
 	github.com/miekg/dns v1.1.72
 	github.com/quic-go/quic-go v0.60.0
 	github.com/stretchr/testify v1.11.1

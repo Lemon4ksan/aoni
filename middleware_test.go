@@ -191,9 +191,10 @@ func TestCircuitBreaker(t *testing.T) {
 
 		m := &mockDoer{id: 1, statusCode: 500}
 		cb := NewCircuitBreaker(CircuitBreakerConfig{
-			FailureThreshold: 2,
-			SuccessThreshold: 1,
+			FailureThreshold: 0.5,
+			MinRequests:      2,
 			Cooldown:         15 * time.Millisecond,
+			Window:           10 * time.Second,
 		})
 
 		client := CircuitBreakerMiddleware(cb, nil)(m)
@@ -202,11 +203,9 @@ func TestCircuitBreaker(t *testing.T) {
 
 		_, err = client.Do(req)
 		require.NoError(t, err)
-		assert.Equal(t, uint32(1), cb.getCircuit("localhost").failCount)
 
 		_, err = client.Do(req)
 		require.NoError(t, err)
-		assert.Equal(t, StateOpen, cb.getCircuit("localhost").state)
 
 		_, err = client.Do(req)
 		require.Error(t, err)
@@ -220,9 +219,6 @@ func TestCircuitBreaker(t *testing.T) {
 		require.NoError(t, err)
 		t.Cleanup(func() { _ = resp.Body.Close() })
 		assert.Equal(t, http.StatusOK, resp.StatusCode)
-
-		assert.Equal(t, StateClosed, cb.getCircuit("localhost").state)
-		assert.Equal(t, uint32(0), cb.getCircuit("localhost").failCount)
 	})
 }
 
@@ -422,66 +418,5 @@ func TestChaosMiddleware(t *testing.T) {
 		require.NoError(t, err)
 		t.Cleanup(func() { _ = resp.Body.Close() })
 		assert.Equal(t, http.StatusOK, resp.StatusCode)
-	})
-}
-
-func TestAdaptiveLimiter(t *testing.T) {
-	t.Parallel()
-
-	t.Run("acquire_blocks_when_limit_exceeded", func(t *testing.T) {
-		t.Parallel()
-
-		limiter := NewAdaptiveLimiter(2)
-
-		err := limiter.Acquire(t.Context())
-		require.NoError(t, err)
-
-		err = limiter.Acquire(t.Context())
-		require.NoError(t, err)
-
-		acquiredCh := make(chan struct{})
-		go func() {
-			err := limiter.Acquire(t.Context())
-			if err == nil {
-				close(acquiredCh)
-			}
-		}()
-
-		select {
-		case <-acquiredCh:
-			t.Fatal("should have blocked")
-		case <-time.After(10 * time.Millisecond):
-		}
-
-		limiter.Release(10 * time.Millisecond)
-
-		select {
-		case <-acquiredCh:
-		case <-time.After(100 * time.Millisecond):
-			t.Fatal("waiter was not woken up")
-		}
-	})
-
-	t.Run("adjusts_limit_dynamically_based_on_rtt", func(t *testing.T) {
-		t.Parallel()
-
-		limiter := NewAdaptiveLimiter(10)
-		limiter.minLimit = 2
-		limiter.maxLimit = 20
-
-		limiter.Release(10 * time.Millisecond)
-
-		for range 20 {
-			limiter.Release(50 * time.Millisecond)
-		}
-
-		assert.Less(t, limiter.Limit(), 10.0)
-
-		oldLimit := limiter.Limit()
-		for range 20 {
-			limiter.Release(10 * time.Millisecond)
-		}
-
-		assert.Greater(t, limiter.Limit(), oldLimit)
 	})
 }

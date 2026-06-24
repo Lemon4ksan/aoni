@@ -7,6 +7,7 @@ package aoni
 import (
 	"net/http"
 	"net/url"
+	"slices"
 	"time"
 )
 
@@ -19,6 +20,29 @@ type CookieData struct {
 	Expires  time.Time `json:"expires"`
 	HTTPOnly bool      `json:"httpOnly"`
 	Secure   bool      `json:"secure"`
+}
+
+// MirrorCookies copies cookies with the specified names from the sourceURL to all targetURLs within a single jar.
+func MirrorCookies(jar http.CookieJar, sourceURL *url.URL, targetURLs []*url.URL, cookieNames ...string) {
+	cookies := jar.Cookies(sourceURL)
+	if len(cookies) == 0 {
+		return
+	}
+
+	toMirror := make([]*http.Cookie, 0, len(cookieNames))
+	for _, c := range cookies {
+		if slices.Contains(cookieNames, c.Name) {
+			toMirror = append(toMirror, c)
+		}
+	}
+
+	if len(toMirror) == 0 {
+		return
+	}
+
+	for _, target := range targetURLs {
+		jar.SetCookies(target, toMirror)
+	}
 }
 
 // ExportCookies prepares cookies for loading into Playwright/Chromedp.

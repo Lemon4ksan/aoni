@@ -13,7 +13,30 @@ import (
 	"runtime"
 	"sync"
 	"sync/atomic"
+
+	"github.com/lemon4ksan/miyako/generic"
 )
+
+// UnwrapTo traverses the decorator chain c and returns the first layer
+// that implements the generic type T, as well as true.
+// If no matching layer is found, returns the null value of T and false.
+func UnwrapTo[T any](c io.Closer) (T, bool) {
+	curr := c
+	for {
+		if val, ok := curr.(T); ok {
+			return val, true
+		}
+
+		u, ok := curr.(interface{ Unwrap() io.Closer })
+		if !ok {
+			break
+		}
+
+		curr = u.Unwrap()
+	}
+
+	return generic.Zero[T](), false
+}
 
 // ReplayableBody represents a response stream that can be reset
 // to the beginning for re-reading (for example, after previewing or logging).

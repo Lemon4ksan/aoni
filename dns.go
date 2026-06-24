@@ -16,6 +16,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/lemon4ksan/miyako/batto"
 	"github.com/miekg/dns"
 )
 
@@ -35,6 +36,7 @@ type InMemoryDNSCache struct {
 	cache    map[string]dnsCacheEntry
 	ttl      time.Duration
 	resolver DNSResolver
+	sflight  batto.Group[string, []net.IPAddr]
 }
 
 // NewInMemoryDNSCache creates a new [InMemoryDNSCache] with the given TTL and resolver.
@@ -60,7 +62,9 @@ func (c *InMemoryDNSCache) LookupIPAddr(ctx context.Context, host string) ([]net
 		return entry.ips, nil
 	}
 
-	ips, err := c.resolver.LookupIPAddr(ctx, host)
+	ips, err := c.sflight.Do(ctx, host, func(ctx context.Context) ([]net.IPAddr, error) {
+		return c.resolver.LookupIPAddr(ctx, host)
+	})
 	if err != nil {
 		return nil, err
 	}

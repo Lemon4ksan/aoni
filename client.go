@@ -30,6 +30,7 @@ import (
 
 	"github.com/andybalholm/brotli"
 	"github.com/klauspost/compress/zstd"
+	"github.com/lemon4ksan/miyako/generic"
 	utls "github.com/refraction-networking/utls"
 	"golang.org/x/text/encoding/htmlindex"
 	"golang.org/x/text/transform"
@@ -419,17 +420,8 @@ func (c *Client) Request(
 		req.Header.Set("Accept-Encoding", "zstd, br, gzip")
 	}
 
-	for _, mod := range c.defaultMods {
-		if mod != nil {
-			mod(req)
-		}
-	}
-
-	for _, mod := range mods {
-		if mod != nil {
-			mod(req)
-		}
-	}
+	generic.ApplyOptions(req, c.defaultMods...)
+	generic.ApplyOptions(req, mods...)
 
 	if errVal := req.Context().Value(bodyErrorCtxKey{}); errVal != nil {
 		if serializationErr, ok := errVal.(error); ok {
@@ -997,25 +989,11 @@ func (c *Client) WithCookieJar(jar http.CookieJar) *Client {
 func (c *Client) WithConnectionPool(cfg ConnectionPoolConfig) *Client {
 	newClient := c.Clone()
 	if transport := newClient.Transport(); transport != nil {
-		if cfg.MaxIdleConns > 0 {
-			transport.MaxIdleConns = cfg.MaxIdleConns
-		}
-
-		if cfg.MaxIdleConnsPerHost > 0 {
-			transport.MaxIdleConnsPerHost = cfg.MaxIdleConnsPerHost
-		}
-
-		if cfg.MaxConnsPerHost > 0 {
-			transport.MaxConnsPerHost = cfg.MaxConnsPerHost
-		}
-
-		if cfg.IdleConnTimeout > 0 {
-			transport.IdleConnTimeout = cfg.IdleConnTimeout
-		}
-
-		if cfg.ResponseHeaderTimeout > 0 {
-			transport.ResponseHeaderTimeout = cfg.ResponseHeaderTimeout
-		}
+		transport.MaxIdleConns = generic.Coalesce(cfg.MaxIdleConns, transport.MaxIdleConns)
+		transport.MaxIdleConnsPerHost = generic.Coalesce(cfg.MaxIdleConnsPerHost, transport.MaxIdleConnsPerHost)
+		transport.MaxConnsPerHost = generic.Coalesce(cfg.MaxConnsPerHost, transport.MaxConnsPerHost)
+		transport.IdleConnTimeout = generic.Coalesce(cfg.IdleConnTimeout, transport.IdleConnTimeout)
+		transport.ResponseHeaderTimeout = generic.Coalesce(cfg.ResponseHeaderTimeout, transport.ResponseHeaderTimeout)
 	}
 
 	return newClient

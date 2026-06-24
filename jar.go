@@ -10,6 +10,8 @@ import (
 	"net/http/cookiejar"
 	"net/url"
 	"sync"
+
+	"github.com/lemon4ksan/miyako/sync/keylock"
 )
 
 type proxyCtxKey struct{}
@@ -18,6 +20,7 @@ type proxyCtxKey struct{}
 type ProxyIsolatedCookieJar struct {
 	mu          sync.RWMutex
 	jars        map[string]http.CookieJar
+	km          keylock.KeyMutex[string]
 	activeProxy string
 	hasActive   bool
 }
@@ -96,20 +99,33 @@ func (p *ProxyIsolatedCookieJar) getJar(ctx context.Context) http.CookieJar {
 }
 
 func (p *ProxyIsolatedCookieJar) getJarByProxy(proxyURL string) http.CookieJar {
-	p.mu.Lock()
-	defer p.mu.Unlock()
-
+	p.mu.RLock()
 	jar, ok := p.jars[proxyURL]
-	if !ok {
-		var err error
+	p.mu.RUnlock()
 
-		jar, err = cookiejar.New(nil)
-		if err != nil {
-			return nil
-		}
-
-		p.jars[proxyURL] = jar
+	if ok {
+		return jar
 	}
+
+	p.km.Lock(proxyURL)
+	defer p.km.Unlock(proxyURL)
+
+	p.mu.RLock()
+	jar, ok = p.jars[proxyURL]
+	p.mu.RUnlock()
+
+	if ok {
+		return jar
+	}
+
+	jar, err := cookiejar.New(nil)
+	if err != nil {
+		return nil
+	}
+
+	p.mu.Lock()
+	p.jars[proxyURL] = jar
+	p.mu.Unlock()
 
 	return jar
 }

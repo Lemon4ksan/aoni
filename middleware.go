@@ -20,6 +20,10 @@ import (
 	"sync"
 	"time"
 
+	"github.com/lemon4ksan/miyako/generic"
+	"github.com/lemon4ksan/miyako/sync/breaker"
+	"github.com/lemon4ksan/miyako/sync/keylock"
+	"github.com/lemon4ksan/miyako/sync/limiter"
 	"golang.org/x/time/rate"
 )
 
@@ -138,13 +142,8 @@ func RetryOnGatewayErrors() RetryCondition {
 // respects the Retry-After header when present and falls back to
 // exponential backoff with jitter.
 func RetryMiddleware(opts RetryOptions, condition RetryCondition) Middleware {
-	if opts.MaxRetries == 0 {
-		opts.MaxRetries = 3
-	}
-
-	if opts.Backoff == 0 {
-		opts.Backoff = 1 * time.Second
-	}
+	opts.MaxRetries = generic.Coalesce(opts.MaxRetries, 3)
+	opts.Backoff = generic.Coalesce(opts.Backoff, 1*time.Second)
 
 	return func(next HTTPDoer) HTTPDoer {
 		return DoerFunc(func(req *http.Request) (*http.Response, error) {
@@ -162,7 +161,13 @@ func RetryMiddleware(opts RetryOptions, condition RetryCondition) Middleware {
 				_ = req.Body.Close()
 			}
 
-			backoff := opts.Backoff
+			var bo *generic.Backoff
+			switch opts.JitterStrategy {
+			case JitterFull:
+				bo = generic.NewBackoff(opts.Backoff, opts.Backoff*32, 2, 1.0)
+			default:
+				bo = generic.NewBackoff(opts.Backoff, opts.Backoff*32, 2, 0.5)
+			}
 
 			for i := uint32(0); i <= opts.MaxRetries; i++ {
 				if body != nil {
@@ -178,32 +183,16 @@ func RetryMiddleware(opts RetryOptions, condition RetryCondition) Middleware {
 					}
 
 					var sleepTime time.Duration
-					switch {
-					case hasRetryAfter:
+					if hasRetryAfter {
 						sleepTime = retryAfter
-					case opts.JitterStrategy == JitterFull:
-						r, err := rand.Int(rand.Reader, big.NewInt(int64(backoff)))
-						if err != nil {
-							return nil, fmt.Errorf("aoni: failed to generate jitter: %w", err)
-						}
-
-						sleepTime = time.Duration(r.Int64())
-
-					default:
-						r, err := rand.Int(rand.Reader, big.NewInt(int64(backoff/5)))
-						if err != nil {
-							return nil, fmt.Errorf("aoni: failed to generate jitter: %w", err)
-						}
-
-						jitter := time.Duration(r.Int64())
-						sleepTime = backoff + (jitter - backoff/10)
+					} else {
+						sleepTime = bo.Next()
 					}
 
 					select {
 					case <-req.Context().Done():
 						return nil, req.Context().Err()
 					case <-time.After(sleepTime):
-						backoff *= 2
 						continue
 					}
 				}
@@ -244,150 +233,77 @@ func RecoveryMiddleware(onPanic func(any)) Middleware {
 	}
 }
 
-// CircuitState tracks the health phase of a host in a
-// [CircuitBreaker].
-type CircuitState int
-
-const (
-	// StateClosed indicates a healthy state allowing all requests to pass.
-	StateClosed CircuitState = iota
-	// StateOpen indicates a failing state where requests are blocked instantly.
-	StateOpen
-	// StateHalfOpen indicates a testing state permitting trial requests to verify recovery.
-	StateHalfOpen
-)
-
 // CircuitBreakerConfig tunes the thresholds for [CircuitBreaker].
+// It wraps [breaker.Config] with a per-host map.
 type CircuitBreakerConfig struct {
-	// FailureThreshold is the consecutive failure limit that triggers an open state.
-	FailureThreshold uint32
-	// SuccessThreshold is the trial success count required to close a half-open breaker.
-	SuccessThreshold uint32
+	// FailureThreshold is the ratio of failures (0.0 to 1.0) that triggers the open state.
+	FailureThreshold float64
 	// Cooldown is the duration the breaker remains open before transitioning to half-open.
 	Cooldown time.Duration
+	// MinRequests is the minimum number of requests in a Window before threshold check is active.
+	MinRequests int
+	// Window is the sliding time duration over which failures are tracked.
+	Window time.Duration
 }
 
-type circuit struct {
-	mu           sync.RWMutex
-	state        CircuitState
-	failCount    uint32
-	successCount uint32
-	lastStateChg time.Time
-}
-
-// CircuitBreaker tracks per-host connection health. After
-// FailureThreshold consecutive failures the circuit opens and
-// rejects requests for Cooldown. It then enters half-open and
-// allows trial requests; SuccessThreshold successes close it.
+// CircuitBreaker tracks per-host connection health using a sliding window.
+// After the failure ratio within [CircuitBreakerConfig.Window] exceeds
+// [CircuitBreakerConfig.FailureThreshold], the circuit opens and rejects requests
+// for [CircuitBreakerConfig.Cooldown]. It then enters half-open and allows a
+// single trial request; success closes it.
 type CircuitBreaker struct {
 	cfg      CircuitBreakerConfig
-	mu       sync.RWMutex
-	circuits map[string]*circuit
+	km       keylock.KeyMutex[string]
+	breakers map[string]*breaker.CircuitBreaker[any]
+	mu       sync.Mutex
 }
 
 // NewCircuitBreaker creates a [CircuitBreaker] with cfg. Zero
-// fields default to 5 failures, 2 successes, and 10s cooldown.
+// fields default to 50% failure threshold, 10s window, 5 min requests,
+// and 5s cooldown.
 func NewCircuitBreaker(cfg CircuitBreakerConfig) *CircuitBreaker {
-	if cfg.FailureThreshold == 0 {
-		cfg.FailureThreshold = 5
+	if cfg.FailureThreshold <= 0 || cfg.FailureThreshold > 1.0 {
+		cfg.FailureThreshold = 0.5
 	}
 
-	if cfg.SuccessThreshold == 0 {
-		cfg.SuccessThreshold = 2
-	}
-
-	if cfg.Cooldown == 0 {
-		cfg.Cooldown = 10 * time.Second
-	}
+	cfg.Cooldown = generic.Coalesce(cfg.Cooldown, 5*time.Second)
+	cfg.MinRequests = generic.Coalesce(cfg.MinRequests, 5)
+	cfg.Window = generic.Coalesce(cfg.Window, 10*time.Second)
 
 	return &CircuitBreaker{
 		cfg:      cfg,
-		circuits: make(map[string]*circuit),
+		breakers: make(map[string]*breaker.CircuitBreaker[any]),
 	}
 }
 
-func (cb *CircuitBreaker) getCircuit(host string) *circuit {
-	cb.mu.RLock()
-	c, ok := cb.circuits[host]
-	cb.mu.RUnlock()
+func (cb *CircuitBreaker) getBreaker(host string) *breaker.CircuitBreaker[any] {
+	cb.mu.Lock()
+	b, ok := cb.breakers[host]
+	cb.mu.Unlock()
 
 	if ok {
-		return c
+		return b
 	}
+
+	cb.km.Lock(host)
+	defer cb.km.Unlock(host)
 
 	cb.mu.Lock()
 
-	c, ok = cb.circuits[host]
+	b, ok = cb.breakers[host]
 	if !ok {
-		c = &circuit{
-			state:        StateClosed,
-			lastStateChg: time.Now(),
-		}
-		cb.circuits[host] = c
+		b = breaker.New[any](breaker.Config{
+			FailureThreshold: cb.cfg.FailureThreshold,
+			Cooldown:         cb.cfg.Cooldown,
+			MinRequests:      cb.cfg.MinRequests,
+			Window:           cb.cfg.Window,
+		})
+		cb.breakers[host] = b
 	}
 
 	cb.mu.Unlock()
 
-	return c
-}
-
-func (c *circuit) allowRequestState(cooldown time.Duration) bool {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-
-	if c.state == StateClosed {
-		return true
-	}
-
-	if c.state == StateOpen {
-		if time.Since(c.lastStateChg) >= cooldown {
-			c.state = StateHalfOpen
-			c.successCount = 0
-			c.lastStateChg = time.Now()
-
-			return true
-		}
-
-		return false
-	}
-
-	return true
-}
-
-func (c *circuit) recordSuccess(successThreshold uint32) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-
-	switch c.state {
-	case StateHalfOpen:
-		c.successCount++
-		if c.successCount >= successThreshold {
-			c.state = StateClosed
-			c.failCount = 0
-			c.lastStateChg = time.Now()
-		}
-
-	case StateClosed:
-		c.failCount = 0
-	}
-}
-
-func (c *circuit) recordFailure(failureThreshold uint32) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-
-	switch c.state {
-	case StateClosed:
-		c.failCount++
-		if c.failCount >= failureThreshold {
-			c.state = StateOpen
-			c.lastStateChg = time.Now()
-		}
-
-	case StateHalfOpen:
-		c.state = StateOpen
-		c.lastStateChg = time.Now()
-	}
+	return b
 }
 
 // DefaultCircuitBreakerCondition returns true for network errors and
@@ -409,6 +325,10 @@ func DefaultCircuitBreakerCondition(resp *http.Response, err error) bool {
 // request fails immediately with an error. isFailure determines
 // which responses count as failures; nil uses
 // [DefaultCircuitBreakerCondition].
+//
+// The circuit breaker uses a sliding window: failures are tracked
+// over [CircuitBreakerConfig.Window] and compared against
+// [CircuitBreakerConfig.FailureThreshold] ratio.
 func CircuitBreakerMiddleware(cb *CircuitBreaker, isFailure func(*http.Response, error) bool) Middleware {
 	if isFailure == nil {
 		isFailure = DefaultCircuitBreakerCondition
@@ -417,21 +337,44 @@ func CircuitBreakerMiddleware(cb *CircuitBreaker, isFailure func(*http.Response,
 	return func(next HTTPDoer) HTTPDoer {
 		return DoerFunc(func(req *http.Request) (*http.Response, error) {
 			host := req.URL.Host
-			c := cb.getCircuit(host)
+			b := cb.getBreaker(host)
 
-			if !c.allowRequestState(cb.cfg.Cooldown) {
+			// Execute through the breaker to check state (open/half-open/closed).
+			// We always return the response to the caller, but signal the breaker
+			// about success/failure via the error channel.
+			var resultResp *http.Response
+
+			_, breakerErr := b.Do(req.Context(), func(ctx context.Context) (any, error) {
+				resp, err := next.Do(req.WithContext(ctx))
+				if err != nil {
+					return nil, err
+				}
+
+				resultResp = resp
+
+				body, _ := io.ReadAll(resp.Body)
+				_ = resp.Body.Close()
+
+				if isFailure(resp, nil) {
+					return nil, fmt.Errorf("aoni: circuit breaker recorded failure (status %d)", resp.StatusCode)
+				}
+
+				resp.Body = io.NopCloser(bytes.NewReader(body))
+
+				return nil, nil
+			})
+
+			if errors.Is(breakerErr, breaker.ErrCircuitOpen) {
 				return nil, fmt.Errorf("aoni: circuit breaker open for host %s", host)
 			}
 
-			resp, err := next.Do(req)
-
-			if isFailure(resp, err) {
-				c.recordFailure(cb.cfg.FailureThreshold)
-			} else {
-				c.recordSuccess(cb.cfg.SuccessThreshold)
+			// If the breaker recorded a failure (not circuit-open), return
+			// the response so the caller can inspect the status code.
+			if resultResp != nil {
+				return resultResp, nil
 			}
 
-			return resp, err
+			return nil, breakerErr
 		})
 	}
 }
@@ -591,124 +534,10 @@ func ChaosMiddleware(cfg ChaosConfig) Middleware {
 	}
 }
 
-// AdaptiveLimiter dynamically caps concurrency based on observed
-// RTT using a Vegas-style algorithm. Call [AdaptiveLimiter.Acquire]
-// before each request and [AdaptiveLimiter.Release] after it.
-type AdaptiveLimiter struct {
-	mu          sync.Mutex
-	limit       float64
-	minLimit    float64
-	maxLimit    float64
-	alpha, beta float64
-	active      int
-	waitChs     []chan struct{}
-	minRTT      time.Duration
-	smoothedRTT time.Duration
-	lastReset   time.Time
-}
-
-// NewAdaptiveLimiter creates an [AdaptiveLimiter] starting at
-// initialLimit concurrent requests.
-func NewAdaptiveLimiter(initialLimit float64) *AdaptiveLimiter {
-	return &AdaptiveLimiter{
-		limit:     initialLimit,
-		minLimit:  1.0,
-		maxLimit:  1000.0,
-		alpha:     2.0,
-		beta:      5.0,
-		lastReset: time.Now(),
-	}
-}
-
-// Acquire blocks until a slot is available or ctx expires. Returns
-// ctx.Err() when the context is cancelled or its deadline exceeded.
-func (l *AdaptiveLimiter) Acquire(ctx context.Context) error {
-	l.mu.Lock()
-	if l.active < int(l.limit) {
-		l.active++
-		l.mu.Unlock()
-		return nil
-	}
-
-	ch := make(chan struct{})
-	l.waitChs = append(l.waitChs, ch)
-	l.mu.Unlock()
-
-	select {
-	case <-ctx.Done():
-		l.mu.Lock()
-		for i, w := range l.waitChs {
-			if w == ch {
-				l.waitChs = append(l.waitChs[:i], l.waitChs[i+1:]...)
-				break
-			}
-		}
-
-		l.mu.Unlock()
-
-		return ctx.Err()
-
-	case <-ch:
-		return nil
-	}
-}
-
-// Release signals that a request has completed. rtt is the observed
-// round-trip time used to adjust the concurrency limit via the
-// Vegas alpha/beta thresholds.
-func (l *AdaptiveLimiter) Release(rtt time.Duration) {
-	l.mu.Lock()
-	defer l.mu.Unlock()
-
-	l.active--
-
-	if time.Since(l.lastReset) > 30*time.Second {
-		l.minRTT = 0
-		l.lastReset = time.Now()
-	}
-
-	if l.minRTT == 0 || rtt < l.minRTT {
-		l.minRTT = rtt
-	}
-
-	if l.smoothedRTT == 0 {
-		l.smoothedRTT = rtt
-	} else {
-		l.smoothedRTT = time.Duration(0.9*float64(l.smoothedRTT) + 0.1*float64(rtt))
-	}
-
-	queue := l.limit * (1.0 - float64(l.minRTT)/float64(l.smoothedRTT))
-
-	if queue > l.beta {
-		l.limit = max(l.minLimit, l.limit-1.0)
-	} else if queue < l.alpha {
-		l.limit = min(l.maxLimit, l.limit+1.0)
-	}
-
-	slots := int(l.limit) - l.active
-	for slots > 0 && len(l.waitChs) > 0 {
-		ch := l.waitChs[0]
-		l.waitChs = l.waitChs[1:]
-
-		close(ch)
-
-		l.active++
-		slots--
-	}
-}
-
-// Limit returns the current concurrency cap computed by the Vegas
-// algorithm.
-func (l *AdaptiveLimiter) Limit() float64 {
-	l.mu.Lock()
-	defer l.mu.Unlock()
-	return l.limit
-}
-
 // AdaptiveLimitMiddleware returns a [Middleware] that gates
 // requests through limiter. Each request acquires a slot before
 // execution and releases it afterward with the observed RTT.
-func AdaptiveLimitMiddleware(limiter *AdaptiveLimiter) Middleware {
+func AdaptiveLimitMiddleware(limiter *limiter.AdaptiveLimiter) Middleware {
 	return func(next HTTPDoer) HTTPDoer {
 		return DoerFunc(func(req *http.Request) (*http.Response, error) {
 			if err := limiter.Acquire(req.Context()); err != nil {

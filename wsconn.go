@@ -16,6 +16,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/gorilla/websocket"
+	"github.com/lemon4ksan/miyako/generic"
 	"golang.org/x/net/http2"
 	"golang.org/x/net/http2/hpack"
 )
@@ -88,10 +89,7 @@ func (c *wsGorillaConn) Read(b []byte) (int, error) {
 }
 
 func (c *wsGorillaConn) Write(b []byte) (int, error) {
-	msgType := websocket.BinaryMessage
-	if utf8.Valid(b) {
-		msgType = websocket.TextMessage
-	}
+	msgType := generic.Ternary(utf8.Valid(b), websocket.TextMessage, websocket.BinaryMessage)
 
 	if err := c.base.WriteMessage(msgType, b); err != nil {
 		_ = c.close()
@@ -204,10 +202,7 @@ func (c *wsRawConn) Write(b []byte) (int, error) {
 	<-c.writeMu
 	defer func() { c.writeMu <- struct{}{} }()
 
-	opcode := byte(wsFrameBinary)
-	if utf8.Valid(b) {
-		opcode = byte(wsFrameText)
-	}
+	opcode := generic.Ternary(utf8.Valid(b), byte(wsFrameText), byte(wsFrameBinary))
 
 	if err := c.writeFrame(opcode, b); err != nil {
 		_ = c.close()

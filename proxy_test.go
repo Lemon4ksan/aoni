@@ -7,7 +7,6 @@ package aoni
 import (
 	"context"
 	"errors"
-	"io"
 	"net/http"
 	"sync"
 	"testing"
@@ -45,7 +44,7 @@ func (m *mockDoer) Do(req *http.Request) (*http.Response, error) {
 		statusCode = http.StatusOK
 	}
 
-	return &http.Response{StatusCode: statusCode, Body: io.NopCloser(nil)}, err
+	return &http.Response{StatusCode: statusCode, Body: http.NoBody}, err
 }
 
 func (m *mockDoer) SetStatusCode(code int) {
