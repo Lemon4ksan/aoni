@@ -123,6 +123,9 @@ func GetJSON[Resp any](
 // PostForm marshals the payload, performs a POST request with URL-encoded parameters,
 // and decodes the resulting JSON response body into Resp.
 //
+// If the payload implements [io.Reader], it is used directly as the request body.
+// Otherwise, the payload is marshaled to URL-encoded form values and wrapped in a [strings.Reader].
+//
 // It validates the payload structure beforehand using [Validate].
 // Returns a [ValidationError] if validation fails.
 func PostForm[Resp any](
@@ -132,18 +135,26 @@ func PostForm[Resp any](
 	payload any,
 	mods ...RequestModifier,
 ) (*Resp, error) {
-	if err := Validate(payload); err != nil {
-		return nil, err
-	}
+	var body io.Reader
 
-	formValues, err := StructToValues(payload)
-	if err != nil {
-		return nil, err
+	if r, ok := payload.(io.Reader); ok {
+		body = r
+	} else {
+		if err := Validate(payload); err != nil {
+			return nil, err
+		}
+
+		formValues, err := StructToValues(payload)
+		if err != nil {
+			return nil, err
+		}
+
+		body = strings.NewReader(formValues.Encode())
 	}
 
 	mods = append([]RequestModifier{
 		WithContentType("application/x-www-form-urlencoded"),
-		WithBody(strings.NewReader(formValues.Encode())),
+		WithBody(body),
 	}, mods...)
 
 	resp, err := c.Request(ctx, http.MethodPost, path, mods...)
@@ -153,7 +164,6 @@ func PostForm[Resp any](
 
 	if reflect.TypeFor[Resp]() == reflect.TypeFor[NoResponse]() {
 		closeResponse(resp)
-
 		return nil, err
 	}
 
@@ -168,6 +178,9 @@ func PostForm[Resp any](
 // PostJSON marshals the payload to JSON, executes a POST request, and decodes the response body.
 // It automatically configures the request headers with Content-Type and Accept set to "application/json".
 //
+// If the payload implements [io.Reader], it is used directly as the request body.
+// Otherwise, the payload is marshaled to URL-encoded form values and wrapped in a [strings.Reader].
+//
 // It validates the payload structure beforehand using [Validate].
 // Returns a [ValidationError] if validation fails.
 func PostJSON[Resp any](
@@ -177,19 +190,15 @@ func PostJSON[Resp any](
 	payload any,
 	mods ...RequestModifier,
 ) (*Resp, error) {
-	if err := Validate(payload); err != nil {
-		return nil, err
-	}
-
-	bodyBytes, err := json.Marshal(payload)
+	body, err := validateAndMarshal(payload)
 	if err != nil {
-		return nil, fmt.Errorf("aoni: failed to marshal payload: %w", err)
+		return nil, err
 	}
 
 	mods = append([]RequestModifier{
 		WithContentType("application/json"),
 		WithAccept("application/json"),
-		WithBody(bytes.NewReader(bodyBytes)),
+		WithBody(body),
 	}, mods...)
 
 	resp, err := c.Request(ctx, http.MethodPost, path, mods...)
@@ -214,6 +223,9 @@ func PostJSON[Resp any](
 // PutJSON marshals the payload to JSON, executes a PUT request, and decodes the response body.
 // It automatically configures the request headers with Content-Type and Accept set to "application/json".
 //
+// If the payload implements [io.Reader], it is used directly as the request body.
+// Otherwise, the payload is marshaled to URL-encoded form values and wrapped in a [strings.Reader].
+//
 // It validates the payload structure beforehand using [Validate].
 // Returns a [ValidationError] if validation fails.
 func PutJSON[Resp any](
@@ -223,19 +235,15 @@ func PutJSON[Resp any](
 	payload any,
 	mods ...RequestModifier,
 ) (*Resp, error) {
-	if err := Validate(payload); err != nil {
-		return nil, err
-	}
-
-	bodyBytes, err := json.Marshal(payload)
+	body, err := validateAndMarshal(payload)
 	if err != nil {
-		return nil, fmt.Errorf("aoni: failed to marshal payload: %w", err)
+		return nil, err
 	}
 
 	mods = append([]RequestModifier{
 		WithContentType("application/json"),
 		WithAccept("application/json"),
-		WithBody(bytes.NewReader(bodyBytes)),
+		WithBody(body),
 	}, mods...)
 
 	resp, err := c.Request(ctx, http.MethodPut, path, mods...)
@@ -260,6 +268,9 @@ func PutJSON[Resp any](
 // PatchJSON marshals the payload to JSON, executes a PATCH request, and decodes the response body.
 // It automatically configures the request headers with Content-Type and Accept set to "application/json".
 //
+// If the payload implements [io.Reader], it is used directly as the request body.
+// Otherwise, the payload is marshaled to URL-encoded form values and wrapped in a [strings.Reader].
+//
 // It validates the payload structure beforehand using [Validate].
 // Returns a [ValidationError] if validation fails.
 func PatchJSON[Resp any](
@@ -269,19 +280,15 @@ func PatchJSON[Resp any](
 	payload any,
 	mods ...RequestModifier,
 ) (*Resp, error) {
-	if err := Validate(payload); err != nil {
-		return nil, err
-	}
-
-	bodyBytes, err := json.Marshal(payload)
+	body, err := validateAndMarshal(payload)
 	if err != nil {
-		return nil, fmt.Errorf("aoni: failed to marshal payload: %w", err)
+		return nil, err
 	}
 
 	mods = append([]RequestModifier{
 		WithContentType("application/json"),
 		WithAccept("application/json"),
-		WithBody(bytes.NewReader(bodyBytes)),
+		WithBody(body),
 	}, mods...)
 
 	resp, err := c.Request(ctx, http.MethodPatch, path, mods...)
@@ -306,6 +313,9 @@ func PatchJSON[Resp any](
 // DeleteJSON marshals the payload to JSON, executes a DELETE request, and decodes the response body.
 // It automatically configures the request headers with Content-Type and Accept set to "application/json".
 //
+// If the payload implements [io.Reader], it is used directly as the request body.
+// Otherwise, the payload is marshaled to URL-encoded form values and wrapped in a [strings.Reader].
+//
 // It validates the payload structure beforehand using [Validate].
 // Returns a [ValidationError] if validation fails.
 func DeleteJSON[Resp any](
@@ -315,28 +325,15 @@ func DeleteJSON[Resp any](
 	payload any,
 	mods ...RequestModifier,
 ) (*Resp, error) {
-	if err := Validate(payload); err != nil {
-		return nil, err
-	}
-
-	var (
-		bodyBytes []byte
-		err       error
-	)
-
-	bodyBytes, err = json.Marshal(payload)
+	body, err := validateAndMarshal(payload)
 	if err != nil {
-		return nil, fmt.Errorf("aoni: failed to marshal payload: %w", err)
-	}
-
-	if string(bodyBytes) == "null" {
-		bodyBytes = nil
+		return nil, err
 	}
 
 	mods = append([]RequestModifier{
 		WithContentType("application/json"),
 		WithAccept("application/json"),
-		WithBody(bytes.NewReader(bodyBytes)),
+		WithBody(body),
 	}, mods...)
 
 	resp, err := c.Request(ctx, http.MethodDelete, path, mods...)
@@ -356,6 +353,27 @@ func DeleteJSON[Resp any](
 	}
 
 	return result, nil
+}
+
+func validateAndMarshal(payload any) (io.Reader, error) {
+	if r, ok := payload.(io.Reader); ok {
+		return r, nil
+	}
+
+	if err := Validate(payload); err != nil {
+		return nil, err
+	}
+
+	bodyBytes, err := json.Marshal(payload)
+	if err != nil {
+		return nil, fmt.Errorf("aoni: failed to marshal payload: %w", err)
+	}
+
+	if string(bodyBytes) == "null" {
+		bodyBytes = nil
+	}
+
+	return bytes.NewReader(bodyBytes), nil
 }
 
 func handleResponse(resp *http.Response, target any, requester Requester) error {
