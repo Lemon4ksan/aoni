@@ -74,14 +74,10 @@ func (c *headerOrderingConn) Write(b []byte) (n int, err error) {
 }
 
 func reorderHTTP1Headers(raw []byte, order []string) ([]byte, bool) {
-	headerEnd := bytes.Index(raw, []byte("\r\n\r\n"))
-	if headerEnd == -1 {
+	headerPart, bodyPart, ok := bytes.Cut(raw, []byte("\r\n\r\n"))
+	if !ok {
 		return nil, false
 	}
-
-	headerPart := raw[:headerEnd]
-	// Skip the \r\n\r\n separator; we'll re-add it after all headers.
-	bodyPart := raw[headerEnd+4:]
 
 	lines := bytes.Split(headerPart, []byte("\r\n"))
 	if len(lines) < 2 {
