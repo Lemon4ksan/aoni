@@ -312,6 +312,11 @@ func (m *multiReadBody) Read(p []byte) (int, error) {
 	return m.reader.Read(p)
 }
 
+// Reset resets the read cursor so the body can be read again.
+func (m *multiReadBody) Reset() {
+	_ = m.Close()
+}
+
 // Close resets the read cursor so the body can be read again (multiRead semantics).
 // It does NOT delete temporary files; call ReallyClose for that.
 func (m *multiReadBody) Close() error {
