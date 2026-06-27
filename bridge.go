@@ -6,6 +6,8 @@ package aoni
 
 import (
 	"context"
+	"errors"
+	"maps"
 	"net/http"
 	"net/url"
 )
@@ -16,8 +18,8 @@ type modsCtxKey struct{}
 // NewStdClient returns a standard [http.Client] whose transport routes all
 // requests through the configured aoni [Client] pipeline.
 //
-// The returned client has Jar set to nil to avoid double cookie handling -
-// the aoni [ProxyIsolatedCookieJar] manages cookies internally.
+// The returned client has Jar set to nil to avoid double cookie handling.
+// The aoni [ProxyIsolatedCookieJar] manages cookies internally.
 //
 // Usage:
 //
@@ -30,9 +32,17 @@ type modsCtxKey struct{}
 //	restyClient.SetHTTPClient(stdClient)
 func NewStdClient(c *Client) *http.Client {
 	return &http.Client{
-		Transport: &aoniTransport{client: c},
+		Transport: NewTransport(c),
 		Jar:       nil,
 	}
+}
+
+// NewTransport returns a new [http.RoundTripper] (specifically [*Transport])
+// configured to route all requests through the provided aoni [Client].
+// This allows developers to integrate aoni's advanced transport features into
+// existing [http.Client] instances simply by swapping the Transport field.
+func NewTransport(c *Client) *Transport {
+	return &Transport{client: c}
 }
 
 // WithContextModifier returns a new context carrying the given RequestModifiers.
@@ -54,6 +64,21 @@ func WithContextModifier(ctx context.Context, mods ...RequestModifier) context.C
 	return context.WithValue(ctx, modsCtxKey{}, mods)
 }
 
+// AppendContextModifier appends new modifiers to an existing context carrying modifiers,
+// or creates a new one if none are present.
+func AppendContextModifier(ctx context.Context, mods ...RequestModifier) context.Context {
+	if len(mods) == 0 {
+		return ctx
+	}
+
+	existing := ContextModifiers(ctx)
+	combined := make([]RequestModifier, 0, len(existing)+len(mods))
+	combined = append(combined, existing...)
+	combined = append(combined, mods...)
+
+	return context.WithValue(ctx, modsCtxKey{}, combined)
+}
+
 // ContextModifiers extracts the RequestModifiers previously stored via
 // [WithContextModifier]. Returns nil if none are present.
 func ContextModifiers(ctx context.Context) []RequestModifier {
@@ -62,16 +87,27 @@ func ContextModifiers(ctx context.Context) []RequestModifier {
 	return mods
 }
 
-// aoniTransport implements [http.RoundTripper] by routing requests through
+// Transport implements [http.RoundTripper] by routing requests through
 // a configured aoni [Client] pipeline.
-type aoniTransport struct {
+type Transport struct {
 	client *Client
 }
 
 // RoundTrip extracts modifiers from the request context, applies them to the
 // request, and delegates to the full aoni pipeline (SSRF guard, Happy Eyeballs,
 // uTLS/JA4, middleware, proxy rotation, decompression, etc.).
-func (t *aoniTransport) RoundTrip(origReq *http.Request) (*http.Response, error) {
+//
+// In accordance with standard [http.RoundTripper] requirements, it returns errors
+// wrapped as [*url.Error].
+func (t *Transport) RoundTrip(origReq *http.Request) (*http.Response, error) {
+	if origReq.URL == nil {
+		return nil, &url.Error{
+			Op:  origReq.Method,
+			URL: "",
+			Err: errors.New("aoni bridge: request URL is nil"),
+		}
+	}
+
 	ctxMods := ContextModifiers(origReq.Context())
 
 	// syncModifier copies request metadata from the original request.
@@ -90,15 +126,15 @@ func (t *aoniTransport) RoundTrip(origReq *http.Request) (*http.Response, error)
 
 		// Merge headers: origReq headers overwrite aoni defaults for the
 		// same key, but aoni-only headers are preserved.
-		for key, values := range origReq.Header {
-			req.Header[key] = values
-		}
+		maps.Copy(req.Header, origReq.Header)
 	}
 
 	cloned := t.client.Clone()
 
 	// Preserve the original request's full URL path for relative resolution.
-	if origReq.URL != nil {
+	// Only overwrite baseURL if the request URL has a valid Host, keeping
+	// the client's configured baseURL for relative or schemeless paths.
+	if origReq.URL.Host != "" {
 		cloned.baseURL = &url.URL{
 			Scheme: origReq.URL.Scheme,
 			Host:   origReq.URL.Host,
@@ -109,13 +145,22 @@ func (t *aoniTransport) RoundTrip(origReq *http.Request) (*http.Response, error)
 	allMods = append(allMods, syncModifier)
 	allMods = append(allMods, ctxMods...)
 
-	return cloned.Request(
+	resp, err := cloned.Request(
 		origReq.Context(),
 		origReq.Method,
 		origReq.URL.RequestURI(),
 		allMods...,
 	)
+	if err != nil {
+		return nil, &url.Error{
+			Op:  origReq.Method,
+			URL: origReq.URL.String(),
+			Err: err,
+		}
+	}
+
+	return resp, nil
 }
 
-// Ensure aoniTransport implements http.RoundTripper.
-var _ http.RoundTripper = (*aoniTransport)(nil)
+// Ensure AoniTransport implements http.RoundTripper.
+var _ http.RoundTripper = (*Transport)(nil)
