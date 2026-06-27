@@ -7,13 +7,19 @@ package aoni
 import (
 	"context"
 	"errors"
+	"fmt"
 	"maps"
 	"net/http"
 	"net/url"
+	"strconv"
+	"strings"
+	"time"
 )
 
-// modsCtxKey is the context key for carrying RequestModifiers through context.
-type modsCtxKey struct{}
+type (
+	modsCtxKey      struct{}
+	traceInfoCtxKey struct{}
+)
 
 // NewStdClient returns a standard [http.Client] whose transport routes all
 // requests through the configured aoni [Client] pipeline.
@@ -87,10 +93,94 @@ func ContextModifiers(ctx context.Context) []RequestModifier {
 	return mods
 }
 
+// TraceContext returns a [RequestModifier] that attaches a new [TraceInfo]
+// to the request context. This allows developers to retrieve network
+// timing and JA4/JA4H fingerprints using [ResponseTrace] after the request finishes.
+func TraceContext() RequestModifier {
+	return func(req *http.Request) {
+		info := &TraceInfo{}
+		ctx := context.WithValue(req.Context(), traceInfoCtxKey{}, info)
+		*req = *req.WithContext(ctx)
+
+		Trace(info)(req)
+		TraceJA4(info)(req)
+	}
+}
+
+// ResponseTrace extracts the [TraceInfo] previously captured via [TraceContext].
+// Returns nil if no trace was registered on the request.
+func ResponseTrace(resp *http.Response) *TraceInfo {
+	if resp == nil || resp.Request == nil {
+		return nil
+	}
+
+	info, _ := resp.Request.Context().Value(traceInfoCtxKey{}).(*TraceInfo)
+
+	return info
+}
+
+// BridgeError represents an error occurring during standard-client bridging.
+// It implements the standard error interface and can be unwrapped to retrieve
+// the underlying client or transport errors.
+type BridgeError struct {
+	Op       string
+	URL      string
+	Err      error
+	Metadata map[string]any
+}
+
+// Error implements the standard error interface.
+func (e *BridgeError) Error() string {
+	return fmt.Sprintf("aoni bridge: %s %s: %v", e.Op, e.URL, e.Err)
+}
+
+// Unwrap returns the underlying wrapped error.
+func (e *BridgeError) Unwrap() error {
+	return e.Err
+}
+
 // Transport implements [http.RoundTripper] by routing requests through
 // a configured aoni [Client] pipeline.
+//
+// # Custom X-Aoni Headers
+//
+// Transport supports declarative configuration of outbound requests via
+// specialized request headers. This provides a clean way to integrate
+// advanced transport features (like TLS fingerprints, proxy routing, or security
+// policies) into standard HTTP clients or third-party SDKs (such as pocketbase-go,
+// Supabase, or Resty) that allow header customization but lack direct access to
+// context modifiers.
+//
+// These internal headers are parsed dynamically during RoundTrip, applied
+// to the cloned request's Client configuration, and fully stripped from the outgoing
+// request. The remote server will never see these configuration headers.
+//
+// Supported headers:
+//
+//   - X-Aoni-Proxy: Sets the proxy URL for the current request.
+//     Format: A standard URL string (e.g. "http://user:pass@127.0.0.1:8080" or "socks5://127.0.0.1:1080").
+//
+//   - X-Aoni-TLS-Fingerprint: Selects a uTLS browser client profile to bypass passive TLS fingerprinting.
+//     Values: "chrome", "firefox", "safari", "none".
+//
+//   - X-Aoni-Timeout: Sets a request-specific timeout.
+//     Format: A duration string parsable by time.ParseDuration (e.g. "10s", "500ms").
+//
+//   - X-Aoni-SSRF-Guard: Protects the application by blocking connection attempts to private and loopback IPs.
+//     Values: "true", "1".
+//
+//   - X-Aoni-Max-Response-Size: Protects against decompression bombs by setting a maximum response body size limit.
+//     Format: Integer size in bytes (e.g. "1048576" for 1 MB).
 type Transport struct {
 	client *Client
+
+	// BeforeRoundTrip is an optional lifecycle hook executed immediately before
+	// the request is dispatched through the aoni engine.
+	// It receives the cloned, pre-configured [Client] and the original request,
+	// and must return the final [Client] to be used. This allows flexible,
+	// dynamic transport-level adjustments (such as adding headers, configuring
+	// authentication, or overriding client settings dynamically).
+	BeforeRoundTrip func(cloned *Client, origReq *http.Request) *Client
 }
 
 // RoundTrip extracts modifiers from the request context, applies them to the
@@ -127,9 +217,63 @@ func (t *Transport) RoundTrip(origReq *http.Request) (*http.Response, error) {
 		// Merge headers: origReq headers overwrite aoni defaults for the
 		// same key, but aoni-only headers are preserved.
 		maps.Copy(req.Header, origReq.Header)
+
+		// Strip any X-Aoni- headers from the outgoing request to avoid leak
+		for k := range req.Header {
+			if strings.HasPrefix(strings.ToLower(k), "x-aoni-") {
+				req.Header.Del(k)
+			}
+		}
 	}
 
 	cloned := t.client.Clone()
+
+	// Parse any special custom headers to configure the client options on the fly.
+	for k, vs := range origReq.Header {
+		if len(vs) == 0 {
+			continue
+		}
+
+		val := vs[0]
+		switch strings.ToLower(k) {
+		case "x-aoni-proxy":
+			if u, err := url.Parse(val); err == nil {
+				cloned = cloned.WithProxy(u)
+			}
+		case "x-aoni-tls-fingerprint":
+			var browser BrowserID
+			switch strings.ToLower(val) {
+			case "chrome":
+				browser = BrowserChrome
+			case "firefox":
+				browser = BrowserFirefox
+			case "safari":
+				browser = BrowserSafari
+			case "none":
+				browser = BrowserNone
+			}
+
+			cloned = cloned.WithTLSFingerprint(browser)
+
+		case "x-aoni-timeout":
+			if d, err := time.ParseDuration(val); err == nil {
+				cloned = cloned.WithTimeout(d)
+			}
+		case "x-aoni-ssrf-guard":
+			if val == "true" || val == "1" {
+				cloned = cloned.WithSSRFGuard()
+			}
+		case "x-aoni-max-response-size":
+			if size, err := strconv.ParseInt(val, 10, 64); err == nil {
+				cloned = cloned.WithMaxResponseSize(size)
+			}
+		}
+	}
+
+	// Apply the lifecycle hook if registered
+	if t.BeforeRoundTrip != nil {
+		cloned = t.BeforeRoundTrip(cloned, origReq)
+	}
 
 	// Preserve the original request's full URL path for relative resolution.
 	// Only overwrite baseURL if the request URL has a valid Host, keeping
@@ -152,10 +296,21 @@ func (t *Transport) RoundTrip(origReq *http.Request) (*http.Response, error) {
 		allMods...,
 	)
 	if err != nil {
+		bErr := &BridgeError{
+			Op:       origReq.Method,
+			URL:      origReq.URL.String(),
+			Err:      err,
+			Metadata: make(map[string]any),
+		}
+		if origReq.URL != nil {
+			bErr.Metadata["host"] = origReq.URL.Host
+			bErr.Metadata["scheme"] = origReq.URL.Scheme
+		}
+
 		return nil, &url.Error{
 			Op:  origReq.Method,
 			URL: origReq.URL.String(),
-			Err: err,
+			Err: bErr,
 		}
 	}
 

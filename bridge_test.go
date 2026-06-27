@@ -19,9 +19,10 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/lemon4ksan/aoni/ja4"
 )
 
-// Helper function to spin up test servers and configure standard clients.
 func setupBridgeTest(t *testing.T, handler http.HandlerFunc) (*httptest.Server, *http.Client) {
 	t.Helper()
 
@@ -34,7 +35,6 @@ func setupBridgeTest(t *testing.T, handler http.HandlerFunc) (*httptest.Server, 
 	return server, stdClient
 }
 
-// Helper function allowing custom initial client configuration.
 func setupBridgeTestWithClient(t *testing.T, c *Client, handler http.HandlerFunc) (*httptest.Server, *http.Client) {
 	t.Helper()
 
@@ -251,13 +251,13 @@ func TestNewStdClient_SyncFields_PreservesProperties(t *testing.T) {
 		w.WriteHeader(http.StatusOK)
 	})
 
-	// Changing to POST with a non-empty body so standard HTTP Transport
-	// does not discard or reset the chunked TransferEncoding field.
+	// Changed method to POST and supplied a non-empty body.
+	// This ensures standard Go transport preserves chunked Transfer-Encoding.
 	req, err := http.NewRequestWithContext(
 		t.Context(),
 		http.MethodPost,
 		server.URL,
-		strings.NewReader("chunked_test_body"),
+		strings.NewReader("chunked_test_payload"),
 	)
 	require.NoError(t, err)
 
@@ -519,8 +519,8 @@ func TestNewStdClient_AutoRestoreGetBody_Succeeds(t *testing.T) {
 		w.WriteHeader(http.StatusOK)
 	})
 
-	// Removing req.GetBody = nil manually cleared state, and asserting
-	// on the standard path so we check that client keeps GetBody intact.
+	// Removed the manual clear of req.GetBody, making sure the client
+	// runs cleanly and preserves GetBody throughout routing.
 	req, err := http.NewRequestWithContext(
 		t.Context(),
 		http.MethodPost,
@@ -702,6 +702,111 @@ func TestAoniTransport_RoundTrip_NilURL_ReturnsURLError(t *testing.T) {
 	}
 }
 
+type mockTransport func(*http.Request) (*http.Response, error)
+
+func (f mockTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	return f(req)
+}
+
+func TestAoniTransport_RoundTrip_SpecialHeaders(t *testing.T) {
+	t.Parallel()
+
+	var (
+		capturedProxy       *url.URL
+		capturedFingerprint BrowserID
+		capturedTimeout     time.Duration
+		capturedSSRF        bool
+		capturedMaxResponse int64
+		headersCleaned      bool
+	)
+
+	transport := mockTransport(func(req *http.Request) (*http.Response, error) {
+		headersCleaned = true
+		for k := range req.Header {
+			if strings.HasPrefix(strings.ToLower(k), "x-aoni-") {
+				headersCleaned = false
+			}
+		}
+
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Body:       io.NopCloser(strings.NewReader("ok")),
+			Request:    req,
+		}, nil
+	})
+
+	httpClient := &http.Client{Transport: transport}
+	c := NewClient(httpClient)
+	tr := NewTransport(c)
+
+	tr.BeforeRoundTrip = func(cloned *Client, origReq *http.Request) *Client {
+		capturedFingerprint = cloned.tlsBrowserID
+		capturedSSRF = cloned.ssrfGuard
+		capturedMaxResponse = cloned.maxResponseSize
+		capturedProxy = cloned.proxyAddr
+
+		if hClient, ok := cloned.http.(*http.Client); ok {
+			capturedTimeout = hClient.Timeout
+		}
+
+		return cloned
+	}
+
+	req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, "http://localhost", nil)
+	require.NoError(t, err)
+
+	req.Header.Set("X-Aoni-Proxy", "http://my-proxy:1080")
+	req.Header.Set("X-Aoni-TLS-Fingerprint", "firefox")
+	req.Header.Set("X-Aoni-Timeout", "12s")
+	req.Header.Set("X-Aoni-SSRF-Guard", "true")
+	req.Header.Set("X-Aoni-Max-Response-Size", "524288")
+
+	resp, err := tr.RoundTrip(req)
+	require.NoError(t, err)
+	resp.Body.Close()
+
+	assert.True(t, headersCleaned)
+	assert.Equal(t, "http://my-proxy:1080", capturedProxy.String())
+	assert.Equal(t, BrowserFirefox, capturedFingerprint)
+	assert.Equal(t, 12*time.Second, capturedTimeout)
+	assert.True(t, capturedSSRF)
+	assert.Equal(t, int64(524288), capturedMaxResponse)
+}
+
+func TestAoniTransport_RoundTrip_TraceContext(t *testing.T) {
+	t.Parallel()
+
+	mockDoer := DoerFunc(func(req *http.Request) (*http.Response, error) {
+		if store, ok := req.Context().Value(ja4ReportCtxKey{}).(*ja4ReportStore); ok {
+			store.report = &ja4.Report{JA4: "t13d1516h2_mock_fingerprint"}
+		}
+
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Body:       io.NopCloser(strings.NewReader("trace_ok")),
+			Request:    req,
+		}, nil
+	})
+
+	c := NewClient(mockDoer)
+	tr := NewTransport(c)
+
+	req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, "http://localhost", nil)
+	require.NoError(t, err)
+
+	TraceContext()(req)
+
+	resp, err := tr.RoundTrip(req)
+	require.NoError(t, err)
+
+	defer resp.Body.Close()
+
+	info := ResponseTrace(resp)
+	require.NotNil(t, info)
+	require.NotNil(t, info.JA4)
+	assert.Equal(t, "t13d1516h2_mock_fingerprint", info.JA4.JA4)
+}
+
 func TestAoniTransport_RoundTrip_RequestFailure_ReturnsURLError(t *testing.T) {
 	t.Parallel()
 
@@ -721,7 +826,11 @@ func TestAoniTransport_RoundTrip_RequestFailure_ReturnsURLError(t *testing.T) {
 	require.ErrorAs(t, err, &urlErr)
 	assert.Equal(t, http.MethodGet, urlErr.Op)
 	assert.Equal(t, "http://localhost/fail", urlErr.URL)
-	assert.ErrorIs(t, urlErr.Err, io.ErrUnexpectedEOF)
+
+	var bridgeErr *BridgeError
+	require.ErrorAs(t, urlErr.Err, &bridgeErr)
+	assert.ErrorIs(t, bridgeErr.Err, io.ErrUnexpectedEOF)
+	assert.Equal(t, "localhost", bridgeErr.Metadata["host"])
 }
 
 func FuzzContextModifiers(f *testing.F) {
