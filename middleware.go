@@ -89,6 +89,10 @@ type RetryOptions struct {
 
 	// JitterStrategy selects the noise algorithm applied to each delay.
 	JitterStrategy JitterStrategy
+
+	// OnRetry is an optional callback executed before each sleep during retry attempts.
+	// Provides the attempt count (1-based), the causing error or nil, and the planned backoff delay.
+	OnRetry func(attempt uint32, err error, delay time.Duration)
 }
 
 // RetryCondition reports whether a failed request should be retried.
@@ -149,11 +153,7 @@ func RetryOnGatewayErrors() RetryCondition {
 // exponential backoff with jitter.
 func RetryMiddleware(opts RetryOptions, condition RetryCondition) Middleware {
 	opts.MaxRetries = generic.Coalesce(opts.MaxRetries, 3)
-	opts.Backoff = generic.Coalesce(opts.Backoff, 1*time.Second)
-
-	if opts.Backoff < 0 {
-		opts.Backoff = 0
-	}
+	opts.Backoff = max(generic.Coalesce(opts.Backoff, 1*time.Second), 0)
 
 	return func(next HTTPDoer) HTTPDoer {
 		return DoerFunc(func(req *http.Request) (*http.Response, error) {
@@ -199,6 +199,10 @@ func RetryMiddleware(opts RetryOptions, condition RetryCondition) Middleware {
 						sleepTime = bo.Next()
 					}
 
+					if opts.OnRetry != nil {
+						opts.OnRetry(i+1, err, sleepTime)
+					}
+
 					select {
 					case <-req.Context().Done():
 						return nil, req.Context().Err()
@@ -220,6 +224,34 @@ func RetryMiddleware(opts RetryOptions, condition RetryCondition) Middleware {
 func ProxyRetryCondition(rotator *ProxyRotator) RetryCondition {
 	return func(resp *http.Response, err error) bool {
 		return rotator.isProxyFault(resp, err)
+	}
+}
+
+// Or combines multiple [RetryCondition] functions into a single condition
+// that returns true if ANY of the underlying conditions return true.
+func Or(conditions ...RetryCondition) RetryCondition {
+	return func(resp *http.Response, err error) bool {
+		for _, cond := range conditions {
+			if cond != nil && cond(resp, err) {
+				return true
+			}
+		}
+
+		return false
+	}
+}
+
+// And combines multiple [RetryCondition] functions into a single condition
+// that returns true if ALL of the underlying conditions return true.
+func And(conditions ...RetryCondition) RetryCondition {
+	return func(resp *http.Response, err error) bool {
+		for _, cond := range conditions {
+			if cond == nil || !cond(resp, err) {
+				return false
+			}
+		}
+
+		return true
 	}
 }
 
@@ -398,6 +430,23 @@ func WithFallback(f FallbackFunc) RequestModifier {
 	return func(req *http.Request) {
 		ctx := context.WithValue(req.Context(), fallbackCtxKey{}, f)
 		*req = *req.WithContext(ctx)
+	}
+}
+
+// FallbackString returns a [FallbackFunc] that responds with plain text and the given statusCode.
+func FallbackString(statusCode int, text string) FallbackFunc {
+	return func(req *http.Request, origErr error) (*http.Response, error) {
+		return &http.Response{
+			StatusCode:    statusCode,
+			Status:        http.StatusText(statusCode),
+			Proto:         "HTTP/1.1",
+			ProtoMajor:    1,
+			ProtoMinor:    1,
+			Header:        http.Header{"Content-Type": []string{"text/plain; charset=utf-8"}},
+			Body:          io.NopCloser(strings.NewReader(text)),
+			ContentLength: int64(len(text)),
+			Request:       req,
+		}, nil
 	}
 }
 

@@ -232,7 +232,7 @@ type Client struct {
 	proxyAddr        *url.URL
 	dynamicHedging   *DynamicHedgingConfig
 	sessionCache     *ProxyAwareSessionCache
-	packetPadding    *PacketPaddingConfig
+	packetPadding    *PaddingConfig
 	transportProxy   func(*http.Request) (*url.URL, error)
 }
 
@@ -905,8 +905,8 @@ func (c *Client) WithProxyAwareSessionCache() *Client {
 
 // WithPacketPadding returns a clone of c that constrains TCP MSS and
 // adds random padding headers to disrupt DPI length analysis. See
-// [PacketPaddingConfig] for available fields.
-func (c *Client) WithPacketPadding(cfg PacketPaddingConfig) *Client {
+// [PaddingConfig] for available fields.
+func (c *Client) WithPacketPadding(cfg PaddingConfig) *Client {
 	newClient := c.Clone()
 	newClient.packetPadding = &cfg
 	newClient.applyDialers()
@@ -1737,7 +1737,7 @@ func isBlockedIP(ip net.IP) bool {
 // header ordering) based on the request context. It is called after dialing
 // a TCP connection, before any TLS handshake.
 func wrapConn(ctx context.Context, conn net.Conn) net.Conn {
-	if cfg, ok := ctx.Value(packetPaddingCtxKey{}).(*PacketPaddingConfig); ok && cfg != nil &&
+	if cfg, ok := ctx.Value(packetPaddingCtxKey{}).(*PaddingConfig); ok && cfg != nil &&
 		cfg.MaxSegmentSize > 0 {
 		conn = wrapWithMSSLimit(conn, cfg.MaxSegmentSize)
 	}

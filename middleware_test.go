@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -59,9 +60,14 @@ func TestRetryMiddleware(t *testing.T) {
 		require.NoError(t, err)
 		t.Cleanup(func() { _ = rotator.Close() })
 
+		var callbackCalls int32
+
 		opts := RetryOptions{
 			MaxRetries: 3,
 			Backoff:    5 * time.Millisecond,
+			OnRetry: func(attempt uint32, err error, delay time.Duration) {
+				atomic.AddInt32(&callbackCalls, 1)
+			},
 		}
 
 		retryMiddleware := RetryMiddleware(opts, ProxyRetryCondition(rotator))
@@ -82,6 +88,7 @@ func TestRetryMiddleware(t *testing.T) {
 
 		assert.GreaterOrEqual(t, m1.GetCalls(), 2)
 		assert.Equal(t, 200, resp.StatusCode)
+		assert.GreaterOrEqual(t, atomic.LoadInt32(&callbackCalls), int32(1))
 	})
 
 	t.Run("max_retries_exceeded", func(t *testing.T) {
@@ -155,6 +162,25 @@ func TestRetryMiddleware(t *testing.T) {
 	})
 }
 
+func TestRetryCondition_Combinators(t *testing.T) {
+	t.Parallel()
+
+	condTrue := func(resp *http.Response, err error) bool { return true }
+	condFalse := func(resp *http.Response, err error) bool { return false }
+
+	t.Run("or_combinator", func(t *testing.T) {
+		t.Parallel()
+		assert.True(t, Or(condTrue, condFalse)(nil, nil))
+		assert.False(t, Or(condFalse, condFalse)(nil, nil))
+	})
+
+	t.Run("and_combinator", func(t *testing.T) {
+		t.Parallel()
+		assert.True(t, And(condTrue, condTrue)(nil, nil))
+		assert.False(t, And(condTrue, condFalse)(nil, nil))
+	})
+}
+
 func TestRecoveryMiddleware(t *testing.T) {
 	t.Parallel()
 
@@ -225,7 +251,7 @@ func TestCircuitBreaker(t *testing.T) {
 func TestFallbackMiddleware(t *testing.T) {
 	t.Parallel()
 
-	t.Run("fallback_on_transport_error", func(t *testing.T) {
+	t.Run("fallback_on_transport_error_json", func(t *testing.T) {
 		t.Parallel()
 
 		m := &mockDoer{id: 1, forceError: true}
@@ -247,6 +273,30 @@ func TestFallbackMiddleware(t *testing.T) {
 		require.NoError(t, err)
 
 		assert.JSONEq(t, `{"message": "fallback-data"}`, string(body))
+	})
+
+	t.Run("fallback_on_transport_error_string", func(t *testing.T) {
+		t.Parallel()
+
+		m := &mockDoer{id: 1, forceError: true}
+		fallback := FallbackString(http.StatusGatewayTimeout, "text-fallback")
+
+		client := FallbackMiddleware()(m)
+
+		req, err := http.NewRequestWithContext(t.Context(), "GET", "http://localhost", nil)
+		require.NoError(t, err)
+
+		req = req.WithContext(context.WithValue(req.Context(), fallbackCtxKey{}, fallback))
+
+		resp, err := client.Do(req)
+		require.NoError(t, err)
+		t.Cleanup(func() { _ = resp.Body.Close() })
+		assert.Equal(t, http.StatusGatewayTimeout, resp.StatusCode)
+
+		body, err := io.ReadAll(resp.Body)
+		require.NoError(t, err)
+		assert.Equal(t, "text-fallback", string(body))
+		assert.Contains(t, resp.Header.Get("Content-Type"), "text/plain")
 	})
 
 	t.Run("fallback_on_custom_condition_5xx", func(t *testing.T) {

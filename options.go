@@ -12,6 +12,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"mime/multipart"
 	"net/http"
 	"net/url"
@@ -84,9 +85,7 @@ func WithQuery(query any) RequestModifier {
 		if len(qValues) > 0 {
 			existing := req.URL.Query()
 
-			for k, vs := range qValues {
-				existing[k] = vs
-			}
+			maps.Copy(existing, qValues)
 
 			req.URL.RawQuery = existing.Encode()
 		}
