@@ -42,9 +42,25 @@ const (
 // before treating the stream as exhausted.
 const maxConsecutiveEmptyReads = 100
 
-// wsGorillaConn adapts a [github.com/gorilla/websocket.Conn] to the [net.Conn] interface.
-// Read reassembles WebSocket messages into a continuous byte stream.
-// Write sends binary WebSocket frames.
+// WebSocketConn represents an active WebSocket connection.
+// It extends the [net.Conn] interface, allowing the connection to be used with standard
+// Go abstractions, while simultaneously providing direct access to reading/writing
+// typed WebSocket messages (Text/Binary), receiving the low-level socket
+// and monitoring channel closure.
+type WebSocketConn interface {
+	net.Conn
+	// ReadMessage считывает следующее сообщение из соединения, возвращая его тип
+	// (TextMessage или BinaryMessage) и полезную нагрузку.
+	ReadMessage() (messageType int, p []byte, err error)
+	// WriteMessage отправляет сообщение определенного типа (TextMessage или BinaryMessage).
+	WriteMessage(messageType int, data []byte) error
+	// UnderlyingConn возвращает низкоуровневый объект соединения (например, *websocket.Conn или http2 stream).
+	UnderlyingConn() any
+	// CloseChan возвращает канал, закрывающийся при разрыве соединения.
+	CloseChan() <-chan struct{}
+}
+
+// wsGorillaConn adapts a [github.com/gorilla/websocket.Conn] to the [WebSocketConn] interface.
 type wsGorillaConn struct {
 	base   *websocket.Conn
 	reader io.Reader
@@ -78,7 +94,7 @@ func (c *wsGorillaConn) Read(b []byte) (int, error) {
 
 		msgType, r, err := c.base.NextReader()
 		if err != nil {
-			_ = c.close()
+			_ = c.Close()
 			return 0, err
 		}
 
@@ -93,20 +109,37 @@ func (c *wsGorillaConn) Write(b []byte) (int, error) {
 	msgType := generic.Ternary(utf8.Valid(b), websocket.TextMessage, websocket.BinaryMessage)
 
 	if err := c.base.WriteMessage(msgType, b); err != nil {
-		_ = c.close()
+		_ = c.Close()
 		return 0, err
 	}
 
 	return len(b), nil
 }
 
-func (c *wsGorillaConn) Close() error {
-	return c.close()
+// ReadMessage reads the next message from the connection, returning its type (TextMessage/BinaryMessage)
+// and the message data.
+func (c *wsGorillaConn) ReadMessage() (int, []byte, error) {
+	return c.base.ReadMessage()
 }
 
-func (c *wsGorillaConn) close() error {
-	c.once.Do(func() { close(c.closed) })
-	return c.base.Close()
+// WriteMessage writes a message to the connection with the specified type (TextMessage/BinaryMessage)
+// and data.
+func (c *wsGorillaConn) WriteMessage(messageType int, data []byte) error {
+	return c.base.WriteMessage(messageType, data)
+}
+
+// UnderlyingConn returns the raw pointer to the gorilla library's [websocket.Conn].
+// This is necessary for integration with external socket managers,
+// which require direct access to the gorilla/websocket API.
+func (c *wsGorillaConn) UnderlyingConn() any {
+	return c.base
+}
+
+// Close closes the connection, releasing any resources.
+// It is safe to call multiple times, and will only close once.
+func (c *wsGorillaConn) Close() error {
+	c.once.Do(func() { close(c.closed); c.base.Close() })
+	return nil
 }
 
 func (c *wsGorillaConn) LocalAddr() net.Addr  { return c.base.LocalAddr() }
@@ -124,15 +157,14 @@ func (c *wsGorillaConn) SetWriteDeadline(t time.Time) error { return c.base.SetW
 // CloseChan returns a channel that is closed when the connection is closed.
 func (c *wsGorillaConn) CloseChan() <-chan struct{} { return c.closed }
 
-var _ net.Conn = (*wsGorillaConn)(nil)
+var _ WebSocketConn = (*wsGorillaConn)(nil)
 
 func wrapGorillaConn(conn *websocket.Conn) *wsGorillaConn {
 	return &wsGorillaConn{base: conn, closed: make(chan struct{})}
 }
 
-// wsRawConn implements net.Conn by manually reading and writing WebSocket
-// frames over a raw TCP/TLS connection. Used for HTTP/2 Extended CONNECT
-// where gorilla/websocket cannot be used.
+// wsRawConn implements [WebSocketConn] by manually reading and writing WebSocket
+// frames over a raw TCP/TLS connection.
 type wsRawConn struct {
 	base     net.Conn
 	isClient bool
@@ -162,7 +194,7 @@ func (c *wsRawConn) Read(b []byte) (int, error) {
 		for range maxConsecutiveEmptyReads {
 			opcode, payload, err := c.readFrame()
 			if err != nil {
-				_ = c.close()
+				_ = c.Close()
 				return 0, err
 			}
 
@@ -184,7 +216,7 @@ func (c *wsRawConn) Read(b []byte) (int, error) {
 				return n, err
 
 			case wsFrameClose:
-				_ = c.close()
+				_ = c.Close()
 				return 0, io.EOF
 			case wsFramePing:
 				_ = c.writeFrame(wsFramePong, payload)
@@ -193,7 +225,7 @@ func (c *wsRawConn) Read(b []byte) (int, error) {
 			}
 		}
 
-		_ = c.close()
+		_ = c.Close()
 
 		return 0, io.EOF
 	}
@@ -206,14 +238,32 @@ func (c *wsRawConn) Write(b []byte) (int, error) {
 	opcode := generic.Ternary(utf8.Valid(b), byte(wsFrameText), byte(wsFrameBinary))
 
 	if err := c.writeFrame(opcode, b); err != nil {
-		_ = c.close()
+		_ = c.Close()
 		return 0, err
 	}
 
 	return len(b), nil
 }
 
-func (c *wsRawConn) Close() error                       { return c.close() }
+func (c *wsRawConn) ReadMessage() (int, []byte, error) {
+	opcode, payload, err := c.readFrame()
+	if err != nil {
+		return 0, nil, err
+	}
+
+	return int(opcode), payload, nil
+}
+
+func (c *wsRawConn) WriteMessage(messageType int, data []byte) error {
+	<-c.writeMu
+	defer func() { c.writeMu <- struct{}{} }()
+	return c.writeFrame(byte(messageType), data)
+}
+
+func (c *wsRawConn) UnderlyingConn() any {
+	return c.base
+}
+
 func (c *wsRawConn) LocalAddr() net.Addr                { return c.base.LocalAddr() }
 func (c *wsRawConn) RemoteAddr() net.Addr               { return c.base.RemoteAddr() }
 func (c *wsRawConn) SetDeadline(t time.Time) error      { return c.base.SetDeadline(t) }
@@ -221,13 +271,12 @@ func (c *wsRawConn) SetReadDeadline(t time.Time) error  { return c.base.SetReadD
 func (c *wsRawConn) SetWriteDeadline(t time.Time) error { return c.base.SetWriteDeadline(t) }
 func (c *wsRawConn) CloseChan() <-chan struct{}         { return c.closed }
 
-func (c *wsRawConn) close() error {
-	c.once.Do(func() { close(c.closed) })
-	return c.base.Close()
+func (c *wsRawConn) Close() error {
+	c.once.Do(func() { close(c.closed); c.base.Close() })
+	return nil
 }
 
 // maxWebSocketFrameSize is the maximum allowed WebSocket frame payload size (16 MiB).
-// Frames exceeding this limit are rejected to prevent OOM from malicious servers.
 const maxWebSocketFrameSize = 16 * 1024 * 1024
 
 func (c *wsRawConn) readFrame() (byte, []byte, error) {
@@ -330,7 +379,7 @@ func (c *wsRawConn) writeFrame(opcode byte, payload []byte) error {
 	return err
 }
 
-var _ net.Conn = (*wsRawConn)(nil)
+var _ WebSocketConn = (*wsRawConn)(nil)
 
 func wrapRawConn(conn net.Conn, isClient bool) *wsRawConn {
 	c := &wsRawConn{

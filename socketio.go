@@ -64,6 +64,13 @@ const (
 	sioEventTypeReconnect
 )
 
+// BackoffStrategy Defines the interface for calculating delays before reconnecting.
+// Allows the implementation of custom attenuation strategies (exponential, linear, Fibonacci, etc.).
+type BackoffStrategy interface {
+	Next() time.Duration
+	Reset()
+}
+
 // SocketIOConfig holds all configurable parameters for a Socket.IO connection.
 // Zero values mean "use default". Passing a zero-valued config is safe.
 type SocketIOConfig struct {
@@ -80,6 +87,10 @@ type SocketIOConfig struct {
 	ReconnectionDelayMax time.Duration
 	// JitterFactor controls random delay variation (0..1). Default: 0.5.
 	JitterFactor float64
+
+	// Backoff allows you to set a custom algorithm for calculating delays.
+	// If nil, the standard exponential backoff is used.
+	Backoff BackoffStrategy
 
 	// ConnectTimeout is the timeout for the full connection handshake (WS + EIO + SIO).
 	// Default: 20s.
@@ -201,22 +212,10 @@ type SocketIOConn struct {
 	offset string
 }
 
-// DialSocketIO connects to a Socket.IO v5 server via the aoni WebSocket pipeline,
-// performs the Engine.IO v4 handshake and Socket.IO v5 CONNECT, and starts
-// background workers for heartbeats and packet reading.
-func DialSocketIO(
-	ctx context.Context,
-	c *Client,
-	targetURL string,
-	config SocketIOConfig,
-	mods ...RequestModifier,
-) (*SocketIOConn, error) {
+// NewSocketIOConn initializes the Engine.IO v4 and Socket.IO v5
+// protocols over any existing [net.Conn] network connection.
+func NewSocketIOConn(ctx context.Context, conn net.Conn, config SocketIOConfig) (*SocketIOConn, error) {
 	config.resolveDefaults()
-
-	conn, _, err := DialWebSocket(ctx, c, targetURL, mods...) //nolint:bodyclose
-	if err != nil {
-		return nil, fmt.Errorf("aoni sio: dial websocket: %w", err)
-	}
 
 	sio := &SocketIOConn{
 		config:        config,
@@ -225,9 +224,6 @@ func DialSocketIO(
 		ackMgr:        jobs.NewManager[int64, []json.RawMessage](0),
 		closed:        make(chan struct{}),
 		reconnectStop: make(chan struct{}),
-		client:        c,
-		targetURL:     targetURL,
-		mods:          mods,
 		backoff:       newBackoff(config),
 	}
 
@@ -280,6 +276,33 @@ func DialSocketIO(
 
 	go sio.readLoop()
 	go sio.heartbeatLoop()
+
+	return sio, nil
+}
+
+// DialSocketIO connects to a Socket.IO v5 server via the aoni WebSocket pipeline,
+// performs the Engine.IO v4 handshake and Socket.IO v5 CONNECT, and starts
+// background workers for heartbeats and packet reading.
+func DialSocketIO(
+	ctx context.Context,
+	c *Client,
+	targetURL string,
+	config SocketIOConfig,
+	mods ...RequestModifier,
+) (*SocketIOConn, error) {
+	conn, _, err := DialWebSocket(ctx, c, targetURL, mods...) //nolint:bodyclose
+	if err != nil {
+		return nil, fmt.Errorf("aoni sio: dial websocket: %w", err)
+	}
+
+	sio, err := NewSocketIOConn(ctx, conn, config)
+	if err != nil {
+		return nil, err
+	}
+
+	sio.client = c
+	sio.targetURL = targetURL
+	sio.mods = mods
 
 	return sio, nil
 }

@@ -1312,7 +1312,6 @@ func TestDispatchPacketErrors(t *testing.T) {
 
 	sio := &SocketIOConn{}
 
-	// Обработка невалидных по структуре пакетов
 	sio.handleSIOPacket([]byte("2"))
 	sio.handleSIOPacket([]byte("2{}"))
 	sio.handleSIOPacket([]byte("2[]"))
