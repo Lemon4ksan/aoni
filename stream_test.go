@@ -6,6 +6,7 @@ package aoni
 
 import (
 	"bytes"
+	"context"
 	"io"
 	"net/http"
 	"os"
@@ -388,4 +389,108 @@ func TestMultiReadBody_GC_FinalizerCleanup(t *testing.T) {
 	runtime.GC()
 	runtime.Gosched()
 	time.Sleep(100 * time.Millisecond)
+}
+
+func TestStreamWithBody(t *testing.T) {
+	t.Parallel()
+	_, client := setupTestServer(t, func(w http.ResponseWriter, r *http.Request) {
+		body, err := io.ReadAll(r.Body)
+		require.NoError(t, err)
+		assert.Equal(t, "post_payload_data", string(body))
+
+		_, _ = w.Write([]byte("response_payload"))
+	})
+
+	stream, err := StreamWithBody(t.Context(), client, http.MethodPost, "/", strings.NewReader("post_payload_data"))
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = stream.Close() })
+
+	data, err := io.ReadAll(stream)
+	require.NoError(t, err)
+	assert.Equal(t, "response_payload", string(data))
+}
+
+func TestStreamSSE_Integration(t *testing.T) {
+	t.Parallel()
+	_, client := setupTestServer(t, func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = w.Write([]byte("event: welcome\ndata: joined\n\n"))
+	})
+
+	out, errs, err := StreamSSE[SSEEvent](t.Context(), client, "/")
+	require.NoError(t, err)
+
+	var events []SSEEvent
+	for ev := range out {
+		events = append(events, ev)
+	}
+
+	for err := range errs {
+		require.NoError(t, err)
+	}
+
+	require.Len(t, events, 1)
+	assert.Equal(t, "welcome", events[0].Event)
+	assert.Equal(t, "joined", events[0].Data)
+}
+
+func TestStreamChunks(t *testing.T) {
+	t.Parallel()
+	_, client := setupTestServer(t, func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte("token1_token2_token3"))
+	})
+
+	stream, err := Stream(t.Context(), client, "/")
+	require.NoError(t, err)
+
+	out, errs := StreamChunks(t.Context(), stream)
+
+	var chunks []string
+	for chunk := range out {
+		chunks = append(chunks, chunk)
+	}
+
+	for err := range errs {
+		require.NoError(t, err)
+	}
+
+	assert.NotEmpty(t, chunks)
+	assert.Equal(t, "token1_token2_token3", strings.Join(chunks, ""))
+}
+
+func TestStreamNDJSON_ContextCancellation(t *testing.T) {
+	t.Parallel()
+	_, client := setupTestServer(t, func(w http.ResponseWriter, r *http.Request) {
+		// Send first record, wait/block, then send second
+		_, _ = w.Write([]byte(`{"message":"first"}` + "\n"))
+
+		time.Sleep(1 * time.Second)
+
+		_, _ = w.Write([]byte(`{"message":"second"}` + "\n"))
+	})
+
+	stream, err := Stream(t.Context(), client, "/")
+	require.NoError(t, err)
+
+	ctx, cancel := context.WithCancel(t.Context())
+
+	type Msg struct {
+		Message string `json:"message"`
+	}
+
+	out, errs := StreamNDJSON[Msg](ctx, stream)
+
+	// Consume the first available message
+	msg1 := <-out
+	assert.Equal(t, "first", msg1.Message)
+
+	// Instantly cancel context to interrupt background reader goroutine
+	cancel()
+
+	var errList []error
+	for err := range errs {
+		errList = append(errList, err)
+	}
+
+	assert.Contains(t, errList, context.Canceled)
 }

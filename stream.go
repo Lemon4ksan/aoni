@@ -271,3 +271,47 @@ func StreamSSE[T any](
 
 	return out, errs, nil
 }
+
+// StreamChunks reads raw data from the stream chunk-by-chunk and yields them as strings.
+// This is a high-level helper suitable for or real-time streaming.
+func StreamChunks(ctx context.Context, resp *StreamResponse) (<-chan string, <-chan error) {
+	out := make(chan string, 100)
+	errs := make(chan error, 1)
+
+	go func() {
+		defer close(out)
+		defer close(errs)
+		defer resp.Close()
+
+		buf := make([]byte, 4096)
+		for {
+			select {
+			case <-ctx.Done():
+				errs <- ctx.Err()
+				return
+			default:
+				n, err := resp.Read(buf)
+				if n > 0 {
+					select {
+					case <-ctx.Done():
+						errs <- ctx.Err()
+						return
+					case out <- string(buf[:n]):
+					}
+				}
+
+				if err != nil {
+					if errors.Is(err, io.EOF) {
+						return
+					}
+
+					errs <- err
+
+					return
+				}
+			}
+		}
+	}()
+
+	return out, errs
+}
