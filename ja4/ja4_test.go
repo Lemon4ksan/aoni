@@ -5,6 +5,7 @@
 package ja4
 
 import (
+	"encoding/binary"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -12,6 +13,8 @@ import (
 )
 
 func TestIsGREASE(t *testing.T) {
+	t.Parallel()
+
 	grease := []uint16{
 		0x0a0a, 0x1a1a, 0x2a2a, 0x3a3a, 0x4a4a, 0x5a5a, 0x6a6a, 0x7a7a,
 		0x8a8a, 0x9a9a, 0xaaaa, 0xbaba, 0xcaca, 0xdada, 0xeaea, 0xfafa,
@@ -28,6 +31,8 @@ func TestIsGREASE(t *testing.T) {
 }
 
 func TestComputeJA4_KnownVector(t *testing.T) {
+	t.Parallel()
+
 	// Example from JA4 spec: Chrome TLS 1.3 with domain SNI, 15 ciphers, 16 extensions, h2 ALPN
 	ciphers := []uint16{
 		0x002f, 0x0035, 0x009c, 0x009d, 0x1301, 0x1302, 0x1303,
@@ -48,6 +53,8 @@ func TestComputeJA4_KnownVector(t *testing.T) {
 }
 
 func TestComputeJA4_NoALPN(t *testing.T) {
+	t.Parallel()
+
 	ciphers := []uint16{0x1301, 0x1302}
 	extensions := []uint16{0x0000, 0x000d}
 	supportedVersions := []uint16{0x0303}
@@ -59,6 +66,8 @@ func TestComputeJA4_NoALPN(t *testing.T) {
 }
 
 func TestComputeJA4_NoSNI(t *testing.T) {
+	t.Parallel()
+
 	ciphers := []uint16{0x1301}
 	extensions := []uint16{0x0010}
 	supportedVersions := []uint16{0x0304}
@@ -68,11 +77,15 @@ func TestComputeJA4_NoSNI(t *testing.T) {
 }
 
 func TestComputeJA4_EmptyCiphers(t *testing.T) {
+	t.Parallel()
+
 	result := ComputeJA4(nil, nil, nil, false, nil, nil)
 	assert.Equal(t, "t00i000000_000000000000_000000000000", result)
 }
 
 func TestComputeJA4_GreaseFiltering(t *testing.T) {
+	t.Parallel()
+
 	// GREASE values should be excluded from counts and hashes
 	ciphers := []uint16{0x0a0a, 0x1301, 0xfafa, 0x1302}
 	extensions := []uint16{0x0a0a, 0x0000, 0xfafa}
@@ -82,7 +95,27 @@ func TestComputeJA4_GreaseFiltering(t *testing.T) {
 	assert.Contains(t, result, "0201") // 2 ciphers, 1 extension
 }
 
+func TestComputeJA4_CappedAt99(t *testing.T) {
+	t.Parallel()
+
+	ciphers := make([]uint16, 110)
+	for i := range ciphers {
+		ciphers[i] = 0x1301
+	}
+
+	extensions := make([]uint16, 120)
+	for i := range extensions {
+		extensions[i] = 0x0005
+	}
+
+	result := ComputeJA4(ciphers, extensions, nil, true, nil, nil)
+	// Cipher count and ext count should be capped at 99
+	assert.Contains(t, result, "t00d999900_")
+}
+
 func TestComputeJA4H_BasicGET(t *testing.T) {
+	t.Parallel()
+
 	headers := []string{"Host", "User-Agent", "Accept"}
 	result := ComputeJA4H("GET", "HTTP/1.1", headers, false, false, "en-US", nil, nil)
 
@@ -91,6 +124,8 @@ func TestComputeJA4H_BasicGET(t *testing.T) {
 }
 
 func TestComputeJA4H_PostWithCookies(t *testing.T) {
+	t.Parallel()
+
 	headers := []string{"Host", "Content-Type"}
 	cookieNames := []string{"session", "token"}
 	cookieValues := []string{"abc123", "xyz789"}
@@ -102,11 +137,15 @@ func TestComputeJA4H_PostWithCookies(t *testing.T) {
 }
 
 func TestComputeJA4H_NoHeaders(t *testing.T) {
+	t.Parallel()
+
 	result := ComputeJA4H("GET", "HTTP/1.0", nil, false, false, "", nil, nil)
 	assert.Regexp(t, `^ge10nn000000_[a-f0-9]{12}_000000000000_000000000000$`, result)
 }
 
 func TestComputeJA4H_HTTP2PseudoHeaders(t *testing.T) {
+	t.Parallel()
+
 	// Pseudo-headers (starting with ":") are NOT filtered by ComputeJA4H.
 	// The caller should filter them before passing to the function.
 	// This test verifies the function counts all provided headers.
@@ -117,7 +156,27 @@ func TestComputeJA4H_HTTP2PseudoHeaders(t *testing.T) {
 	assert.Contains(t, result, "ge20nn05")
 }
 
+func TestComputeJA4H_EdgeCases(t *testing.T) {
+	t.Parallel()
+
+	t.Run("short method", func(t *testing.T) {
+		t.Parallel()
+
+		result := ComputeJA4H("G", "HTTP/1.1", nil, false, false, "", nil, nil)
+		assert.Regexp(t, `^0011nn`, result)
+	})
+
+	t.Run("unmapped protocol", func(t *testing.T) {
+		t.Parallel()
+
+		result := ComputeJA4H("GET", "HTTP/1.5", nil, false, false, "", nil, nil)
+		assert.Regexp(t, `^ge00nn`, result)
+	})
+}
+
 func TestComputeVersion(t *testing.T) {
+	t.Parallel()
+
 	tests := []struct {
 		versions []uint16
 		expected string
@@ -128,6 +187,7 @@ func TestComputeVersion(t *testing.T) {
 		{[]uint16{0x0a0a, 0x0304}, "13"}, // GREASE filtered
 		{nil, "00"},
 		{[]uint16{0x0a0a}, "00"}, // only GREASE
+		{[]uint16{0xffff}, "00"}, // unmapped highest version
 	}
 
 	for _, tt := range tests {
@@ -137,6 +197,8 @@ func TestComputeVersion(t *testing.T) {
 }
 
 func TestComputeALPN(t *testing.T) {
+	t.Parallel()
+
 	tests := []struct {
 		protocols []string
 		expected  string
@@ -146,6 +208,7 @@ func TestComputeALPN(t *testing.T) {
 		{[]string{"spdy/3"}, "s3"},
 		{nil, "00"},
 		{[]string{""}, "00"},
+		{[]string{"a"}, "aa"}, // single character ALPN
 	}
 
 	for _, tt := range tests {
@@ -155,6 +218,8 @@ func TestComputeALPN(t *testing.T) {
 }
 
 func TestComputeLanguage(t *testing.T) {
+	t.Parallel()
+
 	tests := []struct {
 		lang     string
 		expected string
@@ -164,6 +229,7 @@ func TestComputeLanguage(t *testing.T) {
 		{"", "0000"},
 		{"fr-FR,fr;q=0.9", "frfr"},
 		{"zh-CN,zh;q=0.9", "zhcn"},
+		{"-;,=", "0000"}, // non-alphanumeric chars
 	}
 
 	for _, tt := range tests {
@@ -172,7 +238,27 @@ func TestComputeLanguage(t *testing.T) {
 	}
 }
 
+func TestComputeExtHash_EdgeCases(t *testing.T) {
+	t.Parallel()
+
+	t.Run("empty extensions and sigAlgorithms", func(t *testing.T) {
+		t.Parallel()
+
+		res := computeExtHash(nil, nil)
+		assert.Equal(t, "000000000000", res)
+	})
+
+	t.Run("empty extensions but non-empty sigAlgorithms", func(t *testing.T) {
+		t.Parallel()
+
+		res := computeExtHash(nil, []uint16{0x0403})
+		assert.Len(t, res, 12)
+	})
+}
+
 func TestParseExtensionsFromRaw(t *testing.T) {
+	t.Parallel()
+
 	// Build a minimal ClientHello with extensions
 	raw := make([]byte, 0, 100)
 
@@ -223,20 +309,133 @@ func TestParseExtensionsFromRaw(t *testing.T) {
 	assert.Equal(t, uint16(0x0804), sigAlgos[1])
 }
 
-func TestParseExtensionsFromRaw_TooShort(t *testing.T) {
-	exts, sigAlgos := ParseExtensionsFromRaw([]byte{0x00})
-	assert.Nil(t, exts)
-	assert.Nil(t, sigAlgos)
+func TestParseExtensionsFromRaw_BoundaryAndErrorCases(t *testing.T) {
+	t.Parallel()
+
+	buildHelloPrefix := func(extBlock []byte) []byte {
+		raw := make([]byte, 0, 100)
+		raw = append(raw, 0x03, 0x03)                                  // client version
+		raw = append(raw, make([]byte, 32)...)                         // random
+		raw = append(raw, 0x00)                                        // session ID len = 0
+		raw = append(raw, 0x00, 0x02, 0x13, 0x01)                      // cipher suites
+		raw = append(raw, 0x01, 0x00)                                  // compression methods
+		raw = append(raw, byte(len(extBlock)>>8), byte(len(extBlock))) // ext total len
+		raw = append(raw, extBlock...)
+
+		return raw
+	}
+
+	t.Run("too short raw", func(t *testing.T) {
+		t.Parallel()
+
+		exts, sigAlgos := ParseExtensionsFromRaw([]byte{0x00})
+		assert.Nil(t, exts)
+		assert.Nil(t, sigAlgos)
+	})
+
+	t.Run("session id out of bounds", func(t *testing.T) {
+		t.Parallel()
+
+		raw := make([]byte, 38)
+		raw[34] = 10 // sessionIDLen is 10, offset is 35. 35+10 = 45 > 38.
+		exts, sigAlgos := ParseExtensionsFromRaw(raw)
+		assert.Nil(t, exts)
+		assert.Nil(t, sigAlgos)
+	})
+
+	t.Run("cipher suites header out of bounds", func(t *testing.T) {
+		t.Parallel()
+
+		raw := make([]byte, 40)
+		raw[34] = 5 // session id len = 5. offset + 2 (cipher suites len) will exceed 40.
+		exts, sigAlgos := ParseExtensionsFromRaw(raw)
+		assert.Nil(t, exts)
+		assert.Nil(t, sigAlgos)
+	})
+
+	t.Run("cipher suites payload out of bounds", func(t *testing.T) {
+		t.Parallel()
+
+		raw := make([]byte, 42)
+		raw[34] = 0
+		binary.BigEndian.PutUint16(raw[35:37], 10) // cipherSuitesLen = 10
+		exts, sigAlgos := ParseExtensionsFromRaw(raw)
+		assert.Nil(t, exts)
+		assert.Nil(t, sigAlgos)
+	})
+
+	t.Run("compression methods len out of bounds", func(t *testing.T) {
+		t.Parallel()
+
+		raw := make([]byte, 39)
+		raw[34] = 0
+		binary.BigEndian.PutUint16(raw[35:37], 2) // cipherSuitesLen = 2
+		exts, sigAlgos := ParseExtensionsFromRaw(raw)
+		assert.Nil(t, exts)
+		assert.Nil(t, sigAlgos)
+	})
+
+	t.Run("compression methods payload out of bounds", func(t *testing.T) {
+		t.Parallel()
+
+		raw := make([]byte, 40)
+		raw[34] = 0
+		binary.BigEndian.PutUint16(raw[35:37], 2)
+		raw[39] = 5 // compMethodsLen = 5
+		exts, sigAlgos := ParseExtensionsFromRaw(raw)
+		assert.Nil(t, exts)
+		assert.Nil(t, sigAlgos)
+	})
+
+	t.Run("extensions total length out of bounds", func(t *testing.T) {
+		t.Parallel()
+
+		raw := make([]byte, 41)
+		raw[34] = 0
+		binary.BigEndian.PutUint16(raw[35:37], 2)
+		raw[39] = 1 // compMethodsLen = 1
+		exts, sigAlgos := ParseExtensionsFromRaw(raw)
+		assert.Nil(t, exts)
+		assert.Nil(t, sigAlgos)
+	})
+
+	t.Run("sigAlgos extDataLen too short", func(t *testing.T) {
+		t.Parallel()
+
+		extBlock := []byte{
+			0x00, 0x0d, // extID = 0x000d (sigAlgos)
+			0x00, 0x01, // extDataLen = 1 (too short)
+			0x00,
+		}
+		raw := buildHelloPrefix(extBlock)
+		exts, sigAlgos := ParseExtensionsFromRaw(raw)
+		require.NotNil(t, exts)
+		assert.Contains(t, exts, uint16(0x000d))
+		assert.Nil(t, sigAlgos)
+	})
+
+	t.Run("sigAlgos offset out of bounds", func(t *testing.T) {
+		t.Parallel()
+
+		extBlock := []byte{
+			0x00, 0x0d, // extID = 0x000d (sigAlgos)
+			0x00, 0x0a, // extDataLen = 10 (out of bounds)
+			0x01, 0x02,
+		}
+		raw := buildHelloPrefix(extBlock)
+		exts, sigAlgos := ParseExtensionsFromRaw(raw)
+		require.NotNil(t, exts)
+		assert.Contains(t, exts, uint16(0x000d))
+		assert.Nil(t, sigAlgos)
+	})
 }
 
 func TestHash12(t *testing.T) {
-	h := hash12("test")
-	assert.Len(t, h, 12)
-	assert.Regexp(t, `^[a-f0-9]{12}$`, h)
+	t.Parallel()
 
-	// Deterministic
-	assert.Equal(t, h, hash12("test"))
-
-	// Different input produces different hash
-	assert.NotEqual(t, h, hash12("other"))
+	res := hash12("test")
+	assert.Len(t, res, 12)
+	assert.Regexp(t, `^[a-f0-9]{12}$`, res)
+	assert.Equal(t, res, hash12("test"))
+	assert.NotEqual(t, res, hash12("other"))
 }
