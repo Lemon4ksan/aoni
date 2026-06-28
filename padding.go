@@ -7,12 +7,41 @@ package aoni
 import (
 	"crypto/rand"
 	"encoding/binary"
+	"encoding/hex"
 	"net"
+	"net/http"
 )
 
-// PacketPaddingConfig controls MTU fragmentation and packet padding
+// Predefined realistic header pools to mimic popular Cloud/CDN networks.
+var (
+	// AmazonCDNHeaderPool mimics AWS CloudFront and API Gateway tracing headers.
+	AmazonCDNHeaderPool = []string{
+		"X-Amz-Trace-Id",
+		"X-Amzn-RequestId",
+		"X-Amz-Cf-Id",
+	}
+
+	// CloudflareHeaderPool mimics Cloudflare proxy and CDN headers.
+	CloudflareHeaderPool = []string{
+		"CF-RAY",
+		"CF-Connecting-IP",
+		"CF-Visitor",
+		"CF-IPCountry",
+	}
+
+	// GenericCDNHeaderPool mixes multiple standard cloud and CDN diagnostics headers.
+	GenericCDNHeaderPool = []string{
+		"X-Request-ID",
+		"X-Trace-ID",
+		"X-Edge-Cache-Id",
+		"X-Cloud-Trace-Context",
+		"X-Correlation-ID",
+	}
+)
+
+// PaddingConfig controls MTU fragmentation and packet padding
 // to disrupt DPI signature analysis of packet length patterns.
-type PacketPaddingConfig struct {
+type PaddingConfig struct {
 	// MaxSegmentSize sets the TCP Maximum Segment Size (MSS) at the socket level.
 	// This forces TCP to fragment data into smaller packets, breaking static
 	// packet length signatures used by DPI systems. Set to 0 to disable.
@@ -36,22 +65,23 @@ type PacketPaddingConfig struct {
 	// On each request a random name is picked from this pool, making the
 	// padding header indistinguishable from legitimate CDN or cloud tracing
 	// headers. When non-empty this field takes precedence over PaddingHeader.
-	//
-	// Example:
-	//
-	//	[]string{
-	//	    "X-Amz-Trace-Id",
-	//	    "X-Cloud-Trace-Context",
-	//	    "CF-RAY",
-	//	    "X-Edge-Cache-Id",
-	//	    "X-Request-ID",
-	//	    "X-Trace-ID",
-	//	}
 	HeaderPool []string
 }
 
+// WithPadding returns a [RequestModifier] that adds random packet padding
+// headers to the request matching the given [PaddingConfig].
+// This is a high-level helper to apply individual padding settings per request.
+func WithPadding(cfg PaddingConfig) RequestModifier {
+	return func(req *http.Request) {
+		if padding := GeneratePadding(cfg); len(padding) > 0 {
+			headerName := PaddingHeaderName(cfg)
+			req.Header.Set(headerName, hex.EncodeToString(padding))
+		}
+	}
+}
+
 // GeneratePadding returns random padding bytes of the configured length range.
-func GeneratePadding(cfg PacketPaddingConfig) []byte {
+func GeneratePadding(cfg PaddingConfig) []byte {
 	if cfg.MinPaddingBytes <= 0 && cfg.MaxPaddingBytes <= 0 {
 		return nil
 	}
@@ -75,6 +105,22 @@ func GeneratePadding(cfg PacketPaddingConfig) []byte {
 	return padding
 }
 
+// PaddingHeaderName returns a header name for padding.
+// If HeaderPool is configured, a random entry is selected to avoid
+// creating a static DPI fingerprint. Otherwise PaddingHeader is used,
+// falling back to "X-Padding".
+func PaddingHeaderName(cfg PaddingConfig) string {
+	if len(cfg.HeaderPool) > 0 {
+		return cfg.HeaderPool[randIntn(len(cfg.HeaderPool))]
+	}
+
+	if cfg.PaddingHeader != "" {
+		return cfg.PaddingHeader
+	}
+
+	return "X-Padding"
+}
+
 // randIntn returns a cryptographically secure random int in [0, n).
 func randIntn(n int) int {
 	if n <= 0 {
@@ -88,22 +134,6 @@ func randIntn(n int) int {
 	val := binary.BigEndian.Uint64(buf[:])
 
 	return int(val % uint64(n)) //nolint:gosec
-}
-
-// PaddingHeaderName returns a header name for padding.
-// If HeaderPool is configured, a random entry is selected to avoid
-// creating a static DPI fingerprint. Otherwise PaddingHeader is used,
-// falling back to "X-Padding".
-func PaddingHeaderName(cfg PacketPaddingConfig) string {
-	if len(cfg.HeaderPool) > 0 {
-		return cfg.HeaderPool[randIntn(len(cfg.HeaderPool))]
-	}
-
-	if cfg.PaddingHeader != "" {
-		return cfg.PaddingHeader
-	}
-
-	return "X-Padding"
 }
 
 // wrapWithMSSLimit wraps a connection with TCP MSS limiting.
