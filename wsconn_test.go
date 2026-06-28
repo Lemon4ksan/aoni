@@ -540,7 +540,10 @@ func TestWSH2Conn_AllFrames(t *testing.T) {
 		}
 	}
 
+	done1 := make(chan struct{})
 	go func() {
+		defer close(done1)
+
 		frame, err := readExpectedFrame(framerServer)
 		if err != nil {
 			return
@@ -562,10 +565,14 @@ func TestWSH2Conn_AllFrames(t *testing.T) {
 	n, err = h2Conn.Read(buf)
 	require.NoError(t, err)
 	assert.Equal(t, "response", string(buf[:n]))
+	<-done1
 
 	largeData := make([]byte, 20000)
 
+	done2 := make(chan struct{})
 	go func() {
+		defer close(done2)
+
 		f1, err := readExpectedFrame(framerServer)
 		if err != nil {
 			return
@@ -594,6 +601,7 @@ func TestWSH2Conn_AllFrames(t *testing.T) {
 	n, err = h2Conn.Write(largeData)
 	require.NoError(t, err)
 	assert.Equal(t, 20000, n)
+	<-done2
 
 	errCh := make(chan error, 1)
 	go func() {

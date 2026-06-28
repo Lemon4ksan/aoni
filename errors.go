@@ -88,8 +88,14 @@ func (e *DNSError) Unwrap() error {
 }
 
 // Timeout reports whether the error was caused by a network timeout.
-// This allows DNSError to satisfy the net.Error interface if needed.
+// This allows DNSError to satisfy the [net.Error] interface if needed.
 func (e *DNSError) Timeout() bool {
+	return e.IsTimeout
+}
+
+// Temporary reports whether the error is temporary.
+// This is required to satisfy the [net.Error] interface.
+func (e *DNSError) Temporary() bool {
 	return e.IsTimeout
 }
 

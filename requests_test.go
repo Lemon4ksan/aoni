@@ -226,7 +226,7 @@ func TestPostForm(t *testing.T) {
 			_, _ = w.Write([]byte(`{"message":"success"}`))
 		})
 
-		res, err := PostForm[reqTestPayload](t.Context(), client, "/form", input)
+		res, err := PostFormJSON[reqTestPayload](t.Context(), client, "/form", input)
 		require.NoError(t, err)
 		assert.Equal(t, "success", res.Message)
 	})
@@ -240,7 +240,7 @@ func TestPostForm(t *testing.T) {
 			w.WriteHeader(http.StatusOK)
 		})
 
-		_, err := PostForm[NoResponse](t.Context(), client, "/form-reader", readerPayload)
+		_, err := PostFormJSON[NoResponse](t.Context(), client, "/form-reader", readerPayload)
 		require.NoError(t, err)
 	})
 
@@ -251,7 +251,7 @@ func TestPostForm(t *testing.T) {
 		invalidInput := reqTestPayload{Status: 10}
 		client := NewClient(nil)
 
-		_, err := PostForm[reqTestPayload](t.Context(), client, "/form", invalidInput)
+		_, err := PostFormJSON[reqTestPayload](t.Context(), client, "/form", invalidInput)
 		assert.Error(t, err)
 	})
 }

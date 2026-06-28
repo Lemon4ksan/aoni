@@ -138,7 +138,7 @@ func (c *wsGorillaConn) UnderlyingConn() any {
 // Close closes the connection, releasing any resources.
 // It is safe to call multiple times, and will only close once.
 func (c *wsGorillaConn) Close() error {
-	c.once.Do(func() { close(c.closed); c.base.Close() })
+	c.once.Do(func() { close(c.closed); _ = c.base.Close() })
 	return nil
 }
 
@@ -257,7 +257,7 @@ func (c *wsRawConn) ReadMessage() (int, []byte, error) {
 func (c *wsRawConn) WriteMessage(messageType int, data []byte) error {
 	<-c.writeMu
 	defer func() { c.writeMu <- struct{}{} }()
-	return c.writeFrame(byte(messageType), data)
+	return c.writeFrame(byte(messageType), data) //nolint:gosec
 }
 
 func (c *wsRawConn) UnderlyingConn() any {
@@ -272,7 +272,7 @@ func (c *wsRawConn) SetWriteDeadline(t time.Time) error { return c.base.SetWrite
 func (c *wsRawConn) CloseChan() <-chan struct{}         { return c.closed }
 
 func (c *wsRawConn) Close() error {
-	c.once.Do(func() { close(c.closed); c.base.Close() })
+	c.once.Do(func() { close(c.closed); _ = c.base.Close() })
 	return nil
 }
 

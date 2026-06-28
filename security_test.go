@@ -12,6 +12,7 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -52,14 +53,41 @@ func TestIsBlockedIP(t *testing.T) {
 	}
 }
 
+func TestIsBlockedIP_AdvancedIPv6AndObfuscation(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name    string
+		ip      string
+		blocked bool
+	}{
+		{"IPv4-mapped IPv6 loopback", "::ffff:127.0.0.1", true},
+		{"IPv4-mapped IPv6 private 10.x", "::ffff:10.0.0.1", true},
+		{"IPv4-mapped IPv6 public", "::ffff:8.8.8.8", false},
+		{"Link-local unicast v6", "fe80::1", true},
+		{"Multicast v6 node-local", "ff01::1", true},
+		{"Unique local v6 fc00::/8 boundary", "fc00::1", true},
+		{"Unique local v6 fd00::/8 boundary", "fd00::1", true},
+		{"IPv4 loopback range 127.0.0.2", "127.0.0.2", true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			ip := net.ParseIP(tt.ip)
+			require.NotNil(t, ip, "failed to parse IP: %s", tt.ip)
+			assert.Equal(t, tt.blocked, isBlockedIP(ip))
+		})
+	}
+}
+
 func TestRateLimitMiddleware_ClampsNegative(t *testing.T) {
 	t.Parallel()
 
-	// Negative rps should not panic, should clamp to 0.
 	m := RateLimitMiddleware(-5, -10)
 	require.NotNil(t, m)
 
-	// Should still create a working middleware (rate 0 = block all).
 	doer := m(DoerFunc(func(req *http.Request) (*http.Response, error) {
 		return &http.Response{StatusCode: 200, Body: io.NopCloser(strings.NewReader(""))}, nil
 	}))
@@ -69,14 +97,12 @@ func TestRateLimitMiddleware_ClampsNegative(t *testing.T) {
 
 	req, _ := http.NewRequestWithContext(ctx, "GET", "http://localhost", nil)
 	_, err := doer.Do(req)
-	// With rate 0, the limiter blocks until context expires.
 	assert.Error(t, err)
 }
 
 func TestRetryMiddleware_NegativeBackoff(t *testing.T) {
 	t.Parallel()
 
-	// Negative backoff should be clamped to 0, not cause tight loop.
 	m := RetryMiddleware(RetryOptions{
 		MaxRetries: 1,
 		Backoff:    -1 * time.Second,
@@ -98,7 +124,6 @@ func TestNewCircuitBreaker_NaN(t *testing.T) {
 		FailureThreshold: math.NaN(),
 	})
 
-	// NaN should be replaced with default 0.5.
 	assert.Equal(t, 0.5, cb.cfg.FailureThreshold)
 }
 
@@ -140,7 +165,6 @@ func TestDoHResolver_QueryEncoding(t *testing.T) {
 func TestWebSocketMaxFrameSize(t *testing.T) {
 	t.Parallel()
 
-	// Verify the constant exists and is reasonable.
 	assert.Equal(t, 16*1024*1024, maxWebSocketFrameSize)
 }
 
@@ -199,7 +223,6 @@ func TestInMemoryDNSCache_Eviction(t *testing.T) {
 	cache := NewInMemoryDNSCache(time.Millisecond, &net.Resolver{})
 	t.Cleanup(func() { cache.Close() })
 
-	// Insert an entry that will expire immediately.
 	cache.mu.Lock()
 	cache.cache["expired.test"] = dnsCacheEntry{
 		ips:    []net.IPAddr{{IP: net.ParseIP("1.2.3.4")}},
@@ -211,8 +234,6 @@ func TestInMemoryDNSCache_Eviction(t *testing.T) {
 	}
 	cache.mu.Unlock()
 
-	// Wait for the eviction loop to run (1 minute ticker, but we can
-	// test the eviction logic directly).
 	cache.mu.Lock()
 
 	now := time.Now()
@@ -228,4 +249,154 @@ func TestInMemoryDNSCache_Eviction(t *testing.T) {
 
 	assert.False(t, expiredExists, "expired entry should be removed")
 	assert.True(t, validExists, "valid entry should remain")
+}
+
+func TestLimitDecoder_BombPrevention(t *testing.T) {
+	t.Parallel()
+
+	type SimpleData struct {
+		Field string `json:"field"`
+	}
+
+	payload := `{"field": "this data exceeds the safe read limit set on the decoder"}`
+	reader := strings.NewReader(payload)
+
+	limited := LimitDecoder(JSONDecoder, 15)
+
+	var target SimpleData
+
+	err := limited.Decode(reader, &target)
+	require.Error(t, err, "expected decoder to hit the limits boundary and return error")
+}
+
+func TestReorderHTTP1Headers_MalformedInputs(t *testing.T) {
+	t.Parallel()
+
+	t.Run("empty payload", func(t *testing.T) {
+		t.Parallel()
+
+		res, ok := reorderHTTP1Headers([]byte(""), []string{"Host"})
+		assert.False(t, ok)
+		assert.Nil(t, res)
+	})
+
+	t.Run("missing colon in header lines", func(t *testing.T) {
+		t.Parallel()
+
+		malformed := []byte("GET / HTTP/1.1\r\nHost 127.0.0.1\r\n\r\n")
+		res, ok := reorderHTTP1Headers(malformed, []string{"Host"})
+		assert.True(t, ok)
+		assert.Equal(t, []byte("GET / HTTP/1.1\r\n\r\n"), res)
+	})
+
+	t.Run("missing CRLF boundaries", func(t *testing.T) {
+		t.Parallel()
+
+		malformed := []byte("GET / HTTP/1.1\r\nHost: 127.0.0.1\r\n")
+		res, ok := reorderHTTP1Headers(malformed, []string{"Host"})
+		assert.False(t, ok)
+		assert.Nil(t, res)
+	})
+}
+
+func TestMultiReadBody_DoubleCloseIdempotency(t *testing.T) {
+	t.Parallel()
+
+	rc := io.NopCloser(strings.NewReader("payload to write onto temp file in disk storage"))
+	mBody, err := newMultiReadBody(rc, 5)
+	require.NoError(t, err)
+
+	underlying, ok := mBody.(*multiReadBody)
+	require.True(t, ok)
+	require.NotNil(t, underlying.tmpFile)
+
+	tempPath := underlying.tmpFile.Name()
+
+	_, err = os.Stat(tempPath)
+	require.NoError(t, err)
+
+	underlying.ReallyClose()
+	underlying.ReallyClose()
+
+	_, err = os.Stat(tempPath)
+	assert.True(t, os.IsNotExist(err), "expected temporary file to be fully removed from disk after closed")
+}
+
+func TestGeneratePadding_SafetyLimits(t *testing.T) {
+	t.Parallel()
+
+	t.Run("negative padding ranges", func(t *testing.T) {
+		t.Parallel()
+
+		cfg := PaddingConfig{
+			MinPaddingBytes: -20,
+			MaxPaddingBytes: -10,
+		}
+		res := GeneratePadding(cfg)
+		assert.Nil(t, res)
+	})
+
+	t.Run("inverted padding ranges", func(t *testing.T) {
+		t.Parallel()
+
+		cfg := PaddingConfig{
+			MinPaddingBytes: 30,
+			MaxPaddingBytes: 10,
+		}
+		res := GeneratePadding(cfg)
+		require.NotNil(t, res)
+		assert.Equal(t, 30, len(res), "expected range inversion to automatically align size to minimum boundary")
+	})
+}
+
+func TestWrapWithMSSLimit_NegativeMSS(t *testing.T) {
+	t.Parallel()
+
+	c1, c2 := net.Pipe()
+	t.Cleanup(func() { _ = c1.Close(); _ = c2.Close() })
+
+	wrapped := wrapWithMSSLimit(c1, -100)
+	assert.NotNil(t, wrapped, "negative MSS size should be ignored gracefully without breaking the stream")
+}
+
+func TestFragmentedConn_Write(t *testing.T) {
+	t.Parallel()
+
+	c1, c2 := net.Pipe()
+	t.Cleanup(func() { _ = c1.Close(); _ = c2.Close() })
+
+	cfg := FragmentConfig{
+		ChunkSize: 2,
+	}
+
+	fragmented := NewFragmentedConn(c1, &cfg)
+
+	type writeResult struct {
+		n   int
+		err error
+	}
+
+	ch := make(chan writeResult, 1)
+
+	go func() {
+		n, err := fragmentedConnWrite(fragmented, []byte("test"))
+		ch <- writeResult{n: n, err: err}
+	}()
+
+	buf := make([]byte, 2)
+	n, err := io.ReadFull(c2, buf)
+	require.NoError(t, err)
+	assert.Equal(t, "te", string(buf[:n]))
+
+	n, err = io.ReadFull(c2, buf)
+	require.NoError(t, err)
+	assert.Equal(t, "st", string(buf[:n]))
+
+	res := <-ch
+	require.NoError(t, res.err)
+	assert.Equal(t, 4, res.n)
+}
+
+func fragmentedConnWrite(conn net.Conn, b []byte) (int, error) {
+	return conn.Write(b)
 }

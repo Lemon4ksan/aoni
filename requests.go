@@ -139,7 +139,7 @@ func GetJSONEx[Resp any](
 	return result, raw, nil
 }
 
-// PostForm marshals the payload, performs a POST request with URL-encoded parameters,
+// PostFormJSON marshals the payload, performs a POST request with URL-encoded parameters,
 // and decodes the resulting JSON response body into Resp.
 //
 // If the payload implements [io.Reader], it is used directly as the request body.
@@ -147,7 +147,7 @@ func GetJSONEx[Resp any](
 //
 // It validates the payload structure beforehand using [Validate].
 // Returns a [ValidationError] if validation fails.
-func PostForm[Resp any](
+func PostFormJSON[Resp any](
 	ctx context.Context,
 	c Requester,
 	path string,
@@ -194,8 +194,8 @@ func PostForm[Resp any](
 	return result, nil
 }
 
-// PostFormEx is like [PostForm] but returns both the parsed response payload and the raw *http.Response.
-func PostFormEx[Resp any](
+// PostFormJSONEx is like [PostFormJSON] but returns both the parsed response payload and the raw *http.Response.
+func PostFormJSONEx[Resp any](
 	ctx context.Context,
 	c Requester,
 	path string,
@@ -206,7 +206,7 @@ func PostFormEx[Resp any](
 
 	mods = append(mods, CaptureResponse(&raw))
 
-	result, err := PostForm[Resp](ctx, c, path, payload, mods...)
+	result, err := PostFormJSON[Resp](ctx, c, path, payload, mods...)
 	if err != nil {
 		return nil, raw, err
 	}

@@ -116,7 +116,7 @@ func BenchmarkRawCopy_Aoni(b *testing.B) {
 	for b.Loop() {
 		var output []byte
 		// Request has NO body positional argument. Body is handled via modifiers.
-		resp, err := client.Request(ctx, http.MethodGet, "/", AsRaw())
+		resp, err := client.Request(ctx, http.MethodGet, "/", WithRawDecoder())
 		if err != nil {
 			b.Fatal(err)
 		}

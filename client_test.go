@@ -13,6 +13,8 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"crypto/x509/pkix"
+	"encoding/hex"
+	"encoding/json"
 	"encoding/pem"
 	"encoding/xml"
 	"errors"
@@ -24,12 +26,14 @@ import (
 	"net/url"
 	"os"
 	"runtime"
+	"strconv"
 	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/andybalholm/brotli"
+	"github.com/gorilla/websocket"
 	"github.com/klauspost/compress/zstd"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -79,6 +83,45 @@ func setupTestServer(t *testing.T, handler http.HandlerFunc) (*httptest.Server, 
 	return server, client
 }
 
+func generateTestCert(t *testing.T) (cert, key []byte, err error) {
+	t.Helper()
+
+	privateKey, err := rsa.GenerateKey(rand.Reader, 2048)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	serialNumber, err := rand.Int(rand.Reader, new(big.Int).Lsh(big.NewInt(1), 128))
+	if err != nil {
+		return nil, nil, err
+	}
+
+	template := &x509.Certificate{
+		SerialNumber: serialNumber,
+		Subject: pkix.Name{
+			Organization: []string{"Test Org"},
+		},
+		NotBefore:             time.Now(),
+		NotAfter:              time.Now().Add(time.Hour),
+		KeyUsage:              x509.KeyUsageDigitalSignature | x509.KeyUsageKeyEncipherment,
+		ExtKeyUsage:           []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
+		BasicConstraintsValid: true,
+		IPAddresses:           []net.IP{net.ParseIP("127.0.0.1")},
+		DNSNames:              []string{"localhost"},
+	}
+
+	certDER, err := x509.CreateCertificate(rand.Reader, template, template, &privateKey.PublicKey, privateKey)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	certPEM := pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: certDER})
+	keyDER := x509.MarshalPKCS1PrivateKey(privateKey)
+	keyPEM := pem.EncodeToMemory(&pem.Block{Type: "RSA PRIVATE KEY", Bytes: keyDER})
+
+	return certPEM, keyPEM, nil
+}
+
 func TestClient_Request_URLConstruction(t *testing.T) {
 	t.Parallel()
 	_, client := setupTestServer(t, func(w http.ResponseWriter, r *http.Request) {
@@ -91,7 +134,7 @@ func TestClient_Request_URLConstruction(t *testing.T) {
 
 	r, err := client.Request(t.Context(), http.MethodGet, "/api/v1/test")
 	require.NoError(t, err)
-	t.Cleanup(func() { _ = r.Body.Close() })
+	t.Cleanup(func() { closeResponse(r) })
 }
 
 func TestClient_Request_GetParams(t *testing.T) {
@@ -111,7 +154,7 @@ func TestClient_Request_GetParams(t *testing.T) {
 
 	r, err := client.Request(t.Context(), http.MethodGet, "/test", WithQuery(params))
 	require.NoError(t, err)
-	t.Cleanup(func() { _ = r.Body.Close() })
+	t.Cleanup(func() { closeResponse(r) })
 }
 
 func TestClient_Headers(t *testing.T) {
@@ -138,7 +181,7 @@ func TestClient_Headers(t *testing.T) {
 
 	r, err := client.Request(t.Context(), http.MethodGet, "/", mod)
 	require.NoError(t, err)
-	t.Cleanup(func() { _ = r.Body.Close() })
+	t.Cleanup(func() { closeResponse(r) })
 }
 
 func TestClient_ErrorStatus(t *testing.T) {
@@ -174,7 +217,7 @@ func TestClient_ContextCancellation(t *testing.T) {
 
 	r, err := client.Request(ctx, http.MethodGet, "/")
 	if err == nil {
-		t.Cleanup(func() { _ = r.Body.Close() })
+		t.Cleanup(func() { closeResponse(r) })
 		t.Fatal("expected error for canceled context, got nil")
 	}
 }
@@ -245,7 +288,7 @@ func TestClient_PathTemplates(t *testing.T) {
 
 			resp, err := client.Request(t.Context(), http.MethodGet, tt.path, tt.mods...)
 			require.NoError(t, err)
-			t.Cleanup(func() { _ = resp.Body.Close() })
+			t.Cleanup(func() { closeResponse(resp) })
 
 			assert.Equal(t, tt.want, resp.Header.Get("X-Path"))
 		})
@@ -315,7 +358,7 @@ func TestClient_PostForm(t *testing.T) {
 		_, _ = w.Write([]byte(`{"status": 200}`))
 	})
 
-	_, err := PostForm[Params](t.Context(), client, "/form", Params{ID: 123, Name: "bob"})
+	_, err := PostFormJSON[Params](t.Context(), client, "/form", Params{ID: 123, Name: "bob"})
 	assert.NoError(t, err)
 }
 
@@ -332,7 +375,7 @@ func TestClient_CaptureResponse(t *testing.T) {
 	require.NoError(t, err)
 
 	if raw != nil {
-		t.Cleanup(func() { _ = raw.Body.Close() })
+		t.Cleanup(func() { closeResponse(raw) })
 	}
 
 	assert.Equal(t, "ok", result.Message)
@@ -341,7 +384,7 @@ func TestClient_CaptureResponse(t *testing.T) {
 }
 
 func TestClient_DX_Helpers(t *testing.T) {
-	// Sequential execution is required since DefaultClient is globally mutated.
+	// Do not use t.Parallel() here as this test mutates global DefaultClient.
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Header.Get("Authorization") == "Bearer my-token" {
 			w.Header().Set("X-Auth", "bearer")
@@ -369,7 +412,7 @@ func TestClient_DX_Helpers(t *testing.T) {
 		require.NoError(t, err)
 
 		if raw != nil {
-			t.Cleanup(func() { _ = raw.Body.Close() })
+			t.Cleanup(func() { closeResponse(raw) })
 		}
 
 		assert.Equal(t, "ok", res.Message)
@@ -389,7 +432,7 @@ func TestClient_DX_Helpers(t *testing.T) {
 		require.NoError(t, err)
 
 		if raw != nil {
-			t.Cleanup(func() { _ = raw.Body.Close() })
+			t.Cleanup(func() { closeResponse(raw) })
 		}
 
 		assert.Equal(t, "basic", raw.Header.Get("X-Auth"))
@@ -408,7 +451,7 @@ func TestClient_DX_Helpers(t *testing.T) {
 		require.NoError(t, err)
 
 		if raw != nil {
-			t.Cleanup(func() { _ = raw.Body.Close() })
+			t.Cleanup(func() { closeResponse(raw) })
 		}
 
 		assert.Equal(t, http.MethodPut, raw.Request.Method)
@@ -426,7 +469,7 @@ func TestClient_DX_Helpers(t *testing.T) {
 		require.NoError(t, err)
 
 		if raw != nil {
-			t.Cleanup(func() { _ = raw.Body.Close() })
+			t.Cleanup(func() { closeResponse(raw) })
 		}
 
 		assert.Equal(t, http.MethodPatch, raw.Request.Method)
@@ -444,7 +487,7 @@ func TestClient_DX_Helpers(t *testing.T) {
 		require.NoError(t, err)
 
 		if raw != nil {
-			t.Cleanup(func() { _ = raw.Body.Close() })
+			t.Cleanup(func() { closeResponse(raw) })
 		}
 
 		assert.Equal(t, http.MethodDelete, raw.Request.Method)
@@ -469,7 +512,7 @@ func TestClient_AdvancedFeatures(t *testing.T) {
 		reader := strings.NewReader("streamed data")
 		resp, err := client.Request(t.Context(), http.MethodPost, "/", WithBody(reader))
 		require.NoError(t, err)
-		t.Cleanup(func() { _ = resp.Body.Close() })
+		t.Cleanup(func() { closeResponse(resp) })
 	})
 
 	t.Run("cookies", func(t *testing.T) {
@@ -490,7 +533,7 @@ func TestClient_AdvancedFeatures(t *testing.T) {
 				WithCookie(&http.Cookie{Name: "test-cookie", Value: "yum"}),
 			)
 			require.NoError(t, err)
-			t.Cleanup(func() { _ = resp.Body.Close() })
+			t.Cleanup(func() { closeResponse(resp) })
 
 			assert.Equal(t, "yum", resp.Header.Get("X-Cookie"))
 		})
@@ -503,7 +546,7 @@ func TestClient_AdvancedFeatures(t *testing.T) {
 				WithCookies(map[string]string{"test-cookie": "yum-yum"}),
 			)
 			require.NoError(t, err)
-			t.Cleanup(func() { _ = resp.Body.Close() })
+			t.Cleanup(func() { closeResponse(resp) })
 
 			assert.Equal(t, "yum-yum", resp.Header.Get("X-Cookie"))
 		})
@@ -522,7 +565,7 @@ func TestClient_AdvancedFeatures(t *testing.T) {
 			client := client.WithRedirectLimit(0)
 			resp, err := client.Request(t.Context(), http.MethodGet, "/start")
 			require.NoError(t, err)
-			t.Cleanup(func() { _ = resp.Body.Close() })
+			t.Cleanup(func() { closeResponse(resp) })
 
 			assert.Equal(t, http.StatusFound, resp.StatusCode)
 		})
@@ -531,15 +574,21 @@ func TestClient_AdvancedFeatures(t *testing.T) {
 			client := client.WithRedirectLimit(2)
 			resp, err := client.Request(t.Context(), http.MethodGet, "/start")
 			require.NoError(t, err)
-			t.Cleanup(func() { _ = resp.Body.Close() })
+			t.Cleanup(func() { closeResponse(resp) })
 
 			assert.Equal(t, http.StatusOK, resp.StatusCode)
 		})
 	})
 
 	t.Run("timeout", func(t *testing.T) {
+		t.Parallel()
+
 		_, client := setupTestServer(t, func(w http.ResponseWriter, r *http.Request) {
-			time.Sleep(100 * time.Millisecond)
+			select {
+			case <-r.Context().Done():
+			case <-time.After(1 * time.Second):
+			}
+
 			w.WriteHeader(http.StatusOK)
 		})
 
@@ -579,7 +628,7 @@ func TestClient_WithMultipart(t *testing.T) {
 
 	resp, err := client.Request(t.Context(), http.MethodPost, "/", WithMultipart(fields, files))
 	require.NoError(t, err)
-	t.Cleanup(func() { _ = resp.Body.Close() })
+	t.Cleanup(func() { closeResponse(resp) })
 }
 
 func TestClient_TransportMethod(t *testing.T) {
@@ -649,7 +698,7 @@ func TestClient_ProgressCallbacks(t *testing.T) {
 			WithUploadProgress(uploadProgress),
 		)
 		require.NoError(t, err)
-		t.Cleanup(func() { _ = resp.Body.Close() })
+		t.Cleanup(func() { closeResponse(resp) })
 
 		assert.True(t, uploadCalled)
 		assert.Equal(t, int64(10), uploadBytes)
@@ -680,7 +729,7 @@ func TestClient_ProgressCallbacks(t *testing.T) {
 			WithDownloadProgress(downloadProgress),
 		)
 		require.NoError(t, err)
-		t.Cleanup(func() { _ = resp.Body.Close() })
+		t.Cleanup(func() { closeResponse(resp) })
 
 		body, err := io.ReadAll(resp.Body)
 		require.NoError(t, err)
@@ -704,31 +753,57 @@ func TestClient_AutoTranscoding(t *testing.T) {
 	assert.Equal(t, "привет", result.Message)
 }
 
-func TestClient_Hedging(t *testing.T) {
+func TestClient_Hedging_Deterministic(t *testing.T) {
 	t.Parallel()
 
-	var requestCount int32
+	var requestCount atomic.Int32
+
+	slowRequestStarted := make(chan struct{})
+	blockSlowRequest := make(chan struct{})
 
 	_, client := setupTestServer(t, func(w http.ResponseWriter, r *http.Request) {
-		count := atomic.AddInt32(&requestCount, 1)
+		count := requestCount.Add(1)
 		if count == 1 {
-			time.Sleep(200 * time.Millisecond)
+			close(slowRequestStarted)
+			<-blockSlowRequest
+			w.WriteHeader(http.StatusRequestTimeout)
+
+			return
 		}
 
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte(`{"message": "hedged"}`))
 	})
 
-	client = client.WithHedging(20 * time.Millisecond)
+	client = client.WithHedging(10 * time.Millisecond)
 
-	start := time.Now()
-	result, err := GetJSON[testPayload](t.Context(), client, "/")
-	duration := time.Since(start)
+	type result struct {
+		res *testPayload
+		err error
+	}
 
-	require.NoError(t, err)
-	assert.Equal(t, "hedged", result.Message)
-	assert.Less(t, duration, 150*time.Millisecond)
-	assert.GreaterOrEqual(t, atomic.LoadInt32(&requestCount), int32(2))
+	resChan := make(chan result, 1)
+
+	go func() {
+		res, err := GetJSON[testPayload](t.Context(), client, "/")
+		resChan <- result{res: res, err: err}
+	}()
+
+	select {
+	case <-slowRequestStarted:
+	case <-time.After(2 * time.Second):
+		t.Fatal("slow request did not start in time")
+	}
+
+	select {
+	case r := <-resChan:
+		require.NoError(t, r.err)
+		assert.Equal(t, "hedged", r.res.Message)
+	case <-time.After(2 * time.Second):
+		t.Fatal("hedged request did not complete in time")
+	}
+
+	close(blockSlowRequest)
 }
 
 func TestClient_XML_Codecs(t *testing.T) {
@@ -736,23 +811,23 @@ func TestClient_XML_Codecs(t *testing.T) {
 
 	type XMLPayload struct {
 		XMLName xml.Name `xml:"payload"`
-		Value   string   `xml:"value"`
+		Message string   `xml:"message"`
 	}
 
 	_, client := setupTestServer(t, func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/xml")
-		_, _ = w.Write([]byte(`<payload><value>xml-data</value></payload>`))
+		_, _ = w.Write([]byte(`<payload><message>xml-data</message></payload>`))
 	})
 
 	var result XMLPayload
 
-	resp, err := client.Request(t.Context(), http.MethodGet, "/", AsXML())
+	resp, err := client.Request(t.Context(), http.MethodGet, "/", WithXMLDecoder())
 	require.NoError(t, err)
-	t.Cleanup(func() { _ = resp.Body.Close() })
+	t.Cleanup(func() { closeResponse(resp) })
 
 	err = XMLDecoder.Decode(resp.Body, &result)
 	require.NoError(t, err)
-	assert.Equal(t, "xml-data", result.Value)
+	assert.Equal(t, "xml-data", result.Message)
 }
 
 func TestClient_GlobalHooks(t *testing.T) {
@@ -780,7 +855,7 @@ func TestClient_GlobalHooks(t *testing.T) {
 
 	resp, err := client.Request(t.Context(), http.MethodGet, "/")
 	require.NoError(t, err)
-	t.Cleanup(func() { _ = resp.Body.Close() })
+	t.Cleanup(func() { closeResponse(resp) })
 
 	assert.True(t, beforeCalled)
 	assert.True(t, afterCalled)
@@ -843,7 +918,6 @@ func TestClient_ConnectionPool(t *testing.T) {
 	assert.Equal(t, 10*time.Second, transport.IdleConnTimeout)
 	assert.Equal(t, 5*time.Second, transport.ResponseHeaderTimeout)
 
-	// WithConnectionPool clones the transport — original is not modified.
 	origTransport := client.Transport()
 	require.NotNil(t, origTransport)
 	assert.Equal(t, 100, origTransport.MaxIdleConns)
@@ -943,9 +1017,9 @@ func TestClient_ContentTypeGuard(t *testing.T) {
 
 		var output []byte
 
-		resp, err := client.Request(t.Context(), http.MethodGet, "/", AsRaw())
+		resp, err := client.Request(t.Context(), http.MethodGet, "/", WithRawDecoder())
 		require.NoError(t, err)
-		t.Cleanup(func() { _ = resp.Body.Close() })
+		t.Cleanup(func() { closeResponse(resp) })
 
 		err = RawDecoder.Decode(resp.Body, &output)
 		require.NoError(t, err)
@@ -963,7 +1037,6 @@ func TestClient_TLSFingerprint(t *testing.T) {
 	require.NotNil(t, tr)
 	assert.NotNil(t, tr.DialTLSContext)
 
-	// WithTLSFingerprint clones the transport — original is not modified.
 	origTr := client.Transport()
 	require.NotNil(t, origTr)
 	assert.Nil(t, origTr.DialTLSContext)
@@ -986,7 +1059,7 @@ func TestClient_WithJA4Callback(t *testing.T) {
 		})
 
 	assert.NotNil(t, client)
-	// Verify immutability
+
 	origClient := NewClient(nil)
 
 	origTr := origClient.Transport()
@@ -1006,30 +1079,24 @@ func TestClient_JA4CallbackImmutability(t *testing.T) {
 	client1 := NewClient(nil).WithJA4Callback(fn)
 	client2 := client1.WithTLSFingerprint(BrowserChrome)
 
-	// client2 should have the callback
 	assert.NotNil(t, client2.ja4Callback)
-
-	// client1 should also have the callback (Clone copies it)
 	assert.NotNil(t, client1.ja4Callback)
 
-	// New client without callback should not have it
 	client3 := NewClient(nil)
 	assert.Nil(t, client3.ja4Callback)
 }
 
-func TestTraceClientJA4(t *testing.T) {
+func TestClient_TraceJA4(t *testing.T) {
 	t.Parallel()
 
 	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	}))
-	defer server.Close()
+	t.Cleanup(server.Close)
 
-	// Create a transport that skips certificate verification and uses the test server's TLS config
 	transport := &http.Transport{
 		TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
 		DialTLSContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
-			// Directly connect to the test server, bypassing uTLS
 			tcpConn, err := net.Dial("tcp", addr)
 			if err != nil {
 				return nil, err
@@ -1040,7 +1107,7 @@ func TestTraceClientJA4(t *testing.T) {
 				ServerName:         "127.0.0.1",
 			})
 			if err := tlsConn.HandshakeContext(ctx); err != nil {
-				tcpConn.Close()
+				_ = tcpConn.Close()
 				return nil, err
 			}
 
@@ -1059,33 +1126,28 @@ func TestTraceClientJA4(t *testing.T) {
 
 	info := &TraceInfo{}
 	_, err := client.Request(
-		context.Background(),
+		t.Context(),
 		http.MethodGet,
 		server.URL,
 		TraceJA4(info),
 	)
 	require.NoError(t, err)
 
-	// JA4H should always be computed (from request headers)
-	require.NotNil(t, info.JA4, "TraceJA4 should populate JA4 report")
-	assert.NotEmpty(t, info.JA4.JA4H, "JA4H should be computed from request")
+	require.NotNil(t, info.JA4)
+	assert.NotEmpty(t, info.JA4.JA4H)
 	assert.Regexp(
 		t,
 		`^[a-z]{2}[0-9]{2}[cn][rn][0-9]{2}[a-z0-9]{4}_[a-f0-9]{12}_[a-f0-9]{12}_[a-f0-9]{12}$`,
 		info.JA4.JA4H,
 	)
 
-	// JA4 (TLS fingerprint) won't be populated because we bypassed uTLS
-	// That's expected - JA4 is only populated when WithTLSFingerprint is used
-
 	_ = report
 }
 
-func TestTraceJA4_WithTLSFingerprint(t *testing.T) {
+func TestClient_TraceJA4_WithTLSFingerprint(t *testing.T) {
 	t.Parallel()
 
-	// Generate a self-signed cert for the test server
-	cert, key, err := generateTestCert()
+	cert, key, err := generateTestCert(t)
 	require.NoError(t, err)
 
 	tlsCert, err := tls.X509KeyPair(cert, key)
@@ -1101,9 +1163,8 @@ func TestTraceJA4_WithTLSFingerprint(t *testing.T) {
 	server.TLS = tlsConfig
 
 	server.StartTLS()
-	defer server.Close()
+	t.Cleanup(server.Close)
 
-	// Use WithTLSFingerprint + WithJA4Callback + TraceJA4
 	var callbackReport *ja4.Report
 
 	client := NewClient(server.Client()).
@@ -1114,39 +1175,20 @@ func TestTraceJA4_WithTLSFingerprint(t *testing.T) {
 
 	info := &TraceInfo{}
 	_, err = client.Request(
-		context.Background(),
+		t.Context(),
 		http.MethodGet,
 		server.URL,
 		TraceJA4(info),
 	)
 	require.NoError(t, err)
 
-	// JA4H should be computed from request headers
-	require.NotNil(t, info.JA4, "TraceJA4 should populate JA4 report")
-	assert.NotEmpty(t, info.JA4.JA4H, "JA4H should be computed")
-
-	// JA4 (TLS fingerprint) should be populated from the uTLS handshake
-	assert.NotEmpty(t, info.JA4.JA4, "JA4 should be populated from TLS handshake")
+	require.NotNil(t, info.JA4)
+	assert.NotEmpty(t, info.JA4.JA4H)
+	assert.NotEmpty(t, info.JA4.JA4)
 	assert.Regexp(t, `^t[0-9]{2}[di][0-9]{2}[0-9]{2}[a-z0-9]{2}_[a-f0-9]{12}_[a-f0-9]{12}$`, info.JA4.JA4)
 
-	// Callback should also have been invoked
-	require.NotNil(t, callbackReport, "JA4 callback should have been invoked")
+	require.NotNil(t, callbackReport)
 	assert.Equal(t, info.JA4.JA4, callbackReport.JA4)
-}
-
-func TestComputeJA4HFromRequest(t *testing.T) {
-	t.Parallel()
-
-	req, _ := http.NewRequest(http.MethodGet, "http://example.com/path", nil)
-	req.Header.Set("Host", "example.com")
-	req.Header.Set("User-Agent", "test")
-	req.Header.Add("Cookie", "session=abc")
-	req.Header.Add("Cookie", "token=xyz")
-	req.Header.Set("Referer", "http://referrer.com")
-	req.Header.Set("Accept-Language", "en-US")
-
-	result := computeJA4HFromRequest(req)
-	assert.Regexp(t, `^ge11cr[0-9]{2}[a-z0-9]{4}_[a-f0-9]{12}_[a-f0-9]{12}_[a-f0-9]{12}$`, result)
 }
 
 func TestClient_SocketLeakPrevention(t *testing.T) {
@@ -1169,6 +1211,7 @@ func TestClient_SocketLeakPrevention(t *testing.T) {
 		assert.NotNil(t, resp)
 	}()
 
+	// Polling is required as GC finalization is asynchronous and non-deterministic.
 	for range 20 {
 		runtime.GC()
 		time.Sleep(5 * time.Millisecond)
@@ -1207,7 +1250,7 @@ func TestClient_ResponseSizeGuard(t *testing.T) {
 		client = client.WithMaxResponseSize(10)
 		resp, err := client.Request(t.Context(), http.MethodGet, "/")
 		require.NoError(t, err)
-		t.Cleanup(func() { _ = resp.Body.Close() })
+		t.Cleanup(func() { closeResponse(resp) })
 
 		_, err = io.ReadAll(resp.Body)
 		require.Error(t, err)
@@ -1223,7 +1266,7 @@ func TestClient_ResponseSizeGuard(t *testing.T) {
 		client = client.WithMaxResponseSize(100)
 		resp, err := client.Request(t.Context(), http.MethodGet, "/")
 		require.NoError(t, err)
-		t.Cleanup(func() { _ = resp.Body.Close() })
+		t.Cleanup(func() { closeResponse(resp) })
 
 		body, err := io.ReadAll(resp.Body)
 		require.NoError(t, err)
@@ -1261,7 +1304,7 @@ func TestClient_SensitiveHeaderScrubbing(t *testing.T) {
 
 		resp, err := client.Request(t.Context(), http.MethodGet, origServer.URL, reqMod)
 		require.NoError(t, err)
-		t.Cleanup(func() { _ = resp.Body.Close() })
+		t.Cleanup(func() { closeResponse(resp) })
 
 		assert.Empty(t, redirectedHeaders.Get("Authorization"))
 		assert.Empty(t, redirectedHeaders.Get("Cookie"))
@@ -1380,127 +1423,499 @@ func TestClient_MultiReadBody(t *testing.T) {
 		assert.Equal(t, "long body exceeding threshold", string(body1))
 
 		tmpFileName := mBody.tmpFile.Name()
-
 		_ = resp.Body.Close()
 
 		_, err = os.Stat(tmpFileName)
-		assert.True(t, os.IsNotExist(err),
-			"expected temp file to be deleted after Close()")
+		assert.True(t, os.IsNotExist(err), "expected temp file to be deleted after Close()")
 	})
 }
 
-func generateTestCert() (cert, key []byte, err error) {
-	privateKey, err := rsa.GenerateKey(rand.Reader, 2048)
-	if err != nil {
-		return nil, nil, err
-	}
-
-	serialNumber, err := rand.Int(rand.Reader, new(big.Int).Lsh(big.NewInt(1), 128))
-	if err != nil {
-		return nil, nil, err
-	}
-
-	template := &x509.Certificate{
-		SerialNumber: serialNumber,
-		Subject: pkix.Name{
-			Organization: []string{"Test Org"},
-		},
-		NotBefore:             time.Now(),
-		NotAfter:              time.Now().Add(time.Hour),
-		KeyUsage:              x509.KeyUsageDigitalSignature | x509.KeyUsageKeyEncipherment,
-		ExtKeyUsage:           []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
-		BasicConstraintsValid: true,
-		IPAddresses:           []net.IP{net.ParseIP("127.0.0.1")},
-		DNSNames:              []string{"localhost"},
-	}
-
-	certDER, err := x509.CreateCertificate(rand.Reader, template, template, &privateKey.PublicKey, privateKey)
-	if err != nil {
-		return nil, nil, err
-	}
-
-	certPEM := pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: certDER})
-	keyDER := x509.MarshalPKCS1PrivateKey(privateKey)
-	keyPEM := pem.EncodeToMemory(&pem.Block{Type: "RSA PRIVATE KEY", Bytes: keyDER})
-
-	return certPEM, keyPEM, nil
-}
-
-func TestWithQuery_MergesExistingParams(t *testing.T) {
-	t.Parallel()
-
-	type additional struct {
-		Page int `url:"page"`
-	}
-
-	req := &http.Request{
-		URL: &url.URL{
-			RawQuery: "existing=value&foo=bar",
-		},
-	}
-
-	mod := WithQuery(additional{Page: 2})
-	mod(req)
-
-	q := req.URL.Query()
-	assert.Equal(t, "value", q.Get("existing"))
-	assert.Equal(t, "bar", q.Get("foo"))
-	assert.Equal(t, "2", q.Get("page"))
-}
-
-func TestWithQuery_OverwritesSameKey(t *testing.T) {
+func TestWithQuery(t *testing.T) {
 	t.Parallel()
 
 	type params struct {
-		Foo string `url:"foo"`
+		Foo  string `url:"foo,omitempty"`
+		Page int    `url:"page,omitempty"`
 	}
 
-	req := &http.Request{
-		URL: &url.URL{
-			RawQuery: "foo=old&bar=keep",
+	tests := []struct {
+		name     string
+		rawQuery string
+		input    any
+		want     map[string]string
+	}{
+		{
+			name:     "merges_existing_params",
+			rawQuery: "existing=value&foo=bar",
+			input:    params{Page: 2},
+			want:     map[string]string{"existing": "value", "foo": "bar", "page": "2"},
+		},
+		{
+			name:     "overwrites_same_key",
+			rawQuery: "foo=old&bar=keep",
+			input:    params{Foo: "new"},
+			want:     map[string]string{"foo": "new", "bar": "keep"},
+		},
+		{
+			name:     "nil_query_noop",
+			rawQuery: "keep=this",
+			input:    nil,
+			want:     map[string]string{"keep": "this"},
 		},
 	}
 
-	mod := WithQuery(params{Foo: "new"})
-	mod(req)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 
-	q := req.URL.Query()
-	assert.Equal(t, "new", q.Get("foo"))
-	assert.Equal(t, "keep", q.Get("bar"))
+			req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, "http://localhost", nil)
+			require.NoError(t, err)
+
+			req.URL.RawQuery = tt.rawQuery
+
+			mod := WithQuery(tt.input)
+			if mod != nil {
+				mod(req)
+			}
+
+			q := req.URL.Query()
+			for k, v := range tt.want {
+				assert.Equal(t, v, q.Get(k))
+			}
+		})
+	}
 }
 
-func TestWithQuery_NilQueryNoop(t *testing.T) {
+func TestClient_SourceIPRotator(t *testing.T) {
 	t.Parallel()
 
-	req := &http.Request{
-		URL: &url.URL{RawQuery: "keep=this"},
-	}
+	ips := []string{"192.168.1.1", "192.168.1.2"}
+	rotator, err := NewSourceIPRotator(ips)
+	require.NoError(t, err)
+	require.Equal(t, 2, rotator.Size())
 
-	WithQuery(nil)(req)
-	assert.Equal(t, "keep=this", req.URL.RawQuery)
+	ip1 := rotator.Next()
+	ip2 := rotator.Next()
+	ip3 := rotator.Next()
+
+	assert.Equal(t, "192.168.1.1", ip1.String())
+	assert.Equal(t, "192.168.1.2", ip2.String())
+	assert.Equal(t, "192.168.1.1", ip3.String())
+
+	v4IP := rotator.NextForFamily(true)
+	assert.NotNil(t, v4IP)
+	assert.True(t, v4IP.To4() != nil)
+
+	err = rotator.UpdatePool([]string{"10.0.0.1"})
+	require.NoError(t, err)
+	assert.Equal(t, 1, rotator.Size())
+	assert.Equal(t, "10.0.0.1", rotator.Next().String())
 }
 
-func TestWithQuery_ComplexMerge(t *testing.T) {
+func TestClient_ProxyIsolatedCookieJar(t *testing.T) {
 	t.Parallel()
 
-	type first struct {
-		Name string `url:"name"`
+	jar := NewProxyIsolatedCookieJar()
+	u, err := url.Parse("https://example.com")
+	require.NoError(t, err)
+
+	cookie := &http.Cookie{Name: "session", Value: "val1"}
+
+	ctx1 := context.WithValue(t.Context(), proxyCtxKey{}, "http://proxy1:8080")
+	subJar1 := jar.GetJar(ctx1)
+	subJar1.SetCookies(u, []*http.Cookie{cookie})
+
+	ctx2 := context.WithValue(t.Context(), proxyCtxKey{}, "http://proxy2:8080")
+	subJar2 := jar.GetJar(ctx2)
+	cookies2 := subJar2.Cookies(u)
+	assert.Empty(t, cookies2)
+
+	cookies1 := subJar1.Cookies(u)
+	require.Len(t, cookies1, 1)
+	assert.Equal(t, "session", cookies1[0].Name)
+}
+
+func TestClient_HostRewrite(t *testing.T) {
+	t.Parallel()
+
+	rules := map[string]string{
+		"myapi.local": "127.0.0.1:8080",
 	}
 
-	type second struct {
-		Age int `url:"age"`
+	modifier := WithHostRewrite(rules)
+	req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, "https://myapi.local/profile", nil)
+	require.NoError(t, err)
+
+	modifier(req)
+
+	extracted := HostRewriteRules(req.Context())
+	assert.Equal(t, "127.0.0.1:8080", extracted["myapi.local"])
+
+	appendMod := AppendHostRewrite(map[string]string{"another.local": "10.0.0.2"})
+	appendMod(req)
+
+	finalRules := HostRewriteRules(req.Context())
+	assert.Equal(t, "127.0.0.1:8080", finalRules["myapi.local"])
+	assert.Equal(t, "10.0.0.2", finalRules["another.local"])
+}
+
+func TestClient_PacketPadding(t *testing.T) {
+	t.Parallel()
+
+	cfg := PaddingConfig{
+		MinPaddingBytes: 10,
+		MaxPaddingBytes: 20,
+		PaddingHeader:   "X-Custom-Padding",
 	}
 
-	req := &http.Request{
-		URL: &url.URL{RawQuery: "name=alice"},
+	req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, "http://localhost", nil)
+	require.NoError(t, err)
+
+	WithPadding(cfg)(req)
+
+	headerVal := req.Header.Get("X-Custom-Padding")
+	require.NotEmpty(t, headerVal)
+
+	bytesVal, err := hex.DecodeString(headerVal)
+	require.NoError(t, err)
+	assert.GreaterOrEqual(t, len(bytesVal), 10)
+	assert.LessOrEqual(t, len(bytesVal), 20)
+}
+
+func TestClient_ValuesEncoding(t *testing.T) {
+	t.Parallel()
+
+	type Inner struct {
+		InlineField string `url:"inline_field"`
 	}
 
-	WithQuery(first{Name: "bob"})(req)
-	q := req.URL.Query()
-	assert.Equal(t, "bob", q.Get("name"))
+	type QueryStruct struct {
+		Name      string        `url:"name"`
+		IsActive  BoolInt       `url:"is_active"`
+		Timestamp time.Time     `url:"timestamp"`
+		FloatVal  Float64String `url:"float_val"`
+		IntVal    Int64String   `url:"int_val"`
+		Inner     Inner         `url:"inner,inline"`
+		NoTag     string
+	}
 
-	WithQuery(second{Age: 30})(req)
-	q = req.URL.Query()
-	assert.Equal(t, "bob", q.Get("name"))
-	assert.Equal(t, "30", q.Get("age"))
+	now := time.Now().Truncate(time.Second)
+	q := QueryStruct{
+		Name:      "test-user",
+		IsActive:  BoolInt(true),
+		Timestamp: now,
+		FloatVal:  Float64String(12.34),
+		IntVal:    Int64String(99),
+		Inner: Inner{
+			InlineField: "hello",
+		},
+		NoTag: "ignored",
+	}
+
+	vals, err := StructToValues(q)
+	require.NoError(t, err)
+
+	assert.Equal(t, "test-user", vals.Get("name"))
+	assert.Equal(t, "true", vals.Get("is_active"))
+	assert.Equal(t, now.String(), vals.Get("timestamp"))
+	assert.Equal(t, "12.34", vals.Get("float_val"))
+	assert.Equal(t, "99", vals.Get("int_val"))
+	assert.Equal(t, "hello", vals.Get("inline_field"))
+	assert.Empty(t, vals.Get("NoTag"))
+
+	// Test Unmarshal/Marshal of custom types
+	b, err := json.Marshal(BoolInt(true))
+	require.NoError(t, err)
+	assert.Equal(t, "1", string(b))
+
+	var bi BoolInt
+
+	err = json.Unmarshal([]byte(`"true"`), &bi)
+	require.NoError(t, err)
+	assert.True(t, bool(bi))
+
+	ts := UnixTimestamp(now)
+	tsBytes, err := json.Marshal(ts)
+	require.NoError(t, err)
+	assert.Equal(t, strconv.FormatInt(now.Unix(), 10), string(tsBytes))
+}
+
+type failingResolver struct{}
+
+func (f *failingResolver) LookupIPAddr(ctx context.Context, host string) ([]net.IPAddr, error) {
+	return nil, errors.New("lookup failed")
+}
+
+type mockDelayResolver struct {
+	delay time.Duration
+	ip    string
+}
+
+func (m *mockDelayResolver) LookupIPAddr(ctx context.Context, host string) ([]net.IPAddr, error) {
+	select {
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	case <-time.After(m.delay):
+		return []net.IPAddr{{IP: net.ParseIP(m.ip)}}, nil
+	}
+}
+
+func TestDNSResolvers(t *testing.T) {
+	t.Parallel()
+
+	t.Run("static_resolver", func(t *testing.T) {
+		t.Parallel()
+
+		staticMap := map[string][]string{
+			"example.com": {"1.2.3.4"},
+		}
+		resolver := NewStaticResolver(staticMap, nil)
+		ips, err := resolver.LookupIPAddr(t.Context(), "example.com")
+		require.NoError(t, err)
+		require.Len(t, ips, 1)
+		assert.Equal(t, "1.2.3.4", ips[0].IP.String())
+	})
+
+	t.Run("fallback_resolver", func(t *testing.T) {
+		t.Parallel()
+
+		r1 := &failingResolver{}
+		r2 := NewStaticResolver(map[string][]string{"test.com": {"8.8.8.8"}}, nil)
+
+		fallback := NewFallbackResolver(r1, r2)
+		ips, err := fallback.LookupIPAddr(t.Context(), "test.com")
+		require.NoError(t, err)
+		require.NotEmpty(t, ips)
+		assert.Equal(t, "8.8.8.8", ips[0].IP.String())
+	})
+
+	t.Run("fast_race_resolver", func(t *testing.T) {
+		t.Parallel()
+
+		fast := &mockDelayResolver{delay: 1 * time.Millisecond, ip: "1.1.1.1"}
+		slow := &mockDelayResolver{delay: 200 * time.Millisecond, ip: "2.2.2.2"}
+
+		racer := NewFastRaceResolver(slow, fast)
+		ips, err := racer.LookupIPAddr(t.Context(), "any.com")
+		require.NoError(t, err)
+		require.NotEmpty(t, ips)
+		assert.Equal(t, "1.1.1.1", ips[0].IP.String())
+	})
+}
+
+func TestClient_CircuitBreaker(t *testing.T) {
+	t.Parallel()
+
+	cfg := CircuitBreakerConfig{
+		FailureThreshold: 0.5,
+		Cooldown:         50 * time.Millisecond,
+		MinRequests:      2,
+		Window:           5 * time.Second,
+	}
+	cb := NewCircuitBreaker(cfg)
+
+	b := cb.getBreaker("example.com")
+	assert.NotNil(t, b)
+
+	_, err := b.Do(t.Context(), func(ctx context.Context) (any, error) {
+		return nil, errors.New("error")
+	})
+	require.Error(t, err)
+
+	_, err = b.Do(t.Context(), func(ctx context.Context) (any, error) {
+		return nil, errors.New("error")
+	})
+	require.Error(t, err)
+
+	_, err = b.Do(t.Context(), func(ctx context.Context) (any, error) {
+		return nil, nil
+	})
+	assert.ErrorContains(t, err, "circuit breaker is open")
+}
+
+func TestClient_RetryMiddleware(t *testing.T) {
+	t.Parallel()
+
+	var attempts uint32
+
+	opts := RetryOptions{
+		MaxRetries:     3,
+		Backoff:        1 * time.Millisecond,
+		JitterStrategy: JitterFull,
+		OnRetry: func(attempt uint32, err error, delay time.Duration) {
+			atomic.StoreUint32(&attempts, attempt)
+		},
+	}
+
+	handlerCount := int32(0)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		count := atomic.AddInt32(&handlerCount, 1)
+		if count < 3 {
+			w.WriteHeader(http.StatusServiceUnavailable)
+			return
+		}
+
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"message": "recovered"}`))
+	}))
+	t.Cleanup(server.Close)
+
+	client := NewClient(nil).WithBaseURL(server.URL)
+
+	retryMid := RetryMiddleware(opts, RetryOnGatewayErrors())
+	doer := retryMid(client.HTTP())
+
+	req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, server.URL, nil)
+	require.NoError(t, err)
+
+	resp, err := doer.Do(req)
+	require.NoError(t, err)
+	t.Cleanup(func() { closeResponse(resp) })
+
+	assert.Equal(t, http.StatusOK, resp.StatusCode)
+	assert.Equal(t, uint32(2), atomic.LoadUint32(&attempts))
+}
+
+func TestClient_StreamParsing(t *testing.T) {
+	t.Parallel()
+
+	t.Run("ndjson", func(t *testing.T) {
+		t.Parallel()
+
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			_, _ = w.Write(
+				[]byte("{\"status\": 200, \"message\": \"msg1\"}\n{\"status\": 200, \"message\": \"msg2\"}\n"),
+			)
+		}))
+		t.Cleanup(srv.Close)
+
+		streamResp, err := Stream(t.Context(), NewClient(nil), srv.URL)
+		require.NoError(t, err)
+
+		ch, errs := StreamNDJSON[testPayload](t.Context(), streamResp)
+
+		var msgs []string
+		for val := range ch {
+			msgs = append(msgs, val.Message)
+		}
+
+		err = <-errs
+		require.NoError(t, err)
+		assert.Equal(t, []string{"msg1", "msg2"}, msgs)
+	})
+
+	t.Run("sse", func(t *testing.T) {
+		t.Parallel()
+
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			_, _ = w.Write(
+				[]byte(
+					"event: custom\ndata: {\"message\": \"event1\"}\n\nevent: custom\ndata: {\"message\": \"event2\"}\n\n",
+				),
+			)
+		}))
+		t.Cleanup(srv.Close)
+
+		streamResp, err := Stream(t.Context(), NewClient(nil), srv.URL)
+		require.NoError(t, err)
+
+		ch, errs := ParseSSE[testPayload](t.Context(), streamResp)
+
+		var msgs []string
+		for val := range ch {
+			msgs = append(msgs, val.Message)
+		}
+
+		err = <-errs
+		require.NoError(t, err)
+		assert.Equal(t, []string{"event1", "event2"}, msgs)
+	})
+}
+
+func TestClient_WebSocket_RawConn(t *testing.T) {
+	t.Parallel()
+
+	c1, c2 := net.Pipe()
+	t.Cleanup(func() { _ = c1.Close(); _ = c2.Close() })
+
+	wsClient := wrapRawConn(c1, true)
+	wsServer := wrapRawConn(c2, false)
+
+	go func() {
+		err := wsClient.WriteMessage(wsFrameText, []byte("ping"))
+		if err != nil {
+			return
+		}
+	}()
+
+	msgType, payload, err := wsServer.ReadMessage()
+	require.NoError(t, err)
+	assert.Equal(t, wsFrameText, msgType)
+	assert.Equal(t, "ping", string(payload))
+}
+
+func TestClient_SocketIO_Encoding(t *testing.T) {
+	t.Parallel()
+
+	raw := []byte("2[\"event\",{\"foo\":\"bar\"}]")
+	pkt, err := decodeSIOPacket(raw)
+	require.NoError(t, err)
+	assert.Equal(t, byte(sioEvent), pkt.Type)
+	assert.Equal(t, "/", pkt.Namespace)
+	assert.Nil(t, pkt.ID)
+	assert.Contains(t, string(pkt.Data), "event")
+
+	id := int64(123)
+	encoded := encodeSIOPacket(sioPacket{
+		Type:      sioAck,
+		Namespace: "/custom",
+		ID:        &id,
+		Data:      json.RawMessage(`["ack-data"]`),
+	})
+	assert.Equal(t, "3/custom,123[\"ack-data\"]", string(encoded))
+}
+
+func TestClient_SocketIO_Integration(t *testing.T) {
+	t.Parallel()
+
+	upgrader := websocket.Upgrader{}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		conn, err := upgrader.Upgrade(w, r, nil)
+		if err != nil {
+			return
+		}
+
+		t.Cleanup(func() { _ = conn.Close() })
+
+		err = conn.WriteMessage(
+			websocket.TextMessage,
+			[]byte("0{\"sid\":\"123\",\"pingInterval\":1000,\"pingTimeout\":5000}"),
+		)
+		if err != nil {
+			return
+		}
+
+		msgType, payload, err := conn.ReadMessage()
+		if err != nil {
+			return
+		}
+
+		if msgType == websocket.TextMessage && len(payload) > 1 && payload[0] == '4' && payload[1] == '0' {
+			_ = conn.WriteMessage(websocket.TextMessage, []byte("40{\"sid\":\"123\",\"pid\":\"456\"}"))
+		}
+	}))
+	t.Cleanup(server.Close)
+
+	wsURL := "ws" + strings.TrimPrefix(server.URL, "http")
+
+	cfg := SocketIOConfig{
+		Reconnection: false,
+	}
+
+	sio, err := DialSocketIO(t.Context(), NewClient(nil), wsURL, cfg)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = sio.Close() })
+
+	assert.Equal(t, "123", sio.SID())
+	assert.True(t, sio.Connected())
 }

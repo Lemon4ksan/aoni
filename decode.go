@@ -142,17 +142,17 @@ var YAMLDecoder Decoder = DecoderFunc(func(r io.Reader, target any) error {
 	return yaml.NewDecoder(r).Decode(target)
 })
 
-// AsRaw returns a [RequestModifier] that uses [RawDecoder].
-func AsRaw() RequestModifier { return WithDecoder(RawDecoder) }
+// WithRawDecoder returns a [RequestModifier] that uses [RawDecoder].
+func WithRawDecoder() RequestModifier { return WithDecoder(RawDecoder) }
 
-// AsJSON returns a [RequestModifier] that uses [JSONDecoder].
-func AsJSON() RequestModifier { return WithDecoder(JSONDecoder) }
+// WithJSONDecoder returns a [RequestModifier] that uses [JSONDecoder].
+func WithJSONDecoder() RequestModifier { return WithDecoder(JSONDecoder) }
 
-// AsXML returns a [RequestModifier] that uses [XMLDecoder].
-func AsXML() RequestModifier { return WithDecoder(XMLDecoder) }
+// WithXMLDecoder returns a [RequestModifier] that uses [XMLDecoder].
+func WithXMLDecoder() RequestModifier { return WithDecoder(XMLDecoder) }
 
-// AsYAML returns a [RequestModifier] that uses [YAMLDecoder].
-func AsYAML() RequestModifier { return WithDecoder(YAMLDecoder) }
+// WithYAMLDecoder returns a [RequestModifier] that uses [YAMLDecoder].
+func WithYAMLDecoder() RequestModifier { return WithDecoder(YAMLDecoder) }
 
 // DecodeJSON is a convenience helper to directly decode a JSON stream into T.
 func DecodeJSON[T any](r io.Reader) (T, error) {

@@ -170,10 +170,10 @@ func TestDecoderModifiers(t *testing.T) {
 		modifier        RequestModifier
 		expectedDecoder Decoder
 	}{
-		{"AsRaw", AsRaw(), RawDecoder},
-		{"AsJSON", AsJSON(), JSONDecoder},
-		{"AsXML", AsXML(), XMLDecoder},
-		{"AsYAML", AsYAML(), YAMLDecoder},
+		{"AsRaw", WithRawDecoder(), RawDecoder},
+		{"AsJSON", WithJSONDecoder(), JSONDecoder},
+		{"AsXML", WithXMLDecoder(), XMLDecoder},
+		{"AsYAML", WithYAMLDecoder(), YAMLDecoder},
 	}
 
 	for _, tt := range tests {
