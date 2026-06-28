@@ -9,6 +9,36 @@ import (
 	"time"
 )
 
+// HealthStatus represents the detailed state of a tracked endpoint.
+type HealthStatus int
+
+const (
+	// StatusHealthy indicates the endpoint is fully functional with zero consecutive failures.
+	StatusHealthy HealthStatus = iota
+	// StatusDegraded indicates the endpoint is still functional but has experienced some failures.
+	StatusDegraded
+	// StatusUnhealthy indicates the endpoint has exceeded max failures and is currently in cooldown.
+	StatusUnhealthy
+	// StatusRecovering indicates the cooldown has elapsed and the endpoint is ready for a trial request.
+	StatusRecovering
+)
+
+// String returns a human-readable representation of the HealthStatus.
+func (s HealthStatus) String() string {
+	switch s {
+	case StatusHealthy:
+		return "Healthy"
+	case StatusDegraded:
+		return "Degraded"
+	case StatusUnhealthy:
+		return "Unhealthy"
+	case StatusRecovering:
+		return "Recovering"
+	default:
+		return "Unknown"
+	}
+}
+
 // HealthTracker tracks the health state of a single endpoint (proxy or backend)
 // using consecutive failure counting with automatic recovery after a cooldown.
 type HealthTracker struct {
@@ -78,4 +108,62 @@ func (h *HealthTracker) IsAvailable() bool {
 	}
 
 	return false
+}
+
+// FailCount returns the current number of consecutive failures.
+func (h *HealthTracker) FailCount() uint32 {
+	return h.failCount.Load()
+}
+
+// CooldownRemaining returns the time remaining in the cooldown phase.
+// Returns 0 if the endpoint is healthy, recovering, or has no active cooldown.
+func (h *HealthTracker) CooldownRemaining() time.Duration {
+	if !h.unhealthy.Load() {
+		return 0
+	}
+
+	rec := h.recoveredAt.Load()
+	if rec == 0 {
+		return 0
+	}
+
+	remaining := time.Until(time.Unix(0, rec))
+	if remaining < 0 {
+		return 0
+	}
+
+	return remaining
+}
+
+// Status evaluates and returns the precise current status of the endpoint.
+func (h *HealthTracker) Status() HealthStatus {
+	unhealthy := h.unhealthy.Load()
+	fails := h.failCount.Load()
+
+	if !unhealthy {
+		if fails > 0 {
+			return StatusDegraded
+		}
+
+		return StatusHealthy
+	}
+
+	if time.Now().UnixNano() >= h.recoveredAt.Load() {
+		return StatusRecovering
+	}
+
+	return StatusUnhealthy
+}
+
+// Reset clears all failure counters and restores the endpoint to StatusHealthy immediately.
+// If the endpoint was previously unhealthy, it triggers the onRecovered callback if configured.
+func (h *HealthTracker) Reset() {
+	wasUnhealthy := h.unhealthy.Load()
+	h.failCount.Store(0)
+	h.unhealthy.Store(false)
+	h.recoveredAt.Store(0)
+
+	if wasUnhealthy && h.onRecovered != nil {
+		h.onRecovered(h.name)
+	}
 }

@@ -45,7 +45,7 @@ func NewProxyIsolatedCookieJar() *ProxyIsolatedCookieJar {
 // For direct requests, uses the proxy URL from the request context.
 // For redirects (no context available), falls back to the default jar.
 func (p *ProxyIsolatedCookieJar) SetCookies(u *url.URL, cookies []*http.Cookie) {
-	jar := p.getJarByProxy("")
+	jar := p.GetJarForProxy("")
 	if jar != nil {
 		jar.SetCookies(u, cookies)
 	}
@@ -55,7 +55,7 @@ func (p *ProxyIsolatedCookieJar) SetCookies(u *url.URL, cookies []*http.Cookie) 
 // For direct requests, uses the proxy URL from the request context.
 // For redirects (no context available), falls back to the default jar.
 func (p *ProxyIsolatedCookieJar) Cookies(u *url.URL) []*http.Cookie {
-	jar := p.getJarByProxy("")
+	jar := p.GetJarForProxy("")
 	if jar != nil {
 		return jar.Cookies(u)
 	}
@@ -63,17 +63,9 @@ func (p *ProxyIsolatedCookieJar) Cookies(u *url.URL) []*http.Cookie {
 	return nil
 }
 
-// getJar returns the cookie jar for the given context, creating it if necessary.
-func (p *ProxyIsolatedCookieJar) getJar(ctx context.Context) http.CookieJar {
-	proxyURL := ""
-	if val := ctx.Value(proxyCtxKey{}); val != nil {
-		proxyURL = val.(string)
-	}
-
-	return p.getJarByProxy(proxyURL)
-}
-
-func (p *ProxyIsolatedCookieJar) getJarByProxy(proxyURL string) http.CookieJar {
+// GetJarForProxy returns the specific [http.CookieJar] associated with the given proxy URL.
+// This is a high-level helper to manage proxy cookies programmatically.
+func (p *ProxyIsolatedCookieJar) GetJarForProxy(proxyURL string) http.CookieJar {
 	p.mu.RLock()
 	jar, ok := p.jars[proxyURL]
 	p.mu.RUnlock()
@@ -103,4 +95,32 @@ func (p *ProxyIsolatedCookieJar) getJarByProxy(proxyURL string) http.CookieJar {
 	p.mu.Unlock()
 
 	return jar
+}
+
+// SetCookiesForProxy manually stores cookies for a specific proxy URL.
+func (p *ProxyIsolatedCookieJar) SetCookiesForProxy(proxyURL string, u *url.URL, cookies []*http.Cookie) {
+	jar := p.GetJarForProxy(proxyURL)
+	if jar != nil {
+		jar.SetCookies(u, cookies)
+	}
+}
+
+// CookiesForProxy manually retrieves cookies for a specific proxy URL.
+func (p *ProxyIsolatedCookieJar) CookiesForProxy(proxyURL string, u *url.URL) []*http.Cookie {
+	jar := p.GetJarForProxy(proxyURL)
+	if jar != nil {
+		return jar.Cookies(u)
+	}
+
+	return nil
+}
+
+// GetJar returns the cookie jar for the given context, creating it if necessary.
+func (p *ProxyIsolatedCookieJar) GetJar(ctx context.Context) http.CookieJar {
+	proxyURL := ""
+	if val := ctx.Value(proxyCtxKey{}); val != nil {
+		proxyURL = val.(string)
+	}
+
+	return p.GetJarForProxy(proxyURL)
 }

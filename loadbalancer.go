@@ -96,8 +96,7 @@ func NewLoadBalancer(cfg LoadBalancerConfig, backends ...string) (*LoadBalancer,
 					"backend", name, "fails", fails, "retry_after", retryAfter)
 			},
 			func(name string) {
-				slog.Info("backend recovered", //nolint:gosec
-					"backend", name)
+				slog.Info("backend recovered", "backend", name) //nolint:gosec
 			},
 		)
 
@@ -266,6 +265,56 @@ func (lb *LoadBalancer) Do(req *http.Request) (*http.Response, error) {
 	}
 
 	return nil, errors.New("aoni: no healthy backends available")
+}
+
+// LoadBalancerStats provides real-time state metrics for the balanced pool.
+type LoadBalancerStats struct {
+	TotalBackends     int
+	HealthyBackends   int
+	UnhealthyBackends int
+}
+
+// Stats evaluates and returns current health statistics of the registered backends.
+func (lb *LoadBalancer) Stats() LoadBalancerStats {
+	lb.mu.RLock()
+	defer lb.mu.RUnlock()
+
+	stats := LoadBalancerStats{TotalBackends: len(lb.backends)}
+	for _, b := range lb.backends {
+		if b.IsAvailable() {
+			stats.HealthyBackends++
+		} else {
+			stats.UnhealthyBackends++
+		}
+	}
+
+	return stats
+}
+
+// SetWeight updates the selection weight of a specific backend.
+// Returns true if the backend was found and updated, false otherwise.
+func (lb *LoadBalancer) SetWeight(backendURL string, weight int) bool {
+	lb.mu.Lock()
+	defer lb.mu.Unlock()
+
+	for _, b := range lb.backends {
+		if b.URL == backendURL {
+			b.Weight = weight
+			return true
+		}
+	}
+
+	return false
+}
+
+// Reset clears all failure counters and restores all backends to healthy states immediately.
+func (lb *LoadBalancer) Reset() {
+	lb.mu.RLock()
+	defer lb.mu.RUnlock()
+
+	for _, b := range lb.backends {
+		b.Reset()
+	}
 }
 
 func (lb *LoadBalancer) isAvailable(b *Backend) bool {

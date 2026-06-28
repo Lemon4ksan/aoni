@@ -38,6 +38,41 @@ func UnwrapTo[T any](c io.Closer) (T, bool) {
 	return generic.Zero[T](), false
 }
 
+// ReadAllString reads the entire content of a ReplayableBody as a string,
+// and automatically resets the body so it remains completely reusable.
+// This is a high-level helper for quick logging and assertions.
+func ReadAllString(rb ReplayableBody) (string, error) {
+	if rb == nil {
+		return "", nil
+	}
+
+	defer rb.Reset()
+
+	b, err := io.ReadAll(rb)
+	if err != nil {
+		return "", err
+	}
+
+	return string(b), nil
+}
+
+// ReadAllBytes reads the entire content of a ReplayableBody as a byte slice,
+// and automatically resets the body so it remains completely reusable.
+func ReadAllBytes(rb ReplayableBody) ([]byte, error) {
+	if rb == nil {
+		return nil, nil
+	}
+
+	defer rb.Reset()
+
+	b, err := io.ReadAll(rb)
+	if err != nil {
+		return nil, err
+	}
+
+	return b, nil
+}
+
 // ReplayableBody represents a response stream that can be reset
 // to the beginning for re-reading (for example, after previewing or logging).
 type ReplayableBody interface {

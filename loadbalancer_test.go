@@ -5,15 +5,37 @@
 package aoni
 
 import (
+	"context"
+	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+type loadMockDoer struct {
+	id    int
+	calls int32
+}
+
+func (m *loadMockDoer) Do(req *http.Request) (*http.Response, error) {
+	atomic.AddInt32(&m.calls, 1)
+
+	return &http.Response{
+		StatusCode: http.StatusOK,
+		Body:       io.NopCloser(strings.NewReader("prewarmed")),
+	}, nil
+}
+
+func (m *loadMockDoer) GetCalls() int {
+	return int(atomic.LoadInt32(&m.calls))
+}
 
 type mockHTTPServer struct {
 	server     *httptest.Server
@@ -184,6 +206,42 @@ func TestLoadBalancer(t *testing.T) {
 		assert.False(t, lb.backends[0].unhealthy.Load())
 	})
 
+	t.Run("stats_set_weight_and_reset", func(t *testing.T) {
+		t.Parallel()
+		server1 := newMockHTTPServer(t, http.StatusOK)
+		server2 := newMockHTTPServer(t, http.StatusOK)
+
+		lb, err := NewLoadBalancer(LoadBalancerConfig{}, server1.URL(), server2.URL())
+		require.NoError(t, err)
+		t.Cleanup(func() { _ = lb.Close() })
+
+		// Check Stats
+		stats := lb.Stats()
+		assert.Equal(t, 2, stats.TotalBackends)
+		assert.Equal(t, 2, stats.HealthyBackends)
+		assert.Equal(t, 0, stats.UnhealthyBackends)
+
+		// Check SetWeight
+		ok := lb.SetWeight(server1.URL(), 5)
+		assert.True(t, ok)
+		assert.Equal(t, 5, lb.backends[0].Weight)
+
+		ok = lb.SetWeight("http://non-existent", 10)
+		assert.False(t, ok)
+
+		// Check Reset
+		lb.backends[0].MarkFailed()
+		lb.backends[0].MarkFailed()
+		lb.backends[0].MarkFailed() // MaxFails defaults to 3
+		assert.True(t, lb.backends[0].unhealthy.Load())
+
+		assert.Equal(t, 1, lb.Stats().UnhealthyBackends)
+
+		lb.Reset()
+		assert.False(t, lb.backends[0].unhealthy.Load())
+		assert.Equal(t, 2, lb.Stats().HealthyBackends)
+	})
+
 	t.Run("concurrency_safety", func(t *testing.T) {
 		t.Parallel()
 		server1 := newMockHTTPServer(t, http.StatusOK)
@@ -216,13 +274,88 @@ func TestLoadBalancer(t *testing.T) {
 
 		wg.Wait()
 	})
+
+	t.Run("update_backends_handling", func(t *testing.T) {
+		t.Parallel()
+
+		lb, err := NewLoadBalancer(LoadBalancerConfig{}, "http://backend1")
+		require.NoError(t, err)
+		t.Cleanup(func() { _ = lb.Close() })
+
+		// Empty update should return early (no modifications)
+		statsBefore := lb.Stats()
+		lb.UpdateBackends()
+		assert.Equal(t, statsBefore, lb.Stats())
+
+		// Update with new backends should replace the list
+		lb.UpdateBackends("http://new-backend1", "http://new-backend2")
+		assert.Equal(t, 2, lb.Stats().TotalBackends)
+		assert.Equal(t, "http://new-backend1", lb.backends[0].URL)
+	})
+
+	t.Run("invalid_backend_url_error", func(t *testing.T) {
+		t.Parallel()
+
+		lb, err := NewLoadBalancer(LoadBalancerConfig{}, "::invalid_url::")
+		require.NoError(t, err)
+		t.Cleanup(func() { _ = lb.Close() })
+
+		req, err := http.NewRequestWithContext(t.Context(), "GET", "http://test", nil)
+		require.NoError(t, err)
+
+		_, err = lb.Do(req)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "invalid backend URL")
+	})
+
+	t.Run("context_canceled_not_marked_unhealthy", func(t *testing.T) {
+		t.Parallel()
+		server1 := newMockHTTPServer(t, http.StatusOK)
+
+		lb, err := NewLoadBalancer(LoadBalancerConfig{}, server1.URL())
+		require.NoError(t, err)
+		t.Cleanup(func() { _ = lb.Close() })
+
+		// Inject mock client that simulates a context canceled error
+		mock := DoerFunc(func(req *http.Request) (*http.Response, error) {
+			return nil, context.Canceled
+		})
+		lb.WithClients(mock)
+
+		req, err := http.NewRequestWithContext(t.Context(), "GET", "http://test", nil)
+		require.NoError(t, err)
+
+		_, err = lb.Do(req)
+		assert.ErrorIs(t, err, context.Canceled)
+		assert.False(t, lb.backends[0].unhealthy.Load(), "canceled context should not degrade backend health")
+	})
+
+	t.Run("all_backends_unhealthy_fallback_error", func(t *testing.T) {
+		t.Parallel()
+
+		lb, err := NewLoadBalancer(LoadBalancerConfig{}, "http://b1")
+		require.NoError(t, err)
+		t.Cleanup(func() { _ = lb.Close() })
+
+		// Force the single backend to be unhealthy
+		lb.backends[0].MarkFailed()
+		lb.backends[0].MarkFailed()
+		lb.backends[0].MarkFailed()
+
+		req, err := http.NewRequestWithContext(t.Context(), "GET", "http://test", nil)
+		require.NoError(t, err)
+
+		_, err = lb.Do(req)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "no healthy backends available")
+	})
 }
 
 func TestLoadBalancer_Prewarm(t *testing.T) {
 	t.Parallel()
 
-	m1 := &mockDoer{id: 1}
-	m2 := &mockDoer{id: 2}
+	m1 := &loadMockDoer{id: 1}
+	m2 := &loadMockDoer{id: 2}
 
 	lb, err := NewLoadBalancer(LoadBalancerConfig{}, "http://backend1", "http://backend2")
 	require.NoError(t, err)
