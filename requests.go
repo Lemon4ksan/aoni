@@ -120,6 +120,25 @@ func GetJSON[Resp any](
 	return result, nil
 }
 
+// GetJSONEx is like [GetJSON] but returns both the parsed response payload and the raw *http.Response.
+func GetJSONEx[Resp any](
+	ctx context.Context,
+	c Requester,
+	path string,
+	mods ...RequestModifier,
+) (*Resp, *http.Response, error) {
+	var raw *http.Response
+
+	mods = append(mods, CaptureResponse(&raw))
+
+	result, err := GetJSON[Resp](ctx, c, path, mods...)
+	if err != nil {
+		return nil, raw, err
+	}
+
+	return result, raw, nil
+}
+
 // PostForm marshals the payload, performs a POST request with URL-encoded parameters,
 // and decodes the resulting JSON response body into Resp.
 //
@@ -175,6 +194,26 @@ func PostForm[Resp any](
 	return result, nil
 }
 
+// PostFormEx is like [PostForm] but returns both the parsed response payload and the raw *http.Response.
+func PostFormEx[Resp any](
+	ctx context.Context,
+	c Requester,
+	path string,
+	payload any,
+	mods ...RequestModifier,
+) (*Resp, *http.Response, error) {
+	var raw *http.Response
+
+	mods = append(mods, CaptureResponse(&raw))
+
+	result, err := PostForm[Resp](ctx, c, path, payload, mods...)
+	if err != nil {
+		return nil, raw, err
+	}
+
+	return result, raw, nil
+}
+
 // PostJSON marshals the payload to JSON, executes a POST request, and decodes the response body.
 // It automatically configures the request headers with Content-Type and Accept set to "application/json".
 //
@@ -218,6 +257,26 @@ func PostJSON[Resp any](
 	}
 
 	return result, nil
+}
+
+// PostJSONEx is like [PostJSON] but returns both the parsed response payload and the raw *http.Response.
+func PostJSONEx[Resp any](
+	ctx context.Context,
+	c Requester,
+	path string,
+	payload any,
+	mods ...RequestModifier,
+) (*Resp, *http.Response, error) {
+	var raw *http.Response
+
+	mods = append(mods, CaptureResponse(&raw))
+
+	result, err := PostJSON[Resp](ctx, c, path, payload, mods...)
+	if err != nil {
+		return nil, raw, err
+	}
+
+	return result, raw, nil
 }
 
 // PutJSON marshals the payload to JSON, executes a PUT request, and decodes the response body.
@@ -265,6 +324,26 @@ func PutJSON[Resp any](
 	return result, nil
 }
 
+// PutJSONEx is like [PutJSON] but returns both the parsed response payload and the raw *http.Response.
+func PutJSONEx[Resp any](
+	ctx context.Context,
+	c Requester,
+	path string,
+	payload any,
+	mods ...RequestModifier,
+) (*Resp, *http.Response, error) {
+	var raw *http.Response
+
+	mods = append(mods, CaptureResponse(&raw))
+
+	result, err := PutJSON[Resp](ctx, c, path, payload, mods...)
+	if err != nil {
+		return nil, raw, err
+	}
+
+	return result, raw, nil
+}
+
 // PatchJSON marshals the payload to JSON, executes a PATCH request, and decodes the response body.
 // It automatically configures the request headers with Content-Type and Accept set to "application/json".
 //
@@ -310,6 +389,26 @@ func PatchJSON[Resp any](
 	return result, nil
 }
 
+// PatchJSONEx is like [PatchJSON] but returns both the parsed response payload and the raw *http.Response.
+func PatchJSONEx[Resp any](
+	ctx context.Context,
+	c Requester,
+	path string,
+	payload any,
+	mods ...RequestModifier,
+) (*Resp, *http.Response, error) {
+	var raw *http.Response
+
+	mods = append(mods, CaptureResponse(&raw))
+
+	result, err := PatchJSON[Resp](ctx, c, path, payload, mods...)
+	if err != nil {
+		return nil, raw, err
+	}
+
+	return result, raw, nil
+}
+
 // DeleteJSON marshals the payload to JSON, executes a DELETE request, and decodes the response body.
 // It automatically configures the request headers with Content-Type and Accept set to "application/json".
 //
@@ -353,6 +452,26 @@ func DeleteJSON[Resp any](
 	}
 
 	return result, nil
+}
+
+// DeleteJSONEx is like [DeleteJSON] but returns both the parsed response payload and the raw *http.Response.
+func DeleteJSONEx[Resp any](
+	ctx context.Context,
+	c Requester,
+	path string,
+	payload any,
+	mods ...RequestModifier,
+) (*Resp, *http.Response, error) {
+	var raw *http.Response
+
+	mods = append(mods, CaptureResponse(&raw))
+
+	result, err := DeleteJSON[Resp](ctx, c, path, payload, mods...)
+	if err != nil {
+		return nil, raw, err
+	}
+
+	return result, raw, nil
 }
 
 func validateAndMarshal(payload any) (io.Reader, error) {
