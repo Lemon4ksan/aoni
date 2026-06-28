@@ -16,7 +16,7 @@ type cookieJarTransport struct {
 // RoundTrip automatically injects cookies before sending and extracts them from the response.
 // Works correctly for every redirect, preserving the original request's context.
 func (t *cookieJarTransport) RoundTrip(req *http.Request) (*http.Response, error) {
-	jar := t.cookieJar.getJar(req.Context())
+	jar := t.cookieJar.GetJar(req.Context())
 	if jar != nil {
 		for _, cookie := range jar.Cookies(req.URL) {
 			req.AddCookie(cookie)

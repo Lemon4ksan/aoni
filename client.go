@@ -755,6 +755,55 @@ func (c *Client) WithTimeout(d time.Duration) *Client {
 	return newClient
 }
 
+// WithBrowserProfile configures both the TLS fingerprint, matching HTTP/2 framed settings,
+// and default browser headers (like User-Agent, Sec-Ch-Ua, and Accept orders) in a single call.
+// This prevents fingerprint mismatches between TLS and HTTP/2 layers.
+// Use [WithH2FramedTransport] and [WithUserAgent] to configure HTTP/2 settings and User-Agent separately.
+func (c *Client) WithBrowserProfile(browser BrowserID, os profiles.OSKey) *Client {
+	newClient := c.WithTLSFingerprint(browser)
+
+	var (
+		h2Settings HTTP2Settings
+		ua         string
+	)
+
+	switch browser {
+	case BrowserFirefox:
+		// Use Firefox presets
+		h2Settings = HTTP2Settings{
+			HeaderTableSize:   65536,
+			EnablePush:        0,
+			InitialWindowSize: 131072,
+			MaxFrameSize:      16384,
+			ConnectionFlow:    12517377,
+			PriorityWeight:    41,
+		}
+
+		ua = "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:148.0) Gecko/20100101 Firefox/148.0"
+		if os.IsMobile() {
+			ua = "Mozilla/5.0 (Android 16; Mobile; rv:148.0) Gecko/148.0 Firefox/148.0"
+		}
+
+	default:
+		// Default to Chrome presets
+		h2Settings = HTTP2Settings{
+			HeaderTableSize:   65536,
+			EnablePush:        0,
+			InitialWindowSize: 6291456,
+			MaxHeaderListSize: 262144,
+			ConnectionFlow:    15663105,
+			PriorityWeight:    255,
+			PriorityExclusive: true,
+		}
+		ua = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/145.0.0.0 Safari/537.36"
+	}
+
+	newClient = newClient.WithH2FramedTransport(h2Settings)
+	newClient = newClient.WithUserAgent(ua)
+
+	return newClient
+}
+
 // WithRedirectLimit returns a clone of c that stops following
 // redirects after max. A value of 0 disables redirects entirely.
 // A negative value restores Go's default behavior (10 hops).
