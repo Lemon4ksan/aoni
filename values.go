@@ -5,6 +5,7 @@
 package aoni
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/url"
@@ -37,6 +38,11 @@ func (u *Uint64String) UnmarshalJSON(b []byte) error {
 	return nil
 }
 
+// MarshalJSON serializes the [Uint64String] back as a JSON string representation.
+func (u Uint64String) MarshalJSON() ([]byte, error) {
+	return json.Marshal(strconv.FormatUint(uint64(u), 10))
+}
+
 // Int64String parses int64 values from string representations in JSON.
 // It safely handles raw integers, JSON null, or empty strings.
 type Int64String int64
@@ -59,6 +65,11 @@ func (i *Int64String) UnmarshalJSON(b []byte) error {
 	return nil
 }
 
+// MarshalJSON serializes the [Int64String] back as a JSON string representation.
+func (i Int64String) MarshalJSON() ([]byte, error) {
+	return json.Marshal(strconv.FormatInt(int64(i), 10))
+}
+
 // Float64String parses float64 values from string representations in JSON.
 type Float64String float64
 
@@ -78,6 +89,11 @@ func (f *Float64String) UnmarshalJSON(b []byte) error {
 	*f = Float64String(val)
 
 	return nil
+}
+
+// MarshalJSON serializes the [Float64String] back as a JSON string representation.
+func (f Float64String) MarshalJSON() ([]byte, error) {
+	return json.Marshal(strconv.FormatFloat(float64(f), 'f', -1, 64))
 }
 
 // BoolInt parses booleans from integers or strings in JSON.
@@ -106,6 +122,15 @@ func (bi *BoolInt) UnmarshalJSON(b []byte) error {
 	return nil
 }
 
+// MarshalJSON serializes [BoolInt] back as numeric "1" or "0" JSON representations.
+func (bi BoolInt) MarshalJSON() ([]byte, error) {
+	if bi {
+		return []byte("1"), nil
+	}
+
+	return []byte("0"), nil
+}
+
 // UnixTimestamp parses Unix timestamps from strings or numbers in JSON.
 type UnixTimestamp time.Time
 
@@ -127,9 +152,18 @@ func (t *UnixTimestamp) UnmarshalJSON(b []byte) error {
 	return nil
 }
 
+// MarshalJSON serializes the [UnixTimestamp] back as a numeric Unix epoch timestamp.
+func (t UnixTimestamp) MarshalJSON() ([]byte, error) {
+	if time.Time(t).IsZero() {
+		return []byte("0"), nil
+	}
+
+	return []byte(strconv.FormatInt(time.Time(t).Unix(), 10)), nil
+}
+
 // Time returns the [time.Time] value.
-func (t *UnixTimestamp) Time() time.Time {
-	return time.Time(*t)
+func (t UnixTimestamp) Time() time.Time {
+	return time.Time(t)
 }
 
 // StructToValues encodes a struct into [url.Values] using "url" or "json" tags.
