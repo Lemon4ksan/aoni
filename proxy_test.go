@@ -225,6 +225,80 @@ func TestProxyRotator(t *testing.T) {
 
 		assert.Equal(t, iterations, totalCalls)
 	})
+
+	t.Run("update_clients_empty_returns_early", func(t *testing.T) {
+		t.Parallel()
+
+		m1 := &mockDoer{id: 1}
+		r, err := NewProxyRotator(ProxyRotatorConfig{}, ClientWithProxy{Client: m1})
+		require.NoError(t, err)
+		t.Cleanup(func() { _ = r.Close() })
+
+		statsBefore := r.Stats()
+		r.UpdateClients()
+		assert.Equal(t, statsBefore, r.Stats())
+	})
+}
+
+func TestProxyRotator_FromStrings(t *testing.T) {
+	t.Parallel()
+
+	t.Run("valid_creation", func(t *testing.T) {
+		t.Parallel()
+
+		cfg := ProxyRotatorConfig{}
+		r, err := NewProxyRotatorFromStrings(cfg, "http://1.2.3.4:8080", "socks5://5.6.7.8:1080")
+		require.NoError(t, err)
+		t.Cleanup(func() { _ = r.Close() })
+
+		stats := r.Stats()
+		assert.Equal(t, 2, stats.TotalProxies)
+		assert.Equal(t, "http://1.2.3.4:8080", r.clients[0].proxyURL)
+	})
+
+	t.Run("empty_error", func(t *testing.T) {
+		t.Parallel()
+
+		cfg := ProxyRotatorConfig{}
+		_, err := NewProxyRotatorFromStrings(cfg)
+		assert.Error(t, err)
+	})
+
+	t.Run("invalid_url_error", func(t *testing.T) {
+		t.Parallel()
+
+		cfg := ProxyRotatorConfig{}
+		_, err := NewProxyRotatorFromStrings(cfg, " ://invalid")
+		assert.Error(t, err)
+	})
+}
+
+func TestProxyRotator_StatsAndReset(t *testing.T) {
+	t.Parallel()
+
+	m1 := &mockDoer{id: 1}
+	m2 := &mockDoer{id: 2}
+
+	r, err := NewProxyRotator(ProxyRotatorConfig{}, ClientWithProxy{Client: m1}, ClientWithProxy{Client: m2})
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = r.Close() })
+
+	// Check Stats
+	stats := r.Stats()
+	assert.Equal(t, 2, stats.TotalProxies)
+	assert.Equal(t, 2, stats.HealthyProxies)
+	assert.Equal(t, 0, stats.UnhealthyProxies)
+
+	// Check Reset
+	r.clients[0].MarkFailed()
+	r.clients[0].MarkFailed()
+	r.clients[0].MarkFailed() // MaxFails defaults to 3
+	assert.True(t, r.clients[0].unhealthy.Load())
+	assert.Equal(t, 1, r.Stats().UnhealthyProxies)
+
+	r.Reset()
+	assert.False(t, r.clients[0].unhealthy.Load())
+	assert.Equal(t, 2, r.Stats().HealthyProxies)
 }
 
 func TestProxyRotator_HealthCheck(t *testing.T) {
@@ -380,6 +454,129 @@ func TestProxyConfig_CustomTransport(t *testing.T) {
 		require.NoError(t, err)
 		assert.Equal(t, mw, client.Transport)
 	})
+
+	t.Run("factory_error_handling", func(t *testing.T) {
+		t.Parallel()
+
+		cfg := ProxyConfig{
+			TransportFactory: func(c ProxyConfig) (http.RoundTripper, error) {
+				return nil, errors.New("factory simulation error")
+			},
+		}
+		_, err := NewProxyClient(cfg)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "factory simulation error")
+	})
+}
+
+func TestProxyRotator_StickySession(t *testing.T) {
+	t.Parallel()
+
+	t.Run("sticky_key_selectors", func(t *testing.T) {
+		t.Parallel()
+
+		req, err := http.NewRequestWithContext(t.Context(), "GET", "http://test", nil)
+		require.NoError(t, err)
+
+		req.AddCookie(&http.Cookie{Name: "session-id", Value: "abc"})
+		req.Header.Set("X-Custom-Sticky", "val-xyz")
+
+		// Test Cookie selector (now uses "session-id" to match the configured cookie)
+		sel1 := StickyKeyFromCookie("session-id")
+		assert.Equal(t, "abc", sel1(req))
+
+		// Test Cookie selector missing
+		sel1Missing := StickyKeyFromCookie("non-existent")
+		sel1Proxy := sel1Missing(req)
+		assert.Empty(t, sel1Proxy)
+
+		// Test Header selector (now uses "X-Custom-Sticky" to match the set header)
+		sel2 := StickyKeyFromHeader("X-Custom-Sticky")
+		assert.Equal(t, "val-xyz", sel2(req))
+	})
+
+	t.Run("with_sticky_sessions_copy", func(t *testing.T) {
+		t.Parallel()
+
+		m1 := &mockDoer{id: 1}
+		r, err := NewProxyRotator(ProxyRotatorConfig{}, ClientWithProxy{Client: m1})
+		require.NoError(t, err)
+		t.Cleanup(func() { _ = r.Close() })
+
+		stickyFn := func(req *http.Request) string { return "sticky" }
+		copied := r.WithStickySessions(stickyFn)
+		assert.NotNil(t, copied)
+		assert.NotNil(t, copied.stickyKeyFunc)
+	})
+
+	t.Run("sticky_routing_and_fallback", func(t *testing.T) {
+		t.Parallel()
+
+		m1 := &mockDoer{id: 1}
+		m2 := &mockDoer{id: 2}
+
+		r, err := NewProxyRotator(
+			ProxyRotatorConfig{},
+			ClientWithProxy{Client: m1, ProxyURL: "http://proxy1"},
+			ClientWithProxy{Client: m2, ProxyURL: "http://proxy2"},
+		)
+		require.NoError(t, err)
+		t.Cleanup(func() { _ = r.Close() })
+
+		// Inject sticky extractor
+		r.stickyKeyFunc = func(req *http.Request) string {
+			return "session-id-1"
+		}
+
+		req, err := http.NewRequestWithContext(t.Context(), "GET", "http://test", nil)
+		require.NoError(t, err)
+
+		// First request: establishes sticky session
+		_, err = r.Do(req)
+		require.NoError(t, err)
+
+		r.mu.Lock()
+		entry := r.sessions["session-id-1"]
+		r.mu.Unlock()
+		require.NotNil(t, entry)
+		activeIdx := entry.clientIdx
+
+		// Second request: must hit the exact same sticky client index
+		_, err = r.Do(req)
+		require.NoError(t, err)
+
+		if activeIdx == 0 {
+			assert.Equal(t, 2, m1.GetCalls())
+			assert.Equal(t, 0, m2.GetCalls())
+		} else {
+			assert.Equal(t, 0, m1.GetCalls())
+			assert.Equal(t, 2, m2.GetCalls())
+		}
+
+		// Mock sticky client becoming unhealthy
+		r.clients[activeIdx].unhealthy.Store(true)
+		r.clients[activeIdx].recoveredAt.Store(time.Now().Add(time.Hour).UnixNano())
+
+		// Third request: should bypass unhealthy sticky client and use fallback
+		_, err = r.Do(req)
+		require.NoError(t, err)
+
+		if activeIdx == 0 {
+			assert.Equal(t, 2, m1.GetCalls())
+			assert.Equal(t, 1, m2.GetCalls())
+		} else {
+			assert.Equal(t, 1, m1.GetCalls())
+			assert.Equal(t, 2, m2.GetCalls())
+		}
+
+		// Obsolete out-of-bounds sticky session index fallback
+		r.mu.Lock()
+		r.sessions["session-id-1"].clientIdx = 999
+		r.mu.Unlock()
+
+		_, err = r.Do(req)
+		require.NoError(t, err)
+	})
 }
 
 func TestProxyRotator_StickySessionCleanup(t *testing.T) {
@@ -439,4 +636,43 @@ func TestProxyRotator_Prewarm(t *testing.T) {
 
 	assert.Equal(t, 1, m1.GetCalls())
 	assert.Equal(t, 1, m2.GetCalls())
+}
+
+func TestProxyRotator_ErrorPaths(t *testing.T) {
+	t.Parallel()
+
+	t.Run("all_proxies_failed", func(t *testing.T) {
+		t.Parallel()
+
+		m1 := &mockDoer{id: 1, forceError: true}
+		r, err := NewProxyRotator(ProxyRotatorConfig{MaxFails: 1}, ClientWithProxy{Client: m1})
+		require.NoError(t, err)
+		t.Cleanup(func() { _ = r.Close() })
+
+		req, err := http.NewRequestWithContext(t.Context(), "GET", "http://test", nil)
+		require.NoError(t, err)
+
+		_, err = r.Do(req)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "all proxies failed")
+	})
+
+	t.Run("no_healthy_proxies", func(t *testing.T) {
+		t.Parallel()
+
+		m1 := &mockDoer{id: 1}
+		r, err := NewProxyRotator(ProxyRotatorConfig{}, ClientWithProxy{Client: m1})
+		require.NoError(t, err)
+		t.Cleanup(func() { _ = r.Close() })
+
+		r.clients[0].unhealthy.Store(true)
+		r.clients[0].recoveredAt.Store(time.Now().Add(time.Hour).UnixNano())
+
+		req, err := http.NewRequestWithContext(t.Context(), "GET", "http://test", nil)
+		require.NoError(t, err)
+
+		_, err = r.Do(req)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "no healthy proxies available")
+	})
 }

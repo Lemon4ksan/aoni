@@ -206,8 +206,72 @@ func NewProxyRotator(config ProxyRotatorConfig, clients ...ClientWithProxy) (*Pr
 	return r, nil
 }
 
+// NewProxyRotatorFromStrings creates a [ProxyRotator] from a list of raw proxy URL strings.
+// It automatically instantiates standard http.Clients configured with the respective proxies.
+// This is a high-level helper to easily set up a rotating pool from proxy list configurations.
+func NewProxyRotatorFromStrings(config ProxyRotatorConfig, proxyURLs ...string) (*ProxyRotator, error) {
+	if len(proxyURLs) == 0 {
+		return nil, errors.New("aoni: proxy rotator requires at least one client")
+	}
+
+	var clients []ClientWithProxy
+	for _, pStr := range proxyURLs {
+		u, err := url.Parse(pStr)
+		if err != nil {
+			return nil, fmt.Errorf("aoni: invalid proxy URL %q: %w", pStr, err)
+		}
+
+		httpClient, err := NewProxyClient(ProxyConfig{
+			ProxyURL: pStr,
+		})
+		if err != nil {
+			return nil, err
+		}
+
+		clients = append(clients, ClientWithProxy{
+			Client:   httpClient,
+			ProxyURL: u.String(),
+		})
+	}
+
+	return NewProxyRotator(config, clients...)
+}
+
+// ProxyRotatorStats provides real-time state metrics for the rotating proxy pool.
+type ProxyRotatorStats struct {
+	TotalProxies     int
+	HealthyProxies   int
+	UnhealthyProxies int
+}
+
+// Stats evaluates and returns current health statistics of the registered proxy clients.
+func (r *ProxyRotator) Stats() ProxyRotatorStats {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	stats := ProxyRotatorStats{TotalProxies: len(r.clients)}
+	for _, c := range r.clients {
+		if c.IsAvailable() {
+			stats.HealthyProxies++
+		} else {
+			stats.UnhealthyProxies++
+		}
+	}
+
+	return stats
+}
+
+// Reset clears failure states and restores all registered proxy clients to a healthy state.
+func (r *ProxyRotator) Reset() {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	for _, c := range r.clients {
+		c.Reset()
+	}
+}
+
 // UpdateClients replaces the active pool and resets all session mappings.
-// If clients is empty, it returns without changes.
 func (r *ProxyRotator) UpdateClients(clients ...ClientWithProxy) {
 	if len(clients) == 0 {
 		return
