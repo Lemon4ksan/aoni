@@ -116,6 +116,21 @@ func (ns *NamespaceSocket) On(event string, handler func(args []json.RawMessage)
 	ns.conn.setNamespaceHandler(ns.nsp, event, handler)
 }
 
+// OnAny registers a catch-all event listener on this specific namespace
+// that intercepts all incoming Socket.IO events for the namespace.
+func (ns *NamespaceSocket) OnAny(handler func(event string, args []json.RawMessage)) {
+	ns.conn.setNamespaceHandler(ns.nsp, "*", func(args []json.RawMessage) {
+		if len(args) == 0 {
+			return
+		}
+
+		var eventName string
+		if err := json.Unmarshal(args[0], &eventName); err == nil {
+			handler(eventName, args[1:])
+		}
+	})
+}
+
 // Emit sends a Socket.IO event on this namespace.
 // If the last argument is a func(args []json.RawMessage), it is used as an ACK callback.
 func (ns *NamespaceSocket) Emit(event string, args ...any) error {
@@ -269,116 +284,31 @@ func DialSocketIO(
 	return sio, nil
 }
 
-// doHandshake performs the EIO open + SIO CONNECT handshake.
-func (s *SocketIOConn) doHandshake(ctx context.Context) error {
-	// Read EIO OPEN packet
-	conn := s.conn.Load()
-	if conn == nil {
-		return errors.New("aoni sio: handshake failed: connection closed")
-	}
-
-	pType, payload, err := readEIOPacketCtx(ctx, *conn)
-	if err != nil {
-		return fmt.Errorf("aoni sio: handshake failed: %w", err)
-	}
-
-	if pType != eioOpen {
-		return fmt.Errorf("aoni sio: expected EIO open packet, got %c", pType)
-	}
-
-	var params struct {
-		SID          string `json:"sid"`
-		PingInterval int    `json:"pingInterval"`
-		PingTimeout  int    `json:"pingTimeout"`
-	}
-	if err := json.Unmarshal(payload, &params); err != nil {
-		return fmt.Errorf("aoni sio: unmarshal open params: %w", err)
-	}
-
-	s.sid = params.SID
-	s.pingInterval = time.Duration(params.PingInterval) * time.Millisecond
-
-	// Send SIO CONNECT with auth
-	if err := s.sendConnect(); err != nil {
-		return fmt.Errorf("aoni sio: send connect: %w", err)
-	}
-
-	// Read SIO CONNECT response
-	pType, payload, err = readEIOPacketCtx(ctx, *conn)
-	if err != nil {
-		return fmt.Errorf("aoni sio: read connect response: %w", err)
-	}
-
-	if pType != eioMessage || len(payload) < 1 || payload[0] != sioConnect {
-		if pType == eioMessage && len(payload) > 0 && payload[0] == sioConnectError {
-			return fmt.Errorf("aoni sio: connect rejected: %s", string(payload[1:]))
-		}
-
-		return fmt.Errorf("aoni sio: unexpected connect response: %c%s", pType, string(payload))
-	}
-
-	// Parse CONNECT response for sid/pid
-	var connectResp struct {
-		SID string `json:"sid"`
-		PID string `json:"pid"`
-	}
-
-	_ = json.Unmarshal(payload[1:], &connectResp)
-	if connectResp.PID != "" {
-		s.pid = connectResp.PID
-	}
-
-	return nil
-}
-
-// sendConnect sends a Socket.IO CONNECT packet with optional auth.
-func (s *SocketIOConn) sendConnect() error {
-	var data json.RawMessage
-
-	authData := make(map[string]any)
-	if s.config.Auth != nil {
-		switch v := s.config.Auth.(type) {
-		case map[string]any:
-			maps.Copy(authData, v)
-		default:
-			b, err := json.Marshal(s.config.Auth)
-			if err != nil {
-				return fmt.Errorf("aoni sio: marshal auth: %w", err)
-			}
-
-			authData["token"] = json.RawMessage(b)
-		}
-	}
-
-	if s.pid != "" {
-		authData["pid"] = s.pid
-	}
-
-	if s.offset != "" {
-		authData["offset"] = s.offset
-	}
-
-	if len(authData) > 0 {
-		var err error
-
-		data, err = json.Marshal(authData)
-		if err != nil {
-			return fmt.Errorf("aoni sio: marshal auth: %w", err)
-		}
-	}
-
-	payload := encodeSIOPacket(sioPacket{
-		Type:      sioConnect,
-		Namespace: s.namespace,
-		Data:      data,
-	})
-
-	return s.writeEIOPacket(eioMessage, payload)
+// ReconnectionAttempts returns the current consecutive reconnection attempt count.
+func (s *SocketIOConn) ReconnectionAttempts() int {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.attemptCount
 }
 
 // On registers a handler for a specific Socket.IO event on the default namespace.
 func (s *SocketIOConn) On(event string, handler func(args []json.RawMessage)) {
 	s.setNamespaceHandler(s.namespace, event, handler)
+}
+
+// OnAny registers a catch-all event listener on the default namespace
+// that intercepts all incoming Socket.IO events.
+func (s *SocketIOConn) OnAny(handler func(event string, args []json.RawMessage)) {
+	s.setNamespaceHandler(s.namespace, "*", func(args []json.RawMessage) {
+		if len(args) == 0 {
+			return
+		}
+
+		var eventName string
+		if err := json.Unmarshal(args[0], &eventName); err == nil {
+			handler(eventName, args[1:])
+		}
+	})
 }
 
 // OnNamespace returns a [NamespaceSocket] scoped to the given namespace.
@@ -938,6 +868,113 @@ func (s *SocketIOConn) reconnectLoop() {
 
 		return
 	}
+}
+
+// doHandshake performs the EIO open + SIO CONNECT handshake.
+func (s *SocketIOConn) doHandshake(ctx context.Context) error {
+	// Read EIO OPEN packet
+	conn := s.conn.Load()
+	if conn == nil {
+		return errors.New("aoni sio: handshake failed: connection closed")
+	}
+
+	pType, payload, err := readEIOPacketCtx(ctx, *conn)
+	if err != nil {
+		return fmt.Errorf("aoni sio: handshake failed: %w", err)
+	}
+
+	if pType != eioOpen {
+		return fmt.Errorf("aoni sio: expected EIO open packet, got %c", pType)
+	}
+
+	var params struct {
+		SID          string `json:"sid"`
+		PingInterval int    `json:"pingInterval"`
+		PingTimeout  int    `json:"pingTimeout"`
+	}
+	if err := json.Unmarshal(payload, &params); err != nil {
+		return fmt.Errorf("aoni sio: unmarshal open params: %w", err)
+	}
+
+	s.sid = params.SID
+	s.pingInterval = time.Duration(params.PingInterval) * time.Millisecond
+
+	// Send SIO CONNECT with auth
+	if err := s.sendConnect(); err != nil {
+		return fmt.Errorf("aoni sio: send connect: %w", err)
+	}
+
+	// Read SIO CONNECT response
+	pType, payload, err = readEIOPacketCtx(ctx, *conn)
+	if err != nil {
+		return fmt.Errorf("aoni sio: read connect response: %w", err)
+	}
+
+	if pType != eioMessage || len(payload) < 1 || payload[0] != sioConnect {
+		if pType == eioMessage && len(payload) > 0 && payload[0] == sioConnectError {
+			return fmt.Errorf("aoni sio: connect rejected: %s", string(payload[1:]))
+		}
+
+		return fmt.Errorf("aoni sio: unexpected connect response: %c%s", pType, string(payload))
+	}
+
+	// Parse CONNECT response for sid/pid
+	var connectResp struct {
+		SID string `json:"sid"`
+		PID string `json:"pid"`
+	}
+
+	_ = json.Unmarshal(payload[1:], &connectResp)
+	if connectResp.PID != "" {
+		s.pid = connectResp.PID
+	}
+
+	return nil
+}
+
+// sendConnect sends a Socket.IO CONNECT packet with optional auth.
+func (s *SocketIOConn) sendConnect() error {
+	var data json.RawMessage
+
+	authData := make(map[string]any)
+	if s.config.Auth != nil {
+		switch v := s.config.Auth.(type) {
+		case map[string]any:
+			maps.Copy(authData, v)
+		default:
+			b, err := json.Marshal(s.config.Auth)
+			if err != nil {
+				return fmt.Errorf("aoni sio: marshal auth: %w", err)
+			}
+
+			authData["token"] = json.RawMessage(b)
+		}
+	}
+
+	if s.pid != "" {
+		authData["pid"] = s.pid
+	}
+
+	if s.offset != "" {
+		authData["offset"] = s.offset
+	}
+
+	if len(authData) > 0 {
+		var err error
+
+		data, err = json.Marshal(authData)
+		if err != nil {
+			return fmt.Errorf("aoni sio: marshal auth: %w", err)
+		}
+	}
+
+	payload := encodeSIOPacket(sioPacket{
+		Type:      sioConnect,
+		Namespace: s.namespace,
+		Data:      data,
+	})
+
+	return s.writeEIOPacket(eioMessage, payload)
 }
 
 func (s *SocketIOConn) readEIOPacket() (byte, []byte, error) {
