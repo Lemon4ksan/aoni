@@ -424,6 +424,12 @@ func (s *SocketIOConn) SID() string {
 	return s.sid
 }
 
+func (s *SocketIOConn) getClosedChan() chan struct{} {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.closed
+}
+
 // Connected reports whether the connection is currently open.
 func (s *SocketIOConn) Connected() bool {
 	s.stateMu.RLock()
@@ -673,7 +679,9 @@ func (s *SocketIOConn) handleSIOPacket(data []byte) {
 		}
 
 		if connectResp.PID != "" {
+			s.mu.Lock()
 			s.pid = connectResp.PID
+			s.mu.Unlock()
 		}
 
 	case sioEvent:
@@ -753,12 +761,20 @@ func (s *SocketIOConn) handleAck(id int64, data json.RawMessage) {
 }
 
 func (s *SocketIOConn) heartbeatLoop() {
-	ticker := time.NewTicker(s.pingInterval)
+	s.mu.RLock()
+	interval := s.pingInterval
+	s.mu.RUnlock()
+
+	if interval <= 0 {
+		interval = 25 * time.Second
+	}
+
+	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
 
 	for {
 		select {
-		case <-s.closed:
+		case <-s.getClosedChan():
 			return
 		case <-ticker.C:
 			s.pongMu.Lock()
@@ -777,14 +793,18 @@ func (s *SocketIOConn) heartbeatLoop() {
 				// Ping timeout — trigger reconnection.
 				s.mu.Lock()
 				if !s.skipReconnect {
-					close(s.closed)
+					select {
+					case <-s.closed:
+					default:
+						close(s.closed)
+					}
 				}
 
 				s.mu.Unlock()
 
 				return
 
-			case <-s.closed:
+			case <-s.getClosedChan():
 				return
 			}
 		}
@@ -794,26 +814,26 @@ func (s *SocketIOConn) heartbeatLoop() {
 func (s *SocketIOConn) reconnectLoop() {
 	for {
 		select {
-		case <-s.closed:
+		case <-s.getClosedChan():
 			return
 		default:
 		}
 
 		delay := s.backoff.Next()
+
+		s.mu.Lock()
 		s.attemptCount++
+		attempt := s.attemptCount
+		cb := s.onReconnecting
+		s.mu.Unlock()
 
 		timer := time.NewTimer(delay)
 		select {
-		case <-s.closed:
+		case <-s.getClosedChan():
 			timer.Stop()
 			return
 		case <-timer.C:
 		}
-
-		s.mu.RLock()
-		cb := s.onReconnecting
-		attempt := s.attemptCount
-		s.mu.RUnlock()
 
 		if cb != nil {
 			go cb(attempt)
@@ -825,11 +845,12 @@ func (s *SocketIOConn) reconnectLoop() {
 		cancel()
 
 		if err != nil {
-			if s.config.ReconnectionAttempts > 0 && s.attemptCount >= s.config.ReconnectionAttempts {
-				s.mu.RLock()
-				failCb := s.onReconnectFailed
-				s.mu.RUnlock()
+			s.mu.RLock()
+			attempt = s.attemptCount
+			failCb := s.onReconnectFailed
+			s.mu.RUnlock()
 
+			if s.config.ReconnectionAttempts > 0 && attempt >= s.config.ReconnectionAttempts {
 				if failCb != nil {
 					go failCb()
 				}
@@ -854,11 +875,12 @@ func (s *SocketIOConn) reconnectLoop() {
 		if err := s.doHandshake(context.Background()); err != nil {
 			_ = conn.Close()
 
-			if s.config.ReconnectionAttempts > 0 && s.attemptCount >= s.config.ReconnectionAttempts {
-				s.mu.RLock()
-				failCb := s.onReconnectFailed
-				s.mu.RUnlock()
+			s.mu.RLock()
+			attempt = s.attemptCount
+			failCb := s.onReconnectFailed
+			s.mu.RUnlock()
 
+			if s.config.ReconnectionAttempts > 0 && attempt >= s.config.ReconnectionAttempts {
 				if failCb != nil {
 					go failCb()
 				}
@@ -876,11 +898,11 @@ func (s *SocketIOConn) reconnectLoop() {
 		s.stateMu.Unlock()
 
 		s.backoff.Reset()
-		s.attemptCount = 0
 
-		s.mu.RLock()
+		s.mu.Lock()
+		s.attemptCount = 0
 		reconnectedCb := s.onReconnected
-		s.mu.RUnlock()
+		s.mu.Unlock()
 
 		if reconnectedCb != nil {
 			go reconnectedCb()
@@ -919,8 +941,10 @@ func (s *SocketIOConn) doHandshake(ctx context.Context) error {
 		return fmt.Errorf("aoni sio: unmarshal open params: %w", err)
 	}
 
+	s.mu.Lock()
 	s.sid = params.SID
 	s.pingInterval = time.Duration(params.PingInterval) * time.Millisecond
+	s.mu.Unlock()
 
 	// Send SIO CONNECT with auth
 	if err := s.sendConnect(); err != nil {
@@ -949,7 +973,9 @@ func (s *SocketIOConn) doHandshake(ctx context.Context) error {
 
 	_ = json.Unmarshal(payload[1:], &connectResp)
 	if connectResp.PID != "" {
+		s.mu.Lock()
 		s.pid = connectResp.PID
+		s.mu.Unlock()
 	}
 
 	return nil
@@ -974,12 +1000,17 @@ func (s *SocketIOConn) sendConnect() error {
 		}
 	}
 
-	if s.pid != "" {
-		authData["pid"] = s.pid
+	s.mu.RLock()
+	pid := s.pid
+	offset := s.offset
+	s.mu.RUnlock()
+
+	if pid != "" {
+		authData["pid"] = pid
 	}
 
-	if s.offset != "" {
-		authData["offset"] = s.offset
+	if offset != "" {
+		authData["offset"] = offset
 	}
 
 	if len(authData) > 0 {
