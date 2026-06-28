@@ -6,7 +6,7 @@ package aoni
 
 import (
 	"math"
-	"sort"
+	"slices"
 	"sync"
 	"time"
 )
@@ -77,13 +77,9 @@ func (t *RTTTracker) Percentile(p float64) time.Duration {
 
 	sorted := make([]time.Duration, t.count)
 	copy(sorted, t.samples[:t.count])
-	sort.Slice(sorted, func(i, j int) bool { return sorted[i] < sorted[j] })
+	slices.Sort(sorted)
 
-	idx := int(math.Ceil(p/100*float64(len(sorted)))) - 1
-	if idx < 0 {
-		idx = 0
-	}
-
+	idx := max(int(math.Ceil(p/100*float64(len(sorted))))-1, 0)
 	if idx >= len(sorted) {
 		idx = len(sorted) - 1
 	}
@@ -108,6 +104,44 @@ func (t *RTTTracker) MinRTT() time.Duration {
 	return t.minRTT
 }
 
+// MaxRTT returns the maximum observed RTT within the current sliding window.
+// Returns 0 if no samples are recorded.
+func (t *RTTTracker) MaxRTT() time.Duration {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+
+	if t.count == 0 {
+		return 0
+	}
+
+	max := t.samples[0]
+	for i := 1; i < t.count; i++ {
+		if t.samples[i] > max {
+			max = t.samples[i]
+		}
+	}
+
+	return max
+}
+
+// AverageRTT returns the simple mathematical average (mean) of all recorded RTT samples.
+// Returns 0 if no samples are recorded.
+func (t *RTTTracker) AverageRTT() time.Duration {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+
+	if t.count == 0 {
+		return 0
+	}
+
+	var sum int64
+	for i := range t.count {
+		sum += int64(t.samples[i])
+	}
+
+	return time.Duration(sum / int64(t.count))
+}
+
 // SmoothedRTT returns the exponentially smoothed RTT (EWMA).
 func (t *RTTTracker) SmoothedRTT() time.Duration {
 	t.mu.Lock()
@@ -120,6 +154,21 @@ func (t *RTTTracker) Count() int {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	return t.count
+}
+
+// Reset clears all recorded RTT samples and resets the metrics.
+func (t *RTTTracker) Reset() {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+
+	t.writeIdx = 0
+	t.count = 0
+	t.minRTT = 0
+
+	t.smoothedRTT = 0
+	for i := range t.samples {
+		t.samples[i] = 0
+	}
 }
 
 // DynamicHedgingConfig configures the dynamic hedging delay calculation.
