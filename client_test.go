@@ -1017,7 +1017,7 @@ func TestClient_JA4CallbackImmutability(t *testing.T) {
 	assert.Nil(t, client3.ja4Callback)
 }
 
-func TestTraceJA4(t *testing.T) {
+func TestTraceClientJA4(t *testing.T) {
 	t.Parallel()
 
 	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

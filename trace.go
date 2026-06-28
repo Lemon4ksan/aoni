@@ -48,9 +48,35 @@ type TraceInfo struct {
 	// ResponseSize records the response payload size in bytes.
 	ResponseSize int64
 
+	// RemoteAddr holds the IP address and port of the remote server connected to.
+	RemoteAddr string
+
 	// JA4 holds the JA4 fingerprints computed during the request.
 	// Populated only when [TraceJA4] is used as a request modifier.
 	JA4 *ja4.Report
+}
+
+// Start begins tracking total and content transfer timings.
+// It returns a completion function that should be called once the
+// response body has been completely read and closed.
+func (t *TraceInfo) Start() func(resp *http.Response) {
+	start := time.Now()
+
+	return func(resp *http.Response) {
+		t.Total = time.Since(start)
+		if resp != nil {
+			if resp.ContentLength > 0 {
+				t.ResponseSize = resp.ContentLength
+			}
+
+			if t.ServerProcessing > 0 {
+				setupTime := t.DNSLookup + t.TCPConn + t.TLSHandshake + t.ServerProcessing
+				if t.Total > setupTime {
+					t.ContentTransfer = t.Total - setupTime
+				}
+			}
+		}
+	}
 }
 
 // Trace returns a [RequestModifier] that registers a connection tracer on the active request.
@@ -60,13 +86,19 @@ func Trace(target *TraceInfo) RequestModifier {
 		var dnsStart, connectStart, tlsStart, gotConn time.Time
 
 		trace := &httptrace.ClientTrace{
-			DNSStart:             func(_ httptrace.DNSStartInfo) { dnsStart = time.Now() },
-			DNSDone:              func(_ httptrace.DNSDoneInfo) { target.DNSLookup = time.Since(dnsStart) },
-			ConnectStart:         func(_, _ string) { connectStart = time.Now() },
-			ConnectDone:          func(_, _ string, _ error) { target.TCPConn = time.Since(connectStart) },
-			TLSHandshakeStart:    func() { tlsStart = time.Now() },
-			TLSHandshakeDone:     func(_ tls.ConnectionState, _ error) { target.TLSHandshake = time.Since(tlsStart) },
-			GotConn:              func(_ httptrace.GotConnInfo) { gotConn = time.Now() },
+			DNSStart:          func(_ httptrace.DNSStartInfo) { dnsStart = time.Now() },
+			DNSDone:           func(_ httptrace.DNSDoneInfo) { target.DNSLookup = time.Since(dnsStart) },
+			ConnectStart:      func(_, _ string) { connectStart = time.Now() },
+			ConnectDone:       func(_, _ string, _ error) { target.TCPConn = time.Since(connectStart) },
+			TLSHandshakeStart: func() { tlsStart = time.Now() },
+			TLSHandshakeDone:  func(_ tls.ConnectionState, _ error) { target.TLSHandshake = time.Since(tlsStart) },
+			GotConn: func(info httptrace.GotConnInfo) {
+				gotConn = time.Now()
+
+				if info.Conn != nil && info.Conn.RemoteAddr() != nil {
+					target.RemoteAddr = info.Conn.RemoteAddr().String()
+				}
+			},
 			GotFirstResponseByte: func() { target.ServerProcessing = time.Since(gotConn) },
 		}
 

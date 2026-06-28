@@ -1,12 +1,14 @@
 // Copyright (c) 2026 Lemon4ksan All rights reserved.
 // Use of this source code is governed by a BSD-style
-// license that can be found in the LICENSE file.
+// license[s] that can be found in the LICENSE file.
 
 package aoni
 
 import (
+	"context"
 	"io"
 	"net/http"
+	"strings"
 	"testing"
 	"time"
 
@@ -17,7 +19,7 @@ import (
 func TestTrace(t *testing.T) {
 	t.Parallel()
 
-	t.Run("capture_trace_info", func(t *testing.T) {
+	t.Run("capture_trace_info_and_remote_addr", func(t *testing.T) {
 		t.Parallel()
 		_, client := setupTestServer(t, func(w http.ResponseWriter, r *http.Request) {
 			_, _ = w.Write([]byte("ok"))
@@ -32,23 +34,57 @@ func TestTrace(t *testing.T) {
 		_, _ = io.ReadAll(resp.Body)
 
 		assert.GreaterOrEqual(t, traceInfo.ServerProcessing, time.Duration(0))
+		assert.NotEmpty(t, traceInfo.RemoteAddr)
+		assert.Contains(t, traceInfo.RemoteAddr, "127.0.0.1")
 	})
+}
 
-	t.Run("nil_body_request", func(t *testing.T) {
+func TestTraceInfo_Start_CalculatesTransfer(t *testing.T) {
+	t.Parallel()
+
+	info := &TraceInfo{
+		DNSLookup:        5 * time.Millisecond,
+		TCPConn:          10 * time.Millisecond,
+		TLSHandshake:     15 * time.Millisecond,
+		ServerProcessing: 20 * time.Millisecond,
+	}
+
+	finish := info.Start()
+
+	time.Sleep(60 * time.Millisecond) // Simulate body read delay
+
+	resp := &http.Response{
+		ContentLength: 1024,
+	}
+
+	finish(resp)
+
+	assert.Greater(t, info.Total, 50*time.Millisecond)
+	assert.Equal(t, int64(1024), info.ResponseSize)
+	assert.Greater(t, info.ContentTransfer, time.Duration(0))
+}
+
+func TestTraceJA4(t *testing.T) {
+	t.Parallel()
+
+	t.Run("generate_ja4h_fingerprint", func(t *testing.T) {
 		t.Parallel()
-		_, client := setupTestServer(t, func(w http.ResponseWriter, r *http.Request) {
-			_, _ = w.Write([]byte("ok"))
-		})
+
+		req, err := http.NewRequestWithContext(context.Background(), "POST", "http://example.com/api", nil)
+		require.NoError(t, err)
+
+		req.Header.Set("User-Agent", "Mozilla/5.0")
+		req.Header.Set("Accept-Language", "en-US")
+		req.AddCookie(&http.Cookie{Name: "session", Value: "abc"})
 
 		var traceInfo TraceInfo
 
-		resp, err := client.Request(t.Context(), http.MethodGet, "/trace", Trace(&traceInfo))
-		require.NoError(t, err)
-		t.Cleanup(func() { _ = resp.Body.Close() })
+		mod := TraceJA4(&traceInfo)
+		mod(req)
 
-		_, _ = io.ReadAll(resp.Body)
-
-		assert.GreaterOrEqual(t, traceInfo.Total, time.Duration(0))
+		require.NotNil(t, traceInfo.JA4)
+		assert.NotEmpty(t, traceInfo.JA4.JA4H)
+		assert.Contains(t, traceInfo.JA4.JA4H, "po11")
 	})
 }
 
@@ -121,19 +157,31 @@ func TestCurlCommand(t *testing.T) {
 	}
 }
 
-func TestAsCurl(t *testing.T) {
+func TestAsCurl_WithBody(t *testing.T) {
 	t.Parallel()
 
-	t.Run("as_curl_modifier", func(t *testing.T) {
-		t.Parallel()
-		_, client := setupTestServer(t, func(w http.ResponseWriter, r *http.Request) {
-			_, _ = w.Write([]byte("ok"))
-		})
-
-		resp, err := client.Request(t.Context(), http.MethodGet, "/curl", AsCurl())
+	server, client := setupBridgeTest(t, func(w http.ResponseWriter, r *http.Request) {
+		body, err := io.ReadAll(r.Body)
 		require.NoError(t, err)
-		t.Cleanup(func() { _ = resp.Body.Close() })
-
-		_, _ = io.ReadAll(resp.Body)
+		assert.Equal(t, "replayed_body_data", string(body))
+		w.WriteHeader(http.StatusOK)
 	})
+
+	req, err := http.NewRequestWithContext(
+		t.Context(),
+		http.MethodPost,
+		server.URL+"/curl",
+		strings.NewReader("replayed_body_data"),
+	)
+	require.NoError(t, err)
+
+	// Apply AsCurl modifier (captures and re-populates the body)
+	mod := AsCurl()
+	mod(req)
+
+	resp, err := client.Do(req)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = resp.Body.Close() })
+
+	assert.Equal(t, http.StatusOK, resp.StatusCode)
 }
