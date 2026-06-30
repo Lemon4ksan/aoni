@@ -57,40 +57,40 @@ func Get[Resp any](ctx context.Context, path string, mods ...RequestModifier) (*
 func Post[Resp any](
 	ctx context.Context,
 	path string,
-	payload any,
+	body any,
 	mods ...RequestModifier,
 ) (*Resp, error) {
-	return PostJSON[Resp](ctx, DefaultClient, path, payload, mods...)
+	return PostJSON[Resp](ctx, DefaultClient, path, body, mods...)
 }
 
 // Put performs a global PUT request using [DefaultClient] and decodes the JSON response body.
 func Put[Resp any](
 	ctx context.Context,
 	path string,
-	payload any,
+	body any,
 	mods ...RequestModifier,
 ) (*Resp, error) {
-	return PutJSON[Resp](ctx, DefaultClient, path, payload, mods...)
+	return PutJSON[Resp](ctx, DefaultClient, path, body, mods...)
 }
 
 // Patch performs a global PATCH request using [DefaultClient] and decodes the JSON response body.
 func Patch[Resp any](
 	ctx context.Context,
 	path string,
-	payload any,
+	body any,
 	mods ...RequestModifier,
 ) (*Resp, error) {
-	return PatchJSON[Resp](ctx, DefaultClient, path, payload, mods...)
+	return PatchJSON[Resp](ctx, DefaultClient, path, body, mods...)
 }
 
 // Delete performs a global DELETE request using [DefaultClient] and decodes the JSON response body.
 func Delete[Resp any](
 	ctx context.Context,
 	path string,
-	payload any,
+	body any,
 	mods ...RequestModifier,
 ) (*Resp, error) {
-	return DeleteJSON[Resp](ctx, DefaultClient, path, payload, mods...)
+	return DeleteJSON[Resp](ctx, DefaultClient, path, body, mods...)
 }
 
 // GetJSON performs a GET request and decodes the JSON response body into a new instance of Resp.
@@ -139,41 +139,41 @@ func GetJSONEx[Resp any](
 	return result, raw, nil
 }
 
-// PostFormJSON marshals the payload, performs a POST request with URL-encoded parameters,
+// PostFormJSON marshals the body, performs a POST request with URL-encoded parameters,
 // and decodes the resulting JSON response body into Resp.
 //
-// If the payload implements [io.Reader], it is used directly as the request body.
-// Otherwise, the payload is marshaled to URL-encoded form values and wrapped in a [strings.Reader].
+// If the body implements [io.Reader], it is used directly as the request body.
+// Otherwise, the body is marshaled to URL-encoded form values and wrapped in a [strings.Reader].
 //
-// It validates the payload structure beforehand using [Validate].
+// It validates the body structure beforehand using [Validate].
 // Returns a [ValidationError] if validation fails.
 func PostFormJSON[Resp any](
 	ctx context.Context,
 	c Requester,
 	path string,
-	payload any,
+	body any,
 	mods ...RequestModifier,
 ) (*Resp, error) {
-	var body io.Reader
+	var bodyReader io.Reader
 
-	if r, ok := payload.(io.Reader); ok {
-		body = r
-	} else {
-		if err := Validate(payload); err != nil {
+	if r, ok := body.(io.Reader); ok {
+		bodyReader = r
+	} else if body != nil {
+		if err := Validate(body); err != nil {
 			return nil, err
 		}
 
-		formValues, err := StructToValues(payload)
+		formValues, err := StructToValues(body)
 		if err != nil {
 			return nil, err
 		}
 
-		body = strings.NewReader(formValues.Encode())
+		bodyReader = strings.NewReader(formValues.Encode())
 	}
 
 	mods = append([]RequestModifier{
 		WithContentType("application/x-www-form-urlencoded"),
-		WithBody(body),
+		WithBody(bodyReader),
 	}, mods...)
 
 	resp, err := c.Request(ctx, http.MethodPost, path, mods...)
@@ -199,14 +199,14 @@ func PostFormJSONEx[Resp any](
 	ctx context.Context,
 	c Requester,
 	path string,
-	payload any,
+	body any,
 	mods ...RequestModifier,
 ) (*Resp, *http.Response, error) {
 	var raw *http.Response
 
 	mods = append(mods, CaptureResponse(&raw))
 
-	result, err := PostFormJSON[Resp](ctx, c, path, payload, mods...)
+	result, err := PostFormJSON[Resp](ctx, c, path, body, mods...)
 	if err != nil {
 		return nil, raw, err
 	}
@@ -214,22 +214,19 @@ func PostFormJSONEx[Resp any](
 	return result, raw, nil
 }
 
-// PostJSON marshals the payload to JSON, executes a POST request, and decodes the response body.
+// PostJSON marshals the body to JSON, executes a POST request, and decodes the response body.
 // It automatically configures the request headers with Content-Type and Accept set to "application/json".
 //
-// If the payload implements [io.Reader], it is used directly as the request body.
-// Otherwise, the payload is marshaled to URL-encoded form values and wrapped in a [strings.Reader].
-//
-// It validates the payload structure beforehand using [Validate].
+// It validates the body structure beforehand using [Validate].
 // Returns a [ValidationError] if validation fails.
 func PostJSON[Resp any](
 	ctx context.Context,
 	c Requester,
 	path string,
-	payload any,
+	body any,
 	mods ...RequestModifier,
 ) (*Resp, error) {
-	body, err := validateAndMarshal(payload)
+	bodyReader, err := validateAndMarshal(body)
 	if err != nil {
 		return nil, err
 	}
@@ -237,7 +234,7 @@ func PostJSON[Resp any](
 	mods = append([]RequestModifier{
 		WithContentType("application/json"),
 		WithAccept("application/json"),
-		WithBody(body),
+		WithBody(bodyReader),
 	}, mods...)
 
 	resp, err := c.Request(ctx, http.MethodPost, path, mods...)
@@ -264,14 +261,14 @@ func PostJSONEx[Resp any](
 	ctx context.Context,
 	c Requester,
 	path string,
-	payload any,
+	body any,
 	mods ...RequestModifier,
 ) (*Resp, *http.Response, error) {
 	var raw *http.Response
 
 	mods = append(mods, CaptureResponse(&raw))
 
-	result, err := PostJSON[Resp](ctx, c, path, payload, mods...)
+	result, err := PostJSON[Resp](ctx, c, path, body, mods...)
 	if err != nil {
 		return nil, raw, err
 	}
@@ -279,22 +276,19 @@ func PostJSONEx[Resp any](
 	return result, raw, nil
 }
 
-// PutJSON marshals the payload to JSON, executes a PUT request, and decodes the response body.
+// PutJSON marshals the body to JSON, executes a PUT request, and decodes the response body.
 // It automatically configures the request headers with Content-Type and Accept set to "application/json".
 //
-// If the payload implements [io.Reader], it is used directly as the request body.
-// Otherwise, the payload is marshaled to URL-encoded form values and wrapped in a [strings.Reader].
-//
-// It validates the payload structure beforehand using [Validate].
+// It validates the body structure beforehand using [Validate].
 // Returns a [ValidationError] if validation fails.
 func PutJSON[Resp any](
 	ctx context.Context,
 	c Requester,
 	path string,
-	payload any,
+	body any,
 	mods ...RequestModifier,
 ) (*Resp, error) {
-	body, err := validateAndMarshal(payload)
+	bodyReader, err := validateAndMarshal(body)
 	if err != nil {
 		return nil, err
 	}
@@ -302,7 +296,7 @@ func PutJSON[Resp any](
 	mods = append([]RequestModifier{
 		WithContentType("application/json"),
 		WithAccept("application/json"),
-		WithBody(body),
+		WithBody(bodyReader),
 	}, mods...)
 
 	resp, err := c.Request(ctx, http.MethodPut, path, mods...)
@@ -312,7 +306,6 @@ func PutJSON[Resp any](
 
 	if reflect.TypeFor[Resp]() == reflect.TypeFor[NoResponse]() {
 		closeResponse(resp)
-
 		return nil, err
 	}
 
@@ -329,14 +322,14 @@ func PutJSONEx[Resp any](
 	ctx context.Context,
 	c Requester,
 	path string,
-	payload any,
+	body any,
 	mods ...RequestModifier,
 ) (*Resp, *http.Response, error) {
 	var raw *http.Response
 
 	mods = append(mods, CaptureResponse(&raw))
 
-	result, err := PutJSON[Resp](ctx, c, path, payload, mods...)
+	result, err := PutJSON[Resp](ctx, c, path, body, mods...)
 	if err != nil {
 		return nil, raw, err
 	}
@@ -344,22 +337,19 @@ func PutJSONEx[Resp any](
 	return result, raw, nil
 }
 
-// PatchJSON marshals the payload to JSON, executes a PATCH request, and decodes the response body.
+// PatchJSON marshals the body to JSON, executes a PATCH request, and decodes the response body.
 // It automatically configures the request headers with Content-Type and Accept set to "application/json".
 //
-// If the payload implements [io.Reader], it is used directly as the request body.
-// Otherwise, the payload is marshaled to URL-encoded form values and wrapped in a [strings.Reader].
-//
-// It validates the payload structure beforehand using [Validate].
+// It validates the body structure beforehand using [Validate].
 // Returns a [ValidationError] if validation fails.
 func PatchJSON[Resp any](
 	ctx context.Context,
 	c Requester,
 	path string,
-	payload any,
+	body any,
 	mods ...RequestModifier,
 ) (*Resp, error) {
-	body, err := validateAndMarshal(payload)
+	bodyReader, err := validateAndMarshal(body)
 	if err != nil {
 		return nil, err
 	}
@@ -367,7 +357,7 @@ func PatchJSON[Resp any](
 	mods = append([]RequestModifier{
 		WithContentType("application/json"),
 		WithAccept("application/json"),
-		WithBody(body),
+		WithBody(bodyReader),
 	}, mods...)
 
 	resp, err := c.Request(ctx, http.MethodPatch, path, mods...)
@@ -377,7 +367,6 @@ func PatchJSON[Resp any](
 
 	if reflect.TypeFor[Resp]() == reflect.TypeFor[NoResponse]() {
 		closeResponse(resp)
-
 		return nil, err
 	}
 
@@ -394,14 +383,14 @@ func PatchJSONEx[Resp any](
 	ctx context.Context,
 	c Requester,
 	path string,
-	payload any,
+	body any,
 	mods ...RequestModifier,
 ) (*Resp, *http.Response, error) {
 	var raw *http.Response
 
 	mods = append(mods, CaptureResponse(&raw))
 
-	result, err := PatchJSON[Resp](ctx, c, path, payload, mods...)
+	result, err := PatchJSON[Resp](ctx, c, path, body, mods...)
 	if err != nil {
 		return nil, raw, err
 	}
@@ -409,22 +398,19 @@ func PatchJSONEx[Resp any](
 	return result, raw, nil
 }
 
-// DeleteJSON marshals the payload to JSON, executes a DELETE request, and decodes the response body.
+// DeleteJSON marshals the body to JSON, executes a DELETE request, and decodes the response body.
 // It automatically configures the request headers with Content-Type and Accept set to "application/json".
 //
-// If the payload implements [io.Reader], it is used directly as the request body.
-// Otherwise, the payload is marshaled to URL-encoded form values and wrapped in a [strings.Reader].
-//
-// It validates the payload structure beforehand using [Validate].
+// It validates the body structure beforehand using [Validate].
 // Returns a [ValidationError] if validation fails.
 func DeleteJSON[Resp any](
 	ctx context.Context,
 	c Requester,
 	path string,
-	payload any,
+	body any,
 	mods ...RequestModifier,
 ) (*Resp, error) {
-	body, err := validateAndMarshal(payload)
+	bodyReader, err := validateAndMarshal(body)
 	if err != nil {
 		return nil, err
 	}
@@ -432,7 +418,7 @@ func DeleteJSON[Resp any](
 	mods = append([]RequestModifier{
 		WithContentType("application/json"),
 		WithAccept("application/json"),
-		WithBody(body),
+		WithBody(bodyReader),
 	}, mods...)
 
 	resp, err := c.Request(ctx, http.MethodDelete, path, mods...)
@@ -442,7 +428,6 @@ func DeleteJSON[Resp any](
 
 	if reflect.TypeFor[Resp]() == reflect.TypeFor[NoResponse]() {
 		closeResponse(resp)
-
 		return nil, err
 	}
 
@@ -459,14 +444,14 @@ func DeleteJSONEx[Resp any](
 	ctx context.Context,
 	c Requester,
 	path string,
-	payload any,
+	body any,
 	mods ...RequestModifier,
 ) (*Resp, *http.Response, error) {
 	var raw *http.Response
 
 	mods = append(mods, CaptureResponse(&raw))
 
-	result, err := DeleteJSON[Resp](ctx, c, path, payload, mods...)
+	result, err := DeleteJSON[Resp](ctx, c, path, body, mods...)
 	if err != nil {
 		return nil, raw, err
 	}
@@ -477,6 +462,10 @@ func DeleteJSONEx[Resp any](
 func validateAndMarshal(payload any) (io.Reader, error) {
 	if r, ok := payload.(io.Reader); ok {
 		return r, nil
+	}
+
+	if payload == nil {
+		return nil, nil
 	}
 
 	if err := Validate(payload); err != nil {
