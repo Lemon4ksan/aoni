@@ -225,6 +225,8 @@ type Client struct {
 	headersCookieJar http.CookieJar
 	ja4Callback      func(ja4.Report)
 	tlsBrowserID     BrowserID
+	tlsClientHelloID *utls.ClientHelloID
+	headerOrder      []string
 	fragmentConfig   *FragmentConfig
 	hostRewrite      *HostRewriteConfig
 	p0fSignature     *p0f.Signature
@@ -298,6 +300,8 @@ func (c *Client) Clone() *Client {
 		headersCookieJar:   c.headersCookieJar,
 		ja4Callback:        c.ja4Callback,
 		tlsBrowserID:       c.tlsBrowserID,
+		tlsClientHelloID:   c.tlsClientHelloID,
+		headerOrder:        c.headerOrder,
 		proxyDNS:           c.proxyDNS,
 		proxyAddr:          c.proxyAddr,
 		sessionCache:       c.sessionCache,
@@ -376,6 +380,17 @@ func (c *Client) Clone() *Client {
 	if c.packetPadding != nil {
 		padCopy := *c.packetPadding
 		cloned.packetPadding = &padCopy
+	}
+
+	if c.tlsClientHelloID != nil {
+		idCopy := *c.tlsClientHelloID
+		cloned.tlsClientHelloID = &idCopy
+	}
+
+	if c.headerOrder != nil {
+		orderCopy := make([]string, len(c.headerOrder))
+		copy(orderCopy, c.headerOrder)
+		cloned.headerOrder = orderCopy
 	}
 
 	// Clone the http.Client and its transport so mutations don't affect the original.
@@ -1156,6 +1171,7 @@ func (c *Client) WithTLSFingerprint(browser BrowserID) *Client {
 				network,
 				addr,
 				browser,
+				newClient.tlsClientHelloID,
 				newClient.sourceRotator,
 				newClient.dnsResolver,
 				callback,
@@ -1399,6 +1415,7 @@ func dialTLSWithUTLS(
 	ctx context.Context,
 	network, addr string,
 	browser BrowserID,
+	helloID *utls.ClientHelloID,
 	sourceRotator *SourceIPRotator,
 	dnsResolver DNSResolver,
 	ja4Callback func(ja4.Report),
@@ -1438,13 +1455,17 @@ func dialTLSWithUTLS(
 	}
 
 	var spec utls.ClientHelloID
-	switch browser {
-	case BrowserFirefox:
-		spec = utls.HelloFirefox_Auto
-	case BrowserSafari:
-		spec = utls.HelloSafari_Auto
-	default:
-		spec = utls.HelloChrome_Auto
+	if helloID != nil {
+		spec = *helloID
+	} else {
+		switch browser {
+		case BrowserFirefox:
+			spec = utls.HelloFirefox_Auto
+		case BrowserSafari:
+			spec = utls.HelloSafari_Auto
+		default:
+			spec = utls.HelloChrome_Auto
+		}
 	}
 
 	uConfig := &utls.Config{

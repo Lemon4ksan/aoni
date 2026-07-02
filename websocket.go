@@ -155,15 +155,14 @@ func DialWebSocket(
 // fingerprinting). Falls back to direct dialing when no transport exists.
 func (c *Client) dialTLSForWS(ctx context.Context, addr string) (net.Conn, error) {
 	// If the transport has DialTLSContext (set by WithTLSFingerprint or
-	// proxy-aware transport), use it directly — this preserves proxy routing.
+	// proxy-aware transport), use it directly - this preserves proxy routing.
 	if tr := c.Transport(); tr != nil && tr.DialTLSContext != nil {
 		network := "tcp"
 		return tr.DialTLSContext(ctx, network, addr)
 	}
 
-	// No custom DialTLSContext — use browser ID for uTLS if available.
 	browser := c.browserID()
-	if browser != BrowserNone {
+	if browser != BrowserNone || c.tlsClientHelloID != nil {
 		var proxyURL *url.URL
 		if c.transportProxy != nil {
 			proxyURL, _ = c.transportProxy(&http.Request{URL: &url.URL{Host: addr}})
@@ -174,6 +173,7 @@ func (c *Client) dialTLSForWS(ctx context.Context, addr string) (net.Conn, error
 			"tcp",
 			addr,
 			browser,
+			c.tlsClientHelloID,
 			c.sourceRotator,
 			c.dnsResolver,
 			c.ja4Callback,
@@ -182,7 +182,6 @@ func (c *Client) dialTLSForWS(ctx context.Context, addr string) (net.Conn, error
 		)
 	}
 
-	// Standard TLS fallback — also check if transport has DialContext for proxy.
 	if tr := c.Transport(); tr != nil && tr.DialContext != nil {
 		return tr.DialContext(ctx, "tcp", addr)
 	}
