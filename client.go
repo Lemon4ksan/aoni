@@ -229,6 +229,7 @@ type Client struct {
 	headerOrder       []string
 	challengeSolver   ChallengeSolver
 	challengeDetector ChallengeDetector
+	inspector         *TrafficInspector
 	fragmentConfig    *FragmentConfig
 	hostRewrite       *HostRewriteConfig
 	p0fSignature      *p0f.Signature
@@ -306,6 +307,7 @@ func (c *Client) Clone() *Client {
 		headerOrder:        c.headerOrder,
 		challengeSolver:    c.challengeSolver,
 		challengeDetector:  c.challengeDetector,
+		inspector:          c.inspector,
 		proxyDNS:           c.proxyDNS,
 		proxyAddr:          c.proxyAddr,
 		sessionCache:       c.sessionCache,
@@ -540,6 +542,18 @@ func (c *Client) Request(
 	generic.ApplyOptions(req, c.defaultMods...)
 	generic.ApplyOptions(req, mods...)
 
+	var (
+		traceInfo *TraceInfo
+		traceEnd  func(*http.Response)
+	)
+
+	if c.inspector != nil {
+		traceInfo = &TraceInfo{}
+		Trace(traceInfo)(req)
+		TraceJA4(traceInfo)(req)
+		traceEnd = traceInfo.Start()
+	}
+
 	if errVal := req.Context().Value(bodyErrorCtxKey{}); errVal != nil {
 		if serializationErr, ok := errVal.(error); ok {
 			return nil, fmt.Errorf("aoni: body encoding failed: %w", serializationErr)
@@ -610,6 +624,10 @@ func (c *Client) Request(
 		}
 	}
 
+	if traceEnd != nil {
+		traceEnd(resp)
+	}
+
 	// Copy TLS JA4 report from the dialer store to the target TraceInfo.
 	// The store was set by TraceJA4; dialTLSWithUTLS wrote the TLS report during handshake.
 	if store, ok := req.Context().Value(ja4ReportCtxKey{}).(*ja4ReportStore); ok && store.target != nil &&
@@ -621,6 +639,10 @@ func (c *Client) Request(
 		store.target.JA4.CipherCount = store.report.CipherCount
 		store.target.JA4.ExtCount = store.report.ExtCount
 		store.target.JA4.ALPN = store.report.ALPN
+	}
+
+	if c.inspector != nil && traceInfo != nil {
+		c.inspector.Capture(req, resp, reqErr, traceInfo)
 	}
 
 	for _, hook := range c.afterResponse {
@@ -1077,6 +1099,11 @@ func (c *Client) WithDNSResolver(resolver DNSResolver) *Client {
 	newClient.applyDialers()
 
 	return newClient
+}
+
+// Inspector returns the configured [TrafficInspector] if enabled.
+func (c *Client) Inspector() *TrafficInspector {
+	return c.inspector
 }
 
 // WithDoT returns a clone of c that resolves DNS via
@@ -1544,12 +1571,12 @@ func dialTLSWithUTLS(
 
 	uConn.Extensions = forceALPN(uConn.Extensions, alpnProtos)
 
+	report := extractJA4FromUConn(uConn, host)
+
 	if err := uConn.HandshakeContext(ctx); err != nil {
 		_ = conn.Close()
 		return nil, err
 	}
-
-	report := extractJA4FromUConn(uConn, host)
 
 	// Write JA4 report to the store in the request context (set by TraceJA4).
 	// The request context flows through to DialTLSContext.
