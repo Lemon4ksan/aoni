@@ -37,7 +37,7 @@ func main() {
 		WithTLSFingerprint(aoni.BrowserChrome).
 		WithUserAgent(chrome.UserAgentWindows)
 
-	res, err := aoni.GetJSON[Response](ctx, chromeClient, "/ip")
+	res, err := aoni.GetTo[Response](ctx, chromeClient, "/ip")
 	if err != nil {
 		fmt.Printf("Chrome request failed: %v\n", err)
 	} else {
@@ -58,7 +58,7 @@ func main() {
 		WithTLSFingerprint(aoni.BrowserFirefox).
 		WithUserAgent(firefox.UserAgentFirefoxWindows)
 
-	res, err = aoni.GetJSON[Response](ctx, firefoxClient, "/ip")
+	res, err = aoni.GetTo[Response](ctx, firefoxClient, "/ip")
 	if err != nil {
 		fmt.Printf("Firefox request failed: %v\n", err)
 	} else {

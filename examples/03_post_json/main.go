@@ -4,7 +4,7 @@
 
 // Example: POST with JSON body and custom error model.
 //
-// Demonstrates PostJSON with WithJSONBody for creating resources,
+// Demonstrates PostTo with WithJSONBody for creating resources,
 // plus using a custom error response model to capture API errors.
 package main
 
@@ -48,7 +48,7 @@ func main() {
 		UserID: 1,
 	}
 
-	result, err := aoni.PostJSON[PostResponse](
+	result, err := aoni.PostTo[PostResponse](
 		ctx, client, "/posts", payload,
 		aoni.WithErrorModel(&ErrorResponse{}),
 	)

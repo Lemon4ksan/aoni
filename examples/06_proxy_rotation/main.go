@@ -67,7 +67,7 @@ func main() {
 
 	// Make requests that will be load-balanced across proxies
 	for i := range 3 {
-		res, err := aoni.GetJSON[IPResponse](ctx, client, "/ip")
+		res, err := aoni.GetTo[IPResponse](ctx, client, "/ip")
 		if err != nil {
 			log.Printf("Request %d failed: %v", i, err)
 			continue

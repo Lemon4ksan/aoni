@@ -29,7 +29,7 @@ func main() {
 		WithBaseURL("https://jsonplaceholder.typicode.com")
 
 	// Example 1: Check for aoni.APIError with a custom error model
-	_, err := aoni.GetJSON[any](ctx, client,
+	_, err := aoni.GetTo[any](ctx, client,
 		"/posts/99999",
 		aoni.WithErrorModel(&NotFoundResponse{}),
 	)
@@ -47,7 +47,7 @@ func main() {
 	}
 
 	// Example 2: Check for Cloudflare challenge
-	_, err = aoni.GetJSON[any](ctx, client, "/challenge-protected-page")
+	_, err = aoni.GetTo[any](ctx, client, "/challenge-protected-page")
 	if err != nil {
 		if errors.Is(err, aoni.ErrCloudflareChallenge) {
 			fmt.Println("Cloudflare challenge detected, need browser-level solving")
@@ -55,7 +55,7 @@ func main() {
 	}
 
 	// Example 3: Check for response too large
-	_, err = aoni.GetJSON[any](ctx, client, "/large-payload")
+	_, err = aoni.GetTo[any](ctx, client, "/large-payload")
 	if err != nil {
 		if errors.Is(err, aoni.ErrResponseTooLarge) {
 			fmt.Println("Response exceeded configured size limit")

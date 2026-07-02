@@ -50,7 +50,7 @@ func BenchmarkGET_JSON_Aoni(b *testing.B) {
 	b.ReportAllocs()
 
 	for b.Loop() {
-		res, err := GetJSON[benchPayload](ctx, client, "/")
+		res, err := GetTo[benchPayload](ctx, client, "/")
 		if err != nil {
 			b.Fatal(err)
 		}

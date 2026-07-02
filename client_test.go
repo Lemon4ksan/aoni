@@ -191,7 +191,7 @@ func TestClient_ErrorStatus(t *testing.T) {
 		_, _ = w.Write([]byte(`{"error": "not found"}`))
 	})
 
-	_, err := GetJSON[any](t.Context(), client, "/404")
+	_, err := GetTo[any](t.Context(), client, "/404")
 	require.Error(t, err)
 
 	var apiErr *APIError
@@ -232,7 +232,7 @@ func TestClient_BaseResponse(t *testing.T) {
 
 		client = client.WithBaseResponse(func() BaseResponse { return &apiResponse{} })
 
-		result, err := GetJSON[testPayload](t.Context(), client, "/wrapped")
+		result, err := GetTo[testPayload](t.Context(), client, "/wrapped")
 		require.NoError(t, err)
 		assert.Equal(t, "unwrapped", result.Message)
 	})
@@ -244,7 +244,7 @@ func TestClient_BaseResponse(t *testing.T) {
 
 		client = client.WithBaseResponse(func() BaseResponse { return &apiResponse{} })
 
-		_, err := GetJSON[testPayload](t.Context(), client, "/error")
+		_, err := GetTo[testPayload](t.Context(), client, "/error")
 		assert.ErrorContains(t, err, "something went wrong")
 	})
 }
@@ -311,7 +311,7 @@ func TestClient_Validation(t *testing.T) {
 
 	t.Run("missing_query_param", func(t *testing.T) {
 		params := RequiredParams{Name: "test"}
-		_, err := GetJSON[any](t.Context(), client, "/test", WithQuery(params))
+		_, err := GetTo[any](t.Context(), client, "/test", WithQuery(params))
 		require.Error(t, err)
 
 		var valErr *ValidationError
@@ -322,7 +322,7 @@ func TestClient_Validation(t *testing.T) {
 
 	t.Run("missing_payload_field", func(t *testing.T) {
 		payload := RequiredPayload{}
-		_, err := PostJSON[any](t.Context(), client, "/test", payload)
+		_, err := PostTo[any](t.Context(), client, "/test", payload)
 		require.Error(t, err)
 
 		var valErr *ValidationError
@@ -336,7 +336,7 @@ func TestClient_Validation(t *testing.T) {
 			w.WriteHeader(http.StatusOK)
 		})
 		params := RequiredParams{ID: 1}
-		_, err := GetJSON[any](t.Context(), srvClient, "/test", WithQuery(params))
+		_, err := GetTo[any](t.Context(), srvClient, "/test", WithQuery(params))
 		assert.NoError(t, err)
 	})
 }
@@ -358,7 +358,7 @@ func TestClient_PostForm(t *testing.T) {
 		_, _ = w.Write([]byte(`{"status": 200}`))
 	})
 
-	_, err := PostFormJSON[Params](t.Context(), client, "/form", Params{ID: 123, Name: "bob"})
+	_, err := PostFormTo[Params](t.Context(), client, "/form", Params{ID: 123, Name: "bob"})
 	assert.NoError(t, err)
 }
 
@@ -371,7 +371,7 @@ func TestClient_CaptureResponse(t *testing.T) {
 
 	var raw *http.Response
 
-	result, err := GetJSON[testPayload](t.Context(), client, "/capture", CaptureResponse(&raw))
+	result, err := GetTo[testPayload](t.Context(), client, "/capture", CaptureResponse(&raw))
 	require.NoError(t, err)
 
 	if raw != nil {
@@ -408,7 +408,7 @@ func TestClient_DX_Helpers(t *testing.T) {
 	t.Run("global_get_with_bearer", func(t *testing.T) {
 		var raw *http.Response
 
-		res, err := GetJSON[testPayload](
+		res, err := GetTo[testPayload](
 			t.Context(),
 			DefaultClient,
 			"/get",
@@ -428,7 +428,7 @@ func TestClient_DX_Helpers(t *testing.T) {
 	t.Run("basic_auth_and_user_agent", func(t *testing.T) {
 		var raw *http.Response
 
-		_, err := GetJSON[testPayload](
+		_, err := GetTo[testPayload](
 			t.Context(),
 			DefaultClient,
 			"/auth",
@@ -449,7 +449,7 @@ func TestClient_DX_Helpers(t *testing.T) {
 	t.Run("global_put", func(t *testing.T) {
 		var raw *http.Response
 
-		_, err := PutJSON[testPayload](
+		_, err := PutTo[testPayload](
 			t.Context(),
 			DefaultClient,
 			"/put",
@@ -468,7 +468,7 @@ func TestClient_DX_Helpers(t *testing.T) {
 	t.Run("global_patch", func(t *testing.T) {
 		var raw *http.Response
 
-		_, err := PatchJSON[testPayload](
+		_, err := PatchTo[testPayload](
 			t.Context(),
 			DefaultClient,
 			"/patch",
@@ -487,7 +487,7 @@ func TestClient_DX_Helpers(t *testing.T) {
 	t.Run("global_delete", func(t *testing.T) {
 		var raw *http.Response
 
-		_, err := DeleteJSON[testPayload](
+		_, err := DeleteTo[testPayload](
 			t.Context(),
 			DefaultClient,
 			"/delete",
@@ -504,7 +504,7 @@ func TestClient_DX_Helpers(t *testing.T) {
 	})
 
 	t.Run("debug_mode", func(t *testing.T) {
-		_, err := GetJSON[testPayload](t.Context(), DefaultClient, "/debug", Debug())
+		_, err := GetTo[testPayload](t.Context(), DefaultClient, "/debug", Debug())
 		require.NoError(t, err)
 	})
 }
@@ -664,7 +664,7 @@ func TestClient_ErrorModel(t *testing.T) {
 
 	var errModel errorStruct
 
-	_, err := GetJSON[any](t.Context(), client, "/oauth", WithErrorModel(&errModel))
+	_, err := GetTo[any](t.Context(), client, "/oauth", WithErrorModel(&errModel))
 	require.Error(t, err)
 
 	var apiErr *APIError
@@ -758,7 +758,7 @@ func TestClient_AutoTranscoding(t *testing.T) {
 		_, _ = w.Write([]byte(`{"message": "` + "\xef\xf0\xe8\xe2\xe5\xf2" + `"}`))
 	})
 
-	result, err := GetJSON[testPayload](t.Context(), client, "/transcode")
+	result, err := GetTo[testPayload](t.Context(), client, "/transcode")
 	require.NoError(t, err)
 	assert.Equal(t, "привет", result.Message)
 }
@@ -795,7 +795,7 @@ func TestClient_Hedging_Deterministic(t *testing.T) {
 	resChan := make(chan result, 1)
 
 	go func() {
-		res, err := GetJSON[testPayload](t.Context(), client, "/")
+		res, err := GetTo[testPayload](t.Context(), client, "/")
 		resChan <- result{res: res, err: err}
 	}()
 
@@ -899,7 +899,7 @@ func TestClient_BOMStripping(t *testing.T) {
 				_, _ = w.Write(tt.body)
 			})
 
-			result, err := GetJSON[testPayload](t.Context(), client, "/")
+			result, err := GetTo[testPayload](t.Context(), client, "/")
 			require.NoError(t, err)
 			assert.Equal(t, tt.want, result.Message)
 		})
@@ -983,7 +983,7 @@ func TestClient_Decompression(t *testing.T) {
 				_, _ = w.Write(buf.Bytes())
 			})
 
-			result, err := GetJSON[testPayload](t.Context(), client, "/")
+			result, err := GetTo[testPayload](t.Context(), client, "/")
 			require.NoError(t, err)
 			assert.Equal(t, tt.want, result.Message)
 		})
@@ -1000,7 +1000,7 @@ func TestClient_ContentTypeGuard(t *testing.T) {
 			_, _ = w.Write([]byte("<html><body>Hello World</body></html>"))
 		})
 
-		_, err := GetJSON[testPayload](t.Context(), client, "/")
+		_, err := GetTo[testPayload](t.Context(), client, "/")
 		require.Error(t, err)
 		assert.ErrorIs(t, err, ErrUnexpectedContentType)
 		assert.Contains(t, err.Error(), "expected structured data but got HTML")
@@ -1013,7 +1013,7 @@ func TestClient_ContentTypeGuard(t *testing.T) {
 			_, _ = w.Write([]byte("<html><body>cf-challenge and ray id cloudflare</body></html>"))
 		})
 
-		_, err := GetJSON[testPayload](t.Context(), client, "/")
+		_, err := GetTo[testPayload](t.Context(), client, "/")
 		require.Error(t, err)
 		assert.ErrorIs(t, err, ErrCloudflareChallenge)
 	})

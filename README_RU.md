@@ -100,10 +100,14 @@ for i := 0; i < 3; i++ {
 // ❄️ Чистый, неизменяемый конвейерный поток
 client := aoni.NewClient(transportChain)
 
-user, err := aoni.GetJSON[User](ctx, client, "/users/{id}",
+// 1. Автоматическое получение структурированного JSON
+user, err := aoni.GetTo[User](ctx, client, "/users/{id}",
     aoni.WithVar("id", 123),
     aoni.WithErrorModel(&apiErr),
 )
+
+// 2. Или выполнение сырых HTTP-запросов напрямую через удобные методы клиента
+resp, err := client.Get(ctx, "/raw-data")
 ```
 
 </td>
@@ -160,7 +164,7 @@ client := aoni.NewClient(aoni.Chain(stickyRotator, rateLimiter))
 * **Ледяное решение:** Если основной запрос зависает и не возвращает заголовки в течение 150 мс, параллельно отправляется резервный запрос. Возвращается результат того, который завершится быстрее.
 
 ```go
-data, err := aoni.GetJSON[Data](ctx, aoni.NewClient(hedgedClient), "/data", WithHedging(10*time.Millisecond))
+data, err := aoni.GetTo[Data](ctx, aoni.NewClient(hedgedClient), "/data", WithHedging(10*time.Millisecond))
 ```
 
 ### 3. Автоматическое преобразование устаревших кодировок
@@ -168,7 +172,7 @@ data, err := aoni.GetJSON[Data](ctx, aoni.NewClient(hedgedClient), "/data", With
 * **Ледяное решение:** `aoni` на лету определяет кодировку из заголовков и прозрачно преобразует поток в стандартный UTF-8 перед передачей любому декодеру.
 
 ```go
-manifest, err := aoni.GetJSON[Manifest](ctx, client, "/legacy-manifest",
+manifest, err := aoni.GetTo[Manifest](ctx, client, "/legacy-manifest",
     aoni.WithDownloadProgress(func(current, total int64) {
         fmt.Printf("Downloaded %d of %d bytes\n", current, total)
     }),
@@ -189,7 +193,7 @@ client := aoni.NewClient(nil).
         fmt.Println("Active TLS Handshake JA4:", r.JA4)
     })
 
-user, err := aoni.GetJSON[User](ctx, client, "/profile", 
+user, err := aoni.GetTo[User](ctx, client, "/profile", 
     aoni.Trace(info), 
     aoni.TraceJA4(info), // Отслеживает отпечатки TLS (JA4) и HTTP (JA4H).
 )
@@ -231,7 +235,7 @@ sio.On("price_update", func(args []json.RawMessage) {
 ```go
 var trace aoni.TraceInfo
 
-aoni.GetJSON[User](ctx, client, "/debug",
+aoni.GetTo[User](ctx, client, "/debug",
     aoni.Trace(&trace), // Подробные метрики DNS, TCP и TLS.
     aoni.AsCurl(),      // Выводит эквивалентную исполняемую команду curl в стандартный поток ошибок
 )
@@ -274,7 +278,7 @@ client := aoni.NewClient(nil).
 	WithBaseResponse(func() aoni.BaseResponse { return &apiResponse{} })
 
 // 3. Используем — декодер автоматически распаковывает конверт
-user, err := aoni.GetJSON[User](ctx, client, "/users/1")
+user, err := aoni.GetTo[User](ctx, client, "/users/1")
 // Если API вернул {"success":false,"message":"not found"}, err != nil
 // Если API вернул {"success":true,"data":{"name":"Alice"}}, user.Name == "Alice"
 ```

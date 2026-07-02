@@ -159,7 +159,7 @@ type BaseResponseProvider interface {
 type ProgressFunc func(current, total int64)
 
 // BaseResponse is implemented by user-defined response wrappers that
-// participate in [GetJSON] and similar generic request helpers. The
+// participate in [GetTo] and similar generic request helpers. The
 // decoder calls IsSuccess, SetData, and Error to route the result.
 type BaseResponse interface {
 	// IsSuccess reports whether the response indicates a successful operation.
@@ -397,26 +397,50 @@ func (c *Client) Get(ctx context.Context, path string, mods ...RequestModifier) 
 	return Get(ctx, c, path, mods...)
 }
 
-// Post marshals the body to JSON, executes a POST request through the Client,
-// and returns the raw http.Response.
+// Post executes a POST request through the Client and returns the raw http.Response.
+//
+// By default, if the body is a struct or map, it is marshaled to JSON and the request headers
+// "Content-Type" and "Accept" are set to "application/json".
+//
+// To send other body formats (e.g. XML, YAML, or plain text), pre-serialize the payload and
+// pass it as an [io.Reader] (e.g. using [strings.NewReader] or [bytes.NewReader]), then override the Content-Type
+// header using request modifiers like [WithContentType] (e.g. WithContentType("application/xml")).
 func (c *Client) Post(ctx context.Context, path string, body any, mods ...RequestModifier) (*http.Response, error) {
 	return Post(ctx, c, path, body, mods...)
 }
 
-// Put marshals the body to JSON, executes a PUT request through the Client,
-// and returns the raw http.Response.
+// Put executes a PUT request through the Client and returns the raw http.Response.
+//
+// By default, if the body is a struct or map, it is marshaled to JSON and the request headers
+// "Content-Type" and "Accept" are set to "application/json".
+//
+// To send other body formats (e.g. XML, YAML, or plain text), pre-serialize the payload and
+// pass it as an [io.Reader] (e.g. using [strings.NewReader] or [bytes.NewReader]), then override the Content-Type
+// header using request modifiers like [WithContentType] (e.g. WithContentType("application/xml")).
 func (c *Client) Put(ctx context.Context, path string, body any, mods ...RequestModifier) (*http.Response, error) {
 	return Put(ctx, c, path, body, mods...)
 }
 
-// Patch marshals the body to JSON, executes a PATCH request through the Client,
-// and returns the raw http.Response.
+// Patch executes a PATCH request through the Client and returns the raw http.Response.
+//
+// By default, if the body is a struct or map, it is marshaled to JSON and the request headers
+// "Content-Type" and "Accept" are set to "application/json".
+//
+// To send other body formats (e.g. XML, YAML, or plain text), pre-serialize the payload and
+// pass it as an [io.Reader] (e.g. using [strings.NewReader] or [bytes.NewReader]), then override the Content-Type
+// header using request modifiers like [WithContentType] (e.g. WithContentType("application/xml")).
 func (c *Client) Patch(ctx context.Context, path string, body any, mods ...RequestModifier) (*http.Response, error) {
 	return Patch(ctx, c, path, body, mods...)
 }
 
-// Delete marshals the body to JSON, executes a DELETE request through the Client,
-// and returns the raw http.Response.
+// Delete executes a DELETE request through the Client and returns the raw http.Response.
+//
+// By default, if the body is a struct or map, it is marshaled to JSON and the request headers
+// "Content-Type" and "Accept" are set to "application/json".
+//
+// To send other body formats (e.g. XML, YAML, or plain text), pre-serialize the payload and
+// pass it as an [io.Reader] (e.g. using [strings.NewReader] or [bytes.NewReader]), then override the Content-Type
+// header using request modifiers like [WithContentType] (e.g. WithContentType("application/xml")).
 func (c *Client) Delete(ctx context.Context, path string, body any, mods ...RequestModifier) (*http.Response, error) {
 	return Delete(ctx, c, path, body, mods...)
 }

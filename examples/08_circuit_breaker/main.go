@@ -47,7 +47,7 @@ func main() {
 	// Make requests; once the failure ratio exceeds the threshold, the circuit opens
 	// and all subsequent requests fail fast with a circuit-open error
 	for i := 0; i < 10; i++ {
-		res, err := aoni.GetJSON[StatusResponse](ctx, client, "/status/200")
+		res, err := aoni.GetTo[StatusResponse](ctx, client, "/status/200")
 		if err != nil {
 			fmt.Printf("Request %d failed: %v\n", i, err)
 			continue

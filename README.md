@@ -98,10 +98,14 @@ for i := 0; i < 3; i++ {
 // ❄️ Clean, immutable, pipeline-driven flow
 client := aoni.NewClient(transportChain)
 
-user, err := aoni.GetJSON[User](ctx, client, "/users/{id}",
+// 1. Get structured JSON automatically
+user, err := aoni.GetTo[User](ctx, client, "/users/{id}",
     aoni.WithVar("id", 123),
     aoni.WithErrorModel(&apiErr),
 )
+
+// 2. Or perform raw HTTP requests directly via client convenience methods
+resp, err := client.Get(ctx, "/raw-data")
 ```
 
 </td>
@@ -158,7 +162,7 @@ client := aoni.NewClient(aoni.Chain(stickyRotator, rateLimiter))
 * **The Ice-Cold Solution:** If the primary request stalls and doesn't return headers in 150ms, a backup request is dispatched in parallel, returning whichever finishes first.
 
 ```go
-data, err := aoni.GetJSON[Data](ctx, aoni.NewClient(hedgedClient), "/data", WithHedging(10*time.Millisecond))
+data, err := aoni.GetTo[Data](ctx, aoni.NewClient(hedgedClient), "/data", WithHedging(10*time.Millisecond))
 ```
 
 ### 3. Automatic Legacy Charset Translation
@@ -166,7 +170,7 @@ data, err := aoni.GetJSON[Data](ctx, aoni.NewClient(hedgedClient), "/data", With
 * **The Ice-Cold Solution:** `aoni` detects the encoding on-the-fly from the headers and transparently translates the stream to standard UTF-8 before passing it to any decoder.
 
 ```go
-manifest, err := aoni.GetJSON[Manifest](ctx, client, "/legacy-manifest",
+manifest, err := aoni.GetTo[Manifest](ctx, client, "/legacy-manifest",
     aoni.WithDownloadProgress(func(current, total int64) {
         fmt.Printf("Downloaded %d of %d bytes\n", current, total)
     }),
@@ -186,7 +190,7 @@ client := aoni.NewClient(nil).
         fmt.Println("Active TLS Handshake JA4:", r.JA4)
     })
 
-user, err := aoni.GetJSON[User](ctx, client, "/profile", 
+user, err := aoni.GetTo[User](ctx, client, "/profile", 
     aoni.Trace(info), 
     aoni.TraceJA4(info), // Traces both TLS (JA4) and HTTP (JA4H) fingerprints
 )
@@ -226,7 +230,7 @@ sio.On("price_update", func(args []json.RawMessage) {
 ```go
 var trace aoni.TraceInfo
 
-aoni.GetJSON[User](ctx, client, "/debug",
+aoni.GetTo[User](ctx, client, "/debug",
     aoni.Trace(&trace), // Detailed DNS, TCP, and TLS metrics
     aoni.AsCurl(),      // Prints equivalent executable curl command to stderr
 )
@@ -269,7 +273,7 @@ client := aoni.NewClient(nil).
 	WithBaseResponse(func() aoni.BaseResponse { return &apiResponse{} })
 
 // 3. Use it — the decoder handles envelope unwrapping automatically
-user, err := aoni.GetJSON[User](ctx, client, "/users/1")
+user, err := aoni.GetTo[User](ctx, client, "/users/1")
 // If API returns {"success":false,"message":"not found"}, err is non-nil
 // If API returns {"success":true,"data":{"name":"Alice"}}, user.Name == "Alice"
 ```

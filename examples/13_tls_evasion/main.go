@@ -49,7 +49,7 @@ func main() {
 		})
 
 	// Make a request with forced HTTP/1.1 and ordered headers
-	res, err := aoni.GetJSON[Response](ctx, client, "/ip",
+	res, err := aoni.GetTo[Response](ctx, client, "/ip",
 		aoni.WithForceHTTP1(),
 		aoni.WithOrderedHeaders([]string{
 			"Host",
@@ -74,7 +74,7 @@ func main() {
 	fmt.Printf("TLS evasion request successful: %s\n", res.Origin)
 
 	// Alternatively, force HTTP/2 for multiplexing
-	_, _ = aoni.GetJSON[Response](ctx, client, "/ip",
+	_, _ = aoni.GetTo[Response](ctx, client, "/ip",
 		aoni.WithForceHTTP2(),
 		aoni.WithALPN([]string{"h2", "http/1.1"}),
 	)

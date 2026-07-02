@@ -30,7 +30,7 @@ func main() {
 	client := aoni.NewClient(nil).
 		WithBaseURL("https://jsonplaceholder.typicode.com")
 
-	post, err := aoni.GetJSON[Post](ctx, client, "/posts/1")
+	post, err := aoni.GetTo[Post](ctx, client, "/posts/1")
 	if err != nil {
 		log.Fatal(err)
 	}

@@ -46,15 +46,125 @@ func redactHeaders(raw []byte) []byte {
 var DefaultClient = NewClient(nil)
 
 // NoResponse is a sentinel type used to indicate a request that does not return a response body.
+// When used as the response type in generic request helpers like [GetTo],
+// the helper automatically drains and closes the response body to prevent resource leaks.
 type NoResponse struct{}
 
-// Get performs a GET request through the specified Requester and returns the raw http.Response.
+// Put executes a PUT request through the specified Requester and returns the raw [http.Response].
+//
+// By default, if the body is a struct or map, it is marshaled to JSON and the request headers
+// "Content-Type" and "Accept" are set to "application/json".
+//
+// To send other body formats (e.g. XML, YAML, or plain text), pre-serialize the payload and
+// pass it as an [io.Reader] (e.g. using [strings.NewReader] or [bytes.NewReader]), then override the Content-Type
+// header using request modifiers like [WithContentType] (e.g. WithContentType("application/xml")).
+func Put(ctx context.Context, c Requester, path string, body any, mods ...RequestModifier) (*http.Response, error) {
+	bodyReader, err := validateAndMarshal(body)
+	if err != nil {
+		return nil, err
+	}
+
+	mods = append([]RequestModifier{
+		WithContentType("application/json"),
+		WithAccept("application/json"),
+		WithBody(bodyReader),
+	}, mods...)
+
+	return c.Request(ctx, http.MethodPut, path, mods...)
+}
+
+// Patch executes a PATCH request through the specified Requester and returns the raw [http.Response].
+//
+// By default, if the body is a struct or map, it is marshaled to JSON and the request headers
+// "Content-Type" and "Accept" are set to "application/json".
+//
+// To send other body formats (e.g. XML, YAML, or plain text), pre-serialize the payload and
+// pass it as an [io.Reader] (e.g. using [strings.NewReader] or [bytes.NewReader]), then override the Content-Type
+// header using request modifiers like [WithContentType] (e.g. WithContentType("application/xml")).
+func Patch(ctx context.Context, c Requester, path string, body any, mods ...RequestModifier) (*http.Response, error) {
+	bodyReader, err := validateAndMarshal(body)
+	if err != nil {
+		return nil, err
+	}
+
+	mods = append([]RequestModifier{
+		WithContentType("application/json"),
+		WithAccept("application/json"),
+		WithBody(bodyReader),
+	}, mods...)
+
+	return c.Request(ctx, http.MethodPatch, path, mods...)
+}
+
+// Delete executes a DELETE request through the specified Requester and returns the raw [http.Response].
+//
+// By default, if the body is a struct or map, it is marshaled to JSON and the request headers
+// "Content-Type" and "Accept" are set to "application/json".
+//
+// To send other body formats (e.g. XML, YAML, or plain text), pre-serialize the payload and
+// pass it as an [io.Reader] (e.g. using [strings.NewReader] or [bytes.NewReader]), then override the Content-Type
+// header using request modifiers like [WithContentType] (e.g. WithContentType("application/xml")).
+func Delete(ctx context.Context, c Requester, path string, body any, mods ...RequestModifier) (*http.Response, error) {
+	bodyReader, err := validateAndMarshal(body)
+	if err != nil {
+		return nil, err
+	}
+
+	mods = append([]RequestModifier{
+		WithContentType("application/json"),
+		WithAccept("application/json"),
+		WithBody(bodyReader),
+	}, mods...)
+
+	return c.Request(ctx, http.MethodDelete, path, mods...)
+}
+
+// Get performs a GET request through the specified Requester and returns the raw [http.Response].
 func Get(ctx context.Context, c Requester, path string, mods ...RequestModifier) (*http.Response, error) {
 	return c.Request(ctx, http.MethodGet, path, mods...)
 }
 
-// Post marshals the body to JSON, executes a POST request through the specified Requester,
-// and returns the raw http.Response.
+// GetTo performs a GET request and decodes the response body into a new instance of Resp.
+// It returns an [APIError] if the server responds with a non-2xx status code.
+//
+// By default, the response is parsed as JSON. To decode other response formats (such as XML
+// or YAML), pass a corresponding decoder modifier, e.g. [WithXMLDecoder] or [WithYAMLDecoder].
+func GetTo[Resp any](
+	ctx context.Context,
+	c Requester,
+	path string,
+	mods ...RequestModifier,
+) (*Resp, error) {
+	return requestTo[Resp](ctx, c, http.MethodGet, path, mods...)
+}
+
+// GetToEx is like [GetTo] but returns both the parsed response payload and the raw *http.Response.
+func GetToEx[Resp any](
+	ctx context.Context,
+	c Requester,
+	path string,
+	mods ...RequestModifier,
+) (*Resp, *http.Response, error) {
+	var raw *http.Response
+
+	mods = append(mods, CaptureResponse(&raw))
+
+	result, err := GetTo[Resp](ctx, c, path, mods...)
+	if err != nil {
+		return nil, raw, err
+	}
+
+	return result, raw, nil
+}
+
+// Post executes a POST request through the specified Requester and returns the raw [http.Response].
+//
+// By default, if the body is a struct or map, it is marshaled to JSON and the request headers
+// "Content-Type" and "Accept" are set to "application/json".
+//
+// To send other body formats (e.g. XML, YAML, or plain text), pre-serialize the payload and
+// pass it as an [io.Reader] (e.g. using [strings.NewReader] or [bytes.NewReader]), then override the Content-Type
+// header using request modifiers like [WithContentType] (e.g. WithContentType("application/xml")).
 func Post(ctx context.Context, c Requester, path string, body any, mods ...RequestModifier) (*http.Response, error) {
 	bodyReader, err := validateAndMarshal(body)
 	if err != nil {
@@ -68,6 +178,71 @@ func Post(ctx context.Context, c Requester, path string, body any, mods ...Reque
 	}, mods...)
 
 	return c.Request(ctx, http.MethodPost, path, mods...)
+}
+
+// PostTo executes a POST request, marshals the body, and decodes the response body into Resp.
+// It returns an [APIError] if the server responds with a non-2xx status code.
+//
+// By default, the request body is marshaled to JSON and the response is parsed as JSON.
+//
+// To send other body formats, pre-serialize the payload and pass it as an [io.Reader] (e.g. [strings.NewReader]),
+// then override the Content-Type header using [WithContentType].
+// To decode other response formats (such as XML or YAML), pass a decoder modifier, e.g. [WithXMLDecoder] or [WithYAMLDecoder].
+func PostTo[Resp any](
+	ctx context.Context,
+	c Requester,
+	path string,
+	body any,
+	mods ...RequestModifier,
+) (*Resp, error) {
+	bodyReader, err := validateAndMarshal(body)
+	if err != nil {
+		return nil, err
+	}
+
+	mods = append([]RequestModifier{
+		WithContentType("application/json"),
+		WithAccept("application/json"),
+		WithBody(bodyReader),
+	}, mods...)
+
+	resp, err := c.Request(ctx, http.MethodPost, path, mods...)
+	if err != nil {
+		return nil, err
+	}
+
+	if reflect.TypeFor[Resp]() == reflect.TypeFor[NoResponse]() {
+		closeResponse(resp)
+
+		return nil, err
+	}
+
+	result := new(Resp)
+	if err := handleResponse(resp, result, c); err != nil {
+		return nil, err
+	}
+
+	return result, nil
+}
+
+// PostToEx is like [PostTo] but returns both the parsed response payload and the raw *http.Response.
+func PostToEx[Resp any](
+	ctx context.Context,
+	c Requester,
+	path string,
+	body any,
+	mods ...RequestModifier,
+) (*Resp, *http.Response, error) {
+	var raw *http.Response
+
+	mods = append(mods, CaptureResponse(&raw))
+
+	result, err := PostTo[Resp](ctx, c, path, body, mods...)
+	if err != nil {
+		return nil, raw, err
+	}
+
+	return result, raw, nil
 }
 
 // PostForm performs a POST request with URL-encoded parameters using the specified Requester
@@ -107,112 +282,15 @@ func PostForm(
 	return c.Request(ctx, http.MethodPost, path, mods...)
 }
 
-// Put marshals the body to JSON, executes a PUT request through the specified Requester,
-// and returns the raw http.Response.
-func Put(ctx context.Context, c Requester, path string, body any, mods ...RequestModifier) (*http.Response, error) {
-	bodyReader, err := validateAndMarshal(body)
-	if err != nil {
-		return nil, err
-	}
-
-	mods = append([]RequestModifier{
-		WithContentType("application/json"),
-		WithAccept("application/json"),
-		WithBody(bodyReader),
-	}, mods...)
-
-	return c.Request(ctx, http.MethodPut, path, mods...)
-}
-
-// Patch marshals the body to JSON, executes a PATCH request through the specified Requester,
-// and returns the raw http.Response.
-func Patch(ctx context.Context, c Requester, path string, body any, mods ...RequestModifier) (*http.Response, error) {
-	bodyReader, err := validateAndMarshal(body)
-	if err != nil {
-		return nil, err
-	}
-
-	mods = append([]RequestModifier{
-		WithContentType("application/json"),
-		WithAccept("application/json"),
-		WithBody(bodyReader),
-	}, mods...)
-
-	return c.Request(ctx, http.MethodPatch, path, mods...)
-}
-
-// Delete marshals the body to JSON, executes a DELETE request through the specified Requester,
-// and returns the raw http.Response.
-func Delete(ctx context.Context, c Requester, path string, body any, mods ...RequestModifier) (*http.Response, error) {
-	bodyReader, err := validateAndMarshal(body)
-	if err != nil {
-		return nil, err
-	}
-
-	mods = append([]RequestModifier{
-		WithContentType("application/json"),
-		WithAccept("application/json"),
-		WithBody(bodyReader),
-	}, mods...)
-
-	return c.Request(ctx, http.MethodDelete, path, mods...)
-}
-
-// GetJSON performs a GET request and decodes the JSON response body into a new instance of Resp.
-// It returns an [APIError] if the server responds with a non-2xx status code.
-func GetJSON[Resp any](
-	ctx context.Context,
-	c Requester,
-	path string,
-	mods ...RequestModifier,
-) (*Resp, error) {
-	resp, err := c.Request(ctx, http.MethodGet, path, mods...)
-	if err != nil {
-		return nil, err
-	}
-
-	if reflect.TypeFor[Resp]() == reflect.TypeFor[NoResponse]() {
-		closeResponse(resp)
-
-		return nil, err
-	}
-
-	result := new(Resp)
-	if err := handleResponse(resp, result, c); err != nil {
-		return nil, err
-	}
-
-	return result, nil
-}
-
-// GetJSONEx is like [GetJSON] but returns both the parsed response payload and the raw *http.Response.
-func GetJSONEx[Resp any](
-	ctx context.Context,
-	c Requester,
-	path string,
-	mods ...RequestModifier,
-) (*Resp, *http.Response, error) {
-	var raw *http.Response
-
-	mods = append(mods, CaptureResponse(&raw))
-
-	result, err := GetJSON[Resp](ctx, c, path, mods...)
-	if err != nil {
-		return nil, raw, err
-	}
-
-	return result, raw, nil
-}
-
-// PostFormJSON marshals the body, performs a POST request with URL-encoded parameters,
-// and decodes the resulting JSON response body into Resp.
+// PostFormTo marshals the body, performs a POST request with URL-encoded parameters,
+// and decodes the response body into Resp.
 //
 // If the body implements [io.Reader], it is used directly as the request body.
 // Otherwise, the body is marshaled to URL-encoded form values and wrapped in a [strings.Reader].
 //
 // It validates the body structure beforehand using [Validate].
 // Returns a [ValidationError] if validation fails.
-func PostFormJSON[Resp any](
+func PostFormTo[Resp any](
 	ctx context.Context,
 	c Requester,
 	path string,
@@ -259,8 +337,8 @@ func PostFormJSON[Resp any](
 	return result, nil
 }
 
-// PostFormJSONEx is like [PostFormJSON] but returns both the parsed response payload and the raw *http.Response.
-func PostFormJSONEx[Resp any](
+// PostFormToEx is like [PostFormTo] but returns both the parsed response payload and the raw *http.Response.
+func PostFormToEx[Resp any](
 	ctx context.Context,
 	c Requester,
 	path string,
@@ -271,7 +349,7 @@ func PostFormJSONEx[Resp any](
 
 	mods = append(mods, CaptureResponse(&raw))
 
-	result, err := PostFormJSON[Resp](ctx, c, path, body, mods...)
+	result, err := PostFormTo[Resp](ctx, c, path, body, mods...)
 	if err != nil {
 		return nil, raw, err
 	}
@@ -279,80 +357,15 @@ func PostFormJSONEx[Resp any](
 	return result, raw, nil
 }
 
-// PostJSON marshals the body to JSON, executes a POST request, and decodes the response body.
-// It automatically configures the request headers with Content-Type and Accept set to "application/json".
+// PutTo executes a PUT request, marshals the body, and decodes the response body into Resp.
+// It returns an [APIError] if the server responds with a non-2xx status code.
 //
-// If the body implements [io.Reader], it is used directly as the request body.
-// Otherwise, the body is marshaled to JSON.
+// By default, the request body is marshaled to JSON and the response is parsed as JSON.
 //
-// It validates the body structure beforehand using [Validate].
-// Returns a [ValidationError] if validation fails.
-func PostJSON[Resp any](
-	ctx context.Context,
-	c Requester,
-	path string,
-	body any,
-	mods ...RequestModifier,
-) (*Resp, error) {
-	bodyReader, err := validateAndMarshal(body)
-	if err != nil {
-		return nil, err
-	}
-
-	mods = append([]RequestModifier{
-		WithContentType("application/json"),
-		WithAccept("application/json"),
-		WithBody(bodyReader),
-	}, mods...)
-
-	resp, err := c.Request(ctx, http.MethodPost, path, mods...)
-	if err != nil {
-		return nil, err
-	}
-
-	if reflect.TypeFor[Resp]() == reflect.TypeFor[NoResponse]() {
-		closeResponse(resp)
-
-		return nil, err
-	}
-
-	result := new(Resp)
-	if err := handleResponse(resp, result, c); err != nil {
-		return nil, err
-	}
-
-	return result, nil
-}
-
-// PostJSONEx is like [PostJSON] but returns both the parsed response payload and the raw *http.Response.
-func PostJSONEx[Resp any](
-	ctx context.Context,
-	c Requester,
-	path string,
-	body any,
-	mods ...RequestModifier,
-) (*Resp, *http.Response, error) {
-	var raw *http.Response
-
-	mods = append(mods, CaptureResponse(&raw))
-
-	result, err := PostJSON[Resp](ctx, c, path, body, mods...)
-	if err != nil {
-		return nil, raw, err
-	}
-
-	return result, raw, nil
-}
-
-// PutJSON marshals the body to JSON, executes a PUT request, and decodes the response body.
-// It automatically configures the request headers with Content-Type and Accept set to "application/json".
-//
-// If the body implements [io.Reader], it is used directly as the request body.
-// Otherwise, the body is marshaled to JSON.
-//
-// It validates the body structure beforehand using [Validate].
-// Returns a [ValidationError] if validation fails.
-func PutJSON[Resp any](
+// To send other body formats, pre-serialize the payload and pass it as an [io.Reader] (e.g. [strings.NewReader]),
+// then override the Content-Type header using [WithContentType].
+// To decode other response formats (such as XML or YAML), pass a decoder modifier, e.g. [WithXMLDecoder] or [WithYAMLDecoder].
+func PutTo[Resp any](
 	ctx context.Context,
 	c Requester,
 	path string,
@@ -388,8 +401,8 @@ func PutJSON[Resp any](
 	return result, nil
 }
 
-// PutJSONEx is like [PutJSON] but returns both the parsed response payload and the raw *http.Response.
-func PutJSONEx[Resp any](
+// PutToEx is like [PutTo] but returns both the parsed response payload and the raw *http.Response.
+func PutToEx[Resp any](
 	ctx context.Context,
 	c Requester,
 	path string,
@@ -400,7 +413,7 @@ func PutJSONEx[Resp any](
 
 	mods = append(mods, CaptureResponse(&raw))
 
-	result, err := PutJSON[Resp](ctx, c, path, body, mods...)
+	result, err := PutTo[Resp](ctx, c, path, body, mods...)
 	if err != nil {
 		return nil, raw, err
 	}
@@ -408,15 +421,15 @@ func PutJSONEx[Resp any](
 	return result, raw, nil
 }
 
-// PatchJSON marshals the body to JSON, executes a PATCH request, and decodes the response body.
-// It automatically configures the request headers with Content-Type and Accept set to "application/json".
+// PatchTo executes a PATCH request, marshals the body, and decodes the response body into Resp.
+// It returns an [APIError] if the server responds with a non-2xx status code.
 //
-// If the body implements [io.Reader], it is used directly as the request body.
-// Otherwise, the body is marshaled to JSON.
+// By default, the request body is marshaled to JSON and the response is parsed as JSON.
 //
-// It validates the body structure beforehand using [Validate].
-// Returns a [ValidationError] if validation fails.
-func PatchJSON[Resp any](
+// To send other body formats, pre-serialize the payload and pass it as an [io.Reader] (e.g. [strings.NewReader]),
+// then override the Content-Type header using [WithContentType].
+// To decode other response formats (such as XML or YAML), pass a decoder modifier, e.g. [WithXMLDecoder] or [WithYAMLDecoder].
+func PatchTo[Resp any](
 	ctx context.Context,
 	c Requester,
 	path string,
@@ -452,8 +465,8 @@ func PatchJSON[Resp any](
 	return result, nil
 }
 
-// PatchJSONEx is like [PatchJSON] but returns both the parsed response payload and the raw *http.Response.
-func PatchJSONEx[Resp any](
+// PatchToEx is like [PatchTo] but returns both the parsed response payload and the raw *http.Response.
+func PatchToEx[Resp any](
 	ctx context.Context,
 	c Requester,
 	path string,
@@ -464,7 +477,7 @@ func PatchJSONEx[Resp any](
 
 	mods = append(mods, CaptureResponse(&raw))
 
-	result, err := PatchJSON[Resp](ctx, c, path, body, mods...)
+	result, err := PatchTo[Resp](ctx, c, path, body, mods...)
 	if err != nil {
 		return nil, raw, err
 	}
@@ -472,15 +485,15 @@ func PatchJSONEx[Resp any](
 	return result, raw, nil
 }
 
-// DeleteJSON marshals the body to JSON, executes a DELETE request, and decodes the response body.
-// It automatically configures the request headers with Content-Type and Accept set to "application/json".
+// DeleteTo executes a DELETE request, marshals the body, and decodes the response body into Resp.
+// It returns an [APIError] if the server responds with a non-2xx status code.
 //
-// If the body implements [io.Reader], it is used directly as the request body.
-// Otherwise, the body is marshaled to JSON.
+// By default, the request body is marshaled to JSON and the response is parsed as JSON.
 //
-// It validates the body structure beforehand using [Validate].
-// Returns a [ValidationError] if validation fails.
-func DeleteJSON[Resp any](
+// To send other body formats, pre-serialize the payload and pass it as an [io.Reader] (e.g. [strings.NewReader]),
+// then override the Content-Type header using [WithContentType].
+// To decode other response formats (such as XML or YAML), pass a decoder modifier, e.g. [WithXMLDecoder] or [WithYAMLDecoder].
+func DeleteTo[Resp any](
 	ctx context.Context,
 	c Requester,
 	path string,
@@ -516,8 +529,8 @@ func DeleteJSON[Resp any](
 	return result, nil
 }
 
-// DeleteJSONEx is like [DeleteJSON] but returns both the parsed response payload and the raw *http.Response.
-func DeleteJSONEx[Resp any](
+// DeleteToEx is like [DeleteTo] but returns both the parsed response payload and the raw *http.Response.
+func DeleteToEx[Resp any](
 	ctx context.Context,
 	c Requester,
 	path string,
@@ -528,7 +541,7 @@ func DeleteJSONEx[Resp any](
 
 	mods = append(mods, CaptureResponse(&raw))
 
-	result, err := DeleteJSON[Resp](ctx, c, path, body, mods...)
+	result, err := DeleteTo[Resp](ctx, c, path, body, mods...)
 	if err != nil {
 		return nil, raw, err
 	}
@@ -699,4 +712,29 @@ func handleResponse(resp *http.Response, target any, requester Requester) error 
 	}
 
 	return err
+}
+
+func requestTo[Resp any](
+	ctx context.Context,
+	c Requester,
+	method, path string,
+	mods ...RequestModifier,
+) (*Resp, error) {
+	resp, err := c.Request(ctx, method, path, mods...)
+	if err != nil {
+		return nil, err
+	}
+
+	if reflect.TypeFor[Resp]() == reflect.TypeFor[NoResponse]() {
+		closeResponse(resp)
+
+		return nil, err
+	}
+
+	result := new(Resp)
+	if err := handleResponse(resp, result, c); err != nil {
+		return nil, err
+	}
+
+	return result, nil
 }

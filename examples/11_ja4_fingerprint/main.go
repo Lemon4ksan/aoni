@@ -41,7 +41,7 @@ func main() {
 	// Trace with JA4 fingerprint collection
 	var info aoni.TraceInfo
 
-	_, err := aoni.GetJSON[Response](ctx, client, "/ip",
+	_, err := aoni.GetTo[Response](ctx, client, "/ip",
 		aoni.TraceJA4(&info),
 	)
 	if err != nil {
@@ -62,7 +62,7 @@ func main() {
 			fmt.Printf("\nFirefox JA4: %s\n", report.JA4)
 		})
 
-	_, _ = aoni.GetJSON[Response](ctx, firefoxClient, "/ip")
+	_, _ = aoni.GetTo[Response](ctx, firefoxClient, "/ip")
 }
 
 func printJA4Report(r *ja4.Report) {

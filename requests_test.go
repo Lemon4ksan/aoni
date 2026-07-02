@@ -7,6 +7,7 @@ package aoni
 import (
 	"bytes"
 	"encoding/json"
+	"encoding/xml"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -58,7 +59,7 @@ func setupTestReqServer(t *testing.T, handler http.HandlerFunc) (*httptest.Serve
 	return server, c
 }
 
-func TestClient_GetJSON(t *testing.T) {
+func TestClient_GetTo(t *testing.T) {
 	t.Parallel()
 
 	expected := reqTestPayload{Message: "hello", Status: http.StatusOK}
@@ -68,14 +69,14 @@ func TestClient_GetJSON(t *testing.T) {
 		_ = json.NewEncoder(w).Encode(expected)
 	})
 
-	result, err := GetJSON[reqTestPayload](t.Context(), client, "/json")
+	result, err := GetTo[reqTestPayload](t.Context(), client, "/json")
 	require.NoError(t, err)
 
 	assert.Equal(t, expected.Message, result.Message)
 	assert.Equal(t, expected.Status, result.Status)
 }
 
-func TestClient_GetJSONEx(t *testing.T) {
+func TestClient_GetToEx(t *testing.T) {
 	t.Parallel()
 
 	expected := reqTestPayload{Message: "hello_ex", Status: http.StatusOK}
@@ -85,7 +86,7 @@ func TestClient_GetJSONEx(t *testing.T) {
 		_ = json.NewEncoder(w).Encode(expected)
 	})
 
-	result, raw, err := GetJSONEx[reqTestPayload](t.Context(), client, "/json_ex")
+	result, raw, err := GetToEx[reqTestPayload](t.Context(), client, "/json_ex")
 	require.NoError(t, err)
 	require.NotNil(t, raw)
 
@@ -93,7 +94,7 @@ func TestClient_GetJSONEx(t *testing.T) {
 	assert.Equal(t, http.StatusOK, raw.StatusCode)
 }
 
-func TestClient_PostJSON(t *testing.T) {
+func TestClient_PostTo(t *testing.T) {
 	t.Parallel()
 
 	input := reqTestPayload{Message: "sending", Status: 1}
@@ -113,12 +114,12 @@ func TestClient_PostJSON(t *testing.T) {
 		_ = json.NewEncoder(w).Encode(response)
 	})
 
-	result, err := PostJSON[reqTestPayload](t.Context(), client, "/post", input)
+	result, err := PostTo[reqTestPayload](t.Context(), client, "/post", input)
 	require.NoError(t, err)
 	assert.Equal(t, response.Message, result.Message)
 }
 
-func TestClient_PutJSON(t *testing.T) {
+func TestClient_PutTo(t *testing.T) {
 	t.Parallel()
 
 	input := reqTestPayload{Message: "sending-put", Status: 1}
@@ -138,12 +139,12 @@ func TestClient_PutJSON(t *testing.T) {
 		_ = json.NewEncoder(w).Encode(response)
 	})
 
-	result, err := PutJSON[reqTestPayload](t.Context(), client, "/put", input)
+	result, err := PutTo[reqTestPayload](t.Context(), client, "/put", input)
 	require.NoError(t, err)
 	assert.Equal(t, response.Message, result.Message)
 }
 
-func TestClient_PatchJSON(t *testing.T) {
+func TestClient_PatchTo(t *testing.T) {
 	t.Parallel()
 
 	input := reqTestPayload{Message: "sending-patch", Status: 1}
@@ -163,12 +164,12 @@ func TestClient_PatchJSON(t *testing.T) {
 		_ = json.NewEncoder(w).Encode(response)
 	})
 
-	result, err := PatchJSON[reqTestPayload](t.Context(), client, "/patch", input)
+	result, err := PatchTo[reqTestPayload](t.Context(), client, "/patch", input)
 	require.NoError(t, err)
 	assert.Equal(t, response.Message, result.Message)
 }
 
-func TestClient_DeleteJSON(t *testing.T) {
+func TestClient_DeleteTo(t *testing.T) {
 	t.Parallel()
 
 	input := reqTestPayload{Message: "deleting", Status: 1}
@@ -188,12 +189,12 @@ func TestClient_DeleteJSON(t *testing.T) {
 		_ = json.NewEncoder(w).Encode(response)
 	})
 
-	result, err := DeleteJSON[reqTestPayload](t.Context(), client, "/delete", input)
+	result, err := DeleteTo[reqTestPayload](t.Context(), client, "/delete", input)
 	require.NoError(t, err)
 	assert.Equal(t, response.Message, result.Message)
 }
 
-func TestClient_DeleteJSON_NilPayload(t *testing.T) {
+func TestClient_DeleteTo_NilPayload(t *testing.T) {
 	t.Parallel()
 	_, client := setupTestReqServer(t, func(w http.ResponseWriter, r *http.Request) {
 		assert.Equal(t, http.MethodDelete, r.Method)
@@ -206,8 +207,94 @@ func TestClient_DeleteJSON_NilPayload(t *testing.T) {
 		w.WriteHeader(http.StatusNoContent)
 	})
 
-	_, err := DeleteJSON[any](t.Context(), client, "/delete-nil", nil)
+	_, err := DeleteTo[any](t.Context(), client, "/delete-nil", nil)
 	require.NoError(t, err)
+}
+
+func TestGenericToHelpers(t *testing.T) {
+	t.Parallel()
+
+	_, client := setupTestReqServer(t, func(w http.ResponseWriter, r *http.Request) {
+		if strings.Contains(r.URL.Path, "xml") {
+			w.Header().Set("Content-Type", "application/xml")
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(`<payload><message>xml-success</message><status>200</status></payload>`))
+
+			return
+		}
+
+		if strings.Contains(r.URL.Path, "yaml") {
+			w.Header().Set("Content-Type", "application/x-yaml")
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte("message: yaml-success\nstatus: 200\n"))
+
+			return
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"message":"to-success","status":200}`))
+	})
+
+	type xmlPayload struct {
+		XMLName xml.Name `xml:"payload"`
+		Message string   `xml:"message"`
+		Status  int      `xml:"status"`
+	}
+
+	type yamlPayload struct {
+		Message string `yaml:"message"`
+		Status  int    `yaml:"status"`
+	}
+
+	t.Run("GetTo_JSON", func(t *testing.T) {
+		res, err := GetTo[reqTestPayload](t.Context(), client, "/get")
+		require.NoError(t, err)
+		assert.Equal(t, "to-success", res.Message)
+	})
+
+	t.Run("PostTo_JSON", func(t *testing.T) {
+		res, err := PostTo[reqTestPayload](t.Context(), client, "/post", reqTestPayload{Message: "to-msg", Status: 100})
+		require.NoError(t, err)
+		assert.Equal(t, "to-success", res.Message)
+	})
+
+	t.Run("GetTo_XML", func(t *testing.T) {
+		res, err := GetTo[xmlPayload](t.Context(), client, "/get-xml", WithXMLDecoder())
+		require.NoError(t, err)
+		assert.Equal(t, "xml-success", res.Message)
+	})
+
+	t.Run("PostTo_XML", func(t *testing.T) {
+		body, _ := xml.Marshal(xmlPayload{Message: "xml-input", Status: 10})
+		res, err := PostTo[xmlPayload](
+			t.Context(), client, "/post-xml",
+			strings.NewReader(string(body)),
+			WithContentType("application/xml"),
+			WithAccept("application/xml"),
+			WithXMLDecoder(),
+		)
+		require.NoError(t, err)
+		assert.Equal(t, "xml-success", res.Message)
+	})
+
+	t.Run("GetTo_YAML", func(t *testing.T) {
+		res, err := GetTo[yamlPayload](t.Context(), client, "/get-yaml", WithYAMLDecoder())
+		require.NoError(t, err)
+		assert.Equal(t, "yaml-success", res.Message)
+	})
+
+	t.Run("PostTo_YAML", func(t *testing.T) {
+		res, err := PostTo[yamlPayload](
+			t.Context(), client, "/post-yaml",
+			strings.NewReader("message: yaml-input\nstatus: 10\n"),
+			WithContentType("application/x-yaml"),
+			WithAccept("application/x-yaml"),
+			WithYAMLDecoder(),
+		)
+		require.NoError(t, err)
+		assert.Equal(t, "yaml-success", res.Message)
+	})
 }
 
 func TestClient_RawHelpers(t *testing.T) {
@@ -383,7 +470,7 @@ func TestPostForm(t *testing.T) {
 			_, _ = w.Write([]byte(`{"message":"success"}`))
 		})
 
-		res, err := PostFormJSON[reqTestPayload](t.Context(), client, "/form", input)
+		res, err := PostFormTo[reqTestPayload](t.Context(), client, "/form", input)
 		require.NoError(t, err)
 		assert.Equal(t, "success", res.Message)
 	})
@@ -397,7 +484,7 @@ func TestPostForm(t *testing.T) {
 			w.WriteHeader(http.StatusOK)
 		})
 
-		_, err := PostFormJSON[NoResponse](t.Context(), client, "/form-reader", readerPayload)
+		_, err := PostFormTo[NoResponse](t.Context(), client, "/form-reader", readerPayload)
 		require.NoError(t, err)
 	})
 
@@ -408,7 +495,7 @@ func TestPostForm(t *testing.T) {
 		invalidInput := reqTestPayload{Status: 10}
 		client := NewClient(nil)
 
-		_, err := PostFormJSON[reqTestPayload](t.Context(), client, "/form", invalidInput)
+		_, err := PostFormTo[reqTestPayload](t.Context(), client, "/form", invalidInput)
 		assert.Error(t, err)
 	})
 }
@@ -423,7 +510,7 @@ func TestClient_UnexpectedHTML_Detection(t *testing.T) {
 			_, _ = w.Write([]byte("<!doctype html><html><body>error page</body></html>"))
 		})
 
-		_, err := GetJSON[reqTestPayload](t.Context(), client, "/html")
+		_, err := GetTo[reqTestPayload](t.Context(), client, "/html")
 		assert.ErrorIs(t, err, ErrUnexpectedContentType)
 	})
 
@@ -436,7 +523,7 @@ func TestClient_UnexpectedHTML_Detection(t *testing.T) {
 			)
 		})
 
-		_, err := GetJSON[reqTestPayload](t.Context(), client, "/cloudflare")
+		_, err := GetTo[reqTestPayload](t.Context(), client, "/cloudflare")
 		assert.ErrorIs(t, err, ErrCloudflareChallenge)
 	})
 }
@@ -451,7 +538,7 @@ func TestClient_APIError_With_ErrorModel(t *testing.T) {
 
 	var errPayload errorPayload
 
-	_, err := GetJSON[reqTestPayload](t.Context(), client, "/error", WithErrorModel(&errPayload))
+	_, err := GetTo[reqTestPayload](t.Context(), client, "/error", WithErrorModel(&errPayload))
 
 	var apiErr *APIError
 	require.ErrorAs(t, err, &apiErr)
@@ -486,8 +573,8 @@ func TestClient_Diagnostics_SensitiveHeaderRedaction(t *testing.T) {
 	require.NoError(t, err)
 	req.Header.Set("Authorization", "Bearer sensitive-token-here")
 
-	// Call GetJSON so that handleResponse is executed and diagnostics are triggered
-	_, err = GetJSON[testPayload](
+	// Call GetTo so that handleResponse is executed and diagnostics are triggered
+	_, err = GetTo[testPayload](
 		t.Context(),
 		client,
 		"/debug-test",
@@ -520,7 +607,7 @@ func TestClient_BaseResponseProvider(t *testing.T) {
 		},
 	}
 
-	result, err := GetJSON[testPayload](t.Context(), providerClient, "/provider")
+	result, err := GetTo[testPayload](t.Context(), providerClient, "/provider")
 	require.NoError(t, err)
 	assert.Equal(t, "provider_response", result.Message)
 }

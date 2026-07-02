@@ -28,7 +28,7 @@ func main() {
 		WithBaseURL("https://httpbin.org")
 
 	// Bearer token authentication
-	res, err := aoni.GetJSON[ProtectedResource](ctx, client,
+	res, err := aoni.GetTo[ProtectedResource](ctx, client,
 		"/bearer",
 		aoni.WithBearer("my-secret-token"),
 	)
@@ -39,7 +39,7 @@ func main() {
 	fmt.Println("Bearer:", res.Message)
 
 	// Basic authentication
-	basicRes, err := aoni.GetJSON[ProtectedResource](ctx, client,
+	basicRes, err := aoni.GetTo[ProtectedResource](ctx, client,
 		"/basic-auth/user/passwd",
 		aoni.WithBasicAuth("user", "passwd"),
 	)
@@ -50,7 +50,7 @@ func main() {
 	fmt.Println("Basic:", basicRes.Message)
 
 	// Custom headers
-	headerRes, err := aoni.GetJSON[ProtectedResource](ctx, client,
+	headerRes, err := aoni.GetTo[ProtectedResource](ctx, client,
 		"/headers",
 		aoni.WithHeader("X-Custom-Header", "hello-aoni"),
 		aoni.WithHeader("X-Request-ID", "abc-123"),

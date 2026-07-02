@@ -50,7 +50,7 @@ func main() {
 		WithBaseURL("https://jsonplaceholder.typicode.com")
 
 	// 1. Path variable: fetch user /users/{id}
-	user, err := aoni.GetJSON[User](ctx, client,
+	user, err := aoni.GetTo[User](ctx, client,
 		"/users/{id}",
 		aoni.WithVar("id", 1),
 	)
@@ -66,7 +66,7 @@ func main() {
 		PostID int `url:"postId"`
 	}{PostID: 1}
 
-	comments, err := aoni.GetJSON[[]Comment](ctx, client,
+	comments, err := aoni.GetTo[[]Comment](ctx, client,
 		"/posts/{id}/comments",
 		aoni.WithVar("id", 1),
 		aoni.WithQuery(params),
@@ -80,7 +80,7 @@ func main() {
 	// 3. Automated Defaults: fetch filtered posts /posts?userId=1&_limit=3&_sort=id
 	// By passing an empty filter, aoni detects that fields are zero-valued
 	// and automatically applies the values defined in 'default' tags.
-	posts, err := aoni.GetJSON[[]Post](ctx, client,
+	posts, err := aoni.GetTo[[]Post](ctx, client,
 		"/posts",
 		aoni.WithQuery(PostFilter{}), // Zero-value struct -> defaults will be applied!
 	)

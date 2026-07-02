@@ -71,19 +71,20 @@
 //
 //	client := aoni.NewClient(nil).
 //		WithBaseURL("https://api.example.com").
-//		WithTimeout(10 * time.Second).
-//		WithHeader("Accept", "application/json")
+//		WithTimeout(10 * time.Second)
 //
-//	resp, err := client.Request(ctx, http.MethodGet, "/users/123")
+//	// 1. Get structured data with generics:
+//	user, err := aoni.GetTo[User](ctx, client, "/users/123")
+//	if err != nil {
+//		log.Fatal(err)
+//	}
+//
+//	// 2. Or execute raw requests directly via convenience methods:
+//	resp, err := client.Get(ctx, "/raw-data")
 //	if err != nil {
 //		log.Fatal(err)
 //	}
 //	defer resp.Body.Close()
-//
-//	var user User
-//	if err := aoni.DecodeJSON(resp, &user); err != nil {
-//		log.Fatal(err)
-//	}
 //
 // The full example directory contains runnable programs for each feature.
 package aoni

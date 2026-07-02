@@ -27,7 +27,7 @@ func main() {
 		WithTimeout(10 * time.Second).
 		WithP0fSignature(p0f.Linux311)
 
-	resp, err := aoni.GetJSON[IPResponse](ctx, client, "/ip")
+	resp, err := aoni.GetTo[IPResponse](ctx, client, "/ip")
 	if err != nil {
 		log.Fatal(err)
 	}

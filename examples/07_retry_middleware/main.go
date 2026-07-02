@@ -75,7 +75,7 @@ func main() {
 	retryClient := aoni.NewClient(retryOnErr).
 		WithBaseURL("https://httpbin.org")
 
-	res, err := aoni.GetJSON[Response](ctx, retryClient, "/status/200")
+	res, err := aoni.GetTo[Response](ctx, retryClient, "/status/200")
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -86,7 +86,7 @@ func main() {
 	customClient := aoni.NewClient(customRetry).
 		WithBaseURL("https://httpbin.org")
 
-	_, _ = aoni.GetJSON[Response](ctx, customClient, "/status/429")
+	_, _ = aoni.GetTo[Response](ctx, customClient, "/status/429")
 
 	// Use retryOnTransient client for unreliable endpoints
 	_ = retryOnTransient

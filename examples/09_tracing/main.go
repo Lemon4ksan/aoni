@@ -32,7 +32,7 @@ func main() {
 	// Trace with full timing breakdown
 	var info aoni.TraceInfo
 
-	_, err := aoni.GetJSON[HTTPBinResponse](ctx, client, "/ip",
+	_, err := aoni.GetTo[HTTPBinResponse](ctx, client, "/ip",
 		aoni.Trace(&info),
 	)
 	if err != nil {
@@ -52,7 +52,7 @@ func main() {
 	// AsCurl + CaptureResponse: capture the raw response for curl generation
 	var resp *http.Response
 
-	_, err = aoni.GetJSON[HTTPBinResponse](ctx, client, "/ip",
+	_, err = aoni.GetTo[HTTPBinResponse](ctx, client, "/ip",
 		aoni.AsCurl(),
 		aoni.CaptureResponse(&resp),
 	)

@@ -47,7 +47,7 @@ func main() {
 
 	// Requests will be distributed across backends
 	for i := 0; i < 6; i++ {
-		res, err := aoni.GetJSON[Response](ctx, client, "/ip")
+		res, err := aoni.GetTo[Response](ctx, client, "/ip")
 		if err != nil {
 			log.Printf("Request %d failed: %v", i, err)
 			continue
