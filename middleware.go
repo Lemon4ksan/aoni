@@ -80,7 +80,7 @@ const (
 
 // RetryOptions configures [RetryMiddleware].
 type RetryOptions struct {
-	// MaxRetries is the total number of attempts (1 = no retries).
+	// MaxRetries is the maximum number of retry attempts after the initial failure (0 = no retries).
 	MaxRetries uint32
 
 	// Backoff is the delay before the first retry. Subsequent retries
