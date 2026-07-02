@@ -9,7 +9,9 @@ import (
 	"net/http"
 	"net/http/cookiejar"
 	"net/url"
+	"strings"
 	"sync"
+	"time"
 
 	"github.com/lemon4ksan/miyako/sync/keylock"
 )
@@ -29,9 +31,10 @@ type proxyCtxKey struct{}
 // proxy servers typically do not return redirects, and cookies from the target server
 // arrive in the initial response before any redirect.
 type ProxyIsolatedCookieJar struct {
-	mu   sync.RWMutex
-	jars map[string]http.CookieJar
-	km   keylock.KeyMutex[string]
+	mu      sync.RWMutex
+	jars    map[string]http.CookieJar
+	km      keylock.KeyMutex[string]
+	backend CookieStorageBackend
 }
 
 // NewProxyIsolatedCookieJar creates a new ProxyIsolatedCookieJar.
@@ -85,9 +88,58 @@ func (p *ProxyIsolatedCookieJar) GetJarForProxy(proxyURL string) http.CookieJar 
 		return jar
 	}
 
-	jar, err := cookiejar.New(nil)
+	baseJar, err := cookiejar.New(nil)
 	if err != nil {
 		return nil
+	}
+
+	p.mu.RLock()
+	backend := p.backend
+	p.mu.RUnlock()
+
+	if backend != nil {
+		pJar := &PersistentJar{
+			CookieJar:  baseJar,
+			proxyURL:   proxyURL,
+			backend:    backend,
+			cookiesMap: make(map[string]CookieData),
+		}
+		// Load existing cookies from backend
+		if cookies, err := backend.Load(proxyURL); err == nil && len(cookies) > 0 {
+			pJar.mu.Lock()
+			for _, c := range cookies {
+				key := c.Domain + "|" + c.Path + "|" + c.Name
+				pJar.cookiesMap[key] = c
+
+				scheme := "http"
+				if c.Secure {
+					scheme = "https"
+				}
+
+				domain := strings.TrimPrefix(c.Domain, ".")
+
+				u, parseErr := url.Parse(scheme + "://" + domain + c.Path)
+				if parseErr == nil {
+					baseJar.SetCookies(u, []*http.Cookie{
+						{
+							Name:     c.Name,
+							Value:    c.Value,
+							Domain:   c.Domain,
+							Path:     c.Path,
+							Expires:  c.Expires,
+							HttpOnly: c.HTTPOnly,
+							Secure:   c.Secure,
+						},
+					})
+				}
+			}
+
+			pJar.mu.Unlock()
+		}
+
+		jar = pJar
+	} else {
+		jar = baseJar
 	}
 
 	p.mu.Lock()
@@ -95,6 +147,92 @@ func (p *ProxyIsolatedCookieJar) GetJarForProxy(proxyURL string) http.CookieJar 
 	p.mu.Unlock()
 
 	return jar
+}
+
+// WithStorageBackend configures a persistent storage backend for cookies.
+func (p *ProxyIsolatedCookieJar) WithStorageBackend(backend CookieStorageBackend) *ProxyIsolatedCookieJar {
+	p.mu.Lock()
+	p.backend = backend
+	p.mu.Unlock()
+
+	return p
+}
+
+// PersistentJar wraps http.CookieJar to save state to a CookieStorageBackend.
+type PersistentJar struct {
+	http.CookieJar
+	proxyURL   string
+	backend    CookieStorageBackend
+	mu         sync.Mutex
+	cookiesMap map[string]CookieData
+}
+
+// SetCookies implements the http.CookieJar interface.
+func (pj *PersistentJar) SetCookies(u *url.URL, cookies []*http.Cookie) {
+	pj.CookieJar.SetCookies(u, cookies)
+
+	pj.mu.Lock()
+	changed := false
+	now := time.Now()
+
+	for _, c := range cookies {
+		// If cookie is expired or max-age <= 0, remove it
+		if !c.Expires.IsZero() && c.Expires.Before(now) {
+			key := c.Domain + "|" + c.Path + "|" + c.Name
+			if _, exists := pj.cookiesMap[key]; exists {
+				delete(pj.cookiesMap, key)
+
+				changed = true
+			}
+
+			continue
+		}
+
+		domain := c.Domain
+		if domain == "" {
+			domain = u.Hostname()
+		}
+
+		path := c.Path
+		if path == "" {
+			path = "/"
+		}
+
+		key := domain + "|" + path + "|" + c.Name
+		pj.cookiesMap[key] = CookieData{
+			Name:     c.Name,
+			Value:    c.Value,
+			Domain:   domain,
+			Path:     path,
+			Expires:  c.Expires,
+			HTTPOnly: c.HttpOnly,
+			Secure:   c.Secure,
+		}
+		changed = true
+	}
+
+	// Filter out expired cookies from cookiesMap
+	for k, c := range pj.cookiesMap {
+		if !c.Expires.IsZero() && c.Expires.Before(now) {
+			delete(pj.cookiesMap, k)
+
+			changed = true
+		}
+	}
+
+	var list []CookieData
+	if changed {
+		list = make([]CookieData, 0, len(pj.cookiesMap))
+		for _, c := range pj.cookiesMap {
+			list = append(list, c)
+		}
+	}
+
+	pj.mu.Unlock()
+
+	if changed {
+		_ = pj.backend.Save(pj.proxyURL, list)
+	}
 }
 
 // SetCookiesForProxy manually stores cookies for a specific proxy URL.
