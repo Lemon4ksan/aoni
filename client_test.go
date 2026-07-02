@@ -408,7 +408,13 @@ func TestClient_DX_Helpers(t *testing.T) {
 	t.Run("global_get_with_bearer", func(t *testing.T) {
 		var raw *http.Response
 
-		res, err := Get[testPayload](t.Context(), "/get", WithBearer("my-token"), CaptureResponse(&raw))
+		res, err := GetJSON[testPayload](
+			t.Context(),
+			DefaultClient,
+			"/get",
+			WithBearer("my-token"),
+			CaptureResponse(&raw),
+		)
 		require.NoError(t, err)
 
 		if raw != nil {
@@ -422,8 +428,9 @@ func TestClient_DX_Helpers(t *testing.T) {
 	t.Run("basic_auth_and_user_agent", func(t *testing.T) {
 		var raw *http.Response
 
-		_, err := Get[testPayload](
+		_, err := GetJSON[testPayload](
 			t.Context(),
+			DefaultClient,
 			"/auth",
 			WithBasicAuth("user", "pass"),
 			WithUserAgent("G-MAN-BOT"),
@@ -442,8 +449,9 @@ func TestClient_DX_Helpers(t *testing.T) {
 	t.Run("global_put", func(t *testing.T) {
 		var raw *http.Response
 
-		_, err := Put[testPayload](
+		_, err := PutJSON[testPayload](
 			t.Context(),
+			DefaultClient,
 			"/put",
 			testPayload{Message: "put-body"},
 			CaptureResponse(&raw),
@@ -460,8 +468,9 @@ func TestClient_DX_Helpers(t *testing.T) {
 	t.Run("global_patch", func(t *testing.T) {
 		var raw *http.Response
 
-		_, err := Patch[testPayload](
+		_, err := PatchJSON[testPayload](
 			t.Context(),
+			DefaultClient,
 			"/patch",
 			testPayload{Message: "patch-body"},
 			CaptureResponse(&raw),
@@ -478,8 +487,9 @@ func TestClient_DX_Helpers(t *testing.T) {
 	t.Run("global_delete", func(t *testing.T) {
 		var raw *http.Response
 
-		_, err := Delete[testPayload](
+		_, err := DeleteJSON[testPayload](
 			t.Context(),
+			DefaultClient,
 			"/delete",
 			testPayload{Message: "delete-body"},
 			CaptureResponse(&raw),
@@ -494,7 +504,7 @@ func TestClient_DX_Helpers(t *testing.T) {
 	})
 
 	t.Run("debug_mode", func(t *testing.T) {
-		_, err := Get[testPayload](t.Context(), "/debug", Debug())
+		_, err := GetJSON[testPayload](t.Context(), DefaultClient, "/debug", Debug())
 		require.NoError(t, err)
 	})
 }

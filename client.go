@@ -392,6 +392,41 @@ func (c *Client) Clone() *Client {
 	return cloned
 }
 
+// Get performs a GET request through the Client and returns the raw http.Response.
+func (c *Client) Get(ctx context.Context, path string, mods ...RequestModifier) (*http.Response, error) {
+	return Get(ctx, c, path, mods...)
+}
+
+// Post marshals the body to JSON, executes a POST request through the Client,
+// and returns the raw http.Response.
+func (c *Client) Post(ctx context.Context, path string, body any, mods ...RequestModifier) (*http.Response, error) {
+	return Post(ctx, c, path, body, mods...)
+}
+
+// Put marshals the body to JSON, executes a PUT request through the Client,
+// and returns the raw http.Response.
+func (c *Client) Put(ctx context.Context, path string, body any, mods ...RequestModifier) (*http.Response, error) {
+	return Put(ctx, c, path, body, mods...)
+}
+
+// Patch marshals the body to JSON, executes a PATCH request through the Client,
+// and returns the raw http.Response.
+func (c *Client) Patch(ctx context.Context, path string, body any, mods ...RequestModifier) (*http.Response, error) {
+	return Patch(ctx, c, path, body, mods...)
+}
+
+// Delete marshals the body to JSON, executes a DELETE request through the Client,
+// and returns the raw http.Response.
+func (c *Client) Delete(ctx context.Context, path string, body any, mods ...RequestModifier) (*http.Response, error) {
+	return Delete(ctx, c, path, body, mods...)
+}
+
+// PostForm performs a POST request with URL-encoded parameters through the Client
+// and returns the raw http.Response.
+func (c *Client) PostForm(ctx context.Context, path string, body any, mods ...RequestModifier) (*http.Response, error) {
+	return PostForm(ctx, c, path, body, mods...)
+}
+
 // Request sends an HTTP request and returns the response. path is
 // resolved against [Client.WithBaseURL] when set; an empty path
 // targets the base URL directly. Nil modifiers are ignored.
@@ -429,6 +464,10 @@ func (c *Client) Request(
 		if c.proxyAddr != nil {
 			ctx = context.WithValue(ctx, proxyAddrCtxKey{}, c.proxyAddr)
 		}
+	}
+
+	if c.proxyAddr != nil {
+		ctx = context.WithValue(ctx, proxyCtxKey{}, c.proxyAddr.String())
 	}
 
 	if c.sessionCache != nil {

@@ -6,11 +6,11 @@ package aoni
 
 import (
 	"bytes"
-	"context"
 	"encoding/json"
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strings"
 	"testing"
 
@@ -210,6 +210,163 @@ func TestClient_DeleteJSON_NilPayload(t *testing.T) {
 	require.NoError(t, err)
 }
 
+func TestClient_RawHelpers(t *testing.T) {
+	t.Parallel()
+
+	input := reqTestPayload{Message: "raw-msg", Status: 42}
+
+	_, client := setupTestReqServer(t, func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodGet {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(`{"message":"raw-success"}`))
+
+			return
+		}
+
+		assert.Equal(t, "application/json", r.Header.Get("Content-Type"))
+
+		var body reqTestPayload
+
+		err := json.NewDecoder(r.Body).Decode(&body)
+		require.NoError(t, err)
+		assert.Equal(t, input.Message, body.Message)
+
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"message":"raw-success"}`))
+	})
+
+	t.Run("Post raw", func(t *testing.T) {
+		resp, err := Post(t.Context(), client, "/post", input)
+		require.NoError(t, err)
+
+		defer resp.Body.Close()
+
+		assert.Equal(t, http.StatusOK, resp.StatusCode)
+		bodyBytes, err := io.ReadAll(resp.Body)
+		require.NoError(t, err)
+		assert.Contains(t, string(bodyBytes), "raw-success")
+	})
+
+	t.Run("Patch raw", func(t *testing.T) {
+		resp, err := Patch(t.Context(), client, "/patch", input)
+		require.NoError(t, err)
+
+		defer resp.Body.Close()
+
+		assert.Equal(t, http.StatusOK, resp.StatusCode)
+	})
+
+	t.Run("Put raw", func(t *testing.T) {
+		resp, err := Put(t.Context(), client, "/put", input)
+		require.NoError(t, err)
+
+		defer resp.Body.Close()
+
+		assert.Equal(t, http.StatusOK, resp.StatusCode)
+	})
+
+	t.Run("Delete raw", func(t *testing.T) {
+		resp, err := Delete(t.Context(), client, "/delete", input)
+		require.NoError(t, err)
+
+		defer resp.Body.Close()
+
+		assert.Equal(t, http.StatusOK, resp.StatusCode)
+	})
+
+	t.Run("Get raw", func(t *testing.T) {
+		_, clientGet := setupTestReqServer(t, func(w http.ResponseWriter, r *http.Request) {
+			assert.Equal(t, http.MethodGet, r.Method)
+			w.WriteHeader(http.StatusNoContent)
+		})
+		resp, err := Get(t.Context(), clientGet, "/get")
+		require.NoError(t, err)
+
+		defer resp.Body.Close()
+
+		assert.Equal(t, http.StatusNoContent, resp.StatusCode)
+	})
+
+	t.Run("Client convenience methods", func(t *testing.T) {
+		resp, err := client.Post(t.Context(), "/post", input)
+		require.NoError(t, err)
+
+		defer resp.Body.Close()
+
+		assert.Equal(t, http.StatusOK, resp.StatusCode)
+
+		respGet, err := client.Get(t.Context(), "/get")
+		require.NoError(t, err)
+
+		defer respGet.Body.Close()
+
+		respPut, err := client.Put(t.Context(), "/put", input)
+		require.NoError(t, err)
+
+		defer respPut.Body.Close()
+
+		assert.Equal(t, http.StatusOK, respPut.StatusCode)
+
+		respPatch, err := client.Patch(t.Context(), "/patch", input)
+		require.NoError(t, err)
+
+		defer respPatch.Body.Close()
+
+		assert.Equal(t, http.StatusOK, respPatch.StatusCode)
+
+		respDelete, err := client.Delete(t.Context(), "/delete", input)
+		require.NoError(t, err)
+
+		defer respDelete.Body.Close()
+
+		assert.Equal(t, http.StatusOK, respDelete.StatusCode)
+	})
+
+	t.Run("PostForm raw", func(t *testing.T) {
+		formInput := reqTestPayload{Message: "form-raw-msg", Status: 10}
+		_, clientForm := setupTestReqServer(t, func(w http.ResponseWriter, r *http.Request) {
+			assert.Equal(t, "application/x-www-form-urlencoded", r.Header.Get("Content-Type"))
+			assert.Equal(t, "form-raw-msg", r.FormValue("message"))
+			assert.Equal(t, "10", r.FormValue("status"))
+			w.WriteHeader(http.StatusAccepted)
+		})
+
+		resp, err := PostForm(t.Context(), clientForm, "/form", formInput)
+		require.NoError(t, err)
+
+		defer resp.Body.Close()
+
+		assert.Equal(t, http.StatusAccepted, resp.StatusCode)
+
+		resp2, err := clientForm.PostForm(t.Context(), "/form", formInput)
+		require.NoError(t, err)
+
+		defer resp2.Body.Close()
+
+		assert.Equal(t, http.StatusAccepted, resp2.StatusCode)
+	})
+
+	t.Run("ProxyIsolatedCookieJar with WithProxy", func(t *testing.T) {
+		proxyURL, err := url.Parse("http://my-proxy-host:8080")
+		require.NoError(t, err)
+
+		var capturedProxy string
+
+		clientWithProxy := NewClient(nil).
+			WithProxy(proxyURL).
+			WithBeforeRequest(func(req *http.Request) {
+				if val := req.Context().Value(proxyCtxKey{}); val != nil {
+					capturedProxy = val.(string)
+				}
+			})
+
+		_, _ = clientWithProxy.Request(t.Context(), http.MethodGet, "http://localhost:12345")
+		assert.Equal(t, "http://my-proxy-host:8080", capturedProxy)
+	})
+}
+
 func TestPostForm(t *testing.T) {
 	t.Parallel()
 
@@ -366,47 +523,6 @@ func TestClient_BaseResponseProvider(t *testing.T) {
 	result, err := GetJSON[testPayload](t.Context(), providerClient, "/provider")
 	require.NoError(t, err)
 	assert.Equal(t, "provider_response", result.Message)
-}
-
-func TestClient_Global_DefaultClient_Wrappers(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"message":"global_success"}`))
-	}))
-	t.Cleanup(server.Close)
-
-	// Temporarily override DefaultClient to point to local server
-	oldDefault := DefaultClient
-	t.Cleanup(func() { DefaultClient = oldDefault })
-
-	DefaultClient = NewClient(nil).WithBaseURL(server.URL)
-
-	ctx := context.Background()
-
-	// 1. Get
-	gRes, err := Get[reqTestPayload](ctx, "/global-get")
-	require.NoError(t, err)
-	assert.Equal(t, "global_success", gRes.Message)
-
-	// 2. Post
-	pRes, err := Post[reqTestPayload](ctx, "/global-post", nil)
-	require.NoError(t, err)
-	assert.Equal(t, "global_success", pRes.Message)
-
-	// 3. Put
-	uRes, err := Put[reqTestPayload](ctx, "/global-put", nil)
-	require.NoError(t, err)
-	assert.Equal(t, "global_success", uRes.Message)
-
-	// 4. Patch
-	hRes, err := Patch[reqTestPayload](ctx, "/global-patch", nil)
-	require.NoError(t, err)
-	assert.Equal(t, "global_success", hRes.Message)
-
-	// 5. Delete
-	dRes, err := Delete[reqTestPayload](ctx, "/global-delete", nil)
-	require.NoError(t, err)
-	assert.Equal(t, "global_success", dRes.Message)
 }
 
 // Helpers for logger mocking inside diagnostic tests.

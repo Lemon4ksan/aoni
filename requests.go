@@ -48,49 +48,114 @@ var DefaultClient = NewClient(nil)
 // NoResponse is a sentinel type used to indicate a request that does not return a response body.
 type NoResponse struct{}
 
-// Get performs a global GET request using [DefaultClient] and decodes the JSON response body.
-func Get[Resp any](ctx context.Context, path string, mods ...RequestModifier) (*Resp, error) {
-	return GetJSON[Resp](ctx, DefaultClient, path, mods...)
+// Get performs a GET request through the specified Requester and returns the raw http.Response.
+func Get(ctx context.Context, c Requester, path string, mods ...RequestModifier) (*http.Response, error) {
+	return c.Request(ctx, http.MethodGet, path, mods...)
 }
 
-// Post performs a global POST request using [DefaultClient] and decodes the JSON response body.
-func Post[Resp any](
+// Post marshals the body to JSON, executes a POST request through the specified Requester,
+// and returns the raw http.Response.
+func Post(ctx context.Context, c Requester, path string, body any, mods ...RequestModifier) (*http.Response, error) {
+	bodyReader, err := validateAndMarshal(body)
+	if err != nil {
+		return nil, err
+	}
+
+	mods = append([]RequestModifier{
+		WithContentType("application/json"),
+		WithAccept("application/json"),
+		WithBody(bodyReader),
+	}, mods...)
+
+	return c.Request(ctx, http.MethodPost, path, mods...)
+}
+
+// PostForm performs a POST request with URL-encoded parameters using the specified Requester
+// and returns the raw http.Response.
+//
+// If the body implements [io.Reader], it is used directly as the request body.
+// Otherwise, the body is marshaled to URL-encoded form values.
+func PostForm(
 	ctx context.Context,
+	c Requester,
 	path string,
 	body any,
 	mods ...RequestModifier,
-) (*Resp, error) {
-	return PostJSON[Resp](ctx, DefaultClient, path, body, mods...)
+) (*http.Response, error) {
+	var bodyReader io.Reader
+
+	if r, ok := body.(io.Reader); ok {
+		bodyReader = r
+	} else if body != nil {
+		if err := Validate(body); err != nil {
+			return nil, err
+		}
+
+		formValues, err := StructToValues(body)
+		if err != nil {
+			return nil, err
+		}
+
+		bodyReader = strings.NewReader(formValues.Encode())
+	}
+
+	mods = append([]RequestModifier{
+		WithContentType("application/x-www-form-urlencoded"),
+		WithBody(bodyReader),
+	}, mods...)
+
+	return c.Request(ctx, http.MethodPost, path, mods...)
 }
 
-// Put performs a global PUT request using [DefaultClient] and decodes the JSON response body.
-func Put[Resp any](
-	ctx context.Context,
-	path string,
-	body any,
-	mods ...RequestModifier,
-) (*Resp, error) {
-	return PutJSON[Resp](ctx, DefaultClient, path, body, mods...)
+// Put marshals the body to JSON, executes a PUT request through the specified Requester,
+// and returns the raw http.Response.
+func Put(ctx context.Context, c Requester, path string, body any, mods ...RequestModifier) (*http.Response, error) {
+	bodyReader, err := validateAndMarshal(body)
+	if err != nil {
+		return nil, err
+	}
+
+	mods = append([]RequestModifier{
+		WithContentType("application/json"),
+		WithAccept("application/json"),
+		WithBody(bodyReader),
+	}, mods...)
+
+	return c.Request(ctx, http.MethodPut, path, mods...)
 }
 
-// Patch performs a global PATCH request using [DefaultClient] and decodes the JSON response body.
-func Patch[Resp any](
-	ctx context.Context,
-	path string,
-	body any,
-	mods ...RequestModifier,
-) (*Resp, error) {
-	return PatchJSON[Resp](ctx, DefaultClient, path, body, mods...)
+// Patch marshals the body to JSON, executes a PATCH request through the specified Requester,
+// and returns the raw http.Response.
+func Patch(ctx context.Context, c Requester, path string, body any, mods ...RequestModifier) (*http.Response, error) {
+	bodyReader, err := validateAndMarshal(body)
+	if err != nil {
+		return nil, err
+	}
+
+	mods = append([]RequestModifier{
+		WithContentType("application/json"),
+		WithAccept("application/json"),
+		WithBody(bodyReader),
+	}, mods...)
+
+	return c.Request(ctx, http.MethodPatch, path, mods...)
 }
 
-// Delete performs a global DELETE request using [DefaultClient] and decodes the JSON response body.
-func Delete[Resp any](
-	ctx context.Context,
-	path string,
-	body any,
-	mods ...RequestModifier,
-) (*Resp, error) {
-	return DeleteJSON[Resp](ctx, DefaultClient, path, body, mods...)
+// Delete marshals the body to JSON, executes a DELETE request through the specified Requester,
+// and returns the raw http.Response.
+func Delete(ctx context.Context, c Requester, path string, body any, mods ...RequestModifier) (*http.Response, error) {
+	bodyReader, err := validateAndMarshal(body)
+	if err != nil {
+		return nil, err
+	}
+
+	mods = append([]RequestModifier{
+		WithContentType("application/json"),
+		WithAccept("application/json"),
+		WithBody(bodyReader),
+	}, mods...)
+
+	return c.Request(ctx, http.MethodDelete, path, mods...)
 }
 
 // GetJSON performs a GET request and decodes the JSON response body into a new instance of Resp.
@@ -217,6 +282,9 @@ func PostFormJSONEx[Resp any](
 // PostJSON marshals the body to JSON, executes a POST request, and decodes the response body.
 // It automatically configures the request headers with Content-Type and Accept set to "application/json".
 //
+// If the body implements [io.Reader], it is used directly as the request body.
+// Otherwise, the body is marshaled to JSON.
+//
 // It validates the body structure beforehand using [Validate].
 // Returns a [ValidationError] if validation fails.
 func PostJSON[Resp any](
@@ -279,6 +347,9 @@ func PostJSONEx[Resp any](
 // PutJSON marshals the body to JSON, executes a PUT request, and decodes the response body.
 // It automatically configures the request headers with Content-Type and Accept set to "application/json".
 //
+// If the body implements [io.Reader], it is used directly as the request body.
+// Otherwise, the body is marshaled to JSON.
+//
 // It validates the body structure beforehand using [Validate].
 // Returns a [ValidationError] if validation fails.
 func PutJSON[Resp any](
@@ -340,6 +411,9 @@ func PutJSONEx[Resp any](
 // PatchJSON marshals the body to JSON, executes a PATCH request, and decodes the response body.
 // It automatically configures the request headers with Content-Type and Accept set to "application/json".
 //
+// If the body implements [io.Reader], it is used directly as the request body.
+// Otherwise, the body is marshaled to JSON.
+//
 // It validates the body structure beforehand using [Validate].
 // Returns a [ValidationError] if validation fails.
 func PatchJSON[Resp any](
@@ -400,6 +474,9 @@ func PatchJSONEx[Resp any](
 
 // DeleteJSON marshals the body to JSON, executes a DELETE request, and decodes the response body.
 // It automatically configures the request headers with Content-Type and Accept set to "application/json".
+//
+// If the body implements [io.Reader], it is used directly as the request body.
+// Otherwise, the body is marshaled to JSON.
 //
 // It validates the body structure beforehand using [Validate].
 // Returns a [ValidationError] if validation fails.
