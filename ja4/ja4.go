@@ -346,6 +346,16 @@ func hash12(s string) string {
 //	2 bytes: extensions total length
 //	then: extension entries (2-byte ID + 2-byte length + data)
 func ParseExtensionsFromRaw(raw []byte) (extensions, sigAlgorithms []uint16) {
+	// If it starts with Handshake record type (0x16), skip 5-byte TLS record header
+	if len(raw) > 5 && raw[0] == 0x16 {
+		raw = raw[5:]
+	}
+
+	// If it starts with ClientHello handshake type (0x01), skip 4-byte Handshake header
+	if len(raw) > 4 && raw[0] == 0x01 {
+		raw = raw[4:]
+	}
+
 	if len(raw) < 38 { // minimum: type(2) + len(3) + version(2) + random(32) = 39, but we need at least the header
 		return nil, nil
 	}
