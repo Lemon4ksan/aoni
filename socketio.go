@@ -533,31 +533,34 @@ func (s *SocketIOConn) emitBinaryNS(nsp string, data any, ackFn func(args []json
 }
 
 func (s *SocketIOConn) emitWithAckNS(ctx context.Context, nsp, event string, args ...any) ([]json.RawMessage, error) {
-	id := s.ackMgr.NextID()
-
-	_ = s.ackMgr.Add(id, nil,
-		jobs.WithWait[[]json.RawMessage](),
-		jobs.WithContext[[]json.RawMessage](ctx),
-		jobs.WithTimeout[[]json.RawMessage](30*time.Second),
-	)
+	ch := make(chan []json.RawMessage, 1)
 
 	emitArgs := make([]any, len(args)+1)
 	copy(emitArgs, args)
 	emitArgs[len(args)] = func(rawArgs []json.RawMessage) {
-		s.ackMgr.Resolve(id, rawArgs, nil)
+		select {
+		case ch <- rawArgs:
+		default:
+		}
 	}
 
 	if err := s.emitNS(nsp, event, emitArgs...); err != nil {
-		s.ackMgr.Remove(id)
 		return nil, err
 	}
 
-	result, err := s.ackMgr.WaitFor(ctx, id)
-	if err != nil {
-		return nil, err
-	}
+	timer := time.NewTimer(30 * time.Second)
+	defer timer.Stop()
 
-	return result, nil
+	select {
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	case <-s.getClosedChan():
+		return nil, errors.New("aoni sio: connection closed")
+	case <-timer.C:
+		return nil, errors.New("aoni sio: acknowledgment timeout")
+	case result := <-ch:
+		return result, nil
+	}
 }
 
 func (s *SocketIOConn) emitVolatileNS(nsp, event string, args ...any) error {
