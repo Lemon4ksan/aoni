@@ -202,6 +202,11 @@ func DefaultRedirectPolicy(
 	}
 }
 
+type refererState struct {
+	mu      sync.Mutex
+	lastURL string
+}
+
 // Client is an immutable, concurrency-safe HTTP client built on [HTTPDoer].
 // Every With* method returns a new clone, so the original remains usable
 // by other goroutines. Use [NewClient] to create the first instance.
@@ -234,6 +239,9 @@ type Client struct {
 	hostRewrite       *HostRewriteConfig
 	p0fSignature      *p0f.Signature
 	h2Settings        *HTTP2Settings
+	h3Settings        *HTTP3Settings
+	refererAutomaton  bool
+	refererState      *refererState
 	proxyDNS          bool
 	proxyAddr         *url.URL
 	dynamicHedging    *DynamicHedgingConfig
@@ -261,6 +269,7 @@ func NewClient(httpClient HTTPDoer) *Client {
 		headers:            make(http.Header),
 		maxResponseSize:    10 * 1024 * 1024,
 		happyEyeballsDelay: 300 * time.Millisecond,
+		refererState:       &refererState{},
 	}
 
 	c.applyDialers()
@@ -308,6 +317,10 @@ func (c *Client) Clone() *Client {
 		challengeSolver:    c.challengeSolver,
 		challengeDetector:  c.challengeDetector,
 		inspector:          c.inspector,
+		h2Settings:         c.h2Settings,
+		h3Settings:         c.h3Settings,
+		refererAutomaton:   c.refererAutomaton,
+		refererState:       c.refererState,
 		proxyDNS:           c.proxyDNS,
 		proxyAddr:          c.proxyAddr,
 		sessionCache:       c.sessionCache,
@@ -539,6 +552,16 @@ func (c *Client) Request(
 		req.Header.Set("Accept-Encoding", "zstd, br, gzip")
 	}
 
+	if c.refererAutomaton && req.Header.Get("Referer") == "" {
+		c.refererState.mu.Lock()
+		lastURL := c.refererState.lastURL
+		c.refererState.mu.Unlock()
+
+		if lastURL != "" {
+			req.Header.Set("Referer", lastURL)
+		}
+	}
+
 	generic.ApplyOptions(req, c.defaultMods...)
 	generic.ApplyOptions(req, mods...)
 
@@ -643,6 +666,12 @@ func (c *Client) Request(
 
 	if c.inspector != nil && traceInfo != nil {
 		c.inspector.Capture(req, resp, reqErr, traceInfo)
+	}
+
+	if c.refererAutomaton && reqErr == nil && req != nil && req.URL != nil {
+		c.refererState.mu.Lock()
+		c.refererState.lastURL = req.URL.String()
+		c.refererState.mu.Unlock()
 	}
 
 	for _, hook := range c.afterResponse {
@@ -886,6 +915,7 @@ func (c *Client) WithBrowserProfile(browser BrowserID, os profiles.OSKey) *Clien
 
 	var (
 		h2Settings HTTP2Settings
+		h3Settings HTTP3Settings
 		ua         string
 	)
 
@@ -900,6 +930,7 @@ func (c *Client) WithBrowserProfile(browser BrowserID, os profiles.OSKey) *Clien
 			ConnectionFlow:    12517377,
 			PriorityWeight:    41,
 		}
+		h3Settings = FirefoxHTTP3Settings
 
 		ua = "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:148.0) Gecko/20100101 Firefox/148.0"
 		if os.IsMobile() {
@@ -917,10 +948,12 @@ func (c *Client) WithBrowserProfile(browser BrowserID, os profiles.OSKey) *Clien
 			PriorityWeight:    255,
 			PriorityExclusive: true,
 		}
+		h3Settings = ChromeHTTP3Settings
 		ua = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/145.0.0.0 Safari/537.36"
 	}
 
 	newClient = newClient.WithH2FramedTransport(h2Settings)
+	newClient.h3Settings = &h3Settings
 	newClient = newClient.WithUserAgent(ua)
 
 	return newClient
@@ -1381,6 +1414,33 @@ func (c *Client) WithProxy(proxyURL *url.URL) *Client {
 
 	newClient.applyDialers()
 
+	return newClient
+}
+
+// WithProxyString returns a clone of c configured to route requests through a proxy string.
+// If the proxy string lacks a scheme (e.g. "user:pass@1.2.3.4:8080"), the protocol (http or socks5)
+// is automatically detected by probing the port or guessing based on the port number.
+func (c *Client) WithProxyString(proxyStr string) *Client {
+	u, err := ParseAutoProxy(proxyStr)
+	if err != nil {
+		return c.WithProxy(nil)
+	}
+
+	return c.WithProxy(u)
+}
+
+// WithHTTP3Settings returns a clone of c configured with custom HTTP/3 (QUIC) settings.
+func (c *Client) WithHTTP3Settings(settings HTTP3Settings) *Client {
+	newClient := c.Clone()
+	newClient.h3Settings = &settings
+	return newClient
+}
+
+// WithRefererAutomaton returns a clone of c with automatic Referer tracking enabled.
+// Each request will automatically have its "Referer" header set to the URL of the previous request.
+func (c *Client) WithRefererAutomaton(enabled bool) *Client {
+	newClient := c.Clone()
+	newClient.refererAutomaton = enabled
 	return newClient
 }
 

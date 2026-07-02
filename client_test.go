@@ -1908,3 +1908,57 @@ func TestClient_SocketIO_Integration(t *testing.T) {
 	assert.Equal(t, "123", sio.SID())
 	assert.True(t, sio.Connected())
 }
+
+func TestClient_RefererAutomaton(t *testing.T) {
+	var lastReferer string
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		lastReferer = r.Header.Get("Referer")
+
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer server.Close()
+
+	client := NewClient(nil).WithRefererAutomaton(true)
+
+	// First request: no referer should be sent
+	resp1, err := client.Request(context.Background(), http.MethodGet, server.URL+"/page1")
+	require.NoError(t, err)
+
+	_ = resp1.Body.Close()
+
+	assert.Empty(t, lastReferer)
+
+	// Second request: referer should be the URL of the first request
+	resp2, err := client.Request(context.Background(), http.MethodGet, server.URL+"/page2")
+	require.NoError(t, err)
+
+	_ = resp2.Body.Close()
+
+	assert.Equal(t, server.URL+"/page1", lastReferer)
+}
+
+func TestClient_ParseAutoProxy(t *testing.T) {
+	u1, err := ParseAutoProxy("socks5://127.0.0.1:1080")
+	require.NoError(t, err)
+	assert.Equal(t, "socks5", u1.Scheme)
+	assert.Equal(t, "127.0.0.1:1080", u1.Host)
+
+	u2, err := ParseAutoProxy("127.0.0.1:1080")
+	require.NoError(t, err)
+	assert.Equal(t, "socks5h", u2.Scheme)
+	assert.Equal(t, "127.0.0.1:1080", u2.Host)
+
+	u3, err := ParseAutoProxy("user:pass@1.2.3.4:8080")
+	require.NoError(t, err)
+	assert.Equal(t, "http", u3.Scheme)
+	assert.Equal(t, "1.2.3.4:8080", u3.Host)
+	assert.Equal(t, "user", u3.User.Username())
+	password, _ := u3.User.Password()
+	assert.Equal(t, "pass", password)
+}
+
+func TestClient_HTTP3Settings(t *testing.T) {
+	client := NewClient(nil).WithHTTP3Settings(ChromeHTTP3Settings)
+	assert.NotNil(t, client)
+}

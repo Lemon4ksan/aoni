@@ -13,12 +13,69 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
 
 	"github.com/lemon4ksan/miyako/generic"
 )
+
+// ParseAutoProxy parses a proxy string and detects the protocol.
+func ParseAutoProxy(proxyStr string) (*url.URL, error) {
+	if proxyStr == "" {
+		return nil, errors.New("empty proxy string")
+	}
+
+	if strings.Contains(proxyStr, "://") {
+		return url.Parse(proxyStr)
+	}
+
+	u, err := url.Parse("http://" + proxyStr)
+	if err != nil {
+		return nil, err
+	}
+
+	host, portStr, err := net.SplitHostPort(u.Host)
+	if err != nil {
+		host = u.Host
+		portStr = ""
+	}
+
+	scheme := "http"
+
+	addr := net.JoinHostPort(host, portStr)
+	if portStr == "" {
+		addr = host
+	}
+
+	if portStr != "" {
+		dialer := net.Dialer{Timeout: 300 * time.Millisecond}
+
+		conn, err := dialer.DialContext(context.Background(), "tcp", addr)
+		if err == nil {
+			defer conn.Close()
+
+			_ = conn.SetDeadline(time.Now().Add(200 * time.Millisecond))
+
+			_, err = conn.Write([]byte{0x05, 0x01, 0x00})
+			if err == nil {
+				resp := make([]byte, 2)
+
+				n, err := conn.Read(resp)
+				if err == nil && n == 2 && resp[0] == 0x05 {
+					scheme = "socks5h"
+				}
+			}
+		} else if portStr == "1080" || portStr == "1081" || portStr == "9050" || portStr == "9051" || portStr == "10808" {
+			scheme = "socks5h"
+		}
+	}
+
+	u.Scheme = scheme
+
+	return u, nil
+}
 
 // ClientWithProxy pairs an [HTTPDoer] with a proxy URL.
 type ClientWithProxy struct {

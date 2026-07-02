@@ -121,7 +121,7 @@ func (p *ProxyIsolatedCookieJar) GetJarForProxy(proxyURL string) http.CookieJar 
 				u, parseErr := url.Parse(scheme + "://" + domain + c.Path)
 				if parseErr == nil {
 					baseJar.SetCookies(u, []*http.Cookie{
-						{
+						{ // nolint:gosec
 							Name:     c.Name,
 							Value:    c.Value,
 							Domain:   c.Domain,

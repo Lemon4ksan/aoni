@@ -444,6 +444,16 @@ func (c *Client) WithHTTP3Config(config *QUICMigrationConfig) *Client {
 		quicCfg.MaxIdleTimeout = config.MaxIdleTimeout
 	}
 
+	if c.h3Settings != nil {
+		quicCfg.InitialStreamReceiveWindow = c.h3Settings.InitialStreamReceiveWindow
+		quicCfg.MaxStreamReceiveWindow = c.h3Settings.MaxStreamReceiveWindow
+		quicCfg.InitialConnectionReceiveWindow = c.h3Settings.InitialConnectionReceiveWindow
+		quicCfg.MaxConnectionReceiveWindow = c.h3Settings.MaxConnectionReceiveWindow
+		quicCfg.MaxIncomingStreams = c.h3Settings.MaxIncomingStreams
+		quicCfg.MaxIncomingUniStreams = c.h3Settings.MaxIncomingUniStreams
+		quicCfg.EnableDatagrams = c.h3Settings.EnableDatagrams
+	}
+
 	rt := &http3.Transport{
 		TLSClientConfig: &tls.Config{
 			NextProtos: []string{"h3"},
