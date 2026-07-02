@@ -20,6 +20,10 @@ var (
 	// CAPTCHA was detected in the response body.
 	ErrCloudflareChallenge = errors.New("aoni: cloudflare challenge detected")
 
+	// ErrChallengeRequired indicates that a WAF challenge (Cloudflare, CAPTCHA, etc.)
+	// has been detected and solver verification is required.
+	ErrChallengeRequired = errors.New("aoni: challenge verification required")
+
 	// ErrResponseTooLarge indicates the response exceeded the size
 	// limit configured via [Client.WithMaxResponseSize].
 	ErrResponseTooLarge = errors.New("aoni: response size limit exceeded")

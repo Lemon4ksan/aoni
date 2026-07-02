@@ -219,24 +219,26 @@ type Client struct {
 	multiReadThreshold int64
 	logger             Logger
 
-	sourceRotator    *SourceIPRotator
-	dnsResolver      DNSResolver
-	defaultMods      []RequestModifier
-	headersCookieJar http.CookieJar
-	ja4Callback      func(ja4.Report)
-	tlsBrowserID     BrowserID
-	tlsClientHelloID *utls.ClientHelloID
-	headerOrder      []string
-	fragmentConfig   *FragmentConfig
-	hostRewrite      *HostRewriteConfig
-	p0fSignature     *p0f.Signature
-	h2Settings       *HTTP2Settings
-	proxyDNS         bool
-	proxyAddr        *url.URL
-	dynamicHedging   *DynamicHedgingConfig
-	sessionCache     *ProxyAwareSessionCache
-	packetPadding    *PaddingConfig
-	transportProxy   func(*http.Request) (*url.URL, error)
+	sourceRotator     *SourceIPRotator
+	dnsResolver       DNSResolver
+	defaultMods       []RequestModifier
+	headersCookieJar  http.CookieJar
+	ja4Callback       func(ja4.Report)
+	tlsBrowserID      BrowserID
+	tlsClientHelloID  *utls.ClientHelloID
+	headerOrder       []string
+	challengeSolver   ChallengeSolver
+	challengeDetector ChallengeDetector
+	fragmentConfig    *FragmentConfig
+	hostRewrite       *HostRewriteConfig
+	p0fSignature      *p0f.Signature
+	h2Settings        *HTTP2Settings
+	proxyDNS          bool
+	proxyAddr         *url.URL
+	dynamicHedging    *DynamicHedgingConfig
+	sessionCache      *ProxyAwareSessionCache
+	packetPadding     *PaddingConfig
+	transportProxy    func(*http.Request) (*url.URL, error)
 }
 
 // NewClient creates a [Client] wrapping httpClient. When httpClient
@@ -302,6 +304,8 @@ func (c *Client) Clone() *Client {
 		tlsBrowserID:       c.tlsBrowserID,
 		tlsClientHelloID:   c.tlsClientHelloID,
 		headerOrder:        c.headerOrder,
+		challengeSolver:    c.challengeSolver,
+		challengeDetector:  c.challengeDetector,
 		proxyDNS:           c.proxyDNS,
 		proxyAddr:          c.proxyAddr,
 		sessionCache:       c.sessionCache,
@@ -581,6 +585,29 @@ func (c *Client) Request(
 		resp, reqErr = c.executeWithHedging(ctx, hedgingDelay, req)
 	} else {
 		resp, reqErr = c.http.Do(req)
+	}
+
+	// Trigger ChallengeSolver if registered and a challenge is encountered.
+	if reqErr == nil && c.challengeSolver != nil {
+		detector := c.challengeDetector
+		if detector == nil {
+			detector = DefaultChallengeDetector
+		}
+
+		if isChallenge, challengeErr := detector(resp); isChallenge {
+			if resp.Body != nil {
+				_ = resp.Body.Close()
+			}
+
+			newResp, solveErr := c.challengeSolver.Solve(ctx, challengeErr, req)
+			if solveErr == nil {
+				resp = newResp
+				reqErr = nil
+			} else {
+				reqErr = solveErr
+				resp = nil
+			}
+		}
 	}
 
 	// Copy TLS JA4 report from the dialer store to the target TraceInfo.
@@ -1064,6 +1091,13 @@ func (c *Client) WithDoT(endpoint, host string) *Client {
 // the HTTP Host header. See [NewDoHResolver].
 func (c *Client) WithDoH(endpoint, host string) *Client {
 	return c.WithDNSResolver(NewDoHResolver(endpoint, host))
+}
+
+// WithChallengeDetector returns a clone of c configured with the specified ChallengeDetector.
+func (c *Client) WithChallengeDetector(detector ChallengeDetector) *Client {
+	newClient := c.Clone()
+	newClient.challengeDetector = detector
+	return newClient
 }
 
 // WithBeforeRequest returns a clone of c that calls hook before
