@@ -676,3 +676,104 @@ func TestProxyRotator_ErrorPaths(t *testing.T) {
 		assert.Contains(t, err.Error(), "no healthy proxies available")
 	})
 }
+
+func TestProxyRotator_AdaptiveScoring_Cooldown(t *testing.T) {
+	t.Parallel()
+
+	doer1 := &mockDoer{id: 1}
+	doer2 := &mockDoer{id: 2}
+
+	rotator, err := NewProxyRotator(ProxyRotatorConfig{
+		MaxFails:   3,
+		RetryAfter: time.Minute,
+	}, ClientWithProxy{
+		Client:   doer1,
+		ProxyURL: "http://proxy1:8080",
+	}, ClientWithProxy{
+		Client:   doer2,
+		ProxyURL: "http://proxy2:8080",
+	})
+	require.NoError(t, err)
+
+	defer rotator.Close()
+
+	req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, "https://pyaterochka.ru/api/auth", nil)
+	require.NoError(t, err)
+
+	doer1.SetStatusCode(http.StatusForbidden)
+	doer2.SetStatusCode(http.StatusOK)
+
+	resp, err := rotator.Do(req)
+	require.NoError(t, err)
+
+	defer resp.Body.Close()
+
+	var cooledClient, activeClient *mockDoer
+	if doer1.GetCalls() > 0 {
+		cooledClient = doer1
+		activeClient = doer2
+
+		assert.Equal(t, http.StatusForbidden, resp.StatusCode)
+	} else {
+		cooledClient = doer2
+		activeClient = doer1
+
+		assert.Equal(t, http.StatusOK, resp.StatusCode)
+	}
+
+	cooledClient.mu.Lock()
+	cooledClient.calls = 0
+	cooledClient.statusCode = http.StatusForbidden
+	cooledClient.mu.Unlock()
+
+	activeClient.mu.Lock()
+	activeClient.calls = 0
+	activeClient.statusCode = http.StatusOK
+	activeClient.mu.Unlock()
+
+	for i := 0; i < 5; i++ {
+		resp, err := rotator.Do(req)
+		require.NoError(t, err)
+
+		_ = resp.Body.Close()
+		if resp.StatusCode == http.StatusForbidden {
+			break
+		}
+	}
+
+	cooledClient.mu.Lock()
+	cooledClient.calls = 0
+	cooledClient.mu.Unlock()
+
+	activeClient.mu.Lock()
+	activeClient.calls = 0
+	activeClient.mu.Unlock()
+
+	for i := 0; i < 5; i++ {
+		resp, err := rotator.Do(req)
+		require.NoError(t, err)
+
+		_ = resp.Body.Close()
+		assert.Equal(t, http.StatusOK, resp.StatusCode)
+	}
+
+	assert.Equal(t, 0, cooledClient.GetCalls(), "Cooled down client should not have been called!")
+	assert.Equal(t, 5, activeClient.GetCalls(), "Active client should have received all requests!")
+
+	reqGoogle, err := http.NewRequestWithContext(t.Context(), http.MethodGet, "https://google.com/", nil)
+	require.NoError(t, err)
+
+	googleCallsCooled := 0
+	for i := 0; i < 5; i++ {
+		resp, err := rotator.Do(reqGoogle)
+		require.NoError(t, err)
+
+		_ = resp.Body.Close()
+
+		if cooledClient.GetCalls() > 0 {
+			googleCallsCooled++
+		}
+	}
+
+	assert.True(t, googleCallsCooled > 0, "Cooled client should be active for other domains")
+}

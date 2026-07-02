@@ -132,6 +132,42 @@ type trackedClient struct {
 	client   HTTPDoer
 	proxyURL string
 	*HealthTracker
+	domainMu        sync.RWMutex
+	domainCooldowns map[string]time.Time
+}
+
+func (tc *trackedClient) IsDomainCooledDown(domain string) bool {
+	tc.domainMu.RLock()
+	defer tc.domainMu.RUnlock()
+
+	if tc.domainCooldowns == nil {
+		return false
+	}
+
+	cooldownUntil, exists := tc.domainCooldowns[domain]
+	if !exists {
+		return false
+	}
+
+	return time.Now().Before(cooldownUntil)
+}
+
+func (tc *trackedClient) PutDomainInCooldown(domain string, duration time.Duration) {
+	tc.domainMu.Lock()
+	defer tc.domainMu.Unlock()
+
+	if tc.domainCooldowns == nil {
+		tc.domainCooldowns = make(map[string]time.Time)
+	}
+
+	now := time.Now()
+	for d, until := range tc.domainCooldowns {
+		if now.After(until) {
+			delete(tc.domainCooldowns, d)
+		}
+	}
+
+	tc.domainCooldowns[domain] = now.Add(duration)
 }
 
 type sessionEntry struct {
@@ -170,7 +206,11 @@ func NewProxyRotator(config ProxyRotatorConfig, clients ...ClientWithProxy) (*Pr
 	config.RetryAfter = generic.Coalesce(config.RetryAfter, 30*time.Second)
 
 	tracked := generic.Map(clients, func(c ClientWithProxy) *trackedClient {
-		tc := &trackedClient{client: c.Client, proxyURL: c.ProxyURL}
+		tc := &trackedClient{
+			client:          c.Client,
+			proxyURL:        c.ProxyURL,
+			domainCooldowns: make(map[string]time.Time),
+		}
 		tc.HealthTracker = NewHealthTracker(c.ProxyURL, config.MaxFails, config.RetryAfter,
 			func(name string, fails uint32, retryAfter time.Duration) {
 				slog.Warn("proxy marked unhealthy", //nolint:gosec
@@ -271,6 +311,19 @@ func (r *ProxyRotator) Reset() {
 	}
 }
 
+// ResetDomainCooldowns clears all domain-specific cooldowns for all proxies in the pool.
+func (r *ProxyRotator) ResetDomainCooldowns() {
+	r.mu.RLock()
+	clients := r.clients
+	r.mu.RUnlock()
+
+	for _, tc := range clients {
+		tc.domainMu.Lock()
+		tc.domainCooldowns = make(map[string]time.Time)
+		tc.domainMu.Unlock()
+	}
+}
+
 // UpdateClients replaces the active pool and resets all session mappings.
 func (r *ProxyRotator) UpdateClients(clients ...ClientWithProxy) {
 	if len(clients) == 0 {
@@ -279,8 +332,9 @@ func (r *ProxyRotator) UpdateClients(clients ...ClientWithProxy) {
 
 	tracked := generic.Map(clients, func(cp ClientWithProxy) *trackedClient {
 		tc := &trackedClient{
-			client:   cp.Client,
-			proxyURL: cp.ProxyURL,
+			client:          cp.Client,
+			proxyURL:        cp.ProxyURL,
+			domainCooldowns: make(map[string]time.Time),
 		}
 		tc.HealthTracker = NewHealthTracker(cp.ProxyURL, r.config.MaxFails, r.config.RetryAfter,
 			func(name string, fails uint32, retryAfter time.Duration) {
@@ -414,11 +468,14 @@ func (r *ProxyRotator) Do(req *http.Request) (*http.Response, error) {
 	r.mu.RUnlock()
 
 	var (
-		lastErr   error
-		n         = uint64(len(clients))
-		sessionID string
-		stickyIdx = -1
+		lastErr       error
+		n             = uint64(len(clients))
+		sessionID     string
+		stickyIdx     = -1
+		hasCooledDown = false
 	)
+
+	domain := req.URL.Hostname()
 
 	if r.stickyKeyFunc != nil {
 		sessionID = r.stickyKeyFunc(req)
@@ -435,12 +492,16 @@ func (r *ProxyRotator) Do(req *http.Request) (*http.Response, error) {
 
 	if stickyIdx >= 0 && stickyIdx < len(clients) {
 		tc := clients[stickyIdx]
-		if r.isAvailable(tc) {
+		if r.isAvailable(tc) && !tc.IsDomainCooledDown(domain) {
 			proxyCtx := context.WithValue(req.Context(), proxyCtxKey{}, tc.proxyURL)
 
 			resp, err := tc.client.Do(req.WithContext(proxyCtx))
 			if !r.isProxyFault(resp, err) {
 				r.markSuccess(tc)
+
+				if err == nil && resp != nil && resp.StatusCode == http.StatusForbidden {
+					tc.PutDomainInCooldown(domain, 10*time.Minute)
+				}
 
 				return resp, err
 			}
@@ -466,6 +527,11 @@ func (r *ProxyRotator) Do(req *http.Request) (*http.Response, error) {
 			continue
 		}
 
+		if tc.IsDomainCooledDown(domain) {
+			hasCooledDown = true
+			continue
+		}
+
 		proxyCtx := context.WithValue(req.Context(), proxyCtxKey{}, tc.proxyURL)
 		reqWithProxy := req.WithContext(proxyCtx)
 
@@ -484,6 +550,10 @@ func (r *ProxyRotator) Do(req *http.Request) (*http.Response, error) {
 
 		r.markSuccess(tc)
 
+		if err == nil && resp != nil && resp.StatusCode == http.StatusForbidden {
+			tc.PutDomainInCooldown(domain, 10*time.Minute)
+		}
+
 		if sessionID != "" {
 			r.mu.Lock()
 			r.sessions[sessionID] = &sessionEntry{
@@ -498,6 +568,10 @@ func (r *ProxyRotator) Do(req *http.Request) (*http.Response, error) {
 
 	if lastErr != nil {
 		return nil, fmt.Errorf("aoni: all proxies failed, last error: %w", lastErr)
+	}
+
+	if hasCooledDown {
+		return nil, fmt.Errorf("aoni: all proxies are in cooldown for domain %s", domain)
 	}
 
 	return nil, errors.New("aoni: no healthy proxies available")
