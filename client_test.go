@@ -341,27 +341,6 @@ func TestClient_Validation(t *testing.T) {
 	})
 }
 
-func TestClient_PostForm(t *testing.T) {
-	t.Parallel()
-
-	type Params struct {
-		ID   int    `url:"id"`
-		Name string `url:"name"`
-	}
-
-	_, client := setupTestServer(t, func(w http.ResponseWriter, r *http.Request) {
-		assert.Equal(t, "application/x-www-form-urlencoded", r.Header.Get("Content-Type"))
-		_ = r.ParseForm()
-		assert.Equal(t, "123", r.Form.Get("id"))
-		assert.Equal(t, "bob", r.Form.Get("name"))
-
-		_, _ = w.Write([]byte(`{"status": 200}`))
-	})
-
-	_, err := PostFormTo[Params](t.Context(), client, "/form", Params{ID: 123, Name: "bob"})
-	assert.NoError(t, err)
-}
-
 func TestClient_CaptureResponse(t *testing.T) {
 	t.Parallel()
 	_, client := setupTestServer(t, func(w http.ResponseWriter, r *http.Request) {

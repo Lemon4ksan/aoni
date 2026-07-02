@@ -411,30 +411,6 @@ func TestClient_RawHelpers(t *testing.T) {
 		assert.Equal(t, http.StatusOK, respDelete.StatusCode)
 	})
 
-	t.Run("PostForm raw", func(t *testing.T) {
-		formInput := reqTestPayload{Message: "form-raw-msg", Status: 10}
-		_, clientForm := setupTestReqServer(t, func(w http.ResponseWriter, r *http.Request) {
-			assert.Equal(t, "application/x-www-form-urlencoded", r.Header.Get("Content-Type"))
-			assert.Equal(t, "form-raw-msg", r.FormValue("message"))
-			assert.Equal(t, "10", r.FormValue("status"))
-			w.WriteHeader(http.StatusAccepted)
-		})
-
-		resp, err := PostForm(t.Context(), clientForm, "/form", formInput)
-		require.NoError(t, err)
-
-		defer resp.Body.Close()
-
-		assert.Equal(t, http.StatusAccepted, resp.StatusCode)
-
-		resp2, err := clientForm.PostForm(t.Context(), "/form", formInput)
-		require.NoError(t, err)
-
-		defer resp2.Body.Close()
-
-		assert.Equal(t, http.StatusAccepted, resp2.StatusCode)
-	})
-
 	t.Run("ProxyIsolatedCookieJar with WithProxy", func(t *testing.T) {
 		proxyURL, err := url.Parse("http://my-proxy-host:8080")
 		require.NoError(t, err)
@@ -451,52 +427,6 @@ func TestClient_RawHelpers(t *testing.T) {
 
 		_, _ = clientWithProxy.Request(t.Context(), http.MethodGet, "http://localhost:12345")
 		assert.Equal(t, "http://my-proxy-host:8080", capturedProxy)
-	})
-}
-
-func TestPostForm(t *testing.T) {
-	t.Parallel()
-
-	t.Run("post_form_struct_serialization", func(t *testing.T) {
-		t.Parallel()
-
-		input := reqTestPayload{Message: "form-msg", Status: 10}
-		_, client := setupTestReqServer(t, func(w http.ResponseWriter, r *http.Request) {
-			assert.Equal(t, "application/x-www-form-urlencoded", r.Header.Get("Content-Type"))
-			assert.Equal(t, "form-msg", r.FormValue("message"))
-			assert.Equal(t, "10", r.FormValue("status"))
-
-			w.WriteHeader(http.StatusOK)
-			_, _ = w.Write([]byte(`{"message":"success"}`))
-		})
-
-		res, err := PostFormTo[reqTestPayload](t.Context(), client, "/form", input)
-		require.NoError(t, err)
-		assert.Equal(t, "success", res.Message)
-	})
-
-	t.Run("post_form_io_reader_payload", func(t *testing.T) {
-		t.Parallel()
-
-		readerPayload := strings.NewReader("message=direct-reader")
-		_, client := setupTestReqServer(t, func(w http.ResponseWriter, r *http.Request) {
-			assert.Equal(t, "direct-reader", r.FormValue("message"))
-			w.WriteHeader(http.StatusOK)
-		})
-
-		_, err := PostFormTo[NoResponse](t.Context(), client, "/form-reader", readerPayload)
-		require.NoError(t, err)
-	})
-
-	t.Run("post_form_validation_failure", func(t *testing.T) {
-		t.Parallel()
-
-		// Missing required 'message' field
-		invalidInput := reqTestPayload{Status: 10}
-		client := NewClient(nil)
-
-		_, err := PostFormTo[reqTestPayload](t.Context(), client, "/form", invalidInput)
-		assert.Error(t, err)
 	})
 }
 

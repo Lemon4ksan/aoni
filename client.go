@@ -58,27 +58,28 @@ var (
 )
 
 type (
-	capturerCtxKey           struct{}
-	decoderCtxKey            struct{}
-	errorModelCtxKey         struct{}
-	downloadProgressCtxKey   struct{}
-	hedgingCtxKey            struct{}
-	queryErrorCtxKey         struct{}
-	bodyErrorCtxKey          struct{}
-	happyEyeballsDelayCtxKey struct{}
-	multiReadCtxKey          struct{}
-	ssrfGuardCtxKey          struct{}
-	fallbackCtxKey           struct{}
-	debugCtxKey              struct{}
-	orderedHeadersCtxKey     struct{}
-	ja4ReportCtxKey          struct{}
-	ja4CallbackCtxKey        struct{}
-	alpnOverrideCtxKey       struct{}
-	p0fSignatureCtxKey       struct{}
-	proxyDNSCtxKey           struct{}
-	proxyAddrCtxKey          struct{}
-	sessionCacheCtxKey       struct{}
-	packetPaddingCtxKey      struct{}
+	capturerCtxKey             struct{}
+	decoderCtxKey              struct{}
+	errorModelCtxKey           struct{}
+	downloadProgressCtxKey     struct{}
+	hedgingCtxKey              struct{}
+	queryErrorCtxKey           struct{}
+	bodyErrorCtxKey            struct{}
+	happyEyeballsDelayCtxKey   struct{}
+	multiReadCtxKey            struct{}
+	ssrfGuardCtxKey            struct{}
+	fallbackCtxKey             struct{}
+	debugCtxKey                struct{}
+	orderedHeadersCtxKey       struct{}
+	ja4ReportCtxKey            struct{}
+	ja4CallbackCtxKey          struct{}
+	alpnOverrideCtxKey         struct{}
+	p0fSignatureCtxKey         struct{}
+	proxyDNSCtxKey             struct{}
+	proxyAddrCtxKey            struct{}
+	sessionCacheCtxKey         struct{}
+	packetPaddingCtxKey        struct{}
+	requestTimeoutCancelCtxKey struct{}
 )
 
 // DefaultSensitiveHeaders lists headers removed from requests during
@@ -443,12 +444,6 @@ func (c *Client) Patch(ctx context.Context, path string, body any, mods ...Reque
 // header using request modifiers like [WithContentType] (e.g. WithContentType("application/xml")).
 func (c *Client) Delete(ctx context.Context, path string, body any, mods ...RequestModifier) (*http.Response, error) {
 	return Delete(ctx, c, path, body, mods...)
-}
-
-// PostForm performs a POST request with URL-encoded parameters through the Client
-// and returns the raw http.Response.
-func (c *Client) PostForm(ctx context.Context, path string, body any, mods ...RequestModifier) (*http.Response, error) {
-	return PostForm(ctx, c, path, body, mods...)
 }
 
 // Request sends an HTTP request and returns the response. path is
@@ -1771,6 +1766,12 @@ func closeResponse(resp *http.Response) {
 
 	if rb, ok := unwrapBody(resp.Body).(interface{ ReallyClose() }); ok {
 		rb.ReallyClose()
+	}
+
+	if resp.Request != nil {
+		if cancel, ok := resp.Request.Context().Value(requestTimeoutCancelCtxKey{}).(context.CancelFunc); ok {
+			cancel()
+		}
 	}
 }
 

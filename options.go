@@ -493,3 +493,109 @@ func WithP0fSignature(sig *p0f.Signature) RequestModifier {
 		*req = *req.WithContext(ctx)
 	}
 }
+
+// WithTimeout overrides the deadline for this individual request by deriving
+// a child context with the given duration. It does not affect the client-level
+// timeout configured via [Client.WithTimeout].
+func WithTimeout(d time.Duration) RequestModifier {
+	return func(req *http.Request) {
+		ctx, cancel := context.WithTimeout(req.Context(), d)
+		// Attach the cancel function so it is called when the response body is
+		// closed. Store it alongside the request so the transport can invoke it.
+		ctx = context.WithValue(ctx, requestTimeoutCancelCtxKey{}, cancel)
+		*req = *req.WithContext(ctx)
+	}
+}
+
+// WithFormValues merges the provided url.Values into the request body as
+// application/x-www-form-urlencoded. If the request already has a body, it
+// is replaced. Use [WithBody] afterwards if you need to combine form data
+// with a custom reader.
+func WithFormValues(values url.Values) RequestModifier {
+	return func(req *http.Request) {
+		encoded := values.Encode()
+		req.Body = io.NopCloser(strings.NewReader(encoded))
+		req.ContentLength = int64(len(encoded))
+		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+
+		req.GetBody = func() (io.ReadCloser, error) {
+			return io.NopCloser(strings.NewReader(encoded)), nil
+		}
+	}
+}
+
+// WithFormBody serializes payload as URL-encoded form values, sets the request
+// body, and adds a Content-Type: application/x-www-form-urlencoded header.
+//
+// If payload implements [io.Reader], it is used directly as the body.
+// Otherwise, [Validate] is called first, then [StructToValues] converts the
+// struct to url.Values. Validation or serialization errors are stored in the
+// request context and returned by [Client.Request].
+func WithFormBody(payload any) RequestModifier {
+	return func(req *http.Request) {
+		if payload == nil {
+			return
+		}
+
+		if r, ok := payload.(io.Reader); ok {
+			rc, ok := r.(io.ReadCloser)
+			if !ok {
+				rc = io.NopCloser(r)
+			}
+
+			req.Body = rc
+			req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+
+			return
+		}
+
+		if err := Validate(payload); err != nil {
+			ctx := context.WithValue(req.Context(), bodyErrorCtxKey{}, err)
+			*req = *req.WithContext(ctx)
+			return
+		}
+
+		values, err := StructToValues(payload)
+		if err != nil {
+			ctx := context.WithValue(req.Context(), bodyErrorCtxKey{}, err)
+			*req = *req.WithContext(ctx)
+			return
+		}
+
+		encoded := values.Encode()
+		req.Body = io.NopCloser(strings.NewReader(encoded))
+		req.ContentLength = int64(len(encoded))
+		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+
+		req.GetBody = func() (io.ReadCloser, error) {
+			return io.NopCloser(strings.NewReader(encoded)), nil
+		}
+	}
+}
+
+// WithIfNoneMatch sets the If-None-Match request header to the provided ETag
+// value. The server responds with 304 Not Modified when the resource has not
+// changed, allowing the client to use its cached copy.
+func WithIfNoneMatch(etag string) RequestModifier {
+	return func(req *http.Request) {
+		req.Header.Set("If-None-Match", etag)
+	}
+}
+
+// WithIfMatch sets the If-Match request header to the provided ETag value.
+// Typically used with PUT/PATCH/DELETE to ensure the resource has not been
+// modified by another client since it was last fetched (optimistic locking).
+func WithIfMatch(etag string) RequestModifier {
+	return func(req *http.Request) {
+		req.Header.Set("If-Match", etag)
+	}
+}
+
+// WithIfModifiedSince sets the If-Modified-Since request header. The server
+// responds with 304 Not Modified when the resource has not changed since t,
+// avoiding unnecessary payload transfer.
+func WithIfModifiedSince(t time.Time) RequestModifier {
+	return func(req *http.Request) {
+		req.Header.Set("If-Modified-Since", t.UTC().Format(http.TimeFormat))
+	}
+}

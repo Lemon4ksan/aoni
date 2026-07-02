@@ -165,6 +165,8 @@ func GetToEx[Resp any](
 // To send other body formats (e.g. XML, YAML, or plain text), pre-serialize the payload and
 // pass it as an [io.Reader] (e.g. using [strings.NewReader] or [bytes.NewReader]), then override the Content-Type
 // header using request modifiers like [WithContentType] (e.g. WithContentType("application/xml")).
+//
+// Use [WithFormBody] or [WithFormValues] to create PostForm requests.
 func Post(ctx context.Context, c Requester, path string, body any, mods ...RequestModifier) (*http.Response, error) {
 	bodyReader, err := validateAndMarshal(body)
 	if err != nil {
@@ -188,6 +190,8 @@ func Post(ctx context.Context, c Requester, path string, body any, mods ...Reque
 // To send other body formats, pre-serialize the payload and pass it as an [io.Reader] (e.g. [strings.NewReader]),
 // then override the Content-Type header using [WithContentType].
 // To decode other response formats (such as XML or YAML), pass a decoder modifier, e.g. [WithXMLDecoder] or [WithYAMLDecoder].
+//
+// Use [WithFormBody] or [WithFormValues] to create PostForm requests.
 func PostTo[Resp any](
 	ctx context.Context,
 	c Requester,
@@ -238,118 +242,6 @@ func PostToEx[Resp any](
 	mods = append(mods, CaptureResponse(&raw))
 
 	result, err := PostTo[Resp](ctx, c, path, body, mods...)
-	if err != nil {
-		return nil, raw, err
-	}
-
-	return result, raw, nil
-}
-
-// PostForm performs a POST request with URL-encoded parameters using the specified Requester
-// and returns the raw http.Response.
-//
-// If the body implements [io.Reader], it is used directly as the request body.
-// Otherwise, the body is marshaled to URL-encoded form values.
-func PostForm(
-	ctx context.Context,
-	c Requester,
-	path string,
-	body any,
-	mods ...RequestModifier,
-) (*http.Response, error) {
-	var bodyReader io.Reader
-
-	if r, ok := body.(io.Reader); ok {
-		bodyReader = r
-	} else if body != nil {
-		if err := Validate(body); err != nil {
-			return nil, err
-		}
-
-		formValues, err := StructToValues(body)
-		if err != nil {
-			return nil, err
-		}
-
-		bodyReader = strings.NewReader(formValues.Encode())
-	}
-
-	mods = append([]RequestModifier{
-		WithContentType("application/x-www-form-urlencoded"),
-		WithBody(bodyReader),
-	}, mods...)
-
-	return c.Request(ctx, http.MethodPost, path, mods...)
-}
-
-// PostFormTo marshals the body, performs a POST request with URL-encoded parameters,
-// and decodes the response body into Resp.
-//
-// If the body implements [io.Reader], it is used directly as the request body.
-// Otherwise, the body is marshaled to URL-encoded form values and wrapped in a [strings.Reader].
-//
-// It validates the body structure beforehand using [Validate].
-// Returns a [ValidationError] if validation fails.
-func PostFormTo[Resp any](
-	ctx context.Context,
-	c Requester,
-	path string,
-	body any,
-	mods ...RequestModifier,
-) (*Resp, error) {
-	var bodyReader io.Reader
-
-	if r, ok := body.(io.Reader); ok {
-		bodyReader = r
-	} else if body != nil {
-		if err := Validate(body); err != nil {
-			return nil, err
-		}
-
-		formValues, err := StructToValues(body)
-		if err != nil {
-			return nil, err
-		}
-
-		bodyReader = strings.NewReader(formValues.Encode())
-	}
-
-	mods = append([]RequestModifier{
-		WithContentType("application/x-www-form-urlencoded"),
-		WithBody(bodyReader),
-	}, mods...)
-
-	resp, err := c.Request(ctx, http.MethodPost, path, mods...)
-	if err != nil {
-		return nil, err
-	}
-
-	if reflect.TypeFor[Resp]() == reflect.TypeFor[NoResponse]() {
-		closeResponse(resp)
-		return nil, err
-	}
-
-	result := new(Resp)
-	if err := handleResponse(resp, result, c); err != nil {
-		return nil, err
-	}
-
-	return result, nil
-}
-
-// PostFormToEx is like [PostFormTo] but returns both the parsed response payload and the raw *http.Response.
-func PostFormToEx[Resp any](
-	ctx context.Context,
-	c Requester,
-	path string,
-	body any,
-	mods ...RequestModifier,
-) (*Resp, *http.Response, error) {
-	var raw *http.Response
-
-	mods = append(mods, CaptureResponse(&raw))
-
-	result, err := PostFormTo[Resp](ctx, c, path, body, mods...)
 	if err != nil {
 		return nil, raw, err
 	}
