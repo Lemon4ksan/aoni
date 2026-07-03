@@ -793,7 +793,7 @@ func (s *SocketIOConn) heartbeatLoop() {
 			case <-ch:
 				// Pong received in time.
 			case <-time.After(s.config.PingTimeout):
-				// Ping timeout — trigger reconnection.
+				// Ping timeout - trigger reconnection.
 				s.mu.Lock()
 				if !s.skipReconnect {
 					select {

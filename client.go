@@ -248,6 +248,10 @@ type Client struct {
 	sessionCache      *ProxyAwareSessionCache
 	packetPadding     *PaddingConfig
 	transportProxy    func(*http.Request) (*url.URL, error)
+
+	// Per-client defaults for settings that can also be overridden per-request.
+	tcpDelay        *TCPDelayRange             // set by WithTCPDelay
+	globalValidator func(*http.Response) error // set by WithResponseValidator
 }
 
 // NewClient creates a [Client] wrapping httpClient. When httpClient
@@ -325,6 +329,8 @@ func (c *Client) Clone() *Client {
 		proxyAddr:          c.proxyAddr,
 		sessionCache:       c.sessionCache,
 		transportProxy:     c.transportProxy,
+		tcpDelay:           c.tcpDelay,
+		globalValidator:    c.globalValidator,
 	}
 
 	// Clone http.Client and its transport to avoid race conditions.
@@ -624,6 +630,29 @@ func (c *Client) Request(
 		resp, reqErr = c.http.Do(req)
 	}
 
+	// Run validators: client-level first, then per-request (WithResponseValidator).
+	// The per-request validator takes precedence - if both are set the per-request
+	// one is run last and its error wins.
+	if reqErr == nil && resp != nil {
+		if c.globalValidator != nil {
+			if validErr := c.globalValidator(resp); validErr != nil {
+				_ = resp.Body.Close()
+				resp = nil
+				reqErr = validErr
+			}
+		}
+	}
+
+	if reqErr == nil && resp != nil {
+		if fn := GetResponseValidator(req.Context()); fn != nil {
+			if validErr := fn(resp); validErr != nil {
+				_ = resp.Body.Close()
+				resp = nil
+				reqErr = validErr
+			}
+		}
+	}
+
 	// Trigger ChallengeSolver if registered and a challenge is encountered.
 	if reqErr == nil && c.challengeSolver != nil {
 		detector := c.challengeDetector
@@ -889,6 +918,24 @@ func (c *Client) WithBaseURL(raw string) *Client {
 func (c *Client) WithHeader(key, value string) *Client {
 	newClient := c.Clone()
 	newClient.headers.Set(key, value)
+	return newClient
+}
+
+// WithHeaders returns a clone of c with updated headers on every
+// outgoing request. Overwrites any existing values for keys.
+func (c *Client) WithHeaders(headers map[string]string) *Client {
+	newClient := c.Clone()
+	for k, v := range headers {
+		newClient.headers.Set(k, v)
+	}
+
+	return newClient
+}
+
+// WithoutHeaders returns a clone of c with all headers removed.
+func (c *Client) WithoutHeaders() *Client {
+	newClient := c.Clone()
+	newClient.headers = make(http.Header)
 	return newClient
 }
 
@@ -1436,6 +1483,53 @@ func (c *Client) WithHTTP3Settings(settings HTTP3Settings) *Client {
 	return newClient
 }
 
+// WithInsecureSkipVerify returns a clone of c that disables TLS certificate
+// verification for all requests. Use [WithInsecureSkipVerify] (the
+// [RequestModifier] variant) to limit the effect to a single request.
+func (c *Client) WithInsecureSkipVerify() *Client {
+	newClient := c.Clone()
+
+	if transport := newClient.Transport(); transport != nil {
+		if transport.TLSClientConfig == nil {
+			transport.TLSClientConfig = &tls.Config{} //nolint:gosec
+		} else {
+			transport.TLSClientConfig = transport.TLSClientConfig.Clone()
+		}
+
+		transport.TLSClientConfig.InsecureSkipVerify = true //nolint:gosec
+	}
+
+	return newClient
+}
+
+// WithTCPDelay returns a clone of c that sleeps for a random duration between
+// min and max before every TCP dial. This simulates human-like connection
+// timing and can confuse bot-detection heuristics.
+// Use [WithTCPDelay] (the [RequestModifier] variant) to limit the delay to a
+// single request; per-request values always win over this client-level default.
+func (c *Client) WithTCPDelay(min, max time.Duration) *Client {
+	if min > max {
+		min, max = max, min
+	}
+
+	newClient := c.Clone()
+	newClient.tcpDelay = &TCPDelayRange{Min: min, Max: max}
+	newClient.applyDialers()
+
+	return newClient
+}
+
+// WithResponseValidator returns a clone of c that calls fn after every
+// successful HTTP round-trip, before the response body is decoded.
+// If fn returns a non-nil error the request is treated as failed.
+// This client-level validator runs before any per-request validator set via
+// the [WithResponseValidator] [RequestModifier]; the per-request error wins.
+func (c *Client) WithResponseValidator(fn func(resp *http.Response) error) *Client {
+	newClient := c.Clone()
+	newClient.globalValidator = fn
+	return newClient
+}
+
 // WithRefererAutomaton returns a clone of c with automatic Referer tracking enabled.
 // Each request will automatically have its "Referer" header set to the URL of the previous request.
 func (c *Client) WithRefererAutomaton(enabled bool) *Client {
@@ -1518,7 +1612,20 @@ func (c *Client) CloseIdleConnections() {
 
 func (c *Client) applyDialers() {
 	if transport := c.Transport(); transport != nil {
+		// Use determineProxy so that per-request → client-level → env priority
+		// is respected consistently, including the http.ProxyFromEnvironment fallback.
+		transport.Proxy = c.determineProxy
+
 		transport.DialContext = func(ctx context.Context, network, addr string) (net.Conn, error) {
+			// If no per-request delay is set, fall back to the client-level default.
+			if _, ok := GetTCPDelay(ctx); !ok && c.tcpDelay != nil {
+				ctx = context.WithValue(ctx, tcpDelayCtxKey{}, *c.tcpDelay)
+			}
+
+			if err := ApplyTCPDelay(ctx); err != nil {
+				return nil, err
+			}
+
 			return happyEyeballsDial(
 				ctx,
 				network,
@@ -1529,7 +1636,79 @@ func (c *Client) applyDialers() {
 				c.dnsResolver,
 			)
 		}
+
+		// Wire DialTLSContext only when uTLS is NOT configured (WithTLSFingerprint
+		// sets its own DialTLSContext). This gives plain http.Transport connections
+		// the same WithInsecureSkipVerify + WithTCPDelay support that uTLS enjoys.
+		if transport.DialTLSContext == nil {
+			baseTLSCfg := transport.TLSClientConfig
+			transport.DialTLSContext = func(ctx context.Context, network, addr string) (net.Conn, error) {
+				// Honour WithTCPDelay before opening the TCP connection.
+				if err := ApplyTCPDelay(ctx); err != nil {
+					return nil, err
+				}
+
+				host, _, _ := net.SplitHostPort(addr)
+				if host == "" {
+					host = addr
+				}
+
+				// Dial the raw TCP connection.
+				rawConn, err := happyEyeballsDial(
+					ctx,
+					network,
+					addr,
+					c.happyEyeballsDelay,
+					c.ssrfGuard,
+					c.sourceRotator,
+					c.dnsResolver,
+				)
+				if err != nil {
+					return nil, err
+				}
+
+				// Build the effective TLS config, applying any per-request overrides.
+				effectiveCfg := TLSConfigWithOverride(ctx, baseTLSCfg)
+				if effectiveCfg == nil {
+					effectiveCfg = &tls.Config{} //nolint:gosec
+				}
+
+				// Ensure SNI is set even when config came from the user without it.
+				if effectiveCfg.ServerName == "" {
+					cloned := effectiveCfg.Clone()
+					cloned.ServerName = host
+					effectiveCfg = cloned
+				}
+
+				tlsConn := tls.Client(rawConn, effectiveCfg)
+				if err := tlsConn.HandshakeContext(ctx); err != nil {
+					_ = rawConn.Close()
+					return nil, err
+				}
+
+				return tlsConn, nil
+			}
+		}
 	}
+}
+
+// determineProxy resolves the effective proxy for req using three-tier priority:
+//  1. Per-request [WithProxyOverride] stored in the request context.
+//  2. Client-level proxy set via [Client.WithProxy].
+//  3. System environment variables (HTTP_PROXY / HTTPS_PROXY).
+//
+// It is the single source of truth for proxy resolution inside the client and
+// is used by [ProxyFuncWithOverride] to configure [http.Transport.Proxy].
+func (c *Client) determineProxy(req *http.Request) (*url.URL, error) {
+	if raw, ok := GetProxyOverride(req.Context()); ok && raw != "" {
+		return url.Parse(raw)
+	}
+
+	if c.proxyAddr != nil {
+		return c.proxyAddr, nil
+	}
+
+	return http.ProxyFromEnvironment(req)
 }
 
 func dialTLSWithUTLS(
@@ -1543,7 +1722,7 @@ func dialTLSWithUTLS(
 	tlsConfig *tls.Config,
 	proxyURL *url.URL,
 ) (net.Conn, error) {
-	// Read callback from context (set by Client.Request) — the closure-captured
+	// Read callback from context (set by Client.Request) - the closure-captured
 	// value may be stale if WithJA4Callback was called after WithTLSFingerprint.
 	if cb, ok := ctx.Value(ja4CallbackCtxKey{}).(func(ja4.Report)); ok && cb != nil {
 		ja4Callback = cb
@@ -1563,7 +1742,19 @@ func dialTLSWithUTLS(
 		delay = 300 * time.Millisecond
 	}
 
-	// Route through proxy if configured — prevents direct IP leak.
+	// Apply per-request TCP delay (WithTCPDelay) before dialing.
+	if err := ApplyTCPDelay(ctx); err != nil {
+		return nil, err
+	}
+
+	// Check for a per-request proxy override (WithProxyOverride).
+	if raw, ok := GetProxyOverride(ctx); ok && raw != "" {
+		if parsed, parseErr := url.Parse(raw); parseErr == nil {
+			proxyURL = parsed
+		}
+	}
+
+	// Route through proxy if configured - prevents direct IP leak.
 	var conn net.Conn
 	if proxyURL != nil {
 		conn, err = dialViaProxy(ctx, network, host, port, proxyURL)
@@ -1607,6 +1798,11 @@ func dialTLSWithUTLS(
 				uConfig.CurvePreferences[i] = utls.CurveID(id)
 			}
 		}
+	}
+
+	// Per-request InsecureSkipVerify override (WithInsecureSkipVerify).
+	if GetInsecureSkipVerify(ctx) {
+		uConfig.InsecureSkipVerify = true //nolint:gosec
 	}
 
 	// Use proxy-aware session cache if available in context.
@@ -2123,7 +2319,7 @@ func happyEyeballsDial(
 // dialViaProxy connects to a target host through a SOCKS5 proxy, performing DNS
 // resolution on the proxy side to prevent local DNS leaks. For HTTP CONNECT
 // proxies, the proxy resolves the hostname when handling the CONNECT request.
-func dialViaProxy(ctx context.Context, network, host, port string, proxyURL *url.URL) (net.Conn, error) {
+func dialViaProxy(ctx context.Context, _, host, port string, proxyURL *url.URL) (net.Conn, error) {
 	proxyAddr := proxyURL.Host
 	if proxyAddr == "" {
 		return nil, errors.New("aoni: proxy DNS enabled but proxy address is empty")
@@ -2216,7 +2412,7 @@ func (c *bufferedConn) Read(b []byte) (int, error) {
 
 // socks5Handshake performs the SOCKS5 protocol handshake with remote DNS resolution.
 func socks5Handshake(conn net.Conn, host, port string, proxyURL *url.URL) error {
-	// Step 1: Greeting — offer both NO AUTH and USERNAME/PASSWORD when credentials exist.
+	// Step 1: Greeting - offer both NO AUTH and USERNAME/PASSWORD when credentials exist.
 	greeting := []byte{0x05, 0x01, 0x00} // VER=5, NMETHODS=1, NO AUTH
 	if proxyURL.User != nil {
 		greeting = []byte{0x05, 0x02, 0x00, 0x02} // VER=5, NMETHODS=2, [NO AUTH, USERNAME/PASSWORD]

@@ -99,6 +99,22 @@ func WithHeader(key, value string) RequestModifier {
 	}
 }
 
+// WithHeaders sets new key-value pairs in request headers.
+func WithHeaders(headers map[string]string) RequestModifier {
+	return func(req *http.Request) {
+		for k, v := range headers {
+			req.Header.Set(k, v)
+		}
+	}
+}
+
+// ResetHeaders returns a modifier that clears all headers from the request.
+func ResetHeaders() RequestModifier {
+	return func(req *http.Request) {
+		req.Header = make(http.Header)
+	}
+}
+
 // WithBearer applies a Bearer Token authorization header.
 func WithBearer(token string) RequestModifier {
 	return func(req *http.Request) {
@@ -168,7 +184,7 @@ func WithBody(r io.Reader) RequestModifier {
 			}
 		}
 
-		// Set GetBody for hedging support — allows cloning the request body.
+		// Set GetBody for hedging support - allows cloning the request body.
 		if r != nil {
 			req.GetBody = func() (io.ReadCloser, error) {
 				if seeker, ok := r.(io.Seeker); ok {
@@ -202,7 +218,7 @@ func WithJSONBody(payload any) RequestModifier {
 		req.ContentLength = int64(len(bodyBytes))
 		req.Header.Set("Content-Type", "application/json")
 
-		// Set GetBody for hedging support — allows cloning the request body.
+		// Set GetBody for hedging support - allows cloning the request body.
 		req.GetBody = func() (io.ReadCloser, error) {
 			return io.NopCloser(bytes.NewReader(bodyBytes)), nil
 		}

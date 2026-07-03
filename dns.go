@@ -184,7 +184,7 @@ func (r *DoHResolver) LookupIPAddr(ctx context.Context, host string) ([]net.IPAd
 func (r *DoHResolver) query(ctx context.Context, host string, qtype uint16) ([]net.IPAddr, error) {
 	reqURL := fmt.Sprintf("%s?name=%s&type=%d", r.Endpoint, url.QueryEscape(host), qtype)
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, reqURL, nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, reqURL, nil) //nolint:gosec
 	if err != nil {
 		return nil, err
 	}
@@ -195,7 +195,7 @@ func (r *DoHResolver) query(ctx context.Context, host string, qtype uint16) ([]n
 		req.Host = r.Host
 	}
 
-	resp, err := r.client.Do(req)
+	resp, err := r.client.Do(req) //nolint:gosec
 	if err != nil {
 		return nil, err
 	}

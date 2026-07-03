@@ -20,28 +20,6 @@ import (
 	"strings"
 )
 
-var sensitiveHeaders = map[string]bool{
-	"authorization":       true,
-	"cookie":              true,
-	"set-cookie":          true,
-	"proxy-authorization": true,
-}
-
-func redactHeaders(raw []byte) []byte {
-	lines := strings.Split(string(raw), "\r\n")
-	for i, line := range lines {
-		for header := range sensitiveHeaders {
-			prefix := header + ":"
-			if strings.HasPrefix(strings.ToLower(line), prefix) {
-				lines[i] = header + ": <redacted>"
-				break
-			}
-		}
-	}
-
-	return []byte(strings.Join(lines, "\r\n"))
-}
-
 // DefaultClient is the shared default client instance used by global helper functions.
 var DefaultClient = NewClient(nil)
 
@@ -216,9 +194,7 @@ func PostTo[Resp any](
 	}
 
 	if reflect.TypeFor[Resp]() == reflect.TypeFor[NoResponse]() {
-		closeResponse(resp)
-
-		return nil, err
+		return nil, handleResponse(resp, nil, c)
 	}
 
 	result := new(Resp)
@@ -281,8 +257,7 @@ func PutTo[Resp any](
 	}
 
 	if reflect.TypeFor[Resp]() == reflect.TypeFor[NoResponse]() {
-		closeResponse(resp)
-		return nil, err
+		return nil, handleResponse(resp, nil, c)
 	}
 
 	result := new(Resp)
@@ -345,8 +320,7 @@ func PatchTo[Resp any](
 	}
 
 	if reflect.TypeFor[Resp]() == reflect.TypeFor[NoResponse]() {
-		closeResponse(resp)
-		return nil, err
+		return nil, handleResponse(resp, nil, c)
 	}
 
 	result := new(Resp)
@@ -409,8 +383,7 @@ func DeleteTo[Resp any](
 	}
 
 	if reflect.TypeFor[Resp]() == reflect.TypeFor[NoResponse]() {
-		closeResponse(resp)
-		return nil, err
+		return nil, handleResponse(resp, nil, c)
 	}
 
 	result := new(Resp)
@@ -442,6 +415,10 @@ func DeleteToEx[Resp any](
 }
 
 func validateAndMarshal(payload any) (io.Reader, error) {
+	if _, ok := payload.(RequestModifier); ok {
+		return nil, errors.New("aoni: passed a RequestModifier as the request body. Did you forget the body argument?")
+	}
+
 	if r, ok := payload.(io.Reader); ok {
 		return r, nil
 	}
@@ -618,9 +595,7 @@ func requestTo[Resp any](
 	}
 
 	if reflect.TypeFor[Resp]() == reflect.TypeFor[NoResponse]() {
-		closeResponse(resp)
-
-		return nil, err
+		return nil, handleResponse(resp, nil, c)
 	}
 
 	result := new(Resp)
@@ -629,4 +604,26 @@ func requestTo[Resp any](
 	}
 
 	return result, nil
+}
+
+var sensitiveHeaders = map[string]bool{
+	"authorization":       true,
+	"cookie":              true,
+	"set-cookie":          true,
+	"proxy-authorization": true,
+}
+
+func redactHeaders(raw []byte) []byte {
+	lines := strings.Split(string(raw), "\r\n")
+	for i, line := range lines {
+		for header := range sensitiveHeaders {
+			prefix := header + ":"
+			if strings.HasPrefix(strings.ToLower(line), prefix) {
+				lines[i] = header + ": <redacted>"
+				break
+			}
+		}
+	}
+
+	return []byte(strings.Join(lines, "\r\n"))
 }

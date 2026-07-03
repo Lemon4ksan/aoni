@@ -33,7 +33,7 @@ go get github.com/lemon4ksan/aoni
 
 ## 🌀 The Pipeline Philosophy
 
-In `aoni`, a request is not a static object—it is a fluid stream processed in four distinct, highly optimized phases:
+In `aoni`, a request is not a static object-it is a fluid stream processed in four distinct, highly optimized phases:
 
 ```mermaid
 flowchart LR
@@ -128,6 +128,30 @@ This matrix shows where `aoni` focuses its design compared to Go's default capab
 | **Sub-millisecond Tracing** | ⚠️ (Verbose) | ✗ | **✓ (Single-modifier)** |
 | **Structured Response Unwrapping** | ✗ | ✗ | **✓ (`WithBaseResponse`)** |
 | **Socket.IO / Engine.IO v4 Client** | ✗ | ✗ | **✓ (Complete v5 Spec)** |
+| **Per-Request Overrides** | ✗ (Manual transport) | ✗ (Requires client clone) | **✓ (Context Accessors)** |
+
+## 🛠️ Two-Tier Configuration (Overrides)
+
+`aoni` features a powerful two-tier configuration model allowing you to establish client-wide sensible defaults while reserving the ability to fine-tune transport behavior for individual requests.
+
+```
+Request-level Option -> Client-level Default -> System Environment / Transport Default
+```
+
+* **Client-Level (Config once):** Set options globally. Every `With*` call on a `*Client` returns an immutable cloned client, preserving thread safety.
+* **Request-Level (Override once):** Tweak behavior for a single execution using context-bound `RequestModifier` options.
+
+### Override Support Matrix
+
+| Option | Client-Level Default | Per-Request Modifier | Behavior / Resolution Priority |
+| :--- | :--- | :--- | :--- |
+| **Proxy Routing** | `client.WithProxy(url)` | `aoni.WithProxyOverride(url)` | Per-request wins -> Client-level default -> System environment (`HTTP_PROXY`) |
+| **TLS Bypassing** | `client.WithInsecureSkipVerify()` | `aoni.WithInsecureSkipVerify()` | Per-request wins -> Client-level setting -> Standard TLS verification |
+| **TCP Connect Jitter** | `client.WithTCPDelay(min, max)` | `aoni.WithTCPDelay(min, max)` | Per-request wins -> Client-level default -> No delay |
+| **Response Validation** | `client.WithResponseValidator(fn)` | `aoni.WithResponseValidator(fn)` | Both run sequentially. Per-request error overrides client-level error. |
+| **Retry Policies** | *Automatic in middleware* | `aoni.WithRetryPolicy(override)` | Per-request `RetryOverride` settings take precedence over global middleware settings. |
+| **Cache Duration** | *Decided by middleware* | `aoni.WithCacheTTL(duration)` | Passed via context to be retrieved by a caching middleware layer. |
+| **Request Metadata** | *N/A* | `aoni.WithConnMetadata(key, val)` | Thread-safe connection-bound values readable in transports or logging hooks. |
 
 ## 🍳 Cookbook: Common Resiliency Recipes
 
@@ -157,7 +181,19 @@ stickyRotator := rotator.WithStickySessions(func(req *http.Request) string {
 client := aoni.NewClient(aoni.Chain(stickyRotator, rateLimiter))
 ```
 
-### 2. Mitigating Long-Tail Latency via Hedging
+### 2. Fine-Tuning Transport Per-Request (The Overrides Pattern)
+* **The Problem:** You have a configured client, but a specific target requires bypassing certificate verification, routing through a premium proxy, and introducing connection delay to evade detection.
+* **The Ice-Cold Solution:** Pass the modifiers to the specific request. The rest of the client's operations remain untouched and secure.
+
+```go
+resp, err := client.Get(ctx, "/premium-endpoint",
+    aoni.WithProxyOverride("http://premium-proxy.com:8080"),
+    aoni.WithInsecureSkipVerify(),
+    aoni.WithTCPDelay(100*time.Millisecond, 500*time.Millisecond),
+)
+```
+
+### 3. Mitigating Long-Tail Latency via Hedging
 * **The Problem:** Unstable proxies or overloaded servers occasionally freeze, delaying your entire execution queue.
 * **The Ice-Cold Solution:** If the primary request stalls and doesn't return headers in 150ms, a backup request is dispatched in parallel, returning whichever finishes first.
 
@@ -165,7 +201,7 @@ client := aoni.NewClient(aoni.Chain(stickyRotator, rateLimiter))
 data, err := aoni.GetTo[Data](ctx, aoni.NewClient(hedgedClient), "/data", WithHedging(10*time.Millisecond))
 ```
 
-### 3. Automatic Legacy Charset Translation
+### 4. Automatic Legacy Charset Translation
 * **The Problem:** Legacy regional APIs or crawled websites return text encoded in old charsets (e.g., Cyrillic or Asian legacy encodings), resulting in garbled characters during JSON unmarshaling.
 * **The Ice-Cold Solution:** `aoni` detects the encoding on-the-fly from the headers and transparently translates the stream to standard UTF-8 before passing it to any decoder.
 
@@ -177,7 +213,7 @@ manifest, err := aoni.GetTo[Manifest](ctx, client, "/legacy-manifest",
 )
 ```
 
-### 4. Modern WAF Evasion & JA4 Fingerprinting
+### 5. Modern WAF Evasion & JA4 Fingerprinting
 * **The Problem:** Modern Web Application Firewalls (WAFs like Cloudflare or Akamai) block automated requests based on TLS ClientHello fingerprints (JA3/JA4) and HTTP header ordering (JA4H).
 * **The Ice-Cold Solution:** `aoni` natively emulates modern browser TLS handshakes using `uTLS` and automatically aligns headers to generate a clean, completely browser-compliant fingerprint. The built-in [`ja4`](ja4/) subpackage provides pure-Go JA4/JA4H computation.
 
@@ -199,7 +235,7 @@ fmt.Println("Handshake TLS JA4:", info.JA4.JA4)   // "t13d1516h2_8daaf6152771_e5
 fmt.Println("Request HTTP JA4H:", info.JA4.JA4H)  // "ge11nn03enus_9ed1ff1f7b03_cd8dafe26982"
 ```
 
-### 5. Bulletproof, Real-Time Socket.IO v5 / Engine.IO v4 Streaming
+### 6. Bulletproof, Real-Time Socket.IO v5 / Engine.IO v4 Streaming
 * **The Problem:** Real-time web sockets on protected servers get blocked during handshake due to standard Go TLS fingerprints, or silent TCP disconnects go unnoticed.
 * **The Ice-Cold Solution:** `aoni` establishes fully authenticated, JA4-spoofed, proxy-routed Socket.IO v5 sessions over standard WebSockets or stealthy HTTP/2 Extended CONNECT tunnels. It includes automatic, jittered backoff reconnection and ping-timeout heartbeats natively.
 
@@ -223,7 +259,7 @@ sio.On("price_update", func(args []json.RawMessage) {
 })
 ```
 
-### 6. Diagnostic Tracing & Offline Debugging
+### 7. Diagnostic Tracing & Offline Debugging
 * **The Problem:** Tracking network bottlenecks across proxies is difficult, and recreating failing requests in terminal for manual verification takes time.
 * **The Ice-Cold Solution:**
 
@@ -239,40 +275,48 @@ fmt.Printf("DNS: %s | TCP Connect: %s | TLS Handshake: %s | TTFB: %s\n",
     trace.DNSLookup, trace.TCPConn, trace.TLSHandshake, trace.ServerProcessing)
 ```
 
-### 7. Structured API Response Unwrapping with `WithBaseResponse`
+### 8. Structured API Response Unwrapping with `WithBaseResponse`
 * **The Problem:** Many APIs wrap successful data in an envelope object like `{"success":true,"data":{...}}` or `{"status":"ok","result":{...}}`. Manually unwrapping these envelopes, checking success flags, and extracting errors is repetitive boilerplate.
-* **The Ice-Cold Solution:** Implement the `BaseResponse` interface (`IsSuccess`, `Error`, `SetData`, `UnmarshalJSON`) and configure the client with `WithBaseResponse`. The decoder automatically decodes into your wrapper, checks the success flag, extracts errors, and unwraps the inner payload — all in one pass.
+* **The Ice-Cold Solution:** Implement the `BaseResponse` interface (`IsSuccess`, `Error`, `SetData`, `UnmarshalJSON`) and configure the client with `WithBaseResponse`. The decoder automatically decodes into your wrapper, checks the success flag, extracts errors, and unwraps the inner payload - all in one pass.
 
 ```go
 // 1. Define your envelope wrapper
 type apiResponse struct {
 	Success bool   `json:"success"`
 	Message string `json:"message,omitempty"`
+	Data    json.RawMessage `json:"data,omitempty"` // Capture raw JSON
 	target  any
 }
 
 func (r *apiResponse) IsSuccess() bool            { return r.Success }
 func (r *apiResponse) Error() error               { return errors.New(r.Message) }
 func (r *apiResponse) SetData(data any)           { r.target = data }
+
 func (r *apiResponse) UnmarshalJSON(data []byte) error {
+	// 1. Avoid recursion with Alias
 	type Alias apiResponse
 	var aux Alias
 	if err := json.Unmarshal(data, &aux); err != nil {
 		return err
 	}
-	r.Success, r.Message = aux.Success, aux.Message
-	if r.target != nil {
-		return json.Unmarshal(data, r.target)
+	
+	r.Success = aux.Success
+	r.Message = aux.Message
+	r.Data = aux.Data // Save raw "data"
+
+	// 2. Decode the "data" into our target object
+	if r.target != nil && len(r.Data) > 0 {
+		return json.Unmarshal(r.Data, r.target)
 	}
 	return nil
 }
 
-// 2. Configure the client — every JSON request unwraps through this envelope
+// 2. Configure the client - every JSON request unwraps through this envelope
 client := aoni.NewClient(nil).
 	WithBaseURL("https://api.example.com").
 	WithBaseResponse(func() aoni.BaseResponse { return &apiResponse{} })
 
-// 3. Use it — the decoder handles envelope unwrapping automatically
+// 3. Use it - the decoder handles envelope unwrapping automatically
 user, err := aoni.GetTo[User](ctx, client, "/users/1")
 // If API returns {"success":false,"message":"not found"}, err is non-nil
 // If API returns {"success":true,"data":{"name":"Alice"}}, user.Name == "Alice"

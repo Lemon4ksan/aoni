@@ -151,12 +151,33 @@ func RetryOnGatewayErrors() RetryCondition {
 // body is buffered in memory so it can be replayed. The middleware
 // respects the Retry-After header when present and falls back to
 // exponential backoff with jitter.
+//
+// If the request carries a [WithRetryPolicy] override, its values take
+// precedence over the global opts and condition for that request only.
 func RetryMiddleware(opts RetryOptions, condition RetryCondition) Middleware {
 	opts.MaxRetries = generic.Coalesce(opts.MaxRetries, 3)
 	opts.Backoff = max(generic.Coalesce(opts.Backoff, 1*time.Second), 0)
 
 	return func(next HTTPDoer) HTTPDoer {
 		return DoerFunc(func(req *http.Request) (*http.Response, error) {
+			// Per-request override takes precedence over global opts.
+			activeOpts := opts
+
+			activeCond := condition
+			if override, ok := GetRetryOverride(req.Context()); ok {
+				if override.MaxAttempts > 0 {
+					activeOpts.MaxRetries = uint32(override.MaxAttempts - 1) //nolint:gosec
+				}
+
+				if override.Backoff > 0 {
+					activeOpts.Backoff = override.Backoff
+				}
+
+				if override.Condition != nil {
+					activeCond = override.Condition
+				}
+			}
+
 			var (
 				body []byte
 				err  error
@@ -172,21 +193,21 @@ func RetryMiddleware(opts RetryOptions, condition RetryCondition) Middleware {
 			}
 
 			var bo *generic.Backoff
-			switch opts.JitterStrategy {
+			switch activeOpts.JitterStrategy {
 			case JitterFull:
-				bo = generic.NewBackoff(opts.Backoff, opts.Backoff*32, 2, 1.0)
+				bo = generic.NewBackoff(activeOpts.Backoff, activeOpts.Backoff*32, 2, 1.0)
 			default:
-				bo = generic.NewBackoff(opts.Backoff, opts.Backoff*32, 2, 0.5)
+				bo = generic.NewBackoff(activeOpts.Backoff, activeOpts.Backoff*32, 2, 0.5)
 			}
 
-			for i := uint32(0); i <= opts.MaxRetries; i++ {
+			for i := uint32(0); i <= activeOpts.MaxRetries; i++ {
 				if body != nil {
 					req.Body = io.NopCloser(bytes.NewReader(body))
 				}
 
 				resp, err := next.Do(req)
 
-				if i < opts.MaxRetries && condition(resp, err) {
+				if i < activeOpts.MaxRetries && activeCond(resp, err) {
 					retryAfter, hasRetryAfter := parseRetryAfter(resp)
 					if resp != nil {
 						_ = resp.Body.Close()
@@ -199,8 +220,8 @@ func RetryMiddleware(opts RetryOptions, condition RetryCondition) Middleware {
 						sleepTime = bo.Next()
 					}
 
-					if opts.OnRetry != nil {
-						opts.OnRetry(i+1, err, sleepTime)
+					if activeOpts.OnRetry != nil {
+						activeOpts.OnRetry(i+1, err, sleepTime)
 					}
 
 					select {

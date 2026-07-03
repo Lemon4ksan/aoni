@@ -27,18 +27,18 @@ JA4+ is a suite of methods for creating human and machine-readable fingerprints 
 ```go
 import "github.com/lemon4ksan/aoni/ja4"
 
-// JA4 — TLS fingerprint from ClientHello data
+// JA4 - TLS fingerprint from ClientHello data
 fingerprint := ja4.ComputeJA4(
-    cipherSuites,     // []uint16 — cipher suite IDs
-    extensions,       // []uint16 — extension IDs in wire order
-    supportedVersions,// []uint16 — from supported_versions extension
-    true,             // bool — SNI present?
-    []string{"h2"},   // []string — ALPN protocols
-    sigAlgorithms,    // []uint16 — signature algorithms (may be nil)
+    cipherSuites,     // []uint16 - cipher suite IDs
+    extensions,       // []uint16 - extension IDs in wire order
+    supportedVersions,// []uint16 - from supported_versions extension
+    true,             // bool - SNI present?
+    []string{"h2"},   // []string - ALPN protocols
+    sigAlgorithms,    // []uint16 - signature algorithms (may be nil)
 )
 // "t13d1516h2_8daaf6152771_e5627efa2ab1"
 
-// JA4H — HTTP request fingerprint
+// JA4H - HTTP request fingerprint
 fingerprint := ja4.ComputeJA4H(
     "GET",                    // method
     "HTTP/1.1",               // protocol version

@@ -18,7 +18,7 @@
 //   - Section b: hash of cipher suites (JA4) or header names (JA4H)
 //   - Section c: hash of extensions + signature algorithms (JA4) or cookie data (JA4H)
 //
-// # JA4 — TLS Client Fingerprint
+// # JA4 - TLS Client Fingerprint
 //
 // The [ComputeJA4] function produces a fingerprint from a TLS ClientHello:
 //
@@ -33,7 +33,7 @@
 //	  - 8daaf6152771: SHA-256 hash of sorted cipher suites (truncated to 12 hex chars)
 //	  - e5627efa2ab1: SHA-256 hash of sorted extensions + sig algorithms (truncated to 12 hex chars)
 //
-// # JA4H — HTTP Client Fingerprint
+// # JA4H - HTTP Client Fingerprint
 //
 // The [ComputeJA4H] function produces a fingerprint from HTTP request properties:
 //

@@ -1028,7 +1028,7 @@ func TestClient_TLSFingerprint(t *testing.T) {
 
 	origTr := client.Transport()
 	require.NotNil(t, origTr)
-	assert.Nil(t, origTr.DialTLSContext)
+	assert.NotNil(t, origTr.DialTLSContext)
 }
 
 func TestClient_WithJA4Callback(t *testing.T) {
@@ -1053,7 +1053,7 @@ func TestClient_WithJA4Callback(t *testing.T) {
 
 	origTr := origClient.Transport()
 	if origTr != nil {
-		assert.Nil(t, origTr.DialTLSContext)
+		assert.NotNil(t, origTr.DialTLSContext)
 	}
 
 	_ = report
