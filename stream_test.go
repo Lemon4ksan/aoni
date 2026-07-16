@@ -203,7 +203,7 @@ func TestMultiReadBody_FileCleanup(t *testing.T) {
 	data := strings.Repeat("x", 64*1024)
 
 	body := io.NopCloser(strings.NewReader(data))
-	mrb, err := newMultiReadBody(body, 32*1024)
+	mrb, err := newMultiReadBody(body, 32*1024, false)
 	require.NoError(t, err)
 
 	mrc := mrb.(*multiReadBody)
@@ -234,7 +234,7 @@ func TestFinalizerReadCloser_CallsReallyClose(t *testing.T) {
 	data := strings.Repeat("y", 64*1024)
 
 	body := io.NopCloser(strings.NewReader(data))
-	mrb, err := newMultiReadBody(body, 32*1024)
+	mrb, err := newMultiReadBody(body, 32*1024, false)
 	require.NoError(t, err)
 
 	mrc := mrb.(*multiReadBody)
@@ -255,7 +255,7 @@ func TestMultiReadBody_InMemory_NoTmpFile(t *testing.T) {
 
 	data := "small data"
 	body := io.NopCloser(strings.NewReader(data))
-	mrb, err := newMultiReadBody(body, 1024)
+	mrb, err := newMultiReadBody(body, 1024, false)
 	require.NoError(t, err)
 
 	mrc := mrb.(*multiReadBody)
@@ -377,7 +377,7 @@ func TestMultiReadBody_GC_FinalizerCleanup(t *testing.T) {
 
 	for range 5 {
 		body := io.NopCloser(strings.NewReader(data))
-		mrb, _ := newMultiReadBody(body, 32*1024)
+		mrb, _ := newMultiReadBody(body, 32*1024, false)
 		mrc := mrb.(*multiReadBody)
 
 		buf := make([]byte, 1024)

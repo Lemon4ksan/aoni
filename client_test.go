@@ -1417,6 +1417,16 @@ func TestClient_MultiReadBody(t *testing.T) {
 		_, err = os.Stat(tmpFileName)
 		assert.True(t, os.IsNotExist(err), "expected temp file to be deleted after Close()")
 	})
+
+	t.Run("disable_disk_fallback_above_threshold", func(t *testing.T) {
+		_, client := setupTestServer(t, func(w http.ResponseWriter, r *http.Request) {
+			_, _ = w.Write([]byte("long body exceeding threshold"))
+		})
+
+		client = client.WithMultiReadBody(10).WithMultiReadDisableDisk(true)
+		_, err := client.Request(t.Context(), http.MethodGet, "/")
+		assert.ErrorIs(t, err, ErrBufferLimitExceeded)
+	})
 }
 
 func TestWithQuery(t *testing.T) {

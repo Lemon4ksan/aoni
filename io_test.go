@@ -289,7 +289,7 @@ func TestMultiReadBody(t *testing.T) {
 		t.Parallel()
 
 		inner := io.NopCloser(strings.NewReader("under_threshold"))
-		m, err := newMultiReadBody(inner, 50)
+		m, err := newMultiReadBody(inner, 50, false)
 		require.NoError(t, err)
 
 		// Read first time
@@ -311,7 +311,7 @@ func TestMultiReadBody(t *testing.T) {
 		t.Parallel()
 
 		inner := io.NopCloser(strings.NewReader("above_threshold_large_content_stream"))
-		m, err := newMultiReadBody(inner, 10)
+		m, err := newMultiReadBody(inner, 10, false)
 		require.NoError(t, err)
 
 		// Read first time
@@ -333,7 +333,15 @@ func TestMultiReadBody(t *testing.T) {
 		t.Parallel()
 
 		errReader := &ioErrorReader{data: []byte("partial"), err: io.ErrUnexpectedEOF}
-		_, err := newMultiReadBody(errReader, 50)
+		_, err := newMultiReadBody(errReader, 50, false)
 		assert.ErrorIs(t, err, io.ErrUnexpectedEOF)
+	})
+
+	t.Run("disable_disk_cache_error", func(t *testing.T) {
+		t.Parallel()
+
+		inner := io.NopCloser(strings.NewReader("above_threshold_large_content_stream"))
+		_, err := newMultiReadBody(inner, 10, true)
+		assert.ErrorIs(t, err, ErrBufferLimitExceeded)
 	})
 }

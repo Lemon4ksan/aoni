@@ -67,6 +67,7 @@ type (
 	bodyErrorCtxKey            struct{}
 	happyEyeballsDelayCtxKey   struct{}
 	multiReadCtxKey            struct{}
+	multiReadDisableDiskCtxKey struct{}
 	ssrfGuardCtxKey            struct{}
 	fallbackCtxKey             struct{}
 	debugCtxKey                struct{}
@@ -211,18 +212,19 @@ type refererState struct {
 // Every With* method returns a new clone, so the original remains usable
 // by other goroutines. Use [NewClient] to create the first instance.
 type Client struct {
-	http               HTTPDoer
-	baseURL            *url.URL
-	headers            http.Header
-	baseResponse       func() BaseResponse
-	hedgingDelay       time.Duration
-	beforeRequest      []func(req *http.Request)
-	afterResponse      []func(resp *http.Response, err error)
-	maxResponseSize    int64
-	ssrfGuard          bool
-	happyEyeballsDelay time.Duration
-	multiReadThreshold int64
-	logger             Logger
+	http                 HTTPDoer
+	baseURL              *url.URL
+	headers              http.Header
+	baseResponse         func() BaseResponse
+	hedgingDelay         time.Duration
+	beforeRequest        []func(req *http.Request)
+	afterResponse        []func(resp *http.Response, err error)
+	maxResponseSize      int64
+	ssrfGuard            bool
+	happyEyeballsDelay   time.Duration
+	multiReadThreshold   int64
+	multiReadDisableDisk bool
+	logger               Logger
 
 	sourceRotator     *SourceIPRotator
 	dnsResolver       DNSResolver
@@ -298,39 +300,40 @@ func (c *Client) Clone() *Client {
 	}
 
 	cloned := &Client{
-		http:               c.http,
-		baseURL:            c.baseURL,
-		headers:            c.headers.Clone(),
-		baseResponse:       c.baseResponse,
-		hedgingDelay:       c.hedgingDelay,
-		beforeRequest:      beforeCopy,
-		afterResponse:      afterCopy,
-		maxResponseSize:    c.maxResponseSize,
-		ssrfGuard:          c.ssrfGuard,
-		happyEyeballsDelay: c.happyEyeballsDelay,
-		multiReadThreshold: c.multiReadThreshold,
-		logger:             c.logger,
-		sourceRotator:      c.sourceRotator,
-		dnsResolver:        c.dnsResolver,
-		defaultMods:        defaultModsCopy,
-		headersCookieJar:   c.headersCookieJar,
-		ja4Callback:        c.ja4Callback,
-		tlsBrowserID:       c.tlsBrowserID,
-		tlsClientHelloID:   c.tlsClientHelloID,
-		headerOrder:        c.headerOrder,
-		challengeSolver:    c.challengeSolver,
-		challengeDetector:  c.challengeDetector,
-		inspector:          c.inspector,
-		h2Settings:         c.h2Settings,
-		h3Settings:         c.h3Settings,
-		refererAutomaton:   c.refererAutomaton,
-		refererState:       c.refererState,
-		proxyDNS:           c.proxyDNS,
-		proxyAddr:          c.proxyAddr,
-		sessionCache:       c.sessionCache,
-		transportProxy:     c.transportProxy,
-		tcpDelay:           c.tcpDelay,
-		globalValidator:    c.globalValidator,
+		http:                 c.http,
+		baseURL:              c.baseURL,
+		headers:              c.headers.Clone(),
+		baseResponse:         c.baseResponse,
+		hedgingDelay:         c.hedgingDelay,
+		beforeRequest:        beforeCopy,
+		afterResponse:        afterCopy,
+		maxResponseSize:      c.maxResponseSize,
+		ssrfGuard:            c.ssrfGuard,
+		happyEyeballsDelay:   c.happyEyeballsDelay,
+		multiReadThreshold:   c.multiReadThreshold,
+		multiReadDisableDisk: c.multiReadDisableDisk,
+		logger:               c.logger,
+		sourceRotator:        c.sourceRotator,
+		dnsResolver:          c.dnsResolver,
+		defaultMods:          defaultModsCopy,
+		headersCookieJar:     c.headersCookieJar,
+		ja4Callback:          c.ja4Callback,
+		tlsBrowserID:         c.tlsBrowserID,
+		tlsClientHelloID:     c.tlsClientHelloID,
+		headerOrder:          c.headerOrder,
+		challengeSolver:      c.challengeSolver,
+		challengeDetector:    c.challengeDetector,
+		inspector:            c.inspector,
+		h2Settings:           c.h2Settings,
+		h3Settings:           c.h3Settings,
+		refererAutomaton:     c.refererAutomaton,
+		refererState:         c.refererState,
+		proxyDNS:             c.proxyDNS,
+		proxyAddr:            c.proxyAddr,
+		sessionCache:         c.sessionCache,
+		transportProxy:       c.transportProxy,
+		tcpDelay:             c.tcpDelay,
+		globalValidator:      c.globalValidator,
 	}
 
 	// Clone http.Client and its transport to avoid race conditions.
@@ -811,10 +814,19 @@ func (c *Client) Request(
 		}
 
 		if multiReadThreshold > 0 {
-			mBody, err := newMultiReadBody(resp.Body, multiReadThreshold)
-			if err == nil {
-				resp.Body = mBody
+			var disableDisk bool
+			if val := req.Context().Value(multiReadDisableDiskCtxKey{}); val != nil {
+				disableDisk = val.(bool)
+			} else {
+				disableDisk = c.multiReadDisableDisk
 			}
+
+			mBody, err := newMultiReadBody(resp.Body, multiReadThreshold, disableDisk)
+			if err != nil {
+				_ = resp.Body.Close()
+				return nil, err
+			}
+			resp.Body = mBody
 		}
 
 		// Prevent socket leaks via finalizer.
@@ -876,6 +888,16 @@ func (c *Client) WithModifiers(mods ...RequestModifier) *Client {
 func WithMultiReadBody(threshold int64) RequestModifier {
 	return func(req *http.Request) {
 		ctx := context.WithValue(req.Context(), multiReadCtxKey{}, threshold)
+		*req = *req.WithContext(ctx)
+	}
+}
+
+// WithMultiReadDisableDisk returns a [RequestModifier] that overrides the
+// body caching disk-fallback setting for a single request. If disable is true,
+// caching beyond the threshold will fail with [ErrBufferLimitExceeded] instead of falling back to disk.
+func WithMultiReadDisableDisk(disable bool) RequestModifier {
+	return func(req *http.Request) {
+		ctx := context.WithValue(req.Context(), multiReadDisableDiskCtxKey{}, disable)
 		*req = *req.WithContext(ctx)
 	}
 }
@@ -1146,12 +1168,18 @@ func (c *Client) WithHappyEyeballs(delay time.Duration) *Client {
 	return newClient
 }
 
-// WithMultiReadBody returns a clone of c that caches response bodies
-// smaller than threshold bytes so they can be re-read. A value <= 0
-// disables caching.
 func (c *Client) WithMultiReadBody(threshold int64) *Client {
 	newClient := c.Clone()
 	newClient.multiReadThreshold = threshold
+	return newClient
+}
+
+// WithMultiReadDisableDisk returns a clone of c that configures whether
+// caching beyond the threshold is allowed to fallback to disk. If true,
+// exceeding the memory threshold returns an error ([ErrBufferLimitExceeded]) instead of creating temporary files.
+func (c *Client) WithMultiReadDisableDisk(disable bool) *Client {
+	newClient := c.Clone()
+	newClient.multiReadDisableDisk = disable
 	return newClient
 }
 
@@ -1618,7 +1646,7 @@ func (c *Client) applyDialers() {
 
 		transport.DialContext = func(ctx context.Context, network, addr string) (net.Conn, error) {
 			// If no per-request delay is set, fall back to the client-level default.
-			if _, ok := GetTCPDelay(ctx); !ok && c.tcpDelay != nil {
+			if _, ok := GetTCPDelay(ctx).Value(); !ok && c.tcpDelay != nil {
 				ctx = context.WithValue(ctx, tcpDelayCtxKey{}, *c.tcpDelay)
 			}
 
@@ -1700,7 +1728,7 @@ func (c *Client) applyDialers() {
 // It is the single source of truth for proxy resolution inside the client and
 // is used by [ProxyFuncWithOverride] to configure [http.Transport.Proxy].
 func (c *Client) determineProxy(req *http.Request) (*url.URL, error) {
-	if raw, ok := GetProxyOverride(req.Context()); ok && raw != "" {
+	if raw, ok := GetProxyOverride(req.Context()).Value(); ok && raw != "" {
 		return url.Parse(raw)
 	}
 
@@ -1748,7 +1776,7 @@ func dialTLSWithUTLS(
 	}
 
 	// Check for a per-request proxy override (WithProxyOverride).
-	if raw, ok := GetProxyOverride(ctx); ok && raw != "" {
+	if raw, ok := GetProxyOverride(ctx).Value(); ok && raw != "" {
 		if parsed, parseErr := url.Parse(raw); parseErr == nil {
 			proxyURL = parsed
 		}

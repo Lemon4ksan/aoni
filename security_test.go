@@ -303,7 +303,7 @@ func TestMultiReadBody_DoubleCloseIdempotency(t *testing.T) {
 	t.Parallel()
 
 	rc := io.NopCloser(strings.NewReader("payload to write onto temp file in disk storage"))
-	mBody, err := newMultiReadBody(rc, 5)
+	mBody, err := newMultiReadBody(rc, 5, false)
 	require.NoError(t, err)
 
 	underlying, ok := mBody.(*multiReadBody)

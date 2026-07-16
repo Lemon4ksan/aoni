@@ -291,7 +291,7 @@ type multiReadBody struct {
 	closed  bool
 }
 
-func newMultiReadBody(rc io.ReadCloser, threshold int64) (io.ReadCloser, error) {
+func newMultiReadBody(rc io.ReadCloser, threshold int64, disableDisk bool) (io.ReadCloser, error) {
 	var buf bytes.Buffer
 
 	limitReader := io.LimitReader(rc, threshold+1)
@@ -309,6 +309,10 @@ func newMultiReadBody(rc io.ReadCloser, threshold int64) (io.ReadCloser, error) 
 		m.data = buf.Bytes()
 		m.reader = bytes.NewReader(m.data)
 	} else {
+		if disableDisk {
+			_ = rc.Close()
+			return nil, ErrBufferLimitExceeded
+		}
 		tmpFile, err := os.CreateTemp("", "aoni-multiread-*")
 		if err != nil {
 			_ = rc.Close()
@@ -369,8 +373,14 @@ func (m *multiReadBody) Close() error {
 }
 
 // ReallyClose performs the actual resource teardown: it closes and removes
-// any temporary file. It is called by closeResponse (and the GC finalizer)
-// after the body is no longer needed.
+// any underlying temporary file from disk.
+//
+// # Preconditions
+//
+// Once ReallyClose is called, the multiReadBody becomes completely unusable
+// and cannot be reset or read again. This method must only be called when
+// the response is no longer needed (e.g., inside closeResponse or via
+// the garbage collector finalizer).
 func (m *multiReadBody) ReallyClose() {
 	m.mu.Lock()
 	defer m.mu.Unlock()

@@ -28,6 +28,10 @@ var (
 	// limit configured via [Client.WithMaxResponseSize].
 	ErrResponseTooLarge = errors.New("aoni: response size limit exceeded")
 
+	// ErrBufferLimitExceeded indicates the replayable buffer exceeded its memory threshold,
+	// and disk caching was disabled.
+	ErrBufferLimitExceeded = errors.New("aoni: replayable buffer threshold exceeded")
+
 	// ErrSSRFBlocked indicates the request was blocked because the
 	// target resolved to a private or loopback address. Returned by
 	// [Client.Request] when [Client.WithSSRFGuard] is enabled.
