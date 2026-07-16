@@ -7,6 +7,7 @@ package aoni
 import (
 	"bytes"
 	"context"
+	"crypto/tls"
 	"encoding/binary"
 	"encoding/json"
 	"fmt"
@@ -298,7 +299,29 @@ func NewH2FramedTransport(base *http.Transport, settings HTTP2Settings, orderedK
 			if prevDialTLS != nil {
 				conn, err = prevDialTLS(ctx, network, addr)
 			} else {
-				conn, err = (&net.Dialer{}).DialContext(ctx, network, addr)
+				// No custom TLS dialer — perform a standard TLS handshake so that
+				// http2.ConfigureTransports receives a TLS-negotiated connection.
+				tlsCfg := base.TLSClientConfig
+				if tlsCfg == nil {
+					tlsCfg = &tls.Config{}
+				}
+
+				host, _, _ := net.SplitHostPort(addr)
+
+				cfg := tlsCfg.Clone()
+				if cfg.ServerName == "" {
+					cfg.ServerName = host
+				}
+
+				if len(cfg.NextProtos) == 0 {
+					cfg.NextProtos = []string{"h2", "http/1.1"}
+				}
+
+				d := &tls.Dialer{
+					NetDialer: &net.Dialer{},
+					Config:    cfg,
+				}
+				conn, err = d.DialContext(ctx, network, addr)
 			}
 
 			if err != nil {

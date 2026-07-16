@@ -32,6 +32,7 @@ import (
 	"github.com/klauspost/compress/zstd"
 	"github.com/lemon4ksan/miyako/generic"
 	utls "github.com/refraction-networking/utls"
+	"golang.org/x/net/http2"
 	"golang.org/x/text/encoding/htmlindex"
 	"golang.org/x/text/transform"
 
@@ -39,6 +40,26 @@ import (
 	"github.com/lemon4ksan/aoni/p0f"
 	"github.com/lemon4ksan/aoni/profiles"
 )
+
+// ClientHelloSpecProvider defines an interface that returns a uTLS ClientHelloSpec.
+// Implementing this interface allows developers to feed custom/dynamic TLS fingerprints
+// directly to the client at runtime.
+type ClientHelloSpecProvider interface {
+	ClientHelloSpec() (*utls.ClientHelloSpec, error)
+}
+
+// SocketController defines a hook callback interface to directly intercept and configure
+// TCP sockets (file descriptors) at the dial phase before the SYN packet is sent.
+type SocketController interface {
+	Control(fd uintptr, network, address string) error
+}
+
+// HTTP2Configurer defines an interface to customize the golang.org/x/net/http2.Transport instance.
+// This allows advanced developers to adjust HPACK dynamic table size, enable/disable compression,
+// or customize the encoder settings without modifying the core library.
+type HTTP2Configurer interface {
+	ConfigureHTTP2(t *http2.Transport) error
+}
 
 // DefaultUserAgent is the default User-Agent string used for HTTP requests.
 const DefaultUserAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
@@ -58,29 +79,31 @@ var (
 )
 
 type (
-	capturerCtxKey             struct{}
-	decoderCtxKey              struct{}
-	errorModelCtxKey           struct{}
-	downloadProgressCtxKey     struct{}
-	hedgingCtxKey              struct{}
-	queryErrorCtxKey           struct{}
-	bodyErrorCtxKey            struct{}
-	happyEyeballsDelayCtxKey   struct{}
-	multiReadCtxKey            struct{}
-	multiReadDisableDiskCtxKey struct{}
-	ssrfGuardCtxKey            struct{}
-	fallbackCtxKey             struct{}
-	debugCtxKey                struct{}
-	orderedHeadersCtxKey       struct{}
-	ja4ReportCtxKey            struct{}
-	ja4CallbackCtxKey          struct{}
-	alpnOverrideCtxKey         struct{}
-	p0fSignatureCtxKey         struct{}
-	proxyDNSCtxKey             struct{}
-	proxyAddrCtxKey            struct{}
-	sessionCacheCtxKey         struct{}
-	packetPaddingCtxKey        struct{}
-	requestTimeoutCancelCtxKey struct{}
+	capturerCtxKey                struct{}
+	decoderCtxKey                 struct{}
+	errorModelCtxKey              struct{}
+	downloadProgressCtxKey        struct{}
+	hedgingCtxKey                 struct{}
+	queryErrorCtxKey              struct{}
+	bodyErrorCtxKey               struct{}
+	happyEyeballsDelayCtxKey      struct{}
+	multiReadCtxKey               struct{}
+	multiReadDisableDiskCtxKey    struct{}
+	ssrfGuardCtxKey               struct{}
+	fallbackCtxKey                struct{}
+	debugCtxKey                   struct{}
+	orderedHeadersCtxKey          struct{}
+	ja4ReportCtxKey               struct{}
+	ja4CallbackCtxKey             struct{}
+	alpnOverrideCtxKey            struct{}
+	p0fSignatureCtxKey            struct{}
+	proxyDNSCtxKey                struct{}
+	proxyAddrCtxKey               struct{}
+	sessionCacheCtxKey            struct{}
+	packetPaddingCtxKey           struct{}
+	requestTimeoutCancelCtxKey    struct{}
+	socketControllerCtxKey        struct{}
+	clientHelloSpecProviderCtxKey struct{}
 )
 
 // DefaultSensitiveHeaders lists headers removed from requests during
@@ -226,30 +249,33 @@ type Client struct {
 	multiReadDisableDisk bool
 	logger               Logger
 
-	sourceRotator     *SourceIPRotator
-	dnsResolver       DNSResolver
-	defaultMods       []RequestModifier
-	headersCookieJar  http.CookieJar
-	ja4Callback       func(ja4.Report)
-	tlsBrowserID      BrowserID
-	tlsClientHelloID  *utls.ClientHelloID
-	headerOrder       []string
-	challengeSolver   ChallengeSolver
-	challengeDetector ChallengeDetector
-	inspector         *TrafficInspector
-	fragmentConfig    *FragmentConfig
-	hostRewrite       *HostRewriteConfig
-	p0fSignature      *p0f.Signature
-	h2Settings        *HTTP2Settings
-	h3Settings        *HTTP3Settings
-	refererAutomaton  bool
-	refererState      *refererState
-	proxyDNS          bool
-	proxyAddr         *url.URL
-	dynamicHedging    *DynamicHedgingConfig
-	sessionCache      *ProxyAwareSessionCache
-	packetPadding     *PaddingConfig
-	transportProxy    func(*http.Request) (*url.URL, error)
+	sourceRotator              *SourceIPRotator
+	dnsResolver                DNSResolver
+	defaultMods                []RequestModifier
+	headersCookieJar           http.CookieJar
+	ja4Callback                func(ja4.Report)
+	tlsBrowserID               BrowserID
+	tlsClientHelloID           *utls.ClientHelloID
+	tlsClientHelloSpecProvider ClientHelloSpecProvider
+	socketController           SocketController
+	h2Configurer               HTTP2Configurer
+	headerOrder                []string
+	challengeSolver            ChallengeSolver
+	challengeDetector          ChallengeDetector
+	inspector                  *TrafficInspector
+	fragmentConfig             *FragmentConfig
+	hostRewrite                *HostRewriteConfig
+	p0fSignature               *p0f.Signature
+	h2Settings                 *HTTP2Settings
+	h3Settings                 *HTTP3Settings
+	refererAutomaton           bool
+	refererState               *refererState
+	proxyDNS                   bool
+	proxyAddr                  *url.URL
+	dynamicHedging             *DynamicHedgingConfig
+	sessionCache               *ProxyAwareSessionCache
+	packetPadding              *PaddingConfig
+	transportProxy             func(*http.Request) (*url.URL, error)
 
 	// Per-client defaults for settings that can also be overridden per-request.
 	tcpDelay        *TCPDelayRange             // set by WithTCPDelay
@@ -300,40 +326,43 @@ func (c *Client) Clone() *Client {
 	}
 
 	cloned := &Client{
-		http:                 c.http,
-		baseURL:              c.baseURL,
-		headers:              c.headers.Clone(),
-		baseResponse:         c.baseResponse,
-		hedgingDelay:         c.hedgingDelay,
-		beforeRequest:        beforeCopy,
-		afterResponse:        afterCopy,
-		maxResponseSize:      c.maxResponseSize,
-		ssrfGuard:            c.ssrfGuard,
-		happyEyeballsDelay:   c.happyEyeballsDelay,
-		multiReadThreshold:   c.multiReadThreshold,
-		multiReadDisableDisk: c.multiReadDisableDisk,
-		logger:               c.logger,
-		sourceRotator:        c.sourceRotator,
-		dnsResolver:          c.dnsResolver,
-		defaultMods:          defaultModsCopy,
-		headersCookieJar:     c.headersCookieJar,
-		ja4Callback:          c.ja4Callback,
-		tlsBrowserID:         c.tlsBrowserID,
-		tlsClientHelloID:     c.tlsClientHelloID,
-		headerOrder:          c.headerOrder,
-		challengeSolver:      c.challengeSolver,
-		challengeDetector:    c.challengeDetector,
-		inspector:            c.inspector,
-		h2Settings:           c.h2Settings,
-		h3Settings:           c.h3Settings,
-		refererAutomaton:     c.refererAutomaton,
-		refererState:         c.refererState,
-		proxyDNS:             c.proxyDNS,
-		proxyAddr:            c.proxyAddr,
-		sessionCache:         c.sessionCache,
-		transportProxy:       c.transportProxy,
-		tcpDelay:             c.tcpDelay,
-		globalValidator:      c.globalValidator,
+		http:                       c.http,
+		baseURL:                    c.baseURL,
+		headers:                    c.headers.Clone(),
+		baseResponse:               c.baseResponse,
+		hedgingDelay:               c.hedgingDelay,
+		beforeRequest:              beforeCopy,
+		afterResponse:              afterCopy,
+		maxResponseSize:            c.maxResponseSize,
+		ssrfGuard:                  c.ssrfGuard,
+		happyEyeballsDelay:         c.happyEyeballsDelay,
+		multiReadThreshold:         c.multiReadThreshold,
+		multiReadDisableDisk:       c.multiReadDisableDisk,
+		logger:                     c.logger,
+		sourceRotator:              c.sourceRotator,
+		dnsResolver:                c.dnsResolver,
+		defaultMods:                defaultModsCopy,
+		headersCookieJar:           c.headersCookieJar,
+		ja4Callback:                c.ja4Callback,
+		tlsBrowserID:               c.tlsBrowserID,
+		tlsClientHelloID:           c.tlsClientHelloID,
+		tlsClientHelloSpecProvider: c.tlsClientHelloSpecProvider,
+		socketController:           c.socketController,
+		h2Configurer:               c.h2Configurer,
+		headerOrder:                c.headerOrder,
+		challengeSolver:            c.challengeSolver,
+		challengeDetector:          c.challengeDetector,
+		inspector:                  c.inspector,
+		h2Settings:                 c.h2Settings,
+		h3Settings:                 c.h3Settings,
+		refererAutomaton:           c.refererAutomaton,
+		refererState:               c.refererState,
+		proxyDNS:                   c.proxyDNS,
+		proxyAddr:                  c.proxyAddr,
+		sessionCache:               c.sessionCache,
+		transportProxy:             c.transportProxy,
+		tcpDelay:                   c.tcpDelay,
+		globalValidator:            c.globalValidator,
 	}
 
 	// Clone http.Client and its transport to avoid race conditions.
@@ -826,6 +855,7 @@ func (c *Client) Request(
 				_ = resp.Body.Close()
 				return nil, err
 			}
+
 			resp.Body = mBody
 		}
 
@@ -1168,6 +1198,7 @@ func (c *Client) WithHappyEyeballs(delay time.Duration) *Client {
 	return newClient
 }
 
+// WithMultiReadBody returns a clone of c that configures multiReadThreshold.
 func (c *Client) WithMultiReadBody(threshold int64) *Client {
 	newClient := c.Clone()
 	newClient.multiReadThreshold = threshold
@@ -1335,11 +1366,53 @@ func (c *Client) WithTLSFingerprint(browser BrowserID) *Client {
 				proxyURL, _ = proxyFn(&http.Request{URL: &url.URL{Host: addr}})
 			}
 
+			if newClient.tlsClientHelloSpecProvider != nil {
+				ctx = context.WithValue(ctx, clientHelloSpecProviderCtxKey{}, newClient.tlsClientHelloSpecProvider)
+			}
+
 			return dialTLSWithUTLS(
 				ctx,
 				network,
 				addr,
 				browser,
+				newClient.tlsClientHelloID,
+				newClient.sourceRotator,
+				newClient.dnsResolver,
+				callback,
+				tlsConfig,
+				proxyURL,
+			)
+		}
+	}
+
+	return newClient
+}
+
+// WithTLSClientHelloSpecProvider returns a clone of c that uses the provider
+// to dynamically obtain a uTLS ClientHelloSpec for TLS Handshakes.
+func (c *Client) WithTLSClientHelloSpecProvider(provider ClientHelloSpecProvider) *Client {
+	newClient := c.Clone()
+	newClient.tlsClientHelloSpecProvider = provider
+
+	if transport := newClient.Transport(); transport != nil {
+		callback := newClient.ja4Callback
+		tlsConfig := transport.TLSClientConfig
+		proxyFn := transport.Proxy
+		transport.DialTLSContext = func(ctx context.Context, network, addr string) (net.Conn, error) {
+			var proxyURL *url.URL
+			if proxyFn != nil {
+				proxyURL, _ = proxyFn(&http.Request{URL: &url.URL{Host: addr}})
+			}
+
+			if newClient.tlsClientHelloSpecProvider != nil {
+				ctx = context.WithValue(ctx, clientHelloSpecProviderCtxKey{}, newClient.tlsClientHelloSpecProvider)
+			}
+
+			return dialTLSWithUTLS(
+				ctx,
+				network,
+				addr,
+				newClient.tlsBrowserID,
 				newClient.tlsClientHelloID,
 				newClient.sourceRotator,
 				newClient.dnsResolver,
@@ -1437,6 +1510,14 @@ func (c *Client) WithH2FramedTransport(settings HTTP2Settings) *Client {
 	newClient.h2Settings = &settings
 
 	if transport := newClient.Transport(); transport != nil {
+		if newClient.h2Configurer != nil {
+			t2, err := http2.ConfigureTransports(transport)
+			if err == nil && t2 != nil {
+				t2.TLSClientConfig = transport.TLSClientConfig
+				_ = newClient.h2Configurer.ConfigureHTTP2(t2)
+			}
+		}
+
 		framed := NewH2FramedTransport(transport, settings)
 		if httpClient, ok := newClient.http.(*http.Client); ok {
 			httpClient.Transport = framed
@@ -1461,6 +1542,33 @@ func (c *Client) WithProfileH2Settings(s profiles.H2Settings) *Client {
 func (c *Client) WithP0fSignature(sig *p0f.Signature) *Client {
 	newClient := c.Clone()
 	newClient.p0fSignature = sig
+	return newClient
+}
+
+// WithSocketController returns a clone of c that applies the socket controller's
+// Control hook to every newly created TCP socket before the connection is established.
+func (c *Client) WithSocketController(controller SocketController) *Client {
+	newClient := c.Clone()
+	newClient.socketController = controller
+	newClient.applyDialers()
+
+	return newClient
+}
+
+// WithHTTP2Configurer returns a clone of c configured with the provided HTTP2Configurer callback.
+// This allows customizing the underlying HTTP/2 transport (e.g. disabling HPACK dynamic tables, etc.).
+func (c *Client) WithHTTP2Configurer(configurer HTTP2Configurer) *Client {
+	newClient := c.Clone()
+	newClient.h2Configurer = configurer
+
+	// Re-apply dialers (which configures HTTP/2 transport if transport is present)
+	newClient.applyDialers()
+
+	// If h2Settings is already configured, re-apply H2 transport to ensure configurer runs
+	if newClient.h2Settings != nil {
+		newClient = newClient.WithH2FramedTransport(*newClient.h2Settings)
+	}
+
 	return newClient
 }
 
@@ -1622,8 +1730,23 @@ func (c *Client) Transport() *http.Transport {
 			}
 		}
 
-		if transport, ok := httpClient.Transport.(*http.Transport); ok {
-			return transport
+		curr := httpClient.Transport
+		for curr != nil {
+			if transport, ok := curr.(*http.Transport); ok {
+				return transport
+			}
+
+			if ft, ok := curr.(*H2FramedTransport); ok {
+				curr = ft.Transport
+				continue
+			}
+
+			if cj, ok := curr.(*cookieJarTransport); ok {
+				curr = cj.next
+				continue
+			}
+
+			break
 		}
 	}
 
@@ -1640,6 +1763,14 @@ func (c *Client) CloseIdleConnections() {
 
 func (c *Client) applyDialers() {
 	if transport := c.Transport(); transport != nil {
+		if c.h2Configurer != nil {
+			t2, err := http2.ConfigureTransports(transport)
+			if err == nil && t2 != nil {
+				t2.TLSClientConfig = transport.TLSClientConfig
+				_ = c.h2Configurer.ConfigureHTTP2(t2)
+			}
+		}
+
 		// Use determineProxy so that per-request → client-level → env priority
 		// is respected consistently, including the http.ProxyFromEnvironment fallback.
 		transport.Proxy = c.determineProxy
@@ -1648,6 +1779,10 @@ func (c *Client) applyDialers() {
 			// If no per-request delay is set, fall back to the client-level default.
 			if _, ok := GetTCPDelay(ctx).Value(); !ok && c.tcpDelay != nil {
 				ctx = context.WithValue(ctx, tcpDelayCtxKey{}, *c.tcpDelay)
+			}
+
+			if c.socketController != nil {
+				ctx = context.WithValue(ctx, socketControllerCtxKey{}, c.socketController)
 			}
 
 			if err := ApplyTCPDelay(ctx); err != nil {
@@ -1674,6 +1809,10 @@ func (c *Client) applyDialers() {
 				// Honour WithTCPDelay before opening the TCP connection.
 				if err := ApplyTCPDelay(ctx); err != nil {
 					return nil, err
+				}
+
+				if c.socketController != nil {
+					ctx = context.WithValue(ctx, socketControllerCtxKey{}, c.socketController)
 				}
 
 				host, _, _ := net.SplitHostPort(addr)
@@ -1842,7 +1981,28 @@ func dialTLSWithUTLS(
 		uConfig.NextProtos = alpn
 	}
 
-	uConn := utls.UClient(conn, uConfig, spec)
+	var customSpec *utls.ClientHelloSpec
+	if provider, ok := ctx.Value(clientHelloSpecProviderCtxKey{}).(ClientHelloSpecProvider); ok && provider != nil {
+		var err error
+
+		customSpec, err = provider.ClientHelloSpec()
+		if err != nil {
+			_ = conn.Close()
+			return nil, fmt.Errorf("aoni tls: failed to get custom client hello spec: %w", err)
+		}
+	}
+
+	var uConn *utls.UConn
+	if customSpec != nil {
+		uConn = utls.UClient(conn, uConfig, utls.HelloCustom)
+		if err := uConn.ApplyPreset(customSpec); err != nil {
+			_ = conn.Close()
+			return nil, fmt.Errorf("aoni tls: failed to apply custom client hello spec: %w", err)
+		}
+	} else {
+		uConn = utls.UClient(conn, uConfig, spec)
+	}
+
 	if err := uConn.BuildHandshakeState(); err != nil {
 		_ = conn.Close()
 		return nil, err
@@ -2183,6 +2343,42 @@ func wrapConn(ctx context.Context, conn net.Conn) net.Conn {
 	return conn
 }
 
+func makeDialerControl(ctx context.Context) func(network, address string, rc syscall.RawConn) error {
+	var spoofer *p0f.Spoofer
+	if cfg, ok := ctx.Value(p0fSignatureCtxKey{}).(*p0f.Signature); ok && cfg != nil {
+		spoofer = p0f.NewSpoofer(cfg)
+	}
+
+	controller, _ := ctx.Value(socketControllerCtxKey{}).(SocketController)
+
+	if spoofer == nil && controller == nil {
+		return nil
+	}
+
+	return func(network, address string, rc syscall.RawConn) error {
+		if controller != nil {
+			var controlErr error
+
+			err := rc.Control(func(fd uintptr) {
+				controlErr = controller.Control(fd, network, address)
+			})
+			if err != nil {
+				return err
+			}
+
+			if controlErr != nil {
+				return controlErr
+			}
+		}
+
+		if spoofer != nil {
+			return spoofer.ApplyToRawConn(rc)
+		}
+
+		return nil
+	}
+}
+
 func happyEyeballsDial(
 	ctx context.Context,
 	network, addr string,
@@ -2245,13 +2441,7 @@ func happyEyeballsDial(
 			dialer.LocalAddr = &net.TCPAddr{IP: rotator.Next()}
 		}
 
-		// Apply p0f spoofing BEFORE the SYN packet is sent, via Dialer.Control.
-		if cfg, ok := ctx.Value(p0fSignatureCtxKey{}).(*p0f.Signature); ok && cfg != nil {
-			spoofer := p0f.NewSpoofer(cfg)
-			dialer.Control = func(network, address string, c syscall.RawConn) error {
-				return spoofer.ApplyToRawConn(c)
-			}
-		}
+		dialer.Control = makeDialerControl(ctx)
 
 		conn, err := dialer.DialContext(ctx, network, net.JoinHostPort(filtered[0].String(), port))
 		if err != nil {
@@ -2295,14 +2485,7 @@ func happyEyeballsDial(
 			}
 
 			dialer := &net.Dialer{Timeout: 30 * time.Second}
-
-			// Apply p0f spoofing BEFORE the SYN packet, via Dialer.Control.
-			if cfg, ok := dialCtx.Value(p0fSignatureCtxKey{}).(*p0f.Signature); ok && cfg != nil {
-				spoofer := p0f.NewSpoofer(cfg)
-				dialer.Control = func(network, address string, c syscall.RawConn) error {
-					return spoofer.ApplyToRawConn(c)
-				}
-			}
+			dialer.Control = makeDialerControl(dialCtx)
 
 			conn, err := dialer.DialContext(dialCtx, network, net.JoinHostPort(targetIP.String(), port))
 			if err == nil {
