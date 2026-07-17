@@ -23,9 +23,10 @@
 //
 // # Core Types
 //
-//   - [Client] is the central immutable HTTP client. Every configuration call
-//     ([Client.WithBaseURL], [Client.WithTimeout], etc.) returns a new clone,
-//     keeping the original safe for concurrent use.
+//   - [Client] is the central immutable HTTP client. Configuration is done via
+//     functional options passed to [NewClient] (e.g. [WithClientBaseURL],
+//     [WithClientTimeout]). Per-request overrides are applied via
+//     [RequestModifier] values (e.g. [WithHeader], [WithQuery]).
 //   - [LoadBalancer] distributes requests across multiple [Client] instances
 //     with health checking and automatic failover.
 //   - [ProxyRotator] manages a pool of proxy clients with sticky sessions,
@@ -35,23 +36,35 @@
 //   - [ProxyIsolatedCookieJar] stores cookies separately per proxy URL to
 //     prevent session leakage across different exit nodes.
 //
+// # Subpackages
+//
+//   - [github.com/lemon4ksan/aoni/ws] - WebSocket dialing over uTLS and
+//     HTTP/2 Extended CONNECT ([RFC 8441]).
+//   - [github.com/lemon4ksan/aoni/socketio] - Socket.IO v5 / Engine.IO v4
+//     client with automatic reconnection and namespace multiplexing.
+//   - [github.com/lemon4ksan/aoni/inspector] - Traffic inspector for
+//     capturing and replaying HTTP exchanges.
+//   - [github.com/lemon4ksan/aoni/ja4] - Pure-Go JA4/JA4H fingerprint
+//     computation.
+//   - [github.com/lemon4ksan/aoni/p0f] - TCP/IP stack fingerprint signatures.
+//
 // # Fingerprint Evasion
 //
 // aoni can make outbound connections appear as specific browsers:
 //
-//   - [Client.WithTLSFingerprint] selects a uTLS ClientHello profile
+//   - [WithClientTLSFingerprint] selects a uTLS ClientHello profile
 //     (Chrome, Firefox, Safari) for JA3/JA4 matching.
-//   - [Client.WithP0fSignature] sets TTL, Don't Fragment, and TCP window
+//   - [WithClientP0fSignature] sets TTL, Don't Fragment, and TCP window
 //     size to mimic an OS-level network stack.
-//   - [Client.WithOrderedHeaders] controls the HTTP/1.1 header serialization
-//     order. For HTTP/2, [H2FramedTransport] reorders HPACK-encoded
-//     HEADERS frames.
-//   - [Client.WithH2FramedTransport] injects browser-specific SETTINGS and
+//   - [WithClientModifiers] combined with [WithOrderedHeaders] controls the
+//     HTTP/1.1 header serialization order. For HTTP/2, [H2FramedTransport]
+//     reorders HPACK-encoded HEADERS frames.
+//   - [WithClientH2FramedTransport] injects browser-specific SETTINGS and
 //     PRIORITY frames into the HTTP/2 connection preface.
 //
 // # Resilience
 //
-//   - Hedging ([Client.WithHedging]) sends a second request after a delay
+//   - Hedging ([WithHedging]) sends a second request after a delay
 //     if the first has not completed, cutting tail latency.
 //   - [AdaptiveLimiter] dynamically adjusts concurrency based on observed
 //     RTT, similar to the Vegas TCP congestion algorithm.
@@ -62,16 +75,17 @@
 //
 // # Network Protocols
 //
-//   - HTTP/3 over QUIC via [Client.WithHTTP3].
+//   - HTTP/3 over QUIC via [WithClientHTTP3].
 //   - DNS-over-HTTPS ([DoHResolver]) and DNS-over-TLS ([DoTResolver])
 //     bypass local ISP DNS interception.
-//   - WebSocket via uTLS with HTTP/2 Extended CONNECT ([RFC 8441]).
+//   - WebSocket via uTLS with HTTP/2 Extended CONNECT: see [github.com/lemon4ksan/aoni/ws].
 //
 // # Basic Usage
 //
-//	client := aoni.NewClient(nil).
-//		WithBaseURL("https://api.example.com").
-//		WithTimeout(10 * time.Second)
+//	client := aoni.NewClient(nil,
+//		aoni.WithClientBaseURL("https://api.example.com"),
+//		aoni.WithClientTimeout(10*time.Second),
+//	)
 //
 //	// 1. Get structured data with generics:
 //	user, err := aoni.GetTo[User](ctx, client, "/users/123")

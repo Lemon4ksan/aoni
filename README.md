@@ -96,7 +96,11 @@ for i := 0; i < 3; i++ {
 
 ```go
 // ❄️ Clean, immutable, pipeline-driven flow
-client := aoni.NewClient(transportChain)
+client := aoni.NewClient(nil,
+    aoni.WithClientBaseURL("https://api.example.com"),
+    aoni.WithClientTimeout(15*time.Second),
+    aoni.WithClientTLSFingerprint(aoni.BrowserChrome),
+)
 
 // 1. Get structured JSON automatically
 user, err := aoni.GetTo[User](ctx, client, "/users/{id}",
@@ -117,17 +121,18 @@ resp, err := client.Get(ctx, "/raw-data")
 `aoni` uses a modular pipeline architecture. The client's core request execution is composed of 12 decoupled, standard Go middlewares wrapped around the raw HTTP engine. 
 
 ### Custom Pipeline Wrapper
-You can customize, reorder, or completely replace the default middleware chain using `WithPipelineWrapper`:
+You can customize, reorder, or completely replace the default middleware chain using `WithClientPipelineWrapper`:
 
 ```go
-client := aoni.NewClient(nil).
-	WithPipelineWrapper(func(c *aoni.Client, engine aoni.HTTPDoer) aoni.HTTPDoer {
+client := aoni.NewClient(nil,
+	aoni.WithClientPipelineWrapper(func(c *aoni.Client, engine aoni.HTTPDoer) aoni.HTTPDoer {
 		// Build your own custom pipeline, injecting custom logic or reordering stages
 		return aoni.Chain(engine,
 			aoni.InspectorMiddleware(c.Inspector()),
 			aoni.ResponseValidationMiddleware(),
 		)
-	})
+	}),
+)
 ```
 
 ### Specialized Built-In Middlewares
@@ -179,10 +184,10 @@ Request-level Option -> Client-level Default -> System Environment / Transport D
 
 | Option | Client-Level Default | Per-Request Modifier | Behavior / Resolution Priority |
 | :--- | :--- | :--- | :--- |
-| **Proxy Routing** | `client.WithProxy(url)` | `aoni.WithProxyOverride(url)` | Per-request wins -> Client-level default -> System environment (`HTTP_PROXY`) |
-| **TLS Bypassing** | `client.WithInsecureSkipVerify()` | `aoni.WithInsecureSkipVerify()` | Per-request wins -> Client-level setting -> Standard TLS verification |
-| **TCP Connect Jitter** | `client.WithTCPDelay(min, max)` | `aoni.WithTCPDelay(min, max)` | Per-request wins -> Client-level default -> No delay |
-| **Response Validation** | `client.WithResponseValidator(fn)` | `aoni.WithResponseValidator(fn)` | Both run sequentially. Per-request error overrides client-level error. |
+| **Proxy Routing** | `WithClientProxy(url)` | `aoni.WithProxyOverride(url)` | Per-request wins → Client-level default → System environment (`HTTP_PROXY`) |
+| **TLS Bypassing** | `WithClientInsecureSkipVerify()` | `aoni.WithInsecureSkipVerify()` | Per-request wins → Client-level setting → Standard TLS verification |
+| **TCP Connect Jitter** | `WithClientTCPDelay(min, max)` | `aoni.WithTCPDelay(min, max)` | Per-request wins → Client-level default → No delay |
+| **Response Validation** | `WithClientResponseValidator(fn)` | `aoni.WithResponseValidator(fn)` | Both run sequentially. Per-request error overrides client-level error. |
 | **Retry Policies** | *Automatic in middleware* | `aoni.WithRetryPolicy(override)` | Per-request `RetryOverride` settings take precedence over global middleware settings. |
 | **Cache Duration** | *Decided by middleware* | `aoni.WithCacheTTL(duration)` | Passed via context to be retrieved by a caching middleware layer. |
 | **Request Metadata** | *N/A* | `aoni.WithConnMetadata(key, val)` | Thread-safe connection-bound values readable in transports or logging hooks. |
@@ -232,7 +237,7 @@ resp, err := client.Get(ctx, "/premium-endpoint",
 * **The Ice-Cold Solution:** If the primary request stalls and doesn't return headers in 150ms, a backup request is dispatched in parallel, returning whichever finishes first.
 
 ```go
-data, err := aoni.GetTo[Data](ctx, aoni.NewClient(hedgedClient), "/data", WithHedging(10*time.Millisecond))
+data, err := aoni.GetTo[Data](ctx, aoni.NewClient(hedgedClient), "/data", aoni.WithHedging(10*time.Millisecond))
 ```
 
 ### 4. Automatic Legacy Charset Translation
@@ -254,14 +259,15 @@ manifest, err := aoni.GetTo[Manifest](ctx, client, "/legacy-manifest",
 ```go
 info := &aoni.TraceInfo{}
 
-client := aoni.NewClient(nil).
-    WithTLSFingerprint(aoni.BrowserChrome). // Spoofs TLS ClientHello
-    WithJA4Callback(func(r ja4.JA4Report) {
+client := aoni.NewClient(nil,
+    aoni.WithClientTLSFingerprint(aoni.BrowserChrome), // Spoofs TLS ClientHello
+    aoni.WithClientJA4Callback(func(r ja4.JA4Report) {
         fmt.Println("Active TLS Handshake JA4:", r.JA4)
-    })
+    }),
+)
 
-user, err := aoni.GetTo[User](ctx, client, "/profile", 
-    aoni.Trace(info), 
+user, err := aoni.GetTo[User](ctx, client, "/profile",
+    aoni.Trace(info),
     aoni.TraceJA4(info), // Traces both TLS (JA4) and HTTP (JA4H) fingerprints
 )
 
@@ -274,14 +280,16 @@ fmt.Println("Request HTTP JA4H:", info.JA4.JA4H)  // "ge11nn03enus_9ed1ff1f7b03_
 * **The Ice-Cold Solution:** `aoni` establishes fully authenticated, JA4-spoofed, proxy-routed Socket.IO v5 sessions over standard WebSockets or stealthy HTTP/2 Extended CONNECT tunnels. It includes automatic, jittered backoff reconnection and ping-timeout heartbeats natively.
 
 ```go
-cfg := aoni.SocketIOConfig{
+import "github.com/lemon4ksan/aoni/socketio"
+
+cfg := socketio.SocketIOConfig{
     Reconnection: true,
     Namespace:    "/realtime-prices",
     Auth:         map[string]string{"token": "my-secure-token"},
 }
 
 // Automatically inherits proxy rotators, DoT, JA4, and SSRF guards from the client!
-sio, err := aoni.DialSocketIO(ctx, client, "wss://api.pricedb.io", cfg)
+sio, err := socketio.DialSocketIO(ctx, client, "wss://api.pricedb.io", cfg)
 if err != nil {
     log.Fatal(err)
 }
@@ -346,15 +354,27 @@ func (r *apiResponse) UnmarshalJSON(data []byte) error {
 }
 
 // 2. Configure the client - every JSON request unwraps through this envelope
-client := aoni.NewClient(nil).
-	WithBaseURL("https://api.example.com").
-	WithBaseResponse(func() aoni.BaseResponse { return &apiResponse{} })
+client := aoni.NewClient(nil,
+	aoni.WithClientBaseURL("https://api.example.com"),
+	aoni.WithClientBaseResponse(func() aoni.BaseResponse { return &apiResponse{} }),
+)
 
 // 3. Use it - the decoder handles envelope unwrapping automatically
 user, err := aoni.GetTo[User](ctx, client, "/users/1")
 // If API returns {"success":false,"message":"not found"}, err is non-nil
 // If API returns {"success":true,"data":{"name":"Alice"}}, user.Name == "Alice"
 ```
+
+## 📦 Subpackages
+
+| Package | Import path | Description |
+| :--- | :--- | :--- |
+| **ws** | `github.com/lemon4ksan/aoni/ws` | WebSocket dialing over uTLS and HTTP/2 Extended CONNECT (RFC 8441) |
+| **socketio** | `github.com/lemon4ksan/aoni/socketio` | Socket.IO v5 / Engine.IO v4 client with reconnection and namespaces |
+| **inspector** | `github.com/lemon4ksan/aoni/inspector` | Traffic inspector — capture, replay, and export HTTP exchanges |
+| **ja4** | `github.com/lemon4ksan/aoni/ja4` | Pure-Go JA4 / JA4H fingerprint computation |
+| **p0f** | `github.com/lemon4ksan/aoni/p0f` | TCP/IP stack fingerprint signatures (TTL, MSS, window size) |
+| **profiles** | `github.com/lemon4ksan/aoni/profiles` | Pre-built browser TLS + HTTP/2 profiles (Chrome, Firefox) |
 
 ## 🎨 Memory & Resource Footprint
 

@@ -97,16 +97,20 @@ for i := 0; i < 3; i++ {
 <td valign="top">
 
 ```go
-// ❄️ Чистый, неизменяемый конвейерный поток
-client := aoni.NewClient(transportChain)
+// ❄️ Чистый, иммутабельный, конвейерный поток
+client := aoni.NewClient(nil,
+    aoni.WithClientBaseURL("https://api.example.com"),
+    aoni.WithClientTimeout(15*time.Second),
+    aoni.WithClientTLSFingerprint(aoni.BrowserChrome),
+)
 
-// 1. Автоматическое получение структурированного JSON
+// 1. Автоматическое получение структурного JSON
 user, err := aoni.GetTo[User](ctx, client, "/users/{id}",
     aoni.WithVar("id", 123),
     aoni.WithErrorModel(&apiErr),
 )
 
-// 2. Или выполнение сырых HTTP-запросов напрямую через удобные методы клиента
+// 2. Или выполните сырые HTTP-запросы через удобные методы клиента
 resp, err := client.Get(ctx, "/raw-data")
 ```
 
@@ -119,17 +123,18 @@ resp, err := client.Get(ctx, "/raw-data")
 `aoni` использует модульную архитектуру конвейера (pipeline). Основной процесс выполнения запроса клиентом состоит из 12 независимых стандартных middleware на Go, обернутых вокруг сырого HTTP-движка.
 
 ### Кастомная обертка конвейера
-Вы можете настроить, переупорядочить или полностью заменить стандартную цепочку middleware с помощью `WithPipelineWrapper`:
+Вы можете настроить, переупорядочить или полностью заменить стандартную цепочку middleware с помощью `WithClientPipelineWrapper`:
 
 ```go
-client := aoni.NewClient(nil).
-	WithPipelineWrapper(func(c *aoni.Client, engine aoni.HTTPDoer) aoni.HTTPDoer {
+client := aoni.NewClient(nil,
+	aoni.WithClientPipelineWrapper(func(c *aoni.Client, engine aoni.HTTPDoer) aoni.HTTPDoer {
 		// Создайте свой собственный конвейер, внедряя кастомную логику или меняя этапы местами
 		return aoni.Chain(engine,
 			aoni.InspectorMiddleware(c.Inspector()),
 			aoni.ResponseValidationMiddleware(),
 		)
-	})
+	}),
+)
 ```
 
 ### Специализированные встроенные Middleware
@@ -181,10 +186,10 @@ client := aoni.NewClient(nil).
 
 | Параметр | Глобальный метод (Client-Level) | Локальный модификатор (Per-Request) | Приоритет разрешения настроек |
 | :--- | :--- | :--- | :--- |
-| **Прокси (Proxy)** | `client.WithProxy(url)` | `aoni.WithProxyOverride(url)` | Локальный -> Глобальный -> Системные переменные (`HTTP_PROXY`) |
-| **Игнорирование TLS** | `client.WithInsecureSkipVerify()` | `aoni.WithInsecureSkipVerify()` | Локальный -> Глобальный -> Стандартная TLS-валидация |
-| **Задержка TCP** | `client.WithTCPDelay(min, max)` | `aoni.WithTCPDelay(min, max)` | Локальный -> Глобальный -> Без задержки |
-| **Валидация ответов** | `client.WithResponseValidator(fn)` | `aoni.WithResponseValidator(fn)` | Вызываются последовательно. Ошибка локального перекрывает глобальный. |
+| **Прокси (Proxy)** | `WithClientProxy(url)` | `aoni.WithProxyOverride(url)` | Локальный → Глобальный → Системные переменные (`HTTP_PROXY`) |
+| **Игнорирование TLS** | `WithClientInsecureSkipVerify()` | `aoni.WithInsecureSkipVerify()` | Локальный → Глобальный → Стандартная TLS-валидация |
+| **Задержка TCP** | `WithClientTCPDelay(min, max)` | `aoni.WithTCPDelay(min, max)` | Локальный → Глобальный → Без задержки |
+| **Валидация ответов** | `WithClientResponseValidator(fn)` | `aoni.WithResponseValidator(fn)` | Вызываются последовательно. Ошибка локального перекрывает глобальный. |
 | **Ретраи (Retry)** | *Автоматически в middleware* | `aoni.WithRetryPolicy(override)` | Локальный `RetryOverride` полностью заменяет настройки глобального Middleware. |
 | **Время кэша (TTL)** | *Определяется в middleware* | `aoni.WithCacheTTL(duration)` | Пробрасывается через контекст для чтения кэширующим Middleware. |
 | **Метаданные (Metadata)** | *Отсутствует* | `aoni.WithConnMetadata(key, val)` | Потокобезопасные теги запроса, доступные в логах и транспорте. |
@@ -234,7 +239,7 @@ resp, err := client.Get(ctx, "/premium-endpoint",
 * **Ледяное решение:** Если основной запрос зависает и не возвращает заголовки в течение 150 мс, параллельно отправляется резервный запрос. Возвращается результат того, который завершится быстрее.
 
 ```go
-data, err := aoni.GetTo[Data](ctx, aoni.NewClient(hedgedClient), "/data", WithHedging(10*time.Millisecond))
+data, err := aoni.GetTo[Data](ctx, aoni.NewClient(hedgedClient), "/data", aoni.WithHedging(10*time.Millisecond))
 ```
 
 ### 4. Автоматическое преобразование устаревших кодировок
@@ -256,14 +261,15 @@ manifest, err := aoni.GetTo[Manifest](ctx, client, "/legacy-manifest",
 ```go
 info := &aoni.TraceInfo{}
 
-client := aoni.NewClient(nil).
-    WithTLSFingerprint(aoni.BrowserChrome). // Подмена TLS ClientHello
-    WithJA4Callback(func(r ja4.JA4Report) {
+client := aoni.NewClient(nil,
+    aoni.WithClientTLSFingerprint(aoni.BrowserChrome), // Подмена TLS ClientHello
+    aoni.WithClientJA4Callback(func(r ja4.JA4Report) {
         fmt.Println("Active TLS Handshake JA4:", r.JA4)
-    })
+    }),
+)
 
-user, err := aoni.GetTo[User](ctx, client, "/profile", 
-    aoni.Trace(info), 
+user, err := aoni.GetTo[User](ctx, client, "/profile",
+    aoni.Trace(info),
     aoni.TraceJA4(info), // Отслеживает отпечатки TLS (JA4) и HTTP (JA4H).
 )
 
@@ -276,14 +282,16 @@ fmt.Println("Request HTTP JA4H:", info.JA4.JA4H)  // "ge11nn03enus_9ed1ff1f7b03_
 * **Решение:** `aoni` устанавливает полностью аутентифицированные, поддельные JA4, маршрутизируемые через прокси-сервер сессии Socket.IO v5 по стандартным WebSockets или скрытым туннелям HTTP/2 Extended CONNECT tunnels. Он включает в себя автоматическое, с дрожанием, переподключение и сигналы подтверждения таймаута пинга.
 
 ```go
-cfg := aoni.SocketIOConfig{
+import "github.com/lemon4ksan/aoni/socketio"
+
+cfg := socketio.SocketIOConfig{
 		Reconnection: true,
 		Namespace: "/realtime-prices",
 		Auth: map[string]string{"token": "my-secure-token"},
 }
 
 // Автоматически наследует ротаторы прокси, защиту от DoT, JA4 и SSRF от клиента!
-sio, err := aoni.DialSocketIO(ctx, client, "wss://api.pricedb.io", cfg)
+sio, err := socketio.DialSocketIO(ctx, client, "wss://api.pricedb.io", cfg)
 if err != nil {
 		log.Fatal(err)
 }
@@ -348,15 +356,27 @@ func (r *apiResponse) UnmarshalJSON(data []byte) error {
 }
 
 // 2. Настраиваем клиент - каждый JSON-запрос проходит через эту обёртку
-client := aoni.NewClient(nil).
-	WithBaseURL("https://api.example.com").
-	WithBaseResponse(func() aoni.BaseResponse { return &apiResponse{} })
+client := aoni.NewClient(nil,
+	aoni.WithClientBaseURL("https://api.example.com"),
+	aoni.WithClientBaseResponse(func() aoni.BaseResponse { return &apiResponse{} }),
+)
 
 // 3. Используем - декодер автоматически распаковывает конверт
 user, err := aoni.GetTo[User](ctx, client, "/users/1")
 // Если API вернул {"success":false,"message":"not found"}, err != nil
 // Если API вернул {"success":true,"data":{"name":"Alice"}}, user.Name == "Alice"
 ```
+
+## 📦 Субпакеты
+
+| Пакет | Путь импорта | Описание |
+| :--- | :--- | :--- |
+| **ws** | `github.com/lemon4ksan/aoni/ws` | WebSocket-соединение поверх uTLS и HTTP/2 Extended CONNECT (RFC 8441) |
+| **socketio** | `github.com/lemon4ksan/aoni/socketio` | Socket.IO v5 / Engine.IO v4 клиент с переподключением и пространствами имён |
+| **inspector** | `github.com/lemon4ksan/aoni/inspector` | Инспектор трафика — захват, воспроизведение и экспорт HTTP-обменов |
+| **ja4** | `github.com/lemon4ksan/aoni/ja4` | Вычисление отпечатков JA4 / JA4H на чистом Go |
+| **p0f** | `github.com/lemon4ksan/aoni/p0f` | Сигнатуры TCP/IP стека (TTL, MSS, размер окна) |
+| **profiles** | `github.com/lemon4ksan/aoni/profiles` | Готовые браузерные профили TLS + HTTP/2 (Chrome, Firefox) |
 
 ## 🎨 Потребление памяти и ресурсов
 
