@@ -2,7 +2,7 @@
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
-package aoni
+package ws
 
 import (
 	"bytes"
@@ -42,12 +42,12 @@ const (
 // before treating the stream as exhausted.
 const maxConsecutiveEmptyReads = 100
 
-// WebSocketConn represents an active WebSocket connection.
+// Conn represents an active WebSocket connection.
 // It extends the [net.Conn] interface, allowing the connection to be used with standard
 // Go abstractions, while simultaneously providing direct access to reading/writing
 // typed WebSocket messages (Text/Binary), receiving the low-level socket
 // and monitoring channel closure.
-type WebSocketConn interface {
+type Conn interface {
 	net.Conn
 	// ReadMessage reads the next message from the connection, returning its type
 	// (TextMessage or BinaryMessage) and payload.
@@ -60,7 +60,7 @@ type WebSocketConn interface {
 	CloseChan() <-chan struct{}
 }
 
-// wsGorillaConn adapts a [github.com/gorilla/websocket.Conn] to the [WebSocketConn] interface.
+// wsGorillaConn adapts a [github.com/gorilla/websocket.Conn] to the [Conn] interface.
 type wsGorillaConn struct {
 	base   *websocket.Conn
 	reader io.Reader
@@ -157,13 +157,13 @@ func (c *wsGorillaConn) SetWriteDeadline(t time.Time) error { return c.base.SetW
 // CloseChan returns a channel that is closed when the connection is closed.
 func (c *wsGorillaConn) CloseChan() <-chan struct{} { return c.closed }
 
-var _ WebSocketConn = (*wsGorillaConn)(nil)
+var _ Conn = (*wsGorillaConn)(nil)
 
 func wrapGorillaConn(conn *websocket.Conn) *wsGorillaConn {
 	return &wsGorillaConn{base: conn, closed: make(chan struct{})}
 }
 
-// wsRawConn implements [WebSocketConn] by manually reading and writing WebSocket
+// wsRawConn implements [Conn] by manually reading and writing WebSocket
 // frames over a raw TCP/TLS connection.
 type wsRawConn struct {
 	base     net.Conn
@@ -379,7 +379,7 @@ func (c *wsRawConn) writeFrame(opcode byte, payload []byte) error {
 	return err
 }
 
-var _ WebSocketConn = (*wsRawConn)(nil)
+var _ Conn = (*wsRawConn)(nil)
 
 func wrapRawConn(conn net.Conn, isClient bool) *wsRawConn {
 	c := &wsRawConn{

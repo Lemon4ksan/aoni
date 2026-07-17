@@ -739,7 +739,8 @@ func (c *Client) Delete(ctx context.Context, path string, body any, mods ...Requ
 	return Delete(ctx, c, path, body, mods...)
 }
 
-func (c *Client) initRequestConfig(req *http.Request) *http.Request {
+// InitRequestConfig initializes the request configuration for the given request.
+func (c *Client) InitRequestConfig(req *http.Request) *http.Request {
 	cfg := GetRequestConfig(req.Context())
 	if cfg == nil {
 		cfg = &RequestConfig{
@@ -840,7 +841,7 @@ func (c *Client) Request(
 		req.Header.Set("Accept-Encoding", "zstd, br, gzip")
 	}
 
-	req = c.initRequestConfig(req)
+	req = c.InitRequestConfig(req)
 
 	generic.ApplyOptions(req, c.defaults.DefaultMods...)
 	generic.ApplyOptions(req, mods...)

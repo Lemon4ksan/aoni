@@ -33,7 +33,6 @@ import (
 	"time"
 
 	"github.com/andybalholm/brotli"
-	"github.com/gorilla/websocket"
 	"github.com/klauspost/compress/zstd"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -1840,94 +1839,6 @@ func TestClient_StreamParsing(t *testing.T) {
 		require.NoError(t, err)
 		assert.Equal(t, []string{"event1", "event2"}, msgs)
 	})
-}
-
-func TestClient_WebSocket_RawConn(t *testing.T) {
-	t.Parallel()
-
-	c1, c2 := net.Pipe()
-	t.Cleanup(func() { _ = c1.Close(); _ = c2.Close() })
-
-	wsClient := wrapRawConn(c1, true)
-	wsServer := wrapRawConn(c2, false)
-
-	go func() {
-		err := wsClient.WriteMessage(wsFrameText, []byte("ping"))
-		if err != nil {
-			return
-		}
-	}()
-
-	msgType, payload, err := wsServer.ReadMessage()
-	require.NoError(t, err)
-	assert.Equal(t, wsFrameText, msgType)
-	assert.Equal(t, "ping", string(payload))
-}
-
-func TestClient_SocketIO_Encoding(t *testing.T) {
-	t.Parallel()
-
-	raw := []byte("2[\"event\",{\"foo\":\"bar\"}]")
-	pkt, err := decodeSIOPacket(raw)
-	require.NoError(t, err)
-	assert.Equal(t, byte(sioEvent), pkt.Type)
-	assert.Equal(t, "/", pkt.Namespace)
-	assert.Nil(t, pkt.ID)
-	assert.Contains(t, string(pkt.Data), "event")
-
-	id := int64(123)
-	encoded := encodeSIOPacket(sioPacket{
-		Type:      sioAck,
-		Namespace: "/custom",
-		ID:        &id,
-		Data:      json.RawMessage(`["ack-data"]`),
-	})
-	assert.Equal(t, "3/custom,123[\"ack-data\"]", string(encoded))
-}
-
-func TestClient_SocketIO_Integration(t *testing.T) {
-	t.Parallel()
-
-	upgrader := websocket.Upgrader{}
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		conn, err := upgrader.Upgrade(w, r, nil)
-		if err != nil {
-			return
-		}
-
-		t.Cleanup(func() { _ = conn.Close() })
-
-		err = conn.WriteMessage(
-			websocket.TextMessage,
-			[]byte("0{\"sid\":\"123\",\"pingInterval\":1000,\"pingTimeout\":5000}"),
-		)
-		if err != nil {
-			return
-		}
-
-		msgType, payload, err := conn.ReadMessage()
-		if err != nil {
-			return
-		}
-
-		if msgType == websocket.TextMessage && len(payload) > 1 && payload[0] == '4' && payload[1] == '0' {
-			_ = conn.WriteMessage(websocket.TextMessage, []byte("40{\"sid\":\"123\",\"pid\":\"456\"}"))
-		}
-	}))
-	t.Cleanup(server.Close)
-
-	wsURL := "ws" + strings.TrimPrefix(server.URL, "http")
-
-	cfg := SocketIOConfig{
-		Reconnection: false,
-	}
-
-	sio, err := DialSocketIO(t.Context(), NewClient(nil), wsURL, cfg)
-	require.NoError(t, err)
-	t.Cleanup(func() { _ = sio.Close() })
-
-	assert.Equal(t, "123", sio.SID())
-	assert.True(t, sio.Connected())
 }
 
 func TestClient_RefererAutomaton(t *testing.T) {

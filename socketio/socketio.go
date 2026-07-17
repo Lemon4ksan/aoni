@@ -2,7 +2,7 @@
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
-package aoni
+package socketio
 
 import (
 	"bytes"
@@ -24,6 +24,9 @@ import (
 	"github.com/lemon4ksan/miyako/generic"
 	"github.com/lemon4ksan/miyako/jobs"
 	"github.com/lemon4ksan/miyako/kata"
+
+	"github.com/lemon4ksan/aoni"
+	"github.com/lemon4ksan/aoni/ws"
 )
 
 const (
@@ -71,9 +74,9 @@ type BackoffStrategy interface {
 	Reset()
 }
 
-// SocketIOConfig holds all configurable parameters for a Socket.IO connection.
+// Config holds all configurable parameters for a Socket.IO connection.
 // Zero values mean "use default". Passing a zero-valued config is safe.
-type SocketIOConfig struct {
+type Config struct {
 	// Reconnection controls automatic reconnection on unexpected disconnect.
 	Reconnection bool
 	// ReconnectionAttempts is the maximum number of reconnection attempts.
@@ -106,7 +109,7 @@ type SocketIOConfig struct {
 }
 
 // resolveDefaults fills zero-valued config fields with sensible defaults.
-func (cfg *SocketIOConfig) resolveDefaults() {
+func (cfg *Config) resolveDefaults() {
 	cfg.ReconnectionDelay = generic.Coalesce(cfg.ReconnectionDelay, time.Second)
 	cfg.ReconnectionDelayMax = generic.Coalesce(cfg.ReconnectionDelayMax, 30*time.Second)
 	cfg.JitterFactor = generic.Coalesce(cfg.JitterFactor, 0.5)
@@ -116,9 +119,9 @@ func (cfg *SocketIOConfig) resolveDefaults() {
 }
 
 // NamespaceSocket is a namespace-scoped event emitter.
-// Obtain via [SocketIOConn.OnNamespace].
+// Obtain via [Conn.OnNamespace].
 type NamespaceSocket struct {
-	conn *SocketIOConn
+	conn *Conn
 	nsp  string
 }
 
@@ -158,10 +161,10 @@ func (ns *NamespaceSocket) EmitVolatile(event string, args ...any) error {
 	return ns.conn.emitVolatileNS(ns.nsp, event, args...)
 }
 
-// SocketIOConn provides support for working with Socket.IO v5 / Engine.IO v4 servers.
+// Conn provides support for working with Socket.IO v5 / Engine.IO v4 servers.
 // Supports event-based communication, namespace multiplexing, acknowledgements,
 // binary data, and automatic reconnection.
-type SocketIOConn struct {
+type Conn struct {
 	conn atomic.Pointer[net.Conn]
 	sid  string
 
@@ -170,7 +173,7 @@ type SocketIOConn struct {
 	closed  chan struct{}
 
 	// Configuration
-	config    SocketIOConfig
+	config    Config
 	namespace string
 
 	// Per-namespace event handlers: namespace -> event -> handler
@@ -195,9 +198,9 @@ type SocketIOConn struct {
 	attemptCount  int
 	skipReconnect bool
 	reconnectStop chan struct{}
-	client        *Client
+	client        *aoni.Client
 	targetURL     string
-	mods          []RequestModifier
+	mods          []aoni.RequestModifier
 	pingInterval  time.Duration
 
 	// Ping timeout
@@ -214,10 +217,10 @@ type SocketIOConn struct {
 
 // NewSocketIOConn initializes the Engine.IO v4 and Socket.IO v5
 // protocols over any existing [net.Conn] network connection.
-func NewSocketIOConn(ctx context.Context, conn net.Conn, config SocketIOConfig) (*SocketIOConn, error) {
+func NewSocketIOConn(ctx context.Context, conn net.Conn, config Config) (*Conn, error) {
 	config.resolveDefaults()
 
-	sio := &SocketIOConn{
+	sio := &Conn{
 		config:        config,
 		namespace:     config.Namespace,
 		nsEvents:      make(map[string]map[string]func(args []json.RawMessage)),
@@ -285,12 +288,12 @@ func NewSocketIOConn(ctx context.Context, conn net.Conn, config SocketIOConfig) 
 // background workers for heartbeats and packet reading.
 func DialSocketIO(
 	ctx context.Context,
-	c *Client,
+	c *aoni.Client,
 	targetURL string,
-	config SocketIOConfig,
-	mods ...RequestModifier,
-) (*SocketIOConn, error) {
-	conn, _, err := DialWebSocket(ctx, c, targetURL, mods...) //nolint:bodyclose
+	config Config,
+	mods ...aoni.RequestModifier,
+) (*Conn, error) {
+	conn, _, err := ws.DialWebSocket(ctx, c, targetURL, mods...) //nolint:bodyclose
 	if err != nil {
 		return nil, fmt.Errorf("aoni sio: dial websocket: %w", err)
 	}
@@ -308,20 +311,20 @@ func DialSocketIO(
 }
 
 // ReconnectionAttempts returns the current consecutive reconnection attempt count.
-func (s *SocketIOConn) ReconnectionAttempts() int {
+func (s *Conn) ReconnectionAttempts() int {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	return s.attemptCount
 }
 
 // On registers a handler for a specific Socket.IO event on the default namespace.
-func (s *SocketIOConn) On(event string, handler func(args []json.RawMessage)) {
+func (s *Conn) On(event string, handler func(args []json.RawMessage)) {
 	s.setNamespaceHandler(s.namespace, event, handler)
 }
 
 // OnAny registers a catch-all event listener on the default namespace
 // that intercepts all incoming Socket.IO events.
-func (s *SocketIOConn) OnAny(handler func(event string, args []json.RawMessage)) {
+func (s *Conn) OnAny(handler func(event string, args []json.RawMessage)) {
 	s.setNamespaceHandler(s.namespace, "*", func(args []json.RawMessage) {
 		if len(args) == 0 {
 			return
@@ -335,34 +338,34 @@ func (s *SocketIOConn) OnAny(handler func(event string, args []json.RawMessage))
 }
 
 // OnNamespace returns a [NamespaceSocket] scoped to the given namespace.
-func (s *SocketIOConn) OnNamespace(nsp string) *NamespaceSocket {
+func (s *Conn) OnNamespace(nsp string) *NamespaceSocket {
 	s.setNamespaceHandler(nsp, "", nil) // ensure map entry exists
 	return &NamespaceSocket{conn: s, nsp: nsp}
 }
 
 // OnClose sets the callback invoked when the connection closes.
-func (s *SocketIOConn) OnClose(handler func()) {
+func (s *Conn) OnClose(handler func()) {
 	s.mu.Lock()
 	s.onClose = handler
 	s.mu.Unlock()
 }
 
 // OnReconnecting sets the callback invoked before each reconnection attempt.
-func (s *SocketIOConn) OnReconnecting(handler func(attempt int)) {
+func (s *Conn) OnReconnecting(handler func(attempt int)) {
 	s.mu.Lock()
 	s.onReconnecting = handler
 	s.mu.Unlock()
 }
 
 // OnReconnected sets the callback invoked after a successful reconnection.
-func (s *SocketIOConn) OnReconnected(handler func()) {
+func (s *Conn) OnReconnected(handler func()) {
 	s.mu.Lock()
 	s.onReconnected = handler
 	s.mu.Unlock()
 }
 
 // OnReconnectFailed sets the callback invoked when all reconnection attempts are exhausted.
-func (s *SocketIOConn) OnReconnectFailed(handler func()) {
+func (s *Conn) OnReconnectFailed(handler func()) {
 	s.mu.Lock()
 	s.onReconnectFailed = handler
 	s.mu.Unlock()
@@ -370,24 +373,24 @@ func (s *SocketIOConn) OnReconnectFailed(handler func()) {
 
 // Emit sends a Socket.IO event on the default namespace.
 // If the last argument is func(args []json.RawMessage), it is used as an ACK callback.
-func (s *SocketIOConn) Emit(event string, args ...any) error {
+func (s *Conn) Emit(event string, args ...any) error {
 	return s.emitNS(s.namespace, event, args...)
 }
 
 // EmitWithAck sends an event on the default namespace and blocks until the server
 // acknowledges it or ctx expires.
-func (s *SocketIOConn) EmitWithAck(ctx context.Context, event string, args ...any) ([]json.RawMessage, error) {
+func (s *Conn) EmitWithAck(ctx context.Context, event string, args ...any) ([]json.RawMessage, error) {
 	return s.emitWithAckNS(ctx, s.namespace, event, args...)
 }
 
 // EmitVolatile sends an event only if currently connected; silently drops otherwise.
-func (s *SocketIOConn) EmitVolatile(event string, args ...any) error {
+func (s *Conn) EmitVolatile(event string, args ...any) error {
 	return s.emitVolatileNS(s.namespace, event, args...)
 }
 
 // Close sends a Socket.IO DISCONNECT and Engine.IO CLOSE, then shuts down the connection.
 // Reconnection is suppressed.
-func (s *SocketIOConn) Close() error {
+func (s *Conn) Close() error {
 	s.mu.Lock()
 	select {
 	case <-s.closed:
@@ -418,26 +421,26 @@ func (s *SocketIOConn) Close() error {
 }
 
 // SID returns the server-assigned session ID.
-func (s *SocketIOConn) SID() string {
+func (s *Conn) SID() string {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	return s.sid
 }
 
-func (s *SocketIOConn) getClosedChan() chan struct{} {
+func (s *Conn) getClosedChan() chan struct{} {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	return s.closed
 }
 
 // Connected reports whether the connection is currently open.
-func (s *SocketIOConn) Connected() bool {
+func (s *Conn) Connected() bool {
 	s.stateMu.RLock()
 	defer s.stateMu.RUnlock()
 	return s.state == sioStateOpen
 }
 
-func (s *SocketIOConn) emitNS(nsp, event string, args ...any) error {
+func (s *Conn) emitNS(nsp, event string, args ...any) error {
 	s.stateMu.RLock()
 
 	if s.state != sioStateOpen {
@@ -493,7 +496,7 @@ func (s *SocketIOConn) emitNS(nsp, event string, args ...any) error {
 	return s.writeEIOPacket(eioMessage, encoded)
 }
 
-func (s *SocketIOConn) emitBinaryNS(nsp string, data any, ackFn func(args []json.RawMessage)) error {
+func (s *Conn) emitBinaryNS(nsp string, data any, ackFn func(args []json.RawMessage)) error {
 	deconstructed, buffers := deconstructBinary(data)
 
 	jsonData, err := json.Marshal(deconstructed)
@@ -532,7 +535,7 @@ func (s *SocketIOConn) emitBinaryNS(nsp string, data any, ackFn func(args []json
 	return nil
 }
 
-func (s *SocketIOConn) emitWithAckNS(ctx context.Context, nsp, event string, args ...any) ([]json.RawMessage, error) {
+func (s *Conn) emitWithAckNS(ctx context.Context, nsp, event string, args ...any) ([]json.RawMessage, error) {
 	ch := make(chan []json.RawMessage, 1)
 
 	emitArgs := make([]any, len(args)+1)
@@ -563,7 +566,7 @@ func (s *SocketIOConn) emitWithAckNS(ctx context.Context, nsp, event string, arg
 	}
 }
 
-func (s *SocketIOConn) emitVolatileNS(nsp, event string, args ...any) error {
+func (s *Conn) emitVolatileNS(nsp, event string, args ...any) error {
 	s.stateMu.RLock()
 	connected := s.state == sioStateOpen
 	s.stateMu.RUnlock()
@@ -575,7 +578,7 @@ func (s *SocketIOConn) emitVolatileNS(nsp, event string, args ...any) error {
 	return s.emitNS(nsp, event, args...)
 }
 
-func (s *SocketIOConn) setNamespaceHandler(nsp, event string, handler func(args []json.RawMessage)) {
+func (s *Conn) setNamespaceHandler(nsp, event string, handler func(args []json.RawMessage)) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -588,7 +591,7 @@ func (s *SocketIOConn) setNamespaceHandler(nsp, event string, handler func(args 
 	}
 }
 
-func (s *SocketIOConn) readLoop() {
+func (s *Conn) readLoop() {
 	defer func() {
 		// Transition FSM: Open -> Closing -> Closed (two-step close).
 		_ = s.fsm.Transition(context.Background(), sioEventTypeClose)
@@ -658,7 +661,7 @@ func (s *SocketIOConn) readLoop() {
 	}
 }
 
-func (s *SocketIOConn) handleSIOPacket(data []byte) {
+func (s *Conn) handleSIOPacket(data []byte) {
 	pkt, err := decodeSIOPacket(data)
 	if err != nil {
 		return
@@ -716,7 +719,7 @@ func (s *SocketIOConn) handleSIOPacket(data []byte) {
 	}
 }
 
-func (s *SocketIOConn) dispatchPacket(pkt *sioPacket) {
+func (s *Conn) dispatchPacket(pkt *sioPacket) {
 	var rawArgs []json.RawMessage
 	if err := json.Unmarshal(pkt.Data, &rawArgs); err != nil {
 		return
@@ -754,7 +757,7 @@ func (s *SocketIOConn) dispatchPacket(pkt *sioPacket) {
 	s.mu.RUnlock()
 }
 
-func (s *SocketIOConn) handleAck(id int64, data json.RawMessage) {
+func (s *Conn) handleAck(id int64, data json.RawMessage) {
 	var args []json.RawMessage
 	if err := json.Unmarshal(data, &args); err != nil {
 		return
@@ -763,7 +766,7 @@ func (s *SocketIOConn) handleAck(id int64, data json.RawMessage) {
 	s.ackMgr.Resolve(id, args, nil)
 }
 
-func (s *SocketIOConn) heartbeatLoop() {
+func (s *Conn) heartbeatLoop() {
 	s.mu.RLock()
 	interval := s.pingInterval
 	s.mu.RUnlock()
@@ -814,7 +817,7 @@ func (s *SocketIOConn) heartbeatLoop() {
 	}
 }
 
-func (s *SocketIOConn) reconnectLoop() {
+func (s *Conn) reconnectLoop() {
 	for {
 		select {
 		case <-s.getClosedChan():
@@ -843,7 +846,7 @@ func (s *SocketIOConn) reconnectLoop() {
 		}
 
 		ctx, cancel := context.WithTimeout(context.Background(), s.config.ConnectTimeout)
-		conn, _, err := DialWebSocket(ctx, s.client, s.targetURL, s.mods...) //nolint:bodyclose
+		conn, _, err := ws.DialWebSocket(ctx, s.client, s.targetURL, s.mods...) //nolint:bodyclose
 
 		cancel()
 
@@ -919,7 +922,7 @@ func (s *SocketIOConn) reconnectLoop() {
 }
 
 // doHandshake performs the EIO open + SIO CONNECT handshake.
-func (s *SocketIOConn) doHandshake(ctx context.Context) error {
+func (s *Conn) doHandshake(ctx context.Context) error {
 	// Read EIO OPEN packet
 	conn := s.conn.Load()
 	if conn == nil {
@@ -985,7 +988,7 @@ func (s *SocketIOConn) doHandshake(ctx context.Context) error {
 }
 
 // sendConnect sends a Socket.IO CONNECT packet with optional auth.
-func (s *SocketIOConn) sendConnect() error {
+func (s *Conn) sendConnect() error {
 	var data json.RawMessage
 
 	authData := make(map[string]any)
@@ -1034,7 +1037,7 @@ func (s *SocketIOConn) sendConnect() error {
 	return s.writeEIOPacket(eioMessage, payload)
 }
 
-func (s *SocketIOConn) readEIOPacket() (byte, []byte, error) {
+func (s *Conn) readEIOPacket() (byte, []byte, error) {
 	conn := s.conn.Load()
 	if conn == nil {
 		return 0, nil, errors.New("aoni sio: connection closed")
@@ -1121,7 +1124,7 @@ func readSingleEIOPacket(conn net.Conn) (byte, []byte, error) {
 	return data[0], data[1:], nil
 }
 
-func (s *SocketIOConn) writeEIOPacket(pType byte, payload []byte) error {
+func (s *Conn) writeEIOPacket(pType byte, payload []byte) error {
 	s.writeMu.Lock()
 	defer s.writeMu.Unlock()
 
@@ -1216,7 +1219,7 @@ func (br *binaryReconstructor) reconstruct() (*sioPacket, error) {
 	return &pkt, nil
 }
 
-func newBackoff(cfg SocketIOConfig) *generic.Backoff {
+func newBackoff(cfg Config) *generic.Backoff {
 	return generic.NewBackoff(cfg.ReconnectionDelay, cfg.ReconnectionDelayMax, 2, cfg.JitterFactor)
 }
 

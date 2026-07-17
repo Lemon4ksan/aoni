@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/lemon4ksan/aoni"
+	"github.com/lemon4ksan/aoni/socketio"
 )
 
 type PriceUpdate struct {
@@ -35,7 +36,7 @@ func main() {
 	socketURL := "ws://localhost:3000/socket.io/?EIO=4&transport=websocket"
 
 	// Connect to Socket.IO
-	sio, err := aoni.DialSocketIO(ctx, client, socketURL, aoni.SocketIOConfig{})
+	sio, err := socketio.DialSocketIO(ctx, client, socketURL, socketio.Config{})
 	if err != nil {
 		log.Fatalf("Failed to connect to Socket.IO: %v", err)
 	}

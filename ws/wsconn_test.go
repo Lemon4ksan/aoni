@@ -2,7 +2,7 @@
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
-package aoni
+package ws
 
 import (
 	"bytes"
@@ -985,8 +985,8 @@ func TestWSConn_ImplementsNetConn(t *testing.T) {
 	t.Parallel()
 
 	var (
-		_ net.Conn = (*wsGorillaConn)(nil)
-		_ net.Conn = (*wsRawConn)(nil)
+		_ Conn     = (*wsGorillaConn)(nil)
+		_ Conn     = (*wsRawConn)(nil)
 		_ net.Conn = (*wsH2Conn)(nil)
 	)
 }
@@ -1072,4 +1072,10 @@ func TestH2Preface_ContextCancel(t *testing.T) {
 
 	assert.Error(t, err)
 	assert.Less(t, elapsed, 2*time.Second)
+}
+
+func TestMaxWebSocketFrameSize(t *testing.T) {
+	t.Parallel()
+
+	assert.Equal(t, 16*1024*1024, maxWebSocketFrameSize)
 }

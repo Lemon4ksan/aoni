@@ -2,7 +2,7 @@
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
-package aoni
+package socketio
 
 import (
 	"bytes"
@@ -20,6 +20,9 @@ import (
 	"github.com/gorilla/websocket"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/lemon4ksan/aoni"
+	"github.com/lemon4ksan/aoni/ws"
 )
 
 type mockSIOServer struct {
@@ -412,7 +415,7 @@ func TestDeconstructBinaryNoBinary(t *testing.T) {
 func TestBackoffDuration(t *testing.T) {
 	t.Parallel()
 
-	cfg := SocketIOConfig{
+	cfg := Config{
 		ReconnectionDelay:    100 * time.Millisecond,
 		ReconnectionDelayMax: 5 * time.Second,
 		JitterFactor:         0, // no jitter for deterministic test
@@ -440,7 +443,7 @@ func TestBackoffDuration(t *testing.T) {
 func TestBackoffMaxCap(t *testing.T) {
 	t.Parallel()
 
-	cfg := SocketIOConfig{
+	cfg := Config{
 		ReconnectionDelay:    1 * time.Second,
 		ReconnectionDelayMax: 5 * time.Second,
 		JitterFactor:         0,
@@ -461,7 +464,7 @@ func TestBackoffMaxCap(t *testing.T) {
 func TestBackoffReset(t *testing.T) {
 	t.Parallel()
 
-	cfg := SocketIOConfig{
+	cfg := Config{
 		ReconnectionDelay:    100 * time.Millisecond,
 		ReconnectionDelayMax: 5 * time.Second,
 		JitterFactor:         0,
@@ -482,7 +485,7 @@ func TestBackoffReset(t *testing.T) {
 func TestBackoffJitterBounds(t *testing.T) {
 	t.Parallel()
 
-	cfg := SocketIOConfig{
+	cfg := Config{
 		ReconnectionDelay:    1 * time.Second,
 		ReconnectionDelayMax: 30 * time.Second,
 		JitterFactor:         0.5,
@@ -502,7 +505,7 @@ func TestBackoffJitterBounds(t *testing.T) {
 func TestSocketIOConfigDefaults(t *testing.T) {
 	t.Parallel()
 
-	cfg := SocketIOConfig{}
+	cfg := Config{}
 	cfg.resolveDefaults()
 
 	assert.Equal(t, 1*time.Second, cfg.ReconnectionDelay)
@@ -516,7 +519,7 @@ func TestSocketIOConfigDefaults(t *testing.T) {
 func TestSocketIOConfigCustom(t *testing.T) {
 	t.Parallel()
 
-	cfg := SocketIOConfig{
+	cfg := Config{
 		ReconnectionDelay:    2 * time.Second,
 		ReconnectionDelayMax: 60 * time.Second,
 		JitterFactor:         0.3,
@@ -690,7 +693,7 @@ func TestDeconstructBinaryMap(t *testing.T) {
 func TestBackoffNegativeDuration(t *testing.T) {
 	t.Parallel()
 
-	cfg := SocketIOConfig{
+	cfg := Config{
 		ReconnectionDelay:    0,
 		ReconnectionDelayMax: 0,
 		JitterFactor:         0.5,
@@ -724,9 +727,9 @@ func TestReadSingleEIOPacket_GorillaNoEOF(t *testing.T) {
 	defer server.Close()
 
 	wsURL := strings.Replace(server.URL, "http://", "ws://", 1)
-	client := NewClient(server.Client())
+	client := aoni.NewClient(server.Client())
 
-	conn, _, err := DialWebSocket(t.Context(), client, wsURL)
+	conn, _, err := ws.DialWebSocket(t.Context(), client, wsURL)
 	require.NoError(t, err)
 
 	defer conn.Close()
@@ -840,9 +843,9 @@ func TestSocketIO_SuccessfulFlow(t *testing.T) {
 	})
 
 	wsURL := strings.Replace(server.server.URL, "http://", "ws://", 1)
-	client := NewClient(server.server.Client())
+	client := aoni.NewClient(server.server.Client())
 
-	sio, err := DialSocketIO(t.Context(), client, wsURL, SocketIOConfig{
+	sio, err := DialSocketIO(t.Context(), client, wsURL, Config{
 		ConnectTimeout: 1 * time.Second,
 	})
 	require.NoError(t, err)
@@ -885,9 +888,9 @@ func TestSocketIO_ConnectRejected(t *testing.T) {
 	})
 
 	wsURL := strings.Replace(server.server.URL, "http://", "ws://", 1)
-	client := NewClient(server.server.Client())
+	client := aoni.NewClient(server.server.Client())
 
-	_, err := DialSocketIO(t.Context(), client, wsURL, SocketIOConfig{
+	_, err := DialSocketIO(t.Context(), client, wsURL, Config{
 		ConnectTimeout: 500 * time.Millisecond,
 	})
 	assert.Error(t, err)
@@ -931,9 +934,9 @@ func TestSocketIO_Reconnection(t *testing.T) {
 	})
 
 	wsURL := strings.Replace(server.server.URL, "http://", "ws://", 1)
-	client := NewClient(server.server.Client())
+	client := aoni.NewClient(server.server.Client())
 
-	sio, err := DialSocketIO(t.Context(), client, wsURL, SocketIOConfig{
+	sio, err := DialSocketIO(t.Context(), client, wsURL, Config{
 		Reconnection:      true,
 		ReconnectionDelay: 10 * time.Millisecond,
 		ConnectTimeout:    500 * time.Millisecond,
@@ -983,9 +986,9 @@ func TestSocketIO_Acknowledgment(t *testing.T) {
 	})
 
 	wsURL := strings.Replace(server.server.URL, "http://", "ws://", 1)
-	client := NewClient(server.server.Client())
+	client := aoni.NewClient(server.server.Client())
 
-	sio, err := DialSocketIO(t.Context(), client, wsURL, SocketIOConfig{
+	sio, err := DialSocketIO(t.Context(), client, wsURL, Config{
 		ConnectTimeout: 500 * time.Millisecond,
 	})
 	require.NoError(t, err)
@@ -1021,9 +1024,9 @@ func TestSocketIO_Namespaces(t *testing.T) {
 	})
 
 	wsURL := strings.Replace(server.server.URL, "http://", "ws://", 1)
-	client := NewClient(server.server.Client())
+	client := aoni.NewClient(server.server.Client())
 
-	sio, err := DialSocketIO(t.Context(), client, wsURL, SocketIOConfig{
+	sio, err := DialSocketIO(t.Context(), client, wsURL, Config{
 		Namespace:      "/",
 		ConnectTimeout: 500 * time.Millisecond,
 	})
@@ -1062,9 +1065,9 @@ func TestSocketIO_OnAny(t *testing.T) {
 	})
 
 	wsURL := strings.Replace(server.server.URL, "http://", "ws://", 1)
-	client := NewClient(server.server.Client())
+	client := aoni.NewClient(server.server.Client())
 
-	sio, err := DialSocketIO(t.Context(), client, wsURL, SocketIOConfig{
+	sio, err := DialSocketIO(t.Context(), client, wsURL, Config{
 		ConnectTimeout: 500 * time.Millisecond,
 	})
 	require.NoError(t, err)
@@ -1087,7 +1090,7 @@ func TestSocketIO_OnAny(t *testing.T) {
 func TestNamespaceSocket_AllMethods(t *testing.T) {
 	t.Parallel()
 
-	sio := &SocketIOConn{
+	sio := &Conn{
 		namespace: "/",
 		nsEvents:  make(map[string]map[string]func(args []json.RawMessage)),
 	}
@@ -1216,7 +1219,7 @@ func TestReadSingleEIOPacket_TooLarge(t *testing.T) {
 func TestEmitVolatile(t *testing.T) {
 	t.Parallel()
 
-	sio := &SocketIOConn{
+	sio := &Conn{
 		namespace: "/",
 	}
 
@@ -1231,7 +1234,7 @@ func TestEmitVolatile(t *testing.T) {
 func TestCallbacksSetting(t *testing.T) {
 	t.Parallel()
 
-	sio := &SocketIOConn{}
+	sio := &Conn{}
 
 	var closed, reconnected, failed bool
 
@@ -1269,9 +1272,9 @@ func TestReadLoopUnrecognizedEIOType(t *testing.T) {
 	})
 
 	wsURL := strings.Replace(server.server.URL, "http://", "ws://", 1)
-	client := NewClient(server.server.Client())
+	client := aoni.NewClient(server.server.Client())
 
-	sio, err := DialSocketIO(t.Context(), client, wsURL, SocketIOConfig{
+	sio, err := DialSocketIO(t.Context(), client, wsURL, Config{
 		ConnectTimeout: 500 * time.Millisecond,
 	})
 	require.NoError(t, err)
@@ -1296,9 +1299,9 @@ func TestReadLoopBinaryBufNil(t *testing.T) {
 	})
 
 	wsURL := strings.Replace(server.server.URL, "http://", "ws://", 1)
-	client := NewClient(server.server.Client())
+	client := aoni.NewClient(server.server.Client())
 
-	sio, err := DialSocketIO(t.Context(), client, wsURL, SocketIOConfig{
+	sio, err := DialSocketIO(t.Context(), client, wsURL, Config{
 		ConnectTimeout: 500 * time.Millisecond,
 	})
 	require.NoError(t, err)
@@ -1310,7 +1313,7 @@ func TestReadLoopBinaryBufNil(t *testing.T) {
 func TestDispatchPacketErrors(t *testing.T) {
 	t.Parallel()
 
-	sio := &SocketIOConn{}
+	sio := &Conn{}
 
 	sio.handleSIOPacket([]byte("2"))
 	sio.handleSIOPacket([]byte("2{}"))
@@ -1363,9 +1366,9 @@ func TestNamespaceSocket_EmitAndAck(t *testing.T) {
 	})
 
 	wsURL := strings.Replace(server.server.URL, "http://", "ws://", 1)
-	client := NewClient(server.server.Client())
+	client := aoni.NewClient(server.server.Client())
 
-	sio, err := DialSocketIO(t.Context(), client, wsURL, SocketIOConfig{
+	sio, err := DialSocketIO(t.Context(), client, wsURL, Config{
 		ConnectTimeout: 500 * time.Millisecond,
 	})
 	require.NoError(t, err)
@@ -1411,9 +1414,9 @@ func TestNamespaceSocket_EmitCallback(t *testing.T) {
 	})
 
 	wsURL := strings.Replace(server.server.URL, "http://", "ws://", 1)
-	client := NewClient(server.server.Client())
+	client := aoni.NewClient(server.server.Client())
 
-	sio, err := DialSocketIO(t.Context(), client, wsURL, SocketIOConfig{
+	sio, err := DialSocketIO(t.Context(), client, wsURL, Config{
 		Namespace:      "/",
 		ConnectTimeout: 500 * time.Millisecond,
 	})
@@ -1472,9 +1475,9 @@ func TestNamespaceSocket_EmitBinary(t *testing.T) {
 	})
 
 	wsURL := strings.Replace(server.server.URL, "http://", "ws://", 1)
-	client := NewClient(server.server.Client())
+	client := aoni.NewClient(server.server.Client())
 
-	sio, err := DialSocketIO(t.Context(), client, wsURL, SocketIOConfig{
+	sio, err := DialSocketIO(t.Context(), client, wsURL, Config{
 		Namespace:      "/",
 		ConnectTimeout: 500 * time.Millisecond,
 	})
@@ -1511,9 +1514,9 @@ func TestSocketIO_PingTimeout(t *testing.T) {
 	})
 
 	wsURL := strings.Replace(server.server.URL, "http://", "ws://", 1)
-	client := NewClient(server.server.Client())
+	client := aoni.NewClient(server.server.Client())
 
-	sio, err := DialSocketIO(t.Context(), client, wsURL, SocketIOConfig{
+	sio, err := DialSocketIO(t.Context(), client, wsURL, Config{
 		Reconnection:      true,
 		ReconnectionDelay: 10 * time.Millisecond,
 		ConnectTimeout:    500 * time.Millisecond,
@@ -1551,9 +1554,9 @@ func TestSocketIO_ReconnectFailed(t *testing.T) {
 	})
 
 	wsURL := strings.Replace(server.server.URL, "http://", "ws://", 1)
-	client := NewClient(server.server.Client())
+	client := aoni.NewClient(server.server.Client())
 
-	sio, err := DialSocketIO(t.Context(), client, wsURL, SocketIOConfig{
+	sio, err := DialSocketIO(t.Context(), client, wsURL, Config{
 		Reconnection:         true,
 		ReconnectionAttempts: 1,
 		ReconnectionDelay:    10 * time.Millisecond,
@@ -1587,9 +1590,9 @@ func TestSocketIO_CloseMultipleTimes(t *testing.T) {
 	})
 
 	wsURL := strings.Replace(server.server.URL, "http://", "ws://", 1)
-	client := NewClient(server.server.Client())
+	client := aoni.NewClient(server.server.Client())
 
-	sio, err := DialSocketIO(t.Context(), client, wsURL, SocketIOConfig{
+	sio, err := DialSocketIO(t.Context(), client, wsURL, Config{
 		ConnectTimeout: 500 * time.Millisecond,
 	})
 	require.NoError(t, err)
@@ -1623,4 +1626,12 @@ func TestReadEIOPacketCtx_ConnClosed(t *testing.T) {
 
 	_, _, err = readEIOPacketCtx(t.Context(), conn)
 	assert.Error(t, err)
+}
+
+func TestSocketIOMaxSizes(t *testing.T) {
+	t.Parallel()
+
+	assert.Equal(t, 64, maxBinaryAttachments)
+	assert.Equal(t, 32*1024*1024, maxBinaryBufferSize)
+	assert.Equal(t, 8*1024*1024, maxEIOPacketSize)
 }

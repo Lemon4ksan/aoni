@@ -2,11 +2,10 @@
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
-package aoni
+package ws
 
 import (
 	"context"
-	"crypto/tls"
 	"errors"
 	"fmt"
 	"maps"
@@ -14,11 +13,12 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
-	"time"
 
 	"github.com/gorilla/websocket"
 	"github.com/lemon4ksan/miyako/generic"
 	utls "github.com/refraction-networking/utls"
+
+	"github.com/lemon4ksan/aoni"
 )
 
 var (
@@ -63,22 +63,15 @@ func parseWSURL(rawURL string) (*parsedURL, error) {
 //
 // The returned net.Conn is a full-duplex byte stream over WebSocket.
 // For wss:// connections, the TLS handshake uses the client's configured
-// browser fingerprint (via [Client.WithTLSFingerprint]), and JA4 fingerprints
+// browser fingerprint (via WithClientTLSFingerprint), and JA4 fingerprints
 // are computed during the handshake.
 //
-// Use [TraceJA4] to capture both TLS (JA4) and HTTP (JA4H) fingerprints:
-//
-//	info := &aoni.TraceInfo{}
-//	wsConn, resp, err := aoni.DialWebSocket(ctx, client, "wss://example.com/ws",
-//	    aoni.WithHeader("Origin", "https://example.com"),
-//	    aoni.TraceJA4(info),
-//	)
-//	fmt.Println(info.JA4.JA4) // TLS fingerprint from the WebSocket handshake
+// Use TraceJA4 to capture both TLS (JA4) and HTTP (JA4H) fingerprints.
 func DialWebSocket(
 	ctx context.Context,
-	c *Client,
+	c *aoni.Client,
 	targetURL string,
-	mods ...RequestModifier,
+	mods ...aoni.RequestModifier,
 ) (net.Conn, *http.Response, error) {
 	parsed, err := parseWSURL(targetURL)
 	if err != nil {
@@ -92,9 +85,9 @@ func DialWebSocket(
 		return nil, nil, fmt.Errorf("aoni: failed to create ws request: %w", err)
 	}
 
-	maps.Copy(tmpReq.Header, c.defaults.Headers)
+	maps.Copy(tmpReq.Header, c.Defaults().Headers)
 
-	tmpReq = c.initRequestConfig(tmpReq)
+	tmpReq = c.InitRequestConfig(tmpReq)
 
 	generic.ApplyOptions(tmpReq, mods...)
 
@@ -105,9 +98,9 @@ func DialWebSocket(
 	var baseConn net.Conn
 	switch parsed.scheme {
 	case "wss":
-		baseConn, err = c.dialTLSForWS(ctx, addr)
+		baseConn, err = c.DialTLSForWS(ctx, addr)
 	default:
-		baseConn, err = c.dialPlainForWS(ctx, addr)
+		baseConn, err = c.DialPlainForWS(ctx, addr)
 	}
 
 	if err != nil {
@@ -145,116 +138,6 @@ func DialWebSocket(
 
 	// HTTP/1.1 Upgrade via gorilla/websocket with dummy dialer.
 	return dialWSUpgrade(ctx, baseConn, targetURL, header)
-}
-
-// dialTLSForWS dials a TLS connection, routing through the transport's
-// DialTLSContext when available (which handles proxy tunneling and uTLS
-// fingerprinting). Falls back to direct dialing when no transport exists.
-func (c *Client) dialTLSForWS(ctx context.Context, addr string) (net.Conn, error) {
-	// If the transport has DialTLSContext (set by WithTLSFingerprint or
-	// proxy-aware transport), use it directly - this preserves proxy routing.
-	if tr := c.Transport(); tr != nil && tr.DialTLSContext != nil {
-		network := "tcp"
-		return tr.DialTLSContext(ctx, network, addr)
-	}
-
-	browser := c.browserID()
-	if browser != BrowserNone || c.fingerprint.TLSClientHelloID != nil {
-		var proxyURL *url.URL
-		if c.network.TransportProxy != nil {
-			proxyURL, _ = c.network.TransportProxy(&http.Request{URL: &url.URL{Host: addr}})
-		}
-
-		return dialTLSWithUTLS(
-			ctx,
-			"tcp",
-			addr,
-			browser,
-			c.fingerprint.TLSClientHelloID,
-			c.network.SourceRotator,
-			c.network.DNSResolver,
-			c.fingerprint.JA4Callback,
-			c.tlsClientConfig(),
-			proxyURL,
-		)
-	}
-
-	if tr := c.Transport(); tr != nil && tr.DialContext != nil {
-		return tr.DialContext(ctx, "tcp", addr)
-	}
-
-	return dialStandardTLS(ctx, addr)
-}
-
-// dialPlainForWS dials a plain TCP connection, routing through the transport's
-// DialContext when available (which handles proxy tunneling).
-func (c *Client) dialPlainForWS(ctx context.Context, addr string) (net.Conn, error) {
-	var (
-		conn net.Conn
-		err  error
-	)
-
-	if tr := c.Transport(); tr != nil && tr.DialContext != nil {
-		conn, err = tr.DialContext(ctx, "tcp", addr)
-	} else {
-		conn, err = happyEyeballsDial(
-			ctx,
-			"tcp",
-			addr,
-			c.network.HappyEyeballsDelay,
-			c.network.SSRFGuard,
-			c.network.SourceRotator,
-			c.network.DNSResolver,
-		)
-	}
-
-	if err != nil {
-		return nil, err
-	}
-
-	if val := ctx.Value(fragmentCtxKey{}); val != nil {
-		if cfg, ok := val.(FragmentConfig); ok {
-			conn = wrapWithFragmentation(conn, cfg)
-		}
-	}
-
-	return conn, nil
-}
-
-// dialStandardTLS dials using Go's standard net.Dialer (no fingerprint, no proxy).
-func dialStandardTLS(ctx context.Context, addr string) (net.Conn, error) {
-	dialer := &net.Dialer{Timeout: 30 * time.Second}
-	return dialer.DialContext(ctx, "tcp", addr)
-}
-
-// browserID returns the configured BrowserID. When the client uses a
-// ProxyRotator or LoadBalancer as its HTTPDoer, the BrowserID is stored
-// directly on the Client struct by WithTLSFingerprint.
-func (c *Client) browserID() BrowserID {
-	// Check the stored browser ID first (works with any HTTPDoer type).
-	if c.fingerprint.BrowserID != BrowserNone {
-		return c.fingerprint.BrowserID
-	}
-
-	// Fallback: check if the transport has DialTLSContext set (legacy path).
-	if httpClient, ok := c.engine.(*http.Client); ok {
-		if tr, ok := httpClient.Transport.(*http.Transport); ok {
-			if tr != nil && tr.DialTLSContext != nil {
-				return BrowserChrome
-			}
-		}
-	}
-
-	return BrowserNone
-}
-
-// tlsClientConfig returns the transport's TLS client config.
-func (c *Client) tlsClientConfig() *tls.Config {
-	if tr := c.Transport(); tr != nil && tr.TLSClientConfig != nil {
-		return tr.TLSClientConfig.Clone()
-	}
-
-	return nil
 }
 
 // dialWSUpgrade performs an HTTP/1.1 WebSocket upgrade using gorilla/websocket
@@ -296,10 +179,10 @@ type DialWebSocketConfig struct {
 // DialWebSocketWithConfig is like [DialWebSocket] but allows custom buffer sizes.
 func DialWebSocketWithConfig(
 	ctx context.Context,
-	c *Client,
+	c *aoni.Client,
 	targetURL string,
 	config DialWebSocketConfig,
-	mods ...RequestModifier,
+	mods ...aoni.RequestModifier,
 ) (net.Conn, *http.Response, error) {
 	parsed, err := parseWSURL(targetURL)
 	if err != nil {
@@ -311,9 +194,9 @@ func DialWebSocketWithConfig(
 		return nil, nil, fmt.Errorf("aoni: failed to create ws request: %w", err)
 	}
 
-	maps.Copy(tmpReq.Header, c.defaults.Headers)
+	maps.Copy(tmpReq.Header, c.Defaults().Headers)
 
-	tmpReq = c.initRequestConfig(tmpReq)
+	tmpReq = c.InitRequestConfig(tmpReq)
 
 	generic.ApplyOptions(tmpReq, mods...)
 
@@ -323,9 +206,9 @@ func DialWebSocketWithConfig(
 	var baseConn net.Conn
 	switch parsed.scheme {
 	case "wss":
-		baseConn, err = c.dialTLSForWS(ctx, addr)
+		baseConn, err = c.DialTLSForWS(ctx, addr)
 	default:
-		baseConn, err = c.dialPlainForWS(ctx, addr)
+		baseConn, err = c.DialPlainForWS(ctx, addr)
 	}
 
 	if err != nil {

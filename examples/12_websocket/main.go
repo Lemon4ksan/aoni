@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/lemon4ksan/aoni"
+	"github.com/lemon4ksan/aoni/ws"
 )
 
 func main() {
@@ -26,7 +27,7 @@ func main() {
 	)
 
 	// Establish a WebSocket connection
-	conn, resp, err := aoni.DialWebSocket(ctx, client, "wss://echo.websocket.org",
+	conn, resp, err := ws.DialWebSocket(ctx, client, "wss://echo.websocket.org",
 		aoni.WithHeader("Origin", "https://example.com"),
 	)
 	if err != nil {

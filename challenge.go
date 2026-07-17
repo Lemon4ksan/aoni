@@ -26,15 +26,6 @@ type ChallengeSolver interface {
 // It returns true and the associated error if a challenge is detected.
 type ChallengeDetector func(resp *http.Response) (bool, error)
 
-// WithChallengeSolver returns a clone of c configured with the specified ChallengeSolver.
-func (c *Client) WithChallengeSolver(solver ChallengeSolver) *Client {
-	newClient := c.Clone()
-	newClient.defaults.ChallengeSolver = solver
-	newClient.rebuildChain()
-
-	return newClient
-}
-
 // DetectCloudflareChallenge checks if the response is a Cloudflare WAF/JS challenge.
 func DetectCloudflareChallenge(resp *http.Response) (bool, error) {
 	if resp == nil {

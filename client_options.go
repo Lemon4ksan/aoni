@@ -358,7 +358,7 @@ func WithClientBeforeRequest(hook func(req *http.Request)) ClientOption {
 // WithClientAfterResponse registers a hook running after every request completion.
 func WithClientAfterResponse(hook func(resp *http.Response, err error)) ClientOption {
 	return func(c *Client) {
-		c.defaults.AfterResponse = append(c.defaults.AfterResponse, hook) //nolint:gosec
+		c.defaults.AfterResponse = append(c.defaults.AfterResponse, hook) //nolint:bodyclose
 	}
 }
 

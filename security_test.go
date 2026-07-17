@@ -162,20 +162,6 @@ func TestDoHResolver_QueryEncoding(t *testing.T) {
 	assert.Contains(t, capturedURL, "type=1")
 }
 
-func TestWebSocketMaxFrameSize(t *testing.T) {
-	t.Parallel()
-
-	assert.Equal(t, 16*1024*1024, maxWebSocketFrameSize)
-}
-
-func TestSocketIOMaxBinaryAttachments(t *testing.T) {
-	t.Parallel()
-
-	assert.Equal(t, 64, maxBinaryAttachments)
-	assert.Equal(t, 32*1024*1024, maxBinaryBufferSize)
-	assert.Equal(t, 8*1024*1024, maxEIOPacketSize)
-}
-
 func TestRedactHeaders(t *testing.T) {
 	t.Parallel()
 

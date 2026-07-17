@@ -2,7 +2,7 @@
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
-package aoni
+package ws
 
 import (
 	"context"
@@ -17,6 +17,8 @@ import (
 	"github.com/gorilla/websocket"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/lemon4ksan/aoni"
 )
 
 func TestDialWebSocket_PlainWS(t *testing.T) {
@@ -48,12 +50,12 @@ func TestDialWebSocket_PlainWS(t *testing.T) {
 
 	wsURL := "ws" + strings.TrimPrefix(server.URL, "http")
 
-	client := NewClient(nil)
+	client := aoni.NewClient(nil)
 	wsConn, resp, err := DialWebSocket(
 		context.Background(),
 		client,
 		wsURL,
-		WithHeader("Origin", "http://localhost"),
+		aoni.WithHeader("Origin", "http://localhost"),
 	)
 	require.NoError(t, err)
 	require.NotNil(t, resp)
@@ -96,7 +98,7 @@ func TestDialWebSocket_PlainAndTLS(t *testing.T) {
 	server := httptest.NewServer(handler)
 	defer server.Close()
 
-	client := NewClient(nil)
+	client := aoni.NewClient(nil)
 	wsURL := "ws" + strings.TrimPrefix(server.URL, "http")
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -148,14 +150,14 @@ func TestDialWebSocket_WithTraceJA4(t *testing.T) {
 
 	wsURL := "ws" + strings.TrimPrefix(server.URL, "http")
 
-	client := NewClient(nil)
-	info := &TraceInfo{}
+	client := aoni.NewClient(nil)
+	info := &aoni.TraceInfo{}
 
 	wsConn, _, err := DialWebSocket(
 		context.Background(),
 		client,
 		wsURL,
-		TraceJA4(info),
+		aoni.TraceJA4(info),
 	)
 	require.NoError(t, err)
 
@@ -168,7 +170,7 @@ func TestDialWebSocket_WithTraceJA4(t *testing.T) {
 func TestDialWebSocket_InvalidURL(t *testing.T) {
 	t.Parallel()
 
-	client := NewClient(nil)
+	client := aoni.NewClient(nil)
 	_, _, err := DialWebSocket(context.Background(), client, "http://invalid-scheme.com")
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "unsupported websocket scheme")
@@ -193,7 +195,7 @@ func TestDialWebSocket_WithConfig(t *testing.T) {
 	server := httptest.NewServer(handler)
 	defer server.Close()
 
-	client := NewClient(nil)
+	client := aoni.NewClient(nil)
 	wsURL := "ws" + strings.TrimPrefix(server.URL, "http")
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -236,9 +238,9 @@ func TestDialWebSocket_PlainWithFragmentation(t *testing.T) {
 	defer server.Close()
 
 	wsURL := "ws" + strings.TrimPrefix(server.URL, "http")
-	client := NewClient(nil)
+	client := aoni.NewClient(nil)
 
-	fragCfg := FragmentConfig{
+	fragCfg := aoni.FragmentConfig{
 		ChunkSize: 2,
 		MaxDelay:  1 * time.Millisecond,
 	}
@@ -247,7 +249,7 @@ func TestDialWebSocket_PlainWithFragmentation(t *testing.T) {
 		context.Background(),
 		client,
 		wsURL,
-		WithFragmentation(fragCfg),
+		aoni.WithFragmentation(fragCfg),
 	)
 	require.NoError(t, err)
 	assert.NotNil(t, resp)
@@ -280,18 +282,18 @@ func TestDialWebSocket_TLSFingerprint(t *testing.T) {
 	server := httptest.NewTLSServer(handler)
 	defer server.Close()
 
-	client := NewClient(nil)
+	client := aoni.NewClient(nil)
 	// Initialize TLSClientConfig before configuring browser profile
 	client.Transport().TLSClientConfig = server.Client().Transport.(*http.Transport).TLSClientConfig.Clone()
-	client = client.With(WithClientTLSFingerprint(BrowserChrome))
+	client = client.With(aoni.WithClientTLSFingerprint(aoni.BrowserChrome))
 
 	wsURL := "wss" + strings.TrimPrefix(server.URL, "https")
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	info := &TraceInfo{}
-	conn, resp, err := DialWebSocket(ctx, client, wsURL, TraceJA4(info))
+	info := &aoni.TraceInfo{}
+	conn, resp, err := DialWebSocket(ctx, client, wsURL, aoni.TraceJA4(info))
 	require.NoError(t, err)
 	assert.NotNil(t, conn)
 	assert.Equal(t, http.StatusSwitchingProtocols, resp.StatusCode)
@@ -324,7 +326,7 @@ func TestDialWebSocket_TLSCustomDialTLSContext(t *testing.T) {
 
 	wssURL := "wss" + strings.TrimPrefix(server.URL, "https")
 
-	client := NewClient(nil)
+	client := aoni.NewClient(nil)
 	dialTLSContextCalled := false
 	client.Transport().DialTLSContext = func(ctx context.Context, network, addr string) (net.Conn, error) {
 		dialTLSContextCalled = true
@@ -379,7 +381,7 @@ func TestDialWebSocket_TLSCustomDialContext(t *testing.T) {
 
 	wsURL := "ws" + strings.TrimPrefix(server.URL, "http")
 
-	client := NewClient(nil)
+	client := aoni.NewClient(nil)
 	dialContextCalled := false
 	client.Transport().DialContext = func(ctx context.Context, network, addr string) (net.Conn, error) {
 		dialContextCalled = true
@@ -430,7 +432,7 @@ func TestDialWebSocket_PlainCustomDialContext(t *testing.T) {
 
 	wsURL := "ws" + strings.TrimPrefix(server.URL, "http")
 
-	client := NewClient(nil)
+	client := aoni.NewClient(nil)
 	dialContextCalled := false
 	client.Transport().DialContext = func(ctx context.Context, network, addr string) (net.Conn, error) {
 		dialContextCalled = true
@@ -471,7 +473,7 @@ func TestDialWebSocket_TLSH2HandshakeFailure(t *testing.T) {
 	wssURL := "wss" + strings.TrimPrefix(server.URL, "https")
 
 	// Negotiate h2 with a Chrome browser profile setup
-	client := NewClient(nil, WithClientTLSFingerprint(BrowserChrome))
+	client := aoni.NewClient(nil, aoni.WithClientTLSFingerprint(aoni.BrowserChrome))
 	client.Transport().TLSClientConfig = &tls.Config{
 		InsecureSkipVerify: true,
 	}
