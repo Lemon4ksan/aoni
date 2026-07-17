@@ -203,7 +203,9 @@ func TestRetryOnTransientErrors(t *testing.T) {
 		t.Parallel()
 
 		_, err := net.DialTimeout("tcp", "192.0.2.1:1", time.Nanosecond)
-		assert.True(t, cond(nil, err))
+		if !assert.True(t, cond(nil, err)) {
+			t.Logf("Actual error: %v (type: %T)", err, err)
+		}
 	})
 
 	t.Run("connection_refused_string_returns_true", func(t *testing.T) {

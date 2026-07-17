@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/lemon4ksan/aoni"
+	"github.com/lemon4ksan/aoni/inspector"
 )
 
 func main() {
@@ -25,9 +26,11 @@ func main() {
 	fmt.Println("Starting traffic inspector at http://127.0.0.1:8080")
 	fmt.Println("==================================================")
 
-	if err := client.EnableInspector("127.0.0.1:8080"); err != nil {
+	client, inspector, err := inspector.Enable(client, "127.0.0.1:8080")
+	if err != nil {
 		panic(err)
 	}
+	defer inspector.Close()
 
 	fmt.Println("\n>>> ACTION REQUIRED <<<")
 	fmt.Println("Open http://127.0.0.1:8080 in your browser to view the dashboard!")

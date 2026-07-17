@@ -41,6 +41,11 @@ type ClientHelloSpecProvider interface {
 	ClientHelloSpec() (*utls.ClientHelloSpec, error)
 }
 
+// TrafficInspector defines the interface for capturing and logging request trace history.
+type TrafficInspector interface {
+	Capture(req *http.Request, resp *http.Response, err error, traceInfo *TraceInfo)
+}
+
 // SocketController defines a hook callback interface to directly intercept and configure
 // TCP sockets (file descriptors) at the dial phase before the SYN packet is sent.
 type SocketController interface {
@@ -355,7 +360,7 @@ type ClientDefaults struct {
 	ChallengeDetector ChallengeDetector
 
 	// Inspector logs and exposes request trace history to a local developer dashboard.
-	Inspector *TrafficInspector
+	Inspector TrafficInspector
 
 	// MultiReadThreshold determines the size limit (in bytes) under which response bodies are cached in memory for multiple reads.
 	MultiReadThreshold int64
@@ -1057,8 +1062,17 @@ func (c *Client) WithDNSResolver(resolver DNSResolver) *Client {
 }
 
 // Inspector returns the configured [TrafficInspector] if enabled.
-func (c *Client) Inspector() *TrafficInspector {
+func (c *Client) Inspector() TrafficInspector {
 	return c.defaults.Inspector
+}
+
+// WithInspector returns a clone of c with the specified TrafficInspector.
+func (c *Client) WithInspector(inspector TrafficInspector) *Client {
+	newClient := c.Clone()
+	newClient.defaults.Inspector = inspector
+	newClient.rebuildChain()
+
+	return newClient
 }
 
 // WithDoT returns a clone of c that resolves DNS via

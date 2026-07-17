@@ -158,6 +158,16 @@ func TestCacheMiddleware(t *testing.T) {
 	assert.Equal(t, 1, hits) // Only 1 request hit the server, second was cached
 }
 
+type mockInspector struct {
+	capturedReq  *http.Request
+	capturedResp *http.Response
+}
+
+func (m *mockInspector) Capture(req *http.Request, resp *http.Response, err error, traceInfo *TraceInfo) {
+	m.capturedReq = req
+	m.capturedResp = resp
+}
+
 func TestSensitiveDataRedactor(t *testing.T) {
 	t.Parallel()
 
@@ -167,7 +177,7 @@ func TestSensitiveDataRedactor(t *testing.T) {
 	}))
 	defer server.Close()
 
-	inspector := NewTrafficInspector("127.0.0.1:0")
+	inspector := &mockInspector{}
 	client := NewClient(nil).
 		WithBaseURL(server.URL).
 		WithPipelineWrapper(func(c *Client, engine HTTPDoer) HTTPDoer {
@@ -183,11 +193,12 @@ func TestSensitiveDataRedactor(t *testing.T) {
 
 	defer resp.Body.Close()
 
-	// Verify headers are redacted in inspector history
-	history := inspector.GetRequests()
-	require.Len(t, history, 1)
-	assert.Equal(t, "[REDACTED]", history[0].RequestHeaders["Authorization"])
-	assert.Equal(t, "[REDACTED]", history[0].ResponseHeaders["Set-Cookie"])
+	// Verify headers are marked for redaction in the context of the captured request
+	cfg, ok := inspector.capturedReq.Context().Value(RedactConfigCtxKey{}).(*RedactConfig)
+	require.True(t, ok)
+	require.NotNil(t, cfg)
+	assert.True(t, cfg.Headers["authorization"])
+	assert.True(t, cfg.Headers["set-cookie"])
 }
 
 func TestHARGenerator(t *testing.T) {

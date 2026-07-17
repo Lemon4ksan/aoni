@@ -560,12 +560,8 @@ func dialH2ExtendedConnect(ctx context.Context, conn net.Conn, targetURL, host s
 		return nil, err
 	}
 
-	if host == "" {
-		host = u.host
-	}
-
 	// Send CONNECT headers
-	if err := h2c.writeConnectHeaders(u, host); err != nil {
+	if err := h2c.writeConnectHeaders(u, generic.Coalesce(host, u.host)); err != nil {
 		return nil, err
 	}
 
@@ -642,14 +638,9 @@ func (c *wsH2Conn) writeConnectHeaders(u *parsedURL, host string) error {
 
 	encoder := hpack.NewEncoder(&buf)
 
-	scheme := "https"
-	if u.scheme == "ws" {
-		scheme = "http"
-	}
-
 	headers := []hpack.HeaderField{
 		{Name: ":method", Value: "CONNECT"},
-		{Name: ":scheme", Value: scheme},
+		{Name: ":scheme", Value: generic.Ternary(u.scheme == "ws", "http", "https")},
 		{Name: ":authority", Value: host},
 		{Name: ":path", Value: u.Path},
 		{Name: ":protocol", Value: "websocket"},

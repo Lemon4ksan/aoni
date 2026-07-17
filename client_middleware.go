@@ -279,7 +279,7 @@ func PacketPaddingMiddleware(cfg *PaddingConfig) Middleware {
 }
 
 // InspectorMiddleware handles trace/JA4 collection and Traffic Inspector logging.
-func InspectorMiddleware(inspector *TrafficInspector) Middleware {
+func InspectorMiddleware(inspector TrafficInspector) Middleware {
 	return func(next HTTPDoer) HTTPDoer {
 		return DoerFunc(func(req *http.Request) (*http.Response, error) {
 			if inspector == nil {
@@ -891,11 +891,13 @@ func CacheMiddleware(store CacheStore, defaultTTL time.Duration) Middleware {
 	}
 }
 
-type redactConfig struct {
+// RedactConfig holds the configuration for redacting sensitive data in requests.
+type RedactConfig struct {
 	Headers map[string]bool
 }
 
-type redactConfigCtxKey struct{}
+// RedactConfigCtxKey is the context key used to store the RedactConfig in the request context.
+type RedactConfigCtxKey struct{}
 
 // SensitiveDataRedactorMiddleware masks sensitive headers such as Authorization or Cookie
 // for the inspector or logs without modifying the actual network request.
@@ -913,7 +915,7 @@ func SensitiveDataRedactorMiddleware(headersToRedact, jsonKeysToRedact []string)
 
 	return func(next HTTPDoer) HTTPDoer {
 		return DoerFunc(func(req *http.Request) (*http.Response, error) {
-			ctx := context.WithValue(req.Context(), redactConfigCtxKey{}, &redactConfig{Headers: headersMap})
+			ctx := context.WithValue(req.Context(), RedactConfigCtxKey{}, &RedactConfig{Headers: headersMap})
 			return next.Do(req.WithContext(ctx))
 		})
 	}
@@ -943,7 +945,7 @@ type HAREntry struct {
 	Time            int64       `json:"time"`
 	Request         HARRequest  `json:"request"`
 	Response        HARResponse `json:"response"`
-	Cache           interface{} `json:"cache"`
+	Cache           any         `json:"cache"`
 	Timings         HARTimings  `json:"timings"`
 }
 
@@ -953,8 +955,8 @@ type HARRequest struct {
 	URL         string           `json:"url"`
 	HTTPVersion string           `json:"httpVersion"`
 	Headers     []HARHeaderField `json:"headers"`
-	Cookies     []interface{}    `json:"cookies"`
-	QueryString []interface{}    `json:"queryString"`
+	Cookies     []any            `json:"cookies"`
+	QueryString []any            `json:"queryString"`
 	HeadersSize int              `json:"headersSize"`
 	BodySize    int64            `json:"bodySize"`
 }
@@ -965,7 +967,7 @@ type HARResponse struct {
 	StatusText  string           `json:"statusText"`
 	HTTPVersion string           `json:"httpVersion"`
 	Headers     []HARHeaderField `json:"headers"`
-	Cookies     []interface{}    `json:"cookies"`
+	Cookies     []any            `json:"cookies"`
 	Content     HARContent       `json:"content"`
 	RedirectURL string           `json:"redirectURL"`
 	HeadersSize int              `json:"headersSize"`
@@ -1066,10 +1068,7 @@ func HARGeneratorMiddleware(gen *HARGenerator) Middleware {
 
 			var bodyBytes []byte
 			if resp.Body != nil {
-				var bodyBuf bytes.Buffer
-
-				tee := io.TeeReader(resp.Body, &bodyBuf)
-				bodyBytes, _ = io.ReadAll(tee)
+				bodyBytes, _ = io.ReadAll(resp.Body)
 
 				_ = resp.Body.Close()
 				resp.Body = io.NopCloser(bytes.NewReader(bodyBytes))
@@ -1083,8 +1082,8 @@ func HARGeneratorMiddleware(gen *HARGenerator) Middleware {
 					URL:         req.URL.String(),
 					HTTPVersion: req.Proto,
 					Headers:     reqHeaders,
-					Cookies:     []interface{}{},
-					QueryString: []interface{}{},
+					Cookies:     []any{},
+					QueryString: []any{},
 					HeadersSize: -1,
 					BodySize:    reqBodySize,
 				},
@@ -1093,7 +1092,7 @@ func HARGeneratorMiddleware(gen *HARGenerator) Middleware {
 					StatusText:  resp.Status,
 					HTTPVersion: resp.Proto,
 					Headers:     respHeaders,
-					Cookies:     []interface{}{},
+					Cookies:     []any{},
 					Content: HARContent{
 						Size:     int64(len(bodyBytes)),
 						MimeType: resp.Header.Get("Content-Type"),

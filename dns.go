@@ -209,8 +209,7 @@ func (r *DoHResolver) query(ctx context.Context, host string, qtype uint16) ([]n
 	var ips []net.IPAddr
 	for _, ans := range apiResp.Answer {
 		if ans.Type == int(qtype) {
-			ip := net.ParseIP(ans.Data)
-			if ip != nil {
+			if ip := net.ParseIP(ans.Data); ip != nil {
 				ips = append(ips, net.IPAddr{IP: ip})
 			}
 		}

@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/lemon4ksan/aoni"
+	"github.com/lemon4ksan/aoni/inspector"
 	"github.com/lemon4ksan/aoni/p0f"
 )
 
@@ -96,9 +97,11 @@ func main() {
 		})
 
 	// Start traffic inspector dashboard.
-	if err := client.EnableInspector("127.0.0.1:9000"); err != nil {
-		log.Printf("[Warning] Failed to start traffic inspector: %v", err)
+	client, inspector, err := inspector.Enable(client, "127.0.0.1:8080")
+	if err != nil {
+		panic(err)
 	}
+	defer inspector.Close()
 
 	// ==========================================
 	// PHASE 3: Custom Pipeline Middleware Wrapper

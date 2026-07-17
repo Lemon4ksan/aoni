@@ -2,7 +2,7 @@
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
-package aoni_test
+package inspector_test
 
 import (
 	"context"
@@ -14,6 +14,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/lemon4ksan/aoni"
+	"github.com/lemon4ksan/aoni/inspector"
 )
 
 func TestTrafficInspector_CaptureAndHistory(t *testing.T) {
@@ -26,14 +27,12 @@ func TestTrafficInspector_CaptureAndHistory(t *testing.T) {
 
 	client := aoni.NewClient(nil)
 
-	err := client.EnableInspector("127.0.0.1:0")
+	client, ins, err := inspector.Enable(client, "127.0.0.1:0")
 	require.NoError(t, err)
-
-	inspector := client.Inspector()
-	require.NotNil(t, inspector)
+	require.NotNil(t, ins)
 
 	t.Cleanup(func() {
-		_ = inspector.Stop()
+		_ = ins.Close()
 	})
 
 	resp, err := client.Request(context.Background(), http.MethodGet, server.URL+"/test-path", func(r *http.Request) {
@@ -43,7 +42,7 @@ func TestTrafficInspector_CaptureAndHistory(t *testing.T) {
 
 	_ = resp.Body.Close()
 
-	requests := inspector.GetRequests()
+	requests := ins.GetRequests()
 	require.Len(t, requests, 1)
 
 	captured := requests[0]
