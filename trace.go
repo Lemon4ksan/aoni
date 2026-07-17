@@ -6,7 +6,6 @@ package aoni
 
 import (
 	"bytes"
-	"context"
 	"crypto/tls"
 	"fmt"
 	"io"
@@ -125,8 +124,7 @@ func TraceJA4(target *TraceInfo) RequestModifier {
 		// dialTLSWithUTLS will write the TLS report to this store during the handshake.
 		// Client.Request will copy it to target after the request completes.
 		store := &ja4ReportStore{target: target}
-		ctx := context.WithValue(req.Context(), ja4ReportCtxKey{}, store)
-		*req = *req.WithContext(ctx)
+		getOrInitRequestConfig(req).JA4ReportStore = store
 
 		// Compute JA4H from request headers (available immediately)
 		target.JA4 = &ja4.Report{JA4H: computeJA4HFromRequest(req)}

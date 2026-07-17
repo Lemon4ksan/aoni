@@ -5,7 +5,6 @@
 package aoni
 
 import (
-	"context"
 	"io"
 	"net/http"
 	"strings"
@@ -262,7 +261,7 @@ func TestFallbackMiddleware(t *testing.T) {
 		req, err := http.NewRequestWithContext(t.Context(), "GET", "http://localhost", nil)
 		require.NoError(t, err)
 
-		req = req.WithContext(context.WithValue(req.Context(), fallbackCtxKey{}, fallback))
+		WithFallback(fallback)(req)
 
 		resp, err := client.Do(req)
 		require.NoError(t, err)
@@ -286,7 +285,7 @@ func TestFallbackMiddleware(t *testing.T) {
 		req, err := http.NewRequestWithContext(t.Context(), "GET", "http://localhost", nil)
 		require.NoError(t, err)
 
-		req = req.WithContext(context.WithValue(req.Context(), fallbackCtxKey{}, fallback))
+		WithFallback(fallback)(req)
 
 		resp, err := client.Do(req)
 		require.NoError(t, err)
@@ -313,7 +312,7 @@ func TestFallbackMiddleware(t *testing.T) {
 		req, err := http.NewRequestWithContext(t.Context(), "GET", "http://localhost", nil)
 		require.NoError(t, err)
 
-		req = req.WithContext(context.WithValue(req.Context(), fallbackCtxKey{}, fallback))
+		WithFallback(fallback)(req)
 
 		resp, err := client.Do(req)
 		require.NoError(t, err)

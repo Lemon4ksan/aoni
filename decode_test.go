@@ -185,7 +185,9 @@ func TestDecoderModifiers(t *testing.T) {
 
 			tt.modifier(req)
 
-			d, ok := req.Context().Value(decoderCtxKey{}).(Decoder)
+			cfg := GetRequestConfig(req.Context())
+			require.NotNil(t, cfg)
+			d, ok := cfg.Decoder.(Decoder)
 			require.True(t, ok)
 
 			// In Go, function values (like DecoderFunc) are not comparable directly.

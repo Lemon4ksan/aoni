@@ -449,8 +449,7 @@ type FallbackFunc func(req *http.Request, origErr error) (*http.Response, error)
 // fallback for this request. See [FallbackMiddleware].
 func WithFallback(f FallbackFunc) RequestModifier {
 	return func(req *http.Request) {
-		ctx := context.WithValue(req.Context(), fallbackCtxKey{}, f)
-		*req = *req.WithContext(ctx)
+		getOrInitRequestConfig(req).Fallback = f
 	}
 }
 
@@ -513,8 +512,9 @@ func FallbackMiddlewareEx(isFailure func(*http.Response, error) bool) Middleware
 		return DoerFunc(func(req *http.Request) (*http.Response, error) {
 			resp, err := next.Do(req)
 			if isFailure(resp, err) {
-				if f, ok := req.Context().Value(fallbackCtxKey{}).(FallbackFunc); ok && f != nil {
-					fallbackResp, fallbackErr := f(req, err)
+				cfg := GetRequestConfig(req.Context())
+				if cfg != nil && cfg.Fallback != nil {
+					fallbackResp, fallbackErr := cfg.Fallback(req, err)
 					if fallbackErr == nil {
 						if resp != nil && resp.Body != nil {
 							_ = resp.Body.Close()

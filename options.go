@@ -70,15 +70,13 @@ func WithQuery(query any) RequestModifier {
 		}
 
 		if err := Validate(query); err != nil {
-			ctx := context.WithValue(req.Context(), queryErrorCtxKey{}, err)
-			*req = *req.WithContext(ctx)
+			getOrInitRequestConfig(req).QueryError = err
 			return
 		}
 
 		qValues, err := StructToValues(query)
 		if err != nil {
-			ctx := context.WithValue(req.Context(), queryErrorCtxKey{}, err)
-			*req = *req.WithContext(ctx)
+			getOrInitRequestConfig(req).QueryError = err
 			return
 		}
 
@@ -209,8 +207,7 @@ func WithJSONBody(payload any) RequestModifier {
 	return func(req *http.Request) {
 		bodyBytes, err := json.Marshal(payload)
 		if err != nil {
-			ctx := context.WithValue(req.Context(), bodyErrorCtxKey{}, err)
-			*req = *req.WithContext(ctx)
+			getOrInitRequestConfig(req).BodyError = err
 			return
 		}
 
@@ -236,8 +233,7 @@ func WithMultipart(fields map[string]string, files map[string]io.Reader) Request
 
 		for k, v := range fields {
 			if err := writer.WriteField(k, v); err != nil {
-				ctx := context.WithValue(req.Context(), bodyErrorCtxKey{}, err)
-				*req = *req.WithContext(ctx)
+				getOrInitRequestConfig(req).BodyError = err
 
 				return
 			}
@@ -246,8 +242,7 @@ func WithMultipart(fields map[string]string, files map[string]io.Reader) Request
 		for key, r := range files {
 			part, err := writer.CreateFormFile(key, key)
 			if err != nil {
-				ctx := context.WithValue(req.Context(), bodyErrorCtxKey{}, err)
-				*req = *req.WithContext(ctx)
+				getOrInitRequestConfig(req).BodyError = err
 
 				return
 			}
@@ -257,16 +252,14 @@ func WithMultipart(fields map[string]string, files map[string]io.Reader) Request
 			bytePool.Put(bufPtr)
 
 			if err != nil {
-				ctx := context.WithValue(req.Context(), bodyErrorCtxKey{}, err)
-				*req = *req.WithContext(ctx)
+				getOrInitRequestConfig(req).BodyError = err
 
 				return
 			}
 		}
 
 		if err := writer.Close(); err != nil {
-			ctx := context.WithValue(req.Context(), bodyErrorCtxKey{}, err)
-			*req = *req.WithContext(ctx)
+			getOrInitRequestConfig(req).BodyError = err
 
 			return
 		}
@@ -289,8 +282,7 @@ func WithOrigin(origin string) RequestModifier {
 // [Client.WithLogger] for output to appear.
 func WithDebug() RequestModifier {
 	return func(req *http.Request) {
-		ctx := context.WithValue(req.Context(), debugCtxKey{}, true)
-		*req = *req.WithContext(ctx)
+		getOrInitRequestConfig(req).Debug = true
 	}
 }
 
@@ -299,8 +291,7 @@ func WithDebug() RequestModifier {
 // ignored when this modifier is present.
 func WithDecoder(d Decoder) RequestModifier {
 	return func(req *http.Request) {
-		ctx := context.WithValue(req.Context(), decoderCtxKey{}, d)
-		*req = *req.WithContext(ctx)
+		getOrInitRequestConfig(req).Decoder = d
 	}
 }
 
@@ -309,8 +300,7 @@ func WithDecoder(d Decoder) RequestModifier {
 // [errors.As] against [APIError].
 func WithErrorModel(target any) RequestModifier {
 	return func(req *http.Request) {
-		ctx := context.WithValue(req.Context(), errorModelCtxKey{}, target)
-		*req = *req.WithContext(ctx)
+		getOrInitRequestConfig(req).ErrorModel = target
 	}
 }
 
@@ -334,8 +324,7 @@ func WithUploadProgress(onProgress ProgressFunc) RequestModifier {
 // total and the Content-Length value.
 func WithDownloadProgress(onProgress ProgressFunc) RequestModifier {
 	return func(req *http.Request) {
-		ctx := context.WithValue(req.Context(), downloadProgressCtxKey{}, onProgress)
-		*req = *req.WithContext(ctx)
+		getOrInitRequestConfig(req).DownloadProgress = onProgress
 	}
 }
 
@@ -343,8 +332,7 @@ func WithDownloadProgress(onProgress ProgressFunc) RequestModifier {
 // request. A duration <= 0 disables hedging for the request.
 func WithHedging(delay time.Duration) RequestModifier {
 	return func(req *http.Request) {
-		ctx := context.WithValue(req.Context(), hedgingCtxKey{}, delay)
-		*req = *req.WithContext(ctx)
+		getOrInitRequestConfig(req).HedgingDelayOverride = &delay
 	}
 }
 
@@ -353,8 +341,7 @@ func WithHedging(delay time.Duration) RequestModifier {
 // headers or status codes in middleware hooks.
 func WithCaptureResponse(target **http.Response) RequestModifier {
 	return func(req *http.Request) {
-		ctx := context.WithValue(req.Context(), capturerCtxKey{}, target)
-		*req = *req.WithContext(ctx)
+		getOrInitRequestConfig(req).Capturer = target
 	}
 }
 
@@ -390,8 +377,7 @@ func WithStreamingMultipart(fields map[string]string, files map[string]io.Reader
 // HTTP/1.1 request. For HTTP/2, use [H2FramedTransport] instead.
 func WithOrderedHeaders(order []string) RequestModifier {
 	return func(req *http.Request) {
-		ctx := context.WithValue(req.Context(), orderedHeadersCtxKey{}, order)
-		*req = *req.WithContext(ctx)
+		getOrInitRequestConfig(req).OrderedHeaders = order
 	}
 }
 
@@ -486,11 +472,11 @@ func (c *Client) WithHTTP3Config(config *QUICMigrationConfig) *Client {
 }
 
 // WithForceHTTP1 returns a [RequestModifier] that advertises only
+// WithForceHTTP1 returns a [RequestModifier] that advertises only
 // http/1.1 in ALPN, preventing the server from upgrading to HTTP/2.
 func WithForceHTTP1() RequestModifier {
 	return func(req *http.Request) {
-		ctx := context.WithValue(req.Context(), alpnOverrideCtxKey{}, []string{"http/1.1"})
-		*req = *req.WithContext(ctx)
+		getOrInitRequestConfig(req).ALPNOverride = []string{"http/1.1"}
 	}
 }
 
@@ -498,16 +484,14 @@ func WithForceHTTP1() RequestModifier {
 // h2 in ALPN, forcing the server to use HTTP/2.
 func WithForceHTTP2() RequestModifier {
 	return func(req *http.Request) {
-		ctx := context.WithValue(req.Context(), alpnOverrideCtxKey{}, []string{"h2"})
-		*req = *req.WithContext(ctx)
+		getOrInitRequestConfig(req).ALPNOverride = []string{"h2"}
 	}
 }
 
 // WithALPN returns a [RequestModifier] that sets custom ALPN protocols.
 func WithALPN(protocols []string) RequestModifier {
 	return func(req *http.Request) {
-		ctx := context.WithValue(req.Context(), alpnOverrideCtxKey{}, protocols)
-		*req = *req.WithContext(ctx)
+		getOrInitRequestConfig(req).ALPNOverride = protocols
 	}
 }
 
@@ -516,8 +500,7 @@ func WithALPN(protocols []string) RequestModifier {
 // TCP/IP fields (TTL, DF, window size) are spoofed to match the specified OS.
 func WithP0fSignature(sig *p0f.Signature) RequestModifier {
 	return func(req *http.Request) {
-		ctx := context.WithValue(req.Context(), p0fSignatureCtxKey{}, sig)
-		*req = *req.WithContext(ctx)
+		getOrInitRequestConfig(req).P0fSignature = sig
 	}
 }
 
@@ -526,10 +509,9 @@ func WithP0fSignature(sig *p0f.Signature) RequestModifier {
 // timeout configured via [Client.WithTimeout].
 func WithTimeout(d time.Duration) RequestModifier {
 	return func(req *http.Request) {
-		ctx, cancel := context.WithTimeout(req.Context(), d)
-		// Attach the cancel function so it is called when the response body is
-		// closed. Store it alongside the request so the transport can invoke it.
-		ctx = context.WithValue(ctx, requestTimeoutCancelCtxKey{}, cancel)
+		ctx, cancel := context.WithTimeout(req.Context(), d) //nolint:gosec
+		cfg := getOrInitRequestConfig(req)
+		cfg.RequestTimeoutCancel = cancel
 		*req = *req.WithContext(ctx)
 	}
 }
@@ -577,15 +559,13 @@ func WithFormBody(payload any) RequestModifier {
 		}
 
 		if err := Validate(payload); err != nil {
-			ctx := context.WithValue(req.Context(), bodyErrorCtxKey{}, err)
-			*req = *req.WithContext(ctx)
+			getOrInitRequestConfig(req).BodyError = err
 			return
 		}
 
 		values, err := StructToValues(payload)
 		if err != nil {
-			ctx := context.WithValue(req.Context(), bodyErrorCtxKey{}, err)
-			*req = *req.WithContext(ctx)
+			getOrInitRequestConfig(req).BodyError = err
 			return
 		}
 

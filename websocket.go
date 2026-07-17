@@ -94,6 +94,8 @@ func DialWebSocket(
 
 	maps.Copy(tmpReq.Header, c.defaults.Headers)
 
+	tmpReq = c.initRequestConfig(tmpReq)
+
 	generic.ApplyOptions(tmpReq, mods...)
 
 	ctx = tmpReq.Context()
@@ -310,6 +312,8 @@ func DialWebSocketWithConfig(
 	}
 
 	maps.Copy(tmpReq.Header, c.defaults.Headers)
+
+	tmpReq = c.initRequestConfig(tmpReq)
 
 	generic.ApplyOptions(tmpReq, mods...)
 

@@ -475,8 +475,13 @@ func handleResponse(resp *http.Response, target any, requester Requester) error 
 	}
 
 	if resp.Request != nil {
-		if targetPtr, ok := resp.Request.Context().Value(capturerCtxKey{}).(**http.Response); ok {
-			*targetPtr = resp
+		cfg := GetRequestConfig(resp.Request.Context())
+		if cfg != nil {
+			if targetPtr, ok := cfg.Capturer.(**http.Response); ok && targetPtr != nil {
+				*targetPtr = resp
+			} else {
+				defer closeResponse(resp)
+			}
 		} else {
 			defer closeResponse(resp)
 		}
@@ -484,22 +489,25 @@ func handleResponse(resp *http.Response, target any, requester Requester) error 
 		defer closeResponse(resp)
 	}
 
-	if resp.Request != nil && resp.Request.Context().Value(debugCtxKey{}) != nil {
-		reqDump, _ := httputil.DumpRequestOut(resp.Request, true)
-		respDump, _ := httputil.DumpResponse(resp, true)
+	if resp.Request != nil {
+		cfg := GetRequestConfig(resp.Request.Context())
+		if cfg != nil && cfg.Debug {
+			reqDump, _ := httputil.DumpRequestOut(resp.Request, true)
+			respDump, _ := httputil.DumpResponse(resp, true)
 
-		reqDump = redactHeaders(reqDump)
-		respDump = redactHeaders(respDump)
+			reqDump = redactHeaders(reqDump)
+			respDump = redactHeaders(respDump)
 
-		if logger, ok := requester.(interface{ Logger() Logger }); ok {
-			logger.Logger().Debug("Aoni HTTP Diagnostic", "request", string(reqDump), "response", string(respDump))
-		} else {
-			fmt.Fprintf(
-				os.Stderr,
-				"\n--- HTTP DEBUG ---\n%s\n%s\n------------------\n",
-				string(reqDump),
-				string(respDump),
-			)
+			if logger, ok := requester.(interface{ Logger() Logger }); ok {
+				logger.Logger().Debug("Aoni HTTP Diagnostic", "request", string(reqDump), "response", string(respDump))
+			} else {
+				fmt.Fprintf(
+					os.Stderr,
+					"\n--- HTTP DEBUG ---\n%s\n%s\n------------------\n",
+					string(reqDump),
+					string(respDump),
+				)
+			}
 		}
 	}
 
@@ -512,8 +520,10 @@ func handleResponse(resp *http.Response, target any, requester Requester) error 
 
 	decoder := JSONDecoder
 	if resp.Request != nil {
-		if d, ok := resp.Request.Context().Value(decoderCtxKey{}).(Decoder); ok {
-			decoder = d
+		if cfg := GetRequestConfig(resp.Request.Context()); cfg != nil && cfg.Decoder != nil {
+			if d, ok := cfg.Decoder.(Decoder); ok {
+				decoder = d
+			}
 		}
 	}
 
@@ -567,9 +577,9 @@ func handleResponse(resp *http.Response, target any, requester Requester) error 
 
 		apiErr := &APIError{StatusCode: resp.StatusCode, Body: bodyBytes}
 		if resp.Request != nil {
-			if errModel := resp.Request.Context().Value(errorModelCtxKey{}); errModel != nil {
-				if err := json.Unmarshal(bodyBytes, errModel); err == nil {
-					apiErr.Model = errModel
+			if cfg := GetRequestConfig(resp.Request.Context()); cfg != nil && cfg.ErrorModel != nil {
+				if err := json.Unmarshal(bodyBytes, cfg.ErrorModel); err == nil {
+					apiErr.Model = cfg.ErrorModel
 				}
 			}
 		}

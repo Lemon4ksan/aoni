@@ -777,8 +777,9 @@ func TestAoniTransport_RoundTrip_TraceContext(t *testing.T) {
 	t.Parallel()
 
 	mockDoer := DoerFunc(func(req *http.Request) (*http.Response, error) {
-		if store, ok := req.Context().Value(ja4ReportCtxKey{}).(*ja4ReportStore); ok {
-			store.report = &ja4.Report{JA4: "t13d1516h2_mock_fingerprint"}
+		cfg := GetRequestConfig(req.Context())
+		if cfg != nil && cfg.JA4ReportStore != nil {
+			cfg.JA4ReportStore.report = &ja4.Report{JA4: "t13d1516h2_mock_fingerprint"}
 		}
 
 		return &http.Response{

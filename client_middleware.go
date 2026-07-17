@@ -117,11 +117,12 @@ func DecompressionAndTranscodingMiddleware() Middleware {
 			}
 
 			// Trigger download progress callback.
-			if onProgress, ok := req.Context().Value(downloadProgressCtxKey{}).(ProgressFunc); ok && onProgress != nil {
+			cfg := GetRequestConfig(req.Context())
+			if cfg != nil && cfg.DownloadProgress != nil {
 				resp.Body = &progressReader{
 					reader:     resp.Body,
 					total:      resp.ContentLength,
-					onProgress: onProgress,
+					onProgress: cfg.DownloadProgress,
 				}
 			}
 
@@ -199,21 +200,15 @@ func MultiReadBodyMiddleware(threshold int64, disableDisk bool) Middleware {
 				return resp, err
 			}
 
-			var activeThreshold int64
-			if val := req.Context().Value(multiReadCtxKey{}); val != nil {
-				activeThreshold = val.(int64)
-			} else {
-				activeThreshold = threshold
+			activeThreshold := threshold
+
+			activeDisableDisk := disableDisk
+			if cfg := GetRequestConfig(req.Context()); cfg != nil {
+				activeThreshold = cfg.MultiReadThreshold
+				activeDisableDisk = cfg.MultiReadDisableDisk
 			}
 
 			if activeThreshold > 0 {
-				var activeDisableDisk bool
-				if val := req.Context().Value(multiReadDisableDiskCtxKey{}); val != nil {
-					activeDisableDisk = val.(bool)
-				} else {
-					activeDisableDisk = disableDisk
-				}
-
 				mBody, err := newMultiReadBody(resp.Body, activeThreshold, activeDisableDisk)
 				if err != nil {
 					_ = resp.Body.Close()
@@ -339,48 +334,24 @@ func ContextMiddleware(c *Client) Middleware {
 	return func(next HTTPDoer) HTTPDoer {
 		return DoerFunc(func(req *http.Request) (*http.Response, error) {
 			ctx := req.Context()
-			if c.network.SSRFGuard {
-				ctx = context.WithValue(ctx, ssrfGuardCtxKey{}, true)
-			}
 
-			ctx = context.WithValue(ctx, happyEyeballsDelayCtxKey{}, c.network.HappyEyeballsDelay)
-
-			if c.fingerprint.JA4Callback != nil {
-				ctx = context.WithValue(ctx, ja4CallbackCtxKey{}, c.fingerprint.JA4Callback)
-			}
-
-			if c.fingerprint.P0fSignature != nil {
-				ctx = context.WithValue(ctx, p0fSignatureCtxKey{}, c.fingerprint.P0fSignature)
-			}
-
-			if c.network.ProxyDNS {
-				ctx = context.WithValue(ctx, proxyDNSCtxKey{}, true)
-				if c.network.ProxyAddr != nil {
-					ctx = context.WithValue(ctx, proxyAddrCtxKey{}, c.network.ProxyAddr)
+			cfg := GetRequestConfig(ctx)
+			if cfg != nil {
+				if cfg.SessionCache != nil && cfg.ProxyAddr != nil {
+					cfg.SessionCache.SetProxyKey(cfg.ProxyAddr.String())
 				}
-			}
 
-			if c.network.ProxyAddr != nil {
-				ctx = context.WithValue(ctx, proxyCtxKey{}, c.network.ProxyAddr.String())
-			}
-
-			if c.fingerprint.SessionCache != nil {
-				ctx = context.WithValue(ctx, sessionCacheCtxKey{}, c.fingerprint.SessionCache)
-				if c.network.ProxyAddr != nil {
-					c.fingerprint.SessionCache.SetProxyKey(c.network.ProxyAddr.String())
+				if cfg.ProxyAddr != nil {
+					ctx = context.WithValue(ctx, proxyCtxKey{}, cfg.ProxyAddr.String())
 				}
-			}
-
-			if c.fingerprint.PacketPadding != nil {
-				ctx = context.WithValue(ctx, packetPaddingCtxKey{}, c.fingerprint.PacketPadding)
 			}
 
 			req = req.WithContext(ctx)
 			resp, err := next.Do(req)
 
 			// Copy TLS JA4 report from the dialer store to the target TraceInfo.
-			if store, ok := req.Context().Value(ja4ReportCtxKey{}).(*ja4ReportStore); ok && store.target != nil &&
-				store.report != nil {
+			if cfg != nil && cfg.JA4ReportStore != nil && cfg.JA4ReportStore.report != nil {
+				store := cfg.JA4ReportStore
 				store.target.JA4.JA4 = store.report.JA4
 				store.target.JA4.Protocol = store.report.Protocol
 				store.target.JA4.Version = store.report.Version
@@ -402,9 +373,11 @@ func HedgingMiddleware(defaultDelay time.Duration, dynamicHedging *DynamicHedgin
 			requestStart := time.Now()
 
 			var delay time.Duration
+
+			cfg := GetRequestConfig(req.Context())
 			switch {
-			case req.Context().Value(hedgingCtxKey{}) != nil:
-				delay = req.Context().Value(hedgingCtxKey{}).(time.Duration)
+			case cfg != nil && cfg.HedgingDelayOverride != nil:
+				delay = *cfg.HedgingDelayOverride
 			case dynamicHedging != nil:
 				delay = dynamicHedging.ComputeDelay()
 			default:
@@ -737,8 +710,14 @@ func ProxyFailoverMiddleware(proxies []string, retryLimit int) Middleware {
 
 				mu.Unlock()
 
-				ctx := context.WithValue(req.Context(), proxyOverrideCtxKey{}, proxy.String())
-				newReq := req.WithContext(ctx)
+				newReq := req
+
+				cfg := GetRequestConfig(req.Context())
+				if cfg != nil {
+					cfg.ProxyAddr = proxy
+					ctx := context.WithValue(req.Context(), proxyCtxKey{}, proxy.String())
+					newReq = req.WithContext(ctx)
+				}
 
 				if req.Body != nil && req.Body != http.NoBody && req.GetBody != nil {
 					body, getBodyErr := req.GetBody()

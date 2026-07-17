@@ -76,33 +76,155 @@ var (
 	}
 )
 
-type (
-	capturerCtxKey                struct{}
-	decoderCtxKey                 struct{}
-	errorModelCtxKey              struct{}
-	downloadProgressCtxKey        struct{}
-	hedgingCtxKey                 struct{}
-	queryErrorCtxKey              struct{}
-	bodyErrorCtxKey               struct{}
-	happyEyeballsDelayCtxKey      struct{}
-	multiReadCtxKey               struct{}
-	multiReadDisableDiskCtxKey    struct{}
-	ssrfGuardCtxKey               struct{}
-	fallbackCtxKey                struct{}
-	debugCtxKey                   struct{}
-	orderedHeadersCtxKey          struct{}
-	ja4ReportCtxKey               struct{}
-	ja4CallbackCtxKey             struct{}
-	alpnOverrideCtxKey            struct{}
-	p0fSignatureCtxKey            struct{}
-	proxyDNSCtxKey                struct{}
-	proxyAddrCtxKey               struct{}
-	sessionCacheCtxKey            struct{}
-	packetPaddingCtxKey           struct{}
-	requestTimeoutCancelCtxKey    struct{}
-	socketControllerCtxKey        struct{}
-	clientHelloSpecProviderCtxKey struct{}
-)
+type requestConfigKey struct{}
+
+// RequestConfig aggregates all request-scoped options and transport overrides.
+//
+//   - Note: It is stored in the request's context under [requestConfigKey] and is
+//     reusable across middleware and transport levels.
+type RequestConfig struct {
+	// Decoder overrides the response [Decoder] for this request.
+	// - SeeAlso: [WithDecoder]
+	Decoder any
+
+	// ErrorModel is the target struct/map where non-2xx response bodies will be decoded.
+	// - Important: Must be a pointer to a struct or a map.
+	// - SeeAlso: [WithErrorModel]
+	ErrorModel any
+
+	// DownloadProgress triggers during reads from the response body.
+	// - Parameter total: represents Content-Length (or -1 if unknown).
+	// - SeeAlso: [WithDownloadProgress]
+	DownloadProgress ProgressFunc
+
+	// Capturer holds a pointer to a response reference to capture the raw response.
+	// - SeeAlso: [WithCaptureResponse]
+	Capturer any
+
+	// BodyError holds any serialization/validation error occurring during request body setup.
+	// - Note: Verified by [Client.Request] before dispatching the request.
+	BodyError error
+
+	// QueryError holds any validation/serialization error occurring during URL query parameter setup.
+	// - Note: Verified by [Client.Request] before dispatching the request.
+	QueryError error
+
+	// MultiReadThreshold is the size limit in bytes below which response bodies are cached in memory.
+	// - Note: Set to <= 0 to disable body caching.
+	// - SeeAlso: [WithMultiReadBody]
+	MultiReadThreshold int64
+
+	// MultiReadDisableDisk disables disk caching when the multi-read threshold is exceeded.
+	// - SeeAlso: [WithMultiReadDisableDisk]
+	MultiReadDisableDisk bool
+
+	// OrderedHeaders defines the exact order in which HTTP/1.1 request headers must be serialized.
+	// - Important: Only applies to HTTP/1.1 connections.
+	// - SeeAlso: [WithOrderedHeaders]
+	OrderedHeaders []string
+
+	// ALPNOverride configures the exact Application-Layer Protocol Negotiation list for TLS.
+	// - Example: []string{"h2", "http/1.1"}
+	// - SeeAlso: [WithForceHTTP1], [WithForceHTTP2], [WithALPN]
+	ALPNOverride []string
+
+	// JA4ReportStore holds the temporary report reference for TLS/HTTP JA4 fingerprinting.
+	// - SeeAlso: [TraceJA4]
+	JA4ReportStore *ja4ReportStore
+
+	// Debug enables verbose debug logging for this single request.
+	// - SeeAlso: [WithDebug]
+	Debug bool
+
+	// Fallback defines the custom fallback logic to invoke when the request fails.
+	// - SeeAlso: [WithFallback], [FallbackMiddleware]
+	Fallback FallbackFunc
+
+	// RequestTimeoutCancel cancels the request-specific deadline context upon response body close.
+	// - SeeAlso: [WithTimeout]
+	RequestTimeoutCancel context.CancelFunc
+
+	// HedgingDelayOverride sets a custom delay for request hedging.
+	// - Note: Set to a non-positive value to disable hedging.
+	// - SeeAlso: [WithHedging], [HedgingMiddleware]
+	HedgingDelayOverride *time.Duration
+
+	// ProxyAddr is the effective proxy URL for the TCP dial.
+	// - SeeAlso: [WithProxyOverride]
+	ProxyAddr *url.URL
+
+	// InsecureSkipVerify disables TLS certificate verification.
+	// - Warning: Setting this to true exposes the connection to man-in-the-middle attacks.
+	// - SeeAlso: [WithInsecureSkipVerify]
+	InsecureSkipVerify bool
+
+	// TCPDelay introduces a random timing delay before initiating the TCP handshake.
+	// - SeeAlso: [WithTCPDelay]
+	TCPDelay TCPDelayRange
+
+	// ResponseValidator verifies the response immediately after the HTTP round-trip.
+	// - SeeAlso: [WithResponseValidator]
+	ResponseValidator func(resp *http.Response) error
+
+	// CacheTTL specifies the caching time-to-live for the response.
+	// - SeeAlso: [WithCacheTTL]
+	CacheTTL time.Duration
+
+	// RetryPolicy defines the per-request retry override logic.
+	// - SeeAlso: [WithRetryPolicy]
+	RetryPolicy *RetryOverride
+
+	// SSRFGuard enforces DNS resolution restrictions, blocking private and loopback IPs.
+	SSRFGuard bool
+
+	// HappyEyeballsDelay sets the fallback delay between IPv4 and IPv6 connection attempts.
+	HappyEyeballsDelay time.Duration
+
+	// ProxyDNS resolves the host name through the proxy to prevent local DNS leakage.
+	ProxyDNS bool
+
+	// P0fSignature spoofs the TCP/IP network stack fingerprint to emulate specific operating systems.
+	// - SeeAlso: [WithP0fSignature]
+	P0fSignature *p0f.Signature
+
+	// SessionCache is the TLS session ticket cache used to resume TLS handshakes.
+	SessionCache *ProxyAwareSessionCache
+
+	// PacketPadding configuration to obscure TLS segment boundaries.
+	PacketPadding *PaddingConfig
+
+	// SocketController intercepts the socket file descriptor for low-level socket modifications.
+	SocketController SocketController
+
+	// ClientHelloSpecProvider provides custom uTLS ClientHelloSpecs.
+	ClientHelloSpecProvider ClientHelloSpecProvider
+
+	// JA4Callback is invoked once the TLS handshake is complete with the computed JA4 fingerprint report.
+	JA4Callback func(ja4.Report)
+
+	// Metadata stores arbitrary user-defined metadata values associated with the request connection.
+	// - SeeAlso: [WithConnMetadata]
+	Metadata map[string]any
+}
+
+// GetRequestConfig retrieves the [RequestConfig] associated with the context.
+func GetRequestConfig(ctx context.Context) *RequestConfig {
+	cfg, _ := ctx.Value(requestConfigKey{}).(*RequestConfig)
+	return cfg
+}
+
+func getOrInitRequestConfig(req *http.Request) *RequestConfig {
+	cfg := GetRequestConfig(req.Context())
+	if cfg == nil {
+		cfg = &RequestConfig{
+			Metadata: make(map[string]any),
+		}
+		ctx := context.WithValue(req.Context(), requestConfigKey{}, cfg)
+		*req = *req.WithContext(ctx)
+	}
+
+	return cfg
+}
 
 // DefaultSensitiveHeaders lists headers removed from requests during
 // cross-origin redirects. Used by [DefaultRedirectPolicy].
@@ -593,6 +715,71 @@ func (c *Client) Delete(ctx context.Context, path string, body any, mods ...Requ
 	return Delete(ctx, c, path, body, mods...)
 }
 
+func (c *Client) initRequestConfig(req *http.Request) *http.Request {
+	cfg := GetRequestConfig(req.Context())
+	if cfg == nil {
+		cfg = &RequestConfig{
+			Metadata: make(map[string]any),
+		}
+		ctx := context.WithValue(req.Context(), requestConfigKey{}, cfg)
+		req = req.WithContext(ctx)
+	}
+
+	if !cfg.SSRFGuard {
+		cfg.SSRFGuard = c.network.SSRFGuard
+	}
+
+	if cfg.HappyEyeballsDelay == 0 {
+		cfg.HappyEyeballsDelay = c.network.HappyEyeballsDelay
+	}
+
+	if !cfg.ProxyDNS {
+		cfg.ProxyDNS = c.network.ProxyDNS
+	}
+
+	if cfg.ProxyAddr == nil {
+		cfg.ProxyAddr = c.network.ProxyAddr
+	}
+
+	if cfg.P0fSignature == nil {
+		cfg.P0fSignature = c.fingerprint.P0fSignature
+	}
+
+	if cfg.SessionCache == nil {
+		cfg.SessionCache = c.fingerprint.SessionCache
+	}
+
+	if cfg.PacketPadding == nil {
+		cfg.PacketPadding = c.fingerprint.PacketPadding
+	}
+
+	if cfg.SocketController == nil {
+		cfg.SocketController = c.network.SocketController
+	}
+
+	if cfg.ClientHelloSpecProvider == nil {
+		cfg.ClientHelloSpecProvider = c.fingerprint.TLSClientHelloSpecProvider
+	}
+
+	if cfg.JA4Callback == nil {
+		cfg.JA4Callback = c.fingerprint.JA4Callback
+	}
+
+	if cfg.MultiReadThreshold == 0 {
+		cfg.MultiReadThreshold = c.defaults.MultiReadThreshold
+	}
+
+	if !cfg.MultiReadDisableDisk {
+		cfg.MultiReadDisableDisk = c.defaults.MultiReadDisableDisk
+	}
+
+	if cfg.Metadata == nil {
+		cfg.Metadata = make(map[string]any)
+	}
+
+	return req
+}
+
 // Request sends an HTTP request and returns the response. path is
 // resolved against [Client.WithBaseURL] when set; an empty path
 // targets the base URL directly. Nil modifiers are ignored.
@@ -629,18 +816,18 @@ func (c *Client) Request(
 		req.Header.Set("Accept-Encoding", "zstd, br, gzip")
 	}
 
+	req = c.initRequestConfig(req)
+
 	generic.ApplyOptions(req, c.defaults.DefaultMods...)
 	generic.ApplyOptions(req, mods...)
 
-	if errVal := req.Context().Value(bodyErrorCtxKey{}); errVal != nil {
-		if serializationErr, ok := errVal.(error); ok {
-			return nil, fmt.Errorf("aoni: body encoding failed: %w", serializationErr)
+	if cfg := GetRequestConfig(req.Context()); cfg != nil {
+		if cfg.BodyError != nil {
+			return nil, fmt.Errorf("aoni: body encoding failed: %w", cfg.BodyError)
 		}
-	}
 
-	if errVal := req.Context().Value(queryErrorCtxKey{}); errVal != nil {
-		if serializationErr, ok := errVal.(error); ok {
-			return nil, fmt.Errorf("aoni: query encoding failed: %w", serializationErr)
+		if cfg.QueryError != nil {
+			return nil, fmt.Errorf("aoni: query encoding failed: %w", cfg.QueryError)
 		}
 	}
 
@@ -707,8 +894,7 @@ func (c *Client) WithModifiers(mods ...RequestModifier) *Client {
 // multiple times. A value <= 0 disables caching for the request.
 func WithMultiReadBody(threshold int64) RequestModifier {
 	return func(req *http.Request) {
-		ctx := context.WithValue(req.Context(), multiReadCtxKey{}, threshold)
-		*req = *req.WithContext(ctx)
+		getOrInitRequestConfig(req).MultiReadThreshold = threshold
 	}
 }
 
@@ -717,8 +903,7 @@ func WithMultiReadBody(threshold int64) RequestModifier {
 // exceeding the memory threshold returns an error ([ErrBufferLimitExceeded]) instead of creating temporary files.
 func WithMultiReadDisableDisk(disable bool) RequestModifier {
 	return func(req *http.Request) {
-		ctx := context.WithValue(req.Context(), multiReadDisableDiskCtxKey{}, disable)
-		*req = *req.WithContext(ctx)
+		getOrInitRequestConfig(req).MultiReadDisableDisk = disable
 	}
 }
 
@@ -1203,13 +1388,7 @@ func (c *Client) WithTLSFingerprint(browser BrowserID) *Client {
 				proxyURL, _ = proxyFn(&http.Request{URL: &url.URL{Host: addr}})
 			}
 
-			if newClient.fingerprint.TLSClientHelloSpecProvider != nil {
-				ctx = context.WithValue(
-					ctx,
-					clientHelloSpecProviderCtxKey{},
-					newClient.fingerprint.TLSClientHelloSpecProvider,
-				)
-			}
+			// TLSClientHelloSpecProvider is retrieved from RequestConfig inside dialTLSWithUTLS.
 
 			return dialTLSWithUTLS(
 				ctx,
@@ -1247,13 +1426,7 @@ func (c *Client) WithTLSClientHelloSpecProvider(provider ClientHelloSpecProvider
 				proxyURL, _ = proxyFn(&http.Request{URL: &url.URL{Host: addr}})
 			}
 
-			if newClient.fingerprint.TLSClientHelloSpecProvider != nil {
-				ctx = context.WithValue(
-					ctx,
-					clientHelloSpecProviderCtxKey{},
-					newClient.fingerprint.TLSClientHelloSpecProvider,
-				)
-			}
+			// TLSClientHelloSpecProvider is retrieved from RequestConfig inside dialTLSWithUTLS.
 
 			return dialTLSWithUTLS(
 				ctx,
@@ -1662,10 +1835,7 @@ func (c *Client) applyDialers() {
 		transport.Proxy = c.determineProxy
 
 		transport.DialContext = func(ctx context.Context, network, addr string) (net.Conn, error) {
-			if c.network.SocketController != nil {
-				ctx = context.WithValue(ctx, socketControllerCtxKey{}, c.network.SocketController)
-			}
-
+			// SocketController is retrieved from RequestConfig inside makeDialerControl.
 			if err := ApplyTCPDelay(ctx); err != nil {
 				return nil, err
 			}
@@ -1690,10 +1860,6 @@ func (c *Client) applyDialers() {
 				// Honour WithTCPDelay before opening the TCP connection.
 				if err := ApplyTCPDelay(ctx); err != nil {
 					return nil, err
-				}
-
-				if c.network.SocketController != nil {
-					ctx = context.WithValue(ctx, socketControllerCtxKey{}, c.network.SocketController)
 				}
 
 				host, _, _ := net.SplitHostPort(addr)
@@ -1770,24 +1936,24 @@ func dialTLSWithUTLS(
 	tlsConfig *tls.Config,
 	proxyURL *url.URL,
 ) (net.Conn, error) {
-	// Read callback from context (set by Client.Request) - the closure-captured
-	// value may be stale if WithJA4Callback was called after WithTLSFingerprint.
-	if cb, ok := ctx.Value(ja4CallbackCtxKey{}).(func(ja4.Report)); ok && cb != nil {
-		ja4Callback = cb
+	cfg := GetRequestConfig(ctx)
+	if cfg != nil {
+		if cfg.JA4Callback != nil {
+			ja4Callback = cfg.JA4Callback
+		}
 	}
 
-	ssrfGuard := ctx.Value(ssrfGuardCtxKey{}) != nil
+	ssrfGuard := false
+
+	delay := 300 * time.Millisecond
+	if cfg != nil {
+		ssrfGuard = cfg.SSRFGuard
+		delay = cfg.HappyEyeballsDelay
+	}
 
 	host, port, err := net.SplitHostPort(addr)
 	if err != nil {
 		host = addr
-	}
-
-	var delay time.Duration
-	if val := ctx.Value(happyEyeballsDelayCtxKey{}); val != nil {
-		delay = val.(time.Duration)
-	} else {
-		delay = 300 * time.Millisecond
 	}
 
 	// Apply per-request TCP delay (WithTCPDelay) before dialing.
@@ -1854,19 +2020,19 @@ func dialTLSWithUTLS(
 	}
 
 	// Use proxy-aware session cache if available in context.
-	if cache, ok := ctx.Value(sessionCacheCtxKey{}).(*ProxyAwareSessionCache); ok && cache != nil {
-		uConfig.ClientSessionCache = cache
+	if cfg != nil && cfg.SessionCache != nil {
+		uConfig.ClientSessionCache = cfg.SessionCache
 	}
 
-	if alpn, ok := ctx.Value(alpnOverrideCtxKey{}).([]string); ok && len(alpn) > 0 {
-		uConfig.NextProtos = alpn
+	if cfg != nil && len(cfg.ALPNOverride) > 0 {
+		uConfig.NextProtos = cfg.ALPNOverride
 	}
 
 	var customSpec *utls.ClientHelloSpec
-	if provider, ok := ctx.Value(clientHelloSpecProviderCtxKey{}).(ClientHelloSpecProvider); ok && provider != nil {
+	if cfg != nil && cfg.ClientHelloSpecProvider != nil {
 		var err error
 
-		customSpec, err = provider.ClientHelloSpec()
+		customSpec, err = cfg.ClientHelloSpecProvider.ClientHelloSpec()
 		if err != nil {
 			_ = conn.Close()
 			return nil, fmt.Errorf("aoni tls: failed to get custom client hello spec: %w", err)
@@ -1890,8 +2056,8 @@ func dialTLSWithUTLS(
 	}
 
 	alpnProtos := []string{"http/1.1"}
-	if alpn, ok := ctx.Value(alpnOverrideCtxKey{}).([]string); ok && len(alpn) > 0 {
-		alpnProtos = alpn
+	if cfg != nil && len(cfg.ALPNOverride) > 0 {
+		alpnProtos = cfg.ALPNOverride
 	}
 
 	uConn.Extensions = forceALPN(uConn.Extensions, alpnProtos)
@@ -1905,8 +2071,8 @@ func dialTLSWithUTLS(
 
 	// Write JA4 report to the store in the request context (set by TraceJA4).
 	// The request context flows through to DialTLSContext.
-	if store, ok := ctx.Value(ja4ReportCtxKey{}).(*ja4ReportStore); ok {
-		store.report = &report
+	if cfg != nil && cfg.JA4ReportStore != nil {
+		cfg.JA4ReportStore.report = &report
 	}
 
 	if ja4Callback != nil {
@@ -2018,8 +2184,8 @@ func closeResponse(resp *http.Response) {
 	}
 
 	if resp.Request != nil {
-		if cancel, ok := resp.Request.Context().Value(requestTimeoutCancelCtxKey{}).(context.CancelFunc); ok {
-			cancel()
+		if cfg := GetRequestConfig(resp.Request.Context()); cfg != nil && cfg.RequestTimeoutCancel != nil {
+			cfg.RequestTimeoutCancel()
 		}
 	}
 }
@@ -2046,33 +2212,39 @@ func isBlockedIP(ip net.IP) bool {
 	return false
 }
 
-// wrapConn applies connection-level wrappers (MSS limiting, fragmentation,
-// header ordering) based on the request context. It is called after dialing
-// a TCP connection, before any TLS handshake.
 func wrapConn(ctx context.Context, conn net.Conn) net.Conn {
-	if cfg, ok := ctx.Value(packetPaddingCtxKey{}).(*PaddingConfig); ok && cfg != nil &&
-		cfg.MaxSegmentSize > 0 {
-		conn = wrapWithMSSLimit(conn, cfg.MaxSegmentSize)
+	cfg := GetRequestConfig(ctx)
+	if cfg != nil {
+		if cfg.PacketPadding != nil && cfg.PacketPadding.MaxSegmentSize > 0 {
+			conn = wrapWithMSSLimit(conn, cfg.PacketPadding.MaxSegmentSize)
+		}
+
+		if len(cfg.OrderedHeaders) > 0 {
+			conn = &headerOrderingConn{Conn: conn, orderedKeys: cfg.OrderedHeaders}
+		}
 	}
 
-	if cfg, ok := ctx.Value(fragmentCtxKey{}).(FragmentConfig); ok && cfg.ChunkSize > 0 {
-		conn = wrapWithFragmentation(conn, cfg)
-	}
-
-	if order, ok := ctx.Value(orderedHeadersCtxKey{}).([]string); ok && len(order) > 0 {
-		conn = &headerOrderingConn{Conn: conn, orderedKeys: order}
+	if fCfg, ok := ctx.Value(fragmentCtxKey{}).(FragmentConfig); ok && fCfg.ChunkSize > 0 {
+		conn = wrapWithFragmentation(conn, fCfg)
 	}
 
 	return conn
 }
 
 func makeDialerControl(ctx context.Context) func(network, address string, rc syscall.RawConn) error {
-	var spoofer *p0f.Spoofer
-	if cfg, ok := ctx.Value(p0fSignatureCtxKey{}).(*p0f.Signature); ok && cfg != nil {
-		spoofer = p0f.NewSpoofer(cfg)
-	}
+	var (
+		spoofer    *p0f.Spoofer
+		controller SocketController
+	)
 
-	controller, _ := ctx.Value(socketControllerCtxKey{}).(SocketController)
+	cfg := GetRequestConfig(ctx)
+	if cfg != nil {
+		if cfg.P0fSignature != nil {
+			spoofer = p0f.NewSpoofer(cfg.P0fSignature)
+		}
+
+		controller = cfg.SocketController
+	}
 
 	if spoofer == nil && controller == nil {
 		return nil
@@ -2128,10 +2300,10 @@ func happyEyeballsDial(
 	}
 
 	// Proxy DNS: route DNS resolution through the proxy to prevent local DNS leaks.
-	if _, ok := ctx.Value(proxyDNSCtxKey{}).(bool); ok {
-		proxyURL, _ := ctx.Value(proxyAddrCtxKey{}).(*url.URL)
-		if proxyURL != nil && net.ParseIP(host) == nil {
-			return dialViaProxy(ctx, network, host, port, proxyURL)
+	cfg := GetRequestConfig(ctx)
+	if cfg != nil && cfg.ProxyDNS {
+		if cfg.ProxyAddr != nil && net.ParseIP(host) == nil {
+			return dialViaProxy(ctx, network, host, port, cfg.ProxyAddr)
 		}
 	}
 
