@@ -1972,3 +1972,33 @@ func TestClient_HTTP3Settings(t *testing.T) {
 	client := NewClient(nil).WithHTTP3Settings(ChromeHTTP3Settings)
 	assert.NotNil(t, client)
 }
+
+func TestClient_PipelineWrapper(t *testing.T) {
+	t.Parallel()
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, "pipeline_value", r.Header.Get("X-Pipeline-Test"))
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte("custom_pipeline_response"))
+	}))
+	defer server.Close()
+
+	client := NewClient(nil).WithBaseURL(server.URL)
+
+	// Configure a custom PipelineWrapper that injects a custom header in the request
+	client = client.WithPipelineWrapper(func(c *Client, engine HTTPDoer) HTTPDoer {
+		return DoerFunc(func(req *http.Request) (*http.Response, error) {
+			req.Header.Set("X-Pipeline-Test", "pipeline_value")
+			return engine.Do(req)
+		})
+	})
+
+	resp, err := client.Get(t.Context(), "/")
+	require.NoError(t, err)
+
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	require.NoError(t, err)
+	assert.Equal(t, "custom_pipeline_response", string(body))
+}

@@ -23,8 +23,8 @@ import (
 	"golang.org/x/text/transform"
 )
 
-// responseSizeLimitMiddleware enforces response size limits.
-func responseSizeLimitMiddleware(maxSize int64) Middleware {
+// ResponseSizeLimitMiddleware enforces response size limits.
+func ResponseSizeLimitMiddleware(maxSize int64) Middleware {
 	return func(next HTTPDoer) HTTPDoer {
 		return DoerFunc(func(req *http.Request) (*http.Response, error) {
 			resp, err := next.Do(req)
@@ -47,8 +47,8 @@ func responseSizeLimitMiddleware(maxSize int64) Middleware {
 	}
 }
 
-// responseValidationMiddleware executes the validator registered on the request context.
-func responseValidationMiddleware() Middleware {
+// ResponseValidationMiddleware executes the validator registered on the request context.
+func ResponseValidationMiddleware() Middleware {
 	return func(next HTTPDoer) HTTPDoer {
 		return DoerFunc(func(req *http.Request) (*http.Response, error) {
 			resp, err := next.Do(req)
@@ -73,8 +73,8 @@ func responseValidationMiddleware() Middleware {
 	}
 }
 
-// refererAutomatonMiddleware manages Referer headers automatically.
-func refererAutomatonMiddleware(enabled bool, state *refererState) Middleware {
+// RefererAutomatonMiddleware manages Referer headers automatically.
+func RefererAutomatonMiddleware(enabled bool, state *RefererState) Middleware {
 	return func(next HTTPDoer) HTTPDoer {
 		return DoerFunc(func(req *http.Request) (*http.Response, error) {
 			if !enabled || state == nil {
@@ -103,8 +103,8 @@ func refererAutomatonMiddleware(enabled bool, state *refererState) Middleware {
 	}
 }
 
-// decompressionAndTranscodingMiddleware handles automatic decompression and charset transcoding.
-func decompressionAndTranscodingMiddleware() Middleware {
+// DecompressionAndTranscodingMiddleware handles automatic decompression and charset transcoding.
+func DecompressionAndTranscodingMiddleware() Middleware {
 	return func(next HTTPDoer) HTTPDoer {
 		return DoerFunc(func(req *http.Request) (*http.Response, error) {
 			resp, err := next.Do(req)
@@ -186,8 +186,8 @@ func decompressionAndTranscodingMiddleware() Middleware {
 	}
 }
 
-// multiReadBodyMiddleware enables replayable multi-read body caching.
-func multiReadBodyMiddleware(threshold int64, disableDisk bool) Middleware {
+// MultiReadBodyMiddleware enables replayable multi-read body caching.
+func MultiReadBodyMiddleware(threshold int64, disableDisk bool) Middleware {
 	return func(next HTTPDoer) HTTPDoer {
 		return DoerFunc(func(req *http.Request) (*http.Response, error) {
 			resp, err := next.Do(req)
@@ -224,8 +224,8 @@ func multiReadBodyMiddleware(threshold int64, disableDisk bool) Middleware {
 	}
 }
 
-// finalizerMiddleware prevents socket leaks via finalizer.
-func finalizerMiddleware() Middleware {
+// FinalizerMiddleware prevents socket leaks via finalizer.
+func FinalizerMiddleware() Middleware {
 	return func(next HTTPDoer) HTTPDoer {
 		return DoerFunc(func(req *http.Request) (*http.Response, error) {
 			resp, err := next.Do(req)
@@ -240,8 +240,8 @@ func finalizerMiddleware() Middleware {
 	}
 }
 
-// hooksMiddleware executes client-level beforeRequest/afterResponse hooks.
-func hooksMiddleware(before []func(*http.Request), after []func(*http.Response, error)) Middleware {
+// HooksMiddleware executes client-level beforeRequest/afterResponse hooks.
+func HooksMiddleware(before []func(*http.Request), after []func(*http.Response, error)) Middleware {
 	return func(next HTTPDoer) HTTPDoer {
 		return DoerFunc(func(req *http.Request) (*http.Response, error) {
 			for _, hook := range before {
@@ -258,8 +258,8 @@ func hooksMiddleware(before []func(*http.Request), after []func(*http.Response, 
 	}
 }
 
-// packetPaddingMiddleware adds packet padding header to disrupt DPI analysis.
-func packetPaddingMiddleware(cfg *PaddingConfig) Middleware {
+// PacketPaddingMiddleware adds packet padding header to disrupt DPI analysis.
+func PacketPaddingMiddleware(cfg *PaddingConfig) Middleware {
 	return func(next HTTPDoer) HTTPDoer {
 		return DoerFunc(func(req *http.Request) (*http.Response, error) {
 			if cfg != nil {
@@ -274,8 +274,8 @@ func packetPaddingMiddleware(cfg *PaddingConfig) Middleware {
 	}
 }
 
-// inspectorMiddleware handles trace/JA4 collection and Traffic Inspector logging.
-func inspectorMiddleware(inspector *TrafficInspector) Middleware {
+// InspectorMiddleware handles trace/JA4 collection and Traffic Inspector logging.
+func InspectorMiddleware(inspector *TrafficInspector) Middleware {
 	return func(next HTTPDoer) HTTPDoer {
 		return DoerFunc(func(req *http.Request) (*http.Response, error) {
 			if inspector == nil {
@@ -300,8 +300,8 @@ func inspectorMiddleware(inspector *TrafficInspector) Middleware {
 	}
 }
 
-// challengeSolverMiddleware handles Challenge Solver if registered.
-func challengeSolverMiddleware(solver ChallengeSolver, detector ChallengeDetector) Middleware {
+// ChallengeSolverMiddleware handles Challenge Solver if registered.
+func ChallengeSolverMiddleware(solver ChallengeSolver, detector ChallengeDetector) Middleware {
 	return func(next HTTPDoer) HTTPDoer {
 		return DoerFunc(func(req *http.Request) (*http.Response, error) {
 			resp, err := next.Do(req)
@@ -330,8 +330,8 @@ func challengeSolverMiddleware(solver ChallengeSolver, detector ChallengeDetecto
 	}
 }
 
-// contextMiddleware enriches context with Client's specific configurations.
-func contextMiddleware(c *Client) Middleware {
+// ContextMiddleware enriches context with Client's specific configurations.
+func ContextMiddleware(c *Client) Middleware {
 	return func(next HTTPDoer) HTTPDoer {
 		return DoerFunc(func(req *http.Request) (*http.Response, error) {
 			ctx := req.Context()
@@ -391,8 +391,8 @@ func contextMiddleware(c *Client) Middleware {
 	}
 }
 
-// hedgingMiddleware executes request with hedging delay and records RTT.
-func hedgingMiddleware(defaultDelay time.Duration, dynamicHedging *DynamicHedgingConfig) Middleware {
+// HedgingMiddleware executes request with hedging delay and records RTT.
+func HedgingMiddleware(defaultDelay time.Duration, dynamicHedging *DynamicHedgingConfig) Middleware {
 	return func(next HTTPDoer) HTTPDoer {
 		return DoerFunc(func(req *http.Request) (*http.Response, error) {
 			requestStart := time.Now()

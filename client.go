@@ -219,8 +219,8 @@ func DefaultRedirectPolicy(
 	}
 }
 
-// refererState holds the thread-safe state for the Referer tracking automaton.
-type refererState struct {
+// RefererState holds the thread-safe state for the Referer tracking automaton.
+type RefererState struct {
 	mu      sync.Mutex
 	lastURL string
 }
@@ -340,7 +340,7 @@ type ClientDefaults struct {
 	RefererAutomaton bool
 
 	// RefererState is the concurrent-safe state tracking the last visited URL for referer tracking.
-	RefererState *refererState
+	RefererState *RefererState
 
 	// Logger is the diagnostic logger used by the client.
 	Logger Logger
@@ -365,6 +365,9 @@ type ClientDefaults struct {
 
 	// HeadersCookieJar is the cookie jar used for tracking cookie headers when running with custom cookie setups.
 	HeadersCookieJar http.CookieJar
+
+	// PipelineWrapper allows overriding or wrapping the default middleware pipeline.
+	PipelineWrapper func(c *Client, engine HTTPDoer) HTTPDoer
 }
 
 // Client is an immutable, concurrency-safe HTTP client built on [HTTPDoer].
@@ -397,7 +400,7 @@ func NewClient(httpClient HTTPDoer) *Client {
 			BaseURL:         &url.URL{},
 			Headers:         make(http.Header),
 			MaxResponseSize: 10 * 1024 * 1024,
-			RefererState:    &refererState{},
+			RefererState:    &RefererState{},
 		},
 		network: NetworkConfig{
 			HappyEyeballsDelay: 300 * time.Millisecond,
@@ -1513,9 +1516,32 @@ func (c *Client) BaseResponse() BaseResponse {
 	return c.defaults.BaseResponse()
 }
 
-// HTTP returns the underlying [HTTPDoer] interface.
+// HTTP returns the fully wrapped HTTPDoer pipeline.
 func (c *Client) HTTP() HTTPDoer {
 	return c.http
+}
+
+// Engine returns the raw underlying HTTPDoer (typically *http.Client) without any middleware wrappers.
+func (c *Client) Engine() HTTPDoer {
+	return c.engine
+}
+
+// WithEngine returns a clone of c with the raw underlying HTTPDoer replaced by engine.
+func (c *Client) WithEngine(engine HTTPDoer) *Client {
+	newClient := c.Clone()
+	newClient.engine = engine
+	newClient.rebuildChain()
+
+	return newClient
+}
+
+// WithPipelineWrapper returns a clone of c with the custom pipeline wrapper function.
+func (c *Client) WithPipelineWrapper(wrapper func(c *Client, engine HTTPDoer) HTTPDoer) *Client {
+	newClient := c.Clone()
+	newClient.defaults.PipelineWrapper = wrapper
+	newClient.rebuildChain()
+
+	return newClient
 }
 
 // Transport returns the underlying [http.Transport] of the client.
@@ -1569,20 +1595,25 @@ func (c *Client) CloseIdleConnections() {
 }
 
 func (c *Client) rebuildChain() {
+	if c.defaults.PipelineWrapper != nil {
+		c.http = c.defaults.PipelineWrapper(c, c.engine)
+		return
+	}
+
 	doer := c.engine
 
-	doer = responseSizeLimitMiddleware(c.defaults.MaxResponseSize)(doer)
-	doer = decompressionAndTranscodingMiddleware()(doer)
-	doer = multiReadBodyMiddleware(c.defaults.MultiReadThreshold, c.defaults.MultiReadDisableDisk)(doer)
-	doer = finalizerMiddleware()(doer)
-	doer = responseValidationMiddleware()(doer)
-	doer = refererAutomatonMiddleware(c.defaults.RefererAutomaton, c.defaults.RefererState)(doer)
-	doer = hedgingMiddleware(c.network.HedgingDelay, c.network.DynamicHedging)(doer)
-	doer = challengeSolverMiddleware(c.defaults.ChallengeSolver, c.defaults.ChallengeDetector)(doer)
-	doer = inspectorMiddleware(c.defaults.Inspector)(doer)
-	doer = packetPaddingMiddleware(c.fingerprint.PacketPadding)(doer)
-	doer = hooksMiddleware(c.defaults.BeforeRequest, c.defaults.AfterResponse)(doer)
-	doer = contextMiddleware(c)(doer)
+	doer = ResponseSizeLimitMiddleware(c.defaults.MaxResponseSize)(doer)
+	doer = DecompressionAndTranscodingMiddleware()(doer)
+	doer = MultiReadBodyMiddleware(c.defaults.MultiReadThreshold, c.defaults.MultiReadDisableDisk)(doer)
+	doer = FinalizerMiddleware()(doer)
+	doer = ResponseValidationMiddleware()(doer)
+	doer = RefererAutomatonMiddleware(c.defaults.RefererAutomaton, c.defaults.RefererState)(doer)
+	doer = HedgingMiddleware(c.network.HedgingDelay, c.network.DynamicHedging)(doer)
+	doer = ChallengeSolverMiddleware(c.defaults.ChallengeSolver, c.defaults.ChallengeDetector)(doer)
+	doer = InspectorMiddleware(c.defaults.Inspector)(doer)
+	doer = PacketPaddingMiddleware(c.fingerprint.PacketPadding)(doer)
+	doer = HooksMiddleware(c.defaults.BeforeRequest, c.defaults.AfterResponse)(doer)
+	doer = ContextMiddleware(c)(doer)
 
 	c.http = doer
 }

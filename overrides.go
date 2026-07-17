@@ -205,7 +205,7 @@ func GetConnMetadata(ctx context.Context, key string) generic.Optional[any] {
 func WithResponseValidator(fn func(resp *http.Response) error) RequestModifier { //nolint:bodyclose
 	return func(req *http.Request) {
 		var newFn func(resp *http.Response) error
-		if existing := GetResponseValidator(req.Context()); existing != nil {
+		if existing := GetResponseValidator(req.Context()); existing != nil { //nolint:bodyclose
 			newFn = func(resp *http.Response) error { //nolint:bodyclose
 				err1 := existing(resp)
 
