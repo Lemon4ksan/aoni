@@ -740,12 +740,12 @@ func TestAoniTransport_RoundTrip_SpecialHeaders(t *testing.T) {
 	tr := NewTransport(c)
 
 	tr.BeforeRoundTrip = func(cloned *Client, origReq *http.Request) *Client {
-		capturedFingerprint = cloned.tlsBrowserID
-		capturedSSRF = cloned.ssrfGuard
-		capturedMaxResponse = cloned.maxResponseSize
-		capturedProxy = cloned.proxyAddr
+		capturedFingerprint = cloned.fingerprint.BrowserID
+		capturedSSRF = cloned.network.SSRFGuard
+		capturedMaxResponse = cloned.defaults.MaxResponseSize
+		capturedProxy = cloned.network.ProxyAddr
 
-		if hClient, ok := cloned.http.(*http.Client); ok {
+		if hClient, ok := cloned.engine.(*http.Client); ok {
 			capturedTimeout = hClient.Timeout
 		}
 

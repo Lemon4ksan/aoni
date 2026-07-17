@@ -8,7 +8,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"maps"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -43,7 +42,7 @@ func NewStdClient(c *Client) *http.Client {
 	}
 }
 
-// NewTransport returns a new [http.RoundTripper] (specifically [*Transport])
+// NewTransport returns a new [http.RoundTripper] (specifically [Transport])
 // configured to route all requests through the provided aoni [Client].
 // This allows developers to integrate aoni's advanced transport features into
 // existing [http.Client] instances simply by swapping the Transport field.
@@ -176,10 +175,14 @@ type Transport struct {
 
 	// BeforeRoundTrip is an optional lifecycle hook executed immediately before
 	// the request is dispatched through the aoni engine.
+	//
 	// It receives the cloned, pre-configured [Client] and the original request,
 	// and must return the final [Client] to be used. This allows flexible,
 	// dynamic transport-level adjustments (such as adding headers, configuring
 	// authentication, or overriding client settings dynamically).
+	//
+	// Any changes made to cloned Client within this hook should not result in state sharing
+	// between goroutines, as the returned client will only be used for one specific Request().
 	BeforeRoundTrip func(cloned *Client, origReq *http.Request) *Client
 }
 
@@ -214,15 +217,13 @@ func (t *Transport) RoundTrip(origReq *http.Request) (*http.Response, error) {
 		req.GetBody = origReq.GetBody
 		req.URL = origReq.URL
 
-		// Merge headers: origReq headers overwrite aoni defaults for the
-		// same key, but aoni-only headers are preserved.
-		maps.Copy(req.Header, origReq.Header)
-
 		// Strip any X-Aoni- headers from the outgoing request to avoid leak
-		for k := range req.Header {
+		for k, vs := range origReq.Header {
 			if strings.HasPrefix(strings.ToLower(k), "x-aoni-") {
-				req.Header.Del(k)
+				continue
 			}
+
+			req.Header[k] = vs
 		}
 	}
 
@@ -279,7 +280,7 @@ func (t *Transport) RoundTrip(origReq *http.Request) (*http.Response, error) {
 	// Only overwrite baseURL if the request URL has a valid Host, keeping
 	// the client's configured baseURL for relative or schemeless paths.
 	if origReq.URL.Host != "" {
-		cloned.baseURL = &url.URL{
+		cloned.defaults.BaseURL = &url.URL{
 			Scheme: origReq.URL.Scheme,
 			Host:   origReq.URL.Host,
 		}

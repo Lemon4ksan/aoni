@@ -24,7 +24,20 @@ type proxyCtxKey struct{}
 // Cookie isolation works for direct requests: the proxy URL is extracted from the
 // request context and used to select the correct per-proxy jar.
 //
-// Limitation: during HTTP redirects, the standard library's http.Client calls
+// # Concurrency and Thread Safety
+//
+// It uses a combination of an internal read-write mutex protecting
+// the active jars map, and a generic [keylock.KeyMutex] to synchronize the
+// initialization of individual per-proxy jars. This ensures that:
+//   - Reading or accessing an already initialized proxy-specific jar is a non-blocking,
+//     lock-free read path for concurrent requests.
+//   - If multiple parallel goroutines trigger the initial setup or persistent loading
+//     of a jar for the exact same proxy, the keylock serializes the initialization,
+//     completely preventing duplicate database/storage load operations and map races.
+//
+// # Limitations
+//
+// During HTTP redirects, the standard library's http.Client calls
 // SetCookies/Cookies without passing the request context. In this case the jar
 // falls back to the default (empty-key) jar. This means per-proxy cookie isolation
 // does not apply to redirect responses. In practice this is rarely an issue because

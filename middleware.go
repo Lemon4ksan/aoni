@@ -164,7 +164,7 @@ func RetryMiddleware(opts RetryOptions, condition RetryCondition) Middleware {
 			activeOpts := opts
 
 			activeCond := condition
-			if override, ok := GetRetryOverride(req.Context()); ok {
+			if override, ok := GetRetryOverride(req.Context()).Value(); ok {
 				if override.MaxAttempts > 0 {
 					activeOpts.MaxRetries = uint32(override.MaxAttempts - 1) //nolint:gosec
 				}

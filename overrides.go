@@ -18,6 +18,8 @@ import (
 	"net/http"
 	"net/url"
 	"time"
+
+	"github.com/lemon4ksan/miyako/generic"
 )
 
 type (
@@ -64,10 +66,13 @@ func WithProxyOverride(rawURL string) RequestModifier {
 }
 
 // GetProxyOverride returns the per-request proxy URL stored by [WithProxyOverride].
-// The second return value is false when no override is set.
-func GetProxyOverride(ctx context.Context) (string, bool) {
+func GetProxyOverride(ctx context.Context) generic.Optional[string] {
 	val, ok := ctx.Value(proxyOverrideCtxKey{}).(string)
-	return val, ok
+	if !ok {
+		return generic.None[string]()
+	}
+
+	return generic.Some(val)
 }
 
 // WithInsecureSkipVerify returns a [RequestModifier] that disables TLS certificate
@@ -120,18 +125,20 @@ func WithTCPDelay(min, max time.Duration) RequestModifier {
 // GetTCPDelay returns the [TCPDelayRange] stored by [WithTCPDelay] and
 // blocks for a random duration within that range. Callers inside a dialer
 // should call this before opening the connection.
-//
-// Returns false when no delay is configured.
-func GetTCPDelay(ctx context.Context) (TCPDelayRange, bool) {
+func GetTCPDelay(ctx context.Context) generic.Optional[TCPDelayRange] {
 	r, ok := ctx.Value(tcpDelayCtxKey{}).(TCPDelayRange)
-	return r, ok
+	if !ok {
+		return generic.None[TCPDelayRange]()
+	}
+
+	return generic.Some(r)
 }
 
 // ApplyTCPDelay reads the delay range from ctx and sleeps for a uniformly
 // distributed random duration within it. It respects context cancellation.
 // Returns ctx.Err() if the context is cancelled during the sleep, nil otherwise.
 func ApplyTCPDelay(ctx context.Context) error {
-	r, ok := GetTCPDelay(ctx)
+	r, ok := GetTCPDelay(ctx).Value()
 	if !ok || r.Max <= 0 {
 		return nil
 	}
@@ -169,9 +176,13 @@ func WithConnMetadata(key string, val any) RequestModifier {
 }
 
 // GetConnMetadata retrieves a value previously set by [WithConnMetadata].
-func GetConnMetadata(ctx context.Context, key string) (any, bool) {
+func GetConnMetadata(ctx context.Context, key string) generic.Optional[any] {
 	val := ctx.Value(connMetaKey{key})
-	return val, val != nil
+	if val == nil {
+		return generic.None[any]()
+	}
+
+	return generic.Some(val)
 }
 
 // WithResponseValidator attaches a validation function that is invoked by
@@ -191,9 +202,25 @@ func GetConnMetadata(ctx context.Context, key string) (any, bool) {
 //
 // The validator receives the raw *http.Response before any decompression or
 // transcoding has been applied by the client. Do not close resp.Body inside fn.
-func WithResponseValidator(fn func(resp *http.Response) error) RequestModifier {
+func WithResponseValidator(fn func(resp *http.Response) error) RequestModifier { //nolint:bodyclose
 	return func(req *http.Request) {
-		ctx := context.WithValue(req.Context(), responseValidatorCtxKey{}, fn)
+		var newFn func(resp *http.Response) error
+		if existing := GetResponseValidator(req.Context()); existing != nil {
+			newFn = func(resp *http.Response) error { //nolint:bodyclose
+				err1 := existing(resp)
+
+				err2 := fn(resp)
+				if err2 != nil {
+					return err2
+				}
+
+				return err1
+			}
+		} else {
+			newFn = fn
+		}
+
+		ctx := context.WithValue(req.Context(), responseValidatorCtxKey{}, newFn)
 		*req = *req.WithContext(ctx)
 	}
 }
@@ -217,10 +244,13 @@ func WithCacheTTL(d time.Duration) RequestModifier {
 }
 
 // GetCacheTTL returns the per-request cache TTL set by [WithCacheTTL].
-// The second return value is false when no TTL has been set.
-func GetCacheTTL(ctx context.Context) (time.Duration, bool) {
+func GetCacheTTL(ctx context.Context) generic.Optional[time.Duration] {
 	d, ok := ctx.Value(cacheTTLCtxKey{}).(time.Duration)
-	return d, ok
+	if !ok {
+		return generic.None[time.Duration]()
+	}
+
+	return generic.Some(d)
 }
 
 // RetryOverride holds per-request retry settings that override the client-level
@@ -268,10 +298,13 @@ func WithRetryPolicy(o RetryOverride) RequestModifier {
 }
 
 // GetRetryOverride returns the per-request [RetryOverride] set by [WithRetryPolicy].
-// The second return value is false when no override is present.
-func GetRetryOverride(ctx context.Context) (RetryOverride, bool) {
+func GetRetryOverride(ctx context.Context) generic.Optional[RetryOverride] {
 	o, ok := ctx.Value(retryOverrideCtxKey{}).(RetryOverride)
-	return o, ok
+	if !ok {
+		return generic.None[RetryOverride]()
+	}
+
+	return generic.Some(o)
 }
 
 // ProxyFuncWithOverride wraps a base proxy function (e.g. [http.ProxyURL] or
@@ -281,7 +314,7 @@ func GetRetryOverride(ctx context.Context) (RetryOverride, bool) {
 //	transport.Proxy = aoni.ProxyFuncWithOverride(http.ProxyFromEnvironment)
 func ProxyFuncWithOverride(base func(*http.Request) (*url.URL, error)) func(*http.Request) (*url.URL, error) {
 	return func(req *http.Request) (*url.URL, error) {
-		if raw, ok := GetProxyOverride(req.Context()); ok && raw != "" {
+		if raw, ok := GetProxyOverride(req.Context()).Value(); ok && raw != "" {
 			return url.Parse(raw)
 		}
 

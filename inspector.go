@@ -80,7 +80,8 @@ func (c *Client) EnableInspector(addr string) error {
 		return err
 	}
 
-	c.inspector = inspector
+	c.defaults.Inspector = inspector
+	c.rebuildChain()
 
 	return nil
 }

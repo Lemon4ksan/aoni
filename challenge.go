@@ -29,7 +29,9 @@ type ChallengeDetector func(resp *http.Response) (bool, error)
 // WithChallengeSolver returns a clone of c configured with the specified ChallengeSolver.
 func (c *Client) WithChallengeSolver(solver ChallengeSolver) *Client {
 	newClient := c.Clone()
-	newClient.challengeSolver = solver
+	newClient.defaults.ChallengeSolver = solver
+	newClient.rebuildChain()
+
 	return newClient
 }
 

@@ -478,6 +478,12 @@ func NewFastRaceResolver(resolvers ...DNSResolver) *FastRaceResolver {
 }
 
 // LookupIPAddr resolves the host by racing all configured resolvers in parallel.
+// It returns the fastest successful result, cancelling all other pending queries.
+//
+// # Complexity
+//
+// Time Complexity: O(1) latency-wise (matches the speed of the fastest responder).
+// Space Complexity: O(N) allocation, where N is the number of active resolvers.
 func (r *FastRaceResolver) LookupIPAddr(ctx context.Context, host string) ([]net.IPAddr, error) {
 	// Filter out nil resolvers before setting up race tracking to avoid deadlocks
 	var activeResolvers []DNSResolver

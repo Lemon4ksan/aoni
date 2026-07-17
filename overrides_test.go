@@ -23,14 +23,14 @@ func TestGetProxyOverride_Set(t *testing.T) {
 	req, _ := http.NewRequest(http.MethodGet, "http://example.com", nil)
 	WithProxyOverride("http://proxy.local:8080")(req)
 
-	raw, ok := GetProxyOverride(req.Context())
+	raw, ok := GetProxyOverride(req.Context()).Value()
 	require.True(t, ok)
 	assert.Equal(t, "http://proxy.local:8080", raw)
 }
 
 func TestGetProxyOverride_NotSet(t *testing.T) {
 	req, _ := http.NewRequest(http.MethodGet, "http://example.com", nil)
-	_, ok := GetProxyOverride(req.Context())
+	_, ok := GetProxyOverride(req.Context()).Value()
 	assert.False(t, ok)
 }
 
@@ -97,7 +97,7 @@ func TestGetTCPDelay_Set(t *testing.T) {
 	req, _ := http.NewRequest(http.MethodGet, "http://example.com", nil)
 	WithTCPDelay(10*time.Millisecond, 20*time.Millisecond)(req)
 
-	r, ok := GetTCPDelay(req.Context())
+	r, ok := GetTCPDelay(req.Context()).Value()
 	require.True(t, ok)
 	assert.Equal(t, 10*time.Millisecond, r.Min)
 	assert.Equal(t, 20*time.Millisecond, r.Max)
@@ -107,7 +107,7 @@ func TestWithTCPDelay_SwapsMinMax(t *testing.T) {
 	req, _ := http.NewRequest(http.MethodGet, "http://example.com", nil)
 	WithTCPDelay(50*time.Millisecond, 10*time.Millisecond)(req) // reversed
 
-	r, ok := GetTCPDelay(req.Context())
+	r, ok := GetTCPDelay(req.Context()).Value()
 	require.True(t, ok)
 	assert.LessOrEqual(t, r.Min, r.Max, "min must be <= max after swap")
 }
@@ -137,7 +137,7 @@ func TestConnMetadata_SetAndGet(t *testing.T) {
 	req, _ := http.NewRequest(http.MethodGet, "http://example.com", nil)
 	WithConnMetadata("proxy-id", "proxy-42")(req)
 
-	val, ok := GetConnMetadata(req.Context(), "proxy-id")
+	val, ok := GetConnMetadata(req.Context(), "proxy-id").Value()
 	require.True(t, ok)
 	assert.Equal(t, "proxy-42", val)
 }
@@ -147,8 +147,8 @@ func TestConnMetadata_MultipleKeys(t *testing.T) {
 	WithConnMetadata("pool", "eu-west")(req)
 	WithConnMetadata("trace-id", "abc123")(req)
 
-	pool, ok1 := GetConnMetadata(req.Context(), "pool")
-	trace, ok2 := GetConnMetadata(req.Context(), "trace-id")
+	pool, ok1 := GetConnMetadata(req.Context(), "pool").Value()
+	trace, ok2 := GetConnMetadata(req.Context(), "trace-id").Value()
 
 	require.True(t, ok1)
 	require.True(t, ok2)
@@ -158,7 +158,7 @@ func TestConnMetadata_MultipleKeys(t *testing.T) {
 
 func TestConnMetadata_MissingKey(t *testing.T) {
 	req, _ := http.NewRequest(http.MethodGet, "http://example.com", nil)
-	_, ok := GetConnMetadata(req.Context(), "nonexistent")
+	_, ok := GetConnMetadata(req.Context(), "nonexistent").Value()
 	assert.False(t, ok)
 }
 
@@ -216,14 +216,14 @@ func TestGetCacheTTL_Set(t *testing.T) {
 	req, _ := http.NewRequest(http.MethodGet, "http://example.com", nil)
 	WithCacheTTL(5 * time.Minute)(req)
 
-	d, ok := GetCacheTTL(req.Context())
+	d, ok := GetCacheTTL(req.Context()).Value()
 	require.True(t, ok)
 	assert.Equal(t, 5*time.Minute, d)
 }
 
 func TestGetCacheTTL_NotSet(t *testing.T) {
 	req, _ := http.NewRequest(http.MethodGet, "http://example.com", nil)
-	_, ok := GetCacheTTL(req.Context())
+	_, ok := GetCacheTTL(req.Context()).Value()
 	assert.False(t, ok)
 }
 
@@ -234,7 +234,7 @@ func TestGetRetryOverride_Set(t *testing.T) {
 		Backoff:     200 * time.Millisecond,
 	})(req)
 
-	o, ok := GetRetryOverride(req.Context())
+	o, ok := GetRetryOverride(req.Context()).Value()
 	require.True(t, ok)
 	assert.Equal(t, 5, o.MaxAttempts)
 	assert.Equal(t, 200*time.Millisecond, o.Backoff)
@@ -245,13 +245,13 @@ func TestGetRetryOverride_DefaultsMaxAttempts(t *testing.T) {
 	req, _ := http.NewRequest(http.MethodGet, "http://example.com", nil)
 	WithRetryPolicy(RetryOverride{MaxAttempts: 0})(req) // should clamp to 1
 
-	o, ok := GetRetryOverride(req.Context())
+	o, ok := GetRetryOverride(req.Context()).Value()
 	require.True(t, ok)
 	assert.Equal(t, 1, o.MaxAttempts)
 }
 
 func TestGetRetryOverride_NotSet(t *testing.T) {
 	req, _ := http.NewRequest(http.MethodGet, "http://example.com", nil)
-	_, ok := GetRetryOverride(req.Context())
+	_, ok := GetRetryOverride(req.Context()).Value()
 	assert.False(t, ok)
 }

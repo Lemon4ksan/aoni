@@ -85,8 +85,6 @@ func DialWebSocket(
 		return nil, nil, err
 	}
 
-	addr := net.JoinHostPort(parsed.host, parsed.port)
-
 	// Apply request modifiers to a temporary request to activate context
 	// enrichments (TraceJA4, Trace, etc.) and collect headers.
 	tmpReq, err := http.NewRequestWithContext(ctx, http.MethodGet, targetURL, nil)
@@ -94,15 +92,12 @@ func DialWebSocket(
 		return nil, nil, fmt.Errorf("aoni: failed to create ws request: %w", err)
 	}
 
-	maps.Copy(tmpReq.Header, c.headers)
+	maps.Copy(tmpReq.Header, c.defaults.Headers)
 
-	for _, mod := range mods {
-		if mod != nil {
-			mod(tmpReq)
-		}
-	}
+	generic.ApplyOptions(tmpReq, mods...)
 
 	ctx = tmpReq.Context()
+	addr := net.JoinHostPort(parsed.host, parsed.port)
 
 	// Dial the underlying connection, routing through proxy if configured.
 	var baseConn net.Conn
@@ -162,10 +157,10 @@ func (c *Client) dialTLSForWS(ctx context.Context, addr string) (net.Conn, error
 	}
 
 	browser := c.browserID()
-	if browser != BrowserNone || c.tlsClientHelloID != nil {
+	if browser != BrowserNone || c.fingerprint.TLSClientHelloID != nil {
 		var proxyURL *url.URL
-		if c.transportProxy != nil {
-			proxyURL, _ = c.transportProxy(&http.Request{URL: &url.URL{Host: addr}})
+		if c.network.TransportProxy != nil {
+			proxyURL, _ = c.network.TransportProxy(&http.Request{URL: &url.URL{Host: addr}})
 		}
 
 		return dialTLSWithUTLS(
@@ -173,10 +168,10 @@ func (c *Client) dialTLSForWS(ctx context.Context, addr string) (net.Conn, error
 			"tcp",
 			addr,
 			browser,
-			c.tlsClientHelloID,
-			c.sourceRotator,
-			c.dnsResolver,
-			c.ja4Callback,
+			c.fingerprint.TLSClientHelloID,
+			c.network.SourceRotator,
+			c.network.DNSResolver,
+			c.fingerprint.JA4Callback,
 			c.tlsClientConfig(),
 			proxyURL,
 		)
@@ -204,10 +199,10 @@ func (c *Client) dialPlainForWS(ctx context.Context, addr string) (net.Conn, err
 			ctx,
 			"tcp",
 			addr,
-			c.happyEyeballsDelay,
-			c.ssrfGuard,
-			c.sourceRotator,
-			c.dnsResolver,
+			c.network.HappyEyeballsDelay,
+			c.network.SSRFGuard,
+			c.network.SourceRotator,
+			c.network.DNSResolver,
 		)
 	}
 
@@ -235,12 +230,12 @@ func dialStandardTLS(ctx context.Context, addr string) (net.Conn, error) {
 // directly on the Client struct by WithTLSFingerprint.
 func (c *Client) browserID() BrowserID {
 	// Check the stored browser ID first (works with any HTTPDoer type).
-	if c.tlsBrowserID != BrowserNone {
-		return c.tlsBrowserID
+	if c.fingerprint.BrowserID != BrowserNone {
+		return c.fingerprint.BrowserID
 	}
 
 	// Fallback: check if the transport has DialTLSContext set (legacy path).
-	if httpClient, ok := c.http.(*http.Client); ok {
+	if httpClient, ok := c.engine.(*http.Client); ok {
 		if tr, ok := httpClient.Transport.(*http.Transport); ok {
 			if tr != nil && tr.DialTLSContext != nil {
 				return BrowserChrome
@@ -309,22 +304,17 @@ func DialWebSocketWithConfig(
 		return nil, nil, err
 	}
 
-	addr := net.JoinHostPort(parsed.host, parsed.port)
-
 	tmpReq, err := http.NewRequestWithContext(ctx, http.MethodGet, targetURL, nil)
 	if err != nil {
 		return nil, nil, fmt.Errorf("aoni: failed to create ws request: %w", err)
 	}
 
-	maps.Copy(tmpReq.Header, c.headers)
+	maps.Copy(tmpReq.Header, c.defaults.Headers)
 
-	for _, mod := range mods {
-		if mod != nil {
-			mod(tmpReq)
-		}
-	}
+	generic.ApplyOptions(tmpReq, mods...)
 
 	ctx = tmpReq.Context()
+	addr := net.JoinHostPort(parsed.host, parsed.port)
 
 	var baseConn net.Conn
 	switch parsed.scheme {
@@ -365,16 +355,6 @@ func DialWebSocketWithConfig(
 		}
 	}
 
-	readBuf := config.ReadBufferSize
-	if readBuf <= 0 {
-		readBuf = 4096
-	}
-
-	writeBuf := config.WriteBufferSize
-	if writeBuf <= 0 {
-		writeBuf = 4096
-	}
-
 	dialer := &websocket.Dialer{
 		NetDialContext: func(_ context.Context, _, _ string) (net.Conn, error) {
 			return baseConn, nil
@@ -382,8 +362,8 @@ func DialWebSocketWithConfig(
 		NetDialTLSContext: func(_ context.Context, _, _ string) (net.Conn, error) {
 			return baseConn, nil
 		},
-		ReadBufferSize:  readBuf,
-		WriteBufferSize: writeBuf,
+		ReadBufferSize:  generic.Ternary(config.ReadBufferSize > 0, config.ReadBufferSize, 4096),
+		WriteBufferSize: generic.Ternary(config.WriteBufferSize > 0, config.WriteBufferSize, 4096),
 	}
 
 	ws, resp, err := dialer.DialContext(ctx, targetURL, header)

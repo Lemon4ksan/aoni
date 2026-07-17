@@ -37,7 +37,13 @@ func NewSourceIPRotator(addrs []string) (*SourceIPRotator, error) {
 	return &SourceIPRotator{ips: ips}, nil
 }
 
-// Next returns the next IP address in the pool and rotates to the next one.
+// Next returns the next IP address in the pool in a cyclic round-robin order.
+// It is safe for concurrent use.
+//
+// # Complexity
+//
+// Time Complexity: O(1)
+// Space Complexity: O(1)
 func (r *SourceIPRotator) Next() net.IP {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -48,9 +54,14 @@ func (r *SourceIPRotator) Next() net.IP {
 	return ip
 }
 
-// NextForFamily returns the next IP address in the pool that matches the requested IP family
-// (IPv4 if isIPv4 is true, IPv6 otherwise).
-// Returns nil if no matching IP address family is found in the current pool.
+// NextForFamily returns the next IP address in the pool that matches the
+// requested IP family (IPv4 if isIPv4 is true, IPv6 otherwise).
+// It returns nil if no matching IP address family is found in the pool.
+//
+// # Complexity
+//
+// Time Complexity: O(N), where N is the total number of IPs in the pool.
+// Space Complexity: O(1)
 func (r *SourceIPRotator) NextForFamily(isIPv4 bool) net.IP {
 	r.mu.Lock()
 	defer r.mu.Unlock()

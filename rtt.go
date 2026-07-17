@@ -66,7 +66,13 @@ func (t *RTTTracker) Record(rtt time.Duration) {
 }
 
 // Percentile returns the given percentile (0-100) of recorded RTT samples.
-// Returns 0 if no samples are recorded.
+// It returns 0 if no samples have been recorded yet.
+//
+// # Complexity
+//
+// Time Complexity: O(N log N) where N is the number of currently active samples,
+// due to the internal sorting of the window slice copy.
+// Space Complexity: O(N) auxiliary allocation for the sorted slice copy.
 func (t *RTTTracker) Percentile(p float64) time.Duration {
 	t.mu.Lock()
 	defer t.mu.Unlock()

@@ -49,14 +49,14 @@ const maxConsecutiveEmptyReads = 100
 // and monitoring channel closure.
 type WebSocketConn interface {
 	net.Conn
-	// ReadMessage считывает следующее сообщение из соединения, возвращая его тип
-	// (TextMessage или BinaryMessage) и полезную нагрузку.
+	// ReadMessage reads the next message from the connection, returning its type
+	// (TextMessage or BinaryMessage) and payload.
 	ReadMessage() (messageType int, p []byte, err error)
-	// WriteMessage отправляет сообщение определенного типа (TextMessage или BinaryMessage).
+	// WriteMessage sends a message of the specified type (TextMessage or BinaryMessage).
 	WriteMessage(messageType int, data []byte) error
-	// UnderlyingConn возвращает низкоуровневый объект соединения (например, *websocket.Conn или http2 stream).
+	// UnderlyingConn returns the low-level connection object (e.g. *websocket.Conn or http2 stream).
 	UnderlyingConn() any
-	// CloseChan возвращает канал, закрывающийся при разрыве соединения.
+	// CloseChan returns the channel that is closed when the connection is broken.
 	CloseChan() <-chan struct{}
 }
 

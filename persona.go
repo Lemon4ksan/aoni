@@ -136,10 +136,10 @@ var (
 // is an [http.Client] with an [http.Transport].
 func (c *Client) WithTLSClientHelloID(id utls.ClientHelloID) *Client {
 	newClient := c.Clone()
-	newClient.tlsClientHelloID = &id
+	newClient.fingerprint.TLSClientHelloID = &id
 
 	if transport := newClient.Transport(); transport != nil {
-		callback := newClient.ja4Callback
+		callback := newClient.fingerprint.JA4Callback
 		tlsConfig := transport.TLSClientConfig
 		proxyFn := transport.Proxy
 		transport.DialTLSContext = func(ctx context.Context, network, addr string) (net.Conn, error) {
@@ -153,15 +153,17 @@ func (c *Client) WithTLSClientHelloID(id utls.ClientHelloID) *Client {
 				network,
 				addr,
 				BrowserNone,
-				newClient.tlsClientHelloID,
-				newClient.sourceRotator,
-				newClient.dnsResolver,
+				newClient.fingerprint.TLSClientHelloID,
+				newClient.network.SourceRotator,
+				newClient.network.DNSResolver,
 				callback,
 				tlsConfig,
 				proxyURL,
 			)
 		}
 	}
+
+	newClient.rebuildChain()
 
 	return newClient
 }
@@ -172,14 +174,16 @@ func (c *Client) WithTLSClientHelloID(id utls.ClientHelloID) *Client {
 // ensuring complete fingerprint consistency across all network layers.
 func (c *Client) WithPersona(p Persona) *Client {
 	newClient := c.WithTLSClientHelloID(p.TLSID)
-	newClient.h2Settings = &p.H2Settings
-	newClient.headerOrder = p.HeaderOrder
-	newClient.p0fSignature = p.P0fSignature
+	newClient.fingerprint.H2Settings = &p.H2Settings
+	newClient.fingerprint.HeaderOrder = p.HeaderOrder
+	newClient.fingerprint.P0fSignature = p.P0fSignature
 
 	if transport := newClient.Transport(); transport != nil {
 		framed := NewH2FramedTransport(transport, p.H2Settings, p.HeaderOrder...)
-		if httpClient, ok := newClient.http.(*http.Client); ok {
+		if httpClient, ok := newClient.engine.(*http.Client); ok {
 			httpClient.Transport = framed
+
+			newClient.rebuildChain()
 		}
 	}
 

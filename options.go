@@ -460,14 +460,14 @@ func (c *Client) WithHTTP3Config(config *QUICMigrationConfig) *Client {
 		quicCfg.MaxIdleTimeout = config.MaxIdleTimeout
 	}
 
-	if c.h3Settings != nil {
-		quicCfg.InitialStreamReceiveWindow = c.h3Settings.InitialStreamReceiveWindow
-		quicCfg.MaxStreamReceiveWindow = c.h3Settings.MaxStreamReceiveWindow
-		quicCfg.InitialConnectionReceiveWindow = c.h3Settings.InitialConnectionReceiveWindow
-		quicCfg.MaxConnectionReceiveWindow = c.h3Settings.MaxConnectionReceiveWindow
-		quicCfg.MaxIncomingStreams = c.h3Settings.MaxIncomingStreams
-		quicCfg.MaxIncomingUniStreams = c.h3Settings.MaxIncomingUniStreams
-		quicCfg.EnableDatagrams = c.h3Settings.EnableDatagrams
+	if c.fingerprint.H3Settings != nil {
+		quicCfg.InitialStreamReceiveWindow = c.fingerprint.H3Settings.InitialStreamReceiveWindow
+		quicCfg.MaxStreamReceiveWindow = c.fingerprint.H3Settings.MaxStreamReceiveWindow
+		quicCfg.InitialConnectionReceiveWindow = c.fingerprint.H3Settings.InitialConnectionReceiveWindow
+		quicCfg.MaxConnectionReceiveWindow = c.fingerprint.H3Settings.MaxConnectionReceiveWindow
+		quicCfg.MaxIncomingStreams = c.fingerprint.H3Settings.MaxIncomingStreams
+		quicCfg.MaxIncomingUniStreams = c.fingerprint.H3Settings.MaxIncomingUniStreams
+		quicCfg.EnableDatagrams = c.fingerprint.H3Settings.EnableDatagrams
 	}
 
 	rt := &http3.Transport{
@@ -477,9 +477,10 @@ func (c *Client) WithHTTP3Config(config *QUICMigrationConfig) *Client {
 		QUICConfig: quicCfg,
 	}
 
-	newClient.http = &http.Client{
+	newClient.engine = &http.Client{
 		Transport: rt,
 	}
+	newClient.rebuildChain()
 
 	return newClient
 }

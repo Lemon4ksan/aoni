@@ -1068,11 +1068,11 @@ func TestClient_JA4CallbackImmutability(t *testing.T) {
 	client1 := NewClient(nil).WithJA4Callback(fn)
 	client2 := client1.WithTLSFingerprint(BrowserChrome)
 
-	assert.NotNil(t, client2.ja4Callback)
-	assert.NotNil(t, client1.ja4Callback)
+	assert.NotNil(t, client2.fingerprint.JA4Callback)
+	assert.NotNil(t, client1.fingerprint.JA4Callback)
 
 	client3 := NewClient(nil)
-	assert.Nil(t, client3.ja4Callback)
+	assert.Nil(t, client3.fingerprint.JA4Callback)
 }
 
 func TestClient_TraceJA4(t *testing.T) {

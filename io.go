@@ -313,6 +313,7 @@ func newMultiReadBody(rc io.ReadCloser, threshold int64, disableDisk bool) (io.R
 			_ = rc.Close()
 			return nil, ErrBufferLimitExceeded
 		}
+
 		tmpFile, err := os.CreateTemp("", "aoni-multiread-*")
 		if err != nil {
 			_ = rc.Close()
