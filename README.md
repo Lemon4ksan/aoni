@@ -112,6 +112,40 @@ resp, err := client.Get(ctx, "/raw-data")
 </tr>
 </table>
 
+## 🧱 Custom Middlewares & Pipeline Customization
+
+`aoni` uses a modular pipeline architecture. The client's core request execution is composed of 12 decoupled, standard Go middlewares wrapped around the raw HTTP engine. 
+
+### Custom Pipeline Wrapper
+You can customize, reorder, or completely replace the default middleware chain using `WithPipelineWrapper`:
+
+```go
+client := aoni.NewClient(nil).
+	WithPipelineWrapper(func(c *aoni.Client, engine aoni.HTTPDoer) aoni.HTTPDoer {
+		// Build your own custom pipeline, injecting custom logic or reordering stages
+		return aoni.Chain(engine,
+			aoni.InspectorMiddleware(c.Inspector()),
+			aoni.ResponseValidationMiddleware(),
+		)
+	})
+```
+
+### Specialized Built-In Middlewares
+In addition to internal core middlewares, `aoni` provides 6 specialized middlewares for advanced evasion, resilience, and auditing:
+
+1. **`UserAgentAndHintsRotationMiddleware`** (Stealth & Evasion)
+   Rotates both the `User-Agent` and matching `Sec-CH-UA-*` client hints consistently on every request to prevent browser fingerprint mismatches.
+2. **`DPIJitterMiddleware`** (Stealth & Evasion)
+   Introduces a randomized delay (jitter) between writing request headers and body, confusing Deep Packet Inspection (DPI) timing analysis.
+3. **`ProxyFailoverMiddleware`** (Resilience)
+   Transparently switches proxy servers from a pool and retries request execution if the primary proxy fails with a connection error or `502`/`503` status.
+4. **`CacheMiddleware`** (Performance & Resilience)
+   RFC-7234 compliant HTTP caching for `GET` requests. Saves requests to a thread-safe `InMemoryCacheStore` or custom `CacheStore` backend.
+5. **`SensitiveDataRedactorMiddleware`** (Security & Auditing)
+   Redacts sensitive headers (e.g. `Authorization`, `Cookie`) in context before they are passed to the `TrafficInspector` or debug loggers, replacing values with `[REDACTED]`.
+6. **`HARGeneratorMiddleware`** (Auditing)
+   Captures full request-response exchanges (including timings and response bodies) and records them to a `HARGenerator` for exporting standard HTTP Archive (HAR) JSON logs.
+
 ## 📊 Feature Matrix
 
 This matrix shows where `aoni` focuses its design compared to Go's default capabilities and generic wrappers:
