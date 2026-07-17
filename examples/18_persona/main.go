@@ -38,9 +38,9 @@ func main() {
 	fmt.Println("=== Impersonating Chrome 120 on Windows ===")
 	
 	// Create client with Chrome 120 Windows persona
-	chromeClient := aoni.NewClient(nil).
-		WithBaseURL(server.URL).
-		WithPersona(aoni.PersonaChrome120Windows)
+	chromeClient := aoni.NewClient(nil,
+		aoni.WithClientBaseURL(server.URL),
+	).WithPersona(aoni.PersonaChrome120Windows)
 
 	res, err := aoni.GetTo[Response](ctx, chromeClient, "/headers")
 	if err != nil {
@@ -53,9 +53,9 @@ func main() {
 	fmt.Println("\n=== Impersonating Firefox 120 on Windows ===")
 
 	// Create client with Firefox 120 Windows persona
-	firefoxClient := aoni.NewClient(nil).
-		WithBaseURL(server.URL).
-		WithPersona(aoni.PersonaFirefox120Windows)
+	firefoxClient := aoni.NewClient(nil,
+		aoni.WithClientBaseURL(server.URL),
+	).WithPersona(aoni.PersonaFirefox120Windows)
 
 	res, err = aoni.GetTo[Response](ctx, firefoxClient, "/headers")
 	if err != nil {

@@ -26,27 +26,28 @@ func main() {
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
 
-	client := aoni.NewClient(nil).
-		WithBaseURL("https://httpbin.org").
+	client := aoni.NewClient(nil,
+		aoni.WithClientBaseURL("https://httpbin.org"),
 		// Chrome TLS fingerprint to match real browser behavior
-		WithTLSFingerprint(aoni.BrowserChrome).
+		aoni.WithClientTLSFingerprint(aoni.BrowserChrome),
 		// Fragment TLS ClientHello into smaller chunks
-		WithFragmentation(aoni.FragmentConfig{
+		aoni.WithClientFragmentation(aoni.FragmentConfig{
 			ChunkSize: 50,
 			MaxDelay:  5 * time.Millisecond,
-		}).
+		}),
 		// Rewrite Host headers for domain fronting
-		WithHostRewrite(map[string]string{
+		aoni.WithClientHostRewrite(map[string]string{
 			"httpbin.org": "httpbin.org",
-		}).
+		}),
 		// Use DNS-over-TLS resolver to prevent ISP DNS snooping
-		WithDoT("1.1.1.1", "cloudflare-dns.com").
+		aoni.WithClientDoT("1.1.1.1", "cloudflare-dns.com"),
 		// Force HTTP/1.1 to avoid HTTP/2 fingerprinting
-		WithConnectionPool(aoni.ConnectionPoolConfig{
+		aoni.WithClientConnectionPool(aoni.ConnectionPoolConfig{
 			MaxIdleConns:        10,
 			MaxIdleConnsPerHost: 5,
 			IdleConnTimeout:     90 * time.Second,
-		})
+		}),
+	)
 
 	// Make a request with forced HTTP/1.1 and ordered headers
 	res, err := aoni.GetTo[Response](ctx, client, "/ip",

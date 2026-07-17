@@ -26,8 +26,9 @@ func main() {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
-	client := aoni.NewClient(nil).
-		WithBaseURL("https://httpbin.org")
+	client := aoni.NewClient(nil,
+		aoni.WithClientBaseURL("https://httpbin.org"),
+	)
 
 	// Trace with full timing breakdown
 	var info aoni.TraceInfo

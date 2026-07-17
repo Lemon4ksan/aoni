@@ -54,7 +54,7 @@ func setupTestReqServer(t *testing.T, handler http.HandlerFunc) (*httptest.Serve
 	server := httptest.NewServer(handler)
 	t.Cleanup(server.Close)
 
-	c := NewClient(nil).WithBaseURL(server.URL)
+	c := NewClient(nil, WithClientBaseURL(server.URL))
 
 	return server, c
 }
@@ -417,13 +417,14 @@ func TestClient_RawHelpers(t *testing.T) {
 
 		var capturedProxy string
 
-		clientWithProxy := NewClient(nil).
-			WithProxy(proxyURL).
-			WithBeforeRequest(func(req *http.Request) {
+		clientWithProxy := NewClient(nil,
+			WithClientProxy(proxyURL),
+			WithClientBeforeRequest(func(req *http.Request) {
 				if val := req.Context().Value(proxyCtxKey{}); val != nil {
 					capturedProxy = val.(string)
 				}
-			})
+			}),
+		)
 
 		_, _ = clientWithProxy.Request(t.Context(), http.MethodGet, "http://localhost:12345")
 		assert.Equal(t, "http://my-proxy-host:8080", capturedProxy)
@@ -488,7 +489,7 @@ func TestClient_Diagnostics_SensitiveHeaderRedaction(t *testing.T) {
 	mockLogger := &mockLoggerWriter{out: &debugOutput}
 
 	// Build a client configured to log diagnostics via custom logger
-	client := NewClient(nil).WithLogger(mockLogger)
+	client := NewClient(nil, WithClientLogger(mockLogger))
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Set-Cookie", "secret-cookie-value")
 		w.Header().Set("Content-Type", "application/json")
@@ -497,7 +498,7 @@ func TestClient_Diagnostics_SensitiveHeaderRedaction(t *testing.T) {
 	}))
 	t.Cleanup(server.Close)
 
-	client = client.WithBaseURL(server.URL)
+	client = client.With(WithClientBaseURL(server.URL))
 
 	req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, server.URL, nil)
 	require.NoError(t, err)

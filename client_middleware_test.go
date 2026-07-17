@@ -40,11 +40,12 @@ func TestUserAgentAndHintsRotation(t *testing.T) {
 	}))
 	defer server.Close()
 
-	client := NewClient(nil).
-		WithBaseURL(server.URL).
-		WithPipelineWrapper(func(c *Client, engine HTTPDoer) HTTPDoer {
+	client := NewClient(nil,
+		WithClientBaseURL(server.URL),
+		WithClientPipelineWrapper(func(c *Client, engine HTTPDoer) HTTPDoer {
 			return Chain(engine, UserAgentAndHintsRotationMiddleware(profiles))
-		})
+		}),
+	)
 
 	resp1, err := client.Get(t.Context(), "/")
 	require.NoError(t, err)
@@ -71,11 +72,12 @@ func TestDPIJitterMiddleware(t *testing.T) {
 	}))
 	defer server.Close()
 
-	client := NewClient(nil).
-		WithBaseURL(server.URL).
-		WithPipelineWrapper(func(c *Client, engine HTTPDoer) HTTPDoer {
+	client := NewClient(nil,
+		WithClientBaseURL(server.URL),
+		WithClientPipelineWrapper(func(c *Client, engine HTTPDoer) HTTPDoer {
 			return Chain(engine, DPIJitterMiddleware(10*time.Millisecond, 20*time.Millisecond))
-		})
+		}),
+	)
 
 	start := time.Now()
 	resp, err := client.Get(t.Context(), "/")
@@ -101,13 +103,14 @@ func TestProxyFailoverMiddleware(t *testing.T) {
 	}))
 	defer server.Close()
 
-	client := NewClient(nil).
-		WithBaseURL(server.URL).
-		WithPipelineWrapper(func(c *Client, engine HTTPDoer) HTTPDoer {
+	client := NewClient(nil,
+		WithClientBaseURL(server.URL),
+		WithClientPipelineWrapper(func(c *Client, engine HTTPDoer) HTTPDoer {
 			// First proxy fails immediately (connection refused), second is the working server
 			proxies := []string{"http://127.0.0.1:9999", server.URL}
 			return Chain(engine, ProxyFailoverMiddleware(proxies, 2))
-		})
+		}),
+	)
 
 	resp, err := client.Get(t.Context(), "/")
 	require.NoError(t, err)
@@ -135,11 +138,12 @@ func TestCacheMiddleware(t *testing.T) {
 	defer server.Close()
 
 	store := NewInMemoryCacheStore()
-	client := NewClient(nil).
-		WithBaseURL(server.URL).
-		WithPipelineWrapper(func(c *Client, engine HTTPDoer) HTTPDoer {
+	client := NewClient(nil,
+		WithClientBaseURL(server.URL),
+		WithClientPipelineWrapper(func(c *Client, engine HTTPDoer) HTTPDoer {
 			return Chain(engine, CacheMiddleware(store, 1*time.Minute))
-		})
+		}),
+	)
 
 	resp1, err := client.Get(t.Context(), "/")
 	require.NoError(t, err)
@@ -178,15 +182,16 @@ func TestSensitiveDataRedactor(t *testing.T) {
 	defer server.Close()
 
 	inspector := &mockInspector{}
-	client := NewClient(nil).
-		WithBaseURL(server.URL).
-		WithPipelineWrapper(func(c *Client, engine HTTPDoer) HTTPDoer {
+	client := NewClient(nil,
+		WithClientBaseURL(server.URL),
+		WithClientPipelineWrapper(func(c *Client, engine HTTPDoer) HTTPDoer {
 			// Redactor runs before Inspector downstream (leftmost executes first)
 			return Chain(engine,
 				SensitiveDataRedactorMiddleware([]string{"Authorization", "Set-Cookie"}, nil),
 				InspectorMiddleware(inspector),
 			)
-		})
+		}),
+	)
 
 	resp, err := client.Request(t.Context(), "GET", "/", WithHeader("Authorization", "Bearer secretToken"))
 	require.NoError(t, err)
@@ -211,11 +216,12 @@ func TestHARGenerator(t *testing.T) {
 	defer server.Close()
 
 	harGen := NewHARGenerator()
-	client := NewClient(nil).
-		WithBaseURL(server.URL).
-		WithPipelineWrapper(func(c *Client, engine HTTPDoer) HTTPDoer {
+	client := NewClient(nil,
+		WithClientBaseURL(server.URL),
+		WithClientPipelineWrapper(func(c *Client, engine HTTPDoer) HTTPDoer {
 			return Chain(engine, HARGeneratorMiddleware(harGen))
-		})
+		}),
+	)
 
 	resp, err := client.Get(t.Context(), "/")
 	require.NoError(t, err)

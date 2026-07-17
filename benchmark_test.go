@@ -43,7 +43,7 @@ func BenchmarkGET_JSON_Aoni(b *testing.B) {
 	defer server.Close()
 
 	// Immutable client using generic payload decoding
-	client := NewClient(nil).WithBaseURL(server.URL)
+	client := NewClient(nil, WithClientBaseURL(server.URL))
 	ctx := context.Background()
 
 	b.ResetTimer()
@@ -107,7 +107,7 @@ func BenchmarkRawCopy_Aoni(b *testing.B) {
 	}))
 	defer server.Close()
 
-	client := NewClient(nil).WithBaseURL(server.URL)
+	client := NewClient(nil, WithClientBaseURL(server.URL))
 	ctx := context.Background()
 
 	b.ResetTimer()
@@ -179,7 +179,7 @@ func BenchmarkMultipart_Aoni(b *testing.B) {
 	}))
 	defer server.Close()
 
-	client := NewClient(nil).WithBaseURL(server.URL)
+	client := NewClient(nil, WithClientBaseURL(server.URL))
 	ctx := context.Background()
 
 	fields := map[string]string{"foo": "bar"}
@@ -361,7 +361,7 @@ func BenchmarkRequest_WithoutHedging_Aoni(b *testing.B) {
 	}))
 	defer server.Close()
 
-	client := NewClient(nil).WithBaseURL(server.URL)
+	client := NewClient(nil, WithClientBaseURL(server.URL))
 	ctx := context.Background()
 
 	b.ResetTimer()
@@ -396,7 +396,10 @@ func BenchmarkRequest_WithHedging_Aoni(b *testing.B) {
 	defer lb.Close()
 
 	// Hedge after 10ms. If Server1 stalls, Server2 is fired in parallel.
-	client := NewClient(nil).WithHedging(10 * time.Millisecond).WithBaseURL(server1.URL)
+	client := NewClient(nil,
+		WithClientBaseURL(server1.URL),
+		WithClientHedging(10*time.Millisecond),
+	)
 	ctx := context.Background()
 
 	b.ResetTimer()

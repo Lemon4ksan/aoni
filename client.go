@@ -9,7 +9,6 @@ import (
 	"bytes"
 	"context"
 	"crypto/tls"
-	"encoding/base64"
 	"errors"
 	"fmt"
 	"io"
@@ -31,7 +30,6 @@ import (
 
 	"github.com/lemon4ksan/aoni/ja4"
 	"github.com/lemon4ksan/aoni/p0f"
-	"github.com/lemon4ksan/aoni/profiles"
 )
 
 // ClientHelloSpecProvider defines an interface that returns a uTLS ClientHelloSpec.
@@ -80,8 +78,8 @@ type requestConfigKey struct{}
 
 // RequestConfig aggregates all request-scoped options and transport overrides.
 //
-//   - Note: It is stored in the request's context under [requestConfigKey] and is
-//     reusable across middleware and transport levels.
+// Note: It is stored in the request's context under [requestConfigKey] and is
+// reusable across middleware and transport levels.
 type RequestConfig struct {
 	// Decoder overrides the response [Decoder] for this request.
 	// - SeeAlso: [WithDecoder]
@@ -513,7 +511,7 @@ type Client struct {
 // [DefaultRedirectPolicy] (10 hops) is used. The returned client
 // has [DefaultUserAgent] set and a transport dialer configured for
 // Happy Eyeballs.
-func NewClient(httpClient HTTPDoer) *Client {
+func NewClient(httpClient HTTPDoer, opts ...ClientOption) *Client {
 	if httpClient == nil {
 		httpClient = &http.Client{
 			Timeout:       15 * time.Second,
@@ -535,9 +533,35 @@ func NewClient(httpClient HTTPDoer) *Client {
 	}
 
 	c.applyDialers()
+
+	// Apply options
+	for _, opt := range opts {
+		opt(c)
+	}
+
+	generic.ApplyOptions(c, opts...)
+
 	c.rebuildChain()
 
-	return c.WithUserAgent(DefaultUserAgent)
+	// Default to user agent if not set
+	if c.defaults.Headers.Get("User-Agent") == "" {
+		c.defaults.Headers.Set("User-Agent", DefaultUserAgent)
+	}
+
+	return c
+}
+
+// With returns a clone of c with the specified functional options applied.
+func (c *Client) With(opts ...ClientOption) *Client {
+	cloned := c.Clone()
+	for _, opt := range opts {
+		opt(cloned)
+	}
+
+	cloned.applyDialers()
+	cloned.rebuildChain()
+
+	return cloned
 }
 
 // Clone returns a deep copy of c. The cloned client shares nothing
@@ -869,25 +893,6 @@ const (
 	BrowserSafari
 )
 
-// WithLogger returns a clone of c that logs diagnostics through l.
-func (c *Client) WithLogger(l Logger) *Client {
-	newClient := c.Clone()
-	newClient.defaults.Logger = l
-	newClient.rebuildChain()
-
-	return newClient
-}
-
-// WithModifiers returns a clone of c that applies mods to every
-// outgoing request before the middleware chain.
-func (c *Client) WithModifiers(mods ...RequestModifier) *Client {
-	newClient := c.Clone()
-	newClient.defaults.DefaultMods = append(newClient.defaults.DefaultMods, mods...)
-	newClient.rebuildChain()
-
-	return newClient
-}
-
 // WithMultiReadBody returns a [RequestModifier] that overrides the
 // body caching threshold for a single request. Responses smaller
 // than threshold are buffered in memory so the body can be read
@@ -907,768 +912,14 @@ func WithMultiReadDisableDisk(disable bool) RequestModifier {
 	}
 }
 
-// WithBaseResponse returns a clone of c that uses provider to create
-// [BaseResponse] wrappers for structured decoding. Pass nil to clear.
-func (c *Client) WithBaseResponse(provider func() BaseResponse) *Client {
-	newClient := c.Clone()
-	newClient.defaults.BaseResponse = provider
-	newClient.rebuildChain()
-
-	return newClient
-}
-
-// WithBaseURL returns a clone of c that resolves relative paths in
-// [Client.Request] against raw. An empty string clears the base URL.
-// If raw is not a valid URL, the original client is returned unchanged.
-func (c *Client) WithBaseURL(raw string) *Client {
-	if raw == "" {
-		newClient := c.Clone()
-		newClient.defaults.BaseURL = &url.URL{}
-		newClient.rebuildChain()
-
-		return newClient
-	}
-
-	if !strings.HasSuffix(raw, "/") {
-		raw += "/"
-	}
-
-	baseURL, err := url.Parse(raw)
-	if err != nil {
-		return c
-	}
-
-	newClient := c.Clone()
-	newClient.defaults.BaseURL = baseURL
-	newClient.rebuildChain()
-
-	return newClient
-}
-
-// WithHeader returns a clone of c with key set to value on every
-// outgoing request. Overwrites any existing value for key.
-func (c *Client) WithHeader(key, value string) *Client {
-	newClient := c.Clone()
-	newClient.defaults.Headers.Set(key, value)
-	newClient.rebuildChain()
-
-	return newClient
-}
-
-// WithHeaders returns a clone of c with updated headers on every
-// outgoing request. Overwrites any existing values for keys.
-func (c *Client) WithHeaders(headers map[string]string) *Client {
-	newClient := c.Clone()
-	for k, v := range headers {
-		newClient.defaults.Headers.Set(k, v)
-	}
-
-	newClient.rebuildChain()
-
-	return newClient
-}
-
-// WithoutHeaders returns a clone of c with all headers removed.
-func (c *Client) WithoutHeaders() *Client {
-	newClient := c.Clone()
-	newClient.defaults.Headers = make(http.Header)
-	newClient.rebuildChain()
-
-	return newClient
-}
-
-// WithTimeout returns a clone of c whose requests time out after d.
-// Only works when the underlying [HTTPDoer] is an [http.Client].
-// A duration <= 0 means no timeout.
-func (c *Client) WithTimeout(d time.Duration) *Client {
-	newClient := c.Clone()
-	if httpClient, ok := newClient.engine.(*http.Client); ok {
-		cloned := *httpClient
-		cloned.Timeout = d
-		newClient.engine = &cloned
-		newClient.rebuildChain()
-	}
-
-	return newClient
-}
-
-// WithBrowserProfile configures both the TLS fingerprint, matching HTTP/2 framed settings,
-// and default browser headers (like User-Agent, Sec-Ch-Ua, and Accept orders) in a single call.
-// This prevents fingerprint mismatches between TLS and HTTP/2 layers.
-// Use [WithH2FramedTransport] and [WithUserAgent] to configure HTTP/2 settings and User-Agent separately.
-func (c *Client) WithBrowserProfile(browser BrowserID, os profiles.OSKey) *Client {
-	newClient := c.WithTLSFingerprint(browser)
-
-	var (
-		h2Settings HTTP2Settings
-		h3Settings HTTP3Settings
-		ua         string
-	)
-
-	switch browser {
-	case BrowserFirefox:
-		// Use Firefox presets
-		h2Settings = HTTP2Settings{
-			HeaderTableSize:   65536,
-			EnablePush:        0,
-			InitialWindowSize: 131072,
-			MaxFrameSize:      16384,
-			ConnectionFlow:    12517377,
-			PriorityWeight:    41,
-		}
-		h3Settings = FirefoxHTTP3Settings
-
-		ua = "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:148.0) Gecko/20100101 Firefox/148.0"
-		if os.IsMobile() {
-			ua = "Mozilla/5.0 (Android 16; Mobile; rv:148.0) Gecko/148.0 Firefox/148.0"
-		}
-
-	default:
-		// Default to Chrome presets
-		h2Settings = HTTP2Settings{
-			HeaderTableSize:   65536,
-			EnablePush:        0,
-			InitialWindowSize: 6291456,
-			MaxHeaderListSize: 262144,
-			ConnectionFlow:    15663105,
-			PriorityWeight:    255,
-			PriorityExclusive: true,
-		}
-		h3Settings = ChromeHTTP3Settings
-		ua = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/145.0.0.0 Safari/537.36"
-	}
-
-	newClient = newClient.WithH2FramedTransport(h2Settings)
-	newClient.fingerprint.H3Settings = &h3Settings
-	newClient.rebuildChain()
-	newClient = newClient.WithUserAgent(ua)
-
-	return newClient
-}
-
-// WithRedirectLimit returns a clone of c that stops following
-// redirects after max. A value of 0 disables redirects entirely.
-// A negative value restores Go's default behavior (10 hops).
-func (c *Client) WithRedirectLimit(max int) *Client {
-	newClient := c.Clone()
-	if httpClient, ok := newClient.engine.(*http.Client); ok {
-		cloned := *httpClient
-		switch {
-		case max == 0:
-			cloned.CheckRedirect = func(req *http.Request, via []*http.Request) error {
-				return http.ErrUseLastResponse
-			}
-		case max > 0:
-			cloned.CheckRedirect = DefaultRedirectPolicy(max)
-		default:
-			cloned.CheckRedirect = DefaultRedirectPolicy(10)
-		}
-
-		newClient.engine = &cloned
-		newClient.rebuildChain()
-	}
-
-	return newClient
-}
-
-// WithLocalAddr returns a clone of c that binds outgoing connections
-// to addr. The local address is only used when its IP family
-// (v4/v6) matches the target's family. Ignored when the underlying
-// [HTTPDoer] is not an [http.Client] with an [http.Transport].
-func (c *Client) WithLocalAddr(addr string) *Client {
-	newClient := c.Clone()
-	if transport := newClient.Transport(); transport != nil {
-		localAddr, err := net.ResolveIPAddr("ip", addr)
-		if err == nil {
-			prevDial := transport.DialContext
-			transport.DialContext = func(ctx context.Context, network, raddr string) (net.Conn, error) {
-				dialer := &net.Dialer{
-					Timeout:   30 * time.Second,
-					KeepAlive: 30 * time.Second,
-				}
-
-				// Only bind local address if IP families match to avoid EAFNOSUCE.
-				host, _, splitErr := net.SplitHostPort(raddr)
-				if splitErr == nil {
-					if targetIP := net.ParseIP(host); targetIP != nil {
-						localIsV4 := localAddr.IP.To4() != nil
-
-						targetIsV4 := targetIP.To4() != nil
-						if localIsV4 == targetIsV4 {
-							dialer.LocalAddr = &net.TCPAddr{IP: localAddr.IP}
-						}
-					}
-				}
-
-				if prevDial != nil {
-					return prevDial(ctx, network, raddr)
-				}
-
-				return dialer.DialContext(ctx, network, raddr)
-			}
-		}
-	}
-
-	return newClient
-}
-
-// WithHedging returns a clone of c that dispatches a second request
-// after d if the first has not completed. A duration <= 0 disables
-// hedging.
-func (c *Client) WithHedging(d time.Duration) *Client {
-	newClient := c.Clone()
-	newClient.network.HedgingDelay = d
-	newClient.rebuildChain()
-
-	return newClient
-}
-
-// WithDynamicHedging returns a clone of c that computes the hedging
-// delay dynamically from the p95 RTT of recent requests. When config
-// is nil, [DefaultDynamicHedgingConfig] values are used.
-func (c *Client) WithDynamicHedging(config *DynamicHedgingConfig) *Client {
-	newClient := c.Clone()
-	if config == nil {
-		cfg := DefaultDynamicHedgingConfig()
-		newClient.network.DynamicHedging = &cfg
-	} else {
-		newClient.network.DynamicHedging = config
-	}
-
-	newClient.rebuildChain()
-
-	return newClient
-}
-
-// WithProxyAwareSessionCache returns a clone of c that resumes TLS
-// sessions via a [ProxyAwareSessionCache]. The cache is invalidated
-// automatically when the proxy or source IP changes, preventing
-// servers from correlating sessions across different exit nodes.
-func (c *Client) WithProxyAwareSessionCache() *Client {
-	newClient := c.Clone()
-	newClient.fingerprint.SessionCache = NewProxyAwareSessionCache()
-	newClient.rebuildChain()
-
-	return newClient
-}
-
-// WithPacketPadding returns a clone of c that constrains TCP MSS and
-// adds random padding headers to disrupt DPI length analysis. See
-// [PaddingConfig] for available fields.
-func (c *Client) WithPacketPadding(cfg PaddingConfig) *Client {
-	newClient := c.Clone()
-	newClient.fingerprint.PacketPadding = &cfg
-	newClient.applyDialers()
-	newClient.rebuildChain()
-
-	return newClient
-}
-
-// WithMaxResponseSize returns a clone of c that rejects response
-// bodies larger than size bytes. A value <= 0 removes the limit.
-func (c *Client) WithMaxResponseSize(size int64) *Client {
-	newClient := c.Clone()
-	newClient.defaults.MaxResponseSize = size
-	newClient.rebuildChain()
-
-	return newClient
-}
-
-// WithSSRFGuard returns a clone of c that blocks requests resolving
-// to private or loopback IP addresses. Returns [ErrSSRFBlocked]
-// from [Client.Request] when triggered.
-func (c *Client) WithSSRFGuard() *Client {
-	newClient := c.Clone()
-	newClient.network.SSRFGuard = true
-	newClient.applyDialers()
-	newClient.rebuildChain()
-
-	return newClient
-}
-
-// WithHappyEyeballs returns a clone of c that staggers parallel
-// connection attempts by delay per address. A duration <= 0
-// disables staggering and tries all addresses simultaneously.
-func (c *Client) WithHappyEyeballs(delay time.Duration) *Client {
-	newClient := c.Clone()
-	newClient.network.HappyEyeballsDelay = delay
-	newClient.applyDialers()
-	newClient.rebuildChain()
-
-	return newClient
-}
-
-// WithMultiReadBody returns a clone of c that configures multiReadThreshold.
-func (c *Client) WithMultiReadBody(threshold int64) *Client {
-	newClient := c.Clone()
-	newClient.defaults.MultiReadThreshold = threshold
-	newClient.rebuildChain()
-
-	return newClient
-}
-
-// WithMultiReadDisableDisk returns a clone of c that configures whether
-// caching beyond the threshold is allowed to fallback to disk. If true,
-// exceeding the memory threshold returns an error ([ErrBufferLimitExceeded]) instead of creating temporary files.
-func (c *Client) WithMultiReadDisableDisk(disable bool) *Client {
-	newClient := c.Clone()
-	newClient.defaults.MultiReadDisableDisk = disable
-	newClient.rebuildChain()
-
-	return newClient
-}
-
-// WithLocalAddrPool returns a clone of c that round-robins source IP
-// addresses from addrs. Each outgoing connection binds to the next
-// address in the pool. Invalid addresses are silently ignored.
-func (c *Client) WithLocalAddrPool(addrs []string) *Client {
-	rotator, err := NewSourceIPRotator(addrs)
-	if err != nil {
-		return c
-	}
-
-	newClient := c.Clone()
-	newClient.network.SourceRotator = rotator
-	newClient.applyDialers()
-	newClient.rebuildChain()
-
-	return newClient
-}
-
-// WithDNSResolver returns a clone of c that resolves hostnames
-// through resolver instead of the system resolver.
-func (c *Client) WithDNSResolver(resolver DNSResolver) *Client {
-	newClient := c.Clone()
-	newClient.network.DNSResolver = resolver
-	newClient.applyDialers()
-	newClient.rebuildChain()
-
-	return newClient
-}
-
-// Inspector returns the configured [TrafficInspector] if enabled.
-func (c *Client) Inspector() TrafficInspector {
-	return c.defaults.Inspector
-}
-
-// WithInspector returns a clone of c with the specified TrafficInspector.
-func (c *Client) WithInspector(inspector TrafficInspector) *Client {
-	newClient := c.Clone()
-	newClient.defaults.Inspector = inspector
-	newClient.rebuildChain()
-
-	return newClient
-}
-
-// WithDoT returns a clone of c that resolves DNS via
-// DNS-over-TLS using endpoint as the resolver address and host as
-// the TLS server name. See [NewDoTResolver].
-func (c *Client) WithDoT(endpoint, host string) *Client {
-	return c.WithDNSResolver(NewDoTResolver(endpoint, host))
-}
-
-// WithDoH returns a clone of c that resolves DNS via
-// DNS-over-HTTPS using endpoint as the resolver URL and host as
-// the HTTP Host header. See [NewDoHResolver].
-func (c *Client) WithDoH(endpoint, host string) *Client {
-	return c.WithDNSResolver(NewDoHResolver(endpoint, host))
-}
-
-// WithChallengeDetector returns a clone of c configured with the specified ChallengeDetector.
-func (c *Client) WithChallengeDetector(detector ChallengeDetector) *Client {
-	newClient := c.Clone()
-	newClient.defaults.ChallengeDetector = detector
-	newClient.rebuildChain()
-
-	return newClient
-}
-
-// WithBeforeRequest returns a clone of c that calls hook before
-// every request. Hooks execute in registration order.
-func (c *Client) WithBeforeRequest(hook func(req *http.Request)) *Client {
-	newClient := c.Clone()
-	newClient.defaults.BeforeRequest = append(newClient.defaults.BeforeRequest, hook)
-	newClient.rebuildChain()
-
-	return newClient
-}
-
-// WithAfterResponse returns a clone of c that calls hook after every
-// request, regardless of success or failure.
-func (c *Client) WithAfterResponse(hook func(resp *http.Response, err error)) *Client {
-	newClient := c.Clone()
-	newClient.defaults.AfterResponse = append(newClient.defaults.AfterResponse, hook) //nolint:bodyclose
-	newClient.rebuildChain()
-
-	return newClient
-}
-
-// WithUserAgent returns a clone of c that sends ua as the
-// User-Agent header on every request.
-func (c *Client) WithUserAgent(ua string) *Client {
-	return c.WithHeader("User-Agent", ua)
-}
-
 // UserAgent returns the User-Agent header configured on c.
 func (c *Client) UserAgent() string {
 	return c.defaults.Headers.Get("User-Agent")
 }
 
-// WithOrigin returns a clone of c that sends origin as the Origin
-// header on every request.
-func (c *Client) WithOrigin(origin string) *Client {
-	return c.WithHeader("Origin", origin)
-}
-
-// WithBearer returns a clone of c that sends token as a Bearer
-// Authorization header on every request.
-func (c *Client) WithBearer(token string) *Client {
-	return c.WithHeader("Authorization", "Bearer "+token)
-}
-
-// WithBasicAuth returns a clone of c that sends Basic authentication
-// credentials on every request.
-func (c *Client) WithBasicAuth(username, password string) *Client {
-	return c.WithHeader("Authorization", "Basic "+base64.StdEncoding.EncodeToString([]byte(username+":"+password)))
-}
-
-// WithCookieJar returns a clone of c that stores and sends cookies
-// through jar. Only effective when the underlying [HTTPDoer] is an
-// [http.Client].
-func (c *Client) WithCookieJar(jar http.CookieJar) *Client {
-	newClient := c.Clone()
-	if httpClient, ok := newClient.engine.(*http.Client); ok {
-		cloned := *httpClient
-		cloned.Jar = jar
-		newClient.engine = &cloned
-		newClient.rebuildChain()
-	}
-
-	return newClient
-}
-
-// WithConnectionPool returns a clone of c with the transport pool
-// tuned to cfg. Fields left at zero keep the existing transport
-// settings. Only effective when the underlying [HTTPDoer] is an
-// [http.Client] with an [http.Transport].
-func (c *Client) WithConnectionPool(cfg ConnectionPoolConfig) *Client {
-	newClient := c.Clone()
-	if transport := newClient.Transport(); transport != nil {
-		transport.MaxIdleConns = generic.Coalesce(cfg.MaxIdleConns, transport.MaxIdleConns)
-		transport.MaxIdleConnsPerHost = generic.Coalesce(cfg.MaxIdleConnsPerHost, transport.MaxIdleConnsPerHost)
-		transport.MaxConnsPerHost = generic.Coalesce(cfg.MaxConnsPerHost, transport.MaxConnsPerHost)
-		transport.IdleConnTimeout = generic.Coalesce(cfg.IdleConnTimeout, transport.IdleConnTimeout)
-		transport.ResponseHeaderTimeout = generic.Coalesce(cfg.ResponseHeaderTimeout, transport.ResponseHeaderTimeout)
-	}
-
-	return newClient
-}
-
-// WithTLSFingerprint returns a clone of c that uses uTLS to emulate
-// a browser's TLS ClientHello. [BrowserNone] disables emulation.
-// Only effective when the underlying [HTTPDoer] is an [http.Client]
-// with an [http.Transport].
-func (c *Client) WithTLSFingerprint(browser BrowserID) *Client {
-	newClient := c.Clone()
-	if browser == BrowserNone {
-		return newClient
-	}
-
-	// Store browser ID on the Client so it works with any HTTPDoer type
-	// (ProxyRotator, LoadBalancer, etc.), not just *http.Client.
-	newClient.fingerprint.BrowserID = browser
-
-	if transport := newClient.Transport(); transport != nil {
-		callback := newClient.fingerprint.JA4Callback
-		tlsConfig := transport.TLSClientConfig
-		proxyFn := transport.Proxy
-		transport.DialTLSContext = func(ctx context.Context, network, addr string) (net.Conn, error) {
-			var proxyURL *url.URL
-			if proxyFn != nil {
-				proxyURL, _ = proxyFn(&http.Request{URL: &url.URL{Host: addr}})
-			}
-
-			// TLSClientHelloSpecProvider is retrieved from RequestConfig inside dialTLSWithUTLS.
-
-			return dialTLSWithUTLS(
-				ctx,
-				network,
-				addr,
-				browser,
-				newClient.fingerprint.TLSClientHelloID,
-				newClient.network.SourceRotator,
-				newClient.network.DNSResolver,
-				callback,
-				tlsConfig,
-				proxyURL,
-			)
-		}
-	}
-
-	newClient.rebuildChain()
-
-	return newClient
-}
-
-// WithTLSClientHelloSpecProvider returns a clone of c that uses the provider
-// to dynamically obtain a uTLS ClientHelloSpec for TLS Handshakes.
-func (c *Client) WithTLSClientHelloSpecProvider(provider ClientHelloSpecProvider) *Client {
-	newClient := c.Clone()
-	newClient.fingerprint.TLSClientHelloSpecProvider = provider
-
-	if transport := newClient.Transport(); transport != nil {
-		callback := newClient.fingerprint.JA4Callback
-		tlsConfig := transport.TLSClientConfig
-		proxyFn := transport.Proxy
-		transport.DialTLSContext = func(ctx context.Context, network, addr string) (net.Conn, error) {
-			var proxyURL *url.URL
-			if proxyFn != nil {
-				proxyURL, _ = proxyFn(&http.Request{URL: &url.URL{Host: addr}})
-			}
-
-			// TLSClientHelloSpecProvider is retrieved from RequestConfig inside dialTLSWithUTLS.
-
-			return dialTLSWithUTLS(
-				ctx,
-				network,
-				addr,
-				newClient.fingerprint.BrowserID,
-				newClient.fingerprint.TLSClientHelloID,
-				newClient.network.SourceRotator,
-				newClient.network.DNSResolver,
-				callback,
-				tlsConfig,
-				proxyURL,
-			)
-		}
-	}
-
-	newClient.rebuildChain()
-
-	return newClient
-}
-
-// WithJA4Callback returns a clone of c that calls fn after each TLS
-// handshake with the [ja4.Report]. Requires [Client.WithTLSFingerprint]
-// to be enabled.
-func (c *Client) WithJA4Callback(fn func(ja4.Report)) *Client {
-	newClient := c.Clone()
-	newClient.fingerprint.JA4Callback = fn
-	newClient.rebuildChain()
-
-	return newClient
-}
-
-// WithFragmentation returns a clone of c that splits the TLS
-// ClientHello across multiple TCP segments according to cfg. See
-// [FragmentConfig].
-func (c *Client) WithFragmentation(cfg FragmentConfig) *Client {
-	newClient := c.Clone()
-	newClient.network.FragmentConfig = &cfg
-	newClient.rebuildChain()
-
-	return newClient
-}
-
-// WithHostRewrite returns a clone of c that resolves hostnames in
-// requests according to rules (host -> ip), while keeping the
-// original hostname for TLS SNI.
-func (c *Client) WithHostRewrite(rules map[string]string) *Client {
-	newClient := c.Clone()
-	newClient.network.HostRewrite = &HostRewriteConfig{Rules: rules}
-	newClient.rebuildChain()
-
-	return newClient
-}
-
-// WithProxyIsolatedCookieJar returns a clone of c that stores
-// cookies per proxy URL in jar, preventing cross-proxy session
-// leakage. See [ProxyIsolatedCookieJar].
-func (c *Client) WithProxyIsolatedCookieJar(jar *ProxyIsolatedCookieJar) *Client {
-	newClient := c.Clone()
-	newClient.defaults.HeadersCookieJar = jar
-
-	if httpClient, ok := newClient.engine.(*http.Client); ok {
-		clonedHTTP := *httpClient
-
-		baseTransport := clonedHTTP.Transport
-		if baseTransport == nil {
-			baseTransport = http.DefaultTransport
-		}
-
-		// Unwrap existing cookieJarTransport to avoid stacking wrappers.
-		if cjTrans, ok := baseTransport.(*cookieJarTransport); ok {
-			baseTransport = cjTrans.next
-		}
-
-		clonedHTTP.Transport = &cookieJarTransport{
-			next:      baseTransport,
-			cookieJar: jar,
-		}
-		newClient.engine = &clonedHTTP
-		newClient.rebuildChain()
-	}
-
-	return newClient
-}
-
-// WithDNSCache returns a clone of c that caches DNS results for ttl.
-// The cache wraps the current DNS resolver.
-func (c *Client) WithDNSCache(ttl time.Duration) *Client {
-	newClient := c.Clone()
-	newClient.network.DNSResolver = NewInMemoryDNSCache(ttl, c.network.DNSResolver)
-	newClient.rebuildChain()
-
-	return newClient
-}
-
-// WithHTTP2Settings returns a clone of c with custom HTTP/2
-// connection parameters. These values are stored on the client
-// but only take effect when [Client.WithH2FramedTransport] is also
-// configured.
-func (c *Client) WithHTTP2Settings(settings HTTP2Settings) *Client {
-	newClient := c.Clone()
-	newClient.fingerprint.H2Settings = &settings
-	newClient.rebuildChain()
-
-	return newClient
-}
-
-// WithH2FramedTransport returns a clone of c that injects browser-
-// specific SETTINGS and PRIORITY frames into the HTTP/2 connection
-// preface. This makes the HTTP/2 fingerprint match the TLS profile
-// set by [Client.WithTLSFingerprint].
-func (c *Client) WithH2FramedTransport(settings HTTP2Settings) *Client {
-	newClient := c.Clone()
-	newClient.fingerprint.H2Settings = &settings
-
-	if transport := newClient.Transport(); transport != nil {
-		if newClient.fingerprint.H2Configurer != nil {
-			t2, err := http2.ConfigureTransports(transport)
-			if err == nil && t2 != nil {
-				t2.TLSClientConfig = transport.TLSClientConfig
-				_ = newClient.fingerprint.H2Configurer.ConfigureHTTP2(t2)
-			}
-		}
-
-		framed := NewH2FramedTransport(transport, settings)
-		if httpClient, ok := newClient.engine.(*http.Client); ok {
-			httpClient.Transport = framed
-
-			newClient.rebuildChain()
-		}
-	}
-
-	return newClient
-}
-
-// WithProfileH2Settings returns a clone of c with HTTP/2 settings
-// extracted from s. See [H2SettingsFromProfile].
-func (c *Client) WithProfileH2Settings(s profiles.H2Settings) *Client {
-	settings := H2SettingsFromProfile(s)
-	return c.WithH2FramedTransport(settings)
-}
-
-// WithP0fSignature returns a clone of c that spoofs TCP/IP fields
-// (TTL, Don't Fragment, window size) to match sig. The spoofing is
-// applied via Dialer.Control before the SYN packet is sent, making
-// the connection appear as the OS described by sig to passive
-// fingerprinters such as p0f.
-func (c *Client) WithP0fSignature(sig *p0f.Signature) *Client {
-	newClient := c.Clone()
-	newClient.fingerprint.P0fSignature = sig
-	newClient.rebuildChain()
-
-	return newClient
-}
-
-// WithSocketController returns a clone of c that applies the socket controller's
-// Control hook to every newly created TCP socket before the connection is established.
-func (c *Client) WithSocketController(controller SocketController) *Client {
-	newClient := c.Clone()
-	newClient.network.SocketController = controller
-	newClient.applyDialers()
-	newClient.rebuildChain()
-
-	return newClient
-}
-
-// WithHTTP2Configurer returns a clone of c configured with the provided HTTP2Configurer callback.
-// This allows customizing the underlying HTTP/2 transport (e.g. disabling HPACK dynamic tables, etc.).
-func (c *Client) WithHTTP2Configurer(configurer HTTP2Configurer) *Client {
-	newClient := c.Clone()
-	newClient.fingerprint.H2Configurer = configurer
-	newClient.applyDialers()
-
-	// If h2Settings is already configured, re-apply H2 transport to ensure configurer runs
-	if newClient.fingerprint.H2Settings != nil {
-		newClient = newClient.WithH2FramedTransport(*newClient.fingerprint.H2Settings)
-	}
-
-	newClient.rebuildChain()
-
-	return newClient
-}
-
-// WithProxyDNS returns a clone of c that resolves hostnames through
-// the configured SOCKS5 or HTTP CONNECT proxy instead of the local
-// system resolver. This prevents the local ISP from observing DNS
-// queries.
-func (c *Client) WithProxyDNS() *Client {
-	newClient := c.Clone()
-	newClient.network.ProxyDNS = true
-	newClient.applyDialers()
-	newClient.rebuildChain()
-
-	return newClient
-}
-
-// WithProxy returns a clone of c configured to route requests through proxyURL.
-// Supported schemes: http, socks5, socks5h (for remote DNS resolution).
-// When proxyURL is nil, proxy routing is disabled.
-func (c *Client) WithProxy(proxyURL *url.URL) *Client {
-	newClient := c.Clone()
-	newClient.network.ProxyAddr = proxyURL
-
-	if proxyURL != nil {
-		newClient.network.TransportProxy = http.ProxyURL(proxyURL)
-	}
-
-	newClient.applyDialers()
-	newClient.rebuildChain()
-
-	return newClient
-}
-
-// WithProxyString returns a clone of c configured to route requests through a proxy string.
-// If the proxy string lacks a scheme (e.g. "user:pass@1.2.3.4:8080"), the protocol (http or socks5)
-// is automatically detected by probing the port or guessing based on the port number.
-func (c *Client) WithProxyString(proxyStr string) *Client {
-	u, err := ParseAutoProxy(proxyStr)
-	if err != nil {
-		return c.WithProxy(nil)
-	}
-
-	return c.WithProxy(u)
-}
-
-// WithHTTP3Settings returns a clone of c configured with custom HTTP/3 (QUIC) settings.
-func (c *Client) WithHTTP3Settings(settings HTTP3Settings) *Client {
-	newClient := c.Clone()
-	newClient.fingerprint.H3Settings = &settings
-	newClient.rebuildChain()
-
-	return newClient
-}
-
-// WithRefererAutomaton returns a clone of c with automatic Referer tracking enabled.
-// Each request will automatically have its "Referer" header set to the URL of the previous request.
-func (c *Client) WithRefererAutomaton(enabled bool) *Client {
-	newClient := c.Clone()
-	newClient.defaults.RefererAutomaton = enabled
-	newClient.rebuildChain()
-
-	return newClient
+// Inspector returns the configured [TrafficInspector] if enabled.
+func (c *Client) Inspector() TrafficInspector {
+	return c.defaults.Inspector
 }
 
 // Logger is an interface for logging messages.
@@ -1714,22 +965,6 @@ func (c *Client) Engine() HTTPDoer {
 }
 
 // WithEngine returns a clone of c with the raw underlying HTTPDoer replaced by engine.
-func (c *Client) WithEngine(engine HTTPDoer) *Client {
-	newClient := c.Clone()
-	newClient.engine = engine
-	newClient.rebuildChain()
-
-	return newClient
-}
-
-// WithPipelineWrapper returns a clone of c with the custom pipeline wrapper function.
-func (c *Client) WithPipelineWrapper(wrapper func(c *Client, engine HTTPDoer) HTTPDoer) *Client {
-	newClient := c.Clone()
-	newClient.defaults.PipelineWrapper = wrapper
-	newClient.rebuildChain()
-
-	return newClient
-}
 
 // Defaults returns the ClientDefaults configured on c.
 func (c *Client) Defaults() ClientDefaults {

@@ -27,8 +27,9 @@ func main() {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
-	client := aoni.NewClient(nil).
-		WithBaseURL("https://httpbin.org")
+	client := aoni.NewClient(nil,
+		aoni.WithClientBaseURL("https://httpbin.org"),
+	)
 
 	// Retry on any error
 	retryOnErr := aoni.Chain(
@@ -72,8 +73,9 @@ func main() {
 	)
 
 	// Use retryOnErr client
-	retryClient := aoni.NewClient(retryOnErr).
-		WithBaseURL("https://httpbin.org")
+	retryClient := aoni.NewClient(retryOnErr,
+		aoni.WithClientBaseURL("https://httpbin.org"),
+	)
 
 	res, err := aoni.GetTo[Response](ctx, retryClient, "/status/200")
 	if err != nil {
@@ -83,8 +85,9 @@ func main() {
 	fmt.Printf("Success: %s %s\n", res.URL, res.Status)
 
 	// Use customRetry client
-	customClient := aoni.NewClient(customRetry).
-		WithBaseURL("https://httpbin.org")
+	customClient := aoni.NewClient(customRetry,
+		aoni.WithClientBaseURL("https://httpbin.org"),
+	)
 
 	_, _ = aoni.GetTo[Response](ctx, customClient, "/status/429")
 

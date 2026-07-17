@@ -48,16 +48,18 @@ func TestClient_ClientHelloSpecProvider(t *testing.T) {
 		transport.TLSClientConfig = &tls.Config{InsecureSkipVerify: true}
 	}
 
-	client = client.WithBaseURL(server.URL).
-		WithTLSClientHelloSpecProvider(provider).
-		WithTLSFingerprint(BrowserChrome) // Needed to activate utls dialer
+	client = client.With(
+		WithClientBaseURL(server.URL),
+		WithClientTLSClientHelloSpecProvider(provider),
+		WithClientTLSFingerprint(BrowserChrome), // Needed to activate utls dialer
+	)
 
 	// We capture the report to verify
 	var report ja4.Report
 
-	client = client.WithJA4Callback(func(r ja4.Report) {
+	client = client.With(WithClientJA4Callback(func(r ja4.Report) {
 		report = r
-	})
+	}))
 
 	resp, err := client.Request(t.Context(), http.MethodGet, "/")
 	require.NoError(t, err)
@@ -87,9 +89,10 @@ func TestClient_SocketController(t *testing.T) {
 
 	controller := &mockSocketController{}
 
-	client := NewClient(nil).
-		WithBaseURL(server.URL).
-		WithSocketController(controller)
+	client := NewClient(nil,
+		WithClientBaseURL(server.URL),
+		WithClientSocketController(controller),
+	)
 
 	resp, err := client.Request(t.Context(), http.MethodGet, "/")
 	require.NoError(t, err)
@@ -126,9 +129,10 @@ func TestClient_HTTP2Configurer(t *testing.T) {
 
 	// Use the httptest server's own client - it already trusts the self-signed cert.
 	// Build the aoni Client on top of it so TLS config is correct from the start.
-	client := NewClient(server.Client()).
-		WithBaseURL(server.URL).
-		WithHTTP2Configurer(configurer)
+	client := NewClient(server.Client()).With(
+		WithClientBaseURL(server.URL),
+		WithClientHTTP2Configurer(configurer),
+	)
 
 	resp, err := client.Request(t.Context(), http.MethodGet, "/")
 	require.NoError(t, err)

@@ -78,7 +78,7 @@ func setupTestServer(t *testing.T, handler http.HandlerFunc) (*httptest.Server, 
 
 	server := httptest.NewServer(handler)
 	t.Cleanup(server.Close)
-	client := NewClient(nil).WithBaseURL(server.URL)
+	client := NewClient(nil, WithClientBaseURL(server.URL))
 
 	return server, client
 }
@@ -173,7 +173,10 @@ func TestClient_Headers(t *testing.T) {
 	}))
 	t.Cleanup(server.Close)
 
-	client := NewClient(nil).WithBaseURL(server.URL).WithHeader("X-Default", "default-val")
+	client := NewClient(nil,
+		WithClientBaseURL(server.URL),
+		WithClientHeader("X-Default", "default-val"),
+	)
 
 	mod := func(req *http.Request) {
 		req.Header.Set("X-Custom", "custom-val")
@@ -230,7 +233,7 @@ func TestClient_BaseResponse(t *testing.T) {
 			_, _ = w.Write([]byte(`{"status": "success", "data": {"message": "unwrapped"}}`))
 		})
 
-		client = client.WithBaseResponse(func() BaseResponse { return &apiResponse{} })
+		client = client.With(WithClientBaseResponse(func() BaseResponse { return &apiResponse{} }))
 
 		result, err := GetTo[testPayload](t.Context(), client, "/wrapped")
 		require.NoError(t, err)
@@ -242,7 +245,7 @@ func TestClient_BaseResponse(t *testing.T) {
 			_, _ = w.Write([]byte(`{"status": "fail", "error": "something went wrong"}`))
 		})
 
-		client = client.WithBaseResponse(func() BaseResponse { return &apiResponse{} })
+		client = client.With(WithClientBaseResponse(func() BaseResponse { return &apiResponse{} }))
 
 		_, err := GetTo[testPayload](t.Context(), client, "/error")
 		assert.ErrorContains(t, err, "something went wrong")
@@ -307,7 +310,7 @@ func TestClient_Validation(t *testing.T) {
 		Key string `json:"key" validate:"required"`
 	}
 
-	client := NewClient(nil).WithBaseURL("http://localhost")
+	client := NewClient(nil, WithClientBaseURL("http://localhost"))
 
 	t.Run("missing_query_param", func(t *testing.T) {
 		params := RequiredParams{Name: "test"}
@@ -382,7 +385,7 @@ func TestClient_DX_Helpers(t *testing.T) {
 	oldDefault := DefaultClient
 	t.Cleanup(func() { DefaultClient = oldDefault })
 
-	DefaultClient = DefaultClient.WithBaseURL(server.URL)
+	DefaultClient = DefaultClient.With(WithClientBaseURL(server.URL))
 
 	t.Run("global_get_with_bearer", func(t *testing.T) {
 		var raw *http.Response
@@ -551,7 +554,7 @@ func TestClient_AdvancedFeatures(t *testing.T) {
 		})
 
 		t.Run("disable_redirects", func(t *testing.T) {
-			client := client.WithRedirectLimit(0)
+			client := client.With(WithClientRedirectLimit(0))
 			resp, err := client.Request(t.Context(), http.MethodGet, "/start")
 			require.NoError(t, err)
 			t.Cleanup(func() { closeResponse(resp) })
@@ -560,7 +563,7 @@ func TestClient_AdvancedFeatures(t *testing.T) {
 		})
 
 		t.Run("limit_redirects", func(t *testing.T) {
-			client := client.WithRedirectLimit(2)
+			client := client.With(WithClientRedirectLimit(2))
 			resp, err := client.Request(t.Context(), http.MethodGet, "/start")
 			require.NoError(t, err)
 			t.Cleanup(func() { closeResponse(resp) })
@@ -581,7 +584,7 @@ func TestClient_AdvancedFeatures(t *testing.T) {
 			w.WriteHeader(http.StatusOK)
 		})
 
-		client = client.WithTimeout(10 * time.Millisecond)
+		client = client.With(WithClientTimeout(10 * time.Millisecond))
 		_, err := client.Request(t.Context(), http.MethodGet, "/")
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "Client.Timeout exceeded")
@@ -764,7 +767,7 @@ func TestClient_Hedging_Deterministic(t *testing.T) {
 		_, _ = w.Write([]byte(`{"message": "hedged"}`))
 	})
 
-	client = client.WithHedging(10 * time.Millisecond)
+	client = client.With(WithClientHedging(10 * time.Millisecond))
 
 	type result struct {
 		res *testPayload
@@ -828,19 +831,20 @@ func TestClient_GlobalHooks(t *testing.T) {
 
 	var beforeCalled, afterCalled bool
 
-	client = client.
-		WithBeforeRequest(func(req *http.Request) {
+	client = client.With(
+		WithClientBeforeRequest(func(req *http.Request) {
 			beforeCalled = true
 
 			req.Header.Set("X-Before-Hook", "hooked")
-		}).
-		WithAfterResponse(func(resp *http.Response, err error) {
+		}),
+		WithClientAfterResponse(func(resp *http.Response, err error) {
 			afterCalled = true
 
 			require.NoError(t, err)
 			require.NotNil(t, resp)
 			assert.Equal(t, http.StatusOK, resp.StatusCode)
-		})
+		}),
+	)
 
 	resp, err := client.Request(t.Context(), http.MethodGet, "/")
 	require.NoError(t, err)
@@ -897,7 +901,7 @@ func TestClient_ConnectionPool(t *testing.T) {
 		ResponseHeaderTimeout: 5 * time.Second,
 	}
 
-	tunedClient := client.WithConnectionPool(cfg)
+	tunedClient := client.With(WithClientConnectionPool(cfg))
 	transport := tunedClient.Transport()
 	require.NotNil(t, transport)
 
@@ -1020,7 +1024,7 @@ func TestClient_TLSFingerprint(t *testing.T) {
 	t.Parallel()
 
 	client := NewClient(nil)
-	tunedClient := client.WithTLSFingerprint(BrowserChrome)
+	tunedClient := client.With(WithClientTLSFingerprint(BrowserChrome))
 
 	tr := tunedClient.Transport()
 	require.NotNil(t, tr)
@@ -1039,13 +1043,14 @@ func TestClient_WithJA4Callback(t *testing.T) {
 		report ja4.Report
 	)
 
-	client := NewClient(nil).
-		WithTLSFingerprint(BrowserChrome).
-		WithJA4Callback(func(r ja4.Report) {
+	client := NewClient(nil,
+		WithClientTLSFingerprint(BrowserChrome),
+		WithClientJA4Callback(func(r ja4.Report) {
 			called.Store(true)
 
 			report = r
-		})
+		}),
+	)
 
 	assert.NotNil(t, client)
 
@@ -1065,8 +1070,8 @@ func TestClient_JA4CallbackImmutability(t *testing.T) {
 
 	fn := func(r ja4.Report) {}
 
-	client1 := NewClient(nil).WithJA4Callback(fn)
-	client2 := client1.WithTLSFingerprint(BrowserChrome)
+	client1 := NewClient(nil, WithClientJA4Callback(fn))
+	client2 := client1.With(WithClientTLSFingerprint(BrowserChrome))
 
 	assert.NotNil(t, client2.fingerprint.JA4Callback)
 	assert.NotNil(t, client1.fingerprint.JA4Callback)
@@ -1108,10 +1113,9 @@ func TestClient_TraceJA4(t *testing.T) {
 
 	var report *ja4.Report
 
-	client := NewClient(httpClient).
-		WithJA4Callback(func(r ja4.Report) {
-			report = &r
-		})
+	client := NewClient(httpClient).With(
+		WithClientJA4Callback(func(r ja4.Report) { report = &r }),
+	)
 
 	info := &TraceInfo{}
 	_, err := client.Request(
@@ -1156,11 +1160,12 @@ func TestClient_TraceJA4_WithTLSFingerprint(t *testing.T) {
 
 	var callbackReport *ja4.Report
 
-	client := NewClient(server.Client()).
-		WithTLSFingerprint(BrowserChrome).
-		WithJA4Callback(func(r ja4.Report) {
+	client := NewClient(server.Client()).With(
+		WithClientTLSFingerprint(BrowserChrome),
+		WithClientJA4Callback(func(r ja4.Report) {
 			callbackReport = &r
-		})
+		}),
+	)
 
 	info := &TraceInfo{}
 	_, err = client.Request(
@@ -1223,7 +1228,7 @@ func TestClient_ResponseSizeGuard(t *testing.T) {
 			_, _ = w.Write([]byte("01234567890123456789"))
 		})
 
-		client = client.WithMaxResponseSize(10)
+		client = client.With(WithClientMaxResponseSize(10))
 		_, err := client.Request(t.Context(), http.MethodGet, "/")
 		require.Error(t, err)
 		assert.ErrorIs(t, err, ErrResponseTooLarge)
@@ -1236,7 +1241,7 @@ func TestClient_ResponseSizeGuard(t *testing.T) {
 			_, _ = w.Write([]byte("01234567890123456789"))
 		})
 
-		client = client.WithMaxResponseSize(10)
+		client = client.With(WithClientMaxResponseSize(10))
 		resp, err := client.Request(t.Context(), http.MethodGet, "/")
 		require.NoError(t, err)
 		t.Cleanup(func() { closeResponse(resp) })
@@ -1252,7 +1257,7 @@ func TestClient_ResponseSizeGuard(t *testing.T) {
 			_, _ = w.Write([]byte("under limit"))
 		})
 
-		client = client.WithMaxResponseSize(100)
+		client = client.With(WithClientMaxResponseSize(100))
 		resp, err := client.Request(t.Context(), http.MethodGet, "/")
 		require.NoError(t, err)
 		t.Cleanup(func() { closeResponse(resp) })
@@ -1281,7 +1286,7 @@ func TestClient_SensitiveHeaderScrubbing(t *testing.T) {
 		}))
 		t.Cleanup(origServer.Close)
 
-		client := NewClient(nil).WithRedirectLimit(3)
+		client := NewClient(nil, WithClientRedirectLimit(3))
 
 		reqMod := func(req *http.Request) {
 			req.Header.Set("Authorization", "Bearer token123")
@@ -1317,7 +1322,10 @@ func TestClient_SensitiveHeaderScrubbing(t *testing.T) {
 		}))
 		t.Cleanup(server.Close)
 
-		client := NewClient(nil).WithRedirectLimit(3).WithBaseURL(server.URL)
+		client := NewClient(nil,
+			WithClientRedirectLimit(3),
+			WithClientBaseURL(server.URL),
+		)
 
 		reqMod := func(req *http.Request) {
 			req.Header.Set("Authorization", "Bearer token123")
@@ -1340,7 +1348,7 @@ func TestClient_SensitiveHeaderScrubbing(t *testing.T) {
 func TestClient_SSRFGuard(t *testing.T) {
 	t.Parallel()
 
-	client := NewClient(nil).WithSSRFGuard()
+	client := NewClient(nil, WithClientSSRFGuard())
 
 	t.Run("blocks_loopback_ipv4", func(t *testing.T) {
 		_, err := client.Request(t.Context(), http.MethodGet, "http://127.0.0.1:8080/")
@@ -1361,7 +1369,7 @@ func TestClient_HappyEyeballs(t *testing.T) {
 		w.WriteHeader(http.StatusOK)
 	})
 
-	client = client.WithHappyEyeballs(10 * time.Millisecond)
+	client = client.With(WithClientHappyEyeballs(10 * time.Millisecond))
 	resp, err := client.Request(t.Context(), http.MethodGet, "/")
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = resp.Body.Close() })
@@ -1375,7 +1383,7 @@ func TestClient_MultiReadBody(t *testing.T) {
 			_, _ = w.Write([]byte("short body"))
 		})
 
-		client = client.WithMultiReadBody(100)
+		client = client.With(WithClientMultiReadBody(100))
 		resp, err := client.Request(t.Context(), http.MethodGet, "/")
 		require.NoError(t, err)
 		t.Cleanup(func() { closeResponse(resp) })
@@ -1396,7 +1404,7 @@ func TestClient_MultiReadBody(t *testing.T) {
 			_, _ = w.Write([]byte("long body exceeding threshold"))
 		})
 
-		client = client.WithMultiReadBody(10)
+		client = client.With(WithClientMultiReadBody(10))
 		resp, err := client.Request(t.Context(), http.MethodGet, "/")
 		require.NoError(t, err)
 		t.Cleanup(func() { closeResponse(resp) })
@@ -1423,7 +1431,10 @@ func TestClient_MultiReadBody(t *testing.T) {
 			_, _ = w.Write([]byte("long body exceeding threshold"))
 		})
 
-		client = client.WithMultiReadBody(10).WithMultiReadDisableDisk(true)
+		client = client.With(
+			WithClientMultiReadBody(10),
+			WithClientMultiReadDisableDisk(true),
+		)
 		_, err := client.Request(t.Context(), http.MethodGet, "/")
 		assert.ErrorIs(t, err, ErrBufferLimitExceeded)
 	})
@@ -1759,7 +1770,7 @@ func TestClient_RetryMiddleware(t *testing.T) {
 	}))
 	t.Cleanup(server.Close)
 
-	client := NewClient(nil).WithBaseURL(server.URL)
+	client := NewClient(nil, WithClientBaseURL(server.URL))
 
 	retryMid := RetryMiddleware(opts, RetryOnGatewayErrors())
 	doer := retryMid(client.HTTP())
@@ -1929,7 +1940,7 @@ func TestClient_RefererAutomaton(t *testing.T) {
 	}))
 	defer server.Close()
 
-	client := NewClient(nil).WithRefererAutomaton(true)
+	client := NewClient(nil, WithClientRefererAutomaton(true))
 
 	// First request: no referer should be sent
 	resp1, err := client.Request(context.Background(), http.MethodGet, server.URL+"/page1")
@@ -1969,7 +1980,7 @@ func TestClient_ParseAutoProxy(t *testing.T) {
 }
 
 func TestClient_HTTP3Settings(t *testing.T) {
-	client := NewClient(nil).WithHTTP3Settings(ChromeHTTP3Settings)
+	client := NewClient(nil, WithClientHTTP3Settings(ChromeHTTP3Settings))
 	assert.NotNil(t, client)
 }
 
@@ -1983,15 +1994,15 @@ func TestClient_PipelineWrapper(t *testing.T) {
 	}))
 	defer server.Close()
 
-	client := NewClient(nil).WithBaseURL(server.URL)
+	client := NewClient(nil, WithClientBaseURL(server.URL))
 
 	// Configure a custom PipelineWrapper that injects a custom header in the request
-	client = client.WithPipelineWrapper(func(c *Client, engine HTTPDoer) HTTPDoer {
+	client = client.With(WithClientPipelineWrapper(func(c *Client, engine HTTPDoer) HTTPDoer {
 		return DoerFunc(func(req *http.Request) (*http.Response, error) {
 			req.Header.Set("X-Pipeline-Test", "pipeline_value")
 			return engine.Do(req)
 		})
-	})
+	}))
 
 	resp, err := client.Get(t.Context(), "/")
 	require.NoError(t, err)

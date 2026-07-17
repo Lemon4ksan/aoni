@@ -29,7 +29,7 @@ func main() {
 	ctx := context.Background()
 
 	// Create a secure client with TLS fingerprint and user agent
-	client := aoni.NewClient(nil).WithTLSFingerprint(aoni.BrowserChrome)
+	client := aoni.NewClient(nil, aoni.WithClientTLSFingerprint(aoni.BrowserChrome))
 
 	// Specify the Socket.IO URL with Engine.IO v4 parameters
 	socketURL := "ws://localhost:3000/socket.io/?EIO=4&transport=websocket"

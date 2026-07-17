@@ -21,8 +21,9 @@ func main() {
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
 
-	client := aoni.NewClient(nil).
-		WithBaseURL("https://echo.websocket.org")
+	client := aoni.NewClient(nil,
+		aoni.WithClientBaseURL("https://echo.websocket.org"),
+	)
 
 	// Establish a WebSocket connection
 	conn, resp, err := aoni.DialWebSocket(ctx, client, "wss://echo.websocket.org",

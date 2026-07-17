@@ -27,8 +27,9 @@ func main() {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
-	client := aoni.NewClient(nil).
-		WithBaseURL("https://jsonplaceholder.typicode.com")
+	client := aoni.NewClient(nil,
+		aoni.WithClientBaseURL("https://jsonplaceholder.typicode.com"),
+	)
 
 	post, err := aoni.GetTo[Post](ctx, client, "/posts/1")
 	if err != nil {

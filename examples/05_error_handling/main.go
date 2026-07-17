@@ -25,8 +25,9 @@ func main() {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
-	client := aoni.NewClient(nil).
-		WithBaseURL("https://jsonplaceholder.typicode.com")
+	client := aoni.NewClient(nil,
+		aoni.WithClientBaseURL("https://jsonplaceholder.typicode.com"),
+	)
 
 	// Example 1: Check for aoni.APIError with a custom error model
 	_, err := aoni.GetTo[any](ctx, client,

@@ -72,8 +72,7 @@ func main() {
 
 	solver := &BrowserChallengeSolver{}
 
-	_ = aoni.NewClient(nil).
-		WithChallengeSolver(solver)
+	_ = aoni.NewClient(nil, aoni.WithClientChallengeSolver(solver))
 
 	// In a real application, if this request hits a Cloudflare check:
 	// 1. Aoni receives the challenge response (ErrCloudflareChallenge).

@@ -19,8 +19,9 @@ import (
 )
 
 func main() {
-	client := aoni.NewClient(nil).
-		WithTLSFingerprint(aoni.BrowserChrome)
+	client := aoni.NewClient(nil,
+		aoni.WithClientTLSFingerprint(aoni.BrowserChrome),
+	)
 
 	fmt.Println("==================================================")
 	fmt.Println("Starting traffic inspector at http://127.0.0.1:8080")

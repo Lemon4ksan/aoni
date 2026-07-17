@@ -81,20 +81,21 @@ func main() {
 	// PHASE 2: Core Client Configuration
 	// ==========================================
 
-	client := aoni.NewClient(nil).
-		WithBaseURL("https://api.protected-target.com").
-		WithTimeout(30 * time.Second).
-		WithDNSResolver(raceResolver).
-		WithProxyIsolatedCookieJar(cookieJar).
-		WithDynamicHedging(nil). // Enables dynamic tail-latency reduction (hedging)
-		WithChallengeSolver(&HeadlessWAFSolver{}).
-		WithP0fSignature(p0f.Windows10). // Emulate Windows 10 TCP/IP stack
-		WithPacketPadding(aoni.PaddingConfig{
+	client := aoni.NewClient(nil,
+		aoni.WithClientBaseURL("https://api.protected-target.com"),
+		aoni.WithClientTimeout(30 * time.Second),
+		aoni.WithClientDNSResolver(raceResolver),
+		aoni.WithClientProxyIsolatedCookieJar(cookieJar),
+		aoni.WithClientDynamicHedging(nil), // Enables dynamic tail-latency reduction (hedging)
+		aoni.WithClientP0fSignature(p0f.Windows10), // Emulate Windows 10 TCP/IP stack
+		aoni.WithClientPacketPadding(aoni.PaddingConfig{
 			MaxSegmentSize:  512, // Lower MSS to force packet fragmentation
 			MinPaddingBytes: 32,
 			MaxPaddingBytes: 128,
 			HeaderPool:      aoni.CloudflareHeaderPool, // Disguise padding as Cloudflare headers
-		})
+		}),
+		aoni.WithClientChallengeSolver(&HeadlessWAFSolver{}),
+	)
 
 	// Start traffic inspector dashboard.
 	client, inspector, err := inspector.Enable(client, "127.0.0.1:8080")
@@ -114,7 +115,7 @@ func main() {
 	}
 	cacheStore := aoni.NewInMemoryCacheStore()
 
-	client = client.WithPipelineWrapper(func(c *aoni.Client, engine aoni.HTTPDoer) aoni.HTTPDoer {
+	client = client.With(aoni.WithClientPipelineWrapper(func(c *aoni.Client, engine aoni.HTTPDoer) aoni.HTTPDoer {
 		chain := engine
 
 		// 1. User Agent and Hints rotation
@@ -150,7 +151,7 @@ func main() {
 		chain = aoni.ContextMiddleware(c)(chain)
 
 		return chain
-	})
+	}))
 
 	// ==========================================
 	// PHASE 4: Safe Execution

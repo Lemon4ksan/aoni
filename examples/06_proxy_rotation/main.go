@@ -62,8 +62,9 @@ func main() {
 		),
 	)
 
-	client := aoni.NewClient(doer).
-		WithBaseURL("https://httpbin.org")
+	client := aoni.NewClient(doer,
+		aoni.WithClientBaseURL("https://httpbin.org"),
+	)
 
 	// Make requests that will be load-balanced across proxies
 	for i := range 3 {

@@ -283,7 +283,7 @@ func TestDialWebSocket_TLSFingerprint(t *testing.T) {
 	client := NewClient(nil)
 	// Initialize TLSClientConfig before configuring browser profile
 	client.Transport().TLSClientConfig = server.Client().Transport.(*http.Transport).TLSClientConfig.Clone()
-	client = client.WithTLSFingerprint(BrowserChrome)
+	client = client.With(WithClientTLSFingerprint(BrowserChrome))
 
 	wsURL := "wss" + strings.TrimPrefix(server.URL, "https")
 
@@ -471,7 +471,7 @@ func TestDialWebSocket_TLSH2HandshakeFailure(t *testing.T) {
 	wssURL := "wss" + strings.TrimPrefix(server.URL, "https")
 
 	// Negotiate h2 with a Chrome browser profile setup
-	client := NewClient(nil).WithTLSFingerprint(BrowserChrome)
+	client := NewClient(nil, WithClientTLSFingerprint(BrowserChrome))
 	client.Transport().TLSClientConfig = &tls.Config{
 		InsecureSkipVerify: true,
 	}

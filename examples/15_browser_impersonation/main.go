@@ -32,10 +32,11 @@ func main() {
 	fmt.Printf("Sec-CH-UA:  %s\n", chrome.SecCHUA)
 	fmt.Printf("Platform:   %s\n", chrome.PlatformWindows)
 
-	chromeClient := aoni.NewClient(nil).
-		WithBaseURL("https://httpbin.org").
-		WithTLSFingerprint(aoni.BrowserChrome).
-		WithUserAgent(chrome.UserAgentWindows)
+	chromeClient := aoni.NewClient(nil,
+		aoni.WithClientBaseURL("https://httpbin.org"),
+		aoni.WithClientTLSFingerprint(aoni.BrowserChrome),
+		aoni.WithClientUserAgent(chrome.UserAgentWindows),
+	)
 
 	res, err := aoni.GetTo[Response](ctx, chromeClient, "/ip")
 	if err != nil {
@@ -53,10 +54,11 @@ func main() {
 	fmt.Println("\n=== Firefox Desktop ===")
 	fmt.Printf("User-Agent: %s\n", firefox.UserAgentFirefoxWindows)
 
-	firefoxClient := aoni.NewClient(nil).
-		WithBaseURL("https://httpbin.org").
-		WithTLSFingerprint(aoni.BrowserFirefox).
-		WithUserAgent(firefox.UserAgentFirefoxWindows)
+	firefoxClient := aoni.NewClient(nil,
+		aoni.WithClientBaseURL("https://httpbin.org"),
+		aoni.WithClientTLSFingerprint(aoni.BrowserFirefox),
+		aoni.WithClientUserAgent(firefox.UserAgentFirefoxWindows),
+	)
 
 	res, err = aoni.GetTo[Response](ctx, firefoxClient, "/ip")
 	if err != nil {
@@ -83,18 +85,19 @@ func main() {
 	// Combine profiles for realistic browser impersonation
 	fmt.Println("\n=== Full Impersonation Example ===")
 
-	combined := aoni.NewClient(nil).
-		WithBaseURL("https://httpbin.org").
-		WithTLSFingerprint(aoni.BrowserChrome).
-		WithUserAgent(chrome.UserAgentWindows).
-		WithOrigin("https://www.google.com").
-		WithHeader("Sec-CH-UA", chrome.SecCHUA).
-		WithHeader("Sec-CH-UA-Platform", chrome.PlatformWindows).
-		WithConnectionPool(aoni.ConnectionPoolConfig{
+	combined := aoni.NewClient(nil,
+		aoni.WithClientBaseURL("https://httpbin.org"),
+		aoni.WithClientTLSFingerprint(aoni.BrowserChrome),
+		aoni.WithClientUserAgent(chrome.UserAgentWindows),
+		aoni.WithClientOrigin("https://www.google.com"),
+		aoni.WithClientHeader("Sec-CH-UA", chrome.SecCHUA),
+		aoni.WithClientHeader("Sec-CH-UA-Platform", chrome.PlatformWindows),
+		aoni.WithClientConnectionPool(aoni.ConnectionPoolConfig{
 			MaxIdleConns:        100,
 			MaxIdleConnsPerHost: 10,
 			IdleConnTimeout:     90 * time.Second,
-		})
+		}),
+	)
 	_ = combined
 
 	fmt.Println("Browser impersonation examples completed")

@@ -29,7 +29,7 @@ func setupBridgeTest(t *testing.T, handler http.HandlerFunc) (*httptest.Server, 
 	server := httptest.NewServer(handler)
 	t.Cleanup(server.Close)
 
-	c := NewClient(nil).WithBaseURL(server.URL)
+	c := NewClient(nil, WithClientBaseURL(server.URL))
 	stdClient := NewStdClient(c)
 
 	return server, stdClient
@@ -41,7 +41,7 @@ func setupBridgeTestWithClient(t *testing.T, c *Client, handler http.HandlerFunc
 	server := httptest.NewServer(handler)
 	t.Cleanup(server.Close)
 
-	c = c.WithBaseURL(server.URL)
+	c = c.With(WithClientBaseURL(server.URL))
 	stdClient := NewStdClient(c)
 
 	return server, stdClient
@@ -428,7 +428,7 @@ func TestNewTransport_ExposesRoundTripper_CustomClient(t *testing.T) {
 	}))
 	t.Cleanup(server.Close)
 
-	c := NewClient(nil).WithBaseURL(server.URL)
+	c := NewClient(nil, WithClientBaseURL(server.URL))
 	tr := NewTransport(c)
 
 	customClient := &http.Client{
@@ -461,7 +461,7 @@ func TestAoniTransport_RoundTrip_RelativeAndAbsoluteHost(t *testing.T) {
 			}, nil
 		})
 
-		c := NewClient(mockDoer).WithBaseURL("http://localhost")
+		c := NewClient(mockDoer).With(WithClientBaseURL("http://localhost"))
 		tr := NewTransport(c)
 
 		req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, "https://example.com/test", nil)
@@ -490,7 +490,7 @@ func TestAoniTransport_RoundTrip_RelativeAndAbsoluteHost(t *testing.T) {
 			}, nil
 		})
 
-		c := NewClient(mockDoer).WithBaseURL("http://localhost")
+		c := NewClient(mockDoer).With(WithClientBaseURL("http://localhost"))
 		tr := NewTransport(c)
 
 		req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, "/relative_path", nil)

@@ -26,8 +26,9 @@ func main() {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
-	client := aoni.NewClient(nil).
-		WithBaseURL("https://httpbin.org")
+	client := aoni.NewClient(nil,
+		aoni.WithClientBaseURL("https://httpbin.org"),
+	)
 
 	demoStream(ctx, client)
 	demoSSE(ctx, client)

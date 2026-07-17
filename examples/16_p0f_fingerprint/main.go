@@ -22,10 +22,11 @@ type IPResponse struct {
 func main() {
 	ctx := context.Background()
 
-	client := aoni.NewClient(nil).
-		WithBaseURL("https://httpbin.org").
-		WithTimeout(10 * time.Second).
-		WithP0fSignature(p0f.Linux311)
+	client := aoni.NewClient(nil,
+		aoni.WithClientBaseURL("https://httpbin.org"),
+		aoni.WithClientTimeout(10 * time.Second),
+		aoni.WithClientP0fSignature(p0f.Linux311),
+	)
 
 	resp, err := aoni.GetTo[IPResponse](ctx, client, "/ip")
 	if err != nil {

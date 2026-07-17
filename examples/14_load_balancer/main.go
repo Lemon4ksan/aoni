@@ -42,11 +42,12 @@ func main() {
 	defer lb.Close()
 
 	// Wrap the load balancer as the HTTP doer for a client
-	client := aoni.NewClient(lb).
-		WithBaseURL("https://httpbin.org")
+	client := aoni.NewClient(lb,
+		aoni.WithClientBaseURL("https://httpbin.org"),
+	)
 
 	// Requests will be distributed across backends
-	for i := 0; i < 6; i++ {
+	for i := range 6 {
 		res, err := aoni.GetTo[Response](ctx, client, "/ip")
 		if err != nil {
 			log.Printf("Request %d failed: %v", i, err)

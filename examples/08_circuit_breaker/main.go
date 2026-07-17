@@ -41,8 +41,9 @@ func main() {
 		aoni.CircuitBreakerMiddleware(cb, aoni.DefaultCircuitBreakerCondition),
 	)
 
-	client := aoni.NewClient(doer).
-		WithBaseURL("https://httpbin.org")
+	client := aoni.NewClient(doer,
+		aoni.WithClientBaseURL("https://httpbin.org"),
+	)
 
 	// Make requests; once the failure ratio exceeds the threshold, the circuit opens
 	// and all subsequent requests fail fast with a circuit-open error

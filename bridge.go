@@ -239,7 +239,7 @@ func (t *Transport) RoundTrip(origReq *http.Request) (*http.Response, error) {
 		switch strings.ToLower(k) {
 		case "x-aoni-proxy":
 			if u, err := url.Parse(val); err == nil {
-				cloned = cloned.WithProxy(u)
+				cloned = cloned.With(WithClientProxy(u))
 			}
 		case "x-aoni-tls-fingerprint":
 			var browser BrowserID
@@ -254,19 +254,19 @@ func (t *Transport) RoundTrip(origReq *http.Request) (*http.Response, error) {
 				browser = BrowserNone
 			}
 
-			cloned = cloned.WithTLSFingerprint(browser)
+			cloned = cloned.With(WithClientTLSFingerprint(browser))
 
 		case "x-aoni-timeout":
 			if d, err := time.ParseDuration(val); err == nil {
-				cloned = cloned.WithTimeout(d)
+				cloned = cloned.With(WithClientTimeout(d))
 			}
 		case "x-aoni-ssrf-guard":
 			if val == "true" || val == "1" {
-				cloned = cloned.WithSSRFGuard()
+				cloned = cloned.With(WithClientSSRFGuard())
 			}
 		case "x-aoni-max-response-size":
 			if size, err := strconv.ParseInt(val, 10, 64); err == nil {
-				cloned = cloned.WithMaxResponseSize(size)
+				cloned = cloned.With(WithClientMaxResponseSize(size))
 			}
 		}
 	}

@@ -28,15 +28,16 @@ func main() {
 	defer cancel()
 
 	// Create client with Chrome TLS fingerprint
-	client := aoni.NewClient(nil).
-		WithBaseURL("https://httpbin.org").
-		WithTLSFingerprint(aoni.BrowserChrome).
-		WithJA4Callback(func(report ja4.Report) {
+	client := aoni.NewClient(nil,
+		aoni.WithClientBaseURL("https://httpbin.org"),
+		aoni.WithClientTLSFingerprint(aoni.BrowserChrome),
+		aoni.WithClientJA4Callback(func(report ja4.Report) {
 			fmt.Printf("JA4 callback: JA4=%s JA4H=%s proto=%s version=%s\n",
 				report.JA4, report.JA4H, report.Protocol, report.Version)
 			fmt.Printf("  SNI=%s ciphers=%d extensions=%d ALPN=%s\n",
 				report.SNI, report.CipherCount, report.ExtCount, report.ALPN)
-		})
+		}),
+	)
 
 	// Trace with JA4 fingerprint collection
 	var info aoni.TraceInfo
@@ -55,12 +56,13 @@ func main() {
 	}
 
 	// Firefox example
-	firefoxClient := aoni.NewClient(nil).
-		WithBaseURL("https://httpbin.org").
-		WithTLSFingerprint(aoni.BrowserFirefox).
-		WithJA4Callback(func(report ja4.Report) {
+	firefoxClient := aoni.NewClient(nil,
+		aoni.WithClientBaseURL("https://httpbin.org"),
+		aoni.WithClientTLSFingerprint(aoni.BrowserFirefox),
+		aoni.WithClientJA4Callback(func(report ja4.Report) {
 			fmt.Printf("\nFirefox JA4: %s\n", report.JA4)
-		})
+		}),
+	)
 
 	_, _ = aoni.GetTo[Response](ctx, firefoxClient, "/ip")
 }

@@ -65,9 +65,9 @@ func TestChallengeSolver_BypassesChallenge(t *testing.T) {
 		},
 	}
 
-	client := aoni.NewClient(nil).
-		WithBaseURL(server.URL).
-		WithChallengeSolver(solver)
+	client := aoni.NewClient(nil,
+		aoni.WithClientBaseURL(server.URL),
+	).WithChallengeSolver(solver)
 
 	type Response struct {
 		Success bool `json:"success"`
@@ -129,10 +129,10 @@ func TestChallengeSolver_CustomDetector(t *testing.T) {
 		},
 	}
 
-	client := aoni.NewClient(nil).
-		WithBaseURL(server.URL).
-		WithChallengeSolver(solver).
-		WithChallengeDetector(detector)
+	client := aoni.NewClient(nil,
+		aoni.WithClientBaseURL(server.URL),
+		aoni.WithClientChallengeDetector(detector),
+	).WithChallengeSolver(solver)
 
 	type Response struct {
 		Success bool `json:"success"`

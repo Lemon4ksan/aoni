@@ -187,10 +187,10 @@ func (c *Client) WithPersona(p Persona) *Client {
 		}
 	}
 
-	newClient = newClient.WithUserAgent(p.UserAgent)
+	newClient = newClient.With(WithClientUserAgent(p.UserAgent))
 
 	if len(p.HeaderOrder) > 0 {
-		newClient = newClient.WithModifiers(WithOrderedHeaders(p.HeaderOrder))
+		newClient = newClient.With(WithClientModifiers(WithOrderedHeaders(p.HeaderOrder)))
 	}
 
 	return newClient

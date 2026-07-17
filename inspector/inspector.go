@@ -85,7 +85,7 @@ func Enable(c *aoni.Client, addr string) (*aoni.Client, *TrafficInspector, error
 		return nil, nil, err
 	}
 
-	return c.WithInspector(inspector), inspector, nil
+	return c.With(aoni.WithClientInspector(inspector)), inspector, nil
 }
 
 // Serve spins up the local HTTP server in a background goroutine.
