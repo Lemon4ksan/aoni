@@ -54,7 +54,7 @@ func main() {
 
 	_, err = aoni.GetTo[HTTPBinResponse](ctx, client, "/ip",
 		aoni.AsCurl(),
-		aoni.CaptureResponse(&resp),
+		aoni.WithCaptureResponse(&resp),
 	)
 	if err != nil {
 		log.Fatal(err)

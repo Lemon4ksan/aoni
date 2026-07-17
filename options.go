@@ -284,10 +284,10 @@ func WithOrigin(origin string) RequestModifier {
 	}
 }
 
-// Debug returns a [RequestModifier] that tags the request for
+// WithDebug returns a [RequestModifier] that tags the request for
 // verbose logging. The [Client] must have a [Logger] set via
 // [Client.WithLogger] for output to appear.
-func Debug() RequestModifier {
+func WithDebug() RequestModifier {
 	return func(req *http.Request) {
 		ctx := context.WithValue(req.Context(), debugCtxKey{}, true)
 		*req = *req.WithContext(ctx)
@@ -348,10 +348,10 @@ func WithHedging(delay time.Duration) RequestModifier {
 	}
 }
 
-// CaptureResponse stores the final [http.Response] pointer in
+// WithCaptureResponse stores the final [http.Response] pointer in
 // target after the request completes. Useful for inspecting
 // headers or status codes in middleware hooks.
-func CaptureResponse(target **http.Response) RequestModifier {
+func WithCaptureResponse(target **http.Response) RequestModifier {
 	return func(req *http.Request) {
 		ctx := context.WithValue(req.Context(), capturerCtxKey{}, target)
 		*req = *req.WithContext(ctx)

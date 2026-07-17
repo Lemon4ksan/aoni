@@ -350,7 +350,7 @@ func TestClient_CaptureResponse(t *testing.T) {
 
 	var raw *http.Response
 
-	result, err := GetTo[testPayload](t.Context(), client, "/capture", CaptureResponse(&raw))
+	result, err := GetTo[testPayload](t.Context(), client, "/capture", WithCaptureResponse(&raw))
 	require.NoError(t, err)
 
 	if raw != nil {
@@ -392,7 +392,7 @@ func TestClient_DX_Helpers(t *testing.T) {
 			DefaultClient,
 			"/get",
 			WithBearer("my-token"),
-			CaptureResponse(&raw),
+			WithCaptureResponse(&raw),
 		)
 		require.NoError(t, err)
 
@@ -413,7 +413,7 @@ func TestClient_DX_Helpers(t *testing.T) {
 			"/auth",
 			WithBasicAuth("user", "pass"),
 			WithUserAgent("G-MAN-BOT"),
-			CaptureResponse(&raw),
+			WithCaptureResponse(&raw),
 		)
 		require.NoError(t, err)
 
@@ -433,7 +433,7 @@ func TestClient_DX_Helpers(t *testing.T) {
 			DefaultClient,
 			"/put",
 			testPayload{Message: "put-body"},
-			CaptureResponse(&raw),
+			WithCaptureResponse(&raw),
 		)
 		require.NoError(t, err)
 
@@ -452,7 +452,7 @@ func TestClient_DX_Helpers(t *testing.T) {
 			DefaultClient,
 			"/patch",
 			testPayload{Message: "patch-body"},
-			CaptureResponse(&raw),
+			WithCaptureResponse(&raw),
 		)
 		require.NoError(t, err)
 
@@ -471,7 +471,7 @@ func TestClient_DX_Helpers(t *testing.T) {
 			DefaultClient,
 			"/delete",
 			testPayload{Message: "delete-body"},
-			CaptureResponse(&raw),
+			WithCaptureResponse(&raw),
 		)
 		require.NoError(t, err)
 
@@ -483,7 +483,7 @@ func TestClient_DX_Helpers(t *testing.T) {
 	})
 
 	t.Run("debug_mode", func(t *testing.T) {
-		_, err := GetTo[testPayload](t.Context(), DefaultClient, "/debug", Debug())
+		_, err := GetTo[testPayload](t.Context(), DefaultClient, "/debug", WithDebug())
 		require.NoError(t, err)
 	})
 }

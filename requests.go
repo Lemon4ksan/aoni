@@ -28,7 +28,7 @@ var DefaultClient = NewClient(nil)
 // the helper automatically drains and closes the response body to prevent resource leaks.
 type NoResponse struct{}
 
-// Put executes a PUT request through the specified Requester and returns the raw [http.Response].
+// Put executes a PUT request through the specified [Requester] and returns the raw [http.Response].
 //
 // By default, if the body is a struct or map, it is marshaled to JSON and the request headers
 // "Content-Type" and "Accept" are set to "application/json".
@@ -51,7 +51,7 @@ func Put(ctx context.Context, c Requester, path string, body any, mods ...Reques
 	return c.Request(ctx, http.MethodPut, path, mods...)
 }
 
-// Patch executes a PATCH request through the specified Requester and returns the raw [http.Response].
+// Patch executes a PATCH request through the specified [Requester] and returns the raw [http.Response].
 //
 // By default, if the body is a struct or map, it is marshaled to JSON and the request headers
 // "Content-Type" and "Accept" are set to "application/json".
@@ -74,7 +74,7 @@ func Patch(ctx context.Context, c Requester, path string, body any, mods ...Requ
 	return c.Request(ctx, http.MethodPatch, path, mods...)
 }
 
-// Delete executes a DELETE request through the specified Requester and returns the raw [http.Response].
+// Delete executes a DELETE request through the specified [Requester] and returns the raw [http.Response].
 //
 // By default, if the body is a struct or map, it is marshaled to JSON and the request headers
 // "Content-Type" and "Accept" are set to "application/json".
@@ -97,7 +97,7 @@ func Delete(ctx context.Context, c Requester, path string, body any, mods ...Req
 	return c.Request(ctx, http.MethodDelete, path, mods...)
 }
 
-// Get performs a GET request through the specified Requester and returns the raw [http.Response].
+// Get performs a GET request through the specified [Requester] and returns the raw [http.Response].
 func Get(ctx context.Context, c Requester, path string, mods ...RequestModifier) (*http.Response, error) {
 	return c.Request(ctx, http.MethodGet, path, mods...)
 }
@@ -125,17 +125,21 @@ func GetToEx[Resp any](
 ) (*Resp, *http.Response, error) {
 	var raw *http.Response
 
-	mods = append(mods, CaptureResponse(&raw))
+	mods = append(mods, WithCaptureResponse(&raw))
 
 	result, err := GetTo[Resp](ctx, c, path, mods...)
 	if err != nil {
+		if raw != nil && raw.Body != nil {
+			_ = raw.Body.Close()
+		}
+
 		return nil, raw, err
 	}
 
 	return result, raw, nil
 }
 
-// Post executes a POST request through the specified Requester and returns the raw [http.Response].
+// Post executes a POST request through the specified [Requester] and returns the raw [http.Response].
 //
 // By default, if the body is a struct or map, it is marshaled to JSON and the request headers
 // "Content-Type" and "Accept" are set to "application/json".
@@ -215,17 +219,23 @@ func PostToEx[Resp any](
 ) (*Resp, *http.Response, error) {
 	var raw *http.Response
 
-	mods = append(mods, CaptureResponse(&raw))
+	mods = append(mods, WithCaptureResponse(&raw))
 
 	result, err := PostTo[Resp](ctx, c, path, body, mods...)
 	if err != nil {
+		if raw != nil && raw.Body != nil {
+			_ = raw.Body.Close()
+		}
+
 		return nil, raw, err
 	}
 
 	return result, raw, nil
 }
 
-// PutTo executes a PUT request, marshals the body, and decodes the response body into Resp.
+// PutTo executes a PUT request through the specified [Requester],
+// marshals the body, and decodes the response body into Resp.
+//
 // It returns an [APIError] if the server responds with a non-2xx status code.
 //
 // By default, the request body is marshaled to JSON and the response is parsed as JSON.
@@ -278,17 +288,23 @@ func PutToEx[Resp any](
 ) (*Resp, *http.Response, error) {
 	var raw *http.Response
 
-	mods = append(mods, CaptureResponse(&raw))
+	mods = append(mods, WithCaptureResponse(&raw))
 
 	result, err := PutTo[Resp](ctx, c, path, body, mods...)
 	if err != nil {
+		if raw != nil && raw.Body != nil {
+			_ = raw.Body.Close()
+		}
+
 		return nil, raw, err
 	}
 
 	return result, raw, nil
 }
 
-// PatchTo executes a PATCH request, marshals the body, and decodes the response body into Resp.
+// PatchTo executes a PATCH request through the specified [Requester],
+// marshals the body, and decodes the response body into Resp.
+//
 // It returns an [APIError] if the server responds with a non-2xx status code.
 //
 // By default, the request body is marshaled to JSON and the response is parsed as JSON.
@@ -341,17 +357,23 @@ func PatchToEx[Resp any](
 ) (*Resp, *http.Response, error) {
 	var raw *http.Response
 
-	mods = append(mods, CaptureResponse(&raw))
+	mods = append(mods, WithCaptureResponse(&raw))
 
 	result, err := PatchTo[Resp](ctx, c, path, body, mods...)
 	if err != nil {
+		if raw != nil && raw.Body != nil {
+			_ = raw.Body.Close()
+		}
+
 		return nil, raw, err
 	}
 
 	return result, raw, nil
 }
 
-// DeleteTo executes a DELETE request, marshals the body, and decodes the response body into Resp.
+// DeleteTo executes a DELETE request through the specified [Requester],
+// marshals the body, and decodes the response body into Resp.
+//
 // It returns an [APIError] if the server responds with a non-2xx status code.
 //
 // By default, the request body is marshaled to JSON and the response is parsed as JSON.
@@ -404,10 +426,14 @@ func DeleteToEx[Resp any](
 ) (*Resp, *http.Response, error) {
 	var raw *http.Response
 
-	mods = append(mods, CaptureResponse(&raw))
+	mods = append(mods, WithCaptureResponse(&raw))
 
 	result, err := DeleteTo[Resp](ctx, c, path, body, mods...)
 	if err != nil {
+		if raw != nil && raw.Body != nil {
+			_ = raw.Body.Close()
+		}
+
 		return nil, raw, err
 	}
 

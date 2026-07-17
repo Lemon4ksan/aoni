@@ -147,6 +147,18 @@ func (i *TrafficInspector) Capture(req *http.Request, resp *http.Response, reqEr
 		URL:       req.URL.String(),
 	}
 
+	reqHeaders := req.Header
+
+	var respHeaders http.Header
+	if resp != nil {
+		respHeaders = resp.Header
+	}
+
+	var redactMap map[string]bool
+	if cfg, ok := req.Context().Value(redactConfigCtxKey{}).(*redactConfig); ok && cfg != nil {
+		redactMap = cfg.Headers
+	}
+
 	if resp != nil {
 		capReq.Status = resp.StatusCode
 		prefix := fmt.Sprintf("%d ", resp.StatusCode)
@@ -154,9 +166,13 @@ func (i *TrafficInspector) Capture(req *http.Request, resp *http.Response, reqEr
 		capReq.ResponseSize = resp.ContentLength
 
 		capReq.ResponseHeaders = make(map[string]string)
-		for k, v := range resp.Header {
+		for k, v := range respHeaders {
 			if len(v) > 0 {
-				capReq.ResponseHeaders[k] = v[0]
+				if redactMap[strings.ToLower(k)] {
+					capReq.ResponseHeaders[k] = "[REDACTED]"
+				} else {
+					capReq.ResponseHeaders[k] = v[0]
+				}
 			}
 		}
 	} else if reqErr != nil {
@@ -164,9 +180,13 @@ func (i *TrafficInspector) Capture(req *http.Request, resp *http.Response, reqEr
 	}
 
 	capReq.RequestHeaders = make(map[string]string)
-	for k, v := range req.Header {
+	for k, v := range reqHeaders {
 		if len(v) > 0 {
-			capReq.RequestHeaders[k] = v[0]
+			if redactMap[strings.ToLower(k)] {
+				capReq.RequestHeaders[k] = "[REDACTED]"
+			} else {
+				capReq.RequestHeaders[k] = v[0]
+			}
 		}
 	}
 

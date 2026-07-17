@@ -5,14 +5,18 @@
 package aoni
 
 import (
+	"bytes"
 	"compress/gzip"
 	"context"
+	"encoding/base64"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"mime"
 	"net/http"
+	"net/url"
 	"strings"
 	"sync"
 	"time"
@@ -584,4 +588,532 @@ func executeWithHedging(
 	}
 
 	return nil, firstErr
+}
+
+// BrowserProfile represents a user agent aligned with its modern client hints.
+type BrowserProfile struct {
+	UserAgent   string
+	ClientHints map[string]string
+}
+
+// DefaultBrowserProfiles provides a list of realistic, modern Chrome browser profiles.
+var DefaultBrowserProfiles = []BrowserProfile{
+	{
+		UserAgent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+		ClientHints: map[string]string{
+			"Sec-CH-UA":          `"Not_A Brand";v="8", "Chromium";v="120", "Google Chrome";v="120"`,
+			"Sec-CH-UA-Mobile":   "?0",
+			"Sec-CH-UA-Platform": `"Windows"`,
+		},
+	},
+	{
+		UserAgent: "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+		ClientHints: map[string]string{
+			"Sec-CH-UA":          `"Not_A Brand";v="8", "Chromium";v="120", "Google Chrome";v="120"`,
+			"Sec-CH-UA-Mobile":   "?0",
+			"Sec-CH-UA-Platform": `"macOS"`,
+		},
+	},
+	{
+		UserAgent: "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36",
+		ClientHints: map[string]string{
+			"Sec-CH-UA":          `"Not_A Brand";v="8", "Chromium";v="120", "Google Chrome";v="120"`,
+			"Sec-CH-UA-Mobile":   "?1",
+			"Sec-CH-UA-Platform": `"Android"`,
+		},
+	},
+}
+
+// UserAgentAndHintsRotationMiddleware rotates User-Agent and corresponding Sec-Ch-Ua-* client hints
+// to match the selected profile consistently on every request.
+func UserAgentAndHintsRotationMiddleware(profiles []BrowserProfile) Middleware {
+	if len(profiles) == 0 {
+		profiles = DefaultBrowserProfiles
+	}
+
+	var (
+		mu      sync.Mutex
+		counter int
+	)
+
+	return func(next HTTPDoer) HTTPDoer {
+		return DoerFunc(func(req *http.Request) (*http.Response, error) {
+			mu.Lock()
+			prof := profiles[counter%len(profiles)]
+			counter++
+			mu.Unlock()
+
+			req.Header.Set("User-Agent", prof.UserAgent)
+
+			for k, v := range prof.ClientHints {
+				req.Header.Set(k, v)
+			}
+
+			return next.Do(req)
+		})
+	}
+}
+
+type jitterReader struct {
+	io.ReadCloser
+	delay time.Duration
+	once  sync.Once
+}
+
+func (r *jitterReader) Read(p []byte) (int, error) {
+	r.once.Do(func() {
+		time.Sleep(r.delay)
+	})
+
+	return r.ReadCloser.Read(p)
+}
+
+// DPIJitterMiddleware introduces a randomized delay before sending headers or reading request body.
+// When request has a body (like POST), the delay staggers header send and body send phases.
+func DPIJitterMiddleware(minDelay, maxDelay time.Duration) Middleware {
+	return func(next HTTPDoer) HTTPDoer {
+		return DoerFunc(func(req *http.Request) (*http.Response, error) {
+			var delay time.Duration
+			if minDelay > 0 && maxDelay >= minDelay {
+				delta := maxDelay - minDelay
+				if delta > 0 {
+					// Seed random delay via time UnixNano
+					r := time.Duration(time.Now().UnixNano() % int64(delta))
+					delay = minDelay + r
+				} else {
+					delay = minDelay
+				}
+			}
+
+			if delay > 0 {
+				if req.Body != nil && req.Body != http.NoBody {
+					req.Body = &jitterReader{
+						ReadCloser: req.Body,
+						delay:      delay,
+					}
+				} else {
+					time.Sleep(delay)
+				}
+			}
+
+			return next.Do(req)
+		})
+	}
+}
+
+// ProxyFailoverMiddleware handles transparent proxy switching on connection or HTTP 502/503 errors.
+func ProxyFailoverMiddleware(proxies []string, retryLimit int) Middleware {
+	var parsed []*url.URL
+	for _, p := range proxies {
+		if u, err := url.Parse(p); err == nil {
+			parsed = append(parsed, u)
+		}
+	}
+
+	var (
+		mu      sync.Mutex
+		counter int
+	)
+
+	return func(next HTTPDoer) HTTPDoer {
+		return DoerFunc(func(req *http.Request) (*http.Response, error) {
+			if len(parsed) == 0 {
+				return next.Do(req)
+			}
+
+			var (
+				lastErr error
+				resp    *http.Response
+			)
+
+			for i := 0; i <= retryLimit; i++ {
+				mu.Lock()
+
+				proxy := parsed[counter%len(parsed)]
+				if lastErr != nil {
+					counter++
+					proxy = parsed[counter%len(parsed)]
+				}
+
+				mu.Unlock()
+
+				ctx := context.WithValue(req.Context(), proxyOverrideCtxKey{}, proxy.String())
+				newReq := req.WithContext(ctx)
+
+				if req.Body != nil && req.Body != http.NoBody && req.GetBody != nil {
+					body, getBodyErr := req.GetBody()
+					if getBodyErr == nil {
+						newReq.Body = body
+					}
+				}
+
+				resp, lastErr = next.Do(newReq)
+				if lastErr == nil && resp != nil {
+					if resp.StatusCode != http.StatusBadGateway && resp.StatusCode != http.StatusServiceUnavailable {
+						return resp, nil
+					}
+
+					lastErr = fmt.Errorf("aoni: proxy returned status %d", resp.StatusCode)
+					_ = resp.Body.Close()
+				}
+			}
+
+			return nil, fmt.Errorf("aoni proxy failover: exhausted %d retries, last error: %w", retryLimit, lastErr)
+		})
+	}
+}
+
+// CacheStore defines the storage interface for HTTP caching.
+type CacheStore interface {
+	Get(ctx context.Context, key string) ([]byte, error)
+	Set(ctx context.Context, key string, val []byte, ttl time.Duration) error
+}
+
+type inMemoryCacheEntry struct {
+	Value     []byte
+	ExpiresAt time.Time
+}
+
+// InMemoryCacheStore implements CacheStore in memory.
+type InMemoryCacheStore struct {
+	mu    sync.RWMutex
+	cache map[string]inMemoryCacheEntry
+}
+
+// NewInMemoryCacheStore creates a thread-safe in-memory CacheStore.
+func NewInMemoryCacheStore() *InMemoryCacheStore {
+	return &InMemoryCacheStore{
+		cache: make(map[string]inMemoryCacheEntry),
+	}
+}
+
+// Get retrieves cached response bytes from memory.
+func (s *InMemoryCacheStore) Get(ctx context.Context, key string) ([]byte, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	entry, ok := s.cache[key]
+	if !ok || time.Now().After(entry.ExpiresAt) {
+		return nil, errors.New("aoni cache: miss")
+	}
+
+	return entry.Value, nil
+}
+
+// Set stores response bytes in memory with TTL.
+func (s *InMemoryCacheStore) Set(ctx context.Context, key string, val []byte, ttl time.Duration) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	s.cache[key] = inMemoryCacheEntry{
+		Value:     val,
+		ExpiresAt: time.Now().Add(ttl),
+	}
+
+	return nil
+}
+
+type cachedResponse struct {
+	StatusCode int                 `json:"status_code"`
+	Header     map[string][]string `json:"header"`
+	BodyBase64 string              `json:"body_base64"`
+}
+
+// CacheMiddleware intercepts GET requests and serves them from CacheStore if valid.
+func CacheMiddleware(store CacheStore, defaultTTL time.Duration) Middleware {
+	return func(next HTTPDoer) HTTPDoer {
+		return DoerFunc(func(req *http.Request) (*http.Response, error) {
+			if req.Method != http.MethodGet {
+				return next.Do(req)
+			}
+
+			// Respect no-cache requests
+			if cc := req.Header.Get(
+				"Cache-Control",
+			); strings.Contains(cc, "no-cache") ||
+				strings.Contains(cc, "no-store") {
+				return next.Do(req)
+			}
+
+			cacheKey := req.Method + ":" + req.URL.String()
+			if cachedData, err := store.Get(req.Context(), cacheKey); err == nil {
+				var cached cachedResponse
+				if decodeErr := json.Unmarshal(cachedData, &cached); decodeErr == nil {
+					bodyBytes, _ := base64.StdEncoding.DecodeString(cached.BodyBase64)
+					resp := &http.Response{
+						StatusCode:    cached.StatusCode,
+						Header:        cached.Header,
+						Body:          io.NopCloser(bytes.NewReader(bodyBytes)),
+						ContentLength: int64(len(bodyBytes)),
+						Request:       req,
+					}
+
+					return resp, nil
+				}
+			}
+
+			resp, err := next.Do(req)
+			if err != nil || resp == nil || resp.StatusCode != http.StatusOK {
+				return resp, err
+			}
+
+			// Check response cache control
+			respCC := resp.Header.Get("Cache-Control")
+			if strings.Contains(respCC, "no-store") || strings.Contains(respCC, "private") {
+				return resp, nil
+			}
+
+			var bodyBuf bytes.Buffer
+
+			tee := io.TeeReader(resp.Body, &bodyBuf)
+
+			// We need to read the body to cache it, then restore it
+			bodyBytes, readErr := io.ReadAll(tee)
+			if readErr != nil {
+				return resp, nil //nolint:nilerr
+			}
+
+			_ = resp.Body.Close()
+			resp.Body = io.NopCloser(bytes.NewReader(bodyBytes))
+
+			cached := cachedResponse{
+				StatusCode: resp.StatusCode,
+				Header:     resp.Header,
+				BodyBase64: base64.StdEncoding.EncodeToString(bodyBytes),
+			}
+
+			if cachedData, marshalErr := json.Marshal(cached); marshalErr == nil {
+				_ = store.Set(req.Context(), cacheKey, cachedData, defaultTTL)
+			}
+
+			return resp, nil
+		})
+	}
+}
+
+type redactConfig struct {
+	Headers map[string]bool
+}
+
+type redactConfigCtxKey struct{}
+
+// SensitiveDataRedactorMiddleware masks sensitive headers such as Authorization or Cookie
+// for the inspector or logs without modifying the actual network request.
+func SensitiveDataRedactorMiddleware(headersToRedact, jsonKeysToRedact []string) Middleware {
+	headersMap := make(map[string]bool)
+	for _, h := range headersToRedact {
+		headersMap[strings.ToLower(h)] = true
+	}
+
+	if len(headersMap) == 0 {
+		headersMap["authorization"] = true
+		headersMap["cookie"] = true
+		headersMap["set-cookie"] = true
+	}
+
+	return func(next HTTPDoer) HTTPDoer {
+		return DoerFunc(func(req *http.Request) (*http.Response, error) {
+			ctx := context.WithValue(req.Context(), redactConfigCtxKey{}, &redactConfig{Headers: headersMap})
+			return next.Do(req.WithContext(ctx))
+		})
+	}
+}
+
+// HARLog represents the top-level HAR log structure.
+type HARLog struct {
+	Log HARLogDetail `json:"log"`
+}
+
+// HARLogDetail represents the log details in a HAR file.
+type HARLogDetail struct {
+	Version string     `json:"version"`
+	Creator HARCreator `json:"creator"`
+	Entries []HAREntry `json:"entries"`
+}
+
+// HARCreator represents the creator of the HAR file.
+type HARCreator struct {
+	Name    string `json:"name"`
+	Version string `json:"version"`
+}
+
+// HAREntry represents a single request-response session entry in the HAR log.
+type HAREntry struct {
+	StartedDateTime string      `json:"startedDateTime"`
+	Time            int64       `json:"time"`
+	Request         HARRequest  `json:"request"`
+	Response        HARResponse `json:"response"`
+	Cache           interface{} `json:"cache"`
+	Timings         HARTimings  `json:"timings"`
+}
+
+// HARRequest represents a captured HTTP request in the HAR log.
+type HARRequest struct {
+	Method      string           `json:"method"`
+	URL         string           `json:"url"`
+	HTTPVersion string           `json:"httpVersion"`
+	Headers     []HARHeaderField `json:"headers"`
+	Cookies     []interface{}    `json:"cookies"`
+	QueryString []interface{}    `json:"queryString"`
+	HeadersSize int              `json:"headersSize"`
+	BodySize    int64            `json:"bodySize"`
+}
+
+// HARResponse represents a captured HTTP response in the HAR log.
+type HARResponse struct {
+	Status      int              `json:"status"`
+	StatusText  string           `json:"statusText"`
+	HTTPVersion string           `json:"httpVersion"`
+	Headers     []HARHeaderField `json:"headers"`
+	Cookies     []interface{}    `json:"cookies"`
+	Content     HARContent       `json:"content"`
+	RedirectURL string           `json:"redirectURL"`
+	HeadersSize int              `json:"headersSize"`
+	BodySize    int64            `json:"bodySize"`
+}
+
+// HARHeaderField represents an HTTP header name-value pair in the HAR log.
+type HARHeaderField struct {
+	Name  string `json:"name"`
+	Value string `json:"value"`
+}
+
+// HARContent represents the response body content details in the HAR log.
+type HARContent struct {
+	Size     int64  `json:"size"`
+	MimeType string `json:"mimeType"`
+	Text     string `json:"text,omitempty"`
+}
+
+// HARTimings represents the timing metrics for a request-response session in the HAR log.
+type HARTimings struct {
+	Send    int64 `json:"send"`
+	Wait    int64 `json:"wait"`
+	Receive int64 `json:"receive"`
+}
+
+// HARGenerator accumulates HTTP request-response entries.
+type HARGenerator struct {
+	mu      sync.RWMutex
+	entries []HAREntry
+}
+
+// NewHARGenerator creates a new HARGenerator.
+func NewHARGenerator() *HARGenerator {
+	return &HARGenerator{}
+}
+
+// AddEntry adds a single HAREntry thread-safely.
+func (g *HARGenerator) AddEntry(entry HAREntry) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+
+	g.entries = append(g.entries, entry)
+}
+
+// Export returns the serialized HAR archive JSON bytes.
+func (g *HARGenerator) Export() ([]byte, error) {
+	g.mu.RLock()
+	defer g.mu.RUnlock()
+
+	log := HARLog{
+		Log: HARLogDetail{
+			Version: "1.2",
+			Creator: HARCreator{
+				Name:    "aoni",
+				Version: "0.5.0",
+			},
+			Entries: g.entries,
+		},
+	}
+
+	return json.MarshalIndent(log, "", "  ")
+}
+
+// HARGeneratorMiddleware logs completed sessions to the provided HARGenerator.
+func HARGeneratorMiddleware(gen *HARGenerator) Middleware {
+	return func(next HTTPDoer) HTTPDoer {
+		return DoerFunc(func(req *http.Request) (*http.Response, error) {
+			startTime := time.Now()
+
+			var reqHeaders []HARHeaderField
+			for k, v := range req.Header {
+				for _, val := range v {
+					reqHeaders = append(reqHeaders, HARHeaderField{Name: k, Value: val})
+				}
+			}
+
+			var reqBodySize int64
+			if req.Body != nil && req.Body != http.NoBody {
+				if req.ContentLength > 0 {
+					reqBodySize = req.ContentLength
+				}
+			}
+
+			resp, err := next.Do(req)
+			duration := time.Since(startTime).Milliseconds()
+
+			if err != nil || resp == nil {
+				return resp, err
+			}
+
+			var respHeaders []HARHeaderField
+			for k, v := range resp.Header {
+				for _, val := range v {
+					respHeaders = append(respHeaders, HARHeaderField{Name: k, Value: val})
+				}
+			}
+
+			var bodyBytes []byte
+			if resp.Body != nil {
+				var bodyBuf bytes.Buffer
+
+				tee := io.TeeReader(resp.Body, &bodyBuf)
+				bodyBytes, _ = io.ReadAll(tee)
+
+				_ = resp.Body.Close()
+				resp.Body = io.NopCloser(bytes.NewReader(bodyBytes))
+			}
+
+			entry := HAREntry{
+				StartedDateTime: startTime.UTC().Format(time.RFC3339Nano),
+				Time:            duration,
+				Request: HARRequest{
+					Method:      req.Method,
+					URL:         req.URL.String(),
+					HTTPVersion: req.Proto,
+					Headers:     reqHeaders,
+					Cookies:     []interface{}{},
+					QueryString: []interface{}{},
+					HeadersSize: -1,
+					BodySize:    reqBodySize,
+				},
+				Response: HARResponse{
+					Status:      resp.StatusCode,
+					StatusText:  resp.Status,
+					HTTPVersion: resp.Proto,
+					Headers:     respHeaders,
+					Cookies:     []interface{}{},
+					Content: HARContent{
+						Size:     int64(len(bodyBytes)),
+						MimeType: resp.Header.Get("Content-Type"),
+						Text:     string(bodyBytes),
+					},
+					RedirectURL: resp.Header.Get("Location"),
+					HeadersSize: -1,
+					BodySize:    int64(len(bodyBytes)),
+				},
+				Cache: struct{}{},
+				Timings: HARTimings{
+					Send:    0,
+					Wait:    duration,
+					Receive: 0,
+				},
+			}
+
+			gen.AddEntry(entry)
+
+			return resp, nil
+		})
+	}
 }

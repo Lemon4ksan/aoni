@@ -514,12 +514,12 @@ func FallbackMiddlewareEx(isFailure func(*http.Response, error) bool) Middleware
 			resp, err := next.Do(req)
 			if isFailure(resp, err) {
 				if f, ok := req.Context().Value(fallbackCtxKey{}).(FallbackFunc); ok && f != nil {
-					if resp != nil {
-						_ = resp.Body.Close()
-					}
-
 					fallbackResp, fallbackErr := f(req, err)
 					if fallbackErr == nil {
+						if resp != nil && resp.Body != nil {
+							_ = resp.Body.Close()
+						}
+
 						return fallbackResp, nil
 					}
 				}

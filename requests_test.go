@@ -508,7 +508,7 @@ func TestClient_Diagnostics_SensitiveHeaderRedaction(t *testing.T) {
 		t.Context(),
 		client,
 		"/debug-test",
-		Debug(),
+		WithDebug(),
 		WithHeader("Authorization", "Bearer sensitive-token-here"),
 	)
 	require.NoError(t, err)
