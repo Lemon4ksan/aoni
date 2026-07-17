@@ -1544,6 +1544,21 @@ func (c *Client) WithPipelineWrapper(wrapper func(c *Client, engine HTTPDoer) HT
 	return newClient
 }
 
+// Defaults returns the ClientDefaults configured on c.
+func (c *Client) Defaults() ClientDefaults {
+	return c.defaults
+}
+
+// Network returns the NetworkConfig configured on c.
+func (c *Client) Network() NetworkConfig {
+	return c.network
+}
+
+// Fingerprint returns the FingerprintConfig configured on c.
+func (c *Client) Fingerprint() FingerprintConfig {
+	return c.fingerprint
+}
+
 // Transport returns the underlying [http.Transport] of the client.
 // Returns nil if the [HTTPDoer] is not an [http.Client] or its transport is not an [http.Transport].
 func (c *Client) Transport() *http.Transport {
