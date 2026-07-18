@@ -9,7 +9,6 @@ import (
 	"crypto/tls"
 	"errors"
 	"fmt"
-	"log/slog"
 	"net"
 	"net/http"
 	"net/url"
@@ -19,6 +18,7 @@ import (
 	"time"
 
 	"github.com/lemon4ksan/miyako/generic"
+	"github.com/lemon4ksan/miyako/log"
 )
 
 // ParseAutoProxy parses a proxy string and detects the protocol.
@@ -161,6 +161,8 @@ type ProxyRotatorConfig struct {
 	HealthCheckURL string
 	// HealthCheckInterval sets the frequency of background health checks.
 	HealthCheckInterval time.Duration
+	// Logger is the logger used by the proxy rotator.
+	Logger Logger
 }
 
 // StickyKeyFunc extracts a session identifier from a request for sticky routing.
@@ -240,7 +242,7 @@ type sessionEntry struct {
 type ProxyRotator struct {
 	mu            sync.RWMutex
 	clients       []*trackedClient
-	config        ProxyRotatorConfig
+	cfg           ProxyRotatorConfig
 	current       atomic.Uint64
 	stickyKeyFunc StickyKeyFunc
 	sessions      map[string]*sessionEntry
@@ -254,48 +256,51 @@ type ProxyRotator struct {
 // NewProxyRotator creates a [ProxyRotator] from the given config and clients.
 // It returns an error if clients is empty.
 // Default [ProxyRotatorConfig.MaxFails] is 3; default [ProxyRotatorConfig.RetryAfter] is 30 seconds.
-func NewProxyRotator(config ProxyRotatorConfig, clients ...ClientWithProxy) (*ProxyRotator, error) {
+func NewProxyRotator(cfg ProxyRotatorConfig, clients ...ClientWithProxy) (*ProxyRotator, error) {
 	if len(clients) == 0 {
 		return nil, errors.New("aoni: proxy rotator requires at least one client")
 	}
 
-	config.MaxFails = generic.Coalesce(config.MaxFails, 3)
-	config.RetryAfter = generic.Coalesce(config.RetryAfter, 30*time.Second)
+	cfg.MaxFails = generic.Coalesce(cfg.MaxFails, 3)
+	cfg.RetryAfter = generic.Coalesce(cfg.RetryAfter, 30*time.Second)
 
-	tracked := generic.Map(clients, func(c ClientWithProxy) *trackedClient {
+	if cfg.Logger == nil {
+		cfg.Logger = log.Discard
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	r := &ProxyRotator{
+		ctx:        ctx,
+		cancel:     cancel,
+		cfg:        cfg,
+		sessions:   make(map[string]*sessionEntry),
+		sessionTTL: 24 * time.Hour,
+	}
+
+	r.clients = generic.Map(clients, func(c ClientWithProxy) *trackedClient {
 		tc := &trackedClient{
 			client:          c.Client,
 			proxyURL:        c.ProxyURL,
 			domainCooldowns: make(map[string]time.Time),
 		}
-		tc.HealthTracker = NewHealthTracker(c.ProxyURL, config.MaxFails, config.RetryAfter,
+		tc.HealthTracker = NewHealthTracker(c.ProxyURL, cfg.MaxFails, cfg.RetryAfter,
 			func(name string, fails uint32, retryAfter time.Duration) {
-				slog.Warn("proxy marked unhealthy", //nolint:gosec
-					"proxy", name, "fails", fails, "retry_after", retryAfter)
+				cfg.Logger.Warn("proxy marked unhealthy",
+					"proxy", name, "fails", fails, "retry_after", retryAfter,
+				)
 			},
 			func(name string) {
-				slog.Info("proxy recovered", //nolint:gosec
-					"proxy", name)
+				cfg.Logger.Info("proxy recovered", "proxy", name)
 			},
 		)
 
 		return tc
 	})
 
-	ctx, cancel := context.WithCancel(context.Background())
-	r := &ProxyRotator{
-		ctx:        ctx,
-		cancel:     cancel,
-		clients:    tracked,
-		config:     config,
-		sessions:   make(map[string]*sessionEntry),
-		sessionTTL: 24 * time.Hour,
-	}
-
 	r.wg.Go(r.cleanupSessionsLoop)
 
-	if config.HealthCheckURL != "" {
-		r.config.HealthCheckInterval = generic.Coalesce(config.HealthCheckInterval, time.Minute)
+	if cfg.HealthCheckURL != "" {
+		r.cfg.HealthCheckInterval = generic.Coalesce(cfg.HealthCheckInterval, time.Minute)
 
 		r.wg.Go(r.healthCheckLoop)
 	}
@@ -393,14 +398,13 @@ func (r *ProxyRotator) UpdateClients(clients ...ClientWithProxy) {
 			proxyURL:        cp.ProxyURL,
 			domainCooldowns: make(map[string]time.Time),
 		}
-		tc.HealthTracker = NewHealthTracker(cp.ProxyURL, r.config.MaxFails, r.config.RetryAfter,
+		tc.HealthTracker = NewHealthTracker(cp.ProxyURL, r.cfg.MaxFails, r.cfg.RetryAfter,
 			func(name string, fails uint32, retryAfter time.Duration) {
-				slog.Warn("proxy marked unhealthy", //nolint:gosec
+				r.cfg.Logger.Warn("proxy marked unhealthy",
 					"proxy", name, "fails", fails, "retry_after", retryAfter)
 			},
 			func(name string) {
-				slog.Info("proxy recovered", //nolint:gosec
-					"proxy", name)
+				r.cfg.Logger.Info("proxy recovered", "proxy", name)
 			},
 		)
 
@@ -435,11 +439,11 @@ func (r *ProxyRotator) Close() error {
 }
 
 func (r *ProxyRotator) healthCheckLoop() {
-	if r.config.HealthCheckURL == "" {
+	if r.cfg.HealthCheckURL == "" {
 		return
 	}
 
-	ticker := time.NewTicker(r.config.HealthCheckInterval)
+	ticker := time.NewTicker(r.cfg.HealthCheckInterval)
 	defer ticker.Stop()
 
 	for {
@@ -461,7 +465,7 @@ func (r *ProxyRotator) healthCheckLoop() {
 }
 
 func (r *ProxyRotator) checkHealth(tc *trackedClient) {
-	req, err := http.NewRequestWithContext(r.ctx, http.MethodGet, r.config.HealthCheckURL, nil)
+	req, err := http.NewRequestWithContext(r.ctx, http.MethodGet, r.cfg.HealthCheckURL, nil)
 	if err != nil {
 		return
 	}
@@ -505,7 +509,7 @@ func (r *ProxyRotator) WithStickySessions(f StickyKeyFunc) *ProxyRotator {
 		ctx:           r.ctx,
 		cancel:        r.cancel,
 		clients:       make([]*trackedClient, len(r.clients)),
-		config:        r.config,
+		cfg:           r.cfg,
 		sessions:      make(map[string]*sessionEntry),
 		sessionTTL:    r.sessionTTL,
 		stickyKeyFunc: f,
