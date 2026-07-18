@@ -16,6 +16,7 @@ import (
 	"math/big"
 	"net"
 	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
 	"sync"
@@ -41,6 +42,27 @@ func Chain(doer HTTPDoer, middlewares ...Middleware) HTTPDoer {
 	}
 
 	return doer
+}
+
+// LoggingMiddleware returns a middleware that logs HTTP requests using the provided logger.
+//
+// It hides the sensitive values for keys "key", "access_token" and "token".
+func LoggingMiddleware(logger Logger) Middleware {
+	return func(next HTTPDoer) HTTPDoer {
+		return DoerFunc(func(req *http.Request) (*http.Response, error) {
+			start := time.Now()
+			resp, err := next.Do(req)
+
+			logger.Info("http request",
+				"method", req.Method,
+				"url", maskQueryParams(req.URL),
+				"duration", time.Since(start),
+				"error", err,
+			)
+
+			return resp, err
+		})
+	}
 }
 
 // RateLimitMiddleware returns a [Middleware] that blocks when the
@@ -632,4 +654,24 @@ func AdaptiveLimitMiddleware(limiter *limiter.AdaptiveLimiter) Middleware {
 			return resp, err
 		})
 	}
+}
+
+// maskQueryParams returns the URL with sensitive query parameters masked.
+func maskQueryParams(u *url.URL) string {
+	if u == nil {
+		return ""
+	}
+
+	copy := *u
+
+	q := copy.Query()
+	for key := range q {
+		if key == "key" || key == "access_token" || key == "token" {
+			q.Set(key, "***")
+		}
+	}
+
+	copy.RawQuery = q.Encode()
+
+	return copy.String()
 }

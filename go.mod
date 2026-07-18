@@ -6,7 +6,7 @@ require (
 	github.com/andybalholm/brotli v1.2.2
 	github.com/gorilla/websocket v1.5.3
 	github.com/klauspost/compress v1.19.0
-	github.com/lemon4ksan/miyako v0.2.1-0.20260716171846-7b4653c15bd7
+	github.com/lemon4ksan/miyako v0.2.1-0.20260718175055-4d923876d502
 	github.com/miekg/dns v1.1.72
 	github.com/quic-go/quic-go v0.60.0
 	github.com/stretchr/testify v1.11.1
