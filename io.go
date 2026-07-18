@@ -7,12 +7,12 @@ package aoni
 import (
 	"bytes"
 	"context"
+	"errors"
 	"io"
-	"log/slog"
 	"os"
-	"runtime"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"github.com/lemon4ksan/miyako/generic"
 )
@@ -73,6 +73,84 @@ func ReadAllBytes(rb ReplayableBody) ([]byte, error) {
 	return b, nil
 }
 
+// InMemoryCacheStore implements CacheStore in memory.
+type InMemoryCacheStore struct {
+	mu    sync.RWMutex
+	cache map[string]inMemoryCacheEntry
+}
+
+// NewInMemoryCacheStore creates a thread-safe in-memory CacheStore.
+func NewInMemoryCacheStore() *InMemoryCacheStore {
+	return &InMemoryCacheStore{
+		cache: make(map[string]inMemoryCacheEntry),
+	}
+}
+
+// Get retrieves cached response bytes from memory.
+func (s *InMemoryCacheStore) Get(ctx context.Context, key string) ([]byte, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	entry, ok := s.cache[key]
+	if !ok || time.Now().After(entry.ExpiresAt) {
+		return nil, errors.New("aoni cache: miss")
+	}
+
+	return entry.Value, nil
+}
+
+// Set stores response bytes in memory with TTL.
+func (s *InMemoryCacheStore) Set(ctx context.Context, key string, val []byte, ttl time.Duration) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	s.cache[key] = inMemoryCacheEntry{
+		Value:     val,
+		ExpiresAt: time.Now().Add(ttl),
+	}
+
+	return nil
+}
+
+type inMemoryCacheEntry struct {
+	Value     []byte
+	ExpiresAt time.Time
+}
+
+type cachedResponse struct {
+	StatusCode int                 `json:"status_code"`
+	Header     map[string][]string `json:"header"`
+	BodyBase64 string              `json:"body_base64"`
+}
+
+// ExplicitBufferedBody wraps a response body where a prefix has been read and cached in memory.
+// It allows reading the prefix followed by the remaining stream.
+type ExplicitBufferedBody struct {
+	Prefix []byte
+	Stream io.ReadCloser
+
+	reader io.Reader
+}
+
+// Read reads from the prefix followed by the underlying response stream.
+func (e *ExplicitBufferedBody) Read(p []byte) (n int, err error) {
+	if e.reader == nil {
+		e.reader = io.MultiReader(bytes.NewReader(e.Prefix), e.Stream)
+	}
+
+	return e.reader.Read(p)
+}
+
+// Close closes the underlying response stream.
+func (e *ExplicitBufferedBody) Close() error {
+	return e.Stream.Close()
+}
+
+// Rewind resets the internal reader so that the body can be read from the beginning again.
+func (e *ExplicitBufferedBody) Rewind() {
+	e.reader = io.MultiReader(bytes.NewReader(e.Prefix), e.Stream)
+}
+
 // ReplayableBody represents a response stream that can be reset
 // to the beginning for re-reading (for example, after previewing or logging).
 type ReplayableBody interface {
@@ -81,7 +159,7 @@ type ReplayableBody interface {
 }
 
 // AsReplayable turns any [io.ReadCloser] into a [ReplayableBody].
-// If there's already a high-performance buffer (multiReadBody) under the hood, it will return it.
+// If there's already a high-performance buffer ([multiReadBody]) under the hood, it will return it.
 // If not, it will transparently create a lightweight in-memory buffer for repeated reading.
 func AsReplayable(rc io.ReadCloser) ReplayableBody {
 	if rc == nil {
@@ -188,99 +266,25 @@ func (l *limitCheckingReadCloser) Read(p []byte) (int, error) {
 
 func (l *limitCheckingReadCloser) Unwrap() io.Closer { return l.ReadCloser }
 
-type finalizerReadCloser struct {
+type responseBodyReadCloser struct {
 	io.ReadCloser
-	closed atomic.Bool
 }
 
-func newFinalizerReadCloser(rc io.ReadCloser) io.ReadCloser {
-	f := &finalizerReadCloser{ReadCloser: rc}
-	runtime.SetFinalizer(f, func(fr *finalizerReadCloser) {
-		if !fr.closed.Load() {
-			// Log in a separate goroutine so a blocked logger cannot stall
-			// the GC finalizer chain for the entire process.
-			go slog.Warn("aoni: response body was not closed, closing automatically via GC finalizer")
-
-			_ = fr.ReadCloser.Close()
-			// Also ensure any temp-files in the chain are cleaned up.
-			if rb, ok := unwrapBody(fr.ReadCloser).(interface{ ReallyClose() }); ok {
-				rb.ReallyClose()
-			}
-		}
-	})
-
-	return f
+func newResponseBodyReadCloser(rc io.ReadCloser) io.ReadCloser {
+	return &responseBodyReadCloser{ReadCloser: rc}
 }
 
-func (f *finalizerReadCloser) Close() error {
-	if f.closed.CompareAndSwap(false, true) {
-		runtime.SetFinalizer(f, nil)
-
-		err := f.ReadCloser.Close()
-
-		// Ensure any temp-files in the chain are cleaned up even on normal close.
-		if rb, ok := unwrapBody(f.ReadCloser).(interface{ ReallyClose() }); ok {
-			rb.ReallyClose()
-		}
-
-		return err
+func (r *responseBodyReadCloser) Close() error {
+	err := r.ReadCloser.Close()
+	if rb, ok := unwrapBody(r.ReadCloser).(interface{ ReallyClose() }); ok {
+		rb.ReallyClose()
 	}
 
-	return nil
+	return err
 }
 
-func (f *finalizerReadCloser) Unwrap() io.Closer { return f.ReadCloser }
-
-// bomStrippingReadCloser wraps a BOM-stripping reader around an existing ReadCloser.
-// It implements Unwrap so that closeResponse can traverse the wrapper chain.
-type bomStrippingReadCloser struct {
-	io.Reader
-	io.Closer
-}
-
-func (b *bomStrippingReadCloser) Unwrap() io.Closer { return b.Closer }
-
-type bomStrippingReader struct {
-	reader io.Reader
-	header []byte
-	offset int
-}
-
-func newBOMStrippingReader(r io.Reader) io.Reader {
-	return &bomStrippingReader{reader: r}
-}
-
-func (b *bomStrippingReader) Read(p []byte) (int, error) {
-	if b.header == nil {
-		b.header = make([]byte, 3)
-
-		n, err := io.ReadAtLeast(b.reader, b.header, 3)
-		if err != nil && err != io.ErrUnexpectedEOF && err != io.EOF {
-			return 0, err
-		}
-
-		b.header = b.header[:n]
-
-		// Detect UTF-8 BOM
-		switch {
-		case len(b.header) >= 3 && b.header[0] == 0xEF && b.header[1] == 0xBB && b.header[2] == 0xBF:
-			b.offset = 3
-		case len(b.header) >= 2 && b.header[0] == 0xFE && b.header[1] == 0xFF:
-			b.offset = 2
-		case len(b.header) >= 2 && b.header[0] == 0xFF && b.header[1] == 0xFE:
-			b.offset = 2
-		default:
-			b.offset = 0
-		}
-	}
-
-	if b.offset < len(b.header) {
-		n := copy(p, b.header[b.offset:])
-		b.offset += n
-		return n, nil
-	}
-
-	return b.reader.Read(p)
+func (r *responseBodyReadCloser) Unwrap() io.Closer {
+	return r.ReadCloser
 }
 
 type multiReadBody struct {
@@ -380,8 +384,7 @@ func (m *multiReadBody) Close() error {
 //
 // Once ReallyClose is called, the multiReadBody becomes completely unusable
 // and cannot be reset or read again. This method must only be called when
-// the response is no longer needed (e.g., inside closeResponse or via
-// the garbage collector finalizer).
+// the response is no longer needed (e.g., inside closeResponse).
 func (m *multiReadBody) ReallyClose() {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -411,4 +414,18 @@ func (f *fallbackReplayableBody) Read(p []byte) (int, error) {
 
 func (f *fallbackReplayableBody) Reset() {
 	f.reader = io.MultiReader(f.buf, f.ReadCloser)
+}
+
+type jitterReader struct {
+	io.ReadCloser
+	delay time.Duration
+	once  sync.Once
+}
+
+func (r *jitterReader) Read(p []byte) (int, error) {
+	r.once.Do(func() {
+		time.Sleep(r.delay)
+	})
+
+	return r.ReadCloser.Read(p)
 }

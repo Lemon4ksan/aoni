@@ -105,7 +105,7 @@ func main() {
 	defer inspector.Close()
 
 	// ==========================================
-	// PHASE 3: Custom Pipeline Middleware Wrapper
+	// PHASE 3: Custom Pipeline Configuration
 	// ==========================================
 
 	proxies := []string{
@@ -115,42 +115,35 @@ func main() {
 	}
 	cacheStore := aoni.NewInMemoryCacheStore()
 
-	client = client.With(aoni.WithClientPipelineWrapper(func(c *aoni.Client, engine aoni.HTTPDoer) aoni.HTTPDoer {
-		chain := engine
-
-		// 1. User Agent and Hints rotation
-		chain = aoni.UserAgentAndHintsRotationMiddleware(nil)(chain)
-
-		// 2. DPI timing evasion jitter
-		chain = aoni.DPIJitterMiddleware(50*time.Millisecond, 250*time.Millisecond)(chain)
-
-		// 3. Proxy failover and automatic retry rotation
-		chain = aoni.ProxyFailoverMiddleware(proxies, 2)(chain)
-
-		// 4. Hedging (tail latency reduction)
-		chain = aoni.HedgingMiddleware(c.Network().HedgingDelay, c.Network().DynamicHedging)(chain)
-
-		// 5. GET request caching
-		chain = aoni.CacheMiddleware(cacheStore, 10*time.Minute)(chain)
-
-		// 6. HAR generation, data redaction, and traffic capture
-		chain = aoni.HARGeneratorMiddleware(harGenerator)(chain)
-		chain = aoni.SensitiveDataRedactorMiddleware([]string{"Authorization", "Cookie", "X-Api-Key"}, nil)(chain)
-		chain = aoni.InspectorMiddleware(c.Inspector())(chain)
-
-		// 7. Core HTTP response verification and decompression
-		chain = aoni.ResponseSizeLimitMiddleware(c.Defaults().MaxResponseSize)(chain)
-		chain = aoni.DecompressionAndTranscodingMiddleware()(chain)
-		chain = aoni.MultiReadBodyMiddleware(c.Defaults().MaxResponseSize, c.Defaults().MultiReadDisableDisk)(chain)
-		chain = aoni.ResponseValidationMiddleware()(chain)
-		chain = aoni.ChallengeSolverMiddleware(c.Defaults().ChallengeSolver, c.Defaults().ChallengeDetector)(chain)
-
-		// 8. Connection cleanup, hooks execution, and request context injection
-		chain = aoni.FinalizerMiddleware()(chain)
-		chain = aoni.HooksMiddleware(c.Defaults().BeforeRequest, c.Defaults().AfterResponse)(chain)
-		chain = aoni.ContextMiddleware(c)(chain)
-
-		return chain
+	client = client.With(aoni.WithClientPipeline(aoni.PipelineConfig{
+		RotateUA: true,
+		DPIJitter: &aoni.DPIJitterConfig{
+			MinDelay: 50 * time.Millisecond,
+			MaxDelay: 250 * time.Millisecond,
+		},
+		ProxyFailover: &aoni.ProxyFailoverConfig{
+			Proxies:    proxies,
+			RetryLimit: 2,
+		},
+		Hedging: &aoni.HedgingConfig{
+			DefaultDelay:   client.Network().HedgingDelay,
+			DynamicHedging: client.Network().DynamicHedging,
+		},
+		Cache: &aoni.CacheConfig{
+			Store:      cacheStore,
+			DefaultTTL: 10 * time.Minute,
+		},
+		HAR: &aoni.HARConfig{
+			Generator: harGenerator,
+		},
+		Redact: &aoni.RedactConfig{
+			HeadersToRedact: []string{"Authorization", "Cookie", "X-Api-Key"},
+		},
+		Inspect:    true,
+		SizeLimit:  client.Defaults().MaxResponseSize,
+		Decompress: true,
+		Validate:   true,
+		Challenge:  true,
 	}))
 
 	// ==========================================

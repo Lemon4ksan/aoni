@@ -5,13 +5,10 @@
 package aoni
 
 import (
-	"bytes"
 	"context"
 	"io"
-	"runtime"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -225,61 +222,6 @@ func TestLimitCheckingReadCloser(t *testing.T) {
 		_, err := lc.Read(buf)
 		assert.ErrorIs(t, err, ErrResponseTooLarge)
 	})
-}
-
-func TestFinalizerReadCloser_GC(t *testing.T) {
-	t.Parallel()
-
-	closedCh := make(chan bool, 1)
-	m := &mockTrackedCloser{Reader: strings.NewReader("gc_test")}
-
-	// We run allocation in an isolated helper to prevent compiler escape analysis
-	// keeping the reference alive on the stack.
-	func() {
-		f := newFinalizerReadCloser(m)
-		_ = f
-	}()
-
-	// Trigger GC to run finalizer
-	runtime.GC()
-	time.Sleep(50 * time.Millisecond)
-	runtime.GC()
-
-	// Normal manual Close should remove the finalizer safely
-	m2 := &mockTrackedCloser{Reader: strings.NewReader("normal")}
-	f2 := newFinalizerReadCloser(m2)
-	_ = f2.Close()
-
-	assert.True(t, m2.closed)
-
-	_ = closedCh
-}
-
-func TestBOMStrippingReader(t *testing.T) {
-	t.Parallel()
-
-	tests := []struct {
-		name     string
-		input    []byte
-		expected []byte
-	}{
-		{"utf8_bom", []byte{0xEF, 0xBB, 0xBF, 'a', 'b'}, []byte("ab")},
-		{"utf16be_bom", []byte{0xFE, 0xFF, 'x', 'y'}, []byte("xy")},
-		{"utf16le_bom", []byte{0xFF, 0xFE, 'z', 'w'}, []byte("zw")},
-		{"no_bom", []byte("standard"), []byte("standard")},
-		{"short_input", []byte("a"), []byte("a")},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
-
-			reader := newBOMStrippingReader(bytes.NewReader(tt.input))
-			out, err := io.ReadAll(reader)
-			require.NoError(t, err)
-			assert.Equal(t, tt.expected, out)
-		})
-	}
 }
 
 func TestMultiReadBody(t *testing.T) {

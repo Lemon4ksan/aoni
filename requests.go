@@ -511,9 +511,12 @@ func handleResponse(resp *http.Response, target any, requester Requester) error 
 		}
 	}
 
-	peekableReader := bufio.NewReader(newBOMStrippingReader(resp.Body))
+	peekableReader := bufio.NewReader(resp.Body)
 
-	resp.Body = &bomStrippingReadCloser{
+	resp.Body = struct {
+		io.Reader
+		io.Closer
+	}{
 		Reader: peekableReader,
 		Closer: resp.Body,
 	}
@@ -595,19 +598,21 @@ func handleResponse(resp *http.Response, target any, requester Requester) error 
 		return nil
 	}
 
-	if provider, ok := requester.(BaseResponseProvider); ok {
-		if br := provider.BaseResponse(); br != nil {
-			br.SetData(target)
+	if provider, ok := requester.(interface{ Defaults() ClientDefaults }); ok {
+		if brFn := provider.Defaults().BaseResponse; brFn != nil {
+			if br := brFn(); br != nil {
+				br.SetData(target)
 
-			if err := decoder.Decode(resp.Body, br); err != nil {
-				return err
+				if err := decoder.Decode(resp.Body, br); err != nil {
+					return err
+				}
+
+				if !br.IsSuccess() {
+					return br.Error()
+				}
+
+				return nil
 			}
-
-			if !br.IsSuccess() {
-				return br.Error()
-			}
-
-			return nil
 		}
 	}
 

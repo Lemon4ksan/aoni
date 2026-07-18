@@ -25,7 +25,6 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"os"
-	"runtime"
 	"strconv"
 	"strings"
 	"sync/atomic"
@@ -59,16 +58,6 @@ type apiResponse struct {
 func (a *apiResponse) IsSuccess() bool  { return a.Status == "success" }
 func (a *apiResponse) Error() error     { return errors.New(a.ErrorMsg) }
 func (a *apiResponse) SetData(data any) { a.Data = data }
-
-type mockBodyCloser struct {
-	io.Reader
-	closed atomic.Bool
-}
-
-func (m *mockBodyCloser) Close() error {
-	m.closed.Store(true)
-	return nil
-}
 
 // setupTestServer creates a test server and pre-configures a client with its URL.
 // It registers resource cleanup automatically through t.Cleanup.
@@ -1184,39 +1173,6 @@ func TestClient_TraceJA4_WithTLSFingerprint(t *testing.T) {
 	assert.Equal(t, info.JA4.JA4, callbackReport.JA4)
 }
 
-func TestClient_SocketLeakPrevention(t *testing.T) {
-	t.Parallel()
-
-	body := &mockBodyCloser{Reader: strings.NewReader("some data")}
-
-	client := NewClient(DoerFunc(func(req *http.Request) (*http.Response, error) {
-		return &http.Response{
-			StatusCode: http.StatusOK,
-			Body:       body,
-			Header:     make(http.Header),
-			Request:    req,
-		}, nil
-	}))
-
-	func() {
-		resp, err := client.Request(t.Context(), http.MethodGet, "http://localhost")
-		require.NoError(t, err)
-		assert.NotNil(t, resp)
-	}()
-
-	// Polling is required as GC finalization is asynchronous and non-deterministic.
-	for range 20 {
-		runtime.GC()
-		time.Sleep(5 * time.Millisecond)
-
-		if body.closed.Load() {
-			break
-		}
-	}
-
-	assert.True(t, body.closed.Load(), "expected body to be closed by GC finalizer")
-}
-
 func TestClient_ResponseSizeGuard(t *testing.T) {
 	t.Parallel()
 
@@ -1408,7 +1364,7 @@ func TestClient_MultiReadBody(t *testing.T) {
 		require.NoError(t, err)
 		t.Cleanup(func() { closeResponse(resp) })
 
-		fBody, ok := resp.Body.(*finalizerReadCloser)
+		fBody, ok := resp.Body.(*responseBodyReadCloser)
 		require.True(t, ok)
 		mBody, ok := fBody.ReadCloser.(*multiReadBody)
 		require.True(t, ok)
@@ -1895,25 +1851,99 @@ func TestClient_HTTP3Settings(t *testing.T) {
 	assert.NotNil(t, client)
 }
 
-func TestClient_PipelineWrapper(t *testing.T) {
+func TestUserAgentAndHintsRotation(t *testing.T) {
 	t.Parallel()
 
+	profiles := []BrowserProfile{
+		{
+			UserAgent: "BrowserA",
+			ClientHints: map[string]string{
+				"Sec-CH-UA": "BrandA",
+			},
+		},
+		{
+			UserAgent: "BrowserB",
+			ClientHints: map[string]string{
+				"Sec-CH-UA": "BrandB",
+			},
+		},
+	}
+
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		assert.Equal(t, "pipeline_value", r.Header.Get("X-Pipeline-Test"))
+		w.Header().Set("X-UA", r.Header.Get("User-Agent"))
+		w.Header().Set("X-Hint", r.Header.Get("Sec-CH-UA"))
 		w.WriteHeader(http.StatusOK)
-		_, _ = w.Write([]byte("custom_pipeline_response"))
 	}))
 	defer server.Close()
 
-	client := NewClient(nil, WithClientBaseURL(server.URL))
+	client := NewClient(nil,
+		WithClientBaseURL(server.URL),
+		WithClientPipeline(PipelineConfig{RotateUA: true}),
+		WithClientUARotationProfiles(profiles),
+	)
 
-	// Configure a custom PipelineWrapper that injects a custom header in the request
-	client = client.With(WithClientPipelineWrapper(func(c *Client, engine HTTPDoer) HTTPDoer {
-		return DoerFunc(func(req *http.Request) (*http.Response, error) {
-			req.Header.Set("X-Pipeline-Test", "pipeline_value")
-			return engine.Do(req)
-		})
+	resp1, err := client.Get(t.Context(), "/")
+	require.NoError(t, err)
+
+	defer resp1.Body.Close()
+
+	assert.Equal(t, "BrowserA", resp1.Header.Get("X-UA"))
+	assert.Equal(t, "BrandA", resp1.Header.Get("X-Hint"))
+
+	resp2, err := client.Get(t.Context(), "/")
+	require.NoError(t, err)
+
+	defer resp2.Body.Close()
+
+	assert.Equal(t, "BrowserB", resp2.Header.Get("X-UA"))
+	assert.Equal(t, "BrandB", resp2.Header.Get("X-Hint"))
+}
+
+func TestDPIJitter(t *testing.T) {
+	t.Parallel()
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
 	}))
+	defer server.Close()
+
+	client := NewClient(nil,
+		WithClientBaseURL(server.URL),
+		WithClientPipeline(PipelineConfig{
+			DPIJitter: &DPIJitterConfig{MinDelay: 10 * time.Millisecond, MaxDelay: 20 * time.Millisecond},
+		}),
+	)
+
+	start := time.Now()
+	resp, err := client.Get(t.Context(), "/")
+	require.NoError(t, err)
+
+	defer resp.Body.Close()
+
+	duration := time.Since(start)
+	assert.GreaterOrEqual(t, duration, 10*time.Millisecond)
+}
+
+func TestProxyFailover(t *testing.T) {
+	t.Parallel()
+
+	var attempts int
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		attempts++
+
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte("ok"))
+	}))
+	defer server.Close()
+
+	proxies := []string{"http://127.0.0.1:9999", server.URL}
+	client := NewClient(nil,
+		WithClientBaseURL(server.URL),
+		WithClientPipeline(PipelineConfig{
+			ProxyFailover: &ProxyFailoverConfig{Proxies: proxies, RetryLimit: 2},
+		}),
+	)
 
 	resp, err := client.Get(t.Context(), "/")
 	require.NoError(t, err)
@@ -1922,5 +1952,117 @@ func TestClient_PipelineWrapper(t *testing.T) {
 
 	body, err := io.ReadAll(resp.Body)
 	require.NoError(t, err)
-	assert.Equal(t, "custom_pipeline_response", string(body))
+	assert.Equal(t, "ok", string(body))
+	assert.Equal(t, 1, attempts)
+}
+
+func TestCache(t *testing.T) {
+	t.Parallel()
+
+	var hits int
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hits++
+
+		w.Header().Set("Cache-Control", "max-age=3600")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte("cached content"))
+	}))
+	defer server.Close()
+
+	store := NewInMemoryCacheStore()
+	client := NewClient(nil,
+		WithClientBaseURL(server.URL),
+		WithClientPipeline(PipelineConfig{
+			Cache: &CacheConfig{Store: store, DefaultTTL: 1 * time.Minute},
+		}),
+	)
+
+	resp1, err := client.Get(t.Context(), "/")
+	require.NoError(t, err)
+
+	body1, _ := io.ReadAll(resp1.Body)
+	resp1.Body.Close()
+	assert.Equal(t, "cached content", string(body1))
+
+	resp2, err := client.Get(t.Context(), "/")
+	require.NoError(t, err)
+
+	body2, _ := io.ReadAll(resp2.Body)
+	resp2.Body.Close()
+	assert.Equal(t, "cached content", string(body2))
+
+	assert.Equal(t, 1, hits)
+}
+
+type mockInspector struct {
+	capturedReq  *http.Request
+	capturedResp *http.Response
+}
+
+func (m *mockInspector) Capture(req *http.Request, resp *http.Response, err error, traceInfo *TraceInfo) {
+	m.capturedReq = req
+	m.capturedResp = resp
+}
+
+func TestSensitiveDataRedactor(t *testing.T) {
+	t.Parallel()
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Set-Cookie", "secret-session")
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer server.Close()
+
+	inspector := &mockInspector{}
+	client := NewClient(nil,
+		WithClientBaseURL(server.URL),
+		WithClientPipeline(PipelineConfig{
+			Redact:  &RedactConfig{HeadersToRedact: []string{"Authorization", "Set-Cookie"}},
+			Inspect: true,
+		}),
+		WithClientInspector(inspector),
+	)
+
+	resp, err := client.Request(t.Context(), "GET", "/", WithHeader("Authorization", "Bearer secretToken"))
+	require.NoError(t, err)
+
+	defer resp.Body.Close()
+
+	cfg, ok := inspector.capturedReq.Context().Value(RedactConfigCtxKey{}).(*RedactConfig)
+	require.True(t, ok)
+	require.NotNil(t, cfg)
+	assert.True(t, cfg.Headers["authorization"])
+	assert.True(t, cfg.Headers["set-cookie"])
+}
+
+func TestHARGenerator(t *testing.T) {
+	t.Parallel()
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte("har body"))
+	}))
+	defer server.Close()
+
+	harGen := NewHARGenerator()
+	client := NewClient(nil,
+		WithClientBaseURL(server.URL),
+		WithClientPipeline(PipelineConfig{
+			HAR: &HARConfig{Generator: harGen},
+		}),
+	)
+
+	resp, err := client.Get(t.Context(), "/")
+	require.NoError(t, err)
+
+	defer resp.Body.Close()
+
+	data, err := harGen.Export()
+	require.NoError(t, err)
+
+	harString := string(data)
+	assert.Contains(t, harString, "har body")
+	assert.Contains(t, harString, "GET")
+	assert.Contains(t, harString, server.URL)
 }

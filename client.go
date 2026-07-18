@@ -7,14 +7,20 @@ package aoni
 import (
 	"bufio"
 	"bytes"
+	"compress/gzip"
 	"context"
 	"crypto/tls"
+	"encoding/base64"
+	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"maps"
+	"mime"
 	"net"
 	"net/http"
+	"net/http/httptrace"
 	"net/url"
 	"slices"
 	"strconv"
@@ -24,38 +30,18 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/andybalholm/brotli"
+	"github.com/klauspost/compress/zstd"
 	"github.com/lemon4ksan/miyako/generic"
+	"github.com/lemon4ksan/miyako/log"
 	utls "github.com/refraction-networking/utls"
 	"golang.org/x/net/http2"
+	"golang.org/x/text/encoding/htmlindex"
+	"golang.org/x/text/transform"
 
 	"github.com/lemon4ksan/aoni/ja4"
 	"github.com/lemon4ksan/aoni/p0f"
 )
-
-// ClientHelloSpecProvider defines an interface that returns a uTLS ClientHelloSpec.
-// Implementing this interface allows developers to feed custom/dynamic TLS fingerprints
-// directly to the client at runtime.
-type ClientHelloSpecProvider interface {
-	ClientHelloSpec() (*utls.ClientHelloSpec, error)
-}
-
-// TrafficInspector defines the interface for capturing and logging request trace history.
-type TrafficInspector interface {
-	Capture(req *http.Request, resp *http.Response, err error, traceInfo *TraceInfo)
-}
-
-// SocketController defines a hook callback interface to directly intercept and configure
-// TCP sockets (file descriptors) at the dial phase before the SYN packet is sent.
-type SocketController interface {
-	Control(fd uintptr, network, address string) error
-}
-
-// HTTP2Configurer defines an interface to customize the golang.org/x/net/http2.Transport instance.
-// This allows advanced developers to adjust HPACK dynamic table size, enable/disable compression,
-// or customize the encoder settings without modifying the core library.
-type HTTP2Configurer interface {
-	ConfigureHTTP2(t *http2.Transport) error
-}
 
 // DefaultUserAgent is the default User-Agent string used for HTTP requests.
 const DefaultUserAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
@@ -73,168 +59,6 @@ var (
 		},
 	}
 )
-
-type requestConfigKey struct{}
-
-// RequestConfig aggregates all request-scoped options and transport overrides.
-//
-// Note: It is stored in the request's context under [requestConfigKey] and is
-// reusable across middleware and transport levels.
-type RequestConfig struct {
-	// Decoder overrides the response [Decoder] for this request.
-	// - SeeAlso: [WithDecoder]
-	Decoder any
-
-	// ErrorModel is the target struct/map where non-2xx response bodies will be decoded.
-	// - Important: Must be a pointer to a struct or a map.
-	// - SeeAlso: [WithErrorModel]
-	ErrorModel any
-
-	// DownloadProgress triggers during reads from the response body.
-	// - Parameter total: represents Content-Length (or -1 if unknown).
-	// - SeeAlso: [WithDownloadProgress]
-	DownloadProgress ProgressFunc
-
-	// Capturer holds a pointer to a response reference to capture the raw response.
-	// - SeeAlso: [WithCaptureResponse]
-	Capturer any
-
-	// BodyError holds any serialization/validation error occurring during request body setup.
-	// - Note: Verified by [Client.Request] before dispatching the request.
-	BodyError error
-
-	// QueryError holds any validation/serialization error occurring during URL query parameter setup.
-	// - Note: Verified by [Client.Request] before dispatching the request.
-	QueryError error
-
-	// MultiReadThreshold is the size limit in bytes below which response bodies are cached in memory.
-	// - Note: Set to <= 0 to disable body caching.
-	// - SeeAlso: [WithMultiReadBody]
-	MultiReadThreshold int64
-
-	// MultiReadDisableDisk disables disk caching when the multi-read threshold is exceeded.
-	// - SeeAlso: [WithMultiReadDisableDisk]
-	MultiReadDisableDisk bool
-
-	// OrderedHeaders defines the exact order in which HTTP/1.1 request headers must be serialized.
-	// - Important: Only applies to HTTP/1.1 connections.
-	// - SeeAlso: [WithOrderedHeaders]
-	OrderedHeaders []string
-
-	// ALPNOverride configures the exact Application-Layer Protocol Negotiation list for TLS.
-	// - Example: []string{"h2", "http/1.1"}
-	// - SeeAlso: [WithForceHTTP1], [WithForceHTTP2], [WithALPN]
-	ALPNOverride []string
-
-	// JA4ReportStore holds the temporary report reference for TLS/HTTP JA4 fingerprinting.
-	// - SeeAlso: [TraceJA4]
-	JA4ReportStore *ja4ReportStore
-
-	// Debug enables verbose debug logging for this single request.
-	// - SeeAlso: [WithDebug]
-	Debug bool
-
-	// Fallback defines the custom fallback logic to invoke when the request fails.
-	// - SeeAlso: [WithFallback], [FallbackMiddleware]
-	Fallback FallbackFunc
-
-	// RequestTimeoutCancel cancels the request-specific deadline context upon response body close.
-	// - SeeAlso: [WithTimeout]
-	RequestTimeoutCancel context.CancelFunc
-
-	// HedgingDelayOverride sets a custom delay for request hedging.
-	// - Note: Set to a non-positive value to disable hedging.
-	// - SeeAlso: [WithHedging], [HedgingMiddleware]
-	HedgingDelayOverride *time.Duration
-
-	// ProxyAddr is the effective proxy URL for the TCP dial.
-	// - SeeAlso: [WithProxyOverride]
-	ProxyAddr *url.URL
-
-	// InsecureSkipVerify disables TLS certificate verification.
-	// - Warning: Setting this to true exposes the connection to man-in-the-middle attacks.
-	// - SeeAlso: [WithInsecureSkipVerify]
-	InsecureSkipVerify bool
-
-	// TCPDelay introduces a random timing delay before initiating the TCP handshake.
-	// - SeeAlso: [WithTCPDelay]
-	TCPDelay TCPDelayRange
-
-	// ResponseValidator verifies the response immediately after the HTTP round-trip.
-	// - SeeAlso: [WithResponseValidator]
-	ResponseValidator func(resp *http.Response) error
-
-	// CacheTTL specifies the caching time-to-live for the response.
-	// - SeeAlso: [WithCacheTTL]
-	CacheTTL time.Duration
-
-	// RetryPolicy defines the per-request retry override logic.
-	// - SeeAlso: [WithRetryPolicy]
-	RetryPolicy *RetryOverride
-
-	// SSRFGuard enforces DNS resolution restrictions, blocking private and loopback IPs.
-	SSRFGuard bool
-
-	// HappyEyeballsDelay sets the fallback delay between IPv4 and IPv6 connection attempts.
-	HappyEyeballsDelay time.Duration
-
-	// ProxyDNS resolves the host name through the proxy to prevent local DNS leakage.
-	ProxyDNS bool
-
-	// P0fSignature spoofs the TCP/IP network stack fingerprint to emulate specific operating systems.
-	// - SeeAlso: [WithP0fSignature]
-	P0fSignature *p0f.Signature
-
-	// SessionCache is the TLS session ticket cache used to resume TLS handshakes.
-	SessionCache *ProxyAwareSessionCache
-
-	// PacketPadding configuration to obscure TLS segment boundaries.
-	PacketPadding *PaddingConfig
-
-	// SocketController intercepts the socket file descriptor for low-level socket modifications.
-	SocketController SocketController
-
-	// ClientHelloSpecProvider provides custom uTLS ClientHelloSpecs.
-	ClientHelloSpecProvider ClientHelloSpecProvider
-
-	// JA4Callback is invoked once the TLS handshake is complete with the computed JA4 fingerprint report.
-	JA4Callback func(ja4.Report)
-
-	// Metadata stores arbitrary user-defined metadata values associated with the request connection.
-	// - SeeAlso: [WithConnMetadata]
-	Metadata map[string]any
-}
-
-// GetRequestConfig retrieves the [RequestConfig] associated with the context.
-func GetRequestConfig(ctx context.Context) *RequestConfig {
-	cfg, _ := ctx.Value(requestConfigKey{}).(*RequestConfig)
-	return cfg
-}
-
-func getOrInitRequestConfig(req *http.Request) *RequestConfig {
-	cfg := GetRequestConfig(req.Context())
-	if cfg == nil {
-		cfg = &RequestConfig{
-			Metadata: make(map[string]any),
-		}
-		ctx := context.WithValue(req.Context(), requestConfigKey{}, cfg)
-		*req = *req.WithContext(ctx)
-	}
-
-	return cfg
-}
-
-// DefaultSensitiveHeaders lists headers removed from requests during
-// cross-origin redirects. Used by [DefaultRedirectPolicy].
-var DefaultSensitiveHeaders = []string{
-	"Authorization",
-	"Cookie",
-	"X-Session-ID",
-	"X-Access-Token",
-	"X-Access-Key",
-	"X-Api-Key",
-	"X-Auth-Token",
-}
 
 // Unwrapper allows nested decorators to be peeled away to reach the
 // underlying [Requester]. [Client] does not implement this interface;
@@ -291,7 +115,7 @@ type Requester interface {
 
 // BaseResponseProvider optionally provides a [BaseResponse] for
 // structured decoding. Implemented by response wrapper types used
-// with [Client.WithBaseResponse].
+// with [WithClientBaseResponse].
 type BaseResponseProvider interface {
 	BaseResponse() BaseResponse
 }
@@ -313,197 +137,29 @@ type BaseResponse interface {
 	SetData(data any)
 }
 
-// DefaultRedirectPolicy returns a function suitable for
-// [http.Client.CheckRedirect]. It stops after maxRedirects and strips
-// sensitiveHeaders on cross-origin redirects. When sensitiveHeaders
-// is empty, [DefaultSensitiveHeaders] is used.
-func DefaultRedirectPolicy(
-	maxRedirects int,
-	sensitiveHeaders ...string,
-) func(req *http.Request, via []*http.Request) error {
-	return func(req *http.Request, via []*http.Request) error {
-		if maxRedirects >= 0 && len(via) >= maxRedirects {
-			return fmt.Errorf("stopped after %d redirects", maxRedirects)
-		}
-
-		if len(via) == 0 {
-			return nil
-		}
-
-		if len(sensitiveHeaders) == 0 {
-			sensitiveHeaders = DefaultSensitiveHeaders
-		}
-
-		if isCrossOrigin(req.URL, via[0].URL) {
-			for _, h := range sensitiveHeaders {
-				req.Header.Del(h)
-			}
-		}
-
-		return nil
-	}
-}
-
-// RefererState holds the thread-safe state for the Referer tracking automaton.
-type RefererState struct {
-	mu      sync.Mutex
-	lastURL string
-}
-
-// NetworkConfig groups all settings related to the network layer, such as
-// proxying, DNS resolution, SSRF protection, IP rotation, connection delays,
-// request hedging, connection control hooks, packet fragmentation, and host rewrites.
-type NetworkConfig struct {
-	// ProxyDNS controls whether DNS resolution is routed through the SOCKS5
-	// or HTTP CONNECT proxy to prevent local DNS queries from leaking to the local ISP.
-	ProxyDNS bool
-
-	// ProxyAddr is the URL of the proxy server to route all traffic through.
-	// Supports http, socks5, and socks5h schemes.
-	ProxyAddr *url.URL
-
-	// TransportProxy is the proxy resolution function used by the transport.
-	// Typically returns ProxyAddr.
-	TransportProxy func(*http.Request) (*url.URL, error)
-
-	// DNSResolver is the custom resolver used to resolve hostnames.
-	// If nil, the system default net.Resolver is used.
-	DNSResolver DNSResolver
-
-	// SSRFGuard blocks requests that resolve to private or loopback IP addresses.
-	SSRFGuard bool
-
-	// HappyEyeballsDelay staggers parallel IPv4/IPv6 dial attempts to minimize latency.
-	// A duration <= 0 disables staggering.
-	HappyEyeballsDelay time.Duration
-
-	// SourceRotator manages a pool of local IP addresses
-	// to bind outgoing connections to in a round-robin fashion.
-	SourceRotator *SourceIPRotator
-
-	// HedgingDelay defines the delay before a second,
-	// parallel request is dispatched for a slow request.
-	// A duration <= 0 disables request hedging.
-	HedgingDelay time.Duration
-
-	// DynamicHedging configures dynamic request hedging
-	// based on the p95 RTT of recent successful requests.
-	DynamicHedging *DynamicHedgingConfig
-
-	// SocketController hook is executed on every raw TCP connection
-	// right after it is dialed, before any TLS handshake.
-	SocketController SocketController
-
-	// FragmentConfig specifies the configuration for splitting
-	// TLS ClientHello packets across TCP segments.
-	FragmentConfig *FragmentConfig
-
-	// HostRewrite contains custom DNS rules mapping
-	// specific hostnames to target IP addresses.
-	HostRewrite *HostRewriteConfig
-}
-
-// FingerprintConfig groups all settings related to browser TLS and HTTP/2/3 fingerprint emulation,
-// JA4 fingerprint tracking, header order serialization, session caching, and TCP packet padding.
-type FingerprintConfig struct {
-	// BrowserID selects a pre-configured uTLS ClientHello profile for TLS fingerprint emulation.
-	BrowserID BrowserID
-
-	// TLSClientHelloID is a specific, low-level uTLS ClientHello ID to use instead of a generic BrowserID.
-	TLSClientHelloID *utls.ClientHelloID
-
-	// TLSClientHelloSpecProvider dynamically provides custom ClientHelloSpecs at handshake time.
-	TLSClientHelloSpecProvider ClientHelloSpecProvider
-
-	// H2Configurer allows manual tuning of HTTP/2 settings on the transport level.
-	H2Configurer HTTP2Configurer
-
-	// HeaderOrder defines the exact sequence in which HTTP headers should be written to the wire.
-	HeaderOrder []string
-
-	// JA4Callback is invoked with computed JA4 reports after a successful TLS handshake.
-	JA4Callback func(ja4.Report)
-
-	// P0fSignature spoofs TCP/IP parameters (window size, TTL) to match a specific operating system.
-	P0fSignature *p0f.Signature
-
-	// H2Settings overrides the default HTTP/2 SETTINGS frame parameters.
-	H2Settings *HTTP2Settings
-
-	// H3Settings overrides the default HTTP/3 (QUIC) configuration settings.
-	H3Settings *HTTP3Settings
-
-	// SessionCache is a proxy-aware TLS session ticket cache that prevents session correlation across proxies.
-	SessionCache *ProxyAwareSessionCache
-
-	// PacketPadding adjusts MSS and injects random padding headers to confuse DPI length analysis.
-	PacketPadding *PaddingConfig
-}
-
-// ClientDefaults groups standard HTTP client settings, request/response lifecycle hooks,
-// body buffering configs, error handlers, rate-limiting modifiers, WAF solvers, and debugger tools.
-type ClientDefaults struct {
-	// BaseURL is resolved against relative request paths in Client.Request.
-	BaseURL *url.URL
-
-	// Headers is the map of default HTTP headers sent with every request.
-	Headers http.Header
-
-	// BaseResponse is a factory function that returns a fresh instance of a custom response wrapper.
-	BaseResponse func() BaseResponse
-
-	// BeforeRequest hooks run sequentially on every outgoing request before the middleware chain.
-	BeforeRequest []func(req *http.Request)
-
-	// AfterResponse hooks run sequentially after every response (or error) is received.
-	AfterResponse []func(resp *http.Response, err error)
-
-	// MaxResponseSize restricts the maximum bytes allowed in a response body. A value <= 0 removes limits.
-	MaxResponseSize int64
-
-	// RefererAutomaton tracks and automatically injects Referer headers based on previous request URLs.
-	RefererAutomaton bool
-
-	// RefererState is the concurrent-safe state tracking the last visited URL for referer tracking.
-	RefererState *RefererState
-
-	// Logger is the diagnostic logger used by the client.
-	Logger Logger
-
-	// DefaultMods is a slice of RequestModifiers applied to every request prior to the middleware chain.
-	DefaultMods []RequestModifier
-
-	// ChallengeSolver solves JavaScript/WAF challenges (e.g., Cloudflare) on challenge detection.
-	ChallengeSolver ChallengeSolver
-
-	// ChallengeDetector determines if a response constitutes a challenge to be solved.
-	ChallengeDetector ChallengeDetector
-
-	// Inspector logs and exposes request trace history to a local developer dashboard.
-	Inspector TrafficInspector
-
-	// MultiReadThreshold determines the size limit (in bytes) under which response bodies are cached in memory for multiple reads.
-	MultiReadThreshold int64
-
-	// MultiReadDisableDisk prevents caching responses exceeding MultiReadThreshold to disk, returning errors instead.
-	MultiReadDisableDisk bool
-
-	// HeadersCookieJar is the cookie jar used for tracking cookie headers when running with custom cookie setups.
-	HeadersCookieJar http.CookieJar
-
-	// PipelineWrapper allows overriding or wrapping the default middleware pipeline.
-	PipelineWrapper func(c *Client, engine HTTPDoer) HTTPDoer
+// Logger is an interface for logging messages.
+type Logger interface {
+	Debug(msg string, args ...any)
+	DebugContext(ctx context.Context, msg string, args ...any)
+	Info(msg string, args ...any)
+	InfoContext(ctx context.Context, msg string, args ...any)
+	Warn(msg string, args ...any)
+	WarnContext(ctx context.Context, msg string, args ...any)
+	Error(msg string, args ...any)
+	ErrorContext(ctx context.Context, msg string, args ...any)
 }
 
 // Client is an immutable, concurrency-safe HTTP client built on [HTTPDoer].
 // Every With* method returns a new clone, so the original remains usable
 // by other goroutines. Use [NewClient] to create the first instance.
 type Client struct {
-	http        HTTPDoer
 	engine      HTTPDoer
 	network     NetworkConfig
 	fingerprint FingerprintConfig
 	defaults    ClientDefaults
+
+	userAgentRotationCounter uint32
+	proxyFailoverCounter     uint32
 }
 
 // NewClient creates a [Client] wrapping httpClient. When httpClient
@@ -526,6 +182,11 @@ func NewClient(httpClient HTTPDoer, opts ...ClientOption) *Client {
 			Headers:         make(http.Header),
 			MaxResponseSize: 10 * 1024 * 1024,
 			RefererState:    &RefererState{},
+			Pipeline: PipelineConfig{
+				Decompress: true,
+				Validate:   true,
+				Challenge:  true,
+			},
 		},
 		network: NetworkConfig{
 			HappyEyeballsDelay: 300 * time.Millisecond,
@@ -533,15 +194,7 @@ func NewClient(httpClient HTTPDoer, opts ...ClientOption) *Client {
 	}
 
 	c.applyDialers()
-
-	// Apply options
-	for _, opt := range opts {
-		opt(c)
-	}
-
 	generic.ApplyOptions(c, opts...)
-
-	c.rebuildChain()
 
 	// Default to user agent if not set
 	if c.defaults.Headers.Get("User-Agent") == "" {
@@ -551,15 +204,121 @@ func NewClient(httpClient HTTPDoer, opts ...ClientOption) *Client {
 	return c
 }
 
+// Engine returns the raw underlying HTTPDoer (typically *http.Client) without any middleware wrappers.
+func (c *Client) Engine() HTTPDoer {
+	return c.engine
+}
+
+// Defaults returns the ClientDefaults configured on c.
+func (c *Client) Defaults() ClientDefaults {
+	return c.defaults
+}
+
+// Network returns the NetworkConfig configured on c.
+func (c *Client) Network() NetworkConfig {
+	return c.network
+}
+
+// Fingerprint returns the FingerprintConfig configured on c.
+func (c *Client) Fingerprint() FingerprintConfig {
+	return c.fingerprint
+}
+
+// Inspector returns the configured [TrafficInspector] if enabled.
+func (c *Client) Inspector() TrafficInspector {
+	return c.defaults.Inspector
+}
+
+// TLSConfig returns the transport's TLS client config.
+func (c *Client) TLSConfig() *tls.Config {
+	if tr := c.Transport(); tr != nil && tr.TLSClientConfig != nil {
+		return tr.TLSClientConfig.Clone()
+	}
+
+	return nil
+}
+
+// BrowserID returns the configured BrowserID.
+func (c *Client) BrowserID() BrowserID {
+	if c.fingerprint.BrowserID != BrowserNone {
+		return c.fingerprint.BrowserID
+	}
+
+	if httpClient, ok := c.engine.(*http.Client); ok {
+		if tr, ok := httpClient.Transport.(*http.Transport); ok {
+			if tr != nil && tr.DialTLSContext != nil {
+				return BrowserChrome
+			}
+		}
+	}
+
+	return BrowserNone
+}
+
+// Logger returns the logger used by the client.
+// If no logger is set, a no-op logger is returned.
+func (c *Client) Logger() Logger {
+	if c.defaults.Logger == nil {
+		return log.Discard
+	}
+
+	return c.defaults.Logger
+}
+
+// HTTP returns an HTTPDoer that executes requests through the client's pipeline.
+func (c *Client) HTTP() HTTPDoer {
+	return DoerFunc(func(req *http.Request) (*http.Response, error) {
+		return c.execute(req, c.resolvePipeline(req))
+	})
+}
+
+// Transport returns the underlying [http.Transport] of the client.
+// Returns nil if the [HTTPDoer] is not an [http.Client] or its transport is not an [http.Transport].
+func (c *Client) Transport() *http.Transport {
+	if httpClient, ok := c.engine.(*http.Client); ok {
+		if httpClient.Transport == nil {
+			httpClient.Transport = &http.Transport{
+				Proxy: http.ProxyFromEnvironment,
+				DialContext: (&net.Dialer{
+					Timeout:   30 * time.Second,
+					KeepAlive: 30 * time.Second,
+				}).DialContext,
+				ForceAttemptHTTP2:     true,
+				MaxIdleConns:          100,
+				IdleConnTimeout:       90 * time.Second,
+				TLSHandshakeTimeout:   10 * time.Second,
+				ExpectContinueTimeout: 1 * time.Second,
+			}
+		}
+
+		curr := httpClient.Transport
+		for curr != nil {
+			if transport, ok := curr.(*http.Transport); ok {
+				return transport
+			}
+
+			if ft, ok := curr.(*H2FramedTransport); ok {
+				curr = ft.Transport
+				continue
+			}
+
+			if cj, ok := curr.(*cookieJarTransport); ok {
+				curr = cj.next
+				continue
+			}
+
+			break
+		}
+	}
+
+	return nil
+}
+
 // With returns a clone of c with the specified functional options applied.
 func (c *Client) With(opts ...ClientOption) *Client {
 	cloned := c.Clone()
-	for _, opt := range opts {
-		opt(cloned)
-	}
-
+	generic.ApplyOptions(cloned, opts...)
 	cloned.applyDialers()
-	cloned.rebuildChain()
 
 	return cloned
 }
@@ -649,6 +408,73 @@ func (c *Client) Clone() *Client {
 		cloned.defaults.DefaultMods = modsCopy
 	}
 
+	// Clone PipelineConfig
+	cloned.defaults.Pipeline = c.defaults.Pipeline
+	if c.defaults.Pipeline.DPIJitter != nil {
+		dj := *c.defaults.Pipeline.DPIJitter
+		cloned.defaults.Pipeline.DPIJitter = &dj
+	}
+
+	if c.defaults.Pipeline.ProxyFailover != nil {
+		pf := *c.defaults.Pipeline.ProxyFailover
+		proxiesCopy := make([]string, len(pf.Proxies))
+		copy(proxiesCopy, pf.Proxies)
+		pf.Proxies = proxiesCopy
+		cloned.defaults.Pipeline.ProxyFailover = &pf
+	}
+
+	if c.defaults.Pipeline.Hedging != nil {
+		h := *c.defaults.Pipeline.Hedging
+		if h.DynamicHedging != nil {
+			dhCopy := *h.DynamicHedging
+			h.DynamicHedging = &dhCopy
+		}
+
+		cloned.defaults.Pipeline.Hedging = &h
+	}
+
+	if c.defaults.Pipeline.Cache != nil {
+		cc := *c.defaults.Pipeline.Cache
+		cloned.defaults.Pipeline.Cache = &cc
+	}
+
+	if c.defaults.Pipeline.HAR != nil {
+		har := *c.defaults.Pipeline.HAR
+		cloned.defaults.Pipeline.HAR = &har
+	}
+
+	if c.defaults.Pipeline.Redact != nil {
+		r := *c.defaults.Pipeline.Redact
+		if r.Headers != nil {
+			headersCopy := make(map[string]bool, len(r.Headers))
+			for k, v := range r.Headers {
+				headersCopy[k] = v
+			}
+
+			r.Headers = headersCopy
+		}
+
+		cloned.defaults.Pipeline.Redact = &r
+	}
+
+	// Clone UARotationProfiles
+	if c.defaults.UARotationProfiles != nil {
+		profilesCopy := make([]BrowserProfile, len(c.defaults.UARotationProfiles))
+		for i, prof := range c.defaults.UARotationProfiles {
+			hintsCopy := make(map[string]string, len(prof.ClientHints))
+			for k, v := range prof.ClientHints {
+				hintsCopy[k] = v
+			}
+
+			profilesCopy[i] = BrowserProfile{
+				UserAgent:   prof.UserAgent,
+				ClientHints: hintsCopy,
+			}
+		}
+
+		cloned.defaults.UARotationProfiles = profilesCopy
+	}
+
 	// Clone http.Client and its transport to avoid race conditions.
 	// If the transport is wrapped in cookieJarTransport, unwrap, clone the
 	// base transport, and re-wrap to preserve the cookie jar binding.
@@ -681,7 +507,6 @@ func (c *Client) Clone() *Client {
 	}
 
 	cloned.applyDialers()
-	cloned.rebuildChain()
 
 	return cloned
 }
@@ -806,13 +631,11 @@ func (c *Client) InitRequestConfig(req *http.Request) *http.Request {
 }
 
 // Request sends an HTTP request and returns the response. path is
-// resolved against [Client.WithBaseURL] when set; an empty path
+// resolved against [WithClientBaseURL] when set; an empty path
 // targets the base URL directly. Nil modifiers are ignored.
 //
 // Decompression (gzip, brotli, zstd) and charset transcoding to
-// UTF-8 are applied automatically. The response body is wrapped
-// with a GC finalizer so that unclosed bodies eventually release
-// the underlying connection.
+// UTF-8 are applied automatically.
 //
 // Returns [ErrSSRFBlocked] when SSRF guarding is on and the target
 // resolves to a private or loopback address. Returns
@@ -856,7 +679,7 @@ func (c *Client) Request(
 		}
 	}
 
-	resp, reqErr := c.http.Do(req)
+	resp, reqErr := c.execute(req, c.resolvePipeline(req))
 	if reqErr != nil {
 		return nil, fmt.Errorf("aoni: request failed: %w", reqErr)
 	}
@@ -864,164 +687,970 @@ func (c *Client) Request(
 	return resp, nil
 }
 
-// ConnectionPoolConfig tunes the [http.Transport] connection pool.
-// Apply it with [Client.WithConnectionPool].
-type ConnectionPoolConfig struct {
-	// MaxIdleConns is the maximum number of idle connections across all hosts.
-	MaxIdleConns int
-	// MaxIdleConnsPerHost is the maximum number of idle connections kept per host.
-	MaxIdleConnsPerHost int
-	// MaxConnsPerHost is the maximum total number of connections allowed per host.
-	MaxConnsPerHost int
-	// IdleConnTimeout is the maximum duration an idle connection is kept open.
-	IdleConnTimeout time.Duration
-	// ResponseHeaderTimeout is the maximum duration to wait for reading response headers.
-	ResponseHeaderTimeout time.Duration
+// DialTLSForWS dials a TLS connection, routing through the transport's
+// DialTLSContext when available.
+func (c *Client) DialTLSForWS(ctx context.Context, addr string) (net.Conn, error) {
+	if tr := c.Transport(); tr != nil && tr.DialTLSContext != nil {
+		network := "tcp"
+		return tr.DialTLSContext(ctx, network, addr)
+	}
+
+	browser := c.BrowserID()
+	if browser != BrowserNone || c.fingerprint.TLSClientHelloID != nil {
+		var proxyURL *url.URL
+		if c.network.TransportProxy != nil {
+			proxyURL, _ = c.network.TransportProxy(&http.Request{URL: &url.URL{Host: addr}})
+		}
+
+		return dialTLSWithUTLS(
+			ctx,
+			"tcp",
+			addr,
+			browser,
+			c.fingerprint.TLSClientHelloID,
+			c.network.SourceRotator,
+			c.network.DNSResolver,
+			c.fingerprint.JA4Callback,
+			c.TLSConfig(),
+			proxyURL,
+		)
+	}
+
+	if tr := c.Transport(); tr != nil && tr.DialContext != nil {
+		return tr.DialContext(ctx, "tcp", addr)
+	}
+
+	return dialStandardTLS(ctx, addr)
 }
 
-// BrowserID selects a uTLS ClientHello profile for JA3 fingerprint
-// emulation. Pass to [Client.WithTLSFingerprint].
-type BrowserID int
+// DialPlainForWS dials a plain TCP connection, routing through the transport's
+// DialContext when available.
+func (c *Client) DialPlainForWS(ctx context.Context, addr string) (net.Conn, error) {
+	var (
+		conn net.Conn
+		err  error
+	)
 
-const (
-	// BrowserNone disables TLS fingerprint emulation.
-	BrowserNone BrowserID = iota
-	// BrowserChrome emulates Google Chrome TLS fingerprints.
-	BrowserChrome
-	// BrowserFirefox emulates Mozilla Firefox TLS fingerprints.
-	BrowserFirefox
-	// BrowserSafari emulates Apple Safari TLS fingerprints.
-	BrowserSafari
-)
+	if tr := c.Transport(); tr != nil && tr.DialContext != nil {
+		conn, err = tr.DialContext(ctx, "tcp", addr)
+	} else {
+		conn, err = cleanDialContext(
+			ctx,
+			"tcp",
+			addr,
+			c.network.HappyEyeballsDelay,
+			c.network.SSRFGuard,
+			c.network.SourceRotator,
+			c.network.DNSResolver,
+		)
+	}
 
-// WithMultiReadBody returns a [RequestModifier] that overrides the
-// body caching threshold for a single request. Responses smaller
-// than threshold are buffered in memory so the body can be read
-// multiple times. A value <= 0 disables caching for the request.
-func WithMultiReadBody(threshold int64) RequestModifier {
-	return func(req *http.Request) {
-		getOrInitRequestConfig(req).MultiReadThreshold = threshold
+	if err != nil {
+		return nil, err
+	}
+
+	var fCfg *FragmentConfig
+	if cfg := GetRequestConfig(ctx); cfg != nil && cfg.Fragment != nil {
+		fCfg = cfg.Fragment
+	} else if val := ctx.Value(fragmentCtxKey{}); val != nil {
+		if fc, ok := val.(FragmentConfig); ok {
+			fCfg = &fc
+		}
+	}
+
+	if fCfg != nil {
+		conn = wrapWithFragmentation(conn, *fCfg)
+	}
+
+	return conn, nil
+}
+
+// dialStandardTLS dials using Go's standard net.Dialer (no fingerprint, no proxy).
+func dialStandardTLS(ctx context.Context, addr string) (net.Conn, error) {
+	dialer := &net.Dialer{Timeout: 30 * time.Second}
+	return dialer.DialContext(ctx, "tcp", addr)
+}
+
+func (c *Client) resolvePipeline(req *http.Request) PipelineConfig {
+	if reqPipe, ok := GetPipeline(req.Context()); ok {
+		return reqPipe
+	}
+
+	pipe := c.defaults.Pipeline
+
+	if !pipe.RotateUA && len(c.defaults.UARotationProfiles) > 0 {
+		pipe.RotateUA = true
+	}
+
+	if pipe.SizeLimit == 0 {
+		pipe.SizeLimit = c.defaults.MaxResponseSize
+	}
+
+	if !pipe.Inspect && c.defaults.Inspector != nil {
+		pipe.Inspect = true
+	}
+
+	if pipe.Hedging == nil && (c.network.HedgingDelay > 0 || c.network.DynamicHedging != nil) {
+		pipe.Hedging = &HedgingConfig{
+			DefaultDelay:   c.network.HedgingDelay,
+			DynamicHedging: c.network.DynamicHedging,
+		}
+	}
+
+	return pipe
+}
+
+func (c *Client) execute(req *http.Request, pipe PipelineConfig) (*http.Response, error) {
+	startTime := time.Now()
+
+	ctx := req.Context()
+
+	cfg := GetRequestConfig(ctx)
+	if cfg != nil {
+		if cfg.TimeoutOverride > 0 {
+			var cancel context.CancelFunc
+
+			ctx, cancel = context.WithTimeout(ctx, cfg.TimeoutOverride) //nolint:gosec
+			cfg.RequestTimeoutCancel = cancel
+		}
+
+		if cfg.SessionCache != nil && cfg.ProxyAddr != nil {
+			cfg.SessionCache.SetProxyKey(cfg.ProxyAddr.String())
+		}
+
+		if cfg.ProxyAddr != nil {
+			ctx = context.WithValue(ctx, proxyCtxKey{}, cfg.ProxyAddr.String())
+		}
+	}
+
+	req = req.WithContext(ctx)
+
+	for _, hook := range c.defaults.BeforeRequest {
+		hook(req)
+	}
+
+	if c.fingerprint.PacketPadding != nil {
+		c.applyPacketPadding(req)
+	}
+
+	if c.defaults.RefererAutomaton {
+		c.applyRefererHeader(req)
+	}
+
+	if pipe.RotateUA {
+		c.rotateUserAgentAndHints(req)
+	}
+
+	if pipe.DPIJitter != nil {
+		c.applyDPIJitter(req, pipe.DPIJitter)
+	}
+
+	if pipe.Redact != nil {
+		req = c.redactSensitiveData(req, pipe.Redact)
+	}
+
+	if pipe.Cache != nil && req.Method == http.MethodGet {
+		if cachedResp, err := c.tryGetFromCache(req, pipe.Cache); err == nil {
+			return cachedResp, nil
+		}
+	}
+
+	var (
+		traceInfo *TraceInfo
+		traceEnd  func(*http.Response)
+	)
+
+	if cfg != nil && cfg.TraceInfo != nil {
+		traceInfo = cfg.TraceInfo
+	} else if pipe.Inspect && c.defaults.Inspector != nil {
+		traceInfo = &TraceInfo{}
+
+		store := &ja4ReportStore{target: traceInfo}
+		if cfg != nil {
+			cfg.JA4ReportStore = store
+		}
+
+		traceInfo.JA4 = &ja4.Report{JA4H: computeJA4HFromRequest(req)}
+	}
+
+	if traceInfo != nil {
+		trace := &httptrace.ClientTrace{
+			DNSStart:          func(_ httptrace.DNSStartInfo) { traceInfo.dnsStart = time.Now() },
+			DNSDone:           func(_ httptrace.DNSDoneInfo) { traceInfo.DNSLookup = time.Since(traceInfo.dnsStart) },
+			ConnectStart:      func(_, _ string) { traceInfo.connectStart = time.Now() },
+			ConnectDone:       func(_, _ string, _ error) { traceInfo.TCPConn = time.Since(traceInfo.connectStart) },
+			TLSHandshakeStart: func() { traceInfo.tlsStart = time.Now() },
+			TLSHandshakeDone:  func(_ tls.ConnectionState, _ error) { traceInfo.TLSHandshake = time.Since(traceInfo.tlsStart) },
+			GotConn: func(info httptrace.GotConnInfo) {
+				traceInfo.gotConn = time.Now()
+				if info.Conn != nil && info.Conn.RemoteAddr() != nil {
+					traceInfo.RemoteAddr = info.Conn.RemoteAddr().String()
+				}
+			},
+			GotFirstResponseByte: func() { traceInfo.ServerProcessing = time.Since(traceInfo.gotConn) },
+		}
+		req = req.WithContext(httptrace.WithClientTrace(req.Context(), trace))
+		traceEnd = traceInfo.Start()
+	}
+
+	var (
+		resp *http.Response
+		err  error
+	)
+
+	switch {
+	case pipe.ProxyFailover != nil:
+		resp, err = c.executeWithProxyFailover(req, pipe.ProxyFailover, pipe.Hedging)
+	case pipe.Hedging != nil:
+		resp, err = c.executeWithHedging(req, pipe.Hedging)
+	default:
+		resp, err = c.engine.Do(req)
+	}
+
+	duration := time.Since(startTime).Milliseconds()
+
+	for _, hook := range c.defaults.AfterResponse {
+		hook(resp, err)
+	}
+
+	if err != nil {
+		return nil, err
+	}
+
+	if cfg != nil && cfg.JA4ReportStore != nil && cfg.JA4ReportStore.report != nil {
+		store := cfg.JA4ReportStore
+		store.target.JA4.JA4 = store.report.JA4
+		store.target.JA4.Protocol = store.report.Protocol
+		store.target.JA4.Version = store.report.Version
+		store.target.JA4.SNI = store.report.SNI
+		store.target.JA4.CipherCount = store.report.CipherCount
+		store.target.JA4.ExtCount = store.report.ExtCount
+		store.target.JA4.ALPN = store.report.ALPN
+	}
+
+	if traceEnd != nil {
+		traceEnd(resp)
+	}
+
+	if pipe.Inspect && c.defaults.Inspector != nil {
+		c.captureTraffic(req, resp, err, traceInfo)
+	}
+
+	if pipe.HAR != nil {
+		c.writeHARLog(req, resp, pipe.HAR, startTime, duration)
+	}
+
+	if pipe.SizeLimit > 0 {
+		if limitErr := c.limitResponseSize(resp, pipe.SizeLimit); limitErr != nil {
+			return nil, limitErr
+		}
+	}
+
+	if pipe.Decompress {
+		resp = c.handleDecompressionAndTranscoding(req, resp)
+	}
+
+	if pipe.Challenge {
+		resp, err = c.handleWAFChallenge(req, resp)
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	if pipe.Validate {
+		if valErr := c.validateResponse(resp); valErr != nil {
+			return nil, valErr
+		}
+	}
+
+	if c.defaults.RefererAutomaton && c.defaults.RefererState != nil && req != nil && req.URL != nil {
+		c.defaults.RefererState.mu.Lock()
+		c.defaults.RefererState.lastURL = req.URL.String()
+		c.defaults.RefererState.mu.Unlock()
+	}
+
+	if resp != nil && resp.Body != nil {
+		if bufErr := c.applyMultiReadBuffering(req, resp, cfg); bufErr != nil {
+			return nil, bufErr
+		}
+
+		resp.Body = newResponseBodyReadCloser(resp.Body)
+	}
+
+	if pipe.Cache != nil && req.Method == http.MethodGet {
+		c.saveToCache(req, resp, pipe.Cache)
+	}
+
+	return resp, nil
+}
+
+func (c *Client) rotateUserAgentAndHints(req *http.Request) {
+	profiles := c.defaults.UARotationProfiles
+	if len(profiles) == 0 {
+		profiles = DefaultBrowserProfiles
+	}
+
+	idx := atomic.AddUint32(&c.userAgentRotationCounter, 1) - 1
+	prof := profiles[idx%uint32(len(profiles))] //nolint:gosec
+
+	req.Header.Set("User-Agent", prof.UserAgent)
+
+	for k, v := range prof.ClientHints {
+		req.Header.Set(k, v)
 	}
 }
 
-// WithMultiReadDisableDisk returns a [RequestModifier] that overrides the
-// body caching disk-fallback setting for a single request. If disable is true,
-// exceeding the memory threshold returns an error ([ErrBufferLimitExceeded]) instead of creating temporary files.
-func WithMultiReadDisableDisk(disable bool) RequestModifier {
-	return func(req *http.Request) {
-		getOrInitRequestConfig(req).MultiReadDisableDisk = disable
+func (c *Client) applyDPIJitter(req *http.Request, cfg *DPIJitterConfig) {
+	var delay time.Duration
+	if cfg.MinDelay > 0 && cfg.MaxDelay >= cfg.MinDelay {
+		delta := cfg.MaxDelay - cfg.MinDelay
+		if delta > 0 {
+			r := time.Duration(time.Now().UnixNano() % int64(delta))
+			delay = cfg.MinDelay + r
+		} else {
+			delay = cfg.MinDelay
+		}
+	}
+
+	if delay > 0 {
+		if req.Body != nil && req.Body != http.NoBody {
+			req.Body = &jitterReader{
+				ReadCloser: req.Body,
+				delay:      delay,
+			}
+		} else {
+			time.Sleep(delay)
+		}
 	}
 }
 
-// UserAgent returns the User-Agent header configured on c.
-func (c *Client) UserAgent() string {
-	return c.defaults.Headers.Get("User-Agent")
-}
-
-// Inspector returns the configured [TrafficInspector] if enabled.
-func (c *Client) Inspector() TrafficInspector {
-	return c.defaults.Inspector
-}
-
-// Logger is an interface for logging messages.
-type Logger interface {
-	Debug(msg string, args ...any)
-	DebugContext(ctx context.Context, msg string, args ...any)
-	Info(msg string, args ...any)
-	InfoContext(ctx context.Context, msg string, args ...any)
-	Warn(msg string, args ...any)
-	WarnContext(ctx context.Context, msg string, args ...any)
-	Error(msg string, args ...any)
-	ErrorContext(ctx context.Context, msg string, args ...any)
-}
-
-// Logger returns the logger used by the client.
-// If no logger is set, a no-op logger is returned.
-func (c *Client) Logger() Logger {
-	if c.defaults.Logger == nil {
-		return &noopLogger{}
+func (c *Client) tryGetFromCache(req *http.Request, cfg *CacheConfig) (*http.Response, error) {
+	if req.Method != http.MethodGet || cfg == nil || cfg.Store == nil {
+		return nil, errors.New("aoni cache: bypass")
 	}
 
-	return c.defaults.Logger
+	cc := req.Header.Get("Cache-Control")
+	if strings.Contains(cc, "no-cache") || strings.Contains(cc, "no-store") {
+		return nil, errors.New("aoni cache: bypass via request header")
+	}
+
+	cacheKey := req.Method + ":" + req.URL.String()
+
+	cachedData, err := cfg.Store.Get(req.Context(), cacheKey)
+	if err != nil {
+		return nil, err
+	}
+
+	var cached cachedResponse
+	if decodeErr := json.Unmarshal(cachedData, &cached); decodeErr != nil {
+		return nil, decodeErr
+	}
+
+	bodyBytes, _ := base64.StdEncoding.DecodeString(cached.BodyBase64)
+	resp := &http.Response{
+		StatusCode:    cached.StatusCode,
+		Header:        cached.Header,
+		Body:          io.NopCloser(bytes.NewReader(bodyBytes)),
+		ContentLength: int64(len(bodyBytes)),
+		Request:       req,
+	}
+
+	return resp, nil
 }
 
-// BaseResponse returns a new [BaseResponse] wrapper if a provider is configured on the client.
-// Returns nil if no provider is set.
-func (c *Client) BaseResponse() BaseResponse {
-	if c.defaults.BaseResponse == nil {
+func (c *Client) saveToCache(req *http.Request, resp *http.Response, cfg *CacheConfig) {
+	if req.Method != http.MethodGet || resp == nil || resp.StatusCode != http.StatusOK || cfg == nil ||
+		cfg.Store == nil {
+		return
+	}
+
+	respCC := resp.Header.Get("Cache-Control")
+	if strings.Contains(respCC, "no-store") || strings.Contains(respCC, "private") {
+		return
+	}
+
+	var bodyBuf bytes.Buffer
+
+	tee := io.TeeReader(resp.Body, &bodyBuf)
+
+	bodyBytes, readErr := io.ReadAll(tee)
+	if readErr != nil {
+		return
+	}
+
+	_ = resp.Body.Close()
+	resp.Body = io.NopCloser(bytes.NewReader(bodyBytes))
+
+	cached := cachedResponse{
+		StatusCode: resp.StatusCode,
+		Header:     resp.Header,
+		BodyBase64: base64.StdEncoding.EncodeToString(bodyBytes),
+	}
+
+	if cachedData, marshalErr := json.Marshal(cached); marshalErr == nil {
+		ttl := cfg.DefaultTTL
+		if reqCfg := GetRequestConfig(req.Context()); reqCfg != nil && reqCfg.CacheTTL > 0 {
+			ttl = reqCfg.CacheTTL
+		}
+
+		_ = cfg.Store.Set(req.Context(), req.Method+":"+req.URL.String(), cachedData, ttl)
+	}
+}
+
+func (c *Client) redactSensitiveData(req *http.Request, redact *RedactConfig) *http.Request {
+	headersMap := make(map[string]bool)
+	for _, h := range redact.HeadersToRedact {
+		headersMap[strings.ToLower(h)] = true
+	}
+
+	if len(headersMap) == 0 {
+		headersMap["authorization"] = true
+		headersMap["cookie"] = true
+		headersMap["set-cookie"] = true
+	}
+
+	ctx := context.WithValue(req.Context(), RedactConfigCtxKey{}, &RedactConfig{Headers: headersMap})
+
+	return req.WithContext(ctx)
+}
+
+func (c *Client) writeHARLog(
+	req *http.Request,
+	resp *http.Response,
+	har *HARConfig,
+	startTime time.Time,
+	duration int64,
+) {
+	if har == nil || har.Generator == nil || resp == nil {
+		return
+	}
+
+	var reqHeaders []HARHeaderField
+	for k, v := range req.Header {
+		for _, val := range v {
+			reqHeaders = append(reqHeaders, HARHeaderField{Name: k, Value: val})
+		}
+	}
+
+	var reqBodySize int64
+	if req.Body != nil && req.Body != http.NoBody {
+		if req.ContentLength > 0 {
+			reqBodySize = req.ContentLength
+		}
+	}
+
+	var respHeaders []HARHeaderField
+	for k, v := range resp.Header {
+		for _, val := range v {
+			respHeaders = append(respHeaders, HARHeaderField{Name: k, Value: val})
+		}
+	}
+
+	var bodyBytes []byte
+	if resp.Body != nil {
+		bodyBytes, _ = io.ReadAll(resp.Body)
+		_ = resp.Body.Close()
+		resp.Body = io.NopCloser(bytes.NewReader(bodyBytes))
+	}
+
+	entry := HAREntry{
+		StartedDateTime: startTime.UTC().Format(time.RFC3339Nano),
+		Time:            duration,
+		Request: HARRequest{
+			Method:      req.Method,
+			URL:         req.URL.String(),
+			HTTPVersion: req.Proto,
+			Headers:     reqHeaders,
+			Cookies:     []any{},
+			QueryString: []any{},
+			HeadersSize: -1,
+			BodySize:    reqBodySize,
+		},
+		Response: HARResponse{
+			Status:      resp.StatusCode,
+			StatusText:  resp.Status,
+			HTTPVersion: resp.Proto,
+			Headers:     respHeaders,
+			Cookies:     []any{},
+			Content: HARContent{
+				Size:     int64(len(bodyBytes)),
+				MimeType: resp.Header.Get("Content-Type"),
+				Text:     string(bodyBytes),
+			},
+			RedirectURL: resp.Header.Get("Location"),
+			HeadersSize: -1,
+			BodySize:    int64(len(bodyBytes)),
+		},
+		Cache: struct{}{},
+		Timings: HARTimings{
+			Send:    0,
+			Wait:    duration,
+			Receive: 0,
+		},
+	}
+
+	har.Generator.AddEntry(entry)
+}
+
+func (c *Client) captureTraffic(req *http.Request, resp *http.Response, err error, traceInfo *TraceInfo) {
+	if c.defaults.Inspector != nil {
+		c.defaults.Inspector.Capture(req, resp, err, traceInfo)
+	}
+}
+
+func (c *Client) limitResponseSize(resp *http.Response, maxSize int64) error {
+	if resp == nil || resp.Body == nil || maxSize <= 0 {
 		return nil
 	}
 
-	return c.defaults.BaseResponse()
+	if resp.ContentLength > maxSize {
+		_ = resp.Body.Close()
+		return fmt.Errorf("aoni: response too large: %w", ErrResponseTooLarge)
+	}
+
+	resp.Body = &limitCheckingReadCloser{
+		ReadCloser: resp.Body,
+		limit:      maxSize,
+	}
+
+	return nil
 }
 
-// HTTP returns the fully wrapped HTTPDoer pipeline.
-func (c *Client) HTTP() HTTPDoer {
-	return c.http
-}
+func (c *Client) validateResponse(resp *http.Response) error {
+	if resp == nil || resp.Request == nil {
+		return nil
+	}
 
-// Engine returns the raw underlying HTTPDoer (typically *http.Client) without any middleware wrappers.
-func (c *Client) Engine() HTTPDoer {
-	return c.engine
-}
-
-// WithEngine returns a clone of c with the raw underlying HTTPDoer replaced by engine.
-
-// Defaults returns the ClientDefaults configured on c.
-func (c *Client) Defaults() ClientDefaults {
-	return c.defaults
-}
-
-// Network returns the NetworkConfig configured on c.
-func (c *Client) Network() NetworkConfig {
-	return c.network
-}
-
-// Fingerprint returns the FingerprintConfig configured on c.
-func (c *Client) Fingerprint() FingerprintConfig {
-	return c.fingerprint
-}
-
-// Transport returns the underlying [http.Transport] of the client.
-// Returns nil if the [HTTPDoer] is not an [http.Client] or its transport is not an [http.Transport].
-func (c *Client) Transport() *http.Transport {
-	if httpClient, ok := c.engine.(*http.Client); ok {
-		if httpClient.Transport == nil {
-			httpClient.Transport = &http.Transport{
-				Proxy: http.ProxyFromEnvironment,
-				DialContext: (&net.Dialer{
-					Timeout:   30 * time.Second,
-					KeepAlive: 30 * time.Second,
-				}).DialContext,
-				ForceAttemptHTTP2:     true,
-				MaxIdleConns:          100,
-				IdleConnTimeout:       90 * time.Second,
-				TLSHandshakeTimeout:   10 * time.Second,
-				ExpectContinueTimeout: 1 * time.Second,
-			}
-		}
-
-		curr := httpClient.Transport
-		for curr != nil {
-			if transport, ok := curr.(*http.Transport); ok {
-				return transport
+	if fn := GetResponseValidator(resp.Request.Context()); fn != nil { //nolint:bodyclose
+		if valErr := fn(resp); valErr != nil {
+			if resp.Body != nil {
+				_ = resp.Body.Close()
 			}
 
-			if ft, ok := curr.(*H2FramedTransport); ok {
-				curr = ft.Transport
-				continue
-			}
-
-			if cj, ok := curr.(*cookieJarTransport); ok {
-				curr = cj.next
-				continue
-			}
-
-			break
+			return valErr
 		}
 	}
 
 	return nil
+}
+
+func (c *Client) executeWithProxyFailover(
+	req *http.Request,
+	failover *ProxyFailoverConfig,
+	hedging *HedgingConfig,
+) (*http.Response, error) {
+	var parsed []*url.URL
+	for _, p := range failover.Proxies {
+		if u, err := url.Parse(p); err == nil {
+			parsed = append(parsed, u)
+		}
+	}
+
+	if len(parsed) == 0 {
+		if hedging != nil {
+			return c.executeWithHedging(req, hedging)
+		}
+
+		return c.engine.Do(req)
+	}
+
+	var (
+		lastErr error
+		resp    *http.Response
+	)
+
+	for i := 0; i <= failover.RetryLimit; i++ {
+		var idx uint32
+		if lastErr != nil {
+			idx = atomic.AddUint32(&c.proxyFailoverCounter, 1)
+		} else {
+			idx = atomic.LoadUint32(&c.proxyFailoverCounter)
+		}
+
+		proxy := parsed[idx%uint32(len(parsed))] //nolint:gosec
+
+		newReq := req
+
+		cfg := GetRequestConfig(req.Context())
+		if cfg != nil {
+			cfg.ProxyAddr = proxy
+			ctx := context.WithValue(req.Context(), proxyCtxKey{}, proxy.String())
+			newReq = req.WithContext(ctx)
+		}
+
+		if req.Body != nil && req.Body != http.NoBody && req.GetBody != nil {
+			body, getBodyErr := req.GetBody()
+			if getBodyErr == nil {
+				newReq.Body = body
+			}
+		}
+
+		if hedging != nil {
+			resp, lastErr = c.executeWithHedging(newReq, hedging)
+		} else {
+			resp, lastErr = c.engine.Do(newReq)
+		}
+
+		if lastErr == nil && resp != nil {
+			if resp.StatusCode != http.StatusBadGateway && resp.StatusCode != http.StatusServiceUnavailable {
+				return resp, nil
+			}
+
+			lastErr = fmt.Errorf("aoni: proxy returned status %d", resp.StatusCode)
+			_ = resp.Body.Close()
+		}
+	}
+
+	return nil, fmt.Errorf("aoni proxy failover: exhausted %d retries, last error: %w", failover.RetryLimit, lastErr)
+}
+
+func (c *Client) applyPacketPadding(req *http.Request) {
+	if padding := GeneratePadding(*c.fingerprint.PacketPadding); len(padding) > 0 {
+		headerName := PaddingHeaderName(*c.fingerprint.PacketPadding)
+		req.Header.Set(headerName, hex.EncodeToString(padding))
+	}
+}
+
+func (c *Client) applyRefererHeader(req *http.Request) {
+	if req.Header.Get("Referer") == "" {
+		state := c.defaults.RefererState
+		state.mu.Lock()
+		lastURL := state.lastURL
+		state.mu.Unlock()
+
+		if lastURL != "" {
+			req.Header.Set("Referer", lastURL)
+		}
+	}
+}
+
+func (c *Client) handleWAFChallenge(req *http.Request, resp *http.Response) (*http.Response, error) {
+	if c.defaults.ChallengeSolver == nil {
+		return resp, nil
+	}
+
+	if resp != nil && resp.Body != nil {
+		// Read up to 100 KB explicitly to analyze the body for WAF signatures
+		bodyBytes, err := io.ReadAll(io.LimitReader(resp.Body, 100*1024))
+		if err != nil {
+			return resp, nil //nolint:nilerr
+		}
+
+		buffered := &ExplicitBufferedBody{
+			Prefix: bodyBytes,
+			Stream: resp.Body,
+		}
+		resp.Body = buffered
+
+		detector := generic.CoalesceNil(c.defaults.ChallengeDetector, DefaultChallengeDetector)
+
+		isChallenge, challengeErr := detector(resp)
+		if !isChallenge {
+			buffered.Rewind()
+			return resp, nil
+		}
+
+		_ = resp.Body.Close()
+
+		newResp, solveErr := c.defaults.ChallengeSolver.Solve(req.Context(), challengeErr, req)
+		if solveErr != nil {
+			return nil, solveErr
+		}
+
+		return newResp, nil
+	}
+
+	return resp, nil
+}
+
+func (c *Client) applyMultiReadBuffering(req *http.Request, resp *http.Response, cfg *RequestConfig) error {
+	threshold := c.defaults.MultiReadThreshold
+
+	disableDisk := c.defaults.MultiReadDisableDisk
+	if cfg != nil {
+		threshold = cfg.MultiReadThreshold
+		disableDisk = cfg.MultiReadDisableDisk
+	}
+
+	if threshold > 0 && resp.Body != nil {
+		mBody, err := newMultiReadBody(resp.Body, threshold, disableDisk)
+		if err != nil {
+			_ = resp.Body.Close()
+			return err
+		}
+
+		resp.Body = mBody
+	}
+
+	return nil
+}
+
+func (c *Client) handleDecompressionAndTranscoding(req *http.Request, resp *http.Response) *http.Response {
+	if resp == nil || resp.Body == nil {
+		return resp
+	}
+
+	cfg := GetRequestConfig(req.Context())
+	if cfg != nil && cfg.DownloadProgress != nil {
+		resp.Body = &progressReader{
+			reader:     resp.Body,
+			total:      resp.ContentLength,
+			onProgress: cfg.DownloadProgress,
+		}
+	}
+
+	switch resp.Header.Get("Content-Encoding") {
+	case "br":
+		resp.Body = &decompressReadCloser{
+			Reader: brotli.NewReader(resp.Body),
+			closer: resp.Body,
+		}
+		resp.Header.Del("Content-Encoding")
+		resp.Header.Del("Content-Length")
+		resp.ContentLength = -1
+
+	case "zstd":
+		if zstdDec, err := zstd.NewReader(resp.Body); err == nil {
+			resp.Body = &decompressReadCloser{
+				Reader: zstdDec,
+				closer: resp.Body,
+			}
+			resp.Header.Del("Content-Encoding")
+			resp.Header.Del("Content-Length")
+			resp.ContentLength = -1
+		} else {
+			resp.Header.Del("Content-Encoding")
+		}
+
+	case "gzip":
+		if gzReader, err := gzip.NewReader(resp.Body); err == nil {
+			resp.Body = &decompressReadCloser{
+				Reader: gzReader,
+				closer: resp.Body,
+			}
+			resp.Header.Del("Content-Encoding")
+			resp.Header.Del("Content-Length")
+			resp.ContentLength = -1
+		} else {
+			resp.Header.Del("Content-Encoding")
+		}
+	}
+
+	if contentType := resp.Header.Get("Content-Type"); contentType != "" {
+		if _, params, err := mime.ParseMediaType(contentType); err == nil {
+			if charset := params["charset"]; charset != "" {
+				charset = strings.ToLower(charset)
+				if charset != "utf-8" && charset != "utf8" {
+					if enc, err := htmlindex.Get(charset); err == nil {
+						resp.Body = struct {
+							io.Reader
+							io.Closer
+						}{
+							Reader: transform.NewReader(resp.Body, enc.NewDecoder()),
+							Closer: resp.Body,
+						}
+					}
+				}
+			}
+		}
+	}
+
+	return resp
+}
+
+func (c *Client) executeWithHedging(req *http.Request, pipeHedging *HedgingConfig) (*http.Response, error) {
+	requestStart := time.Now()
+
+	var delay time.Duration
+
+	cfg := GetRequestConfig(req.Context())
+	switch {
+	case cfg != nil && cfg.HedgingDelayOverride != nil:
+		delay = *cfg.HedgingDelayOverride
+	case pipeHedging != nil && pipeHedging.DynamicHedging != nil:
+		delay = pipeHedging.DynamicHedging.ComputeDelay()
+	case pipeHedging != nil:
+		delay = pipeHedging.DefaultDelay
+	default:
+		delay = c.network.HedgingDelay
+	}
+
+	var (
+		resp *http.Response
+		err  error
+	)
+
+	if delay > 0 {
+		resp, err = c.dispatchHedgingAttempts(req, delay)
+	} else {
+		resp, err = c.engine.Do(req)
+	}
+
+	var tracker *RTTTracker
+	if pipeHedging != nil && pipeHedging.DynamicHedging != nil {
+		tracker = pipeHedging.DynamicHedging.Tracker
+	} else if c.network.DynamicHedging != nil {
+		tracker = c.network.DynamicHedging.Tracker
+	}
+
+	if tracker != nil && err == nil {
+		rtt := time.Since(requestStart)
+		tracker.Record(rtt)
+	}
+
+	return resp, err
+}
+
+func (c *Client) dispatchHedgingAttempts(req *http.Request, delay time.Duration) (*http.Response, error) {
+	type result struct {
+		resp *http.Response
+		err  error
+	}
+
+	resultsCh := make(chan result, 2)
+	ctx := req.Context()
+	ctx1, cancel1 := context.WithCancel(ctx)
+	ctx2, cancel2 := context.WithCancel(ctx)
+
+	var (
+		cleaned bool
+		mu      sync.Mutex
+	)
+
+	cleanup := func(winner int) {
+		mu.Lock()
+		defer mu.Unlock()
+
+		if cleaned {
+			return
+		}
+
+		cleaned = true
+
+		switch winner {
+		case 1:
+			cancel2()
+		case 2:
+			cancel1()
+		default:
+			cancel1()
+			cancel2()
+		}
+	}
+	defer func() { cleanup(0) }()
+
+	cloneReq := func(orig *http.Request, reqCtx context.Context) (*http.Request, error) {
+		cloned := orig.Clone(reqCtx)
+		if orig.Body != nil && orig.Body != http.NoBody {
+			if orig.GetBody != nil {
+				body, err := orig.GetBody()
+				if err != nil {
+					return nil, err
+				}
+
+				cloned.Body = body
+			} else {
+				return nil, errors.New("aoni: request body cannot be duplicated for hedging")
+			}
+		}
+
+		return cloned, nil
+	}
+
+	req1, err := cloneReq(req, ctx1)
+	if err != nil {
+		return nil, err
+	}
+
+	go func() {
+		resp, err := c.engine.Do(req1) //nolint:bodyclose
+		resultsCh <- result{resp: resp, err: err}
+	}()
+
+	timer := time.NewTimer(delay)
+	defer timer.Stop()
+
+	var (
+		req2Started bool
+		firstErr    error
+	)
+
+	activeCount := 1
+
+	for activeCount > 0 {
+		select {
+		case res := <-resultsCh:
+			activeCount--
+
+			if res.err == nil {
+				winner := 1
+
+				cancelWinner := cancel1
+				if res.resp.Request != nil && res.resp.Request.Context() == ctx2 {
+					winner = 2
+					cancelWinner = cancel2
+				}
+
+				cleanup(winner)
+
+				res.resp.Body = &contextCancelingReadCloser{
+					ReadCloser: res.resp.Body,
+					cancel:     cancelWinner,
+				}
+
+				return res.resp, nil
+			}
+
+			if firstErr == nil {
+				firstErr = res.err
+			}
+
+			if activeCount == 0 && !req2Started {
+				timer.Stop()
+
+				select {
+				case <-timer.C:
+				default:
+				}
+
+				req2Started = true
+
+				req2, err := cloneReq(req, ctx2)
+				if err != nil {
+					return nil, err
+				}
+
+				activeCount++
+
+				go func() {
+					resp, err := c.engine.Do(req2) //nolint:bodyclose
+					resultsCh <- result{resp: resp, err: err}
+				}()
+			}
+
+		case <-timer.C:
+			if !req2Started {
+				req2Started = true
+
+				req2, err := cloneReq(req, ctx2)
+				if err != nil {
+					break
+				}
+
+				activeCount++
+
+				go func() {
+					resp, err := c.engine.Do(req2) //nolint:bodyclose
+					resultsCh <- result{resp: resp, err: err}
+				}()
+			}
+
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		}
+	}
+
+	return nil, firstErr
 }
 
 // CloseIdleConnections closes any idle keep-alive connections maintained by the client.
@@ -1030,30 +1659,6 @@ func (c *Client) CloseIdleConnections() {
 	if httpClient, ok := c.engine.(*http.Client); ok {
 		httpClient.CloseIdleConnections()
 	}
-}
-
-func (c *Client) rebuildChain() {
-	if c.defaults.PipelineWrapper != nil {
-		c.http = c.defaults.PipelineWrapper(c, c.engine)
-		return
-	}
-
-	doer := c.engine
-
-	doer = ResponseSizeLimitMiddleware(c.defaults.MaxResponseSize)(doer)
-	doer = DecompressionAndTranscodingMiddleware()(doer)
-	doer = MultiReadBodyMiddleware(c.defaults.MultiReadThreshold, c.defaults.MultiReadDisableDisk)(doer)
-	doer = FinalizerMiddleware()(doer)
-	doer = ResponseValidationMiddleware()(doer)
-	doer = RefererAutomatonMiddleware(c.defaults.RefererAutomaton, c.defaults.RefererState)(doer)
-	doer = HedgingMiddleware(c.network.HedgingDelay, c.network.DynamicHedging)(doer)
-	doer = ChallengeSolverMiddleware(c.defaults.ChallengeSolver, c.defaults.ChallengeDetector)(doer)
-	doer = InspectorMiddleware(c.defaults.Inspector)(doer)
-	doer = PacketPaddingMiddleware(c.fingerprint.PacketPadding)(doer)
-	doer = HooksMiddleware(c.defaults.BeforeRequest, c.defaults.AfterResponse)(doer)
-	doer = ContextMiddleware(c)(doer)
-
-	c.http = doer
 }
 
 func (c *Client) applyDialers() {
@@ -1076,7 +1681,7 @@ func (c *Client) applyDialers() {
 				return nil, err
 			}
 
-			return happyEyeballsDial(
+			return cleanDialContext(
 				ctx,
 				network,
 				addr,
@@ -1104,7 +1709,7 @@ func (c *Client) applyDialers() {
 				}
 
 				// Dial the raw TCP connection.
-				rawConn, err := happyEyeballsDial(
+				rawConn, err := cleanDialContext(
 					ctx,
 					network,
 					addr,
@@ -1144,7 +1749,7 @@ func (c *Client) applyDialers() {
 
 // determineProxy resolves the effective proxy for req using three-tier priority:
 //  1. Per-request [WithProxyOverride] stored in the request context.
-//  2. Client-level proxy set via [Client.WithProxy].
+//  2. Client-level proxy set via [WithClientProxy].
 //  3. System environment variables (HTTP_PROXY / HTTPS_PROXY).
 //
 // It is the single source of truth for proxy resolution inside the client and
@@ -1180,8 +1785,8 @@ func dialTLSWithUTLS(
 	}
 
 	ssrfGuard := false
-
 	delay := 300 * time.Millisecond
+
 	if cfg != nil {
 		ssrfGuard = cfg.SSRFGuard
 		delay = cfg.HappyEyeballsDelay
@@ -1209,7 +1814,7 @@ func dialTLSWithUTLS(
 	if proxyURL != nil {
 		conn, err = dialViaProxy(ctx, network, host, port, proxyURL)
 	} else {
-		conn, err = happyEyeballsDial(ctx, network, addr, delay, ssrfGuard, sourceRotator, dnsResolver)
+		conn, err = cleanDialContext(ctx, network, addr, delay, ssrfGuard, sourceRotator, dnsResolver)
 	}
 
 	if err != nil {
@@ -1460,8 +2065,15 @@ func wrapConn(ctx context.Context, conn net.Conn) net.Conn {
 		}
 	}
 
-	if fCfg, ok := ctx.Value(fragmentCtxKey{}).(FragmentConfig); ok && fCfg.ChunkSize > 0 {
-		conn = wrapWithFragmentation(conn, fCfg)
+	var fCfg *FragmentConfig
+	if cfg != nil && cfg.Fragment != nil {
+		fCfg = cfg.Fragment
+	} else if val, ok := ctx.Value(fragmentCtxKey{}).(FragmentConfig); ok {
+		fCfg = &val
+	}
+
+	if fCfg != nil && fCfg.ChunkSize > 0 {
+		conn = wrapWithFragmentation(conn, *fCfg)
 	}
 
 	return conn
@@ -1510,7 +2122,7 @@ func makeDialerControl(ctx context.Context) func(network, address string, rc sys
 	}
 }
 
-func happyEyeballsDial(
+func cleanDialContext(
 	ctx context.Context,
 	network, addr string,
 	delay time.Duration,
@@ -1523,8 +2135,8 @@ func happyEyeballsDial(
 		return nil, err
 	}
 
-	if cfg, ok := ctx.Value(hostRewriteCtxKey{}).(*HostRewriteConfig); ok && cfg != nil {
-		if rewritten, exists := cfg.Rules[host]; exists {
+	if rules := HostRewriteRules(ctx); len(rules) > 0 {
+		if rewritten, exists := rules[host]; exists {
 			if newHost, newPort, err := net.SplitHostPort(rewritten); err == nil {
 				host = newHost
 
@@ -1553,109 +2165,31 @@ func happyEyeballsDial(
 		return nil, err
 	}
 
-	var filtered []net.IP
+	// Explicitly perform SSRF checks on resolved IP addresses prior to dialing
 	for _, ia := range addrs {
 		if ssrfGuard && isBlockedIP(ia.IP) {
-			continue
-		}
-
-		filtered = append(filtered, ia.IP)
-	}
-
-	if len(filtered) == 0 {
-		return nil, fmt.Errorf("%w: %s resolves to blocked or empty IPs", ErrSSRFBlocked, host)
-	}
-
-	if len(filtered) == 1 || delay <= 0 {
-		dialer := &net.Dialer{Timeout: 30 * time.Second}
-		if rotator != nil {
-			dialer.LocalAddr = &net.TCPAddr{IP: rotator.Next()}
-		}
-
-		dialer.Control = makeDialerControl(ctx)
-
-		conn, err := dialer.DialContext(ctx, network, net.JoinHostPort(filtered[0].String(), port))
-		if err != nil {
-			return nil, err
-		}
-
-		return wrapConn(ctx, conn), nil
-	}
-
-	type dialResult struct {
-		conn net.Conn
-		err  error
-	}
-
-	resultCh := make(chan dialResult, len(filtered))
-
-	dialCtx, cancelAll := context.WithCancel(ctx)
-	defer cancelAll()
-
-	var (
-		wg   sync.WaitGroup
-		done uint32
-	)
-
-	for i, ip := range filtered {
-		wg.Add(1)
-
-		go func(targetIP net.IP, idx int) {
-			defer wg.Done()
-
-			if idx > 0 {
-				select {
-				case <-dialCtx.Done():
-					return
-				case <-time.After(time.Duration(idx) * delay):
-				}
-			}
-
-			if atomic.LoadUint32(&done) == 1 {
-				return
-			}
-
-			dialer := &net.Dialer{Timeout: 30 * time.Second}
-			dialer.Control = makeDialerControl(dialCtx)
-
-			conn, err := dialer.DialContext(dialCtx, network, net.JoinHostPort(targetIP.String(), port))
-			if err == nil {
-				if atomic.CompareAndSwapUint32(&done, 0, 1) {
-					resultCh <- dialResult{conn: conn}
-
-					cancelAll()
-				} else {
-					_ = conn.Close()
-				}
-			} else {
-				resultCh <- dialResult{err: err}
-			}
-		}(ip, i)
-	}
-
-	var firstErr error
-
-	failedCount := 0
-
-	for {
-		select {
-		case <-ctx.Done():
-			return nil, ctx.Err()
-		case res := <-resultCh:
-			if res.conn != nil {
-				return wrapConn(ctx, res.conn), nil
-			}
-
-			if firstErr == nil {
-				firstErr = res.err
-			}
-
-			failedCount++
-			if failedCount == len(filtered) {
-				return nil, firstErr
-			}
+			return nil, fmt.Errorf("%w: blocked IP %s", ErrSSRFBlocked, ia.IP)
 		}
 	}
+
+	// Delegate connection creation to the standard net.Dialer
+	dialer := &net.Dialer{
+		Timeout:       30 * time.Second,
+		FallbackDelay: delay,
+	}
+
+	if rotator != nil {
+		dialer.LocalAddr = &net.TCPAddr{IP: rotator.Next()}
+	}
+
+	dialer.Control = makeDialerControl(ctx)
+
+	conn, err := dialer.DialContext(ctx, network, net.JoinHostPort(host, port))
+	if err != nil {
+		return nil, err
+	}
+
+	return wrapConn(ctx, conn), nil
 }
 
 // dialViaProxy connects to a target host through a SOCKS5 proxy, performing DNS
@@ -1889,14 +2423,3 @@ func forceALPN(extensions []utls.TLSExtension, protos []string) []utls.TLSExtens
 
 	return filtered
 }
-
-type noopLogger struct{}
-
-func (l noopLogger) Debug(_ string, _ ...any)                           {}
-func (l noopLogger) DebugContext(_ context.Context, _ string, _ ...any) {}
-func (l noopLogger) Info(_ string, _ ...any)                            {}
-func (l noopLogger) InfoContext(_ context.Context, _ string, _ ...any)  {}
-func (l noopLogger) Warn(_ string, _ ...any)                            {}
-func (l noopLogger) WarnContext(_ context.Context, _ string, _ ...any)  {}
-func (l noopLogger) Error(_ string, _ ...any)                           {}
-func (l noopLogger) ErrorContext(_ context.Context, _ string, _ ...any) {}

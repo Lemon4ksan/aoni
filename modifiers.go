@@ -6,7 +6,6 @@ package aoni
 
 import (
 	"bytes"
-	"context"
 	"crypto/tls"
 	"encoding/json"
 	"errors"
@@ -279,7 +278,7 @@ func WithOrigin(origin string) RequestModifier {
 
 // WithDebug returns a [RequestModifier] that tags the request for
 // verbose logging. The [Client] must have a [Logger] set via
-// [Client.WithLogger] for output to appear.
+// [WithClientLogger] for output to appear.
 func WithDebug() RequestModifier {
 	return func(req *http.Request) {
 		getOrInitRequestConfig(req).Debug = true
@@ -287,7 +286,7 @@ func WithDebug() RequestModifier {
 }
 
 // WithDecoder overrides the response [Decoder] for this request.
-// The client-level decoder set via [Client.WithBaseResponse] is
+// The client-level decoder set via [WithClientBaseResponse] is
 // ignored when this modifier is present.
 func WithDecoder(d Decoder) RequestModifier {
 	return func(req *http.Request) {
@@ -466,7 +465,6 @@ func (c *Client) WithHTTP3Config(config *QUICMigrationConfig) *Client {
 	newClient.engine = &http.Client{
 		Transport: rt,
 	}
-	newClient.rebuildChain()
 
 	return newClient
 }
@@ -496,7 +494,7 @@ func WithALPN(protocols []string) RequestModifier {
 }
 
 // WithP0fSignature returns a [RequestModifier] that stores a p0f signature
-// in the request context. When used with [Client.WithP0fSignature], the
+// in the request context. When used with [WithClientP0fSignature], the
 // TCP/IP fields (TTL, DF, window size) are spoofed to match the specified OS.
 func WithP0fSignature(sig *p0f.Signature) RequestModifier {
 	return func(req *http.Request) {
@@ -504,15 +502,12 @@ func WithP0fSignature(sig *p0f.Signature) RequestModifier {
 	}
 }
 
-// WithTimeout overrides the deadline for this individual request by deriving
-// a child context with the given duration. It does not affect the client-level
-// timeout configured via [Client.WithTimeout].
+// WithTimeout overrides the deadline for this individual request by setting
+// a request-specific timeout duration. It does not affect the client-level
+// timeout configured via [WithClientTimeout].
 func WithTimeout(d time.Duration) RequestModifier {
 	return func(req *http.Request) {
-		ctx, cancel := context.WithTimeout(req.Context(), d) //nolint:gosec
-		cfg := getOrInitRequestConfig(req)
-		cfg.RequestTimeoutCancel = cancel
-		*req = *req.WithContext(ctx)
+		getOrInitRequestConfig(req).TimeoutOverride = d
 	}
 }
 

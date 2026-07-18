@@ -5,6 +5,7 @@
 package aoni
 
 import (
+	"bufio"
 	"bytes"
 	"encoding/json"
 	"encoding/xml"
@@ -111,10 +112,33 @@ type JSONDecoderConfig struct {
 	UseNumber bool
 }
 
+func stripBOM(r io.Reader) io.Reader {
+	br, ok := r.(*bufio.Reader)
+	if !ok {
+		br = bufio.NewReader(r)
+	}
+
+	if peek, err := br.Peek(3); err == nil {
+		if len(peek) >= 3 && peek[0] == 0xEF && peek[1] == 0xBB && peek[2] == 0xBF {
+			_, _ = br.Discard(3)
+			return br
+		}
+	}
+
+	if peek, err := br.Peek(2); err == nil {
+		if (len(peek) >= 2 && peek[0] == 0xFE && peek[1] == 0xFF) ||
+			(len(peek) >= 2 && peek[0] == 0xFF && peek[1] == 0xFE) {
+			_, _ = br.Discard(2)
+		}
+	}
+
+	return br
+}
+
 // NewJSONDecoder creates a custom [Decoder] configured with the specified parameters.
 func NewJSONDecoder(cfg JSONDecoderConfig) Decoder {
 	return DecoderFunc(func(r io.Reader, target any) error {
-		dec := json.NewDecoder(r)
+		dec := json.NewDecoder(stripBOM(r))
 		if cfg.DisallowUnknownFields {
 			dec.DisallowUnknownFields()
 		}
@@ -129,17 +153,17 @@ func NewJSONDecoder(cfg JSONDecoderConfig) Decoder {
 
 // JSONDecoder parses the response body as JSON into target.
 var JSONDecoder Decoder = DecoderFunc(func(r io.Reader, target any) error {
-	return json.NewDecoder(r).Decode(target)
+	return json.NewDecoder(stripBOM(r)).Decode(target)
 })
 
 // XMLDecoder parses the response body as XML into target.
 var XMLDecoder Decoder = DecoderFunc(func(r io.Reader, target any) error {
-	return xml.NewDecoder(r).Decode(target)
+	return xml.NewDecoder(stripBOM(r)).Decode(target)
 })
 
 // YAMLDecoder parses the response body as YAML into target.
 var YAMLDecoder Decoder = DecoderFunc(func(r io.Reader, target any) error {
-	return yaml.NewDecoder(r).Decode(target)
+	return yaml.NewDecoder(stripBOM(r)).Decode(target)
 })
 
 // WithRawDecoder returns a [RequestModifier] that uses [RawDecoder].

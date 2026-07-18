@@ -10,7 +10,6 @@ import (
 	"io"
 	"net/http"
 	"os"
-	"runtime"
 	"strings"
 	"sync"
 	"testing"
@@ -228,7 +227,7 @@ func TestMultiReadBody_FileCleanup(t *testing.T) {
 	assert.True(t, os.IsNotExist(err))
 }
 
-func TestFinalizerReadCloser_CallsReallyClose(t *testing.T) {
+func TestResponseBodyReadCloser_CallsReallyClose(t *testing.T) {
 	t.Parallel()
 
 	data := strings.Repeat("y", 64*1024)
@@ -241,7 +240,7 @@ func TestFinalizerReadCloser_CallsReallyClose(t *testing.T) {
 	require.NotNil(t, mrc.tmpFile)
 	tmpPath := mrc.tmpFile.Name()
 
-	frc := newFinalizerReadCloser(mrb)
+	frc := newResponseBodyReadCloser(mrb)
 
 	err = frc.Close()
 	require.NoError(t, err)
@@ -366,29 +365,6 @@ func (r *threadSafeReader) Read(p []byte) (int, error) {
 	r.pos += n
 
 	return n, nil
-}
-
-func TestMultiReadBody_GC_FinalizerCleanup(t *testing.T) {
-	if testing.Short() {
-		t.Skip("skipping GC test in short mode")
-	}
-
-	data := strings.Repeat("z", 64*1024)
-
-	for range 5 {
-		body := io.NopCloser(strings.NewReader(data))
-		mrb, _ := newMultiReadBody(body, 32*1024, false)
-		mrc := mrb.(*multiReadBody)
-
-		buf := make([]byte, 1024)
-		_, _ = mrc.Read(buf)
-
-		_ = mrc
-	}
-
-	runtime.GC()
-	runtime.Gosched()
-	time.Sleep(100 * time.Millisecond)
 }
 
 func TestStreamWithBody(t *testing.T) {

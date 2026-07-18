@@ -10,8 +10,6 @@ import (
 	"net/http"
 )
 
-type hostRewriteCtxKey struct{}
-
 // HostRewriteConfig holds the configuration for host rewrite.
 type HostRewriteConfig struct {
 	Rules map[string]string
@@ -20,9 +18,7 @@ type HostRewriteConfig struct {
 // WithHostRewrite returns a RequestModifier that rewrites the host header based on the provided rules.
 func WithHostRewrite(rules map[string]string) RequestModifier {
 	return func(req *http.Request) {
-		cfg := &HostRewriteConfig{Rules: rules}
-		ctx := context.WithValue(req.Context(), hostRewriteCtxKey{}, cfg)
-		*req = *req.WithContext(ctx)
+		getOrInitRequestConfig(req).HostRewrite = &HostRewriteConfig{Rules: rules}
 	}
 }
 
@@ -30,29 +26,25 @@ func WithHostRewrite(rules map[string]string) RequestModifier {
 // HostRewriteConfig in the request context, or creates a new one if none are present.
 func AppendHostRewrite(rules map[string]string) RequestModifier {
 	return func(req *http.Request) {
-		var existing *HostRewriteConfig
-		if val, ok := req.Context().Value(hostRewriteCtxKey{}).(*HostRewriteConfig); ok && val != nil {
-			existing = val
-		}
+		cfg := getOrInitRequestConfig(req)
 
 		newRules := make(map[string]string)
-		if existing != nil && existing.Rules != nil {
-			maps.Copy(newRules, existing.Rules)
+		if cfg.HostRewrite != nil && cfg.HostRewrite.Rules != nil {
+			maps.Copy(newRules, cfg.HostRewrite.Rules)
 		}
 
 		maps.Copy(newRules, rules)
 
-		cfg := &HostRewriteConfig{Rules: newRules}
-		ctx := context.WithValue(req.Context(), hostRewriteCtxKey{}, cfg)
-		*req = *req.WithContext(ctx)
+		cfg.HostRewrite = &HostRewriteConfig{Rules: newRules}
 	}
 }
 
 // HostRewriteRules extracts and returns the active host rewrite rules map from the given context.
 // Returns nil if no rules are configured in the context.
 func HostRewriteRules(ctx context.Context) map[string]string {
-	if cfg, ok := ctx.Value(hostRewriteCtxKey{}).(*HostRewriteConfig); ok && cfg != nil {
-		return cfg.Rules
+	cfg := GetRequestConfig(ctx)
+	if cfg != nil && cfg.HostRewrite != nil {
+		return cfg.HostRewrite.Rules
 	}
 
 	return nil

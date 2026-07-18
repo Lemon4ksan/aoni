@@ -6,11 +6,9 @@ package aoni
 
 import (
 	"bytes"
-	"crypto/tls"
 	"fmt"
 	"io"
 	"net/http"
-	"net/http/httptrace"
 	"os"
 	"strings"
 	"time"
@@ -53,6 +51,11 @@ type TraceInfo struct {
 	// JA4 holds the JA4 fingerprints computed during the request.
 	// Populated only when [TraceJA4] is used as a request modifier.
 	JA4 *ja4.Report
+
+	dnsStart     time.Time
+	connectStart time.Time
+	tlsStart     time.Time
+	gotConn      time.Time
 }
 
 // Start begins tracking total and content transfer timings.
@@ -82,36 +85,16 @@ func (t *TraceInfo) Start() func(resp *http.Response) {
 // Timing metrics are populated inside the provided [TraceInfo] structure.
 func Trace(target *TraceInfo) RequestModifier {
 	return func(req *http.Request) {
-		var dnsStart, connectStart, tlsStart, gotConn time.Time
-
-		trace := &httptrace.ClientTrace{
-			DNSStart:          func(_ httptrace.DNSStartInfo) { dnsStart = time.Now() },
-			DNSDone:           func(_ httptrace.DNSDoneInfo) { target.DNSLookup = time.Since(dnsStart) },
-			ConnectStart:      func(_, _ string) { connectStart = time.Now() },
-			ConnectDone:       func(_, _ string, _ error) { target.TCPConn = time.Since(connectStart) },
-			TLSHandshakeStart: func() { tlsStart = time.Now() },
-			TLSHandshakeDone:  func(_ tls.ConnectionState, _ error) { target.TLSHandshake = time.Since(tlsStart) },
-			GotConn: func(info httptrace.GotConnInfo) {
-				gotConn = time.Now()
-
-				if info.Conn != nil && info.Conn.RemoteAddr() != nil {
-					target.RemoteAddr = info.Conn.RemoteAddr().String()
-				}
-			},
-			GotFirstResponseByte: func() { target.ServerProcessing = time.Since(gotConn) },
-		}
-
-		newReq := req.WithContext(httptrace.WithClientTrace(req.Context(), trace))
-		*req = *newReq
+		getOrInitRequestConfig(req).TraceInfo = target
 	}
 }
 
 // TraceJA4 returns a [RequestModifier] that populates the JA4 field of the provided [TraceInfo].
-// It sets up a shared store in the request context so that [Client.WithTLSFingerprint] can write
+// It sets up a shared store in the request context so that [WithClientTLSFingerprint] can write
 // the TLS fingerprint during the handshake, and computes the HTTP fingerprint from request headers.
 //
 // The JA4 report is fully populated after the request completes. The TLS fingerprint (JA4)
-// requires [Client.WithTLSFingerprint] to be enabled.
+// requires [WithClientTLSFingerprint] to be enabled.
 //
 // Use this modifier alongside [Trace] for complete timing and fingerprint data:
 //

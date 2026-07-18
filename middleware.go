@@ -369,8 +369,7 @@ func (cb *CircuitBreaker) getBreaker(host string) *breaker.CircuitBreaker[any] {
 	return b
 }
 
-// DefaultCircuitBreakerCondition returns true for network errors and
-// HTTP status codes >= 500.
+// DefaultCircuitBreakerCondition returns true for network errors and HTTP status codes >= 500.
 func DefaultCircuitBreakerCondition(resp *http.Response, err error) bool {
 	if err != nil {
 		return true

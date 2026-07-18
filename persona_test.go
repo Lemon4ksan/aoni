@@ -23,7 +23,7 @@ func TestClientWithPersona(t *testing.T) {
 	assert.Equal(
 		t,
 		"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-		c2.UserAgent(),
+		c2.Defaults().Headers.Get("User-Agent"),
 	)
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

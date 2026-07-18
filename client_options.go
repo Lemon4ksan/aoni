@@ -689,10 +689,35 @@ func WithClientEngine(engine HTTPDoer) ClientOption {
 	}
 }
 
-// WithClientPipelineWrapper registers a wrapper function that intercepts or wraps
-// the entire default middleware pipeline.
-func WithClientPipelineWrapper(wrapper func(c *Client, engine HTTPDoer) HTTPDoer) ClientOption {
+// WithClientPipeline configures the client-level default pipeline settings.
+func WithClientPipeline(pipe PipelineConfig) ClientOption {
 	return func(c *Client) {
-		c.defaults.PipelineWrapper = wrapper
+		c.defaults.Pipeline = pipe
+	}
+}
+
+// WithClientUARotationProfiles sets the list of browser profiles for User-Agent rotation.
+func WithClientUARotationProfiles(profiles []BrowserProfile) ClientOption {
+	return func(c *Client) {
+		c.defaults.UARotationProfiles = profiles
+	}
+}
+
+// WithMultiReadBody returns a [RequestModifier] that overrides the
+// body caching threshold for a single request. Responses smaller
+// than threshold are buffered in memory so the body can be read
+// multiple times. A value <= 0 disables caching for the request.
+func WithMultiReadBody(threshold int64) RequestModifier {
+	return func(req *http.Request) {
+		getOrInitRequestConfig(req).MultiReadThreshold = threshold
+	}
+}
+
+// WithMultiReadDisableDisk returns a [RequestModifier] that overrides the
+// body caching disk-fallback setting for a single request. If disable is true,
+// exceeding the memory threshold returns an error ([ErrBufferLimitExceeded]) instead of creating temporary files.
+func WithMultiReadDisableDisk(disable bool) RequestModifier {
+	return func(req *http.Request) {
+		getOrInitRequestConfig(req).MultiReadDisableDisk = disable
 	}
 }

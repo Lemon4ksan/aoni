@@ -63,7 +63,7 @@ func GetProxyOverride(ctx context.Context) generic.Optional[string] {
 //
 // Only takes effect when the underlying transport honours [GetInsecureSkipVerify].
 // The built-in [Client] wires this automatically for uTLS connections (see
-// [Client.WithTLSFingerprint]) and plain [http.Transport] connections.
+// [WithClientTLSFingerprint]) and plain [http.Transport] connections.
 //
 //nolint:gosec
 func WithInsecureSkipVerify() RequestModifier {

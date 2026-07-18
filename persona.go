@@ -163,8 +163,6 @@ func (c *Client) WithTLSClientHelloID(id utls.ClientHelloID) *Client {
 		}
 	}
 
-	newClient.rebuildChain()
-
 	return newClient
 }
 
@@ -182,8 +180,6 @@ func (c *Client) WithPersona(p Persona) *Client {
 		framed := NewH2FramedTransport(transport, p.H2Settings, p.HeaderOrder...)
 		if httpClient, ok := newClient.engine.(*http.Client); ok {
 			httpClient.Transport = framed
-
-			newClient.rebuildChain()
 		}
 	}
 

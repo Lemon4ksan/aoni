@@ -25,7 +25,7 @@ var (
 	ErrChallengeRequired = errors.New("aoni: challenge verification required")
 
 	// ErrResponseTooLarge indicates the response exceeded the size
-	// limit configured via [Client.WithMaxResponseSize].
+	// limit configured via [WithClientMaxResponseSize].
 	ErrResponseTooLarge = errors.New("aoni: response size limit exceeded")
 
 	// ErrBufferLimitExceeded indicates the replayable buffer exceeded its memory threshold,
@@ -34,7 +34,7 @@ var (
 
 	// ErrSSRFBlocked indicates the request was blocked because the
 	// target resolved to a private or loopback address. Returned by
-	// [Client.Request] when [Client.WithSSRFGuard] is enabled.
+	// [Client.Request] when [WithClientSSRFGuard] is enabled.
 	ErrSSRFBlocked = errors.New("aoni: request blocked by SSRF guard")
 )
 
@@ -128,4 +128,24 @@ func wrapDNSError(host, resolver, endpoint string, err error) error {
 		Err:       err,
 		IsTimeout: isTimeout,
 	}
+}
+
+// BridgeError represents an error occurring during standard-client bridging.
+// It implements the standard error interface and can be unwrapped to retrieve
+// the underlying client or transport errors.
+type BridgeError struct {
+	Op       string
+	URL      string
+	Err      error
+	Metadata map[string]any
+}
+
+// Error implements the standard error interface.
+func (e *BridgeError) Error() string {
+	return fmt.Sprintf("aoni bridge: %s %s: %v", e.Op, e.URL, e.Err)
+}
+
+// Unwrap returns the underlying wrapped error.
+func (e *BridgeError) Unwrap() error {
+	return e.Err
 }

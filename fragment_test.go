@@ -149,13 +149,12 @@ func TestWithFragmentation_ContextVerification(t *testing.T) {
 
 	mod(req)
 
-	val := req.Context().Value(fragmentCtxKey{})
+	val := GetRequestConfig(req.Context())
 	require.NotNil(t, val)
+	require.NotNil(t, val.Fragment)
 
-	extracted, ok := val.(FragmentConfig)
-	require.True(t, ok)
-	assert.Equal(t, 42, extracted.ChunkSize)
-	assert.Equal(t, 15*time.Millisecond, extracted.MaxDelay)
+	assert.Equal(t, 42, val.Fragment.ChunkSize)
+	assert.Equal(t, 15*time.Millisecond, val.Fragment.MaxDelay)
 }
 
 func TestNewFragmentedConn(t *testing.T) {

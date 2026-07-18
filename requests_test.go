@@ -15,6 +15,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/lemon4ksan/miyako/log"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -545,7 +546,7 @@ func TestClient_BaseResponseProvider(t *testing.T) {
 
 // Helpers for logger mocking inside diagnostic tests.
 type mockLoggerWriter struct {
-	noopLogger
+	log.DiscardType
 	out io.Writer
 }
 

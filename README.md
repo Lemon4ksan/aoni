@@ -116,40 +116,49 @@ resp, err := client.Get(ctx, "/raw-data")
 </tr>
 </table>
 
-## 🧱 Custom Middlewares & Pipeline Customization
+## 🧱 Pipeline Architecture & Declarative Configuration
 
-`aoni` uses a modular pipeline architecture. The client's core request execution is composed of 12 decoupled, standard Go middlewares wrapped around the raw HTTP engine. 
+`aoni` uses a modular request pipeline. The client's core request execution is composed of sequential stages governed by a declarative `PipelineConfig` applied directly inside the request loop.
 
-### Custom Pipeline Wrapper
-You can customize, reorder, or completely replace the default middleware chain using `WithClientPipelineWrapper`:
+### Declarative Pipeline Configuration
+You can customize the pipeline declarative settings at the client level using `WithClientPipeline`:
 
 ```go
 client := aoni.NewClient(nil,
-	aoni.WithClientPipelineWrapper(func(c *aoni.Client, engine aoni.HTTPDoer) aoni.HTTPDoer {
-		// Build your own custom pipeline, injecting custom logic or reordering stages
-		return aoni.Chain(engine,
-			aoni.InspectorMiddleware(c.Inspector()),
-			aoni.ResponseValidationMiddleware(),
-		)
+	aoni.WithClientPipeline(aoni.PipelineConfig{
+		Decompress: true,
+		Challenge:  true,
+		Validate:   true,
+		Inspect:    true,
 	}),
 )
 ```
 
-### Specialized Built-In Middlewares
-In addition to internal core middlewares, `aoni` provides 6 specialized middlewares for advanced evasion, resilience, and auditing:
+Or override the entire pipeline configuration on a single request using `WithPipeline`:
 
-1. **`UserAgentAndHintsRotationMiddleware`** (Stealth & Evasion)
+```go
+resp, err := client.Get(ctx, "/path", aoni.WithPipeline(aoni.PipelineConfig{
+	RotateUA:   true,
+	Decompress: false,
+}))
+```
+
+### Core Pipeline Configuration Stages
+
+The `PipelineConfig` allows configuring the following specialized stages for advanced evasion, resilience, and auditing:
+
+1. **User Agent & Client Hints Rotation (`RotateUA: true`)**
    Rotates both the `User-Agent` and matching `Sec-CH-UA-*` client hints consistently on every request to prevent browser fingerprint mismatches.
-2. **`DPIJitterMiddleware`** (Stealth & Evasion)
+2. **DPI Jitter (`DPIJitter`)**
    Introduces a randomized delay (jitter) between writing request headers and body, confusing Deep Packet Inspection (DPI) timing analysis.
-3. **`ProxyFailoverMiddleware`** (Resilience)
+3. **Proxy Failover (`ProxyFailover`)**
    Transparently switches proxy servers from a pool and retries request execution if the primary proxy fails with a connection error or `502`/`503` status.
-4. **`CacheMiddleware`** (Performance & Resilience)
+4. **Caching (`Cache`)**
    RFC-7234 compliant HTTP caching for `GET` requests. Saves requests to a thread-safe `InMemoryCacheStore` or custom `CacheStore` backend.
-5. **`SensitiveDataRedactorMiddleware`** (Security & Auditing)
-   Redacts sensitive headers (e.g. `Authorization`, `Cookie`) in context before they are passed to the `TrafficInspector` or debug loggers, replacing values with `[REDACTED]`.
-6. **`HARGeneratorMiddleware`** (Auditing)
-   Captures full request-response exchanges (including timings and response bodies) and records them to a `HARGenerator` for exporting standard HTTP Archive (HAR) JSON logs.
+5. **Sensitive Data Redaction (`Redact`)**
+   Redacts sensitive headers (e.g. `Authorization`, `Cookie`) before they are passed to traffic inspectors or loggers, replacing values with `[REDACTED]`.
+6. **HAR Logging (`HAR`)**
+   Captures full request-response exchanges (including timings and response bodies) and records them to a `HARConfig` for exporting standard HTTP Archive (HAR) JSON logs.
 
 ## 📊 Feature Matrix
 
@@ -365,16 +374,59 @@ user, err := aoni.GetTo[User](ctx, client, "/users/1")
 // If API returns {"success":true,"data":{"name":"Alice"}}, user.Name == "Alice"
 ```
 
-## 📦 Subpackages
+## 📦 Subpackages & How They Work Under the Hood
 
-| Package | Import path | Description |
-| :--- | :--- | :--- |
-| **ws** | `github.com/lemon4ksan/aoni/ws` | WebSocket dialing over uTLS and HTTP/2 Extended CONNECT (RFC 8441) |
-| **socketio** | `github.com/lemon4ksan/aoni/socketio` | Socket.IO v5 / Engine.IO v4 client with reconnection and namespaces |
-| **inspector** | `github.com/lemon4ksan/aoni/inspector` | Traffic inspector — capture, replay, and export HTTP exchanges |
-| **ja4** | `github.com/lemon4ksan/aoni/ja4` | Pure-Go JA4 / JA4H fingerprint computation |
-| **p0f** | `github.com/lemon4ksan/aoni/p0f` | TCP/IP stack fingerprint signatures (TTL, MSS, window size) |
-| **profiles** | `github.com/lemon4ksan/aoni/profiles` | Pre-built browser TLS + HTTP/2 profiles (Chrome, Firefox) |
+To eliminate the fear of "magic" and explain the exact physics of the process, here is how each subpackage and system in `aoni` works mathematically and algorithmically.
+
+### 🔌 1. `github.com/lemon4ksan/aoni/ws` (WebSocket Transport)
+* **The Physics:** Handshakes WebSocket connections over custom-negotiated TLS or HTTP/2 transport.
+* **Under the Hood:**
+  1. For standard TLS handshakes, it utilizes `uTLS` to spoof browser-specific ClientHello signatures.
+  2. For HTTP/2 Extended CONNECT ([RFC 8441]), instead of opening a raw TCP connection, it sends a single HTTP/2 `CONNECT` request with the `:protocol` pseudo-header set to `websocket`. This multiplexes the WebSocket connection as a single stream inside an existing HTTP/2 connection, completely avoiding extra TCP handshakes and bypassing firewalls.
+
+### 🔄 2. `github.com/lemon4ksan/aoni/socketio` (Socket.IO v5 Client)
+* **The Physics:** Establishes Engine.IO (v4) / Socket.IO (v5) client connections with automatic upgrading and state synchronization.
+* **Under the Hood:**
+  1. **Handshake:** First performs an HTTP handshake via the parent client to negotiate protocol version, obtain a Session ID (`sid`), and determine transport upgrades.
+  2. **Upgrading:** Initiates a parallel WebSocket connection. Once a WebSocket handshake completes successfully, it immediately transitions the active stream from HTTP long polling to WebSocket frames.
+  3. **Liveness:** Spawns a background goroutine that coordinates the ping-pong heartbeat cycle. If a ping response is not received within the `pingTimeout` window, the connection is closed immediately.
+  4. **Reconnection:** Employs an exponential backoff algorithm with randomized jitter to prevent the "thundering herd" problem on the target server.
+
+### 🕵️ 3. `github.com/lemon4ksan/aoni/inspector` (Auditing & Traffic Replay)
+* **The Physics:** Intercepts and replicates HTTP request/response payloads without modifying or locking the active connection.
+* **Under the Hood:**
+  1. When enabled, it captures outgoing request metadata and headers directly.
+  2. For response bodies, it intercepts `resp.Body` and wraps it in a standard `io.TeeReader` coupled to an in-memory buffer. As the caller reads the stream, the data is concurrently mirrored to the buffer.
+  3. When `Close()` is called on the response body, the inspector compiles the captured buffer, metadata, and timing metrics into a standard HTTP Archive (HAR) format transaction log.
+
+### 🧬 4. `github.com/lemon4ksan/aoni/ja4` (JA4/JA4H Fingerprint Engine)
+* **The Physics:** Computes deterministic TLS and HTTP/1.1-2 signatures from active handshakes and request headers.
+* **Under the Hood:**
+  1. **TLS Fingerprint (JA4):** Extracted during the TLS connection callback. It collects supported TLS versions, cipher suites, extensions, and signature algorithms. The list is sorted alphabetically, hashed using SHA-256, and truncated to build a signature string (e.g. `t13d1516h2_8daaf6152771_e5627efa2ab1`).
+  2. **HTTP Fingerprint (JA4H):** Analyzes the raw request structure in Go. It computes a signature based on the HTTP method, protocol version, cookie count, referer headers, language preferences, and the exact order of headers. Header names are joined, hashed using SHA-256, and combined with hashes of header values to build a compliant `JA4H` string.
+
+### 💻 5. `github.com/lemon4ksan/aoni/p0f` (TCP/IP Spoofing)
+* **The Physics:** Spoofs operating system TCP/IP stack fingerprints at the socket level.
+* **Under the Hood:**
+  1. Uses Go's `syscall.RawConn` controller to intercept socket creation.
+  2. Modifies low-level socket options on the file descriptor (`fd`) before the TCP SYN packet is dispatched:
+     - Sets the IPv4 Time-to-Live (TTL) or IPv6 Hop Limit.
+     - Adjusts the TCP Maximum Segment Size (MSS) via `TCP_MAXSEG` socket options.
+     - Configures the TCP Window Size.
+  This ensures passive network scanners recognize the OS stack as matching the chosen browser profile (e.g. Chrome on Windows).
+
+### 📁 6. `github.com/lemon4ksan/aoni/profiles` (Browser Impersonation Profiles)
+* **The Physics:** Synchronizes TLS and HTTP/2 layer configurations to mimic specific browsers.
+* **Under the Hood:**
+  Modern WAFs block connections where uTLS simulates a Chrome TLS fingerprint but the HTTP/2 settings (such as max concurrent streams or initial window size) use Go's default values. `profiles` solves this by matching uTLS specifications and HTTP/2 settings frames statically, aligning all layers to present a consistent browser profile.
+
+### 🏛️ 7. `aoni.Client` & Engine Mechanics (Core Architecture)
+* **The Physics:** Orchestrates the request lifecycle, ensuring thread-safe immutable configuration, custom dialers for WAF evasion, and type-safe response unwrapping.
+* **Under the Hood:**
+  1. **Thread-Safe Immutability:** The `Client` struct is immutable. Every functional option call (e.g. `client.With(aoni.WithClientTimeout(...))`) shallow-copies the client, copies configuration maps/slices, and returns a new pointer. This allows safe, concurrent sharing of a base client across thousands of goroutines with custom overrides per goroutine.
+  2. **Custom TLS Dialing:** Standard Go `net/http` establishes TLS connections using its internal TLS handshake logic. `aoni` swaps this out by registering a custom `DialTLSContext` on the transport level. When dialing a host, it uses `uTLS` to intercept the connection right after the TCP handshake, injecting a custom ClientHello frame (with browser-specific cipher suites, extension ordering, and ALPN lists) before transferring control back to Go's standard HTTP transport engine.
+  3. **WAF Challenge Buffering:** When challenge checking is enabled, `aoni` buffers the first 1024 bytes of the response body into an `ExplicitBufferedBody`. This buffered prefix is passed to the challenge detector to check for Cloudflare/DDoS pages without consuming the stream. If no challenge is found, the body is wrapped in a rewound reader, allowing the user's application to read the body from the very first byte as if no intercept occurred.
+  4. **Generics & Charset Transcoding:** Helper functions like `GetTo[T]` do not just decode raw streams. They inspect the response `Content-Type` header and body prefix to detect legacy text encodings (e.g. Windows-1251, Shift-JIS). If a legacy charset is detected, a transcoding reader is transparently wrapped around the stream to translate the bytes to UTF-8 on the fly before passing it to `JSONDecoder` or `XMLDecoder`.
 
 ## 🎨 Memory & Resource Footprint
 
@@ -382,8 +434,9 @@ While standard clients focus only on raw speed, `aoni` is engineered to protect 
 
 * **Static Heap Footprint:** Maintains an ultra-lean runtime profile, consuming roughly **~1.2 MB** of live heap memory in idle states.
 * **Sync.Pool Recycled Buffers:** Utilizes pooled memory slices for body streaming, JSON parsing, and multipart encoding to keep GC overhead and "GC pauses" to a minimum.
-* **Leak Defense (Finalizers):** Leverages `runtime.SetFinalizer` on critical network responses to automatically release unclosed connections and warn you about resource leaks before file descriptors are exhausted.
+* **Deterministic Resource Cleanup:** Implements a strict, deterministic `responseBodyReadCloser` that automatically calls `ReallyClose()` when the user closes the response body. This instantly deletes any temporary spool files created on disk during body caching without relying on GC finalization or non-deterministic resource cleanup.
 * **Response Bomb Protection:** Enforces strict payload reading limits (e.g. 10MB) via `io.LimitReader` on incoming responses to prevent out-of-memory (OOM) crashes from malicious or unexpectedly massive responses.
+* **Explicit BOM Stripping:** Text-based decoders (JSON, XML, YAML) explicitly strip Byte Order Marks (BOM) via a helper `stripBOM(r io.Reader)` using peek-discard buffers before decoding, preventing data corruption on raw binary streams.
 
 ## ⚖️ Legal & License
 
