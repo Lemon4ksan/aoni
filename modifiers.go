@@ -68,12 +68,12 @@ func WithQuery(query any) RequestModifier {
 			return
 		}
 
-		if err := Validate(query); err != nil {
-			getOrInitRequestConfig(req).QueryError = err
-			return
+		encoder := StructToValues
+		if cfg := GetRequestConfig(req.Context()); cfg != nil && cfg.QueryEncoder != nil {
+			encoder = cfg.QueryEncoder
 		}
 
-		qValues, err := StructToValues(query)
+		qValues, err := encoder(query)
 		if err != nil {
 			getOrInitRequestConfig(req).QueryError = err
 			return
@@ -553,12 +553,12 @@ func WithFormBody(payload any) RequestModifier {
 			return
 		}
 
-		if err := Validate(payload); err != nil {
-			getOrInitRequestConfig(req).BodyError = err
-			return
+		encoder := StructToValues
+		if cfg := GetRequestConfig(req.Context()); cfg != nil && cfg.QueryEncoder != nil {
+			encoder = cfg.QueryEncoder
 		}
 
-		values, err := StructToValues(payload)
+		values, err := encoder(payload)
 		if err != nil {
 			getOrInitRequestConfig(req).BodyError = err
 			return

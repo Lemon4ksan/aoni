@@ -195,60 +195,6 @@ func StructToValues(s any) (url.Values, error) {
 	return values, nil
 }
 
-// Validate checks struct fields for the "validate:required" tag.
-// It returns a [ValidationError] for the first missing required field.
-func Validate(s any) error {
-	if s == nil {
-		return nil
-	}
-
-	v := reflect.ValueOf(s)
-	if v.Kind() == reflect.Pointer {
-		v = v.Elem()
-	}
-
-	if v.Kind() != reflect.Struct {
-		return nil
-	}
-
-	return validateValue(v, "")
-}
-
-func validateValue(v reflect.Value, parent string) error {
-	t := v.Type()
-	for i := 0; i < v.NumField(); i++ {
-		field := t.Field(i)
-		fieldValue := v.Field(i)
-
-		name := field.Name
-		if parent != "" {
-			name = parent + "." + name
-		}
-
-		validateTag := field.Tag.Get("validate")
-		if validateTag == "required" && fieldValue.IsZero() {
-			return &ValidationError{Field: name}
-		}
-
-		if fieldValue.Kind() == reflect.Struct {
-			if err := validateValue(fieldValue, name); err != nil {
-				return err
-			}
-		}
-
-		if fieldValue.Kind() == reflect.Pointer && !fieldValue.IsNil() {
-			elem := fieldValue.Elem()
-			if elem.Kind() == reflect.Struct {
-				if err := validateValue(elem, name); err != nil {
-					return err
-				}
-			}
-		}
-	}
-
-	return nil
-}
-
 func fillValues(v reflect.Value, values url.Values) error {
 	t := v.Type()
 	for i := range v.NumField() {

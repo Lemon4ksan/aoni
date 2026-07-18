@@ -360,24 +360,6 @@ func TestWithContextModifier_Empty_ReturnsSameContext(t *testing.T) {
 	assert.Equal(t, ctx, res)
 }
 
-func TestAppendContextModifier_ConfigureContext_AppendsModifiers(t *testing.T) {
-	t.Parallel()
-
-	ctx := WithContextModifier(t.Context(), WithHeader("A", "1"))
-	ctx = AppendContextModifier(ctx, WithHeader("B", "2"))
-
-	mods := ContextModifiers(ctx)
-	require.Len(t, mods, 2)
-}
-
-func TestAppendContextModifier_Empty_ReturnsSameContext(t *testing.T) {
-	t.Parallel()
-
-	ctx := t.Context()
-	res := AppendContextModifier(ctx)
-	assert.Equal(t, ctx, res)
-}
-
 func TestContextModifiers_Retrieve_ReturnsExpectedModifiers(t *testing.T) {
 	t.Parallel()
 

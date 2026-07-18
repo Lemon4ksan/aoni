@@ -627,6 +627,10 @@ func (c *Client) InitRequestConfig(req *http.Request) *http.Request {
 		cfg.Metadata = make(map[string]any)
 	}
 
+	if cfg.QueryEncoder == nil {
+		cfg.QueryEncoder = c.defaults.QueryEncoder
+	}
+
 	return req
 }
 

@@ -19,6 +19,9 @@ import (
 	"github.com/lemon4ksan/aoni/p0f"
 )
 
+// QueryEncoder defines the function signature for marshalling structures into url.Values.
+type QueryEncoder func(any) (url.Values, error)
+
 // ClientHelloSpecProvider defines an interface that returns a uTLS ClientHelloSpec.
 // Implementing this interface allows developers to feed custom/dynamic TLS fingerprints
 // directly to the client at runtime.
@@ -277,6 +280,12 @@ type RequestConfig struct {
 
 	// Redact configures the sensitive header redaction rules.
 	Redact *RedactConfig
+
+	// Modifiers holds RequestModifiers passed via context.
+	Modifiers []RequestModifier
+
+	// QueryEncoder allows overriding the query encoder for a specific request.
+	QueryEncoder QueryEncoder
 }
 
 // GetRequestConfig retrieves the [RequestConfig] associated with the context.
@@ -447,6 +456,9 @@ type ClientDefaults struct {
 
 	// Pipeline configures the client-level default pipeline settings.
 	Pipeline PipelineConfig
+
+	// QueryEncoder is the default encoder for marshalling structures into url.Values.
+	QueryEncoder QueryEncoder
 
 	// UARotationProfiles defines the list of browser profiles for User-Agent rotation.
 	UARotationProfiles []BrowserProfile

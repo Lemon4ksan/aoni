@@ -12,8 +12,6 @@ import (
 	"net/url"
 )
 
-type modsCtxKey struct{}
-
 // NewStdClient returns a standard [http.Client] whose transport routes all
 // requests through the configured aoni [Client] pipeline.
 //
@@ -61,30 +59,28 @@ func WithContextModifier(ctx context.Context, mods ...RequestModifier) context.C
 		return ctx
 	}
 
-	return context.WithValue(ctx, modsCtxKey{}, mods)
-}
-
-// AppendContextModifier appends new modifiers to an existing context carrying modifiers,
-// or creates a new one if none are present.
-func AppendContextModifier(ctx context.Context, mods ...RequestModifier) context.Context {
-	if len(mods) == 0 {
-		return ctx
+	cfg := GetRequestConfig(ctx)
+	if cfg == nil {
+		cfg = &RequestConfig{
+			Metadata: make(map[string]any),
+		}
+		ctx = context.WithValue(ctx, requestConfigKey{}, cfg)
 	}
 
-	existing := ContextModifiers(ctx)
-	combined := make([]RequestModifier, 0, len(existing)+len(mods))
-	combined = append(combined, existing...)
-	combined = append(combined, mods...)
+	cfg.Modifiers = append(cfg.Modifiers, mods...)
 
-	return context.WithValue(ctx, modsCtxKey{}, combined)
+	return ctx
 }
 
 // ContextModifiers extracts the RequestModifiers previously stored via
 // [WithContextModifier]. Returns nil if none are present.
 func ContextModifiers(ctx context.Context) []RequestModifier {
-	mods, _ := ctx.Value(modsCtxKey{}).([]RequestModifier)
+	cfg := GetRequestConfig(ctx)
+	if cfg != nil {
+		return cfg.Modifiers
+	}
 
-	return mods
+	return nil
 }
 
 // WithTraceContext returns a [RequestModifier] that attaches a new [TraceInfo]

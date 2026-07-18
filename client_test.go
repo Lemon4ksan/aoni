@@ -286,52 +286,6 @@ func TestClient_PathTemplates(t *testing.T) {
 	}
 }
 
-func TestClient_Validation(t *testing.T) {
-	t.Parallel()
-
-	type RequiredParams struct {
-		ID   int    `url:"id"   validate:"required"`
-		Name string `url:"name"`
-	}
-
-	type RequiredPayload struct {
-		Key string `json:"key" validate:"required"`
-	}
-
-	client := NewClient(nil, WithClientBaseURL("http://localhost"))
-
-	t.Run("missing_query_param", func(t *testing.T) {
-		params := RequiredParams{Name: "test"}
-		_, err := GetTo[any](t.Context(), client, "/test", WithQuery(params))
-		require.Error(t, err)
-
-		var valErr *ValidationError
-		if assert.ErrorAs(t, err, &valErr) {
-			assert.Equal(t, "ID", valErr.Field)
-		}
-	})
-
-	t.Run("missing_payload_field", func(t *testing.T) {
-		payload := RequiredPayload{}
-		_, err := PostTo[any](t.Context(), client, "/test", payload)
-		require.Error(t, err)
-
-		var valErr *ValidationError
-		if assert.ErrorAs(t, err, &valErr) {
-			assert.Equal(t, "Key", valErr.Field)
-		}
-	})
-
-	t.Run("validation_success", func(t *testing.T) {
-		_, srvClient := setupTestServer(t, func(w http.ResponseWriter, r *http.Request) {
-			w.WriteHeader(http.StatusOK)
-		})
-		params := RequiredParams{ID: 1}
-		_, err := GetTo[any](t.Context(), srvClient, "/test", WithQuery(params))
-		assert.NoError(t, err)
-	})
-}
-
 func TestClient_CaptureResponse(t *testing.T) {
 	t.Parallel()
 	_, client := setupTestServer(t, func(w http.ResponseWriter, r *http.Request) {
@@ -2065,4 +2019,32 @@ func TestHARGenerator(t *testing.T) {
 	assert.Contains(t, harString, "har body")
 	assert.Contains(t, harString, "GET")
 	assert.Contains(t, harString, server.URL)
+}
+
+func TestClient_QueryEncoder(t *testing.T) {
+	t.Parallel()
+
+	var capturedQuery string
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		capturedQuery = r.URL.RawQuery
+
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer server.Close()
+
+	customEncoder := func(s any) (url.Values, error) {
+		vals := make(url.Values)
+		vals.Set("custom_key", "custom_val")
+		return vals, nil
+	}
+
+	client := NewClient(nil,
+		WithClientBaseURL(server.URL),
+		WithClientQueryEncoder(customEncoder),
+	)
+
+	_, err := client.Get(t.Context(), "/", WithQuery(struct{ Dummy string }{Dummy: "value"}))
+	require.NoError(t, err)
+	assert.Equal(t, "custom_key=custom_val", capturedQuery)
 }

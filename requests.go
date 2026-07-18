@@ -453,10 +453,6 @@ func validateAndMarshal(payload any) (io.Reader, error) {
 		return nil, nil
 	}
 
-	if err := Validate(payload); err != nil {
-		return nil, err
-	}
-
 	bodyBytes, err := json.Marshal(payload)
 	if err != nil {
 		return nil, fmt.Errorf("aoni: failed to marshal payload: %w", err)
@@ -598,22 +594,27 @@ func handleResponse(resp *http.Response, target any, requester Requester) error 
 		return nil
 	}
 
-	if provider, ok := requester.(interface{ Defaults() ClientDefaults }); ok {
+	var br BaseResponse
+	if p, ok := requester.(BaseResponseProvider); ok {
+		br = p.BaseResponse()
+	} else if provider, ok := requester.(interface{ Defaults() ClientDefaults }); ok {
 		if brFn := provider.Defaults().BaseResponse; brFn != nil {
-			if br := brFn(); br != nil {
-				br.SetData(target)
-
-				if err := decoder.Decode(resp.Body, br); err != nil {
-					return err
-				}
-
-				if !br.IsSuccess() {
-					return br.Error()
-				}
-
-				return nil
-			}
+			br = brFn()
 		}
+	}
+
+	if br != nil {
+		br.SetData(target)
+
+		if err := decoder.Decode(resp.Body, br); err != nil {
+			return err
+		}
+
+		if !br.IsSuccess() {
+			return br.Error()
+		}
+
+		return nil
 	}
 
 	err := decoder.Decode(resp.Body, target)

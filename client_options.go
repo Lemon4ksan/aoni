@@ -46,6 +46,13 @@ func WithClientBaseResponse(provider func() BaseResponse) ClientOption {
 	}
 }
 
+// WithClientQueryEncoder configures the default query parameters encoder for the client.
+func WithClientQueryEncoder(encoder QueryEncoder) ClientOption {
+	return func(c *Client) {
+		c.defaults.QueryEncoder = encoder
+	}
+}
+
 // WithClientBaseURL configures the base URL for resolving relative request paths.
 func WithClientBaseURL(raw string) ClientOption {
 	return func(c *Client) {
