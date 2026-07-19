@@ -228,7 +228,11 @@ func WithJSONBody(payload any) RequestModifier {
 func WithMultipart(fields map[string]string, files map[string]io.Reader) RequestModifier {
 	return func(req *http.Request) {
 		body := &bytes.Buffer{}
+
 		writer := multipart.NewWriter(body)
+		if cfg := getOrInitRequestConfig(req); cfg.MultipartBoundary != "" {
+			_ = writer.SetBoundary(cfg.MultipartBoundary)
+		}
 
 		for k, v := range fields {
 			if err := writer.WriteField(k, v); err != nil {
@@ -351,7 +355,11 @@ func WithCaptureResponse(target **http.Response) RequestModifier {
 func WithStreamingMultipart(fields map[string]string, files map[string]io.Reader) RequestModifier {
 	return func(req *http.Request) {
 		pr, pw := io.Pipe()
+
 		writer := multipart.NewWriter(pw)
+		if cfg := getOrInitRequestConfig(req); cfg.MultipartBoundary != "" {
+			_ = writer.SetBoundary(cfg.MultipartBoundary)
+		}
 
 		go func() {
 			defer pw.Close()

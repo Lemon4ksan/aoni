@@ -44,6 +44,7 @@ var Desktop = &profiles.Variant{
 	InsertHeaders: func(headers map[string]string, method string) {
 		insertDesktopHeaders(headers, method)
 	},
+	HeaderCache: HeaderCache,
 }
 
 // Mobile is the mobile variant of the Firefox profile.
@@ -56,6 +57,7 @@ var Mobile = &profiles.Variant{
 	InsertHeaders: func(headers map[string]string, method string) {
 		insertMobileHeaders(headers, method)
 	},
+	HeaderCache: HeaderCache,
 }
 
 // Boundary returns a random boundary string for use in multipart requests.

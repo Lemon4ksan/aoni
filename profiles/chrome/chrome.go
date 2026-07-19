@@ -170,7 +170,7 @@ var HelloChrome145QUIC = utls.ClientHelloSpec{
 const SecCHUA = `"Not:A-Brand";v="99", "Google Chrome";v="145", "Chromium";v="145"`
 
 // Various user agent strings for different platforms.
-var (
+const (
 	UserAgentWindows = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/145.0.0.0 Safari/537.36"
 	UserAgentMacOS   = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/145.0.0.0 Safari/537.36"
 	UserAgentLinux   = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/145.0.0.0 Safari/537.36"
@@ -210,6 +210,7 @@ var Desktop = &profiles.Variant{
 	InsertHeaders: func(headers map[string]string, method string) {
 		insertDesktopHeaders(headers, method)
 	},
+	HeaderCache: HeaderCache,
 }
 
 // Mobile is the Chrome mobile variant.
@@ -222,6 +223,7 @@ var Mobile = &profiles.Variant{
 	InsertHeaders: func(headers map[string]string, method string) {
 		insertMobileHeaders(headers, method)
 	},
+	HeaderCache: HeaderCache,
 }
 
 // Boundary generates a random boundary string for use in multipart/form-data requests.

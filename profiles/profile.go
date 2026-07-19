@@ -75,6 +75,7 @@ type Variant struct {
 	ConfigureH3   func(*H3Settings)
 	BuildHeaders  func(OSKey) []HeaderEntry
 	InsertHeaders func(headers map[string]string, method string)
+	HeaderCache   *HeaderCache
 }
 
 // Header names used in the browser profile.

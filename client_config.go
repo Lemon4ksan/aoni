@@ -166,6 +166,9 @@ type RequestConfig struct {
 	// - Note: Verified by [Client.Request] before dispatching the request.
 	QueryError error
 
+	// MultipartBoundary is a custom boundary string for multipart requests.
+	MultipartBoundary string
+
 	// MultiReadThreshold is the size limit in bytes below which response bodies are cached in memory.
 	// - Note: Set to <= 0 to disable body caching.
 	// - SeeAlso: [WithMultiReadBody]

@@ -33,10 +33,12 @@ import (
 
 	"github.com/andybalholm/brotli"
 	"github.com/klauspost/compress/zstd"
+	utls "github.com/refraction-networking/utls"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	"github.com/lemon4ksan/aoni/ja4"
+	"github.com/lemon4ksan/aoni/profiles"
 )
 
 type testPayload struct {
@@ -2047,4 +2049,215 @@ func TestClient_QueryEncoder(t *testing.T) {
 	_, err := client.Get(t.Context(), "/", WithQuery(struct{ Dummy string }{Dummy: "value"}))
 	require.NoError(t, err)
 	assert.Equal(t, "custom_key=custom_val", capturedQuery)
+}
+
+func TestWithClientBrowserProfile(t *testing.T) {
+	t.Parallel()
+
+	clientChrome := NewClient(nil,
+		WithClientBrowserProfile(BrowserChrome, profiles.Windows),
+	)
+
+	headersChrome := clientChrome.defaults.Headers
+	assert.Contains(t, headersChrome.Get("User-Agent"), "Chrome")
+	assert.Contains(t, headersChrome.Get("Sec-Ch-Ua"), "Google Chrome")
+	assert.Equal(t, "?0", headersChrome.Get("Sec-Ch-Ua-Mobile"))
+	assert.Equal(t, `"Windows"`, headersChrome.Get("Sec-Ch-Ua-Platform"))
+
+	require.NotNil(t, clientChrome.fingerprint.H2Settings)
+	assert.Equal(t, uint32(65536), clientChrome.fingerprint.H2Settings.HeaderTableSize)
+	assert.Equal(t, uint32(6291456), clientChrome.fingerprint.H2Settings.InitialWindowSize)
+
+	require.NotNil(t, clientChrome.fingerprint.H3Settings)
+	assert.True(t, clientChrome.fingerprint.H3Settings.EnableDatagrams)
+
+	require.NotNil(t, clientChrome.fingerprint.TLSClientHelloSpecProvider)
+	spec, err := clientChrome.fingerprint.TLSClientHelloSpecProvider.ClientHelloSpec()
+	require.NoError(t, err)
+	require.NotNil(t, spec)
+	assert.Contains(t, spec.CipherSuites, uint16(utls.TLS_AES_128_GCM_SHA256))
+
+	clientFirefox := NewClient(nil,
+		WithClientBrowserProfile(BrowserFirefox, profiles.Windows),
+	)
+
+	headersFirefox := clientFirefox.defaults.Headers
+	assert.Contains(t, headersFirefox.Get("User-Agent"), "Firefox")
+
+	require.NotNil(t, clientFirefox.fingerprint.H2Settings)
+	assert.Equal(t, uint32(131072), clientFirefox.fingerprint.H2Settings.InitialWindowSize)
+
+	require.NotNil(t, clientFirefox.fingerprint.H3Settings)
+	assert.False(t, clientFirefox.fingerprint.H3Settings.EnableDatagrams)
+
+	require.NotNil(t, clientFirefox.fingerprint.TLSClientHelloID)
+	assert.Equal(t, utls.HelloFirefox_120, *clientFirefox.fingerprint.TLSClientHelloID)
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer server.Close()
+
+	client := NewClient(nil,
+		WithClientBaseURL(server.URL),
+		WithClientBrowserProfile(BrowserChrome, profiles.Windows),
+	)
+
+	reqGet, err := http.NewRequestWithContext(t.Context(), "GET", server.URL, nil)
+	require.NoError(t, err)
+
+	reqGet = client.InitRequestConfig(reqGet)
+	for _, mod := range client.defaults.DefaultMods {
+		mod(reqGet)
+	}
+
+	assert.Contains(t, reqGet.Header.Get("Accept"), "text/html")
+	cfgGet := GetRequestConfig(reqGet.Context())
+	require.NotNil(t, cfgGet)
+	assert.NotEmpty(t, cfgGet.OrderedHeaders)
+	assert.Equal(t, ":method", cfgGet.OrderedHeaders[0])
+
+	reqPost, err := http.NewRequestWithContext(t.Context(), "POST", server.URL, nil)
+	require.NoError(t, err)
+
+	reqPost = client.InitRequestConfig(reqPost)
+	for _, mod := range client.defaults.DefaultMods {
+		mod(reqPost)
+	}
+
+	assert.Equal(t, "*/*", reqPost.Header.Get("Accept"))
+	cfgPost := GetRequestConfig(reqPost.Context())
+	require.NotNil(t, cfgPost)
+	assert.NotEmpty(t, cfgPost.OrderedHeaders)
+	assert.Equal(t, "content-length", cfgPost.OrderedHeaders[4])
+
+	reqMultipart, err := http.NewRequestWithContext(t.Context(), "POST", server.URL, nil)
+	require.NoError(t, err)
+
+	reqMultipart = client.InitRequestConfig(reqMultipart)
+	for _, mod := range client.defaults.DefaultMods {
+		mod(reqMultipart)
+	}
+
+	modMultipart := WithMultipart(map[string]string{"foo": "bar"}, nil)
+	modMultipart(reqMultipart)
+
+	contentType := reqMultipart.Header.Get("Content-Type")
+	assert.Contains(t, contentType, "multipart/form-data")
+	assert.Contains(t, contentType, "----WebKitFormBoundary")
+}
+
+func TestWithClientProfileVariant_Custom(t *testing.T) {
+	t.Parallel()
+
+	customCache := profiles.NewHeaderCache(
+		map[string][]string{"GET": {"custom-header", "user-agent"}},
+		map[string][]string{"GET": {"user-agent", "custom-header"}},
+	)
+
+	customVariant := &profiles.Variant{
+		HelloID: utls.ClientHelloID{
+			Client:  "Firefox",
+			Version: "123",
+		},
+		BoundaryFunc: func() string {
+			return "----CustomBoundary123"
+		},
+		ConfigureH2: func(s *profiles.H2Settings) {
+			s.InitialWindowSize = 99999
+		},
+		BuildHeaders: func(os profiles.OSKey) []profiles.HeaderEntry {
+			return []profiles.HeaderEntry{
+				{Name: "User-Agent", Value: "CustomUA/1.0"},
+				{Name: "custom-header", Value: "custom-val"},
+			}
+		},
+		HeaderCache: customCache,
+	}
+
+	client := NewClient(nil,
+		WithClientProfileVariant(customVariant, profiles.Windows),
+	)
+
+	// Verify custom headers
+	headers := client.defaults.Headers
+	assert.Equal(t, "CustomUA/1.0", headers.Get("User-Agent"))
+	assert.Equal(t, "custom-val", headers.Get("custom-header"))
+
+	// Verify custom H2 Settings
+	require.NotNil(t, client.fingerprint.H2Settings)
+	assert.Equal(t, uint32(99999), client.fingerprint.H2Settings.InitialWindowSize)
+
+	// Verify custom HelloID
+	require.NotNil(t, client.fingerprint.TLSClientHelloID)
+	assert.Equal(t, "Firefox", client.fingerprint.TLSClientHelloID.Client)
+	assert.Equal(t, "123", client.fingerprint.TLSClientHelloID.Version)
+
+	// Verify custom OrderedHeaders
+	req, err := http.NewRequestWithContext(t.Context(), "GET", "http://example.com", nil)
+	require.NoError(t, err)
+
+	req = client.InitRequestConfig(req)
+	for _, mod := range client.defaults.DefaultMods {
+		mod(req)
+	}
+
+	cfg := GetRequestConfig(req.Context())
+	require.NotNil(t, cfg)
+	assert.Equal(t, []string{"custom-header", "user-agent"}, cfg.OrderedHeaders)
+
+	// Verify custom boundary
+	reqMultipart, err := http.NewRequestWithContext(t.Context(), "POST", "http://example.com", nil)
+	require.NoError(t, err)
+
+	reqMultipart = client.InitRequestConfig(reqMultipart)
+	for _, mod := range client.defaults.DefaultMods {
+		mod(reqMultipart)
+	}
+
+	modMultipart := WithMultipart(map[string]string{"foo": "bar"}, nil)
+	modMultipart(reqMultipart)
+
+	contentType := reqMultipart.Header.Get("Content-Type")
+	assert.Contains(t, contentType, "multipart/form-data")
+	assert.Contains(t, contentType, "----CustomBoundary123")
+}
+
+func TestWithClientTCPDelay(t *testing.T) {
+	t.Parallel()
+
+	client := NewClient(nil,
+		WithClientTCPDelay(10*time.Millisecond, 20*time.Millisecond),
+	)
+
+	// Test GET request uses client-level default TCP delay
+	reqGet, err := http.NewRequestWithContext(t.Context(), "GET", "http://example.com", nil)
+	require.NoError(t, err)
+
+	reqGet = client.InitRequestConfig(reqGet)
+	for _, mod := range client.defaults.DefaultMods {
+		mod(reqGet)
+	}
+
+	cfgGet := GetRequestConfig(reqGet.Context())
+	require.NotNil(t, cfgGet)
+	assert.Equal(t, 10*time.Millisecond, cfgGet.TCPDelay.Min)
+	assert.Equal(t, 20*time.Millisecond, cfgGet.TCPDelay.Max)
+
+	// Test GET request with per-request override
+	reqOverride, err := http.NewRequestWithContext(t.Context(), "GET", "http://example.com", nil)
+	require.NoError(t, err)
+
+	reqOverride = client.InitRequestConfig(reqOverride)
+	for _, mod := range client.defaults.DefaultMods {
+		mod(reqOverride)
+	}
+
+	// Apply per-request override
+	WithTCPDelay(100*time.Millisecond, 200*time.Millisecond)(reqOverride)
+
+	cfgOverride := GetRequestConfig(reqOverride.Context())
+	require.NotNil(t, cfgOverride)
+	assert.Equal(t, 100*time.Millisecond, cfgOverride.TCPDelay.Min)
+	assert.Equal(t, 200*time.Millisecond, cfgOverride.TCPDelay.Max)
 }

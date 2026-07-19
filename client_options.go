@@ -14,11 +14,14 @@ import (
 	"time"
 
 	"github.com/lemon4ksan/miyako/generic"
+	utls "github.com/refraction-networking/utls"
 	"golang.org/x/net/http2"
 
 	"github.com/lemon4ksan/aoni/ja4"
 	"github.com/lemon4ksan/aoni/p0f"
 	"github.com/lemon4ksan/aoni/profiles"
+	"github.com/lemon4ksan/aoni/profiles/chrome"
+	"github.com/lemon4ksan/aoni/profiles/firefox"
 )
 
 // ClientOption is a functional option used to configure an aoni [Client].
@@ -107,53 +110,136 @@ func WithClientTimeout(d time.Duration) ClientOption {
 	}
 }
 
-// WithClientBrowserProfile configures the TLS fingerprint, HTTP/2 setting frames,
-// and default browser headers to match the selected browser profile.
-func WithClientBrowserProfile(browser BrowserID, os profiles.OSKey) ClientOption {
+type staticSpecProvider struct {
+	spec *utls.ClientHelloSpec
+}
+
+func (s staticSpecProvider) ClientHelloSpec() (*utls.ClientHelloSpec, error) {
+	return s.spec, nil
+}
+
+// WithClientProfileVariant configures the TLS fingerprint, HTTP/2 setting frames,
+// and default browser headers to match the provided custom browser profile variant.
+func WithClientProfileVariant(variant *profiles.Variant, os profiles.OSKey) ClientOption {
 	return func(c *Client) {
-		WithClientTLSFingerprint(browser)(c)
-
-		var (
-			h2Settings HTTP2Settings
-			h3Settings HTTP3Settings
-			ua         string
-		)
-
-		switch browser {
-		case BrowserFirefox:
-			h2Settings = HTTP2Settings{
-				HeaderTableSize:   65536,
-				EnablePush:        0,
-				InitialWindowSize: 131072,
-				MaxFrameSize:      16384,
-				ConnectionFlow:    12517377,
-				PriorityWeight:    41,
-			}
-			h3Settings = FirefoxHTTP3Settings
-
-			ua = "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:148.0) Gecko/20100101 Firefox/148.0"
-			if os.IsMobile() {
-				ua = "Mozilla/5.0 (Android 16; Mobile; rv:148.0) Gecko/148.0 Firefox/148.0"
-			}
-
-		default:
-			h2Settings = HTTP2Settings{
-				HeaderTableSize:   65536,
-				EnablePush:        0,
-				InitialWindowSize: 6291456,
-				MaxHeaderListSize: 262144,
-				ConnectionFlow:    15663105,
-				PriorityWeight:    255,
-				PriorityExclusive: true,
-			}
-			h3Settings = ChromeHTTP3Settings
-			ua = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/145.0.0.0 Safari/537.36"
+		if variant == nil {
+			return
 		}
 
-		c.defaults.Headers.Set("User-Agent", ua)
+		// Initialize base uTLS fingerprint dialer if none configured
+		if c.fingerprint.BrowserID == BrowserNone {
+			if variant.HelloID.Client == "Firefox" {
+				WithClientTLSFingerprint(BrowserFirefox)(c)
+			} else {
+				WithClientTLSFingerprint(BrowserChrome)(c)
+			}
+		}
+
+		if variant.HelloSpec != nil {
+			c.fingerprint.TLSClientHelloSpecProvider = staticSpecProvider{spec: variant.HelloSpec}
+			c.fingerprint.TLSClientHelloID = nil
+		} else if variant.HelloID != (utls.ClientHelloID{}) {
+			helloID := variant.HelloID
+			c.fingerprint.TLSClientHelloID = &helloID
+			c.fingerprint.TLSClientHelloSpecProvider = nil
+		}
+
+		var h2Settings HTTP2Settings
+		if variant.ConfigureH2 != nil {
+			var h2s profiles.H2Settings
+			variant.ConfigureH2(&h2s)
+			h2Settings = H2SettingsFromProfile(h2s)
+			c.fingerprint.H2Settings = &h2Settings
+		}
+
+		// Configure H3 based on the variant HelloID or HelloSpec
+		var h3Settings HTTP3Settings
+		if variant.HelloID.Client == "Firefox" {
+			h3Settings = FirefoxHTTP3Settings
+		} else {
+			h3Settings = ChromeHTTP3Settings
+		}
+
 		c.fingerprint.H3Settings = &h3Settings
 
-		c.fingerprint.H2Settings = &h2Settings
+		// 1. Build and set static default headers
+		if variant.BuildHeaders != nil {
+			for _, h := range variant.BuildHeaders(os) {
+				if h.Value != "" {
+					c.defaults.Headers.Set(h.Name, h.Value)
+				}
+			}
+		}
+
+		// Reconstruct static OrderedHeaders for GET method (fallback) if HeaderCache is provided
+		isMobile := os.IsMobile()
+
+		var getHeadersOrder []string
+		if variant.HeaderCache != nil {
+			enums := variant.HeaderCache.Enums(isMobile)
+			if methodOrder, ok := enums["GET"]; ok {
+				getHeadersOrder = make([]string, len(methodOrder))
+				for h, idx := range methodOrder {
+					if idx >= 0 && idx < len(getHeadersOrder) {
+						getHeadersOrder[idx] = h
+					}
+				}
+
+				c.fingerprint.HeaderOrder = getHeadersOrder
+			}
+		}
+
+		// 2. Add dynamic request modifier for method-specific headers, boundary, and OrderedHeaders
+		c.defaults.DefaultMods = append(c.defaults.DefaultMods, func(req *http.Request) {
+			headersMap := make(map[string]string)
+			for k, v := range req.Header {
+				if len(v) > 0 {
+					headersMap[k] = v[0]
+				}
+			}
+
+			if variant.InsertHeaders != nil {
+				variant.InsertHeaders(headersMap, req.Method)
+			}
+
+			for k, v := range headersMap {
+				if v == "" {
+					continue
+				}
+
+				if req.Header.Get(k) == "" {
+					req.Header.Set(k, v)
+				}
+			}
+
+			// Store the custom boundary string in request config for WithMultipart
+			if variant.BoundaryFunc != nil {
+				cfg := getOrInitRequestConfig(req)
+				cfg.MultipartBoundary = variant.BoundaryFunc()
+			}
+
+			// Dynamically set OrderedHeaders based on request method if HeaderCache is provided
+			if variant.HeaderCache != nil {
+				enums := variant.HeaderCache.Enums(isMobile)
+
+				methodOrder, ok := enums[req.Method]
+				if !ok {
+					methodOrder = enums["GET"]
+				}
+
+				ordered := make([]string, len(methodOrder))
+				for h, idx := range methodOrder {
+					if idx >= 0 && idx < len(ordered) {
+						ordered[idx] = h
+					}
+				}
+
+				cfg := getOrInitRequestConfig(req)
+				cfg.OrderedHeaders = ordered
+			}
+		})
+
+		// Re-apply H2 settings on the transport level if it is initialized
 		if transport := c.Transport(); transport != nil {
 			if c.fingerprint.H2Configurer != nil {
 				t2, err := http2.ConfigureTransports(transport)
@@ -163,11 +249,50 @@ func WithClientBrowserProfile(browser BrowserID, os profiles.OSKey) ClientOption
 				}
 			}
 
-			framed := NewH2FramedTransport(transport, h2Settings)
-			if httpClient, ok := c.engine.(*http.Client); ok {
-				httpClient.Transport = framed
+			if c.fingerprint.H2Settings != nil {
+				framed := NewH2FramedTransport(transport, *c.fingerprint.H2Settings)
+				if httpClient, ok := c.engine.(*http.Client); ok {
+					httpClient.Transport = framed
+				}
 			}
 		}
+	}
+}
+
+// WithClientBrowserProfile configures the TLS fingerprint, HTTP/2 setting frames,
+// and default browser headers to match the selected browser profile.
+func WithClientBrowserProfile(browser BrowserID, os profiles.OSKey) ClientOption {
+	var variant *profiles.Variant
+	switch browser {
+	case BrowserFirefox:
+		if os.IsMobile() {
+			variant = firefox.Mobile
+		} else {
+			variant = firefox.Desktop
+		}
+
+	default: // default to BrowserChrome
+		if os.IsMobile() {
+			variant = chrome.Mobile
+		} else {
+			variant = chrome.Desktop
+		}
+	}
+
+	return WithClientProfileVariant(variant, os)
+}
+
+// WithClientTCPDelay sets the default TCP connection delay range for all requests.
+// When a per-request [WithTCPDelay] modifier is also present, it takes precedence.
+func WithClientTCPDelay(min, max time.Duration) ClientOption {
+	if min > max {
+		min, max = max, min
+	}
+
+	return func(c *Client) {
+		c.defaults.DefaultMods = append(c.defaults.DefaultMods, func(req *http.Request) {
+			getOrInitRequestConfig(req).TCPDelay = TCPDelayRange{Min: min, Max: max}
+		})
 	}
 }
 
