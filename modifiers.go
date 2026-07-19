@@ -609,3 +609,20 @@ func WithIfModifiedSince(t time.Time) RequestModifier {
 		req.Header.Set("If-Modified-Since", t.UTC().Format(http.TimeFormat))
 	}
 }
+
+// WithCertificatePin returns a RequestModifier that pins the certificate of the given domain
+// to the specified public key SHA-256 fingerprint hash during the TLS handshake.
+//
+// The hash can be in base64 or hex format, and optionally prefixed with "sha256/".
+// Multiple pins can be added for the same domain (e.g. for key rotation backup).
+// Matching supports wildcards like "*.example.com".
+func WithCertificatePin(domain, hash string) RequestModifier {
+	return func(req *http.Request) {
+		cfg := getOrInitRequestConfig(req)
+		if cfg.CertificatePins == nil {
+			cfg.CertificatePins = make(map[string][]string)
+		}
+
+		cfg.CertificatePins[domain] = append(cfg.CertificatePins[domain], hash)
+	}
+}

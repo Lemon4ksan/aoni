@@ -1280,8 +1280,9 @@ func TestReadLoopUnrecognizedEIOType(t *testing.T) {
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = sio.Close() })
 
-	time.Sleep(100 * time.Millisecond)
-	assert.False(t, sio.Connected())
+	assert.Eventually(t, func() bool {
+		return !sio.Connected()
+	}, time.Second, 10*time.Millisecond)
 }
 
 func TestReadLoopBinaryBufNil(t *testing.T) {

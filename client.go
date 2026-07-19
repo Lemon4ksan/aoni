@@ -10,6 +10,7 @@ import (
 	"compress/gzip"
 	"context"
 	"crypto/tls"
+	"crypto/x509"
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
@@ -631,6 +632,28 @@ func (c *Client) InitRequestConfig(req *http.Request) *http.Request {
 		cfg.QueryEncoder = c.defaults.QueryEncoder
 	}
 
+	if len(c.fingerprint.CertificatePins) > 0 {
+		if cfg.CertificatePins == nil {
+			cfg.CertificatePins = make(map[string][]string)
+		}
+
+		for domain, hashes := range c.fingerprint.CertificatePins {
+			for _, h := range hashes {
+				found := false
+				for _, existing := range cfg.CertificatePins[domain] {
+					if existing == h {
+						found = true
+						break
+					}
+				}
+
+				if !found {
+					cfg.CertificatePins[domain] = append(cfg.CertificatePins[domain], h)
+				}
+			}
+		}
+	}
+
 	return req
 }
 
@@ -1225,14 +1248,36 @@ func (c *Client) validateResponse(resp *http.Response) error {
 		return nil
 	}
 
-	if fn := GetResponseValidator(resp.Request.Context()); fn != nil { //nolint:bodyclose
-		if valErr := fn(resp); valErr != nil {
+	var clientErr error
+	if c.defaults.ResponseValidator != nil {
+		clientErr = c.defaults.ResponseValidator(resp)
+	}
+
+	fn := GetResponseValidator(resp.Request.Context()) //nolint:bodyclose
+	if fn != nil {
+		requestErr := fn(resp)
+		// Per-request validation was configured and executed.
+		// Its result overrides the client-level validator result.
+		if requestErr != nil {
 			if resp.Body != nil {
 				_ = resp.Body.Close()
 			}
 
-			return valErr
+			return requestErr
 		}
+
+		// Request-level validator succeeded (returned nil).
+		// This overrides any client-level validation failure.
+		return nil
+	}
+
+	// If no request-level validator was configured, return the client-level validation error if any.
+	if clientErr != nil {
+		if resp.Body != nil {
+			_ = resp.Body.Close()
+		}
+
+		return clientErr
 	}
 
 	return nil
@@ -1700,8 +1745,8 @@ func (c *Client) applyDialers() {
 		// sets its own DialTLSContext). This gives plain http.Transport connections
 		// the same WithInsecureSkipVerify + WithTCPDelay support that uTLS enjoys.
 		if transport.DialTLSContext == nil {
-			baseTLSCfg := transport.TLSClientConfig
 			transport.DialTLSContext = func(ctx context.Context, network, addr string) (net.Conn, error) {
+				baseTLSCfg := transport.TLSClientConfig
 				// Honour WithTCPDelay before opening the TCP connection.
 				if err := ApplyTCPDelay(ctx); err != nil {
 					return nil, err
@@ -1736,6 +1781,24 @@ func (c *Client) applyDialers() {
 				if effectiveCfg.ServerName == "" {
 					cloned := effectiveCfg.Clone()
 					cloned.ServerName = host
+					effectiveCfg = cloned
+				}
+
+				// Inject certificate pin verification if configured.
+				if cfg := GetRequestConfig(ctx); cfg != nil && len(cfg.CertificatePins) > 0 {
+					cloned := effectiveCfg.Clone()
+					userVerify := cloned.VerifyPeerCertificate
+					cloned.VerifyPeerCertificate = func(rawCerts [][]byte, verifiedChains [][]*x509.Certificate) error { //nolint:gosec
+						if err := verifyCertificatePins(host, cfg.CertificatePins, rawCerts); err != nil {
+							return err
+						}
+
+						if userVerify != nil {
+							return userVerify(rawCerts, verifiedChains)
+						}
+
+						return nil
+					}
 					effectiveCfg = cloned
 				}
 
@@ -1850,6 +1913,7 @@ func dialTLSWithUTLS(
 		uConfig.MinVersion = tlsConfig.MinVersion
 		uConfig.MaxVersion = tlsConfig.MaxVersion
 		uConfig.CipherSuites = tlsConfig.CipherSuites
+		uConfig.VerifyPeerCertificate = tlsConfig.VerifyPeerCertificate
 
 		if len(tlsConfig.CurvePreferences) > 0 {
 			uConfig.CurvePreferences = make([]utls.CurveID, len(tlsConfig.CurvePreferences))
@@ -1862,6 +1926,22 @@ func dialTLSWithUTLS(
 	// Per-request InsecureSkipVerify override (WithInsecureSkipVerify).
 	if GetInsecureSkipVerify(ctx) {
 		uConfig.InsecureSkipVerify = true //nolint:gosec
+	}
+
+	// Inject certificate pin verification if configured.
+	if cfg != nil && len(cfg.CertificatePins) > 0 {
+		userVerify := uConfig.VerifyPeerCertificate
+		uConfig.VerifyPeerCertificate = func(rawCerts [][]byte, verifiedChains [][]*x509.Certificate) error {
+			if err := verifyCertificatePins(host, cfg.CertificatePins, rawCerts); err != nil {
+				return err
+			}
+
+			if userVerify != nil {
+				return userVerify(rawCerts, verifiedChains)
+			}
+
+			return nil
+		}
 	}
 
 	// Use proxy-aware session cache if available in context.

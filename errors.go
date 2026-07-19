@@ -36,6 +36,10 @@ var (
 	// target resolved to a private or loopback address. Returned by
 	// [Client.Request] when [WithClientSSRFGuard] is enabled.
 	ErrSSRFBlocked = errors.New("aoni: request blocked by SSRF guard")
+
+	// ErrCertificatePinning indicates the TLS handshake failed because
+	// none of the peer certificates matched the configured public key pins.
+	ErrCertificatePinning = errors.New("aoni: certificate pinning validation failed")
 )
 
 // APIError wraps a non-2xx HTTP response. StatusCode holds the

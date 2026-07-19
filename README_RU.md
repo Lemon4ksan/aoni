@@ -196,6 +196,7 @@ resp, err := client.Get(ctx, "/path", aoni.WithPipeline(aoni.PipelineConfig{
 | :--- | :--- | :--- | :--- |
 | **Прокси (Proxy)** | `WithClientProxy(url)` | `aoni.WithProxyOverride(url)` | Локальный → Глобальный → Системные переменные (`HTTP_PROXY`) |
 | **Игнорирование TLS** | `WithClientInsecureSkipVerify()` | `aoni.WithInsecureSkipVerify()` | Локальный → Глобальный → Стандартная TLS-валидация |
+| **Пиннинг сертификатов** | `WithClientCertificatePin(domain, hash)` | `aoni.WithCertificatePin(domain, hash)` | Слияние. Настройки локального объединяются с глобальным. |
 | **Задержка TCP** | `WithClientTCPDelay(min, max)` | `aoni.WithTCPDelay(min, max)` | Локальный → Глобальный → Без задержки |
 | **Валидация ответов** | `WithClientResponseValidator(fn)` | `aoni.WithResponseValidator(fn)` | Вызываются последовательно. Ошибка локального перекрывает глобальный. |
 | **Ретраи (Retry)** | *Автоматически в middleware* | `aoni.WithRetryPolicy(override)` | Локальный `RetryOverride` полностью заменяет настройки глобального Middleware. |

@@ -284,6 +284,9 @@ type RequestConfig struct {
 	// Redact configures the sensitive header redaction rules.
 	Redact *RedactConfig
 
+	// CertificatePins maps domains to their pinned SHA-256 public key hashes.
+	CertificatePins map[string][]string
+
 	// Modifiers holds RequestModifiers passed via context.
 	Modifiers []RequestModifier
 
@@ -404,6 +407,9 @@ type FingerprintConfig struct {
 
 	// PacketPadding adjusts MSS and injects random padding headers to confuse DPI length analysis.
 	PacketPadding *PaddingConfig
+
+	// CertificatePins maps domains to their pinned SHA-256 public key hashes globally.
+	CertificatePins map[string][]string
 }
 
 // ClientDefaults groups standard HTTP client settings, request/response lifecycle hooks,
@@ -462,6 +468,9 @@ type ClientDefaults struct {
 
 	// QueryEncoder is the default encoder for marshalling structures into url.Values.
 	QueryEncoder QueryEncoder
+
+	// ResponseValidator is the client-level default response validator called on every request.
+	ResponseValidator func(*http.Response) error
 
 	// UARotationProfiles defines the list of browser profiles for User-Agent rotation.
 	UARotationProfiles []BrowserProfile

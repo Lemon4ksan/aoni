@@ -6,6 +6,7 @@ package aoni
 
 import (
 	"context"
+	"crypto/tls"
 	"encoding/base64"
 	"net"
 	"net/http"
@@ -552,6 +553,22 @@ func WithClientConnectionPool(cfg ConnectionPoolConfig) ClientOption {
 	}
 }
 
+// WithClientInsecureSkipVerify returns a ClientOption that disables TLS certificate verification
+// globally for all requests sent by this client.
+//
+// Warning: Bypassing verification makes the client vulnerable to man-in-the-middle attacks.
+func WithClientInsecureSkipVerify() ClientOption {
+	return func(c *Client) {
+		if transport := c.Transport(); transport != nil {
+			if transport.TLSClientConfig == nil {
+				transport.TLSClientConfig = &tls.Config{} //nolint:gosec
+			}
+
+			transport.TLSClientConfig.InsecureSkipVerify = true
+		}
+	}
+}
+
 // WithClientTLSFingerprint sets the uTLS BrowserID profile.
 func WithClientTLSFingerprint(browser BrowserID) ClientOption {
 	return func(c *Client) {
@@ -825,6 +842,40 @@ func WithClientEngine(engine HTTPDoer) ClientOption {
 func WithClientPipeline(pipe PipelineConfig) ClientOption {
 	return func(c *Client) {
 		c.defaults.Pipeline = pipe
+	}
+}
+
+// WithClientResponseValidator sets the default response validator for all requests.
+// When a per-request [WithResponseValidator] modifier is also present, both are run sequentially.
+func WithClientResponseValidator(fn func(*http.Response) error) ClientOption {
+	return func(c *Client) {
+		c.defaults.ResponseValidator = fn
+	}
+}
+
+// WithClientCertificatePin returns a ClientOption that pins the certificate of the given domain
+// to the specified public key SHA-256 fingerprint hash globally for all requests sent by this client.
+func WithClientCertificatePin(domain, hash string) ClientOption {
+	return func(c *Client) {
+		if c.fingerprint.CertificatePins == nil {
+			c.fingerprint.CertificatePins = make(map[string][]string)
+		}
+
+		c.fingerprint.CertificatePins[domain] = append(c.fingerprint.CertificatePins[domain], hash)
+	}
+}
+
+// WithClientCertificatePins returns a ClientOption that registers a map of domains to their
+// respective public key SHA-256 fingerprint hashes globally for all requests sent by this client.
+func WithClientCertificatePins(pins map[string][]string) ClientOption {
+	return func(c *Client) {
+		if c.fingerprint.CertificatePins == nil {
+			c.fingerprint.CertificatePins = make(map[string][]string)
+		}
+
+		for domain, hashes := range pins {
+			c.fingerprint.CertificatePins[domain] = append(c.fingerprint.CertificatePins[domain], hashes...)
+		}
 	}
 }
 

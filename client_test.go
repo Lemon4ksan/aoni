@@ -2261,3 +2261,70 @@ func TestWithClientTCPDelay(t *testing.T) {
 	assert.Equal(t, 100*time.Millisecond, cfgOverride.TCPDelay.Min)
 	assert.Equal(t, 200*time.Millisecond, cfgOverride.TCPDelay.Max)
 }
+
+func TestClient_WithClientInsecureSkipVerify(t *testing.T) {
+	t.Parallel()
+
+	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	t.Cleanup(server.Close)
+
+	client := NewClient(nil, WithClientInsecureSkipVerify())
+	resp, err := client.Request(t.Context(), http.MethodGet, server.URL)
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusOK, resp.StatusCode)
+}
+
+func TestClient_WithClientResponseValidator(t *testing.T) {
+	t.Parallel()
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	t.Cleanup(server.Close)
+
+	errClientVal := errors.New("client validator error")
+	errReqVal := errors.New("request validator error")
+
+	t.Run("Client-level only - failure", func(t *testing.T) {
+		client := NewClient(nil, WithClientResponseValidator(func(resp *http.Response) error {
+			return errClientVal
+		}))
+		_, err := client.Request(t.Context(), http.MethodGet, server.URL)
+		require.Error(t, err)
+		assert.ErrorIs(t, err, errClientVal)
+	})
+
+	t.Run("Client-level and request-level both fail - request-level wins", func(t *testing.T) {
+		client := NewClient(nil, WithClientResponseValidator(func(resp *http.Response) error {
+			return errClientVal
+		}))
+		_, err := client.Request(
+			t.Context(),
+			http.MethodGet,
+			server.URL,
+			WithResponseValidator(func(resp *http.Response) error {
+				return errReqVal
+			}),
+		)
+		require.Error(t, err)
+		assert.ErrorIs(t, err, errReqVal)
+	})
+
+	t.Run("Client-level fails, request-level succeeds - request-level override passes", func(t *testing.T) {
+		client := NewClient(nil, WithClientResponseValidator(func(resp *http.Response) error {
+			return errClientVal
+		}))
+		resp, err := client.Request(
+			t.Context(),
+			http.MethodGet,
+			server.URL,
+			WithResponseValidator(func(resp *http.Response) error {
+				return nil
+			}),
+		)
+		require.NoError(t, err)
+		assert.Equal(t, http.StatusOK, resp.StatusCode)
+	})
+}
