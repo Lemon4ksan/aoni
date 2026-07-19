@@ -16,3 +16,6 @@ profile.cov
 
 # Memory profile
 *.pprof
+
+# Example output
+*.json
