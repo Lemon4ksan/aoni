@@ -2,7 +2,7 @@
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
-package aoni
+package aoni_test
 
 import (
 	"context"
@@ -14,6 +14,8 @@ import (
 
 	"github.com/stretchr/testify/assert"
 
+	"github.com/lemon4ksan/aoni"
+	"github.com/lemon4ksan/aoni/option"
 )
 
 type MockChallengeSolver struct {
@@ -48,7 +50,7 @@ func TestChallengeSolver_BypassesChallenge(t *testing.T) {
 
 	solver := &MockChallengeSolver{
 		solveFunc: func(ctx context.Context, err error, req *http.Request) (*http.Response, error) {
-			assert.ErrorIs(t, err, ErrCloudflareChallenge)
+			assert.ErrorIs(t, err, aoni.ErrCloudflareChallenge)
 
 			client := &http.Client{}
 
@@ -64,16 +66,16 @@ func TestChallengeSolver_BypassesChallenge(t *testing.T) {
 		},
 	}
 
-	client := NewClient(nil,
-		withBaseURL(server.URL),
-		withChallengeSolver(solver),
+	client := aoni.NewClient(nil,
+		option.WithBaseURL(server.URL),
+		option.WithChallengeSolver(solver),
 	)
 
 	type Response struct {
 		Success bool `json:"success"`
 	}
 
-	res, err := GetTo[Response](context.Background(), client, "/")
+	res, err := aoni.GetTo[Response](context.Background(), client, "/")
 	assert.NoError(t, err)
 	assert.True(t, res.Success)
 	assert.Equal(t, 1, solver.solveCount)
@@ -129,17 +131,17 @@ func TestChallengeSolver_CustomDetector(t *testing.T) {
 		},
 	}
 
-	client := NewClient(nil,
-		withBaseURL(server.URL),
-		withChallengeDetector(detector),
-		withChallengeSolver(solver),
+	client := aoni.NewClient(nil,
+		option.WithBaseURL(server.URL),
+		option.WithChallengeDetector(detector),
+		option.WithChallengeSolver(solver),
 	)
 
 	type Response struct {
 		Success bool `json:"success"`
 	}
 
-	res, err := GetTo[Response](context.Background(), client, "/")
+	res, err := aoni.GetTo[Response](context.Background(), client, "/")
 	assert.NoError(t, err)
 	assert.True(t, res.Success)
 	assert.Equal(t, 1, solver.solveCount)

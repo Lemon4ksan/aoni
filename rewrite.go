@@ -18,7 +18,7 @@ type HostRewriteConfig struct {
 // WithHostRewrite returns a RequestModifier that rewrites the host header based on the provided rules.
 func WithHostRewrite(rules map[string]string) RequestModifier {
 	return func(req *http.Request) {
-		getOrInitRequestConfig(req).HostRewrite = &HostRewriteConfig{Rules: rules}
+		GetOrInitRequestConfig(req).HostRewrite = &HostRewriteConfig{Rules: rules}
 	}
 }
 
@@ -26,7 +26,7 @@ func WithHostRewrite(rules map[string]string) RequestModifier {
 // HostRewriteConfig in the request context, or creates a new one if none are present.
 func AppendHostRewrite(rules map[string]string) RequestModifier {
 	return func(req *http.Request) {
-		cfg := getOrInitRequestConfig(req)
+		cfg := GetOrInitRequestConfig(req)
 
 		newRules := make(map[string]string)
 		if cfg.HostRewrite != nil && cfg.HostRewrite.Rules != nil {

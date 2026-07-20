@@ -22,6 +22,15 @@ import (
 	"github.com/lemon4ksan/aoni/h2"
 )
 
+const (
+	// AlpnH3 is the official ALPN protocol identifier for HTTP/3 over QUIC.
+	AlpnH3 = "h3"
+	// AlpnH2 is the official ALPN protocol identifier for HTTP/2 over TLS.
+	AlpnH2 = "h2"
+	// AlpnHTTP is the official ALPN protocol identifier for HTTP/1.1.
+	AlpnHTTP = "http/1.1"
+)
+
 // HTTPDoer executes an [http.Request] and returns a response.
 // [http.Client] satisfies this interface. Pass a [DoerFunc] to adapt
 // a plain function.
@@ -83,6 +92,11 @@ type Logger interface {
 	Error(msg string, args ...any)
 	ErrorContext(ctx context.Context, msg string, args ...any)
 }
+
+// ClientOption is a functional option that configures a [Config] and is
+// consumed by [NewClient] or [Client.With] to produce a configured client.
+// Concrete option implementations are located in the [github.com/lemon4ksan/aoni/option] package.
+type ClientOption func(cfg *Config)
 
 // Client is an immutable, concurrency-safe HTTP client built on [HTTPDoer].
 // Every With* method returns a new clone, so the original remains usable

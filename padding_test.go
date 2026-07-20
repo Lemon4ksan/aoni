@@ -5,10 +5,7 @@
 package aoni
 
 import (
-	"context"
-	"encoding/hex"
 	"net"
-	"net/http"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -104,31 +101,6 @@ func TestRandIntn_Boundaries(t *testing.T) {
 
 	assert.Equal(t, 0, randIntn(0))
 	assert.Equal(t, 0, randIntn(-10))
-}
-
-func TestApplyRequestPadding(t *testing.T) {
-	t.Parallel()
-
-	cfg := PaddingConfig{
-		MinPaddingBytes: 8,
-		MaxPaddingBytes: 8,
-		PaddingHeader:   "X-Padding-Test",
-	}
-
-	req, err := http.NewRequestWithContext(context.Background(), "GET", "http://localhost", nil)
-	require.NoError(t, err)
-
-	mod := WithPadding(cfg)
-	require.NotNil(t, mod)
-
-	mod(req)
-
-	headerVal := req.Header.Get("X-Padding-Test")
-	require.NotEmpty(t, headerVal)
-
-	decoded, err := hex.DecodeString(headerVal)
-	require.NoError(t, err)
-	assert.Len(t, decoded, 8)
 }
 
 func TestWrapWithMSSLimit(t *testing.T) {

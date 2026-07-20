@@ -7,6 +7,7 @@ package aoni
 import (
 	"context"
 	"crypto/tls"
+	"crypto/x509"
 	"net"
 	"net/http"
 	"net/url"
@@ -93,10 +94,14 @@ func (c *Client) applyDialers(transport *http.Transport) {
 		return
 	}
 
-	if c.fingerprint.H2Configurer != nil {
-		t2, err := http2.ConfigureTransports(transport)
-		if err == nil && t2 != nil {
-			t2.TLSClientConfig = transport.TLSClientConfig
+	// Always force HTTP/2 on the transport.
+	// This ensures that even if wrapped in cookie.Transport or h2.FramedTransport
+	// the client will be able to natively negotiate the h2 protocol during the TLS handshake.
+	t2, err := http2.ConfigureTransports(transport)
+	if err == nil && t2 != nil {
+		t2.TLSClientConfig = transport.TLSClientConfig
+
+		if c.fingerprint.H2Configurer != nil {
 			_ = c.fingerprint.H2Configurer.ConfigureHTTP2(t2)
 		}
 	}
@@ -123,7 +128,8 @@ func (c *Client) applyDialers(transport *http.Transport) {
 		return proxyClient{}.CleanDialContext(ctx, dialCfg)
 	}
 
-	if c.fingerprint.BrowserID != BrowserNone || c.fingerprint.TLSClientHelloID != nil || c.fingerprint.TLSClientHelloSpecProvider != nil {
+	if c.fingerprint.BrowserID != BrowserNone || c.fingerprint.TLSClientHelloID != nil ||
+		c.fingerprint.TLSClientHelloSpecProvider != nil {
 		tlsConfig := transport.TLSClientConfig
 		proxyFn := transport.Proxy
 		transport.DialTLSContext = func(ctx context.Context, network, addr string) (net.Conn, error) {
@@ -190,7 +196,17 @@ func (c *Client) dialContext(ctx context.Context, network, addr string) (net.Con
 		effectiveCfg = cloned
 	}
 
-	if cfg := GetRequestConfig(ctx); cfg != nil && len(cfg.CertificatePins) > 0 {
+	if effectiveCfg.InsecureSkipVerify {
+		if cfg := GetRequestConfig(ctx); cfg != nil && len(cfg.CertificatePins) > 0 {
+			effectiveCfg.VerifyPeerCertificate = func(rawCerts [][]byte, verifiedChains [][]*x509.Certificate) error {
+				return verifyCertificatePins(host, cfg.CertificatePins, rawCerts)
+			}
+		} else {
+			effectiveCfg.VerifyPeerCertificate = func(rawCerts [][]byte, verifiedChains [][]*x509.Certificate) error { //nolint:gosec
+				return nil
+			}
+		}
+	} else if cfg := GetRequestConfig(ctx); cfg != nil && len(cfg.CertificatePins) > 0 {
 		cloned := effectiveCfg.Clone()
 		cloned.VerifyPeerCertificate = tlsEvasion{}.wrapPinning( //nolint:gosec
 			host, cfg.CertificatePins, cloned.VerifyPeerCertificate,
@@ -268,12 +284,10 @@ func (c *Client) dialTLSWithUTLS(
 		return nil, err
 	}
 
-	alpnProtos := []string{"http/1.1"}
 	if reqCfg != nil && len(reqCfg.ALPNOverride) > 0 {
-		alpnProtos = reqCfg.ALPNOverride
+		ev := tlsEvasion{}
+		uConn.Extensions = ev.ForceALPN(uConn.Extensions, reqCfg.ALPNOverride)
 	}
-
-	uConn.Extensions = ev.ForceALPN(uConn.Extensions, alpnProtos)
 
 	report := ev.ExtractJA4(uConn, host)
 

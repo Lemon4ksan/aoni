@@ -9,11 +9,13 @@
 package main
 
 import (
-	"github.com/lemon4ksan/aoni/option"
 	"context"
 	"fmt"
 	"log"
 	"time"
+
+	"github.com/lemon4ksan/aoni/mod"
+	"github.com/lemon4ksan/aoni/option"
 
 	"github.com/lemon4ksan/aoni"
 	"github.com/lemon4ksan/aoni/ws"
@@ -29,7 +31,7 @@ func main() {
 
 	// Establish a WebSocket connection
 	conn, resp, err := ws.DialWebSocket(ctx, client, "wss://echo.websocket.org",
-		aoni.WithHeader("Origin", "https://example.com"),
+		mod.WithHeader("Origin", "https://example.com"),
 	)
 	if err != nil {
 		log.Fatal(err)

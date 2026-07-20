@@ -9,11 +9,13 @@
 package main
 
 import (
-	"github.com/lemon4ksan/aoni/option"
 	"context"
 	"fmt"
 	"log"
 	"time"
+
+	"github.com/lemon4ksan/aoni/mod"
+	"github.com/lemon4ksan/aoni/option"
 
 	"github.com/lemon4ksan/aoni"
 )
@@ -52,7 +54,7 @@ func main() {
 
 	result, err := aoni.PostTo[PostResponse](
 		ctx, client, "/posts", payload,
-		aoni.WithErrorModel(&ErrorResponse{}),
+		mod.WithErrorModel(&ErrorResponse{}),
 	)
 	if err != nil {
 		log.Fatal(err)

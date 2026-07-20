@@ -189,7 +189,7 @@ func (c *Client) WithPersona(p Persona) *Client {
 
 	if len(p.HeaderOrder) > 0 {
 		newClient = newClient.With(func(cfg *Config) {
-			cfg.Defaults.DefaultMods = append(cfg.Defaults.DefaultMods, WithOrderedHeaders(p.HeaderOrder))
+			cfg.Defaults.DefaultMods = append(cfg.Defaults.DefaultMods, withOrderedHeaders(p.HeaderOrder))
 		})
 	}
 

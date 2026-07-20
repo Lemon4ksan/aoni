@@ -470,7 +470,7 @@ type FallbackFunc func(req *http.Request, origErr error) (*http.Response, error)
 // fallback for this request. See [FallbackMiddleware].
 func WithFallback(f FallbackFunc) RequestModifier {
 	return func(req *http.Request) {
-		getOrInitRequestConfig(req).Fallback = f
+		GetOrInitRequestConfig(req).Fallback = f
 	}
 }
 

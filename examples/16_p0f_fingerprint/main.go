@@ -6,11 +6,12 @@
 package main
 
 import (
-	"github.com/lemon4ksan/aoni/option"
 	"context"
 	"fmt"
 	"log"
 	"time"
+
+	"github.com/lemon4ksan/aoni/option"
 
 	"github.com/lemon4ksan/aoni"
 	"github.com/lemon4ksan/aoni/p0f"
@@ -25,7 +26,7 @@ func main() {
 
 	client := aoni.NewClient(nil,
 		option.WithBaseURL("https://httpbin.org"),
-		option.WithTimeout(10 * time.Second),
+		option.WithTimeout(10*time.Second),
 		option.WithP0fSignature(p0f.Linux311),
 	)
 

@@ -89,7 +89,7 @@ func ContextModifiers(ctx context.Context) []RequestModifier {
 func WithTraceContext() RequestModifier {
 	return func(req *http.Request) {
 		info := &TraceInfo{}
-		getOrInitRequestConfig(req).TraceInfo = info
+		GetOrInitRequestConfig(req).TraceInfo = info
 		TraceJA4(info)(req)
 	}
 }

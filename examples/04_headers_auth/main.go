@@ -8,11 +8,13 @@
 package main
 
 import (
-	"github.com/lemon4ksan/aoni/option"
 	"context"
 	"fmt"
 	"log"
 	"time"
+
+	"github.com/lemon4ksan/aoni/mod"
+	"github.com/lemon4ksan/aoni/option"
 
 	"github.com/lemon4ksan/aoni"
 )
@@ -32,7 +34,7 @@ func main() {
 	// Bearer token authentication
 	res, err := aoni.GetTo[ProtectedResource](ctx, client,
 		"/bearer",
-		aoni.WithBearer("my-secret-token"),
+		mod.WithBearer("my-secret-token"),
 	)
 	if err != nil {
 		log.Fatal(err)
@@ -43,7 +45,7 @@ func main() {
 	// Basic authentication
 	basicRes, err := aoni.GetTo[ProtectedResource](ctx, client,
 		"/basic-auth/user/passwd",
-		aoni.WithBasicAuth("user", "passwd"),
+		mod.WithBasicAuth("user", "passwd"),
 	)
 	if err != nil {
 		log.Fatal(err)
@@ -54,9 +56,9 @@ func main() {
 	// Custom headers
 	headerRes, err := aoni.GetTo[ProtectedResource](ctx, client,
 		"/headers",
-		aoni.WithHeader("X-Custom-Header", "hello-aoni"),
-		aoni.WithHeader("X-Request-ID", "abc-123"),
-		aoni.WithOrigin("https://example.com"),
+		mod.WithHeader("X-Custom-Header", "hello-aoni"),
+		mod.WithHeader("X-Request-ID", "abc-123"),
+		mod.WithOrigin("https://example.com"),
 	)
 	if err != nil {
 		log.Fatal(err)

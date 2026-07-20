@@ -10,6 +10,7 @@ import (
 	"net/http"
 
 	"github.com/lemon4ksan/miyako/generic"
+	"golang.org/x/net/http2"
 
 	"github.com/lemon4ksan/aoni/cookie"
 )
@@ -228,7 +229,21 @@ func applyEngineConfig(c *Client, eng EngineConfig) {
 			transport.MaxIdleConnsPerHost = generic.Coalesce(pool.MaxIdleConnsPerHost, transport.MaxIdleConnsPerHost)
 			transport.MaxConnsPerHost = generic.Coalesce(pool.MaxConnsPerHost, transport.MaxConnsPerHost)
 			transport.IdleConnTimeout = generic.Coalesce(pool.IdleConnTimeout, transport.IdleConnTimeout)
-			transport.ResponseHeaderTimeout = generic.Coalesce(pool.ResponseHeaderTimeout, transport.ResponseHeaderTimeout)
+			transport.ResponseHeaderTimeout = generic.Coalesce(
+				pool.ResponseHeaderTimeout,
+				transport.ResponseHeaderTimeout,
+			)
+		}
+	}
+
+	if eng.HTTP2Config != nil {
+		if transport := c.Transport(); transport != nil {
+			t2, err := http2.ConfigureTransports(transport)
+			if err == nil && t2 != nil {
+				t2.ReadIdleTimeout = eng.HTTP2Config.ReadIdleTimeout
+				t2.PingTimeout = eng.HTTP2Config.PingTimeout
+				t2.AllowHTTP = eng.HTTP2Config.AllowHTTP
+			}
 		}
 	}
 }

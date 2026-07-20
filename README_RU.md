@@ -61,8 +61,8 @@ func main() {
 
 	// Запрашиваем, валидируем и декодируем за один шаг
 	user, err := aoni.GetTo[User](ctx, client, "/users/{id}",
-		aoni.WithVar("id", 123),
-		aoni.WithHeader("X-Custom", "value"),
+		mod.WithVar("id", 123),
+		mod.WithHeader("X-Custom", "value"),
 	)
 	if err != nil {
 		panic(err)
@@ -93,7 +93,7 @@ func main() {
 `aoni` использует модульный конвейер запросов. Вы можете настроить этапы выполнения глобально с помощью `option.WithPipeline` или переопределить их для конкретного запроса через `WithPipeline`:
 
 ```go
-resp, err := client.Get(ctx, "/path", aoni.WithPipeline(aoni.PipelineConfig{
+resp, err := client.Get(ctx, "/path", mod.WithPipeline(aoni.PipelineConfig{
 	RotateUA:   true,       // Согласованно ротирует User-Agent и Client Hints
 	Decompress: true,       // Автоматически обрабатывает gzip, brotli и zstd
 	Challenge:  true,       // Обнаруживает страницы проверки WAF (например, Cloudflare)

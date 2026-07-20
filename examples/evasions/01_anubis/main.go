@@ -11,7 +11,6 @@
 package main
 
 import (
-	"github.com/lemon4ksan/aoni/option"
 	"bytes"
 	"context"
 	"crypto/sha256"
@@ -26,6 +25,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/lemon4ksan/aoni/option"
 
 	"github.com/PuerkitoBio/goquery"
 	"github.com/lemon4ksan/aoni"

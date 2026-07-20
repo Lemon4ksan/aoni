@@ -36,6 +36,29 @@ import (
 	"github.com/lemon4ksan/aoni/ja4"
 )
 
+// IsBlockedIP returns true if the IP is a local or reserved IP.
+func IsBlockedIP(ip net.IP) bool {
+	if ip.IsUnspecified() || ip.IsLoopback() || ip.IsLinkLocalUnicast() || ip.IsLinkLocalMulticast() ||
+		ip.IsInterfaceLocalMulticast() {
+		return true
+	}
+
+	// Check private IP ranges.
+	if ip4 := ip.To4(); ip4 != nil {
+		return ip4[0] == 0 ||
+			ip4[0] == 10 ||
+			(ip4[0] == 172 && ip4[1] >= 16 && ip4[1] <= 31) ||
+			(ip4[0] == 192 && ip4[1] == 168)
+	}
+
+	if ip6 := ip.To16(); ip6 != nil {
+		// Check unique local IPv6.
+		return (ip6[0] & 0xfe) == 0xfc
+	}
+
+	return false
+}
+
 var (
 	bytePool = sync.Pool{
 		New: func() any {
@@ -1070,26 +1093,4 @@ func unwrapBody(c io.Closer) io.Closer {
 	}
 
 	return c
-}
-
-func isBlockedIP(ip net.IP) bool {
-	if ip.IsUnspecified() || ip.IsLoopback() || ip.IsLinkLocalUnicast() || ip.IsLinkLocalMulticast() ||
-		ip.IsInterfaceLocalMulticast() {
-		return true
-	}
-
-	// Check private IP ranges.
-	if ip4 := ip.To4(); ip4 != nil {
-		return ip4[0] == 0 ||
-			ip4[0] == 10 ||
-			(ip4[0] == 172 && ip4[1] >= 16 && ip4[1] <= 31) ||
-			(ip4[0] == 192 && ip4[1] == 168)
-	}
-
-	if ip6 := ip.To16(); ip6 != nil {
-		// Check unique local IPv6.
-		return (ip6[0] & 0xfe) == 0xfc
-	}
-
-	return false
 }

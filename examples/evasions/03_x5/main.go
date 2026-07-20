@@ -11,12 +11,11 @@
 //
 // By continuously polling the browser context, we capture these cookies immediately after they are set
 // and reuse them with aligned TLS fingerprints, bypassing the verification stage entirely.
-// 
+//
 // 5ka.ru only works with Russian VPN. No Yandex captcha is triggered.
 package main
 
 import (
-	"github.com/lemon4ksan/aoni/option"
 	"context"
 	"encoding/json"
 	"errors"
@@ -28,6 +27,8 @@ import (
 	"os"
 	"strings"
 	"time"
+
+	"github.com/lemon4ksan/aoni/option"
 
 	"github.com/lemon4ksan/aoni"
 	"github.com/lemon4ksan/aoni/profiles"

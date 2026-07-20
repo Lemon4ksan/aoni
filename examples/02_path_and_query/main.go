@@ -9,11 +9,13 @@
 package main
 
 import (
-	"github.com/lemon4ksan/aoni/option"
 	"context"
 	"fmt"
 	"log"
 	"time"
+
+	"github.com/lemon4ksan/aoni/mod"
+	"github.com/lemon4ksan/aoni/option"
 
 	"github.com/lemon4ksan/aoni"
 )
@@ -54,7 +56,7 @@ func main() {
 	// 1. Path variable: fetch user /users/{id}
 	user, err := aoni.GetTo[User](ctx, client,
 		"/users/{id}",
-		aoni.WithVar("id", 1),
+		mod.WithVar("id", 1),
 	)
 	if err != nil {
 		log.Fatal(err)
@@ -70,8 +72,8 @@ func main() {
 
 	comments, err := aoni.GetTo[[]Comment](ctx, client,
 		"/posts/{id}/comments",
-		aoni.WithVar("id", 1),
-		aoni.WithQuery(params),
+		mod.WithVar("id", 1),
+		mod.WithQuery(params),
 	)
 	if err != nil {
 		log.Fatal(err)
@@ -84,7 +86,7 @@ func main() {
 	// and automatically applies the values defined in 'default' tags.
 	posts, err := aoni.GetTo[[]Post](ctx, client,
 		"/posts",
-		aoni.WithQuery(PostFilter{}), // Zero-value struct -> defaults will be applied!
+		mod.WithQuery(PostFilter{}), // Zero-value struct -> defaults will be applied!
 	)
 	if err != nil {
 		log.Fatal(err)

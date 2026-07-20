@@ -24,7 +24,7 @@ func TestStream(t *testing.T) {
 
 	t.Run("stream_response_body", func(t *testing.T) {
 		t.Parallel()
-		_, client := setupTestServer(t, func(w http.ResponseWriter, r *http.Request) {
+		_, client := SetupTestServer(t, func(w http.ResponseWriter, r *http.Request) {
 			w.Header().Set("Content-Type", "application/octet-stream")
 			w.Header().Set("Content-Length", "11")
 			w.WriteHeader(http.StatusOK)
@@ -45,7 +45,7 @@ func TestStream(t *testing.T) {
 
 	t.Run("stream_error_status", func(t *testing.T) {
 		t.Parallel()
-		_, client := setupTestServer(t, func(w http.ResponseWriter, r *http.Request) {
+		_, client := SetupTestServer(t, func(w http.ResponseWriter, r *http.Request) {
 			w.WriteHeader(http.StatusNotFound)
 		})
 
@@ -59,7 +59,7 @@ func TestStream(t *testing.T) {
 
 	t.Run("stream_with_query_params", func(t *testing.T) {
 		t.Parallel()
-		_, client := setupTestServer(t, func(w http.ResponseWriter, r *http.Request) {
+		_, client := SetupTestServer(t, func(w http.ResponseWriter, r *http.Request) {
 			assert.Equal(t, "bar", r.URL.Query().Get("foo"))
 
 			_, _ = w.Write([]byte("ok"))
@@ -82,29 +82,12 @@ func TestStream(t *testing.T) {
 		assert.Equal(t, "ok", string(data))
 	})
 
-	t.Run("stream_with_request_modifier", func(t *testing.T) {
-		t.Parallel()
-		_, client := setupTestServer(t, func(w http.ResponseWriter, r *http.Request) {
-			assert.Equal(t, "Bearer token123", r.Header.Get("Authorization"))
-
-			_, _ = w.Write([]byte("authorized"))
-		})
-
-		stream, err := Stream(t.Context(), client, "/auth", WithBearer("token123"))
-		require.NoError(t, err)
-		t.Cleanup(func() { _ = stream.Close() })
-
-		data, err := io.ReadAll(stream)
-		require.NoError(t, err)
-		assert.Equal(t, "authorized", string(data))
-	})
-
 	t.Run("stream_large_body", func(t *testing.T) {
 		t.Parallel()
 
 		largeBody := strings.Repeat("x", 1024*1024)
 
-		_, client := setupTestServer(t, func(w http.ResponseWriter, r *http.Request) {
+		_, client := SetupTestServer(t, func(w http.ResponseWriter, r *http.Request) {
 			w.Header().Set("Content-Length", "1048576")
 			_, _ = w.Write([]byte(largeBody))
 		})
@@ -120,7 +103,7 @@ func TestStream(t *testing.T) {
 
 	t.Run("response_method", func(t *testing.T) {
 		t.Parallel()
-		_, client := setupTestServer(t, func(w http.ResponseWriter, r *http.Request) {
+		_, client := SetupTestServer(t, func(w http.ResponseWriter, r *http.Request) {
 			w.Header().Set("X-Custom", "value")
 			_, _ = w.Write([]byte("ok"))
 		})
@@ -138,7 +121,7 @@ func TestStream(t *testing.T) {
 
 func TestStreamNDJSON(t *testing.T) {
 	t.Parallel()
-	_, client := setupTestServer(t, func(w http.ResponseWriter, r *http.Request) {
+	_, client := SetupTestServer(t, func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/x-ndjson")
 		_, _ = w.Write([]byte(`{"message": "msg1"}` + "\n" + `{"message": "msg2"}` + "\n"))
 	})
@@ -166,7 +149,7 @@ func TestStreamNDJSON(t *testing.T) {
 
 func TestStreamSSE(t *testing.T) {
 	t.Parallel()
-	_, client := setupTestServer(t, func(w http.ResponseWriter, r *http.Request) {
+	_, client := SetupTestServer(t, func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/event-stream")
 		_, _ = w.Write([]byte("event: first\ndata: value1\nid: 1\n\nevent: second\ndata: value2\n\n"))
 	})
@@ -202,7 +185,7 @@ func TestMultiReadBody_FileCleanup(t *testing.T) {
 	data := strings.Repeat("x", 64*1024)
 
 	body := io.NopCloser(strings.NewReader(data))
-	mrb, err := newMultiReadBody(body, 32*1024, false)
+	mrb, err := NewMultiReadBody(body, 32*1024, false)
 	require.NoError(t, err)
 
 	mrc := mrb.(*multiReadBody)
@@ -233,14 +216,14 @@ func TestResponseBodyReadCloser_CallsReallyClose(t *testing.T) {
 	data := strings.Repeat("y", 64*1024)
 
 	body := io.NopCloser(strings.NewReader(data))
-	mrb, err := newMultiReadBody(body, 32*1024, false)
+	mrb, err := NewMultiReadBody(body, 32*1024, false)
 	require.NoError(t, err)
 
 	mrc := mrb.(*multiReadBody)
 	require.NotNil(t, mrc.tmpFile)
 	tmpPath := mrc.tmpFile.Name()
 
-	frc := newResponseBodyReadCloser(mrb)
+	frc := NewResponseBodyReadCloser(mrb)
 
 	err = frc.Close()
 	require.NoError(t, err)
@@ -254,7 +237,7 @@ func TestMultiReadBody_InMemory_NoTmpFile(t *testing.T) {
 
 	data := "small data"
 	body := io.NopCloser(strings.NewReader(data))
-	mrb, err := newMultiReadBody(body, 1024, false)
+	mrb, err := NewMultiReadBody(body, 1024, false)
 	require.NoError(t, err)
 
 	mrc := mrb.(*multiReadBody)
@@ -369,7 +352,7 @@ func (r *threadSafeReader) Read(p []byte) (int, error) {
 
 func TestStreamWithBody(t *testing.T) {
 	t.Parallel()
-	_, client := setupTestServer(t, func(w http.ResponseWriter, r *http.Request) {
+	_, client := SetupTestServer(t, func(w http.ResponseWriter, r *http.Request) {
 		body, err := io.ReadAll(r.Body)
 		require.NoError(t, err)
 		assert.Equal(t, "post_payload_data", string(body))
@@ -388,7 +371,7 @@ func TestStreamWithBody(t *testing.T) {
 
 func TestStreamSSE_Integration(t *testing.T) {
 	t.Parallel()
-	_, client := setupTestServer(t, func(w http.ResponseWriter, r *http.Request) {
+	_, client := SetupTestServer(t, func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/event-stream")
 		_, _ = w.Write([]byte("event: welcome\ndata: joined\n\n"))
 	})
@@ -412,7 +395,7 @@ func TestStreamSSE_Integration(t *testing.T) {
 
 func TestStreamChunks(t *testing.T) {
 	t.Parallel()
-	_, client := setupTestServer(t, func(w http.ResponseWriter, r *http.Request) {
+	_, client := SetupTestServer(t, func(w http.ResponseWriter, r *http.Request) {
 		_, _ = w.Write([]byte("token1_token2_token3"))
 	})
 
@@ -436,7 +419,7 @@ func TestStreamChunks(t *testing.T) {
 
 func TestStreamNDJSON_ContextCancellation(t *testing.T) {
 	t.Parallel()
-	_, client := setupTestServer(t, func(w http.ResponseWriter, r *http.Request) {
+	_, client := SetupTestServer(t, func(w http.ResponseWriter, r *http.Request) {
 		// Send first record, wait/block, then send second
 		_, _ = w.Write([]byte(`{"message":"first"}` + "\n"))
 

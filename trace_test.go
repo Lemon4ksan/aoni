@@ -21,7 +21,7 @@ func TestTrace(t *testing.T) {
 
 	t.Run("capture_trace_info_and_remote_addr", func(t *testing.T) {
 		t.Parallel()
-		_, client := setupTestServer(t, func(w http.ResponseWriter, r *http.Request) {
+		_, client := SetupTestServer(t, func(w http.ResponseWriter, r *http.Request) {
 			_, _ = w.Write([]byte("ok"))
 		})
 
@@ -160,7 +160,7 @@ func TestCurlCommand(t *testing.T) {
 func TestAsCurl_WithBody(t *testing.T) {
 	t.Parallel()
 
-	server, client := setupBridgeTest(t, func(w http.ResponseWriter, r *http.Request) {
+	server, client := SetupBridgeTest(t, func(w http.ResponseWriter, r *http.Request) {
 		body, err := io.ReadAll(r.Body)
 		require.NoError(t, err)
 		assert.Equal(t, "replayed_body_data", string(body))

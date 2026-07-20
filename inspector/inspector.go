@@ -5,7 +5,6 @@
 package inspector
 
 import (
-	"github.com/lemon4ksan/aoni/option"
 	"context"
 	_ "embed"
 	"encoding/json"
@@ -18,6 +17,7 @@ import (
 	"time"
 
 	"github.com/lemon4ksan/aoni"
+	"github.com/lemon4ksan/aoni/option"
 )
 
 // CapturedRequest represents a request logged by the traffic inspector.

@@ -7,8 +7,6 @@ package aoni
 import (
 	"crypto/rand"
 	"encoding/binary"
-	"encoding/hex"
-	"net/http"
 )
 
 // Predefined realistic header pools to mimic popular Cloud/CDN networks.
@@ -65,18 +63,6 @@ type PaddingConfig struct {
 	// padding header indistinguishable from legitimate CDN or cloud tracing
 	// headers. When non-empty this field takes precedence over PaddingHeader.
 	HeaderPool []string
-}
-
-// WithPadding returns a [RequestModifier] that adds random packet padding
-// headers to the request matching the given [PaddingConfig].
-// This is a high-level helper to apply individual padding settings per request.
-func WithPadding(cfg PaddingConfig) RequestModifier {
-	return func(req *http.Request) {
-		if padding := GeneratePadding(cfg); len(padding) > 0 {
-			headerName := PaddingHeaderName(cfg)
-			req.Header.Set(headerName, hex.EncodeToString(padding))
-		}
-	}
 }
 
 // GeneratePadding returns random padding bytes of the configured length range.

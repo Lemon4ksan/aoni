@@ -46,7 +46,7 @@ func (tlsEvasion) BuildConfig(
 ) *utls.Config {
 	uCfg := &utls.Config{
 		ServerName: host,
-		NextProtos: []string{"http/1.1"},
+		NextProtos: []string{AlpnH2, AlpnHTTP},
 	}
 
 	if tlsCfg != nil {
@@ -69,18 +69,32 @@ func (tlsEvasion) BuildConfig(
 		uCfg.InsecureSkipVerify = true //nolint:gosec
 	}
 
-	if reqCfg == nil {
-		return uCfg
-	}
-
-	if len(reqCfg.CertificatePins) > 0 {
+	// If InsecureSkipVerify is enabled, force overwrite VerifyPeerCertificate
+	// with an empty function that returns nil. This will cause uTLS to skip verification
+	// even when using custom HelloCustom specifications.
+	if uCfg.InsecureSkipVerify {
+		if reqCfg != nil && len(reqCfg.CertificatePins) > 0 {
+			uCfg.VerifyPeerCertificate = func(rawCerts [][]byte, verifiedChains [][]*x509.Certificate) error {
+				return verifyCertificatePins(host, reqCfg.CertificatePins, rawCerts)
+			}
+		} else {
+			uCfg.VerifyPeerCertificate = func(rawCerts [][]byte, verifiedChains [][]*x509.Certificate) error {
+				return nil
+			}
+		}
+	} else if reqCfg != nil && len(reqCfg.CertificatePins) > 0 {
 		uCfg.VerifyPeerCertificate = tlsEvasion{}.wrapPinning(
 			host, reqCfg.CertificatePins, uCfg.VerifyPeerCertificate,
 		)
 	}
 
+	if reqCfg == nil {
+		return uCfg
+	}
+
 	if reqCfg.SessionCache != nil {
-		uCfg.ClientSessionCache = reqCfg.SessionCache
+		uConfig := uCfg // uConfig is needed for field assignment, but we can assign directly to uCfg
+		uConfig.ClientSessionCache = reqCfg.SessionCache
 	}
 
 	if len(reqCfg.ALPNOverride) > 0 {
@@ -254,7 +268,7 @@ func (proxy proxyClient) CleanDialContext(ctx context.Context, dialCfg dialConfi
 
 	// Explicitly perform SSRF checks on resolved IP addresses prior to dialing
 	for _, address := range addrs {
-		if dialCfg.SSRFGuard && isBlockedIP(address.IP) {
+		if dialCfg.SSRFGuard && IsBlockedIP(address.IP) {
 			return nil, fmt.Errorf("%w: blocked IP %s", ErrSSRFBlocked, address.IP)
 		}
 	}

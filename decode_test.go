@@ -2,7 +2,7 @@
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
-package aoni
+package aoni_test
 
 import (
 	"encoding/json"
@@ -14,6 +14,9 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/lemon4ksan/aoni"
+	"github.com/lemon4ksan/aoni/mod"
 )
 
 func TestRawDecoder_Decode_Success(t *testing.T) {
@@ -23,7 +26,7 @@ func TestRawDecoder_Decode_Success(t *testing.T) {
 
 	var output []byte
 
-	err := RawDecoder.Decode(r, &output)
+	err := aoni.RawDecoder.Decode(r, &output)
 	require.NoError(t, err)
 	assert.Equal(t, "raw payload data", string(output))
 }
@@ -35,7 +38,7 @@ func TestRawDecoder_Decode_InvalidTargetType(t *testing.T) {
 
 	var output string // not *[]byte
 
-	err := RawDecoder.Decode(r, &output)
+	err := aoni.RawDecoder.Decode(r, &output)
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "aoni: RawDecoder requires *[]byte as output type")
 }
@@ -51,7 +54,7 @@ func TestRawDecoder_Decode_CopyError(t *testing.T) {
 
 	var output []byte
 
-	err := RawDecoder.Decode(errorReader{}, &output)
+	err := aoni.RawDecoder.Decode(errorReader{}, &output)
 	assert.ErrorIs(t, err, io.ErrUnexpectedEOF)
 }
 
@@ -67,7 +70,7 @@ func TestJSONDecoder_Decode(t *testing.T) {
 			Name string `json:"name"`
 		}
 
-		err := JSONDecoder.Decode(r, &target)
+		err := aoni.JSONDecoder.Decode(r, &target)
 		require.NoError(t, err)
 		assert.Equal(t, "test_user", target.Name)
 	})
@@ -81,7 +84,7 @@ func TestJSONDecoder_Decode(t *testing.T) {
 			Name string `json:"name"`
 		}
 
-		err := JSONDecoder.Decode(r, &target)
+		err := aoni.JSONDecoder.Decode(r, &target)
 		assert.Error(t, err)
 	})
 }
@@ -98,7 +101,7 @@ func TestXMLDecoder_Decode(t *testing.T) {
 			Name string `xml:"name"`
 		}
 
-		err := XMLDecoder.Decode(r, &target)
+		err := aoni.XMLDecoder.Decode(r, &target)
 		require.NoError(t, err)
 		assert.Equal(t, "test_xml", target.Name)
 	})
@@ -112,7 +115,7 @@ func TestXMLDecoder_Decode(t *testing.T) {
 			Name string `xml:"name"`
 		}
 
-		err := XMLDecoder.Decode(r, &target)
+		err := aoni.XMLDecoder.Decode(r, &target)
 		assert.Error(t, err)
 	})
 }
@@ -129,7 +132,7 @@ func TestYAMLDecoder_Decode(t *testing.T) {
 			Name string `yaml:"name"`
 		}
 
-		err := YAMLDecoder.Decode(r, &target)
+		err := aoni.YAMLDecoder.Decode(r, &target)
 		require.NoError(t, err)
 		assert.Equal(t, "test_yaml", target.Name)
 	})
@@ -143,7 +146,7 @@ func TestYAMLDecoder_Decode(t *testing.T) {
 			Name string `yaml:"name"`
 		}
 
-		err := YAMLDecoder.Decode(r, &target)
+		err := aoni.YAMLDecoder.Decode(r, &target)
 		assert.Error(t, err)
 	})
 }
@@ -152,7 +155,7 @@ func TestDecoderFunc_Decode(t *testing.T) {
 	t.Parallel()
 
 	called := false
-	df := DecoderFunc(func(r io.Reader, target any) error {
+	df := aoni.DecoderFunc(func(r io.Reader, target any) error {
 		called = true
 		return nil
 	})
@@ -167,13 +170,13 @@ func TestDecoderModifiers(t *testing.T) {
 
 	tests := []struct {
 		name            string
-		modifier        RequestModifier
-		expectedDecoder Decoder
+		modifier        aoni.RequestModifier
+		expectedDecoder aoni.Decoder
 	}{
-		{"AsRaw", WithRawDecoder(), RawDecoder},
-		{"AsJSON", WithJSONDecoder(), JSONDecoder},
-		{"AsXML", WithXMLDecoder(), XMLDecoder},
-		{"AsYAML", WithYAMLDecoder(), YAMLDecoder},
+		{"AsRaw", mod.WithRawDecoder(), aoni.RawDecoder},
+		{"AsJSON", mod.WithJSONDecoder(), aoni.JSONDecoder},
+		{"AsXML", mod.WithXMLDecoder(), aoni.XMLDecoder},
+		{"AsYAML", mod.WithYAMLDecoder(), aoni.YAMLDecoder},
 	}
 
 	for _, tt := range tests {
@@ -185,15 +188,15 @@ func TestDecoderModifiers(t *testing.T) {
 
 			tt.modifier(req)
 
-			cfg := GetRequestConfig(req.Context())
+			cfg := aoni.GetRequestConfig(req.Context())
 			require.NotNil(t, cfg)
-			d, ok := cfg.Decoder.(Decoder)
+			d, ok := cfg.Decoder.(aoni.Decoder)
 			require.True(t, ok)
 
 			// In Go, function values (like DecoderFunc) are not comparable directly.
 			// We compare their function pointers via reflection to verify reference equality.
-			if _, isRaw := tt.expectedDecoder.(rawDecoder); isRaw {
-				assert.IsType(t, rawDecoder{}, d)
+			if _, isRaw := tt.expectedDecoder.(aoni.RawDecoderT); isRaw {
+				assert.IsType(t, aoni.RawDecoderT{}, d)
 			} else {
 				expectedPtr := reflect.ValueOf(tt.expectedDecoder).Pointer()
 				actualPtr := reflect.ValueOf(d).Pointer()
@@ -215,7 +218,7 @@ func TestDecodeTo_Helpers(t *testing.T) {
 			ID int `json:"id"`
 		}
 
-		val, err := DecodeTo[item](r, JSONDecoder)
+		val, err := aoni.DecodeTo[item](r, aoni.JSONDecoder)
 		require.NoError(t, err)
 		assert.Equal(t, 42, val.ID)
 	})
@@ -229,7 +232,7 @@ func TestDecodeTo_Helpers(t *testing.T) {
 			ID int `json:"id"`
 		}
 
-		_, err := DecodeTo[item](r, JSONDecoder)
+		_, err := aoni.DecodeTo[item](r, aoni.JSONDecoder)
 		assert.Error(t, err)
 	})
 
@@ -242,7 +245,7 @@ func TestDecodeTo_Helpers(t *testing.T) {
 			ID int `json:"id"`
 		}
 
-		val, err := DecodeJSON[item](r)
+		val, err := aoni.DecodeJSON[item](r)
 		require.NoError(t, err)
 		assert.Equal(t, 100, val.ID)
 	})
@@ -256,7 +259,7 @@ func TestDecodeTo_Helpers(t *testing.T) {
 			ID int `xml:"id"`
 		}
 
-		val, err := DecodeXML[item](r)
+		val, err := aoni.DecodeXML[item](r)
 		require.NoError(t, err)
 		assert.Equal(t, 200, val.ID)
 	})
@@ -270,7 +273,7 @@ func TestDecodeTo_Helpers(t *testing.T) {
 			ID int `yaml:"id"`
 		}
 
-		val, err := DecodeYAML[item](r)
+		val, err := aoni.DecodeYAML[item](r)
 		require.NoError(t, err)
 		assert.Equal(t, 300, val.ID)
 	})
@@ -283,7 +286,7 @@ func TestNewJSONDecoder_StrictAndUseNumber(t *testing.T) {
 		t.Parallel()
 
 		r := strings.NewReader(`{"id":42,"extra_key":"value"}`)
-		d := NewJSONDecoder(JSONDecoderConfig{DisallowUnknownFields: true})
+		d := aoni.NewJSONDecoder(aoni.JSONDecoderConfig{DisallowUnknownFields: true})
 
 		var target struct {
 			ID int `json:"id"`
@@ -298,7 +301,7 @@ func TestNewJSONDecoder_StrictAndUseNumber(t *testing.T) {
 		t.Parallel()
 
 		r := strings.NewReader(`{"val":12345678901234567890}`)
-		d := NewJSONDecoder(JSONDecoderConfig{UseNumber: true})
+		d := aoni.NewJSONDecoder(aoni.JSONDecoderConfig{UseNumber: true})
 
 		var target struct {
 			Val any `json:"val"`
@@ -337,7 +340,7 @@ func TestDecodeByContentType(t *testing.T) {
 
 			var target testUser
 
-			err := DecodeByContentType(r, tt.contentType, &target)
+			err := aoni.DecodeByContentType(r, tt.contentType, &target)
 			require.NoError(t, err)
 			assert.Equal(t, tt.wantName, target.Name)
 		})
@@ -350,7 +353,7 @@ func TestDecodeByContentType(t *testing.T) {
 
 		var target []byte
 
-		err := DecodeByContentType(r, "application/octet-stream", &target)
+		err := aoni.DecodeByContentType(r, "application/octet-stream", &target)
 		require.NoError(t, err)
 		assert.Equal(t, "binary_payload", string(target))
 	})
@@ -360,7 +363,7 @@ func TestLimitDecoder_ExceedsLimit_ReturnsError(t *testing.T) {
 	t.Parallel()
 
 	r := strings.NewReader(`{"name":"extremely_long_name_exceeding_limit"}`)
-	d := LimitDecoder(JSONDecoder, 15) // Constraints reader to 15 bytes, truncating the stream
+	d := aoni.LimitDecoder(aoni.JSONDecoder, 15) // Constraints reader to 15 bytes, truncating the stream
 
 	var target struct {
 		Name string `json:"name"`

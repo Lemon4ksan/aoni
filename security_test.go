@@ -50,7 +50,7 @@ func TestIsBlockedIP(t *testing.T) {
 
 			ip := net.ParseIP(tt.ip)
 			require.NotNil(t, ip, "invalid IP: %s", tt.ip)
-			assert.Equal(t, tt.blocked, isBlockedIP(ip))
+			assert.Equal(t, tt.blocked, IsBlockedIP(ip))
 		})
 	}
 }
@@ -79,7 +79,7 @@ func TestIsBlockedIP_AdvancedIPv6AndObfuscation(t *testing.T) {
 
 			ip := net.ParseIP(tt.ip)
 			require.NotNil(t, ip, "failed to parse IP: %s", tt.ip)
-			assert.Equal(t, tt.blocked, isBlockedIP(ip))
+			assert.Equal(t, tt.blocked, IsBlockedIP(ip))
 		})
 	}
 }
@@ -293,7 +293,7 @@ func TestMultiReadBody_DoubleCloseIdempotency(t *testing.T) {
 	t.Parallel()
 
 	rc := io.NopCloser(strings.NewReader("payload to write onto temp file in disk storage"))
-	mBody, err := newMultiReadBody(rc, 5, false)
+	mBody, err := NewMultiReadBody(rc, 5, false)
 	require.NoError(t, err)
 
 	underlying, ok := mBody.(*multiReadBody)

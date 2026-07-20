@@ -2,7 +2,7 @@
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
-package aoni
+package aoni_test
 
 import (
 	"crypto/sha256"
@@ -19,6 +19,10 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/lemon4ksan/aoni"
+	"github.com/lemon4ksan/aoni/mod"
+	"github.com/lemon4ksan/aoni/option"
 )
 
 func TestCertificatePinning(t *testing.T) {
@@ -48,117 +52,117 @@ func TestCertificatePinning(t *testing.T) {
 	incorrectPin := "sha256/AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
 
 	t.Run("Standard Client - Correct Pin Base64", func(t *testing.T) {
-		client := NewClient(server.Client())
+		client := aoni.NewClient(server.Client())
 		resp, err := client.Request(t.Context(), http.MethodGet, server.URL,
-			WithCertificatePin("127.0.0.1", correctPinBase64),
+			mod.WithCertificatePin("127.0.0.1", correctPinBase64),
 		)
 		require.NoError(t, err)
 		assert.Equal(t, http.StatusOK, resp.StatusCode)
 	})
 
 	t.Run("Standard Client - Correct Pin Hex", func(t *testing.T) {
-		client := NewClient(server.Client())
+		client := aoni.NewClient(server.Client())
 		resp, err := client.Request(t.Context(), http.MethodGet, server.URL,
-			WithCertificatePin("127.0.0.1", correctPinHex),
+			mod.WithCertificatePin("127.0.0.1", correctPinHex),
 		)
 		require.NoError(t, err)
 		assert.Equal(t, http.StatusOK, resp.StatusCode)
 	})
 
 	t.Run("Standard Client - Correct Pin Prefixed", func(t *testing.T) {
-		client := NewClient(server.Client())
+		client := aoni.NewClient(server.Client())
 		resp, err := client.Request(t.Context(), http.MethodGet, server.URL,
-			WithCertificatePin("127.0.0.1", correctPinPrefixed),
+			mod.WithCertificatePin("127.0.0.1", correctPinPrefixed),
 		)
 		require.NoError(t, err)
 		assert.Equal(t, http.StatusOK, resp.StatusCode)
 	})
 
 	t.Run("Standard Client - Incorrect Pin", func(t *testing.T) {
-		client := NewClient(server.Client())
+		client := aoni.NewClient(server.Client())
 		_, err := client.Request(t.Context(), http.MethodGet, server.URL,
-			WithCertificatePin("127.0.0.1", incorrectPin),
+			mod.WithCertificatePin("127.0.0.1", incorrectPin),
 		)
 		require.Error(t, err)
 		assert.True(
 			t,
-			errors.Is(err, ErrCertificatePinning) ||
+			errors.Is(err, aoni.ErrCertificatePinning) ||
 				strings.Contains(err.Error(), "certificate pinning validation failed"),
 		)
 	})
 
 	t.Run("UTLS Client - Correct Pin", func(t *testing.T) {
-		client := NewClient(nil, withTLSFingerprint(BrowserChrome))
+		client := aoni.NewClient(nil, option.WithTLSFingerprint(aoni.BrowserChrome))
 		resp, err := client.Request(t.Context(), http.MethodGet, server.URL,
-			WithCertificatePin("127.0.0.1", correctPinBase64),
-			WithInsecureSkipVerify(),
+			mod.WithCertificatePin("127.0.0.1", correctPinBase64),
+			mod.WithInsecureSkipVerify(),
 		)
 		require.NoError(t, err)
 		assert.Equal(t, http.StatusOK, resp.StatusCode)
 	})
 
 	t.Run("UTLS Client - Incorrect Pin", func(t *testing.T) {
-		client := NewClient(nil, withTLSFingerprint(BrowserChrome))
+		client := aoni.NewClient(nil, option.WithTLSFingerprint(aoni.BrowserChrome))
 		_, err := client.Request(t.Context(), http.MethodGet, server.URL,
-			WithCertificatePin("127.0.0.1", incorrectPin),
-			WithInsecureSkipVerify(),
+			mod.WithCertificatePin("127.0.0.1", incorrectPin),
+			mod.WithInsecureSkipVerify(),
 		)
 		require.Error(t, err)
 		assert.True(
 			t,
-			errors.Is(err, ErrCertificatePinning) ||
+			errors.Is(err, aoni.ErrCertificatePinning) ||
 				strings.Contains(err.Error(), "certificate pinning validation failed"),
 		)
 	})
 
 	t.Run("Wildcard Domain Match - Correct Pin", func(t *testing.T) {
-		client := NewClient(server.Client())
+		client := aoni.NewClient(server.Client())
 		// Map api.example.com to our local test server port
 		targetURL := "https://api.example.com/test"
 		resp, err := client.Request(t.Context(), http.MethodGet, targetURL,
-			WithHostRewrite(map[string]string{"api.example.com": "127.0.0.1:" + port}),
-			WithCertificatePin("*.example.com", correctPinBase64),
+			mod.WithHostRewrite(map[string]string{"api.example.com": "127.0.0.1:" + port}),
+			mod.WithCertificatePin("*.example.com", correctPinBase64),
 		)
 		require.NoError(t, err)
 		assert.Equal(t, http.StatusOK, resp.StatusCode)
 	})
 
 	t.Run("Suffix Domain Match - Correct Pin", func(t *testing.T) {
-		client := NewClient(server.Client())
+		client := aoni.NewClient(server.Client())
 		// Map api.example.com to our local test server port
 		targetURL := "https://api.example.com/test"
 		resp, err := client.Request(t.Context(), http.MethodGet, targetURL,
-			WithHostRewrite(map[string]string{"api.example.com": "127.0.0.1:" + port}),
-			WithCertificatePin(".example.com", correctPinBase64),
+			mod.WithHostRewrite(map[string]string{"api.example.com": "127.0.0.1:" + port}),
+			mod.WithCertificatePin(".example.com", correctPinBase64),
 		)
 		require.NoError(t, err)
 		assert.Equal(t, http.StatusOK, resp.StatusCode)
 	})
 
 	t.Run("Multiple Pins - One Correct", func(t *testing.T) {
-		client := NewClient(server.Client())
+		client := aoni.NewClient(server.Client())
 		resp, err := client.Request(t.Context(), http.MethodGet, server.URL,
-			WithCertificatePin("127.0.0.1", incorrectPin),
-			WithCertificatePin("127.0.0.1", correctPinBase64),
+			mod.WithCertificatePin("127.0.0.1", incorrectPin),
+			mod.WithCertificatePin("127.0.0.1", correctPinBase64),
 		)
 		require.NoError(t, err)
 		assert.Equal(t, http.StatusOK, resp.StatusCode)
 	})
 
 	t.Run("Client-Level Correct Pin", func(t *testing.T) {
-		client := NewClient(server.Client(), withCertificatePin("127.0.0.1", correctPinBase64))
+		client := aoni.NewClient(server.Client(), option.WithCertificatePin("127.0.0.1", correctPinBase64))
 		resp, err := client.Request(t.Context(), http.MethodGet, server.URL)
 		require.NoError(t, err)
 		assert.Equal(t, http.StatusOK, resp.StatusCode)
 	})
 
 	t.Run("Client-Level Incorrect Pin", func(t *testing.T) {
-		client := NewClient(server.Client(), withCertificatePin("127.0.0.1", incorrectPin))
+		client := aoni.NewClient(server.Client(), option.WithCertificatePin("127.0.0.1", incorrectPin))
 		_, err := client.Request(t.Context(), http.MethodGet, server.URL)
 		require.Error(t, err)
 		assert.True(
 			t,
-			errors.Is(err, ErrCertificatePinning) ||
+			errors.Is(err, aoni.ErrCertificatePinning) ||
 				strings.Contains(err.Error(), "certificate pinning validation failed"),
 		)
 	})

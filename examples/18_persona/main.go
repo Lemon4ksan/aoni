@@ -10,12 +10,13 @@
 package main
 
 import (
-	"github.com/lemon4ksan/aoni/option"
 	"context"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"time"
+
+	"github.com/lemon4ksan/aoni/option"
 
 	"github.com/lemon4ksan/aoni"
 )
@@ -37,7 +38,7 @@ func main() {
 	defer server.Close()
 
 	fmt.Println("=== Impersonating Chrome 120 on Windows ===")
-	
+
 	// Create client with Chrome 120 Windows persona
 	chromeClient := aoni.NewClient(nil,
 		option.WithBaseURL(server.URL),

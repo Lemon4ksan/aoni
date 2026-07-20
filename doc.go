@@ -82,13 +82,13 @@
 //
 // # Basic Usage
 //
-//	client := NewClient(nil,
+//	client := aoni.NewClient(nil,
 //		option.WithBaseURL("https://api.example.com"),
 //		option.WithTimeout(10*time.Second),
 //	)
 //
 //	// 1. Get structured data with generics:
-//	user, err := GetTo[User](ctx, client, "/users/123")
+//	user, err := aoni.GetTo[User](ctx, client, "/users/123")
 //	if err != nil {
 //		log.Fatal(err)
 //	}
@@ -102,6 +102,3 @@
 //
 // The full example directory contains runnable programs for each feature.
 package aoni
-
-import (
-)

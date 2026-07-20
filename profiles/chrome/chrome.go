@@ -9,6 +9,7 @@ import (
 
 	utls "github.com/refraction-networking/utls"
 
+	"github.com/lemon4ksan/aoni"
 	"github.com/lemon4ksan/aoni/profiles"
 )
 
@@ -56,7 +57,7 @@ var HelloChrome150 = utls.ClientHelloSpec{
 			},
 			&utls.SessionTicketExtension{},
 			&utls.ALPNExtension{
-				AlpnProtocols: []string{"h2", "http/1.1"},
+				AlpnProtocols: []string{aoni.AlpnH2, aoni.AlpnHTTP},
 			},
 			&utls.StatusRequestExtension{},
 			&utls.SignatureAlgorithmsExtension{

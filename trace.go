@@ -85,7 +85,7 @@ func (t *TraceInfo) Start() func(resp *http.Response) {
 // Timing metrics are populated inside the provided [TraceInfo] structure.
 func Trace(target *TraceInfo) RequestModifier {
 	return func(req *http.Request) {
-		getOrInitRequestConfig(req).TraceInfo = target
+		GetOrInitRequestConfig(req).TraceInfo = target
 	}
 }
 
@@ -107,7 +107,7 @@ func TraceJA4(target *TraceInfo) RequestModifier {
 		// dialTLSWithUTLS will write the TLS report to this store during the handshake.
 		// Client.Request will copy it to target after the request completes.
 		store := &JA4ReportStore{Target: target}
-		getOrInitRequestConfig(req).JA4ReportStore = store
+		GetOrInitRequestConfig(req).JA4ReportStore = store
 
 		// Compute JA4H from request headers (available immediately)
 		target.JA4 = &ja4.Report{JA4H: computeJA4HFromRequest(req)}

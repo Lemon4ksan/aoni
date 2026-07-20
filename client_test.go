@@ -2,7 +2,7 @@
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
-package aoni
+package aoni_test
 
 import (
 	"bytes"
@@ -16,7 +16,6 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"encoding/pem"
-	"encoding/xml"
 	"errors"
 	"io"
 	"math/big"
@@ -24,7 +23,6 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
-	"os"
 	"strconv"
 	"strings"
 	"sync/atomic"
@@ -37,9 +35,12 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/lemon4ksan/aoni"
 	"github.com/lemon4ksan/aoni/cookie"
 	"github.com/lemon4ksan/aoni/h3"
 	"github.com/lemon4ksan/aoni/ja4"
+	"github.com/lemon4ksan/aoni/mod"
+	"github.com/lemon4ksan/aoni/option"
 	"github.com/lemon4ksan/aoni/profiles"
 )
 
@@ -62,18 +63,6 @@ type apiResponse struct {
 func (a *apiResponse) IsSuccess() bool  { return a.Status == "success" }
 func (a *apiResponse) Error() error     { return errors.New(a.ErrorMsg) }
 func (a *apiResponse) SetData(data any) { a.Data = data }
-
-// setupTestServer creates a test server and pre-configures a client With its URL.
-// It registers resource cleanup automatically through t.Cleanup.
-func setupTestServer(t *testing.T, handler http.HandlerFunc) (*httptest.Server, *Client) {
-	t.Helper()
-
-	server := httptest.NewServer(handler)
-	t.Cleanup(server.Close)
-	client := NewClient(nil, withBaseURL(server.URL))
-
-	return server, client
-}
 
 func generateTestCert(t *testing.T) (cert, key []byte, err error) {
 	t.Helper()
@@ -114,82 +103,29 @@ func generateTestCert(t *testing.T) (cert, key []byte, err error) {
 	return certPEM, keyPEM, nil
 }
 
-func TestClient_Request_URLConstruction(t *testing.T) {
+func TestClient_Request_Basic(t *testing.T) {
 	t.Parallel()
-	_, client := setupTestServer(t, func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/api/v1/test" {
-			t.Errorf("expected path /api/v1/test, got %s", r.URL.Path)
-		}
-
+	_, client := aoni.SetupTestServer(t, func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"message": "ok"}`))
 	})
 
-	r, err := client.Request(t.Context(), http.MethodGet, "/api/v1/test")
+	result, err := aoni.GetTo[testPayload](t.Context(), client, "/")
 	require.NoError(t, err)
-	t.Cleanup(func() { CloseResponse(r) })
-}
-
-func TestClient_Request_GetParams(t *testing.T) {
-	t.Parallel()
-	_, client := setupTestServer(t, func(w http.ResponseWriter, r *http.Request) {
-		query := r.URL.Query()
-		if query.Get("foo") != "bar" || query.Get("baz") != "123" {
-			t.Errorf("unexpected query params: %v", query)
-		}
-
-		w.WriteHeader(http.StatusOK)
-	})
-
-	params := url.Values{}
-	params.Set("foo", "bar")
-	params.Set("baz", "123")
-
-	r, err := client.Request(t.Context(), http.MethodGet, "/test", WithQuery(params))
-	require.NoError(t, err)
-	t.Cleanup(func() { CloseResponse(r) })
-}
-
-func TestClient_Headers(t *testing.T) {
-	t.Parallel()
-
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Header.Get("X-Default") != "default-val" {
-			t.Error("default header missing")
-		}
-
-		if r.Header.Get("X-Custom") != "custom-val" {
-			t.Error("custom modifier header missing")
-		}
-
-		w.WriteHeader(http.StatusOK)
-	}))
-	t.Cleanup(server.Close)
-
-	client := NewClient(nil,
-		withBaseURL(server.URL),
-		withHeader("X-Default", "default-val"),
-	)
-
-	mod := func(req *http.Request) {
-		req.Header.Set("X-Custom", "custom-val")
-	}
-
-	r, err := client.Request(t.Context(), http.MethodGet, "/", mod)
-	require.NoError(t, err)
-	t.Cleanup(func() { CloseResponse(r) })
+	assert.Equal(t, "ok", result.Message)
 }
 
 func TestClient_ErrorStatus(t *testing.T) {
 	t.Parallel()
-	_, client := setupTestServer(t, func(w http.ResponseWriter, r *http.Request) {
+	_, client := aoni.SetupTestServer(t, func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusNotFound)
 		_, _ = w.Write([]byte(`{"error": "not found"}`))
 	})
 
-	_, err := GetTo[any](t.Context(), client, "/404")
+	_, err := aoni.GetTo[any](t.Context(), client, "/404")
 	require.Error(t, err)
 
-	var apiErr *APIError
+	var apiErr *aoni.APIError
 	require.ErrorAs(t, err, &apiErr)
 
 	assert.Contains(t, string(apiErr.Body), "not found")
@@ -198,7 +134,7 @@ func TestClient_ErrorStatus(t *testing.T) {
 
 func TestClient_ContextCancellation(t *testing.T) {
 	t.Parallel()
-	_, client := setupTestServer(t, func(w http.ResponseWriter, r *http.Request) {
+	_, client := aoni.SetupTestServer(t, func(w http.ResponseWriter, r *http.Request) {
 		select {
 		case <-r.Context().Done():
 			return
@@ -212,7 +148,7 @@ func TestClient_ContextCancellation(t *testing.T) {
 
 	r, err := client.Request(ctx, http.MethodGet, "/")
 	if err == nil {
-		t.Cleanup(func() { CloseResponse(r) })
+		t.Cleanup(func() { aoni.CloseResponse(r) })
 		t.Fatal("expected error for canceled context, got nil")
 	}
 }
@@ -221,325 +157,32 @@ func TestClient_BaseResponse(t *testing.T) {
 	t.Parallel()
 
 	t.Run("success_response", func(t *testing.T) {
-		_, client := setupTestServer(t, func(w http.ResponseWriter, r *http.Request) {
+		_, client := aoni.SetupTestServer(t, func(w http.ResponseWriter, r *http.Request) {
 			_, _ = w.Write([]byte(`{"status": "success", "data": {"message": "unwrapped"}}`))
 		})
 
-		client = client.With(withBaseResponse(func() BaseResponse { return &apiResponse{} }))
+		client = client.With(option.WithBaseResponse(func() aoni.BaseResponse { return &apiResponse{} }))
 
-		result, err := GetTo[testPayload](t.Context(), client, "/wrapped")
+		result, err := aoni.GetTo[testPayload](t.Context(), client, "/wrapped")
 		require.NoError(t, err)
 		assert.Equal(t, "unwrapped", result.Message)
 	})
 
 	t.Run("error_response", func(t *testing.T) {
-		_, client := setupTestServer(t, func(w http.ResponseWriter, r *http.Request) {
+		_, client := aoni.SetupTestServer(t, func(w http.ResponseWriter, r *http.Request) {
 			_, _ = w.Write([]byte(`{"status": "fail", "error": "something went wrong"}`))
 		})
 
-		client = client.With(withBaseResponse(func() BaseResponse { return &apiResponse{} }))
+		client = client.With(option.WithBaseResponse(func() aoni.BaseResponse { return &apiResponse{} }))
 
-		_, err := GetTo[testPayload](t.Context(), client, "/error")
+		_, err := aoni.GetTo[testPayload](t.Context(), client, "/error")
 		assert.ErrorContains(t, err, "something went wrong")
-	})
-}
-
-func TestClient_PathTemplates(t *testing.T) {
-	t.Parallel()
-
-	tests := []struct {
-		name string
-		path string
-		mods []RequestModifier
-		want string
-	}{
-		{
-			name: "With_var_single_replacement",
-			path: "/user/{id}/profile",
-			mods: []RequestModifier{WithVar("id", 123)},
-			want: "/user/123/profile",
-		},
-		{
-			name: "With_vars_multiple_replacements",
-			path: "/{group}/{member}",
-			mods: []RequestModifier{WithVars("group", "admins", "member", "bob")},
-			want: "/admins/bob",
-		},
-		{
-			name: "escaping",
-			path: "/search/{query}",
-			mods: []RequestModifier{WithVar("query", "hello world")},
-			want: "/search/hello%20world",
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
-			_, client := setupTestServer(t, func(w http.ResponseWriter, r *http.Request) {
-				w.Header().Set("X-Path", r.URL.Path)
-				w.WriteHeader(http.StatusOK)
-			})
-
-			resp, err := client.Request(t.Context(), http.MethodGet, tt.path, tt.mods...)
-			require.NoError(t, err)
-			t.Cleanup(func() { CloseResponse(resp) })
-
-			assert.Equal(t, tt.want, resp.Header.Get("X-Path"))
-		})
-	}
-}
-
-func TestClient_CaptureResponse(t *testing.T) {
-	t.Parallel()
-	_, client := setupTestServer(t, func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("X-Custom-Header", "captured")
-		_, _ = w.Write([]byte(`{"message": "ok"}`))
-	})
-
-	var raw *http.Response
-
-	result, err := GetTo[testPayload](t.Context(), client, "/capture", WithCaptureResponse(&raw))
-	require.NoError(t, err)
-
-	if raw != nil {
-		t.Cleanup(func() { CloseResponse(raw) })
-	}
-
-	assert.Equal(t, "ok", result.Message)
-	require.NotNil(t, raw)
-	assert.Equal(t, "captured", raw.Header.Get("X-Custom-Header"))
-}
-
-func TestClient_DX_Helpers(t *testing.T) {
-	// Do not use t.Parallel() here as this test mutates global DefaultClient.
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Header.Get("Authorization") == "Bearer my-token" {
-			w.Header().Set("X-Auth", "bearer")
-		} else if u, p, ok := r.BasicAuth(); ok && u == "user" && p == "pass" {
-			w.Header().Set("X-Auth", "basic")
-		}
-
-		if r.Header.Get("User-Agent") == "G-MAN-BOT" {
-			w.Header().Set("X-UA", "ok")
-		}
-
-		_, _ = w.Write([]byte(`{"message": "ok"}`))
-	}))
-	t.Cleanup(server.Close)
-
-	oldDefault := DefaultClient
-	t.Cleanup(func() { DefaultClient = oldDefault })
-
-	DefaultClient = DefaultClient.With(withBaseURL(server.URL))
-
-	t.Run("global_get_With_bearer", func(t *testing.T) {
-		var raw *http.Response
-
-		res, err := GetTo[testPayload](
-			t.Context(),
-			DefaultClient,
-			"/get",
-			WithBearer("my-token"),
-			WithCaptureResponse(&raw),
-		)
-		require.NoError(t, err)
-
-		if raw != nil {
-			t.Cleanup(func() { CloseResponse(raw) })
-		}
-
-		assert.Equal(t, "ok", res.Message)
-		assert.Equal(t, "bearer", raw.Header.Get("X-Auth"))
-	})
-
-	t.Run("basic_auth_and_user_agent", func(t *testing.T) {
-		var raw *http.Response
-
-		_, err := GetTo[testPayload](
-			t.Context(),
-			DefaultClient,
-			"/auth",
-			WithBasicAuth("user", "pass"),
-			WithUserAgent("G-MAN-BOT"),
-			WithCaptureResponse(&raw),
-		)
-		require.NoError(t, err)
-
-		if raw != nil {
-			t.Cleanup(func() { CloseResponse(raw) })
-		}
-
-		assert.Equal(t, "basic", raw.Header.Get("X-Auth"))
-		assert.Equal(t, "ok", raw.Header.Get("X-UA"))
-	})
-
-	t.Run("global_put", func(t *testing.T) {
-		var raw *http.Response
-
-		_, err := PutTo[testPayload](
-			t.Context(),
-			DefaultClient,
-			"/put",
-			testPayload{Message: "put-body"},
-			WithCaptureResponse(&raw),
-		)
-		require.NoError(t, err)
-
-		if raw != nil {
-			t.Cleanup(func() { CloseResponse(raw) })
-		}
-
-		assert.Equal(t, http.MethodPut, raw.Request.Method)
-	})
-
-	t.Run("global_patch", func(t *testing.T) {
-		var raw *http.Response
-
-		_, err := PatchTo[testPayload](
-			t.Context(),
-			DefaultClient,
-			"/patch",
-			testPayload{Message: "patch-body"},
-			WithCaptureResponse(&raw),
-		)
-		require.NoError(t, err)
-
-		if raw != nil {
-			t.Cleanup(func() { CloseResponse(raw) })
-		}
-
-		assert.Equal(t, http.MethodPatch, raw.Request.Method)
-	})
-
-	t.Run("global_delete", func(t *testing.T) {
-		var raw *http.Response
-
-		_, err := DeleteTo[testPayload](
-			t.Context(),
-			DefaultClient,
-			"/delete",
-			testPayload{Message: "delete-body"},
-			WithCaptureResponse(&raw),
-		)
-		require.NoError(t, err)
-
-		if raw != nil {
-			t.Cleanup(func() { CloseResponse(raw) })
-		}
-
-		assert.Equal(t, http.MethodDelete, raw.Request.Method)
-	})
-
-	t.Run("debug_mode", func(t *testing.T) {
-		_, err := GetTo[testPayload](t.Context(), DefaultClient, "/debug", WithDebug())
-		require.NoError(t, err)
-	})
-}
-
-func TestClient_AdvancedFeatures(t *testing.T) {
-	t.Parallel()
-
-	t.Run("streaming_body", func(t *testing.T) {
-		_, client := setupTestServer(t, func(w http.ResponseWriter, r *http.Request) {
-			body, _ := io.ReadAll(r.Body)
-			assert.Equal(t, "streamed data", string(body))
-			w.WriteHeader(http.StatusOK)
-		})
-
-		reader := strings.NewReader("streamed data")
-		resp, err := client.Request(t.Context(), http.MethodPost, "/", WithBody(reader))
-		require.NoError(t, err)
-		t.Cleanup(func() { CloseResponse(resp) })
-	})
-
-	t.Run("cookies", func(t *testing.T) {
-		_, client := setupTestServer(t, func(w http.ResponseWriter, r *http.Request) {
-			c, err := r.Cookie("test-cookie")
-			if err == nil {
-				w.Header().Set("X-Cookie", c.Value)
-			}
-
-			w.WriteHeader(http.StatusOK)
-		})
-
-		t.Run("With_cookie_modifier", func(t *testing.T) {
-			resp, err := client.Request(
-				t.Context(),
-				http.MethodGet,
-				"/",
-				WithCookie(&http.Cookie{Name: "test-cookie", Value: "yum"}),
-			)
-			require.NoError(t, err)
-			t.Cleanup(func() { CloseResponse(resp) })
-
-			assert.Equal(t, "yum", resp.Header.Get("X-Cookie"))
-		})
-
-		t.Run("With_cookies_map_modifier", func(t *testing.T) {
-			resp, err := client.Request(
-				t.Context(),
-				http.MethodGet,
-				"/",
-				WithCookies(map[string]string{"test-cookie": "yum-yum"}),
-			)
-			require.NoError(t, err)
-			t.Cleanup(func() { CloseResponse(resp) })
-
-			assert.Equal(t, "yum-yum", resp.Header.Get("X-Cookie"))
-		})
-	})
-
-	t.Run("redirect_policy", func(t *testing.T) {
-		_, client := setupTestServer(t, func(w http.ResponseWriter, r *http.Request) {
-			if r.URL.Path == "/start" {
-				http.Redirect(w, r, "/end", http.StatusFound)
-			} else {
-				w.WriteHeader(http.StatusOK)
-			}
-		})
-
-		t.Run("disable_redirects", func(t *testing.T) {
-			client := client.With(withRedirectLimit(0))
-			resp, err := client.Request(t.Context(), http.MethodGet, "/start")
-			require.NoError(t, err)
-			t.Cleanup(func() { CloseResponse(resp) })
-
-			assert.Equal(t, http.StatusFound, resp.StatusCode)
-		})
-
-		t.Run("limit_redirects", func(t *testing.T) {
-			client := client.With(withRedirectLimit(2))
-			resp, err := client.Request(t.Context(), http.MethodGet, "/start")
-			require.NoError(t, err)
-			t.Cleanup(func() { CloseResponse(resp) })
-
-			assert.Equal(t, http.StatusOK, resp.StatusCode)
-		})
-	})
-
-	t.Run("timeout", func(t *testing.T) {
-		t.Parallel()
-
-		_, client := setupTestServer(t, func(w http.ResponseWriter, r *http.Request) {
-			select {
-			case <-r.Context().Done():
-			case <-time.After(1 * time.Second):
-			}
-
-			w.WriteHeader(http.StatusOK)
-		})
-
-		client = client.With(withTimeout(10 * time.Millisecond))
-		_, err := client.Request(t.Context(), http.MethodGet, "/")
-		require.Error(t, err)
-		assert.Contains(t, err.Error(), "Client.Timeout exceeded")
 	})
 }
 
 func TestClient_WithMultipart(t *testing.T) {
 	t.Parallel()
-	_, client := setupTestServer(t, func(w http.ResponseWriter, r *http.Request) {
+	_, client := aoni.SetupTestServer(t, func(w http.ResponseWriter, r *http.Request) {
 		assert.Contains(t, r.Header.Get("Content-Type"), "multipart/form-data")
 		err := r.ParseMultipartForm(10 * 1024 * 1024)
 		require.NoError(t, err)
@@ -564,27 +207,14 @@ func TestClient_WithMultipart(t *testing.T) {
 		"file1": strings.NewReader("file content"),
 	}
 
-	resp, err := client.Request(t.Context(), http.MethodPost, "/", WithMultipart(fields, files))
+	resp, err := client.Request(t.Context(), http.MethodPost, "/", mod.WithMultipart(fields, files))
 	require.NoError(t, err)
-	t.Cleanup(func() { CloseResponse(resp) })
-}
-
-func TestClient_TransportMethod(t *testing.T) {
-	t.Parallel()
-
-	client := NewClient(nil)
-	tr := client.Transport()
-	require.NotNil(t, tr)
-
-	nonStandardClient := NewClient(DoerFunc(func(r *http.Request) (*http.Response, error) {
-		return nil, nil
-	}))
-	assert.Nil(t, nonStandardClient.Transport())
+	t.Cleanup(func() { aoni.CloseResponse(resp) })
 }
 
 func TestClient_ErrorModel(t *testing.T) {
 	t.Parallel()
-	_, client := setupTestServer(t, func(w http.ResponseWriter, r *http.Request) {
+	_, client := aoni.SetupTestServer(t, func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusBadRequest)
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`{"error": "invalid_grant", "error_description": "expired token"}`))
@@ -592,10 +222,10 @@ func TestClient_ErrorModel(t *testing.T) {
 
 	var errModel errorStruct
 
-	_, err := GetTo[any](t.Context(), client, "/oauth", WithErrorModel(&errModel))
+	_, err := aoni.GetTo[any](t.Context(), client, "/oauth", mod.WithErrorModel(&errModel))
 	require.Error(t, err)
 
-	var apiErr *APIError
+	var apiErr *aoni.APIError
 	require.True(t, errors.As(err, &apiErr))
 	assert.Equal(t, http.StatusBadRequest, apiErr.StatusCode)
 	assert.NotNil(t, apiErr.Model)
@@ -609,41 +239,8 @@ func TestClient_ErrorModel(t *testing.T) {
 func TestClient_ProgressCallbacks(t *testing.T) {
 	t.Parallel()
 
-	t.Run("upload_progress", func(t *testing.T) {
-		_, client := setupTestServer(t, func(w http.ResponseWriter, r *http.Request) {
-			body, _ := io.ReadAll(r.Body)
-			assert.Equal(t, "1234567890", string(body))
-			w.WriteHeader(http.StatusOK)
-		})
-
-		var (
-			uploadCalled bool
-			uploadBytes  int64
-		)
-
-		uploadProgress := func(current, total int64) {
-			uploadCalled = true
-			uploadBytes = current
-
-			assert.Equal(t, int64(10), total)
-		}
-
-		resp, err := client.Request(
-			t.Context(),
-			http.MethodPost,
-			"/upload",
-			WithBody(strings.NewReader("1234567890")),
-			WithUploadProgress(uploadProgress),
-		)
-		require.NoError(t, err)
-		t.Cleanup(func() { CloseResponse(resp) })
-
-		assert.True(t, uploadCalled)
-		assert.Equal(t, int64(10), uploadBytes)
-	})
-
 	t.Run("download_progress", func(t *testing.T) {
-		_, client := setupTestServer(t, func(w http.ResponseWriter, r *http.Request) {
+		_, client := aoni.SetupTestServer(t, func(w http.ResponseWriter, r *http.Request) {
 			w.Header().Set("Content-Length", "10")
 			_, _ = w.Write([]byte("1234567890"))
 		})
@@ -664,10 +261,10 @@ func TestClient_ProgressCallbacks(t *testing.T) {
 			t.Context(),
 			http.MethodGet,
 			"/download",
-			WithDownloadProgress(downloadProgress),
+			mod.WithDownloadProgress(downloadProgress),
 		)
 		require.NoError(t, err)
-		t.Cleanup(func() { CloseResponse(resp) })
+		t.Cleanup(func() { aoni.CloseResponse(resp) })
 
 		body, err := io.ReadAll(resp.Body)
 		require.NoError(t, err)
@@ -680,13 +277,13 @@ func TestClient_ProgressCallbacks(t *testing.T) {
 
 func TestClient_AutoTranscoding(t *testing.T) {
 	t.Parallel()
-	_, client := setupTestServer(t, func(w http.ResponseWriter, r *http.Request) {
+	_, client := aoni.SetupTestServer(t, func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json; charset=windows-1251")
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte(`{"message": "` + "\xef\xf0\xe8\xe2\xe5\xf2" + `"}`))
 	})
 
-	result, err := GetTo[testPayload](t.Context(), client, "/transcode")
+	result, err := aoni.GetTo[testPayload](t.Context(), client, "/transcode")
 	require.NoError(t, err)
 	assert.Equal(t, "привет", result.Message)
 }
@@ -699,7 +296,7 @@ func TestClient_Hedging_Deterministic(t *testing.T) {
 	slowRequestStarted := make(chan struct{})
 	blockSlowRequest := make(chan struct{})
 
-	_, client := setupTestServer(t, func(w http.ResponseWriter, r *http.Request) {
+	_, client := aoni.SetupTestServer(t, func(w http.ResponseWriter, r *http.Request) {
 		count := requestCount.Add(1)
 		if count == 1 {
 			close(slowRequestStarted)
@@ -713,7 +310,7 @@ func TestClient_Hedging_Deterministic(t *testing.T) {
 		_, _ = w.Write([]byte(`{"message": "hedged"}`))
 	})
 
-	client = client.With(withHedging(10 * time.Millisecond))
+	client = client.With(option.WithHedging(10 * time.Millisecond))
 
 	type result struct {
 		res *testPayload
@@ -723,7 +320,7 @@ func TestClient_Hedging_Deterministic(t *testing.T) {
 	resChan := make(chan result, 1)
 
 	go func() {
-		res, err := GetTo[testPayload](t.Context(), client, "/")
+		res, err := aoni.GetTo[testPayload](t.Context(), client, "/")
 		resChan <- result{res: res, err: err}
 	}()
 
@@ -742,126 +339,6 @@ func TestClient_Hedging_Deterministic(t *testing.T) {
 	}
 
 	close(blockSlowRequest)
-}
-
-func TestClient_XML_Codecs(t *testing.T) {
-	t.Parallel()
-
-	type XMLPayload struct {
-		XMLName xml.Name `xml:"payload"`
-		Message string   `xml:"message"`
-	}
-
-	_, client := setupTestServer(t, func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/xml")
-		_, _ = w.Write([]byte(`<payload><message>xml-data</message></payload>`))
-	})
-
-	var result XMLPayload
-
-	resp, err := client.Request(t.Context(), http.MethodGet, "/", WithXMLDecoder())
-	require.NoError(t, err)
-	t.Cleanup(func() { CloseResponse(resp) })
-
-	err = XMLDecoder.Decode(resp.Body, &result)
-	require.NoError(t, err)
-	assert.Equal(t, "xml-data", result.Message)
-}
-
-func TestClient_GlobalHooks(t *testing.T) {
-	t.Parallel()
-	_, client := setupTestServer(t, func(w http.ResponseWriter, r *http.Request) {
-		assert.Equal(t, "hooked", r.Header.Get("X-Before-Hook"))
-		w.WriteHeader(http.StatusOK)
-	})
-
-	var beforeCalled, afterCalled bool
-
-	client = client.With(
-		withBeforeRequest(func(req *http.Request) {
-			beforeCalled = true
-
-			req.Header.Set("X-Before-Hook", "hooked")
-		}),
-		withAfterResponse(func(resp *http.Response, err error) {
-			afterCalled = true
-
-			require.NoError(t, err)
-			require.NotNil(t, resp)
-			assert.Equal(t, http.StatusOK, resp.StatusCode)
-		}),
-	)
-
-	resp, err := client.Request(t.Context(), http.MethodGet, "/")
-	require.NoError(t, err)
-	t.Cleanup(func() { CloseResponse(resp) })
-
-	assert.True(t, beforeCalled)
-	assert.True(t, afterCalled)
-}
-
-func TestClient_BOMStripping(t *testing.T) {
-	t.Parallel()
-
-	tests := []struct {
-		name string
-		body []byte
-		want string
-	}{
-		{
-			name: "utf8_bom_stripping",
-			body: []byte("\xEF\xBB\xBF" + `{"message": "bom-stripped"}`),
-			want: "bom-stripped",
-		},
-		{
-			name: "no_bom_payload",
-			body: []byte(`{"message": "no-bom"}`),
-			want: "no-bom",
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
-			_, client := setupTestServer(t, func(w http.ResponseWriter, r *http.Request) {
-				w.Header().Set("Content-Type", "application/json")
-				_, _ = w.Write(tt.body)
-			})
-
-			result, err := GetTo[testPayload](t.Context(), client, "/")
-			require.NoError(t, err)
-			assert.Equal(t, tt.want, result.Message)
-		})
-	}
-}
-
-func TestClient_ConnectionPool(t *testing.T) {
-	t.Parallel()
-
-	client := NewClient(nil)
-	cfg := ConnectionPoolConfig{
-		MaxIdleConns:          50,
-		MaxIdleConnsPerHost:   10,
-		MaxConnsPerHost:       20,
-		IdleConnTimeout:       10 * time.Second,
-		ResponseHeaderTimeout: 5 * time.Second,
-	}
-
-	tunedClient := client.With(withConnectionPool(cfg))
-	transport := tunedClient.Transport()
-	require.NotNil(t, transport)
-
-	assert.Equal(t, 50, transport.MaxIdleConns)
-	assert.Equal(t, 10, transport.MaxIdleConnsPerHost)
-	assert.Equal(t, 20, transport.MaxConnsPerHost)
-	assert.Equal(t, 10*time.Second, transport.IdleConnTimeout)
-	assert.Equal(t, 5*time.Second, transport.ResponseHeaderTimeout)
-
-	origTransport := client.Transport()
-	require.NotNil(t, origTransport)
-	assert.Equal(t, 100, origTransport.MaxIdleConns)
-
-	tunedClient.CloseIdleConnections()
 }
 
 func TestClient_Decompression(t *testing.T) {
@@ -906,13 +383,13 @@ func TestClient_Decompression(t *testing.T) {
 			_, _ = w.Write([]byte(`{"message": "` + tt.want + `"}`))
 			_ = w.Close()
 
-			_, client := setupTestServer(t, func(w http.ResponseWriter, r *http.Request) {
+			_, client := aoni.SetupTestServer(t, func(w http.ResponseWriter, r *http.Request) {
 				w.Header().Set("Content-Type", "application/json")
 				w.Header().Set("Content-Encoding", tt.encoding)
 				_, _ = w.Write(buf.Bytes())
 			})
 
-			result, err := GetTo[testPayload](t.Context(), client, "/")
+			result, err := aoni.GetTo[testPayload](t.Context(), client, "/")
 			require.NoError(t, err)
 			assert.Equal(t, tt.want, result.Message)
 		})
@@ -923,32 +400,32 @@ func TestClient_ContentTypeGuard(t *testing.T) {
 	t.Parallel()
 
 	t.Run("html_instead_of_json_returns_error", func(t *testing.T) {
-		_, client := setupTestServer(t, func(w http.ResponseWriter, r *http.Request) {
+		_, client := aoni.SetupTestServer(t, func(w http.ResponseWriter, r *http.Request) {
 			w.Header().Set("Content-Type", "text/html; charset=utf-8")
 			w.WriteHeader(http.StatusOK)
 			_, _ = w.Write([]byte("<html><body>Hello World</body></html>"))
 		})
 
-		_, err := GetTo[testPayload](t.Context(), client, "/")
+		_, err := aoni.GetTo[testPayload](t.Context(), client, "/")
 		require.Error(t, err)
-		assert.ErrorIs(t, err, ErrUnexpectedContentType)
+		assert.ErrorIs(t, err, aoni.ErrUnexpectedContentType)
 		assert.Contains(t, err.Error(), "expected structured data but got HTML")
 	})
 
 	t.Run("cloudflare_challenge_html_returns_error", func(t *testing.T) {
-		_, client := setupTestServer(t, func(w http.ResponseWriter, r *http.Request) {
+		_, client := aoni.SetupTestServer(t, func(w http.ResponseWriter, r *http.Request) {
 			w.Header().Set("Content-Type", "text/html; charset=utf-8")
 			w.WriteHeader(http.StatusOK)
 			_, _ = w.Write([]byte("<html><body>cf-challenge and ray id cloudflare</body></html>"))
 		})
 
-		_, err := GetTo[testPayload](t.Context(), client, "/")
+		_, err := aoni.GetTo[testPayload](t.Context(), client, "/")
 		require.Error(t, err)
-		assert.ErrorIs(t, err, ErrCloudflareChallenge)
+		assert.ErrorIs(t, err, aoni.ErrCloudflareChallenge)
 	})
 
 	t.Run("html_With_raw_decoder_succeeds", func(t *testing.T) {
-		_, client := setupTestServer(t, func(w http.ResponseWriter, r *http.Request) {
+		_, client := aoni.SetupTestServer(t, func(w http.ResponseWriter, r *http.Request) {
 			w.Header().Set("Content-Type", "text/html; charset=utf-8")
 			w.WriteHeader(http.StatusOK)
 			_, _ = w.Write([]byte("<html><body>Hello World</body></html>"))
@@ -956,131 +433,14 @@ func TestClient_ContentTypeGuard(t *testing.T) {
 
 		var output []byte
 
-		resp, err := client.Request(t.Context(), http.MethodGet, "/", WithRawDecoder())
+		resp, err := client.Request(t.Context(), http.MethodGet, "/", mod.WithRawDecoder())
 		require.NoError(t, err)
-		t.Cleanup(func() { CloseResponse(resp) })
+		t.Cleanup(func() { aoni.CloseResponse(resp) })
 
-		err = RawDecoder.Decode(resp.Body, &output)
+		err = aoni.RawDecoder.Decode(resp.Body, &output)
 		require.NoError(t, err)
 		assert.Equal(t, "<html><body>Hello World</body></html>", string(output))
 	})
-}
-
-func TestClient_TLSFingerprint(t *testing.T) {
-	t.Parallel()
-
-	client := NewClient(nil)
-	tunedClient := client.With(withTLSFingerprint(BrowserChrome))
-
-	tr := tunedClient.Transport()
-	require.NotNil(t, tr)
-	assert.NotNil(t, tr.DialTLSContext)
-
-	origTr := client.Transport()
-	require.NotNil(t, origTr)
-	assert.NotNil(t, origTr.DialTLSContext)
-}
-
-func TestClient_WithJA4Callback(t *testing.T) {
-	t.Parallel()
-
-	var (
-		called atomic.Bool
-		report ja4.Report
-	)
-
-	client := NewClient(nil,
-		withTLSFingerprint(BrowserChrome),
-		withJA4Callback(func(r ja4.Report) {
-			called.Store(true)
-
-			report = r
-		}),
-	)
-
-	assert.NotNil(t, client)
-
-	origClient := NewClient(nil)
-
-	origTr := origClient.Transport()
-	if origTr != nil {
-		assert.NotNil(t, origTr.DialTLSContext)
-	}
-
-	_ = report
-	_ = called.Load()
-}
-
-func TestClient_JA4CallbackImmutability(t *testing.T) {
-	t.Parallel()
-
-	fn := func(r ja4.Report) {}
-
-	client1 := NewClient(nil, withJA4Callback(fn))
-	client2 := client1.With(withTLSFingerprint(BrowserChrome))
-
-	assert.NotNil(t, client2.Fingerprint().JA4Callback)
-	assert.NotNil(t, client1.Fingerprint().JA4Callback)
-
-	client3 := NewClient(nil)
-	assert.Nil(t, client3.Fingerprint().JA4Callback)
-}
-
-func TestClient_TraceJA4(t *testing.T) {
-	t.Parallel()
-
-	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusOK)
-	}))
-	t.Cleanup(server.Close)
-
-	transport := &http.Transport{
-		TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
-		DialTLSContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
-			tcpConn, err := net.Dial("tcp", addr)
-			if err != nil {
-				return nil, err
-			}
-
-			tlsConn := tls.Client(tcpConn, &tls.Config{
-				InsecureSkipVerify: true,
-				ServerName:         "127.0.0.1",
-			})
-			if err := tlsConn.HandshakeContext(ctx); err != nil {
-				_ = tcpConn.Close()
-				return nil, err
-			}
-
-			return tlsConn, nil
-		},
-	}
-
-	httpClient := &http.Client{Transport: transport}
-
-	var report *ja4.Report
-
-	client := NewClient(httpClient).With(
-		withJA4Callback(func(r ja4.Report) { report = &r }),
-	)
-
-	info := &TraceInfo{}
-	_, err := client.Request(
-		t.Context(),
-		http.MethodGet,
-		server.URL,
-		TraceJA4(info),
-	)
-	require.NoError(t, err)
-
-	require.NotNil(t, info.JA4)
-	assert.NotEmpty(t, info.JA4.JA4H)
-	assert.Regexp(
-		t,
-		`^[a-z]{2}[0-9]{2}[cn][rn][0-9]{2}[a-z0-9]{4}_[a-f0-9]{12}_[a-f0-9]{12}_[a-f0-9]{12}$`,
-		info.JA4.JA4H,
-	)
-
-	_ = report
 }
 
 func TestClient_TraceJA4_WithTLSFingerprint(t *testing.T) {
@@ -1106,19 +466,19 @@ func TestClient_TraceJA4_WithTLSFingerprint(t *testing.T) {
 
 	var callbackReport *ja4.Report
 
-	client := NewClient(server.Client()).With(
-		withTLSFingerprint(BrowserChrome),
-		withJA4Callback(func(r ja4.Report) {
+	client := aoni.NewClient(server.Client()).With(
+		option.WithTLSFingerprint(aoni.BrowserChrome),
+		option.WithJA4Callback(func(r ja4.Report) {
 			callbackReport = &r
 		}),
 	)
 
-	info := &TraceInfo{}
+	info := &aoni.TraceInfo{}
 	_, err = client.Request(
 		t.Context(),
 		http.MethodGet,
 		server.URL,
-		TraceJA4(info),
+		aoni.TraceJA4(info),
 	)
 	require.NoError(t, err)
 
@@ -1135,49 +495,33 @@ func TestClient_ResponseSizeGuard(t *testing.T) {
 	t.Parallel()
 
 	t.Run("fails_early_on_content_length", func(t *testing.T) {
-		_, client := setupTestServer(t, func(w http.ResponseWriter, r *http.Request) {
+		_, client := aoni.SetupTestServer(t, func(w http.ResponseWriter, r *http.Request) {
 			w.Header().Set("Content-Length", "20")
 			w.WriteHeader(http.StatusOK)
 			_, _ = w.Write([]byte("01234567890123456789"))
 		})
 
-		client = client.With(withMaxResponseSize(10))
+		client = client.With(option.WithMaxResponseSize(10))
 		_, err := client.Request(t.Context(), http.MethodGet, "/")
 		require.Error(t, err)
-		assert.ErrorIs(t, err, ErrResponseTooLarge)
+		assert.ErrorIs(t, err, aoni.ErrResponseTooLarge)
 	})
 
 	t.Run("fails_during_read_when_limit_exceeded", func(t *testing.T) {
-		_, client := setupTestServer(t, func(w http.ResponseWriter, r *http.Request) {
+		_, client := aoni.SetupTestServer(t, func(w http.ResponseWriter, r *http.Request) {
 			w.Header().Set("Transfer-Encoding", "chunked")
 			w.WriteHeader(http.StatusOK)
 			_, _ = w.Write([]byte("01234567890123456789"))
 		})
 
-		client = client.With(withMaxResponseSize(10))
+		client = client.With(option.WithMaxResponseSize(10))
 		resp, err := client.Request(t.Context(), http.MethodGet, "/")
 		require.NoError(t, err)
-		t.Cleanup(func() { CloseResponse(resp) })
+		t.Cleanup(func() { aoni.CloseResponse(resp) })
 
 		_, err = io.ReadAll(resp.Body)
 		require.Error(t, err)
-		assert.ErrorIs(t, err, ErrResponseTooLarge)
-	})
-
-	t.Run("succeeds_when_under_limit", func(t *testing.T) {
-		_, client := setupTestServer(t, func(w http.ResponseWriter, r *http.Request) {
-			w.WriteHeader(http.StatusOK)
-			_, _ = w.Write([]byte("under limit"))
-		})
-
-		client = client.With(withMaxResponseSize(100))
-		resp, err := client.Request(t.Context(), http.MethodGet, "/")
-		require.NoError(t, err)
-		t.Cleanup(func() { CloseResponse(resp) })
-
-		body, err := io.ReadAll(resp.Body)
-		require.NoError(t, err)
-		assert.Equal(t, "under limit", string(body))
+		assert.ErrorIs(t, err, aoni.ErrResponseTooLarge)
 	})
 }
 
@@ -1199,7 +543,7 @@ func TestClient_SensitiveHeaderScrubbing(t *testing.T) {
 		}))
 		t.Cleanup(origServer.Close)
 
-		client := NewClient(nil, withRedirectLimit(3))
+		client := aoni.NewClient(nil, option.WithRedirectLimit(3))
 
 		reqMod := func(req *http.Request) {
 			req.Header.Set("Authorization", "Bearer token123")
@@ -1211,7 +555,7 @@ func TestClient_SensitiveHeaderScrubbing(t *testing.T) {
 
 		resp, err := client.Request(t.Context(), http.MethodGet, origServer.URL, reqMod)
 		require.NoError(t, err)
-		t.Cleanup(func() { CloseResponse(resp) })
+		t.Cleanup(func() { aoni.CloseResponse(resp) })
 
 		assert.Empty(t, redirectedHeaders.Get("Authorization"))
 		assert.Empty(t, redirectedHeaders.Get("Cookie"))
@@ -1219,70 +563,33 @@ func TestClient_SensitiveHeaderScrubbing(t *testing.T) {
 		assert.Empty(t, redirectedHeaders.Get("X-Access-Token"))
 		assert.Equal(t, "keep-me", redirectedHeaders.Get("X-Safe-Header"))
 	})
-
-	t.Run("same_origin_redirect_preserves_headers", func(t *testing.T) {
-		var redirectedHeaders http.Header
-
-		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			if r.URL.Path == "/redirect" {
-				http.Redirect(w, r, "/target", http.StatusFound)
-				return
-			}
-
-			redirectedHeaders = r.Header
-
-			w.WriteHeader(http.StatusOK)
-		}))
-		t.Cleanup(server.Close)
-
-		client := NewClient(nil,
-			withRedirectLimit(3),
-			withBaseURL(server.URL),
-		)
-
-		reqMod := func(req *http.Request) {
-			req.Header.Set("Authorization", "Bearer token123")
-			req.Header.Set("Cookie", "session=cookie123")
-			req.Header.Set("X-Session-ID", "sess123")
-			req.Header.Set("X-Safe-Header", "keep-me")
-		}
-
-		resp, err := client.Request(t.Context(), http.MethodGet, "/redirect", reqMod)
-		require.NoError(t, err)
-		t.Cleanup(func() { _ = resp.Body.Close() })
-
-		assert.Equal(t, "Bearer token123", redirectedHeaders.Get("Authorization"))
-		assert.Equal(t, "session=cookie123", redirectedHeaders.Get("Cookie"))
-		assert.Equal(t, "sess123", redirectedHeaders.Get("X-Session-ID"))
-		assert.Equal(t, "keep-me", redirectedHeaders.Get("X-Safe-Header"))
-	})
 }
 
 func TestClient_SSRFGuard(t *testing.T) {
 	t.Parallel()
 
-	client := NewClient(nil, withSSRFGuard())
+	client := aoni.NewClient(nil, option.WithSSRFGuard())
 
 	t.Run("blocks_loopback_ipv4", func(t *testing.T) {
 		_, err := client.Request(t.Context(), http.MethodGet, "http://127.0.0.1:8080/")
 		require.Error(t, err)
-		assert.ErrorIs(t, err, ErrSSRFBlocked)
+		assert.ErrorIs(t, err, aoni.ErrSSRFBlocked)
 	})
 
 	t.Run("blocks_private_network_ipv4", func(t *testing.T) {
 		_, err := client.Request(t.Context(), http.MethodGet, "http://192.168.1.1:8080/")
 		require.Error(t, err)
-		assert.ErrorIs(t, err, ErrSSRFBlocked)
+		assert.ErrorIs(t, err, aoni.ErrSSRFBlocked)
 	})
 }
 
 func TestClient_HappyEyeballs(t *testing.T) {
 	t.Parallel()
-	_, client := setupTestServer(t, func(w http.ResponseWriter, r *http.Request) {
+	_, client := aoni.SetupTestServer(t, func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	})
 
-	client = client.With(withHappyEyeballs(10 * time.Millisecond))
+	client = client.With(option.WithHappyEyeballs(10 * time.Millisecond))
 	resp, err := client.Request(t.Context(), http.MethodGet, "/")
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = resp.Body.Close() })
@@ -1292,14 +599,14 @@ func TestClient_MultiReadBody(t *testing.T) {
 	t.Parallel()
 
 	t.Run("in_memory_caching_under_threshold", func(t *testing.T) {
-		_, client := setupTestServer(t, func(w http.ResponseWriter, r *http.Request) {
+		_, client := aoni.SetupTestServer(t, func(w http.ResponseWriter, r *http.Request) {
 			_, _ = w.Write([]byte("short body"))
 		})
 
-		client = client.With(withMultiReadBody(100))
+		client = client.With(option.WithMultiReadBody(100))
 		resp, err := client.Request(t.Context(), http.MethodGet, "/")
 		require.NoError(t, err)
-		t.Cleanup(func() { CloseResponse(resp) })
+		t.Cleanup(func() { aoni.CloseResponse(resp) })
 
 		body1, err := io.ReadAll(resp.Body)
 		require.NoError(t, err)
@@ -1312,108 +619,25 @@ func TestClient_MultiReadBody(t *testing.T) {
 		assert.Equal(t, "short body", string(body2))
 	})
 
-	t.Run("on_disk_caching_over_threshold", func(t *testing.T) {
-		_, client := setupTestServer(t, func(w http.ResponseWriter, r *http.Request) {
-			_, _ = w.Write([]byte("long body exceeding threshold"))
-		})
-
-		client = client.With(withMultiReadBody(10))
-		resp, err := client.Request(t.Context(), http.MethodGet, "/")
-		require.NoError(t, err)
-		t.Cleanup(func() { CloseResponse(resp) })
-
-		fBody, ok := resp.Body.(*responseBodyReadCloser)
-		require.True(t, ok)
-		mBody, ok := fBody.ReadCloser.(*multiReadBody)
-		require.True(t, ok)
-		assert.NotNil(t, mBody.tmpFile)
-
-		body1, err := io.ReadAll(resp.Body)
-		require.NoError(t, err)
-		assert.Equal(t, "long body exceeding threshold", string(body1))
-
-		tmpFileName := mBody.tmpFile.Name()
-		_ = resp.Body.Close()
-
-		_, err = os.Stat(tmpFileName)
-		assert.True(t, os.IsNotExist(err), "expected temp file to be deleted after Close()")
-	})
-
 	t.Run("disable_disk_fallback_above_threshold", func(t *testing.T) {
-		_, client := setupTestServer(t, func(w http.ResponseWriter, r *http.Request) {
+		_, client := aoni.SetupTestServer(t, func(w http.ResponseWriter, r *http.Request) {
 			_, _ = w.Write([]byte("long body exceeding threshold"))
 		})
 
 		client = client.With(
-			withMultiReadBody(10),
-			withMultiReadDisableDisk(true),
+			option.WithMultiReadBody(10),
+			option.WithMultiReadDisableDisk(true),
 		)
 		_, err := client.Request(t.Context(), http.MethodGet, "/")
-		assert.ErrorIs(t, err, ErrBufferLimitExceeded)
+		assert.ErrorIs(t, err, aoni.ErrBufferLimitExceeded)
 	})
-}
-
-func TestWithQuery(t *testing.T) {
-	t.Parallel()
-
-	type params struct {
-		Foo  string `url:"foo,omitempty"`
-		Page int    `url:"page,omitempty"`
-	}
-
-	tests := []struct {
-		name     string
-		rawQuery string
-		input    any
-		want     map[string]string
-	}{
-		{
-			name:     "merges_existing_params",
-			rawQuery: "existing=value&foo=bar",
-			input:    params{Page: 2},
-			want:     map[string]string{"existing": "value", "foo": "bar", "page": "2"},
-		},
-		{
-			name:     "overwrites_same_key",
-			rawQuery: "foo=old&bar=keep",
-			input:    params{Foo: "new"},
-			want:     map[string]string{"foo": "new", "bar": "keep"},
-		},
-		{
-			name:     "nil_query_noop",
-			rawQuery: "keep=this",
-			input:    nil,
-			want:     map[string]string{"keep": "this"},
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
-
-			req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, "http://localhost", nil)
-			require.NoError(t, err)
-
-			req.URL.RawQuery = tt.rawQuery
-
-			mod := WithQuery(tt.input)
-			if mod != nil {
-				mod(req)
-			}
-
-			q := req.URL.Query()
-			for k, v := range tt.want {
-				assert.Equal(t, v, q.Get(k))
-			}
-		})
-	}
 }
 
 func TestClient_SourceIPRotator(t *testing.T) {
 	t.Parallel()
 
 	ips := []string{"192.168.1.1", "192.168.1.2"}
-	rotator, err := NewSourceIPRotator(ips)
+	rotator, err := aoni.NewSourceIPRotator(ips)
 	require.NoError(t, err)
 	require.Equal(t, 2, rotator.Size())
 
@@ -1465,19 +689,19 @@ func TestClient_HostRewrite(t *testing.T) {
 		"myapi.local": "127.0.0.1:8080",
 	}
 
-	modifier := WithHostRewrite(rules)
+	modifier := mod.WithHostRewrite(rules)
 	req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, "https://myapi.local/profile", nil)
 	require.NoError(t, err)
 
 	modifier(req)
 
-	extracted := HostRewriteRules(req.Context())
+	extracted := aoni.HostRewriteRules(req.Context())
 	assert.Equal(t, "127.0.0.1:8080", extracted["myapi.local"])
 
-	appendMod := AppendHostRewrite(map[string]string{"another.local": "10.0.0.2"})
+	appendMod := aoni.AppendHostRewrite(map[string]string{"another.local": "10.0.0.2"})
 	appendMod(req)
 
-	finalRules := HostRewriteRules(req.Context())
+	finalRules := aoni.HostRewriteRules(req.Context())
 	assert.Equal(t, "127.0.0.1:8080", finalRules["myapi.local"])
 	assert.Equal(t, "10.0.0.2", finalRules["another.local"])
 }
@@ -1485,7 +709,7 @@ func TestClient_HostRewrite(t *testing.T) {
 func TestClient_PacketPadding(t *testing.T) {
 	t.Parallel()
 
-	cfg := PaddingConfig{
+	cfg := aoni.PaddingConfig{
 		MinPaddingBytes: 10,
 		MaxPaddingBytes: 20,
 		PaddingHeader:   "X-Custom-Padding",
@@ -1494,7 +718,7 @@ func TestClient_PacketPadding(t *testing.T) {
 	req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, "http://localhost", nil)
 	require.NoError(t, err)
 
-	WithPadding(cfg)(req)
+	mod.WithPadding(cfg)(req)
 
 	headerVal := req.Header.Get("X-Custom-Padding")
 	require.NotEmpty(t, headerVal)
@@ -1513,29 +737,29 @@ func TestClient_ValuesEncoding(t *testing.T) {
 	}
 
 	type QueryStruct struct {
-		Name      string        `url:"name"`
-		IsActive  BoolInt       `url:"is_active"`
-		Timestamp time.Time     `url:"timestamp"`
-		FloatVal  Float64String `url:"float_val"`
-		IntVal    Int64String   `url:"int_val"`
-		Inner     Inner         `url:"inner,inline"`
+		Name      string             `url:"name"`
+		IsActive  aoni.BoolInt       `url:"is_active"`
+		Timestamp time.Time          `url:"timestamp"`
+		FloatVal  aoni.Float64String `url:"float_val"`
+		IntVal    aoni.Int64String   `url:"int_val"`
+		Inner     Inner              `url:"inner,inline"`
 		NoTag     string
 	}
 
 	now := time.Now().Truncate(time.Second)
 	q := QueryStruct{
 		Name:      "test-user",
-		IsActive:  BoolInt(true),
+		IsActive:  aoni.BoolInt(true),
 		Timestamp: now,
-		FloatVal:  Float64String(12.34),
-		IntVal:    Int64String(99),
+		FloatVal:  aoni.Float64String(12.34),
+		IntVal:    aoni.Int64String(99),
 		Inner: Inner{
 			InlineField: "hello",
 		},
 		NoTag: "ignored",
 	}
 
-	vals, err := StructToValues(q)
+	vals, err := aoni.StructToValues(q)
 	require.NoError(t, err)
 
 	assert.Equal(t, "test-user", vals.Get("name"))
@@ -1547,17 +771,17 @@ func TestClient_ValuesEncoding(t *testing.T) {
 	assert.Empty(t, vals.Get("NoTag"))
 
 	// Test Unmarshal/Marshal of custom types
-	b, err := json.Marshal(BoolInt(true))
+	b, err := json.Marshal(aoni.BoolInt(true))
 	require.NoError(t, err)
 	assert.Equal(t, "1", string(b))
 
-	var bi BoolInt
+	var bi aoni.BoolInt
 
 	err = json.Unmarshal([]byte(`"true"`), &bi)
 	require.NoError(t, err)
 	assert.True(t, bool(bi))
 
-	ts := UnixTimestamp(now)
+	ts := aoni.UnixTimestamp(now)
 	tsBytes, err := json.Marshal(ts)
 	require.NoError(t, err)
 	assert.Equal(t, strconv.FormatInt(now.Unix(), 10), string(tsBytes))
@@ -1592,7 +816,7 @@ func TestDNSResolvers(t *testing.T) {
 		staticMap := map[string][]string{
 			"example.com": {"1.2.3.4"},
 		}
-		resolver := NewStaticResolver(staticMap, nil)
+		resolver := aoni.NewStaticResolver(staticMap, nil)
 		ips, err := resolver.LookupIPAddr(t.Context(), "example.com")
 		require.NoError(t, err)
 		require.Len(t, ips, 1)
@@ -1603,9 +827,9 @@ func TestDNSResolvers(t *testing.T) {
 		t.Parallel()
 
 		r1 := &failingResolver{}
-		r2 := NewStaticResolver(map[string][]string{"test.com": {"8.8.8.8"}}, nil)
+		r2 := aoni.NewStaticResolver(map[string][]string{"test.com": {"8.8.8.8"}}, nil)
 
-		fallback := NewFallbackResolver(r1, r2)
+		fallback := aoni.NewFallbackResolver(r1, r2)
 		ips, err := fallback.LookupIPAddr(t.Context(), "test.com")
 		require.NoError(t, err)
 		require.NotEmpty(t, ips)
@@ -1618,7 +842,7 @@ func TestDNSResolvers(t *testing.T) {
 		fast := &mockDelayResolver{delay: 1 * time.Millisecond, ip: "1.1.1.1"}
 		slow := &mockDelayResolver{delay: 200 * time.Millisecond, ip: "2.2.2.2"}
 
-		racer := NewFastRaceResolver(slow, fast)
+		racer := aoni.NewFastRaceResolver(slow, fast)
 		ips, err := racer.LookupIPAddr(t.Context(), "any.com")
 		require.NoError(t, err)
 		require.NotEmpty(t, ips)
@@ -1629,15 +853,15 @@ func TestDNSResolvers(t *testing.T) {
 func TestClient_CircuitBreaker(t *testing.T) {
 	t.Parallel()
 
-	cfg := CircuitBreakerConfig{
+	cfg := aoni.CircuitBreakerConfig{
 		FailureThreshold: 0.5,
 		Cooldown:         50 * time.Millisecond,
 		MinRequests:      2,
 		Window:           5 * time.Second,
 	}
-	cb := NewCircuitBreaker(cfg)
+	cb := aoni.NewCircuitBreaker(cfg)
 
-	b := cb.getBreaker("example.com")
+	b := cb.GetBreaker("example.com")
 	assert.NotNil(t, b)
 
 	_, err := b.Do(t.Context(), func(ctx context.Context) (any, error) {
@@ -1661,10 +885,10 @@ func TestClient_RetryMiddleware(t *testing.T) {
 
 	var attempts uint32
 
-	opts := RetryOptions{
+	opts := aoni.RetryOptions{
 		MaxRetries:     3,
 		Backoff:        1 * time.Millisecond,
-		JitterStrategy: JitterFull,
+		JitterStrategy: aoni.JitterFull,
 		OnRetry: func(attempt uint32, err error, delay time.Duration) {
 			atomic.StoreUint32(&attempts, attempt)
 		},
@@ -1683,9 +907,9 @@ func TestClient_RetryMiddleware(t *testing.T) {
 	}))
 	t.Cleanup(server.Close)
 
-	client := NewClient(nil, withBaseURL(server.URL))
+	client := aoni.NewClient(nil, option.WithBaseURL(server.URL))
 
-	retryMid := RetryMiddleware(opts, RetryOnGatewayErrors())
+	retryMid := aoni.RetryMiddleware(opts, aoni.RetryOnGatewayErrors())
 	doer := retryMid(client.HTTP())
 
 	req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, server.URL, nil)
@@ -1693,7 +917,7 @@ func TestClient_RetryMiddleware(t *testing.T) {
 
 	resp, err := doer.Do(req)
 	require.NoError(t, err)
-	t.Cleanup(func() { CloseResponse(resp) })
+	t.Cleanup(func() { aoni.CloseResponse(resp) })
 
 	assert.Equal(t, http.StatusOK, resp.StatusCode)
 	assert.Equal(t, uint32(2), atomic.LoadUint32(&attempts))
@@ -1712,10 +936,10 @@ func TestClient_StreamParsing(t *testing.T) {
 		}))
 		t.Cleanup(srv.Close)
 
-		streamResp, err := Stream(t.Context(), NewClient(nil), srv.URL)
+		streamResp, err := aoni.Stream(t.Context(), aoni.NewClient(nil), srv.URL)
 		require.NoError(t, err)
 
-		ch, errs := StreamNDJSON[testPayload](t.Context(), streamResp)
+		ch, errs := aoni.StreamNDJSON[testPayload](t.Context(), streamResp)
 
 		var msgs []string
 		for val := range ch {
@@ -1739,10 +963,10 @@ func TestClient_StreamParsing(t *testing.T) {
 		}))
 		t.Cleanup(srv.Close)
 
-		streamResp, err := Stream(t.Context(), NewClient(nil), srv.URL)
+		streamResp, err := aoni.Stream(t.Context(), aoni.NewClient(nil), srv.URL)
 		require.NoError(t, err)
 
-		ch, errs := ParseSSE[testPayload](t.Context(), streamResp)
+		ch, errs := aoni.ParseSSE[testPayload](t.Context(), streamResp)
 
 		var msgs []string
 		for val := range ch {
@@ -1765,7 +989,7 @@ func TestClient_RefererAutomaton(t *testing.T) {
 	}))
 	defer server.Close()
 
-	client := NewClient(nil, withRefererAutomaton(true))
+	client := aoni.NewClient(nil, option.WithRefererAutomaton(true))
 
 	// First request: no referer should be sent
 	resp1, err := client.Request(context.Background(), http.MethodGet, server.URL+"/page1")
@@ -1785,17 +1009,17 @@ func TestClient_RefererAutomaton(t *testing.T) {
 }
 
 func TestClient_ParseAutoProxy(t *testing.T) {
-	u1, err := ParseAutoProxy("socks5://127.0.0.1:1080")
+	u1, err := aoni.ParseAutoProxy("socks5://127.0.0.1:1080")
 	require.NoError(t, err)
 	assert.Equal(t, "socks5", u1.Scheme)
 	assert.Equal(t, "127.0.0.1:1080", u1.Host)
 
-	u2, err := ParseAutoProxy("127.0.0.1:1080")
+	u2, err := aoni.ParseAutoProxy("127.0.0.1:1080")
 	require.NoError(t, err)
 	assert.Equal(t, "socks5h", u2.Scheme)
 	assert.Equal(t, "127.0.0.1:1080", u2.Host)
 
-	u3, err := ParseAutoProxy("user:pass@1.2.3.4:8080")
+	u3, err := aoni.ParseAutoProxy("user:pass@1.2.3.4:8080")
 	require.NoError(t, err)
 	assert.Equal(t, "http", u3.Scheme)
 	assert.Equal(t, "1.2.3.4:8080", u3.Host)
@@ -1805,14 +1029,14 @@ func TestClient_ParseAutoProxy(t *testing.T) {
 }
 
 func TestClient_HTTP3Settings(t *testing.T) {
-	client := NewClient(nil, withHTTP3Settings(h3.ChromeSettings))
+	client := aoni.NewClient(nil, option.WithHTTP3Settings(h3.ChromeSettings))
 	assert.NotNil(t, client)
 }
 
 func TestUserAgentAndHintsRotation(t *testing.T) {
 	t.Parallel()
 
-	profiles := []BrowserProfile{
+	profiles := []aoni.BrowserProfile{
 		{
 			UserAgent: "BrowserA",
 			ClientHints: map[string]string{
@@ -1834,10 +1058,10 @@ func TestUserAgentAndHintsRotation(t *testing.T) {
 	}))
 	defer server.Close()
 
-	client := NewClient(nil,
-		withBaseURL(server.URL),
-		withPipeline(PipelineConfig{RotateUA: true}),
-		withUARotationProfiles(profiles),
+	client := aoni.NewClient(nil,
+		option.WithBaseURL(server.URL),
+		option.WithPipeline(aoni.PipelineConfig{RotateUA: true}),
+		option.WithUARotationProfiles(profiles),
 	)
 
 	resp1, err := client.Get(t.Context(), "/")
@@ -1865,10 +1089,10 @@ func TestDPIJitter(t *testing.T) {
 	}))
 	defer server.Close()
 
-	client := NewClient(nil,
-		withBaseURL(server.URL),
-		withPipeline(PipelineConfig{
-			DPIJitter: &DPIJitterConfig{MinDelay: 10 * time.Millisecond, MaxDelay: 20 * time.Millisecond},
+	client := aoni.NewClient(nil,
+		option.WithBaseURL(server.URL),
+		option.WithPipeline(aoni.PipelineConfig{
+			DPIJitter: &aoni.DPIJitterConfig{MinDelay: 10 * time.Millisecond, MaxDelay: 20 * time.Millisecond},
 		}),
 	)
 
@@ -1896,10 +1120,10 @@ func TestProxyFailover(t *testing.T) {
 	defer server.Close()
 
 	proxies := []string{"http://127.0.0.1:9999", server.URL}
-	client := NewClient(nil,
-		withBaseURL(server.URL),
-		withPipeline(PipelineConfig{
-			ProxyFailover: &ProxyFailoverConfig{Proxies: proxies, RetryLimit: 2},
+	client := aoni.NewClient(nil,
+		option.WithBaseURL(server.URL),
+		option.WithPipeline(aoni.PipelineConfig{
+			ProxyFailover: &aoni.ProxyFailoverConfig{Proxies: proxies, RetryLimit: 2},
 		}),
 	)
 
@@ -1928,11 +1152,11 @@ func TestCache(t *testing.T) {
 	}))
 	defer server.Close()
 
-	store := NewInMemoryCacheStore()
-	client := NewClient(nil,
-		withBaseURL(server.URL),
-		withPipeline(PipelineConfig{
-			Cache: &CacheConfig{Store: store, DefaultTTL: 1 * time.Minute},
+	store := aoni.NewInMemoryCacheStore()
+	client := aoni.NewClient(nil,
+		option.WithBaseURL(server.URL),
+		option.WithPipeline(aoni.PipelineConfig{
+			Cache: &aoni.CacheConfig{Store: store, DefaultTTL: 1 * time.Minute},
 		}),
 	)
 
@@ -1958,7 +1182,7 @@ type mockInspector struct {
 	capturedResp *http.Response
 }
 
-func (m *mockInspector) Capture(req *http.Request, resp *http.Response, err error, traceInfo *TraceInfo) {
+func (m *mockInspector) Capture(req *http.Request, resp *http.Response, err error, traceInfo *aoni.TraceInfo) {
 	m.capturedReq = req
 	m.capturedResp = resp
 }
@@ -1973,21 +1197,21 @@ func TestSensitiveDataRedactor(t *testing.T) {
 	defer server.Close()
 
 	inspector := &mockInspector{}
-	client := NewClient(nil,
-		withBaseURL(server.URL),
-		withPipeline(PipelineConfig{
-			Redact:  &RedactConfig{HeadersToRedact: []string{"Authorization", "Set-Cookie"}},
+	client := aoni.NewClient(nil,
+		option.WithBaseURL(server.URL),
+		option.WithPipeline(aoni.PipelineConfig{
+			Redact:  &aoni.RedactConfig{HeadersToRedact: []string{"Authorization", "Set-Cookie"}},
 			Inspect: true,
 		}),
-		withInspector(inspector),
+		option.WithInspector(inspector),
 	)
 
-	resp, err := client.Request(t.Context(), "GET", "/", WithHeader("Authorization", "Bearer secretToken"))
+	resp, err := client.Request(t.Context(), "GET", "/", mod.WithHeader("Authorization", "Bearer secretToken"))
 	require.NoError(t, err)
 
 	defer resp.Body.Close()
 
-	cfg, ok := inspector.capturedReq.Context().Value(RedactConfigCtxKey{}).(*RedactConfig)
+	cfg, ok := inspector.capturedReq.Context().Value(aoni.RedactConfigCtxKey{}).(*aoni.RedactConfig)
 	require.True(t, ok)
 	require.NotNil(t, cfg)
 
@@ -2007,11 +1231,11 @@ func TestHARGenerator(t *testing.T) {
 	}))
 	defer server.Close()
 
-	harGen := NewHARGenerator()
-	client := NewClient(nil,
-		withBaseURL(server.URL),
-		withPipeline(PipelineConfig{
-			HAR: &HARConfig{Generator: harGen},
+	harGen := aoni.NewHARGenerator()
+	client := aoni.NewClient(nil,
+		option.WithBaseURL(server.URL),
+		option.WithPipeline(aoni.PipelineConfig{
+			HAR: &aoni.HARConfig{Generator: harGen},
 		}),
 	)
 
@@ -2047,12 +1271,12 @@ func TestClient_QueryEncoder(t *testing.T) {
 		return vals, nil
 	}
 
-	client := NewClient(nil,
-		withBaseURL(server.URL),
-		withQueryEncoder(customEncoder),
+	client := aoni.NewClient(nil,
+		option.WithBaseURL(server.URL),
+		option.WithQueryEncoder(customEncoder),
 	)
 
-	_, err := client.Get(t.Context(), "/", WithQuery(struct{ Dummy string }{Dummy: "value"}))
+	_, err := client.Get(t.Context(), "/", mod.WithQuery(struct{ Dummy string }{Dummy: "value"}))
 	require.NoError(t, err)
 	assert.Equal(t, "custom_key=custom_val", capturedQuery)
 }
@@ -2060,8 +1284,8 @@ func TestClient_QueryEncoder(t *testing.T) {
 func TestWithClientBrowserProfile(t *testing.T) {
 	t.Parallel()
 
-	clientChrome := NewClient(nil,
-		withBrowserProfile(BrowserChrome, profiles.Windows),
+	clientChrome := aoni.NewClient(nil,
+		option.WithBrowserProfile(aoni.BrowserChrome, profiles.Windows),
 	)
 
 	headersChrome := clientChrome.Defaults().Headers
@@ -2083,8 +1307,8 @@ func TestWithClientBrowserProfile(t *testing.T) {
 	require.NotNil(t, spec)
 	assert.Contains(t, spec.CipherSuites, uint16(utls.TLS_AES_128_GCM_SHA256))
 
-	clientFirefox := NewClient(nil,
-		withBrowserProfile(BrowserFirefox, profiles.Windows),
+	clientFirefox := aoni.NewClient(nil,
+		option.WithBrowserProfile(aoni.BrowserFirefox, profiles.Windows),
 	)
 
 	headersFirefox := clientFirefox.Defaults().Headers
@@ -2104,21 +1328,21 @@ func TestWithClientBrowserProfile(t *testing.T) {
 	}))
 	defer server.Close()
 
-	client := NewClient(nil,
-		withBaseURL(server.URL),
-		withBrowserProfile(BrowserChrome, profiles.Windows),
+	client := aoni.NewClient(nil,
+		option.WithBaseURL(server.URL),
+		option.WithBrowserProfile(aoni.BrowserChrome, profiles.Windows),
 	)
 
 	reqGet, err := http.NewRequestWithContext(t.Context(), "GET", server.URL, nil)
 	require.NoError(t, err)
 
 	reqGet = client.InitRequestConfig(reqGet)
-	for _, mod := range client.Defaults().DefaultMods {
-		mod(reqGet)
+	for _, defaultMod := range client.Defaults().DefaultMods {
+		defaultMod(reqGet)
 	}
 
 	assert.Contains(t, reqGet.Header.Get("Accept"), "text/html")
-	cfgGet := GetRequestConfig(reqGet.Context())
+	cfgGet := aoni.GetRequestConfig(reqGet.Context())
 	require.NotNil(t, cfgGet)
 	assert.NotEmpty(t, cfgGet.OrderedHeaders)
 	assert.Equal(t, ":method", cfgGet.OrderedHeaders[0])
@@ -2127,12 +1351,12 @@ func TestWithClientBrowserProfile(t *testing.T) {
 	require.NoError(t, err)
 
 	reqPost = client.InitRequestConfig(reqPost)
-	for _, mod := range client.Defaults().DefaultMods {
-		mod(reqPost)
+	for _, defaultMod := range client.Defaults().DefaultMods {
+		defaultMod(reqPost)
 	}
 
 	assert.Equal(t, "*/*", reqPost.Header.Get("Accept"))
-	cfgPost := GetRequestConfig(reqPost.Context())
+	cfgPost := aoni.GetRequestConfig(reqPost.Context())
 	require.NotNil(t, cfgPost)
 	assert.NotEmpty(t, cfgPost.OrderedHeaders)
 	assert.Equal(t, "content-length", cfgPost.OrderedHeaders[4])
@@ -2141,11 +1365,11 @@ func TestWithClientBrowserProfile(t *testing.T) {
 	require.NoError(t, err)
 
 	reqMultipart = client.InitRequestConfig(reqMultipart)
-	for _, mod := range client.Defaults().DefaultMods {
-		mod(reqMultipart)
+	for _, defaultMod := range client.Defaults().DefaultMods {
+		defaultMod(reqMultipart)
 	}
 
-	modMultipart := WithMultipart(map[string]string{"foo": "bar"}, nil)
+	modMultipart := mod.WithMultipart(map[string]string{"foo": "bar"}, nil)
 	modMultipart(reqMultipart)
 
 	contentType := reqMultipart.Header.Get("Content-Type")
@@ -2181,8 +1405,8 @@ func TestWithClientProfileVariant_Custom(t *testing.T) {
 		HeaderCache: customCache,
 	}
 
-	client := NewClient(nil,
-		withProfileVariant(customVariant, profiles.Windows),
+	client := aoni.NewClient(nil,
+		option.WithProfileVariant(customVariant, profiles.Windows),
 	)
 
 	// Verify custom headers
@@ -2204,11 +1428,11 @@ func TestWithClientProfileVariant_Custom(t *testing.T) {
 	require.NoError(t, err)
 
 	req = client.InitRequestConfig(req)
-	for _, mod := range client.Defaults().DefaultMods {
-		mod(req)
+	for _, defaultMod := range client.Defaults().DefaultMods {
+		defaultMod(req)
 	}
 
-	cfg := GetRequestConfig(req.Context())
+	cfg := aoni.GetRequestConfig(req.Context())
 	require.NotNil(t, cfg)
 	assert.Equal(t, []string{"custom-header", "user-agent"}, cfg.OrderedHeaders)
 
@@ -2217,11 +1441,11 @@ func TestWithClientProfileVariant_Custom(t *testing.T) {
 	require.NoError(t, err)
 
 	reqMultipart = client.InitRequestConfig(reqMultipart)
-	for _, mod := range client.Defaults().DefaultMods {
-		mod(reqMultipart)
+	for _, defaultMod := range client.Defaults().DefaultMods {
+		defaultMod(reqMultipart)
 	}
 
-	modMultipart := WithMultipart(map[string]string{"foo": "bar"}, nil)
+	modMultipart := mod.WithMultipart(map[string]string{"foo": "bar"}, nil)
 	modMultipart(reqMultipart)
 
 	contentType := reqMultipart.Header.Get("Content-Type")
@@ -2232,8 +1456,8 @@ func TestWithClientProfileVariant_Custom(t *testing.T) {
 func TestWithClientTCPDelay(t *testing.T) {
 	t.Parallel()
 
-	client := NewClient(nil,
-		withTCPDelay(10*time.Millisecond, 20*time.Millisecond),
+	client := aoni.NewClient(nil,
+		option.WithTCPDelay(10*time.Millisecond, 20*time.Millisecond),
 	)
 
 	// Test GET request uses client-level default TCP delay
@@ -2241,11 +1465,11 @@ func TestWithClientTCPDelay(t *testing.T) {
 	require.NoError(t, err)
 
 	reqGet = client.InitRequestConfig(reqGet)
-	for _, mod := range client.Defaults().DefaultMods {
-		mod(reqGet)
+	for _, defaultMod := range client.Defaults().DefaultMods {
+		defaultMod(reqGet)
 	}
 
-	cfgGet := GetRequestConfig(reqGet.Context())
+	cfgGet := aoni.GetRequestConfig(reqGet.Context())
 	require.NotNil(t, cfgGet)
 	assert.Equal(t, 10*time.Millisecond, cfgGet.TCPDelay.Min)
 	assert.Equal(t, 20*time.Millisecond, cfgGet.TCPDelay.Max)
@@ -2255,14 +1479,14 @@ func TestWithClientTCPDelay(t *testing.T) {
 	require.NoError(t, err)
 
 	reqOverride = client.InitRequestConfig(reqOverride)
-	for _, mod := range client.Defaults().DefaultMods {
-		mod(reqOverride)
+	for _, defaultMod := range client.Defaults().DefaultMods {
+		defaultMod(reqOverride)
 	}
 
 	// Apply per-request override
-	WithTCPDelay(100*time.Millisecond, 200*time.Millisecond)(reqOverride)
+	mod.WithTCPDelay(100*time.Millisecond, 200*time.Millisecond)(reqOverride)
 
-	cfgOverride := GetRequestConfig(reqOverride.Context())
+	cfgOverride := aoni.GetRequestConfig(reqOverride.Context())
 	require.NotNil(t, cfgOverride)
 	assert.Equal(t, 100*time.Millisecond, cfgOverride.TCPDelay.Min)
 	assert.Equal(t, 200*time.Millisecond, cfgOverride.TCPDelay.Max)
@@ -2276,7 +1500,7 @@ func TestClient_WithClientInsecureSkipVerify(t *testing.T) {
 	}))
 	t.Cleanup(server.Close)
 
-	client := NewClient(nil, withInsecureSkipVerify())
+	client := aoni.NewClient(nil, option.WithInsecureSkipVerify())
 	resp, err := client.Request(t.Context(), http.MethodGet, server.URL)
 	require.NoError(t, err)
 	assert.Equal(t, http.StatusOK, resp.StatusCode)
@@ -2294,7 +1518,7 @@ func TestClient_WithClientResponseValidator(t *testing.T) {
 	errReqVal := errors.New("request validator error")
 
 	t.Run("Client-level only - failure", func(t *testing.T) {
-		client := NewClient(nil, withResponseValidator(func(resp *http.Response) error {
+		client := aoni.NewClient(nil, option.WithResponseValidator(func(resp *http.Response) error {
 			return errClientVal
 		}))
 		_, err := client.Request(t.Context(), http.MethodGet, server.URL)
@@ -2303,14 +1527,14 @@ func TestClient_WithClientResponseValidator(t *testing.T) {
 	})
 
 	t.Run("Client-level and request-level both fail - request-level wins", func(t *testing.T) {
-		client := NewClient(nil, withResponseValidator(func(resp *http.Response) error {
+		client := aoni.NewClient(nil, option.WithResponseValidator(func(resp *http.Response) error {
 			return errClientVal
 		}))
 		_, err := client.Request(
 			t.Context(),
 			http.MethodGet,
 			server.URL,
-			WithResponseValidator(func(resp *http.Response) error {
+			mod.WithResponseValidator(func(resp *http.Response) error {
 				return errReqVal
 			}),
 		)
@@ -2319,14 +1543,14 @@ func TestClient_WithClientResponseValidator(t *testing.T) {
 	})
 
 	t.Run("Client-level fails, request-level succeeds - request-level override passes", func(t *testing.T) {
-		client := NewClient(nil, withResponseValidator(func(resp *http.Response) error {
+		client := aoni.NewClient(nil, option.WithResponseValidator(func(resp *http.Response) error {
 			return errClientVal
 		}))
 		resp, err := client.Request(
 			t.Context(),
 			http.MethodGet,
 			server.URL,
-			WithResponseValidator(func(resp *http.Response) error {
+			mod.WithResponseValidator(func(resp *http.Response) error {
 				return nil
 			}),
 		)

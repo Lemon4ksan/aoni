@@ -113,7 +113,7 @@ func DialWebSocket(
 
 	// Check if the TLS connection negotiated HTTP/2.
 	if uConn, ok := baseConn.(*utls.UConn); ok {
-		if uConn.ConnectionState().NegotiatedProtocol == "h2" {
+		if uConn.ConnectionState().NegotiatedProtocol == aoni.AlpnH2 {
 			wsConn, err := dialH2ExtendedConnect(ctx, baseConn, targetURL, parsed.host)
 			if err != nil {
 				_ = baseConn.Close()
@@ -219,7 +219,7 @@ func DialWebSocketWithConfig(
 	maps.Copy(header, tmpReq.Header)
 
 	if uConn, ok := baseConn.(*utls.UConn); ok {
-		if uConn.ConnectionState().NegotiatedProtocol == "h2" {
+		if uConn.ConnectionState().NegotiatedProtocol == aoni.AlpnH2 {
 			wsConn, err := dialH2ExtendedConnect(ctx, baseConn, targetURL, parsed.host)
 			if err != nil {
 				_ = baseConn.Close()

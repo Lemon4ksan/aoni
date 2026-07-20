@@ -9,11 +9,13 @@
 package main
 
 import (
-	"github.com/lemon4ksan/aoni/option"
 	"context"
 	"errors"
 	"fmt"
 	"time"
+
+	"github.com/lemon4ksan/aoni/mod"
+	"github.com/lemon4ksan/aoni/option"
 
 	"github.com/lemon4ksan/aoni"
 )
@@ -33,7 +35,7 @@ func main() {
 	// Example 1: Check for aoni.APIError with a custom error model
 	_, err := aoni.GetTo[any](ctx, client,
 		"/posts/99999",
-		aoni.WithErrorModel(&NotFoundResponse{}),
+		mod.WithErrorModel(&NotFoundResponse{}),
 	)
 	if err != nil {
 		var apiErr *aoni.APIError

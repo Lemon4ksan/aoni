@@ -2,7 +2,7 @@
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
-package aoni
+package aoni_test
 
 import (
 	"bytes"
@@ -17,29 +17,33 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/lemon4ksan/aoni"
+	"github.com/lemon4ksan/aoni/mod"
+	"github.com/lemon4ksan/aoni/option"
 )
 
 func TestGetProxyOverride_Set(t *testing.T) {
 	req, _ := http.NewRequest(http.MethodGet, "http://example.com", nil)
-	WithProxyOverride("http://proxy.local:8080")(req)
+	mod.WithProxyOverride("http://proxy.local:8080")(req)
 
-	raw, ok := GetProxyOverride(req.Context()).Value()
+	raw, ok := aoni.GetProxyOverride(req.Context()).Value()
 	require.True(t, ok)
 	assert.Equal(t, "http://proxy.local:8080", raw)
 }
 
 func TestGetProxyOverride_NotSet(t *testing.T) {
 	req, _ := http.NewRequest(http.MethodGet, "http://example.com", nil)
-	_, ok := GetProxyOverride(req.Context()).Value()
+	_, ok := aoni.GetProxyOverride(req.Context()).Value()
 	assert.False(t, ok)
 }
 
 func TestProxyFuncWithOverride_PreferOverride(t *testing.T) {
 	base := http.ProxyURL(&url.URL{Scheme: "http", Host: "global-proxy:8080"})
-	wrapped := ProxyFuncWithOverride(base)
+	wrapped := aoni.ProxyFuncWithOverride(base)
 
 	req, _ := http.NewRequest(http.MethodGet, "http://example.com", nil)
-	WithProxyOverride("http://per-request-proxy:9090")(req)
+	mod.WithProxyOverride("http://per-request-proxy:9090")(req)
 
 	u, err := wrapped(req)
 	require.NoError(t, err)
@@ -48,7 +52,7 @@ func TestProxyFuncWithOverride_PreferOverride(t *testing.T) {
 
 func TestProxyFuncWithOverride_FallbackToBase(t *testing.T) {
 	base := http.ProxyURL(&url.URL{Scheme: "http", Host: "global-proxy:8080"})
-	wrapped := ProxyFuncWithOverride(base)
+	wrapped := aoni.ProxyFuncWithOverride(base)
 
 	req, _ := http.NewRequest(http.MethodGet, "http://example.com", nil)
 
@@ -58,7 +62,7 @@ func TestProxyFuncWithOverride_FallbackToBase(t *testing.T) {
 }
 
 func TestProxyFuncWithOverride_NilBase(t *testing.T) {
-	wrapped := ProxyFuncWithOverride(nil)
+	wrapped := aoni.ProxyFuncWithOverride(nil)
 
 	req, _ := http.NewRequest(http.MethodGet, "http://example.com", nil)
 
@@ -69,20 +73,20 @@ func TestProxyFuncWithOverride_NilBase(t *testing.T) {
 
 func TestGetInsecureSkipVerify_Set(t *testing.T) {
 	req, _ := http.NewRequest(http.MethodGet, "http://example.com", nil)
-	WithInsecureSkipVerify()(req)
-	assert.True(t, GetInsecureSkipVerify(req.Context()))
+	mod.WithInsecureSkipVerify()(req)
+	assert.True(t, aoni.GetInsecureSkipVerify(req.Context()))
 }
 
 func TestGetInsecureSkipVerify_NotSet(t *testing.T) {
 	req, _ := http.NewRequest(http.MethodGet, "http://example.com", nil)
-	assert.False(t, GetInsecureSkipVerify(req.Context()))
+	assert.False(t, aoni.GetInsecureSkipVerify(req.Context()))
 }
 
 func TestTLSConfigWithOverride_AppliesFlag(t *testing.T) {
 	req, _ := http.NewRequest(http.MethodGet, "https://example.com", nil)
-	WithInsecureSkipVerify()(req)
+	mod.WithInsecureSkipVerify()(req)
 
-	cfg := TLSConfigWithOverride(req.Context(), nil)
+	cfg := aoni.TLSConfigWithOverride(req.Context(), nil)
 	require.NotNil(t, cfg)
 	assert.True(t, cfg.InsecureSkipVerify)
 }
@@ -90,14 +94,14 @@ func TestTLSConfigWithOverride_AppliesFlag(t *testing.T) {
 func TestTLSConfigWithOverride_NoCloneWhenNotSet(t *testing.T) {
 	req, _ := http.NewRequest(http.MethodGet, "https://example.com", nil)
 	// not calling WithInsecureSkipVerify()
-	assert.False(t, GetInsecureSkipVerify(req.Context()))
+	assert.False(t, aoni.GetInsecureSkipVerify(req.Context()))
 }
 
 func TestGetTCPDelay_Set(t *testing.T) {
 	req, _ := http.NewRequest(http.MethodGet, "http://example.com", nil)
-	WithTCPDelay(10*time.Millisecond, 20*time.Millisecond)(req)
+	mod.WithTCPDelay(10*time.Millisecond, 20*time.Millisecond)(req)
 
-	r, ok := GetTCPDelay(req.Context()).Value()
+	r, ok := aoni.GetTCPDelay(req.Context()).Value()
 	require.True(t, ok)
 	assert.Equal(t, 10*time.Millisecond, r.Min)
 	assert.Equal(t, 20*time.Millisecond, r.Max)
@@ -105,9 +109,9 @@ func TestGetTCPDelay_Set(t *testing.T) {
 
 func TestWithTCPDelay_SwapsMinMax(t *testing.T) {
 	req, _ := http.NewRequest(http.MethodGet, "http://example.com", nil)
-	WithTCPDelay(50*time.Millisecond, 10*time.Millisecond)(req) // reversed
+	mod.WithTCPDelay(50*time.Millisecond, 10*time.Millisecond)(req) // reversed
 
-	r, ok := GetTCPDelay(req.Context()).Value()
+	r, ok := aoni.GetTCPDelay(req.Context()).Value()
 	require.True(t, ok)
 	assert.LessOrEqual(t, r.Min, r.Max, "min must be <= max after swap")
 }
@@ -116,17 +120,17 @@ func TestApplyTCPDelay_NoDelay(t *testing.T) {
 	req, _ := http.NewRequest(http.MethodGet, "http://example.com", nil)
 	// No delay set should return immediately.
 	start := time.Now()
-	err := ApplyTCPDelay(req.Context())
+	err := aoni.ApplyTCPDelay(req.Context())
 	require.NoError(t, err)
 	assert.Less(t, time.Since(start), 10*time.Millisecond)
 }
 
 func TestApplyTCPDelay_WithDelay(t *testing.T) {
 	req, _ := http.NewRequest(http.MethodGet, "http://example.com", nil)
-	WithTCPDelay(20*time.Millisecond, 30*time.Millisecond)(req)
+	mod.WithTCPDelay(20*time.Millisecond, 30*time.Millisecond)(req)
 
 	start := time.Now()
-	err := ApplyTCPDelay(req.Context())
+	err := aoni.ApplyTCPDelay(req.Context())
 	elapsed := time.Since(start)
 
 	require.NoError(t, err)
@@ -135,20 +139,20 @@ func TestApplyTCPDelay_WithDelay(t *testing.T) {
 
 func TestConnMetadata_SetAndGet(t *testing.T) {
 	req, _ := http.NewRequest(http.MethodGet, "http://example.com", nil)
-	WithConnMetadata("proxy-id", "proxy-42")(req)
+	mod.WithConnMetadata("proxy-id", "proxy-42")(req)
 
-	val, ok := GetConnMetadata(req.Context(), "proxy-id").Value()
+	val, ok := aoni.GetConnMetadata(req.Context(), "proxy-id").Value()
 	require.True(t, ok)
 	assert.Equal(t, "proxy-42", val)
 }
 
 func TestConnMetadata_MultipleKeys(t *testing.T) {
 	req, _ := http.NewRequest(http.MethodGet, "http://example.com", nil)
-	WithConnMetadata("pool", "eu-west")(req)
-	WithConnMetadata("trace-id", "abc123")(req)
+	mod.WithConnMetadata("pool", "eu-west")(req)
+	mod.WithConnMetadata("trace-id", "abc123")(req)
 
-	pool, ok1 := GetConnMetadata(req.Context(), "pool").Value()
-	trace, ok2 := GetConnMetadata(req.Context(), "trace-id").Value()
+	pool, ok1 := aoni.GetConnMetadata(req.Context(), "pool").Value()
+	trace, ok2 := aoni.GetConnMetadata(req.Context(), "trace-id").Value()
 
 	require.True(t, ok1)
 	require.True(t, ok2)
@@ -158,7 +162,7 @@ func TestConnMetadata_MultipleKeys(t *testing.T) {
 
 func TestConnMetadata_MissingKey(t *testing.T) {
 	req, _ := http.NewRequest(http.MethodGet, "http://example.com", nil)
-	_, ok := GetConnMetadata(req.Context(), "nonexistent").Value()
+	_, ok := aoni.GetConnMetadata(req.Context(), "nonexistent").Value()
 	assert.False(t, ok)
 }
 
@@ -170,10 +174,10 @@ func TestWithResponseValidator_PassesOnSuccess(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	c := NewClient(nil, withBaseURL(srv.URL))
+	c := aoni.NewClient(nil, option.WithBaseURL(srv.URL))
 
 	resp, err := c.Get(t.Context(), "/",
-		WithResponseValidator(func(resp *http.Response) error {
+		mod.WithResponseValidator(func(resp *http.Response) error {
 			if resp.Header.Get("X-Status") != "ok" {
 				return errors.New("missing X-Status")
 			}
@@ -193,10 +197,10 @@ func TestWithResponseValidator_BlocksOnFailure(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	c := NewClient(nil, withBaseURL(srv.URL))
+	c := aoni.NewClient(nil, option.WithBaseURL(srv.URL))
 
 	resp, err := c.Get(t.Context(), "/",
-		WithResponseValidator(func(resp *http.Response) error {
+		mod.WithResponseValidator(func(resp *http.Response) error {
 			body, _ := io.ReadAll(resp.Body)
 
 			resp.Body = io.NopCloser(bytes.NewReader(body)) // reset for caller
@@ -214,27 +218,27 @@ func TestWithResponseValidator_BlocksOnFailure(t *testing.T) {
 
 func TestGetCacheTTL_Set(t *testing.T) {
 	req, _ := http.NewRequest(http.MethodGet, "http://example.com", nil)
-	WithCacheTTL(5 * time.Minute)(req)
+	mod.WithCacheTTL(5 * time.Minute)(req)
 
-	d, ok := GetCacheTTL(req.Context()).Value()
+	d, ok := aoni.GetCacheTTL(req.Context()).Value()
 	require.True(t, ok)
 	assert.Equal(t, 5*time.Minute, d)
 }
 
 func TestGetCacheTTL_NotSet(t *testing.T) {
 	req, _ := http.NewRequest(http.MethodGet, "http://example.com", nil)
-	_, ok := GetCacheTTL(req.Context()).Value()
+	_, ok := aoni.GetCacheTTL(req.Context()).Value()
 	assert.False(t, ok)
 }
 
 func TestGetRetryOverride_Set(t *testing.T) {
 	req, _ := http.NewRequest(http.MethodGet, "http://example.com", nil)
-	WithRetryPolicy(RetryOverride{
+	mod.WithRetryPolicy(aoni.RetryOverride{
 		MaxAttempts: 5,
 		Backoff:     200 * time.Millisecond,
 	})(req)
 
-	o, ok := GetRetryOverride(req.Context()).Value()
+	o, ok := aoni.GetRetryOverride(req.Context()).Value()
 	require.True(t, ok)
 	assert.Equal(t, 5, o.MaxAttempts)
 	assert.Equal(t, 200*time.Millisecond, o.Backoff)
@@ -243,15 +247,15 @@ func TestGetRetryOverride_Set(t *testing.T) {
 
 func TestGetRetryOverride_DefaultsMaxAttempts(t *testing.T) {
 	req, _ := http.NewRequest(http.MethodGet, "http://example.com", nil)
-	WithRetryPolicy(RetryOverride{MaxAttempts: 0})(req) // should clamp to 1
+	mod.WithRetryPolicy(aoni.RetryOverride{MaxAttempts: 0})(req) // should clamp to 1
 
-	o, ok := GetRetryOverride(req.Context()).Value()
+	o, ok := aoni.GetRetryOverride(req.Context()).Value()
 	require.True(t, ok)
 	assert.Equal(t, 1, o.MaxAttempts)
 }
 
 func TestGetRetryOverride_NotSet(t *testing.T) {
 	req, _ := http.NewRequest(http.MethodGet, "http://example.com", nil)
-	_, ok := GetRetryOverride(req.Context()).Value()
+	_, ok := aoni.GetRetryOverride(req.Context()).Value()
 	assert.False(t, ok)
 }

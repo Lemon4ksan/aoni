@@ -5,7 +5,6 @@
 package main
 
 import (
-	"github.com/lemon4ksan/aoni/option"
 	"context"
 	"database/sql"
 	"errors"
@@ -16,6 +15,9 @@ import (
 	"os"
 	"strings"
 	"time"
+
+	"github.com/lemon4ksan/aoni/mod"
+	"github.com/lemon4ksan/aoni/option"
 
 	"github.com/lemon4ksan/aoni"
 	"github.com/lemon4ksan/aoni/cookie"
@@ -154,7 +156,7 @@ func main() {
 
 	log.Println("Executing safe user profile lookup...")
 
-	antiBotValidator := aoni.WithResponseValidator(func(resp *http.Response) error {
+	antiBotValidator := mod.WithResponseValidator(func(resp *http.Response) error {
 		if resp.Header.Get("X-Frame-Options") == "DENY" {
 			return errors.New("proxy address blocked by target system")
 		}
@@ -166,7 +168,7 @@ func main() {
 		client,
 		"/v1/users/profile",
 		antiBotValidator,
-		aoni.WithHeader("X-Client-Build", "release-v2.0"),
+		mod.WithHeader("X-Client-Build", "release-v2.0"),
 	)
 
 	if err != nil {

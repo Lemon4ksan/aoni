@@ -9,12 +9,14 @@
 package main
 
 import (
-	"github.com/lemon4ksan/aoni/option"
 	"context"
 	"fmt"
 	"log"
 	"net/http"
 	"time"
+
+	"github.com/lemon4ksan/aoni/mod"
+	"github.com/lemon4ksan/aoni/option"
 
 	"github.com/lemon4ksan/aoni"
 )
@@ -56,7 +58,7 @@ func main() {
 
 	_, err = aoni.GetTo[HTTPBinResponse](ctx, client, "/ip",
 		aoni.AsCurl(),
-		aoni.WithCaptureResponse(&resp),
+		mod.WithCaptureResponse(&resp),
 	)
 	if err != nil {
 		log.Fatal(err)

@@ -51,7 +51,7 @@ func StreamWithBody(
 	body io.Reader,
 	mods ...RequestModifier,
 ) (*StreamResponse, error) {
-	resp, err := c.Request(ctx, method, path, append(mods, WithBody(body))...)
+	resp, err := c.Request(ctx, method, path, append(mods, withBody(body))...)
 	if err != nil {
 		return nil, err
 	}
@@ -256,9 +256,9 @@ func StreamSSE[T any](
 	mods ...RequestModifier,
 ) (<-chan T, <-chan error, error) {
 	sseMods := []RequestModifier{ //nolint:prealloc
-		WithHeader("Accept", "text/event-stream"),
-		WithHeader("Cache-Control", "no-cache"),
-		WithHeader("Connection", "keep-alive"),
+		withHeader("Accept", "text/event-stream"),
+		withHeader("Cache-Control", "no-cache"),
+		withHeader("Connection", "keep-alive"),
 	}
 	mods = append(sseMods, mods...)
 

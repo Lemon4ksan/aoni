@@ -11,6 +11,7 @@ import (
 	utls "github.com/refraction-networking/utls"
 	"golang.org/x/net/http2"
 
+	"github.com/lemon4ksan/aoni/cookie"
 	"github.com/lemon4ksan/aoni/h2"
 	"github.com/lemon4ksan/aoni/h3"
 	"github.com/lemon4ksan/aoni/profiles"
@@ -26,7 +27,8 @@ func (s StaticSpecProvider) ClientHelloSpec() (*utls.ClientHelloSpec, error) {
 	return s.Spec, nil
 }
 
-func getOrInitRequestConfig(req *http.Request) *RequestConfig {
+// GetOrInitRequestConfig retrieves or initializes the [RequestConfig] associated with the request context.
+func GetOrInitRequestConfig(req *http.Request) *RequestConfig {
 	cfg := GetRequestConfig(req.Context())
 	if cfg == nil {
 		cfg = &RequestConfig{
@@ -54,7 +56,7 @@ func setOrderedHeaders(req *http.Request, variant *profiles.Variant, os profiles
 		}
 	}
 
-	cfg := getOrInitRequestConfig(req)
+	cfg := GetOrInitRequestConfig(req)
 	cfg.OrderedHeaders = ordered
 }
 
@@ -74,7 +76,11 @@ func (c *Client) reapplyH2Settings(tr *http.Transport) {
 	if c.fingerprint.H2Settings != nil {
 		framed := h2.NewFramedTransport(tr, *c.fingerprint.H2Settings)
 		if httpClient, ok := c.engine.(*http.Client); ok {
-			httpClient.Transport = framed
+			if cjTrans, ok := httpClient.Transport.(*cookie.Transport); ok {
+				cjTrans.Next = framed
+			} else {
+				httpClient.Transport = framed
+			}
 		}
 	}
 }
@@ -87,6 +93,7 @@ func ApplyTLSVariantToConfig(cfg *Config, variant *profiles.Variant) {
 		} else {
 			cfg.Fingerprint.BrowserID = BrowserChrome
 		}
+
 		cfg.Fingerprint.TLSClientHelloID = nil
 	}
 
@@ -113,6 +120,7 @@ func ApplyHTTPVariantToConfig(cfg *Config, variant *profiles.Variant, os profile
 		if cfg.Defaults.Headers == nil {
 			cfg.Defaults.Headers = make(http.Header)
 		}
+
 		for _, h := range variant.BuildHeaders(os) {
 			if h.Value != "" {
 				cfg.Defaults.Headers.Set(h.Name, h.Value)
@@ -183,7 +191,7 @@ func ApplyProfileHeaders(req *http.Request, variant *profiles.Variant, os profil
 	}
 
 	if variant.BoundaryFunc != nil {
-		cfg := getOrInitRequestConfig(req)
+		cfg := GetOrInitRequestConfig(req)
 		cfg.MultipartBoundary = variant.BoundaryFunc()
 	}
 

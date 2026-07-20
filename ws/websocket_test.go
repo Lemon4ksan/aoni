@@ -5,7 +5,6 @@
 package ws
 
 import (
-	"github.com/lemon4ksan/aoni/option"
 	"context"
 	"crypto/tls"
 	"net"
@@ -20,6 +19,8 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/lemon4ksan/aoni"
+	"github.com/lemon4ksan/aoni/mod"
+	"github.com/lemon4ksan/aoni/option"
 )
 
 func TestDialWebSocket_PlainWS(t *testing.T) {
@@ -56,7 +57,7 @@ func TestDialWebSocket_PlainWS(t *testing.T) {
 		context.Background(),
 		client,
 		wsURL,
-		aoni.WithHeader("Origin", "http://localhost"),
+		mod.WithHeader("Origin", "http://localhost"),
 	)
 	require.NoError(t, err)
 	require.NotNil(t, resp)

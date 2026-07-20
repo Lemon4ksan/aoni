@@ -399,6 +399,12 @@ func (c *h2framedConn) Write(b []byte) (int, error) {
 	// Build replacement SETTINGS frame with browser-specific values
 	replacement := c.buildSettingsFrame()
 
+	if c.settings.ConnectionFlow > 65535 {
+		increment := c.settings.ConnectionFlow - 65535
+		windowUpdate := c.buildWindowUpdateFrame(increment)
+		replacement = append(replacement, windowUpdate...)
+	}
+
 	// Check if there's a PRIORITY frame after SETTINGS (Firefox sends one)
 	remaining := settingsFrame[9+payloadLen:]
 
@@ -417,8 +423,8 @@ func (c *h2framedConn) Write(b []byte) (int, error) {
 	// Assemble: preface + replacement settings + modified remaining + untouched remaining
 	result := make([]byte, 0, len(b)+64)
 	result = append(result, preface...)
-
 	result = append(result, replacement...)
+
 	if len(newRemaining) > 0 {
 		result = append(result, newRemaining...)
 	}
@@ -434,6 +440,28 @@ func (c *h2framedConn) Write(b []byte) (int, error) {
 	c.prefaceWritten = true
 
 	return len(b), nil
+}
+
+func (c *h2framedConn) buildWindowUpdateFrame(increment uint32) []byte {
+	frame := make([]byte, 13)
+
+	// Length: 4 (0x000004)
+	frame[0] = 0x0
+	frame[1] = 0x0
+	frame[2] = 0x4
+	// Type: WINDOW_UPDATE (0x8)
+	frame[3] = 0x8
+	// Flags: 0
+	frame[4] = 0x0
+	// Stream ID: 0 (Connection-level)
+	frame[5] = 0x0
+	frame[6] = 0x0
+	frame[7] = 0x0
+	frame[8] = 0x0
+
+	binary.BigEndian.PutUint32(frame[9:13], increment&0x7FFFFFFF)
+
+	return frame
 }
 
 // buildSettingsFrame constructs an HTTP/2 SETTINGS frame with browser-specific values.

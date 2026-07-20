@@ -60,7 +60,7 @@ func GetToEx[Resp any](
 ) (*Resp, *http.Response, error) {
 	var raw *http.Response
 
-	mods = append(mods, WithCaptureResponse(&raw))
+	mods = append(mods, withCaptureResponse(&raw))
 
 	result, err := GetTo[Resp](ctx, c, path, mods...)
 	if err != nil {
@@ -91,9 +91,9 @@ func Post(ctx context.Context, c Requester, path string, body any, mods ...Reque
 	}
 
 	mods = append([]RequestModifier{
-		WithContentType("application/json"),
-		WithAccept("application/json"),
-		WithBody(bodyReader),
+		withContentType("application/json"),
+		withAccept("application/json"),
+		withBody(bodyReader),
 	}, mods...)
 
 	return c.Request(ctx, http.MethodPost, path, mods...)
@@ -122,9 +122,9 @@ func PostTo[Resp any](
 	}
 
 	mods = append([]RequestModifier{
-		WithContentType("application/json"),
-		WithAccept("application/json"),
-		WithBody(bodyReader),
+		withContentType("application/json"),
+		withAccept("application/json"),
+		withBody(bodyReader),
 	}, mods...)
 
 	resp, err := c.Request(ctx, http.MethodPost, path, mods...) //nolint:bodyclose
@@ -154,7 +154,7 @@ func PostToEx[Resp any](
 ) (*Resp, *http.Response, error) {
 	var raw *http.Response
 
-	mods = append(mods, WithCaptureResponse(&raw))
+	mods = append(mods, withCaptureResponse(&raw))
 
 	result, err := PostTo[Resp](ctx, c, path, body, mods...)
 	if err != nil {
@@ -183,9 +183,9 @@ func Put(ctx context.Context, c Requester, path string, body any, mods ...Reques
 	}
 
 	mods = append([]RequestModifier{
-		WithContentType("application/json"),
-		WithAccept("application/json"),
-		WithBody(bodyReader),
+		withContentType("application/json"),
+		withAccept("application/json"),
+		withBody(bodyReader),
 	}, mods...)
 
 	return c.Request(ctx, http.MethodPut, path, mods...)
@@ -214,9 +214,9 @@ func PutTo[Resp any](
 	}
 
 	mods = append([]RequestModifier{
-		WithContentType("application/json"),
-		WithAccept("application/json"),
-		WithBody(bodyReader),
+		withContentType("application/json"),
+		withAccept("application/json"),
+		withBody(bodyReader),
 	}, mods...)
 
 	resp, err := c.Request(ctx, http.MethodPut, path, mods...) //nolint:bodyclose
@@ -246,7 +246,7 @@ func PutToEx[Resp any](
 ) (*Resp, *http.Response, error) {
 	var raw *http.Response
 
-	mods = append(mods, WithCaptureResponse(&raw))
+	mods = append(mods, withCaptureResponse(&raw))
 
 	result, err := PutTo[Resp](ctx, c, path, body, mods...)
 	if err != nil {
@@ -275,9 +275,9 @@ func Patch(ctx context.Context, c Requester, path string, body any, mods ...Requ
 	}
 
 	mods = append([]RequestModifier{
-		WithContentType("application/json"),
-		WithAccept("application/json"),
-		WithBody(bodyReader),
+		withContentType("application/json"),
+		withAccept("application/json"),
+		withBody(bodyReader),
 	}, mods...)
 
 	return c.Request(ctx, http.MethodPatch, path, mods...)
@@ -306,9 +306,9 @@ func PatchTo[Resp any](
 	}
 
 	mods = append([]RequestModifier{
-		WithContentType("application/json"),
-		WithAccept("application/json"),
-		WithBody(bodyReader),
+		withContentType("application/json"),
+		withAccept("application/json"),
+		withBody(bodyReader),
 	}, mods...)
 
 	resp, err := c.Request(ctx, http.MethodPatch, path, mods...) //nolint:bodyclose
@@ -338,7 +338,7 @@ func PatchToEx[Resp any](
 ) (*Resp, *http.Response, error) {
 	var raw *http.Response
 
-	mods = append(mods, WithCaptureResponse(&raw))
+	mods = append(mods, withCaptureResponse(&raw))
 
 	result, err := PatchTo[Resp](ctx, c, path, body, mods...)
 	if err != nil {
@@ -367,9 +367,9 @@ func Delete(ctx context.Context, c Requester, path string, body any, mods ...Req
 	}
 
 	mods = append([]RequestModifier{
-		WithContentType("application/json"),
-		WithAccept("application/json"),
-		WithBody(bodyReader),
+		withContentType("application/json"),
+		withAccept("application/json"),
+		withBody(bodyReader),
 	}, mods...)
 
 	return c.Request(ctx, http.MethodDelete, path, mods...)
@@ -398,9 +398,9 @@ func DeleteTo[Resp any](
 	}
 
 	mods = append([]RequestModifier{
-		WithContentType("application/json"),
-		WithAccept("application/json"),
-		WithBody(bodyReader),
+		withContentType("application/json"),
+		withAccept("application/json"),
+		withBody(bodyReader),
 	}, mods...)
 
 	resp, err := c.Request(ctx, http.MethodDelete, path, mods...) //nolint:bodyclose
@@ -430,7 +430,7 @@ func DeleteToEx[Resp any](
 ) (*Resp, *http.Response, error) {
 	var raw *http.Response
 
-	mods = append(mods, WithCaptureResponse(&raw))
+	mods = append(mods, withCaptureResponse(&raw))
 
 	result, err := DeleteTo[Resp](ctx, c, path, body, mods...)
 	if err != nil {

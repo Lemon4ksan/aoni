@@ -2,7 +2,7 @@
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
-package aoni
+package aoni_test
 
 import (
 	"bytes"
@@ -17,6 +17,10 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/lemon4ksan/aoni"
+	"github.com/lemon4ksan/aoni/mod"
+	"github.com/lemon4ksan/aoni/option"
 )
 
 type benchPayload struct {
@@ -43,14 +47,14 @@ func BenchmarkGET_JSON_Aoni(b *testing.B) {
 	defer server.Close()
 
 	// Immutable client using generic payload decoding
-	client := NewClient(nil, withBaseURL(server.URL))
+	client := aoni.NewClient(nil, option.WithBaseURL(server.URL))
 	ctx := context.Background()
 
 	b.ResetTimer()
 	b.ReportAllocs()
 
 	for b.Loop() {
-		res, err := GetTo[benchPayload](ctx, client, "/")
+		res, err := aoni.GetTo[benchPayload](ctx, client, "/")
 		if err != nil {
 			b.Fatal(err)
 		}
@@ -107,7 +111,7 @@ func BenchmarkRawCopy_Aoni(b *testing.B) {
 	}))
 	defer server.Close()
 
-	client := NewClient(nil, withBaseURL(server.URL))
+	client := aoni.NewClient(nil, option.WithBaseURL(server.URL))
 	ctx := context.Background()
 
 	b.ResetTimer()
@@ -116,12 +120,12 @@ func BenchmarkRawCopy_Aoni(b *testing.B) {
 	for b.Loop() {
 		var output []byte
 		// Request has NO body positional argument. Body is handled via modifiers.
-		resp, err := client.Request(ctx, http.MethodGet, "/", WithRawDecoder())
+		resp, err := client.Request(ctx, http.MethodGet, "/", mod.WithRawDecoder())
 		if err != nil {
 			b.Fatal(err)
 		}
 
-		err = RawDecoder.Decode(resp.Body, &output)
+		err = aoni.RawDecoder.Decode(resp.Body, &output)
 		_ = resp.Body.Close()
 
 		if err != nil {
@@ -179,7 +183,7 @@ func BenchmarkMultipart_Aoni(b *testing.B) {
 	}))
 	defer server.Close()
 
-	client := NewClient(nil, withBaseURL(server.URL))
+	client := aoni.NewClient(nil, option.WithBaseURL(server.URL))
 	ctx := context.Background()
 
 	fields := map[string]string{"foo": "bar"}
@@ -193,7 +197,7 @@ func BenchmarkMultipart_Aoni(b *testing.B) {
 			"file1": strings.NewReader(fileData),
 		}
 		// Clean, declarative body definition via RequestModifier
-		resp, err := client.Request(ctx, http.MethodPost, "/", WithMultipart(fields, files))
+		resp, err := client.Request(ctx, http.MethodPost, "/", mod.WithMultipart(fields, files))
 		if err != nil {
 			b.Fatal(err)
 		}
@@ -269,7 +273,7 @@ func BenchmarkQueryEncoding_Aoni(b *testing.B) {
 	b.ReportAllocs()
 
 	for b.Loop() {
-		values, err := StructToValues(params)
+		values, err := aoni.StructToValues(params)
 		if err != nil {
 			b.Fatal(err)
 		}
@@ -324,15 +328,15 @@ func BenchmarkLoadBalancer_WeightedRoundRobin_Aoni(b *testing.B) {
 	}))
 	defer server2.Close()
 
-	lb, err := NewLoadBalancer(LoadBalancerConfig{
-		Strategy: WeightedRoundRobin,
+	lb, err := aoni.NewLoadBalancer(aoni.LoadBalancerConfig{
+		Strategy: aoni.WeightedRoundRobin,
 	}, server1.URL, server2.URL)
 	if err != nil {
 		b.Fatal(err)
 	}
 	defer lb.Close()
 
-	client := NewClient(lb)
+	client := aoni.NewClient(lb)
 	ctx := context.Background()
 
 	b.ResetTimer()
@@ -361,7 +365,7 @@ func BenchmarkRequest_WithoutHedging_Aoni(b *testing.B) {
 	}))
 	defer server.Close()
 
-	client := NewClient(nil, withBaseURL(server.URL))
+	client := aoni.NewClient(nil, option.WithBaseURL(server.URL))
 	ctx := context.Background()
 
 	b.ResetTimer()
@@ -392,13 +396,13 @@ func BenchmarkRequest_WithHedging_Aoni(b *testing.B) {
 	defer server2.Close()
 
 	// Route requests through the load balancer
-	lb, _ := NewLoadBalancer(LoadBalancerConfig{Strategy: RoundRobin}, server1.URL, server2.URL)
+	lb, _ := aoni.NewLoadBalancer(aoni.LoadBalancerConfig{Strategy: aoni.RoundRobin}, server1.URL, server2.URL)
 	defer lb.Close()
 
 	// Hedge after 10ms. If Server1 stalls, Server2 is fired in parallel.
-	client := NewClient(nil,
-		withBaseURL(server1.URL),
-		withHedging(10*time.Millisecond),
+	client := aoni.NewClient(nil,
+		option.WithBaseURL(server1.URL),
+		option.WithHedging(10*time.Millisecond),
 	)
 	ctx := context.Background()
 

@@ -5,7 +5,6 @@
 package main
 
 import (
-	"github.com/lemon4ksan/aoni/option"
 	"bytes"
 	"context"
 	"errors"
@@ -16,6 +15,8 @@ import (
 	"net/url"
 	"strings"
 	"time"
+
+	"github.com/lemon4ksan/aoni/option"
 
 	"github.com/PuerkitoBio/goquery"
 	"github.com/lemon4ksan/aoni"

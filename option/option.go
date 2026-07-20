@@ -18,6 +18,7 @@ import (
 	"github.com/lemon4ksan/aoni/h2"
 	"github.com/lemon4ksan/aoni/h3"
 	"github.com/lemon4ksan/aoni/ja4"
+	"github.com/lemon4ksan/aoni/mod"
 	"github.com/lemon4ksan/aoni/p0f"
 	"github.com/lemon4ksan/aoni/profiles"
 	"github.com/lemon4ksan/aoni/profiles/chrome"
@@ -175,7 +176,7 @@ func WithTCPDelay(min, max time.Duration) aoni.ClientOption {
 	}
 
 	return func(cfg *aoni.Config) {
-		cfg.Defaults.DefaultMods = append(cfg.Defaults.DefaultMods, aoni.WithTCPDelay(min, max))
+		cfg.Defaults.DefaultMods = append(cfg.Defaults.DefaultMods, mod.WithTCPDelay(min, max))
 	}
 }
 

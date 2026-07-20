@@ -10,11 +10,13 @@
 package main
 
 import (
-	"github.com/lemon4ksan/aoni/option"
 	"context"
 	"fmt"
 	"log"
 	"time"
+
+	"github.com/lemon4ksan/aoni/mod"
+	"github.com/lemon4ksan/aoni/option"
 
 	"github.com/lemon4ksan/aoni"
 )
@@ -52,8 +54,8 @@ func main() {
 
 	// Make a request with forced HTTP/1.1 and ordered headers
 	res, err := aoni.GetTo[Response](ctx, client, "/ip",
-		aoni.WithForceHTTP1(),
-		aoni.WithOrderedHeaders([]string{
+		mod.WithForceHTTP1(),
+		mod.WithOrderedHeaders([]string{
 			"Host",
 			"Connection",
 			"Cache-Control",
@@ -77,8 +79,8 @@ func main() {
 
 	// Alternatively, force HTTP/2 for multiplexing
 	_, _ = aoni.GetTo[Response](ctx, client, "/ip",
-		aoni.WithForceHTTP2(),
-		aoni.WithALPN([]string{"h2", "http/1.1"}),
+		mod.WithForceHTTP2(),
+		mod.WithALPN(aoni.AlpnH2, aoni.AlpnHTTP),
 	)
 
 	fmt.Println("HTTP/2 with custom ALPN also supported")

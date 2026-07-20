@@ -61,8 +61,8 @@ func main() {
 
 	// Fetch, validate, and decode in one step
 	user, err := aoni.GetTo[User](ctx, client, "/users/{id}",
-		aoni.WithVar("id", 123),
-		aoni.WithHeader("X-Custom", "value"),
+		mod.WithVar("id", 123),
+		mod.WithHeader("X-Custom", "value"),
 	)
 	if err != nil {
 		panic(err)
@@ -93,7 +93,7 @@ func main() {
 `aoni` features a modular request pipeline. You can configure execution stages globally via `option.WithPipeline` or override them for a single request using `WithPipeline`:
 
 ```go
-resp, err := client.Get(ctx, "/path", aoni.WithPipeline(aoni.PipelineConfig{
+resp, err := client.Get(ctx, "/path", mod.WithPipeline(aoni.PipelineConfig{
 	RotateUA:   true,       // Rotates User-Agent & Client Hints consistently
 	Decompress: true,       // Handles gzip, brotli, and zstd automatically
 	Challenge:  true,       // Detects WAF challenge pages (e.g., Cloudflare)

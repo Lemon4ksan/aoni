@@ -61,7 +61,7 @@
 //
 //   - [aoni.WithTLSFingerprint] to emulate browser TLS handshakes
 //
-//   - [aoni.WithJA4Callback] to receive fingerprints via a callback
+//   - [mod.WithJA4Callback] to receive fingerprints via a callback
 //
 //   - [aoni.TraceJA4] to populate [aoni.TraceInfo] with both JA4 and JA4H
 //

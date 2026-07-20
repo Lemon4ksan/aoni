@@ -61,6 +61,9 @@ type EngineConfig struct {
 
 	// CustomEngine replaces the underlying HTTPDoer engine entirely.
 	CustomEngine HTTPDoer
+
+	// HTTP2Config configures HTTP/2 settings for the engine.
+	HTTP2Config *HTTP2Config
 }
 
 const redirectLimitUnset = -2
@@ -196,6 +199,11 @@ type RequestConfig struct {
 	// - SeeAlso: [WithErrorModel]
 	ErrorModel any
 
+	// UploadProgress triggers during reads from the response body.
+	// - Parameter total: represents Content-Length (or -1 if unknown).
+	// - SeeAlso: [WithDownloadProgress]
+	UploadProgress ProgressFunc
+
 	// DownloadProgress triggers during reads from the response body.
 	// - Parameter total: represents Content-Length (or -1 if unknown).
 	// - SeeAlso: [WithDownloadProgress]
@@ -231,7 +239,7 @@ type RequestConfig struct {
 	OrderedHeaders []string
 
 	// ALPNOverride configures the exact Application-Layer Protocol Negotiation list for TLS.
-	// - Example: []string{"h2", "http/1.1"}
+	// - Example: []string{AlpnH2, AlpnHTTP}
 	// - SeeAlso: [WithForceHTTP1], [WithForceHTTP2], [WithALPN]
 	ALPNOverride []string
 
@@ -775,13 +783,6 @@ type PipelineConfig struct {
 
 	// Challenge enables automatic WAF/JS/DDoS challenge page detection (e.g. Cloudflare) before returning the response.
 	Challenge bool
-}
-
-// WithPipeline returns a RequestModifier that overrides the pipeline configuration for a single request.
-func WithPipeline(pipe PipelineConfig) RequestModifier {
-	return func(req *http.Request) {
-		getOrInitRequestConfig(req).Pipeline = &pipe
-	}
 }
 
 // GetPipeline retrieves the request-specific PipelineConfig from context.
