@@ -10,6 +10,7 @@
 package main
 
 import (
+	"github.com/lemon4ksan/aoni/option"
 	"maps"
 	"context"
 	"fmt"
@@ -72,7 +73,7 @@ func main() {
 
 	solver := &BrowserChallengeSolver{}
 
-	_ = aoni.NewClient(nil, aoni.WithClientChallengeSolver(solver))
+	_ = aoni.NewClient(nil, option.WithChallengeSolver(solver))
 
 	// In a real application, if this request hits a Cloudflare check:
 	// 1. Aoni receives the challenge response (ErrCloudflareChallenge).

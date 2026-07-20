@@ -29,7 +29,41 @@ type Config struct {
 	Network     NetworkConfig
 	Fingerprint FingerprintConfig
 	Defaults    ClientDefaults
+	Engine      EngineConfig
 }
+
+// EngineConfig holds settings that are applied directly to the underlying
+// [HTTPDoer] engine (typically [http.Client]) rather than to the
+// Network, Fingerprint, or Defaults configuration blocks.
+// [ClientOption] functions that target engine-level behaviour (timeout,
+// redirect policy, cookie jar, TLS verification, connection pool) store
+// their intent here so that [Client.With] can apply them after the clone
+// is constructed from the data-only Config blocks.
+type EngineConfig struct {
+	// Timeout is the end-to-end request deadline.
+	// A zero value leaves the engine's existing timeout unchanged.
+	Timeout time.Duration
+
+	// RedirectLimit controls the maximum number of redirects to follow.
+	// -2 means "unset" (leave engine default); -1 means unlimited;
+	// 0 means block all redirects; positive values set an explicit cap.
+	RedirectLimit int
+
+	// CookieJar overrides the engine's cookie jar.
+	CookieJar http.CookieJar
+
+	// InsecureSkipVerify disables TLS certificate verification globally.
+	InsecureSkipVerify bool
+
+	// ConnectionPool tunes the underlying transport connection pool.
+	// A nil value leaves the pool settings unchanged.
+	ConnectionPool *ConnectionPoolConfig
+
+	// CustomEngine replaces the underlying HTTPDoer engine entirely.
+	CustomEngine HTTPDoer
+}
+
+const redirectLimitUnset = -2
 
 // QueryEncoder defines the function signature for marshalling structures into url.Values.
 type QueryEncoder func(any) (url.Values, error)
@@ -60,7 +94,7 @@ type HTTP2Configurer interface {
 }
 
 // BrowserID selects a uTLS ClientHello profile for JA3 fingerprint
-// emulation. Pass to [WithClientTLSFingerprint].
+// emulation. Pass to [option.WithTLSFingerprint].
 type BrowserID int
 
 const (
@@ -683,7 +717,7 @@ func (d ClientDefaults) Clone() ClientDefaults {
 }
 
 // ConnectionPoolConfig tunes the [http.Transport] connection pool.
-// Apply it with [WithClientConnectionPool].
+// Apply it with [option.WithConnectionPool].
 type ConnectionPoolConfig struct {
 	// MaxIdleConns is the maximum number of idle connections across all hosts.
 	MaxIdleConns int

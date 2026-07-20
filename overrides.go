@@ -38,7 +38,7 @@ func MarkModifierError(req *http.Request, err error) {
 //
 // Example:
 //
-//	resp, err := client.Get(ctx, "/api", aoni.WithProxyOverride("http://10.0.0.1:8080"))
+//	resp, err := client.Get(ctx, "/api", WithProxyOverride("http://10.0.0.1:8080"))
 func WithProxyOverride(rawURL string) RequestModifier {
 	return func(req *http.Request) {
 		if u, err := url.Parse(rawURL); err == nil {
@@ -63,7 +63,7 @@ func GetProxyOverride(ctx context.Context) generic.Optional[string] {
 //
 // Only takes effect when the underlying transport honours [GetInsecureSkipVerify].
 // The built-in [Client] wires this automatically for uTLS connections (see
-// [WithClientTLSFingerprint]) and plain [http.Transport] connections.
+// [option.WithTLSFingerprint]) and plain [http.Transport] connections.
 //
 //nolint:gosec
 func WithInsecureSkipVerify() RequestModifier {
@@ -264,14 +264,14 @@ type RetryOverride struct {
 //
 // Example - disable retries for a critical mutating action:
 //
-//	client.Post(ctx, "/checkout", body, aoni.WithRetryPolicy(aoni.RetryOverride{MaxAttempts: 1}))
+//	client.Post(ctx, "/checkout", body, WithRetryPolicy(RetryOverride{MaxAttempts: 1}))
 //
 // Example - aggressive retry for a read-only scrape:
 //
-//	client.Get(ctx, "/prices", aoni.WithRetryPolicy(aoni.RetryOverride{
+//	client.Get(ctx, "/prices", WithRetryPolicy(RetryOverride{
 //	    MaxAttempts: 10,
 //	    Backoff:     500 * time.Millisecond,
-//	    Condition:   aoni.Or(aoni.RetryOnErr(), aoni.RetryOnGatewayErrors()),
+//	    Condition:   Or(RetryOnErr(), RetryOnGatewayErrors()),
 //	}))
 func WithRetryPolicy(o RetryOverride) RequestModifier {
 	if o.MaxAttempts < 1 {
@@ -301,7 +301,7 @@ func GetRetryOverride(ctx context.Context) generic.Optional[RetryOverride] {
 // [http.ProxyFromEnvironment]) so that a per-request [WithProxyOverride] value
 // takes precedence. Pass the result as [http.Transport.Proxy].
 //
-//	transport.Proxy = aoni.ProxyFuncWithOverride(http.ProxyFromEnvironment)
+//	transport.Proxy = ProxyFuncWithOverride(http.ProxyFromEnvironment)
 func ProxyFuncWithOverride(base func(*http.Request) (*url.URL, error)) func(*http.Request) (*url.URL, error) {
 	return func(req *http.Request) (*url.URL, error) {
 		if raw, ok := GetProxyOverride(req.Context()).Value(); ok && raw != "" {

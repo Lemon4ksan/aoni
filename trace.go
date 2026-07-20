@@ -90,16 +90,16 @@ func Trace(target *TraceInfo) RequestModifier {
 }
 
 // TraceJA4 returns a [RequestModifier] that populates the JA4 field of the provided [TraceInfo].
-// It sets up a shared store in the request context so that [WithClientTLSFingerprint] can write
+// It sets up a shared store in the request context so that [option.WithTLSFingerprint] can write
 // the TLS fingerprint during the handshake, and computes the HTTP fingerprint from request headers.
 //
 // The JA4 report is fully populated after the request completes. The TLS fingerprint (JA4)
-// requires [WithClientTLSFingerprint] to be enabled.
+// requires [option.WithTLSFingerprint] to be enabled.
 //
 // Use this modifier alongside [Trace] for complete timing and fingerprint data:
 //
-//	info := &aoni.TraceInfo{}
-//	client.Get(ctx, "/path", aoni.Trace(info), aoni.TraceJA4(info))
+//	info := &TraceInfo{}
+//	client.Get(ctx, "/path", Trace(info), TraceJA4(info))
 //	// After request: info.JA4 contains both JA4 and JA4H
 func TraceJA4(target *TraceInfo) RequestModifier {
 	return func(req *http.Request) {

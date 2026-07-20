@@ -10,6 +10,7 @@
 package main
 
 import (
+	"github.com/lemon4ksan/aoni/option"
 	"context"
 	"fmt"
 	"net/http"
@@ -39,7 +40,7 @@ func main() {
 	
 	// Create client with Chrome 120 Windows persona
 	chromeClient := aoni.NewClient(nil,
-		aoni.WithClientBaseURL(server.URL),
+		option.WithBaseURL(server.URL),
 	).WithPersona(aoni.PersonaChrome120Windows)
 
 	res, err := aoni.GetTo[Response](ctx, chromeClient, "/headers")
@@ -54,7 +55,7 @@ func main() {
 
 	// Create client with Firefox 120 Windows persona
 	firefoxClient := aoni.NewClient(nil,
-		aoni.WithClientBaseURL(server.URL),
+		option.WithBaseURL(server.URL),
 	).WithPersona(aoni.PersonaFirefox120Windows)
 
 	res, err = aoni.GetTo[Response](ctx, firefoxClient, "/headers")

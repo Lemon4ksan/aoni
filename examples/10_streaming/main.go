@@ -9,6 +9,7 @@
 package main
 
 import (
+	"github.com/lemon4ksan/aoni/option"
 	"context"
 	"fmt"
 	"log"
@@ -27,7 +28,7 @@ func main() {
 	defer cancel()
 
 	client := aoni.NewClient(nil,
-		aoni.WithClientBaseURL("https://httpbin.org"),
+		option.WithBaseURL("https://httpbin.org"),
 	)
 
 	demoStream(ctx, client)

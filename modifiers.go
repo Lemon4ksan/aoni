@@ -282,7 +282,7 @@ func WithOrigin(origin string) RequestModifier {
 
 // WithDebug returns a [RequestModifier] that tags the request for
 // verbose logging. The [Client] must have a [Logger] set via
-// [WithClientLogger] for output to appear.
+// [option.WithLogger] for output to appear.
 func WithDebug() RequestModifier {
 	return func(req *http.Request) {
 		getOrInitRequestConfig(req).Debug = true
@@ -290,7 +290,7 @@ func WithDebug() RequestModifier {
 }
 
 // WithDecoder overrides the response [Decoder] for this request.
-// The client-level decoder set via [WithClientBaseResponse] is
+// The client-level decoder set via [option.WithBaseResponse] is
 // ignored when this modifier is present.
 func WithDecoder(d Decoder) RequestModifier {
 	return func(req *http.Request) {
@@ -502,7 +502,7 @@ func WithALPN(protocols []string) RequestModifier {
 }
 
 // WithP0fSignature returns a [RequestModifier] that stores a p0f signature
-// in the request context. When used with [WithClientP0fSignature], the
+// in the request context. When used with [option.WithP0fSignature], the
 // TCP/IP fields (TTL, DF, window size) are spoofed to match the specified OS.
 func WithP0fSignature(sig *p0f.Signature) RequestModifier {
 	return func(req *http.Request) {
@@ -512,7 +512,7 @@ func WithP0fSignature(sig *p0f.Signature) RequestModifier {
 
 // WithTimeout overrides the deadline for this individual request by setting
 // a request-specific timeout duration. It does not affect the client-level
-// timeout configured via [WithClientTimeout].
+// timeout configured via [option.WithTimeout].
 func WithTimeout(d time.Duration) RequestModifier {
 	return func(req *http.Request) {
 		getOrInitRequestConfig(req).TimeoutOverride = d
@@ -624,5 +624,24 @@ func WithCertificatePin(domain, hash string) RequestModifier {
 		}
 
 		cfg.CertificatePins[domain] = append(cfg.CertificatePins[domain], hash)
+	}
+}
+
+// WithMultiReadBody returns a [RequestModifier] that overrides the
+// body caching threshold for a single request. Responses smaller
+// than threshold are buffered in memory so the body can be read
+// multiple times. A value <= 0 disables caching for the request.
+func WithMultiReadBody(threshold int64) RequestModifier {
+	return func(req *http.Request) {
+		getOrInitRequestConfig(req).MultiReadThreshold = threshold
+	}
+}
+
+// WithMultiReadDisableDisk returns a [RequestModifier] that overrides the
+// body caching disk-fallback setting for a single request. If disable is true,
+// exceeding the memory threshold returns an error ([ErrBufferLimitExceeded]) instead of creating temporary files.
+func WithMultiReadDisableDisk(disable bool) RequestModifier {
+	return func(req *http.Request) {
+		getOrInitRequestConfig(req).MultiReadDisableDisk = disable
 	}
 }

@@ -5,6 +5,7 @@
 package ws
 
 import (
+	"github.com/lemon4ksan/aoni/option"
 	"context"
 	"crypto/tls"
 	"net"
@@ -285,7 +286,7 @@ func TestDialWebSocket_TLSFingerprint(t *testing.T) {
 	client := aoni.NewClient(nil)
 	// Initialize TLSClientConfig before configuring browser profile
 	client.Transport().TLSClientConfig = server.Client().Transport.(*http.Transport).TLSClientConfig.Clone()
-	client = client.With(aoni.WithClientTLSFingerprint(aoni.BrowserChrome))
+	client = client.With(option.WithTLSFingerprint(aoni.BrowserChrome))
 
 	wsURL := "wss" + strings.TrimPrefix(server.URL, "https")
 
@@ -473,7 +474,7 @@ func TestDialWebSocket_TLSH2HandshakeFailure(t *testing.T) {
 	wssURL := "wss" + strings.TrimPrefix(server.URL, "https")
 
 	// Negotiate h2 with a Chrome browser profile setup
-	client := aoni.NewClient(nil, aoni.WithClientTLSFingerprint(aoni.BrowserChrome))
+	client := aoni.NewClient(nil, option.WithTLSFingerprint(aoni.BrowserChrome))
 	client.Transport().TLSClientConfig = &tls.Config{
 		InsecureSkipVerify: true,
 	}

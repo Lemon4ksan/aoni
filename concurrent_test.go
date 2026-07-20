@@ -42,7 +42,7 @@ func TestWithTimeout(t *testing.T) {
 			w.WriteHeader(http.StatusServiceUnavailable)
 		}))
 		t.Cleanup(server.Close)
-		client := NewClient(nil, WithClientBaseURL(server.URL))
+		client := NewClient(nil, withBaseURL(server.URL))
 
 		_, err := GetTo[reqTestPayload](t.Context(), client, "/slow", WithTimeout(100*time.Millisecond))
 		require.Error(t, err)
@@ -136,7 +136,7 @@ func TestConcurrent(t *testing.T) {
 	}))
 	t.Cleanup(server.Close)
 
-	client := NewClient(nil, WithClientBaseURL(server.URL))
+	client := NewClient(nil, withBaseURL(server.URL))
 
 	results := Concurrent(t.Context(), client, paths,
 		func(ctx context.Context, c Requester, path string) (*reqTestPayload, error) {
@@ -168,7 +168,7 @@ func TestConcurrentWithMods(t *testing.T) {
 	}))
 	t.Cleanup(server.Close)
 
-	client := NewClient(nil, WithClientBaseURL(server.URL))
+	client := NewClient(nil, withBaseURL(server.URL))
 
 	results := ConcurrentWithMods(t.Context(), client, paths, mods,
 		func(ctx context.Context, c Requester, path string, m ...RequestModifier) (*reqTestPayload, error) {

@@ -5,6 +5,7 @@
 package inspector
 
 import (
+	"github.com/lemon4ksan/aoni/option"
 	"context"
 	_ "embed"
 	"encoding/json"
@@ -85,7 +86,7 @@ func Enable(c *aoni.Client, addr string) (*aoni.Client, *TrafficInspector, error
 		return nil, nil, err
 	}
 
-	return c.With(aoni.WithClientInspector(inspector)), inspector, nil
+	return c.With(option.WithInspector(inspector)), inspector, nil
 }
 
 // Serve spins up the local HTTP server in a background goroutine.

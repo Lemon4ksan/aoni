@@ -50,7 +50,7 @@ type Requester interface {
 
 // BaseResponseProvider optionally provides a [BaseResponse] for
 // structured decoding. Implemented by response wrapper types used
-// with [WithClientBaseResponse].
+// with [option.WithBaseResponse].
 type BaseResponseProvider interface {
 	BaseResponse() BaseResponse
 }
@@ -128,10 +128,35 @@ func NewClient(doer HTTPDoer, opts ...ClientOption) *Client {
 		},
 	}
 
-	c.applyDialers(c.Transport())
-	generic.ApplyOptions(c, opts...)
+	// Seed a Config from the freshly constructed client, apply all options
+	// to the Config snapshot, then write back to c — same three-phase flow
+	// as Client.With so that every option stays purely data-oriented.
+	cfg := Config{
+		Network:     c.network.Clone(),
+		Fingerprint: c.fingerprint.Clone(),
+		Defaults:    c.defaults.Clone(),
+	}
 
-	// Default to user agent if not set
+	for _, opt := range opts {
+		if opt != nil {
+			opt(&cfg)
+		}
+	}
+
+	c.network = cfg.Network
+	c.fingerprint = cfg.Fingerprint
+	c.defaults = cfg.Defaults
+
+	// Apply engine-level overrides (Timeout, RedirectLimit, CookieJar, …).
+	applyEngineConfig(c, cfg.Engine)
+
+	// Wire transport dialers for the final network/fingerprint configuration.
+	c.applyDialers(c.Transport())
+
+	// Apply H2 framing / configurer if fingerprint settings were provided.
+	c.reapplyH2Settings(c.Transport())
+
+	// Default to user agent if not set.
 	if c.defaults.Headers.Get("User-Agent") == "" {
 		c.defaults.Headers.Set("User-Agent", DefaultUserAgent)
 	}
@@ -299,7 +324,7 @@ func (c *Client) Delete(ctx context.Context, path string, body any, mods ...Requ
 }
 
 // Request sends an HTTP request and returns the response. path is
-// resolved against [WithClientBaseURL] when set; an empty path
+// resolved against [option.WithBaseURL] when set; an empty path
 // targets the base URL directly. Nil modifiers are ignored.
 //
 // Decompression (gzip, brotli, zstd) and charset transcoding to

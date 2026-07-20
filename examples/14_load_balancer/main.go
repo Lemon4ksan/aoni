@@ -9,6 +9,7 @@
 package main
 
 import (
+	"github.com/lemon4ksan/aoni/option"
 	"context"
 	"fmt"
 	"log"
@@ -43,7 +44,7 @@ func main() {
 
 	// Wrap the load balancer as the HTTP doer for a client
 	client := aoni.NewClient(lb,
-		aoni.WithClientBaseURL("https://httpbin.org"),
+		option.WithBaseURL("https://httpbin.org"),
 	)
 
 	// Requests will be distributed across backends

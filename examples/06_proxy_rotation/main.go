@@ -9,6 +9,7 @@
 package main
 
 import (
+	"github.com/lemon4ksan/aoni/option"
 	"context"
 	"fmt"
 	"log"
@@ -63,7 +64,7 @@ func main() {
 	)
 
 	client := aoni.NewClient(doer,
-		aoni.WithClientBaseURL("https://httpbin.org"),
+		option.WithBaseURL("https://httpbin.org"),
 	)
 
 	// Make requests that will be load-balanced across proxies

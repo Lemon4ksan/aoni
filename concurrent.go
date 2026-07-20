@@ -27,9 +27,9 @@ type ConcurrentResult[Resp any] struct {
 //
 // Example: fan-out GET requests.
 //
-//	results := aoni.Concurrent(ctx, client, paths,
-//	    func(ctx context.Context, c aoni.Requester, path string) (*MyType, error) {
-//	        return aoni.GetTo[MyType](ctx, c, path)
+//	results := Concurrent(ctx, client, paths,
+//	    func(ctx context.Context, c Requester, path string) (*MyType, error) {
+//	        return GetTo[MyType](ctx, c, path)
 //	    })
 func Concurrent[Resp any](
 	ctx context.Context,

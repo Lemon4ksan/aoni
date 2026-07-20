@@ -88,7 +88,7 @@ func TestCertificatePinning(t *testing.T) {
 	})
 
 	t.Run("UTLS Client - Correct Pin", func(t *testing.T) {
-		client := NewClient(nil, WithClientTLSFingerprint(BrowserChrome))
+		client := NewClient(nil, withTLSFingerprint(BrowserChrome))
 		resp, err := client.Request(t.Context(), http.MethodGet, server.URL,
 			WithCertificatePin("127.0.0.1", correctPinBase64),
 			WithInsecureSkipVerify(),
@@ -98,7 +98,7 @@ func TestCertificatePinning(t *testing.T) {
 	})
 
 	t.Run("UTLS Client - Incorrect Pin", func(t *testing.T) {
-		client := NewClient(nil, WithClientTLSFingerprint(BrowserChrome))
+		client := NewClient(nil, withTLSFingerprint(BrowserChrome))
 		_, err := client.Request(t.Context(), http.MethodGet, server.URL,
 			WithCertificatePin("127.0.0.1", incorrectPin),
 			WithInsecureSkipVerify(),
@@ -146,14 +146,14 @@ func TestCertificatePinning(t *testing.T) {
 	})
 
 	t.Run("Client-Level Correct Pin", func(t *testing.T) {
-		client := NewClient(server.Client(), WithClientCertificatePin("127.0.0.1", correctPinBase64))
+		client := NewClient(server.Client(), withCertificatePin("127.0.0.1", correctPinBase64))
 		resp, err := client.Request(t.Context(), http.MethodGet, server.URL)
 		require.NoError(t, err)
 		assert.Equal(t, http.StatusOK, resp.StatusCode)
 	})
 
 	t.Run("Client-Level Incorrect Pin", func(t *testing.T) {
-		client := NewClient(server.Client(), WithClientCertificatePin("127.0.0.1", incorrectPin))
+		client := NewClient(server.Client(), withCertificatePin("127.0.0.1", incorrectPin))
 		_, err := client.Request(t.Context(), http.MethodGet, server.URL)
 		require.Error(t, err)
 		assert.True(

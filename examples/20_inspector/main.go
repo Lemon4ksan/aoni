@@ -9,6 +9,7 @@
 package main
 
 import (
+	"github.com/lemon4ksan/aoni/option"
 	"context"
 	"fmt"
 	"net/http"
@@ -20,7 +21,7 @@ import (
 
 func main() {
 	client := aoni.NewClient(nil,
-		aoni.WithClientTLSFingerprint(aoni.BrowserChrome),
+		option.WithTLSFingerprint(aoni.BrowserChrome),
 	)
 
 	fmt.Println("==================================================")

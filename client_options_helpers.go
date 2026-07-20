@@ -16,12 +16,14 @@ import (
 	"github.com/lemon4ksan/aoni/profiles"
 )
 
-type staticSpecProvider struct {
-	spec *utls.ClientHelloSpec
+// StaticSpecProvider wraps a static *utls.ClientHelloSpec as a ClientHelloSpecProvider.
+type StaticSpecProvider struct {
+	Spec *utls.ClientHelloSpec
 }
 
-func (s staticSpecProvider) ClientHelloSpec() (*utls.ClientHelloSpec, error) {
-	return s.spec, nil
+// ClientHelloSpec returns the underlying static spec.
+func (s StaticSpecProvider) ClientHelloSpec() (*utls.ClientHelloSpec, error) {
+	return s.Spec, nil
 }
 
 func getOrInitRequestConfig(req *http.Request) *RequestConfig {
@@ -77,37 +79,43 @@ func (c *Client) reapplyH2Settings(tr *http.Transport) {
 	}
 }
 
-func (c *Client) setupTLSFromVariant(variant *profiles.Variant) {
-	if c.fingerprint.BrowserID == BrowserNone {
+// ApplyTLSVariantToConfig applies TLS fingerprint settings from a browser profile variant to a Config.
+func ApplyTLSVariantToConfig(cfg *Config, variant *profiles.Variant) {
+	if cfg.Fingerprint.BrowserID == BrowserNone {
 		if variant.HelloID.Client == "Firefox" {
-			WithClientTLSFingerprint(BrowserFirefox)(c)
+			cfg.Fingerprint.BrowserID = BrowserFirefox
 		} else {
-			WithClientTLSFingerprint(BrowserChrome)(c)
+			cfg.Fingerprint.BrowserID = BrowserChrome
 		}
+		cfg.Fingerprint.TLSClientHelloID = nil
 	}
 
 	if variant.HelloSpec != nil {
-		c.fingerprint.TLSClientHelloSpecProvider = staticSpecProvider{spec: variant.HelloSpec}
-		c.fingerprint.TLSClientHelloID = nil
+		cfg.Fingerprint.TLSClientHelloSpecProvider = StaticSpecProvider{Spec: variant.HelloSpec}
+		cfg.Fingerprint.TLSClientHelloID = nil
 	} else if variant.HelloID != (utls.ClientHelloID{}) {
 		helloID := variant.HelloID
-		c.fingerprint.TLSClientHelloID = &helloID
-		c.fingerprint.TLSClientHelloSpecProvider = nil
+		cfg.Fingerprint.TLSClientHelloID = &helloID
+		cfg.Fingerprint.TLSClientHelloSpecProvider = nil
 	}
 }
 
-func (c *Client) setupHTTPFromVariant(variant *profiles.Variant, os profiles.OSKey) {
-	h2, h3 := applyHTTPSettings(variant)
-	if h2 != nil {
-		c.fingerprint.H2Settings = h2
+// ApplyHTTPVariantToConfig applies HTTP/2 and HTTP/3 settings and default headers from a variant to a Config.
+func ApplyHTTPVariantToConfig(cfg *Config, variant *profiles.Variant, os profiles.OSKey) {
+	h2Settings, h3Settings := applyHTTPSettings(variant)
+	if h2Settings != nil {
+		cfg.Fingerprint.H2Settings = h2Settings
 	}
 
-	c.fingerprint.H3Settings = &h3
+	cfg.Fingerprint.H3Settings = &h3Settings
 
 	if variant.BuildHeaders != nil {
+		if cfg.Defaults.Headers == nil {
+			cfg.Defaults.Headers = make(http.Header)
+		}
 		for _, h := range variant.BuildHeaders(os) {
 			if h.Value != "" {
-				c.defaults.Headers.Set(h.Name, h.Value)
+				cfg.Defaults.Headers.Set(h.Name, h.Value)
 			}
 		}
 	}
@@ -132,7 +140,7 @@ func (c *Client) setupHTTPFromVariant(variant *profiles.Variant, os profiles.OSK
 		}
 	}
 
-	c.fingerprint.HeaderOrder = getHeadersOrder
+	cfg.Fingerprint.HeaderOrder = getHeadersOrder
 }
 
 func applyHTTPSettings(variant *profiles.Variant) (http2 *h2.Settings, http3 h3.Settings) {
@@ -151,7 +159,8 @@ func applyHTTPSettings(variant *profiles.Variant) (http2 *h2.Settings, http3 h3.
 	return http2, http3
 }
 
-func applyProfileHeaders(req *http.Request, variant *profiles.Variant, os profiles.OSKey) {
+// ApplyProfileHeaders injects profile-specific headers and boundaries into an HTTP request.
+func ApplyProfileHeaders(req *http.Request, variant *profiles.Variant, os profiles.OSKey) {
 	headersMap := make(map[string]string)
 	for k, v := range req.Header {
 		if len(v) > 0 {

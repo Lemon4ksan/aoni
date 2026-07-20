@@ -6,6 +6,7 @@
 package main
 
 import (
+	"github.com/lemon4ksan/aoni/option"
 	"context"
 	"fmt"
 	"log"
@@ -23,9 +24,9 @@ func main() {
 	ctx := context.Background()
 
 	client := aoni.NewClient(nil,
-		aoni.WithClientBaseURL("https://httpbin.org"),
-		aoni.WithClientTimeout(10 * time.Second),
-		aoni.WithClientP0fSignature(p0f.Linux311),
+		option.WithBaseURL("https://httpbin.org"),
+		option.WithTimeout(10 * time.Second),
+		option.WithP0fSignature(p0f.Linux311),
 	)
 
 	resp, err := aoni.GetTo[IPResponse](ctx, client, "/ip")

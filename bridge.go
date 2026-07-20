@@ -20,11 +20,11 @@ import (
 //
 // Usage:
 //
-//	client := aoni.NewClient(nil,
-//	    WithClientTLSFingerprint(aoni.BrowserChrome),
-//	    WithClientDoHResolver(),
+//	client := NewClient(nil,
+//	    option.WithTLSFingerprint(BrowserChrome),
+//	    option.WithDoHResolver(),
 //	)
-//	stdClient := aoni.NewStdClient(client)
+//	stdClient := NewStdClient(client)
 //
 //	// Use with any third-party library
 //	restyClient.SetHTTPClient(stdClient)
@@ -49,9 +49,9 @@ func NewTransport(c *Client) *Transport {
 //
 // Example with go-resty:
 //
-//	ctx := aoni.WithContextModifier(context.Background(),
-//	    aoni.WithHeader("X-Api-Key", "secret"),
-//	    aoni.TraceJA4(info),
+//	ctx := WithContextModifier(context.Background(),
+//	    WithHeader("X-Api-Key", "secret"),
+//	    TraceJA4(info),
 //	)
 //	resp, err := restyClient.R().SetContext(ctx).Get("/api/data")
 func WithContextModifier(ctx context.Context, mods ...RequestModifier) context.Context {

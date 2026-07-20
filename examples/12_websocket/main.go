@@ -9,6 +9,7 @@
 package main
 
 import (
+	"github.com/lemon4ksan/aoni/option"
 	"context"
 	"fmt"
 	"log"
@@ -23,7 +24,7 @@ func main() {
 	defer cancel()
 
 	client := aoni.NewClient(nil,
-		aoni.WithClientBaseURL("https://echo.websocket.org"),
+		option.WithBaseURL("https://echo.websocket.org"),
 	)
 
 	// Establish a WebSocket connection

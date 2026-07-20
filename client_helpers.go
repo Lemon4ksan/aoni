@@ -1072,25 +1072,6 @@ func unwrapBody(c io.Closer) io.Closer {
 	return c
 }
 
-func closeResponse(resp *http.Response) {
-	if resp == nil || resp.Body == nil {
-		return
-	}
-
-	_ = resp.Body.Close()
-
-	if rb, ok := unwrapBody(resp.Body).(interface{ ReallyClose() }); ok {
-		rb.ReallyClose()
-	}
-
-	if resp.Request != nil {
-		cfg := GetRequestConfig(resp.Request.Context())
-		if cfg != nil && cfg.RequestTimeoutCancel != nil {
-			cfg.RequestTimeoutCancel()
-		}
-	}
-}
-
 func isBlockedIP(ip net.IP) bool {
 	if ip.IsUnspecified() || ip.IsLoopback() || ip.IsLinkLocalUnicast() || ip.IsLinkLocalMulticast() ||
 		ip.IsInterfaceLocalMulticast() {

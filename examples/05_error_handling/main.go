@@ -9,6 +9,7 @@
 package main
 
 import (
+	"github.com/lemon4ksan/aoni/option"
 	"context"
 	"errors"
 	"fmt"
@@ -26,7 +27,7 @@ func main() {
 	defer cancel()
 
 	client := aoni.NewClient(nil,
-		aoni.WithClientBaseURL("https://jsonplaceholder.typicode.com"),
+		option.WithBaseURL("https://jsonplaceholder.typicode.com"),
 	)
 
 	// Example 1: Check for aoni.APIError with a custom error model

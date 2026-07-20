@@ -5,6 +5,7 @@
 package main
 
 import (
+	"github.com/lemon4ksan/aoni/option"
 	"context"
 	"database/sql"
 	"errors"
@@ -83,19 +84,19 @@ func main() {
 	// ==========================================
 
 	client := aoni.NewClient(nil,
-		aoni.WithClientBaseURL("https://api.protected-target.com"),
-		aoni.WithClientTimeout(30*time.Second),
-		aoni.WithClientDNSResolver(raceResolver),
-		aoni.WithClientCookieJar(cookieJar),
-		aoni.WithClientDynamicHedging(nil),         // Enables dynamic tail-latency reduction (hedging)
-		aoni.WithClientP0fSignature(p0f.Windows10), // Emulate Windows 10 TCP/IP stack
-		aoni.WithClientPacketPadding(aoni.PaddingConfig{
+		option.WithBaseURL("https://api.protected-target.com"),
+		option.WithTimeout(30*time.Second),
+		option.WithDNSResolver(raceResolver),
+		option.WithCookieJar(cookieJar),
+		option.WithDynamicHedging(nil),         // Enables dynamic tail-latency reduction (hedging)
+		option.WithP0fSignature(p0f.Windows10), // Emulate Windows 10 TCP/IP stack
+		option.WithPacketPadding(aoni.PaddingConfig{
 			MaxSegmentSize:  512, // Lower MSS to force packet fragmentation
 			MinPaddingBytes: 32,
 			MaxPaddingBytes: 128,
 			HeaderPool:      aoni.CloudflareHeaderPool, // Disguise padding as Cloudflare headers
 		}),
-		aoni.WithClientChallengeSolver(&HeadlessWAFSolver{}),
+		option.WithChallengeSolver(&HeadlessWAFSolver{}),
 	)
 
 	// Start traffic inspector dashboard.
@@ -116,7 +117,7 @@ func main() {
 	}
 	cacheStore := aoni.NewInMemoryCacheStore()
 
-	client = client.With(aoni.WithClientPipeline(aoni.PipelineConfig{
+	client = client.With(option.WithPipeline(aoni.PipelineConfig{
 		RotateUA: true,
 		DPIJitter: &aoni.DPIJitterConfig{
 			MinDelay: 50 * time.Millisecond,

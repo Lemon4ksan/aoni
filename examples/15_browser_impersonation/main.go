@@ -9,6 +9,7 @@
 package main
 
 import (
+	"github.com/lemon4ksan/aoni/option"
 	"context"
 	"fmt"
 	"time"
@@ -33,9 +34,9 @@ func main() {
 	fmt.Printf("Platform:   %s\n", chrome.PlatformWindows)
 
 	chromeClient := aoni.NewClient(nil,
-		aoni.WithClientBaseURL("https://httpbin.org"),
-		aoni.WithClientTLSFingerprint(aoni.BrowserChrome),
-		aoni.WithClientUserAgent(chrome.UserAgentWindows),
+		option.WithBaseURL("https://httpbin.org"),
+		option.WithTLSFingerprint(aoni.BrowserChrome),
+		option.WithUserAgent(chrome.UserAgentWindows),
 	)
 
 	res, err := aoni.GetTo[Response](ctx, chromeClient, "/ip")
@@ -55,9 +56,9 @@ func main() {
 	fmt.Printf("User-Agent: %s\n", firefox.UserAgentFirefoxWindows)
 
 	firefoxClient := aoni.NewClient(nil,
-		aoni.WithClientBaseURL("https://httpbin.org"),
-		aoni.WithClientTLSFingerprint(aoni.BrowserFirefox),
-		aoni.WithClientUserAgent(firefox.UserAgentFirefoxWindows),
+		option.WithBaseURL("https://httpbin.org"),
+		option.WithTLSFingerprint(aoni.BrowserFirefox),
+		option.WithUserAgent(firefox.UserAgentFirefoxWindows),
 	)
 
 	res, err = aoni.GetTo[Response](ctx, firefoxClient, "/ip")
@@ -86,13 +87,13 @@ func main() {
 	fmt.Println("\n=== Full Impersonation Example ===")
 
 	combined := aoni.NewClient(nil,
-		aoni.WithClientBaseURL("https://httpbin.org"),
-		aoni.WithClientTLSFingerprint(aoni.BrowserChrome),
-		aoni.WithClientUserAgent(chrome.UserAgentWindows),
-		aoni.WithClientOrigin("https://www.google.com"),
-		aoni.WithClientHeader("Sec-CH-UA", chrome.SecCHUA),
-		aoni.WithClientHeader("Sec-CH-UA-Platform", chrome.PlatformWindows),
-		aoni.WithClientConnectionPool(aoni.ConnectionPoolConfig{
+		option.WithBaseURL("https://httpbin.org"),
+		option.WithTLSFingerprint(aoni.BrowserChrome),
+		option.WithUserAgent(chrome.UserAgentWindows),
+		option.WithOrigin("https://www.google.com"),
+		option.WithHeader("Sec-CH-UA", chrome.SecCHUA),
+		option.WithHeader("Sec-CH-UA-Platform", chrome.PlatformWindows),
+		option.WithConnectionPool(aoni.ConnectionPoolConfig{
 			MaxIdleConns:        100,
 			MaxIdleConnsPerHost: 10,
 			IdleConnTimeout:     90 * time.Second,

@@ -183,10 +183,14 @@ func (c *Client) WithPersona(p Persona) *Client {
 		}
 	}
 
-	newClient = newClient.With(WithClientUserAgent(p.UserAgent))
+	newClient = newClient.With(func(cfg *Config) {
+		cfg.Defaults.Headers.Set("User-Agent", p.UserAgent)
+	})
 
 	if len(p.HeaderOrder) > 0 {
-		newClient = newClient.With(WithClientModifiers(WithOrderedHeaders(p.HeaderOrder)))
+		newClient = newClient.With(func(cfg *Config) {
+			cfg.Defaults.DefaultMods = append(cfg.Defaults.DefaultMods, WithOrderedHeaders(p.HeaderOrder))
+		})
 	}
 
 	return newClient

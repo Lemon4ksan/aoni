@@ -6,7 +6,7 @@ COVER_PKG?=$(PKG)
 CYAN  := \033[0;36m
 RESET := \033[0m
 
-.PHONY: test race cover lint format help
+.PHONY: test race cover lint format check-tls-spec update-browsers update-browsers-apply help
 
 test: ## Run normal quick tests
 	@printf "$(CYAN)Running unit tests...$(RESET)\n"
@@ -33,6 +33,18 @@ clean: ## Delete temporary files and binaries
 format: ## Run go code formatting
 	addlicense -c "Lemon4ksan" -l bsd -ignore "**/*.yml" .
 	golangci-lint run --fix
+
+check-tls-spec: ## Compare project TLS specs against utls.HelloChrome_Auto / HelloFirefox_Auto
+	@printf "$(CYAN)Comparing TLS ClientHello specs...$(RESET)\n"
+	go run ./scripts/compare-tls-spec/
+
+update-browsers: ## Dry-run the browser version update script (no files changed)
+	@printf "$(CYAN)Updating browser versions (dry-run)...$(RESET)\n"
+	bash scripts/update-browser-versions.sh --dry-run
+
+update-browsers-apply: ## Apply browser version updates (Chrome, Firefox, iOS, Android, utls)
+	@printf "$(CYAN)Updating browser versions...$(RESET)\n"
+	bash scripts/update-browser-versions.sh
 
 help: ## Show this message
 	@printf "Usage: make [target]\n"

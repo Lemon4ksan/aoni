@@ -63,7 +63,7 @@ func parseWSURL(rawURL string) (*parsedURL, error) {
 //
 // The returned net.Conn is a full-duplex byte stream over WebSocket.
 // For wss:// connections, the TLS handshake uses the client's configured
-// browser fingerprint (via WithClientTLSFingerprint), and JA4 fingerprints
+// browser fingerprint (via option.WithTLSFingerprint), and JA4 fingerprints
 // are computed during the handshake.
 //
 // Use TraceJA4 to capture both TLS (JA4) and HTTP (JA4H) fingerprints.

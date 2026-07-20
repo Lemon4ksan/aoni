@@ -10,6 +10,7 @@
 package main
 
 import (
+	"github.com/lemon4ksan/aoni/option"
 	"context"
 	"fmt"
 	"log"
@@ -27,22 +28,22 @@ func main() {
 	defer cancel()
 
 	client := aoni.NewClient(nil,
-		aoni.WithClientBaseURL("https://httpbin.org"),
+		option.WithBaseURL("https://httpbin.org"),
 		// Chrome TLS fingerprint to match real browser behavior
-		aoni.WithClientTLSFingerprint(aoni.BrowserChrome),
+		option.WithTLSFingerprint(aoni.BrowserChrome),
 		// Fragment TLS ClientHello into smaller chunks
-		aoni.WithClientFragmentation(aoni.FragmentConfig{
+		option.WithFragmentation(aoni.FragmentConfig{
 			ChunkSize: 50,
 			MaxDelay:  5 * time.Millisecond,
 		}),
 		// Rewrite Host headers for domain fronting
-		aoni.WithClientHostRewrite(map[string]string{
+		option.WithHostRewrite(map[string]string{
 			"httpbin.org": "httpbin.org",
 		}),
 		// Use DNS-over-TLS resolver to prevent ISP DNS snooping
-		aoni.WithClientDoT("1.1.1.1", "cloudflare-dns.com"),
+		option.WithDoT("1.1.1.1", "cloudflare-dns.com"),
 		// Force HTTP/1.1 to avoid HTTP/2 fingerprinting
-		aoni.WithClientConnectionPool(aoni.ConnectionPoolConfig{
+		option.WithConnectionPool(aoni.ConnectionPoolConfig{
 			MaxIdleConns:        10,
 			MaxIdleConnsPerHost: 5,
 			IdleConnTimeout:     90 * time.Second,

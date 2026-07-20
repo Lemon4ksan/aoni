@@ -11,6 +11,7 @@
 package main
 
 import (
+	"github.com/lemon4ksan/aoni/option"
 	"context"
 	"fmt"
 	"time"
@@ -42,7 +43,7 @@ func main() {
 	)
 
 	client := aoni.NewClient(doer,
-		aoni.WithClientBaseURL("https://httpbin.org"),
+		option.WithBaseURL("https://httpbin.org"),
 	)
 
 	// Make requests; once the failure ratio exceeds the threshold, the circuit opens

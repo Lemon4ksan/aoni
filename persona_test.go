@@ -2,7 +2,7 @@
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
-package aoni_test
+package aoni
 
 import (
 	"context"
@@ -12,18 +12,17 @@ import (
 
 	"github.com/stretchr/testify/assert"
 
-	"github.com/lemon4ksan/aoni"
 )
 
 func TestClientWithPersona(t *testing.T) {
-	c := aoni.NewClient(nil)
+	c := NewClient(nil)
 
-	c2 := c.WithPersona(aoni.PersonaChrome120Windows)
+	c2 := c.WithPersona(PersonaChrome120Windows)
 
-	assert.Equal(t, aoni.DefaultUserAgent, c2.Defaults().Headers.Get("User-Agent"))
+	assert.Equal(t, DefaultUserAgent, c2.Defaults().Headers.Get("User-Agent"))
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		assert.Equal(t, aoni.DefaultUserAgent, r.UserAgent())
+		assert.Equal(t, DefaultUserAgent, r.UserAgent())
 		w.WriteHeader(http.StatusOK)
 	}))
 	defer server.Close()
@@ -38,13 +37,13 @@ func TestClientWithPersona(t *testing.T) {
 }
 
 func TestPredefinedPersonas(t *testing.T) {
-	personas := []aoni.Persona{
-		aoni.PersonaChrome120Windows,
-		aoni.PersonaChrome120Android,
-		aoni.PersonaFirefox120Windows,
-		aoni.PersonaFirefox120Android,
-		aoni.PersonaSafari17MacOS,
-		aoni.PersonaSafari17IOS,
+	personas := []Persona{
+		PersonaChrome120Windows,
+		PersonaChrome120Android,
+		PersonaFirefox120Windows,
+		PersonaFirefox120Android,
+		PersonaSafari17MacOS,
+		PersonaSafari17IOS,
 	}
 
 	for _, p := range personas {

@@ -9,6 +9,7 @@
 package main
 
 import (
+	"github.com/lemon4ksan/aoni/option"
 	"context"
 	"fmt"
 	"log"
@@ -28,7 +29,7 @@ func main() {
 	defer cancel()
 
 	client := aoni.NewClient(nil,
-		aoni.WithClientBaseURL("https://httpbin.org"),
+		option.WithBaseURL("https://httpbin.org"),
 	)
 
 	// Retry on any error
@@ -74,7 +75,7 @@ func main() {
 
 	// Use retryOnErr client
 	retryClient := aoni.NewClient(retryOnErr,
-		aoni.WithClientBaseURL("https://httpbin.org"),
+		option.WithBaseURL("https://httpbin.org"),
 	)
 
 	res, err := aoni.GetTo[Response](ctx, retryClient, "/status/200")
@@ -86,7 +87,7 @@ func main() {
 
 	// Use customRetry client
 	customClient := aoni.NewClient(customRetry,
-		aoni.WithClientBaseURL("https://httpbin.org"),
+		option.WithBaseURL("https://httpbin.org"),
 	)
 
 	_, _ = aoni.GetTo[Response](ctx, customClient, "/status/429")

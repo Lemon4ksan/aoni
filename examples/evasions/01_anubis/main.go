@@ -11,6 +11,7 @@
 package main
 
 import (
+	"github.com/lemon4ksan/aoni/option"
 	"bytes"
 	"context"
 	"crypto/sha256"
@@ -120,8 +121,8 @@ func run(ctx context.Context, targetURL string) error {
 	}
 
 	client := aoni.NewClient(nil,
-		aoni.WithClientTLSFingerprint(aoni.BrowserChrome),
-		aoni.WithClientCookieJar(jar),
+		option.WithTLSFingerprint(aoni.BrowserChrome),
+		option.WithCookieJar(jar),
 	)
 
 	resp, err := client.Get(ctx, targetURL)

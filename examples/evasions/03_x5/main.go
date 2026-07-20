@@ -16,6 +16,7 @@
 package main
 
 import (
+	"github.com/lemon4ksan/aoni/option"
 	"context"
 	"encoding/json"
 	"errors"
@@ -322,12 +323,12 @@ func run(ctx context.Context, targetURL string) error {
 	// - Headers (User-Agent, Accept-Language, Origin, Referer) align with the automated context.
 	// - TCP Delays prevent triggering rate-limiting heuristics.
 	client := aoni.NewClient(nil,
-		aoni.WithClientTLSFingerprint(aoni.BrowserFirefox),
-		aoni.WithClientBrowserProfile(aoni.BrowserFirefox, profiles.Windows),
-		aoni.WithClientCookieJar(jar),
-		aoni.WithClientHeader("Accept-Language", "ru-RU,ru;q=0.9,en;q=0.8"),
-		aoni.WithClientRefererAutomaton(true),
-		aoni.WithClientTCPDelay(300*time.Millisecond, 800*time.Millisecond),
+		option.WithTLSFingerprint(aoni.BrowserFirefox),
+		option.WithBrowserProfile(aoni.BrowserFirefox, profiles.Windows),
+		option.WithCookieJar(jar),
+		option.WithHeader("Accept-Language", "ru-RU,ru;q=0.9,en;q=0.8"),
+		option.WithRefererAutomaton(true),
+		option.WithTCPDelay(300*time.Millisecond, 800*time.Millisecond),
 	)
 
 	fmt.Printf("\n[aoni] Sending authorized request to %s...\n", targetURL)

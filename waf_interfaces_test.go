@@ -49,21 +49,21 @@ func TestClient_ClientHelloSpecProvider(t *testing.T) {
 	}
 
 	client = client.With(
-		WithClientBaseURL(server.URL),
-		WithClientTLSClientHelloSpecProvider(provider),
-		WithClientTLSFingerprint(BrowserChrome), // Needed to activate utls dialer
+		withBaseURL(server.URL),
+		withTLSClientHelloSpecProvider(provider),
+		withTLSFingerprint(BrowserChrome), // Needed to activate utls dialer
 	)
 
 	// We capture the report to verify
 	var report ja4.Report
 
-	client = client.With(WithClientJA4Callback(func(r ja4.Report) {
+	client = client.With(withJA4Callback(func(r ja4.Report) {
 		report = r
 	}))
 
 	resp, err := client.Request(t.Context(), http.MethodGet, "/")
 	require.NoError(t, err)
-	t.Cleanup(func() { closeResponse(resp) })
+	t.Cleanup(func() { CloseResponse(resp) })
 
 	assert.Equal(t, http.StatusOK, resp.StatusCode)
 	assert.NotEmpty(t, report.JA4)
@@ -90,13 +90,13 @@ func TestClient_SocketController(t *testing.T) {
 	controller := &mockSocketController{}
 
 	client := NewClient(nil,
-		WithClientBaseURL(server.URL),
-		WithClientSocketController(controller),
+		withBaseURL(server.URL),
+		withSocketController(controller),
 	)
 
 	resp, err := client.Request(t.Context(), http.MethodGet, "/")
 	require.NoError(t, err)
-	t.Cleanup(func() { closeResponse(resp) })
+	t.Cleanup(func() { CloseResponse(resp) })
 
 	assert.Equal(t, http.StatusOK, resp.StatusCode)
 	assert.Greater(t, atomic.LoadInt32(&controller.called), int32(0))
@@ -130,13 +130,13 @@ func TestClient_HTTP2Configurer(t *testing.T) {
 	// Use the httptest server's own client - it already trusts the self-signed cert.
 	// Build the aoni Client on top of it so TLS config is correct from the start.
 	client := NewClient(server.Client()).With(
-		WithClientBaseURL(server.URL),
-		WithClientHTTP2Configurer(configurer),
+		withBaseURL(server.URL),
+		withHTTP2Configurer(configurer),
 	)
 
 	resp, err := client.Request(t.Context(), http.MethodGet, "/")
 	require.NoError(t, err)
-	t.Cleanup(func() { closeResponse(resp) })
+	t.Cleanup(func() { CloseResponse(resp) })
 
 	assert.Equal(t, http.StatusOK, resp.StatusCode)
 	assert.Greater(t, atomic.LoadInt32(&configurer.called), int32(0))

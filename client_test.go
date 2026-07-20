@@ -63,14 +63,14 @@ func (a *apiResponse) IsSuccess() bool  { return a.Status == "success" }
 func (a *apiResponse) Error() error     { return errors.New(a.ErrorMsg) }
 func (a *apiResponse) SetData(data any) { a.Data = data }
 
-// setupTestServer creates a test server and pre-configures a client with its URL.
+// setupTestServer creates a test server and pre-configures a client With its URL.
 // It registers resource cleanup automatically through t.Cleanup.
 func setupTestServer(t *testing.T, handler http.HandlerFunc) (*httptest.Server, *Client) {
 	t.Helper()
 
 	server := httptest.NewServer(handler)
 	t.Cleanup(server.Close)
-	client := NewClient(nil, WithClientBaseURL(server.URL))
+	client := NewClient(nil, withBaseURL(server.URL))
 
 	return server, client
 }
@@ -126,7 +126,7 @@ func TestClient_Request_URLConstruction(t *testing.T) {
 
 	r, err := client.Request(t.Context(), http.MethodGet, "/api/v1/test")
 	require.NoError(t, err)
-	t.Cleanup(func() { closeResponse(r) })
+	t.Cleanup(func() { CloseResponse(r) })
 }
 
 func TestClient_Request_GetParams(t *testing.T) {
@@ -146,7 +146,7 @@ func TestClient_Request_GetParams(t *testing.T) {
 
 	r, err := client.Request(t.Context(), http.MethodGet, "/test", WithQuery(params))
 	require.NoError(t, err)
-	t.Cleanup(func() { closeResponse(r) })
+	t.Cleanup(func() { CloseResponse(r) })
 }
 
 func TestClient_Headers(t *testing.T) {
@@ -166,8 +166,8 @@ func TestClient_Headers(t *testing.T) {
 	t.Cleanup(server.Close)
 
 	client := NewClient(nil,
-		WithClientBaseURL(server.URL),
-		WithClientHeader("X-Default", "default-val"),
+		withBaseURL(server.URL),
+		withHeader("X-Default", "default-val"),
 	)
 
 	mod := func(req *http.Request) {
@@ -176,7 +176,7 @@ func TestClient_Headers(t *testing.T) {
 
 	r, err := client.Request(t.Context(), http.MethodGet, "/", mod)
 	require.NoError(t, err)
-	t.Cleanup(func() { closeResponse(r) })
+	t.Cleanup(func() { CloseResponse(r) })
 }
 
 func TestClient_ErrorStatus(t *testing.T) {
@@ -212,7 +212,7 @@ func TestClient_ContextCancellation(t *testing.T) {
 
 	r, err := client.Request(ctx, http.MethodGet, "/")
 	if err == nil {
-		t.Cleanup(func() { closeResponse(r) })
+		t.Cleanup(func() { CloseResponse(r) })
 		t.Fatal("expected error for canceled context, got nil")
 	}
 }
@@ -225,7 +225,7 @@ func TestClient_BaseResponse(t *testing.T) {
 			_, _ = w.Write([]byte(`{"status": "success", "data": {"message": "unwrapped"}}`))
 		})
 
-		client = client.With(WithClientBaseResponse(func() BaseResponse { return &apiResponse{} }))
+		client = client.With(withBaseResponse(func() BaseResponse { return &apiResponse{} }))
 
 		result, err := GetTo[testPayload](t.Context(), client, "/wrapped")
 		require.NoError(t, err)
@@ -237,7 +237,7 @@ func TestClient_BaseResponse(t *testing.T) {
 			_, _ = w.Write([]byte(`{"status": "fail", "error": "something went wrong"}`))
 		})
 
-		client = client.With(WithClientBaseResponse(func() BaseResponse { return &apiResponse{} }))
+		client = client.With(withBaseResponse(func() BaseResponse { return &apiResponse{} }))
 
 		_, err := GetTo[testPayload](t.Context(), client, "/error")
 		assert.ErrorContains(t, err, "something went wrong")
@@ -254,13 +254,13 @@ func TestClient_PathTemplates(t *testing.T) {
 		want string
 	}{
 		{
-			name: "with_var_single_replacement",
+			name: "With_var_single_replacement",
 			path: "/user/{id}/profile",
 			mods: []RequestModifier{WithVar("id", 123)},
 			want: "/user/123/profile",
 		},
 		{
-			name: "with_vars_multiple_replacements",
+			name: "With_vars_multiple_replacements",
 			path: "/{group}/{member}",
 			mods: []RequestModifier{WithVars("group", "admins", "member", "bob")},
 			want: "/admins/bob",
@@ -283,7 +283,7 @@ func TestClient_PathTemplates(t *testing.T) {
 
 			resp, err := client.Request(t.Context(), http.MethodGet, tt.path, tt.mods...)
 			require.NoError(t, err)
-			t.Cleanup(func() { closeResponse(resp) })
+			t.Cleanup(func() { CloseResponse(resp) })
 
 			assert.Equal(t, tt.want, resp.Header.Get("X-Path"))
 		})
@@ -303,7 +303,7 @@ func TestClient_CaptureResponse(t *testing.T) {
 	require.NoError(t, err)
 
 	if raw != nil {
-		t.Cleanup(func() { closeResponse(raw) })
+		t.Cleanup(func() { CloseResponse(raw) })
 	}
 
 	assert.Equal(t, "ok", result.Message)
@@ -331,9 +331,9 @@ func TestClient_DX_Helpers(t *testing.T) {
 	oldDefault := DefaultClient
 	t.Cleanup(func() { DefaultClient = oldDefault })
 
-	DefaultClient = DefaultClient.With(WithClientBaseURL(server.URL))
+	DefaultClient = DefaultClient.With(withBaseURL(server.URL))
 
-	t.Run("global_get_with_bearer", func(t *testing.T) {
+	t.Run("global_get_With_bearer", func(t *testing.T) {
 		var raw *http.Response
 
 		res, err := GetTo[testPayload](
@@ -346,7 +346,7 @@ func TestClient_DX_Helpers(t *testing.T) {
 		require.NoError(t, err)
 
 		if raw != nil {
-			t.Cleanup(func() { closeResponse(raw) })
+			t.Cleanup(func() { CloseResponse(raw) })
 		}
 
 		assert.Equal(t, "ok", res.Message)
@@ -367,7 +367,7 @@ func TestClient_DX_Helpers(t *testing.T) {
 		require.NoError(t, err)
 
 		if raw != nil {
-			t.Cleanup(func() { closeResponse(raw) })
+			t.Cleanup(func() { CloseResponse(raw) })
 		}
 
 		assert.Equal(t, "basic", raw.Header.Get("X-Auth"))
@@ -387,7 +387,7 @@ func TestClient_DX_Helpers(t *testing.T) {
 		require.NoError(t, err)
 
 		if raw != nil {
-			t.Cleanup(func() { closeResponse(raw) })
+			t.Cleanup(func() { CloseResponse(raw) })
 		}
 
 		assert.Equal(t, http.MethodPut, raw.Request.Method)
@@ -406,7 +406,7 @@ func TestClient_DX_Helpers(t *testing.T) {
 		require.NoError(t, err)
 
 		if raw != nil {
-			t.Cleanup(func() { closeResponse(raw) })
+			t.Cleanup(func() { CloseResponse(raw) })
 		}
 
 		assert.Equal(t, http.MethodPatch, raw.Request.Method)
@@ -425,7 +425,7 @@ func TestClient_DX_Helpers(t *testing.T) {
 		require.NoError(t, err)
 
 		if raw != nil {
-			t.Cleanup(func() { closeResponse(raw) })
+			t.Cleanup(func() { CloseResponse(raw) })
 		}
 
 		assert.Equal(t, http.MethodDelete, raw.Request.Method)
@@ -450,7 +450,7 @@ func TestClient_AdvancedFeatures(t *testing.T) {
 		reader := strings.NewReader("streamed data")
 		resp, err := client.Request(t.Context(), http.MethodPost, "/", WithBody(reader))
 		require.NoError(t, err)
-		t.Cleanup(func() { closeResponse(resp) })
+		t.Cleanup(func() { CloseResponse(resp) })
 	})
 
 	t.Run("cookies", func(t *testing.T) {
@@ -463,7 +463,7 @@ func TestClient_AdvancedFeatures(t *testing.T) {
 			w.WriteHeader(http.StatusOK)
 		})
 
-		t.Run("with_cookie_modifier", func(t *testing.T) {
+		t.Run("With_cookie_modifier", func(t *testing.T) {
 			resp, err := client.Request(
 				t.Context(),
 				http.MethodGet,
@@ -471,12 +471,12 @@ func TestClient_AdvancedFeatures(t *testing.T) {
 				WithCookie(&http.Cookie{Name: "test-cookie", Value: "yum"}),
 			)
 			require.NoError(t, err)
-			t.Cleanup(func() { closeResponse(resp) })
+			t.Cleanup(func() { CloseResponse(resp) })
 
 			assert.Equal(t, "yum", resp.Header.Get("X-Cookie"))
 		})
 
-		t.Run("with_cookies_map_modifier", func(t *testing.T) {
+		t.Run("With_cookies_map_modifier", func(t *testing.T) {
 			resp, err := client.Request(
 				t.Context(),
 				http.MethodGet,
@@ -484,7 +484,7 @@ func TestClient_AdvancedFeatures(t *testing.T) {
 				WithCookies(map[string]string{"test-cookie": "yum-yum"}),
 			)
 			require.NoError(t, err)
-			t.Cleanup(func() { closeResponse(resp) })
+			t.Cleanup(func() { CloseResponse(resp) })
 
 			assert.Equal(t, "yum-yum", resp.Header.Get("X-Cookie"))
 		})
@@ -500,19 +500,19 @@ func TestClient_AdvancedFeatures(t *testing.T) {
 		})
 
 		t.Run("disable_redirects", func(t *testing.T) {
-			client := client.With(WithClientRedirectLimit(0))
+			client := client.With(withRedirectLimit(0))
 			resp, err := client.Request(t.Context(), http.MethodGet, "/start")
 			require.NoError(t, err)
-			t.Cleanup(func() { closeResponse(resp) })
+			t.Cleanup(func() { CloseResponse(resp) })
 
 			assert.Equal(t, http.StatusFound, resp.StatusCode)
 		})
 
 		t.Run("limit_redirects", func(t *testing.T) {
-			client := client.With(WithClientRedirectLimit(2))
+			client := client.With(withRedirectLimit(2))
 			resp, err := client.Request(t.Context(), http.MethodGet, "/start")
 			require.NoError(t, err)
-			t.Cleanup(func() { closeResponse(resp) })
+			t.Cleanup(func() { CloseResponse(resp) })
 
 			assert.Equal(t, http.StatusOK, resp.StatusCode)
 		})
@@ -530,7 +530,7 @@ func TestClient_AdvancedFeatures(t *testing.T) {
 			w.WriteHeader(http.StatusOK)
 		})
 
-		client = client.With(WithClientTimeout(10 * time.Millisecond))
+		client = client.With(withTimeout(10 * time.Millisecond))
 		_, err := client.Request(t.Context(), http.MethodGet, "/")
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "Client.Timeout exceeded")
@@ -566,7 +566,7 @@ func TestClient_WithMultipart(t *testing.T) {
 
 	resp, err := client.Request(t.Context(), http.MethodPost, "/", WithMultipart(fields, files))
 	require.NoError(t, err)
-	t.Cleanup(func() { closeResponse(resp) })
+	t.Cleanup(func() { CloseResponse(resp) })
 }
 
 func TestClient_TransportMethod(t *testing.T) {
@@ -636,7 +636,7 @@ func TestClient_ProgressCallbacks(t *testing.T) {
 			WithUploadProgress(uploadProgress),
 		)
 		require.NoError(t, err)
-		t.Cleanup(func() { closeResponse(resp) })
+		t.Cleanup(func() { CloseResponse(resp) })
 
 		assert.True(t, uploadCalled)
 		assert.Equal(t, int64(10), uploadBytes)
@@ -667,7 +667,7 @@ func TestClient_ProgressCallbacks(t *testing.T) {
 			WithDownloadProgress(downloadProgress),
 		)
 		require.NoError(t, err)
-		t.Cleanup(func() { closeResponse(resp) })
+		t.Cleanup(func() { CloseResponse(resp) })
 
 		body, err := io.ReadAll(resp.Body)
 		require.NoError(t, err)
@@ -713,7 +713,7 @@ func TestClient_Hedging_Deterministic(t *testing.T) {
 		_, _ = w.Write([]byte(`{"message": "hedged"}`))
 	})
 
-	client = client.With(WithClientHedging(10 * time.Millisecond))
+	client = client.With(withHedging(10 * time.Millisecond))
 
 	type result struct {
 		res *testPayload
@@ -761,7 +761,7 @@ func TestClient_XML_Codecs(t *testing.T) {
 
 	resp, err := client.Request(t.Context(), http.MethodGet, "/", WithXMLDecoder())
 	require.NoError(t, err)
-	t.Cleanup(func() { closeResponse(resp) })
+	t.Cleanup(func() { CloseResponse(resp) })
 
 	err = XMLDecoder.Decode(resp.Body, &result)
 	require.NoError(t, err)
@@ -778,12 +778,12 @@ func TestClient_GlobalHooks(t *testing.T) {
 	var beforeCalled, afterCalled bool
 
 	client = client.With(
-		WithClientBeforeRequest(func(req *http.Request) {
+		withBeforeRequest(func(req *http.Request) {
 			beforeCalled = true
 
 			req.Header.Set("X-Before-Hook", "hooked")
 		}),
-		WithClientAfterResponse(func(resp *http.Response, err error) {
+		withAfterResponse(func(resp *http.Response, err error) {
 			afterCalled = true
 
 			require.NoError(t, err)
@@ -794,7 +794,7 @@ func TestClient_GlobalHooks(t *testing.T) {
 
 	resp, err := client.Request(t.Context(), http.MethodGet, "/")
 	require.NoError(t, err)
-	t.Cleanup(func() { closeResponse(resp) })
+	t.Cleanup(func() { CloseResponse(resp) })
 
 	assert.True(t, beforeCalled)
 	assert.True(t, afterCalled)
@@ -847,7 +847,7 @@ func TestClient_ConnectionPool(t *testing.T) {
 		ResponseHeaderTimeout: 5 * time.Second,
 	}
 
-	tunedClient := client.With(WithClientConnectionPool(cfg))
+	tunedClient := client.With(withConnectionPool(cfg))
 	transport := tunedClient.Transport()
 	require.NotNil(t, transport)
 
@@ -947,7 +947,7 @@ func TestClient_ContentTypeGuard(t *testing.T) {
 		assert.ErrorIs(t, err, ErrCloudflareChallenge)
 	})
 
-	t.Run("html_with_raw_decoder_succeeds", func(t *testing.T) {
+	t.Run("html_With_raw_decoder_succeeds", func(t *testing.T) {
 		_, client := setupTestServer(t, func(w http.ResponseWriter, r *http.Request) {
 			w.Header().Set("Content-Type", "text/html; charset=utf-8")
 			w.WriteHeader(http.StatusOK)
@@ -958,7 +958,7 @@ func TestClient_ContentTypeGuard(t *testing.T) {
 
 		resp, err := client.Request(t.Context(), http.MethodGet, "/", WithRawDecoder())
 		require.NoError(t, err)
-		t.Cleanup(func() { closeResponse(resp) })
+		t.Cleanup(func() { CloseResponse(resp) })
 
 		err = RawDecoder.Decode(resp.Body, &output)
 		require.NoError(t, err)
@@ -970,7 +970,7 @@ func TestClient_TLSFingerprint(t *testing.T) {
 	t.Parallel()
 
 	client := NewClient(nil)
-	tunedClient := client.With(WithClientTLSFingerprint(BrowserChrome))
+	tunedClient := client.With(withTLSFingerprint(BrowserChrome))
 
 	tr := tunedClient.Transport()
 	require.NotNil(t, tr)
@@ -990,8 +990,8 @@ func TestClient_WithJA4Callback(t *testing.T) {
 	)
 
 	client := NewClient(nil,
-		WithClientTLSFingerprint(BrowserChrome),
-		WithClientJA4Callback(func(r ja4.Report) {
+		withTLSFingerprint(BrowserChrome),
+		withJA4Callback(func(r ja4.Report) {
 			called.Store(true)
 
 			report = r
@@ -1016,14 +1016,14 @@ func TestClient_JA4CallbackImmutability(t *testing.T) {
 
 	fn := func(r ja4.Report) {}
 
-	client1 := NewClient(nil, WithClientJA4Callback(fn))
-	client2 := client1.With(WithClientTLSFingerprint(BrowserChrome))
+	client1 := NewClient(nil, withJA4Callback(fn))
+	client2 := client1.With(withTLSFingerprint(BrowserChrome))
 
-	assert.NotNil(t, client2.fingerprint.JA4Callback)
-	assert.NotNil(t, client1.fingerprint.JA4Callback)
+	assert.NotNil(t, client2.Fingerprint().JA4Callback)
+	assert.NotNil(t, client1.Fingerprint().JA4Callback)
 
 	client3 := NewClient(nil)
-	assert.Nil(t, client3.fingerprint.JA4Callback)
+	assert.Nil(t, client3.Fingerprint().JA4Callback)
 }
 
 func TestClient_TraceJA4(t *testing.T) {
@@ -1060,7 +1060,7 @@ func TestClient_TraceJA4(t *testing.T) {
 	var report *ja4.Report
 
 	client := NewClient(httpClient).With(
-		WithClientJA4Callback(func(r ja4.Report) { report = &r }),
+		withJA4Callback(func(r ja4.Report) { report = &r }),
 	)
 
 	info := &TraceInfo{}
@@ -1107,8 +1107,8 @@ func TestClient_TraceJA4_WithTLSFingerprint(t *testing.T) {
 	var callbackReport *ja4.Report
 
 	client := NewClient(server.Client()).With(
-		WithClientTLSFingerprint(BrowserChrome),
-		WithClientJA4Callback(func(r ja4.Report) {
+		withTLSFingerprint(BrowserChrome),
+		withJA4Callback(func(r ja4.Report) {
 			callbackReport = &r
 		}),
 	)
@@ -1141,7 +1141,7 @@ func TestClient_ResponseSizeGuard(t *testing.T) {
 			_, _ = w.Write([]byte("01234567890123456789"))
 		})
 
-		client = client.With(WithClientMaxResponseSize(10))
+		client = client.With(withMaxResponseSize(10))
 		_, err := client.Request(t.Context(), http.MethodGet, "/")
 		require.Error(t, err)
 		assert.ErrorIs(t, err, ErrResponseTooLarge)
@@ -1154,10 +1154,10 @@ func TestClient_ResponseSizeGuard(t *testing.T) {
 			_, _ = w.Write([]byte("01234567890123456789"))
 		})
 
-		client = client.With(WithClientMaxResponseSize(10))
+		client = client.With(withMaxResponseSize(10))
 		resp, err := client.Request(t.Context(), http.MethodGet, "/")
 		require.NoError(t, err)
-		t.Cleanup(func() { closeResponse(resp) })
+		t.Cleanup(func() { CloseResponse(resp) })
 
 		_, err = io.ReadAll(resp.Body)
 		require.Error(t, err)
@@ -1170,10 +1170,10 @@ func TestClient_ResponseSizeGuard(t *testing.T) {
 			_, _ = w.Write([]byte("under limit"))
 		})
 
-		client = client.With(WithClientMaxResponseSize(100))
+		client = client.With(withMaxResponseSize(100))
 		resp, err := client.Request(t.Context(), http.MethodGet, "/")
 		require.NoError(t, err)
-		t.Cleanup(func() { closeResponse(resp) })
+		t.Cleanup(func() { CloseResponse(resp) })
 
 		body, err := io.ReadAll(resp.Body)
 		require.NoError(t, err)
@@ -1199,7 +1199,7 @@ func TestClient_SensitiveHeaderScrubbing(t *testing.T) {
 		}))
 		t.Cleanup(origServer.Close)
 
-		client := NewClient(nil, WithClientRedirectLimit(3))
+		client := NewClient(nil, withRedirectLimit(3))
 
 		reqMod := func(req *http.Request) {
 			req.Header.Set("Authorization", "Bearer token123")
@@ -1211,7 +1211,7 @@ func TestClient_SensitiveHeaderScrubbing(t *testing.T) {
 
 		resp, err := client.Request(t.Context(), http.MethodGet, origServer.URL, reqMod)
 		require.NoError(t, err)
-		t.Cleanup(func() { closeResponse(resp) })
+		t.Cleanup(func() { CloseResponse(resp) })
 
 		assert.Empty(t, redirectedHeaders.Get("Authorization"))
 		assert.Empty(t, redirectedHeaders.Get("Cookie"))
@@ -1236,8 +1236,8 @@ func TestClient_SensitiveHeaderScrubbing(t *testing.T) {
 		t.Cleanup(server.Close)
 
 		client := NewClient(nil,
-			WithClientRedirectLimit(3),
-			WithClientBaseURL(server.URL),
+			withRedirectLimit(3),
+			withBaseURL(server.URL),
 		)
 
 		reqMod := func(req *http.Request) {
@@ -1261,7 +1261,7 @@ func TestClient_SensitiveHeaderScrubbing(t *testing.T) {
 func TestClient_SSRFGuard(t *testing.T) {
 	t.Parallel()
 
-	client := NewClient(nil, WithClientSSRFGuard())
+	client := NewClient(nil, withSSRFGuard())
 
 	t.Run("blocks_loopback_ipv4", func(t *testing.T) {
 		_, err := client.Request(t.Context(), http.MethodGet, "http://127.0.0.1:8080/")
@@ -1282,7 +1282,7 @@ func TestClient_HappyEyeballs(t *testing.T) {
 		w.WriteHeader(http.StatusOK)
 	})
 
-	client = client.With(WithClientHappyEyeballs(10 * time.Millisecond))
+	client = client.With(withHappyEyeballs(10 * time.Millisecond))
 	resp, err := client.Request(t.Context(), http.MethodGet, "/")
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = resp.Body.Close() })
@@ -1296,10 +1296,10 @@ func TestClient_MultiReadBody(t *testing.T) {
 			_, _ = w.Write([]byte("short body"))
 		})
 
-		client = client.With(WithClientMultiReadBody(100))
+		client = client.With(withMultiReadBody(100))
 		resp, err := client.Request(t.Context(), http.MethodGet, "/")
 		require.NoError(t, err)
-		t.Cleanup(func() { closeResponse(resp) })
+		t.Cleanup(func() { CloseResponse(resp) })
 
 		body1, err := io.ReadAll(resp.Body)
 		require.NoError(t, err)
@@ -1317,10 +1317,10 @@ func TestClient_MultiReadBody(t *testing.T) {
 			_, _ = w.Write([]byte("long body exceeding threshold"))
 		})
 
-		client = client.With(WithClientMultiReadBody(10))
+		client = client.With(withMultiReadBody(10))
 		resp, err := client.Request(t.Context(), http.MethodGet, "/")
 		require.NoError(t, err)
-		t.Cleanup(func() { closeResponse(resp) })
+		t.Cleanup(func() { CloseResponse(resp) })
 
 		fBody, ok := resp.Body.(*responseBodyReadCloser)
 		require.True(t, ok)
@@ -1345,8 +1345,8 @@ func TestClient_MultiReadBody(t *testing.T) {
 		})
 
 		client = client.With(
-			WithClientMultiReadBody(10),
-			WithClientMultiReadDisableDisk(true),
+			withMultiReadBody(10),
+			withMultiReadDisableDisk(true),
 		)
 		_, err := client.Request(t.Context(), http.MethodGet, "/")
 		assert.ErrorIs(t, err, ErrBufferLimitExceeded)
@@ -1683,7 +1683,7 @@ func TestClient_RetryMiddleware(t *testing.T) {
 	}))
 	t.Cleanup(server.Close)
 
-	client := NewClient(nil, WithClientBaseURL(server.URL))
+	client := NewClient(nil, withBaseURL(server.URL))
 
 	retryMid := RetryMiddleware(opts, RetryOnGatewayErrors())
 	doer := retryMid(client.HTTP())
@@ -1693,7 +1693,7 @@ func TestClient_RetryMiddleware(t *testing.T) {
 
 	resp, err := doer.Do(req)
 	require.NoError(t, err)
-	t.Cleanup(func() { closeResponse(resp) })
+	t.Cleanup(func() { CloseResponse(resp) })
 
 	assert.Equal(t, http.StatusOK, resp.StatusCode)
 	assert.Equal(t, uint32(2), atomic.LoadUint32(&attempts))
@@ -1765,7 +1765,7 @@ func TestClient_RefererAutomaton(t *testing.T) {
 	}))
 	defer server.Close()
 
-	client := NewClient(nil, WithClientRefererAutomaton(true))
+	client := NewClient(nil, withRefererAutomaton(true))
 
 	// First request: no referer should be sent
 	resp1, err := client.Request(context.Background(), http.MethodGet, server.URL+"/page1")
@@ -1805,7 +1805,7 @@ func TestClient_ParseAutoProxy(t *testing.T) {
 }
 
 func TestClient_HTTP3Settings(t *testing.T) {
-	client := NewClient(nil, WithClientHTTP3Settings(h3.ChromeSettings))
+	client := NewClient(nil, withHTTP3Settings(h3.ChromeSettings))
 	assert.NotNil(t, client)
 }
 
@@ -1835,9 +1835,9 @@ func TestUserAgentAndHintsRotation(t *testing.T) {
 	defer server.Close()
 
 	client := NewClient(nil,
-		WithClientBaseURL(server.URL),
-		WithClientPipeline(PipelineConfig{RotateUA: true}),
-		WithClientUARotationProfiles(profiles),
+		withBaseURL(server.URL),
+		withPipeline(PipelineConfig{RotateUA: true}),
+		withUARotationProfiles(profiles),
 	)
 
 	resp1, err := client.Get(t.Context(), "/")
@@ -1866,8 +1866,8 @@ func TestDPIJitter(t *testing.T) {
 	defer server.Close()
 
 	client := NewClient(nil,
-		WithClientBaseURL(server.URL),
-		WithClientPipeline(PipelineConfig{
+		withBaseURL(server.URL),
+		withPipeline(PipelineConfig{
 			DPIJitter: &DPIJitterConfig{MinDelay: 10 * time.Millisecond, MaxDelay: 20 * time.Millisecond},
 		}),
 	)
@@ -1897,8 +1897,8 @@ func TestProxyFailover(t *testing.T) {
 
 	proxies := []string{"http://127.0.0.1:9999", server.URL}
 	client := NewClient(nil,
-		WithClientBaseURL(server.URL),
-		WithClientPipeline(PipelineConfig{
+		withBaseURL(server.URL),
+		withPipeline(PipelineConfig{
 			ProxyFailover: &ProxyFailoverConfig{Proxies: proxies, RetryLimit: 2},
 		}),
 	)
@@ -1930,8 +1930,8 @@ func TestCache(t *testing.T) {
 
 	store := NewInMemoryCacheStore()
 	client := NewClient(nil,
-		WithClientBaseURL(server.URL),
-		WithClientPipeline(PipelineConfig{
+		withBaseURL(server.URL),
+		withPipeline(PipelineConfig{
 			Cache: &CacheConfig{Store: store, DefaultTTL: 1 * time.Minute},
 		}),
 	)
@@ -1974,12 +1974,12 @@ func TestSensitiveDataRedactor(t *testing.T) {
 
 	inspector := &mockInspector{}
 	client := NewClient(nil,
-		WithClientBaseURL(server.URL),
-		WithClientPipeline(PipelineConfig{
+		withBaseURL(server.URL),
+		withPipeline(PipelineConfig{
 			Redact:  &RedactConfig{HeadersToRedact: []string{"Authorization", "Set-Cookie"}},
 			Inspect: true,
 		}),
-		WithClientInspector(inspector),
+		withInspector(inspector),
 	)
 
 	resp, err := client.Request(t.Context(), "GET", "/", WithHeader("Authorization", "Bearer secretToken"))
@@ -2009,8 +2009,8 @@ func TestHARGenerator(t *testing.T) {
 
 	harGen := NewHARGenerator()
 	client := NewClient(nil,
-		WithClientBaseURL(server.URL),
-		WithClientPipeline(PipelineConfig{
+		withBaseURL(server.URL),
+		withPipeline(PipelineConfig{
 			HAR: &HARConfig{Generator: harGen},
 		}),
 	)
@@ -2048,8 +2048,8 @@ func TestClient_QueryEncoder(t *testing.T) {
 	}
 
 	client := NewClient(nil,
-		WithClientBaseURL(server.URL),
-		WithClientQueryEncoder(customEncoder),
+		withBaseURL(server.URL),
+		withQueryEncoder(customEncoder),
 	)
 
 	_, err := client.Get(t.Context(), "/", WithQuery(struct{ Dummy string }{Dummy: "value"}))
@@ -2061,43 +2061,43 @@ func TestWithClientBrowserProfile(t *testing.T) {
 	t.Parallel()
 
 	clientChrome := NewClient(nil,
-		WithClientBrowserProfile(BrowserChrome, profiles.Windows),
+		withBrowserProfile(BrowserChrome, profiles.Windows),
 	)
 
-	headersChrome := clientChrome.defaults.Headers
+	headersChrome := clientChrome.Defaults().Headers
 	assert.Contains(t, headersChrome.Get("User-Agent"), "Chrome")
 	assert.Contains(t, headersChrome.Get("Sec-Ch-Ua"), "Google Chrome")
 	assert.Equal(t, "?0", headersChrome.Get("Sec-Ch-Ua-Mobile"))
 	assert.Equal(t, `"Windows"`, headersChrome.Get("Sec-Ch-Ua-Platform"))
 
-	require.NotNil(t, clientChrome.fingerprint.H2Settings)
-	assert.Equal(t, uint32(65536), clientChrome.fingerprint.H2Settings.HeaderTableSize)
-	assert.Equal(t, uint32(6291456), clientChrome.fingerprint.H2Settings.InitialWindowSize)
+	require.NotNil(t, clientChrome.Fingerprint().H2Settings)
+	assert.Equal(t, uint32(65536), clientChrome.Fingerprint().H2Settings.HeaderTableSize)
+	assert.Equal(t, uint32(6291456), clientChrome.Fingerprint().H2Settings.InitialWindowSize)
 
-	require.NotNil(t, clientChrome.fingerprint.H3Settings)
-	assert.True(t, clientChrome.fingerprint.H3Settings.EnableDatagrams)
+	require.NotNil(t, clientChrome.Fingerprint().H3Settings)
+	assert.True(t, clientChrome.Fingerprint().H3Settings.EnableDatagrams)
 
-	require.NotNil(t, clientChrome.fingerprint.TLSClientHelloSpecProvider)
-	spec, err := clientChrome.fingerprint.TLSClientHelloSpecProvider.ClientHelloSpec()
+	require.NotNil(t, clientChrome.Fingerprint().TLSClientHelloSpecProvider)
+	spec, err := clientChrome.Fingerprint().TLSClientHelloSpecProvider.ClientHelloSpec()
 	require.NoError(t, err)
 	require.NotNil(t, spec)
 	assert.Contains(t, spec.CipherSuites, uint16(utls.TLS_AES_128_GCM_SHA256))
 
 	clientFirefox := NewClient(nil,
-		WithClientBrowserProfile(BrowserFirefox, profiles.Windows),
+		withBrowserProfile(BrowserFirefox, profiles.Windows),
 	)
 
-	headersFirefox := clientFirefox.defaults.Headers
+	headersFirefox := clientFirefox.Defaults().Headers
 	assert.Contains(t, headersFirefox.Get("User-Agent"), "Firefox")
 
-	require.NotNil(t, clientFirefox.fingerprint.H2Settings)
-	assert.Equal(t, uint32(131072), clientFirefox.fingerprint.H2Settings.InitialWindowSize)
+	require.NotNil(t, clientFirefox.Fingerprint().H2Settings)
+	assert.Equal(t, uint32(131072), clientFirefox.Fingerprint().H2Settings.InitialWindowSize)
 
-	require.NotNil(t, clientFirefox.fingerprint.H3Settings)
-	assert.False(t, clientFirefox.fingerprint.H3Settings.EnableDatagrams)
+	require.NotNil(t, clientFirefox.Fingerprint().H3Settings)
+	assert.False(t, clientFirefox.Fingerprint().H3Settings.EnableDatagrams)
 
-	require.NotNil(t, clientFirefox.fingerprint.TLSClientHelloID)
-	assert.Equal(t, utls.HelloFirefox_120, *clientFirefox.fingerprint.TLSClientHelloID)
+	require.NotNil(t, clientFirefox.Fingerprint().TLSClientHelloID)
+	assert.Equal(t, utls.HelloFirefox_120, *clientFirefox.Fingerprint().TLSClientHelloID)
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
@@ -2105,15 +2105,15 @@ func TestWithClientBrowserProfile(t *testing.T) {
 	defer server.Close()
 
 	client := NewClient(nil,
-		WithClientBaseURL(server.URL),
-		WithClientBrowserProfile(BrowserChrome, profiles.Windows),
+		withBaseURL(server.URL),
+		withBrowserProfile(BrowserChrome, profiles.Windows),
 	)
 
 	reqGet, err := http.NewRequestWithContext(t.Context(), "GET", server.URL, nil)
 	require.NoError(t, err)
 
 	reqGet = client.InitRequestConfig(reqGet)
-	for _, mod := range client.defaults.DefaultMods {
+	for _, mod := range client.Defaults().DefaultMods {
 		mod(reqGet)
 	}
 
@@ -2127,7 +2127,7 @@ func TestWithClientBrowserProfile(t *testing.T) {
 	require.NoError(t, err)
 
 	reqPost = client.InitRequestConfig(reqPost)
-	for _, mod := range client.defaults.DefaultMods {
+	for _, mod := range client.Defaults().DefaultMods {
 		mod(reqPost)
 	}
 
@@ -2141,7 +2141,7 @@ func TestWithClientBrowserProfile(t *testing.T) {
 	require.NoError(t, err)
 
 	reqMultipart = client.InitRequestConfig(reqMultipart)
-	for _, mod := range client.defaults.DefaultMods {
+	for _, mod := range client.Defaults().DefaultMods {
 		mod(reqMultipart)
 	}
 
@@ -2182,29 +2182,29 @@ func TestWithClientProfileVariant_Custom(t *testing.T) {
 	}
 
 	client := NewClient(nil,
-		WithClientProfileVariant(customVariant, profiles.Windows),
+		withProfileVariant(customVariant, profiles.Windows),
 	)
 
 	// Verify custom headers
-	headers := client.defaults.Headers
+	headers := client.Defaults().Headers
 	assert.Equal(t, "CustomUA/1.0", headers.Get("User-Agent"))
 	assert.Equal(t, "custom-val", headers.Get("custom-header"))
 
 	// Verify custom H2 Settings
-	require.NotNil(t, client.fingerprint.H2Settings)
-	assert.Equal(t, uint32(99999), client.fingerprint.H2Settings.InitialWindowSize)
+	require.NotNil(t, client.Fingerprint().H2Settings)
+	assert.Equal(t, uint32(99999), client.Fingerprint().H2Settings.InitialWindowSize)
 
 	// Verify custom HelloID
-	require.NotNil(t, client.fingerprint.TLSClientHelloID)
-	assert.Equal(t, "Firefox", client.fingerprint.TLSClientHelloID.Client)
-	assert.Equal(t, "123", client.fingerprint.TLSClientHelloID.Version)
+	require.NotNil(t, client.Fingerprint().TLSClientHelloID)
+	assert.Equal(t, "Firefox", client.Fingerprint().TLSClientHelloID.Client)
+	assert.Equal(t, "123", client.Fingerprint().TLSClientHelloID.Version)
 
 	// Verify custom OrderedHeaders
 	req, err := http.NewRequestWithContext(t.Context(), "GET", "http://example.com", nil)
 	require.NoError(t, err)
 
 	req = client.InitRequestConfig(req)
-	for _, mod := range client.defaults.DefaultMods {
+	for _, mod := range client.Defaults().DefaultMods {
 		mod(req)
 	}
 
@@ -2217,7 +2217,7 @@ func TestWithClientProfileVariant_Custom(t *testing.T) {
 	require.NoError(t, err)
 
 	reqMultipart = client.InitRequestConfig(reqMultipart)
-	for _, mod := range client.defaults.DefaultMods {
+	for _, mod := range client.Defaults().DefaultMods {
 		mod(reqMultipart)
 	}
 
@@ -2233,7 +2233,7 @@ func TestWithClientTCPDelay(t *testing.T) {
 	t.Parallel()
 
 	client := NewClient(nil,
-		WithClientTCPDelay(10*time.Millisecond, 20*time.Millisecond),
+		withTCPDelay(10*time.Millisecond, 20*time.Millisecond),
 	)
 
 	// Test GET request uses client-level default TCP delay
@@ -2241,7 +2241,7 @@ func TestWithClientTCPDelay(t *testing.T) {
 	require.NoError(t, err)
 
 	reqGet = client.InitRequestConfig(reqGet)
-	for _, mod := range client.defaults.DefaultMods {
+	for _, mod := range client.Defaults().DefaultMods {
 		mod(reqGet)
 	}
 
@@ -2250,12 +2250,12 @@ func TestWithClientTCPDelay(t *testing.T) {
 	assert.Equal(t, 10*time.Millisecond, cfgGet.TCPDelay.Min)
 	assert.Equal(t, 20*time.Millisecond, cfgGet.TCPDelay.Max)
 
-	// Test GET request with per-request override
+	// Test GET request With per-request override
 	reqOverride, err := http.NewRequestWithContext(t.Context(), "GET", "http://example.com", nil)
 	require.NoError(t, err)
 
 	reqOverride = client.InitRequestConfig(reqOverride)
-	for _, mod := range client.defaults.DefaultMods {
+	for _, mod := range client.Defaults().DefaultMods {
 		mod(reqOverride)
 	}
 
@@ -2276,7 +2276,7 @@ func TestClient_WithClientInsecureSkipVerify(t *testing.T) {
 	}))
 	t.Cleanup(server.Close)
 
-	client := NewClient(nil, WithClientInsecureSkipVerify())
+	client := NewClient(nil, withInsecureSkipVerify())
 	resp, err := client.Request(t.Context(), http.MethodGet, server.URL)
 	require.NoError(t, err)
 	assert.Equal(t, http.StatusOK, resp.StatusCode)
@@ -2294,7 +2294,7 @@ func TestClient_WithClientResponseValidator(t *testing.T) {
 	errReqVal := errors.New("request validator error")
 
 	t.Run("Client-level only - failure", func(t *testing.T) {
-		client := NewClient(nil, WithClientResponseValidator(func(resp *http.Response) error {
+		client := NewClient(nil, withResponseValidator(func(resp *http.Response) error {
 			return errClientVal
 		}))
 		_, err := client.Request(t.Context(), http.MethodGet, server.URL)
@@ -2303,7 +2303,7 @@ func TestClient_WithClientResponseValidator(t *testing.T) {
 	})
 
 	t.Run("Client-level and request-level both fail - request-level wins", func(t *testing.T) {
-		client := NewClient(nil, WithClientResponseValidator(func(resp *http.Response) error {
+		client := NewClient(nil, withResponseValidator(func(resp *http.Response) error {
 			return errClientVal
 		}))
 		_, err := client.Request(
@@ -2319,7 +2319,7 @@ func TestClient_WithClientResponseValidator(t *testing.T) {
 	})
 
 	t.Run("Client-level fails, request-level succeeds - request-level override passes", func(t *testing.T) {
-		client := NewClient(nil, WithClientResponseValidator(func(resp *http.Response) error {
+		client := NewClient(nil, withResponseValidator(func(resp *http.Response) error {
 			return errClientVal
 		}))
 		resp, err := client.Request(

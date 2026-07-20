@@ -24,8 +24,8 @@
 // # Core Types
 //
 //   - [Client] is the central immutable HTTP client. Configuration is done via
-//     functional options passed to [NewClient] (e.g. [WithClientBaseURL],
-//     [WithClientTimeout]). Per-request overrides are applied via
+//     functional options passed to [NewClient] (e.g. [option.WithBaseURL],
+//     [option.WithTimeout]). Per-request overrides are applied via
 //     [RequestModifier] values (e.g. [WithHeader], [WithQuery]).
 //   - [LoadBalancer] distributes requests across multiple [Client] instances
 //     with health checking and automatic failover.
@@ -52,11 +52,11 @@
 //
 // aoni can make outbound connections appear as specific browsers:
 //
-//   - [WithClientTLSFingerprint] selects a uTLS ClientHello profile
+//   - [option.WithTLSFingerprint] selects a uTLS ClientHello profile
 //     (Chrome, Firefox, Safari) for JA3/JA4 matching.
-//   - [WithClientP0fSignature] sets TTL, Don't Fragment, and TCP window
+//   - [option.WithP0fSignature] sets TTL, Don't Fragment, and TCP window
 //     size to mimic an OS-level network stack.
-//   - [WithClientModifiers] combined with [WithOrderedHeaders] controls the
+//   - [option.WithModifiers] combined with [WithOrderedHeaders] controls the
 //     HTTP/1.1 header serialization order. For HTTP/2, [FramedTransport]
 //     reorders HPACK-encoded HEADERS frames.
 //   - [WithClientFramedTransport] injects browser-specific SETTINGS and
@@ -82,13 +82,13 @@
 //
 // # Basic Usage
 //
-//	client := aoni.NewClient(nil,
-//		aoni.WithClientBaseURL("https://api.example.com"),
-//		aoni.WithClientTimeout(10*time.Second),
+//	client := NewClient(nil,
+//		option.WithBaseURL("https://api.example.com"),
+//		option.WithTimeout(10*time.Second),
 //	)
 //
 //	// 1. Get structured data with generics:
-//	user, err := aoni.GetTo[User](ctx, client, "/users/123")
+//	user, err := GetTo[User](ctx, client, "/users/123")
 //	if err != nil {
 //		log.Fatal(err)
 //	}
@@ -102,3 +102,6 @@
 //
 // The full example directory contains runnable programs for each feature.
 package aoni
+
+import (
+)

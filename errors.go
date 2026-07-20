@@ -25,7 +25,7 @@ var (
 	ErrChallengeRequired = errors.New("aoni: challenge verification required")
 
 	// ErrResponseTooLarge indicates the response exceeded the size
-	// limit configured via [WithClientMaxResponseSize].
+	// limit configured via [option.WithMaxResponseSize].
 	ErrResponseTooLarge = errors.New("aoni: response size limit exceeded")
 
 	// ErrBufferLimitExceeded indicates the replayable buffer exceeded its memory threshold,
@@ -34,7 +34,7 @@ var (
 
 	// ErrSSRFBlocked indicates the request was blocked because the
 	// target resolved to a private or loopback address. Returned by
-	// [Client.Request] when [WithClientSSRFGuard] is enabled.
+	// [Client.Request] when [option.WithSSRFGuard] is enabled.
 	ErrSSRFBlocked = errors.New("aoni: request blocked by SSRF guard")
 
 	// ErrCertificatePinning indicates the TLS handshake failed because

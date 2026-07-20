@@ -225,7 +225,7 @@ func handleResponse(resp *http.Response, target any, requester Requester) error 
 	dec := responseDecoder{}
 
 	if !dec.setCapturer(resp) {
-		defer closeResponse(resp)
+		defer CloseResponse(resp)
 	}
 
 	dec.dumpDiagnostics(resp, requester)

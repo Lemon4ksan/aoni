@@ -5,6 +5,7 @@
 package main
 
 import (
+	"github.com/lemon4ksan/aoni/option"
 	"bytes"
 	"context"
 	"errors"
@@ -143,10 +144,10 @@ func run(ctx context.Context, targetURL string) error {
 	})
 
 	client := aoni.NewClient(nil,
-		aoni.WithClientBrowserProfile(aoni.BrowserChrome, profiles.Windows),
-		aoni.WithClientCookieJar(jar),
-		aoni.WithClientRefererAutomaton(true),
-		aoni.WithClientTCPDelay(150*time.Millisecond, 400*time.Millisecond),
+		option.WithBrowserProfile(aoni.BrowserChrome, profiles.Windows),
+		option.WithCookieJar(jar),
+		option.WithRefererAutomaton(true),
+		option.WithTCPDelay(150*time.Millisecond, 400*time.Millisecond),
 	)
 
 	resp, err := client.Get(ctx, targetURL)

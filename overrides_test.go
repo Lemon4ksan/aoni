@@ -170,7 +170,7 @@ func TestWithResponseValidator_PassesOnSuccess(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	c := NewClient(nil, WithClientBaseURL(srv.URL))
+	c := NewClient(nil, withBaseURL(srv.URL))
 
 	resp, err := c.Get(t.Context(), "/",
 		WithResponseValidator(func(resp *http.Response) error {
@@ -193,7 +193,7 @@ func TestWithResponseValidator_BlocksOnFailure(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	c := NewClient(nil, WithClientBaseURL(srv.URL))
+	c := NewClient(nil, withBaseURL(srv.URL))
 
 	resp, err := c.Get(t.Context(), "/",
 		WithResponseValidator(func(resp *http.Response) error {

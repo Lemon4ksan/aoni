@@ -8,6 +8,7 @@
 package main
 
 import (
+	"github.com/lemon4ksan/aoni/option"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -30,7 +31,7 @@ func main() {
 	ctx := context.Background()
 
 	// Create a secure client with TLS fingerprint and user agent
-	client := aoni.NewClient(nil, aoni.WithClientTLSFingerprint(aoni.BrowserChrome))
+	client := aoni.NewClient(nil, option.WithTLSFingerprint(aoni.BrowserChrome))
 
 	// Specify the Socket.IO URL with Engine.IO v4 parameters
 	socketURL := "ws://localhost:3000/socket.io/?EIO=4&transport=websocket"

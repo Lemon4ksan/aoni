@@ -123,14 +123,33 @@ func (c *Client) applyDialers(transport *http.Transport) {
 		return proxyClient{}.CleanDialContext(ctx, dialCfg)
 	}
 
-	// Wire DialTLSContext only when uTLS is NOT configured (WithTLSFingerprint
-	// sets its own DialTLSContext). This gives plain http.Transport connections
-	// the same WithInsecureSkipVerify + WithTCPDelay support that uTLS enjoys.
-	if transport.DialTLSContext != nil {
-		return
-	}
+	if c.fingerprint.BrowserID != BrowserNone || c.fingerprint.TLSClientHelloID != nil || c.fingerprint.TLSClientHelloSpecProvider != nil {
+		tlsConfig := transport.TLSClientConfig
+		proxyFn := transport.Proxy
+		transport.DialTLSContext = func(ctx context.Context, network, addr string) (net.Conn, error) {
+			var proxyURL *url.URL
+			if proxyFn != nil {
+				proxyURL, _ = proxyFn(&http.Request{URL: &url.URL{Host: addr}})
+			}
 
-	transport.DialTLSContext = c.dialContext
+			dialConfig := dialConfig{
+				Network:       network,
+				Addr:          addr,
+				Browser:       c.fingerprint.BrowserID,
+				HelloID:       c.fingerprint.TLSClientHelloID,
+				SourceRotator: c.network.SourceRotator,
+				DNSResolver:   c.network.DNSResolver,
+				Delay:         c.network.HappyEyeballsDelay,
+				SSRFGuard:     c.network.SSRFGuard,
+				JA4Callback:   c.fingerprint.JA4Callback,
+				ProxyURL:      proxyURL,
+			}
+
+			return c.dialTLSWithUTLS(ctx, dialConfig, tlsConfig, GetRequestConfig(ctx))
+		}
+	} else {
+		transport.DialTLSContext = c.dialContext
+	}
 }
 
 func (c *Client) dialContext(ctx context.Context, network, addr string) (net.Conn, error) {
