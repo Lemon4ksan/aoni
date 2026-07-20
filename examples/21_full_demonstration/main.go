@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/lemon4ksan/aoni"
+	"github.com/lemon4ksan/aoni/cookie"
 	"github.com/lemon4ksan/aoni/inspector"
 	"github.com/lemon4ksan/aoni/p0f"
 )
@@ -62,11 +63,11 @@ func main() {
 	}
 	defer db.Close()
 
-	sqlStorage := aoni.NewSQLCookieStorage(db)
+	sqlStorage := cookie.NewSQLStorage(db)
 	// Init schema works but uses dummy no-op driver statements here.
 	_ = sqlStorage.InitSchema()
 
-	cookieJar := aoni.NewProxyIsolatedCookieJar().WithStorageBackend(sqlStorage)
+	cookieJar := cookie.NewProxyIsolatedJar().WithStorageBackend(sqlStorage)
 
 	// High-speed race DNS resolver.
 	raceResolver := aoni.NewFastRaceResolver(
@@ -83,10 +84,10 @@ func main() {
 
 	client := aoni.NewClient(nil,
 		aoni.WithClientBaseURL("https://api.protected-target.com"),
-		aoni.WithClientTimeout(30 * time.Second),
+		aoni.WithClientTimeout(30*time.Second),
 		aoni.WithClientDNSResolver(raceResolver),
-		aoni.WithClientProxyIsolatedCookieJar(cookieJar),
-		aoni.WithClientDynamicHedging(nil), // Enables dynamic tail-latency reduction (hedging)
+		aoni.WithClientCookieJar(cookieJar),
+		aoni.WithClientDynamicHedging(nil),         // Enables dynamic tail-latency reduction (hedging)
 		aoni.WithClientP0fSignature(p0f.Windows10), // Emulate Windows 10 TCP/IP stack
 		aoni.WithClientPacketPadding(aoni.PaddingConfig{
 			MaxSegmentSize:  512, // Lower MSS to force packet fragmentation

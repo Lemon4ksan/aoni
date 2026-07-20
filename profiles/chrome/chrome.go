@@ -12,8 +12,9 @@ import (
 	"github.com/lemon4ksan/aoni/profiles"
 )
 
-// HelloChrome145 is the Chrome 145 client hello spec.
-var HelloChrome145 = utls.ClientHelloSpec{
+// HelloChrome150 is the Chrome 150 client hello spec.
+// The version number changes with each update. Never use it directly.
+var HelloChrome150 = utls.ClientHelloSpec{
 	CipherSuites: []uint16{
 		utls.GREASE_PLACEHOLDER,
 		utls.TLS_AES_128_GCM_SHA256,
@@ -105,8 +106,9 @@ var HelloChrome145 = utls.ClientHelloSpec{
 	),
 }
 
-// HelloChrome145QUIC is the Chrome 145 QUIC client hello spec.
-var HelloChrome145QUIC = utls.ClientHelloSpec{
+// HelloChrome150QUIC is the Chrome 145 QUIC client hello spec.
+// The version number changes with each update. Never use it directly.
+var HelloChrome150QUIC = utls.ClientHelloSpec{
 	CipherSuites: []uint16{
 		utls.TLS_AES_128_GCM_SHA256,
 		utls.TLS_AES_256_GCM_SHA384,
@@ -167,15 +169,15 @@ var HelloChrome145QUIC = utls.ClientHelloSpec{
 }
 
 // SecCHUA is the Chrome user agent string.
-const SecCHUA = `"Not:A-Brand";v="99", "Google Chrome";v="145", "Chromium";v="145"`
+const SecCHUA = `"Not:A-Brand";v="99", "Google Chrome";v="150", "Chromium";v="150"`
 
 // Various user agent strings for different platforms.
 const (
-	UserAgentWindows = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/145.0.0.0 Safari/537.36"
-	UserAgentMacOS   = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/145.0.0.0 Safari/537.36"
-	UserAgentLinux   = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/145.0.0.0 Safari/537.36"
-	UserAgentAndroid = "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/145.0.7632.26 Mobile Safari/537.36"
-	UserAgentIOS     = "Mozilla/5.0 (iPhone; CPU iPhone OS 26_2_1 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) CriOS/145.0.7632.55 Mobile/15E148 Safari/604.1"
+	UserAgentWindows = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/150.0.0.0 Safari/537.36"
+	UserAgentMacOS   = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/150.0.0.0 Safari/537.36"
+	UserAgentLinux   = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/150.0.0.0 Safari/537.36"
+	UserAgentAndroid = "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/150.0.7871.124 Mobile Safari/537.36"
+	UserAgentIOS     = "Mozilla/5.0 (iPhone; CPU iPhone OS 26_2_1 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) CriOS/150.0.7922.25 Mobile/15E148 Safari/604.1"
 
 	PlatformWindows = `"Windows"`
 	PlatformMacOS   = `"macOS"`
@@ -202,7 +204,7 @@ var platforms = map[profiles.OSKey]string{
 
 // Desktop is the Chrome desktop variant.
 var Desktop = &profiles.Variant{
-	HelloSpec:    &HelloChrome145,
+	HelloSpec:    &HelloChrome150,
 	BoundaryFunc: Boundary,
 	ConfigureH2:  configureH2Desktop,
 	ConfigureH3:  configureH3Desktop,
@@ -215,7 +217,7 @@ var Desktop = &profiles.Variant{
 
 // Mobile is the Chrome mobile variant.
 var Mobile = &profiles.Variant{
-	HelloSpec:    &HelloChrome145,
+	HelloSpec:    &HelloChrome150,
 	BoundaryFunc: Boundary,
 	ConfigureH2:  configureH2Desktop,
 	ConfigureH3:  configureH3Desktop,

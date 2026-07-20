@@ -2,7 +2,7 @@
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
-package aoni
+package cookie
 
 import (
 	"context"
@@ -18,7 +18,7 @@ import (
 func TestProxyIsolatedCookieJar_Basic(t *testing.T) {
 	t.Parallel()
 
-	pJar := NewProxyIsolatedCookieJar()
+	pJar := NewProxyIsolatedJar()
 	require.NotNil(t, pJar)
 
 	u, err := url.Parse("https://example.com")
@@ -37,7 +37,7 @@ func TestProxyIsolatedCookieJar_Basic(t *testing.T) {
 func TestProxyIsolatedCookieJar_ContextRetrieval(t *testing.T) {
 	t.Parallel()
 
-	pJar := NewProxyIsolatedCookieJar()
+	pJar := NewProxyIsolatedJar()
 	u, err := url.Parse("https://google.com")
 	require.NoError(t, err)
 
@@ -63,7 +63,7 @@ func TestProxyIsolatedCookieJar_ContextRetrieval(t *testing.T) {
 func TestProxyIsolatedCookieJar_DX_Methods(t *testing.T) {
 	t.Parallel()
 
-	pJar := NewProxyIsolatedCookieJar()
+	pJar := NewProxyIsolatedJar()
 	u, err := url.Parse("https://yahoo.com")
 	require.NoError(t, err)
 
@@ -93,7 +93,7 @@ func TestProxyIsolatedCookieJar_DX_Methods(t *testing.T) {
 func TestProxyIsolatedCookieJar_ConcurrentUsage(t *testing.T) {
 	t.Parallel()
 
-	pJar := NewProxyIsolatedCookieJar()
+	pJar := NewProxyIsolatedJar()
 
 	var wg sync.WaitGroup
 

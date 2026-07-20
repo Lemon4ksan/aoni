@@ -19,6 +19,8 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/lemon4ksan/aoni/h2"
 )
 
 func TestIsBlockedIP(t *testing.T) {
@@ -263,7 +265,7 @@ func TestReorderHTTP1Headers_MalformedInputs(t *testing.T) {
 	t.Run("empty payload", func(t *testing.T) {
 		t.Parallel()
 
-		res, ok := reorderHTTP1Headers([]byte(""), []string{"Host"})
+		res, ok := h2.ReorderHTTP1Headers([]byte(""), []string{"Host"})
 		assert.False(t, ok)
 		assert.Nil(t, res)
 	})
@@ -272,7 +274,7 @@ func TestReorderHTTP1Headers_MalformedInputs(t *testing.T) {
 		t.Parallel()
 
 		malformed := []byte("GET / HTTP/1.1\r\nHost 127.0.0.1\r\n\r\n")
-		res, ok := reorderHTTP1Headers(malformed, []string{"Host"})
+		res, ok := h2.ReorderHTTP1Headers(malformed, []string{"Host"})
 		assert.True(t, ok)
 		assert.Equal(t, []byte("GET / HTTP/1.1\r\n\r\n"), res)
 	})
@@ -281,7 +283,7 @@ func TestReorderHTTP1Headers_MalformedInputs(t *testing.T) {
 		t.Parallel()
 
 		malformed := []byte("GET / HTTP/1.1\r\nHost: 127.0.0.1\r\n")
-		res, ok := reorderHTTP1Headers(malformed, []string{"Host"})
+		res, ok := h2.ReorderHTTP1Headers(malformed, []string{"Host"})
 		assert.False(t, ok)
 		assert.Nil(t, res)
 	})
@@ -343,7 +345,7 @@ func TestWrapWithMSSLimit_NegativeMSS(t *testing.T) {
 	c1, c2 := net.Pipe()
 	t.Cleanup(func() { _ = c1.Close(); _ = c2.Close() })
 
-	wrapped := wrapWithMSSLimit(c1, -100)
+	wrapped := connWrapper{}.WithMSSLimit(c1, -100)
 	assert.NotNil(t, wrapped, "negative MSS size should be ignored gracefully without breaking the stream")
 }
 

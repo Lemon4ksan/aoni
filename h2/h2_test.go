@@ -2,7 +2,7 @@
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
-package aoni
+package h2
 
 import (
 	"bytes"
@@ -25,7 +25,7 @@ func TestReorderHTTP1Headers_Basic(t *testing.T) {
 	raw := []byte("GET / HTTP/1.1\r\nHost: example.com\r\nUser-Agent: curl\r\nAccept: */*\r\n\r\n")
 	order := []string{"Accept", "Host", "User-Agent"}
 
-	result, ok := reorderHTTP1Headers(raw, order)
+	result, ok := ReorderHTTP1Headers(raw, order)
 	require.True(t, ok)
 
 	expected := "GET / HTTP/1.1\r\nAccept: */*\r\nHost: example.com\r\nUser-Agent: curl\r\n\r\n"
@@ -38,7 +38,7 @@ func TestReorderHTTP1Headers_PreservesUnlisted(t *testing.T) {
 	raw := []byte("POST /data HTTP/1.1\r\nHost: example.com\r\nX-Custom: val1\r\nAccept: */*\r\nX-Other: val2\r\n\r\n")
 	order := []string{"Host", "Accept"}
 
-	result, ok := reorderHTTP1Headers(raw, order)
+	result, ok := ReorderHTTP1Headers(raw, order)
 	require.True(t, ok)
 
 	lines := strings.Split(string(result), "\r\n")
@@ -60,7 +60,7 @@ func TestReorderHTTP1Headers_CaseInsensitive(t *testing.T) {
 	raw := []byte("GET / HTTP/1.1\r\nhost: example.com\r\nUSER-AGENT: test\r\n\r\n")
 	order := []string{"user-agent", "HOST"}
 
-	result, ok := reorderHTTP1Headers(raw, order)
+	result, ok := ReorderHTTP1Headers(raw, order)
 	require.True(t, ok)
 
 	expected := "GET / HTTP/1.1\r\nUSER-AGENT: test\r\nhost: example.com\r\n\r\n"
@@ -73,7 +73,7 @@ func TestReorderHTTP1Headers_WithBody(t *testing.T) {
 	raw := []byte("POST / HTTP/1.1\r\nHost: a.com\r\nContent-Type: text/plain\r\n\r\nhello world")
 	order := []string{"Content-Type", "Host"}
 
-	result, ok := reorderHTTP1Headers(raw, order)
+	result, ok := ReorderHTTP1Headers(raw, order)
 	require.True(t, ok)
 
 	expected := "POST / HTTP/1.1\r\nContent-Type: text/plain\r\nHost: a.com\r\n\r\nhello world"
@@ -84,7 +84,7 @@ func TestReorderHTTP1Headers_NoTerminator(t *testing.T) {
 	t.Parallel()
 
 	raw := []byte("GET / HTTP/1.1\r\nHost: example.com")
-	_, ok := reorderHTTP1Headers(raw, []string{"Host"})
+	_, ok := ReorderHTTP1Headers(raw, []string{"Host"})
 	assert.False(t, ok)
 }
 
@@ -94,7 +94,7 @@ func TestReorderHTTP1Headers_SingleHeader(t *testing.T) {
 	raw := []byte("GET / HTTP/1.1\r\nHost: example.com\r\n\r\n")
 	order := []string{"Host"}
 
-	result, ok := reorderHTTP1Headers(raw, order)
+	result, ok := ReorderHTTP1Headers(raw, order)
 	require.True(t, ok)
 	assert.Equal(t, "GET / HTTP/1.1\r\nHost: example.com\r\n\r\n", string(result))
 }
@@ -103,7 +103,7 @@ func TestReorderHTTP1Headers_EmptyOrder(t *testing.T) {
 	t.Parallel()
 
 	raw := []byte("GET / HTTP/1.1\r\nHost: a.com\r\nAccept: */*\r\n\r\n")
-	result, ok := reorderHTTP1Headers(raw, []string{})
+	result, ok := ReorderHTTP1Headers(raw, []string{})
 	require.True(t, ok)
 	assert.Equal(t, "GET / HTTP/1.1\r\nHost: a.com\r\nAccept: */*\r\n\r\n", string(result))
 }
@@ -112,9 +112,9 @@ func TestHeaderOrderingConn_Reorders(t *testing.T) {
 	t.Parallel()
 
 	server, client := net.Pipe()
-	conn := &headerOrderingConn{
+	conn := &HeaderOrderingConn{
 		Conn:        client,
-		orderedKeys: []string{"Accept", "Host"},
+		OrderedKeys: []string{"Accept", "Host"},
 	}
 
 	input := "GET / HTTP/1.1\r\nHost: example.com\r\nUser-Agent: test\r\nAccept: */*\r\n\r\n"
@@ -144,9 +144,9 @@ func TestHeaderOrderingConn_PassthroughNonHTTP(t *testing.T) {
 	t.Parallel()
 
 	server, client := net.Pipe()
-	conn := &headerOrderingConn{
+	conn := &HeaderOrderingConn{
 		Conn:        client,
-		orderedKeys: []string{"Host"},
+		OrderedKeys: []string{"Host"},
 	}
 
 	data := []byte("this is not an HTTP request")
@@ -175,9 +175,9 @@ func TestHeaderOrderingConn_EmptyKeys(t *testing.T) {
 	t.Parallel()
 
 	server, client := net.Pipe()
-	conn := &headerOrderingConn{
+	conn := &HeaderOrderingConn{
 		Conn:        client,
-		orderedKeys: []string{},
+		OrderedKeys: []string{},
 	}
 
 	input := "GET / HTTP/1.1\r\nHost: a.com\r\n\r\n"
@@ -219,7 +219,7 @@ func TestH2SettingsFromProfile(t *testing.T) {
 		PriorityWeight:       16,
 	}
 
-	settings := H2SettingsFromProfile(profSettings)
+	settings := SettingsFromProfile(profSettings)
 	assert.Equal(t, uint32(4096), settings.HeaderTableSize)
 	assert.Equal(t, uint32(0), settings.EnablePush)
 	assert.Equal(t, uint32(100), settings.MaxConcurrentStreams)
@@ -350,7 +350,7 @@ func TestH2FramedConn_WithPriorityFrame(t *testing.T) {
 	server, client := net.Pipe()
 	conn := &h2framedConn{
 		Conn: client,
-		settings: HTTP2Settings{
+		settings: Settings{
 			HeaderTableSize:   65536,
 			PriorityStreamDep: 13,
 			PriorityExclusive: true,
@@ -610,12 +610,12 @@ func TestH2FramedConn_ReordersHeaders(t *testing.T) {
 	assert.Equal(t, "user-agent", decoded[3].Name)
 }
 
-func TestH2FramedTransport_Constructor(t *testing.T) {
+func TestFramedTransport_Constructor(t *testing.T) {
 	t.Parallel()
 
 	base := &http.Transport{}
-	settings := HTTP2Settings{HeaderTableSize: 4096}
-	tr := NewH2FramedTransport(base, settings, "Host", "User-Agent")
+	settings := Settings{HeaderTableSize: 4096}
+	tr := NewFramedTransport(base, settings, "Host", "User-Agent")
 	require.NotNil(t, tr)
 
 	assert.Equal(t, settings, tr.settings)
@@ -623,7 +623,7 @@ func TestH2FramedTransport_Constructor(t *testing.T) {
 	assert.NotNil(t, tr.DialTLSContext)
 }
 
-func TestParseHTTP2Settings(t *testing.T) {
+func TestParseSettings(t *testing.T) {
 	t.Parallel()
 
 	t.Run("parse_snake_case", func(t *testing.T) {
@@ -631,7 +631,7 @@ func TestParseHTTP2Settings(t *testing.T) {
 
 		jsonStr := `{"header_table_size":65536,"initial_window_size":6291456,"priority_weight":255,"priority_exclusive":true}`
 
-		settings, err := ParseHTTP2Settings(jsonStr)
+		settings, err := ParseSettings(jsonStr)
 		require.NoError(t, err)
 
 		assert.Equal(t, uint32(65536), settings.HeaderTableSize)
@@ -645,7 +645,7 @@ func TestParseHTTP2Settings(t *testing.T) {
 
 		jsonStr := `{"headerTableSize":4096,"initialWindowSize":131072,"priorityWeight":41}`
 
-		settings, err := ParseHTTP2Settings(jsonStr)
+		settings, err := ParseSettings(jsonStr)
 		require.NoError(t, err)
 
 		assert.Equal(t, uint32(4096), settings.HeaderTableSize)
@@ -658,7 +658,7 @@ func TestParseHTTP2Settings(t *testing.T) {
 
 		jsonStr := `{"HeaderTableSize":16384,"InitialWindowSize":262144}`
 
-		settings, err := ParseHTTP2Settings(jsonStr)
+		settings, err := ParseSettings(jsonStr)
 		require.NoError(t, err)
 
 		assert.Equal(t, uint32(16384), settings.HeaderTableSize)
@@ -668,7 +668,7 @@ func TestParseHTTP2Settings(t *testing.T) {
 	t.Run("invalid_json_returns_error", func(t *testing.T) {
 		t.Parallel()
 
-		_, err := ParseHTTP2Settings(`{"header_table_size": "not_a_number"}`)
+		_, err := ParseSettings(`{"header_table_size": "not_a_number"}`)
 		assert.Error(t, err)
 	})
 }

@@ -8,7 +8,6 @@ import (
 	"crypto/rand"
 	"encoding/binary"
 	"encoding/hex"
-	"net"
 	"net/http"
 )
 
@@ -134,27 +133,4 @@ func randIntn(n int) int {
 	val := binary.BigEndian.Uint64(buf[:])
 
 	return int(val % uint64(n)) //nolint:gosec
-}
-
-// wrapWithMSSLimit wraps a connection with TCP MSS limiting.
-// This forces TCP to fragment data into smaller segments, disrupting
-// DPI analysis of packet length signatures during TLS handshake and
-// initial data transfer.
-func wrapWithMSSLimit(conn net.Conn, mss int) net.Conn {
-	if mss <= 0 {
-		return conn
-	}
-
-	if tc, ok := conn.(*net.TCPConn); ok {
-		raw, err := tc.SyscallConn()
-		if err != nil {
-			return conn
-		}
-
-		_ = raw.Control(func(fd uintptr) {
-			setTCPMaxSeg(fd, mss)
-		})
-	}
-
-	return conn
 }

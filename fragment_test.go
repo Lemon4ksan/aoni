@@ -210,7 +210,7 @@ func TestWrapWithFragmentation(t *testing.T) {
 		MaxDelay:  2 * time.Millisecond,
 	}
 
-	conn := wrapWithFragmentation(client, cfg)
+	conn := connWrapper{}.WithFragmentation(client, cfg)
 	require.NotNil(t, conn)
 
 	// Assert internal fields using type assertion since we are in the package aoni

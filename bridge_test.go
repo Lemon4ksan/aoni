@@ -690,7 +690,7 @@ func TestAoniTransport_RoundTrip_TraceContext(t *testing.T) {
 	mockDoer := DoerFunc(func(req *http.Request) (*http.Response, error) {
 		cfg := GetRequestConfig(req.Context())
 		if cfg != nil && cfg.JA4ReportStore != nil {
-			cfg.JA4ReportStore.report = &ja4.Report{JA4: "t13d1516h2_mock_fingerprint"}
+			cfg.JA4ReportStore.Report = &ja4.Report{JA4: "t13d1516h2_mock_fingerprint"}
 		}
 
 		return &http.Response{

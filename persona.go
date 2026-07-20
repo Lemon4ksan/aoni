@@ -12,6 +12,7 @@ import (
 
 	utls "github.com/refraction-networking/utls"
 
+	"github.com/lemon4ksan/aoni/h2"
 	"github.com/lemon4ksan/aoni/p0f"
 )
 
@@ -19,7 +20,7 @@ import (
 // (TCP/IP, TLS, HTTP/2 settings, headers, and User-Agent).
 type Persona struct {
 	TLSID        utls.ClientHelloID
-	H2Settings   HTTP2Settings
+	H2Settings   h2.Settings
 	UserAgent    string
 	HeaderOrder  []string
 	P0fSignature *p0f.Signature
@@ -29,8 +30,8 @@ var (
 	// PersonaChrome120Windows mimics Google Chrome 120 on Windows.
 	PersonaChrome120Windows = Persona{
 		TLSID:      utls.HelloChrome_120,
-		H2Settings: ChromeH2Settings,
-		UserAgent:  "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+		H2Settings: h2.ChromeH2Settings,
+		UserAgent:  DefaultUserAgent,
 		HeaderOrder: []string{
 			":method", ":authority", ":scheme", ":path",
 			"sec-ch-ua", "sec-ch-ua-mobile", "sec-ch-ua-platform",
@@ -45,7 +46,7 @@ var (
 	// PersonaChrome120Android mimics Google Chrome 120 on Android.
 	PersonaChrome120Android = Persona{
 		TLSID:      utls.HelloChrome_120,
-		H2Settings: ChromeH2Settings,
+		H2Settings: h2.ChromeH2Settings,
 		UserAgent:  "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36",
 		HeaderOrder: []string{
 			":method", ":authority", ":scheme", ":path",
@@ -61,7 +62,7 @@ var (
 	// PersonaFirefox120Windows mimics Mozilla Firefox 120 on Windows.
 	PersonaFirefox120Windows = Persona{
 		TLSID:      utls.HelloFirefox_120,
-		H2Settings: FirefoxH2Settings,
+		H2Settings: h2.FirefoxH2Settings,
 		UserAgent:  "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:120.0) Gecko/20100101 Firefox/120.0",
 		HeaderOrder: []string{
 			":method", ":path", ":authority", ":scheme",
@@ -77,7 +78,7 @@ var (
 	// PersonaFirefox120Android mimics Mozilla Firefox 120 on Android.
 	PersonaFirefox120Android = Persona{
 		TLSID:      utls.HelloFirefox_120,
-		H2Settings: FirefoxH2Settings,
+		H2Settings: h2.FirefoxH2Settings,
 		UserAgent:  "Mozilla/5.0 (Android 13; Mobile; rv:120.0) Gecko/120.0 Firefox/120.0",
 		HeaderOrder: []string{
 			":method", ":path", ":authority", ":scheme",
@@ -93,7 +94,7 @@ var (
 	// PersonaSafari17MacOS mimics Apple Safari 17 on macOS.
 	PersonaSafari17MacOS = Persona{
 		TLSID: utls.HelloSafari_16_0, // closest Safari hello ID available in uTLS v1.8.2
-		H2Settings: HTTP2Settings{
+		H2Settings: h2.Settings{
 			HeaderTableSize:   4096,
 			EnablePush:        0,
 			InitialWindowSize: 2097152,
@@ -113,7 +114,7 @@ var (
 	// PersonaSafari17IOS mimics Apple Safari 17 on iOS.
 	PersonaSafari17IOS = Persona{
 		TLSID: utls.HelloSafari_16_0, // closest Safari hello ID available in uTLS v1.8.2
-		H2Settings: HTTP2Settings{
+		H2Settings: h2.Settings{
 			HeaderTableSize:   4096,
 			EnablePush:        0,
 			InitialWindowSize: 2097152,
@@ -135,35 +136,34 @@ var (
 // for TLS ClientHello emulation. Only effective when the underlying [HTTPDoer]
 // is an [http.Client] with an [http.Transport].
 func (c *Client) WithTLSClientHelloID(id utls.ClientHelloID) *Client {
-	newClient := c.Clone()
-	newClient.fingerprint.TLSClientHelloID = &id
+	new := c.Clone()
+	new.fingerprint.TLSClientHelloID = &id
 
-	if transport := newClient.Transport(); transport != nil {
-		callback := newClient.fingerprint.JA4Callback
-		tlsConfig := transport.TLSClientConfig
-		proxyFn := transport.Proxy
+	if transport := new.Transport(); transport != nil {
 		transport.DialTLSContext = func(ctx context.Context, network, addr string) (net.Conn, error) {
 			var proxyURL *url.URL
-			if proxyFn != nil {
-				proxyURL, _ = proxyFn(&http.Request{URL: &url.URL{Host: addr}})
+			if transport.Proxy != nil {
+				proxyURL, _ = transport.Proxy(&http.Request{URL: &url.URL{Host: addr}})
 			}
 
-			return dialTLSWithUTLS(
-				ctx,
-				network,
-				addr,
-				BrowserNone,
-				newClient.fingerprint.TLSClientHelloID,
-				newClient.network.SourceRotator,
-				newClient.network.DNSResolver,
-				callback,
-				tlsConfig,
-				proxyURL,
-			)
+			dialConfig := dialConfig{
+				Network:       network,
+				Addr:          addr,
+				Browser:       BrowserNone,
+				HelloID:       new.fingerprint.TLSClientHelloID,
+				SourceRotator: new.network.SourceRotator,
+				DNSResolver:   new.network.DNSResolver,
+				Delay:         new.network.HappyEyeballsDelay,
+				SSRFGuard:     new.network.SSRFGuard,
+				JA4Callback:   new.fingerprint.JA4Callback,
+				ProxyURL:      proxyURL,
+			}
+
+			return c.dialTLSWithUTLS(ctx, dialConfig, transport.TLSClientConfig, nil)
 		}
 	}
 
-	return newClient
+	return new
 }
 
 // WithPersona returns a clone of c configured with all parameters of the target Persona.
@@ -177,7 +177,7 @@ func (c *Client) WithPersona(p Persona) *Client {
 	newClient.fingerprint.P0fSignature = p.P0fSignature
 
 	if transport := newClient.Transport(); transport != nil {
-		framed := NewH2FramedTransport(transport, p.H2Settings, p.HeaderOrder...)
+		framed := h2.NewFramedTransport(transport, p.H2Settings, p.HeaderOrder...)
 		if httpClient, ok := newClient.engine.(*http.Client); ok {
 			httpClient.Transport = framed
 		}

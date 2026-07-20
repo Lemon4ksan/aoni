@@ -19,6 +19,8 @@ import (
 
 	"github.com/lemon4ksan/miyako/generic"
 	"github.com/lemon4ksan/miyako/log"
+
+	"github.com/lemon4ksan/aoni/cookie"
 )
 
 // ParseAutoProxy parses a proxy string and detects the protocol.
@@ -243,7 +245,7 @@ type ProxyRotator struct {
 	mu            sync.RWMutex
 	clients       []*trackedClient
 	cfg           ProxyRotatorConfig
-	current       atomic.Uint64
+	current       atomic.Uint32
 	stickyKeyFunc StickyKeyFunc
 	sessions      map[string]*sessionEntry
 	sessionTTL    time.Duration
@@ -277,25 +279,7 @@ func NewProxyRotator(cfg ProxyRotatorConfig, clients ...ClientWithProxy) (*Proxy
 		sessionTTL: 24 * time.Hour,
 	}
 
-	r.clients = generic.Map(clients, func(c ClientWithProxy) *trackedClient {
-		tc := &trackedClient{
-			client:          c.Client,
-			proxyURL:        c.ProxyURL,
-			domainCooldowns: make(map[string]time.Time),
-		}
-		tc.HealthTracker = NewHealthTracker(c.ProxyURL, cfg.MaxFails, cfg.RetryAfter,
-			func(name string, fails uint32, retryAfter time.Duration) {
-				cfg.Logger.Warn("proxy marked unhealthy",
-					"proxy", name, "fails", fails, "retry_after", retryAfter,
-				)
-			},
-			func(name string) {
-				cfg.Logger.Info("proxy recovered", "proxy", name)
-			},
-		)
-
-		return tc
-	})
+	r.clients = generic.Map(clients, r.setupClient)
 
 	r.wg.Go(r.cleanupSessionsLoop)
 
@@ -346,6 +330,54 @@ type ProxyRotatorStats struct {
 	UnhealthyProxies int
 }
 
+// WithStickySessions returns a copy of r configured with the given key extractor.
+func (r *ProxyRotator) WithStickySessions(f StickyKeyFunc) *ProxyRotator {
+	c := &ProxyRotator{
+		ctx:           r.ctx,
+		cancel:        r.cancel,
+		clients:       make([]*trackedClient, len(r.clients)),
+		cfg:           r.cfg,
+		sessions:      make(map[string]*sessionEntry),
+		sessionTTL:    r.sessionTTL,
+		stickyKeyFunc: f,
+	}
+	copy(c.clients, r.clients)
+	c.current.Store(r.current.Load())
+
+	return c
+}
+
+// Prewarm opens TCP/TLS connections to targetURL through all proxy clients.
+// It sends concurrent HEAD requests to pre-populate transport connection pools.
+func (r *ProxyRotator) Prewarm(ctx context.Context, targetURL string) {
+	r.mu.RLock()
+	clients := make([]*trackedClient, len(r.clients))
+	copy(clients, r.clients)
+	r.mu.RUnlock()
+
+	var wg sync.WaitGroup
+
+	for _, tc := range clients {
+		wg.Add(1)
+
+		go func(c *trackedClient) {
+			defer wg.Done()
+
+			req, err := http.NewRequestWithContext(ctx, http.MethodHead, targetURL, nil)
+			if err != nil {
+				return
+			}
+
+			resp, err := c.client.Do(req)
+			if err == nil {
+				_ = resp.Body.Close()
+			}
+		}(tc)
+	}
+
+	wg.Wait()
+}
+
 // Stats evaluates and returns current health statistics of the registered proxy clients.
 func (r *ProxyRotator) Stats() ProxyRotatorStats {
 	r.mu.RLock()
@@ -392,30 +424,89 @@ func (r *ProxyRotator) UpdateClients(clients ...ClientWithProxy) {
 		return
 	}
 
-	tracked := generic.Map(clients, func(cp ClientWithProxy) *trackedClient {
-		tc := &trackedClient{
-			client:          cp.Client,
-			proxyURL:        cp.ProxyURL,
-			domainCooldowns: make(map[string]time.Time),
-		}
-		tc.HealthTracker = NewHealthTracker(cp.ProxyURL, r.cfg.MaxFails, r.cfg.RetryAfter,
-			func(name string, fails uint32, retryAfter time.Duration) {
-				r.cfg.Logger.Warn("proxy marked unhealthy",
-					"proxy", name, "fails", fails, "retry_after", retryAfter)
-			},
-			func(name string) {
-				r.cfg.Logger.Info("proxy recovered", "proxy", name)
-			},
-		)
-
-		return tc
-	})
+	tracked := generic.Map(clients, r.setupClient)
 
 	r.mu.Lock()
 	r.clients = tracked
 	r.current.Store(0)
 	r.sessions = make(map[string]*sessionEntry)
 	r.mu.Unlock()
+}
+
+// Do performs an HTTP request using the next available client in the pool.
+// It attempts sticky routing first, then falls back to round-robin selection.
+// If a client faults, it is marked unhealthy. Returns an error if all clients fail.
+func (r *ProxyRotator) Do(req *http.Request) (*http.Response, error) {
+	r.mu.RLock()
+	clients := r.clients
+	r.mu.RUnlock()
+
+	var (
+		lastErr       error
+		n             = uint32(len(clients)) //nolint:gosec
+		sessionID     string
+		stickyIdx     = -1
+		hasCooledDown = false
+	)
+
+	domain := req.URL.Hostname()
+
+	if r.stickyKeyFunc != nil {
+		if sessionID = r.stickyKeyFunc(req); sessionID != "" {
+			stickyIdx = r.getStickyClientIndex(sessionID)
+		}
+	}
+
+	if stickyIdx >= 0 && stickyIdx < len(clients) {
+		tc := clients[stickyIdx]
+		if tc.IsAvailable() && !tc.IsDomainCooledDown(domain) {
+			resp, err := r.executeWithProxy(req, tc)
+			if r.handleProxyResult(tc, resp, err, domain) {
+				return resp, err
+			}
+
+			lastErr = err
+		}
+	}
+
+	for range n {
+		idx := r.current.Add(1) % n
+		if int(idx) == stickyIdx {
+			continue
+		}
+
+		tc := clients[idx]
+		if !tc.IsAvailable() {
+			continue
+		}
+
+		if tc.IsDomainCooledDown(domain) {
+			hasCooledDown = true
+			continue
+		}
+
+		resp, err := r.executeWithProxy(req, tc)
+		if !r.handleProxyResult(tc, resp, err, domain) {
+			lastErr = err
+			continue
+		}
+
+		if sessionID != "" {
+			r.saveSession(sessionID, int(idx))
+		}
+
+		return resp, err
+	}
+
+	if lastErr != nil {
+		return nil, fmt.Errorf("aoni: all proxies failed, last error: %w", lastErr)
+	}
+
+	if hasCooledDown {
+		return nil, fmt.Errorf("aoni: all proxies are in cooldown for domain %s", domain)
+	}
+
+	return nil, errors.New("aoni: no healthy proxies available")
 }
 
 // Close stops background routines and closes idle connections.
@@ -436,6 +527,104 @@ func (r *ProxyRotator) Close() error {
 	}
 
 	return nil
+}
+
+func (r *ProxyRotator) setupClient(cp ClientWithProxy) *trackedClient {
+	tc := &trackedClient{
+		client:          cp.Client,
+		proxyURL:        cp.ProxyURL,
+		domainCooldowns: make(map[string]time.Time),
+	}
+	tc.HealthTracker = NewHealthTracker(cp.ProxyURL, r.cfg.MaxFails, r.cfg.RetryAfter,
+		func(name string, fails uint32, retryAfter time.Duration) {
+			r.cfg.Logger.Warn("proxy marked unhealthy", "proxy", name, "fails", fails, "retry_after", retryAfter)
+		},
+		func(name string) {
+			r.cfg.Logger.Info("proxy recovered", "proxy", name)
+		},
+	)
+
+	return tc
+}
+
+func (r *ProxyRotator) isProxyFault(resp *http.Response, err error) bool {
+	if err != nil {
+		if errors.Is(err, context.Canceled) {
+			return false
+		}
+
+		var netErr net.Error
+		if errors.As(err, &netErr) {
+			return true
+		}
+
+		return true
+	}
+
+	if resp != nil {
+		if resp.StatusCode == http.StatusProxyAuthRequired { // 407
+			return true
+		}
+
+		if resp.StatusCode == http.StatusTooManyRequests { // 429
+			return true
+		}
+
+		if resp.StatusCode == http.StatusBadGateway ||
+			resp.StatusCode == http.StatusGatewayTimeout ||
+			resp.StatusCode == http.StatusServiceUnavailable {
+			return true
+		}
+	}
+
+	return false
+}
+
+func (r *ProxyRotator) getStickyClientIndex(sessionID string) int {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	if val, ok := r.sessions[sessionID]; ok {
+		val.lastSeen = time.Now()
+		return val.clientIdx
+	}
+
+	return -1
+}
+
+func (r *ProxyRotator) executeWithProxy(req *http.Request, tc *trackedClient) (*http.Response, error) {
+	proxyCtx := cookie.WithProxyAddress(req.Context(), tc.proxyURL)
+	reqWithProxy := req.WithContext(proxyCtx)
+	return tc.client.Do(reqWithProxy)
+}
+
+func (r *ProxyRotator) handleProxyResult(tc *trackedClient, resp *http.Response, err error, domain string) bool {
+	if !r.isProxyFault(resp, err) {
+		tc.MarkSuccess()
+
+		if err == nil && resp != nil && resp.StatusCode == http.StatusForbidden {
+			tc.PutDomainInCooldown(domain, 10*time.Minute)
+		}
+
+		return true
+	}
+
+	tc.MarkFailed()
+
+	if resp != nil {
+		_ = resp.Body.Close()
+	}
+
+	return false
+}
+
+func (r *ProxyRotator) saveSession(sessionID string, idx int) {
+	r.mu.Lock()
+	r.sessions[sessionID] = &sessionEntry{
+		clientIdx: idx,
+		lastSeen:  time.Now(),
+	}
+	r.mu.Unlock()
 }
 
 func (r *ProxyRotator) healthCheckLoop() {
@@ -473,7 +662,7 @@ func (r *ProxyRotator) checkHealth(tc *trackedClient) {
 	resp, err := tc.client.Do(req)
 	if err == nil {
 		if resp.StatusCode >= 200 && resp.StatusCode < 300 {
-			r.markSuccess(tc)
+			tc.MarkSuccess()
 		}
 
 		_ = resp.Body.Close()
@@ -501,215 +690,4 @@ func (r *ProxyRotator) cleanupSessionsLoop() {
 			r.mu.Unlock()
 		}
 	}
-}
-
-// WithStickySessions returns a copy of r configured with the given key extractor.
-func (r *ProxyRotator) WithStickySessions(f StickyKeyFunc) *ProxyRotator {
-	c := &ProxyRotator{
-		ctx:           r.ctx,
-		cancel:        r.cancel,
-		clients:       make([]*trackedClient, len(r.clients)),
-		cfg:           r.cfg,
-		sessions:      make(map[string]*sessionEntry),
-		sessionTTL:    r.sessionTTL,
-		stickyKeyFunc: f,
-	}
-	copy(c.clients, r.clients)
-	c.current.Store(r.current.Load())
-
-	return c
-}
-
-// Do performs an HTTP request using the next available client in the pool.
-// It attempts sticky routing first, then falls back to round-robin selection.
-// If a client faults, it is marked unhealthy. Returns an error if all clients fail.
-func (r *ProxyRotator) Do(req *http.Request) (*http.Response, error) {
-	r.mu.RLock()
-	clients := r.clients
-	r.mu.RUnlock()
-
-	var (
-		lastErr       error
-		n             = uint64(len(clients))
-		sessionID     string
-		stickyIdx     = -1
-		hasCooledDown = false
-	)
-
-	domain := req.URL.Hostname()
-
-	if r.stickyKeyFunc != nil {
-		sessionID = r.stickyKeyFunc(req)
-		if sessionID != "" {
-			r.mu.Lock()
-			if val, ok := r.sessions[sessionID]; ok {
-				stickyIdx = val.clientIdx
-				val.lastSeen = time.Now()
-			}
-
-			r.mu.Unlock()
-		}
-	}
-
-	if stickyIdx >= 0 && stickyIdx < len(clients) {
-		tc := clients[stickyIdx]
-		if r.isAvailable(tc) && !tc.IsDomainCooledDown(domain) {
-			proxyCtx := context.WithValue(req.Context(), proxyCtxKey{}, tc.proxyURL)
-
-			resp, err := tc.client.Do(req.WithContext(proxyCtx))
-			if !r.isProxyFault(resp, err) {
-				r.markSuccess(tc)
-
-				if err == nil && resp != nil && resp.StatusCode == http.StatusForbidden {
-					tc.PutDomainInCooldown(domain, 10*time.Minute)
-				}
-
-				return resp, err
-			}
-
-			r.markFailed(tc)
-
-			if resp != nil {
-				_ = resp.Body.Close()
-			}
-
-			lastErr = err
-		}
-	}
-
-	for range n {
-		idx := r.current.Add(1) % n
-		if int(idx) == stickyIdx { //nolint:gosec
-			continue
-		}
-
-		tc := clients[idx]
-		if !r.isAvailable(tc) {
-			continue
-		}
-
-		if tc.IsDomainCooledDown(domain) {
-			hasCooledDown = true
-			continue
-		}
-
-		proxyCtx := context.WithValue(req.Context(), proxyCtxKey{}, tc.proxyURL)
-		reqWithProxy := req.WithContext(proxyCtx)
-
-		resp, err := tc.client.Do(reqWithProxy)
-		if r.isProxyFault(resp, err) {
-			r.markFailed(tc)
-
-			lastErr = err
-
-			if resp != nil {
-				_ = resp.Body.Close()
-			}
-
-			continue
-		}
-
-		r.markSuccess(tc)
-
-		if err == nil && resp != nil && resp.StatusCode == http.StatusForbidden {
-			tc.PutDomainInCooldown(domain, 10*time.Minute)
-		}
-
-		if sessionID != "" {
-			r.mu.Lock()
-			r.sessions[sessionID] = &sessionEntry{
-				clientIdx: int(idx), //nolint:gosec
-				lastSeen:  time.Now(),
-			}
-			r.mu.Unlock()
-		}
-
-		return resp, err
-	}
-
-	if lastErr != nil {
-		return nil, fmt.Errorf("aoni: all proxies failed, last error: %w", lastErr)
-	}
-
-	if hasCooledDown {
-		return nil, fmt.Errorf("aoni: all proxies are in cooldown for domain %s", domain)
-	}
-
-	return nil, errors.New("aoni: no healthy proxies available")
-}
-
-func (r *ProxyRotator) isAvailable(tc *trackedClient) bool {
-	return tc.IsAvailable()
-}
-
-func (r *ProxyRotator) markFailed(tc *trackedClient) {
-	tc.MarkFailed()
-}
-
-func (r *ProxyRotator) markSuccess(tc *trackedClient) {
-	tc.MarkSuccess()
-}
-
-func (r *ProxyRotator) isProxyFault(resp *http.Response, err error) bool {
-	if err != nil {
-		if errors.Is(err, context.Canceled) {
-			return false
-		}
-
-		var netErr net.Error
-		if errors.As(err, &netErr) {
-			return true
-		}
-
-		return true
-	}
-
-	if resp != nil {
-		if resp.StatusCode == http.StatusProxyAuthRequired { // 407
-			return true
-		}
-
-		if resp.StatusCode == http.StatusTooManyRequests { // 429
-			return true
-		}
-
-		if resp.StatusCode == http.StatusBadGateway ||
-			resp.StatusCode == http.StatusGatewayTimeout ||
-			resp.StatusCode == http.StatusServiceUnavailable {
-			return true
-		}
-	}
-
-	return false
-}
-
-// Prewarm opens TCP/TLS connections to targetURL through all proxy clients.
-// It sends concurrent HEAD requests to pre-populate transport connection pools.
-func (r *ProxyRotator) Prewarm(ctx context.Context, targetURL string) {
-	r.mu.RLock()
-	clients := make([]*trackedClient, len(r.clients))
-	copy(clients, r.clients)
-	r.mu.RUnlock()
-
-	var wg sync.WaitGroup
-
-	for _, tc := range clients {
-		wg.Add(1)
-
-		go func(c *trackedClient) {
-			defer wg.Done()
-
-			req, err := http.NewRequestWithContext(ctx, http.MethodHead, targetURL, nil)
-			if err != nil {
-				return
-			}
-
-			resp, err := c.client.Do(req)
-			if err == nil {
-				_ = resp.Body.Close()
-			}
-		}(tc)
-	}
-
-	wg.Wait()
 }

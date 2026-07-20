@@ -11,8 +11,6 @@ import (
 	"time"
 )
 
-type fragmentCtxKey struct{}
-
 // FragmentConfig specifies the chunk size and inter-chunk delay for connection fragmentation.
 type FragmentConfig struct {
 	ChunkSize int
@@ -139,13 +137,5 @@ func NewFragmentedConn(conn net.Conn, cfg *FragmentConfig) net.Conn {
 		maxChunkSize: cfg.MaxChunkSize,
 		minChunkSize: cfg.MinChunkSize,
 		limitBytes:   limit,
-	}
-}
-
-func wrapWithFragmentation(conn net.Conn, cfg FragmentConfig) net.Conn {
-	return &fragmentedConn{
-		Conn:      conn,
-		chunkSize: cfg.ChunkSize,
-		maxDelay:  cfg.MaxDelay,
 	}
 }

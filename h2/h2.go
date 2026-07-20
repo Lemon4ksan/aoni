@@ -2,7 +2,7 @@
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
-package aoni
+package h2
 
 import (
 	"bytes"
@@ -24,7 +24,7 @@ import (
 
 var (
 	// ChromeH2Settings provides HTTP/2 settings matching standard Google Chrome clients.
-	ChromeH2Settings = HTTP2Settings{
+	ChromeH2Settings = Settings{
 		HeaderTableSize:   65536,
 		EnablePush:        0,
 		InitialWindowSize: 6291456,
@@ -35,7 +35,7 @@ var (
 	}
 
 	// FirefoxH2Settings provides HTTP/2 settings matching standard Mozilla Firefox clients.
-	FirefoxH2Settings = HTTP2Settings{
+	FirefoxH2Settings = Settings{
 		InitialStreamID:   3,
 		HeaderTableSize:   65536,
 		EnablePush:        0,
@@ -46,11 +46,11 @@ var (
 	}
 )
 
-// ParseHTTP2Settings parses HTTP/2 settings from a JSON-encoded string.
+// ParseSettings parses HTTP/2 settings from a JSON-encoded string.
 // It supports snake_case, camelCase, and PascalCase field names, making it
 // extremely convenient to import settings captured from Wireshark, browser
 // developer tools, or TLS bypass scripts.
-func ParseHTTP2Settings(jsonStr string) (HTTP2Settings, error) {
+func ParseSettings(jsonStr string) (Settings, error) {
 	// Proxy structure with explicit snake_case tags.
 	// We use pointers to detect whether fields were actually present in the JSON.
 	type h2SettingsProxy struct {
@@ -71,10 +71,10 @@ func ParseHTTP2Settings(jsonStr string) (HTTP2Settings, error) {
 
 	err := json.Unmarshal([]byte(jsonStr), &p)
 	if err != nil {
-		return HTTP2Settings{}, fmt.Errorf("aoni h2: failed to decode settings JSON: %w", err)
+		return Settings{}, fmt.Errorf("aoni h2: failed to decode settings JSON: %w", err)
 	}
 
-	var settings HTTP2Settings
+	var settings Settings
 
 	hasProxyFields := false
 
@@ -138,7 +138,7 @@ func ParseHTTP2Settings(jsonStr string) (HTTP2Settings, error) {
 	// struct directly to leverage Go's default case-insensitive field matching
 	// (which perfectly covers camelCase and PascalCase formats).
 	if !hasProxyFields {
-		var direct HTTP2Settings
+		var direct Settings
 		if errDirect := json.Unmarshal([]byte(jsonStr), &direct); errDirect == nil {
 			return direct, nil
 		}
@@ -147,10 +147,10 @@ func ParseHTTP2Settings(jsonStr string) (HTTP2Settings, error) {
 	return settings, nil
 }
 
-// HTTP2Settings holds the full set of HTTP/2 connection parameters
+// Settings holds the full set of HTTP/2 connection parameters
 // for browser-grade frame impersonation. Each field maps directly to
 // an HTTP/2 SETTINGS frame parameter or PRIORITY frame value.
-type HTTP2Settings struct {
+type Settings struct {
 	HeaderTableSize      uint32
 	EnablePush           uint32
 	MaxConcurrentStreams uint32
@@ -164,9 +164,9 @@ type HTTP2Settings struct {
 	PriorityWeight       uint8
 }
 
-// H2SettingsFromProfile populates HTTP2Settings from a profiles.H2Settings.
-func H2SettingsFromProfile(s profiles.H2Settings) HTTP2Settings {
-	return HTTP2Settings{
+// SettingsFromProfile populates Settings from a profiles.H2Settings.
+func SettingsFromProfile(s profiles.H2Settings) *Settings {
+	return &Settings{
 		HeaderTableSize:      s.HeaderTableSize,
 		EnablePush:           s.EnablePush,
 		MaxConcurrentStreams: s.MaxConcurrentStreams,
@@ -181,26 +181,26 @@ func H2SettingsFromProfile(s profiles.H2Settings) HTTP2Settings {
 	}
 }
 
-// headerOrderingConn wraps a [net.Conn] to reorder HTTP/1.1 headers before
+// HeaderOrderingConn wraps a [net.Conn] to reorder HTTP/1.1 headers before
 // they reach the wire. It operates at the TCP level, sitting between the raw
 // socket and the TLS layer (e.g. [tls.Conn] or [utls.UConn]).
 //
 // This placement is critical: TLS calls Write() on the wrapped connection
-// with plaintext data before encrypting. So headerOrderingConn sees and
+// with plaintext data before encrypting. So HeaderOrderingConn sees and
 // reorders plaintext HTTP headers, not encrypted TLS records.
 //
-// Wrapping order: TCP → headerOrderingConn → TLS → Go HTTP client
-type headerOrderingConn struct {
+// Wrapping order: TCP → HeaderOrderingConn → TLS → Go HTTP client
+type HeaderOrderingConn struct {
 	net.Conn
-	orderedKeys []string
+	OrderedKeys []string
 }
 
 // Write intercepts serialized HTTP/1.1 requests and reorders headers
 // according to the configured order. Detection is based on the presence
 // of the HTTP header terminator \r\n\r\n in the written bytes.
-func (c *headerOrderingConn) Write(b []byte) (n int, err error) {
-	if len(c.orderedKeys) > 0 && bytes.Contains(b, []byte("\r\n\r\n")) {
-		if rewritten, ok := reorderHTTP1Headers(b, c.orderedKeys); ok {
+func (c *HeaderOrderingConn) Write(b []byte) (n int, err error) {
+	if len(c.OrderedKeys) > 0 && bytes.Contains(b, []byte("\r\n\r\n")) {
+		if rewritten, ok := ReorderHTTP1Headers(b, c.OrderedKeys); ok {
 			b = rewritten
 		}
 	}
@@ -208,7 +208,9 @@ func (c *headerOrderingConn) Write(b []byte) (n int, err error) {
 	return c.Conn.Write(b)
 }
 
-func reorderHTTP1Headers(raw []byte, order []string) ([]byte, bool) {
+// ReorderHTTP1Headers reorders the HTTP headers in the given raw HTTP/1.1 request
+// according to the specified order. Returns the reordered bytes and a success flag.
+func ReorderHTTP1Headers(raw []byte, order []string) ([]byte, bool) {
 	headerPart, bodyPart, ok := bytes.Cut(raw, []byte("\r\n\r\n"))
 	if !ok {
 		return nil, false
@@ -268,21 +270,21 @@ func reorderHTTP1Headers(raw []byte, order []string) ([]byte, bool) {
 	return newHeaderPart.Bytes(), true
 }
 
-// H2FramedTransport wraps an *http.Transport to apply HTTP/2 frame impersonation.
+// FramedTransport wraps an *http.Transport to apply HTTP/2 frame impersonation.
 // When DialTLSContext is called, the returned connection is wrapped in [h2framedConn]
 // so that the initial SETTINGS and PRIORITY frames match the target browser fingerprint.
 // If orderedKeys is set, HEADERS frames are also reordered.
-type H2FramedTransport struct {
+type FramedTransport struct {
 	*http.Transport
-	settings    HTTP2Settings
+	settings    Settings
 	orderedKeys []string
 }
 
-// NewH2FramedTransport creates an [H2FramedTransport] from an existing transport
+// NewFramedTransport creates an [FramedTransport] from an existing transport
 // and HTTP/2 settings. The transport's DialTLSContext is replaced to wrap connections
 // with browser-specific HTTP/2 frame injection.
-func NewH2FramedTransport(base *http.Transport, settings HTTP2Settings, orderedKeys ...string) *H2FramedTransport {
-	ft := &H2FramedTransport{
+func NewFramedTransport(base *http.Transport, settings Settings, orderedKeys ...string) *FramedTransport {
+	ft := &FramedTransport{
 		Transport:   base,
 		settings:    settings,
 		orderedKeys: orderedKeys,
@@ -345,7 +347,7 @@ func NewH2FramedTransport(base *http.Transport, settings HTTP2Settings, orderedK
 // When orderedKeys is set, HEADERS frames are also intercepted and reordered.
 type h2framedConn struct {
 	net.Conn
-	settings       HTTP2Settings
+	settings       Settings
 	orderedKeys    []string
 	mu             sync.Mutex
 	prefaceSent    bool

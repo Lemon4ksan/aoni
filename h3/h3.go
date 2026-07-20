@@ -2,12 +2,12 @@
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
-package aoni
+package h3
 
-// HTTP3Settings holds QUIC flow control and stream parameters
+// Settings holds QUIC flow control and stream parameters
 // for browser-grade HTTP/3 fingerprint impersonation. Each field
 // directly configures the underlying QUIC transport layer parameters.
-type HTTP3Settings struct {
+type Settings struct {
 	InitialStreamReceiveWindow     uint64
 	MaxStreamReceiveWindow         uint64
 	InitialConnectionReceiveWindow uint64
@@ -17,8 +17,8 @@ type HTTP3Settings struct {
 	EnableDatagrams                bool
 }
 
-// ChromeHTTP3Settings provides production-grade QUIC transport presets matching Google Chrome.
-var ChromeHTTP3Settings = HTTP3Settings{
+// ChromeSettings provides production-grade QUIC transport presets matching Google Chrome.
+var ChromeSettings = Settings{
 	InitialStreamReceiveWindow:     6291456, // 6 MB
 	MaxStreamReceiveWindow:         6291456,
 	InitialConnectionReceiveWindow: 15728640, // 15 MB
@@ -28,8 +28,8 @@ var ChromeHTTP3Settings = HTTP3Settings{
 	EnableDatagrams:                true,
 }
 
-// FirefoxHTTP3Settings provides production-grade QUIC transport presets matching Mozilla Firefox.
-var FirefoxHTTP3Settings = HTTP3Settings{
+// FirefoxSettings provides production-grade QUIC transport presets matching Mozilla Firefox.
+var FirefoxSettings = Settings{
 	InitialStreamReceiveWindow:     6291456, // 6 MB
 	MaxStreamReceiveWindow:         6291456,
 	InitialConnectionReceiveWindow: 25165824, // 24 MB

@@ -138,7 +138,7 @@ func TestWrapWithMSSLimit(t *testing.T) {
 		t.Parallel()
 
 		_, client := net.Pipe()
-		res := wrapWithMSSLimit(client, 0)
+		res := connWrapper{}.WithMSSLimit(client, 0)
 		assert.Equal(t, client, res)
 		_ = client.Close()
 	})
@@ -147,7 +147,7 @@ func TestWrapWithMSSLimit(t *testing.T) {
 		t.Parallel()
 
 		_, client := net.Pipe()
-		res := wrapWithMSSLimit(client, 512)
+		res := connWrapper{}.WithMSSLimit(client, 512)
 		assert.Equal(t, client, res)
 		_ = client.Close()
 	})
@@ -181,7 +181,7 @@ func TestWrapWithMSSLimit(t *testing.T) {
 		t.Cleanup(func() { _ = serverConn.Close() })
 
 		// Apply MSS limit to the client connection
-		res := wrapWithMSSLimit(clientConn, 512)
+		res := connWrapper{}.WithMSSLimit(clientConn, 512)
 		assert.NotNil(t, res)
 		assert.Equal(t, clientConn, res)
 	})

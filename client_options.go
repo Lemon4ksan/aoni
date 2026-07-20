@@ -15,9 +15,11 @@ import (
 	"time"
 
 	"github.com/lemon4ksan/miyako/generic"
-	utls "github.com/refraction-networking/utls"
 	"golang.org/x/net/http2"
 
+	"github.com/lemon4ksan/aoni/cookie"
+	"github.com/lemon4ksan/aoni/h2"
+	"github.com/lemon4ksan/aoni/h3"
 	"github.com/lemon4ksan/aoni/ja4"
 	"github.com/lemon4ksan/aoni/p0f"
 	"github.com/lemon4ksan/aoni/profiles"
@@ -27,6 +29,36 @@ import (
 
 // ClientOption is a functional option used to configure an aoni [Client].
 type ClientOption = generic.Option[*Client]
+
+// WithClientConfig replaces the entire client configuration at once.
+func WithClientConfig(cfg Config) ClientOption {
+	return func(c *Client) {
+		c.network = cfg.Network.Clone()
+		c.fingerprint = cfg.Fingerprint.Clone()
+		c.defaults = cfg.Defaults.Clone()
+	}
+}
+
+// WithClientDefaultsBlock replaces only the default parameters block.
+func WithClientDefaultsBlock(defaults ClientDefaults) ClientOption {
+	return func(c *Client) {
+		c.defaults = defaults.Clone()
+	}
+}
+
+// WithClientNetworkBlock replaces only the network layer block.
+func WithClientNetworkBlock(network NetworkConfig) ClientOption {
+	return func(c *Client) {
+		c.network = network.Clone()
+	}
+}
+
+// WithClientFingerprintBlock replaces only the fingerprint layer block.
+func WithClientFingerprintBlock(fingerprint FingerprintConfig) ClientOption {
+	return func(c *Client) {
+		c.fingerprint = fingerprint.Clone()
+	}
+}
 
 // WithClientLogger sets the diagnostic logger for the client.
 func WithClientLogger(l Logger) ClientOption {
@@ -111,14 +143,6 @@ func WithClientTimeout(d time.Duration) ClientOption {
 	}
 }
 
-type staticSpecProvider struct {
-	spec *utls.ClientHelloSpec
-}
-
-func (s staticSpecProvider) ClientHelloSpec() (*utls.ClientHelloSpec, error) {
-	return s.spec, nil
-}
-
 // WithClientProfileVariant configures the TLS fingerprint, HTTP/2 setting frames,
 // and default browser headers to match the provided custom browser profile variant.
 func WithClientProfileVariant(variant *profiles.Variant, os profiles.OSKey) ClientOption {
@@ -127,136 +151,16 @@ func WithClientProfileVariant(variant *profiles.Variant, os profiles.OSKey) Clie
 			return
 		}
 
-		// Initialize base uTLS fingerprint dialer if none configured
-		if c.fingerprint.BrowserID == BrowserNone {
-			if variant.HelloID.Client == "Firefox" {
-				WithClientTLSFingerprint(BrowserFirefox)(c)
-			} else {
-				WithClientTLSFingerprint(BrowserChrome)(c)
-			}
-		}
+		c.setupTLSFromVariant(variant)
 
-		if variant.HelloSpec != nil {
-			c.fingerprint.TLSClientHelloSpecProvider = staticSpecProvider{spec: variant.HelloSpec}
-			c.fingerprint.TLSClientHelloID = nil
-		} else if variant.HelloID != (utls.ClientHelloID{}) {
-			helloID := variant.HelloID
-			c.fingerprint.TLSClientHelloID = &helloID
-			c.fingerprint.TLSClientHelloSpecProvider = nil
-		}
+		c.setupHTTPFromVariant(variant, os)
 
-		var h2Settings HTTP2Settings
-		if variant.ConfigureH2 != nil {
-			var h2s profiles.H2Settings
-			variant.ConfigureH2(&h2s)
-			h2Settings = H2SettingsFromProfile(h2s)
-			c.fingerprint.H2Settings = &h2Settings
-		}
-
-		// Configure H3 based on the variant HelloID or HelloSpec
-		var h3Settings HTTP3Settings
-		if variant.HelloID.Client == "Firefox" {
-			h3Settings = FirefoxHTTP3Settings
-		} else {
-			h3Settings = ChromeHTTP3Settings
-		}
-
-		c.fingerprint.H3Settings = &h3Settings
-
-		// 1. Build and set static default headers
-		if variant.BuildHeaders != nil {
-			for _, h := range variant.BuildHeaders(os) {
-				if h.Value != "" {
-					c.defaults.Headers.Set(h.Name, h.Value)
-				}
-			}
-		}
-
-		// Reconstruct static OrderedHeaders for GET method (fallback) if HeaderCache is provided
-		isMobile := os.IsMobile()
-
-		var getHeadersOrder []string
-		if variant.HeaderCache != nil {
-			enums := variant.HeaderCache.Enums(isMobile)
-			if methodOrder, ok := enums["GET"]; ok {
-				getHeadersOrder = make([]string, len(methodOrder))
-				for h, idx := range methodOrder {
-					if idx >= 0 && idx < len(getHeadersOrder) {
-						getHeadersOrder[idx] = h
-					}
-				}
-
-				c.fingerprint.HeaderOrder = getHeadersOrder
-			}
-		}
-
-		// 2. Add dynamic request modifier for method-specific headers, boundary, and OrderedHeaders
+		// Add dynamic request modifier for method-specific headers, boundary, and OrderedHeaders
 		c.defaults.DefaultMods = append(c.defaults.DefaultMods, func(req *http.Request) {
-			headersMap := make(map[string]string)
-			for k, v := range req.Header {
-				if len(v) > 0 {
-					headersMap[k] = v[0]
-				}
-			}
-
-			if variant.InsertHeaders != nil {
-				variant.InsertHeaders(headersMap, req.Method)
-			}
-
-			for k, v := range headersMap {
-				if v == "" {
-					continue
-				}
-
-				if req.Header.Get(k) == "" {
-					req.Header.Set(k, v)
-				}
-			}
-
-			// Store the custom boundary string in request config for WithMultipart
-			if variant.BoundaryFunc != nil {
-				cfg := getOrInitRequestConfig(req)
-				cfg.MultipartBoundary = variant.BoundaryFunc()
-			}
-
-			// Dynamically set OrderedHeaders based on request method if HeaderCache is provided
-			if variant.HeaderCache != nil {
-				enums := variant.HeaderCache.Enums(isMobile)
-
-				methodOrder, ok := enums[req.Method]
-				if !ok {
-					methodOrder = enums["GET"]
-				}
-
-				ordered := make([]string, len(methodOrder))
-				for h, idx := range methodOrder {
-					if idx >= 0 && idx < len(ordered) {
-						ordered[idx] = h
-					}
-				}
-
-				cfg := getOrInitRequestConfig(req)
-				cfg.OrderedHeaders = ordered
-			}
+			applyProfileHeaders(req, variant, os)
 		})
 
-		// Re-apply H2 settings on the transport level if it is initialized
-		if transport := c.Transport(); transport != nil {
-			if c.fingerprint.H2Configurer != nil {
-				t2, err := http2.ConfigureTransports(transport)
-				if err == nil && t2 != nil {
-					t2.TLSClientConfig = transport.TLSClientConfig
-					_ = c.fingerprint.H2Configurer.ConfigureHTTP2(t2)
-				}
-			}
-
-			if c.fingerprint.H2Settings != nil {
-				framed := NewH2FramedTransport(transport, *c.fingerprint.H2Settings)
-				if httpClient, ok := c.engine.(*http.Client); ok {
-					httpClient.Transport = framed
-				}
-			}
-		}
+		c.reapplyH2Settings(c.Transport())
 	}
 }
 
@@ -264,20 +168,12 @@ func WithClientProfileVariant(variant *profiles.Variant, os profiles.OSKey) Clie
 // and default browser headers to match the selected browser profile.
 func WithClientBrowserProfile(browser BrowserID, os profiles.OSKey) ClientOption {
 	var variant *profiles.Variant
+
 	switch browser {
 	case BrowserFirefox:
-		if os.IsMobile() {
-			variant = firefox.Mobile
-		} else {
-			variant = firefox.Desktop
-		}
-
-	default: // default to BrowserChrome
-		if os.IsMobile() {
-			variant = chrome.Mobile
-		} else {
-			variant = chrome.Desktop
-		}
+		variant = generic.Ternary(os.IsMobile(), firefox.Mobile, firefox.Desktop)
+	default:
+		variant = generic.Ternary(os.IsMobile(), chrome.Mobile, chrome.Desktop)
 	}
 
 	return WithClientProfileVariant(variant, os)
@@ -300,57 +196,38 @@ func WithClientTCPDelay(min, max time.Duration) ClientOption {
 // WithClientRedirectLimit sets the maximum redirect count.
 func WithClientRedirectLimit(max int) ClientOption {
 	return func(c *Client) {
-		if httpClient, ok := c.engine.(*http.Client); ok {
-			cloned := *httpClient
-			switch {
-			case max == 0:
-				cloned.CheckRedirect = func(req *http.Request, via []*http.Request) error {
-					return http.ErrUseLastResponse
-				}
-			case max > 0:
-				cloned.CheckRedirect = DefaultRedirectPolicy(max)
-			default:
-				cloned.CheckRedirect = DefaultRedirectPolicy(10)
-			}
-
-			c.engine = &cloned
+		httpClient, ok := c.engine.(*http.Client)
+		if !ok {
+			return
 		}
+
+		cloned := *httpClient
+		switch {
+		case max == 0:
+			cloned.CheckRedirect = func(req *http.Request, via []*http.Request) error {
+				return http.ErrUseLastResponse
+			}
+		case max > 0:
+			cloned.CheckRedirect = DefaultRedirectPolicy(max)
+		default:
+			cloned.CheckRedirect = DefaultRedirectPolicy(10)
+		}
+
+		c.engine = &cloned
 	}
 }
 
 // WithClientLocalAddr configures the local IP address to bind outgoing connections to.
 func WithClientLocalAddr(addr string) ClientOption {
 	return func(c *Client) {
-		if transport := c.Transport(); transport != nil {
-			localAddr, err := net.ResolveIPAddr("ip", addr)
-			if err == nil {
-				prevDial := transport.DialContext
-				transport.DialContext = func(ctx context.Context, network, raddr string) (net.Conn, error) {
-					dialer := &net.Dialer{
-						Timeout:   30 * time.Second,
-						KeepAlive: 30 * time.Second,
-					}
-
-					host, _, splitErr := net.SplitHostPort(raddr)
-					if splitErr == nil {
-						if targetIP := net.ParseIP(host); targetIP != nil {
-							localIsV4 := localAddr.IP.To4() != nil
-
-							targetIsV4 := targetIP.To4() != nil
-							if localIsV4 == targetIsV4 {
-								dialer.LocalAddr = &net.TCPAddr{IP: localAddr.IP}
-							}
-						}
-					}
-
-					if prevDial != nil {
-						return prevDial(ctx, network, raddr)
-					}
-
-					return dialer.DialContext(ctx, network, raddr)
-				}
-			}
+		rotator, err := NewSourceIPRotator([]string{addr})
+		if err != nil {
+			c.Logger().Error("aoni: invalid local address", "error", err)
+			return
 		}
+
+		c.network.SourceRotator = rotator
+		c.applyDialers(c.Transport())
 	}
 }
 
@@ -384,7 +261,7 @@ func WithClientProxyAwareSessionCache() ClientOption {
 func WithClientPacketPadding(cfg PaddingConfig) ClientOption {
 	return func(c *Client) {
 		c.fingerprint.PacketPadding = &cfg
-		c.applyDialers()
+		c.applyDialers(c.Transport())
 	}
 }
 
@@ -399,7 +276,7 @@ func WithClientMaxResponseSize(size int64) ClientOption {
 func WithClientSSRFGuard() ClientOption {
 	return func(c *Client) {
 		c.network.SSRFGuard = true
-		c.applyDialers()
+		c.applyDialers(c.Transport())
 	}
 }
 
@@ -407,7 +284,7 @@ func WithClientSSRFGuard() ClientOption {
 func WithClientHappyEyeballs(delay time.Duration) ClientOption {
 	return func(c *Client) {
 		c.network.HappyEyeballsDelay = delay
-		c.applyDialers()
+		c.applyDialers(c.Transport())
 	}
 }
 
@@ -431,7 +308,7 @@ func WithClientLocalAddrPool(addrs []string) ClientOption {
 		rotator, err := NewSourceIPRotator(addrs)
 		if err == nil {
 			c.network.SourceRotator = rotator
-			c.applyDialers()
+			c.applyDialers(c.Transport())
 		}
 	}
 }
@@ -440,7 +317,7 @@ func WithClientLocalAddrPool(addrs []string) ClientOption {
 func WithClientDNSResolver(resolver DNSResolver) ClientOption {
 	return func(c *Client) {
 		c.network.DNSResolver = resolver
-		c.applyDialers()
+		c.applyDialers(c.Transport())
 	}
 }
 
@@ -455,7 +332,7 @@ func WithClientInspector(inspector TrafficInspector) ClientOption {
 func WithClientDoT(endpoint, host string) ClientOption {
 	return func(c *Client) {
 		c.network.DNSResolver = NewDoTResolver(endpoint, host)
-		c.applyDialers()
+		c.applyDialers(c.Transport())
 	}
 }
 
@@ -463,7 +340,7 @@ func WithClientDoT(endpoint, host string) ClientOption {
 func WithClientDoH(endpoint, host string) ClientOption {
 	return func(c *Client) {
 		c.network.DNSResolver = NewDoHResolver(endpoint, host)
-		c.applyDialers()
+		c.applyDialers(c.Transport())
 	}
 }
 
@@ -527,11 +404,29 @@ func WithClientBasicAuth(username, password string) ClientOption {
 }
 
 // WithClientCookieJar sets the CookieJar for request cookies.
+// If the provided jar is an isolated cookie.ProxyIsolatedJar,
+// the client automatically wires up transport-level proxy isolation.
 func WithClientCookieJar(jar http.CookieJar) ClientOption {
 	return func(c *Client) {
 		if httpClient, ok := c.engine.(*http.Client); ok {
 			cloned := *httpClient
 			cloned.Jar = jar
+
+			if pJar, ok := jar.(*cookie.ProxyIsolatedJar); ok {
+				c.defaults.HeadersCookieJar = jar
+
+				baseTransport := cloned.Transport
+				if baseTransport == nil {
+					baseTransport = http.DefaultTransport
+				}
+
+				if cjTrans, ok := baseTransport.(*cookie.Transport); ok {
+					baseTransport = cjTrans.Unwrap()
+				}
+
+				cloned.Transport = &cookie.Transport{Next: baseTransport, CookieJar: pJar}
+			}
+
 			c.engine = &cloned
 		}
 	}
@@ -580,7 +475,6 @@ func WithClientTLSFingerprint(browser BrowserID) ClientOption {
 		c.fingerprint.TLSClientHelloID = nil
 
 		if transport := c.Transport(); transport != nil {
-			callback := c.fingerprint.JA4Callback
 			tlsConfig := transport.TLSClientConfig
 			proxyFn := transport.Proxy
 			transport.DialTLSContext = func(ctx context.Context, network, addr string) (net.Conn, error) {
@@ -589,18 +483,20 @@ func WithClientTLSFingerprint(browser BrowserID) ClientOption {
 					proxyURL, _ = proxyFn(&http.Request{URL: &url.URL{Host: addr}})
 				}
 
-				return dialTLSWithUTLS(
-					ctx,
-					network,
-					addr,
-					browser,
-					c.fingerprint.TLSClientHelloID,
-					c.network.SourceRotator,
-					c.network.DNSResolver,
-					callback,
-					tlsConfig,
-					proxyURL,
-				)
+				dialConfig := dialConfig{
+					Network:       network,
+					Addr:          addr,
+					Browser:       browser,
+					HelloID:       c.fingerprint.TLSClientHelloID,
+					SourceRotator: c.network.SourceRotator,
+					DNSResolver:   c.network.DNSResolver,
+					Delay:         c.network.HappyEyeballsDelay,
+					SSRFGuard:     c.network.SSRFGuard,
+					JA4Callback:   c.fingerprint.JA4Callback,
+					ProxyURL:      proxyURL,
+				}
+
+				return c.dialTLSWithUTLS(ctx, dialConfig, tlsConfig, GetRequestConfig(ctx))
 			}
 		}
 	}
@@ -612,7 +508,6 @@ func WithClientTLSClientHelloSpecProvider(provider ClientHelloSpecProvider) Clie
 		c.fingerprint.TLSClientHelloSpecProvider = provider
 
 		if transport := c.Transport(); transport != nil {
-			callback := c.fingerprint.JA4Callback
 			tlsConfig := transport.TLSClientConfig
 			proxyFn := transport.Proxy
 			transport.DialTLSContext = func(ctx context.Context, network, addr string) (net.Conn, error) {
@@ -621,18 +516,20 @@ func WithClientTLSClientHelloSpecProvider(provider ClientHelloSpecProvider) Clie
 					proxyURL, _ = proxyFn(&http.Request{URL: &url.URL{Host: addr}})
 				}
 
-				return dialTLSWithUTLS(
-					ctx,
-					network,
-					addr,
-					c.fingerprint.BrowserID,
-					c.fingerprint.TLSClientHelloID,
-					c.network.SourceRotator,
-					c.network.DNSResolver,
-					callback,
-					tlsConfig,
-					proxyURL,
-				)
+				dialConfig := dialConfig{
+					Network:       network,
+					Addr:          addr,
+					Browser:       c.fingerprint.BrowserID,
+					HelloID:       c.fingerprint.TLSClientHelloID,
+					SourceRotator: c.network.SourceRotator,
+					DNSResolver:   c.network.DNSResolver,
+					Delay:         c.network.HappyEyeballsDelay,
+					SSRFGuard:     c.network.SSRFGuard,
+					JA4Callback:   c.fingerprint.JA4Callback,
+					ProxyURL:      proxyURL,
+				}
+
+				return c.dialTLSWithUTLS(ctx, dialConfig, tlsConfig, GetRequestConfig(ctx))
 			}
 		}
 	}
@@ -659,48 +556,23 @@ func WithClientHostRewrite(rules map[string]string) ClientOption {
 	}
 }
 
-// WithClientProxyIsolatedCookieJar registers a proxy-isolated cookie jar wrapper on transport.
-func WithClientProxyIsolatedCookieJar(jar *ProxyIsolatedCookieJar) ClientOption {
-	return func(c *Client) {
-		c.defaults.HeadersCookieJar = jar
-		if httpClient, ok := c.engine.(*http.Client); ok {
-			clonedHTTP := *httpClient
-
-			baseTransport := clonedHTTP.Transport
-			if baseTransport == nil {
-				baseTransport = http.DefaultTransport
-			}
-
-			if cjTrans, ok := baseTransport.(*cookieJarTransport); ok {
-				baseTransport = cjTrans.next
-			}
-
-			clonedHTTP.Transport = &cookieJarTransport{
-				next:      baseTransport,
-				cookieJar: jar,
-			}
-			c.engine = &clonedHTTP
-		}
-	}
-}
-
 // WithClientDNSCache registers an in-memory DNS caching resolver wrapper.
 func WithClientDNSCache(ttl time.Duration) ClientOption {
 	return func(c *Client) {
 		c.network.DNSResolver = NewInMemoryDNSCache(ttl, c.network.DNSResolver)
-		c.applyDialers()
+		c.applyDialers(c.Transport())
 	}
 }
 
-// WithClientHTTP2Settings sets local HTTP/2 connection settings.
-func WithClientHTTP2Settings(settings HTTP2Settings) ClientOption {
+// WithClientSettings sets local HTTP/2 connection settings.
+func WithClientSettings(settings h2.Settings) ClientOption {
 	return func(c *Client) {
 		c.fingerprint.H2Settings = &settings
 	}
 }
 
 // WithClientH2FramedTransport enables H2 transport wrapper to inject custom SETTINGS/PRIORITY frames.
-func WithClientH2FramedTransport(settings HTTP2Settings) ClientOption {
+func WithClientH2FramedTransport(settings h2.Settings) ClientOption {
 	return func(c *Client) {
 		c.fingerprint.H2Settings = &settings
 		if transport := c.Transport(); transport != nil {
@@ -712,7 +584,7 @@ func WithClientH2FramedTransport(settings HTTP2Settings) ClientOption {
 				}
 			}
 
-			framed := NewH2FramedTransport(transport, settings)
+			framed := h2.NewFramedTransport(transport, settings)
 			if httpClient, ok := c.engine.(*http.Client); ok {
 				httpClient.Transport = framed
 			}
@@ -723,9 +595,9 @@ func WithClientH2FramedTransport(settings HTTP2Settings) ClientOption {
 // WithClientProfileH2Settings extracts H2 transport settings from profiles.
 func WithClientProfileH2Settings(s profiles.H2Settings) ClientOption {
 	return func(c *Client) {
-		settings := H2SettingsFromProfile(s)
+		settings := h2.SettingsFromProfile(s)
 
-		c.fingerprint.H2Settings = &settings
+		c.fingerprint.H2Settings = settings
 		if transport := c.Transport(); transport != nil {
 			if c.fingerprint.H2Configurer != nil {
 				t2, err := http2.ConfigureTransports(transport)
@@ -735,7 +607,7 @@ func WithClientProfileH2Settings(s profiles.H2Settings) ClientOption {
 				}
 			}
 
-			framed := NewH2FramedTransport(transport, settings)
+			framed := h2.NewFramedTransport(transport, *settings)
 			if httpClient, ok := c.engine.(*http.Client); ok {
 				httpClient.Transport = framed
 			}
@@ -754,7 +626,7 @@ func WithClientP0fSignature(sig *p0f.Signature) ClientOption {
 func WithClientSocketController(controller SocketController) ClientOption {
 	return func(c *Client) {
 		c.network.SocketController = controller
-		c.applyDialers()
+		c.applyDialers(c.Transport())
 	}
 }
 
@@ -762,7 +634,7 @@ func WithClientSocketController(controller SocketController) ClientOption {
 func WithClientHTTP2Configurer(configurer HTTP2Configurer) ClientOption {
 	return func(c *Client) {
 		c.fingerprint.H2Configurer = configurer
-		c.applyDialers()
+		c.applyDialers(c.Transport())
 
 		if c.fingerprint.H2Settings != nil {
 			if transport := c.Transport(); transport != nil {
@@ -772,7 +644,7 @@ func WithClientHTTP2Configurer(configurer HTTP2Configurer) ClientOption {
 					_ = c.fingerprint.H2Configurer.ConfigureHTTP2(t2)
 				}
 
-				framed := NewH2FramedTransport(transport, *c.fingerprint.H2Settings)
+				framed := h2.NewFramedTransport(transport, *c.fingerprint.H2Settings)
 				if httpClient, ok := c.engine.(*http.Client); ok {
 					httpClient.Transport = framed
 				}
@@ -785,7 +657,7 @@ func WithClientHTTP2Configurer(configurer HTTP2Configurer) ClientOption {
 func WithClientProxyDNS() ClientOption {
 	return func(c *Client) {
 		c.network.ProxyDNS = true
-		c.applyDialers()
+		c.applyDialers(c.Transport())
 	}
 }
 
@@ -797,7 +669,7 @@ func WithClientProxy(proxyURL *url.URL) ClientOption {
 			c.network.TransportProxy = http.ProxyURL(proxyURL)
 		}
 
-		c.applyDialers()
+		c.applyDialers(c.Transport())
 	}
 }
 
@@ -808,17 +680,17 @@ func WithClientProxyString(proxyStr string) ClientOption {
 		if err == nil {
 			c.network.ProxyAddr = u
 			c.network.TransportProxy = http.ProxyURL(u)
-			c.applyDialers()
+			c.applyDialers(c.Transport())
 		} else {
 			c.network.ProxyAddr = nil
 			c.network.TransportProxy = nil
-			c.applyDialers()
+			c.applyDialers(c.Transport())
 		}
 	}
 }
 
 // WithClientHTTP3Settings configures HTTP/3 QUIC connection parameters.
-func WithClientHTTP3Settings(settings HTTP3Settings) ClientOption {
+func WithClientHTTP3Settings(settings h3.Settings) ClientOption {
 	return func(c *Client) {
 		c.fingerprint.H3Settings = &settings
 	}

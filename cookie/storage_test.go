@@ -2,7 +2,7 @@
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
-package aoni_test
+package cookie_test
 
 import (
 	"net/http"
@@ -14,7 +14,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/lemon4ksan/aoni"
+	"github.com/lemon4ksan/aoni/cookie"
 )
 
 func TestJSONFileCookieStorage_Persistence(t *testing.T) {
@@ -25,25 +25,25 @@ func TestJSONFileCookieStorage_Persistence(t *testing.T) {
 
 	filePath := filepath.Join(tempDir, "cookies.json")
 
-	backend1 := aoni.NewJSONFileCookieStorage(filePath)
-	jar1 := aoni.NewProxyIsolatedCookieJar().WithStorageBackend(backend1)
+	backend1 := cookie.NewJSONFileStorage(filePath)
+	jar1 := cookie.NewProxyIsolatedJar().WithStorageBackend(backend1)
 
 	u, err := url.Parse("https://pyaterochka.ru")
 	require.NoError(t, err)
 
-	cookie := &http.Cookie{
+	c := &http.Cookie{
 		Name:  "session_token",
 		Value: "valid_session_12345",
 	}
 
-	jar1.SetCookiesForProxy("http://proxy.test:8080", u, []*http.Cookie{cookie})
+	jar1.SetCookiesForProxy("http://proxy.test:8080", u, []*http.Cookie{c})
 
 	// Verify the file was created on disk
 	assert.FileExists(t, filePath)
 
 	// Instantiate a completely new jar loading from the same file (simulating app restart)
-	backend2 := aoni.NewJSONFileCookieStorage(filePath)
-	jar2 := aoni.NewProxyIsolatedCookieJar().WithStorageBackend(backend2)
+	backend2 := cookie.NewJSONFileStorage(filePath)
+	jar2 := cookie.NewProxyIsolatedJar().WithStorageBackend(backend2)
 
 	// Retrieve cookies for the same proxy/domain - should be restored from file
 	cookies := jar2.CookiesForProxy("http://proxy.test:8080", u)

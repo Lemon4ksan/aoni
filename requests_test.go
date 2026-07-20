@@ -18,6 +18,8 @@ import (
 	"github.com/lemon4ksan/miyako/log"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/lemon4ksan/aoni/cookie"
 )
 
 type reqTestPayload struct {
@@ -421,9 +423,7 @@ func TestClient_RawHelpers(t *testing.T) {
 		clientWithProxy := NewClient(nil,
 			WithClientProxy(proxyURL),
 			WithClientBeforeRequest(func(req *http.Request) {
-				if val := req.Context().Value(proxyCtxKey{}); val != nil {
-					capturedProxy = val.(string)
-				}
+				capturedProxy = cookie.GetProxyAddress(req.Context())
 			}),
 		)
 

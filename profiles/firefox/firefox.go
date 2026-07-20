@@ -14,16 +14,17 @@ import (
 	"github.com/lemon4ksan/aoni/profiles"
 )
 
-// HelloFirefox148 is the TLS hello for Firefox 148.
-var HelloFirefox148 = utls.HelloFirefox_120
+// HelloFirefox1520 is the TLS hello for Firefox 1520.
+// The version number changes with each update. Never use it directly.
+var HelloFirefox1520 = utls.HelloFirefox_120
 
 // Various user agent strings for different operating systems.
 var (
-	UserAgentFirefoxWindows = "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:148.0) Gecko/20100101 Firefox/148.0"
-	UserAgentFirefoxMacOS   = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:148.0) Gecko/20100101 Firefox/148.0"
-	UserAgentFirefoxLinux   = "Mozilla/5.0 (X11; Linux x86_64; rv:148.0) Gecko/20100101 Firefox/148.0"
-	UserAgentFirefoxAndroid = "Mozilla/5.0 (Android 16; Mobile; rv:148.0) Gecko/148.0 Firefox/148.0"
-	UserAgentFirefoxIOS     = "Mozilla/5.0 (iPhone; CPU iPhone OS 18_7 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) FxiOS/148.0 Mobile/15E148 Safari/605.1.15"
+	UserAgentFirefoxWindows = "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:152.0) Gecko/20100101 Firefox/152.0"
+	UserAgentFirefoxMacOS   = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:152.0) Gecko/20100101 Firefox/152.0"
+	UserAgentFirefoxLinux   = "Mozilla/5.0 (X11; Linux x86_64; rv:152.0) Gecko/20100101 Firefox/152.0"
+	UserAgentFirefoxAndroid = "Mozilla/5.0 (Android 16; Mobile; rv:152.0) Gecko/148.0 Firefox/152.0"
+	UserAgentFirefoxIOS     = "Mozilla/5.0 (iPhone; CPU iPhone OS 18_7 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) FxiOS/152.0 Mobile/15E148 Safari/605.1.15"
 )
 
 var userAgents = map[profiles.OSKey]string{
@@ -36,7 +37,7 @@ var userAgents = map[profiles.OSKey]string{
 
 // Desktop is the desktop variant of the Firefox profile.
 var Desktop = &profiles.Variant{
-	HelloID:      HelloFirefox148,
+	HelloID:      HelloFirefox1520,
 	BoundaryFunc: Boundary,
 	ConfigureH2:  configureH2Desktop,
 	ConfigureH3:  configureH3Desktop,
@@ -49,7 +50,7 @@ var Desktop = &profiles.Variant{
 
 // Mobile is the mobile variant of the Firefox profile.
 var Mobile = &profiles.Variant{
-	HelloID:      HelloFirefox148,
+	HelloID:      HelloFirefox1520,
 	BoundaryFunc: Boundary,
 	ConfigureH2:  configureH2Desktop,
 	ConfigureH3:  configureH3Desktop,

@@ -2,28 +2,28 @@
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
-package aoni
+package cookie
 
 import "net/http"
 
-// cookieJarTransport intercepts requests and responses at the transport level,
+// Transport intercepts requests and responses at the transport level,
 // providing context-safe cookie isolation based on the active proxy server.
-type cookieJarTransport struct {
-	next      http.RoundTripper
-	cookieJar *ProxyIsolatedCookieJar
+type Transport struct {
+	Next      http.RoundTripper
+	CookieJar *ProxyIsolatedJar
 }
 
 // RoundTrip automatically injects cookies before sending and extracts them from the response.
 // Works correctly for every redirect, preserving the original request's context.
-func (t *cookieJarTransport) RoundTrip(req *http.Request) (*http.Response, error) {
-	jar := t.cookieJar.GetJar(req.Context())
+func (t *Transport) RoundTrip(req *http.Request) (*http.Response, error) {
+	jar := t.CookieJar.GetJar(req.Context())
 	if jar != nil {
 		for _, cookie := range jar.Cookies(req.URL) {
 			req.AddCookie(cookie)
 		}
 	}
 
-	resp, err := t.next.RoundTrip(req)
+	resp, err := t.Next.RoundTrip(req)
 	if err != nil {
 		return nil, err
 	}
@@ -39,6 +39,6 @@ func (t *cookieJarTransport) RoundTrip(req *http.Request) (*http.Response, error
 
 // Unwrap returns the underlying transport, allowing http.Client.Clone
 // to properly unwrap and re-wrap the transport chain.
-func (t *cookieJarTransport) Unwrap() http.RoundTripper {
-	return t.next
+func (t *Transport) Unwrap() http.RoundTripper {
+	return t.Next
 }

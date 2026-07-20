@@ -7,17 +7,29 @@ package aoni
 import (
 	"context"
 	"fmt"
+	"maps"
 	"net/http"
 	"net/url"
+	"slices"
 	"sync"
 	"time"
 
+	"github.com/lemon4ksan/miyako/generic"
 	utls "github.com/refraction-networking/utls"
 	"golang.org/x/net/http2"
 
+	"github.com/lemon4ksan/aoni/h2"
+	"github.com/lemon4ksan/aoni/h3"
 	"github.com/lemon4ksan/aoni/ja4"
 	"github.com/lemon4ksan/aoni/p0f"
 )
+
+// Config aggregates all client settings for easy serialization and bootstrapping.
+type Config struct {
+	Network     NetworkConfig
+	Fingerprint FingerprintConfig
+	Defaults    ClientDefaults
+}
 
 // QueryEncoder defines the function signature for marshalling structures into url.Values.
 type QueryEncoder func(any) (url.Values, error)
@@ -62,10 +74,13 @@ const (
 	BrowserSafari
 )
 
+// DefaultUserAgent is the default User-Agent string used for HTTP requests.
+const DefaultUserAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+
 // DefaultBrowserProfiles provides a list of realistic, modern Chrome browser profiles.
 var DefaultBrowserProfiles = []BrowserProfile{
 	{
-		UserAgent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+		UserAgent: DefaultUserAgent,
 		ClientHints: map[string]string{
 			"Sec-CH-UA":          `"Not_A Brand";v="8", "Chromium";v="120", "Google Chrome";v="120"`,
 			"Sec-CH-UA-Mobile":   "?0",
@@ -133,8 +148,6 @@ func DefaultRedirectPolicy(
 	}
 }
 
-type requestConfigKey struct{}
-
 // RequestConfig aggregates all request-scoped options and transport overrides.
 //
 // Note: It is stored in the request's context under [requestConfigKey] and is
@@ -190,7 +203,7 @@ type RequestConfig struct {
 
 	// JA4ReportStore holds the temporary report reference for TLS/HTTP JA4 fingerprinting.
 	// - SeeAlso: [TraceJA4]
-	JA4ReportStore *ja4ReportStore
+	JA4ReportStore *JA4ReportStore
 
 	// Debug enables verbose debug logging for this single request.
 	// - SeeAlso: [WithDebug]
@@ -294,22 +307,58 @@ type RequestConfig struct {
 	QueryEncoder QueryEncoder
 }
 
+// ApplyDefaults merges client-level defaults into the request config
+// if they are not already set.
+func (cfg *RequestConfig) ApplyDefaults(c *Client) {
+	if cfg.Metadata == nil {
+		cfg.Metadata = make(map[string]any)
+	}
+
+	if cfg.CertificatePins == nil {
+		cfg.CertificatePins = make(map[string][]string)
+	}
+
+	if !cfg.SSRFGuard {
+		cfg.SSRFGuard = c.network.SSRFGuard
+	}
+
+	if !cfg.ProxyDNS {
+		cfg.ProxyDNS = c.network.ProxyDNS
+	}
+
+	if !cfg.MultiReadDisableDisk {
+		cfg.MultiReadDisableDisk = c.defaults.MultiReadDisableDisk
+	}
+
+	cfg.HappyEyeballsDelay = generic.Coalesce(cfg.HappyEyeballsDelay, c.network.HappyEyeballsDelay)
+	cfg.MultiReadThreshold = generic.Coalesce(c.defaults.MultiReadThreshold, cfg.MultiReadThreshold)
+
+	cfg.ProxyAddr = generic.CoalesceNil(cfg.ProxyAddr, c.network.ProxyAddr)
+	cfg.P0fSignature = generic.CoalesceNil(cfg.P0fSignature, c.fingerprint.P0fSignature)
+	cfg.SessionCache = generic.CoalesceNil(cfg.SessionCache, c.fingerprint.SessionCache)
+	cfg.PacketPadding = generic.CoalesceNil(cfg.PacketPadding, c.fingerprint.PacketPadding)
+	cfg.SocketController = generic.CoalesceNil(cfg.SocketController, c.network.SocketController)
+	cfg.ClientHelloSpecProvider = generic.CoalesceNil(
+		cfg.ClientHelloSpecProvider,
+		c.fingerprint.TLSClientHelloSpecProvider,
+	)
+	cfg.JA4Callback = generic.CoalesceNil(cfg.JA4Callback, c.fingerprint.JA4Callback)
+	cfg.QueryEncoder = generic.CoalesceNil(cfg.QueryEncoder, c.defaults.QueryEncoder)
+
+	for domain, hashes := range c.fingerprint.CertificatePins {
+		for _, h := range hashes {
+			if !slices.Contains(cfg.CertificatePins[domain], h) {
+				cfg.CertificatePins[domain] = append(cfg.CertificatePins[domain], h)
+			}
+		}
+	}
+}
+
+type requestConfigKey struct{}
+
 // GetRequestConfig retrieves the [RequestConfig] associated with the context.
 func GetRequestConfig(ctx context.Context) *RequestConfig {
 	cfg, _ := ctx.Value(requestConfigKey{}).(*RequestConfig)
-	return cfg
-}
-
-func getOrInitRequestConfig(req *http.Request) *RequestConfig {
-	cfg := GetRequestConfig(req.Context())
-	if cfg == nil {
-		cfg = &RequestConfig{
-			Metadata: make(map[string]any),
-		}
-		ctx := context.WithValue(req.Context(), requestConfigKey{}, cfg)
-		*req = *req.WithContext(ctx)
-	}
-
 	return cfg
 }
 
@@ -372,6 +421,29 @@ type NetworkConfig struct {
 	HostRewrite *HostRewriteConfig
 }
 
+// Clone returns the deep copy of the NetworkConfig.
+func (n NetworkConfig) Clone() NetworkConfig {
+	cloned := n
+
+	if n.DynamicHedging != nil {
+		dhCopy := *n.DynamicHedging
+		cloned.DynamicHedging = &dhCopy
+	}
+
+	if n.FragmentConfig != nil {
+		fragCopy := *n.FragmentConfig
+		cloned.FragmentConfig = &fragCopy
+	}
+
+	if n.HostRewrite != nil && n.HostRewrite.Rules != nil {
+		rulesCopy := make(map[string]string, len(n.HostRewrite.Rules))
+		maps.Copy(rulesCopy, n.HostRewrite.Rules)
+		cloned.HostRewrite = &HostRewriteConfig{Rules: rulesCopy}
+	}
+
+	return cloned
+}
+
 // FingerprintConfig groups all settings related to browser TLS and HTTP/2/3 fingerprint emulation,
 // JA4 fingerprint tracking, header order serialization, session caching, and TCP packet padding.
 type FingerprintConfig struct {
@@ -397,10 +469,10 @@ type FingerprintConfig struct {
 	P0fSignature *p0f.Signature
 
 	// H2Settings overrides the default HTTP/2 SETTINGS frame parameters.
-	H2Settings *HTTP2Settings
+	H2Settings *h2.Settings
 
 	// H3Settings overrides the default HTTP/3 (QUIC) configuration settings.
-	H3Settings *HTTP3Settings
+	H3Settings *h3.Settings
 
 	// SessionCache is a proxy-aware TLS session ticket cache that prevents session correlation across proxies.
 	SessionCache *ProxyAwareSessionCache
@@ -410,6 +482,56 @@ type FingerprintConfig struct {
 
 	// CertificatePins maps domains to their pinned SHA-256 public key hashes globally.
 	CertificatePins map[string][]string
+}
+
+// Clone returns the deep copy of the FingerprintConfig.
+func (f FingerprintConfig) Clone() FingerprintConfig {
+	cloned := f
+
+	if f.TLSClientHelloID != nil {
+		idCopy := *f.TLSClientHelloID
+		cloned.TLSClientHelloID = &idCopy
+	}
+
+	if f.HeaderOrder != nil {
+		orderCopy := make([]string, len(f.HeaderOrder))
+		copy(orderCopy, f.HeaderOrder)
+		cloned.HeaderOrder = orderCopy
+	}
+
+	if f.P0fSignature != nil {
+		sigCopy := *f.P0fSignature
+		if len(sigCopy.Options) > 0 {
+			optsCopy := make([]string, len(sigCopy.Options))
+			copy(optsCopy, sigCopy.Options)
+			sigCopy.Options = optsCopy
+		}
+
+		if len(sigCopy.Quirks) > 0 {
+			qCopy := make([]string, len(sigCopy.Quirks))
+			copy(qCopy, sigCopy.Quirks)
+			sigCopy.Quirks = qCopy
+		}
+
+		cloned.P0fSignature = &sigCopy
+	}
+
+	if f.H2Settings != nil {
+		h2Copy := *f.H2Settings
+		cloned.H2Settings = &h2Copy
+	}
+
+	if f.H3Settings != nil {
+		h3Copy := *f.H3Settings
+		cloned.H3Settings = &h3Copy
+	}
+
+	if f.PacketPadding != nil {
+		padCopy := *f.PacketPadding
+		cloned.PacketPadding = &padCopy
+	}
+
+	return cloned
 }
 
 // ClientDefaults groups standard HTTP client settings, request/response lifecycle hooks,
@@ -474,6 +596,90 @@ type ClientDefaults struct {
 
 	// UARotationProfiles defines the list of browser profiles for User-Agent rotation.
 	UARotationProfiles []BrowserProfile
+}
+
+// Clone returns the deep copy of the ClientDefaults.
+func (d ClientDefaults) Clone() ClientDefaults {
+	cloned := d
+
+	cloned.Headers = d.Headers.Clone()
+
+	beforeCopy := make([]func(req *http.Request), len(d.BeforeRequest))
+	copy(beforeCopy, d.BeforeRequest)
+	cloned.BeforeRequest = beforeCopy
+
+	afterCopy := make([]func(resp *http.Response, err error), len(d.AfterResponse))
+	copy(afterCopy, d.AfterResponse)
+	cloned.AfterResponse = afterCopy
+
+	if d.DefaultMods != nil {
+		modsCopy := make([]RequestModifier, len(d.DefaultMods))
+		copy(modsCopy, d.DefaultMods)
+		cloned.DefaultMods = modsCopy
+	}
+
+	cloned.Pipeline = d.Pipeline
+	if d.Pipeline.DPIJitter != nil {
+		dj := *d.Pipeline.DPIJitter
+		cloned.Pipeline.DPIJitter = &dj
+	}
+
+	if d.Pipeline.ProxyFailover != nil {
+		pf := *d.Pipeline.ProxyFailover
+		proxiesCopy := make([]string, len(pf.Proxies))
+		copy(proxiesCopy, pf.Proxies)
+		pf.Proxies = proxiesCopy
+		cloned.Pipeline.ProxyFailover = &pf
+	}
+
+	if d.Pipeline.Hedging != nil {
+		h := *d.Pipeline.Hedging
+		if h.DynamicHedging != nil {
+			dhCopy := *h.DynamicHedging
+			h.DynamicHedging = &dhCopy
+		}
+
+		cloned.Pipeline.Hedging = &h
+	}
+
+	if d.Pipeline.Cache != nil {
+		cc := *d.Pipeline.Cache
+		cloned.Pipeline.Cache = &cc
+	}
+
+	if d.Pipeline.HAR != nil {
+		har := *d.Pipeline.HAR
+		cloned.Pipeline.HAR = &har
+	}
+
+	if d.Pipeline.Redact != nil {
+		r := *d.Pipeline.Redact
+		if r.Headers != nil {
+			headersCopy := make(map[string]struct{}, len(r.Headers))
+			maps.Copy(headersCopy, r.Headers)
+
+			r.Headers = headersCopy
+		}
+
+		cloned.Pipeline.Redact = &r
+	}
+
+	if d.UARotationProfiles != nil {
+		profilesCopy := make([]BrowserProfile, len(d.UARotationProfiles))
+		for i, prof := range d.UARotationProfiles {
+			hintsCopy := make(map[string]string, len(prof.ClientHints))
+			maps.Copy(hintsCopy, prof.ClientHints)
+
+			profilesCopy[i] = BrowserProfile{
+				UserAgent:   prof.UserAgent,
+				ClientHints: hintsCopy,
+			}
+		}
+
+		cloned.UARotationProfiles = profilesCopy
+	}
+
+	return cloned
 }
 
 // ConnectionPoolConfig tunes the [http.Transport] connection pool.
@@ -594,7 +800,7 @@ type RedactConfigCtxKey struct{}
 
 // RedactConfig holds the configuration for redacting sensitive headers.
 type RedactConfig struct {
-	Headers          map[string]bool
+	Headers          map[string]struct{}
 	HeadersToRedact  []string
 	JSONKeysToRedact []string
 }
@@ -603,4 +809,11 @@ type RedactConfig struct {
 type BrowserProfile struct {
 	UserAgent   string
 	ClientHints map[string]string
+}
+
+// JA4ReportStore is a shared pointer that allows dialTLSWithUTLS to write the JA4 report
+// and Client.Request to copy it to the target TraceInfo after the request completes.
+type JA4ReportStore struct {
+	Report *ja4.Report
+	Target *TraceInfo
 }

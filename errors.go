@@ -40,6 +40,9 @@ var (
 	// ErrCertificatePinning indicates the TLS handshake failed because
 	// none of the peer certificates matched the configured public key pins.
 	ErrCertificatePinning = errors.New("aoni: certificate pinning validation failed")
+
+	// ErrEmptyDNSProxy is returned by dialers if proxy dns is enabled but the proxy adress is empty.
+	ErrEmptyDNSProxy = errors.New("aoni: proxy DNS enabled but proxy address is empty")
 )
 
 // APIError wraps a non-2xx HTTP response. StatusCode holds the

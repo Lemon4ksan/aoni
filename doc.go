@@ -57,9 +57,9 @@
 //   - [WithClientP0fSignature] sets TTL, Don't Fragment, and TCP window
 //     size to mimic an OS-level network stack.
 //   - [WithClientModifiers] combined with [WithOrderedHeaders] controls the
-//     HTTP/1.1 header serialization order. For HTTP/2, [H2FramedTransport]
+//     HTTP/1.1 header serialization order. For HTTP/2, [FramedTransport]
 //     reorders HPACK-encoded HEADERS frames.
-//   - [WithClientH2FramedTransport] injects browser-specific SETTINGS and
+//   - [WithClientFramedTransport] injects browser-specific SETTINGS and
 //     PRIORITY frames into the HTTP/2 connection preface.
 //
 // # Resilience

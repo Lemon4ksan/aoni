@@ -18,13 +18,9 @@ import (
 
 	"github.com/PuerkitoBio/goquery"
 	"github.com/lemon4ksan/aoni"
+	"github.com/lemon4ksan/aoni/profiles"
 	"github.com/lemon4ksan/aoni/profiles/chrome"
 	"github.com/mxschmitt/playwright-go"
-)
-
-var (
-	userAgent = chrome.UserAgentWindows
-	secCHUA   = chrome.SecCHUA
 )
 
 var protectionCookies = []string{
@@ -56,7 +52,7 @@ func getProtectionCookie(targetURL string) (name, value string, err error) {
 	defer browser.Close()
 
 	browserContext, err := browser.NewContext(playwright.BrowserNewContextOptions{
-		UserAgent: new(userAgent),
+		UserAgent: new(chrome.UserAgentWindows),
 	})
 	if err != nil {
 		return "", "", fmt.Errorf("create context: %w", err)
@@ -147,20 +143,8 @@ func run(ctx context.Context, targetURL string) error {
 	})
 
 	client := aoni.NewClient(nil,
-		aoni.WithClientTLSFingerprint(aoni.BrowserChrome),
+		aoni.WithClientBrowserProfile(aoni.BrowserChrome, profiles.Windows),
 		aoni.WithClientCookieJar(jar),
-		aoni.WithClientHeader("User-Agent", userAgent),
-		aoni.WithClientHeader("Sec-CH-UA", secCHUA),
-		aoni.WithClientHeader("Sec-CH-UA-Mobile", "?0"),
-		aoni.WithClientHeader("Sec-CH-UA-Platform", `"Windows"`),
-		aoni.WithClientHeader("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8"),
-		aoni.WithClientHeader("Accept-Language", "en-US,en;q=0.9"),
-		aoni.WithClientHeader("Accept-Encoding", "gzip, deflate, br, zstd"),
-		aoni.WithClientHeader("Sec-Fetch-Site", "none"),
-		aoni.WithClientHeader("Sec-Fetch-Mode", "navigate"),
-		aoni.WithClientHeader("Sec-Fetch-User", "?1"),
-		aoni.WithClientHeader("Sec-Fetch-Dest", "document"),
-		aoni.WithClientHeader("Upgrade-Insecure-Requests", "1"),
 		aoni.WithClientRefererAutomaton(true),
 		aoni.WithClientTCPDelay(150*time.Millisecond, 400*time.Millisecond),
 	)

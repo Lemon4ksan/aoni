@@ -177,12 +177,9 @@ func getFreshCookies(targetURL string) ([]*http.Cookie, string, error) {
 
 	// Handling scenarios where the automated flow hits an immediate VPN/block notice.
 	// Often, navigating back allows the application state to settle and bypasses the temporary intercept.
-	if strings.Contains(currentURL, "block") ||
-		strings.Contains(currentURL, "vpn") ||
-		strings.Contains(currentURL, "connect") ||
-		strings.Contains(strings.ToLower(currentURL), "проблемы") {
+	if strings.Contains(page.URL(), "auth/error") {
 		fmt.Println("[Playwright] VPN or Block page detected. Attempting to navigate back...")
-		if _, err := page.GoBack(playwright.PageGoBackOptions{
+		if _, err := page.Goto(targetURL, playwright.PageGotoOptions{
 			WaitUntil: playwright.WaitUntilStateDomcontentloaded,
 		}); err == nil {
 			fmt.Printf("[Playwright] URL after navigating back: %s\n", page.URL())
@@ -226,15 +223,7 @@ func getFreshCookies(targetURL string) ([]*http.Cookie, string, error) {
 		}
 
 		// Checking if we reached a blocked/error state.
-		currentURL := page.URL()
-		isBlocked := strings.Contains(currentURL, "block") ||
-			strings.Contains(currentURL, "vpn") ||
-			strings.Contains(currentURL, "connect") ||
-			strings.Contains(currentURL, "error") ||
-			strings.Contains(currentURL, "auth") ||
-			strings.Contains(strings.ToLower(currentURL), "проблемы")
-
-		if isBlocked {
+		if strings.Contains(page.URL(), "auth/error") {
 			// Race condition mitigation: Even if redirected to an error/auth page,
 			// the required 'spid' and 'spsn' might have already been successfully assigned.
 			if found >= 2 {
@@ -336,10 +325,7 @@ func run(ctx context.Context, targetURL string) error {
 		aoni.WithClientTLSFingerprint(aoni.BrowserFirefox),
 		aoni.WithClientBrowserProfile(aoni.BrowserFirefox, profiles.Windows),
 		aoni.WithClientCookieJar(jar),
-		aoni.WithClientHeader("User-Agent", firefox.UserAgentFirefoxWindows),
 		aoni.WithClientHeader("Accept-Language", "ru-RU,ru;q=0.9,en;q=0.8"),
-		aoni.WithClientHeader("Origin", "https://5ka.ru"),
-		aoni.WithClientHeader("Referer", "https://5ka.ru/"),
 		aoni.WithClientRefererAutomaton(true),
 		aoni.WithClientTCPDelay(300*time.Millisecond, 800*time.Millisecond),
 	)

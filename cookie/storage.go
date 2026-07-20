@@ -2,7 +2,7 @@
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
-package aoni
+package cookie
 
 import (
 	"context"
@@ -13,73 +13,59 @@ import (
 	"sync"
 )
 
-// CookieStorageBackend defines the interface for persisting cookie jar states.
-type CookieStorageBackend interface {
-	Save(key string, cookies []CookieData) error
-	Load(key string) ([]CookieData, error)
+// Storage defines the interface for persisting cookie jar states.
+type Storage interface {
+	Save(key string, cookies []Cookie) error
+	Load(key string) ([]Cookie, error)
 }
 
-// JSONFileCookieStorage implements CookieStorageBackend using a single JSON file on disk.
-type JSONFileCookieStorage struct {
+// JSONFileStorage implements CookieStorageBackend using a single JSON file on disk.
+type JSONFileStorage struct {
 	mu       sync.Mutex
 	filePath string
+	data     fileStorageData
 }
 
-// NewJSONFileCookieStorage creates a new JSONFileCookieStorage at the specified path.
-func NewJSONFileCookieStorage(filePath string) *JSONFileCookieStorage {
-	return &JSONFileCookieStorage{
+// NewJSONFileStorage creates a new JSONFileCookieStorage at the specified path.
+func NewJSONFileStorage(filePath string) *JSONFileStorage {
+	s := &JSONFileStorage{
 		filePath: filePath,
+		data:     make(fileStorageData),
 	}
+
+	if fileBytes, err := os.ReadFile(filePath); err == nil {
+		_ = json.Unmarshal(fileBytes, &s.data)
+	}
+
+	return s
 }
 
-type fileStorageData map[string][]CookieData
+type fileStorageData map[string][]Cookie
 
 // Save writes the specified cookies associated with the given key to the JSON file.
-func (s *JSONFileCookieStorage) Save(key string, cookies []CookieData) error {
+func (s *JSONFileStorage) Save(key string, cookies []Cookie) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	data := make(fileStorageData)
-	//nolint:gosec // Path traversal checked by caller.
-	if fileBytes, err := os.ReadFile(s.filePath); err == nil {
-		_ = json.Unmarshal(fileBytes, &data)
-	}
+	s.data[key] = cookies
 
-	data[key] = cookies
-
-	fileBytes, err := json.MarshalIndent(data, "", "  ")
+	fileBytes, err := json.MarshalIndent(s.data, "", "  ")
 	if err != nil {
 		return err
 	}
 
-	//nolint:gosec // Owner-only read/write permissions for cookie security.
-	return os.WriteFile(s.filePath, fileBytes, 0o600)
+	return os.WriteFile(s.filePath, fileBytes, 0o600) //nolint:gosec
 }
 
 // Load reads cookies associated with the given key from the JSON file.
-func (s *JSONFileCookieStorage) Load(key string) ([]CookieData, error) {
+func (s *JSONFileStorage) Load(key string) ([]Cookie, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	//nolint:gosec // Path traversal checked by caller.
-	fileBytes, err := os.ReadFile(s.filePath)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return nil, nil
-		}
-
-		return nil, err
-	}
-
-	data := make(fileStorageData)
-	if err := json.Unmarshal(fileBytes, &data); err != nil {
-		return nil, err
-	}
-
-	return data[key], nil
+	return s.data[key], nil
 }
 
-// SQLCookieStorage implements CookieStorageBackend using any SQL database (SQLite, Postgres, MySQL).
+// SQLStorage implements CookieStorageBackend using any SQL database (SQLite, Postgres, MySQL).
 // It expects a table created with the following schema:
 //
 // CREATE TABLE IF NOT EXISTS aoni_cookies (
@@ -89,21 +75,21 @@ func (s *JSONFileCookieStorage) Load(key string) ([]CookieData, error) {
 //	PRIMARY KEY (proxy_key)
 //
 // );
-type SQLCookieStorage struct {
+type SQLStorage struct {
 	db        *sql.DB
 	tableName string
 }
 
-// NewSQLCookieStorage creates a new SQLCookieStorage with a given database connection.
-func NewSQLCookieStorage(db *sql.DB) *SQLCookieStorage {
-	return &SQLCookieStorage{
+// NewSQLStorage creates a new SQLCookieStorage with a given database connection.
+func NewSQLStorage(db *sql.DB) *SQLStorage {
+	return &SQLStorage{
 		db:        db,
 		tableName: "aoni_cookies",
 	}
 }
 
 // InitSchema creates the required table schema.
-func (s *SQLCookieStorage) InitSchema() error {
+func (s *SQLStorage) InitSchema() error {
 	//nolint:gosec // Table name is internal and safe.
 	query := `CREATE TABLE IF NOT EXISTS ` + s.tableName + ` (
 		proxy_key TEXT PRIMARY KEY,
@@ -115,7 +101,7 @@ func (s *SQLCookieStorage) InitSchema() error {
 }
 
 // Save persists the specified cookies to the SQL database.
-func (s *SQLCookieStorage) Save(key string, cookies []CookieData) error {
+func (s *SQLStorage) Save(key string, cookies []Cookie) error {
 	jsonData, err := json.Marshal(cookies)
 	if err != nil {
 		return err
@@ -153,7 +139,7 @@ func (s *SQLCookieStorage) Save(key string, cookies []CookieData) error {
 }
 
 // Load retrieves cookies associated with the given key from the SQL database.
-func (s *SQLCookieStorage) Load(key string) ([]CookieData, error) {
+func (s *SQLStorage) Load(key string) ([]Cookie, error) {
 	ctx := context.Background()
 	//nolint:gosec // Table name is internal and safe.
 	row := s.db.QueryRowContext(ctx, `SELECT cookie_data FROM `+s.tableName+` WHERE proxy_key = ?`, key)
@@ -169,7 +155,7 @@ func (s *SQLCookieStorage) Load(key string) ([]CookieData, error) {
 		return nil, err
 	}
 
-	var cookies []CookieData
+	var cookies []Cookie
 	if err := json.Unmarshal([]byte(dataStr), &cookies); err != nil {
 		return nil, err
 	}

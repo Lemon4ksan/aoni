@@ -1,0 +1,286 @@
+// Copyright (c) 2026 Lemon4ksan All rights reserved.
+// Use of this source code is governed by a BSD-style
+// license that can be found in the LICENSE file.
+
+package aoni
+
+import (
+	"bufio"
+	"bytes"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"io"
+	"mime"
+	"net/http"
+	"net/http/httputil"
+	"os"
+	"strings"
+)
+
+var sensitiveHeaders = map[string]bool{
+	"authorization":       true,
+	"cookie":              true,
+	"set-cookie":          true,
+	"proxy-authorization": true,
+}
+
+func redactHeaders(raw []byte) []byte {
+	lines := strings.Split(string(raw), "\r\n")
+	for i, line := range lines {
+		for header := range sensitiveHeaders {
+			prefix := header + ":"
+			if strings.HasPrefix(strings.ToLower(line), prefix) {
+				lines[i] = header + ": <redacted>"
+				break
+			}
+		}
+	}
+
+	return []byte(strings.Join(lines, "\r\n"))
+}
+
+type responseDecoder struct{}
+
+func (d responseDecoder) validateState(resp *http.Response, decoder Decoder) error {
+	peekableReader := bufio.NewReader(resp.Body)
+
+	resp.Body = struct {
+		io.Reader
+		io.Closer
+	}{
+		Reader: peekableReader,
+		Closer: resp.Body,
+	}
+
+	_, isRaw := decoder.(rawDecoder)
+
+	if isRaw {
+		return nil
+	}
+
+	if err := d.checkHTML(peekableReader); err != nil {
+		return err
+	}
+
+	return d.checkMIMEType(resp)
+}
+
+func (responseDecoder) setCapturer(resp *http.Response) bool {
+	if resp.Request == nil {
+		return false
+	}
+
+	cfg := GetRequestConfig(resp.Request.Context())
+	if cfg != nil {
+		if targetPtr, ok := cfg.Capturer.(**http.Response); ok && targetPtr != nil {
+			*targetPtr = resp
+			return true
+		}
+	}
+
+	return false
+}
+
+func (responseDecoder) dumpDiagnostics(resp *http.Response, requester Requester) {
+	if resp.Request == nil {
+		return
+	}
+
+	cfg := GetRequestConfig(resp.Request.Context())
+
+	if cfg != nil && cfg.Debug {
+		reqDump, _ := httputil.DumpRequestOut(resp.Request, true)
+		respDump, _ := httputil.DumpResponse(resp, true)
+
+		reqDump = redactHeaders(reqDump)
+		respDump = redactHeaders(respDump)
+
+		if logger, ok := requester.(interface{ Logger() Logger }); ok {
+			logger.Logger().Debug("Aoni HTTP Diagnostic", "request", string(reqDump), "response", string(respDump))
+		} else {
+			fmt.Fprintf(
+				os.Stderr,
+				"\n--- HTTP DEBUG ---\n%s\n%s\n------------------\n",
+				string(reqDump),
+				string(respDump),
+			)
+		}
+	}
+}
+
+func (responseDecoder) checkMIMEType(resp *http.Response) error {
+	contentType := resp.Header.Get("Content-Type")
+	if contentType == "" {
+		return nil
+	}
+
+	mediaType, _, err := mime.ParseMediaType(contentType)
+	if err != nil {
+		return nil //nolint:nilerr
+	}
+
+	if mediaType == "text/html" || mediaType == "application/xhtml+xml" {
+		return fmt.Errorf("%w: expected structured data but got HTML", ErrUnexpectedContentType)
+	}
+
+	return nil
+}
+
+func (responseDecoder) checkHTML(buf *bufio.Reader) error {
+	peekBytes, err := buf.Peek(128)
+
+	if err != nil && err != io.EOF {
+		return nil
+	}
+
+	if len(peekBytes) == 0 {
+		return nil
+	}
+
+	firstNonSpace := byte(0)
+	for _, b := range peekBytes {
+		if b != ' ' && b != '\t' && b != '\r' && b != '\n' {
+			firstNonSpace = b
+			break
+		}
+	}
+
+	if firstNonSpace != '<' {
+		return nil
+	}
+
+	bodyStr := strings.ToLower(string(peekBytes))
+	isHTML := strings.Contains(bodyStr, "<html") || strings.Contains(bodyStr, "<!doctype html")
+
+	if !isHTML {
+		return nil
+	}
+
+	if strings.Contains(bodyStr, "cf-challenge") || strings.Contains(bodyStr, "ray id") ||
+		strings.Contains(bodyStr, "cloudflare") {
+		return ErrCloudflareChallenge
+	}
+
+	return fmt.Errorf("%w: expected structured data but got HTML", ErrUnexpectedContentType)
+}
+
+func (responseDecoder) decodeAPIError(resp *http.Response) error {
+	bodyBytes, _ := io.ReadAll(io.LimitReader(resp.Body, 1024*1024))
+
+	apiErr := &APIError{StatusCode: resp.StatusCode, Body: bodyBytes}
+
+	if resp.Request != nil {
+		cfg := GetRequestConfig(resp.Request.Context())
+
+		if cfg == nil || cfg.ErrorModel == nil {
+			return apiErr
+		}
+
+		if err := json.Unmarshal(bodyBytes, cfg.ErrorModel); err == nil {
+			apiErr.Model = cfg.ErrorModel
+		}
+	}
+
+	return apiErr
+}
+
+func (responseDecoder) decodeSuccess(resp *http.Response, target any, requester Requester, decoder Decoder) error {
+	var br BaseResponse
+	if p, ok := requester.(BaseResponseProvider); ok {
+		br = p.BaseResponse()
+	} else if provider, ok := requester.(interface{ Defaults() ClientDefaults }); ok {
+		if brFn := provider.Defaults().BaseResponse; brFn != nil {
+			br = brFn()
+		}
+	}
+
+	if br != nil {
+		br.SetData(target)
+
+		if err := decoder.Decode(resp.Body, br); err != nil {
+			return err
+		}
+
+		if !br.IsSuccess() {
+			return br.Error()
+		}
+
+		return nil
+	}
+
+	err := decoder.Decode(resp.Body, target)
+	if errors.Is(err, io.EOF) {
+		return nil
+	}
+
+	return err
+}
+
+func handleResponse(resp *http.Response, target any, requester Requester) error {
+	if resp == nil {
+		return errors.New("aoni: response is nil")
+	}
+
+	dec := responseDecoder{}
+
+	if !dec.setCapturer(resp) {
+		defer closeResponse(resp)
+	}
+
+	dec.dumpDiagnostics(resp, requester)
+
+	decoder := JSONDecoder
+	if resp.Request != nil {
+		cfg := GetRequestConfig(resp.Request.Context())
+
+		if cfg != nil && cfg.Decoder != nil {
+			if d, ok := cfg.Decoder.(Decoder); ok {
+				decoder = d
+			}
+		}
+	}
+
+	if err := dec.validateState(resp, decoder); err != nil {
+		return err
+	}
+
+	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
+		return dec.decodeAPIError(resp)
+	}
+
+	if target == nil || resp.StatusCode == http.StatusNoContent {
+		bufPtr := bytePool.Get().(*[]byte)
+		_, _ = io.CopyBuffer(io.Discard, resp.Body, *bufPtr)
+		bytePool.Put(bufPtr)
+
+		return nil
+	}
+
+	return dec.decodeSuccess(resp, target, requester, decoder)
+}
+
+func validateAndMarshal(payload any) (io.Reader, error) {
+	if _, ok := payload.(RequestModifier); ok {
+		return nil, errors.New("aoni: passed a RequestModifier as the request body. Did you forget the body argument?")
+	}
+
+	if r, ok := payload.(io.Reader); ok {
+		return r, nil
+	}
+
+	if payload == nil {
+		return nil, nil
+	}
+
+	bodyBytes, err := json.Marshal(payload)
+	if err != nil {
+		return nil, fmt.Errorf("aoni: failed to marshal payload: %w", err)
+	}
+
+	if string(bodyBytes) == "null" {
+		bodyBytes = nil
+	}
+
+	return bytes.NewReader(bodyBytes), nil
+}

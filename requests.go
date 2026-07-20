@@ -5,19 +5,9 @@
 package aoni
 
 import (
-	"bufio"
-	"bytes"
 	"context"
-	"encoding/json"
-	"errors"
-	"fmt"
-	"io"
-	"mime"
 	"net/http"
-	"net/http/httputil"
-	"os"
 	"reflect"
-	"strings"
 )
 
 // DefaultClient is the shared default client instance used by global helper functions.
@@ -27,75 +17,6 @@ var DefaultClient = NewClient(nil)
 // When used as the response type in generic request helpers like [GetTo],
 // the helper automatically drains and closes the response body to prevent resource leaks.
 type NoResponse struct{}
-
-// Put executes a PUT request through the specified [Requester] and returns the raw [http.Response].
-//
-// By default, if the body is a struct or map, it is marshaled to JSON and the request headers
-// "Content-Type" and "Accept" are set to "application/json".
-//
-// To send other body formats (e.g. XML, YAML, or plain text), pre-serialize the payload and
-// pass it as an [io.Reader] (e.g. using [strings.NewReader] or [bytes.NewReader]), then override the Content-Type
-// header using request modifiers like [WithContentType] (e.g. WithContentType("application/xml")).
-func Put(ctx context.Context, c Requester, path string, body any, mods ...RequestModifier) (*http.Response, error) {
-	bodyReader, err := validateAndMarshal(body)
-	if err != nil {
-		return nil, err
-	}
-
-	mods = append([]RequestModifier{
-		WithContentType("application/json"),
-		WithAccept("application/json"),
-		WithBody(bodyReader),
-	}, mods...)
-
-	return c.Request(ctx, http.MethodPut, path, mods...)
-}
-
-// Patch executes a PATCH request through the specified [Requester] and returns the raw [http.Response].
-//
-// By default, if the body is a struct or map, it is marshaled to JSON and the request headers
-// "Content-Type" and "Accept" are set to "application/json".
-//
-// To send other body formats (e.g. XML, YAML, or plain text), pre-serialize the payload and
-// pass it as an [io.Reader] (e.g. using [strings.NewReader] or [bytes.NewReader]), then override the Content-Type
-// header using request modifiers like [WithContentType] (e.g. WithContentType("application/xml")).
-func Patch(ctx context.Context, c Requester, path string, body any, mods ...RequestModifier) (*http.Response, error) {
-	bodyReader, err := validateAndMarshal(body)
-	if err != nil {
-		return nil, err
-	}
-
-	mods = append([]RequestModifier{
-		WithContentType("application/json"),
-		WithAccept("application/json"),
-		WithBody(bodyReader),
-	}, mods...)
-
-	return c.Request(ctx, http.MethodPatch, path, mods...)
-}
-
-// Delete executes a DELETE request through the specified [Requester] and returns the raw [http.Response].
-//
-// By default, if the body is a struct or map, it is marshaled to JSON and the request headers
-// "Content-Type" and "Accept" are set to "application/json".
-//
-// To send other body formats (e.g. XML, YAML, or plain text), pre-serialize the payload and
-// pass it as an [io.Reader] (e.g. using [strings.NewReader] or [bytes.NewReader]), then override the Content-Type
-// header using request modifiers like [WithContentType] (e.g. WithContentType("application/xml")).
-func Delete(ctx context.Context, c Requester, path string, body any, mods ...RequestModifier) (*http.Response, error) {
-	bodyReader, err := validateAndMarshal(body)
-	if err != nil {
-		return nil, err
-	}
-
-	mods = append([]RequestModifier{
-		WithContentType("application/json"),
-		WithAccept("application/json"),
-		WithBody(bodyReader),
-	}, mods...)
-
-	return c.Request(ctx, http.MethodDelete, path, mods...)
-}
 
 // Get performs a GET request through the specified [Requester] and returns the raw [http.Response].
 func Get(ctx context.Context, c Requester, path string, mods ...RequestModifier) (*http.Response, error) {
@@ -113,7 +34,21 @@ func GetTo[Resp any](
 	path string,
 	mods ...RequestModifier,
 ) (*Resp, error) {
-	return requestTo[Resp](ctx, c, http.MethodGet, path, mods...)
+	resp, err := c.Request(ctx, http.MethodGet, path, mods...) //nolint:bodyclose
+	if err != nil {
+		return nil, err
+	}
+
+	if reflect.TypeFor[Resp]() == reflect.TypeFor[NoResponse]() {
+		return nil, handleResponse(resp, nil, c)
+	}
+
+	result := new(Resp)
+	if err := handleResponse(resp, result, c); err != nil {
+		return nil, err
+	}
+
+	return result, nil
 }
 
 // GetToEx is like [GetTo] but returns both the parsed response payload and the raw *http.Response.
@@ -192,7 +127,7 @@ func PostTo[Resp any](
 		WithBody(bodyReader),
 	}, mods...)
 
-	resp, err := c.Request(ctx, http.MethodPost, path, mods...)
+	resp, err := c.Request(ctx, http.MethodPost, path, mods...) //nolint:bodyclose
 	if err != nil {
 		return nil, err
 	}
@@ -233,6 +168,29 @@ func PostToEx[Resp any](
 	return result, raw, nil
 }
 
+// Put executes a PUT request through the specified [Requester] and returns the raw [http.Response].
+//
+// By default, if the body is a struct or map, it is marshaled to JSON and the request headers
+// "Content-Type" and "Accept" are set to "application/json".
+//
+// To send other body formats (e.g. XML, YAML, or plain text), pre-serialize the payload and
+// pass it as an [io.Reader] (e.g. using [strings.NewReader] or [bytes.NewReader]), then override the Content-Type
+// header using request modifiers like [WithContentType] (e.g. WithContentType("application/xml")).
+func Put(ctx context.Context, c Requester, path string, body any, mods ...RequestModifier) (*http.Response, error) {
+	bodyReader, err := validateAndMarshal(body)
+	if err != nil {
+		return nil, err
+	}
+
+	mods = append([]RequestModifier{
+		WithContentType("application/json"),
+		WithAccept("application/json"),
+		WithBody(bodyReader),
+	}, mods...)
+
+	return c.Request(ctx, http.MethodPut, path, mods...)
+}
+
 // PutTo executes a PUT request through the specified [Requester],
 // marshals the body, and decodes the response body into Resp.
 //
@@ -261,7 +219,7 @@ func PutTo[Resp any](
 		WithBody(bodyReader),
 	}, mods...)
 
-	resp, err := c.Request(ctx, http.MethodPut, path, mods...)
+	resp, err := c.Request(ctx, http.MethodPut, path, mods...) //nolint:bodyclose
 	if err != nil {
 		return nil, err
 	}
@@ -302,6 +260,29 @@ func PutToEx[Resp any](
 	return result, raw, nil
 }
 
+// Patch executes a PATCH request through the specified [Requester] and returns the raw [http.Response].
+//
+// By default, if the body is a struct or map, it is marshaled to JSON and the request headers
+// "Content-Type" and "Accept" are set to "application/json".
+//
+// To send other body formats (e.g. XML, YAML, or plain text), pre-serialize the payload and
+// pass it as an [io.Reader] (e.g. using [strings.NewReader] or [bytes.NewReader]), then override the Content-Type
+// header using request modifiers like [WithContentType] (e.g. WithContentType("application/xml")).
+func Patch(ctx context.Context, c Requester, path string, body any, mods ...RequestModifier) (*http.Response, error) {
+	bodyReader, err := validateAndMarshal(body)
+	if err != nil {
+		return nil, err
+	}
+
+	mods = append([]RequestModifier{
+		WithContentType("application/json"),
+		WithAccept("application/json"),
+		WithBody(bodyReader),
+	}, mods...)
+
+	return c.Request(ctx, http.MethodPatch, path, mods...)
+}
+
 // PatchTo executes a PATCH request through the specified [Requester],
 // marshals the body, and decodes the response body into Resp.
 //
@@ -330,7 +311,7 @@ func PatchTo[Resp any](
 		WithBody(bodyReader),
 	}, mods...)
 
-	resp, err := c.Request(ctx, http.MethodPatch, path, mods...)
+	resp, err := c.Request(ctx, http.MethodPatch, path, mods...) //nolint:bodyclose
 	if err != nil {
 		return nil, err
 	}
@@ -371,6 +352,29 @@ func PatchToEx[Resp any](
 	return result, raw, nil
 }
 
+// Delete executes a DELETE request through the specified [Requester] and returns the raw [http.Response].
+//
+// By default, if the body is a struct or map, it is marshaled to JSON and the request headers
+// "Content-Type" and "Accept" are set to "application/json".
+//
+// To send other body formats (e.g. XML, YAML, or plain text), pre-serialize the payload and
+// pass it as an [io.Reader] (e.g. using [strings.NewReader] or [bytes.NewReader]), then override the Content-Type
+// header using request modifiers like [WithContentType] (e.g. WithContentType("application/xml")).
+func Delete(ctx context.Context, c Requester, path string, body any, mods ...RequestModifier) (*http.Response, error) {
+	bodyReader, err := validateAndMarshal(body)
+	if err != nil {
+		return nil, err
+	}
+
+	mods = append([]RequestModifier{
+		WithContentType("application/json"),
+		WithAccept("application/json"),
+		WithBody(bodyReader),
+	}, mods...)
+
+	return c.Request(ctx, http.MethodDelete, path, mods...)
+}
+
 // DeleteTo executes a DELETE request through the specified [Requester],
 // marshals the body, and decodes the response body into Resp.
 //
@@ -399,7 +403,7 @@ func DeleteTo[Resp any](
 		WithBody(bodyReader),
 	}, mods...)
 
-	resp, err := c.Request(ctx, http.MethodDelete, path, mods...)
+	resp, err := c.Request(ctx, http.MethodDelete, path, mods...) //nolint:bodyclose
 	if err != nil {
 		return nil, err
 	}
@@ -438,234 +442,4 @@ func DeleteToEx[Resp any](
 	}
 
 	return result, raw, nil
-}
-
-func validateAndMarshal(payload any) (io.Reader, error) {
-	if _, ok := payload.(RequestModifier); ok {
-		return nil, errors.New("aoni: passed a RequestModifier as the request body. Did you forget the body argument?")
-	}
-
-	if r, ok := payload.(io.Reader); ok {
-		return r, nil
-	}
-
-	if payload == nil {
-		return nil, nil
-	}
-
-	bodyBytes, err := json.Marshal(payload)
-	if err != nil {
-		return nil, fmt.Errorf("aoni: failed to marshal payload: %w", err)
-	}
-
-	if string(bodyBytes) == "null" {
-		bodyBytes = nil
-	}
-
-	return bytes.NewReader(bodyBytes), nil
-}
-
-func handleResponse(resp *http.Response, target any, requester Requester) error {
-	if resp == nil {
-		return errors.New("aoni: response is nil")
-	}
-
-	if resp.Request != nil {
-		cfg := GetRequestConfig(resp.Request.Context())
-		if cfg != nil {
-			if targetPtr, ok := cfg.Capturer.(**http.Response); ok && targetPtr != nil {
-				*targetPtr = resp
-			} else {
-				defer closeResponse(resp)
-			}
-		} else {
-			defer closeResponse(resp)
-		}
-	} else {
-		defer closeResponse(resp)
-	}
-
-	if resp.Request != nil {
-		cfg := GetRequestConfig(resp.Request.Context())
-		if cfg != nil && cfg.Debug {
-			reqDump, _ := httputil.DumpRequestOut(resp.Request, true)
-			respDump, _ := httputil.DumpResponse(resp, true)
-
-			reqDump = redactHeaders(reqDump)
-			respDump = redactHeaders(respDump)
-
-			if logger, ok := requester.(interface{ Logger() Logger }); ok {
-				logger.Logger().Debug("Aoni HTTP Diagnostic", "request", string(reqDump), "response", string(respDump))
-			} else {
-				fmt.Fprintf(
-					os.Stderr,
-					"\n--- HTTP DEBUG ---\n%s\n%s\n------------------\n",
-					string(reqDump),
-					string(respDump),
-				)
-			}
-		}
-	}
-
-	peekableReader := bufio.NewReader(resp.Body)
-
-	resp.Body = struct {
-		io.Reader
-		io.Closer
-	}{
-		Reader: peekableReader,
-		Closer: resp.Body,
-	}
-
-	decoder := JSONDecoder
-	if resp.Request != nil {
-		if cfg := GetRequestConfig(resp.Request.Context()); cfg != nil && cfg.Decoder != nil {
-			if d, ok := cfg.Decoder.(Decoder); ok {
-				decoder = d
-			}
-		}
-	}
-
-	_, isRaw := decoder.(rawDecoder)
-
-	if !isRaw {
-		if peekBytes, err := peekableReader.Peek(128); err == nil || (err == io.EOF && len(peekBytes) > 0) {
-			firstNonSpace := byte(0)
-			for _, b := range peekBytes {
-				if b != ' ' && b != '\t' && b != '\r' && b != '\n' {
-					firstNonSpace = b
-					break
-				}
-			}
-
-			if firstNonSpace == '<' {
-				bodyStr := strings.ToLower(string(peekBytes))
-				isHTML := strings.Contains(bodyStr, "<html") || strings.Contains(bodyStr, "<!doctype html")
-
-				if isHTML {
-					if strings.Contains(bodyStr, "cf-challenge") || strings.Contains(bodyStr, "ray id") ||
-						strings.Contains(bodyStr, "cloudflare") {
-						return ErrCloudflareChallenge
-					}
-
-					return fmt.Errorf("%w: expected structured data but got HTML", ErrUnexpectedContentType)
-				}
-			}
-		}
-	}
-
-	if contentType := resp.Header.Get("Content-Type"); contentType != "" {
-		if mediaType, _, err := mime.ParseMediaType(contentType); err == nil {
-			if (mediaType == "text/html" || mediaType == "application/xhtml+xml") && !isRaw {
-				bodyBytes, _ := io.ReadAll(io.LimitReader(resp.Body, 100*1024))
-				_ = resp.Body.Close()
-
-				bodyStr := string(bodyBytes)
-				if strings.Contains(bodyStr, "cf-challenge") || strings.Contains(bodyStr, "ray id") ||
-					strings.Contains(bodyStr, "cloudflare") {
-					return ErrCloudflareChallenge
-				}
-
-				return fmt.Errorf("%w: expected structured data but got HTML", ErrUnexpectedContentType)
-			}
-		}
-	}
-
-	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
-		bodyBytes, _ := io.ReadAll(io.LimitReader(resp.Body, 1024*1024))
-
-		apiErr := &APIError{StatusCode: resp.StatusCode, Body: bodyBytes}
-		if resp.Request != nil {
-			if cfg := GetRequestConfig(resp.Request.Context()); cfg != nil && cfg.ErrorModel != nil {
-				if err := json.Unmarshal(bodyBytes, cfg.ErrorModel); err == nil {
-					apiErr.Model = cfg.ErrorModel
-				}
-			}
-		}
-
-		return apiErr
-	}
-
-	if target == nil || resp.StatusCode == http.StatusNoContent {
-		bufPtr := bytePool.Get().(*[]byte)
-		_, _ = io.CopyBuffer(io.Discard, resp.Body, *bufPtr)
-		bytePool.Put(bufPtr)
-
-		return nil
-	}
-
-	var br BaseResponse
-	if p, ok := requester.(BaseResponseProvider); ok {
-		br = p.BaseResponse()
-	} else if provider, ok := requester.(interface{ Defaults() ClientDefaults }); ok {
-		if brFn := provider.Defaults().BaseResponse; brFn != nil {
-			br = brFn()
-		}
-	}
-
-	if br != nil {
-		br.SetData(target)
-
-		if err := decoder.Decode(resp.Body, br); err != nil {
-			return err
-		}
-
-		if !br.IsSuccess() {
-			return br.Error()
-		}
-
-		return nil
-	}
-
-	err := decoder.Decode(resp.Body, target)
-	if errors.Is(err, io.EOF) {
-		return nil
-	}
-
-	return err
-}
-
-func requestTo[Resp any](
-	ctx context.Context,
-	c Requester,
-	method, path string,
-	mods ...RequestModifier,
-) (*Resp, error) {
-	resp, err := c.Request(ctx, method, path, mods...)
-	if err != nil {
-		return nil, err
-	}
-
-	if reflect.TypeFor[Resp]() == reflect.TypeFor[NoResponse]() {
-		return nil, handleResponse(resp, nil, c)
-	}
-
-	result := new(Resp)
-	if err := handleResponse(resp, result, c); err != nil {
-		return nil, err
-	}
-
-	return result, nil
-}
-
-var sensitiveHeaders = map[string]bool{
-	"authorization":       true,
-	"cookie":              true,
-	"set-cookie":          true,
-	"proxy-authorization": true,
-}
-
-func redactHeaders(raw []byte) []byte {
-	lines := strings.Split(string(raw), "\r\n")
-	for i, line := range lines {
-		for header := range sensitiveHeaders {
-			prefix := header + ":"
-			if strings.HasPrefix(strings.ToLower(line), prefix) {
-				lines[i] = header + ": <redacted>"
-				break
-			}
-		}
-	}
-
-	return []byte(strings.Join(lines, "\r\n"))
 }

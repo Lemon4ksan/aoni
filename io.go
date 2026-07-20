@@ -5,10 +5,12 @@
 package aoni
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"errors"
 	"io"
+	"net"
 	"os"
 	"sync"
 	"sync/atomic"
@@ -428,4 +430,19 @@ func (r *jitterReader) Read(p []byte) (int, error) {
 	})
 
 	return r.ReadCloser.Read(p)
+}
+
+// bufferedConn wraps a net.Conn with a bufio.Reader so that leftover bytes
+// buffered during HTTP response parsing are returned before real network data.
+type bufferedConn struct {
+	net.Conn
+	r *bufio.Reader
+}
+
+func (c *bufferedConn) Read(b []byte) (int, error) {
+	if c.r.Buffered() > 0 {
+		return c.r.Read(b)
+	}
+
+	return c.Conn.Read(b)
 }

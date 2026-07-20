@@ -106,7 +106,7 @@ func TraceJA4(target *TraceInfo) RequestModifier {
 		// Allocate a store with a pointer to the target TraceInfo.
 		// dialTLSWithUTLS will write the TLS report to this store during the handshake.
 		// Client.Request will copy it to target after the request completes.
-		store := &ja4ReportStore{target: target}
+		store := &JA4ReportStore{Target: target}
 		getOrInitRequestConfig(req).JA4ReportStore = store
 
 		// Compute JA4H from request headers (available immediately)

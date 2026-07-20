@@ -2,7 +2,7 @@
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
-package aoni
+package cookie
 
 import (
 	"context"
@@ -18,7 +18,21 @@ import (
 
 type proxyCtxKey struct{}
 
-// ProxyIsolatedCookieJar is an isolated cookie jar that stores cookies per proxy URL.
+// WithProxyAddress attaches the active proxy URL string to the context.
+func WithProxyAddress(ctx context.Context, addr string) context.Context {
+	return context.WithValue(ctx, proxyCtxKey{}, addr)
+}
+
+// GetProxyAddress extracts the active proxy URL string from the context.
+func GetProxyAddress(ctx context.Context) string {
+	if val := ctx.Value(proxyCtxKey{}); val != nil {
+		return val.(string)
+	}
+
+	return ""
+}
+
+// ProxyIsolatedJar is an isolated cookie jar that stores cookies per proxy URL.
 // It is safe for concurrent use by multiple goroutines.
 //
 // Cookie isolation works for direct requests: the proxy URL is extracted from the
@@ -43,16 +57,16 @@ type proxyCtxKey struct{}
 // does not apply to redirect responses. In practice this is rarely an issue because
 // proxy servers typically do not return redirects, and cookies from the target server
 // arrive in the initial response before any redirect.
-type ProxyIsolatedCookieJar struct {
+type ProxyIsolatedJar struct {
 	mu      sync.RWMutex
 	jars    map[string]http.CookieJar
 	km      keylock.KeyMutex[string]
-	backend CookieStorageBackend
+	backend Storage
 }
 
-// NewProxyIsolatedCookieJar creates a new ProxyIsolatedCookieJar.
-func NewProxyIsolatedCookieJar() *ProxyIsolatedCookieJar {
-	return &ProxyIsolatedCookieJar{
+// NewProxyIsolatedJar creates a new ProxyIsolatedCookieJar.
+func NewProxyIsolatedJar() *ProxyIsolatedJar {
+	return &ProxyIsolatedJar{
 		jars: make(map[string]http.CookieJar),
 	}
 }
@@ -60,7 +74,7 @@ func NewProxyIsolatedCookieJar() *ProxyIsolatedCookieJar {
 // SetCookies implements the http.CookieJar interface.
 // For direct requests, uses the proxy URL from the request context.
 // For redirects (no context available), falls back to the default jar.
-func (p *ProxyIsolatedCookieJar) SetCookies(u *url.URL, cookies []*http.Cookie) {
+func (p *ProxyIsolatedJar) SetCookies(u *url.URL, cookies []*http.Cookie) {
 	jar := p.GetJarForProxy("")
 	if jar != nil {
 		jar.SetCookies(u, cookies)
@@ -70,7 +84,7 @@ func (p *ProxyIsolatedCookieJar) SetCookies(u *url.URL, cookies []*http.Cookie) 
 // Cookies implements the http.CookieJar interface.
 // For direct requests, uses the proxy URL from the request context.
 // For redirects (no context available), falls back to the default jar.
-func (p *ProxyIsolatedCookieJar) Cookies(u *url.URL) []*http.Cookie {
+func (p *ProxyIsolatedJar) Cookies(u *url.URL) []*http.Cookie {
 	jar := p.GetJarForProxy("")
 	if jar != nil {
 		return jar.Cookies(u)
@@ -81,7 +95,7 @@ func (p *ProxyIsolatedCookieJar) Cookies(u *url.URL) []*http.Cookie {
 
 // GetJarForProxy returns the specific [http.CookieJar] associated with the given proxy URL.
 // This is a high-level helper to manage proxy cookies programmatically.
-func (p *ProxyIsolatedCookieJar) GetJarForProxy(proxyURL string) http.CookieJar {
+func (p *ProxyIsolatedJar) GetJarForProxy(proxyURL string) http.CookieJar {
 	p.mu.RLock()
 	jar, ok := p.jars[proxyURL]
 	p.mu.RUnlock()
@@ -115,7 +129,7 @@ func (p *ProxyIsolatedCookieJar) GetJarForProxy(proxyURL string) http.CookieJar 
 			CookieJar:  baseJar,
 			proxyURL:   proxyURL,
 			backend:    backend,
-			cookiesMap: make(map[string]CookieData),
+			cookiesMap: make(map[string]Cookie),
 		}
 		// Load existing cookies from backend
 		if cookies, err := backend.Load(proxyURL); err == nil && len(cookies) > 0 {
@@ -163,7 +177,7 @@ func (p *ProxyIsolatedCookieJar) GetJarForProxy(proxyURL string) http.CookieJar 
 }
 
 // WithStorageBackend configures a persistent storage backend for cookies.
-func (p *ProxyIsolatedCookieJar) WithStorageBackend(backend CookieStorageBackend) *ProxyIsolatedCookieJar {
+func (p *ProxyIsolatedJar) WithStorageBackend(backend Storage) *ProxyIsolatedJar {
 	p.mu.Lock()
 	p.backend = backend
 	p.mu.Unlock()
@@ -171,13 +185,29 @@ func (p *ProxyIsolatedCookieJar) WithStorageBackend(backend CookieStorageBackend
 	return p
 }
 
+// CookiesForProxy manually retrieves cookies for a specific proxy URL.
+func (p *ProxyIsolatedJar) CookiesForProxy(proxyURL string, u *url.URL) []*http.Cookie {
+	jar := p.GetJarForProxy(proxyURL)
+	if jar != nil {
+		return jar.Cookies(u)
+	}
+
+	return nil
+}
+
+// GetJar returns the cookie jar for the given context, creating it if necessary.
+func (p *ProxyIsolatedJar) GetJar(ctx context.Context) http.CookieJar {
+	proxyURL := GetProxyAddress(ctx) // Используем наш хелпер
+	return p.GetJarForProxy(proxyURL)
+}
+
 // PersistentJar wraps http.CookieJar to save state to a CookieStorageBackend.
 type PersistentJar struct {
 	http.CookieJar
 	proxyURL   string
-	backend    CookieStorageBackend
+	backend    Storage
 	mu         sync.Mutex
-	cookiesMap map[string]CookieData
+	cookiesMap map[string]Cookie
 }
 
 // SetCookies implements the http.CookieJar interface.
@@ -212,7 +242,7 @@ func (pj *PersistentJar) SetCookies(u *url.URL, cookies []*http.Cookie) {
 		}
 
 		key := domain + "|" + path + "|" + c.Name
-		pj.cookiesMap[key] = CookieData{
+		pj.cookiesMap[key] = Cookie{
 			Name:     c.Name,
 			Value:    c.Value,
 			Domain:   domain,
@@ -233,9 +263,9 @@ func (pj *PersistentJar) SetCookies(u *url.URL, cookies []*http.Cookie) {
 		}
 	}
 
-	var list []CookieData
+	var list []Cookie
 	if changed {
-		list = make([]CookieData, 0, len(pj.cookiesMap))
+		list = make([]Cookie, 0, len(pj.cookiesMap))
 		for _, c := range pj.cookiesMap {
 			list = append(list, c)
 		}
@@ -249,29 +279,9 @@ func (pj *PersistentJar) SetCookies(u *url.URL, cookies []*http.Cookie) {
 }
 
 // SetCookiesForProxy manually stores cookies for a specific proxy URL.
-func (p *ProxyIsolatedCookieJar) SetCookiesForProxy(proxyURL string, u *url.URL, cookies []*http.Cookie) {
+func (p *ProxyIsolatedJar) SetCookiesForProxy(proxyURL string, u *url.URL, cookies []*http.Cookie) {
 	jar := p.GetJarForProxy(proxyURL)
 	if jar != nil {
 		jar.SetCookies(u, cookies)
 	}
-}
-
-// CookiesForProxy manually retrieves cookies for a specific proxy URL.
-func (p *ProxyIsolatedCookieJar) CookiesForProxy(proxyURL string, u *url.URL) []*http.Cookie {
-	jar := p.GetJarForProxy(proxyURL)
-	if jar != nil {
-		return jar.Cookies(u)
-	}
-
-	return nil
-}
-
-// GetJar returns the cookie jar for the given context, creating it if necessary.
-func (p *ProxyIsolatedCookieJar) GetJar(ctx context.Context) http.CookieJar {
-	proxyURL := ""
-	if val := ctx.Value(proxyCtxKey{}); val != nil {
-		proxyURL = val.(string)
-	}
-
-	return p.GetJarForProxy(proxyURL)
 }

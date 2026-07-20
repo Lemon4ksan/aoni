@@ -37,6 +37,8 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/lemon4ksan/aoni/cookie"
+	"github.com/lemon4ksan/aoni/h3"
 	"github.com/lemon4ksan/aoni/ja4"
 	"github.com/lemon4ksan/aoni/profiles"
 )
@@ -1436,17 +1438,17 @@ func TestClient_SourceIPRotator(t *testing.T) {
 func TestClient_ProxyIsolatedCookieJar(t *testing.T) {
 	t.Parallel()
 
-	jar := NewProxyIsolatedCookieJar()
+	jar := cookie.NewProxyIsolatedJar()
 	u, err := url.Parse("https://example.com")
 	require.NoError(t, err)
 
-	cookie := &http.Cookie{Name: "session", Value: "val1"}
+	c := &http.Cookie{Name: "session", Value: "val1"}
 
-	ctx1 := context.WithValue(t.Context(), proxyCtxKey{}, "http://proxy1:8080")
+	ctx1 := cookie.WithProxyAddress(t.Context(), "http://proxy1:8080")
 	subJar1 := jar.GetJar(ctx1)
-	subJar1.SetCookies(u, []*http.Cookie{cookie})
+	subJar1.SetCookies(u, []*http.Cookie{c})
 
-	ctx2 := context.WithValue(t.Context(), proxyCtxKey{}, "http://proxy2:8080")
+	ctx2 := cookie.WithProxyAddress(t.Context(), "http://proxy2:8080")
 	subJar2 := jar.GetJar(ctx2)
 	cookies2 := subJar2.Cookies(u)
 	assert.Empty(t, cookies2)
@@ -1803,7 +1805,7 @@ func TestClient_ParseAutoProxy(t *testing.T) {
 }
 
 func TestClient_HTTP3Settings(t *testing.T) {
-	client := NewClient(nil, WithClientHTTP3Settings(ChromeHTTP3Settings))
+	client := NewClient(nil, WithClientHTTP3Settings(h3.ChromeSettings))
 	assert.NotNil(t, client)
 }
 
@@ -1988,8 +1990,12 @@ func TestSensitiveDataRedactor(t *testing.T) {
 	cfg, ok := inspector.capturedReq.Context().Value(RedactConfigCtxKey{}).(*RedactConfig)
 	require.True(t, ok)
 	require.NotNil(t, cfg)
-	assert.True(t, cfg.Headers["authorization"])
-	assert.True(t, cfg.Headers["set-cookie"])
+
+	_, ok1 := cfg.Headers["authorization"]
+	_, ok2 := cfg.Headers["set-cookie"]
+
+	assert.True(t, ok1)
+	assert.True(t, ok2)
 }
 
 func TestHARGenerator(t *testing.T) {

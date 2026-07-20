@@ -105,6 +105,14 @@ func findPassChallengePath(html string) string {
 	return generic.Coalesce(match, "/.within.website/x/cmd/anubis/api/pass-challenge")
 }
 
+func main() {
+	target := "https://developer.valvesoftware.com/wiki/Source_SDK_Base_2013"
+
+	if err := run(context.Background(), target); err != nil {
+		panic(err)
+	}
+}
+
 func run(ctx context.Context, targetURL string) error {
 	jar, err := cookiejar.New(nil)
 	if err != nil {
@@ -189,12 +197,4 @@ func run(ctx context.Context, targetURL string) error {
 	}
 
 	return nil
-}
-
-func main() {
-	target := "https://developer.valvesoftware.com/wiki/Source_SDK_Base_2013"
-
-	if err := run(context.Background(), target); err != nil {
-		panic(err)
-	}
 }

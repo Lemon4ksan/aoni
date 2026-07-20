@@ -20,18 +20,10 @@ func TestClientWithPersona(t *testing.T) {
 
 	c2 := c.WithPersona(aoni.PersonaChrome120Windows)
 
-	assert.Equal(
-		t,
-		"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-		c2.Defaults().Headers.Get("User-Agent"),
-	)
+	assert.Equal(t, aoni.DefaultUserAgent, c2.Defaults().Headers.Get("User-Agent"))
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		assert.Equal(
-			t,
-			"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-			r.UserAgent(),
-		)
+		assert.Equal(t, aoni.DefaultUserAgent, r.UserAgent())
 		w.WriteHeader(http.StatusOK)
 	}))
 	defer server.Close()

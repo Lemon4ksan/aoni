@@ -381,7 +381,7 @@ func WithStreamingMultipart(fields map[string]string, files map[string]io.Reader
 }
 
 // WithOrderedHeaders sets the header serialization order for this
-// HTTP/1.1 request. For HTTP/2, use [H2FramedTransport] instead.
+// HTTP/1.1 request. For HTTP/2, use [FramedTransport] instead.
 func WithOrderedHeaders(order []string) RequestModifier {
 	return func(req *http.Request) {
 		getOrInitRequestConfig(req).OrderedHeaders = order

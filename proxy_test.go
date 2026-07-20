@@ -600,7 +600,7 @@ func TestProxyRotator_StickySessionCleanup(t *testing.T) {
 	r.mu.RLock()
 	entry, exists := r.sessions["session1"]
 	r.mu.RUnlock()
-	assert.True(t, exists)
+	require.True(t, exists)
 	assert.Equal(t, 0, entry.clientIdx)
 
 	time.Sleep(20 * time.Millisecond)
