@@ -14,7 +14,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
+	stdio "io"
 	"mime"
 	"net"
 	"net/http"
@@ -32,8 +32,10 @@ import (
 	"golang.org/x/text/transform"
 
 	"github.com/lemon4ksan/aoni/cookie"
-	"github.com/lemon4ksan/aoni/h2"
+	"github.com/lemon4ksan/aoni/internal/h1"
+	"github.com/lemon4ksan/aoni/internal/io"
 	"github.com/lemon4ksan/aoni/ja4"
+	"github.com/lemon4ksan/aoni/telemetry"
 )
 
 // IsBlockedIP returns true if the IP is a local or reserved IP.
@@ -143,8 +145,8 @@ func (c *Client) execute(req *http.Request, pipe PipelineConfig) (*http.Response
 		c.defaults.Inspector.Capture(req, resp, err, traceInfo)
 	}
 
-	if pipe.HAR != nil {
-		c.writeHARLog(req, resp, pipe.HAR, startTime, duration)
+	if pipe.HAR != nil && pipe.HAR.Tracker != nil {
+		pipe.HAR.Tracker.Record(req, resp, startTime, duration)
 	}
 
 	if err != nil {
@@ -299,7 +301,7 @@ func (c *Client) postProcessResponse(
 			return nil, bufErr
 		}
 
-		resp.Body = newResponseBodyReadCloser(resp.Body)
+		resp.Body = &io.ResponseBodyReadCloser{ReadCloser: resp.Body}
 	}
 
 	if pipe.Cache != nil && req.Method == http.MethodGet {
@@ -339,9 +341,9 @@ func (c *Client) applyDPIJitter(req *http.Request, cfg *DPIJitterConfig) {
 	}
 
 	if req.Body != nil && req.Body != http.NoBody {
-		req.Body = &jitterReader{
+		req.Body = &io.JitterReader{
 			ReadCloser: req.Body,
-			delay:      delay,
+			Delay:      delay,
 		}
 
 		return
@@ -367,7 +369,7 @@ func (c *Client) tryGetFromCache(req *http.Request, cfg *CacheConfig) (*http.Res
 		return nil, err
 	}
 
-	var cached cachedResponse
+	var cached CachedResponse
 	if decodeErr := json.Unmarshal(cachedData, &cached); decodeErr != nil {
 		return nil, decodeErr
 	}
@@ -376,7 +378,7 @@ func (c *Client) tryGetFromCache(req *http.Request, cfg *CacheConfig) (*http.Res
 	resp := &http.Response{
 		StatusCode:    cached.StatusCode,
 		Header:        cached.Header,
-		Body:          io.NopCloser(bytes.NewReader(bodyBytes)),
+		Body:          stdio.NopCloser(bytes.NewReader(bodyBytes)),
 		ContentLength: int64(len(bodyBytes)),
 		Request:       req,
 	}
@@ -397,17 +399,17 @@ func (c *Client) saveToCache(req *http.Request, resp *http.Response, cfg *CacheC
 
 	var bodyBuf bytes.Buffer
 
-	tee := io.TeeReader(resp.Body, &bodyBuf)
+	tee := stdio.TeeReader(resp.Body, &bodyBuf)
 
-	bodyBytes, readErr := io.ReadAll(tee)
+	bodyBytes, readErr := stdio.ReadAll(tee)
 	if readErr != nil {
 		return
 	}
 
 	_ = resp.Body.Close()
-	resp.Body = io.NopCloser(bytes.NewReader(bodyBytes))
+	resp.Body = stdio.NopCloser(bytes.NewReader(bodyBytes))
 
-	cached := cachedResponse{
+	cached := CachedResponse{
 		StatusCode: resp.StatusCode,
 		Header:     resp.Header,
 		BodyBase64: base64.StdEncoding.EncodeToString(bodyBytes),
@@ -440,82 +442,6 @@ func (c *Client) redactSensitiveData(req *http.Request, redact *RedactConfig) *h
 	)
 }
 
-func (c *Client) writeHARLog(
-	req *http.Request,
-	resp *http.Response,
-	har *HARConfig,
-	startTime time.Time,
-	duration int64,
-) {
-	if har == nil || har.Generator == nil || resp == nil {
-		return
-	}
-
-	var reqHeaders []HARHeaderField
-	for k, v := range req.Header {
-		for _, val := range v {
-			reqHeaders = append(reqHeaders, HARHeaderField{Name: k, Value: val})
-		}
-	}
-
-	var reqBodySize int64
-	if req.Body != nil && req.Body != http.NoBody {
-		if req.ContentLength > 0 {
-			reqBodySize = req.ContentLength
-		}
-	}
-
-	var respHeaders []HARHeaderField
-	for k, v := range resp.Header {
-		for _, val := range v {
-			respHeaders = append(respHeaders, HARHeaderField{Name: k, Value: val})
-		}
-	}
-
-	var bodyBytes []byte
-	if resp.Body != nil {
-		bodyBytes, _ = io.ReadAll(resp.Body)
-		_ = resp.Body.Close()
-		resp.Body = io.NopCloser(bytes.NewReader(bodyBytes))
-	}
-
-	har.Generator.AddEntry(HAREntry{
-		StartedDateTime: startTime.UTC().Format(time.RFC3339Nano),
-		Time:            duration,
-		Request: HARRequest{
-			Method:      req.Method,
-			URL:         req.URL.String(),
-			HTTPVersion: req.Proto,
-			Headers:     reqHeaders,
-			Cookies:     []any{},
-			QueryString: []any{},
-			HeadersSize: -1,
-			BodySize:    reqBodySize,
-		},
-		Response: HARResponse{
-			Status:      resp.StatusCode,
-			StatusText:  resp.Status,
-			HTTPVersion: resp.Proto,
-			Headers:     respHeaders,
-			Cookies:     []any{},
-			Content: HARContent{
-				Size:     int64(len(bodyBytes)),
-				MimeType: resp.Header.Get("Content-Type"),
-				Text:     string(bodyBytes),
-			},
-			RedirectURL: resp.Header.Get("Location"),
-			HeadersSize: -1,
-			BodySize:    int64(len(bodyBytes)),
-		},
-		Cache: struct{}{},
-		Timings: HARTimings{
-			Send:    0,
-			Wait:    duration,
-			Receive: 0,
-		},
-	})
-}
-
 func (c *Client) limitResponseSize(resp *http.Response, maxSize int64) error {
 	if resp == nil || resp.Body == nil || maxSize <= 0 {
 		return nil
@@ -526,9 +452,9 @@ func (c *Client) limitResponseSize(resp *http.Response, maxSize int64) error {
 		return fmt.Errorf("aoni: response too large: %w", ErrResponseTooLarge)
 	}
 
-	resp.Body = &limitCheckingReadCloser{
+	resp.Body = &io.LimitCheckingReadCloser{
 		ReadCloser: resp.Body,
-		limit:      maxSize,
+		Limit:      maxSize,
 	}
 
 	return nil
@@ -671,12 +597,12 @@ func (c *Client) handleWAFChallenge(req *http.Request, resp *http.Response) (*ht
 
 	if resp != nil && resp.Body != nil {
 		// Read up to 100 KB explicitly to analyze the body for WAF signatures
-		bodyBytes, err := io.ReadAll(io.LimitReader(resp.Body, 100*1024))
+		bodyBytes, err := stdio.ReadAll(stdio.LimitReader(resp.Body, 100*1024))
 		if err != nil {
 			return resp, nil //nolint:nilerr
 		}
 
-		buffered := &ExplicitBufferedBody{
+		buffered := &io.ExplicitBufferedBody{
 			Prefix: bodyBytes,
 			Stream: resp.Body,
 		}
@@ -713,7 +639,7 @@ func (c *Client) applyMultiReadBuffering(_ *http.Request, resp *http.Response, c
 	}
 
 	if threshold > 0 && resp.Body != nil {
-		mBody, err := newMultiReadBody(resp.Body, threshold, disableDisk)
+		mBody, err := io.NewMultiReadBody(resp.Body, threshold, disableDisk)
 		if err != nil {
 			_ = resp.Body.Close()
 			return err
@@ -732,18 +658,18 @@ func (c *Client) handleDecompressionAndTranscoding(req *http.Request, resp *http
 
 	cfg := GetRequestConfig(req.Context())
 	if cfg != nil && cfg.DownloadProgress != nil {
-		resp.Body = &progressReader{
-			reader:     resp.Body,
-			total:      resp.ContentLength,
-			onProgress: cfg.DownloadProgress,
+		resp.Body = &io.ProgressReader{
+			Reader:     resp.Body,
+			Total:      resp.ContentLength,
+			OnProgress: cfg.DownloadProgress,
 		}
 	}
 
 	switch resp.Header.Get("Content-Encoding") {
 	case "br":
-		resp.Body = &decompressReadCloser{
+		resp.Body = &io.DecompressReadCloser{
 			Reader: brotli.NewReader(resp.Body),
-			closer: resp.Body,
+			Closer: resp.Body,
 		}
 		resp.Header.Del("Content-Encoding")
 		resp.Header.Del("Content-Length")
@@ -751,9 +677,9 @@ func (c *Client) handleDecompressionAndTranscoding(req *http.Request, resp *http
 
 	case "zstd":
 		if zstdDec, err := zstd.NewReader(resp.Body); err == nil {
-			resp.Body = &decompressReadCloser{
+			resp.Body = &io.DecompressReadCloser{
 				Reader: zstdDec,
-				closer: resp.Body,
+				Closer: resp.Body,
 			}
 			resp.Header.Del("Content-Encoding")
 			resp.Header.Del("Content-Length")
@@ -764,9 +690,9 @@ func (c *Client) handleDecompressionAndTranscoding(req *http.Request, resp *http
 
 	case "gzip":
 		if gzReader, err := gzip.NewReader(resp.Body); err == nil {
-			resp.Body = &decompressReadCloser{
+			resp.Body = &io.DecompressReadCloser{
 				Reader: gzReader,
-				closer: resp.Body,
+				Closer: resp.Body,
 			}
 			resp.Header.Del("Content-Encoding")
 			resp.Header.Del("Content-Length")
@@ -783,8 +709,8 @@ func (c *Client) handleDecompressionAndTranscoding(req *http.Request, resp *http
 				if charset != "utf-8" && charset != "utf8" {
 					if enc, err := htmlindex.Get(charset); err == nil {
 						resp.Body = struct {
-							io.Reader
-							io.Closer
+							stdio.Reader
+							stdio.Closer
 						}{
 							Reader: transform.NewReader(resp.Body, enc.NewDecoder()),
 							Closer: resp.Body,
@@ -826,7 +752,7 @@ func (c *Client) executeWithHedging(req *http.Request, pipeHedging *HedgingConfi
 		resp, err = c.engine.Do(req)
 	}
 
-	var tracker *RTTTracker
+	var tracker *telemetry.RTTTracker
 	if pipeHedging != nil && pipeHedging.DynamicHedging != nil {
 		tracker = pipeHedging.DynamicHedging.Tracker
 	} else if c.network.DynamicHedging != nil {
@@ -880,9 +806,9 @@ func (c *Client) dispatchHedgingAttempts(req *http.Request, delay time.Duration)
 
 				cleanup(winner)
 
-				res.resp.Body = &contextCancelingReadCloser{
+				res.resp.Body = &io.ContextCancelingReadCloser{
 					ReadCloser: res.resp.Body,
-					cancel:     cancelWinner,
+					Cancel:     cancelWinner,
 				}
 
 				return res.resp, nil
@@ -1024,7 +950,7 @@ func (c connWrapper) Wrap(ctx context.Context, conn net.Conn) net.Conn {
 		}
 
 		if len(cfg.OrderedHeaders) > 0 {
-			conn = &h2.HeaderOrderingConn{Conn: conn, OrderedKeys: cfg.OrderedHeaders}
+			conn = &h1.HeaderOrderingConn{Conn: conn, OrderedKeys: cfg.OrderedHeaders}
 		}
 
 		if cfg.Fragment != nil {
@@ -1080,17 +1006,4 @@ func isCrossOrigin(u1, u2 *url.URL) bool {
 	}
 
 	return false
-}
-
-func unwrapBody(c io.Closer) io.Closer {
-	for {
-		u, ok := c.(interface{ Unwrap() io.Closer })
-		if !ok {
-			break
-		}
-
-		c = u.Unwrap()
-	}
-
-	return c
 }

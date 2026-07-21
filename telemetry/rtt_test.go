@@ -2,7 +2,7 @@
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
-package aoni
+package telemetry
 
 import (
 	"sync"
@@ -112,6 +112,30 @@ func TestRTTTracker_Reset(t *testing.T) {
 	assert.Equal(t, time.Duration(0), tracker.AverageRTT())
 }
 
+func TestRTTTracker_Concurrency(t *testing.T) {
+	t.Parallel()
+
+	tracker := NewRTTTracker(50)
+
+	var wg sync.WaitGroup
+
+	for i := range 100 {
+		wg.Add(1)
+
+		go func(val int) {
+			defer wg.Done()
+
+			tracker.Record(time.Duration(val) * time.Millisecond)
+			_ = tracker.P95()
+			_ = tracker.SmoothedRTT()
+			_ = tracker.AverageRTT()
+		}(i)
+	}
+
+	wg.Wait()
+	assert.Equal(t, 50, tracker.Count())
+}
+
 func TestDynamicHedgingConfig_ComputeDelay(t *testing.T) {
 	t.Parallel()
 
@@ -180,28 +204,4 @@ func TestDynamicHedgingConfig_ComputeDelay(t *testing.T) {
 		}
 		assert.Equal(t, 300*time.Millisecond, cfgMaxCap.ComputeDelay())
 	})
-}
-
-func TestRTTTracker_Concurrency(t *testing.T) {
-	t.Parallel()
-
-	tracker := NewRTTTracker(50)
-
-	var wg sync.WaitGroup
-
-	for i := range 100 {
-		wg.Add(1)
-
-		go func(val int) {
-			defer wg.Done()
-
-			tracker.Record(time.Duration(val) * time.Millisecond)
-			_ = tracker.P95()
-			_ = tracker.SmoothedRTT()
-			_ = tracker.AverageRTT()
-		}(i)
-	}
-
-	wg.Wait()
-	assert.Equal(t, 50, tracker.Count())
 }

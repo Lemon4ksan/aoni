@@ -16,12 +16,6 @@ import (
 // Concrete modifier implementations are located in the [github.com/lemon4ksan/aoni/mod] package.
 type RequestModifier = generic.Option[*http.Request]
 
-func withHeader(key, value string) RequestModifier {
-	return func(req *http.Request) {
-		req.Header.Set(key, value)
-	}
-}
-
 func withOrderedHeaders(headers []string) RequestModifier {
 	return func(req *http.Request) {
 		GetOrInitRequestConfig(req).OrderedHeaders = headers

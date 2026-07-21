@@ -22,6 +22,7 @@ import (
 
 	"github.com/lemon4ksan/aoni"
 	"github.com/lemon4ksan/aoni/ja4"
+	"github.com/lemon4ksan/aoni/middleware"
 	"github.com/lemon4ksan/aoni/mod"
 	"github.com/lemon4ksan/aoni/option"
 )
@@ -573,15 +574,15 @@ func TestNewStdClient_Resilience_IntegratesMiddlewares(t *testing.T) {
 
 		var attempts atomic.Int32
 
-		retryOpts := aoni.RetryOptions{
+		retryOpts := middleware.RetryOptions{
 			MaxRetries:     5,
 			Backoff:        0,
-			JitterStrategy: aoni.JitterEqual,
+			JitterStrategy: middleware.JitterEqual,
 		}
 
-		doer := aoni.Chain(
+		doer := middleware.Chain(
 			&http.Client{},
-			aoni.RetryMiddleware(retryOpts, aoni.RetryOnGatewayErrors()),
+			middleware.Retry(retryOpts, aoni.RetryOnGatewayErrors()),
 		)
 
 		c := aoni.NewClient(doer)
@@ -610,7 +611,7 @@ func TestNewStdClient_Resilience_IntegratesMiddlewares(t *testing.T) {
 	t.Run("with_circuit_breaker", func(t *testing.T) {
 		t.Parallel()
 
-		cb := aoni.NewCircuitBreaker(aoni.CircuitBreakerConfig{
+		cb := middleware.NewCircuitBreaker(middleware.CircuitBreakerConfig{
 			FailureThreshold: 0.5,
 			MinRequests:      2,
 			Cooldown:         0,
@@ -619,9 +620,9 @@ func TestNewStdClient_Resilience_IntegratesMiddlewares(t *testing.T) {
 
 		var attempts atomic.Int32
 
-		doer := aoni.Chain(
+		doer := middleware.Chain(
 			&http.Client{},
-			aoni.CircuitBreakerMiddleware(cb, aoni.DefaultCircuitBreakerCondition),
+			middleware.CircuitBreak(cb, middleware.DefaultCircuitBreakerCondition),
 		)
 
 		c := aoni.NewClient(doer)
@@ -701,7 +702,7 @@ func TestAoniTransport_RoundTrip_TraceContext(t *testing.T) {
 	req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, "http://localhost", nil)
 	require.NoError(t, err)
 
-	aoni.WithTraceContext()(req)
+	mod.WithTraceContext()(req)
 
 	resp, err := tr.RoundTrip(req)
 	require.NoError(t, err)

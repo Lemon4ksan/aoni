@@ -2,7 +2,7 @@
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
-package aoni
+package stream
 
 import (
 	"bufio"
@@ -14,22 +14,25 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+
+	"github.com/lemon4ksan/aoni"
+	"github.com/lemon4ksan/aoni/mod"
 )
 
-// StreamResponse wraps an [http.Response] and manages connection reading streams.
-// Callers are responsible for calling [StreamResponse.Close] after read operations complete.
-type StreamResponse struct {
+// Response wraps an [http.Response] and manages connection reading streams.
+// Callers are responsible for calling [Response.Close] after read operations complete.
+type Response struct {
 	resp *http.Response
 }
 
-// Stream executes a GET request and returns the resulting connection body as [StreamResponse].
+// Get executes a GET request and returns the resulting connection body as [Response].
 // Callers must ensure the returned stream is closed when done.
-func Stream(
+func Get(
 	ctx context.Context,
-	c Requester,
+	c aoni.Requester,
 	path string,
-	mods ...RequestModifier,
-) (*StreamResponse, error) {
+	mods ...aoni.RequestModifier,
+) (*Response, error) {
 	resp, err := c.Request(ctx, http.MethodGet, path, mods...)
 	if err != nil {
 		return nil, err
@@ -37,69 +40,67 @@ func Stream(
 
 	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
 		_ = resp.Body.Close()
-		return nil, &APIError{StatusCode: resp.StatusCode, Body: nil}
+		return nil, &aoni.APIError{StatusCode: resp.StatusCode, Body: nil}
 	}
 
-	return &StreamResponse{resp: resp}, nil
+	return &Response{resp: resp}, nil
 }
 
-// StreamWithBody executes an HTTP request with the provided body and returns a raw [StreamResponse].
-func StreamWithBody(
+// WithBody executes an HTTP request with the provided body and returns a raw [Response].
+func WithBody(
 	ctx context.Context,
-	c Requester,
+	c aoni.Requester,
 	method, path string,
 	body io.Reader,
-	mods ...RequestModifier,
-) (*StreamResponse, error) {
-	resp, err := c.Request(ctx, method, path, append(mods, withBody(body))...)
+	mods ...aoni.RequestModifier,
+) (*Response, error) {
+	resp, err := c.Request(ctx, method, path, append(mods, mod.WithBody(body))...)
 	if err != nil {
 		return nil, err
 	}
 
 	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
 		_ = resp.Body.Close()
-		return nil, &APIError{StatusCode: resp.StatusCode, Body: nil}
+		return nil, &aoni.APIError{StatusCode: resp.StatusCode, Body: nil}
 	}
 
-	return &StreamResponse{resp: resp}, nil
+	return &Response{resp: resp}, nil
 }
 
 // Read reads connection body data into p.
-func (s *StreamResponse) Read(p []byte) (n int, err error) {
+func (s *Response) Read(p []byte) (n int, err error) {
 	return s.resp.Body.Read(p)
 }
 
 // Close closes the underlying network response body stream.
-func (s *StreamResponse) Close() error {
+func (s *Response) Close() error {
 	return s.resp.Body.Close()
 }
 
 // ContentLength returns the response body content length, or -1 if unknown.
-func (s *StreamResponse) ContentLength() int64 {
+func (s *Response) ContentLength() int64 {
 	return s.resp.ContentLength
 }
 
 // ContentType returns the Content-Type header field value.
-func (s *StreamResponse) ContentType() string {
+func (s *Response) ContentType() string {
 	return s.resp.Header.Get("Content-Type")
 }
 
 // StatusCode returns the HTTP status code of the response.
-func (s *StreamResponse) StatusCode() int {
+func (s *Response) StatusCode() int {
 	return s.resp.StatusCode
 }
 
 // Response returns the underlying raw [http.Response] structure.
-func (s *StreamResponse) Response() *http.Response {
+func (s *Response) Response() *http.Response {
 	return s.resp
 }
 
-var _ io.Reader = (*StreamResponse)(nil)
-
-// StreamNDJSON reads a newline-delimited JSON stream from the [StreamResponse] body.
+// GetNDJSON reads a newline-delimited JSON stream from the [Response] body.
 // It parses values concurrently in a background goroutine and pushes them to the returned channel.
 // It automatically closes channels and connection streams when done or on context cancellation.
-func StreamNDJSON[T any](ctx context.Context, resp *StreamResponse) (<-chan T, <-chan error) {
+func GetNDJSON[T any](ctx context.Context, resp *Response) (<-chan T, <-chan error) {
 	out := make(chan T)
 	errs := make(chan error, 1)
 
@@ -152,7 +153,7 @@ type SSEEvent struct {
 }
 
 // ParseSSE parses a Server-Sent Event stream and returns a channel of parsed events and an error channel.
-func ParseSSE[T any](ctx context.Context, resp *StreamResponse) (<-chan T, <-chan error) {
+func ParseSSE[T any](ctx context.Context, resp *Response) (<-chan T, <-chan error) {
 	out := make(chan T, 100)
 	errs := make(chan error, 1)
 
@@ -247,22 +248,22 @@ func ParseSSE[T any](ctx context.Context, resp *StreamResponse) (<-chan T, <-cha
 	return out, errs
 }
 
-// StreamSSE parses incoming Server-Sent Events from the [StreamResponse] body.
+// SSE parses incoming Server-Sent Events from the [Response] body.
 // It executes a background parsing loop and closes returned channels when done.
-func StreamSSE[T any](
+func SSE[T any](
 	ctx context.Context,
-	c Requester,
+	c aoni.Requester,
 	path string,
-	mods ...RequestModifier,
+	mods ...aoni.RequestModifier,
 ) (<-chan T, <-chan error, error) {
-	sseMods := []RequestModifier{ //nolint:prealloc
-		withHeader("Accept", "text/event-stream"),
-		withHeader("Cache-Control", "no-cache"),
-		withHeader("Connection", "keep-alive"),
+	sseMods := []aoni.RequestModifier{ //nolint:prealloc
+		mod.WithHeader("Accept", "text/event-stream"),
+		mod.WithHeader("Cache-Control", "no-cache"),
+		mod.WithHeader("Connection", "keep-alive"),
 	}
 	mods = append(sseMods, mods...)
 
-	resp, err := Stream(ctx, c, path, mods...)
+	resp, err := Get(ctx, c, path, mods...)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -272,9 +273,9 @@ func StreamSSE[T any](
 	return out, errs, nil
 }
 
-// StreamChunks reads raw data from the stream chunk-by-chunk and yields them as strings.
+// Chunks reads raw data from the stream chunk-by-chunk and yields them as strings.
 // This is a high-level helper suitable for or real-time streaming.
-func StreamChunks(ctx context.Context, resp *StreamResponse) (<-chan string, <-chan error) {
+func Chunks(ctx context.Context, resp *Response) (<-chan string, <-chan error) {
 	out := make(chan string, 100)
 	errs := make(chan error, 1)
 

@@ -2,19 +2,17 @@
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
-package aoni
+package middleware
 
 import (
 	"bytes"
 	"context"
 	"crypto/rand"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"math"
 	"math/big"
-	"net"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -27,16 +25,14 @@ import (
 	"github.com/lemon4ksan/miyako/sync/keylock"
 	"github.com/lemon4ksan/miyako/sync/limiter"
 	"golang.org/x/time/rate"
-)
 
-// Middleware wraps an [HTTPDoer] with additional request/response
-// processing logic. Pass to [Chain] to compose multiple layers.
-type Middleware func(next HTTPDoer) HTTPDoer
+	"github.com/lemon4ksan/aoni"
+)
 
 // Chain wraps doer with middlewares from left to right: the first
 // middleware in the slice executes first. Returns doer unmodified
 // when middlewares is empty.
-func Chain(doer HTTPDoer, middlewares ...Middleware) HTTPDoer {
+func Chain(doer aoni.HTTPDoer, middlewares ...aoni.Middleware) aoni.HTTPDoer {
 	for i := len(middlewares) - 1; i >= 0; i-- {
 		doer = middlewares[i](doer)
 	}
@@ -44,12 +40,12 @@ func Chain(doer HTTPDoer, middlewares ...Middleware) HTTPDoer {
 	return doer
 }
 
-// LoggingMiddleware returns a middleware that logs HTTP requests using the provided logger.
+// Log returns a middleware that logs HTTP requests using the provided logger.
 //
 // It hides the sensitive values for keys "key", "access_token" and "token".
-func LoggingMiddleware(logger Logger) Middleware {
-	return func(next HTTPDoer) HTTPDoer {
-		return DoerFunc(func(req *http.Request) (*http.Response, error) {
+func Log(logger aoni.Logger) aoni.Middleware {
+	return func(next aoni.HTTPDoer) aoni.HTTPDoer {
+		return aoni.DoerFunc(func(req *http.Request) (*http.Response, error) {
 			start := time.Now()
 			resp, err := next.Do(req)
 
@@ -65,10 +61,10 @@ func LoggingMiddleware(logger Logger) Middleware {
 	}
 }
 
-// RateLimitMiddleware returns a [Middleware] that blocks when the
+// RateLimit returns a [Middleware] that blocks when the
 // request rate exceeds rps with burst tolerance. The limiter uses
 // a token bucket algorithm from [golang.org/x/time/rate].
-func RateLimitMiddleware(rps float64, burst int) Middleware {
+func RateLimit(rps float64, burst int) aoni.Middleware {
 	if rps < 0 {
 		rps = 0
 	}
@@ -79,8 +75,8 @@ func RateLimitMiddleware(rps float64, burst int) Middleware {
 
 	limiter := rate.NewLimiter(rate.Limit(rps), burst)
 
-	return func(next HTTPDoer) HTTPDoer {
-		return DoerFunc(func(req *http.Request) (*http.Response, error) {
+	return func(next aoni.HTTPDoer) aoni.HTTPDoer {
+		return aoni.DoerFunc(func(req *http.Request) (*http.Response, error) {
 			if err := limiter.Wait(req.Context()); err != nil {
 				return nil, fmt.Errorf("aoni: rate limit wait failed: %w", err)
 			}
@@ -100,7 +96,7 @@ const (
 	JitterFull
 )
 
-// RetryOptions configures [RetryMiddleware].
+// RetryOptions configures [Retry].
 type RetryOptions struct {
 	// MaxRetries is the maximum number of retry attempts after the initial failure (0 = no retries).
 	MaxRetries uint32
@@ -117,58 +113,7 @@ type RetryOptions struct {
 	OnRetry func(attempt uint32, err error, delay time.Duration)
 }
 
-// RetryCondition reports whether a failed request should be retried.
-type RetryCondition func(resp *http.Response, err error) bool
-
-// RetryOnErr returns a [RetryCondition] that retries on any non-nil error.
-func RetryOnErr() RetryCondition {
-	return func(resp *http.Response, err error) bool {
-		return err != nil
-	}
-}
-
-// RetryOnTransientErrors returns a [RetryCondition] that retries on
-// network errors, connection resets, and broken pipes.
-func RetryOnTransientErrors() RetryCondition {
-	return func(resp *http.Response, err error) bool {
-		if err != nil {
-			var netErr net.Error
-			if errors.As(err, &netErr) {
-				return true
-			}
-
-			errStr := err.Error()
-
-			return strings.Contains(errStr, "connection refused") ||
-				strings.Contains(errStr, "connection reset") ||
-				strings.Contains(errStr, "broken pipe")
-		}
-
-		return false
-	}
-}
-
-// RetryOnRateLimit returns a [RetryCondition] that retries on HTTP 429.
-func RetryOnRateLimit() RetryCondition {
-	return func(resp *http.Response, err error) bool {
-		return resp != nil && resp.StatusCode == http.StatusTooManyRequests
-	}
-}
-
-// RetryOnGatewayErrors returns a [RetryCondition] that retries on
-// HTTP 502, 503, and 504 status codes.
-func RetryOnGatewayErrors() RetryCondition {
-	return func(resp *http.Response, err error) bool {
-		if resp != nil {
-			sc := resp.StatusCode
-			return sc == http.StatusBadGateway || sc == http.StatusServiceUnavailable || sc == http.StatusGatewayTimeout
-		}
-
-		return false
-	}
-}
-
-// RetryMiddleware returns a [Middleware] that retries requests
+// Retry returns a [Middleware] that retries requests
 // matching condition up to opts.MaxRetries times. The request
 // body is buffered in memory so it can be replayed. The middleware
 // respects the Retry-After header when present and falls back to
@@ -176,17 +121,17 @@ func RetryOnGatewayErrors() RetryCondition {
 //
 // If the request carries a [WithRetryPolicy] override, its values take
 // precedence over the global opts and condition for that request only.
-func RetryMiddleware(opts RetryOptions, condition RetryCondition) Middleware {
+func Retry(opts RetryOptions, condition aoni.RetryCondition) aoni.Middleware {
 	opts.MaxRetries = generic.Coalesce(opts.MaxRetries, 3)
 	opts.Backoff = max(generic.Coalesce(opts.Backoff, 1*time.Second), 0)
 
-	return func(next HTTPDoer) HTTPDoer {
-		return DoerFunc(func(req *http.Request) (*http.Response, error) {
+	return func(next aoni.HTTPDoer) aoni.HTTPDoer {
+		return aoni.DoerFunc(func(req *http.Request) (*http.Response, error) {
 			// Per-request override takes precedence over global opts.
 			activeOpts := opts
 
 			activeCond := condition
-			if override, ok := GetRetryOverride(req.Context()).Value(); ok {
+			if override, ok := aoni.GetRetryOverride(req.Context()).Value(); ok {
 				if override.MaxAttempts > 0 {
 					activeOpts.MaxRetries = uint32(override.MaxAttempts - 1) //nolint:gosec
 				}
@@ -262,47 +207,11 @@ func RetryMiddleware(opts RetryOptions, condition RetryCondition) Middleware {
 	}
 }
 
-// ProxyRetryCondition returns a [RetryCondition] that retries when
-// rotator considers the response or error a proxy fault.
-func ProxyRetryCondition(rotator *ProxyRotator) RetryCondition {
-	return func(resp *http.Response, err error) bool {
-		return rotator.isProxyFault(resp, err)
-	}
-}
-
-// Or combines multiple [RetryCondition] functions into a single condition
-// that returns true if ANY of the underlying conditions return true.
-func Or(conditions ...RetryCondition) RetryCondition {
-	return func(resp *http.Response, err error) bool {
-		for _, cond := range conditions {
-			if cond != nil && cond(resp, err) {
-				return true
-			}
-		}
-
-		return false
-	}
-}
-
-// And combines multiple [RetryCondition] functions into a single condition
-// that returns true if ALL of the underlying conditions return true.
-func And(conditions ...RetryCondition) RetryCondition {
-	return func(resp *http.Response, err error) bool {
-		for _, cond := range conditions {
-			if cond == nil || !cond(resp, err) {
-				return false
-			}
-		}
-
-		return true
-	}
-}
-
-// RecoveryMiddleware catches panics during request execution, calls
+// Recover catches panics during request execution, calls
 // onPanic with the recovered value (if non-nil), and returns an error.
-func RecoveryMiddleware(onPanic func(any)) Middleware {
-	return func(next HTTPDoer) HTTPDoer {
-		return DoerFunc(func(req *http.Request) (resp *http.Response, err error) {
+func Recover(onPanic func(any)) aoni.Middleware {
+	return func(next aoni.HTTPDoer) aoni.HTTPDoer {
+		return aoni.DoerFunc(func(req *http.Request) (resp *http.Response, err error) {
 			defer func() {
 				if r := recover(); r != nil {
 					if onPanic != nil {
@@ -404,7 +313,7 @@ func DefaultCircuitBreakerCondition(resp *http.Response, err error) bool {
 	return false
 }
 
-// CircuitBreakerMiddleware returns a [Middleware] that gates
+// CircuitBreak returns a [Middleware] that gates
 // requests through cb per host. When the circuit is open the
 // request fails immediately with an error. isFailure determines
 // which responses count as failures; nil uses
@@ -413,13 +322,13 @@ func DefaultCircuitBreakerCondition(resp *http.Response, err error) bool {
 // The circuit breaker uses a sliding window: failures are tracked
 // over [CircuitBreakerConfig.Window] and compared against
 // [CircuitBreakerConfig.FailureThreshold] ratio.
-func CircuitBreakerMiddleware(cb *CircuitBreaker, isFailure func(*http.Response, error) bool) Middleware {
+func CircuitBreak(cb *CircuitBreaker, isFailure func(*http.Response, error) bool) aoni.Middleware {
 	if isFailure == nil {
 		isFailure = DefaultCircuitBreakerCondition
 	}
 
-	return func(next HTTPDoer) HTTPDoer {
-		return DoerFunc(func(req *http.Request) (*http.Response, error) {
+	return func(next aoni.HTTPDoer) aoni.HTTPDoer {
+		return aoni.DoerFunc(func(req *http.Request) (*http.Response, error) {
 			host := req.URL.Host
 			b := cb.getBreaker(host)
 
@@ -463,77 +372,26 @@ func CircuitBreakerMiddleware(cb *CircuitBreaker, isFailure func(*http.Response,
 	}
 }
 
-// FallbackFunc provides an alternate response when a request fails.
-type FallbackFunc func(req *http.Request, origErr error) (*http.Response, error)
-
-// WithFallback returns a [RequestModifier] that registers f as the
-// fallback for this request. See [FallbackMiddleware].
-func WithFallback(f FallbackFunc) RequestModifier {
-	return func(req *http.Request) {
-		GetOrInitRequestConfig(req).Fallback = f
-	}
-}
-
-// FallbackString returns a [FallbackFunc] that responds with plain text and the given statusCode.
-func FallbackString(statusCode int, text string) FallbackFunc {
-	return func(req *http.Request, origErr error) (*http.Response, error) {
-		return &http.Response{
-			StatusCode:    statusCode,
-			Status:        http.StatusText(statusCode),
-			Proto:         "HTTP/1.1",
-			ProtoMajor:    1,
-			ProtoMinor:    1,
-			Header:        http.Header{"Content-Type": []string{"text/plain; charset=utf-8"}},
-			Body:          io.NopCloser(strings.NewReader(text)),
-			ContentLength: int64(len(text)),
-			Request:       req,
-		}, nil
-	}
-}
-
-// FallbackJSON returns a [FallbackFunc] that responds with data
-// serialized as JSON and the given statusCode.
-func FallbackJSON(statusCode int, data any) FallbackFunc {
-	return func(req *http.Request, origErr error) (*http.Response, error) {
-		bodyBytes, err := json.Marshal(data)
-		if err != nil {
-			return nil, err
-		}
-
-		return &http.Response{
-			StatusCode:    statusCode,
-			Status:        http.StatusText(statusCode),
-			Proto:         "HTTP/1.1",
-			ProtoMajor:    1,
-			ProtoMinor:    1,
-			Header:        http.Header{"Content-Type": []string{"application/json"}},
-			Body:          io.NopCloser(bytes.NewReader(bodyBytes)),
-			ContentLength: int64(len(bodyBytes)),
-			Request:       req,
-		}, nil
-	}
-}
-
-// FallbackMiddleware returns a [Middleware] that invokes the
+// Fallback returns a [Middleware] that invokes the
 // [FallbackFunc] registered via [WithFallback] when the request
 // fails with any error.
-func FallbackMiddleware() Middleware {
-	return FallbackMiddlewareEx(nil)
+func Fallback() aoni.Middleware {
+	return FallbackEx(nil)
 }
 
-// FallbackMiddlewareEx is like [FallbackMiddleware] but uses isFailure
+// FallbackEx is like [Fallback] but uses isFailure
 // to decide which responses trigger the fallback. When isFailure is
 // nil, any non-nil error triggers it.
-func FallbackMiddlewareEx(isFailure func(*http.Response, error) bool) Middleware {
+func FallbackEx(isFailure func(*http.Response, error) bool) aoni.Middleware {
 	if isFailure == nil {
 		isFailure = func(resp *http.Response, err error) bool { return err != nil }
 	}
 
-	return func(next HTTPDoer) HTTPDoer {
-		return DoerFunc(func(req *http.Request) (*http.Response, error) {
+	return func(next aoni.HTTPDoer) aoni.HTTPDoer {
+		return aoni.DoerFunc(func(req *http.Request) (*http.Response, error) {
 			resp, err := next.Do(req)
 			if isFailure(resp, err) {
-				cfg := GetRequestConfig(req.Context())
+				cfg := aoni.GetRequestConfig(req.Context())
 				if cfg != nil && cfg.Fallback != nil {
 					fallbackResp, fallbackErr := cfg.Fallback(req, err)
 					if fallbackErr == nil {
@@ -551,32 +409,7 @@ func FallbackMiddlewareEx(isFailure func(*http.Response, error) bool) Middleware
 	}
 }
 
-func parseRetryAfter(resp *http.Response) (time.Duration, bool) {
-	if resp == nil {
-		return 0, false
-	}
-
-	val := resp.Header.Get("Retry-After")
-	if val == "" {
-		return 0, false
-	}
-
-	if secs, err := strconv.ParseInt(val, 10, 64); err == nil && secs >= 0 {
-		return time.Duration(secs) * time.Second, true
-	}
-
-	if t, err := http.ParseTime(val); err == nil {
-		if delay := time.Until(t); delay > 0 {
-			return delay, true
-		}
-
-		return 0, true
-	}
-
-	return 0, false
-}
-
-// ChaosConfig defines parameters for [ChaosMiddleware].
+// ChaosConfig defines parameters for [Chaos].
 type ChaosConfig struct {
 	// FailureRate is the probability (0.0 to 1.0) of randomly returning a 503 error.
 	FailureRate float64
@@ -586,11 +419,11 @@ type ChaosConfig struct {
 	LatencyMax time.Duration
 }
 
-// ChaosMiddleware returns a [Middleware] that injects random latency
+// Chaos returns a [Middleware] that injects random latency
 // and 503 errors. Useful for testing retry and circuit breaker logic.
-func ChaosMiddleware(cfg ChaosConfig) Middleware {
-	return func(next HTTPDoer) HTTPDoer {
-		return DoerFunc(func(req *http.Request) (*http.Response, error) {
+func Chaos(cfg ChaosConfig) aoni.Middleware {
+	return func(next aoni.HTTPDoer) aoni.HTTPDoer {
+		return aoni.DoerFunc(func(req *http.Request) (*http.Response, error) {
 			if cfg.LatencyMax > cfg.LatencyMin && cfg.LatencyMin > 0 {
 				diff := cfg.LatencyMax - cfg.LatencyMin
 
@@ -635,12 +468,12 @@ func ChaosMiddleware(cfg ChaosConfig) Middleware {
 	}
 }
 
-// AdaptiveLimitMiddleware returns a [Middleware] that gates
+// AdaptiveLimit returns a [Middleware] that gates
 // requests through limiter. Each request acquires a slot before
 // execution and releases it afterward with the observed RTT.
-func AdaptiveLimitMiddleware(limiter *limiter.AdaptiveLimiter) Middleware {
-	return func(next HTTPDoer) HTTPDoer {
-		return DoerFunc(func(req *http.Request) (*http.Response, error) {
+func AdaptiveLimit(limiter *limiter.AdaptiveLimiter) aoni.Middleware {
+	return func(next aoni.HTTPDoer) aoni.HTTPDoer {
+		return aoni.DoerFunc(func(req *http.Request) (*http.Response, error) {
 			if err := limiter.Acquire(req.Context()); err != nil {
 				return nil, err
 			}
@@ -656,7 +489,31 @@ func AdaptiveLimitMiddleware(limiter *limiter.AdaptiveLimiter) Middleware {
 	}
 }
 
-// maskQueryParams returns the URL with sensitive query parameters masked.
+func parseRetryAfter(resp *http.Response) (time.Duration, bool) {
+	if resp == nil {
+		return 0, false
+	}
+
+	val := resp.Header.Get("Retry-After")
+	if val == "" {
+		return 0, false
+	}
+
+	if secs, err := strconv.ParseInt(val, 10, 64); err == nil && secs >= 0 {
+		return time.Duration(secs) * time.Second, true
+	}
+
+	if t, err := http.ParseTime(val); err == nil {
+		if delay := time.Until(t); delay > 0 {
+			return delay, true
+		}
+
+		return 0, true
+	}
+
+	return 0, false
+}
+
 func maskQueryParams(u *url.URL) string {
 	if u == nil {
 		return ""

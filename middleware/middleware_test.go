@@ -2,21 +2,77 @@
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
-package aoni
+package middleware
 
 import (
+	"context"
+	"errors"
 	"io"
+	"math"
 	"net/http"
 	"net/url"
 	"strings"
 	"sync"
-	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/lemon4ksan/aoni"
+	"github.com/lemon4ksan/aoni/mod"
 )
+
+type mockDoer struct {
+	mu         sync.RWMutex
+	id         int
+	calls      int
+	forceError bool
+	statusCode int
+}
+
+func (m *mockDoer) Do(req *http.Request) (*http.Response, error) {
+	m.mu.Lock()
+	m.calls++
+	forceError := m.forceError
+	statusCode := m.statusCode
+	m.mu.Unlock()
+
+	if err := req.Context().Err(); err != nil {
+		return nil, err
+	}
+
+	var err error
+	if forceError {
+		err = errors.New("forced error")
+	}
+
+	if statusCode == 0 {
+		statusCode = http.StatusOK
+	}
+
+	return &http.Response{StatusCode: statusCode, Body: http.NoBody}, err
+}
+
+func (m *mockDoer) SetStatusCode(code int) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	m.statusCode = code
+}
+
+func (m *mockDoer) SetForceError(force bool) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	m.forceError = force
+}
+
+func (m *mockDoer) GetCalls() int {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return m.calls
+}
 
 type mockRetryDoer struct {
 	mu         sync.Mutex
@@ -52,67 +108,6 @@ func (m *mockRetryDoer) SetStatusCode(code int) {
 func TestRetryMiddleware(t *testing.T) {
 	t.Parallel()
 
-	t.Run("retry_on_failure_and_preserve_body", func(t *testing.T) {
-		t.Parallel()
-
-		m1 := &mockDoer{id: 1, statusCode: 502}
-		rotator, err := NewProxyRotator(ProxyRotatorConfig{}, ClientWithProxy{Client: m1})
-		require.NoError(t, err)
-		t.Cleanup(func() { _ = rotator.Close() })
-
-		var callbackCalls int32
-
-		opts := RetryOptions{
-			MaxRetries: 3,
-			Backoff:    5 * time.Millisecond,
-			OnRetry: func(attempt uint32, err error, delay time.Duration) {
-				atomic.AddInt32(&callbackCalls, 1)
-			},
-		}
-
-		retryMiddleware := RetryMiddleware(opts, ProxyRetryCondition(rotator))
-		client := retryMiddleware(m1)
-
-		bodyText := "test body"
-		req, err := http.NewRequestWithContext(t.Context(), "POST", "http://test", strings.NewReader(bodyText))
-		require.NoError(t, err)
-
-		go func() {
-			time.Sleep(10 * time.Millisecond)
-			m1.SetStatusCode(200)
-		}()
-
-		resp, err := client.Do(req)
-		require.NoError(t, err)
-		t.Cleanup(func() { _ = resp.Body.Close() })
-
-		assert.GreaterOrEqual(t, m1.GetCalls(), 2)
-		assert.Equal(t, 200, resp.StatusCode)
-		assert.GreaterOrEqual(t, atomic.LoadInt32(&callbackCalls), int32(1))
-	})
-
-	t.Run("max_retries_exceeded", func(t *testing.T) {
-		t.Parallel()
-
-		m1 := &mockDoer{id: 1, forceError: true}
-		rotator, err := NewProxyRotator(ProxyRotatorConfig{}, ClientWithProxy{Client: m1})
-		require.NoError(t, err)
-		t.Cleanup(func() { _ = rotator.Close() })
-
-		opts := RetryOptions{
-			MaxRetries: 1,
-			Backoff:    1 * time.Millisecond,
-		}
-
-		client := RetryMiddleware(opts, ProxyRetryCondition(rotator))(m1)
-		req, err := http.NewRequestWithContext(t.Context(), "GET", "http://test", nil)
-		require.NoError(t, err)
-
-		_, err = client.Do(req)
-		require.Error(t, err)
-		assert.Equal(t, 2, m1.GetCalls())
-	})
-
 	t.Run("custom_condition", func(t *testing.T) {
 		t.Parallel()
 
@@ -121,7 +116,7 @@ func TestRetryMiddleware(t *testing.T) {
 			mu    sync.Mutex
 		)
 
-		m1 := DoerFunc(func(req *http.Request) (*http.Response, error) {
+		m1 := aoni.DoerFunc(func(req *http.Request) (*http.Response, error) {
 			mu.Lock()
 			calls++
 			currentCalls := calls
@@ -148,7 +143,7 @@ func TestRetryMiddleware(t *testing.T) {
 			return resp != nil && resp.StatusCode == http.StatusTooManyRequests
 		}
 
-		retryMiddleware := RetryMiddleware(opts, condition)
+		retryMiddleware := Retry(opts, condition)
 		client := retryMiddleware(m1)
 		req, err := http.NewRequestWithContext(t.Context(), "GET", "http://test", nil)
 		require.NoError(t, err)
@@ -162,38 +157,19 @@ func TestRetryMiddleware(t *testing.T) {
 	})
 }
 
-func TestRetryCondition_Combinators(t *testing.T) {
-	t.Parallel()
-
-	condTrue := func(resp *http.Response, err error) bool { return true }
-	condFalse := func(resp *http.Response, err error) bool { return false }
-
-	t.Run("or_combinator", func(t *testing.T) {
-		t.Parallel()
-		assert.True(t, Or(condTrue, condFalse)(nil, nil))
-		assert.False(t, Or(condFalse, condFalse)(nil, nil))
-	})
-
-	t.Run("and_combinator", func(t *testing.T) {
-		t.Parallel()
-		assert.True(t, And(condTrue, condTrue)(nil, nil))
-		assert.False(t, And(condTrue, condFalse)(nil, nil))
-	})
-}
-
 func TestRecoveryMiddleware(t *testing.T) {
 	t.Parallel()
 
 	t.Run("recover_from_panic_and_return_error", func(t *testing.T) {
 		t.Parallel()
 
-		panicDoer := DoerFunc(func(req *http.Request) (*http.Response, error) {
+		panicDoer := aoni.DoerFunc(func(req *http.Request) (*http.Response, error) {
 			panic("something went terribly wrong")
 		})
 
 		var panicVal any
 
-		recovery := RecoveryMiddleware(func(r any) {
+		recovery := Recover(func(r any) {
 			panicVal = r
 		})
 
@@ -223,7 +199,7 @@ func TestCircuitBreaker(t *testing.T) {
 			Window:           10 * time.Second,
 		})
 
-		client := CircuitBreakerMiddleware(cb, nil)(m)
+		client := CircuitBreak(cb, nil)(m)
 		req, err := http.NewRequestWithContext(t.Context(), "GET", "http://localhost", nil)
 		require.NoError(t, err)
 
@@ -255,14 +231,14 @@ func TestFallbackMiddleware(t *testing.T) {
 		t.Parallel()
 
 		m := &mockDoer{id: 1, forceError: true}
-		fallback := FallbackJSON(http.StatusOK, map[string]string{"message": "fallback-data"})
+		fallback := aoni.FallbackJSON(http.StatusOK, map[string]string{"message": "fallback-data"})
 
-		client := FallbackMiddleware()(m)
+		client := Fallback()(m)
 
 		req, err := http.NewRequestWithContext(t.Context(), "GET", "http://localhost", nil)
 		require.NoError(t, err)
 
-		WithFallback(fallback)(req)
+		mod.WithFallback(fallback)(req)
 
 		resp, err := client.Do(req)
 		require.NoError(t, err)
@@ -279,14 +255,14 @@ func TestFallbackMiddleware(t *testing.T) {
 		t.Parallel()
 
 		m := &mockDoer{id: 1, forceError: true}
-		fallback := FallbackString(http.StatusGatewayTimeout, "text-fallback")
+		fallback := aoni.FallbackString(http.StatusGatewayTimeout, "text-fallback")
 
-		client := FallbackMiddleware()(m)
+		client := Fallback()(m)
 
 		req, err := http.NewRequestWithContext(t.Context(), "GET", "http://localhost", nil)
 		require.NoError(t, err)
 
-		WithFallback(fallback)(req)
+		mod.WithFallback(fallback)(req)
 
 		resp, err := client.Do(req)
 		require.NoError(t, err)
@@ -303,17 +279,17 @@ func TestFallbackMiddleware(t *testing.T) {
 		t.Parallel()
 
 		m := &mockDoer{id: 1, statusCode: 503}
-		fallback := FallbackJSON(http.StatusOK, map[string]string{"message": "fallback-5xx"})
+		fallback := aoni.FallbackJSON(http.StatusOK, map[string]string{"message": "fallback-5xx"})
 
 		isFailure := func(resp *http.Response, err error) bool {
 			return err != nil || (resp != nil && resp.StatusCode >= 500)
 		}
-		client := FallbackMiddlewareEx(isFailure)(m)
+		client := FallbackEx(isFailure)(m)
 
 		req, err := http.NewRequestWithContext(t.Context(), "GET", "http://localhost", nil)
 		require.NoError(t, err)
 
-		WithFallback(fallback)(req)
+		mod.WithFallback(fallback)(req)
 
 		resp, err := client.Do(req)
 		require.NoError(t, err)
@@ -347,7 +323,7 @@ func TestRetryAfter(t *testing.T) {
 			return resp != nil && resp.StatusCode == 429
 		}
 
-		client := RetryMiddleware(opts, condition)(m)
+		client := Retry(opts, condition)(m)
 		req, err := http.NewRequestWithContext(t.Context(), "GET", "http://localhost", nil)
 		require.NoError(t, err)
 
@@ -384,7 +360,7 @@ func TestRetryMiddleware_JitterFull(t *testing.T) {
 			return resp != nil && resp.StatusCode == 502
 		}
 
-		client := RetryMiddleware(opts, condition)(m)
+		client := Retry(opts, condition)(m)
 		req, err := http.NewRequestWithContext(t.Context(), "GET", "http://localhost", nil)
 		require.NoError(t, err)
 
@@ -415,7 +391,7 @@ func TestChaosMiddleware(t *testing.T) {
 			LatencyMin: 15 * time.Millisecond,
 			LatencyMax: 20 * time.Millisecond,
 		}
-		chaos := ChaosMiddleware(cfg)
+		chaos := Chaos(cfg)
 		client := chaos(m)
 
 		req, err := http.NewRequestWithContext(t.Context(), "GET", "http://localhost", nil)
@@ -439,7 +415,7 @@ func TestChaosMiddleware(t *testing.T) {
 		cfg := ChaosConfig{
 			FailureRate: 1.0,
 		}
-		chaos := ChaosMiddleware(cfg)
+		chaos := Chaos(cfg)
 		client := chaos(m)
 
 		req, err := http.NewRequestWithContext(t.Context(), "GET", "http://localhost", nil)
@@ -458,7 +434,7 @@ func TestChaosMiddleware(t *testing.T) {
 		cfg := ChaosConfig{
 			FailureRate: 0.0,
 		}
-		chaos := ChaosMiddleware(cfg)
+		chaos := Chaos(cfg)
 		client := chaos(m)
 
 		req, err := http.NewRequestWithContext(t.Context(), "GET", "http://localhost", nil)
@@ -553,4 +529,89 @@ func TestMaskQueryParams_DoesNotModifyOriginal(t *testing.T) {
 	if u.Query().Get("key") != originalQuery {
 		t.Error("maskQueryParams should not modify the original URL")
 	}
+}
+
+func TestClient_CircuitBreaker(t *testing.T) {
+	t.Parallel()
+
+	cfg := CircuitBreakerConfig{
+		FailureThreshold: 0.5,
+		Cooldown:         50 * time.Millisecond,
+		MinRequests:      2,
+		Window:           5 * time.Second,
+	}
+	cb := NewCircuitBreaker(cfg)
+
+	b := cb.getBreaker("example.com")
+	assert.NotNil(t, b)
+
+	_, err := b.Do(t.Context(), func(ctx context.Context) (any, error) {
+		return nil, errors.New("error")
+	})
+	require.Error(t, err)
+
+	_, err = b.Do(t.Context(), func(ctx context.Context) (any, error) {
+		return nil, errors.New("error")
+	})
+	require.Error(t, err)
+
+	_, err = b.Do(t.Context(), func(ctx context.Context) (any, error) {
+		return nil, nil
+	})
+	assert.ErrorContains(t, err, "circuit breaker is open")
+}
+
+func TestRateLimitMiddleware_ClampsNegative(t *testing.T) {
+	t.Parallel()
+
+	m := RateLimit(-5, -10)
+	require.NotNil(t, m)
+
+	doer := m(aoni.DoerFunc(func(req *http.Request) (*http.Response, error) {
+		return &http.Response{StatusCode: 200, Body: io.NopCloser(strings.NewReader(""))}, nil
+	}))
+
+	ctx, cancel := context.WithTimeout(t.Context(), 50*time.Millisecond)
+	defer cancel()
+
+	req, _ := http.NewRequestWithContext(ctx, "GET", "http://localhost", nil)
+	_, err := doer.Do(req)
+	assert.Error(t, err)
+}
+
+func TestRetryMiddleware_NegativeBackoff(t *testing.T) {
+	t.Parallel()
+
+	m := Retry(RetryOptions{
+		MaxRetries: 1,
+		Backoff:    -1 * time.Second,
+	}, aoni.RetryOnErr())
+
+	doer := m(aoni.DoerFunc(func(req *http.Request) (*http.Response, error) {
+		return nil, assert.AnError
+	}))
+
+	req, _ := http.NewRequestWithContext(t.Context(), "GET", "http://localhost", nil)
+	_, err := doer.Do(req)
+	assert.Error(t, err)
+}
+
+func TestNewCircuitBreaker_NaN(t *testing.T) {
+	t.Parallel()
+
+	cb := NewCircuitBreaker(CircuitBreakerConfig{
+		FailureThreshold: math.NaN(),
+	})
+
+	assert.Equal(t, 0.5, cb.cfg.FailureThreshold)
+}
+
+func TestNewCircuitBreaker_Defaults(t *testing.T) {
+	t.Parallel()
+
+	cb := NewCircuitBreaker(CircuitBreakerConfig{})
+	assert.Equal(t, 0.5, cb.cfg.FailureThreshold)
+	assert.Equal(t, 5*time.Second, cb.cfg.Cooldown)
+	assert.Equal(t, 5, cb.cfg.MinRequests)
+	assert.Equal(t, 10*time.Second, cb.cfg.Window)
 }

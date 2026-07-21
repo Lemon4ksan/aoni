@@ -6,7 +6,6 @@ package aoni
 
 import (
 	"net"
-	"net/http"
 	"sync"
 	"time"
 )
@@ -105,13 +104,6 @@ func (c *fragmentedConn) sleepWithJitter() {
 	}
 
 	time.Sleep(delay)
-}
-
-// WithFragmentation returns a RequestModifier that sets fragmentation configuration on the request context.
-func WithFragmentation(cfg FragmentConfig) RequestModifier {
-	return func(req *http.Request) {
-		GetOrInitRequestConfig(req).Fragment = &cfg
-	}
 }
 
 // NewFragmentedConn wraps a net.Conn with fragmentation and delay settings.

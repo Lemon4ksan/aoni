@@ -9,6 +9,8 @@ import (
 	"mime"
 	"net/http"
 	"strings"
+
+	"github.com/lemon4ksan/aoni/internal/io"
 )
 
 // DefaultChallengeDetector is the default detector used by Client.
@@ -41,7 +43,7 @@ func DetectCloudflareChallenge(resp *http.Response) (bool, error) {
 
 	// We expect resp.Body to be already wrapped in *ExplicitBufferedBody.
 	// If it is, we inspect the Prefix. If not, we don't inspect.
-	buffered, ok := resp.Body.(*ExplicitBufferedBody)
+	buffered, ok := resp.Body.(*io.ExplicitBufferedBody)
 	if !ok || len(buffered.Prefix) == 0 {
 		return false, nil
 	}

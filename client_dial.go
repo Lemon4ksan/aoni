@@ -199,7 +199,7 @@ func (c *Client) dialContext(ctx context.Context, network, addr string) (net.Con
 	if effectiveCfg.InsecureSkipVerify {
 		if cfg := GetRequestConfig(ctx); cfg != nil && len(cfg.CertificatePins) > 0 {
 			effectiveCfg.VerifyPeerCertificate = func(rawCerts [][]byte, verifiedChains [][]*x509.Certificate) error {
-				return verifyCertificatePins(host, cfg.CertificatePins, rawCerts)
+				return pinning{}.VerifyCertificatePins(host, cfg.CertificatePins, rawCerts)
 			}
 		} else {
 			effectiveCfg.VerifyPeerCertificate = func(rawCerts [][]byte, verifiedChains [][]*x509.Certificate) error { //nolint:gosec

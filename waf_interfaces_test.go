@@ -26,6 +26,7 @@ import (
 	"github.com/lemon4ksan/aoni/ja4"
 	"github.com/lemon4ksan/aoni/option"
 	"github.com/lemon4ksan/aoni/profiles"
+	"github.com/lemon4ksan/aoni/telemetry"
 )
 
 type mockSpecProvider struct {
@@ -240,7 +241,7 @@ func TestClient_E2E_WAFBypass_Pipeline(t *testing.T) {
 	})
 
 	cacheStore := aoni.NewInMemoryCacheStore()
-	harGen := aoni.NewHARGenerator()
+	harGen := telemetry.NewHARGenerator()
 
 	client := aoni.NewClient(wafServer.Client(),
 		option.WithBaseURL(wafServer.URL),
@@ -250,7 +251,7 @@ func TestClient_E2E_WAFBypass_Pipeline(t *testing.T) {
 		option.WithProxyString(proxyServer.URL),
 		option.WithPipeline(aoni.PipelineConfig{
 			Cache:      &aoni.CacheConfig{Store: cacheStore, DefaultTTL: 5 * time.Minute},
-			HAR:        &aoni.HARConfig{Generator: harGen},
+			HAR:        &aoni.HARConfig{Tracker: harGen},
 			Validate:   true,
 			Decompress: true,
 		}),

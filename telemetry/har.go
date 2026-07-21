@@ -2,11 +2,15 @@
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
-package aoni
+package telemetry
 
 import (
+	"bytes"
 	"encoding/json"
+	"io"
+	"net/http"
 	"sync"
+	"time"
 )
 
 // HARGenerator accumulates HTTP request-response entries.
@@ -18,6 +22,83 @@ type HARGenerator struct {
 // NewHARGenerator creates a new HARGenerator.
 func NewHARGenerator() *HARGenerator {
 	return &HARGenerator{}
+}
+
+// Record implements the aoni.HARTracker interface.
+// It compiles the request and response details into a standard HAR entry.
+func (g *HARGenerator) Record(
+	req *http.Request,
+	resp *http.Response,
+	startTime time.Time,
+	duration int64,
+) {
+	if resp == nil {
+		return
+	}
+
+	var reqHeaders []HARHeaderField
+	for k, v := range req.Header {
+		for _, val := range v {
+			reqHeaders = append(reqHeaders, HARHeaderField{Name: k, Value: val})
+		}
+	}
+
+	var reqBodySize int64
+	if req.Body != nil && req.Body != http.NoBody {
+		if req.ContentLength > 0 {
+			reqBodySize = req.ContentLength
+		}
+	}
+
+	var respHeaders []HARHeaderField
+	for k, v := range resp.Header {
+		for _, val := range v {
+			respHeaders = append(respHeaders, HARHeaderField{Name: k, Value: val})
+		}
+	}
+
+	var bodyBytes []byte
+	if resp.Body != nil {
+		bodyBytes, _ = io.ReadAll(resp.Body)
+		_ = resp.Body.Close()
+		resp.Body = io.NopCloser(bytes.NewReader(bodyBytes))
+	}
+
+	g.AddEntry(HAREntry{
+		StartedDateTime: startTime.UTC().Format(time.RFC3339Nano),
+		Time:            duration,
+		Request: HARRequest{
+			Method:      req.Method,
+			URL:         req.URL.String(),
+			HTTPVersion: req.Proto,
+			Headers:     reqHeaders,
+			Cookies:     []any{},
+			QueryString: []any{},
+			HeadersSize: -1,
+			BodySize:    reqBodySize,
+		},
+		Response: HARResponse{
+			Status:      resp.StatusCode,
+			StatusText:  resp.Status,
+			HTTPVersion: resp.Proto,
+			Headers:     respHeaders,
+			Cookies:     []any{},
+			Content: HARContent{
+				Size:     int64(len(bodyBytes)),
+				MimeType: resp.Header.Get("Content-Type"),
+				Text:     string(bodyBytes),
+			},
+			RedirectURL: resp.Header.Get("Location"),
+			HeadersSize: -1,
+			BodySize:    int64(len(bodyBytes)),
+		},
+		Cache: struct{}{},
+		Timings: HARTimings{
+			Send:    0,
+			Wait:    duration,
+			Receive: 0,
+		},
+	})
 }
 
 // AddEntry adds a single HAREntry thread-safely.

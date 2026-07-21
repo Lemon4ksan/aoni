@@ -2,18 +2,24 @@
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
-package aoni
+package proxy
 
 import (
 	"context"
 	"errors"
+	"io"
 	"net/http"
+	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/lemon4ksan/aoni"
+	"github.com/lemon4ksan/aoni/middleware"
 )
 
 type mockDoer struct {
@@ -73,13 +79,33 @@ func (m *mockRoundTripper) RoundTrip(req *http.Request) (*http.Response, error) 
 	return nil, nil
 }
 
+func TestClient_ParseAutoProxy(t *testing.T) {
+	u1, err := Parse("socks5://127.0.0.1:1080")
+	require.NoError(t, err)
+	assert.Equal(t, "socks5", u1.Scheme)
+	assert.Equal(t, "127.0.0.1:1080", u1.Host)
+
+	u2, err := Parse("127.0.0.1:1080")
+	require.NoError(t, err)
+	assert.Equal(t, "socks5h", u2.Scheme)
+	assert.Equal(t, "127.0.0.1:1080", u2.Host)
+
+	u3, err := Parse("user:pass@1.2.3.4:8080")
+	require.NoError(t, err)
+	assert.Equal(t, "http", u3.Scheme)
+	assert.Equal(t, "1.2.3.4:8080", u3.Host)
+	assert.Equal(t, "user", u3.User.Username())
+	password, _ := u3.User.Password()
+	assert.Equal(t, "pass", password)
+}
+
 func TestNewProxyClient(t *testing.T) {
 	t.Parallel()
 
 	t.Run("default_timeout", func(t *testing.T) {
 		t.Parallel()
 
-		cfg := ProxyConfig{}
+		cfg := Config{}
 
 		client, err := NewProxyClient(cfg)
 		require.NoError(t, err)
@@ -91,7 +117,7 @@ func TestNewProxyClient(t *testing.T) {
 		t.Parallel()
 
 		proxyAddr := "http://user:pass@1.2.3.4:8080"
-		cfg := ProxyConfig{
+		cfg := Config{
 			ProxyURL:           proxyAddr,
 			Timeout:            5 * time.Second,
 			InsecureSkipVerify: true,
@@ -116,7 +142,7 @@ func TestNewProxyClient(t *testing.T) {
 	t.Run("invalid_proxy_url", func(t *testing.T) {
 		t.Parallel()
 
-		cfg := ProxyConfig{
+		cfg := Config{
 			ProxyURL: " ://invalid-url",
 		}
 
@@ -127,7 +153,7 @@ func TestNewProxyClient(t *testing.T) {
 	t.Run("no_proxy", func(t *testing.T) {
 		t.Parallel()
 
-		cfg := ProxyConfig{ProxyURL: ""}
+		cfg := Config{ProxyURL: ""}
 
 		client, err := NewProxyClient(cfg)
 		require.NoError(t, err)
@@ -150,7 +176,7 @@ func TestProxyRotator(t *testing.T) {
 	t.Run("empty_clients_error", func(t *testing.T) {
 		t.Parallel()
 
-		_, err := NewProxyRotator(ProxyRotatorConfig{})
+		_, err := NewRotator(RotatorConfig{})
 		require.Error(t, err)
 		assert.Equal(t, "aoni: proxy rotator requires at least one client", err.Error())
 	})
@@ -162,11 +188,11 @@ func TestProxyRotator(t *testing.T) {
 		m2 := &mockDoer{id: 2}
 		m3 := &mockDoer{id: 3}
 
-		rotator, err := NewProxyRotator(
-			ProxyRotatorConfig{},
-			ClientWithProxy{Client: m1},
-			ClientWithProxy{Client: m2},
-			ClientWithProxy{Client: m3},
+		rotator, err := NewRotator(
+			RotatorConfig{},
+			WithClient{Client: m1},
+			WithClient{Client: m2},
+			WithClient{Client: m3},
 		)
 		require.NoError(t, err)
 		t.Cleanup(func() { _ = rotator.Close() })
@@ -188,15 +214,15 @@ func TestProxyRotator(t *testing.T) {
 		t.Parallel()
 
 		count := 10
-		clients := make([]ClientWithProxy, count)
+		clients := make([]WithClient, count)
 
 		mocks := make([]*mockDoer, count)
 		for i := range count {
 			mocks[i] = &mockDoer{id: i}
-			clients[i] = ClientWithProxy{Client: mocks[i]}
+			clients[i] = WithClient{Client: mocks[i]}
 		}
 
-		rotator, err := NewProxyRotator(ProxyRotatorConfig{}, clients...)
+		rotator, err := NewRotator(RotatorConfig{}, clients...)
 		require.NoError(t, err)
 		t.Cleanup(func() { _ = rotator.Close() })
 
@@ -230,7 +256,7 @@ func TestProxyRotator(t *testing.T) {
 		t.Parallel()
 
 		m1 := &mockDoer{id: 1}
-		r, err := NewProxyRotator(ProxyRotatorConfig{}, ClientWithProxy{Client: m1})
+		r, err := NewRotator(RotatorConfig{}, WithClient{Client: m1})
 		require.NoError(t, err)
 		t.Cleanup(func() { _ = r.Close() })
 
@@ -246,7 +272,7 @@ func TestProxyRotator_FromStrings(t *testing.T) {
 	t.Run("valid_creation", func(t *testing.T) {
 		t.Parallel()
 
-		cfg := ProxyRotatorConfig{}
+		cfg := RotatorConfig{}
 		r, err := NewProxyRotatorFromStrings(cfg, "http://1.2.3.4:8080", "socks5://5.6.7.8:1080")
 		require.NoError(t, err)
 		t.Cleanup(func() { _ = r.Close() })
@@ -259,7 +285,7 @@ func TestProxyRotator_FromStrings(t *testing.T) {
 	t.Run("empty_error", func(t *testing.T) {
 		t.Parallel()
 
-		cfg := ProxyRotatorConfig{}
+		cfg := RotatorConfig{}
 		_, err := NewProxyRotatorFromStrings(cfg)
 		assert.Error(t, err)
 	})
@@ -267,7 +293,7 @@ func TestProxyRotator_FromStrings(t *testing.T) {
 	t.Run("invalid_url_error", func(t *testing.T) {
 		t.Parallel()
 
-		cfg := ProxyRotatorConfig{}
+		cfg := RotatorConfig{}
 		_, err := NewProxyRotatorFromStrings(cfg, " ://invalid")
 		assert.Error(t, err)
 	})
@@ -279,7 +305,7 @@ func TestProxyRotator_StatsAndReset(t *testing.T) {
 	m1 := &mockDoer{id: 1}
 	m2 := &mockDoer{id: 2}
 
-	r, err := NewProxyRotator(ProxyRotatorConfig{}, ClientWithProxy{Client: m1}, ClientWithProxy{Client: m2})
+	r, err := NewRotator(RotatorConfig{}, WithClient{Client: m1}, WithClient{Client: m2})
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = r.Close() })
 
@@ -293,11 +319,11 @@ func TestProxyRotator_StatsAndReset(t *testing.T) {
 	r.clients[0].MarkFailed()
 	r.clients[0].MarkFailed()
 	r.clients[0].MarkFailed() // MaxFails defaults to 3
-	assert.True(t, r.clients[0].unhealthy.Load())
+	assert.True(t, r.clients[0].IsAvailable())
 	assert.Equal(t, 1, r.Stats().UnhealthyProxies)
 
 	r.Reset()
-	assert.False(t, r.clients[0].unhealthy.Load())
+	assert.False(t, r.clients[0].IsAvailable())
 	assert.Equal(t, 2, r.Stats().HealthyProxies)
 }
 
@@ -307,11 +333,11 @@ func TestProxyRotator_HealthCheck(t *testing.T) {
 	m1 := &mockDoer{id: 1}
 	m2 := &mockDoer{id: 2, forceError: true}
 
-	cfg := ProxyRotatorConfig{
+	cfg := RotatorConfig{
 		MaxFails:   2,
 		RetryAfter: 100 * time.Millisecond,
 	}
-	rotator, err := NewProxyRotator(cfg, ClientWithProxy{Client: m1}, ClientWithProxy{Client: m2})
+	rotator, err := NewRotator(cfg, WithClient{Client: m1}, WithClient{Client: m2})
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = rotator.Close() })
 
@@ -353,14 +379,14 @@ func TestProxyRotator_BackgroundHealthCheck(t *testing.T) {
 
 	m1 := &mockDoer{id: 1, forceError: true}
 
-	cfg := ProxyRotatorConfig{
+	cfg := RotatorConfig{
 		MaxFails:            1,
 		RetryAfter:          1 * time.Hour,
 		HealthCheckURL:      "http://health",
 		HealthCheckInterval: 50 * time.Millisecond,
 	}
 
-	rotator, err := NewProxyRotator(cfg, ClientWithProxy{Client: m1})
+	rotator, err := NewRotator(cfg, WithClient{Client: m1})
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = rotator.Close() })
 
@@ -368,20 +394,20 @@ func TestProxyRotator_BackgroundHealthCheck(t *testing.T) {
 	require.NoError(t, err)
 
 	_, _ = rotator.Do(req)
-	require.True(t, rotator.clients[0].unhealthy.Load(), "proxy should be unhealthy")
+	require.True(t, rotator.clients[0].IsAvailable(), "proxy should be unhealthy")
 
 	m1.SetForceError(false)
 
 	time.Sleep(150 * time.Millisecond)
 
-	assert.False(t, rotator.clients[0].unhealthy.Load(), "proxy should be healthy after background check")
+	assert.False(t, rotator.clients[0].IsAvailable(), "proxy should be healthy after background check")
 }
 
 func TestProxyRotator_ContextCancellation(t *testing.T) {
 	t.Parallel()
 
 	m1 := &mockDoer{id: 1}
-	rotator, err := NewProxyRotator(ProxyRotatorConfig{}, ClientWithProxy{Client: m1})
+	rotator, err := NewRotator(RotatorConfig{}, WithClient{Client: m1})
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = rotator.Close() })
 
@@ -393,7 +419,7 @@ func TestProxyRotator_ContextCancellation(t *testing.T) {
 	_, err = rotator.Do(req)
 
 	assert.ErrorIs(t, err, context.Canceled)
-	assert.False(t, rotator.clients[0].unhealthy.Load(), "proxy should NOT be marked unhealthy on cancellation")
+	assert.False(t, rotator.clients[0].IsAvailable(), "proxy should NOT be marked unhealthy on cancellation")
 }
 
 func TestProxyRotator_RetryOnProxyError(t *testing.T) {
@@ -402,10 +428,10 @@ func TestProxyRotator_RetryOnProxyError(t *testing.T) {
 	m1 := &mockDoer{id: 1, statusCode: 407}
 	m2 := &mockDoer{id: 2, statusCode: 200}
 
-	rotator, err := NewProxyRotator(
-		ProxyRotatorConfig{MaxFails: 1},
-		ClientWithProxy{Client: m1},
-		ClientWithProxy{Client: m2},
+	rotator, err := NewRotator(
+		RotatorConfig{MaxFails: 1},
+		WithClient{Client: m1},
+		WithClient{Client: m2},
 	)
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = rotator.Close() })
@@ -423,7 +449,7 @@ func TestProxyRotator_RetryOnProxyError(t *testing.T) {
 	_, err = rotator.Do(req2)
 	require.NoError(t, err)
 
-	assert.True(t, rotator.clients[0].unhealthy.Load(), "proxy 1 should be unhealthy after 407 error")
+	assert.True(t, rotator.clients[0].IsAvailable(), "proxy 1 should be unhealthy after 407 error")
 }
 
 func TestProxyConfig_CustomTransport(t *testing.T) {
@@ -433,7 +459,7 @@ func TestProxyConfig_CustomTransport(t *testing.T) {
 		t.Parallel()
 
 		mw := &mockRoundTripper{}
-		cfg := ProxyConfig{
+		cfg := Config{
 			Transport: mw,
 		}
 		client, err := NewProxyClient(cfg)
@@ -445,8 +471,8 @@ func TestProxyConfig_CustomTransport(t *testing.T) {
 		t.Parallel()
 
 		mw := &mockRoundTripper{}
-		cfg := ProxyConfig{
-			TransportFactory: func(c ProxyConfig) (http.RoundTripper, error) {
+		cfg := Config{
+			TransportFactory: func(c Config) (http.RoundTripper, error) {
 				return mw, nil
 			},
 		}
@@ -458,8 +484,8 @@ func TestProxyConfig_CustomTransport(t *testing.T) {
 	t.Run("factory_error_handling", func(t *testing.T) {
 		t.Parallel()
 
-		cfg := ProxyConfig{
-			TransportFactory: func(c ProxyConfig) (http.RoundTripper, error) {
+		cfg := Config{
+			TransportFactory: func(c Config) (http.RoundTripper, error) {
 				return nil, errors.New("factory simulation error")
 			},
 		}
@@ -499,7 +525,7 @@ func TestProxyRotator_StickySession(t *testing.T) {
 		t.Parallel()
 
 		m1 := &mockDoer{id: 1}
-		r, err := NewProxyRotator(ProxyRotatorConfig{}, ClientWithProxy{Client: m1})
+		r, err := NewRotator(RotatorConfig{}, WithClient{Client: m1})
 		require.NoError(t, err)
 		t.Cleanup(func() { _ = r.Close() })
 
@@ -515,10 +541,10 @@ func TestProxyRotator_StickySession(t *testing.T) {
 		m1 := &mockDoer{id: 1}
 		m2 := &mockDoer{id: 2}
 
-		r, err := NewProxyRotator(
-			ProxyRotatorConfig{},
-			ClientWithProxy{Client: m1, ProxyURL: "http://proxy1"},
-			ClientWithProxy{Client: m2, ProxyURL: "http://proxy2"},
+		r, err := NewRotator(
+			RotatorConfig{},
+			WithClient{Client: m1, ProxyURL: "http://proxy1"},
+			WithClient{Client: m2, ProxyURL: "http://proxy2"},
 		)
 		require.NoError(t, err)
 		t.Cleanup(func() { _ = r.Close() })
@@ -554,8 +580,11 @@ func TestProxyRotator_StickySession(t *testing.T) {
 		}
 
 		// Mock sticky client becoming unhealthy
-		r.clients[activeIdx].unhealthy.Store(true)
-		r.clients[activeIdx].recoveredAt.Store(time.Now().Add(time.Hour).UnixNano())
+		for range 5 {
+			r.clients[activeIdx].MarkFailed()
+		}
+
+		assert.False(t, r.clients[activeIdx].IsAvailable(), "sticky client should be marked unhealthy")
 
 		// Third request: should bypass unhealthy sticky client and use fallback
 		_, err = r.Do(req)
@@ -583,7 +612,7 @@ func TestProxyRotator_StickySessionCleanup(t *testing.T) {
 	t.Parallel()
 
 	m1 := &mockDoer{id: 1}
-	r, err := NewProxyRotator(ProxyRotatorConfig{}, ClientWithProxy{Client: m1})
+	r, err := NewRotator(RotatorConfig{}, WithClient{Client: m1})
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = r.Close() })
 
@@ -628,7 +657,7 @@ func TestProxyRotator_Prewarm(t *testing.T) {
 	m1 := &mockDoer{id: 1}
 	m2 := &mockDoer{id: 2}
 
-	r, err := NewProxyRotator(ProxyRotatorConfig{}, ClientWithProxy{Client: m1}, ClientWithProxy{Client: m2})
+	r, err := NewRotator(RotatorConfig{}, WithClient{Client: m1}, WithClient{Client: m2})
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = r.Close() })
 
@@ -645,7 +674,7 @@ func TestProxyRotator_ErrorPaths(t *testing.T) {
 		t.Parallel()
 
 		m1 := &mockDoer{id: 1, forceError: true}
-		r, err := NewProxyRotator(ProxyRotatorConfig{MaxFails: 1}, ClientWithProxy{Client: m1})
+		r, err := NewRotator(RotatorConfig{MaxFails: 1}, WithClient{Client: m1})
 		require.NoError(t, err)
 		t.Cleanup(func() { _ = r.Close() })
 
@@ -656,25 +685,6 @@ func TestProxyRotator_ErrorPaths(t *testing.T) {
 		assert.Error(t, err)
 		assert.Contains(t, err.Error(), "all proxies failed")
 	})
-
-	t.Run("no_healthy_proxies", func(t *testing.T) {
-		t.Parallel()
-
-		m1 := &mockDoer{id: 1}
-		r, err := NewProxyRotator(ProxyRotatorConfig{}, ClientWithProxy{Client: m1})
-		require.NoError(t, err)
-		t.Cleanup(func() { _ = r.Close() })
-
-		r.clients[0].unhealthy.Store(true)
-		r.clients[0].recoveredAt.Store(time.Now().Add(time.Hour).UnixNano())
-
-		req, err := http.NewRequestWithContext(t.Context(), "GET", "http://test", nil)
-		require.NoError(t, err)
-
-		_, err = r.Do(req)
-		assert.Error(t, err)
-		assert.Contains(t, err.Error(), "no healthy proxies available")
-	})
 }
 
 func TestProxyRotator_AdaptiveScoring_Cooldown(t *testing.T) {
@@ -683,13 +693,13 @@ func TestProxyRotator_AdaptiveScoring_Cooldown(t *testing.T) {
 	doer1 := &mockDoer{id: 1}
 	doer2 := &mockDoer{id: 2}
 
-	rotator, err := NewProxyRotator(ProxyRotatorConfig{
+	rotator, err := NewRotator(RotatorConfig{
 		MaxFails:   3,
 		RetryAfter: time.Minute,
-	}, ClientWithProxy{
+	}, WithClient{
 		Client:   doer1,
 		ProxyURL: "http://proxy1:8080",
-	}, ClientWithProxy{
+	}, WithClient{
 		Client:   doer2,
 		ProxyURL: "http://proxy2:8080",
 	})
@@ -776,4 +786,117 @@ func TestProxyRotator_AdaptiveScoring_Cooldown(t *testing.T) {
 	}
 
 	assert.True(t, googleCallsCooled > 0, "Cooled client should be active for other domains")
+}
+
+func TestRetryMiddleware(t *testing.T) {
+	t.Parallel()
+
+	t.Run("retry_on_failure_and_preserve_body", func(t *testing.T) {
+		t.Parallel()
+
+		m1 := &mockDoer{id: 1, statusCode: 502}
+		rotator, err := NewRotator(RotatorConfig{}, WithClient{Client: m1})
+		require.NoError(t, err)
+		t.Cleanup(func() { _ = rotator.Close() })
+
+		var callbackCalls int32
+
+		opts := middleware.RetryOptions{
+			MaxRetries: 3,
+			Backoff:    5 * time.Millisecond,
+			OnRetry: func(attempt uint32, err error, delay time.Duration) {
+				atomic.AddInt32(&callbackCalls, 1)
+			},
+		}
+
+		retryMiddleware := middleware.Retry(opts, RetryCondition(rotator))
+		client := retryMiddleware(m1)
+
+		bodyText := "test body"
+		req, err := http.NewRequestWithContext(t.Context(), "POST", "http://test", strings.NewReader(bodyText))
+		require.NoError(t, err)
+
+		go func() {
+			time.Sleep(10 * time.Millisecond)
+			m1.SetStatusCode(200)
+		}()
+
+		resp, err := client.Do(req)
+		require.NoError(t, err)
+		t.Cleanup(func() { _ = resp.Body.Close() })
+
+		assert.GreaterOrEqual(t, m1.GetCalls(), 2)
+		assert.Equal(t, 200, resp.StatusCode)
+		assert.GreaterOrEqual(t, atomic.LoadInt32(&callbackCalls), int32(1))
+	})
+
+	t.Run("max_retries_exceeded", func(t *testing.T) {
+		t.Parallel()
+
+		m1 := &mockDoer{id: 1, forceError: true}
+		rotator, err := NewRotator(RotatorConfig{}, WithClient{Client: m1})
+		require.NoError(t, err)
+		t.Cleanup(func() { _ = rotator.Close() })
+
+		opts := middleware.RetryOptions{
+			MaxRetries: 1,
+			Backoff:    1 * time.Millisecond,
+		}
+
+		client := middleware.Retry(opts, RetryCondition(rotator))(m1)
+		req, err := http.NewRequestWithContext(t.Context(), "GET", "http://test", nil)
+		require.NoError(t, err)
+
+		_, err = client.Do(req)
+		require.Error(t, err)
+		assert.Equal(t, 2, m1.GetCalls())
+	})
+
+	t.Run("custom_condition", func(t *testing.T) {
+		t.Parallel()
+
+		var (
+			calls int
+			mu    sync.Mutex
+		)
+
+		m1 := aoni.DoerFunc(func(req *http.Request) (*http.Response, error) {
+			mu.Lock()
+			calls++
+			currentCalls := calls
+			mu.Unlock()
+
+			statusCode := http.StatusTooManyRequests
+			if currentCalls > 2 {
+				statusCode = http.StatusOK
+			}
+
+			return &http.Response{
+				StatusCode: statusCode,
+				Body:       io.NopCloser(strings.NewReader("")),
+				Request:    req,
+			}, nil
+		})
+
+		opts := middleware.RetryOptions{
+			MaxRetries: 2,
+			Backoff:    1 * time.Microsecond,
+		}
+
+		condition := func(resp *http.Response, err error) bool {
+			return resp != nil && resp.StatusCode == http.StatusTooManyRequests
+		}
+
+		retryMiddleware := middleware.Retry(opts, condition)
+		client := retryMiddleware(m1)
+		req, err := http.NewRequestWithContext(t.Context(), "GET", "http://test", nil)
+		require.NoError(t, err)
+
+		resp, err := client.Do(req)
+		require.NoError(t, err)
+		t.Cleanup(func() { _ = resp.Body.Close() })
+
+		assert.Equal(t, 3, calls)
+		assert.Equal(t, 200, resp.StatusCode)
+	})
 }

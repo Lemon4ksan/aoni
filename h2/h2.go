@@ -23,8 +23,8 @@ import (
 )
 
 var (
-	// ChromeH2Settings provides HTTP/2 settings matching standard Google Chrome clients.
-	ChromeH2Settings = Settings{
+	// ChromeSettings provides HTTP/2 settings matching standard Google Chrome clients.
+	ChromeSettings = Settings{
 		HeaderTableSize:   65536,
 		EnablePush:        0,
 		InitialWindowSize: 6291456,
@@ -34,8 +34,8 @@ var (
 		PriorityExclusive: true,
 	}
 
-	// FirefoxH2Settings provides HTTP/2 settings matching standard Mozilla Firefox clients.
-	FirefoxH2Settings = Settings{
+	// FirefoxSettings provides HTTP/2 settings matching standard Mozilla Firefox clients.
+	FirefoxSettings = Settings{
 		InitialStreamID:   3,
 		HeaderTableSize:   65536,
 		EnablePush:        0,
@@ -46,6 +46,40 @@ var (
 	}
 )
 
+// Settings holds the full set of HTTP/2 connection parameters
+// for browser-grade frame impersonation. Each field maps directly to
+// an HTTP/2 SETTINGS frame parameter or PRIORITY frame value.
+type Settings struct {
+	HeaderTableSize      uint32
+	EnablePush           uint32
+	MaxConcurrentStreams uint32
+	InitialWindowSize    uint32
+	MaxFrameSize         uint32
+	MaxHeaderListSize    uint32
+	ConnectionFlow       uint32
+	InitialStreamID      uint32
+	PriorityStreamDep    uint32
+	PriorityExclusive    bool
+	PriorityWeight       uint8
+}
+
+// SettingsFromProfile populates Settings from a profiles.H2Settings.
+func SettingsFromProfile(s profiles.H2Settings) *Settings {
+	return &Settings{
+		HeaderTableSize:      s.HeaderTableSize,
+		EnablePush:           s.EnablePush,
+		MaxConcurrentStreams: s.MaxConcurrentStreams,
+		InitialWindowSize:    s.InitialWindowSize,
+		MaxFrameSize:         s.MaxFrameSize,
+		MaxHeaderListSize:    s.MaxHeaderListSize,
+		ConnectionFlow:       s.ConnectionFlow,
+		InitialStreamID:      s.InitialStreamID,
+		PriorityStreamDep:    s.PriorityStreamDep,
+		PriorityExclusive:    s.PriorityExclusive,
+		PriorityWeight:       s.PriorityWeight,
+	}
+}
+
 // ParseSettings parses HTTP/2 settings from a JSON-encoded string.
 // It supports snake_case, camelCase, and PascalCase field names, making it
 // extremely convenient to import settings captured from Wireshark, browser
@@ -53,7 +87,7 @@ var (
 func ParseSettings(jsonStr string) (Settings, error) {
 	// Proxy structure with explicit snake_case tags.
 	// We use pointers to detect whether fields were actually present in the JSON.
-	type h2SettingsProxy struct {
+	type settingsProxy struct {
 		HeaderTableSize      *uint32 `json:"header_table_size"`
 		EnablePush           *uint32 `json:"enable_push"`
 		MaxConcurrentStreams *uint32 `json:"max_concurrent_streams"`
@@ -67,7 +101,7 @@ func ParseSettings(jsonStr string) (Settings, error) {
 		PriorityWeight       *uint8  `json:"priority_weight"`
 	}
 
-	var p h2SettingsProxy
+	var p settingsProxy
 
 	err := json.Unmarshal([]byte(jsonStr), &p)
 	if err != nil {
@@ -147,129 +181,6 @@ func ParseSettings(jsonStr string) (Settings, error) {
 	return settings, nil
 }
 
-// Settings holds the full set of HTTP/2 connection parameters
-// for browser-grade frame impersonation. Each field maps directly to
-// an HTTP/2 SETTINGS frame parameter or PRIORITY frame value.
-type Settings struct {
-	HeaderTableSize      uint32
-	EnablePush           uint32
-	MaxConcurrentStreams uint32
-	InitialWindowSize    uint32
-	MaxFrameSize         uint32
-	MaxHeaderListSize    uint32
-	ConnectionFlow       uint32
-	InitialStreamID      uint32
-	PriorityStreamDep    uint32
-	PriorityExclusive    bool
-	PriorityWeight       uint8
-}
-
-// SettingsFromProfile populates Settings from a profiles.H2Settings.
-func SettingsFromProfile(s profiles.H2Settings) *Settings {
-	return &Settings{
-		HeaderTableSize:      s.HeaderTableSize,
-		EnablePush:           s.EnablePush,
-		MaxConcurrentStreams: s.MaxConcurrentStreams,
-		InitialWindowSize:    s.InitialWindowSize,
-		MaxFrameSize:         s.MaxFrameSize,
-		MaxHeaderListSize:    s.MaxHeaderListSize,
-		ConnectionFlow:       s.ConnectionFlow,
-		InitialStreamID:      s.InitialStreamID,
-		PriorityStreamDep:    s.PriorityStreamDep,
-		PriorityExclusive:    s.PriorityExclusive,
-		PriorityWeight:       s.PriorityWeight,
-	}
-}
-
-// HeaderOrderingConn wraps a [net.Conn] to reorder HTTP/1.1 headers before
-// they reach the wire. It operates at the TCP level, sitting between the raw
-// socket and the TLS layer (e.g. [tls.Conn] or [utls.UConn]).
-//
-// This placement is critical: TLS calls Write() on the wrapped connection
-// with plaintext data before encrypting. So HeaderOrderingConn sees and
-// reorders plaintext HTTP headers, not encrypted TLS records.
-//
-// Wrapping order: TCP → HeaderOrderingConn → TLS → Go HTTP client
-type HeaderOrderingConn struct {
-	net.Conn
-	OrderedKeys []string
-}
-
-// Write intercepts serialized HTTP/1.1 requests and reorders headers
-// according to the configured order. Detection is based on the presence
-// of the HTTP header terminator \r\n\r\n in the written bytes.
-func (c *HeaderOrderingConn) Write(b []byte) (n int, err error) {
-	if len(c.OrderedKeys) > 0 && bytes.Contains(b, []byte("\r\n\r\n")) {
-		if rewritten, ok := ReorderHTTP1Headers(b, c.OrderedKeys); ok {
-			b = rewritten
-		}
-	}
-
-	return c.Conn.Write(b)
-}
-
-// ReorderHTTP1Headers reorders the HTTP headers in the given raw HTTP/1.1 request
-// according to the specified order. Returns the reordered bytes and a success flag.
-func ReorderHTTP1Headers(raw []byte, order []string) ([]byte, bool) {
-	headerPart, bodyPart, ok := bytes.Cut(raw, []byte("\r\n\r\n"))
-	if !ok {
-		return nil, false
-	}
-
-	lines := bytes.Split(headerPart, []byte("\r\n"))
-	if len(lines) < 2 {
-		return nil, false
-	}
-
-	requestLine := lines[0]
-	headerLines := lines[1:]
-
-	headersMap := make(map[string][]byte)
-	for _, line := range headerLines {
-		before, _, ok := bytes.Cut(line, []byte{':'})
-		if !ok {
-			continue
-		}
-
-		key := strings.ToLower(string(bytes.TrimSpace(before)))
-		headersMap[key] = line
-	}
-
-	var newHeaderPart bytes.Buffer
-	newHeaderPart.Write(requestLine)
-	newHeaderPart.Write([]byte("\r\n"))
-
-	written := make(map[string]bool)
-	for _, key := range order {
-		lowerKey := strings.ToLower(key)
-		if line, ok := headersMap[lowerKey]; ok {
-			newHeaderPart.Write(line)
-			newHeaderPart.Write([]byte("\r\n"))
-
-			written[lowerKey] = true
-		}
-	}
-
-	for _, line := range headerLines {
-		before, _, ok := bytes.Cut(line, []byte{':'})
-		if !ok {
-			continue
-		}
-
-		key := strings.ToLower(string(bytes.TrimSpace(before)))
-		if !written[key] {
-			newHeaderPart.Write(line)
-			newHeaderPart.Write([]byte("\r\n"))
-		}
-	}
-
-	// Write the \r\n header terminator + body.
-	newHeaderPart.Write([]byte("\r\n"))
-	newHeaderPart.Write(bodyPart)
-
-	return newHeaderPart.Bytes(), true
-}
-
 // FramedTransport wraps an *http.Transport to apply HTTP/2 frame impersonation.
 // When DialTLSContext is called, the returned connection is wrapped in [h2framedConn]
 // so that the initial SETTINGS and PRIORITY frames match the target browser fingerprint.
@@ -290,62 +201,64 @@ func NewFramedTransport(base *http.Transport, settings Settings, orderedKeys ...
 		orderedKeys: orderedKeys,
 	}
 
-	if base != nil {
-		prevDialTLS := base.DialTLSContext
-		ft.DialTLSContext = func(ctx context.Context, network, addr string) (net.Conn, error) {
-			var (
-				conn net.Conn
-				err  error
-			)
+	if base == nil {
+		return ft
+	}
 
-			if prevDialTLS != nil {
-				conn, err = prevDialTLS(ctx, network, addr)
-			} else {
-				// No custom TLS dialer — perform a standard TLS handshake so that
-				// http2.ConfigureTransports receives a TLS-negotiated connection.
-				tlsCfg := base.TLSClientConfig
-				if tlsCfg == nil {
-					tlsCfg = &tls.Config{}
-				}
+	prevDialTLS := base.DialTLSContext
+	ft.DialTLSContext = func(ctx context.Context, network, addr string) (net.Conn, error) {
+		var (
+			conn net.Conn
+			err  error
+		)
 
-				host, _, _ := net.SplitHostPort(addr)
-
-				cfg := tlsCfg.Clone()
-				if cfg.ServerName == "" {
-					cfg.ServerName = host
-				}
-
-				if len(cfg.NextProtos) == 0 {
-					cfg.NextProtos = []string{"h2", "http/1.1"}
-				}
-
-				d := &tls.Dialer{
-					NetDialer: &net.Dialer{},
-					Config:    cfg,
-				}
-				conn, err = d.DialContext(ctx, network, addr)
+		if prevDialTLS != nil {
+			conn, err = prevDialTLS(ctx, network, addr)
+		} else {
+			// No custom TLS dialer — perform a standard TLS handshake so that
+			// http2.ConfigureTransports receives a TLS-negotiated connection.
+			tlsCfg := base.TLSClientConfig
+			if tlsCfg == nil {
+				tlsCfg = &tls.Config{}
 			}
 
-			if err != nil {
-				return nil, err
+			host, _, _ := net.SplitHostPort(addr)
+
+			cfg := tlsCfg.Clone()
+			if cfg.ServerName == "" {
+				cfg.ServerName = host
 			}
 
-			return &h2framedConn{
-				Conn:        conn,
-				settings:    settings,
-				orderedKeys: orderedKeys,
-			}, nil
+			if len(cfg.NextProtos) == 0 {
+				cfg.NextProtos = []string{"h2", "http/1.1"}
+			}
+
+			d := &tls.Dialer{
+				NetDialer: &net.Dialer{},
+				Config:    cfg,
+			}
+			conn, err = d.DialContext(ctx, network, addr)
 		}
+
+		if err != nil {
+			return nil, err
+		}
+
+		return &framedConn{
+			Conn:        conn,
+			settings:    settings,
+			orderedKeys: orderedKeys,
+		}, nil
 	}
 
 	return ft
 }
 
-// h2framedConn wraps a [net.Conn] and intercepts the HTTP/2 client preface
+// framedConn wraps a [net.Conn] and intercepts the HTTP/2 client preface
 // to replace the SETTINGS frame and PRIORITY frame with browser-specific values.
 // This enables full HTTP/2 fingerprint impersonation matching the TLS profile.
 // When orderedKeys is set, HEADERS frames are also intercepted and reordered.
-type h2framedConn struct {
+type framedConn struct {
 	net.Conn
 	settings       Settings
 	orderedKeys    []string
@@ -354,7 +267,7 @@ type h2framedConn struct {
 	prefaceWritten bool
 }
 
-func (c *h2framedConn) Write(b []byte) (int, error) {
+func (c *framedConn) Write(b []byte) (int, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
@@ -442,7 +355,7 @@ func (c *h2framedConn) Write(b []byte) (int, error) {
 	return len(b), nil
 }
 
-func (c *h2framedConn) buildWindowUpdateFrame(increment uint32) []byte {
+func (c *framedConn) buildWindowUpdateFrame(increment uint32) []byte {
 	frame := make([]byte, 13)
 
 	// Length: 4 (0x000004)
@@ -465,7 +378,7 @@ func (c *h2framedConn) buildWindowUpdateFrame(increment uint32) []byte {
 }
 
 // buildSettingsFrame constructs an HTTP/2 SETTINGS frame with browser-specific values.
-func (c *h2framedConn) buildSettingsFrame() []byte {
+func (c *framedConn) buildSettingsFrame() []byte {
 	var payload bytes.Buffer
 
 	if c.settings.HeaderTableSize > 0 {
@@ -520,7 +433,7 @@ func (c *h2framedConn) buildSettingsFrame() []byte {
 }
 
 // buildPriorityFrame constructs a PRIORITY frame matching the browser's pattern.
-func (c *h2framedConn) buildPriorityFrame(original []byte) []byte {
+func (c *framedConn) buildPriorityFrame(original []byte) []byte {
 	if len(original) < 9 {
 		return nil
 	}
@@ -684,11 +597,7 @@ func reorderH2Headers(frame []byte, flags byte, order []string) ([]byte, bool) {
 	// Copy prefix (pad length + priority fields).
 	// gosec G602 cannot prove bounds safety on slice expressions here,
 	// so copy byte-by-byte with explicit bounds checks.
-	prefixCopyLen := min(prefixLen, len(frame)-9)
-
-	if prefixCopyLen > len(newFrame)-9 {
-		prefixCopyLen = len(newFrame) - 9
-	}
+	prefixCopyLen := min(min(prefixLen, len(frame)-9), len(newFrame)-9)
 
 	for i := range prefixCopyLen { //nolint:gosec
 		newFrame[9+i] = frame[9+i] //nolint:gosec

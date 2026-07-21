@@ -5,22 +5,15 @@
 package aoni
 
 import (
-	"context"
 	"errors"
-	"io"
-	"math"
+	stdio "io"
 	"net"
-	"net/http"
-	"net/http/httptest"
-	"os"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-
-	"github.com/lemon4ksan/aoni/h2"
 )
 
 func TestIsBlockedIP(t *testing.T) {
@@ -84,86 +77,6 @@ func TestIsBlockedIP_AdvancedIPv6AndObfuscation(t *testing.T) {
 	}
 }
 
-func TestRateLimitMiddleware_ClampsNegative(t *testing.T) {
-	t.Parallel()
-
-	m := RateLimitMiddleware(-5, -10)
-	require.NotNil(t, m)
-
-	doer := m(DoerFunc(func(req *http.Request) (*http.Response, error) {
-		return &http.Response{StatusCode: 200, Body: io.NopCloser(strings.NewReader(""))}, nil
-	}))
-
-	ctx, cancel := context.WithTimeout(t.Context(), 50*time.Millisecond)
-	defer cancel()
-
-	req, _ := http.NewRequestWithContext(ctx, "GET", "http://localhost", nil)
-	_, err := doer.Do(req)
-	assert.Error(t, err)
-}
-
-func TestRetryMiddleware_NegativeBackoff(t *testing.T) {
-	t.Parallel()
-
-	m := RetryMiddleware(RetryOptions{
-		MaxRetries: 1,
-		Backoff:    -1 * time.Second,
-	}, RetryOnErr())
-
-	doer := m(DoerFunc(func(req *http.Request) (*http.Response, error) {
-		return nil, assert.AnError
-	}))
-
-	req, _ := http.NewRequestWithContext(t.Context(), "GET", "http://localhost", nil)
-	_, err := doer.Do(req)
-	assert.Error(t, err)
-}
-
-func TestNewCircuitBreaker_NaN(t *testing.T) {
-	t.Parallel()
-
-	cb := NewCircuitBreaker(CircuitBreakerConfig{
-		FailureThreshold: math.NaN(),
-	})
-
-	assert.Equal(t, 0.5, cb.cfg.FailureThreshold)
-}
-
-func TestNewCircuitBreaker_Defaults(t *testing.T) {
-	t.Parallel()
-
-	cb := NewCircuitBreaker(CircuitBreakerConfig{})
-	assert.Equal(t, 0.5, cb.cfg.FailureThreshold)
-	assert.Equal(t, 5*time.Second, cb.cfg.Cooldown)
-	assert.Equal(t, 5, cb.cfg.MinRequests)
-	assert.Equal(t, 10*time.Second, cb.cfg.Window)
-}
-
-func TestDoHResolver_QueryEncoding(t *testing.T) {
-	t.Parallel()
-
-	var capturedURL string
-
-	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		capturedURL = r.URL.String()
-
-		w.WriteHeader(http.StatusOK)
-	}))
-	t.Cleanup(ts.Close)
-
-	r := &DoHResolver{
-		Endpoint: ts.URL,
-		Host:     "cloudflare-dns.com",
-		client:   ts.Client(),
-	}
-
-	ctx := t.Context()
-	_, _ = r.query(ctx, "example.com", 1)
-
-	assert.Contains(t, capturedURL, "name=example.com")
-	assert.Contains(t, capturedURL, "type=1")
-}
-
 func TestRedactHeaders(t *testing.T) {
 	t.Parallel()
 
@@ -203,42 +116,8 @@ func TestRetryOnTransientErrors(t *testing.T) {
 
 	t.Run("io_eof_returns_false", func(t *testing.T) {
 		t.Parallel()
-		assert.False(t, cond(nil, io.ErrUnexpectedEOF))
+		assert.False(t, cond(nil, stdio.ErrUnexpectedEOF))
 	})
-}
-
-func TestInMemoryDNSCache_Eviction(t *testing.T) {
-	t.Parallel()
-
-	cache := NewInMemoryDNSCache(time.Millisecond, &net.Resolver{})
-	t.Cleanup(func() { cache.Close() })
-
-	cache.mu.Lock()
-	cache.cache["expired.test"] = dnsCacheEntry{
-		ips:    []net.IPAddr{{IP: net.ParseIP("1.2.3.4")}},
-		expiry: time.Now().Add(-time.Hour),
-	}
-	cache.cache["valid.test"] = dnsCacheEntry{
-		ips:    []net.IPAddr{{IP: net.ParseIP("5.6.7.8")}},
-		expiry: time.Now().Add(time.Hour),
-	}
-	cache.mu.Unlock()
-
-	cache.mu.Lock()
-
-	now := time.Now()
-	for k, v := range cache.cache {
-		if now.After(v.expiry) {
-			delete(cache.cache, k)
-		}
-	}
-
-	_, expiredExists := cache.cache["expired.test"]
-	_, validExists := cache.cache["valid.test"]
-	cache.mu.Unlock()
-
-	assert.False(t, expiredExists, "expired entry should be removed")
-	assert.True(t, validExists, "valid entry should remain")
 }
 
 func TestLimitDecoder_BombPrevention(t *testing.T) {
@@ -257,59 +136,6 @@ func TestLimitDecoder_BombPrevention(t *testing.T) {
 
 	err := limited.Decode(reader, &target)
 	require.Error(t, err, "expected decoder to hit the limits boundary and return error")
-}
-
-func TestReorderHTTP1Headers_MalformedInputs(t *testing.T) {
-	t.Parallel()
-
-	t.Run("empty payload", func(t *testing.T) {
-		t.Parallel()
-
-		res, ok := h2.ReorderHTTP1Headers([]byte(""), []string{"Host"})
-		assert.False(t, ok)
-		assert.Nil(t, res)
-	})
-
-	t.Run("missing colon in header lines", func(t *testing.T) {
-		t.Parallel()
-
-		malformed := []byte("GET / HTTP/1.1\r\nHost 127.0.0.1\r\n\r\n")
-		res, ok := h2.ReorderHTTP1Headers(malformed, []string{"Host"})
-		assert.True(t, ok)
-		assert.Equal(t, []byte("GET / HTTP/1.1\r\n\r\n"), res)
-	})
-
-	t.Run("missing CRLF boundaries", func(t *testing.T) {
-		t.Parallel()
-
-		malformed := []byte("GET / HTTP/1.1\r\nHost: 127.0.0.1\r\n")
-		res, ok := h2.ReorderHTTP1Headers(malformed, []string{"Host"})
-		assert.False(t, ok)
-		assert.Nil(t, res)
-	})
-}
-
-func TestMultiReadBody_DoubleCloseIdempotency(t *testing.T) {
-	t.Parallel()
-
-	rc := io.NopCloser(strings.NewReader("payload to write onto temp file in disk storage"))
-	mBody, err := NewMultiReadBody(rc, 5, false)
-	require.NoError(t, err)
-
-	underlying, ok := mBody.(*multiReadBody)
-	require.True(t, ok)
-	require.NotNil(t, underlying.tmpFile)
-
-	tempPath := underlying.tmpFile.Name()
-
-	_, err = os.Stat(tempPath)
-	require.NoError(t, err)
-
-	underlying.ReallyClose()
-	underlying.ReallyClose()
-
-	_, err = os.Stat(tempPath)
-	assert.True(t, os.IsNotExist(err), "expected temporary file to be fully removed from disk after closed")
 }
 
 func TestGeneratePadding_SafetyLimits(t *testing.T) {
@@ -374,11 +200,11 @@ func TestFragmentedConn_Write(t *testing.T) {
 	}()
 
 	buf := make([]byte, 2)
-	n, err := io.ReadFull(c2, buf)
+	n, err := stdio.ReadFull(c2, buf)
 	require.NoError(t, err)
 	assert.Equal(t, "te", string(buf[:n]))
 
-	n, err = io.ReadFull(c2, buf)
+	n, err = stdio.ReadFull(c2, buf)
 	require.NoError(t, err)
 	assert.Equal(t, "st", string(buf[:n]))
 

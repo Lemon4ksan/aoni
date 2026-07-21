@@ -15,6 +15,7 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/lemon4ksan/aoni/middleware"
 	"github.com/lemon4ksan/aoni/option"
 
 	"github.com/lemon4ksan/aoni"
@@ -34,23 +35,23 @@ func main() {
 	)
 
 	// Retry on any error
-	retryOnErr := aoni.Chain(
+	retryOnErr := middleware.Chain(
 		client.HTTP(),
-		aoni.RetryMiddleware(
-			aoni.RetryOptions{
+		middleware.Retry(
+			middleware.RetryOptions{
 				MaxRetries:     3,
 				Backoff:        1 * time.Second,
-				JitterStrategy: aoni.JitterFull,
+				JitterStrategy: middleware.JitterFull,
 			},
 			aoni.RetryOnErr(),
 		),
 	)
 
 	// Retry on transient errors (network errors, 502, 503, 504)
-	retryOnTransient := aoni.Chain(
+	retryOnTransient := middleware.Chain(
 		client.HTTP(),
-		aoni.RetryMiddleware(
-			aoni.RetryOptions{
+		middleware.Retry(
+			middleware.RetryOptions{
 				MaxRetries: 5,
 				Backoff:    500 * time.Millisecond,
 			},
@@ -59,10 +60,10 @@ func main() {
 	)
 
 	// Custom retry condition: retry on specific status codes
-	customRetry := aoni.Chain(
+	customRetry := middleware.Chain(
 		client.HTTP(),
-		aoni.RetryMiddleware(
-			aoni.RetryOptions{MaxRetries: 3, Backoff: 2 * time.Second},
+		middleware.Retry(
+			middleware.RetryOptions{MaxRetries: 3, Backoff: 2 * time.Second},
 			func(resp *http.Response, err error) bool {
 				if resp != nil && resp.StatusCode == 429 {
 					fmt.Println("Rate limited, will retry...")

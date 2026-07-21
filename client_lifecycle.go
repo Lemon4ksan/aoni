@@ -13,6 +13,7 @@ import (
 	"golang.org/x/net/http2"
 
 	"github.com/lemon4ksan/aoni/cookie"
+	"github.com/lemon4ksan/aoni/internal/io"
 )
 
 // Unwrapper allows nested decorators to be peeled away to reach the
@@ -78,7 +79,7 @@ func CloseResponse(resp *http.Response) {
 
 	_ = resp.Body.Close()
 
-	if rb, ok := unwrapBody(resp.Body).(interface{ ReallyClose() }); ok {
+	if rb, ok := io.UnwrapBody(resp.Body).(interface{ ReallyClose() }); ok {
 		rb.ReallyClose()
 	}
 

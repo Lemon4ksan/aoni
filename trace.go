@@ -18,6 +18,21 @@ import (
 	"github.com/lemon4ksan/aoni/ja4"
 )
 
+// ResponseTrace extracts the [TraceInfo] previously captured via [WithTraceContext].
+// Returns nil if no trace was registered on the request.
+func ResponseTrace(resp *http.Response) *TraceInfo {
+	if resp == nil || resp.Request == nil {
+		return nil
+	}
+
+	cfg := GetRequestConfig(resp.Request.Context())
+	if cfg != nil {
+		return cfg.TraceInfo
+	}
+
+	return nil
+}
+
 // TraceInfo records network layer timing metrics for a request.
 // Timing fields are fully populated only after the response body is completely read.
 type TraceInfo struct {

@@ -23,6 +23,7 @@ import (
 	"github.com/lemon4ksan/aoni"
 	"github.com/lemon4ksan/aoni/ja4"
 	"github.com/lemon4ksan/aoni/p0f"
+	"github.com/lemon4ksan/aoni/values"
 )
 
 // Modifier is a type alias for [aoni.RequestModifier].
@@ -64,7 +65,7 @@ func WithQuery(query any) aoni.RequestModifier {
 			return
 		}
 
-		encoder := aoni.StructToValues
+		encoder := values.StructToValues
 		if cfg := aoni.GetRequestConfig(req.Context()); cfg != nil && cfg.QueryEncoder != nil {
 			encoder = cfg.QueryEncoder
 		}
@@ -296,7 +297,7 @@ func WithFormBody(payload any) aoni.RequestModifier {
 			return
 		}
 
-		encoder := aoni.StructToValues
+		encoder := values.StructToValues
 		if cfg := aoni.GetRequestConfig(req.Context()); cfg != nil && cfg.QueryEncoder != nil {
 			encoder = cfg.QueryEncoder
 		}
@@ -315,6 +316,14 @@ func WithFormBody(payload any) aoni.RequestModifier {
 		req.GetBody = func() (io.ReadCloser, error) {
 			return io.NopCloser(strings.NewReader(encoded)), nil
 		}
+	}
+}
+
+// WithFallback returns a [RequestModifier] that registers f as the
+// fallback for this request. See [FallbackMiddleware].
+func WithFallback(f aoni.FallbackFunc) aoni.RequestModifier {
+	return func(req *http.Request) {
+		aoni.GetOrInitRequestConfig(req).Fallback = f
 	}
 }
 
@@ -510,7 +519,7 @@ func WithP0fSignature(sig *p0f.Signature) aoni.RequestModifier {
 }
 
 // WithSessionCache sets TLS session cache.
-func WithSessionCache(cache *aoni.ProxyAwareSessionCache) aoni.RequestModifier {
+func WithSessionCache(cache aoni.SessionCache) aoni.RequestModifier {
 	return func(req *http.Request) {
 		aoni.GetOrInitRequestConfig(req).SessionCache = cache
 	}
@@ -549,10 +558,45 @@ func WithJA4Callback(fn func(ja4.Report)) aoni.RequestModifier {
 	}
 }
 
+// WithTraceContext returns a [RequestModifier] that attaches a new [TraceInfo]
+// to the request context. This allows developers to retrieve network
+// timing and JA4/JA4H fingerprints using [ResponseTrace] after the request finishes.
+func WithTraceContext() aoni.RequestModifier {
+	return func(req *http.Request) {
+		info := &aoni.TraceInfo{}
+		aoni.GetOrInitRequestConfig(req).TraceInfo = info
+		aoni.TraceJA4(info)(req)
+	}
+}
+
+// WithFragmentation returns a RequestModifier that sets fragmentation configuration on the request context.
+func WithFragmentation(cfg aoni.FragmentConfig) aoni.RequestModifier {
+	return func(req *http.Request) {
+		aoni.GetOrInitRequestConfig(req).Fragment = &cfg
+	}
+}
+
 // WithHostRewrite sets DNS rewrite rules.
 func WithHostRewrite(rules map[string]string) aoni.RequestModifier {
 	return func(req *http.Request) {
 		aoni.GetOrInitRequestConfig(req).HostRewrite = &aoni.HostRewriteConfig{Rules: rules}
+	}
+}
+
+// AppendHostRewrite returns a RequestModifier that appends new host rewrite rules to the existing
+// HostRewriteConfig in the request context, or creates a new one if none are present.
+func AppendHostRewrite(rules map[string]string) aoni.RequestModifier {
+	return func(req *http.Request) {
+		cfg := aoni.GetOrInitRequestConfig(req)
+
+		newRules := make(map[string]string)
+		if cfg.HostRewrite != nil && cfg.HostRewrite.Rules != nil {
+			maps.Copy(newRules, cfg.HostRewrite.Rules)
+		}
+
+		maps.Copy(newRules, rules)
+
+		cfg.HostRewrite = &aoni.HostRewriteConfig{Rules: newRules}
 	}
 }
 

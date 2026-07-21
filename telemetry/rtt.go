@@ -2,7 +2,7 @@
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
-package aoni
+package telemetry
 
 import (
 	"math"
@@ -10,6 +10,78 @@ import (
 	"sync"
 	"time"
 )
+
+// DynamicHedgingConfig configures the dynamic hedging delay calculation.
+type DynamicHedgingConfig struct {
+	// Tracker is the shared RTT tracker for measuring network latency.
+	Tracker *RTTTracker
+	// Percentile is the RTT percentile to use for delay calculation (default: 95).
+	Percentile float64
+	// MinDelay is the minimum hedging delay regardless of RTT (default: 50ms).
+	MinDelay time.Duration
+	// MaxDelay is the maximum hedging delay cap (default: 2s).
+	MaxDelay time.Duration
+	// Multiplier scales the percentile RTT to compute the delay (default: 1.5).
+	// The dynamic delay = min(MaxDelay, max(MinDelay, p95 * Multiplier)).
+	Multiplier float64
+}
+
+// DefaultDynamicHedgingConfig returns sensible defaults for dynamic hedging.
+func DefaultDynamicHedgingConfig() DynamicHedgingConfig {
+	return DynamicHedgingConfig{
+		Tracker:    NewRTTTracker(100),
+		Percentile: 95,
+		MinDelay:   50 * time.Millisecond,
+		MaxDelay:   2 * time.Second,
+		Multiplier: 1.5,
+	}
+}
+
+// ComputeDelay calculates the dynamic hedging delay based on observed RTT data.
+// If the tracker has insufficient samples (< 10), it returns MinDelay.
+func (c DynamicHedgingConfig) ComputeDelay() time.Duration {
+	if c.Tracker == nil || c.Tracker.Count() < 10 {
+		if c.MinDelay > 0 {
+			return c.MinDelay
+		}
+
+		return 50 * time.Millisecond
+	}
+
+	pct := c.Percentile
+	if pct <= 0 {
+		pct = 95
+	}
+
+	rtt := c.Tracker.Percentile(pct)
+
+	mult := c.Multiplier
+	if mult <= 0 {
+		mult = 1.5
+	}
+
+	delay := time.Duration(float64(rtt) * mult)
+
+	minDelay := c.MinDelay
+	if minDelay <= 0 {
+		minDelay = 50 * time.Millisecond
+	}
+
+	maxDelay := c.MaxDelay
+	if maxDelay <= 0 {
+		maxDelay = 2 * time.Second
+	}
+
+	if delay < minDelay {
+		delay = minDelay
+	}
+
+	if delay > maxDelay {
+		delay = maxDelay
+	}
+
+	return delay
+}
 
 // RTTTracker maintains a sliding window of RTT measurements and computes
 // percentile-based values (p95, p99) for dynamic hedging delay calculation.
@@ -175,76 +247,4 @@ func (t *RTTTracker) Reset() {
 	for i := range t.samples {
 		t.samples[i] = 0
 	}
-}
-
-// DynamicHedgingConfig configures the dynamic hedging delay calculation.
-type DynamicHedgingConfig struct {
-	// Tracker is the shared RTT tracker for measuring network latency.
-	Tracker *RTTTracker
-	// Percentile is the RTT percentile to use for delay calculation (default: 95).
-	Percentile float64
-	// MinDelay is the minimum hedging delay regardless of RTT (default: 50ms).
-	MinDelay time.Duration
-	// MaxDelay is the maximum hedging delay cap (default: 2s).
-	MaxDelay time.Duration
-	// Multiplier scales the percentile RTT to compute the delay (default: 1.5).
-	// The dynamic delay = min(MaxDelay, max(MinDelay, p95 * Multiplier)).
-	Multiplier float64
-}
-
-// DefaultDynamicHedgingConfig returns sensible defaults for dynamic hedging.
-func DefaultDynamicHedgingConfig() DynamicHedgingConfig {
-	return DynamicHedgingConfig{
-		Tracker:    NewRTTTracker(100),
-		Percentile: 95,
-		MinDelay:   50 * time.Millisecond,
-		MaxDelay:   2 * time.Second,
-		Multiplier: 1.5,
-	}
-}
-
-// ComputeDelay calculates the dynamic hedging delay based on observed RTT data.
-// If the tracker has insufficient samples (< 10), it returns MinDelay.
-func (c DynamicHedgingConfig) ComputeDelay() time.Duration {
-	if c.Tracker == nil || c.Tracker.Count() < 10 {
-		if c.MinDelay > 0 {
-			return c.MinDelay
-		}
-
-		return 50 * time.Millisecond
-	}
-
-	pct := c.Percentile
-	if pct <= 0 {
-		pct = 95
-	}
-
-	rtt := c.Tracker.Percentile(pct)
-
-	mult := c.Multiplier
-	if mult <= 0 {
-		mult = 1.5
-	}
-
-	delay := time.Duration(float64(rtt) * mult)
-
-	minDelay := c.MinDelay
-	if minDelay <= 0 {
-		minDelay = 50 * time.Millisecond
-	}
-
-	maxDelay := c.MaxDelay
-	if maxDelay <= 0 {
-		maxDelay = 2 * time.Second
-	}
-
-	if delay < minDelay {
-		delay = minDelay
-	}
-
-	if delay > maxDelay {
-		delay = maxDelay
-	}
-
-	return delay
 }

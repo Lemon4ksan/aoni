@@ -30,7 +30,7 @@ var (
 	// PersonaChrome120Windows mimics Google Chrome 120 on Windows.
 	PersonaChrome120Windows = Persona{
 		TLSID:      utls.HelloChrome_120,
-		H2Settings: h2.ChromeH2Settings,
+		H2Settings: h2.ChromeSettings,
 		UserAgent:  DefaultUserAgent,
 		HeaderOrder: []string{
 			":method", ":authority", ":scheme", ":path",
@@ -46,7 +46,7 @@ var (
 	// PersonaChrome120Android mimics Google Chrome 120 on Android.
 	PersonaChrome120Android = Persona{
 		TLSID:      utls.HelloChrome_120,
-		H2Settings: h2.ChromeH2Settings,
+		H2Settings: h2.ChromeSettings,
 		UserAgent:  "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36",
 		HeaderOrder: []string{
 			":method", ":authority", ":scheme", ":path",
@@ -62,7 +62,7 @@ var (
 	// PersonaFirefox120Windows mimics Mozilla Firefox 120 on Windows.
 	PersonaFirefox120Windows = Persona{
 		TLSID:      utls.HelloFirefox_120,
-		H2Settings: h2.FirefoxH2Settings,
+		H2Settings: h2.FirefoxSettings,
 		UserAgent:  "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:120.0) Gecko/20100101 Firefox/120.0",
 		HeaderOrder: []string{
 			":method", ":path", ":authority", ":scheme",
@@ -78,7 +78,7 @@ var (
 	// PersonaFirefox120Android mimics Mozilla Firefox 120 on Android.
 	PersonaFirefox120Android = Persona{
 		TLSID:      utls.HelloFirefox_120,
-		H2Settings: h2.FirefoxH2Settings,
+		H2Settings: h2.FirefoxSettings,
 		UserAgent:  "Mozilla/5.0 (Android 13; Mobile; rv:120.0) Gecko/120.0 Firefox/120.0",
 		HeaderOrder: []string{
 			":method", ":path", ":authority", ":scheme",

@@ -259,3 +259,22 @@ func TestGetRetryOverride_NotSet(t *testing.T) {
 	_, ok := aoni.GetRetryOverride(req.Context()).Value()
 	assert.False(t, ok)
 }
+
+func TestRetryCondition_Combinators(t *testing.T) {
+	t.Parallel()
+
+	condTrue := func(resp *http.Response, err error) bool { return true }
+	condFalse := func(resp *http.Response, err error) bool { return false }
+
+	t.Run("or_combinator", func(t *testing.T) {
+		t.Parallel()
+		assert.True(t, aoni.Or(condTrue, condFalse)(nil, nil))
+		assert.False(t, aoni.Or(condFalse, condFalse)(nil, nil))
+	})
+
+	t.Run("and_combinator", func(t *testing.T) {
+		t.Parallel()
+		assert.True(t, aoni.And(condTrue, condTrue)(nil, nil))
+		assert.False(t, aoni.And(condTrue, condFalse)(nil, nil))
+	})
+}

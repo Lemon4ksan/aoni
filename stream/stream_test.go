@@ -2,36 +2,51 @@
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
-package aoni
+package stream_test
 
 import (
-	"bytes"
 	"context"
 	"io"
 	"net/http"
-	"os"
+	"net/http/httptest"
 	"strings"
-	"sync"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/lemon4ksan/aoni"
+	"github.com/lemon4ksan/aoni/option"
+	"github.com/lemon4ksan/aoni/stream"
 )
+
+// setupTestServer creates a test server and pre-configures a client With its URL.
+// It registers resource cleanup automatically through t.Cleanup.
+func setupTestServer(t *testing.T, handler http.HandlerFunc) (*httptest.Server, *aoni.Client) {
+	t.Helper()
+
+	server := httptest.NewServer(handler)
+	t.Cleanup(server.Close)
+
+	client := aoni.NewClient(nil, option.WithBaseURL(server.URL))
+
+	return server, client
+}
 
 func TestStream(t *testing.T) {
 	t.Parallel()
 
 	t.Run("stream_response_body", func(t *testing.T) {
 		t.Parallel()
-		_, client := SetupTestServer(t, func(w http.ResponseWriter, r *http.Request) {
+		_, client := setupTestServer(t, func(w http.ResponseWriter, r *http.Request) {
 			w.Header().Set("Content-Type", "application/octet-stream")
 			w.Header().Set("Content-Length", "11")
 			w.WriteHeader(http.StatusOK)
 			_, _ = w.Write([]byte("hello world"))
 		})
 
-		stream, err := Stream(t.Context(), client, "/stream")
+		stream, err := stream.Get(t.Context(), client, "/stream")
 		require.NoError(t, err)
 		t.Cleanup(func() { _ = stream.Close() })
 
@@ -45,28 +60,28 @@ func TestStream(t *testing.T) {
 
 	t.Run("stream_error_status", func(t *testing.T) {
 		t.Parallel()
-		_, client := SetupTestServer(t, func(w http.ResponseWriter, r *http.Request) {
+		_, client := setupTestServer(t, func(w http.ResponseWriter, r *http.Request) {
 			w.WriteHeader(http.StatusNotFound)
 		})
 
-		_, err := Stream(t.Context(), client, "/notfound")
+		_, err := stream.Get(t.Context(), client, "/notfound")
 		require.Error(t, err)
 
-		var apiErr *APIError
+		var apiErr *aoni.APIError
 		require.ErrorAs(t, err, &apiErr)
 		assert.Equal(t, http.StatusNotFound, apiErr.StatusCode)
 	})
 
 	t.Run("stream_with_query_params", func(t *testing.T) {
 		t.Parallel()
-		_, client := SetupTestServer(t, func(w http.ResponseWriter, r *http.Request) {
+		_, client := setupTestServer(t, func(w http.ResponseWriter, r *http.Request) {
 			assert.Equal(t, "bar", r.URL.Query().Get("foo"))
 
 			_, _ = w.Write([]byte("ok"))
 		})
 
 		query := map[string]string{"foo": "bar"}
-		stream, err := Stream(t.Context(), client, "/test", func(req *http.Request) {
+		stream, err := stream.Get(t.Context(), client, "/test", func(req *http.Request) {
 			q := req.URL.Query()
 			for k, v := range query {
 				q.Set(k, v)
@@ -87,12 +102,12 @@ func TestStream(t *testing.T) {
 
 		largeBody := strings.Repeat("x", 1024*1024)
 
-		_, client := SetupTestServer(t, func(w http.ResponseWriter, r *http.Request) {
+		_, client := setupTestServer(t, func(w http.ResponseWriter, r *http.Request) {
 			w.Header().Set("Content-Length", "1048576")
 			_, _ = w.Write([]byte(largeBody))
 		})
 
-		stream, err := Stream(t.Context(), client, "/large")
+		stream, err := stream.Get(t.Context(), client, "/large")
 		require.NoError(t, err)
 		t.Cleanup(func() { _ = stream.Close() })
 
@@ -103,12 +118,12 @@ func TestStream(t *testing.T) {
 
 	t.Run("response_method", func(t *testing.T) {
 		t.Parallel()
-		_, client := SetupTestServer(t, func(w http.ResponseWriter, r *http.Request) {
+		_, client := setupTestServer(t, func(w http.ResponseWriter, r *http.Request) {
 			w.Header().Set("X-Custom", "value")
 			_, _ = w.Write([]byte("ok"))
 		})
 
-		stream, err := Stream(t.Context(), client, "/test")
+		stream, err := stream.Get(t.Context(), client, "/test")
 		require.NoError(t, err)
 		t.Cleanup(func() { _ = stream.Close() })
 
@@ -121,19 +136,19 @@ func TestStream(t *testing.T) {
 
 func TestStreamNDJSON(t *testing.T) {
 	t.Parallel()
-	_, client := SetupTestServer(t, func(w http.ResponseWriter, r *http.Request) {
+	_, client := setupTestServer(t, func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/x-ndjson")
 		_, _ = w.Write([]byte(`{"message": "msg1"}` + "\n" + `{"message": "msg2"}` + "\n"))
 	})
 
-	stream, err := Stream(t.Context(), client, "/")
+	s, err := stream.Get(t.Context(), client, "/")
 	require.NoError(t, err)
 
 	type Msg struct {
 		Message string `json:"message"`
 	}
 
-	out, errs := StreamNDJSON[Msg](t.Context(), stream)
+	out, errs := stream.GetNDJSON[Msg](t.Context(), s)
 
 	var messages []string
 	for msg := range out {
@@ -149,17 +164,17 @@ func TestStreamNDJSON(t *testing.T) {
 
 func TestStreamSSE(t *testing.T) {
 	t.Parallel()
-	_, client := SetupTestServer(t, func(w http.ResponseWriter, r *http.Request) {
+	_, client := setupTestServer(t, func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/event-stream")
 		_, _ = w.Write([]byte("event: first\ndata: value1\nid: 1\n\nevent: second\ndata: value2\n\n"))
 	})
 
-	stream, err := Stream(t.Context(), client, "/")
+	s, err := stream.Get(t.Context(), client, "/")
 	require.NoError(t, err)
 
-	out, errs := ParseSSE[SSEEvent](t.Context(), stream)
+	out, errs := stream.ParseSSE[stream.SSEEvent](t.Context(), s)
 
-	var events []SSEEvent
+	var events []stream.SSEEvent
 	for ev := range out {
 		events = append(events, ev)
 	}
@@ -179,180 +194,9 @@ func TestStreamSSE(t *testing.T) {
 	assert.Equal(t, "value2", events[1].Data)
 }
 
-func TestMultiReadBody_FileCleanup(t *testing.T) {
-	t.Parallel()
-
-	data := strings.Repeat("x", 64*1024)
-
-	body := io.NopCloser(strings.NewReader(data))
-	mrb, err := NewMultiReadBody(body, 32*1024, false)
-	require.NoError(t, err)
-
-	mrc := mrb.(*multiReadBody)
-	require.NotNil(t, mrc.tmpFile)
-
-	tmpPath := mrc.tmpFile.Name()
-
-	buf := make([]byte, len(data))
-	n, err := io.ReadFull(mrc, buf)
-	require.NoError(t, err)
-	assert.Equal(t, len(data), n)
-
-	err = mrc.Close()
-	require.NoError(t, err)
-
-	_, err = os.Stat(tmpPath)
-	assert.NoError(t, err)
-
-	mrc.ReallyClose()
-
-	_, err = os.Stat(tmpPath)
-	assert.True(t, os.IsNotExist(err))
-}
-
-func TestResponseBodyReadCloser_CallsReallyClose(t *testing.T) {
-	t.Parallel()
-
-	data := strings.Repeat("y", 64*1024)
-
-	body := io.NopCloser(strings.NewReader(data))
-	mrb, err := NewMultiReadBody(body, 32*1024, false)
-	require.NoError(t, err)
-
-	mrc := mrb.(*multiReadBody)
-	require.NotNil(t, mrc.tmpFile)
-	tmpPath := mrc.tmpFile.Name()
-
-	frc := NewResponseBodyReadCloser(mrb)
-
-	err = frc.Close()
-	require.NoError(t, err)
-
-	_, err = os.Stat(tmpPath)
-	assert.True(t, os.IsNotExist(err))
-}
-
-func TestMultiReadBody_InMemory_NoTmpFile(t *testing.T) {
-	t.Parallel()
-
-	data := "small data"
-	body := io.NopCloser(strings.NewReader(data))
-	mrb, err := NewMultiReadBody(body, 1024, false)
-	require.NoError(t, err)
-
-	mrc := mrb.(*multiReadBody)
-	assert.Nil(t, mrc.tmpFile)
-
-	buf, err := io.ReadAll(mrc)
-	require.NoError(t, err)
-	assert.Equal(t, data, string(buf))
-
-	err = mrc.Close()
-	require.NoError(t, err)
-
-	mrc.ReallyClose()
-}
-
-func TestProgressReader_AtomicIncrement(t *testing.T) {
-	t.Parallel()
-
-	data := make([]byte, 1024*1024)
-	for i := range data {
-		data[i] = byte(i % 256)
-	}
-
-	var (
-		totalRead int64
-		mu        sync.Mutex
-	)
-
-	seen := make(map[int64]bool)
-
-	pr := &progressReader{
-		reader: bytes.NewReader(data),
-		total:  int64(len(data)),
-		onProgress: func(current, total int64) {
-			mu.Lock()
-			seen[current] = true
-			totalRead = current
-			mu.Unlock()
-		},
-	}
-
-	buf := make([]byte, 256)
-	for {
-		n, err := pr.Read(buf)
-		if err != nil {
-			break
-		}
-
-		_ = n
-	}
-
-	mu.Lock()
-	assert.Equal(t, int64(len(data)), totalRead)
-	assert.True(t, len(seen) > 0)
-	mu.Unlock()
-}
-
-func TestProgressReader_ConcurrentSafety(t *testing.T) {
-	t.Parallel()
-
-	pr := &progressReader{
-		reader:     &threadSafeReader{data: make([]byte, 4096)},
-		total:      4096,
-		onProgress: func(_, _ int64) {},
-	}
-
-	var wg sync.WaitGroup
-	for range 10 {
-		wg.Go(func() {
-			buf := make([]byte, 64)
-			for {
-				_, err := pr.Read(buf)
-				if err != nil {
-					return
-				}
-			}
-		})
-	}
-
-	done := make(chan struct{})
-	go func() {
-		wg.Wait()
-		close(done)
-	}()
-
-	select {
-	case <-done:
-	case <-time.After(5 * time.Second):
-		t.Fatal("timed out waiting for concurrent reads")
-	}
-}
-
-type threadSafeReader struct {
-	mu   sync.Mutex
-	data []byte
-	pos  int
-}
-
-func (r *threadSafeReader) Read(p []byte) (int, error) {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-
-	if r.pos >= len(r.data) {
-		return 0, io.EOF
-	}
-
-	n := copy(p, r.data[r.pos:])
-	r.pos += n
-
-	return n, nil
-}
-
 func TestStreamWithBody(t *testing.T) {
 	t.Parallel()
-	_, client := SetupTestServer(t, func(w http.ResponseWriter, r *http.Request) {
+	_, client := setupTestServer(t, func(w http.ResponseWriter, r *http.Request) {
 		body, err := io.ReadAll(r.Body)
 		require.NoError(t, err)
 		assert.Equal(t, "post_payload_data", string(body))
@@ -360,7 +204,7 @@ func TestStreamWithBody(t *testing.T) {
 		_, _ = w.Write([]byte("response_payload"))
 	})
 
-	stream, err := StreamWithBody(t.Context(), client, http.MethodPost, "/", strings.NewReader("post_payload_data"))
+	stream, err := stream.WithBody(t.Context(), client, http.MethodPost, "/", strings.NewReader("post_payload_data"))
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = stream.Close() })
 
@@ -371,15 +215,15 @@ func TestStreamWithBody(t *testing.T) {
 
 func TestStreamSSE_Integration(t *testing.T) {
 	t.Parallel()
-	_, client := SetupTestServer(t, func(w http.ResponseWriter, r *http.Request) {
+	_, client := setupTestServer(t, func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/event-stream")
 		_, _ = w.Write([]byte("event: welcome\ndata: joined\n\n"))
 	})
 
-	out, errs, err := StreamSSE[SSEEvent](t.Context(), client, "/")
+	out, errs, err := stream.SSE[stream.SSEEvent](t.Context(), client, "/")
 	require.NoError(t, err)
 
-	var events []SSEEvent
+	var events []stream.SSEEvent
 	for ev := range out {
 		events = append(events, ev)
 	}
@@ -395,14 +239,14 @@ func TestStreamSSE_Integration(t *testing.T) {
 
 func TestStreamChunks(t *testing.T) {
 	t.Parallel()
-	_, client := SetupTestServer(t, func(w http.ResponseWriter, r *http.Request) {
+	_, client := setupTestServer(t, func(w http.ResponseWriter, r *http.Request) {
 		_, _ = w.Write([]byte("token1_token2_token3"))
 	})
 
-	stream, err := Stream(t.Context(), client, "/")
+	s, err := stream.Get(t.Context(), client, "/")
 	require.NoError(t, err)
 
-	out, errs := StreamChunks(t.Context(), stream)
+	out, errs := stream.Chunks(t.Context(), s)
 
 	var chunks []string
 	for chunk := range out {
@@ -419,7 +263,7 @@ func TestStreamChunks(t *testing.T) {
 
 func TestStreamNDJSON_ContextCancellation(t *testing.T) {
 	t.Parallel()
-	_, client := SetupTestServer(t, func(w http.ResponseWriter, r *http.Request) {
+	_, client := setupTestServer(t, func(w http.ResponseWriter, r *http.Request) {
 		// Send first record, wait/block, then send second
 		_, _ = w.Write([]byte(`{"message":"first"}` + "\n"))
 
@@ -428,7 +272,7 @@ func TestStreamNDJSON_ContextCancellation(t *testing.T) {
 		_, _ = w.Write([]byte(`{"message":"second"}` + "\n"))
 	})
 
-	stream, err := Stream(t.Context(), client, "/")
+	s, err := stream.Get(t.Context(), client, "/")
 	require.NoError(t, err)
 
 	ctx, cancel := context.WithCancel(t.Context())
@@ -437,7 +281,7 @@ func TestStreamNDJSON_ContextCancellation(t *testing.T) {
 		Message string `json:"message"`
 	}
 
-	out, errs := StreamNDJSON[Msg](ctx, stream)
+	out, errs := stream.GetNDJSON[Msg](ctx, s)
 
 	// Consume the first available message
 	msg1 := <-out

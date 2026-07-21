@@ -12,15 +12,72 @@
 package aoni
 
 import (
+	"bytes"
 	"context"
 	"crypto/tls"
+	"encoding/json"
+	"errors"
+	"io"
 	"math/rand/v2"
+	"net"
 	"net/http"
 	"net/url"
+	"strings"
 	"time"
 
 	"github.com/lemon4ksan/miyako/generic"
 )
+
+// HostRewriteRules extracts and returns the active host rewrite rules map from the given context.
+// Returns nil if no rules are configured in the context.
+func HostRewriteRules(ctx context.Context) map[string]string {
+	cfg := GetRequestConfig(ctx)
+	if cfg != nil && cfg.HostRewrite != nil {
+		return cfg.HostRewrite.Rules
+	}
+
+	return nil
+}
+
+// WithContextModifier returns a new context carrying the given RequestModifiers.
+// Third-party libraries that pass context through [http.Request] will carry
+// these modifiers into the aoni pipeline automatically.
+//
+// Example with go-resty:
+//
+//	ctx := WithContextModifier(context.Background(),
+//	    WithHeader("X-Api-Key", "secret"),
+//	    TraceJA4(info),
+//	)
+//	resp, err := restyClient.R().SetContext(ctx).Get("/api/data")
+func WithContextModifier(ctx context.Context, mods ...RequestModifier) context.Context {
+	if len(mods) == 0 {
+		return ctx
+	}
+
+	cfg := GetRequestConfig(ctx)
+	if cfg == nil {
+		cfg = &RequestConfig{
+			Metadata: make(map[string]any),
+		}
+		ctx = context.WithValue(ctx, requestConfigKey{}, cfg)
+	}
+
+	cfg.Modifiers = append(cfg.Modifiers, mods...)
+
+	return ctx
+}
+
+// ContextModifiers extracts the RequestModifiers previously stored via
+// [WithContextModifier]. Returns nil if none are present.
+func ContextModifiers(ctx context.Context) []RequestModifier {
+	cfg := GetRequestConfig(ctx)
+	if cfg != nil {
+		return cfg.Modifiers
+	}
+
+	return nil
+}
 
 // MarkModifierError attaches an error to the request config.
 // The [Client] will check for this error before dispatching the request
@@ -132,6 +189,80 @@ func GetCacheTTL(ctx context.Context) generic.Optional[time.Duration] {
 	return generic.Some(cfg.CacheTTL)
 }
 
+// RetryCondition reports whether a failed request should be retried.
+type RetryCondition func(resp *http.Response, err error) bool
+
+// Or combines multiple [RetryCondition] functions into a single condition
+// that returns true if ANY of the underlying conditions return true.
+func Or(conditions ...RetryCondition) RetryCondition {
+	return func(resp *http.Response, err error) bool {
+		for _, cond := range conditions {
+			if cond != nil && cond(resp, err) {
+				return true
+			}
+		}
+
+		return false
+	}
+}
+
+// And combines multiple [RetryCondition] functions into a single condition
+// that returns true if ALL of the underlying conditions return true.
+func And(conditions ...RetryCondition) RetryCondition {
+	return func(resp *http.Response, err error) bool {
+		for _, cond := range conditions {
+			if cond == nil || !cond(resp, err) {
+				return false
+			}
+		}
+
+		return true
+	}
+}
+
+// FallbackFunc provides an alternate response when a request fails.
+type FallbackFunc func(req *http.Request, origErr error) (*http.Response, error)
+
+// FallbackString returns a [FallbackFunc] that responds with plain text and the given statusCode.
+func FallbackString(statusCode int, text string) FallbackFunc {
+	return func(req *http.Request, origErr error) (*http.Response, error) {
+		return &http.Response{
+			StatusCode:    statusCode,
+			Status:        http.StatusText(statusCode),
+			Proto:         "HTTP/1.1",
+			ProtoMajor:    1,
+			ProtoMinor:    1,
+			Header:        http.Header{"Content-Type": []string{"text/plain; charset=utf-8"}},
+			Body:          io.NopCloser(strings.NewReader(text)),
+			ContentLength: int64(len(text)),
+			Request:       req,
+		}, nil
+	}
+}
+
+// FallbackJSON returns a [FallbackFunc] that responds with data
+// serialized as JSON and the given statusCode.
+func FallbackJSON(statusCode int, data any) FallbackFunc {
+	return func(req *http.Request, origErr error) (*http.Response, error) {
+		bodyBytes, err := json.Marshal(data)
+		if err != nil {
+			return nil, err
+		}
+
+		return &http.Response{
+			StatusCode:    statusCode,
+			Status:        http.StatusText(statusCode),
+			Proto:         "HTTP/1.1",
+			ProtoMajor:    1,
+			ProtoMinor:    1,
+			Header:        http.Header{"Content-Type": []string{"application/json"}},
+			Body:          io.NopCloser(bytes.NewReader(bodyBytes)),
+			ContentLength: int64(len(bodyBytes)),
+			Request:       req,
+		}, nil
+	}
+}
+
 // RetryOverride holds per-request retry settings that override the client-level
 // [RetryMiddleware] configuration.
 type RetryOverride struct {
@@ -144,6 +275,54 @@ type RetryOverride struct {
 	// Condition is called after each failed attempt to decide whether to retry.
 	// When nil [RetryOnErr] is used as the default.
 	Condition RetryCondition
+}
+
+// RetryOnErr returns a [RetryCondition] that retries on any non-nil error.
+func RetryOnErr() RetryCondition {
+	return func(resp *http.Response, err error) bool {
+		return err != nil
+	}
+}
+
+// RetryOnTransientErrors returns a [RetryCondition] that retries on
+// network errors, connection resets, and broken pipes.
+func RetryOnTransientErrors() RetryCondition {
+	return func(resp *http.Response, err error) bool {
+		if err != nil {
+			var netErr net.Error
+			if errors.As(err, &netErr) {
+				return true
+			}
+
+			errStr := err.Error()
+
+			return strings.Contains(errStr, "connection refused") ||
+				strings.Contains(errStr, "connection reset") ||
+				strings.Contains(errStr, "broken pipe")
+		}
+
+		return false
+	}
+}
+
+// RetryOnRateLimit returns a [RetryCondition] that retries on HTTP 429.
+func RetryOnRateLimit() RetryCondition {
+	return func(resp *http.Response, err error) bool {
+		return resp != nil && resp.StatusCode == http.StatusTooManyRequests
+	}
+}
+
+// RetryOnGatewayErrors returns a [RetryCondition] that retries on
+// HTTP 502, 503, and 504 status codes.
+func RetryOnGatewayErrors() RetryCondition {
+	return func(resp *http.Response, err error) bool {
+		if resp != nil {
+			sc := resp.StatusCode
+			return sc == http.StatusBadGateway || sc == http.StatusServiceUnavailable || sc == http.StatusGatewayTimeout
+		}
+
+		return false
+	}
 }
 
 // GetRetryOverride returns the per-request [RetryOverride] set by [mod.WithRetryPolicy].

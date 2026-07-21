@@ -2,7 +2,7 @@
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
-package aoni
+package io
 
 import (
 	"bufio"
@@ -18,6 +18,32 @@ import (
 
 	"github.com/lemon4ksan/miyako/generic"
 )
+
+// ErrBufferLimitExceeded indicates the replayable buffer exceeded its memory threshold,
+// and disk caching was disabled.
+var ErrBufferLimitExceeded = errors.New("aoni: replayable buffer threshold exceeded")
+
+// ErrResponseTooLarge indicates the response exceeded the size limit.
+var ErrResponseTooLarge = errors.New("aoni: response size limit exceeded")
+
+// ProgressFunc is called periodically during response body reads.
+// current is the bytes read so far; total is the Content-Length
+// value or -1 if unknown.
+type ProgressFunc func(current, total int64)
+
+// UnwrapBody unwraps the body of a response, following any decorator chain.
+func UnwrapBody(c io.Closer) io.Closer {
+	for {
+		u, ok := c.(interface{ Unwrap() io.Closer })
+		if !ok {
+			break
+		}
+
+		c = u.Unwrap()
+	}
+
+	return c
+}
 
 // UnwrapTo traverses the decorator chain c and returns the first layer
 // that implements the generic type T, as well as true.
@@ -73,56 +99,6 @@ func ReadAllBytes(rb ReplayableBody) ([]byte, error) {
 	}
 
 	return b, nil
-}
-
-// InMemoryCacheStore implements CacheStore in memory.
-type InMemoryCacheStore struct {
-	mu    sync.RWMutex
-	cache map[string]inMemoryCacheEntry
-}
-
-// NewInMemoryCacheStore creates a thread-safe in-memory CacheStore.
-func NewInMemoryCacheStore() *InMemoryCacheStore {
-	return &InMemoryCacheStore{
-		cache: make(map[string]inMemoryCacheEntry),
-	}
-}
-
-// Get retrieves cached response bytes from memory.
-func (s *InMemoryCacheStore) Get(ctx context.Context, key string) ([]byte, error) {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-
-	entry, ok := s.cache[key]
-	if !ok || time.Now().After(entry.ExpiresAt) {
-		return nil, errors.New("aoni cache: miss")
-	}
-
-	return entry.Value, nil
-}
-
-// Set stores response bytes in memory with TTL.
-func (s *InMemoryCacheStore) Set(ctx context.Context, key string, val []byte, ttl time.Duration) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	s.cache[key] = inMemoryCacheEntry{
-		Value:     val,
-		ExpiresAt: time.Now().Add(ttl),
-	}
-
-	return nil
-}
-
-type inMemoryCacheEntry struct {
-	Value     []byte
-	ExpiresAt time.Time
-}
-
-type cachedResponse struct {
-	StatusCode int                 `json:"status_code"`
-	Header     map[string][]string `json:"header"`
-	BodyBase64 string              `json:"body_base64"`
 }
 
 // ExplicitBufferedBody wraps a response body where a prefix has been read and cached in memory.
@@ -184,112 +160,119 @@ func AsReplayable(rc io.ReadCloser) ReplayableBody {
 
 	buf := &bytes.Buffer{}
 
-	return &fallbackReplayableBody{
+	return &FallbackReplayableBody{
 		ReadCloser: rc,
 		buf:        buf,
 		reader:     io.TeeReader(rc, buf),
 	}
 }
 
-type progressReader struct {
-	reader     io.Reader
-	total      int64
-	current    int64
-	onProgress ProgressFunc
+// ProgressReader wraps an [io.Reader] and calls a progress function as it reads.
+type ProgressReader struct {
+	io.Reader
+	Total      int64
+	OnProgress ProgressFunc
+
+	current int64
 }
 
-func (pr *progressReader) Read(p []byte) (n int, err error) {
-	n, err = pr.reader.Read(p)
+func (pr *ProgressReader) Read(p []byte) (n int, err error) {
+	n, err = pr.Reader.Read(p)
 	if n > 0 {
 		cur := atomic.AddInt64(&pr.current, int64(n))
-		pr.onProgress(cur, pr.total)
+		pr.OnProgress(cur, pr.Total)
 	}
 
 	return n, err
 }
 
-func (pr *progressReader) Close() error {
-	if closer, ok := pr.reader.(io.Closer); ok {
+// Close closes the underlying reader and returns any error.
+func (pr *ProgressReader) Close() error {
+	if closer, ok := pr.Reader.(io.Closer); ok {
 		return closer.Close()
 	}
 
 	return nil
 }
 
-type contextCancelingReadCloser struct {
+// ContextCancelingReadCloser wraps an [io.ReadCloser] and cancels a context when closed.
+type ContextCancelingReadCloser struct {
 	io.ReadCloser
-	cancel context.CancelFunc
+	Cancel context.CancelFunc
 }
 
-func (c *contextCancelingReadCloser) Close() error {
+// Close closes the underlying reader and cancels the context.
+func (c *ContextCancelingReadCloser) Close() error {
 	err := c.ReadCloser.Close()
-	c.cancel()
+	c.Cancel()
 	return err
 }
 
-func (c *contextCancelingReadCloser) Unwrap() io.Closer { return c.ReadCloser }
+func (c *ContextCancelingReadCloser) Unwrap() io.Closer { return c.ReadCloser }
 
-type decompressReadCloser struct {
+// DecompressReadCloser wraps an [io.Reader] and an [io.Closer] for decompressing data.
+type DecompressReadCloser struct {
 	io.Reader
-	closer io.Closer
+	Closer io.Closer
 }
 
-func (d *decompressReadCloser) Close() error {
+// Close closes the underlying reader and returns any error.
+func (d *DecompressReadCloser) Close() error {
 	var firstErr error
 	if c, ok := d.Reader.(io.Closer); ok {
 		firstErr = c.Close()
 	}
 
-	if err := d.closer.Close(); err != nil && firstErr == nil {
+	if err := d.Closer.Close(); err != nil && firstErr == nil {
 		firstErr = err
 	}
 
 	return firstErr
 }
 
-func (d *decompressReadCloser) Unwrap() io.Closer { return d.closer }
+func (d *DecompressReadCloser) Unwrap() io.Closer { return d.Closer }
 
-type limitCheckingReadCloser struct {
+// LimitCheckingReadCloser wraps an [io.ReadCloser] and checks the read limit.
+type LimitCheckingReadCloser struct {
 	io.ReadCloser
-	limit int64
+	Limit int64
 	read  int64
 }
 
-func (l *limitCheckingReadCloser) Read(p []byte) (int, error) {
+func (l *LimitCheckingReadCloser) Read(p []byte) (int, error) {
 	n, err := l.ReadCloser.Read(p)
 
 	l.read += int64(n)
-	if l.read > l.limit {
+	if l.read > l.Limit {
 		return n, ErrResponseTooLarge
 	}
 
 	return n, err
 }
 
-func (l *limitCheckingReadCloser) Unwrap() io.Closer { return l.ReadCloser }
+func (l *LimitCheckingReadCloser) Unwrap() io.Closer { return l.ReadCloser }
 
-type responseBodyReadCloser struct {
+// ResponseBodyReadCloser wraps an [io.ReadCloser] for reading the response body.
+type ResponseBodyReadCloser struct {
 	io.ReadCloser
 }
 
-func newResponseBodyReadCloser(rc io.ReadCloser) io.ReadCloser {
-	return &responseBodyReadCloser{ReadCloser: rc}
-}
-
-func (r *responseBodyReadCloser) Close() error {
+// Close closes the underlying ReadCloser and performs any necessary cleanup.
+func (r *ResponseBodyReadCloser) Close() error {
 	err := r.ReadCloser.Close()
-	if rb, ok := unwrapBody(r.ReadCloser).(interface{ ReallyClose() }); ok {
+	if rb, ok := UnwrapBody(r.ReadCloser).(interface{ ReallyClose() }); ok {
 		rb.ReallyClose()
 	}
 
 	return err
 }
 
-func (r *responseBodyReadCloser) Unwrap() io.Closer {
+func (r *ResponseBodyReadCloser) Unwrap() io.Closer {
 	return r.ReadCloser
 }
 
-type multiReadBody struct {
+// MultiReadBody wraps an [io.ReadCloser] to read data into memory or a temporary file.
+type MultiReadBody struct {
 	data    []byte
 	tmpFile *os.File
 	reader  io.Reader
@@ -297,7 +280,8 @@ type multiReadBody struct {
 	closed  bool
 }
 
-func newMultiReadBody(rc io.ReadCloser, threshold int64, disableDisk bool) (io.ReadCloser, error) {
+// NewMultiReadBody returns a new [MultiReadBody] that wraps the given [io.ReadCloser].
+func NewMultiReadBody(rc io.ReadCloser, threshold int64, disableDisk bool) (io.ReadCloser, error) {
 	var buf bytes.Buffer
 
 	limitReader := io.LimitReader(rc, threshold+1)
@@ -308,7 +292,7 @@ func newMultiReadBody(rc io.ReadCloser, threshold int64, disableDisk bool) (io.R
 		return nil, err
 	}
 
-	m := &multiReadBody{}
+	m := &MultiReadBody{}
 
 	if int64(buf.Len()) <= threshold {
 		_ = rc.Close()
@@ -352,20 +336,20 @@ func newMultiReadBody(rc io.ReadCloser, threshold int64, disableDisk bool) (io.R
 	return m, nil
 }
 
-func (m *multiReadBody) Read(p []byte) (int, error) {
+func (m *MultiReadBody) Read(p []byte) (int, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	return m.reader.Read(p)
 }
 
 // Reset resets the read cursor so the body can be read again.
-func (m *multiReadBody) Reset() {
+func (m *MultiReadBody) Reset() {
 	_ = m.Close()
 }
 
 // Close resets the read cursor so the body can be read again (multiRead semantics).
 // It does NOT delete temporary files; call ReallyClose for that.
-func (m *multiReadBody) Close() error {
+func (m *MultiReadBody) Close() error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
@@ -387,7 +371,7 @@ func (m *multiReadBody) Close() error {
 // Once ReallyClose is called, the multiReadBody becomes completely unusable
 // and cannot be reset or read again. This method must only be called when
 // the response is no longer needed (e.g., inside closeResponse).
-func (m *multiReadBody) ReallyClose() {
+func (m *MultiReadBody) ReallyClose() {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
@@ -404,44 +388,48 @@ func (m *multiReadBody) ReallyClose() {
 	}
 }
 
-type fallbackReplayableBody struct {
+// FallbackReplayableBody wraps an [io.ReadCloser] and a buffer to allow
+// replaying buffered data before reading from the underlying ReadCloser.
+type FallbackReplayableBody struct {
 	io.ReadCloser
 	buf    *bytes.Buffer
 	reader io.Reader
 }
 
-func (f *fallbackReplayableBody) Read(p []byte) (int, error) {
+func (f *FallbackReplayableBody) Read(p []byte) (int, error) {
 	return f.reader.Read(p)
 }
 
-func (f *fallbackReplayableBody) Reset() {
+// Reset reinitializes the reader to replay the buffer before the underlying ReadCloser.
+func (f *FallbackReplayableBody) Reset() {
 	f.reader = io.MultiReader(f.buf, f.ReadCloser)
 }
 
-type jitterReader struct {
+// JitterReader wraps an [io.ReadCloser] and adds a fixed delay before each read.
+type JitterReader struct {
 	io.ReadCloser
-	delay time.Duration
+	Delay time.Duration
 	once  sync.Once
 }
 
-func (r *jitterReader) Read(p []byte) (int, error) {
+func (r *JitterReader) Read(p []byte) (int, error) {
 	r.once.Do(func() {
-		time.Sleep(r.delay)
+		time.Sleep(r.Delay)
 	})
 
 	return r.ReadCloser.Read(p)
 }
 
-// bufferedConn wraps a net.Conn with a bufio.Reader so that leftover bytes
+// BufferedConn wraps a net.Conn with a bufio.Reader so that leftover bytes
 // buffered during HTTP response parsing are returned before real network data.
-type bufferedConn struct {
+type BufferedConn struct {
 	net.Conn
-	r *bufio.Reader
+	R *bufio.Reader
 }
 
-func (c *bufferedConn) Read(b []byte) (int, error) {
-	if c.r.Buffered() > 0 {
-		return c.r.Read(b)
+func (c *BufferedConn) Read(b []byte) (int, error) {
+	if c.R.Buffered() > 0 {
+		return c.R.Read(b)
 	}
 
 	return c.Conn.Read(b)

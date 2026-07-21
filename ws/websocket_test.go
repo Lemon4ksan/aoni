@@ -251,7 +251,7 @@ func TestDialWebSocket_PlainWithFragmentation(t *testing.T) {
 		context.Background(),
 		client,
 		wsURL,
-		aoni.WithFragmentation(fragCfg),
+		mod.WithFragmentation(fragCfg),
 	)
 	require.NoError(t, err)
 	assert.NotNil(t, resp)

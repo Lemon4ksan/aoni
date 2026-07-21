@@ -5,7 +5,6 @@
 package aoni
 
 import (
-	"context"
 	"errors"
 	"maps"
 	"net/http"
@@ -41,72 +40,6 @@ func NewStdClient(c *Client) *http.Client {
 // existing [http.Client] instances simply by swapping the Transport field.
 func NewTransport(c *Client) *Transport {
 	return &Transport{client: c}
-}
-
-// WithContextModifier returns a new context carrying the given RequestModifiers.
-// Third-party libraries that pass context through [http.Request] will carry
-// these modifiers into the aoni pipeline automatically.
-//
-// Example with go-resty:
-//
-//	ctx := WithContextModifier(context.Background(),
-//	    WithHeader("X-Api-Key", "secret"),
-//	    TraceJA4(info),
-//	)
-//	resp, err := restyClient.R().SetContext(ctx).Get("/api/data")
-func WithContextModifier(ctx context.Context, mods ...RequestModifier) context.Context {
-	if len(mods) == 0 {
-		return ctx
-	}
-
-	cfg := GetRequestConfig(ctx)
-	if cfg == nil {
-		cfg = &RequestConfig{
-			Metadata: make(map[string]any),
-		}
-		ctx = context.WithValue(ctx, requestConfigKey{}, cfg)
-	}
-
-	cfg.Modifiers = append(cfg.Modifiers, mods...)
-
-	return ctx
-}
-
-// ContextModifiers extracts the RequestModifiers previously stored via
-// [WithContextModifier]. Returns nil if none are present.
-func ContextModifiers(ctx context.Context) []RequestModifier {
-	cfg := GetRequestConfig(ctx)
-	if cfg != nil {
-		return cfg.Modifiers
-	}
-
-	return nil
-}
-
-// WithTraceContext returns a [RequestModifier] that attaches a new [TraceInfo]
-// to the request context. This allows developers to retrieve network
-// timing and JA4/JA4H fingerprints using [ResponseTrace] after the request finishes.
-func WithTraceContext() RequestModifier {
-	return func(req *http.Request) {
-		info := &TraceInfo{}
-		GetOrInitRequestConfig(req).TraceInfo = info
-		TraceJA4(info)(req)
-	}
-}
-
-// ResponseTrace extracts the [TraceInfo] previously captured via [WithTraceContext].
-// Returns nil if no trace was registered on the request.
-func ResponseTrace(resp *http.Response) *TraceInfo {
-	if resp == nil || resp.Request == nil {
-		return nil
-	}
-
-	cfg := GetRequestConfig(resp.Request.Context())
-	if cfg != nil {
-		return cfg.TraceInfo
-	}
-
-	return nil
 }
 
 // Transport implements [http.RoundTripper] by routing requests through
@@ -163,7 +96,6 @@ func (t *Transport) RoundTrip(origReq *http.Request) (*http.Response, error) {
 
 	cloned := t.client.Clone()
 
-	// Apply the lifecycle hook if registered
 	if t.BeforeRoundTrip != nil {
 		cloned = t.BeforeRoundTrip(cloned, origReq)
 	}

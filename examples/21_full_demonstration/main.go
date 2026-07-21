@@ -18,19 +18,22 @@ import (
 
 	"github.com/lemon4ksan/aoni/mod"
 	"github.com/lemon4ksan/aoni/option"
+	"github.com/lemon4ksan/aoni/telemetry"
+	"github.com/lemon4ksan/aoni/values"
 
 	"github.com/lemon4ksan/aoni"
 	"github.com/lemon4ksan/aoni/cookie"
+	"github.com/lemon4ksan/aoni/dns"
 	"github.com/lemon4ksan/aoni/inspector"
 	"github.com/lemon4ksan/aoni/p0f"
 )
 
 // ProtectedUserData describes the target data structure using custom aoni values.
 type ProtectedUserData struct {
-	ID        aoni.Uint64String  `json:"id"`
-	Name      string             `json:"name"`
-	IsActive  aoni.BoolInt       `json:"is_active"`
-	CreatedAt aoni.UnixTimestamp `json:"created_at"`
+	ID        values.Uint64String  `json:"id"`
+	Name      string               `json:"name"`
+	IsActive  values.BoolInt       `json:"is_active"`
+	CreatedAt values.UnixTimestamp `json:"created_at"`
 }
 
 // HeadlessWAFSolver simulates an external solver (Playwright/Puppeteer/Selenium) handling WAF challenges.
@@ -73,13 +76,13 @@ func main() {
 	cookieJar := cookie.NewProxyIsolatedJar().WithStorageBackend(sqlStorage)
 
 	// High-speed race DNS resolver.
-	raceResolver := aoni.NewFastRaceResolver(
-		aoni.NewDoHResolver("https://1.1.1.1/dns-query", "cloudflare-dns.com"),
-		aoni.NewDoTResolver("8.8.8.8:853", "dns.google"),
+	raceResolver := dns.NewFastRaceResolver(
+		dns.NewDoHResolver("https://1.1.1.1/dns-query", "cloudflare-dns.com"),
+		dns.NewDoTResolver("8.8.8.8:853", "dns.google"),
 	)
 
 	// HAR traffic recorder.
-	harGenerator := aoni.NewHARGenerator()
+	harGenerator := telemetry.NewHARGenerator()
 
 	// ==========================================
 	// PHASE 2: Core Client Configuration
@@ -138,7 +141,7 @@ func main() {
 			DefaultTTL: 10 * time.Minute,
 		},
 		HAR: &aoni.HARConfig{
-			Generator: harGenerator,
+			Tracker: harGenerator,
 		},
 		Redact: &aoni.RedactConfig{
 			HeadersToRedact: []string{"Authorization", "Cookie", "X-Api-Key"},

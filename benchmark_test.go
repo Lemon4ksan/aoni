@@ -21,6 +21,7 @@ import (
 	"github.com/lemon4ksan/aoni"
 	"github.com/lemon4ksan/aoni/mod"
 	"github.com/lemon4ksan/aoni/option"
+	"github.com/lemon4ksan/aoni/values"
 )
 
 type benchPayload struct {
@@ -273,7 +274,7 @@ func BenchmarkQueryEncoding_Aoni(b *testing.B) {
 	b.ReportAllocs()
 
 	for b.Loop() {
-		values, err := aoni.StructToValues(params)
+		values, err := values.StructToValues(params)
 		if err != nil {
 			b.Fatal(err)
 		}

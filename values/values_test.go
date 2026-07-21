@@ -2,7 +2,7 @@
 // Use of this source code is governed by a BSD-style
 // license Image by BSD-style license.
 
-package aoni
+package values
 
 import (
 	"encoding/json"
@@ -409,4 +409,62 @@ func TestStructToValues_Inline(t *testing.T) {
 	assert.Equal(t, "active", v.Get("m"))
 	assert.Equal(t, []string{"10", "20"}, v["cid[]"])
 	assert.Equal(t, "secret", v.Get("internal"))
+}
+
+func TestValuesEncoding(t *testing.T) {
+	t.Parallel()
+
+	type Inner struct {
+		InlineField string `url:"inline_field"`
+	}
+
+	type QueryStruct struct {
+		Name      string        `url:"name"`
+		IsActive  BoolInt       `url:"is_active"`
+		Timestamp time.Time     `url:"timestamp"`
+		FloatVal  Float64String `url:"float_val"`
+		IntVal    Int64String   `url:"int_val"`
+		Inner     Inner         `url:"inner,inline"`
+		NoTag     string
+	}
+
+	now := time.Now().Truncate(time.Second)
+	q := QueryStruct{
+		Name:      "test-user",
+		IsActive:  BoolInt(true),
+		Timestamp: now,
+		FloatVal:  Float64String(12.34),
+		IntVal:    Int64String(99),
+		Inner: Inner{
+			InlineField: "hello",
+		},
+		NoTag: "ignored",
+	}
+
+	vals, err := StructToValues(q)
+	require.NoError(t, err)
+
+	assert.Equal(t, "test-user", vals.Get("name"))
+	assert.Equal(t, "true", vals.Get("is_active"))
+	assert.Equal(t, now.String(), vals.Get("timestamp"))
+	assert.Equal(t, "12.34", vals.Get("float_val"))
+	assert.Equal(t, "99", vals.Get("int_val"))
+	assert.Equal(t, "hello", vals.Get("inline_field"))
+	assert.Empty(t, vals.Get("NoTag"))
+
+	// Test Unmarshal/Marshal of custom types
+	b, err := json.Marshal(BoolInt(true))
+	require.NoError(t, err)
+	assert.Equal(t, "1", string(b))
+
+	var bi BoolInt
+
+	err = json.Unmarshal([]byte(`"true"`), &bi)
+	require.NoError(t, err)
+	assert.True(t, bool(bi))
+
+	ts := UnixTimestamp(now)
+	tsBytes, err := json.Marshal(ts)
+	require.NoError(t, err)
+	assert.Equal(t, strconv.FormatInt(now.Unix(), 10), string(tsBytes))
 }

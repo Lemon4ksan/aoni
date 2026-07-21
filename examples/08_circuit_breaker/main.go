@@ -15,6 +15,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/lemon4ksan/aoni/middleware"
 	"github.com/lemon4ksan/aoni/option"
 
 	"github.com/lemon4ksan/aoni"
@@ -30,7 +31,7 @@ func main() {
 
 	// Create a circuit breaker: open when 50% of requests in a 10s window fail,
 	// with a 30-second cooldown and minimum 5 requests before evaluation
-	cb := aoni.NewCircuitBreaker(aoni.CircuitBreakerConfig{
+	cb := middleware.NewCircuitBreaker(middleware.CircuitBreakerConfig{
 		FailureThreshold: 0.5,
 		MinRequests:      5,
 		Cooldown:         30 * time.Second,
@@ -38,9 +39,9 @@ func main() {
 	})
 
 	// Wrap client with circuit breaker middleware using the default condition
-	doer := aoni.Chain(
+	doer := middleware.Chain(
 		aoni.NewClient(nil).HTTP(),
-		aoni.CircuitBreakerMiddleware(cb, aoni.DefaultCircuitBreakerCondition),
+		middleware.CircuitBreak(cb, middleware.DefaultCircuitBreakerCondition),
 	)
 
 	client := aoni.NewClient(doer,

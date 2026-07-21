@@ -10,11 +10,12 @@ import (
 	"context"
 	"crypto/rand"
 	"crypto/rsa"
+	"crypto/sha256"
 	"crypto/tls"
 	"crypto/x509"
 	"crypto/x509/pkix"
+	"encoding/base64"
 	"encoding/hex"
-	"encoding/json"
 	"encoding/pem"
 	"errors"
 	"io"
@@ -23,7 +24,6 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
-	"strconv"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -39,9 +39,12 @@ import (
 	"github.com/lemon4ksan/aoni/cookie"
 	"github.com/lemon4ksan/aoni/h3"
 	"github.com/lemon4ksan/aoni/ja4"
+	"github.com/lemon4ksan/aoni/middleware"
 	"github.com/lemon4ksan/aoni/mod"
 	"github.com/lemon4ksan/aoni/option"
 	"github.com/lemon4ksan/aoni/profiles"
+	"github.com/lemon4ksan/aoni/stream"
+	"github.com/lemon4ksan/aoni/telemetry"
 )
 
 type testPayload struct {
@@ -698,7 +701,7 @@ func TestClient_HostRewrite(t *testing.T) {
 	extracted := aoni.HostRewriteRules(req.Context())
 	assert.Equal(t, "127.0.0.1:8080", extracted["myapi.local"])
 
-	appendMod := aoni.AppendHostRewrite(map[string]string{"another.local": "10.0.0.2"})
+	appendMod := mod.AppendHostRewrite(map[string]string{"another.local": "10.0.0.2"})
 	appendMod(req)
 
 	finalRules := aoni.HostRewriteRules(req.Context())
@@ -729,166 +732,15 @@ func TestClient_PacketPadding(t *testing.T) {
 	assert.LessOrEqual(t, len(bytesVal), 20)
 }
 
-func TestClient_ValuesEncoding(t *testing.T) {
-	t.Parallel()
-
-	type Inner struct {
-		InlineField string `url:"inline_field"`
-	}
-
-	type QueryStruct struct {
-		Name      string             `url:"name"`
-		IsActive  aoni.BoolInt       `url:"is_active"`
-		Timestamp time.Time          `url:"timestamp"`
-		FloatVal  aoni.Float64String `url:"float_val"`
-		IntVal    aoni.Int64String   `url:"int_val"`
-		Inner     Inner              `url:"inner,inline"`
-		NoTag     string
-	}
-
-	now := time.Now().Truncate(time.Second)
-	q := QueryStruct{
-		Name:      "test-user",
-		IsActive:  aoni.BoolInt(true),
-		Timestamp: now,
-		FloatVal:  aoni.Float64String(12.34),
-		IntVal:    aoni.Int64String(99),
-		Inner: Inner{
-			InlineField: "hello",
-		},
-		NoTag: "ignored",
-	}
-
-	vals, err := aoni.StructToValues(q)
-	require.NoError(t, err)
-
-	assert.Equal(t, "test-user", vals.Get("name"))
-	assert.Equal(t, "true", vals.Get("is_active"))
-	assert.Equal(t, now.String(), vals.Get("timestamp"))
-	assert.Equal(t, "12.34", vals.Get("float_val"))
-	assert.Equal(t, "99", vals.Get("int_val"))
-	assert.Equal(t, "hello", vals.Get("inline_field"))
-	assert.Empty(t, vals.Get("NoTag"))
-
-	// Test Unmarshal/Marshal of custom types
-	b, err := json.Marshal(aoni.BoolInt(true))
-	require.NoError(t, err)
-	assert.Equal(t, "1", string(b))
-
-	var bi aoni.BoolInt
-
-	err = json.Unmarshal([]byte(`"true"`), &bi)
-	require.NoError(t, err)
-	assert.True(t, bool(bi))
-
-	ts := aoni.UnixTimestamp(now)
-	tsBytes, err := json.Marshal(ts)
-	require.NoError(t, err)
-	assert.Equal(t, strconv.FormatInt(now.Unix(), 10), string(tsBytes))
-}
-
-type failingResolver struct{}
-
-func (f *failingResolver) LookupIPAddr(ctx context.Context, host string) ([]net.IPAddr, error) {
-	return nil, errors.New("lookup failed")
-}
-
-type mockDelayResolver struct {
-	delay time.Duration
-	ip    string
-}
-
-func (m *mockDelayResolver) LookupIPAddr(ctx context.Context, host string) ([]net.IPAddr, error) {
-	select {
-	case <-ctx.Done():
-		return nil, ctx.Err()
-	case <-time.After(m.delay):
-		return []net.IPAddr{{IP: net.ParseIP(m.ip)}}, nil
-	}
-}
-
-func TestDNSResolvers(t *testing.T) {
-	t.Parallel()
-
-	t.Run("static_resolver", func(t *testing.T) {
-		t.Parallel()
-
-		staticMap := map[string][]string{
-			"example.com": {"1.2.3.4"},
-		}
-		resolver := aoni.NewStaticResolver(staticMap, nil)
-		ips, err := resolver.LookupIPAddr(t.Context(), "example.com")
-		require.NoError(t, err)
-		require.Len(t, ips, 1)
-		assert.Equal(t, "1.2.3.4", ips[0].IP.String())
-	})
-
-	t.Run("fallback_resolver", func(t *testing.T) {
-		t.Parallel()
-
-		r1 := &failingResolver{}
-		r2 := aoni.NewStaticResolver(map[string][]string{"test.com": {"8.8.8.8"}}, nil)
-
-		fallback := aoni.NewFallbackResolver(r1, r2)
-		ips, err := fallback.LookupIPAddr(t.Context(), "test.com")
-		require.NoError(t, err)
-		require.NotEmpty(t, ips)
-		assert.Equal(t, "8.8.8.8", ips[0].IP.String())
-	})
-
-	t.Run("fast_race_resolver", func(t *testing.T) {
-		t.Parallel()
-
-		fast := &mockDelayResolver{delay: 1 * time.Millisecond, ip: "1.1.1.1"}
-		slow := &mockDelayResolver{delay: 200 * time.Millisecond, ip: "2.2.2.2"}
-
-		racer := aoni.NewFastRaceResolver(slow, fast)
-		ips, err := racer.LookupIPAddr(t.Context(), "any.com")
-		require.NoError(t, err)
-		require.NotEmpty(t, ips)
-		assert.Equal(t, "1.1.1.1", ips[0].IP.String())
-	})
-}
-
-func TestClient_CircuitBreaker(t *testing.T) {
-	t.Parallel()
-
-	cfg := aoni.CircuitBreakerConfig{
-		FailureThreshold: 0.5,
-		Cooldown:         50 * time.Millisecond,
-		MinRequests:      2,
-		Window:           5 * time.Second,
-	}
-	cb := aoni.NewCircuitBreaker(cfg)
-
-	b := cb.GetBreaker("example.com")
-	assert.NotNil(t, b)
-
-	_, err := b.Do(t.Context(), func(ctx context.Context) (any, error) {
-		return nil, errors.New("error")
-	})
-	require.Error(t, err)
-
-	_, err = b.Do(t.Context(), func(ctx context.Context) (any, error) {
-		return nil, errors.New("error")
-	})
-	require.Error(t, err)
-
-	_, err = b.Do(t.Context(), func(ctx context.Context) (any, error) {
-		return nil, nil
-	})
-	assert.ErrorContains(t, err, "circuit breaker is open")
-}
-
 func TestClient_RetryMiddleware(t *testing.T) {
 	t.Parallel()
 
 	var attempts uint32
 
-	opts := aoni.RetryOptions{
+	opts := middleware.RetryOptions{
 		MaxRetries:     3,
 		Backoff:        1 * time.Millisecond,
-		JitterStrategy: aoni.JitterFull,
+		JitterStrategy: middleware.JitterFull,
 		OnRetry: func(attempt uint32, err error, delay time.Duration) {
 			atomic.StoreUint32(&attempts, attempt)
 		},
@@ -909,7 +761,7 @@ func TestClient_RetryMiddleware(t *testing.T) {
 
 	client := aoni.NewClient(nil, option.WithBaseURL(server.URL))
 
-	retryMid := aoni.RetryMiddleware(opts, aoni.RetryOnGatewayErrors())
+	retryMid := middleware.Retry(opts, aoni.RetryOnGatewayErrors())
 	doer := retryMid(client.HTTP())
 
 	req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, server.URL, nil)
@@ -936,10 +788,10 @@ func TestClient_StreamParsing(t *testing.T) {
 		}))
 		t.Cleanup(srv.Close)
 
-		streamResp, err := aoni.Stream(t.Context(), aoni.NewClient(nil), srv.URL)
+		streamResp, err := stream.Get(t.Context(), aoni.NewClient(nil), srv.URL)
 		require.NoError(t, err)
 
-		ch, errs := aoni.StreamNDJSON[testPayload](t.Context(), streamResp)
+		ch, errs := stream.GetNDJSON[testPayload](t.Context(), streamResp)
 
 		var msgs []string
 		for val := range ch {
@@ -963,10 +815,10 @@ func TestClient_StreamParsing(t *testing.T) {
 		}))
 		t.Cleanup(srv.Close)
 
-		streamResp, err := aoni.Stream(t.Context(), aoni.NewClient(nil), srv.URL)
+		streamResp, err := stream.Get(t.Context(), aoni.NewClient(nil), srv.URL)
 		require.NoError(t, err)
 
-		ch, errs := aoni.ParseSSE[testPayload](t.Context(), streamResp)
+		ch, errs := stream.ParseSSE[testPayload](t.Context(), streamResp)
 
 		var msgs []string
 		for val := range ch {
@@ -1006,26 +858,6 @@ func TestClient_RefererAutomaton(t *testing.T) {
 	_ = resp2.Body.Close()
 
 	assert.Equal(t, server.URL+"/page1", lastReferer)
-}
-
-func TestClient_ParseAutoProxy(t *testing.T) {
-	u1, err := aoni.ParseAutoProxy("socks5://127.0.0.1:1080")
-	require.NoError(t, err)
-	assert.Equal(t, "socks5", u1.Scheme)
-	assert.Equal(t, "127.0.0.1:1080", u1.Host)
-
-	u2, err := aoni.ParseAutoProxy("127.0.0.1:1080")
-	require.NoError(t, err)
-	assert.Equal(t, "socks5h", u2.Scheme)
-	assert.Equal(t, "127.0.0.1:1080", u2.Host)
-
-	u3, err := aoni.ParseAutoProxy("user:pass@1.2.3.4:8080")
-	require.NoError(t, err)
-	assert.Equal(t, "http", u3.Scheme)
-	assert.Equal(t, "1.2.3.4:8080", u3.Host)
-	assert.Equal(t, "user", u3.User.Username())
-	password, _ := u3.User.Password()
-	assert.Equal(t, "pass", password)
 }
 
 func TestClient_HTTP3Settings(t *testing.T) {
@@ -1231,11 +1063,11 @@ func TestHARGenerator(t *testing.T) {
 	}))
 	defer server.Close()
 
-	harGen := aoni.NewHARGenerator()
+	harGen := telemetry.NewHARGenerator()
 	client := aoni.NewClient(nil,
 		option.WithBaseURL(server.URL),
 		option.WithPipeline(aoni.PipelineConfig{
-			HAR: &aoni.HARConfig{Generator: harGen},
+			HAR: &aoni.HARConfig{Tracker: harGen},
 		}),
 	)
 
@@ -1556,5 +1388,148 @@ func TestClient_WithClientResponseValidator(t *testing.T) {
 		)
 		require.NoError(t, err)
 		assert.Equal(t, http.StatusOK, resp.StatusCode)
+	})
+}
+
+func TestCertificatePinning(t *testing.T) {
+	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte("ok"))
+	}))
+	t.Cleanup(server.Close)
+
+	// Extract port from the test server URL
+	u, err := url.Parse(server.URL)
+	require.NoError(t, err)
+	_, port, err := net.SplitHostPort(u.Host)
+	require.NoError(t, err)
+
+	// Extract the leaf certificate of the test server
+	require.NotEmpty(t, server.TLS.Certificates)
+	leafCert, err := x509.ParseCertificate(server.TLS.Certificates[0].Certificate[0])
+	require.NoError(t, err)
+
+	// Compute SPKI fingerprints
+	spkiHash := sha256.Sum256(leafCert.RawSubjectPublicKeyInfo)
+	correctPinBase64 := base64.StdEncoding.EncodeToString(spkiHash[:])
+	correctPinHex := hex.EncodeToString(spkiHash[:])
+	correctPinPrefixed := "sha256/" + correctPinBase64
+
+	incorrectPin := "sha256/AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+
+	t.Run("Standard Client - Correct Pin Base64", func(t *testing.T) {
+		client := aoni.NewClient(server.Client())
+		resp, err := client.Request(t.Context(), http.MethodGet, server.URL,
+			mod.WithCertificatePin("127.0.0.1", correctPinBase64),
+		)
+		require.NoError(t, err)
+		assert.Equal(t, http.StatusOK, resp.StatusCode)
+	})
+
+	t.Run("Standard Client - Correct Pin Hex", func(t *testing.T) {
+		client := aoni.NewClient(server.Client())
+		resp, err := client.Request(t.Context(), http.MethodGet, server.URL,
+			mod.WithCertificatePin("127.0.0.1", correctPinHex),
+		)
+		require.NoError(t, err)
+		assert.Equal(t, http.StatusOK, resp.StatusCode)
+	})
+
+	t.Run("Standard Client - Correct Pin Prefixed", func(t *testing.T) {
+		client := aoni.NewClient(server.Client())
+		resp, err := client.Request(t.Context(), http.MethodGet, server.URL,
+			mod.WithCertificatePin("127.0.0.1", correctPinPrefixed),
+		)
+		require.NoError(t, err)
+		assert.Equal(t, http.StatusOK, resp.StatusCode)
+	})
+
+	t.Run("Standard Client - Incorrect Pin", func(t *testing.T) {
+		client := aoni.NewClient(server.Client())
+		_, err := client.Request(t.Context(), http.MethodGet, server.URL,
+			mod.WithCertificatePin("127.0.0.1", incorrectPin),
+		)
+		require.Error(t, err)
+		assert.True(
+			t,
+			errors.Is(err, aoni.ErrCertificatePinning) ||
+				strings.Contains(err.Error(), "certificate pinning validation failed"),
+		)
+	})
+
+	t.Run("UTLS Client - Correct Pin", func(t *testing.T) {
+		client := aoni.NewClient(nil, option.WithTLSFingerprint(aoni.BrowserChrome))
+		resp, err := client.Request(t.Context(), http.MethodGet, server.URL,
+			mod.WithCertificatePin("127.0.0.1", correctPinBase64),
+			mod.WithInsecureSkipVerify(),
+		)
+		require.NoError(t, err)
+		assert.Equal(t, http.StatusOK, resp.StatusCode)
+	})
+
+	t.Run("UTLS Client - Incorrect Pin", func(t *testing.T) {
+		client := aoni.NewClient(nil, option.WithTLSFingerprint(aoni.BrowserChrome))
+		_, err := client.Request(t.Context(), http.MethodGet, server.URL,
+			mod.WithCertificatePin("127.0.0.1", incorrectPin),
+			mod.WithInsecureSkipVerify(),
+		)
+		require.Error(t, err)
+		assert.True(
+			t,
+			errors.Is(err, aoni.ErrCertificatePinning) ||
+				strings.Contains(err.Error(), "certificate pinning validation failed"),
+		)
+	})
+
+	t.Run("Wildcard Domain Match - Correct Pin", func(t *testing.T) {
+		client := aoni.NewClient(server.Client())
+		// Map api.example.com to our local test server port
+		targetURL := "https://api.example.com/test"
+		resp, err := client.Request(t.Context(), http.MethodGet, targetURL,
+			mod.WithHostRewrite(map[string]string{"api.example.com": "127.0.0.1:" + port}),
+			mod.WithCertificatePin("*.example.com", correctPinBase64),
+		)
+		require.NoError(t, err)
+		assert.Equal(t, http.StatusOK, resp.StatusCode)
+	})
+
+	t.Run("Suffix Domain Match - Correct Pin", func(t *testing.T) {
+		client := aoni.NewClient(server.Client())
+		// Map api.example.com to our local test server port
+		targetURL := "https://api.example.com/test"
+		resp, err := client.Request(t.Context(), http.MethodGet, targetURL,
+			mod.WithHostRewrite(map[string]string{"api.example.com": "127.0.0.1:" + port}),
+			mod.WithCertificatePin(".example.com", correctPinBase64),
+		)
+		require.NoError(t, err)
+		assert.Equal(t, http.StatusOK, resp.StatusCode)
+	})
+
+	t.Run("Multiple Pins - One Correct", func(t *testing.T) {
+		client := aoni.NewClient(server.Client())
+		resp, err := client.Request(t.Context(), http.MethodGet, server.URL,
+			mod.WithCertificatePin("127.0.0.1", incorrectPin),
+			mod.WithCertificatePin("127.0.0.1", correctPinBase64),
+		)
+		require.NoError(t, err)
+		assert.Equal(t, http.StatusOK, resp.StatusCode)
+	})
+
+	t.Run("Client-Level Correct Pin", func(t *testing.T) {
+		client := aoni.NewClient(server.Client(), option.WithCertificatePin("127.0.0.1", correctPinBase64))
+		resp, err := client.Request(t.Context(), http.MethodGet, server.URL)
+		require.NoError(t, err)
+		assert.Equal(t, http.StatusOK, resp.StatusCode)
+	})
+
+	t.Run("Client-Level Incorrect Pin", func(t *testing.T) {
+		client := aoni.NewClient(server.Client(), option.WithCertificatePin("127.0.0.1", incorrectPin))
+		_, err := client.Request(t.Context(), http.MethodGet, server.URL)
+		require.Error(t, err)
+		assert.True(
+			t,
+			errors.Is(err, aoni.ErrCertificatePinning) ||
+				strings.Contains(err.Error(), "certificate pinning validation failed"),
+		)
 	})
 }

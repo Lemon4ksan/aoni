@@ -2,7 +2,7 @@
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
-package aoni
+package dns
 
 import (
 	"context"
@@ -10,6 +10,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"net/http/httptest"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -20,11 +21,24 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// DNSResolverFunc is an adapter to allow the use of ordinary functions as DNS resolvers.
-type DNSResolverFunc func(ctx context.Context, host string) ([]net.IPAddr, error)
+type failingResolver struct{}
 
-func (f DNSResolverFunc) LookupIPAddr(ctx context.Context, host string) ([]net.IPAddr, error) {
-	return f(ctx, host)
+func (f *failingResolver) LookupIPAddr(ctx context.Context, host string) ([]net.IPAddr, error) {
+	return nil, errors.New("lookup failed")
+}
+
+type mockDelayResolver struct {
+	delay time.Duration
+	ip    string
+}
+
+func (m *mockDelayResolver) LookupIPAddr(ctx context.Context, host string) ([]net.IPAddr, error) {
+	select {
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	case <-time.After(m.delay):
+		return []net.IPAddr{{IP: net.ParseIP(m.ip)}}, nil
+	}
 }
 
 type roundTripperFunc func(req *http.Request) (*http.Response, error)
@@ -549,4 +563,106 @@ func TestFastRaceResolver(t *testing.T) {
 		assert.Error(t, err)
 		assert.Contains(t, err.Error(), "no active resolvers configured")
 	})
+}
+
+func TestDNSResolvers(t *testing.T) {
+	t.Parallel()
+
+	t.Run("static_resolver", func(t *testing.T) {
+		t.Parallel()
+
+		staticMap := map[string][]string{
+			"example.com": {"1.2.3.4"},
+		}
+		resolver := NewStaticResolver(staticMap, nil)
+		ips, err := resolver.LookupIPAddr(t.Context(), "example.com")
+		require.NoError(t, err)
+		require.Len(t, ips, 1)
+		assert.Equal(t, "1.2.3.4", ips[0].IP.String())
+	})
+
+	t.Run("fallback_resolver", func(t *testing.T) {
+		t.Parallel()
+
+		r1 := &failingResolver{}
+		r2 := NewStaticResolver(map[string][]string{"test.com": {"8.8.8.8"}}, nil)
+
+		fallback := NewFallbackResolver(r1, r2)
+		ips, err := fallback.LookupIPAddr(t.Context(), "test.com")
+		require.NoError(t, err)
+		require.NotEmpty(t, ips)
+		assert.Equal(t, "8.8.8.8", ips[0].IP.String())
+	})
+
+	t.Run("fast_race_resolver", func(t *testing.T) {
+		t.Parallel()
+
+		fast := &mockDelayResolver{delay: 1 * time.Millisecond, ip: "1.1.1.1"}
+		slow := &mockDelayResolver{delay: 200 * time.Millisecond, ip: "2.2.2.2"}
+
+		racer := NewFastRaceResolver(slow, fast)
+		ips, err := racer.LookupIPAddr(t.Context(), "any.com")
+		require.NoError(t, err)
+		require.NotEmpty(t, ips)
+		assert.Equal(t, "1.1.1.1", ips[0].IP.String())
+	})
+}
+
+func TestDoHResolver_QueryEncoding(t *testing.T) {
+	t.Parallel()
+
+	var capturedURL string
+
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		capturedURL = r.URL.String()
+
+		w.WriteHeader(http.StatusOK)
+	}))
+	t.Cleanup(ts.Close)
+
+	r := &DoHResolver{
+		Endpoint: ts.URL,
+		Host:     "cloudflare-dns.com",
+		client:   ts.Client(),
+	}
+
+	ctx := t.Context()
+	_, _ = r.query(ctx, "example.com", 1)
+
+	assert.Contains(t, capturedURL, "name=example.com")
+	assert.Contains(t, capturedURL, "type=1")
+}
+
+func TestInMemoryDNSCache_Eviction(t *testing.T) {
+	t.Parallel()
+
+	cache := NewInMemoryDNSCache(time.Millisecond, &net.Resolver{})
+	t.Cleanup(func() { cache.Close() })
+
+	cache.mu.Lock()
+	cache.cache["expired.test"] = dnsCacheEntry{
+		ips:    []net.IPAddr{{IP: net.ParseIP("1.2.3.4")}},
+		expiry: time.Now().Add(-time.Hour),
+	}
+	cache.cache["valid.test"] = dnsCacheEntry{
+		ips:    []net.IPAddr{{IP: net.ParseIP("5.6.7.8")}},
+		expiry: time.Now().Add(time.Hour),
+	}
+	cache.mu.Unlock()
+
+	cache.mu.Lock()
+
+	now := time.Now()
+	for k, v := range cache.cache {
+		if now.After(v.expiry) {
+			delete(cache.cache, k)
+		}
+	}
+
+	_, expiredExists := cache.cache["expired.test"]
+	_, validExists := cache.cache["valid.test"]
+	cache.mu.Unlock()
+
+	assert.False(t, expiredExists, "expired entry should be removed")
+	assert.True(t, validExists, "valid entry should remain")
 }

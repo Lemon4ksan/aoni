@@ -16,7 +16,9 @@ import (
 	"net/url"
 	"time"
 
+	"github.com/lemon4ksan/aoni/middleware"
 	"github.com/lemon4ksan/aoni/option"
+	"github.com/lemon4ksan/aoni/proxy"
 
 	"github.com/lemon4ksan/aoni"
 )
@@ -37,13 +39,13 @@ func main() {
 	client2 := aoni.NewClient(nil).HTTP()
 
 	// Create a proxy rotator
-	rotator, err := aoni.NewProxyRotator(
-		aoni.ProxyRotatorConfig{
+	rotator, err := proxy.NewRotator(
+		proxy.RotatorConfig{
 			MaxFails:   3,
 			RetryAfter: 30 * time.Second,
 		},
-		aoni.ClientWithProxy{Client: client1, ProxyURL: proxyURL1.String()},
-		aoni.ClientWithProxy{Client: client2, ProxyURL: proxyURL2.String()},
+		proxy.WithClient{Client: client1, ProxyURL: proxyURL1.String()},
+		proxy.WithClient{Client: client2, ProxyURL: proxyURL2.String()},
 	)
 	if err != nil {
 		log.Fatal(err)
@@ -56,11 +58,11 @@ func main() {
 	})
 
 	// Wrap with retry middleware that retries on proxy failures
-	doer := aoni.Chain(
+	doer := middleware.Chain(
 		rotator,
-		aoni.RetryMiddleware(
-			aoni.RetryOptions{MaxRetries: 3, Backoff: 1 * time.Second},
-			aoni.ProxyRetryCondition(rotator),
+		middleware.Retry(
+			middleware.RetryOptions{MaxRetries: 3, Backoff: 1 * time.Second},
+			proxy.RetryCondition(rotator),
 		),
 	)
 

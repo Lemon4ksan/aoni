@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/lemon4ksan/aoni/option"
+	"github.com/lemon4ksan/aoni/stream"
 
 	"github.com/lemon4ksan/aoni"
 )
@@ -39,7 +40,7 @@ func main() {
 
 // demoStream reads a raw streaming response in chunks.
 func demoStream(ctx context.Context, client *aoni.Client) {
-	stream, err := aoni.Stream(ctx, client, "/stream/3")
+	stream, err := stream.Get(ctx, client, "/stream/3")
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -63,13 +64,13 @@ func demoStream(ctx context.Context, client *aoni.Client) {
 
 // demoSSE processes server-sent events from a streaming endpoint.
 func demoSSE(ctx context.Context, client *aoni.Client) {
-	sseStream, err := aoni.Stream(ctx, client, "/events/2")
+	sseStream, err := stream.Get(ctx, client, "/events/2")
 	if err != nil {
 		log.Fatal(err)
 	}
 	defer sseStream.Close()
 
-	events, errs := aoni.ParseSSE[aoni.SSEEvent](ctx, sseStream)
+	events, errs := stream.ParseSSE[stream.SSEEvent](ctx, sseStream)
 	for {
 		select {
 		case event, ok := <-events:

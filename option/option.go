@@ -23,6 +23,8 @@ import (
 	"github.com/lemon4ksan/aoni/profiles"
 	"github.com/lemon4ksan/aoni/profiles/chrome"
 	"github.com/lemon4ksan/aoni/profiles/firefox"
+	"github.com/lemon4ksan/aoni/proxy"
+	"github.com/lemon4ksan/aoni/telemetry"
 )
 
 // Option is a type alias for [aoni.ClientOption].
@@ -205,10 +207,10 @@ func WithHedging(d time.Duration) aoni.ClientOption {
 }
 
 // WithDynamicHedging configures dynamic request hedging.
-func WithDynamicHedging(config *aoni.DynamicHedgingConfig) aoni.ClientOption {
+func WithDynamicHedging(config *telemetry.DynamicHedgingConfig) aoni.ClientOption {
 	return func(cfg *aoni.Config) {
 		if config == nil {
-			dc := aoni.DefaultDynamicHedgingConfig()
+			dc := telemetry.DefaultDynamicHedgingConfig()
 			cfg.Network.DynamicHedging = &dc
 		} else {
 			cfg.Network.DynamicHedging = config
@@ -216,10 +218,10 @@ func WithDynamicHedging(config *aoni.DynamicHedgingConfig) aoni.ClientOption {
 	}
 }
 
-// WithProxyAwareSessionCache enables the proxy-aware TLS session ticket cache.
-func WithProxyAwareSessionCache() aoni.ClientOption {
+// WithSessionCache enables the TLS session ticket cache.
+func WithSessionCache(cache aoni.SessionCache) aoni.ClientOption {
 	return func(cfg *aoni.Config) {
-		cfg.Fingerprint.SessionCache = aoni.NewProxyAwareSessionCache()
+		cfg.Fingerprint.SessionCache = cache
 	}
 }
 
@@ -286,20 +288,6 @@ func WithDNSResolver(resolver aoni.DNSResolver) aoni.ClientOption {
 func WithInspector(inspector aoni.TrafficInspector) aoni.ClientOption {
 	return func(cfg *aoni.Config) {
 		cfg.Defaults.Inspector = inspector
-	}
-}
-
-// WithDoT configures DNS-over-TLS resolution.
-func WithDoT(endpoint, host string) aoni.ClientOption {
-	return func(cfg *aoni.Config) {
-		cfg.Network.DNSResolver = aoni.NewDoTResolver(endpoint, host)
-	}
-}
-
-// WithDoH configures DNS-over-HTTPS resolution.
-func WithDoH(endpoint, host string) aoni.ClientOption {
-	return func(cfg *aoni.Config) {
-		cfg.Network.DNSResolver = aoni.NewDoHResolver(endpoint, host)
 	}
 }
 
@@ -423,13 +411,6 @@ func WithHostRewrite(rules map[string]string) aoni.ClientOption {
 	}
 }
 
-// WithDNSCache registers an in-memory DNS caching resolver wrapper.
-func WithDNSCache(ttl time.Duration) aoni.ClientOption {
-	return func(cfg *aoni.Config) {
-		cfg.Network.DNSResolver = aoni.NewInMemoryDNSCache(ttl, cfg.Network.DNSResolver)
-	}
-}
-
 // WithSettings sets local HTTP/2 connection settings.
 func WithSettings(settings h2.Settings) aoni.ClientOption {
 	return func(cfg *aoni.Config) {
@@ -492,7 +473,7 @@ func WithProxy(proxyURL *url.URL) aoni.ClientOption {
 // WithProxyString configures proxy destination parsing from string formats.
 func WithProxyString(proxyStr string) aoni.ClientOption {
 	return func(cfg *aoni.Config) {
-		u, err := aoni.ParseAutoProxy(proxyStr)
+		u, err := proxy.Parse(proxyStr)
 		if err == nil {
 			cfg.Network.ProxyAddr = u
 			cfg.Network.TransportProxy = http.ProxyURL(u)

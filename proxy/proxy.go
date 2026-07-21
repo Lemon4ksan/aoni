@@ -2,7 +2,7 @@
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
-package aoni
+package proxy
 
 import (
 	"context"
@@ -20,11 +20,19 @@ import (
 	"github.com/lemon4ksan/miyako/generic"
 	"github.com/lemon4ksan/miyako/log"
 
+	"github.com/lemon4ksan/aoni"
 	"github.com/lemon4ksan/aoni/cookie"
 )
 
-// ParseAutoProxy parses a proxy string and detects the protocol.
-func ParseAutoProxy(proxyStr string) (*url.URL, error) {
+// WithProxyAwareSessionCache enables the proxy-aware TLS session ticket cache.
+func WithProxyAwareSessionCache() aoni.ClientOption {
+	return func(cfg *aoni.Config) {
+		cfg.Fingerprint.SessionCache = NewProxyAwareSessionCache()
+	}
+}
+
+// Parse parses a proxy string and detects the protocol.
+func Parse(proxyStr string) (*url.URL, error) {
 	if proxyStr == "" {
 		return nil, errors.New("empty proxy string")
 	}
@@ -79,14 +87,14 @@ func ParseAutoProxy(proxyStr string) (*url.URL, error) {
 	return u, nil
 }
 
-// ClientWithProxy pairs an [HTTPDoer] with a proxy URL.
-type ClientWithProxy struct {
-	Client   HTTPDoer
+// WithClient pairs an [HTTPDoer] with a proxy URL.
+type WithClient struct {
+	Client   aoni.HTTPDoer
 	ProxyURL string
 }
 
-// ProxyConfig configures a proxy-supported HTTP client.
-type ProxyConfig struct {
+// Config configures a proxy-supported HTTP client.
+type Config struct {
 	// ProxyURL is the address of the proxy server (e.g. http://user:pass@ip:port).
 	ProxyURL string
 	// Timeout is the overall request timeout.
@@ -96,16 +104,16 @@ type ProxyConfig struct {
 	// Transport overrides the default transport settings.
 	Transport http.RoundTripper
 	// TransportFactory creates a custom [http.RoundTripper].
-	TransportFactory func(ProxyConfig) (http.RoundTripper, error)
+	TransportFactory func(Config) (http.RoundTripper, error)
 }
 
 // NewProxyClient creates an [http.Client] configured with proxy transport.
-// It prioritizes [ProxyConfig.TransportFactory], then [ProxyConfig.Transport],
+// It prioritizes [Config.TransportFactory], then [Config.Transport],
 // and falls back to a default [http.Transport] if neither is provided.
 //
-// If [ProxyConfig.ProxyURL] is empty, no proxy routing is applied.
-// If [ProxyConfig.Timeout] is zero, a default 15-second timeout is set.
-func NewProxyClient(cfg ProxyConfig) (*http.Client, error) {
+// If [Config.ProxyURL] is empty, no proxy routing is applied.
+// If [Config.Timeout] is zero, a default 15-second timeout is set.
+func NewProxyClient(cfg Config) (*http.Client, error) {
 	timeout := cfg.Timeout
 	if timeout == 0 {
 		timeout = 15 * time.Second
@@ -153,8 +161,8 @@ func NewProxyClient(cfg ProxyConfig) (*http.Client, error) {
 	}, nil
 }
 
-// ProxyRotatorConfig configures health-checking and recovery for a [ProxyRotator].
-type ProxyRotatorConfig struct {
+// RotatorConfig configures health-checking and recovery for a [Rotator].
+type RotatorConfig struct {
 	// MaxFails is the consecutive error limit before a client is marked unhealthy.
 	MaxFails uint32
 	// RetryAfter is the duration for which an unhealthy client is kept offline.
@@ -164,7 +172,7 @@ type ProxyRotatorConfig struct {
 	// HealthCheckInterval sets the frequency of background health checks.
 	HealthCheckInterval time.Duration
 	// Logger is the logger used by the proxy rotator.
-	Logger Logger
+	Logger aoni.Logger
 }
 
 // StickyKeyFunc extracts a session identifier from a request for sticky routing.
@@ -190,9 +198,9 @@ func StickyKeyFromHeader(headerName string) StickyKeyFunc {
 }
 
 type trackedClient struct {
-	client   HTTPDoer
+	client   aoni.HTTPDoer
 	proxyURL string
-	*HealthTracker
+	*aoni.HealthTracker
 	domainMu        sync.RWMutex
 	domainCooldowns map[string]time.Time
 }
@@ -236,15 +244,15 @@ type sessionEntry struct {
 	lastSeen  time.Time
 }
 
-// ProxyRotator distributes HTTP requests across a pool of proxy clients.
+// Rotator distributes HTTP requests across a pool of proxy clients.
 // It implements [HTTPDoer] and supports sticky routing, health monitoring,
 // and dynamic pool replacement.
 //
-// Create instances with [NewProxyRotator].
-type ProxyRotator struct {
+// Create instances with [NewRotator].
+type Rotator struct {
 	mu            sync.RWMutex
 	clients       []*trackedClient
-	cfg           ProxyRotatorConfig
+	cfg           RotatorConfig
 	current       atomic.Uint32
 	stickyKeyFunc StickyKeyFunc
 	sessions      map[string]*sessionEntry
@@ -255,10 +263,10 @@ type ProxyRotator struct {
 	wg     sync.WaitGroup
 }
 
-// NewProxyRotator creates a [ProxyRotator] from the given config and clients.
+// NewRotator creates a [Rotator] from the given config and clients.
 // It returns an error if clients is empty.
-// Default [ProxyRotatorConfig.MaxFails] is 3; default [ProxyRotatorConfig.RetryAfter] is 30 seconds.
-func NewProxyRotator(cfg ProxyRotatorConfig, clients ...ClientWithProxy) (*ProxyRotator, error) {
+// Default [RotatorConfig.MaxFails] is 3; default [RotatorConfig.RetryAfter] is 30 seconds.
+func NewRotator(cfg RotatorConfig, clients ...WithClient) (*Rotator, error) {
 	if len(clients) == 0 {
 		return nil, errors.New("aoni: proxy rotator requires at least one client")
 	}
@@ -271,7 +279,7 @@ func NewProxyRotator(cfg ProxyRotatorConfig, clients ...ClientWithProxy) (*Proxy
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
-	r := &ProxyRotator{
+	r := &Rotator{
 		ctx:        ctx,
 		cancel:     cancel,
 		cfg:        cfg,
@@ -292,47 +300,47 @@ func NewProxyRotator(cfg ProxyRotatorConfig, clients ...ClientWithProxy) (*Proxy
 	return r, nil
 }
 
-// NewProxyRotatorFromStrings creates a [ProxyRotator] from a list of raw proxy URL strings.
+// NewProxyRotatorFromStrings creates a [Rotator] from a list of raw proxy URL strings.
 // It automatically instantiates standard http.Clients configured with the respective proxies.
 // This is a high-level helper to easily set up a rotating pool from proxy list configurations.
-func NewProxyRotatorFromStrings(config ProxyRotatorConfig, proxyURLs ...string) (*ProxyRotator, error) {
+func NewProxyRotatorFromStrings(config RotatorConfig, proxyURLs ...string) (*Rotator, error) {
 	if len(proxyURLs) == 0 {
 		return nil, errors.New("aoni: proxy rotator requires at least one client")
 	}
 
-	var clients []ClientWithProxy
+	var clients []WithClient
 	for _, pStr := range proxyURLs {
 		u, err := url.Parse(pStr)
 		if err != nil {
 			return nil, fmt.Errorf("aoni: invalid proxy URL %q: %w", pStr, err)
 		}
 
-		httpClient, err := NewProxyClient(ProxyConfig{
+		httpClient, err := NewProxyClient(Config{
 			ProxyURL: pStr,
 		})
 		if err != nil {
 			return nil, err
 		}
 
-		clients = append(clients, ClientWithProxy{
+		clients = append(clients, WithClient{
 			Client:   httpClient,
 			ProxyURL: u.String(),
 		})
 	}
 
-	return NewProxyRotator(config, clients...)
+	return NewRotator(config, clients...)
 }
 
-// ProxyRotatorStats provides real-time state metrics for the rotating proxy pool.
-type ProxyRotatorStats struct {
+// RotatorStats provides real-time state metrics for the rotating proxy pool.
+type RotatorStats struct {
 	TotalProxies     int
 	HealthyProxies   int
 	UnhealthyProxies int
 }
 
 // WithStickySessions returns a copy of r configured with the given key extractor.
-func (r *ProxyRotator) WithStickySessions(f StickyKeyFunc) *ProxyRotator {
-	c := &ProxyRotator{
+func (r *Rotator) WithStickySessions(f StickyKeyFunc) *Rotator {
+	c := &Rotator{
 		ctx:           r.ctx,
 		cancel:        r.cancel,
 		clients:       make([]*trackedClient, len(r.clients)),
@@ -349,7 +357,7 @@ func (r *ProxyRotator) WithStickySessions(f StickyKeyFunc) *ProxyRotator {
 
 // Prewarm opens TCP/TLS connections to targetURL through all proxy clients.
 // It sends concurrent HEAD requests to pre-populate transport connection pools.
-func (r *ProxyRotator) Prewarm(ctx context.Context, targetURL string) {
+func (r *Rotator) Prewarm(ctx context.Context, targetURL string) {
 	r.mu.RLock()
 	clients := make([]*trackedClient, len(r.clients))
 	copy(clients, r.clients)
@@ -379,11 +387,11 @@ func (r *ProxyRotator) Prewarm(ctx context.Context, targetURL string) {
 }
 
 // Stats evaluates and returns current health statistics of the registered proxy clients.
-func (r *ProxyRotator) Stats() ProxyRotatorStats {
+func (r *Rotator) Stats() RotatorStats {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
-	stats := ProxyRotatorStats{TotalProxies: len(r.clients)}
+	stats := RotatorStats{TotalProxies: len(r.clients)}
 	for _, c := range r.clients {
 		if c.IsAvailable() {
 			stats.HealthyProxies++
@@ -396,7 +404,7 @@ func (r *ProxyRotator) Stats() ProxyRotatorStats {
 }
 
 // Reset clears failure states and restores all registered proxy clients to a healthy state.
-func (r *ProxyRotator) Reset() {
+func (r *Rotator) Reset() {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
@@ -406,7 +414,7 @@ func (r *ProxyRotator) Reset() {
 }
 
 // ResetDomainCooldowns clears all domain-specific cooldowns for all proxies in the pool.
-func (r *ProxyRotator) ResetDomainCooldowns() {
+func (r *Rotator) ResetDomainCooldowns() {
 	r.mu.RLock()
 	clients := r.clients
 	r.mu.RUnlock()
@@ -419,7 +427,7 @@ func (r *ProxyRotator) ResetDomainCooldowns() {
 }
 
 // UpdateClients replaces the active pool and resets all session mappings.
-func (r *ProxyRotator) UpdateClients(clients ...ClientWithProxy) {
+func (r *Rotator) UpdateClients(clients ...WithClient) {
 	if len(clients) == 0 {
 		return
 	}
@@ -436,7 +444,7 @@ func (r *ProxyRotator) UpdateClients(clients ...ClientWithProxy) {
 // Do performs an HTTP request using the next available client in the pool.
 // It attempts sticky routing first, then falls back to round-robin selection.
 // If a client faults, it is marked unhealthy. Returns an error if all clients fail.
-func (r *ProxyRotator) Do(req *http.Request) (*http.Response, error) {
+func (r *Rotator) Do(req *http.Request) (*http.Response, error) {
 	r.mu.RLock()
 	clients := r.clients
 	r.mu.RUnlock()
@@ -510,7 +518,7 @@ func (r *ProxyRotator) Do(req *http.Request) (*http.Response, error) {
 }
 
 // Close stops background routines and closes idle connections.
-func (r *ProxyRotator) Close() error {
+func (r *Rotator) Close() error {
 	r.cancel()
 	r.wg.Wait()
 
@@ -529,13 +537,13 @@ func (r *ProxyRotator) Close() error {
 	return nil
 }
 
-func (r *ProxyRotator) setupClient(cp ClientWithProxy) *trackedClient {
+func (r *Rotator) setupClient(cp WithClient) *trackedClient {
 	tc := &trackedClient{
 		client:          cp.Client,
 		proxyURL:        cp.ProxyURL,
 		domainCooldowns: make(map[string]time.Time),
 	}
-	tc.HealthTracker = NewHealthTracker(cp.ProxyURL, r.cfg.MaxFails, r.cfg.RetryAfter,
+	tc.HealthTracker = aoni.NewHealthTracker(cp.ProxyURL, r.cfg.MaxFails, r.cfg.RetryAfter,
 		func(name string, fails uint32, retryAfter time.Duration) {
 			r.cfg.Logger.Warn("proxy marked unhealthy", "proxy", name, "fails", fails, "retry_after", retryAfter)
 		},
@@ -547,7 +555,7 @@ func (r *ProxyRotator) setupClient(cp ClientWithProxy) *trackedClient {
 	return tc
 }
 
-func (r *ProxyRotator) isProxyFault(resp *http.Response, err error) bool {
+func (r *Rotator) isProxyFault(resp *http.Response, err error) bool {
 	if err != nil {
 		if errors.Is(err, context.Canceled) {
 			return false
@@ -580,7 +588,7 @@ func (r *ProxyRotator) isProxyFault(resp *http.Response, err error) bool {
 	return false
 }
 
-func (r *ProxyRotator) getStickyClientIndex(sessionID string) int {
+func (r *Rotator) getStickyClientIndex(sessionID string) int {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
@@ -592,13 +600,13 @@ func (r *ProxyRotator) getStickyClientIndex(sessionID string) int {
 	return -1
 }
 
-func (r *ProxyRotator) executeWithProxy(req *http.Request, tc *trackedClient) (*http.Response, error) {
+func (r *Rotator) executeWithProxy(req *http.Request, tc *trackedClient) (*http.Response, error) {
 	proxyCtx := cookie.WithProxyAddress(req.Context(), tc.proxyURL)
 	reqWithProxy := req.WithContext(proxyCtx)
 	return tc.client.Do(reqWithProxy)
 }
 
-func (r *ProxyRotator) handleProxyResult(tc *trackedClient, resp *http.Response, err error, domain string) bool {
+func (r *Rotator) handleProxyResult(tc *trackedClient, resp *http.Response, err error, domain string) bool {
 	if !r.isProxyFault(resp, err) {
 		tc.MarkSuccess()
 
@@ -618,7 +626,7 @@ func (r *ProxyRotator) handleProxyResult(tc *trackedClient, resp *http.Response,
 	return false
 }
 
-func (r *ProxyRotator) saveSession(sessionID string, idx int) {
+func (r *Rotator) saveSession(sessionID string, idx int) {
 	r.mu.Lock()
 	r.sessions[sessionID] = &sessionEntry{
 		clientIdx: idx,
@@ -627,7 +635,7 @@ func (r *ProxyRotator) saveSession(sessionID string, idx int) {
 	r.mu.Unlock()
 }
 
-func (r *ProxyRotator) healthCheckLoop() {
+func (r *Rotator) healthCheckLoop() {
 	if r.cfg.HealthCheckURL == "" {
 		return
 	}
@@ -645,7 +653,7 @@ func (r *ProxyRotator) healthCheckLoop() {
 			r.mu.RUnlock()
 
 			for _, tc := range clients {
-				if tc.unhealthy.Load() {
+				if tc.IsAvailable() {
 					r.checkHealth(tc)
 				}
 			}
@@ -653,7 +661,7 @@ func (r *ProxyRotator) healthCheckLoop() {
 	}
 }
 
-func (r *ProxyRotator) checkHealth(tc *trackedClient) {
+func (r *Rotator) checkHealth(tc *trackedClient) {
 	req, err := http.NewRequestWithContext(r.ctx, http.MethodGet, r.cfg.HealthCheckURL, nil)
 	if err != nil {
 		return
@@ -669,7 +677,7 @@ func (r *ProxyRotator) checkHealth(tc *trackedClient) {
 	}
 }
 
-func (r *ProxyRotator) cleanupSessionsLoop() {
+func (r *Rotator) cleanupSessionsLoop() {
 	ticker := time.NewTicker(1 * time.Hour)
 	defer ticker.Stop()
 

@@ -8,6 +8,7 @@ import (
 	"context"
 	"fmt"
 	"maps"
+	"net"
 	"net/http"
 	"net/url"
 	"slices"
@@ -20,8 +21,10 @@ import (
 
 	"github.com/lemon4ksan/aoni/h2"
 	"github.com/lemon4ksan/aoni/h3"
+	"github.com/lemon4ksan/aoni/internal/io"
 	"github.com/lemon4ksan/aoni/ja4"
 	"github.com/lemon4ksan/aoni/p0f"
+	"github.com/lemon4ksan/aoni/telemetry"
 )
 
 // Config aggregates all client settings for easy serialization and bootstrapping.
@@ -94,6 +97,57 @@ type SocketController interface {
 // or customize the encoder settings without modifying the core library.
 type HTTP2Configurer interface {
 	ConfigureHTTP2(t *http2.Transport) error
+}
+
+// Logger is an interface for logging messages.
+type Logger interface {
+	Debug(msg string, args ...any)
+	DebugContext(ctx context.Context, msg string, args ...any)
+	Info(msg string, args ...any)
+	InfoContext(ctx context.Context, msg string, args ...any)
+	Warn(msg string, args ...any)
+	WarnContext(ctx context.Context, msg string, args ...any)
+	Error(msg string, args ...any)
+	ErrorContext(ctx context.Context, msg string, args ...any)
+}
+
+// BaseResponseProvider optionally provides a [BaseResponse] for
+// structured decoding. Implemented by response wrapper types used
+// with [option.WithBaseResponse].
+type BaseResponseProvider interface {
+	BaseResponse() BaseResponse
+}
+
+// BaseResponse is implemented by user-defined response wrappers that
+// participate in [GetTo] and similar generic request helpers. The
+// decoder calls IsSuccess, SetData, and Error to route the result.
+type BaseResponse interface {
+	// IsSuccess reports whether the response indicates a successful operation.
+	IsSuccess() bool
+	// Error returns an error representation if IsSuccess returns false.
+	Error() error
+	// SetData sets the data into the response.
+	SetData(data any)
+}
+
+// SessionCache is an interface for managing session caching.
+type SessionCache interface {
+	utls.ClientSessionCache
+	// SetProxyKey invalidates all cached sessions and starts a fresh session cache
+	// for the given proxy key (typically the proxy address or source IP).
+	// This ensures that when the proxy changes, no session tickets from the
+	// previous proxy are reused, preventing session correlation tracking.
+	SetProxyKey(key string)
+}
+
+// ProgressFunc is called periodically during response body reads.
+// current is the bytes read so far; total is the Content-Length
+// value or -1 if unknown.
+type ProgressFunc = io.ProgressFunc
+
+// DNSResolver resolves hostnames to IP addresses.
+type DNSResolver interface {
+	LookupIPAddr(ctx context.Context, host string) ([]net.IPAddr, error)
 }
 
 // BrowserID selects a uTLS ClientHello profile for JA3 fingerprint
@@ -303,7 +357,7 @@ type RequestConfig struct {
 	P0fSignature *p0f.Signature
 
 	// SessionCache is the TLS session ticket cache used to resume TLS handshakes.
-	SessionCache *ProxyAwareSessionCache
+	SessionCache SessionCache
 
 	// PacketPadding configuration to obscure TLS segment boundaries.
 	PacketPadding *PaddingConfig
@@ -448,7 +502,7 @@ type NetworkConfig struct {
 
 	// DynamicHedging configures dynamic request hedging
 	// based on the p95 RTT of recent successful requests.
-	DynamicHedging *DynamicHedgingConfig
+	DynamicHedging *telemetry.DynamicHedgingConfig
 
 	// SocketController hook is executed on every raw TCP connection
 	// right after it is dialed, before any TLS handshake.
@@ -517,7 +571,7 @@ type FingerprintConfig struct {
 	H3Settings *h3.Settings
 
 	// SessionCache is a proxy-aware TLS session ticket cache that prevents session correlation across proxies.
-	SessionCache *ProxyAwareSessionCache
+	SessionCache SessionCache
 
 	// PacketPadding adjusts MSS and injects random padding headers to confuse DPI length analysis.
 	PacketPadding *PaddingConfig
@@ -795,6 +849,11 @@ func GetPipeline(ctx context.Context) (PipelineConfig, bool) {
 	return PipelineConfig{}, false
 }
 
+// HostRewriteConfig holds the configuration for host rewrite.
+type HostRewriteConfig struct {
+	Rules map[string]string
+}
+
 // DPIJitterConfig configures the randomized delay before sending headers or body.
 type DPIJitterConfig struct {
 	MinDelay time.Duration
@@ -810,24 +869,17 @@ type ProxyFailoverConfig struct {
 // HedgingConfig configures the request hedging delay and dynamic tracker.
 type HedgingConfig struct {
 	DefaultDelay   time.Duration
-	DynamicHedging *DynamicHedgingConfig
+	DynamicHedging *telemetry.DynamicHedgingConfig
 }
 
-// CacheStore defines an interface for response caching.
-type CacheStore interface {
-	Get(ctx context.Context, key string) ([]byte, error)
-	Set(ctx context.Context, key string, val []byte, ttl time.Duration) error
+// HARTracker defines the interface for recording HTTP archive logs.
+type HARTracker interface {
+	Record(req *http.Request, resp *http.Response, startTime time.Time, duration int64)
 }
 
-// CacheConfig configures response caching store and TTL.
-type CacheConfig struct {
-	Store      CacheStore
-	DefaultTTL time.Duration
-}
-
-// HARConfig configures completed session logging to a HAR Generator.
+// HARConfig configures capturing completed session logging to a HAR Tracker.
 type HARConfig struct {
-	Generator *HARGenerator
+	Tracker HARTracker // Теперь мы работаем с интерфейсом!
 }
 
 // RedactConfigCtxKey is the context key used to store the RedactConfig in the request context.

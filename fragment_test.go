@@ -7,7 +7,6 @@ package aoni
 import (
 	"bytes"
 	"net"
-	"net/http"
 	"testing"
 	"time"
 
@@ -131,30 +130,6 @@ func TestFragmentedConn_Write_Error(t *testing.T) {
 	assert.Error(t, err)
 
 	_ = fragConn.Close()
-}
-
-func TestWithFragmentation_ContextVerification(t *testing.T) {
-	t.Parallel()
-
-	cfg := FragmentConfig{
-		ChunkSize: 42,
-		MaxDelay:  15 * time.Millisecond,
-	}
-
-	mod := WithFragmentation(cfg)
-	require.NotNil(t, mod)
-
-	req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, "http://localhost", nil)
-	require.NoError(t, err)
-
-	mod(req)
-
-	val := GetRequestConfig(req.Context())
-	require.NotNil(t, val)
-	require.NotNil(t, val.Fragment)
-
-	assert.Equal(t, 42, val.Fragment.ChunkSize)
-	assert.Equal(t, 15*time.Millisecond, val.Fragment.MaxDelay)
 }
 
 func TestNewFragmentedConn(t *testing.T) {

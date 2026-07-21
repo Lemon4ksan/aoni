@@ -46,6 +46,10 @@ func (f DoerFunc) Do(req *http.Request) (*http.Response, error) {
 	return f(req)
 }
 
+// Middleware wraps an [HTTPDoer] with additional request/response
+// processing logic. Pass to [Chain] to compose multiple layers.
+type Middleware func(next HTTPDoer) HTTPDoer
+
 // Requester sends an HTTP request and returns the response.
 // [Client] is the primary implementation. Relative paths are resolved
 // against the base URL. Request modifiers are applied before execution.
@@ -55,42 +59,6 @@ type Requester interface {
 		method, path string,
 		mods ...RequestModifier,
 	) (*http.Response, error)
-}
-
-// BaseResponseProvider optionally provides a [BaseResponse] for
-// structured decoding. Implemented by response wrapper types used
-// with [option.WithBaseResponse].
-type BaseResponseProvider interface {
-	BaseResponse() BaseResponse
-}
-
-// ProgressFunc is called periodically during response body reads.
-// current is the bytes read so far; total is the Content-Length
-// value or -1 if unknown.
-type ProgressFunc func(current, total int64)
-
-// BaseResponse is implemented by user-defined response wrappers that
-// participate in [GetTo] and similar generic request helpers. The
-// decoder calls IsSuccess, SetData, and Error to route the result.
-type BaseResponse interface {
-	// IsSuccess reports whether the response indicates a successful operation.
-	IsSuccess() bool
-	// Error returns an error representation if IsSuccess returns false.
-	Error() error
-	// SetData sets the data into the response.
-	SetData(data any)
-}
-
-// Logger is an interface for logging messages.
-type Logger interface {
-	Debug(msg string, args ...any)
-	DebugContext(ctx context.Context, msg string, args ...any)
-	Info(msg string, args ...any)
-	InfoContext(ctx context.Context, msg string, args ...any)
-	Warn(msg string, args ...any)
-	WarnContext(ctx context.Context, msg string, args ...any)
-	Error(msg string, args ...any)
-	ErrorContext(ctx context.Context, msg string, args ...any)
 }
 
 // ClientOption is a functional option that configures a [Config] and is
