@@ -8,7 +8,6 @@ import (
 	"context"
 	"io"
 	"net/http"
-	"strings"
 	"testing"
 	"time"
 
@@ -155,33 +154,4 @@ func TestCurlCommand(t *testing.T) {
 			}
 		})
 	}
-}
-
-func TestAsCurl_WithBody(t *testing.T) {
-	t.Parallel()
-
-	server, client := SetupBridgeTest(t, func(w http.ResponseWriter, r *http.Request) {
-		body, err := io.ReadAll(r.Body)
-		require.NoError(t, err)
-		assert.Equal(t, "replayed_body_data", string(body))
-		w.WriteHeader(http.StatusOK)
-	})
-
-	req, err := http.NewRequestWithContext(
-		t.Context(),
-		http.MethodPost,
-		server.URL+"/curl",
-		strings.NewReader("replayed_body_data"),
-	)
-	require.NoError(t, err)
-
-	// Apply AsCurl modifier (captures and re-populates the body)
-	mod := AsCurl()
-	mod(req)
-
-	resp, err := client.Do(req)
-	require.NoError(t, err)
-	t.Cleanup(func() { _ = resp.Body.Close() })
-
-	assert.Equal(t, http.StatusOK, resp.StatusCode)
 }

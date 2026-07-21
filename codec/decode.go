@@ -2,7 +2,7 @@
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
-package aoni
+package codec
 
 import (
 	"bufio"
@@ -11,9 +11,13 @@ import (
 	"encoding/xml"
 	"fmt"
 	"io"
+	"net/http"
 	"strings"
+	"sync"
 
 	"go.yaml.in/yaml/v4"
+
+	"github.com/lemon4ksan/aoni"
 )
 
 // LimitDecoder wraps an existing decoder, ensuring that no more than maxBytes
@@ -75,7 +79,27 @@ func (f DecoderFunc) Decode(r io.Reader, target any) error {
 // The target must be a *[]byte.
 var RawDecoder Decoder = rawDecoder{}
 
+// IsRawDecoder returns true if the decoder is a [RawDecoder].
+func IsRawDecoder(d Decoder) bool {
+	_, ok := d.(rawDecoder)
+	return ok
+}
+
 type rawDecoder struct{}
+
+var (
+	bytePool = sync.Pool{
+		New: func() any {
+			b := make([]byte, 32*1024)
+			return &b
+		},
+	}
+	bufferPool = sync.Pool{
+		New: func() any {
+			return new(bytes.Buffer)
+		},
+	}
+)
 
 func (rawDecoder) Decode(r io.Reader, target any) error {
 	ptr, ok := target.(*[]byte)
@@ -180,3 +204,22 @@ func DecodeXML[T any](r io.Reader) (T, error) {
 func DecodeYAML[T any](r io.Reader) (T, error) {
 	return DecodeTo[T](r, YAMLDecoder)
 }
+
+// WithDecoder overrides the response Decoder for this request.
+func WithDecoder(d Decoder) aoni.RequestModifier {
+	return func(req *http.Request) {
+		aoni.GetOrInitRequestConfig(req).Decoder = d
+	}
+}
+
+// WithRawDecoder returns a RequestModifier that uses RawDecoder.
+func WithRawDecoder() aoni.RequestModifier { return WithDecoder(RawDecoder) }
+
+// WithJSONDecoder returns a RequestModifier that uses JSONDecoder.
+func WithJSONDecoder() aoni.RequestModifier { return WithDecoder(JSONDecoder) }
+
+// WithXMLDecoder returns a RequestModifier that uses XMLDecoder.
+func WithXMLDecoder() aoni.RequestModifier { return WithDecoder(XMLDecoder) }
+
+// WithYAMLDecoder returns a RequestModifier that uses YAMLDecoder.
+func WithYAMLDecoder() aoni.RequestModifier { return WithDecoder(YAMLDecoder) }

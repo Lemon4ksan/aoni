@@ -16,6 +16,7 @@ import (
 
 	"github.com/lemon4ksan/aoni/mod"
 	"github.com/lemon4ksan/aoni/option"
+	"github.com/lemon4ksan/aoni/request"
 
 	"github.com/lemon4ksan/aoni"
 )
@@ -52,7 +53,7 @@ func main() {
 		UserID: 1,
 	}
 
-	result, err := aoni.PostTo[PostResponse](
+	result, err := request.PostTo[PostResponse](
 		ctx, client, "/posts", payload,
 		mod.WithErrorModel(&ErrorResponse{}),
 	)

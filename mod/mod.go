@@ -17,10 +17,12 @@ import (
 	"mime/multipart"
 	"net/http"
 	"net/url"
+	"os"
 	"strings"
 	"time"
 
 	"github.com/lemon4ksan/aoni"
+	"github.com/lemon4ksan/aoni/codec"
 	"github.com/lemon4ksan/aoni/ja4"
 	"github.com/lemon4ksan/aoni/p0f"
 	"github.com/lemon4ksan/aoni/values"
@@ -334,12 +336,9 @@ func WithDebug() aoni.RequestModifier {
 	}
 }
 
-// WithDecoder overrides the response Decoder for this request.
-func WithDecoder(d aoni.Decoder) aoni.RequestModifier {
-	return func(req *http.Request) {
-		aoni.GetOrInitRequestConfig(req).Decoder = d
-	}
-}
+// WithDecoder is an alias for [codec.WithDecoder].
+// It overrides the response Decoder for this request.
+var WithDecoder = codec.WithDecoder
 
 // WithErrorModel sets the target struct/map for non-2xx response decoding.
 func WithErrorModel(model any) aoni.RequestModifier {
@@ -522,6 +521,24 @@ func WithP0fSignature(sig *p0f.Signature) aoni.RequestModifier {
 func WithSessionCache(cache aoni.SessionCache) aoni.RequestModifier {
 	return func(req *http.Request) {
 		aoni.GetOrInitRequestConfig(req).SessionCache = cache
+	}
+}
+
+// WithCurlDump returns a [RequestModifier] that dumps the equivalent curl command to stderr.
+func WithCurlDump() aoni.RequestModifier {
+	return func(req *http.Request) {
+		var body []byte
+
+		if req.Body != nil && req.Body != http.NoBody {
+			var buf bytes.Buffer
+
+			_, _ = io.Copy(&buf, req.Body)
+			body = buf.Bytes()
+			req.Body = io.NopCloser(bytes.NewReader(body))
+		}
+
+		curl := aoni.CurlCommand(req, body)
+		fmt.Fprintf(os.Stderr, "%s\n", curl)
 	}
 }
 
@@ -718,15 +735,3 @@ func WithTimeout(d time.Duration) aoni.RequestModifier {
 		aoni.GetOrInitRequestConfig(req).RequestTimeoutCancel = cancel
 	}
 }
-
-// WithRawDecoder returns a RequestModifier that uses RawDecoder.
-func WithRawDecoder() aoni.RequestModifier { return WithDecoder(aoni.RawDecoder) }
-
-// WithJSONDecoder returns a RequestModifier that uses JSONDecoder.
-func WithJSONDecoder() aoni.RequestModifier { return WithDecoder(aoni.JSONDecoder) }
-
-// WithXMLDecoder returns a RequestModifier that uses XMLDecoder.
-func WithXMLDecoder() aoni.RequestModifier { return WithDecoder(aoni.XMLDecoder) }
-
-// WithYAMLDecoder returns a RequestModifier that uses YAMLDecoder.
-func WithYAMLDecoder() aoni.RequestModifier { return WithDecoder(aoni.YAMLDecoder) }

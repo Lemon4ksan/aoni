@@ -27,6 +27,15 @@ import (
 	"github.com/lemon4ksan/aoni/telemetry"
 )
 
+const (
+	// AlpnH3 is the official ALPN protocol identifier for HTTP/3 over QUIC.
+	AlpnH3 = "h3"
+	// AlpnH2 is the official ALPN protocol identifier for HTTP/2 over TLS.
+	AlpnH2 = "h2"
+	// AlpnHTTP is the official ALPN protocol identifier for HTTP/1.1.
+	AlpnHTTP = "http/1.1"
+)
+
 // Config aggregates all client settings for easy serialization and bootstrapping.
 type Config struct {
 	Network     NetworkConfig

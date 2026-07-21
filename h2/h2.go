@@ -254,6 +254,15 @@ func NewFramedTransport(base *http.Transport, settings Settings, orderedKeys ...
 	return ft
 }
 
+// Clone returns a clone of the FramedTransport wrapping the provided base transport.
+func (ft *FramedTransport) Clone(base *http.Transport) *FramedTransport {
+	if ft == nil {
+		return nil
+	}
+
+	return NewFramedTransport(base, ft.settings, ft.orderedKeys...)
+}
+
 // framedConn wraps a [net.Conn] and intercepts the HTTP/2 client preface
 // to replace the SETTINGS frame and PRIORITY frame with browser-specific values.
 // This enables full HTTP/2 fingerprint impersonation matching the TLS profile.

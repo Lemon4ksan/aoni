@@ -2,7 +2,7 @@
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
-package aoni_test
+package request
 
 import (
 	"context"
@@ -32,7 +32,7 @@ func TestWithTimeout(t *testing.T) {
 			_, _ = fmt.Fprint(w, `{"message":"ok","status":200}`)
 		})
 
-		res, err := aoni.GetTo[reqTestPayload](t.Context(), client, "/", mod.WithTimeout(2*time.Second))
+		res, err := GetTo[reqTestPayload](t.Context(), client, "/", mod.WithTimeout(2*time.Second))
 		require.NoError(t, err)
 		assert.Equal(t, "ok", res.Message)
 	})
@@ -48,7 +48,7 @@ func TestWithTimeout(t *testing.T) {
 		t.Cleanup(server.Close)
 		client := aoni.NewClient(nil, option.WithBaseURL(server.URL))
 
-		_, err := aoni.GetTo[reqTestPayload](t.Context(), client, "/slow", mod.WithTimeout(100*time.Millisecond))
+		_, err := GetTo[reqTestPayload](t.Context(), client, "/slow", mod.WithTimeout(100*time.Millisecond))
 		require.Error(t, err)
 		assert.ErrorIs(t, err, context.DeadlineExceeded)
 	})
@@ -64,7 +64,7 @@ func TestWithFormValues(t *testing.T) {
 		w.WriteHeader(http.StatusNoContent)
 	})
 
-	resp, err := aoni.Post(t.Context(), client, "/form", nil,
+	resp, err := Post(t.Context(), client, "/form", nil,
 		mod.WithFormValues(url.Values{
 			"hello":  {"world"},
 			"answer": {"42"},
@@ -87,7 +87,7 @@ func TestConditionalHeaders(t *testing.T) {
 			w.WriteHeader(http.StatusNotModified)
 		})
 
-		resp, err := aoni.Get(t.Context(), client, "/", mod.WithIfNoneMatch(`"abc123"`))
+		resp, err := Get(t.Context(), client, "/", mod.WithIfNoneMatch(`"abc123"`))
 		require.NoError(t, err)
 
 		defer resp.Body.Close()
@@ -102,7 +102,7 @@ func TestConditionalHeaders(t *testing.T) {
 			w.WriteHeader(http.StatusOK)
 		})
 
-		resp, err := aoni.Put(t.Context(), client, "/", nil, mod.WithIfMatch(`"abc123"`))
+		resp, err := Put(t.Context(), client, "/", nil, mod.WithIfMatch(`"abc123"`))
 		require.NoError(t, err)
 
 		defer resp.Body.Close()
@@ -119,7 +119,7 @@ func TestConditionalHeaders(t *testing.T) {
 			w.WriteHeader(http.StatusNotModified)
 		})
 
-		resp, err := aoni.Get(t.Context(), client, "/", mod.WithIfModifiedSince(since))
+		resp, err := Get(t.Context(), client, "/", mod.WithIfModifiedSince(since))
 		require.NoError(t, err)
 
 		defer resp.Body.Close()
@@ -142,9 +142,9 @@ func TestConcurrent(t *testing.T) {
 
 	client := aoni.NewClient(nil, option.WithBaseURL(server.URL))
 
-	results := aoni.Concurrent(t.Context(), client, paths,
+	results := Concurrent(t.Context(), client, paths,
 		func(ctx context.Context, c aoni.Requester, path string) (*reqTestPayload, error) {
-			return aoni.GetTo[reqTestPayload](ctx, c, path)
+			return GetTo[reqTestPayload](ctx, c, path)
 		})
 
 	require.Len(t, results, 3)
@@ -174,9 +174,9 @@ func TestConcurrentWithMods(t *testing.T) {
 
 	client := aoni.NewClient(nil, option.WithBaseURL(server.URL))
 
-	results := aoni.ConcurrentWithMods(t.Context(), client, paths, mods,
+	results := ConcurrentWithMods(t.Context(), client, paths, mods,
 		func(ctx context.Context, c aoni.Requester, path string, m ...aoni.RequestModifier) (*reqTestPayload, error) {
-			return aoni.GetTo[reqTestPayload](ctx, c, path, m...)
+			return GetTo[reqTestPayload](ctx, c, path, m...)
 		})
 
 	require.Len(t, results, 2)

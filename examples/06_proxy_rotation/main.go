@@ -19,6 +19,7 @@ import (
 	"github.com/lemon4ksan/aoni/middleware"
 	"github.com/lemon4ksan/aoni/option"
 	"github.com/lemon4ksan/aoni/proxy"
+	"github.com/lemon4ksan/aoni/request"
 
 	"github.com/lemon4ksan/aoni"
 )
@@ -72,7 +73,7 @@ func main() {
 
 	// Make requests that will be load-balanced across proxies
 	for i := range 3 {
-		res, err := aoni.GetTo[IPResponse](ctx, client, "/ip")
+		res, err := request.GetTo[IPResponse](ctx, client, "/ip")
 		if err != nil {
 			log.Printf("Request %d failed: %v", i, err)
 			continue

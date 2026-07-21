@@ -22,15 +22,6 @@ import (
 	"github.com/lemon4ksan/aoni/h2"
 )
 
-const (
-	// AlpnH3 is the official ALPN protocol identifier for HTTP/3 over QUIC.
-	AlpnH3 = "h3"
-	// AlpnH2 is the official ALPN protocol identifier for HTTP/2 over TLS.
-	AlpnH2 = "h2"
-	// AlpnHTTP is the official ALPN protocol identifier for HTTP/1.1.
-	AlpnHTTP = "http/1.1"
-)
-
 // HTTPDoer executes an [http.Request] and returns a response.
 // [http.Client] satisfies this interface. Pass a [DoerFunc] to adapt
 // a plain function.
@@ -49,6 +40,10 @@ func (f DoerFunc) Do(req *http.Request) (*http.Response, error) {
 // Middleware wraps an [HTTPDoer] with additional request/response
 // processing logic. Pass to [Chain] to compose multiple layers.
 type Middleware func(next HTTPDoer) HTTPDoer
+
+// RequestModifier represents a function that alters an [http.Request] before execution.
+// Concrete modifier implementations are located in the [github.com/lemon4ksan/aoni/mod] package.
+type RequestModifier = generic.Option[*http.Request]
 
 // Requester sends an HTTP request and returns the response.
 // [Client] is the primary implementation. Relative paths are resolved
@@ -252,59 +247,6 @@ func (c *Client) Transport() *http.Transport {
 	}
 }
 
-// Get performs a GET request through the Client and returns the raw http.Response.
-func (c *Client) Get(ctx context.Context, path string, mods ...RequestModifier) (*http.Response, error) {
-	return Get(ctx, c, path, mods...)
-}
-
-// Post executes a POST request through the Client and returns the raw http.Response.
-//
-// By default, if the body is a struct or map, it is marshaled to JSON and the request headers
-// "Content-Type" and "Accept" are set to "application/json".
-//
-// To send other body formats (e.g. XML, YAML, or plain text), pre-serialize the payload and
-// pass it as an [io.Reader] (e.g. using [strings.NewReader] or [bytes.NewReader]), then override the Content-Type
-// header using request modifiers like [WithContentType] (e.g. WithContentType("application/xml")).
-func (c *Client) Post(ctx context.Context, path string, body any, mods ...RequestModifier) (*http.Response, error) {
-	return Post(ctx, c, path, body, mods...)
-}
-
-// Put executes a PUT request through the Client and returns the raw http.Response.
-//
-// By default, if the body is a struct or map, it is marshaled to JSON and the request headers
-// "Content-Type" and "Accept" are set to "application/json".
-//
-// To send other body formats (e.g. XML, YAML, or plain text), pre-serialize the payload and
-// pass it as an [io.Reader] (e.g. using [strings.NewReader] or [bytes.NewReader]), then override the Content-Type
-// header using request modifiers like [WithContentType] (e.g. WithContentType("application/xml")).
-func (c *Client) Put(ctx context.Context, path string, body any, mods ...RequestModifier) (*http.Response, error) {
-	return Put(ctx, c, path, body, mods...)
-}
-
-// Patch executes a PATCH request through the Client and returns the raw http.Response.
-//
-// By default, if the body is a struct or map, it is marshaled to JSON and the request headers
-// "Content-Type" and "Accept" are set to "application/json".
-//
-// To send other body formats (e.g. XML, YAML, or plain text), pre-serialize the payload and
-// pass it as an [io.Reader] (e.g. using [strings.NewReader] or [bytes.NewReader]), then override the Content-Type
-// header using request modifiers like [WithContentType] (e.g. WithContentType("application/xml")).
-func (c *Client) Patch(ctx context.Context, path string, body any, mods ...RequestModifier) (*http.Response, error) {
-	return Patch(ctx, c, path, body, mods...)
-}
-
-// Delete executes a DELETE request through the Client and returns the raw http.Response.
-//
-// By default, if the body is a struct or map, it is marshaled to JSON and the request headers
-// "Content-Type" and "Accept" are set to "application/json".
-//
-// To send other body formats (e.g. XML, YAML, or plain text), pre-serialize the payload and
-// pass it as an [io.Reader] (e.g. using [strings.NewReader] or [bytes.NewReader]), then override the Content-Type
-// header using request modifiers like [WithContentType] (e.g. WithContentType("application/xml")).
-func (c *Client) Delete(ctx context.Context, path string, body any, mods ...RequestModifier) (*http.Response, error) {
-	return Delete(ctx, c, path, body, mods...)
-}
-
 // Request sends an HTTP request and returns the response. path is
 // resolved against [option.WithBaseURL] when set; an empty path
 // targets the base URL directly. Nil modifiers are ignored.
@@ -360,4 +302,75 @@ func (c *Client) Request(
 	}
 
 	return resp, nil
+}
+
+// DialTLSForWS dials a TLS connection, routing through the transport's DialTLSContext when available.
+func (c *Client) DialTLSForWS(ctx context.Context, addr string) (net.Conn, error) {
+	if tr := c.Transport(); tr != nil && tr.DialTLSContext != nil {
+		return tr.DialTLSContext(ctx, "tcp", addr)
+	}
+
+	if browser := c.BrowserID(); browser != BrowserNone || c.fingerprint.TLSClientHelloID != nil {
+		var proxyURL *url.URL
+		if c.network.TransportProxy != nil {
+			proxyURL, _ = c.network.TransportProxy(&http.Request{URL: &url.URL{Host: addr}})
+		}
+
+		dialCfg := dialConfig{
+			Network:       "tcp",
+			Addr:          addr,
+			Browser:       browser,
+			HelloID:       c.fingerprint.TLSClientHelloID,
+			SourceRotator: c.network.SourceRotator,
+			DNSResolver:   c.network.DNSResolver,
+			JA4Callback:   c.fingerprint.JA4Callback,
+			ProxyURL:      proxyURL,
+		}
+
+		return c.dialTLSWithUTLS(ctx, dialCfg, c.TLSConfig(), GetRequestConfig(ctx))
+	}
+
+	if tr := c.Transport(); tr != nil && tr.DialContext != nil {
+		return tr.DialContext(ctx, "tcp", addr)
+	}
+
+	dialer := &net.Dialer{Timeout: 30 * time.Second}
+
+	return dialer.DialContext(ctx, "tcp", addr)
+}
+
+// DialPlainForWS dials a plain TCP connection, routing through the transport's DialContext when available.
+func (c *Client) DialPlainForWS(ctx context.Context, addr string) (net.Conn, error) {
+	var (
+		conn net.Conn
+		err  error
+	)
+
+	if tr := c.Transport(); tr != nil && tr.DialContext != nil {
+		conn, err = tr.DialContext(ctx, "tcp", addr)
+	} else {
+		conn, err = proxyClient{}.CleanDialContext(ctx, dialConfig{
+			Network:       "tcp",
+			Addr:          addr,
+			Delay:         c.network.HappyEyeballsDelay,
+			SSRFGuard:     c.network.SSRFGuard,
+			SourceRotator: c.network.SourceRotator,
+			DNSResolver:   c.network.DNSResolver,
+		})
+	}
+
+	if err != nil {
+		return nil, err
+	}
+
+	var fCfg *FragmentConfig
+	if cfg := GetRequestConfig(ctx); cfg != nil && cfg.Fragment != nil {
+		fCfg = cfg.Fragment
+	}
+
+	if fCfg != nil {
+		conn = connWrapper{}.WithFragmentation(conn, *fCfg)
+	}
+
+	return conn, nil
 }

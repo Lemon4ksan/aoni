@@ -16,6 +16,7 @@ import (
 
 	"github.com/lemon4ksan/aoni/mod"
 	"github.com/lemon4ksan/aoni/option"
+	"github.com/lemon4ksan/aoni/request"
 
 	"github.com/lemon4ksan/aoni"
 )
@@ -54,7 +55,7 @@ func main() {
 	)
 
 	// 1. Path variable: fetch user /users/{id}
-	user, err := aoni.GetTo[User](ctx, client,
+	user, err := request.GetTo[User](ctx, client,
 		"/users/{id}",
 		mod.WithVar("id", 1),
 	)
@@ -70,7 +71,7 @@ func main() {
 		PostID int `url:"postId"`
 	}{PostID: 1}
 
-	comments, err := aoni.GetTo[[]Comment](ctx, client,
+	comments, err := request.GetTo[[]Comment](ctx, client,
 		"/posts/{id}/comments",
 		mod.WithVar("id", 1),
 		mod.WithQuery(params),
@@ -84,7 +85,7 @@ func main() {
 	// 3. Automated Defaults: fetch filtered posts /posts?userId=1&_limit=3&_sort=id
 	// By passing an empty filter, aoni detects that fields are zero-valued
 	// and automatically applies the values defined in 'default' tags.
-	posts, err := aoni.GetTo[[]Post](ctx, client,
+	posts, err := request.GetTo[[]Post](ctx, client,
 		"/posts",
 		mod.WithQuery(PostFilter{}), // Zero-value struct -> defaults will be applied!
 	)

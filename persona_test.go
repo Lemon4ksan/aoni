@@ -26,7 +26,7 @@ func TestClientWithPersona(t *testing.T) {
 	}))
 	defer server.Close()
 
-	resp, err := c2.Get(context.Background(), server.URL)
+	resp, err := c2.Request(context.Background(), http.MethodGet, server.URL)
 	assert.NoError(t, err)
 
 	if resp != nil {

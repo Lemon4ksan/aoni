@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/lemon4ksan/aoni/option"
+	"github.com/lemon4ksan/aoni/request"
 
 	"github.com/lemon4ksan/aoni"
 )
@@ -33,7 +34,7 @@ func main() {
 		option.WithBaseURL("https://jsonplaceholder.typicode.com"),
 	)
 
-	post, err := aoni.GetTo[Post](ctx, client, "/posts/1")
+	post, err := request.GetTo[Post](ctx, client, "/posts/1")
 	if err != nil {
 		log.Fatal(err)
 	}

@@ -61,20 +61,6 @@ func IsBlockedIP(ip net.IP) bool {
 	return false
 }
 
-var (
-	bytePool = sync.Pool{
-		New: func() any {
-			b := make([]byte, 32*1024)
-			return &b
-		},
-	}
-	bufferPool = sync.Pool{
-		New: func() any {
-			return new(bytes.Buffer)
-		},
-	}
-)
-
 func (c *Client) resolvePipeline(req *http.Request) PipelineConfig {
 	if reqPipe, ok := GetPipeline(req.Context()); ok {
 		return reqPipe

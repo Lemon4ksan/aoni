@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/lemon4ksan/aoni/option"
+	"github.com/lemon4ksan/aoni/request"
 
 	"github.com/lemon4ksan/aoni"
 	"github.com/lemon4ksan/aoni/ja4"
@@ -44,7 +45,7 @@ func main() {
 	// Trace with JA4 fingerprint collection
 	var info aoni.TraceInfo
 
-	_, err := aoni.GetTo[Response](ctx, client, "/ip",
+	_, err := request.GetTo[Response](ctx, client, "/ip",
 		aoni.TraceJA4(&info),
 	)
 	if err != nil {
@@ -66,7 +67,7 @@ func main() {
 		}),
 	)
 
-	_, _ = aoni.GetTo[Response](ctx, firefoxClient, "/ip")
+	_, _ = request.GetTo[Response](ctx, firefoxClient, "/ip")
 }
 
 func printJA4Report(r *ja4.Report) {

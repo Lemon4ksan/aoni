@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/lemon4ksan/aoni/option"
+	"github.com/lemon4ksan/aoni/request"
 
 	"github.com/lemon4ksan/aoni"
 	"github.com/lemon4ksan/aoni/profiles/chrome"
@@ -40,7 +41,7 @@ func main() {
 		option.WithUserAgent(chrome.UserAgentWindows),
 	)
 
-	res, err := aoni.GetTo[Response](ctx, chromeClient, "/ip")
+	res, err := request.GetTo[Response](ctx, chromeClient, "/ip")
 	if err != nil {
 		fmt.Printf("Chrome request failed: %v\n", err)
 	} else {
@@ -62,7 +63,7 @@ func main() {
 		option.WithUserAgent(firefox.UserAgentFirefoxWindows),
 	)
 
-	res, err = aoni.GetTo[Response](ctx, firefoxClient, "/ip")
+	res, err = request.GetTo[Response](ctx, firefoxClient, "/ip")
 	if err != nil {
 		fmt.Printf("Firefox request failed: %v\n", err)
 	} else {

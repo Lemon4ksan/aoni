@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/lemon4ksan/aoni/option"
+	"github.com/lemon4ksan/aoni/request"
 
 	"github.com/lemon4ksan/aoni"
 	"github.com/lemon4ksan/aoni/p0f"
@@ -30,7 +31,7 @@ func main() {
 		option.WithP0fSignature(p0f.Linux311),
 	)
 
-	resp, err := aoni.GetTo[IPResponse](ctx, client, "/ip")
+	resp, err := request.GetTo[IPResponse](ctx, client, "/ip")
 	if err != nil {
 		log.Fatal(err)
 	}

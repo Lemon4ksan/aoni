@@ -16,6 +16,7 @@ import (
 
 	"github.com/lemon4ksan/aoni"
 	"github.com/lemon4ksan/aoni/option"
+	"github.com/lemon4ksan/aoni/request"
 )
 
 type MockChallengeSolver struct {
@@ -75,7 +76,7 @@ func TestChallengeSolver_BypassesChallenge(t *testing.T) {
 		Success bool `json:"success"`
 	}
 
-	res, err := aoni.GetTo[Response](context.Background(), client, "/")
+	res, err := request.GetTo[Response](context.Background(), client, "/")
 	assert.NoError(t, err)
 	assert.True(t, res.Success)
 	assert.Equal(t, 1, solver.solveCount)
@@ -141,7 +142,7 @@ func TestChallengeSolver_CustomDetector(t *testing.T) {
 		Success bool `json:"success"`
 	}
 
-	res, err := aoni.GetTo[Response](context.Background(), client, "/")
+	res, err := request.GetTo[Response](context.Background(), client, "/")
 	assert.NoError(t, err)
 	assert.True(t, res.Success)
 	assert.Equal(t, 1, solver.solveCount)

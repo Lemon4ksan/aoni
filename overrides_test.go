@@ -21,6 +21,7 @@ import (
 	"github.com/lemon4ksan/aoni"
 	"github.com/lemon4ksan/aoni/mod"
 	"github.com/lemon4ksan/aoni/option"
+	"github.com/lemon4ksan/aoni/request"
 )
 
 func TestGetProxyOverride_Set(t *testing.T) {
@@ -176,7 +177,7 @@ func TestWithResponseValidator_PassesOnSuccess(t *testing.T) {
 
 	c := aoni.NewClient(nil, option.WithBaseURL(srv.URL))
 
-	resp, err := c.Get(t.Context(), "/",
+	resp, err := request.Get(t.Context(), c, "/",
 		mod.WithResponseValidator(func(resp *http.Response) error {
 			if resp.Header.Get("X-Status") != "ok" {
 				return errors.New("missing X-Status")
@@ -199,7 +200,7 @@ func TestWithResponseValidator_BlocksOnFailure(t *testing.T) {
 
 	c := aoni.NewClient(nil, option.WithBaseURL(srv.URL))
 
-	resp, err := c.Get(t.Context(), "/",
+	resp, err := request.Get(t.Context(), c, "/",
 		mod.WithResponseValidator(func(resp *http.Response) error {
 			body, _ := io.ReadAll(resp.Body)
 

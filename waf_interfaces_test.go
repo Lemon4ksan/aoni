@@ -26,6 +26,7 @@ import (
 	"github.com/lemon4ksan/aoni/ja4"
 	"github.com/lemon4ksan/aoni/option"
 	"github.com/lemon4ksan/aoni/profiles"
+	"github.com/lemon4ksan/aoni/request"
 	"github.com/lemon4ksan/aoni/telemetry"
 )
 
@@ -153,8 +154,6 @@ func TestClient_HTTP2Configurer(t *testing.T) {
 }
 
 func TestClient_E2E_WAFBypass_Pipeline(t *testing.T) {
-	t.Parallel()
-
 	var wafHits atomic.Int32
 
 	wafServer := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -259,7 +258,7 @@ func TestClient_E2E_WAFBypass_Pipeline(t *testing.T) {
 	)
 
 	info := &aoni.TraceInfo{}
-	result, err := aoni.GetTo[testPayload](t.Context(), client, "/", aoni.Trace(info), aoni.TraceJA4(info))
+	result, err := request.GetTo[testPayload](t.Context(), client, "/", aoni.Trace(info), aoni.TraceJA4(info))
 	require.NoError(t, err)
 
 	assert.Equal(t, "evaded", result.Message)
@@ -270,7 +269,7 @@ func TestClient_E2E_WAFBypass_Pipeline(t *testing.T) {
 	assert.NotEmpty(t, info.RemoteAddr)
 	assert.Greater(t, info.Total, 0*time.Second)
 
-	resultCached, err := aoni.GetTo[testPayload](t.Context(), client, "/")
+	resultCached, err := request.GetTo[testPayload](t.Context(), client, "/")
 	require.NoError(t, err)
 
 	assert.Equal(t, "evaded", resultCached.Message)

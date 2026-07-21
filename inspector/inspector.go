@@ -185,10 +185,6 @@ func (i *TrafficInspector) Capture(req *http.Request, resp *http.Response, reqEr
 		applyTraceToCapturedRequest(&capReq, trace)
 	}
 
-	if trace != nil {
-		applyTraceToCapturedRequest(&capReq, trace)
-	}
-
 	i.saveAndBroadcast(capReq)
 }
 

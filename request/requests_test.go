@@ -2,7 +2,7 @@
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
-package aoni_test
+package request
 
 import (
 	"bytes"
@@ -20,10 +20,16 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/lemon4ksan/aoni"
+	"github.com/lemon4ksan/aoni/codec"
 	"github.com/lemon4ksan/aoni/cookie"
 	"github.com/lemon4ksan/aoni/mod"
 	"github.com/lemon4ksan/aoni/option"
 )
+
+type testPayload struct {
+	Message string `json:"message"`
+	Status  int    `json:"status"`
+}
 
 type reqTestPayload struct {
 	Message string `json:"message" validate:"required"`
@@ -33,25 +39,6 @@ type reqTestPayload struct {
 type errorPayload struct {
 	Code    string `json:"code"`
 	Details string `json:"details"`
-}
-
-type mockBaseResponse struct {
-	Success  bool  `json:"success"`
-	Data     any   `json:"data"`
-	ErrorVal error `json:"-"`
-}
-
-func (b *mockBaseResponse) IsSuccess() bool { return b.Success }
-func (b *mockBaseResponse) Error() error    { return b.ErrorVal }
-func (b *mockBaseResponse) SetData(d any)   { b.Data = d }
-
-type mockBaseProvider struct {
-	aoni.Requester
-	provider func() aoni.BaseResponse
-}
-
-func (m *mockBaseProvider) BaseResponse() aoni.BaseResponse {
-	return m.provider()
 }
 
 func setupTestReqServer(t *testing.T, handler http.HandlerFunc) (*httptest.Server, *aoni.Client) {
@@ -75,7 +62,7 @@ func TestClient_GetTo(t *testing.T) {
 		_ = json.NewEncoder(w).Encode(expected)
 	})
 
-	result, err := aoni.GetTo[reqTestPayload](t.Context(), client, "/json")
+	result, err := GetTo[reqTestPayload](t.Context(), client, "/json")
 	require.NoError(t, err)
 
 	assert.Equal(t, expected.Message, result.Message)
@@ -92,7 +79,7 @@ func TestClient_GetToEx(t *testing.T) {
 		_ = json.NewEncoder(w).Encode(expected)
 	})
 
-	result, raw, err := aoni.GetToEx[reqTestPayload](t.Context(), client, "/json_ex")
+	result, raw, err := GetToEx[reqTestPayload](t.Context(), client, "/json_ex")
 	require.NoError(t, err)
 	require.NotNil(t, raw)
 
@@ -120,7 +107,7 @@ func TestClient_PostTo(t *testing.T) {
 		_ = json.NewEncoder(w).Encode(response)
 	})
 
-	result, err := aoni.PostTo[reqTestPayload](t.Context(), client, "/post", input)
+	result, err := PostTo[reqTestPayload](t.Context(), client, "/post", input)
 	require.NoError(t, err)
 	assert.Equal(t, response.Message, result.Message)
 }
@@ -145,7 +132,7 @@ func TestClient_PutTo(t *testing.T) {
 		_ = json.NewEncoder(w).Encode(response)
 	})
 
-	result, err := aoni.PutTo[reqTestPayload](t.Context(), client, "/put", input)
+	result, err := PutTo[reqTestPayload](t.Context(), client, "/put", input)
 	require.NoError(t, err)
 	assert.Equal(t, response.Message, result.Message)
 }
@@ -170,7 +157,7 @@ func TestClient_PatchTo(t *testing.T) {
 		_ = json.NewEncoder(w).Encode(response)
 	})
 
-	result, err := aoni.PatchTo[reqTestPayload](t.Context(), client, "/patch", input)
+	result, err := PatchTo[reqTestPayload](t.Context(), client, "/patch", input)
 	require.NoError(t, err)
 	assert.Equal(t, response.Message, result.Message)
 }
@@ -195,7 +182,7 @@ func TestClient_DeleteTo(t *testing.T) {
 		_ = json.NewEncoder(w).Encode(response)
 	})
 
-	result, err := aoni.DeleteTo[reqTestPayload](t.Context(), client, "/delete", input)
+	result, err := DeleteTo[reqTestPayload](t.Context(), client, "/delete", input)
 	require.NoError(t, err)
 	assert.Equal(t, response.Message, result.Message)
 }
@@ -213,7 +200,7 @@ func TestClient_DeleteTo_NilPayload(t *testing.T) {
 		w.WriteHeader(http.StatusNoContent)
 	})
 
-	_, err := aoni.DeleteTo[any](t.Context(), client, "/delete-nil", nil)
+	_, err := DeleteTo[any](t.Context(), client, "/delete-nil", nil)
 	require.NoError(t, err)
 }
 
@@ -254,13 +241,13 @@ func TestGenericToHelpers(t *testing.T) {
 	}
 
 	t.Run("GetTo_JSON", func(t *testing.T) {
-		res, err := aoni.GetTo[reqTestPayload](t.Context(), client, "/get")
+		res, err := GetTo[reqTestPayload](t.Context(), client, "/get")
 		require.NoError(t, err)
 		assert.Equal(t, "to-success", res.Message)
 	})
 
 	t.Run("PostTo_JSON", func(t *testing.T) {
-		res, err := aoni.PostTo[reqTestPayload](
+		res, err := PostTo[reqTestPayload](
 			t.Context(),
 			client,
 			"/post",
@@ -271,37 +258,37 @@ func TestGenericToHelpers(t *testing.T) {
 	})
 
 	t.Run("GetTo_XML", func(t *testing.T) {
-		res, err := aoni.GetTo[xmlPayload](t.Context(), client, "/get-xml", mod.WithXMLDecoder())
+		res, err := GetTo[xmlPayload](t.Context(), client, "/get-xml", codec.WithXMLDecoder())
 		require.NoError(t, err)
 		assert.Equal(t, "xml-success", res.Message)
 	})
 
 	t.Run("PostTo_XML", func(t *testing.T) {
 		body, _ := xml.Marshal(xmlPayload{Message: "xml-input", Status: 10})
-		res, err := aoni.PostTo[xmlPayload](
+		res, err := PostTo[xmlPayload](
 			t.Context(), client, "/post-xml",
 			strings.NewReader(string(body)),
 			mod.WithContentType("application/xml"),
 			mod.WithAccept("application/xml"),
-			mod.WithXMLDecoder(),
+			codec.WithXMLDecoder(),
 		)
 		require.NoError(t, err)
 		assert.Equal(t, "xml-success", res.Message)
 	})
 
 	t.Run("GetTo_YAML", func(t *testing.T) {
-		res, err := aoni.GetTo[yamlPayload](t.Context(), client, "/get-yaml", mod.WithYAMLDecoder())
+		res, err := GetTo[yamlPayload](t.Context(), client, "/get-yaml", codec.WithYAMLDecoder())
 		require.NoError(t, err)
 		assert.Equal(t, "yaml-success", res.Message)
 	})
 
 	t.Run("PostTo_YAML", func(t *testing.T) {
-		res, err := aoni.PostTo[yamlPayload](
+		res, err := PostTo[yamlPayload](
 			t.Context(), client, "/post-yaml",
 			strings.NewReader("message: yaml-input\nstatus: 10\n"),
 			mod.WithContentType("application/x-yaml"),
 			mod.WithAccept("application/x-yaml"),
-			mod.WithYAMLDecoder(),
+			codec.WithYAMLDecoder(),
 		)
 		require.NoError(t, err)
 		assert.Equal(t, "yaml-success", res.Message)
@@ -336,7 +323,7 @@ func TestClient_RawHelpers(t *testing.T) {
 	})
 
 	t.Run("Post raw", func(t *testing.T) {
-		resp, err := aoni.Post(t.Context(), client, "/post", input)
+		resp, err := Post(t.Context(), client, "/post", input)
 		require.NoError(t, err)
 
 		defer resp.Body.Close()
@@ -348,7 +335,7 @@ func TestClient_RawHelpers(t *testing.T) {
 	})
 
 	t.Run("Patch raw", func(t *testing.T) {
-		resp, err := aoni.Patch(t.Context(), client, "/patch", input)
+		resp, err := Patch(t.Context(), client, "/patch", input)
 		require.NoError(t, err)
 
 		defer resp.Body.Close()
@@ -357,7 +344,7 @@ func TestClient_RawHelpers(t *testing.T) {
 	})
 
 	t.Run("Put raw", func(t *testing.T) {
-		resp, err := aoni.Put(t.Context(), client, "/put", input)
+		resp, err := Put(t.Context(), client, "/put", input)
 		require.NoError(t, err)
 
 		defer resp.Body.Close()
@@ -366,7 +353,7 @@ func TestClient_RawHelpers(t *testing.T) {
 	})
 
 	t.Run("Delete raw", func(t *testing.T) {
-		resp, err := aoni.Delete(t.Context(), client, "/delete", input)
+		resp, err := Delete(t.Context(), client, "/delete", input)
 		require.NoError(t, err)
 
 		defer resp.Body.Close()
@@ -379,47 +366,12 @@ func TestClient_RawHelpers(t *testing.T) {
 			assert.Equal(t, http.MethodGet, r.Method)
 			w.WriteHeader(http.StatusNoContent)
 		})
-		resp, err := aoni.Get(t.Context(), clientGet, "/get")
+		resp, err := Get(t.Context(), clientGet, "/get")
 		require.NoError(t, err)
 
 		defer resp.Body.Close()
 
 		assert.Equal(t, http.StatusNoContent, resp.StatusCode)
-	})
-
-	t.Run("Client convenience methods", func(t *testing.T) {
-		resp, err := client.Post(t.Context(), "/post", input)
-		require.NoError(t, err)
-
-		defer resp.Body.Close()
-
-		assert.Equal(t, http.StatusOK, resp.StatusCode)
-
-		respGet, err := client.Get(t.Context(), "/get")
-		require.NoError(t, err)
-
-		defer respGet.Body.Close()
-
-		respPut, err := client.Put(t.Context(), "/put", input)
-		require.NoError(t, err)
-
-		defer respPut.Body.Close()
-
-		assert.Equal(t, http.StatusOK, respPut.StatusCode)
-
-		respPatch, err := client.Patch(t.Context(), "/patch", input)
-		require.NoError(t, err)
-
-		defer respPatch.Body.Close()
-
-		assert.Equal(t, http.StatusOK, respPatch.StatusCode)
-
-		respDelete, err := client.Delete(t.Context(), "/delete", input)
-		require.NoError(t, err)
-
-		defer respDelete.Body.Close()
-
-		assert.Equal(t, http.StatusOK, respDelete.StatusCode)
 	})
 
 	t.Run("ProxyIsolatedCookieJar with WithProxy", func(t *testing.T) {
@@ -450,7 +402,7 @@ func TestClient_UnexpectedHTML_Detection(t *testing.T) {
 			_, _ = w.Write([]byte("<!doctype html><html><body>error page</body></html>"))
 		})
 
-		_, err := aoni.GetTo[reqTestPayload](t.Context(), client, "/html")
+		_, err := GetTo[reqTestPayload](t.Context(), client, "/html")
 		assert.ErrorIs(t, err, aoni.ErrUnexpectedContentType)
 	})
 
@@ -463,7 +415,7 @@ func TestClient_UnexpectedHTML_Detection(t *testing.T) {
 			)
 		})
 
-		_, err := aoni.GetTo[reqTestPayload](t.Context(), client, "/cloudflare")
+		_, err := GetTo[reqTestPayload](t.Context(), client, "/cloudflare")
 		assert.ErrorIs(t, err, aoni.ErrCloudflareChallenge)
 	})
 }
@@ -478,7 +430,7 @@ func TestClient_APIError_With_ErrorModel(t *testing.T) {
 
 	var errPayload errorPayload
 
-	_, err := aoni.GetTo[reqTestPayload](t.Context(), client, "/error", mod.WithErrorModel(&errPayload))
+	_, err := GetTo[reqTestPayload](t.Context(), client, "/error", mod.WithErrorModel(&errPayload))
 
 	var apiErr *aoni.APIError
 	require.ErrorAs(t, err, &apiErr)
@@ -514,7 +466,7 @@ func TestClient_Diagnostics_SensitiveHeaderRedaction(t *testing.T) {
 	req.Header.Set("Authorization", "Bearer sensitive-token-here")
 
 	// Call GetTo so that handleResponse is executed and diagnostics are triggered
-	_, err = aoni.GetTo[testPayload](
+	_, err = GetTo[testPayload](
 		t.Context(),
 		client,
 		"/debug-test",
@@ -529,29 +481,6 @@ func TestClient_Diagnostics_SensitiveHeaderRedaction(t *testing.T) {
 	assert.NotContains(t, outputStr, "sensitive-token-here")
 }
 
-func TestClient_BaseResponseProvider(t *testing.T) {
-	t.Parallel()
-
-	_, client := aoni.SetupTestServer(t, func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusOK)
-		// Corrected JSON structure with 'data' envelope matching mockBaseResponse struct
-		_, _ = w.Write([]byte(`{"success":true,"data":{"message":"provider_response"}}`))
-	})
-
-	// Wrap original client to behave as a BaseResponseProvider
-	providerClient := &mockBaseProvider{
-		Requester: client,
-		provider: func() aoni.BaseResponse {
-			return &mockBaseResponse{}
-		},
-	}
-
-	result, err := aoni.GetTo[testPayload](t.Context(), providerClient, "/provider")
-	require.NoError(t, err)
-	assert.Equal(t, "provider_response", result.Message)
-}
-
 // Helpers for logger mocking inside diagnostic tests.
 type mockLoggerWriter struct {
 	log.DiscardType
@@ -564,4 +493,35 @@ func (m *mockLoggerWriter) Debug(msg string, args ...any) {
 			_, _ = m.out.Write([]byte(s))
 		}
 	}
+}
+
+func TestLimitDecoder_BombPrevention(t *testing.T) {
+	t.Parallel()
+
+	type SimpleData struct {
+		Field string `json:"field"`
+	}
+
+	payload := `{"field": "this data exceeds the safe read limit set on the decoder"}`
+	reader := strings.NewReader(payload)
+
+	limited := codec.LimitDecoder(codec.JSONDecoder, 15)
+
+	var target SimpleData
+
+	err := limited.Decode(reader, &target)
+	require.Error(t, err, "expected decoder to hit the limits boundary and return error")
+}
+
+func TestRedactHeaders(t *testing.T) {
+	t.Parallel()
+
+	input := "Authorization: Bearer secret-token\r\nCookie: session=abc123\r\nContent-Type: text/plain\r\n"
+	result := string(redactHeaders([]byte(input)))
+
+	assert.Contains(t, result, "authorization: <redacted>")
+	assert.Contains(t, result, "cookie: <redacted>")
+	assert.Contains(t, result, "Content-Type: text/plain")
+	assert.NotContains(t, result, "secret-token")
+	assert.NotContains(t, result, "session=abc123")
 }

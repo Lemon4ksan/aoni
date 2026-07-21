@@ -18,6 +18,7 @@ import (
 	"github.com/lemon4ksan/aoni/dns"
 	"github.com/lemon4ksan/aoni/mod"
 	"github.com/lemon4ksan/aoni/option"
+	"github.com/lemon4ksan/aoni/request"
 
 	"github.com/lemon4ksan/aoni"
 )
@@ -54,7 +55,7 @@ func main() {
 	)
 
 	// Make a request with forced HTTP/1.1 and ordered headers
-	res, err := aoni.GetTo[Response](ctx, client, "/ip",
+	res, err := request.GetTo[Response](ctx, client, "/ip",
 		mod.WithForceHTTP1(),
 		mod.WithOrderedHeaders([]string{
 			"Host",
@@ -79,7 +80,7 @@ func main() {
 	fmt.Printf("TLS evasion request successful: %s\n", res.Origin)
 
 	// Alternatively, force HTTP/2 for multiplexing
-	_, _ = aoni.GetTo[Response](ctx, client, "/ip",
+	_, _ = request.GetTo[Response](ctx, client, "/ip",
 		mod.WithForceHTTP2(),
 		mod.WithALPN(aoni.AlpnH2, aoni.AlpnHTTP),
 	)

@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/lemon4ksan/aoni/option"
+	"github.com/lemon4ksan/aoni/request"
 
 	"github.com/lemon4ksan/aoni"
 )
@@ -44,7 +45,7 @@ func main() {
 		option.WithBaseURL(server.URL),
 	).WithPersona(aoni.PersonaChrome120Windows)
 
-	res, err := aoni.GetTo[Response](ctx, chromeClient, "/headers")
+	res, err := request.GetTo[Response](ctx, chromeClient, "/headers")
 	if err != nil {
 		fmt.Printf("Request failed: %v\n", err)
 	} else {
@@ -59,7 +60,7 @@ func main() {
 		option.WithBaseURL(server.URL),
 	).WithPersona(aoni.PersonaFirefox120Windows)
 
-	res, err = aoni.GetTo[Response](ctx, firefoxClient, "/headers")
+	res, err = request.GetTo[Response](ctx, firefoxClient, "/headers")
 	if err != nil {
 		fmt.Printf("Request failed: %v\n", err)
 	} else {

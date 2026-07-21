@@ -8,7 +8,6 @@ import (
 	"errors"
 	stdio "io"
 	"net"
-	"strings"
 	"testing"
 	"time"
 
@@ -77,19 +76,6 @@ func TestIsBlockedIP_AdvancedIPv6AndObfuscation(t *testing.T) {
 	}
 }
 
-func TestRedactHeaders(t *testing.T) {
-	t.Parallel()
-
-	input := "Authorization: Bearer secret-token\r\nCookie: session=abc123\r\nContent-Type: text/plain\r\n"
-	result := string(redactHeaders([]byte(input)))
-
-	assert.Contains(t, result, "authorization: <redacted>")
-	assert.Contains(t, result, "cookie: <redacted>")
-	assert.Contains(t, result, "Content-Type: text/plain")
-	assert.NotContains(t, result, "secret-token")
-	assert.NotContains(t, result, "session=abc123")
-}
-
 func TestRetryOnTransientErrors(t *testing.T) {
 	t.Parallel()
 
@@ -118,24 +104,6 @@ func TestRetryOnTransientErrors(t *testing.T) {
 		t.Parallel()
 		assert.False(t, cond(nil, stdio.ErrUnexpectedEOF))
 	})
-}
-
-func TestLimitDecoder_BombPrevention(t *testing.T) {
-	t.Parallel()
-
-	type SimpleData struct {
-		Field string `json:"field"`
-	}
-
-	payload := `{"field": "this data exceeds the safe read limit set on the decoder"}`
-	reader := strings.NewReader(payload)
-
-	limited := LimitDecoder(JSONDecoder, 15)
-
-	var target SimpleData
-
-	err := limited.Decode(reader, &target)
-	require.Error(t, err, "expected decoder to hit the limits boundary and return error")
 }
 
 func TestGeneratePadding_SafetyLimits(t *testing.T) {

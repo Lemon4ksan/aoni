@@ -41,7 +41,10 @@ import (
 	"context"
 	"fmt"
 	"time"
+
 	"github.com/lemon4ksan/aoni"
+	"github.com/lemon4ksan/aoni/mod"
+	"github.com/lemon4ksan/aoni/request"
 )
 
 type User struct {
@@ -60,7 +63,7 @@ func main() {
 	)
 
 	// Fetch, validate, and decode in one step
-	user, err := aoni.GetTo[User](ctx, client, "/users/{id}",
+	user, err := request.GetTo[User](ctx, client, "/users/{id}",
 		mod.WithVar("id", 123),
 		mod.WithHeader("X-Custom", "value"),
 	)

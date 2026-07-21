@@ -17,6 +17,7 @@ import (
 
 	"github.com/lemon4ksan/aoni/mod"
 	"github.com/lemon4ksan/aoni/option"
+	"github.com/lemon4ksan/aoni/request"
 
 	"github.com/lemon4ksan/aoni"
 )
@@ -36,7 +37,7 @@ func main() {
 	// Trace with full timing breakdown
 	var info aoni.TraceInfo
 
-	_, err := aoni.GetTo[HTTPBinResponse](ctx, client, "/ip",
+	_, err := request.GetTo[HTTPBinResponse](ctx, client, "/ip",
 		aoni.Trace(&info),
 	)
 	if err != nil {
@@ -56,8 +57,8 @@ func main() {
 	// AsCurl + CaptureResponse: capture the raw response for curl generation
 	var resp *http.Response
 
-	_, err = aoni.GetTo[HTTPBinResponse](ctx, client, "/ip",
-		aoni.AsCurl(),
+	_, err = request.GetTo[HTTPBinResponse](ctx, client, "/ip",
+		mod.WithCurlDump(),
 		mod.WithCaptureResponse(&resp),
 	)
 	if err != nil {

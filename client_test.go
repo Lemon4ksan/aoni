@@ -36,6 +36,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/lemon4ksan/aoni"
+	"github.com/lemon4ksan/aoni/codec"
 	"github.com/lemon4ksan/aoni/cookie"
 	"github.com/lemon4ksan/aoni/h3"
 	"github.com/lemon4ksan/aoni/ja4"
@@ -43,9 +44,29 @@ import (
 	"github.com/lemon4ksan/aoni/mod"
 	"github.com/lemon4ksan/aoni/option"
 	"github.com/lemon4ksan/aoni/profiles"
+	"github.com/lemon4ksan/aoni/request"
 	"github.com/lemon4ksan/aoni/stream"
 	"github.com/lemon4ksan/aoni/telemetry"
 )
+
+type mockBaseResponse struct {
+	Success  bool  `json:"success"`
+	Data     any   `json:"data"`
+	ErrorVal error `json:"-"`
+}
+
+func (b *mockBaseResponse) IsSuccess() bool { return b.Success }
+func (b *mockBaseResponse) Error() error    { return b.ErrorVal }
+func (b *mockBaseResponse) SetData(d any)   { b.Data = d }
+
+type mockBaseProvider struct {
+	aoni.Requester
+	provider func() aoni.BaseResponse
+}
+
+func (m *mockBaseProvider) BaseResponse() aoni.BaseResponse {
+	return m.provider()
+}
 
 type testPayload struct {
 	Message string `json:"message"`
@@ -113,7 +134,7 @@ func TestClient_Request_Basic(t *testing.T) {
 		_, _ = w.Write([]byte(`{"message": "ok"}`))
 	})
 
-	result, err := aoni.GetTo[testPayload](t.Context(), client, "/")
+	result, err := request.GetTo[testPayload](t.Context(), client, "/")
 	require.NoError(t, err)
 	assert.Equal(t, "ok", result.Message)
 }
@@ -125,7 +146,7 @@ func TestClient_ErrorStatus(t *testing.T) {
 		_, _ = w.Write([]byte(`{"error": "not found"}`))
 	})
 
-	_, err := aoni.GetTo[any](t.Context(), client, "/404")
+	_, err := request.GetTo[any](t.Context(), client, "/404")
 	require.Error(t, err)
 
 	var apiErr *aoni.APIError
@@ -166,7 +187,7 @@ func TestClient_BaseResponse(t *testing.T) {
 
 		client = client.With(option.WithBaseResponse(func() aoni.BaseResponse { return &apiResponse{} }))
 
-		result, err := aoni.GetTo[testPayload](t.Context(), client, "/wrapped")
+		result, err := request.GetTo[testPayload](t.Context(), client, "/wrapped")
 		require.NoError(t, err)
 		assert.Equal(t, "unwrapped", result.Message)
 	})
@@ -178,7 +199,7 @@ func TestClient_BaseResponse(t *testing.T) {
 
 		client = client.With(option.WithBaseResponse(func() aoni.BaseResponse { return &apiResponse{} }))
 
-		_, err := aoni.GetTo[testPayload](t.Context(), client, "/error")
+		_, err := request.GetTo[testPayload](t.Context(), client, "/error")
 		assert.ErrorContains(t, err, "something went wrong")
 	})
 }
@@ -225,7 +246,7 @@ func TestClient_ErrorModel(t *testing.T) {
 
 	var errModel errorStruct
 
-	_, err := aoni.GetTo[any](t.Context(), client, "/oauth", mod.WithErrorModel(&errModel))
+	_, err := request.GetTo[any](t.Context(), client, "/oauth", mod.WithErrorModel(&errModel))
 	require.Error(t, err)
 
 	var apiErr *aoni.APIError
@@ -286,7 +307,7 @@ func TestClient_AutoTranscoding(t *testing.T) {
 		_, _ = w.Write([]byte(`{"message": "` + "\xef\xf0\xe8\xe2\xe5\xf2" + `"}`))
 	})
 
-	result, err := aoni.GetTo[testPayload](t.Context(), client, "/transcode")
+	result, err := request.GetTo[testPayload](t.Context(), client, "/transcode")
 	require.NoError(t, err)
 	assert.Equal(t, "привет", result.Message)
 }
@@ -323,7 +344,7 @@ func TestClient_Hedging_Deterministic(t *testing.T) {
 	resChan := make(chan result, 1)
 
 	go func() {
-		res, err := aoni.GetTo[testPayload](t.Context(), client, "/")
+		res, err := request.GetTo[testPayload](t.Context(), client, "/")
 		resChan <- result{res: res, err: err}
 	}()
 
@@ -392,7 +413,7 @@ func TestClient_Decompression(t *testing.T) {
 				_, _ = w.Write(buf.Bytes())
 			})
 
-			result, err := aoni.GetTo[testPayload](t.Context(), client, "/")
+			result, err := request.GetTo[testPayload](t.Context(), client, "/")
 			require.NoError(t, err)
 			assert.Equal(t, tt.want, result.Message)
 		})
@@ -409,7 +430,7 @@ func TestClient_ContentTypeGuard(t *testing.T) {
 			_, _ = w.Write([]byte("<html><body>Hello World</body></html>"))
 		})
 
-		_, err := aoni.GetTo[testPayload](t.Context(), client, "/")
+		_, err := request.GetTo[testPayload](t.Context(), client, "/")
 		require.Error(t, err)
 		assert.ErrorIs(t, err, aoni.ErrUnexpectedContentType)
 		assert.Contains(t, err.Error(), "expected structured data but got HTML")
@@ -422,7 +443,7 @@ func TestClient_ContentTypeGuard(t *testing.T) {
 			_, _ = w.Write([]byte("<html><body>cf-challenge and ray id cloudflare</body></html>"))
 		})
 
-		_, err := aoni.GetTo[testPayload](t.Context(), client, "/")
+		_, err := request.GetTo[testPayload](t.Context(), client, "/")
 		require.Error(t, err)
 		assert.ErrorIs(t, err, aoni.ErrCloudflareChallenge)
 	})
@@ -436,11 +457,11 @@ func TestClient_ContentTypeGuard(t *testing.T) {
 
 		var output []byte
 
-		resp, err := client.Request(t.Context(), http.MethodGet, "/", mod.WithRawDecoder())
+		resp, err := client.Request(t.Context(), http.MethodGet, "/", codec.WithRawDecoder())
 		require.NoError(t, err)
 		t.Cleanup(func() { aoni.CloseResponse(resp) })
 
-		err = aoni.RawDecoder.Decode(resp.Body, &output)
+		err = codec.RawDecoder.Decode(resp.Body, &output)
 		require.NoError(t, err)
 		assert.Equal(t, "<html><body>Hello World</body></html>", string(output))
 	})
@@ -896,7 +917,7 @@ func TestUserAgentAndHintsRotation(t *testing.T) {
 		option.WithUARotationProfiles(profiles),
 	)
 
-	resp1, err := client.Get(t.Context(), "/")
+	resp1, err := request.Get(t.Context(), client, "/")
 	require.NoError(t, err)
 
 	defer resp1.Body.Close()
@@ -904,13 +925,36 @@ func TestUserAgentAndHintsRotation(t *testing.T) {
 	assert.Equal(t, "BrowserA", resp1.Header.Get("X-UA"))
 	assert.Equal(t, "BrandA", resp1.Header.Get("X-Hint"))
 
-	resp2, err := client.Get(t.Context(), "/")
+	resp2, err := request.Get(t.Context(), client, "/")
 	require.NoError(t, err)
 
 	defer resp2.Body.Close()
 
 	assert.Equal(t, "BrowserB", resp2.Header.Get("X-UA"))
 	assert.Equal(t, "BrandB", resp2.Header.Get("X-Hint"))
+}
+
+func TestClient_BaseResponseProvider(t *testing.T) {
+	t.Parallel()
+
+	_, client := aoni.SetupTestServer(t, func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		// Corrected JSON structure with 'data' envelope matching mockBaseResponse struct
+		_, _ = w.Write([]byte(`{"success":true,"data":{"message":"provider_response"}}`))
+	})
+
+	// Wrap original client to behave as a BaseResponseProvider
+	providerClient := &mockBaseProvider{
+		Requester: client,
+		provider: func() aoni.BaseResponse {
+			return &mockBaseResponse{}
+		},
+	}
+
+	result, err := request.GetTo[testPayload](t.Context(), providerClient, "/provider")
+	require.NoError(t, err)
+	assert.Equal(t, "provider_response", result.Message)
 }
 
 func TestDPIJitter(t *testing.T) {
@@ -929,7 +973,7 @@ func TestDPIJitter(t *testing.T) {
 	)
 
 	start := time.Now()
-	resp, err := client.Get(t.Context(), "/")
+	resp, err := request.Get(t.Context(), client, "/")
 	require.NoError(t, err)
 
 	defer resp.Body.Close()
@@ -959,7 +1003,7 @@ func TestProxyFailover(t *testing.T) {
 		}),
 	)
 
-	resp, err := client.Get(t.Context(), "/")
+	resp, err := request.Get(t.Context(), client, "/")
 	require.NoError(t, err)
 
 	defer resp.Body.Close()
@@ -992,14 +1036,14 @@ func TestCache(t *testing.T) {
 		}),
 	)
 
-	resp1, err := client.Get(t.Context(), "/")
+	resp1, err := request.Get(t.Context(), client, "/")
 	require.NoError(t, err)
 
 	body1, _ := io.ReadAll(resp1.Body)
 	resp1.Body.Close()
 	assert.Equal(t, "cached content", string(body1))
 
-	resp2, err := client.Get(t.Context(), "/")
+	resp2, err := request.Get(t.Context(), client, "/")
 	require.NoError(t, err)
 
 	body2, _ := io.ReadAll(resp2.Body)
@@ -1071,7 +1115,7 @@ func TestHARGenerator(t *testing.T) {
 		}),
 	)
 
-	resp, err := client.Get(t.Context(), "/")
+	resp, err := request.Get(t.Context(), client, "/")
 	require.NoError(t, err)
 
 	defer resp.Body.Close()
@@ -1108,7 +1152,7 @@ func TestClient_QueryEncoder(t *testing.T) {
 		option.WithQueryEncoder(customEncoder),
 	)
 
-	_, err := client.Get(t.Context(), "/", mod.WithQuery(struct{ Dummy string }{Dummy: "value"}))
+	_, err := request.Get(t.Context(), client, "/", mod.WithQuery(struct{ Dummy string }{Dummy: "value"}))
 	require.NoError(t, err)
 	assert.Equal(t, "custom_key=custom_val", capturedQuery)
 }
@@ -1532,4 +1576,33 @@ func TestCertificatePinning(t *testing.T) {
 				strings.Contains(err.Error(), "certificate pinning validation failed"),
 		)
 	})
+}
+
+func TestAsCurl_WithBody(t *testing.T) {
+	t.Parallel()
+
+	server, client := aoni.SetupBridgeTest(t, func(w http.ResponseWriter, r *http.Request) {
+		body, err := io.ReadAll(r.Body)
+		require.NoError(t, err)
+		assert.Equal(t, "replayed_body_data", string(body))
+		w.WriteHeader(http.StatusOK)
+	})
+
+	req, err := http.NewRequestWithContext(
+		t.Context(),
+		http.MethodPost,
+		server.URL+"/curl",
+		strings.NewReader("replayed_body_data"),
+	)
+	require.NoError(t, err)
+
+	// Apply AsCurl modifier (captures and re-populates the body)
+	mod := mod.WithCurlDump()
+	mod(req)
+
+	resp, err := client.Do(req)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = resp.Body.Close() })
+
+	assert.Equal(t, http.StatusOK, resp.StatusCode)
 }

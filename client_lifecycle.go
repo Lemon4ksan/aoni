@@ -13,6 +13,7 @@ import (
 	"golang.org/x/net/http2"
 
 	"github.com/lemon4ksan/aoni/cookie"
+	"github.com/lemon4ksan/aoni/h2"
 	"github.com/lemon4ksan/aoni/internal/io"
 )
 
@@ -43,20 +44,45 @@ func UnwrapClient(r Requester) (c *Client) {
 	return nil
 }
 
+// GetOrInitRequestConfig retrieves or initializes the [RequestConfig] associated with the request context.
+func GetOrInitRequestConfig(req *http.Request) *RequestConfig {
+	cfg := GetRequestConfig(req.Context())
+	if cfg == nil {
+		cfg = &RequestConfig{
+			Metadata: make(map[string]any),
+		}
+		ctx := context.WithValue(req.Context(), requestConfigKey{}, cfg)
+		*req = *req.WithContext(ctx)
+	}
+
+	return cfg
+}
+
 // CloneHTTPClient returns a deep cloned http client.
 func CloneHTTPClient(c *http.Client) *http.Client {
 	cloned := *c
 	baseTr := cloned.Transport
 
 	var wrappedJar *cookie.ProxyIsolatedJar
-
 	if cjTr, ok := baseTr.(*cookie.Transport); ok {
 		wrappedJar = cjTr.CookieJar
 		baseTr = cjTr.Next
 	}
 
+	var framedTr *h2.FramedTransport
+	if ft, ok := baseTr.(*h2.FramedTransport); ok {
+		framedTr = ft
+		baseTr = ft.Transport
+	}
+
 	if tr, ok := baseTr.(*http.Transport); ok && tr != nil {
 		baseTr = tr.Clone()
+	}
+
+	if framedTr != nil {
+		if tr, ok := baseTr.(*http.Transport); ok {
+			baseTr = framedTr.Clone(tr)
+		}
 	}
 
 	if wrappedJar != nil {
@@ -156,7 +182,8 @@ func (c *Client) Clone() *Client {
 		cloned.engine = CloneHTTPClient(httpClient)
 	}
 
-	cloned.applyDialers(c.Transport())
+	cloned.applyDialers(cloned.Transport())
+	cloned.reapplyH2Settings(cloned.Transport())
 
 	return cloned
 }

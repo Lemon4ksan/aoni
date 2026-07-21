@@ -5,11 +5,8 @@
 package aoni
 
 import (
-	"bytes"
 	"fmt"
-	"io"
 	"net/http"
-	"os"
 	"strings"
 	"time"
 
@@ -211,22 +208,4 @@ func CurlCommand(req *http.Request, body []byte) string {
 	fmt.Fprintf(&sb, " '%s'", escapedURL)
 
 	return sb.String()
-}
-
-// AsCurl returns a [RequestModifier] that dumps the equivalent curl command to stderr.
-func AsCurl() RequestModifier {
-	return func(req *http.Request) {
-		var body []byte
-
-		if req.Body != nil && req.Body != http.NoBody {
-			var buf bytes.Buffer
-
-			_, _ = io.Copy(&buf, req.Body)
-			body = buf.Bytes()
-			req.Body = io.NopCloser(bytes.NewReader(body))
-		}
-
-		curl := CurlCommand(req, body)
-		fmt.Fprintf(os.Stderr, "%s\n", curl)
-	}
 }

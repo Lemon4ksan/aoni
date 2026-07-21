@@ -2,11 +2,13 @@
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
-package aoni
+package request
 
 import (
 	"context"
 	"sync"
+
+	"github.com/lemon4ksan/aoni"
 )
 
 // ConcurrentResult holds the outcome of a single request in a concurrent fan-out.
@@ -33,9 +35,9 @@ type ConcurrentResult[Resp any] struct {
 //	    })
 func Concurrent[Resp any](
 	ctx context.Context,
-	c Requester,
+	c aoni.Requester,
 	paths []string,
-	fn func(ctx context.Context, c Requester, path string) (*Resp, error),
+	fn func(ctx context.Context, c aoni.Requester, path string) (*Resp, error),
 ) []ConcurrentResult[Resp] {
 	results := make([]ConcurrentResult[Resp], len(paths))
 
@@ -61,10 +63,10 @@ func Concurrent[Resp any](
 // or be nil/empty in which case no per-request modifiers are applied.
 func ConcurrentWithMods[Resp any](
 	ctx context.Context,
-	c Requester,
+	c aoni.Requester,
 	paths []string,
-	mods [][]RequestModifier,
-	fn func(ctx context.Context, c Requester, path string, mods ...RequestModifier) (*Resp, error),
+	mods [][]aoni.RequestModifier,
+	fn func(ctx context.Context, c aoni.Requester, path string, mods ...aoni.RequestModifier) (*Resp, error),
 ) []ConcurrentResult[Resp] {
 	results := make([]ConcurrentResult[Resp], len(paths))
 
@@ -72,7 +74,7 @@ func ConcurrentWithMods[Resp any](
 	wg.Add(len(paths))
 
 	for i, path := range paths {
-		var reqMods []RequestModifier
+		var reqMods []aoni.RequestModifier
 		if i < len(mods) {
 			reqMods = mods[i]
 		}

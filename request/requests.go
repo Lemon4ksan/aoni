@@ -2,16 +2,19 @@
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
-package aoni
+package request
 
 import (
 	"context"
 	"net/http"
 	"reflect"
+
+	"github.com/lemon4ksan/aoni"
+	"github.com/lemon4ksan/aoni/mod"
 )
 
 // DefaultClient is the shared default client instance used by global helper functions.
-var DefaultClient = NewClient(nil)
+var DefaultClient = aoni.NewClient(nil)
 
 // NoResponse is a sentinel type used to indicate a request that does not return a response body.
 // When used as the response type in generic request helpers like [GetTo],
@@ -19,7 +22,7 @@ var DefaultClient = NewClient(nil)
 type NoResponse struct{}
 
 // Get performs a GET request through the specified [Requester] and returns the raw [http.Response].
-func Get(ctx context.Context, c Requester, path string, mods ...RequestModifier) (*http.Response, error) {
+func Get(ctx context.Context, c aoni.Requester, path string, mods ...aoni.RequestModifier) (*http.Response, error) {
 	return c.Request(ctx, http.MethodGet, path, mods...)
 }
 
@@ -30,9 +33,9 @@ func Get(ctx context.Context, c Requester, path string, mods ...RequestModifier)
 // or YAML), pass a corresponding decoder modifier, e.g. [WithXMLDecoder] or [WithYAMLDecoder].
 func GetTo[Resp any](
 	ctx context.Context,
-	c Requester,
+	c aoni.Requester,
 	path string,
-	mods ...RequestModifier,
+	mods ...aoni.RequestModifier,
 ) (*Resp, error) {
 	resp, err := c.Request(ctx, http.MethodGet, path, mods...) //nolint:bodyclose
 	if err != nil {
@@ -54,13 +57,13 @@ func GetTo[Resp any](
 // GetToEx is like [GetTo] but returns both the parsed response payload and the raw *http.Response.
 func GetToEx[Resp any](
 	ctx context.Context,
-	c Requester,
+	c aoni.Requester,
 	path string,
-	mods ...RequestModifier,
+	mods ...aoni.RequestModifier,
 ) (*Resp, *http.Response, error) {
 	var raw *http.Response
 
-	mods = append(mods, withCaptureResponse(&raw))
+	mods = append(mods, mod.WithCaptureResponse(&raw))
 
 	result, err := GetTo[Resp](ctx, c, path, mods...)
 	if err != nil {
@@ -84,16 +87,22 @@ func GetToEx[Resp any](
 // header using request modifiers like [WithContentType] (e.g. WithContentType("application/xml")).
 //
 // Use [WithFormBody] or [WithFormValues] to create PostForm requests.
-func Post(ctx context.Context, c Requester, path string, body any, mods ...RequestModifier) (*http.Response, error) {
+func Post(
+	ctx context.Context,
+	c aoni.Requester,
+	path string,
+	body any,
+	mods ...aoni.RequestModifier,
+) (*http.Response, error) {
 	bodyReader, err := validateAndMarshal(body)
 	if err != nil {
 		return nil, err
 	}
 
-	mods = append([]RequestModifier{
-		withContentType("application/json"),
-		withAccept("application/json"),
-		withBody(bodyReader),
+	mods = append([]aoni.RequestModifier{
+		mod.WithContentType("application/json"),
+		mod.WithAccept("application/json"),
+		mod.WithBody(bodyReader),
 	}, mods...)
 
 	return c.Request(ctx, http.MethodPost, path, mods...)
@@ -111,20 +120,20 @@ func Post(ctx context.Context, c Requester, path string, body any, mods ...Reque
 // Use [WithFormBody] or [WithFormValues] to create PostForm requests.
 func PostTo[Resp any](
 	ctx context.Context,
-	c Requester,
+	c aoni.Requester,
 	path string,
 	body any,
-	mods ...RequestModifier,
+	mods ...aoni.RequestModifier,
 ) (*Resp, error) {
 	bodyReader, err := validateAndMarshal(body)
 	if err != nil {
 		return nil, err
 	}
 
-	mods = append([]RequestModifier{
-		withContentType("application/json"),
-		withAccept("application/json"),
-		withBody(bodyReader),
+	mods = append([]aoni.RequestModifier{
+		mod.WithContentType("application/json"),
+		mod.WithAccept("application/json"),
+		mod.WithBody(bodyReader),
 	}, mods...)
 
 	resp, err := c.Request(ctx, http.MethodPost, path, mods...) //nolint:bodyclose
@@ -147,14 +156,14 @@ func PostTo[Resp any](
 // PostToEx is like [PostTo] but returns both the parsed response payload and the raw *http.Response.
 func PostToEx[Resp any](
 	ctx context.Context,
-	c Requester,
+	c aoni.Requester,
 	path string,
 	body any,
-	mods ...RequestModifier,
+	mods ...aoni.RequestModifier,
 ) (*Resp, *http.Response, error) {
 	var raw *http.Response
 
-	mods = append(mods, withCaptureResponse(&raw))
+	mods = append(mods, mod.WithCaptureResponse(&raw))
 
 	result, err := PostTo[Resp](ctx, c, path, body, mods...)
 	if err != nil {
@@ -176,16 +185,22 @@ func PostToEx[Resp any](
 // To send other body formats (e.g. XML, YAML, or plain text), pre-serialize the payload and
 // pass it as an [io.Reader] (e.g. using [strings.NewReader] or [bytes.NewReader]), then override the Content-Type
 // header using request modifiers like [WithContentType] (e.g. WithContentType("application/xml")).
-func Put(ctx context.Context, c Requester, path string, body any, mods ...RequestModifier) (*http.Response, error) {
+func Put(
+	ctx context.Context,
+	c aoni.Requester,
+	path string,
+	body any,
+	mods ...aoni.RequestModifier,
+) (*http.Response, error) {
 	bodyReader, err := validateAndMarshal(body)
 	if err != nil {
 		return nil, err
 	}
 
-	mods = append([]RequestModifier{
-		withContentType("application/json"),
-		withAccept("application/json"),
-		withBody(bodyReader),
+	mods = append([]aoni.RequestModifier{
+		mod.WithContentType("application/json"),
+		mod.WithAccept("application/json"),
+		mod.WithBody(bodyReader),
 	}, mods...)
 
 	return c.Request(ctx, http.MethodPut, path, mods...)
@@ -203,20 +218,20 @@ func Put(ctx context.Context, c Requester, path string, body any, mods ...Reques
 // To decode other response formats (such as XML or YAML), pass a decoder modifier, e.g. [WithXMLDecoder] or [WithYAMLDecoder].
 func PutTo[Resp any](
 	ctx context.Context,
-	c Requester,
+	c aoni.Requester,
 	path string,
 	body any,
-	mods ...RequestModifier,
+	mods ...aoni.RequestModifier,
 ) (*Resp, error) {
 	bodyReader, err := validateAndMarshal(body)
 	if err != nil {
 		return nil, err
 	}
 
-	mods = append([]RequestModifier{
-		withContentType("application/json"),
-		withAccept("application/json"),
-		withBody(bodyReader),
+	mods = append([]aoni.RequestModifier{
+		mod.WithContentType("application/json"),
+		mod.WithAccept("application/json"),
+		mod.WithBody(bodyReader),
 	}, mods...)
 
 	resp, err := c.Request(ctx, http.MethodPut, path, mods...) //nolint:bodyclose
@@ -239,14 +254,14 @@ func PutTo[Resp any](
 // PutToEx is like [PutTo] but returns both the parsed response payload and the raw *http.Response.
 func PutToEx[Resp any](
 	ctx context.Context,
-	c Requester,
+	c aoni.Requester,
 	path string,
 	body any,
-	mods ...RequestModifier,
+	mods ...aoni.RequestModifier,
 ) (*Resp, *http.Response, error) {
 	var raw *http.Response
 
-	mods = append(mods, withCaptureResponse(&raw))
+	mods = append(mods, mod.WithCaptureResponse(&raw))
 
 	result, err := PutTo[Resp](ctx, c, path, body, mods...)
 	if err != nil {
@@ -268,16 +283,22 @@ func PutToEx[Resp any](
 // To send other body formats (e.g. XML, YAML, or plain text), pre-serialize the payload and
 // pass it as an [io.Reader] (e.g. using [strings.NewReader] or [bytes.NewReader]), then override the Content-Type
 // header using request modifiers like [WithContentType] (e.g. WithContentType("application/xml")).
-func Patch(ctx context.Context, c Requester, path string, body any, mods ...RequestModifier) (*http.Response, error) {
+func Patch(
+	ctx context.Context,
+	c aoni.Requester,
+	path string,
+	body any,
+	mods ...aoni.RequestModifier,
+) (*http.Response, error) {
 	bodyReader, err := validateAndMarshal(body)
 	if err != nil {
 		return nil, err
 	}
 
-	mods = append([]RequestModifier{
-		withContentType("application/json"),
-		withAccept("application/json"),
-		withBody(bodyReader),
+	mods = append([]aoni.RequestModifier{
+		mod.WithContentType("application/json"),
+		mod.WithAccept("application/json"),
+		mod.WithBody(bodyReader),
 	}, mods...)
 
 	return c.Request(ctx, http.MethodPatch, path, mods...)
@@ -295,20 +316,20 @@ func Patch(ctx context.Context, c Requester, path string, body any, mods ...Requ
 // To decode other response formats (such as XML or YAML), pass a decoder modifier, e.g. [WithXMLDecoder] or [WithYAMLDecoder].
 func PatchTo[Resp any](
 	ctx context.Context,
-	c Requester,
+	c aoni.Requester,
 	path string,
 	body any,
-	mods ...RequestModifier,
+	mods ...aoni.RequestModifier,
 ) (*Resp, error) {
 	bodyReader, err := validateAndMarshal(body)
 	if err != nil {
 		return nil, err
 	}
 
-	mods = append([]RequestModifier{
-		withContentType("application/json"),
-		withAccept("application/json"),
-		withBody(bodyReader),
+	mods = append([]aoni.RequestModifier{
+		mod.WithContentType("application/json"),
+		mod.WithAccept("application/json"),
+		mod.WithBody(bodyReader),
 	}, mods...)
 
 	resp, err := c.Request(ctx, http.MethodPatch, path, mods...) //nolint:bodyclose
@@ -331,14 +352,14 @@ func PatchTo[Resp any](
 // PatchToEx is like [PatchTo] but returns both the parsed response payload and the raw *http.Response.
 func PatchToEx[Resp any](
 	ctx context.Context,
-	c Requester,
+	c aoni.Requester,
 	path string,
 	body any,
-	mods ...RequestModifier,
+	mods ...aoni.RequestModifier,
 ) (*Resp, *http.Response, error) {
 	var raw *http.Response
 
-	mods = append(mods, withCaptureResponse(&raw))
+	mods = append(mods, mod.WithCaptureResponse(&raw))
 
 	result, err := PatchTo[Resp](ctx, c, path, body, mods...)
 	if err != nil {
@@ -360,16 +381,22 @@ func PatchToEx[Resp any](
 // To send other body formats (e.g. XML, YAML, or plain text), pre-serialize the payload and
 // pass it as an [io.Reader] (e.g. using [strings.NewReader] or [bytes.NewReader]), then override the Content-Type
 // header using request modifiers like [WithContentType] (e.g. WithContentType("application/xml")).
-func Delete(ctx context.Context, c Requester, path string, body any, mods ...RequestModifier) (*http.Response, error) {
+func Delete(
+	ctx context.Context,
+	c aoni.Requester,
+	path string,
+	body any,
+	mods ...aoni.RequestModifier,
+) (*http.Response, error) {
 	bodyReader, err := validateAndMarshal(body)
 	if err != nil {
 		return nil, err
 	}
 
-	mods = append([]RequestModifier{
-		withContentType("application/json"),
-		withAccept("application/json"),
-		withBody(bodyReader),
+	mods = append([]aoni.RequestModifier{
+		mod.WithContentType("application/json"),
+		mod.WithAccept("application/json"),
+		mod.WithBody(bodyReader),
 	}, mods...)
 
 	return c.Request(ctx, http.MethodDelete, path, mods...)
@@ -387,20 +414,20 @@ func Delete(ctx context.Context, c Requester, path string, body any, mods ...Req
 // To decode other response formats (such as XML or YAML), pass a decoder modifier, e.g. [WithXMLDecoder] or [WithYAMLDecoder].
 func DeleteTo[Resp any](
 	ctx context.Context,
-	c Requester,
+	c aoni.Requester,
 	path string,
 	body any,
-	mods ...RequestModifier,
+	mods ...aoni.RequestModifier,
 ) (*Resp, error) {
 	bodyReader, err := validateAndMarshal(body)
 	if err != nil {
 		return nil, err
 	}
 
-	mods = append([]RequestModifier{
-		withContentType("application/json"),
-		withAccept("application/json"),
-		withBody(bodyReader),
+	mods = append([]aoni.RequestModifier{
+		mod.WithContentType("application/json"),
+		mod.WithAccept("application/json"),
+		mod.WithBody(bodyReader),
 	}, mods...)
 
 	resp, err := c.Request(ctx, http.MethodDelete, path, mods...) //nolint:bodyclose
@@ -423,14 +450,14 @@ func DeleteTo[Resp any](
 // DeleteToEx is like [DeleteTo] but returns both the parsed response payload and the raw *http.Response.
 func DeleteToEx[Resp any](
 	ctx context.Context,
-	c Requester,
+	c aoni.Requester,
 	path string,
 	body any,
-	mods ...RequestModifier,
+	mods ...aoni.RequestModifier,
 ) (*Resp, *http.Response, error) {
 	var raw *http.Response
 
-	mods = append(mods, withCaptureResponse(&raw))
+	mods = append(mods, mod.WithCaptureResponse(&raw))
 
 	result, err := DeleteTo[Resp](ctx, c, path, body, mods...)
 	if err != nil {

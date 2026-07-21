@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/lemon4ksan/aoni/option"
+	"github.com/lemon4ksan/aoni/request"
 
 	"github.com/lemon4ksan/aoni"
 )
@@ -50,7 +51,7 @@ func main() {
 
 	// Requests will be distributed across backends
 	for i := range 6 {
-		res, err := aoni.GetTo[Response](ctx, client, "/ip")
+		res, err := request.GetTo[Response](ctx, client, "/ip")
 		if err != nil {
 			log.Printf("Request %d failed: %v", i, err)
 			continue
