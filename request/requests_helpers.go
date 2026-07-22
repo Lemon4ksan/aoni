@@ -19,7 +19,7 @@ import (
 	"sync"
 
 	"github.com/lemon4ksan/aoni"
-	"github.com/lemon4ksan/aoni/codec"
+	"github.com/lemon4ksan/aoni/codec/decode"
 	"github.com/lemon4ksan/aoni/resiliency/challenge"
 )
 
@@ -47,7 +47,7 @@ func redactHeaders(raw []byte) []byte {
 
 type responseDecoder struct{}
 
-func (d responseDecoder) validateState(resp *http.Response, decoder codec.Decoder) error {
+func (d responseDecoder) validateState(resp *http.Response, decoder decode.Decoder) error {
 	peekableReader := bufio.NewReader(resp.Body)
 
 	resp.Body = struct {
@@ -58,7 +58,7 @@ func (d responseDecoder) validateState(resp *http.Response, decoder codec.Decode
 		Closer: resp.Body,
 	}
 
-	if codec.IsRawDecoder(decoder) {
+	if decode.IsRawDecoder(decoder) {
 		return nil
 	}
 
@@ -192,7 +192,7 @@ func (responseDecoder) decodeSuccess(
 	resp *http.Response,
 	target any,
 	requester aoni.Requester,
-	decoder codec.Decoder,
+	decoder decode.Decoder,
 ) error {
 	var br aoni.BaseResponse
 	if p, ok := requester.(aoni.BaseResponseProvider); ok {
@@ -246,12 +246,12 @@ func HandleResponse(resp *http.Response, target any, requester aoni.Requester) e
 
 	dec.dumpDiagnostics(resp, requester)
 
-	decoder := codec.JSONDecoder
+	decoder := decode.JSONDecoder
 	if resp.Request != nil {
 		cfg := aoni.GetRequestConfig(resp.Request.Context())
 
 		if cfg != nil && cfg.Decoder != nil {
-			if d, ok := cfg.Decoder.(codec.Decoder); ok {
+			if d, ok := cfg.Decoder.(decode.Decoder); ok {
 				decoder = d
 			}
 		}

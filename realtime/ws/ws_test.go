@@ -284,7 +284,7 @@ func TestDialWebSocket_WithTraceJA4(t *testing.T) {
 	client := aoni.NewClient(nil)
 	info := &telemetry.TraceInfo{}
 
-	wsConn, _, err := DialWebSocket(t.Context(), client, wsURL, mod.TraceJA4(info))
+	wsConn, _, err := DialWebSocket(t.Context(), client, wsURL, mod.WithTraceJA4(info))
 	require.NoError(t, err)
 
 	defer wsConn.Close()
@@ -369,7 +369,7 @@ func TestDialWebSocket_TLSFingerprint(t *testing.T) {
 	wsURL := "wss" + strings.TrimPrefix(server.URL, "https")
 
 	info := &telemetry.TraceInfo{}
-	conn, resp, err := DialWebSocket(t.Context(), client, wsURL, mod.TraceJA4(info))
+	conn, resp, err := DialWebSocket(t.Context(), client, wsURL, mod.WithTraceJA4(info))
 	require.NoError(t, err)
 	assert.NotNil(t, conn)
 	assert.Equal(t, http.StatusSwitchingProtocols, resp.StatusCode)

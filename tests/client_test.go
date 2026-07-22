@@ -36,7 +36,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/lemon4ksan/aoni"
-	"github.com/lemon4ksan/aoni/codec"
+	"github.com/lemon4ksan/aoni/codec/decode"
 	"github.com/lemon4ksan/aoni/cookie"
 	"github.com/lemon4ksan/aoni/fingerprint"
 	"github.com/lemon4ksan/aoni/fingerprint/h3"
@@ -440,7 +440,7 @@ func TestClient_ContentTypeGuard(t *testing.T) {
 		{
 			name:      "html_with_raw_decoder_succeeds",
 			body:      "<html><body>Hello World</body></html>",
-			mod:       codec.WithRawDecoder(),
+			mod:       decode.WithRaw(),
 			expectErr: nil,
 		},
 	}
@@ -461,7 +461,7 @@ func TestClient_ContentTypeGuard(t *testing.T) {
 				require.NoError(t, err)
 				t.Cleanup(func() { aoni.CloseResponse(resp) })
 
-				err = codec.RawDecoder.Decode(resp.Body, &output)
+				err = decode.RawDecoder.Decode(resp.Body, &output)
 				require.NoError(t, err)
 				assert.Equal(t, tt.body, string(output))
 
@@ -1029,7 +1029,7 @@ func TestClient_TraceJA4_WithTLSFingerprint(t *testing.T) {
 	)
 
 	info := &telemetry.TraceInfo{}
-	_, err = client.Request(t.Context(), http.MethodGet, server.URL, mod.TraceJA4(info))
+	_, err = client.Request(t.Context(), http.MethodGet, server.URL, mod.WithTraceJA4(info))
 	require.NoError(t, err)
 
 	require.NotNil(t, info.JA4)
@@ -1161,7 +1161,7 @@ func TestClient_HostRewrite(t *testing.T) {
 	extracted := aoni.HostRewriteRules(req.Context())
 	assert.Equal(t, "127.0.0.1:8080", extracted["myapi.local"])
 
-	appendMod := mod.AppendHostRewrite(map[string]string{"another.local": "10.0.0.2"})
+	appendMod := mod.WithAppendHostRewrite(map[string]string{"another.local": "10.0.0.2"})
 	appendMod(req)
 
 	finalRules := aoni.HostRewriteRules(req.Context())

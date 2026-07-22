@@ -43,7 +43,7 @@ func TestTrace(t *testing.T) {
 
 		var traceInfo telemetry.TraceInfo
 
-		resp, err := client.Request(t.Context(), http.MethodGet, "/trace", mod.Trace(&traceInfo))
+		resp, err := client.Request(t.Context(), http.MethodGet, "/trace", mod.WithTrace(&traceInfo))
 		require.NoError(t, err)
 		t.Cleanup(func() { _ = resp.Body.Close() })
 
@@ -95,7 +95,7 @@ func TestTraceJA4(t *testing.T) {
 
 		var traceInfo telemetry.TraceInfo
 
-		mod := mod.TraceJA4(&traceInfo)
+		mod := mod.WithTraceJA4(&traceInfo)
 		mod(req)
 
 		require.NotNil(t, traceInfo.JA4)

@@ -2,7 +2,7 @@
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
-package codec
+package decode
 
 import (
 	"encoding/json"
@@ -172,7 +172,7 @@ func TestDecodeTo_Helpers(t *testing.T) {
 			ID int `json:"id"`
 		}
 
-		val, err := DecodeTo[item](r, JSONDecoder)
+		val, err := To[item](r, JSONDecoder)
 		require.NoError(t, err)
 		assert.Equal(t, 42, val.ID)
 	})
@@ -186,7 +186,7 @@ func TestDecodeTo_Helpers(t *testing.T) {
 			ID int `json:"id"`
 		}
 
-		_, err := DecodeTo[item](r, JSONDecoder)
+		_, err := To[item](r, JSONDecoder)
 		assert.Error(t, err)
 	})
 
@@ -199,7 +199,7 @@ func TestDecodeTo_Helpers(t *testing.T) {
 			ID int `json:"id"`
 		}
 
-		val, err := DecodeJSON[item](r)
+		val, err := JSON[item](r)
 		require.NoError(t, err)
 		assert.Equal(t, 100, val.ID)
 	})
@@ -213,7 +213,7 @@ func TestDecodeTo_Helpers(t *testing.T) {
 			ID int `xml:"id"`
 		}
 
-		val, err := DecodeXML[item](r)
+		val, err := XML[item](r)
 		require.NoError(t, err)
 		assert.Equal(t, 200, val.ID)
 	})
@@ -227,7 +227,7 @@ func TestDecodeTo_Helpers(t *testing.T) {
 			ID int `yaml:"id"`
 		}
 
-		val, err := DecodeYAML[item](r)
+		val, err := YAML[item](r)
 		require.NoError(t, err)
 		assert.Equal(t, 300, val.ID)
 	})
@@ -294,7 +294,7 @@ func TestDecodeByContentType(t *testing.T) {
 
 			var target testUser
 
-			err := DecodeByContentType(r, tt.contentType, &target)
+			err := ByContentType(r, tt.contentType, &target)
 			require.NoError(t, err)
 			assert.Equal(t, tt.wantName, target.Name)
 		})
@@ -307,7 +307,7 @@ func TestDecodeByContentType(t *testing.T) {
 
 		var target []byte
 
-		err := DecodeByContentType(r, "application/octet-stream", &target)
+		err := ByContentType(r, "application/octet-stream", &target)
 		require.NoError(t, err)
 		assert.Equal(t, "binary_payload", string(target))
 	})

@@ -20,7 +20,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/lemon4ksan/aoni"
-	"github.com/lemon4ksan/aoni/codec"
+	"github.com/lemon4ksan/aoni/codec/decode"
 	"github.com/lemon4ksan/aoni/cookie"
 	"github.com/lemon4ksan/aoni/mod"
 	"github.com/lemon4ksan/aoni/option"
@@ -259,7 +259,7 @@ func TestGenericToHelpers(t *testing.T) {
 	})
 
 	t.Run("GetTo_XML", func(t *testing.T) {
-		res, err := GetTo[xmlPayload](t.Context(), client, "/get-xml", codec.WithXMLDecoder())
+		res, err := GetTo[xmlPayload](t.Context(), client, "/get-xml", decode.WithXML())
 		require.NoError(t, err)
 		assert.Equal(t, "xml-success", res.Message)
 	})
@@ -271,14 +271,14 @@ func TestGenericToHelpers(t *testing.T) {
 			strings.NewReader(string(body)),
 			mod.WithContentType("application/xml"),
 			mod.WithAccept("application/xml"),
-			codec.WithXMLDecoder(),
+			decode.WithXML(),
 		)
 		require.NoError(t, err)
 		assert.Equal(t, "xml-success", res.Message)
 	})
 
 	t.Run("GetTo_YAML", func(t *testing.T) {
-		res, err := GetTo[yamlPayload](t.Context(), client, "/get-yaml", codec.WithYAMLDecoder())
+		res, err := GetTo[yamlPayload](t.Context(), client, "/get-yaml", decode.WithYAML())
 		require.NoError(t, err)
 		assert.Equal(t, "yaml-success", res.Message)
 	})
@@ -289,7 +289,7 @@ func TestGenericToHelpers(t *testing.T) {
 			strings.NewReader("message: yaml-input\nstatus: 10\n"),
 			mod.WithContentType("application/x-yaml"),
 			mod.WithAccept("application/x-yaml"),
-			codec.WithYAMLDecoder(),
+			decode.WithYAML(),
 		)
 		require.NoError(t, err)
 		assert.Equal(t, "yaml-success", res.Message)
@@ -506,7 +506,7 @@ func TestLimitDecoder_BombPrevention(t *testing.T) {
 	payload := `{"field": "this data exceeds the safe read limit set on the decoder"}`
 	reader := strings.NewReader(payload)
 
-	limited := codec.LimitDecoder(codec.JSONDecoder, 15)
+	limited := decode.LimitDecoder(decode.JSONDecoder, 15)
 
 	var target SimpleData
 

@@ -260,7 +260,7 @@ func TestClient_E2E_WAFBypass_Pipeline(t *testing.T) {
 	)
 
 	info := &telemetry.TraceInfo{}
-	result, err := request.GetTo[testPayload](t.Context(), client, "/", mod.Trace(info), mod.TraceJA4(info))
+	result, err := request.GetTo[testPayload](t.Context(), client, "/", mod.WithTrace(info), mod.WithTraceJA4(info))
 	require.NoError(t, err)
 
 	assert.Equal(t, "evaded", result.Message)

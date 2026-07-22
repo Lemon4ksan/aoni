@@ -48,7 +48,7 @@ func main() {
 	var info telemetry.TraceInfo
 
 	_, err := request.GetTo[Response](ctx, client, "/ip",
-		mod.TraceJA4(&info),
+		mod.WithTraceJA4(&info),
 	)
 	if err != nil {
 		log.Fatal(err)

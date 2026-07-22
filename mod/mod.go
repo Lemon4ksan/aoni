@@ -27,7 +27,7 @@ import (
 	"time"
 
 	"github.com/lemon4ksan/aoni"
-	"github.com/lemon4ksan/aoni/codec"
+	"github.com/lemon4ksan/aoni/codec/values"
 	"github.com/lemon4ksan/aoni/fingerprint"
 	"github.com/lemon4ksan/aoni/fingerprint/ja4"
 	"github.com/lemon4ksan/aoni/fingerprint/p0f"
@@ -73,7 +73,7 @@ func WithQuery(query any) aoni.RequestModifier {
 			return
 		}
 
-		encoder := codec.StructToValues
+		encoder := values.StructToValues
 		if cfg := aoni.GetRequestConfig(req.Context()); cfg != nil && cfg.QueryEncoder != nil {
 			encoder = cfg.QueryEncoder
 		}
@@ -305,7 +305,7 @@ func WithFormBody(payload any) aoni.RequestModifier {
 			return
 		}
 
-		encoder := codec.StructToValues
+		encoder := values.StructToValues
 		if cfg := aoni.GetRequestConfig(req.Context()); cfg != nil && cfg.QueryEncoder != nil {
 			encoder = cfg.QueryEncoder
 		}
@@ -342,9 +342,12 @@ func WithDebug() aoni.RequestModifier {
 	}
 }
 
-// WithDecoder is an alias for [codec.WithDecoder].
-// It overrides the response Decoder for this request.
-var WithDecoder = codec.WithDecoder
+// WithDecoder overrides the response Decoder for this request.
+func WithDecoder(d any) aoni.RequestModifier {
+	return func(req *http.Request) {
+		aoni.GetOrInitRequestConfig(req).Decoder = d
+	}
+}
 
 // WithErrorModel sets the target struct/map for non-2xx response decoding.
 func WithErrorModel(model any) aoni.RequestModifier {
@@ -560,27 +563,27 @@ func WithPadding(cfg fingerprint.PaddingConfig) aoni.RequestModifier {
 	}
 }
 
-// Trace returns a [RequestModifier] that registers a connection tracer on the active request.
+// WithTrace returns a [RequestModifier] that registers a connection tracer on the active request.
 // Timing metrics are populated inside the provided [TraceInfo] structure.
-func Trace(target *telemetry.TraceInfo) aoni.RequestModifier {
+func WithTrace(target *telemetry.TraceInfo) aoni.RequestModifier {
 	return func(req *http.Request) {
 		aoni.GetOrInitRequestConfig(req).TraceInfo = target
 	}
 }
 
-// TraceJA4 returns a [RequestModifier] that populates the JA4 field of the provided [TraceInfo].
+// WithTraceJA4 returns a [RequestModifier] that populates the JA4 field of the provided [TraceInfo].
 // It sets up a shared store in the request context so that [option.WithTLSFingerprint] can write
 // the TLS fingerprint during the handshake, and computes the HTTP fingerprint from request headers.
 //
 // The JA4 report is fully populated after the request completes. The TLS fingerprint (JA4)
 // requires [option.WithTLSFingerprint] to be enabled.
 //
-// Use this modifier alongside [Trace] for complete timing and fingerprint data:
+// Use this modifier alongside [WithTrace] for complete timing and fingerprint data:
 //
 //	info := &TraceInfo{}
-//	client.Get(ctx, "/path", Trace(info), TraceJA4(info))
+//	client.Get(ctx, "/path", Trace(info), WithTraceJA4(info))
 //	// After request: info.JA4 contains both JA4 and JA4H
-func TraceJA4(target *telemetry.TraceInfo) aoni.RequestModifier {
+func WithTraceJA4(target *telemetry.TraceInfo) aoni.RequestModifier {
 	return func(req *http.Request) {
 		// Allocate a store with a pointer to the target TraceInfo.
 		// dialTLSWithUTLS will write the TLS report to this store during the handshake.
@@ -621,7 +624,7 @@ func WithTraceContext() aoni.RequestModifier {
 	return func(req *http.Request) {
 		info := &telemetry.TraceInfo{}
 		aoni.GetOrInitRequestConfig(req).TraceInfo = info
-		TraceJA4(info)(req)
+		WithTraceJA4(info)(req)
 	}
 }
 
@@ -639,9 +642,9 @@ func WithHostRewrite(rules map[string]string) aoni.RequestModifier {
 	}
 }
 
-// AppendHostRewrite returns a RequestModifier that appends new host rewrite rules to the existing
+// WithAppendHostRewrite returns a RequestModifier that appends new host rewrite rules to the existing
 // HostRewriteConfig in the request context, or creates a new one if none are present.
-func AppendHostRewrite(rules map[string]string) aoni.RequestModifier {
+func WithAppendHostRewrite(rules map[string]string) aoni.RequestModifier {
 	return func(req *http.Request) {
 		cfg := aoni.GetOrInitRequestConfig(req)
 

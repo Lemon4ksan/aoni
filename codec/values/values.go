@@ -2,7 +2,7 @@
 // Use of this source code is governed by a BSD-style
 // license can be found in the LICENSE file.
 
-package codec
+package values
 
 import (
 	"encoding"

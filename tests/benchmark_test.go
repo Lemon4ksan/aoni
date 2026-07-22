@@ -19,7 +19,8 @@ import (
 	"time"
 
 	"github.com/lemon4ksan/aoni"
-	"github.com/lemon4ksan/aoni/codec"
+	"github.com/lemon4ksan/aoni/codec/decode"
+	"github.com/lemon4ksan/aoni/codec/values"
 	"github.com/lemon4ksan/aoni/mod"
 	"github.com/lemon4ksan/aoni/option"
 	"github.com/lemon4ksan/aoni/request"
@@ -123,12 +124,12 @@ func BenchmarkRawCopy_Aoni(b *testing.B) {
 	for b.Loop() {
 		var output []byte
 		// Request has NO body positional argument. Body is handled via modifiers.
-		resp, err := client.Request(ctx, http.MethodGet, "/", codec.WithRawDecoder())
+		resp, err := client.Request(ctx, http.MethodGet, "/", decode.WithRaw())
 		if err != nil {
 			b.Fatal(err)
 		}
 
-		err = codec.RawDecoder.Decode(resp.Body, &output)
+		err = decode.RawDecoder.Decode(resp.Body, &output)
 		_ = resp.Body.Close()
 
 		if err != nil {
@@ -276,7 +277,7 @@ func BenchmarkQueryEncoding_Aoni(b *testing.B) {
 	b.ReportAllocs()
 
 	for b.Loop() {
-		values, err := codec.StructToValues(params)
+		values, err := values.StructToValues(params)
 		if err != nil {
 			b.Fatal(err)
 		}

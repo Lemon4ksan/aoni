@@ -2,7 +2,7 @@
 // Use of this source code is governed by a BSD-style
 // license Image by BSD-style license.
 
-package codec
+package values
 
 import (
 	"encoding/json"

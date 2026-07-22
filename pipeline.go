@@ -180,7 +180,14 @@ func (c *Client) traceRequest(
 		ConnectStart:      func(_, _ string) { traceInfo.ConnectStart = time.Now() },
 		ConnectDone:       func(_, _ string, _ error) { traceInfo.TCPConn = time.Since(traceInfo.ConnectStart) },
 		TLSHandshakeStart: func() { traceInfo.TLSStart = time.Now() },
-		TLSHandshakeDone:  func(_ tls.ConnectionState, _ error) { traceInfo.TLSHandshake = time.Since(traceInfo.TLSStart) },
+		TLSHandshakeDone: func(state tls.ConnectionState, err error) {
+			traceInfo.TLSHandshake = time.Since(traceInfo.TLSStart)
+			if err == nil {
+				stCopy := state
+				traceInfo.TLSState = &stCopy
+				traceInfo.PeerCertificates = state.PeerCertificates
+			}
+		},
 		GotConn: func(info httptrace.GotConnInfo) {
 			traceInfo.GotConn = time.Now()
 			if info.Conn != nil && info.Conn.RemoteAddr() != nil {

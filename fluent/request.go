@@ -23,6 +23,7 @@ import (
 	"github.com/lemon4ksan/aoni"
 	"github.com/lemon4ksan/aoni/mod"
 	"github.com/lemon4ksan/aoni/request"
+	"github.com/lemon4ksan/aoni/telemetry"
 )
 
 var bytePool = sync.Pool{
@@ -58,6 +59,7 @@ type Request struct {
 	outputFile       string
 	downloadProgress aoni.ProgressFunc
 	uploadProgress   aoni.ProgressFunc
+	traceInfo        *telemetry.TraceInfo
 	timeout          time.Duration
 }
 
@@ -79,6 +81,7 @@ func (r *Request) Reset() {
 	r.outputFile = ""
 	r.downloadProgress = nil
 	r.uploadProgress = nil
+	r.traceInfo = nil
 	r.timeout = 0
 
 	for k := range r.headers {
@@ -201,6 +204,12 @@ func (r *Request) SetUploadProgress(progress aoni.ProgressFunc) *Request {
 	return r
 }
 
+// SetTrace associates a [telemetry.TraceInfo] container to capture detailed network timings and TLS certificate details.
+func (r *Request) SetTrace(info *telemetry.TraceInfo) *Request {
+	r.traceInfo = info
+	return r
+}
+
 // SetTimeout sets a per-request execution deadline timeout.
 func (r *Request) SetTimeout(timeout time.Duration) *Request {
 	r.timeout = timeout
@@ -274,6 +283,10 @@ func (r *Request) Execute(method, path string) (*http.Response, error) {
 
 	if r.uploadProgress != nil {
 		mods = append(mods, mod.WithUploadProgress(r.uploadProgress))
+	}
+
+	if r.traceInfo != nil {
+		mods = append(mods, mod.WithTrace(r.traceInfo))
 	}
 
 	if r.timeout > 0 {

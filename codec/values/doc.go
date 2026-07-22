@@ -79,4 +79,4 @@
 //		// Prints: active=1&created=2026-07-21T21%3A46%3A00Z&meta=%7B%22sys%22%3A%22production%22%7D&name=administrator&tags=admin%2Cinternal
 //		fmt.Println(vals.Encode())
 //	}
-package codec
+package values

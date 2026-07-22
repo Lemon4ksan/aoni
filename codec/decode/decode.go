@@ -2,7 +2,7 @@
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
-package codec
+package decode
 
 import (
 	"bufio"
@@ -11,13 +11,13 @@ import (
 	"encoding/xml"
 	"fmt"
 	"io"
-	"net/http"
 	"strings"
 	"sync"
 
 	"go.yaml.in/yaml/v4"
 
 	"github.com/lemon4ksan/aoni"
+	"github.com/lemon4ksan/aoni/mod"
 )
 
 // LimitDecoder wraps an existing decoder, ensuring that no more than maxBytes
@@ -29,10 +29,10 @@ func LimitDecoder(d Decoder, maxBytes int64) Decoder {
 	})
 }
 
-// DecodeByContentType automatically parses the stream from r into target by selecting
+// ByContentType automatically parses the stream from r into target by selecting
 // the most appropriate registered decoder based on the parsed MIME-type.
 // Falls back to RawDecoder if the content type is unrecognized or raw binary is returned.
-func DecodeByContentType(r io.Reader, contentType string, target any) error {
+func ByContentType(r io.Reader, contentType string, target any) error {
 	// Simple manual parsing to avoid strict external mime dependencies
 	mediaType := strings.Split(contentType, ";")[0]
 	mediaType = strings.TrimSpace(strings.ToLower(mediaType))
@@ -49,8 +49,8 @@ func DecodeByContentType(r io.Reader, contentType string, target any) error {
 	}
 }
 
-// DecodeTo decodes the data from r using the provided decoder into a newly allocated T.
-func DecodeTo[T any](r io.Reader, d Decoder) (T, error) {
+// To decodes the data from r using the provided decoder into a newly allocated T.
+func To[T any](r io.Reader, d Decoder) (T, error) {
 	var target T
 	if err := d.Decode(r, &target); err != nil {
 		var zero T
@@ -190,36 +190,29 @@ var YAMLDecoder Decoder = DecoderFunc(func(r io.Reader, target any) error {
 	return yaml.NewDecoder(stripBOM(r)).Decode(target)
 })
 
-// DecodeJSON is a convenience helper to directly decode a JSON stream into T.
-func DecodeJSON[T any](r io.Reader) (T, error) {
-	return DecodeTo[T](r, JSONDecoder)
+// JSON is a convenience helper to directly decode a JSON stream into T.
+func JSON[T any](r io.Reader) (T, error) {
+	return To[T](r, JSONDecoder)
 }
 
-// DecodeXML is a convenience helper to directly decode an XML stream into T.
-func DecodeXML[T any](r io.Reader) (T, error) {
-	return DecodeTo[T](r, XMLDecoder)
+// XML is a convenience helper to directly decode an XML stream into T.
+func XML[T any](r io.Reader) (T, error) {
+	return To[T](r, XMLDecoder)
 }
 
-// DecodeYAML is a convenience helper to directly decode a YAML stream into T.
-func DecodeYAML[T any](r io.Reader) (T, error) {
-	return DecodeTo[T](r, YAMLDecoder)
+// YAML is a convenience helper to directly decode a YAML stream into T.
+func YAML[T any](r io.Reader) (T, error) {
+	return To[T](r, YAMLDecoder)
 }
 
-// WithDecoder overrides the response Decoder for this request.
-func WithDecoder(d Decoder) aoni.RequestModifier {
-	return func(req *http.Request) {
-		aoni.GetOrInitRequestConfig(req).Decoder = d
-	}
-}
+// WithRaw returns a RequestModifier that uses RawDecoder.
+func WithRaw() aoni.RequestModifier { return mod.WithDecoder(RawDecoder) }
 
-// WithRawDecoder returns a RequestModifier that uses RawDecoder.
-func WithRawDecoder() aoni.RequestModifier { return WithDecoder(RawDecoder) }
+// WithJSON returns a RequestModifier that uses JSONDecoder.
+func WithJSON() aoni.RequestModifier { return mod.WithDecoder(JSONDecoder) }
 
-// WithJSONDecoder returns a RequestModifier that uses JSONDecoder.
-func WithJSONDecoder() aoni.RequestModifier { return WithDecoder(JSONDecoder) }
+// WithXML returns a RequestModifier that uses XMLDecoder.
+func WithXML() aoni.RequestModifier { return mod.WithDecoder(XMLDecoder) }
 
-// WithXMLDecoder returns a RequestModifier that uses XMLDecoder.
-func WithXMLDecoder() aoni.RequestModifier { return WithDecoder(XMLDecoder) }
-
-// WithYAMLDecoder returns a RequestModifier that uses YAMLDecoder.
-func WithYAMLDecoder() aoni.RequestModifier { return WithDecoder(YAMLDecoder) }
+// WithYAML returns a RequestModifier that uses YAMLDecoder.
+func WithYAML() aoni.RequestModifier { return mod.WithDecoder(YAMLDecoder) }

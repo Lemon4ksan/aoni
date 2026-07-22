@@ -6,6 +6,10 @@
 package telemetry
 
 import (
+	"crypto/sha256"
+	"crypto/tls"
+	"crypto/x509"
+	"encoding/hex"
 	"fmt"
 	"net/http"
 	"slices"
@@ -33,10 +37,56 @@ type TraceInfo struct {
 	RemoteAddr string
 	JA4        *ja4.Report
 
+	TLSState         *tls.ConnectionState
+	PeerCertificates []*x509.Certificate
+
 	DNSStart     time.Time
 	ConnectStart time.Time
 	TLSStart     time.Time
 	GotConn      time.Time
+}
+
+// PeerCertificate returns the leaf server certificate captured during the TLS handshake.
+func (t *TraceInfo) PeerCertificate() *x509.Certificate {
+	if len(t.PeerCertificates) > 0 {
+		return t.PeerCertificates[0]
+	}
+
+	return nil
+}
+
+// CertSummary holds extracted information about the server's TLS certificate.
+type CertSummary struct {
+	Subject       string
+	Issuer        string
+	DNSNames      []string
+	NotBefore     time.Time
+	NotAfter      time.Time
+	SHA256Pin     string
+	DaysRemaining int
+}
+
+// CertSummary extracts and returns structured details for the peer certificate.
+func (t *TraceInfo) CertSummary() *CertSummary {
+	cert := t.PeerCertificate()
+	if cert == nil {
+		return nil
+	}
+
+	hash := sha256.Sum256(cert.RawSubjectPublicKeyInfo)
+	pin := hex.EncodeToString(hash[:])
+
+	days := int(time.Until(cert.NotAfter).Hours() / 24)
+
+	return &CertSummary{
+		Subject:       cert.Subject.String(),
+		Issuer:        cert.Issuer.String(),
+		DNSNames:      cert.DNSNames,
+		NotBefore:     cert.NotBefore,
+		NotAfter:      cert.NotAfter,
+		SHA256Pin:     pin,
+		DaysRemaining: days,
+	}
 }
 
 // Start begins tracking total transaction and content transfer timing.

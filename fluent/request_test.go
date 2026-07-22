@@ -18,6 +18,7 @@ import (
 	"github.com/lemon4ksan/aoni"
 	"github.com/lemon4ksan/aoni/fluent"
 	"github.com/lemon4ksan/aoni/option"
+	"github.com/lemon4ksan/aoni/telemetry"
 )
 
 type userPayload struct {
@@ -244,6 +245,29 @@ func TestFluent_DownloadFile(t *testing.T) {
 	savedData, readErr := os.ReadFile(targetPath)
 	require.NoError(t, readErr)
 	assert.Equal(t, fileContent, savedData)
+}
+
+func TestFluent_TLSCertificateInspection(t *testing.T) {
+	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer server.Close()
+
+	client := aoni.NewClient(server.Client(), option.WithBaseURL(server.URL), option.WithInsecureSkipVerify())
+
+	info := &telemetry.TraceInfo{}
+	resp, err := fluent.R(client).
+		SetTrace(info).
+		Get("/")
+
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusOK, resp.StatusCode)
+	require.NotEmpty(t, info.PeerCertificates)
+
+	summary := info.CertSummary()
+	require.NotNil(t, summary)
+	assert.NotEmpty(t, summary.Issuer)
+	assert.NotEmpty(t, summary.SHA256Pin)
 }
 
 func BenchmarkFluent_RequestCreation(b *testing.B) {

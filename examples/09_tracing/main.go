@@ -39,7 +39,7 @@ func main() {
 	var info telemetry.TraceInfo
 
 	_, err := request.GetTo[HTTPBinResponse](ctx, client, "/ip",
-		mod.Trace(&info),
+		mod.WithTrace(&info),
 	)
 	if err != nil {
 		log.Fatal(err)
