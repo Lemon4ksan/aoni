@@ -14,6 +14,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -211,39 +212,101 @@ func (t RFC3339Timestamp) String() string {
 	return time.Time(t).Format(time.RFC3339)
 }
 
-// StructToValues encodes a struct into [url.Values] using "url" or "json" tags.
-// It expands inline structs recursively and supports slices, arrays, and primitive types.
-// Returns an error if the input is not a struct or pointer to a struct.
-func StructToValues(s any) (url.Values, error) {
-	if s == nil {
-		return nil, nil
-	}
-
-	if vals, ok := s.(url.Values); ok {
-		return vals, nil
-	}
-
-	v := reflect.ValueOf(s)
-	if v.Kind() == reflect.Pointer {
-		v = v.Elem()
-	}
-
-	if v.Kind() != reflect.Struct {
-		return nil, errors.New("unsupported type: input must be a struct or a pointer to a struct")
-	}
-
-	values := make(url.Values)
-	if err := fillValues(v, values); err != nil {
-		return nil, err
-	}
-
-	return values, nil
+// QueryEncoder is implemented by custom types that can encode themselves directly into [url.Values]
+// without runtime reflection, achieving maximum performance.
+type QueryEncoder interface {
+	EncodeValues() url.Values
 }
 
-func fillValues(v reflect.Value, values url.Values) error {
-	t := v.Type()
-	for i := range v.NumField() {
-		if err := fillField(v.Field(i), t.Field(i), values); err != nil {
+type fieldSchema struct {
+	index       int
+	name        string
+	key         string
+	defaultVal  string
+	isInline    bool
+	isAnonymous bool
+	omitempty   bool
+	hasComma    bool
+	hasSpace    bool
+	hasPipe     bool
+	isIgnored   bool
+	subSchema   *structSchema
+}
+
+type structSchema struct {
+	fields []fieldSchema
+}
+
+var schemaCache sync.Map // map[reflect.Type]*structSchema
+
+func getStructSchema(t reflect.Type) *structSchema {
+	if cached, ok := schemaCache.Load(t); ok {
+		return cached.(*structSchema)
+	}
+
+	schema := buildStructSchema(t)
+	cached, _ := schemaCache.LoadOrStore(t, schema)
+
+	return cached.(*structSchema)
+}
+
+func buildStructSchema(t reflect.Type) *structSchema {
+	numField := t.NumField()
+	fields := make([]fieldSchema, 0, numField)
+
+	for i := range numField {
+		field := t.Field(i)
+
+		defaultVal := field.Tag.Get("default")
+
+		tag := field.Tag.Get("url")
+		if tag == "" {
+			tag = field.Tag.Get("json")
+		}
+
+		parts := strings.Split(tag, ",")
+		key := parts[0]
+		isInline := slices.Contains(parts[1:], "inline")
+		omitempty := slices.Contains(parts[1:], "omitempty")
+		hasComma := slices.Contains(parts[1:], "comma")
+		hasSpace := slices.Contains(parts[1:], "space")
+		hasPipe := slices.Contains(parts[1:], "pipe")
+
+		fSchema := fieldSchema{
+			index:       i,
+			name:        field.Name,
+			key:         key,
+			defaultVal:  defaultVal,
+			isInline:    isInline,
+			isAnonymous: field.Anonymous,
+			omitempty:   omitempty,
+			hasComma:    hasComma,
+			hasSpace:    hasSpace,
+			hasPipe:     hasPipe,
+			isIgnored:   key == "-",
+		}
+
+		fieldType := field.Type
+		if fieldType.Kind() == reflect.Pointer {
+			fieldType = fieldType.Elem()
+		}
+
+		if (field.Anonymous || isInline) && fieldType.Kind() == reflect.Struct {
+			fSchema.subSchema = buildStructSchema(fieldType)
+		} else if key == "" && !field.Anonymous && !isInline {
+			fSchema.isIgnored = true
+		}
+
+		fields = append(fields, fSchema)
+	}
+
+	return &structSchema{fields: fields}
+}
+
+func (s *structSchema) fillValues(v reflect.Value, values url.Values) error {
+	for i := range s.fields {
+		f := &s.fields[i]
+		if err := f.fillField(v.Field(f.index), values); err != nil {
 			return err
 		}
 	}
@@ -251,77 +314,52 @@ func fillValues(v reflect.Value, values url.Values) error {
 	return nil
 }
 
-func fillField(fieldValue reflect.Value, field reflect.StructField, values url.Values) error {
-	defaultVal := field.Tag.Get("default")
-
+func (f *fieldSchema) fillField(fieldValue reflect.Value, values url.Values) error {
 	if fieldValue.Kind() == reflect.Pointer {
 		if fieldValue.IsNil() {
-			applyDefaultValue(field, defaultVal, values)
+			if f.defaultVal != "" && f.key != "" && f.key != "-" {
+				values.Set(f.key, f.defaultVal)
+			}
+
 			return nil
 		}
 
 		fieldValue = fieldValue.Elem()
 	}
 
-	key, parts, isInline := parseFieldTags(field)
+	if (f.isAnonymous || f.isInline) && fieldValue.Kind() == reflect.Struct {
+		if f.subSchema != nil {
+			return f.subSchema.fillValues(fieldValue, values)
+		}
 
-	if (field.Anonymous || isInline) && fieldValue.Kind() == reflect.Struct {
-		return fillValues(fieldValue, values)
+		sub := getStructSchema(fieldValue.Type())
+
+		return sub.fillValues(fieldValue, values)
 	}
 
-	if key == "" || key == "-" {
+	if f.isIgnored || f.key == "" || f.key == "-" {
 		return nil
 	}
 
-	if shouldSkipZeroValue(fieldValue, parts, defaultVal, key, values) {
+	if f.shouldSkipZeroValue(fieldValue, values) {
 		return nil
 	}
 
-	return serializeValue(fieldValue, field.Name, key, parts, values)
+	return f.serializeValue(fieldValue, values)
 }
 
-func parseFieldTags(field reflect.StructField) (string, []string, bool) {
-	tag := field.Tag.Get("url")
-	if tag == "" {
-		tag = field.Tag.Get("json")
-	}
-
-	parts := strings.Split(tag, ",")
-	key := parts[0]
-	isInline := slices.Contains(parts[1:], "inline")
-
-	return key, parts, isInline
-}
-
-func applyDefaultValue(field reflect.StructField, defaultVal string, values url.Values) {
-	if defaultVal == "" {
-		return
-	}
-
-	tag := field.Tag.Get("url")
-	if tag == "" {
-		tag = field.Tag.Get("json")
-	}
-
-	key := strings.Split(tag, ",")[0]
-	if key != "" && key != "-" {
-		values.Set(key, defaultVal)
-	}
-}
-
-func shouldSkipZeroValue(fieldValue reflect.Value, parts []string, defaultVal, key string, values url.Values) bool {
-	omitempty := slices.Contains(parts[1:], "omitempty")
-	if omitempty && fieldValue.IsZero() {
+func (f *fieldSchema) shouldSkipZeroValue(fieldValue reflect.Value, values url.Values) bool {
+	if f.omitempty && fieldValue.IsZero() {
 		return true
 	}
 
 	if fieldValue.IsZero() {
-		if defaultVal != "" {
-			values.Set(key, defaultVal)
+		if f.defaultVal != "" {
+			values.Set(f.key, f.defaultVal)
 			return true
 		}
 
-		if omitempty {
+		if f.omitempty {
 			return true
 		}
 	}
@@ -329,14 +367,14 @@ func shouldSkipZeroValue(fieldValue reflect.Value, parts []string, defaultVal, k
 	return false
 }
 
-func serializeValue(fieldValue reflect.Value, fieldName, key string, parts []string, values url.Values) error {
+func (f *fieldSchema) serializeValue(fieldValue reflect.Value, values url.Values) error {
 	if hasTextOrStringerRepresentation(fieldValue) {
 		str, err := toString(fieldValue)
 		if err != nil {
-			return fmt.Errorf("field %s: %w", fieldName, err)
+			return fmt.Errorf("field %s: %w", f.name, err)
 		}
 
-		values.Set(key, str)
+		values.Set(f.key, str)
 
 		return nil
 	}
@@ -347,46 +385,30 @@ func serializeValue(fieldValue reflect.Value, fieldName, key string, parts []str
 	if isStruct || isMap {
 		b, err := json.Marshal(fieldValue.Interface())
 		if err != nil {
-			return fmt.Errorf("field %s: failed to marshal nested structure to JSON: %w", fieldName, err)
+			return fmt.Errorf("field %s: failed to marshal nested structure to JSON: %w", f.name, err)
 		}
 
-		values.Set(key, string(b))
+		values.Set(f.key, string(b))
 
 		return nil
 	}
 
 	if fieldValue.Kind() == reflect.Slice || fieldValue.Kind() == reflect.Array {
-		return serializeSlice(fieldValue, fieldName, key, parts, values)
+		return f.serializeSlice(fieldValue, values)
 	}
 
 	str, err := toString(fieldValue)
 	if err != nil {
-		return fmt.Errorf("field %s: %w", fieldName, err)
+		return fmt.Errorf("field %s: %w", f.name, err)
 	}
 
-	values.Set(key, str)
+	values.Set(f.key, str)
 
 	return nil
 }
 
-func hasTextOrStringerRepresentation(v reflect.Value) bool {
-	if !v.CanInterface() {
-		return false
-	}
-
-	val := v.Interface()
-	_, hasText := val.(encoding.TextMarshaler)
-	_, hasStringer := val.(interface{ String() string })
-
-	return hasText || hasStringer
-}
-
-func serializeSlice(fieldValue reflect.Value, fieldName, key string, parts []string, values url.Values) error {
-	hasComma := slices.Contains(parts[1:], "comma")
-	hasSpace := slices.Contains(parts[1:], "space")
-	hasPipe := slices.Contains(parts[1:], "pipe")
-
-	if hasComma || hasSpace || hasPipe {
+func (f *fieldSchema) serializeSlice(fieldValue reflect.Value, values url.Values) error {
+	if f.hasComma || f.hasSpace || f.hasPipe {
 		var strVals []string
 		for j := range fieldValue.Len() {
 			val := fieldValue.Index(j)
@@ -400,20 +422,20 @@ func serializeSlice(fieldValue reflect.Value, fieldName, key string, parts []str
 
 			str, err := toString(val)
 			if err != nil {
-				return fmt.Errorf("field %s[%d]: %w", fieldName, j, err)
+				return fmt.Errorf("field %s[%d]: %w", f.name, j, err)
 			}
 
 			strVals = append(strVals, str)
 		}
 
 		sep := ","
-		if hasSpace {
+		if f.hasSpace {
 			sep = " "
-		} else if hasPipe {
+		} else if f.hasPipe {
 			sep = "|"
 		}
 
-		values.Set(key, strings.Join(strVals, sep))
+		values.Set(f.key, strings.Join(strVals, sep))
 
 		return nil
 	}
@@ -430,13 +452,82 @@ func serializeSlice(fieldValue reflect.Value, fieldName, key string, parts []str
 
 		strValue, err := toString(val)
 		if err != nil {
-			return fmt.Errorf("field %s[%d]: %w", fieldName, j, err)
+			return fmt.Errorf("field %s[%d]: %w", f.name, j, err)
 		}
 
-		values.Add(key, strValue)
+		values.Add(f.key, strValue)
 	}
 
 	return nil
+}
+
+// StructToValues encodes a struct into [url.Values] using "url" or "json" tags.
+// It expands inline structs recursively and supports slices, arrays, maps, QueryEncoders, and primitive types.
+// Returns an error if the input is not a struct or pointer to a struct.
+func StructToValues(s any) (url.Values, error) {
+	if s == nil {
+		return nil, nil
+	}
+
+	// Level 1 & Level 2 Fast Paths
+	switch v := s.(type) {
+	case url.Values:
+		return v, nil
+	case QueryEncoder:
+		return v.EncodeValues(), nil
+	case interface{ EncodeValues() (url.Values, error) }:
+		return v.EncodeValues()
+	case map[string]string:
+		res := make(url.Values, len(v))
+		for k, val := range v {
+			res.Set(k, val)
+		}
+
+		return res, nil
+
+	case map[string][]string:
+		res := make(url.Values, len(v))
+		for k, val := range v {
+			res[k] = slices.Clone(val)
+		}
+
+		return res, nil
+	}
+
+	v := reflect.ValueOf(s)
+	if v.Kind() == reflect.Pointer {
+		if v.IsNil() {
+			return nil, nil
+		}
+
+		v = v.Elem()
+	}
+
+	if v.Kind() != reflect.Struct {
+		return nil, errors.New("unsupported type: input must be a struct or a pointer to a struct")
+	}
+
+	// Level 3: Cached Schema
+	schema := getStructSchema(v.Type())
+
+	values := make(url.Values)
+	if err := schema.fillValues(v, values); err != nil {
+		return nil, err
+	}
+
+	return values, nil
+}
+
+func hasTextOrStringerRepresentation(v reflect.Value) bool {
+	if !v.CanInterface() {
+		return false
+	}
+
+	val := v.Interface()
+	_, hasText := val.(encoding.TextMarshaler)
+	_, hasStringer := val.(interface{ String() string })
+
+	return hasText || hasStringer
 }
 
 func toString(v reflect.Value) (string, error) {

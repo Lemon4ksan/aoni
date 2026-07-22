@@ -580,3 +580,93 @@ func TestValuesEncoding(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, strconv.FormatInt(now.Unix(), 10), string(tsBytes))
 }
+
+type customQueryStruct struct {
+	Foo string
+	Bar int
+}
+
+func (c customQueryStruct) EncodeValues() url.Values {
+	v := make(url.Values)
+	v.Set("foo", c.Foo)
+	v.Set("bar", strconv.Itoa(c.Bar))
+
+	return v
+}
+
+func TestStructToValues_Optimizations(t *testing.T) {
+	t.Parallel()
+
+	t.Run("Level 1 Fast Path Maps", func(t *testing.T) {
+		m1 := map[string]string{"page": "1", "limit": "20"}
+		res1, err := StructToValues(m1)
+		require.NoError(t, err)
+		assert.Equal(t, "1", res1.Get("page"))
+		assert.Equal(t, "20", res1.Get("limit"))
+
+		m2 := map[string][]string{"tags": {"go", "http"}}
+		res2, err := StructToValues(m2)
+		require.NoError(t, err)
+		assert.Equal(t, []string{"go", "http"}, res2["tags"])
+	})
+
+	t.Run("Level 2 Zero Reflection QueryEncoder", func(t *testing.T) {
+		q := customQueryStruct{Foo: "hello", Bar: 42}
+		res, err := StructToValues(q)
+		require.NoError(t, err)
+		assert.Equal(t, "hello", res.Get("foo"))
+		assert.Equal(t, "42", res.Get("bar"))
+	})
+
+	t.Run("Level 3 Cached Reflection Schema", func(t *testing.T) {
+		type cachedSample struct {
+			Query string `url:"q"`
+			Page  int    `url:"page,omitempty"`
+		}
+
+		s1 := cachedSample{Query: "aoni", Page: 1}
+		res1, err := StructToValues(s1)
+		require.NoError(t, err)
+		assert.Equal(t, "aoni", res1.Get("q"))
+		assert.Equal(t, "1", res1.Get("page"))
+
+		// Second call uses cached schema
+		s2 := cachedSample{Query: "fast"}
+		res2, err := StructToValues(s2)
+		require.NoError(t, err)
+		assert.Equal(t, "fast", res2.Get("q"))
+		assert.False(t, res2.Has("page"))
+	})
+}
+
+func BenchmarkStructToValues_Cached(b *testing.B) {
+	type BenchQuery struct {
+		ID       int      `url:"id"`
+		Name     string   `url:"name"`
+		Tags     []string `url:"tags,comma"`
+		IsActive bool     `url:"active,omitempty"`
+	}
+
+	q := BenchQuery{
+		ID:       101,
+		Name:     "gopher",
+		Tags:     []string{"go", "net", "http"},
+		IsActive: true,
+	}
+
+	b.ResetTimer()
+
+	for i := 0; i < b.N; i++ {
+		_, _ = StructToValues(q)
+	}
+}
+
+func BenchmarkStructToValues_QueryEncoder(b *testing.B) {
+	q := customQueryStruct{Foo: "bench", Bar: 100}
+
+	b.ResetTimer()
+
+	for i := 0; i < b.N; i++ {
+		_, _ = StructToValues(q)
+	}
+}
