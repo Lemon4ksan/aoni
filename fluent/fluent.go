@@ -1,6 +1,6 @@
 // Copyright (c) 2026 Lemon4ksan All rights reserved.
 // Use of this source code is governed by a BSD-style
-// license can be found in the LICENSE file.
+// license that can be found in the LICENSE file.
 
 package fluent
 
@@ -11,7 +11,9 @@ import (
 	"github.com/lemon4ksan/aoni"
 )
 
-// New initializes a new pooled [Request] builder bound to client.
+// New initializes a new pooled [Request] builder bound to the target client.
+// The returned [Request] is retrieved from an internal sync.Pool and is automatically
+// recycled back to the pool upon execution.
 func New(client *aoni.Client) *Request {
 	r := requestPool.Get().(*Request)
 	r.client = client
@@ -68,7 +70,7 @@ func DeleteJSON[T any](ctx context.Context, c *aoni.Client, path string) (T, *ht
 	return target, resp, err
 }
 
-// DoJSON dispatches a request with any custom method and optional body, unmarshalling a 2xx JSON response into T.
+// DoJSON dispatches a request with any custom method and optional body, unmarshaling a 2xx JSON response into T.
 func DoJSON[T any](ctx context.Context, c *aoni.Client, method, path string, body any) (T, *http.Response, error) {
 	var target T
 

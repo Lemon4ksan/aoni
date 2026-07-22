@@ -1,6 +1,6 @@
 // Copyright (c) 2026 Lemon4ksan All rights reserved.
 // Use of this source code is governed by a BSD-style
-// license can be found in the LICENSE file.
+// license that can be found in the LICENSE file.
 
 // Package fluent provides a high-performance, chainable Request Builder API
 // designed for ergonomics, zero-allocation request pooling, and seamless integration
@@ -43,20 +43,24 @@ var requestPool = sync.Pool{
 	},
 }
 
-// Request is a thread-safe pooled request builder offering a fluent API.
+// Request is a thread-safe pooled request builder offering a fluent chainable API.
+// Instances are recycled back to an internal sync.Pool upon calling Execute or HTTP verb methods.
 type Request struct {
+	// 16-byte aligned interface and string headers
+	ctx         context.Context
+	body        any
+	result      any
+	resultError any
+	queryStruct any
+	bearerToken string
+	outputFile  string
+
+	// 8-byte aligned pointers, maps, and scalar types
 	client           *aoni.Client
-	ctx              context.Context
-	body             any
-	result           any
-	resultError      any
-	queryStruct      any
+	basicAuth        *basicAuth
 	headers          http.Header
 	queryParams      url.Values
 	pathParams       map[string]string
-	bearerToken      string
-	basicAuth        *basicAuth
-	outputFile       string
 	downloadProgress aoni.ProgressFunc
 	uploadProgress   aoni.ProgressFunc
 	traceInfo        *telemetry.TraceInfo
@@ -204,7 +208,7 @@ func (r *Request) SetUploadProgress(progress aoni.ProgressFunc) *Request {
 	return r
 }
 
-// SetTrace associates a [telemetry.TraceInfo] container to capture detailed network timings and TLS certificate details.
+// SetTrace associates a [telemetry.TraceInfo] container to capture detailed network timings and TLS details.
 func (r *Request) SetTrace(info *telemetry.TraceInfo) *Request {
 	r.traceInfo = info
 	return r
@@ -225,8 +229,8 @@ func (r *Request) Download(url, filePath string) (*http.Response, error) {
 func (r *Request) Execute(method, path string) (*http.Response, error) {
 	client := r.client
 	resultTarget := r.result
-
 	outputFile := r.outputFile
+
 	defer func() {
 		r.Reset()
 		requestPool.Put(r)
@@ -239,6 +243,32 @@ func (r *Request) Execute(method, path string) (*http.Response, error) {
 		ctx = context.Background()
 	}
 
+	mods := r.buildModifiers()
+
+	if outputFile != "" {
+		return r.executeDownload(ctx, client, method, finalPath, mods, outputFile)
+	}
+
+	if resultTarget != nil {
+		var rawResp *http.Response
+		mods = append(mods, mod.WithCaptureResponse(&rawResp))
+
+		resp, err := client.Request(ctx, method, finalPath, mods...)
+		if err != nil {
+			return nil, err
+		}
+
+		if err := request.HandleResponse(resp, resultTarget, client); err != nil {
+			return resp, err
+		}
+
+		return resp, nil
+	}
+
+	return client.Request(ctx, method, finalPath, mods...)
+}
+
+func (r *Request) buildModifiers() []aoni.RequestModifier {
 	var mods []aoni.RequestModifier
 
 	if len(r.headers) > 0 {
@@ -293,60 +323,49 @@ func (r *Request) Execute(method, path string) (*http.Response, error) {
 		mods = append(mods, mod.WithTimeout(r.timeout))
 	}
 
-	if outputFile != "" {
-		resp, err := client.Request(ctx, method, finalPath, mods...)
-		if err != nil {
-			return nil, err
-		}
-		defer resp.Body.Close()
+	return mods
+}
 
-		if resp.StatusCode >= http.StatusBadRequest {
-			if r.resultError != nil {
-				_ = request.HandleResponse(resp, r.resultError, client)
-			}
+func (r *Request) executeDownload(
+	ctx context.Context,
+	client *aoni.Client,
+	method, path string,
+	mods []aoni.RequestModifier,
+	outputFile string,
+) (*http.Response, error) {
+	resp, err := client.Request(ctx, method, path, mods...)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
 
-			return resp, fmt.Errorf("aoni: download failed with status code %d", resp.StatusCode)
-		}
-
-		if err := os.MkdirAll(filepath.Dir(outputFile), 0o755); err != nil { //nolint:gosec
-			return resp, fmt.Errorf("aoni: failed to create target directory: %w", err)
-		}
-
-		outFile, err := os.Create(outputFile)
-		if err != nil {
-			return resp, fmt.Errorf("aoni: failed to create output file: %w", err)
-		}
-		defer outFile.Close()
-
-		bufPtr := bytePool.Get().(*[]byte)
-		_, err = io.CopyBuffer(outFile, resp.Body, *bufPtr)
-		bytePool.Put(bufPtr)
-
-		if err != nil {
-			return resp, fmt.Errorf("aoni: error writing downloaded file: %w", err)
+	if resp.StatusCode >= http.StatusBadRequest {
+		if r.resultError != nil {
+			_ = request.HandleResponse(resp, r.resultError, client)
 		}
 
-		return resp, nil
+		return resp, fmt.Errorf("aoni: download failed with status code %d", resp.StatusCode)
 	}
 
-	if resultTarget != nil {
-		var rawResp *http.Response
-
-		mods = append(mods, mod.WithCaptureResponse(&rawResp))
-
-		resp, err := client.Request(ctx, method, finalPath, mods...)
-		if err != nil {
-			return nil, err
-		}
-
-		if err := request.HandleResponse(resp, resultTarget, client); err != nil {
-			return resp, err
-		}
-
-		return resp, nil
+	if err := os.MkdirAll(filepath.Dir(outputFile), 0o755); err != nil {
+		return resp, fmt.Errorf("aoni: failed to create target directory: %w", err)
 	}
 
-	return client.Request(ctx, method, finalPath, mods...)
+	outFile, err := os.Create(outputFile)
+	if err != nil {
+		return resp, fmt.Errorf("aoni: failed to create output file: %w", err)
+	}
+	defer outFile.Close()
+
+	bufPtr := bytePool.Get().(*[]byte)
+	_, err = io.CopyBuffer(outFile, resp.Body, *bufPtr)
+	bytePool.Put(bufPtr)
+
+	if err != nil {
+		return resp, fmt.Errorf("aoni: error writing downloaded file: %w", err)
+	}
+
+	return resp, nil
 }
 
 // Get executes a GET request against path.
