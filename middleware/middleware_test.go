@@ -615,3 +615,63 @@ func TestNewCircuitBreaker_Defaults(t *testing.T) {
 	assert.Equal(t, 5, cb.cfg.MinRequests)
 	assert.Equal(t, 10*time.Second, cb.cfg.Window)
 }
+
+func TestSlidingWindowRateLimit(t *testing.T) {
+	t.Parallel()
+
+	mw := SlidingWindowRateLimit(3, 100*time.Millisecond)
+
+	var calls int
+
+	doer := mw(aoni.DoerFunc(func(req *http.Request) (*http.Response, error) {
+		calls++
+		return &http.Response{StatusCode: http.StatusOK}, nil
+	}))
+
+	req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, "http://localhost", nil)
+	require.NoError(t, err)
+
+	start := time.Now()
+
+	for i := 0; i < 5; i++ {
+		_, err := doer.Do(req)
+		require.NoError(t, err)
+	}
+
+	elapsed := time.Since(start)
+
+	assert.Equal(t, 5, calls)
+	assert.GreaterOrEqual(t, elapsed, 100*time.Millisecond)
+}
+
+func TestRetryMiddleware_FatalErrorNoRetry(t *testing.T) {
+	t.Parallel()
+
+	var attempts int
+
+	mw := Retry(RetryOptions{MaxRetries: 3}, aoni.RetryOnErr())
+
+	doer := mw(aoni.DoerFunc(func(req *http.Request) (*http.Response, error) {
+		attempts++
+		return nil, aoni.ErrSSRFBlocked
+	}))
+
+	req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, "http://localhost", nil)
+	require.NoError(t, err)
+
+	_, err = doer.Do(req)
+	assert.ErrorIs(t, err, aoni.ErrSSRFBlocked)
+	assert.Equal(t, 1, attempts) // Instant abort on 1st attempt, zero retries
+}
+
+func TestParseRetryAfter_Overflow(t *testing.T) {
+	t.Parallel()
+
+	resp := &http.Response{
+		Header: http.Header{"Retry-After": []string{"9999999999999999999999"}},
+	}
+
+	delay, has := parseRetryAfter(resp)
+	assert.True(t, has)
+	assert.Greater(t, delay, time.Duration(0))
+}

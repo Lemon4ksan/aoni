@@ -11,9 +11,11 @@ import (
 	"fmt"
 	"log/slog"
 	"math/rand/v2"
+	"net"
 	"net/http"
 	"net/url"
 	"slices"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -136,18 +138,158 @@ func (b *Balancer) WithClients(clients ...aoni.HTTPDoer) *Balancer {
 	return b
 }
 
-// UpdateBackends dynamically replaces the active backend pool and resets selection counters.
+// NewSRV creates a new [Balancer] that dynamically discovers and balances requests across
+// backends resolved from DNS SRV records (e.g. service="_http", proto="_tcp", name="service.consul").
+func NewSRV(
+	ctx context.Context,
+	service, proto, name, scheme string,
+	refreshInterval time.Duration,
+	clientFactory func(targetURL string) aoni.HTTPDoer,
+) (*Balancer, error) {
+	return NewSRVWeightedRoundRobin(ctx, service, proto, name, scheme, refreshInterval, clientFactory)
+}
+
+// NewSRVWeightedRoundRobin initializes a Weighted Round-Robin load balancer populated from DNS SRV records.
+func NewSRVWeightedRoundRobin(
+	ctx context.Context,
+	service, proto, name, scheme string,
+	refreshInterval time.Duration,
+	clientFactory func(targetURL string) aoni.HTTPDoer,
+) (*Balancer, error) {
+	backends, err := resolveSRVBackends(service, proto, name, scheme, clientFactory)
+	if err != nil {
+		return nil, fmt.Errorf("aoni: srv loadbalancer: initial DNS SRV lookup failed: %w", err)
+	}
+
+	cfg := Config{
+		Strategy:            WeightedRoundRobin,
+		MaxFails:            3,
+		RetryAfter:          30 * time.Second,
+		HealthCheckInterval: refreshInterval,
+	}
+
+	childCtx, cancel := context.WithCancel(ctx)
+	lb := &Balancer{
+		ctx:      childCtx,
+		cancel:   cancel,
+		backends: backends,
+		config:   cfg,
+	}
+
+	if refreshInterval > 0 {
+		lb.wg.Go(func() {
+			ticker := time.NewTicker(refreshInterval)
+			defer ticker.Stop()
+
+			for {
+				select {
+				case <-lb.ctx.Done():
+					return
+				case <-ticker.C:
+					lb.refreshSRV(service, proto, name, scheme, clientFactory)
+				}
+			}
+		})
+	}
+
+	return lb, nil
+}
+
+func resolveSRVBackends(
+	service, proto, name, scheme string,
+	clientFactory func(targetURL string) aoni.HTTPDoer,
+) ([]*Backend, error) {
+	_, records, err := net.LookupSRV(service, proto, name) //nolint:gosec
+	if err != nil {
+		return nil, err
+	}
+
+	if len(records) == 0 {
+		return nil, ErrNoBackends
+	}
+
+	cfg := Config{MaxFails: 3, RetryAfter: 30 * time.Second}
+
+	backends := make([]*Backend, 0, len(records))
+	for _, rec := range records {
+		targetHost := strings.TrimSuffix(rec.Target, ".")
+		targetURL := fmt.Sprintf("%s://%s:%d", scheme, targetHost, rec.Port)
+
+		parsed, parseErr := url.Parse(targetURL)
+
+		w := int(rec.Weight)
+		if w <= 0 {
+			w = 1
+		}
+
+		var doer aoni.HTTPDoer
+		if clientFactory != nil {
+			doer = clientFactory(targetURL)
+		} else {
+			doer = http.DefaultClient
+		}
+
+		backends = append(backends, &Backend{
+			URL:    targetURL,
+			Weight: w,
+			client: doer,
+			tracker: health.NewTracker(
+				targetURL, cfg.MaxFails, cfg.RetryAfter,
+				func(name string, fails uint32, retryAfter time.Duration) {
+					slog.Warn(
+						"srv backend marked unhealthy",
+						"backend",
+						name,
+						"fails",
+						fails,
+						"retry_after",
+						retryAfter,
+					)
+				},
+				func(name string) {
+					slog.Info("srv backend recovered", "backend", name)
+				},
+			),
+			parsedURL: parsed,
+			parseErr:  parseErr,
+		})
+	}
+
+	return backends, nil
+}
+
+func (b *Balancer) refreshSRV(
+	service, proto, name, scheme string,
+	clientFactory func(targetURL string) aoni.HTTPDoer,
+) {
+	newBackends, err := resolveSRVBackends(service, proto, name, scheme, clientFactory)
+	if err != nil || len(newBackends) == 0 {
+		return
+	}
+
+	b.SetBackendPool(newBackends)
+}
+
+// SetBackendPool dynamically replaces the active backend pool.
+func (b *Balancer) SetBackendPool(backends []*Backend) {
+	if len(backends) == 0 {
+		return
+	}
+
+	b.mu.Lock()
+	b.backends = backends
+	b.current.Store(0)
+	b.mu.Unlock()
+}
+
+// UpdateBackends dynamically replaces the active backend pool from string URLs and resets selection counters.
 func (b *Balancer) UpdateBackends(backends ...string) {
 	if len(backends) == 0 {
 		return
 	}
 
 	tracked := createBackends(backends, b.config)
-
-	b.mu.Lock()
-	b.backends = tracked
-	b.current.Store(0)
-	b.mu.Unlock()
+	b.SetBackendPool(tracked)
 }
 
 // Close stops background health check workers and closes idle backend keep-alive connections.

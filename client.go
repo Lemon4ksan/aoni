@@ -728,12 +728,18 @@ func applyEngineConfig(c *Client, eng EngineConfig) {
 		httpClient.Timeout = eng.Timeout
 	}
 
-	applyRedirectPolicy(httpClient, eng.RedirectLimit)
+	applyRedirectPolicy(httpClient, eng)
 	applyCookieJar(c, httpClient, eng.CookieJar)
 	applyTransportOverrides(c, eng)
 }
 
-func applyRedirectPolicy(httpClient *http.Client, limit int) {
+func applyRedirectPolicy(httpClient *http.Client, eng EngineConfig) {
+	if eng.CheckRedirect != nil {
+		httpClient.CheckRedirect = eng.CheckRedirect
+		return
+	}
+
+	limit := eng.RedirectLimit
 	if limit == redirectLimitUnset {
 		return
 	}
@@ -796,6 +802,8 @@ func applyTransportOverrides(c *Client, eng EngineConfig) {
 		tr.MaxConnsPerHost = generic.Coalesce(pool.MaxConnsPerHost, tr.MaxConnsPerHost)
 		tr.IdleConnTimeout = generic.Coalesce(pool.IdleConnTimeout, tr.IdleConnTimeout)
 		tr.ResponseHeaderTimeout = generic.Coalesce(pool.ResponseHeaderTimeout, tr.ResponseHeaderTimeout)
+		tr.ReadBufferSize = generic.Coalesce(pool.ReadBufferSize, tr.ReadBufferSize)
+		tr.WriteBufferSize = generic.Coalesce(pool.WriteBufferSize, tr.WriteBufferSize)
 	}
 
 	if h2Cfg := eng.HTTP2Config; h2Cfg != nil {

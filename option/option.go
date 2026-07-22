@@ -164,6 +164,13 @@ func WithTimeout(d time.Duration) aoni.ClientOption {
 	}
 }
 
+// WithAllowedRedirectDomains restricts HTTP redirects to a specified list of trusted domain names.
+func WithAllowedRedirectDomains(domains ...string) aoni.ClientOption {
+	return func(cfg *aoni.Config) {
+		cfg.Engine.CheckRedirect = aoni.AllowedDomainsRedirectPolicy(domains...)
+	}
+}
+
 // WithProfileVariant configures the TLS fingerprint, HTTP/2 setting frames,
 // and default browser headers to match the provided custom browser profile variant.
 func WithProfileVariant(variant *profiles.Variant, os profiles.OSKey) aoni.ClientOption {

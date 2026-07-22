@@ -22,6 +22,7 @@ import (
 
 	"github.com/lemon4ksan/aoni"
 	"github.com/lemon4ksan/aoni/mod"
+	"github.com/lemon4ksan/aoni/netutil"
 	"github.com/lemon4ksan/aoni/request"
 	"github.com/lemon4ksan/aoni/telemetry"
 )
@@ -47,27 +48,38 @@ var requestPool = sync.Pool{
 // Instances are recycled back to an internal sync.Pool upon calling Execute or HTTP verb methods.
 type Request struct {
 	// 16-byte aligned interface and string headers
-	ctx         context.Context
-	body        any
-	result      any
-	resultError any
-	queryStruct any
-	bearerToken string
-	outputFile  string
+	ctx              context.Context
+	body             any
+	result           any
+	resultError      any
+	queryStruct      any
+	bearerToken      string
+	outputFile       string
+	outputDirectory  string
+	correlationID    string
+	forceContentType string
+	label            string
 
 	// 8-byte aligned pointers, maps, and scalar types
 	client           *aoni.Client
 	basicAuth        *basicAuth
+	digestAuth       *digestAuth
 	headers          http.Header
 	queryParams      url.Values
 	pathParams       map[string]string
 	downloadProgress aoni.ProgressFunc
 	uploadProgress   aoni.ProgressFunc
 	traceInfo        *telemetry.TraceInfo
+	appliedMods      []aoni.RequestModifier
 	timeout          time.Duration
 }
 
 type basicAuth struct {
+	username string
+	password string
+}
+
+type digestAuth struct {
 	username string
 	password string
 }
@@ -82,10 +94,16 @@ func (r *Request) Reset() {
 	r.queryStruct = nil
 	r.bearerToken = ""
 	r.basicAuth = nil
+	r.digestAuth = nil
 	r.outputFile = ""
+	r.outputDirectory = ""
+	r.correlationID = ""
+	r.forceContentType = ""
+	r.label = ""
 	r.downloadProgress = nil
 	r.uploadProgress = nil
 	r.traceInfo = nil
+	r.appliedMods = r.appliedMods[:0]
 	r.timeout = 0
 
 	for k := range r.headers {
@@ -167,6 +185,19 @@ func (r *Request) SetBasicAuth(username, password string) *Request {
 	return r
 }
 
+// SetDigestAuth configures RFC 7616 Digest Access Authentication credentials.
+func (r *Request) SetDigestAuth(username, password string) *Request {
+	r.digestAuth = &digestAuth{username: username, password: password}
+	return r
+}
+
+// SetOutputFromHeader instructs the request to stream the downloaded file to targetDir
+// using a sanitized, Path Traversal-safe filename extracted from Content-Disposition header.
+func (r *Request) SetOutputFromHeader(targetDir string) *Request {
+	r.outputDirectory = targetDir
+	return r
+}
+
 // SetBody sets the payload body to be serialized into the request.
 func (r *Request) SetBody(body any) *Request {
 	r.body = body
@@ -214,6 +245,35 @@ func (r *Request) SetTrace(info *telemetry.TraceInfo) *Request {
 	return r
 }
 
+// SetCorrelationID sets an end-to-end tracing Correlation ID for the request.
+func (r *Request) SetCorrelationID(id string) *Request {
+	r.correlationID = id
+	return r
+}
+
+// SetForceContentType forces automatic response decoding using the specified MIME type.
+func (r *Request) SetForceContentType(mime string) *Request {
+	r.forceContentType = mime
+	return r
+}
+
+// SetForceJSON forces automatic response decoding as JSON even if Content-Type header is missing or text/plain.
+func (r *Request) SetForceJSON() *Request {
+	return r.SetForceContentType("application/json")
+}
+
+// SetLabel attaches a human-readable metric/route label for observability.
+func (r *Request) SetLabel(label string) *Request {
+	r.label = label
+	return r
+}
+
+// Apply injects reusable [aoni.RequestModifier] functions into the request builder.
+func (r *Request) Apply(mods ...aoni.RequestModifier) *Request {
+	r.appliedMods = append(r.appliedMods, mods...)
+	return r
+}
+
 // SetTimeout sets a per-request execution deadline timeout.
 func (r *Request) SetTimeout(timeout time.Duration) *Request {
 	r.timeout = timeout
@@ -245,12 +305,13 @@ func (r *Request) Execute(method, path string) (*http.Response, error) {
 
 	mods := r.buildModifiers()
 
-	if outputFile != "" {
+	if outputFile != "" || r.outputDirectory != "" {
 		return r.executeDownload(ctx, client, method, finalPath, mods, outputFile)
 	}
 
 	if resultTarget != nil {
 		var rawResp *http.Response
+
 		mods = append(mods, mod.WithCaptureResponse(&rawResp))
 
 		resp, err := client.Request(ctx, method, finalPath, mods...)
@@ -319,6 +380,22 @@ func (r *Request) buildModifiers() []aoni.RequestModifier {
 		mods = append(mods, mod.WithTrace(r.traceInfo))
 	}
 
+	if r.correlationID != "" {
+		mods = append(mods, mod.WithCorrelationID(r.correlationID))
+	}
+
+	if r.forceContentType != "" {
+		mods = append(mods, mod.WithForceContentType(r.forceContentType))
+	}
+
+	if r.label != "" {
+		mods = append(mods, mod.WithLabel(r.label))
+	}
+
+	if len(r.appliedMods) > 0 {
+		mods = append(mods, r.appliedMods...)
+	}
+
 	if r.timeout > 0 {
 		mods = append(mods, mod.WithTimeout(r.timeout))
 	}
@@ -345,6 +422,11 @@ func (r *Request) executeDownload(
 		}
 
 		return resp, fmt.Errorf("aoni: download failed with status code %d", resp.StatusCode)
+	}
+
+	if outputFile == "" && r.outputDirectory != "" {
+		filename := netutil.ExtractSanitizedFilename(resp.Header.Get("Content-Disposition"))
+		outputFile = filepath.Join(r.outputDirectory, filename)
 	}
 
 	if err := os.MkdirAll(filepath.Dir(outputFile), 0o755); err != nil {

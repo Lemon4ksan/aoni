@@ -9,6 +9,8 @@ import (
 	"bytes"
 	"context"
 	"crypto/rand"
+	"crypto/tls"
+	"crypto/x509"
 	"errors"
 	"fmt"
 	"io"
@@ -80,6 +82,94 @@ func RateLimit(rps float64, burst int) aoni.Middleware {
 		return aoni.DoerFunc(func(req *http.Request) (*http.Response, error) {
 			if err := limiter.Wait(req.Context()); err != nil {
 				return nil, fmt.Errorf("aoni: rate limit wait failed: %w", err)
+			}
+
+			return next.Do(req)
+		})
+	}
+}
+
+// SlidingWindowLimiter implements an O(1) ring-buffer sliding window rate limiter
+// without memory allocations or slice memory copies during timestamp purging.
+type SlidingWindowLimiter struct {
+	mu         sync.Mutex
+	limit      int
+	window     time.Duration
+	timestamps []time.Time
+	head       int
+	tail       int
+	count      int
+}
+
+// NewSlidingWindowLimiter creates a new ring-buffer sliding window rate limiter.
+func NewSlidingWindowLimiter(limit int, window time.Duration) *SlidingWindowLimiter {
+	if limit <= 0 {
+		limit = 1
+	}
+
+	return &SlidingWindowLimiter{
+		limit:      limit,
+		window:     window,
+		timestamps: make([]time.Time, limit),
+	}
+}
+
+// Allow checks if a request is allowed at time now.
+// Returns true and 0 wait time if allowed, or false and the required wait duration if limit is reached.
+func (l *SlidingWindowLimiter) Allow(now time.Time) (bool, time.Duration) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+
+	cutoff := now.Add(-l.window)
+
+	// Purge expired timestamps from head in O(1) without memory copy churn
+	for l.count > 0 && !l.timestamps[l.head].After(cutoff) {
+		l.head = (l.head + 1) % l.limit
+		l.count--
+	}
+
+	if l.count < l.limit {
+		l.timestamps[l.tail] = now
+		l.tail = (l.tail + 1) % l.limit
+		l.count++
+
+		return true, 0
+	}
+
+	// Calculate wait time until oldest request in rolling window expires
+	oldest := l.timestamps[l.head]
+
+	waitTime := oldest.Add(l.window).Sub(now)
+	if waitTime < 0 {
+		waitTime = 0
+	}
+
+	return false, waitTime
+}
+
+// SlidingWindowRateLimit returns a [Middleware] that enforces strict sliding window rate limiting.
+// Guarantees no more than limit requests are dispatched within any rolling window duration.
+func SlidingWindowRateLimit(limit int, window time.Duration) aoni.Middleware {
+	limiter := NewSlidingWindowLimiter(limit, window)
+
+	return func(next aoni.HTTPDoer) aoni.HTTPDoer {
+		return aoni.DoerFunc(func(req *http.Request) (*http.Response, error) {
+			for {
+				now := time.Now()
+
+				allowed, waitTime := limiter.Allow(now)
+				if allowed {
+					break
+				}
+
+				timer := time.NewTimer(waitTime)
+				select {
+				case <-req.Context().Done():
+					timer.Stop()
+					return nil, fmt.Errorf("aoni: sliding window rate limit wait canceled: %w", req.Context().Err())
+				case <-timer.C:
+					timer.Stop()
+				}
 			}
 
 			return next.Do(req)
@@ -176,6 +266,10 @@ func Retry(opts RetryOptions, condition aoni.RetryCondition) aoni.Middleware {
 				resp, err := next.Do(req)
 
 				if i < activeOpts.MaxRetries && activeCond(resp, err) {
+					if err != nil && isFatalError(err) {
+						return resp, err
+					}
+
 					retryAfter, hasRetryAfter := parseRetryAfter(resp)
 					if resp != nil {
 						_ = resp.Body.Close()
@@ -490,6 +584,45 @@ func AdaptiveLimit(limiter *limiter.AdaptiveLimiter) aoni.Middleware {
 	}
 }
 
+func isFatalError(err error) bool {
+	if err == nil {
+		return false
+	}
+
+	if errors.Is(err, aoni.ErrSSRFBlocked) || errors.Is(err, aoni.ErrRedirectDomainForbidden) {
+		return true
+	}
+
+	var urlErr *url.Error
+	if errors.As(err, &urlErr) {
+		if urlErr.Err != nil && strings.Contains(urlErr.Err.Error(), "unsupported protocol scheme") {
+			return true
+		}
+	}
+
+	var (
+		certInvalidErr  *x509.CertificateInvalidError
+		unknownAuthErr  *x509.UnknownAuthorityError
+		hostnameErr     *x509.HostnameError
+		recordHeaderErr tls.RecordHeaderError
+	)
+
+	if errors.As(err, &certInvalidErr) ||
+		errors.As(err, &unknownAuthErr) ||
+		errors.As(err, &hostnameErr) ||
+		errors.As(err, &recordHeaderErr) {
+		return true
+	}
+
+	errMsg := err.Error()
+	if strings.Contains(errMsg, "certificate signed by unknown authority") ||
+		strings.Contains(errMsg, "certificate pinning failure") {
+		return true
+	}
+
+	return false
+}
+
 func parseRetryAfter(resp *http.Response) (time.Duration, bool) {
 	if resp == nil {
 		return 0, false
@@ -500,8 +633,17 @@ func parseRetryAfter(resp *http.Response) (time.Duration, bool) {
 		return 0, false
 	}
 
-	if secs, err := strconv.ParseInt(val, 10, 64); err == nil && secs >= 0 {
+	secs, err := strconv.ParseInt(val, 10, 64)
+	if err == nil && secs >= 0 {
+		maxSecs := int64(math.MaxInt64 / time.Second)
+		if secs > maxSecs {
+			secs = maxSecs
+		}
+
 		return time.Duration(secs) * time.Second, true
+	} else if errors.Is(err, strconv.ErrRange) {
+		maxSecs := int64(math.MaxInt64 / time.Second)
+		return time.Duration(maxSecs) * time.Second, true
 	}
 
 	if t, err := http.ParseTime(val); err == nil {

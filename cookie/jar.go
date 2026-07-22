@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/lemon4ksan/miyako/sync/keylock"
+	"golang.org/x/net/publicsuffix"
 )
 
 type proxyCtxKey struct{}
@@ -96,7 +97,9 @@ func (p *ProxyIsolatedJar) GetJarForProxy(proxyURL string) http.CookieJar {
 		return jar
 	}
 
-	baseJar, err := cookiejar.New(nil)
+	baseJar, err := cookiejar.New(&cookiejar.Options{
+		PublicSuffixList: publicsuffix.List,
+	})
 	if err != nil {
 		return nil
 	}

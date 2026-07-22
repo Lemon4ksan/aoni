@@ -7,6 +7,7 @@ package telemetry_test
 import (
 	"context"
 	"io"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -122,7 +123,7 @@ func TestCurlCommand(t *testing.T) {
 			url:     "http://example.com/api/test",
 			headers: map[string]string{"Authorization": "Bearer token123"},
 			body:    nil,
-			want:    []string{"curl", "http://example.com/api/test", "Authorization: Bearer token123"},
+			want:    []string{"curl", "http://example.com/api/test", "*****REDACTED*****"},
 		},
 		{
 			name:    "post_request_with_body",
@@ -171,4 +172,49 @@ func TestCurlCommand(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestCorrelationID_And_Slog_And_TruncateBody(t *testing.T) {
+	cid1 := telemetry.GenerateCorrelationID()
+	cid2 := telemetry.GenerateCorrelationID()
+
+	assert.NotEmpty(t, cid1)
+	assert.NotEmpty(t, cid2)
+	assert.NotEqual(t, cid1, cid2)
+
+	// Body Truncation Test
+	largeBody := []byte("Hello World Large Payload")
+	truncated := telemetry.TruncateBody(largeBody, 11)
+	assert.Equal(t, "Hello World... [truncated 14 bytes]", truncated)
+
+	// Slog Valuer Test
+	info := &telemetry.TraceInfo{
+		CorrelationID: cid1,
+		RemoteAddr:    "127.0.0.1:443",
+	}
+
+	val := info.LogValue()
+	assert.Equal(t, slog.KindGroup, val.Kind())
+}
+
+func TestExtractRedirectHistory(t *testing.T) {
+	req1, _ := http.NewRequest("GET", "http://example.com/step1", nil)
+	resp1 := &http.Response{StatusCode: 301, Request: req1}
+
+	req2, _ := http.NewRequest("GET", "https://example.com/step2", nil)
+	req2.Response = resp1
+	resp2 := &http.Response{StatusCode: 302, Request: req2}
+
+	reqFinal, _ := http.NewRequest("GET", "https://example.com/final", nil)
+	reqFinal.Response = resp2
+	respFinal := &http.Response{StatusCode: 200, Request: reqFinal}
+
+	hops := telemetry.ExtractRedirectHistory(respFinal)
+	require.Len(t, hops, 2)
+
+	assert.Equal(t, "http://example.com/step1", hops[0].URL)
+	assert.Equal(t, 301, hops[0].StatusCode)
+
+	assert.Equal(t, "https://example.com/step2", hops[1].URL)
+	assert.Equal(t, 302, hops[1].StatusCode)
 }

@@ -8,6 +8,7 @@ package io
 import (
 	"bufio"
 	"bytes"
+	"compress/gzip"
 	"context"
 	"errors"
 	"io"
@@ -237,6 +238,52 @@ func (d *DecompressReadCloser) Close() error {
 }
 
 func (d *DecompressReadCloser) Unwrap() io.Closer { return d.Closer }
+
+var gzipReaderPool = sync.Pool{
+	New: func() any {
+		return new(gzip.Reader)
+	},
+}
+
+// NewPooledGzipReader retrieves a *gzip.Reader from sync.Pool and resets it with r,
+// eliminating heap allocations (~64 KB per reader) during response decompression.
+func NewPooledGzipReader(r io.Reader) (io.ReadCloser, error) {
+	gr := gzipReaderPool.Get().(*gzip.Reader)
+	if err := gr.Reset(r); err != nil {
+		gzipReaderPool.Put(gr)
+		return nil, err
+	}
+
+	return &pooledGzipReadCloser{gr: gr, reader: r}, nil
+}
+
+type pooledGzipReadCloser struct {
+	gr     *gzip.Reader
+	reader io.Reader
+}
+
+func (p *pooledGzipReadCloser) Read(b []byte) (int, error) {
+	return p.gr.Read(b)
+}
+
+func (p *pooledGzipReadCloser) Close() error {
+	_ = p.gr.Close()
+	gzipReaderPool.Put(p.gr)
+
+	if c, ok := p.reader.(io.Closer); ok {
+		return c.Close()
+	}
+
+	return nil
+}
+
+func (p *pooledGzipReadCloser) Unwrap() io.Closer {
+	if c, ok := p.reader.(io.Closer); ok {
+		return c
+	}
+
+	return nil
+}
 
 // LimitCheckingReadCloser wraps an [io.ReadCloser] and checks the read limit.
 type LimitCheckingReadCloser struct {

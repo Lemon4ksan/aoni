@@ -285,6 +285,22 @@ func TestClient_BaseResponse(t *testing.T) {
 	})
 }
 
+func TestAllowedDomainsRedirectPolicy(t *testing.T) {
+	t.Parallel()
+
+	policy := aoni.AllowedDomainsRedirectPolicy("example.com", "*.trusted.org")
+
+	reqAllowed, _ := http.NewRequest("GET", "https://example.com/login", nil)
+	assert.NoError(t, policy(reqAllowed, []*http.Request{reqAllowed}))
+
+	reqSubdomainAllowed, _ := http.NewRequest("GET", "https://api.trusted.org/v1", nil)
+	assert.NoError(t, policy(reqSubdomainAllowed, []*http.Request{reqSubdomainAllowed}))
+
+	reqForbidden, _ := http.NewRequest("GET", "https://evil-phishing.com/steal", nil)
+	err := policy(reqForbidden, []*http.Request{reqForbidden})
+	assert.ErrorIs(t, err, aoni.ErrRedirectDomainForbidden)
+}
+
 func TestClient_ErrorModel(t *testing.T) {
 	t.Parallel()
 

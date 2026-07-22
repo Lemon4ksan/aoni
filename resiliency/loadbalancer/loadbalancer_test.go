@@ -381,3 +381,16 @@ func TestLoadBalancer_InvalidBackendURL(t *testing.T) {
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "all backends failed")
 }
+
+func TestLoadBalancer_SetBackendPool(t *testing.T) {
+	t.Parallel()
+
+	lb, err := New(Config{}, "http://b1")
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = lb.Close() })
+
+	assert.Equal(t, 1, lb.Stats().TotalBackends)
+
+	lb.UpdateBackends("http://b1", "http://b2", "http://b3")
+	assert.Equal(t, 3, lb.Stats().TotalBackends)
+}

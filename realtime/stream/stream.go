@@ -14,9 +14,11 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/lemon4ksan/aoni"
 	"github.com/lemon4ksan/aoni/mod"
+	"github.com/lemon4ksan/miyako/generic"
 )
 
 // Stream wraps an [http.Response] and manages connection reading streams.
@@ -152,6 +154,61 @@ type SSEEvent struct {
 	Retry int
 }
 
+func parseSSELine(line string, currentEvent *SSEEvent) {
+	line = strings.TrimSpace(line)
+	if line == "" || strings.HasPrefix(line, ":") {
+		return
+	}
+
+	parts := strings.SplitN(line, ":", 2)
+	key := parts[0]
+	var value string
+	if len(parts) > 1 {
+		value = strings.TrimSpace(parts[1])
+	}
+
+	switch key {
+	case "event":
+		currentEvent.Event = value
+	case "data":
+		if currentEvent.Data != "" {
+			currentEvent.Data += "\n" + value
+		} else {
+			currentEvent.Data = value
+		}
+	case "id":
+		currentEvent.ID = value
+	case "retry":
+		if r, err := strconv.Atoi(value); err == nil {
+			currentEvent.Retry = r
+		}
+	}
+}
+
+func dispatchSSEEvent[T any](ctx context.Context, currentEvent SSEEvent, out chan<- T) error {
+	if currentEvent.Data == "" && currentEvent.Event == "" {
+		return nil
+	}
+
+	var val T
+	if sse, ok := any(currentEvent).(T); ok {
+		val = sse
+	} else if s, ok := any(currentEvent.Data).(T); ok {
+		val = s
+	} else {
+		if err := json.Unmarshal([]byte(currentEvent.Data), &val); err != nil {
+			return fmt.Errorf("aoni sse: unmarshal failed: %w", err)
+		}
+	}
+
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case out <- val:
+		return nil
+	}
+}
+
 // ParseSSE parses a Server-Sent Event stream and returns a channel of parsed events and an error channel.
 func ParseSSE[T any](ctx context.Context, resp *Stream) (<-chan T, <-chan error) {
 	out := make(chan T, 100)
@@ -163,7 +220,6 @@ func ParseSSE[T any](ctx context.Context, resp *Stream) (<-chan T, <-chan error)
 		defer resp.Close()
 
 		reader := bufio.NewReader(resp)
-
 		var currentEvent SSEEvent
 
 		for {
@@ -177,75 +233,153 @@ func ParseSSE[T any](ctx context.Context, resp *Stream) (<-chan T, <-chan error)
 					if errors.Is(err, io.EOF) {
 						return
 					}
-
 					errs <- err
-
 					return
 				}
 
-				line = strings.TrimSpace(line)
-				if line == "" {
-					if currentEvent.Data != "" || currentEvent.Event != "" {
-						var val T
-
-						if sse, ok := any(currentEvent).(T); ok {
-							val = sse
-						} else if s, ok := any(currentEvent.Data).(T); ok {
-							val = s
-						} else {
-							if err := json.Unmarshal([]byte(currentEvent.Data), &val); err != nil {
-								errs <- fmt.Errorf("aoni sse: unmarshal failed: %w", err)
-								return
-							}
-						}
-
-						select {
-						case <-ctx.Done():
-							errs <- ctx.Err()
-							return
-						case out <- val:
-						}
-
-						currentEvent = SSEEvent{}
+				if strings.TrimSpace(line) == "" {
+					if err := dispatchSSEEvent(ctx, currentEvent, out); err != nil {
+						errs <- err
+						return
 					}
-
+					currentEvent = SSEEvent{}
 					continue
 				}
 
-				if strings.HasPrefix(line, ":") {
-					continue
-				}
-
-				parts := strings.SplitN(line, ":", 2)
-				key := parts[0]
-
-				var value string
-				if len(parts) > 1 {
-					value = strings.TrimSpace(parts[1])
-				}
-
-				switch key {
-				case "event":
-					currentEvent.Event = value
-				case "data":
-					if currentEvent.Data != "" {
-						currentEvent.Data += "\n" + value
-					} else {
-						currentEvent.Data = value
-					}
-
-				case "id":
-					currentEvent.ID = value
-				case "retry":
-					if r, err := strconv.Atoi(value); err == nil {
-						currentEvent.Retry = r
-					}
-				}
+				parseSSELine(line, &currentEvent)
 			}
 		}
 	}()
 
 	return out, errs
+}
+
+// SSEReconnectOptions configures automatic stream reconnection behavior for SSE streams.
+type SSEReconnectOptions struct {
+	// MaxReconnects specifies the maximum number of reconnection attempts after network drops (0 = infinite reconnects).
+	MaxReconnects int
+	// DefaultRetry specifies the initial delay before attempting to reconnect (default 3 seconds).
+	DefaultRetry time.Duration
+}
+
+// ResumableSSE opens a Server-Sent Event stream that automatically reconnects on network drops.
+// On reconnection, it sends the WHATWG standard Last-Event-ID header containing the last seen event ID
+// and respects any server-sent 'retry: <ms>' directives.
+func ResumableSSE[T any](
+	ctx context.Context,
+	c aoni.Requester,
+	path string,
+	opts SSEReconnectOptions,
+	mods ...aoni.RequestModifier,
+) (<-chan T, <-chan error, error) {
+	out := make(chan T, 100)
+	errs := make(chan error, 1)
+
+	defaultRetry := generic.Coalesce(opts.DefaultRetry, 3*time.Second)
+
+	go func() {
+		defer close(out)
+		defer close(errs)
+
+		var lastEventID string
+		reconnectDelay := defaultRetry
+		attempts := 0
+
+		for {
+			select {
+			case <-ctx.Done():
+				errs <- ctx.Err()
+				return
+			default:
+			}
+
+			reqMods := make([]aoni.RequestModifier, 0, len(mods)+4)
+			reqMods = append(reqMods,
+				mod.WithHeader("Accept", "text/event-stream"),
+				mod.WithHeader("Cache-Control", "no-cache"),
+				mod.WithHeader("Connection", "keep-alive"),
+			)
+			if lastEventID != "" {
+				reqMods = append(reqMods, mod.WithHeader("Last-Event-ID", lastEventID))
+			}
+			reqMods = append(reqMods, mods...)
+
+			resp, err := Get(ctx, c, path, reqMods...)
+			if err != nil {
+				attempts++
+				if opts.MaxReconnects > 0 && attempts > opts.MaxReconnects {
+					errs <- fmt.Errorf("aoni sse: max reconnect attempts reached (%d): %w", opts.MaxReconnects, err)
+					return
+				}
+
+				if !sleepOrCancel(ctx, reconnectDelay, errs) {
+					return
+				}
+				continue
+			}
+
+			attempts = 0
+			reader := bufio.NewReader(resp)
+			var currentEvent SSEEvent
+
+			for {
+				select {
+				case <-ctx.Done():
+					resp.Close()
+					errs <- ctx.Err()
+					return
+				default:
+				}
+
+				line, err := reader.ReadString('\n')
+				if err != nil {
+					resp.Close()
+					break
+				}
+
+				if strings.TrimSpace(line) == "" {
+					if currentEvent.ID != "" {
+						lastEventID = currentEvent.ID
+					}
+					if currentEvent.Retry > 0 {
+						reconnectDelay = time.Duration(currentEvent.Retry) * time.Millisecond
+					}
+
+					if err := dispatchSSEEvent(ctx, currentEvent, out); err != nil {
+						errs <- err
+						return
+					}
+					currentEvent = SSEEvent{}
+					continue
+				}
+
+				parseSSELine(line, &currentEvent)
+			}
+
+			if resp.StatusCode() == http.StatusNoContent {
+				return
+			}
+
+			if !sleepOrCancel(ctx, reconnectDelay, errs) {
+				return
+			}
+		}
+	}()
+
+	return out, errs, nil
+}
+
+func sleepOrCancel(ctx context.Context, delay time.Duration, errs chan<- error) bool {
+	timer := time.NewTimer(delay)
+	defer timer.Stop()
+
+	select {
+	case <-ctx.Done():
+		errs <- ctx.Err()
+		return false
+	case <-timer.C:
+		return true
+	}
 }
 
 // SSE parses incoming Server-Sent Events from the [Stream] body.

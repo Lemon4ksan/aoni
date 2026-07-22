@@ -6,7 +6,6 @@ package aoni
 
 import (
 	"bytes"
-	"compress/gzip"
 	"context"
 	"crypto/tls"
 	"encoding/base64"
@@ -534,11 +533,8 @@ func applyContentDecompression(resp *http.Response) {
 		}
 
 	case "gzip":
-		if gzReader, err := gzip.NewReader(resp.Body); err == nil {
-			resp.Body = &io.DecompressReadCloser{
-				Reader: gzReader,
-				Closer: resp.Body,
-			}
+		if gzReader, err := io.NewPooledGzipReader(resp.Body); err == nil {
+			resp.Body = gzReader
 			resetDecompressedHeader(resp)
 		} else {
 			resp.Header.Del("Content-Encoding")
@@ -721,13 +717,36 @@ func (c *Client) handleWAFChallenge(req *http.Request, resp *http.Response) (*ht
 	return resp, nil
 }
 
+func isIdempotentMethod(method string) bool {
+	switch method {
+	case http.MethodGet, http.MethodHead, http.MethodOptions, http.MethodTrace:
+		return true
+	default:
+		return false
+	}
+}
+
 // executeWithHedging executes attempts with static or dynamic delays.
 func (c *Client) executeWithHedging(req *http.Request, pipeHedging *HedgingConfig) (*http.Response, error) {
+	cfg := GetRequestConfig(req.Context())
+
+	// Idempotency Protection: By default, only hedge read-only / idempotent HTTP methods (GET, HEAD, OPTIONS, TRACE)
+	// unless explicitly overridden by AllowNonReadOnly flag.
+	allowNonReadOnly := false
+	if cfg != nil && cfg.AllowNonReadOnlyHedging {
+		allowNonReadOnly = true
+	} else if pipeHedging != nil && pipeHedging.AllowNonReadOnly {
+		allowNonReadOnly = true
+	}
+
+	if !allowNonReadOnly && !isIdempotentMethod(req.Method) {
+		return c.engine.Do(req)
+	}
+
 	requestStart := time.Now()
 
 	var delay time.Duration
 
-	cfg := GetRequestConfig(req.Context())
 	switch {
 	case cfg != nil && cfg.HedgingDelayOverride != nil:
 		delay = *cfg.HedgingDelayOverride

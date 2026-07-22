@@ -297,3 +297,42 @@ func TestStreamNDJSON_ContextCancellation(t *testing.T) {
 
 	assert.Contains(t, errList, context.Canceled)
 }
+
+func TestResumableSSE_LastEventID(t *testing.T) {
+	t.Parallel()
+
+	var receivedLastID string
+	var attempts int
+
+	_, client := setupTestServer(t, func(w http.ResponseWriter, r *http.Request) {
+		attempts++
+		receivedLastID = r.Header.Get("Last-Event-ID")
+		w.Header().Set("Content-Type", "text/event-stream")
+
+		if attempts == 1 {
+			_, _ = w.Write([]byte("id: 42\ndata: event1\nretry: 10\n\n"))
+			// Disconnect abruptly without EOF
+			return
+		}
+
+		_, _ = w.Write([]byte("id: 43\ndata: event2\n\n"))
+	})
+
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+
+	events, _, err := stream.ResumableSSE[stream.SSEEvent](
+		ctx, client, "/",
+		stream.SSEReconnectOptions{DefaultRetry: 10 * time.Millisecond},
+	)
+	require.NoError(t, err)
+
+	e1 := <-events
+	assert.Equal(t, "42", e1.ID)
+	assert.Equal(t, "event1", e1.Data)
+
+	e2 := <-events
+	assert.Equal(t, "43", e2.ID)
+	assert.Equal(t, "event2", e2.Data)
+	assert.Equal(t, "42", receivedLastID)
+}

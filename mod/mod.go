@@ -21,6 +21,7 @@ import (
 	"maps"
 	"mime/multipart"
 	"net/http"
+	"net/textproto"
 	"net/url"
 	"os"
 	"strings"
@@ -349,6 +350,13 @@ func WithDecoder(d any) aoni.RequestModifier {
 	}
 }
 
+// WithForceContentType overrides the response Content-Type header to force automatic response decoding.
+func WithForceContentType(mime string) aoni.RequestModifier {
+	return func(req *http.Request) {
+		aoni.GetOrInitRequestConfig(req).ForceContentType = mime
+	}
+}
+
 // WithErrorModel sets the target struct/map for non-2xx response decoding.
 func WithErrorModel(model any) aoni.RequestModifier {
 	return func(req *http.Request) {
@@ -379,6 +387,39 @@ func WithCaptureResponse(target any) aoni.RequestModifier {
 	}
 }
 
+// WithCorrelationID assigns an end-to-end tracing Correlation ID to the request.
+// If id is empty, a fast unique hex ID is automatically generated.
+func WithCorrelationID(id string) aoni.RequestModifier {
+	if id == "" {
+		id = telemetry.GenerateCorrelationID()
+	}
+	return func(req *http.Request) {
+		cfg := aoni.GetOrInitRequestConfig(req)
+		if cfg.TraceInfo != nil {
+			cfg.TraceInfo.CorrelationID = id
+		}
+		req.Header.Set("X-Correlation-ID", id)
+	}
+}
+
+// WithLabel attaches a human-readable route/metric label to the request for observability and tracing.
+func WithLabel(label string) aoni.RequestModifier {
+	return func(req *http.Request) {
+		cfg := aoni.GetOrInitRequestConfig(req)
+		cfg.Label = label
+		if cfg.TraceInfo != nil {
+			cfg.TraceInfo.Label = label
+		}
+	}
+}
+
+// WithAllowNonReadOnlyHedging permits request hedging for non-idempotent HTTP methods (POST, PUT, DELETE, PATCH).
+func WithAllowNonReadOnlyHedging(allow bool) aoni.RequestModifier {
+	return func(req *http.Request) {
+		aoni.GetOrInitRequestConfig(req).AllowNonReadOnlyHedging = allow
+	}
+}
+
 // WithOrderedHeaders sets header serialization order for HTTP/1.1.
 func WithOrderedHeaders(headers []string) aoni.RequestModifier {
 	return func(req *http.Request) {
@@ -393,8 +434,41 @@ func WithALPN(protos ...string) aoni.RequestModifier {
 	}
 }
 
+var quoteEscaper = strings.NewReplacer("\\", "\\\\", `"`, "\\\"")
+
+func escapeQuotes(s string) string {
+	return quoteEscaper.Replace(s)
+}
+
+func detectMIMEAndReader(r io.Reader) (string, io.Reader) {
+	var buf [512]byte
+	n, err := io.ReadFull(r, buf[:])
+	if n > 0 {
+		contentType := http.DetectContentType(buf[:n])
+		reader := io.MultiReader(bytes.NewReader(buf[:n]), r)
+		return contentType, reader
+	}
+	if err != nil && !errors.Is(err, io.EOF) && !errors.Is(err, io.ErrUnexpectedEOF) {
+		return "application/octet-stream", r
+	}
+	return "application/octet-stream", r
+}
+
+func createFormFileHeader(w *multipart.Writer, fieldname, filename, contentType string) (io.Writer, error) {
+	h := make(textproto.MIMEHeader)
+	h.Set("Content-Disposition",
+		fmt.Sprintf(`form-data; name="%s"; filename="%s"`, escapeQuotes(fieldname), escapeQuotes(filename)))
+	if contentType != "" {
+		h.Set("Content-Type", contentType)
+	} else {
+		h.Set("Content-Type", "application/octet-stream")
+	}
+	return w.CreatePart(h)
+}
+
 // WithStreamingMultipart builds a multipart/form-data body using an
 // [io.Pipe] so that file data is streamed rather than buffered in memory.
+// Automatically performs 512-byte MIME sniffing and RFC 7578 quote escaping.
 func WithStreamingMultipart(fields map[string]string, files map[string]io.Reader) aoni.RequestModifier {
 	return func(req *http.Request) {
 		pr, pw := io.Pipe()
@@ -404,17 +478,34 @@ func WithStreamingMultipart(fields map[string]string, files map[string]io.Reader
 			_ = writer.SetBoundary(cfg.MultipartBoundary)
 		}
 
+		ctx := req.Context()
+
 		go func() {
 			defer pw.Close()
 			defer writer.Close()
 
 			for k, v := range fields {
-				_ = writer.WriteField(k, v)
+				select {
+				case <-ctx.Done():
+					_ = pw.CloseWithError(ctx.Err())
+					return
+				default:
+					_ = writer.WriteField(k, v)
+				}
 			}
 
 			for key, r := range files {
-				part, _ := writer.CreateFormFile(key, key)
-				_, _ = io.Copy(part, r)
+				select {
+				case <-ctx.Done():
+					_ = pw.CloseWithError(ctx.Err())
+					return
+				default:
+					contentType, streamReader := detectMIMEAndReader(r)
+					part, err := createFormFileHeader(writer, key, key, contentType)
+					if err == nil {
+						_, _ = io.Copy(part, streamReader)
+					}
+				}
 			}
 		}()
 

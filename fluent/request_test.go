@@ -270,6 +270,54 @@ func TestFluent_TLSCertificateInspection(t *testing.T) {
 	assert.NotEmpty(t, summary.SHA256Pin)
 }
 
+func TestFluent_ForceContentType(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "text/plain") // Server incorrectly returns text/plain for JSON
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"id": 42, "name": "ForcedJSON"}`))
+	}))
+	defer server.Close()
+
+	client := aoni.NewClient(server.Client(), option.WithBaseURL(server.URL))
+
+	var target userPayload
+
+	resp, err := fluent.R(client).
+		SetForceJSON().
+		SetResult(&target).
+		Get("/")
+
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusOK, resp.StatusCode)
+	assert.Equal(t, 42, target.ID)
+	assert.Equal(t, "ForcedJSON", target.Name)
+}
+
+func TestFluent_Label_And_Apply(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, "custom-applied-value", r.Header.Get("X-Applied-Header"))
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer server.Close()
+
+	client := aoni.NewClient(server.Client(), option.WithBaseURL(server.URL))
+
+	info := &telemetry.TraceInfo{}
+	customMod := func(req *http.Request) {
+		req.Header.Set("X-Applied-Header", "custom-applied-value")
+	}
+
+	resp, err := fluent.R(client).
+		SetLabel("GetUserProfile").
+		SetTrace(info).
+		Apply(customMod).
+		Get("/")
+
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusOK, resp.StatusCode)
+	assert.Equal(t, "GetUserProfile", info.Label)
+}
+
 func BenchmarkFluent_RequestCreation(b *testing.B) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusOK)

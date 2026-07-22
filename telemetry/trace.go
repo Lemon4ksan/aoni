@@ -11,9 +11,11 @@ import (
 	"crypto/x509"
 	"encoding/hex"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"slices"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/lemon4ksan/miyako/generic"
@@ -21,9 +23,19 @@ import (
 	"github.com/lemon4ksan/aoni/fingerprint/ja4"
 )
 
+var correlationCounter uint64
+
+// GenerateCorrelationID generates a fast, unique 16-character hex correlation identifier for request tracing.
+func GenerateCorrelationID() string {
+	id := atomic.AddUint64(&correlationCounter, 1)
+	return fmt.Sprintf("%016x", id)
+}
+
 // TraceInfo records network layer execution timings, metrics, and TLS/HTTP fingerprints for a request.
 // Detailed timing fields are populated progressively as execution phases complete.
 type TraceInfo struct {
+	CorrelationID    string
+	Label            string
 	DNSLookup        time.Duration
 	TCPConn          time.Duration
 	TLSHandshake     time.Duration
@@ -46,6 +58,37 @@ type TraceInfo struct {
 	GotConn      time.Time
 }
 
+// LogValue implements [slog.LogValuer] for structured logging with log/slog.
+func (t *TraceInfo) LogValue() slog.Value {
+	if t == nil {
+		return slog.Value{}
+	}
+
+	attrs := []slog.Attr{
+		slog.String("correlation_id", t.CorrelationID),
+		slog.String("remote_addr", t.RemoteAddr),
+		slog.Duration("dns_lookup", t.DNSLookup),
+		slog.Duration("tcp_conn", t.TCPConn),
+		slog.Duration("tls_handshake", t.TLSHandshake),
+		slog.Duration("server_processing", t.ServerProcessing),
+		slog.Duration("total", t.Total),
+	}
+
+	if t.Label != "" {
+		attrs = append(attrs, slog.String("label", t.Label))
+	}
+
+	if t.JA4 != nil {
+		attrs = append(attrs, slog.String("ja4", t.JA4.JA4))
+	}
+
+	if cert := t.CertSummary(); cert != nil {
+		attrs = append(attrs, slog.Any("cert", cert))
+	}
+
+	return slog.GroupValue(attrs...)
+}
+
 // PeerCertificate returns the leaf server certificate captured during the TLS handshake.
 func (t *TraceInfo) PeerCertificate() *x509.Certificate {
 	if len(t.PeerCertificates) > 0 {
@@ -53,6 +96,54 @@ func (t *TraceInfo) PeerCertificate() *x509.Certificate {
 	}
 
 	return nil
+}
+
+// RedirectHop represents a single intermediate HTTP redirect step.
+type RedirectHop struct {
+	URL        string
+	StatusCode int
+	Method     string
+}
+
+// ExtractRedirectHistory traverses the http.Response.Request.Response chain
+// and returns all intermediate redirect hops in chronological order.
+func ExtractRedirectHistory(resp *http.Response) []RedirectHop {
+	if resp == nil || resp.Request == nil || resp.Request.Response == nil {
+		return nil
+	}
+
+	var hops []RedirectHop
+
+	curr := resp.Request.Response
+
+	for curr != nil {
+		reqURL := ""
+
+		method := ""
+		if curr.Request != nil {
+			if curr.Request.URL != nil {
+				reqURL = curr.Request.URL.String()
+			}
+
+			method = curr.Request.Method
+		}
+
+		hops = append(hops, RedirectHop{
+			URL:        reqURL,
+			StatusCode: curr.StatusCode,
+			Method:     method,
+		})
+
+		if curr.Request != nil {
+			curr = curr.Request.Response
+		} else {
+			curr = nil
+		}
+	}
+
+	slices.Reverse(hops)
+
+	return hops
 }
 
 // CertSummary holds extracted information about the server's TLS certificate.
@@ -64,6 +155,33 @@ type CertSummary struct {
 	NotAfter      time.Time
 	SHA256Pin     string
 	DaysRemaining int
+}
+
+// LogValue implements [slog.LogValuer] for structured logging with log/slog.
+func (c *CertSummary) LogValue() slog.Value {
+	if c == nil {
+		return slog.Value{}
+	}
+
+	return slog.GroupValue(
+		slog.String("issuer", c.Issuer),
+		slog.String("subject", c.Subject),
+		slog.Int("days_remaining", c.DaysRemaining),
+		slog.String("sha256_pin", c.SHA256Pin),
+	)
+}
+
+// TruncateBody safely limits body payload output length to maxBytes to prevent console/log spam.
+func TruncateBody(body []byte, maxBytes int) string {
+	if maxBytes <= 0 {
+		maxBytes = 4096 // Default 4 KB debug limit
+	}
+
+	if len(body) <= maxBytes {
+		return string(body)
+	}
+
+	return fmt.Sprintf("%s... [truncated %d bytes]", string(body[:maxBytes]), len(body)-maxBytes)
 }
 
 // CertSummary extracts and returns structured details for the peer certificate.
@@ -158,33 +276,4 @@ func ComputeJA4HFromRequest(req *http.Request) string {
 	}
 
 	return ja4.ComputeJA4H(method, proto, headers, hasCookie, hasReferer, acceptLanguage, cookieNames, cookieValues)
-}
-
-// CurlFromRequest builds a shell-compatible curl command string from an [http.Request] and body payload.
-func CurlFromRequest(req *http.Request, body []byte) string {
-	var sb strings.Builder
-
-	sb.WriteString("curl")
-
-	if req.Method != http.MethodGet {
-		fmt.Fprintf(&sb, " -X %s", req.Method)
-	}
-
-	for key, values := range req.Header {
-		for _, value := range values {
-			escapedKey := strings.ReplaceAll(key, "'", "'\\''")
-			escapedVal := strings.ReplaceAll(value, "'", "'\\''")
-			fmt.Fprintf(&sb, " -H '%s: %s'", escapedKey, escapedVal)
-		}
-	}
-
-	if len(body) > 0 {
-		escaped := strings.ReplaceAll(string(body), "'", "'\\''")
-		fmt.Fprintf(&sb, " -d '%s'", escaped)
-	}
-
-	escapedURL := strings.ReplaceAll(req.URL.String(), "'", "'\\''")
-	fmt.Fprintf(&sb, " '%s'", escapedURL)
-
-	return sb.String()
 }

@@ -6,12 +6,14 @@ package aoni
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"maps"
 	"net"
 	"net/http"
 	"net/url"
 	"slices"
+	"strings"
 	"sync"
 	"time"
 
@@ -149,6 +151,9 @@ type EngineConfig struct {
 	// InsecureSkipVerify disables TLS certificate verification globally on the transport.
 	// Warning: Enabling this exposes connections to man-in-the-middle attacks.
 	InsecureSkipVerify bool
+
+	// CheckRedirect defines a custom redirect policy function.
+	CheckRedirect func(req *http.Request, via []*http.Request) error
 }
 
 const redirectLimitUnset = -2
@@ -170,6 +175,12 @@ type ConnectionPoolConfig struct {
 
 	// MaxConnsPerHost is the maximum total number of concurrent connections allowed per host.
 	MaxConnsPerHost int
+
+	// ReadBufferSize specifies the size of the read buffer in bytes for I/O operations (e.g. 64 KB).
+	ReadBufferSize int
+
+	// WriteBufferSize specifies the size of the write buffer in bytes for I/O operations (e.g. 64 KB).
+	WriteBufferSize int
 }
 
 // HTTP2Config configures low-level HTTP/2 connection parameters.
@@ -527,10 +538,12 @@ type ProxyFailoverConfig struct {
 	RetryLimit int
 }
 
-// HedgingConfig configures the request hedging delay and dynamic tracker.
+// HedgingConfig configures the request hedging delay, rate limits, and idempotency rules.
 type HedgingConfig struct {
-	DynamicHedging *telemetry.DynamicHedgingConfig
-	DefaultDelay   time.Duration
+	DynamicHedging       *telemetry.DynamicHedgingConfig
+	DefaultDelay         time.Duration
+	MaxRequestsPerSecond int
+	AllowNonReadOnly     bool
 }
 
 // HARConfig configures capturing completed session logging to a HAR Tracker.
@@ -574,6 +587,7 @@ type ClientDefaults struct {
 	HeadersCookieJar     http.CookieJar
 	QueryEncoder         QueryEncoder
 	ResponseValidator    func(*http.Response) error
+	OnPanic              func(ctx context.Context, err any, stack []byte)
 	UARotationProfiles   []BrowserProfile
 	Pipeline             PipelineConfig
 	MaxResponseSize      int64
@@ -686,6 +700,8 @@ type ProgressFunc = io.ProgressFunc
 type RequestConfig struct {
 	Decoder                 any
 	ErrorModel              any
+	ForceContentType        string
+	Label                   string
 	UploadProgress          ProgressFunc
 	DownloadProgress        ProgressFunc
 	Capturer                any
@@ -723,11 +739,12 @@ type RequestConfig struct {
 	HappyEyeballsDelay time.Duration
 	TCPDelay           TCPDelayRange
 
-	MultiReadDisableDisk bool
-	Debug                bool
-	InsecureSkipVerify   bool
-	SSRFGuard            bool
-	ProxyDNS             bool
+	MultiReadDisableDisk    bool
+	AllowNonReadOnlyHedging bool
+	Debug                   bool
+	InsecureSkipVerify      bool
+	SSRFGuard               bool
+	ProxyDNS                bool
 }
 
 // ApplyDefaults merges client-level defaults into the request config
@@ -843,6 +860,45 @@ type BaseResponse interface {
 // HARTracker defines the interface for recording HTTP archive logs.
 type HARTracker interface {
 	Record(req *http.Request, resp *http.Response, startTime time.Time, duration int64)
+}
+
+var ErrRedirectDomainForbidden = errors.New("aoni: redirect domain not allowed")
+
+// AllowedDomainsRedirectPolicy returns a CheckRedirect function that restricts HTTP redirects to a list of allowed domains.
+// Supports exact domain matches ("example.com") and wildcard subdomain matches ("*.example.com").
+func AllowedDomainsRedirectPolicy(allowedDomains ...string) func(req *http.Request, via []*http.Request) error {
+	return func(req *http.Request, via []*http.Request) error {
+		if len(via) >= 10 {
+			return errors.New("stopped after 10 redirects")
+		}
+
+		if req.URL == nil {
+			return nil
+		}
+
+		host := strings.ToLower(req.URL.Hostname())
+		allowed := false
+
+		for _, domain := range allowedDomains {
+			d := strings.ToLower(domain)
+			if strings.HasPrefix(d, "*.") {
+				suffix := d[1:]
+				if strings.HasSuffix(host, suffix) || host == d[2:] {
+					allowed = true
+					break
+				}
+			} else if host == d {
+				allowed = true
+				break
+			}
+		}
+
+		if !allowed {
+			return fmt.Errorf("%w: %s", ErrRedirectDomainForbidden, host)
+		}
+
+		return nil
+	}
 }
 
 // DefaultRedirectPolicy returns a function suitable for [http.Client.CheckRedirect].

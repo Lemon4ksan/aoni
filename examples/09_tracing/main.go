@@ -5,7 +5,7 @@
 // Example: Request tracing and curl command generation.
 //
 // Demonstrates Trace(&info) for timing measurements (DNS, TCP, TLS, TTFB),
-// TraceJA4(&info) for JA4 fingerprinting, and AsCurl() for curl reproduction.
+// TraceJA4(&info) for JA4 fingerprinting, and WithCurlDump() for curl reproduction.
 package main
 
 import (
@@ -55,7 +55,7 @@ func main() {
 	fmt.Printf("Request Size:  %d bytes\n", info.RequestSize)
 	fmt.Printf("Response Size: %d bytes\n", info.ResponseSize)
 
-	// AsCurl + CaptureResponse: capture the raw response for curl generation
+	// WithCurlDump + CaptureResponse: capture the raw response for curl generation
 	var resp *http.Response
 
 	_, err = request.GetTo[HTTPBinResponse](ctx, client, "/ip",

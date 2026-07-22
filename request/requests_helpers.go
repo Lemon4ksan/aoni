@@ -250,9 +250,21 @@ func HandleResponse(resp *http.Response, target any, requester aoni.Requester) e
 	if resp.Request != nil {
 		cfg := aoni.GetRequestConfig(resp.Request.Context())
 
-		if cfg != nil && cfg.Decoder != nil {
-			if d, ok := cfg.Decoder.(decode.Decoder); ok {
-				decoder = d
+		if cfg != nil {
+			if cfg.ForceContentType != "" {
+				mime := strings.ToLower(cfg.ForceContentType)
+				switch {
+				case strings.Contains(mime, "xml"):
+					decoder = decode.XMLDecoder
+				case strings.Contains(mime, "json"):
+					decoder = decode.JSONDecoder
+				}
+			}
+
+			if cfg.Decoder != nil {
+				if d, ok := cfg.Decoder.(decode.Decoder); ok {
+					decoder = d
+				}
 			}
 		}
 	}
