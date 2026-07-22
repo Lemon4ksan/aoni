@@ -1,6 +1,6 @@
 // Copyright (c) 2026 Lemon4ksan All rights reserved.
 // Use of this source code is governed by a BSD-style
-// license that can be found in the LICENSE file.
+// license can be found in the LICENSE file.
 
 package telemetry
 
@@ -9,23 +9,37 @@ import (
 	"encoding/json"
 	"io"
 	"net/http"
+	"strings"
 	"sync"
 	"time"
 )
 
-// HARGenerator accumulates HTTP request-response entries.
+// HARGenerator thread-safely captures and aggregates HTTP request-response
+// transactions into a standard-compliant HTTP Archive (HAR) format.
 type HARGenerator struct {
 	mu      sync.RWMutex
 	entries []HAREntry
 }
 
-// NewHARGenerator creates a new HARGenerator.
+// NewHARGenerator instantiates an empty [HARGenerator] ready to record sessions.
 func NewHARGenerator() *HARGenerator {
-	return &HARGenerator{}
+	return &HARGenerator{
+		entries: make([]HAREntry, 0),
+	}
 }
 
-// Record implements the aoni.HARTracker interface.
-// It compiles the request and response details into a standard HAR entry.
+// Record compiles the transaction detail of a completed request and response cycle
+// into a structured HAR entry.
+//
+// Preconditions:
+//   - The response argument must not be nil.
+//
+// Side effects:
+//   - If the response is text-based and its size is under 150 KB, the body is read,
+//     buffered, and transparently replaced with a fresh [io.ReadCloser] to ensure
+//     subsequent readers can still consume the response body stream cleanly.
+//   - If the response body is binary or exceeds 150 KB, body capture is skipped
+//     defensively to prevent memory exhaustion (OOM).
 func (g *HARGenerator) Record(
 	req *http.Request,
 	resp *http.Response,
@@ -36,7 +50,7 @@ func (g *HARGenerator) Record(
 		return
 	}
 
-	var reqHeaders []HARHeaderField
+	reqHeaders := make([]HARHeaderField, 0, len(req.Header))
 	for k, v := range req.Header {
 		for _, val := range v {
 			reqHeaders = append(reqHeaders, HARHeaderField{Name: k, Value: val})
@@ -44,24 +58,70 @@ func (g *HARGenerator) Record(
 	}
 
 	var reqBodySize int64
-	if req.Body != nil && req.Body != http.NoBody {
-		if req.ContentLength > 0 {
-			reqBodySize = req.ContentLength
+	if req.Body != nil && req.Body != http.NoBody && req.ContentLength > 0 {
+		reqBodySize = req.ContentLength
+	}
+
+	reqQuery := make([]HARQueryField, 0, len(req.URL.Query()))
+	for k, v := range req.URL.Query() {
+		for _, val := range v {
+			reqQuery = append(reqQuery, HARQueryField{Name: k, Value: val})
 		}
 	}
 
-	var respHeaders []HARHeaderField
+	reqCookies := make([]HARCookieField, 0, len(req.Cookies()))
+	for _, c := range req.Cookies() {
+		reqCookies = append(reqCookies, HARCookieField{
+			Name:     c.Name,
+			Value:    c.Value,
+			Path:     c.Path,
+			Domain:   c.Domain,
+			Expires:  c.Expires.Format(time.RFC3339Nano),
+			HTTPOnly: c.HttpOnly,
+			Secure:   c.Secure,
+		})
+	}
+
+	respHeaders := make([]HARHeaderField, 0, len(resp.Header))
 	for k, v := range resp.Header {
 		for _, val := range v {
 			respHeaders = append(respHeaders, HARHeaderField{Name: k, Value: val})
 		}
 	}
 
+	respCookies := make([]HARCookieField, 0, len(resp.Cookies()))
+	for _, c := range resp.Cookies() {
+		respCookies = append(respCookies, HARCookieField{
+			Name:     c.Name,
+			Value:    c.Value,
+			Path:     c.Path,
+			Domain:   c.Domain,
+			Expires:  c.Expires.Format(time.RFC3339Nano),
+			HTTPOnly: c.HttpOnly,
+			Secure:   c.Secure,
+		})
+	}
+
 	var bodyBytes []byte
 	if resp.Body != nil {
-		bodyBytes, _ = io.ReadAll(resp.Body)
-		_ = resp.Body.Close()
-		resp.Body = io.NopCloser(bytes.NewReader(bodyBytes))
+		contentType := resp.Header.Get("Content-Type")
+		isText := strings.Contains(contentType, "json") ||
+			strings.Contains(contentType, "text") ||
+			strings.Contains(contentType, "xml")
+
+		if isText && (resp.ContentLength == -1 || resp.ContentLength < 150*1024) {
+			limitReader := io.LimitReader(resp.Body, 150*1024+1)
+			bodyBytes, _ = io.ReadAll(limitReader)
+			_ = resp.Body.Close()
+
+			if int64(len(bodyBytes)) > 150*1024 {
+				bodyBytes = []byte("[Truncated: Response too large for HAR log]")
+			}
+
+			resp.Body = io.NopCloser(bytes.NewReader(bodyBytes))
+		} else {
+			bodyBytes = []byte("[Skipped: Binary or large response body]")
+		}
 	}
 
 	g.AddEntry(HAREntry{
@@ -72,8 +132,8 @@ func (g *HARGenerator) Record(
 			URL:         req.URL.String(),
 			HTTPVersion: req.Proto,
 			Headers:     reqHeaders,
-			Cookies:     []any{},
-			QueryString: []any{},
+			Cookies:     reqCookies,
+			QueryString: reqQuery,
 			HeadersSize: -1,
 			BodySize:    reqBodySize,
 		},
@@ -82,7 +142,7 @@ func (g *HARGenerator) Record(
 			StatusText:  resp.Status,
 			HTTPVersion: resp.Proto,
 			Headers:     respHeaders,
-			Cookies:     []any{},
+			Cookies:     respCookies,
 			Content: HARContent{
 				Size:     int64(len(bodyBytes)),
 				MimeType: resp.Header.Get("Content-Type"),
@@ -109,10 +169,15 @@ func (g *HARGenerator) AddEntry(entry HAREntry) {
 	g.entries = append(g.entries, entry)
 }
 
-// Export returns the serialized HAR archive JSON bytes.
+// Export serializes the logged entries into standard HAR JSON format.
 func (g *HARGenerator) Export() ([]byte, error) {
 	g.mu.RLock()
 	defer g.mu.RUnlock()
+
+	entries := g.entries
+	if entries == nil {
+		entries = make([]HAREntry, 0)
+	}
 
 	log := HARLog{
 		Log: HARLogDetail{
@@ -121,7 +186,7 @@ func (g *HARGenerator) Export() ([]byte, error) {
 				Name:    "aoni",
 				Version: "0.5.0",
 			},
-			Entries: g.entries,
+			Entries: entries,
 		},
 	}
 
@@ -162,8 +227,8 @@ type HARRequest struct {
 	URL         string           `json:"url"`
 	HTTPVersion string           `json:"httpVersion"`
 	Headers     []HARHeaderField `json:"headers"`
-	Cookies     []any            `json:"cookies"`
-	QueryString []any            `json:"queryString"`
+	Cookies     []HARCookieField `json:"cookies"`
+	QueryString []HARQueryField  `json:"queryString"`
 	HeadersSize int              `json:"headersSize"`
 	BodySize    int64            `json:"bodySize"`
 }
@@ -174,7 +239,7 @@ type HARResponse struct {
 	StatusText  string           `json:"statusText"`
 	HTTPVersion string           `json:"httpVersion"`
 	Headers     []HARHeaderField `json:"headers"`
-	Cookies     []any            `json:"cookies"`
+	Cookies     []HARCookieField `json:"cookies"`
 	Content     HARContent       `json:"content"`
 	RedirectURL string           `json:"redirectURL"`
 	HeadersSize int              `json:"headersSize"`
@@ -183,6 +248,23 @@ type HARResponse struct {
 
 // HARHeaderField represents an HTTP header name-value pair in the HAR log.
 type HARHeaderField struct {
+	Name  string `json:"name"`
+	Value string `json:"value"`
+}
+
+// HARCookieField represents a cookie in the HAR log.
+type HARCookieField struct {
+	Name     string `json:"name"`
+	Value    string `json:"value"`
+	Path     string `json:"path"`
+	Domain   string `json:"domain"`
+	Expires  string `json:"expires"`
+	HTTPOnly bool   `json:"httpOnly"`
+	Secure   bool   `json:"secure"`
+}
+
+// HARQueryField represents an URL query parameter in the HAR log.
+type HARQueryField struct {
 	Name  string `json:"name"`
 	Value string `json:"value"`
 }

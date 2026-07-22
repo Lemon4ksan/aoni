@@ -15,7 +15,7 @@ import (
 	"github.com/lemon4ksan/aoni/request"
 
 	"github.com/lemon4ksan/aoni"
-	"github.com/lemon4ksan/aoni/p0f"
+	"github.com/lemon4ksan/aoni/fingerprint/p0f"
 )
 
 type IPResponse struct {

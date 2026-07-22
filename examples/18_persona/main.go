@@ -16,6 +16,7 @@ import (
 	"net/http/httptest"
 	"time"
 
+	"github.com/lemon4ksan/aoni/fingerprint"
 	"github.com/lemon4ksan/aoni/option"
 	"github.com/lemon4ksan/aoni/request"
 
@@ -43,7 +44,7 @@ func main() {
 	// Create client with Chrome 120 Windows persona
 	chromeClient := aoni.NewClient(nil,
 		option.WithBaseURL(server.URL),
-	).WithPersona(aoni.PersonaChrome120Windows)
+	).WithPersona(fingerprint.PersonaChrome120Windows)
 
 	res, err := request.GetTo[Response](ctx, chromeClient, "/headers")
 	if err != nil {
@@ -58,7 +59,7 @@ func main() {
 	// Create client with Firefox 120 Windows persona
 	firefoxClient := aoni.NewClient(nil,
 		option.WithBaseURL(server.URL),
-	).WithPersona(aoni.PersonaFirefox120Windows)
+	).WithPersona(fingerprint.PersonaFirefox120Windows)
 
 	res, err = request.GetTo[Response](ctx, firefoxClient, "/headers")
 	if err != nil {

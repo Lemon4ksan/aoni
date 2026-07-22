@@ -16,6 +16,7 @@ import (
 
 	"github.com/lemon4ksan/aoni/option"
 	"github.com/lemon4ksan/aoni/request"
+	lb "github.com/lemon4ksan/aoni/resiliency/loadbalancer"
 
 	"github.com/lemon4ksan/aoni"
 )
@@ -28,10 +29,10 @@ func main() {
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
 
-	// Create a load balancer with weighted round-robin
-	lb, err := aoni.NewLoadBalancer(
-		aoni.LoadBalancerConfig{
-			Strategy:   aoni.WeightedRoundRobin,
+	// Create a load balancer1 with weighted round-robin
+	balancer1, err := lb.New(
+		lb.Config{
+			Strategy:   lb.WeightedRoundRobin,
 			MaxFails:   3,
 			RetryAfter: 30 * time.Second,
 		},
@@ -42,10 +43,10 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
-	defer lb.Close()
+	defer balancer1.Close()
 
 	// Wrap the load balancer as the HTTP doer for a client
-	client := aoni.NewClient(lb,
+	client := aoni.NewClient(balancer1,
 		option.WithBaseURL("https://httpbin.org"),
 	)
 
@@ -61,34 +62,34 @@ func main() {
 	}
 
 	// Update backends dynamically
-	lb.UpdateBackends(
+	balancer1.UpdateBackends(
 		"https://server-a.example.com",
 		"https://server-b.example.com",
 	)
 
 	// RoundRobin strategy example
-	lb2, _ := aoni.NewLoadBalancer(
-		aoni.LoadBalancerConfig{
-			Strategy: aoni.RoundRobin,
+	balancer2, _ := lb.New(
+		lb.Config{
+			Strategy: lb.RoundRobin,
 		},
 		"https://api1.example.com",
 		"https://api2.example.com",
 	)
-	defer lb2.Close()
+	defer balancer2.Close()
 
-	_ = lb2
+	_ = balancer2
 
 	// Random strategy example
-	lb3, _ := aoni.NewLoadBalancer(
-		aoni.LoadBalancerConfig{
-			Strategy: aoni.Random,
+	balancer3, _ := lb.New(
+		lb.Config{
+			Strategy: lb.Random,
 		},
 		"https://cdn1.example.com",
 		"https://cdn2.example.com",
 	)
-	defer lb3.Close()
+	defer balancer3.Close()
 
-	_ = lb3
+	_ = balancer3
 
 	fmt.Println("Load balancer examples completed")
 }

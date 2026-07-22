@@ -6,39 +6,50 @@ package cookie
 
 import "net/http"
 
-// Transport intercepts requests and responses at the transport level,
-// providing context-safe cookie isolation based on the active proxy server.
+// Transport intercepts HTTP round-trips to automatically inject and store cookies
+// in a [ProxyIsolatedJar] based on the request's active proxy context.
 type Transport struct {
 	Next      http.RoundTripper
 	CookieJar *ProxyIsolatedJar
 }
 
-// RoundTrip automatically injects cookies before sending and extracts them from the response.
-// Works correctly for every redirect, preserving the original request's context.
+// RoundTrip injects isolated proxy cookies into outgoing request headers
+// and extracts response cookies back into the proxy jar.
 func (t *Transport) RoundTrip(req *http.Request) (*http.Response, error) {
-	jar := t.CookieJar.GetJar(req.Context())
-	if jar != nil {
-		for _, cookie := range jar.Cookies(req.URL) {
-			req.AddCookie(cookie)
+	next := t.Next
+	if next == nil {
+		next = http.DefaultTransport
+	}
+
+	if t.CookieJar != nil {
+		if jar := t.CookieJar.GetJar(req.Context()); jar != nil {
+			for _, c := range jar.Cookies(req.URL) {
+				req.AddCookie(c)
+			}
 		}
 	}
 
-	resp, err := t.Next.RoundTrip(req)
+	resp, err := next.RoundTrip(req)
 	if err != nil {
 		return nil, err
 	}
 
-	if jar != nil {
-		if rc := resp.Cookies(); len(rc) > 0 {
-			jar.SetCookies(req.URL, rc)
+	if t.CookieJar != nil && resp != nil {
+		if jar := t.CookieJar.GetJar(req.Context()); jar != nil {
+			if rc := resp.Cookies(); len(rc) > 0 {
+				jar.SetCookies(req.URL, rc)
+			}
 		}
 	}
 
 	return resp, nil
 }
 
-// Unwrap returns the underlying transport, allowing http.Client.Clone
-// to properly unwrap and re-wrap the transport chain.
+// Unwrap returns the underlying [http.RoundTripper] for transport wrapper chaining.
 func (t *Transport) Unwrap() http.RoundTripper {
-	return t.Next
+	if t.Next != nil {
+		return t.Next
+	}
+
+	return http.DefaultTransport
 }

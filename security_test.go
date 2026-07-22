@@ -5,133 +5,13 @@
 package aoni
 
 import (
-	"errors"
 	stdio "io"
 	"net"
 	"testing"
-	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
-
-func TestIsBlockedIP(t *testing.T) {
-	t.Parallel()
-
-	tests := []struct {
-		name    string
-		ip      string
-		blocked bool
-	}{
-		{"loopback v4", "127.0.0.1", true},
-		{"loopback v6", "::1", true},
-		{"zero v4", "0.0.0.0", true},
-		{"private 10.x", "10.0.0.1", true},
-		{"private 172.16.x", "172.16.0.1", true},
-		{"private 192.168.x", "192.168.1.1", true},
-		{"link-local", "169.254.1.1", true},
-		{"unique-local v6", "fd00::1", true},
-		{"public v4", "8.8.8.8", false},
-		{"public v6", "2001:4860:4860::8888", false},
-		{"cloudflare", "1.1.1.1", false},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
-
-			ip := net.ParseIP(tt.ip)
-			require.NotNil(t, ip, "invalid IP: %s", tt.ip)
-			assert.Equal(t, tt.blocked, IsBlockedIP(ip))
-		})
-	}
-}
-
-func TestIsBlockedIP_AdvancedIPv6AndObfuscation(t *testing.T) {
-	t.Parallel()
-
-	tests := []struct {
-		name    string
-		ip      string
-		blocked bool
-	}{
-		{"IPv4-mapped IPv6 loopback", "::ffff:127.0.0.1", true},
-		{"IPv4-mapped IPv6 private 10.x", "::ffff:10.0.0.1", true},
-		{"IPv4-mapped IPv6 public", "::ffff:8.8.8.8", false},
-		{"Link-local unicast v6", "fe80::1", true},
-		{"Multicast v6 node-local", "ff01::1", true},
-		{"Unique local v6 fc00::/8 boundary", "fc00::1", true},
-		{"Unique local v6 fd00::/8 boundary", "fd00::1", true},
-		{"IPv4 loopback range 127.0.0.2", "127.0.0.2", true},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
-
-			ip := net.ParseIP(tt.ip)
-			require.NotNil(t, ip, "failed to parse IP: %s", tt.ip)
-			assert.Equal(t, tt.blocked, IsBlockedIP(ip))
-		})
-	}
-}
-
-func TestRetryOnTransientErrors(t *testing.T) {
-	t.Parallel()
-
-	cond := RetryOnTransientErrors()
-
-	t.Run("nil_error_returns_false", func(t *testing.T) {
-		t.Parallel()
-		assert.False(t, cond(nil, nil))
-	})
-
-	t.Run("net_error_returns_true", func(t *testing.T) {
-		t.Parallel()
-
-		_, err := net.DialTimeout("tcp", "192.0.2.1:1", time.Nanosecond)
-		if !assert.True(t, cond(nil, err)) {
-			t.Logf("Actual error: %v (type: %T)", err, err)
-		}
-	})
-
-	t.Run("connection_refused_string_returns_true", func(t *testing.T) {
-		t.Parallel()
-		assert.True(t, cond(nil, errors.New("dial tcp: connection refused")))
-	})
-
-	t.Run("io_eof_returns_false", func(t *testing.T) {
-		t.Parallel()
-		assert.False(t, cond(nil, stdio.ErrUnexpectedEOF))
-	})
-}
-
-func TestGeneratePadding_SafetyLimits(t *testing.T) {
-	t.Parallel()
-
-	t.Run("negative padding ranges", func(t *testing.T) {
-		t.Parallel()
-
-		cfg := PaddingConfig{
-			MinPaddingBytes: -20,
-			MaxPaddingBytes: -10,
-		}
-		res := GeneratePadding(cfg)
-		assert.Nil(t, res)
-	})
-
-	t.Run("inverted padding ranges", func(t *testing.T) {
-		t.Parallel()
-
-		cfg := PaddingConfig{
-			MinPaddingBytes: 30,
-			MaxPaddingBytes: 10,
-		}
-		res := GeneratePadding(cfg)
-		require.NotNil(t, res)
-		assert.Equal(t, 30, len(res), "expected range inversion to automatically align size to minimum boundary")
-	})
-}
 
 func TestWrapWithMSSLimit_NegativeMSS(t *testing.T) {
 	t.Parallel()
@@ -139,8 +19,8 @@ func TestWrapWithMSSLimit_NegativeMSS(t *testing.T) {
 	c1, c2 := net.Pipe()
 	t.Cleanup(func() { _ = c1.Close(); _ = c2.Close() })
 
-	wrapped := connWrapper{}.WithMSSLimit(c1, -100)
-	assert.NotNil(t, wrapped, "negative MSS size should be ignored gracefully without breaking the stream")
+	wrapped := applyMSSLimit(c1, -100)
+	assert.NotNil(t, wrapped, "negative MSS size should be ignored gracefully")
 }
 
 func TestFragmentedConn_Write(t *testing.T) {
@@ -163,7 +43,7 @@ func TestFragmentedConn_Write(t *testing.T) {
 	ch := make(chan writeResult, 1)
 
 	go func() {
-		n, err := fragmentedConnWrite(fragmented, []byte("test"))
+		n, err := fragmented.Write([]byte("test"))
 		ch <- writeResult{n: n, err: err}
 	}()
 
@@ -181,6 +61,58 @@ func TestFragmentedConn_Write(t *testing.T) {
 	assert.Equal(t, 4, res.n)
 }
 
-func fragmentedConnWrite(conn net.Conn, b []byte) (int, error) {
-	return conn.Write(b)
+func TestApplyMSSLimit(t *testing.T) {
+	t.Parallel()
+
+	t.Run("zero_or_negative_mss", func(t *testing.T) {
+		t.Parallel()
+
+		_, client := net.Pipe()
+		res := applyMSSLimit(client, 0)
+		assert.Equal(t, client, res)
+		_ = client.Close()
+	})
+
+	t.Run("non_tcp_conn", func(t *testing.T) {
+		t.Parallel()
+
+		_, client := net.Pipe()
+		res := applyMSSLimit(client, 512)
+		assert.Equal(t, client, res)
+		_ = client.Close()
+	})
+
+	t.Run("real_tcp_conn", func(t *testing.T) {
+		t.Parallel()
+
+		listener, err := net.Listen("tcp", "127.0.0.1:0")
+		require.NoError(t, err)
+		t.Cleanup(func() { _ = listener.Close() })
+
+		var (
+			serverConn net.Conn
+			acceptErr  error
+		)
+
+		done := make(chan struct{})
+
+		go func() {
+			defer close(done)
+
+			serverConn, acceptErr = listener.Accept()
+		}()
+
+		clientConn, err := net.Dial("tcp", listener.Addr().String())
+		require.NoError(t, err)
+		t.Cleanup(func() { _ = clientConn.Close() })
+
+		<-done
+		require.NoError(t, acceptErr)
+		t.Cleanup(func() { _ = serverConn.Close() })
+
+		// Apply MSS limit to the client connection
+		res := applyMSSLimit(clientConn, 512)
+		assert.NotNil(t, res)
+		assert.Equal(t, clientConn, res)
+	})
 }

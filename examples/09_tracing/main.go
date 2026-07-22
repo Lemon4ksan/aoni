@@ -18,6 +18,7 @@ import (
 	"github.com/lemon4ksan/aoni/mod"
 	"github.com/lemon4ksan/aoni/option"
 	"github.com/lemon4ksan/aoni/request"
+	"github.com/lemon4ksan/aoni/telemetry"
 
 	"github.com/lemon4ksan/aoni"
 )
@@ -35,10 +36,10 @@ func main() {
 	)
 
 	// Trace with full timing breakdown
-	var info aoni.TraceInfo
+	var info telemetry.TraceInfo
 
 	_, err := request.GetTo[HTTPBinResponse](ctx, client, "/ip",
-		aoni.Trace(&info),
+		mod.Trace(&info),
 	)
 	if err != nil {
 		log.Fatal(err)
@@ -70,6 +71,6 @@ func main() {
 	}
 
 	// Generate curl command from a request
-	curlCmd := aoni.CurlCommand(nil, nil)
+	curlCmd := telemetry.CurlFromRequest(nil, nil)
 	fmt.Printf("\nCurl command generator: %s\n", curlCmd)
 }

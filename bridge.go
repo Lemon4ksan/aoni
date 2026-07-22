@@ -1,6 +1,6 @@
 // Copyright (c) 2026 Lemon4ksan All rights reserved.
 // Use of this source code is governed by a BSD-style
-// license that can be found in the LICENSE file.
+// license can be found in the LICENSE file.
 
 package aoni
 
@@ -9,24 +9,21 @@ import (
 	"maps"
 	"net/http"
 	"net/url"
+
+	"github.com/lemon4ksan/miyako/generic"
 )
 
-// NewStdClient returns a standard [http.Client] whose transport routes all
-// requests through the configured aoni [Client] pipeline.
+// ErrNilURL is returned when attempting to route an outbound HTTP request
+// that does not specify a destination URL.
+var ErrNilURL = errors.New("aoni bridge: request URL is nil")
+
+// NewStdClient adapts an aoni [Client] into a standard [*http.Client].
 //
-// The returned client has Jar set to nil to avoid double cookie handling.
-// The aoni [ProxyIsolatedCookieJar] manages cookies internally.
-//
-// Usage:
-//
-//	client := NewClient(nil,
-//	    option.WithTLSFingerprint(BrowserChrome),
-//	    option.WithDoHResolver(),
-//	)
-//	stdClient := NewStdClient(client)
-//
-//	// Use with any third-party library
-//	restyClient.SetHTTPClient(stdClient)
+// This client bridges third-party libraries (e.g., resty or custom API SDKs)
+// with aoni's custom transport pipeline. It configures the underlying
+// transport and intentionally disables the client's default cookie jar.
+// This allows the internal aoni pipeline (such as [ProxyIsolatedCookieJar])
+// to manage cookies internally, preventing double-cookie handling issues.
 func NewStdClient(c *Client) *http.Client {
 	return &http.Client{
 		Transport: NewTransport(c),
@@ -34,113 +31,141 @@ func NewStdClient(c *Client) *http.Client {
 	}
 }
 
-// NewTransport returns a new [http.RoundTripper] (specifically [Transport])
-// configured to route all requests through the provided aoni [Client].
-// This allows developers to integrate aoni's advanced transport features into
-// existing [http.Client] instances simply by swapping the Transport field.
+// NewTransport constructs an [http.RoundTripper] (as a [*Transport]) configured
+// to pass all outgoing requests through the provided aoni [Client].
+//
+// Swap this transport into an existing [*http.Client] to seamlessly inject
+// aoni's advanced transport features (like JA4, happy eyeballs, and SSRF protection)
+// without replacing the client itself.
 func NewTransport(c *Client) *Transport {
 	return &Transport{client: c}
 }
 
-// Transport implements [http.RoundTripper] by routing requests through
-// a configured aoni [Client] pipeline.
+// Transport implements the standard [http.RoundTripper] interface, intercepting
+// outbound requests and delegating them to an active aoni [Client] pipeline.
 type Transport struct {
 	client *Client
 
-	// BeforeRoundTrip is an optional lifecycle hook executed immediately before
-	// the request is dispatched through the aoni engine.
+	// BeforeRoundTrip runs immediately before a request enters the aoni engine.
 	//
-	// It receives the cloned, pre-configured [Client] and the original request,
-	// and must return the final [Client] to be used. This allows flexible,
-	// dynamic transport-level adjustments (such as adding headers, configuring
-	// authentication, or overriding client settings dynamically).
+	// It provides a clone of the executing [Client] and the original request,
+	// allowing dynamic modifications (e.g., adding headers or altering configuration)
+	// on a per-request basis. The callback must return the final [Client] state.
 	//
-	// Any changes made to cloned Client within this hook should not result in state sharing
-	// between goroutines, as the returned client will only be used for one specific Request().
+	// To prevent concurrent state sharing or race conditions, the modified client
+	// is isolated strictly to the current request execution cycle.
 	BeforeRoundTrip func(cloned *Client, origReq *http.Request) *Client
 }
 
-// RoundTrip extracts modifiers from the request context, applies them to the
-// request, and delegates to the full aoni pipeline (SSRF guard, Happy Eyeballs,
-// uTLS/JA4, middleware, proxy rotation, decompression, etc.).
+// RoundTrip satisfies [http.RoundTripper] by extracting request modifiers from
+// the context, merging request metadata, and executing the request via aoni.
 //
-// In accordance with standard [http.RoundTripper] requirements, it returns errors
-// wrapped as [*url.Error].
+// Following standard specifications, all errors encountered
+// during execution are returned wrapped in a [*url.Error], and the request body
+// is guaranteed to be closed to prevent resource leaks.
+//
+// The incoming request's URL field must not be nil, otherwise [ErrNilURL] is returned.
 func (t *Transport) RoundTrip(origReq *http.Request) (*http.Response, error) {
 	if origReq.URL == nil {
+		if origReq.Body != nil {
+			_ = origReq.Body.Close()
+		}
+
 		return nil, &url.Error{
 			Op:  origReq.Method,
 			URL: "",
-			Err: errors.New("aoni bridge: request URL is nil"),
+			Err: ErrNilURL,
 		}
 	}
 
+	cloned := t.prepareClient(origReq)
 	ctxMods := ContextModifiers(origReq.Context())
 
-	// syncModifier copies request metadata from the original request.
-	// Headers are MERGED: origReq headers are added on top of aoni's
-	// defaults, so both global config and per-request headers are preserved.
-	syncModifier := func(req *http.Request) {
-		// Copy non-header fields.
-		req.Method = origReq.Method
-		req.Body = origReq.Body
-		req.ContentLength = origReq.ContentLength
-		req.TransferEncoding = origReq.TransferEncoding
-		req.Close = origReq.Close
-		req.Host = origReq.Host
-		req.GetBody = origReq.GetBody
-		req.URL = origReq.URL
+	modifiers := make([]RequestModifier, 0, 1+len(ctxMods))
+	modifiers = append(modifiers, t.newSyncModifier(origReq))
+	modifiers = append(modifiers, ctxMods...)
 
-		maps.Copy(req.Header, origReq.Header)
+	resp, err := cloned.Request(
+		origReq.Context(),
+		origReq.Method,
+		origReq.URL.RequestURI(),
+		modifiers...,
+	)
+	if err != nil {
+		return nil, t.wrapError(origReq, err)
 	}
 
+	return resp, nil
+}
+
+func (t *Transport) prepareClient(origReq *http.Request) *Client {
 	cloned := t.client.Clone()
 
 	if t.BeforeRoundTrip != nil {
 		cloned = t.BeforeRoundTrip(cloned, origReq)
 	}
 
-	// Preserve the original request's full URL path for relative resolution.
-	// Only overwrite baseURL if the request URL has a valid Host, keeping
-	// the client's configured baseURL for relative or schemeless paths.
 	if origReq.URL.Host != "" {
 		cloned.defaults.BaseURL = &url.URL{
-			Scheme: origReq.URL.Scheme,
+			Scheme: generic.Coalesce(origReq.URL.Scheme, "https"),
 			Host:   origReq.URL.Host,
 		}
 	}
 
-	allMods := make([]RequestModifier, 0, 1+len(ctxMods))
-	allMods = append(allMods, syncModifier)
-	allMods = append(allMods, ctxMods...)
-
-	resp, err := cloned.Request(
-		origReq.Context(),
-		origReq.Method,
-		origReq.URL.RequestURI(),
-		allMods...,
-	)
-	if err != nil {
-		bErr := &BridgeError{
-			Op:       origReq.Method,
-			URL:      origReq.URL.String(),
-			Err:      err,
-			Metadata: make(map[string]any),
-		}
-		if origReq.URL != nil {
-			bErr.Metadata["host"] = origReq.URL.Host
-			bErr.Metadata["scheme"] = origReq.URL.Scheme
-		}
-
-		return nil, &url.Error{
-			Op:  origReq.Method,
-			URL: origReq.URL.String(),
-			Err: bErr,
-		}
-	}
-
-	return resp, nil
+	return cloned
 }
 
-// Ensure AoniTransport implements http.RoundTripper.
+func (t *Transport) newSyncModifier(origReq *http.Request) RequestModifier {
+	return func(aoniReq *http.Request) {
+		resolvedURL := aoniReq.URL
+
+		aoniReq.Method = origReq.Method
+		aoniReq.Body = origReq.Body
+		aoniReq.ContentLength = origReq.ContentLength
+		aoniReq.TransferEncoding = origReq.TransferEncoding
+		aoniReq.Close = origReq.Close
+		aoniReq.Host = origReq.Host
+		aoniReq.GetBody = origReq.GetBody
+
+		if origReq.URL != nil {
+			u := *origReq.URL
+			if resolvedURL != nil {
+				u.Scheme = resolvedURL.Scheme
+				u.Host = resolvedURL.Host
+			}
+
+			aoniReq.URL = &u
+		}
+
+		if aoniReq.Header == nil {
+			aoniReq.Header = make(http.Header)
+		}
+
+		maps.Copy(aoniReq.Header, origReq.Header)
+	}
+}
+
+func (t *Transport) wrapError(origReq *http.Request, err error) error {
+	if origReq.Body != nil {
+		_ = origReq.Body.Close()
+	}
+
+	bridgeErr := &BridgeError{
+		Op:  origReq.Method,
+		URL: origReq.URL.String(),
+		Err: err,
+		Metadata: map[string]any{
+			"host":   origReq.URL.Host,
+			"scheme": origReq.URL.Scheme,
+		},
+	}
+
+	return &url.Error{
+		Op:  origReq.Method,
+		URL: origReq.URL.String(),
+		Err: bridgeErr,
+	}
+}
+
+// Ensure Transport satisfies the http.RoundTripper interface.
 var _ http.RoundTripper = (*Transport)(nil)

@@ -1,38 +1,45 @@
-PKG=$(shell go list ./... | grep -v /vendor/)
-COVER_OUT?=coverage.out
-COVER_PKG?=$(PKG)
+# Discover library packages, excluding examples, scripts, and vendor
+PKG       := $(shell go list ./... | grep -v /examples | grep -v /scripts | grep -v /vendor/)
+COVER_PKG := $(shell go list ./... | grep -v /examples | grep -v /scripts | grep -v /vendor/ | tr '\n' ',' | sed 's/,$$//')
+COVER_OUT ?= coverage.out
 
 # Colors for console output
 CYAN  := \033[0;36m
 RESET := \033[0m
 
-.PHONY: test race cover lint format check-tls-spec update-browsers update-browsers-apply help
+.PHONY: test race cover cover-html lint format clean check-tls-spec update-browsers update-browsers-apply help
 
-test: ## Run normal quick tests
+test: ## Run quick unit tests
 	@printf "$(CYAN)Running unit tests...$(RESET)\n"
 	go test -v $(PKG)
 
-race: ## Run tests with race detector
+race: ## Run unit tests with race detector enabled
 	@printf "$(CYAN)Running tests with race detector...$(RESET)\n"
-	go test -v -race -timeout 30s $(PKG)
+	go test -v -race -timeout 60s $(PKG)
 
-cover: ## Run tests and open the coverage report in a browser
-	@printf "$(CYAN)Generating coverage report...$(RESET)\n"
-	go test -coverprofile=$(COVER_OUT) $(COVER_PKG)
+cover: ## Calculate and print exact core library coverage report
+	@printf "$(CYAN)Generating exact coverage report...$(RESET)\n"
+	go test -coverpkg=$(COVER_PKG) -coverprofile=$(COVER_OUT) $(PKG)
+	go tool cover -func=$(COVER_OUT)
+
+cover-html: cover ## Generate coverage report and open interactive HTML in browser
+	@printf "$(CYAN)Opening coverage report in browser...$(RESET)\n"
 	go tool cover -html=$(COVER_OUT)
 
-lint: ## Check the code with a linter (requires golangci-lint)
+lint: ## Run golangci-lint check
 	@printf "$(CYAN)Running linter...$(RESET)\n"
 	golangci-lint run ./...
 
-clean: ## Delete temporary files and binaries
-	@printf "$(CYAN)Cleaning up...$(RESET)\n"
-	rm -rf bin/
-	rm -f coverage.out
-
-format: ## Run go code formatting
+format: ## Format code and auto-fix linter suggestions
+	@printf "$(CYAN)Formatting Go code...$(RESET)\n"
+	go fmt ./...
 	addlicense -c "Lemon4ksan" -l bsd -ignore "**/*.yml" .
 	golangci-lint run --fix
+
+clean: ## Delete temporary files, binaries, and coverage profiles
+	@printf "$(CYAN)Cleaning up temporary artifacts...$(RESET)\n"
+	rm -rf bin/
+	rm -f $(COVER_OUT)
 
 check-tls-spec: ## Compare project TLS specs against utls.HelloChrome_Auto / HelloFirefox_Auto
 	@printf "$(CYAN)Comparing TLS ClientHello specs...$(RESET)\n"
@@ -46,8 +53,6 @@ update-browsers-apply: ## Apply browser version updates (Chrome, Firefox, iOS, A
 	@printf "$(CYAN)Updating browser versions...$(RESET)\n"
 	bash scripts/update-browser-versions.sh
 
-help: ## Show this message
-	@printf "Usage: make [target]\n"
-	@printf "\n"
-	@printf "Targets:\n"
-	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | sort | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-20s\033[0m %s\n", $$1, $$2}'
+help: ## Show this help message
+	@printf "Usage: make [target]\n\nTargets:\n"
+	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | sort | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-22s\033[0m %s\n", $$1, $$2}'

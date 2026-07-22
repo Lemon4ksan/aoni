@@ -12,8 +12,7 @@ import (
 	"time"
 )
 
-// Cookie holds the data for a cookie in a JSON-serializable structure
-// compatible with standard browser automation tools.
+// Cookie represents a browser cookie structure suitable for JSON serialization and external automation tools.
 type Cookie struct {
 	Name     string    `json:"name"`
 	Value    string    `json:"value"`
@@ -24,8 +23,12 @@ type Cookie struct {
 	Secure   bool      `json:"secure"`
 }
 
-// Mirror copies cookies with the specified names from the sourceURL to all targetURLs within a single jar.
+// Mirror copies cookies matching cookieNames from sourceURL to each targetURL inside jar.
 func Mirror(jar http.CookieJar, sourceURL *url.URL, targetURLs []*url.URL, cookieNames ...string) {
+	if jar == nil || sourceURL == nil || len(targetURLs) == 0 || len(cookieNames) == 0 {
+		return
+	}
+
 	cookies := jar.Cookies(sourceURL)
 	if len(cookies) == 0 {
 		return
@@ -43,33 +46,40 @@ func Mirror(jar http.CookieJar, sourceURL *url.URL, targetURLs []*url.URL, cooki
 	}
 
 	for _, target := range targetURLs {
-		jar.SetCookies(target, toMirror)
+		if target != nil {
+			jar.SetCookies(target, toMirror)
+		}
 	}
 }
 
-// Export prepares cookies for loading into Playwright, Chromedp, or other automation engines.
+// Export retrieves cookies for u from jar and converts them to a slice of [Cookie].
 func Export(jar http.CookieJar, u *url.URL) []Cookie {
 	if jar == nil || u == nil {
 		return nil
 	}
 
-	var exported []Cookie
-	for _, cookie := range jar.Cookies(u) {
+	rawCookies := jar.Cookies(u)
+	if len(rawCookies) == 0 {
+		return nil
+	}
+
+	exported := make([]Cookie, 0, len(rawCookies))
+	for _, c := range rawCookies {
 		exported = append(exported, Cookie{
-			Name:     cookie.Name,
-			Value:    cookie.Value,
-			Domain:   cookie.Domain,
-			Path:     cookie.Path,
-			Expires:  cookie.Expires,
-			HTTPOnly: cookie.HttpOnly,
-			Secure:   cookie.Secure,
+			Name:     c.Name,
+			Value:    c.Value,
+			Domain:   c.Domain,
+			Path:     c.Path,
+			Expires:  c.Expires,
+			HTTPOnly: c.HttpOnly,
+			Secure:   c.Secure,
 		})
 	}
 
 	return exported
 }
 
-// ExportJSON serializes the exported cookies for the given URL directly into a JSON string.
+// ExportJSON serializes exported cookies for u into a JSON string.
 func ExportJSON(jar http.CookieJar, u *url.URL) (string, error) {
 	exported := Export(jar, u)
 	if len(exported) == 0 {
@@ -84,15 +94,15 @@ func ExportJSON(jar http.CookieJar, u *url.URL) (string, error) {
 	return string(b), nil
 }
 
-// Import imports cookies from the browser/automation data into http.CookieJar.
+// Import injects a slice of [Cookie] into jar for target u.
 func Import(jar http.CookieJar, u *url.URL, cookies []Cookie) {
-	if jar == nil || u == nil {
+	if jar == nil || u == nil || len(cookies) == 0 {
 		return
 	}
 
-	var httpCookies []*http.Cookie
+	httpCookies := make([]*http.Cookie, 0, len(cookies))
 	for _, c := range cookies {
-		httpCookies = append(httpCookies, &http.Cookie{ //nolint:gosec
+		httpCookies = append(httpCookies, &http.Cookie{
 			Name:     c.Name,
 			Value:    c.Value,
 			Domain:   c.Domain,
@@ -106,7 +116,7 @@ func Import(jar http.CookieJar, u *url.URL, cookies []Cookie) {
 	jar.SetCookies(u, httpCookies)
 }
 
-// ImportJSON deserializes cookies from a JSON string and imports them into http.CookieJar.
+// ImportJSON deserializes a JSON string of cookies and imports them into jar for target u.
 func ImportJSON(jar http.CookieJar, u *url.URL, jsonStr string) error {
 	if jar == nil || u == nil || jsonStr == "" || jsonStr == "[]" {
 		return nil

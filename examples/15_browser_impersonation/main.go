@@ -17,8 +17,8 @@ import (
 	"github.com/lemon4ksan/aoni/request"
 
 	"github.com/lemon4ksan/aoni"
-	"github.com/lemon4ksan/aoni/profiles/chrome"
-	"github.com/lemon4ksan/aoni/profiles/firefox"
+	"github.com/lemon4ksan/aoni/fingerprint/profiles/chrome"
+	"github.com/lemon4ksan/aoni/fingerprint/profiles/firefox"
 )
 
 type Response struct {

@@ -7,6 +7,7 @@ package aoni
 import (
 	"errors"
 	"fmt"
+	"strings"
 
 	"github.com/lemon4ksan/aoni/internal/io"
 )
@@ -16,14 +17,6 @@ var (
 	// does not match the expected format. A captive portal or
 	// transparent proxy often causes this.
 	ErrUnexpectedContentType = errors.New("aoni: unexpected content-type (possible captive portal or intercept)")
-
-	// ErrCloudflareChallenge indicates a Cloudflare JS challenge or
-	// CAPTCHA was detected in the response body.
-	ErrCloudflareChallenge = errors.New("aoni: cloudflare challenge detected")
-
-	// ErrChallengeRequired indicates that a WAF challenge (Cloudflare, CAPTCHA, etc.)
-	// has been detected and solver verification is required.
-	ErrChallengeRequired = errors.New("aoni: challenge verification required")
 
 	// ErrResponseTooLarge indicates the response exceeded the size
 	// limit configured via [option.WithMaxResponseSize].
@@ -42,7 +35,13 @@ var (
 	// none of the peer certificates matched the configured public key pins.
 	ErrCertificatePinning = errors.New("aoni: certificate pinning validation failed")
 
-	// ErrEmptyDNSProxy is returned by dialers if proxy dns is enabled but the proxy adress is empty.
+	// ErrNoCertificatesPresented is returned when a peer TLS handshake presents zero certificates.
+	ErrNoCertificatesPresented = errors.New("aoni: no certificates presented by peer")
+
+	// ErrInvalidPinFormat is returned when a certificate public key pin hash cannot be decoded.
+	ErrInvalidPinFormat = errors.New("aoni: invalid pin format: must be 32-byte sha256 hash in base64 or hex")
+
+	// ErrEmptyDNSProxy is returned by dialers if proxy dns is enabled but the proxy address is empty.
 	ErrEmptyDNSProxy = errors.New("aoni: proxy DNS enabled but proxy address is empty")
 )
 
@@ -58,6 +57,12 @@ type APIError struct {
 
 // Error returns a human-readable representation of e.
 func (e *APIError) Error() string {
+	if len(e.Body) > 0 {
+		limit := min(len(e.Body), 128)
+		cleanBody := strings.ReplaceAll(string(e.Body[:limit]), "\n", " ")
+		return fmt.Sprintf("aoni: status %d (body: %s)", e.StatusCode, cleanBody)
+	}
+
 	return fmt.Sprintf("aoni: status %d", e.StatusCode)
 }
 

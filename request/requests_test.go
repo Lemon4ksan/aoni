@@ -24,6 +24,7 @@ import (
 	"github.com/lemon4ksan/aoni/cookie"
 	"github.com/lemon4ksan/aoni/mod"
 	"github.com/lemon4ksan/aoni/option"
+	"github.com/lemon4ksan/aoni/resiliency/challenge"
 )
 
 type testPayload struct {
@@ -416,7 +417,7 @@ func TestClient_UnexpectedHTML_Detection(t *testing.T) {
 		})
 
 		_, err := GetTo[reqTestPayload](t.Context(), client, "/cloudflare")
-		assert.ErrorIs(t, err, aoni.ErrCloudflareChallenge)
+		assert.ErrorIs(t, err, challenge.ErrCloudflareDetected)
 	})
 }
 

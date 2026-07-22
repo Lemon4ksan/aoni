@@ -2,13 +2,6 @@
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
-// Package aoni – per-request transport overrides.
-//
-// Every modifier in github.com/lemon4ksan/aoni/mod stores its value in the request context
-// using an unexported key type (the "Context Accessors" pattern). The
-// transport layer reads the value back with the matching Get* function.
-// This avoids creating a new [Client] for each one-off tweak.
-
 package aoni
 
 import (
@@ -26,10 +19,27 @@ import (
 	"time"
 
 	"github.com/lemon4ksan/miyako/generic"
+
+	"github.com/lemon4ksan/aoni/telemetry"
 )
 
-// HostRewriteRules extracts and returns the active host rewrite rules map from the given context.
-// Returns nil if no rules are configured in the context.
+// ResponseTrace extracts the [TraceInfo] previously captured via [WithTraceContext].
+// Returns nil if no trace was registered on the request.
+func ResponseTrace(resp *http.Response) *telemetry.TraceInfo {
+	if resp == nil || resp.Request == nil {
+		return nil
+	}
+
+	cfg := GetRequestConfig(resp.Request.Context())
+	if cfg != nil {
+		return cfg.TraceInfo
+	}
+
+	return nil
+}
+
+// HostRewriteRules extracts and returns active host rewrite rules from the context.
+// Returns nil if no rewrite rules are attached to the context.
 func HostRewriteRules(ctx context.Context) map[string]string {
 	cfg := GetRequestConfig(ctx)
 	if cfg != nil && cfg.HostRewrite != nil {
@@ -39,17 +49,9 @@ func HostRewriteRules(ctx context.Context) map[string]string {
 	return nil
 }
 
-// WithContextModifier returns a new context carrying the given RequestModifiers.
-// Third-party libraries that pass context through [http.Request] will carry
-// these modifiers into the aoni pipeline automatically.
-//
-// Example with go-resty:
-//
-//	ctx := WithContextModifier(context.Background(),
-//	    WithHeader("X-Api-Key", "secret"),
-//	    TraceJA4(info),
-//	)
-//	resp, err := restyClient.R().SetContext(ctx).Get("/api/data")
+// WithContextModifier attaches request modifiers to the context.
+// Third-party HTTP libraries carrying this context will propagate these modifiers
+// into the aoni execution pipeline automatically.
 func WithContextModifier(ctx context.Context, mods ...RequestModifier) context.Context {
 	if len(mods) == 0 {
 		return ctx
@@ -68,8 +70,7 @@ func WithContextModifier(ctx context.Context, mods ...RequestModifier) context.C
 	return ctx
 }
 
-// ContextModifiers extracts the RequestModifiers previously stored via
-// [WithContextModifier]. Returns nil if none are present.
+// ContextModifiers retrieves all [RequestModifier] functions stored in the context.
 func ContextModifiers(ctx context.Context) []RequestModifier {
 	cfg := GetRequestConfig(ctx)
 	if cfg != nil {
@@ -79,9 +80,8 @@ func ContextModifiers(ctx context.Context) []RequestModifier {
 	return nil
 }
 
-// MarkModifierError attaches an error to the request config.
-// The [Client] will check for this error before dispatching the request
-// and return it if present, preventing malformed requests from being sent.
+// MarkModifierError attaches a serialization or setup error to the request config,
+// causing the client to abort request dispatching before sending wire data.
 func MarkModifierError(req *http.Request, err error) {
 	if err == nil {
 		return
@@ -90,7 +90,7 @@ func MarkModifierError(req *http.Request, err error) {
 	GetOrInitRequestConfig(req).BodyError = err
 }
 
-// GetProxyOverride returns the per-request proxy URL stored by [mod.WithProxyOverride].
+// GetProxyOverride returns the per-request proxy URL string stored in the context.
 func GetProxyOverride(ctx context.Context) generic.Optional[string] {
 	cfg := GetRequestConfig(ctx)
 	if cfg == nil || cfg.ProxyAddr == nil {
@@ -100,22 +100,19 @@ func GetProxyOverride(ctx context.Context) generic.Optional[string] {
 	return generic.Some(cfg.ProxyAddr.String())
 }
 
-// GetInsecureSkipVerify reports whether the request carries a per-request
-// InsecureSkipVerify flag set by [mod.WithInsecureSkipVerify].
+// GetInsecureSkipVerify reports whether TLS certificate verification is bypassed for this request.
 func GetInsecureSkipVerify(ctx context.Context) bool {
 	cfg := GetRequestConfig(ctx)
 	return cfg != nil && cfg.InsecureSkipVerify
 }
 
-// TCPDelayRange describes a random jitter window applied before the TCP dial.
+// TCPDelayRange defines the bounds for randomized pre-dial TCP delay jitter.
 type TCPDelayRange struct {
 	Min time.Duration
 	Max time.Duration
 }
 
-// GetTCPDelay returns the [TCPDelayRange] stored by [mod.WithTCPDelay] and
-// blocks for a random duration within that range. Callers inside a dialer
-// should call this before opening the connection.
+// GetTCPDelay retrieves the configured [TCPDelayRange] from context.
 func GetTCPDelay(ctx context.Context) generic.Optional[TCPDelayRange] {
 	cfg := GetRequestConfig(ctx)
 	if cfg == nil || cfg.TCPDelay.Max <= 0 {
@@ -125,9 +122,9 @@ func GetTCPDelay(ctx context.Context) generic.Optional[TCPDelayRange] {
 	return generic.Some(cfg.TCPDelay)
 }
 
-// ApplyTCPDelay reads the delay range from ctx and sleeps for a uniformly
-// distributed random duration within it. It respects context cancellation.
-// Returns ctx.Err() if the context is cancelled during the sleep, nil otherwise.
+// ApplyTCPDelay inspects the context for TCP delay range jitter and sleeps
+// for a random duration within those bounds before dialing.
+// Respects context cancellation and cleans up timer resources immediately.
 func ApplyTCPDelay(ctx context.Context) error {
 	r, ok := GetTCPDelay(ctx).Value()
 	if !ok || r.Max <= 0 {
@@ -145,15 +142,18 @@ func ApplyTCPDelay(ctx context.Context) error {
 		return nil
 	}
 
+	timer := time.NewTimer(delay)
+	defer timer.Stop()
+
 	select {
-	case <-time.After(delay):
+	case <-timer.C:
 		return nil
 	case <-ctx.Done():
 		return ctx.Err()
 	}
 }
 
-// GetConnMetadata retrieves a value previously set by [mod.WithConnMetadata].
+// GetConnMetadata retrieves connection metadata stored under key from context.
 func GetConnMetadata(ctx context.Context, key string) generic.Optional[any] {
 	cfg := GetRequestConfig(ctx)
 	if cfg == nil || cfg.Metadata == nil {
@@ -168,8 +168,7 @@ func GetConnMetadata(ctx context.Context, key string) generic.Optional[any] {
 	return generic.Some(val)
 }
 
-// GetResponseValidator returns the per-request validator registered by
-// [mod.WithResponseValidator], or nil when none is set.
+// GetResponseValidator returns the per-request response validator function from context.
 func GetResponseValidator(ctx context.Context) func(resp *http.Response) error {
 	cfg := GetRequestConfig(ctx)
 	if cfg == nil {
@@ -179,7 +178,7 @@ func GetResponseValidator(ctx context.Context) func(resp *http.Response) error {
 	return cfg.ResponseValidator
 }
 
-// GetCacheTTL returns the per-request cache TTL set by [mod.WithCacheTTL].
+// GetCacheTTL returns the per-request cache TTL duration from context.
 func GetCacheTTL(ctx context.Context) generic.Optional[time.Duration] {
 	cfg := GetRequestConfig(ctx)
 	if cfg == nil || cfg.CacheTTL <= 0 {
@@ -189,11 +188,10 @@ func GetCacheTTL(ctx context.Context) generic.Optional[time.Duration] {
 	return generic.Some(cfg.CacheTTL)
 }
 
-// RetryCondition reports whether a failed request should be retried.
+// RetryCondition evaluates whether a failed request attempt should trigger a retry.
 type RetryCondition func(resp *http.Response, err error) bool
 
-// Or combines multiple [RetryCondition] functions into a single condition
-// that returns true if ANY of the underlying conditions return true.
+// Or combines multiple [RetryCondition] predicates, returning true if ANY condition is satisfied.
 func Or(conditions ...RetryCondition) RetryCondition {
 	return func(resp *http.Response, err error) bool {
 		for _, cond := range conditions {
@@ -206,8 +204,7 @@ func Or(conditions ...RetryCondition) RetryCondition {
 	}
 }
 
-// And combines multiple [RetryCondition] functions into a single condition
-// that returns true if ALL of the underlying conditions return true.
+// And combines multiple [RetryCondition] predicates, returning true if ALL conditions are satisfied.
 func And(conditions ...RetryCondition) RetryCondition {
 	return func(resp *http.Response, err error) bool {
 		for _, cond := range conditions {
@@ -220,10 +217,10 @@ func And(conditions ...RetryCondition) RetryCondition {
 	}
 }
 
-// FallbackFunc provides an alternate response when a request fails.
+// FallbackFunc generates an alternative [http.Response] when a request fails.
 type FallbackFunc func(req *http.Request, origErr error) (*http.Response, error)
 
-// FallbackString returns a [FallbackFunc] that responds with plain text and the given statusCode.
+// FallbackString constructs a [FallbackFunc] returning plain text with the specified status code.
 func FallbackString(statusCode int, text string) FallbackFunc {
 	return func(req *http.Request, origErr error) (*http.Response, error) {
 		return &http.Response{
@@ -240,8 +237,7 @@ func FallbackString(statusCode int, text string) FallbackFunc {
 	}
 }
 
-// FallbackJSON returns a [FallbackFunc] that responds with data
-// serialized as JSON and the given statusCode.
+// FallbackJSON constructs a [FallbackFunc] returning JSON-encoded data with the specified status code.
 func FallbackJSON(statusCode int, data any) FallbackFunc {
 	return func(req *http.Request, origErr error) (*http.Response, error) {
 		bodyBytes, err := json.Marshal(data)
@@ -255,7 +251,7 @@ func FallbackJSON(statusCode int, data any) FallbackFunc {
 			Proto:         "HTTP/1.1",
 			ProtoMajor:    1,
 			ProtoMinor:    1,
-			Header:        http.Header{"Content-Type": []string{"application/json"}},
+			Header:        http.Header{"Content-Type": []string{"application/json; charset=utf-8"}},
 			Body:          io.NopCloser(bytes.NewReader(bodyBytes)),
 			ContentLength: int64(len(bodyBytes)),
 			Request:       req,
@@ -263,69 +259,61 @@ func FallbackJSON(statusCode int, data any) FallbackFunc {
 	}
 }
 
-// RetryOverride holds per-request retry settings that override the client-level
-// [RetryMiddleware] configuration.
+// RetryOverride holds request-scoped retry parameters that take precedence over global middleware defaults.
 type RetryOverride struct {
-	// MaxAttempts is the maximum number of total attempts (including the first).
-	// 1 means no retries; 0 is treated as 1 (no retries).
 	MaxAttempts int
-	// Backoff is the delay before the first retry. Subsequent retries use
-	// exponential back-off starting from this value.
-	Backoff time.Duration
-	// Condition is called after each failed attempt to decide whether to retry.
-	// When nil [RetryOnErr] is used as the default.
-	Condition RetryCondition
+	Backoff     time.Duration
+	Condition   RetryCondition
 }
 
-// RetryOnErr returns a [RetryCondition] that retries on any non-nil error.
+// RetryOnErr returns a [RetryCondition] that triggers a retry on any non-nil network or transport error.
 func RetryOnErr() RetryCondition {
-	return func(resp *http.Response, err error) bool {
+	return func(_ *http.Response, err error) bool {
 		return err != nil
 	}
 }
 
-// RetryOnTransientErrors returns a [RetryCondition] that retries on
-// network errors, connection resets, and broken pipes.
+// RetryOnTransientErrors returns a [RetryCondition] triggering retries on network timeouts, resets, or broken pipes.
 func RetryOnTransientErrors() RetryCondition {
-	return func(resp *http.Response, err error) bool {
-		if err != nil {
-			var netErr net.Error
-			if errors.As(err, &netErr) {
-				return true
-			}
-
-			errStr := err.Error()
-
-			return strings.Contains(errStr, "connection refused") ||
-				strings.Contains(errStr, "connection reset") ||
-				strings.Contains(errStr, "broken pipe")
+	return func(_ *http.Response, err error) bool {
+		if err == nil {
+			return false
 		}
 
-		return false
+		var netErr net.Error
+		if errors.As(err, &netErr) {
+			return true
+		}
+
+		errStr := strings.ToLower(err.Error())
+
+		return strings.Contains(errStr, "connection refused") ||
+			strings.Contains(errStr, "connection reset") ||
+			strings.Contains(errStr, "broken pipe")
 	}
 }
 
-// RetryOnRateLimit returns a [RetryCondition] that retries on HTTP 429.
+// RetryOnRateLimit returns a [RetryCondition] triggering retries on HTTP 429 Too Many Requests responses.
 func RetryOnRateLimit() RetryCondition {
-	return func(resp *http.Response, err error) bool {
+	return func(resp *http.Response, _ error) bool {
 		return resp != nil && resp.StatusCode == http.StatusTooManyRequests
 	}
 }
 
-// RetryOnGatewayErrors returns a [RetryCondition] that retries on
-// HTTP 502, 503, and 504 status codes.
+// RetryOnGatewayErrors returns a [RetryCondition] triggering retries on HTTP 502, 503, and 504 responses.
 func RetryOnGatewayErrors() RetryCondition {
-	return func(resp *http.Response, err error) bool {
-		if resp != nil {
-			sc := resp.StatusCode
-			return sc == http.StatusBadGateway || sc == http.StatusServiceUnavailable || sc == http.StatusGatewayTimeout
+	return func(resp *http.Response, _ error) bool {
+		if resp == nil {
+			return false
 		}
 
-		return false
+		sc := resp.StatusCode
+
+		return sc == http.StatusBadGateway || sc == http.StatusServiceUnavailable || sc == http.StatusGatewayTimeout
 	}
 }
 
-// GetRetryOverride returns the per-request [RetryOverride] set by [mod.WithRetryPolicy].
+// GetRetryOverride retrieves the per-request [RetryOverride] configuration from context.
 func GetRetryOverride(ctx context.Context) generic.Optional[RetryOverride] {
 	cfg := GetRequestConfig(ctx)
 	if cfg == nil || cfg.RetryPolicy == nil {
@@ -335,11 +323,7 @@ func GetRetryOverride(ctx context.Context) generic.Optional[RetryOverride] {
 	return generic.Some(*cfg.RetryPolicy)
 }
 
-// ProxyFuncWithOverride wraps a base proxy function (e.g. [http.ProxyURL] or
-// [http.ProxyFromEnvironment]) so that a per-request [mod.WithProxyOverride] value
-// takes precedence. Pass the result as [http.Transport.Proxy].
-//
-//	transport.Proxy = ProxyFuncWithOverride(http.ProxyFromEnvironment)
+// ProxyFuncWithOverride wraps a base proxy resolution function so that per-request proxy overrides take precedence.
 func ProxyFuncWithOverride(base func(*http.Request) (*url.URL, error)) func(*http.Request) (*url.URL, error) {
 	return func(req *http.Request) (*url.URL, error) {
 		if raw, ok := GetProxyOverride(req.Context()).Value(); ok && raw != "" {
@@ -354,9 +338,7 @@ func ProxyFuncWithOverride(base func(*http.Request) (*url.URL, error)) func(*htt
 	}
 }
 
-// TLSConfigWithOverride clones base and applies any per-request overrides
-// found in ctx (currently [mod.WithInsecureSkipVerify]). Returns base unchanged
-// when no overrides are present so no unnecessary allocations occur.
+// TLSConfigWithOverride clones base and applies per-request TLS settings (e.g. InsecureSkipVerify) from context.
 func TLSConfigWithOverride(ctx context.Context, base *tls.Config) *tls.Config {
 	if !GetInsecureSkipVerify(ctx) {
 		return base
@@ -366,10 +348,10 @@ func TLSConfigWithOverride(ctx context.Context, base *tls.Config) *tls.Config {
 	if base != nil {
 		cloned = base.Clone()
 	} else {
-		cloned = &tls.Config{} //nolint:gosec
+		cloned = &tls.Config{}
 	}
 
-	cloned.InsecureSkipVerify = true //nolint:gosec
+	cloned.InsecureSkipVerify = true
 
 	return cloned
 }

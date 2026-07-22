@@ -1,6 +1,6 @@
 // Copyright (c) 2026 Lemon4ksan All rights reserved.
 // Use of this source code is governed by a BSD-style
-// license that can be found in the LICENSE file.
+// license can be found in the LICENSE file.
 
 package telemetry
 
@@ -15,12 +15,16 @@ import (
 type DynamicHedgingConfig struct {
 	// Tracker is the shared RTT tracker for measuring network latency.
 	Tracker *RTTTracker
+
 	// Percentile is the RTT percentile to use for delay calculation (default: 95).
 	Percentile float64
+
 	// MinDelay is the minimum hedging delay regardless of RTT (default: 50ms).
 	MinDelay time.Duration
+
 	// MaxDelay is the maximum hedging delay cap (default: 2s).
 	MaxDelay time.Duration
+
 	// Multiplier scales the percentile RTT to compute the delay (default: 1.5).
 	// The dynamic delay = min(MaxDelay, max(MinDelay, p95 * Multiplier)).
 	Multiplier float64
@@ -94,6 +98,9 @@ type RTTTracker struct {
 	count       int
 	minRTT      time.Duration
 	smoothedRTT time.Duration
+
+	dirty        bool
+	cachedSorted []time.Duration
 }
 
 // NewRTTTracker creates an [RTTTracker] with the given sample window capacity.
@@ -135,6 +142,8 @@ func (t *RTTTracker) Record(rtt time.Duration) {
 	} else {
 		t.smoothedRTT = time.Duration(0.9*float64(t.smoothedRTT) + 0.1*float64(rtt))
 	}
+
+	t.dirty = true
 }
 
 // Percentile returns the given percentile (0-100) of recorded RTT samples.
@@ -142,9 +151,9 @@ func (t *RTTTracker) Record(rtt time.Duration) {
 //
 // # Complexity
 //
-// Time Complexity: O(N log N) where N is the number of currently active samples,
-// due to the internal sorting of the window slice copy.
-// Space Complexity: O(N) auxiliary allocation for the sorted slice copy.
+//   - Time Complexity: O(1) amortized if no new samples arrive.
+//     Otherwise, O(N log N) for re-sorting the sliding window.
+//   - Space Complexity: O(N) for allocating a sorted cache slice.
 func (t *RTTTracker) Percentile(p float64) time.Duration {
 	t.mu.Lock()
 	defer t.mu.Unlock()
@@ -153,16 +162,22 @@ func (t *RTTTracker) Percentile(p float64) time.Duration {
 		return 0
 	}
 
-	sorted := make([]time.Duration, t.count)
-	copy(sorted, t.samples[:t.count])
-	slices.Sort(sorted)
+	if t.dirty || len(t.cachedSorted) != t.count {
+		if len(t.cachedSorted) != t.count {
+			t.cachedSorted = make([]time.Duration, t.count)
+		}
 
-	idx := max(int(math.Ceil(p/100*float64(len(sorted))))-1, 0)
-	if idx >= len(sorted) {
-		idx = len(sorted) - 1
+		copy(t.cachedSorted, t.samples[:t.count])
+		slices.Sort(t.cachedSorted)
+		t.dirty = false
 	}
 
-	return sorted[idx]
+	idx := max(int(math.Ceil(p/100*float64(len(t.cachedSorted))))-1, 0)
+	if idx >= len(t.cachedSorted) {
+		idx = len(t.cachedSorted) - 1
+	}
+
+	return t.cachedSorted[idx]
 }
 
 // P95 returns the 95th percentile RTT.
@@ -192,14 +207,14 @@ func (t *RTTTracker) MaxRTT() time.Duration {
 		return 0
 	}
 
-	max := t.samples[0]
+	maxVal := t.samples[0]
 	for i := 1; i < t.count; i++ {
-		if t.samples[i] > max {
-			max = t.samples[i]
+		if t.samples[i] > maxVal {
+			maxVal = t.samples[i]
 		}
 	}
 
-	return max
+	return maxVal
 }
 
 // AverageRTT returns the simple mathematical average (mean) of all recorded RTT samples.
@@ -242,8 +257,11 @@ func (t *RTTTracker) Reset() {
 	t.writeIdx = 0
 	t.count = 0
 	t.minRTT = 0
-
 	t.smoothedRTT = 0
+
+	t.dirty = true
+	t.cachedSorted = nil
+
 	for i := range t.samples {
 		t.samples[i] = 0
 	}

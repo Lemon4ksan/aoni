@@ -1,7 +1,8 @@
 // Copyright (c) 2026 Lemon4ksan All rights reserved.
 // Use of this source code is governed by a BSD-style
-// license that can be found in the LICENSE file.
+// license can be found in the LICENSE file.
 
+// Package io provides low-level streaming I/O wrappers and response body decorators.
 package io
 
 import (
@@ -127,6 +128,11 @@ func (e *ExplicitBufferedBody) Close() error {
 // Rewind resets the internal reader so that the body can be read from the beginning again.
 func (e *ExplicitBufferedBody) Rewind() {
 	e.reader = io.MultiReader(bytes.NewReader(e.Prefix), e.Stream)
+}
+
+// BufferedPrefix returns the pre-buffered byte prefix of the response body.
+func (e *ExplicitBufferedBody) BufferedPrefix() []byte {
+	return e.Prefix
 }
 
 // ReplayableBody represents a response stream that can be reset

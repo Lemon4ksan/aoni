@@ -17,6 +17,7 @@ import (
 	"github.com/lemon4ksan/aoni/mod"
 	"github.com/lemon4ksan/aoni/option"
 	"github.com/lemon4ksan/aoni/request"
+	"github.com/lemon4ksan/aoni/resiliency/challenge"
 
 	"github.com/lemon4ksan/aoni"
 )
@@ -54,7 +55,7 @@ func main() {
 	// Example 2: Check for Cloudflare challenge
 	_, err = request.GetTo[any](ctx, client, "/challenge-protected-page")
 	if err != nil {
-		if errors.Is(err, aoni.ErrCloudflareChallenge) {
+		if errors.Is(err, challenge.ErrCloudflareDetected) {
 			fmt.Println("Cloudflare challenge detected, need browser-level solving")
 		}
 	}

@@ -2,6 +2,13 @@
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
+// Package request provides type-safe, generic-first helper functions for executing HTTP transactions.
+//
+// It abstracts away boilerplate request construction, response decoding, and status validation:
+//   - [GetTo], [PostTo], [PutTo], [PatchTo], [DeleteTo]: Execute requests and decode JSON/XML/YAML
+//     response bodies into strongly-typed target structs [T].
+//   - [Concurrent], [ConcurrentWithMods]: Execute fan-out requests concurrently across multiple paths,
+//     preserving original slice ordering and context deadlines.
 package request
 
 import (

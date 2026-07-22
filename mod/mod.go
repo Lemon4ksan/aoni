@@ -2,7 +2,12 @@
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
-// Package mod provides request modifiers for customizing an [http.Request] before execution.
+// Package mod provides declarative request modifiers for customizing an [http.Request] prior to dispatch.
+//
+// RequestModifiers allow fine-grained, per-request customization without cloning or re-configuring
+// the executing [aoni.Client]. Modifiers store context-bound overrides (Context Accessors)
+// covering path variable substitution, query parameter encoding, custom headers, bearer tokens,
+// multipart form streaming, and TCP dial delays.
 package mod
 
 import (
@@ -23,13 +28,14 @@ import (
 
 	"github.com/lemon4ksan/aoni"
 	"github.com/lemon4ksan/aoni/codec"
-	"github.com/lemon4ksan/aoni/ja4"
-	"github.com/lemon4ksan/aoni/p0f"
-	"github.com/lemon4ksan/aoni/values"
+	"github.com/lemon4ksan/aoni/fingerprint"
+	"github.com/lemon4ksan/aoni/fingerprint/ja4"
+	"github.com/lemon4ksan/aoni/fingerprint/p0f"
+	"github.com/lemon4ksan/aoni/telemetry"
 )
 
-// Modifier is a type alias for [aoni.RequestModifier].
-type Modifier = aoni.RequestModifier
+// ErrBodyNotSeekable indicates that the request body cannot be rewound for hedging or retries.
+var ErrBodyNotSeekable = errors.New("aoni: body does not support seeking for hedging")
 
 // WithVar replaces a single placeholder (e.g. "{key}") in the path with an escaped value.
 func WithVar(key string, value any) aoni.RequestModifier {
@@ -67,7 +73,7 @@ func WithQuery(query any) aoni.RequestModifier {
 			return
 		}
 
-		encoder := values.StructToValues
+		encoder := codec.StructToValues
 		if cfg := aoni.GetRequestConfig(req.Context()); cfg != nil && cfg.QueryEncoder != nil {
 			encoder = cfg.QueryEncoder
 		}
@@ -188,7 +194,7 @@ func WithBody(r io.Reader) aoni.RequestModifier {
 					return io.NopCloser(r), nil
 				}
 
-				return nil, errors.New("aoni: body does not support seeking for hedging")
+				return nil, ErrBodyNotSeekable
 			}
 		}
 	}
@@ -299,7 +305,7 @@ func WithFormBody(payload any) aoni.RequestModifier {
 			return
 		}
 
-		encoder := values.StructToValues
+		encoder := codec.StructToValues
 		if cfg := aoni.GetRequestConfig(req.Context()); cfg != nil && cfg.QueryEncoder != nil {
 			encoder = cfg.QueryEncoder
 		}
@@ -537,7 +543,7 @@ func WithCurlDump() aoni.RequestModifier {
 			req.Body = io.NopCloser(bytes.NewReader(body))
 		}
 
-		curl := aoni.CurlCommand(req, body)
+		curl := telemetry.CurlFromRequest(req, body)
 		fmt.Fprintf(os.Stderr, "%s\n", curl)
 	}
 }
@@ -545,12 +551,45 @@ func WithCurlDump() aoni.RequestModifier {
 // WithPadding returns a [RequestModifier] that adds random packet padding
 // headers to the request matching the given [PaddingConfig].
 // This is a high-level helper to apply individual padding settings per request.
-func WithPadding(cfg aoni.PaddingConfig) aoni.RequestModifier {
+func WithPadding(cfg fingerprint.PaddingConfig) aoni.RequestModifier {
 	return func(req *http.Request) {
-		if padding := aoni.GeneratePadding(cfg); len(padding) > 0 {
-			headerName := aoni.PaddingHeaderName(cfg)
+		if padding := fingerprint.GeneratePadding(cfg); len(padding) > 0 {
+			headerName := fingerprint.PaddingHeaderName(cfg)
 			req.Header.Set(headerName, hex.EncodeToString(padding))
 		}
+	}
+}
+
+// Trace returns a [RequestModifier] that registers a connection tracer on the active request.
+// Timing metrics are populated inside the provided [TraceInfo] structure.
+func Trace(target *telemetry.TraceInfo) aoni.RequestModifier {
+	return func(req *http.Request) {
+		aoni.GetOrInitRequestConfig(req).TraceInfo = target
+	}
+}
+
+// TraceJA4 returns a [RequestModifier] that populates the JA4 field of the provided [TraceInfo].
+// It sets up a shared store in the request context so that [option.WithTLSFingerprint] can write
+// the TLS fingerprint during the handshake, and computes the HTTP fingerprint from request headers.
+//
+// The JA4 report is fully populated after the request completes. The TLS fingerprint (JA4)
+// requires [option.WithTLSFingerprint] to be enabled.
+//
+// Use this modifier alongside [Trace] for complete timing and fingerprint data:
+//
+//	info := &TraceInfo{}
+//	client.Get(ctx, "/path", Trace(info), TraceJA4(info))
+//	// After request: info.JA4 contains both JA4 and JA4H
+func TraceJA4(target *telemetry.TraceInfo) aoni.RequestModifier {
+	return func(req *http.Request) {
+		// Allocate a store with a pointer to the target TraceInfo.
+		// dialTLSWithUTLS will write the TLS report to this store during the handshake.
+		// Client.Request will copy it to target after the request completes.
+		store := &aoni.JA4ReportStore{Target: target}
+		aoni.GetOrInitRequestConfig(req).JA4ReportStore = store
+
+		// Compute JA4H from request headers (available immediately)
+		target.JA4 = &ja4.Report{JA4H: telemetry.ComputeJA4HFromRequest(req)}
 	}
 }
 
@@ -580,9 +619,9 @@ func WithJA4Callback(fn func(ja4.Report)) aoni.RequestModifier {
 // timing and JA4/JA4H fingerprints using [ResponseTrace] after the request finishes.
 func WithTraceContext() aoni.RequestModifier {
 	return func(req *http.Request) {
-		info := &aoni.TraceInfo{}
+		info := &telemetry.TraceInfo{}
 		aoni.GetOrInitRequestConfig(req).TraceInfo = info
-		aoni.TraceJA4(info)(req)
+		TraceJA4(info)(req)
 	}
 }
 

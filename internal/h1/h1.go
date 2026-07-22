@@ -1,7 +1,8 @@
 // Copyright (c) 2026 Lemon4ksan All rights reserved.
 // Use of this source code is governed by a BSD-style
-// license that can be found in the LICENSE file.
+// license can be found in the LICENSE file.
 
+// Package h1 provides TCP-level HTTP/1.1 header reordering connection wrappers.
 package h1
 
 import (

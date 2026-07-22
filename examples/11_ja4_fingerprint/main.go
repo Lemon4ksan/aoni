@@ -15,11 +15,13 @@ import (
 	"log"
 	"time"
 
+	"github.com/lemon4ksan/aoni/mod"
 	"github.com/lemon4ksan/aoni/option"
 	"github.com/lemon4ksan/aoni/request"
+	"github.com/lemon4ksan/aoni/telemetry"
 
 	"github.com/lemon4ksan/aoni"
-	"github.com/lemon4ksan/aoni/ja4"
+	"github.com/lemon4ksan/aoni/fingerprint/ja4"
 )
 
 type Response struct {
@@ -43,10 +45,10 @@ func main() {
 	)
 
 	// Trace with JA4 fingerprint collection
-	var info aoni.TraceInfo
+	var info telemetry.TraceInfo
 
 	_, err := request.GetTo[Response](ctx, client, "/ip",
-		aoni.TraceJA4(&info),
+		mod.TraceJA4(&info),
 	)
 	if err != nil {
 		log.Fatal(err)

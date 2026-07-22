@@ -20,6 +20,7 @@ import (
 
 	"github.com/lemon4ksan/aoni"
 	"github.com/lemon4ksan/aoni/codec"
+	"github.com/lemon4ksan/aoni/resiliency/challenge"
 )
 
 var sensitiveHeaders = map[string]bool{
@@ -161,7 +162,7 @@ func (responseDecoder) checkHTML(buf *bufio.Reader) error {
 
 	if strings.Contains(bodyStr, "cf-challenge") || strings.Contains(bodyStr, "ray id") ||
 		strings.Contains(bodyStr, "cloudflare") {
-		return aoni.ErrCloudflareChallenge
+		return challenge.ErrCloudflareDetected
 	}
 
 	return fmt.Errorf("%w: expected structured data but got HTML", aoni.ErrUnexpectedContentType)

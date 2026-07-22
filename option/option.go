@@ -2,7 +2,14 @@
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
-// Package option provides functional options for configuring an aoni [aoni.Client].
+// Package option provides functional options for configuring an [aoni.Client].
+//
+// Options are passed to [aoni.NewClient] or [aoni.Client.With] to configure global client
+// defaults, such as base URLs, request timeouts, proxy rotators, TLS fingerprints,
+// and pipeline execution flags.
+//
+// All options operate immutably on [aoni.Config] structs, ensuring that thread safety
+// and concurrent client reusability are preserved.
 package option
 
 import (
@@ -15,15 +22,17 @@ import (
 	"github.com/lemon4ksan/miyako/generic"
 
 	"github.com/lemon4ksan/aoni"
-	"github.com/lemon4ksan/aoni/h2"
-	"github.com/lemon4ksan/aoni/h3"
-	"github.com/lemon4ksan/aoni/ja4"
+	"github.com/lemon4ksan/aoni/fingerprint"
+	"github.com/lemon4ksan/aoni/fingerprint/h2"
+	"github.com/lemon4ksan/aoni/fingerprint/h3"
+	"github.com/lemon4ksan/aoni/fingerprint/ja4"
+	"github.com/lemon4ksan/aoni/fingerprint/p0f"
+	"github.com/lemon4ksan/aoni/fingerprint/profiles"
+	"github.com/lemon4ksan/aoni/fingerprint/profiles/chrome"
+	"github.com/lemon4ksan/aoni/fingerprint/profiles/firefox"
 	"github.com/lemon4ksan/aoni/mod"
-	"github.com/lemon4ksan/aoni/p0f"
-	"github.com/lemon4ksan/aoni/profiles"
-	"github.com/lemon4ksan/aoni/profiles/chrome"
-	"github.com/lemon4ksan/aoni/profiles/firefox"
-	"github.com/lemon4ksan/aoni/proxy"
+	"github.com/lemon4ksan/aoni/netutil/ip"
+	"github.com/lemon4ksan/aoni/netutil/proxy"
 	"github.com/lemon4ksan/aoni/telemetry"
 )
 
@@ -90,6 +99,14 @@ func WithQueryEncoder(encoder aoni.QueryEncoder) aoni.ClientOption {
 	}
 }
 
+// WithHTTP2Config configures the low-level HTTP/2 connection parameters.
+func WithHTTP2Config(cfg aoni.HTTP2Config) aoni.ClientOption {
+	// For consistency with http3 we leave this option in the core module
+	return func(c *aoni.Config) {
+		c.Engine.HTTP2Config = &cfg
+	}
+}
+
 // WithBaseURL configures the base URL for resolving relative request paths.
 func WithBaseURL(raw string) aoni.ClientOption {
 	return func(cfg *aoni.Config) {
@@ -112,6 +129,10 @@ func WithBaseURL(raw string) aoni.ClientOption {
 // WithHeader adds a default HTTP header sent with every request.
 func WithHeader(key, value string) aoni.ClientOption {
 	return func(cfg *aoni.Config) {
+		if cfg.Defaults.Headers == nil {
+			cfg.Defaults.Headers = make(http.Header)
+		}
+
 		cfg.Defaults.Headers.Set(key, value)
 	}
 }
@@ -119,6 +140,10 @@ func WithHeader(key, value string) aoni.ClientOption {
 // WithHeaders merges the provided map of headers into the default request headers.
 func WithHeaders(headers map[string]string) aoni.ClientOption {
 	return func(cfg *aoni.Config) {
+		if cfg.Defaults.Headers == nil {
+			cfg.Defaults.Headers = make(http.Header)
+		}
+
 		for k, v := range headers {
 			cfg.Defaults.Headers.Set(k, v)
 		}
@@ -192,7 +217,7 @@ func WithRedirectLimit(max int) aoni.ClientOption {
 // WithLocalAddr configures the local IP address to bind outgoing connections to.
 func WithLocalAddr(addr string) aoni.ClientOption {
 	return func(cfg *aoni.Config) {
-		rotator, err := aoni.NewSourceIPRotator([]string{addr})
+		rotator, err := ip.NewSourceIPRotator([]string{addr})
 		if err == nil {
 			cfg.Network.SourceRotator = rotator
 		}
@@ -226,7 +251,7 @@ func WithSessionCache(cache aoni.SessionCache) aoni.ClientOption {
 }
 
 // WithPacketPadding configures packet padding to obscure segments against DPI.
-func WithPacketPadding(padding aoni.PaddingConfig) aoni.ClientOption {
+func WithPacketPadding(padding fingerprint.PaddingConfig) aoni.ClientOption {
 	return func(cfg *aoni.Config) {
 		cfg.Fingerprint.PacketPadding = &padding
 	}
@@ -270,7 +295,7 @@ func WithMultiReadDisableDisk(disable bool) aoni.ClientOption {
 // WithLocalAddrPool registers a list of local IP addresses to cycle through.
 func WithLocalAddrPool(addrs []string) aoni.ClientOption {
 	return func(cfg *aoni.Config) {
-		rotator, err := aoni.NewSourceIPRotator(addrs)
+		rotator, err := ip.NewSourceIPRotator(addrs)
 		if err == nil {
 			cfg.Network.SourceRotator = rotator
 		}
