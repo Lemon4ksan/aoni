@@ -86,14 +86,7 @@ func (c *Client) newDialContextFunc() func(context.Context, string, string) (net
 			return nil, err
 		}
 
-		dialCfg := dialConfig{
-			Network:       network,
-			Addr:          addr,
-			Delay:         c.network.HappyEyeballsDelay,
-			SSRFGuard:     c.network.SSRFGuard,
-			SourceRotator: c.network.SourceRotator,
-			DNSResolver:   c.network.DNSResolver,
-		}
+		dialCfg := c.resolveDialConfig(ctx, network, addr)
 
 		return proxyClient{}.CleanDialContext(ctx, dialCfg)
 	}
@@ -103,59 +96,42 @@ func (c *Client) newDialTLSContextFunc(
 	proxyFn func(*http.Request) (*url.URL, error),
 ) func(context.Context, string, string) (net.Conn, error) {
 	return func(ctx context.Context, network, addr string) (net.Conn, error) {
-		var proxyURL *url.URL
+		if err := ApplyTCPDelay(ctx); err != nil {
+			return nil, err
+		}
+
+		dialCfg := c.resolveDialConfig(ctx, network, addr)
+
 		if proxyFn != nil {
-			proxyURL, _ = proxyFn(&http.Request{URL: &url.URL{Host: addr}})
+			var dummyURL url.URL
+
+			dummyURL.Host = addr
+
+			var dummyReq http.Request
+
+			dummyReq.URL = &dummyURL
+
+			dialCfg.ProxyURL, _ = proxyFn(&dummyReq)
 		}
 
-		dialConfig := dialConfig{
-			Network:       network,
-			Addr:          addr,
-			Browser:       c.fingerprint.BrowserID,
-			HelloID:       c.fingerprint.TLSClientHelloID,
-			SourceRotator: c.network.SourceRotator,
-			DNSResolver:   c.network.DNSResolver,
-			Delay:         c.network.HappyEyeballsDelay,
-			SSRFGuard:     c.network.SSRFGuard,
-			JA4Callback:   c.fingerprint.JA4Callback,
-			ProxyURL:      proxyURL,
-		}
-
-		var tlsConfig *tls.Config
-		if tr := c.Transport(); tr != nil {
-			tlsConfig = tr.TLSClientConfig
-		}
-
-		return c.dialTLSWithUTLS(ctx, dialConfig, tlsConfig, GetRequestConfig(ctx))
+		return c.dialTLSWithUTLS(ctx, dialCfg)
 	}
 }
 
 // dialContext executes a standard TCP dial followed by a standard TLS client handshake.
 func (c *Client) dialContext(ctx context.Context, network, addr string) (net.Conn, error) {
-	var baseTLSCfg *tls.Config
-	if tr := c.Transport(); tr != nil {
-		baseTLSCfg = tr.TLSClientConfig
-	}
-
 	if err := ApplyTCPDelay(ctx); err != nil {
 		return nil, err
 	}
 
-	dialCfg := dialConfig{
-		Network:       network,
-		Addr:          addr,
-		Delay:         c.network.HappyEyeballsDelay,
-		SSRFGuard:     c.network.SSRFGuard,
-		SourceRotator: c.network.SourceRotator,
-		DNSResolver:   c.network.DNSResolver,
-	}
+	dialCfg := c.resolveDialConfig(ctx, network, addr)
 
 	rawConn, err := proxyClient{}.CleanDialContext(ctx, dialCfg)
 	if err != nil {
 		return nil, err
 	}
 
-	tlsCfg := setupTLSConfig(ctx, baseTLSCfg, resolveDialHost(addr))
+	tlsCfg := setupTLSConfig(dialCfg, resolveDialHost(dialCfg.Host))
 
 	tlsConn := tls.Client(rawConn, tlsCfg)
 	if err := tlsConn.HandshakeContext(ctx); err != nil {
@@ -170,24 +146,16 @@ func (c *Client) dialContext(ctx context.Context, network, addr string) (net.Con
 func (c *Client) dialTLSWithUTLS(
 	ctx context.Context,
 	dialCfg dialConfig,
-	tlsCfg *tls.Config,
-	reqCfg *RequestConfig,
 ) (net.Conn, error) {
-	dialCfg = buildUTLSDialConfig(ctx, dialCfg, reqCfg)
-
-	if err := ApplyTCPDelay(ctx); err != nil {
-		return nil, err
-	}
-
 	conn, err := establishBaseProxyConnection(ctx, dialCfg)
 	if err != nil {
 		return nil, err
 	}
 
 	ev := tlsEvasion{}
-	utlsCfg := ev.BuildConfig(ctx, resolveDialHost(dialCfg.Addr), tlsCfg, reqCfg)
+	utlsCfg := ev.BuildConfig(resolveDialHost(dialCfg.Addr), dialCfg)
 
-	uConn, err := ev.BuildConn(reqCfg, dialCfg, utlsCfg, conn)
+	uConn, err := ev.BuildConn(dialCfg, utlsCfg, conn)
 	if err != nil {
 		_ = conn.Close()
 		return nil, err
@@ -198,8 +166,8 @@ func (c *Client) dialTLSWithUTLS(
 		return nil, err
 	}
 
-	if reqCfg != nil && len(reqCfg.ALPNOverride) > 0 {
-		uConn.Extensions = ev.ForceALPN(uConn.Extensions, reqCfg.ALPNOverride)
+	if len(dialCfg.ALPNOverride) > 0 {
+		uConn.Extensions = ev.ForceALPN(uConn.Extensions, dialCfg.ALPNOverride)
 	}
 
 	report := ev.ExtractJA4(uConn)
@@ -208,8 +176,8 @@ func (c *Client) dialTLSWithUTLS(
 		return nil, err
 	}
 
-	if reqCfg != nil && reqCfg.JA4ReportStore != nil {
-		reqCfg.JA4ReportStore.Report = &report
+	if dialCfg.JA4ReportStore != nil {
+		dialCfg.JA4ReportStore.Report = &report
 	}
 
 	if dialCfg.JA4Callback != nil {
@@ -219,47 +187,131 @@ func (c *Client) dialTLSWithUTLS(
 	return uConn, nil
 }
 
-// dialConfig aggregates the low-level target specifications passed down to proxy and transport dialers.
+// dialConfig aggregates all target, security, proxy, and fingerprint specifications
+// resolved at the threshold before executing network connection routines.
 type dialConfig struct {
-	Network       string
-	Addr          string
-	Browser       BrowserID
-	HelloID       *utls.ClientHelloID
-	SourceRotator *ip.SourceIPRotator
-	DNSResolver   DNSResolver
-	JA4Callback   func(ja4.Report)
-	ProxyURL      *url.URL
-	Delay         time.Duration
-	SSRFGuard     bool
+	Network                 string
+	Addr                    string
+	Host                    string
+	Port                    string
+	Browser                 BrowserID
+	HelloID                 *utls.ClientHelloID
+	SourceRotator           *ip.SourceIPRotator
+	DNSResolver             DNSResolver
+	JA4Callback             func(ja4.Report)
+	ProxyURL                *url.URL
+	Delay                   time.Duration
+	SSRFGuard               bool
+	ProxyDNS                bool
+	InsecureSkipVerify      bool
+	CertificatePins         map[string][]string
+	ALPNOverride            []string
+	P0fSignature            *p0f.Signature
+	SocketController        SocketController
+	JA4ReportStore          *JA4ReportStore
+	ClientHelloSpecProvider ClientHelloSpecProvider
+	SessionCache            utls.ClientSessionCache
+	BaseTLSConfig           *tls.Config
 }
 
-func buildUTLSDialConfig(ctx context.Context, dialCfg dialConfig, reqCfg *RequestConfig) dialConfig {
+// resolveDialConfig is the threshold function ("порог") where context magic is unpacked
+// into a clean, strongly-typed dialConfig data structure.
+func (c *Client) resolveDialConfig(ctx context.Context, network, addr string) dialConfig {
+	reqCfg := GetRequestConfig(ctx)
+
+	dialCfg := dialConfig{
+		Network: network,
+		Addr:    addr,
+	}
+
+	if c != nil {
+		dialCfg.Browser = c.fingerprint.BrowserID
+		dialCfg.HelloID = c.fingerprint.TLSClientHelloID
+		dialCfg.SourceRotator = c.network.SourceRotator
+		dialCfg.DNSResolver = c.network.DNSResolver
+		dialCfg.JA4Callback = c.fingerprint.JA4Callback
+		dialCfg.Delay = c.network.HappyEyeballsDelay
+		dialCfg.SSRFGuard = c.network.SSRFGuard
+
+		if tr := c.Transport(); tr != nil {
+			dialCfg.BaseTLSConfig = tr.TLSClientConfig
+		}
+	}
+
+	// 1. Host Rewrite Rules at threshold
+	host, port, _ := net.SplitHostPort(addr)
+	if host == "" {
+		host = addr
+	}
+
+	rules := HostRewriteRules(ctx)
+	if rewritten, exists := rules[host]; exists {
+		if newHost, newPort, err := net.SplitHostPort(rewritten); err == nil {
+			host = newHost
+
+			if newPort != "" {
+				port = newPort
+			}
+		}
+	}
+
+	dialCfg.Host = host
+	dialCfg.Port = port
+
+	// 2. Base TLS Config override at threshold
+	dialCfg.BaseTLSConfig = TLSConfigWithOverride(ctx, dialCfg.BaseTLSConfig)
+
+	// 3. Unpack RequestConfig at threshold
 	if reqCfg != nil {
 		dialCfg.SSRFGuard = reqCfg.SSRFGuard
+		if reqCfg.HappyEyeballsDelay > 0 {
+			dialCfg.Delay = reqCfg.HappyEyeballsDelay
+		}
 
-		dialCfg.Delay = reqCfg.HappyEyeballsDelay
 		if reqCfg.JA4Callback != nil {
 			dialCfg.JA4Callback = reqCfg.JA4Callback
 		}
-	} else {
-		dialCfg.SSRFGuard = false
+
+		dialCfg.ProxyDNS = reqCfg.ProxyDNS
+		dialCfg.P0fSignature = reqCfg.P0fSignature
+		dialCfg.SocketController = reqCfg.SocketController
+		dialCfg.CertificatePins = reqCfg.CertificatePins
+		dialCfg.ALPNOverride = reqCfg.ALPNOverride
+		dialCfg.JA4ReportStore = reqCfg.JA4ReportStore
+		dialCfg.ClientHelloSpecProvider = reqCfg.ClientHelloSpecProvider
+		dialCfg.SessionCache = reqCfg.SessionCache
+	} else if dialCfg.Delay == 0 {
 		dialCfg.Delay = 300 * time.Millisecond
 	}
 
+	// 4. Proxy URL override at threshold
 	if raw, ok := GetProxyOverride(ctx).Value(); ok && raw != "" {
 		if parsed, parseErr := url.Parse(raw); parseErr == nil {
 			dialCfg.ProxyURL = parsed
 		}
+	} else if reqCfg != nil && reqCfg.ProxyAddr != nil {
+		dialCfg.ProxyURL = reqCfg.ProxyAddr
+	}
+
+	// 5. InsecureSkipVerify at threshold
+	if GetInsecureSkipVerify(ctx) {
+		dialCfg.InsecureSkipVerify = true
 	}
 
 	return dialCfg
 }
 
 func establishBaseProxyConnection(ctx context.Context, dialCfg dialConfig) (net.Conn, error) {
-	host, port, _ := net.SplitHostPort(dialCfg.Addr)
+	host, port := dialCfg.Host, dialCfg.Port
+	if host == "" {
+		host, port, _ = net.SplitHostPort(dialCfg.Addr)
+		if host == "" {
+			host = dialCfg.Addr
+		}
+	}
 
 	if dialCfg.ProxyURL != nil {
-		return proxyClient{}.dial(ctx, dialCfg, generic.Coalesce(host, dialCfg.Addr), port)
+		return proxyClient{}.dial(ctx, dialCfg, host, port)
 	}
 
 	return proxyClient{}.CleanDialContext(ctx, dialCfg)
@@ -268,36 +320,30 @@ func establishBaseProxyConnection(ctx context.Context, dialCfg dialConfig) (net.
 // tlsEvasion groups helper methods utilized to build, configure, and inspect customized ClientHello handshake parameters.
 type tlsEvasion struct{}
 
-// BuildConfig resolves and configures the base uTLS connection settings.
+// BuildConfig resolves and configures the base uTLS connection settings using pre-resolved dialConfig.
 func (tlsEvasion) BuildConfig(
-	ctx context.Context,
 	host string,
-	tlsCfg *tls.Config,
-	reqCfg *RequestConfig,
+	dialCfg dialConfig,
 ) *utls.Config {
 	uCfg := &utls.Config{
 		ServerName: host,
 		NextProtos: []string{AlpnH2, AlpnHTTP},
 	}
 
-	copyBaseTLSConfig(uCfg, tlsCfg)
+	copyBaseTLSConfig(uCfg, dialCfg.BaseTLSConfig)
 
-	if GetInsecureSkipVerify(ctx) {
+	if dialCfg.InsecureSkipVerify {
 		uCfg.InsecureSkipVerify = true
 	}
 
-	applyUTLSPeerVerification(uCfg, reqCfg, host)
+	applyUTLSPeerVerification(uCfg, dialCfg, host)
 
-	if reqCfg == nil {
-		return uCfg
+	if dialCfg.SessionCache != nil {
+		uCfg.ClientSessionCache = dialCfg.SessionCache
 	}
 
-	if reqCfg.SessionCache != nil {
-		uCfg.ClientSessionCache = reqCfg.SessionCache
-	}
-
-	if len(reqCfg.ALPNOverride) > 0 {
-		uCfg.NextProtos = reqCfg.ALPNOverride
+	if len(dialCfg.ALPNOverride) > 0 {
+		uCfg.NextProtos = dialCfg.ALPNOverride
 	}
 
 	return uCfg
@@ -323,33 +369,32 @@ func copyBaseTLSConfig(uCfg *utls.Config, tlsCfg *tls.Config) {
 	}
 }
 
-func applyUTLSPeerVerification(uCfg *utls.Config, reqCfg *RequestConfig, host string) {
+func applyUTLSPeerVerification(uCfg *utls.Config, dialCfg dialConfig, host string) {
 	if uCfg.InsecureSkipVerify {
-		if reqCfg != nil && len(reqCfg.CertificatePins) > 0 {
+		if len(dialCfg.CertificatePins) > 0 {
 			uCfg.VerifyPeerCertificate = func(rawCerts [][]byte, _ [][]*x509.Certificate) error {
-				return pinning{}.VerifyCertificatePins(host, reqCfg.CertificatePins, rawCerts)
+				return pinning{}.VerifyCertificatePins(host, dialCfg.CertificatePins, rawCerts)
 			}
 		} else {
 			uCfg.VerifyPeerCertificate = func(_ [][]byte, _ [][]*x509.Certificate) error {
 				return nil
 			}
 		}
-	} else if reqCfg != nil && len(reqCfg.CertificatePins) > 0 {
+	} else if len(dialCfg.CertificatePins) > 0 {
 		uCfg.VerifyPeerCertificate = tlsEvasion{}.wrapPinning(
-			host, reqCfg.CertificatePins, uCfg.VerifyPeerCertificate,
+			host, dialCfg.CertificatePins, uCfg.VerifyPeerCertificate,
 		)
 	}
 }
 
 // BuildConn returns a new custom, uncompleted uTLS UConn connection.
 func (tlsEvasion) BuildConn(
-	reqCfg *RequestConfig,
 	dialCfg dialConfig,
 	utlsCfg *utls.Config,
 	conn net.Conn,
 ) (*utls.UConn, error) {
-	if reqCfg != nil && reqCfg.ClientHelloSpecProvider != nil {
-		spec, err := reqCfg.ClientHelloSpecProvider.ClientHelloSpec()
+	if dialCfg.ClientHelloSpecProvider != nil {
+		spec, err := dialCfg.ClientHelloSpecProvider.ClientHelloSpec()
 		if err != nil {
 			return nil, fmt.Errorf("aoni tls: failed to get custom client hello spec: %w", err)
 		}
@@ -412,7 +457,8 @@ func (tlsEvasion) ExtractJA4(uConn *utls.UConn) ja4.Report {
 
 	if len(hello.AlpnProtocols) > 0 && hello.AlpnProtocols[0] != "" {
 		first := hello.AlpnProtocols[0]
-		report.ALPN = string(first[0]) + string(first[len(first)-1])
+		alpnBuf := [2]byte{first[0], first[len(first)-1]}
+		report.ALPN = string(alpnBuf[:])
 	} else {
 		report.ALPN = "00"
 	}
@@ -472,16 +518,13 @@ type proxyClient struct{}
 
 // CleanDialContext establishes standard TCP socket tunnels, executing DNS and SSRF checks.
 func (pc proxyClient) CleanDialContext(ctx context.Context, dialCfg dialConfig) (net.Conn, error) {
-	host, port, err := getAddressHostPort(ctx, dialCfg.Addr)
+	host, port, err := getAddressHostPort(dialCfg.Addr, dialCfg.Host, dialCfg.Port)
 	if err != nil {
 		return nil, err
 	}
 
-	cfg := GetRequestConfig(ctx)
-	if cfg != nil && cfg.ProxyDNS {
-		if cfg.ProxyAddr != nil && net.ParseIP(host) == nil {
-			return pc.dial(ctx, dialCfg, host, port)
-		}
+	if dialCfg.ProxyDNS && dialCfg.ProxyURL != nil && net.ParseIP(host) == nil {
+		return pc.dial(ctx, dialCfg, host, port)
 	}
 
 	resolver := dialCfg.DNSResolver
@@ -509,14 +552,14 @@ func (pc proxyClient) CleanDialContext(ctx context.Context, dialCfg dialConfig) 
 		dialer.LocalAddr = &net.TCPAddr{IP: dialCfg.SourceRotator.Next()}
 	}
 
-	dialer.Control = pc.dialerControl(ctx)
+	dialer.Control = pc.dialerControl(dialCfg)
 
 	conn, err := dialer.DialContext(ctx, dialCfg.Network, net.JoinHostPort(host, port))
 	if err != nil {
 		return nil, err
 	}
 
-	return wrapConn(ctx, conn), nil
+	return conn, nil
 }
 
 func (pc proxyClient) dial(ctx context.Context, dialCfg dialConfig, host, port string) (net.Conn, error) {
@@ -532,7 +575,7 @@ func (pc proxyClient) dial(ctx context.Context, dialCfg dialConfig, host, port s
 		dialer.LocalAddr = &net.TCPAddr{IP: dialCfg.SourceRotator.Next()}
 	}
 
-	dialer.Control = pc.dialerControl(ctx)
+	dialer.Control = pc.dialerControl(dialCfg)
 
 	switch dialCfg.ProxyURL.Scheme {
 	case "socks5", "socks5h":
@@ -605,20 +648,13 @@ func (proxyClient) dialHTTP(ctx context.Context, forward *net.Dialer, address, h
 	return conn, nil
 }
 
-func (proxyClient) dialerControl(ctx context.Context) func(network, address string, rc syscall.RawConn) error {
-	var (
-		spoofer    *p0f.Spoofer
-		controller SocketController
-	)
-
-	cfg := GetRequestConfig(ctx)
-	if cfg != nil {
-		if cfg.P0fSignature != nil {
-			spoofer = p0f.NewSpoofer(cfg.P0fSignature)
-		}
-
-		controller = cfg.SocketController
+func (proxyClient) dialerControl(dialCfg dialConfig) func(network, address string, rc syscall.RawConn) error {
+	var spoofer *p0f.Spoofer
+	if dialCfg.P0fSignature != nil {
+		spoofer = p0f.NewSpoofer(dialCfg.P0fSignature)
 	}
+
+	controller := dialCfg.SocketController
 
 	if spoofer == nil && controller == nil {
 		return nil
@@ -748,8 +784,8 @@ func resolveDialHost(addr string) string {
 	return generic.Coalesce(host, addr)
 }
 
-func setupTLSConfig(ctx context.Context, baseCfg *tls.Config, host string) *tls.Config {
-	tlsCfg := TLSConfigWithOverride(ctx, baseCfg)
+func setupTLSConfig(dialCfg dialConfig, host string) *tls.Config {
+	tlsCfg := dialCfg.BaseTLSConfig
 	if tlsCfg == nil {
 		tlsCfg = &tls.Config{}
 	}
@@ -760,21 +796,26 @@ func setupTLSConfig(ctx context.Context, baseCfg *tls.Config, host string) *tls.
 		tlsCfg = cloned
 	}
 
-	cfg := GetRequestConfig(ctx)
+	if dialCfg.InsecureSkipVerify {
+		cloned := tlsCfg.Clone()
+		cloned.InsecureSkipVerify = true
+		tlsCfg = cloned
+	}
+
 	if tlsCfg.InsecureSkipVerify {
-		if cfg != nil && len(cfg.CertificatePins) > 0 {
+		if len(dialCfg.CertificatePins) > 0 {
 			tlsCfg.VerifyPeerCertificate = func(rawCerts [][]byte, _ [][]*x509.Certificate) error { //nolint:gosec
-				return pinning{}.VerifyCertificatePins(host, cfg.CertificatePins, rawCerts)
+				return pinning{}.VerifyCertificatePins(host, dialCfg.CertificatePins, rawCerts)
 			}
 		} else {
 			tlsCfg.VerifyPeerCertificate = func(_ [][]byte, _ [][]*x509.Certificate) error { //nolint:gosec
 				return nil
 			}
 		}
-	} else if cfg != nil && len(cfg.CertificatePins) > 0 {
+	} else if len(dialCfg.CertificatePins) > 0 {
 		cloned := tlsCfg.Clone()
 		cloned.VerifyPeerCertificate = tlsEvasion{}.wrapPinning( //nolint:gosec
-			host, cfg.CertificatePins, cloned.VerifyPeerCertificate,
+			host, dialCfg.CertificatePins, cloned.VerifyPeerCertificate,
 		)
 		tlsCfg = cloned
 	}
@@ -782,29 +823,15 @@ func setupTLSConfig(ctx context.Context, baseCfg *tls.Config, host string) *tls.
 	return tlsCfg
 }
 
-func getAddressHostPort(ctx context.Context, address string) (host, port string, err error) {
-	host, port, err = net.SplitHostPort(address)
+func getAddressHostPort(rawAddr, resolvedHost, resolvedPort string) (host, port string, err error) {
+	if resolvedHost != "" {
+		return resolvedHost, resolvedPort, nil
+	}
+
+	host, port, err = net.SplitHostPort(rawAddr)
 	if err != nil {
 		return "", "", err
 	}
 
-	rules := HostRewriteRules(ctx)
-	if len(rules) == 0 {
-		return host, port, err
-	}
-
-	rewritten, exists := rules[host]
-	if !exists {
-		return host, port, err
-	}
-
-	if newHost, newPort, err := net.SplitHostPort(rewritten); err == nil {
-		host = newHost
-
-		if newPort != "" {
-			port = newPort
-		}
-	}
-
-	return host, port, err
+	return host, port, nil
 }

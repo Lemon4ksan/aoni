@@ -124,6 +124,18 @@ type Config struct {
 // EngineConfig configures parameters applied directly to the underlying [HTTPDoer]
 // engine (typically [*http.Client]) rather than the modular network/fingerprint layers.
 type EngineConfig struct {
+	// CookieJar overrides the engine's default cookie storage.
+	CookieJar http.CookieJar
+
+	// CustomEngine replaces the default *http.Client engine entirely.
+	CustomEngine HTTPDoer
+
+	// ConnectionPool configures idle connection limits and keepalive timeouts.
+	ConnectionPool *ConnectionPoolConfig
+
+	// HTTP2Config configures low-level HTTP/2 connection and ping parameters.
+	HTTP2Config *HTTP2Config
+
 	// Timeout sets the maximum duration allowed for the end-to-end request transaction.
 	Timeout time.Duration
 
@@ -134,21 +146,9 @@ type EngineConfig struct {
 	//  > 0: Explicit cap on followed redirects.
 	RedirectLimit int
 
-	// CookieJar overrides the engine's default cookie storage.
-	CookieJar http.CookieJar
-
 	// InsecureSkipVerify disables TLS certificate verification globally on the transport.
 	// Warning: Enabling this exposes connections to man-in-the-middle attacks.
 	InsecureSkipVerify bool
-
-	// ConnectionPool configures idle connection limits and keepalive timeouts.
-	ConnectionPool *ConnectionPoolConfig
-
-	// CustomEngine replaces the default *http.Client engine entirely.
-	CustomEngine HTTPDoer
-
-	// HTTP2Config configures low-level HTTP/2 connection and ping parameters.
-	HTTP2Config *HTTP2Config
 }
 
 const redirectLimitUnset = -2
@@ -156,6 +156,12 @@ const redirectLimitUnset = -2
 // ConnectionPoolConfig configures keep-alive connection pool boundaries
 // on the underlying [http.Transport] instance.
 type ConnectionPoolConfig struct {
+	// IdleConnTimeout is the maximum duration an idle connection is kept open.
+	IdleConnTimeout time.Duration
+
+	// ResponseHeaderTimeout is the maximum duration to wait for reading response headers.
+	ResponseHeaderTimeout time.Duration
+
 	// MaxIdleConns is the maximum number of idle (keep-alive) connections across all hosts.
 	MaxIdleConns int
 
@@ -164,12 +170,6 @@ type ConnectionPoolConfig struct {
 
 	// MaxConnsPerHost is the maximum total number of concurrent connections allowed per host.
 	MaxConnsPerHost int
-
-	// IdleConnTimeout is the maximum duration an idle connection is kept open.
-	IdleConnTimeout time.Duration
-
-	// ResponseHeaderTimeout is the maximum duration to wait for reading response headers.
-	ResponseHeaderTimeout time.Duration
 }
 
 // HTTP2Config configures low-level HTTP/2 connection parameters.
@@ -187,20 +187,20 @@ type HTTP2Config struct {
 
 // QUICMigrationConfig controls the parameters for QUIC Connection Migration over HTTP/3.
 type QUICMigrationConfig struct {
-	// EnableMigration enables QUIC Connection Migration.
-	EnableMigration bool
-
 	// KeepAlivePeriod sends periodic keepalive packets to maintain the connection.
 	KeepAlivePeriod time.Duration
 
 	// MaxIdleTimeout is the maximum duration without network activity before connection close.
 	MaxIdleTimeout time.Duration
 
-	// DisablePathMTUDiscovery disables Path MTU Discovery during migration.
-	DisablePathMTUDiscovery bool
-
 	// InitialPacketSize sets the initial QUIC packet size.
 	InitialPacketSize uint16
+
+	// EnableMigration enables QUIC Connection Migration.
+	EnableMigration bool
+
+	// DisablePathMTUDiscovery disables Path MTU Discovery during migration.
+	DisablePathMTUDiscovery bool
 }
 
 // DefaultQUICMigrationConfig returns a [QUICMigrationConfig] populated with stable,
@@ -227,10 +227,6 @@ func (s staticSpecProvider) ClientHelloSpec() (*utls.ClientHelloSpec, error) {
 // NetworkConfig configures the network transport layer, proxies, DNS resolution,
 // SSRF safeguards, IP rotation, and socket controllers.
 type NetworkConfig struct {
-	// ProxyDNS routes DNS lookup requests through the SOCKS5 or HTTP CONNECT proxy
-	// to prevent local DNS queries from leaking to the local ISP.
-	ProxyDNS bool
-
 	// ProxyAddr is the URL of the proxy server to route all traffic through.
 	// Supports http, socks5, and socks5h schemes.
 	ProxyAddr *url.URL
@@ -241,17 +237,8 @@ type NetworkConfig struct {
 	// DNSResolver is the custom resolver used to resolve hostnames.
 	DNSResolver DNSResolver
 
-	// SSRFGuard blocks requests that resolve to private or loopback IP addresses.
-	SSRFGuard bool
-
-	// HappyEyeballsDelay staggers parallel IPv4/IPv6 dial attempts to minimize latency.
-	HappyEyeballsDelay time.Duration
-
 	// SourceRotator manages a pool of local IP addresses to bind outgoing connections to in a round-robin fashion.
 	SourceRotator *ip.SourceIPRotator
-
-	// HedgingDelay defines the delay before a second, parallel request is dispatched for a slow request.
-	HedgingDelay time.Duration
 
 	// DynamicHedging configures dynamic request hedging based on the percentile RTT of recent successful requests.
 	DynamicHedging *telemetry.DynamicHedgingConfig
@@ -264,22 +251,34 @@ type NetworkConfig struct {
 
 	// HostRewrite contains custom DNS rules mapping specific hostnames to target IP addresses.
 	HostRewrite *HostRewriteConfig
+
+	// HappyEyeballsDelay staggers parallel IPv4/IPv6 dial attempts to minimize latency.
+	HappyEyeballsDelay time.Duration
+
+	// HedgingDelay defines the delay before a second, parallel request is dispatched for a slow request.
+	HedgingDelay time.Duration
+
+	// ProxyDNS routes DNS lookup requests through the SOCKS5 or HTTP CONNECT proxy
+	// to prevent local DNS queries from leaking to the local ISP.
+	ProxyDNS bool
+
+	// SSRFGuard blocks requests that resolve to private or loopback IP addresses.
+	SSRFGuard bool
 }
 
 // FragmentConfig specifies the chunk size and inter-chunk delay for connection fragmentation.
 type FragmentConfig struct {
-	ChunkSize int
-
 	// LimitBytes specifies the maximum number of bytes to subject to fragmentation.
 	// Once LimitBytes is exceeded, subsequent writes pass through seamlessly.
 	// Set to -1 to fragment the entire stream.
 	LimitBytes int64
 
-	MinChunkSize int
-	MaxChunkSize int
-
 	MaxDelay time.Duration
 	MinDelay time.Duration
+
+	ChunkSize    int
+	MinChunkSize int
+	MaxChunkSize int
 }
 
 // NewFragmentedConn wraps a net.Conn with fragmentation and delay settings.
@@ -348,9 +347,6 @@ type DNSResolver interface {
 // FingerprintConfig groups settings related to browser TLS/JA4 evasion,
 // HTTP/2 setting frames, header order serialization, and TCP packet padding.
 type FingerprintConfig struct {
-	// BrowserID selects a pre-configured uTLS ClientHello profile for TLS fingerprint emulation.
-	BrowserID BrowserID
-
 	// TLSClientHelloID is a specific, low-level uTLS ClientHello ID to use instead of a generic BrowserID.
 	TLSClientHelloID *utls.ClientHelloID
 
@@ -386,6 +382,9 @@ type FingerprintConfig struct {
 
 	// CertificatePins maps domains to their pinned SHA-256 public key hashes globally.
 	CertificatePins map[string][]string
+
+	// BrowserID selects a pre-configured uTLS ClientHello profile for TLS fingerprint emulation.
+	BrowserID BrowserID
 }
 
 // Clone returns a deep copy of [FingerprintConfig].
@@ -460,10 +459,20 @@ type JA4ReportStore struct {
 	Target *telemetry.TraceInfo
 }
 
+// CacheKey uniquely identifies a cached HTTP request without string concatenation.
+type CacheKey struct {
+	Method string
+	URL    string
+}
+
+func (k CacheKey) String() string {
+	return k.Method + ":" + k.URL
+}
+
 // CacheStore defines the contract for response caching backends.
 type CacheStore interface {
-	Get(ctx context.Context, key string) ([]byte, error)
-	Set(ctx context.Context, key string, val []byte, ttl time.Duration) error
+	Get(ctx context.Context, key any) ([]byte, error)
+	Set(ctx context.Context, key any, val []byte, ttl time.Duration) error
 }
 
 // CacheConfig configures HTTP response caching behavior and default time-to-live.
@@ -474,49 +483,26 @@ type CacheConfig struct {
 
 // CachedResponse holds a serialized HTTP response stored in cache backends.
 type CachedResponse struct {
-	StatusCode int                 `json:"status_code"`
 	Header     map[string][]string `json:"header"`
 	BodyBase64 string              `json:"body_base64"`
+	StatusCode int                 `json:"status_code"`
 }
 
 // PipelineConfig configures request-response execution phases,
 // including User-Agent rotation, DPI jittering, HAR logging, and size limits.
 type PipelineConfig struct {
-	// RotateUA enables automatic rotation of the User-Agent header and its matching Client Hints.
-	RotateUA bool
-
-	// DPIJitter configures a randomized delay introduced between writing request headers and body.
-	DPIJitter *DPIJitterConfig
-
-	// ProxyFailover configures automatic fallback to alternative proxies in the pool if the current proxy fails.
+	DPIJitter     *DPIJitterConfig
 	ProxyFailover *ProxyFailoverConfig
-
-	// Hedging configures parallel request dispatching (hedging) to mitigate tail latency.
-	Hedging *HedgingConfig
-
-	// Cache configures RFC-7234 compliant local caching of GET responses.
-	Cache *CacheConfig
-
-	// HAR configures capturing full request-response exchanges into an HTTP Archive (HAR) log.
-	HAR *HARConfig
-
-	// Redact configures automatic redaction of sensitive request/response headers.
-	Redact *RedactConfig
-
-	// Inspect enables raw request/response mirroring to the traffic inspector.
-	Inspect bool
-
-	// SizeLimit specifies the maximum allowed size of the response body in bytes.
-	SizeLimit int64
-
-	// Decompress enables transparent decompression of brotli, zstd, gzip, or deflate response bodies.
-	Decompress bool
-
-	// Validate configures response validation using registered validation rules.
-	Validate bool
-
-	// Challenge enables automatic WAF/JS/DDoS challenge page detection (e.g. Cloudflare).
-	Challenge bool
+	Hedging       *HedgingConfig
+	Cache         *CacheConfig
+	HAR           *HARConfig
+	Redact        *RedactConfig
+	SizeLimit     int64
+	RotateUA      bool
+	Inspect       bool
+	Decompress    bool
+	Validate      bool
+	Challenge     bool
 }
 
 // GetPipeline retrieves the request-specific [PipelineConfig] from context.
@@ -543,8 +529,8 @@ type ProxyFailoverConfig struct {
 
 // HedgingConfig configures the request hedging delay and dynamic tracker.
 type HedgingConfig struct {
-	DefaultDelay   time.Duration
 	DynamicHedging *telemetry.DynamicHedgingConfig
+	DefaultDelay   time.Duration
 }
 
 // HARConfig configures capturing completed session logging to a HAR Tracker.
@@ -574,65 +560,26 @@ type ChallengeDetector func(resp *http.Response) (bool, error)
 // ClientDefaults configures standard request defaults, hooks, WAF solvers,
 // body buffering configs, and debuggers.
 type ClientDefaults struct {
-	// BaseURL is resolved against relative request paths in Client.Request.
-	BaseURL *url.URL
-
-	// Headers is the map of default HTTP headers sent with every request.
-	Headers http.Header
-
-	// BaseResponse is a factory function that returns a fresh instance of a custom response wrapper.
-	BaseResponse func() BaseResponse
-
-	// BeforeRequest hooks run sequentially on every outgoing request before the middleware chain.
-	BeforeRequest []func(req *http.Request)
-
-	// AfterResponse hooks run sequentially after every response (or error) is received.
-	AfterResponse []func(resp *http.Response, err error)
-
-	// MaxResponseSize restricts the maximum bytes allowed in a response body. A value <= 0 removes limits.
-	MaxResponseSize int64
-
-	// RefererAutomaton tracks and automatically injects Referer headers based on previous request URLs.
-	RefererAutomaton bool
-
-	// RefererState is the concurrent-safe state tracking the last visited URL for referer tracking.
-	RefererState *RefererState
-
-	// Logger is the diagnostic logger used by the client.
-	Logger Logger
-
-	// DefaultMods is a slice of RequestModifiers applied to every request prior to the middleware chain.
-	DefaultMods []RequestModifier
-
-	// ChallengeSolver solves JavaScript/WAF challenges (e.g., Cloudflare) on challenge detection.
-	ChallengeSolver ChallengeSolver
-
-	// ChallengeDetector determines if a response constitutes a challenge to be solved.
-	ChallengeDetector ChallengeDetector
-
-	// Inspector logs and exposes request trace history to a local developer dashboard.
-	Inspector TrafficInspector
-
-	// MultiReadThreshold determines the size limit (in bytes) under which response bodies are cached in memory for multiple reads.
-	MultiReadThreshold int64
-
-	// MultiReadDisableDisk prevents caching responses exceeding MultiReadThreshold to disk, returning errors instead.
+	BaseURL              *url.URL
+	Headers              http.Header
+	BaseResponse         func() BaseResponse
+	BeforeRequest        []func(req *http.Request)
+	AfterResponse        []func(resp *http.Response, err error)
+	RefererState         *RefererState
+	Logger               Logger
+	DefaultMods          []RequestModifier
+	ChallengeSolver      ChallengeSolver
+	ChallengeDetector    ChallengeDetector
+	Inspector            TrafficInspector
+	HeadersCookieJar     http.CookieJar
+	QueryEncoder         QueryEncoder
+	ResponseValidator    func(*http.Response) error
+	UARotationProfiles   []BrowserProfile
+	Pipeline             PipelineConfig
+	MaxResponseSize      int64
+	MultiReadThreshold   int64
+	RefererAutomaton     bool
 	MultiReadDisableDisk bool
-
-	// HeadersCookieJar is the cookie jar used for tracking cookie headers when running with custom cookie setups.
-	HeadersCookieJar http.CookieJar
-
-	// Pipeline configures the client-level default pipeline settings.
-	Pipeline PipelineConfig
-
-	// QueryEncoder is the default encoder for marshalling structures into url.Values.
-	QueryEncoder QueryEncoder
-
-	// ResponseValidator is the client-level default response validator called on every request.
-	ResponseValidator func(*http.Response) error
-
-	// UARotationProfiles defines the list of browser profiles for User-Agent rotation.
-	UARotationProfiles []BrowserProfile
 }
 
 // Clone returns a deep copy of [ClientDefaults].
@@ -737,131 +684,50 @@ type ProgressFunc = io.ProgressFunc
 
 // RequestConfig aggregates all request-scoped options and transport overrides.
 type RequestConfig struct {
-	// Decoder overrides the response [Decoder] for this request.
-	Decoder any
-
-	// ErrorModel is the target struct/map where non-2xx response bodies will be decoded.
-	ErrorModel any
-
-	// UploadProgress triggers during reads from the response body.
-	UploadProgress ProgressFunc
-
-	// DownloadProgress triggers during reads from the response body.
-	DownloadProgress ProgressFunc
-
-	// Capturer holds a pointer to a response reference to capture the raw response.
-	Capturer any
-
-	// BodyError holds any serialization/validation error occurring during request body setup.
-	BodyError error
-
-	// QueryError holds any validation/serialization error occurring during URL query parameter setup.
-	QueryError error
-
-	// MultipartBoundary is a custom boundary string for multipart requests.
-	MultipartBoundary string
-
-	// MultiReadThreshold is the size limit in bytes below which response bodies are cached in memory.
-	MultiReadThreshold int64
-
-	// MultiReadDisableDisk disables disk caching when the multi-read threshold is exceeded.
-	MultiReadDisableDisk bool
-
-	// OrderedHeaders defines the exact order in which HTTP/1.1 request headers must be serialized.
-	OrderedHeaders []string
-
-	// ALPNOverride configures the exact Application-Layer Protocol Negotiation list for TLS.
-	ALPNOverride []string
-
-	// JA4ReportStore holds the temporary report reference for TLS/HTTP JA4 fingerprinting.
-	JA4ReportStore *JA4ReportStore
-
-	// Debug enables verbose debug logging for this single request.
-	Debug bool
-
-	// Fallback defines the custom fallback logic to invoke when the request fails.
-	Fallback FallbackFunc
-
-	// RequestTimeoutCancel cancels the request-specific deadline context upon response body close.
-	RequestTimeoutCancel context.CancelFunc
-
-	// HedgingDelayOverride sets a custom delay for request hedging.
-	HedgingDelayOverride *time.Duration
-
-	// ProxyAddr is the effective proxy URL for the TCP dial.
-	ProxyAddr *url.URL
-
-	// InsecureSkipVerify disables TLS certificate verification.
-	InsecureSkipVerify bool
-
-	// TCPDelay introduces a random timing delay before initiating the TCP handshake.
-	TCPDelay TCPDelayRange
-
-	// ResponseValidator verifies the response immediately after the HTTP round-trip.
-	ResponseValidator func(resp *http.Response) error
-
-	// CacheTTL specifies the caching time-to-live for the response.
-	CacheTTL time.Duration
-
-	// RetryPolicy defines the per-request retry override logic.
-	RetryPolicy *RetryOverride
-
-	// SSRFGuard enforces DNS resolution restrictions, blocking private and loopback IPs.
-	SSRFGuard bool
-
-	// HappyEyeballsDelay sets the fallback delay between IPv4 and IPv6 connection attempts.
-	HappyEyeballsDelay time.Duration
-
-	// ProxyDNS resolves the host name through the proxy to prevent local DNS leakage.
-	ProxyDNS bool
-
-	// P0fSignature spoofs the TCP/IP network stack fingerprint to emulate specific operating systems.
-	P0fSignature *p0f.Signature
-
-	// SessionCache is the TLS session ticket cache used to resume TLS handshakes.
-	SessionCache SessionCache
-
-	// PacketPadding configuration to obscure TLS segment boundaries.
-	PacketPadding *fingerprint.PaddingConfig
-
-	// SocketController intercepts the socket file descriptor for low-level socket modifications.
-	SocketController SocketController
-
-	// ClientHelloSpecProvider provides custom uTLS ClientHelloSpecs.
+	Decoder                 any
+	ErrorModel              any
+	UploadProgress          ProgressFunc
+	DownloadProgress        ProgressFunc
+	Capturer                any
+	BodyError               error
+	QueryError              error
+	MultipartBoundary       string
+	OrderedHeaders          []string
+	ALPNOverride            []string
+	JA4ReportStore          *JA4ReportStore
+	Fallback                FallbackFunc
+	RequestTimeoutCancel    context.CancelFunc
+	HedgingDelayOverride    *time.Duration
+	ProxyAddr               *url.URL
+	ResponseValidator       func(resp *http.Response) error
+	RetryPolicy             *RetryOverride
+	P0fSignature            *p0f.Signature
+	SessionCache            SessionCache
+	PacketPadding           *fingerprint.PaddingConfig
+	SocketController        SocketController
 	ClientHelloSpecProvider ClientHelloSpecProvider
+	JA4Callback             func(ja4.Report)
+	Metadata                map[string]any
+	TraceInfo               *telemetry.TraceInfo
+	HostRewrite             *HostRewriteConfig
+	Pipeline                *PipelineConfig
+	Fragment                *FragmentConfig
+	Redact                  *RedactConfig
+	CertificatePins         map[string][]string
+	Modifiers               []RequestModifier
+	QueryEncoder            QueryEncoder
 
-	// JA4Callback is invoked once the TLS handshake is complete with the computed JA4 fingerprint report.
-	JA4Callback func(ja4.Report)
+	MultiReadThreshold int64
+	TimeoutOverride    time.Duration
+	CacheTTL           time.Duration
+	HappyEyeballsDelay time.Duration
+	TCPDelay           TCPDelayRange
 
-	// Metadata stores arbitrary user-defined metadata values associated with the request connection.
-	Metadata map[string]any
-
-	// TraceInfo holds timing tracking metrics.
-	TraceInfo *telemetry.TraceInfo
-
-	// HostRewrite rules.
-	HostRewrite *HostRewriteConfig
-
-	// Pipeline config overrides.
-	Pipeline *PipelineConfig
-
-	// Fragment configures packet fragmentation.
-	Fragment *FragmentConfig
-
-	// TimeoutOverride overrides the request timeout.
-	TimeoutOverride time.Duration
-
-	// Redact configures the sensitive header redaction rules.
-	Redact *RedactConfig
-
-	// CertificatePins maps domains to their pinned SHA-256 public key hashes.
-	CertificatePins map[string][]string
-
-	// Modifiers holds RequestModifiers passed via context.
-	Modifiers []RequestModifier
-
-	// QueryEncoder allows overriding the query encoder for a specific request.
-	QueryEncoder QueryEncoder
+	MultiReadDisableDisk bool
+	Debug                bool
+	InsecureSkipVerify   bool
+	SSRFGuard            bool
+	ProxyDNS             bool
 }
 
 // ApplyDefaults merges client-level defaults into the request config

@@ -33,7 +33,6 @@ import (
 	"github.com/lemon4ksan/aoni/cookie"
 	"github.com/lemon4ksan/aoni/fingerprint"
 	"github.com/lemon4ksan/aoni/fingerprint/ja4"
-	"github.com/lemon4ksan/aoni/internal/h1"
 	"github.com/lemon4ksan/aoni/internal/io"
 	"github.com/lemon4ksan/aoni/internal/tcp"
 	"github.com/lemon4ksan/aoni/netutil/fragment"
@@ -271,9 +270,7 @@ func (c *Client) tryGetFromCache(req *http.Request, cfg *CacheConfig) *http.Resp
 		return nil
 	}
 
-	cacheKey := req.Method + ":" + req.URL.String()
-
-	cachedData, err := cfg.Store.Get(req.Context(), cacheKey)
+	cachedData, err := cfg.Store.Get(req.Context(), CacheKey{Method: req.Method, URL: req.URL.String()})
 	if err != nil {
 		return nil
 	}
@@ -330,7 +327,7 @@ func (c *Client) saveToCache(req *http.Request, resp *http.Response, cfg *CacheC
 			ttl = reqCfg.CacheTTL
 		}
 
-		_ = cfg.Store.Set(req.Context(), req.Method+":"+req.URL.String(), cachedData, ttl)
+		_ = cfg.Store.Set(req.Context(), CacheKey{Method: req.Method, URL: req.URL.String()}, cachedData, ttl)
 	}
 }
 
@@ -976,31 +973,6 @@ func (c *Client) determineProxy(req *http.Request) (*url.URL, error) {
 	}
 
 	return http.ProxyFromEnvironment(req)
-}
-
-// wrapConn decorates a network socket connection with ordered headers, fragmentation, or MSS limits.
-func wrapConn(ctx context.Context, conn net.Conn) net.Conn {
-	var fCfg *FragmentConfig
-
-	if cfg := GetRequestConfig(ctx); cfg != nil {
-		if cfg.PacketPadding != nil && cfg.PacketPadding.MaxSegmentSize > 0 {
-			conn = applyMSSLimit(conn, cfg.PacketPadding.MaxSegmentSize)
-		}
-
-		if len(cfg.OrderedHeaders) > 0 {
-			conn = &h1.HeaderOrderingConn{Conn: conn, OrderedKeys: cfg.OrderedHeaders}
-		}
-
-		if cfg.Fragment != nil {
-			fCfg = cfg.Fragment
-		}
-	}
-
-	if fCfg != nil && fCfg.ChunkSize > 0 {
-		conn = applyFragmentation(conn, *fCfg)
-	}
-
-	return conn
 }
 
 // applyMSSLimit sets the TCP Maximum Segment Size (MSS) socket option on the connection.

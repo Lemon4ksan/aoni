@@ -159,25 +159,12 @@ func (c *Client) WithTLSClientHelloID(id utls.ClientHelloID) *Client {
 
 	if transport := new.Transport(); transport != nil {
 		transport.DialTLSContext = func(ctx context.Context, network, addr string) (net.Conn, error) {
-			var proxyURL *url.URL
-			if transport.Proxy != nil {
-				proxyURL, _ = transport.Proxy(&http.Request{URL: &url.URL{Host: addr}})
+			dialCfg := new.resolveDialConfig(ctx, network, addr)
+			if dialCfg.ProxyURL == nil && transport.Proxy != nil {
+				dialCfg.ProxyURL, _ = transport.Proxy(&http.Request{URL: &url.URL{Host: addr}})
 			}
 
-			dialConfig := dialConfig{
-				Network:       network,
-				Addr:          addr,
-				Browser:       BrowserNone,
-				HelloID:       new.fingerprint.TLSClientHelloID,
-				SourceRotator: new.network.SourceRotator,
-				DNSResolver:   new.network.DNSResolver,
-				Delay:         new.network.HappyEyeballsDelay,
-				SSRFGuard:     new.network.SSRFGuard,
-				JA4Callback:   new.fingerprint.JA4Callback,
-				ProxyURL:      proxyURL,
-			}
-
-			return c.dialTLSWithUTLS(ctx, dialConfig, transport.TLSClientConfig, nil)
+			return new.dialTLSWithUTLS(ctx, dialCfg)
 		}
 	}
 
@@ -383,23 +370,12 @@ func (c *Client) DialTLSForWS(ctx context.Context, addr string) (net.Conn, error
 	}
 
 	if browser := c.BrowserID(); browser != BrowserNone || c.fingerprint.TLSClientHelloID != nil {
-		var proxyURL *url.URL
-		if c.network.TransportProxy != nil {
-			proxyURL, _ = c.network.TransportProxy(&http.Request{URL: &url.URL{Host: addr}})
+		dialCfg := c.resolveDialConfig(ctx, "tcp", addr)
+		if dialCfg.ProxyURL == nil && c.network.TransportProxy != nil {
+			dialCfg.ProxyURL, _ = c.network.TransportProxy(&http.Request{URL: &url.URL{Host: addr}})
 		}
 
-		dialCfg := dialConfig{
-			Network:       "tcp",
-			Addr:          addr,
-			Browser:       browser,
-			HelloID:       c.fingerprint.TLSClientHelloID,
-			SourceRotator: c.network.SourceRotator,
-			DNSResolver:   c.network.DNSResolver,
-			JA4Callback:   c.fingerprint.JA4Callback,
-			ProxyURL:      proxyURL,
-		}
-
-		return c.dialTLSWithUTLS(ctx, dialCfg, c.TLSConfig(), GetRequestConfig(ctx))
+		return c.dialTLSWithUTLS(ctx, dialCfg)
 	}
 
 	if tr != nil && tr.DialContext != nil {
@@ -426,14 +402,8 @@ func (c *Client) DialPlainForWS(ctx context.Context, addr string) (net.Conn, err
 	if tr != nil && tr.DialContext != nil {
 		conn, err = tr.DialContext(ctx, "tcp", addr)
 	} else {
-		conn, err = proxyClient{}.CleanDialContext(ctx, dialConfig{
-			Network:       "tcp",
-			Addr:          addr,
-			Delay:         c.network.HappyEyeballsDelay,
-			SSRFGuard:     c.network.SSRFGuard,
-			SourceRotator: c.network.SourceRotator,
-			DNSResolver:   c.network.DNSResolver,
-		})
+		dialCfg := c.resolveDialConfig(ctx, "tcp", addr)
+		conn, err = proxyClient{}.CleanDialContext(ctx, dialCfg)
 	}
 
 	if err != nil {
@@ -659,6 +629,10 @@ func CloseResponse(resp *http.Response) {
 
 func defaultEngine(doer HTTPDoer) HTTPDoer {
 	if doer != nil {
+		if httpClient, ok := doer.(*http.Client); ok {
+			return CloneHTTPClient(httpClient)
+		}
+
 		return doer
 	}
 
@@ -737,8 +711,12 @@ func (c *Client) ensureUserAgent() {
 // after the client's data fields have been set.
 func applyEngineConfig(c *Client, eng EngineConfig) {
 	if eng.CustomEngine != nil {
-		c.engine = eng.CustomEngine
-		return
+		if httpClient, ok := eng.CustomEngine.(*http.Client); ok {
+			c.engine = CloneHTTPClient(httpClient)
+		} else {
+			c.engine = eng.CustomEngine
+			return
+		}
 	}
 
 	httpClient, ok := c.engine.(*http.Client)

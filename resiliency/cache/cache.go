@@ -18,7 +18,7 @@ var ErrCacheMiss = errors.New("aoni cache: miss")
 // InMemoryStore provides a thread-safe, in-memory cache backend with background janitor cleanup.
 type InMemoryStore struct {
 	mu     sync.RWMutex
-	items  map[string]inMemoryEntry
+	items  map[any]inMemoryEntry
 	cancel context.CancelFunc
 }
 
@@ -31,7 +31,7 @@ type inMemoryEntry struct {
 func NewInMemoryStore(cleanupInterval time.Duration) *InMemoryStore {
 	ctx, cancel := context.WithCancel(context.Background()) //nolint:gosec
 	store := &InMemoryStore{
-		items:  make(map[string]inMemoryEntry),
+		items:  make(map[any]inMemoryEntry),
 		cancel: cancel,
 	}
 
@@ -43,7 +43,7 @@ func NewInMemoryStore(cleanupInterval time.Duration) *InMemoryStore {
 }
 
 // Get retrieves cached bytes for key. Returns [aoni.ErrCacheMiss] if missing or expired.
-func (s *InMemoryStore) Get(_ context.Context, key string) ([]byte, error) {
+func (s *InMemoryStore) Get(_ context.Context, key any) ([]byte, error) {
 	s.mu.RLock()
 	entry, ok := s.items[key]
 	s.mu.RUnlock()
@@ -56,7 +56,7 @@ func (s *InMemoryStore) Get(_ context.Context, key string) ([]byte, error) {
 }
 
 // Set stores value in memory with the specified ttl duration.
-func (s *InMemoryStore) Set(_ context.Context, key string, val []byte, ttl time.Duration) error {
+func (s *InMemoryStore) Set(_ context.Context, key any, val []byte, ttl time.Duration) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
