@@ -144,12 +144,18 @@ func (p *ProxyIsolatedJar) GetJar(ctx context.Context) http.CookieJar {
 	return p.GetJarForProxy(GetProxyAddress(ctx))
 }
 
+type cookieKey struct {
+	domain string
+	path   string
+	name   string
+}
+
 func (p *ProxyIsolatedJar) initPersistentJar(proxyURL string, baseJar http.CookieJar, backend Storage) http.CookieJar {
 	pJar := &PersistentJar{
 		CookieJar:  baseJar,
 		proxyURL:   proxyURL,
 		backend:    backend,
-		cookiesMap: make(map[string]Cookie),
+		cookiesMap: make(map[cookieKey]Cookie),
 	}
 
 	cookies, err := backend.Load(proxyURL)
@@ -161,7 +167,7 @@ func (p *ProxyIsolatedJar) initPersistentJar(proxyURL string, baseJar http.Cooki
 	defer pJar.mu.Unlock()
 
 	for _, c := range cookies {
-		key := buildCookieMapKey(c.Domain, c.Path, c.Name)
+		key := cookieKey{domain: c.Domain, path: c.Path, name: c.Name}
 		pJar.cookiesMap[key] = c
 
 		scheme := "http"
@@ -196,7 +202,7 @@ type PersistentJar struct {
 	proxyURL   string
 	backend    Storage
 	mu         sync.Mutex
-	cookiesMap map[string]Cookie
+	cookiesMap map[cookieKey]Cookie
 }
 
 // SetCookies stores cookies in the inner jar and syncs non-expired cookies to persistent storage.
@@ -208,7 +214,7 @@ func (pj *PersistentJar) SetCookies(u *url.URL, cookies []*http.Cookie) {
 	changed := false
 
 	for _, c := range cookies {
-		key := buildCookieMapKey(c.Domain, c.Path, c.Name)
+		key := cookieKey{domain: c.Domain, path: c.Path, name: c.Name}
 		if !c.Expires.IsZero() && c.Expires.Before(now) {
 			if _, exists := pj.cookiesMap[key]; exists {
 				delete(pj.cookiesMap, key)
@@ -229,7 +235,7 @@ func (pj *PersistentJar) SetCookies(u *url.URL, cookies []*http.Cookie) {
 			path = "/"
 		}
 
-		key = buildCookieMapKey(domain, path, c.Name)
+		key = cookieKey{domain: domain, path: path, name: c.Name}
 		pj.cookiesMap[key] = Cookie{
 			Name:     c.Name,
 			Value:    c.Value,
@@ -263,8 +269,4 @@ func (pj *PersistentJar) SetCookies(u *url.URL, cookies []*http.Cookie) {
 	if changed {
 		_ = pj.backend.Save(pj.proxyURL, list)
 	}
-}
-
-func buildCookieMapKey(domain, path, name string) string {
-	return domain + "|" + path + "|" + name
 }
