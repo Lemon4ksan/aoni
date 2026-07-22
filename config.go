@@ -357,6 +357,9 @@ type FingerprintConfig struct {
 	// TLSClientHelloSpecProvider dynamically provides custom ClientHelloSpecs at handshake time.
 	TLSClientHelloSpecProvider ClientHelloSpecProvider
 
+	// TLSQUICClientHelloSpec is the QUIC-specific ClientHelloSpec to use for TLS fingerprint emulation.
+	TLSQUICClientHelloSpec *utls.ClientHelloSpec
+
 	// H2Configurer allows manual tuning of HTTP/2 settings on the transport level.
 	H2Configurer HTTP2Configurer
 

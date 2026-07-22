@@ -256,11 +256,19 @@ func (c *Client) WithHTTP3Config(config *QUICMigrationConfig) *Client {
 		quicCfg.EnableDatagrams = c.fingerprint.H3Settings.EnableDatagrams
 	}
 
+	tlsCfg := &tls.Config{
+		NextProtos: []string{"h3"},
+	}
+
+	if spec := c.fingerprint.TLSQUICClientHelloSpec; spec != nil {
+		if len(spec.CipherSuites) > 0 {
+			tlsCfg.CipherSuites = spec.CipherSuites
+		}
+	}
+
 	rt := &http3.Transport{
-		TLSClientConfig: &tls.Config{
-			NextProtos: []string{"h3"},
-		},
-		QUICConfig: quicCfg,
+		TLSClientConfig: tlsCfg,
+		QUICConfig:      quicCfg,
 	}
 
 	newClient.engine = &http.Client{

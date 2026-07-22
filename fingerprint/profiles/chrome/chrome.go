@@ -13,9 +13,8 @@ import (
 	"github.com/lemon4ksan/aoni/fingerprint/profiles"
 )
 
-// HelloChrome150 is the Chrome 150 client hello spec.
-// The version number changes with each update. Never use it directly.
-var HelloChrome150 = utls.ClientHelloSpec{
+// defaultHelloSpec represents the active Chrome TLS ClientHello specification.
+var defaultHelloSpec = utls.ClientHelloSpec{
 	CipherSuites: []uint16{
 		utls.GREASE_PLACEHOLDER,
 		utls.TLS_AES_128_GCM_SHA256,
@@ -107,9 +106,8 @@ var HelloChrome150 = utls.ClientHelloSpec{
 	),
 }
 
-// HelloChrome150QUIC is the Chrome 145 QUIC client hello spec.
-// The version number changes with each update. Never use it directly.
-var HelloChrome150QUIC = utls.ClientHelloSpec{
+// defaultHelloQUICSpec represents the active Chrome TLS ClientHello specification.
+var defaultHelloQUICSpec = utls.ClientHelloSpec{
 	CipherSuites: []uint16{
 		utls.TLS_AES_128_GCM_SHA256,
 		utls.TLS_AES_256_GCM_SHA384,
@@ -205,11 +203,12 @@ var platforms = map[profiles.OSKey]string{
 
 // Desktop is the Chrome desktop variant.
 var Desktop = &profiles.Variant{
-	HelloSpec:    &HelloChrome150,
-	BoundaryFunc: Boundary,
-	ConfigureH2:  configureH2Desktop,
-	ConfigureH3:  configureH3Desktop,
-	BuildHeaders: buildHeadersDesktop,
+	HelloSpec:     &defaultHelloSpec,
+	HelloQUICSpec: &defaultHelloQUICSpec,
+	BoundaryFunc:  Boundary,
+	ConfigureH2:   configureH2Desktop,
+	ConfigureH3:   configureH3Desktop,
+	BuildHeaders:  buildHeadersDesktop,
 	InsertHeaders: func(headers map[string]string, method string) {
 		insertDesktopHeaders(headers, method)
 	},
@@ -218,7 +217,7 @@ var Desktop = &profiles.Variant{
 
 // Mobile is the Chrome mobile variant.
 var Mobile = &profiles.Variant{
-	HelloSpec:    &HelloChrome150,
+	HelloSpec:    &defaultHelloSpec,
 	BoundaryFunc: Boundary,
 	ConfigureH2:  configureH2Desktop,
 	ConfigureH3:  configureH3Desktop,

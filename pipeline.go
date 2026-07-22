@@ -102,7 +102,7 @@ func (c *Client) prepareRequestContext(req *http.Request) *http.Request {
 	if cfg.TimeoutOverride > 0 {
 		var cancel context.CancelFunc
 
-		ctx, cancel = context.WithTimeout(ctx, cfg.TimeoutOverride)
+		ctx, cancel = context.WithTimeout(ctx, cfg.TimeoutOverride) //nolint:gosec
 		cfg.RequestTimeoutCancel = cancel
 	}
 
@@ -193,7 +193,7 @@ func (c *Client) traceRequest(
 
 	req = req.WithContext(httptrace.WithClientTrace(req.Context(), trace))
 
-	return req, traceInfo, traceInfo.Start()
+	return req, traceInfo, traceInfo.Start() //nolint:bodyclose
 }
 
 // rotateUserAgentAndHints rotates UA headers and client hints.
@@ -204,7 +204,7 @@ func (c *Client) rotateUserAgentAndHints(req *http.Request) {
 	}
 
 	idx := atomic.AddUint32(&c.userAgentRotationCounter, 1) - 1
-	prof := profiles[idx%uint32(len(profiles))]
+	prof := profiles[idx%uint32(len(profiles))] //nolint:gosec
 
 	req.Header.Set("User-Agent", prof.UserAgent)
 
@@ -434,7 +434,7 @@ func (c *Client) validateResponse(resp *http.Response) error {
 		clientErr = c.defaults.ResponseValidator(resp)
 	}
 
-	fn := GetResponseValidator(resp.Request.Context())
+	fn := GetResponseValidator(resp.Request.Context()) //nolint:bodyclose
 	if fn != nil {
 		requestErr := fn(resp)
 		if requestErr != nil {
@@ -655,7 +655,7 @@ func (c *Client) selectNextProxy(proxies []*url.URL, isRetry bool) *url.URL {
 		idx = atomic.LoadUint32(&c.proxyFailoverCounter)
 	}
 
-	return proxies[idx%uint32(len(proxies))]
+	return proxies[idx%uint32(len(proxies))] //nolint:gosec
 }
 
 // prepareRequestForProxy clones the outgoing request context and bodies to target proxy routes.
@@ -689,7 +689,7 @@ func (c *Client) handleWAFChallenge(req *http.Request, resp *http.Response) (*ht
 	if resp != nil && resp.Body != nil {
 		bodyBytes, err := stdio.ReadAll(stdio.LimitReader(resp.Body, 100*1024))
 		if err != nil {
-			return resp, nil
+			return resp, nil //nolint:nilerr
 		}
 
 		buffered := &io.ExplicitBufferedBody{
@@ -857,7 +857,7 @@ func (c *Client) launchHedgeAttempt(ctx context.Context, req *http.Request, resu
 	}
 
 	go func() {
-		resp, err := c.engine.Do(cloned)
+		resp, err := c.engine.Do(cloned) //nolint:bodyclose
 		resultsCh <- hedgeResult{resp: resp, err: err}
 	}()
 }

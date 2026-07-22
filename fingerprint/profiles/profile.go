@@ -70,6 +70,7 @@ type H3Settings struct {
 // Variant represents a single browser variant with its associated settings.
 type Variant struct {
 	HelloSpec     *utls.ClientHelloSpec
+	HelloQUICSpec *utls.ClientHelloSpec
 	HelloID       utls.ClientHelloID
 	BoundaryFunc  func() string
 	ConfigureH2   func(*H2Settings)

@@ -107,5 +107,5 @@ func secureRandomInt(maxVal int) int {
 	_, _ = rand.Read(buf[:])
 	val := binary.BigEndian.Uint64(buf[:])
 
-	return int(val % uint64(maxVal))
+	return int(val % uint64(maxVal)) //nolint:gosec
 }

@@ -35,6 +35,10 @@ func ApplyTLSVariantToConfig(cfg *Config, variant *profiles.Variant) {
 		cfg.Fingerprint.TLSClientHelloID = &helloID
 		cfg.Fingerprint.TLSClientHelloSpecProvider = nil
 	}
+
+	if variant.HelloQUICSpec != nil {
+		cfg.Fingerprint.TLSQUICClientHelloSpec = variant.HelloQUICSpec
+	}
 }
 
 // ApplyHTTPVariantToConfig maps HTTP/2, HTTP/3 transport frames and base browser headers

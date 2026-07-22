@@ -14,9 +14,8 @@ import (
 	"github.com/lemon4ksan/aoni/fingerprint/profiles"
 )
 
-// HelloFirefox1520 is the TLS hello for Firefox 1520.
-// The version number changes with each update. Never use it directly.
-var HelloFirefox1520 = utls.HelloFirefox_120
+// defaultHelloID is the active uTLS ClientHello ID for Firefox.
+var defaultHelloID = utls.HelloFirefox_120
 
 // Various user agent strings for different operating systems.
 var (
@@ -37,7 +36,7 @@ var userAgents = map[profiles.OSKey]string{
 
 // Desktop is the desktop variant of the Firefox profile.
 var Desktop = &profiles.Variant{
-	HelloID:      HelloFirefox1520,
+	HelloID:      defaultHelloID,
 	BoundaryFunc: Boundary,
 	ConfigureH2:  configureH2Desktop,
 	ConfigureH3:  configureH3Desktop,
@@ -50,7 +49,7 @@ var Desktop = &profiles.Variant{
 
 // Mobile is the mobile variant of the Firefox profile.
 var Mobile = &profiles.Variant{
-	HelloID:      HelloFirefox1520,
+	HelloID:      defaultHelloID,
 	BoundaryFunc: Boundary,
 	ConfigureH2:  configureH2Desktop,
 	ConfigureH3:  configureH3Desktop,
