@@ -232,7 +232,8 @@ var bytePool = sync.Pool{
 	},
 }
 
-func handleResponse(resp *http.Response, target any, requester aoni.Requester) error {
+// HandleResponse processes and decodes an HTTP response into target struct or API error model.
+func HandleResponse(resp *http.Response, target any, requester aoni.Requester) error {
 	if resp == nil {
 		return errors.New("aoni: response is nil")
 	}

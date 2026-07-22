@@ -50,11 +50,11 @@ func GetTo[Resp any](
 	}
 
 	if reflect.TypeFor[Resp]() == reflect.TypeFor[NoResponse]() {
-		return nil, handleResponse(resp, nil, c)
+		return nil, HandleResponse(resp, nil, c)
 	}
 
 	result := new(Resp)
-	if err := handleResponse(resp, result, c); err != nil {
+	if err := HandleResponse(resp, result, c); err != nil {
 		return nil, err
 	}
 
@@ -149,11 +149,11 @@ func PostTo[Resp any](
 	}
 
 	if reflect.TypeFor[Resp]() == reflect.TypeFor[NoResponse]() {
-		return nil, handleResponse(resp, nil, c)
+		return nil, HandleResponse(resp, nil, c)
 	}
 
 	result := new(Resp)
-	if err := handleResponse(resp, result, c); err != nil {
+	if err := HandleResponse(resp, result, c); err != nil {
 		return nil, err
 	}
 
@@ -247,11 +247,11 @@ func PutTo[Resp any](
 	}
 
 	if reflect.TypeFor[Resp]() == reflect.TypeFor[NoResponse]() {
-		return nil, handleResponse(resp, nil, c)
+		return nil, HandleResponse(resp, nil, c)
 	}
 
 	result := new(Resp)
-	if err := handleResponse(resp, result, c); err != nil {
+	if err := HandleResponse(resp, result, c); err != nil {
 		return nil, err
 	}
 
@@ -345,11 +345,11 @@ func PatchTo[Resp any](
 	}
 
 	if reflect.TypeFor[Resp]() == reflect.TypeFor[NoResponse]() {
-		return nil, handleResponse(resp, nil, c)
+		return nil, HandleResponse(resp, nil, c)
 	}
 
 	result := new(Resp)
-	if err := handleResponse(resp, result, c); err != nil {
+	if err := HandleResponse(resp, result, c); err != nil {
 		return nil, err
 	}
 
@@ -443,11 +443,11 @@ func DeleteTo[Resp any](
 	}
 
 	if reflect.TypeFor[Resp]() == reflect.TypeFor[NoResponse]() {
-		return nil, handleResponse(resp, nil, c)
+		return nil, HandleResponse(resp, nil, c)
 	}
 
 	result := new(Resp)
-	if err := handleResponse(resp, result, c); err != nil {
+	if err := HandleResponse(resp, result, c); err != nil {
 		return nil, err
 	}
 
@@ -467,6 +467,156 @@ func DeleteToEx[Resp any](
 	mods = append(mods, mod.WithCaptureResponse(&raw))
 
 	result, err := DeleteTo[Resp](ctx, c, path, body, mods...)
+	if err != nil {
+		if raw != nil && raw.Body != nil {
+			_ = raw.Body.Close()
+		}
+
+		return nil, raw, err
+	}
+
+	return result, raw, nil
+}
+
+// Head performs a HEAD request through the specified [Requester] and returns the raw [http.Response].
+func Head(
+	ctx context.Context,
+	c aoni.Requester,
+	path string,
+	mods ...aoni.RequestModifier,
+) (*http.Response, error) {
+	return c.Request(ctx, http.MethodHead, path, mods...)
+}
+
+// Options performs an OPTIONS request through the specified [Requester] and returns the raw [http.Response].
+func Options(
+	ctx context.Context,
+	c aoni.Requester,
+	path string,
+	mods ...aoni.RequestModifier,
+) (*http.Response, error) {
+	return c.Request(ctx, http.MethodOptions, path, mods...)
+}
+
+// OptionsTo performs an OPTIONS request and decodes the response body into Resp.
+func OptionsTo[Resp any](
+	ctx context.Context,
+	c aoni.Requester,
+	path string,
+	mods ...aoni.RequestModifier,
+) (*Resp, error) {
+	resp, err := c.Request(ctx, http.MethodOptions, path, mods...) //nolint:bodyclose
+	if err != nil {
+		return nil, err
+	}
+
+	if reflect.TypeFor[Resp]() == reflect.TypeFor[NoResponse]() {
+		return nil, HandleResponse(resp, nil, c)
+	}
+
+	result := new(Resp)
+	if err := HandleResponse(resp, result, c); err != nil {
+		return nil, err
+	}
+
+	return result, nil
+}
+
+// Trace performs a TRACE request through the specified [Requester] and returns the raw [http.Response].
+func Trace(
+	ctx context.Context,
+	c aoni.Requester,
+	path string,
+	mods ...aoni.RequestModifier,
+) (*http.Response, error) {
+	return c.Request(ctx, http.MethodTrace, path, mods...)
+}
+
+// Connect performs a CONNECT request through the specified [Requester] and returns the raw [http.Response].
+func Connect(
+	ctx context.Context,
+	c aoni.Requester,
+	path string,
+	mods ...aoni.RequestModifier,
+) (*http.Response, error) {
+	return c.Request(ctx, http.MethodConnect, path, mods...)
+}
+
+// Do performs an arbitrary HTTP request using method and optional body, returning the raw [http.Response].
+func Do(
+	ctx context.Context,
+	c aoni.Requester,
+	method, path string,
+	body any,
+	mods ...aoni.RequestModifier,
+) (*http.Response, error) {
+	if body != nil {
+		bodyReader, err := validateAndMarshal(body)
+		if err != nil {
+			return nil, err
+		}
+
+		mods = append([]aoni.RequestModifier{
+			mod.WithContentType("application/json"),
+			mod.WithAccept("application/json"),
+			mod.WithBody(bodyReader),
+		}, mods...)
+	}
+
+	return c.Request(ctx, method, path, mods...)
+}
+
+// DoTo performs an arbitrary HTTP request using method, marshals optional body, and decodes response into Resp.
+func DoTo[Resp any](
+	ctx context.Context,
+	c aoni.Requester,
+	method, path string,
+	body any,
+	mods ...aoni.RequestModifier,
+) (*Resp, error) {
+	if body != nil {
+		bodyReader, err := validateAndMarshal(body)
+		if err != nil {
+			return nil, err
+		}
+
+		mods = append([]aoni.RequestModifier{
+			mod.WithContentType("application/json"),
+			mod.WithAccept("application/json"),
+			mod.WithBody(bodyReader),
+		}, mods...)
+	}
+
+	resp, err := c.Request(ctx, method, path, mods...) //nolint:bodyclose
+	if err != nil {
+		return nil, err
+	}
+
+	if reflect.TypeFor[Resp]() == reflect.TypeFor[NoResponse]() {
+		return nil, HandleResponse(resp, nil, c)
+	}
+
+	result := new(Resp)
+	if err := HandleResponse(resp, result, c); err != nil {
+		return nil, err
+	}
+
+	return result, nil
+}
+
+// DoToEx is like [DoTo] but returns both the parsed response payload and the raw *http.Response.
+func DoToEx[Resp any](
+	ctx context.Context,
+	c aoni.Requester,
+	method, path string,
+	body any,
+	mods ...aoni.RequestModifier,
+) (*Resp, *http.Response, error) {
+	var raw *http.Response
+
+	mods = append(mods, mod.WithCaptureResponse(&raw))
+
+	result, err := DoTo[Resp](ctx, c, method, path, body, mods...)
 	if err != nil {
 		if raw != nil && raw.Body != nil {
 			_ = raw.Body.Close()
