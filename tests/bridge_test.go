@@ -749,7 +749,7 @@ func TestNewStdClient_Resilience(t *testing.T) {
 
 		doer := middleware.Chain(
 			&http.Client{},
-			middleware.Retry(retryOpts, aoni.RetryOnGatewayErrors()),
+			middleware.Retry(retryOpts, middleware.RetryOnGatewayErrors()),
 		)
 
 		c := aoni.NewClient(doer)

@@ -236,11 +236,6 @@ func TestGenericToHelpers(t *testing.T) {
 		Status  int      `xml:"status"`
 	}
 
-	type yamlPayload struct {
-		Message string `yaml:"message"`
-		Status  int    `yaml:"status"`
-	}
-
 	t.Run("GetTo_JSON", func(t *testing.T) {
 		res, err := GetTo[reqTestPayload](t.Context(), client, "/get")
 		require.NoError(t, err)
@@ -275,24 +270,6 @@ func TestGenericToHelpers(t *testing.T) {
 		)
 		require.NoError(t, err)
 		assert.Equal(t, "xml-success", res.Message)
-	})
-
-	t.Run("GetTo_YAML", func(t *testing.T) {
-		res, err := GetTo[yamlPayload](t.Context(), client, "/get-yaml", decode.WithYAML())
-		require.NoError(t, err)
-		assert.Equal(t, "yaml-success", res.Message)
-	})
-
-	t.Run("PostTo_YAML", func(t *testing.T) {
-		res, err := PostTo[yamlPayload](
-			t.Context(), client, "/post-yaml",
-			strings.NewReader("message: yaml-input\nstatus: 10\n"),
-			mod.WithContentType("application/x-yaml"),
-			mod.WithAccept("application/x-yaml"),
-			decode.WithYAML(),
-		)
-		require.NoError(t, err)
-		assert.Equal(t, "yaml-success", res.Message)
 	})
 }
 

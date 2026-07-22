@@ -2,25 +2,28 @@
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
+// Package fluent provides a high-performance, chainable Request Builder API
+// designed for ergonomics, zero-allocation request pooling, and seamless integration
+// with the core aoni HTTP client.
 package fluent
 
 import (
 	"context"
 	"net/http"
 
+	"google.golang.org/protobuf/proto"
+
 	"github.com/lemon4ksan/aoni"
 )
 
-// New initializes a new pooled [Request] builder bound to the target client.
-// The returned [Request] is retrieved from an internal sync.Pool and is automatically
-// recycled back to the pool upon execution.
+// New initializes a new pooled Request builder bound to the target client.
 func New(client *aoni.Client) *Request {
 	r := requestPool.Get().(*Request)
 	r.client = client
 	return r
 }
 
-// R is a convenient short alias for [New].
+// R is a convenient short alias for New.
 func R(client *aoni.Client) *Request {
 	return New(client)
 }
@@ -80,6 +83,52 @@ func DoJSON[T any](ctx context.Context, c *aoni.Client, method, path string, bod
 	}
 
 	resp, err := req.Do(method, path)
+
+	return target, resp, err
+}
+
+// PostProto dispatches a POST request with a Protobuf payload and unmarshals a binary Protobuf response into T.
+func PostProto[T any](
+	ctx context.Context,
+	c *aoni.Client,
+	path string,
+	reqMsg proto.Message,
+) (T, *http.Response, error) {
+	var target T
+
+	resp, err := R(c).SetContext(ctx).SetProtoBody(reqMsg).SetProtoResult(&target).Post(path)
+
+	return target, resp, err
+}
+
+// PostGRPCWeb dispatches a POST request with a gRPC-Web framed payload and unmarshals a gRPC-Web response frame into T.
+func PostGRPCWeb[T any](
+	ctx context.Context,
+	c *aoni.Client,
+	path string,
+	reqMsg proto.Message,
+) (T, *http.Response, error) {
+	var target T
+
+	resp, err := R(c).SetContext(ctx).SetGRPCWebBody(reqMsg).SetGRPCWebResult(&target).Post(path)
+
+	return target, resp, err
+}
+
+// GetProto dispatches a GET request and unmarshals a binary Protobuf response into T.
+func GetProto[T any](ctx context.Context, c *aoni.Client, path string) (T, *http.Response, error) {
+	var target T
+
+	resp, err := R(c).SetContext(ctx).SetProtoResult(&target).Get(path)
+
+	return target, resp, err
+}
+
+// GetGRPCWeb dispatches a GET request and unmarshals a gRPC-Web response frame into T.
+func GetGRPCWeb[T any](ctx context.Context, c *aoni.Client, path string) (T, *http.Response, error) {
+	var target T
+
+	resp, err := R(c).SetContext(ctx).SetGRPCWebResult(&target).Get(path)
 
 	return target, resp, err
 }

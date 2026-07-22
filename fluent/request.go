@@ -2,9 +2,6 @@
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
-// Package fluent provides a high-performance, chainable Request Builder API
-// designed for ergonomics, zero-allocation request pooling, and seamless integration
-// with the core aoni HTTP client.
 package fluent
 
 import (
@@ -20,7 +17,10 @@ import (
 	"sync"
 	"time"
 
+	"google.golang.org/protobuf/proto"
+
 	"github.com/lemon4ksan/aoni"
+	"github.com/lemon4ksan/aoni/codec/decode"
 	"github.com/lemon4ksan/aoni/mod"
 	"github.com/lemon4ksan/aoni/netutil"
 	"github.com/lemon4ksan/aoni/request"
@@ -45,11 +45,11 @@ var requestPool = sync.Pool{
 }
 
 // Request is a thread-safe pooled request builder offering a fluent chainable API.
-// Instances are recycled back to an internal sync.Pool upon calling Execute or HTTP verb methods.
 type Request struct {
-	// 16-byte aligned interface and string headers
 	ctx              context.Context
 	body             any
+	protoBody        proto.Message
+	grpcWebBody      proto.Message
 	result           any
 	resultError      any
 	queryStruct      any
@@ -60,7 +60,6 @@ type Request struct {
 	forceContentType string
 	label            string
 
-	// 8-byte aligned pointers, maps, and scalar types
 	client           *aoni.Client
 	basicAuth        *basicAuth
 	digestAuth       *digestAuth
@@ -72,6 +71,9 @@ type Request struct {
 	traceInfo        *telemetry.TraceInfo
 	appliedMods      []aoni.RequestModifier
 	timeout          time.Duration
+
+	useProtoDecoder   bool
+	useGRPCWebDecoder bool
 }
 
 type basicAuth struct {
@@ -89,6 +91,8 @@ func (r *Request) Reset() {
 	r.client = nil
 	r.ctx = nil
 	r.body = nil
+	r.protoBody = nil
+	r.grpcWebBody = nil
 	r.result = nil
 	r.resultError = nil
 	r.queryStruct = nil
@@ -105,6 +109,8 @@ func (r *Request) Reset() {
 	r.traceInfo = nil
 	r.appliedMods = r.appliedMods[:0]
 	r.timeout = 0
+	r.useProtoDecoder = false
+	r.useGRPCWebDecoder = false
 
 	for k := range r.headers {
 		delete(r.headers, k)
@@ -119,7 +125,7 @@ func (r *Request) Reset() {
 	}
 }
 
-// SetContext associates a [context.Context] with the request execution.
+// SetContext associates a context.Context with the request execution.
 func (r *Request) SetContext(ctx context.Context) *Request {
 	r.ctx = ctx
 	return r
@@ -161,7 +167,7 @@ func (r *Request) SetQueryStruct(v any) *Request {
 	return r
 }
 
-// SetPathParam sets a URL path parameter to be interpolated (e.g., /users/{id}).
+// SetPathParam sets a URL path parameter to be interpolated (e.g. /users/{id}).
 func (r *Request) SetPathParam(param, value string) *Request {
 	r.pathParams[param] = value
 	return r
@@ -198,15 +204,41 @@ func (r *Request) SetOutputFromHeader(targetDir string) *Request {
 	return r
 }
 
-// SetBody sets the payload body to be serialized into the request.
+// SetBody sets the payload body to be serialized into the request as JSON or raw stream.
 func (r *Request) SetBody(body any) *Request {
 	r.body = body
+	return r
+}
+
+// SetProtoBody serializes a Protocol Buffer message into the binary request payload.
+func (r *Request) SetProtoBody(msg proto.Message) *Request {
+	r.protoBody = msg
+	return r
+}
+
+// SetGRPCWebBody serializes a Protocol Buffer message into a gRPC-Web framed request payload.
+func (r *Request) SetGRPCWebBody(msg proto.Message) *Request {
+	r.grpcWebBody = msg
 	return r
 }
 
 // SetResult sets the target struct pointer into which a 2xx response body is decoded.
 func (r *Request) SetResult(result any) *Request {
 	r.result = result
+	return r
+}
+
+// SetProtoResult configures the response target to be decoded via ProtoDecoder.
+func (r *Request) SetProtoResult(result any) *Request {
+	r.result = result
+	r.useProtoDecoder = true
+	return r
+}
+
+// SetGRPCWebResult configures the response target to be decoded via GRPCWebDecoder.
+func (r *Request) SetGRPCWebResult(result any) *Request {
+	r.result = result
+	r.useGRPCWebDecoder = true
 	return r
 }
 
@@ -222,7 +254,7 @@ func (r *Request) SetOutput(filePath string) *Request {
 	return r
 }
 
-// SetSaveFileName is an alias for [SetOutput].
+// SetSaveFileName is an alias for SetOutput.
 func (r *Request) SetSaveFileName(filePath string) *Request {
 	return r.SetOutput(filePath)
 }
@@ -239,7 +271,7 @@ func (r *Request) SetUploadProgress(progress aoni.ProgressFunc) *Request {
 	return r
 }
 
-// SetTrace associates a [telemetry.TraceInfo] container to capture detailed network timings and TLS details.
+// SetTrace associates a TraceInfo container to capture detailed network timings and TLS details.
 func (r *Request) SetTrace(info *telemetry.TraceInfo) *Request {
 	r.traceInfo = info
 	return r
@@ -268,7 +300,7 @@ func (r *Request) SetLabel(label string) *Request {
 	return r
 }
 
-// Apply injects reusable [aoni.RequestModifier] functions into the request builder.
+// Apply injects reusable RequestModifier functions into the request builder.
 func (r *Request) Apply(mods ...aoni.RequestModifier) *Request {
 	r.appliedMods = append(r.appliedMods, mods...)
 	return r
@@ -285,7 +317,7 @@ func (r *Request) Download(url, filePath string) (*http.Response, error) {
 	return r.SetOutput(filePath).Get(url)
 }
 
-// Execute compiles the request builder into aoni.RequestModifiers and executes the HTTP request.
+// Execute compiles the request builder into RequestModifiers and executes the HTTP request.
 func (r *Request) Execute(method, path string) (*http.Response, error) {
 	client := r.client
 	resultTarget := r.result
@@ -356,12 +388,23 @@ func (r *Request) buildModifiers() []aoni.RequestModifier {
 		mods = append(mods, mod.WithQuery(r.queryStruct))
 	}
 
-	if r.body != nil {
+	switch {
+	case r.protoBody != nil:
+		mods = append(mods, mod.WithProtoBody(r.protoBody))
+	case r.grpcWebBody != nil:
+		mods = append(mods, mod.WithGRPCWebBody(r.grpcWebBody))
+	case r.body != nil:
 		if reader, ok := r.body.(io.Reader); ok {
 			mods = append(mods, mod.WithBody(reader))
 		} else {
 			mods = append(mods, mod.WithJSONBody(r.body))
 		}
+	}
+
+	if r.useProtoDecoder {
+		mods = append(mods, decode.WithProto())
+	} else if r.useGRPCWebDecoder {
+		mods = append(mods, decode.WithGRPCWeb())
 	}
 
 	if r.resultError != nil {
@@ -429,7 +472,7 @@ func (r *Request) executeDownload(
 		outputFile = filepath.Join(r.outputDirectory, filename)
 	}
 
-	if err := os.MkdirAll(filepath.Dir(outputFile), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(outputFile), 0o755); err != nil { //nolint:gosec
 		return resp, fmt.Errorf("aoni: failed to create target directory: %w", err)
 	}
 
@@ -500,7 +543,6 @@ func (r *Request) Do(method, path string) (*http.Response, error) {
 	return r.Execute(method, path)
 }
 
-// interpolatePathParams replaces placeholders like {id} in path with mapped values.
 func interpolatePathParams(rawPath string, params map[string]string) string {
 	if len(params) == 0 || strings.IndexByte(rawPath, '{') == -1 {
 		return rawPath

@@ -44,7 +44,7 @@ func main() {
 				Backoff:        1 * time.Second,
 				JitterStrategy: middleware.JitterFull,
 			},
-			aoni.RetryOnErr(),
+			middleware.RetryOnErr(),
 		),
 	)
 
@@ -56,7 +56,7 @@ func main() {
 				MaxRetries: 5,
 				Backoff:    500 * time.Millisecond,
 			},
-			aoni.RetryOnTransientErrors(),
+			middleware.RetryOnTransientErrors(),
 		),
 	)
 

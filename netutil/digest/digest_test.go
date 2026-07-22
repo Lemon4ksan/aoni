@@ -82,6 +82,7 @@ func TestDigestAuth_SHA256_AuthInt(t *testing.T) {
 			w.Header().
 				Set("WWW-Authenticate", fmt.Sprintf(`Digest realm="%s", nonce="%s", algorithm="SHA-256", qop="auth-int"`, realm, nonce))
 			w.WriteHeader(http.StatusUnauthorized)
+
 			return
 		}
 

@@ -301,8 +301,10 @@ func TestStreamNDJSON_ContextCancellation(t *testing.T) {
 func TestResumableSSE_LastEventID(t *testing.T) {
 	t.Parallel()
 
-	var receivedLastID string
-	var attempts int
+	var (
+		receivedLastID string
+		attempts       int
+	)
 
 	_, client := setupTestServer(t, func(w http.ResponseWriter, r *http.Request) {
 		attempts++

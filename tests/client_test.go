@@ -1237,7 +1237,7 @@ func TestClient_RetryMiddleware(t *testing.T) {
 	t.Cleanup(server.Close)
 
 	client := aoni.NewClient(nil, option.WithBaseURL(server.URL))
-	retryMid := middleware.Retry(opts, aoni.RetryOnGatewayErrors())
+	retryMid := middleware.Retry(opts, middleware.RetryOnGatewayErrors())
 	doer := retryMid(client.HTTP())
 
 	req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, server.URL, nil)

@@ -22,6 +22,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/lemon4ksan/aoni"
+	"github.com/lemon4ksan/aoni/middleware"
 	"github.com/lemon4ksan/aoni/mod"
 	"github.com/lemon4ksan/aoni/option"
 	"github.com/lemon4ksan/aoni/request"
@@ -498,43 +499,43 @@ func TestRetryPolicyAndConditions(t *testing.T) {
 		}{
 			{
 				name:        "retry_on_err_with_error",
-				cond:        aoni.RetryOnErr(),
+				cond:        middleware.RetryOnErr(),
 				err:         errors.New("network fail"),
 				expectRetry: true,
 			},
 			{
 				name:        "retry_on_err_without_error",
-				cond:        aoni.RetryOnErr(),
+				cond:        middleware.RetryOnErr(),
 				resp:        &http.Response{StatusCode: 200},
 				expectRetry: false,
 			},
 			{
 				name:        "retry_transient_net_error",
-				cond:        aoni.RetryOnTransientErrors(),
+				cond:        middleware.RetryOnTransientErrors(),
 				err:         &net.OpError{Op: "dial", Err: errors.New("connection refused")},
 				expectRetry: true,
 			},
 			{
 				name:        "retry_rate_limit_429",
-				cond:        aoni.RetryOnRateLimit(),
+				cond:        middleware.RetryOnRateLimit(),
 				resp:        &http.Response{StatusCode: http.StatusTooManyRequests},
 				expectRetry: true,
 			},
 			{
 				name:        "retry_rate_limit_200_ok",
-				cond:        aoni.RetryOnRateLimit(),
+				cond:        middleware.RetryOnRateLimit(),
 				resp:        &http.Response{StatusCode: http.StatusOK},
 				expectRetry: false,
 			},
 			{
 				name:        "retry_gateway_502",
-				cond:        aoni.RetryOnGatewayErrors(),
+				cond:        middleware.RetryOnGatewayErrors(),
 				resp:        &http.Response{StatusCode: http.StatusBadGateway},
 				expectRetry: true,
 			},
 			{
 				name:        "retry_gateway_200",
-				cond:        aoni.RetryOnGatewayErrors(),
+				cond:        middleware.RetryOnGatewayErrors(),
 				resp:        &http.Response{StatusCode: http.StatusOK},
 				expectRetry: false,
 			},
@@ -645,7 +646,7 @@ func TestContextModifiersAndRules(t *testing.T) {
 func TestRetryOnTransientErrors(t *testing.T) {
 	t.Parallel()
 
-	cond := aoni.RetryOnTransientErrors()
+	cond := middleware.RetryOnTransientErrors()
 
 	tests := []struct {
 		name        string

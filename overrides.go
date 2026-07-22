@@ -9,10 +9,8 @@ import (
 	"context"
 	"crypto/tls"
 	"encoding/json"
-	"errors"
 	"io"
 	"math/rand/v2"
-	"net"
 	"net/http"
 	"net/url"
 	"strings"
@@ -264,53 +262,6 @@ type RetryOverride struct {
 	MaxAttempts int
 	Backoff     time.Duration
 	Condition   RetryCondition
-}
-
-// RetryOnErr returns a [RetryCondition] that triggers a retry on any non-nil network or transport error.
-func RetryOnErr() RetryCondition {
-	return func(_ *http.Response, err error) bool {
-		return err != nil
-	}
-}
-
-// RetryOnTransientErrors returns a [RetryCondition] triggering retries on network timeouts, resets, or broken pipes.
-func RetryOnTransientErrors() RetryCondition {
-	return func(_ *http.Response, err error) bool {
-		if err == nil {
-			return false
-		}
-
-		var netErr net.Error
-		if errors.As(err, &netErr) {
-			return true
-		}
-
-		errStr := strings.ToLower(err.Error())
-
-		return strings.Contains(errStr, "connection refused") ||
-			strings.Contains(errStr, "connection reset") ||
-			strings.Contains(errStr, "broken pipe")
-	}
-}
-
-// RetryOnRateLimit returns a [RetryCondition] triggering retries on HTTP 429 Too Many Requests responses.
-func RetryOnRateLimit() RetryCondition {
-	return func(resp *http.Response, _ error) bool {
-		return resp != nil && resp.StatusCode == http.StatusTooManyRequests
-	}
-}
-
-// RetryOnGatewayErrors returns a [RetryCondition] triggering retries on HTTP 502, 503, and 504 responses.
-func RetryOnGatewayErrors() RetryCondition {
-	return func(resp *http.Response, _ error) bool {
-		if resp == nil {
-			return false
-		}
-
-		sc := resp.StatusCode
-
-		return sc == http.StatusBadGateway || sc == http.StatusServiceUnavailable || sc == http.StatusGatewayTimeout
-	}
 }
 
 // GetRetryOverride retrieves the per-request [RetryOverride] configuration from context.

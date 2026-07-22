@@ -16,8 +16,10 @@ import (
 	"io"
 	"math"
 	"math/big"
+	"net"
 	"net/http"
 	"net/url"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -30,6 +32,7 @@ import (
 	"golang.org/x/time/rate"
 
 	"github.com/lemon4ksan/aoni"
+	"github.com/lemon4ksan/aoni/codec/decode"
 )
 
 // Chain wraps doer with middlewares from left to right: the first
@@ -202,6 +205,75 @@ type RetryOptions struct {
 	// OnRetry is an optional callback executed before each sleep during retry attempts.
 	// Provides the attempt count (1-based), the causing error or nil, and the planned backoff delay.
 	OnRetry func(attempt uint32, err error, delay time.Duration)
+}
+
+// RetryOnErr returns a [RetryCondition] that triggers a retry on any non-nil network or transport error.
+func RetryOnErr() aoni.RetryCondition {
+	return func(_ *http.Response, err error) bool {
+		return err != nil
+	}
+}
+
+// RetryOnTransientErrors returns a [RetryCondition] triggering retries on network timeouts, resets, or broken pipes.
+func RetryOnTransientErrors() aoni.RetryCondition {
+	return func(_ *http.Response, err error) bool {
+		if err == nil {
+			return false
+		}
+
+		var netErr net.Error
+		if errors.As(err, &netErr) {
+			return true
+		}
+
+		errStr := strings.ToLower(err.Error())
+
+		return strings.Contains(errStr, "connection refused") ||
+			strings.Contains(errStr, "connection reset") ||
+			strings.Contains(errStr, "broken pipe")
+	}
+}
+
+// RetryOnRateLimit returns a [RetryCondition] triggering retries on HTTP 429 Too Many Requests responses.
+func RetryOnRateLimit() aoni.RetryCondition {
+	return func(resp *http.Response, _ error) bool {
+		return resp != nil && resp.StatusCode == http.StatusTooManyRequests
+	}
+}
+
+// RetryOnGatewayErrors returns a [RetryCondition] triggering retries on HTTP 502, 503, and 504 responses.
+func RetryOnGatewayErrors() aoni.RetryCondition {
+	return func(resp *http.Response, _ error) bool {
+		if resp == nil {
+			return false
+		}
+
+		sc := resp.StatusCode
+
+		return sc == http.StatusBadGateway || sc == http.StatusServiceUnavailable || sc == http.StatusGatewayTimeout
+	}
+}
+
+// RetryOnGRPCStatus returns a RetryCondition that triggers retries when a gRPC-Web call
+// fails with specific gRPC status codes (e.g. "14" for UNAVAILABLE, "8" for RESOURCE_EXHAUSTED).
+// If no status codes are supplied, defaults to retrying on "14" (UNAVAILABLE) and "13" (INTERNAL).
+func RetryOnGRPCStatus(statusCodes ...string) aoni.RetryCondition {
+	if len(statusCodes) == 0 {
+		statusCodes = []string{"14", "13", "8"}
+	}
+
+	return func(_ *http.Response, err error) bool {
+		if err == nil {
+			return false
+		}
+
+		var grpcErr *decode.GRPCWebError
+		if errors.As(err, &grpcErr) {
+			return slices.Contains(statusCodes, grpcErr.StatusCode)
+		}
+
+		return false
+	}
 }
 
 // Retry returns a [Middleware] that retries requests
@@ -584,6 +656,33 @@ func AdaptiveLimit(limiter *limiter.AdaptiveLimiter) aoni.Middleware {
 	}
 }
 
+// GRPCWebTimeout returns a Middleware that injects the official gRPC timeout header
+// (grpc-timeout) into outgoing request headers based on timeout duration.
+func GRPCWebTimeout(d time.Duration) aoni.Middleware {
+	timeoutStr := formatGRPCTimeout(d)
+
+	return func(next aoni.HTTPDoer) aoni.HTTPDoer {
+		return aoni.DoerFunc(func(req *http.Request) (*http.Response, error) {
+			req.Header.Set("grpc-timeout", timeoutStr)
+			return next.Do(req)
+		})
+	}
+}
+
+// GRPCMetadata returns a Middleware that attaches a key-value map of gRPC Metadata
+// headers to every outgoing request.
+func GRPCMetadata(md map[string]string) aoni.Middleware {
+	return func(next aoni.HTTPDoer) aoni.HTTPDoer {
+		return aoni.DoerFunc(func(req *http.Request) (*http.Response, error) {
+			for k, v := range md {
+				req.Header.Set(k, v)
+			}
+
+			return next.Do(req)
+		})
+	}
+}
+
 func isFatalError(err error) bool {
 	if err == nil {
 		return false
@@ -674,4 +773,21 @@ func maskQueryParams(u *url.URL) string {
 	copy.RawQuery = q.Encode()
 
 	return copy.String()
+}
+
+func formatGRPCTimeout(d time.Duration) string {
+	if d <= 0 {
+		return "0m"
+	}
+
+	switch {
+	case d < time.Second:
+		return strconv.FormatInt(d.Milliseconds(), 10) + "m"
+	case d < time.Minute:
+		return strconv.FormatInt(int64(d.Seconds()), 10) + "S"
+	case d < time.Hour:
+		return strconv.FormatInt(int64(d.Minutes()), 10) + "M"
+	default:
+		return strconv.FormatInt(int64(d.Hours()), 10) + "H"
+	}
 }

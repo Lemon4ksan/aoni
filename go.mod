@@ -9,10 +9,10 @@ require (
 	github.com/lemon4ksan/miyako v0.2.1-0.20260718175055-4d923876d502
 	github.com/quic-go/quic-go v0.60.0
 	github.com/stretchr/testify v1.11.1
-	go.yaml.in/yaml/v4 v4.0.0-rc.6
 	golang.org/x/net v0.57.0
 	golang.org/x/text v0.40.0
 	golang.org/x/time v0.15.0
+	google.golang.org/protobuf v1.36.11
 )
 
 require (

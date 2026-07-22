@@ -16,7 +16,10 @@ import (
 	"net/http"
 	"reflect"
 
+	"google.golang.org/protobuf/proto"
+
 	"github.com/lemon4ksan/aoni"
+	"github.com/lemon4ksan/aoni/codec/decode"
 	"github.com/lemon4ksan/aoni/mod"
 )
 
@@ -82,6 +85,35 @@ func GetToEx[Resp any](
 	}
 
 	return result, raw, nil
+}
+
+// GetProtoTo executes a GET request expecting a binary Protobuf response and decodes it into Resp.
+func GetProtoTo[Resp any](
+	ctx context.Context,
+	c aoni.Requester,
+	path string,
+	mods ...aoni.RequestModifier,
+) (*Resp, error) {
+	mods = append([]aoni.RequestModifier{
+		mod.WithHeader("Accept", "application/x-protobuf"),
+		mod.WithDecoder(decode.ProtoDecoder),
+	}, mods...)
+
+	resp, err := c.Request(ctx, http.MethodGet, path, mods...) //nolint:bodyclose
+	if err != nil {
+		return nil, err
+	}
+
+	if reflect.TypeFor[Resp]() == reflect.TypeFor[NoResponse]() {
+		return nil, HandleResponse(resp, nil, c)
+	}
+
+	result := new(Resp)
+	if err := HandleResponse(resp, result, c); err != nil {
+		return nil, err
+	}
+
+	return result, nil
 }
 
 // Post executes a POST request through the specified [Requester] and returns the raw [http.Response].
@@ -184,6 +216,90 @@ func PostToEx[Resp any](
 	return result, raw, nil
 }
 
+// PostProto executes a POST request containing a Protobuf payload and returns the raw *http.Response.
+func PostProto(
+	ctx context.Context,
+	c aoni.Requester,
+	path string,
+	msg proto.Message,
+	mods ...aoni.RequestModifier,
+) (*http.Response, error) {
+	mods = append([]aoni.RequestModifier{mod.WithProtoBody(msg)}, mods...)
+	return c.Request(ctx, http.MethodPost, path, mods...)
+}
+
+// PostProtoTo executes a POST request with a Protobuf payload and decodes the response into Resp.
+func PostProtoTo[Resp any](
+	ctx context.Context,
+	c aoni.Requester,
+	path string,
+	msg proto.Message,
+	mods ...aoni.RequestModifier,
+) (*Resp, error) {
+	mods = append([]aoni.RequestModifier{
+		mod.WithProtoBody(msg),
+		mod.WithDecoder(decode.ProtoDecoder),
+	}, mods...)
+
+	resp, err := c.Request(ctx, http.MethodPost, path, mods...) //nolint:bodyclose
+	if err != nil {
+		return nil, err
+	}
+
+	if reflect.TypeFor[Resp]() == reflect.TypeFor[NoResponse]() {
+		return nil, HandleResponse(resp, nil, c)
+	}
+
+	result := new(Resp)
+	if err := HandleResponse(resp, result, c); err != nil {
+		return nil, err
+	}
+
+	return result, nil
+}
+
+// PostGRPCWeb executes a POST request with a gRPC-Web framed Protobuf payload and returns the raw *http.Response.
+func PostGRPCWeb(
+	ctx context.Context,
+	c aoni.Requester,
+	path string,
+	msg proto.Message,
+	mods ...aoni.RequestModifier,
+) (*http.Response, error) {
+	mods = append([]aoni.RequestModifier{mod.WithGRPCWebBody(msg)}, mods...)
+	return c.Request(ctx, http.MethodPost, path, mods...)
+}
+
+// PostGRPCWebTo executes a POST request with a gRPC-Web framed payload and decodes the response frame into Resp.
+func PostGRPCWebTo[Resp any](
+	ctx context.Context,
+	c aoni.Requester,
+	path string,
+	msg proto.Message,
+	mods ...aoni.RequestModifier,
+) (*Resp, error) {
+	mods = append([]aoni.RequestModifier{
+		mod.WithGRPCWebBody(msg),
+		mod.WithDecoder(decode.GRPCWebDecoder),
+	}, mods...)
+
+	resp, err := c.Request(ctx, http.MethodPost, path, mods...) //nolint:bodyclose
+	if err != nil {
+		return nil, err
+	}
+
+	if reflect.TypeFor[Resp]() == reflect.TypeFor[NoResponse]() {
+		return nil, HandleResponse(resp, nil, c)
+	}
+
+	result := new(Resp)
+	if err := HandleResponse(resp, result, c); err != nil {
+		return nil, err
+	}
+
+	return result, nil
+}
+
 // Put executes a PUT request through the specified [Requester] and returns the raw [http.Response].
 //
 // By default, if the body is a struct or map, it is marshaled to JSON and the request headers
@@ -280,6 +396,17 @@ func PutToEx[Resp any](
 	}
 
 	return result, raw, nil
+}
+
+// PutProtoTo executes a PUT request with a Protobuf payload and decodes the response into Resp.
+func PutProtoTo[Resp any](
+	ctx context.Context,
+	c aoni.Requester,
+	path string,
+	msg proto.Message,
+	mods ...aoni.RequestModifier,
+) (*Resp, error) {
+	return DoProtoTo[Resp](ctx, c, http.MethodPut, path, msg, mods...)
 }
 
 // Patch executes a PATCH request through the specified [Requester] and returns the raw [http.Response].
@@ -380,6 +507,17 @@ func PatchToEx[Resp any](
 	return result, raw, nil
 }
 
+// PatchProtoTo executes a PATCH request with a Protobuf payload and decodes the response into Resp.
+func PatchProtoTo[Resp any](
+	ctx context.Context,
+	c aoni.Requester,
+	path string,
+	msg proto.Message,
+	mods ...aoni.RequestModifier,
+) (*Resp, error) {
+	return DoProtoTo[Resp](ctx, c, http.MethodPatch, path, msg, mods...)
+}
+
 // Delete executes a DELETE request through the specified [Requester] and returns the raw [http.Response].
 //
 // By default, if the body is a struct or map, it is marshaled to JSON and the request headers
@@ -476,6 +614,17 @@ func DeleteToEx[Resp any](
 	}
 
 	return result, raw, nil
+}
+
+// DeleteProtoTo executes a DELETE request with an optional Protobuf payload and decodes the response into Resp.
+func DeleteProtoTo[Resp any](
+	ctx context.Context,
+	c aoni.Requester,
+	path string,
+	msg proto.Message,
+	mods ...aoni.RequestModifier,
+) (*Resp, error) {
+	return DoProtoTo[Resp](ctx, c, http.MethodDelete, path, msg, mods...)
 }
 
 // Head performs a HEAD request through the specified [Requester] and returns the raw [http.Response].
@@ -626,4 +775,37 @@ func DoToEx[Resp any](
 	}
 
 	return result, raw, nil
+}
+
+// DoProtoTo executes an HTTP request using any method with a Protobuf payload and decodes the response into Resp.
+func DoProtoTo[Resp any](
+	ctx context.Context,
+	c aoni.Requester,
+	method, path string,
+	msg proto.Message,
+	mods ...aoni.RequestModifier,
+) (*Resp, error) {
+	if msg != nil {
+		mods = append([]aoni.RequestModifier{mod.WithProtoBody(msg)}, mods...)
+	} else {
+		mods = append([]aoni.RequestModifier{mod.WithHeader("Accept", "application/x-protobuf")}, mods...)
+	}
+
+	mods = append(mods, mod.WithDecoder(decode.ProtoDecoder))
+
+	resp, err := c.Request(ctx, method, path, mods...) //nolint:bodyclose
+	if err != nil {
+		return nil, err
+	}
+
+	if reflect.TypeFor[Resp]() == reflect.TypeFor[NoResponse]() {
+		return nil, HandleResponse(resp, nil, c)
+	}
+
+	result := new(Resp)
+	if err := HandleResponse(resp, result, c); err != nil {
+		return nil, err
+	}
+
+	return result, nil
 }

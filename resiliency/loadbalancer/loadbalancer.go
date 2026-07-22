@@ -199,7 +199,7 @@ func resolveSRVBackends(
 	service, proto, name, scheme string,
 	clientFactory func(targetURL string) aoni.HTTPDoer,
 ) ([]*Backend, error) {
-	_, records, err := net.LookupSRV(service, proto, name) //nolint:gosec
+	_, records, err := net.LookupSRV(service, proto, name) //nolint:noctx
 	if err != nil {
 		return nil, err
 	}

@@ -13,6 +13,7 @@ package mod
 import (
 	"bytes"
 	"context"
+	"encoding/binary"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -26,6 +27,8 @@ import (
 	"os"
 	"strings"
 	"time"
+
+	"google.golang.org/protobuf/proto"
 
 	"github.com/lemon4ksan/aoni"
 	"github.com/lemon4ksan/aoni/codec/values"
@@ -220,6 +223,63 @@ func WithJSONBody(payload any) aoni.RequestModifier {
 	}
 }
 
+// WithProtoBody serializes payload as a binary Protocol Buffer message,
+// assigns the request body, and sets Content-Type and Accept headers to application/x-protobuf.
+func WithProtoBody(msg proto.Message) aoni.RequestModifier {
+	return func(req *http.Request) {
+		if msg == nil {
+			return
+		}
+
+		bodyBytes, err := proto.Marshal(msg)
+		if err != nil {
+			aoni.GetOrInitRequestConfig(req).BodyError = err
+			return
+		}
+
+		req.Body = io.NopCloser(bytes.NewReader(bodyBytes))
+		req.ContentLength = int64(len(bodyBytes))
+		req.Header.Set("Content-Type", "application/x-protobuf")
+		req.Header.Set("Accept", "application/x-protobuf")
+
+		req.GetBody = func() (io.ReadCloser, error) {
+			return io.NopCloser(bytes.NewReader(bodyBytes)), nil
+		}
+	}
+}
+
+// WithGRPCWebBody serializes payload as a gRPC-Web framed Protocol Buffer message (5-byte frame header),
+// assigns the request body, and applies standard gRPC-Web headers (Content-Type: application/grpc-web+proto).
+func WithGRPCWebBody(msg proto.Message) aoni.RequestModifier {
+	return func(req *http.Request) {
+		if msg == nil {
+			return
+		}
+
+		protoBytes, err := proto.Marshal(msg)
+		if err != nil {
+			aoni.GetOrInitRequestConfig(req).BodyError = err
+			return
+		}
+
+		frame := make([]byte, 5+len(protoBytes))
+		frame[0] = 0x00                                                 // Data frame flag
+		binary.BigEndian.PutUint32(frame[1:5], uint32(len(protoBytes))) //nolint:gosec
+		copy(frame[5:], protoBytes)
+
+		req.Body = io.NopCloser(bytes.NewReader(frame))
+		req.ContentLength = int64(len(frame))
+		req.Header.Set("Content-Type", "application/grpc-web+proto")
+		req.Header.Set("Accept", "application/grpc-web+proto")
+		req.Header.Set("X-Grpc-Web", "1")
+		req.Header.Set("X-User-Agent", "grpc-web-javascript/0.1")
+
+		req.GetBody = func() (io.ReadCloser, error) {
+			return io.NopCloser(bytes.NewReader(frame)), nil
+		}
+	}
+}
+
 // WithMultipart builds a multipart/form-data body from fields and files.
 func WithMultipart(fields map[string]string, files map[string]io.Reader) aoni.RequestModifier {
 	return func(req *http.Request) {
@@ -393,11 +453,13 @@ func WithCorrelationID(id string) aoni.RequestModifier {
 	if id == "" {
 		id = telemetry.GenerateCorrelationID()
 	}
+
 	return func(req *http.Request) {
 		cfg := aoni.GetOrInitRequestConfig(req)
 		if cfg.TraceInfo != nil {
 			cfg.TraceInfo.CorrelationID = id
 		}
+
 		req.Header.Set("X-Correlation-ID", id)
 	}
 }
@@ -406,6 +468,7 @@ func WithCorrelationID(id string) aoni.RequestModifier {
 func WithLabel(label string) aoni.RequestModifier {
 	return func(req *http.Request) {
 		cfg := aoni.GetOrInitRequestConfig(req)
+
 		cfg.Label = label
 		if cfg.TraceInfo != nil {
 			cfg.TraceInfo.Label = label
@@ -442,15 +505,18 @@ func escapeQuotes(s string) string {
 
 func detectMIMEAndReader(r io.Reader) (string, io.Reader) {
 	var buf [512]byte
+
 	n, err := io.ReadFull(r, buf[:])
 	if n > 0 {
 		contentType := http.DetectContentType(buf[:n])
 		reader := io.MultiReader(bytes.NewReader(buf[:n]), r)
 		return contentType, reader
 	}
+
 	if err != nil && !errors.Is(err, io.EOF) && !errors.Is(err, io.ErrUnexpectedEOF) {
 		return "application/octet-stream", r
 	}
+
 	return "application/octet-stream", r
 }
 
@@ -458,11 +524,13 @@ func createFormFileHeader(w *multipart.Writer, fieldname, filename, contentType 
 	h := make(textproto.MIMEHeader)
 	h.Set("Content-Disposition",
 		fmt.Sprintf(`form-data; name="%s"; filename="%s"`, escapeQuotes(fieldname), escapeQuotes(filename)))
+
 	if contentType != "" {
 		h.Set("Content-Type", contentType)
 	} else {
 		h.Set("Content-Type", "application/octet-stream")
 	}
+
 	return w.CreatePart(h)
 }
 
@@ -501,6 +569,7 @@ func WithStreamingMultipart(fields map[string]string, files map[string]io.Reader
 					return
 				default:
 					contentType, streamReader := detectMIMEAndReader(r)
+
 					part, err := createFormFileHeader(writer, key, key, contentType)
 					if err == nil {
 						_, _ = io.Copy(part, streamReader)
@@ -578,10 +647,6 @@ func WithCacheTTL(ttl time.Duration) aoni.RequestModifier {
 func WithRetryPolicy(override aoni.RetryOverride) aoni.RequestModifier {
 	if override.MaxAttempts < 1 {
 		override.MaxAttempts = 1
-	}
-
-	if override.Condition == nil {
-		override.Condition = aoni.RetryOnErr()
 	}
 
 	return func(req *http.Request) {

@@ -7,8 +7,6 @@ package values
 import (
 	"encoding"
 	"encoding/json"
-	"errors"
-	"fmt"
 	"net/url"
 	"reflect"
 	"slices"
@@ -16,13 +14,16 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"google.golang.org/protobuf/encoding/protojson"
+	"google.golang.org/protobuf/proto"
 )
 
 // Uint64String parses uint64 values from string representations in JSON.
-// It safely handles raw integers, JSON null, or empty strings.
+// Safely handles raw integers, JSON null, or empty strings.
 type Uint64String uint64
 
-// UnmarshalJSON parses JSON byte data into the [Uint64String] target.
+// UnmarshalJSON parses JSON byte data into the Uint64String target.
 func (u *Uint64String) UnmarshalJSON(b []byte) error {
 	s := strings.Trim(string(b), `"`)
 	if s == "" || s == "null" {
@@ -32,7 +33,7 @@ func (u *Uint64String) UnmarshalJSON(b []byte) error {
 
 	val, err := strconv.ParseUint(s, 10, 64)
 	if err != nil {
-		return fmt.Errorf("Uint64String: %w", err)
+		return &ValueError{Type: "Uint64String", Err: err}
 	}
 
 	*u = Uint64String(val)
@@ -40,16 +41,16 @@ func (u *Uint64String) UnmarshalJSON(b []byte) error {
 	return nil
 }
 
-// MarshalJSON serializes the [Uint64String] back as a JSON string representation.
+// MarshalJSON serializes Uint64String as a quoted JSON string.
 func (u Uint64String) MarshalJSON() ([]byte, error) {
 	return json.Marshal(strconv.FormatUint(uint64(u), 10))
 }
 
 // Int64String parses int64 values from string representations in JSON.
-// It safely handles raw integers, JSON null, or empty strings.
+// Safely handles raw integers, JSON null, or empty strings.
 type Int64String int64
 
-// UnmarshalJSON parses JSON byte data into the [Int64String] target.
+// UnmarshalJSON parses JSON byte data into the Int64String target.
 func (i *Int64String) UnmarshalJSON(b []byte) error {
 	s := strings.Trim(string(b), `"`)
 	if s == "" || s == "null" {
@@ -59,7 +60,7 @@ func (i *Int64String) UnmarshalJSON(b []byte) error {
 
 	val, err := strconv.ParseInt(s, 10, 64)
 	if err != nil {
-		return fmt.Errorf("Int64String: %w", err)
+		return &ValueError{Type: "Int64String", Err: err}
 	}
 
 	*i = Int64String(val)
@@ -67,7 +68,7 @@ func (i *Int64String) UnmarshalJSON(b []byte) error {
 	return nil
 }
 
-// MarshalJSON serializes the [Int64String] back as a JSON string representation.
+// MarshalJSON serializes Int64String as a quoted JSON string.
 func (i Int64String) MarshalJSON() ([]byte, error) {
 	return json.Marshal(strconv.FormatInt(int64(i), 10))
 }
@@ -75,7 +76,7 @@ func (i Int64String) MarshalJSON() ([]byte, error) {
 // Float64String parses float64 values from string representations in JSON.
 type Float64String float64
 
-// UnmarshalJSON parses JSON byte data into the [Float64String] target.
+// UnmarshalJSON parses JSON byte data into the Float64String target.
 func (f *Float64String) UnmarshalJSON(b []byte) error {
 	s := strings.Trim(string(b), `"`)
 	if s == "" || s == "null" {
@@ -85,7 +86,7 @@ func (f *Float64String) UnmarshalJSON(b []byte) error {
 
 	val, err := strconv.ParseFloat(s, 64)
 	if err != nil {
-		return fmt.Errorf("Float64String: %w", err)
+		return &ValueError{Type: "Float64String", Err: err}
 	}
 
 	*f = Float64String(val)
@@ -93,13 +94,13 @@ func (f *Float64String) UnmarshalJSON(b []byte) error {
 	return nil
 }
 
-// MarshalJSON serializes the [Float64String] back as a JSON string representation.
+// MarshalJSON serializes Float64String as a JSON string.
 func (f Float64String) MarshalJSON() ([]byte, error) {
 	return json.Marshal(strconv.FormatFloat(float64(f), 'f', -1, 64))
 }
 
 // BoolInt parses booleans from integers or strings in JSON.
-// It maps 1, "1", "true" to true and 0, "0", "false", "null" to false.
+// Maps 1, "1", "true" to true and 0, "0", "false", "null" to false.
 type BoolInt bool
 
 // UnmarshalJSON implements json.Unmarshaler.
@@ -123,7 +124,7 @@ func (bi *BoolInt) UnmarshalJSON(b []byte) error {
 	return nil
 }
 
-// MarshalJSON serializes [BoolInt] back as numeric "1" or "0" JSON representations.
+// MarshalJSON serializes BoolInt back as numeric "1" or "0" JSON representations.
 func (bi BoolInt) MarshalJSON() ([]byte, error) {
 	if bi {
 		return []byte("1"), nil
@@ -132,7 +133,7 @@ func (bi BoolInt) MarshalJSON() ([]byte, error) {
 	return []byte("0"), nil
 }
 
-// UnixTimestamp parses Unix timestamps from strings or numbers in JSON.
+// UnixTimestamp parses Unix epoch timestamps from strings or numbers in JSON.
 type UnixTimestamp time.Time
 
 // UnmarshalJSON implements json.Unmarshaler.
@@ -145,7 +146,7 @@ func (t *UnixTimestamp) UnmarshalJSON(b []byte) error {
 
 	unix, err := strconv.ParseInt(s, 10, 64)
 	if err != nil {
-		return fmt.Errorf("UnixTimestamp: %w", err)
+		return &ValueError{Type: "UnixTimestamp", Err: err}
 	}
 
 	*t = UnixTimestamp(time.Unix(unix, 0).UTC())
@@ -153,7 +154,7 @@ func (t *UnixTimestamp) UnmarshalJSON(b []byte) error {
 	return nil
 }
 
-// MarshalJSON serializes the [UnixTimestamp] back as a numeric Unix epoch timestamp.
+// MarshalJSON serializes UnixTimestamp as a numeric Unix epoch timestamp.
 func (t UnixTimestamp) MarshalJSON() ([]byte, error) {
 	if time.Time(t).IsZero() {
 		return []byte("0"), nil
@@ -162,13 +163,10 @@ func (t UnixTimestamp) MarshalJSON() ([]byte, error) {
 	return []byte(strconv.FormatInt(time.Time(t).Unix(), 10)), nil
 }
 
-// Time returns the [time.Time] value.
-func (t UnixTimestamp) Time() time.Time {
-	return time.Time(t)
-}
+// Time returns the underlying time.Time.
+func (t UnixTimestamp) Time() time.Time { return time.Time(t) }
 
 // RFC3339Timestamp parses ISO-8601 / RFC-3339 formatted date-time strings in JSON.
-// It safely handles JSON null, empty strings, and outputs RFC-3339 strings on marshal.
 type RFC3339Timestamp time.Time
 
 // UnmarshalJSON implements json.Unmarshaler.
@@ -181,7 +179,7 @@ func (t *RFC3339Timestamp) UnmarshalJSON(b []byte) error {
 
 	parsed, err := time.Parse(time.RFC3339, s)
 	if err != nil {
-		return fmt.Errorf("RFC3339Timestamp: %w", err)
+		return &ValueError{Type: "RFC3339Timestamp", Err: err}
 	}
 
 	*t = RFC3339Timestamp(parsed.UTC())
@@ -198,12 +196,10 @@ func (t RFC3339Timestamp) MarshalJSON() ([]byte, error) {
 	return json.Marshal(time.Time(t).Format(time.RFC3339))
 }
 
-// Time returns the underlying standard time.Time representation.
-func (t RFC3339Timestamp) Time() time.Time {
-	return time.Time(t)
-}
+// Time returns the underlying time.Time representation.
+func (t RFC3339Timestamp) Time() time.Time { return time.Time(t) }
 
-// String returns the RFC-3339 formatted representation.
+// String returns the RFC-3339 formatted date-time string.
 func (t RFC3339Timestamp) String() string {
 	if time.Time(t).IsZero() {
 		return ""
@@ -212,8 +208,29 @@ func (t RFC3339Timestamp) String() string {
 	return time.Time(t).Format(time.RFC3339)
 }
 
-// QueryEncoder is implemented by custom types that can encode themselves directly into [url.Values]
-// without runtime reflection, achieving maximum performance.
+// CommaSlice encodes a slice into a single comma-separated string parameter.
+type CommaSlice[T any] []T
+
+// MarshalText formats the slice items as a comma-joined string representation.
+func (cs CommaSlice[T]) MarshalText() ([]byte, error) {
+	if len(cs) == 0 {
+		return nil, nil
+	}
+
+	parts := make([]string, len(cs))
+	for i, item := range cs {
+		str, err := toString(reflect.ValueOf(item))
+		if err != nil {
+			return nil, &ValueError{Index: i, Err: err}
+		}
+
+		parts[i] = str
+	}
+
+	return []byte(strings.Join(parts, ",")), nil
+}
+
+// QueryEncoder is implemented by types that encode themselves directly into url.Values.
 type QueryEncoder interface {
 	EncodeValues() url.Values
 }
@@ -237,7 +254,7 @@ type structSchema struct {
 	fields []fieldSchema
 }
 
-var schemaCache sync.Map // map[reflect.Type]*structSchema
+var schemaCache sync.Map
 
 func getStructSchema(t reflect.Type) *structSchema {
 	if cached, ok := schemaCache.Load(t); ok {
@@ -256,7 +273,6 @@ func buildStructSchema(t reflect.Type) *structSchema {
 
 	for i := range numField {
 		field := t.Field(i)
-
 		defaultVal := field.Tag.Get("default")
 
 		tag := field.Tag.Get("url")
@@ -266,23 +282,18 @@ func buildStructSchema(t reflect.Type) *structSchema {
 
 		parts := strings.Split(tag, ",")
 		key := parts[0]
-		isInline := slices.Contains(parts[1:], "inline")
-		omitempty := slices.Contains(parts[1:], "omitempty")
-		hasComma := slices.Contains(parts[1:], "comma")
-		hasSpace := slices.Contains(parts[1:], "space")
-		hasPipe := slices.Contains(parts[1:], "pipe")
 
 		fSchema := fieldSchema{
 			index:       i,
 			name:        field.Name,
 			key:         key,
 			defaultVal:  defaultVal,
-			isInline:    isInline,
+			isInline:    slices.Contains(parts[1:], "inline"),
 			isAnonymous: field.Anonymous,
-			omitempty:   omitempty,
-			hasComma:    hasComma,
-			hasSpace:    hasSpace,
-			hasPipe:     hasPipe,
+			omitempty:   slices.Contains(parts[1:], "omitempty"),
+			hasComma:    slices.Contains(parts[1:], "comma"),
+			hasSpace:    slices.Contains(parts[1:], "space"),
+			hasPipe:     slices.Contains(parts[1:], "pipe"),
 			isIgnored:   key == "-",
 		}
 
@@ -291,9 +302,9 @@ func buildStructSchema(t reflect.Type) *structSchema {
 			fieldType = fieldType.Elem()
 		}
 
-		if (field.Anonymous || isInline) && fieldType.Kind() == reflect.Struct {
+		if (field.Anonymous || fSchema.isInline) && fieldType.Kind() == reflect.Struct {
 			fSchema.subSchema = buildStructSchema(fieldType)
-		} else if key == "" && !field.Anonymous && !isInline {
+		} else if key == "" && !field.Anonymous && !fSchema.isInline {
 			fSchema.isIgnored = true
 		}
 
@@ -349,10 +360,6 @@ func (f *fieldSchema) fillField(fieldValue reflect.Value, values url.Values) err
 }
 
 func (f *fieldSchema) shouldSkipZeroValue(fieldValue reflect.Value, values url.Values) bool {
-	if f.omitempty && fieldValue.IsZero() {
-		return true
-	}
-
 	if fieldValue.IsZero() {
 		if f.defaultVal != "" {
 			values.Set(f.key, f.defaultVal)
@@ -368,10 +375,29 @@ func (f *fieldSchema) shouldSkipZeroValue(fieldValue reflect.Value, values url.V
 }
 
 func (f *fieldSchema) serializeValue(fieldValue reflect.Value, values url.Values) error {
+	if !fieldValue.CanInterface() {
+		return nil
+	}
+
+	val := fieldValue.Interface()
+
+	if pm, ok := val.(proto.Message); ok {
+		opts := protojson.MarshalOptions{UseProtoNames: true}
+
+		b, err := opts.Marshal(pm)
+		if err != nil {
+			return &ValueError{Field: f.name, Err: err}
+		}
+
+		values.Set(f.key, string(b))
+
+		return nil
+	}
+
 	if hasTextOrStringerRepresentation(fieldValue) {
 		str, err := toString(fieldValue)
 		if err != nil {
-			return fmt.Errorf("field %s: %w", f.name, err)
+			return &ValueError{Field: f.name, Err: err}
 		}
 
 		values.Set(f.key, str)
@@ -379,13 +405,10 @@ func (f *fieldSchema) serializeValue(fieldValue reflect.Value, values url.Values
 		return nil
 	}
 
-	isStruct := fieldValue.Kind() == reflect.Struct
-	isMap := fieldValue.Kind() == reflect.Map
-
-	if isStruct || isMap {
-		b, err := json.Marshal(fieldValue.Interface())
+	if fieldValue.Kind() == reflect.Struct || fieldValue.Kind() == reflect.Map {
+		b, err := json.Marshal(val)
 		if err != nil {
-			return fmt.Errorf("field %s: failed to marshal nested structure to JSON: %w", f.name, err)
+			return &ValueError{Field: f.name, Err: err}
 		}
 
 		values.Set(f.key, string(b))
@@ -399,7 +422,7 @@ func (f *fieldSchema) serializeValue(fieldValue reflect.Value, values url.Values
 
 	str, err := toString(fieldValue)
 	if err != nil {
-		return fmt.Errorf("field %s: %w", f.name, err)
+		return &ValueError{Field: f.name, Err: err}
 	}
 
 	values.Set(f.key, str)
@@ -422,7 +445,7 @@ func (f *fieldSchema) serializeSlice(fieldValue reflect.Value, values url.Values
 
 			str, err := toString(val)
 			if err != nil {
-				return fmt.Errorf("field %s[%d]: %w", f.name, j, err)
+				return &ValueError{Field: f.name, Index: j, Err: err}
 			}
 
 			strVals = append(strVals, str)
@@ -452,7 +475,7 @@ func (f *fieldSchema) serializeSlice(fieldValue reflect.Value, values url.Values
 
 		strValue, err := toString(val)
 		if err != nil {
-			return fmt.Errorf("field %s[%d]: %w", f.name, j, err)
+			return &ValueError{Field: f.name, Index: j, Err: err}
 		}
 
 		values.Add(f.key, strValue)
@@ -461,15 +484,12 @@ func (f *fieldSchema) serializeSlice(fieldValue reflect.Value, values url.Values
 	return nil
 }
 
-// StructToValues encodes a struct into [url.Values] using "url" or "json" tags.
-// It expands inline structs recursively and supports slices, arrays, maps, QueryEncoders, and primitive types.
-// Returns an error if the input is not a struct or pointer to a struct.
+// StructToValues encodes a struct or Protobuf message into url.Values.
 func StructToValues(s any) (url.Values, error) {
 	if s == nil {
 		return nil, nil
 	}
 
-	// Level 1 & Level 2 Fast Paths
 	switch v := s.(type) {
 	case url.Values:
 		return v, nil
@@ -477,6 +497,8 @@ func StructToValues(s any) (url.Values, error) {
 		return v.EncodeValues(), nil
 	case interface{ EncodeValues() (url.Values, error) }:
 		return v.EncodeValues()
+	case proto.Message:
+		return protoToValues(v)
 	case map[string]string:
 		res := make(url.Values, len(v))
 		for k, val := range v {
@@ -504,10 +526,9 @@ func StructToValues(s any) (url.Values, error) {
 	}
 
 	if v.Kind() != reflect.Struct {
-		return nil, errors.New("unsupported type: input must be a struct or a pointer to a struct")
+		return nil, ErrUnsupportedType
 	}
 
-	// Level 3: Cached Schema
 	schema := getStructSchema(v.Type())
 
 	values := make(url.Values)
@@ -516,6 +537,33 @@ func StructToValues(s any) (url.Values, error) {
 	}
 
 	return values, nil
+}
+
+func protoToValues(pm proto.Message) (url.Values, error) {
+	opts := protojson.MarshalOptions{UseProtoNames: true}
+
+	b, err := opts.Marshal(pm)
+	if err != nil {
+		return nil, &ValueError{Type: "proto.Message", Err: err}
+	}
+
+	var rawMap map[string]any
+	if err := json.Unmarshal(b, &rawMap); err != nil {
+		return nil, &ValueError{Type: "proto.Message", Err: err}
+	}
+
+	res := make(url.Values, len(rawMap))
+	for k, val := range rawMap {
+		switch v := val.(type) {
+		case string:
+			res.Set(k, v)
+		default:
+			subJSON, _ := json.Marshal(v)
+			res.Set(k, string(subJSON))
+		}
+	}
+
+	return res, nil
 }
 
 func hasTextOrStringerRepresentation(v reflect.Value) bool {
@@ -560,6 +608,6 @@ func toString(v reflect.Value) (string, error) {
 	case reflect.Float32, reflect.Float64:
 		return strconv.FormatFloat(v.Float(), 'f', -1, 64), nil
 	default:
-		return "", fmt.Errorf("unsupported type: %s", v.Kind())
+		return "", ErrUnsupportedType
 	}
 }

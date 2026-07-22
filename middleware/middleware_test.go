@@ -585,7 +585,7 @@ func TestRetryMiddleware_NegativeBackoff(t *testing.T) {
 	m := Retry(RetryOptions{
 		MaxRetries: 1,
 		Backoff:    -1 * time.Second,
-	}, aoni.RetryOnErr())
+	}, RetryOnErr())
 
 	doer := m(aoni.DoerFunc(func(req *http.Request) (*http.Response, error) {
 		return nil, assert.AnError
@@ -649,7 +649,7 @@ func TestRetryMiddleware_FatalErrorNoRetry(t *testing.T) {
 
 	var attempts int
 
-	mw := Retry(RetryOptions{MaxRetries: 3}, aoni.RetryOnErr())
+	mw := Retry(RetryOptions{MaxRetries: 3}, RetryOnErr())
 
 	doer := mw(aoni.DoerFunc(func(req *http.Request) (*http.Response, error) {
 		attempts++

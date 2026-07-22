@@ -6,19 +6,27 @@ package stream
 
 import (
 	"bufio"
+	"bytes"
+	"compress/gzip"
 	"context"
+	"encoding/base64"
+	"encoding/binary"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"net/http"
+	"reflect"
 	"strconv"
 	"strings"
 	"time"
 
-	"github.com/lemon4ksan/aoni"
-	"github.com/lemon4ksan/aoni/mod"
 	"github.com/lemon4ksan/miyako/generic"
+	"google.golang.org/protobuf/proto"
+
+	"github.com/lemon4ksan/aoni"
+	"github.com/lemon4ksan/aoni/codec/decode"
+	"github.com/lemon4ksan/aoni/mod"
 )
 
 // Stream wraps an [http.Response] and manages connection reading streams.
@@ -162,6 +170,7 @@ func parseSSELine(line string, currentEvent *SSEEvent) {
 
 	parts := strings.SplitN(line, ":", 2)
 	key := parts[0]
+
 	var value string
 	if len(parts) > 1 {
 		value = strings.TrimSpace(parts[1])
@@ -176,6 +185,7 @@ func parseSSELine(line string, currentEvent *SSEEvent) {
 		} else {
 			currentEvent.Data = value
 		}
+
 	case "id":
 		currentEvent.ID = value
 	case "retry":
@@ -220,6 +230,7 @@ func ParseSSE[T any](ctx context.Context, resp *Stream) (<-chan T, <-chan error)
 		defer resp.Close()
 
 		reader := bufio.NewReader(resp)
+
 		var currentEvent SSEEvent
 
 		for {
@@ -233,7 +244,9 @@ func ParseSSE[T any](ctx context.Context, resp *Stream) (<-chan T, <-chan error)
 					if errors.Is(err, io.EOF) {
 						return
 					}
+
 					errs <- err
+
 					return
 				}
 
@@ -242,7 +255,9 @@ func ParseSSE[T any](ctx context.Context, resp *Stream) (<-chan T, <-chan error)
 						errs <- err
 						return
 					}
+
 					currentEvent = SSEEvent{}
+
 					continue
 				}
 
@@ -282,6 +297,7 @@ func ResumableSSE[T any](
 		defer close(errs)
 
 		var lastEventID string
+
 		reconnectDelay := defaultRetry
 		attempts := 0
 
@@ -294,6 +310,7 @@ func ResumableSSE[T any](
 			}
 
 			reqMods := make([]aoni.RequestModifier, 0, len(mods)+4)
+
 			reqMods = append(reqMods,
 				mod.WithHeader("Accept", "text/event-stream"),
 				mod.WithHeader("Cache-Control", "no-cache"),
@@ -302,6 +319,7 @@ func ResumableSSE[T any](
 			if lastEventID != "" {
 				reqMods = append(reqMods, mod.WithHeader("Last-Event-ID", lastEventID))
 			}
+
 			reqMods = append(reqMods, mods...)
 
 			resp, err := Get(ctx, c, path, reqMods...)
@@ -315,25 +333,30 @@ func ResumableSSE[T any](
 				if !sleepOrCancel(ctx, reconnectDelay, errs) {
 					return
 				}
+
 				continue
 			}
 
 			attempts = 0
 			reader := bufio.NewReader(resp)
+
 			var currentEvent SSEEvent
 
 			for {
 				select {
 				case <-ctx.Done():
-					resp.Close()
+					_ = resp.Close()
+
 					errs <- ctx.Err()
+
 					return
+
 				default:
 				}
 
 				line, err := reader.ReadString('\n')
 				if err != nil {
-					resp.Close()
+					_ = resp.Close()
 					break
 				}
 
@@ -341,6 +364,7 @@ func ResumableSSE[T any](
 					if currentEvent.ID != "" {
 						lastEventID = currentEvent.ID
 					}
+
 					if currentEvent.Retry > 0 {
 						reconnectDelay = time.Duration(currentEvent.Retry) * time.Millisecond
 					}
@@ -349,7 +373,9 @@ func ResumableSSE[T any](
 						errs <- err
 						return
 					}
+
 					currentEvent = SSEEvent{}
+
 					continue
 				}
 
@@ -449,4 +475,135 @@ func Chunks(ctx context.Context, resp *Stream) (<-chan string, <-chan error) {
 	}()
 
 	return out, errs
+}
+
+// ParseGRPCWebStream reads a gRPC-Web response stream and yields decoded Protobuf messages to a channel.
+// ParseGRPCWebStream reads a gRPC-Web response stream and yields decoded Protobuf messages to a channel.
+func ParseGRPCWebStream[T any](ctx context.Context, resp *Stream) (<-chan T, <-chan error) {
+	out := make(chan T, 100)
+	errs := make(chan error, 1)
+
+	go func() {
+		defer close(out)
+		defer close(errs)
+		defer resp.Close()
+
+		br := bufio.NewReader(resp.resp.Body)
+
+		var reader io.Reader = br
+
+		if peek, err := br.Peek(5); err == nil && decode.IsBase64Header(peek) {
+			reader = base64.NewDecoder(base64.StdEncoding, br)
+		}
+
+		var header [5]byte
+
+		for {
+			select {
+			case <-ctx.Done():
+				errs <- ctx.Err()
+				return
+			default:
+			}
+
+			if _, err := io.ReadFull(reader, header[:]); err != nil {
+				if errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF) {
+					return
+				}
+
+				errs <- err
+
+				return
+			}
+
+			flags := header[0]
+			length := binary.BigEndian.Uint32(header[1:5])
+
+			payload := make([]byte, length)
+			if _, err := io.ReadFull(reader, payload); err != nil {
+				errs <- err
+				return
+			}
+
+			if flags&0x80 != 0 {
+				if err := decode.VerifyGRPCTrailer(payload); err != nil {
+					errs <- err
+				}
+
+				return
+			}
+
+			val, err := decodeProtoPayload[T](payload, flags)
+			if err != nil {
+				errs <- err
+				return
+			}
+
+			select {
+			case <-ctx.Done():
+				errs <- ctx.Err()
+				return
+			case out <- val:
+			}
+		}
+	}()
+
+	return out, errs
+}
+
+func decodeProtoPayload[T any](payload []byte, flags byte) (T, error) {
+	var zero T
+
+	if flags&0x01 != 0 {
+		gzReader, err := gzip.NewReader(bytes.NewReader(payload))
+		if err != nil {
+			return zero, fmt.Errorf("aoni stream: decompress gRPC-Web frame failed: %w", err)
+		}
+
+		decompressed, err := io.ReadAll(gzReader)
+		_ = gzReader.Close()
+
+		if err != nil {
+			return zero, fmt.Errorf("aoni stream: read decompressed gRPC-Web payload failed: %w", err)
+		}
+
+		payload = decompressed
+	}
+
+	var target T
+
+	msg, err := resolveProtoTargetInstance(&target)
+	if err != nil {
+		return zero, fmt.Errorf("aoni stream: %w", err)
+	}
+
+	if err := proto.Unmarshal(payload, msg); err != nil {
+		return zero, fmt.Errorf("aoni stream: unmarshal gRPC-Web payload failed: %w", err)
+	}
+
+	return target, nil
+}
+
+func resolveProtoTargetInstance(targetPtr any) (proto.Message, error) {
+	if msg, ok := targetPtr.(proto.Message); ok {
+		return msg, nil
+	}
+
+	val := reflect.ValueOf(targetPtr)
+	if val.Kind() == reflect.Pointer && !val.IsNil() {
+		elem := val.Elem()
+		if msg, ok := elem.Interface().(proto.Message); ok {
+			return msg, nil
+		}
+
+		if elem.Kind() == reflect.Pointer && elem.IsNil() && elem.CanSet() {
+			elem.Set(reflect.New(elem.Type().Elem()))
+
+			if msg, ok := elem.Interface().(proto.Message); ok {
+				return msg, nil
+			}
+		}
+	}
+
+	return nil, fmt.Errorf("target type %T does not implement proto.Message", targetPtr)
 }
