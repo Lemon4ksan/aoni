@@ -75,7 +75,7 @@ type customJSONDecoder struct {
 }
 
 func (d customJSONDecoder) Decode(reader stdio.Reader, target any) error {
-	dec := json.NewDecoder(StripBOM(reader))
+	dec := json.NewDecoder(reader)
 	if d.cfg.DisallowUnknownFields {
 		dec.DisallowUnknownFields()
 	}
@@ -95,7 +95,7 @@ func NewJSONDecoder(cfg JSONDecoderConfig) Decoder {
 type jsonDecoder struct{}
 
 func (jsonDecoder) Decode(reader stdio.Reader, target any) error {
-	return json.NewDecoder(StripBOM(reader)).Decode(target)
+	return json.NewDecoder(reader).Decode(target)
 }
 
 type xmlDecoder struct{}
@@ -112,13 +112,12 @@ func (rawDecoder) Decode(r stdio.Reader, target any) error {
 		return &Error{Format: "raw", Target: typeName(target), Err: ErrInvalidRawTarget}
 	}
 
-	buf, err := copyToBuffer(r)
+	rawBytes, err := stdio.ReadAll(r)
 	if err != nil {
-		return err
+		return &Error{Format: "raw", Target: typeName(target), Err: err}
 	}
-	defer bufferPool.Put(buf)
 
-	*outPtr = bytes.Clone(buf.Bytes())
+	*outPtr = rawBytes
 
 	return nil
 }

@@ -503,3 +503,71 @@ func TestRedactHeaders(t *testing.T) {
 	assert.NotContains(t, result, "secret-token")
 	assert.NotContains(t, result, "session=abc123")
 }
+
+func TestGenericIntoHelpers(t *testing.T) {
+	t.Parallel()
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"message":"into-success","status":200}`))
+	}))
+	defer server.Close()
+
+	client := aoni.NewClient(nil, option.WithBaseURL(server.URL))
+
+	t.Run("GetInto", func(t *testing.T) {
+		var res reqTestPayload
+
+		err := GetInto(t.Context(), client, "/", &res)
+		require.NoError(t, err)
+		assert.Equal(t, "into-success", res.Message)
+	})
+
+	t.Run("PostInto", func(t *testing.T) {
+		var res reqTestPayload
+
+		err := PostInto(t.Context(), client, "/", reqTestPayload{Message: "test"}, &res)
+		require.NoError(t, err)
+		assert.Equal(t, "into-success", res.Message)
+	})
+
+	t.Run("PutInto", func(t *testing.T) {
+		var res reqTestPayload
+
+		err := PutInto(t.Context(), client, "/", reqTestPayload{Message: "test"}, &res)
+		require.NoError(t, err)
+		assert.Equal(t, "into-success", res.Message)
+	})
+
+	t.Run("PatchInto", func(t *testing.T) {
+		var res reqTestPayload
+
+		err := PatchInto(t.Context(), client, "/", reqTestPayload{Message: "test"}, &res)
+		require.NoError(t, err)
+		assert.Equal(t, "into-success", res.Message)
+	})
+
+	t.Run("DeleteInto", func(t *testing.T) {
+		var res reqTestPayload
+
+		err := DeleteInto(t.Context(), client, "/", nil, &res)
+		require.NoError(t, err)
+		assert.Equal(t, "into-success", res.Message)
+	})
+
+	t.Run("OptionsInto", func(t *testing.T) {
+		var res reqTestPayload
+
+		err := OptionsInto(t.Context(), client, "/", &res)
+		require.NoError(t, err)
+		assert.Equal(t, "into-success", res.Message)
+	})
+
+	t.Run("DoInto", func(t *testing.T) {
+		var res reqTestPayload
+
+		err := DoInto(t.Context(), client, http.MethodPost, "/", reqTestPayload{Message: "test"}, &res)
+		require.NoError(t, err)
+		assert.Equal(t, "into-success", res.Message)
+	})
+}

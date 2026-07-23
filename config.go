@@ -530,6 +530,7 @@ type ChallengeDetector func(resp *http.Response) (bool, error)
 type ClientDefaults struct {
 	BaseURL              *url.URL
 	BaseURLString        string
+	BaseURLTrimmedString string
 	Headers              http.Header
 	BaseResponse         func() BaseResponse
 	BeforeRequest        []func(req *http.Request)
@@ -785,6 +786,11 @@ type Logger interface {
 // BaseResponseProvider optionally provides a [BaseResponse] for structured decoding.
 type BaseResponseProvider interface {
 	BaseResponse() BaseResponse
+}
+
+// LoggerProvider optionally provides a [Logger] for diagnostic logs.
+type LoggerProvider interface {
+	Logger() Logger
 }
 
 // BaseResponse is implemented by user-defined response wrappers.

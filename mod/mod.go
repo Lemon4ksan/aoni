@@ -65,30 +65,46 @@ func WithVars(pairs ...any) aoni.RequestModifier {
 	}
 }
 
-// WithQuery encodes a struct or map as URL query parameters.
+// WithQuery encodes query parameters directly into the URL RawQuery string without intermediate map allocations.
+//
+// Delegates to custom [aoni.QueryEncoder] if configured in the request context;
+// otherwise uses high-performance zero-allocation encoding via [values.StructToQueryString].
 func WithQuery(query any) aoni.RequestModifier {
 	return func(req *http.Request) {
 		if query == nil {
 			return
 		}
 
-		encoder := values.StructToValues
-		if cfg := aoni.GetRequestConfig(req.Context()); cfg != nil && cfg.QueryEncoder != nil {
-			encoder = cfg.QueryEncoder
-		}
-
-		qValues, err := encoder(query)
+		qStr, err := resolveQueryString(req, query)
 		if err != nil {
 			aoni.GetOrInitRequestConfig(req).QueryError = err
 			return
 		}
 
-		if len(qValues) > 0 {
-			existing := req.URL.Query()
-			maps.Copy(existing, qValues)
-			req.URL.RawQuery = existing.Encode()
+		if qStr == "" {
+			return
+		}
+
+		if req.URL.RawQuery == "" {
+			req.URL.RawQuery = qStr
+		} else {
+			req.URL.RawQuery += "&" + qStr
 		}
 	}
+}
+
+func resolveQueryString(req *http.Request, query any) (string, error) {
+	cfg := aoni.GetRequestConfig(req.Context())
+	if cfg != nil && cfg.QueryEncoder != nil {
+		qVals, err := cfg.QueryEncoder(query)
+		if err != nil || len(qVals) == 0 {
+			return "", err
+		}
+
+		return qVals.Encode(), nil
+	}
+
+	return values.StructToQueryString(query)
 }
 
 // WithHeader sets the key header field to the given value.

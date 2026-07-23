@@ -1,6 +1,6 @@
 // Copyright (c) 2026 Lemon4ksan All rights reserved.
 // Use of this source code is governed by a BSD-style
-// license that can be found in the LICENSE file.
+// license can be found in the LICENSE file.
 
 package aoni_test
 
@@ -28,21 +28,17 @@ import (
 )
 
 type benchPayload struct {
-	ID      int    `json:"id"`
 	Message string `json:"message"`
+	ID      int    `json:"id"`
 }
 
 type queryParams struct {
+	Query string `url:"q"`
 	ID    uint64 `url:"id"`
 	Limit int    `url:"limit,omitempty"`
-	Query string `url:"q"`
 }
 
-// ============================================================================
-// 1. JSON GET BENCHMARKS (Generics vs Manual net/http)
-// Measures the overhead of generic unmarshaling and client initialization.
-// ============================================================================
-
+// BenchmarkGET_JSON_Aoni measures generic payload unmarshaling overhead over HTTP transactions.
 func BenchmarkGET_JSON_Aoni(b *testing.B) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -50,7 +46,6 @@ func BenchmarkGET_JSON_Aoni(b *testing.B) {
 	}))
 	defer server.Close()
 
-	// Immutable client using generic payload decoding
 	client := aoni.NewClient(nil, option.WithBaseURL(server.URL))
 	ctx := context.Background()
 
@@ -69,8 +64,36 @@ func BenchmarkGET_JSON_Aoni(b *testing.B) {
 	}
 }
 
+func BenchmarkGET_JSON_Into_Aoni(b *testing.B) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(benchPayload{ID: 100, Message: "hello benchmark"})
+	}))
+	defer server.Close()
+
+	client := aoni.NewClient(nil, option.WithBaseURL(server.URL))
+	ctx := context.Background()
+
+	b.ResetTimer()
+	b.ReportAllocs()
+
+	for b.Loop() {
+		var payload benchPayload
+
+		err := request.GetInto(ctx, client, "/", &payload)
+		if err != nil {
+			b.Fatal(err)
+		}
+
+		if payload.ID != 100 {
+			b.Fatal("invalid id")
+		}
+	}
+}
+
+// BenchmarkGET_JSON_NetHTTP measures standard net/http JSON decoding performance.
 func BenchmarkGET_JSON_NetHTTP(b *testing.B) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(benchPayload{ID: 100, Message: "hello benchmark"})
 	}))
@@ -102,22 +125,19 @@ func BenchmarkGET_JSON_NetHTTP(b *testing.B) {
 	}
 }
 
-// ============================================================================
-// 2. LARGE PAYLOAD COPY BENCHMARKS (1MB stream reading)
-// Measures if our raw buffer reading and limiters introduce CPU/RAM overhead.
-// ============================================================================
-
+// BenchmarkRawCopy_Aoni measures 1MB stream copy execution using zero-copy pipelines.
 func BenchmarkRawCopy_Aoni(b *testing.B) {
-	payload := strings.Repeat("a", 1024*1024) // 1MB payload
+	payload := strings.Repeat("a", 1024*1024)
+	payloadBytes := []byte(payload)
 
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		_, _ = w.Write([]byte(payload))
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write(payloadBytes)
 	}))
 	defer server.Close()
 
 	client := aoni.NewClient(nil,
 		option.WithBaseURL(server.URL),
-		option.WithMultiReadBodyThreshold(0),
+		option.WithMultiReadDisableDisk(true),
 	)
 	ctx := context.Background()
 
@@ -126,7 +146,7 @@ func BenchmarkRawCopy_Aoni(b *testing.B) {
 
 	for b.Loop() {
 		var output []byte
-		// Request has NO body positional argument. Body is handled via modifiers.
+
 		resp, err := client.Request(ctx, http.MethodGet, "/", decode.WithRaw())
 		if err != nil {
 			b.Fatal(err)
@@ -145,11 +165,12 @@ func BenchmarkRawCopy_Aoni(b *testing.B) {
 	}
 }
 
+// BenchmarkRawCopy_NetHTTP measures standard net/http 1MB stream copy execution.
 func BenchmarkRawCopy_NetHTTP(b *testing.B) {
-	payload := strings.Repeat("a", 1024*1024) // 1MB payload
+	payloadBytes := []byte(strings.Repeat("a", 1024*1024))
 
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		_, _ = w.Write([]byte(payload))
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write(payloadBytes)
 	}))
 	defer server.Close()
 
@@ -171,17 +192,13 @@ func BenchmarkRawCopy_NetHTTP(b *testing.B) {
 			b.Fatal(err)
 		}
 
-		if len(output) != len(payload) {
+		if len(output) != len(payloadBytes) {
 			b.Fatal("length mismatch")
 		}
 	}
 }
 
-// ============================================================================
-// 3. MULTIPART FORM BENCHMARKS (Payload assembly & streaming)
-// Measures memory allocations during heavy multipart body encoding.
-// ============================================================================
-
+// BenchmarkMultipart_Aoni measures multipart form body assembly and streaming.
 func BenchmarkMultipart_Aoni(b *testing.B) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		_ = r.ParseMultipartForm(10 * 1024 * 1024)
@@ -194,7 +211,7 @@ func BenchmarkMultipart_Aoni(b *testing.B) {
 	ctx := context.Background()
 
 	fields := map[string]string{"foo": "bar"}
-	fileData := strings.Repeat("b", 100*1024) // 100KB file
+	fileData := strings.Repeat("b", 100*1024)
 
 	b.ResetTimer()
 	b.ReportAllocs()
@@ -203,7 +220,7 @@ func BenchmarkMultipart_Aoni(b *testing.B) {
 		files := map[string]io.Reader{
 			"file1": strings.NewReader(fileData),
 		}
-		// Clean, declarative body definition via RequestModifier
+
 		resp, err := client.Request(ctx, http.MethodPost, "/", mod.WithMultipart(fields, files))
 		if err != nil {
 			b.Fatal(err)
@@ -213,6 +230,7 @@ func BenchmarkMultipart_Aoni(b *testing.B) {
 	}
 }
 
+// BenchmarkMultipart_NetHTTP measures manual net/http multipart body encoding.
 func BenchmarkMultipart_NetHTTP(b *testing.B) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		_ = r.ParseMultipartForm(10 * 1024 * 1024)
@@ -222,7 +240,7 @@ func BenchmarkMultipart_NetHTTP(b *testing.B) {
 	defer server.Close()
 
 	client := &http.Client{}
-	fileData := strings.Repeat("b", 100*1024) // 100KB file
+	fileData := strings.Repeat("b", 100*1024)
 
 	b.ResetTimer()
 	b.ReportAllocs()
@@ -231,8 +249,7 @@ func BenchmarkMultipart_NetHTTP(b *testing.B) {
 		body := &bytes.Buffer{}
 		writer := multipart.NewWriter(body)
 
-		err := writer.WriteField("foo", "bar")
-		if err != nil {
+		if err := writer.WriteField("foo", "bar"); err != nil {
 			b.Fatal(err)
 		}
 
@@ -241,14 +258,13 @@ func BenchmarkMultipart_NetHTTP(b *testing.B) {
 			b.Fatal(err)
 		}
 
-		_, err = io.Copy(part, strings.NewReader(fileData))
-		if err != nil {
+		if _, err = io.Copy(part, strings.NewReader(fileData)); err != nil {
 			b.Fatal(err)
 		}
 
 		_ = writer.Close()
 
-		req, err := http.NewRequest("POST", server.URL, body)
+		req, err := http.NewRequest(http.MethodPost, server.URL, body)
 		if err != nil {
 			b.Fatal(err)
 		}
@@ -264,11 +280,30 @@ func BenchmarkMultipart_NetHTTP(b *testing.B) {
 	}
 }
 
-// ============================================================================
-// 4. QUERY STRING ENCODING BENCHMARKS (Reflection vs Manual)
-// Measures the exact performance cost of reflection-based tag parsing.
-// ============================================================================
+// BenchmarkQueryEncoding_Fast_Aoni measures direct zero-allocation URL query string generation.
+func BenchmarkQueryEncoding_Fast_Aoni(b *testing.B) {
+	params := queryParams{
+		ID:    76561198000000000,
+		Limit: 100,
+		Query: "search_term",
+	}
 
+	b.ResetTimer()
+	b.ReportAllocs()
+
+	for b.Loop() {
+		qStr, err := values.StructToQueryString(params)
+		if err != nil {
+			b.Fatal(err)
+		}
+
+		if qStr == "" {
+			b.Fatal("invalid result")
+		}
+	}
+}
+
+// BenchmarkQueryEncoding_Aoni measures legacy url.Values map construction via reflection.
 func BenchmarkQueryEncoding_Aoni(b *testing.B) {
 	params := queryParams{
 		ID:    76561198000000000,
@@ -280,17 +315,18 @@ func BenchmarkQueryEncoding_Aoni(b *testing.B) {
 	b.ReportAllocs()
 
 	for b.Loop() {
-		values, err := values.StructToValues(params)
+		vals, err := values.StructToValues(params)
 		if err != nil {
 			b.Fatal(err)
 		}
 
-		if values.Get("id") != "76561198000000000" {
+		if vals.Get("id") != "76561198000000000" {
 			b.Fatal("invalid result")
 		}
 	}
 }
 
+// BenchmarkQueryEncoding_Manual measures manual url.Values map construction.
 func BenchmarkQueryEncoding_Manual(b *testing.B) {
 	params := queryParams{
 		ID:    76561198000000000,
@@ -302,35 +338,31 @@ func BenchmarkQueryEncoding_Manual(b *testing.B) {
 	b.ReportAllocs()
 
 	for b.Loop() {
-		values := make(url.Values)
-		values.Set("id", strconv.FormatUint(params.ID, 10))
+		vals := make(url.Values)
+		vals.Set("id", strconv.FormatUint(params.ID, 10))
 
 		if params.Limit != 0 {
-			values.Set("limit", strconv.Itoa(params.Limit))
+			vals.Set("limit", strconv.Itoa(params.Limit))
 		}
 
 		if params.Query != "" {
-			values.Set("q", params.Query)
+			vals.Set("q", params.Query)
 		}
 
-		if values.Get("id") != "76561198000000000" {
+		if vals.Get("id") != "76561198000000000" {
 			b.Fatal("invalid result")
 		}
 	}
 }
 
-// ============================================================================
-// 5. LOAD BALANCER OVERHEAD BENCHMARKS
-// Measures the latency and allocation cost introduced by the LoadBalancer router.
-// ============================================================================
-
+// BenchmarkLoadBalancer_WeightedRoundRobin_Aoni measures load balancer request routing overhead.
 func BenchmarkLoadBalancer_WeightedRoundRobin_Aoni(b *testing.B) {
-	server1 := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server1 := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	}))
 	defer server1.Close()
 
-	server2 := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server2 := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	}))
 	defer server2.Close()
@@ -359,14 +391,9 @@ func BenchmarkLoadBalancer_WeightedRoundRobin_Aoni(b *testing.B) {
 	}
 }
 
-// ============================================================================
-// 6. LATENCY HEDGING BENCHMARKS (Parallel backup execution under packet lag)
-// Demonstrates how hedging flattens p99 response times under simulated network lag.
-// ============================================================================
-
+// BenchmarkRequest_WithoutHedging_Aoni measures baseline request execution latency.
 func BenchmarkRequest_WithoutHedging_Aoni(b *testing.B) {
-	// Server simulates a slow proxy or temporary backend lag (50ms)
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		time.Sleep(50 * time.Millisecond)
 		w.WriteHeader(http.StatusOK)
 	}))
@@ -388,25 +415,22 @@ func BenchmarkRequest_WithoutHedging_Aoni(b *testing.B) {
 	}
 }
 
+// BenchmarkRequest_WithHedging_Aoni measures parallel hedging backup execution under network lag.
 func BenchmarkRequest_WithHedging_Aoni(b *testing.B) {
-	// Node 1 is extremely slow (50ms)
-	server1 := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server1 := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		time.Sleep(50 * time.Millisecond)
 		w.WriteHeader(http.StatusOK)
 	}))
 	defer server1.Close()
 
-	// Node 2 is ultra-fast (0ms)
-	server2 := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server2 := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	}))
 	defer server2.Close()
 
-	// Route requests through the load balancer
-	lb, _ := lb.New(lb.Config{Strategy: lb.RoundRobin}, server1.URL, server2.URL)
-	defer lb.Close()
+	lbInstance, _ := lb.New(lb.Config{Strategy: lb.RoundRobin}, server1.URL, server2.URL)
+	defer lbInstance.Close()
 
-	// Hedge after 10ms. If Server1 stalls, Server2 is fired in parallel.
 	client := aoni.NewClient(nil,
 		option.WithBaseURL(server1.URL),
 		option.WithHedging(10*time.Millisecond),
@@ -417,7 +441,6 @@ func BenchmarkRequest_WithHedging_Aoni(b *testing.B) {
 	b.ReportAllocs()
 
 	for b.Loop() {
-		// Average execution will drop from 50ms to ~10-12ms thanks to parallel backup!
 		resp, err := client.Request(ctx, http.MethodGet, "/")
 		if err != nil {
 			b.Fatal(err)

@@ -537,6 +537,137 @@ func StructToValues(s any) (url.Values, error) {
 	return values, nil
 }
 
+// FastQueryEncoder is implemented by types capable of encoding URL query strings directly.
+type FastQueryEncoder interface {
+	EncodeQueryString() (string, error)
+}
+
+// StructToQueryString encodes a struct or map directly into a raw URL query string (e.g. "key=val&a=b").
+//
+// Bypasses url.Values map allocations by writing directly to a pre-allocated builder.
+func StructToQueryString(s any) (string, error) {
+	if s == nil {
+		return "", nil
+	}
+
+	if fqe, ok := s.(FastQueryEncoder); ok {
+		return fqe.EncodeQueryString()
+	}
+
+	if v, ok := s.(url.Values); ok {
+		return v.Encode(), nil
+	}
+
+	if m, ok := s.(map[string]string); ok {
+		return encodeMapDirect(m), nil
+	}
+
+	v := reflect.ValueOf(s)
+	if v.Kind() == reflect.Pointer {
+		if v.IsNil() {
+			return "", nil
+		}
+
+		v = v.Elem()
+	}
+
+	if v.Kind() != reflect.Struct {
+		return "", ErrUnsupportedType
+	}
+
+	schema := getStructSchema(v.Type())
+
+	var sb strings.Builder
+	sb.Grow(len(schema.fields) * 20)
+
+	if err := schema.writeQueryString(v, &sb); err != nil {
+		return "", err
+	}
+
+	return sb.String(), nil
+}
+
+func encodeMapDirect(m map[string]string) string {
+	if len(m) == 0 {
+		return ""
+	}
+
+	var sb strings.Builder
+	sb.Grow(len(m) * 20)
+
+	first := true
+	for k, val := range m {
+		if !first {
+			sb.WriteByte('&')
+		}
+
+		sb.WriteString(url.QueryEscape(k))
+		sb.WriteByte('=')
+		sb.WriteString(url.QueryEscape(val))
+
+		first = false
+	}
+
+	return sb.String()
+}
+
+func (s *structSchema) writeQueryString(v reflect.Value, sb *strings.Builder) error {
+	first := true
+
+	for i := range s.fields {
+		f := &s.fields[i]
+		val := v.Field(f.index)
+
+		if val.Kind() == reflect.Pointer {
+			if val.IsNil() {
+				if f.defaultVal != "" && f.key != "" && f.key != "-" {
+					writeQueryKeyValuePair(sb, f.key, f.defaultVal, &first)
+				}
+
+				continue
+			}
+
+			val = val.Elem()
+		}
+
+		if f.isIgnored || f.key == "" || f.key == "-" {
+			continue
+		}
+
+		if val.IsZero() {
+			if f.defaultVal != "" {
+				writeQueryKeyValuePair(sb, f.key, f.defaultVal, &first)
+				continue
+			}
+
+			if f.omitempty {
+				continue
+			}
+		}
+
+		strVal, err := toString(val)
+		if err != nil {
+			return &ValueError{Field: f.name, Err: err}
+		}
+
+		writeQueryKeyValuePair(sb, f.key, strVal, &first)
+	}
+
+	return nil
+}
+
+func writeQueryKeyValuePair(sb *strings.Builder, key, value string, first *bool) {
+	if !*first {
+		sb.WriteByte('&')
+	}
+
+	sb.WriteString(url.QueryEscape(key))
+	sb.WriteByte('=')
+	sb.WriteString(url.QueryEscape(value))
+
+	*first = false
+}
+
 func protoToValues(pm proto.Message) (url.Values, error) {
 	opts := protojson.MarshalOptions{UseProtoNames: true}
 

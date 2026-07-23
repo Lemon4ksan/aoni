@@ -126,6 +126,7 @@ func WithBaseURL(raw string) aoni.ClientOption {
 		if err == nil {
 			cfg.Defaults.BaseURL = baseURL
 			cfg.Defaults.BaseURLString = baseURL.String()
+			cfg.Defaults.BaseURLTrimmedString = strings.TrimSuffix(baseURL.String(), "/")
 		}
 	}
 }

@@ -7,7 +7,6 @@ package aoni
 import (
 	"context"
 	"crypto/tls"
-	"maps"
 	"net"
 	"net/http"
 	"net/url"
@@ -296,12 +295,13 @@ func (c *Client) Request(
 	}
 
 	cfg := GetRequestConfig(ctx)
-	if cfg == nil {
+	if cfg != nil {
+		cfg.ApplyDefaults(c)
+	} else if len(mods) > 0 || len(c.defaults.DefaultMods) > 0 || c.needsRequestConfig() {
 		cfg = requestConfigPool.Get().(*RequestConfig)
 		ctx = context.WithValue(ctx, requestConfigKey{}, cfg)
+		cfg.ApplyDefaults(c)
 	}
-
-	cfg.ApplyDefaults(c)
 
 	req, err := http.NewRequestWithContext(ctx, method, targetURLStr, http.NoBody) //nolint:gosec
 	if err != nil {
@@ -309,22 +309,31 @@ func (c *Client) Request(
 	}
 
 	if len(c.defaults.Headers) > 0 {
-		maps.Copy(req.Header, c.defaults.Headers)
+		for k, v := range c.defaults.Headers {
+			req.Header[k] = v
+		}
 	}
 
 	if len(req.Header["Accept-Encoding"]) == 0 {
 		req.Header["Accept-Encoding"] = defaultAcceptEncoding
 	}
 
-	generic.ApplyOptions(req, c.defaults.DefaultMods...)
-	generic.ApplyOptions(req, mods...)
-
-	if cfg.BodyError != nil {
-		return nil, &Error{Op: "body encoding failed", Err: cfg.BodyError}
+	if len(c.defaults.DefaultMods) > 0 {
+		generic.ApplyOptions(req, c.defaults.DefaultMods...)
 	}
 
-	if cfg.QueryError != nil {
-		return nil, &Error{Op: "query encoding failed", Err: cfg.QueryError}
+	if len(mods) > 0 {
+		generic.ApplyOptions(req, mods...)
+	}
+
+	if cfg != nil {
+		if cfg.BodyError != nil {
+			return nil, &Error{Op: "body encoding failed", Err: cfg.BodyError}
+		}
+
+		if cfg.QueryError != nil {
+			return nil, &Error{Op: "query encoding failed", Err: cfg.QueryError}
+		}
 	}
 
 	resp, err := c.execute(req, c.resolvePipeline(req))
@@ -333,6 +342,18 @@ func (c *Client) Request(
 	}
 
 	return resp, nil
+}
+
+func (c *Client) needsRequestConfig() bool {
+	return c.network.SocketController != nil ||
+		c.fingerprint.TLSClientHelloSpecProvider != nil ||
+		len(c.fingerprint.CertificatePins) > 0 ||
+		c.fingerprint.P0fSignature != nil ||
+		c.fingerprint.JA4Callback != nil ||
+		c.defaults.QueryEncoder != nil ||
+		c.defaults.MultiReadThreshold > 0 ||
+		c.network.SSRFGuard ||
+		c.network.ProxyAddr != nil
 }
 
 // DialTLSForWS establishes an encrypted TLS socket connection.
@@ -761,7 +782,15 @@ func (c *Client) resolveTargetURL(path string) (string, error) {
 		return c.defaults.BaseURL.String(), nil
 	}
 
+	if strings.HasPrefix(path, "http://") || strings.HasPrefix(path, "https://") {
+		return path, nil
+	}
+
 	if path[0] == '/' && (c.defaults.BaseURL.Path == "" || c.defaults.BaseURL.Path == "/") {
+		if c.defaults.BaseURLTrimmedString != "" {
+			return c.defaults.BaseURLTrimmedString + path, nil
+		}
+
 		if c.defaults.BaseURLString != "" {
 			return strings.TrimSuffix(c.defaults.BaseURLString, "/") + path, nil
 		}

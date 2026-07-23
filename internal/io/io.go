@@ -32,6 +32,9 @@ var (
 // ProgressFunc reports periodic stream transfer progress (current bytes and total Content-Length).
 type ProgressFunc func(current, total int64)
 
+// Cap pooled buffers at 64 KB to prevent sync.Pool memory bloat during large stream reads.
+const maxPoolBufferSize = 64 * 1024
+
 var copyBufPool = sync.Pool{
 	New: func() any {
 		b := make([]byte, 32*1024)
@@ -39,7 +42,7 @@ var copyBufPool = sync.Pool{
 	},
 }
 
-// CopyZeroAlloc streams data from r to w using kernel-level zero-copy paths when available.
+// CopyZeroAlloc streams data from r to w using zero-copy paths or pooled 32KB buffers.
 //
 // If w or r satisfy [io.ReaderFrom] or [io.WriterTo] (such as *os.File or *net.TCPConn),
 // execution delegates to the OS kernel (e.g. sendfile/splice syscalls).
@@ -58,7 +61,11 @@ func CopyZeroAlloc(w io.Writer, r io.Reader) (int64, error) {
 	}
 
 	bufPtr := copyBufPool.Get().(*[]byte)
-	defer copyBufPool.Put(bufPtr)
+	defer func() {
+		if cap(*bufPtr) <= maxPoolBufferSize {
+			copyBufPool.Put(bufPtr)
+		}
+	}()
 
 	return io.CopyBuffer(w, r, *bufPtr)
 }

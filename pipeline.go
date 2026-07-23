@@ -581,6 +581,27 @@ func applyCharsetTranscoding(resp *http.Response) {
 		return
 	}
 
+	lower := strings.ToLower(contentType)
+	// Fast-path: bypass mime.ParseMediaType map allocations if no charset parameter exists
+	if !strings.Contains(lower, "charset=") {
+		return
+	}
+
+	if isUTF8Charset(lower) {
+		return
+	}
+
+	parseAndApplyNonUTF8Transcoder(resp, contentType)
+}
+
+func isUTF8Charset(lowerContentType string) bool {
+	return strings.Contains(lowerContentType, "charset=utf-8") ||
+		strings.Contains(lowerContentType, "charset=utf8") ||
+		strings.Contains(lowerContentType, "charset=\"utf-8\"") ||
+		strings.Contains(lowerContentType, "charset=\"utf8\"")
+}
+
+func parseAndApplyNonUTF8Transcoder(resp *http.Response, contentType string) {
 	_, params, err := mime.ParseMediaType(contentType)
 	if err != nil {
 		return

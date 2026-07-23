@@ -60,8 +60,9 @@ func redactHeaders(raw []byte) []byte {
 			continue
 		}
 
-		if isSensitiveHeader(bytes.TrimSpace(key)) {
-			buf.Write(key)
+		trimmedKey := bytes.TrimSpace(key)
+		if isSensitiveHeader(trimmedKey) {
+			buf.Write(bytes.ToLower(trimmedKey))
 			buf.WriteString(": <redacted>")
 		} else {
 			buf.Write(line)
@@ -89,15 +90,9 @@ func (d responseDecoder) ValidateState(resp *http.Response, decoder decode.Decod
 		return nil
 	}
 
-	contentType := resp.Header.Get("Content-Type")
-	if resp.StatusCode < http.StatusBadRequest && contentType != "" {
-		mediaType, _, _ := strings.Cut(contentType, ";")
-		mediaType = strings.TrimSpace(mediaType)
-
-		if bytesconv.EqualFoldASCII(mediaType, "application/json") ||
-			bytesconv.EqualFoldASCII(mediaType, "application/x-protobuf") ||
-			bytesconv.EqualFoldASCII(mediaType, "application/protobuf") ||
-			bytesconv.EqualFoldASCII(mediaType, "application/grpc-web+proto") {
+	if resp.StatusCode < http.StatusBadRequest {
+		contentType := resp.Header.Get("Content-Type")
+		if contentType == "" || isStructuredDataMIME(contentType) {
 			return nil
 		}
 	}
@@ -109,6 +104,17 @@ func (d responseDecoder) ValidateState(resp *http.Response, decoder decode.Decod
 	}
 
 	return d.checkMIMEType(resp)
+}
+
+func isStructuredDataMIME(contentType string) bool {
+	mediaType, _, _ := strings.Cut(contentType, ";")
+	mediaType = strings.TrimSpace(mediaType)
+
+	return bytesconv.EqualFoldASCII(mediaType, "application/json") ||
+		bytesconv.EqualFoldASCII(mediaType, "text/json") ||
+		bytesconv.EqualFoldASCII(mediaType, "application/x-protobuf") ||
+		bytesconv.EqualFoldASCII(mediaType, "application/protobuf") ||
+		bytesconv.EqualFoldASCII(mediaType, "application/grpc-web+proto")
 }
 
 func resolvePeekableReader(resp *http.Response) *bufio.Reader {
@@ -158,7 +164,7 @@ func (d responseDecoder) DumpDiagnostics(resp *http.Response, requester Requeste
 	reqDump = redactHeaders(reqDump)
 	respDump = redactHeaders(respDump)
 
-	if logger, ok := requester.(interface{ Logger() aoni.Logger }); ok {
+	if logger, ok := requester.(aoni.LoggerProvider); ok {
 		logger.Logger().
 			Debug("Aoni HTTP Diagnostic", "request", bytesconv.B2S(reqDump), "response", bytesconv.B2S(respDump))
 		return
@@ -210,25 +216,36 @@ func (responseDecoder) DecodeSuccess(
 	requester Requester,
 	decoder decode.Decoder,
 ) error {
-	var br aoni.BaseResponse
-	if p, ok := requester.(aoni.BaseResponseProvider); ok {
-		br = p.BaseResponse()
-	} else if provider, ok := requester.(interface{ BaseResponse() aoni.BaseResponse }); ok {
-		br = provider.BaseResponse()
-	}
+	// Fast-path: direct type check to avoid interface assertion boxing allocations
+	if client, ok := requester.(*aoni.Client); ok {
+		if br := client.BaseResponse(); br != nil {
+			br.SetData(target)
 
-	if br != nil {
-		br.SetData(target)
+			if err := decoder.Decode(resp.Body, br); err != nil {
+				return err
+			}
 
-		if err := decoder.Decode(resp.Body, br); err != nil {
-			return err
+			if !br.IsSuccess() {
+				return br.Error()
+			}
+
+			return nil
 		}
+	} else if p, ok := requester.(aoni.BaseResponseProvider); ok {
+		br := p.BaseResponse()
+		if br != nil {
+			br.SetData(target)
 
-		if !br.IsSuccess() {
-			return br.Error()
+			if err := decoder.Decode(resp.Body, br); err != nil {
+				return err
+			}
+
+			if !br.IsSuccess() {
+				return br.Error()
+			}
+
+			return nil
 		}
-
-		return nil
 	}
 
 	err := decoder.Decode(resp.Body, target)
