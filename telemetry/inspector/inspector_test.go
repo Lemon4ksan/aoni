@@ -36,8 +36,8 @@ func TestTrafficInspector_CaptureAndHistory(t *testing.T) {
 		_ = ins.Close()
 	})
 
-	resp, err := client.Request(context.Background(), http.MethodGet, server.URL+"/test-path", func(r *http.Request) {
-		r.Header.Set("X-Custom-Request-Header", "request-val-987")
+	resp, err := client.Request(context.Background(), http.MethodGet, server.URL+"/test-path", func(r aoni.Request) {
+		r.SetHeader("X-Custom-Request-Header", "request-val-987")
 	})
 	require.NoError(t, err)
 

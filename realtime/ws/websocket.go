@@ -112,9 +112,12 @@ func buildTemporaryWSRequest(
 		return nil, fmt.Errorf("aoni: failed to create ws request: %w", err)
 	}
 
-	maps.Copy(req.Header, c.Defaults().Headers)
-	req = c.InitRequestConfig(req)
-	generic.ApplyOptions(req, mods...)
+	stdReq := aoni.NewStdRequest(req)
+	for _, m := range mods {
+		if m != nil {
+			m(stdReq)
+		}
+	}
 
 	return req, nil
 }

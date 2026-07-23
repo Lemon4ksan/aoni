@@ -58,7 +58,7 @@ func TestGetProxyOverride(t *testing.T) {
 			require.NoError(t, err)
 
 			if tt.proxyURL != "" {
-				mod.WithProxyOverride(tt.proxyURL)(req)
+				mod.WithProxyOverride(tt.proxyURL)(aoni.NewStdRequest(req))
 			}
 
 			raw, ok := aoni.GetProxyOverride(req.Context()).Value()
@@ -113,7 +113,7 @@ func TestProxyFuncWithOverride(t *testing.T) {
 			require.NoError(t, err)
 
 			if tt.overrideURL != "" {
-				mod.WithProxyOverride(tt.overrideURL)(req)
+				mod.WithProxyOverride(tt.overrideURL)(aoni.NewStdRequest(req))
 			}
 
 			u, err := wrapped(req)
@@ -157,7 +157,7 @@ func TestInsecureSkipVerify(t *testing.T) {
 			require.NoError(t, err)
 
 			if tt.applyMod {
-				mod.WithInsecureSkipVerify()(req)
+				mod.WithInsecureSkipVerify()(aoni.NewStdRequest(req))
 			}
 
 			assert.Equal(t, tt.expectedVal, aoni.GetInsecureSkipVerify(req.Context()))
@@ -219,7 +219,7 @@ func TestTCPDelay(t *testing.T) {
 				require.NoError(t, err)
 
 				if tt.expectSet {
-					mod.WithTCPDelay(tt.minDelay, tt.maxDelay)(req)
+					mod.WithTCPDelay(tt.minDelay, tt.maxDelay)(aoni.NewStdRequest(req))
 				}
 
 				r, ok := aoni.GetTCPDelay(req.Context()).Value()
@@ -254,7 +254,7 @@ func TestTCPDelay(t *testing.T) {
 			req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, "http://example.com", nil)
 			require.NoError(t, err)
 
-			mod.WithTCPDelay(20*time.Millisecond, 30*time.Millisecond)(req)
+			mod.WithTCPDelay(20*time.Millisecond, 30*time.Millisecond)(aoni.NewStdRequest(req))
 
 			start := time.Now()
 			err = aoni.ApplyTCPDelay(req.Context())
@@ -271,7 +271,7 @@ func TestTCPDelay(t *testing.T) {
 			req, err := http.NewRequestWithContext(ctx, http.MethodGet, "http://example.com", nil)
 			require.NoError(t, err)
 
-			mod.WithTCPDelay(500*time.Millisecond, 1*time.Second)(req)
+			mod.WithTCPDelay(500*time.Millisecond, 1*time.Second)(aoni.NewStdRequest(req))
 
 			cancel()
 
@@ -287,8 +287,8 @@ func TestConnMetadata(t *testing.T) {
 	req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, "http://example.com", nil)
 	require.NoError(t, err)
 
-	mod.WithConnMetadata("pool", "eu-west")(req)
-	mod.WithConnMetadata("trace-id", "abc123")(req)
+	mod.WithConnMetadata("pool", "eu-west")(aoni.NewStdRequest(req))
+	mod.WithConnMetadata("trace-id", "abc123")(aoni.NewStdRequest(req))
 
 	tests := []struct {
 		name        string
@@ -419,7 +419,7 @@ func TestCacheTTL(t *testing.T) {
 			require.NoError(t, err)
 
 			if tt.applyMod {
-				mod.WithCacheTTL(tt.ttl)(req)
+				mod.WithCacheTTL(tt.ttl)(aoni.NewStdRequest(req))
 			}
 
 			d, ok := aoni.GetCacheTTL(req.Context()).Value()
@@ -474,7 +474,7 @@ func TestRetryPolicyAndConditions(t *testing.T) {
 				require.NoError(t, err)
 
 				if tt.applyMod {
-					mod.WithRetryPolicy(tt.override)(req)
+					mod.WithRetryPolicy(tt.override)(aoni.NewStdRequest(req))
 				}
 
 				o, ok := aoni.GetRetryOverride(req.Context()).Value()
@@ -605,7 +605,7 @@ func TestContextModifiersAndRules(t *testing.T) {
 		t.Parallel()
 
 		ctx := context.Background()
-		dummyMod := func(_ *http.Request) {}
+		dummyMod := func(_ aoni.Request) {}
 
 		ctx = aoni.WithContextModifier(ctx, dummyMod)
 		mods := aoni.ContextModifiers(ctx)
@@ -621,7 +621,7 @@ func TestContextModifiersAndRules(t *testing.T) {
 		require.NoError(t, err)
 
 		rules := map[string]string{"example.com": "127.0.0.1:8080"}
-		mod.WithHostRewrite(rules)(req)
+		mod.WithHostRewrite(rules)(aoni.NewStdRequest(req))
 
 		extracted := aoni.HostRewriteRules(req.Context())
 		require.NotNil(t, extracted)

@@ -116,7 +116,24 @@ func (t *Transport) prepareClient(origReq *http.Request) *Client {
 }
 
 func (t *Transport) newSyncModifier(origReq *http.Request) RequestModifier {
-	return func(aoniReq *http.Request) {
+	return func(req Request) {
+		aoniReq := req.HTTPRequest()
+		if aoniReq == nil {
+			req.SetMethod(origReq.Method)
+
+			if origReq.URL != nil {
+				req.SetURL(origReq.URL.String())
+			}
+
+			for k, vv := range origReq.Header {
+				for _, v := range vv {
+					req.AddHeader(k, v)
+				}
+			}
+
+			return
+		}
+
 		resolvedURL := aoniReq.URL
 
 		aoniReq.Method = origReq.Method

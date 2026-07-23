@@ -81,13 +81,10 @@ func TestStream(t *testing.T) {
 		})
 
 		query := map[string]string{"foo": "bar"}
-		stream, err := stream.Get(t.Context(), client, "/test", func(req *http.Request) {
-			q := req.URL.Query()
+		stream, err := stream.Get(t.Context(), client, "/test", func(req aoni.Request) {
 			for k, v := range query {
-				q.Set(k, v)
+				req.AddQueryParam(k, v)
 			}
-
-			req.URL.RawQuery = q.Encode()
 		})
 		require.NoError(t, err)
 		t.Cleanup(func() { _ = stream.Close() })

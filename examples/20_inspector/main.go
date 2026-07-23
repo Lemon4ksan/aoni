@@ -11,7 +11,6 @@ package main
 import (
 	"context"
 	"fmt"
-	"net/http"
 	"time"
 
 	"github.com/lemon4ksan/aoni/option"
@@ -46,8 +45,8 @@ func main() {
 	for {
 		fmt.Printf("[%s] Generating request %d to https://httpbin.org/headers...\n", time.Now().Format("15:04:05"), i)
 
-		resp, err := client.Request(ctx, "GET", "https://httpbin.org/headers", func(req *http.Request) {
-			req.Header.Set("X-Aoni-Request-Index", fmt.Sprintf("%d", i))
+		resp, err := client.Request(ctx, "GET", "https://httpbin.org/headers", func(req aoni.Request) {
+			req.SetHeader("X-Aoni-Request-Index", fmt.Sprintf("%d", i))
 		})
 		if err == nil {
 			_ = resp.Body.Close()

@@ -187,7 +187,7 @@ func WithProfileVariant(variant *profiles.Variant, os profiles.OSKey) aoni.Clien
 		aoni.ApplyTLSVariantToConfig(cfg, variant)
 		aoni.ApplyHTTPVariantToConfig(cfg, variant, os)
 
-		cfg.Defaults.DefaultMods = append(cfg.Defaults.DefaultMods, func(req *http.Request) {
+		cfg.Defaults.DefaultMods = append(cfg.Defaults.DefaultMods, func(req aoni.Request) {
 			aoni.ApplyProfileHeaders(req, variant, os)
 		})
 	}

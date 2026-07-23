@@ -7,6 +7,8 @@ package aoni
 import (
 	"context"
 	"crypto/tls"
+	"errors"
+	"maps"
 	"net"
 	"net/http"
 	"net/url"
@@ -59,11 +61,11 @@ func (f DoerFunc) Do(req *http.Request) (*http.Response, error) {
 // retries, circuit breaking, logging, or custom telemetry.
 type Middleware func(next HTTPDoer) HTTPDoer
 
-// RequestModifier defines a hook to alter an outgoing [*http.Request] prior to execution.
+// RequestModifier defines a hook to alter an outgoing [Request] prior to execution.
 //
 // Concrete implementations (like modifying headers, cookies, or queries)
 // are provided in the [github.com/lemon4ksan/aoni/mod] package.
-type RequestModifier = generic.Option[*http.Request]
+type RequestModifier = generic.Option[Request]
 
 // ClientOption represents a functional option utilized to customize client configuration.
 //
@@ -183,7 +185,7 @@ func (c *Client) WithPersona(p fingerprint.Persona) *Client {
 
 	if len(p.HeaderOrder) > 0 {
 		newClient = newClient.With(func(cfg *Config) {
-			cfg.Defaults.DefaultMods = append(cfg.Defaults.DefaultMods, func(req *http.Request) {
+			cfg.Defaults.DefaultMods = append(cfg.Defaults.DefaultMods, func(req Request) {
 				GetOrInitRequestConfig(req).OrderedHeaders = p.HeaderOrder
 			})
 		})
@@ -309,21 +311,29 @@ func (c *Client) Request(
 	}
 
 	if len(c.defaults.Headers) > 0 {
-		for k, v := range c.defaults.Headers {
-			req.Header[k] = v
-		}
+		maps.Copy(req.Header, c.defaults.Headers)
 	}
 
 	if len(req.Header["Accept-Encoding"]) == 0 {
 		req.Header["Accept-Encoding"] = defaultAcceptEncoding
 	}
 
+	stdReq := NewStdRequest(req)
+
 	if len(c.defaults.DefaultMods) > 0 {
-		generic.ApplyOptions(req, c.defaults.DefaultMods...)
+		for _, m := range c.defaults.DefaultMods {
+			if m != nil {
+				m(stdReq)
+			}
+		}
 	}
 
 	if len(mods) > 0 {
-		generic.ApplyOptions(req, mods...)
+		for _, m := range mods {
+			if m != nil {
+				m(stdReq)
+			}
+		}
 	}
 
 	if cfg != nil {
@@ -342,6 +352,37 @@ func (c *Client) Request(
 	}
 
 	return resp, nil
+}
+
+// Do executes a prepared [Request] contract via the client's pipeline.
+//
+// Provides complete method parity with fast.Client, allowing standard and fast engines
+// to execute unified [Request] adapters interchangeably.
+func (c *Client) Do(req Request) (Response, error) {
+	if req == nil {
+		return nil, errors.New("aoni: request is nil")
+	}
+
+	httpReq := req.HTTPRequest()
+	if httpReq == nil {
+		ctx := req.Context()
+		if ctx == nil {
+			ctx = context.Background()
+		}
+
+		var err error
+		httpReq, err = http.NewRequestWithContext(ctx, req.Method(), req.URL(), req.BodyStream())
+		if err != nil {
+			return nil, &Error{Op: "failed to create http request", Err: err}
+		}
+	}
+
+	resp, err := c.execute(httpReq, c.resolvePipeline(httpReq))
+	if err != nil {
+		return nil, &Error{Op: "request failed", Err: err}
+	}
+
+	return NewStdResponse(resp), nil
 }
 
 func (c *Client) needsRequestConfig() bool {
@@ -561,15 +602,47 @@ func (c *Client) CloseIdleConnections() {
 }
 
 // GetOrInitRequestConfig retrieves or initializes the [RequestConfig] associated with the request context.
-func GetOrInitRequestConfig(req *http.Request) *RequestConfig {
-	cfg := GetRequestConfig(req.Context())
-	if cfg == nil {
-		cfg = requestConfigPool.Get().(*RequestConfig)
-		ctx := context.WithValue(req.Context(), requestConfigKey{}, cfg)
-		*req = *req.WithContext(ctx)
-	}
+func GetOrInitRequestConfig(v any) *RequestConfig {
+	switch req := v.(type) {
+	case Request:
+		if req == nil {
+			return &RequestConfig{}
+		}
 
-	return cfg
+		cfg := GetRequestConfig(req.Context())
+		if cfg == nil {
+			cfg = requestConfigPool.Get().(*RequestConfig)
+			ctx := context.WithValue(req.Context(), requestConfigKey{}, cfg)
+			req.SetContext(ctx)
+		}
+
+		return cfg
+
+	case *http.Request:
+		if req == nil {
+			return &RequestConfig{}
+		}
+
+		cfg := GetRequestConfig(req.Context())
+		if cfg == nil {
+			cfg = requestConfigPool.Get().(*RequestConfig)
+			ctx := context.WithValue(req.Context(), requestConfigKey{}, cfg)
+			*req = *req.WithContext(ctx)
+		}
+
+		return cfg
+
+	case context.Context:
+		cfg := GetRequestConfig(req)
+		if cfg == nil {
+			cfg = requestConfigPool.Get().(*RequestConfig)
+		}
+
+		return cfg
+
+	default:
+		return &RequestConfig{}
+	}
 }
 
 // CloneHTTPClient returns a deep cloned http client.
@@ -867,3 +940,5 @@ func applyTransportOverrides(c *Client, eng EngineConfig) {
 		}
 	}
 }
+
+var _ RequestDoer = (*Client)(nil)

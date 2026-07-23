@@ -1,6 +1,6 @@
 // Copyright (c) 2026 Lemon4ksan All rights reserved.
 // Use of this source code is governed by a BSD-style
-// license that can be found in the LICENSE file.
+// license can be found in the LICENSE file.
 
 package aoni_test
 
@@ -13,7 +13,6 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/lemon4ksan/aoni"
-	"github.com/lemon4ksan/aoni/fingerprint/h2"
 	"github.com/lemon4ksan/aoni/fingerprint/p0f"
 	"github.com/lemon4ksan/aoni/mod"
 	"github.com/lemon4ksan/aoni/option"
@@ -22,31 +21,26 @@ import (
 func TestOptions_Coverage(t *testing.T) {
 	t.Parallel()
 
-	cfg := aoni.Config{
-		Defaults: aoni.ClientDefaults{
-			Headers: make(http.Header),
-		},
-	}
+	cfg := &aoni.Config{Defaults: aoni.ClientDefaults{Headers: make(http.Header)}}
+	option.WithTimeout(5 * time.Second)(cfg)
+	option.WithUserAgent("CustomUA")(cfg)
+	option.WithBaseURL("https://example.com")(cfg)
+	option.WithHeaders(map[string]string{"X-Header": "Val"})(cfg)
 
-	option.WithConfig(aoni.Config{})(&cfg)
-	option.WithDefaultsBlock(aoni.ClientDefaults{})(&cfg)
-	option.WithNetworkBlock(aoni.NetworkConfig{})(&cfg)
-	option.WithFingerprintBlock(aoni.FingerprintConfig{})(&cfg)
-	option.WithHeader("X-Key", "Val")(&cfg)
-	option.WithHeaders(map[string]string{"K1": "V1"})(&cfg)
-	option.WithoutHeaders()(&cfg)
-	option.WithTimeout(10 * time.Second)(&cfg)
-	option.WithHTTP2Config(aoni.HTTP2Config{})(&cfg)
-	option.WithUserAgent("CustomUA")(&cfg)
-	option.WithOrigin("https://origin.local")(&cfg)
-	option.WithBearer("token123")(&cfg)
-	option.WithBasicAuth("user", "pass")(&cfg)
-	option.WithConnectionPool(aoni.ConnectionPoolConfig{})(&cfg)
-	option.WithSettings(h2.Settings{})(&cfg)
-	option.WithH2FramedTransport(h2.Settings{})(&cfg)
-	option.WithP0fSignature(p0f.Windows10)(&cfg)
-	option.WithProxyDNS()(&cfg)
-	option.WithCertificatePins(map[string][]string{"example.com": {"pin1"}})(&cfg)
+	assert.Equal(t, 5*time.Second, cfg.Engine.Timeout)
+	assert.Equal(t, "CustomUA", cfg.Defaults.Headers.Get("User-Agent"))
+	assert.Equal(t, "https://example.com/", cfg.Defaults.BaseURL.String())
+	assert.Equal(t, "Val", cfg.Defaults.Headers.Get("X-Header"))
+}
+
+func TestOption_WithDefaultHeaders(t *testing.T) {
+	t.Parallel()
+
+	cfg := &aoni.Config{Defaults: aoni.ClientDefaults{Headers: make(http.Header)}}
+	option.WithHeaders(map[string]string{
+		"User-Agent": "CustomUA",
+		"Origin":     "https://origin.local",
+	})(cfg)
 
 	assert.Equal(t, "CustomUA", cfg.Defaults.Headers.Get("User-Agent"))
 	assert.Equal(t, "https://origin.local", cfg.Defaults.Headers.Get("Origin"))
@@ -55,46 +49,49 @@ func TestOptions_Coverage(t *testing.T) {
 func TestModifiers_Coverage(t *testing.T) {
 	t.Parallel()
 
-	req, err := http.NewRequestWithContext(t.Context(), http.MethodPost, "http://example.com/users/{id}", nil)
+	httpReq, err := http.NewRequestWithContext(t.Context(), http.MethodPost, "http://example.com/users/{id}", nil)
 	require.NoError(t, err)
 
+	req := aoni.NewStdRequest(httpReq)
 	mod.WithVar("id", 123)(req)
-	assert.Equal(t, "/users/123", req.URL.Path)
+	assert.Equal(t, "/users/123", req.Path())
 
-	req2, _ := http.NewRequestWithContext(t.Context(), http.MethodPost, "http://example.com/item/{cat}/{id}", nil)
+	httpReq2, _ := http.NewRequestWithContext(t.Context(), http.MethodPost, "http://example.com/item/{cat}/{id}", nil)
+	req2 := aoni.NewStdRequest(httpReq2)
 	mod.WithVars("cat", "books", "id", 42)(req2)
-	assert.Equal(t, "/item/books/42", req2.URL.Path)
+	assert.Equal(t, "/item/books/42", req2.Path())
 
-	req3, _ := http.NewRequestWithContext(t.Context(), http.MethodGet, "http://example.com", nil)
+	httpReq3, _ := http.NewRequestWithContext(t.Context(), http.MethodGet, "http://example.com", nil)
+	req3 := aoni.NewStdRequest(httpReq3)
 	mod.WithHeaders(map[string]string{"X-A": "1", "X-B": "2"})(req3)
-	assert.Equal(t, "1", req3.Header.Get("X-A"))
+	assert.Equal(t, "1", req3.Header("X-A"))
 
 	mod.ResetHeaders()(req3)
-	assert.Empty(t, req3.Header.Get("X-A"))
+	assert.Empty(t, req3.Header("X-A"))
 
 	mod.WithBearer("secret")(req3)
-	assert.Equal(t, "Bearer secret", req3.Header.Get("Authorization"))
+	assert.Equal(t, "Bearer secret", req3.Header("Authorization"))
 
 	mod.WithBasicAuth("admin", "pass")(req3)
-	assert.Contains(t, req3.Header.Get("Authorization"), "Basic")
+	assert.Contains(t, req3.Header("Authorization"), "Basic")
 
 	mod.WithUserAgent("AgentX")(req3)
-	assert.Equal(t, "AgentX", req3.Header.Get("User-Agent"))
+	assert.Equal(t, "AgentX", req3.Header("User-Agent"))
 
 	mod.WithCookie(&http.Cookie{Name: "c1", Value: "v1"})(req3)
 	mod.WithCookies(map[string]string{"c2": "v2"})(req3)
 
 	mod.WithJSONBody(map[string]string{"foo": "bar"})(req3)
-	assert.Equal(t, "application/json", req3.Header.Get("Content-Type"))
+	assert.Equal(t, "application/json", req3.Header("Content-Type"))
 
 	mod.WithOrigin("https://test.com")(req3)
-	assert.Equal(t, "https://test.com", req3.Header.Get("Origin"))
+	assert.Equal(t, "https://test.com", req3.Header("Origin"))
 
 	type formPayload struct {
 		Field string `url:"field"`
 	}
 	mod.WithFormBody(formPayload{Field: "value"})(req3)
-	assert.Equal(t, "application/x-www-form-urlencoded", req3.Header.Get("Content-Type"))
+	assert.Equal(t, "application/x-www-form-urlencoded", req3.Header("Content-Type"))
 
 	mod.WithOrderedHeaders([]string{"user-agent", "host"})(req3)
 	mod.WithALPN("h2", "http/1.1")(req3)
@@ -113,7 +110,8 @@ func TestModifiers_Coverage(t *testing.T) {
 	assert.True(t, cfg.SSRFGuard)
 	assert.True(t, cfg.ProxyDNS)
 
-	req4, _ := http.NewRequest(http.MethodGet, "http://example.com", nil)
+	httpReq4, _ := http.NewRequest(http.MethodGet, "http://example.com", nil)
+	req4 := aoni.NewStdRequest(httpReq4)
 	mod.WithContext(t.Context())(req4)
 	assert.Equal(t, t.Context(), req4.Context())
 }

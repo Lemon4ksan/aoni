@@ -1079,12 +1079,12 @@ func TestClient_SensitiveHeaderScrubbing(t *testing.T) {
 
 		client := aoni.NewClient(nil, option.WithRedirectLimit(3))
 
-		reqMod := func(req *http.Request) {
-			req.Header.Set("Authorization", "Bearer token123")
-			req.Header.Set("Cookie", "session=cookie123")
-			req.Header.Set("X-Session-ID", "sess123")
-			req.Header.Set("X-Access-Token", "tok123")
-			req.Header.Set("X-Safe-Header", "keep-me")
+		reqMod := func(req aoni.Request) {
+			req.SetHeader("Authorization", "Bearer token123")
+			req.SetHeader("Cookie", "session=cookie123")
+			req.SetHeader("X-Session-ID", "sess123")
+			req.SetHeader("X-Access-Token", "tok123")
+			req.SetHeader("X-Safe-Header", "keep-me")
 		}
 
 		resp, err := client.Request(t.Context(), http.MethodGet, origServer.URL, reqMod)
@@ -1172,13 +1172,13 @@ func TestClient_HostRewrite(t *testing.T) {
 	req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, "https://myapi.local/profile", nil)
 	require.NoError(t, err)
 
-	modifier(req)
+	modifier(aoni.NewStdRequest(req))
 
 	extracted := aoni.HostRewriteRules(req.Context())
 	assert.Equal(t, "127.0.0.1:8080", extracted["myapi.local"])
 
 	appendMod := mod.WithAppendHostRewrite(map[string]string{"another.local": "10.0.0.2"})
-	appendMod(req)
+	appendMod(aoni.NewStdRequest(req))
 
 	finalRules := aoni.HostRewriteRules(req.Context())
 	assert.Equal(t, "127.0.0.1:8080", finalRules["myapi.local"])
@@ -1197,7 +1197,7 @@ func TestClient_PacketPadding(t *testing.T) {
 	req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, "http://localhost", nil)
 	require.NoError(t, err)
 
-	mod.WithPadding(cfg)(req)
+	mod.WithPadding(cfg)(aoni.NewStdRequest(req))
 
 	headerVal := req.Header.Get("X-Custom-Padding")
 	require.NotEmpty(t, headerVal)
@@ -1589,7 +1589,7 @@ func TestWithClientBrowserProfile(t *testing.T) {
 
 		reqGet = client.InitRequestConfig(reqGet)
 		for _, defaultMod := range client.Defaults().DefaultMods {
-			defaultMod(reqGet)
+			defaultMod(aoni.NewStdRequest(reqGet))
 		}
 
 		assert.Contains(t, reqGet.Header.Get("Accept"), "text/html")
@@ -1603,7 +1603,7 @@ func TestWithClientBrowserProfile(t *testing.T) {
 
 		reqPost = client.InitRequestConfig(reqPost)
 		for _, defaultMod := range client.Defaults().DefaultMods {
-			defaultMod(reqPost)
+			defaultMod(aoni.NewStdRequest(reqPost))
 		}
 
 		assert.Equal(t, "*/*", reqPost.Header.Get("Accept"))
@@ -1617,11 +1617,11 @@ func TestWithClientBrowserProfile(t *testing.T) {
 
 		reqMultipart = client.InitRequestConfig(reqMultipart)
 		for _, defaultMod := range client.Defaults().DefaultMods {
-			defaultMod(reqMultipart)
+			defaultMod(aoni.NewStdRequest(reqMultipart))
 		}
 
 		modMultipart := mod.WithMultipart(map[string]string{"foo": "bar"}, nil)
-		modMultipart(reqMultipart)
+		modMultipart(aoni.NewStdRequest(reqMultipart))
 
 		contentType := reqMultipart.Header.Get("Content-Type")
 		assert.Contains(t, contentType, "multipart/form-data")
@@ -1677,7 +1677,7 @@ func TestWithClientProfileVariant_Custom(t *testing.T) {
 
 	req = client.InitRequestConfig(req)
 	for _, defaultMod := range client.Defaults().DefaultMods {
-		defaultMod(req)
+		defaultMod(aoni.NewStdRequest(req))
 	}
 
 	cfg := aoni.GetRequestConfig(req.Context())
@@ -1689,11 +1689,11 @@ func TestWithClientProfileVariant_Custom(t *testing.T) {
 
 	reqMultipart = client.InitRequestConfig(reqMultipart)
 	for _, defaultMod := range client.Defaults().DefaultMods {
-		defaultMod(reqMultipart)
+		defaultMod(aoni.NewStdRequest(reqMultipart))
 	}
 
 	modMultipart := mod.WithMultipart(map[string]string{"foo": "bar"}, nil)
-	modMultipart(reqMultipart)
+	modMultipart(aoni.NewStdRequest(reqMultipart))
 
 	contentType := reqMultipart.Header.Get("Content-Type")
 	assert.Contains(t, contentType, "multipart/form-data")
@@ -1712,7 +1712,7 @@ func TestWithClientTCPDelay(t *testing.T) {
 
 	reqGet = client.InitRequestConfig(reqGet)
 	for _, defaultMod := range client.Defaults().DefaultMods {
-		defaultMod(reqGet)
+		defaultMod(aoni.NewStdRequest(reqGet))
 	}
 
 	cfgGet := aoni.GetRequestConfig(reqGet.Context())
@@ -1725,10 +1725,10 @@ func TestWithClientTCPDelay(t *testing.T) {
 
 	reqOverride = client.InitRequestConfig(reqOverride)
 	for _, defaultMod := range client.Defaults().DefaultMods {
-		defaultMod(reqOverride)
+		defaultMod(aoni.NewStdRequest(reqOverride))
 	}
 
-	mod.WithTCPDelay(100*time.Millisecond, 200*time.Millisecond)(reqOverride)
+	mod.WithTCPDelay(100*time.Millisecond, 200*time.Millisecond)(aoni.NewStdRequest(reqOverride))
 
 	cfgOverride := aoni.GetRequestConfig(reqOverride.Context())
 	require.NotNil(t, cfgOverride)
@@ -1768,7 +1768,7 @@ func TestAsCurl_WithBody(t *testing.T) {
 	)
 	require.NoError(t, err)
 
-	mod.WithCurlDump()(req)
+	mod.WithCurlDump()(aoni.NewStdRequest(req))
 
 	resp, err := client.Engine().Do(req)
 	require.NoError(t, err)

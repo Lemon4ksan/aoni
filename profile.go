@@ -86,21 +86,23 @@ func ApplyHTTPVariantToConfig(cfg *Config, variant *profiles.Variant, os profile
 
 // ApplyProfileHeaders populates the target outgoing request with browser-grade headers,
 // boundary lines, and frame order sequences matching the profile variant.
-func ApplyProfileHeaders(req *http.Request, variant *profiles.Variant, os profiles.OSKey) {
+func ApplyProfileHeaders(req Request, variant *profiles.Variant, os profiles.OSKey) {
 	headersMap := make(map[string]string)
-	for k, v := range req.Header {
-		if len(v) > 0 {
-			headersMap[k] = v[0]
+	if stdReq := req.HTTPRequest(); stdReq != nil {
+		for k, v := range stdReq.Header {
+			if len(v) > 0 {
+				headersMap[k] = v[0]
+			}
 		}
 	}
 
 	if variant.InsertHeaders != nil {
-		variant.InsertHeaders(headersMap, req.Method)
+		variant.InsertHeaders(headersMap, req.Method())
 	}
 
 	for k, v := range headersMap {
-		if v != "" && req.Header.Get(k) == "" {
-			req.Header.Set(k, v)
+		if v != "" && req.Header(k) == "" {
+			req.SetHeader(k, v)
 		}
 	}
 
@@ -114,10 +116,10 @@ func ApplyProfileHeaders(req *http.Request, variant *profiles.Variant, os profil
 	}
 }
 
-func setOrderedHeaders(req *http.Request, variant *profiles.Variant, os profiles.OSKey) {
+func setOrderedHeaders(req Request, variant *profiles.Variant, os profiles.OSKey) {
 	enums := variant.HeaderCache.Enums(os.IsMobile())
 
-	methodOrder, ok := enums[req.Method]
+	methodOrder, ok := enums[req.Method()]
 	if !ok {
 		methodOrder = enums["GET"]
 	}

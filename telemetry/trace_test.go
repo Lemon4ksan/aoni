@@ -97,7 +97,7 @@ func TestTraceJA4(t *testing.T) {
 		var traceInfo telemetry.TraceInfo
 
 		mod := mod.WithTraceJA4(&traceInfo)
-		mod(req)
+		mod(aoni.NewStdRequest(req))
 
 		require.NotNil(t, traceInfo.JA4)
 		assert.NotEmpty(t, traceInfo.JA4.JA4H)
