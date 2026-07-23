@@ -11,7 +11,6 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"encoding/hex"
-	"fmt"
 	"io"
 	"log/slog"
 	"math/rand/v2"
@@ -27,11 +26,21 @@ import (
 	"github.com/lemon4ksan/aoni/internal/bytesconv"
 )
 
-// GenerateCorrelationID creates a fast, monotonic, and collision-resistant 16-character Base36 string ID.
-// Uses microsecond timestamp precision multiplied to isolate random entropy bits under concurrency.
+// GenerateCorrelationID generates a fast, monotonic Base36 correlation ID without heap allocations.
 func GenerateCorrelationID() string {
 	timestamp := uint64(time.Now().UnixMicro())*1000 + uint64(rand.Int64N(1000)) //nolint:gosec
-	return strings.ToUpper(strconv.FormatUint(timestamp, 36))
+
+	var buf [32]byte
+
+	b := strconv.AppendUint(buf[:0], timestamp, 36)
+
+	for i := range b {
+		if b[i] >= 'a' && b[i] <= 'z' {
+			b[i] -= 'a' - 'A'
+		}
+	}
+
+	return bytesconv.B2S(b)
 }
 
 // TraceInfo records network layer execution timings, metrics, and TLS/HTTP fingerprints for a request.
@@ -174,19 +183,6 @@ func (c *CertSummary) LogValue() slog.Value {
 	)
 }
 
-// TruncateBody safely limits body payload output length to maxBytes to prevent console/log spam.
-func TruncateBody(body []byte, maxBytes int) string {
-	if maxBytes <= 0 {
-		maxBytes = 4096 // Default 4 KB debug limit
-	}
-
-	if len(body) <= maxBytes {
-		return string(body)
-	}
-
-	return fmt.Sprintf("%s... [truncated %d bytes]", string(body[:maxBytes]), len(body)-maxBytes)
-}
-
 // CertSummary extracts and returns structured details for the peer certificate.
 func (t *TraceInfo) CertSummary() *CertSummary {
 	cert := t.PeerCertificate()
@@ -296,6 +292,31 @@ func ComputeJA4HFromRequest(req *http.Request) string {
 		cookieNames,
 		cookieValues,
 	)
+}
+
+// TruncateBody limits output payload representation to maxBytes without unnecessary buffer copying.
+func TruncateBody(body []byte, maxBytes int) string {
+	limit := maxBytes
+	if limit <= 0 {
+		limit = 4096
+	}
+
+	if len(body) <= limit {
+		return bytesconv.B2S(body)
+	}
+
+	var numBuf [20]byte
+
+	truncatedBytes := strconv.AppendInt(numBuf[:0], int64(len(body)-limit), 10)
+
+	var sb strings.Builder
+	sb.Grow(limit + 32 + len(truncatedBytes))
+	sb.WriteString(bytesconv.B2S(body[:limit]))
+	sb.WriteString("... [truncated ")
+	sb.Write(truncatedBytes)
+	sb.WriteString(" bytes]")
+
+	return sb.String()
 }
 
 // IsStreamingResponse detects whether an HTTP response represents a real-time stream

@@ -1,8 +1,8 @@
 // Copyright (c) 2026 Lemon4ksan All rights reserved.
 // Use of this source code is governed by a BSD-style
-// license that can be found in the LICENSE file.
+// license can be found in the LICENSE file.
 
-// Package cookie provides proxy-isolated cookie management, session persistence, and transport decoration.
+// Package cookie provides proxy-isolated cookie management, persistence, and transport decoration.
 package cookie
 
 import (
@@ -13,20 +13,22 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/lemon4ksan/aoni/internal/bytesconv"
 )
 
 // Cookie represents a browser cookie structure formatted for JSON persistence and external automation tools.
 type Cookie struct {
+	Expires  time.Time `json:"expires"`
 	Name     string    `json:"name"`
 	Value    string    `json:"value"`
 	Domain   string    `json:"domain"`
 	Path     string    `json:"path"`
-	Expires  time.Time `json:"expires"`
 	HTTPOnly bool      `json:"httpOnly"`
 	Secure   bool      `json:"secure"`
 }
 
-// Mirror copies matching cookies from sourceURL to each targetURL within jar.
+// Mirror copies matching cookies from sourceURL to each targetURL in jar.
 func Mirror(jar http.CookieJar, sourceURL *url.URL, targetURLs []*url.URL, cookieNames ...string) {
 	if jar == nil || sourceURL == nil || len(targetURLs) == 0 || len(cookieNames) == 0 {
 		return
@@ -55,8 +57,7 @@ func Mirror(jar http.CookieJar, sourceURL *url.URL, targetURLs []*url.URL, cooki
 	}
 }
 
-// SortForBrowser sorts cookies according to RFC 6265 Section 5.4:
-// longest path first, followed by creation order.
+// SortForBrowser sorts cookies according to RFC 6265 Section 5.4 (longest path first).
 func SortForBrowser(cookies []*http.Cookie) {
 	if len(cookies) <= 1 {
 		return
@@ -67,20 +68,21 @@ func SortForBrowser(cookies []*http.Cookie) {
 	})
 }
 
-// BuildCookieHeader constructs a single RFC-compliant "name1=val1; name2=val2" string
-// using strings.Builder to minimize heap allocations.
+// BuildCookieHeader constructs an RFC 6265 compliant 'Cookie' header string.
+//
+// Sorts cookies according to path length precedence without mutating the original slice.
 func BuildCookieHeader(cookies []*http.Cookie) string {
 	if len(cookies) == 0 {
 		return ""
 	}
 
-	SortForBrowser(cookies)
+	sorted := slices.Clone(cookies)
+	SortForBrowser(sorted)
 
 	var sb strings.Builder
-	// Preallocate estimated capacity (~32 bytes per cookie entry)
-	sb.Grow(len(cookies) * 32)
+	sb.Grow(len(sorted) * 36)
 
-	for i, c := range cookies {
+	for i, c := range sorted {
 		if i > 0 {
 			sb.WriteString("; ")
 		}
@@ -93,7 +95,7 @@ func BuildCookieHeader(cookies []*http.Cookie) string {
 	return sb.String()
 }
 
-// ExportNetscape exports cookies formatted as standard Netscape HTTP Cookie File (cookies.txt).
+// ExportNetscape exports cookies formatted as a standard Netscape HTTP Cookie File (cookies.txt).
 func ExportNetscape(jar http.CookieJar, u *url.URL) string {
 	if jar == nil || u == nil {
 		return ""
@@ -105,7 +107,10 @@ func ExportNetscape(jar http.CookieJar, u *url.URL) string {
 	}
 
 	var sb strings.Builder
+	sb.Grow(len(cookies) * 80)
 	sb.WriteString("# Netscape HTTP Cookie File\n\n")
+
+	var numBuf [20]byte
 
 	for _, c := range cookies {
 		domain := c.Domain
@@ -114,7 +119,7 @@ func ExportNetscape(jar http.CookieJar, u *url.URL) string {
 		}
 
 		includeSubdomains := "FALSE"
-		if strings.HasPrefix(domain, ".") {
+		if len(domain) > 0 && domain[0] == '.' {
 			includeSubdomains = "TRUE"
 		}
 
@@ -130,7 +135,8 @@ func ExportNetscape(jar http.CookieJar, u *url.URL) string {
 
 		expires := "0"
 		if !c.Expires.IsZero() {
-			expires = strconv.FormatInt(c.Expires.Unix(), 10)
+			b := strconv.AppendInt(numBuf[:0], c.Expires.Unix(), 10)
+			expires = bytesconv.B2S(b)
 		}
 
 		sb.WriteString(domain)
@@ -152,7 +158,7 @@ func ExportNetscape(jar http.CookieJar, u *url.URL) string {
 	return sb.String()
 }
 
-// Export retrieves cookies for u from jar and converts them to a slice of Cookie structs.
+// Export converts cookies for u from jar into exported [Cookie] structures.
 func Export(jar http.CookieJar, u *url.URL) []Cookie {
 	if jar == nil || u == nil {
 		return nil
@@ -179,7 +185,7 @@ func Export(jar http.CookieJar, u *url.URL) []Cookie {
 	return exported
 }
 
-// ExportJSON serializes exported cookies for u into a JSON formatted string.
+// ExportJSON serializes exported cookies for u into a JSON string.
 func ExportJSON(jar http.CookieJar, u *url.URL) (string, error) {
 	exported := Export(jar, u)
 	if len(exported) == 0 {
@@ -191,10 +197,10 @@ func ExportJSON(jar http.CookieJar, u *url.URL) (string, error) {
 		return "", err
 	}
 
-	return string(b), nil
+	return bytesconv.B2S(b), nil
 }
 
-// Import injects a slice of Cookie structs into jar for target u.
+// Import injects a slice of exported [Cookie] structs into jar for destination u.
 func Import(jar http.CookieJar, u *url.URL, cookies []Cookie) {
 	if jar == nil || u == nil || len(cookies) == 0 {
 		return
@@ -216,14 +222,14 @@ func Import(jar http.CookieJar, u *url.URL, cookies []Cookie) {
 	jar.SetCookies(u, httpCookies)
 }
 
-// ImportJSON deserializes a JSON string of cookies and imports them into jar for target u.
+// ImportJSON deserializes a JSON cookie payload and imports it into jar for target u.
 func ImportJSON(jar http.CookieJar, u *url.URL, jsonStr string) error {
 	if jar == nil || u == nil || jsonStr == "" || jsonStr == "[]" {
 		return nil
 	}
 
 	var cookies []Cookie
-	if err := json.Unmarshal([]byte(jsonStr), &cookies); err != nil {
+	if err := json.Unmarshal(bytesconv.S2B(jsonStr), &cookies); err != nil {
 		return err
 	}
 

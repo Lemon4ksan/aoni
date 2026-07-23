@@ -1,20 +1,21 @@
 // Copyright (c) 2026 Lemon4ksan All rights reserved.
 // Use of this source code is governed by a BSD-style
-// license that can be found in the LICENSE file.
+// license can be found in the LICENSE file.
 
 package cookie
 
-import "net/http"
+import (
+	"net/http"
+	"strings"
+)
 
-// Transport intercepts HTTP round-trips to automatically inject and extract cookies
-// in a [ProxyIsolatedJar] based on the request's active proxy context.
+// Transport intercepts HTTP transactions to manage proxy-isolated cookies.
 type Transport struct {
 	Next      http.RoundTripper
 	CookieJar *ProxyIsolatedJar
 }
 
-// RoundTrip injects isolated proxy cookies with browser-compliant RFC 6265 ordering
-// into outgoing request headers and stores response cookies back into the proxy jar.
+// RoundTrip injects isolated proxy cookies into outbound headers and captures response set-cookie headers.
 func (t *Transport) RoundTrip(req *http.Request) (*http.Response, error) {
 	next := t.Next
 	if next == nil {
@@ -58,14 +59,21 @@ func (t *Transport) setCookies(req *http.Request) {
 		return
 	}
 
-	if existing := req.Header.Get("Cookie"); existing != "" {
-		req.Header.Set("Cookie", existing+"; "+cookieHeader)
-	} else {
+	existing := req.Header.Get("Cookie")
+	if existing == "" {
 		req.Header.Set("Cookie", cookieHeader)
+		return
 	}
+
+	var sb strings.Builder
+	sb.Grow(len(existing) + 2 + len(cookieHeader))
+	sb.WriteString(existing)
+	sb.WriteString("; ")
+	sb.WriteString(cookieHeader)
+
+	req.Header.Set("Cookie", sb.String())
 }
 
-// Unwrap returns the underlying [http.RoundTripper] for transport wrapper chaining.
 func (t *Transport) Unwrap() http.RoundTripper {
 	if t.Next != nil {
 		return t.Next

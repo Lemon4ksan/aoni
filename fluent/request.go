@@ -30,13 +30,6 @@ import (
 	"github.com/lemon4ksan/aoni/telemetry"
 )
 
-var bytePool = sync.Pool{
-	New: func() any {
-		b := make([]byte, 32*1024)
-		return &b
-	},
-}
-
 // TypedRequestPool provides a zero-boxing free list for *Request instances.
 type TypedRequestPool struct {
 	mu    sync.Mutex

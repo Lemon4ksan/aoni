@@ -27,19 +27,11 @@ import (
 	"github.com/lemon4ksan/aoni/mod"
 )
 
-var (
-	bytePool = sync.Pool{
-		New: func() any {
-			b := make([]byte, 32*1024)
-			return &b
-		},
-	}
-	bufferPool = sync.Pool{
-		New: func() any {
-			return new(bytes.Buffer)
-		},
-	}
-)
+var bufferPool = sync.Pool{
+	New: func() any {
+		return new(bytes.Buffer)
+	},
+}
 
 // RawDecoder reads the entire response stream directly into a byte slice (*[]byte).
 var RawDecoder Decoder = rawDecoder{}

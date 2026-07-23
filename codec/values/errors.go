@@ -1,16 +1,17 @@
 // Copyright (c) 2026 Lemon4ksan All rights reserved.
 // Use of this source code is governed by a BSD-style
-// license that can be found in the LICENSE file.
+// license can be found in the LICENSE file.
 
 package values
 
 import (
 	"errors"
 	"strconv"
+	"strings"
 )
 
 var (
-	// ErrUnsupportedType is returned when a value or field type cannot be encoded into URL parameters.
+	// ErrUnsupportedType is returned when a type cannot be encoded into URL parameters.
 	ErrUnsupportedType = errors.New("aoni values: unsupported type for encoding")
 
 	// ErrInvalidFormat is returned when a raw string representation fails parsing into a structured type.
@@ -19,10 +20,10 @@ var (
 
 // ValueError describes an error encountered during structure reflection or value marshaling.
 type ValueError struct {
-	Type  string // Type name for scalar unmarshaling errors (e.g. "Uint64String")
-	Field string // Field name in struct schema
-	Index int    // Slice element index (-1 if scalar)
-	Err   error  // Underlying cause
+	Err   error
+	Type  string
+	Field string
+	Index int
 }
 
 func (e *ValueError) Error() string {
@@ -30,19 +31,39 @@ func (e *ValueError) Error() string {
 		return "<nil>"
 	}
 
+	var sb strings.Builder
+	sb.Grow(64)
+	sb.WriteString("aoni values: ")
+
 	if e.Field != "" {
+		sb.WriteString("field ")
+		sb.WriteString(e.Field)
+
 		if e.Index >= 0 {
-			return "aoni values: field " + e.Field + "[" + strconv.Itoa(e.Index) + "]: " + e.Err.Error()
+			var numBuf [12]byte
+
+			sb.WriteByte('[')
+			sb.Write(strconv.AppendInt(numBuf[:0], int64(e.Index), 10))
+			sb.WriteByte(']')
 		}
 
-		return "aoni values: field " + e.Field + ": " + e.Err.Error()
+		sb.WriteString(": ")
+		sb.WriteString(e.Err.Error())
+
+		return sb.String()
 	}
 
 	if e.Type != "" {
-		return "aoni values: " + e.Type + ": " + e.Err.Error()
+		sb.WriteString(e.Type)
+		sb.WriteString(": ")
+		sb.WriteString(e.Err.Error())
+
+		return sb.String()
 	}
 
-	return "aoni values: " + e.Err.Error()
+	sb.WriteString(e.Err.Error())
+
+	return sb.String()
 }
 
 func (e *ValueError) Unwrap() error { return e.Err }

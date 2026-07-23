@@ -1,6 +1,6 @@
 // Copyright (c) 2026 Lemon4ksan All rights reserved.
 // Use of this source code is governed by a BSD-style
-// license that can be found in the LICENSE file.
+// license can be found in the LICENSE file.
 
 package aoni
 
@@ -9,46 +9,45 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/lemon4ksan/aoni/internal/bytesconv"
 	"github.com/lemon4ksan/aoni/internal/io"
 )
 
 var (
-	// ErrResponseTooLarge indicates the response exceeded the size
-	// limit configured via [option.WithMaxResponseSize].
+	// ErrUnexpectedContentType indicates that the response Content-Type violates target expectations.
+	ErrUnexpectedContentType = errors.New("aoni: unexpected content-type (possible captive portal or intercept)")
+
+	// ErrResponseTooLarge indicates that response payload length exceeded configured bounds.
 	ErrResponseTooLarge = io.ErrResponseTooLarge
 
-	// ErrBufferLimitExceeded indicates the replayable buffer exceeded its memory threshold,
-	// and disk caching was disabled.
+	// ErrBufferLimitExceeded indicates replayable buffer size exceeded memory threshold without disk backing.
 	ErrBufferLimitExceeded = io.ErrBufferLimitExceeded
 
-	// ErrSSRFBlocked indicates the request was blocked because the
-	// target resolved to a private or loopback address. Returned by
-	// [Client.Request] when [option.WithSSRFGuard] is enabled.
+	// ErrSSRFBlocked indicates that request destination resolved to a restricted loopback or private IP.
 	ErrSSRFBlocked = errors.New("aoni: request blocked by SSRF guard")
 
-	// ErrCertificatePinning indicates the TLS handshake failed because
-	// none of the peer certificates matched the configured public key pins.
+	// ErrCertificatePinning indicates that TLS peer certificate hash failed pin matching.
 	ErrCertificatePinning = errors.New("aoni: certificate pinning validation failed")
 
-	// ErrNoCertificatesPresented is returned when a peer TLS handshake presents zero certificates.
+	// ErrNoCertificatesPresented is returned when a TLS handshake yields empty peer certificate chains.
 	ErrNoCertificatesPresented = errors.New("aoni: no certificates presented by peer")
 
-	// ErrInvalidPinFormat is returned when a certificate public key pin hash cannot be decoded.
+	// ErrInvalidPinFormat indicates an unparseable certificate public key pin hash format.
 	ErrInvalidPinFormat = errors.New("aoni: invalid pin format: must be 32-byte sha256 hash in base64 or hex")
 
-	// ErrEmptyDNSProxy is returned by dialers if proxy dns is enabled but the proxy address is empty.
+	// ErrEmptyDNSProxy is returned when proxy DNS is enabled but proxy target URL is empty.
 	ErrEmptyDNSProxy = errors.New("aoni: proxy DNS enabled but proxy address is empty")
 
-	// ErrRedirectDomainForbidden is returned when a redirect domain is not allowed.
+	// ErrRedirectDomainForbidden is returned when a redirect target hostname is excluded by policy.
 	ErrRedirectDomainForbidden = errors.New("aoni: redirect domain not allowed")
 )
 
-// Error represents a structured operation error in the aoni package.
+// Error describes a structured operational failure in the aoni package.
 type Error struct {
+	Err    error
 	Op     string
 	Path   string
 	Target string
-	Err    error
 }
 
 func (e *Error) Error() string {
@@ -56,82 +55,113 @@ func (e *Error) Error() string {
 		return "<nil>"
 	}
 
-	msg := "aoni: "
+	var sb strings.Builder
+	sb.Grow(len(e.Op) + len(e.Target) + len(e.Path) + 32)
+	sb.WriteString("aoni: ")
+
 	if e.Op != "" {
-		msg += e.Op + ": "
+		sb.WriteString(e.Op)
+		sb.WriteString(": ")
 	}
 
 	if e.Target != "" {
-		msg += e.Target + ": "
+		sb.WriteString(e.Target)
+		sb.WriteString(": ")
 	}
 
 	if e.Path != "" {
-		msg += e.Path + ": "
+		sb.WriteString(e.Path)
+		sb.WriteString(": ")
 	}
 
 	if e.Err != nil {
-		msg += e.Err.Error()
+		sb.WriteString(e.Err.Error())
 	}
 
-	return msg
+	return sb.String()
 }
 
 func (e *Error) Unwrap() error { return e.Err }
 
-// APIError wraps a non-2xx HTTP response. StatusCode holds the
-// status code, Body holds the raw response, and Model holds the
-// deserialized error structure when [WithErrorModel] was used.
-// Inspect with [errors.As].
+// APIError describes an HTTP response status failure (>= 400).
 type APIError struct {
-	StatusCode int
-	Body       []byte
 	Model      any
+	Body       []byte
+	StatusCode int
 }
 
-// Error returns a human-readable representation of e.
 func (e *APIError) Error() string {
-	statusStr := strconv.Itoa(e.StatusCode)
-	if len(e.Body) > 0 {
-		limit := min(len(e.Body), 128)
-		cleanBody := strings.ReplaceAll(string(e.Body[:limit]), "\n", " ")
-		return "aoni: status " + statusStr + " (body: " + cleanBody + ")"
+	if e == nil {
+		return "<nil>"
 	}
 
-	return "aoni: status " + statusStr
+	var numBuf [10]byte
+
+	statusBytes := strconv.AppendInt(numBuf[:0], int64(e.StatusCode), 10)
+
+	if len(e.Body) == 0 {
+		return "aoni: status " + bytesconv.B2S(statusBytes)
+	}
+
+	limit := min(len(e.Body), 128)
+	bodySlice := e.Body[:limit]
+
+	var sb strings.Builder
+	sb.Grow(32 + len(bodySlice))
+	sb.WriteString("aoni: status ")
+	sb.Write(statusBytes)
+	sb.WriteString(" (body: ")
+
+	for _, b := range bodySlice {
+		if b == '\n' || b == '\r' {
+			sb.WriteByte(' ')
+		} else {
+			sb.WriteByte(b)
+		}
+	}
+
+	sb.WriteByte(')')
+
+	return sb.String()
 }
 
-// ValidationError reports that a required field was missing or
-// invalid during request validation. Inspect with [errors.As] to
-// access Field.
+// ValidationError reports that a required field failed schema validation.
 type ValidationError struct {
 	Field string
 }
 
-// Error returns a human-readable description of the validation failure.
 func (e *ValidationError) Error() string {
 	return "aoni: missing required field: " + e.Field
 }
 
-// BridgeError represents an error occurring during standard-client bridging.
-// It implements the standard error interface and can be unwrapped to retrieve
-// the underlying client or transport errors.
+// BridgeError describes an execution failure during stdlib [http.Client] bridging.
 type BridgeError struct {
-	Op       string
-	URL      string
 	Err      error
 	Metadata map[string]any
+	Op       string
+	URL      string
 }
 
-// Error implements the standard error interface.
 func (e *BridgeError) Error() string {
-	if e.Err != nil {
-		return "aoni bridge: " + e.Op + " " + e.URL + ": " + e.Err.Error()
+	if e == nil {
+		return "<nil>"
 	}
 
-	return "aoni bridge: " + e.Op + " " + e.URL
+	var sb strings.Builder
+	sb.Grow(len(e.Op) + len(e.URL) + 32)
+	sb.WriteString("aoni bridge: ")
+	sb.WriteString(e.Op)
+	sb.WriteByte(' ')
+	sb.WriteString(e.URL)
+
+	if e.Err != nil {
+		sb.WriteString(": ")
+		sb.WriteString(e.Err.Error())
+	}
+
+	return sb.String()
 }
 
-// Unwrap returns the underlying wrapped error.
 func (e *BridgeError) Unwrap() error {
 	return e.Err
 }
