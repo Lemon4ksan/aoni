@@ -289,8 +289,8 @@ func WithHappyEyeballs(delay time.Duration) aoni.ClientOption {
 	}
 }
 
-// WithMultiReadBody sets the multi-read threshold in bytes.
-func WithMultiReadBody(threshold int64) aoni.ClientOption {
+// WithMultiReadBodyThreshold sets the multi-read threshold in bytes.
+func WithMultiReadBodyThreshold(threshold int64) aoni.ClientOption {
 	return func(cfg *aoni.Config) {
 		cfg.Defaults.MultiReadThreshold = threshold
 	}

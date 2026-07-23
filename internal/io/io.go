@@ -2,7 +2,7 @@
 // Use of this source code is governed by a BSD-style
 // license can be found in the LICENSE file.
 
-// Package io provides low-level streaming I/O wrappers and response body decorators.
+// Package io provides high-performance streaming I/O wrappers and response body decorators.
 package io
 
 import (
@@ -21,35 +21,64 @@ import (
 	"github.com/lemon4ksan/miyako/generic"
 )
 
-// ErrBufferLimitExceeded indicates the replayable buffer exceeded its memory threshold,
-// and disk caching was disabled.
-var ErrBufferLimitExceeded = errors.New("aoni: replayable buffer threshold exceeded")
+var (
+	// ErrBufferLimitExceeded indicates that replayable payload size exceeded the RAM threshold with disk caching disabled.
+	ErrBufferLimitExceeded = errors.New("aoni: replayable buffer threshold exceeded")
 
-// ErrResponseTooLarge indicates the response exceeded the size limit.
-var ErrResponseTooLarge = errors.New("aoni: response size limit exceeded")
+	// ErrResponseTooLarge indicates that response payload length exceeded configured max limits.
+	ErrResponseTooLarge = errors.New("aoni: response size limit exceeded")
+)
 
-// ProgressFunc is called periodically during response body reads.
-// current is the bytes read so far; total is the Content-Length
-// value or -1 if unknown.
+// ProgressFunc reports periodic stream transfer progress (current bytes and total Content-Length).
 type ProgressFunc func(current, total int64)
 
-// UnwrapBody unwraps the body of a response, following any decorator chain.
+var copyBufPool = sync.Pool{
+	New: func() any {
+		b := make([]byte, 32*1024)
+		return &b
+	},
+}
+
+// CopyZeroAlloc streams data from r to w using kernel-level zero-copy paths when available.
+//
+// If w or r satisfy [io.ReaderFrom] or [io.WriterTo] (such as *os.File or *net.TCPConn),
+// execution delegates to the OS kernel (e.g. sendfile/splice syscalls).
+// Otherwise, it recycles a 32KB buffer from an internal pool to eliminate heap allocations.
+func CopyZeroAlloc(w io.Writer, r io.Reader) (int64, error) {
+	if r == nil || w == nil {
+		return 0, nil
+	}
+
+	if rf, ok := w.(io.ReaderFrom); ok {
+		return rf.ReadFrom(r)
+	}
+
+	if wt, ok := r.(io.WriterTo); ok {
+		return wt.WriteTo(w)
+	}
+
+	bufPtr := copyBufPool.Get().(*[]byte)
+	defer copyBufPool.Put(bufPtr)
+
+	return io.CopyBuffer(w, r, *bufPtr)
+}
+
+// UnwrapBody unwraps nested response body decorators down to the innermost [io.Closer].
 func UnwrapBody(c io.Closer) io.Closer {
+	curr := c
 	for {
-		u, ok := c.(interface{ Unwrap() io.Closer })
+		u, ok := curr.(interface{ Unwrap() io.Closer })
 		if !ok {
 			break
 		}
 
-		c = u.Unwrap()
+		curr = u.Unwrap()
 	}
 
-	return c
+	return curr
 }
 
-// UnwrapTo traverses the decorator chain c and returns the first layer
-// that implements the generic type T, as well as true.
-// If no matching layer is found, returns the null value of T and false.
+// UnwrapTo traverses the decorator chain c and returns the first layer satisfying target type T.
 func UnwrapTo[T any](c io.Closer) (T, bool) {
 	curr := c
 	for {
@@ -68,9 +97,7 @@ func UnwrapTo[T any](c io.Closer) (T, bool) {
 	return generic.Zero[T](), false
 }
 
-// ReadAllString reads the entire content of a ReplayableBody as a string,
-// and automatically resets the body so it remains completely reusable.
-// This is a high-level helper for quick logging and assertions.
+// ReadAllString reads the full stream content into a string and resets the reader position.
 func ReadAllString(rb ReplayableBody) (string, error) {
 	if rb == nil {
 		return "", nil
@@ -86,8 +113,7 @@ func ReadAllString(rb ReplayableBody) (string, error) {
 	return string(b), nil
 }
 
-// ReadAllBytes reads the entire content of a ReplayableBody as a byte slice,
-// and automatically resets the body so it remains completely reusable.
+// ReadAllBytes reads the full stream content into a byte slice and resets the reader position.
 func ReadAllBytes(rb ReplayableBody) ([]byte, error) {
 	if rb == nil {
 		return nil, nil
@@ -103,17 +129,14 @@ func ReadAllBytes(rb ReplayableBody) ([]byte, error) {
 	return b, nil
 }
 
-// ExplicitBufferedBody wraps a response body where a prefix has been read and cached in memory.
-// It allows reading the prefix followed by the remaining stream.
+// ExplicitBufferedBody wraps a response stream carrying a pre-buffered prefix buffer.
 type ExplicitBufferedBody struct {
-	Prefix []byte
 	Stream io.ReadCloser
-
 	reader io.Reader
+	Prefix []byte
 }
 
-// Read reads from the prefix followed by the underlying response stream.
-func (e *ExplicitBufferedBody) Read(p []byte) (n int, err error) {
+func (e *ExplicitBufferedBody) Read(p []byte) (int, error) {
 	if e.reader == nil {
 		e.reader = io.MultiReader(bytes.NewReader(e.Prefix), e.Stream)
 	}
@@ -121,31 +144,28 @@ func (e *ExplicitBufferedBody) Read(p []byte) (n int, err error) {
 	return e.reader.Read(p)
 }
 
-// Close closes the underlying response stream.
+// Close closes the underlying stream.
 func (e *ExplicitBufferedBody) Close() error {
 	return e.Stream.Close()
 }
 
-// Rewind resets the internal reader so that the body can be read from the beginning again.
+// Rewind resets the reader to the beginning of the stream, including the buffered prefix.
 func (e *ExplicitBufferedBody) Rewind() {
 	e.reader = io.MultiReader(bytes.NewReader(e.Prefix), e.Stream)
 }
 
-// BufferedPrefix returns the pre-buffered byte prefix of the response body.
+// BufferedPrefix returns the buffered prefix bytes.
 func (e *ExplicitBufferedBody) BufferedPrefix() []byte {
 	return e.Prefix
 }
 
-// ReplayableBody represents a response stream that can be reset
-// to the beginning for re-reading (for example, after previewing or logging).
+// ReplayableBody defines a stream that can be rewinded back to position 0 for repeated reads.
 type ReplayableBody interface {
 	io.ReadCloser
 	Reset()
 }
 
-// AsReplayable turns any [io.ReadCloser] into a [ReplayableBody].
-// If there's already a high-performance buffer ([multiReadBody]) under the hood, it will return it.
-// If not, it will transparently create a lightweight in-memory buffer for repeated reading.
+// AsReplayable wraps rc into a [ReplayableBody] using active buffers or in-memory tee fallback.
 func AsReplayable(rc io.ReadCloser) ReplayableBody {
 	if rc == nil {
 		return nil
@@ -174,17 +194,16 @@ func AsReplayable(rc io.ReadCloser) ReplayableBody {
 	}
 }
 
-// ProgressReader wraps an [io.Reader] and calls a progress function as it reads.
+// ProgressReader invokes OnProgress callbacks as data is read from the stream.
 type ProgressReader struct {
 	io.Reader
-	Total      int64
 	OnProgress ProgressFunc
-
-	current int64
+	Total      int64
+	current    int64
 }
 
-func (pr *ProgressReader) Read(p []byte) (n int, err error) {
-	n, err = pr.Reader.Read(p)
+func (pr *ProgressReader) Read(p []byte) (int, error) {
+	n, err := pr.Reader.Read(p)
 	if n > 0 {
 		cur := atomic.AddInt64(&pr.current, int64(n))
 		pr.OnProgress(cur, pr.Total)
@@ -202,7 +221,7 @@ func (pr *ProgressReader) Close() error {
 	return nil
 }
 
-// ContextCancelingReadCloser wraps an [io.ReadCloser] and cancels a context when closed.
+// ContextCancelingReadCloser triggers context cancellation when closed.
 type ContextCancelingReadCloser struct {
 	io.ReadCloser
 	Cancel context.CancelFunc
@@ -212,12 +231,13 @@ type ContextCancelingReadCloser struct {
 func (c *ContextCancelingReadCloser) Close() error {
 	err := c.ReadCloser.Close()
 	c.Cancel()
+
 	return err
 }
 
 func (c *ContextCancelingReadCloser) Unwrap() io.Closer { return c.ReadCloser }
 
-// DecompressReadCloser wraps an [io.Reader] and an [io.Closer] for decompressing data.
+// DecompressReadCloser combines decompression streams with underlying resource closers.
 type DecompressReadCloser struct {
 	io.Reader
 	Closer io.Closer
@@ -245,8 +265,7 @@ var gzipReaderPool = sync.Pool{
 	},
 }
 
-// NewPooledGzipReader retrieves a *gzip.Reader from sync.Pool and resets it with r,
-// eliminating heap allocations (~64 KB per reader) during response decompression.
+// NewPooledGzipReader retrieves a reset *gzip.Reader from sync.Pool without allocations.
 func NewPooledGzipReader(r io.Reader) (io.ReadCloser, error) {
 	gr := gzipReaderPool.Get().(*gzip.Reader)
 	if err := gr.Reset(r); err != nil {
@@ -285,7 +304,7 @@ func (p *pooledGzipReadCloser) Unwrap() io.Closer {
 	return nil
 }
 
-// LimitCheckingReadCloser wraps an [io.ReadCloser] and checks the read limit.
+// LimitCheckingReadCloser caps maximum byte consumption and returns [ErrResponseTooLarge] on overflow.
 type LimitCheckingReadCloser struct {
 	io.ReadCloser
 	Limit int64
@@ -294,8 +313,8 @@ type LimitCheckingReadCloser struct {
 
 func (l *LimitCheckingReadCloser) Read(p []byte) (int, error) {
 	n, err := l.ReadCloser.Read(p)
-
 	l.read += int64(n)
+
 	if l.read > l.Limit {
 		return n, ErrResponseTooLarge
 	}
@@ -305,7 +324,7 @@ func (l *LimitCheckingReadCloser) Read(p []byte) (int, error) {
 
 func (l *LimitCheckingReadCloser) Unwrap() io.Closer { return l.ReadCloser }
 
-// ResponseBodyReadCloser wraps an [io.ReadCloser] for reading the response body.
+// ResponseBodyReadCloser manages response stream cleanup.
 type ResponseBodyReadCloser struct {
 	io.ReadCloser
 }
@@ -320,78 +339,89 @@ func (r *ResponseBodyReadCloser) Close() error {
 	return err
 }
 
-func (r *ResponseBodyReadCloser) Unwrap() io.Closer {
-	return r.ReadCloser
-}
+func (r *ResponseBodyReadCloser) Unwrap() io.Closer { return r.ReadCloser }
 
-// MultiReadBody wraps an [io.ReadCloser] to read data into memory or a temporary file.
+// MultiReadBody buffers payload streams in RAM or temp files for repeatable reads.
 type MultiReadBody struct {
-	data    []byte
 	tmpFile *os.File
 	reader  io.Reader
+	data    []byte
 	mu      sync.Mutex
 	closed  bool
 }
 
-// NewMultiReadBody returns a new [MultiReadBody] that wraps the given [io.ReadCloser].
+// NewMultiReadBody creates a [MultiReadBody] wrapping rc using RAM or disk buffers.
 func NewMultiReadBody(rc io.ReadCloser, threshold int64, disableDisk bool) (io.ReadCloser, error) {
+	if rc == nil {
+		return nil, nil
+	}
+
 	var buf bytes.Buffer
 
 	limitReader := io.LimitReader(rc, threshold+1)
 
-	_, err := io.Copy(&buf, limitReader)
-	if err != nil {
+	if _, err := CopyZeroAlloc(&buf, limitReader); err != nil {
 		_ = rc.Close()
 		return nil, err
 	}
 
-	m := &MultiReadBody{}
-
 	if int64(buf.Len()) <= threshold {
 		_ = rc.Close()
-		m.data = buf.Bytes()
-		m.reader = bytes.NewReader(m.data)
-	} else {
-		if disableDisk {
-			_ = rc.Close()
-			return nil, ErrBufferLimitExceeded
-		}
+		data := buf.Bytes()
 
-		tmpFile, err := os.CreateTemp("", "aoni-multiread-*")
-		if err != nil {
-			_ = rc.Close()
-			return nil, err
-		}
-
-		_, err = tmpFile.Write(buf.Bytes())
-		if err != nil {
-			_ = tmpFile.Close()
-			_ = os.Remove(tmpFile.Name())
-			_ = rc.Close()
-
-			return nil, err
-		}
-
-		_, err = io.Copy(tmpFile, rc)
-
-		_ = rc.Close()
-		if err != nil {
-			_ = tmpFile.Close()
-			_ = os.Remove(tmpFile.Name())
-			return nil, err
-		}
-
-		_, _ = tmpFile.Seek(0, io.SeekStart)
-		m.tmpFile = tmpFile
-		m.reader = tmpFile
+		return &MultiReadBody{
+			data:   data,
+			reader: bytes.NewReader(data),
+		}, nil
 	}
 
-	return m, nil
+	if disableDisk {
+		_ = rc.Close()
+		return nil, ErrBufferLimitExceeded
+	}
+
+	return createDiskBackedMultiReadBody(rc, buf.Bytes())
+}
+
+func createDiskBackedMultiReadBody(rc io.ReadCloser, initialBytes []byte) (io.ReadCloser, error) {
+	defer rc.Close()
+
+	tmpFile, err := os.CreateTemp("", "aoni-multiread-*")
+	if err != nil {
+		return nil, err
+	}
+
+	if _, err := tmpFile.Write(initialBytes); err != nil {
+		_ = tmpFile.Close()
+		_ = os.Remove(tmpFile.Name())
+
+		return nil, err
+	}
+
+	if _, err := CopyZeroAlloc(tmpFile, rc); err != nil {
+		_ = tmpFile.Close()
+		_ = os.Remove(tmpFile.Name())
+
+		return nil, err
+	}
+
+	if _, err := tmpFile.Seek(0, io.SeekStart); err != nil {
+		_ = tmpFile.Close()
+		_ = os.Remove(tmpFile.Name())
+
+		return nil, err
+	}
+
+	return &MultiReadBody{
+		tmpFile: tmpFile,
+		reader:  tmpFile,
+	}, nil
 }
 
 func (m *MultiReadBody) Read(p []byte) (int, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+
 	return m.reader.Read(p)
 }
 
@@ -441,8 +471,7 @@ func (m *MultiReadBody) ReallyClose() {
 	}
 }
 
-// FallbackReplayableBody wraps an [io.ReadCloser] and a buffer to allow
-// replaying buffered data before reading from the underlying ReadCloser.
+// FallbackReplayableBody provides tee-buffered replayable stream reads.
 type FallbackReplayableBody struct {
 	io.ReadCloser
 	buf    *bytes.Buffer
@@ -458,7 +487,7 @@ func (f *FallbackReplayableBody) Reset() {
 	f.reader = io.MultiReader(f.buf, f.ReadCloser)
 }
 
-// JitterReader wraps an [io.ReadCloser] and adds a fixed delay before each read.
+// JitterReader applies artificial delay prior to initial stream reads.
 type JitterReader struct {
 	io.ReadCloser
 	Delay time.Duration
@@ -473,8 +502,7 @@ func (r *JitterReader) Read(p []byte) (int, error) {
 	return r.ReadCloser.Read(p)
 }
 
-// BufferedConn wraps a net.Conn with a bufio.Reader so that leftover bytes
-// buffered during HTTP response parsing are returned before real network data.
+// BufferedConn wraps net.Conn with a buffered reader.
 type BufferedConn struct {
 	net.Conn
 	R *bufio.Reader

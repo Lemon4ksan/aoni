@@ -829,7 +829,7 @@ func TestClient_MultiReadBody(t *testing.T) {
 			})
 
 			client = client.With(
-				option.WithMultiReadBody(tt.threshold),
+				option.WithMultiReadBodyThreshold(tt.threshold),
 				option.WithMultiReadDisableDisk(tt.disableDisk),
 			)
 

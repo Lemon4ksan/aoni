@@ -3,11 +3,6 @@
 // license that can be found in the LICENSE file.
 
 // Package mod provides declarative request modifiers for customizing an [http.Request] prior to dispatch.
-//
-// RequestModifiers allow fine-grained, per-request customization without cloning or re-configuring
-// the executing [aoni.Client]. Modifiers store context-bound overrides (Context Accessors)
-// covering path variable substitution, query parameter encoding, custom headers, bearer tokens,
-// multipart form streaming, and TCP dial delays.
 package mod
 
 import (
@@ -18,7 +13,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
+	stdio "io"
 	"maps"
 	"mime/multipart"
 	"net/http"
@@ -35,6 +30,7 @@ import (
 	"github.com/lemon4ksan/aoni/fingerprint"
 	"github.com/lemon4ksan/aoni/fingerprint/ja4"
 	"github.com/lemon4ksan/aoni/fingerprint/p0f"
+	"github.com/lemon4ksan/aoni/internal/io"
 	"github.com/lemon4ksan/aoni/telemetry"
 )
 
@@ -55,7 +51,6 @@ func WithVar(key string, value any) aoni.RequestModifier {
 }
 
 // WithVars replaces multiple placeholder keys in the path with their respective values.
-// It accepts alternating key-value arguments.
 func WithVars(pairs ...any) aoni.RequestModifier {
 	return func(req *http.Request) {
 		if len(pairs)%2 != 0 {
@@ -70,7 +65,7 @@ func WithVars(pairs ...any) aoni.RequestModifier {
 	}
 }
 
-// WithQuery encodes a struct or map as URL query parameters and appends them to the request URL.
+// WithQuery encodes a struct or map as URL query parameters.
 func WithQuery(query any) aoni.RequestModifier {
 	return func(req *http.Request) {
 		if query == nil {
@@ -112,7 +107,7 @@ func WithHeaders(headers map[string]string) aoni.RequestModifier {
 	}
 }
 
-// ResetHeaders returns a modifier that clears all headers from the request.
+// ResetHeaders clears all headers from the request.
 func ResetHeaders() aoni.RequestModifier {
 	return func(req *http.Request) {
 		req.Header = make(http.Header)
@@ -171,11 +166,11 @@ func WithCookies(kv map[string]string) aoni.RequestModifier {
 }
 
 // WithBody replaces the request body stream with the provided reader.
-func WithBody(r io.Reader) aoni.RequestModifier {
+func WithBody(r stdio.Reader) aoni.RequestModifier {
 	return func(req *http.Request) {
-		rc, ok := r.(io.ReadCloser)
+		rc, ok := r.(stdio.ReadCloser)
 		if !ok && r != nil {
-			rc = io.NopCloser(r)
+			rc = stdio.NopCloser(r)
 		}
 
 		req.Body = rc
@@ -189,13 +184,13 @@ func WithBody(r io.Reader) aoni.RequestModifier {
 		}
 
 		if r != nil {
-			req.GetBody = func() (io.ReadCloser, error) {
-				if seeker, ok := r.(io.Seeker); ok {
-					if _, err := seeker.Seek(0, io.SeekStart); err != nil {
+			req.GetBody = func() (stdio.ReadCloser, error) {
+				if seeker, ok := r.(stdio.Seeker); ok {
+					if _, err := seeker.Seek(0, stdio.SeekStart); err != nil {
 						return nil, err
 					}
 
-					return io.NopCloser(r), nil
+					return stdio.NopCloser(r), nil
 				}
 
 				return nil, ErrBodyNotSeekable
@@ -213,18 +208,17 @@ func WithJSONBody(payload any) aoni.RequestModifier {
 			return
 		}
 
-		req.Body = io.NopCloser(bytes.NewReader(bodyBytes))
+		req.Body = stdio.NopCloser(bytes.NewReader(bodyBytes))
 		req.ContentLength = int64(len(bodyBytes))
 		req.Header.Set("Content-Type", "application/json")
 
-		req.GetBody = func() (io.ReadCloser, error) {
-			return io.NopCloser(bytes.NewReader(bodyBytes)), nil
+		req.GetBody = func() (stdio.ReadCloser, error) {
+			return stdio.NopCloser(bytes.NewReader(bodyBytes)), nil
 		}
 	}
 }
 
-// WithProtoBody serializes payload as a binary Protocol Buffer message,
-// assigns the request body, and sets Content-Type and Accept headers to application/x-protobuf.
+// WithProtoBody serializes payload as binary Protocol Buffer bytes.
 func WithProtoBody(msg proto.Message) aoni.RequestModifier {
 	return func(req *http.Request) {
 		if msg == nil {
@@ -237,19 +231,18 @@ func WithProtoBody(msg proto.Message) aoni.RequestModifier {
 			return
 		}
 
-		req.Body = io.NopCloser(bytes.NewReader(bodyBytes))
+		req.Body = stdio.NopCloser(bytes.NewReader(bodyBytes))
 		req.ContentLength = int64(len(bodyBytes))
 		req.Header.Set("Content-Type", "application/x-protobuf")
 		req.Header.Set("Accept", "application/x-protobuf")
 
-		req.GetBody = func() (io.ReadCloser, error) {
-			return io.NopCloser(bytes.NewReader(bodyBytes)), nil
+		req.GetBody = func() (stdio.ReadCloser, error) {
+			return stdio.NopCloser(bytes.NewReader(bodyBytes)), nil
 		}
 	}
 }
 
-// WithGRPCWebBody serializes payload as a gRPC-Web framed Protocol Buffer message (5-byte frame header),
-// assigns the request body, and applies standard gRPC-Web headers (Content-Type: application/grpc-web+proto).
+// WithGRPCWebBody serializes payload as gRPC-Web framed Protocol Buffer bytes.
 func WithGRPCWebBody(msg proto.Message) aoni.RequestModifier {
 	return func(req *http.Request) {
 		if msg == nil {
@@ -263,29 +256,31 @@ func WithGRPCWebBody(msg proto.Message) aoni.RequestModifier {
 		}
 
 		frame := make([]byte, 5+len(protoBytes))
-		frame[0] = 0x00                                                 // Data frame flag
+		frame[0] = 0x00
 		binary.BigEndian.PutUint32(frame[1:5], uint32(len(protoBytes))) //nolint:gosec
 		copy(frame[5:], protoBytes)
 
-		req.Body = io.NopCloser(bytes.NewReader(frame))
+		req.Body = stdio.NopCloser(bytes.NewReader(frame))
 		req.ContentLength = int64(len(frame))
 		req.Header.Set("Content-Type", "application/grpc-web+proto")
 		req.Header.Set("Accept", "application/grpc-web+proto")
 		req.Header.Set("X-Grpc-Web", "1")
 		req.Header.Set("X-User-Agent", "grpc-web-javascript/0.1")
 
-		req.GetBody = func() (io.ReadCloser, error) {
-			return io.NopCloser(bytes.NewReader(frame)), nil
+		req.GetBody = func() (stdio.ReadCloser, error) {
+			return stdio.NopCloser(bytes.NewReader(frame)), nil
 		}
 	}
 }
 
-// WithMultipart builds a multipart/form-data body from fields and files.
-func WithMultipart(fields map[string]string, files map[string]io.Reader) aoni.RequestModifier {
+// WithMultipart builds a multipart/form-data payload from form fields and stream readers.
+//
+// Streams files into the body buffer via [io.CopyZeroAlloc] to eliminate allocations.
+func WithMultipart(fields map[string]string, files map[string]stdio.Reader) aoni.RequestModifier {
 	return func(req *http.Request) {
 		body := &bytes.Buffer{}
-
 		writer := multipart.NewWriter(body)
+
 		if cfg := aoni.GetOrInitRequestConfig(req); cfg.MultipartBoundary != "" {
 			_ = writer.SetBoundary(cfg.MultipartBoundary)
 		}
@@ -304,10 +299,7 @@ func WithMultipart(fields map[string]string, files map[string]io.Reader) aoni.Re
 				return
 			}
 
-			buf := make([]byte, 32*1024)
-
-			_, err = io.CopyBuffer(part, r, buf)
-			if err != nil {
+			if _, err = io.CopyZeroAlloc(part, r); err != nil {
 				aoni.GetOrInitRequestConfig(req).BodyError = err
 				return
 			}
@@ -318,7 +310,7 @@ func WithMultipart(fields map[string]string, files map[string]io.Reader) aoni.Re
 			return
 		}
 
-		req.Body = io.NopCloser(body)
+		req.Body = stdio.NopCloser(body)
 		req.ContentLength = int64(body.Len())
 		req.Header.Set("Content-Type", writer.FormDataContentType())
 	}
@@ -331,33 +323,31 @@ func WithOrigin(origin string) aoni.RequestModifier {
 	}
 }
 
-// WithFormValues merges the provided url.Values into the request body as
-// application/x-www-form-urlencoded.
+// WithFormValues merges url.Values into the request body as form-urlencoded.
 func WithFormValues(values url.Values) aoni.RequestModifier {
 	return func(req *http.Request) {
 		encoded := values.Encode()
-		req.Body = io.NopCloser(strings.NewReader(encoded))
+		req.Body = stdio.NopCloser(strings.NewReader(encoded))
 		req.ContentLength = int64(len(encoded))
 		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 
-		req.GetBody = func() (io.ReadCloser, error) {
-			return io.NopCloser(strings.NewReader(encoded)), nil
+		req.GetBody = func() (stdio.ReadCloser, error) {
+			return stdio.NopCloser(strings.NewReader(encoded)), nil
 		}
 	}
 }
 
-// WithFormBody serializes payload as URL-encoded form values, sets the request
-// body, and adds a Content-Type: application/x-www-form-urlencoded header.
+// WithFormBody serializes payload as URL-encoded form values into the request body.
 func WithFormBody(payload any) aoni.RequestModifier {
 	return func(req *http.Request) {
 		if payload == nil {
 			return
 		}
 
-		if r, ok := payload.(io.Reader); ok {
-			rc, ok := r.(io.ReadCloser)
+		if r, ok := payload.(stdio.Reader); ok {
+			rc, ok := r.(stdio.ReadCloser)
 			if !ok {
-				rc = io.NopCloser(r)
+				rc = stdio.NopCloser(r)
 			}
 
 			req.Body = rc
@@ -371,32 +361,31 @@ func WithFormBody(payload any) aoni.RequestModifier {
 			encoder = cfg.QueryEncoder
 		}
 
-		values, err := encoder(payload)
+		vals, err := encoder(payload)
 		if err != nil {
 			aoni.GetOrInitRequestConfig(req).BodyError = err
 			return
 		}
 
-		encoded := values.Encode()
-		req.Body = io.NopCloser(strings.NewReader(encoded))
+		encoded := vals.Encode()
+		req.Body = stdio.NopCloser(strings.NewReader(encoded))
 		req.ContentLength = int64(len(encoded))
 		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 
-		req.GetBody = func() (io.ReadCloser, error) {
-			return io.NopCloser(strings.NewReader(encoded)), nil
+		req.GetBody = func() (stdio.ReadCloser, error) {
+			return stdio.NopCloser(strings.NewReader(encoded)), nil
 		}
 	}
 }
 
-// WithFallback returns a [RequestModifier] that registers f as the
-// fallback for this request. See [FallbackMiddleware].
+// WithFallback registers a request-level fallback response generator.
 func WithFallback(f aoni.FallbackFunc) aoni.RequestModifier {
 	return func(req *http.Request) {
 		aoni.GetOrInitRequestConfig(req).Fallback = f
 	}
 }
 
-// WithDebug tags the request for verbose debug logging.
+// WithDebug tags the request for verbose diagnostic logging.
 func WithDebug() aoni.RequestModifier {
 	return func(req *http.Request) {
 		aoni.GetOrInitRequestConfig(req).Debug = true
@@ -410,7 +399,7 @@ func WithDecoder(d any) aoni.RequestModifier {
 	}
 }
 
-// WithForceContentType overrides the response Content-Type header to force automatic response decoding.
+// WithForceContentType forces automatic response decoding using the specified MIME type.
 func WithForceContentType(mime string) aoni.RequestModifier {
 	return func(req *http.Request) {
 		aoni.GetOrInitRequestConfig(req).ForceContentType = mime
@@ -424,9 +413,7 @@ func WithErrorModel(model any) aoni.RequestModifier {
 	}
 }
 
-// WithUploadProgress wraps the request body with a [ProgressReader].
-// that calls onProgress during reads. The total parameter is
-// Content-Length or -1 when unknown.
+// WithUploadProgress wraps the request body to trigger progress callbacks during uploads.
 func WithUploadProgress(progress aoni.ProgressFunc) aoni.RequestModifier {
 	return func(req *http.Request) {
 		aoni.GetOrInitRequestConfig(req).UploadProgress = progress
@@ -440,7 +427,7 @@ func WithDownloadProgress(progress aoni.ProgressFunc) aoni.RequestModifier {
 	}
 }
 
-// WithCaptureResponse stores a pointer reference to capture the raw http.Response.
+// WithCaptureResponse captures a pointer reference to the raw http.Response.
 func WithCaptureResponse(target any) aoni.RequestModifier {
 	return func(req *http.Request) {
 		aoni.GetOrInitRequestConfig(req).Capturer = target
@@ -448,49 +435,49 @@ func WithCaptureResponse(target any) aoni.RequestModifier {
 }
 
 // WithCorrelationID assigns an end-to-end tracing Correlation ID to the request.
-// If id is empty, a fast unique hex ID is automatically generated.
 func WithCorrelationID(id string) aoni.RequestModifier {
-	if id == "" {
-		id = telemetry.GenerateCorrelationID()
+	activeID := id
+	if activeID == "" {
+		activeID = telemetry.GenerateCorrelationID()
 	}
 
 	return func(req *http.Request) {
 		cfg := aoni.GetOrInitRequestConfig(req)
 		if cfg.TraceInfo != nil {
-			cfg.TraceInfo.CorrelationID = id
+			cfg.TraceInfo.CorrelationID = activeID
 		}
 
-		req.Header.Set("X-Correlation-ID", id)
+		req.Header.Set("X-Correlation-ID", activeID)
 	}
 }
 
-// WithLabel attaches a human-readable route/metric label to the request for observability and tracing.
+// WithLabel attaches a route or metric label to the request.
 func WithLabel(label string) aoni.RequestModifier {
 	return func(req *http.Request) {
 		cfg := aoni.GetOrInitRequestConfig(req)
-
 		cfg.Label = label
+
 		if cfg.TraceInfo != nil {
 			cfg.TraceInfo.Label = label
 		}
 	}
 }
 
-// WithAllowNonReadOnlyHedging permits request hedging for non-idempotent HTTP methods (POST, PUT, DELETE, PATCH).
+// WithAllowNonReadOnlyHedging permits request hedging for non-idempotent HTTP methods.
 func WithAllowNonReadOnlyHedging(allow bool) aoni.RequestModifier {
 	return func(req *http.Request) {
 		aoni.GetOrInitRequestConfig(req).AllowNonReadOnlyHedging = allow
 	}
 }
 
-// WithOrderedHeaders sets header serialization order for HTTP/1.1.
+// WithOrderedHeaders sets HTTP/1.1 header wire serialization order.
 func WithOrderedHeaders(headers []string) aoni.RequestModifier {
 	return func(req *http.Request) {
 		aoni.GetOrInitRequestConfig(req).OrderedHeaders = headers
 	}
 }
 
-// WithALPN sets custom ALPN protocols for TLS.
+// WithALPN overrides negotiated ALPN protocols for TLS handshakes.
 func WithALPN(protos ...string) aoni.RequestModifier {
 	return func(req *http.Request) {
 		aoni.GetOrInitRequestConfig(req).ALPNOverride = protos
@@ -503,24 +490,25 @@ func escapeQuotes(s string) string {
 	return quoteEscaper.Replace(s)
 }
 
-func detectMIMEAndReader(r io.Reader) (string, io.Reader) {
+func detectMIMEAndReader(r stdio.Reader) (string, stdio.Reader) {
 	var buf [512]byte
 
-	n, err := io.ReadFull(r, buf[:])
+	n, err := stdio.ReadFull(r, buf[:])
 	if n > 0 {
 		contentType := http.DetectContentType(buf[:n])
-		reader := io.MultiReader(bytes.NewReader(buf[:n]), r)
+		reader := stdio.MultiReader(bytes.NewReader(buf[:n]), r)
+
 		return contentType, reader
 	}
 
-	if err != nil && !errors.Is(err, io.EOF) && !errors.Is(err, io.ErrUnexpectedEOF) {
+	if err != nil && !errors.Is(err, stdio.EOF) && !errors.Is(err, stdio.ErrUnexpectedEOF) {
 		return "application/octet-stream", r
 	}
 
 	return "application/octet-stream", r
 }
 
-func createFormFileHeader(w *multipart.Writer, fieldname, filename, contentType string) (io.Writer, error) {
+func createFormFileHeader(w *multipart.Writer, fieldname, filename, contentType string) (stdio.Writer, error) {
 	h := make(textproto.MIMEHeader)
 	h.Set("Content-Disposition",
 		fmt.Sprintf(`form-data; name="%s"; filename="%s"`, escapeQuotes(fieldname), escapeQuotes(filename)))
@@ -534,12 +522,10 @@ func createFormFileHeader(w *multipart.Writer, fieldname, filename, contentType 
 	return w.CreatePart(h)
 }
 
-// WithStreamingMultipart builds a multipart/form-data body using an
-// [io.Pipe] so that file data is streamed rather than buffered in memory.
-// Automatically performs 512-byte MIME sniffing and RFC 7578 quote escaping.
-func WithStreamingMultipart(fields map[string]string, files map[string]io.Reader) aoni.RequestModifier {
+// WithStreamingMultipart streams a multipart/form-data body via an [stdio.Pipe] using zero-copy transfers.
+func WithStreamingMultipart(fields map[string]string, files map[string]stdio.Reader) aoni.RequestModifier {
 	return func(req *http.Request) {
-		pr, pw := io.Pipe()
+		pr, pw := stdio.Pipe()
 
 		writer := multipart.NewWriter(pw)
 		if cfg := aoni.GetOrInitRequestConfig(req); cfg.MultipartBoundary != "" {
@@ -572,7 +558,7 @@ func WithStreamingMultipart(fields map[string]string, files map[string]io.Reader
 
 					part, err := createFormFileHeader(writer, key, key, contentType)
 					if err == nil {
-						_, _ = io.Copy(part, streamReader)
+						_, _ = io.CopyZeroAlloc(part, streamReader)
 					}
 				}
 			}
@@ -583,7 +569,7 @@ func WithStreamingMultipart(fields map[string]string, files map[string]io.Reader
 	}
 }
 
-// WithMultiReadThreshold sets the multi-read threshold in bytes for a single request.
+// WithMultiReadThreshold sets the multi-read RAM threshold in bytes for a single request.
 func WithMultiReadThreshold(threshold int64) aoni.RequestModifier {
 	return func(req *http.Request) {
 		aoni.GetOrInitRequestConfig(req).MultiReadThreshold = threshold
@@ -615,12 +601,13 @@ func WithInsecureSkipVerify() aoni.RequestModifier {
 
 // WithTCPDelay adds random jitter delay before TCP dial.
 func WithTCPDelay(min, max time.Duration) aoni.RequestModifier {
-	if min > max {
-		min, max = max, min
+	minDelay, maxDelay := min, max
+	if minDelay > maxDelay {
+		minDelay, maxDelay = maxDelay, minDelay
 	}
 
 	return func(req *http.Request) {
-		aoni.GetOrInitRequestConfig(req).TCPDelay = aoni.TCPDelayRange{Min: min, Max: max}
+		aoni.GetOrInitRequestConfig(req).TCPDelay = aoni.TCPDelayRange{Min: minDelay, Max: maxDelay}
 	}
 }
 
@@ -645,12 +632,13 @@ func WithCacheTTL(ttl time.Duration) aoni.RequestModifier {
 
 // WithRetryPolicy overrides retry logic for this request.
 func WithRetryPolicy(override aoni.RetryOverride) aoni.RequestModifier {
-	if override.MaxAttempts < 1 {
-		override.MaxAttempts = 1
+	policy := override
+	if policy.MaxAttempts < 1 {
+		policy.MaxAttempts = 1
 	}
 
 	return func(req *http.Request) {
-		aoni.GetOrInitRequestConfig(req).RetryPolicy = &override
+		aoni.GetOrInitRequestConfig(req).RetryPolicy = &policy
 	}
 }
 
@@ -689,7 +677,7 @@ func WithSessionCache(cache aoni.SessionCache) aoni.RequestModifier {
 	}
 }
 
-// WithCurlDump returns a [RequestModifier] that dumps the equivalent curl command to stderr.
+// WithCurlDump dumps the equivalent cURL command to stderr using zero-copy body buffering.
 func WithCurlDump() aoni.RequestModifier {
 	return func(req *http.Request) {
 		var body []byte
@@ -697,9 +685,9 @@ func WithCurlDump() aoni.RequestModifier {
 		if req.Body != nil && req.Body != http.NoBody {
 			var buf bytes.Buffer
 
-			_, _ = io.Copy(&buf, req.Body)
+			_, _ = io.CopyZeroAlloc(&buf, req.Body)
 			body = buf.Bytes()
-			req.Body = io.NopCloser(bytes.NewReader(body))
+			req.Body = stdio.NopCloser(bytes.NewReader(body))
 		}
 
 		curl := telemetry.CurlFromRequest(req, body)
@@ -707,9 +695,7 @@ func WithCurlDump() aoni.RequestModifier {
 	}
 }
 
-// WithPadding returns a [RequestModifier] that adds random packet padding
-// headers to the request matching the given [PaddingConfig].
-// This is a high-level helper to apply individual padding settings per request.
+// WithPadding adds random packet padding headers to the request.
 func WithPadding(cfg fingerprint.PaddingConfig) aoni.RequestModifier {
 	return func(req *http.Request) {
 		if padding := fingerprint.GeneratePadding(cfg); len(padding) > 0 {
@@ -719,35 +705,18 @@ func WithPadding(cfg fingerprint.PaddingConfig) aoni.RequestModifier {
 	}
 }
 
-// WithTrace returns a [RequestModifier] that registers a connection tracer on the active request.
-// Timing metrics are populated inside the provided [TraceInfo] structure.
+// WithTrace registers a connection tracer on the active request.
 func WithTrace(target *telemetry.TraceInfo) aoni.RequestModifier {
 	return func(req *http.Request) {
 		aoni.GetOrInitRequestConfig(req).TraceInfo = target
 	}
 }
 
-// WithTraceJA4 returns a [RequestModifier] that populates the JA4 field of the provided [TraceInfo].
-// It sets up a shared store in the request context so that [option.WithTLSFingerprint] can write
-// the TLS fingerprint during the handshake, and computes the HTTP fingerprint from request headers.
-//
-// The JA4 report is fully populated after the request completes. The TLS fingerprint (JA4)
-// requires [option.WithTLSFingerprint] to be enabled.
-//
-// Use this modifier alongside [WithTrace] for complete timing and fingerprint data:
-//
-//	info := &TraceInfo{}
-//	client.Get(ctx, "/path", Trace(info), WithTraceJA4(info))
-//	// After request: info.JA4 contains both JA4 and JA4H
+// WithTraceJA4 populates JA4/JA4H telemetry fields for the active request.
 func WithTraceJA4(target *telemetry.TraceInfo) aoni.RequestModifier {
 	return func(req *http.Request) {
-		// Allocate a store with a pointer to the target TraceInfo.
-		// dialTLSWithUTLS will write the TLS report to this store during the handshake.
-		// Client.Request will copy it to target after the request completes.
 		store := &aoni.JA4ReportStore{Target: target}
 		aoni.GetOrInitRequestConfig(req).JA4ReportStore = store
-
-		// Compute JA4H from request headers (available immediately)
 		target.JA4 = &ja4.Report{JA4H: telemetry.ComputeJA4HFromRequest(req)}
 	}
 }
@@ -773,9 +742,7 @@ func WithJA4Callback(fn func(ja4.Report)) aoni.RequestModifier {
 	}
 }
 
-// WithTraceContext returns a [RequestModifier] that attaches a new [TraceInfo]
-// to the request context. This allows developers to retrieve network
-// timing and JA4/JA4H fingerprints using [ResponseTrace] after the request finishes.
+// WithTraceContext attaches a new [telemetry.TraceInfo] container to the request context.
 func WithTraceContext() aoni.RequestModifier {
 	return func(req *http.Request) {
 		info := &telemetry.TraceInfo{}
@@ -784,7 +751,7 @@ func WithTraceContext() aoni.RequestModifier {
 	}
 }
 
-// WithFragmentation returns a RequestModifier that sets fragmentation configuration on the request context.
+// WithFragmentation sets packet fragmentation configuration.
 func WithFragmentation(cfg aoni.FragmentConfig) aoni.RequestModifier {
 	return func(req *http.Request) {
 		aoni.GetOrInitRequestConfig(req).Fragment = &cfg
@@ -798,8 +765,7 @@ func WithHostRewrite(rules map[string]string) aoni.RequestModifier {
 	}
 }
 
-// WithAppendHostRewrite returns a RequestModifier that appends new host rewrite rules to the existing
-// HostRewriteConfig in the request context, or creates a new one if none are present.
+// WithAppendHostRewrite appends new DNS rewrite rules to the existing request configuration.
 func WithAppendHostRewrite(rules map[string]string) aoni.RequestModifier {
 	return func(req *http.Request) {
 		cfg := aoni.GetOrInitRequestConfig(req)
@@ -810,14 +776,11 @@ func WithAppendHostRewrite(rules map[string]string) aoni.RequestModifier {
 		}
 
 		maps.Copy(newRules, rules)
-
 		cfg.HostRewrite = &aoni.HostRewriteConfig{Rules: newRules}
 	}
 }
 
-// WithResponseValidator attaches a validation function that is invoked by
-// [Client.Request] immediately after a successful HTTP round-trip, before the
-// response body is decoded.
+// WithResponseValidator attaches a response validation function.
 func WithResponseValidator(fn func(resp *http.Response) error) aoni.RequestModifier {
 	return func(req *http.Request) {
 		cfg := aoni.GetOrInitRequestConfig(req)
@@ -825,14 +788,11 @@ func WithResponseValidator(fn func(resp *http.Response) error) aoni.RequestModif
 		existing := cfg.ResponseValidator
 		if existing != nil {
 			cfg.ResponseValidator = func(resp *http.Response) error {
-				err1 := existing(resp)
-
-				err2 := fn(resp)
-				if err2 != nil {
-					return err2
+				if err := existing(resp); err != nil {
+					return err
 				}
 
-				return err1
+				return fn(resp)
 			}
 		} else {
 			cfg.ResponseValidator = fn
@@ -873,59 +833,56 @@ func WithCertificatePin(domain, hash string) aoni.RequestModifier {
 	}
 }
 
-// WithForceHTTP1 returns a RequestModifier that advertises only
-// http/1.1 in ALPN, preventing the server from upgrading to HTTP/2.
+// WithForceHTTP1 advertises HTTP/1.1 only in ALPN.
 func WithForceHTTP1() aoni.RequestModifier {
 	return func(req *http.Request) {
 		aoni.GetOrInitRequestConfig(req).ALPNOverride = []string{aoni.AlpnHTTP}
 	}
 }
 
-// WithForceHTTP2 returns a RequestModifier that advertises only
-// h2 in ALPN, forcing the server to use HTTP/2.
+// WithForceHTTP2 advertises HTTP/2 only in ALPN.
 func WithForceHTTP2() aoni.RequestModifier {
 	return func(req *http.Request) {
 		aoni.GetOrInitRequestConfig(req).ALPNOverride = []string{"h2"}
 	}
 }
 
-// WithForceHTTP3 returns a RequestModifier that advertises only
-// h3 in ALPN, forcing the server to use HTTP/3 (QUIC) for this request.
+// WithForceHTTP3 advertises HTTP/3 only in ALPN.
 func WithForceHTTP3() aoni.RequestModifier {
 	return func(req *http.Request) {
 		aoni.GetOrInitRequestConfig(req).ALPNOverride = []string{"h3"}
 	}
 }
 
-// WithIfNoneMatch sets the If-None-Match request header to the provided ETag value.
+// WithIfNoneMatch sets the If-None-Match header.
 func WithIfNoneMatch(etag string) aoni.RequestModifier {
 	return func(req *http.Request) {
 		req.Header.Set("If-None-Match", etag)
 	}
 }
 
-// WithIfMatch sets the If-Match request header to the provided ETag value.
+// WithIfMatch sets the If-Match header.
 func WithIfMatch(etag string) aoni.RequestModifier {
 	return func(req *http.Request) {
 		req.Header.Set("If-Match", etag)
 	}
 }
 
-// WithIfModifiedSince sets the If-Modified-Since request header.
+// WithIfModifiedSince sets the If-Modified-Since header.
 func WithIfModifiedSince(t time.Time) aoni.RequestModifier {
 	return func(req *http.Request) {
 		req.Header.Set("If-Modified-Since", t.UTC().Format(http.TimeFormat))
 	}
 }
 
-// WithContext returns a RequestModifier that sets the context on the request.
+// WithContext sets context on the request.
 func WithContext(ctx context.Context) aoni.RequestModifier {
 	return func(req *http.Request) {
 		*req = *req.WithContext(ctx)
 	}
 }
 
-// WithTimeout sets a timeout for the request by wrapping its context with a deadline.
+// WithTimeout sets a context deadline timeout for the request.
 func WithTimeout(d time.Duration) aoni.RequestModifier {
 	return func(req *http.Request) {
 		ctx, cancel := context.WithTimeout(req.Context(), d) //nolint:gosec

@@ -338,7 +338,8 @@ func HandleResponse(resp *http.Response, target any, requester Requester) error 
 
 	if target == nil || resp.StatusCode == http.StatusNoContent {
 		bufPtr := bytePool.Get().(*[]byte)
-		_, _ = stdio.CopyBuffer(stdio.Discard, resp.Body, *bufPtr)
+		_, _ = io.CopyZeroAlloc(stdio.Discard, resp.Body)
+
 		bytePool.Put(bufPtr)
 
 		return nil

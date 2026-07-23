@@ -6,7 +6,7 @@ package fluent
 
 import (
 	"context"
-	"io"
+	stdio "io"
 	"maps"
 	"net/http"
 	"net/url"
@@ -22,6 +22,7 @@ import (
 	"github.com/lemon4ksan/aoni"
 	"github.com/lemon4ksan/aoni/codec"
 	"github.com/lemon4ksan/aoni/codec/decode"
+	"github.com/lemon4ksan/aoni/internal/io"
 	"github.com/lemon4ksan/aoni/middleware"
 	"github.com/lemon4ksan/aoni/mod"
 	"github.com/lemon4ksan/aoni/netutil"
@@ -103,7 +104,7 @@ type Request struct {
 	queryParams      url.Values
 	pathParams       map[string]string
 	formFields       map[string]string
-	formFiles        map[string]io.Reader
+	formFiles        map[string]stdio.Reader
 	expectedStatuses []int
 	downloadProgress aoni.ProgressFunc
 	uploadProgress   aoni.ProgressFunc
@@ -264,9 +265,9 @@ func (r *Request) SetFormField(key, value string) *Request {
 }
 
 // SetFormFile attaches a stream reader as a file part in multipart/form-data requests.
-func (r *Request) SetFormFile(fieldname string, reader io.Reader) *Request {
+func (r *Request) SetFormFile(fieldname string, reader stdio.Reader) *Request {
 	if r.formFiles == nil {
-		r.formFiles = make(map[string]io.Reader, 2)
+		r.formFiles = make(map[string]stdio.Reader, 2)
 	}
 
 	r.formFiles[fieldname] = reader
@@ -576,7 +577,7 @@ func (r *Request) buildModifiers() []aoni.RequestModifier {
 	case r.grpcWebBody != nil:
 		mods = append(mods, mod.WithGRPCWebBody(r.grpcWebBody))
 	case r.body != nil:
-		if reader, ok := r.body.(io.Reader); ok {
+		if reader, ok := r.body.(stdio.Reader); ok {
 			mods = append(mods, mod.WithBody(reader))
 		} else {
 			mods = append(mods, mod.WithJSONBody(r.body))
@@ -669,11 +670,7 @@ func (r *Request) executeDownload(
 	}
 	defer outFile.Close()
 
-	bufPtr := bytePool.Get().(*[]byte)
-	_, err = io.CopyBuffer(outFile, resp.Body, *bufPtr)
-	bytePool.Put(bufPtr)
-
-	if err != nil {
+	if _, err = io.CopyZeroAlloc(outFile, resp.Body); err != nil {
 		return resp, &Error{Op: "download", Path: outputFile, Err: err}
 	}
 

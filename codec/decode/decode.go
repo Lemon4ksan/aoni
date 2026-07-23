@@ -13,7 +13,7 @@ import (
 	"encoding/json"
 	"encoding/xml"
 	"errors"
-	"io"
+	stdio "io"
 	"reflect"
 	"strings"
 	"sync"
@@ -23,6 +23,7 @@ import (
 
 	"github.com/lemon4ksan/aoni"
 	"github.com/lemon4ksan/aoni/internal/bytesconv"
+	"github.com/lemon4ksan/aoni/internal/io"
 	"github.com/lemon4ksan/aoni/mod"
 )
 
@@ -60,14 +61,14 @@ var ProtoJSONDecoder Decoder = protoJSONDecoder{}
 
 // Decoder defines the contract for unmarshaling response payload streams into Go structures.
 type Decoder interface {
-	Decode(reader io.Reader, target any) error
+	Decode(reader stdio.Reader, target any) error
 }
 
 // DecoderFunc adapts a plain function signature to satisfy [Decoder].
-type DecoderFunc func(reader io.Reader, target any) error
+type DecoderFunc func(reader stdio.Reader, target any) error
 
 // Decode executes the underlying function to parse reader data into target.
-func (f DecoderFunc) Decode(reader io.Reader, target any) error {
+func (f DecoderFunc) Decode(reader stdio.Reader, target any) error {
 	return f(reader, target)
 }
 
@@ -81,7 +82,7 @@ type customJSONDecoder struct {
 	cfg JSONDecoderConfig
 }
 
-func (d customJSONDecoder) Decode(reader io.Reader, target any) error {
+func (d customJSONDecoder) Decode(reader stdio.Reader, target any) error {
 	dec := json.NewDecoder(StripBOM(reader))
 	if d.cfg.DisallowUnknownFields {
 		dec.DisallowUnknownFields()
@@ -101,19 +102,19 @@ func NewJSONDecoder(cfg JSONDecoderConfig) Decoder {
 
 type jsonDecoder struct{}
 
-func (jsonDecoder) Decode(reader io.Reader, target any) error {
+func (jsonDecoder) Decode(reader stdio.Reader, target any) error {
 	return json.NewDecoder(StripBOM(reader)).Decode(target)
 }
 
 type xmlDecoder struct{}
 
-func (xmlDecoder) Decode(reader io.Reader, target any) error {
+func (xmlDecoder) Decode(reader stdio.Reader, target any) error {
 	return xml.NewDecoder(StripBOM(reader)).Decode(target)
 }
 
 type rawDecoder struct{}
 
-func (rawDecoder) Decode(r io.Reader, target any) error {
+func (rawDecoder) Decode(r stdio.Reader, target any) error {
 	outPtr, ok := target.(*[]byte)
 	if !ok {
 		return &Error{Format: "raw", Target: typeName(target), Err: ErrInvalidRawTarget}
@@ -132,7 +133,7 @@ func (rawDecoder) Decode(r io.Reader, target any) error {
 
 type protoDecoder struct{}
 
-func (protoDecoder) Decode(r io.Reader, target any) error {
+func (protoDecoder) Decode(r stdio.Reader, target any) error {
 	msg, err := castOrResolveProto(target)
 	if err != nil {
 		return err
@@ -153,7 +154,7 @@ func (protoDecoder) Decode(r io.Reader, target any) error {
 
 type protoJSONDecoder struct{}
 
-func (protoJSONDecoder) Decode(r io.Reader, target any) error {
+func (protoJSONDecoder) Decode(r stdio.Reader, target any) error {
 	msg, err := castOrResolveProto(target)
 	if err != nil {
 		return err
@@ -176,7 +177,7 @@ func (protoJSONDecoder) Decode(r io.Reader, target any) error {
 
 type grpcWebDecoder struct{}
 
-func (grpcWebDecoder) Decode(r io.Reader, target any) error {
+func (grpcWebDecoder) Decode(r stdio.Reader, target any) error {
 	msg, err := castOrResolveProto(target)
 	if err != nil {
 		return err
@@ -184,7 +185,7 @@ func (grpcWebDecoder) Decode(r io.Reader, target any) error {
 
 	br := bufio.NewReader(r)
 
-	var reader io.Reader = br
+	var reader stdio.Reader = br
 
 	if peek, err := br.Peek(5); err == nil && IsBase64Header(peek) {
 		reader = base64.NewDecoder(base64.StdEncoding, br)
@@ -196,8 +197,8 @@ func (grpcWebDecoder) Decode(r io.Reader, target any) error {
 	)
 
 	for {
-		if _, err := io.ReadFull(reader, header[:]); err != nil {
-			if (errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF)) && payloadRead {
+		if _, err := stdio.ReadFull(reader, header[:]); err != nil {
+			if (errors.Is(err, stdio.EOF) || errors.Is(err, stdio.ErrUnexpectedEOF)) && payloadRead {
 				return nil
 			}
 
@@ -208,7 +209,7 @@ func (grpcWebDecoder) Decode(r io.Reader, target any) error {
 		length := binary.BigEndian.Uint32(header[1:5])
 
 		payload := make([]byte, length)
-		if _, err := io.ReadFull(reader, payload); err != nil {
+		if _, err := stdio.ReadFull(reader, payload); err != nil {
 			return &GRPCWebError{Op: "read_payload", Err: ErrInvalidGRPCWebFrame}
 		}
 
@@ -235,14 +236,11 @@ func (grpcWebDecoder) Decode(r io.Reader, target any) error {
 	}
 }
 
-func copyToBuffer(r io.Reader) (*bytes.Buffer, error) {
+func copyToBuffer(r stdio.Reader) (*bytes.Buffer, error) {
 	buf := bufferPool.Get().(*bytes.Buffer)
 	buf.Reset()
 
-	bufPtr := bytePool.Get().(*[]byte)
-	defer bytePool.Put(bufPtr)
-
-	if _, err := io.CopyBuffer(buf, r, *bufPtr); err != nil {
+	if _, err := io.CopyZeroAlloc(buf, r); err != nil {
 		bufferPool.Put(buf)
 		return nil, err
 	}
@@ -256,7 +254,7 @@ func decompressProtoPayload(payload []byte) ([]byte, error) {
 		return nil, &GRPCWebError{Op: "decompress", Err: err}
 	}
 
-	decompressed, err := io.ReadAll(gzReader)
+	decompressed, err := stdio.ReadAll(gzReader)
 	_ = gzReader.Close()
 
 	if err != nil {
@@ -331,8 +329,8 @@ type limitDecoder struct {
 	maxBytes int64
 }
 
-func (l limitDecoder) Decode(reader io.Reader, target any) error {
-	return l.decoder.Decode(io.LimitReader(reader, l.maxBytes), target)
+func (l limitDecoder) Decode(reader stdio.Reader, target any) error {
+	return l.decoder.Decode(stdio.LimitReader(reader, l.maxBytes), target)
 }
 
 // LimitDecoder caps response payload input stream consumption at maxBytes.
@@ -346,7 +344,7 @@ func LimitDecoder(decoder Decoder, maxBytes int64) Decoder {
 // ByContentType selects a registered decoder matching the MIME type in contentType.
 //
 // Defaults to RawDecoder if the contentType is unrecognized.
-func ByContentType(reader io.Reader, contentType string, target any) error {
+func ByContentType(reader stdio.Reader, contentType string, target any) error {
 	mediaType, _, _ := strings.Cut(contentType, ";")
 	mediaType = strings.TrimSpace(mediaType)
 
@@ -368,7 +366,7 @@ func ByContentType(reader io.Reader, contentType string, target any) error {
 }
 
 // To allocates a new instance of T and decodes payload data into it.
-func To[T any](reader io.Reader, decoder Decoder) (T, error) {
+func To[T any](reader stdio.Reader, decoder Decoder) (T, error) {
 	var target T
 	if err := decoder.Decode(reader, &target); err != nil {
 		var zero T
@@ -385,22 +383,22 @@ func IsRawDecoder(decoder Decoder) bool {
 }
 
 // JSON reads from reader and unmarshals JSON data into a newly allocated T.
-func JSON[T any](reader io.Reader) (T, error) {
+func JSON[T any](reader stdio.Reader) (T, error) {
 	return To[T](reader, JSONDecoder)
 }
 
 // XML reads from reader and unmarshals XML data into a newly allocated T.
-func XML[T any](reader io.Reader) (T, error) {
+func XML[T any](reader stdio.Reader) (T, error) {
 	return To[T](reader, XMLDecoder)
 }
 
 // Proto reads from reader and unmarshals binary Protocol Buffer data into a newly allocated T.
-func Proto[T any](reader io.Reader) (T, error) {
+func Proto[T any](reader stdio.Reader) (T, error) {
 	return To[T](reader, ProtoDecoder)
 }
 
 // GRPCWeb reads from reader and unmarshals gRPC-Web framed data into a newly allocated T.
-func GRPCWeb[T any](reader io.Reader) (T, error) {
+func GRPCWeb[T any](reader stdio.Reader) (T, error) {
 	return To[T](reader, GRPCWebDecoder)
 }
 
@@ -420,7 +418,7 @@ func WithProto() aoni.RequestModifier { return mod.WithDecoder(ProtoDecoder) }
 func WithGRPCWeb() aoni.RequestModifier { return mod.WithDecoder(GRPCWebDecoder) }
 
 // StripBOM strips UTF-8 and UTF-16 Byte Order Marks from the input stream.
-func StripBOM(reader io.Reader) io.Reader {
+func StripBOM(reader stdio.Reader) stdio.Reader {
 	var br *bufio.Reader
 
 	switch r := reader.(type) {
@@ -436,7 +434,7 @@ func StripBOM(reader io.Reader) io.Reader {
 
 	var buf [3]byte
 
-	n, _ := io.ReadFull(reader, buf[:])
+	n, _ := stdio.ReadFull(reader, buf[:])
 	if n == 0 {
 		return reader
 	}
@@ -451,10 +449,10 @@ func StripBOM(reader io.Reader) io.Reader {
 			return reader
 		}
 
-		return io.MultiReader(bytes.NewReader(unread), reader)
+		return stdio.MultiReader(bytes.NewReader(unread), reader)
 	}
 
-	return io.MultiReader(bytes.NewReader(buf[:n]), reader)
+	return stdio.MultiReader(bytes.NewReader(buf[:n]), reader)
 }
 
 func stripBufferBOM(br *bufio.Reader) *bufio.Reader {

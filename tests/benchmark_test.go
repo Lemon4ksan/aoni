@@ -115,7 +115,10 @@ func BenchmarkRawCopy_Aoni(b *testing.B) {
 	}))
 	defer server.Close()
 
-	client := aoni.NewClient(nil, option.WithBaseURL(server.URL))
+	client := aoni.NewClient(nil,
+		option.WithBaseURL(server.URL),
+		option.WithMultiReadBodyThreshold(0),
+	)
 	ctx := context.Background()
 
 	b.ResetTimer()
