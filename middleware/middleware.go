@@ -2,7 +2,7 @@
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
-// Package middleware provides HTTP middleware functions for request logging, rate limiting, and other common use cases.
+// Package middleware provides composable HTTP request and response execution interceptors.
 package middleware
 
 import (
@@ -33,11 +33,23 @@ import (
 
 	"github.com/lemon4ksan/aoni"
 	"github.com/lemon4ksan/aoni/codec/decode"
+	"github.com/lemon4ksan/aoni/internal/timer"
 )
 
-// Chain wraps doer with middlewares from left to right: the first
-// middleware in the slice executes first. Returns doer unmodified
-// when middlewares is empty.
+var (
+	// ErrMaxRetriesExceeded indicates that a request failed after performing all configured retry attempts.
+	ErrMaxRetriesExceeded = errors.New("aoni: max retries exceeded")
+
+	// ErrChaosFailure is returned when the chaos middleware artificially drops a transaction.
+	ErrChaosFailure = errors.New("aoni: simulated chaos network failure")
+
+	// ErrSlidingWindowCanceled indicates that context was canceled while waiting for a rate limiter slot.
+	ErrSlidingWindowCanceled = errors.New("aoni: sliding window rate limit wait canceled")
+)
+
+// Chain composes an [aoni.HTTPDoer] with a sequence of middleware layers.
+//
+// Interceptors execute in left-to-right order. Returns doer unmodified when middlewares is empty.
 func Chain(doer aoni.HTTPDoer, middlewares ...aoni.Middleware) aoni.HTTPDoer {
 	for i := len(middlewares) - 1; i >= 0; i-- {
 		doer = middlewares[i](doer)
@@ -46,19 +58,18 @@ func Chain(doer aoni.HTTPDoer, middlewares ...aoni.Middleware) aoni.HTTPDoer {
 	return doer
 }
 
-// Log returns a middleware that logs HTTP requests using the provided logger.
-//
-// It hides the sensitive values for keys "key", "access_token" and "token".
+// Log records structured execution telemetry for HTTP transactions using logger.
+// Sensitive query parameters ("key", "token", "access_token") are automatically masked.
 func Log(logger aoni.Logger) aoni.Middleware {
 	return func(next aoni.HTTPDoer) aoni.HTTPDoer {
 		return aoni.DoerFunc(func(req *http.Request) (*http.Response, error) {
-			start := time.Now()
+			startTime := time.Now()
 			resp, err := next.Do(req)
 
 			logger.Info("http request",
 				"method", req.Method,
 				"url", maskQueryParams(req.URL),
-				"duration", time.Since(start),
+				"duration", time.Since(startTime),
 				"error", err,
 			)
 
@@ -67,19 +78,12 @@ func Log(logger aoni.Logger) aoni.Middleware {
 	}
 }
 
-// RateLimit returns a [Middleware] that blocks when the
-// request rate exceeds rps with burst tolerance. The limiter uses
-// a token bucket algorithm from [golang.org/x/time/rate].
-func RateLimit(rps float64, burst int) aoni.Middleware {
-	if rps < 0 {
-		rps = 0
-	}
+// RateLimit caps outbound request frequency using a token bucket algorithm.
+func RateLimit(requestsPerSecond float64, burst int) aoni.Middleware {
+	rps := max(requestsPerSecond, 0)
+	burstLimit := max(burst, 0)
 
-	if burst < 0 {
-		burst = 0
-	}
-
-	limiter := rate.NewLimiter(rate.Limit(rps), burst)
+	limiter := rate.NewLimiter(rate.Limit(rps), burstLimit)
 
 	return func(next aoni.HTTPDoer) aoni.HTTPDoer {
 		return aoni.DoerFunc(func(req *http.Request) (*http.Response, error) {
@@ -92,40 +96,37 @@ func RateLimit(rps float64, burst int) aoni.Middleware {
 	}
 }
 
-// SlidingWindowLimiter implements an O(1) ring-buffer sliding window rate limiter
-// without memory allocations or slice memory copies during timestamp purging.
+// SlidingWindowLimiter maintains a zero-allocation ring-buffer sliding window rate limiter.
 type SlidingWindowLimiter struct {
 	mu         sync.Mutex
-	limit      int
-	window     time.Duration
 	timestamps []time.Time
+	window     time.Duration
+	limit      int
 	head       int
 	tail       int
 	count      int
 }
 
-// NewSlidingWindowLimiter creates a new ring-buffer sliding window rate limiter.
+// NewSlidingWindowLimiter creates a ring-buffer sliding window rate limiter.
 func NewSlidingWindowLimiter(limit int, window time.Duration) *SlidingWindowLimiter {
-	if limit <= 0 {
-		limit = 1
-	}
+	capacity := max(limit, 1)
 
 	return &SlidingWindowLimiter{
-		limit:      limit,
+		limit:      capacity,
 		window:     window,
-		timestamps: make([]time.Time, limit),
+		timestamps: make([]time.Time, capacity),
 	}
 }
 
-// Allow checks if a request is allowed at time now.
-// Returns true and 0 wait time if allowed, or false and the required wait duration if limit is reached.
+// Allow checks whether a request attempt is permitted at timestamp now.
+//
+// Returns true and 0 delay if allowed, or false and the required sleep duration if restricted.
 func (l *SlidingWindowLimiter) Allow(now time.Time) (bool, time.Duration) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 
 	cutoff := now.Add(-l.window)
 
-	// Purge expired timestamps from head in O(1) without memory copy churn
 	for l.count > 0 && !l.timestamps[l.head].After(cutoff) {
 		l.head = (l.head + 1) % l.limit
 		l.count--
@@ -139,39 +140,31 @@ func (l *SlidingWindowLimiter) Allow(now time.Time) (bool, time.Duration) {
 		return true, 0
 	}
 
-	// Calculate wait time until oldest request in rolling window expires
 	oldest := l.timestamps[l.head]
-
 	waitTime := oldest.Add(l.window).Sub(now)
-	if waitTime < 0 {
-		waitTime = 0
-	}
 
-	return false, waitTime
+	return false, max(waitTime, 0)
 }
 
-// SlidingWindowRateLimit returns a [Middleware] that enforces strict sliding window rate limiting.
-// Guarantees no more than limit requests are dispatched within any rolling window duration.
+// SlidingWindowRateLimit enforces strict sliding-window request throttling.
 func SlidingWindowRateLimit(limit int, window time.Duration) aoni.Middleware {
 	limiter := NewSlidingWindowLimiter(limit, window)
 
 	return func(next aoni.HTTPDoer) aoni.HTTPDoer {
 		return aoni.DoerFunc(func(req *http.Request) (*http.Response, error) {
 			for {
-				now := time.Now()
-
-				allowed, waitTime := limiter.Allow(now)
+				allowed, waitTime := limiter.Allow(time.Now())
 				if allowed {
 					break
 				}
 
-				timer := time.NewTimer(waitTime)
+				t := timer.Acquire(waitTime)
 				select {
 				case <-req.Context().Done():
-					timer.Stop()
-					return nil, fmt.Errorf("aoni: sliding window rate limit wait canceled: %w", req.Context().Err())
-				case <-timer.C:
-					timer.Stop()
+					timer.Release(t)
+					return nil, fmt.Errorf("%w: %w", ErrSlidingWindowCanceled, req.Context().Err())
+				case <-t.C:
+					timer.Release(t)
 				}
 			}
 
@@ -180,41 +173,32 @@ func SlidingWindowRateLimit(limit int, window time.Duration) aoni.Middleware {
 	}
 }
 
-// JitterStrategy selects the algorithm for computing retry delay noise.
+// JitterStrategy selects the algorithm applied to backoff calculation noise.
 type JitterStrategy int
 
 const (
-	// JitterEqual adds +/- 10% random noise to the exponential backoff.
+	// JitterEqual adds +/- 50% randomized noise to the exponential delay.
 	JitterEqual JitterStrategy = iota
-	// JitterFull picks a random duration between zero and the backoff value.
+	// JitterFull selects a random duration between zero and the computed delay cap.
 	JitterFull
 )
 
-// RetryOptions configures [Retry].
+// RetryOptions configures backoff behavior and repetition bounds for [Retry].
 type RetryOptions struct {
-	// MaxRetries is the maximum number of retry attempts after the initial failure (0 = no retries).
-	MaxRetries uint32
-
-	// Backoff is the delay before the first retry. Subsequent retries
-	// use exponential backoff starting from this value.
-	Backoff time.Duration
-
-	// JitterStrategy selects the noise algorithm applied to each delay.
+	OnRetry        func(attempt uint32, err error, delay time.Duration)
+	Backoff        time.Duration
+	MaxRetries     uint32
 	JitterStrategy JitterStrategy
-
-	// OnRetry is an optional callback executed before each sleep during retry attempts.
-	// Provides the attempt count (1-based), the causing error or nil, and the planned backoff delay.
-	OnRetry func(attempt uint32, err error, delay time.Duration)
 }
 
-// RetryOnErr returns a [RetryCondition] that triggers a retry on any non-nil network or transport error.
+// RetryOnErr triggers retries on any non-nil error.
 func RetryOnErr() aoni.RetryCondition {
 	return func(_ *http.Response, err error) bool {
 		return err != nil
 	}
 }
 
-// RetryOnTransientErrors returns a [RetryCondition] triggering retries on network timeouts, resets, or broken pipes.
+// RetryOnTransientErrors triggers retries on socket timeouts, connection resets, or broken pipes.
 func RetryOnTransientErrors() aoni.RetryCondition {
 	return func(_ *http.Response, err error) bool {
 		if err == nil {
@@ -234,32 +218,33 @@ func RetryOnTransientErrors() aoni.RetryCondition {
 	}
 }
 
-// RetryOnRateLimit returns a [RetryCondition] triggering retries on HTTP 429 Too Many Requests responses.
+// RetryOnRateLimit triggers retries on HTTP 429 Too Many Requests responses.
 func RetryOnRateLimit() aoni.RetryCondition {
 	return func(resp *http.Response, _ error) bool {
 		return resp != nil && resp.StatusCode == http.StatusTooManyRequests
 	}
 }
 
-// RetryOnGatewayErrors returns a [RetryCondition] triggering retries on HTTP 502, 503, and 504 responses.
+// RetryOnGatewayErrors triggers retries on HTTP 502, 503, and 504 status codes.
 func RetryOnGatewayErrors() aoni.RetryCondition {
 	return func(resp *http.Response, _ error) bool {
 		if resp == nil {
 			return false
 		}
 
-		sc := resp.StatusCode
+		code := resp.StatusCode
 
-		return sc == http.StatusBadGateway || sc == http.StatusServiceUnavailable || sc == http.StatusGatewayTimeout
+		return code == http.StatusBadGateway ||
+			code == http.StatusServiceUnavailable ||
+			code == http.StatusGatewayTimeout
 	}
 }
 
-// RetryOnGRPCStatus returns a RetryCondition that triggers retries when a gRPC-Web call
-// fails with specific gRPC status codes (e.g. "14" for UNAVAILABLE, "8" for RESOURCE_EXHAUSTED).
-// If no status codes are supplied, defaults to retrying on "14" (UNAVAILABLE) and "13" (INTERNAL).
+// RetryOnGRPCStatus triggers retries when gRPC-Web status matches candidate codes.
 func RetryOnGRPCStatus(statusCodes ...string) aoni.RetryCondition {
-	if len(statusCodes) == 0 {
-		statusCodes = []string{"14", "13", "8"}
+	targets := statusCodes
+	if len(targets) == 0 {
+		targets = []string{"14", "13", "8"}
 	}
 
 	return func(_ *http.Response, err error) bool {
@@ -268,114 +253,123 @@ func RetryOnGRPCStatus(statusCodes ...string) aoni.RetryCondition {
 		}
 
 		var grpcErr *decode.GRPCWebError
-		if errors.As(err, &grpcErr) {
-			return slices.Contains(statusCodes, grpcErr.StatusCode)
-		}
 
-		return false
+		return errors.As(err, &grpcErr) && slices.Contains(targets, grpcErr.StatusCode)
 	}
 }
 
-// Retry returns a [Middleware] that retries requests
-// matching condition up to opts.MaxRetries times. The request
-// body is buffered in memory so it can be replayed. The middleware
-// respects the Retry-After header when present and falls back to
-// exponential backoff with jitter.
-//
-// If the request carries a [WithRetryPolicy] override, its values take
-// precedence over the global opts and condition for that request only.
+// Retry automatically re-executes failed transactions up to opts.MaxRetries times.
 func Retry(opts RetryOptions, condition aoni.RetryCondition) aoni.Middleware {
 	opts.MaxRetries = generic.Coalesce(opts.MaxRetries, 3)
 	opts.Backoff = max(generic.Coalesce(opts.Backoff, 1*time.Second), 0)
 
 	return func(next aoni.HTTPDoer) aoni.HTTPDoer {
 		return aoni.DoerFunc(func(req *http.Request) (*http.Response, error) {
-			// Per-request override takes precedence over global opts.
-			activeOpts := opts
+			activeOpts, activeCond := resolveRetryOverrides(req.Context(), opts, condition)
 
-			activeCond := condition
-			if override, ok := aoni.GetRetryOverride(req.Context()).Value(); ok {
-				if override.MaxAttempts > 0 {
-					activeOpts.MaxRetries = uint32(override.MaxAttempts - 1) //nolint:gosec
-				}
-
-				if override.Backoff > 0 {
-					activeOpts.Backoff = override.Backoff
-				}
-
-				if override.Condition != nil {
-					activeCond = override.Condition
-				}
+			body, err := bufferRequestBody(req)
+			if err != nil {
+				return nil, err
 			}
 
-			var (
-				body []byte
-				err  error
-			)
+			backoff := createBackoffGenerator(activeOpts)
 
-			if req.Body != nil && req.Body != http.NoBody {
-				body, err = io.ReadAll(req.Body)
-				if err != nil {
-					return nil, fmt.Errorf("aoni: failed to read request body for retry: %w", err)
-				}
-
-				_ = req.Body.Close()
-			}
-
-			var bo *generic.Backoff
-			switch activeOpts.JitterStrategy {
-			case JitterFull:
-				bo = generic.NewBackoff(activeOpts.Backoff, activeOpts.Backoff*32, 2, 1.0)
-			default:
-				bo = generic.NewBackoff(activeOpts.Backoff, activeOpts.Backoff*32, 2, 0.5)
-			}
-
-			for i := uint32(0); i <= activeOpts.MaxRetries; i++ {
+			for attempt := uint32(0); attempt <= activeOpts.MaxRetries; attempt++ {
 				if body != nil {
 					req.Body = io.NopCloser(bytes.NewReader(body))
 				}
 
 				resp, err := next.Do(req)
-
-				if i < activeOpts.MaxRetries && activeCond(resp, err) {
-					if err != nil && isFatalError(err) {
-						return resp, err
-					}
-
-					retryAfter, hasRetryAfter := parseRetryAfter(resp)
-					if resp != nil {
-						_ = resp.Body.Close()
-					}
-
-					var sleepTime time.Duration
-					if hasRetryAfter {
-						sleepTime = retryAfter
-					} else {
-						sleepTime = bo.Next()
-					}
-
-					if activeOpts.OnRetry != nil {
-						activeOpts.OnRetry(i+1, err, sleepTime)
-					}
-
-					select {
-					case <-req.Context().Done():
-						return nil, req.Context().Err()
-					case <-time.After(sleepTime):
-						continue
-					}
+				if attempt == activeOpts.MaxRetries || !activeCond(resp, err) {
+					return resp, err
 				}
 
-				return resp, err
+				if err != nil && isFatalError(err) {
+					return resp, err
+				}
+
+				sleepDuration := calculateRetrySleep(resp, backoff)
+				if activeOpts.OnRetry != nil {
+					activeOpts.OnRetry(attempt+1, err, sleepDuration)
+				}
+
+				t := timer.Acquire(sleepDuration)
+				select {
+				case <-req.Context().Done():
+					timer.Release(t)
+					return nil, req.Context().Err()
+				case <-t.C:
+					timer.Release(t)
+				}
 			}
 
-			return nil, errors.New("aoni: max retries exceeded")
+			return nil, ErrMaxRetriesExceeded
 		})
 	}
 }
 
-// Recover catches panics during request execution, calls
-// onPanic with the recovered value (if non-nil), and returns an error.
+func resolveRetryOverrides(
+	ctx context.Context,
+	baseOpts RetryOptions,
+	baseCond aoni.RetryCondition,
+) (RetryOptions, aoni.RetryCondition) {
+	override, ok := aoni.GetRetryOverride(ctx).Value()
+	if !ok {
+		return baseOpts, baseCond
+	}
+
+	if override.MaxAttempts > 0 {
+		baseOpts.MaxRetries = uint32(override.MaxAttempts - 1) //nolint:gosec
+	}
+
+	if override.Backoff > 0 {
+		baseOpts.Backoff = override.Backoff
+	}
+
+	if override.Condition != nil {
+		baseCond = override.Condition
+	}
+
+	return baseOpts, baseCond
+}
+
+func bufferRequestBody(req *http.Request) ([]byte, error) {
+	if req.Body == nil || req.Body == http.NoBody {
+		return nil, nil
+	}
+
+	bodyBytes, err := io.ReadAll(req.Body)
+	_ = req.Body.Close()
+
+	if err != nil {
+		return nil, fmt.Errorf("aoni: failed to read request body for retry: %w", err)
+	}
+
+	return bodyBytes, nil
+}
+
+func createBackoffGenerator(opts RetryOptions) *generic.Backoff {
+	if opts.JitterStrategy == JitterFull {
+		return generic.NewBackoff(opts.Backoff, opts.Backoff*32, 2, 1.0)
+	}
+
+	return generic.NewBackoff(opts.Backoff, opts.Backoff*32, 2, 0.5)
+}
+
+func calculateRetrySleep(resp *http.Response, bo *generic.Backoff) time.Duration {
+	retryAfter, hasRetryAfter := parseRetryAfter(resp)
+	if resp != nil {
+		_ = resp.Body.Close()
+	}
+
+	if hasRetryAfter {
+		return retryAfter
+	}
+
+	return bo.Next()
+}
+
+// Recover converts panics encountered during request execution into errors.
 func Recover(onPanic func(any)) aoni.Middleware {
 	return func(next aoni.HTTPDoer) aoni.HTTPDoer {
 		return aoni.DoerFunc(func(req *http.Request) (resp *http.Response, err error) {
@@ -394,34 +388,23 @@ func Recover(onPanic func(any)) aoni.Middleware {
 	}
 }
 
-// CircuitBreakerConfig tunes the thresholds for [CircuitBreaker].
-// It wraps [breaker.Config] with a per-host map.
+// CircuitBreakerConfig tunes threshold boundaries for [CircuitBreaker].
 type CircuitBreakerConfig struct {
-	// FailureThreshold is the ratio of failures (0.0 to 1.0) that triggers the open state.
+	Cooldown         time.Duration
+	Window           time.Duration
 	FailureThreshold float64
-	// Cooldown is the duration the breaker remains open before transitioning to half-open.
-	Cooldown time.Duration
-	// MinRequests is the minimum number of requests in a Window before threshold check is active.
-	MinRequests int
-	// Window is the sliding time duration over which failures are tracked.
-	Window time.Duration
+	MinRequests      int
 }
 
-// CircuitBreaker tracks per-host connection health using a sliding window.
-// After the failure ratio within [CircuitBreakerConfig.Window] exceeds
-// [CircuitBreakerConfig.FailureThreshold], the circuit opens and rejects requests
-// for [CircuitBreakerConfig.Cooldown]. It then enters half-open and allows a
-// single trial request; success closes it.
+// CircuitBreaker tracks per-host health state using a sliding failure window.
 type CircuitBreaker struct {
-	cfg      CircuitBreakerConfig
-	km       keylock.KeyMutex[string]
 	breakers map[string]*breaker.CircuitBreaker[any]
+	km       keylock.KeyMutex[string]
+	cfg      CircuitBreakerConfig
 	mu       sync.Mutex
 }
 
-// NewCircuitBreaker creates a [CircuitBreaker] with cfg. Zero
-// fields default to 50% failure threshold, 10s window, 5 min requests,
-// and 5s cooldown.
+// NewCircuitBreaker initializes a per-host [CircuitBreaker].
 func NewCircuitBreaker(cfg CircuitBreakerConfig) *CircuitBreaker {
 	if cfg.FailureThreshold <= 0 || cfg.FailureThreshold > 1.0 || math.IsNaN(cfg.FailureThreshold) {
 		cfg.FailureThreshold = 0.5
@@ -450,6 +433,7 @@ func (cb *CircuitBreaker) getBreaker(host string) *breaker.CircuitBreaker[any] {
 	defer cb.km.Unlock(host)
 
 	cb.mu.Lock()
+	defer cb.mu.Unlock()
 
 	b, ok = cb.breakers[host]
 	if !ok {
@@ -462,36 +446,23 @@ func (cb *CircuitBreaker) getBreaker(host string) *breaker.CircuitBreaker[any] {
 		cb.breakers[host] = b
 	}
 
-	cb.mu.Unlock()
-
 	return b
 }
 
-// DefaultCircuitBreakerCondition returns true for network errors and HTTP status codes >= 500.
+// DefaultCircuitBreakerCondition reports true for network failures or HTTP 5xx responses.
 func DefaultCircuitBreakerCondition(resp *http.Response, err error) bool {
 	if err != nil {
 		return true
 	}
 
-	if resp != nil {
-		return resp.StatusCode >= 500
-	}
-
-	return false
+	return resp != nil && resp.StatusCode >= http.StatusInternalServerError
 }
 
-// CircuitBreak returns a [Middleware] that gates
-// requests through cb per host. When the circuit is open the
-// request fails immediately with an error. isFailure determines
-// which responses count as failures; nil uses
-// [DefaultCircuitBreakerCondition].
-//
-// The circuit breaker uses a sliding window: failures are tracked
-// over [CircuitBreakerConfig.Window] and compared against
-// [CircuitBreakerConfig.FailureThreshold] ratio.
+// CircuitBreak protects target hosts using per-host circuit state inspection.
 func CircuitBreak(cb *CircuitBreaker, isFailure func(*http.Response, error) bool) aoni.Middleware {
-	if isFailure == nil {
-		isFailure = DefaultCircuitBreakerCondition
+	failureCheck := isFailure
+	if failureCheck == nil {
+		failureCheck = DefaultCircuitBreakerCondition
 	}
 
 	return func(next aoni.HTTPDoer) aoni.HTTPDoer {
@@ -499,9 +470,6 @@ func CircuitBreak(cb *CircuitBreaker, isFailure func(*http.Response, error) bool
 			host := req.URL.Host
 			b := cb.getBreaker(host)
 
-			// Execute through the breaker to check state (open/half-open/closed).
-			// We always return the response to the caller, but signal the breaker
-			// about success/failure via the error channel.
 			var resultResp *http.Response
 
 			_, breakerErr := b.Do(req.Context(), func(ctx context.Context) (any, error) {
@@ -511,11 +479,10 @@ func CircuitBreak(cb *CircuitBreaker, isFailure func(*http.Response, error) bool
 				}
 
 				resultResp = resp
-
 				body, _ := io.ReadAll(io.LimitReader(resp.Body, 16*1024*1024))
 				_ = resp.Body.Close()
 
-				if isFailure(resp, nil) {
+				if failureCheck(resp, nil) {
 					return nil, fmt.Errorf("aoni: circuit breaker recorded failure (status %d)", resp.StatusCode)
 				}
 
@@ -528,8 +495,6 @@ func CircuitBreak(cb *CircuitBreaker, isFailure func(*http.Response, error) bool
 				return nil, fmt.Errorf("aoni: circuit breaker open for host %s", host)
 			}
 
-			// If the breaker recorded a failure (not circuit-open), return
-			// the response so the caller can inspect the status code.
 			if resultResp != nil {
 				return resultResp, nil
 			}
@@ -539,95 +504,70 @@ func CircuitBreak(cb *CircuitBreaker, isFailure func(*http.Response, error) bool
 	}
 }
 
-// Fallback returns a [Middleware] that invokes the
-// [FallbackFunc] registered via [WithFallback] when the request
-// fails with any error.
+// Fallback invokes a request-scoped [aoni.FallbackFunc] when request execution fails.
 func Fallback() aoni.Middleware {
 	return FallbackEx(nil)
 }
 
-// FallbackEx is like [Fallback] but uses isFailure
-// to decide which responses trigger the fallback. When isFailure is
-// nil, any non-nil error triggers it.
+// FallbackEx invokes a request-scoped [aoni.FallbackFunc] when isFailure evaluates to true.
 func FallbackEx(isFailure func(*http.Response, error) bool) aoni.Middleware {
-	if isFailure == nil {
-		isFailure = func(resp *http.Response, err error) bool { return err != nil }
+	failureCheck := isFailure
+	if failureCheck == nil {
+		failureCheck = func(_ *http.Response, err error) bool { return err != nil }
 	}
 
 	return func(next aoni.HTTPDoer) aoni.HTTPDoer {
 		return aoni.DoerFunc(func(req *http.Request) (*http.Response, error) {
 			resp, err := next.Do(req)
-			if isFailure(resp, err) {
-				cfg := aoni.GetRequestConfig(req.Context())
-				if cfg != nil && cfg.Fallback != nil {
-					fallbackResp, fallbackErr := cfg.Fallback(req, err)
-					if fallbackErr == nil {
-						if resp != nil && resp.Body != nil {
-							_ = resp.Body.Close()
-						}
-
-						return fallbackResp, nil
-					}
-				}
+			if !failureCheck(resp, err) {
+				return resp, err
 			}
 
-			return resp, err
+			cfg := aoni.GetRequestConfig(req.Context())
+			if cfg == nil || cfg.Fallback == nil {
+				return resp, err
+			}
+
+			fallbackResp, fallbackErr := cfg.Fallback(req, err)
+			if fallbackErr != nil {
+				return resp, err
+			}
+
+			if resp != nil && resp.Body != nil {
+				_ = resp.Body.Close()
+			}
+
+			return fallbackResp, nil
 		})
 	}
 }
 
-// ChaosConfig defines parameters for [Chaos].
+// ChaosConfig tunes fault rates and synthetic latency bounds for [Chaos].
 type ChaosConfig struct {
-	// FailureRate is the probability (0.0 to 1.0) of randomly returning a 503 error.
+	LatencyMin  time.Duration
+	LatencyMax  time.Duration
 	FailureRate float64
-	// LatencyMin is the minimum artificial delay duration applied to requests.
-	LatencyMin time.Duration
-	// LatencyMax is the maximum artificial delay duration applied to requests.
-	LatencyMax time.Duration
 }
 
-// Chaos returns a [Middleware] that injects random latency
-// and 503 errors. Useful for testing retry and circuit breaker logic.
+// Chaos injects random network latency and artificial 503 Service Unavailable errors.
 func Chaos(cfg ChaosConfig) aoni.Middleware {
 	return func(next aoni.HTTPDoer) aoni.HTTPDoer {
 		return aoni.DoerFunc(func(req *http.Request) (*http.Response, error) {
-			if cfg.LatencyMax > cfg.LatencyMin && cfg.LatencyMin > 0 {
-				diff := cfg.LatencyMax - cfg.LatencyMin
-
-				r, err := rand.Int(rand.Reader, big.NewInt(int64(diff)))
-				if err == nil {
-					delay := cfg.LatencyMin + time.Duration(r.Int64())
-					select {
-					case <-req.Context().Done():
-						return nil, req.Context().Err()
-					case <-time.After(delay):
-					}
-				}
-			} else if cfg.LatencyMin > 0 {
-				select {
-				case <-req.Context().Done():
-					return nil, req.Context().Err()
-				case <-time.After(cfg.LatencyMin):
-				}
+			if err := applyChaosDelay(req.Context(), cfg); err != nil {
+				return nil, err
 			}
 
-			if cfg.FailureRate > 0 {
-				r, err := rand.Int(rand.Reader, big.NewInt(10000))
-				if err == nil {
-					val := float64(r.Int64()) / 10000.0
-					if val < cfg.FailureRate {
-						return &http.Response{
-							StatusCode: http.StatusServiceUnavailable,
-							Status:     http.StatusText(http.StatusServiceUnavailable),
-							Proto:      "HTTP/1.1",
-							ProtoMajor: 1,
-							ProtoMinor: 1,
-							Header:     http.Header{"Content-Type": []string{"text/plain"}},
-							Body:       io.NopCloser(strings.NewReader("aoni: simulated chaos network failure")),
-							Request:    req,
-						}, nil
-					}
-				}
+			if shouldInjectChaosError(cfg.FailureRate) {
+				return &http.Response{
+					StatusCode: http.StatusServiceUnavailable,
+					Status:     http.StatusText(http.StatusServiceUnavailable),
+					Proto:      "HTTP/1.1",
+					ProtoMajor: 1,
+					ProtoMinor: 1,
+					Header:     http.Header{"Content-Type": []string{"text/plain"}},
+					Body:       io.NopCloser(strings.NewReader("aoni: simulated chaos network failure")),
+					Request:    req,
+				}, nil
 			}
 
 			return next.Do(req)
@@ -635,9 +575,49 @@ func Chaos(cfg ChaosConfig) aoni.Middleware {
 	}
 }
 
-// AdaptiveLimit returns a [Middleware] that gates
-// requests through limiter. Each request acquires a slot before
-// execution and releases it afterward with the observed RTT.
+func applyChaosDelay(ctx context.Context, cfg ChaosConfig) error {
+	var delay time.Duration
+
+	if cfg.LatencyMax > cfg.LatencyMin && cfg.LatencyMin > 0 {
+		diff := cfg.LatencyMax - cfg.LatencyMin
+
+		r, err := rand.Int(rand.Reader, big.NewInt(int64(diff)))
+		if err == nil {
+			delay = cfg.LatencyMin + time.Duration(r.Int64())
+		}
+	} else if cfg.LatencyMin > 0 {
+		delay = cfg.LatencyMin
+	}
+
+	if delay <= 0 {
+		return nil
+	}
+
+	t := timer.Acquire(delay)
+	select {
+	case <-ctx.Done():
+		timer.Release(t)
+		return ctx.Err()
+	case <-t.C:
+		timer.Release(t)
+		return nil
+	}
+}
+
+func shouldInjectChaosError(rate float64) bool {
+	if rate <= 0 {
+		return false
+	}
+
+	r, err := rand.Int(rand.Reader, big.NewInt(10000))
+	if err != nil {
+		return false
+	}
+
+	return (float64(r.Int64()) / 10000.0) < rate
+}
+
+// AdaptiveLimit restricts request concurrency dynamically via adaptive response-time evaluation.
 func AdaptiveLimit(limiter *limiter.AdaptiveLimiter) aoni.Middleware {
 	return func(next aoni.HTTPDoer) aoni.HTTPDoer {
 		return aoni.DoerFunc(func(req *http.Request) (*http.Response, error) {
@@ -645,9 +625,9 @@ func AdaptiveLimit(limiter *limiter.AdaptiveLimiter) aoni.Middleware {
 				return nil, err
 			}
 
-			start := time.Now()
+			startTime := time.Now()
 			resp, err := next.Do(req)
-			rtt := time.Since(start)
+			rtt := time.Since(startTime)
 
 			limiter.Release(rtt)
 
@@ -656,8 +636,7 @@ func AdaptiveLimit(limiter *limiter.AdaptiveLimiter) aoni.Middleware {
 	}
 }
 
-// GRPCWebTimeout returns a Middleware that injects the official gRPC timeout header
-// (grpc-timeout) into outgoing request headers based on timeout duration.
+// GRPCWebTimeout attaches the standard `grpc-timeout` header to outgoing requests.
 func GRPCWebTimeout(d time.Duration) aoni.Middleware {
 	timeoutStr := formatGRPCTimeout(d)
 
@@ -669,8 +648,7 @@ func GRPCWebTimeout(d time.Duration) aoni.Middleware {
 	}
 }
 
-// GRPCMetadata returns a Middleware that attaches a key-value map of gRPC Metadata
-// headers to every outgoing request.
+// GRPCMetadata attaches gRPC key-value metadata to outgoing request headers.
 func GRPCMetadata(md map[string]string) aoni.Middleware {
 	return func(next aoni.HTTPDoer) aoni.HTTPDoer {
 		return aoni.DoerFunc(func(req *http.Request) (*http.Response, error) {
@@ -693,10 +671,9 @@ func isFatalError(err error) bool {
 	}
 
 	var urlErr *url.Error
-	if errors.As(err, &urlErr) {
-		if urlErr.Err != nil && strings.Contains(urlErr.Err.Error(), "unsupported protocol scheme") {
-			return true
-		}
+	if errors.As(err, &urlErr) && urlErr.Err != nil &&
+		strings.Contains(urlErr.Err.Error(), "unsupported protocol scheme") {
+		return true
 	}
 
 	var (
@@ -714,12 +691,9 @@ func isFatalError(err error) bool {
 	}
 
 	errMsg := err.Error()
-	if strings.Contains(errMsg, "certificate signed by unknown authority") ||
-		strings.Contains(errMsg, "certificate pinning failure") {
-		return true
-	}
 
-	return false
+	return strings.Contains(errMsg, "certificate signed by unknown authority") ||
+		strings.Contains(errMsg, "certificate pinning failure")
 }
 
 func parseRetryAfter(resp *http.Response) (time.Duration, bool) {
@@ -735,22 +709,18 @@ func parseRetryAfter(resp *http.Response) (time.Duration, bool) {
 	secs, err := strconv.ParseInt(val, 10, 64)
 	if err == nil && secs >= 0 {
 		maxSecs := int64(math.MaxInt64 / time.Second)
-		if secs > maxSecs {
-			secs = maxSecs
-		}
+		secs = min(secs, maxSecs)
 
 		return time.Duration(secs) * time.Second, true
-	} else if errors.Is(err, strconv.ErrRange) {
+	}
+
+	if errors.Is(err, strconv.ErrRange) {
 		maxSecs := int64(math.MaxInt64 / time.Second)
 		return time.Duration(maxSecs) * time.Second, true
 	}
 
 	if t, err := http.ParseTime(val); err == nil {
-		if delay := time.Until(t); delay > 0 {
-			return delay, true
-		}
-
-		return 0, true
+		return max(time.Until(t), 0), true
 	}
 
 	return 0, false
@@ -761,18 +731,18 @@ func maskQueryParams(u *url.URL) string {
 		return ""
 	}
 
-	copy := *u
+	copyURL := *u
+	query := copyURL.Query()
 
-	q := copy.Query()
-	for key := range q {
+	for key := range query {
 		if key == "key" || key == "access_token" || key == "token" {
-			q.Set(key, "***")
+			query.Set(key, "***")
 		}
 	}
 
-	copy.RawQuery = q.Encode()
+	copyURL.RawQuery = query.Encode()
 
-	return copy.String()
+	return copyURL.String()
 }
 
 func formatGRPCTimeout(d time.Duration) string {

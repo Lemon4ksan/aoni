@@ -18,6 +18,7 @@ import (
 
 	"github.com/lemon4ksan/miyako/generic"
 
+	"github.com/lemon4ksan/aoni/internal/timer"
 	"github.com/lemon4ksan/aoni/telemetry"
 )
 
@@ -120,7 +121,8 @@ func GetTCPDelay(ctx context.Context) generic.Optional[TCPDelayRange] {
 
 // ApplyTCPDelay inspects the context for TCP delay range jitter and sleeps
 // for a random duration within those bounds before dialing.
-// Respects context cancellation and cleans up timer resources immediately.
+//
+// Respects context cancellation and recycles timer instances via the internal pool.
 func ApplyTCPDelay(ctx context.Context) error {
 	r, ok := GetTCPDelay(ctx).Value()
 	if !ok || r.Max <= 0 {
@@ -138,13 +140,13 @@ func ApplyTCPDelay(ctx context.Context) error {
 		return nil
 	}
 
-	timer := time.NewTimer(delay)
-	defer timer.Stop()
-
+	t := timer.Acquire(delay)
 	select {
-	case <-timer.C:
+	case <-t.C:
+		timer.Release(t)
 		return nil
 	case <-ctx.Done():
+		timer.Release(t)
 		return ctx.Err()
 	}
 }
@@ -218,7 +220,7 @@ type FallbackFunc func(req *http.Request, origErr error) (*http.Response, error)
 
 // FallbackString constructs a [FallbackFunc] returning plain text with the specified status code.
 func FallbackString(statusCode int, text string) FallbackFunc {
-	return func(req *http.Request, origErr error) (*http.Response, error) {
+	return func(req *http.Request, _ error) (*http.Response, error) {
 		return &http.Response{
 			StatusCode:    statusCode,
 			Status:        http.StatusText(statusCode),
@@ -235,7 +237,7 @@ func FallbackString(statusCode int, text string) FallbackFunc {
 
 // FallbackJSON constructs a [FallbackFunc] returning JSON-encoded data with the specified status code.
 func FallbackJSON(statusCode int, data any) FallbackFunc {
-	return func(req *http.Request, origErr error) (*http.Response, error) {
+	return func(req *http.Request, _ error) (*http.Response, error) {
 		bodyBytes, err := json.Marshal(data)
 		if err != nil {
 			return nil, err
@@ -257,9 +259,9 @@ func FallbackJSON(statusCode int, data any) FallbackFunc {
 
 // RetryOverride holds request-scoped retry parameters that take precedence over global middleware defaults.
 type RetryOverride struct {
-	MaxAttempts int
-	Backoff     time.Duration
 	Condition   RetryCondition
+	Backoff     time.Duration
+	MaxAttempts int
 }
 
 // GetRetryOverride retrieves the per-request [RetryOverride] configuration from context.
