@@ -7,10 +7,11 @@ set -euo pipefail
 
 CHROME_FILE="fingerprint/profiles/chrome/chrome.go"
 FIREFOX_FILE="fingerprint/profiles/firefox/firefox.go"
+SAFARI_FILE="fingerprint/profiles/safari/safari.go"
 
-if [ ! -f "$CHROME_FILE" ] || [ ! -f "$FIREFOX_FILE" ]; then
+if [ ! -f "$CHROME_FILE" ] || [ ! -f "$FIREFOX_FILE" ] || [ ! -f "$SAFARI_FILE" ]; then
     echo "ERROR: Target files not found! Check directory structure."
-    echo "  Expected: $CHROME_FILE and $FIREFOX_FILE"
+    echo "  Expected: $CHROME_FILE, $FIREFOX_FILE and $SAFARI_FILE"
     exit 1
 fi
 
@@ -76,10 +77,14 @@ CURRENT_IOS_CHROME=$(grep -oP 'iPhone; CPU iPhone OS \K[0-9_]+' "$CHROME_FILE" |
 CURRENT_IOS_FIREFOX=$(grep -oP 'iPhone; CPU iPhone OS \K[0-9_]+' "$FIREFOX_FILE" | head -1 || echo "")
 CURRENT_ANDROID_FIREFOX=$(grep -oP 'Android \K[0-9]+(?=;)' "$FIREFOX_FILE" | head -1 || echo "")
 
+CURRENT_IOS_SAFARI=$(grep -oP 'iPhone; CPU iPhone OS \K[0-9_]+' "$SAFARI_FILE" | head -1 || echo "")
+CURRENT_SAFARI_VERSION=$(grep -oP 'Version/\K[0-9]+\.[0-9]+' "$SAFARI_FILE" | head -1 || echo "")
+
 echo ""
 echo "Current Chrome: $CURRENT_CHROME_MAJOR (win build=$CURRENT_CHROME_WIN_BUILD)"
 echo "Current Firefox: $CURRENT_FIREFOX_MAJORMINOR"
-echo "Current iOS (Chrome UA): $CURRENT_IOS_CHROME | (Firefox UA): $CURRENT_IOS_FIREFOX"
+echo "Current Safari: $CURRENT_SAFARI_VERSION"
+echo "Current iOS (Chrome UA): $CURRENT_IOS_CHROME | (Firefox UA): $CURRENT_IOS_FIREFOX | (Safari UA): $CURRENT_IOS_SAFARI"
 echo "Current Android (Firefox UA): $CURRENT_ANDROID_FIREFOX"
 echo ""
 
@@ -123,6 +128,22 @@ else
     echo "Firefox is up to date ($CURRENT_FIREFOX_MAJORMINOR)."
 fi
 
+# ---------- Update Safari User-Agent Strings ----------
+SAFARI_VERSION=""
+if [ -n "$IOS_FULL" ]; then
+    SAFARI_VERSION=$(get_major_minor "$IOS_FULL")
+    if [ -n "$CURRENT_SAFARI_VERSION" ] && [ "$SAFARI_VERSION" != "$CURRENT_SAFARI_VERSION" ]; then
+        echo "Updating Safari strings: $CURRENT_SAFARI_VERSION -> $SAFARI_VERSION"
+        UPDATED=true
+
+        sed -i "s/Version\/${CURRENT_SAFARI_VERSION}/Version\/${SAFARI_VERSION}/g" "$SAFARI_FILE"
+
+        echo "Safari updated."
+    else
+        echo "Safari is up to date ($CURRENT_SAFARI_VERSION)."
+    fi
+fi
+
 # ---------- Update iOS OS version ----------
 if [ -n "$IOS_UA" ]; then
     if [ -n "$CURRENT_IOS_CHROME" ] && [ "$IOS_UA" != "$CURRENT_IOS_CHROME" ]; then
@@ -134,6 +155,12 @@ if [ -n "$IOS_UA" ]; then
     if [ -n "$CURRENT_IOS_FIREFOX" ] && [ "$IOS_UA" != "$CURRENT_IOS_FIREFOX" ]; then
         echo "Updating Firefox iOS OS: $CURRENT_IOS_FIREFOX -> $IOS_UA"
         sed -i "s/iPhone; CPU iPhone OS ${CURRENT_IOS_FIREFOX}/iPhone; CPU iPhone OS ${IOS_UA}/g" "$FIREFOX_FILE"
+        UPDATED=true
+    fi
+
+    if [ -n "$CURRENT_IOS_SAFARI" ] && [ "$IOS_UA" != "$CURRENT_IOS_SAFARI" ]; then
+        echo "Updating Safari iOS OS: $CURRENT_IOS_SAFARI -> $IOS_UA"
+        sed -i "s/iPhone; CPU iPhone OS ${CURRENT_IOS_SAFARI}/iPhone; CPU iPhone OS ${IOS_UA}/g" "$SAFARI_FILE"
         UPDATED=true
     fi
 fi
@@ -173,7 +200,7 @@ fi
 
 # ---------- Compare TLS ClientHello specs against utls auto ----------
 echo ""
-echo "Comparing TLS ClientHello specs against utls.HelloChrome_Auto / HelloFirefox_Auto..."
+echo "Comparing TLS ClientHello specs against utls.HelloChrome_Auto / HelloFirefox_Auto / HelloSafari_Auto..."
 
 SPEC_DRIFT=false
 SPEC_DIFF_OUTPUT=""
@@ -204,6 +231,7 @@ if [ -n "${GITHUB_OUTPUT:-}" ]; then
     echo "chrome_android_version=$CHROME_ANDROID_RAW"  >> "$GITHUB_OUTPUT"
     echo "chrome_ios_version=$CHROME_IOS_RAW"          >> "$GITHUB_OUTPUT"
     echo "firefox_version=$FIREFOX_RAW"                >> "$GITHUB_OUTPUT"
+    echo "safari_version=${SAFARI_VERSION:-$CURRENT_SAFARI_VERSION}" >> "$GITHUB_OUTPUT"
     echo "utls_version=${UTLS_LATEST:-unknown}"        >> "$GITHUB_OUTPUT"
     echo "utls_updated=${UTLS_UPDATED}"                >> "$GITHUB_OUTPUT"
     echo "spec_drift=${SPEC_DRIFT}"                    >> "$GITHUB_OUTPUT"
@@ -234,7 +262,7 @@ if [ "$UPDATED" = "true" ]; then
     if command -v go &>/dev/null; then
         if ! go build ./...; then
             echo "ERROR: Build failed! Reverting..."
-            git checkout -- "$CHROME_FILE" "$FIREFOX_FILE" go.mod go.sum 2>/dev/null || true
+            git checkout -- "$CHROME_FILE" "$FIREFOX_FILE" "$SAFARI_FILE" go.mod go.sum 2>/dev/null || true
             echo "updated=false" >> "${GITHUB_OUTPUT:-/dev/null}"
             exit 1
         fi
@@ -243,7 +271,7 @@ if [ "$UPDATED" = "true" ]; then
         echo "Running profile tests..."
         if ! go test ./fingerprint/profiles/...; then
             echo "ERROR: Profile tests failed! Reverting..."
-            git checkout -- "$CHROME_FILE" "$FIREFOX_FILE" go.mod go.sum 2>/dev/null || true
+            git checkout -- "$CHROME_FILE" "$FIREFOX_FILE" "$SAFARI_FILE" go.mod go.sum 2>/dev/null || true
             echo "updated=false" >> "${GITHUB_OUTPUT:-/dev/null}"
             exit 1
         fi
@@ -252,7 +280,7 @@ if [ "$UPDATED" = "true" ]; then
         echo "Running Live Canary Test against tls.peet.ws..."
         if ! go run ./scripts/canary-test/; then
             echo "ERROR: Canary test failed! Reverting..."
-            git checkout -- "$CHROME_FILE" "$FIREFOX_FILE" go.mod go.sum 2>/dev/null || true
+            git checkout -- "$CHROME_FILE" "$FIREFOX_FILE" "$SAFARI_FILE" go.mod go.sum 2>/dev/null || true
             echo "updated=false" >> "${GITHUB_OUTPUT:-/dev/null}"
             exit 1
         fi

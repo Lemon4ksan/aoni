@@ -49,7 +49,7 @@ update-browsers: ## Dry-run the browser version update script (no files changed)
 	@printf "$(CYAN)Updating browser versions (dry-run)...$(RESET)\n"
 	bash scripts/update-browser-versions.sh --dry-run
 
-update-browsers-apply: ## Apply browser version updates (Chrome, Firefox, iOS, Android, utls)
+update-browsers-apply: ## Apply browser version updates (Chrome, Firefox, Safari, iOS, Android, utls)
 	@printf "$(CYAN)Updating browser versions...$(RESET)\n"
 	bash scripts/update-browser-versions.sh
 

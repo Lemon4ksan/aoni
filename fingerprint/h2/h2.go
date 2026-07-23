@@ -391,7 +391,7 @@ func (c *framedConn) buildWindowUpdateFrame(increment uint32) []byte {
 	return frame
 }
 
-// buildSettingsFrame constructs an HTTP/2 SETTINGS frame with browser-specific values.
+// buildSettingsFrame constructs an HTTP/2 SETTINGS frame with strict Chrome parameter sequence ordering.
 func (c *framedConn) buildSettingsFrame() []byte {
 	var payload bytes.Buffer
 
@@ -399,47 +399,31 @@ func (c *framedConn) buildSettingsFrame() []byte {
 		writeSettingEntry(&payload, 0x1, c.settings.HeaderTableSize)
 	}
 
-	if c.settings.EnablePush > 0 || c.settings.MaxConcurrentStreams > 0 ||
-		c.settings.InitialWindowSize > 0 || c.settings.MaxFrameSize > 0 ||
-		c.settings.MaxHeaderListSize > 0 {
-		// Chrome sends ENABLE_PUSH=0
-		if c.settings.EnablePush > 0 || c.settings.MaxConcurrentStreams > 0 ||
-			c.settings.InitialWindowSize > 0 || c.settings.MaxFrameSize > 0 ||
-			c.settings.MaxHeaderListSize > 0 {
-			writeSettingEntry(&payload, 0x2, c.settings.EnablePush)
-		}
+	if c.settings.EnablePush > 0 || c.settings.InitialWindowSize > 0 {
+		writeSettingEntry(&payload, 0x2, c.settings.EnablePush)
+	}
 
-		if c.settings.MaxConcurrentStreams > 0 {
-			writeSettingEntry(&payload, 0x3, c.settings.MaxConcurrentStreams)
-		}
+	if c.settings.MaxConcurrentStreams > 0 {
+		writeSettingEntry(&payload, 0x3, c.settings.MaxConcurrentStreams)
+	}
 
-		if c.settings.InitialWindowSize > 0 {
-			writeSettingEntry(&payload, 0x4, c.settings.InitialWindowSize)
-		}
+	if c.settings.InitialWindowSize > 0 {
+		writeSettingEntry(&payload, 0x4, c.settings.InitialWindowSize)
+	}
 
-		if c.settings.MaxFrameSize > 0 {
-			writeSettingEntry(&payload, 0x5, c.settings.MaxFrameSize)
-		}
+	if c.settings.MaxFrameSize > 0 {
+		writeSettingEntry(&payload, 0x5, c.settings.MaxFrameSize)
+	}
 
-		if c.settings.MaxHeaderListSize > 0 {
-			writeSettingEntry(&payload, 0x6, c.settings.MaxHeaderListSize)
-		}
+	if c.settings.MaxHeaderListSize > 0 {
+		writeSettingEntry(&payload, 0x6, c.settings.MaxHeaderListSize)
 	}
 
 	frame := make([]byte, 9+payload.Len())
-	// Length (3 bytes)
 	frame[0] = byte(payload.Len() >> 16) //nolint:gosec
 	frame[1] = byte(payload.Len() >> 8)  //nolint:gosec
 	frame[2] = byte(payload.Len())       //nolint:gosec
-	// Type: SETTINGS (0x4)
-	frame[3] = 0x4
-	// Flags: none
-	frame[4] = 0x0
-	// Stream ID: 0
-	frame[5] = 0x0
-	frame[6] = 0x0
-	frame[7] = 0x0
-	frame[8] = 0x0
+	frame[3] = 0x4                       // SETTINGS frame type
 
 	copy(frame[9:], payload.Bytes())
 

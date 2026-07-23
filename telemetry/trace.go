@@ -31,7 +31,7 @@ import (
 // GenerateCorrelationID creates a fast, monotonic, and collision-resistant 16-character Base36 string ID.
 // Uses microsecond timestamp precision multiplied to isolate random entropy bits under concurrency.
 func GenerateCorrelationID() string {
-	timestamp := uint64(time.Now().UnixMicro())*1000 + uint64(rand.Int64N(1000))
+	timestamp := uint64(time.Now().UnixMicro())*1000 + uint64(rand.Int64N(1000)) //nolint:gosec
 	return strings.ToUpper(strconv.FormatUint(timestamp, 36))
 }
 

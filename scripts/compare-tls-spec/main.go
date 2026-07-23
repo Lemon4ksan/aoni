@@ -26,6 +26,7 @@ import (
 	"github.com/lemon4ksan/aoni/fingerprint/profiles"
 	"github.com/lemon4ksan/aoni/fingerprint/profiles/chrome"
 	"github.com/lemon4ksan/aoni/fingerprint/profiles/firefox"
+	"github.com/lemon4ksan/aoni/fingerprint/profiles/safari"
 )
 
 func main() {
@@ -73,8 +74,29 @@ func main() {
 		fmt.Println("  ✓ No differences found")
 	}
 
+	autoSafari, err := utls.UTLSIdToSpec(utls.HelloSafari_Auto)
+	if err != nil {
+		fatalf("cannot resolve HelloSafari_Auto: %v", err)
+	}
+
+	projectSafari := specFromVariant("Safari", safari.Desktop)
+
+	fmt.Println("\n=== Safari TLS ClientHello Comparison ===")
+	fmt.Printf("    reference : utls.HelloSafari_Auto\n")
+	fmt.Printf("    project   : safari.Desktop.HelloID → UTLSIdToSpec\n\n")
+
+	if diffs := compareSpecs(autoSafari, *projectSafari); len(diffs) > 0 {
+		for _, d := range diffs {
+			fmt.Println(" ", d)
+		}
+
+		exitCode = 1
+	} else {
+		fmt.Println("  ✓ No differences found")
+	}
+
 	if exitCode != 0 {
-		fmt.Print("\n⚠  Differences detected. Update the HelloSpec in chrome.go / firefox.go\n")
+		fmt.Print("\n⚠  Differences detected. Update the HelloSpec in chrome.go / firefox.go / safari.go\n")
 		fmt.Print("   to match the utls auto spec before merging.\n")
 	}
 

@@ -16,6 +16,26 @@ import (
 	"strings"
 )
 
+// ErrInvalidP0fSignature is returned when a p0f signature string violates the 8-field format.
+var ErrInvalidP0fSignature = errors.New("aoni p0f: invalid p0f signature string")
+
+// Error is returned when a p0f signature string violates the 8-field format.
+type Error struct {
+	Field string
+	Val   string
+	Err   error
+}
+
+func (e *Error) Error() string {
+	if e == nil {
+		return "<nil>"
+	}
+
+	return "aoni p0f: field " + e.Field + " (" + e.Val + "): " + e.Err.Error()
+}
+
+func (e *Error) Unwrap() error { return e.Err }
+
 // WindowType describes how the TCP window size is computed.
 type WindowType int
 
@@ -32,6 +52,21 @@ const (
 	WindowAny
 )
 
+// Predefined p0f signatures for common OS versions.
+var (
+	Linux311  = MustParse("*:64:0:*:mss*20,10:mss,sok,ts,nop,ws:df,id+:0")
+	Linux3x   = MustParse("*:64:0:*:mss*10,0:mss,sok,ts,nop,ws:df,id+:0")
+	Linux26   = MustParse("*:64:0:*:mss*4,7:mss,sok,ts,nop,ws:df,id+:0")
+	Linux24   = MustParse("*:64:0:*:mss*4,0:mss,sok,ts,nop,ws:df,id+:0")
+	WindowsXP = MustParse("*:128:0:*:16384,0:mss,nop,nop,sok:df,id+:0")
+	Windows7  = MustParse("*:128:0:*:8192,8:mss,nop,ws,nop,nop,sok:df,id+:0")
+	Windows10 = MustParse("*:128:0:*:8192,2:mss,nop,ws,nop,nop,sok:df,id+:0")
+	MacOS     = MustParse("*:64:0:*:65535,6:mss,sok,ts,nop,ws:df+:0")
+	Android   = MustParse("*:64:0:*:mss*44,1:mss,sok,ts,nop,ws:df,id+:0")
+	IOS       = MustParse("*:64:0:*:65535,3:mss,nop,ws,sok,ts:df,id+:0")
+	Nmap      = MustParse("*:64-:0:265:512,0:mss,sok,ts:ack+:0")
+)
+
 // Signature represents a parsed p0f TCP fingerprint.
 type Signature struct {
 	IPVersion   string     // "4", "6", "*"
@@ -45,6 +80,39 @@ type Signature struct {
 	Options     []string   // TCP options layout (e.g. ["mss","sok","ts","nop","ws"])
 	Quirks      []string   // IP/TCP quirks (e.g. ["df","id+"])
 	Payload     string     // "0", "+", or "*"
+}
+
+// String reconstructs the p0f signature string.
+func (s *Signature) String() string {
+	ttlStr := strconv.Itoa(s.TTL)
+	if s.HasTTLMinus {
+		ttlStr += "-"
+	}
+
+	mssStr := "*"
+	if s.MSS != -1 {
+		mssStr = strconv.Itoa(s.MSS)
+	}
+
+	var windowStr string
+	switch s.WindowType {
+	case WindowAny:
+		windowStr = "*,-1"
+	case WindowMSS:
+		windowStr = "mss*" + strconv.Itoa(s.WindowSize) + "," + strconv.Itoa(s.WindowScale)
+	default:
+		windowStr = strconv.Itoa(s.WindowSize) + "," + strconv.Itoa(s.WindowScale)
+	}
+
+	return s.IPVersion + ":" + ttlStr + ":" + strconv.Itoa(
+		s.IPOptLen,
+	) + ":" + mssStr + ":" + windowStr + ":" + strings.Join(
+		s.Options,
+		",",
+	) + ":" + strings.Join(
+		s.Quirks,
+		",",
+	) + ":" + s.Payload
 }
 
 // Parse parses a p0f signature string in the format:
@@ -191,52 +259,3 @@ func MustParse(sig string) *Signature {
 
 	return s
 }
-
-// String reconstructs the p0f signature string.
-func (s *Signature) String() string {
-	ttlStr := strconv.Itoa(s.TTL)
-	if s.HasTTLMinus {
-		ttlStr += "-"
-	}
-
-	mssStr := "*"
-	if s.MSS != -1 {
-		mssStr = strconv.Itoa(s.MSS)
-	}
-
-	var windowStr string
-	switch s.WindowType {
-	case WindowAny:
-		windowStr = "*,-1"
-	case WindowMSS:
-		windowStr = fmt.Sprintf("mss*%d,%d", s.WindowSize, s.WindowScale)
-	default:
-		windowStr = fmt.Sprintf("%d,%d", s.WindowSize, s.WindowScale)
-	}
-
-	return fmt.Sprintf("%s:%s:%d:%s:%s:%s:%s:%s",
-		s.IPVersion,
-		ttlStr,
-		s.IPOptLen,
-		mssStr,
-		windowStr,
-		strings.Join(s.Options, ","),
-		strings.Join(s.Quirks, ","),
-		s.Payload,
-	)
-}
-
-// Predefined p0f signatures for common OS versions.
-var (
-	Linux311  = MustParse("*:64:0:*:mss*20,10:mss,sok,ts,nop,ws:df,id+:0")
-	Linux3x   = MustParse("*:64:0:*:mss*10,0:mss,sok,ts,nop,ws:df,id+:0")
-	Linux26   = MustParse("*:64:0:*:mss*4,7:mss,sok,ts,nop,ws:df,id+:0")
-	Linux24   = MustParse("*:64:0:*:mss*4,0:mss,sok,ts,nop,ws:df,id+:0")
-	WindowsXP = MustParse("*:128:0:*:16384,0:mss,nop,nop,sok:df,id+:0")
-	Windows7  = MustParse("*:128:0:*:8192,8:mss,nop,ws,nop,nop,sok:df,id+:0")
-	Windows10 = MustParse("*:128:0:*:8192,2:mss,nop,ws,nop,nop,sok:df,id+:0")
-	MacOS     = MustParse("*:64:0:*:65535,6:mss,sok,ts,nop,ws:df+:0")
-	Android   = MustParse("*:64:0:*:mss*44,1:mss,sok,ts,nop,ws:df,id+:0")
-	IOS       = MustParse("*:64:0:*:65535,3:mss,nop,ws,sok,ts:df,id+:0")
-	Nmap      = MustParse("*:64-:0:265:512,0:mss,sok,ts:ack+:0")
-)

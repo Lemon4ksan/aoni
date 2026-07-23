@@ -10,7 +10,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"google.golang.org/protobuf/types/known/wrapperspb"
+	"google.golang.org/protobuf/types/known/typepb"
 )
 
 func TestValueError_FormattingAndUnwrap(t *testing.T) {
@@ -63,29 +63,29 @@ func TestProtobufIntegration(t *testing.T) {
 	t.Run("top_level_proto_message", func(t *testing.T) {
 		t.Parallel()
 
-		msg := wrapperspb.String("proto_query_test")
+		msg := &typepb.Option{Name: "proto_query_test"}
 		v, err := StructToValues(msg)
 		require.NoError(t, err)
-		assert.Equal(t, "proto_query_test", v.Get("value"))
+		assert.Equal(t, "proto_query_test", v.Get("name"))
 	})
 
 	t.Run("struct_with_nested_proto_field", func(t *testing.T) {
 		t.Parallel()
 
 		type RequestWithProto struct {
-			Query string                  `url:"q"`
-			Meta  *wrapperspb.StringValue `url:"meta"`
+			Query string         `url:"q"`
+			Meta  *typepb.Option `url:"meta"`
 		}
 
 		req := RequestWithProto{
 			Query: "aoni",
-			Meta:  wrapperspb.String("nested_proto_val"),
+			Meta:  &typepb.Option{Name: "nested_proto_val"},
 		}
 
 		v, err := StructToValues(req)
 		require.NoError(t, err)
 		assert.Equal(t, "aoni", v.Get("q"))
-		assert.JSONEq(t, `{"value":"nested_proto_val"}`, v.Get("meta"))
+		assert.JSONEq(t, `{"name":"nested_proto_val"}`, v.Get("meta"))
 	})
 }
 

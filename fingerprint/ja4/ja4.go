@@ -8,14 +8,35 @@ import (
 	"crypto/sha256"
 	"encoding/binary"
 	"encoding/hex"
-	"fmt"
+	"errors"
 	"sort"
 	"strings"
 )
 
-const hashLen = 12
+// ErrInvalidJA4Input is returned when raw bytes or ClientHello structures cannot be parsed for JA4 calculation.
+var ErrInvalidJA4Input = errors.New("ja4: invalid input payload for fingerprint computation")
 
-// tlsVersionMap maps TLS version wire values to JA4 version strings.
+const (
+	hashLen  = 12
+	hexTable = "0123456789abcdef"
+)
+
+func formatHex4(v uint16) string {
+	var buf [4]byte
+
+	buf[0] = hexTable[(v>>12)&0x0f]
+	buf[1] = hexTable[(v>>8)&0x0f]
+	buf[2] = hexTable[(v>>4)&0x0f]
+	buf[3] = hexTable[v&0x0f]
+
+	return string(buf[:])
+}
+
+func hash12(s string) string {
+	h := sha256.Sum256([]byte(s))
+	return hex.EncodeToString(h[:6])
+}
+
 var tlsVersionMap = map[uint16]string{
 	0x0304: "13",
 	0x0303: "12",
@@ -25,32 +46,15 @@ var tlsVersionMap = map[uint16]string{
 	0x0002: "s2",
 }
 
-// greaseValues contains the 16 GREASE (Generate Random Extensions And Sustain Extensibility) values.
-// GREASE values are used by TLS implementations to ensure protocol extensibility
-// and must be excluded from JA4 fingerprint computation.
-var greaseValues = map[uint16]bool{
-	0x0a0a: true,
-	0x1a1a: true,
-	0x2a2a: true,
-	0x3a3a: true,
-	0x4a4a: true,
-	0x5a5a: true,
-	0x6a6a: true,
-	0x7a7a: true,
-	0x8a8a: true,
-	0x9a9a: true,
-	0xaaaa: true,
-	0xbaba: true,
-	0xcaca: true,
-	0xdada: true,
-	0xeaea: true,
-	0xfafa: true,
+var greaseValues = map[uint16]struct{}{
+	0x0a0a: {}, 0x1a1a: {}, 0x2a2a: {}, 0x3a3a: {},
+	0x4a4a: {}, 0x5a5a: {}, 0x6a6a: {}, 0x7a7a: {},
+	0x8a8a: {}, 0x9a9a: {}, 0xaaaa: {}, 0xbaba: {},
+	0xcaca: {}, 0xdada: {}, 0xeaea: {}, 0xfafa: {},
 }
 
 // IsGREASE reports whether v is a TLS GREASE value.
-func IsGREASE(v uint16) bool {
-	return greaseValues[v]
-}
+func IsGREASE(v uint16) bool { _, ok := greaseValues[v]; return ok }
 
 // Report holds both TLS (JA4) and HTTP (JA4H) fingerprints computed from a request.
 type Report struct {
@@ -106,15 +110,25 @@ func ComputeJA4(
 	extCount := min(len(filteredExts), 99)
 
 	alpn := computeALPN(alpnProtocols)
-
 	cipherHash := computeCipherHash(filteredCiphers)
-
 	extHash := computeExtHash(filteredExts, sigAlgorithms)
 
-	return fmt.Sprintf("%s%s%s%02d%02d%s_%s_%s",
-		protocol, version, sniChar, cipherCount, extCount, alpn,
-		cipherHash, extHash,
-	)
+	var sb strings.Builder
+	sb.Grow(36)
+	sb.WriteString(protocol)
+	sb.WriteString(version)
+	sb.WriteString(sniChar)
+
+	writePaddedTwoDigits(&sb, cipherCount)
+	writePaddedTwoDigits(&sb, extCount)
+
+	sb.WriteString(alpn)
+	sb.WriteByte('_')
+	sb.WriteString(cipherHash)
+	sb.WriteByte('_')
+	sb.WriteString(extHash)
+
+	return sb.String()
 }
 
 // ComputeJA4H computes an HTTP client fingerprint.
@@ -169,167 +183,34 @@ func ComputeJA4H(
 	lang := computeLanguage(acceptLanguage)
 	headersHash := computeHeadersHash(headers)
 
-	cookieNamesHash := hash12(strings.Join(cookieNames, ","))
-	if len(cookieNames) == 0 {
-		cookieNamesHash = "000000000000"
+	cookieNamesHash := "000000000000"
+	if len(cookieNames) > 0 {
+		cookieNamesHash = hash12(strings.Join(cookieNames, ","))
 	}
 
-	cookieValuesHash := hash12(strings.Join(cookieValues, ","))
-	if len(cookieValues) == 0 {
-		cookieValuesHash = "000000000000"
+	cookieValuesHash := "000000000000"
+	if len(cookieValues) > 0 {
+		cookieValuesHash = hash12(strings.Join(cookieValues, ","))
 	}
 
-	return fmt.Sprintf("%s%s%s%s%02d%s_%s_%s_%s",
-		methodStr, version, cookie, referer, headerCount, lang,
-		headersHash, cookieNamesHash, cookieValuesHash,
-	)
-}
+	var sb strings.Builder
+	sb.Grow(52)
+	sb.WriteString(methodStr)
+	sb.WriteString(version)
+	sb.WriteString(cookie)
+	sb.WriteString(referer)
 
-// FilterGREASE returns a new slice with GREASE values removed.
-func FilterGREASE(vals []uint16) []uint16 {
-	result := make([]uint16, 0, len(vals))
-	for _, v := range vals {
-		if !IsGREASE(v) {
-			result = append(result, v)
-		}
-	}
+	writePaddedTwoDigits(&sb, headerCount)
 
-	return result
-}
+	sb.WriteString(lang)
+	sb.WriteByte('_')
+	sb.WriteString(headersHash)
+	sb.WriteByte('_')
+	sb.WriteString(cookieNamesHash)
+	sb.WriteByte('_')
+	sb.WriteString(cookieValuesHash)
 
-// computeVersion returns the JA4 version string from supported_versions.
-func computeVersion(supportedVersions []uint16) string {
-	filtered := FilterGREASE(supportedVersions)
-	if len(filtered) == 0 {
-		return "00"
-	}
-
-	highest := filtered[0]
-	for _, v := range filtered[1:] {
-		if v > highest {
-			highest = v
-		}
-	}
-
-	if v, ok := tlsVersionMap[highest]; ok {
-		return v
-	}
-
-	return "00"
-}
-
-// computeALPN returns the JA4 ALPN string (first + last alphanumeric char of first protocol).
-func computeALPN(protocols []string) string {
-	if len(protocols) == 0 || protocols[0] == "" {
-		return "00"
-	}
-
-	first := protocols[0]
-	if len(first) == 0 {
-		return "00"
-	}
-
-	return string(first[0]) + string(first[len(first)-1])
-}
-
-// computeCipherHash computes the JA4 cipher hash from filtered cipher suites.
-func computeCipherHash(ciphers []uint16) string {
-	if len(ciphers) == 0 {
-		return strings.Repeat("0", hashLen)
-	}
-
-	hexes := make([]string, len(ciphers))
-	for i, c := range ciphers {
-		hexes[i] = fmt.Sprintf("%04x", c)
-	}
-
-	sort.Strings(hexes)
-
-	return hash12(strings.Join(hexes, ","))
-}
-
-// computeExtHash computes the JA4 extension hash from filtered extensions and signature algorithms.
-func computeExtHash(extensions, sigAlgorithms []uint16) string {
-	// Filter out SNI (0x0000) and ALPN (0x0010)
-	exts := make([]string, 0, len(extensions))
-	for _, e := range extensions {
-		if e == 0x0000 || e == 0x0010 {
-			continue
-		}
-
-		exts = append(exts, fmt.Sprintf("%04x", e))
-	}
-
-	if len(exts) == 0 && len(sigAlgorithms) == 0 {
-		return strings.Repeat("0", hashLen)
-	}
-
-	sort.Strings(exts)
-
-	// Append signature algorithms in original order (unsorted)
-	if len(sigAlgorithms) > 0 {
-		sigParts := make([]string, len(sigAlgorithms))
-		for i, s := range sigAlgorithms {
-			sigParts[i] = fmt.Sprintf("%04x", s)
-		}
-
-		return hash12(strings.Join(exts, ",") + "_" + strings.Join(sigParts, ","))
-	}
-
-	return hash12(strings.Join(exts, ","))
-}
-
-// computeLanguage returns the first 4 alphanumeric characters of the Accept-Language value.
-func computeLanguage(lang string) string {
-	if lang == "" {
-		return "0000"
-	}
-
-	// Strip whitespace, take first 4 alphanumeric chars
-	cleaned := strings.Map(func(r rune) rune {
-		if r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9' {
-			return r
-		}
-
-		return -1
-	}, lang)
-
-	if len(cleaned) == 0 {
-		return "0000"
-	}
-
-	if len(cleaned) > 4 {
-		cleaned = cleaned[:4]
-	}
-
-	// Pad to 4 chars
-	for len(cleaned) < 4 {
-		cleaned += "0"
-	}
-
-	return strings.ToLower(cleaned)
-}
-
-// computeHeadersHash computes the JA4H headers hash.
-func computeHeadersHash(headers []string) string {
-	if len(headers) == 0 {
-		return strings.Repeat("0", hashLen)
-	}
-
-	lower := make([]string, len(headers))
-	for i, h := range headers {
-		lower[i] = strings.ToLower(h)
-	}
-
-	sort.Strings(lower)
-
-	return hash12(strings.Join(lower, ","))
-}
-
-// hash12 returns the first 12 hex characters of the SHA-256 hash of s.
-func hash12(s string) string {
-	h := sha256.Sum256([]byte(s))
-	return hex.EncodeToString(h[:6])
+	return sb.String()
 }
 
 // ParseExtensionsFromRaw parses extension IDs from a raw TLS ClientHello message
@@ -450,4 +331,148 @@ func ParseExtensionsFromRaw(raw []byte) (extensions, sigAlgorithms []uint16) {
 	}
 
 	return extensions, sigAlgorithms
+}
+
+func computeLanguage(lang string) string {
+	if lang == "" {
+		return "0000"
+	}
+
+	cleaned := strings.Map(func(r rune) rune {
+		if (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') {
+			return r
+		}
+
+		return -1
+	}, lang)
+
+	if len(cleaned) == 0 {
+		return "0000"
+	}
+
+	if len(cleaned) > 4 {
+		cleaned = cleaned[:4]
+	}
+
+	for len(cleaned) < 4 {
+		cleaned += "0"
+	}
+
+	return strings.ToLower(cleaned)
+}
+
+func computeHeadersHash(headers []string) string {
+	if len(headers) == 0 {
+		return strings.Repeat("0", hashLen)
+	}
+
+	lower := make([]string, len(headers))
+	for i, h := range headers {
+		lower[i] = strings.ToLower(h)
+	}
+
+	sort.Strings(lower)
+
+	return hash12(strings.Join(lower, ","))
+}
+
+func writePaddedTwoDigits(sb *strings.Builder, n int) {
+	if n < 10 {
+		sb.WriteByte('0')
+		sb.WriteByte(byte('0' + n)) //nolint:gosec
+		return
+	}
+
+	sb.WriteByte(byte('0' + n/10)) //nolint:gosec
+	sb.WriteByte(byte('0' + n%10)) //nolint:gosec
+}
+
+func computeCipherHash(ciphers []uint16) string {
+	if len(ciphers) == 0 {
+		return strings.Repeat("0", hashLen)
+	}
+
+	hexes := make([]string, len(ciphers))
+	for i, c := range ciphers {
+		hexes[i] = formatHex4(c)
+	}
+
+	sort.Strings(hexes)
+
+	return hash12(strings.Join(hexes, ","))
+}
+
+func computeExtHash(extensions, sigAlgorithms []uint16) string {
+	exts := make([]string, 0, len(extensions))
+	for _, e := range extensions {
+		if e == 0x0000 || e == 0x0010 {
+			continue
+		}
+
+		exts = append(exts, formatHex4(e))
+	}
+
+	if len(exts) == 0 && len(sigAlgorithms) == 0 {
+		return strings.Repeat("0", hashLen)
+	}
+
+	sort.Strings(exts)
+
+	if len(sigAlgorithms) > 0 {
+		sigParts := make([]string, len(sigAlgorithms))
+		for i, s := range sigAlgorithms {
+			sigParts[i] = formatHex4(s)
+		}
+
+		return hash12(strings.Join(exts, ",") + "_" + strings.Join(sigParts, ","))
+	}
+
+	return hash12(strings.Join(exts, ","))
+}
+
+// FilterGREASE removes GREASE values from the given slice of uint16 values.
+func FilterGREASE(vals []uint16) []uint16 {
+	result := make([]uint16, 0, len(vals))
+	for _, v := range vals {
+		if !IsGREASE(v) {
+			result = append(result, v)
+		}
+	}
+
+	return result
+}
+
+// computeVersion returns the JA4 version string from supported_versions.
+func computeVersion(supportedVersions []uint16) string {
+	filtered := FilterGREASE(supportedVersions)
+	if len(filtered) == 0 {
+		return "00"
+	}
+
+	highest := filtered[0]
+	for _, v := range filtered[1:] {
+		if v > highest {
+			highest = v
+		}
+	}
+
+	if v, ok := tlsVersionMap[highest]; ok {
+		return v
+	}
+
+	return "00"
+}
+
+// computeALPN returns the JA4 ALPN string (first + last alphanumeric char of first protocol).
+func computeALPN(protocols []string) string {
+	if len(protocols) == 0 || protocols[0] == "" {
+		return "00"
+	}
+
+	first := protocols[0]
+	if len(first) == 0 {
+		return "00"
+	}
+
+	return string(first[0]) + string(first[len(first)-1])
 }

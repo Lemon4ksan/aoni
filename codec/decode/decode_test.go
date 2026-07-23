@@ -16,6 +16,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/protobuf/proto"
+	"google.golang.org/protobuf/types/known/typepb"
 	"google.golang.org/protobuf/types/known/wrapperspb"
 )
 
@@ -181,21 +182,21 @@ func TestProtoJSONDecoder_Decode(t *testing.T) {
 	t.Run("success", func(t *testing.T) {
 		t.Parallel()
 
-		jsonPayload := `{"value":"proto_json_test","unknownField":123}`
+		jsonPayload := `{"name":"proto_json_test","unknownField":123}`
 
-		var target wrapperspb.StringValue
+		var target typepb.Option
 
 		err := ProtoJSONDecoder.Decode(strings.NewReader(jsonPayload), &target)
 		require.NoError(t, err)
-		assert.Equal(t, "proto_json_test", target.GetValue())
+		assert.Equal(t, "proto_json_test", target.GetName())
 	})
 
 	t.Run("invalid_json", func(t *testing.T) {
 		t.Parallel()
 
-		var target wrapperspb.StringValue
+		var target typepb.Option
 
-		err := ProtoJSONDecoder.Decode(strings.NewReader(`{"value":`), &target)
+		err := ProtoJSONDecoder.Decode(strings.NewReader(`{"name":`), &target)
 		assert.Error(t, err)
 	})
 }

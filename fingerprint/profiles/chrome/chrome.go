@@ -2,6 +2,7 @@
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
+// Package chrome provides browser profile variants matching Chromium engine.
 package chrome
 
 import (
@@ -232,7 +233,7 @@ var Mobile = &profiles.Variant{
 func Boundary() string {
 	prefix := "----WebKitFormBoundary"
 
-	alphaNumericEncodingMap := []byte{
+	alphaNumericEncodingMap := [...]byte{
 		0x41, 0x42, 0x43, 0x44, 0x45, 0x46, 0x47, 0x48,
 		0x49, 0x4A, 0x4B, 0x4C, 0x4D, 0x4E, 0x4F, 0x50,
 		0x51, 0x52, 0x53, 0x54, 0x55, 0x56, 0x57, 0x58,
@@ -243,21 +244,23 @@ func Boundary() string {
 		0x34, 0x35, 0x36, 0x37, 0x38, 0x39, 0x41, 0x42,
 	}
 
-	boundary := []byte(prefix)
+	var randomBytes [16]byte
 
-	for range 4 {
-		randomBytes := make([]byte, 4)
-		rand.Read(randomBytes)
+	_, _ = rand.Read(randomBytes[:])
 
-		randomness := uint32(randomBytes[0])<<24 |
-			uint32(randomBytes[1])<<16 |
-			uint32(randomBytes[2])<<8 |
-			uint32(randomBytes[3])
+	boundary := make([]byte, len(prefix)+16)
+	copy(boundary, prefix)
 
-		boundary = append(boundary, alphaNumericEncodingMap[(randomness>>24)&0x3F])
-		boundary = append(boundary, alphaNumericEncodingMap[(randomness>>16)&0x3F])
-		boundary = append(boundary, alphaNumericEncodingMap[(randomness>>8)&0x3F])
-		boundary = append(boundary, alphaNumericEncodingMap[randomness&0x3F])
+	for i := range 4 {
+		randomness := uint32(randomBytes[i*4])<<24 |
+			uint32(randomBytes[i*4+1])<<16 |
+			uint32(randomBytes[i*4+2])<<8 |
+			uint32(randomBytes[i*4+3])
+
+		boundary[len(prefix)+i*4] = alphaNumericEncodingMap[(randomness>>24)&0x3F]
+		boundary[len(prefix)+i*4+1] = alphaNumericEncodingMap[(randomness>>16)&0x3F]
+		boundary[len(prefix)+i*4+2] = alphaNumericEncodingMap[(randomness>>8)&0x3F]
+		boundary[len(prefix)+i*4+3] = alphaNumericEncodingMap[randomness&0x3F]
 	}
 
 	return string(boundary)
