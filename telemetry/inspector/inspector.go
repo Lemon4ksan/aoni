@@ -10,12 +10,14 @@ import (
 	_ "embed"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net"
 	"net/http"
 	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
+	"unicode/utf8"
 
 	"github.com/lemon4ksan/aoni"
 	"github.com/lemon4ksan/aoni/option"
@@ -41,6 +43,8 @@ type CapturedRequest struct {
 	H2Settings       string            `json:"h2_settings"`
 	RequestHeaders   map[string]string `json:"request_headers"`
 	ResponseHeaders  map[string]string `json:"response_headers"`
+	RequestBody      string            `json:"request_body,omitempty"`
+	ResponseBody     string            `json:"response_body,omitempty"`
 	DNSLookup        time.Duration     `json:"dns_lookup"`
 	TCPConn          time.Duration     `json:"tcp_conn"`
 	TLSHandshake     time.Duration     `json:"tls_handshake"`
@@ -132,31 +136,6 @@ func (i *TrafficInspector) Close() error {
 	return nil
 }
 
-func captureHeaders(reqHeaders http.Header, redactMap map[string]struct{}) map[string]string {
-	headers := make(map[string]string, len(reqHeaders))
-
-	for k, v := range reqHeaders {
-		if len(v) > 0 {
-			if _, ok := redactMap[strings.ToLower(k)]; ok {
-				headers[k] = "[REDACTED]"
-			} else {
-				headers[k] = v[0]
-			}
-		}
-	}
-
-	return headers
-}
-
-func getRedactMap(req *http.Request) map[string]struct{} {
-	redactMap := make(map[string]struct{})
-	if cfg, ok := req.Context().Value(aoni.RedactConfigCtxKey{}).(*aoni.RedactConfig); ok && cfg != nil {
-		redactMap = cfg.Headers
-	}
-
-	return redactMap
-}
-
 // Capture logs a request/response pair into the inspector and broadcasts it to live clients.
 func (i *TrafficInspector) Capture(req *http.Request, resp *http.Response, reqErr error, trace *telemetry.TraceInfo) {
 	if req == nil {
@@ -173,12 +152,21 @@ func (i *TrafficInspector) Capture(req *http.Request, resp *http.Response, reqEr
 	redactMap := getRedactMap(req)
 	capReq.RequestHeaders = captureHeaders(req.Header, redactMap)
 
+	if req.GetBody != nil {
+		capReq.RequestBody = i.captureBody(req)
+	}
+
 	if resp != nil {
 		capReq.Status = resp.StatusCode
 		prefix := fmt.Sprintf("%d ", resp.StatusCode)
 		capReq.StatusText = strings.TrimPrefix(resp.Status, prefix)
 		capReq.ResponseSize = resp.ContentLength
 		capReq.ResponseHeaders = captureHeaders(resp.Header, redactMap)
+
+		if telemetry.IsStreamingResponse(resp) {
+			capReq.StatusText += " [Streaming Active]"
+			capReq.ResponseBody = "[Streaming Response - Body Not Captured]"
+		}
 	} else if reqErr != nil {
 		capReq.StatusText = reqErr.Error()
 	}
@@ -188,6 +176,31 @@ func (i *TrafficInspector) Capture(req *http.Request, resp *http.Response, reqEr
 	}
 
 	i.saveAndBroadcast(capReq)
+}
+
+func (i *TrafficInspector) captureBody(req *http.Request) string {
+	bodyRc, err := req.GetBody()
+	if err != nil {
+		return ""
+	}
+
+	bodyBytes, readErr := io.ReadAll(io.LimitReader(bodyRc, 128*1024))
+	_ = bodyRc.Close()
+
+	if readErr != nil || len(bodyBytes) == 0 {
+		return ""
+	}
+
+	contentType := req.Header.Get("Content-Type")
+	if strings.HasPrefix(strings.ToLower(contentType), "multipart/form-data") {
+		return telemetry.SummarizeMultipartBody(bodyBytes, contentType)
+	}
+
+	if utf8.Valid(bodyBytes) {
+		return string(bodyBytes)
+	}
+
+	return "(binary payload omitted)"
 }
 
 func (i *TrafficInspector) saveAndBroadcast(req CapturedRequest) {
@@ -203,64 +216,6 @@ func (i *TrafficInspector) saveAndBroadcast(req CapturedRequest) {
 	jsonData, err := json.Marshal(req)
 	if err == nil {
 		i.broadcast(string(jsonData))
-	}
-}
-
-func applyTraceToCapturedRequest(req *CapturedRequest, trace *telemetry.TraceInfo) {
-	req.Duration = trace.Total
-	req.DurationStr = trace.Total.String()
-	req.RemoteAddr = trace.RemoteAddr
-
-	req.RequestSize = trace.RequestSize
-	if req.ResponseSize <= 0 {
-		req.ResponseSize = trace.ResponseSize
-	}
-
-	req.DNSLookup = trace.DNSLookup
-	req.TCPConn = trace.TCPConn
-	req.TLSHandshake = trace.TLSHandshake
-	req.ServerProcessing = trace.ServerProcessing
-	req.ContentTransfer = trace.ContentTransfer
-
-	if trace.JA4 != nil {
-		req.JA4 = trace.JA4.JA4
-		switch trace.JA4.Protocol {
-		case "t":
-			req.JA4Protocol = "TLS (TCP)"
-		case "q":
-			req.JA4Protocol = "QUIC (UDP)"
-		case "d":
-			req.JA4Protocol = "DTLS"
-		default:
-			req.JA4Protocol = trace.JA4.Protocol
-		}
-
-		if trace.JA4.Version != "" {
-			var ver string
-			switch trace.JA4.Version {
-			case "13":
-				ver = "1.3"
-			case "12":
-				ver = "1.2"
-			case "11":
-				ver = "1.1"
-			case "10":
-				ver = "1.0"
-			default:
-				ver = trace.JA4.Version
-			}
-
-			req.JA4Protocol += " " + ver
-		}
-
-		switch trace.JA4.SNI {
-		case "d":
-			req.JA4SNI = "Domain Name (Present)"
-		case "i":
-			req.JA4SNI = "IP Address"
-		default:
-			req.JA4SNI = "None / Hidden"
-		}
 	}
 }
 
@@ -335,4 +290,87 @@ var dashboardHTML []byte
 func (i *TrafficInspector) dashboardHandler(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	_, _ = w.Write(dashboardHTML)
+}
+
+func applyTraceToCapturedRequest(req *CapturedRequest, trace *telemetry.TraceInfo) {
+	req.Duration = trace.Total
+	req.DurationStr = trace.Total.String()
+	req.RemoteAddr = trace.RemoteAddr
+
+	req.RequestSize = trace.RequestSize
+	if req.ResponseSize <= 0 {
+		req.ResponseSize = trace.ResponseSize
+	}
+
+	req.DNSLookup = trace.DNSLookup
+	req.TCPConn = trace.TCPConn
+	req.TLSHandshake = trace.TLSHandshake
+	req.ServerProcessing = trace.ServerProcessing
+	req.ContentTransfer = trace.ContentTransfer
+
+	if trace.JA4 != nil {
+		req.JA4 = trace.JA4.JA4
+		switch trace.JA4.Protocol {
+		case "t":
+			req.JA4Protocol = "TLS (TCP)"
+		case "q":
+			req.JA4Protocol = "QUIC (UDP)"
+		case "d":
+			req.JA4Protocol = "DTLS"
+		default:
+			req.JA4Protocol = trace.JA4.Protocol
+		}
+
+		if trace.JA4.Version != "" {
+			var ver string
+			switch trace.JA4.Version {
+			case "13":
+				ver = "1.3"
+			case "12":
+				ver = "1.2"
+			case "11":
+				ver = "1.1"
+			case "10":
+				ver = "1.0"
+			default:
+				ver = trace.JA4.Version
+			}
+
+			req.JA4Protocol += " " + ver
+		}
+
+		switch trace.JA4.SNI {
+		case "d":
+			req.JA4SNI = "Domain Name (Present)"
+		case "i":
+			req.JA4SNI = "IP Address"
+		default:
+			req.JA4SNI = "None / Hidden"
+		}
+	}
+}
+
+func captureHeaders(reqHeaders http.Header, redactMap map[string]struct{}) map[string]string {
+	headers := make(map[string]string, len(reqHeaders))
+
+	for k, v := range reqHeaders {
+		if len(v) > 0 {
+			if _, ok := redactMap[strings.ToLower(k)]; ok {
+				headers[k] = "[REDACTED]"
+			} else {
+				headers[k] = v[0]
+			}
+		}
+	}
+
+	return headers
+}
+
+func getRedactMap(req *http.Request) map[string]struct{} {
+	redactMap := make(map[string]struct{})
+	if cfg, ok := req.Context().Value(aoni.RedactConfigCtxKey{}).(*aoni.RedactConfig); ok && cfg != nil {
+		redactMap = cfg.Headers
+	}
+
+	return redactMap
 }

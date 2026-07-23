@@ -115,13 +115,14 @@ func CurlFromRequestWithOptions(req *http.Request, body []byte, opts *CurlOption
 		}
 	}
 
-	// 3. Process Payload / Body / Multipart
 	contentType := req.Header.Get("Content-Type")
-	isMultipart := strings.HasPrefix(strings.ToLower(contentType), "multipart/form-data")
+	if strings.HasPrefix(strings.ToLower(contentType), "multipart/form-data") && len(body) > 0 {
+		summary := SummarizeMultipartBody(body, contentType)
 
-	if isMultipart {
-		sb.WriteString(" -F ")
-		sb.WriteString(escapeShell("<multipart payload omitted>"))
+		for part := range strings.SplitSeq(summary, "&") {
+			sb.WriteString(" -F ")
+			sb.WriteString(escapeShell(part))
+		}
 	} else if len(body) > 0 {
 		sb.WriteString(" -d ")
 		sb.WriteString(escapeShell(string(body)))

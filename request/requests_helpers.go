@@ -21,6 +21,7 @@ import (
 	"github.com/lemon4ksan/aoni"
 	"github.com/lemon4ksan/aoni/codec/decode"
 	"github.com/lemon4ksan/aoni/resiliency/challenge"
+	"github.com/lemon4ksan/aoni/telemetry"
 )
 
 var sensitiveHeaders = map[string]bool{
@@ -47,7 +48,7 @@ func redactHeaders(raw []byte) []byte {
 
 type responseDecoder struct{}
 
-func (d responseDecoder) validateState(resp *http.Response, decoder decode.Decoder) error {
+func (d responseDecoder) ValidateState(resp *http.Response, decoder decode.Decoder) error {
 	peekableReader := bufio.NewReader(resp.Body)
 
 	resp.Body = struct {
@@ -69,7 +70,49 @@ func (d responseDecoder) validateState(resp *http.Response, decoder decode.Decod
 	return d.checkMIMEType(resp)
 }
 
-func (responseDecoder) setCapturer(resp *http.Response) bool {
+func (d responseDecoder) DumpDiagnostics(resp *http.Response, requester aoni.Requester) {
+	if resp.Request == nil {
+		return
+	}
+
+	cfg := aoni.GetRequestConfig(resp.Request.Context())
+	if cfg == nil || !cfg.Debug {
+		return
+	}
+
+	reqDump := d.dumpMultipart(resp.Request)
+	if len(reqDump) == 0 {
+		reqDump, _ = httputil.DumpRequestOut(resp.Request, true)
+	}
+
+	var respDump []byte
+	if telemetry.IsStreamingResponse(resp) {
+		respDump = []byte(
+			resp.Proto + " " + resp.Status + "\r\nContent-Type: " + resp.Header.Get(
+				"Content-Type",
+			) + "\r\n\r\n[Streaming Active - Body Omitted]",
+		)
+	} else {
+		respDump, _ = httputil.DumpResponse(resp, true)
+	}
+
+	reqDump, respDump = redactHeaders(reqDump), redactHeaders(respDump)
+
+	logger, ok := requester.(interface{ Logger() aoni.Logger })
+	if ok {
+		logger.Logger().Debug("Aoni HTTP Diagnostic", "request", string(reqDump), "response", string(respDump))
+		return
+	}
+
+	fmt.Fprintf(
+		os.Stderr,
+		"\n--- HTTP DEBUG ---\n%s\n\n%s\n------------------\n",
+		string(reqDump),
+		string(respDump),
+	)
+}
+
+func (responseDecoder) SetCapturer(resp *http.Response) bool {
 	if resp.Request == nil {
 		return false
 	}
@@ -85,31 +128,83 @@ func (responseDecoder) setCapturer(resp *http.Response) bool {
 	return false
 }
 
-func (responseDecoder) dumpDiagnostics(resp *http.Response, requester aoni.Requester) {
-	if resp.Request == nil {
-		return
-	}
+func (responseDecoder) DecodeAPIError(resp *http.Response) error {
+	bodyBytes, _ := io.ReadAll(io.LimitReader(resp.Body, 1024*1024))
 
-	cfg := aoni.GetRequestConfig(resp.Request.Context())
+	apiErr := &aoni.APIError{StatusCode: resp.StatusCode, Body: bodyBytes}
 
-	if cfg != nil && cfg.Debug {
-		reqDump, _ := httputil.DumpRequestOut(resp.Request, true)
-		respDump, _ := httputil.DumpResponse(resp, true)
+	if resp.Request != nil {
+		cfg := aoni.GetRequestConfig(resp.Request.Context())
 
-		reqDump = redactHeaders(reqDump)
-		respDump = redactHeaders(respDump)
+		if cfg == nil || cfg.ErrorModel == nil {
+			return apiErr
+		}
 
-		if logger, ok := requester.(interface{ Logger() aoni.Logger }); ok {
-			logger.Logger().Debug("Aoni HTTP Diagnostic", "request", string(reqDump), "response", string(respDump))
-		} else {
-			fmt.Fprintf(
-				os.Stderr,
-				"\n--- HTTP DEBUG ---\n%s\n%s\n------------------\n",
-				string(reqDump),
-				string(respDump),
-			)
+		if err := json.Unmarshal(bodyBytes, cfg.ErrorModel); err == nil {
+			apiErr.Model = cfg.ErrorModel
 		}
 	}
+
+	return apiErr
+}
+
+func (responseDecoder) DecodeSuccess(
+	resp *http.Response,
+	target any,
+	requester aoni.Requester,
+	decoder decode.Decoder,
+) error {
+	var br aoni.BaseResponse
+	if p, ok := requester.(aoni.BaseResponseProvider); ok {
+		br = p.BaseResponse()
+	} else if provider, ok := requester.(interface{ Defaults() aoni.ClientDefaults }); ok {
+		if brFn := provider.Defaults().BaseResponse; brFn != nil {
+			br = brFn()
+		}
+	}
+
+	if br != nil {
+		br.SetData(target)
+
+		if err := decoder.Decode(resp.Body, br); err != nil {
+			return err
+		}
+
+		if !br.IsSuccess() {
+			return br.Error()
+		}
+
+		return nil
+	}
+
+	err := decoder.Decode(resp.Body, target)
+	if errors.Is(err, io.EOF) {
+		return nil
+	}
+
+	return err
+}
+
+func (responseDecoder) dumpMultipart(req *http.Request) []byte {
+	contentType := req.Header.Get("Content-Type")
+
+	if !strings.HasPrefix(strings.ToLower(contentType), "multipart/form-data") || req.GetBody == nil {
+		return nil
+	}
+
+	bodyRc, err := req.GetBody()
+	if err != nil {
+		return nil
+	}
+
+	bodyBytes, _ := io.ReadAll(io.LimitReader(bodyRc, 256*1024))
+	_ = bodyRc.Close()
+
+	summary := telemetry.SummarizeMultipartBody(bodyBytes, contentType)
+
+	return []byte(
+		req.Method + " " + req.URL.RequestURI() + " HTTP/1.1\r\nContent-Type: " + contentType + "\r\n\r\n" + summary,
+	)
 }
 
 func (responseDecoder) checkMIMEType(resp *http.Response) error {
@@ -168,63 +263,6 @@ func (responseDecoder) checkHTML(buf *bufio.Reader) error {
 	return fmt.Errorf("%w: expected structured data but got HTML", aoni.ErrUnexpectedContentType)
 }
 
-func (responseDecoder) decodeAPIError(resp *http.Response) error {
-	bodyBytes, _ := io.ReadAll(io.LimitReader(resp.Body, 1024*1024))
-
-	apiErr := &aoni.APIError{StatusCode: resp.StatusCode, Body: bodyBytes}
-
-	if resp.Request != nil {
-		cfg := aoni.GetRequestConfig(resp.Request.Context())
-
-		if cfg == nil || cfg.ErrorModel == nil {
-			return apiErr
-		}
-
-		if err := json.Unmarshal(bodyBytes, cfg.ErrorModel); err == nil {
-			apiErr.Model = cfg.ErrorModel
-		}
-	}
-
-	return apiErr
-}
-
-func (responseDecoder) decodeSuccess(
-	resp *http.Response,
-	target any,
-	requester aoni.Requester,
-	decoder decode.Decoder,
-) error {
-	var br aoni.BaseResponse
-	if p, ok := requester.(aoni.BaseResponseProvider); ok {
-		br = p.BaseResponse()
-	} else if provider, ok := requester.(interface{ Defaults() aoni.ClientDefaults }); ok {
-		if brFn := provider.Defaults().BaseResponse; brFn != nil {
-			br = brFn()
-		}
-	}
-
-	if br != nil {
-		br.SetData(target)
-
-		if err := decoder.Decode(resp.Body, br); err != nil {
-			return err
-		}
-
-		if !br.IsSuccess() {
-			return br.Error()
-		}
-
-		return nil
-	}
-
-	err := decoder.Decode(resp.Body, target)
-	if errors.Is(err, io.EOF) {
-		return nil
-	}
-
-	return err
-}
-
 var bytePool = sync.Pool{
 	New: func() any {
 		b := make([]byte, 32*1024)
@@ -240,11 +278,11 @@ func HandleResponse(resp *http.Response, target any, requester aoni.Requester) e
 
 	dec := responseDecoder{}
 
-	if !dec.setCapturer(resp) {
+	if !dec.SetCapturer(resp) {
 		defer aoni.CloseResponse(resp)
 	}
 
-	dec.dumpDiagnostics(resp, requester)
+	dec.DumpDiagnostics(resp, requester)
 
 	decoder := decode.JSONDecoder
 	if resp.Request != nil {
@@ -269,12 +307,12 @@ func HandleResponse(resp *http.Response, target any, requester aoni.Requester) e
 		}
 	}
 
-	if err := dec.validateState(resp, decoder); err != nil {
+	if err := dec.ValidateState(resp, decoder); err != nil {
 		return err
 	}
 
 	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
-		return dec.decodeAPIError(resp)
+		return dec.DecodeAPIError(resp)
 	}
 
 	if target == nil || resp.StatusCode == http.StatusNoContent {
@@ -285,7 +323,7 @@ func HandleResponse(resp *http.Response, target any, requester aoni.Requester) e
 		return nil
 	}
 
-	return dec.decodeSuccess(resp, target, requester, decoder)
+	return dec.DecodeSuccess(resp, target, requester, decoder)
 }
 
 func validateAndMarshal(payload any) (io.Reader, error) {

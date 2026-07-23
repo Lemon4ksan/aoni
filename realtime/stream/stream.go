@@ -433,8 +433,7 @@ func SSE[T any](
 	return out, errs, nil
 }
 
-// Chunks reads raw data from the stream chunk-by-chunk and yields them as strings.
-// This is a high-level helper suitable for or real-time streaming.
+// Chunks reads raw data from the stream using a 1MB buffer and yields chunks as strings.
 func Chunks(ctx context.Context, resp *Stream) (<-chan string, <-chan error) {
 	out := make(chan string, 100)
 	errs := make(chan error, 1)
@@ -444,14 +443,16 @@ func Chunks(ctx context.Context, resp *Stream) (<-chan string, <-chan error) {
 		defer close(errs)
 		defer resp.Close()
 
-		buf := make([]byte, 4096)
+		reader := bufio.NewReaderSize(resp, 1024*1024)
+		buf := make([]byte, 32*1024)
+
 		for {
 			select {
 			case <-ctx.Done():
 				errs <- ctx.Err()
 				return
 			default:
-				n, err := resp.Read(buf)
+				n, err := reader.Read(buf)
 				if n > 0 {
 					select {
 					case <-ctx.Done():

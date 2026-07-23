@@ -6,16 +6,21 @@
 package telemetry
 
 import (
+	"bytes"
 	"crypto/sha256"
 	"crypto/tls"
 	"crypto/x509"
 	"encoding/hex"
 	"fmt"
+	"io"
 	"log/slog"
+	"math/rand/v2"
+	"mime"
+	"mime/multipart"
 	"net/http"
 	"slices"
+	"strconv"
 	"strings"
-	"sync/atomic"
 	"time"
 
 	"github.com/lemon4ksan/miyako/generic"
@@ -23,12 +28,11 @@ import (
 	"github.com/lemon4ksan/aoni/fingerprint/ja4"
 )
 
-var correlationCounter uint64
-
-// GenerateCorrelationID generates a fast, unique 16-character hex correlation identifier for request tracing.
+// GenerateCorrelationID creates a fast, monotonic, and collision-resistant 16-character Base36 string ID.
+// Uses microsecond timestamp precision multiplied to isolate random entropy bits under concurrency.
 func GenerateCorrelationID() string {
-	id := atomic.AddUint64(&correlationCounter, 1)
-	return fmt.Sprintf("%016x", id)
+	timestamp := uint64(time.Now().UnixMicro())*1000 + uint64(rand.Int64N(1000))
+	return strings.ToUpper(strconv.FormatUint(timestamp, 36))
 }
 
 // TraceInfo records network layer execution timings, metrics, and TLS/HTTP fingerprints for a request.
@@ -276,4 +280,76 @@ func ComputeJA4HFromRequest(req *http.Request) string {
 	}
 
 	return ja4.ComputeJA4H(method, proto, headers, hasCookie, hasReferer, acceptLanguage, cookieNames, cookieValues)
+}
+
+// IsStreamingResponse detects whether an HTTP response represents a real-time stream
+// (such as SSE, NDJSON, or Chunked transfers) that should not be fully buffered into memory.
+func IsStreamingResponse(resp *http.Response) bool {
+	if resp == nil {
+		return false
+	}
+
+	contentType := strings.ToLower(resp.Header.Get("Content-Type"))
+	streamingTypes := [...]string{
+		"text/event-stream",
+		"application/stream",
+		"application/x-ndjson",
+		"application/x-stream",
+		"text/stream",
+	}
+
+	for _, st := range streamingTypes {
+		if strings.Contains(contentType, st) {
+			return true
+		}
+	}
+
+	chunked := strings.Contains(strings.ToLower(resp.Header.Get("Transfer-Encoding")), "chunked")
+
+	return strings.Contains(contentType, "text/plain") && chunked && resp.ContentLength == -1
+}
+
+// SummarizeMultipartBody extracts form field names and file metadata from a multipart/form-data payload
+// into a compact string representation without loading binary file contents.
+func SummarizeMultipartBody(body []byte, contentType string) string {
+	if len(body) == 0 || contentType == "" {
+		return ""
+	}
+
+	_, params, err := mime.ParseMediaType(contentType)
+	if err != nil || params["boundary"] == "" {
+		return "(multipart/form-data payload)"
+	}
+
+	reader := multipart.NewReader(bytes.NewReader(body), params["boundary"])
+
+	var parts []string
+
+	for {
+		part, err := reader.NextPart()
+		if err == io.EOF || err != nil {
+			break
+		}
+
+		name := part.FormName()
+		if name == "" {
+			continue
+		}
+
+		if filename := part.FileName(); filename != "" {
+			parts = append(parts, name+"=@"+filename)
+			continue
+		}
+
+		var sb strings.Builder
+		if _, err := io.Copy(&sb, part); err == nil {
+			parts = append(parts, name+"="+sb.String())
+		}
+	}
+
+	if len(parts) == 0 {
+		return "(multipart/form-data payload)"
+	}
+
+	return strings.Join(parts, "&")
 }

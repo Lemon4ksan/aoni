@@ -45,7 +45,7 @@ func TestCurlFromRequest_Multipart(t *testing.T) {
 	req.Header.Set("Content-Type", "multipart/form-data; boundary=---------------------------12345")
 
 	curl := telemetry.CurlFromRequest(req, []byte("raw binary data"))
-	assert.Contains(t, curl, "-F '<multipart payload omitted>'")
+	assert.Contains(t, curl, "-F '(multipart/form-data payload)'")
 	assert.NotContains(t, curl, "raw binary data")
 }
 

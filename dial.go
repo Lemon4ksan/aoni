@@ -132,8 +132,8 @@ func (c *Client) dialContext(ctx context.Context, network, addr string) (net.Con
 	}
 
 	tlsCfg := setupTLSConfig(dialCfg, resolveDialHost(dialCfg.Host))
-
 	tlsConn := tls.Client(rawConn, tlsCfg)
+
 	if err := tlsConn.HandshakeContext(ctx); err != nil {
 		_ = rawConn.Close()
 		return nil, err
@@ -311,7 +311,7 @@ func establishBaseProxyConnection(ctx context.Context, dialCfg dialConfig) (net.
 	}
 
 	if dialCfg.ProxyURL != nil {
-		return proxyClient{}.dial(ctx, dialCfg, host, port)
+		return proxyClient{}.dialProxy(ctx, dialCfg, host, port)
 	}
 
 	return proxyClient{}.CleanDialContext(ctx, dialCfg)
@@ -518,15 +518,23 @@ type proxyClient struct{}
 
 // CleanDialContext establishes standard TCP socket tunnels, executing DNS and SSRF checks.
 func (pc proxyClient) CleanDialContext(ctx context.Context, dialCfg dialConfig) (net.Conn, error) {
+	if strings.HasPrefix(dialCfg.Addr, "unix://") || dialCfg.Network == "unix" {
+		return pc.dialSocket(ctx, dialCfg)
+	}
+
 	host, port, err := getAddressHostPort(dialCfg.Addr, dialCfg.Host, dialCfg.Port)
 	if err != nil {
 		return nil, err
 	}
 
 	if dialCfg.ProxyDNS && dialCfg.ProxyURL != nil && net.ParseIP(host) == nil {
-		return pc.dial(ctx, dialCfg, host, port)
+		return pc.dialProxy(ctx, dialCfg, host, port)
 	}
 
+	return pc.dial(ctx, dialCfg, host, port)
+}
+
+func (pc proxyClient) dial(ctx context.Context, dialCfg dialConfig, host, port string) (net.Conn, error) {
 	resolver := dialCfg.DNSResolver
 	if resolver == nil {
 		resolver = &net.Resolver{}
@@ -554,15 +562,10 @@ func (pc proxyClient) CleanDialContext(ctx context.Context, dialCfg dialConfig) 
 
 	dialer.Control = pc.dialerControl(dialCfg)
 
-	conn, err := dialer.DialContext(ctx, dialCfg.Network, net.JoinHostPort(host, port))
-	if err != nil {
-		return nil, err
-	}
-
-	return conn, nil
+	return dialer.DialContext(ctx, dialCfg.Network, net.JoinHostPort(host, port))
 }
 
-func (pc proxyClient) dial(ctx context.Context, dialCfg dialConfig, host, port string) (net.Conn, error) {
+func (pc proxyClient) dialProxy(ctx context.Context, dialCfg dialConfig, host, port string) (net.Conn, error) {
 	if dialCfg.ProxyURL.Host == "" {
 		return nil, ErrEmptyDNSProxy
 	}
@@ -579,13 +582,26 @@ func (pc proxyClient) dial(ctx context.Context, dialCfg dialConfig, host, port s
 
 	switch dialCfg.ProxyURL.Scheme {
 	case "socks5", "socks5h":
-		return pc.dialSocks5(ctx, dialCfg.ProxyURL, dialer, dialCfg.ProxyURL.Host, host, port)
+		return pc.dialProxySocks5(ctx, dialCfg.ProxyURL, dialer, dialCfg.ProxyURL.Host, host, port)
 	default:
-		return pc.dialHTTP(ctx, dialer, dialCfg.ProxyURL.Host, host, port)
+		return pc.dialProxyHTTP(ctx, dialer, dialCfg.ProxyURL.Host, host, port)
 	}
 }
 
-func (proxyClient) dialSocks5(
+func (pc proxyClient) dialSocket(ctx context.Context, dialCfg dialConfig) (net.Conn, error) {
+	socketPath := strings.TrimPrefix(dialCfg.Addr, "unix://")
+	dialer := &net.Dialer{
+		Timeout: 30 * time.Second,
+	}
+
+	if dialCfg.SocketController != nil {
+		dialer.Control = pc.dialerControl(dialCfg)
+	}
+
+	return dialer.DialContext(ctx, "unix", socketPath)
+}
+
+func (proxyClient) dialProxySocks5(
 	ctx context.Context,
 	proxyURL *url.URL,
 	forward proxy.Dialer,
@@ -612,7 +628,11 @@ func (proxyClient) dialSocks5(
 	return socksDialer.Dial("tcp", net.JoinHostPort(host, port))
 }
 
-func (proxyClient) dialHTTP(ctx context.Context, forward *net.Dialer, address, host, port string) (net.Conn, error) {
+func (proxyClient) dialProxyHTTP(
+	ctx context.Context,
+	forward *net.Dialer,
+	address, host, port string,
+) (net.Conn, error) {
 	conn, err := forward.DialContext(ctx, "tcp", address)
 	if err != nil {
 		return nil, fmt.Errorf("aoni: dial proxy %s: %w", address, err)
