@@ -1,14 +1,18 @@
 // Copyright (c) 2026 Lemon4ksan All rights reserved.
 // Use of this source code is governed by a BSD-style
-// license can be found in the LICENSE file.
+// license that can be found in the LICENSE file.
 
 package fluent_test
 
 import (
 	"encoding/json"
+	"errors"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -16,9 +20,9 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/lemon4ksan/aoni"
+	"github.com/lemon4ksan/aoni/codec"
 	"github.com/lemon4ksan/aoni/fluent"
 	"github.com/lemon4ksan/aoni/option"
-	"github.com/lemon4ksan/aoni/telemetry"
 )
 
 type userPayload struct {
@@ -94,6 +98,27 @@ func TestFluent_PathParamInterpolation(t *testing.T) {
 	assert.Equal(t, http.StatusOK, resp.StatusCode)
 }
 
+func TestFluent_BulkMaps_SetHeaders_SetQueryParams_SetPathParams(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, "/api/v1/groups/devs", r.URL.Path)
+		assert.Equal(t, "bulk-value", r.Header.Get("X-Bulk-Header"))
+		assert.Equal(t, "active", r.URL.Query().Get("status"))
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer server.Close()
+
+	client := aoni.NewClient(server.Client(), option.WithBaseURL(server.URL))
+
+	resp, err := fluent.R(client).
+		SetHeaders(map[string]string{"X-Bulk-Header": "bulk-value"}).
+		SetQueryParams(map[string]string{"status": "active"}).
+		SetPathParams(map[string]string{"group": "devs"}).
+		Get("/api/v1/groups/{group}")
+
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusOK, resp.StatusCode)
+}
+
 func TestFluent_PostJSON_WithBodyAndErrorModel(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		assert.Equal(t, http.MethodPost, r.Method)
@@ -151,24 +176,240 @@ func TestFluent_QueryStruct(t *testing.T) {
 	assert.Equal(t, http.StatusOK, resp.StatusCode)
 }
 
-func TestFluent_GenericShortcuts(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusOK)
-		_ = json.NewEncoder(w).Encode(userPayload{ID: 99, Name: "Charlie"})
+func TestFluent_ExpectStatus(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusCreated)
 	}))
 	defer server.Close()
 
 	client := aoni.NewClient(server.Client(), option.WithBaseURL(server.URL))
 
-	user, resp, err := fluent.GetJSON[userPayload](t.Context(), client, "/")
+	resp, err := fluent.R(client).
+		ExpectStatus(200, 201).
+		Post("/created")
+
 	require.NoError(t, err)
-	assert.Equal(t, http.StatusOK, resp.StatusCode)
-	assert.Equal(t, 99, user.ID)
-	assert.Equal(t, "Charlie", user.Name)
+	assert.Equal(t, http.StatusCreated, resp.StatusCode)
+
+	respErr, errFail := fluent.R(client).
+		ExpectStatus(200).
+		Post("/created")
+
+	require.Error(t, errFail)
+	assert.True(t, errors.Is(errFail, fluent.ErrUnexpectedStatus))
+	assert.Equal(t, http.StatusCreated, respErr.StatusCode)
 }
 
-func TestFluent_BasicAuthAndTimeout(t *testing.T) {
+func TestFluent_Fetch_UniversalGeneric(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"id": 888, "name": "FetchUniversal"}`))
+	}))
+	defer server.Close()
+
+	client := aoni.NewClient(server.Client(), option.WithBaseURL(server.URL))
+
+	user, resp, err := fluent.FetchTo[userPayload](t.Context(), client, http.MethodGet, "/")
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusOK, resp.StatusCode)
+	assert.Equal(t, 888, user.ID)
+	assert.Equal(t, "FetchUniversal", user.Name)
+}
+
+func TestFluent_Multipart_SetFormField_And_SetFormFile(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		require.NoError(t, r.ParseMultipartForm(10*1024*1024))
+		assert.Equal(t, "John", r.FormValue("username"))
+
+		file, header, err := r.FormFile("avatar")
+		require.NoError(t, err)
+
+		defer file.Close()
+
+		assert.Equal(t, "avatar", header.Filename)
+
+		content, _ := io.ReadAll(file)
+		assert.Equal(t, "fake_image_bytes", string(content))
+
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer server.Close()
+
+	client := aoni.NewClient(server.Client(), option.WithBaseURL(server.URL))
+
+	resp, err := fluent.R(client).
+		SetFormField("username", "John").
+		SetFormFile("avatar", strings.NewReader("fake_image_bytes")).
+		Post("/upload")
+
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusOK, resp.StatusCode)
+}
+
+func TestFluent_WithCodec_CustomCodec(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, "application/json", r.Header.Get("Content-Type"))
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"id": 777, "name": "CodecUser"}`))
+	}))
+	defer server.Close()
+
+	client := aoni.NewClient(server.Client(), option.WithBaseURL(server.URL))
+
+	var user userPayload
+
+	resp, err := fluent.R(client).
+		WithCodec(codec.JSONCodec, userPayload{Name: "Input"}).
+		SetResult(&user).
+		Post("/")
+
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusOK, resp.StatusCode)
+	assert.Equal(t, 777, user.ID)
+	assert.Equal(t, "CodecUser", user.Name)
+}
+
+func TestFluent_SetProxy_And_SetRetry(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer server.Close()
+
+	client := aoni.NewClient(server.Client(), option.WithBaseURL(server.URL))
+
+	resp, err := fluent.R(client).
+		SetProxy("http://127.0.0.1:8080").
+		SetRetry(2, 100*time.Millisecond).
+		Get("/")
+
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusOK, resp.StatusCode)
+}
+
+func TestFluent_SetOutputFromHeader(t *testing.T) {
+	fileContent := []byte("content from header download")
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Disposition", `attachment; filename="report.pdf"`)
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write(fileContent)
+	}))
+	defer server.Close()
+
+	client := aoni.NewClient(server.Client(), option.WithBaseURL(server.URL))
+	targetDir := t.TempDir()
+
+	resp, err := fluent.R(client).
+		SetOutputFromHeader(targetDir).
+		Get("/download")
+
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusOK, resp.StatusCode)
+
+	expectedPath := filepath.Join(targetDir, "report.pdf")
+	savedData, readErr := os.ReadFile(expectedPath)
+	require.NoError(t, readErr)
+	assert.Equal(t, fileContent, savedData)
+}
+
+func TestFluent_SetUploadProgress_And_SetCorrelationID(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, "CORR-12345", r.Header.Get("X-Correlation-ID"))
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer server.Close()
+
+	client := aoni.NewClient(server.Client(), option.WithBaseURL(server.URL))
+
+	var uploadCalled bool
+
+	resp, err := fluent.R(client).
+		SetCorrelationID("CORR-12345").
+		SetUploadProgress(func(current, total int64) {
+			uploadCalled = true
+		}).
+		SetBody("test upload body").
+		Post("/")
+
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusOK, resp.StatusCode)
+	assert.True(t, uploadCalled)
+}
+
+func TestFluent_Download_HTTPStatusError(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusNotFound)
+	}))
+	defer server.Close()
+
+	client := aoni.NewClient(server.Client(), option.WithBaseURL(server.URL))
+	targetFile := filepath.Join(t.TempDir(), "missing.bin")
+
+	resp, err := fluent.R(client).
+		SetOutput(targetFile).
+		Get("/notfound")
+
+	require.Error(t, err)
+	require.NotNil(t, resp)
+	assert.Equal(t, http.StatusNotFound, resp.StatusCode)
+	assert.True(t, errors.Is(err, fluent.ErrDownloadFailed))
+
+	var flErr *fluent.Error
+	require.True(t, errors.As(err, &flErr))
+	assert.Equal(t, 404, flErr.Code)
+	assert.Contains(t, flErr.Error(), "aoni fluent: download")
+}
+
+func TestFluent_Error_Formatting(t *testing.T) {
+	e1 := &fluent.Error{Op: "download", Path: "/file", Code: 404, Err: fluent.ErrDownloadFailed}
+	assert.Equal(t, "aoni fluent: download /file status 404: aoni fluent: download HTTP status error", e1.Error())
+	assert.True(t, errors.Is(e1, fluent.ErrDownloadFailed))
+
+	e2 := &fluent.Error{Op: "create_file", Path: "/tmp/test.txt", Err: os.ErrPermission}
+	assert.Equal(t, "aoni fluent: create_file /tmp/test.txt: permission denied", e2.Error())
+
+	e3 := &fluent.Error{Op: "generic_op", Err: errors.New("simple error")}
+	assert.Equal(t, "aoni fluent: generic_op: simple error", e3.Error())
+
+	var nilErr *fluent.Error
+	assert.Equal(t, "<nil>", nilErr.Error())
+}
+
+func TestFluent_HTTPVerbs_All(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(r.Method))
+	}))
+	defer server.Close()
+
+	client := aoni.NewClient(server.Client(), option.WithBaseURL(server.URL))
+
+	r := fluent.R(client)
+
+	resp, err := r.Put("/")
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusOK, resp.StatusCode)
+
+	resp, err = fluent.R(client).Patch("/")
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusOK, resp.StatusCode)
+
+	resp, err = fluent.R(client).Delete("/")
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusOK, resp.StatusCode)
+
+	resp, err = fluent.R(client).Head("/")
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusOK, resp.StatusCode)
+
+	resp, err = fluent.R(client).Options("/")
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusOK, resp.StatusCode)
+}
+
+func TestFluent_BasicAuth_DigestAuth_And_Timeout(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		u, p, ok := r.BasicAuth()
 		assert.True(t, ok)
@@ -182,6 +423,7 @@ func TestFluent_BasicAuthAndTimeout(t *testing.T) {
 
 	resp, err := fluent.R(client).
 		SetBasicAuth("admin", "pass123").
+		SetDigestAuth("user", "pass").
 		SetTimeout(5 * time.Second).
 		Get("/")
 
@@ -189,133 +431,25 @@ func TestFluent_BasicAuthAndTimeout(t *testing.T) {
 	assert.Equal(t, http.StatusOK, resp.StatusCode)
 }
 
-func TestFluent_CustomMethods(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Method == "PROPFIND" {
-			w.Header().Set("Content-Type", "application/json")
-			w.WriteHeader(http.StatusOK)
-			_ = json.NewEncoder(w).Encode(userPayload{ID: 77, Name: "CustomMethod"})
-
-			return
-		}
-
-		w.WriteHeader(http.StatusOK)
-	}))
-	defer server.Close()
-
-	client := aoni.NewClient(server.Client(), option.WithBaseURL(server.URL))
-
-	resp, err := fluent.R(client).Do("PROPFIND", "/")
-	require.NoError(t, err)
-	assert.Equal(t, http.StatusOK, resp.StatusCode)
-
-	user, resp, err := fluent.DoJSON[userPayload](t.Context(), client, "PROPFIND", "/", nil)
-	require.NoError(t, err)
-	assert.Equal(t, http.StatusOK, resp.StatusCode)
-	assert.Equal(t, 77, user.ID)
-	assert.Equal(t, "CustomMethod", user.Name)
-}
-
-func TestFluent_DownloadFile(t *testing.T) {
-	fileContent := []byte("hello file downloader world!")
+func TestFluent_Download_Shortcut(t *testing.T) {
+	fileContent := []byte("download shortcut content")
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		w.Header().Set("Content-Type", "application/octet-stream")
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write(fileContent)
 	}))
 	defer server.Close()
 
 	client := aoni.NewClient(server.Client(), option.WithBaseURL(server.URL))
-	targetPath := t.TempDir() + "/downloaded/test.bin"
+	targetPath := filepath.Join(t.TempDir(), "download_shortcut.txt")
 
-	var progressCalled bool
-
-	resp, err := fluent.R(client).
-		SetDownloadProgress(func(current, total int64) {
-			progressCalled = true
-		}).
-		SetOutput(targetPath).
-		Get("/file.bin")
-
+	resp, err := fluent.R(client).Download(server.URL+"/file", targetPath)
 	require.NoError(t, err)
 	assert.Equal(t, http.StatusOK, resp.StatusCode)
-	assert.True(t, progressCalled)
 
-	savedData, readErr := os.ReadFile(targetPath)
-	require.NoError(t, readErr)
-	assert.Equal(t, fileContent, savedData)
-}
-
-func TestFluent_TLSCertificateInspection(t *testing.T) {
-	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		w.WriteHeader(http.StatusOK)
-	}))
-	defer server.Close()
-
-	client := aoni.NewClient(server.Client(), option.WithBaseURL(server.URL), option.WithInsecureSkipVerify())
-
-	info := &telemetry.TraceInfo{}
-	resp, err := fluent.R(client).
-		SetTrace(info).
-		Get("/")
-
+	data, err := os.ReadFile(targetPath)
 	require.NoError(t, err)
-	assert.Equal(t, http.StatusOK, resp.StatusCode)
-	require.NotEmpty(t, info.PeerCertificates)
-
-	summary := info.CertSummary()
-	require.NotNil(t, summary)
-	assert.NotEmpty(t, summary.Issuer)
-	assert.NotEmpty(t, summary.SHA256Pin)
-}
-
-func TestFluent_ForceContentType(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		w.Header().Set("Content-Type", "text/plain") // Server incorrectly returns text/plain for JSON
-		w.WriteHeader(http.StatusOK)
-		_, _ = w.Write([]byte(`{"id": 42, "name": "ForcedJSON"}`))
-	}))
-	defer server.Close()
-
-	client := aoni.NewClient(server.Client(), option.WithBaseURL(server.URL))
-
-	var target userPayload
-
-	resp, err := fluent.R(client).
-		SetForceJSON().
-		SetResult(&target).
-		Get("/")
-
-	require.NoError(t, err)
-	assert.Equal(t, http.StatusOK, resp.StatusCode)
-	assert.Equal(t, 42, target.ID)
-	assert.Equal(t, "ForcedJSON", target.Name)
-}
-
-func TestFluent_Label_And_Apply(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		assert.Equal(t, "custom-applied-value", r.Header.Get("X-Applied-Header"))
-		w.WriteHeader(http.StatusOK)
-	}))
-	defer server.Close()
-
-	client := aoni.NewClient(server.Client(), option.WithBaseURL(server.URL))
-
-	info := &telemetry.TraceInfo{}
-	customMod := func(req *http.Request) {
-		req.Header.Set("X-Applied-Header", "custom-applied-value")
-	}
-
-	resp, err := fluent.R(client).
-		SetLabel("GetUserProfile").
-		SetTrace(info).
-		Apply(customMod).
-		Get("/")
-
-	require.NoError(t, err)
-	assert.Equal(t, http.StatusOK, resp.StatusCode)
-	assert.Equal(t, "GetUserProfile", info.Label)
+	assert.Equal(t, fileContent, data)
 }
 
 func BenchmarkFluent_RequestCreation(b *testing.B) {

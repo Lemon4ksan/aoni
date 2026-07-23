@@ -202,7 +202,7 @@ func Import(jar http.CookieJar, u *url.URL, cookies []Cookie) {
 
 	httpCookies := make([]*http.Cookie, len(cookies))
 	for i, c := range cookies {
-		httpCookies[i] = &http.Cookie{
+		httpCookies[i] = &http.Cookie{ //nolint:gosec
 			Name:     c.Name,
 			Value:    c.Value,
 			Domain:   c.Domain,

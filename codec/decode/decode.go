@@ -50,14 +50,10 @@ var ProtoDecoder Decoder = protoDecoder{}
 var GRPCWebDecoder Decoder = grpcWebDecoder{}
 
 // JSONDecoder parses the response stream as standard JSON into the target structure.
-var JSONDecoder Decoder = DecoderFunc(func(reader io.Reader, target any) error {
-	return json.NewDecoder(StripBOM(reader)).Decode(target)
-})
+var JSONDecoder Decoder = jsonDecoder{}
 
 // XMLDecoder parses the response stream as XML into the target structure.
-var XMLDecoder Decoder = DecoderFunc(func(reader io.Reader, target any) error {
-	return xml.NewDecoder(StripBOM(reader)).Decode(target)
-})
+var XMLDecoder Decoder = xmlDecoder{}
 
 // ProtoJSONDecoder parses JSON response streams into Protobuf messages using standard protojson mapping.
 var ProtoJSONDecoder Decoder = protoJSONDecoder{}
@@ -86,20 +82,38 @@ type JSONDecoderConfig struct {
 	UseNumber bool
 }
 
+type customJSONDecoder struct {
+	cfg JSONDecoderConfig
+}
+
+func (d customJSONDecoder) Decode(reader io.Reader, target any) error {
+	dec := json.NewDecoder(StripBOM(reader))
+	if d.cfg.DisallowUnknownFields {
+		dec.DisallowUnknownFields()
+	}
+
+	if d.cfg.UseNumber {
+		dec.UseNumber()
+	}
+
+	return dec.Decode(target)
+}
+
 // NewJSONDecoder creates a custom JSON [Decoder] configured with the specified parameters.
 func NewJSONDecoder(cfg JSONDecoderConfig) Decoder {
-	return DecoderFunc(func(reader io.Reader, target any) error {
-		dec := json.NewDecoder(StripBOM(reader))
-		if cfg.DisallowUnknownFields {
-			dec.DisallowUnknownFields()
-		}
+	return customJSONDecoder{cfg: cfg}
+}
 
-		if cfg.UseNumber {
-			dec.UseNumber()
-		}
+type jsonDecoder struct{}
 
-		return dec.Decode(target)
-	})
+func (jsonDecoder) Decode(reader io.Reader, target any) error {
+	return json.NewDecoder(StripBOM(reader)).Decode(target)
+}
+
+type xmlDecoder struct{}
+
+func (xmlDecoder) Decode(reader io.Reader, target any) error {
+	return xml.NewDecoder(StripBOM(reader)).Decode(target)
 }
 
 type rawDecoder struct{}
@@ -314,11 +328,21 @@ func castOrResolveProto(target any) (proto.Message, error) {
 	return nil, &Error{Format: "proto", Target: typeName(target), Err: ErrInvalidProtoTarget}
 }
 
+type limitDecoder struct {
+	decoder  Decoder
+	maxBytes int64
+}
+
+func (l limitDecoder) Decode(reader io.Reader, target any) error {
+	return l.decoder.Decode(io.LimitReader(reader, l.maxBytes), target)
+}
+
 // LimitDecoder wraps an existing decoder to cap input stream consumption at maxBytes.
 func LimitDecoder(decoder Decoder, maxBytes int64) Decoder {
-	return DecoderFunc(func(reader io.Reader, target any) error {
-		return decoder.Decode(io.LimitReader(reader, maxBytes), target)
-	})
+	return limitDecoder{
+		decoder:  decoder,
+		maxBytes: maxBytes,
+	}
 }
 
 // ByContentType automatically inspects the MIME type in contentType and selects
@@ -393,19 +417,48 @@ func WithProto() aoni.RequestModifier { return mod.WithDecoder(ProtoDecoder) }
 // WithGRPCWeb creates a request modifier that sets GRPCWebDecoder for response parsing.
 func WithGRPCWeb() aoni.RequestModifier { return mod.WithDecoder(GRPCWebDecoder) }
 
-// StripBOM removes the BOM (Byte Order Mark) from the reader if present.
+// StripBOM removes the BOM (Byte Order Mark) from the reader if present without allocations.
 func StripBOM(reader io.Reader) io.Reader {
-	br, ok := reader.(*bufio.Reader)
-	if !ok {
-		br = bufio.NewReader(reader)
+	var br *bufio.Reader
+	switch r := reader.(type) {
+	case *bufio.Reader:
+		br = r
+	case interface{ BufioReader() *bufio.Reader }:
+		br = r.BufioReader()
 	}
 
-	peek, err := br.Peek(3)
-	if err == nil && len(peek) >= 3 {
-		if bytes.HasPrefix(peek, []byte{0xEF, 0xBB, 0xBF}) {
-			_, _ = br.Discard(3)
-			return br
+	if br != nil {
+		return stripBufferBOM(br)
+	}
+
+	var buf [3]byte
+
+	n, _ := io.ReadFull(reader, buf[:])
+	if n == 0 {
+		return reader
+	}
+
+	if n >= 3 && buf[0] == 0xEF && buf[1] == 0xBB && buf[2] == 0xBF {
+		return reader
+	}
+
+	if n >= 2 && ((buf[0] == 0xFE && buf[1] == 0xFF) || (buf[0] == 0xFF && buf[1] == 0xFE)) {
+		unread := buf[2:n]
+		if len(unread) == 0 {
+			return reader
 		}
+
+		return io.MultiReader(bytes.NewReader(unread), reader)
+	}
+
+	return io.MultiReader(bytes.NewReader(buf[:n]), reader)
+}
+
+func stripBufferBOM(br *bufio.Reader) *bufio.Reader {
+	peek, err := br.Peek(3)
+	if err == nil && len(peek) >= 3 && bytes.HasPrefix(peek, []byte{0xEF, 0xBB, 0xBF}) {
+		_, _ = br.Discard(3)
+		return br
 	}
 
 	peek, err = br.Peek(2)

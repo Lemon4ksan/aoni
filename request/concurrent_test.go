@@ -143,7 +143,7 @@ func TestConcurrent(t *testing.T) {
 	client := aoni.NewClient(nil, option.WithBaseURL(server.URL))
 
 	results := Concurrent(t.Context(), client, paths,
-		func(ctx context.Context, c aoni.Requester, path string) (*reqTestPayload, error) {
+		func(ctx context.Context, c Requester, path string) (*reqTestPayload, error) {
 			return GetTo[reqTestPayload](ctx, c, path)
 		})
 
@@ -175,7 +175,7 @@ func TestConcurrentWithMods(t *testing.T) {
 	client := aoni.NewClient(nil, option.WithBaseURL(server.URL))
 
 	results := ConcurrentWithMods(t.Context(), client, paths, mods,
-		func(ctx context.Context, c aoni.Requester, path string, m ...aoni.RequestModifier) (*reqTestPayload, error) {
+		func(ctx context.Context, c Requester, path string, m ...aoni.RequestModifier) (*reqTestPayload, error) {
 			return GetTo[reqTestPayload](ctx, c, path, m...)
 		})
 

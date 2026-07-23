@@ -7,12 +7,12 @@ package aoni
 import (
 	"context"
 	"crypto/tls"
-	"fmt"
 	"maps"
 	"net"
 	"net/http"
 	"net/url"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/lemon4ksan/miyako/generic"
@@ -26,6 +26,15 @@ import (
 	"github.com/lemon4ksan/aoni/fingerprint"
 	"github.com/lemon4ksan/aoni/fingerprint/h2"
 	"github.com/lemon4ksan/aoni/internal/io"
+)
+
+var (
+	requestConfigPool = sync.Pool{
+		New: func() any {
+			return &RequestConfig{}
+		},
+	}
+	defaultAcceptEncoding = []string{"zstd, br, gzip"}
 )
 
 // HTTPDoer wraps the execution of an HTTP request.
@@ -57,30 +66,11 @@ type Middleware func(next HTTPDoer) HTTPDoer
 // are provided in the [github.com/lemon4ksan/aoni/mod] package.
 type RequestModifier = generic.Option[*http.Request]
 
-// Requester specifies a high-level API client capable of executing parameterized requests.
-//
-// The pipeline handles base URL resolution, request parameter mapping, WAF challenge
-// solving, and automatic decompression.
-type Requester interface {
-	Request(
-		ctx context.Context,
-		method, path string,
-		mods ...RequestModifier,
-	) (*http.Response, error)
-}
-
 // ClientOption represents a functional option utilized to customize client configuration.
 //
 // Options are consumed by [NewClient] or [Client.With] to alter transport timeouts,
 // browser fingerprint choices, or DNS settings.
 type ClientOption generic.Option[*Config]
-
-// Unwrapper allows nested decorators to be peeled away to reach the
-// underlying [Requester]. [Client] does not implement this interface;
-// wrapper types returned by [NewStdClient] or [Chain] do.
-type Unwrapper interface {
-	Unwrap() Requester
-}
 
 // Client is a thread-safe, concurrency-ready HTTP and WebSocket client built on [HTTPDoer].
 //
@@ -282,26 +272,6 @@ func (c *Client) Clone() *Client {
 	return cloned
 }
 
-// UnwrapClient strips all [Unwrapper] layers from r and returns the
-// innermost [Client]. Returns nil if r is not a *Client and no
-// Unwrapper chain leads to one.
-func UnwrapClient(r Requester) (c *Client) {
-	for {
-		if client, ok := r.(*Client); ok {
-			return client
-		}
-
-		u, ok := r.(Unwrapper)
-		if !ok {
-			break
-		}
-
-		r = u.Unwrap()
-	}
-
-	return nil
-}
-
 // Request executes a parameterized HTTP transaction and yields the response.
 //
 // Relative paths are resolved against the client's configured BaseURL.
@@ -318,42 +288,48 @@ func (c *Client) Request(
 	method, path string,
 	mods ...RequestModifier,
 ) (*http.Response, error) {
-	rel, err := url.Parse(strings.TrimLeft(path, "/"))
+	var targetURLStr string
+
+	targetURLStr, err := c.resolveTargetURL(path)
 	if err != nil {
-		return nil, fmt.Errorf("aoni: invalid path: %w", err)
+		return nil, err
 	}
 
-	u := c.defaults.BaseURL.ResolveReference(rel)
+	cfg := GetRequestConfig(ctx)
+	if cfg == nil {
+		cfg = requestConfigPool.Get().(*RequestConfig)
+		ctx = context.WithValue(ctx, requestConfigKey{}, cfg)
+	}
 
-	req, err := http.NewRequestWithContext(ctx, method, u.String(), http.NoBody) //nolint:gosec
+	cfg.ApplyDefaults(c)
+
+	req, err := http.NewRequestWithContext(ctx, method, targetURLStr, http.NoBody) //nolint:gosec
 	if err != nil {
-		return nil, fmt.Errorf("aoni: failed to create request: %w", err)
+		return nil, &Error{Op: "failed to create request", Err: err}
 	}
 
-	maps.Copy(req.Header, c.defaults.Headers)
-
-	if req.Header.Get("Accept-Encoding") == "" {
-		req.Header.Set("Accept-Encoding", "zstd, br, gzip")
+	if len(c.defaults.Headers) > 0 {
+		maps.Copy(req.Header, c.defaults.Headers)
 	}
 
-	req = c.InitRequestConfig(req)
+	if len(req.Header["Accept-Encoding"]) == 0 {
+		req.Header["Accept-Encoding"] = defaultAcceptEncoding
+	}
 
 	generic.ApplyOptions(req, c.defaults.DefaultMods...)
 	generic.ApplyOptions(req, mods...)
 
-	if cfg := GetRequestConfig(req.Context()); cfg != nil {
-		if cfg.BodyError != nil {
-			return nil, fmt.Errorf("aoni: body encoding failed: %w", cfg.BodyError)
-		}
+	if cfg.BodyError != nil {
+		return nil, &Error{Op: "body encoding failed", Err: cfg.BodyError}
+	}
 
-		if cfg.QueryError != nil {
-			return nil, fmt.Errorf("aoni: query encoding failed: %w", cfg.QueryError)
-		}
+	if cfg.QueryError != nil {
+		return nil, &Error{Op: "query encoding failed", Err: cfg.QueryError}
 	}
 
 	resp, err := c.execute(req, c.resolvePipeline(req))
 	if err != nil {
-		return nil, fmt.Errorf("aoni: request failed: %w", err)
+		return nil, &Error{Op: "request failed", Err: err}
 	}
 
 	return resp, nil
@@ -425,6 +401,15 @@ func (c *Client) Engine() HTTPDoer {
 // Defaults retrieves the default request settings configured on this client.
 func (c *Client) Defaults() ClientDefaults {
 	return c.defaults.Clone()
+}
+
+// BaseResponse invokes the configured BaseResponse factory function if present.
+func (c *Client) BaseResponse() BaseResponse {
+	if c.defaults.BaseResponse != nil {
+		return c.defaults.BaseResponse()
+	}
+
+	return nil
 }
 
 // Network retrieves the active network layer configurations.
@@ -536,7 +521,7 @@ func (c *Client) Transport() *http.Transport {
 func (c *Client) InitRequestConfig(req *http.Request) *http.Request {
 	cfg := GetRequestConfig(req.Context())
 	if cfg == nil {
-		cfg = &RequestConfig{}
+		cfg = requestConfigPool.Get().(*RequestConfig)
 		ctx := context.WithValue(req.Context(), requestConfigKey{}, cfg)
 		req = req.WithContext(ctx)
 	}
@@ -558,9 +543,7 @@ func (c *Client) CloseIdleConnections() {
 func GetOrInitRequestConfig(req *http.Request) *RequestConfig {
 	cfg := GetRequestConfig(req.Context())
 	if cfg == nil {
-		cfg = &RequestConfig{
-			Metadata: make(map[string]any),
-		}
+		cfg = requestConfigPool.Get().(*RequestConfig)
 		ctx := context.WithValue(req.Context(), requestConfigKey{}, cfg)
 		*req = *req.WithContext(ctx)
 	}
@@ -619,12 +602,21 @@ func CloseResponse(resp *http.Response) {
 		rb.ReallyClose()
 	}
 
-	if resp.Request != nil {
-		cfg := GetRequestConfig(resp.Request.Context())
-		if cfg != nil && cfg.RequestTimeoutCancel != nil {
-			cfg.RequestTimeoutCancel()
-		}
+	if resp.Request == nil {
+		return
 	}
+
+	cfg := GetRequestConfig(resp.Request.Context())
+	if cfg == nil {
+		return
+	}
+
+	if cfg.RequestTimeoutCancel != nil {
+		cfg.RequestTimeoutCancel()
+	}
+
+	*cfg = RequestConfig{}
+	requestConfigPool.Put(cfg)
 }
 
 func defaultEngine(doer HTTPDoer) HTTPDoer {
@@ -754,6 +746,38 @@ func applyRedirectPolicy(httpClient *http.Client, eng EngineConfig) {
 	default:
 		httpClient.CheckRedirect = DefaultRedirectPolicy(10)
 	}
+}
+
+func (c *Client) resolveTargetURL(path string) (string, error) {
+	if c.defaults.BaseURL == nil || c.defaults.BaseURL.Host == "" {
+		return path, nil
+	}
+
+	if path == "" || path == "/" {
+		if c.defaults.BaseURLString != "" {
+			return c.defaults.BaseURLString, nil
+		}
+
+		return c.defaults.BaseURL.String(), nil
+	}
+
+	if path[0] == '/' && (c.defaults.BaseURL.Path == "" || c.defaults.BaseURL.Path == "/") {
+		if c.defaults.BaseURLString != "" {
+			return strings.TrimSuffix(c.defaults.BaseURLString, "/") + path, nil
+		}
+
+		uCopy := *c.defaults.BaseURL
+		uCopy.Path = path
+
+		return uCopy.String(), nil
+	}
+
+	rel, err := url.Parse(strings.TrimLeft(path, "/"))
+	if err != nil {
+		return "", &Error{Op: "invalid path", Err: err}
+	}
+
+	return c.defaults.BaseURL.ResolveReference(rel).String(), nil
 }
 
 func applyCookieJar(c *Client, httpClient *http.Client, jar http.CookieJar) {

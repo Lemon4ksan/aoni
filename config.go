@@ -7,12 +7,12 @@ package aoni
 import (
 	"context"
 	"errors"
-	"fmt"
 	"maps"
 	"net"
 	"net/http"
 	"net/url"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -322,15 +322,8 @@ func NewFragmentedConn(conn net.Conn, cfg *FragmentConfig) net.Conn {
 func (n NetworkConfig) Clone() NetworkConfig {
 	cloned := n
 
-	if n.DynamicHedging != nil {
-		dhCopy := *n.DynamicHedging
-		cloned.DynamicHedging = &dhCopy
-	}
-
-	if n.FragmentConfig != nil {
-		fragCopy := *n.FragmentConfig
-		cloned.FragmentConfig = &fragCopy
-	}
+	cloned.DynamicHedging = clonePtr(n.DynamicHedging)
+	cloned.FragmentConfig = clonePtr(n.FragmentConfig)
 
 	if n.HostRewrite != nil && n.HostRewrite.Rules != nil {
 		rulesCopy := make(map[string]string, len(n.HostRewrite.Rules))
@@ -402,48 +395,10 @@ type FingerprintConfig struct {
 func (f FingerprintConfig) Clone() FingerprintConfig {
 	cloned := f
 
-	if f.TLSClientHelloID != nil {
-		idCopy := *f.TLSClientHelloID
-		cloned.TLSClientHelloID = &idCopy
-	}
-
-	if f.HeaderOrder != nil {
-		orderCopy := make([]string, len(f.HeaderOrder))
-		copy(orderCopy, f.HeaderOrder)
-		cloned.HeaderOrder = orderCopy
-	}
-
-	if f.P0fSignature != nil {
-		sigCopy := *f.P0fSignature
-		if len(sigCopy.Options) > 0 {
-			optsCopy := make([]string, len(sigCopy.Options))
-			copy(optsCopy, sigCopy.Options)
-			sigCopy.Options = optsCopy
-		}
-
-		if len(sigCopy.Quirks) > 0 {
-			qCopy := make([]string, len(sigCopy.Quirks))
-			copy(qCopy, sigCopy.Quirks)
-			sigCopy.Quirks = qCopy
-		}
-
-		cloned.P0fSignature = &sigCopy
-	}
-
-	if f.H2Settings != nil {
-		h2Copy := *f.H2Settings
-		cloned.H2Settings = &h2Copy
-	}
-
-	if f.H3Settings != nil {
-		h3Copy := *f.H3Settings
-		cloned.H3Settings = &h3Copy
-	}
-
-	if f.PacketPadding != nil {
-		padCopy := *f.PacketPadding
-		cloned.PacketPadding = &padCopy
-	}
+	cloned.TLSClientHelloID = clonePtr(f.TLSClientHelloID)
+	cloned.H2Settings = clonePtr(f.H2Settings)
+	cloned.H3Settings = clonePtr(f.H3Settings)
+	cloned.PacketPadding = clonePtr(f.PacketPadding)
 
 	return cloned
 }
@@ -574,6 +529,7 @@ type ChallengeDetector func(resp *http.Response) (bool, error)
 // body buffering configs, and debuggers.
 type ClientDefaults struct {
 	BaseURL              *url.URL
+	BaseURLString        string
 	Headers              http.Header
 	BaseResponse         func() BaseResponse
 	BeforeRequest        []func(req *http.Request)
@@ -617,10 +573,7 @@ func (d ClientDefaults) Clone() ClientDefaults {
 	}
 
 	cloned.Pipeline = d.Pipeline
-	if d.Pipeline.DPIJitter != nil {
-		dj := *d.Pipeline.DPIJitter
-		cloned.Pipeline.DPIJitter = &dj
-	}
+	cloned.Pipeline.DPIJitter = clonePtr(d.Pipeline.DPIJitter)
 
 	if d.Pipeline.ProxyFailover != nil {
 		pf := *d.Pipeline.ProxyFailover
@@ -632,23 +585,12 @@ func (d ClientDefaults) Clone() ClientDefaults {
 
 	if d.Pipeline.Hedging != nil {
 		h := *d.Pipeline.Hedging
-		if h.DynamicHedging != nil {
-			dhCopy := *h.DynamicHedging
-			h.DynamicHedging = &dhCopy
-		}
-
+		h.DynamicHedging = clonePtr(h.DynamicHedging)
 		cloned.Pipeline.Hedging = &h
 	}
 
-	if d.Pipeline.Cache != nil {
-		cc := *d.Pipeline.Cache
-		cloned.Pipeline.Cache = &cc
-	}
-
-	if d.Pipeline.HAR != nil {
-		har := *d.Pipeline.HAR
-		cloned.Pipeline.HAR = &har
-	}
+	cloned.Pipeline.Cache = clonePtr(d.Pipeline.Cache)
+	cloned.Pipeline.HAR = clonePtr(d.Pipeline.HAR)
 
 	if d.Pipeline.Redact != nil {
 		r := *d.Pipeline.Redact
@@ -750,14 +692,6 @@ type RequestConfig struct {
 // ApplyDefaults merges client-level defaults into the request config
 // if they are not already set.
 func (cfg *RequestConfig) ApplyDefaults(c *Client) {
-	if cfg.Metadata == nil {
-		cfg.Metadata = make(map[string]any)
-	}
-
-	if cfg.CertificatePins == nil {
-		cfg.CertificatePins = make(map[string][]string)
-	}
-
 	if !cfg.SSRFGuard {
 		cfg.SSRFGuard = c.network.SSRFGuard
 	}
@@ -785,12 +719,18 @@ func (cfg *RequestConfig) ApplyDefaults(c *Client) {
 	cfg.JA4Callback = generic.CoalesceNil(cfg.JA4Callback, c.fingerprint.JA4Callback)
 	cfg.QueryEncoder = generic.CoalesceNil(cfg.QueryEncoder, c.defaults.QueryEncoder)
 
-	c.mergeCertificatePins(cfg)
+	if len(c.fingerprint.CertificatePins) > 0 {
+		c.mergeCertificatePins(cfg)
+	}
 }
 
 func (c *Client) mergeCertificatePins(cfg *RequestConfig) {
 	for domain, hashes := range c.fingerprint.CertificatePins {
 		for _, h := range hashes {
+			if cfg.CertificatePins == nil {
+				cfg.CertificatePins = make(map[string][]string)
+			}
+
 			if !slices.Contains(cfg.CertificatePins[domain], h) {
 				cfg.CertificatePins[domain] = append(cfg.CertificatePins[domain], h)
 			}
@@ -862,8 +802,6 @@ type HARTracker interface {
 	Record(req *http.Request, resp *http.Response, startTime time.Time, duration int64)
 }
 
-var ErrRedirectDomainForbidden = errors.New("aoni: redirect domain not allowed")
-
 // AllowedDomainsRedirectPolicy returns a CheckRedirect function that restricts HTTP redirects to a list of allowed domains.
 // Supports exact domain matches ("example.com") and wildcard subdomain matches ("*.example.com").
 func AllowedDomainsRedirectPolicy(allowedDomains ...string) func(req *http.Request, via []*http.Request) error {
@@ -894,7 +832,7 @@ func AllowedDomainsRedirectPolicy(allowedDomains ...string) func(req *http.Reque
 		}
 
 		if !allowed {
-			return fmt.Errorf("%w: %s", ErrRedirectDomainForbidden, host)
+			return &Error{Op: "redirect", Target: host, Err: ErrRedirectDomainForbidden}
 		}
 
 		return nil
@@ -908,7 +846,7 @@ func DefaultRedirectPolicy(
 ) func(req *http.Request, via []*http.Request) error {
 	return func(req *http.Request, via []*http.Request) error {
 		if maxRedirects >= 0 && len(via) >= maxRedirects {
-			return fmt.Errorf("stopped after %d redirects", maxRedirects)
+			return &Error{Op: "redirect", Err: errors.New("stopped after " + strconv.Itoa(maxRedirects) + " redirects")}
 		}
 
 		if len(via) == 0 {
@@ -927,4 +865,14 @@ func DefaultRedirectPolicy(
 
 		return nil
 	}
+}
+
+func clonePtr[T any](p *T) *T {
+	if p == nil {
+		return nil
+	}
+
+	val := *p
+
+	return &val
 }

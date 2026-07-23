@@ -6,13 +6,13 @@ package fluent
 
 import (
 	"context"
-	"fmt"
 	"io"
 	"maps"
 	"net/http"
 	"net/url"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -20,7 +20,9 @@ import (
 	"google.golang.org/protobuf/proto"
 
 	"github.com/lemon4ksan/aoni"
+	"github.com/lemon4ksan/aoni/codec"
 	"github.com/lemon4ksan/aoni/codec/decode"
+	"github.com/lemon4ksan/aoni/middleware"
 	"github.com/lemon4ksan/aoni/mod"
 	"github.com/lemon4ksan/aoni/netutil"
 	"github.com/lemon4ksan/aoni/request"
@@ -34,14 +36,47 @@ var bytePool = sync.Pool{
 	},
 }
 
-var requestPool = sync.Pool{
-	New: func() any {
-		return &Request{
-			headers:     make(http.Header),
-			queryParams: make(url.Values),
-			pathParams:  make(map[string]string),
-		}
-	},
+// TypedRequestPool provides a zero-boxing free list for *Request instances.
+type TypedRequestPool struct {
+	mu    sync.Mutex
+	items []*Request
+}
+
+// Get retrieves a pooled *Request instance bound to the given client.
+func (p *TypedRequestPool) Get(client *aoni.Client) *Request {
+	p.mu.Lock()
+
+	n := len(p.items)
+	if n > 0 {
+		r := p.items[n-1]
+		p.items = p.items[:n-1]
+		p.mu.Unlock()
+
+		r.client = client
+
+		return r
+	}
+
+	p.mu.Unlock()
+
+	return &Request{
+		client: client,
+	}
+}
+
+// Put returns a request to the pool for reuse.
+func (p *TypedRequestPool) Put(r *Request) {
+	r.Reset()
+	p.mu.Lock()
+	if len(p.items) < 1024 {
+		p.items = append(p.items, r)
+	}
+
+	p.mu.Unlock()
+}
+
+var requestPool = &TypedRequestPool{
+	items: make([]*Request, 0, 128),
 }
 
 // Request is a thread-safe pooled request builder offering a fluent chainable API.
@@ -59,6 +94,7 @@ type Request struct {
 	correlationID    string
 	forceContentType string
 	label            string
+	proxyOverride    string
 
 	client           *aoni.Client
 	basicAuth        *basicAuth
@@ -66,11 +102,15 @@ type Request struct {
 	headers          http.Header
 	queryParams      url.Values
 	pathParams       map[string]string
+	formFields       map[string]string
+	formFiles        map[string]io.Reader
+	expectedStatuses []int
 	downloadProgress aoni.ProgressFunc
 	uploadProgress   aoni.ProgressFunc
 	traceInfo        *telemetry.TraceInfo
 	appliedMods      []aoni.RequestModifier
 	timeout          time.Duration
+	retryOverride    *aoni.RetryOverride
 
 	useProtoDecoder   bool
 	useGRPCWebDecoder bool
@@ -104,11 +144,14 @@ func (r *Request) Reset() {
 	r.correlationID = ""
 	r.forceContentType = ""
 	r.label = ""
+	r.proxyOverride = ""
 	r.downloadProgress = nil
 	r.uploadProgress = nil
 	r.traceInfo = nil
 	r.appliedMods = r.appliedMods[:0]
+	r.expectedStatuses = r.expectedStatuses[:0]
 	r.timeout = 0
+	r.retryOverride = nil
 	r.useProtoDecoder = false
 	r.useGRPCWebDecoder = false
 
@@ -123,6 +166,30 @@ func (r *Request) Reset() {
 	for k := range r.pathParams {
 		delete(r.pathParams, k)
 	}
+
+	for k := range r.formFields {
+		delete(r.formFields, k)
+	}
+
+	for k := range r.formFiles {
+		delete(r.formFiles, k)
+	}
+}
+
+// Release resets the request and returns it to the internal pool.
+// Use this if a constructed request is abandoned before execution.
+func (r *Request) Release() {
+	if r == nil {
+		return
+	}
+
+	r.Reset()
+	requestPool.Put(r)
+}
+
+// Discard is a convenience alias for Release.
+func (r *Request) Discard() {
+	r.Release()
 }
 
 // SetContext associates a context.Context with the request execution.
@@ -133,12 +200,21 @@ func (r *Request) SetContext(ctx context.Context) *Request {
 
 // SetHeader sets a single HTTP request header.
 func (r *Request) SetHeader(header, value string) *Request {
+	if r.headers == nil {
+		r.headers = make(http.Header, 4)
+	}
+
 	r.headers.Set(header, value)
+
 	return r
 }
 
 // SetHeaders bulk-sets HTTP headers from a map.
 func (r *Request) SetHeaders(headers map[string]string) *Request {
+	if r.headers == nil {
+		r.headers = make(http.Header, len(headers))
+	}
+
 	for k, v := range headers {
 		r.headers.Set(k, v)
 	}
@@ -148,14 +224,85 @@ func (r *Request) SetHeaders(headers map[string]string) *Request {
 
 // SetQueryParam appends a URL query parameter key-value pair.
 func (r *Request) SetQueryParam(param, value string) *Request {
+	if r.queryParams == nil {
+		r.queryParams = make(url.Values, 4)
+	}
+
 	r.queryParams.Add(param, value)
+
 	return r
 }
 
 // SetQueryParams bulk-sets URL query parameters from a map.
 func (r *Request) SetQueryParams(params map[string]string) *Request {
+	if r.queryParams == nil {
+		r.queryParams = make(url.Values, len(params))
+	}
+
 	for k, v := range params {
 		r.queryParams.Add(k, v)
+	}
+
+	return r
+}
+
+// ExpectStatus asserts that response status code matches one of the expected HTTP status codes.
+func (r *Request) ExpectStatus(codes ...int) *Request {
+	r.expectedStatuses = append(r.expectedStatuses, codes...)
+	return r
+}
+
+// SetFormField adds a key-value form field for multipart/form-data requests.
+func (r *Request) SetFormField(key, value string) *Request {
+	if r.formFields == nil {
+		r.formFields = make(map[string]string, 4)
+	}
+
+	r.formFields[key] = value
+
+	return r
+}
+
+// SetFormFile attaches a stream reader as a file part in multipart/form-data requests.
+func (r *Request) SetFormFile(fieldname string, reader io.Reader) *Request {
+	if r.formFiles == nil {
+		r.formFiles = make(map[string]io.Reader, 2)
+	}
+
+	r.formFiles[fieldname] = reader
+
+	return r
+}
+
+// SetProxy routes this specific request through a custom proxy URL.
+func (r *Request) SetProxy(proxyURL string) *Request {
+	r.proxyOverride = proxyURL
+	return r
+}
+
+// SetRetry configures custom retry parameters for this request execution.
+func (r *Request) SetRetry(maxAttempts int, backoff time.Duration) *Request {
+	r.retryOverride = &aoni.RetryOverride{
+		MaxAttempts: maxAttempts,
+		Backoff:     backoff,
+		Condition:   middleware.RetryOnTransientErrors(),
+	}
+
+	return r
+}
+
+// WithCodec applies both request body encoding and response decoding strategies defined by codec.
+func (r *Request) WithCodec(c codec.Codec, body any) *Request {
+	if c == nil {
+		return r
+	}
+
+	if encMod := c.Encode(body); encMod != nil {
+		r.appliedMods = append(r.appliedMods, encMod)
+	}
+
+	if decMod := c.Decode(); decMod != nil {
+		r.appliedMods = append(r.appliedMods, decMod)
 	}
 
 	return r
@@ -169,13 +316,23 @@ func (r *Request) SetQueryStruct(v any) *Request {
 
 // SetPathParam sets a URL path parameter to be interpolated (e.g. /users/{id}).
 func (r *Request) SetPathParam(param, value string) *Request {
+	if r.pathParams == nil {
+		r.pathParams = make(map[string]string, 4)
+	}
+
 	r.pathParams[param] = value
+
 	return r
 }
 
 // SetPathParams bulk-sets URL path parameters from a map.
 func (r *Request) SetPathParams(params map[string]string) *Request {
+	if r.pathParams == nil {
+		r.pathParams = make(map[string]string, len(params))
+	}
+
 	maps.Copy(r.pathParams, params)
+
 	return r
 }
 
@@ -323,10 +480,7 @@ func (r *Request) Execute(method, path string) (*http.Response, error) {
 	resultTarget := r.result
 	outputFile := r.outputFile
 
-	defer func() {
-		r.Reset()
-		requestPool.Put(r)
-	}()
+	defer r.Release()
 
 	finalPath := interpolatePathParams(path, r.pathParams)
 
@@ -342,13 +496,13 @@ func (r *Request) Execute(method, path string) (*http.Response, error) {
 	}
 
 	if resultTarget != nil {
-		var rawResp *http.Response
-
-		mods = append(mods, mod.WithCaptureResponse(&rawResp))
-
 		resp, err := client.Request(ctx, method, finalPath, mods...)
 		if err != nil {
 			return nil, err
+		}
+
+		if err := r.checkExpectedStatus(resp, finalPath); err != nil {
+			return resp, err
 		}
 
 		if err := request.HandleResponse(resp, resultTarget, client); err != nil {
@@ -358,7 +512,33 @@ func (r *Request) Execute(method, path string) (*http.Response, error) {
 		return resp, nil
 	}
 
-	return client.Request(ctx, method, finalPath, mods...)
+	resp, err := client.Request(ctx, method, finalPath, mods...)
+	if err != nil {
+		return resp, err
+	}
+
+	if err := r.checkExpectedStatus(resp, finalPath); err != nil {
+		return resp, err
+	}
+
+	return resp, nil
+}
+
+func (r *Request) checkExpectedStatus(resp *http.Response, finalPath string) error {
+	if len(r.expectedStatuses) == 0 || resp == nil {
+		return nil
+	}
+
+	if slices.Contains(r.expectedStatuses, resp.StatusCode) {
+		return nil
+	}
+
+	return &Error{
+		Op:   "expect_status",
+		Path: finalPath,
+		Code: resp.StatusCode,
+		Err:  ErrUnexpectedStatus,
+	}
 }
 
 func (r *Request) buildModifiers() []aoni.RequestModifier {
@@ -389,6 +569,8 @@ func (r *Request) buildModifiers() []aoni.RequestModifier {
 	}
 
 	switch {
+	case len(r.formFields) > 0 || len(r.formFiles) > 0:
+		mods = append(mods, mod.WithMultipart(r.formFields, r.formFiles))
 	case r.protoBody != nil:
 		mods = append(mods, mod.WithProtoBody(r.protoBody))
 	case r.grpcWebBody != nil:
@@ -464,7 +646,12 @@ func (r *Request) executeDownload(
 			_ = request.HandleResponse(resp, r.resultError, client)
 		}
 
-		return resp, fmt.Errorf("aoni: download failed with status code %d", resp.StatusCode)
+		return resp, &Error{
+			Op:   "download",
+			Path: path,
+			Code: resp.StatusCode,
+			Err:  ErrDownloadFailed,
+		}
 	}
 
 	if outputFile == "" && r.outputDirectory != "" {
@@ -473,12 +660,12 @@ func (r *Request) executeDownload(
 	}
 
 	if err := os.MkdirAll(filepath.Dir(outputFile), 0o755); err != nil { //nolint:gosec
-		return resp, fmt.Errorf("aoni: failed to create target directory: %w", err)
+		return resp, &Error{Op: "download", Path: outputFile, Err: err}
 	}
 
 	outFile, err := os.Create(outputFile)
 	if err != nil {
-		return resp, fmt.Errorf("aoni: failed to create output file: %w", err)
+		return resp, &Error{Op: "download", Path: outputFile, Err: err}
 	}
 	defer outFile.Close()
 
@@ -487,7 +674,7 @@ func (r *Request) executeDownload(
 	bytePool.Put(bufPtr)
 
 	if err != nil {
-		return resp, fmt.Errorf("aoni: error writing downloaded file: %w", err)
+		return resp, &Error{Op: "download", Path: outputFile, Err: err}
 	}
 
 	return resp, nil

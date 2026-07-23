@@ -2,17 +2,12 @@
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
-// Copyright (c) 2026 Lemon4ksan All rights reserved.
-// Use of this source code is governed by a BSD-style
-// license can be found in the LICENSE file.
-
 // Package dns provides secure, resilient, and anti-censorship DNS resolution strategies.
 package dns
 
 import (
 	"context"
 	"errors"
-	"fmt"
 	"net"
 	"strings"
 )
@@ -106,7 +101,7 @@ func (r *FallbackResolver) LookupIPAddr(ctx context.Context, host string) ([]net
 		lastErr = err
 	}
 
-	return nil, fmt.Errorf("aoni: dns: all fallback resolvers failed, last error: %w", lastErr)
+	return nil, errors.New("aoni: dns: all fallback resolvers failed: " + lastErr.Error())
 }
 
 // StaticResolver allows overriding DNS lookups with static IP mappings.
@@ -229,7 +224,7 @@ func (r *FastRaceResolver) LookupIPAddr(ctx context.Context, host string) ([]net
 
 			failedCount++
 			if failedCount == activeCount {
-				return nil, fmt.Errorf("aoni race resolver: all concurrent resolutions failed, last error: %w", lastErr)
+				return nil, errors.New("aoni race resolver: all concurrent resolutions failed: " + lastErr.Error())
 			}
 		}
 	}

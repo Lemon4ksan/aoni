@@ -487,3 +487,23 @@ func (c *BufferedConn) Read(b []byte) (int, error) {
 
 	return c.Conn.Read(b)
 }
+
+// BufioReadCloser wraps a bufio.Reader and an io.Closer.
+type BufioReadCloser struct {
+	*bufio.Reader
+	Closer io.Closer
+}
+
+// Close closes the underlying Closer, if any.
+func (b *BufioReadCloser) Close() error {
+	if b.Closer != nil {
+		return b.Closer.Close()
+	}
+
+	return nil
+}
+
+// BufioReader returns the underlying bufio.Reader.
+func (b *BufioReadCloser) BufioReader() *bufio.Reader {
+	return b.Reader
+}

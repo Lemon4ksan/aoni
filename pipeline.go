@@ -12,13 +12,13 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
-	"fmt"
 	stdio "io"
 	"mime"
 	"net"
 	"net/http"
 	"net/http/httptrace"
 	"net/url"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -141,6 +141,17 @@ func (c *Client) prepareRequest(req *http.Request, pipe PipelineConfig) *http.Re
 
 	if pipe.Redact != nil {
 		req = c.redactSensitiveData(req, pipe.Redact)
+	}
+
+	if cfg := GetRequestConfig(
+		req.Context(),
+	); cfg != nil && cfg.UploadProgress != nil && req.Body != nil &&
+		req.Body != http.NoBody {
+		req.Body = &io.ProgressReader{
+			Reader:     req.Body,
+			Total:      req.ContentLength,
+			OnProgress: cfg.UploadProgress,
+		}
 	}
 
 	return req
@@ -378,8 +389,6 @@ func (c *Client) postProcessResponse(
 		if bufErr := c.applyMultiReadBuffering(req, resp, GetRequestConfig(req.Context())); bufErr != nil {
 			return nil, bufErr
 		}
-
-		resp.Body = &io.ResponseBodyReadCloser{ReadCloser: resp.Body}
 	}
 
 	if pipe.Cache != nil && req.Method == http.MethodGet {
@@ -389,9 +398,9 @@ func (c *Client) postProcessResponse(
 	return resp, nil
 }
 
-// redactSensitiveData replaces sensitive request header values with REDACTED.
+// redactSensitiveData stores redaction rules directly in RequestConfig without context node allocations.
 func (c *Client) redactSensitiveData(req *http.Request, redact *RedactConfig) *http.Request {
-	headers := make(map[string]struct{})
+	headers := make(map[string]struct{}, len(redact.HeadersToRedact))
 	for _, h := range redact.HeadersToRedact {
 		headers[strings.ToLower(h)] = struct{}{}
 	}
@@ -402,9 +411,10 @@ func (c *Client) redactSensitiveData(req *http.Request, redact *RedactConfig) *h
 		headers["set-cookie"] = struct{}{}
 	}
 
-	return req.WithContext(
-		context.WithValue(req.Context(), RedactConfigCtxKey{}, &RedactConfig{Headers: headers}),
-	)
+	cfg := GetOrInitRequestConfig(req)
+	cfg.Redact = &RedactConfig{Headers: headers}
+
+	return req
 }
 
 // limitResponseSize enforces limits on the maximum response size.
@@ -413,9 +423,13 @@ func (c *Client) limitResponseSize(resp *http.Response, maxSize int64) error {
 		return nil
 	}
 
+	if resp.ContentLength > 0 && resp.ContentLength <= maxSize {
+		return nil
+	}
+
 	if resp.ContentLength > maxSize {
 		_ = resp.Body.Close()
-		return fmt.Errorf("aoni: response too large: %w", ErrResponseTooLarge)
+		return &Error{Op: "limit response size", Err: ErrResponseTooLarge}
 	}
 
 	resp.Body = &io.LimitCheckingReadCloser{
@@ -465,22 +479,29 @@ func (c *Client) validateResponse(resp *http.Response) error {
 // applyMultiReadBuffering applies high-performance buffering for multiple reads.
 func (c *Client) applyMultiReadBuffering(_ *http.Request, resp *http.Response, cfg *RequestConfig) error {
 	threshold := c.defaults.MultiReadThreshold
-
 	disableDisk := c.defaults.MultiReadDisableDisk
-	if cfg != nil {
-		threshold = cfg.MultiReadThreshold
-		disableDisk = cfg.MultiReadDisableDisk
-	}
 
-	if threshold > 0 && resp.Body != nil {
-		mBody, err := io.NewMultiReadBody(resp.Body, threshold, disableDisk)
-		if err != nil {
-			_ = resp.Body.Close()
-			return err
+	if cfg != nil {
+		if cfg.MultiReadThreshold > 0 {
+			threshold = cfg.MultiReadThreshold
 		}
 
-		resp.Body = mBody
+		if cfg.MultiReadDisableDisk {
+			disableDisk = cfg.MultiReadDisableDisk
+		}
 	}
+
+	if threshold <= 0 || resp == nil || resp.Body == nil || resp.Body == http.NoBody {
+		return nil
+	}
+
+	mBody, err := io.NewMultiReadBody(resp.Body, threshold, disableDisk)
+	if err != nil {
+		_ = resp.Body.Close()
+		return err
+	}
+
+	resp.Body = &io.ResponseBodyReadCloser{ReadCloser: mBody}
 
 	return nil
 }
@@ -626,12 +647,15 @@ func (c *Client) executeWithProxyFailover(
 				return resp, nil
 			}
 
-			lastErr = fmt.Errorf("aoni: proxy returned status %d", resp.StatusCode)
+			lastErr = &Error{
+				Op:  "proxy failover",
+				Err: errors.New("proxy returned status " + strconv.Itoa(resp.StatusCode)),
+			}
 			_ = resp.Body.Close()
 		}
 	}
 
-	return nil, fmt.Errorf("aoni proxy failover: exhausted %d retries, last error: %w", failover.RetryLimit, lastErr)
+	return nil, &Error{Op: "proxy failover exhausted " + strconv.Itoa(failover.RetryLimit) + " retries", Err: lastErr}
 }
 
 // parseProxyURLs parses a slice of raw proxy URL strings into structured URLs.
@@ -730,14 +754,11 @@ func isIdempotentMethod(method string) bool {
 func (c *Client) executeWithHedging(req *http.Request, pipeHedging *HedgingConfig) (*http.Response, error) {
 	cfg := GetRequestConfig(req.Context())
 
-	// Idempotency Protection: By default, only hedge read-only / idempotent HTTP methods (GET, HEAD, OPTIONS, TRACE)
+	// Idempotency Protection: By default, only hedge read-only
+	// idempotent HTTP methods (GET, HEAD, OPTIONS, TRACE)
 	// unless explicitly overridden by AllowNonReadOnly flag.
-	allowNonReadOnly := false
-	if cfg != nil && cfg.AllowNonReadOnlyHedging {
-		allowNonReadOnly = true
-	} else if pipeHedging != nil && pipeHedging.AllowNonReadOnly {
-		allowNonReadOnly = true
-	}
+	allowNonReadOnly := (cfg != nil && cfg.AllowNonReadOnlyHedging) ||
+		(pipeHedging != nil && pipeHedging.AllowNonReadOnly)
 
 	if !allowNonReadOnly && !isIdempotentMethod(req.Method) {
 		return c.engine.Do(req)

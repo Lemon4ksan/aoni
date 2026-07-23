@@ -13,7 +13,7 @@ import (
 	"crypto/x509"
 	"encoding/base64"
 	"encoding/hex"
-	"fmt"
+	"errors"
 	"net"
 	"net/http"
 	"net/url"
@@ -396,12 +396,12 @@ func (tlsEvasion) BuildConn(
 	if dialCfg.ClientHelloSpecProvider != nil {
 		spec, err := dialCfg.ClientHelloSpecProvider.ClientHelloSpec()
 		if err != nil {
-			return nil, fmt.Errorf("aoni tls: failed to get custom client hello spec: %w", err)
+			return nil, &Error{Op: "get custom client hello spec", Err: err}
 		}
 
 		uConn := utls.UClient(conn, utlsCfg, utls.HelloCustom)
 		if err := uConn.ApplyPreset(spec); err != nil {
-			return nil, fmt.Errorf("aoni tls: failed to apply custom client hello spec: %w", err)
+			return nil, &Error{Op: "apply custom client hello spec", Err: err}
 		}
 
 		return uConn, nil
@@ -443,12 +443,17 @@ func (tlsEvasion) ExtractJA4(uConn *utls.UConn) ja4.Report {
 		sigAlgorithms,
 	)
 
+	sniStr := "i"
+	if sni {
+		sniStr = "d"
+	}
+
 	report := ja4.Report{
 		JA4:         fingerprint,
 		Protocol:    "t",
 		CipherCount: len(ja4.FilterGREASE(hello.CipherSuites)),
 		ExtCount:    len(ja4.FilterGREASE(extensions)),
-		SNI:         generic.Ternary(sni, "d", "i"),
+		SNI:         sniStr,
 	}
 
 	if len(fingerprint) >= 4 {
@@ -547,7 +552,7 @@ func (pc proxyClient) dial(ctx context.Context, dialCfg dialConfig, host, port s
 
 	for _, address := range addrs {
 		if dialCfg.SSRFGuard && ip.IsPrivateIP(address.IP) {
-			return nil, fmt.Errorf("%w: blocked IP %s", ErrSSRFBlocked, address.IP)
+			return nil, &Error{Op: "SSRF guard", Target: address.IP.String(), Err: ErrSSRFBlocked}
 		}
 	}
 
@@ -618,7 +623,7 @@ func (proxyClient) dialProxySocks5(
 
 	socksDialer, err := proxy.SOCKS5("tcp", address, auth, forward)
 	if err != nil {
-		return nil, fmt.Errorf("aoni: failed to create socks5 dialer: %w", err)
+		return nil, &Error{Op: "create socks5 dialer", Err: err}
 	}
 
 	if cd, ok := socksDialer.(proxy.ContextDialer); ok {
@@ -635,13 +640,13 @@ func (proxyClient) dialProxyHTTP(
 ) (net.Conn, error) {
 	conn, err := forward.DialContext(ctx, "tcp", address)
 	if err != nil {
-		return nil, fmt.Errorf("aoni: dial proxy %s: %w", address, err)
+		return nil, &Error{Op: "dial proxy", Target: address, Err: err}
 	}
 
-	connectReq := fmt.Appendf([]byte{}, "CONNECT %s:%s HTTP/1.1\r\nHost: %s:%s\r\n\r\n", host, port, host, port)
+	connectReq := []byte("CONNECT " + host + ":" + port + " HTTP/1.1\r\nHost: " + host + ":" + port + "\r\n\r\n")
 	if _, err := conn.Write(connectReq); err != nil {
 		_ = conn.Close()
-		return nil, fmt.Errorf("aoni: send CONNECT to proxy: %w", err)
+		return nil, &Error{Op: "send CONNECT to proxy", Err: err}
 	}
 
 	br := bufio.NewReader(conn)
@@ -649,14 +654,14 @@ func (proxyClient) dialProxyHTTP(
 	resp, err := http.ReadResponse(br, nil)
 	if err != nil {
 		_ = conn.Close()
-		return nil, fmt.Errorf("aoni: read CONNECT response: %w", err)
+		return nil, &Error{Op: "read CONNECT response", Err: err}
 	}
 
 	_ = resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
 		_ = conn.Close()
-		return nil, fmt.Errorf("aoni: CONNECT rejected with status %s", resp.Status)
+		return nil, &Error{Op: "CONNECT rejected with status " + resp.Status, Err: errors.New(resp.Status)}
 	}
 
 	_ = conn.SetDeadline(time.Time{})
@@ -728,7 +733,7 @@ func (p pinning) VerifyCertificatePins(host string, pins map[string][]string, ra
 	for _, pin := range hostPins {
 		hashBytes, err := p.parsePin(pin)
 		if err != nil {
-			return fmt.Errorf("aoni: failed to parse certificate pin %q: %w", pin, err)
+			return &Error{Op: "parse certificate pin", Target: pin, Err: err}
 		}
 
 		expectedHashes = append(expectedHashes, hashBytes)
@@ -737,7 +742,7 @@ func (p pinning) VerifyCertificatePins(host string, pins map[string][]string, ra
 	for _, rawCert := range rawCerts {
 		cert, err := x509.ParseCertificate(rawCert)
 		if err != nil {
-			return fmt.Errorf("aoni: failed to parse peer certificate: %w", err)
+			return &Error{Op: "parse peer certificate", Err: err}
 		}
 
 		sum := sha256.Sum256(cert.RawSubjectPublicKeyInfo)

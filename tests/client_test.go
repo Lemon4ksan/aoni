@@ -64,7 +64,7 @@ func (b *mockBaseResponse) Error() error    { return b.ErrorVal }
 func (b *mockBaseResponse) SetData(d any)   { b.Data = d }
 
 type mockBaseProvider struct {
-	aoni.Requester
+	request.Requester
 	provider func() aoni.BaseResponse
 }
 
@@ -1450,8 +1450,9 @@ func TestSensitiveDataRedactor(t *testing.T) {
 
 	defer resp.Body.Close()
 
-	cfg, ok := inspector.capturedReq.Context().Value(aoni.RedactConfigCtxKey{}).(*aoni.RedactConfig)
-	require.True(t, ok)
+	reqConfig := aoni.GetRequestConfig(inspector.capturedReq.Context())
+	require.NotNil(t, reqConfig)
+	cfg := reqConfig.Redact
 	require.NotNil(t, cfg)
 
 	_, ok1 := cfg.Headers["authorization"]
@@ -1777,7 +1778,7 @@ func TestAsCurl_WithBody(t *testing.T) {
 }
 
 type dummyUnwrapper struct {
-	inner aoni.Requester
+	inner request.Requester
 }
 
 func (d *dummyUnwrapper) Request(
@@ -1788,7 +1789,7 @@ func (d *dummyUnwrapper) Request(
 	return d.inner.Request(ctx, method, path, mods...)
 }
 
-func (d *dummyUnwrapper) Unwrap() aoni.Requester {
+func (d *dummyUnwrapper) Unwrap() request.Requester {
 	return d.inner
 }
 
@@ -1808,7 +1809,7 @@ func TestClient_GettersAndUnwrap(t *testing.T) {
 
 	// Test UnwrapClient
 	wrapper := &dummyUnwrapper{inner: client}
-	unwrapped := aoni.UnwrapClient(wrapper)
+	unwrapped := request.UnwrapClient(wrapper)
 	assert.Same(t, client, unwrapped)
 
 	// Test WithTLSClientHelloID & WithPersona & WithHTTP3

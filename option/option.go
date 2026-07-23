@@ -114,6 +114,7 @@ func WithBaseURL(raw string) aoni.ClientOption {
 	return func(cfg *aoni.Config) {
 		if raw == "" {
 			cfg.Defaults.BaseURL = &url.URL{}
+			cfg.Defaults.BaseURLString = ""
 			return
 		}
 
@@ -124,6 +125,7 @@ func WithBaseURL(raw string) aoni.ClientOption {
 		baseURL, err := url.Parse(raw)
 		if err == nil {
 			cfg.Defaults.BaseURL = baseURL
+			cfg.Defaults.BaseURLString = baseURL.String()
 		}
 	}
 }

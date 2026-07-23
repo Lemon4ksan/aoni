@@ -10,7 +10,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
+	stdio "io"
 	"mime"
 	"net/http"
 	"net/http/httputil"
@@ -20,6 +20,7 @@ import (
 
 	"github.com/lemon4ksan/aoni"
 	"github.com/lemon4ksan/aoni/codec/decode"
+	"github.com/lemon4ksan/aoni/internal/io"
 	"github.com/lemon4ksan/aoni/resiliency/challenge"
 	"github.com/lemon4ksan/aoni/telemetry"
 )
@@ -49,18 +50,39 @@ func redactHeaders(raw []byte) []byte {
 type responseDecoder struct{}
 
 func (d responseDecoder) ValidateState(resp *http.Response, decoder decode.Decoder) error {
-	peekableReader := bufio.NewReader(resp.Body)
-
-	resp.Body = struct {
-		io.Reader
-		io.Closer
-	}{
-		Reader: peekableReader,
-		Closer: resp.Body,
+	if resp == nil || resp.Body == nil {
+		return nil
 	}
 
 	if decode.IsRawDecoder(decoder) {
 		return nil
+	}
+
+	contentType := resp.Header.Get("Content-Type")
+
+	if resp.StatusCode < 400 && contentType != "" {
+		mediaType, _, _ := strings.Cut(contentType, ";")
+		mediaType = strings.TrimSpace(strings.ToLower(mediaType))
+
+		if mediaType == "application/json" ||
+			mediaType == "application/x-protobuf" ||
+			mediaType == "application/protobuf" ||
+			mediaType == "application/grpc-web+proto" {
+			return nil
+		}
+	}
+
+	var peekableReader *bufio.Reader
+	if b, ok := resp.Body.(*io.BufioReadCloser); ok {
+		peekableReader = b.Reader
+	} else if br, ok := resp.Body.(interface{ BufioReader() *bufio.Reader }); ok {
+		peekableReader = br.BufioReader()
+	} else {
+		peekableReader = bufio.NewReader(resp.Body)
+		resp.Body = &io.BufioReadCloser{
+			Reader: peekableReader,
+			Closer: resp.Body,
+		}
 	}
 
 	if err := d.checkHTML(peekableReader); err != nil {
@@ -70,7 +92,7 @@ func (d responseDecoder) ValidateState(resp *http.Response, decoder decode.Decod
 	return d.checkMIMEType(resp)
 }
 
-func (d responseDecoder) DumpDiagnostics(resp *http.Response, requester aoni.Requester) {
+func (d responseDecoder) DumpDiagnostics(resp *http.Response, requester Requester) {
 	if resp.Request == nil {
 		return
 	}
@@ -129,7 +151,7 @@ func (responseDecoder) SetCapturer(resp *http.Response) bool {
 }
 
 func (responseDecoder) DecodeAPIError(resp *http.Response) error {
-	bodyBytes, _ := io.ReadAll(io.LimitReader(resp.Body, 1024*1024))
+	bodyBytes, _ := stdio.ReadAll(stdio.LimitReader(resp.Body, 1024*1024))
 
 	apiErr := &aoni.APIError{StatusCode: resp.StatusCode, Body: bodyBytes}
 
@@ -151,16 +173,14 @@ func (responseDecoder) DecodeAPIError(resp *http.Response) error {
 func (responseDecoder) DecodeSuccess(
 	resp *http.Response,
 	target any,
-	requester aoni.Requester,
+	requester Requester,
 	decoder decode.Decoder,
 ) error {
 	var br aoni.BaseResponse
 	if p, ok := requester.(aoni.BaseResponseProvider); ok {
 		br = p.BaseResponse()
-	} else if provider, ok := requester.(interface{ Defaults() aoni.ClientDefaults }); ok {
-		if brFn := provider.Defaults().BaseResponse; brFn != nil {
-			br = brFn()
-		}
+	} else if provider, ok := requester.(interface{ BaseResponse() aoni.BaseResponse }); ok {
+		br = provider.BaseResponse()
 	}
 
 	if br != nil {
@@ -178,7 +198,7 @@ func (responseDecoder) DecodeSuccess(
 	}
 
 	err := decoder.Decode(resp.Body, target)
-	if errors.Is(err, io.EOF) {
+	if errors.Is(err, stdio.EOF) {
 		return nil
 	}
 
@@ -197,7 +217,7 @@ func (responseDecoder) dumpMultipart(req *http.Request) []byte {
 		return nil
 	}
 
-	bodyBytes, _ := io.ReadAll(io.LimitReader(bodyRc, 256*1024))
+	bodyBytes, _ := stdio.ReadAll(stdio.LimitReader(bodyRc, 256*1024))
 	_ = bodyRc.Close()
 
 	summary := telemetry.SummarizeMultipartBody(bodyBytes, contentType)
@@ -228,7 +248,7 @@ func (responseDecoder) checkMIMEType(resp *http.Response) error {
 func (responseDecoder) checkHTML(buf *bufio.Reader) error {
 	peekBytes, err := buf.Peek(128)
 
-	if err != nil && err != io.EOF {
+	if err != nil && err != stdio.EOF {
 		return nil
 	}
 
@@ -271,7 +291,7 @@ var bytePool = sync.Pool{
 }
 
 // HandleResponse processes and decodes an HTTP response into target struct or API error model.
-func HandleResponse(resp *http.Response, target any, requester aoni.Requester) error {
+func HandleResponse(resp *http.Response, target any, requester Requester) error {
 	if resp == nil {
 		return errors.New("aoni: response is nil")
 	}
@@ -317,7 +337,7 @@ func HandleResponse(resp *http.Response, target any, requester aoni.Requester) e
 
 	if target == nil || resp.StatusCode == http.StatusNoContent {
 		bufPtr := bytePool.Get().(*[]byte)
-		_, _ = io.CopyBuffer(io.Discard, resp.Body, *bufPtr)
+		_, _ = stdio.CopyBuffer(stdio.Discard, resp.Body, *bufPtr)
 		bytePool.Put(bufPtr)
 
 		return nil
@@ -326,12 +346,12 @@ func HandleResponse(resp *http.Response, target any, requester aoni.Requester) e
 	return dec.DecodeSuccess(resp, target, requester, decoder)
 }
 
-func validateAndMarshal(payload any) (io.Reader, error) {
+func validateAndMarshal(payload any) (stdio.Reader, error) {
 	if _, ok := payload.(aoni.RequestModifier); ok {
 		return nil, errors.New("aoni: passed a RequestModifier as the request body. Did you forget the body argument?")
 	}
 
-	if r, ok := payload.(io.Reader); ok {
+	if r, ok := payload.(stdio.Reader); ok {
 		return r, nil
 	}
 

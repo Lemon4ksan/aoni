@@ -57,9 +57,7 @@ func WithContextModifier(ctx context.Context, mods ...RequestModifier) context.C
 
 	cfg := GetRequestConfig(ctx)
 	if cfg == nil {
-		cfg = &RequestConfig{
-			Metadata: make(map[string]any),
-		}
+		cfg = requestConfigPool.Get().(*RequestConfig)
 		ctx = context.WithValue(ctx, requestConfigKey{}, cfg)
 	}
 

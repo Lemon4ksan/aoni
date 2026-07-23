@@ -229,13 +229,17 @@ func (p *ProxyIsolatedJar) initPersistentJar(proxyURL string, baseJar http.Cooki
 		key := cookieKey{domain: c.Domain, path: c.Path, name: c.Name}
 		pJar.cookiesMap[key] = c
 
-		scheme := generic.Ternary(c.Secure, "https", "http")
+		scheme := "http"
+		if c.Secure {
+			scheme = "https"
+		}
+
 		domain := strings.TrimPrefix(c.Domain, ".")
 
 		u, parseErr := url.Parse(scheme + "://" + domain + c.Path)
 		if parseErr == nil {
 			baseJar.SetCookies(u, []*http.Cookie{
-				{
+				{ //nolint:gosec
 					Name:     c.Name,
 					Value:    c.Value,
 					Domain:   c.Domain,

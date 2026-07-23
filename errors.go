@@ -6,7 +6,7 @@ package aoni
 
 import (
 	"errors"
-	"fmt"
+	"strconv"
 	"strings"
 
 	"github.com/lemon4ksan/aoni/internal/io"
@@ -43,7 +43,45 @@ var (
 
 	// ErrEmptyDNSProxy is returned by dialers if proxy dns is enabled but the proxy address is empty.
 	ErrEmptyDNSProxy = errors.New("aoni: proxy DNS enabled but proxy address is empty")
+
+	// ErrRedirectDomainForbidden is returned when a redirect domain is not allowed.
+	ErrRedirectDomainForbidden = errors.New("aoni: redirect domain not allowed")
 )
+
+// Error represents a structured operation error in the aoni package.
+type Error struct {
+	Op     string
+	Path   string
+	Target string
+	Err    error
+}
+
+func (e *Error) Error() string {
+	if e == nil {
+		return "<nil>"
+	}
+
+	msg := "aoni: "
+	if e.Op != "" {
+		msg += e.Op + ": "
+	}
+
+	if e.Target != "" {
+		msg += e.Target + ": "
+	}
+
+	if e.Path != "" {
+		msg += e.Path + ": "
+	}
+
+	if e.Err != nil {
+		msg += e.Err.Error()
+	}
+
+	return msg
+}
+
+func (e *Error) Unwrap() error { return e.Err }
 
 // APIError wraps a non-2xx HTTP response. StatusCode holds the
 // status code, Body holds the raw response, and Model holds the
@@ -57,13 +95,14 @@ type APIError struct {
 
 // Error returns a human-readable representation of e.
 func (e *APIError) Error() string {
+	statusStr := strconv.Itoa(e.StatusCode)
 	if len(e.Body) > 0 {
 		limit := min(len(e.Body), 128)
 		cleanBody := strings.ReplaceAll(string(e.Body[:limit]), "\n", " ")
-		return fmt.Sprintf("aoni: status %d (body: %s)", e.StatusCode, cleanBody)
+		return "aoni: status " + statusStr + " (body: " + cleanBody + ")"
 	}
 
-	return fmt.Sprintf("aoni: status %d", e.StatusCode)
+	return "aoni: status " + statusStr
 }
 
 // ValidationError reports that a required field was missing or
@@ -90,7 +129,11 @@ type BridgeError struct {
 
 // Error implements the standard error interface.
 func (e *BridgeError) Error() string {
-	return fmt.Sprintf("aoni bridge: %s %s: %v", e.Op, e.URL, e.Err)
+	if e.Err != nil {
+		return "aoni bridge: " + e.Op + " " + e.URL + ": " + e.Err.Error()
+	}
+
+	return "aoni bridge: " + e.Op + " " + e.URL
 }
 
 // Unwrap returns the underlying wrapped error.

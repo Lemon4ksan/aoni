@@ -17,78 +17,41 @@ import (
 )
 
 // New initializes a new pooled Request builder bound to the target client.
+//
+// Request builders are pooled to avoid unnecessary allocations and improve performance.
+// Call [Request.Discard] if a constructed request is abandoned before execution.
 func New(client *aoni.Client) *Request {
-	r := requestPool.Get().(*Request)
-	r.client = client
-	return r
+	return requestPool.Get(client)
 }
 
 // R is a convenient short alias for New.
 func R(client *aoni.Client) *Request {
-	return New(client)
+	return requestPool.Get(client)
 }
 
-// GetJSON dispatches a GET request and unmarshals a 2xx JSON response directly into T.
-func GetJSON[T any](ctx context.Context, c *aoni.Client, path string) (T, *http.Response, error) {
+// FetchTo is the universal generic entrypoint that executes a request using any method, path, and codecs/modifiers,
+// unmarshaling the 2xx response directly into T.
+//
+// Replaces specialized functions like GetJSON or PostProto with a single type-safe interface.
+func FetchTo[T any](
+	ctx context.Context,
+	c *aoni.Client,
+	method, path string,
+	mods ...aoni.RequestModifier,
+) (T, *http.Response, error) {
 	var target T
 
-	resp, err := R(c).SetContext(ctx).SetResult(&target).Get(path)
+	resp, err := R(c).
+		SetContext(ctx).
+		SetResult(&target).
+		Apply(mods...).
+		Execute(method, path)
 
 	return target, resp, err
 }
 
-// PostJSON dispatches a POST request with body and unmarshals a 2xx JSON response into T.
-func PostJSON[T any](ctx context.Context, c *aoni.Client, path string, body any) (T, *http.Response, error) {
-	var target T
-
-	resp, err := R(c).SetContext(ctx).SetBody(body).SetResult(&target).Post(path)
-
-	return target, resp, err
-}
-
-// PutJSON dispatches a PUT request with body and unmarshals a 2xx JSON response into T.
-func PutJSON[T any](ctx context.Context, c *aoni.Client, path string, body any) (T, *http.Response, error) {
-	var target T
-
-	resp, err := R(c).SetContext(ctx).SetBody(body).SetResult(&target).Put(path)
-
-	return target, resp, err
-}
-
-// PatchJSON dispatches a PATCH request with body and unmarshals a 2xx JSON response into T.
-func PatchJSON[T any](ctx context.Context, c *aoni.Client, path string, body any) (T, *http.Response, error) {
-	var target T
-
-	resp, err := R(c).SetContext(ctx).SetBody(body).SetResult(&target).Patch(path)
-
-	return target, resp, err
-}
-
-// DeleteJSON dispatches a DELETE request and unmarshals a 2xx JSON response into T.
-func DeleteJSON[T any](ctx context.Context, c *aoni.Client, path string) (T, *http.Response, error) {
-	var target T
-
-	resp, err := R(c).SetContext(ctx).SetResult(&target).Delete(path)
-
-	return target, resp, err
-}
-
-// DoJSON dispatches a request with any custom method and optional body, unmarshaling a 2xx JSON response into T.
-func DoJSON[T any](ctx context.Context, c *aoni.Client, method, path string, body any) (T, *http.Response, error) {
-	var target T
-
-	req := R(c).SetContext(ctx).SetResult(&target)
-	if body != nil {
-		req.SetBody(body)
-	}
-
-	resp, err := req.Do(method, path)
-
-	return target, resp, err
-}
-
-// PostProto dispatches a POST request with a Protobuf payload and unmarshals a binary Protobuf response into T.
-func PostProto[T any](
+// PostProtoTo dispatches a POST request with a Protobuf payload and unmarshals a binary Protobuf response into T.
+func PostProtoTo[T any](
 	ctx context.Context,
 	c *aoni.Client,
 	path string,
@@ -101,8 +64,8 @@ func PostProto[T any](
 	return target, resp, err
 }
 
-// PostGRPCWeb dispatches a POST request with a gRPC-Web framed payload and unmarshals a gRPC-Web response frame into T.
-func PostGRPCWeb[T any](
+// PostGRPCWebTo dispatches a POST request with a gRPC-Web framed payload and unmarshals a gRPC-Web response frame into T.
+func PostGRPCWebTo[T any](
 	ctx context.Context,
 	c *aoni.Client,
 	path string,
@@ -115,8 +78,8 @@ func PostGRPCWeb[T any](
 	return target, resp, err
 }
 
-// GetProto dispatches a GET request and unmarshals a binary Protobuf response into T.
-func GetProto[T any](ctx context.Context, c *aoni.Client, path string) (T, *http.Response, error) {
+// GetProtoTo dispatches a GET request and unmarshals a binary Protobuf response into T.
+func GetProtoTo[T any](ctx context.Context, c *aoni.Client, path string) (T, *http.Response, error) {
 	var target T
 
 	resp, err := R(c).SetContext(ctx).SetProtoResult(&target).Get(path)
@@ -124,8 +87,8 @@ func GetProto[T any](ctx context.Context, c *aoni.Client, path string) (T, *http
 	return target, resp, err
 }
 
-// GetGRPCWeb dispatches a GET request and unmarshals a gRPC-Web response frame into T.
-func GetGRPCWeb[T any](ctx context.Context, c *aoni.Client, path string) (T, *http.Response, error) {
+// GetGRPCWebTo dispatches a GET request and unmarshals a gRPC-Web response frame into T.
+func GetGRPCWebTo[T any](ctx context.Context, c *aoni.Client, path string) (T, *http.Response, error) {
 	var target T
 
 	resp, err := R(c).SetContext(ctx).SetGRPCWebResult(&target).Get(path)

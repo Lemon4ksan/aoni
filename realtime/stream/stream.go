@@ -2,6 +2,7 @@
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
+// Package stream provides utilities for reading and writing connection streams.
 package stream
 
 import (
@@ -27,6 +28,7 @@ import (
 	"github.com/lemon4ksan/aoni"
 	"github.com/lemon4ksan/aoni/codec/decode"
 	"github.com/lemon4ksan/aoni/mod"
+	"github.com/lemon4ksan/aoni/request"
 )
 
 // Stream wraps an [http.Response] and manages connection reading streams.
@@ -39,7 +41,7 @@ type Stream struct {
 // Callers must ensure the returned stream is closed when done.
 func Get(
 	ctx context.Context,
-	r aoni.Requester,
+	r request.Requester,
 	path string,
 	mods ...aoni.RequestModifier,
 ) (*Stream, error) {
@@ -59,7 +61,7 @@ func Get(
 // WithBody executes an HTTP request with the provided body and returns a raw [Stream].
 func WithBody(
 	ctx context.Context,
-	r aoni.Requester,
+	r request.Requester,
 	method, path string,
 	body io.Reader,
 	mods ...aoni.RequestModifier,
@@ -282,7 +284,7 @@ type SSEReconnectOptions struct {
 // and respects any server-sent 'retry: <ms>' directives.
 func ResumableSSE[T any](
 	ctx context.Context,
-	c aoni.Requester,
+	c request.Requester,
 	path string,
 	opts SSEReconnectOptions,
 	mods ...aoni.RequestModifier,
@@ -412,7 +414,7 @@ func sleepOrCancel(ctx context.Context, delay time.Duration, errs chan<- error) 
 // It executes a background parsing loop and closes returned channels when done.
 func SSE[T any](
 	ctx context.Context,
-	c aoni.Requester,
+	c request.Requester,
 	path string,
 	mods ...aoni.RequestModifier,
 ) (<-chan T, <-chan error, error) {

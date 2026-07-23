@@ -367,10 +367,13 @@ func captureHeaders(reqHeaders http.Header, redactMap map[string]struct{}) map[s
 }
 
 func getRedactMap(req *http.Request) map[string]struct{} {
-	redactMap := make(map[string]struct{})
-	if cfg, ok := req.Context().Value(aoni.RedactConfigCtxKey{}).(*aoni.RedactConfig); ok && cfg != nil {
-		redactMap = cfg.Headers
+	if cfg := aoni.GetRequestConfig(req.Context()); cfg != nil && cfg.Redact != nil {
+		return cfg.Redact.Headers
 	}
 
-	return redactMap
+	if cfg, ok := req.Context().Value(aoni.RedactConfigCtxKey{}).(*aoni.RedactConfig); ok && cfg != nil {
+		return cfg.Headers
+	}
+
+	return make(map[string]struct{})
 }

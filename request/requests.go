@@ -31,8 +31,47 @@ var DefaultClient = aoni.NewClient(nil)
 // the helper automatically drains and closes the response body to prevent resource leaks.
 type NoResponse struct{}
 
+// Unwrapper allows nested decorators to be peeled away to reach the
+// underlying [Requester]. [Client] does not implement this interface;
+// wrapper types returned by [NewStdClient] or [Chain] do.
+type Unwrapper interface {
+	Unwrap() Requester
+}
+
+// UnwrapClient strips all [Unwrapper] layers from r and returns the
+// innermost [Client]. Returns nil if r is not a *Client and no
+// Unwrapper chain leads to one.
+func UnwrapClient(r Requester) (c *aoni.Client) {
+	for {
+		if client, ok := r.(*aoni.Client); ok {
+			return client
+		}
+
+		u, ok := r.(Unwrapper)
+		if !ok {
+			break
+		}
+
+		r = u.Unwrap()
+	}
+
+	return nil
+}
+
+// Requester specifies a high-level API client capable of executing parameterized requests.
+//
+// The pipeline handles base URL resolution, request parameter mapping, WAF challenge
+// solving, and automatic decompression.
+type Requester interface {
+	Request(
+		ctx context.Context,
+		method, path string,
+		mods ...aoni.RequestModifier,
+	) (*http.Response, error)
+}
+
 // Get performs a GET request through the specified [Requester] and returns the raw [http.Response].
-func Get(ctx context.Context, c aoni.Requester, path string, mods ...aoni.RequestModifier) (*http.Response, error) {
+func Get(ctx context.Context, c Requester, path string, mods ...aoni.RequestModifier) (*http.Response, error) {
 	return c.Request(ctx, http.MethodGet, path, mods...)
 }
 
@@ -43,7 +82,7 @@ func Get(ctx context.Context, c aoni.Requester, path string, mods ...aoni.Reques
 // or YAML), pass a corresponding decoder modifier, e.g. [WithXMLDecoder] or [WithYAMLDecoder].
 func GetTo[Resp any](
 	ctx context.Context,
-	c aoni.Requester,
+	c Requester,
 	path string,
 	mods ...aoni.RequestModifier,
 ) (*Resp, error) {
@@ -67,7 +106,7 @@ func GetTo[Resp any](
 // GetToEx is like [GetTo] but returns both the parsed response payload and the raw *http.Response.
 func GetToEx[Resp any](
 	ctx context.Context,
-	c aoni.Requester,
+	c Requester,
 	path string,
 	mods ...aoni.RequestModifier,
 ) (*Resp, *http.Response, error) {
@@ -90,7 +129,7 @@ func GetToEx[Resp any](
 // GetProtoTo executes a GET request expecting a binary Protobuf response and decodes it into Resp.
 func GetProtoTo[Resp any](
 	ctx context.Context,
-	c aoni.Requester,
+	c Requester,
 	path string,
 	mods ...aoni.RequestModifier,
 ) (*Resp, error) {
@@ -128,7 +167,7 @@ func GetProtoTo[Resp any](
 // Use [WithFormBody] or [WithFormValues] to create PostForm requests.
 func Post(
 	ctx context.Context,
-	c aoni.Requester,
+	c Requester,
 	path string,
 	body any,
 	mods ...aoni.RequestModifier,
@@ -159,7 +198,7 @@ func Post(
 // Use [WithFormBody] or [WithFormValues] to create PostForm requests.
 func PostTo[Resp any](
 	ctx context.Context,
-	c aoni.Requester,
+	c Requester,
 	path string,
 	body any,
 	mods ...aoni.RequestModifier,
@@ -195,7 +234,7 @@ func PostTo[Resp any](
 // PostToEx is like [PostTo] but returns both the parsed response payload and the raw *http.Response.
 func PostToEx[Resp any](
 	ctx context.Context,
-	c aoni.Requester,
+	c Requester,
 	path string,
 	body any,
 	mods ...aoni.RequestModifier,
@@ -219,7 +258,7 @@ func PostToEx[Resp any](
 // PostProto executes a POST request containing a Protobuf payload and returns the raw *http.Response.
 func PostProto(
 	ctx context.Context,
-	c aoni.Requester,
+	c Requester,
 	path string,
 	msg proto.Message,
 	mods ...aoni.RequestModifier,
@@ -231,7 +270,7 @@ func PostProto(
 // PostProtoTo executes a POST request with a Protobuf payload and decodes the response into Resp.
 func PostProtoTo[Resp any](
 	ctx context.Context,
-	c aoni.Requester,
+	c Requester,
 	path string,
 	msg proto.Message,
 	mods ...aoni.RequestModifier,
@@ -261,7 +300,7 @@ func PostProtoTo[Resp any](
 // PostGRPCWeb executes a POST request with a gRPC-Web framed Protobuf payload and returns the raw *http.Response.
 func PostGRPCWeb(
 	ctx context.Context,
-	c aoni.Requester,
+	c Requester,
 	path string,
 	msg proto.Message,
 	mods ...aoni.RequestModifier,
@@ -273,7 +312,7 @@ func PostGRPCWeb(
 // PostGRPCWebTo executes a POST request with a gRPC-Web framed payload and decodes the response frame into Resp.
 func PostGRPCWebTo[Resp any](
 	ctx context.Context,
-	c aoni.Requester,
+	c Requester,
 	path string,
 	msg proto.Message,
 	mods ...aoni.RequestModifier,
@@ -310,7 +349,7 @@ func PostGRPCWebTo[Resp any](
 // header using request modifiers like [WithContentType] (e.g. WithContentType("application/xml")).
 func Put(
 	ctx context.Context,
-	c aoni.Requester,
+	c Requester,
 	path string,
 	body any,
 	mods ...aoni.RequestModifier,
@@ -341,7 +380,7 @@ func Put(
 // To decode other response formats (such as XML or YAML), pass a decoder modifier, e.g. [WithXMLDecoder] or [WithYAMLDecoder].
 func PutTo[Resp any](
 	ctx context.Context,
-	c aoni.Requester,
+	c Requester,
 	path string,
 	body any,
 	mods ...aoni.RequestModifier,
@@ -377,7 +416,7 @@ func PutTo[Resp any](
 // PutToEx is like [PutTo] but returns both the parsed response payload and the raw *http.Response.
 func PutToEx[Resp any](
 	ctx context.Context,
-	c aoni.Requester,
+	c Requester,
 	path string,
 	body any,
 	mods ...aoni.RequestModifier,
@@ -401,7 +440,7 @@ func PutToEx[Resp any](
 // PutProtoTo executes a PUT request with a Protobuf payload and decodes the response into Resp.
 func PutProtoTo[Resp any](
 	ctx context.Context,
-	c aoni.Requester,
+	c Requester,
 	path string,
 	msg proto.Message,
 	mods ...aoni.RequestModifier,
@@ -419,7 +458,7 @@ func PutProtoTo[Resp any](
 // header using request modifiers like [WithContentType] (e.g. WithContentType("application/xml")).
 func Patch(
 	ctx context.Context,
-	c aoni.Requester,
+	c Requester,
 	path string,
 	body any,
 	mods ...aoni.RequestModifier,
@@ -450,7 +489,7 @@ func Patch(
 // To decode other response formats (such as XML or YAML), pass a decoder modifier, e.g. [WithXMLDecoder] or [WithYAMLDecoder].
 func PatchTo[Resp any](
 	ctx context.Context,
-	c aoni.Requester,
+	c Requester,
 	path string,
 	body any,
 	mods ...aoni.RequestModifier,
@@ -486,7 +525,7 @@ func PatchTo[Resp any](
 // PatchToEx is like [PatchTo] but returns both the parsed response payload and the raw *http.Response.
 func PatchToEx[Resp any](
 	ctx context.Context,
-	c aoni.Requester,
+	c Requester,
 	path string,
 	body any,
 	mods ...aoni.RequestModifier,
@@ -510,7 +549,7 @@ func PatchToEx[Resp any](
 // PatchProtoTo executes a PATCH request with a Protobuf payload and decodes the response into Resp.
 func PatchProtoTo[Resp any](
 	ctx context.Context,
-	c aoni.Requester,
+	c Requester,
 	path string,
 	msg proto.Message,
 	mods ...aoni.RequestModifier,
@@ -528,7 +567,7 @@ func PatchProtoTo[Resp any](
 // header using request modifiers like [WithContentType] (e.g. WithContentType("application/xml")).
 func Delete(
 	ctx context.Context,
-	c aoni.Requester,
+	c Requester,
 	path string,
 	body any,
 	mods ...aoni.RequestModifier,
@@ -559,7 +598,7 @@ func Delete(
 // To decode other response formats (such as XML or YAML), pass a decoder modifier, e.g. [WithXMLDecoder] or [WithYAMLDecoder].
 func DeleteTo[Resp any](
 	ctx context.Context,
-	c aoni.Requester,
+	c Requester,
 	path string,
 	body any,
 	mods ...aoni.RequestModifier,
@@ -595,7 +634,7 @@ func DeleteTo[Resp any](
 // DeleteToEx is like [DeleteTo] but returns both the parsed response payload and the raw *http.Response.
 func DeleteToEx[Resp any](
 	ctx context.Context,
-	c aoni.Requester,
+	c Requester,
 	path string,
 	body any,
 	mods ...aoni.RequestModifier,
@@ -619,7 +658,7 @@ func DeleteToEx[Resp any](
 // DeleteProtoTo executes a DELETE request with an optional Protobuf payload and decodes the response into Resp.
 func DeleteProtoTo[Resp any](
 	ctx context.Context,
-	c aoni.Requester,
+	c Requester,
 	path string,
 	msg proto.Message,
 	mods ...aoni.RequestModifier,
@@ -630,7 +669,7 @@ func DeleteProtoTo[Resp any](
 // Head performs a HEAD request through the specified [Requester] and returns the raw [http.Response].
 func Head(
 	ctx context.Context,
-	c aoni.Requester,
+	c Requester,
 	path string,
 	mods ...aoni.RequestModifier,
 ) (*http.Response, error) {
@@ -640,7 +679,7 @@ func Head(
 // Options performs an OPTIONS request through the specified [Requester] and returns the raw [http.Response].
 func Options(
 	ctx context.Context,
-	c aoni.Requester,
+	c Requester,
 	path string,
 	mods ...aoni.RequestModifier,
 ) (*http.Response, error) {
@@ -650,7 +689,7 @@ func Options(
 // OptionsTo performs an OPTIONS request and decodes the response body into Resp.
 func OptionsTo[Resp any](
 	ctx context.Context,
-	c aoni.Requester,
+	c Requester,
 	path string,
 	mods ...aoni.RequestModifier,
 ) (*Resp, error) {
@@ -674,7 +713,7 @@ func OptionsTo[Resp any](
 // Trace performs a TRACE request through the specified [Requester] and returns the raw [http.Response].
 func Trace(
 	ctx context.Context,
-	c aoni.Requester,
+	c Requester,
 	path string,
 	mods ...aoni.RequestModifier,
 ) (*http.Response, error) {
@@ -684,7 +723,7 @@ func Trace(
 // Connect performs a CONNECT request through the specified [Requester] and returns the raw [http.Response].
 func Connect(
 	ctx context.Context,
-	c aoni.Requester,
+	c Requester,
 	path string,
 	mods ...aoni.RequestModifier,
 ) (*http.Response, error) {
@@ -694,7 +733,7 @@ func Connect(
 // Do performs an arbitrary HTTP request using method and optional body, returning the raw [http.Response].
 func Do(
 	ctx context.Context,
-	c aoni.Requester,
+	c Requester,
 	method, path string,
 	body any,
 	mods ...aoni.RequestModifier,
@@ -718,7 +757,7 @@ func Do(
 // DoTo performs an arbitrary HTTP request using method, marshals optional body, and decodes response into Resp.
 func DoTo[Resp any](
 	ctx context.Context,
-	c aoni.Requester,
+	c Requester,
 	method, path string,
 	body any,
 	mods ...aoni.RequestModifier,
@@ -756,7 +795,7 @@ func DoTo[Resp any](
 // DoToEx is like [DoTo] but returns both the parsed response payload and the raw *http.Response.
 func DoToEx[Resp any](
 	ctx context.Context,
-	c aoni.Requester,
+	c Requester,
 	method, path string,
 	body any,
 	mods ...aoni.RequestModifier,
@@ -780,7 +819,7 @@ func DoToEx[Resp any](
 // DoProtoTo executes an HTTP request using any method with a Protobuf payload and decodes the response into Resp.
 func DoProtoTo[Resp any](
 	ctx context.Context,
-	c aoni.Requester,
+	c Requester,
 	method, path string,
 	msg proto.Message,
 	mods ...aoni.RequestModifier,
