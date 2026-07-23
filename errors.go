@@ -13,11 +13,6 @@ import (
 )
 
 var (
-	// ErrUnexpectedContentType indicates the response content type
-	// does not match the expected format. A captive portal or
-	// transparent proxy often causes this.
-	ErrUnexpectedContentType = errors.New("aoni: unexpected content-type (possible captive portal or intercept)")
-
 	// ErrResponseTooLarge indicates the response exceeded the size
 	// limit configured via [option.WithMaxResponseSize].
 	ErrResponseTooLarge = io.ErrResponseTooLarge

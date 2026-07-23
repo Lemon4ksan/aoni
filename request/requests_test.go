@@ -381,7 +381,7 @@ func TestClient_UnexpectedHTML_Detection(t *testing.T) {
 		})
 
 		_, err := GetTo[reqTestPayload](t.Context(), client, "/html")
-		assert.ErrorIs(t, err, aoni.ErrUnexpectedContentType)
+		assert.ErrorIs(t, err, ErrUnexpectedContentType)
 	})
 
 	t.Run("cloudflare_challenge_detected", func(t *testing.T) {

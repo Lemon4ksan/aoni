@@ -23,9 +23,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/lemon4ksan/miyako/generic"
-
 	"github.com/lemon4ksan/aoni/fingerprint/ja4"
+	"github.com/lemon4ksan/aoni/internal/bytesconv"
 )
 
 // GenerateCorrelationID creates a fast, monotonic, and collision-resistant 16-character Base36 string ID.
@@ -238,22 +237,22 @@ func (t *TraceInfo) Start() func(resp *http.Response) {
 
 // ComputeJA4HFromRequest computes a JA4H HTTP client fingerprint directly from an [http.Request].
 func ComputeJA4HFromRequest(req *http.Request) string {
-	method := req.Method
-	proto := req.Proto
+	if req == nil {
+		return ""
+	}
 
-	var headers []string
-
+	headers := make([]string, 0, len(req.Header))
 	hasCookie := false
 	hasReferer := false
 	acceptLanguage := ""
 
 	for name := range req.Header {
-		switch strings.ToLower(name) {
-		case "cookie":
+		switch {
+		case bytesconv.EqualFoldASCII(name, "cookie"):
 			hasCookie = true
-		case "referer":
+		case bytesconv.EqualFoldASCII(name, "referer"):
 			hasReferer = true
-		case "accept-language":
+		case bytesconv.EqualFoldASCII(name, "accept-language"):
 			acceptLanguage = req.Header.Get(name)
 		default:
 			headers = append(headers, name)
@@ -262,24 +261,41 @@ func ComputeJA4HFromRequest(req *http.Request) string {
 
 	var cookieNames, cookieValues []string
 	if hasCookie {
+		cookies := req.Cookies()
+
 		type kv struct {
 			name  string
 			value string
 		}
 
-		kvs := generic.Map(req.Cookies(), func(c *http.Cookie) kv {
-			return kv{name: c.Name, value: c.Value}
-		})
+		kvs := make([]kv, len(cookies))
+		for i, c := range cookies {
+			kvs[i] = kv{name: c.Name, value: c.Value}
+		}
 
 		slices.SortFunc(kvs, func(a, b kv) int {
 			return strings.Compare(a.name, b.name)
 		})
 
-		cookieNames = generic.Map(kvs, func(k kv) string { return k.name })
-		cookieValues = generic.Map(kvs, func(k kv) string { return k.value })
+		cookieNames = make([]string, len(kvs))
+
+		cookieValues = make([]string, len(kvs))
+		for i, item := range kvs {
+			cookieNames[i] = item.name
+			cookieValues[i] = item.value
+		}
 	}
 
-	return ja4.ComputeJA4H(method, proto, headers, hasCookie, hasReferer, acceptLanguage, cookieNames, cookieValues)
+	return ja4.ComputeJA4H(
+		req.Method,
+		req.Proto,
+		headers,
+		hasCookie,
+		hasReferer,
+		acceptLanguage,
+		cookieNames,
+		cookieValues,
+	)
 }
 
 // IsStreamingResponse detects whether an HTTP response represents a real-time stream

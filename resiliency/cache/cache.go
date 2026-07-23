@@ -42,7 +42,7 @@ func NewInMemoryStore(cleanupInterval time.Duration) *InMemoryStore {
 	return store
 }
 
-// Get retrieves cached bytes for key. Returns [aoni.ErrCacheMiss] if missing or expired.
+// Get retrieves cached bytes for key. Returns [ErrCacheMiss] if missing or expired.
 func (s *InMemoryStore) Get(_ context.Context, key any) ([]byte, error) {
 	s.mu.RLock()
 	entry, ok := s.items[key]

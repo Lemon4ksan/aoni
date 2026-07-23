@@ -5,8 +5,8 @@
 package ja4
 
 import (
+	"bytes"
 	"encoding/binary"
-	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -47,7 +47,9 @@ func TestFormatHex4(t *testing.T) {
 	}
 
 	for _, tt := range tests {
-		assert.Equal(t, tt.expected, formatHex4(tt.input))
+		var bb bytes.Buffer
+		writeHex4(&bb, tt.input)
+		assert.Equal(t, tt.expected, bb.String())
 	}
 }
 
@@ -67,9 +69,9 @@ func TestWritePaddedTwoDigits(t *testing.T) {
 	}
 
 	for _, tt := range tests {
-		var sb strings.Builder
-		writePaddedTwoDigits(&sb, tt.input)
-		assert.Equal(t, tt.expected, sb.String())
+		var bb bytes.Buffer
+		writePaddedTwoDigits(&bb, tt.input)
+		assert.Equal(t, tt.expected, bb.String())
 	}
 }
 
@@ -449,11 +451,11 @@ func TestParseExtensionsFromRaw_BoundaryAndErrorCases(t *testing.T) {
 func TestHash12(t *testing.T) {
 	t.Parallel()
 
-	res := hash12("test")
+	res := hash12Bytes([]byte("test"))
 	assert.Len(t, res, 12)
 	assert.Regexp(t, `^[a-f0-9]{12}$`, res)
-	assert.Equal(t, res, hash12("test"))
-	assert.NotEqual(t, res, hash12("other"))
+	assert.Equal(t, res, hash12Bytes([]byte("test")))
+	assert.NotEqual(t, res, hash12Bytes([]byte("other")))
 }
 
 func BenchmarkComputeJA4(b *testing.B) {

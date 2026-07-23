@@ -13,6 +13,7 @@ package request
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"reflect"
 
@@ -22,6 +23,11 @@ import (
 	"github.com/lemon4ksan/aoni/codec/decode"
 	"github.com/lemon4ksan/aoni/mod"
 )
+
+// ErrUnexpectedContentType indicates the response content type
+// does not match the expected format. A captive portal or
+// transparent proxy often causes this.
+var ErrUnexpectedContentType = errors.New("aoni: unexpected content-type (possible captive portal or intercept)")
 
 // DefaultClient is the shared default client instance used by global helper functions.
 var DefaultClient = aoni.NewClient(nil)
@@ -76,7 +82,7 @@ func Get(ctx context.Context, c Requester, path string, mods ...aoni.RequestModi
 }
 
 // GetTo performs a GET request and decodes the response body into a new instance of Resp.
-// It returns an [APIError] if the server responds with a non-2xx status code.
+// It returns an [aoni.APIError] if the server responds with a non-2xx status code.
 //
 // By default, the response is parsed as JSON. To decode other response formats (such as XML
 // or YAML), pass a corresponding decoder modifier, e.g. [WithXMLDecoder] or [WithYAMLDecoder].
@@ -187,7 +193,7 @@ func Post(
 }
 
 // PostTo executes a POST request, marshals the body, and decodes the response body into Resp.
-// It returns an [APIError] if the server responds with a non-2xx status code.
+// It returns an [aoni.APIError] if the server responds with a non-2xx status code.
 //
 // By default, the request body is marshaled to JSON and the response is parsed as JSON.
 //
@@ -371,7 +377,7 @@ func Put(
 // PutTo executes a PUT request through the specified [Requester],
 // marshals the body, and decodes the response body into Resp.
 //
-// It returns an [APIError] if the server responds with a non-2xx status code.
+// It returns an [aoni.APIError] if the server responds with a non-2xx status code.
 //
 // By default, the request body is marshaled to JSON and the response is parsed as JSON.
 //
@@ -480,7 +486,7 @@ func Patch(
 // PatchTo executes a PATCH request through the specified [Requester],
 // marshals the body, and decodes the response body into Resp.
 //
-// It returns an [APIError] if the server responds with a non-2xx status code.
+// It returns an [aoni.APIError] if the server responds with a non-2xx status code.
 //
 // By default, the request body is marshaled to JSON and the response is parsed as JSON.
 //
@@ -589,7 +595,7 @@ func Delete(
 // DeleteTo executes a DELETE request through the specified [Requester],
 // marshals the body, and decodes the response body into Resp.
 //
-// It returns an [APIError] if the server responds with a non-2xx status code.
+// It returns an [aoni.APIError] if the server responds with a non-2xx status code.
 //
 // By default, the request body is marshaled to JSON and the response is parsed as JSON.
 //

@@ -446,7 +446,7 @@ func TestClient_ContentTypeGuard(t *testing.T) {
 		{
 			name:      "html_instead_of_json_returns_error",
 			body:      "<html><body>Hello World</body></html>",
-			expectErr: aoni.ErrUnexpectedContentType,
+			expectErr: request.ErrUnexpectedContentType,
 		},
 		{
 			name:      "cloudflare_challenge_html_returns_error",

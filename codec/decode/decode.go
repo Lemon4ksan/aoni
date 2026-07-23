@@ -22,6 +22,7 @@ import (
 	"google.golang.org/protobuf/proto"
 
 	"github.com/lemon4ksan/aoni"
+	"github.com/lemon4ksan/aoni/internal/bytesconv"
 	"github.com/lemon4ksan/aoni/mod"
 )
 
@@ -39,32 +40,30 @@ var (
 	}
 )
 
-// RawDecoder reads the entire response stream directly into a byte slice.
-// The destination target must be of type *[]byte.
+// RawDecoder reads the entire response stream directly into a byte slice (*[]byte).
 var RawDecoder Decoder = rawDecoder{}
 
-// ProtoDecoder reads raw binary Protocol Buffer payloads into proto.Message targets.
+// ProtoDecoder reads binary Protocol Buffer payloads into proto.Message targets.
 var ProtoDecoder Decoder = protoDecoder{}
 
-// GRPCWebDecoder extracts Protobuf payloads from 5-byte gRPC-Web frames and validates server trailers.
+// GRPCWebDecoder extracts Protobuf payloads from 5-byte gRPC-Web frames and validates trailers.
 var GRPCWebDecoder Decoder = grpcWebDecoder{}
 
-// JSONDecoder parses the response stream as standard JSON into the target structure.
+// JSONDecoder parses response payload streams as standard JSON.
 var JSONDecoder Decoder = jsonDecoder{}
 
-// XMLDecoder parses the response stream as XML into the target structure.
+// XMLDecoder parses response payload streams as XML.
 var XMLDecoder Decoder = xmlDecoder{}
 
-// ProtoJSONDecoder parses JSON response streams into Protobuf messages using standard protojson mapping.
+// ProtoJSONDecoder parses JSON response streams into Protobuf messages via protojson.
 var ProtoJSONDecoder Decoder = protoJSONDecoder{}
 
 // Decoder defines the contract for unmarshaling response payload streams into Go structures.
 type Decoder interface {
-	// Decode reads from reader and unmarshals the content into target.
 	Decode(reader io.Reader, target any) error
 }
 
-// DecoderFunc adapts a function signature to satisfy the Decoder interface.
+// DecoderFunc adapts a plain function signature to satisfy [Decoder].
 type DecoderFunc func(reader io.Reader, target any) error
 
 // Decode executes the underlying function to parse reader data into target.
@@ -72,14 +71,10 @@ func (f DecoderFunc) Decode(reader io.Reader, target any) error {
 	return f(reader, target)
 }
 
-// JSONDecoderConfig configures custom behavior for JSON payload decoding.
+// JSONDecoderConfig configures parsing options for JSON response streams.
 type JSONDecoderConfig struct {
-	// DisallowUnknownFields causes decoding to fail if the JSON payload contains key names
-	// not matching any struct fields in the target.
 	DisallowUnknownFields bool
-
-	// UseNumber unmarshals JSON numbers into json.Number instead of float64.
-	UseNumber bool
+	UseNumber             bool
 }
 
 type customJSONDecoder struct {
@@ -99,7 +94,7 @@ func (d customJSONDecoder) Decode(reader io.Reader, target any) error {
 	return dec.Decode(target)
 }
 
-// NewJSONDecoder creates a custom JSON [Decoder] configured with the specified parameters.
+// NewJSONDecoder creates a custom JSON [Decoder] with the specified configuration.
 func NewJSONDecoder(cfg JSONDecoderConfig) Decoder {
 	return customJSONDecoder{cfg: cfg}
 }
@@ -170,9 +165,7 @@ func (protoJSONDecoder) Decode(r io.Reader, target any) error {
 	}
 	defer bufferPool.Put(buf)
 
-	opts := protojson.UnmarshalOptions{
-		DiscardUnknown: true,
-	}
+	opts := protojson.UnmarshalOptions{DiscardUnknown: true}
 
 	if err := opts.Unmarshal(buf.Bytes(), msg); err != nil {
 		return &Error{Format: "protojson", Target: typeName(msg), Err: err}
@@ -190,10 +183,11 @@ func (grpcWebDecoder) Decode(r io.Reader, target any) error {
 	}
 
 	br := bufio.NewReader(r)
+
+	var reader io.Reader = br
+
 	if peek, err := br.Peek(5); err == nil && IsBase64Header(peek) {
-		r = base64.NewDecoder(base64.StdEncoding, br)
-	} else {
-		r = br
+		reader = base64.NewDecoder(base64.StdEncoding, br)
 	}
 
 	var (
@@ -202,7 +196,7 @@ func (grpcWebDecoder) Decode(r io.Reader, target any) error {
 	)
 
 	for {
-		if _, err := io.ReadFull(r, header[:]); err != nil {
+		if _, err := io.ReadFull(reader, header[:]); err != nil {
 			if (errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF)) && payloadRead {
 				return nil
 			}
@@ -214,7 +208,7 @@ func (grpcWebDecoder) Decode(r io.Reader, target any) error {
 		length := binary.BigEndian.Uint32(header[1:5])
 
 		payload := make([]byte, length)
-		if _, err := io.ReadFull(r, payload); err != nil {
+		if _, err := io.ReadFull(reader, payload); err != nil {
 			return &GRPCWebError{Op: "read_payload", Err: ErrInvalidGRPCWebFrame}
 		}
 
@@ -243,7 +237,6 @@ func (grpcWebDecoder) Decode(r io.Reader, target any) error {
 
 func copyToBuffer(r io.Reader) (*bytes.Buffer, error) {
 	buf := bufferPool.Get().(*bytes.Buffer)
-
 	buf.Reset()
 
 	bufPtr := bytePool.Get().(*[]byte)
@@ -274,25 +267,30 @@ func decompressProtoPayload(payload []byte) ([]byte, error) {
 }
 
 func verifyGRPCTrailer(trailerPayload []byte) error {
-	scanner := bufio.NewScanner(bytes.NewReader(trailerPayload))
-
 	var statusCode, statusMsg string
 
-	for scanner.Scan() {
-		line := scanner.Text()
+	for len(trailerPayload) > 0 {
+		var line []byte
 
-		key, val, ok := strings.Cut(line, ":")
+		if idx := bytes.IndexByte(trailerPayload, '\n'); idx >= 0 {
+			line = trailerPayload[:idx]
+			trailerPayload = trailerPayload[idx+1:]
+		} else {
+			line = trailerPayload
+			trailerPayload = nil
+		}
+
+		keyBytes, valBytes, ok := bytes.Cut(line, []byte{':'})
 		if !ok {
 			continue
 		}
 
-		key = strings.ToLower(strings.TrimSpace(key))
-		val = strings.TrimSpace(val)
+		key := strings.TrimSpace(bytesconv.B2S(keyBytes))
+		val := strings.TrimSpace(bytesconv.B2S(valBytes))
 
-		switch key {
-		case "grpc-status":
+		if bytesconv.EqualFoldASCII(key, "grpc-status") {
 			statusCode = val
-		case "grpc-message":
+		} else if bytesconv.EqualFoldASCII(key, "grpc-message") {
 			statusMsg = val
 		}
 	}
@@ -337,7 +335,7 @@ func (l limitDecoder) Decode(reader io.Reader, target any) error {
 	return l.decoder.Decode(io.LimitReader(reader, l.maxBytes), target)
 }
 
-// LimitDecoder wraps an existing decoder to cap input stream consumption at maxBytes.
+// LimitDecoder caps response payload input stream consumption at maxBytes.
 func LimitDecoder(decoder Decoder, maxBytes int64) Decoder {
 	return limitDecoder{
 		decoder:  decoder,
@@ -345,27 +343,31 @@ func LimitDecoder(decoder Decoder, maxBytes int64) Decoder {
 	}
 }
 
-// ByContentType automatically inspects the MIME type in contentType and selects
-// a matching registered decoder. Defaults to RawDecoder if unrecognized.
+// ByContentType selects a registered decoder matching the MIME type in contentType.
+//
+// Defaults to RawDecoder if the contentType is unrecognized.
 func ByContentType(reader io.Reader, contentType string, target any) error {
 	mediaType, _, _ := strings.Cut(contentType, ";")
-	mediaType = strings.TrimSpace(strings.ToLower(mediaType))
+	mediaType = strings.TrimSpace(mediaType)
 
-	switch mediaType {
-	case "application/json", "text/json":
+	switch {
+	case bytesconv.EqualFoldASCII(mediaType, "application/json"), bytesconv.EqualFoldASCII(mediaType, "text/json"):
 		return JSONDecoder.Decode(reader, target)
-	case "application/x-protobuf", "application/protobuf":
+	case bytesconv.EqualFoldASCII(mediaType, "application/x-protobuf"),
+		bytesconv.EqualFoldASCII(mediaType, "application/protobuf"):
 		return ProtoDecoder.Decode(reader, target)
-	case "application/grpc-web+proto", "application/grpc-web", "application/grpc-web-text":
+	case bytesconv.EqualFoldASCII(mediaType, "application/grpc-web+proto"),
+		bytesconv.EqualFoldASCII(mediaType, "application/grpc-web"),
+		bytesconv.EqualFoldASCII(mediaType, "application/grpc-web-text"):
 		return GRPCWebDecoder.Decode(reader, target)
-	case "application/xml", "text/xml":
+	case bytesconv.EqualFoldASCII(mediaType, "application/xml"), bytesconv.EqualFoldASCII(mediaType, "text/xml"):
 		return XMLDecoder.Decode(reader, target)
 	default:
 		return RawDecoder.Decode(reader, target)
 	}
 }
 
-// To allocates a new instance of type T and decodes reader data into it using the specified decoder.
+// To allocates a new instance of T and decodes payload data into it.
 func To[T any](reader io.Reader, decoder Decoder) (T, error) {
 	var target T
 	if err := decoder.Decode(reader, &target); err != nil {
@@ -376,50 +378,51 @@ func To[T any](reader io.Reader, decoder Decoder) (T, error) {
 	return target, nil
 }
 
-// IsRawDecoder reports whether the provided decoder is the raw byte-slice decoder.
+// IsRawDecoder reports whether decoder is the raw byte-slice decoder.
 func IsRawDecoder(decoder Decoder) bool {
 	_, ok := decoder.(rawDecoder)
 	return ok
 }
 
-// JSON reads from reader and unmarshals JSON data into T.
+// JSON reads from reader and unmarshals JSON data into a newly allocated T.
 func JSON[T any](reader io.Reader) (T, error) {
 	return To[T](reader, JSONDecoder)
 }
 
-// XML reads from reader and unmarshals XML data into T.
+// XML reads from reader and unmarshals XML data into a newly allocated T.
 func XML[T any](reader io.Reader) (T, error) {
 	return To[T](reader, XMLDecoder)
 }
 
-// Proto reads from reader and unmarshals binary Protocol Buffer data into T.
+// Proto reads from reader and unmarshals binary Protocol Buffer data into a newly allocated T.
 func Proto[T any](reader io.Reader) (T, error) {
 	return To[T](reader, ProtoDecoder)
 }
 
-// GRPCWeb reads from reader and unmarshals gRPC-Web framed Protocol Buffer data into T.
+// GRPCWeb reads from reader and unmarshals gRPC-Web framed data into a newly allocated T.
 func GRPCWeb[T any](reader io.Reader) (T, error) {
 	return To[T](reader, GRPCWebDecoder)
 }
 
-// WithRaw creates a request modifier that configures the request to use RawDecoder.
+// WithRaw creates a request modifier that assigns RawDecoder for response parsing.
 func WithRaw() aoni.RequestModifier { return mod.WithDecoder(RawDecoder) }
 
-// WithJSON creates a request modifier that configures the request to use JSONDecoder.
+// WithJSON creates a request modifier that assigns JSONDecoder for response parsing.
 func WithJSON() aoni.RequestModifier { return mod.WithDecoder(JSONDecoder) }
 
-// WithXML creates a request modifier that configures the request to use XMLDecoder.
+// WithXML creates a request modifier that assigns XMLDecoder for response parsing.
 func WithXML() aoni.RequestModifier { return mod.WithDecoder(XMLDecoder) }
 
-// WithProto creates a request modifier that sets ProtoDecoder for response parsing.
+// WithProto creates a request modifier that assigns ProtoDecoder for response parsing.
 func WithProto() aoni.RequestModifier { return mod.WithDecoder(ProtoDecoder) }
 
-// WithGRPCWeb creates a request modifier that sets GRPCWebDecoder for response parsing.
+// WithGRPCWeb creates a request modifier that assigns GRPCWebDecoder for response parsing.
 func WithGRPCWeb() aoni.RequestModifier { return mod.WithDecoder(GRPCWebDecoder) }
 
-// StripBOM removes the BOM (Byte Order Mark) from the reader if present without allocations.
+// StripBOM strips UTF-8 and UTF-16 Byte Order Marks from the input stream.
 func StripBOM(reader io.Reader) io.Reader {
 	var br *bufio.Reader
+
 	switch r := reader.(type) {
 	case *bufio.Reader:
 		br = r
@@ -473,41 +476,10 @@ func stripBufferBOM(br *bufio.Reader) *bufio.Reader {
 
 // VerifyGRPCTrailer parses gRPC-Web trailer key-value headers and validates grpc-status codes.
 func VerifyGRPCTrailer(trailerPayload []byte) error {
-	scanner := bufio.NewScanner(bytes.NewReader(trailerPayload))
-
-	var statusCode, statusMsg string
-
-	for scanner.Scan() {
-		line := scanner.Text()
-
-		key, val, ok := strings.Cut(line, ":")
-		if !ok {
-			continue
-		}
-
-		key = strings.ToLower(strings.TrimSpace(key))
-		val = strings.TrimSpace(val)
-
-		switch key {
-		case "grpc-status":
-			statusCode = val
-		case "grpc-message":
-			statusMsg = val
-		}
-	}
-
-	if statusCode != "" && statusCode != "0" {
-		return &GRPCWebError{
-			StatusCode: statusCode,
-			StatusMsg:  statusMsg,
-			Err:        ErrGRPCWebStatusError,
-		}
-	}
-
-	return nil
+	return verifyGRPCTrailer(trailerPayload)
 }
 
-// IsBase64Header checks whether the frame prefix matches a Base64 text-encoded gRPC-Web stream.
+// IsBase64Header checks whether frame prefix matches Base64 text-encoded gRPC-Web stream.
 func IsBase64Header(header []byte) bool {
 	if len(header) < 5 {
 		return false

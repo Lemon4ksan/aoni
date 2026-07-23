@@ -6,9 +6,10 @@ package telemetry
 
 import (
 	"fmt"
-	"maps"
 	"net/http"
 	"strings"
+
+	"github.com/lemon4ksan/aoni/internal/bytesconv"
 )
 
 // CurlOptions controls formatting, redaction, and cookie extraction for cURL generation.
@@ -19,22 +20,22 @@ type CurlOptions struct {
 
 const defaultRedacted = "*****REDACTED*****"
 
-var defaultSensitiveHeaders = map[string]bool{
-	"authorization":       true,
-	"proxy-authorization": true,
-	"x-api-key":           true,
-	"api-key":             true,
-	"token":               true,
-	"secret":              true,
-	"set-cookie":          true,
+var defaultSensitiveHeaders = []string{
+	"authorization",
+	"proxy-authorization",
+	"x-api-key",
+	"api-key",
+	"token",
+	"secret",
+	"set-cookie",
 }
 
-// CurlFromRequest converts an [http.Request] and optional body payload into a clean, shell-escaped cURL command string.
+// CurlFromRequest converts an [http.Request] and body payload into a shell-escaped cURL command.
 func CurlFromRequest(req *http.Request, body []byte) string {
 	return CurlFromRequestWithOptions(req, body, nil)
 }
 
-// CurlFromRequestWithOptions converts an [http.Request] with custom [CurlOptions] into a cURL command string.
+// CurlFromRequestWithOptions converts an [http.Request] into cURL with custom [CurlOptions].
 func CurlFromRequestWithOptions(req *http.Request, body []byte, opts *CurlOptions) string {
 	if req == nil {
 		return "curl"
@@ -42,7 +43,6 @@ func CurlFromRequestWithOptions(req *http.Request, body []byte, opts *CurlOption
 
 	var sb strings.Builder
 	sb.Grow(512)
-
 	sb.WriteString("curl")
 
 	if req.Method != "" && req.Method != http.MethodGet {
@@ -50,94 +50,109 @@ func CurlFromRequestWithOptions(req *http.Request, body []byte, opts *CurlOption
 		sb.WriteString(req.Method)
 	}
 
-	sensitive := defaultSensitiveHeaders
-	redactPlaceholder := defaultRedacted
+	redactSecret := resolveRedactSecret(opts)
+	sensitiveList := resolveSensitiveHeaders(opts)
 
-	if opts != nil {
-		if len(opts.RedactHeaders) > 0 {
-			sensitive = make(map[string]bool, len(defaultSensitiveHeaders)+len(opts.RedactHeaders))
-			maps.Copy(sensitive, defaultSensitiveHeaders)
-
-			for _, h := range opts.RedactHeaders {
-				sensitive[strings.ToLower(h)] = true
-			}
-		}
-
-		if opts.RedactSecret != "" {
-			redactPlaceholder = opts.RedactSecret
-		}
-	}
-
-	// 1. Process Request Headers
 	hasCookieHeader := false
 	for key, values := range req.Header {
-		lowerKey := strings.ToLower(key)
-		if lowerKey == "cookie" {
+		if bytesconv.EqualFoldASCII(key, "cookie") {
 			hasCookieHeader = true
 		}
 
-		isSecret := sensitive[lowerKey]
+		isSecret := isHeaderSensitive(key, sensitiveList)
 		for _, val := range values {
 			outVal := val
 			if isSecret {
-				outVal = redactPlaceholder
+				outVal = redactSecret
 			}
 
-			headerStr := fmt.Sprintf("%s: %s", key, outVal)
-
 			sb.WriteString(" -H ")
-			sb.WriteString(escapeShell(headerStr))
+			sb.WriteString(escapeShell(fmt.Sprintf("%s: %s", key, outVal)))
 		}
 	}
 
-	// 2. Process CookieJar / Cookies if Cookie header was not explicitly set
 	if !hasCookieHeader {
-		cookies := req.Cookies()
-		if len(cookies) > 0 {
-			var cookieSb strings.Builder
-			for i, c := range cookies {
-				if i > 0 {
-					cookieSb.WriteString("; ")
-				}
+		appendJarCookies(&sb, req.Cookies(), isHeaderSensitive("cookie", sensitiveList), redactSecret)
+	}
 
-				cookieSb.WriteString(c.Name)
-				cookieSb.WriteString("=")
+	appendBodyAndURL(&sb, req, body)
 
-				if sensitive["cookie"] {
-					cookieSb.WriteString(redactPlaceholder)
-				} else {
-					cookieSb.WriteString(c.Value)
-				}
-			}
+	return sb.String()
+}
 
-			sb.WriteString(" -H ")
-			sb.WriteString(escapeShell("Cookie: " + cookieSb.String()))
+func resolveRedactSecret(opts *CurlOptions) string {
+	if opts != nil && opts.RedactSecret != "" {
+		return opts.RedactSecret
+	}
+
+	return defaultRedacted
+}
+
+func resolveSensitiveHeaders(opts *CurlOptions) []string {
+	if opts == nil || len(opts.RedactHeaders) == 0 {
+		return defaultSensitiveHeaders
+	}
+
+	result := make([]string, len(defaultSensitiveHeaders), len(defaultSensitiveHeaders)+len(opts.RedactHeaders))
+	copy(result, defaultSensitiveHeaders)
+
+	return append(result, opts.RedactHeaders...)
+}
+
+func isHeaderSensitive(key string, sensitiveList []string) bool {
+	for _, target := range sensitiveList {
+		if bytesconv.EqualFoldASCII(key, target) {
+			return true
 		}
 	}
 
-	contentType := req.Header.Get("Content-Type")
-	if strings.HasPrefix(strings.ToLower(contentType), "multipart/form-data") && len(body) > 0 {
-		summary := SummarizeMultipartBody(body, contentType)
+	return false
+}
 
+func appendJarCookies(sb *strings.Builder, cookies []*http.Cookie, isSecret bool, redactSecret string) {
+	if len(cookies) == 0 {
+		return
+	}
+
+	var cookieSb strings.Builder
+	for i, c := range cookies {
+		if i > 0 {
+			cookieSb.WriteString("; ")
+		}
+
+		cookieSb.WriteString(c.Name)
+		cookieSb.WriteByte('=')
+
+		if isSecret {
+			cookieSb.WriteString(redactSecret)
+		} else {
+			cookieSb.WriteString(c.Value)
+		}
+	}
+
+	sb.WriteString(" -H ")
+	sb.WriteString(escapeShell("Cookie: " + cookieSb.String()))
+}
+
+func appendBodyAndURL(sb *strings.Builder, req *http.Request, body []byte) {
+	contentType := req.Header.Get("Content-Type")
+	if len(contentType) >= 19 && bytesconv.EqualFoldASCII(contentType[:19], "multipart/form-data") && len(body) > 0 {
+		summary := SummarizeMultipartBody(body, contentType)
 		for part := range strings.SplitSeq(summary, "&") {
 			sb.WriteString(" -F ")
 			sb.WriteString(escapeShell(part))
 		}
 	} else if len(body) > 0 {
 		sb.WriteString(" -d ")
-		sb.WriteString(escapeShell(string(body)))
+		sb.WriteString(escapeShell(bytesconv.B2S(body)))
 	}
 
-	// 4. Target URL
 	if req.URL != nil {
-		sb.WriteString(" ")
+		sb.WriteByte(' ')
 		sb.WriteString(escapeShell(req.URL.String()))
 	}
-
-	return sb.String()
 }
 
-// isShellSafeByte returns true if b is safe in a POSIX shell command without quoting.
 func isShellSafeByte(b byte) bool {
 	return (b >= 'a' && b <= 'z') ||
 		(b >= 'A' && b <= 'Z') ||
@@ -147,15 +162,14 @@ func isShellSafeByte(b byte) bool {
 		b == '%' || b == '+' || b == ',' || b == '@' || b == '~'
 }
 
-// escapeShell returns s as a shell-safe string.
-// Clean strings are returned as-is, while strings with spaces/special characters are wrapped in single quotes.
 func escapeShell(s string) string {
 	if s == "" {
 		return "''"
 	}
 
 	safe := true
-	for i := 0; i < len(s); i++ {
+
+	for i := range s {
 		if !isShellSafeByte(s[i]) {
 			safe = false
 			break
@@ -170,7 +184,7 @@ func escapeShell(s string) string {
 	sb.Grow(len(s) + 8)
 	sb.WriteByte('\'')
 
-	for i := 0; i < len(s); i++ {
+	for i := range s {
 		if s[i] == '\'' {
 			sb.WriteString("'\\''")
 		} else {

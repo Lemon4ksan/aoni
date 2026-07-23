@@ -2,45 +2,39 @@
 // Use of this source code is governed by a BSD-style
 // license can be found in the LICENSE file.
 
-// Package h1 provides TCP-level HTTP/1.1 header reordering connection wrappers.
+// Package h1 provides socket-level HTTP/1.1 header reordering connection wrappers.
 package h1
 
 import (
 	"bytes"
 	"errors"
 	"net"
-	"strings"
+
+	"github.com/lemon4ksan/aoni/internal/bytesconv"
 )
+
+// ErrInvalidHeaderTerminator indicates missing or corrupted HTTP/1.1 header section bounds.
+var ErrInvalidHeaderTerminator = errors.New("aoni h1: invalid or truncated HTTP header section")
 
 const (
 	lineTerminator    = "\r\n"
-	sectionTerminator = lineTerminator + lineTerminator
+	sectionTerminator = "\r\n\r\n"
 )
 
-type header struct {
-	key  string
+type headerEntry struct {
+	key  []byte
 	line []byte
 }
 
-// HeaderOrderingConn wraps a [net.Conn] to reorder HTTP/1.1 headers before
-// they reach the wire. It operates at the TCP level, sitting between the raw
-// socket and the TLS layer (e.g. [tls.Conn] or [utls.UConn]).
-//
-// This placement is critical: TLS calls Write() on the wrapped connection
-// with plaintext data before encrypting. So HeaderOrderingConn sees and
-// reorders plaintext HTTP headers, not encrypted TLS records.
-//
-// Wrapping order: TCP → HeaderOrderingConn → TLS → Go HTTP client
+// HeaderOrderingConn intercepts raw TCP writes to reorder HTTP/1.1 request headers prior to encryption.
 type HeaderOrderingConn struct {
 	net.Conn
 	OrderedKeys []string
 }
 
-// Write intercepts serialized HTTP/1.1 requests and reorders headers
-// according to the configured order. Detection is based on the presence
-// of the HTTP header terminator \r\n\r\n in the written bytes.
-func (c *HeaderOrderingConn) Write(b []byte) (n int, err error) {
-	if len(c.OrderedKeys) > 0 && bytes.Contains(b, []byte(sectionTerminator)) {
+// Write intercepts serialized HTTP/1.1 request data and reorders header lines according to OrderedKeys.
+func (c *HeaderOrderingConn) Write(b []byte) (int, error) {
+	if len(c.OrderedKeys) > 0 && bytes.Contains(b, bytesconv.S2B(sectionTerminator)) {
 		if rewritten, ok := ReorderHeaders(b, c.OrderedKeys); ok {
 			b = rewritten
 		}
@@ -49,18 +43,17 @@ func (c *HeaderOrderingConn) Write(b []byte) (n int, err error) {
 	return c.Conn.Write(b)
 }
 
-// ReorderHeaders reorders the HTTP headers in the given raw HTTP/1.1 request
-// according to the specified order. Returns the reordered bytes and a success flag.
+// ReorderHeaders reorders header lines in raw HTTP/1.1 wire payloads according to order.
+//
+// Operates directly on byte buffers without heap allocations for map headers or key strings.
 func ReorderHeaders(raw []byte, order []string) ([]byte, bool) {
 	body, lines, err := splitHeader(raw)
-	if err != nil {
+	if err != nil || len(lines) < 2 {
 		return nil, false
 	}
 
-	request, rawHeaders := lines[0], lines[1:]
-
-	parsed := make([]header, 0, len(rawHeaders))
-	headersMap := make(map[string][]byte, len(rawHeaders))
+	requestLine, rawHeaders := lines[0], lines[1:]
+	parsed := make([]headerEntry, 0, len(rawHeaders))
 
 	for _, h := range rawHeaders {
 		before, _, ok := bytes.Cut(h, []byte{':'})
@@ -68,50 +61,55 @@ func ReorderHeaders(raw []byte, order []string) ([]byte, bool) {
 			continue
 		}
 
-		key := strings.ToLower(string(bytes.TrimSpace(before)))
-		parsed = append(parsed, header{key: key, line: h})
-		headersMap[key] = h
+		parsed = append(parsed, headerEntry{
+			key:  bytes.TrimSpace(before),
+			line: h,
+		})
 	}
 
 	var newHeader bytes.Buffer
-	newHeader.Write(request)
-	newHeader.Write([]byte(lineTerminator))
+	newHeader.Grow(len(raw))
+	newHeader.Write(requestLine)
+	newHeader.WriteString(lineTerminator)
 
-	written := make(map[string]bool, len(order))
-	for _, key := range order {
-		lowerKey := strings.ToLower(key)
-		if line, ok := headersMap[lowerKey]; ok {
-			newHeader.Write(line)
-			newHeader.Write([]byte(lineTerminator))
+	written := make([]bool, len(parsed))
 
-			written[lowerKey] = true
+	for _, targetKey := range order {
+		for i, h := range parsed {
+			if !written[i] && bytesconv.EqualFoldASCII(bytesconv.B2S(h.key), targetKey) {
+				newHeader.Write(h.line)
+				newHeader.WriteString(lineTerminator)
+
+				written[i] = true
+
+				break
+			}
 		}
 	}
 
-	for _, h := range parsed {
-		if !written[h.key] {
+	for i, h := range parsed {
+		if !written[i] {
 			newHeader.Write(h.line)
-			newHeader.Write([]byte(lineTerminator))
+			newHeader.WriteString(lineTerminator)
 		}
 	}
 
-	newHeader.Write([]byte(lineTerminator))
+	newHeader.WriteString(lineTerminator)
 	newHeader.Write(body)
 
 	return newHeader.Bytes(), true
 }
 
-func splitHeader(raw []byte) (body []byte, lines [][]byte, err error) {
-	header, body, ok := bytes.Cut(raw, []byte(sectionTerminator))
+func splitHeader(raw []byte) ([]byte, [][]byte, error) {
+	headerBytes, body, ok := bytes.Cut(raw, bytesconv.S2B(sectionTerminator))
 	if !ok {
-		err = errors.New("invalid header")
-		return body, lines, err
+		return nil, nil, ErrInvalidHeaderTerminator
 	}
 
-	lines = bytes.Split(header, []byte(lineTerminator))
+	lines := bytes.Split(headerBytes, bytesconv.S2B(lineTerminator))
 	if len(lines) < 2 {
-		err = errors.New("invalid header")
+		return nil, nil, ErrInvalidHeaderTerminator
 	}
 
-	return body, lines, err
+	return body, lines, nil
 }

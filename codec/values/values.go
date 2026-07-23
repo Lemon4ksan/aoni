@@ -17,16 +17,17 @@ import (
 
 	"google.golang.org/protobuf/encoding/protojson"
 	"google.golang.org/protobuf/proto"
+
+	"github.com/lemon4ksan/aoni/internal/bytesconv"
 )
 
-// Uint64String parses uint64 values from string representations in JSON.
-// Safely handles raw integers, JSON null, or empty strings.
+// Uint64String parses uint64 values from numeric or quoted string JSON payloads.
 type Uint64String uint64
 
-// UnmarshalJSON parses JSON byte data into the Uint64String target.
+// UnmarshalJSON parses JSON byte data into Uint64String.
 func (u *Uint64String) UnmarshalJSON(b []byte) error {
-	s := strings.Trim(string(b), `"`)
-	if s == "" || s == "null" {
+	s := bytesconv.B2S(bytesconv.TrimQuotes(b))
+	if len(s) == 0 || s == "null" {
 		*u = 0
 		return nil
 	}
@@ -46,14 +47,13 @@ func (u Uint64String) MarshalJSON() ([]byte, error) {
 	return json.Marshal(strconv.FormatUint(uint64(u), 10))
 }
 
-// Int64String parses int64 values from string representations in JSON.
-// Safely handles raw integers, JSON null, or empty strings.
+// Int64String parses int64 values from numeric or quoted string JSON payloads.
 type Int64String int64
 
-// UnmarshalJSON parses JSON byte data into the Int64String target.
+// UnmarshalJSON parses JSON byte data into Int64String.
 func (i *Int64String) UnmarshalJSON(b []byte) error {
-	s := strings.Trim(string(b), `"`)
-	if s == "" || s == "null" {
+	s := bytesconv.B2S(bytesconv.TrimQuotes(b))
+	if len(s) == 0 || s == "null" {
 		*i = 0
 		return nil
 	}
@@ -73,13 +73,13 @@ func (i Int64String) MarshalJSON() ([]byte, error) {
 	return json.Marshal(strconv.FormatInt(int64(i), 10))
 }
 
-// Float64String parses float64 values from string representations in JSON.
+// Float64String parses float64 values from numeric or quoted string JSON payloads.
 type Float64String float64
 
-// UnmarshalJSON parses JSON byte data into the Float64String target.
+// UnmarshalJSON parses JSON byte data into Float64String.
 func (f *Float64String) UnmarshalJSON(b []byte) error {
-	s := strings.Trim(string(b), `"`)
-	if s == "" || s == "null" {
+	s := bytesconv.B2S(bytesconv.TrimQuotes(b))
+	if len(s) == 0 || s == "null" {
 		*f = 0
 		return nil
 	}
@@ -99,32 +99,27 @@ func (f Float64String) MarshalJSON() ([]byte, error) {
 	return json.Marshal(strconv.FormatFloat(float64(f), 'f', -1, 64))
 }
 
-// BoolInt parses booleans from integers or strings in JSON.
-// Maps 1, "1", "true" to true and 0, "0", "false", "null" to false.
+// BoolInt parses boolean flags represented as numbers or strings in JSON.
 type BoolInt bool
 
-// UnmarshalJSON implements json.Unmarshaler.
+// UnmarshalJSON implements [json.Unmarshaler].
 func (bi *BoolInt) UnmarshalJSON(b []byte) error {
-	s := strings.ToLower(strings.Trim(string(b), `"`))
-	switch s {
-	case "1", "true":
+	s := bytesconv.B2S(bytesconv.TrimQuotes(b))
+
+	switch {
+	case s == "1" || bytesconv.EqualFoldASCII(s, "true"):
 		*bi = true
-	case "0", "false", "", "null":
+	case s == "0" || bytesconv.EqualFoldASCII(s, "false") || len(s) == 0 || s == "null":
 		*bi = false
 	default:
 		val, err := strconv.Atoi(s)
-		if err == nil {
-			*bi = val != 0
-			return nil
-		}
-
-		*bi = false
+		*bi = (err == nil && val != 0)
 	}
 
 	return nil
 }
 
-// MarshalJSON serializes BoolInt back as numeric "1" or "0" JSON representations.
+// MarshalJSON serializes BoolInt back as numeric "1" or "0" JSON values.
 func (bi BoolInt) MarshalJSON() ([]byte, error) {
 	if bi {
 		return []byte("1"), nil
@@ -133,13 +128,13 @@ func (bi BoolInt) MarshalJSON() ([]byte, error) {
 	return []byte("0"), nil
 }
 
-// UnixTimestamp parses Unix epoch timestamps from strings or numbers in JSON.
+// UnixTimestamp parses UNIX epoch timestamps from strings or numbers in JSON.
 type UnixTimestamp time.Time
 
-// UnmarshalJSON implements json.Unmarshaler.
+// UnmarshalJSON implements [json.Unmarshaler].
 func (t *UnixTimestamp) UnmarshalJSON(b []byte) error {
-	s := strings.Trim(string(b), `"`)
-	if s == "" || s == "null" || s == "0" {
+	s := bytesconv.B2S(bytesconv.TrimQuotes(b))
+	if len(s) == 0 || s == "null" || s == "0" {
 		*t = UnixTimestamp(time.Time{})
 		return nil
 	}
@@ -163,16 +158,16 @@ func (t UnixTimestamp) MarshalJSON() ([]byte, error) {
 	return []byte(strconv.FormatInt(time.Time(t).Unix(), 10)), nil
 }
 
-// Time returns the underlying time.Time.
+// Time returns the underlying [time.Time].
 func (t UnixTimestamp) Time() time.Time { return time.Time(t) }
 
 // RFC3339Timestamp parses ISO-8601 / RFC-3339 formatted date-time strings in JSON.
 type RFC3339Timestamp time.Time
 
-// UnmarshalJSON implements json.Unmarshaler.
+// UnmarshalJSON implements [json.Unmarshaler].
 func (t *RFC3339Timestamp) UnmarshalJSON(b []byte) error {
-	s := strings.Trim(string(b), `"`)
-	if s == "" || s == "null" {
+	s := bytesconv.B2S(bytesconv.TrimQuotes(b))
+	if len(s) == 0 || s == "null" {
 		*t = RFC3339Timestamp(time.Time{})
 		return nil
 	}
@@ -187,7 +182,7 @@ func (t *RFC3339Timestamp) UnmarshalJSON(b []byte) error {
 	return nil
 }
 
-// MarshalJSON implements json.Marshaler.
+// MarshalJSON implements [json.Marshaler].
 func (t RFC3339Timestamp) MarshalJSON() ([]byte, error) {
 	if time.Time(t).IsZero() {
 		return []byte("null"), nil
@@ -196,7 +191,7 @@ func (t RFC3339Timestamp) MarshalJSON() ([]byte, error) {
 	return json.Marshal(time.Time(t).Format(time.RFC3339))
 }
 
-// Time returns the underlying time.Time representation.
+// Time returns the underlying [time.Time] value.
 func (t RFC3339Timestamp) Time() time.Time { return time.Time(t) }
 
 // String returns the RFC-3339 formatted date-time string.
@@ -217,17 +212,21 @@ func (cs CommaSlice[T]) MarshalText() ([]byte, error) {
 		return nil, nil
 	}
 
-	parts := make([]string, len(cs))
+	var sb strings.Builder
 	for i, item := range cs {
+		if i > 0 {
+			sb.WriteByte(',')
+		}
+
 		str, err := toString(reflect.ValueOf(item))
 		if err != nil {
 			return nil, &ValueError{Index: i, Err: err}
 		}
 
-		parts[i] = str
+		sb.WriteString(str)
 	}
 
-	return []byte(strings.Join(parts, ",")), nil
+	return bytesconv.S2B(sb.String()), nil
 }
 
 // QueryEncoder is implemented by types that encode themselves directly into url.Values.
@@ -236,10 +235,11 @@ type QueryEncoder interface {
 }
 
 type fieldSchema struct {
-	index       int
+	subSchema   *structSchema
 	name        string
 	key         string
 	defaultVal  string
+	index       int
 	isInline    bool
 	isAnonymous bool
 	omitempty   bool
@@ -247,7 +247,6 @@ type fieldSchema struct {
 	hasSpace    bool
 	hasPipe     bool
 	isIgnored   bool
-	subSchema   *structSchema
 }
 
 type structSchema struct {
@@ -316,8 +315,7 @@ func buildStructSchema(t reflect.Type) *structSchema {
 
 func (s *structSchema) fillValues(v reflect.Value, values url.Values) error {
 	for i := range s.fields {
-		f := &s.fields[i]
-		if err := f.fillField(v.Field(f.index), values); err != nil {
+		if err := s.fields[i].fillField(v.Field(s.fields[i].index), values); err != nil {
 			return err
 		}
 	}
@@ -343,9 +341,7 @@ func (f *fieldSchema) fillField(fieldValue reflect.Value, values url.Values) err
 			return f.subSchema.fillValues(fieldValue, values)
 		}
 
-		sub := getStructSchema(fieldValue.Type())
-
-		return sub.fillValues(fieldValue, values)
+		return getStructSchema(fieldValue.Type()).fillValues(fieldValue, values)
 	}
 
 	if f.isIgnored || f.key == "" || f.key == "-" {
@@ -360,18 +356,16 @@ func (f *fieldSchema) fillField(fieldValue reflect.Value, values url.Values) err
 }
 
 func (f *fieldSchema) shouldSkipZeroValue(fieldValue reflect.Value, values url.Values) bool {
-	if fieldValue.IsZero() {
-		if f.defaultVal != "" {
-			values.Set(f.key, f.defaultVal)
-			return true
-		}
-
-		if f.omitempty {
-			return true
-		}
+	if !fieldValue.IsZero() {
+		return false
 	}
 
-	return false
+	if f.defaultVal != "" {
+		values.Set(f.key, f.defaultVal)
+		return true
+	}
+
+	return f.omitempty
 }
 
 func (f *fieldSchema) serializeValue(fieldValue reflect.Value, values url.Values) error {
@@ -389,7 +383,7 @@ func (f *fieldSchema) serializeValue(fieldValue reflect.Value, values url.Values
 			return &ValueError{Field: f.name, Err: err}
 		}
 
-		values.Set(f.key, string(b))
+		values.Set(f.key, bytesconv.B2S(b))
 
 		return nil
 	}
@@ -411,7 +405,7 @@ func (f *fieldSchema) serializeValue(fieldValue reflect.Value, values url.Values
 			return &ValueError{Field: f.name, Err: err}
 		}
 
-		values.Set(f.key, string(b))
+		values.Set(f.key, bytesconv.B2S(b))
 
 		return nil
 	}
@@ -432,7 +426,14 @@ func (f *fieldSchema) serializeValue(fieldValue reflect.Value, values url.Values
 
 func (f *fieldSchema) serializeSlice(fieldValue reflect.Value, values url.Values) error {
 	if f.hasComma || f.hasSpace || f.hasPipe {
-		var strVals []string
+		sep := ","
+		if f.hasSpace {
+			sep = " "
+		} else if f.hasPipe {
+			sep = "|"
+		}
+
+		var sb strings.Builder
 		for j := range fieldValue.Len() {
 			val := fieldValue.Index(j)
 			if val.Kind() == reflect.Pointer {
@@ -448,17 +449,14 @@ func (f *fieldSchema) serializeSlice(fieldValue reflect.Value, values url.Values
 				return &ValueError{Field: f.name, Index: j, Err: err}
 			}
 
-			strVals = append(strVals, str)
+			if j > 0 {
+				sb.WriteString(sep)
+			}
+
+			sb.WriteString(str)
 		}
 
-		sep := ","
-		if f.hasSpace {
-			sep = " "
-		} else if f.hasPipe {
-			sep = "|"
-		}
-
-		values.Set(f.key, strings.Join(strVals, sep))
+		values.Set(f.key, sb.String())
 
 		return nil
 	}
@@ -484,7 +482,7 @@ func (f *fieldSchema) serializeSlice(fieldValue reflect.Value, values url.Values
 	return nil
 }
 
-// StructToValues encodes a struct or Protobuf message into url.Values.
+// StructToValues encodes a struct or Protobuf message into [url.Values].
 func StructToValues(s any) (url.Values, error) {
 	if s == nil {
 		return nil, nil
@@ -530,8 +528,8 @@ func StructToValues(s any) (url.Values, error) {
 	}
 
 	schema := getStructSchema(v.Type())
-
 	values := make(url.Values)
+
 	if err := schema.fillValues(v, values); err != nil {
 		return nil, err
 	}
@@ -559,7 +557,7 @@ func protoToValues(pm proto.Message) (url.Values, error) {
 			res.Set(k, v)
 		default:
 			subJSON, _ := json.Marshal(v)
-			res.Set(k, string(subJSON))
+			res.Set(k, bytesconv.B2S(subJSON))
 		}
 	}
 
@@ -588,7 +586,7 @@ func toString(v reflect.Value) (string, error) {
 				return "", err
 			}
 
-			return string(b), nil
+			return bytesconv.B2S(b), nil
 		}
 
 		if s, ok := val.(interface{ String() string }); ok {
