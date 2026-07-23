@@ -13,6 +13,7 @@
 package option
 
 import (
+	"context"
 	"encoding/base64"
 	"net/http"
 	"net/url"
@@ -22,6 +23,7 @@ import (
 	"github.com/lemon4ksan/miyako/generic"
 
 	"github.com/lemon4ksan/aoni"
+	"github.com/lemon4ksan/aoni/cookie"
 	"github.com/lemon4ksan/aoni/fingerprint"
 	"github.com/lemon4ksan/aoni/fingerprint/h2"
 	"github.com/lemon4ksan/aoni/fingerprint/h3"
@@ -386,6 +388,16 @@ func WithBasicAuth(username, password string) aoni.ClientOption {
 func WithCookieJar(jar http.CookieJar) aoni.ClientOption {
 	return func(cfg *aoni.Config) {
 		cfg.Engine.CookieJar = jar
+	}
+}
+
+// WithCookieJanitor enables automatic periodic background purging of expired cookies
+// for the client's cookie jar at the specified interval.
+func WithCookieJanitor(ctx context.Context, interval time.Duration) aoni.ClientOption {
+	return func(cfg *aoni.Config) {
+		if pJar, ok := cfg.Engine.CookieJar.(*cookie.ProxyIsolatedJar); ok {
+			pJar.StartJanitor(ctx, interval)
+		}
 	}
 }
 

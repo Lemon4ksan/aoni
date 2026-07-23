@@ -14,14 +14,17 @@ import (
 	"sync"
 )
 
+// ErrInvalidCookieData is returned when persisted cookie data cannot be unmarshaled.
+var ErrInvalidCookieData = errors.New("aoni cookie: invalid persisted cookie payload")
+
 // Storage defines the persistence interface for proxy-isolated cookie jars.
 type Storage interface {
 	Save(key string, cookies []Cookie) error
 	Load(key string) ([]Cookie, error)
 }
 
-// JSONFileStorage implements [Storage] using a single JSON file on disk.
-// Disk writes are serialized using atomic file swaps to prevent data corruption on crash.
+// JSONFileStorage implements Storage using a single JSON file on disk.
+// File updates are performed via atomic temp file swaps to prevent corruption on crash.
 type JSONFileStorage struct {
 	mu       sync.RWMutex
 	filePath string
@@ -44,7 +47,7 @@ func NewJSONFileStorage(filePath string) *JSONFileStorage {
 	return s
 }
 
-// Save stores cookies under key and writes the updated JSON file atomically to disk.
+// Save stores cookies under key and flushes the updated JSON structure atomically to disk.
 func (s *JSONFileStorage) Save(key string, cookies []Cookie) error {
 	s.mu.Lock()
 	s.data[key] = cookies
@@ -102,14 +105,13 @@ func writeDataAtomically(filePath string, data []byte) error {
 	return os.Rename(tmpName, filePath) //nolint:gosec
 }
 
-// SQLStorage implements [Storage] using a SQL database connection.
-// Requires a table named 'aoni_cookies' with (proxy_key TEXT PRIMARY KEY, cookie_data TEXT).
+// SQLStorage implements [Storage] backed by an SQL database.
 type SQLStorage struct {
 	db        *sql.DB
 	tableName string
 }
 
-// NewSQLStorage instantiates a [SQLStorage] using the given database instance.
+// NewSQLStorage instantiates an [SQLStorage] instance using the provided database handle.
 func NewSQLStorage(db *sql.DB) *SQLStorage {
 	return &SQLStorage{
 		db:        db,
@@ -117,7 +119,7 @@ func NewSQLStorage(db *sql.DB) *SQLStorage {
 	}
 }
 
-// InitSchema creates the required table schema if it does not exist.
+// InitSchema constructs the required table schema if it does not exist.
 func (s *SQLStorage) InitSchema() error {
 	//nolint:gosec
 	query := `CREATE TABLE IF NOT EXISTS ` + s.tableName + ` (
@@ -145,19 +147,19 @@ func (s *SQLStorage) Save(key string, cookies []Cookie) error {
 
 	defer func() { _ = tx.Rollback() }()
 
-	//nolint:gosec
-	if _, err := tx.ExecContext(
+	if _, err := tx.ExecContext( //nolint:gosec
 		ctx,
-		`DELETE FROM `+s.tableName+` WHERE proxy_key = ?`,
+		`DELETE FROM `+s.tableName+` WHERE proxy_key = ?`, //nolint:gosec
 		key,
 	); err != nil {
 		return err
 	}
 
 	if len(cookies) > 0 {
-		if _, err := tx.ExecContext( //nolint:gosec
+		//nolint:gosec
+		if _, err := tx.ExecContext(
 			ctx,
-			`INSERT INTO `+s.tableName+` (proxy_key, cookie_data) VALUES (?, ?)`, //nolint:gosec
+			`INSERT INTO `+s.tableName+` (proxy_key, cookie_data) VALUES (?, ?)`,
 			key,
 			string(jsonData),
 		); err != nil {
@@ -184,7 +186,7 @@ func (s *SQLStorage) Load(key string) ([]Cookie, error) {
 
 	var cookies []Cookie
 	if err := json.Unmarshal([]byte(dataStr), &cookies); err != nil {
-		return nil, err
+		return nil, ErrInvalidCookieData
 	}
 
 	return cookies, nil
