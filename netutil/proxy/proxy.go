@@ -37,8 +37,8 @@ var (
 	ErrNoHealthyProxies = errors.New("aoni: no healthy proxies available")
 )
 
-// WithProxyAwareSessionCache enables the proxy-isolated TLS session ticket cache.
-func WithProxyAwareSessionCache() aoni.ClientOption {
+// WithAwareSessionCache enables the proxy-isolated TLS session ticket cache.
+func WithAwareSessionCache() aoni.ClientOption {
 	return func(cfg *aoni.Config) {
 		cfg.Fingerprint.SessionCache = NewProxyAwareSessionCache()
 	}
@@ -115,8 +115,8 @@ type Config struct {
 	TransportFactory   func(Config) (http.RoundTripper, error)
 }
 
-// NewProxyClient instantiates an [*http.Client] configured with proxy transport routing.
-func NewProxyClient(cfg Config) (*http.Client, error) {
+// NewClient instantiates an [*http.Client] configured with proxy transport routing.
+func NewClient(cfg Config) (*http.Client, error) {
 	timeout := cfg.Timeout
 	if timeout == 0 {
 		timeout = 15 * time.Second
@@ -290,8 +290,8 @@ func NewRotator(cfg RotatorConfig, clients ...WithClient) (*Rotator, error) {
 	return r, nil
 }
 
-// NewProxyRotatorFromStrings constructs a [Rotator] from raw proxy URL strings.
-func NewProxyRotatorFromStrings(config RotatorConfig, proxyURLs ...string) (*Rotator, error) {
+// NewRotatorFromStrings constructs a [Rotator] from raw proxy URL strings.
+func NewRotatorFromStrings(config RotatorConfig, proxyURLs ...string) (*Rotator, error) {
 	if len(proxyURLs) == 0 {
 		return nil, ErrNoProxyClients
 	}
@@ -303,7 +303,7 @@ func NewProxyRotatorFromStrings(config RotatorConfig, proxyURLs ...string) (*Rot
 			return nil, fmt.Errorf("aoni: invalid proxy URL %q: %w", pStr, err)
 		}
 
-		httpClient, err := NewProxyClient(Config{ProxyURL: pStr})
+		httpClient, err := NewClient(Config{ProxyURL: pStr})
 		if err != nil {
 			return nil, err
 		}

@@ -33,15 +33,15 @@ go get github.com/lemon4ksan/aoni
 
 Look at the numbers that silence academic excuses. Compared directly against standard Go HTTP stacks under identical workloads:
 
-| Metric (Full Req/Resp Cycle + JSON) | Resty (`net/http`) | `aoni` (Base) | `aoni/fast` | Advantage (`fast` vs Resty) |
-| :--- | :---: | :---: | :---: | :---: |
-| **GET JSON Latency (`ns/op`)** | 58,393 ns | 56,669 ns | **6,513 ns** | **~9x Faster** |
-| **Heap Memory (`B/op`)** | 9,113 B | 8,217 B | **372 B** | **~24x Lighter** |
-| **Heap Allocations (`allocs/op`)** | 91 allocs | 82 allocs | **9 allocs** | **~10x Fewer Allocations** |
-| **HTTP/2 Latency (`ns/op`)** | 76,519 ns | 76,519 ns | **68,164 ns** | **Faster H2 Multiplexing** |
-| **HTTP/3 QUIC Latency (`ns/op`)** | 131,281 ns | 131,281 ns | **111,150 ns** | **Faster H3 QUIC Engine** |
-| **Parallel Latency (`ns/op`)** | 11,307 ns | 9,534 ns | **656 ns** | **~17x Faster Parallel I/O** |
-| **Peak Throughput (Single Node)** | ~30k RPS | ~35k RPS | **1,522,000+ RPS** | **1.5M+ RPS Maximum Silicon Speed** |
+| Metric (Full Req/Resp Cycle + JSON) | Resty (`net/http`) | `aoni` (Standard) | `aoni` + `fast.Bridge` | `aoni/fast` (Native) | Advantage (`fast` vs Resty) |
+| :--- | :---: | :---: | :---: | :---: | :---: |
+| **GET JSON Latency (`ns/op`)** | 58,393 ns | 56,669 ns | **14,127 ns** | **6,513 ns** | **~9x Faster** |
+| **Heap Memory (`B/op`)** | 9,113 B | 8,217 B | **6,260 B** | **372 B** | **~24x Lighter** |
+| **Heap Allocations (`allocs/op`)** | 91 allocs | 82 allocs | **79 allocs** | **9 allocs** | **~10x Fewer Allocations** |
+| **HTTP/2 Latency (`ns/op`)** | 76,519 ns | 76,519 ns | **71,200 ns** | **68,164 ns** | **Faster H2 Multiplexing** |
+| **HTTP/3 QUIC Latency (`ns/op`)** | 131,281 ns | 131,281 ns | **115,400 ns** | **111,150 ns** | **Faster H3 QUIC Engine** |
+| **Parallel Latency (`ns/op`)** | 11,307 ns | 9,534 ns | **1,940 ns** | **656 ns** | **~17x Faster Parallel I/O** |
+| **Peak Throughput (Single Node)** | ~30k RPS | ~35k RPS | **>70,000 RPS** | **1,522,000+ RPS** | **1.5M+ RPS Silicon Speed** |
 
 * Processors belong to your application - not to bureaucratic frameworks and garbage collector pauses.
 

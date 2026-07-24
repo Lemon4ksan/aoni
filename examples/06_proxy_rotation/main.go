@@ -4,7 +4,7 @@
 
 // Example: Proxy rotation with sticky sessions and retry middleware.
 //
-// Demonstrates NewProxyClient, NewProxyRotator, WithStickySessions,
+// Demonstrates NewClient, NewProxyRotator, WithStickySessions,
 // ProxyRetryCondition, and RetryMiddleware for resilient proxy rotation.
 package main
 

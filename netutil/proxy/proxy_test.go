@@ -99,7 +99,7 @@ func TestClient_ParseAutoProxy(t *testing.T) {
 	assert.Equal(t, "pass", password)
 }
 
-func TestNewProxyClient(t *testing.T) {
+func TestNewClient(t *testing.T) {
 	t.Parallel()
 
 	t.Run("default_timeout", func(t *testing.T) {
@@ -107,7 +107,7 @@ func TestNewProxyClient(t *testing.T) {
 
 		cfg := Config{}
 
-		client, err := NewProxyClient(cfg)
+		client, err := NewClient(cfg)
 		require.NoError(t, err)
 
 		assert.Equal(t, 15*time.Second, client.Timeout)
@@ -123,7 +123,7 @@ func TestNewProxyClient(t *testing.T) {
 			InsecureSkipVerify: true,
 		}
 
-		client, err := NewProxyClient(cfg)
+		client, err := NewClient(cfg)
 		require.NoError(t, err)
 
 		assert.Equal(t, 5*time.Second, client.Timeout)
@@ -146,7 +146,7 @@ func TestNewProxyClient(t *testing.T) {
 			ProxyURL: " ://invalid-url",
 		}
 
-		_, err := NewProxyClient(cfg)
+		_, err := NewClient(cfg)
 		require.Error(t, err)
 	})
 
@@ -155,7 +155,7 @@ func TestNewProxyClient(t *testing.T) {
 
 		cfg := Config{ProxyURL: ""}
 
-		client, err := NewProxyClient(cfg)
+		client, err := NewClient(cfg)
 		require.NoError(t, err)
 
 		transport := client.Transport.(*http.Transport)
@@ -273,7 +273,7 @@ func TestProxyRotator_FromStrings(t *testing.T) {
 		t.Parallel()
 
 		cfg := RotatorConfig{}
-		r, err := NewProxyRotatorFromStrings(cfg, "http://1.2.3.4:8080", "socks5://5.6.7.8:1080")
+		r, err := NewRotatorFromStrings(cfg, "http://1.2.3.4:8080", "socks5://5.6.7.8:1080")
 		require.NoError(t, err)
 		t.Cleanup(func() { _ = r.Close() })
 
@@ -286,7 +286,7 @@ func TestProxyRotator_FromStrings(t *testing.T) {
 		t.Parallel()
 
 		cfg := RotatorConfig{}
-		_, err := NewProxyRotatorFromStrings(cfg)
+		_, err := NewRotatorFromStrings(cfg)
 		assert.Error(t, err)
 	})
 
@@ -294,7 +294,7 @@ func TestProxyRotator_FromStrings(t *testing.T) {
 		t.Parallel()
 
 		cfg := RotatorConfig{}
-		_, err := NewProxyRotatorFromStrings(cfg, " ://invalid")
+		_, err := NewRotatorFromStrings(cfg, " ://invalid")
 		assert.Error(t, err)
 	})
 }
@@ -454,7 +454,7 @@ func TestProxyConfig_CustomTransport(t *testing.T) {
 		cfg := Config{
 			Transport: mw,
 		}
-		client, err := NewProxyClient(cfg)
+		client, err := NewClient(cfg)
 		require.NoError(t, err)
 		assert.Equal(t, mw, client.Transport)
 	})
@@ -468,7 +468,7 @@ func TestProxyConfig_CustomTransport(t *testing.T) {
 				return mw, nil
 			},
 		}
-		client, err := NewProxyClient(cfg)
+		client, err := NewClient(cfg)
 		require.NoError(t, err)
 		assert.Equal(t, mw, client.Transport)
 	})
@@ -481,7 +481,7 @@ func TestProxyConfig_CustomTransport(t *testing.T) {
 				return nil, errors.New("factory simulation error")
 			},
 		}
-		_, err := NewProxyClient(cfg)
+		_, err := NewClient(cfg)
 		assert.Error(t, err)
 		assert.Contains(t, err.Error(), "factory simulation error")
 	})

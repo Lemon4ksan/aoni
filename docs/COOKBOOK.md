@@ -14,7 +14,7 @@ import (
 )
 
 // Instantiate a resilient, health-checked proxy pool
-rotator, err := proxy.NewProxyRotatorFromStrings(proxy.RotatorConfig{
+rotator, err := proxy.NewRotatorFromStrings(proxy.RotatorConfig{
 	MaxFails:   3,
 	RetryAfter: 30 * time.Second,
 }, "http://proxy1.local:8080", "http://proxy2.local:8080")
