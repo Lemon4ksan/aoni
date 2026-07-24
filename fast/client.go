@@ -5,6 +5,7 @@
 package fast
 
 import (
+	"bytes"
 	"context"
 	"crypto/tls"
 	"net"
@@ -75,6 +76,7 @@ func (c *Client) Engine() *fasthttp.Client {
 }
 
 // Request executes an HTTP request across HTTP/1.1, native HTTP/2, or native HTTP/3.
+// Handles HTTP 3xx redirects and scrubs sensitive credentials during cross-origin hops.
 //
 // Postconditions:
 //   - The returned [aoni.Response] MUST be closed via [aoni.Response.Close]
@@ -103,27 +105,8 @@ func (c *Client) Request(
 	c.applyModifiers(reqAdapter, mods)
 
 	reqCtx := reqAdapter.Context()
-	alpnMode := resolveALPNMode(reqCtx, &c.config)
 
-	var (
-		err          error
-		autoReleased bool
-	)
-
-	switch alpnMode {
-	case aoni.AlpnH3:
-		h3 := c.getH3Client()
-		err = h3.Do(reqCtx, fastReq, fastResp, c.config.Fingerprint.HeaderOrder)
-
-	case aoni.AlpnH2:
-		host := string(fastReq.URI().Host())
-		h2Cl := c.getH2Client(host)
-		err = h2Cl.Do(reqCtx, fastReq, fastResp)
-
-	default:
-		err, autoReleased = c.executeFastHTTP(reqCtx, fastReq, fastResp)
-	}
-
+	err, autoReleased := c.executeWithRedirects(reqCtx, fastReq, fastResp)
 	if err != nil {
 		if !autoReleased {
 			fasthttp.ReleaseRequest(fastReq)
@@ -158,23 +141,8 @@ func (c *Client) Do(req aoni.Request) (aoni.Response, error) {
 	}
 
 	fastResp := fasthttp.AcquireResponse()
-	alpnMode := resolveALPNMode(ctx, &c.config)
 
-	var (
-		err          error
-		autoReleased bool
-	)
-
-	switch alpnMode {
-	case aoni.AlpnH3:
-		err = c.getH3Client().Do(ctx, fastReq, fastResp, c.config.Fingerprint.HeaderOrder)
-	case aoni.AlpnH2:
-		host := string(fastReq.URI().Host())
-		err = c.getH2Client(host).Do(ctx, fastReq, fastResp)
-	default:
-		err, autoReleased = c.executeFastHTTP(ctx, fastReq, fastResp)
-	}
-
+	err, autoReleased := c.executeWithRedirects(ctx, fastReq, fastResp)
 	if err != nil {
 		if !autoReleased {
 			fasthttp.ReleaseResponse(fastResp)
@@ -187,6 +155,119 @@ func (c *Client) Do(req aoni.Request) (aoni.Response, error) {
 	}
 
 	return NewResponse(fastResp), nil
+}
+
+func (c *Client) executeWithRedirects(
+	ctx context.Context,
+	fastReq *fasthttp.Request,
+	fastResp *fasthttp.Response,
+) (err error, autoReleased bool) {
+	redirectLimit := c.resolveRedirectLimit()
+	if redirectLimit == 0 {
+		return c.dispatchSingleRequest(ctx, fastReq, fastResp)
+	}
+
+	currentURI := fasthttp.AcquireURI()
+	defer fasthttp.ReleaseURI(currentURI)
+
+	var redirectsFollowed int
+
+	for {
+		fastReq.URI().CopyTo(currentURI)
+
+		err, autoReleased = c.dispatchSingleRequest(ctx, fastReq, fastResp)
+		if err != nil {
+			return err, autoReleased
+		}
+
+		statusCode := fastResp.StatusCode()
+		if !isRedirectStatus(statusCode) {
+			return nil, false
+		}
+
+		location := fastResp.Header.Peek("Location")
+		if len(location) == 0 {
+			return nil, false
+		}
+
+		redirectsFollowed++
+		if redirectsFollowed > redirectLimit {
+			return ErrMaxRedirectsExceeded, false
+		}
+
+		nextURI := fasthttp.AcquireURI()
+		fastReq.URI().UpdateBytes(location)
+		fastReq.URI().CopyTo(nextURI)
+
+		if isCrossOriginURI(currentURI, nextURI) {
+			scrubSensitiveHeaders(fastReq)
+		}
+
+		applyRedirectMethodAndBody(statusCode, fastReq)
+		fasthttp.ReleaseURI(nextURI)
+
+		fastResp.Reset()
+	}
+}
+
+func (c *Client) dispatchSingleRequest(
+	ctx context.Context,
+	fastReq *fasthttp.Request,
+	fastResp *fasthttp.Response,
+) (err error, autoReleased bool) {
+	alpnMode := resolveALPNMode(ctx, &c.config)
+
+	switch alpnMode {
+	case aoni.AlpnH3:
+		h3 := c.getH3Client()
+		return h3.Do(ctx, fastReq, fastResp, c.config.Fingerprint.HeaderOrder), false
+
+	case aoni.AlpnH2:
+		host := string(fastReq.URI().Host())
+		h2Cl := c.getH2Client(host)
+		return h2Cl.Do(ctx, fastReq, fastResp), false
+
+	default:
+		return c.executeFastHTTP(ctx, fastReq, fastResp)
+	}
+}
+
+func (c *Client) resolveRedirectLimit() int {
+	if c.config.Engine.RedirectLimit < 0 {
+		return 10
+	}
+
+	return c.config.Engine.RedirectLimit
+}
+
+func isRedirectStatus(code int) bool {
+	return code == fasthttp.StatusMovedPermanently ||
+		code == fasthttp.StatusFound ||
+		code == fasthttp.StatusSeeOther ||
+		code == fasthttp.StatusTemporaryRedirect ||
+		code == fasthttp.StatusPermanentRedirect
+}
+
+func isCrossOriginURI(u1, u2 *fasthttp.URI) bool {
+	return !bytes.EqualFold(u1.Scheme(), u2.Scheme()) ||
+		!bytes.EqualFold(u1.Host(), u2.Host())
+}
+
+func scrubSensitiveHeaders(req *fasthttp.Request) {
+	for _, h := range aoni.DefaultSensitiveHeaders {
+		req.Header.Del(h)
+	}
+}
+
+func applyRedirectMethodAndBody(statusCode int, req *fasthttp.Request) {
+	switch statusCode {
+	case fasthttp.StatusMovedPermanently, fasthttp.StatusFound, fasthttp.StatusSeeOther:
+		method := string(req.Header.Method())
+		if method != http.MethodGet && method != http.MethodHead {
+			req.Header.SetMethod(http.MethodGet)
+			req.SetBody(nil)
+		}
+	}
 }
 
 func (c *Client) getH3Client() *h3engine.Client {

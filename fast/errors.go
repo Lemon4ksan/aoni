@@ -19,4 +19,6 @@ var (
 	// ErrProxyConnectionFailed is returned when establishing an outbound proxy tunnel fails.
 	ErrProxyConnectionFailed = errors.New("fast: proxy connection failed")
 
+	// ErrMaxRedirectsExceeded is returned when the request halts because the maximum redirect threshold was reached.
+	ErrMaxRedirectsExceeded = errors.New("fast: maximum redirects limit exceeded")
 )
