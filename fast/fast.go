@@ -10,6 +10,7 @@ import (
 	"context"
 	"io"
 	"net/http"
+	"slices"
 
 	"github.com/valyala/fasthttp"
 
@@ -32,7 +33,7 @@ func NewRequest(req *fasthttp.Request) *Request {
 	return &Request{req: req}
 }
 
-// Context yields the request execution context, falling back to [context.Background].
+// Context yields the execution context, defaulting to context.Background.
 func (f *Request) Context() context.Context {
 	if f.ctx == nil {
 		return context.Background()
@@ -126,7 +127,7 @@ func (f *Request) Header(key string) string {
 	return bytesconv.B2S(f.req.Header.Peek(key))
 }
 
-// HeaderBytes yields direct access to the header byte slice value inside fasthttp internal buffers.
+// HeaderBytes yields direct access to internal header buffer bytes.
 func (f *Request) HeaderBytes(key []byte) []byte {
 	return f.req.Header.PeekBytes(key)
 }
@@ -181,7 +182,7 @@ func (f *Request) SetBodyStream(r io.Reader, contentLength int64) {
 	f.req.SetBodyStream(r, int(contentLength))
 }
 
-// BodyStream yields an [io.Reader] for the request body.
+// BodyStream yields an io.Reader for the request body.
 func (f *Request) BodyStream() io.Reader {
 	return f.req.BodyStream()
 }
@@ -235,7 +236,7 @@ func (f *Response) Header(key string) string {
 	return bytesconv.B2S(f.resp.Header.Peek(key))
 }
 
-// HeaderBytes yields direct access to header value byte slice inside fasthttp internal buffers.
+// HeaderBytes yields direct access to header value byte slice inside internal buffers.
 func (f *Response) HeaderBytes(key []byte) []byte {
 	return f.resp.Header.PeekBytes(key)
 }
@@ -252,14 +253,35 @@ func (f *Response) Headers() map[string][]string {
 	return m
 }
 
-// BodyBytes yields direct zero-copy access to response body bytes inside fasthttp socket buffers.
+// BodyBytes returns an independent, memory-safe copy of the response body bytes.
+//
+// Postconditions:
+//   - The returned slice is safe to retain or mutate beyond response pool recycling.
 func (f *Response) BodyBytes() []byte {
+	return slices.Clone(f.resp.Body())
+}
+
+// UnsafeBodyBytes provides zero-allocation direct access to internal response buffers.
+//
+// Warning:
+//   - Points directly to volatile internal buffers managed by sync.Pool.
+//   - MUST NOT be referenced, mutated, or retained after closing or recycling the response.
+func (f *Response) UnsafeBodyBytes() []byte {
 	return f.resp.Body()
 }
 
-// BodyStream yields an [io.ReadCloser] wrapping response body bytes.
+// BodyStream yields an io.ReadCloser wrapping the response body stream or bytes.
 func (f *Response) BodyStream() io.ReadCloser {
-	return io.NopCloser(bytes.NewReader(f.resp.Body()))
+	if f.resp.IsBodyStream() {
+		stream := f.resp.BodyStream()
+		if rc, ok := stream.(io.ReadCloser); ok {
+			return rc
+		}
+
+		return io.NopCloser(stream)
+	}
+
+	return io.NopCloser(bytes.NewReader(f.BodyBytes()))
 }
 
 // HTTPResponse yields nil for fasthttp response adapters.

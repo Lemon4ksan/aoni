@@ -5,6 +5,7 @@
 package fast
 
 import (
+	"slices"
 	"context"
 	"crypto/tls"
 	"net"
@@ -155,7 +156,9 @@ func (c *Client) Do(req aoni.Request) (aoni.Response, error) {
 		fastReq.Header.SetMethod(req.Method())
 		fastReq.SetRequestURI(req.URL())
 
-		if body := req.BodyBytes(); len(body) > 0 {
+		if bodyStream := req.BodyStream(); bodyStream != nil {
+			fastReq.SetBodyStream(bodyStream, -1)
+		} else if body := req.BodyBytes(); len(body) > 0 {
 			fastReq.SetBody(body)
 		}
 	}
@@ -171,7 +174,7 @@ func (c *Client) Do(req aoni.Request) (aoni.Response, error) {
 		host := string(fastReq.URI().Host())
 		err = c.getH2Client(host).Do(fastReq, fastResp)
 	default:
-		err = c.engine.Do(fastReq, fastResp)
+		err = c.executeFastHTTP(ctx, fastReq, fastResp)
 	}
 
 	if err != nil {
@@ -254,21 +257,11 @@ func resolveALPNMode(ctx context.Context, cfg *aoni.Config) string {
 		}
 	}
 
-	if len(cfg.Fingerprint.HeaderOrder) > 0 && slicesContains(cfg.Fingerprint.HeaderOrder, ":method") {
+	if len(cfg.Fingerprint.HeaderOrder) > 0 && slices.Contains(cfg.Fingerprint.HeaderOrder, ":method") {
 		return aoni.AlpnH2
 	}
 
 	return aoni.AlpnHTTP
-}
-
-func slicesContains(slice []string, target string) bool {
-	for _, item := range slice {
-		if item == target {
-			return true
-		}
-	}
-
-	return false
 }
 
 func (c *Client) applyEngineConfig() {
