@@ -352,6 +352,23 @@ func (c *Conn) readLoop() {
 	}
 }
 
+func isExpectContinue(req *fasthttp.Request) bool {
+	expect := req.Header.Peek("Expect")
+	return bytes.EqualFold(expect, []byte("100-continue"))
+}
+
+func (c *Conn) waitExpectContinue(ctx *Context) {
+	t := time.NewTimer(1 * time.Second)
+	defer t.Stop()
+
+	select {
+	case <-t.C:
+		// ExpectContinueTimeout elapsed; proceed to transmit body payload
+	case <-ctx.Err:
+		// Early response arrived (100 Continue or 4xx/5xx error rejection)
+	}
+}
+
 func (c *Conn) writeRequest(ctx *Context) error {
 	if !c.CanOpenStream() {
 		return ErrNotAvailableStreams
@@ -393,19 +410,31 @@ func (c *Conn) writeRequest(ctx *Context) error {
 	c.reqQueued.Store(id, ctx)
 
 	_, err := fr.WriteTo(c.bw)
-	if err == nil && hasBody {
-		ReleaseFrame(h)
-		err = c.writeData(fr, ctx, req.Body())
+	if err != nil {
+		c.lastErr = err
+		c.reqQueued.Delete(id)
+		ctx.SetState(streamClosed)
+
+		return err
 	}
 
-	if err == nil {
-		err = c.bw.Flush()
-		if err == nil {
-			atomic.AddInt32(&c.openStreams, 1)
+	_ = c.bw.Flush()
+
+	if hasBody {
+		ReleaseFrame(h)
+
+		if isExpectContinue(req) {
+			c.waitExpectContinue(ctx)
+		}
+
+		if ctx.State() != streamClosed {
+			err = c.writeData(fr, ctx, req.Body())
 		}
 	}
 
-	if err != nil {
+	if err == nil {
+		atomic.AddInt32(&c.openStreams, 1)
+	} else {
 		c.lastErr = err
 		c.reqQueued.Delete(id)
 		ctx.SetState(streamClosed)
