@@ -12,6 +12,7 @@ import (
 
 	"github.com/lemon4ksan/aoni"
 	"github.com/lemon4ksan/aoni/internal/h1"
+	"github.com/lemon4ksan/aoni/netutil"
 	"github.com/lemon4ksan/aoni/netutil/netdial"
 )
 
@@ -34,6 +35,9 @@ func (d *fastDialer) Dial(addr string) (net.Conn, error) {
 		port = "80"
 	}
 
+	host = netutil.CleanHost(host)
+	targetAddr := net.JoinHostPort(host, port)
+
 	isTLS := port == "443" || d.isTLSEnabled()
 
 	dialOpts := netdial.DialOptions{
@@ -49,7 +53,7 @@ func (d *fastDialer) Dial(addr string) (net.Conn, error) {
 		InsecureSkipVerify: d.config.Engine.InsecureSkipVerify,
 	}
 
-	rawConn, err := netdial.DialL4(ctx, "tcp", addr, dialOpts)
+	rawConn, err := netdial.DialL4(ctx, "tcp", targetAddr, dialOpts)
 	if err != nil {
 		return nil, err
 	}
