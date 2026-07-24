@@ -8,8 +8,11 @@ import (
 	"bytes"
 	"context"
 	"crypto/tls"
+	"fmt"
+	"io"
 	"net"
 	"net/http"
+	"net/url"
 	"strings"
 	"sync"
 	"time"
@@ -76,12 +79,12 @@ func (c *Client) Engine() *fasthttp.Client {
 }
 
 // Request executes an HTTP request across HTTP/1.1, native HTTP/2, or native HTTP/3.
-// Handles HTTP 3xx redirects and scrubs sensitive credentials during cross-origin hops.
+// Handles redirects, cookies, proxy failover, response validation, and WAF challenges.
 //
 // Postconditions:
 //   - The returned [aoni.Response] MUST be closed via [aoni.Response.Close]
 //     to return objects back to [sync.Pool].
-//   - Aborts execution immediately if ctx is canceled.
+//   - Aborts execution immediately if ctx is canceled without memory race hazards.
 func (c *Client) Request(
 	ctx context.Context,
 	method, path string,
@@ -106,7 +109,7 @@ func (c *Client) Request(
 
 	reqCtx := reqAdapter.Context()
 
-	err, autoReleased := c.executeWithRedirects(reqCtx, fastReq, fastResp)
+	err, autoReleased := c.dispatchPipeline(reqCtx, fastReq, fastResp)
 	if err != nil {
 		if !autoReleased {
 			fasthttp.ReleaseRequest(fastReq)
@@ -142,7 +145,7 @@ func (c *Client) Do(req aoni.Request) (aoni.Response, error) {
 
 	fastResp := fasthttp.AcquireResponse()
 
-	err, autoReleased := c.executeWithRedirects(ctx, fastReq, fastResp)
+	err, autoReleased := c.dispatchPipeline(ctx, fastReq, fastResp)
 	if err != nil {
 		if !autoReleased {
 			fasthttp.ReleaseResponse(fastResp)
@@ -155,6 +158,198 @@ func (c *Client) Do(req aoni.Request) (aoni.Response, error) {
 	}
 
 	return NewResponse(fastResp), nil
+}
+
+func (c *Client) dispatchPipeline(
+	ctx context.Context,
+	fastReq *fasthttp.Request,
+	fastResp *fasthttp.Response,
+) (err error, autoReleased bool) {
+	c.applyCookies(fastReq)
+
+	if c.config.Defaults.Pipeline.ProxyFailover != nil {
+		err, autoReleased = c.executeWithProxyFailover(ctx, fastReq, fastResp)
+	} else {
+		err, autoReleased = c.executeWithRedirects(ctx, fastReq, fastResp)
+	}
+
+	if err != nil {
+		return err, autoReleased
+	}
+
+	c.captureCookies(fastReq, fastResp)
+
+	if valErr := c.validateResponse(fastReq, fastResp); valErr != nil {
+		return valErr, false
+	}
+
+	if wafErr := c.handleWAFChallenge(ctx, fastReq, fastResp); wafErr != nil {
+		return wafErr, false
+	}
+
+	return nil, false
+}
+
+func (c *Client) applyCookies(req *fasthttp.Request) {
+	jar := c.config.Engine.CookieJar
+	if jar == nil {
+		return
+	}
+
+	u, err := url.Parse(string(req.URI().FullURI()))
+	if err != nil {
+		return
+	}
+
+	cookies := jar.Cookies(u)
+	for _, cookie := range cookies {
+		req.Header.SetCookie(cookie.Name, cookie.Value)
+	}
+}
+
+func (c *Client) captureCookies(req *fasthttp.Request, resp *fasthttp.Response) {
+	jar := c.config.Engine.CookieJar
+	if jar == nil {
+		return
+	}
+
+	u, err := url.Parse(string(req.URI().FullURI()))
+	if err != nil {
+		return
+	}
+
+	var cookies []*http.Cookie
+	resp.Header.Cookies()(func(key, value []byte) bool {
+		if cookie := parseCookie(key, value); cookie != nil {
+			cookies = append(cookies, cookie)
+		}
+		return true
+	})
+
+	if len(cookies) > 0 {
+		jar.SetCookies(u, cookies)
+	}
+}
+
+func parseCookie(key, value []byte) *http.Cookie {
+	header := http.Header{}
+	header.Add("Set-Cookie", string(key)+"="+string(value))
+
+	fakeResp := &http.Response{Header: header}
+	parsed := fakeResp.Cookies()
+	if len(parsed) > 0 {
+		return parsed[0]
+	}
+
+	return nil
+}
+
+func (c *Client) executeWithProxyFailover(
+	ctx context.Context,
+	fastReq *fasthttp.Request,
+	fastResp *fasthttp.Response,
+) (err error, autoReleased bool) {
+	failover := c.config.Defaults.Pipeline.ProxyFailover
+	if failover == nil || len(failover.Proxies) == 0 {
+		return c.executeWithRedirects(ctx, fastReq, fastResp)
+	}
+
+	maxRetries := failover.RetryLimit
+	if maxRetries <= 0 {
+		maxRetries = len(failover.Proxies)
+	}
+
+	for i := range maxRetries {
+		proxyStr := failover.Proxies[i%len(failover.Proxies)]
+		if u, parseErr := url.Parse(proxyStr); parseErr == nil {
+			reqCfg := aoni.GetOrInitRequestConfig(ctx)
+			reqCfg.ProxyAddr = u
+		}
+
+		err, autoReleased = c.executeWithRedirects(ctx, fastReq, fastResp)
+		if err == nil && !isProxyGatewayError(fastResp.StatusCode()) {
+			return nil, autoReleased
+		}
+
+		if autoReleased {
+			return err, true
+		}
+
+		fastResp.Reset()
+	}
+
+	return fmt.Errorf("aoni fast: proxy failover exhausted retries: %w", err), false
+}
+
+func isProxyGatewayError(status int) bool {
+	return status == http.StatusBadGateway ||
+		status == http.StatusServiceUnavailable ||
+		status == http.StatusGatewayTimeout
+}
+
+func (c *Client) validateResponse(fastReq *fasthttp.Request, fastResp *fasthttp.Response) error {
+	validator := c.config.Defaults.ResponseValidator
+	if validator == nil {
+		return nil
+	}
+
+	httpResp := toHTTPResponse(fastReq, fastResp)
+
+	return validator(httpResp)
+}
+
+func (c *Client) handleWAFChallenge(
+	ctx context.Context,
+	fastReq *fasthttp.Request,
+	fastResp *fasthttp.Response,
+) error {
+	detector := c.config.Defaults.ChallengeDetector
+	solver := c.config.Defaults.ChallengeSolver
+	if detector == nil || solver == nil {
+		return nil
+	}
+
+	httpResp := toHTTPResponse(fastReq, fastResp)
+	isChallenge, err := detector(httpResp)
+	if !isChallenge {
+		return nil
+	}
+
+	solvedResp, solveErr := solver.Solve(ctx, err, httpResp.Request)
+	if solveErr != nil {
+		return solveErr
+	}
+
+	if solvedResp != nil && solvedResp.Body != nil {
+		bodyBytes, _ := io.ReadAll(solvedResp.Body)
+		_ = solvedResp.Body.Close()
+
+		fastResp.SetBody(bodyBytes)
+		fastResp.SetStatusCode(solvedResp.StatusCode)
+	}
+
+	return nil
+}
+
+func toHTTPResponse(fastReq *fasthttp.Request, fastResp *fasthttp.Response) *http.Response {
+	reqMethod := string(fastReq.Header.Method())
+	reqURI := string(fastReq.URI().FullURI())
+	stdReq, _ := http.NewRequest(reqMethod, reqURI, nil)
+
+	httpResp := &http.Response{
+		StatusCode: fastResp.StatusCode(),
+		Status:     http.StatusText(fastResp.StatusCode()),
+		Header:     make(http.Header),
+		Body:       io.NopCloser(bytes.NewReader(fastResp.Body())),
+		Request:    stdReq,
+	}
+
+	fastResp.Header.All()(func(k, v []byte) bool {
+		httpResp.Header.Add(string(k), string(v))
+		return true
+	})
+
+	return httpResp
 }
 
 func (c *Client) executeWithRedirects(
@@ -225,6 +420,7 @@ func (c *Client) dispatchSingleRequest(
 	case aoni.AlpnH2:
 		host := string(fastReq.URI().Host())
 		h2Cl := c.getH2Client(host)
+
 		return h2Cl.Do(ctx, fastReq, fastResp), false
 
 	default:
@@ -404,6 +600,12 @@ func (c *Client) applyModifiers(req aoni.Request, mods []aoni.RequestModifier) {
 	}
 }
 
+// executeFastHTTP executes an H1 request via fasthttp, ensuring memory safety
+// and context cancellation without pool corruption or data races.
+//
+// Postconditions:
+//   - If autoReleased is true, ownership of fastReq/fastResp is retained by
+//     the background goroutine; caller MUST NOT release or touch them.
 func (c *Client) executeFastHTTP(
 	ctx context.Context,
 	req *fasthttp.Request,
