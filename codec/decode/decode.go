@@ -361,26 +361,87 @@ func LimitDecoder(decoder Decoder, maxBytes int64) Decoder {
 	}
 }
 
-// ByContentType selects a registered decoder matching the MIME type in contentType.
-func ByContentType(reader stdio.Reader, contentType string, target any) error {
+var (
+	decodersMu         sync.RWMutex
+	registeredDecoders = make(map[string]Decoder)
+)
+
+func normalizeContentType(contentType string) string {
 	mediaType, _, _ := strings.Cut(contentType, ";")
-	mediaType = strings.TrimSpace(mediaType)
+	return strings.ToLower(strings.TrimSpace(mediaType))
+}
+
+// RegisterDecoder registers a custom [Decoder] globally for a MIME content type (e.g. "application/x-msgpack").
+func RegisterDecoder(contentType string, decoder Decoder) {
+	norm := normalizeContentType(contentType)
+	if norm == "" {
+		return
+	}
+
+	decodersMu.Lock()
+	defer decodersMu.Unlock()
+
+	if decoder == nil {
+		delete(registeredDecoders, norm)
+	} else {
+		registeredDecoders[norm] = decoder
+	}
+}
+
+// UnregisterDecoder removes a custom [Decoder] globally registered for a MIME content type.
+func UnregisterDecoder(contentType string) {
+	RegisterDecoder(contentType, nil)
+}
+
+// GetDecoder retrieves the custom [Decoder] globally registered for contentType, or nil if none is registered.
+func GetDecoder(contentType string) Decoder {
+	norm := normalizeContentType(contentType)
+	if norm == "" {
+		return nil
+	}
+
+	decodersMu.RLock()
+	defer decodersMu.RUnlock()
+
+	return registeredDecoders[norm]
+}
+
+// LookupDecoder resolves a [Decoder] for contentType, checking registered custom decoders first,
+// then standard MIME types (JSON, Proto, gRPC-Web, XML), falling back to RawDecoder.
+func LookupDecoder(contentType string) Decoder {
+	norm := normalizeContentType(contentType)
+	if norm != "" {
+		decodersMu.RLock()
+
+		d, ok := registeredDecoders[norm]
+
+		decodersMu.RUnlock()
+
+		if ok {
+			return d
+		}
+	}
 
 	switch {
-	case bytesconv.EqualFoldASCII(mediaType, "application/json"), bytesconv.EqualFoldASCII(mediaType, "text/json"):
-		return JSONDecoder.Decode(reader, target)
-	case bytesconv.EqualFoldASCII(mediaType, "application/x-protobuf"),
-		bytesconv.EqualFoldASCII(mediaType, "application/protobuf"):
-		return ProtoDecoder.Decode(reader, target)
-	case bytesconv.EqualFoldASCII(mediaType, "application/grpc-web+proto"),
-		bytesconv.EqualFoldASCII(mediaType, "application/grpc-web"),
-		bytesconv.EqualFoldASCII(mediaType, "application/grpc-web-text"):
-		return GRPCWebDecoder.Decode(reader, target)
-	case bytesconv.EqualFoldASCII(mediaType, "application/xml"), bytesconv.EqualFoldASCII(mediaType, "text/xml"):
-		return XMLDecoder.Decode(reader, target)
+	case bytesconv.EqualFoldASCII(norm, "application/json"), bytesconv.EqualFoldASCII(norm, "text/json"):
+		return JSONDecoder
+	case bytesconv.EqualFoldASCII(norm, "application/x-protobuf"),
+		bytesconv.EqualFoldASCII(norm, "application/protobuf"):
+		return ProtoDecoder
+	case bytesconv.EqualFoldASCII(norm, "application/grpc-web+proto"),
+		bytesconv.EqualFoldASCII(norm, "application/grpc-web"),
+		bytesconv.EqualFoldASCII(norm, "application/grpc-web-text"):
+		return GRPCWebDecoder
+	case bytesconv.EqualFoldASCII(norm, "application/xml"), bytesconv.EqualFoldASCII(norm, "text/xml"):
+		return XMLDecoder
 	default:
-		return RawDecoder.Decode(reader, target)
+		return RawDecoder
 	}
+}
+
+// ByContentType selects a registered decoder matching the MIME type in contentType.
+func ByContentType(reader stdio.Reader, contentType string, target any) error {
+	return LookupDecoder(contentType).Decode(reader, target)
 }
 
 // To allocates a new instance of T and decodes payload data into it.

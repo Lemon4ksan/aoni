@@ -18,6 +18,7 @@ import (
 	"encoding/hex"
 	"encoding/pem"
 	"errors"
+	"fmt"
 	"io"
 	"math/big"
 	"net"
@@ -1820,4 +1821,56 @@ func TestClient_GettersAndUnwrap(t *testing.T) {
 
 	c4 := client.WithHTTP3()
 	assert.NotNil(t, c4)
+}
+
+type msgpackTestDecoder struct{}
+
+func (msgpackTestDecoder) Decode(r io.Reader, target any) error {
+	b, err := io.ReadAll(r)
+	if err != nil {
+		return err
+	}
+
+	switch v := target.(type) {
+	case *string:
+		*v = "msgpack:" + string(b)
+		return nil
+	case **string:
+		**v = "msgpack:" + string(b)
+		return nil
+	default:
+		return fmt.Errorf("invalid target type: %T", target)
+	}
+}
+
+func TestClient_CustomMIMEDecoders(t *testing.T) {
+	t.Parallel()
+
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/x-msgpack; charset=utf-8")
+		_, _ = w.Write([]byte("binary_payload"))
+	}))
+	t.Cleanup(ts.Close)
+
+	t.Run("via option.WithDecoder", func(t *testing.T) {
+		client := aoni.NewClient(ts.Client(),
+			option.WithBaseURL(ts.URL),
+			option.WithDecoder("application/x-msgpack", msgpackTestDecoder{}),
+		)
+
+		result, err := request.GetTo[string](context.Background(), client, "/")
+		require.NoError(t, err)
+		require.NotNil(t, result)
+		assert.Equal(t, "msgpack:binary_payload", *result)
+	})
+
+	t.Run("via client.RegisterDecoder", func(t *testing.T) {
+		client := aoni.NewClient(ts.Client(), option.WithBaseURL(ts.URL)).
+			RegisterDecoder("application/x-msgpack", msgpackTestDecoder{})
+
+		result, err := request.GetTo[string](context.Background(), client, "/")
+		require.NoError(t, err)
+		require.NotNil(t, result)
+		assert.Equal(t, "msgpack:binary_payload", *result)
+	})
 }

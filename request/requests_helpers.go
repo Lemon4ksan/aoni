@@ -365,26 +365,64 @@ func HandleResponse(resp *http.Response, target any, requester Requester) error 
 }
 
 func resolveDecoder(resp *http.Response) decode.Decoder {
-	if resp.Request == nil {
-		return decode.JSONDecoder
-	}
+	if resp != nil && resp.Request != nil {
+		cfg := aoni.GetRequestConfig(resp.Request.Context())
+		if cfg != nil {
+			if cfg.ForceContentType != "" {
+				mime := cfg.ForceContentType
+				if bytesconv.EqualFoldASCII(mime, "application/xml") || bytesconv.EqualFoldASCII(mime, "text/xml") {
+					return decode.XMLDecoder
+				}
 
-	cfg := aoni.GetRequestConfig(resp.Request.Context())
-	if cfg == nil {
-		return decode.JSONDecoder
-	}
+				return decode.JSONDecoder
+			}
 
-	if cfg.ForceContentType != "" {
-		mime := cfg.ForceContentType
-		if bytesconv.EqualFoldASCII(mime, "application/xml") || bytesconv.EqualFoldASCII(mime, "text/xml") {
-			return decode.XMLDecoder
+			if cfg.Decoder != nil {
+				if d, ok := cfg.Decoder.(decode.Decoder); ok && d != nil {
+					return d
+				}
+
+				if rdec, ok := cfg.Decoder.(aoni.ResponseDecoder); ok && rdec != nil {
+					return decode.DecoderFunc(rdec.Decode)
+				}
+			}
+
+			contentType := resp.Header.Get("Content-Type")
+			if contentType != "" {
+				if d := cfg.LookupDecoder(contentType); d != nil {
+					if dec, ok := d.(decode.Decoder); ok && dec != nil {
+						return dec
+					}
+
+					return decode.DecoderFunc(d.Decode)
+				}
+			}
 		}
-
-		return decode.JSONDecoder
 	}
 
-	if d, ok := cfg.Decoder.(decode.Decoder); ok {
-		return d
+	if resp != nil {
+		contentType := resp.Header.Get("Content-Type")
+		if contentType != "" {
+			if customDec := decode.GetDecoder(contentType); customDec != nil {
+				return customDec
+			}
+
+			mediaType, _, _ := strings.Cut(contentType, ";")
+
+			mediaType = strings.TrimSpace(mediaType)
+			switch {
+			case bytesconv.EqualFoldASCII(mediaType, "application/xml"),
+				bytesconv.EqualFoldASCII(mediaType, "text/xml"):
+				return decode.XMLDecoder
+			case bytesconv.EqualFoldASCII(mediaType, "application/x-protobuf"),
+				bytesconv.EqualFoldASCII(mediaType, "application/protobuf"):
+				return decode.ProtoDecoder
+			case bytesconv.EqualFoldASCII(mediaType, "application/grpc-web+proto"),
+				bytesconv.EqualFoldASCII(mediaType, "application/grpc-web"),
+				bytesconv.EqualFoldASCII(mediaType, "application/grpc-web-text"):
+				return decode.GRPCWebDecoder
+			}
+		}
 	}
 
 	return decode.JSONDecoder

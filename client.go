@@ -114,6 +114,33 @@ func (c *Client) With(opts ...ClientOption) *Client {
 	return cloned
 }
 
+// RegisterDecoder returns a cloned [Client] with a registered custom response decoder for the specified MIME content type.
+func (c *Client) RegisterDecoder(contentType string, decoder ResponseDecoder) *Client {
+	return c.WithDecoder(contentType, decoder)
+}
+
+// WithDecoder returns a cloned [Client] with a registered custom response decoder for the specified MIME content type.
+func (c *Client) WithDecoder(contentType string, decoder ResponseDecoder) *Client {
+	return c.With(func(cfg *Config) {
+		mediaType, _, _ := strings.Cut(contentType, ";")
+
+		norm := strings.ToLower(strings.TrimSpace(mediaType))
+		if norm == "" {
+			return
+		}
+
+		if cfg.Defaults.Decoders == nil {
+			cfg.Defaults.Decoders = make(map[string]ResponseDecoder)
+		}
+
+		if decoder == nil {
+			delete(cfg.Defaults.Decoders, norm)
+		} else {
+			cfg.Defaults.Decoders[norm] = decoder
+		}
+	})
+}
+
 // WithTLSClientHelloID returns a cloned [Client] configured with the specified uTLS ClientHello ID.
 func (c *Client) WithTLSClientHelloID(id utls.ClientHelloID) *Client {
 	cloned := c.Clone()
@@ -341,6 +368,7 @@ func (c *Client) needsRequestConfig() bool {
 		c.fingerprint.P0fSignature != nil ||
 		c.fingerprint.JA4Callback != nil ||
 		c.defaults.QueryEncoder != nil ||
+		len(c.defaults.Decoders) > 0 ||
 		c.defaults.MultiReadThreshold > 0 ||
 		c.network.SSRFGuard ||
 		c.network.ProxyAddr != nil

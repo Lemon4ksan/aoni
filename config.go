@@ -391,6 +391,7 @@ type ClientDefaults struct {
 	Inspector            TrafficInspector
 	HeadersCookieJar     http.CookieJar
 	QueryEncoder         QueryEncoder
+	Decoders             map[string]ResponseDecoder
 	ResponseValidator    func(*http.Response) error
 	OnPanic              func(ctx context.Context, err any, stack []byte)
 	UARotationProfiles   []BrowserProfile
@@ -419,6 +420,11 @@ func (d ClientDefaults) Clone() ClientDefaults {
 
 	if len(d.DefaultMods) > 0 {
 		cloned.DefaultMods = slices.Clone(d.DefaultMods)
+	}
+
+	if d.Decoders != nil {
+		cloned.Decoders = make(map[string]ResponseDecoder, len(d.Decoders))
+		maps.Copy(cloned.Decoders, d.Decoders)
 	}
 
 	cloned.Pipeline = d.Pipeline
@@ -519,6 +525,7 @@ type RequestConfig struct {
 	CertificatePins         map[string][]string
 	Modifiers               []RequestModifier
 	QueryEncoder            QueryEncoder
+	Decoders                map[string]ResponseDecoder
 
 	MultiReadThreshold int64
 	TimeoutOverride    time.Duration
@@ -563,9 +570,35 @@ func (cfg *RequestConfig) ApplyDefaults(c *Client) {
 	cfg.JA4Callback = generic.CoalesceNil(cfg.JA4Callback, c.fingerprint.JA4Callback)
 	cfg.QueryEncoder = generic.CoalesceNil(cfg.QueryEncoder, c.defaults.QueryEncoder)
 
+	if len(c.defaults.Decoders) > 0 {
+		if cfg.Decoders == nil {
+			cfg.Decoders = make(map[string]ResponseDecoder, len(c.defaults.Decoders))
+		}
+
+		for k, v := range c.defaults.Decoders {
+			if _, ok := cfg.Decoders[k]; !ok {
+				cfg.Decoders[k] = v
+			}
+		}
+	}
+
 	if len(c.fingerprint.CertificatePins) > 0 {
 		c.mergeCertificatePins(cfg)
 	}
+}
+
+// LookupDecoder resolves a registered [ResponseDecoder] for contentType using request-level decoders or client defaults.
+func (cfg *RequestConfig) LookupDecoder(contentType string) ResponseDecoder {
+	mediaType, _, _ := strings.Cut(contentType, ";")
+
+	norm := strings.ToLower(strings.TrimSpace(mediaType))
+	if norm != "" && cfg.Decoders != nil {
+		if d, ok := cfg.Decoders[norm]; ok {
+			return d
+		}
+	}
+
+	return nil
 }
 
 func (c *Client) mergeCertificatePins(cfg *RequestConfig) {

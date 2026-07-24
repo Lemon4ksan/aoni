@@ -154,3 +154,8 @@ type Response interface {
 type RequestDoer interface {
 	Do(req Request) (Response, error)
 }
+
+// ResponseDecoder defines the contract for unmarshaling response payload streams into Go structures.
+type ResponseDecoder interface {
+	Decode(reader stdio.Reader, target any) error
+}

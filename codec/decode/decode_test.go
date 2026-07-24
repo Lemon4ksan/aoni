@@ -9,6 +9,7 @@ import (
 	"compress/gzip"
 	"encoding/base64"
 	"encoding/binary"
+	"errors"
 	"io"
 	"strings"
 	"testing"
@@ -38,7 +39,7 @@ func TestErrorStructures(t *testing.T) {
 		errWithTarget := &Error{Format: "proto", Target: "*pb.User", Err: ErrInvalidProtoTarget}
 		assert.Equal(
 			t,
-			"aoni: decode proto into *pb.User: aoni: ProtoDecoder requires proto.Message output type",
+			"aoni: decode proto into *pb.User: aoni: ProtoDecoder requires proto.Message output target",
 			errWithTarget.Error(),
 		)
 
@@ -460,4 +461,40 @@ func TestByContentType_Extensions(t *testing.T) {
 		require.NoError(t, err)
 		assert.Equal(t, "content_type_grpc", target.GetValue())
 	})
+}
+
+type dummyCustomDecoder struct{}
+
+func (dummyCustomDecoder) Decode(r io.Reader, target any) error {
+	data, err := io.ReadAll(r)
+	if err != nil {
+		return err
+	}
+
+	if strPtr, ok := target.(*string); ok {
+		*strPtr = "custom:" + string(data)
+		return nil
+	}
+
+	return errors.New("invalid target")
+}
+
+func TestRegisterDecoder_Global(t *testing.T) {
+	mime := "application/x-custom-test"
+	dec := dummyCustomDecoder{}
+
+	RegisterDecoder(mime, dec)
+	defer UnregisterDecoder(mime)
+
+	assert.Equal(t, dec, GetDecoder(mime))
+	assert.Equal(t, dec, LookupDecoder(mime+"; charset=utf-8"))
+
+	var target string
+
+	err := ByContentType(bytes.NewReader([]byte("hello")), mime, &target)
+	require.NoError(t, err)
+	assert.Equal(t, "custom:hello", target)
+
+	UnregisterDecoder(mime)
+	assert.Nil(t, GetDecoder(mime))
 }

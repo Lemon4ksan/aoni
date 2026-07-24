@@ -22,6 +22,7 @@ import (
 	"github.com/lemon4ksan/miyako/generic"
 
 	"github.com/lemon4ksan/aoni"
+	"github.com/lemon4ksan/aoni/codec/decode"
 	"github.com/lemon4ksan/aoni/cookie"
 	"github.com/lemon4ksan/aoni/fingerprint"
 	"github.com/lemon4ksan/aoni/fingerprint/h2"
@@ -643,5 +644,49 @@ func WithChallengeDetector(detector aoni.ChallengeDetector) aoni.ClientOption {
 func WithChallengeSolver(solver aoni.ChallengeSolver) aoni.ClientOption {
 	return func(cfg *aoni.Config) {
 		cfg.Defaults.ChallengeSolver = solver
+	}
+}
+
+// WithDecoder returns an [aoni.ClientOption] that registers a custom response decoder for a MIME content type.
+func WithDecoder(contentType string, decoder decode.Decoder) aoni.ClientOption {
+	return func(cfg *aoni.Config) {
+		mediaType, _, _ := strings.Cut(contentType, ";")
+
+		norm := strings.ToLower(strings.TrimSpace(mediaType))
+		if norm == "" {
+			return
+		}
+
+		if cfg.Defaults.Decoders == nil {
+			cfg.Defaults.Decoders = make(map[string]aoni.ResponseDecoder)
+		}
+
+		if decoder == nil {
+			delete(cfg.Defaults.Decoders, norm)
+		} else {
+			cfg.Defaults.Decoders[norm] = decoder
+		}
+	}
+}
+
+// WithDecoders returns an [aoni.ClientOption] that registers multiple MIME content type decoders.
+func WithDecoders(decoders map[string]decode.Decoder) aoni.ClientOption {
+	return func(cfg *aoni.Config) {
+		if cfg.Defaults.Decoders == nil {
+			cfg.Defaults.Decoders = make(map[string]aoni.ResponseDecoder, len(decoders))
+		}
+
+		for contentType, decoder := range decoders {
+			mediaType, _, _ := strings.Cut(contentType, ";")
+
+			norm := strings.ToLower(strings.TrimSpace(mediaType))
+			if norm != "" {
+				if decoder == nil {
+					delete(cfg.Defaults.Decoders, norm)
+				} else {
+					cfg.Defaults.Decoders[norm] = decoder
+				}
+			}
+		}
 	}
 }
