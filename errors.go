@@ -34,6 +34,9 @@ var (
 
 	// ErrHedgingBodyNonRepeatable is returned when request hedging attempt cannot duplicate a non-replayable payload stream.
 	ErrHedgingBodyNonRepeatable = errors.New("aoni: request body cannot be duplicated for hedging")
+
+	// ErrConflictingContentLength is returned when a response carries multiple conflicting Content-Length headers (RFC 9112).
+	ErrConflictingContentLength = errors.New("aoni: conflicting Content-Length headers detected")
 )
 
 // Error describes a structured operational failure in the aoni package.

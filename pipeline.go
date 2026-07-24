@@ -356,14 +356,22 @@ func (c *Client) postProcessResponse(
 	resp *http.Response,
 	pipe PipelineConfig,
 ) (*http.Response, error) {
-	if pipe.SizeLimit > 0 {
-		if limitErr := c.limitResponseSize(resp, pipe.SizeLimit); limitErr != nil {
-			return nil, limitErr
+	if err := validateAndNormalizeContentLength(resp); err != nil {
+		if resp != nil && resp.Body != nil {
+			_ = resp.Body.Close()
 		}
+
+		return nil, err
 	}
 
 	if pipe.Decompress {
 		resp = c.handleDecompressionAndTranscoding(req, resp)
+	}
+
+	if pipe.SizeLimit > 0 {
+		if limitErr := c.limitResponseSize(resp, pipe.SizeLimit); limitErr != nil {
+			return nil, limitErr
+		}
 	}
 
 	if pipe.Challenge {
@@ -398,6 +406,25 @@ func (c *Client) postProcessResponse(
 	}
 
 	return resp, nil
+}
+
+func validateAndNormalizeContentLength(resp *http.Response) error {
+	if resp == nil || len(resp.Header["Content-Length"]) <= 1 {
+		return nil
+	}
+
+	clValues := resp.Header["Content-Length"]
+	firstVal := strings.TrimSpace(clValues[0])
+
+	for _, val := range clValues[1:] {
+		if strings.TrimSpace(val) != firstVal {
+			return ErrConflictingContentLength
+		}
+	}
+
+	resp.Header["Content-Length"] = []string{firstVal}
+
+	return nil
 }
 
 func (c *Client) redactSensitiveData(req *http.Request, redact *RedactConfig) *http.Request {
