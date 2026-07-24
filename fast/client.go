@@ -9,35 +9,34 @@ import (
 	"crypto/tls"
 	"net"
 	"net/http"
-	"slices"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/quic-go/quic-go"
-	"github.com/quic-go/quic-go/http3"
 	"github.com/valyala/fasthttp"
-	"golang.org/x/net/http2"
 
 	"github.com/lemon4ksan/aoni"
-	"github.com/lemon4ksan/aoni/fingerprint/h2"
-	"github.com/lemon4ksan/aoni/internal/bytesconv"
+	"github.com/lemon4ksan/aoni/fast/h2engine"
+	"github.com/lemon4ksan/aoni/fast/h3engine"
 )
 
-// Client executes ultra-high-performance HTTP requests over fasthttp, seamlessly multiplexing H1, H2, and H3 (quic-go).
+// Client executes ultra-high-performance HTTP requests over fasthttp,
+// seamlessly multiplexing native H1 (fasthttp), native H2 (h2engine), and native H3 (h3engine).
 type Client struct {
-	engine      *fasthttp.Client
-	h2Transport http.RoundTripper
-	h3Transport http.RoundTripper
-	config      aoni.Config
-	h2Once      sync.Once
-	h3Once      sync.Once
+	engine    *fasthttp.Client
+	h2Clients map[string]*h2engine.Client
+	h3Client  *h3engine.Client
+	config    aoni.Config
+	h2Mutex   sync.Mutex
+	h3Once    sync.Once
 }
 
 // Option is an alias for [aoni.ClientOption].
 type Option = aoni.ClientOption
 
-// NewClient creates a new multiprotocol [Client] configured with fasthttp, uTLS, HTTP/2 framing, and HTTP/3 QUIC support.
+// NewClient creates a new multiprotocol Client configured with fasthttp, uTLS,
+// native HTTP/2 framing, and native HTTP/3 QUIC support.
 func NewClient(opts ...aoni.ClientOption) *Client {
 	c := &Client{
 		engine: &fasthttp.Client{
@@ -75,10 +74,12 @@ func (c *Client) Engine() *fasthttp.Client {
 	return c.engine
 }
 
-// Request executes an HTTP request, seamlessly routing execution across HTTP/1.1 (fasthttp), HTTP/2, or HTTP/3 (quic-go).
+// Request executes an HTTP request, seamlessly routing execution across
+// HTTP/1.1 (fasthttp), native HTTP/2 (h2engine), or native HTTP/3 (h3engine).
 //
 // Postconditions:
-//   - When executing over HTTP/1.1, the returned [aoni.Response] MUST be closed via [aoni.Response.Close] to return objects to [sync.Pool].
+//   - The returned [aoni.Response] MUST be closed via [aoni.Response.Close]
+//     to return objects back to [sync.Pool].
 func (c *Client) Request(
 	ctx context.Context,
 	method, path string,
@@ -101,19 +102,32 @@ func (c *Client) Request(
 	c.applyDefaultHeaders(reqAdapter)
 	c.applyModifiers(reqAdapter, mods)
 
-	alpnMode := resolveALPNMode(ctx, &c.config)
+	alpnMode := resolveALPNMode(reqAdapter.Context(), &c.config)
 	switch alpnMode {
 	case aoni.AlpnH3:
-		fasthttp.ReleaseRequest(fastReq)
-		fasthttp.ReleaseResponse(fastResp)
+		h3 := c.getH3Client()
+		err := h3.Do(ctx, fastReq, fastResp, c.config.Fingerprint.HeaderOrder)
+		if err != nil {
+			fasthttp.ReleaseRequest(fastReq)
+			fasthttp.ReleaseResponse(fastResp)
 
-		return c.executeStdTransport(ctx, reqAdapter, c.getH3Transport())
+			return nil, err
+		}
+
+		return NewPooledResponse(fastReq, fastResp), nil
 
 	case aoni.AlpnH2:
-		fasthttp.ReleaseRequest(fastReq)
-		fasthttp.ReleaseResponse(fastResp)
+		host := string(fastReq.URI().Host())
+		h2Cl := c.getH2Client(host)
+		err := h2Cl.Do(fastReq, fastResp)
+		if err != nil {
+			fasthttp.ReleaseRequest(fastReq)
+			fasthttp.ReleaseResponse(fastResp)
 
-		return c.executeStdTransport(ctx, reqAdapter, c.getH2Transport())
+			return nil, err
+		}
+
+		return NewPooledResponse(fastReq, fastResp), nil
 
 	default:
 		if err := c.executeFastHTTP(ctx, fastReq, fastResp); err != nil {
@@ -127,27 +141,17 @@ func (c *Client) Request(
 	}
 }
 
-// Do executes a prepared [aoni.Request] contract, routing through the target protocol engine (H1, H2, or H3 over quic-go).
+// Do executes a prepared [aoni.Request] contract, routing through the target
+// native protocol engine (H1, H2, or H3).
 func (c *Client) Do(req aoni.Request) (aoni.Response, error) {
 	if req == nil {
 		req = NewRequest(nil)
 	}
 
 	ctx := req.Context()
-	alpnMode := resolveALPNMode(ctx, &c.config)
-
-	switch alpnMode {
-	case aoni.AlpnH3:
-		return c.executeStdTransport(ctx, req, c.getH3Transport())
-	case aoni.AlpnH2:
-		return c.executeStdTransport(ctx, req, c.getH2Transport())
-	}
-
 	fastReq, ok := req.EngineRequest().(*fasthttp.Request)
 	if !ok {
 		fastReq = fasthttp.AcquireRequest()
-		defer fasthttp.ReleaseRequest(fastReq)
-
 		fastReq.Header.SetMethod(req.Method())
 		fastReq.SetRequestURI(req.URL())
 
@@ -157,7 +161,20 @@ func (c *Client) Do(req aoni.Request) (aoni.Response, error) {
 	}
 
 	fastResp := fasthttp.AcquireResponse()
-	if err := c.engine.Do(fastReq, fastResp); err != nil {
+	alpnMode := resolveALPNMode(ctx, &c.config)
+
+	var err error
+	switch alpnMode {
+	case aoni.AlpnH3:
+		err = c.getH3Client().Do(ctx, fastReq, fastResp, c.config.Fingerprint.HeaderOrder)
+	case aoni.AlpnH2:
+		host := string(fastReq.URI().Host())
+		err = c.getH2Client(host).Do(fastReq, fastResp)
+	default:
+		err = c.engine.Do(fastReq, fastResp)
+	}
+
+	if err != nil {
 		fasthttp.ReleaseResponse(fastResp)
 		return nil, err
 	}
@@ -165,8 +182,16 @@ func (c *Client) Do(req aoni.Request) (aoni.Response, error) {
 	return NewResponse(fastResp), nil
 }
 
-func (c *Client) getH3Transport() http.RoundTripper {
+func (c *Client) getH3Client() *h3engine.Client {
 	c.h3Once.Do(func() {
+		tlsCfg := &tls.Config{
+			InsecureSkipVerify: c.config.Engine.InsecureSkipVerify,
+		}
+
+		if spec := c.config.Fingerprint.TLSQUICClientHelloSpec; spec != nil && len(spec.CipherSuites) > 0 {
+			tlsCfg.CipherSuites = spec.CipherSuites
+		}
+
 		quicCfg := &quic.Config{
 			EnableDatagrams: true,
 		}
@@ -181,78 +206,43 @@ func (c *Client) getH3Transport() http.RoundTripper {
 			quicCfg.EnableDatagrams = h3s.EnableDatagrams
 		}
 
-		tlsCfg := &tls.Config{
-			NextProtos:         []string{aoni.AlpnH3},
-			InsecureSkipVerify: c.config.Engine.InsecureSkipVerify,
-		}
-
-		if spec := c.config.Fingerprint.TLSQUICClientHelloSpec; spec != nil && len(spec.CipherSuites) > 0 {
-			tlsCfg.CipherSuites = spec.CipherSuites
-		}
-
-		c.h3Transport = &http3.Transport{
-			TLSClientConfig: tlsCfg,
-			QUICConfig:      quicCfg,
-		}
+		c.h3Client = h3engine.NewClient(tlsCfg, quicCfg)
 	})
 
-	return c.h3Transport
+	return c.h3Client
 }
 
-func (c *Client) getH2Transport() http.RoundTripper {
-	c.h2Once.Do(func() {
-		baseTr := &http.Transport{
-			Proxy: http.ProxyFromEnvironment,
-			DialTLSContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
-				dialer := newFastDialer(&c.config)
-				return dialer.DialH2(ctx, addr)
-			},
-			ForceAttemptHTTP2: true,
-		}
+func (c *Client) getH2Client(host string) *h2engine.Client {
+	c.h2Mutex.Lock()
+	defer c.h2Mutex.Unlock()
 
-		if h2Settings := c.config.Fingerprint.H2Settings; h2Settings != nil {
-			c.h2Transport = h2.NewFramedTransport(baseTr, *h2Settings, c.config.Fingerprint.HeaderOrder...)
-			return
-		}
+	if c.h2Clients == nil {
+		c.h2Clients = make(map[string]*h2engine.Client)
+	}
 
-		t2, err := http2.ConfigureTransports(baseTr)
-		if err == nil && t2 != nil {
-			t2.ReadIdleTimeout = 15 * time.Second
-		}
+	if cl, ok := c.h2Clients[host]; ok {
+		return cl
+	}
 
-		c.h2Transport = baseTr
+	dialer := &h2engine.Dialer{
+		Addr: host,
+		RawDial: func(addr string) (net.Conn, error) {
+			fastD := newFastDialer(&c.config)
+			return fastD.DialH2(context.Background(), addr)
+		},
+	}
+
+	cl := h2engine.NewClient(dialer, h2engine.ClientOpts{
+		PingInterval: 15 * time.Second,
 	})
 
-	return c.h2Transport
-}
-
-func (c *Client) executeStdTransport(
-	ctx context.Context,
-	req aoni.Request,
-	tr http.RoundTripper,
-) (aoni.Response, error) {
-	httpReq := req.HTTPRequest()
-	if httpReq == nil {
-		var err error
-		httpReq, err = http.NewRequestWithContext(ctx, req.Method(), req.URL(), req.BodyStream())
-		if err != nil {
-			return nil, err
-		}
-
-		if fastReq, ok := req.EngineRequest().(*fasthttp.Request); ok && fastReq != nil {
-			fastReq.Header.All()(func(k, v []byte) bool {
-				httpReq.Header.Add(string(k), string(v))
-				return true
-			})
-		}
+	if len(c.config.Fingerprint.HeaderOrder) > 0 {
+		cl.SetOrderedHeaders(c.config.Fingerprint.HeaderOrder)
 	}
 
-	resp, err := tr.RoundTrip(httpReq)
-	if err != nil {
-		return nil, err
-	}
+	c.h2Clients[host] = cl
 
-	return aoni.NewStdResponse(resp), nil
+	return cl
 }
 
 func resolveALPNMode(ctx context.Context, cfg *aoni.Config) string {
@@ -264,11 +254,21 @@ func resolveALPNMode(ctx context.Context, cfg *aoni.Config) string {
 		}
 	}
 
-	if len(cfg.Fingerprint.HeaderOrder) > 0 && slices.Contains(cfg.Fingerprint.HeaderOrder, ":method") {
+	if len(cfg.Fingerprint.HeaderOrder) > 0 && slicesContains(cfg.Fingerprint.HeaderOrder, ":method") {
 		return aoni.AlpnH2
 	}
 
 	return aoni.AlpnHTTP
+}
+
+func slicesContains(slice []string, target string) bool {
+	for _, item := range slice {
+		if item == target {
+			return true
+		}
+	}
+
+	return false
 }
 
 func (c *Client) applyEngineConfig() {
@@ -278,7 +278,7 @@ func (c *Client) applyEngineConfig() {
 	}
 
 	if c.config.Engine.InsecureSkipVerify {
-		c.engine.TLSConfig = nil
+		c.engine.TLSConfig = &tls.Config{InsecureSkipVerify: true}
 	}
 
 	c.engine.DisableHeaderNamesNormalizing = true
@@ -339,7 +339,7 @@ func (c *Client) resolveTargetURL(req aoni.Request, path string) error {
 		return ErrTargetURLEmpty
 	}
 
-	if len(path) >= 7 && (bytesconv.EqualFoldASCII(path[:7], "http://") || bytesconv.EqualFoldASCII(path[:min(len(path), 8)], "https://")) {
+	if len(path) >= 7 && (strings.HasPrefix(path, "http://") || strings.HasPrefix(path, "https://")) {
 		req.SetURL(path)
 		return nil
 	}
@@ -361,7 +361,7 @@ func (c *Client) resolveTargetURL(req aoni.Request, path string) error {
 	return nil
 }
 
-// PooledResponse wraps a fasthttp response and returns instances back to [sync.Pool] upon invocation of [PooledResponse.Close].
+// PooledResponse wraps a fasthttp response and returns instances back to [sync.Pool] upon Close.
 type PooledResponse struct {
 	*Response
 	fastReq  *fasthttp.Request
@@ -369,7 +369,7 @@ type PooledResponse struct {
 	once     sync.Once
 }
 
-// NewPooledResponse creates a [PooledResponse] adapter around fastResp.
+// NewPooledResponse creates a PooledResponse adapter around fastResp.
 func NewPooledResponse(fastReq *fasthttp.Request, fastResp *fasthttp.Response) *PooledResponse {
 	return &PooledResponse{
 		Response: NewResponse(fastResp),

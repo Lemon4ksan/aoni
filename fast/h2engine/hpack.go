@@ -1,0 +1,552 @@
+// Copyright (c) 2026 Lemon4ksan All rights reserved.
+// Use of this source code is governed by a BSD-style
+// license that can be found in the LICENSE file.
+
+package h2engine
+
+import (
+	"bytes"
+	"fmt"
+	"sync"
+)
+
+const (
+	indexByte   = 128
+	literalByte = 64
+	noIndexByte = 240
+	maxIndex    = 62
+)
+
+var headerPool = sync.Pool{
+	New: func() any { return &HeaderField{} },
+}
+
+// HeaderField represents a key-value header entry inside HPACK tables.
+type HeaderField struct {
+	key      []byte
+	value    []byte
+	sensible bool
+}
+
+// AcquireHeaderField retrieves a recycled HeaderField from memory pools.
+func AcquireHeaderField() *HeaderField {
+	return headerPool.Get().(*HeaderField)
+}
+
+// ReleaseHeaderField clears and returns a HeaderField to memory pools.
+func ReleaseHeaderField(hf *HeaderField) {
+	if hf != nil {
+		hf.Reset()
+		headerPool.Put(hf)
+	}
+}
+
+func (hf *HeaderField) String() string     { return string(hf.AppendBytes(nil)) }
+func (hf *HeaderField) Empty() bool        { return len(hf.key) == 0 && len(hf.value) == 0 }
+func (hf *HeaderField) Reset()             { hf.key = hf.key[:0]; hf.value = hf.value[:0]; hf.sensible = false }
+func (hf *HeaderField) Size() uint32       { return uint32(len(hf.key) + len(hf.value) + 32) }
+func (hf *HeaderField) Key() string        { return string(hf.key) }
+func (hf *HeaderField) Value() string      { return string(hf.value) }
+func (hf *HeaderField) KeyBytes() []byte   { return hf.key }
+func (hf *HeaderField) ValueBytes() []byte { return hf.value }
+func (hf *HeaderField) IsPseudo() bool     { return len(hf.key) > 0 && hf.key[0] == ':' }
+func (hf *HeaderField) IsSensible() bool   { return hf.sensible }
+
+func (hf *HeaderField) Set(k, v string) {
+	hf.SetKey(k)
+	hf.SetValue(v)
+}
+
+func (hf *HeaderField) SetBytes(k, v []byte) {
+	hf.SetKeyBytes(k)
+	hf.SetValueBytes(v)
+}
+
+func (hf *HeaderField) SetKey(key string)          { hf.key = append(hf.key[:0], key...) }
+func (hf *HeaderField) SetValue(value string)      { hf.value = append(hf.value[:0], value...) }
+func (hf *HeaderField) SetKeyBytes(key []byte)     { hf.key = append(hf.key[:0], key...) }
+func (hf *HeaderField) SetValueBytes(value []byte) { hf.value = append(hf.value[:0], value...) }
+
+func (hf *HeaderField) CopyTo(other *HeaderField) {
+	other.key = append(other.key[:0], hf.key...)
+	other.value = append(other.value[:0], hf.value...)
+	other.sensible = hf.sensible
+}
+
+func (hf *HeaderField) AppendBytes(dst []byte) []byte {
+	dst = append(dst, hf.key...)
+	dst = append(dst, ':', ' ')
+	dst = append(dst, hf.value...)
+
+	return dst
+}
+
+var hpackPool = sync.Pool{
+	New: func() any {
+		return &HPACK{
+			maxTableSize: defaultHeaderTableSize,
+			dynamic:      make([]*HeaderField, 0, 16),
+		}
+	},
+}
+
+// HPACK manages header compression tables and HPACK encoding/decoding operations (RFC 7541).
+type HPACK struct {
+	DisableCompression  bool
+	DisableDynamicTable bool
+	dynamic             []*HeaderField
+	maxTableSize        uint32
+}
+
+// AcquireHPACK retrieves an initialized HPACK context from memory pools.
+func AcquireHPACK() *HPACK {
+	hp := hpackPool.Get().(*HPACK)
+	hp.Reset()
+
+	return hp
+}
+
+// ReleaseHPACK returns an HPACK context to memory pools after clearing dynamic state.
+func ReleaseHPACK(hp *HPACK) {
+	if hp != nil {
+		hpackPool.Put(hp)
+	}
+}
+
+func (hp *HPACK) Reset() {
+	hp.releaseDynamic()
+	hp.maxTableSize = defaultHeaderTableSize
+	hp.DisableCompression = false
+	hp.DisableDynamicTable = false
+}
+
+func (hp *HPACK) releaseDynamic() {
+	for _, hf := range hp.dynamic {
+		ReleaseHeaderField(hf)
+	}
+
+	hp.dynamic = hp.dynamic[:0]
+}
+
+func (hp *HPACK) SetMaxTableSize(size uint32) { hp.maxTableSize = size }
+
+func (hp *HPACK) DynamicSize() (n uint32) {
+	for _, hf := range hp.dynamic {
+		n += hf.Size()
+	}
+
+	return n
+}
+
+func (hp *HPACK) addDynamic(hf *HeaderField) {
+	hf2 := AcquireHeaderField()
+	hf.CopyTo(hf2)
+	hp.dynamic = append(hp.dynamic, hf2)
+	hp.shrink()
+}
+
+func (hp *HPACK) shrink() {
+	var n int
+
+	tableSize := hp.DynamicSize()
+
+	for n = 0; n < len(hp.dynamic) && tableSize > hp.maxTableSize; n++ {
+		tableSize -= hp.dynamic[n].Size()
+	}
+
+	if n != 0 {
+		for i := range n {
+			ReleaseHeaderField(hp.dynamic[i])
+		}
+
+		hp.dynamic = append(hp.dynamic[:0], hp.dynamic[n:]...)
+	}
+}
+
+func (hp *HPACK) peek(n uint64) *HeaderField {
+	if n < maxIndex {
+		idx := int(n - 1)
+		if idx < 0 || idx >= len(staticTable) {
+			return nil
+		}
+
+		return staticTable[idx]
+	}
+
+	idx := len(hp.dynamic) - int(n-maxIndex) - 1
+	if idx < 0 || idx >= len(hp.dynamic) {
+		return nil
+	}
+
+	return hp.dynamic[idx]
+}
+
+func (hp *HPACK) search(hf *HeaderField) (n uint64, fullMatch bool) {
+	for i, hf2 := range hp.dynamic {
+		if bytes.Equal(hf.key, hf2.key) && bytes.Equal(hf.value, hf2.value) {
+			return uint64(maxIndex + len(hp.dynamic) - i - 1), true
+		}
+	}
+
+	for i, hf2 := range staticTable {
+		if !bytes.Equal(hf.key, hf2.key) {
+			continue
+		}
+
+		if bytes.Equal(hf.value, hf2.value) {
+			return uint64(i + 1), true
+		}
+
+		if n == 0 {
+			n = uint64(i + 1)
+		}
+	}
+
+	return n, false
+}
+
+// Next parses the next HPACK-encoded header field from byte stream b.
+func (hp *HPACK) Next(hf *HeaderField, b []byte) ([]byte, error) {
+	for len(b) > 0 {
+		c := b[0]
+		switch {
+		case c&indexByte == indexByte:
+			return hp.decodeIndexed(hf, b)
+		case c&literalByte == literalByte:
+			return hp.decodeLiteralIndexed(hf, b)
+		case c&noIndexByte == 16:
+			hf.sensible = true
+			return hp.decodeLiteralNoIndex(hf, b)
+		case c&noIndexByte == 0:
+			return hp.decodeLiteralNoIndex(hf, b)
+		case c&32 == 32:
+			var n uint64
+
+			b, n = readInt(5, b)
+			hp.maxTableSize = uint32(n)
+			hp.shrink()
+		}
+	}
+
+	return b, nil
+}
+
+func (hp *HPACK) decodeIndexed(hf *HeaderField, b []byte) ([]byte, error) {
+	b, n := readInt(7, b)
+
+	hf2 := hp.peek(n)
+	if hf2 == nil {
+		return b, NewError(FlowControlError, fmt.Sprintf("index field not found: %d", n))
+	}
+
+	hf2.CopyTo(hf)
+
+	return b, nil
+}
+
+func (hp *HPACK) decodeLiteralIndexed(hf *HeaderField, b []byte) ([]byte, error) {
+	c := b[0]
+
+	var (
+		n   uint64
+		err error
+	)
+
+	if c != 64 {
+		b, n = readInt(6, b)
+
+		hf2 := hp.peek(n)
+		if hf2 == nil {
+			return b, NewError(FlowControlError, fmt.Sprintf("literal indexed field not found: %d", n))
+		}
+
+		hf.SetKeyBytes(hf2.KeyBytes())
+	} else {
+		b = b[1:]
+		dst := bytePool.Get().([]byte)
+
+		b, dst, err = readString(dst[:0], b)
+		if err != nil {
+			bytePool.Put(dst)
+			return b, err
+		}
+
+		hf.SetKeyBytes(dst)
+		bytePool.Put(dst)
+	}
+
+	if len(b) > 0 && b[0] == c {
+		b = b[1:]
+	}
+
+	dst := bytePool.Get().([]byte)
+
+	b, dst, err = readString(dst[:0], b)
+	if err != nil {
+		bytePool.Put(dst)
+		return b, err
+	}
+
+	hf.SetValueBytes(dst)
+	bytePool.Put(dst)
+	hp.addDynamic(hf)
+
+	return b, nil
+}
+
+func (hp *HPACK) decodeLiteralNoIndex(hf *HeaderField, b []byte) ([]byte, error) {
+	c := b[0]
+
+	var (
+		n   uint64
+		err error
+	)
+
+	if c&15 != 0 {
+		b, n = readInt(4, b)
+
+		hf2 := hp.peek(n)
+		if hf2 == nil {
+			return b, NewError(FlowControlError, fmt.Sprintf("non-indexed field not found: %d", n))
+		}
+
+		hf.SetKeyBytes(hf2.key)
+	} else {
+		b = b[1:]
+		dst := bytePool.Get().([]byte)
+
+		b, dst, err = readString(dst[:0], b)
+		if err != nil {
+			bytePool.Put(dst)
+			return b, err
+		}
+
+		hf.SetKeyBytes(dst)
+		bytePool.Put(dst)
+	}
+
+	if len(b) > 0 && b[0] == c {
+		b = b[1:]
+	}
+
+	dst := bytePool.Get().([]byte)
+
+	b, dst, err = readString(dst[:0], b)
+	if err != nil {
+		bytePool.Put(dst)
+		return b, err
+	}
+
+	hf.SetValueBytes(dst)
+	bytePool.Put(dst)
+
+	return b, nil
+}
+
+func (hp *HPACK) AppendHeaderField(h *Headers, hf *HeaderField, store bool) {
+	h.rawHeaders = hp.AppendHeader(h.rawHeaders, hf, store)
+}
+
+func (hp *HPACK) AppendHeader(dst []byte, hf *HeaderField, store bool) []byte {
+	c := !hp.DisableCompression
+	bits := uint8(6)
+
+	index, fullMatch := hp.search(hf)
+	if hf.sensible {
+		c = false
+		dst = append(dst, 16)
+	} else if index > 0 {
+		if fullMatch {
+			bits, dst = 7, append(dst, indexByte)
+		} else if !store {
+			bits, dst = 4, append(dst, 0)
+		} else {
+			dst = append(dst, literalByte)
+			if index < maxIndex {
+				hp.addDynamic(hf)
+			}
+		}
+	} else if !store || hp.DisableDynamicTable {
+		dst = append(dst, 0, 0)
+	} else {
+		dst = append(dst, literalByte)
+		hp.addDynamic(hf)
+	}
+
+	if index > 0 {
+		dst = appendInt(dst, bits, index)
+	} else {
+		dst = appendString(dst, hf.key, c)
+	}
+
+	if bits != 7 {
+		dst = appendString(dst, hf.value, c)
+	}
+
+	return dst
+}
+
+var bytePool = sync.Pool{
+	New: func() any { return make([]byte, 128) },
+}
+
+func readInt(n int, b []byte) ([]byte, uint64) {
+	b0 := byte(1<<n - 1)
+	if b0&b[0] != b0 {
+		return b[1:], uint64(b[0] & b0)
+	}
+
+	var nn uint64
+
+	i := 1
+
+	for i < len(b) {
+		nn |= uint64(b[i]&127) << ((i - 1) * 7)
+		if b[i]&128 != 128 {
+			break
+		}
+
+		i++
+	}
+
+	return b[i+1:], nn + uint64(b0)
+}
+
+func appendInt(dst []byte, bits uint8, index uint64) []byte {
+	if len(dst) == 0 {
+		dst = append(dst, 0)
+	}
+
+	b0 := uint64(1<<bits - 1)
+
+	if index <= b0 {
+		dst[len(dst)-1] |= byte(index)
+		return dst
+	}
+
+	dst[len(dst)-1] |= byte(b0)
+	index -= b0
+
+	for index != 0 {
+		dst = append(dst, 128|byte(index&127))
+		index >>= 7
+	}
+
+	dst[len(dst)-1] &= 127
+
+	return dst
+}
+
+func readString(dst, b []byte) ([]byte, []byte, error) {
+	if len(b) == 0 {
+		return b, dst, ErrMalformedString
+	}
+
+	mustDecode := b[0]&128 == 128
+
+	b, n := readInt(7, b)
+	if uint64(len(b)) < n {
+		return b, dst, ErrUnexpectedSize
+	}
+
+	if mustDecode {
+		dst = HuffmanDecode(dst, b[:n])
+	} else {
+		dst = append(dst, b[:n]...)
+	}
+
+	return b[n:], dst, nil
+}
+
+func appendString(dst, src []byte, encode bool) []byte {
+	var b []byte
+
+	if !encode {
+		b = src
+	} else {
+		b = bytePool.Get().([]byte)
+		b = HuffmanEncode(b[:0], src)
+	}
+
+	n := uint64(len(b))
+	nn := len(dst) - 1
+
+	if nn >= 0 && dst[nn] != 0 {
+		dst = append(dst, 0)
+		nn++
+	}
+
+	dst = appendInt(dst, 7, n)
+	dst = append(dst, b...)
+
+	if encode {
+		bytePool.Put(b)
+		dst[nn] |= 128
+	}
+
+	return dst
+}
+
+var staticTable = []*HeaderField{
+	{key: []byte(":authority")},
+	{key: []byte(":method"), value: []byte("GET")},
+	{key: []byte(":method"), value: []byte("POST")},
+	{key: []byte(":path"), value: []byte("/")},
+	{key: []byte(":path"), value: []byte("/index.html")},
+	{key: []byte(":scheme"), value: []byte("http")},
+	{key: []byte(":scheme"), value: []byte("https")},
+	{key: []byte(":status"), value: []byte("200")},
+	{key: []byte(":status"), value: []byte("204")},
+	{key: []byte(":status"), value: []byte("206")},
+	{key: []byte(":status"), value: []byte("304")},
+	{key: []byte(":status"), value: []byte("400")},
+	{key: []byte(":status"), value: []byte("404")},
+	{key: []byte(":status"), value: []byte("500")},
+	{key: []byte("accept-charset")},
+	{key: []byte("accept-encoding"), value: []byte("gzip, deflate")},
+	{key: []byte("accept-language")},
+	{key: []byte("accept-ranges")},
+	{key: []byte("accept")},
+	{key: []byte("access-control-allow-origin")},
+	{key: []byte("age")},
+	{key: []byte("allow")},
+	{key: []byte("authorization")},
+	{key: []byte("cache-control")},
+	{key: []byte("content-disposition")},
+	{key: []byte("content-encoding")},
+	{key: []byte("content-language")},
+	{key: []byte("content-length")},
+	{key: []byte("content-location")},
+	{key: []byte("content-range")},
+	{key: []byte("content-type")},
+	{key: []byte("cookie")},
+	{key: []byte("date")},
+	{key: []byte("etag")},
+	{key: []byte("expect")},
+	{key: []byte("expires")},
+	{key: []byte("from")},
+	{key: []byte("host")},
+	{key: []byte("if-match")},
+	{key: []byte("if-modified-since")},
+	{key: []byte("if-none-match")},
+	{key: []byte("if-range")},
+	{key: []byte("if-unmodified-since")},
+	{key: []byte("last-modified")},
+	{key: []byte("link")},
+	{key: []byte("location")},
+	{key: []byte("max-forwards")},
+	{key: []byte("proxy-authenticate")},
+	{key: []byte("proxy-authorization")},
+	{key: []byte("range")},
+	{key: []byte("referer")},
+	{key: []byte("refresh")},
+	{key: []byte("retry-after")},
+	{key: []byte("server")},
+	{key: []byte("set-cookie")},
+	{key: []byte("strict-transport-security")},
+	{key: []byte("transfer-encoding")},
+	{key: []byte("user-agent")},
+	{key: []byte("vary")},
+	{key: []byte("via")},
+	{key: []byte("www-authenticate")},
+}

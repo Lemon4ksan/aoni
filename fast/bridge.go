@@ -6,7 +6,7 @@ package fast
 
 import (
 	"errors"
-	stdio "io"
+	"io"
 	"maps"
 	"net/http"
 	"net/url"
@@ -58,7 +58,7 @@ func (t *Transport) RoundTrip(req *http.Request) (*http.Response, error) {
 	}
 
 	if req.Body != nil {
-		b, err := stdio.ReadAll(req.Body)
+		b, err := io.ReadAll(req.Body)
 		_ = req.Body.Close()
 		if err != nil {
 			return nil, err

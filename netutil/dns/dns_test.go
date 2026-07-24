@@ -354,7 +354,7 @@ func TestProxyRoutedDNSResolver(t *testing.T) {
 		resolver := NewProxyRoutedDNSResolver(nil, nil)
 		_, err := resolver.LookupIPAddr(t.Context(), "example.test")
 		assert.Error(t, err)
-		assert.Contains(t, err.Error(), "no underlying resolver configured")
+		assert.ErrorIs(t, err, ErrNoResolversConfigured)
 	})
 
 	t.Run("delegation_to_underlying_resolver", func(t *testing.T) {

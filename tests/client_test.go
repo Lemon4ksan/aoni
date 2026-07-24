@@ -620,6 +620,8 @@ func TestClient_CertificatePinning(t *testing.T) {
 		},
 		{
 			name:       "incorrect_pin_fails",
+			useUTLS:    true,
+			insecure:   true,
 			reqPins:    []string{incorrectPin},
 			targetPath: server.URL,
 			expectErr:  true,
@@ -652,6 +654,8 @@ func TestClient_CertificatePinning(t *testing.T) {
 		},
 		{
 			name:       "client_level_incorrect_pin_fails",
+			useUTLS:    true,
+			insecure:   true,
 			clientPins: []string{incorrectPin},
 			targetPath: server.URL,
 			expectErr:  true,

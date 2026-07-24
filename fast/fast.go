@@ -8,7 +8,7 @@ package fast
 import (
 	"bytes"
 	"context"
-	stdio "io"
+	"io"
 	"net/http"
 
 	"github.com/valyala/fasthttp"
@@ -177,12 +177,12 @@ func (f *Request) BodyBytes() []byte {
 }
 
 // SetBodyStream assigns a streaming reader as request body.
-func (f *Request) SetBodyStream(r stdio.Reader, contentLength int64) {
+func (f *Request) SetBodyStream(r io.Reader, contentLength int64) {
 	f.req.SetBodyStream(r, int(contentLength))
 }
 
-// BodyStream yields an [stdio.Reader] for the request body.
-func (f *Request) BodyStream() stdio.Reader {
+// BodyStream yields an [io.Reader] for the request body.
+func (f *Request) BodyStream() io.Reader {
 	return f.req.BodyStream()
 }
 
@@ -257,9 +257,9 @@ func (f *Response) BodyBytes() []byte {
 	return f.resp.Body()
 }
 
-// BodyStream yields an [stdio.ReadCloser] wrapping response body bytes.
-func (f *Response) BodyStream() stdio.ReadCloser {
-	return stdio.NopCloser(bytes.NewReader(f.resp.Body()))
+// BodyStream yields an [io.ReadCloser] wrapping response body bytes.
+func (f *Response) BodyStream() io.ReadCloser {
+	return io.NopCloser(bytes.NewReader(f.resp.Body()))
 }
 
 // HTTPResponse yields nil for fasthttp response adapters.

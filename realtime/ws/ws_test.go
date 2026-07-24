@@ -300,7 +300,7 @@ func TestDialWebSocket_InvalidURL(t *testing.T) {
 	client := aoni.NewClient(nil)
 	_, _, err := DialWebSocket(t.Context(), client, "http://invalid-scheme.com")
 	assert.Error(t, err)
-	assert.Contains(t, err.Error(), "unsupported websocket scheme")
+	assert.ErrorIs(t, err, ErrUnsupportedWSScheme)
 }
 
 func TestDialWebSocket_WithFragmentation(t *testing.T) {

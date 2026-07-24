@@ -1,0 +1,312 @@
+// Copyright (c) 2026 Lemon4ksan All rights reserved.
+// Use of this source code is governed by a BSD-style
+// license that can be found in the LICENSE file.
+
+package h2engine
+
+import (
+	"bufio"
+	"bytes"
+	"context"
+	"net"
+	"testing"
+	"time"
+
+	"github.com/valyala/fasthttp"
+)
+
+func runMockH2Server(t *testing.T, serverConn net.Conn, handler func(req *fasthttp.Request, resp *fasthttp.Response)) {
+	br := bufio.NewReader(serverConn)
+	bw := bufio.NewWriter(serverConn)
+
+	if !ReadPreface(br) {
+		t.Errorf("server: invalid client preface")
+		return
+	}
+
+	serverSettings := &Settings{}
+	serverSettings.SetMaxWindowSize(1 << 20)
+
+	if err := PerformHandshake(false, bw, serverSettings, 1<<20); err != nil {
+		t.Errorf("server: handshake failed: %v", err)
+		return
+	}
+
+	frClientSettings, err := ReadFrameFrom(br)
+	if err != nil {
+		t.Errorf("server: read client settings failed: %v", err)
+		return
+	}
+
+	ReleaseFrameHeader(frClientSettings)
+
+	ackFrame := AcquireFrameHeader()
+
+	stRes := AcquireFrame(FrameSettings).(*Settings)
+	stRes.SetAck(true)
+	ackFrame.SetBody(stRes)
+
+	if _, err := ackFrame.WriteTo(bw); err != nil {
+		t.Errorf("server: write settings ack failed: %v", err)
+		return
+	}
+
+	_ = bw.Flush()
+	ReleaseFrameHeader(ackFrame)
+
+	dec := AcquireHPACK()
+	enc := AcquireHPACK()
+
+	defer ReleaseHPACK(dec)
+
+	defer ReleaseHPACK(enc)
+
+	for {
+		fr, err := ReadFrameFrom(br)
+		if err != nil {
+			return
+		}
+
+		if fr.Type() == FrameHeaders {
+			hFrame := fr.Body().(FrameWithHeaders)
+			req := &fasthttp.Request{}
+			resp := &fasthttp.Response{}
+
+			hf := AcquireHeaderField()
+
+			b := hFrame.Headers()
+
+			for len(b) > 0 {
+				var nErr error
+
+				b, nErr = dec.Next(hf, b)
+				if nErr != nil {
+					break
+				}
+
+				if !hf.IsPseudo() {
+					req.Header.AddBytesKV(hf.KeyBytes(), hf.ValueBytes())
+				} else if bytes.Equal(hf.KeyBytes(), StringMethod) {
+					req.Header.SetMethodBytes(hf.ValueBytes())
+				} else if bytes.Equal(hf.KeyBytes(), StringPath) {
+					req.Header.SetRequestURIBytes(hf.ValueBytes())
+				}
+
+				hf.Reset()
+			}
+
+			ReleaseHeaderField(hf)
+			ReleaseFrameHeader(fr)
+
+			handler(req, resp)
+
+			respFH := AcquireFrameHeader()
+			respFH.SetStream(fr.Stream())
+
+			respH := AcquireFrame(FrameHeaders).(*Headers)
+			respH.SetEndHeaders(true)
+			respH.SetEndStream(len(resp.Body()) == 0)
+
+			respFH.SetBody(respH)
+
+			fasthttpResponseHeaders(respH, enc, resp)
+
+			if _, err := respFH.WriteTo(bw); err != nil {
+				return
+			}
+
+			_ = bw.Flush()
+
+			ReleaseFrameHeader(respFH)
+
+			if len(resp.Body()) > 0 {
+				dataFH := AcquireFrameHeader()
+
+				dataFH.SetStream(fr.Stream())
+
+				dataF := AcquireFrame(FrameData).(*Data)
+				dataF.SetEndStream(true)
+				dataF.SetData(resp.Body())
+
+				dataFH.SetBody(dataF)
+
+				if _, err := dataFH.WriteTo(bw); err != nil {
+					return
+				}
+
+				_ = bw.Flush()
+
+				ReleaseFrameHeader(dataFH)
+			}
+
+			return
+		}
+
+		ReleaseFrameHeader(fr)
+	}
+}
+
+func TestClientServerEndToEnd(t *testing.T) {
+	clientConn, serverConn := net.Pipe()
+
+	defer clientConn.Close()
+
+	defer serverConn.Close()
+
+	go runMockH2Server(t, serverConn, func(req *fasthttp.Request, resp *fasthttp.Response) {
+		if string(req.Header.Method()) != "GET" {
+			t.Errorf("server: method mismatch: got %s, want GET", req.Header.Method())
+		}
+
+		resp.SetStatusCode(200)
+		resp.SetBodyString("aoni h2engine success")
+	})
+
+	dialer := &Dialer{
+		RawDial: func(addr string) (net.Conn, error) {
+			return clientConn, nil
+		},
+	}
+
+	client := NewClient(dialer, ClientOpts{PingInterval: 5 * time.Second})
+
+	req := fasthttp.AcquireRequest()
+	resp := fasthttp.AcquireResponse()
+
+	defer fasthttp.ReleaseRequest(req)
+
+	defer fasthttp.ReleaseResponse(resp)
+
+	req.Header.SetMethod("GET")
+	req.SetRequestURI("https://example.com/test")
+
+	if err := client.Do(req, resp); err != nil {
+		t.Fatalf("client.Do failed: %v", err)
+	}
+
+	if resp.StatusCode() != 200 {
+		t.Fatalf("expected status code 200, got %d", resp.StatusCode())
+	}
+
+	if string(resp.Body()) != "aoni h2engine success" {
+		t.Fatalf("body mismatch: got %q, want %q", resp.Body(), "aoni h2engine success")
+	}
+}
+
+func TestOrderedHeadersSequenceOnWire(t *testing.T) {
+	clientConn, serverConn := net.Pipe()
+
+	defer clientConn.Close()
+
+	defer serverConn.Close()
+
+	orderedKeys := []string{"accept-language", "user-agent", "x-custom-a"}
+
+	var capturedHeaders []string
+
+	go func() {
+		br := bufio.NewReader(serverConn)
+		bw := bufio.NewWriter(serverConn)
+
+		_ = ReadPreface(br)
+
+		serverSettings := &Settings{}
+
+		_ = PerformHandshake(false, bw, serverSettings, 1<<20)
+
+		frClientSettings, _ := ReadFrameFrom(br)
+
+		ReleaseFrameHeader(frClientSettings)
+
+		ackFrame := AcquireFrameHeader()
+
+		stRes := AcquireFrame(FrameSettings).(*Settings)
+
+		stRes.SetAck(true)
+		ackFrame.SetBody(stRes)
+
+		_, _ = ackFrame.WriteTo(bw)
+
+		_ = bw.Flush()
+
+		ReleaseFrameHeader(ackFrame)
+
+		dec := AcquireHPACK()
+
+		defer ReleaseHPACK(dec)
+
+		fr, _ := ReadFrameFrom(br)
+
+		if fr.Type() == FrameHeaders {
+			hFrame := fr.Body().(FrameWithHeaders)
+			b := hFrame.Headers()
+
+			for len(b) > 0 {
+				hf := AcquireHeaderField()
+
+				var err error
+
+				b, err = dec.Next(hf, b)
+				if err != nil {
+					ReleaseHeaderField(hf)
+					break
+				}
+
+				if !hf.IsPseudo() {
+					capturedHeaders = append(capturedHeaders, hf.Key())
+				}
+
+				ReleaseHeaderField(hf)
+			}
+		}
+
+		ReleaseFrameHeader(fr)
+	}()
+
+	dialer := &Dialer{
+		RawDial: func(addr string) (net.Conn, error) {
+			return clientConn, nil
+		},
+	}
+
+	client := NewClient(dialer, ClientOpts{PingInterval: 5 * time.Second})
+
+	client.SetOrderedHeaders(orderedKeys)
+
+	req := fasthttp.AcquireRequest()
+	resp := fasthttp.AcquireResponse()
+
+	defer fasthttp.ReleaseRequest(req)
+
+	defer fasthttp.ReleaseResponse(resp)
+
+	req.Header.SetMethod("GET")
+	req.SetRequestURI("https://example.com/test")
+
+	req.Header.Set("x-custom-a", "val-a")
+	req.Header.Set("user-agent", "aoni-agent")
+	req.Header.Set("accept-language", "en-US")
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+
+	defer cancel()
+
+	done := make(chan error, 1)
+
+	go func() {
+		done <- client.Do(req, resp)
+	}()
+
+	select {
+	case <-ctx.Done():
+	case <-done:
+	}
+
+	if len(capturedHeaders) < 3 {
+		t.Fatalf("expected at least 3 headers, got %d: %v", len(capturedHeaders), capturedHeaders)
+	}
+
+	if capturedHeaders[0] != "accept-language" || capturedHeaders[1] != "user-agent" || capturedHeaders[2] != "x-custom-a" {
+		t.Fatalf("headers order sequence violated: got %v, want %v", capturedHeaders, orderedKeys)
+	}
+}

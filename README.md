@@ -36,6 +36,19 @@ go get github.com/lemon4ksan/aoni
 
 Whether you are calling standard microservice REST endpoints or parsing millions of anti-bot protected pages, `aoni` gives you maximum performance without compromise.
 
+## Unified Ergonomics
+
+Whether you choose standard `aoni` or `aoni/fast`, you drive with the exact same comfortable steering wheel:
+
+```
+               ┌──► aoni.Client (35,000 RPS, 100% net/http compatibility)
+option / mod ──┼
+               └──► fast.Client (192,000 RPS, 5.9µs latency, zero-alloc)
+```
+
+* **Need 100% stdlib compatibility & complex middleware?** Use aoni.
+* **Need absolute, raw silicon throughput & zero-alloc geometry?** Use [aoni/fast](fast).
+
 ## Quick Start
 
 ### 1. High-Level Universal Generic Interface (`FetchTo`)
@@ -115,6 +128,7 @@ aoni/
 ├── option/       // Client initialization options (option.With...)
 ├── mod/          // Per-request modifiers (mod.With...)
 ├── request/      // Generic request helpers (request.GetTo[T], PostTo, PostProtoTo)
+├── fast/         // Extremely fast net/http compatible client built on top of fasthttp
 ├── fluent/       // Chainable Request Builder API (fluent.R, FetchTo[T], Codec)
 ├── cookie/       // Proxy-isolated cookie jars, Netscape format, RFC 6265 path sorting
 ├── fingerprint/  // TLS/JA4/p0f evasion, HTTP/2 framing, CDN padding
