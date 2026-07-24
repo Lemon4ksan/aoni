@@ -44,18 +44,20 @@ type DNSResolver interface {
 	LookupIPAddr(ctx context.Context, host string) ([]net.IPAddr, error)
 }
 
-// DialOptions aggregates lower-level L4 socket and proxy configuration parameters.
+// DialOptions aggregates lower-level L4 socket, busy poll, and proxy configuration parameters.
 type DialOptions struct {
-	ProxyURL           *url.URL
-	DNSResolver        DNSResolver
-	SourceRotator      *ip.SourceIPRotator
-	P0fSignature       *p0f.Signature
-	SocketController   SocketController
-	FragmentConfig     *fragment.Config
-	HappyEyeballs      time.Duration
-	SSRFGuard          bool
-	ProxyDNS           bool
-	InsecureSkipVerify bool
+	ProxyURL             *url.URL
+	DNSResolver          DNSResolver
+	SourceRotator        *ip.SourceIPRotator
+	P0fSignature         *p0f.Signature
+	SocketController     SocketController
+	FragmentConfig       *fragment.Config
+	HappyEyeballs        time.Duration
+	BusyPollMicroseconds int
+	SSRFGuard            bool
+	ProxyDNS             bool
+	InsecureSkipVerify   bool
+	TCPQuickACK          bool
 }
 
 // DialL4 establishes a raw TCP socket connection applying DNS resolution, SSRF guards, IP rotation, p0f spoofing, and fragmentation.
@@ -221,24 +223,26 @@ func buildSocketControl(opts DialOptions) func(network, address string, rc sysca
 	}
 
 	controller := opts.SocketController
-	if spoofer == nil && controller == nil {
-		return nil
-	}
 
 	return func(network, address string, rc syscall.RawConn) error {
-		if controller != nil {
-			var controlErr error
+		var controlErr error
 
-			err := rc.Control(func(fd uintptr) {
+		err := rc.Control(func(fd uintptr) {
+			if applyErr := applyLinuxSocketOptions(fd, opts); applyErr != nil {
+				controlErr = applyErr
+				return
+			}
+
+			if controller != nil {
 				controlErr = controller.Control(fd, network, address)
-			})
-			if err != nil {
-				return err
 			}
+		})
+		if err != nil {
+			return err
+		}
 
-			if controlErr != nil {
-				return controlErr
-			}
+		if controlErr != nil {
+			return controlErr
 		}
 
 		if spoofer != nil {
