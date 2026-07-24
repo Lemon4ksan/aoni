@@ -49,7 +49,7 @@ func TestResolveALPNMode(t *testing.T) {
 	ctx := context.Background()
 	cfg := &aoni.Config{}
 
-	if mode := resolveALPNMode(ctx, cfg); mode != aoni.AlpnHTTP {
+	if mode := resolveALPNMode(ctx, cfg, ""); mode != aoni.AlpnHTTP {
 		t.Errorf("got ALPN mode %q, want %q", mode, aoni.AlpnHTTP)
 	}
 
@@ -59,12 +59,12 @@ func TestResolveALPNMode(t *testing.T) {
 		},
 	}
 
-	if mode := resolveALPNMode(ctx, cfgH2); mode != aoni.AlpnH2 {
+	if mode := resolveALPNMode(ctx, cfgH2, ""); mode != aoni.AlpnH2 {
 		t.Errorf("got ALPN mode %q, want %q", mode, aoni.AlpnH2)
 	}
 
 	ctxH3 := aoni.WithContextModifier(ctx, mod.WithForceHTTP3())
-	if mode := resolveALPNMode(ctxH3, cfg); mode != aoni.AlpnH3 {
+	if mode := resolveALPNMode(ctxH3, cfg, ""); mode != aoni.AlpnH3 {
 		t.Errorf("got context ALPN mode %q, want %q", mode, aoni.AlpnH3)
 	}
 }

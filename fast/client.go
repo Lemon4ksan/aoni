@@ -15,6 +15,7 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -600,12 +601,82 @@ func extractUserInfoAndSetAuth(req *fasthttp.Request) {
 	req.URI().SetUsername("")
 }
 
+type altSvcCache struct {
+	mu    sync.RWMutex
+	hosts map[string]time.Time
+}
+
+var globalAltSvcCache = &altSvcCache{
+	hosts: make(map[string]time.Time),
+}
+
+func (c *altSvcCache) IsH3Supported(host string) bool {
+	c.mu.RLock()
+	exp, ok := c.hosts[host]
+	c.mu.RUnlock()
+
+	if !ok {
+		return false
+	}
+
+	if time.Now().After(exp) {
+		c.mu.Lock()
+		delete(c.hosts, host)
+		c.mu.Unlock()
+
+		return false
+	}
+
+	return true
+}
+
+func (c *altSvcCache) Record(host, headerVal string) {
+	if host == "" || headerVal == "" {
+		return
+	}
+
+	if headerVal == "clear" {
+		c.mu.Lock()
+		delete(c.hosts, host)
+		c.mu.Unlock()
+
+		return
+	}
+
+	if !strings.Contains(headerVal, "h3") {
+		return
+	}
+
+	maxAge := parseMaxAge(headerVal)
+
+	c.mu.Lock()
+	c.hosts[host] = time.Now().Add(maxAge)
+	c.mu.Unlock()
+}
+
+func parseMaxAge(headerVal string) time.Duration {
+	maxAge := 86400 * time.Second
+	parts := strings.Split(headerVal, ";")
+
+	for _, p := range parts {
+		p = strings.TrimSpace(p)
+		if strings.HasPrefix(p, "ma=") {
+			if seconds, err := strconv.ParseInt(p[3:], 10, 64); err == nil && seconds > 0 {
+				return time.Duration(seconds) * time.Second
+			}
+		}
+	}
+
+	return maxAge
+}
+
 func (c *Client) dispatchSingleRequest(
 	ctx context.Context,
 	fastReq *fasthttp.Request,
 	fastResp *fasthttp.Response,
 ) (trailers map[string][]string, err error, autoReleased bool) {
-	alpnMode := resolveALPNMode(ctx, &c.config)
+	host := string(fastReq.URI().Host())
+	alpnMode := resolveALPNMode(ctx, &c.config, host)
 
 	switch alpnMode {
 	case aoni.AlpnH3:
@@ -615,14 +686,21 @@ func (c *Client) dispatchSingleRequest(
 		return tr, err, false
 
 	case aoni.AlpnH2:
-		host := string(fastReq.URI().Host())
 		h2Cl := c.getH2Client(host)
 		tr, err := h2Cl.DoWithTrailers(ctx, fastReq, fastResp)
+
+		if altSvc := fastResp.Header.Peek("Alt-Svc"); len(altSvc) > 0 {
+			globalAltSvcCache.Record(host, string(altSvc))
+		}
 
 		return tr, err, false
 
 	default:
 		err, autoReleased = c.executeFastHTTP(ctx, fastReq, fastResp)
+
+		if altSvc := fastResp.Header.Peek("Alt-Svc"); len(altSvc) > 0 {
+			globalAltSvcCache.Record(host, string(altSvc))
+		}
 
 		return nil, err, autoReleased
 	}
@@ -745,13 +823,17 @@ func (c *Client) getH2Client(host string) *h2engine.Client {
 	return cl
 }
 
-func resolveALPNMode(ctx context.Context, cfg *aoni.Config) string {
+func resolveALPNMode(ctx context.Context, cfg *aoni.Config, host string) string {
 	reqCfg := aoni.GetRequestConfig(ctx)
 	if reqCfg != nil && len(reqCfg.ALPNOverride) > 0 {
 		first := reqCfg.ALPNOverride[0]
 		if first == aoni.AlpnH3 || first == aoni.AlpnH2 {
 			return first
 		}
+	}
+
+	if globalAltSvcCache.IsH3Supported(host) {
+		return aoni.AlpnH3
 	}
 
 	if len(cfg.Fingerprint.HeaderOrder) > 0 && slicesContains(cfg.Fingerprint.HeaderOrder, ":method") {
