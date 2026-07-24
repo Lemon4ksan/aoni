@@ -172,17 +172,6 @@ func main() {
 | **Custom Header Order (JA4H)** | ✗ | ✗ | **✓** | **✓ (Zero-Cost Wire Ordering)** |
 | **`http.Client` Compatibility Bridge** | Native | ✗ | Native | **✓ (`fast.NewStdClient`)** |
 
-Comparison with other languages and frameworks (on the same hardware)
-
-If you run the test on the same good CPU (e.g., Core i5/i7 or server Xeon/EPYC):
-
-| Stack / Library | Actual RPS on 1 node | Explanation |
-| :--- | :---: | :--- |
-| **Python** (`requests` / `urllib3`) | **~1,200 – 3,000** RPS | Limited by the GIL and slow string parsing. |
-| **Node.js** (`axios` / `fetch`) | **~8,000 – 15,000** RPS | Squeezes out the Event Loop, but is bogged down by V8 GC and allocations. |
-| **Go** (`net/http` / `Resty`) | **~25,000 – 35,000** RPS | Excellent result, but limited by Garbage Collector pauses and `http.Header` maps. |
-| **`aoni/fast`** (`fasthttp` + H2/H3) | **192,000 RPS** | **Limited not by the code, but by the physical limits of the processor and OS system calls.** |
-
 ## License
 
 Licensed under the **BSD 3-Clause License**. See [LICENSE](LICENSE) for details.
