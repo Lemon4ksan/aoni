@@ -87,14 +87,25 @@ func (c *Client) execute(req *http.Request, pipe PipelineConfig) (*http.Response
 }
 
 func (c *Client) dispatchRequest(req *http.Request, pipe PipelineConfig) (*http.Response, error) {
+	var (
+		resp *http.Response
+		err  error
+	)
+
 	switch {
 	case pipe.ProxyFailover != nil:
-		return c.executeWithProxyFailover(req, pipe.ProxyFailover, pipe.Hedging)
+		resp, err = c.executeWithProxyFailover(req, pipe.ProxyFailover, pipe.Hedging)
 	case pipe.Hedging != nil:
-		return c.executeWithHedging(req, pipe.Hedging)
+		resp, err = c.executeWithHedging(req, pipe.Hedging)
 	default:
-		return c.engine.Do(req)
+		resp, err = c.engine.Do(req)
 	}
+
+	if resp != nil && resp.Request == nil {
+		resp.Request = req
+	}
+
+	return resp, err
 }
 
 func (c *Client) prepareRequestContext(req *http.Request) *http.Request {
