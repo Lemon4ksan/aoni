@@ -9,7 +9,7 @@ import (
 	"context"
 	"crypto/tls"
 	"encoding/json"
-	"io"
+	stdio "io"
 	"math/rand/v2"
 	"net/http"
 	"net/url"
@@ -18,9 +18,13 @@ import (
 
 	"github.com/lemon4ksan/miyako/generic"
 
+	"github.com/lemon4ksan/aoni/internal/io"
 	"github.com/lemon4ksan/aoni/internal/timer"
 	"github.com/lemon4ksan/aoni/telemetry"
 )
+
+// AsReplayable wraps rc into a [io.ReplayableBody] using active buffers or tee-buffered fallback.
+var AsReplayable = io.AsReplayable
 
 // ResponseTrace extracts the [TraceInfo] previously captured via [WithTraceContext].
 // Returns nil if no trace was registered on the request.
@@ -79,7 +83,7 @@ func ContextModifiers(ctx context.Context) []RequestModifier {
 
 // MarkModifierError attaches a serialization or setup error to the request config,
 // causing the client to abort request dispatching before sending wire data.
-func MarkModifierError(req *http.Request, err error) {
+func MarkModifierError(req any, err error) {
 	if err == nil {
 		return
 	}
@@ -228,7 +232,7 @@ func FallbackString(statusCode int, text string) FallbackFunc {
 			ProtoMajor:    1,
 			ProtoMinor:    1,
 			Header:        http.Header{"Content-Type": []string{"text/plain; charset=utf-8"}},
-			Body:          io.NopCloser(strings.NewReader(text)),
+			Body:          stdio.NopCloser(strings.NewReader(text)),
 			ContentLength: int64(len(text)),
 			Request:       req,
 		}, nil
@@ -250,7 +254,7 @@ func FallbackJSON(statusCode int, data any) FallbackFunc {
 			ProtoMajor:    1,
 			ProtoMinor:    1,
 			Header:        http.Header{"Content-Type": []string{"application/json; charset=utf-8"}},
-			Body:          io.NopCloser(bytes.NewReader(bodyBytes)),
+			Body:          stdio.NopCloser(bytes.NewReader(bodyBytes)),
 			ContentLength: int64(len(bodyBytes)),
 			Request:       req,
 		}, nil
