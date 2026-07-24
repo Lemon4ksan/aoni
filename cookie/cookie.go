@@ -28,6 +28,57 @@ type Cookie struct {
 	Secure   bool      `json:"secure"`
 }
 
+// PathMatch reports whether requestPath matches cookiePath according to RFC 6265 Section 5.1.4.
+//
+// Postconditions:
+//   - Correctly handles sub-paths requiring explicit slash boundaries (e.g., "/api" matches "/api/v1" but NOT "/api-v2").
+func PathMatch(reqPath, cookiePath string) bool {
+	if cookiePath == "" {
+		cookiePath = "/"
+	}
+
+	if reqPath == "" {
+		reqPath = "/"
+	}
+
+	if reqPath == cookiePath {
+		return true
+	}
+
+	if strings.HasPrefix(reqPath, cookiePath) {
+		if strings.HasSuffix(cookiePath, "/") {
+			return true
+		}
+
+		if len(reqPath) > len(cookiePath) && reqPath[len(cookiePath)] == '/' {
+			return true
+		}
+	}
+
+	return false
+}
+
+// FilterForRequest filters cookies matching destination u using RFC 6265 path-matching rules.
+func FilterForRequest(cookies []*http.Cookie, u *url.URL) []*http.Cookie {
+	if len(cookies) == 0 || u == nil {
+		return nil
+	}
+
+	reqPath := u.Path
+	if reqPath == "" {
+		reqPath = "/"
+	}
+
+	filtered := make([]*http.Cookie, 0, len(cookies))
+	for _, c := range cookies {
+		if PathMatch(reqPath, c.Path) {
+			filtered = append(filtered, c)
+		}
+	}
+
+	return filtered
+}
+
 // Mirror copies matching cookies from sourceURL to each targetURL in jar.
 func Mirror(jar http.CookieJar, sourceURL *url.URL, targetURLs []*url.URL, cookieNames ...string) {
 	if jar == nil || sourceURL == nil || len(targetURLs) == 0 || len(cookieNames) == 0 {
