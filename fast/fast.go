@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"slices"
 	"sync"
+	"sync/atomic"
 
 	"github.com/valyala/fasthttp"
 
@@ -423,7 +424,7 @@ type PooledResponse struct {
 	*Response
 	fastReq  *fasthttp.Request
 	fastResp *fasthttp.Response
-	once     sync.Once
+	closed   atomic.Bool
 }
 
 // NewPooledResponse acquires a pooled PooledResponse adapter wrapping fastReq and fastResp.
@@ -439,14 +440,14 @@ func NewPooledResponse(fastReq *fasthttp.Request, fastResp *fasthttp.Response) *
 	pr.Response.uncompressed = false
 	pr.fastReq = fastReq
 	pr.fastResp = fastResp
-	pr.once = sync.Once{}
+	pr.closed.Store(false)
 
 	return pr
 }
 
 // Close releases underlying fasthttp objects and returns PooledResponse to memory pool.
 func (r *PooledResponse) Close() error {
-	r.once.Do(func() {
+	if r.closed.CompareAndSwap(false, true) {
 		if r.fastReq != nil {
 			fasthttp.ReleaseRequest(r.fastReq)
 			r.fastReq = nil
@@ -461,7 +462,7 @@ func (r *PooledResponse) Close() error {
 		r.Response.trailers = nil
 		r.Response.uncompressed = false
 		pooledResponsePool.Put(r)
-	})
+	}
 
 	return nil
 }

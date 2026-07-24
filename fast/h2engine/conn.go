@@ -17,6 +17,8 @@ import (
 	"sync/atomic"
 	"time"
 
+	"golang.org/x/sys/cpu"
+
 	"github.com/lemon4ksan/aoni/internal/bytesconv"
 	"github.com/valyala/fasthttp"
 )
@@ -37,32 +39,40 @@ type ConnOpts struct {
 
 // Conn manages a multiplexed HTTP/2 connection over a net.Conn socket.
 type Conn struct {
-	c                  net.Conn
-	br                 *bufio.Reader
-	bw                 *bufio.Writer
-	enc                *HPACK
-	dec                *HPACK
-	nextID             uint32
+	c            net.Conn
+	br           *bufio.Reader
+	bw           *bufio.Writer
+	enc          *HPACK
+	dec          *HPACK
+	onDisconnect func(*Conn)
+	lastErr      error
+	orderedKeys  []string
+
+	windowCond *sync.Cond
+	windowMu   sync.Mutex
+
+	_ cpu.CacheLinePad
+
+	// Hot atomic counters isolated on their own 64-byte cache lines
 	serverWindow       int32
 	serverStreamWindow int32
 	maxWindow          int32
 	currentWindow      int32
 	openStreams        int32
-	current            Settings
-	serverS            Settings
-	reqQueued          sync.Map
-	in                 chan *Context
-	out                chan *FrameHeader
-	pingInterval       time.Duration
-	unacks             int
-	disableAcks        bool
-	lastErr            error
-	onDisconnect       func(*Conn)
-	closed             uint64
-	orderedKeys        []string
+	nextID             uint32
 
-	windowMu   sync.Mutex
-	windowCond *sync.Cond
+	_ cpu.CacheLinePad
+
+	current   Settings
+	serverS   Settings
+	reqQueued sync.Map
+
+	in           chan *Context
+	out          chan *FrameHeader
+	pingInterval time.Duration
+	unacks       int
+	closed       uint64
+	disableAcks  bool
 }
 
 // NewConn instantiates a new Conn wrapping socket c.

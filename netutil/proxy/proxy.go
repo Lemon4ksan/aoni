@@ -19,6 +19,8 @@ import (
 	"sync/atomic"
 	"time"
 
+	"golang.org/x/sys/cpu"
+
 	"github.com/lemon4ksan/miyako/generic"
 	"github.com/lemon4ksan/miyako/log"
 
@@ -238,17 +240,20 @@ type sessionEntry struct {
 
 // Rotator balances requests across a pool of proxy clients, supporting sticky sessions, health probing, and domain cooldowns.
 type Rotator struct {
-	mu            sync.RWMutex
-	clients       []*trackedClient
-	cfg           RotatorConfig
-	current       atomic.Uint32
 	stickyKeyFunc StickyKeyFunc
 	sessions      map[string]*sessionEntry
+	clients       []*trackedClient
+	ctx           context.Context
+	cancel        context.CancelFunc
 	sessionTTL    time.Duration
+	cfg           RotatorConfig
+	wg            sync.WaitGroup
 
-	ctx    context.Context
-	cancel context.CancelFunc
-	wg     sync.WaitGroup
+	_       cpu.CacheLinePad
+	mu      sync.RWMutex
+	_       cpu.CacheLinePad
+	current atomic.Uint32
+	_       cpu.CacheLinePad
 }
 
 // NewRotator instantiates a proxy pool [Rotator] using configured clients.

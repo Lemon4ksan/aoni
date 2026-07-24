@@ -6,7 +6,7 @@
 
 [![Go Reference](https://img.shields.io/badge/go-reference-007d9c?logo=go&logoColor=white&style=flat-square)](https://pkg.go.dev/github.com/lemon4ksan/aoni/fast)
 [![License](https://img.shields.io/github/license/lemon4ksan/aoni?style=flat-square)](LICENSE)
-[![RPS](https://img.shields.io/badge/throughput-192k%20RPS-brightgreen?style=flat-square)](#бескомпромиссная-производительность-сухая-математика)
+[![RPS](https://img.shields.io/badge/throughput-1.5M%2B%20RPS-brightgreen?style=flat-square)](#бескомпромиссная-производительность-сухая-математика)
 
 > _"Никаких компромиссов. Строгая геометрия памяти. Чистая скорость кремния."_
 
@@ -31,16 +31,60 @@ go get github.com/lemon4ksan/aoni
 
 ## Бескомпромиссная производительность: Сухая математика
 
-Посмотрите на цифры, перед которыми с треском затыкаются их академические теории. Сравнение напрямую со стандартным HTTP-стеком Go при одинаковой нагрузке с декодированием JSON:
+Посмотрите на цифры, перед которыми с треском затыкаются их академические теории. Сравнение напрямую со стандартным HTTP-стеком Go при одинаковой нагрузке:
 
-| Метрика (Полный цикл Запрос/Ответ + JSON) | Resty / `net/http` | `aoni` (Базовый) | `aoni/fast` | Преимущество (`fast` vs Resty) |
+| Метрика (Полный цикл Запрос/Ответ + JSON) | Resty (`net/http`) | `aoni` (Базовый) | `aoni/fast` | Преимущество (`fast` vs Resty) |
 | :--- | :---: | :---: | :---: | :---: |
-| **Задержка выполнения (`ns/op`)** | 50.1 мкс | 62.1 мкс | **5.9 мкс** | **Быстрее в 8.5 раз** |
-| **Память в куче (`B/op`)** | 6,540 Б | 9,872 Б | **436 Б** | **Легче в 15 раз** |
-| **Аллокации в куче (`allocs/op`)** | 82 аллок. | 87 аллок. | **12 аллок.** | **~В 7 раз меньше аллокаций** |
-| **Пиковая пропускная способность (1 нода)** | ~25k RPS | ~37k RPS | **192,000 RPS** | **Максимальная скорость кремния** |
+| **Задержка GET JSON (`ns/op`)** | 58 393 ns | 56 669 ns | **6 513 ns** | **Быстрее в ~9 раз** |
+| **Память в куче (`B/op`)** | 9 113 Б | 8 217 Б | **372 Б** | **Легче в ~24 раза** |
+| **Аллокации в куче (`allocs/op`)** | 91 аллок. | 82 аллок. | **9 аллок.** | **В ~10 раз меньше аллокаций** |
+| **Задержка HTTP/2 (`ns/op`)** | 76 519 ns | 76 519 ns | **68 164 ns** | **Быстрый H2 мультиплексинг** |
+| **Задержка HTTP/3 (`ns/op`)** | 131 281 ns | 131 281 ns | **111 150 ns** | **Нативный H3 QUIC движок** |
+| **Параллельная задержка (`ns/op`)** | 11 307 ns | 9 534 ns | **656 ns** | **В ~17 раз быстрее в параллель** |
+| **Пиковая пропускная способность** | ~30k RPS | ~35k RPS | **1 522 000+ RPS** | **1.5M+ RPS макс. скорость кремния** |
 
 * Процессор принадлежит вашему приложению — а не бюрократическим фреймворкам и паузам сборщика мусора.
+
+## 🛡️ Полное соответствие RFC, безопасность и почему нет причин использовать `net/http` вместо `aoni/fast`
+
+Движок **`aoni/fast`** объединяет скорость и нулевые аллокации `fasthttp` с защитой безопасности и стандартами академического уровня `net/http`:
+
+1. **Управление памятью, `sync.Pool` и предотвращение Use-After-Free / Data Race**:
+   - Безопасная копия тела ответа (`slices.Clone` в `BodyBytes()`), предотвращающая повреждение памяти при возврате объекта в `sync.Pool`.
+   - Явный Zero-Copy метод `UnsafeBodyBytes()` для прецизионных высоконагруженных сценариев.
+   - Передача владения памятью (Ownership Transfer) при отмене контекста: фоновая горутина возвращает ресурсы в `sync.Pool` только после завершения I/O, исключая Data Race.
+   - Защита от Data Race при хеджировании (`executeWithHedging`) с созданием изолированных клонов запросов.
+
+2. **Потоковый ввод-вывод (I/O) и защита от OOM**:
+   - Потоковая передача тел запросов (Streaming Body) через `SetBodyStreamWriter` без вычитывания гигабайтных файлов в память.
+   - Автоматический `GetBody` с rewind (`Seek`) для повторной отправки потоковых тел при 307/308 редиректах.
+   - Защита от Zip-бомб: декомпрессия (`gzip`/`brotli`/`zstd`) выполняется строго перед `SizeLimit` лимитом.
+   - Keep-Alive Slurping: считывание невычитанного остатка (до 2 KB) в `io.Discard` при закрытии/редиректе для сохранения сокета.
+
+3. **Безопасность протоколов (RFC Standards & Anti-Exploit)**:
+   - HTTP Request Smuggling Protection (RFC 9112): дедупликация и отказ от обработки при конфликтах `Content-Length`.
+   - HPACK Header Flood Limit (RFC 7541): жесткий лимит объема заголовков (10 МБ).
+   - Control Frame Flood Protection (Anti-DoS): расторжение соединения при спаме служебными кадрами (`PING`, `SETTINGS` >1000 подряд).
+   - Subdomain-Aware Cookie Scrubbing (RFC 6265): зачистка `Cookie` при Cross-Domain редиректах.
+   - HTTPS ➔ HTTP Referer Strip (RFC 7231): автоудаление `Referer` при даунгрейде схемы.
+   - Автоизвлечение UserInfo из URL в `Authorization: Basic`.
+
+4. **Протоколы H1, H2, H3 и сетевой стек**:
+   - HTTP/1.1 Anti-DPI (`HeaderOrderingConn`) с сохранением регистра и порядка заголовков.
+   - H2 Flow Control без Spin-Wait на условных переменных (`sync.Cond`).
+   - H2 Stream Lifecycle FSM (`streamIdle`, `streamOpen`, `streamHalfClosed`, `streamClosed`).
+   - Поддержка HTTP/2 & HTTP/3 Trailers и вычитка QPACK Encoder Stream.
+   - HTTP/3 QUIC Happy Eyeballs с авто-откатом на H2/H1 при блокировках UDP 443.
+   - Кэширование `Alt-Svc: h3` (RFC 7838).
+   - IDN Punycode & IPv6 Zone ID Stripping (`[fe80::1%eth0]` ➔ `[fe80::1]`).
+   - Domain Fronting изоляция SNI (RFC 6066).
+   - Поддержка паузы `Expect: 100-continue`.
+
+5. **Академические механизмы stdlib `net/http`**:
+   - Флаг `Response.Uncompressed`.
+   - `nothingWrittenError` (0-Byte Write Retry) для безопасного повтора на заснувших Keep-Alive сокетах.
+   - Реестр кастомных схем (`RegisterProtocol` / `WithProtocol`).
+   - Инспекция промежуточных ответов через `httptrace.Got1xxResponse`.
 
 ## Подземный монорельс: `fast.NewStdClient` и Bridge
 

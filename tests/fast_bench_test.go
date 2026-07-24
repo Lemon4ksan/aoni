@@ -248,3 +248,68 @@ func BenchmarkGET_JSON_Resty_FastBridged(b *testing.B) {
 		}
 	}
 }
+
+func BenchmarkGET_JSON_Aoni_FastBridged(b *testing.B) {
+	ln, srv := setupFastBenchServer()
+	defer func() {
+		_ = srv.Shutdown()
+		_ = ln.Close()
+	}()
+
+	fastClient := fast.NewClient(
+		option.WithBaseURL("http://inmemory"),
+		option.WithTimeout(5*time.Second),
+	)
+	fastClient.Engine().Dial = func(_ string) (net.Conn, error) {
+		return ln.Dial()
+	}
+
+	stdHTTPClient := fast.NewStdClient(fastClient)
+	aoniClient := aoni.NewClient(stdHTTPClient, option.WithBaseURL("http://inmemory"))
+	ctx := context.Background()
+
+	b.ReportAllocs()
+	b.ResetTimer()
+
+	for b.Loop() {
+		var user fastBenchUser
+		err := request.GetInto(ctx, aoniClient, "/user", &user)
+		if err != nil {
+			b.Fatalf("aoni fast bridged request failed: %v", err)
+		}
+
+		if user.ID != 42 {
+			b.Fatalf("invalid aoni fast response: %d", user.ID)
+		}
+	}
+}
+
+func BenchmarkGET_FastClient_Parallel(b *testing.B) {
+	ln, srv := setupFastBenchServer()
+	defer func() {
+		_ = srv.Shutdown()
+		_ = ln.Close()
+	}()
+
+	fastClient := fast.NewClient(
+		option.WithBaseURL("http://inmemory"),
+		option.WithTimeout(5*time.Second),
+	)
+	fastClient.Engine().Dial = func(_ string) (net.Conn, error) {
+		return ln.Dial()
+	}
+	ctx := context.Background()
+
+	b.ReportAllocs()
+	b.ResetTimer()
+
+	b.RunParallel(func(pb *testing.PB) {
+		for pb.Next() {
+			resp, err := fastClient.Request(ctx, "GET", "/user")
+			if err != nil {
+				b.Fatalf("fast parallel request failed: %v", err)
+			}
+			_ = resp.Close()
+		}
+	})
+}

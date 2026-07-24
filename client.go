@@ -22,6 +22,7 @@ import (
 	"github.com/quic-go/quic-go/http3"
 	utls "github.com/refraction-networking/utls"
 	"golang.org/x/net/http2"
+	"golang.org/x/sys/cpu"
 
 	"github.com/lemon4ksan/aoni/cookie"
 	"github.com/lemon4ksan/aoni/fingerprint"
@@ -63,12 +64,15 @@ type ClientOption generic.Option[*Config]
 // Client is an immutable, thread-safe HTTP and WebSocket client built on top of [HTTPDoer].
 type Client struct {
 	engine      HTTPDoer
+	defaults    ClientDefaults
 	network     NetworkConfig
 	fingerprint FingerprintConfig
-	defaults    ClientDefaults
 
+	_                        cpu.CacheLinePad
 	userAgentRotationCounter uint32
+	_                        cpu.CacheLinePad
 	proxyFailoverCounter     uint32
+	_                        cpu.CacheLinePad
 }
 
 // NewClient instantiates a new thread-safe [Client] wrapping the specified engine.

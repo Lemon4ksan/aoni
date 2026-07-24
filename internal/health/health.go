@@ -8,6 +8,8 @@ package health
 import (
 	"sync/atomic"
 	"time"
+
+	"golang.org/x/sys/cpu"
 )
 
 // Status represents the operational health state of a tracked network endpoint.
@@ -42,15 +44,19 @@ func (s Status) String() string {
 
 // Tracker monitors endpoint reliability via failure thresholds and manages cooldown state recovery.
 type Tracker struct {
-	failCount   atomic.Uint32
-	unhealthy   atomic.Bool
-	recoveredAt atomic.Int64
-
-	maxFails    uint32
-	retryAfter  time.Duration
-	name        string
 	onUnhealthy func(name string, fails uint32, retryAfter time.Duration)
 	onRecovered func(name string)
+	name        string
+	retryAfter  time.Duration
+	maxFails    uint32
+
+	_           cpu.CacheLinePad
+	recoveredAt atomic.Int64
+	_           cpu.CacheLinePad
+	failCount   atomic.Uint32
+	_           cpu.CacheLinePad
+	unhealthy   atomic.Bool
+	_           cpu.CacheLinePad
 }
 
 // NewTracker creates a thread-safe [Tracker] configured with failure thresholds and state callbacks.

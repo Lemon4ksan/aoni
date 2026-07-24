@@ -23,6 +23,7 @@ import (
 
 	"github.com/quic-go/quic-go"
 	"github.com/valyala/fasthttp"
+	"golang.org/x/sys/cpu"
 
 	"github.com/lemon4ksan/aoni"
 	"github.com/lemon4ksan/aoni/fast/h2engine"
@@ -38,8 +39,12 @@ type Client struct {
 	h2Clients map[string]*h2engine.Client
 	h3Client  *h3engine.Client
 	config    aoni.Config
-	h2Mutex   sync.Mutex
-	h3Once    sync.Once
+
+	_       cpu.CacheLinePad
+	h2Mutex sync.Mutex
+	_       cpu.CacheLinePad
+	h3Once  sync.Once
+	_       cpu.CacheLinePad
 }
 
 // Option is an alias for [aoni.ClientOption].
@@ -676,9 +681,14 @@ func extractUserInfoAndSetAuth(req *fasthttp.Request) {
 }
 
 type altSvcCache struct {
-	mu        sync.RWMutex
+	mu sync.RWMutex
+
+	_ cpu.CacheLinePad
+
 	hosts     map[string]time.Time
 	cooldowns map[string]time.Time
+
+	_ cpu.CacheLinePad
 }
 
 var globalAltSvcCache = &altSvcCache{
@@ -944,14 +954,26 @@ func (c *Client) getH2Client(host string) *h2engine.Client {
 
 func resolveALPNMode(ctx context.Context, cfg *aoni.Config, host string) string {
 	reqCfg := aoni.GetRequestConfig(ctx)
-	if reqCfg != nil && len(reqCfg.ALPNOverride) > 0 {
-		first := reqCfg.ALPNOverride[0]
-		if first == aoni.AlpnH3 || first == aoni.AlpnH2 {
-			return first
+	if reqCfg != nil {
+		if len(reqCfg.Modifiers) > 0 && len(reqCfg.ALPNOverride) == 0 {
+			dummyReq := NewRequest(nil)
+			dummyReq.SetContext(ctx)
+			for _, m := range reqCfg.Modifiers {
+				if m != nil {
+					m(dummyReq)
+				}
+			}
+		}
+
+		if len(reqCfg.ALPNOverride) > 0 {
+			first := reqCfg.ALPNOverride[0]
+			if first == aoni.AlpnH3 || first == aoni.AlpnH2 {
+				return first
+			}
 		}
 	}
 
-	if globalAltSvcCache.IsH3Supported(host) {
+	if host != "" && globalAltSvcCache.IsH3Supported(host) {
 		return aoni.AlpnH3
 	}
 
@@ -1095,41 +1117,24 @@ func (c *Client) resolveTargetURL(req aoni.Request, path string) error {
 		return nil
 	}
 
-	fastReq, isFast := req.EngineRequest().(*fasthttp.Request)
-	if isFast && c.config.Defaults.BaseURL != nil && c.config.Defaults.BaseURL.Host != "" {
-		uri := fastReq.URI()
-		uri.SetScheme(c.config.Defaults.BaseURL.Scheme)
-		uri.SetHost(c.config.Defaults.BaseURL.Host)
-
-		if path != "" && path != "/" {
-			uri.SetPath(path)
+	if c.config.Defaults.BaseURL != nil && c.config.Defaults.BaseURL.Host != "" {
+		base := c.config.Defaults.BaseURL
+		basePath := strings.TrimSuffix(base.Path, "/")
+		cleanPath := path
+		if cleanPath != "" && cleanPath[0] != '/' {
+			cleanPath = "/" + cleanPath
 		}
 
+		fullURL := base.Scheme + "://" + base.Host + basePath + cleanPath
+		req.SetURL(fullURL)
 		return nil
 	}
 
-	baseURLTrimmed := c.config.Defaults.BaseURLTrimmedString
-	if baseURLTrimmed == "" {
-		if path == "" {
-			return ErrTargetURLEmpty
-		}
-
-		req.SetURL(path)
-		return nil
+	if path == "" {
+		return ErrTargetURLEmpty
 	}
 
-	if path == "" || path == "/" {
-		req.SetURL(c.config.Defaults.BaseURLString)
-		return nil
-	}
-
-	cleanPath := path
-	if path[0] != '/' {
-		cleanPath = "/" + path
-	}
-
-	req.SetURL(baseURLTrimmed + cleanPath)
-
+	req.SetURL(path)
 	return nil
 }
 

@@ -92,3 +92,10 @@ func (s *InMemoryStore) purgeExpired(now time.Time) {
 		}
 	}
 }
+
+// Close cancels the background janitor loop.
+func (s *InMemoryStore) Close() {
+	if s.cancel != nil {
+		s.cancel()
+	}
+}
