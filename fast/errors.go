@@ -27,4 +27,7 @@ var (
 
 	// ErrHedgingFailed is returned when all hedged request attempts fail to execute.
 	ErrHedgingFailed = errors.New("fast: all hedged request attempts failed")
+
+	// ErrNothingWritten indicates a network error occurred before any request bytes reached the socket.
+	ErrNothingWritten = errors.New("fast: connection closed before any request bytes were written")
 )

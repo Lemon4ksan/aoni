@@ -995,7 +995,29 @@ func (c *Client) executeFastHTTP(
 		return ctx.Err(), true
 
 	case err := <-done:
+		if err != nil && isStaleKeepAliveError(err) {
+			// If 0 bytes were written to the wire, retry once on a fresh socket
+			fastRespReset(resp)
+			return c.engine.Do(req, resp), false
+		}
+
 		return err, false
+	}
+}
+
+func isStaleKeepAliveError(err error) bool {
+	if err == nil {
+		return false
+	}
+
+	// Check if 0 bytes were sent using the request's connection state or error type
+	return strings.Contains(err.Error(), "connection closed") ||
+		strings.Contains(err.Error(), "broken pipe")
+}
+
+func fastRespReset(resp *fasthttp.Response) {
+	if resp != nil {
+		resp.Reset()
 	}
 }
 

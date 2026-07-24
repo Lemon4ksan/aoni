@@ -58,8 +58,11 @@ func (d *fastDialer) Dial(addr string) (net.Conn, error) {
 		return nil, err
 	}
 
+	// Track written bytes for zero-byte write idle retry logic
+	trackingConn := netutil.NewWriteTrackingConn(rawConn)
+
 	var (
-		conn            = rawConn
+		conn            net.Conn = trackingConn
 		negotiatedProto string
 	)
 
@@ -73,7 +76,7 @@ func (d *fastDialer) Dial(addr string) (net.Conn, error) {
 			InsecureSkipVerify: d.config.Engine.InsecureSkipVerify,
 		}
 
-		uConn, _, err := netdial.HandshakeUTLS(ctx, rawConn, host, utlsOpts)
+		uConn, _, err := netdial.HandshakeUTLS(ctx, trackingConn, host, utlsOpts)
 		if err != nil {
 			return nil, err
 		}
