@@ -15,6 +15,8 @@ import (
 	"github.com/valyala/fasthttp"
 )
 
+const errCodeH3RequestCancelled = 0x10c
+
 // ClientConn manages HTTP/3 frame exchanges over a quic.Conn session.
 type ClientConn struct {
 	conn     *quic.Conn
@@ -114,16 +116,34 @@ func (cc *ClientConn) readControlStream(r quicvarint.Reader) {
 }
 
 // Do executes a fasthttp.Request over a QUIC stream and populates fasthttp.Response.
+//
+// Postconditions:
+//   - Aborts QUIC stream reads and writes immediately if ctx is canceled.
 func (cc *ClientConn) Do(ctx context.Context, req *fasthttp.Request, resp *fasthttp.Response, headerOrder []string) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+
 	str, err := cc.conn.OpenStreamSync(ctx)
 	if err != nil {
 		return err
 	}
 
+	done := make(chan struct{})
+	defer close(done)
+
+	go func() {
+		select {
+		case <-ctx.Done():
+			str.CancelWrite(errCodeH3RequestCancelled)
+			str.CancelRead(errCodeH3RequestCancelled)
+		case <-done:
+		}
+	}()
+
 	defer str.Close()
 
 	if err := cc.sendRequest(str, req, headerOrder); err != nil {
-		str.CancelWrite(0x10c)
 		return err
 	}
 

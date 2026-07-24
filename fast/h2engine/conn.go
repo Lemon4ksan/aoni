@@ -146,6 +146,29 @@ func (c *Conn) CanOpenStream() bool {
 	return atomic.LoadInt32(&c.openStreams) < int32(c.serverS.maxStreams)
 }
 
+// CancelStream terminates an active HTTP/2 stream by transmitting an RST_STREAM frame.
+func (c *Conn) CancelStream(ctx *Context) {
+	if ctx == nil || ctx.StreamID == 0 {
+		return
+	}
+
+	c.reqQueued.Delete(ctx.StreamID)
+	atomic.AddInt32(&c.openStreams, -1)
+
+	fr := AcquireFrameHeader()
+	fr.SetStream(ctx.StreamID)
+
+	rst := AcquireFrame(FrameResetStream).(*RstStream)
+	rst.SetCode(StreamCanceled)
+	fr.SetBody(rst)
+
+	select {
+	case c.out <- fr:
+	default:
+		ReleaseFrameHeader(fr)
+	}
+}
+
 // Closed reports whether the connection has been closed.
 func (c *Conn) Closed() bool {
 	return atomic.LoadUint64(&c.closed) == 1
@@ -318,6 +341,7 @@ func (c *Conn) writeRequest(ctx *Context) error {
 
 	id := c.nextID
 	c.nextID += 2
+	ctx.StreamID = id
 
 	fr := AcquireFrameHeader()
 	defer ReleaseFrameHeader(fr)

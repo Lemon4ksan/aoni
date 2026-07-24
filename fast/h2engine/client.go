@@ -6,6 +6,7 @@ package h2engine
 
 import (
 	"container/list"
+	"context"
 	"sync"
 	"time"
 
@@ -25,6 +26,7 @@ type Context struct {
 	Request  *fasthttp.Request
 	Response *fasthttp.Response
 	Err      chan error
+	StreamID uint32
 }
 
 // Client manages connection pooling and stream allocation for HTTP/2.
@@ -80,45 +82,59 @@ func (cl *Client) createConn() (*Conn, *list.Element, error) {
 }
 
 // Do executes req over an available HTTP/2 stream and writes the result into res.
-func (cl *Client) Do(req *fasthttp.Request, res *fasthttp.Response) error {
-	var (
-		c   *Conn
-		err error
-	)
+//
+// Postconditions:
+//   - Immediately cancels stream execution if ctx expires before completion.
+func (cl *Client) Do(ctx context.Context, req *fasthttp.Request, res *fasthttp.Response) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 
+	conn, err := cl.selectConn()
+	if err != nil {
+		return err
+	}
+
+	errCh := make(chan error, 1)
+	reqCtx := &Context{
+		Request:  req,
+		Response: res,
+		Err:      errCh,
+	}
+
+	conn.Write(reqCtx)
+
+	select {
+	case <-ctx.Done():
+		conn.CancelStream(reqCtx)
+		return ctx.Err()
+
+	case err := <-errCh:
+		return err
+	}
+}
+
+func (cl *Client) selectConn() (*Conn, error) {
 	cl.lck.Lock()
+	defer cl.lck.Unlock()
 
 	var next *list.Element
 
-	for e := cl.conns.Front(); c == nil; e = next {
-		if e != nil {
-			c = e.Value.(*Conn)
-		} else {
-			c, e, err = cl.createConn()
-			if err != nil {
-				cl.lck.Unlock()
-				return err
-			}
+	for e := cl.conns.Front(); e != nil; e = next {
+		c := e.Value.(*Conn)
+		next = e.Next()
+
+		if c.Closed() {
+			cl.conns.Remove(e)
+			continue
 		}
 
-		if !c.CanOpenStream() || c.Closed() {
-			next = e.Next()
-			if c.Closed() {
-				cl.conns.Remove(e)
-			}
-
-			c = nil
+		if c.CanOpenStream() {
+			return c, nil
 		}
 	}
 
-	cl.lck.Unlock()
+	c, _, err := cl.createConn()
 
-	ch := make(chan error, 1)
-	c.Write(&Context{
-		Request:  req,
-		Response: res,
-		Err:      ch,
-	})
-
-	return <-ch
+	return c, err
 }

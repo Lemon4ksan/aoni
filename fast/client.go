@@ -5,7 +5,6 @@
 package fast
 
 import (
-	"slices"
 	"context"
 	"crypto/tls"
 	"net"
@@ -75,12 +74,12 @@ func (c *Client) Engine() *fasthttp.Client {
 	return c.engine
 }
 
-// Request executes an HTTP request, seamlessly routing execution across
-// HTTP/1.1 (fasthttp), native HTTP/2 (h2engine), or native HTTP/3 (h3engine).
+// Request executes an HTTP request across HTTP/1.1, native HTTP/2, or native HTTP/3.
 //
 // Postconditions:
 //   - The returned [aoni.Response] MUST be closed via [aoni.Response.Close]
 //     to return objects back to [sync.Pool].
+//   - Aborts execution immediately if ctx is canceled.
 func (c *Client) Request(
 	ctx context.Context,
 	method, path string,
@@ -103,43 +102,38 @@ func (c *Client) Request(
 	c.applyDefaultHeaders(reqAdapter)
 	c.applyModifiers(reqAdapter, mods)
 
-	alpnMode := resolveALPNMode(reqAdapter.Context(), &c.config)
+	reqCtx := reqAdapter.Context()
+	alpnMode := resolveALPNMode(reqCtx, &c.config)
+
+	var (
+		err          error
+		autoReleased bool
+	)
+
 	switch alpnMode {
 	case aoni.AlpnH3:
 		h3 := c.getH3Client()
-		err := h3.Do(ctx, fastReq, fastResp, c.config.Fingerprint.HeaderOrder)
-		if err != nil {
-			fasthttp.ReleaseRequest(fastReq)
-			fasthttp.ReleaseResponse(fastResp)
-
-			return nil, err
-		}
-
-		return NewPooledResponse(fastReq, fastResp), nil
+		err = h3.Do(reqCtx, fastReq, fastResp, c.config.Fingerprint.HeaderOrder)
 
 	case aoni.AlpnH2:
 		host := string(fastReq.URI().Host())
 		h2Cl := c.getH2Client(host)
-		err := h2Cl.Do(fastReq, fastResp)
-		if err != nil {
-			fasthttp.ReleaseRequest(fastReq)
-			fasthttp.ReleaseResponse(fastResp)
-
-			return nil, err
-		}
-
-		return NewPooledResponse(fastReq, fastResp), nil
+		err = h2Cl.Do(reqCtx, fastReq, fastResp)
 
 	default:
-		if err := c.executeFastHTTP(ctx, fastReq, fastResp); err != nil {
+		err, autoReleased = c.executeFastHTTP(reqCtx, fastReq, fastResp)
+	}
+
+	if err != nil {
+		if !autoReleased {
 			fasthttp.ReleaseRequest(fastReq)
 			fasthttp.ReleaseResponse(fastResp)
-
-			return nil, err
 		}
 
-		return NewPooledResponse(fastReq, fastResp), nil
+		return nil, err
 	}
+
+	return NewPooledResponse(fastReq, fastResp), nil
 }
 
 // Do executes a prepared [aoni.Request] contract, routing through the target
@@ -150,8 +144,8 @@ func (c *Client) Do(req aoni.Request) (aoni.Response, error) {
 	}
 
 	ctx := req.Context()
-	fastReq, ok := req.EngineRequest().(*fasthttp.Request)
-	if !ok {
+	fastReq, isFastReq := req.EngineRequest().(*fasthttp.Request)
+	if !isFastReq {
 		fastReq = fasthttp.AcquireRequest()
 		fastReq.Header.SetMethod(req.Method())
 		fastReq.SetRequestURI(req.URL())
@@ -166,19 +160,29 @@ func (c *Client) Do(req aoni.Request) (aoni.Response, error) {
 	fastResp := fasthttp.AcquireResponse()
 	alpnMode := resolveALPNMode(ctx, &c.config)
 
-	var err error
+	var (
+		err          error
+		autoReleased bool
+	)
+
 	switch alpnMode {
 	case aoni.AlpnH3:
 		err = c.getH3Client().Do(ctx, fastReq, fastResp, c.config.Fingerprint.HeaderOrder)
 	case aoni.AlpnH2:
 		host := string(fastReq.URI().Host())
-		err = c.getH2Client(host).Do(fastReq, fastResp)
+		err = c.getH2Client(host).Do(ctx, fastReq, fastResp)
 	default:
-		err = c.executeFastHTTP(ctx, fastReq, fastResp)
+		err, autoReleased = c.executeFastHTTP(ctx, fastReq, fastResp)
 	}
 
 	if err != nil {
-		fasthttp.ReleaseResponse(fastResp)
+		if !autoReleased {
+			fasthttp.ReleaseResponse(fastResp)
+			if !isFastReq {
+				fasthttp.ReleaseRequest(fastReq)
+			}
+		}
+
 		return nil, err
 	}
 
@@ -257,11 +261,21 @@ func resolveALPNMode(ctx context.Context, cfg *aoni.Config) string {
 		}
 	}
 
-	if len(cfg.Fingerprint.HeaderOrder) > 0 && slices.Contains(cfg.Fingerprint.HeaderOrder, ":method") {
+	if len(cfg.Fingerprint.HeaderOrder) > 0 && slicesContains(cfg.Fingerprint.HeaderOrder, ":method") {
 		return aoni.AlpnH2
 	}
 
 	return aoni.AlpnHTTP
+}
+
+func slicesContains(slice []string, target string) bool {
+	for _, item := range slice {
+		if item == target {
+			return true
+		}
+	}
+
+	return false
 }
 
 func (c *Client) applyEngineConfig() {
@@ -313,16 +327,40 @@ func (c *Client) executeFastHTTP(
 	ctx context.Context,
 	req *fasthttp.Request,
 	resp *fasthttp.Response,
-) error {
-	if deadline, ok := ctx.Deadline(); ok {
-		return c.engine.DoDeadline(req, resp, deadline)
+) (err error, autoReleased bool) {
+	if err := ctx.Err(); err != nil {
+		return err, false
 	}
 
-	if c.config.Engine.Timeout > 0 {
-		return c.engine.DoTimeout(req, resp, c.config.Engine.Timeout)
-	}
+	done := make(chan error, 1)
 
-	return c.engine.Do(req, resp)
+	go func() {
+		if deadline, ok := ctx.Deadline(); ok {
+			done <- c.engine.DoDeadline(req, resp, deadline)
+			return
+		}
+
+		if c.config.Engine.Timeout > 0 {
+			done <- c.engine.DoTimeout(req, resp, c.config.Engine.Timeout)
+			return
+		}
+
+		done <- c.engine.Do(req, resp)
+	}()
+
+	select {
+	case <-ctx.Done():
+		go func() {
+			<-done
+			fasthttp.ReleaseRequest(req)
+			fasthttp.ReleaseResponse(resp)
+		}()
+
+		return ctx.Err(), true
+
+	case err := <-done:
+		return err, false
+	}
 }
 
 func (c *Client) resolveTargetURL(req aoni.Request, path string) error {

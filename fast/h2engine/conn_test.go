@@ -180,7 +180,7 @@ func TestClientServerEndToEnd(t *testing.T) {
 	req.Header.SetMethod("GET")
 	req.SetRequestURI("https://example.com/test")
 
-	if err := client.Do(req, resp); err != nil {
+	if err := client.Do(context.Background(), req, resp); err != nil {
 		t.Fatalf("client.Do failed: %v", err)
 	}
 
@@ -294,7 +294,7 @@ func TestOrderedHeadersSequenceOnWire(t *testing.T) {
 	done := make(chan error, 1)
 
 	go func() {
-		done <- client.Do(req, resp)
+		done <- client.Do(context.Background(), req, resp)
 	}()
 
 	select {
