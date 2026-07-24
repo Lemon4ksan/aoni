@@ -96,6 +96,11 @@ func (c *Conn) CancelStream(ctx *Context) {
 		return
 	}
 
+	if ctx.State() == streamClosed {
+		return
+	}
+
+	ctx.SetState(streamClosed)
 	c.reqQueued.Delete(ctx.StreamID)
 	atomic.AddInt32(&c.openStreams, -1)
 
@@ -314,14 +319,21 @@ func (c *Conn) readLoop() {
 
 		if ri, ok := c.reqQueued.Load(fr.Stream()); ok {
 			r := ri.(*Context)
-			err := c.readStream(fr, r.Response)
+			if r.State() == streamClosed {
+				ReleaseFrameHeader(fr)
+				continue
+			}
 
+			err := c.readStream(fr, r.Response)
 			if err == nil {
 				if fr.Flags().Has(FlagEndStream) {
+					r.SetState(streamClosed)
 					c.finish(r, fr.Stream(), nil)
 				}
 			} else {
+				r.SetState(streamClosed)
 				c.finish(r, fr.Stream(), err)
+
 				if errors.Is(err, FlowControlError) {
 					ReleaseFrameHeader(fr)
 					break
@@ -344,6 +356,14 @@ func (c *Conn) writeRequest(ctx *Context) error {
 	id := c.nextID
 	c.nextID += 2
 	ctx.StreamID = id
+	ctx.SetState(streamOpen)
+
+	initWin := int32(c.serverS.MaxWindowSize())
+	if initWin <= 0 {
+		initWin = 65535
+	}
+
+	atomic.StoreInt32(&ctx.streamWindow, initWin)
 
 	fr := AcquireFrameHeader()
 	defer ReleaseFrameHeader(fr)
@@ -359,12 +379,16 @@ func (c *Conn) writeRequest(ctx *Context) error {
 	h.SetEndStream(!hasBody)
 	h.SetEndHeaders(true)
 
+	if !hasBody {
+		ctx.SetState(streamHalfClosed)
+	}
+
 	c.reqQueued.Store(id, ctx)
 
 	_, err := fr.WriteTo(c.bw)
 	if err == nil && hasBody {
 		ReleaseFrame(h)
-		err = writeData(c.bw, fr, req.Body())
+		err = c.writeData(fr, ctx, req.Body())
 	}
 
 	if err == nil {
@@ -377,9 +401,65 @@ func (c *Conn) writeRequest(ctx *Context) error {
 	if err != nil {
 		c.lastErr = err
 		c.reqQueued.Delete(id)
+		ctx.SetState(streamClosed)
 	}
 
 	return err
+}
+
+func (c *Conn) writeData(fh *FrameHeader, ctx *Context, body []byte) error {
+	data := AcquireFrame(FrameData).(*Data)
+	fh.SetBody(data)
+
+	offset := 0
+	bodyLen := len(body)
+
+	for offset < bodyLen {
+		chunkSize := c.calculateChunkSize(ctx, bodyLen-offset)
+		if chunkSize <= 0 {
+			time.Sleep(1 * time.Millisecond)
+			continue
+		}
+
+		end := offset + chunkSize
+		data.SetEndStream(end == bodyLen)
+		data.SetPadding(false)
+		data.SetData(body[offset:end])
+
+		if _, err := fh.WriteTo(c.bw); err != nil {
+			return err
+		}
+
+		atomic.AddInt32(&c.serverWindow, -int32(chunkSize))
+		atomic.AddInt32(&ctx.streamWindow, -int32(chunkSize))
+		offset = end
+	}
+
+	if bodyLen > 0 {
+		ctx.SetState(streamHalfClosed)
+	}
+
+	return nil
+}
+
+func (c *Conn) calculateChunkSize(ctx *Context, remaining int) int {
+	maxFrame := int(c.serverS.MaxFrameSize())
+	if maxFrame <= 0 {
+		maxFrame = 16384
+	}
+
+	serverWin := atomic.LoadInt32(&c.serverWindow)
+	streamWin := atomic.LoadInt32(&ctx.streamWindow)
+
+	win := int(min(streamWin, serverWin))
+
+	if win <= 0 {
+		return 0
+	}
+
+	chunk := min(remaining, win)
+
+	return min(chunk, maxFrame)
 }
 
 func (c *Conn) encodeRequestHeaders(h *Headers, req *fasthttp.Request) {
@@ -445,29 +525,6 @@ func (c *Conn) appendOrderedHeaders(h *Headers, req *fasthttp.Request, hf *Heade
 	})
 }
 
-func writeData(bw *bufio.Writer, fh *FrameHeader, body []byte) error {
-	step := 1 << 14
-
-	data := AcquireFrame(FrameData).(*Data)
-	fh.SetBody(data)
-
-	var err error
-
-	for i := 0; err == nil && i < len(body); i += step {
-		if i+step >= len(body) {
-			step = len(body) - i
-		}
-
-		data.SetEndStream(i+step == len(body))
-		data.SetPadding(false)
-		data.SetData(body[i : step+i])
-
-		_, err = fh.WriteTo(bw)
-	}
-
-	return err
-}
-
 func (c *Conn) readNext() (*FrameHeader, error) {
 	for {
 		fr, err := ReadFrameFrom(c.br)
@@ -529,12 +586,42 @@ func (c *Conn) handleWindowUpdate(fr *FrameHeader) error {
 		return ErrInvalidWindowIncrement
 	}
 
+	streamID := fr.Stream()
+	if streamID == 0 {
+		return c.updateServerWindow(inc)
+	}
+
+	return c.updateStreamWindow(streamID, inc)
+}
+
+func (c *Conn) updateServerWindow(inc int32) error {
 	old := atomic.LoadInt32(&c.serverWindow)
 	if old > 0 && old > (1<<31-1)-inc {
 		return ErrWindowAboveLimits
 	}
 
 	atomic.AddInt32(&c.serverWindow, inc)
+
+	return nil
+}
+
+func (c *Conn) updateStreamWindow(streamID uint32, inc int32) error {
+	v, ok := c.reqQueued.Load(streamID)
+	if !ok {
+		return nil
+	}
+
+	reqCtx, ok := v.(*Context)
+	if !ok {
+		return nil
+	}
+
+	old := atomic.LoadInt32(&reqCtx.streamWindow)
+	if old > 0 && old > (1<<31-1)-inc {
+		return ErrWindowAboveLimits
+	}
+
+	atomic.AddInt32(&reqCtx.streamWindow, inc)
 
 	return nil
 }

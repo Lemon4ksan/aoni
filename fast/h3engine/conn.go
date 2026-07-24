@@ -53,6 +53,15 @@ func NewClientConn(conn *quic.Conn, settings *Settings) (*ClientConn, error) {
 	return cc, nil
 }
 
+func (cc *ClientConn) isClosed() bool {
+	select {
+	case <-cc.closed:
+		return true
+	default:
+		return cc.conn.Context().Err() != nil
+	}
+}
+
 func (cc *ClientConn) setupControlStream() error {
 	str, err := cc.conn.OpenUniStream()
 	if err != nil {
@@ -90,10 +99,27 @@ func (cc *ClientConn) handleUnidirectionalStream(str *quic.ReceiveStream) {
 	switch streamType {
 	case StreamTypeControl:
 		cc.readControlStream(r)
-	case StreamTypeQPACKEncoder, StreamTypeQPACKDecoder:
+	case StreamTypeQPACKEncoder:
+		cc.readQPACKEncoderStream(r)
+	case StreamTypeQPACKDecoder:
 		return
 	default:
 		str.CancelRead(0x103)
+	}
+}
+
+func (cc *ClientConn) readQPACKEncoderStream(r quicvarint.Reader) {
+	buf := make([]byte, 4096)
+
+	for {
+		n, err := r.Read(buf)
+		if n > 0 {
+			_ = cc.qpack.WriteDecoderTable(buf[:n])
+		}
+
+		if err != nil {
+			return
+		}
 	}
 }
 

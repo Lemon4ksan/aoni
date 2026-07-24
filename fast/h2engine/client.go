@@ -9,12 +9,22 @@ import (
 	"context"
 	"errors"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/valyala/fasthttp"
 )
 
 const DefaultPingInterval = 3 * time.Second
+
+type streamState int32
+
+const (
+	streamIdle streamState = iota
+	streamOpen
+	streamHalfClosed
+	streamClosed
+)
 
 // ClientOpts configures the HTTP/2 client multiplexer.
 type ClientOpts struct {
@@ -24,10 +34,22 @@ type ClientOpts struct {
 
 // Context maps a fasthttp request/response pair to an asynchronous stream execution.
 type Context struct {
-	Request  *fasthttp.Request
-	Response *fasthttp.Response
-	Err      chan error
-	StreamID uint32
+	Request      *fasthttp.Request
+	Response     *fasthttp.Response
+	Err          chan error
+	StreamID     uint32
+	streamWindow int32
+	state        atomic.Int32
+}
+
+// State yields current lifecycle state of the HTTP/2 stream.
+func (ctx *Context) State() streamState {
+	return streamState(ctx.state.Load())
+}
+
+// SetState updates lifecycle state of the HTTP/2 stream.
+func (ctx *Context) SetState(s streamState) {
+	ctx.state.Store(int32(s))
 }
 
 // Client manages connection pooling and stream allocation for HTTP/2.

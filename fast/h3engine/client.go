@@ -47,6 +47,9 @@ func NewClient(tlsCfg *tls.Config, quicCfg *quic.Config) *Client {
 }
 
 // Do executes a fasthttp.Request over HTTP/3 to the destination server, writing response into resp.
+//
+// Postconditions:
+//   - Automatically purges closed QUIC connections and reconnects on connection loss.
 func (c *Client) Do(ctx context.Context, req *fasthttp.Request, resp *fasthttp.Response, headerOrder []string) error {
 	host := string(req.URI().Host())
 
@@ -66,8 +69,12 @@ func (c *Client) Do(ctx context.Context, req *fasthttp.Request, resp *fasthttp.R
 func (c *Client) getConn(ctx context.Context, host string) (*ClientConn, error) {
 	c.mutex.Lock()
 	if conn, ok := c.conns[host]; ok {
-		c.mutex.Unlock()
-		return conn, nil
+		if !conn.isClosed() {
+			c.mutex.Unlock()
+			return conn, nil
+		}
+
+		delete(c.conns, host)
 	}
 	c.mutex.Unlock()
 

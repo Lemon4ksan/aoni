@@ -25,11 +25,19 @@ type QPACKCodec struct {
 	decoder *qpack.Decoder
 }
 
-// NewQPACKCodec instantiates a new QPACKCodec with default table capacities.
+// NewQPACKCodec instantiates a new QPACKCodec.
 func NewQPACKCodec() *QPACKCodec {
 	return &QPACKCodec{
 		decoder: qpack.NewDecoder(),
 	}
+}
+
+// WriteDecoderTable processes instructions received over the QPACK Encoder Stream.
+//
+// Note: Currently quic-go/qpack operates on static tables and does not expose
+// dynamic table instructions, so incoming bytes are safely consumed.
+func (q *QPACKCodec) WriteDecoderTable(_ []byte) error {
+	return nil
 }
 
 // EncodeRequestHeaders encodes a fasthttp request header into a QPACK block,
@@ -49,8 +57,9 @@ func (q *QPACKCodec) EncodeRequestHeaders(w io.Writer, req *fasthttp.Request, or
 	if len(orderedKeys) > 0 {
 		q.encodeOrderedHeaders(enc, req, orderedKeys)
 	} else {
-		req.Header.VisitAll(func(k, v []byte) {
+		req.Header.All()(func(k, v []byte) bool {
 			enc.WriteField(qpack.HeaderField{Name: toLowerCopy(k), Value: string(v)})
+			return true
 		})
 	}
 
@@ -74,11 +83,11 @@ func (q *QPACKCodec) encodeOrderedHeaders(enc *qpack.Encoder, req *fasthttp.Requ
 		}
 	}
 
-	req.Header.VisitAll(func(k, v []byte) {
-		kStr := string(k)
-		if !visited[kStr] {
+	req.Header.All()(func(k, v []byte) bool {
+		if !visited[string(k)] {
 			enc.WriteField(qpack.HeaderField{Name: toLowerCopy(k), Value: string(v)})
 		}
+		return true
 	})
 }
 
