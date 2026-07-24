@@ -55,7 +55,7 @@ func (d *fastDialer) Dial(addr string) (net.Conn, error) {
 	}
 
 	var (
-		conn            net.Conn = rawConn
+		conn            = rawConn
 		negotiatedProto string
 	)
 

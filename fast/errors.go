@@ -24,4 +24,7 @@ var (
 
 	// ErrCannotRewind is returned when a stream request body cannot be rewound for a 307/308 redirect.
 	ErrCannotRewind = errors.New("fast: cannot rewind request body stream for redirect")
+
+	// ErrHedgingFailed is returned when all hedged request attempts fail to execute.
+	ErrHedgingFailed = errors.New("fast: all hedged request attempts failed")
 )

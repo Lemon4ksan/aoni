@@ -79,7 +79,7 @@ func (c *Client) Engine() *fasthttp.Client {
 }
 
 // Request executes an HTTP request across HTTP/1.1, native HTTP/2, or native HTTP/3.
-// Handles redirects, cookies, proxy failover, response validation, and WAF challenges.
+// Handles redirects, cookies, proxy failover, hedging, response validation, WAF challenges, and telemetry.
 //
 // Postconditions:
 //   - The returned [aoni.Response] MUST be closed via [aoni.Response.Close]
@@ -172,29 +172,145 @@ func (c *Client) dispatchPipeline(
 	fastResp *fasthttp.Response,
 	reqAdapter *Request,
 ) (err error, autoReleased bool) {
+	startTime := time.Now()
+
 	c.applyCookies(fastReq)
 
-	if c.config.Defaults.Pipeline.ProxyFailover != nil {
-		err, autoReleased = c.executeWithProxyFailover(ctx, fastReq, fastResp, reqAdapter)
-	} else {
-		err, autoReleased = c.executeWithRedirects(ctx, fastReq, fastResp, reqAdapter)
-	}
-
+	err, autoReleased = c.executeWithHedging(ctx, fastReq, fastResp, reqAdapter)
 	if err != nil {
+		c.recordTelemetry(ctx, fastReq, nil, err, startTime)
 		return err, autoReleased
 	}
 
 	c.captureCookies(fastReq, fastResp)
 
 	if valErr := c.validateResponse(fastReq, fastResp); valErr != nil {
+		c.recordTelemetry(ctx, fastReq, fastResp, valErr, startTime)
 		return valErr, false
 	}
 
 	if wafErr := c.handleWAFChallenge(ctx, fastReq, fastResp); wafErr != nil {
+		c.recordTelemetry(ctx, fastReq, fastResp, wafErr, startTime)
 		return wafErr, false
 	}
 
+	c.recordTelemetry(ctx, fastReq, fastResp, nil, startTime)
+
 	return nil, false
+}
+
+func (c *Client) recordTelemetry(
+	ctx context.Context,
+	fastReq *fasthttp.Request,
+	fastResp *fasthttp.Response,
+	execErr error,
+	startTime time.Time,
+) {
+	inspector := c.config.Defaults.Inspector
+	harTracker := c.config.Defaults.Pipeline.HAR
+
+	if inspector == nil && harTracker == nil {
+		return
+	}
+
+	var httpResp *http.Response
+	if fastResp != nil {
+		httpResp = toHTTPResponse(fastReq, fastResp)
+	} else {
+		reqMethod := string(fastReq.Header.Method())
+		reqURI := string(fastReq.URI().FullURI())
+		stdReq, _ := http.NewRequestWithContext(ctx, reqMethod, reqURI, nil)
+		httpResp = &http.Response{Request: stdReq}
+	}
+
+	if inspector != nil {
+		inspector.Capture(httpResp.Request, httpResp, execErr, nil)
+	}
+
+	if harTracker != nil && harTracker.Tracker != nil {
+		duration := time.Since(startTime).Milliseconds()
+		harTracker.Tracker.Record(httpResp.Request, httpResp, startTime, duration)
+	}
+}
+
+func (c *Client) executeWithHedging(
+	ctx context.Context,
+	fastReq *fasthttp.Request,
+	fastResp *fasthttp.Response,
+	reqAdapter *Request,
+) (err error, autoReleased bool) {
+	delay := c.config.Network.HedgingDelay
+	if c.config.Defaults.Pipeline.Hedging != nil && c.config.Defaults.Pipeline.Hedging.DefaultDelay > 0 {
+		delay = c.config.Defaults.Pipeline.Hedging.DefaultDelay
+	}
+
+	if delay <= 0 {
+		return c.executeWithProxyFailover(ctx, fastReq, fastResp, reqAdapter)
+	}
+
+	type result struct {
+		resp *fasthttp.Response
+		err  error
+	}
+
+	resultsCh := make(chan result, 2)
+	hedgeCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
+
+	go func() {
+		resp1 := fasthttp.AcquireResponse()
+		e, _ := c.executeWithProxyFailover(hedgeCtx, fastReq, resp1, reqAdapter)
+		resultsCh <- result{resp: resp1, err: e}
+	}()
+
+	timer := time.NewTimer(delay)
+	defer timer.Stop()
+
+	var req2Started bool
+
+	select {
+	case res := <-resultsCh:
+		if res.err == nil {
+			res.resp.CopyTo(fastResp)
+			fasthttp.ReleaseResponse(res.resp)
+
+			return nil, false
+		}
+
+		fasthttp.ReleaseResponse(res.resp)
+
+		if !req2Started {
+			req2Started = true
+			go func() {
+				resp2 := fasthttp.AcquireResponse()
+				e, _ := c.executeWithProxyFailover(hedgeCtx, fastReq, resp2, reqAdapter)
+				resultsCh <- result{resp: resp2, err: e}
+			}()
+		}
+
+	case <-timer.C:
+		req2Started = true
+		go func() {
+			resp2 := fasthttp.AcquireResponse()
+			e, _ := c.executeWithProxyFailover(hedgeCtx, fastReq, resp2, reqAdapter)
+			resultsCh <- result{resp: resp2, err: e}
+		}()
+	}
+
+	for range 2 {
+		res := <-resultsCh
+		if res.err == nil {
+			cancel()
+			res.resp.CopyTo(fastResp)
+			fasthttp.ReleaseResponse(res.resp)
+
+			return nil, false
+		}
+
+		fasthttp.ReleaseResponse(res.resp)
+	}
+
+	return ErrHedgingFailed, false
 }
 
 func (c *Client) applyCookies(req *fasthttp.Request) {

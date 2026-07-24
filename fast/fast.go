@@ -169,7 +169,7 @@ func (f *Request) ResetHeaders() {
 }
 
 // SetBodyBytes sets request body to a raw byte slice.
-func (f *Request) SetBodyBytes(body []byte) {
+func (f *Request) SetBodyBytes(body []byte) { //nolint:unparam
 	f.req.SetBody(body)
 	f.getBody = nil
 }
@@ -240,7 +240,8 @@ func (f *Request) EngineRequest() any {
 
 // Response adapts a high-performance [*fasthttp.Response] to the unified [aoni.Response] contract.
 type Response struct {
-	resp *fasthttp.Response
+	resp     *fasthttp.Response
+	trailers map[string][]string
 }
 
 // NewResponse wraps resp into a unified [aoni.Response] adapter.
@@ -250,6 +251,16 @@ func NewResponse(resp *fasthttp.Response) *Response {
 	}
 
 	return &Response{resp: resp}
+}
+
+// SetTrailers registers HTTP trailers captured during frame execution.
+func (f *Response) SetTrailers(trailers map[string][]string) {
+	f.trailers = trailers
+}
+
+// Trailers returns HTTP trailers parsed after the body stream.
+func (f *Response) Trailers() map[string][]string {
+	return f.trailers
 }
 
 // StatusCode yields the HTTP status code.
