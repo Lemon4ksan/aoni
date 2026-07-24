@@ -27,6 +27,7 @@ import (
 	"github.com/lemon4ksan/aoni/fast/h2engine"
 	"github.com/lemon4ksan/aoni/fast/h3engine"
 	"github.com/lemon4ksan/aoni/internal/bytesconv"
+	"github.com/lemon4ksan/aoni/netutil"
 )
 
 // Client executes ultra-high-performance HTTP requests over fasthttp,
@@ -568,7 +569,7 @@ func (c *Client) executeWithRedirects(
 		fastReq.URI().CopyTo(nextURI)
 
 		if isCrossOriginURI(currentURI, nextURI) {
-			scrubSensitiveHeaders(fastReq)
+			scrubSensitiveHeaders(fastReq, currentURI, nextURI)
 		}
 
 		if isHTTPSDowngrade(currentURI, nextURI) {
@@ -749,10 +750,33 @@ func isCrossOriginURI(u1, u2 *fasthttp.URI) bool {
 		!bytes.EqualFold(u1.Host(), u2.Host())
 }
 
-func scrubSensitiveHeaders(req *fasthttp.Request) {
+func scrubSensitiveHeaders(req *fasthttp.Request, currentURI, nextURI *fasthttp.URI) {
 	for _, h := range aoni.DefaultSensitiveHeaders {
 		req.Header.Del(h)
 	}
+
+	req.Header.Del("Cookie2")
+	req.Header.Del("Proxy-Authenticate")
+	req.Header.Del("WWW-Authenticate")
+
+	host1 := string(currentURI.Host())
+	host2 := string(nextURI.Host())
+
+	// If cross-domain (not the same domain or parent/subdomain relationship), force-delete manual Cookie headers
+	if !isSameDomainOrSubdomain(host1, host2) {
+		req.Header.Del("Cookie")
+	}
+}
+
+func isSameDomainOrSubdomain(h1, h2 string) bool {
+	clean1 := strings.ToLower(netutil.CleanHost(h1))
+	clean2 := strings.ToLower(netutil.CleanHost(h2))
+
+	if clean1 == clean2 {
+		return true
+	}
+
+	return strings.HasSuffix(clean1, "."+clean2) || strings.HasSuffix(clean2, "."+clean1)
 }
 
 func applyRedirectMethodAndBody(statusCode int, req *fasthttp.Request, reqAdapter *Request) error {

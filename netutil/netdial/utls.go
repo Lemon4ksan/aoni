@@ -21,6 +21,7 @@ import (
 	utls "github.com/refraction-networking/utls"
 
 	"github.com/lemon4ksan/aoni/fingerprint/ja4"
+	"github.com/lemon4ksan/aoni/netutil"
 )
 
 var (
@@ -55,9 +56,15 @@ type RTLSOptions struct {
 }
 
 // HandshakeUTLS executes a uTLS ClientHello handshake over a raw net.Conn socket.
+// isolating TLS SNI from HTTP Host headers for Domain Fronting.
 func HandshakeUTLS(ctx context.Context, conn net.Conn, host string, opts RTLSOptions) (*utls.UConn, ja4.Report, error) {
+	sniHost := netutil.CleanHost(host)
+	if net.ParseIP(sniHost) != nil {
+		sniHost = "" // RFC 6066: IP addresses must not be sent in TLS SNI extension
+	}
+
 	uCfg := &utls.Config{
-		ServerName: host,
+		ServerName: sniHost,
 		NextProtos: []string{"h2", "http/1.1"},
 	}
 
