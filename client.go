@@ -7,6 +7,7 @@ package aoni
 import (
 	"context"
 	"crypto/tls"
+	stdio "io"
 	"maps"
 	"net"
 	"net/http"
@@ -635,12 +636,16 @@ func CloneHTTPClient(c *http.Client) *http.Client {
 	return &cloned
 }
 
-// CloseResponse closes the response body stream and recycles associated request context resources.
+const maxBodySlurpBytes int64 = 2048
+
+// CloseResponse drains up to 2KB of unread body payload to preserve Keep-Alive sockets,
+// closes the response body stream, and recycles request context resources.
 func CloseResponse(resp *http.Response) {
 	if resp == nil || resp.Body == nil {
 		return
 	}
 
+	_, _ = stdio.CopyN(stdio.Discard, resp.Body, maxBodySlurpBytes)
 	_ = resp.Body.Close()
 
 	if rb, ok := io.UnwrapBody(resp.Body).(interface{ ReallyClose() }); ok {

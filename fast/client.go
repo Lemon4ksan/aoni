@@ -426,7 +426,7 @@ func (c *Client) executeWithProxyFailover(
 			return nil, err, true
 		}
 
-		fastResp.Reset()
+		slurpAndResetResponse(fastResp)
 	}
 
 	return nil, fmt.Errorf("aoni fast: proxy failover exhausted retries: %w", err), false
@@ -436,6 +436,20 @@ func isProxyGatewayError(status int) bool {
 	return status == http.StatusBadGateway ||
 		status == http.StatusServiceUnavailable ||
 		status == http.StatusGatewayTimeout
+}
+
+func slurpAndResetResponse(resp *fasthttp.Response) {
+	if resp == nil {
+		return
+	}
+
+	if resp.IsBodyStream() {
+		if stream := resp.BodyStream(); stream != nil {
+			_, _ = io.CopyN(io.Discard, stream, maxBodySlurpBytes)
+		}
+	}
+
+	resp.Reset()
 }
 
 func (c *Client) validateResponse(fastReq *fasthttp.Request, fastResp *fasthttp.Response) error {
@@ -561,7 +575,7 @@ func (c *Client) executeWithRedirects(
 		}
 
 		fasthttp.ReleaseURI(nextURI)
-		fastResp.Reset()
+		slurpAndResetResponse(fastResp)
 	}
 }
 
@@ -579,7 +593,7 @@ func extractUserInfoAndSetAuth(req *fasthttp.Request) {
 	if len(req.Header.Peek("Authorization")) == 0 {
 		user := string(req.URI().Username())
 		pass := string(req.URI().Password())
-		encoded := base64.StdEncoding.EncodeToString(bytesconv.S2B(user+":"+pass))
+		encoded := base64.StdEncoding.EncodeToString(bytesconv.S2B(user + ":" + pass))
 		req.Header.Set("Authorization", "Basic "+encoded)
 	}
 

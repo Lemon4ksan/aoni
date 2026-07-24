@@ -345,8 +345,16 @@ func (f *Response) EngineResponse() any {
 	return f.resp
 }
 
-// Close releases resources bound to the response wrapper.
+const maxBodySlurpBytes int64 = 2048
+
+// Close releases resources bound to the response wrapper and slurps unread stream bytes to preserve sockets.
 func (f *Response) Close() error {
+	if f.resp != nil && f.resp.IsBodyStream() {
+		if stream := f.resp.BodyStream(); stream != nil {
+			_, _ = io.CopyN(io.Discard, stream, maxBodySlurpBytes)
+		}
+	}
+
 	return nil
 }
 
