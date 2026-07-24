@@ -21,4 +21,7 @@ var (
 
 	// ErrMaxRedirectsExceeded is returned when the request halts because the maximum redirect threshold was reached.
 	ErrMaxRedirectsExceeded = errors.New("fast: maximum redirects limit exceeded")
+
+	// ErrCannotRewind is returned when a stream request body cannot be rewound for a 307/308 redirect.
+	ErrCannotRewind = errors.New("fast: cannot rewind request body stream for redirect")
 )

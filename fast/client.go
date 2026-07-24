@@ -109,7 +109,7 @@ func (c *Client) Request(
 
 	reqCtx := reqAdapter.Context()
 
-	err, autoReleased := c.dispatchPipeline(reqCtx, fastReq, fastResp)
+	err, autoReleased := c.dispatchPipeline(reqCtx, fastReq, fastResp, reqAdapter)
 	if err != nil {
 		if !autoReleased {
 			fasthttp.ReleaseRequest(fastReq)
@@ -131,6 +131,12 @@ func (c *Client) Do(req aoni.Request) (aoni.Response, error) {
 
 	ctx := req.Context()
 	fastReq, isFastReq := req.EngineRequest().(*fasthttp.Request)
+
+	var reqAdapter *Request
+	if fastAdapter, ok := req.(*Request); ok {
+		reqAdapter = fastAdapter
+	}
+
 	if !isFastReq {
 		fastReq = fasthttp.AcquireRequest()
 		fastReq.Header.SetMethod(req.Method())
@@ -145,7 +151,7 @@ func (c *Client) Do(req aoni.Request) (aoni.Response, error) {
 
 	fastResp := fasthttp.AcquireResponse()
 
-	err, autoReleased := c.dispatchPipeline(ctx, fastReq, fastResp)
+	err, autoReleased := c.dispatchPipeline(ctx, fastReq, fastResp, reqAdapter)
 	if err != nil {
 		if !autoReleased {
 			fasthttp.ReleaseResponse(fastResp)
@@ -164,13 +170,14 @@ func (c *Client) dispatchPipeline(
 	ctx context.Context,
 	fastReq *fasthttp.Request,
 	fastResp *fasthttp.Response,
+	reqAdapter *Request,
 ) (err error, autoReleased bool) {
 	c.applyCookies(fastReq)
 
 	if c.config.Defaults.Pipeline.ProxyFailover != nil {
-		err, autoReleased = c.executeWithProxyFailover(ctx, fastReq, fastResp)
+		err, autoReleased = c.executeWithProxyFailover(ctx, fastReq, fastResp, reqAdapter)
 	} else {
-		err, autoReleased = c.executeWithRedirects(ctx, fastReq, fastResp)
+		err, autoReleased = c.executeWithRedirects(ctx, fastReq, fastResp, reqAdapter)
 	}
 
 	if err != nil {
@@ -248,10 +255,11 @@ func (c *Client) executeWithProxyFailover(
 	ctx context.Context,
 	fastReq *fasthttp.Request,
 	fastResp *fasthttp.Response,
+	reqAdapter *Request,
 ) (err error, autoReleased bool) {
 	failover := c.config.Defaults.Pipeline.ProxyFailover
 	if failover == nil || len(failover.Proxies) == 0 {
-		return c.executeWithRedirects(ctx, fastReq, fastResp)
+		return c.executeWithRedirects(ctx, fastReq, fastResp, reqAdapter)
 	}
 
 	maxRetries := failover.RetryLimit
@@ -266,7 +274,7 @@ func (c *Client) executeWithProxyFailover(
 			reqCfg.ProxyAddr = u
 		}
 
-		err, autoReleased = c.executeWithRedirects(ctx, fastReq, fastResp)
+		err, autoReleased = c.executeWithRedirects(ctx, fastReq, fastResp, reqAdapter)
 		if err == nil && !isProxyGatewayError(fastResp.StatusCode()) {
 			return nil, autoReleased
 		}
@@ -356,6 +364,7 @@ func (c *Client) executeWithRedirects(
 	ctx context.Context,
 	fastReq *fasthttp.Request,
 	fastResp *fasthttp.Response,
+	reqAdapter *Request,
 ) (err error, autoReleased bool) {
 	redirectLimit := c.resolveRedirectLimit()
 	if redirectLimit == 0 {
@@ -390,6 +399,10 @@ func (c *Client) executeWithRedirects(
 			return ErrMaxRedirectsExceeded, false
 		}
 
+		if err := applyRedirectMethodAndBody(statusCode, fastReq, reqAdapter); err != nil {
+			return err, false
+		}
+
 		nextURI := fasthttp.AcquireURI()
 		fastReq.URI().UpdateBytes(location)
 		fastReq.URI().CopyTo(nextURI)
@@ -398,9 +411,7 @@ func (c *Client) executeWithRedirects(
 			scrubSensitiveHeaders(fastReq)
 		}
 
-		applyRedirectMethodAndBody(statusCode, fastReq)
 		fasthttp.ReleaseURI(nextURI)
-
 		fastResp.Reset()
 	}
 }
@@ -455,7 +466,7 @@ func scrubSensitiveHeaders(req *fasthttp.Request) {
 	}
 }
 
-func applyRedirectMethodAndBody(statusCode int, req *fasthttp.Request) {
+func applyRedirectMethodAndBody(statusCode int, req *fasthttp.Request, reqAdapter *Request) error {
 	switch statusCode {
 	case fasthttp.StatusMovedPermanently, fasthttp.StatusFound, fasthttp.StatusSeeOther:
 		method := string(req.Header.Method())
@@ -463,7 +474,23 @@ func applyRedirectMethodAndBody(statusCode int, req *fasthttp.Request) {
 			req.Header.SetMethod(http.MethodGet)
 			req.SetBody(nil)
 		}
+
+	case fasthttp.StatusTemporaryRedirect, fasthttp.StatusPermanentRedirect:
+		if req.IsBodyStream() {
+			if reqAdapter == nil {
+				return ErrCannotRewind
+			}
+
+			bodyCloser, err := reqAdapter.GetBody()
+			if err != nil || bodyCloser == nil {
+				return ErrCannotRewind
+			}
+
+			req.SetBodyStream(bodyCloser, -1)
+		}
 	}
+
+	return nil
 }
 
 func (c *Client) getH3Client() *h3engine.Client {

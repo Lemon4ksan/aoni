@@ -20,8 +20,9 @@ import (
 
 // Request adapts a high-performance [*fasthttp.Request] to the unified [aoni.Request] contract.
 type Request struct {
-	req *fasthttp.Request
-	ctx context.Context
+	req     *fasthttp.Request
+	ctx     context.Context
+	getBody func() (io.ReadCloser, error)
 }
 
 // NewRequest wraps req into a unified [aoni.Request] adapter.
@@ -170,6 +171,7 @@ func (f *Request) ResetHeaders() {
 // SetBodyBytes sets request body to a raw byte slice.
 func (f *Request) SetBodyBytes(body []byte) {
 	f.req.SetBody(body)
+	f.getBody = nil
 }
 
 // BodyBytes yields direct access to internal fasthttp request body byte slice.
@@ -177,9 +179,43 @@ func (f *Request) BodyBytes() []byte {
 	return f.req.Body()
 }
 
-// SetBodyStream assigns a streaming reader as request body.
+// SetBodyStream assigns a streaming reader as request body and sets up rewind capabilities if supported.
 func (f *Request) SetBodyStream(r io.Reader, contentLength int64) {
 	f.req.SetBodyStream(r, int(contentLength))
+
+	if seeker, ok := r.(io.Seeker); ok {
+		f.getBody = func() (io.ReadCloser, error) {
+			if _, err := seeker.Seek(0, io.SeekStart); err != nil {
+				return nil, err
+			}
+
+			if rc, ok := r.(io.ReadCloser); ok {
+				return rc, nil
+			}
+
+			return io.NopCloser(r), nil
+		}
+	} else {
+		f.getBody = nil
+	}
+}
+
+// SetGetBody assigns a custom generator for rewinding body streams during retries and 307/308 redirects.
+func (f *Request) SetGetBody(fn func() (io.ReadCloser, error)) {
+	f.getBody = fn
+}
+
+// GetBody generates a fresh ReadCloser for replaying the request payload stream.
+func (f *Request) GetBody() (io.ReadCloser, error) {
+	if f.getBody != nil {
+		return f.getBody()
+	}
+
+	if body := f.req.Body(); len(body) > 0 {
+		return io.NopCloser(bytes.NewReader(slices.Clone(body))), nil
+	}
+
+	return nil, nil
 }
 
 // BodyStream yields an io.Reader for the request body.

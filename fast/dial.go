@@ -11,6 +11,7 @@ import (
 	utls "github.com/refraction-networking/utls"
 
 	"github.com/lemon4ksan/aoni"
+	"github.com/lemon4ksan/aoni/internal/h1"
 	"github.com/lemon4ksan/aoni/netutil/netdial"
 )
 
@@ -22,7 +23,8 @@ func newFastDialer(cfg *aoni.Config) *fastDialer {
 	return &fastDialer{config: cfg}
 }
 
-// Dial executes an L4 TCP dial (with proxy/p0f/SSRF checks) followed by an optional uTLS handshake.
+// Dial executes an L4 TCP dial followed by an optional uTLS handshake,
+// wrapping HTTP/1.1 connections with header ordering decorators when configured.
 func (d *fastDialer) Dial(addr string) (net.Conn, error) {
 	ctx := context.Background()
 
@@ -52,22 +54,38 @@ func (d *fastDialer) Dial(addr string) (net.Conn, error) {
 		return nil, err
 	}
 
-	if !isTLS {
-		return rawConn, nil
+	var (
+		conn            net.Conn = rawConn
+		negotiatedProto string
+	)
+
+	if isTLS {
+		utlsOpts := netdial.RTLSOptions{
+			HelloID:            d.resolveHelloID(),
+			SpecProvider:       d.config.Fingerprint.TLSClientHelloSpecProvider,
+			SessionCache:       d.config.Fingerprint.SessionCache,
+			CertificatePins:    d.config.Fingerprint.CertificatePins,
+			JA4Callback:        d.config.Fingerprint.JA4Callback,
+			InsecureSkipVerify: d.config.Engine.InsecureSkipVerify,
+		}
+
+		uConn, _, err := netdial.HandshakeUTLS(ctx, rawConn, host, utlsOpts)
+		if err != nil {
+			return nil, err
+		}
+
+		conn = uConn
+		negotiatedProto = uConn.ConnectionState().NegotiatedProtocol
 	}
 
-	utlsOpts := netdial.RTLSOptions{
-		HelloID:            d.resolveHelloID(),
-		SpecProvider:       d.config.Fingerprint.TLSClientHelloSpecProvider,
-		SessionCache:       d.config.Fingerprint.SessionCache,
-		CertificatePins:    d.config.Fingerprint.CertificatePins,
-		JA4Callback:        d.config.Fingerprint.JA4Callback,
-		InsecureSkipVerify: d.config.Engine.InsecureSkipVerify,
+	if negotiatedProto != aoni.AlpnH2 && len(d.config.Fingerprint.HeaderOrder) > 0 {
+		return &h1.HeaderOrderingConn{
+			Conn:        conn,
+			OrderedKeys: d.config.Fingerprint.HeaderOrder,
+		}, nil
 	}
 
-	uConn, _, err := netdial.HandshakeUTLS(ctx, rawConn, host, utlsOpts)
-
-	return uConn, err
+	return conn, nil
 }
 
 // DialH2 dials an L4 connection and performs a uTLS handshake forcing ALPN "h2".
