@@ -752,9 +752,11 @@ func (c *Conn) readStream(fr *FrameHeader, reqCtx *Context) error {
 			return c.readTrailers(h.Headers(), reqCtx)
 		}
 
-		err := c.readHeader(h.Headers(), reqCtx.Response)
+		statusCode, err := c.readHeader(h.Headers(), reqCtx.Response)
 		if err == nil {
-			reqCtx.headersParsed = true
+			if statusCode < 100 || statusCode >= 200 || statusCode == 101 {
+				reqCtx.headersParsed = true
+			}
 		}
 
 		return err
@@ -816,25 +818,31 @@ func (c *Conn) updateWindow(streamID uint32, size int) {
 	c.out <- fr
 }
 
-func (c *Conn) readHeader(b []byte, res *fasthttp.Response) error {
+func (c *Conn) readHeader(b []byte, res *fasthttp.Response) (int, error) {
 	hf := AcquireHeaderField()
 	defer ReleaseHeaderField(hf)
 
-	var err error
+	var (
+		err        error
+		statusCode int
+	)
 
 	for len(b) > 0 {
 		b, err = c.dec.Next(hf, b)
 		if err != nil {
-			return err
+			return 0, err
 		}
 
 		if hf.IsPseudo() && len(hf.KeyBytes()) > 1 && hf.KeyBytes()[1] == 's' {
 			n, pErr := strconv.ParseInt(hf.Value(), 10, 64)
 			if pErr != nil {
-				return pErr
+				return 0, pErr
 			}
 
-			res.SetStatusCode(int(n))
+			statusCode = int(n)
+			if statusCode < 100 || statusCode >= 200 || statusCode == 101 {
+				res.SetStatusCode(statusCode)
+			}
 
 			continue
 		}
@@ -847,7 +855,7 @@ func (c *Conn) readHeader(b []byte, res *fasthttp.Response) error {
 		}
 	}
 
-	return nil
+	return statusCode, nil
 }
 
 // Dialer establishes HTTP/2 TLS connections using custom network dialers.

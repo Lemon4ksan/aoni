@@ -135,7 +135,7 @@ func TestReadResponseH3Framing(t *testing.T) {
 			block := make([]byte, pLen)
 			_, _ = io.ReadFull(r, block)
 
-			if err := codec.DecodeResponseHeaders(block, &resp.Header); err != nil {
+			if _, err := codec.DecodeResponseHeaders(block, &resp.Header); err != nil {
 				t.Fatalf("DecodeResponseHeaders failed: %v", err)
 			}
 

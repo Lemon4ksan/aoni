@@ -91,10 +91,15 @@ func (q *QPACKCodec) encodeOrderedHeaders(enc *qpack.Encoder, req *fasthttp.Requ
 	})
 }
 
-// DecodeResponseHeaders parses a QPACK header block directly into fasthttp ResponseHeader.
-func (q *QPACKCodec) DecodeResponseHeaders(headerBlock []byte, res *fasthttp.ResponseHeader) error {
+// DecodeResponseHeaders parses a QPACK header block directly into fasthttp ResponseHeader,
+// returning the parsed status code and ignoring 1xx informational frames.
+func (q *QPACKCodec) DecodeResponseHeaders(headerBlock []byte, res *fasthttp.ResponseHeader) (int, error) {
 	decodeFn := q.decoder.Decode(headerBlock)
-	hasStatus := false
+
+	var (
+		hasStatus  bool
+		statusCode int
+	)
 
 	for {
 		hf, err := decodeFn()
@@ -103,16 +108,20 @@ func (q *QPACKCodec) DecodeResponseHeaders(headerBlock []byte, res *fasthttp.Res
 		}
 
 		if err != nil {
-			return ErrQPACKDecompressFailed
+			return 0, ErrQPACKDecompressFailed
 		}
 
 		if hf.Name == ":status" {
-			statusCode, parseErr := strconv.Atoi(hf.Value)
+			code, parseErr := strconv.Atoi(hf.Value)
 			if parseErr != nil {
-				return parseErr
+				return 0, parseErr
 			}
 
-			res.SetStatusCode(statusCode)
+			statusCode = code
+			if statusCode < 100 || statusCode >= 200 || statusCode == 101 {
+				res.SetStatusCode(statusCode)
+			}
+
 			hasStatus = true
 
 			continue
@@ -134,10 +143,10 @@ func (q *QPACKCodec) DecodeResponseHeaders(headerBlock []byte, res *fasthttp.Res
 	}
 
 	if !hasStatus {
-		return ErrMissingStatusHeader
+		return 0, ErrMissingStatusHeader
 	}
 
-	return nil
+	return statusCode, nil
 }
 
 // DecodeResponseTrailers decodes a QPACK header block containing response trailers into a key-value map.

@@ -249,11 +249,14 @@ func (cc *ClientConn) readResponse(str *quic.Stream, resp *fasthttp.Response) (t
 					return nil, err
 				}
 			} else {
-				if err := cc.qpack.DecodeResponseHeaders(headerBlock, &resp.Header); err != nil {
+				statusCode, err := cc.qpack.DecodeResponseHeaders(headerBlock, &resp.Header)
+				if err != nil {
 					return nil, err
 				}
 
-				headersParsed = true
+				if statusCode < 100 || statusCode >= 200 || statusCode == 101 {
+					headersParsed = true
+				}
 			}
 
 		case FrameTypeData:

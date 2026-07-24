@@ -132,7 +132,7 @@ func TestQPACKDecodeResponseHeaders(t *testing.T) {
 
 	var respHeader fasthttp.ResponseHeader
 
-	if err := codec.DecodeResponseHeaders(buf.Bytes(), &respHeader); err != nil {
+	if _, err := codec.DecodeResponseHeaders(buf.Bytes(), &respHeader); err != nil {
 		t.Fatalf("DecodeResponseHeaders failed: %v", err)
 	}
 
@@ -160,7 +160,7 @@ func TestQPACKDecodeResponseMissingStatus(t *testing.T) {
 
 	var respHeader fasthttp.ResponseHeader
 
-	err := codec.DecodeResponseHeaders(buf.Bytes(), &respHeader)
+	_, err := codec.DecodeResponseHeaders(buf.Bytes(), &respHeader)
 	if err != ErrMissingStatusHeader {
 		t.Fatalf("expected ErrMissingStatusHeader, got %v", err)
 	}
