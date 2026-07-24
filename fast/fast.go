@@ -10,11 +10,24 @@ import (
 	"io"
 	"net/http"
 	"slices"
+	"sync"
 
 	"github.com/valyala/fasthttp"
 
 	"github.com/lemon4ksan/aoni"
 	"github.com/lemon4ksan/aoni/internal/bytesconv"
+)
+
+var (
+	requestAdapterPool = sync.Pool{
+		New: func() any { return &Request{} },
+	}
+	responseAdapterPool = sync.Pool{
+		New: func() any { return &Response{} },
+	}
+	pooledResponsePool = sync.Pool{
+		New: func() any { return &PooledResponse{Response: &Response{}} },
+	}
 )
 
 // Request adapts a high-performance [*fasthttp.Request] to the unified [aoni.Request] contract.
@@ -24,13 +37,19 @@ type Request struct {
 	getBody func() (io.ReadCloser, error)
 }
 
-// NewRequest wraps req into a unified [aoni.Request] adapter.
+// NewRequest acquires a pooled Request adapter wrapping req.
+// The caller is responsible for releasing the request object.
 func NewRequest(req *fasthttp.Request) *Request {
 	if req == nil {
 		req = fasthttp.AcquireRequest()
 	}
 
-	return &Request{req: req}
+	r := requestAdapterPool.Get().(*Request)
+	r.req = req
+	r.ctx = nil
+	r.getBody = nil
+
+	return r
 }
 
 // Context yields the execution context, defaulting to context.Background.
@@ -237,6 +256,18 @@ func (f *Request) EngineRequest() any {
 	return f.req
 }
 
+// Release returns the Request adapter back to the pool.
+func (f *Request) Release() {
+	if f == nil {
+		return
+	}
+
+	f.req = nil
+	f.ctx = nil
+	f.getBody = nil
+	requestAdapterPool.Put(f)
+}
+
 // Response adapts a high-performance [*fasthttp.Response] to the unified [aoni.Response] contract.
 type Response struct {
 	resp         *fasthttp.Response
@@ -245,12 +276,18 @@ type Response struct {
 }
 
 // NewResponse wraps resp into a unified [aoni.Response] adapter.
+// The caller is responsible for releasing the response object.
 func NewResponse(resp *fasthttp.Response) *Response {
 	if resp == nil {
 		resp = fasthttp.AcquireResponse()
 	}
 
-	return &Response{resp: resp}
+	r := responseAdapterPool.Get().(*Response)
+	r.resp = resp
+	r.trailers = nil
+	r.uncompressed = false
+
+	return r
 }
 
 // SetTrailers registers HTTP trailers captured during frame execution.
@@ -356,6 +393,18 @@ func (f *Response) Uncompressed() bool {
 	return f.uncompressed
 }
 
+// Release returns the Response adapter back to memory pool.
+func (f *Response) Release() {
+	if f == nil {
+		return
+	}
+
+	f.resp = nil
+	f.trailers = nil
+	f.uncompressed = false
+	responseAdapterPool.Put(f)
+}
+
 const maxBodySlurpBytes int64 = 2048
 
 // Close releases resources bound to the response wrapper and slurps unread stream bytes to preserve sockets.
@@ -369,7 +418,56 @@ func (f *Response) Close() error {
 	return nil
 }
 
+// PooledResponse wraps a fasthttp response and returns instances back to [sync.Pool] upon Close.
+type PooledResponse struct {
+	*Response
+	fastReq  *fasthttp.Request
+	fastResp *fasthttp.Response
+	once     sync.Once
+}
+
+// NewPooledResponse acquires a pooled PooledResponse adapter wrapping fastReq and fastResp.
+// The caller is responsible for releasing the request and response objects.
+func NewPooledResponse(fastReq *fasthttp.Request, fastResp *fasthttp.Response) *PooledResponse {
+	pr := pooledResponsePool.Get().(*PooledResponse)
+	if pr.Response == nil {
+		pr.Response = &Response{}
+	}
+
+	pr.Response.resp = fastResp
+	pr.Response.trailers = nil
+	pr.Response.uncompressed = false
+	pr.fastReq = fastReq
+	pr.fastResp = fastResp
+	pr.once = sync.Once{}
+
+	return pr
+}
+
+// Close releases underlying fasthttp objects and returns PooledResponse to memory pool.
+func (r *PooledResponse) Close() error {
+	r.once.Do(func() {
+		if r.fastReq != nil {
+			fasthttp.ReleaseRequest(r.fastReq)
+			r.fastReq = nil
+		}
+
+		if r.fastResp != nil {
+			fasthttp.ReleaseResponse(r.fastResp)
+			r.fastResp = nil
+		}
+
+		r.Response.resp = nil
+		r.Response.trailers = nil
+		r.Response.uncompressed = false
+		pooledResponsePool.Put(r)
+	})
+
+	return nil
+}
+
 var (
 	_ aoni.Request  = (*Request)(nil)
 	_ aoni.Response = (*Response)(nil)
+	_ aoni.Response = (*PooledResponse)(nil)
 )

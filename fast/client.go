@@ -114,6 +114,8 @@ func (c *Client) Request(
 	fastResp := fasthttp.AcquireResponse()
 
 	reqAdapter := NewRequest(fastReq)
+	defer reqAdapter.Release()
+
 	reqAdapter.SetContext(ctx)
 	reqAdapter.SetMethod(method)
 
@@ -229,29 +231,52 @@ func (c *Client) dispatchPipeline(
 	fastResp *fasthttp.Response,
 	reqAdapter *Request,
 ) (trailers map[string][]string, err error, autoReleased bool) {
-	startTime := time.Now()
+	hasTelemetry := c.config.Defaults.Inspector != nil || c.config.Defaults.Pipeline.HAR != nil
+	var startTime time.Time
+	if hasTelemetry {
+		startTime = time.Now()
+	}
 
 	c.applyCookies(fastReq)
 
-	trailers, err, autoReleased = c.executeWithHedging(ctx, fastReq, fastResp, reqAdapter)
+	// Direct Fast-Path: Bypass hedging & failover wrappers when disabled
+	if c.config.Defaults.Pipeline.ProxyFailover == nil &&
+		c.config.Network.HedgingDelay <= 0 &&
+		c.config.Defaults.Pipeline.Hedging == nil {
+		trailers, err, autoReleased = c.executeWithRedirects(ctx, fastReq, fastResp, reqAdapter)
+	} else {
+		trailers, err, autoReleased = c.executeWithHedging(ctx, fastReq, fastResp, reqAdapter)
+	}
+
 	if err != nil {
-		c.recordTelemetry(ctx, fastReq, nil, err, startTime)
+		if hasTelemetry {
+			c.recordTelemetry(ctx, fastReq, nil, err, startTime)
+		}
+
 		return nil, err, autoReleased
 	}
 
 	c.captureCookies(fastReq, fastResp)
 
 	if valErr := c.validateResponse(fastReq, fastResp); valErr != nil {
-		c.recordTelemetry(ctx, fastReq, fastResp, valErr, startTime)
+		if hasTelemetry {
+			c.recordTelemetry(ctx, fastReq, fastResp, valErr, startTime)
+		}
+
 		return nil, valErr, false
 	}
 
 	if wafErr := c.handleWAFChallenge(ctx, fastReq, fastResp); wafErr != nil {
-		c.recordTelemetry(ctx, fastReq, fastResp, wafErr, startTime)
+		if hasTelemetry {
+			c.recordTelemetry(ctx, fastReq, fastResp, wafErr, startTime)
+		}
+
 		return nil, wafErr, false
 	}
 
-	c.recordTelemetry(ctx, fastReq, fastResp, nil, startTime)
+	if hasTelemetry {
+		c.recordTelemetry(ctx, fastReq, fastResp, nil, startTime)
+	}
 
 	return trailers, nil, false
 }
@@ -629,6 +654,12 @@ func isHTTPSDowngrade(u1, u2 *fasthttp.URI) bool {
 }
 
 func extractUserInfoAndSetAuth(req *fasthttp.Request) {
+	fullURI := req.URI().FullURI()
+	// Fast-Check: In 99.9% of URLs there is no '@' character (no user:pass in URI)
+	if bytes.IndexByte(fullURI, '@') == -1 {
+		return
+	}
+
 	userInfo := req.URI().Username()
 	if len(userInfo) == 0 {
 		return
@@ -951,7 +982,7 @@ func (c *Client) applyCustomDialer() {
 }
 
 func (c *Client) applyDefaultHeaders(req aoni.Request) {
-	if c.config.Defaults.Headers == nil {
+	if len(c.config.Defaults.Headers) == 0 {
 		return
 	}
 
@@ -991,6 +1022,20 @@ func (c *Client) executeFastHTTP(
 		return err, false
 	}
 
+	// Fast path: if context is standard Background/TODO without active cancellation, execute synchronously!
+	if ctx == context.Background() || ctx == context.TODO() || ctx.Done() == nil {
+		if deadline, ok := ctx.Deadline(); ok {
+			return c.engine.DoDeadline(req, resp, deadline), false
+		}
+
+		if c.config.Engine.Timeout > 0 {
+			return c.engine.DoTimeout(req, resp, c.config.Engine.Timeout), false
+		}
+
+		return c.engine.Do(req, resp), false
+	}
+
+	// Slow path: context carries active cancellation (channel + watcher goroutine)
 	done := make(chan error, 1)
 
 	go func() {
@@ -1045,69 +1090,47 @@ func fastRespReset(resp *fasthttp.Response) {
 }
 
 func (c *Client) resolveTargetURL(req aoni.Request, path string) error {
-	baseURLStr := c.config.Defaults.BaseURL.String()
-
-	if path == "" && baseURLStr == "" {
-		return ErrTargetURLEmpty
-	}
-
 	if len(path) >= 7 && (strings.HasPrefix(path, "http://") || strings.HasPrefix(path, "https://")) {
 		req.SetURL(path)
 		return nil
 	}
 
-	if baseURLStr == "" {
+	fastReq, isFast := req.EngineRequest().(*fasthttp.Request)
+	if isFast && c.config.Defaults.BaseURL != nil && c.config.Defaults.BaseURL.Host != "" {
+		uri := fastReq.URI()
+		uri.SetScheme(c.config.Defaults.BaseURL.Scheme)
+		uri.SetHost(c.config.Defaults.BaseURL.Host)
+
+		if path != "" && path != "/" {
+			uri.SetPath(path)
+		}
+
+		return nil
+	}
+
+	baseURLTrimmed := c.config.Defaults.BaseURLTrimmedString
+	if baseURLTrimmed == "" {
+		if path == "" {
+			return ErrTargetURLEmpty
+		}
+
 		req.SetURL(path)
 		return nil
 	}
 
-	baseURL := strings.TrimSuffix(baseURLStr, "/")
-	cleanPath := path
+	if path == "" || path == "/" {
+		req.SetURL(c.config.Defaults.BaseURLString)
+		return nil
+	}
 
-	if len(path) == 0 || path[0] != '/' {
+	cleanPath := path
+	if path[0] != '/' {
 		cleanPath = "/" + path
 	}
 
-	req.SetURL(baseURL + cleanPath)
+	req.SetURL(baseURLTrimmed + cleanPath)
 
 	return nil
 }
 
-// PooledResponse wraps a fasthttp response and returns instances back to [sync.Pool] upon Close.
-type PooledResponse struct {
-	*Response
-	fastReq  *fasthttp.Request
-	fastResp *fasthttp.Response
-	once     sync.Once
-}
-
-// NewPooledResponse creates a PooledResponse adapter around fastResp.
-func NewPooledResponse(fastReq *fasthttp.Request, fastResp *fasthttp.Response) *PooledResponse {
-	return &PooledResponse{
-		Response: NewResponse(fastResp),
-		fastReq:  fastReq,
-		fastResp: fastResp,
-	}
-}
-
-// Close releases underlying fasthttp request and response objects back to [sync.Pool].
-func (r *PooledResponse) Close() error {
-	r.once.Do(func() {
-		if r.fastReq != nil {
-			fasthttp.ReleaseRequest(r.fastReq)
-			r.fastReq = nil
-		}
-
-		if r.fastResp != nil {
-			fasthttp.ReleaseResponse(r.fastResp)
-			r.fastResp = nil
-		}
-	})
-
-	return nil
-}
-
-var (
-	_ aoni.Response    = (*PooledResponse)(nil)
-	_ aoni.RequestDoer = (*Client)(nil)
-)
+var _ aoni.RequestDoer = (*Client)(nil)
