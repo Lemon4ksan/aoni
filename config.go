@@ -125,6 +125,7 @@ type EngineConfig struct {
 	RedirectLimit      int
 	InsecureSkipVerify bool
 	CheckRedirect      func(req *http.Request, via []*http.Request) error
+	Protocols          map[string]http.RoundTripper // Custom scheme handlers (e.g., "file", "ftp")
 }
 
 const redirectLimitUnset = -2

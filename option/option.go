@@ -88,6 +88,20 @@ func WithEngine(engine aoni.HTTPDoer) aoni.ClientOption {
 	}
 }
 
+// WithProtocol registers a custom [http.RoundTripper] handler for non-HTTP schemes (e.g., "file", "ftp", "s3").
+func WithProtocol(scheme string, handler http.RoundTripper) aoni.ClientOption {
+	return func(cfg *aoni.Config) {
+		if cfg.Engine.Protocols == nil {
+			cfg.Engine.Protocols = make(map[string]http.RoundTripper)
+		}
+
+		normScheme := strings.ToLower(strings.TrimSpace(scheme))
+		if normScheme != "" && handler != nil {
+			cfg.Engine.Protocols[normScheme] = handler
+		}
+	}
+}
+
 // WithBaseURL returns an [aoni.ClientOption] setting the default base URL for resolving relative request paths.
 func WithBaseURL(raw string) aoni.ClientOption {
 	return func(cfg *aoni.Config) {

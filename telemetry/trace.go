@@ -6,16 +6,20 @@ package telemetry
 
 import (
 	"bytes"
+	"context"
 	"crypto/sha256"
 	"crypto/tls"
 	"crypto/x509"
 	"encoding/hex"
 	"io"
 	"log/slog"
+	"maps"
 	"math/rand/v2"
 	"mime"
 	"mime/multipart"
 	"net/http"
+	"net/http/httptrace"
+	"net/textproto"
 	"slices"
 	"strconv"
 	"strings"
@@ -287,6 +291,22 @@ func ComputeJA4HFromRequest(req *http.Request) string {
 		cookieNames,
 		cookieValues,
 	)
+}
+
+// TriggerGot1xxResponse signals an 1xx informational response (102, 103) to active httptrace hooks.
+//
+// Postconditions:
+//   - If the active Got1xxResponse hook returns a non-nil error, the request MUST be aborted immediately.
+func TriggerGot1xxResponse(ctx context.Context, code int, header http.Header) error {
+	trace := httptrace.ContextClientTrace(ctx)
+	if trace == nil || trace.Got1xxResponse == nil {
+		return nil
+	}
+
+	mimeHeader := make(textproto.MIMEHeader, len(header))
+	maps.Copy(mimeHeader, header)
+
+	return trace.Got1xxResponse(code, mimeHeader)
 }
 
 // TruncateBody limits output payload representations to maxBytes without unnecessary allocations.

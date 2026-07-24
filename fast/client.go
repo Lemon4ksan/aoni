@@ -95,6 +95,20 @@ func (c *Client) Request(
 	method, path string,
 	mods ...aoni.RequestModifier,
 ) (aoni.Response, error) {
+	if handler := c.resolveProtocolHandler(path); handler != nil {
+		stdReq, err := http.NewRequestWithContext(ctx, method, path, nil)
+		if err != nil {
+			return nil, err
+		}
+
+		resp, err := handler.RoundTrip(stdReq)
+		if err != nil {
+			return nil, err
+		}
+
+		return aoni.NewStdResponse(resp), nil
+	}
+
 	fastReq := fasthttp.AcquireRequest()
 	fastResp := fasthttp.AcquireResponse()
 
@@ -188,6 +202,24 @@ func (c *Client) Do(req aoni.Request) (aoni.Response, error) {
 	}
 
 	return respAdapter, nil
+}
+
+func (c *Client) resolveProtocolHandler(rawURL string) http.RoundTripper {
+	if len(c.config.Engine.Protocols) == 0 {
+		return nil
+	}
+
+	scheme, _, ok := strings.Cut(rawURL, "://")
+	if !ok {
+		return nil
+	}
+
+	normScheme := strings.ToLower(strings.TrimSpace(scheme))
+	if normScheme == "http" || normScheme == "https" || normScheme == "ws" || normScheme == "wss" {
+		return nil
+	}
+
+	return c.config.Engine.Protocols[normScheme]
 }
 
 func (c *Client) dispatchPipeline(
