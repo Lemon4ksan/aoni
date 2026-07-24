@@ -10,6 +10,7 @@ import (
 	"strconv"
 	"sync"
 
+	"github.com/lemon4ksan/aoni/internal/bytesconv"
 	"github.com/quic-go/qpack"
 	"github.com/valyala/fasthttp"
 )
@@ -69,24 +70,36 @@ func (q *QPACKCodec) EncodeRequestHeaders(w io.Writer, req *fasthttp.Request, or
 }
 
 func (q *QPACKCodec) encodeOrderedHeaders(enc *qpack.Encoder, req *fasthttp.Request, orderedKeys []string) {
-	visited := make(map[string]bool, len(orderedKeys))
+	var visitedBits uint64
+	numOrdered := min(len(orderedKeys), 64)
 
-	for _, key := range orderedKeys {
+	for i := 0; i < numOrdered; i++ {
+		key := orderedKeys[i]
 		if key == "" || key[0] == ':' {
 			continue
 		}
 
 		val := req.Header.Peek(key)
 		if len(val) > 0 {
-			enc.WriteField(qpack.HeaderField{Name: toLowerCopy([]byte(key)), Value: string(val)})
-			visited[key] = true
+			enc.WriteField(qpack.HeaderField{Name: key, Value: bytesconv.B2S(val)})
+			visitedBits |= (1 << i)
 		}
 	}
 
 	req.Header.All()(func(k, v []byte) bool {
-		if !visited[string(k)] {
-			enc.WriteField(qpack.HeaderField{Name: toLowerCopy(k), Value: string(v)})
+		kStr := bytesconv.B2S(k)
+
+		for i := 0; i < numOrdered; i++ {
+			if (visitedBits&(1<<i)) != 0 && bytesconv.EqualFoldASCII(kStr, orderedKeys[i]) {
+				return true
+			}
 		}
+
+		enc.WriteField(qpack.HeaderField{
+			Name:  bytesconv.B2S(bytesconv.AppendToLower(nil, k)),
+			Value: bytesconv.B2S(v),
+		})
+
 		return true
 	})
 }

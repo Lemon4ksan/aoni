@@ -59,13 +59,20 @@ type RTLSOptions struct {
 // isolating TLS SNI from HTTP Host headers for Domain Fronting.
 func HandshakeUTLS(ctx context.Context, conn net.Conn, host string, opts RTLSOptions) (*utls.UConn, ja4.Report, error) {
 	sniHost := netutil.CleanHost(host)
-	if net.ParseIP(sniHost) != nil {
+	cleanHost := sniHost
+
+	isIP := net.ParseIP(sniHost) != nil
+	if isIP {
 		sniHost = "" // RFC 6066: IP addresses must not be sent in TLS SNI extension
 	}
 
 	uCfg := &utls.Config{
 		ServerName: sniHost,
 		NextProtos: []string{"h2", "http/1.1"},
+	}
+
+	if isIP {
+		uCfg.InsecureServerNameToVerify = cleanHost
 	}
 
 	copyBaseTLSConfig(uCfg, opts.BaseTLSConfig)

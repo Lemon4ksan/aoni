@@ -313,7 +313,16 @@ func (responseDecoder) checkHTML(buf *bufio.Reader) error {
 }
 
 func findFirstNonWhitespaceByte(b []byte) byte {
-	for _, ch := range b {
+	n := len(b)
+	if n == 0 {
+		return 0
+	}
+
+	// BCE hint: prove bounds to SSA compiler
+	_ = b[n-1]
+
+	for i := 0; i < n; i++ {
+		ch := b[i]
 		if ch != ' ' && ch != '\t' && ch != '\r' && ch != '\n' {
 			return ch
 		}

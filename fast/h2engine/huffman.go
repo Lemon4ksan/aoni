@@ -4,14 +4,25 @@
 
 package h2engine
 
-// HuffmanEncode compresses src bytes using static HPACK Huffman codes.
+// HuffmanEncode compresses src bytes using static HPACK Huffman codes with BCE optimizations.
 func HuffmanEncode(dst, src []byte) []byte {
+	nSrc := len(src)
+	if nSrc == 0 {
+		return dst
+	}
+
 	var (
 		code   uint64
 		length uint8
 	)
 
-	for _, b := range src {
+	// BCE hints: prove bounds of static 256-element arrays to SSA compiler
+	_ = huffmanCodeLen[255]
+	_ = huffmanCodes[255]
+	_ = src[nSrc-1]
+
+	for i := 0; i < nSrc; i++ {
+		b := src[i]
 		n := huffmanCodeLen[b]
 		c := uint64(huffmanCodes[b])
 

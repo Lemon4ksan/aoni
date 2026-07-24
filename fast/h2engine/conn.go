@@ -17,6 +17,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/lemon4ksan/aoni/internal/bytesconv"
 	"github.com/valyala/fasthttp"
 )
 
@@ -570,28 +571,40 @@ func (c *Conn) encodeRequestHeaders(h *Headers, req *fasthttp.Request) {
 }
 
 func (c *Conn) appendOrderedHeaders(h *Headers, req *fasthttp.Request, hf *HeaderField) {
-	visited := make(map[string]bool)
+	var visitedBits uint64
+	numOrdered := min(len(c.orderedKeys), 64)
 
-	for _, key := range c.orderedKeys {
-		if key == "" || key[0] == ':' || bytes.EqualFold([]byte(key), StringUserAgent) {
+	for i := 0; i < numOrdered; i++ {
+		key := c.orderedKeys[i]
+		if key == "" || key[0] == ':' || bytesconv.EqualFoldASCII(key, "user-agent") {
 			continue
 		}
 
 		val := req.Header.Peek(key)
 		if len(val) > 0 {
-			hf.SetBytes(toLowerCopy([]byte(key)), val)
+			hf.SetKey(key)
+			hf.SetValueBytes(val)
 			c.enc.AppendHeaderField(h, hf, false)
-			visited[key] = true
+			visitedBits |= (1 << i)
 		}
 	}
 
 	req.Header.All()(func(k, v []byte) bool {
-		if visited[string(k)] || bytes.EqualFold(k, StringUserAgent) {
+		kStr := bytesconv.B2S(k)
+		if bytesconv.EqualFoldASCII(kStr, "user-agent") {
 			return true
 		}
 
-		hf.SetBytes(toLowerCopy(k), v)
+		for i := 0; i < numOrdered; i++ {
+			if (visitedBits&(1<<i)) != 0 && bytesconv.EqualFoldASCII(kStr, c.orderedKeys[i]) {
+				return true
+			}
+		}
+
+		hf.SetKeyBytes(bytesconv.AppendToLower(nil, k))
+		hf.SetValueBytes(v)
 		c.enc.AppendHeaderField(h, hf, false)
+
 		return true
 	})
 }

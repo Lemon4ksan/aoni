@@ -253,9 +253,14 @@ func ParseExtensionsFromRaw(raw []byte) (extensions, sigAlgorithms []uint16) {
 
 func parseSigAlgorithmsPayload(payload []byte) []uint16 {
 	count := len(payload) / 2
-	sigs := make([]uint16, count)
+	if count == 0 {
+		return nil
+	}
 
-	for i := range count {
+	sigs := make([]uint16, count)
+	_ = payload[count*2-1] // BCE hint: eliminate bounds checks in payload slice reads
+
+	for i := 0; i < count; i++ {
 		sigs[i] = binary.BigEndian.Uint16(payload[i*2 : i*2+2])
 	}
 
@@ -324,7 +329,15 @@ func computeHeadersHash(headers []string) string {
 
 func compareLowerASCII(a, b string) int {
 	minLen := min(len(a), len(b))
-	for i := range minLen {
+	if minLen == 0 {
+		return cmp.Compare(len(a), len(b))
+	}
+
+	// BCE hints: prove slice boundaries to SSA compiler to eliminate loop bounds checks
+	_ = a[minLen-1]
+	_ = b[minLen-1]
+
+	for i := 0; i < minLen; i++ {
 		la := bytesconv.LowercaseByte(a[i])
 		lb := bytesconv.LowercaseByte(b[i])
 
@@ -440,6 +453,8 @@ func computeExtHash(extensions, sigAlgorithms []uint16) string {
 }
 
 func writeHex4(buf *bytes.Buffer, v uint16) {
+	_ = hexTable[15] // BCE hint: prove bounds for constant hexTable lookups
+
 	buf.WriteByte(hexTable[(v>>12)&0x0f])
 	buf.WriteByte(hexTable[(v>>8)&0x0f])
 	buf.WriteByte(hexTable[(v>>4)&0x0f])

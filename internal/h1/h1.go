@@ -14,7 +14,7 @@ import (
 )
 
 // ErrInvalidHeaderTerminator is returned when HTTP/1.1 header section terminators (\r\n\r\n) are missing or corrupted.
-var ErrInvalidHeaderTerminator = errors.New("aoni h1: invalid or truncated HTTP header section")
+var ErrInvalidHeaderTerminator = errors.New("h1: invalid or truncated HTTP header section")
 
 const (
 	lineTerminator    = "\r\n"
@@ -42,51 +42,83 @@ func (c *HeaderOrderingConn) Write(b []byte) (int, error) {
 	return c.Conn.Write(b)
 }
 
-// ReorderHeaders reorders header lines in raw HTTP/1.1 wire byte buffers according to order.
+// ReorderHeaders reorders header lines in raw HTTP/1.1 wire byte buffers according to order with zero heap allocations.
 func ReorderHeaders(raw []byte, order []string) ([]byte, bool) {
-	body, lines, err := splitHeader(raw)
-	if err != nil || len(lines) < 2 {
+	headerBytes, body, ok := bytes.Cut(raw, bytesconv.S2B(sectionTerminator))
+	if !ok {
 		return nil, false
 	}
 
-	requestLine, rawHeaders := lines[0], lines[1:]
-	parsed := make([]headerEntry, 0, len(rawHeaders))
+	// Stack-allocated array to avoid heap allocations for standard HTTP header sets
+	var stackBuf [64]headerEntry
 
-	for _, h := range rawHeaders {
-		before, _, ok := bytes.Cut(h, []byte{':'})
-		if !ok {
+	parsed := stackBuf[:0]
+
+	var requestLine []byte
+
+	rest := headerBytes
+
+	for len(rest) > 0 {
+		var line []byte
+
+		idx := bytes.Index(rest, bytesconv.S2B(lineTerminator))
+		if idx >= 0 {
+			line = rest[:idx]
+			rest = rest[idx+2:]
+		} else {
+			line = rest
+			rest = nil
+		}
+
+		if requestLine == nil {
+			requestLine = line
 			continue
 		}
 
-		parsed = append(parsed, headerEntry{
+		before, _, hasColon := bytes.Cut(line, []byte{':'})
+		if !hasColon {
+			continue
+		}
+
+		entry := headerEntry{
 			key:  bytes.TrimSpace(before),
-			line: h,
-		})
+			line: line,
+		}
+
+		parsed = append(parsed, entry)
 	}
+
+	if requestLine == nil {
+		return nil, false
+	}
+
+	numHeaders := min(len(parsed), 64)
 
 	var newHeader bytes.Buffer
 	newHeader.Grow(len(raw))
+
 	newHeader.Write(requestLine)
 	newHeader.WriteString(lineTerminator)
 
-	written := make([]bool, len(parsed))
+	// CPU register bitmask tracking written header indices with zero allocations
+	var writtenBits uint64
 
 	for _, targetKey := range order {
-		for i, h := range parsed {
-			if !written[i] && bytesconv.EqualFoldASCII(bytesconv.B2S(h.key), targetKey) {
-				newHeader.Write(h.line)
+		for i := 0; i < numHeaders; i++ {
+			if (writtenBits&(1<<i)) == 0 && bytesconv.EqualFoldASCII(bytesconv.B2S(parsed[i].key), targetKey) {
+				newHeader.Write(parsed[i].line)
 				newHeader.WriteString(lineTerminator)
 
-				written[i] = true
+				writtenBits |= (1 << i)
 
 				break
 			}
 		}
 	}
 
-	for i, h := range parsed {
-		if !written[i] {
-			newHeader.Write(h.line)
+	for i := 0; i < numHeaders; i++ {
+		if (writtenBits & (1 << i)) == 0 {
+			newHeader.Write(parsed[i].line)
 			newHeader.WriteString(lineTerminator)
 		}
 	}
@@ -95,18 +127,4 @@ func ReorderHeaders(raw []byte, order []string) ([]byte, bool) {
 	newHeader.Write(body)
 
 	return newHeader.Bytes(), true
-}
-
-func splitHeader(raw []byte) ([]byte, [][]byte, error) {
-	headerBytes, body, ok := bytes.Cut(raw, bytesconv.S2B(sectionTerminator))
-	if !ok {
-		return nil, nil, ErrInvalidHeaderTerminator
-	}
-
-	lines := bytes.Split(headerBytes, bytesconv.S2B(lineTerminator))
-	if len(lines) < 2 {
-		return nil, nil, ErrInvalidHeaderTerminator
-	}
-
-	return body, lines, nil
 }

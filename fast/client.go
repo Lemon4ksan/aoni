@@ -15,6 +15,7 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -923,21 +924,11 @@ func resolveALPNMode(ctx context.Context, cfg *aoni.Config, host string) string 
 		return aoni.AlpnH3
 	}
 
-	if len(cfg.Fingerprint.HeaderOrder) > 0 && slicesContains(cfg.Fingerprint.HeaderOrder, ":method") {
+	if len(cfg.Fingerprint.HeaderOrder) > 0 && slices.Contains(cfg.Fingerprint.HeaderOrder, ":method") {
 		return aoni.AlpnH2
 	}
 
 	return aoni.AlpnHTTP
-}
-
-func slicesContains(slice []string, target string) bool {
-	for _, item := range slice {
-		if item == target {
-			return true
-		}
-	}
-
-	return false
 }
 
 func (c *Client) applyEngineConfig() {
