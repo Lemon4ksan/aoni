@@ -2,7 +2,6 @@
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
-// Package h2engine provides HTTP/2 client functionality using fasthttp.
 package h2engine
 
 import (
@@ -197,10 +196,28 @@ func (cl *Client) doOnce(ctx context.Context, req *fasthttp.Request, res *fastht
 	}
 }
 
+// selectConn selects an available connection from pool with Late-Binding optimization.
 func (cl *Client) selectConn() (*Conn, error) {
 	cl.lck.Lock()
 	defer cl.lck.Unlock()
 
+	for {
+		if conn := cl.findAvailableConnLocked(); conn != nil {
+			return conn, nil
+		}
+
+		c, err := cl.dialOrWaitLateBindingLocked()
+		if err != nil {
+			return nil, err
+		}
+
+		if c != nil {
+			return c, nil
+		}
+	}
+}
+
+func (cl *Client) findAvailableConnLocked() *Conn {
 	var next *list.Element
 
 	for e := cl.conns.Front(); e != nil; e = next {
@@ -213,11 +230,27 @@ func (cl *Client) selectConn() (*Conn, error) {
 		}
 
 		if c.CanOpenStream() {
-			return c, nil
+			return c
 		}
 	}
 
-	c, _, err := cl.createConn()
+	return nil
+}
 
-	return c, err
+func (cl *Client) dialOrWaitLateBindingLocked() (*Conn, error) {
+	// Release pool lock during network dial to avoid blocking sibling requests
+	cl.lck.Unlock()
+	c, _, err := cl.createConn()
+	cl.lck.Lock()
+
+	if err != nil {
+		return nil, err
+	}
+
+	// Late-Binding Check: If an existing warm connection freed a stream slot during dial, bind to it!
+	if existing := cl.findAvailableConnLocked(); existing != nil && existing != c {
+		return existing, nil
+	}
+
+	return c, nil
 }
