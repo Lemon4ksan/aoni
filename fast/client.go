@@ -9,6 +9,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/tls"
+	"encoding/base64"
 	"fmt"
 	"io"
 	"net"
@@ -24,6 +25,7 @@ import (
 	"github.com/lemon4ksan/aoni"
 	"github.com/lemon4ksan/aoni/fast/h2engine"
 	"github.com/lemon4ksan/aoni/fast/h3engine"
+	"github.com/lemon4ksan/aoni/internal/bytesconv"
 )
 
 // Client executes ultra-high-performance HTTP requests over fasthttp,
@@ -509,6 +511,7 @@ func (c *Client) executeWithRedirects(
 ) (trailers map[string][]string, err error, autoReleased bool) {
 	redirectLimit := c.resolveRedirectLimit()
 	if redirectLimit == 0 {
+		extractUserInfoAndSetAuth(fastReq)
 		return c.dispatchSingleRequest(ctx, fastReq, fastResp)
 	}
 
@@ -519,6 +522,7 @@ func (c *Client) executeWithRedirects(
 
 	for {
 		fastReq.URI().CopyTo(currentURI)
+		extractUserInfoAndSetAuth(fastReq)
 
 		trailers, err, autoReleased = c.dispatchSingleRequest(ctx, fastReq, fastResp)
 		if err != nil {
@@ -552,9 +556,34 @@ func (c *Client) executeWithRedirects(
 			scrubSensitiveHeaders(fastReq)
 		}
 
+		if isHTTPSDowngrade(currentURI, nextURI) {
+			fastReq.Header.Del("Referer")
+		}
+
 		fasthttp.ReleaseURI(nextURI)
 		fastResp.Reset()
 	}
+}
+
+func isHTTPSDowngrade(u1, u2 *fasthttp.URI) bool {
+	return bytes.EqualFold(u1.Scheme(), []byte("https")) &&
+		bytes.EqualFold(u2.Scheme(), []byte("http"))
+}
+
+func extractUserInfoAndSetAuth(req *fasthttp.Request) {
+	userInfo := req.URI().Username()
+	if len(userInfo) == 0 {
+		return
+	}
+
+	if len(req.Header.Peek("Authorization")) == 0 {
+		user := string(req.URI().Username())
+		pass := string(req.URI().Password())
+		encoded := base64.StdEncoding.EncodeToString(bytesconv.S2B(user+":"+pass))
+		req.Header.Set("Authorization", "Basic "+encoded)
+	}
+
+	req.URI().SetUsername("")
 }
 
 func (c *Client) dispatchSingleRequest(
