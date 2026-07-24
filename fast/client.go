@@ -602,28 +602,42 @@ func extractUserInfoAndSetAuth(req *fasthttp.Request) {
 }
 
 type altSvcCache struct {
-	mu    sync.RWMutex
-	hosts map[string]time.Time
+	mu        sync.RWMutex
+	hosts     map[string]time.Time
+	cooldowns map[string]time.Time
 }
 
 var globalAltSvcCache = &altSvcCache{
-	hosts: make(map[string]time.Time),
+	hosts:     make(map[string]time.Time),
+	cooldowns: make(map[string]time.Time),
 }
 
-func (c *altSvcCache) IsH3Supported(host string) bool {
-	c.mu.RLock()
-	exp, ok := c.hosts[host]
-	c.mu.RUnlock()
+// MarkH3Failed puts host in a temporary HTTP/3 cooldown upon QUIC dial or network errors.
+func (c *altSvcCache) MarkH3Failed(host string) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
 
-	if !ok {
-		return false
+	if c.cooldowns == nil {
+		c.cooldowns = make(map[string]time.Time)
 	}
 
-	if time.Now().After(exp) {
-		c.mu.Lock()
-		delete(c.hosts, host)
-		c.mu.Unlock()
+	// Disable H3 attempts for this host for 5 minutes after a QUIC/UDP block
+	c.cooldowns[host] = time.Now().Add(5 * time.Minute)
+}
 
+// IsH3Supported reports whether HTTP/3 is supported for host and not currently in cooldown.
+func (c *altSvcCache) IsH3Supported(host string) bool {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+
+	if c.cooldowns != nil {
+		if until, ok := c.cooldowns[host]; ok && time.Now().Before(until) {
+			return false
+		}
+	}
+
+	exp, ok := c.hosts[host]
+	if !ok || time.Now().After(exp) {
 		return false
 	}
 
@@ -638,6 +652,7 @@ func (c *altSvcCache) Record(host, headerVal string) {
 	if headerVal == "clear" {
 		c.mu.Lock()
 		delete(c.hosts, host)
+		delete(c.cooldowns, host)
 		c.mu.Unlock()
 
 		return
@@ -678,14 +693,22 @@ func (c *Client) dispatchSingleRequest(
 	host := string(fastReq.URI().Host())
 	alpnMode := resolveALPNMode(ctx, &c.config, host)
 
-	switch alpnMode {
-	case aoni.AlpnH3:
+	if alpnMode == aoni.AlpnH3 {
 		h3 := c.getH3Client()
 		tr, err := h3.Do(ctx, fastReq, fastResp, c.config.Fingerprint.HeaderOrder)
 
-		return tr, err, false
+		if err == nil {
+			return tr, nil, false
+		}
 
-	case aoni.AlpnH2:
+		// QUIC/UDP network block or handshake failure: fallback to H2/H1 transparently
+		globalAltSvcCache.MarkH3Failed(host)
+		fastResp.Reset()
+
+		alpnMode = resolveALPNMode(ctx, &c.config, host)
+	}
+
+	if alpnMode == aoni.AlpnH2 {
 		h2Cl := c.getH2Client(host)
 		tr, err := h2Cl.DoWithTrailers(ctx, fastReq, fastResp)
 
@@ -694,16 +717,15 @@ func (c *Client) dispatchSingleRequest(
 		}
 
 		return tr, err, false
-
-	default:
-		err, autoReleased = c.executeFastHTTP(ctx, fastReq, fastResp)
-
-		if altSvc := fastResp.Header.Peek("Alt-Svc"); len(altSvc) > 0 {
-			globalAltSvcCache.Record(host, string(altSvc))
-		}
-
-		return nil, err, autoReleased
 	}
+
+	err, autoReleased = c.executeFastHTTP(ctx, fastReq, fastResp)
+
+	if altSvc := fastResp.Header.Peek("Alt-Svc"); len(altSvc) > 0 {
+		globalAltSvcCache.Record(host, string(altSvc))
+	}
+
+	return nil, err, autoReleased
 }
 
 func (c *Client) resolveRedirectLimit() int {
