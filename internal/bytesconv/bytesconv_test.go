@@ -13,11 +13,13 @@ func TestB2SAndS2B(t *testing.T) {
 	if s := B2S(nil); s != "" {
 		t.Errorf("B2S(nil) = %q, want empty", s)
 	}
+
 	if b := S2B(""); b != nil {
 		t.Errorf("S2B(\"\") = %v, want nil", b)
 	}
 
 	str := "Hello, Aoni!"
+
 	b := S2B(str)
 	if !bytes.Equal(b, []byte(str)) {
 		t.Errorf("S2B(%q) = %v, want %v", str, b, []byte(str))
@@ -76,6 +78,7 @@ func TestAppendToLower(t *testing.T) {
 	dst := []byte("Header: ")
 	src := []byte("X-Aoni-Test")
 	got := AppendToLower(dst, src)
+
 	want := "Header: x-aoni-test"
 	if string(got) != want {
 		t.Errorf("AppendToLower result = %q, want %q", string(got), want)

@@ -22,6 +22,7 @@ import (
 
 func generateTestKeyPair(t *testing.T, dir string) (certPath, keyPath string) {
 	t.Helper()
+
 	priv, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	if err != nil {
 		t.Fatalf("failed to generate key: %v", err)
@@ -51,6 +52,7 @@ func generateTestKeyPair(t *testing.T, dir string) (certPath, keyPath string) {
 	if err != nil {
 		t.Fatalf("failed to open cert.pem: %v", err)
 	}
+
 	_ = pem.Encode(certOut, &pem.Block{Type: "CERTIFICATE", Bytes: certDER})
 	_ = certOut.Close()
 
@@ -58,10 +60,12 @@ func generateTestKeyPair(t *testing.T, dir string) (certPath, keyPath string) {
 	if err != nil {
 		t.Fatalf("failed to open key.pem: %v", err)
 	}
+
 	privBytes, err := x509.MarshalECPrivateKey(priv)
 	if err != nil {
 		t.Fatalf("failed to marshal key: %v", err)
 	}
+
 	_ = pem.Encode(keyOut, &pem.Block{Type: "EC PRIVATE KEY", Bytes: privBytes})
 	_ = keyOut.Close()
 

@@ -6,6 +6,7 @@ package cache_test
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
@@ -20,7 +21,7 @@ func TestInMemoryStore_SetGetEviction(t *testing.T) {
 	val := []byte(`{"id":123,"name":"Test User"}`)
 
 	// Miss
-	if _, err := store.Get(ctx, key); err != cache.ErrCacheMiss {
+	if _, err := store.Get(ctx, key); !errors.Is(err, cache.ErrCacheMiss) {
 		t.Fatalf("expected ErrCacheMiss, got %v", err)
 	}
 
@@ -34,6 +35,7 @@ func TestInMemoryStore_SetGetEviction(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Get failed: %v", err)
 	}
+
 	if string(got) != string(val) {
 		t.Errorf("got %q, want %q", string(got), string(val))
 	}
@@ -42,7 +44,7 @@ func TestInMemoryStore_SetGetEviction(t *testing.T) {
 	time.Sleep(150 * time.Millisecond)
 
 	// Miss after expiration
-	if _, err := store.Get(ctx, key); err != cache.ErrCacheMiss {
+	if _, err := store.Get(ctx, key); !errors.Is(err, cache.ErrCacheMiss) {
 		t.Fatalf("expected ErrCacheMiss after expiration, got %v", err)
 	}
 
