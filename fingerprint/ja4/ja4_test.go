@@ -450,11 +450,11 @@ func TestParseExtensionsFromRaw_BoundaryAndErrorCases(t *testing.T) {
 func TestHash12(t *testing.T) {
 	t.Parallel()
 
-	res := hash12Bytes([]byte("test"))
+	res := hash12Hex([]byte("test"))
 	assert.Len(t, res, 12)
 	assert.Regexp(t, `^[a-f0-9]{12}$`, res)
-	assert.Equal(t, res, hash12Bytes([]byte("test")))
-	assert.NotEqual(t, res, hash12Bytes([]byte("other")))
+	assert.Equal(t, res, hash12Hex([]byte("test")))
+	assert.NotEqual(t, res, hash12Hex([]byte("other")))
 }
 
 func BenchmarkComputeJA4(b *testing.B) {

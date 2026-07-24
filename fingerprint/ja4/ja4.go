@@ -10,7 +10,6 @@ import (
 	"cmp"
 	"crypto/sha256"
 	"encoding/binary"
-	"encoding/hex"
 	"errors"
 	"slices"
 	"sync"
@@ -308,7 +307,19 @@ func computeHeadersHash(headers []string) string {
 		return "000000000000"
 	}
 
-	sorted := slices.Clone(headers)
+	// Stack-allocated array for header key sorting to prevent heap allocations
+	var (
+		stackBuf [64]string
+		sorted   []string
+	)
+
+	if len(headers) <= cap(stackBuf) {
+		sorted = stackBuf[:len(headers)]
+		copy(sorted, headers)
+	} else {
+		sorted = slices.Clone(headers)
+	}
+
 	slices.SortFunc(sorted, compareLowerASCII)
 
 	buf := acquireBuffer(len(headers) * 12)
@@ -319,12 +330,12 @@ func computeHeadersHash(headers []string) string {
 			buf.WriteByte(',')
 		}
 
-		for j := range h {
+		for j := 0; j < len(h); j++ {
 			buf.WriteByte(bytesconv.LowercaseByte(h[j]))
 		}
 	}
 
-	return hash12Bytes(buf.Bytes())
+	return hash12Hex(buf.Bytes())
 }
 
 func compareLowerASCII(a, b string) int {
@@ -369,12 +380,30 @@ func hashSlice(items []string) string {
 		buf.WriteString(item)
 	}
 
-	return hash12Bytes(buf.Bytes())
+	return hash12Hex(buf.Bytes())
 }
 
-func hash12Bytes(b []byte) string {
-	h := sha256.Sum256(b)
-	return hex.EncodeToString(h[:6])
+func hash12Hex(b []byte) string {
+	sum := sha256.Sum256(b)
+
+	var dst [12]byte
+
+	_ = hexTable[15]
+
+	dst[0] = hexTable[sum[0]>>4]
+	dst[1] = hexTable[sum[0]&0x0f]
+	dst[2] = hexTable[sum[1]>>4]
+	dst[3] = hexTable[sum[1]&0x0f]
+	dst[4] = hexTable[sum[2]>>4]
+	dst[5] = hexTable[sum[2]&0x0f]
+	dst[6] = hexTable[sum[3]>>4]
+	dst[7] = hexTable[sum[3]&0x0f]
+	dst[8] = hexTable[sum[4]>>4]
+	dst[9] = hexTable[sum[4]&0x0f]
+	dst[10] = hexTable[sum[5]>>4]
+	dst[11] = hexTable[sum[5]&0x0f]
+
+	return bytesconv.B2S(dst[:])
 }
 
 func writePaddedTwoDigits(buf *bytes.Buffer, n int) {
@@ -393,7 +422,18 @@ func computeCipherHash(ciphers []uint16) string {
 		return "000000000000"
 	}
 
-	sortedCiphers := slices.Clone(ciphers)
+	var (
+		stackBuf      [64]uint16
+		sortedCiphers []uint16
+	)
+
+	if len(ciphers) <= cap(stackBuf) {
+		sortedCiphers = stackBuf[:len(ciphers)]
+		copy(sortedCiphers, ciphers)
+	} else {
+		sortedCiphers = slices.Clone(ciphers)
+	}
+
 	slices.Sort(sortedCiphers)
 
 	buf := acquireBuffer(len(sortedCiphers) * 5)
@@ -407,7 +447,7 @@ func computeCipherHash(ciphers []uint16) string {
 		writeHex4(buf, c)
 	}
 
-	return hash12Bytes(buf.Bytes())
+	return hash12Hex(buf.Bytes())
 }
 
 func computeExtHash(extensions, sigAlgorithms []uint16) string {
@@ -449,7 +489,7 @@ func computeExtHash(extensions, sigAlgorithms []uint16) string {
 		}
 	}
 
-	return hash12Bytes(buf.Bytes())
+	return hash12Hex(buf.Bytes())
 }
 
 func writeHex4(buf *bytes.Buffer, v uint16) {
