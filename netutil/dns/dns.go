@@ -12,25 +12,28 @@ import (
 	"strings"
 )
 
-// Resolver resolves hostnames to IP addresses.
+// ErrNoResolversConfigured is returned when a fallback or race resolver is instantiated without active resolvers.
+var ErrNoResolversConfigured = errors.New("aoni: dns: no active resolvers configured")
+
+// Resolver defines the hostname-to-IP lookup interface.
 type Resolver interface {
 	LookupIPAddr(ctx context.Context, host string) ([]net.IPAddr, error)
 }
 
-// ResolverFunc is an adapter to allow the use of ordinary functions as DNS resolvers.
+// ResolverFunc adapts a function to the [Resolver] interface.
 type ResolverFunc func(ctx context.Context, host string) ([]net.IPAddr, error)
 
-// LookupIPAddr implements the DNSResolver interface for DNSResolverFunc.
+// LookupIPAddr executes the underlying function.
 func (f ResolverFunc) LookupIPAddr(ctx context.Context, host string) ([]net.IPAddr, error) {
 	return f(ctx, host)
 }
 
-// StdlibResolver delegates DNS resolution to the system resolver via [net.Resolver].
+// StdlibResolver delegates DNS resolutions directly to standard library [net.Resolver].
 type StdlibResolver struct {
 	Resolver *net.Resolver
 }
 
-// NewStdlibResolver creates a [StdlibResolver] with the default resolver.
+// NewStdlibResolver instantiates a [StdlibResolver] wrapping standard system resolvers.
 func NewStdlibResolver() *StdlibResolver {
 	return &StdlibResolver{Resolver: &net.Resolver{}}
 }
@@ -40,14 +43,13 @@ func (r *StdlibResolver) LookupIPAddr(ctx context.Context, host string) ([]net.I
 	return r.Resolver.LookupIPAddr(ctx, host)
 }
 
-// ProxyRoutedResolver sends DNS queries through a proxy connection to prevent leaks.
+// ProxyRoutedResolver routes DNS query connections through proxy dialers to prevent local DNS leakage.
 type ProxyRoutedResolver struct {
 	resolver  Resolver
 	proxyDial func(ctx context.Context, network, addr string) (net.Conn, error)
 }
 
-// NewProxyRoutedDNSResolver creates a [ProxyRoutedResolver] that routes DNS queries
-// through the given proxy dial function.
+// NewProxyRoutedDNSResolver creates a [ProxyRoutedResolver] routing lookups via proxyDial.
 func NewProxyRoutedDNSResolver(
 	resolver Resolver,
 	proxyDial func(ctx context.Context, network, addr string) (net.Conn, error),
@@ -58,22 +60,21 @@ func NewProxyRoutedDNSResolver(
 	}
 }
 
-// LookupIPAddr resolves the host by delegating to the proxy-routed resolver.
+// LookupIPAddr executes proxy-routed host resolution.
 func (r *ProxyRoutedResolver) LookupIPAddr(ctx context.Context, host string) ([]net.IPAddr, error) {
 	if r.resolver == nil {
-		return nil, errors.New("aoni: proxy-routed DNS resolver: no underlying resolver configured")
+		return nil, ErrNoResolversConfigured
 	}
 
 	return r.resolver.LookupIPAddr(ctx, host)
 }
 
-// FallbackResolver tries to resolve hostnames using a list of resolvers sequentially.
-// If a resolver fails, it falls back to the next one.
+// FallbackResolver attempts resolution across a prioritized list of resolvers sequentially.
 type FallbackResolver struct {
 	resolvers []Resolver
 }
 
-// NewFallbackResolver creates a new [FallbackResolver] with the given prioritized resolvers.
+// NewFallbackResolver creates a [FallbackResolver] with active fallback resolvers.
 func NewFallbackResolver(resolvers ...Resolver) *FallbackResolver {
 	active := make([]Resolver, 0, len(resolvers))
 	for _, r := range resolvers {
@@ -85,10 +86,10 @@ func NewFallbackResolver(resolvers ...Resolver) *FallbackResolver {
 	return &FallbackResolver{resolvers: active}
 }
 
-// LookupIPAddr implements the [Resolver] interface by trying resolvers sequentially.
+// LookupIPAddr tries resolvers sequentially, returning the first successful response.
 func (r *FallbackResolver) LookupIPAddr(ctx context.Context, host string) ([]net.IPAddr, error) {
 	if len(r.resolvers) == 0 {
-		return nil, errors.New("aoni: dns: fallback resolver has no active resolvers configured")
+		return nil, ErrNoResolversConfigured
 	}
 
 	var lastErr error
@@ -104,15 +105,13 @@ func (r *FallbackResolver) LookupIPAddr(ctx context.Context, host string) ([]net
 	return nil, errors.New("aoni: dns: all fallback resolvers failed: " + lastErr.Error())
 }
 
-// StaticResolver allows overriding DNS lookups with static IP mappings.
-// If a queried host is not registered in the static map, it delegates
-// the lookup to the next fallback resolver.
+// StaticResolver allows overriding DNS resolutions with explicit static IP mappings.
 type StaticResolver struct {
 	mapping  map[string][]net.IPAddr
 	delegate Resolver
 }
 
-// NewStaticResolver creates a new [StaticResolver] with the given IP mapping and delegate.
+// NewStaticResolver creates a [StaticResolver] with host-to-IP overrides and delegate fallbacks.
 func NewStaticResolver(mapping map[string][]string, delegate Resolver) *StaticResolver {
 	if delegate == nil {
 		delegate = &net.Resolver{}
@@ -138,7 +137,7 @@ func NewStaticResolver(mapping map[string][]string, delegate Resolver) *StaticRe
 	}
 }
 
-// LookupIPAddr implements the [Resolver] interface.
+// LookupIPAddr returns static IP mappings or delegates the lookup to the fallback resolver.
 func (r *StaticResolver) LookupIPAddr(ctx context.Context, host string) ([]net.IPAddr, error) {
 	cleanHost := strings.ToLower(strings.TrimSuffix(host, "."))
 	if ips, ok := r.mapping[cleanHost]; ok {
@@ -148,8 +147,7 @@ func (r *StaticResolver) LookupIPAddr(ctx context.Context, host string) ([]net.I
 	return r.delegate.LookupIPAddr(ctx, host)
 }
 
-// FastRaceResolver executes multiple DNS resolutions concurrently and
-// returns the fastest successful result, canceling all other pending queries.
+// FastRaceResolver races multiple DNS resolutions concurrently and returns the fastest successful result.
 type FastRaceResolver struct {
 	resolvers []Resolver
 }
@@ -166,15 +164,8 @@ func NewFastRaceResolver(resolvers ...Resolver) *FastRaceResolver {
 	return &FastRaceResolver{resolvers: active}
 }
 
-// LookupIPAddr resolves the host by racing all configured resolvers in parallel.
-// It returns the fastest successful result, cancelling all other pending queries.
-//
-// # Complexity
-//
-// Time Complexity: O(1) latency-wise (matches the speed of the fastest responder).
-// Space Complexity: O(N) allocation, where N is the number of active resolvers.
+// LookupIPAddr races all configured resolvers concurrently, yielding the fastest response.
 func (r *FastRaceResolver) LookupIPAddr(ctx context.Context, host string) ([]net.IPAddr, error) {
-	// Filter out nil resolvers before setting up race tracking to avoid deadlocks
 	var activeResolvers []Resolver
 	for _, res := range r.resolvers {
 		if res != nil {
@@ -183,7 +174,7 @@ func (r *FastRaceResolver) LookupIPAddr(ctx context.Context, host string) ([]net
 	}
 
 	if len(activeResolvers) == 0 {
-		return nil, errors.New("aoni race resolver: no active resolvers configured")
+		return nil, ErrNoResolversConfigured
 	}
 
 	type result struct {
@@ -221,8 +212,8 @@ func (r *FastRaceResolver) LookupIPAddr(ctx context.Context, host string) ([]net
 			}
 
 			lastErr = res.err
-
 			failedCount++
+
 			if failedCount == activeCount {
 				return nil, errors.New("aoni race resolver: all concurrent resolutions failed: " + lastErr.Error())
 			}

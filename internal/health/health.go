@@ -1,8 +1,8 @@
 // Copyright (c) 2026 Lemon4ksan All rights reserved.
 // Use of this source code is governed by a BSD-style
-// license can be found in the LICENSE file.
+// license that can be found in the LICENSE file.
 
-// Package health provides internal endpoint health tracking for load balancers and proxy rotators.
+// Package health provides endpoint health tracking for load balancers and proxy rotators.
 package health
 
 import (
@@ -10,7 +10,7 @@ import (
 	"time"
 )
 
-// Status represents the execution health state of a tracked network endpoint.
+// Status represents the operational health state of a tracked network endpoint.
 type Status int
 
 const (
@@ -40,9 +40,7 @@ func (s Status) String() string {
 	}
 }
 
-// Tracker monitors endpoint reliability via consecutive failure thresholds
-// and handles automatic state restoration after cooldown delays.
-// Safe for concurrent use across multiple goroutines without mutex contention.
+// Tracker monitors endpoint reliability via failure thresholds and manages cooldown state recovery.
 type Tracker struct {
 	failCount   atomic.Uint32
 	unhealthy   atomic.Bool
@@ -55,7 +53,7 @@ type Tracker struct {
 	onRecovered func(name string)
 }
 
-// NewTracker creates a [Tracker] configured with failure thresholds and state callbacks.
+// NewTracker creates a thread-safe [Tracker] configured with failure thresholds and state callbacks.
 func NewTracker(
 	name string,
 	maxFails uint32,
@@ -72,8 +70,7 @@ func NewTracker(
 	}
 }
 
-// MarkFailed increments the consecutive failure counter. If failures reach maxFails,
-// the endpoint transitions to unhealthy state and triggers the onUnhealthy callback.
+// MarkFailed records a failure event. If consecutive failures reach maxFails, transitions to [StatusUnhealthy].
 func (h *Tracker) MarkFailed() {
 	fails := h.failCount.Add(1)
 	if fails >= h.maxFails {
@@ -85,8 +82,7 @@ func (h *Tracker) MarkFailed() {
 	}
 }
 
-// MarkSuccess resets the consecutive failure counter and transitions the endpoint back to healthy.
-// Triggers onRecovered callback if the endpoint was previously marked unhealthy.
+// MarkSuccess resets consecutive failure counters and restores endpoint health state to [StatusHealthy].
 func (h *Tracker) MarkSuccess() {
 	h.failCount.Store(0)
 
@@ -96,7 +92,6 @@ func (h *Tracker) MarkSuccess() {
 }
 
 // IsAvailable reports whether the endpoint is eligible to receive network traffic.
-// An unhealthy endpoint becomes available again once its cooldown duration elapses.
 func (h *Tracker) IsAvailable() bool {
 	if !h.unhealthy.Load() {
 		return true
@@ -105,13 +100,12 @@ func (h *Tracker) IsAvailable() bool {
 	return time.Now().UnixNano() >= h.recoveredAt.Load()
 }
 
-// FailCount returns the current count of consecutive recorded failures.
+// FailCount returns the current consecutive recorded failure count.
 func (h *Tracker) FailCount() uint32 {
 	return h.failCount.Load()
 }
 
-// CooldownRemaining calculates the duration left before an unhealthy endpoint can attempt recovery.
-// Returns 0 if the endpoint is healthy, recovering, or has no active cooldown.
+// CooldownRemaining calculates the duration remaining before an unhealthy endpoint can attempt trial recovery.
 func (h *Tracker) CooldownRemaining() time.Duration {
 	if !h.unhealthy.Load() {
 		return 0
@@ -144,7 +138,7 @@ func (h *Tracker) Status() Status {
 	return StatusUnhealthy
 }
 
-// Reset clears failure statistics and forces the endpoint back to StatusHealthy immediately.
+// Reset clears failure counters and restores the endpoint to [StatusHealthy] immediately.
 func (h *Tracker) Reset() {
 	h.failCount.Store(0)
 	h.recoveredAt.Store(0)

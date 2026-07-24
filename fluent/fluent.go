@@ -2,9 +2,7 @@
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
-// Package fluent provides a high-performance, chainable Request Builder API
-// designed for ergonomics, zero-allocation request pooling, and seamless integration
-// with the core aoni HTTP client.
+// Package fluent provides a high-performance, chainable Request Builder API backed by zero-allocation request pooling.
 package fluent
 
 import (
@@ -16,23 +14,20 @@ import (
 	"github.com/lemon4ksan/aoni"
 )
 
-// New initializes a new pooled Request builder bound to the target client.
+// New acquires a pooled [Request] builder bound to the provided [aoni.Client].
 //
-// Request builders are pooled to avoid unnecessary allocations and improve performance.
-// Call [Request.Discard] if a constructed request is abandoned before execution.
+// Postconditions:
+//   - The returned request must be executed or released via [Request.Discard] to prevent pool leaks.
 func New(client *aoni.Client) *Request {
 	return requestPool.Get(client)
 }
 
-// R is a convenient short alias for New.
+// R is a convenient shorthand alias for [New].
 func R(client *aoni.Client) *Request {
 	return requestPool.Get(client)
 }
 
-// FetchTo is the universal generic entrypoint that executes a request using any method, path, and codecs/modifiers,
-// unmarshaling the 2xx response directly into T.
-//
-// Replaces specialized functions like GetJSON or PostProto with a single type-safe interface.
+// FetchTo executes a request with method, path, and optional [aoni.RequestModifier] options, unmarshaling the 2xx response into T.
 func FetchTo[T any](
 	ctx context.Context,
 	c *aoni.Client,
@@ -50,7 +45,7 @@ func FetchTo[T any](
 	return target, resp, err
 }
 
-// PostProtoTo dispatches a POST request with a Protobuf payload and unmarshals a binary Protobuf response into T.
+// PostProtoTo dispatches a POST request carrying a binary [proto.Message] payload and unmarshals the response into T.
 func PostProtoTo[T any](
 	ctx context.Context,
 	c *aoni.Client,
@@ -64,7 +59,7 @@ func PostProtoTo[T any](
 	return target, resp, err
 }
 
-// PostGRPCWebTo dispatches a POST request with a gRPC-Web framed payload and unmarshals a gRPC-Web response frame into T.
+// PostGRPCWebTo dispatches a POST request carrying a gRPC-Web framed payload and unmarshals the response frame into T.
 func PostGRPCWebTo[T any](
 	ctx context.Context,
 	c *aoni.Client,
@@ -78,7 +73,7 @@ func PostGRPCWebTo[T any](
 	return target, resp, err
 }
 
-// GetProtoTo dispatches a GET request and unmarshals a binary Protobuf response into T.
+// GetProtoTo dispatches a GET request expecting a binary Protocol Buffer response stream decoded into T.
 func GetProtoTo[T any](ctx context.Context, c *aoni.Client, path string) (T, *http.Response, error) {
 	var target T
 
@@ -87,7 +82,7 @@ func GetProtoTo[T any](ctx context.Context, c *aoni.Client, path string) (T, *ht
 	return target, resp, err
 }
 
-// GetGRPCWebTo dispatches a GET request and unmarshals a gRPC-Web response frame into T.
+// GetGRPCWebTo dispatches a GET request expecting a gRPC-Web framed response stream decoded into T.
 func GetGRPCWebTo[T any](ctx context.Context, c *aoni.Client, path string) (T, *http.Response, error) {
 	var target T
 

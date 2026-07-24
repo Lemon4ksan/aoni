@@ -1,6 +1,6 @@
 // Copyright (c) 2026 Lemon4ksan All rights reserved.
 // Use of this source code is governed by a BSD-style
-// license can be found in the LICENSE file.
+// license that can be found in the LICENSE file.
 
 // Package inspector provides a local HTTP traffic inspector and real-time web dashboard.
 package inspector
@@ -24,7 +24,7 @@ import (
 	"github.com/lemon4ksan/aoni/telemetry"
 )
 
-// CapturedRequest represents a request logged by the traffic inspector.
+// CapturedRequest represents a request logged by [TrafficInspector].
 type CapturedRequest struct {
 	ID               int64             `json:"id"`
 	Timestamp        time.Time         `json:"timestamp"`
@@ -52,7 +52,7 @@ type CapturedRequest struct {
 	ContentTransfer  time.Duration     `json:"content_transfer"`
 }
 
-// TrafficInspector holds requests history and runs the embedded web server.
+// TrafficInspector holds request history and runs the embedded dashboard HTTP server.
 type TrafficInspector struct {
 	mu        sync.RWMutex
 	requests  []CapturedRequest
@@ -63,7 +63,7 @@ type TrafficInspector struct {
 	addr      string
 }
 
-// NewTrafficInspector initializes a TrafficInspector on the specified address.
+// NewTrafficInspector initializes a [TrafficInspector] listening on addr.
 func NewTrafficInspector(addr string) *TrafficInspector {
 	return &TrafficInspector{
 		addr:    addr,
@@ -71,7 +71,7 @@ func NewTrafficInspector(addr string) *TrafficInspector {
 	}
 }
 
-// GetRequests returns a copy of all currently captured requests in reverse chronological order.
+// GetRequests returns a copy of captured requests in reverse chronological order.
 func (i *TrafficInspector) GetRequests() []CapturedRequest {
 	i.mu.RLock()
 	defer i.mu.RUnlock()
@@ -84,8 +84,7 @@ func (i *TrafficInspector) GetRequests() []CapturedRequest {
 	return reversed
 }
 
-// Enable enables the traffic inspector dashboard for the client at the specified address.
-// It returns a new clone of the client with the inspector registered.
+// Enable starts the traffic inspector dashboard server for c on addr.
 func Enable(c *aoni.Client, addr string) (*aoni.Client, *TrafficInspector, error) {
 	inspector := NewTrafficInspector(addr)
 	if err := inspector.Serve(); err != nil {
@@ -136,7 +135,7 @@ func (i *TrafficInspector) Close() error {
 	return nil
 }
 
-// Capture logs a request/response pair into the inspector and broadcasts it to live clients.
+// Capture logs a request-response transaction into history and broadcasts it to live dashboard clients.
 func (i *TrafficInspector) Capture(req *http.Request, resp *http.Response, reqErr error, trace *telemetry.TraceInfo) {
 	if req == nil {
 		return
@@ -205,8 +204,8 @@ func (i *TrafficInspector) captureBody(req *http.Request) string {
 
 func (i *TrafficInspector) saveAndBroadcast(req CapturedRequest) {
 	i.mu.Lock()
-
 	i.requests = append(i.requests, req)
+
 	if len(i.requests) > 500 {
 		i.requests = i.requests[len(i.requests)-500:]
 	}
@@ -281,6 +280,7 @@ func (i *TrafficInspector) clearHandler(w http.ResponseWriter, r *http.Request) 
 	i.mu.Lock()
 	i.requests = nil
 	i.mu.Unlock()
+
 	w.WriteHeader(http.StatusOK)
 }
 

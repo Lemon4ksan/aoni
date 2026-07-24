@@ -1,6 +1,6 @@
 // Copyright (c) 2026 Lemon4ksan All rights reserved.
 // Use of this source code is governed by a BSD-style
-// license can be found in the LICENSE file.
+// license that can be found in the LICENSE file.
 
 package ws
 
@@ -985,7 +985,7 @@ func TestDialH2ExtendedConnect_Failures(t *testing.T) {
 				_, _ = framer.ReadFrame()
 				_ = framer.WriteSettings()
 			},
-			expectErr: errH2ConnectNotSupported,
+			expectErr: ErrH2ConnectNotSupported,
 		},
 		{
 			name: "forbidden_status_403",
@@ -1006,7 +1006,7 @@ func TestDialH2ExtendedConnect_Failures(t *testing.T) {
 					EndHeaders:    true,
 				})
 			},
-			expectErr: errH2ConnectFailed,
+			expectErr: ErrH2ConnectFailed,
 		},
 		{
 			name: "unexpected_frame_during_preface",
@@ -1018,7 +1018,7 @@ func TestDialH2ExtendedConnect_Failures(t *testing.T) {
 					EndHeaders:    true,
 				})
 			},
-			expectErr: errH2UnexpectedFrame,
+			expectErr: ErrH2UnexpectedFrame,
 		},
 		{
 			name: "stream_reset_by_server",
@@ -1030,7 +1030,7 @@ func TestDialH2ExtendedConnect_Failures(t *testing.T) {
 				hf, _ := framer.ReadFrame()
 				_ = framer.WriteRSTStream(hf.(*http2.HeadersFrame).StreamID, http2.ErrCodeCancel)
 			},
-			expectErr: errH2StreamClosed,
+			expectErr: ErrH2StreamClosed,
 		},
 		{
 			name: "goaway_frame_received",
@@ -1042,7 +1042,7 @@ func TestDialH2ExtendedConnect_Failures(t *testing.T) {
 				_, _ = framer.ReadFrame()
 				_ = framer.WriteGoAway(1, http2.ErrCodeNo, nil)
 			},
-			expectErr: errH2GoAway,
+			expectErr: ErrH2GoAway,
 		},
 	}
 

@@ -1,8 +1,8 @@
 // Copyright (c) 2026 Lemon4ksan All rights reserved.
 // Use of this source code is governed by a BSD-style
-// license can be found in the LICENSE file.
+// license that can be found in the LICENSE file.
 
-// Package cert provides dynamic TLS certificate file watching, auto-reloading, and cert utilities.
+// Package cert provides dynamic TLS certificate watching and hot-reloading capabilities.
 package cert
 
 import (
@@ -14,8 +14,7 @@ import (
 	"time"
 )
 
-// Watcher periodically polls disk mtime for TLS certificate and key files,
-// reloading them dynamically without requiring application restarts.
+// Watcher monitors disk modification timestamps for TLS keypairs, updating certificates dynamically.
 type Watcher struct {
 	mu          sync.RWMutex
 	certPath    string
@@ -25,9 +24,7 @@ type Watcher struct {
 	cancel      context.CancelFunc
 }
 
-// NewWatcher creates a new [Watcher] that monitors certPath and keyPath.
-// Initial certificate loading is performed synchronously. If interval > 0,
-// a background watcher goroutine automatically checks for file modifications.
+// NewWatcher creates a new [Watcher] monitoring certPath and keyPath. Initial loading is synchronous.
 func NewWatcher(certPath, keyPath string, interval time.Duration) (*Watcher, error) {
 	w := &Watcher{
 		certPath: certPath,
@@ -40,29 +37,31 @@ func NewWatcher(certPath, keyPath string, interval time.Duration) (*Watcher, err
 
 	if interval > 0 {
 		ctx, cancel := context.WithCancel(context.Background())
-
 		w.cancel = cancel
+
 		go w.watchLoop(ctx, interval)
 	}
 
 	return w, nil
 }
 
-// GetCertificate returns the current active [tls.Certificate] for use in tls.Config.
+// GetCertificate returns the active [*tls.Certificate] for server handshake configs.
 func (w *Watcher) GetCertificate(_ *tls.ClientHelloInfo) (*tls.Certificate, error) {
 	w.mu.RLock()
 	defer w.mu.RUnlock()
+
 	return w.cert, nil
 }
 
-// GetClientCertificate returns the current active client [tls.Certificate] for mTLS.
+// GetClientCertificate returns the active client [*tls.Certificate] for mTLS handshakes.
 func (w *Watcher) GetClientCertificate(_ *tls.CertificateRequestInfo) (*tls.Certificate, error) {
 	w.mu.RLock()
 	defer w.mu.RUnlock()
+
 	return w.cert, nil
 }
 
-// Close stops the background cert watcher loop.
+// Close terminates the background certificate watcher loop.
 func (w *Watcher) Close() {
 	if w.cancel != nil {
 		w.cancel()

@@ -1,8 +1,8 @@
 // Copyright (c) 2026 Lemon4ksan All rights reserved.
 // Use of this source code is governed by a BSD-style
-// license can be found in the LICENSE file.
+// license that can be found in the LICENSE file.
 
-// Package digest implements RFC 7616 / RFC 2617 Digest Access Authentication for HTTP transactions.
+// Package digest implements RFC 7616 and RFC 2617 Digest Access Authentication for HTTP transactions.
 package digest
 
 import (
@@ -23,13 +23,16 @@ import (
 )
 
 var (
-	// ErrDigestBadChallenge is returned when the server responds with a bad challenge.
+	// ErrDigestBadChallenge is returned when the server responds with a malformed Digest WWW-Authenticate challenge.
 	ErrDigestBadChallenge = errors.New("aoni: digest: bad challenge")
-	// ErrDigestInvalidCharset is returned when the server responds with an invalid charset.
+
+	// ErrDigestInvalidCharset is returned when the server challenge specifies an unsupported character encoding.
 	ErrDigestInvalidCharset = errors.New("aoni: digest: invalid charset")
-	// ErrDigestAlgNotSupported is returned when the server responds with an unsupported algorithm.
+
+	// ErrDigestAlgNotSupported is returned when the server requires an unsupported hash algorithm.
 	ErrDigestAlgNotSupported = errors.New("aoni: digest: algorithm not supported")
-	// ErrDigestQopNotSupported is returned when the server responds with an unsupported qop.
+
+	// ErrDigestQopNotSupported is returned when the server requires an unsupported quality of protection mode.
 	ErrDigestQopNotSupported = errors.New("aoni: digest: qop not supported")
 )
 
@@ -50,14 +53,14 @@ const (
 	qopAuthInt = "auth-int"
 )
 
-// Transport wraps an http.RoundTripper to automatically handle HTTP Digest Authentication (401 challenge-response).
+// Transport wraps an [http.RoundTripper] to automatically resolve HTTP 401 Digest Authentication challenges.
 type Transport struct {
 	Username  string
 	Password  string
 	Transport http.RoundTripper
 }
 
-// RoundTrip implements the http.RoundTripper interface, adding Digest Authentication to the request.
+// RoundTrip executes requests, handling HTTP 401 Digest challenge-response flows transparently.
 func (dt *Transport) RoundTrip(req *http.Request) (*http.Response, error) {
 	tr := dt.Transport
 	if tr == nil {
@@ -67,12 +70,8 @@ func (dt *Transport) RoundTrip(req *http.Request) (*http.Response, error) {
 	req1 := dt.cloneReq(req, true)
 
 	res, err := tr.RoundTrip(req1)
-	if err != nil {
-		return nil, err
-	}
-
-	if res.StatusCode != http.StatusUnauthorized {
-		return res, nil
+	if err != nil || res.StatusCode != http.StatusUnauthorized {
+		return res, err
 	}
 
 	_, _ = io.Copy(io.Discard, res.Body)
@@ -126,7 +125,9 @@ func (dt *Transport) parseChallenge(input string) (*digestChallenge, error) {
 
 	s = strings.Trim(s[7:], ws)
 	c := &digestChallenge{}
-	b := strings.Builder{}
+
+	var sb strings.Builder
+
 	key := ""
 	quoted := false
 
@@ -136,10 +137,10 @@ func (dt *Transport) parseChallenge(input string) (*digestChallenge, error) {
 			quoted = !quoted
 		case ',':
 			if quoted {
-				b.WriteRune(r)
+				sb.WriteRune(r)
 			} else {
-				val := strings.Trim(b.String(), ws)
-				b.Reset()
+				val := strings.Trim(sb.String(), ws)
+				sb.Reset()
 
 				if err := c.setValue(key, val); err != nil {
 					return nil, err
@@ -150,24 +151,24 @@ func (dt *Transport) parseChallenge(input string) (*digestChallenge, error) {
 
 		case '=':
 			if quoted {
-				b.WriteRune(r)
+				sb.WriteRune(r)
 			} else {
-				key = strings.Trim(b.String(), ws)
-				b.Reset()
+				key = strings.Trim(sb.String(), ws)
+				sb.Reset()
 			}
 
 		default:
-			b.WriteRune(r)
+			sb.WriteRune(r)
 		}
 	}
 
 	key = strings.TrimSpace(key)
-	if quoted || (key == "" && b.Len() > 0) {
+	if quoted || (key == "" && sb.Len() > 0) {
 		return nil, ErrDigestBadChallenge
 	}
 
 	if key != "" {
-		val := strings.Trim(b.String(), ws)
+		val := strings.Trim(sb.String(), ws)
 		if err := c.setValue(key, val); err != nil {
 			return nil, err
 		}
@@ -341,6 +342,7 @@ func (dc *digestCredentials) parseQop(cha *digestChallenge) error {
 func (dc *digestCredentials) h(data string) string {
 	h := newHashFunc(dc.algorithm)
 	_, _ = h.Write([]byte(data))
+
 	return hex.EncodeToString(h.Sum(nil))
 }
 
@@ -367,8 +369,7 @@ func (dc *digestCredentials) digest(cha *digestChallenge) (string, error) {
 	case "":
 		resp = fmt.Sprintf("%s:%s:%s", ha1, dc.nonce, ha2)
 	case qopAuth, qopAuthInt:
-		resp = fmt.Sprintf("%s:%s:%08x:%s:%s:%s",
-			ha1, dc.nonce, dc.nc, dc.cnonce, dc.qop, ha2)
+		resp = fmt.Sprintf("%s:%s:%08x:%s:%s:%s", ha1, dc.nonce, dc.nc, dc.cnonce, dc.qop, ha2)
 	}
 
 	dc.response = dc.h(resp)
@@ -403,8 +404,8 @@ func (dc *digestCredentials) String() string {
 	sl = append(sl, fmt.Sprintf(`username="%s"`, dc.username))
 	sl = append(sl, fmt.Sprintf(`realm="%s"`, dc.realm))
 	sl = append(sl, fmt.Sprintf(`nonce="%s"`, dc.nonce))
-
 	sl = append(sl, fmt.Sprintf(`uri="%s"`, dc.uri))
+
 	if dc.algorithm != "" {
 		sl = append(sl, "algorithm="+dc.algorithm)
 	}

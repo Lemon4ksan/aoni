@@ -1,6 +1,6 @@
 // Copyright (c) 2026 Lemon4ksan All rights reserved.
 // Use of this source code is governed by a BSD-style
-// license can be found in the LICENSE file.
+// license that can be found in the LICENSE file.
 
 package telemetry
 
@@ -14,32 +14,20 @@ import (
 	"time"
 )
 
-// HARGenerator thread-safely captures and aggregates HTTP request-response
-// transactions into a standard-compliant HTTP Archive (HAR) format.
+// HARGenerator captures and aggregates HTTP request-response sessions into HAR 1.2 JSON format.
 type HARGenerator struct {
 	mu      sync.RWMutex
 	entries []HAREntry
 }
 
-// NewHARGenerator instantiates an empty [HARGenerator] ready to record sessions.
+// NewHARGenerator instantiates an empty thread-safe [HARGenerator].
 func NewHARGenerator() *HARGenerator {
 	return &HARGenerator{
 		entries: make([]HAREntry, 0),
 	}
 }
 
-// Record compiles the transaction detail of a completed request and response cycle
-// into a structured HAR entry.
-//
-// Preconditions:
-//   - The response argument must not be nil.
-//
-// Side effects:
-//   - If the response is text-based and its size is under 150 KB, the body is read,
-//     buffered, and transparently replaced with a fresh [io.ReadCloser] to ensure
-//     subsequent readers can still consume the response body stream cleanly.
-//   - If the response body is binary or exceeds 150 KB, body capture is skipped
-//     defensively to prevent memory exhaustion (OOM).
+// Record captures details of a completed request-response cycle into a structured [HAREntry].
 func (g *HARGenerator) Record(
 	req *http.Request,
 	resp *http.Response,
@@ -102,27 +90,7 @@ func (g *HARGenerator) Record(
 		})
 	}
 
-	var bodyBytes []byte
-	if resp.Body != nil {
-		contentType := resp.Header.Get("Content-Type")
-		isText := strings.Contains(contentType, "json") ||
-			strings.Contains(contentType, "text") ||
-			strings.Contains(contentType, "xml")
-
-		if isText && (resp.ContentLength == -1 || resp.ContentLength < 150*1024) {
-			limitReader := io.LimitReader(resp.Body, 150*1024+1)
-			bodyBytes, _ = io.ReadAll(limitReader)
-			_ = resp.Body.Close()
-
-			if int64(len(bodyBytes)) > 150*1024 {
-				bodyBytes = []byte("[Truncated: Response too large for HAR log]")
-			}
-
-			resp.Body = io.NopCloser(bytes.NewReader(bodyBytes))
-		} else {
-			bodyBytes = []byte("[Skipped: Binary or large response body]")
-		}
-	}
+	bodyBytes := captureHARResponseBody(resp)
 
 	g.AddEntry(HAREntry{
 		StartedDateTime: startTime.UTC().Format(time.RFC3339Nano),
@@ -161,7 +129,34 @@ func (g *HARGenerator) Record(
 	})
 }
 
-// AddEntry adds a single HAREntry thread-safely.
+func captureHARResponseBody(resp *http.Response) []byte {
+	if resp.Body == nil {
+		return nil
+	}
+
+	contentType := resp.Header.Get("Content-Type")
+	isText := strings.Contains(contentType, "json") ||
+		strings.Contains(contentType, "text") ||
+		strings.Contains(contentType, "xml")
+
+	if !isText || (resp.ContentLength != -1 && resp.ContentLength >= 150*1024) {
+		return []byte("[Skipped: Binary or large response body]")
+	}
+
+	limitReader := io.LimitReader(resp.Body, 150*1024+1)
+	bodyBytes, _ := io.ReadAll(limitReader)
+	_ = resp.Body.Close()
+
+	if int64(len(bodyBytes)) > 150*1024 {
+		bodyBytes = []byte("[Truncated: Response too large for HAR log]")
+	}
+
+	resp.Body = io.NopCloser(bytes.NewReader(bodyBytes))
+
+	return bodyBytes
+}
+
+// AddEntry adds a single [HAREntry] to the generator thread-safely.
 func (g *HARGenerator) AddEntry(entry HAREntry) {
 	g.mu.Lock()
 	defer g.mu.Unlock()
@@ -169,7 +164,7 @@ func (g *HARGenerator) AddEntry(entry HAREntry) {
 	g.entries = append(g.entries, entry)
 }
 
-// Export serializes the logged entries into standard HAR JSON format.
+// Export serializes logged entries into HAR 1.2 compliant JSON bytes.
 func (g *HARGenerator) Export() ([]byte, error) {
 	g.mu.RLock()
 	defer g.mu.RUnlock()
@@ -179,7 +174,7 @@ func (g *HARGenerator) Export() ([]byte, error) {
 		entries = make([]HAREntry, 0)
 	}
 
-	log := HARLog{
+	logData := HARLog{
 		Log: HARLogDetail{
 			Version: "1.2",
 			Creator: HARCreator{
@@ -190,28 +185,28 @@ func (g *HARGenerator) Export() ([]byte, error) {
 		},
 	}
 
-	return json.MarshalIndent(log, "", "  ")
+	return json.MarshalIndent(logData, "", "  ")
 }
 
-// HARLog represents the top-level HAR log structure.
+// HARLog represents top-level HAR structure.
 type HARLog struct {
 	Log HARLogDetail `json:"log"`
 }
 
-// HARLogDetail represents the log details in a HAR file.
+// HARLogDetail holds metadata and entry lists.
 type HARLogDetail struct {
 	Version string     `json:"version"`
 	Creator HARCreator `json:"creator"`
 	Entries []HAREntry `json:"entries"`
 }
 
-// HARCreator represents the creator of the HAR file.
+// HARCreator holds generator application metadata.
 type HARCreator struct {
 	Name    string `json:"name"`
 	Version string `json:"version"`
 }
 
-// HAREntry represents a single request-response session entry in the HAR log.
+// HAREntry represents a captured request-response transaction.
 type HAREntry struct {
 	StartedDateTime string      `json:"startedDateTime"`
 	Time            int64       `json:"time"`
@@ -221,7 +216,7 @@ type HAREntry struct {
 	Timings         HARTimings  `json:"timings"`
 }
 
-// HARRequest represents a captured HTTP request in the HAR log.
+// HARRequest represents a captured HTTP request.
 type HARRequest struct {
 	Method      string           `json:"method"`
 	URL         string           `json:"url"`
@@ -233,7 +228,7 @@ type HARRequest struct {
 	BodySize    int64            `json:"bodySize"`
 }
 
-// HARResponse represents a captured HTTP response in the HAR log.
+// HARResponse represents a captured HTTP response.
 type HARResponse struct {
 	Status      int              `json:"status"`
 	StatusText  string           `json:"statusText"`
@@ -246,13 +241,13 @@ type HARResponse struct {
 	BodySize    int64            `json:"bodySize"`
 }
 
-// HARHeaderField represents an HTTP header name-value pair in the HAR log.
+// HARHeaderField represents an HTTP header name-value pair.
 type HARHeaderField struct {
 	Name  string `json:"name"`
 	Value string `json:"value"`
 }
 
-// HARCookieField represents a cookie in the HAR log.
+// HARCookieField represents a cookie in HAR format.
 type HARCookieField struct {
 	Name     string `json:"name"`
 	Value    string `json:"value"`
@@ -263,20 +258,20 @@ type HARCookieField struct {
 	Secure   bool   `json:"secure"`
 }
 
-// HARQueryField represents an URL query parameter in the HAR log.
+// HARQueryField represents a URL query parameter.
 type HARQueryField struct {
 	Name  string `json:"name"`
 	Value string `json:"value"`
 }
 
-// HARContent represents the response body content details in the HAR log.
+// HARContent represents response body details.
 type HARContent struct {
 	Size     int64  `json:"size"`
 	MimeType string `json:"mimeType"`
 	Text     string `json:"text,omitempty"`
 }
 
-// HARTimings represents the timing metrics for a request-response session in the HAR log.
+// HARTimings represents timing metrics in milliseconds.
 type HARTimings struct {
 	Send    int64 `json:"send"`
 	Wait    int64 `json:"wait"`

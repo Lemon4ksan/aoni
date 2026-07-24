@@ -1,6 +1,6 @@
 // Copyright (c) 2026 Lemon4ksan All rights reserved.
 // Use of this source code is governed by a BSD-style
-// license can be found in the LICENSE file.
+// license that can be found in the LICENSE file.
 
 package ws
 
@@ -22,14 +22,25 @@ import (
 )
 
 var (
-	errH2ConnectNotSupported = errors.New("aoni: http2 extended connect not supported by peer")
-	errH2StreamClosed        = errors.New("aoni: http2 stream closed")
-	errH2ConnectFailed       = errors.New("aoni: http2 websocket connect failed")
-	errH2GoAway              = errors.New("aoni: http2 connection closed")
-	errH2UnexpectedFrame     = errors.New("aoni: unexpected frame during h2 handshake")
+	// ErrUnsupportedWSScheme is returned when a target URL uses a scheme other than ws:// or wss://.
+	ErrUnsupportedWSScheme = errors.New("aoni ws: unsupported scheme (expected ws or wss)")
+
+	// ErrH2ConnectNotSupported is returned when the remote server does not support HTTP/2 Extended CONNECT.
+	ErrH2ConnectNotSupported = errors.New("aoni ws: http2 extended connect not supported by peer")
+
+	// ErrH2StreamClosed is returned when an active HTTP/2 stream closes prematurely.
+	ErrH2StreamClosed = errors.New("aoni ws: http2 stream closed")
+
+	// ErrH2ConnectFailed is returned when HTTP/2 Extended CONNECT handshake yields a non-200 status code.
+	ErrH2ConnectFailed = errors.New("aoni ws: http2 websocket connect failed")
+
+	// ErrH2GoAway is returned when an HTTP/2 GOAWAY frame is received during handshake.
+	ErrH2GoAway = errors.New("aoni ws: http2 connection closed")
+
+	// ErrH2UnexpectedFrame is returned when an unexpected HTTP/2 frame type is received during connection setup.
+	ErrH2UnexpectedFrame = errors.New("aoni ws: unexpected frame during h2 handshake")
 )
 
-// parsedURL holds parsed WebSocket URL components.
 type parsedURL struct {
 	scheme string
 	host   string
@@ -37,10 +48,7 @@ type parsedURL struct {
 	Path   string
 }
 
-// DialWebSocket establishes a WebSocket connection over uTLS/JA4 pipeline.
-//
-// Handshake parameters (including SSL/TLS Hello signatures) are configured
-// automatically using the client's default browser profile variant.
+// DialWebSocket establishes a browser-emulated WebSocket connection using the client's uTLS/JA4 pipeline.
 func DialWebSocket(
 	ctx context.Context,
 	c *aoni.Client,
@@ -50,13 +58,13 @@ func DialWebSocket(
 	return dialWS(ctx, c, targetURL, 4096, 4096, mods...)
 }
 
-// DialWebSocketConfig holds optional configuration for [DialWebSocket].
+// DialWebSocketConfig configures custom I/O buffer capacities for [DialWebSocketWithConfig].
 type DialWebSocketConfig struct {
 	ReadBufferSize  int
 	WriteBufferSize int
 }
 
-// DialWebSocketWithConfig is like [DialWebSocket] but allows custom read and write buffer sizes.
+// DialWebSocketWithConfig connects to a WebSocket endpoint applying custom buffer sizing.
 func DialWebSocketWithConfig(
 	ctx context.Context,
 	c *aoni.Client,
@@ -66,6 +74,7 @@ func DialWebSocketWithConfig(
 ) (net.Conn, *http.Response, error) {
 	readSize := generic.Ternary(config.ReadBufferSize > 0, config.ReadBufferSize, 4096)
 	writeSize := generic.Ternary(config.WriteBufferSize > 0, config.WriteBufferSize, 4096)
+
 	return dialWS(ctx, c, targetURL, readSize, writeSize, mods...)
 }
 
@@ -109,7 +118,7 @@ func buildTemporaryWSRequest(
 ) (*http.Request, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, targetURL, nil)
 	if err != nil {
-		return nil, fmt.Errorf("aoni: failed to create ws request: %w", err)
+		return nil, fmt.Errorf("aoni ws: failed to create request: %w", err)
 	}
 
 	stdReq := aoni.NewStdRequest(req)
@@ -192,12 +201,12 @@ func dialWSUpgradeWithBuffers(
 func parseWSURL(rawURL string) (*parsedURL, error) {
 	u, err := url.Parse(rawURL)
 	if err != nil {
-		return nil, fmt.Errorf("aoni: invalid websocket url: %w", err)
+		return nil, fmt.Errorf("aoni ws: invalid websocket url: %w", err)
 	}
 
 	scheme := strings.ToLower(u.Scheme)
 	if scheme != "ws" && scheme != "wss" {
-		return nil, fmt.Errorf("aoni: unsupported websocket scheme %q (want ws or wss)", scheme)
+		return nil, ErrUnsupportedWSScheme
 	}
 
 	return &parsedURL{

@@ -1,6 +1,6 @@
 // Copyright (c) 2026 Lemon4ksan All rights reserved.
 // Use of this source code is governed by a BSD-style
-// license can be found in the LICENSE file.
+// license that can be found in the LICENSE file.
 
 package values
 
@@ -11,7 +11,7 @@ import (
 )
 
 var (
-	// ErrUnsupportedType is returned when a type cannot be encoded into URL parameters.
+	// ErrUnsupportedType is returned when a type cannot be encoded into URL query or form parameters.
 	ErrUnsupportedType = errors.New("aoni values: unsupported type for encoding")
 
 	// ErrInvalidFormat is returned when a raw string representation fails parsing into a structured type.

@@ -1,6 +1,6 @@
 // Copyright (c) 2026 Lemon4ksan All rights reserved.
 // Use of this source code is governed by a BSD-style
-// license can be found in the LICENSE file.
+// license that can be found in the LICENSE file.
 
 // Package ja4 provides pure-Go computation of JA4 (TLS) and JA4H (HTTP) client fingerprints.
 package ja4
@@ -25,18 +25,13 @@ const (
 	hashLen  = 12
 	hexTable = "0123456789abcdef"
 
-	// TLS Extension IDs explicitly excluded from Section c hash calculation per JA4 specification.
-	extSNI  uint16 = 0x0000
-	extALPN uint16 = 0x0010
-
-	// TLS Signature Algorithms Extension ID (0x000d).
+	extSNI                 uint16 = 0x0000
+	extALPN                uint16 = 0x0010
 	extSignatureAlgorithms uint16 = 0x000d
 
-	// TLS Handshake Protocol Wire Constants.
 	recordTypeHandshake      byte = 0x16
 	handshakeTypeClientHello byte = 0x01
 
-	// Offsets past ClientHello record headers: version (2b) + random (32b).
 	clientHelloHeaderOffset = 34
 )
 
@@ -85,7 +80,7 @@ func IsGREASE(v uint16) bool {
 	return ok
 }
 
-// Report holds computed TLS (JA4) and HTTP (JA4H) fingerprints alongside metadata.
+// Report holds computed TLS (JA4) and HTTP (JA4H) fingerprints alongside TLS metadata.
 type Report struct {
 	JA4         string
 	JA4H        string
@@ -98,10 +93,6 @@ type Report struct {
 }
 
 // ComputeJA4 evaluates a TLS client fingerprint string in 'a_b_c' format.
-//
-// Section a: protocol ('t'), TLS version, SNI indicator ('d'/'i'), cipher/extension counts, ALPN.
-// Section b: SHA-256 hash of sorted cipher suite IDs (excluding GREASE).
-// Section c: SHA-256 hash of sorted extension IDs (excluding SNI, ALPN, GREASE) and signature algorithms.
 func ComputeJA4(
 	cipherSuites []uint16,
 	extensions []uint16,
@@ -145,11 +136,6 @@ func ComputeJA4(
 }
 
 // ComputeJA4H evaluates an HTTP client fingerprint string in 'a_b_c_d' format.
-//
-// Section a: HTTP method prefix, version, cookie indicator ('c'/'n'), referer indicator ('r'/'n'), header count, language.
-// Section b: SHA-256 hash of sorted header names.
-// Section c: SHA-256 hash of sorted cookie names.
-// Section d: SHA-256 hash of cookie values sorted by name order.
 func ComputeJA4H(
 	method, proto string,
 	headers []string,
@@ -210,16 +196,11 @@ func ComputeJA4H(
 }
 
 // ParseExtensionsFromRaw extracts extension IDs and signature algorithms from raw ClientHello bytes.
-//
-// Expects wire format: [TLS Record (5b)] -> [Handshake (4b)] -> [Version+Random (34b)] ->
-// [Session ID] -> [Cipher Suites] -> [Compression] -> [Extensions Payload]
 func ParseExtensionsFromRaw(raw []byte) (extensions, sigAlgorithms []uint16) {
-	// Skip 5-byte TLS Record Header if present (0x16 = Handshake)
 	if len(raw) > 5 && raw[0] == recordTypeHandshake {
 		raw = raw[5:]
 	}
 
-	// Skip 4-byte Handshake Header if present (0x01 = ClientHello)
 	if len(raw) > 4 && raw[0] == handshakeTypeClientHello {
 		raw = raw[4:]
 	}
@@ -228,31 +209,26 @@ func ParseExtensionsFromRaw(raw []byte) (extensions, sigAlgorithms []uint16) {
 		return nil, nil
 	}
 
-	// Skip client_version (2b) + client_random (32b)
 	offset := clientHelloHeaderOffset
 	if offset >= len(raw) {
 		return nil, nil
 	}
 
-	// Skip Variable Session ID (1 byte length prefix)
 	offset += 1 + int(raw[offset])
 	if offset+2 > len(raw) {
 		return nil, nil
 	}
 
-	// Skip Variable Cipher Suites (2 bytes length prefix)
 	offset += 2 + int(binary.BigEndian.Uint16(raw[offset:offset+2]))
 	if offset >= len(raw) {
 		return nil, nil
 	}
 
-	// Skip Variable Compression Methods (1 byte length prefix)
 	offset += 1 + int(raw[offset])
 	if offset+2 > len(raw) {
 		return nil, nil
 	}
 
-	// Parse Extensions Total Length (2 bytes)
 	extTotalLen := int(binary.BigEndian.Uint16(raw[offset : offset+2]))
 	offset += 2
 
@@ -265,7 +241,6 @@ func ParseExtensionsFromRaw(raw []byte) (extensions, sigAlgorithms []uint16) {
 
 		extensions = append(extensions, extID)
 
-		// Parse Signature Algorithms Extension payload (0x000d)
 		if extID == extSignatureAlgorithms && extDataLen >= 2 && offset+extDataLen <= extEnd {
 			sigAlgorithms = parseSigAlgorithmsPayload(raw[offset : offset+extDataLen])
 		}
@@ -393,7 +368,6 @@ func writePaddedTwoDigits(buf *bytes.Buffer, n int) {
 	if n < 10 {
 		buf.WriteByte('0')
 		buf.WriteByte(byte('0' + n)) //nolint:gosec
-
 		return
 	}
 
@@ -426,7 +400,6 @@ func computeCipherHash(ciphers []uint16) string {
 func computeExtHash(extensions, sigAlgorithms []uint16) string {
 	filteredExts := make([]uint16, 0, len(extensions))
 	for _, e := range extensions {
-		// SNI (0x0000) and ALPN (0x0010) are excluded per JA4 specification
 		if e != extSNI && e != extALPN {
 			filteredExts = append(filteredExts, e)
 		}
@@ -473,7 +446,7 @@ func writeHex4(buf *bytes.Buffer, v uint16) {
 	buf.WriteByte(hexTable[v&0x0f])
 }
 
-// FilterGREASE removes GREASE reservation values from vals.
+// FilterGREASE removes reserved TLS GREASE values from vals.
 func FilterGREASE(vals []uint16) []uint16 {
 	result := make([]uint16, 0, len(vals))
 	for _, v := range vals {

@@ -1,6 +1,6 @@
 // Copyright (c) 2026 Lemon4ksan All rights reserved.
 // Use of this source code is governed by a BSD-style
-// license can be found in the LICENSE file.
+// license that can be found in the LICENSE file.
 
 package aoni
 
@@ -14,6 +14,15 @@ import (
 )
 
 var (
+	// ErrNilRequest is returned when an operation is executed on a nil Request contract.
+	ErrNilRequest = errors.New("aoni: request is nil")
+
+	// ErrInvalidPath indicates that the provided URL path could not be parsed.
+	ErrInvalidPath = errors.New("aoni: invalid path")
+
+	// ErrMaxRedirectsExceeded is returned when the request execution halts because the maximum redirect threshold was reached.
+	ErrMaxRedirectsExceeded = errors.New("aoni: maximum redirects limit exceeded")
+
 	// ErrUnexpectedContentType indicates that the response Content-Type violates target expectations.
 	ErrUnexpectedContentType = errors.New("aoni: unexpected content-type (possible captive portal or intercept)")
 
@@ -40,6 +49,9 @@ var (
 
 	// ErrRedirectDomainForbidden is returned when a redirect target hostname is excluded by policy.
 	ErrRedirectDomainForbidden = errors.New("aoni: redirect domain not allowed")
+
+	// ErrHedgingBodyNonRepeatable is returned when request hedging attempt cannot duplicate a non-replayable payload stream.
+	ErrHedgingBodyNonRepeatable = errors.New("aoni: request body cannot be duplicated for hedging")
 )
 
 // Error describes a structured operational failure in the aoni package.

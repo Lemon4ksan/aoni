@@ -2,7 +2,7 @@
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
-// Package proxy provides proxy rotation, SOCKS5/HTTP tunnel dialing, and proxy-isolated TLS session ticket caching.
+// Package proxy provides proxy pool rotation, SOCKS5/HTTP tunnel dialing, and proxy-isolated TLS session ticket management.
 package proxy
 
 import (
@@ -13,6 +13,7 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -26,14 +27,22 @@ import (
 	"github.com/lemon4ksan/aoni/internal/health"
 )
 
-// WithProxyAwareSessionCache enables the proxy-aware TLS session ticket cache.
+var (
+	// ErrNoProxyClients is returned when instantiating a [Rotator] with zero proxy clients.
+	ErrNoProxyClients = errors.New("aoni: proxy rotator requires at least one client")
+
+	// ErrNoHealthyProxies is returned when all registered proxy exit nodes are unhealthy or in cooldown.
+	ErrNoHealthyProxies = errors.New("aoni: no healthy proxies available")
+)
+
+// WithProxyAwareSessionCache enables the proxy-isolated TLS session ticket cache.
 func WithProxyAwareSessionCache() aoni.ClientOption {
 	return func(cfg *aoni.Config) {
 		cfg.Fingerprint.SessionCache = NewProxyAwareSessionCache()
 	}
 }
 
-// Parse parses a proxy string and detects the protocol.
+// Parse parses a raw proxy string and detects the target transport protocol.
 func Parse(proxyStr string) (*url.URL, error) {
 	if proxyStr == "" {
 		return nil, errors.New("empty proxy string")
@@ -89,32 +98,22 @@ func Parse(proxyStr string) (*url.URL, error) {
 	return u, nil
 }
 
-// WithClient pairs an [HTTPDoer] with a proxy URL.
+// WithClient pairs an [aoni.HTTPDoer] client with its associated exit proxy URL.
 type WithClient struct {
 	Client   aoni.HTTPDoer
 	ProxyURL string
 }
 
-// Config configures a proxy-supported HTTP client.
+// Config configures proxy client parameters.
 type Config struct {
-	// ProxyURL is the address of the proxy server (e.g. http://user:pass@ip:port).
-	ProxyURL string
-	// Timeout is the overall request timeout.
-	Timeout time.Duration
-	// InsecureSkipVerify controls whether SSL/TLS certificate verification is bypassed.
+	ProxyURL           string
+	Timeout            time.Duration
 	InsecureSkipVerify bool
-	// Transport overrides the default transport settings.
-	Transport http.RoundTripper
-	// TransportFactory creates a custom [http.RoundTripper].
-	TransportFactory func(Config) (http.RoundTripper, error)
+	Transport          http.RoundTripper
+	TransportFactory   func(Config) (http.RoundTripper, error)
 }
 
-// NewProxyClient creates an [http.Client] configured with proxy transport.
-// It prioritizes [Config.TransportFactory], then [Config.Transport],
-// and falls back to a default [http.Transport] if neither is provided.
-//
-// If [Config.ProxyURL] is empty, no proxy routing is applied.
-// If [Config.Timeout] is zero, a default 15-second timeout is set.
+// NewProxyClient instantiates an [*http.Client] configured with proxy transport routing.
 func NewProxyClient(cfg Config) (*http.Client, error) {
 	timeout := cfg.Timeout
 	if timeout == 0 {
@@ -134,6 +133,7 @@ func NewProxyClient(cfg Config) (*http.Client, error) {
 
 	case cfg.Transport != nil:
 		rt = cfg.Transport
+
 	default:
 		transport := &http.Transport{
 			MaxIdleConns:          100,
@@ -141,8 +141,7 @@ func NewProxyClient(cfg Config) (*http.Client, error) {
 			IdleConnTimeout:       90 * time.Second,
 			TLSHandshakeTimeout:   10 * time.Second,
 			ExpectContinueTimeout: 1 * time.Second,
-			// #nosec G402 -- InsecureSkipVerify is configurable by the user for proxy compatibility.
-			TLSClientConfig: &tls.Config{InsecureSkipVerify: cfg.InsecureSkipVerify},
+			TLSClientConfig:       &tls.Config{InsecureSkipVerify: cfg.InsecureSkipVerify}, //nolint:gosec
 		}
 
 		if cfg.ProxyURL != "" {
@@ -163,25 +162,19 @@ func NewProxyClient(cfg Config) (*http.Client, error) {
 	}, nil
 }
 
-// RotatorConfig configures health-checking and recovery for a [Rotator].
+// RotatorConfig configures health checking, failure thresholds, and recovery durations for a [Rotator].
 type RotatorConfig struct {
-	// MaxFails is the consecutive error limit before a client is marked unhealthy.
-	MaxFails uint32
-	// RetryAfter is the duration for which an unhealthy client is kept offline.
-	RetryAfter time.Duration
-	// HealthCheckURL is the endpoint probed during background health checks.
-	HealthCheckURL string
-	// HealthCheckInterval sets the frequency of background health checks.
+	MaxFails            uint32
+	RetryAfter          time.Duration
+	HealthCheckURL      string
 	HealthCheckInterval time.Duration
-	// Logger is the logger used by the proxy rotator.
-	Logger aoni.Logger
+	Logger              aoni.Logger
 }
 
-// StickyKeyFunc extracts a session identifier from a request for sticky routing.
-// Return an empty string to fall back to round-robin rotation.
+// StickyKeyFunc extracts a sticky session identifier string from an incoming request.
 type StickyKeyFunc func(req *http.Request) string
 
-// StickyKeyFromCookie returns a function to extract the key from a specific cookie.
+// StickyKeyFromCookie constructs a [StickyKeyFunc] extracting session keys from cookieName.
 func StickyKeyFromCookie(cookieName string) StickyKeyFunc {
 	return func(req *http.Request) string {
 		if cookie, err := req.Cookie(cookieName); err == nil {
@@ -192,7 +185,7 @@ func StickyKeyFromCookie(cookieName string) StickyKeyFunc {
 	}
 }
 
-// StickyKeyFromHeader returns a function to extract the key from the HTTP header.
+// StickyKeyFromHeader constructs a [StickyKeyFunc] extracting session keys from headerName.
 func StickyKeyFromHeader(headerName string) StickyKeyFunc {
 	return func(req *http.Request) string {
 		return req.Header.Get(headerName)
@@ -216,11 +209,8 @@ func (tc *trackedClient) IsDomainCooledDown(domain string) bool {
 	}
 
 	cooldownUntil, exists := tc.domainCooldowns[domain]
-	if !exists {
-		return false
-	}
 
-	return time.Now().Before(cooldownUntil)
+	return exists && time.Now().Before(cooldownUntil)
 }
 
 func (tc *trackedClient) PutDomainInCooldown(domain string, duration time.Duration) {
@@ -246,11 +236,7 @@ type sessionEntry struct {
 	lastSeen  time.Time
 }
 
-// Rotator distributes HTTP requests across a pool of proxy clients.
-// It implements [HTTPDoer] and supports sticky routing, health monitoring,
-// and dynamic pool replacement.
-//
-// Create instances with [NewRotator].
+// Rotator balances requests across a pool of proxy clients, supporting sticky sessions, health probing, and domain cooldowns.
 type Rotator struct {
 	mu            sync.RWMutex
 	clients       []*trackedClient
@@ -265,12 +251,10 @@ type Rotator struct {
 	wg     sync.WaitGroup
 }
 
-// NewRotator creates a [Rotator] from the given config and clients.
-// It returns an error if clients is empty.
-// Default [RotatorConfig.MaxFails] is 3; default [RotatorConfig.RetryAfter] is 30 seconds.
+// NewRotator instantiates a proxy pool [Rotator] using configured clients.
 func NewRotator(cfg RotatorConfig, clients ...WithClient) (*Rotator, error) {
 	if len(clients) == 0 {
-		return nil, errors.New("aoni: proxy rotator requires at least one client")
+		return nil, ErrNoProxyClients
 	}
 
 	cfg.MaxFails = generic.Coalesce(cfg.MaxFails, 3)
@@ -295,31 +279,26 @@ func NewRotator(cfg RotatorConfig, clients ...WithClient) (*Rotator, error) {
 
 	if cfg.HealthCheckURL != "" {
 		r.cfg.HealthCheckInterval = generic.Coalesce(cfg.HealthCheckInterval, time.Minute)
-
 		r.wg.Go(r.healthCheckLoop)
 	}
 
 	return r, nil
 }
 
-// NewProxyRotatorFromStrings creates a [Rotator] from a list of raw proxy URL strings.
-// It automatically instantiates standard http.Clients configured with the respective proxies.
-// This is a high-level helper to easily set up a rotating pool from proxy list configurations.
+// NewProxyRotatorFromStrings constructs a [Rotator] from raw proxy URL strings.
 func NewProxyRotatorFromStrings(config RotatorConfig, proxyURLs ...string) (*Rotator, error) {
 	if len(proxyURLs) == 0 {
-		return nil, errors.New("aoni: proxy rotator requires at least one client")
+		return nil, ErrNoProxyClients
 	}
 
-	var clients []WithClient
+	clients := make([]WithClient, 0, len(proxyURLs))
 	for _, pStr := range proxyURLs {
 		u, err := url.Parse(pStr)
 		if err != nil {
 			return nil, fmt.Errorf("aoni: invalid proxy URL %q: %w", pStr, err)
 		}
 
-		httpClient, err := NewProxyClient(Config{
-			ProxyURL: pStr,
-		})
+		httpClient, err := NewProxyClient(Config{ProxyURL: pStr})
 		if err != nil {
 			return nil, err
 		}
@@ -333,14 +312,14 @@ func NewProxyRotatorFromStrings(config RotatorConfig, proxyURLs ...string) (*Rot
 	return NewRotator(config, clients...)
 }
 
-// RotatorStats provides real-time state metrics for the rotating proxy pool.
+// RotatorStats holds snapshot health metrics for the proxy pool.
 type RotatorStats struct {
 	TotalProxies     int
 	HealthyProxies   int
 	UnhealthyProxies int
 }
 
-// WithStickySessions returns a copy of r configured with the given key extractor.
+// WithStickySessions returns a copy of r configured with sticky session key extraction.
 func (r *Rotator) WithStickySessions(f StickyKeyFunc) *Rotator {
 	c := &Rotator{
 		ctx:           r.ctx,
@@ -357,12 +336,10 @@ func (r *Rotator) WithStickySessions(f StickyKeyFunc) *Rotator {
 	return c
 }
 
-// Prewarm opens TCP/TLS connections to targetURL through all proxy clients.
-// It sends concurrent HEAD requests to pre-populate transport connection pools.
+// Prewarm opens TCP/TLS connections to targetURL across all proxy clients in parallel to pre-populate transport connection pools.
 func (r *Rotator) Prewarm(ctx context.Context, targetURL string) {
 	r.mu.RLock()
-	clients := make([]*trackedClient, len(r.clients))
-	copy(clients, r.clients)
+	clients := slices.Clone(r.clients)
 	r.mu.RUnlock()
 
 	var wg sync.WaitGroup
@@ -379,7 +356,7 @@ func (r *Rotator) Prewarm(ctx context.Context, targetURL string) {
 			}
 
 			resp, err := c.client.Do(req)
-			if err == nil {
+			if err == nil && resp != nil && resp.Body != nil {
 				_ = resp.Body.Close()
 			}
 		}(tc)
@@ -388,7 +365,7 @@ func (r *Rotator) Prewarm(ctx context.Context, targetURL string) {
 	wg.Wait()
 }
 
-// Stats evaluates and returns current health statistics of the registered proxy clients.
+// Stats evaluates and returns current health and availability metrics for all registered proxy clients.
 func (r *Rotator) Stats() RotatorStats {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
@@ -405,7 +382,7 @@ func (r *Rotator) Stats() RotatorStats {
 	return stats
 }
 
-// Reset clears failure states and restores all registered proxy clients to a healthy state.
+// Reset clears failure counters and restores all registered proxy clients to healthy status immediately.
 func (r *Rotator) Reset() {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
@@ -415,7 +392,7 @@ func (r *Rotator) Reset() {
 	}
 }
 
-// ResetDomainCooldowns clears all domain-specific cooldowns for all proxies in the pool.
+// ResetDomainCooldowns purges all active domain-specific cooldown blocks across every proxy client in the pool.
 func (r *Rotator) ResetDomainCooldowns() {
 	r.mu.RLock()
 	clients := r.clients
@@ -423,12 +400,12 @@ func (r *Rotator) ResetDomainCooldowns() {
 
 	for _, tc := range clients {
 		tc.domainMu.Lock()
-		tc.domainCooldowns = make(map[string]time.Time)
+		clear(tc.domainCooldowns)
 		tc.domainMu.Unlock()
 	}
 }
 
-// UpdateClients replaces the active pool and resets all session mappings.
+// UpdateClients dynamically replaces the active proxy client pool and resets all sticky session mappings.
 func (r *Rotator) UpdateClients(clients ...WithClient) {
 	if len(clients) == 0 {
 		return
@@ -443,9 +420,7 @@ func (r *Rotator) UpdateClients(clients ...WithClient) {
 	r.mu.Unlock()
 }
 
-// Do performs an HTTP request using the next available client in the pool.
-// It attempts sticky routing first, then falls back to round-robin selection.
-// If a client faults, it is marked unhealthy. Returns an error if all clients fail.
+// Do executes req using the next available proxy client in the pool.
 func (r *Rotator) Do(req *http.Request) (*http.Response, error) {
 	r.mu.RLock()
 	clients := r.clients
@@ -516,10 +491,10 @@ func (r *Rotator) Do(req *http.Request) (*http.Response, error) {
 		return nil, fmt.Errorf("aoni: all proxies are in cooldown for domain %s", domain)
 	}
 
-	return nil, errors.New("aoni: no healthy proxies available")
+	return nil, ErrNoHealthyProxies
 }
 
-// Close stops background routines and closes idle connections.
+// Close stops background health check workers and closes idle transport connections.
 func (r *Rotator) Close() error {
 	r.cancel()
 	r.wg.Wait()
@@ -545,6 +520,7 @@ func (r *Rotator) setupClient(cp WithClient) *trackedClient {
 		proxyURL:        cp.ProxyURL,
 		domainCooldowns: make(map[string]time.Time),
 	}
+
 	tc.tracker = health.NewTracker(cp.ProxyURL, r.cfg.MaxFails, r.cfg.RetryAfter,
 		func(name string, fails uint32, retryAfter time.Duration) {
 			r.cfg.Logger.Warn("proxy marked unhealthy", "proxy", name, "fails", fails, "retry_after", retryAfter)
@@ -559,32 +535,17 @@ func (r *Rotator) setupClient(cp WithClient) *trackedClient {
 
 func (r *Rotator) isProxyFault(resp *http.Response, err error) bool {
 	if err != nil {
-		if errors.Is(err, context.Canceled) {
-			return false
-		}
-
-		var netErr net.Error
-		if errors.As(err, &netErr) {
-			return true
-		}
-
-		return true
+		return !errors.Is(err, context.Canceled)
 	}
 
 	if resp != nil {
-		if resp.StatusCode == http.StatusProxyAuthRequired { // 407
-			return true
-		}
+		sc := resp.StatusCode
 
-		if resp.StatusCode == http.StatusTooManyRequests { // 429
-			return true
-		}
-
-		if resp.StatusCode == http.StatusBadGateway ||
-			resp.StatusCode == http.StatusGatewayTimeout ||
-			resp.StatusCode == http.StatusServiceUnavailable {
-			return true
-		}
+		return sc == http.StatusProxyAuthRequired ||
+			sc == http.StatusTooManyRequests ||
+			sc == http.StatusBadGateway ||
+			sc == http.StatusGatewayTimeout ||
+			sc == http.StatusServiceUnavailable
 	}
 
 	return false
@@ -605,6 +566,7 @@ func (r *Rotator) getStickyClientIndex(sessionID string) int {
 func (r *Rotator) executeWithProxy(req *http.Request, tc *trackedClient) (*http.Response, error) {
 	proxyCtx := cookie.WithProxyAddress(req.Context(), tc.proxyURL)
 	reqWithProxy := req.WithContext(proxyCtx)
+
 	return tc.client.Do(reqWithProxy)
 }
 

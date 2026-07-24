@@ -1,6 +1,6 @@
 // Copyright (c) 2026 Lemon4ksan All rights reserved.
 // Use of this source code is governed by a BSD-style
-// license can be found in the LICENSE file.
+// license that can be found in the LICENSE file.
 
 package aoni
 
@@ -33,17 +33,16 @@ import (
 	"github.com/lemon4ksan/aoni/netutil/ip"
 )
 
-// applyDialers binds custom TCP and TLS dialers to the given transport.
+// applyDialers binds custom TCP and TLS network dialers to the specified [http.Transport].
 //
-// This hooks into the connection establishment phase to inject Happy Eyeballs staggering,
-// SSRF safeguards, source IP pool rotation, p0f signature spoofing, and uTLS browser fingerprints.
+// It hooks into connection establishment to inject Happy Eyeballs staggering, SSRF safeguards,
+// source IP pool rotation, p0f OS TCP signature spoofing, and uTLS ClientHello browser fingerprint emulation.
 //
 // Preconditions:
-//   - The transport argument must not be nil, otherwise the function returns immediately.
+//   - If transport is nil, no operations are performed.
 //
-// Side effects:
-//   - Overwrites the transport's DialContext and DialTLSContext fields.
-//   - Enforces HTTP/2 negotiation capability on the transport's TLS configuration.
+// Side Effects:
+//   - Mutates transport.Proxy, transport.DialContext, and transport.DialTLSContext.
 func (c *Client) applyDialers(transport *http.Transport) {
 	if transport == nil {
 		return
@@ -56,9 +55,10 @@ func (c *Client) applyDialers(transport *http.Transport) {
 
 	if c.hasBrowserFingerprint() {
 		transport.DialTLSContext = c.newDialTLSContextFunc(transport.Proxy)
-	} else {
-		transport.DialTLSContext = c.dialContext
+		return
 	}
+
+	transport.DialTLSContext = c.dialContext
 }
 
 func configureH2Transport(transport *http.Transport, configurer HTTP2Configurer) {
@@ -118,7 +118,6 @@ func (c *Client) newDialTLSContextFunc(
 	}
 }
 
-// dialContext executes a standard TCP dial followed by a standard TLS client handshake.
 func (c *Client) dialContext(ctx context.Context, network, addr string) (net.Conn, error) {
 	if err := ApplyTCPDelay(ctx); err != nil {
 		return nil, err
@@ -143,6 +142,12 @@ func (c *Client) dialContext(ctx context.Context, network, addr string) (net.Con
 }
 
 // dialTLSWithUTLS executes a TCP dial followed by a uTLS ClientHello handshake.
+//
+// Preconditions:
+//   - Establishes a raw network connection via proxies if [dialConfig.ProxyURL] is declared.
+//
+// Side Effects:
+//   - Automatically closes the underlying socket connection if TLS negotiation fails.
 func (c *Client) dialTLSWithUTLS(
 	ctx context.Context,
 	dialCfg dialConfig,
@@ -187,35 +192,39 @@ func (c *Client) dialTLSWithUTLS(
 	return uConn, nil
 }
 
-// dialConfig aggregates all target, security, proxy, and fingerprint specifications
-// resolved at the threshold before executing network connection routines.
+// dialConfig aggregates target, security, proxy, and fingerprint specifications resolved prior to dialing.
 type dialConfig struct {
-	Network                 string
-	Addr                    string
-	Host                    string
-	Port                    string
-	Browser                 BrowserID
-	HelloID                 *utls.ClientHelloID
-	SourceRotator           *ip.SourceIPRotator
+	// --- Slices & Strings (24 / 16 bytes) ---
+	ALPNOverride []string
+	Network      string
+	Addr         string
+	Host         string
+	Port         string
+
+	// --- Interfaces (16 bytes) ---
 	DNSResolver             DNSResolver
-	JA4Callback             func(ja4.Report)
-	ProxyURL                *url.URL
-	Delay                   time.Duration
-	SSRFGuard               bool
-	ProxyDNS                bool
-	InsecureSkipVerify      bool
-	CertificatePins         map[string][]string
-	ALPNOverride            []string
-	P0fSignature            *p0f.Signature
 	SocketController        SocketController
-	JA4ReportStore          *JA4ReportStore
 	ClientHelloSpecProvider ClientHelloSpecProvider
 	SessionCache            utls.ClientSessionCache
-	BaseTLSConfig           *tls.Config
+
+	// --- Pointers & 8-byte Scalars ---
+	BaseTLSConfig   *tls.Config
+	ProxyURL        *url.URL
+	SourceRotator   *ip.SourceIPRotator
+	HelloID         *utls.ClientHelloID
+	P0fSignature    *p0f.Signature
+	JA4ReportStore  *JA4ReportStore
+	CertificatePins map[string][]string
+	JA4Callback     func(ja4.Report)
+	Delay           time.Duration
+	Browser         BrowserID
+
+	// --- Booleans (1 byte each) ---
+	SSRFGuard          bool
+	ProxyDNS           bool
+	InsecureSkipVerify bool
 }
 
-// resolveDialConfig is the threshold function ("порог") where context magic is unpacked
-// into a clean, strongly-typed dialConfig data structure.
 func (c *Client) resolveDialConfig(ctx context.Context, network, addr string) dialConfig {
 	reqCfg := GetRequestConfig(ctx)
 
@@ -238,7 +247,6 @@ func (c *Client) resolveDialConfig(ctx context.Context, network, addr string) di
 		}
 	}
 
-	// 1. Host Rewrite Rules at threshold
 	host, port, _ := net.SplitHostPort(addr)
 	if host == "" {
 		host = addr
@@ -257,11 +265,8 @@ func (c *Client) resolveDialConfig(ctx context.Context, network, addr string) di
 
 	dialCfg.Host = host
 	dialCfg.Port = port
-
-	// 2. Base TLS Config override at threshold
 	dialCfg.BaseTLSConfig = TLSConfigWithOverride(ctx, dialCfg.BaseTLSConfig)
 
-	// 3. Unpack RequestConfig at threshold
 	if reqCfg != nil {
 		dialCfg.SSRFGuard = reqCfg.SSRFGuard
 		if reqCfg.HappyEyeballsDelay > 0 {
@@ -284,7 +289,6 @@ func (c *Client) resolveDialConfig(ctx context.Context, network, addr string) di
 		dialCfg.Delay = 300 * time.Millisecond
 	}
 
-	// 4. Proxy URL override at threshold
 	if raw, ok := GetProxyOverride(ctx).Value(); ok && raw != "" {
 		if parsed, parseErr := url.Parse(raw); parseErr == nil {
 			dialCfg.ProxyURL = parsed
@@ -293,7 +297,6 @@ func (c *Client) resolveDialConfig(ctx context.Context, network, addr string) di
 		dialCfg.ProxyURL = reqCfg.ProxyAddr
 	}
 
-	// 5. InsecureSkipVerify at threshold
 	if GetInsecureSkipVerify(ctx) {
 		dialCfg.InsecureSkipVerify = true
 	}
@@ -317,10 +320,9 @@ func establishBaseProxyConnection(ctx context.Context, dialCfg dialConfig) (net.
 	return proxyClient{}.CleanDialContext(ctx, dialCfg)
 }
 
-// tlsEvasion groups helper methods utilized to build, configure, and inspect customized ClientHello handshake parameters.
 type tlsEvasion struct{}
 
-// BuildConfig resolves and configures the base uTLS connection settings using pre-resolved dialConfig.
+// BuildConfig resolves and configures base [utls.Config] settings using pre-resolved [dialConfig].
 func (tlsEvasion) BuildConfig(
 	host string,
 	dialCfg dialConfig,
@@ -387,7 +389,7 @@ func applyUTLSPeerVerification(uCfg *utls.Config, dialCfg dialConfig, host strin
 	}
 }
 
-// BuildConn returns a new custom, uncompleted uTLS UConn connection.
+// BuildConn returns an uncompleted [utls.UConn] instance ready for ClientHello dispatch.
 func (tlsEvasion) BuildConn(
 	dialCfg dialConfig,
 	utlsCfg *utls.Config,
@@ -422,7 +424,7 @@ func (tlsEvasion) BuildConn(
 	return utls.UClient(conn, utlsCfg, *spec), nil
 }
 
-// ExtractJA4 analyzes completed handshakes and extracts pure-Go JA4 fingerprint reports.
+// ExtractJA4 analyzes handshake state and extracts pure-Go [ja4.Report] signatures.
 func (tlsEvasion) ExtractJA4(uConn *utls.UConn) ja4.Report {
 	_ = uConn.BuildHandshakeState()
 
@@ -471,22 +473,22 @@ func (tlsEvasion) ExtractJA4(uConn *utls.UConn) ja4.Report {
 	return report
 }
 
-// ForceALPN alters ALPN extensions to match target configurations.
+// ForceALPN overrides ALPN protocol preferences inside uTLS extension lists.
 func (tlsEvasion) ForceALPN(extensions []utls.TLSExtension, protos []string) []utls.TLSExtension {
 	found := false
 	filtered := make([]utls.TLSExtension, 0, len(extensions))
 
 	for _, ext := range extensions {
-		switch ext.(type) {
+		switch e := ext.(type) {
 		case *utls.ALPNExtension:
 			filtered = append(filtered, &utls.ALPNExtension{AlpnProtocols: protos})
 			found = true
 		case *utls.ApplicationSettingsExtension:
 			if slices.Contains(protos, "h2") {
-				filtered = append(filtered, ext)
+				filtered = append(filtered, e)
 			}
 		default:
-			filtered = append(filtered, ext)
+			filtered = append(filtered, e)
 		}
 	}
 
@@ -518,10 +520,9 @@ func (tlsEvasion) wrapPinning(
 	}
 }
 
-// proxyClient manages network socket tunnel establishment for SOCKS5 and HTTP.
 type proxyClient struct{}
 
-// CleanDialContext establishes standard TCP socket tunnels, executing DNS and SSRF checks.
+// CleanDialContext establishes standard TCP socket tunnels, enforcing DNS and SSRF checks.
 func (pc proxyClient) CleanDialContext(ctx context.Context, dialCfg dialConfig) (net.Conn, error) {
 	if strings.HasPrefix(dialCfg.Addr, "unix://") || dialCfg.Network == "unix" {
 		return pc.dialSocket(ctx, dialCfg)
@@ -579,6 +580,7 @@ func (pc proxyClient) dialProxy(ctx context.Context, dialCfg dialConfig, host, p
 		Timeout:       30 * time.Second,
 		FallbackDelay: dialCfg.Delay,
 	}
+
 	if dialCfg.SourceRotator != nil {
 		dialer.LocalAddr = &net.TCPAddr{IP: dialCfg.SourceRotator.Next()}
 	}
@@ -643,8 +645,10 @@ func (proxyClient) dialProxyHTTP(
 		return nil, &Error{Op: "dial proxy", Target: address, Err: err}
 	}
 
-	connectReq := []byte("CONNECT " + host + ":" + port + " HTTP/1.1\r\nHost: " + host + ":" + port + "\r\n\r\n")
-	if _, err := conn.Write(connectReq); err != nil {
+	targetHostPort := net.JoinHostPort(host, port)
+
+	connectReq := "CONNECT " + targetHostPort + " HTTP/1.1\r\nHost: " + targetHostPort + "\r\n\r\n"
+	if _, err := conn.Write([]byte(connectReq)); err != nil {
 		_ = conn.Close()
 		return nil, &Error{Op: "send CONNECT to proxy", Err: err}
 	}
@@ -661,7 +665,11 @@ func (proxyClient) dialProxyHTTP(
 
 	if resp.StatusCode != http.StatusOK {
 		_ = conn.Close()
-		return nil, &Error{Op: "CONNECT rejected with status " + resp.Status, Err: errors.New(resp.Status)}
+
+		return nil, &Error{
+			Op:  "CONNECT rejected with status " + resp.Status,
+			Err: errors.New(resp.Status),
+		}
 	}
 
 	_ = conn.SetDeadline(time.Time{})
@@ -680,7 +688,6 @@ func (proxyClient) dialerControl(dialCfg dialConfig) func(network, address strin
 	}
 
 	controller := dialCfg.SocketController
-
 	if spoofer == nil && controller == nil {
 		return nil
 	}
@@ -709,34 +716,22 @@ func (proxyClient) dialerControl(dialCfg dialConfig) func(network, address strin
 	}
 }
 
-// pinning groups verification rules used to validate TLS certificate chains against SHA-256 pinned hashes.
 type pinning struct{}
 
-// VerifyCertificatePins verifies the parsed certificate chain against the pinned hashes configured for the host.
+// VerifyCertificatePins verifies parsed peer certificates against expected SHA-256 pinned hashes for host.
 func (p pinning) VerifyCertificatePins(host string, pins map[string][]string, rawCerts [][]byte) error {
 	if len(rawCerts) == 0 {
 		return ErrNoCertificatesPresented
 	}
 
-	var hostPins []string
-	for pinDomain, domainPins := range pins {
-		if p.matchHost(host, pinDomain) {
-			hostPins = append(hostPins, domainPins...)
-		}
-	}
-
+	hostPins := p.resolveHostPins(host, pins)
 	if len(hostPins) == 0 {
 		return nil
 	}
 
-	var expectedHashes [][]byte
-	for _, pin := range hostPins {
-		hashBytes, err := p.parsePin(pin)
-		if err != nil {
-			return &Error{Op: "parse certificate pin", Target: pin, Err: err}
-		}
-
-		expectedHashes = append(expectedHashes, hashBytes)
+	expectedHashes, err := p.parseExpectedPins(hostPins)
+	if err != nil {
+		return err
 	}
 
 	for _, rawCert := range rawCerts {
@@ -754,6 +749,31 @@ func (p pinning) VerifyCertificatePins(host string, pins map[string][]string, ra
 	}
 
 	return ErrCertificatePinning
+}
+
+func (p pinning) resolveHostPins(host string, pins map[string][]string) []string {
+	var hostPins []string
+	for pinDomain, domainPins := range pins {
+		if p.matchHost(host, pinDomain) {
+			hostPins = append(hostPins, domainPins...)
+		}
+	}
+
+	return hostPins
+}
+
+func (p pinning) parseExpectedPins(pins []string) ([][]byte, error) {
+	expectedHashes := make([][]byte, 0, len(pins))
+	for _, pin := range pins {
+		hashBytes, err := p.parsePin(pin)
+		if err != nil {
+			return nil, &Error{Op: "parse certificate pin", Target: pin, Err: err}
+		}
+
+		expectedHashes = append(expectedHashes, hashBytes)
+	}
+
+	return expectedHashes, nil
 }
 
 func (pinning) matchHost(host, pinDomain string) bool {

@@ -2,13 +2,7 @@
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
-// Package request provides type-safe, generic-first helper functions for executing HTTP transactions.
-//
-// It abstracts away boilerplate request construction, response decoding, and status validation:
-//   - [GetTo], [PostTo], [PutTo], [PatchTo], [DeleteTo]: Execute requests and decode JSON/XML/YAML
-//     response bodies into strongly-typed target structs [T].
-//   - [Concurrent], [ConcurrentWithMods]: Execute fan-out requests concurrently across multiple paths,
-//     preserving original slice ordering and context deadlines.
+// Package request provides generic, type-safe request execution helpers and automatic response stream binding.
 package request
 
 import (
@@ -24,29 +18,32 @@ import (
 	"github.com/lemon4ksan/aoni/mod"
 )
 
-// ErrUnexpectedContentType indicates the response content type
-// does not match the expected format. A captive portal or
-// transparent proxy often causes this.
-var ErrUnexpectedContentType = errors.New("aoni: unexpected content-type (possible captive portal or intercept)")
+var (
+	// ErrUnexpectedContentType indicates that the response Content-Type header violates expected structured MIME formats.
+	ErrUnexpectedContentType = errors.New("aoni: unexpected content-type (possible captive portal or intercept)")
 
-// DefaultClient is the shared default client instance used by global helper functions.
+	// ErrModifierAsBody is returned when an [aoni.RequestModifier] is accidentally passed as a request payload argument.
+	ErrModifierAsBody = errors.New("aoni: passed a RequestModifier as the request body payload")
+
+	// ErrNilResponse is returned when attempting to process a nil [*http.Response].
+	ErrNilResponse = errors.New("aoni: response is nil")
+)
+
+// DefaultClient provides a shared default [aoni.Client] instance used by global request helpers.
 var DefaultClient = aoni.NewClient(nil)
 
-// NoResponse is a sentinel type used to indicate a request that does not return a response body.
-// When used as the response type in generic request helpers like [GetTo],
-// the helper automatically drains and closes the response body to prevent resource leaks.
+// NoResponse is a sentinel type indicating a request that produces no unmarshaled body structure.
+//
+// When passed as type Resp to generic request helpers like [GetTo], the helper automatically
+// drains and closes the response body stream to prevent socket leaks.
 type NoResponse struct{}
 
-// Unwrapper allows nested decorators to be peeled away to reach the
-// underlying [Requester]. [Client] does not implement this interface;
-// wrapper types returned by [NewStdClient] or [Chain] do.
+// Unwrapper allows nested decorator wrappers to be unwrapped down to the root [Requester].
 type Unwrapper interface {
 	Unwrap() Requester
 }
 
-// UnwrapClient strips all [Unwrapper] layers from r and returns the
-// innermost [Client]. Returns nil if r is not a *Client and no
-// Unwrapper chain leads to one.
+// UnwrapClient peels away all [Unwrapper] decorator layers from r and returns the innermost [*aoni.Client].
 func UnwrapClient(r Requester) (c *aoni.Client) {
 	for {
 		if client, ok := r.(*aoni.Client); ok {
@@ -64,10 +61,7 @@ func UnwrapClient(r Requester) (c *aoni.Client) {
 	return nil
 }
 
-// Requester specifies a high-level API client capable of executing parameterized requests.
-//
-// The pipeline handles base URL resolution, request parameter mapping, WAF challenge
-// solving, and automatic decompression.
+// Requester specifies the core client contract capable of executing parameterized HTTP requests.
 type Requester interface {
 	Request(
 		ctx context.Context,
@@ -76,16 +70,12 @@ type Requester interface {
 	) (*http.Response, error)
 }
 
-// Get performs a GET request through the specified [Requester] and returns the raw [http.Response].
+// Get performs a GET request through c and returns the raw [*http.Response].
 func Get(ctx context.Context, c Requester, path string, mods ...aoni.RequestModifier) (*http.Response, error) {
 	return c.Request(ctx, http.MethodGet, path, mods...)
 }
 
-// GetTo performs a GET request and decodes the response body into a new instance of Resp.
-// It returns an [aoni.APIError] if the server responds with a non-2xx status code.
-//
-// By default, the response is parsed as JSON. To decode other response formats (such as XML
-// or YAML), pass a corresponding decoder modifier, e.g. [WithXMLDecoder] or [WithYAMLDecoder].
+// GetTo performs a GET request and unmarshals the 2xx response payload into a newly allocated Resp instance.
 func GetTo[Resp any](
 	ctx context.Context,
 	c Requester,
@@ -109,8 +99,7 @@ func GetTo[Resp any](
 	return result, nil
 }
 
-// GetInto executes a GET request and decodes the response body directly into target.
-// Eliminates target heap allocation by unmarshaling directly into an existing pointer.
+// GetInto performs a GET request and unmarshals the response body directly into target, eliminating allocations.
 func GetInto[T any](
 	ctx context.Context,
 	c Requester,
@@ -126,7 +115,7 @@ func GetInto[T any](
 	return HandleResponse(resp, target, c)
 }
 
-// GetToEx is like [GetTo] but returns both the parsed response payload and the raw *http.Response.
+// GetToEx is like [GetTo], but yields both the unmarshaled payload structure and the raw [*http.Response].
 func GetToEx[Resp any](
 	ctx context.Context,
 	c Requester,
@@ -149,7 +138,7 @@ func GetToEx[Resp any](
 	return result, raw, nil
 }
 
-// GetProtoTo executes a GET request expecting a binary Protobuf response and decodes it into Resp.
+// GetProtoTo performs a GET request expecting a binary Protocol Buffer stream unmarshaled into Resp.
 func GetProtoTo[Resp any](
 	ctx context.Context,
 	c Requester,
@@ -178,7 +167,7 @@ func GetProtoTo[Resp any](
 	return result, nil
 }
 
-// GetProtoInto executes a GET request expecting a binary Protobuf response and decodes it directly into target.
+// GetProtoInto performs a GET request expecting a binary Protocol Buffer stream unmarshaled directly into target.
 func GetProtoInto[T any](
 	ctx context.Context,
 	c Requester,
@@ -199,16 +188,7 @@ func GetProtoInto[T any](
 	return HandleResponse(resp, target, c)
 }
 
-// Post executes a POST request through the specified [Requester] and returns the raw [http.Response].
-//
-// By default, if the body is a struct or map, it is marshaled to JSON and the request headers
-// "Content-Type" and "Accept" are set to "application/json".
-//
-// To send other body formats (e.g. XML, YAML, or plain text), pre-serialize the payload and
-// pass it as an [io.Reader] (e.g. using [strings.NewReader] or [bytes.NewReader]), then override the Content-Type
-// header using request modifiers like [WithContentType] (e.g. WithContentType("application/xml")).
-//
-// Use [WithFormBody] or [WithFormValues] to create PostForm requests.
+// Post executes a POST request carrying body marshaled as JSON and returns the raw [*http.Response].
 func Post(
 	ctx context.Context,
 	c Requester,
@@ -230,16 +210,7 @@ func Post(
 	return c.Request(ctx, http.MethodPost, path, mods...)
 }
 
-// PostTo executes a POST request, marshals the body, and decodes the response body into Resp.
-// It returns an [aoni.APIError] if the server responds with a non-2xx status code.
-//
-// By default, the request body is marshaled to JSON and the response is parsed as JSON.
-//
-// To send other body formats, pre-serialize the payload and pass it as an [io.Reader] (e.g. [strings.NewReader]),
-// then override the Content-Type header using [WithContentType].
-// To decode other response formats (such as XML or YAML), pass a decoder modifier, e.g. [WithXMLDecoder] or [WithYAMLDecoder].
-//
-// Use [WithFormBody] or [WithFormValues] to create PostForm requests.
+// PostTo executes a POST request with body payload and unmarshals the response into Resp.
 func PostTo[Resp any](
 	ctx context.Context,
 	c Requester,
@@ -275,7 +246,7 @@ func PostTo[Resp any](
 	return result, nil
 }
 
-// PostInto executes a POST request, marshals the body, and decodes the response body directly into target.
+// PostInto executes a POST request with body payload and unmarshals the response directly into target.
 func PostInto[T any](
 	ctx context.Context,
 	c Requester,
@@ -303,7 +274,7 @@ func PostInto[T any](
 	return HandleResponse(resp, target, c)
 }
 
-// PostToEx is like [PostTo] but returns both the parsed response payload and the raw *http.Response.
+// PostToEx is like [PostTo], but yields both the unmarshaled payload structure and the raw [*http.Response].
 func PostToEx[Resp any](
 	ctx context.Context,
 	c Requester,
@@ -327,7 +298,7 @@ func PostToEx[Resp any](
 	return result, raw, nil
 }
 
-// PostProto executes a POST request containing a Protobuf payload and returns the raw *http.Response.
+// PostProto executes a POST request containing a binary [proto.Message] payload and returns the raw [*http.Response].
 func PostProto(
 	ctx context.Context,
 	c Requester,
@@ -339,7 +310,7 @@ func PostProto(
 	return c.Request(ctx, http.MethodPost, path, mods...)
 }
 
-// PostProtoTo executes a POST request with a Protobuf payload and decodes the response into Resp.
+// PostProtoTo executes a POST request with a [proto.Message] payload and unmarshals the binary response into Resp.
 func PostProtoTo[Resp any](
 	ctx context.Context,
 	c Requester,
@@ -369,7 +340,7 @@ func PostProtoTo[Resp any](
 	return result, nil
 }
 
-// PostProtoInto executes a POST request with a Protobuf payload and decodes the response directly into target.
+// PostProtoInto executes a POST request with a [proto.Message] payload and unmarshals the response directly into target.
 func PostProtoInto[T any](
 	ctx context.Context,
 	c Requester,
@@ -391,7 +362,7 @@ func PostProtoInto[T any](
 	return HandleResponse(resp, target, c)
 }
 
-// PostGRPCWeb executes a POST request with a gRPC-Web framed Protobuf payload and returns the raw *http.Response.
+// PostGRPCWeb executes a POST request with a gRPC-Web framed [proto.Message] payload and returns the raw [*http.Response].
 func PostGRPCWeb(
 	ctx context.Context,
 	c Requester,
@@ -403,7 +374,7 @@ func PostGRPCWeb(
 	return c.Request(ctx, http.MethodPost, path, mods...)
 }
 
-// PostGRPCWebTo executes a POST request with a gRPC-Web framed payload and decodes the response frame into Resp.
+// PostGRPCWebTo executes a POST request with a gRPC-Web framed payload and unmarshals the response into Resp.
 func PostGRPCWebTo[Resp any](
 	ctx context.Context,
 	c Requester,
@@ -433,7 +404,7 @@ func PostGRPCWebTo[Resp any](
 	return result, nil
 }
 
-// PostGRPCWebInto executes a POST request with a gRPC-Web framed payload and decodes the response frame directly into target.
+// PostGRPCWebInto executes a POST request with a gRPC-Web framed payload and unmarshals the response directly into target.
 func PostGRPCWebInto[T any](
 	ctx context.Context,
 	c Requester,
@@ -455,14 +426,7 @@ func PostGRPCWebInto[T any](
 	return HandleResponse(resp, target, c)
 }
 
-// Put executes a PUT request through the specified [Requester] and returns the raw [http.Response].
-//
-// By default, if the body is a struct or map, it is marshaled to JSON and the request headers
-// "Content-Type" and "Accept" are set to "application/json".
-//
-// To send other body formats (e.g. XML, YAML, or plain text), pre-serialize the payload and
-// pass it as an [io.Reader] (e.g. using [strings.NewReader] or [bytes.NewReader]), then override the Content-Type
-// header using request modifiers like [WithContentType] (e.g. WithContentType("application/xml")).
+// Put executes a PUT request through c and returns the raw [*http.Response].
 func Put(
 	ctx context.Context,
 	c Requester,
@@ -484,16 +448,7 @@ func Put(
 	return c.Request(ctx, http.MethodPut, path, mods...)
 }
 
-// PutTo executes a PUT request through the specified [Requester],
-// marshals the body, and decodes the response body into Resp.
-//
-// It returns an [aoni.APIError] if the server responds with a non-2xx status code.
-//
-// By default, the request body is marshaled to JSON and the response is parsed as JSON.
-//
-// To send other body formats, pre-serialize the payload and pass it as an [io.Reader] (e.g. [strings.NewReader]),
-// then override the Content-Type header using [WithContentType].
-// To decode other response formats (such as XML or YAML), pass a decoder modifier, e.g. [WithXMLDecoder] or [WithYAMLDecoder].
+// PutTo executes a PUT request and unmarshals the response payload into Resp.
 func PutTo[Resp any](
 	ctx context.Context,
 	c Requester,
@@ -529,7 +484,7 @@ func PutTo[Resp any](
 	return result, nil
 }
 
-// PutInto executes a PUT request, marshals the body, and decodes the response body directly into target.
+// PutInto executes a PUT request and unmarshals the response payload directly into target.
 func PutInto[T any](
 	ctx context.Context,
 	c Requester,
@@ -557,7 +512,7 @@ func PutInto[T any](
 	return HandleResponse(resp, target, c)
 }
 
-// PutToEx is like [PutTo] but returns both the parsed response payload and the raw *http.Response.
+// PutToEx is like [PutTo], but yields both the unmarshaled payload structure and the raw [*http.Response].
 func PutToEx[Resp any](
 	ctx context.Context,
 	c Requester,
@@ -581,7 +536,7 @@ func PutToEx[Resp any](
 	return result, raw, nil
 }
 
-// PutProtoTo executes a PUT request with a Protobuf payload and decodes the response into Resp.
+// PutProtoTo executes a PUT request carrying a [proto.Message] payload and unmarshals the response into Resp.
 func PutProtoTo[Resp any](
 	ctx context.Context,
 	c Requester,
@@ -592,7 +547,7 @@ func PutProtoTo[Resp any](
 	return DoProtoTo[Resp](ctx, c, http.MethodPut, path, msg, mods...)
 }
 
-// PutProtoInto executes a PUT request with a Protobuf payload and decodes the response directly into target.
+// PutProtoInto executes a PUT request carrying a [proto.Message] payload and unmarshals the response directly into target.
 func PutProtoInto[T any](
 	ctx context.Context,
 	c Requester,
@@ -604,14 +559,7 @@ func PutProtoInto[T any](
 	return DoProtoInto[T](ctx, c, http.MethodPut, path, msg, target, mods...)
 }
 
-// Patch executes a PATCH request through the specified [Requester] and returns the raw [http.Response].
-//
-// By default, if the body is a struct or map, it is marshaled to JSON and the request headers
-// "Content-Type" and "Accept" are set to "application/json".
-//
-// To send other body formats (e.g. XML, YAML, or plain text), pre-serialize the payload and
-// pass it as an [io.Reader] (e.g. using [strings.NewReader] or [bytes.NewReader]), then override the Content-Type
-// header using request modifiers like [WithContentType] (e.g. WithContentType("application/xml")).
+// Patch executes a PATCH request through c and returns the raw [*http.Response].
 func Patch(
 	ctx context.Context,
 	c Requester,
@@ -633,16 +581,7 @@ func Patch(
 	return c.Request(ctx, http.MethodPatch, path, mods...)
 }
 
-// PatchTo executes a PATCH request through the specified [Requester],
-// marshals the body, and decodes the response body into Resp.
-//
-// It returns an [aoni.APIError] if the server responds with a non-2xx status code.
-//
-// By default, the request body is marshaled to JSON and the response is parsed as JSON.
-//
-// To send other body formats, pre-serialize the payload and pass it as an [io.Reader] (e.g. [strings.NewReader]),
-// then override the Content-Type header using [WithContentType].
-// To decode other response formats (such as XML or YAML), pass a decoder modifier, e.g. [WithXMLDecoder] or [WithYAMLDecoder].
+// PatchTo executes a PATCH request and unmarshals the response payload into Resp.
 func PatchTo[Resp any](
 	ctx context.Context,
 	c Requester,
@@ -678,7 +617,7 @@ func PatchTo[Resp any](
 	return result, nil
 }
 
-// PatchInto executes a PATCH request, marshals the body, and decodes the response body directly into target.
+// PatchInto executes a PATCH request and unmarshals the response payload directly into target.
 func PatchInto[T any](
 	ctx context.Context,
 	c Requester,
@@ -706,7 +645,7 @@ func PatchInto[T any](
 	return HandleResponse(resp, target, c)
 }
 
-// PatchToEx is like [PatchTo] but returns both the parsed response payload and the raw *http.Response.
+// PatchToEx is like [PatchTo], but yields both the unmarshaled payload structure and the raw [*http.Response].
 func PatchToEx[Resp any](
 	ctx context.Context,
 	c Requester,
@@ -730,7 +669,7 @@ func PatchToEx[Resp any](
 	return result, raw, nil
 }
 
-// PatchProtoTo executes a PATCH request with a Protobuf payload and decodes the response into Resp.
+// PatchProtoTo executes a PATCH request with a [proto.Message] payload and unmarshals the response into Resp.
 func PatchProtoTo[Resp any](
 	ctx context.Context,
 	c Requester,
@@ -741,7 +680,7 @@ func PatchProtoTo[Resp any](
 	return DoProtoTo[Resp](ctx, c, http.MethodPatch, path, msg, mods...)
 }
 
-// PatchProtoInto executes a PATCH request with a Protobuf payload and decodes the response directly into target.
+// PatchProtoInto executes a PATCH request with a [proto.Message] payload and unmarshals the response directly into target.
 func PatchProtoInto[T any](
 	ctx context.Context,
 	c Requester,
@@ -753,14 +692,7 @@ func PatchProtoInto[T any](
 	return DoProtoInto[T](ctx, c, http.MethodPatch, path, msg, target, mods...)
 }
 
-// Delete executes a DELETE request through the specified [Requester] and returns the raw [http.Response].
-//
-// By default, if the body is a struct or map, it is marshaled to JSON and the request headers
-// "Content-Type" and "Accept" are set to "application/json".
-//
-// To send other body formats (e.g. XML, YAML, or plain text), pre-serialize the payload and
-// pass it as an [io.Reader] (e.g. using [strings.NewReader] or [bytes.NewReader]), then override the Content-Type
-// header using request modifiers like [WithContentType] (e.g. WithContentType("application/xml")).
+// Delete executes a DELETE request through c and returns the raw [*http.Response].
 func Delete(
 	ctx context.Context,
 	c Requester,
@@ -782,16 +714,7 @@ func Delete(
 	return c.Request(ctx, http.MethodDelete, path, mods...)
 }
 
-// DeleteTo executes a DELETE request through the specified [Requester],
-// marshals the body, and decodes the response body into Resp.
-//
-// It returns an [aoni.APIError] if the server responds with a non-2xx status code.
-//
-// By default, the request body is marshaled to JSON and the response is parsed as JSON.
-//
-// To send other body formats, pre-serialize the payload and pass it as an [io.Reader] (e.g. [strings.NewReader]),
-// then override the Content-Type header using [WithContentType].
-// To decode other response formats (such as XML or YAML), pass a decoder modifier, e.g. [WithXMLDecoder] or [WithYAMLDecoder].
+// DeleteTo executes a DELETE request and unmarshals the response payload into Resp.
 func DeleteTo[Resp any](
 	ctx context.Context,
 	c Requester,
@@ -827,7 +750,7 @@ func DeleteTo[Resp any](
 	return result, nil
 }
 
-// DeleteInto executes a DELETE request, marshals the body, and decodes the response body directly into target.
+// DeleteInto executes a DELETE request and unmarshals the response payload directly into target.
 func DeleteInto[T any](
 	ctx context.Context,
 	c Requester,
@@ -855,7 +778,7 @@ func DeleteInto[T any](
 	return HandleResponse(resp, target, c)
 }
 
-// DeleteToEx is like [DeleteTo] but returns both the parsed response payload and the raw *http.Response.
+// DeleteToEx is like [DeleteTo], but yields both the unmarshaled payload structure and the raw [*http.Response].
 func DeleteToEx[Resp any](
 	ctx context.Context,
 	c Requester,
@@ -879,7 +802,7 @@ func DeleteToEx[Resp any](
 	return result, raw, nil
 }
 
-// DeleteProtoTo executes a DELETE request with an optional Protobuf payload and decodes the response into Resp.
+// DeleteProtoTo executes a DELETE request with an optional [proto.Message] payload and unmarshals the response into Resp.
 func DeleteProtoTo[Resp any](
 	ctx context.Context,
 	c Requester,
@@ -890,7 +813,7 @@ func DeleteProtoTo[Resp any](
 	return DoProtoTo[Resp](ctx, c, http.MethodDelete, path, msg, mods...)
 }
 
-// DeleteProtoInto executes a DELETE request with an optional Protobuf payload and decodes the response directly into target.
+// DeleteProtoInto executes a DELETE request with an optional [proto.Message] payload and unmarshals the response directly into target.
 func DeleteProtoInto[T any](
 	ctx context.Context,
 	c Requester,
@@ -902,7 +825,7 @@ func DeleteProtoInto[T any](
 	return DoProtoInto[T](ctx, c, http.MethodDelete, path, msg, target, mods...)
 }
 
-// Head performs a HEAD request through the specified [Requester] and returns the raw [http.Response].
+// Head performs a HEAD request through c and returns the raw [*http.Response].
 func Head(
 	ctx context.Context,
 	c Requester,
@@ -912,7 +835,7 @@ func Head(
 	return c.Request(ctx, http.MethodHead, path, mods...)
 }
 
-// Options performs an OPTIONS request through the specified [Requester] and returns the raw [http.Response].
+// Options performs an OPTIONS request through c and returns the raw [*http.Response].
 func Options(
 	ctx context.Context,
 	c Requester,
@@ -922,7 +845,7 @@ func Options(
 	return c.Request(ctx, http.MethodOptions, path, mods...)
 }
 
-// OptionsTo performs an OPTIONS request and decodes the response body into Resp.
+// OptionsTo performs an OPTIONS request and unmarshals the response payload into Resp.
 func OptionsTo[Resp any](
 	ctx context.Context,
 	c Requester,
@@ -946,7 +869,7 @@ func OptionsTo[Resp any](
 	return result, nil
 }
 
-// OptionsInto performs an OPTIONS request and decodes the response body directly into target.
+// OptionsInto performs an OPTIONS request and unmarshals the response payload directly into target.
 func OptionsInto[T any](
 	ctx context.Context,
 	c Requester,
@@ -962,7 +885,7 @@ func OptionsInto[T any](
 	return HandleResponse(resp, target, c)
 }
 
-// Trace performs a TRACE request through the specified [Requester] and returns the raw [http.Response].
+// Trace performs a TRACE request through c and returns the raw [*http.Response].
 func Trace(
 	ctx context.Context,
 	c Requester,
@@ -972,7 +895,7 @@ func Trace(
 	return c.Request(ctx, http.MethodTrace, path, mods...)
 }
 
-// Connect performs a CONNECT request through the specified [Requester] and returns the raw [http.Response].
+// Connect performs a CONNECT request through c and returns the raw [*http.Response].
 func Connect(
 	ctx context.Context,
 	c Requester,
@@ -982,7 +905,7 @@ func Connect(
 	return c.Request(ctx, http.MethodConnect, path, mods...)
 }
 
-// Do performs an arbitrary HTTP request using method and optional body, returning the raw [http.Response].
+// Do performs an HTTP request using method and optional body, returning the raw [*http.Response].
 func Do(
 	ctx context.Context,
 	c Requester,
@@ -1006,7 +929,7 @@ func Do(
 	return c.Request(ctx, method, path, mods...)
 }
 
-// DoTo performs an arbitrary HTTP request using method, marshals optional body, and decodes response into Resp.
+// DoTo performs an HTTP request using method, marshaling body if provided, and unmarshals response into Resp.
 func DoTo[Resp any](
 	ctx context.Context,
 	c Requester,
@@ -1044,7 +967,7 @@ func DoTo[Resp any](
 	return result, nil
 }
 
-// DoInto performs an arbitrary HTTP request using method, marshals optional body, and decodes response directly into target.
+// DoInto performs an HTTP request using method, marshaling body if provided, and unmarshals response directly into target.
 func DoInto[T any](
 	ctx context.Context,
 	c Requester,
@@ -1074,7 +997,7 @@ func DoInto[T any](
 	return HandleResponse(resp, target, c)
 }
 
-// DoToEx is like [DoTo] but returns both the parsed response payload and the raw *http.Response.
+// DoToEx is like [DoTo], but yields both the unmarshaled payload structure and the raw [*http.Response].
 func DoToEx[Resp any](
 	ctx context.Context,
 	c Requester,
@@ -1098,7 +1021,7 @@ func DoToEx[Resp any](
 	return result, raw, nil
 }
 
-// DoProtoTo executes an HTTP request using any method with a Protobuf payload and decodes the response into Resp.
+// DoProtoTo executes an HTTP request with a [proto.Message] payload and unmarshals the response into Resp.
 func DoProtoTo[Resp any](
 	ctx context.Context,
 	c Requester,
@@ -1131,7 +1054,7 @@ func DoProtoTo[Resp any](
 	return result, nil
 }
 
-// DoProtoInto executes an HTTP request using any method with a Protobuf payload and decodes the response directly into target.
+// DoProtoInto executes an HTTP request with a [proto.Message] payload and unmarshals the response directly into target.
 func DoProtoInto[T any](
 	ctx context.Context,
 	c Requester,

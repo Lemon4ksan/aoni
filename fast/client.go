@@ -1,6 +1,6 @@
 // Copyright (c) 2026 Lemon4ksan All rights reserved.
 // Use of this source code is governed by a BSD-style
-// license can be found in the LICENSE file.
+// license that can be found in the LICENSE file.
 
 package fast
 
@@ -8,6 +8,7 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"strings"
 	"sync"
 	"time"
 
@@ -17,20 +18,19 @@ import (
 	"github.com/lemon4ksan/aoni/internal/bytesconv"
 )
 
-// ErrTargetURLEmpty is returned when no destination address is specified.
+// ErrTargetURLEmpty is returned when no destination address is specified in a request path or base URL configuration.
 var ErrTargetURLEmpty = errors.New("aoni fast: target URL is empty")
 
-// Client executes HTTP transactions over a high-performance fasthttp engine.
+// Client executes high-performance HTTP transactions over a pooled [*fasthttp.Client] engine.
 type Client struct {
 	engine *fasthttp.Client
 	config aoni.Config
 }
 
-// Option is a type alias for [aoni.ClientOption], allowing options from package [option]
-// to configure both aoni.Client (net/http) and fast.Client (fasthttp) identically.
+// Option is an alias for [aoni.ClientOption].
 type Option = aoni.ClientOption
 
-// NewClient instantiates a new [Client] with fasthttp settings configured via universal [aoni.ClientOption] options.
+// NewClient instantiates a new [Client] with fasthttp parameters configured via [aoni.ClientOption] options.
 func NewClient(opts ...aoni.ClientOption) *Client {
 	c := &Client{
 		engine: &fasthttp.Client{
@@ -56,20 +56,20 @@ func NewClient(opts ...aoni.ClientOption) *Client {
 	return c
 }
 
-// Config returns a copy of the active client configuration.
+// Config returns a copy of the active client configuration struct.
 func (c *Client) Config() aoni.Config {
 	return c.config
 }
 
-// Engine returns the underlying [*fasthttp.Client].
+// Engine returns the underlying [*fasthttp.Client] instance.
 func (c *Client) Engine() *fasthttp.Client {
 	return c.engine
 }
 
-// Request executes a transaction using fasthttp instances pulled from [sync.Pool].
+// Request executes a transaction using fasthttp objects acquired from [sync.Pool].
 //
-// The returned [aoni.Response] must be closed via [aoni.Response.Close] by the caller or decoder
-// to return the underlying fasthttp request and response objects back to the pool.
+// Postconditions:
+//   - The returned [aoni.Response] MUST be closed via [aoni.Response.Close] to return acquired objects to [sync.Pool].
 func (c *Client) Request(
 	ctx context.Context,
 	method, path string,
@@ -103,9 +103,9 @@ func (c *Client) Request(
 		}
 	}
 
-	for i := range mods {
-		if mods[i] != nil {
-			mods[i](reqAdapter)
+	for _, m := range mods {
+		if m != nil {
+			m(reqAdapter)
 		}
 	}
 
@@ -119,7 +119,7 @@ func (c *Client) Request(
 	return NewPooledResponse(fastReq, fastResp), nil
 }
 
-// Do executes a prepared [aoni.Request] via fasthttp, applying client defaults and modifiers.
+// Do executes a prepared [aoni.Request] via fasthttp, applying defaults and modifiers.
 func (c *Client) Do(req aoni.Request) (aoni.Response, error) {
 	if req == nil {
 		req = NewRequest(nil)
@@ -132,13 +132,14 @@ func (c *Client) Do(req aoni.Request) (aoni.Response, error) {
 
 		fastReq.Header.SetMethod(req.Method())
 		fastReq.SetRequestURI(req.URL())
+
 		if body := req.BodyBytes(); len(body) > 0 {
 			fastReq.SetBody(body)
 		}
 	}
 
 	fastResp := fasthttp.AcquireResponse()
-	if err := c.engine.Do(fastReq, fastResp);err != nil {
+	if err := c.engine.Do(fastReq, fastResp); err != nil {
 		fasthttp.ReleaseResponse(fastResp)
 		return nil, err
 	}
@@ -179,12 +180,9 @@ func (c *Client) resolveTargetURL(req aoni.Request, path string) error {
 		return nil
 	}
 
-	baseURL := baseURLStr
-	if len(baseURL) > 0 && baseURL[len(baseURL)-1] == '/' {
-		baseURL = baseURL[:len(baseURL)-1]
-	}
-
+	baseURL := strings.TrimSuffix(baseURLStr, "/")
 	cleanPath := path
+
 	if len(path) == 0 || path[0] != '/' {
 		cleanPath = "/" + path
 	}
@@ -194,7 +192,7 @@ func (c *Client) resolveTargetURL(req aoni.Request, path string) error {
 	return nil
 }
 
-// PooledResponse wraps fasthttp response and returns instances to [sync.Pool] upon Close.
+// PooledResponse wraps a fasthttp response and returns instances back to [sync.Pool] upon invocation of [PooledResponse.Close].
 type PooledResponse struct {
 	*Response
 	fastReq  *fasthttp.Request
@@ -211,9 +209,7 @@ func NewPooledResponse(fastReq *fasthttp.Request, fastResp *fasthttp.Response) *
 	}
 }
 
-// Close releases the underlying fasthttp request and response objects back to [sync.Pool].
-//
-// Satisfies the [aoni.Response] contract. Safe for concurrent invocation via [sync.Once].
+// Close releases underlying fasthttp request and response objects back to [sync.Pool].
 func (r *PooledResponse) Close() error {
 	r.once.Do(func() {
 		if r.fastReq != nil {

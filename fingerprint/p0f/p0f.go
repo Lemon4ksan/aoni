@@ -2,11 +2,7 @@
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
-// Package p0f provides passive operating system TCP/IP stack fingerprint spoofing.
-//
-// Passive OS fingerprinting tools (like p0f) inspect Layer 4 TCP parameters (TTL, TCP Window Size,
-// Don't Fragment flag) to determine the client's OS. This package uses platform-specific kernel
-// `setsockopt` system calls to adjust raw socket parameters before the TCP SYN handshake packet is written.
+// Package p0f provides passive OS TCP/IP stack fingerprint spoofing via socket options.
 package p0f
 
 import (
@@ -16,10 +12,10 @@ import (
 	"strings"
 )
 
-// ErrInvalidP0fSignature is returned when a p0f signature string violates the 8-field format.
+// ErrInvalidP0fSignature is returned when a p0f signature string violates the 8-field spec format.
 var ErrInvalidP0fSignature = errors.New("aoni p0f: invalid p0f signature string")
 
-// Error is returned when a p0f signature string violates the 8-field format.
+// Error describes a parsing or parsing validation error for a specific signature field.
 type Error struct {
 	Field string
 	Val   string
@@ -36,7 +32,7 @@ func (e *Error) Error() string {
 
 func (e *Error) Unwrap() error { return e.Err }
 
-// WindowType describes how the TCP window size is computed.
+// WindowType describes how TCP Window Size is computed for the fingerprint.
 type WindowType int
 
 const (
@@ -52,7 +48,7 @@ const (
 	WindowAny
 )
 
-// Predefined p0f signatures for common OS versions.
+// Predefined p0f TCP signatures for common operating systems.
 var (
 	Linux311  = MustParse("*:64:0:*:mss*20,10:mss,sok,ts,nop,ws:df,id+:0")
 	Linux3x   = MustParse("*:64:0:*:mss*10,0:mss,sok,ts,nop,ws:df,id+:0")
@@ -67,22 +63,22 @@ var (
 	Nmap      = MustParse("*:64-:0:265:512,0:mss,sok,ts:ack+:0")
 )
 
-// Signature represents a parsed p0f TCP fingerprint.
+// Signature represents a parsed p0f TCP/IP stack fingerprint.
 type Signature struct {
-	IPVersion   string     // "4", "6", "*"
-	TTL         int        // initial TTL value
-	HasTTLMinus bool       // true if TTL has "-" suffix (bad TTL)
-	IPOptLen    int        // IP options header length in bytes
-	MSS         int        // -1 = wildcard
-	WindowSize  int        // window size value, -1 = wildcard
-	WindowType  WindowType // how to interpret WindowSize
-	WindowScale int        // window scale shift count, -1 = wildcard
-	Options     []string   // TCP options layout (e.g. ["mss","sok","ts","nop","ws"])
-	Quirks      []string   // IP/TCP quirks (e.g. ["df","id+"])
-	Payload     string     // "0", "+", or "*"
+	IPVersion   string
+	TTL         int
+	HasTTLMinus bool
+	IPOptLen    int
+	MSS         int
+	WindowSize  int
+	WindowType  WindowType
+	WindowScale int
+	Options     []string
+	Quirks      []string
+	Payload     string
 }
 
-// String reconstructs the p0f signature string.
+// String reconstructs the 8-field p0f signature string format.
 func (s *Signature) String() string {
 	ttlStr := strconv.Itoa(s.TTL)
 	if s.HasTTLMinus {
@@ -115,12 +111,11 @@ func (s *Signature) String() string {
 	) + ":" + s.Payload
 }
 
-// Parse parses a p0f signature string in the format:
-// {ip_ver}:{ttl}:{ip_opt_len}:{mss}:{window,wscale}:{opt_layout}:{quirks}:{pay_class}
+// Parse parses an 8-field p0f signature string.
 func Parse(sig string) (*Signature, error) {
 	parts := strings.Split(sig, ":")
 	if len(parts) != 8 {
-		return nil, fmt.Errorf("p0f: signature must have 8 colon-separated fields, got %d", len(parts))
+		return nil, ErrInvalidP0fSignature
 	}
 
 	s := &Signature{}
@@ -130,7 +125,6 @@ func Parse(sig string) (*Signature, error) {
 		return nil, fmt.Errorf("p0f: invalid IP version %q", s.IPVersion)
 	}
 
-	// Parse TTL (may have "-" suffix for bad TTL)
 	ttlStr := parts[1]
 	if strings.HasSuffix(ttlStr, "-") {
 		s.HasTTLMinus = true
@@ -151,7 +145,6 @@ func Parse(sig string) (*Signature, error) {
 
 	s.IPOptLen = ipOptLen
 
-	// Parse MSS (-1 = wildcard)
 	if parts[3] == "*" {
 		s.MSS = -1
 	} else {
@@ -163,19 +156,16 @@ func Parse(sig string) (*Signature, error) {
 		s.MSS = mss
 	}
 
-	// Parse window,wscale
 	if err := parseWindow(parts[4], s); err != nil {
 		return nil, err
 	}
 
-	// Parse options
 	if parts[5] != "" {
 		s.Options = strings.Split(parts[5], ",")
 	} else {
 		s.Options = []string{}
 	}
 
-	// Parse quirks
 	if parts[6] != "" {
 		s.Quirks = strings.Split(parts[6], ",")
 	} else {
@@ -192,7 +182,6 @@ func parseWindow(field string, s *Signature) error {
 		return errors.New("p0f: empty window field")
 	}
 
-	// Handle wildcard: *,-1
 	if field == "*,-1" {
 		s.WindowType = WindowAny
 		s.WindowSize = -1
@@ -203,10 +192,9 @@ func parseWindow(field string, s *Signature) error {
 
 	parts := strings.Split(field, ",")
 	if len(parts) != 2 {
-		return fmt.Errorf("p0f: invalid window field %q: expected two comma-separated values", field)
+		return fmt.Errorf("p0f: invalid window field %q", field)
 	}
 
-	// Parse window scale
 	scale, err := strconv.Atoi(parts[1])
 	if err != nil {
 		return fmt.Errorf("p0f: invalid window scale %q: %w", parts[1], err)
@@ -214,7 +202,6 @@ func parseWindow(field string, s *Signature) error {
 
 	s.WindowScale = scale
 
-	// Parse window size (may be mss*20, 8192, etc.)
 	wsStr := parts[0]
 	switch {
 	case strings.HasPrefix(wsStr, "mss*"):

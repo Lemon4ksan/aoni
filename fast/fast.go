@@ -1,6 +1,6 @@
 // Copyright (c) 2026 Lemon4ksan All rights reserved.
 // Use of this source code is governed by a BSD-style
-// license can be found in the LICENSE file.
+// license that can be found in the LICENSE file.
 
 // Package fast provides high-performance fasthttp engine adapters for [aoni.Request] and [aoni.Response].
 package fast
@@ -18,17 +18,12 @@ import (
 )
 
 // Request adapts a high-performance [*fasthttp.Request] to the unified [aoni.Request] contract.
-//
-// Designed to proxy modifier invocations directly into fasthttp byte buffers with zero heap allocations.
 type Request struct {
 	req *fasthttp.Request
 	ctx context.Context
 }
 
 // NewRequest wraps req into a unified [aoni.Request] adapter.
-//
-// Preconditions: If req is nil, acquires an instance from [fasthttp.AcquireRequest].
-// The caller or client execution pipeline remains responsible for releasing acquired requests.
 func NewRequest(req *fasthttp.Request) *Request {
 	if req == nil {
 		req = fasthttp.AcquireRequest()
@@ -46,7 +41,7 @@ func (f *Request) Context() context.Context {
 	return f.ctx
 }
 
-// SetContext assigns the execution context to the request wrapper.
+// SetContext assigns the execution context to the request adapter.
 func (f *Request) SetContext(ctx context.Context) {
 	f.ctx = ctx
 }
@@ -71,12 +66,12 @@ func (f *Request) URL() string {
 	return bytesconv.B2S(f.req.URI().FullURI())
 }
 
-// SetURL assigns the full destination address using a string.
+// SetURL assigns the destination address string.
 func (f *Request) SetURL(urlStr string) {
 	f.req.SetRequestURI(urlStr)
 }
 
-// SetURIBytes assigns the full destination address using a byte slice.
+// SetURIBytes assigns the destination address from a byte slice.
 func (f *Request) SetURIBytes(uri []byte) {
 	f.req.Header.SetRequestURIBytes(uri)
 }
@@ -101,7 +96,7 @@ func (f *Request) SetRawQuery(query string) {
 	f.req.URI().SetQueryString(query)
 }
 
-// SetRawQueryBytes assigns the raw query string using a byte slice.
+// SetRawQueryBytes assigns the raw query string from a byte slice.
 func (f *Request) SetRawQueryBytes(query []byte) {
 	f.req.URI().SetQueryStringBytes(query)
 }
@@ -116,12 +111,12 @@ func (f *Request) AddQueryParamBytes(key, value []byte) {
 	f.req.URI().QueryArgs().AddBytesKV(key, value)
 }
 
-// SetQueryParam sets or replaces a key-value query parameter in the URI.
+// SetQueryParam sets or replaces a query parameter in the URI.
 func (f *Request) SetQueryParam(key, value string) {
 	f.req.URI().QueryArgs().Set(key, value)
 }
 
-// SetQueryParamBytes sets or replaces a key-value query parameter using byte slices.
+// SetQueryParamBytes sets or replaces a query parameter using byte slices.
 func (f *Request) SetQueryParamBytes(key, value []byte) {
 	f.req.URI().QueryArgs().SetBytesKV(key, value)
 }
@@ -171,22 +166,22 @@ func (f *Request) ResetHeaders() {
 	f.req.Header.Reset()
 }
 
-// SetBodyBytes sets the request body to a raw byte slice in a single assignment.
+// SetBodyBytes sets request body to a raw byte slice.
 func (f *Request) SetBodyBytes(body []byte) {
 	f.req.SetBody(body)
 }
 
-// BodyBytes yields direct access to the internal fasthttp request body byte slice.
+// BodyBytes yields direct access to internal fasthttp request body byte slice.
 func (f *Request) BodyBytes() []byte {
 	return f.req.Body()
 }
 
-// SetBodyStream assigns a streaming reader as the request body.
+// SetBodyStream assigns a streaming reader as request body.
 func (f *Request) SetBodyStream(r stdio.Reader, contentLength int64) {
 	f.req.SetBodyStream(r, int(contentLength))
 }
 
-// BodyStream yields an io.Reader for the request body.
+// BodyStream yields an [stdio.Reader] for the request body.
 func (f *Request) BodyStream() stdio.Reader {
 	return f.req.BodyStream()
 }
@@ -220,7 +215,7 @@ func NewResponse(resp *fasthttp.Response) *Response {
 	return &Response{resp: resp}
 }
 
-// StatusCode yields the HTTP response status code.
+// StatusCode yields the HTTP status code.
 func (f *Response) StatusCode() int {
 	return f.resp.StatusCode()
 }
@@ -230,7 +225,7 @@ func (f *Response) Status() string {
 	return http.StatusText(f.resp.StatusCode())
 }
 
-// StatusBytes yields the status text as a byte slice.
+// StatusBytes yields status text as a byte slice.
 func (f *Response) StatusBytes() []byte {
 	return bytesconv.S2B(f.Status())
 }
@@ -253,15 +248,16 @@ func (f *Response) Headers() map[string][]string {
 		m[sk] = append(m[sk], string(v))
 		return true
 	})
+
 	return m
 }
 
-// BodyBytes yields direct zero-copy access to the response body byte slice inside fasthttp socket buffers.
+// BodyBytes yields direct zero-copy access to response body bytes inside fasthttp socket buffers.
 func (f *Response) BodyBytes() []byte {
 	return f.resp.Body()
 }
 
-// BodyStream yields an io.ReadCloser wrapping response body bytes.
+// BodyStream yields an [stdio.ReadCloser] wrapping response body bytes.
 func (f *Response) BodyStream() stdio.ReadCloser {
 	return stdio.NopCloser(bytes.NewReader(f.resp.Body()))
 }
@@ -281,7 +277,7 @@ func (f *Response) EngineResponse() any {
 	return f.resp
 }
 
-// Close releases any resources bound to the response wrapper.
+// Close releases resources bound to the response wrapper.
 func (f *Response) Close() error {
 	return nil
 }

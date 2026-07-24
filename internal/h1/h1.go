@@ -1,8 +1,8 @@
 // Copyright (c) 2026 Lemon4ksan All rights reserved.
 // Use of this source code is governed by a BSD-style
-// license can be found in the LICENSE file.
+// license that can be found in the LICENSE file.
 
-// Package h1 provides socket-level HTTP/1.1 header reordering connection wrappers.
+// Package h1 provides socket-level HTTP/1.1 wire header reordering connection wrappers.
 package h1
 
 import (
@@ -13,7 +13,7 @@ import (
 	"github.com/lemon4ksan/aoni/internal/bytesconv"
 )
 
-// ErrInvalidHeaderTerminator indicates missing or corrupted HTTP/1.1 header section bounds.
+// ErrInvalidHeaderTerminator is returned when HTTP/1.1 header section terminators (\r\n\r\n) are missing or corrupted.
 var ErrInvalidHeaderTerminator = errors.New("aoni h1: invalid or truncated HTTP header section")
 
 const (
@@ -26,13 +26,12 @@ type headerEntry struct {
 	line []byte
 }
 
-// HeaderOrderingConn intercepts raw TCP writes to reorder HTTP/1.1 request headers prior to encryption.
+// HeaderOrderingConn wraps a [net.Conn] to reorder HTTP/1.1 request header lines prior to socket transmission.
 type HeaderOrderingConn struct {
 	net.Conn
 	OrderedKeys []string
 }
 
-// Write intercepts serialized HTTP/1.1 request data and reorders header lines according to OrderedKeys.
 func (c *HeaderOrderingConn) Write(b []byte) (int, error) {
 	if len(c.OrderedKeys) > 0 && bytes.Contains(b, bytesconv.S2B(sectionTerminator)) {
 		if rewritten, ok := ReorderHeaders(b, c.OrderedKeys); ok {
@@ -43,9 +42,7 @@ func (c *HeaderOrderingConn) Write(b []byte) (int, error) {
 	return c.Conn.Write(b)
 }
 
-// ReorderHeaders reorders header lines in raw HTTP/1.1 wire payloads according to order.
-//
-// Operates directly on byte buffers without heap allocations for map headers or key strings.
+// ReorderHeaders reorders header lines in raw HTTP/1.1 wire byte buffers according to order.
 func ReorderHeaders(raw []byte, order []string) ([]byte, bool) {
 	body, lines, err := splitHeader(raw)
 	if err != nil || len(lines) < 2 {

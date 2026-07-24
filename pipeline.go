@@ -1,6 +1,6 @@
 // Copyright (c) 2026 Lemon4ksan All rights reserved.
 // Use of this source code is governed by a BSD-style
-// license can be found in the LICENSE file.
+// license that can be found in the LICENSE file.
 
 package aoni
 
@@ -38,7 +38,17 @@ import (
 	"github.com/lemon4ksan/aoni/telemetry"
 )
 
-// execute executes a request through the full client pipeline.
+// execute routes an outgoing [*http.Request] through the complete client request-response pipeline.
+//
+// Execution Order:
+//  1. Request context preparation and before-request hooks execution.
+//  2. Cache lookup for idempotent requests.
+//  3. Network dispatch (direct, proxy failover, or request hedging).
+//  4. Telemetry collection and traffic inspection capture.
+//  5. Response post-processing (decompression, WAF challenge solving, validation, multi-read buffering).
+//
+// Postconditions:
+//   - Finalizes JA4 signatures into the request's [telemetry.TraceInfo] if tracing was enabled.
 func (c *Client) execute(req *http.Request, pipe PipelineConfig) (*http.Response, error) {
 	startTime := time.Now()
 	req = c.prepareRequest(req, pipe)
@@ -76,7 +86,6 @@ func (c *Client) execute(req *http.Request, pipe PipelineConfig) (*http.Response
 	return c.postProcessResponse(req, resp, pipe)
 }
 
-// dispatchRequest routes request execution depending on proxy or hedging setup.
 func (c *Client) dispatchRequest(req *http.Request, pipe PipelineConfig) (*http.Response, error) {
 	switch {
 	case pipe.ProxyFailover != nil:
@@ -88,7 +97,6 @@ func (c *Client) dispatchRequest(req *http.Request, pipe PipelineConfig) (*http.
 	}
 }
 
-// prepareRequestContext configures request deadlines and session keys.
 func (c *Client) prepareRequestContext(req *http.Request) *http.Request {
 	ctx := req.Context()
 
@@ -115,7 +123,6 @@ func (c *Client) prepareRequestContext(req *http.Request) *http.Request {
 	return req.WithContext(ctx)
 }
 
-// prepareRequest executes user hooks and applies evasion features.
 func (c *Client) prepareRequest(req *http.Request, pipe PipelineConfig) *http.Request {
 	req = c.prepareRequestContext(req)
 
@@ -143,10 +150,8 @@ func (c *Client) prepareRequest(req *http.Request, pipe PipelineConfig) *http.Re
 		req = c.redactSensitiveData(req, pipe.Redact)
 	}
 
-	if cfg := GetRequestConfig(
-		req.Context(),
-	); cfg != nil && cfg.UploadProgress != nil && req.Body != nil &&
-		req.Body != http.NoBody {
+	cfg := GetRequestConfig(req.Context())
+	if cfg != nil && cfg.UploadProgress != nil && req.Body != nil && req.Body != http.NoBody {
 		req.Body = &io.ProgressReader{
 			Reader:     req.Body,
 			Total:      req.ContentLength,
@@ -157,7 +162,6 @@ func (c *Client) prepareRequest(req *http.Request, pipe PipelineConfig) *http.Re
 	return req
 }
 
-// traceRequest attaches telemetry tracer configs to the context.
 func (c *Client) traceRequest(
 	req *http.Request,
 	pipe PipelineConfig,
@@ -212,7 +216,6 @@ func (c *Client) traceRequest(
 	return req, traceInfo, traceInfo.Start() //nolint:bodyclose
 }
 
-// rotateUserAgentAndHints rotates UA headers and client hints.
 func (c *Client) rotateUserAgentAndHints(req *http.Request) {
 	profiles := c.defaults.UARotationProfiles
 	if len(profiles) == 0 {
@@ -229,7 +232,6 @@ func (c *Client) rotateUserAgentAndHints(req *http.Request) {
 	}
 }
 
-// applyDPIJitter introduces randomized delays before sending payloads.
 func (c *Client) applyDPIJitter(req *http.Request, cfg *DPIJitterConfig) {
 	delay := cfg.MinDelay
 	if cfg.MinDelay > 0 && cfg.MaxDelay >= cfg.MinDelay {
@@ -254,7 +256,6 @@ func (c *Client) applyDPIJitter(req *http.Request, cfg *DPIJitterConfig) {
 	time.Sleep(delay)
 }
 
-// applyPacketPadding injects random padding headers to obscure TLS segment boundaries.
 func (c *Client) applyPacketPadding(req *http.Request) {
 	if padding := fingerprint.GeneratePadding(*c.fingerprint.PacketPadding); len(padding) > 0 {
 		headerName := fingerprint.PaddingHeaderName(*c.fingerprint.PacketPadding)
@@ -262,21 +263,21 @@ func (c *Client) applyPacketPadding(req *http.Request) {
 	}
 }
 
-// applyRefererHeader tracks and automatically injects Referer headers.
 func (c *Client) applyRefererHeader(req *http.Request) {
-	if req.Header.Get("Referer") == "" {
-		state := c.defaults.RefererState
-		state.mu.Lock()
-		lastURL := state.lastURL
-		state.mu.Unlock()
+	if req.Header.Get("Referer") != "" {
+		return
+	}
 
-		if lastURL != "" {
-			req.Header.Set("Referer", lastURL)
-		}
+	state := c.defaults.RefererState
+	state.mu.Lock()
+	lastURL := state.lastURL
+	state.mu.Unlock()
+
+	if lastURL != "" {
+		req.Header.Set("Referer", lastURL)
 	}
 }
 
-// tryGetFromCache retrieves a cached response if available. Returns nil on cache bypass or miss.
 func (c *Client) tryGetFromCache(req *http.Request, cfg *CacheConfig) *http.Response {
 	if req.Method != http.MethodGet || cfg == nil || cfg.Store == nil {
 		return nil
@@ -308,7 +309,6 @@ func (c *Client) tryGetFromCache(req *http.Request, cfg *CacheConfig) *http.Resp
 	}
 }
 
-// saveToCache caches a successful response.
 func (c *Client) saveToCache(req *http.Request, resp *http.Response, cfg *CacheConfig) {
 	if req.Method != http.MethodGet || resp == nil || resp.StatusCode != http.StatusOK || cfg == nil ||
 		cfg.Store == nil {
@@ -338,17 +338,19 @@ func (c *Client) saveToCache(req *http.Request, resp *http.Response, cfg *CacheC
 		BodyBase64: base64.StdEncoding.EncodeToString(bodyBytes),
 	}
 
-	if cachedData, marshalErr := json.Marshal(cached); marshalErr == nil {
-		ttl := cfg.DefaultTTL
-		if reqCfg := GetRequestConfig(req.Context()); reqCfg != nil && reqCfg.CacheTTL > 0 {
-			ttl = reqCfg.CacheTTL
-		}
-
-		_ = cfg.Store.Set(req.Context(), CacheKey{Method: req.Method, URL: req.URL.String()}, cachedData, ttl)
+	cachedData, marshalErr := json.Marshal(cached)
+	if marshalErr != nil {
+		return
 	}
+
+	ttl := cfg.DefaultTTL
+	if reqCfg := GetRequestConfig(req.Context()); reqCfg != nil && reqCfg.CacheTTL > 0 {
+		ttl = reqCfg.CacheTTL
+	}
+
+	_ = cfg.Store.Set(req.Context(), CacheKey{Method: req.Method, URL: req.URL.String()}, cachedData, ttl)
 }
 
-// postProcessResponse applies WAF checks, decompression, buffering and validation.
 func (c *Client) postProcessResponse(
 	req *http.Request,
 	resp *http.Response,
@@ -398,7 +400,6 @@ func (c *Client) postProcessResponse(
 	return resp, nil
 }
 
-// redactSensitiveData stores redaction rules directly in RequestConfig without context node allocations.
 func (c *Client) redactSensitiveData(req *http.Request, redact *RedactConfig) *http.Request {
 	headers := make(map[string]struct{}, len(redact.HeadersToRedact))
 	for _, h := range redact.HeadersToRedact {
@@ -417,7 +418,6 @@ func (c *Client) redactSensitiveData(req *http.Request, redact *RedactConfig) *h
 	return req
 }
 
-// limitResponseSize enforces limits on the maximum response size.
 func (c *Client) limitResponseSize(resp *http.Response, maxSize int64) error {
 	if resp == nil || resp.Body == nil || maxSize <= 0 {
 		return nil
@@ -440,7 +440,6 @@ func (c *Client) limitResponseSize(resp *http.Response, maxSize int64) error {
 	return nil
 }
 
-// validateResponse executes validation hooks on the response.
 func (c *Client) validateResponse(resp *http.Response) error {
 	if resp == nil || resp.Request == nil {
 		return nil
@@ -476,7 +475,6 @@ func (c *Client) validateResponse(resp *http.Response) error {
 	return nil
 }
 
-// applyMultiReadBuffering applies high-performance buffering for multiple reads.
 func (c *Client) applyMultiReadBuffering(_ *http.Request, resp *http.Response, cfg *RequestConfig) error {
 	threshold := c.defaults.MultiReadThreshold
 	disableDisk := c.defaults.MultiReadDisableDisk
@@ -506,7 +504,6 @@ func (c *Client) applyMultiReadBuffering(_ *http.Request, resp *http.Response, c
 	return nil
 }
 
-// handleDecompressionAndTranscoding transcodes non-UTF-8 charsets and decompresses payloads.
 func (c *Client) handleDecompressionAndTranscoding(req *http.Request, resp *http.Response) *http.Response {
 	if resp == nil || resp.Body == nil {
 		return resp
@@ -522,7 +519,6 @@ func (c *Client) handleDecompressionAndTranscoding(req *http.Request, resp *http
 	return resp
 }
 
-// applyDownloadProgress attaches a progress reader wrapper to the response stream.
 func applyDownloadProgress(resp *http.Response, progress ProgressFunc) {
 	resp.Body = &io.ProgressReader{
 		Reader:     resp.Body,
@@ -531,7 +527,6 @@ func applyDownloadProgress(resp *http.Response, progress ProgressFunc) {
 	}
 }
 
-// applyContentDecompression handles decoding of br, zstd, and gzip encodings.
 func applyContentDecompression(resp *http.Response) {
 	encoding := resp.Header.Get("Content-Encoding")
 	switch encoding {
@@ -563,14 +558,12 @@ func applyContentDecompression(resp *http.Response) {
 	}
 }
 
-// resetDecompressedHeader resets HTTP headers once payload is fully decompressed.
 func resetDecompressedHeader(resp *http.Response) {
 	resp.Header.Del("Content-Encoding")
 	resp.Header.Del("Content-Length")
 	resp.ContentLength = -1
 }
 
-// applyCharsetTranscoding transcodes charsets into clean UTF-8 payloads.
 func applyCharsetTranscoding(resp *http.Response) {
 	if resp == nil || resp.Body == nil {
 		return
@@ -582,12 +575,7 @@ func applyCharsetTranscoding(resp *http.Response) {
 	}
 
 	lower := strings.ToLower(contentType)
-	// Fast-path: bypass mime.ParseMediaType map allocations if no charset parameter exists
-	if !strings.Contains(lower, "charset=") {
-		return
-	}
-
-	if isUTF8Charset(lower) {
+	if !strings.Contains(lower, "charset=") || isUTF8Charset(lower) {
 		return
 	}
 
@@ -628,7 +616,6 @@ func parseAndApplyNonUTF8Transcoder(resp *http.Response, contentType string) {
 	}
 }
 
-// executeWithProxyFailover rotates alternative proxies in the pool if the current proxy fails.
 func (c *Client) executeWithProxyFailover(
 	req *http.Request,
 	failover *ProxyFailoverConfig,
@@ -636,19 +623,12 @@ func (c *Client) executeWithProxyFailover(
 ) (*http.Response, error) {
 	parsed := parseProxyURLs(failover.Proxies)
 	if len(parsed) == 0 {
-		if hedging != nil {
-			return c.executeWithHedging(req, hedging)
-		}
-
-		return c.engine.Do(req)
+		return c.dispatchProxyAttempt(req, hedging)
 	}
 
-	var (
-		lastErr error
-		resp    *http.Response
-	)
+	var lastErr error
 
-	for i := 0; i <= failover.RetryLimit; i++ {
+	for range failover.RetryLimit + 1 {
 		proxyURL := c.selectNextProxy(parsed, lastErr != nil)
 
 		clonedReq, err := c.prepareRequestForProxy(req, proxyURL)
@@ -657,31 +637,36 @@ func (c *Client) executeWithProxyFailover(
 			continue
 		}
 
-		if hedging != nil {
-			resp, lastErr = c.executeWithHedging(clonedReq, hedging)
-		} else {
-			resp, lastErr = c.engine.Do(clonedReq)
+		resp, err := c.dispatchProxyAttempt(clonedReq, hedging)
+		if err != nil {
+			lastErr = err
+			continue
 		}
 
-		if lastErr == nil && resp != nil {
-			if resp.StatusCode != http.StatusBadGateway && resp.StatusCode != http.StatusServiceUnavailable {
-				return resp, nil
-			}
+		if resp.StatusCode != http.StatusBadGateway && resp.StatusCode != http.StatusServiceUnavailable {
+			return resp, nil
+		}
 
-			lastErr = &Error{
-				Op:  "proxy failover",
-				Err: errors.New("proxy returned status " + strconv.Itoa(resp.StatusCode)),
-			}
-			_ = resp.Body.Close()
+		_ = resp.Body.Close()
+		lastErr = &Error{
+			Op:  "proxy failover",
+			Err: errors.New("proxy returned status " + strconv.Itoa(resp.StatusCode)),
 		}
 	}
 
 	return nil, &Error{Op: "proxy failover exhausted " + strconv.Itoa(failover.RetryLimit) + " retries", Err: lastErr}
 }
 
-// parseProxyURLs parses a slice of raw proxy URL strings into structured URLs.
+func (c *Client) dispatchProxyAttempt(req *http.Request, hedging *HedgingConfig) (*http.Response, error) {
+	if hedging != nil {
+		return c.executeWithHedging(req, hedging)
+	}
+
+	return c.engine.Do(req)
+}
+
 func parseProxyURLs(proxies []string) []*url.URL {
-	var parsed []*url.URL
+	parsed := make([]*url.URL, 0, len(proxies))
 	for _, p := range proxies {
 		if u, err := url.Parse(p); err == nil {
 			parsed = append(parsed, u)
@@ -691,7 +676,6 @@ func parseProxyURLs(proxies []string) []*url.URL {
 	return parsed
 }
 
-// selectNextProxy returns the next cyclic proxy URL in the failover pool.
 func (c *Client) selectNextProxy(proxies []*url.URL, isRetry bool) *url.URL {
 	var idx uint32
 	if isRetry {
@@ -703,7 +687,6 @@ func (c *Client) selectNextProxy(proxies []*url.URL, isRetry bool) *url.URL {
 	return proxies[idx%uint32(len(proxies))] //nolint:gosec
 }
 
-// prepareRequestForProxy clones the outgoing request context and bodies to target proxy routes.
 func (c *Client) prepareRequestForProxy(req *http.Request, proxyURL *url.URL) (*http.Request, error) {
 	newReq := req
 
@@ -725,41 +708,31 @@ func (c *Client) prepareRequestForProxy(req *http.Request, proxyURL *url.URL) (*
 	return newReq, nil
 }
 
-// handleWAFChallenge intercepts response flows to solve JS/DDoS challenges on detection.
 func (c *Client) handleWAFChallenge(req *http.Request, resp *http.Response) (*http.Response, error) {
-	if c.defaults.ChallengeDetector == nil || c.defaults.ChallengeSolver == nil {
+	if c.defaults.ChallengeDetector == nil || c.defaults.ChallengeSolver == nil || resp == nil || resp.Body == nil {
 		return resp, nil
 	}
 
-	if resp != nil && resp.Body != nil {
-		bodyBytes, err := stdio.ReadAll(stdio.LimitReader(resp.Body, 100*1024))
-		if err != nil {
-			return resp, nil //nolint:nilerr
-		}
-
-		buffered := &io.ExplicitBufferedBody{
-			Prefix: bodyBytes,
-			Stream: resp.Body,
-		}
-		resp.Body = buffered
-
-		isChallenge, challengeErr := c.defaults.ChallengeDetector(resp)
-		if !isChallenge {
-			buffered.Rewind()
-			return resp, nil
-		}
-
-		_ = resp.Body.Close()
-
-		newResp, solveErr := c.defaults.ChallengeSolver.Solve(req.Context(), challengeErr, req)
-		if solveErr != nil {
-			return nil, solveErr
-		}
-
-		return newResp, nil
+	bodyBytes, err := stdio.ReadAll(stdio.LimitReader(resp.Body, 100*1024))
+	if err != nil {
+		return resp, nil //nolint:nilerr
 	}
 
-	return resp, nil
+	buffered := &io.ExplicitBufferedBody{
+		Prefix: bodyBytes,
+		Stream: resp.Body,
+	}
+	resp.Body = buffered
+
+	isChallenge, challengeErr := c.defaults.ChallengeDetector(resp)
+	if !isChallenge {
+		buffered.Rewind()
+		return resp, nil
+	}
+
+	_ = resp.Body.Close()
+
+	return c.defaults.ChallengeSolver.Solve(req.Context(), challengeErr, req)
 }
 
 func isIdempotentMethod(method string) bool {
@@ -771,13 +744,9 @@ func isIdempotentMethod(method string) bool {
 	}
 }
 
-// executeWithHedging executes attempts with static or dynamic delays.
 func (c *Client) executeWithHedging(req *http.Request, pipeHedging *HedgingConfig) (*http.Response, error) {
 	cfg := GetRequestConfig(req.Context())
 
-	// Idempotency Protection: By default, only hedge read-only
-	// idempotent HTTP methods (GET, HEAD, OPTIONS, TRACE)
-	// unless explicitly overridden by AllowNonReadOnly flag.
 	allowNonReadOnly := (cfg != nil && cfg.AllowNonReadOnlyHedging) ||
 		(pipeHedging != nil && pipeHedging.AllowNonReadOnly)
 
@@ -786,19 +755,7 @@ func (c *Client) executeWithHedging(req *http.Request, pipeHedging *HedgingConfi
 	}
 
 	requestStart := time.Now()
-
-	var delay time.Duration
-
-	switch {
-	case cfg != nil && cfg.HedgingDelayOverride != nil:
-		delay = *cfg.HedgingDelayOverride
-	case pipeHedging != nil && pipeHedging.DynamicHedging != nil:
-		delay = pipeHedging.DynamicHedging.ComputeDelay()
-	case pipeHedging != nil:
-		delay = pipeHedging.DefaultDelay
-	default:
-		delay = c.network.HedgingDelay
-	}
+	delay := c.resolveHedgingDelay(cfg, pipeHedging)
 
 	var (
 		resp *http.Response
@@ -811,22 +768,39 @@ func (c *Client) executeWithHedging(req *http.Request, pipeHedging *HedgingConfi
 		resp, err = c.engine.Do(req)
 	}
 
-	var tracker *telemetry.RTTTracker
-	if pipeHedging != nil && pipeHedging.DynamicHedging != nil {
-		tracker = pipeHedging.DynamicHedging.Tracker
-	} else if c.network.DynamicHedging != nil {
-		tracker = c.network.DynamicHedging.Tracker
-	}
-
+	tracker := c.resolveRTTTracker(pipeHedging)
 	if tracker != nil && err == nil {
-		rtt := time.Since(requestStart)
-		tracker.Record(rtt)
+		tracker.Record(time.Since(requestStart))
 	}
 
 	return resp, err
 }
 
-// dispatchHedgingAttempts coordinates primary and secondary hedging attempt threads.
+func (c *Client) resolveHedgingDelay(cfg *RequestConfig, pipeHedging *HedgingConfig) time.Duration {
+	switch {
+	case cfg != nil && cfg.HedgingDelayOverride != nil:
+		return *cfg.HedgingDelayOverride
+	case pipeHedging != nil && pipeHedging.DynamicHedging != nil:
+		return pipeHedging.DynamicHedging.ComputeDelay()
+	case pipeHedging != nil:
+		return pipeHedging.DefaultDelay
+	default:
+		return c.network.HedgingDelay
+	}
+}
+
+func (c *Client) resolveRTTTracker(pipeHedging *HedgingConfig) *telemetry.RTTTracker {
+	if pipeHedging != nil && pipeHedging.DynamicHedging != nil {
+		return pipeHedging.DynamicHedging.Tracker
+	}
+
+	if c.network.DynamicHedging != nil {
+		return c.network.DynamicHedging.Tracker
+	}
+
+	return nil
+}
+
 func (c *Client) dispatchHedgingAttempts(req *http.Request, delay time.Duration) (*http.Response, error) {
 	resultsCh := make(chan hedgeResult, 2)
 
@@ -888,7 +862,6 @@ type hedgeResult struct {
 	err  error
 }
 
-// handleHedgeWinner shuts down alternative hedge routines once a winning connection is achieved.
 func (c *Client) handleHedgeWinner(
 	res hedgeResult,
 	ctx2 context.Context,
@@ -913,7 +886,6 @@ func (c *Client) handleHedgeWinner(
 	return res.resp
 }
 
-// launchHedgeAttempt schedules a single request hedging attempt in the background.
 func (c *Client) launchHedgeAttempt(ctx context.Context, req *http.Request, resultsCh chan<- hedgeResult) {
 	cloned, err := c.cloneRequest(req, ctx)
 	if err != nil {
@@ -927,7 +899,6 @@ func (c *Client) launchHedgeAttempt(ctx context.Context, req *http.Request, resu
 	}()
 }
 
-// buildHedgeContext generates cancelable context pairs for request hedging attempts.
 func (c *Client) buildHedgeContext(
 	req *http.Request,
 ) (context.Context, context.Context, context.CancelFunc, context.CancelFunc, func(winner int)) {
@@ -964,7 +935,6 @@ func (c *Client) buildHedgeContext(
 	return ctx1, ctx2, cancel1, cancel2, cleanup
 }
 
-// cloneRequest creates deep-copied request structures used during request hedging.
 func (c *Client) cloneRequest(orig *http.Request, reqCtx context.Context) (*http.Request, error) {
 	cloned := orig.Clone(reqCtx)
 	if orig.Body == nil || orig.Body == http.NoBody {
@@ -972,7 +942,7 @@ func (c *Client) cloneRequest(orig *http.Request, reqCtx context.Context) (*http
 	}
 
 	if orig.GetBody == nil {
-		return nil, errors.New("aoni: request body cannot be duplicated for hedging")
+		return nil, ErrHedgingBodyNonRepeatable
 	}
 
 	body, err := orig.GetBody()
@@ -985,7 +955,6 @@ func (c *Client) cloneRequest(orig *http.Request, reqCtx context.Context) (*http
 	return cloned, nil
 }
 
-// finalizeJA4Report maps compiled JA4 reports back to the trace metrics structures.
 func (c *Client) finalizeJA4Report(cfg *RequestConfig) {
 	if cfg == nil || cfg.JA4ReportStore == nil || cfg.JA4ReportStore.Report == nil {
 		return
@@ -1001,7 +970,6 @@ func (c *Client) finalizeJA4Report(cfg *RequestConfig) {
 	store.Target.JA4.ALPN = store.Report.ALPN
 }
 
-// resolvePipeline extracts and resolves active pipeline configs.
 func (c *Client) resolvePipeline(req *http.Request) PipelineConfig {
 	if reqPipe, ok := GetPipeline(req.Context()); ok {
 		return reqPipe
@@ -1030,7 +998,6 @@ func (c *Client) resolvePipeline(req *http.Request) PipelineConfig {
 	return pipe
 }
 
-// determineProxy evaluates proxy resolutions priorities.
 func (c *Client) determineProxy(req *http.Request) (*url.URL, error) {
 	if raw, ok := GetProxyOverride(req.Context()).Value(); ok && raw != "" {
 		return url.Parse(raw)
@@ -1043,7 +1010,6 @@ func (c *Client) determineProxy(req *http.Request) (*url.URL, error) {
 	return http.ProxyFromEnvironment(req)
 }
 
-// applyMSSLimit sets the TCP Maximum Segment Size (MSS) socket option on the connection.
 func applyMSSLimit(conn net.Conn, mss int) net.Conn {
 	if mss <= 0 {
 		return conn
@@ -1063,7 +1029,6 @@ func applyMSSLimit(conn net.Conn, mss int) net.Conn {
 	return conn
 }
 
-// applyFragmentation wraps a connection with TCP packet fragmentation.
 func applyFragmentation(conn net.Conn, cfg FragmentConfig) net.Conn {
 	return &fragment.FragmentedConn{
 		Conn:      conn,
@@ -1072,7 +1037,6 @@ func applyFragmentation(conn net.Conn, cfg FragmentConfig) net.Conn {
 	}
 }
 
-// isCrossOrigin reports whether the target URL belongs to a different origin.
 func isCrossOrigin(u1, u2 *url.URL) bool {
 	return u1.Scheme != u2.Scheme || u1.Host != u2.Host
 }

@@ -1,6 +1,6 @@
 // Copyright (c) 2026 Lemon4ksan All rights reserved.
 // Use of this source code is governed by a BSD-style
-// license can be found in the LICENSE file.
+// license that can be found in the LICENSE file.
 
 // Package bytesconv provides zero-allocation byte slice and string manipulation utilities.
 package bytesconv
@@ -26,9 +26,10 @@ var toLowerTable = [256]byte{
 	0xf0, 0xf1, 0xf2, 0xf3, 0xf4, 0xf5, 0xf6, 0xf7, 0xf8, 0xf9, 0xfa, 0xfb, 0xfc, 0xfd, 0xfe, 0xff,
 }
 
-// B2S converts a byte slice to a string without heap allocations.
+// B2S converts a byte slice to a string without heap allocations using [unsafe.StringData].
 //
-// The backing array of b MUST NOT be mutated while the string is referenced.
+// Preconditions:
+//   - The backing array of b MUST NOT be mutated while the returned string is referenced.
 func B2S(b []byte) string {
 	if len(b) == 0 {
 		return ""
@@ -37,9 +38,10 @@ func B2S(b []byte) string {
 	return unsafe.String(unsafe.SliceData(b), len(b))
 }
 
-// S2B converts a string to a byte slice without heap allocations.
+// S2B converts a string to a byte slice without heap allocations using [unsafe.StringData].
 //
-// The returned byte slice MUST NOT be written to or mutated.
+// Preconditions:
+//   - The returned byte slice MUST NOT be written to or mutated.
 func S2B(s string) []byte {
 	if len(s) == 0 {
 		return nil
@@ -48,7 +50,7 @@ func S2B(s string) []byte {
 	return unsafe.Slice(unsafe.StringData(s), len(s))
 }
 
-// LowercaseByte converts an ASCII character b to lowercase in O(1) time without branching.
+// LowercaseByte converts an ASCII byte character b to lowercase in O(1) time without branching.
 func LowercaseByte(b byte) byte {
 	return toLowerTable[b]
 }

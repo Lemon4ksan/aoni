@@ -2,7 +2,7 @@
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
-// Package stream provides utilities for reading and writing connection streams.
+// Package stream provides utilities for consuming real-time HTTP response streams (SSE, NDJSON, Chunked, gRPC-Web).
 package stream
 
 import (
@@ -31,14 +31,18 @@ import (
 	"github.com/lemon4ksan/aoni/request"
 )
 
-// Stream wraps an [http.Response] and manages connection reading streams.
-// Callers are responsible for calling [Stream.Close] after read operations complete.
+// ErrTargetNotProtoMessage is returned when a target output variable does not implement [proto.Message].
+var ErrTargetNotProtoMessage = errors.New("aoni stream: target type does not implement proto.Message")
+
+// Stream wraps an [*http.Response] and manages live connection response stream reads.
 type Stream struct {
 	resp *http.Response
 }
 
-// Get executes a GET request and returns the resulting connection body as [Stream].
-// Callers must ensure the returned stream is closed when done.
+// Get performs a GET request through r and yields the live response stream as a [Stream].
+//
+// Postconditions:
+//   - Callers must close the returned [Stream] via [Stream.Close] when reading is complete.
 func Get(
 	ctx context.Context,
 	r request.Requester,
@@ -58,7 +62,7 @@ func Get(
 	return &Stream{resp: resp}, nil
 }
 
-// WithBody executes an HTTP request with the provided body and returns a raw [Stream].
+// WithBody performs an HTTP request with body payload and yields the response stream as a [Stream].
 func WithBody(
 	ctx context.Context,
 	r request.Requester,
@@ -79,7 +83,7 @@ func WithBody(
 	return &Stream{resp: resp}, nil
 }
 
-// Read reads connection body data into p.
+// Read reads stream data into p.
 func (s *Stream) Read(p []byte) (n int, err error) {
 	return s.resp.Body.Read(p)
 }
@@ -89,29 +93,27 @@ func (s *Stream) Close() error {
 	return s.resp.Body.Close()
 }
 
-// ContentLength returns the response body content length, or -1 if unknown.
+// ContentLength returns response body content length, or -1 if unknown.
 func (s *Stream) ContentLength() int64 {
 	return s.resp.ContentLength
 }
 
-// ContentType returns the Content-Type header field value.
+// ContentType returns Content-Type response header value.
 func (s *Stream) ContentType() string {
 	return s.resp.Header.Get("Content-Type")
 }
 
-// StatusCode returns the HTTP status code of the response.
+// StatusCode returns HTTP status code.
 func (s *Stream) StatusCode() int {
 	return s.resp.StatusCode
 }
 
-// Response returns the underlying raw [http.Response] structure.
+// Response returns the underlying raw [*http.Response].
 func (s *Stream) Response() *http.Response {
 	return s.resp
 }
 
-// GetNDJSON reads a newline-delimited JSON stream from the [Stream] body.
-// It parses values concurrently in a background goroutine and pushes them to the returned channel.
-// It automatically closes channels and connection streams when done or on context cancellation.
+// GetNDJSON reads a newline-delimited JSON stream from resp, pushing decoded values to the returned channel.
 func GetNDJSON[T any](ctx context.Context, resp *Stream) (<-chan T, <-chan error) {
 	out := make(chan T)
 	errs := make(chan error, 1)
@@ -152,15 +154,11 @@ func GetNDJSON[T any](ctx context.Context, resp *Stream) (<-chan T, <-chan error
 	return out, errs
 }
 
-// SSEEvent holds the parsed fields of a Server-Sent Event.
+// SSEEvent represents parsed fields of a Server-Sent Event frame.
 type SSEEvent struct {
-	// Event is the event identifier string.
 	Event string
-	// Data is the data payload buffer string.
-	Data string
-	// ID is the unique event tracking ID.
-	ID string
-	// Retry is the reconnection timeout value in milliseconds.
+	Data  string
+	ID    string
 	Retry int
 }
 
@@ -184,9 +182,10 @@ func parseSSELine(line string, currentEvent *SSEEvent) {
 	case "data":
 		if currentEvent.Data != "" {
 			currentEvent.Data += "\n" + value
-		} else {
-			currentEvent.Data = value
+			return
 		}
+
+		currentEvent.Data = value
 
 	case "id":
 		currentEvent.ID = value
@@ -221,7 +220,7 @@ func dispatchSSEEvent[T any](ctx context.Context, currentEvent SSEEvent, out cha
 	}
 }
 
-// ParseSSE parses a Server-Sent Event stream and returns a channel of parsed events and an error channel.
+// ParseSSE parses an incoming Server-Sent Event stream from resp.
 func ParseSSE[T any](ctx context.Context, resp *Stream) (<-chan T, <-chan error) {
 	out := make(chan T, 100)
 	errs := make(chan error, 1)
@@ -271,17 +270,13 @@ func ParseSSE[T any](ctx context.Context, resp *Stream) (<-chan T, <-chan error)
 	return out, errs
 }
 
-// SSEReconnectOptions configures automatic stream reconnection behavior for SSE streams.
+// SSEReconnectOptions configures automatic stream reconnection parameters for Server-Sent Events.
 type SSEReconnectOptions struct {
-	// MaxReconnects specifies the maximum number of reconnection attempts after network drops (0 = infinite reconnects).
 	MaxReconnects int
-	// DefaultRetry specifies the initial delay before attempting to reconnect (default 3 seconds).
-	DefaultRetry time.Duration
+	DefaultRetry  time.Duration
 }
 
-// ResumableSSE opens a Server-Sent Event stream that automatically reconnects on network drops.
-// On reconnection, it sends the WHATWG standard Last-Event-ID header containing the last seen event ID
-// and respects any server-sent 'retry: <ms>' directives.
+// ResumableSSE opens an auto-reconnecting Server-Sent Event stream sending standard Last-Event-ID headers on recovery.
 func ResumableSSE[T any](
 	ctx context.Context,
 	c request.Requester,
@@ -312,12 +307,12 @@ func ResumableSSE[T any](
 			}
 
 			reqMods := make([]aoni.RequestModifier, 0, len(mods)+4)
-
 			reqMods = append(reqMods,
 				mod.WithHeader("Accept", "text/event-stream"),
 				mod.WithHeader("Cache-Control", "no-cache"),
 				mod.WithHeader("Connection", "keep-alive"),
 			)
+
 			if lastEventID != "" {
 				reqMods = append(reqMods, mod.WithHeader("Last-Event-ID", lastEventID))
 			}
@@ -410,20 +405,18 @@ func sleepOrCancel(ctx context.Context, delay time.Duration, errs chan<- error) 
 	}
 }
 
-// SSE parses incoming Server-Sent Events from the [Stream] body.
-// It executes a background parsing loop and closes returned channels when done.
+// SSE opens a Server-Sent Event stream on path and returns event channels.
 func SSE[T any](
 	ctx context.Context,
 	c request.Requester,
 	path string,
 	mods ...aoni.RequestModifier,
 ) (<-chan T, <-chan error, error) {
-	sseMods := []aoni.RequestModifier{ //nolint:prealloc
+	mods = append([]aoni.RequestModifier{
 		mod.WithHeader("Accept", "text/event-stream"),
 		mod.WithHeader("Cache-Control", "no-cache"),
 		mod.WithHeader("Connection", "keep-alive"),
-	}
-	mods = append(sseMods, mods...)
+	}, mods...)
 
 	resp, err := Get(ctx, c, path, mods...)
 	if err != nil {
@@ -435,7 +428,7 @@ func SSE[T any](
 	return out, errs, nil
 }
 
-// Chunks reads raw data from the stream using a 1MB buffer and yields chunks as strings.
+// Chunks reads raw data from resp in 32KB chunks and pushes strings to a channel.
 func Chunks(ctx context.Context, resp *Stream) (<-chan string, <-chan error) {
 	out := make(chan string, 100)
 	errs := make(chan error, 1)
@@ -480,8 +473,7 @@ func Chunks(ctx context.Context, resp *Stream) (<-chan string, <-chan error) {
 	return out, errs
 }
 
-// ParseGRPCWebStream reads a gRPC-Web response stream and yields decoded Protobuf messages to a channel.
-// ParseGRPCWebStream reads a gRPC-Web response stream and yields decoded Protobuf messages to a channel.
+// ParseGRPCWebStream reads a gRPC-Web response stream and pushes decoded [proto.Message] instances to a channel.
 func ParseGRPCWebStream[T any](ctx context.Context, resp *Stream) (<-chan T, <-chan error) {
 	out := make(chan T, 100)
 	errs := make(chan error, 1)
@@ -499,59 +491,71 @@ func ParseGRPCWebStream[T any](ctx context.Context, resp *Stream) (<-chan T, <-c
 			reader = base64.NewDecoder(base64.StdEncoding, br)
 		}
 
-		var header [5]byte
-
 		for {
 			select {
 			case <-ctx.Done():
 				errs <- ctx.Err()
 				return
 			default:
-			}
-
-			if _, err := io.ReadFull(reader, header[:]); err != nil {
-				if errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF) {
+				val, done, err := readNextGRPCWebFrame[T](reader)
+				if err != nil {
+					errs <- err
 					return
 				}
 
-				errs <- err
-
-				return
-			}
-
-			flags := header[0]
-			length := binary.BigEndian.Uint32(header[1:5])
-
-			payload := make([]byte, length)
-			if _, err := io.ReadFull(reader, payload); err != nil {
-				errs <- err
-				return
-			}
-
-			if flags&0x80 != 0 {
-				if err := decode.VerifyGRPCTrailer(payload); err != nil {
-					errs <- err
+				if done {
+					return
 				}
 
-				return
-			}
-
-			val, err := decodeProtoPayload[T](payload, flags)
-			if err != nil {
-				errs <- err
-				return
-			}
-
-			select {
-			case <-ctx.Done():
-				errs <- ctx.Err()
-				return
-			case out <- val:
+				select {
+				case <-ctx.Done():
+					errs <- ctx.Err()
+					return
+				case out <- val:
+				}
 			}
 		}
 	}()
 
 	return out, errs
+}
+
+func readNextGRPCWebFrame[T any](reader io.Reader) (val T, done bool, err error) {
+	var (
+		zero   T
+		header [5]byte
+	)
+
+	if _, err := io.ReadFull(reader, header[:]); err != nil {
+		if errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF) {
+			return zero, true, nil
+		}
+
+		return zero, false, err
+	}
+
+	flags := header[0]
+	length := binary.BigEndian.Uint32(header[1:5])
+
+	payload := make([]byte, length)
+	if _, err := io.ReadFull(reader, payload); err != nil {
+		return zero, false, err
+	}
+
+	if flags&0x80 != 0 {
+		if err := decode.VerifyGRPCTrailer(payload); err != nil {
+			return zero, false, err
+		}
+
+		return zero, true, nil
+	}
+
+	val, err = decodeProtoPayload[T](payload, flags)
+	if err != nil {
+		return zero, false, err
+	}
+
+	return val, false, nil
 }
 
 func decodeProtoPayload[T any](payload []byte, flags byte) (T, error) {
@@ -608,5 +612,5 @@ func resolveProtoTargetInstance(targetPtr any) (proto.Message, error) {
 		}
 	}
 
-	return nil, fmt.Errorf("target type %T does not implement proto.Message", targetPtr)
+	return nil, ErrTargetNotProtoMessage
 }

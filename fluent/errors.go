@@ -10,14 +10,14 @@ import (
 )
 
 var (
-	// ErrDownloadFailed is returned when a stream download request yields an HTTP status code indicating an error (>= 400).
+	// ErrDownloadFailed is returned when a stream download request yields an HTTP status code >= 400.
 	ErrDownloadFailed = errors.New("aoni fluent: download HTTP status error")
 
-	// ErrUnexpectedStatus is returned when response status code does not match expected status criteria.
+	// ErrUnexpectedStatus is returned when response status code violates [Request.ExpectStatus] criteria.
 	ErrUnexpectedStatus = errors.New("aoni fluent: response status code mismatch")
 )
 
-// Error is returned when a request fails.
+// Error describes an operational failure occurring during request building or execution.
 type Error struct {
 	Op   string
 	Path string

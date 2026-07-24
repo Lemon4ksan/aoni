@@ -30,13 +30,13 @@ import (
 	"github.com/lemon4ksan/aoni/telemetry"
 )
 
-// TypedRequestPool provides a zero-boxing free list for *Request instances.
+// TypedRequestPool provides a zero-boxing free-list pool for [Request] instances.
 type TypedRequestPool struct {
 	mu    sync.Mutex
 	items []*Request
 }
 
-// Get retrieves a pooled *Request instance bound to the given client.
+// Get retrieves a pooled [Request] instance bound to client.
 func (p *TypedRequestPool) Get(client *aoni.Client) *Request {
 	p.mu.Lock()
 
@@ -58,10 +58,11 @@ func (p *TypedRequestPool) Get(client *aoni.Client) *Request {
 	}
 }
 
-// Put returns a request to the pool for reuse.
+// Put recycles a [Request] instance back to the free-list pool after resetting fields.
 func (p *TypedRequestPool) Put(r *Request) {
 	r.Reset()
 	p.mu.Lock()
+
 	if len(p.items) < 1024 {
 		p.items = append(p.items, r)
 	}
@@ -73,7 +74,7 @@ var requestPool = &TypedRequestPool{
 	items: make([]*Request, 0, 128),
 }
 
-// Request is a thread-safe pooled request builder offering a fluent chainable API.
+// Request is a pooled request builder offering a chainable, fluent configuration API.
 type Request struct {
 	ctx              context.Context
 	body             any
@@ -120,7 +121,7 @@ type digestAuth struct {
 	password string
 }
 
-// Reset clears all request fields to prepare the instance for sync.Pool recycling.
+// Reset clears all request fields to prepare the instance for pool recycling.
 func (r *Request) Reset() {
 	r.client = nil
 	r.ctx = nil
@@ -149,29 +150,14 @@ func (r *Request) Reset() {
 	r.useProtoDecoder = false
 	r.useGRPCWebDecoder = false
 
-	for k := range r.headers {
-		delete(r.headers, k)
-	}
-
-	for k := range r.queryParams {
-		delete(r.queryParams, k)
-	}
-
-	for k := range r.pathParams {
-		delete(r.pathParams, k)
-	}
-
-	for k := range r.formFields {
-		delete(r.formFields, k)
-	}
-
-	for k := range r.formFiles {
-		delete(r.formFiles, k)
-	}
+	clear(r.headers)
+	clear(r.queryParams)
+	clear(r.pathParams)
+	clear(r.formFields)
+	clear(r.formFiles)
 }
 
-// Release resets the request and returns it to the internal pool.
-// Use this if a constructed request is abandoned before execution.
+// Release resets the request builder and returns it to the free-list pool.
 func (r *Request) Release() {
 	if r == nil {
 		return
@@ -181,18 +167,18 @@ func (r *Request) Release() {
 	requestPool.Put(r)
 }
 
-// Discard is a convenience alias for Release.
+// Discard is an alias for [Request.Release].
 func (r *Request) Discard() {
 	r.Release()
 }
 
-// SetContext associates a context.Context with the request execution.
+// SetContext associates execution context with the request.
 func (r *Request) SetContext(ctx context.Context) *Request {
 	r.ctx = ctx
 	return r
 }
 
-// SetHeader sets a single HTTP request header.
+// SetHeader sets an HTTP header key-value pair.
 func (r *Request) SetHeader(header, value string) *Request {
 	if r.headers == nil {
 		r.headers = make(http.Header, 4)
@@ -240,13 +226,13 @@ func (r *Request) SetQueryParams(params map[string]string) *Request {
 	return r
 }
 
-// ExpectStatus asserts that response status code matches one of the expected HTTP status codes.
+// ExpectStatus asserts that the response status code matches one of the expected HTTP status codes.
 func (r *Request) ExpectStatus(codes ...int) *Request {
 	r.expectedStatuses = append(r.expectedStatuses, codes...)
 	return r
 }
 
-// SetFormField adds a key-value form field for multipart/form-data requests.
+// SetFormField adds a form key-value field for multipart/form-data requests.
 func (r *Request) SetFormField(key, value string) *Request {
 	if r.formFields == nil {
 		r.formFields = make(map[string]string, 4)
@@ -268,13 +254,13 @@ func (r *Request) SetFormFile(fieldname string, reader stdio.Reader) *Request {
 	return r
 }
 
-// SetProxy routes this specific request through a custom proxy URL.
+// SetProxy routes this request through a target proxy URL.
 func (r *Request) SetProxy(proxyURL string) *Request {
 	r.proxyOverride = proxyURL
 	return r
 }
 
-// SetRetry configures custom retry parameters for this request execution.
+// SetRetry configures custom retry parameters for this request attempt.
 func (r *Request) SetRetry(maxAttempts int, backoff time.Duration) *Request {
 	r.retryOverride = &aoni.RetryOverride{
 		MaxAttempts: maxAttempts,
@@ -285,7 +271,7 @@ func (r *Request) SetRetry(maxAttempts int, backoff time.Duration) *Request {
 	return r
 }
 
-// WithCodec applies both request body encoding and response decoding strategies defined by codec.
+// WithCodec applies request encoding and response decoding strategies defined by codec.
 func (r *Request) WithCodec(c codec.Codec, body any) *Request {
 	if c == nil {
 		return r
@@ -302,13 +288,13 @@ func (r *Request) WithCodec(c codec.Codec, body any) *Request {
 	return r
 }
 
-// SetQueryStruct sets a struct to be marshalled into query parameters using aoni schema caching.
+// SetQueryStruct assigns a structure to be marshaled into query parameters.
 func (r *Request) SetQueryStruct(v any) *Request {
 	r.queryStruct = v
 	return r
 }
 
-// SetPathParam sets a URL path parameter to be interpolated (e.g. /users/{id}).
+// SetPathParam sets a URL path template parameter (e.g. /users/{id}).
 func (r *Request) SetPathParam(param, value string) *Request {
 	if r.pathParams == nil {
 		r.pathParams = make(map[string]string, 4)
@@ -330,7 +316,7 @@ func (r *Request) SetPathParams(params map[string]string) *Request {
 	return r
 }
 
-// SetBearerToken injects an "Authorization: Bearer <token>" header.
+// SetBearerToken sets an "Authorization: Bearer <token>" header.
 func (r *Request) SetBearerToken(token string) *Request {
 	r.bearerToken = token
 	return r
@@ -348,127 +334,131 @@ func (r *Request) SetDigestAuth(username, password string) *Request {
 	return r
 }
 
-// SetOutputFromHeader instructs the request to stream the downloaded file to targetDir
-// using a sanitized, Path Traversal-safe filename extracted from Content-Disposition header.
+// SetOutputFromHeader instructs the request to stream the downloaded file to targetDir using Content-Disposition filenames.
 func (r *Request) SetOutputFromHeader(targetDir string) *Request {
 	r.outputDirectory = targetDir
 	return r
 }
 
-// SetBody sets the payload body to be serialized into the request as JSON or raw stream.
+// SetBody sets the payload body to be serialized into the request.
 func (r *Request) SetBody(body any) *Request {
 	r.body = body
 	return r
 }
 
-// SetProtoBody serializes a Protocol Buffer message into the binary request payload.
+// SetProtoBody serializes a [proto.Message] into binary request bytes.
 func (r *Request) SetProtoBody(msg proto.Message) *Request {
 	r.protoBody = msg
 	return r
 }
 
-// SetGRPCWebBody serializes a Protocol Buffer message into a gRPC-Web framed request payload.
+// SetGRPCWebBody serializes a [proto.Message] into a gRPC-Web framed request payload.
 func (r *Request) SetGRPCWebBody(msg proto.Message) *Request {
 	r.grpcWebBody = msg
 	return r
 }
 
-// SetResult sets the target struct pointer into which a 2xx response body is decoded.
+// SetResult sets the target structure pointer for unmarshaling 2xx response bodies.
 func (r *Request) SetResult(result any) *Request {
 	r.result = result
 	return r
 }
 
-// SetProtoResult configures the response target to be decoded via ProtoDecoder.
+// SetProtoResult configures response target unmarshaling via [decode.ProtoDecoder].
 func (r *Request) SetProtoResult(result any) *Request {
 	r.result = result
 	r.useProtoDecoder = true
+
 	return r
 }
 
-// SetGRPCWebResult configures the response target to be decoded via GRPCWebDecoder.
+// SetGRPCWebResult configures response target unmarshaling via [decode.GRPCWebDecoder].
 func (r *Request) SetGRPCWebResult(result any) *Request {
 	r.result = result
 	r.useGRPCWebDecoder = true
+
 	return r
 }
 
-// SetError sets the target struct pointer into which non-2xx response bodies are decoded.
+// SetError sets the target structure pointer for non-2xx response unmarshaling.
 func (r *Request) SetError(errResult any) *Request {
 	r.resultError = errResult
 	return r
 }
 
-// SetOutput sets the local file path to stream and save the response body directly to disk.
+// SetOutput sets the local disk file path to stream and save the response payload directly.
 func (r *Request) SetOutput(filePath string) *Request {
 	r.outputFile = filePath
 	return r
 }
 
-// SetSaveFileName is an alias for SetOutput.
+// SetSaveFileName is an alias for [Request.SetOutput].
 func (r *Request) SetSaveFileName(filePath string) *Request {
 	return r.SetOutput(filePath)
 }
 
-// SetDownloadProgress registers a callback function to monitor download progress in real-time.
+// SetDownloadProgress registers an [aoni.ProgressFunc] callback monitoring response stream reads.
 func (r *Request) SetDownloadProgress(progress aoni.ProgressFunc) *Request {
 	r.downloadProgress = progress
 	return r
 }
 
-// SetUploadProgress registers a callback function to monitor request payload upload progress.
+// SetUploadProgress registers an [aoni.ProgressFunc] callback monitoring request body uploads.
 func (r *Request) SetUploadProgress(progress aoni.ProgressFunc) *Request {
 	r.uploadProgress = progress
 	return r
 }
 
-// SetTrace associates a TraceInfo container to capture detailed network timings and TLS details.
+// SetTrace associates a [telemetry.TraceInfo] container to capture fine-grained network timings.
 func (r *Request) SetTrace(info *telemetry.TraceInfo) *Request {
 	r.traceInfo = info
 	return r
 }
 
-// SetCorrelationID sets an end-to-end tracing Correlation ID for the request.
+// SetCorrelationID assigns an end-to-end tracing Correlation ID to the request.
 func (r *Request) SetCorrelationID(id string) *Request {
 	r.correlationID = id
 	return r
 }
 
-// SetForceContentType forces automatic response decoding using the specified MIME type.
+// SetForceContentType forces response parsing using the specified MIME type.
 func (r *Request) SetForceContentType(mime string) *Request {
 	r.forceContentType = mime
 	return r
 }
 
-// SetForceJSON forces automatic response decoding as JSON even if Content-Type header is missing or text/plain.
+// SetForceJSON forces response parsing as JSON regardless of Content-Type headers.
 func (r *Request) SetForceJSON() *Request {
 	return r.SetForceContentType("application/json")
 }
 
-// SetLabel attaches a human-readable metric/route label for observability.
+// SetLabel attaches a human-readable metric or route label.
 func (r *Request) SetLabel(label string) *Request {
 	r.label = label
 	return r
 }
 
-// Apply injects reusable RequestModifier functions into the request builder.
+// Apply injects custom [aoni.RequestModifier] options into the builder chain.
 func (r *Request) Apply(mods ...aoni.RequestModifier) *Request {
 	r.appliedMods = append(r.appliedMods, mods...)
 	return r
 }
 
-// SetTimeout sets a per-request execution deadline timeout.
+// SetTimeout sets a per-request context deadline timeout.
 func (r *Request) SetTimeout(timeout time.Duration) *Request {
 	r.timeout = timeout
 	return r
 }
 
-// Download is a convenience method to execute a GET request and stream the response directly to filePath.
+// Download is a convenience method executing a GET request and streaming response bytes to filePath.
 func (r *Request) Download(url, filePath string) (*http.Response, error) {
 	return r.SetOutput(filePath).Get(url)
 }
 
-// Execute compiles the request builder into RequestModifiers and executes the HTTP request.
+// Execute compiles builder configurations into modifiers and executes the request.
+//
+// Postconditions:
+//   - Automatically releases the request instance back to the pool upon completion.
 func (r *Request) Execute(method, path string) (*http.Response, error) {
 	client := r.client
 	resultTarget := r.result
@@ -536,7 +526,8 @@ func (r *Request) checkExpectedStatus(resp *http.Response, finalPath string) err
 }
 
 func (r *Request) buildModifiers() []aoni.RequestModifier {
-	var mods []aoni.RequestModifier
+	estimatedCap := len(r.headers) + len(r.appliedMods) + 12
+	mods := make([]aoni.RequestModifier, 0, estimatedCap)
 
 	if len(r.headers) > 0 {
 		for k, v := range r.headers {
@@ -653,21 +644,27 @@ func (r *Request) executeDownload(
 		outputFile = filepath.Join(r.outputDirectory, filename)
 	}
 
-	if err := os.MkdirAll(filepath.Dir(outputFile), 0o755); err != nil { //nolint:gosec
-		return resp, &Error{Op: "download", Path: outputFile, Err: err}
-	}
-
-	outFile, err := os.Create(outputFile)
-	if err != nil {
-		return resp, &Error{Op: "download", Path: outputFile, Err: err}
-	}
-	defer outFile.Close()
-
-	if _, err = io.CopyZeroAlloc(outFile, resp.Body); err != nil {
+	if err := saveStreamToFile(outputFile, resp.Body); err != nil {
 		return resp, &Error{Op: "download", Path: outputFile, Err: err}
 	}
 
 	return resp, nil
+}
+
+func saveStreamToFile(outputFile string, body stdio.Reader) error {
+	if err := os.MkdirAll(filepath.Dir(outputFile), 0o755); err != nil { //nolint:gosec
+		return err
+	}
+
+	outFile, err := os.Create(outputFile)
+	if err != nil {
+		return err
+	}
+	defer outFile.Close()
+
+	_, err = io.CopyZeroAlloc(outFile, body)
+
+	return err
 }
 
 // Get executes a GET request against path.

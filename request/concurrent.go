@@ -11,28 +11,23 @@ import (
 	"github.com/lemon4ksan/aoni"
 )
 
-// ConcurrentResult holds the outcome of a single request in a concurrent fan-out.
+// ConcurrentResult encapsulates the execution outcome of a single request within a concurrent fan-out operation.
 type ConcurrentResult[Resp any] struct {
-	// Index is the position of this result in the original input slice.
+	// Index represents the position of this result in the original input path slice.
 	Index int
-	// Value is the decoded response payload. It is nil when Err is non-nil.
+
+	// Value points to the unmarshaled response structure. It is nil when Err is non-nil.
 	Value *Resp
-	// Err is any error returned by the request. It is nil on success.
+
+	// Err holds any execution error encountered. It is nil on success.
 	Err error
 }
 
-// Concurrent executes fn for each path in paths concurrently using the provided
-// Requester, collecting results preserving the original order of paths.
-// The results slice always has the same length as paths.
-// Each request inherits the parent context; individual cancellations do not
-// affect sibling requests.
+// Concurrent executes fn concurrently across paths using the provided [Requester], preserving original slice order.
 //
-// Example: fan-out GET requests.
-//
-//	results := Concurrent(ctx, client, paths,
-//	    func(ctx context.Context, c Requester, path string) (*MyType, error) {
-//	        return GetTo[MyType](ctx, c, path)
-//	    })
+// Postconditions:
+//   - The length of the returned results slice matches paths.
+//   - Context cancellation on individual requests does not abort sibling operations.
 func Concurrent[Resp any](
 	ctx context.Context,
 	c Requester,
@@ -45,12 +40,12 @@ func Concurrent[Resp any](
 	wg.Add(len(paths))
 
 	for i, path := range paths {
-		go func() {
+		go func(idx int, targetPath string) {
 			defer wg.Done()
 
-			val, err := fn(ctx, c, path)
-			results[i] = ConcurrentResult[Resp]{Index: i, Value: val, Err: err}
-		}()
+			val, err := fn(ctx, c, targetPath)
+			results[idx] = ConcurrentResult[Resp]{Index: idx, Value: val, Err: err}
+		}(i, path)
 	}
 
 	wg.Wait()
@@ -58,9 +53,7 @@ func Concurrent[Resp any](
 	return results
 }
 
-// ConcurrentWithMods is like [Concurrent] but passes per-request modifiers
-// alongside each path. The mods slice must have the same length as paths,
-// or be nil/empty in which case no per-request modifiers are applied.
+// ConcurrentWithMods is like [Concurrent], but applies per-request [aoni.RequestModifier] slices matching each path.
 func ConcurrentWithMods[Resp any](
 	ctx context.Context,
 	c Requester,
@@ -79,12 +72,12 @@ func ConcurrentWithMods[Resp any](
 			reqMods = mods[i]
 		}
 
-		go func() {
+		go func(idx int, targetPath string, targetMods []aoni.RequestModifier) {
 			defer wg.Done()
 
-			val, err := fn(ctx, c, path, reqMods...)
-			results[i] = ConcurrentResult[Resp]{Index: i, Value: val, Err: err}
-		}()
+			val, err := fn(ctx, c, targetPath, targetMods...)
+			results[idx] = ConcurrentResult[Resp]{Index: idx, Value: val, Err: err}
+		}(i, path, reqMods)
 	}
 
 	wg.Wait()

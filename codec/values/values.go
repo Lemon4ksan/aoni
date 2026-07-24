@@ -1,6 +1,6 @@
 // Copyright (c) 2026 Lemon4ksan All rights reserved.
 // Use of this source code is governed by a BSD-style
-// license can be found in the LICENSE file.
+// license that can be found in the LICENSE file.
 
 package values
 
@@ -24,7 +24,7 @@ import (
 // Uint64String parses uint64 values from numeric or quoted string JSON payloads.
 type Uint64String uint64
 
-// UnmarshalJSON parses JSON byte data into Uint64String.
+// UnmarshalJSON parses JSON byte data into [Uint64String].
 func (u *Uint64String) UnmarshalJSON(b []byte) error {
 	s := bytesconv.B2S(bytesconv.TrimQuotes(b))
 	if len(s) == 0 || s == "null" {
@@ -42,7 +42,7 @@ func (u *Uint64String) UnmarshalJSON(b []byte) error {
 	return nil
 }
 
-// MarshalJSON serializes Uint64String as a quoted JSON string.
+// MarshalJSON serializes [Uint64String] as a quoted JSON string.
 func (u Uint64String) MarshalJSON() ([]byte, error) {
 	return json.Marshal(strconv.FormatUint(uint64(u), 10))
 }
@@ -50,7 +50,7 @@ func (u Uint64String) MarshalJSON() ([]byte, error) {
 // Int64String parses int64 values from numeric or quoted string JSON payloads.
 type Int64String int64
 
-// UnmarshalJSON parses JSON byte data into Int64String.
+// UnmarshalJSON parses JSON byte data into [Int64String].
 func (i *Int64String) UnmarshalJSON(b []byte) error {
 	s := bytesconv.B2S(bytesconv.TrimQuotes(b))
 	if len(s) == 0 || s == "null" {
@@ -68,7 +68,7 @@ func (i *Int64String) UnmarshalJSON(b []byte) error {
 	return nil
 }
 
-// MarshalJSON serializes Int64String as a quoted JSON string.
+// MarshalJSON serializes [Int64String] as a quoted JSON string.
 func (i Int64String) MarshalJSON() ([]byte, error) {
 	return json.Marshal(strconv.FormatInt(int64(i), 10))
 }
@@ -76,7 +76,7 @@ func (i Int64String) MarshalJSON() ([]byte, error) {
 // Float64String parses float64 values from numeric or quoted string JSON payloads.
 type Float64String float64
 
-// UnmarshalJSON parses JSON byte data into Float64String.
+// UnmarshalJSON parses JSON byte data into [Float64String].
 func (f *Float64String) UnmarshalJSON(b []byte) error {
 	s := bytesconv.B2S(bytesconv.TrimQuotes(b))
 	if len(s) == 0 || s == "null" {
@@ -94,7 +94,7 @@ func (f *Float64String) UnmarshalJSON(b []byte) error {
 	return nil
 }
 
-// MarshalJSON serializes Float64String as a JSON string.
+// MarshalJSON serializes [Float64String] as a JSON string.
 func (f Float64String) MarshalJSON() ([]byte, error) {
 	return json.Marshal(strconv.FormatFloat(float64(f), 'f', -1, 64))
 }
@@ -119,7 +119,7 @@ func (bi *BoolInt) UnmarshalJSON(b []byte) error {
 	return nil
 }
 
-// MarshalJSON serializes BoolInt back as numeric "1" or "0" JSON values.
+// MarshalJSON serializes [BoolInt] back as numeric "1" or "0" JSON values.
 func (bi BoolInt) MarshalJSON() ([]byte, error) {
 	if bi {
 		return []byte("1"), nil
@@ -149,7 +149,7 @@ func (t *UnixTimestamp) UnmarshalJSON(b []byte) error {
 	return nil
 }
 
-// MarshalJSON serializes UnixTimestamp as a numeric Unix epoch timestamp.
+// MarshalJSON serializes [UnixTimestamp] as a numeric Unix epoch timestamp.
 func (t UnixTimestamp) MarshalJSON() ([]byte, error) {
 	if time.Time(t).IsZero() {
 		return []byte("0"), nil
@@ -229,7 +229,7 @@ func (cs CommaSlice[T]) MarshalText() ([]byte, error) {
 	return bytesconv.S2B(sb.String()), nil
 }
 
-// QueryEncoder is implemented by types that encode themselves directly into url.Values.
+// QueryEncoder is implemented by types that encode themselves directly into [url.Values].
 type QueryEncoder interface {
 	EncodeValues() url.Values
 }
@@ -426,49 +426,13 @@ func (f *fieldSchema) serializeValue(fieldValue reflect.Value, values url.Values
 
 func (f *fieldSchema) serializeSlice(fieldValue reflect.Value, values url.Values) error {
 	if f.hasComma || f.hasSpace || f.hasPipe {
-		sep := ","
-		if f.hasSpace {
-			sep = " "
-		} else if f.hasPipe {
-			sep = "|"
-		}
-
-		var sb strings.Builder
-		for j := range fieldValue.Len() {
-			val := fieldValue.Index(j)
-			if val.Kind() == reflect.Pointer {
-				if val.IsNil() {
-					continue
-				}
-
-				val = val.Elem()
-			}
-
-			str, err := toString(val)
-			if err != nil {
-				return &ValueError{Field: f.name, Index: j, Err: err}
-			}
-
-			if j > 0 {
-				sb.WriteString(sep)
-			}
-
-			sb.WriteString(str)
-		}
-
-		values.Set(f.key, sb.String())
-
-		return nil
+		return f.serializeDelimitedSlice(fieldValue, values)
 	}
 
 	for j := range fieldValue.Len() {
-		val := fieldValue.Index(j)
-		if val.Kind() == reflect.Pointer {
-			if val.IsNil() {
-				continue
-			}
-
-			val = val.Elem()
+		val := derefPointer(fieldValue.Index(j))
+		if !val.IsValid() {
+			continue
 		}
 
 		strValue, err := toString(val)
@@ -480,6 +444,50 @@ func (f *fieldSchema) serializeSlice(fieldValue reflect.Value, values url.Values
 	}
 
 	return nil
+}
+
+func (f *fieldSchema) serializeDelimitedSlice(fieldValue reflect.Value, values url.Values) error {
+	sep := ","
+	if f.hasSpace {
+		sep = " "
+	} else if f.hasPipe {
+		sep = "|"
+	}
+
+	var sb strings.Builder
+	for j := range fieldValue.Len() {
+		val := derefPointer(fieldValue.Index(j))
+		if !val.IsValid() {
+			continue
+		}
+
+		str, err := toString(val)
+		if err != nil {
+			return &ValueError{Field: f.name, Index: j, Err: err}
+		}
+
+		if j > 0 {
+			sb.WriteString(sep)
+		}
+
+		sb.WriteString(str)
+	}
+
+	values.Set(f.key, sb.String())
+
+	return nil
+}
+
+func derefPointer(val reflect.Value) reflect.Value {
+	if val.Kind() == reflect.Pointer {
+		if val.IsNil() {
+			return reflect.Value{}
+		}
+
+		return val.Elem()
+	}
+
+	return val
 }
 
 // StructToValues encodes a struct or Protobuf message into [url.Values].
@@ -543,8 +551,6 @@ type FastQueryEncoder interface {
 }
 
 // StructToQueryString encodes a struct or map directly into a raw URL query string (e.g. "key=val&a=b").
-//
-// Bypasses url.Values map allocations by writing directly to a pre-allocated builder.
 func StructToQueryString(s any) (string, error) {
 	if s == nil {
 		return "", nil

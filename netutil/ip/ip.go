@@ -1,6 +1,6 @@
 // Copyright (c) 2026 Lemon4ksan All rights reserved.
 // Use of this source code is governed by a BSD-style
-// license can be found in the LICENSE file.
+// license that can be found in the LICENSE file.
 
 // Package ip provides local IP address rotation, network interface discovery, and IPv6 subnet randomization.
 package ip
@@ -14,14 +14,15 @@ import (
 	"sync"
 )
 
-// ErrEmptyIPPool is returned when attempting to initialize or update a source IP rotator with zero addresses.
-var ErrEmptyIPPool = errors.New("aoni: source IP pool cannot be empty")
+var (
+	// ErrEmptyIPPool is returned when initializing an IP rotator with an empty address pool.
+	ErrEmptyIPPool = errors.New("aoni: source IP pool cannot be empty")
 
-// ErrInvalidCIDR is returned when an invalid CIDR notation string is provided.
-var ErrInvalidCIDR = errors.New("netutil: invalid CIDR notation")
+	// ErrInvalidCIDR is returned when an invalid CIDR notation string is provided.
+	ErrInvalidCIDR = errors.New("netutil: invalid CIDR notation")
+)
 
-// DiscoverInterfaceIPs queries system network interfaces and returns all active,
-// non-loopback IPv4 and IPv6 addresses eligible for socket binding.
+// DiscoverInterfaceIPs queries active system network interfaces and returns non-loopback IP addresses eligible for socket binding.
 func DiscoverInterfaceIPs() ([]net.IP, error) {
 	ifaces, err := net.Interfaces()
 	if err != nil {
@@ -50,8 +51,7 @@ func DiscoverInterfaceIPs() ([]net.IP, error) {
 	return ips, nil
 }
 
-// IsPrivateIP reports whether the IP address belongs to private (RFC 1918/4193),
-// loopback, link-local, or CGNAT network ranges for SSRF protection.
+// IsPrivateIP reports whether ip belongs to private (RFC 1918/4193), loopback, link-local, or CGNAT ranges.
 func IsPrivateIP(ip net.IP) bool {
 	if ip == nil || ip.IsUnspecified() || ip.IsLoopback() || ip.IsLinkLocalUnicast() || ip.IsLinkLocalMulticast() {
 		return true
@@ -84,7 +84,6 @@ func extractIP(addr net.Addr) net.IP {
 }
 
 // SourceIPRotator maintains a pool of local IP addresses and cycles through them for socket binding.
-// It is thread-safe for concurrent access by multiple network dialers.
 type SourceIPRotator struct {
 	ips []net.IP
 	mu  sync.Mutex
@@ -92,7 +91,6 @@ type SourceIPRotator struct {
 }
 
 // NewSourceIPRotator instantiates a [SourceIPRotator] with parsed local network addresses.
-// Returns [ErrEmptyIPPool] if addrs is empty or contains no valid IP strings.
 func NewSourceIPRotator(addrs []string) (*SourceIPRotator, error) {
 	ips, err := parseIPs(addrs)
 	if err != nil {
@@ -102,7 +100,7 @@ func NewSourceIPRotator(addrs []string) (*SourceIPRotator, error) {
 	return &SourceIPRotator{ips: ips}, nil
 }
 
-// Next selects and returns the next IP address from the pool using round-robin rotation.
+// Next returns the next local IP address using round-robin rotation.
 func (r *SourceIPRotator) Next() net.IP {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -113,8 +111,7 @@ func (r *SourceIPRotator) Next() net.IP {
 	return ip
 }
 
-// NextForFamily selects the next IP matching the specified network family (IPv4 if isIPv4 is true, IPv6 otherwise).
-// Returns nil if no matching IP family exists in the pool.
+// NextForFamily selects the next local IP matching the specified address family (IPv4 if isIPv4 is true, IPv6 otherwise).
 func (r *SourceIPRotator) NextForFamily(isIPv4 bool) net.IP {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -133,7 +130,7 @@ func (r *SourceIPRotator) NextForFamily(isIPv4 bool) net.IP {
 	return nil
 }
 
-// UpdatePool dynamically replaces the active IP pool addresses and resets rotation index to zero.
+// UpdatePool dynamically replaces active IP pool addresses and resets rotation state to zero.
 func (r *SourceIPRotator) UpdatePool(addrs []string) error {
 	ips, err := parseIPs(addrs)
 	if err != nil {
@@ -152,6 +149,7 @@ func (r *SourceIPRotator) UpdatePool(addrs []string) error {
 func (r *SourceIPRotator) Size() int {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+
 	return len(r.ips)
 }
 
@@ -184,8 +182,7 @@ func parseIPs(addrs []string) ([]net.IP, error) {
 	return ips, nil
 }
 
-// IPv6SubnetRotator generates cryptographically random IPv6 addresses
-// from a designated CIDR subnet block (e.g., /64 range).
+// IPv6SubnetRotator generates cryptographically random IPv6 addresses from a CIDR subnet prefix.
 type IPv6SubnetRotator struct {
 	prefix netip.Prefix
 }

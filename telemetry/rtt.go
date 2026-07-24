@@ -1,6 +1,6 @@
 // Copyright (c) 2026 Lemon4ksan All rights reserved.
 // Use of this source code is governed by a BSD-style
-// license can be found in the LICENSE file.
+// license that can be found in the LICENSE file.
 
 package telemetry
 
@@ -11,7 +11,7 @@ import (
 	"time"
 )
 
-// DynamicHedgingConfig configures the dynamic hedging delay calculation.
+// DynamicHedgingConfig configures percentile-based dynamic request hedging.
 type DynamicHedgingConfig struct {
 	// Tracker is the shared RTT tracker for measuring network latency.
 	Tracker *RTTTracker
@@ -30,7 +30,7 @@ type DynamicHedgingConfig struct {
 	Multiplier float64
 }
 
-// DefaultDynamicHedgingConfig returns sensible defaults for dynamic hedging.
+// DefaultDynamicHedgingConfig returns production defaults for dynamic request hedging.
 func DefaultDynamicHedgingConfig() DynamicHedgingConfig {
 	return DynamicHedgingConfig{
 		Tracker:    NewRTTTracker(100),
@@ -41,8 +41,7 @@ func DefaultDynamicHedgingConfig() DynamicHedgingConfig {
 	}
 }
 
-// ComputeDelay calculates the dynamic hedging delay based on observed RTT data.
-// If the tracker has insufficient samples (< 10), it returns MinDelay.
+// ComputeDelay calculates dynamic hedging delay based on observed RTT percentile values.
 func (c DynamicHedgingConfig) ComputeDelay() time.Duration {
 	if c.Tracker == nil || c.Tracker.Count() < 10 {
 		if c.MinDelay > 0 {
@@ -76,20 +75,10 @@ func (c DynamicHedgingConfig) ComputeDelay() time.Duration {
 		maxDelay = 2 * time.Second
 	}
 
-	if delay < minDelay {
-		delay = minDelay
-	}
-
-	if delay > maxDelay {
-		delay = maxDelay
-	}
-
-	return delay
+	return max(minDelay, min(delay, maxDelay))
 }
 
-// RTTTracker maintains a sliding window of RTT measurements and computes
-// percentile-based values (p95, p99) for dynamic hedging delay calculation.
-// It is safe for concurrent use.
+// RTTTracker maintains a sliding window of network round-trip time measurements.
 type RTTTracker struct {
 	mu          sync.Mutex
 	samples     []time.Duration
@@ -103,9 +92,7 @@ type RTTTracker struct {
 	cachedSorted []time.Duration
 }
 
-// NewRTTTracker creates an [RTTTracker] with the given sample window capacity.
-// A larger capacity provides more stable estimates but reacts slower to changes.
-// A capacity of 100 is recommended for most use cases.
+// NewRTTTracker instantiates an [RTTTracker] with sample window capacity.
 func NewRTTTracker(capacity int) *RTTTracker {
 	if capacity <= 0 {
 		capacity = 100
@@ -117,7 +104,7 @@ func NewRTTTracker(capacity int) *RTTTracker {
 	}
 }
 
-// Record adds an RTT measurement to the tracker.
+// Record registers an RTT measurement sample.
 func (t *RTTTracker) Record(rtt time.Duration) {
 	if rtt <= 0 {
 		return
@@ -146,14 +133,7 @@ func (t *RTTTracker) Record(rtt time.Duration) {
 	t.dirty = true
 }
 
-// Percentile returns the given percentile (0-100) of recorded RTT samples.
-// It returns 0 if no samples have been recorded yet.
-//
-// # Complexity
-//
-//   - Time Complexity: O(1) amortized if no new samples arrive.
-//     Otherwise, O(N log N) for re-sorting the sliding window.
-//   - Space Complexity: O(N) for allocating a sorted cache slice.
+// Percentile evaluates the specified percentile (0-100) across recorded RTT samples.
 func (t *RTTTracker) Percentile(p float64) time.Duration {
 	t.mu.Lock()
 	defer t.mu.Unlock()
@@ -180,25 +160,25 @@ func (t *RTTTracker) Percentile(p float64) time.Duration {
 	return t.cachedSorted[idx]
 }
 
-// P95 returns the 95th percentile RTT.
+// P95 returns 95th percentile RTT.
 func (t *RTTTracker) P95() time.Duration {
 	return t.Percentile(95)
 }
 
-// P99 returns the 99th percentile RTT.
+// P99 returns 99th percentile RTT.
 func (t *RTTTracker) P99() time.Duration {
 	return t.Percentile(99)
 }
 
-// MinRTT returns the minimum observed RTT.
+// MinRTT returns minimum observed RTT.
 func (t *RTTTracker) MinRTT() time.Duration {
 	t.mu.Lock()
 	defer t.mu.Unlock()
+
 	return t.minRTT
 }
 
-// MaxRTT returns the maximum observed RTT within the current sliding window.
-// Returns 0 if no samples are recorded.
+// MaxRTT returns maximum observed RTT within the current sliding window.
 func (t *RTTTracker) MaxRTT() time.Duration {
 	t.mu.Lock()
 	defer t.mu.Unlock()
@@ -217,8 +197,7 @@ func (t *RTTTracker) MaxRTT() time.Duration {
 	return maxVal
 }
 
-// AverageRTT returns the simple mathematical average (mean) of all recorded RTT samples.
-// Returns 0 if no samples are recorded.
+// AverageRTT computes the arithmetic mean across recorded RTT samples.
 func (t *RTTTracker) AverageRTT() time.Duration {
 	t.mu.Lock()
 	defer t.mu.Unlock()
@@ -235,21 +214,23 @@ func (t *RTTTracker) AverageRTT() time.Duration {
 	return time.Duration(sum / int64(t.count))
 }
 
-// SmoothedRTT returns the exponentially smoothed RTT (EWMA).
+// SmoothedRTT returns exponentially weighted moving average (EWMA) RTT.
 func (t *RTTTracker) SmoothedRTT() time.Duration {
 	t.mu.Lock()
 	defer t.mu.Unlock()
+
 	return t.smoothedRTT
 }
 
-// Count returns the number of recorded samples.
+// Count returns recorded sample count.
 func (t *RTTTracker) Count() int {
 	t.mu.Lock()
 	defer t.mu.Unlock()
+
 	return t.count
 }
 
-// Reset clears all recorded RTT samples and resets the metrics.
+// Reset clears recorded RTT samples and resets tracking state.
 func (t *RTTTracker) Reset() {
 	t.mu.Lock()
 	defer t.mu.Unlock()
@@ -258,11 +239,8 @@ func (t *RTTTracker) Reset() {
 	t.count = 0
 	t.minRTT = 0
 	t.smoothedRTT = 0
-
 	t.dirty = true
 	t.cachedSorted = nil
 
-	for i := range t.samples {
-		t.samples[i] = 0
-	}
+	clear(t.samples)
 }

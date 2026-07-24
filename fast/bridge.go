@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Lemon4ksan All rights reserved.
+// Use of this source code is governed by a BSD-style
+// license that can be found in the LICENSE file.
+
 package fast
 
 import (
@@ -8,10 +12,12 @@ import (
 	"net/url"
 )
 
-// NewStdClient adapts a fast.Client (fasthttp) into a standard [*http.Client].
-//
-// Third-party libraries (e.g. Resty, Go SDKs, legacy clients) expecting a standard *http.Client
-// can use this to execute all requests transparently over fasthttp.
+var (
+	// ErrNilURL is returned when attempting to route an outbound HTTP request without a destination URL.
+	ErrNilURL = errors.New("aoni fast bridge: request URL is nil")
+)
+
+// NewStdClient adapts a [Client] (fasthttp) into a standard [*http.Client].
 func NewStdClient(c *Client) *http.Client {
 	return &http.Client{
 		Transport: NewTransport(c),
@@ -23,18 +29,18 @@ func NewTransport(c *Client) *Transport {
 	return &Transport{client: c}
 }
 
-// Transport implements [http.RoundTripper] using a fast.Client engine.
+// Transport implements [http.RoundTripper] delegating execution to a high-performance fasthttp [Client].
 type Transport struct {
 	client *Client
 }
 
-// RoundTrip satisfies [http.RoundTripper], executing standard *http.Request over fasthttp.
+// RoundTrip satisfies [http.RoundTripper], executing standard [*http.Request] instances over fasthttp.
 func (t *Transport) RoundTrip(req *http.Request) (*http.Response, error) {
 	if req.URL == nil {
 		return nil, &url.Error{
 			Op:  req.Method,
 			URL: "",
-			Err: errors.New("aoni fast bridge: request URL is nil"),
+			Err: ErrNilURL,
 		}
 	}
 
@@ -57,6 +63,7 @@ func (t *Transport) RoundTrip(req *http.Request) (*http.Response, error) {
 		if err != nil {
 			return nil, err
 		}
+
 		fastReq.SetBodyBytes(b)
 	}
 

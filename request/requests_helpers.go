@@ -216,36 +216,18 @@ func (responseDecoder) DecodeSuccess(
 	requester Requester,
 	decoder decode.Decoder,
 ) error {
-	// Fast-path: direct type check to avoid interface assertion boxing allocations
-	if client, ok := requester.(*aoni.Client); ok {
-		if br := client.BaseResponse(); br != nil {
-			br.SetData(target)
+	if br := extractBaseResponse(requester); br != nil {
+		br.SetData(target)
 
-			if err := decoder.Decode(resp.Body, br); err != nil {
-				return err
-			}
-
-			if !br.IsSuccess() {
-				return br.Error()
-			}
-
-			return nil
+		if err := decoder.Decode(resp.Body, br); err != nil {
+			return err
 		}
-	} else if p, ok := requester.(aoni.BaseResponseProvider); ok {
-		br := p.BaseResponse()
-		if br != nil {
-			br.SetData(target)
 
-			if err := decoder.Decode(resp.Body, br); err != nil {
-				return err
-			}
-
-			if !br.IsSuccess() {
-				return br.Error()
-			}
-
-			return nil
+		if !br.IsSuccess() {
+			return br.Error()
 		}
+
+		return nil
 	}
 
 	err := decoder.Decode(resp.Body, target)
@@ -254,6 +236,18 @@ func (responseDecoder) DecodeSuccess(
 	}
 
 	return err
+}
+
+func extractBaseResponse(requester Requester) aoni.BaseResponse {
+	if client, ok := requester.(*aoni.Client); ok {
+		return client.BaseResponse()
+	}
+
+	if provider, ok := requester.(aoni.BaseResponseProvider); ok {
+		return provider.BaseResponse()
+	}
+
+	return nil
 }
 
 func (responseDecoder) dumpMultipart(req *http.Request) []byte {
@@ -301,38 +295,43 @@ func (responseDecoder) checkHTML(buf *bufio.Reader) error {
 		return nil
 	}
 
-	firstNonSpace := byte(0)
-	for _, b := range peekBytes {
-		if b != ' ' && b != '\t' && b != '\r' && b != '\n' {
-			firstNonSpace = b
-			break
-		}
-	}
-
+	firstNonSpace := findFirstNonWhitespaceByte(peekBytes)
 	if firstNonSpace != '<' {
 		return nil
 	}
 
 	lowerPeek := bytes.ToLower(peekBytes)
-	isHTML := bytes.Contains(lowerPeek, []byte("<html")) || bytes.Contains(lowerPeek, []byte("<!doctype html"))
-
-	if !isHTML {
+	if !bytes.Contains(lowerPeek, []byte("<html")) && !bytes.Contains(lowerPeek, []byte("<!doctype html")) {
 		return nil
 	}
 
-	if bytes.Contains(lowerPeek, []byte("cf-challenge")) ||
-		bytes.Contains(lowerPeek, []byte("ray id")) ||
-		bytes.Contains(lowerPeek, []byte("cloudflare")) {
+	if isCloudflareChallengeBytes(lowerPeek) {
 		return challenge.ErrCloudflareDetected
 	}
 
 	return fmt.Errorf("%w: expected structured data but got HTML", ErrUnexpectedContentType)
 }
 
-// HandleResponse processes and decodes an HTTP response into target structure or API error.
+func findFirstNonWhitespaceByte(b []byte) byte {
+	for _, ch := range b {
+		if ch != ' ' && ch != '\t' && ch != '\r' && ch != '\n' {
+			return ch
+		}
+	}
+
+	return 0
+}
+
+func isCloudflareChallengeBytes(lower []byte) bool {
+	return bytes.Contains(lower, []byte("cf-challenge")) ||
+		bytes.Contains(lower, []byte("ray id")) ||
+		bytes.Contains(lower, []byte("cloudflare"))
+}
+
+// HandleResponse processes and decodes an HTTP response stream into a target structure or API error.
 func HandleResponse(resp *http.Response, target any, requester Requester) error {
 	if resp == nil {
-		return errors.New("aoni: response is nil")
+		return ErrNilResponse
 	}
 
 	dec := responseDecoder{}
@@ -393,7 +392,7 @@ func resolveDecoder(resp *http.Response) decode.Decoder {
 
 func validateAndMarshal(payload any) (stdio.Reader, error) {
 	if _, ok := payload.(aoni.RequestModifier); ok {
-		return nil, errors.New("aoni: passed a RequestModifier as the request body. Did you forget the body argument?")
+		return nil, ErrModifierAsBody
 	}
 
 	if r, ok := payload.(stdio.Reader); ok {

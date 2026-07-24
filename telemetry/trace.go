@@ -2,7 +2,6 @@
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
-// Package telemetry provides observability, diagnostic logging, and latency tracking utilities.
 package telemetry
 
 import (
@@ -26,7 +25,7 @@ import (
 	"github.com/lemon4ksan/aoni/internal/bytesconv"
 )
 
-// GenerateCorrelationID generates a fast, monotonic Base36 correlation ID without heap allocations.
+// GenerateCorrelationID generates a fast, monotonic Base36 correlation ID string.
 func GenerateCorrelationID() string {
 	timestamp := uint64(time.Now().UnixMicro())*1000 + uint64(rand.Int64N(1000)) //nolint:gosec
 
@@ -43,8 +42,7 @@ func GenerateCorrelationID() string {
 	return bytesconv.B2S(b)
 }
 
-// TraceInfo records network layer execution timings, metrics, and TLS/HTTP fingerprints for a request.
-// Detailed timing fields are populated progressively as execution phases complete.
+// TraceInfo records network layer execution timings, TLS details, and JA4 signatures for a request.
 type TraceInfo struct {
 	CorrelationID    string
 	Label            string
@@ -101,7 +99,7 @@ func (t *TraceInfo) LogValue() slog.Value {
 	return slog.GroupValue(attrs...)
 }
 
-// PeerCertificate returns the leaf server certificate captured during the TLS handshake.
+// PeerCertificate returns leaf peer certificate captured during TLS handshakes.
 func (t *TraceInfo) PeerCertificate() *x509.Certificate {
 	if len(t.PeerCertificates) > 0 {
 		return t.PeerCertificates[0]
@@ -117,8 +115,7 @@ type RedirectHop struct {
 	Method     string
 }
 
-// ExtractRedirectHistory traverses the http.Response.Request.Response chain
-// and returns all intermediate redirect hops in chronological order.
+// ExtractRedirectHistory extracts intermediate redirect steps from an [*http.Response].
 func ExtractRedirectHistory(resp *http.Response) []RedirectHop {
 	if resp == nil || resp.Request == nil || resp.Request.Response == nil {
 		return nil
@@ -130,8 +127,8 @@ func ExtractRedirectHistory(resp *http.Response) []RedirectHop {
 
 	for curr != nil {
 		reqURL := ""
-
 		method := ""
+
 		if curr.Request != nil {
 			if curr.Request.URL != nil {
 				reqURL = curr.Request.URL.String()
@@ -158,7 +155,7 @@ func ExtractRedirectHistory(resp *http.Response) []RedirectHop {
 	return hops
 }
 
-// CertSummary holds extracted information about the server's TLS certificate.
+// CertSummary holds extracted details for a peer TLS certificate.
 type CertSummary struct {
 	Subject       string
 	Issuer        string
@@ -169,7 +166,7 @@ type CertSummary struct {
 	DaysRemaining int
 }
 
-// LogValue implements [slog.LogValuer] for structured logging with log/slog.
+// LogValue implements [slog.LogValuer].
 func (c *CertSummary) LogValue() slog.Value {
 	if c == nil {
 		return slog.Value{}
@@ -183,7 +180,7 @@ func (c *CertSummary) LogValue() slog.Value {
 	)
 }
 
-// CertSummary extracts and returns structured details for the peer certificate.
+// CertSummary extracts structured details for the leaf peer certificate.
 func (t *TraceInfo) CertSummary() *CertSummary {
 	cert := t.PeerCertificate()
 	if cert == nil {
@@ -192,7 +189,6 @@ func (t *TraceInfo) CertSummary() *CertSummary {
 
 	hash := sha256.Sum256(cert.RawSubjectPublicKeyInfo)
 	pin := hex.EncodeToString(hash[:])
-
 	days := int(time.Until(cert.NotAfter).Hours() / 24)
 
 	return &CertSummary{
@@ -206,8 +202,7 @@ func (t *TraceInfo) CertSummary() *CertSummary {
 	}
 }
 
-// Start begins tracking total transaction and content transfer timing.
-// Returns a completion callback to be invoked when the response body is fully read.
+// Start begins tracking transaction execution timing, returning a completion callback.
 func (t *TraceInfo) Start() func(resp *http.Response) {
 	start := time.Now()
 
@@ -231,7 +226,7 @@ func (t *TraceInfo) Start() func(resp *http.Response) {
 	}
 }
 
-// ComputeJA4HFromRequest computes a JA4H HTTP client fingerprint directly from an [http.Request].
+// ComputeJA4HFromRequest evaluates a JA4H HTTP client fingerprint from an [*http.Request].
 func ComputeJA4HFromRequest(req *http.Request) string {
 	if req == nil {
 		return ""
@@ -274,8 +269,8 @@ func ComputeJA4HFromRequest(req *http.Request) string {
 		})
 
 		cookieNames = make([]string, len(kvs))
-
 		cookieValues = make([]string, len(kvs))
+
 		for i, item := range kvs {
 			cookieNames[i] = item.name
 			cookieValues[i] = item.value
@@ -294,7 +289,7 @@ func ComputeJA4HFromRequest(req *http.Request) string {
 	)
 }
 
-// TruncateBody limits output payload representation to maxBytes without unnecessary buffer copying.
+// TruncateBody limits output payload representations to maxBytes without unnecessary allocations.
 func TruncateBody(body []byte, maxBytes int) string {
 	limit := maxBytes
 	if limit <= 0 {
@@ -319,8 +314,7 @@ func TruncateBody(body []byte, maxBytes int) string {
 	return sb.String()
 }
 
-// IsStreamingResponse detects whether an HTTP response represents a real-time stream
-// (such as SSE, NDJSON, or Chunked transfers) that should not be fully buffered into memory.
+// IsStreamingResponse detects whether an HTTP response represents a real-time stream (SSE, NDJSON, Chunked).
 func IsStreamingResponse(resp *http.Response) bool {
 	if resp == nil {
 		return false
@@ -346,8 +340,7 @@ func IsStreamingResponse(resp *http.Response) bool {
 	return strings.Contains(contentType, "text/plain") && chunked && resp.ContentLength == -1
 }
 
-// SummarizeMultipartBody extracts form field names and file metadata from a multipart/form-data payload
-// into a compact string representation without loading binary file contents.
+// SummarizeMultipartBody extracts form field names and file metadata from a multipart payload.
 func SummarizeMultipartBody(body []byte, contentType string) string {
 	if len(body) == 0 || contentType == "" {
 		return ""

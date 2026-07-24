@@ -1,7 +1,8 @@
 // Copyright (c) 2026 Lemon4ksan All rights reserved.
 // Use of this source code is governed by a BSD-style
-// license can be found in the LICENSE file.
+// license that can be found in the LICENSE file.
 
+// Package telemetry provides observability, diagnostic logging, HAR exports, and latency tracking utilities.
 package telemetry
 
 import (
@@ -12,7 +13,7 @@ import (
 	"github.com/lemon4ksan/aoni/internal/bytesconv"
 )
 
-// CurlOptions controls formatting, redaction, and cookie extraction for cURL generation.
+// CurlOptions controls header redaction and secrets masking for cURL command generation.
 type CurlOptions struct {
 	RedactHeaders []string
 	RedactSecret  string
@@ -30,12 +31,12 @@ var defaultSensitiveHeaders = []string{
 	"set-cookie",
 }
 
-// CurlFromRequest converts an [http.Request] and body payload into a shell-escaped cURL command.
+// CurlFromRequest converts an [*http.Request] and optional body payload into a shell-escaped cURL command.
 func CurlFromRequest(req *http.Request, body []byte) string {
 	return CurlFromRequestWithOptions(req, body, nil)
 }
 
-// CurlFromRequestWithOptions converts an [http.Request] into cURL with custom [CurlOptions].
+// CurlFromRequestWithOptions converts an [*http.Request] into cURL applying custom [CurlOptions].
 func CurlFromRequestWithOptions(req *http.Request, body []byte, opts *CurlOptions) string {
 	if req == nil {
 		return "curl"
@@ -168,7 +169,6 @@ func escapeShell(s string) string {
 	}
 
 	safe := true
-
 	for i := range s {
 		if !isShellSafeByte(s[i]) {
 			safe = false

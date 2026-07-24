@@ -1,6 +1,6 @@
 // Copyright (c) 2026 Lemon4ksan All rights reserved.
 // Use of this source code is governed by a BSD-style
-// license can be found in the LICENSE file.
+// license that can be found in the LICENSE file.
 
 package ws
 
@@ -32,13 +32,13 @@ const (
 )
 
 const (
-	h2DefaultMaxFrameSize = 16 * 1024
-	h2InitialWindowSize   = 65535
+	h2DefaultMaxFrameSize    = 16 * 1024
+	h2InitialWindowSize      = 65535
+	maxWebSocketFrameSize    = 16 * 1024 * 1024
+	maxConsecutiveEmptyReads = 100
 )
 
-const maxConsecutiveEmptyReads = 100
-
-// Conn represents an active WebSocket connection.
+// Conn represents an active WebSocket connection contract extending standard [net.Conn].
 type Conn interface {
 	net.Conn
 	ReadMessage() (messageType int, p []byte, err error)
@@ -111,12 +111,17 @@ func (c *wsGorillaConn) UnderlyingConn() any {
 }
 
 func (c *wsGorillaConn) Close() error {
-	c.once.Do(func() { close(c.closed); _ = c.base.Close() })
+	c.once.Do(func() {
+		close(c.closed)
+		_ = c.base.Close()
+	})
+
 	return nil
 }
 
 func (c *wsGorillaConn) LocalAddr() net.Addr  { return c.base.LocalAddr() }
 func (c *wsGorillaConn) RemoteAddr() net.Addr { return c.base.RemoteAddr() }
+
 func (c *wsGorillaConn) SetDeadline(t time.Time) error {
 	if err := c.base.SetReadDeadline(t); err != nil {
 		return err
@@ -124,6 +129,7 @@ func (c *wsGorillaConn) SetDeadline(t time.Time) error {
 
 	return c.base.SetWriteDeadline(t)
 }
+
 func (c *wsGorillaConn) SetReadDeadline(t time.Time) error  { return c.base.SetReadDeadline(t) }
 func (c *wsGorillaConn) SetWriteDeadline(t time.Time) error { return c.base.SetWriteDeadline(t) }
 func (c *wsGorillaConn) CloseChan() <-chan struct{}         { return c.closed }
@@ -181,7 +187,6 @@ func (c *wsRawConn) processNextFrame() error {
 		case wsFramePing:
 			_ = c.writeFrame(wsFramePong, payload)
 		case wsFramePong:
-			// ignore
 		}
 	}
 
@@ -213,13 +218,11 @@ func (c *wsRawConn) ReadMessage() (int, []byte, error) {
 func (c *wsRawConn) WriteMessage(messageType int, data []byte) error {
 	<-c.writeMu
 	defer func() { c.writeMu <- struct{}{} }()
+
 	return c.writeFrame(byte(messageType), data) //nolint:gosec
 }
 
-func (c *wsRawConn) UnderlyingConn() any {
-	return c.base
-}
-
+func (c *wsRawConn) UnderlyingConn() any                { return c.base }
 func (c *wsRawConn) LocalAddr() net.Addr                { return c.base.LocalAddr() }
 func (c *wsRawConn) RemoteAddr() net.Addr               { return c.base.RemoteAddr() }
 func (c *wsRawConn) SetDeadline(t time.Time) error      { return c.base.SetDeadline(t) }
@@ -228,11 +231,13 @@ func (c *wsRawConn) SetWriteDeadline(t time.Time) error { return c.base.SetWrite
 func (c *wsRawConn) CloseChan() <-chan struct{}         { return c.closed }
 
 func (c *wsRawConn) Close() error {
-	c.once.Do(func() { close(c.closed); _ = c.base.Close() })
+	c.once.Do(func() {
+		close(c.closed)
+		_ = c.base.Close()
+	})
+
 	return nil
 }
-
-const maxWebSocketFrameSize = 16 * 1024 * 1024
 
 func (c *wsRawConn) readFrame() (byte, []byte, error) {
 	header := make([]byte, 2)
@@ -563,7 +568,6 @@ func (c *wsH2Conn) clientPreface() error {
 				return c.processPrefaceSettingsFrame(f)
 			}
 		case *http2.WindowUpdateFrame:
-			// ignore
 		case *http2.PingFrame:
 			if !f.IsAck() {
 				c.writeMu.Lock()
@@ -576,7 +580,7 @@ func (c *wsH2Conn) clientPreface() error {
 			}
 
 		default:
-			return errH2UnexpectedFrame
+			return ErrH2UnexpectedFrame
 		}
 	}
 }
@@ -614,7 +618,7 @@ func (c *wsH2Conn) processPrefaceSettingsFrame(f *http2.SettingsFrame) error {
 	}
 
 	if !enableConnect {
-		return errH2ConnectNotSupported
+		return ErrH2ConnectNotSupported
 	}
 
 	return nil
@@ -632,6 +636,7 @@ func (c *wsH2Conn) writeConnectHeaders(u *parsedURL, host string) error {
 		{Name: ":path", Value: u.Path},
 		{Name: ":protocol", Value: "websocket"},
 	}
+
 	for _, h := range headers {
 		if err := encoder.WriteField(h); err != nil {
 			return err
@@ -675,10 +680,11 @@ func (c *wsH2Conn) readConnectResponse() error {
 
 		case *http2.RSTStreamFrame:
 			if f.StreamID == c.streamID {
-				return errH2StreamClosed
+				return ErrH2StreamClosed
 			}
 		case *http2.GoAwayFrame:
-			return errH2GoAway
+			return ErrH2GoAway
+
 		case *http2.PingFrame:
 			if !f.IsAck() {
 				c.writeMu.Lock()
@@ -708,7 +714,7 @@ func (c *wsH2Conn) processResponseHeaders(f *http2.HeadersFrame, decoder *hpack.
 	}
 
 	if status != "200" {
-		return errH2ConnectFailed
+		return ErrH2ConnectFailed
 	}
 
 	return nil

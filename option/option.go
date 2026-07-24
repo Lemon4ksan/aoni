@@ -2,14 +2,13 @@
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
-// Package option provides functional options for configuring an [aoni.Client].
+// Package option provides functional options for customizing an [aoni.Client] configuration.
 //
-// Options are passed to [aoni.NewClient] or [aoni.Client.With] to configure global client
-// defaults, such as base URLs, request timeouts, proxy rotators, TLS fingerprints,
-// and pipeline execution flags.
+// Options are consumed by [aoni.NewClient] or [aoni.Client.With] to configure global client defaults,
+// such as base URLs, timeouts, proxy rotators, TLS fingerprints, and execution pipeline behavior.
 //
-// All options operate immutably on [aoni.Config] structs, ensuring that thread safety
-// and concurrent client reusability are preserved.
+// Thread Safety:
+// All options operate immutably on [aoni.Config] structures, preserving thread safety and concurrent client reuse.
 package option
 
 import (
@@ -38,10 +37,14 @@ import (
 	"github.com/lemon4ksan/aoni/telemetry"
 )
 
-// Option is a type alias for [aoni.ClientOption].
+// Option is an alias for [aoni.ClientOption].
 type Option = aoni.ClientOption
 
-// WithConfig replaces the entire client configuration at once.
+// ============================================================================
+// 1. FULL CONFIGURATION BLOCK OVERRIDES
+// ============================================================================
+
+// WithConfig returns an [aoni.ClientOption] that replaces the entire client configuration at once.
 func WithConfig(cfg aoni.Config) aoni.ClientOption {
 	return func(c *aoni.Config) {
 		c.Network = cfg.Network.Clone()
@@ -51,87 +54,122 @@ func WithConfig(cfg aoni.Config) aoni.ClientOption {
 	}
 }
 
-// WithDefaultsBlock replaces only the default parameters block.
+// WithDefaultsBlock returns an [aoni.ClientOption] replacing only the [aoni.ClientDefaults] configuration layer.
 func WithDefaultsBlock(defaults aoni.ClientDefaults) aoni.ClientOption {
 	return func(cfg *aoni.Config) {
 		cfg.Defaults = defaults.Clone()
 	}
 }
 
-// WithNetworkBlock replaces only the network layer block.
+// WithNetworkBlock returns an [aoni.ClientOption] replacing only the [aoni.NetworkConfig] configuration layer.
 func WithNetworkBlock(network aoni.NetworkConfig) aoni.ClientOption {
 	return func(cfg *aoni.Config) {
 		cfg.Network = network.Clone()
 	}
 }
 
-// WithFingerprintBlock replaces only the fingerprint layer block.
+// WithFingerprintBlock returns an [aoni.ClientOption] replacing only the [aoni.FingerprintConfig] configuration layer.
 func WithFingerprintBlock(fingerprint aoni.FingerprintConfig) aoni.ClientOption {
 	return func(cfg *aoni.Config) {
 		cfg.Fingerprint = fingerprint.Clone()
 	}
 }
 
-// WithLogger sets the diagnostic logger for the client.
-func WithLogger(l aoni.Logger) aoni.ClientOption {
+// ============================================================================
+// 2. ENGINE, BASE URL & TRANSPORT OPTIONS
+// ============================================================================
+
+// WithEngine returns an [aoni.ClientOption] replacing the underlying [aoni.HTTPDoer] engine (e.g. custom [*http.Client]).
+func WithEngine(engine aoni.HTTPDoer) aoni.ClientOption {
 	return func(cfg *aoni.Config) {
-		cfg.Defaults.Logger = l
+		cfg.Engine.CustomEngine = engine
 	}
 }
 
-// WithModifiers registers request modifiers that run on every request
-// before the middleware chain.
-func WithModifiers(mods ...aoni.RequestModifier) aoni.ClientOption {
-	return func(cfg *aoni.Config) {
-		cfg.Defaults.DefaultMods = append(cfg.Defaults.DefaultMods, mods...)
-	}
-}
-
-// WithBaseResponse sets the response provider for structured API unwrapping.
-func WithBaseResponse(provider func() aoni.BaseResponse) aoni.ClientOption {
-	return func(cfg *aoni.Config) {
-		cfg.Defaults.BaseResponse = provider
-	}
-}
-
-// WithQueryEncoder configures the default query parameters encoder for the client.
-func WithQueryEncoder(encoder aoni.QueryEncoder) aoni.ClientOption {
-	return func(cfg *aoni.Config) {
-		cfg.Defaults.QueryEncoder = encoder
-	}
-}
-
-// WithHTTP2Config configures the low-level HTTP/2 connection parameters.
-func WithHTTP2Config(cfg aoni.HTTP2Config) aoni.ClientOption {
-	// For consistency with http3 we leave this option in the core module
-	return func(c *aoni.Config) {
-		c.Engine.HTTP2Config = &cfg
-	}
-}
-
-// WithBaseURL configures the base URL for resolving relative request paths.
+// WithBaseURL returns an [aoni.ClientOption] setting the default base URL for resolving relative request paths.
 func WithBaseURL(raw string) aoni.ClientOption {
 	return func(cfg *aoni.Config) {
 		if raw == "" {
 			cfg.Defaults.BaseURL = &url.URL{}
 			cfg.Defaults.BaseURLString = ""
+			cfg.Defaults.BaseURLTrimmedString = ""
+
 			return
 		}
 
-		if !strings.HasSuffix(raw, "/") {
-			raw += "/"
+		formatted := raw
+		if !strings.HasSuffix(formatted, "/") {
+			formatted += "/"
 		}
 
-		baseURL, err := url.Parse(raw)
-		if err == nil {
-			cfg.Defaults.BaseURL = baseURL
-			cfg.Defaults.BaseURLString = baseURL.String()
-			cfg.Defaults.BaseURLTrimmedString = strings.TrimSuffix(baseURL.String(), "/")
+		baseURL, err := url.Parse(formatted)
+		if err != nil {
+			return
 		}
+
+		cfg.Defaults.BaseURL = baseURL
+		cfg.Defaults.BaseURLString = baseURL.String()
+		cfg.Defaults.BaseURLTrimmedString = strings.TrimSuffix(baseURL.String(), "/")
 	}
 }
 
-// WithHeader adds a default HTTP header sent with every request.
+// WithTimeout returns an [aoni.ClientOption] setting the end-to-end request transaction deadline duration.
+func WithTimeout(d time.Duration) aoni.ClientOption {
+	return func(cfg *aoni.Config) {
+		cfg.Engine.Timeout = d
+	}
+}
+
+// WithRedirectLimit returns an [aoni.ClientOption] setting the maximum number of HTTP redirects followed.
+func WithRedirectLimit(max int) aoni.ClientOption {
+	return func(cfg *aoni.Config) {
+		cfg.Engine.RedirectLimit = max
+	}
+}
+
+// WithAllowedRedirectDomains returns an [aoni.ClientOption] restricting HTTP redirects to trusted domain patterns.
+func WithAllowedRedirectDomains(domains ...string) aoni.ClientOption {
+	return func(cfg *aoni.Config) {
+		cfg.Engine.CheckRedirect = aoni.AllowedDomainsRedirectPolicy(domains...)
+	}
+}
+
+// WithConnectionPool returns an [aoni.ClientOption] configuring keep-alive connection boundaries on the transport.
+func WithConnectionPool(pool aoni.ConnectionPoolConfig) aoni.ClientOption {
+	return func(cfg *aoni.Config) {
+		cfg.Engine.ConnectionPool = &pool
+	}
+}
+
+// WithHTTP2Config returns an [aoni.ClientOption] configuring low-level HTTP/2 connection parameters.
+func WithHTTP2Config(cfg aoni.HTTP2Config) aoni.ClientOption {
+	return func(c *aoni.Config) {
+		c.Engine.HTTP2Config = &cfg
+	}
+}
+
+// WithHTTP2Configurer returns an [aoni.ClientOption] configuring an [aoni.HTTP2Configurer] interface on the transport.
+func WithHTTP2Configurer(configurer aoni.HTTP2Configurer) aoni.ClientOption {
+	return func(cfg *aoni.Config) {
+		cfg.Fingerprint.H2Configurer = configurer
+	}
+}
+
+// WithInsecureSkipVerify returns an [aoni.ClientOption] bypassing TLS certificate verification globally on the transport.
+//
+// Warning:
+// Enabling this exposes outgoing connections to man-in-the-middle attacks.
+func WithInsecureSkipVerify() aoni.ClientOption {
+	return func(cfg *aoni.Config) {
+		cfg.Engine.InsecureSkipVerify = true
+	}
+}
+
+// ============================================================================
+// 3. HEADER, USER-AGENT & AUTH OPTIONS
+// ============================================================================
+
+// WithHeader returns an [aoni.ClientOption] adding a default header key-value pair sent with every request.
 func WithHeader(key, value string) aoni.ClientOption {
 	return func(cfg *aoni.Config) {
 		if cfg.Defaults.Headers == nil {
@@ -142,11 +180,11 @@ func WithHeader(key, value string) aoni.ClientOption {
 	}
 }
 
-// WithHeaders merges the provided map of headers into the default request headers.
+// WithHeaders returns an [aoni.ClientOption] merging a map of default headers into the client configuration.
 func WithHeaders(headers map[string]string) aoni.ClientOption {
 	return func(cfg *aoni.Config) {
 		if cfg.Defaults.Headers == nil {
-			cfg.Defaults.Headers = make(http.Header)
+			cfg.Defaults.Headers = make(http.Header, len(headers))
 		}
 
 		for k, v := range headers {
@@ -155,29 +193,209 @@ func WithHeaders(headers map[string]string) aoni.ClientOption {
 	}
 }
 
-// WithoutHeaders removes all default request headers.
+// WithoutHeaders returns an [aoni.ClientOption] purging all default request headers.
 func WithoutHeaders() aoni.ClientOption {
 	return func(cfg *aoni.Config) {
 		cfg.Defaults.Headers = make(http.Header)
 	}
 }
 
-// WithTimeout configures the request deadline.
-func WithTimeout(d time.Duration) aoni.ClientOption {
+// WithUserAgent returns an [aoni.ClientOption] overriding the default User-Agent header field.
+func WithUserAgent(ua string) aoni.ClientOption {
 	return func(cfg *aoni.Config) {
-		cfg.Engine.Timeout = d
+		if cfg.Defaults.Headers == nil {
+			cfg.Defaults.Headers = make(http.Header)
+		}
+
+		cfg.Defaults.Headers.Set("User-Agent", ua)
 	}
 }
 
-// WithAllowedRedirectDomains restricts HTTP redirects to a specified list of trusted domain names.
-func WithAllowedRedirectDomains(domains ...string) aoni.ClientOption {
+// WithUARotationProfiles returns an [aoni.ClientOption] configuring browser profiles for automatic User-Agent rotation.
+func WithUARotationProfiles(profiles []aoni.BrowserProfile) aoni.ClientOption {
 	return func(cfg *aoni.Config) {
-		cfg.Engine.CheckRedirect = aoni.AllowedDomainsRedirectPolicy(domains...)
+		cfg.Defaults.UARotationProfiles = profiles
 	}
 }
 
-// WithProfileVariant configures the TLS fingerprint, HTTP/2 setting frames,
-// and default browser headers to match the provided custom browser profile variant.
+// WithOrigin returns an [aoni.ClientOption] setting a default Origin header.
+func WithOrigin(origin string) aoni.ClientOption {
+	return func(cfg *aoni.Config) {
+		if cfg.Defaults.Headers == nil {
+			cfg.Defaults.Headers = make(http.Header)
+		}
+
+		cfg.Defaults.Headers.Set("Origin", origin)
+	}
+}
+
+// WithBearer returns an [aoni.ClientOption] setting a default "Authorization: Bearer <token>" header.
+func WithBearer(token string) aoni.ClientOption {
+	return func(cfg *aoni.Config) {
+		if cfg.Defaults.Headers == nil {
+			cfg.Defaults.Headers = make(http.Header)
+		}
+
+		cfg.Defaults.Headers.Set("Authorization", "Bearer "+token)
+	}
+}
+
+// WithBasicAuth returns an [aoni.ClientOption] setting default HTTP Basic Authentication credentials.
+func WithBasicAuth(username, password string) aoni.ClientOption {
+	return func(cfg *aoni.Config) {
+		if cfg.Defaults.Headers == nil {
+			cfg.Defaults.Headers = make(http.Header)
+		}
+
+		auth := username + ":" + password
+		cfg.Defaults.Headers.Set(
+			"Authorization",
+			"Basic "+base64.StdEncoding.EncodeToString([]byte(auth)),
+		)
+	}
+}
+
+// WithRefererAutomaton returns an [aoni.ClientOption] toggling automatic Referer header tracking across requests.
+func WithRefererAutomaton(enabled bool) aoni.ClientOption {
+	return func(cfg *aoni.Config) {
+		cfg.Defaults.RefererAutomaton = enabled
+	}
+}
+
+// ============================================================================
+// 4. NETWORK, PROXY & DNS OPTIONS
+// ============================================================================
+
+// WithLocalAddr returns an [aoni.ClientOption] binding outgoing TCP connections to a single local IP address.
+func WithLocalAddr(addr string) aoni.ClientOption {
+	return func(cfg *aoni.Config) {
+		rotator, err := ip.NewSourceIPRotator([]string{addr})
+		if err == nil {
+			cfg.Network.SourceRotator = rotator
+		}
+	}
+}
+
+// WithLocalAddrPool returns an [aoni.ClientOption] registering a pool of local IP addresses to cycle through.
+func WithLocalAddrPool(addrs []string) aoni.ClientOption {
+	return func(cfg *aoni.Config) {
+		rotator, err := ip.NewSourceIPRotator(addrs)
+		if err == nil {
+			cfg.Network.SourceRotator = rotator
+		}
+	}
+}
+
+// WithProxy returns an [aoni.ClientOption] configuring a proxy server URL.
+func WithProxy(proxyURL *url.URL) aoni.ClientOption {
+	return func(cfg *aoni.Config) {
+		cfg.Network.ProxyAddr = proxyURL
+		if proxyURL != nil {
+			cfg.Network.TransportProxy = http.ProxyURL(proxyURL)
+		}
+	}
+}
+
+// WithProxyString returns an [aoni.ClientOption] parsing and setting a proxy URL string.
+func WithProxyString(proxyStr string) aoni.ClientOption {
+	return func(cfg *aoni.Config) {
+		u, err := proxy.Parse(proxyStr)
+		if err != nil {
+			cfg.Network.ProxyAddr = nil
+			cfg.Network.TransportProxy = nil
+			return
+		}
+
+		cfg.Network.ProxyAddr = u
+		cfg.Network.TransportProxy = http.ProxyURL(u)
+	}
+}
+
+// WithProxyDNS returns an [aoni.ClientOption] routing DNS resolutions through SOCKS5 or HTTP CONNECT proxies.
+func WithProxyDNS() aoni.ClientOption {
+	return func(cfg *aoni.Config) {
+		cfg.Network.ProxyDNS = true
+	}
+}
+
+// WithDNSResolver returns an [aoni.ClientOption] replacing the default system DNS resolver with an [aoni.DNSResolver].
+func WithDNSResolver(resolver aoni.DNSResolver) aoni.ClientOption {
+	return func(cfg *aoni.Config) {
+		cfg.Network.DNSResolver = resolver
+	}
+}
+
+// WithHostRewrite returns an [aoni.ClientOption] configuring DNS hostname-to-IP remapping rules.
+func WithHostRewrite(rules map[string]string) aoni.ClientOption {
+	return func(cfg *aoni.Config) {
+		cfg.Network.HostRewrite = &aoni.HostRewriteConfig{Rules: rules}
+	}
+}
+
+// WithHappyEyeballs returns an [aoni.ClientOption] configuring IPv4/IPv6 stagger delay.
+func WithHappyEyeballs(delay time.Duration) aoni.ClientOption {
+	return func(cfg *aoni.Config) {
+		cfg.Network.HappyEyeballsDelay = delay
+	}
+}
+
+// WithSSRFGuard returns an [aoni.ClientOption] enabling SSRF safeguards against private and loopback IP addresses.
+func WithSSRFGuard() aoni.ClientOption {
+	return func(cfg *aoni.Config) {
+		cfg.Network.SSRFGuard = true
+	}
+}
+
+// WithTCPDelay returns an [aoni.ClientOption] setting default pre-dial TCP delay jitter bounds.
+func WithTCPDelay(min, max time.Duration) aoni.ClientOption {
+	minDelay, maxDelay := min, max
+	if minDelay > maxDelay {
+		minDelay, maxDelay = maxDelay, minDelay
+	}
+
+	return func(cfg *aoni.Config) {
+		cfg.Defaults.DefaultMods = append(cfg.Defaults.DefaultMods, mod.WithTCPDelay(minDelay, maxDelay))
+	}
+}
+
+// WithFragmentation returns an [aoni.ClientOption] configuring TCP packet fragmentation parameters.
+func WithFragmentation(frag aoni.FragmentConfig) aoni.ClientOption {
+	return func(cfg *aoni.Config) {
+		cfg.Network.FragmentConfig = &frag
+	}
+}
+
+// WithSocketController returns an [aoni.ClientOption] registering an [aoni.SocketController] socket control hook.
+func WithSocketController(controller aoni.SocketController) aoni.ClientOption {
+	return func(cfg *aoni.Config) {
+		cfg.Network.SocketController = controller
+	}
+}
+
+// ============================================================================
+// 5. FINGERPRINT, TLS & H2/H3 EVASION OPTIONS
+// ============================================================================
+
+// WithTLSFingerprint returns an [aoni.ClientOption] selecting a pre-defined [aoni.BrowserID] uTLS ClientHello profile.
+func WithTLSFingerprint(browser aoni.BrowserID) aoni.ClientOption {
+	return func(cfg *aoni.Config) {
+		if browser == aoni.BrowserNone {
+			return
+		}
+
+		cfg.Fingerprint.BrowserID = browser
+		cfg.Fingerprint.TLSClientHelloID = nil
+	}
+}
+
+// WithTLSClientHelloSpecProvider returns an [aoni.ClientOption] setting a dynamic uTLS spec provider.
+func WithTLSClientHelloSpecProvider(provider aoni.ClientHelloSpecProvider) aoni.ClientOption {
+	return func(cfg *aoni.Config) {
+		cfg.Fingerprint.TLSClientHelloSpecProvider = provider
+	}
+}
+
+// WithProfileVariant returns an [aoni.ClientOption] configuring TLS fingerprints, HTTP/2 SETTINGS, and browser headers from a [profiles.Variant].
 func WithProfileVariant(variant *profiles.Variant, os profiles.OSKey) aoni.ClientOption {
 	return func(cfg *aoni.Config) {
 		if variant == nil {
@@ -193,8 +411,7 @@ func WithProfileVariant(variant *profiles.Variant, os profiles.OSKey) aoni.Clien
 	}
 }
 
-// WithBrowserProfile configures the TLS fingerprint, HTTP/2 setting frames,
-// and default browser headers to match the selected browser profile.
+// WithBrowserProfile returns an [aoni.ClientOption] selecting a pre-defined browser profile for the given operating system.
 func WithBrowserProfile(browser aoni.BrowserID, os profiles.OSKey) aoni.ClientOption {
 	var variant *profiles.Variant
 
@@ -208,366 +425,47 @@ func WithBrowserProfile(browser aoni.BrowserID, os profiles.OSKey) aoni.ClientOp
 	return WithProfileVariant(variant, os)
 }
 
-// WithTCPDelay sets the default TCP connection delay range for all requests.
-func WithTCPDelay(min, max time.Duration) aoni.ClientOption {
-	if min > max {
-		min, max = max, min
-	}
-
-	return func(cfg *aoni.Config) {
-		cfg.Defaults.DefaultMods = append(cfg.Defaults.DefaultMods, mod.WithTCPDelay(min, max))
-	}
-}
-
-// WithRedirectLimit sets the maximum redirect count.
-func WithRedirectLimit(max int) aoni.ClientOption {
-	return func(cfg *aoni.Config) {
-		cfg.Engine.RedirectLimit = max
-	}
-}
-
-// WithLocalAddr configures the local IP address to bind outgoing connections to.
-func WithLocalAddr(addr string) aoni.ClientOption {
-	return func(cfg *aoni.Config) {
-		rotator, err := ip.NewSourceIPRotator([]string{addr})
-		if err == nil {
-			cfg.Network.SourceRotator = rotator
-		}
-	}
-}
-
-// WithHedging configures the request hedging delay.
-func WithHedging(d time.Duration) aoni.ClientOption {
-	return func(cfg *aoni.Config) {
-		cfg.Network.HedgingDelay = d
-	}
-}
-
-// WithDynamicHedging configures dynamic request hedging.
-func WithDynamicHedging(config *telemetry.DynamicHedgingConfig) aoni.ClientOption {
-	return func(cfg *aoni.Config) {
-		if config == nil {
-			dc := telemetry.DefaultDynamicHedgingConfig()
-			cfg.Network.DynamicHedging = &dc
-		} else {
-			cfg.Network.DynamicHedging = config
-		}
-	}
-}
-
-// WithSessionCache enables the TLS session ticket cache.
-func WithSessionCache(cache aoni.SessionCache) aoni.ClientOption {
-	return func(cfg *aoni.Config) {
-		cfg.Fingerprint.SessionCache = cache
-	}
-}
-
-// WithPacketPadding configures packet padding to obscure segments against DPI.
-func WithPacketPadding(padding fingerprint.PaddingConfig) aoni.ClientOption {
-	return func(cfg *aoni.Config) {
-		cfg.Fingerprint.PacketPadding = &padding
-	}
-}
-
-// WithMaxResponseSize limits the maximum bytes allowed in response bodies.
-func WithMaxResponseSize(size int64) aoni.ClientOption {
-	return func(cfg *aoni.Config) {
-		cfg.Defaults.MaxResponseSize = size
-	}
-}
-
-// WithSSRFGuard enables SSRF protection by blocking requests resolving to private/loopback IPs.
-func WithSSRFGuard() aoni.ClientOption {
-	return func(cfg *aoni.Config) {
-		cfg.Network.SSRFGuard = true
-	}
-}
-
-// WithHappyEyeballs configures the staggered Happy Eyeballs delay.
-func WithHappyEyeballs(delay time.Duration) aoni.ClientOption {
-	return func(cfg *aoni.Config) {
-		cfg.Network.HappyEyeballsDelay = delay
-	}
-}
-
-// WithMultiReadBodyThreshold sets the multi-read threshold in bytes.
-func WithMultiReadBodyThreshold(threshold int64) aoni.ClientOption {
-	return func(cfg *aoni.Config) {
-		cfg.Defaults.MultiReadThreshold = threshold
-	}
-}
-
-// WithMultiReadDisableDisk disables disk fallbacks when multi-read cache limit is reached.
-func WithMultiReadDisableDisk(disable bool) aoni.ClientOption {
-	return func(cfg *aoni.Config) {
-		cfg.Defaults.MultiReadDisableDisk = disable
-	}
-}
-
-// WithLocalAddrPool registers a list of local IP addresses to cycle through.
-func WithLocalAddrPool(addrs []string) aoni.ClientOption {
-	return func(cfg *aoni.Config) {
-		rotator, err := ip.NewSourceIPRotator(addrs)
-		if err == nil {
-			cfg.Network.SourceRotator = rotator
-		}
-	}
-}
-
-// WithDNSResolver sets the resolver for hostname DNS lookup.
-func WithDNSResolver(resolver aoni.DNSResolver) aoni.ClientOption {
-	return func(cfg *aoni.Config) {
-		cfg.Network.DNSResolver = resolver
-	}
-}
-
-// WithInspector configures the local developer traffic inspector.
-func WithInspector(inspector aoni.TrafficInspector) aoni.ClientOption {
-	return func(cfg *aoni.Config) {
-		cfg.Defaults.Inspector = inspector
-	}
-}
-
-// WithChallengeDetector registers a challenge detector (e.g. Cloudflare detection).
-func WithChallengeDetector(detector aoni.ChallengeDetector) aoni.ClientOption {
-	return func(cfg *aoni.Config) {
-		cfg.Defaults.ChallengeDetector = detector
-	}
-}
-
-// WithChallengeSolver configures a custom challenge solver to solve javascript/WAF checks.
-func WithChallengeSolver(solver aoni.ChallengeSolver) aoni.ClientOption {
-	return func(cfg *aoni.Config) {
-		cfg.Defaults.ChallengeSolver = solver
-	}
-}
-
-// WithBeforeRequest registers a hook running prior to outgoing requests.
-func WithBeforeRequest(hook func(req *http.Request)) aoni.ClientOption {
-	return func(cfg *aoni.Config) {
-		cfg.Defaults.BeforeRequest = append(cfg.Defaults.BeforeRequest, hook)
-	}
-}
-
-// WithAfterResponse registers a hook running after every request completion.
-func WithAfterResponse(hook func(resp *http.Response, err error)) aoni.ClientOption {
-	return func(cfg *aoni.Config) {
-		cfg.Defaults.AfterResponse = append(cfg.Defaults.AfterResponse, hook) //nolint:bodyclose
-	}
-}
-
-// WithUserAgent sets the default User-Agent request header.
-func WithUserAgent(ua string) aoni.ClientOption {
-	return func(cfg *aoni.Config) {
-		cfg.Defaults.Headers.Set("User-Agent", ua)
-	}
-}
-
-// WithOrigin sets the default Origin request header.
-func WithOrigin(origin string) aoni.ClientOption {
-	return func(cfg *aoni.Config) {
-		cfg.Defaults.Headers.Set("Origin", origin)
-	}
-}
-
-// WithBearer sets the default Bearer token Authorization header.
-func WithBearer(token string) aoni.ClientOption {
-	return func(cfg *aoni.Config) {
-		cfg.Defaults.Headers.Set("Authorization", "Bearer "+token)
-	}
-}
-
-// WithBasicAuth sets the default Basic authentication Authorization header.
-func WithBasicAuth(username, password string) aoni.ClientOption {
-	return func(cfg *aoni.Config) {
-		cfg.Defaults.Headers.Set(
-			"Authorization",
-			"Basic "+base64.StdEncoding.EncodeToString([]byte(username+":"+password)),
-		)
-	}
-}
-
-// WithCookieJar sets the CookieJar for request cookies.
-func WithCookieJar(jar http.CookieJar) aoni.ClientOption {
-	return func(cfg *aoni.Config) {
-		cfg.Engine.CookieJar = jar
-	}
-}
-
-// WithCookieJanitor enables automatic periodic background purging of expired cookies
-// for the client's cookie jar at the specified interval.
-func WithCookieJanitor(ctx context.Context, interval time.Duration) aoni.ClientOption {
-	return func(cfg *aoni.Config) {
-		if pJar, ok := cfg.Engine.CookieJar.(*cookie.ProxyIsolatedJar); ok {
-			pJar.StartJanitor(ctx, interval)
-		}
-	}
-}
-
-// WithConnectionPool configures TCP connection pool limits.
-func WithConnectionPool(pool aoni.ConnectionPoolConfig) aoni.ClientOption {
-	return func(cfg *aoni.Config) {
-		cfg.Engine.ConnectionPool = &pool
-	}
-}
-
-// WithInsecureSkipVerify disables TLS certificate verification globally.
-func WithInsecureSkipVerify() aoni.ClientOption {
-	return func(cfg *aoni.Config) {
-		cfg.Engine.InsecureSkipVerify = true
-	}
-}
-
-// WithTLSFingerprint sets the uTLS BrowserID profile.
-func WithTLSFingerprint(browser aoni.BrowserID) aoni.ClientOption {
-	return func(cfg *aoni.Config) {
-		if browser == aoni.BrowserNone {
-			return
-		}
-
-		cfg.Fingerprint.BrowserID = browser
-		cfg.Fingerprint.TLSClientHelloID = nil
-	}
-}
-
-// WithTLSClientHelloSpecProvider configures a custom spec provider for handshakes.
-func WithTLSClientHelloSpecProvider(provider aoni.ClientHelloSpecProvider) aoni.ClientOption {
-	return func(cfg *aoni.Config) {
-		cfg.Fingerprint.TLSClientHelloSpecProvider = provider
-	}
-}
-
-// WithJA4Callback sets the callback executed with computed JA4 reports.
-func WithJA4Callback(fn func(ja4.Report)) aoni.ClientOption {
-	return func(cfg *aoni.Config) {
-		cfg.Fingerprint.JA4Callback = fn
-	}
-}
-
-// WithFragmentation configures TCP packet segmentation properties.
-func WithFragmentation(frag aoni.FragmentConfig) aoni.ClientOption {
-	return func(cfg *aoni.Config) {
-		cfg.Network.FragmentConfig = &frag
-	}
-}
-
-// WithHostRewrite sets DNS rewrite rules for SNI vs destination routing.
-func WithHostRewrite(rules map[string]string) aoni.ClientOption {
-	return func(cfg *aoni.Config) {
-		cfg.Network.HostRewrite = &aoni.HostRewriteConfig{Rules: rules}
-	}
-}
-
-// WithSettings sets local HTTP/2 connection settings.
+// WithSettings returns an [aoni.ClientOption] setting custom HTTP/2 SETTINGS frame parameters.
 func WithSettings(settings h2.Settings) aoni.ClientOption {
 	return func(cfg *aoni.Config) {
 		cfg.Fingerprint.H2Settings = &settings
 	}
 }
 
-// WithH2FramedTransport enables H2 transport wrapper to inject custom SETTINGS/PRIORITY frames.
+// WithH2FramedTransport is an alias for [WithSettings].
 func WithH2FramedTransport(settings h2.Settings) aoni.ClientOption {
-	return func(cfg *aoni.Config) {
-		cfg.Fingerprint.H2Settings = &settings
-	}
+	return WithSettings(settings)
 }
 
-// WithProfileH2Settings extracts H2 transport settings from profiles.
+// WithProfileH2Settings returns an [aoni.ClientOption] extracting HTTP/2 transport parameters from a [profiles.H2Settings].
 func WithProfileH2Settings(s profiles.H2Settings) aoni.ClientOption {
 	return func(cfg *aoni.Config) {
 		cfg.Fingerprint.H2Settings = h2.SettingsFromProfile(s)
 	}
 }
 
-// WithP0fSignature sets p0f stack signatures for TCP/IP emulation.
-func WithP0fSignature(sig *p0f.Signature) aoni.ClientOption {
-	return func(cfg *aoni.Config) {
-		cfg.Fingerprint.P0fSignature = sig
-	}
-}
-
-// WithSocketController registers a controller intercepting outbound socket descriptors.
-func WithSocketController(controller aoni.SocketController) aoni.ClientOption {
-	return func(cfg *aoni.Config) {
-		cfg.Network.SocketController = controller
-	}
-}
-
-// WithHTTP2Configurer configures underlying HTTP/2 parameters.
-func WithHTTP2Configurer(configurer aoni.HTTP2Configurer) aoni.ClientOption {
-	return func(cfg *aoni.Config) {
-		cfg.Fingerprint.H2Configurer = configurer
-	}
-}
-
-// WithProxyDNS configures DNS resolving via SOCKS5/HTTP Connect proxies.
-func WithProxyDNS() aoni.ClientOption {
-	return func(cfg *aoni.Config) {
-		cfg.Network.ProxyDNS = true
-	}
-}
-
-// WithProxy configures proxy server destination.
-func WithProxy(proxyURL *url.URL) aoni.ClientOption {
-	return func(cfg *aoni.Config) {
-		cfg.Network.ProxyAddr = proxyURL
-		if proxyURL != nil {
-			cfg.Network.TransportProxy = http.ProxyURL(proxyURL)
-		}
-	}
-}
-
-// WithProxyString configures proxy destination parsing from string formats.
-func WithProxyString(proxyStr string) aoni.ClientOption {
-	return func(cfg *aoni.Config) {
-		u, err := proxy.Parse(proxyStr)
-		if err == nil {
-			cfg.Network.ProxyAddr = u
-			cfg.Network.TransportProxy = http.ProxyURL(u)
-		} else {
-			cfg.Network.ProxyAddr = nil
-			cfg.Network.TransportProxy = nil
-		}
-	}
-}
-
-// WithHTTP3Settings configures HTTP/3 QUIC connection parameters.
+// WithHTTP3Settings returns an [aoni.ClientOption] setting custom HTTP/3 QUIC connection parameters.
 func WithHTTP3Settings(settings h3.Settings) aoni.ClientOption {
 	return func(cfg *aoni.Config) {
 		cfg.Fingerprint.H3Settings = &settings
 	}
 }
 
-// WithRefererAutomaton enables automatic Referer header tracking.
-func WithRefererAutomaton(enabled bool) aoni.ClientOption {
+// WithP0fSignature returns an [aoni.ClientOption] setting a [p0f.Signature] for OS TCP/IP stack emulation.
+func WithP0fSignature(sig *p0f.Signature) aoni.ClientOption {
 	return func(cfg *aoni.Config) {
-		cfg.Defaults.RefererAutomaton = enabled
+		cfg.Fingerprint.P0fSignature = sig
 	}
 }
 
-// WithEngine replaces the raw underlying HTTPDoer engine.
-func WithEngine(engine aoni.HTTPDoer) aoni.ClientOption {
+// WithSessionCache returns an [aoni.ClientOption] assigning an isolated proxy-aware TLS [aoni.SessionCache].
+func WithSessionCache(cache aoni.SessionCache) aoni.ClientOption {
 	return func(cfg *aoni.Config) {
-		cfg.Engine.CustomEngine = engine
+		cfg.Fingerprint.SessionCache = cache
 	}
 }
 
-// WithPipeline configures the client-level default pipeline settings.
-func WithPipeline(pipe aoni.PipelineConfig) aoni.ClientOption {
-	return func(cfg *aoni.Config) {
-		cfg.Defaults.Pipeline = pipe
-	}
-}
-
-// WithResponseValidator sets the default response validator for all requests.
-func WithResponseValidator(fn func(*http.Response) error) aoni.ClientOption {
-	return func(cfg *aoni.Config) {
-		cfg.Defaults.ResponseValidator = fn
-	}
-}
-
-// WithCertificatePin returns a ClientOption that pins the certificate of the given domain
-// to the specified public key SHA-256 fingerprint hash globally for all requests sent by this client.
+// WithCertificatePin returns an [aoni.ClientOption] pinning SHA-256 public key hashes globally for a domain.
 func WithCertificatePin(domain, hash string) aoni.ClientOption {
 	return func(cfg *aoni.Config) {
 		if cfg.Fingerprint.CertificatePins == nil {
@@ -578,12 +476,11 @@ func WithCertificatePin(domain, hash string) aoni.ClientOption {
 	}
 }
 
-// WithCertificatePins returns a ClientOption that registers a map of domains to their
-// respective public key SHA-256 fingerprint hashes globally for all requests sent by this client.
+// WithCertificatePins returns an [aoni.ClientOption] registering a map of domain certificate pins globally.
 func WithCertificatePins(pins map[string][]string) aoni.ClientOption {
 	return func(cfg *aoni.Config) {
 		if cfg.Fingerprint.CertificatePins == nil {
-			cfg.Fingerprint.CertificatePins = make(map[string][]string)
+			cfg.Fingerprint.CertificatePins = make(map[string][]string, len(pins))
 		}
 
 		for domain, hashes := range pins {
@@ -592,9 +489,158 @@ func WithCertificatePins(pins map[string][]string) aoni.ClientOption {
 	}
 }
 
-// WithUARotationProfiles sets the list of browser profiles for User-Agent rotation.
-func WithUARotationProfiles(profiles []aoni.BrowserProfile) aoni.ClientOption {
+// WithPacketPadding returns an [aoni.ClientOption] configuring random packet padding headers to confuse DPI length analysis.
+func WithPacketPadding(padding fingerprint.PaddingConfig) aoni.ClientOption {
 	return func(cfg *aoni.Config) {
-		cfg.Defaults.UARotationProfiles = profiles
+		cfg.Fingerprint.PacketPadding = &padding
+	}
+}
+
+// WithJA4Callback returns an [aoni.ClientOption] setting a callback triggered with computed [ja4.Report] signatures.
+func WithJA4Callback(fn func(ja4.Report)) aoni.ClientOption {
+	return func(cfg *aoni.Config) {
+		cfg.Fingerprint.JA4Callback = fn
+	}
+}
+
+// ============================================================================
+// 6. PIPELINE, RESILIENCE, CACHE & BUFFER OPTIONS
+// ============================================================================
+
+// WithPipeline returns an [aoni.ClientOption] setting default pipeline configurations.
+func WithPipeline(pipe aoni.PipelineConfig) aoni.ClientOption {
+	return func(cfg *aoni.Config) {
+		cfg.Defaults.Pipeline = pipe
+	}
+}
+
+// WithHedging returns an [aoni.ClientOption] configuring request hedging delay.
+func WithHedging(d time.Duration) aoni.ClientOption {
+	return func(cfg *aoni.Config) {
+		cfg.Network.HedgingDelay = d
+	}
+}
+
+// WithDynamicHedging returns an [aoni.ClientOption] configuring dynamic RTT-percentile request hedging.
+func WithDynamicHedging(config *telemetry.DynamicHedgingConfig) aoni.ClientOption {
+	return func(cfg *aoni.Config) {
+		if config == nil {
+			dc := telemetry.DefaultDynamicHedgingConfig()
+			cfg.Network.DynamicHedging = &dc
+			return
+		}
+
+		cfg.Network.DynamicHedging = config
+	}
+}
+
+// WithMaxResponseSize returns an [aoni.ClientOption] limiting response body consumption in bytes.
+func WithMaxResponseSize(size int64) aoni.ClientOption {
+	return func(cfg *aoni.Config) {
+		cfg.Defaults.MaxResponseSize = size
+	}
+}
+
+// WithMultiReadBodyThreshold returns an [aoni.ClientOption] setting RAM buffering bounds for replayable reads.
+func WithMultiReadBodyThreshold(threshold int64) aoni.ClientOption {
+	return func(cfg *aoni.Config) {
+		cfg.Defaults.MultiReadThreshold = threshold
+	}
+}
+
+// WithMultiReadDisableDisk returns an [aoni.ClientOption] disabling temporary file disk backing on multi-read buffer overflows.
+func WithMultiReadDisableDisk(disable bool) aoni.ClientOption {
+	return func(cfg *aoni.Config) {
+		cfg.Defaults.MultiReadDisableDisk = disable
+	}
+}
+
+// WithResponseValidator returns an [aoni.ClientOption] setting default response validation functions.
+func WithResponseValidator(fn func(*http.Response) error) aoni.ClientOption {
+	return func(cfg *aoni.Config) {
+		cfg.Defaults.ResponseValidator = fn
+	}
+}
+
+// WithCookieJar returns an [aoni.ClientOption] overriding default cookie storage.
+func WithCookieJar(jar http.CookieJar) aoni.ClientOption {
+	return func(cfg *aoni.Config) {
+		cfg.Engine.CookieJar = jar
+	}
+}
+
+// WithCookieJanitor returns an [aoni.ClientOption] enabling background cookie purging for [cookie.ProxyIsolatedJar].
+func WithCookieJanitor(ctx context.Context, interval time.Duration) aoni.ClientOption {
+	return func(cfg *aoni.Config) {
+		if pJar, ok := cfg.Engine.CookieJar.(*cookie.ProxyIsolatedJar); ok {
+			pJar.StartJanitor(ctx, interval)
+		}
+	}
+}
+
+// ============================================================================
+// 7. HOOKS, OBSERVABILITY & CHALLENGE OPTIONS
+// ============================================================================
+
+// WithBeforeRequest returns an [aoni.ClientOption] registering a hook function executed before dispatching outgoing requests.
+func WithBeforeRequest(hook func(req *http.Request)) aoni.ClientOption {
+	return func(cfg *aoni.Config) {
+		cfg.Defaults.BeforeRequest = append(cfg.Defaults.BeforeRequest, hook)
+	}
+}
+
+// WithAfterResponse returns an [aoni.ClientOption] registering a hook function executed after response completion.
+func WithAfterResponse(hook func(resp *http.Response, err error)) aoni.ClientOption {
+	return func(cfg *aoni.Config) {
+		cfg.Defaults.AfterResponse = append(cfg.Defaults.AfterResponse, hook) //nolint:bodyclose
+	}
+}
+
+// WithModifiers returns an [aoni.ClientOption] registering default request modifiers executed on every request.
+func WithModifiers(mods ...aoni.RequestModifier) aoni.ClientOption {
+	return func(cfg *aoni.Config) {
+		cfg.Defaults.DefaultMods = append(cfg.Defaults.DefaultMods, mods...)
+	}
+}
+
+// WithLogger returns an [aoni.ClientOption] assigning a diagnostic [aoni.Logger].
+func WithLogger(l aoni.Logger) aoni.ClientOption {
+	return func(cfg *aoni.Config) {
+		cfg.Defaults.Logger = l
+	}
+}
+
+// WithQueryEncoder returns an [aoni.ClientOption] setting a default query parameters encoder.
+func WithQueryEncoder(encoder aoni.QueryEncoder) aoni.ClientOption {
+	return func(cfg *aoni.Config) {
+		cfg.Defaults.QueryEncoder = encoder
+	}
+}
+
+// WithBaseResponse returns an [aoni.ClientOption] setting a response provider for structured API response unwrapping.
+func WithBaseResponse(provider func() aoni.BaseResponse) aoni.ClientOption {
+	return func(cfg *aoni.Config) {
+		cfg.Defaults.BaseResponse = provider
+	}
+}
+
+// WithInspector returns an [aoni.ClientOption] assigning an [aoni.TrafficInspector] diagnostic capturer.
+func WithInspector(inspector aoni.TrafficInspector) aoni.ClientOption {
+	return func(cfg *aoni.Config) {
+		cfg.Defaults.Inspector = inspector
+	}
+}
+
+// WithChallengeDetector returns an [aoni.ClientOption] registering an [aoni.ChallengeDetector] WAF challenge detector.
+func WithChallengeDetector(detector aoni.ChallengeDetector) aoni.ClientOption {
+	return func(cfg *aoni.Config) {
+		cfg.Defaults.ChallengeDetector = detector
+	}
+}
+
+// WithChallengeSolver returns an [aoni.ClientOption] registering an [aoni.ChallengeSolver] WAF challenge solver.
+func WithChallengeSolver(solver aoni.ChallengeSolver) aoni.ClientOption {
+	return func(cfg *aoni.Config) {
+		cfg.Defaults.ChallengeSolver = solver
 	}
 }

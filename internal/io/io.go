@@ -1,6 +1,6 @@
 // Copyright (c) 2026 Lemon4ksan All rights reserved.
 // Use of this source code is governed by a BSD-style
-// license can be found in the LICENSE file.
+// license that can be found in the LICENSE file.
 
 // Package io provides high-performance streaming I/O wrappers and response body decorators.
 package io
@@ -22,17 +22,16 @@ import (
 )
 
 var (
-	// ErrBufferLimitExceeded indicates that replayable payload size exceeded the RAM threshold with disk caching disabled.
+	// ErrBufferLimitExceeded indicates that replayable payload size exceeded RAM bounds with disk backing disabled.
 	ErrBufferLimitExceeded = errors.New("aoni: replayable buffer threshold exceeded")
 
-	// ErrResponseTooLarge indicates that response payload length exceeded configured max limits.
+	// ErrResponseTooLarge indicates that response payload length exceeded configured maximum bounds.
 	ErrResponseTooLarge = errors.New("aoni: response size limit exceeded")
 )
 
 // ProgressFunc reports periodic stream transfer progress (current bytes and total Content-Length).
 type ProgressFunc func(current, total int64)
 
-// Cap pooled buffers at 64 KB to prevent sync.Pool memory bloat during large stream reads.
 const maxPoolBufferSize = 64 * 1024
 
 var copyBufPool = sync.Pool{
@@ -42,11 +41,7 @@ var copyBufPool = sync.Pool{
 	},
 }
 
-// CopyZeroAlloc streams data from r to w using zero-copy paths or pooled 32KB buffers.
-//
-// If w or r satisfy [io.ReaderFrom] or [io.WriterTo] (such as *os.File or *net.TCPConn),
-// execution delegates to the OS kernel (e.g. sendfile/splice syscalls).
-// Otherwise, it recycles a 32KB buffer from an internal pool to eliminate heap allocations.
+// CopyZeroAlloc streams data from r to w using kernel zero-copy paths or pooled 32KB buffers.
 func CopyZeroAlloc(w io.Writer, r io.Reader) (int64, error) {
 	if r == nil || w == nil {
 		return 0, nil
@@ -85,7 +80,7 @@ func UnwrapBody(c io.Closer) io.Closer {
 	return curr
 }
 
-// UnwrapTo traverses the decorator chain c and returns the first layer satisfying target type T.
+// UnwrapTo traverses decorator chain c and returns the first layer satisfying target type T.
 func UnwrapTo[T any](c io.Closer) (T, bool) {
 	curr := c
 	for {
@@ -104,7 +99,7 @@ func UnwrapTo[T any](c io.Closer) (T, bool) {
 	return generic.Zero[T](), false
 }
 
-// ReadAllString reads the full stream content into a string and resets the reader position.
+// ReadAllString reads stream content into a string and resets the reader position.
 func ReadAllString(rb ReplayableBody) (string, error) {
 	if rb == nil {
 		return "", nil
@@ -120,7 +115,7 @@ func ReadAllString(rb ReplayableBody) (string, error) {
 	return string(b), nil
 }
 
-// ReadAllBytes reads the full stream content into a byte slice and resets the reader position.
+// ReadAllBytes reads stream content into a byte slice and resets the reader position.
 func ReadAllBytes(rb ReplayableBody) ([]byte, error) {
 	if rb == nil {
 		return nil, nil
@@ -136,7 +131,7 @@ func ReadAllBytes(rb ReplayableBody) ([]byte, error) {
 	return b, nil
 }
 
-// ExplicitBufferedBody wraps a response stream carrying a pre-buffered prefix buffer.
+// ExplicitBufferedBody wraps a response stream carrying a pre-buffered byte prefix buffer.
 type ExplicitBufferedBody struct {
 	Stream io.ReadCloser
 	reader io.Reader
@@ -161,7 +156,7 @@ func (e *ExplicitBufferedBody) Rewind() {
 	e.reader = io.MultiReader(bytes.NewReader(e.Prefix), e.Stream)
 }
 
-// BufferedPrefix returns the buffered prefix bytes.
+// BufferedPrefix returns the pre-buffered prefix bytes.
 func (e *ExplicitBufferedBody) BufferedPrefix() []byte {
 	return e.Prefix
 }
@@ -172,7 +167,7 @@ type ReplayableBody interface {
 	Reset()
 }
 
-// AsReplayable wraps rc into a [ReplayableBody] using active buffers or in-memory tee fallback.
+// AsReplayable wraps rc into a [ReplayableBody] using active buffers or tee-buffered fallback.
 func AsReplayable(rc io.ReadCloser) ReplayableBody {
 	if rc == nil {
 		return nil
@@ -201,7 +196,7 @@ func AsReplayable(rc io.ReadCloser) ReplayableBody {
 	}
 }
 
-// ProgressReader invokes OnProgress callbacks as data is read from the stream.
+// ProgressReader invokes [ProgressFunc] callbacks as data is read from the stream.
 type ProgressReader struct {
 	io.Reader
 	OnProgress ProgressFunc
@@ -219,7 +214,7 @@ func (pr *ProgressReader) Read(p []byte) (int, error) {
 	return n, err
 }
 
-// Close closes the underlying reader and returns any error.
+// Close closes the underlying reader if it implements [io.Closer].
 func (pr *ProgressReader) Close() error {
 	if closer, ok := pr.Reader.(io.Closer); ok {
 		return closer.Close()
@@ -272,7 +267,7 @@ var gzipReaderPool = sync.Pool{
 	},
 }
 
-// NewPooledGzipReader retrieves a reset *gzip.Reader from sync.Pool without allocations.
+// NewPooledGzipReader retrieves a reset [*gzip.Reader] from [sync.Pool] without heap allocations.
 func NewPooledGzipReader(r io.Reader) (io.ReadCloser, error) {
 	gr := gzipReaderPool.Get().(*gzip.Reader)
 	if err := gr.Reset(r); err != nil {
@@ -311,7 +306,7 @@ func (p *pooledGzipReadCloser) Unwrap() io.Closer {
 	return nil
 }
 
-// LimitCheckingReadCloser caps maximum byte consumption and returns [ErrResponseTooLarge] on overflow.
+// LimitCheckingReadCloser caps byte consumption and returns [ErrResponseTooLarge] on overflow.
 type LimitCheckingReadCloser struct {
 	io.ReadCloser
 	Limit int64
@@ -331,7 +326,7 @@ func (l *LimitCheckingReadCloser) Read(p []byte) (int, error) {
 
 func (l *LimitCheckingReadCloser) Unwrap() io.Closer { return l.ReadCloser }
 
-// ResponseBodyReadCloser manages response stream cleanup.
+// ResponseBodyReadCloser manages response stream teardown.
 type ResponseBodyReadCloser struct {
 	io.ReadCloser
 }
@@ -398,14 +393,7 @@ func createDiskBackedMultiReadBody(rc io.ReadCloser, initialBytes []byte) (io.Re
 		return nil, err
 	}
 
-	if _, err := tmpFile.Write(initialBytes); err != nil {
-		_ = tmpFile.Close()
-		_ = os.Remove(tmpFile.Name())
-
-		return nil, err
-	}
-
-	if _, err := CopyZeroAlloc(tmpFile, rc); err != nil {
+	if err := writeInitialAndStreamData(tmpFile, rc, initialBytes); err != nil {
 		_ = tmpFile.Close()
 		_ = os.Remove(tmpFile.Name())
 
@@ -425,6 +413,16 @@ func createDiskBackedMultiReadBody(rc io.ReadCloser, initialBytes []byte) (io.Re
 	}, nil
 }
 
+func writeInitialAndStreamData(tmpFile *os.File, rc io.Reader, initialBytes []byte) error {
+	if _, err := tmpFile.Write(initialBytes); err != nil {
+		return err
+	}
+
+	_, err := CopyZeroAlloc(tmpFile, rc)
+
+	return err
+}
+
 func (m *MultiReadBody) Read(p []byte) (int, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -437,8 +435,7 @@ func (m *MultiReadBody) Reset() {
 	_ = m.Close()
 }
 
-// Close resets the read cursor so the body can be read again (multiRead semantics).
-// It does NOT delete temporary files; call ReallyClose for that.
+// Close resets the read cursor so the body can be read again.
 func (m *MultiReadBody) Close() error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -453,14 +450,7 @@ func (m *MultiReadBody) Close() error {
 	return nil
 }
 
-// ReallyClose performs the actual resource teardown: it closes and removes
-// any underlying temporary file from disk.
-//
-// # Preconditions
-//
-// Once ReallyClose is called, the multiReadBody becomes completely unusable
-// and cannot be reset or read again. This method must only be called when
-// the response is no longer needed (e.g., inside closeResponse).
+// ReallyClose performs actual resource teardown: closes and removes temporary files.
 func (m *MultiReadBody) ReallyClose() {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -509,7 +499,7 @@ func (r *JitterReader) Read(p []byte) (int, error) {
 	return r.ReadCloser.Read(p)
 }
 
-// BufferedConn wraps net.Conn with a buffered reader.
+// BufferedConn wraps a [net.Conn] with a buffered reader.
 type BufferedConn struct {
 	net.Conn
 	R *bufio.Reader
@@ -523,7 +513,7 @@ func (c *BufferedConn) Read(b []byte) (int, error) {
 	return c.Conn.Read(b)
 }
 
-// BufioReadCloser wraps a bufio.Reader and an io.Closer.
+// BufioReadCloser wraps a [*bufio.Reader] and an [io.Closer].
 type BufioReadCloser struct {
 	*bufio.Reader
 	Closer io.Closer

@@ -1,6 +1,6 @@
 // Copyright (c) 2026 Lemon4ksan All rights reserved.
 // Use of this source code is governed by a BSD-style
-// license can be found in the LICENSE file.
+// license that can be found in the LICENSE file.
 
 // Package ws implements a resilient, browser-grade WebSocket client built on
 // top of the uTLS/JA4 network evasion pipeline of the aoni engine.
