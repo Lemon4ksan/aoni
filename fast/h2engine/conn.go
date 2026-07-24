@@ -786,6 +786,15 @@ func (c *Conn) readTrailers(b []byte, reqCtx *Context) error {
 	hf := AcquireHeaderField()
 	defer ReleaseHeaderField(hf)
 
+	var (
+		totalSize uint32
+		maxList   = c.current.MaxHeaderListSize()
+	)
+
+	if maxList == 0 {
+		maxList = defaultMaxHeaderListSize
+	}
+
 	if reqCtx.Trailers == nil {
 		reqCtx.Trailers = make(map[string][]string)
 	}
@@ -796,6 +805,11 @@ func (c *Conn) readTrailers(b []byte, reqCtx *Context) error {
 
 		if err != nil {
 			return err
+		}
+
+		totalSize += hf.Size()
+		if totalSize > maxList {
+			return ErrPayloadExceeds
 		}
 
 		if !hf.IsPseudo() && len(hf.KeyBytes()) > 0 {
@@ -818,6 +832,8 @@ func (c *Conn) updateWindow(streamID uint32, size int) {
 	c.out <- fr
 }
 
+const defaultMaxHeaderListSize = 10 * 1024 * 1024
+
 func (c *Conn) readHeader(b []byte, res *fasthttp.Response) (int, error) {
 	hf := AcquireHeaderField()
 	defer ReleaseHeaderField(hf)
@@ -825,12 +841,23 @@ func (c *Conn) readHeader(b []byte, res *fasthttp.Response) (int, error) {
 	var (
 		err        error
 		statusCode int
+		totalSize  uint32
+		maxList    = c.current.MaxHeaderListSize()
 	)
+
+	if maxList == 0 {
+		maxList = defaultMaxHeaderListSize
+	}
 
 	for len(b) > 0 {
 		b, err = c.dec.Next(hf, b)
 		if err != nil {
 			return 0, err
+		}
+
+		totalSize += hf.Size()
+		if totalSize > maxList {
+			return 0, ErrPayloadExceeds
 		}
 
 		if hf.IsPseudo() && len(hf.KeyBytes()) > 1 && hf.KeyBytes()[1] == 's' {
