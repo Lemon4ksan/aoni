@@ -298,6 +298,10 @@ func (c *Client) tryGetFromCache(req *http.Request, cfg *CacheConfig) *http.Resp
 		return nil
 	}
 
+	if !matchVaryHeaders(req, cached.VaryHeaders) {
+		return nil
+	}
+
 	bodyBytes, _ := base64.StdEncoding.DecodeString(cached.BodyBase64)
 
 	return &http.Response{
@@ -309,6 +313,20 @@ func (c *Client) tryGetFromCache(req *http.Request, cfg *CacheConfig) *http.Resp
 	}
 }
 
+func matchVaryHeaders(req *http.Request, varyHeaders map[string]string) bool {
+	if len(varyHeaders) == 0 {
+		return true
+	}
+
+	for k, expectedVal := range varyHeaders {
+		if req.Header.Get(k) != expectedVal {
+			return false
+		}
+	}
+
+	return true
+}
+
 func (c *Client) saveToCache(req *http.Request, resp *http.Response, cfg *CacheConfig) {
 	if req.Method != http.MethodGet || resp == nil || resp.StatusCode != http.StatusOK || cfg == nil ||
 		cfg.Store == nil {
@@ -317,6 +335,11 @@ func (c *Client) saveToCache(req *http.Request, resp *http.Response, cfg *CacheC
 
 	respCC := resp.Header.Get("Cache-Control")
 	if strings.Contains(respCC, "no-store") || strings.Contains(respCC, "private") {
+		return
+	}
+
+	varyHeader := resp.Header.Get("Vary")
+	if varyHeader == "*" {
 		return
 	}
 
@@ -333,9 +356,10 @@ func (c *Client) saveToCache(req *http.Request, resp *http.Response, cfg *CacheC
 	resp.Body = stdio.NopCloser(bytes.NewReader(bodyBytes))
 
 	cached := CachedResponse{
-		StatusCode: resp.StatusCode,
-		Header:     resp.Header,
-		BodyBase64: base64.StdEncoding.EncodeToString(bodyBytes),
+		StatusCode:  resp.StatusCode,
+		Header:      resp.Header,
+		VaryHeaders: extractVaryHeaders(req, varyHeader),
+		BodyBase64:  base64.StdEncoding.EncodeToString(bodyBytes),
 	}
 
 	cachedData, marshalErr := json.Marshal(cached)
@@ -349,6 +373,22 @@ func (c *Client) saveToCache(req *http.Request, resp *http.Response, cfg *CacheC
 	}
 
 	_ = cfg.Store.Set(req.Context(), CacheKey{Method: req.Method, URL: req.URL.String()}, cachedData, ttl)
+}
+
+func extractVaryHeaders(req *http.Request, varyHeader string) map[string]string {
+	if varyHeader == "" {
+		return nil
+	}
+
+	varyMap := make(map[string]string)
+	for p := range strings.SplitSeq(varyHeader, ",") {
+		hName := strings.TrimSpace(p)
+		if hName != "" && hName != "*" {
+			varyMap[hName] = req.Header.Get(hName)
+		}
+	}
+
+	return varyMap
 }
 
 func (c *Client) postProcessResponse(

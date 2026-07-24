@@ -298,9 +298,10 @@ type CacheConfig struct {
 
 // CachedResponse holds a serialized HTTP response stored in cache backends.
 type CachedResponse struct {
-	Header     map[string][]string `json:"header"`
-	BodyBase64 string              `json:"body_base64"`
-	StatusCode int                 `json:"status_code"`
+	Header      map[string][]string `json:"header"`
+	VaryHeaders map[string]string   `json:"vary_headers,omitempty"`
+	BodyBase64  string              `json:"body_base64"`
+	StatusCode  int                 `json:"status_code"`
 }
 
 // PipelineConfig configures request-response execution phases,
