@@ -38,6 +38,8 @@ var (
 	ErrWriterClosed           = errors.New("aoni h2engine: stream writer closed")
 	ErrWrongPreface           = errors.New("aoni h2engine: invalid connection preface")
 	ErrMalformedString        = errors.New("aoni h2engine: malformed HPACK string data")
+	ErrGoAwayRetryable        = errors.New("aoni h2engine: stream affected by GOAWAY frame")
+	ErrControlFrameFlood      = NewGoAwayError(EnhanceYourCalm, "too many consecutive control frames")
 	ErrUnknownFrameType       = NewError(ProtocolError, "unknown frame type")
 	ErrMissingBytes           = NewError(ProtocolError, "missing payload bytes")
 	ErrPayloadExceeds         = NewError(FrameSizeError, "frame payload exceeds negotiated maximum size")
@@ -48,8 +50,7 @@ var (
 	ErrWindowAboveLimits      = NewGoAwayError(FlowControlError, "window is above limits")
 )
 
-// Error encapsulates an HTTP/2 protocol failure, combining the error code,
-// the frame type that caused the failure, and debug metadata.
+// Error encapsulates an HTTP/2 protocol failure.
 type Error struct {
 	code      ErrorCode
 	frameType FrameType

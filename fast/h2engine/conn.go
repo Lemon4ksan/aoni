@@ -20,6 +20,8 @@ import (
 	"github.com/valyala/fasthttp"
 )
 
+const maxConsecutiveControlFrames = 1000
+
 // FrameWithHeaders defines an interface for HTTP/2 frames that carry raw HPACK-encoded header fragments.
 type FrameWithHeaders interface {
 	Headers() []byte
@@ -88,6 +90,29 @@ func (c *Conn) SetOrderedHeaders(keys []string) {
 	c.orderedKeys = keys
 }
 
+// CancelStream terminates an active HTTP/2 stream by transmitting an RST_STREAM frame.
+func (c *Conn) CancelStream(ctx *Context) {
+	if ctx == nil || ctx.StreamID == 0 {
+		return
+	}
+
+	c.reqQueued.Delete(ctx.StreamID)
+	atomic.AddInt32(&c.openStreams, -1)
+
+	fr := AcquireFrameHeader()
+	fr.SetStream(ctx.StreamID)
+
+	rst := AcquireFrame(FrameResetStream).(*RstStream)
+	rst.SetCode(StreamCanceled)
+	fr.SetBody(rst)
+
+	select {
+	case c.out <- fr:
+	default:
+		ReleaseFrameHeader(fr)
+	}
+}
+
 // Handshake performs HTTP/2 connection initialization.
 func (c *Conn) Handshake() error {
 	if err := PerformHandshake(true, c.bw, &c.current, c.maxWindow-65535); err != nil {
@@ -144,29 +169,6 @@ func (c *Conn) sendSettingsAck() {
 // CanOpenStream reports whether the client can open new concurrent streams.
 func (c *Conn) CanOpenStream() bool {
 	return atomic.LoadInt32(&c.openStreams) < int32(c.serverS.maxStreams)
-}
-
-// CancelStream terminates an active HTTP/2 stream by transmitting an RST_STREAM frame.
-func (c *Conn) CancelStream(ctx *Context) {
-	if ctx == nil || ctx.StreamID == 0 {
-		return
-	}
-
-	c.reqQueued.Delete(ctx.StreamID)
-	atomic.AddInt32(&c.openStreams, -1)
-
-	fr := AcquireFrameHeader()
-	fr.SetStream(ctx.StreamID)
-
-	rst := AcquireFrame(FrameResetStream).(*RstStream)
-	rst.SetCode(StreamCanceled)
-	fr.SetBody(rst)
-
-	select {
-	case c.out <- fr:
-	default:
-		ReleaseFrameHeader(fr)
-	}
 }
 
 // Closed reports whether the connection has been closed.
@@ -386,7 +388,6 @@ func (c *Conn) encodeRequestHeaders(h *Headers, req *fasthttp.Request) {
 
 	enc := c.enc
 
-	// 1. Pseudo-headers
 	hf.SetBytes(StringAuthority, req.URI().Host())
 	enc.AppendHeaderField(h, hf, true)
 
@@ -399,11 +400,9 @@ func (c *Conn) encodeRequestHeaders(h *Headers, req *fasthttp.Request) {
 	hf.SetBytes(StringScheme, req.URI().Scheme())
 	enc.AppendHeaderField(h, hf, true)
 
-	// 2. User-Agent
 	hf.SetBytes(StringUserAgent, req.Header.UserAgent())
 	enc.AppendHeaderField(h, hf, true)
 
-	// 3. Regular Headers (with ordered keys support if provided)
 	if len(c.orderedKeys) > 0 {
 		c.appendOrderedHeaders(h, req, hf)
 	} else {
@@ -476,16 +475,30 @@ func (c *Conn) readNext() (*FrameHeader, error) {
 			return nil, err
 		}
 
+		if fr.Type() == FrameData || fr.Type() == FrameHeaders {
+			c.unacks = 0
+		} else {
+			c.unacks++
+			if c.unacks > maxConsecutiveControlFrames {
+				ReleaseFrameHeader(fr)
+				return nil, ErrControlFrameFlood
+			}
+		}
+
 		if fr.Stream() != 0 {
 			return fr, nil
 		}
 
-		c.handleConnectionFrame(fr)
+		if err := c.handleConnectionFrame(fr); err != nil {
+			ReleaseFrameHeader(fr)
+			return nil, err
+		}
+
 		ReleaseFrameHeader(fr)
 	}
 }
 
-func (c *Conn) handleConnectionFrame(fr *FrameHeader) {
+func (c *Conn) handleConnectionFrame(fr *FrameHeader) error {
 	switch fr.Type() {
 	case FrameSettings:
 		st := fr.Body().(*Settings)
@@ -493,8 +506,7 @@ func (c *Conn) handleConnectionFrame(fr *FrameHeader) {
 			c.handleSettings(st)
 		}
 	case FrameWindowUpdate:
-		win := int32(fr.Body().(*WindowUpdate).Increment())
-		atomic.AddInt32(&c.serverWindow, win)
+		return c.handleWindowUpdate(fr)
 	case FramePing:
 		ping := fr.Body().(*Ping)
 		if !ping.IsAck() {
@@ -503,8 +515,56 @@ func (c *Conn) handleConnectionFrame(fr *FrameHeader) {
 			c.unacks--
 		}
 	case FrameGoAway:
-		_ = c.Close()
+		ga := fr.Body().(*GoAway)
+		c.handleGoAway(ga)
 	}
+
+	return nil
+}
+
+func (c *Conn) handleWindowUpdate(fr *FrameHeader) error {
+	wu := fr.Body().(*WindowUpdate)
+	inc := int32(wu.Increment())
+	if inc <= 0 {
+		return ErrInvalidWindowIncrement
+	}
+
+	old := atomic.LoadInt32(&c.serverWindow)
+	if old > 0 && old > (1<<31-1)-inc {
+		return ErrWindowAboveLimits
+	}
+
+	atomic.AddInt32(&c.serverWindow, inc)
+
+	return nil
+}
+
+func (c *Conn) handleGoAway(ga *GoAway) {
+	lastStreamID := ga.Stream()
+
+	c.reqQueued.Range(func(key, value any) bool {
+		streamID, ok := key.(uint32)
+		if !ok {
+			return true
+		}
+
+		reqCtx, ok := value.(*Context)
+		if !ok {
+			return true
+		}
+
+		if streamID > lastStreamID {
+			c.reqQueued.Delete(streamID)
+			select {
+			case reqCtx.Err <- ErrGoAwayRetryable:
+			default:
+			}
+		}
+
+		return true
+	})
+
+	_ = c.Close()
 }
 
 func (c *Conn) writePing() error {
@@ -624,8 +684,8 @@ type Dialer struct {
 	Addr         string
 	TLSConfig    *tls.Config
 	PingInterval time.Duration
-	NetDial      fasthttp.DialFunc // Dial func returning raw TCP conn requiring TLS handshake
-	RawDial      fasthttp.DialFunc // Dial func returning pre-handshaked TLS conn (e.g. uTLS)
+	NetDial      fasthttp.DialFunc
+	RawDial      fasthttp.DialFunc
 }
 
 // Dial creates and performs an HTTP/2 handshake on a new connection.

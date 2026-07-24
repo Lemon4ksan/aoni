@@ -105,7 +105,7 @@ func (cc *ClientConn) readControlStream(r quicvarint.Reader) {
 		}
 
 		if frameType == FrameTypeGoAway {
-			_ = cc.Close()
+			cc.handleGoAway(r, payloadLen)
 			return
 		}
 
@@ -113,6 +113,14 @@ func (cc *ClientConn) readControlStream(r quicvarint.Reader) {
 			return
 		}
 	}
+}
+
+func (cc *ClientConn) handleGoAway(r quicvarint.Reader, payloadLen uint64) {
+	if payloadLen > 0 {
+		_, _ = quicvarint.Read(r)
+	}
+
+	_ = cc.Close()
 }
 
 // Do executes a fasthttp.Request over a QUIC stream and populates fasthttp.Response.

@@ -25,7 +25,7 @@ type QPACKCodec struct {
 	decoder *qpack.Decoder
 }
 
-// NewQPACKCodec instantiates a new QPACKCodec.
+// NewQPACKCodec instantiates a new QPACKCodec with default table capacities.
 func NewQPACKCodec() *QPACKCodec {
 	return &QPACKCodec{
 		decoder: qpack.NewDecoder(),

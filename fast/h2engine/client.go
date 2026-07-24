@@ -7,6 +7,7 @@ package h2engine
 import (
 	"container/list"
 	"context"
+	"errors"
 	"sync"
 	"time"
 
@@ -81,15 +82,29 @@ func (cl *Client) createConn() (*Conn, *list.Element, error) {
 	return c, cl.conns.PushFront(c), nil
 }
 
-// Do executes req over an available HTTP/2 stream and writes the result into res.
+// Do executes req over an available HTTP/2 stream, automatically retrying
+// on a fresh connection if affected by a graceful GOAWAY frame (RFC 7540 Section 6.8).
 //
 // Postconditions:
-//   - Immediately cancels stream execution if ctx expires before completion.
+//   - Retries transparently up to 3 times on new connections when GOAWAY is received.
 func (cl *Client) Do(ctx context.Context, req *fasthttp.Request, res *fasthttp.Response) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
 
+	for range 3 {
+		err := cl.doOnce(ctx, req, res)
+		if errors.Is(err, ErrGoAwayRetryable) {
+			continue
+		}
+
+		return err
+	}
+
+	return ErrGoAwayRetryable
+}
+
+func (cl *Client) doOnce(ctx context.Context, req *fasthttp.Request, res *fasthttp.Response) error {
 	conn, err := cl.selectConn()
 	if err != nil {
 		return err
