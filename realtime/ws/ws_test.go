@@ -27,6 +27,7 @@ import (
 
 	"github.com/lemon4ksan/aoni"
 	"github.com/lemon4ksan/aoni/mod"
+	"github.com/lemon4ksan/aoni/netutil/fragment"
 	"github.com/lemon4ksan/aoni/option"
 	"github.com/lemon4ksan/aoni/telemetry"
 )
@@ -326,7 +327,7 @@ func TestDialWebSocket_WithFragmentation(t *testing.T) {
 	wsURL := "ws" + strings.TrimPrefix(server.URL, "http")
 	client := aoni.NewClient(nil)
 
-	fragCfg := aoni.FragmentConfig{
+	fragCfg := fragment.Config{
 		ChunkSize: 2,
 		MaxDelay:  1 * time.Millisecond,
 	}

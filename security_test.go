@@ -11,6 +11,8 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/lemon4ksan/aoni/netutil/fragment"
 )
 
 func TestWrapWithMSSLimit_NegativeMSS(t *testing.T) {
@@ -29,11 +31,11 @@ func TestFragmentedConn_Write(t *testing.T) {
 	c1, c2 := net.Pipe()
 	t.Cleanup(func() { _ = c1.Close(); _ = c2.Close() })
 
-	cfg := FragmentConfig{
+	cfg := fragment.Config{
 		ChunkSize: 2,
 	}
 
-	fragmented := NewFragmentedConn(c1, &cfg)
+	fragmented := fragment.NewFragmentedConn(c1, &cfg)
 
 	type writeResult struct {
 		n   int

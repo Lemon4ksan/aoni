@@ -33,6 +33,7 @@ import (
 	"github.com/lemon4ksan/aoni/fingerprint/p0f"
 	"github.com/lemon4ksan/aoni/internal/bytesconv"
 	"github.com/lemon4ksan/aoni/internal/io"
+	"github.com/lemon4ksan/aoni/netutil/fragment"
 	"github.com/lemon4ksan/aoni/telemetry"
 )
 
@@ -613,14 +614,14 @@ func WithInsecureSkipVerify() aoni.RequestModifier {
 }
 
 // WithFragmentation constructs an [aoni.RequestModifier] configuring TCP packet fragmentation parameters.
-func WithFragmentation(cfg aoni.FragmentConfig) aoni.RequestModifier {
+func WithFragmentation(cfg fragment.Config) aoni.RequestModifier {
 	return func(req aoni.Request) {
 		aoni.GetOrInitRequestConfig(req).Fragment = &cfg
 	}
 }
 
 // WithFragment is an alias for [WithFragmentation].
-func WithFragment(cfg aoni.FragmentConfig) aoni.RequestModifier {
+func WithFragment(cfg fragment.Config) aoni.RequestModifier {
 	return WithFragmentation(cfg)
 }
 

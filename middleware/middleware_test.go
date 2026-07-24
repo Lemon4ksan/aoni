@@ -21,6 +21,7 @@ import (
 
 	"github.com/lemon4ksan/aoni"
 	"github.com/lemon4ksan/aoni/mod"
+	"github.com/lemon4ksan/aoni/netutil/netdial"
 )
 
 type mockDoer struct {
@@ -653,14 +654,14 @@ func TestRetryMiddleware_FatalErrorNoRetry(t *testing.T) {
 
 	doer := mw(aoni.DoerFunc(func(req *http.Request) (*http.Response, error) {
 		attempts++
-		return nil, aoni.ErrSSRFBlocked
+		return nil, netdial.ErrSSRFBlocked
 	}))
 
 	req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, "http://localhost", nil)
 	require.NoError(t, err)
 
 	_, err = doer.Do(req)
-	assert.ErrorIs(t, err, aoni.ErrSSRFBlocked)
+	assert.ErrorIs(t, err, netdial.ErrSSRFBlocked)
 	assert.Equal(t, 1, attempts) // Instant abort on 1st attempt, zero retries
 }
 

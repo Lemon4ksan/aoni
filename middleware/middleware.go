@@ -34,6 +34,7 @@ import (
 	"github.com/lemon4ksan/aoni"
 	"github.com/lemon4ksan/aoni/codec/decode"
 	"github.com/lemon4ksan/aoni/internal/timer"
+	"github.com/lemon4ksan/aoni/netutil/netdial"
 )
 
 var (
@@ -702,7 +703,7 @@ func isFatalError(err error) bool {
 		return false
 	}
 
-	if errors.Is(err, aoni.ErrSSRFBlocked) || errors.Is(err, aoni.ErrRedirectDomainForbidden) {
+	if errors.Is(err, netdial.ErrSSRFBlocked) || errors.Is(err, aoni.ErrRedirectDomainForbidden) {
 		return true
 	}
 

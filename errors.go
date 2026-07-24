@@ -23,29 +23,11 @@ var (
 	// ErrMaxRedirectsExceeded is returned when the request execution halts because the maximum redirect threshold was reached.
 	ErrMaxRedirectsExceeded = errors.New("aoni: maximum redirects limit exceeded")
 
-	// ErrUnexpectedContentType indicates that the response Content-Type violates target expectations.
-	ErrUnexpectedContentType = errors.New("aoni: unexpected content-type (possible captive portal or intercept)")
-
 	// ErrResponseTooLarge indicates that response payload length exceeded configured bounds.
 	ErrResponseTooLarge = io.ErrResponseTooLarge
 
 	// ErrBufferLimitExceeded indicates replayable buffer size exceeded memory threshold without disk backing.
 	ErrBufferLimitExceeded = io.ErrBufferLimitExceeded
-
-	// ErrSSRFBlocked indicates that request destination resolved to a restricted loopback or private IP.
-	ErrSSRFBlocked = errors.New("aoni: request blocked by SSRF guard")
-
-	// ErrCertificatePinning indicates that TLS peer certificate hash failed pin matching.
-	ErrCertificatePinning = errors.New("aoni: certificate pinning validation failed")
-
-	// ErrNoCertificatesPresented is returned when a TLS handshake yields empty peer certificate chains.
-	ErrNoCertificatesPresented = errors.New("aoni: no certificates presented by peer")
-
-	// ErrInvalidPinFormat indicates an unparseable certificate public key pin hash format.
-	ErrInvalidPinFormat = errors.New("aoni: invalid pin format: must be 32-byte sha256 hash in base64 or hex")
-
-	// ErrEmptyDNSProxy is returned when proxy DNS is enabled but proxy target URL is empty.
-	ErrEmptyDNSProxy = errors.New("aoni: proxy DNS enabled but proxy address is empty")
 
 	// ErrRedirectDomainForbidden is returned when a redirect target hostname is excluded by policy.
 	ErrRedirectDomainForbidden = errors.New("aoni: redirect domain not allowed")

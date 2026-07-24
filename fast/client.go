@@ -6,31 +6,38 @@ package fast
 
 import (
 	"context"
-	"errors"
+	"crypto/tls"
+	"net"
 	"net/http"
+	"slices"
 	"strings"
 	"sync"
 	"time"
 
+	"github.com/quic-go/quic-go"
+	"github.com/quic-go/quic-go/http3"
 	"github.com/valyala/fasthttp"
+	"golang.org/x/net/http2"
 
 	"github.com/lemon4ksan/aoni"
+	"github.com/lemon4ksan/aoni/fingerprint/h2"
 	"github.com/lemon4ksan/aoni/internal/bytesconv"
 )
 
-// ErrTargetURLEmpty is returned when no destination address is specified in a request path or base URL configuration.
-var ErrTargetURLEmpty = errors.New("aoni fast: target URL is empty")
-
-// Client executes high-performance HTTP transactions over a pooled [*fasthttp.Client] engine.
+// Client executes ultra-high-performance HTTP requests over fasthttp, seamlessly multiplexing H1, H2, and H3 (quic-go).
 type Client struct {
-	engine *fasthttp.Client
-	config aoni.Config
+	engine      *fasthttp.Client
+	h2Transport http.RoundTripper
+	h3Transport http.RoundTripper
+	config      aoni.Config
+	h2Once      sync.Once
+	h3Once      sync.Once
 }
 
 // Option is an alias for [aoni.ClientOption].
 type Option = aoni.ClientOption
 
-// NewClient instantiates a new [Client] with fasthttp parameters configured via [aoni.ClientOption] options.
+// NewClient creates a new multiprotocol [Client] configured with fasthttp, uTLS, HTTP/2 framing, and HTTP/3 QUIC support.
 func NewClient(opts ...aoni.ClientOption) *Client {
 	c := &Client{
 		engine: &fasthttp.Client{
@@ -39,7 +46,11 @@ func NewClient(opts ...aoni.ClientOption) *Client {
 			MaxConnsPerHost:     512,
 			MaxIdleConnDuration: 90 * time.Second,
 		},
-		config: aoni.Config{Defaults: aoni.ClientDefaults{Headers: make(http.Header)}},
+		config: aoni.Config{
+			Defaults: aoni.ClientDefaults{
+				Headers: make(http.Header),
+			},
+		},
 	}
 
 	for _, opt := range opts {
@@ -48,28 +59,26 @@ func NewClient(opts ...aoni.ClientOption) *Client {
 		}
 	}
 
-	if c.config.Engine.Timeout > 0 {
-		c.engine.ReadTimeout = c.config.Engine.Timeout
-		c.engine.WriteTimeout = c.config.Engine.Timeout
-	}
+	c.applyEngineConfig()
+	c.applyCustomDialer()
 
 	return c
 }
 
-// Config returns a copy of the active client configuration struct.
+// Config returns a copy of active client configurations.
 func (c *Client) Config() aoni.Config {
 	return c.config
 }
 
-// Engine returns the underlying [*fasthttp.Client] instance.
+// Engine returns the underlying [*fasthttp.Client] engine instance.
 func (c *Client) Engine() *fasthttp.Client {
 	return c.engine
 }
 
-// Request executes a transaction using fasthttp objects acquired from [sync.Pool].
+// Request executes an HTTP request, seamlessly routing execution across HTTP/1.1 (fasthttp), HTTP/2, or HTTP/3 (quic-go).
 //
 // Postconditions:
-//   - The returned [aoni.Response] MUST be closed via [aoni.Response.Close] to return acquired objects to [sync.Pool].
+//   - When executing over HTTP/1.1, the returned [aoni.Response] MUST be closed via [aoni.Response.Close] to return objects to [sync.Pool].
 func (c *Client) Request(
 	ctx context.Context,
 	method, path string,
@@ -89,40 +98,49 @@ func (c *Client) Request(
 		return nil, err
 	}
 
-	if c.config.Defaults.Headers != nil {
-		for k, vv := range c.config.Defaults.Headers {
-			if reqAdapter.Header(k) == "" && len(vv) > 0 {
-				reqAdapter.SetHeader(k, vv[0])
-			}
-		}
-	}
+	c.applyDefaultHeaders(reqAdapter)
+	c.applyModifiers(reqAdapter, mods)
 
-	for _, defaultMod := range c.config.Defaults.DefaultMods {
-		if defaultMod != nil {
-			defaultMod(reqAdapter)
-		}
-	}
-
-	for _, m := range mods {
-		if m != nil {
-			m(reqAdapter)
-		}
-	}
-
-	if err := c.executeFastHTTP(ctx, fastReq, fastResp); err != nil {
+	alpnMode := resolveALPNMode(ctx, &c.config)
+	switch alpnMode {
+	case aoni.AlpnH3:
 		fasthttp.ReleaseRequest(fastReq)
 		fasthttp.ReleaseResponse(fastResp)
 
-		return nil, err
-	}
+		return c.executeStdTransport(ctx, reqAdapter, c.getH3Transport())
 
-	return NewPooledResponse(fastReq, fastResp), nil
+	case aoni.AlpnH2:
+		fasthttp.ReleaseRequest(fastReq)
+		fasthttp.ReleaseResponse(fastResp)
+
+		return c.executeStdTransport(ctx, reqAdapter, c.getH2Transport())
+
+	default:
+		if err := c.executeFastHTTP(ctx, fastReq, fastResp); err != nil {
+			fasthttp.ReleaseRequest(fastReq)
+			fasthttp.ReleaseResponse(fastResp)
+
+			return nil, err
+		}
+
+		return NewPooledResponse(fastReq, fastResp), nil
+	}
 }
 
-// Do executes a prepared [aoni.Request] via fasthttp, applying defaults and modifiers.
+// Do executes a prepared [aoni.Request] contract, routing through the target protocol engine (H1, H2, or H3 over quic-go).
 func (c *Client) Do(req aoni.Request) (aoni.Response, error) {
 	if req == nil {
 		req = NewRequest(nil)
+	}
+
+	ctx := req.Context()
+	alpnMode := resolveALPNMode(ctx, &c.config)
+
+	switch alpnMode {
+	case aoni.AlpnH3:
+		return c.executeStdTransport(ctx, req, c.getH3Transport())
+	case aoni.AlpnH2:
+		return c.executeStdTransport(ctx, req, c.getH2Transport())
 	}
 
 	fastReq, ok := req.EngineRequest().(*fasthttp.Request)
@@ -145,6 +163,157 @@ func (c *Client) Do(req aoni.Request) (aoni.Response, error) {
 	}
 
 	return NewResponse(fastResp), nil
+}
+
+func (c *Client) getH3Transport() http.RoundTripper {
+	c.h3Once.Do(func() {
+		quicCfg := &quic.Config{
+			EnableDatagrams: true,
+		}
+
+		if h3s := c.config.Fingerprint.H3Settings; h3s != nil {
+			quicCfg.InitialStreamReceiveWindow = h3s.InitialStreamReceiveWindow
+			quicCfg.MaxStreamReceiveWindow = h3s.MaxStreamReceiveWindow
+			quicCfg.InitialConnectionReceiveWindow = h3s.InitialConnectionReceiveWindow
+			quicCfg.MaxConnectionReceiveWindow = h3s.MaxConnectionReceiveWindow
+			quicCfg.MaxIncomingStreams = h3s.MaxIncomingStreams
+			quicCfg.MaxIncomingUniStreams = h3s.MaxIncomingUniStreams
+			quicCfg.EnableDatagrams = h3s.EnableDatagrams
+		}
+
+		tlsCfg := &tls.Config{
+			NextProtos:         []string{aoni.AlpnH3},
+			InsecureSkipVerify: c.config.Engine.InsecureSkipVerify,
+		}
+
+		if spec := c.config.Fingerprint.TLSQUICClientHelloSpec; spec != nil && len(spec.CipherSuites) > 0 {
+			tlsCfg.CipherSuites = spec.CipherSuites
+		}
+
+		c.h3Transport = &http3.Transport{
+			TLSClientConfig: tlsCfg,
+			QUICConfig:      quicCfg,
+		}
+	})
+
+	return c.h3Transport
+}
+
+func (c *Client) getH2Transport() http.RoundTripper {
+	c.h2Once.Do(func() {
+		baseTr := &http.Transport{
+			Proxy: http.ProxyFromEnvironment,
+			DialTLSContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
+				dialer := newFastDialer(&c.config)
+				return dialer.DialH2(ctx, addr)
+			},
+			ForceAttemptHTTP2: true,
+		}
+
+		if h2Settings := c.config.Fingerprint.H2Settings; h2Settings != nil {
+			c.h2Transport = h2.NewFramedTransport(baseTr, *h2Settings, c.config.Fingerprint.HeaderOrder...)
+			return
+		}
+
+		t2, err := http2.ConfigureTransports(baseTr)
+		if err == nil && t2 != nil {
+			t2.ReadIdleTimeout = 15 * time.Second
+		}
+
+		c.h2Transport = baseTr
+	})
+
+	return c.h2Transport
+}
+
+func (c *Client) executeStdTransport(
+	ctx context.Context,
+	req aoni.Request,
+	tr http.RoundTripper,
+) (aoni.Response, error) {
+	httpReq := req.HTTPRequest()
+	if httpReq == nil {
+		var err error
+		httpReq, err = http.NewRequestWithContext(ctx, req.Method(), req.URL(), req.BodyStream())
+		if err != nil {
+			return nil, err
+		}
+
+		if fastReq, ok := req.EngineRequest().(*fasthttp.Request); ok && fastReq != nil {
+			fastReq.Header.All()(func(k, v []byte) bool {
+				httpReq.Header.Add(string(k), string(v))
+				return true
+			})
+		}
+	}
+
+	resp, err := tr.RoundTrip(httpReq)
+	if err != nil {
+		return nil, err
+	}
+
+	return aoni.NewStdResponse(resp), nil
+}
+
+func resolveALPNMode(ctx context.Context, cfg *aoni.Config) string {
+	reqCfg := aoni.GetRequestConfig(ctx)
+	if reqCfg != nil && len(reqCfg.ALPNOverride) > 0 {
+		first := reqCfg.ALPNOverride[0]
+		if first == aoni.AlpnH3 || first == aoni.AlpnH2 {
+			return first
+		}
+	}
+
+	if len(cfg.Fingerprint.HeaderOrder) > 0 && slices.Contains(cfg.Fingerprint.HeaderOrder, ":method") {
+		return aoni.AlpnH2
+	}
+
+	return aoni.AlpnHTTP
+}
+
+func (c *Client) applyEngineConfig() {
+	if c.config.Engine.Timeout > 0 {
+		c.engine.ReadTimeout = c.config.Engine.Timeout
+		c.engine.WriteTimeout = c.config.Engine.Timeout
+	}
+
+	if c.config.Engine.InsecureSkipVerify {
+		c.engine.TLSConfig = nil
+	}
+
+	c.engine.DisableHeaderNamesNormalizing = true
+}
+
+func (c *Client) applyCustomDialer() {
+	dialer := newFastDialer(&c.config)
+	c.engine.Dial = dialer.Dial
+	c.engine.DialDualStack = true
+}
+
+func (c *Client) applyDefaultHeaders(req aoni.Request) {
+	if c.config.Defaults.Headers == nil {
+		return
+	}
+
+	for k, vv := range c.config.Defaults.Headers {
+		if req.Header(k) == "" && len(vv) > 0 {
+			req.SetHeader(k, vv[0])
+		}
+	}
+}
+
+func (c *Client) applyModifiers(req aoni.Request, mods []aoni.RequestModifier) {
+	for _, defaultMod := range c.config.Defaults.DefaultMods {
+		if defaultMod != nil {
+			defaultMod(req)
+		}
+	}
+
+	for _, m := range mods {
+		if m != nil {
+			m(req)
+		}
+	}
 }
 
 func (c *Client) executeFastHTTP(
@@ -227,7 +396,6 @@ func (r *PooledResponse) Close() error {
 }
 
 var (
-	_ aoni.Response     = (*PooledResponse)(nil)
-	_ http.RoundTripper = (*Transport)(nil)
-	_ aoni.RequestDoer  = (*Client)(nil)
+	_ aoni.Response    = (*PooledResponse)(nil)
+	_ aoni.RequestDoer = (*Client)(nil)
 )

@@ -11,6 +11,16 @@ import (
 	"time"
 )
 
+// Config configures write chunking and inter-chunk delays for TCP packet fragmentation.
+type Config struct {
+	LimitBytes   int64
+	MaxDelay     time.Duration
+	MinDelay     time.Duration
+	ChunkSize    int
+	MinChunkSize int
+	MaxChunkSize int
+}
+
 // FragmentedConn wraps a [net.Conn] and splits socket writes into variable-sized chunks with inter-chunk delays.
 type FragmentedConn struct {
 	net.Conn
@@ -23,6 +33,33 @@ type FragmentedConn struct {
 
 	totalWritten int64
 	mu           sync.Mutex
+}
+
+// NewFragmentedConn wraps a [net.Conn] with socket fragmentation and jitter delay wrappers.
+func NewFragmentedConn(conn net.Conn, cfg *Config) net.Conn {
+	if cfg == nil {
+		return conn
+	}
+
+	var limit int64
+	switch cfg.LimitBytes {
+	case -1:
+		limit = 0
+	case 0:
+		limit = 4096
+	default:
+		limit = cfg.LimitBytes
+	}
+
+	return &FragmentedConn{
+		Conn:         conn,
+		ChunkSize:    cfg.ChunkSize,
+		MaxDelay:     cfg.MaxDelay,
+		MinDelay:     cfg.MinDelay,
+		MaxChunkSize: cfg.MaxChunkSize,
+		MinChunkSize: cfg.MinChunkSize,
+		LimitBytes:   limit,
+	}
 }
 
 func (c *FragmentedConn) Write(b []byte) (n int, err error) {

@@ -32,6 +32,7 @@ import (
 	"github.com/lemon4ksan/aoni/fingerprint/profiles/chrome"
 	"github.com/lemon4ksan/aoni/fingerprint/profiles/firefox"
 	"github.com/lemon4ksan/aoni/mod"
+	"github.com/lemon4ksan/aoni/netutil/fragment"
 	"github.com/lemon4ksan/aoni/netutil/ip"
 	"github.com/lemon4ksan/aoni/netutil/proxy"
 	"github.com/lemon4ksan/aoni/telemetry"
@@ -359,7 +360,7 @@ func WithTCPDelay(min, max time.Duration) aoni.ClientOption {
 }
 
 // WithFragmentation returns an [aoni.ClientOption] configuring TCP packet fragmentation parameters.
-func WithFragmentation(frag aoni.FragmentConfig) aoni.ClientOption {
+func WithFragmentation(frag fragment.Config) aoni.ClientOption {
 	return func(cfg *aoni.Config) {
 		cfg.Network.FragmentConfig = &frag
 	}

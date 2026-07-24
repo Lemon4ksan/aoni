@@ -2,7 +2,7 @@
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
-package fragment_test
+package fragment
 
 import (
 	"bytes"
@@ -12,20 +12,18 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-
-	"github.com/lemon4ksan/aoni"
 )
 
 func TestFragmentedConn_SmallWrite(t *testing.T) {
 	t.Parallel()
 
 	server, client := net.Pipe()
-	frag := &aoni.FragmentConfig{
+	frag := &Config{
 		ChunkSize: 10,
 		MaxDelay:  -1,
 	}
 
-	fragConn := aoni.NewFragmentedConn(client, frag)
+	fragConn := NewFragmentedConn(client, frag)
 
 	data := []byte("hello")
 	go func() {
@@ -49,12 +47,12 @@ func TestFragmentedConn_SmallWrite_WithDelay(t *testing.T) {
 	t.Parallel()
 
 	server, client := net.Pipe()
-	frag := &aoni.FragmentConfig{
+	frag := &Config{
 		ChunkSize: 20,
 		MaxDelay:  10 * time.Millisecond,
 	}
 
-	fragConn := aoni.NewFragmentedConn(client, frag)
+	fragConn := NewFragmentedConn(client, frag)
 
 	data := []byte("short")
 
@@ -75,12 +73,12 @@ func TestFragmentedConn_LargeWrite(t *testing.T) {
 	t.Parallel()
 
 	server, client := net.Pipe()
-	frag := &aoni.FragmentConfig{
+	frag := &Config{
 		ChunkSize: 5,
 		MaxDelay:  -1,
 	}
 
-	fragConn := aoni.NewFragmentedConn(client, frag)
+	fragConn := NewFragmentedConn(client, frag)
 
 	data := []byte("hello world test data")
 
@@ -117,12 +115,12 @@ func TestFragmentedConn_Write_Error(t *testing.T) {
 	t.Parallel()
 
 	server, client := net.Pipe()
-	frag := &aoni.FragmentConfig{
+	frag := &Config{
 		ChunkSize: 5,
 		MaxDelay:  -1,
 	}
 
-	fragConn := aoni.NewFragmentedConn(client, frag)
+	fragConn := NewFragmentedConn(client, frag)
 
 	// Close server side so the next write inside loop fails
 	_ = server.Close()
@@ -138,12 +136,12 @@ func TestNewFragmentedConn(t *testing.T) {
 	t.Parallel()
 
 	server, client := net.Pipe()
-	cfg := &aoni.FragmentConfig{
+	cfg := &Config{
 		ChunkSize: 10,
 		MaxDelay:  5 * time.Millisecond,
 	}
 
-	fragConn := aoni.NewFragmentedConn(client, cfg)
+	fragConn := NewFragmentedConn(client, cfg)
 
 	data := []byte("test data for fragmentation")
 

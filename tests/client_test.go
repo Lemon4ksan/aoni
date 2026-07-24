@@ -45,6 +45,7 @@ import (
 	"github.com/lemon4ksan/aoni/middleware"
 	"github.com/lemon4ksan/aoni/mod"
 	"github.com/lemon4ksan/aoni/netutil/ip"
+	"github.com/lemon4ksan/aoni/netutil/netdial"
 	"github.com/lemon4ksan/aoni/option"
 	"github.com/lemon4ksan/aoni/realtime/stream"
 	"github.com/lemon4ksan/aoni/request"
@@ -371,7 +372,7 @@ func TestClient_SSRFGuard(t *testing.T) {
 
 			client := aoni.NewClient(nil, option.WithSSRFGuard())
 			_, err := client.Request(t.Context(), http.MethodGet, tt.url)
-			assert.ErrorIs(t, err, aoni.ErrSSRFBlocked)
+			assert.ErrorIs(t, err, netdial.ErrSSRFBlocked)
 		})
 	}
 }
@@ -695,9 +696,7 @@ func TestClient_CertificatePinning(t *testing.T) {
 			if tt.expectErr {
 				require.Error(t, err)
 				assert.True(
-					t,
-					errors.Is(err, aoni.ErrCertificatePinning) ||
-						strings.Contains(err.Error(), "certificate pinning validation failed"),
+					t, strings.Contains(err.Error(), "certificate pinning validation failed"),
 				)
 
 				return

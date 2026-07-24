@@ -1029,7 +1029,7 @@ func applyMSSLimit(conn net.Conn, mss int) net.Conn {
 	return conn
 }
 
-func applyFragmentation(conn net.Conn, cfg FragmentConfig) net.Conn {
+func applyFragmentation(conn net.Conn, cfg fragment.Config) net.Conn {
 	return &fragment.FragmentedConn{
 		Conn:      conn,
 		ChunkSize: cfg.ChunkSize,

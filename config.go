@@ -184,49 +184,12 @@ type NetworkConfig struct {
 	SourceRotator      *ip.SourceIPRotator
 	DynamicHedging     *telemetry.DynamicHedgingConfig
 	SocketController   SocketController
-	FragmentConfig     *FragmentConfig
+	FragmentConfig     *fragment.Config
 	HostRewrite        *HostRewriteConfig
 	HappyEyeballsDelay time.Duration
 	HedgingDelay       time.Duration
 	ProxyDNS           bool
 	SSRFGuard          bool
-}
-
-// FragmentConfig configures write chunking and inter-chunk delays for TCP packet fragmentation.
-type FragmentConfig struct {
-	LimitBytes   int64
-	MaxDelay     time.Duration
-	MinDelay     time.Duration
-	ChunkSize    int
-	MinChunkSize int
-	MaxChunkSize int
-}
-
-// NewFragmentedConn wraps a [net.Conn] with socket fragmentation and jitter delay wrappers.
-func NewFragmentedConn(conn net.Conn, cfg *FragmentConfig) net.Conn {
-	if cfg == nil {
-		return conn
-	}
-
-	var limit int64
-	switch cfg.LimitBytes {
-	case -1:
-		limit = 0
-	case 0:
-		limit = 4096
-	default:
-		limit = cfg.LimitBytes
-	}
-
-	return &fragment.FragmentedConn{
-		Conn:         conn,
-		ChunkSize:    cfg.ChunkSize,
-		MaxDelay:     cfg.MaxDelay,
-		MinDelay:     cfg.MinDelay,
-		MaxChunkSize: cfg.MaxChunkSize,
-		MinChunkSize: cfg.MinChunkSize,
-		LimitBytes:   limit,
-	}
 }
 
 // Clone creates an independent deep copy of [NetworkConfig].
@@ -551,7 +514,7 @@ type RequestConfig struct {
 	TraceInfo               *telemetry.TraceInfo
 	HostRewrite             *HostRewriteConfig
 	Pipeline                *PipelineConfig
-	Fragment                *FragmentConfig
+	Fragment                *fragment.Config
 	Redact                  *RedactConfig
 	CertificatePins         map[string][]string
 	Modifiers               []RequestModifier
