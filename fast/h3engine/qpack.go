@@ -140,6 +140,31 @@ func (q *QPACKCodec) DecodeResponseHeaders(headerBlock []byte, res *fasthttp.Res
 	return nil
 }
 
+// DecodeResponseTrailers decodes a QPACK header block containing response trailers into a key-value map.
+func (q *QPACKCodec) DecodeResponseTrailers(headerBlock []byte) (map[string][]string, error) {
+	decodeFn := q.decoder.Decode(headerBlock)
+	trailers := make(map[string][]string)
+
+	for {
+		hf, err := decodeFn()
+		if err == io.EOF {
+			break
+		}
+
+		if err != nil {
+			return nil, ErrQPACKDecompressFailed
+		}
+
+		if hf.IsPseudo() {
+			continue
+		}
+
+		trailers[hf.Name] = append(trailers[hf.Name], hf.Value)
+	}
+
+	return trailers, nil
+}
+
 func toLowerCopy(b []byte) string {
 	out := make([]byte, len(b))
 	for i := range b {

@@ -2,6 +2,7 @@
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
+// Package h2engine provides HTTP/2 client functionality using fasthttp.
 package h2engine
 
 import (
@@ -34,12 +35,14 @@ type ClientOpts struct {
 
 // Context maps a fasthttp request/response pair to an asynchronous stream execution.
 type Context struct {
-	Request      *fasthttp.Request
-	Response     *fasthttp.Response
-	Err          chan error
-	StreamID     uint32
-	streamWindow int32
-	state        atomic.Int32
+	Request       *fasthttp.Request
+	Response      *fasthttp.Response
+	Err           chan error
+	Trailers      map[string][]string
+	StreamID      uint32
+	streamWindow  int32
+	state         atomic.Int32
+	headersParsed bool
 }
 
 // State yields current lifecycle state of the HTTP/2 stream.
@@ -105,7 +108,7 @@ func (cl *Client) createConn() (*Conn, *list.Element, error) {
 }
 
 // Do executes req over an available HTTP/2 stream, automatically retrying
-// on a fresh connection if affected by a graceful GOAWAY frame (RFC 7540 Section 6.8).
+// on a fresh connection if affected by a graceful GOAWAY frame.
 //
 // Postconditions:
 //   - Retries transparently up to 3 times on new connections when GOAWAY is received.
@@ -124,6 +127,49 @@ func (cl *Client) Do(ctx context.Context, req *fasthttp.Request, res *fasthttp.R
 	}
 
 	return ErrGoAwayRetryable
+}
+
+// DoWithTrailers executes req over an available HTTP/2 stream and returns captured response trailers.
+func (cl *Client) DoWithTrailers(ctx context.Context, req *fasthttp.Request, res *fasthttp.Response) (map[string][]string, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+
+	for range 3 {
+		trailers, err := cl.doOnceWithTrailers(ctx, req, res)
+		if errors.Is(err, ErrGoAwayRetryable) {
+			continue
+		}
+
+		return trailers, err
+	}
+
+	return nil, ErrGoAwayRetryable
+}
+
+func (cl *Client) doOnceWithTrailers(ctx context.Context, req *fasthttp.Request, res *fasthttp.Response) (map[string][]string, error) {
+	conn, err := cl.selectConn()
+	if err != nil {
+		return nil, err
+	}
+
+	errCh := make(chan error, 1)
+	reqCtx := &Context{
+		Request:  req,
+		Response: res,
+		Err:      errCh,
+	}
+
+	conn.Write(reqCtx)
+
+	select {
+	case <-ctx.Done():
+		conn.CancelStream(reqCtx)
+		return nil, ctx.Err()
+
+	case err := <-errCh:
+		return reqCtx.Trailers, err
+	}
 }
 
 func (cl *Client) doOnce(ctx context.Context, req *fasthttp.Request, res *fasthttp.Response) error {

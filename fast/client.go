@@ -2,6 +2,7 @@
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
+// Package fast provides high-performance fasthttp engine adapters for [aoni.Request] and [aoni.Response].
 package fast
 
 import (
@@ -109,7 +110,7 @@ func (c *Client) Request(
 
 	reqCtx := reqAdapter.Context()
 
-	err, autoReleased := c.dispatchPipeline(reqCtx, fastReq, fastResp, reqAdapter)
+	trailers, err, autoReleased := c.dispatchPipeline(reqCtx, fastReq, fastResp, reqAdapter)
 	if err != nil {
 		if !autoReleased {
 			fasthttp.ReleaseRequest(fastReq)
@@ -119,7 +120,12 @@ func (c *Client) Request(
 		return nil, err
 	}
 
-	return NewPooledResponse(fastReq, fastResp), nil
+	pooledResp := NewPooledResponse(fastReq, fastResp)
+	if len(trailers) > 0 {
+		pooledResp.SetTrailers(trailers)
+	}
+
+	return pooledResp, nil
 }
 
 // Do executes a prepared [aoni.Request] contract, routing through the target
@@ -151,7 +157,7 @@ func (c *Client) Do(req aoni.Request) (aoni.Response, error) {
 
 	fastResp := fasthttp.AcquireResponse()
 
-	err, autoReleased := c.dispatchPipeline(ctx, fastReq, fastResp, reqAdapter)
+	trailers, err, autoReleased := c.dispatchPipeline(ctx, fastReq, fastResp, reqAdapter)
 	if err != nil {
 		if !autoReleased {
 			fasthttp.ReleaseResponse(fastResp)
@@ -163,7 +169,12 @@ func (c *Client) Do(req aoni.Request) (aoni.Response, error) {
 		return nil, err
 	}
 
-	return NewResponse(fastResp), nil
+	respAdapter := NewResponse(fastResp)
+	if len(trailers) > 0 {
+		respAdapter.SetTrailers(trailers)
+	}
+
+	return respAdapter, nil
 }
 
 func (c *Client) dispatchPipeline(
@@ -171,32 +182,32 @@ func (c *Client) dispatchPipeline(
 	fastReq *fasthttp.Request,
 	fastResp *fasthttp.Response,
 	reqAdapter *Request,
-) (err error, autoReleased bool) {
+) (trailers map[string][]string, err error, autoReleased bool) {
 	startTime := time.Now()
 
 	c.applyCookies(fastReq)
 
-	err, autoReleased = c.executeWithHedging(ctx, fastReq, fastResp, reqAdapter)
+	trailers, err, autoReleased = c.executeWithHedging(ctx, fastReq, fastResp, reqAdapter)
 	if err != nil {
 		c.recordTelemetry(ctx, fastReq, nil, err, startTime)
-		return err, autoReleased
+		return nil, err, autoReleased
 	}
 
 	c.captureCookies(fastReq, fastResp)
 
 	if valErr := c.validateResponse(fastReq, fastResp); valErr != nil {
 		c.recordTelemetry(ctx, fastReq, fastResp, valErr, startTime)
-		return valErr, false
+		return nil, valErr, false
 	}
 
 	if wafErr := c.handleWAFChallenge(ctx, fastReq, fastResp); wafErr != nil {
 		c.recordTelemetry(ctx, fastReq, fastResp, wafErr, startTime)
-		return wafErr, false
+		return nil, wafErr, false
 	}
 
 	c.recordTelemetry(ctx, fastReq, fastResp, nil, startTime)
 
-	return nil, false
+	return trailers, nil, false
 }
 
 func (c *Client) recordTelemetry(
@@ -233,12 +244,18 @@ func (c *Client) recordTelemetry(
 	}
 }
 
+type hedgeResult struct {
+	resp     *fasthttp.Response
+	trailers map[string][]string
+	err      error
+}
+
 func (c *Client) executeWithHedging(
 	ctx context.Context,
 	fastReq *fasthttp.Request,
 	fastResp *fasthttp.Response,
 	reqAdapter *Request,
-) (err error, autoReleased bool) {
+) (trailers map[string][]string, err error, autoReleased bool) {
 	delay := c.config.Network.HedgingDelay
 	if c.config.Defaults.Pipeline.Hedging != nil && c.config.Defaults.Pipeline.Hedging.DefaultDelay > 0 {
 		delay = c.config.Defaults.Pipeline.Hedging.DefaultDelay
@@ -248,20 +265,11 @@ func (c *Client) executeWithHedging(
 		return c.executeWithProxyFailover(ctx, fastReq, fastResp, reqAdapter)
 	}
 
-	type result struct {
-		resp *fasthttp.Response
-		err  error
-	}
-
-	resultsCh := make(chan result, 2)
+	resultsCh := make(chan hedgeResult, 2)
 	hedgeCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
-	go func() {
-		resp1 := fasthttp.AcquireResponse()
-		e, _ := c.executeWithProxyFailover(hedgeCtx, fastReq, resp1, reqAdapter)
-		resultsCh <- result{resp: resp1, err: e}
-	}()
+	c.launchHedgedAttempt(hedgeCtx, fastReq, reqAdapter, resultsCh)
 
 	timer := time.NewTimer(delay)
 	defer timer.Stop()
@@ -274,27 +282,19 @@ func (c *Client) executeWithHedging(
 			res.resp.CopyTo(fastResp)
 			fasthttp.ReleaseResponse(res.resp)
 
-			return nil, false
+			return res.trailers, nil, false
 		}
 
 		fasthttp.ReleaseResponse(res.resp)
 
 		if !req2Started {
 			req2Started = true
-			go func() {
-				resp2 := fasthttp.AcquireResponse()
-				e, _ := c.executeWithProxyFailover(hedgeCtx, fastReq, resp2, reqAdapter)
-				resultsCh <- result{resp: resp2, err: e}
-			}()
+			c.launchHedgedAttempt(hedgeCtx, fastReq, reqAdapter, resultsCh)
 		}
 
 	case <-timer.C:
 		req2Started = true
-		go func() {
-			resp2 := fasthttp.AcquireResponse()
-			e, _ := c.executeWithProxyFailover(hedgeCtx, fastReq, resp2, reqAdapter)
-			resultsCh <- result{resp: resp2, err: e}
-		}()
+		c.launchHedgedAttempt(hedgeCtx, fastReq, reqAdapter, resultsCh)
 	}
 
 	for range 2 {
@@ -304,13 +304,38 @@ func (c *Client) executeWithHedging(
 			res.resp.CopyTo(fastResp)
 			fasthttp.ReleaseResponse(res.resp)
 
-			return nil, false
+			return res.trailers, nil, false
 		}
 
 		fasthttp.ReleaseResponse(res.resp)
 	}
 
-	return ErrHedgingFailed, false
+	return nil, ErrHedgingFailed, false
+}
+
+func (c *Client) launchHedgedAttempt(
+	ctx context.Context,
+	origReq *fasthttp.Request,
+	reqAdapter *Request,
+	resultsCh chan<- hedgeResult,
+) {
+	reqCopy := fasthttp.AcquireRequest()
+	origReq.CopyTo(reqCopy)
+
+	if reqAdapter != nil {
+		if bodyCloser, err := reqAdapter.GetBody(); err == nil && bodyCloser != nil {
+			reqCopy.SetBodyStream(bodyCloser, -1)
+		}
+	}
+
+	go func() {
+		defer fasthttp.ReleaseRequest(reqCopy)
+
+		resp := fasthttp.AcquireResponse()
+		trailers, err, _ := c.executeWithProxyFailover(ctx, reqCopy, resp, reqAdapter)
+
+		resultsCh <- hedgeResult{resp: resp, trailers: trailers, err: err}
+	}()
 }
 
 func (c *Client) applyCookies(req *fasthttp.Request) {
@@ -372,7 +397,7 @@ func (c *Client) executeWithProxyFailover(
 	fastReq *fasthttp.Request,
 	fastResp *fasthttp.Response,
 	reqAdapter *Request,
-) (err error, autoReleased bool) {
+) (trailers map[string][]string, err error, autoReleased bool) {
 	failover := c.config.Defaults.Pipeline.ProxyFailover
 	if failover == nil || len(failover.Proxies) == 0 {
 		return c.executeWithRedirects(ctx, fastReq, fastResp, reqAdapter)
@@ -390,19 +415,19 @@ func (c *Client) executeWithProxyFailover(
 			reqCfg.ProxyAddr = u
 		}
 
-		err, autoReleased = c.executeWithRedirects(ctx, fastReq, fastResp, reqAdapter)
+		trailers, err, autoReleased = c.executeWithRedirects(ctx, fastReq, fastResp, reqAdapter)
 		if err == nil && !isProxyGatewayError(fastResp.StatusCode()) {
-			return nil, autoReleased
+			return trailers, nil, autoReleased
 		}
 
 		if autoReleased {
-			return err, true
+			return nil, err, true
 		}
 
 		fastResp.Reset()
 	}
 
-	return fmt.Errorf("aoni fast: proxy failover exhausted retries: %w", err), false
+	return nil, fmt.Errorf("aoni fast: proxy failover exhausted retries: %w", err), false
 }
 
 func isProxyGatewayError(status int) bool {
@@ -481,7 +506,7 @@ func (c *Client) executeWithRedirects(
 	fastReq *fasthttp.Request,
 	fastResp *fasthttp.Response,
 	reqAdapter *Request,
-) (err error, autoReleased bool) {
+) (trailers map[string][]string, err error, autoReleased bool) {
 	redirectLimit := c.resolveRedirectLimit()
 	if redirectLimit == 0 {
 		return c.dispatchSingleRequest(ctx, fastReq, fastResp)
@@ -495,28 +520,28 @@ func (c *Client) executeWithRedirects(
 	for {
 		fastReq.URI().CopyTo(currentURI)
 
-		err, autoReleased = c.dispatchSingleRequest(ctx, fastReq, fastResp)
+		trailers, err, autoReleased = c.dispatchSingleRequest(ctx, fastReq, fastResp)
 		if err != nil {
-			return err, autoReleased
+			return nil, err, autoReleased
 		}
 
 		statusCode := fastResp.StatusCode()
 		if !isRedirectStatus(statusCode) {
-			return nil, false
+			return trailers, nil, false
 		}
 
 		location := fastResp.Header.Peek("Location")
 		if len(location) == 0 {
-			return nil, false
+			return trailers, nil, false
 		}
 
 		redirectsFollowed++
 		if redirectsFollowed > redirectLimit {
-			return ErrMaxRedirectsExceeded, false
+			return nil, ErrMaxRedirectsExceeded, false
 		}
 
 		if err := applyRedirectMethodAndBody(statusCode, fastReq, reqAdapter); err != nil {
-			return err, false
+			return nil, err, false
 		}
 
 		nextURI := fasthttp.AcquireURI()
@@ -536,22 +561,27 @@ func (c *Client) dispatchSingleRequest(
 	ctx context.Context,
 	fastReq *fasthttp.Request,
 	fastResp *fasthttp.Response,
-) (err error, autoReleased bool) {
+) (trailers map[string][]string, err error, autoReleased bool) {
 	alpnMode := resolveALPNMode(ctx, &c.config)
 
 	switch alpnMode {
 	case aoni.AlpnH3:
 		h3 := c.getH3Client()
-		return h3.Do(ctx, fastReq, fastResp, c.config.Fingerprint.HeaderOrder), false
+		tr, err := h3.Do(ctx, fastReq, fastResp, c.config.Fingerprint.HeaderOrder)
+
+		return tr, err, false
 
 	case aoni.AlpnH2:
 		host := string(fastReq.URI().Host())
 		h2Cl := c.getH2Client(host)
+		tr, err := h2Cl.DoWithTrailers(ctx, fastReq, fastResp)
 
-		return h2Cl.Do(ctx, fastReq, fastResp), false
+		return tr, err, false
 
 	default:
-		return c.executeFastHTTP(ctx, fastReq, fastResp)
+		err, autoReleased = c.executeFastHTTP(ctx, fastReq, fastResp)
+
+		return nil, err, autoReleased
 	}
 }
 

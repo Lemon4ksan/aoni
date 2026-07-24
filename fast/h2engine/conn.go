@@ -59,6 +59,9 @@ type Conn struct {
 	onDisconnect       func(*Conn)
 	closed             uint64
 	orderedKeys        []string
+
+	windowMu   sync.Mutex
+	windowCond *sync.Cond
 }
 
 // NewConn instantiates a new Conn wrapping socket c.
@@ -79,6 +82,7 @@ func NewConn(c net.Conn, opts ConnOpts) *Conn {
 		onDisconnect:  opts.OnDisconnect,
 	}
 
+	nc.windowCond = sync.NewCond(&nc.windowMu)
 	nc.current.SetMaxWindowSize(1 << 20)
 	nc.current.SetPush(false)
 
@@ -116,6 +120,8 @@ func (c *Conn) CancelStream(ctx *Context) {
 	default:
 		ReleaseFrameHeader(fr)
 	}
+
+	c.broadcastWindowUpdate()
 }
 
 // Handshake performs HTTP/2 connection initialization.
@@ -203,6 +209,7 @@ func (c *Conn) Close() error {
 	}
 
 	_ = c.c.Close()
+	c.broadcastWindowUpdate()
 
 	if c.onDisconnect != nil {
 		c.onDisconnect(c)
@@ -324,7 +331,7 @@ func (c *Conn) readLoop() {
 				continue
 			}
 
-			err := c.readStream(fr, r.Response)
+			err := c.readStream(fr, r)
 			if err == nil {
 				if fr.Flags().Has(FlagEndStream) {
 					r.SetState(streamClosed)
@@ -415,9 +422,15 @@ func (c *Conn) writeData(fh *FrameHeader, ctx *Context, body []byte) error {
 	bodyLen := len(body)
 
 	for offset < bodyLen {
-		chunkSize := c.calculateChunkSize(ctx, bodyLen-offset)
+		if c.Closed() || ctx.State() == streamClosed {
+			return ErrStreamClosed
+		}
+
+		remaining := bodyLen - offset
+		chunkSize := c.calculateChunkSize(ctx, remaining)
+
 		if chunkSize <= 0 {
-			time.Sleep(1 * time.Millisecond)
+			c.waitForWindowUpdate(ctx, remaining)
 			continue
 		}
 
@@ -442,6 +455,32 @@ func (c *Conn) writeData(fh *FrameHeader, ctx *Context, body []byte) error {
 	return nil
 }
 
+// waitForWindowUpdate blocks the writing goroutine until flow control window capacity expands
+// or until the stream/connection terminates.
+//
+// Preconditions:
+//   - Evaluates calculateChunkSize inside c.windowMu lock to prevent lost wake-up signal races.
+func (c *Conn) waitForWindowUpdate(ctx *Context, remaining int) {
+	c.windowMu.Lock()
+	defer c.windowMu.Unlock()
+
+	if c.Closed() || ctx.State() == streamClosed {
+		return
+	}
+
+	if c.calculateChunkSize(ctx, remaining) > 0 {
+		return
+	}
+
+	c.windowCond.Wait()
+}
+
+func (c *Conn) broadcastWindowUpdate() {
+	c.windowMu.Lock()
+	c.windowCond.Broadcast()
+	c.windowMu.Unlock()
+}
+
 func (c *Conn) calculateChunkSize(ctx *Context, remaining int) int {
 	maxFrame := int(c.serverS.MaxFrameSize())
 	if maxFrame <= 0 {
@@ -451,7 +490,10 @@ func (c *Conn) calculateChunkSize(ctx *Context, remaining int) int {
 	serverWin := atomic.LoadInt32(&c.serverWindow)
 	streamWin := atomic.LoadInt32(&ctx.streamWindow)
 
-	win := int(min(streamWin, serverWin))
+	win := int(serverWin)
+	if int(streamWin) < win {
+		win = int(streamWin)
+	}
 
 	if win <= 0 {
 		return 0
@@ -587,11 +629,19 @@ func (c *Conn) handleWindowUpdate(fr *FrameHeader) error {
 	}
 
 	streamID := fr.Stream()
+
+	var err error
 	if streamID == 0 {
-		return c.updateServerWindow(inc)
+		err = c.updateServerWindow(inc)
+	} else {
+		err = c.updateStreamWindow(streamID, inc)
 	}
 
-	return c.updateStreamWindow(streamID, inc)
+	if err == nil {
+		c.broadcastWindowUpdate()
+	}
+
+	return err
 }
 
 func (c *Conn) updateServerWindow(inc int32) error {
@@ -694,11 +744,20 @@ func (c *Conn) handlePing(ping *Ping) {
 	c.out <- fr
 }
 
-func (c *Conn) readStream(fr *FrameHeader, res *fasthttp.Response) error {
+func (c *Conn) readStream(fr *FrameHeader, reqCtx *Context) error {
 	switch fr.Type() {
 	case FrameHeaders, FrameContinuation:
 		h := fr.Body().(FrameWithHeaders)
-		return c.readHeader(h.Headers(), res)
+		if reqCtx.headersParsed {
+			return c.readTrailers(h.Headers(), reqCtx)
+		}
+
+		err := c.readHeader(h.Headers(), reqCtx.Response)
+		if err == nil {
+			reqCtx.headersParsed = true
+		}
+
+		return err
 
 	case FrameData:
 		c.currentWindow -= int32(fr.Len())
@@ -707,7 +766,7 @@ func (c *Conn) readStream(fr *FrameHeader, res *fasthttp.Response) error {
 
 		data := fr.Body().(*Data)
 		if data.Len() != 0 {
-			res.AppendBody(data.Data())
+			reqCtx.Response.AppendBody(data.Data())
 			c.updateWindow(fr.Stream(), fr.Len())
 		}
 
@@ -715,6 +774,31 @@ func (c *Conn) readStream(fr *FrameHeader, res *fasthttp.Response) error {
 			nValue := c.maxWindow - currentWin
 			c.currentWindow = c.maxWindow
 			c.updateWindow(0, int(nValue))
+		}
+	}
+
+	return nil
+}
+
+func (c *Conn) readTrailers(b []byte, reqCtx *Context) error {
+	hf := AcquireHeaderField()
+	defer ReleaseHeaderField(hf)
+
+	if reqCtx.Trailers == nil {
+		reqCtx.Trailers = make(map[string][]string)
+	}
+
+	for len(b) > 0 {
+		var err error
+		b, err = c.dec.Next(hf, b)
+
+		if err != nil {
+			return err
+		}
+
+		if !hf.IsPseudo() && len(hf.KeyBytes()) > 0 {
+			key := hf.Key()
+			reqCtx.Trailers[key] = append(reqCtx.Trailers[key], hf.Value())
 		}
 	}
 

@@ -2,6 +2,7 @@
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
+// Package h3engine provides HTTP/3 client functionality using fasthttp.
 package h3engine
 
 import (
@@ -46,24 +47,26 @@ func NewClient(tlsCfg *tls.Config, quicCfg *quic.Config) *Client {
 	}
 }
 
-// Do executes a fasthttp.Request over HTTP/3 to the destination server, writing response into resp.
-//
-// Postconditions:
-//   - Automatically purges closed QUIC connections and reconnects on connection loss.
-func (c *Client) Do(ctx context.Context, req *fasthttp.Request, resp *fasthttp.Response, headerOrder []string) error {
+// Do executes a fasthttp.Request over HTTP/3 to the destination server, writing response into resp and returning trailers.
+func (c *Client) Do(
+	ctx context.Context,
+	req *fasthttp.Request,
+	resp *fasthttp.Response,
+	headerOrder []string,
+) (map[string][]string, error) {
 	host := string(req.URI().Host())
 
 	cc, err := c.getConn(ctx, host)
 	if err != nil {
-		return err
+		return nil, err
 	}
 
-	err = cc.Do(ctx, req, resp, headerOrder)
+	trailers, err := cc.Do(ctx, req, resp, headerOrder)
 	if err != nil {
 		c.removeConn(host)
 	}
 
-	return err
+	return trailers, err
 }
 
 func (c *Client) getConn(ctx context.Context, host string) (*ClientConn, error) {

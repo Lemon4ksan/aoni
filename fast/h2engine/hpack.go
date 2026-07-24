@@ -263,32 +263,38 @@ func (hp *HPACK) decodeLiteralIndexed(hf *HeaderField, b []byte) ([]byte, error)
 		hf.SetKeyBytes(hf2.KeyBytes())
 	} else {
 		b = b[1:]
-		dst := bytePool.Get().([]byte)
+		bufPtr := bytePool.Get().(*[]byte)
+		dst := (*bufPtr)[:0]
 
 		b, dst, err = readString(dst[:0], b)
 		if err != nil {
-			bytePool.Put(dst)
+			*bufPtr = dst
+			bytePool.Put(bufPtr)
 			return b, err
 		}
 
 		hf.SetKeyBytes(dst)
-		bytePool.Put(dst)
+		*bufPtr = dst
+		bytePool.Put(bufPtr)
 	}
 
 	if len(b) > 0 && b[0] == c {
 		b = b[1:]
 	}
 
-	dst := bytePool.Get().([]byte)
+	bufPtr := bytePool.Get().(*[]byte)
+	dst := (*bufPtr)[:0]
 
-	b, dst, err = readString(dst[:0], b)
+	b, dst, err = readString(dst, b)
 	if err != nil {
-		bytePool.Put(dst)
+		*bufPtr = dst
+		bytePool.Put(bufPtr)
 		return b, err
 	}
 
 	hf.SetValueBytes(dst)
-	bytePool.Put(dst)
+	*bufPtr = dst
+	bytePool.Put(bufPtr)
 	hp.addDynamic(hf)
 
 	return b, nil
@@ -313,32 +319,38 @@ func (hp *HPACK) decodeLiteralNoIndex(hf *HeaderField, b []byte) ([]byte, error)
 		hf.SetKeyBytes(hf2.key)
 	} else {
 		b = b[1:]
-		dst := bytePool.Get().([]byte)
+		bufPtr := bytePool.Get().(*[]byte)
+		dst := (*bufPtr)[:0]
 
-		b, dst, err = readString(dst[:0], b)
+		b, dst, err = readString(dst, b)
 		if err != nil {
-			bytePool.Put(dst)
+			*bufPtr = dst
+			bytePool.Put(bufPtr)
 			return b, err
 		}
 
 		hf.SetKeyBytes(dst)
-		bytePool.Put(dst)
+		*bufPtr = dst
+		bytePool.Put(bufPtr)
 	}
 
 	if len(b) > 0 && b[0] == c {
 		b = b[1:]
 	}
 
-	dst := bytePool.Get().([]byte)
+	bufPtr := bytePool.Get().(*[]byte)
+	dst := (*bufPtr)[:0]
 
-	b, dst, err = readString(dst[:0], b)
+	b, dst, err = readString(dst, b)
 	if err != nil {
-		bytePool.Put(dst)
+		*bufPtr = dst
+		bytePool.Put(bufPtr)
 		return b, err
 	}
 
 	hf.SetValueBytes(dst)
-	bytePool.Put(dst)
+	*bufPtr = dst
+	bytePool.Put(bufPtr)
 
 	return b, nil
 }
@@ -387,7 +399,10 @@ func (hp *HPACK) AppendHeader(dst []byte, hf *HeaderField, store bool) []byte {
 }
 
 var bytePool = sync.Pool{
-	New: func() any { return make([]byte, 128) },
+	New: func() any {
+		b := make([]byte, 0, 128)
+		return &b
+	},
 }
 
 func readInt(n int, b []byte) ([]byte, uint64) {
@@ -459,29 +474,36 @@ func readString(dst, b []byte) ([]byte, []byte, error) {
 }
 
 func appendString(dst, src []byte, encode bool) []byte {
-	var b []byte
+	var (
+		bufPtr  *[]byte
+		payload []byte
+	)
 
 	if !encode {
-		b = src
+		payload = src
 	} else {
-		b = bytePool.Get().([]byte)
-		b = HuffmanEncode(b[:0], src)
+		bufPtr = bytePool.Get().(*[]byte)
+		payload = HuffmanEncode((*bufPtr)[:0], src)
 	}
 
-	n := uint64(len(b))
-	nn := len(dst) - 1
+	payloadLen := uint64(len(payload))
+	lastIdx := len(dst) - 1
 
-	if nn >= 0 && dst[nn] != 0 {
+	if lastIdx >= 0 && dst[lastIdx] != 0 {
 		dst = append(dst, 0)
-		nn++
+		lastIdx++
 	}
 
-	dst = appendInt(dst, 7, n)
-	dst = append(dst, b...)
+	hBitIdx := max(lastIdx, 0)
+
+	dst = appendInt(dst, 7, payloadLen)
+	dst = append(dst, payload...)
 
 	if encode {
-		bytePool.Put(b)
-		dst[nn] |= 128
+		*bufPtr = payload
+		bytePool.Put(bufPtr)
+
+		dst[hBitIdx] |= 0x80
 	}
 
 	return dst

@@ -149,18 +149,20 @@ func (cc *ClientConn) handleGoAway(r quicvarint.Reader, payloadLen uint64) {
 	_ = cc.Close()
 }
 
-// Do executes a fasthttp.Request over a QUIC stream and populates fasthttp.Response.
-//
-// Postconditions:
-//   - Aborts QUIC stream reads and writes immediately if ctx is canceled.
-func (cc *ClientConn) Do(ctx context.Context, req *fasthttp.Request, resp *fasthttp.Response, headerOrder []string) error {
+// Do executes a fasthttp.Request over a QUIC stream and populates fasthttp.Response and captured trailers.
+func (cc *ClientConn) Do(
+	ctx context.Context,
+	req *fasthttp.Request,
+	resp *fasthttp.Response,
+	headerOrder []string,
+) (map[string][]string, error) {
 	if err := ctx.Err(); err != nil {
-		return err
+		return nil, err
 	}
 
 	str, err := cc.conn.OpenStreamSync(ctx)
 	if err != nil {
-		return err
+		return nil, err
 	}
 
 	done := make(chan struct{})
@@ -178,7 +180,7 @@ func (cc *ClientConn) Do(ctx context.Context, req *fasthttp.Request, resp *fasth
 	defer str.Close()
 
 	if err := cc.sendRequest(str, req, headerOrder); err != nil {
-		return err
+		return nil, err
 	}
 
 	return cc.readResponse(str, resp)
@@ -220,7 +222,7 @@ func (cc *ClientConn) sendRequest(str *quic.Stream, req *fasthttp.Request, heade
 	return nil
 }
 
-func (cc *ClientConn) readResponse(str *quic.Stream, resp *fasthttp.Response) error {
+func (cc *ClientConn) readResponse(str *quic.Stream, resp *fasthttp.Response) (trailers map[string][]string, err error) {
 	r := quicvarint.NewReader(str)
 	headersParsed := false
 
@@ -231,30 +233,32 @@ func (cc *ClientConn) readResponse(str *quic.Stream, resp *fasthttp.Response) er
 		}
 
 		if err != nil {
-			return err
+			return nil, err
 		}
 
 		switch frameType {
 		case FrameTypeHeaders:
-			if headersParsed {
-				return ErrFrameUnexpected
-			}
-
 			headerBlock := make([]byte, payloadLen)
-
 			if _, err := io.ReadFull(r, headerBlock); err != nil {
-				return err
+				return nil, err
 			}
 
-			if err := cc.qpack.DecodeResponseHeaders(headerBlock, &resp.Header); err != nil {
-				return err
-			}
+			if headersParsed {
+				trailers, err = cc.qpack.DecodeResponseTrailers(headerBlock)
+				if err != nil {
+					return nil, err
+				}
+			} else {
+				if err := cc.qpack.DecodeResponseHeaders(headerBlock, &resp.Header); err != nil {
+					return nil, err
+				}
 
-			headersParsed = true
+				headersParsed = true
+			}
 
 		case FrameTypeData:
 			if !headersParsed {
-				return ErrFrameUnexpected
+				return nil, ErrFrameUnexpected
 			}
 
 			lr := io.LimitReader(r, int64(payloadLen))
@@ -271,18 +275,18 @@ func (cc *ClientConn) readResponse(str *quic.Stream, resp *fasthttp.Response) er
 				}
 
 				if rErr != nil {
-					return rErr
+					return nil, rErr
 				}
 			}
 
 		default:
 			if _, err := io.CopyN(io.Discard, r, int64(payloadLen)); err != nil {
-				return err
+				return nil, err
 			}
 		}
 	}
 
-	return nil
+	return trailers, nil
 }
 
 // Close gracefully terminates the HTTP/3 client connection.
