@@ -239,8 +239,9 @@ func (f *Request) EngineRequest() any {
 
 // Response adapts a high-performance [*fasthttp.Response] to the unified [aoni.Response] contract.
 type Response struct {
-	resp     *fasthttp.Response
-	trailers map[string][]string
+	resp         *fasthttp.Response
+	trailers     map[string][]string
+	uncompressed bool
 }
 
 // NewResponse wraps resp into a unified [aoni.Response] adapter.
@@ -343,6 +344,16 @@ func (f *Response) FastHTTPResponse() *fasthttp.Response {
 // EngineResponse yields the underlying [*fasthttp.Response] cast to any.
 func (f *Response) EngineResponse() any {
 	return f.resp
+}
+
+// SetUncompressed records whether the response payload was transparently decompressed by the client.
+func (f *Response) SetUncompressed(v bool) {
+	f.uncompressed = v
+}
+
+// Uncompressed reports whether the response body was transparently decompressed by the client.
+func (f *Response) Uncompressed() bool {
+	return f.uncompressed
 }
 
 const maxBodySlurpBytes int64 = 2048

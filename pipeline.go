@@ -580,10 +580,26 @@ func (c *Client) handleDecompressionAndTranscoding(req *http.Request, resp *http
 		applyDownloadProgress(resp, cfg.DownloadProgress)
 	}
 
-	applyContentDecompression(resp)
+	// Only transparently decompress if Accept-Encoding was injected automatically by client defaults
+	if !hasExplicitAcceptEncoding(req) {
+		if decompressed := applyContentDecompression(resp); decompressed {
+			resp.Uncompressed = true
+		}
+	}
+
 	applyCharsetTranscoding(resp)
 
 	return resp
+}
+
+func hasExplicitAcceptEncoding(req *http.Request) bool {
+	if req == nil || req.Context() == nil {
+		return false
+	}
+
+	cfg := GetRequestConfig(req.Context())
+
+	return cfg != nil && cfg.HasExplicitAcceptEncoding
 }
 
 func applyDownloadProgress(resp *http.Response, progress ProgressFunc) {
@@ -594,7 +610,7 @@ func applyDownloadProgress(resp *http.Response, progress ProgressFunc) {
 	}
 }
 
-func applyContentDecompression(resp *http.Response) {
+func applyContentDecompression(resp *http.Response) bool {
 	encoding := resp.Header.Get("Content-Encoding")
 	switch encoding {
 	case "br":
@@ -604,6 +620,8 @@ func applyContentDecompression(resp *http.Response) {
 		}
 		resetDecompressedHeader(resp)
 
+		return true
+
 	case "zstd":
 		if zstdDec, err := zstd.NewReader(resp.Body); err == nil {
 			resp.Body = &io.DecompressReadCloser{
@@ -611,18 +629,24 @@ func applyContentDecompression(resp *http.Response) {
 				Closer: resp.Body,
 			}
 			resetDecompressedHeader(resp)
-		} else {
-			resp.Header.Del("Content-Encoding")
+
+			return true
 		}
+
+		resp.Header.Del("Content-Encoding")
 
 	case "gzip":
 		if gzReader, err := io.NewPooledGzipReader(resp.Body); err == nil {
 			resp.Body = gzReader
 			resetDecompressedHeader(resp)
-		} else {
-			resp.Header.Del("Content-Encoding")
+
+			return true
 		}
+
+		resp.Header.Del("Content-Encoding")
 	}
+
+	return false
 }
 
 func resetDecompressedHeader(resp *http.Response) {

@@ -145,6 +145,9 @@ type Response interface {
 	// EngineResponse returns the underlying raw response object of the active engine.
 	EngineResponse() any
 
+	// Uncompressed reports whether the response body was transparently decompressed by the client.
+	Uncompressed() bool
+
 	// Close releases any resources associated with the response body.
 	Close() error
 }

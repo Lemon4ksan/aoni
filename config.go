@@ -534,12 +534,13 @@ type RequestConfig struct {
 	HappyEyeballsDelay time.Duration
 	TCPDelay           TCPDelayRange
 
-	MultiReadDisableDisk    bool
-	AllowNonReadOnlyHedging bool
-	Debug                   bool
-	InsecureSkipVerify      bool
-	SSRFGuard               bool
-	ProxyDNS                bool
+	MultiReadDisableDisk      bool
+	AllowNonReadOnlyHedging   bool
+	HasExplicitAcceptEncoding bool
+	Debug                     bool
+	InsecureSkipVerify        bool
+	SSRFGuard                 bool
+	ProxyDNS                  bool
 }
 
 // ApplyDefaults merges client-level defaults into uninitialized fields of [RequestConfig].

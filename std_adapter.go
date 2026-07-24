@@ -392,6 +392,15 @@ func (s *StdResponse) EngineResponse() any {
 	return s.resp
 }
 
+// Uncompressed reports whether the response body was transparently decompressed by the client.
+func (s *StdResponse) Uncompressed() bool {
+	if s.resp == nil {
+		return false
+	}
+
+	return s.resp.Uncompressed
+}
+
 // Close closes response body stream.
 func (s *StdResponse) Close() error {
 	if s.resp != nil && s.resp.Body != nil {

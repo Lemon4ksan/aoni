@@ -67,6 +67,7 @@ func (t *Transport) RoundTrip(req *http.Request) (*http.Response, error) {
 		Header:        make(http.Header),
 		Body:          resp.BodyStream(),
 		ContentLength: resolveContentLength(resp),
+		Uncompressed:  resp.Uncompressed(),
 		Request:       req,
 	}
 

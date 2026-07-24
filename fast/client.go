@@ -112,6 +112,10 @@ func (c *Client) Request(
 	c.applyDefaultHeaders(reqAdapter)
 	c.applyModifiers(reqAdapter, mods)
 
+	isAutoAE := len(fastReq.Header.Peek("Accept-Encoding")) == 0
+	c.applyDefaultHeaders(reqAdapter)
+	c.applyModifiers(reqAdapter, mods)
+
 	reqCtx := reqAdapter.Context()
 
 	trailers, err, autoReleased := c.dispatchPipeline(reqCtx, fastReq, fastResp, reqAdapter)
@@ -125,8 +129,13 @@ func (c *Client) Request(
 	}
 
 	pooledResp := NewPooledResponse(fastReq, fastResp)
+
 	if len(trailers) > 0 {
 		pooledResp.SetTrailers(trailers)
+	}
+
+	if isAutoAE && len(fastResp.Header.Peek("Content-Encoding")) > 0 {
+		pooledResp.SetUncompressed(true)
 	}
 
 	return pooledResp, nil
