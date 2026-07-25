@@ -196,6 +196,17 @@ func WithHeader(key, value string) aoni.ClientOption {
 	}
 }
 
+// WithHeaderFunc returns an [aoni.ClientOption] setting a dynamic header evaluated via provider on every request.
+func WithHeaderFunc(key string, provider func() string) aoni.ClientOption {
+	return func(cfg *aoni.Config) {
+		if key == "" || provider == nil {
+			return
+		}
+
+		cfg.Defaults.DefaultMods = append(cfg.Defaults.DefaultMods, mod.WithHeaderFunc(key, provider))
+	}
+}
+
 // WithHeaders returns an [aoni.ClientOption] merging a map of default headers into the client configuration.
 func WithHeaders(headers map[string]string) aoni.ClientOption {
 	return func(cfg *aoni.Config) {

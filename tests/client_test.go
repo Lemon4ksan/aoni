@@ -267,6 +267,20 @@ func TestClient_BaseResponse(t *testing.T) {
 		}
 	})
 
+	t.Run("disable_base_response_per_request", func(t *testing.T) {
+		t.Parallel()
+
+		_, client := setupTestServer(t, func(w http.ResponseWriter, _ *http.Request) {
+			_, _ = w.Write([]byte(`{"message": "raw_direct_payload"}`))
+		})
+
+		client = client.With(option.WithBaseResponse(func() aoni.BaseResponse { return &apiResponse{} }))
+
+		result, err := request.GetTo[testPayload](t.Context(), client, "/", mod.WithoutBaseResponse())
+		require.NoError(t, err)
+		assert.Equal(t, "raw_direct_payload", result.Message)
+	})
+
 	t.Run("provider_interface", func(t *testing.T) {
 		t.Parallel()
 

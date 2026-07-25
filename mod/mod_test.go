@@ -153,3 +153,35 @@ func TestWithForceHTTP3(t *testing.T) {
 		t.Errorf("expected ALPN h3 override in request config")
 	}
 }
+
+func TestWithURL(t *testing.T) {
+	reqAdapter := newDummyRequest()
+	mod.WithURL("https://api.custom-target.com/v1/data")(reqAdapter)
+
+	if reqAdapter.URL() != "https://api.custom-target.com/v1/data" {
+		t.Errorf("got URL %q, want https://api.custom-target.com/v1/data", reqAdapter.URL())
+	}
+}
+
+func TestWithDynamicHeader(t *testing.T) {
+	reqAdapter := newDummyRequest()
+	token := "initial-token"
+
+	headerMod := mod.WithDynamicHeader("X-Short-Lived-Token", func() string {
+		return token
+	})
+
+	headerMod(reqAdapter)
+
+	if reqAdapter.Header("X-Short-Lived-Token") != "initial-token" {
+		t.Errorf("got header %q, want initial-token", reqAdapter.Header("X-Short-Lived-Token"))
+	}
+
+	token = "refreshed-token"
+
+	headerMod(reqAdapter)
+
+	if reqAdapter.Header("X-Short-Lived-Token") != "refreshed-token" {
+		t.Errorf("got header %q, want refreshed-token", reqAdapter.Header("X-Short-Lived-Token"))
+	}
+}

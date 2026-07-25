@@ -68,3 +68,16 @@ func TestWithHeadersAndBearer(t *testing.T) {
 		t.Errorf("got Accept header %q", cfg.Defaults.Headers.Get("Accept"))
 	}
 }
+
+func TestWithDynamicHeader(t *testing.T) {
+	cfg := &aoni.Config{}
+	token := "tok-1"
+
+	option.WithHeaderFunc("X-Token", func() string {
+		return token
+	})(cfg)
+
+	if len(cfg.Defaults.DefaultMods) != 1 {
+		t.Fatalf("expected 1 DefaultMod, got %d", len(cfg.Defaults.DefaultMods))
+	}
+}

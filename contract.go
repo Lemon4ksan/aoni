@@ -7,6 +7,7 @@ package aoni
 import (
 	"context"
 	stdio "io"
+	"net"
 	"net/http"
 	"reflect"
 )
@@ -22,18 +23,22 @@ func (f DoerFunc) Do(req Request) (Response, error) {
 // Middleware decorates a [RequestDoer] with request and response interception logic.
 type Middleware func(next RequestDoer) RequestDoer
 
-// Configure applies [ClientOption] layers to any [RequestDoer] engine.
+// Configure applies [ClientOption] layers to any engine (RequestDoer, *Client, *fast.Client, or HTTPDoer).
 //
 // If doer natively supports option configuration (such as [*Client] or [*fast.Client]),
 // options are applied directly to the underlying engine without wrapping.
 // If doer is nil or a raw engine without option support, instantiates a configured [*Client].
-func Configure(doer RequestDoer, opts ...ClientOption) RequestDoer {
+func Configure(doer any, opts ...ClientOption) RequestDoer {
 	if len(opts) == 0 {
 		if doer == nil {
 			return NewClient(nil)
 		}
 
-		return doer
+		if rd, ok := doer.(RequestDoer); ok {
+			return rd
+		}
+
+		return NewClient(doer)
 	}
 
 	if doer == nil {
@@ -222,4 +227,14 @@ type RequestDoer interface {
 // ResponseDecoder defines the contract for unmarshaling response payload streams into Go structures.
 type ResponseDecoder interface {
 	Decode(reader stdio.Reader, target any) error
+}
+
+// WSDialer is implemented by clients that support raw TCP/TLS socket dialing for WebSocket upgrades.
+// Both [*Client] and any custom dialer can satisfy this interface to be used with the ws package.
+type WSDialer interface {
+	// DialTLSForWS establishes an encrypted TLS connection to addr for WebSocket use.
+	DialTLSForWS(ctx context.Context, addr string) (net.Conn, error)
+
+	// DialPlainForWS establishes a plain TCP connection to addr for WebSocket use.
+	DialPlainForWS(ctx context.Context, addr string) (net.Conn, error)
 }

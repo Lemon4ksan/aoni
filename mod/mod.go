@@ -87,6 +87,43 @@ func WithVars(pairs ...any) aoni.RequestModifier {
 	}
 }
 
+// WithURL returns an [aoni.RequestModifier] that overrides the target request URL directly, bypassing any default BaseURL.
+func WithURL(raw string) aoni.RequestModifier {
+	return func(req aoni.Request) {
+		if raw != "" {
+			req.SetURL(raw)
+		}
+	}
+}
+
+// WithoutBaseURL returns an [aoni.RequestModifier] that forces the request to ignore the client's default BaseURL.
+func WithoutBaseURL() aoni.RequestModifier {
+	return func(req aoni.Request) {
+		req.SetURL(req.Path())
+	}
+}
+
+// WithoutBaseResponse returns an [aoni.RequestModifier] that disables envelope unwrapping (BaseResponse) for a single request.
+func WithoutBaseResponse() aoni.RequestModifier {
+	return func(req aoni.Request) {
+		aoni.GetOrInitRequestConfig(req).DisableBaseResponse = true
+	}
+}
+
+// WithBaseResponse returns an [aoni.RequestModifier] that overrides or sets the BaseResponse envelope provider for a single request.
+func WithBaseResponse(provider func() aoni.BaseResponse) aoni.RequestModifier {
+	return func(req aoni.Request) {
+		cfg := aoni.GetOrInitRequestConfig(req)
+		if provider == nil {
+			cfg.DisableBaseResponse = true
+			cfg.BaseResponseOverride = nil
+		} else {
+			cfg.BaseResponseOverride = provider
+			cfg.DisableBaseResponse = false
+		}
+	}
+}
+
 // WithQuery constructs an [aoni.RequestModifier] encoding query parameters from a struct or map into the request URL.
 //
 // Side Effects:
@@ -147,6 +184,22 @@ func WithHeaderBytes(key, value []byte) aoni.RequestModifier {
 	return func(req aoni.Request) {
 		req.SetHeaderBytes(key, value)
 	}
+}
+
+// WithHeaderFunc constructs an [aoni.RequestModifier] evaluating provider dynamically at request execution time to set key header.
+func WithHeaderFunc(key string, provider func() string) aoni.RequestModifier {
+	return func(req aoni.Request) {
+		if provider != nil && key != "" {
+			if val := provider(); val != "" {
+				req.SetHeader(key, val)
+			}
+		}
+	}
+}
+
+// WithDynamicHeader is an alias for [WithHeaderFunc].
+func WithDynamicHeader(key string, provider func() string) aoni.RequestModifier {
+	return WithHeaderFunc(key, provider)
 }
 
 // WithHeaders constructs an [aoni.RequestModifier] bulk-setting multiple HTTP request headers from a map.

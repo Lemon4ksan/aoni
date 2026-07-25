@@ -542,6 +542,8 @@ type RequestConfig struct {
 	InsecureSkipVerify        bool
 	SSRFGuard                 bool
 	ProxyDNS                  bool
+	DisableBaseResponse       bool
+	BaseResponseOverride      func() BaseResponse
 }
 
 // ApplyDefaults merges client-level defaults into uninitialized fields of [RequestConfig].

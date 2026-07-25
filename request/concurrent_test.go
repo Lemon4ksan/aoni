@@ -207,3 +207,24 @@ func TestAsRequester(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, "ok", res.Message)
 }
+
+func TestRequest_Configure(t *testing.T) {
+	t.Parallel()
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"message":"configured","status":200}`))
+	}))
+	t.Cleanup(server.Close)
+
+	reqr := Configure(nil, option.WithBaseURL(server.URL))
+	require.NotNil(t, reqr)
+
+	reqr2 := Configure(reqr, option.WithUserAgent("ConfiguredUserAgent/1.0"))
+	require.NotNil(t, reqr2)
+
+	res, err := GetTo[reqTestPayload](t.Context(), reqr2, "/test")
+	require.NoError(t, err)
+	assert.Equal(t, "configured", res.Message)
+}

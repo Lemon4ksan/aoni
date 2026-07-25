@@ -48,10 +48,10 @@ type parsedURL struct {
 	Path   string
 }
 
-// DialWebSocket establishes a browser-emulated WebSocket connection using the client's uTLS/JA4 pipeline.
+// DialWebSocket establishes a WebSocket connection using the provided [aoni.WSDialer] for raw socket dialing.
 func DialWebSocket(
 	ctx context.Context,
-	c *aoni.Client,
+	c aoni.WSDialer,
 	targetURL string,
 	mods ...aoni.RequestModifier,
 ) (net.Conn, *http.Response, error) {
@@ -67,7 +67,7 @@ type DialWebSocketConfig struct {
 // DialWebSocketWithConfig connects to a WebSocket endpoint applying custom buffer sizing.
 func DialWebSocketWithConfig(
 	ctx context.Context,
-	c *aoni.Client,
+	c aoni.WSDialer,
 	targetURL string,
 	config DialWebSocketConfig,
 	mods ...aoni.RequestModifier,
@@ -80,7 +80,7 @@ func DialWebSocketWithConfig(
 
 func dialWS(
 	ctx context.Context,
-	c *aoni.Client,
+	c aoni.WSDialer,
 	targetURL string,
 	readBuf, writeBuf int,
 	mods ...aoni.RequestModifier,
@@ -112,7 +112,7 @@ func dialWS(
 
 func buildTemporaryWSRequest(
 	ctx context.Context,
-	c *aoni.Client,
+	_ aoni.WSDialer,
 	targetURL string,
 	mods ...aoni.RequestModifier,
 ) (*http.Request, error) {
@@ -131,7 +131,7 @@ func buildTemporaryWSRequest(
 	return req, nil
 }
 
-func dialBaseWSConnection(ctx context.Context, c *aoni.Client, parsed *parsedURL) (net.Conn, error) {
+func dialBaseWSConnection(ctx context.Context, c aoni.WSDialer, parsed *parsedURL) (net.Conn, error) {
 	addr := net.JoinHostPort(parsed.host, parsed.port)
 	if parsed.scheme == "wss" {
 		return c.DialTLSForWS(ctx, addr)

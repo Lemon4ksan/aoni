@@ -217,7 +217,7 @@ func (responseDecoder) DecodeSuccess(
 	requester Requester,
 	decoder decode.Decoder,
 ) error {
-	if br := extractBaseResponse(requester); br != nil {
+	if br := extractBaseResponse(requester, resp); br != nil {
 		br.SetData(target)
 
 		if err := decoder.Decode(resp.Body, br); err != nil {
@@ -239,7 +239,19 @@ func (responseDecoder) DecodeSuccess(
 	return err
 }
 
-func extractBaseResponse(requester Requester) aoni.BaseResponse {
+func extractBaseResponse(requester Requester, resp *http.Response) aoni.BaseResponse {
+	if resp != nil && resp.Request != nil {
+		if cfg := aoni.GetRequestConfig(resp.Request.Context()); cfg != nil {
+			if cfg.DisableBaseResponse {
+				return nil
+			}
+
+			if cfg.BaseResponseOverride != nil {
+				return cfg.BaseResponseOverride()
+			}
+		}
+	}
+
 	if client, ok := requester.(*aoni.Client); ok {
 		return client.BaseResponse()
 	}

@@ -83,6 +83,11 @@ func AsRequester(doer aoni.RequestDoer) Requester {
 	return aoni.NewClient(doer)
 }
 
+// Configure applies [aoni.ClientOption] layers to any client or engine, returning a configured [Requester].
+func Configure(doer any, opts ...aoni.ClientOption) Requester {
+	return AsRequester(aoni.Configure(doer, opts...))
+}
+
 // Get performs a GET request through c and returns the raw [*http.Response].
 func Get(ctx context.Context, c Requester, path string, mods ...aoni.RequestModifier) (*http.Response, error) {
 	return c.Request(ctx, http.MethodGet, path, mods...)
