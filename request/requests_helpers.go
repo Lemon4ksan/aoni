@@ -378,12 +378,7 @@ func resolveDecoder(resp *http.Response) decode.Decoder {
 		cfg := aoni.GetRequestConfig(resp.Request.Context())
 		if cfg != nil {
 			if cfg.ForceContentType != "" {
-				mime := cfg.ForceContentType
-				if bytesconv.EqualFoldASCII(mime, "application/xml") || bytesconv.EqualFoldASCII(mime, "text/xml") {
-					return decode.XMLDecoder
-				}
-
-				return decode.JSONDecoder
+				return decode.LookupDecoder(cfg.ForceContentType)
 			}
 
 			if cfg.Decoder != nil {
