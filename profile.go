@@ -101,6 +101,10 @@ func ApplyProfileHeaders(req Request, variant *profiles.Variant, os profiles.OSK
 	}
 
 	for k, v := range headersMap {
+		if k[0] == byte(':') {
+			continue
+		}
+
 		if v != "" && req.Header(k) == "" {
 			req.SetHeader(k, v)
 		}

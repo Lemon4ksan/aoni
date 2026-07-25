@@ -239,7 +239,7 @@ func TestFramedTransport_Constructor(t *testing.T) {
 
 	assert.Equal(t, settings, tr.settings)
 	assert.Equal(t, []string{"Host", "User-Agent"}, tr.orderedKeys)
-	assert.NotNil(t, tr.DialTLSContext)
+	assert.NotNil(t, tr.Transport)
 }
 
 func TestParseSettings(t *testing.T) {

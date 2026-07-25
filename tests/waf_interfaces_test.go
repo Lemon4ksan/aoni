@@ -215,9 +215,19 @@ func TestClient_E2E_WAFBypass_Pipeline(t *testing.T) {
 				defer clientConn.Close()
 				defer destConn.Close()
 
-				go func() { _, _ = io.Copy(destConn, clientConn) }()
+				done := make(chan struct{}, 2)
+				go func() {
+					_, _ = io.Copy(destConn, clientConn)
 
-				_, _ = io.Copy(clientConn, destConn)
+					done <- struct{}{}
+				}()
+				go func() {
+					_, _ = io.Copy(clientConn, destConn)
+
+					done <- struct{}{}
+				}()
+
+				<-done
 			}()
 
 			return

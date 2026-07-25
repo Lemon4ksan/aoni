@@ -88,7 +88,7 @@ func (c *Client) newDialTLSContextFunc(
 		targetHost, targetPort, dialOpts, utlsOpts := c.resolveTLSContextOptions(ctx, network, addr)
 
 		if dialOpts.ProxyURL == nil && proxyFn != nil {
-			dummyReq := &http.Request{URL: &url.URL{Host: addr}}
+			dummyReq := &http.Request{URL: &url.URL{Host: addr, Scheme: "https"}}
 			dialOpts.ProxyURL, _ = proxyFn(dummyReq)
 		}
 

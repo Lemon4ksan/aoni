@@ -47,6 +47,7 @@ import (
 	"github.com/lemon4ksan/aoni/mod"
 	"github.com/lemon4ksan/aoni/netutil/ip"
 	"github.com/lemon4ksan/aoni/netutil/netdial"
+	"github.com/lemon4ksan/aoni/netutil/proxy"
 	"github.com/lemon4ksan/aoni/option"
 	"github.com/lemon4ksan/aoni/realtime/stream"
 	"github.com/lemon4ksan/aoni/request"
@@ -1877,4 +1878,61 @@ func TestClient_CustomMIMEDecoders(t *testing.T) {
 		require.NotNil(t, result)
 		assert.Equal(t, "msgpack:binary_payload", *result)
 	})
+}
+
+func TestClient_BrowserProfile_HTTP2(t *testing.T) {
+	t.Parallel()
+
+	ts := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("X-Proto", r.Proto)
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte("ok"))
+	}))
+	ts.EnableHTTP2 = true
+	ts.StartTLS()
+	t.Cleanup(ts.Close)
+
+	client := aoni.NewClient(nil,
+		option.WithBrowserProfile(aoni.BrowserChrome, profiles.Windows),
+		option.WithInsecureSkipVerify(),
+		option.WithSessionCache(proxy.NewProxyAwareSessionCache()),
+	)
+
+	req, err := http.NewRequestWithContext(context.Background(), "GET", ts.URL, nil)
+	require.NoError(t, err)
+
+	resp, err := client.HTTP().Do(req)
+	require.NoError(t, err)
+
+	defer resp.Body.Close()
+
+	assert.Equal(t, http.StatusOK, resp.StatusCode)
+	assert.Equal(t, "HTTP/2.0", resp.Header.Get("X-Proto"))
+}
+
+func TestClient_SNI_CleanHostPort_Handshake(t *testing.T) {
+	t.Parallel()
+
+	ts := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte("ok"))
+	}))
+	t.Cleanup(ts.Close)
+
+	client := aoni.NewClient(nil,
+		option.WithBrowserProfile(aoni.BrowserChrome, profiles.Windows),
+		option.WithInsecureSkipVerify(),
+		option.WithSessionCache(proxy.NewProxyAwareSessionCache()),
+	)
+
+	// Test passing URL with explicit port
+	req, err := http.NewRequestWithContext(context.Background(), "GET", ts.URL+"/dev/apikey", nil)
+	require.NoError(t, err)
+
+	resp, err := client.HTTP().Do(req)
+	require.NoError(t, err)
+
+	defer resp.Body.Close()
+
+	assert.Equal(t, http.StatusOK, resp.StatusCode)
 }

@@ -55,20 +55,62 @@ type RTLSOptions struct {
 	InsecureSkipVerify bool
 }
 
+// UConnWrapper wraps a [*utls.UConn] to expose standard crypto/tls.ConnectionState
+// compatibility so Go's net/http.Transport recognizes HTTP/2 ALPN negotiations.
+type UConnWrapper struct {
+	*utls.UConn
+}
+
+// ConnectionState implements the interface expected by net/http.Transport to extract TLS state.
+func (w *UConnWrapper) ConnectionState() tls.ConnectionState {
+	uState := w.UConn.ConnectionState()
+
+	return tls.ConnectionState{
+		Version:                     uState.Version,
+		HandshakeComplete:           uState.HandshakeComplete,
+		DidResume:                   uState.DidResume,
+		CipherSuite:                 uState.CipherSuite,
+		NegotiatedProtocol:          uState.NegotiatedProtocol,
+		NegotiatedProtocolIsMutual:  uState.NegotiatedProtocolIsMutual,
+		ServerName:                  uState.ServerName,
+		PeerCertificates:            uState.PeerCertificates,
+		VerifiedChains:              uState.VerifiedChains,
+		SignedCertificateTimestamps: uState.SignedCertificateTimestamps,
+		OCSPResponse:                uState.OCSPResponse,
+		TLSUnique:                   uState.TLSUnique,
+	}
+}
+
 // HandshakeUTLS executes a uTLS ClientHello handshake over a raw net.Conn socket.
 // isolating TLS SNI from HTTP Host headers for Domain Fronting.
-func HandshakeUTLS(ctx context.Context, conn net.Conn, host string, opts RTLSOptions) (*utls.UConn, ja4.Report, error) {
-	sniHost := netutil.CleanHost(host)
-	cleanHost := sniHost
+func HandshakeUTLS(
+	ctx context.Context,
+	conn net.Conn,
+	host string,
+	opts RTLSOptions,
+) (*UConnWrapper, ja4.Report, error) {
+	cleanHost, _ := netutil.CleanHostPort(host)
+	sniHost := cleanHost
 
 	isIP := net.ParseIP(sniHost) != nil
 	if isIP {
 		sniHost = "" // RFC 6066: IP addresses must not be sent in TLS SNI extension
+	} else if sniHost == "" && opts.BaseTLSConfig != nil && opts.BaseTLSConfig.ServerName != "" {
+		baseSNI, _ := netutil.CleanHostPort(opts.BaseTLSConfig.ServerName)
+		if net.ParseIP(baseSNI) == nil {
+			sniHost = baseSNI
+		}
+	}
+
+	nextProtos := []string{"h2", "http/1.1"}
+	if len(opts.ALPNOverride) > 0 {
+		nextProtos = opts.ALPNOverride
 	}
 
 	uCfg := &utls.Config{
-		ServerName: sniHost,
-		NextProtos: []string{"h2", "http/1.1"},
+		ServerName:   sniHost,
+		NextProtos:   nextProtos,
+		OmitEmptyPsk: true,
 	}
 
 	if isIP {
@@ -87,23 +129,21 @@ func HandshakeUTLS(ctx context.Context, conn net.Conn, host string, opts RTLSOpt
 		uCfg.ClientSessionCache = opts.SessionCache
 	}
 
-	if len(opts.ALPNOverride) > 0 {
-		uCfg.NextProtos = opts.ALPNOverride
-	}
-
 	uConn, err := buildUConn(conn, uCfg, opts)
 	if err != nil {
 		_ = conn.Close()
 		return nil, ja4.Report{}, err
 	}
 
+	if sniHost != "" {
+		uConn.Extensions = ensureSNI(uConn.Extensions, sniHost)
+	}
+
+	uConn.Extensions = forceALPN(uConn.Extensions, nextProtos)
+
 	if err := uConn.BuildHandshakeState(); err != nil {
 		_ = conn.Close()
 		return nil, ja4.Report{}, fmt.Errorf("%w: build handshake state: %w", ErrUTLSHandshakeFailed, err)
-	}
-
-	if len(opts.ALPNOverride) > 0 {
-		uConn.Extensions = forceALPN(uConn.Extensions, opts.ALPNOverride)
 	}
 
 	report := ExtractJA4FromUConn(uConn)
@@ -117,7 +157,7 @@ func HandshakeUTLS(ctx context.Context, conn net.Conn, host string, opts RTLSOpt
 		opts.JA4Callback(report)
 	}
 
-	return uConn, report, nil
+	return &UConnWrapper{UConn: uConn}, report, nil
 }
 
 func buildUConn(conn net.Conn, uCfg *utls.Config, opts RTLSOptions) (*utls.UConn, error) {
@@ -284,7 +324,6 @@ func parsePin(pin string) ([]byte, error) {
 
 // ExtractJA4FromUConn analyzes completed handshakes and extracts pure-Go [ja4.Report] signatures.
 func ExtractJA4FromUConn(uConn *utls.UConn) ja4.Report {
-	_ = uConn.BuildHandshakeState()
 	hello := uConn.HandshakeState.Hello
 
 	var extensions, sigAlgorithms []uint16
@@ -308,9 +347,13 @@ func ExtractJA4FromUConn(uConn *utls.UConn) ja4.Report {
 	}
 
 	alpnToken := "00"
-	if len(hello.AlpnProtocols) > 0 && hello.AlpnProtocols[0] != "" {
+	if len(hello.AlpnProtocols) > 0 {
 		first := hello.AlpnProtocols[0]
-		alpnToken = string([]byte{first[0], first[len(first)-1]})
+		if len(first) == 2 {
+			alpnToken = first
+		} else if len(first) > 0 {
+			alpnToken = string([]byte{first[0], first[len(first)-1]})
+		}
 	}
 
 	report := ja4.Report{
@@ -327,6 +370,30 @@ func ExtractJA4FromUConn(uConn *utls.UConn) ja4.Report {
 	}
 
 	return report
+}
+
+func ensureSNI(extensions []utls.TLSExtension, serverName string) []utls.TLSExtension {
+	if serverName == "" {
+		return extensions
+	}
+
+	found := false
+	filtered := make([]utls.TLSExtension, 0, len(extensions))
+
+	for _, ext := range extensions {
+		if _, ok := ext.(*utls.SNIExtension); ok {
+			filtered = append(filtered, &utls.SNIExtension{ServerName: serverName})
+			found = true
+		} else {
+			filtered = append(filtered, ext)
+		}
+	}
+
+	if !found {
+		filtered = append(filtered, &utls.SNIExtension{ServerName: serverName})
+	}
+
+	return filtered
 }
 
 func forceALPN(extensions []utls.TLSExtension, protos []string) []utls.TLSExtension {

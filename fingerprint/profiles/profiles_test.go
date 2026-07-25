@@ -58,10 +58,6 @@ func TestChromeVariantNotNil(t *testing.T) {
 	if chrome.Mobile == nil {
 		t.Error("chrome.Mobile is nil")
 	}
-
-	if chrome.Desktop.HelloSpec == nil {
-		t.Error("chrome.Desktop.HelloSpec is nil")
-	}
 }
 
 func TestFirefoxVariantNotNil(t *testing.T) {

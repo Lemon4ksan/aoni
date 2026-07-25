@@ -97,7 +97,7 @@ func (d responseDecoder) ValidateState(resp *http.Response, decoder decode.Decod
 		}
 	}
 
-	peekableReader := resolvePeekableReader(resp)
+	peekableReader := ResolvePeekableReader(resp)
 
 	if err := d.checkHTML(peekableReader); err != nil {
 		return err
@@ -117,7 +117,8 @@ func isStructuredDataMIME(contentType string) bool {
 		bytesconv.EqualFoldASCII(mediaType, "application/grpc-web+proto")
 }
 
-func resolvePeekableReader(resp *http.Response) *bufio.Reader {
+// ResolvePeekableReader returns a peekable reader for the response body.
+func ResolvePeekableReader(resp *http.Response) *bufio.Reader {
 	if b, ok := resp.Body.(*io.BufioReadCloser); ok {
 		return b.Reader
 	}

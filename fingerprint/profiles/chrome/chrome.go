@@ -46,7 +46,6 @@ var defaultHelloSpec = utls.ClientHelloSpec{
 			&utls.SupportedCurvesExtension{
 				Curves: []utls.CurveID{
 					utls.GREASE_PLACEHOLDER,
-					utls.X25519MLKEM768,
 					utls.X25519,
 					utls.CurveP256,
 					utls.CurveP384,
@@ -76,7 +75,6 @@ var defaultHelloSpec = utls.ClientHelloSpec{
 			&utls.KeyShareExtension{
 				KeyShares: []utls.KeyShare{
 					{Group: utls.GREASE_PLACEHOLDER, Data: []byte{0}},
-					{Group: utls.X25519MLKEM768},
 					{Group: utls.X25519},
 				},
 			},
@@ -127,7 +125,6 @@ var defaultHelloQUICSpec = utls.ClientHelloSpec{
 		utls.BoringGREASEECH(),
 		&utls.SupportedCurvesExtension{
 			Curves: []utls.CurveID{
-				utls.X25519MLKEM768,
 				utls.X25519,
 				utls.CurveP256,
 				utls.CurveP384,
@@ -162,7 +159,6 @@ var defaultHelloQUICSpec = utls.ClientHelloSpec{
 		},
 		&utls.QUICTransportParametersExtension{},
 		&utls.KeyShareExtension{KeyShares: []utls.KeyShare{
-			{Group: utls.X25519MLKEM768},
 			{Group: utls.X25519},
 		}},
 	},
@@ -204,7 +200,7 @@ var platforms = map[profiles.OSKey]string{
 
 // Desktop is the Chrome desktop variant.
 var Desktop = &profiles.Variant{
-	HelloSpec:     &defaultHelloSpec,
+	HelloID:       utls.HelloChrome_Auto,
 	HelloQUICSpec: &defaultHelloQUICSpec,
 	BoundaryFunc:  Boundary,
 	ConfigureH2:   configureH2Desktop,
@@ -218,7 +214,7 @@ var Desktop = &profiles.Variant{
 
 // Mobile is the Chrome mobile variant.
 var Mobile = &profiles.Variant{
-	HelloSpec:    &defaultHelloSpec,
+	HelloID:      utls.HelloChrome_Auto,
 	BoundaryFunc: Boundary,
 	ConfigureH2:  configureH2Desktop,
 	ConfigureH3:  configureH3Desktop,

@@ -62,6 +62,11 @@ type DialOptions struct {
 
 // DialL4 establishes a raw TCP socket connection applying DNS resolution, SSRF guards, IP rotation, p0f spoofing, and fragmentation.
 func DialL4(ctx context.Context, network, addr string, opts DialOptions) (net.Conn, error) {
+	if opts.ProxyURL != nil && opts.ProxyURL.Host != "" {
+		host, port, _ := net.SplitHostPort(addr)
+		return DialProxy(ctx, opts.ProxyURL, host, port, opts)
+	}
+
 	if strings.HasPrefix(addr, "unix://") || network == "unix" {
 		return dialUnixSocket(ctx, addr, opts)
 	}

@@ -6,6 +6,7 @@
 package h2
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"crypto/tls"
@@ -15,7 +16,11 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"net/http/httptrace"
+	"net/url"
 	"sync"
+
+	"golang.org/x/net/http2"
 
 	"github.com/lemon4ksan/aoni/fingerprint/profiles"
 )
@@ -183,6 +188,10 @@ type FramedTransport struct {
 	*http.Transport
 	settings    Settings
 	orderedKeys []string
+
+	h2Transport http2.Transport
+	h2Conns     map[string]*http2.ClientConn
+	mu          sync.Mutex
 }
 
 // NewFramedTransport creates a [FramedTransport] wrapping base with custom HTTP/2 settings and header ordering rules.
@@ -191,54 +200,171 @@ func NewFramedTransport(base *http.Transport, settings Settings, orderedKeys ...
 		Transport:   base,
 		settings:    settings,
 		orderedKeys: orderedKeys,
+		h2Conns:     make(map[string]*http2.ClientConn),
 	}
 
 	if base == nil {
 		return ft
 	}
 
-	prevDialTLS := base.DialTLSContext
-	ft.DialTLSContext = func(ctx context.Context, network, addr string) (net.Conn, error) {
-		var (
-			conn net.Conn
-			err  error
-		)
-
-		if prevDialTLS != nil {
-			conn, err = prevDialTLS(ctx, network, addr)
-		} else {
-			tlsCfg := base.TLSClientConfig
-			if tlsCfg == nil {
-				tlsCfg = &tls.Config{}
-			}
-
-			host, _, _ := net.SplitHostPort(addr)
-
-			cfg := tlsCfg.Clone()
-			if cfg.ServerName == "" {
-				cfg.ServerName = host
-			}
-
-			if len(cfg.NextProtos) == 0 {
-				cfg.NextProtos = []string{"h2", "http/1.1"}
-			}
-
-			d := &tls.Dialer{NetDialer: &net.Dialer{}, Config: cfg}
-			conn, err = d.DialContext(ctx, network, addr)
-		}
-
-		if err != nil {
-			return nil, err
-		}
-
-		return &framedConn{
-			Conn:        conn,
-			settings:    settings,
-			orderedKeys: orderedKeys,
-		}, nil
-	}
+	_, _ = http2.ConfigureTransports(base)
 
 	return ft
+}
+
+// RoundTrip executes an HTTP request transaction, handling uTLS ALPN negotiation for HTTP/2 vs HTTP/1.1.
+func (ft *FramedTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	if req.URL == nil || req.URL.Scheme != "https" {
+		if ft.Transport != nil {
+			return ft.Transport.RoundTrip(req)
+		}
+
+		return http.DefaultTransport.RoundTrip(req)
+	}
+
+	addr := canonicalAddr(req.URL)
+
+	if cc := ft.getH2Conn(addr); cc != nil {
+		return cc.RoundTrip(req)
+	}
+
+	conn, err := ft.dialTLS(req.Context(), addr)
+	if err != nil {
+		return nil, err
+	}
+
+	if trace := httptrace.ContextClientTrace(req.Context()); trace != nil && trace.GotConn != nil {
+		trace.GotConn(httptrace.GotConnInfo{Conn: conn})
+	}
+
+	alpn := getALPN(conn)
+
+	if alpn == "h2" {
+		framed, ok := conn.(*framedConn)
+		if !ok {
+			framed = &framedConn{
+				Conn:        conn,
+				settings:    ft.settings,
+				orderedKeys: ft.orderedKeys,
+			}
+		}
+
+		cc, err := ft.h2Transport.NewClientConn(framed)
+		if err != nil {
+			_ = conn.Close()
+			return nil, fmt.Errorf("aoni h2: failed to create h2 client conn: %w", err)
+		}
+
+		ft.saveH2Conn(addr, cc)
+
+		return cc.RoundTrip(req)
+	}
+
+	return http1RoundTrip(req, conn)
+}
+
+func (ft *FramedTransport) getH2Conn(addr string) *http2.ClientConn {
+	ft.mu.Lock()
+	defer ft.mu.Unlock()
+
+	cc, ok := ft.h2Conns[addr]
+	if !ok {
+		return nil
+	}
+
+	if !cc.CanTakeNewRequest() {
+		delete(ft.h2Conns, addr)
+
+		_ = cc.Close()
+		return nil
+	}
+
+	return cc
+}
+
+func (ft *FramedTransport) saveH2Conn(addr string, cc *http2.ClientConn) {
+	ft.mu.Lock()
+	defer ft.mu.Unlock()
+
+	if ft.h2Conns == nil {
+		ft.h2Conns = make(map[string]*http2.ClientConn)
+	}
+
+	ft.h2Conns[addr] = cc
+}
+
+func (ft *FramedTransport) dialTLS(ctx context.Context, addr string) (net.Conn, error) {
+	if ft.Transport != nil && ft.DialTLSContext != nil {
+		return ft.DialTLSContext(ctx, "tcp", addr)
+	}
+
+	tlsCfg := &tls.Config{
+		NextProtos: []string{"h2", "http/1.1"},
+	}
+	if ft.Transport != nil && ft.TLSClientConfig != nil {
+		tlsCfg = ft.TLSClientConfig.Clone()
+		if len(tlsCfg.NextProtos) == 0 {
+			tlsCfg.NextProtos = []string{"h2", "http/1.1"}
+		}
+	}
+
+	host, _, _ := net.SplitHostPort(addr)
+	if tlsCfg.ServerName == "" {
+		tlsCfg.ServerName = host
+	}
+
+	d := &tls.Dialer{NetDialer: &net.Dialer{}, Config: tlsCfg}
+
+	return d.DialContext(ctx, "tcp", addr)
+}
+
+func getALPN(conn net.Conn) string {
+	if cs, ok := conn.(interface{ ConnectionState() tls.ConnectionState }); ok {
+		return cs.ConnectionState().NegotiatedProtocol
+	}
+
+	return ""
+}
+
+func canonicalAddr(u *url.URL) string {
+	host := u.Hostname()
+
+	port := u.Port()
+	if port == "" {
+		port = "443"
+	}
+
+	return net.JoinHostPort(host, port)
+}
+
+func http1RoundTrip(req *http.Request, conn net.Conn) (*http.Response, error) {
+	if err := req.Write(conn); err != nil {
+		_ = conn.Close()
+		return nil, fmt.Errorf("aoni h2: failed to write h1 request: %w", err)
+	}
+
+	br := bufio.NewReader(conn)
+
+	resp, err := http.ReadResponse(br, req)
+	if err != nil {
+		_ = conn.Close()
+		return nil, fmt.Errorf("aoni h2: failed to read h1 response: %w", err)
+	}
+
+	resp.Body = &connCloser{ReadCloser: resp.Body, conn: conn}
+
+	return resp, nil
+}
+
+type connCloser struct {
+	io.ReadCloser
+	conn net.Conn
+}
+
+func (c *connCloser) Close() error {
+	err := c.ReadCloser.Close()
+	_ = c.conn.Close()
+	return err
 }
 
 // Clone creates an independent copy of [FramedTransport] wrapping the provided base transport.
@@ -257,6 +383,24 @@ type framedConn struct {
 	mu             sync.Mutex
 	prefaceSent    bool
 	prefaceWritten bool
+}
+
+// ConnectionState delegates to the underlying connection's ConnectionState if available.
+func (c *framedConn) ConnectionState() tls.ConnectionState {
+	if cs, ok := c.Conn.(interface{ ConnectionState() tls.ConnectionState }); ok {
+		return cs.ConnectionState()
+	}
+
+	return tls.ConnectionState{}
+}
+
+// Handshake delegates to the underlying connection's Handshake if available.
+func (c *framedConn) Handshake() error {
+	if hs, ok := c.Conn.(interface{ Handshake() error }); ok {
+		return hs.Handshake()
+	}
+
+	return nil
 }
 
 func (c *framedConn) Write(b []byte) (int, error) {
