@@ -127,7 +127,18 @@ func BuildCookieHeader(cookies []*http.Cookie) string {
 		return ""
 	}
 
-	sorted := slices.Clone(cookies)
+	var (
+		stackBuf [16]*http.Cookie
+		sorted   []*http.Cookie
+	)
+
+	if len(cookies) <= len(stackBuf) {
+		sorted = stackBuf[:len(cookies)]
+		copy(sorted, cookies)
+	} else {
+		sorted = slices.Clone(cookies)
+	}
+
 	SortForBrowser(sorted)
 
 	var sb strings.Builder
