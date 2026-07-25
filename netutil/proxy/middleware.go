@@ -5,6 +5,8 @@
 package proxy
 
 import (
+	"context"
+	"errors"
 	"net/http"
 
 	"github.com/lemon4ksan/aoni"
@@ -13,7 +15,25 @@ import (
 // RetryCondition returns a [RetryCondition] that retries when
 // rotator considers the response or error a proxy fault.
 func RetryCondition(rotator *Rotator) aoni.RetryCondition {
-	return func(resp *http.Response, err error) bool {
-		return rotator.isProxyFault(resp, err)
+	return func(resp aoni.Response, err error) bool {
+		var httpResp *http.Response
+		if resp != nil {
+			httpResp = resp.HTTPResponse() //nolint:bodyclose
+			if httpResp == nil {
+				if err != nil {
+					return !errors.Is(err, context.Canceled)
+				}
+
+				sc := resp.StatusCode()
+
+				return sc == http.StatusProxyAuthRequired ||
+					sc == http.StatusTooManyRequests ||
+					sc == http.StatusBadGateway ||
+					sc == http.StatusGatewayTimeout ||
+					sc == http.StatusServiceUnavailable
+			}
+		}
+
+		return rotator.isProxyFault(httpResp, err)
 	}
 }

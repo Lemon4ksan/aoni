@@ -79,6 +79,25 @@ func NewClient(opts ...aoni.ClientOption) *Client {
 	return c
 }
 
+// With produces a deep-copied [Client] with the provided functional options applied.
+func (c *Client) With(opts ...aoni.ClientOption) *Client {
+	c2 := &Client{
+		engine: c.engine,
+		config: c.config.Clone(),
+	}
+
+	for _, opt := range opts {
+		if opt != nil {
+			opt(&c2.config)
+		}
+	}
+
+	c2.applyEngineConfig()
+	c2.applyCustomDialer()
+
+	return c2
+}
+
 // Config returns a copy of active client configurations.
 func (c *Client) Config() aoni.Config {
 	return c.config

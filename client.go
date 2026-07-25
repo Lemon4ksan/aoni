@@ -44,17 +44,6 @@ type HTTPDoer interface {
 	Do(req *http.Request) (*http.Response, error)
 }
 
-// DoerFunc adapts a plain function matching the HTTP execution signature to the [HTTPDoer] interface.
-type DoerFunc func(req *http.Request) (*http.Response, error)
-
-// Do executes the underlying function against the provided HTTP request.
-func (f DoerFunc) Do(req *http.Request) (*http.Response, error) {
-	return f(req)
-}
-
-// Middleware decorates an [HTTPDoer] with request and response interception logic.
-type Middleware func(next HTTPDoer) HTTPDoer
-
 // RequestModifier represents a functional hook that mutates an outgoing [Request] contract prior to dispatch.
 type RequestModifier = generic.Option[Request]
 
@@ -75,8 +64,8 @@ type Client struct {
 	_                        cpu.CacheLinePad
 }
 
-// NewClient instantiates a new thread-safe [Client] wrapping the specified engine.
-func NewClient(doer HTTPDoer, opts ...ClientOption) *Client {
+// NewClient instantiates a new thread-safe [Client] wrapping the specified doer.
+func NewClient(doer any, opts ...ClientOption) *Client {
 	client := &Client{
 		engine:   defaultEngine(doer),
 		defaults: defaultClientDefaults(),
@@ -96,6 +85,11 @@ func NewClient(doer HTTPDoer, opts ...ClientOption) *Client {
 	client.ensureUserAgent()
 
 	return client
+}
+
+// Config returns a snapshot copy of the active client configuration.
+func (c *Client) Config() Config {
+	return c.snapshotConfig()
 }
 
 // With produces a deep-copied [Client] with the provided functional options applied.
@@ -492,9 +486,17 @@ func (c *Client) Logger() Logger {
 	return c.defaults.Logger
 }
 
+// HTTPDoerFunc adapts a plain function matching the HTTP execution signature to the [HTTPDoer] interface.
+type HTTPDoerFunc func(req *http.Request) (*http.Response, error)
+
+// Do executes the underlying function against the provided HTTP request.
+func (f HTTPDoerFunc) Do(req *http.Request) (*http.Response, error) {
+	return f(req)
+}
+
 // HTTP returns an [HTTPDoer] adapter executing requests through the full pipeline.
 func (c *Client) HTTP() HTTPDoer {
-	return DoerFunc(func(req *http.Request) (*http.Response, error) {
+	return HTTPDoerFunc(func(req *http.Request) (*http.Response, error) {
 		return c.execute(req, c.resolvePipeline(req))
 	})
 }
@@ -673,13 +675,19 @@ func CloseResponse(resp *http.Response) {
 	requestConfigPool.Put(cfg)
 }
 
-func defaultEngine(doer HTTPDoer) HTTPDoer {
+func defaultEngine(doer any) HTTPDoer {
 	if doer != nil {
+		if rd, ok := doer.(RequestDoer); ok {
+			return NewRequestDoerAdapter(rd)
+		}
+
 		if httpClient, ok := doer.(*http.Client); ok {
 			return CloneHTTPClient(httpClient)
 		}
 
-		return doer
+		if hd, ok := doer.(HTTPDoer); ok {
+			return hd
+		}
 	}
 
 	return &http.Client{

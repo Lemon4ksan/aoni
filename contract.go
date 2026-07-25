@@ -8,7 +8,68 @@ import (
 	"context"
 	stdio "io"
 	"net/http"
+	"reflect"
 )
+
+// DoerFunc adapts a plain function matching the request execution signature to the [RequestDoer] interface.
+type DoerFunc func(req Request) (Response, error)
+
+// Do executes the underlying function against the provided request contract.
+func (f DoerFunc) Do(req Request) (Response, error) {
+	return f(req)
+}
+
+// Middleware decorates a [RequestDoer] with request and response interception logic.
+type Middleware func(next RequestDoer) RequestDoer
+
+// Configure applies [ClientOption] layers to any [RequestDoer] engine.
+//
+// If doer natively supports option configuration (such as [*Client] or [*fast.Client]),
+// options are applied directly to the underlying engine without wrapping.
+// If doer is nil or a raw engine without option support, instantiates a configured [*Client].
+func Configure(doer RequestDoer, opts ...ClientOption) RequestDoer {
+	if len(opts) == 0 {
+		if doer == nil {
+			return NewClient(nil)
+		}
+
+		return doer
+	}
+
+	if doer == nil {
+		return NewClient(nil, opts...)
+	}
+
+	type withRequestDoer interface {
+		With(opts ...ClientOption) RequestDoer
+	}
+	if w, ok := doer.(withRequestDoer); ok {
+		return w.With(opts...)
+	}
+
+	type withClient interface {
+		With(opts ...ClientOption) *Client
+	}
+	if w, ok := doer.(withClient); ok {
+		return w.With(opts...)
+	}
+
+	val := reflect.ValueOf(doer)
+
+	method := val.MethodByName("With")
+	if method.IsValid() && method.Type().NumIn() == 1 && method.Type().IsVariadic() {
+		args := []reflect.Value{reflect.ValueOf(opts)}
+
+		out := method.CallSlice(args)
+		if len(out) == 1 {
+			if res, ok := out[0].Interface().(RequestDoer); ok {
+				return res
+			}
+		}
+	}
+
+	return NewClient(doer, opts...)
+}
 
 // Request defines the unified, engine-agnostic HTTP request interface.
 //

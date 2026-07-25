@@ -191,11 +191,11 @@ func GetCacheTTL(ctx context.Context) generic.Optional[time.Duration] {
 }
 
 // RetryCondition evaluates whether a failed request attempt should trigger a retry.
-type RetryCondition func(resp *http.Response, err error) bool
+type RetryCondition func(resp Response, err error) bool
 
 // Or combines multiple [RetryCondition] predicates, returning true if ANY condition is satisfied.
 func Or(conditions ...RetryCondition) RetryCondition {
-	return func(resp *http.Response, err error) bool {
+	return func(resp Response, err error) bool {
 		for _, cond := range conditions {
 			if cond != nil && cond(resp, err) {
 				return true
@@ -208,7 +208,7 @@ func Or(conditions ...RetryCondition) RetryCondition {
 
 // And combines multiple [RetryCondition] predicates, returning true if ALL conditions are satisfied.
 func And(conditions ...RetryCondition) RetryCondition {
-	return func(resp *http.Response, err error) bool {
+	return func(resp Response, err error) bool {
 		for _, cond := range conditions {
 			if cond == nil || !cond(resp, err) {
 				return false
@@ -219,45 +219,61 @@ func And(conditions ...RetryCondition) RetryCondition {
 	}
 }
 
-// FallbackFunc generates an alternative [http.Response] when a request fails.
-type FallbackFunc func(req *http.Request, origErr error) (*http.Response, error)
+// FallbackFunc generates an alternative [Response] when a request fails.
+type FallbackFunc func(req Request, origErr error) (Response, error)
 
 // FallbackString constructs a [FallbackFunc] returning plain text with the specified status code.
 func FallbackString(statusCode int, text string) FallbackFunc {
-	return func(req *http.Request, _ error) (*http.Response, error) {
-		return &http.Response{
+	return func(req Request, _ error) (Response, error) {
+		header := make(http.Header)
+		header.Set("Content-Type", "text/plain; charset=utf-8")
+
+		var httpReq *http.Request
+		if req != nil {
+			httpReq = req.HTTPRequest()
+		}
+
+		return NewStdResponse(&http.Response{
 			StatusCode:    statusCode,
 			Status:        http.StatusText(statusCode),
 			Proto:         "HTTP/1.1",
 			ProtoMajor:    1,
 			ProtoMinor:    1,
-			Header:        http.Header{"Content-Type": []string{"text/plain; charset=utf-8"}},
+			Header:        header,
 			Body:          stdio.NopCloser(strings.NewReader(text)),
 			ContentLength: int64(len(text)),
-			Request:       req,
-		}, nil
+			Request:       httpReq,
+		}), nil
 	}
 }
 
 // FallbackJSON constructs a [FallbackFunc] returning JSON-encoded data with the specified status code.
 func FallbackJSON(statusCode int, data any) FallbackFunc {
-	return func(req *http.Request, _ error) (*http.Response, error) {
+	return func(req Request, _ error) (Response, error) {
 		bodyBytes, err := json.Marshal(data)
 		if err != nil {
 			return nil, err
 		}
 
-		return &http.Response{
+		header := make(http.Header)
+		header.Set("Content-Type", "application/json; charset=utf-8")
+
+		var httpReq *http.Request
+		if req != nil {
+			httpReq = req.HTTPRequest()
+		}
+
+		return NewStdResponse(&http.Response{
 			StatusCode:    statusCode,
 			Status:        http.StatusText(statusCode),
 			Proto:         "HTTP/1.1",
 			ProtoMajor:    1,
 			ProtoMinor:    1,
-			Header:        http.Header{"Content-Type": []string{"application/json; charset=utf-8"}},
+			Header:        header,
 			Body:          stdio.NopCloser(bytes.NewReader(bodyBytes)),
 			ContentLength: int64(len(bodyBytes)),
-			Request:       req,
-		}, nil
+			Request:       httpReq,
+		}), nil
 	}
 }
 

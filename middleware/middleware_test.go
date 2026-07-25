@@ -32,7 +32,7 @@ type mockDoer struct {
 	statusCode int
 }
 
-func (m *mockDoer) Do(req *http.Request) (*http.Response, error) {
+func (m *mockDoer) Do(req aoni.Request) (aoni.Response, error) {
 	m.mu.Lock()
 	m.calls++
 	forceError := m.forceError
@@ -52,7 +52,7 @@ func (m *mockDoer) Do(req *http.Request) (*http.Response, error) {
 		statusCode = http.StatusOK
 	}
 
-	return &http.Response{StatusCode: statusCode, Body: http.NoBody}, err
+	return aoni.NewStdResponse(&http.Response{StatusCode: statusCode, Body: http.NoBody}), err
 }
 
 func (m *mockDoer) SetStatusCode(code int) {
@@ -82,7 +82,7 @@ type mockRetryDoer struct {
 	header     http.Header
 }
 
-func (m *mockRetryDoer) Do(req *http.Request) (*http.Response, error) {
+func (m *mockRetryDoer) Do(req aoni.Request) (aoni.Response, error) {
 	m.mu.Lock()
 	m.calls++
 	status := m.statusCode
@@ -92,11 +92,11 @@ func (m *mockRetryDoer) Do(req *http.Request) (*http.Response, error) {
 		status = http.StatusOK
 	}
 
-	return &http.Response{
+	return aoni.NewStdResponse(&http.Response{
 		StatusCode: status,
 		Header:     m.header,
 		Body:       io.NopCloser(strings.NewReader("")),
-	}, nil
+	}), nil
 }
 
 func (m *mockRetryDoer) SetStatusCode(code int) {
@@ -117,7 +117,7 @@ func TestRetryMiddleware(t *testing.T) {
 			mu    sync.Mutex
 		)
 
-		m1 := aoni.DoerFunc(func(req *http.Request) (*http.Response, error) {
+		m1 := aoni.DoerFunc(func(req aoni.Request) (aoni.Response, error) {
 			mu.Lock()
 			calls++
 			currentCalls := calls
@@ -128,11 +128,10 @@ func TestRetryMiddleware(t *testing.T) {
 				statusCode = http.StatusOK
 			}
 
-			return &http.Response{
+			return aoni.NewStdResponse(&http.Response{
 				StatusCode: statusCode,
 				Body:       io.NopCloser(strings.NewReader("")),
-				Request:    req,
-			}, nil
+			}), nil
 		})
 
 		opts := RetryOptions{
@@ -140,21 +139,21 @@ func TestRetryMiddleware(t *testing.T) {
 			Backoff:    1 * time.Microsecond,
 		}
 
-		condition := func(resp *http.Response, err error) bool {
-			return resp != nil && resp.StatusCode == http.StatusTooManyRequests
+		condition := func(resp aoni.Response, err error) bool {
+			return resp != nil && resp.StatusCode() == http.StatusTooManyRequests
 		}
 
 		retryMiddleware := Retry(opts, condition)
 		client := retryMiddleware(m1)
-		req, err := http.NewRequestWithContext(t.Context(), "GET", "http://test", nil)
+		httpReq, err := http.NewRequestWithContext(t.Context(), "GET", "http://test", nil)
 		require.NoError(t, err)
 
-		resp, err := client.Do(req)
+		resp, err := client.Do(aoni.NewStdRequest(httpReq))
 		require.NoError(t, err)
-		t.Cleanup(func() { _ = resp.Body.Close() })
+		t.Cleanup(func() { _ = resp.Close() })
 
 		assert.Equal(t, 3, calls)
-		assert.Equal(t, 200, resp.StatusCode)
+		assert.Equal(t, 200, resp.StatusCode())
 	})
 }
 
@@ -164,7 +163,7 @@ func TestRecoveryMiddleware(t *testing.T) {
 	t.Run("recover_from_panic_and_return_error", func(t *testing.T) {
 		t.Parallel()
 
-		panicDoer := aoni.DoerFunc(func(req *http.Request) (*http.Response, error) {
+		panicDoer := aoni.DoerFunc(func(req aoni.Request) (aoni.Response, error) {
 			panic("something went terribly wrong")
 		})
 
@@ -175,10 +174,10 @@ func TestRecoveryMiddleware(t *testing.T) {
 		})
 
 		client := recovery(panicDoer)
-		req, err := http.NewRequestWithContext(t.Context(), "GET", "http://test", nil)
+		httpReq, err := http.NewRequestWithContext(t.Context(), "GET", "http://test", nil)
 		require.NoError(t, err)
 
-		resp, err := client.Do(req)
+		resp, err := client.Do(aoni.NewStdRequest(httpReq))
 		require.Error(t, err)
 		assert.Nil(t, resp)
 		assert.Contains(t, err.Error(), "aoni: panic recovered during request execution: something went terribly wrong")
@@ -201,8 +200,10 @@ func TestCircuitBreaker(t *testing.T) {
 		})
 
 		client := CircuitBreak(cb, nil)(m)
-		req, err := http.NewRequestWithContext(t.Context(), "GET", "http://localhost", nil)
+		httpReq, err := http.NewRequestWithContext(t.Context(), "GET", "http://localhost", nil)
 		require.NoError(t, err)
+
+		req := aoni.NewStdRequest(httpReq)
 
 		_, err = client.Do(req)
 		require.NoError(t, err)
@@ -220,8 +221,8 @@ func TestCircuitBreaker(t *testing.T) {
 
 		resp, err := client.Do(req)
 		require.NoError(t, err)
-		t.Cleanup(func() { _ = resp.Body.Close() })
-		assert.Equal(t, http.StatusOK, resp.StatusCode)
+		t.Cleanup(func() { _ = resp.Close() })
+		assert.Equal(t, http.StatusOK, resp.StatusCode())
 	})
 }
 
@@ -236,20 +237,19 @@ func TestFallbackMiddleware(t *testing.T) {
 
 		client := Fallback()(m)
 
-		req, err := http.NewRequestWithContext(t.Context(), "GET", "http://localhost", nil)
+		httpReq, err := http.NewRequestWithContext(t.Context(), "GET", "http://localhost", nil)
 		require.NoError(t, err)
 
-		mod.WithFallback(fallback)(aoni.NewStdRequest(req))
+		req := aoni.NewStdRequest(httpReq)
+		mod.WithFallback(fallback)(req)
 
 		resp, err := client.Do(req)
 		require.NoError(t, err)
-		t.Cleanup(func() { _ = resp.Body.Close() })
-		assert.Equal(t, http.StatusOK, resp.StatusCode)
+		t.Cleanup(func() { _ = resp.Close() })
+		assert.Equal(t, http.StatusOK, resp.StatusCode())
 
-		body, err := io.ReadAll(resp.Body)
-		require.NoError(t, err)
-
-		assert.JSONEq(t, `{"message": "fallback-data"}`, string(body))
+		bodyBytes := resp.BodyBytes()
+		assert.JSONEq(t, `{"message": "fallback-data"}`, string(bodyBytes))
 	})
 
 	t.Run("fallback_on_transport_error_string", func(t *testing.T) {
@@ -260,20 +260,20 @@ func TestFallbackMiddleware(t *testing.T) {
 
 		client := Fallback()(m)
 
-		req, err := http.NewRequestWithContext(t.Context(), "GET", "http://localhost", nil)
+		httpReq, err := http.NewRequestWithContext(t.Context(), "GET", "http://localhost", nil)
 		require.NoError(t, err)
 
-		mod.WithFallback(fallback)(aoni.NewStdRequest(req))
+		req := aoni.NewStdRequest(httpReq)
+		mod.WithFallback(fallback)(req)
 
 		resp, err := client.Do(req)
 		require.NoError(t, err)
-		t.Cleanup(func() { _ = resp.Body.Close() })
-		assert.Equal(t, http.StatusGatewayTimeout, resp.StatusCode)
+		t.Cleanup(func() { _ = resp.Close() })
+		assert.Equal(t, http.StatusGatewayTimeout, resp.StatusCode())
 
-		body, err := io.ReadAll(resp.Body)
-		require.NoError(t, err)
-		assert.Equal(t, "text-fallback", string(body))
-		assert.Contains(t, resp.Header.Get("Content-Type"), "text/plain")
+		bodyBytes := resp.BodyBytes()
+		assert.Equal(t, "text-fallback", string(bodyBytes))
+		assert.Contains(t, resp.Header("Content-Type"), "text/plain")
 	})
 
 	t.Run("fallback_on_custom_condition_5xx", func(t *testing.T) {
@@ -282,25 +282,24 @@ func TestFallbackMiddleware(t *testing.T) {
 		m := &mockDoer{id: 1, statusCode: 503}
 		fallback := aoni.FallbackJSON(http.StatusOK, map[string]string{"message": "fallback-5xx"})
 
-		isFailure := func(resp *http.Response, err error) bool {
-			return err != nil || (resp != nil && resp.StatusCode >= 500)
+		isFailure := func(resp aoni.Response, err error) bool {
+			return err != nil || (resp != nil && resp.StatusCode() >= 500)
 		}
 		client := FallbackEx(isFailure)(m)
 
-		req, err := http.NewRequestWithContext(t.Context(), "GET", "http://localhost", nil)
+		httpReq, err := http.NewRequestWithContext(t.Context(), "GET", "http://localhost", nil)
 		require.NoError(t, err)
 
-		mod.WithFallback(fallback)(aoni.NewStdRequest(req))
+		req := aoni.NewStdRequest(httpReq)
+		mod.WithFallback(fallback)(req)
 
 		resp, err := client.Do(req)
 		require.NoError(t, err)
-		t.Cleanup(func() { _ = resp.Body.Close() })
-		assert.Equal(t, http.StatusOK, resp.StatusCode)
+		t.Cleanup(func() { _ = resp.Close() })
+		assert.Equal(t, http.StatusOK, resp.StatusCode())
 
-		body, err := io.ReadAll(resp.Body)
-		require.NoError(t, err)
-
-		assert.JSONEq(t, `{"message": "fallback-5xx"}`, string(body))
+		bodyBytes := resp.BodyBytes()
+		assert.JSONEq(t, `{"message": "fallback-5xx"}`, string(bodyBytes))
 	})
 }
 
@@ -320,12 +319,12 @@ func TestRetryAfter(t *testing.T) {
 			Backoff:    5 * time.Millisecond,
 		}
 
-		condition := func(resp *http.Response, err error) bool {
-			return resp != nil && resp.StatusCode == 429
+		condition := func(resp aoni.Response, err error) bool {
+			return resp != nil && resp.StatusCode() == 429
 		}
 
 		client := Retry(opts, condition)(m)
-		req, err := http.NewRequestWithContext(t.Context(), "GET", "http://localhost", nil)
+		httpReq, err := http.NewRequestWithContext(t.Context(), "GET", "http://localhost", nil)
 		require.NoError(t, err)
 
 		start := time.Now()
@@ -335,9 +334,9 @@ func TestRetryAfter(t *testing.T) {
 			m.SetStatusCode(200)
 		}()
 
-		resp, err := client.Do(req)
+		resp, err := client.Do(aoni.NewStdRequest(httpReq))
 		require.NoError(t, err)
-		t.Cleanup(func() { _ = resp.Body.Close() })
+		t.Cleanup(func() { _ = resp.Close() })
 
 		elapsed := time.Since(start)
 		assert.GreaterOrEqual(t, elapsed, 900*time.Millisecond)
@@ -357,12 +356,12 @@ func TestRetryMiddleware_JitterFull(t *testing.T) {
 			JitterStrategy: JitterFull,
 		}
 
-		condition := func(resp *http.Response, err error) bool {
-			return resp != nil && resp.StatusCode == 502
+		condition := func(resp aoni.Response, err error) bool {
+			return resp != nil && resp.StatusCode() == 502
 		}
 
 		client := Retry(opts, condition)(m)
-		req, err := http.NewRequestWithContext(t.Context(), "GET", "http://localhost", nil)
+		httpReq, err := http.NewRequestWithContext(t.Context(), "GET", "http://localhost", nil)
 		require.NoError(t, err)
 
 		go func() {
@@ -370,9 +369,9 @@ func TestRetryMiddleware_JitterFull(t *testing.T) {
 			m.SetStatusCode(200)
 		}()
 
-		resp, err := client.Do(req)
+		resp, err := client.Do(aoni.NewStdRequest(httpReq))
 		require.NoError(t, err)
-		t.Cleanup(func() { _ = resp.Body.Close() })
+		t.Cleanup(func() { _ = resp.Close() })
 
 		m.mu.Lock()
 		calls := m.calls
@@ -395,17 +394,17 @@ func TestChaosMiddleware(t *testing.T) {
 		chaos := Chaos(cfg)
 		client := chaos(m)
 
-		req, err := http.NewRequestWithContext(t.Context(), "GET", "http://localhost", nil)
+		httpReq, err := http.NewRequestWithContext(t.Context(), "GET", "http://localhost", nil)
 		require.NoError(t, err)
 
 		start := time.Now()
-		resp, err := client.Do(req)
+		resp, err := client.Do(aoni.NewStdRequest(httpReq))
 		require.NoError(t, err)
-		t.Cleanup(func() { _ = resp.Body.Close() })
+		t.Cleanup(func() { _ = resp.Close() })
 
 		elapsed := time.Since(start)
 
-		assert.Equal(t, http.StatusOK, resp.StatusCode)
+		assert.Equal(t, http.StatusOK, resp.StatusCode())
 		assert.GreaterOrEqual(t, elapsed, 15*time.Millisecond)
 	})
 
@@ -419,13 +418,13 @@ func TestChaosMiddleware(t *testing.T) {
 		chaos := Chaos(cfg)
 		client := chaos(m)
 
-		req, err := http.NewRequestWithContext(t.Context(), "GET", "http://localhost", nil)
+		httpReq, err := http.NewRequestWithContext(t.Context(), "GET", "http://localhost", nil)
 		require.NoError(t, err)
 
-		resp, err := client.Do(req)
+		resp, err := client.Do(aoni.NewStdRequest(httpReq))
 		require.NoError(t, err)
-		t.Cleanup(func() { _ = resp.Body.Close() })
-		assert.Equal(t, http.StatusServiceUnavailable, resp.StatusCode)
+		t.Cleanup(func() { _ = resp.Close() })
+		assert.Equal(t, http.StatusServiceUnavailable, resp.StatusCode())
 	})
 
 	t.Run("no_failure_injected_when_failure_rate_is_zero", func(t *testing.T) {
@@ -438,13 +437,13 @@ func TestChaosMiddleware(t *testing.T) {
 		chaos := Chaos(cfg)
 		client := chaos(m)
 
-		req, err := http.NewRequestWithContext(t.Context(), "GET", "http://localhost", nil)
+		httpReq, err := http.NewRequestWithContext(t.Context(), "GET", "http://localhost", nil)
 		require.NoError(t, err)
 
-		resp, err := client.Do(req)
+		resp, err := client.Do(aoni.NewStdRequest(httpReq))
 		require.NoError(t, err)
-		t.Cleanup(func() { _ = resp.Body.Close() })
-		assert.Equal(t, http.StatusOK, resp.StatusCode)
+		t.Cleanup(func() { _ = resp.Close() })
+		assert.Equal(t, http.StatusOK, resp.StatusCode())
 	})
 }
 
@@ -568,15 +567,15 @@ func TestRateLimitMiddleware_ClampsNegative(t *testing.T) {
 	m := RateLimit(-5, -10)
 	require.NotNil(t, m)
 
-	doer := m(aoni.DoerFunc(func(req *http.Request) (*http.Response, error) {
-		return &http.Response{StatusCode: 200, Body: io.NopCloser(strings.NewReader(""))}, nil
+	doer := m(aoni.DoerFunc(func(req aoni.Request) (aoni.Response, error) {
+		return aoni.NewStdResponse(&http.Response{StatusCode: 200, Body: io.NopCloser(strings.NewReader(""))}), nil
 	}))
 
 	ctx, cancel := context.WithTimeout(t.Context(), 50*time.Millisecond)
 	defer cancel()
 
-	req, _ := http.NewRequestWithContext(ctx, "GET", "http://localhost", nil)
-	_, err := doer.Do(req)
+	httpReq, _ := http.NewRequestWithContext(ctx, "GET", "http://localhost", nil)
+	_, err := doer.Do(aoni.NewStdRequest(httpReq))
 	assert.Error(t, err)
 }
 
@@ -588,12 +587,12 @@ func TestRetryMiddleware_NegativeBackoff(t *testing.T) {
 		Backoff:    -1 * time.Second,
 	}, RetryOnErr())
 
-	doer := m(aoni.DoerFunc(func(req *http.Request) (*http.Response, error) {
+	doer := m(aoni.DoerFunc(func(req aoni.Request) (aoni.Response, error) {
 		return nil, assert.AnError
 	}))
 
-	req, _ := http.NewRequestWithContext(t.Context(), "GET", "http://localhost", nil)
-	_, err := doer.Do(req)
+	httpReq, _ := http.NewRequestWithContext(t.Context(), "GET", "http://localhost", nil)
+	_, err := doer.Do(aoni.NewStdRequest(httpReq))
 	assert.Error(t, err)
 }
 
@@ -624,14 +623,15 @@ func TestSlidingWindowRateLimit(t *testing.T) {
 
 	var calls int
 
-	doer := mw(aoni.DoerFunc(func(req *http.Request) (*http.Response, error) {
+	doer := mw(aoni.DoerFunc(func(req aoni.Request) (aoni.Response, error) {
 		calls++
-		return &http.Response{StatusCode: http.StatusOK}, nil
+		return aoni.NewStdResponse(&http.Response{StatusCode: http.StatusOK}), nil
 	}))
 
-	req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, "http://localhost", nil)
+	httpReq, err := http.NewRequestWithContext(t.Context(), http.MethodGet, "http://localhost", nil)
 	require.NoError(t, err)
 
+	req := aoni.NewStdRequest(httpReq)
 	start := time.Now()
 
 	for i := 0; i < 5; i++ {
@@ -652,15 +652,15 @@ func TestRetryMiddleware_FatalErrorNoRetry(t *testing.T) {
 
 	mw := Retry(RetryOptions{MaxRetries: 3}, RetryOnErr())
 
-	doer := mw(aoni.DoerFunc(func(req *http.Request) (*http.Response, error) {
+	doer := mw(aoni.DoerFunc(func(req aoni.Request) (aoni.Response, error) {
 		attempts++
 		return nil, netdial.ErrSSRFBlocked
 	}))
 
-	req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, "http://localhost", nil)
+	httpReq, err := http.NewRequestWithContext(t.Context(), http.MethodGet, "http://localhost", nil)
 	require.NoError(t, err)
 
-	_, err = doer.Do(req)
+	_, err = doer.Do(aoni.NewStdRequest(httpReq))
 	assert.ErrorIs(t, err, netdial.ErrSSRFBlocked)
 	assert.Equal(t, 1, attempts) // Instant abort on 1st attempt, zero retries
 }
@@ -668,9 +668,9 @@ func TestRetryMiddleware_FatalErrorNoRetry(t *testing.T) {
 func TestParseRetryAfter_Overflow(t *testing.T) {
 	t.Parallel()
 
-	resp := &http.Response{
+	resp := aoni.NewStdResponse(&http.Response{
 		Header: http.Header{"Retry-After": []string{"9999999999999999999999"}},
-	}
+	})
 
 	delay, has := parseRetryAfter(resp)
 	assert.True(t, has)

@@ -39,6 +39,7 @@ import (
 	"github.com/lemon4ksan/aoni"
 	"github.com/lemon4ksan/aoni/codec/decode"
 	"github.com/lemon4ksan/aoni/cookie"
+	"github.com/lemon4ksan/aoni/fast"
 	"github.com/lemon4ksan/aoni/fingerprint"
 	"github.com/lemon4ksan/aoni/fingerprint/h3"
 	"github.com/lemon4ksan/aoni/fingerprint/ja4"
@@ -1243,17 +1244,50 @@ func TestClient_RetryMiddleware(t *testing.T) {
 
 	client := aoni.NewClient(nil, option.WithBaseURL(server.URL))
 	retryMid := middleware.Retry(opts, middleware.RetryOnGatewayErrors())
-	doer := retryMid(client.HTTP())
+	doer := retryMid(client)
 
 	req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, server.URL, nil)
 	require.NoError(t, err)
 
-	resp, err := doer.Do(req)
+	resp, err := doer.Do(aoni.NewStdRequest(req))
 	require.NoError(t, err)
-	t.Cleanup(func() { aoni.CloseResponse(resp) })
+	t.Cleanup(func() { _ = resp.Close() })
 
-	assert.Equal(t, http.StatusOK, resp.StatusCode)
+	assert.Equal(t, http.StatusOK, resp.StatusCode())
 	assert.Equal(t, uint32(2), atomic.LoadUint32(&attempts))
+}
+
+func TestConfigure_GenericEngine(t *testing.T) {
+	t.Parallel()
+
+	t.Run("configure_aoni_client", func(t *testing.T) {
+		t.Parallel()
+
+		stdClient := aoni.NewClient(nil)
+		configured := aoni.Configure(stdClient, option.WithUserAgent("AoniUserAgent/1.0"))
+		c, ok := configured.(*aoni.Client)
+		require.True(t, ok)
+		assert.Equal(t, "AoniUserAgent/1.0", c.Config().Defaults.Headers.Get("User-Agent"))
+	})
+
+	t.Run("configure_fast_client", func(t *testing.T) {
+		t.Parallel()
+
+		fastClient := fast.NewClient()
+		configured := aoni.Configure(fastClient, option.WithUserAgent("FastUserAgent/1.0"))
+		fc, ok := configured.(*fast.Client)
+		require.True(t, ok)
+		assert.Equal(t, "FastUserAgent/1.0", fc.Config().Defaults.Headers.Get("User-Agent"))
+	})
+
+	t.Run("configure_nil_client", func(t *testing.T) {
+		t.Parallel()
+
+		configured := aoni.Configure(nil, option.WithUserAgent("DefaultUserAgent/1.0"))
+		c, ok := configured.(*aoni.Client)
+		require.True(t, ok)
+		assert.Equal(t, "DefaultUserAgent/1.0", c.Config().Defaults.Headers.Get("User-Agent"))
+	})
 }
 
 func TestClient_StreamParsing(t *testing.T) {

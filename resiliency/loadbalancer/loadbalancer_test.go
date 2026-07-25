@@ -206,7 +206,7 @@ func TestLoadBalancer_FaultHandling(t *testing.T) {
 			t.Cleanup(func() { _ = lb.Close() })
 
 			if tt.doerErr != nil {
-				lb.WithClients(aoni.DoerFunc(func(_ *http.Request) (*http.Response, error) {
+				lb.WithClients(aoni.HTTPDoerFunc(func(_ *http.Request) (*http.Response, error) {
 					return nil, tt.doerErr
 				}))
 			}
@@ -326,13 +326,13 @@ func TestLoadBalancer_Prewarm(t *testing.T) {
 
 	var calls1, calls2 atomic.Int32
 
-	c1 := aoni.DoerFunc(func(req *http.Request) (*http.Response, error) {
+	c1 := aoni.HTTPDoerFunc(func(req *http.Request) (*http.Response, error) {
 		calls1.Add(1)
 		assert.Equal(t, http.MethodHead, req.Method)
 		return &http.Response{StatusCode: http.StatusOK}, nil
 	})
 
-	c2 := aoni.DoerFunc(func(req *http.Request) (*http.Response, error) {
+	c2 := aoni.HTTPDoerFunc(func(req *http.Request) (*http.Response, error) {
 		calls2.Add(1)
 		assert.Equal(t, http.MethodHead, req.Method)
 		return &http.Response{StatusCode: http.StatusOK}, nil

@@ -70,6 +70,19 @@ type Requester interface {
 	) (*http.Response, error)
 }
 
+// AsRequester adapts any [aoni.RequestDoer] engine into a [Requester] for use with [request] package helpers.
+func AsRequester(doer aoni.RequestDoer) Requester {
+	if doer == nil {
+		return DefaultClient
+	}
+
+	if r, ok := doer.(Requester); ok {
+		return r
+	}
+
+	return aoni.NewClient(doer)
+}
+
 // Get performs a GET request through c and returns the raw [*http.Response].
 func Get(ctx context.Context, c Requester, path string, mods ...aoni.RequestModifier) (*http.Response, error) {
 	return c.Request(ctx, http.MethodGet, path, mods...)

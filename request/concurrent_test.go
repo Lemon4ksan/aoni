@@ -188,3 +188,22 @@ func TestConcurrentWithMods(t *testing.T) {
 		assert.Equal(t, expected[r.Index], r.Value.Message)
 	}
 }
+
+func TestAsRequester(t *testing.T) {
+	t.Parallel()
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"message":"ok","status":200}`))
+	}))
+	t.Cleanup(server.Close)
+
+	stdClient := aoni.NewClient(nil, option.WithBaseURL(server.URL))
+	reqr := AsRequester(stdClient)
+	require.NotNil(t, reqr)
+
+	res, err := GetTo[reqTestPayload](t.Context(), reqr, "/test")
+	require.NoError(t, err)
+	assert.Equal(t, "ok", res.Message)
+}

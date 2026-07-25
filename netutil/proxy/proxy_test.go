@@ -802,10 +802,10 @@ func TestRetryMiddleware(t *testing.T) {
 		}
 
 		retryMiddleware := middleware.Retry(opts, RetryCondition(rotator))
-		client := retryMiddleware(m1)
+		client := retryMiddleware(aoni.NewHTTPDoerAdapter(m1))
 
 		bodyText := "test body"
-		req, err := http.NewRequestWithContext(t.Context(), "POST", "http://test", strings.NewReader(bodyText))
+		httpReq, err := http.NewRequestWithContext(t.Context(), "POST", "http://test", strings.NewReader(bodyText))
 		require.NoError(t, err)
 
 		go func() {
@@ -813,12 +813,12 @@ func TestRetryMiddleware(t *testing.T) {
 			m1.SetStatusCode(200)
 		}()
 
-		resp, err := client.Do(req)
+		resp, err := client.Do(aoni.NewStdRequest(httpReq))
 		require.NoError(t, err)
-		t.Cleanup(func() { _ = resp.Body.Close() })
+		t.Cleanup(func() { _ = resp.Close() })
 
 		assert.GreaterOrEqual(t, m1.GetCalls(), 2)
-		assert.Equal(t, 200, resp.StatusCode)
+		assert.Equal(t, 200, resp.StatusCode())
 		assert.GreaterOrEqual(t, atomic.LoadInt32(&callbackCalls), int32(1))
 	})
 
@@ -835,11 +835,11 @@ func TestRetryMiddleware(t *testing.T) {
 			Backoff:    1 * time.Millisecond,
 		}
 
-		client := middleware.Retry(opts, RetryCondition(rotator))(m1)
-		req, err := http.NewRequestWithContext(t.Context(), "GET", "http://test", nil)
+		client := middleware.Retry(opts, RetryCondition(rotator))(aoni.NewHTTPDoerAdapter(m1))
+		httpReq, err := http.NewRequestWithContext(t.Context(), "GET", "http://test", nil)
 		require.NoError(t, err)
 
-		_, err = client.Do(req)
+		_, err = client.Do(aoni.NewStdRequest(httpReq))
 		require.Error(t, err)
 		assert.Equal(t, 2, m1.GetCalls())
 	})
@@ -852,7 +852,7 @@ func TestRetryMiddleware(t *testing.T) {
 			mu    sync.Mutex
 		)
 
-		m1 := aoni.DoerFunc(func(req *http.Request) (*http.Response, error) {
+		m1 := aoni.DoerFunc(func(req aoni.Request) (aoni.Response, error) {
 			mu.Lock()
 			calls++
 			currentCalls := calls
@@ -863,11 +863,10 @@ func TestRetryMiddleware(t *testing.T) {
 				statusCode = http.StatusOK
 			}
 
-			return &http.Response{
+			return aoni.NewStdResponse(&http.Response{
 				StatusCode: statusCode,
 				Body:       io.NopCloser(strings.NewReader("")),
-				Request:    req,
-			}, nil
+			}), nil
 		})
 
 		opts := middleware.RetryOptions{
@@ -875,20 +874,20 @@ func TestRetryMiddleware(t *testing.T) {
 			Backoff:    1 * time.Microsecond,
 		}
 
-		condition := func(resp *http.Response, err error) bool {
-			return resp != nil && resp.StatusCode == http.StatusTooManyRequests
+		condition := func(resp aoni.Response, err error) bool {
+			return resp != nil && resp.StatusCode() == http.StatusTooManyRequests
 		}
 
 		retryMiddleware := middleware.Retry(opts, condition)
 		client := retryMiddleware(m1)
-		req, err := http.NewRequestWithContext(t.Context(), "GET", "http://test", nil)
+		httpReq, err := http.NewRequestWithContext(t.Context(), "GET", "http://test", nil)
 		require.NoError(t, err)
 
-		resp, err := client.Do(req)
+		resp, err := client.Do(aoni.NewStdRequest(httpReq))
 		require.NoError(t, err)
-		t.Cleanup(func() { _ = resp.Body.Close() })
+		t.Cleanup(func() { _ = resp.Close() })
 
 		assert.Equal(t, 3, calls)
-		assert.Equal(t, 200, resp.StatusCode)
+		assert.Equal(t, 200, resp.StatusCode())
 	})
 }

@@ -756,3 +756,13 @@ func clonePtr[T any](p *T) *T {
 
 	return &val
 }
+
+// Clone produces a deep copy of the [Config] instance.
+func (c Config) Clone() Config {
+	return Config{
+		Network:     c.Network.Clone(),
+		Fingerprint: c.Fingerprint.Clone(),
+		Defaults:    c.Defaults.Clone(),
+		Engine:      c.Engine,
+	}
+}

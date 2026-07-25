@@ -19,6 +19,7 @@ import (
 
 	"github.com/lemon4ksan/aoni"
 	"github.com/lemon4ksan/aoni/fast"
+	"github.com/lemon4ksan/aoni/middleware"
 	"github.com/lemon4ksan/aoni/mod"
 	"github.com/lemon4ksan/aoni/option"
 )
@@ -82,6 +83,27 @@ func TestFastClient_WithOptions(t *testing.T) {
 	assert.Equal(t, 10*time.Second, cfg.Engine.Timeout)
 	assert.Equal(t, "FastClient/1.0", cfg.Defaults.Headers.Get("User-Agent"))
 	assert.Equal(t, "FastApp", cfg.Defaults.Headers.Get("X-Custom-App"))
+}
+
+func TestFastClient_With(t *testing.T) {
+	t.Parallel()
+
+	baseClient := fast.NewClient(
+		option.WithBaseURL("http://example.com/v1"),
+		option.WithTimeout(10*time.Second),
+	)
+
+	clonedClient := baseClient.With(
+		option.WithUserAgent("ClonedFastClient/1.0"),
+		option.WithHeader("X-Cloned", "true"),
+	)
+
+	cfg1 := baseClient.Config()
+	cfg2 := clonedClient.Config()
+
+	assert.Equal(t, "", cfg1.Defaults.Headers.Get("User-Agent"))
+	assert.Equal(t, "ClonedFastClient/1.0", cfg2.Defaults.Headers.Get("User-Agent"))
+	assert.Equal(t, "true", cfg2.Defaults.Headers.Get("X-Cloned"))
 }
 
 func TestFastRequest_Contract(t *testing.T) {
@@ -207,4 +229,57 @@ func BenchmarkFastAdapter_ZeroAllocations(b *testing.B) {
 		req.SetQueryParamBytes(queryKey, queryVal)
 		_ = req.HeaderBytes(key)
 	}
+}
+
+func TestFastClient_MiddlewareChain(t *testing.T) {
+	t.Parallel()
+
+	var attempts int
+	ln := fasthttputil.NewInmemoryListener()
+	srv := &fasthttp.Server{
+		Handler: func(ctx *fasthttp.RequestCtx) {
+			attempts++
+			if attempts < 3 {
+				ctx.SetStatusCode(fasthttp.StatusServiceUnavailable)
+				return
+			}
+			ctx.SetStatusCode(fasthttp.StatusOK)
+			ctx.SetBodyString(`{"success":true}`)
+		},
+	}
+
+	go func() {
+		_ = srv.Serve(ln)
+	}()
+
+	t.Cleanup(func() {
+		_ = srv.Shutdown()
+		_ = ln.Close()
+	})
+
+	fastClient := fast.NewClient(option.WithTimeout(5 * time.Second))
+	fastClient.Engine().Dial = func(_ string) (net.Conn, error) {
+		return ln.Dial()
+	}
+
+	chained := middleware.Chain(
+		fastClient,
+		middleware.Retry(
+			middleware.RetryOptions{MaxRetries: 3, Backoff: 1 * time.Millisecond},
+			middleware.RetryOnGatewayErrors(),
+		),
+		middleware.RateLimit(100, 10),
+	)
+
+	req := fast.NewRequest(fasthttp.AcquireRequest())
+	req.SetURL("http://inmemory/test")
+	req.SetMethod("GET")
+
+	resp, err := chained.Do(req)
+	require.NoError(t, err)
+	defer resp.Close()
+
+	assert.Equal(t, 200, resp.StatusCode())
+	assert.Equal(t, []byte(`{"success":true}`), resp.BodyBytes())
+	assert.Equal(t, 3, attempts)
 }

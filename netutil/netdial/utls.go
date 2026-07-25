@@ -71,7 +71,6 @@ func (w *UConnWrapper) ConnectionState() tls.ConnectionState {
 		DidResume:                   uState.DidResume,
 		CipherSuite:                 uState.CipherSuite,
 		NegotiatedProtocol:          uState.NegotiatedProtocol,
-		NegotiatedProtocolIsMutual:  uState.NegotiatedProtocolIsMutual,
 		ServerName:                  uState.ServerName,
 		PeerCertificates:            uState.PeerCertificates,
 		VerifiedChains:              uState.VerifiedChains,

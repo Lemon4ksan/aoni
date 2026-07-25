@@ -490,10 +490,14 @@ func TestRetryPolicyAndConditions(t *testing.T) {
 	t.Run("built_in_retry_conditions", func(t *testing.T) {
 		t.Parallel()
 
+		newResp := func(code int) aoni.Response {
+			return aoni.NewStdResponse(&http.Response{StatusCode: code})
+		}
+
 		tests := []struct {
 			name        string
 			cond        aoni.RetryCondition
-			resp        *http.Response
+			resp        aoni.Response
 			err         error
 			expectRetry bool
 		}{
@@ -506,7 +510,7 @@ func TestRetryPolicyAndConditions(t *testing.T) {
 			{
 				name:        "retry_on_err_without_error",
 				cond:        middleware.RetryOnErr(),
-				resp:        &http.Response{StatusCode: 200},
+				resp:        newResp(200),
 				expectRetry: false,
 			},
 			{
@@ -518,25 +522,25 @@ func TestRetryPolicyAndConditions(t *testing.T) {
 			{
 				name:        "retry_rate_limit_429",
 				cond:        middleware.RetryOnRateLimit(),
-				resp:        &http.Response{StatusCode: http.StatusTooManyRequests},
+				resp:        newResp(http.StatusTooManyRequests),
 				expectRetry: true,
 			},
 			{
 				name:        "retry_rate_limit_200_ok",
 				cond:        middleware.RetryOnRateLimit(),
-				resp:        &http.Response{StatusCode: http.StatusOK},
+				resp:        newResp(http.StatusOK),
 				expectRetry: false,
 			},
 			{
 				name:        "retry_gateway_502",
 				cond:        middleware.RetryOnGatewayErrors(),
-				resp:        &http.Response{StatusCode: http.StatusBadGateway},
+				resp:        newResp(http.StatusBadGateway),
 				expectRetry: true,
 			},
 			{
 				name:        "retry_gateway_200",
 				cond:        middleware.RetryOnGatewayErrors(),
-				resp:        &http.Response{StatusCode: http.StatusOK},
+				resp:        newResp(http.StatusOK),
 				expectRetry: false,
 			},
 		}
@@ -553,8 +557,8 @@ func TestRetryPolicyAndConditions(t *testing.T) {
 	t.Run("combinators_or_and", func(t *testing.T) {
 		t.Parallel()
 
-		condTrue := func(_ *http.Response, _ error) bool { return true }
-		condFalse := func(_ *http.Response, _ error) bool { return false }
+		condTrue := func(_ aoni.Response, _ error) bool { return true }
+		condFalse := func(_ aoni.Response, _ error) bool { return false }
 
 		assert.True(t, aoni.Or(condTrue, condFalse)(nil, nil))
 		assert.False(t, aoni.Or(condFalse, condFalse)(nil, nil))
@@ -567,8 +571,10 @@ func TestRetryPolicyAndConditions(t *testing.T) {
 func TestFallbackFunctions(t *testing.T) {
 	t.Parallel()
 
-	req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, "http://example.com", nil)
+	httpReq, err := http.NewRequestWithContext(t.Context(), http.MethodGet, "http://example.com", nil)
 	require.NoError(t, err)
+
+	req := aoni.NewStdRequest(httpReq)
 
 	t.Run("fallback_string", func(t *testing.T) {
 		t.Parallel()
@@ -578,8 +584,8 @@ func TestFallbackFunctions(t *testing.T) {
 		require.NoError(t, err)
 		require.NotNil(t, resp)
 
-		assert.Equal(t, http.StatusInternalServerError, resp.StatusCode)
-		body, _ := io.ReadAll(resp.Body)
+		assert.Equal(t, http.StatusInternalServerError, resp.StatusCode())
+		body := resp.BodyBytes()
 		assert.Equal(t, "error fallback", string(body))
 	})
 
@@ -592,8 +598,8 @@ func TestFallbackFunctions(t *testing.T) {
 		require.NoError(t, err)
 		require.NotNil(t, resp)
 
-		assert.Equal(t, http.StatusServiceUnavailable, resp.StatusCode)
-		body, _ := io.ReadAll(resp.Body)
+		assert.Equal(t, http.StatusServiceUnavailable, resp.StatusCode())
+		body := resp.BodyBytes()
 		assert.Contains(t, string(body), "service unavailable")
 	})
 }

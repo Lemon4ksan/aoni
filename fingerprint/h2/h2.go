@@ -276,6 +276,7 @@ func (ft *FramedTransport) getH2Conn(addr string) *http2.ClientConn {
 		delete(ft.h2Conns, addr)
 
 		_ = cc.Close()
+
 		return nil
 	}
 

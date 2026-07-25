@@ -409,3 +409,84 @@ func (s *StdResponse) Close() error {
 
 	return nil
 }
+
+// HTTPDoerAdapter adapts an [HTTPDoer] to the unified [RequestDoer] interface.
+type HTTPDoerAdapter struct {
+	doer HTTPDoer
+}
+
+// NewHTTPDoerAdapter wraps doer in a [RequestDoer] adapter.
+func NewHTTPDoerAdapter(doer HTTPDoer) RequestDoer {
+	if doer == nil {
+		return nil
+	}
+
+	return &HTTPDoerAdapter{doer: doer}
+}
+
+// Do executes a unified [Request] via the underlying [HTTPDoer].
+func (a *HTTPDoerAdapter) Do(req Request) (Response, error) {
+	if a == nil || a.doer == nil {
+		return nil, ErrNilRequest
+	}
+
+	httpReq := req.HTTPRequest()
+	if httpReq == nil {
+		ctx := req.Context()
+		if ctx == nil {
+			ctx = context.Background()
+		}
+
+		var err error
+
+		httpReq, err = http.NewRequestWithContext(ctx, req.Method(), req.URL(), req.BodyStream())
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	resp, err := a.doer.Do(httpReq) //nolint:bodyclose
+	if err != nil {
+		return nil, err
+	}
+
+	return NewStdResponse(resp), nil
+}
+
+// RequestDoerAdapter adapts a [RequestDoer] to the legacy [HTTPDoer] interface.
+type RequestDoerAdapter struct {
+	doer RequestDoer
+}
+
+// NewRequestDoerAdapter wraps doer in an [HTTPDoer] adapter.
+func NewRequestDoerAdapter(doer RequestDoer) HTTPDoer {
+	if doer == nil {
+		return nil
+	}
+
+	return &RequestDoerAdapter{doer: doer}
+}
+
+// Do executes a standard [*http.Request] via the underlying [RequestDoer].
+func (a *RequestDoerAdapter) Do(req *http.Request) (*http.Response, error) {
+	if a == nil || a.doer == nil {
+		return nil, ErrNilRequest
+	}
+
+	stdReq := NewStdRequest(req)
+
+	resp, err := a.doer.Do(stdReq)
+	if err != nil {
+		return nil, err
+	}
+
+	if stdResp, ok := resp.(*StdResponse); ok {
+		return stdResp.resp, nil
+	}
+
+	if httpResp := resp.HTTPResponse(); httpResp != nil {
+		return httpResp, nil
+	}
+
+	return nil, ErrNilRequest
+}

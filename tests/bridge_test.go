@@ -517,7 +517,7 @@ func TestTransport_RoundTrip_RequestFailure_ClosesBody(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 
-			mockDoer := aoni.DoerFunc(func(req *http.Request) (*http.Response, error) {
+			mockDoer := aoni.HTTPDoerFunc(func(req *http.Request) (*http.Response, error) {
 				return nil, io.ErrUnexpectedEOF
 			})
 
@@ -589,7 +589,7 @@ func TestTransport_RoundTrip_BaseURL_Rewriting(t *testing.T) {
 
 			var capturedURL *url.URL
 
-			mockDoer := aoni.DoerFunc(func(req *http.Request) (*http.Response, error) {
+			mockDoer := aoni.HTTPDoerFunc(func(req *http.Request) (*http.Response, error) {
 				capturedURL = req.URL
 
 				return &http.Response{
@@ -625,7 +625,7 @@ func TestTransport_RoundTrip_BeforeRoundTripHook(t *testing.T) {
 
 	var hookCalled atomic.Bool
 
-	mockDoer := aoni.DoerFunc(func(req *http.Request) (*http.Response, error) {
+	mockDoer := aoni.HTTPDoerFunc(func(req *http.Request) (*http.Response, error) {
 		return &http.Response{
 			StatusCode: http.StatusOK,
 			Body:       io.NopCloser(strings.NewReader("ok")),
@@ -831,7 +831,7 @@ func TestNewStdClient_CancelledContext(t *testing.T) {
 func TestTransport_RoundTrip_TraceContext(t *testing.T) {
 	t.Parallel()
 
-	mockDoer := aoni.DoerFunc(func(req *http.Request) (*http.Response, error) {
+	mockDoer := aoni.HTTPDoerFunc(func(req *http.Request) (*http.Response, error) {
 		cfg := aoni.GetRequestConfig(req.Context())
 		if cfg != nil && cfg.JA4ReportStore != nil {
 			cfg.JA4ReportStore.Report = &ja4.Report{JA4: "t13d1516h2_mock_fingerprint"}

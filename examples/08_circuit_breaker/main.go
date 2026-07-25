@@ -41,7 +41,7 @@ func main() {
 
 	// Wrap client with circuit breaker middleware using the default condition
 	doer := middleware.Chain(
-		aoni.NewClient(nil).HTTP(),
+		aoni.NewClient(nil),
 		middleware.CircuitBreak(cb, middleware.DefaultCircuitBreakerCondition),
 	)
 
