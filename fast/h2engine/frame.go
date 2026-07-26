@@ -105,7 +105,7 @@ func AcquireFrame(frameType FrameType) Frame {
 
 // ReleaseFrame returns a Frame instance back to memory pools.
 func ReleaseFrame(fr Frame) {
-	if fr != nil {
+	if fr != nil && int(fr.Type()) >= 0 && int(fr.Type()) < len(framePools) {
 		framePools[fr.Type()].Put(fr)
 	}
 }

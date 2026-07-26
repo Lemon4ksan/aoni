@@ -19,6 +19,8 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/lemon4ksan/aoni"
 )
 
 type failingResolver struct{}
@@ -262,7 +264,7 @@ func TestInMemoryDNSCache_EvictionLoop(t *testing.T) {
 func TestNewDoHResolver(t *testing.T) {
 	t.Parallel()
 
-	resolver := NewDoHResolver("https://8.8.8.8/dns-query", "dns.google")
+	resolver := NewDoHResolver("https://8.8.8.8/dns-query", "dns.google", nil)
 	require.NotNil(t, resolver)
 
 	assert.Equal(t, "https://8.8.8.8/dns-query", resolver.Endpoint)
@@ -272,10 +274,8 @@ func TestNewDoHResolver(t *testing.T) {
 func TestDoHResolver_LookupIPAddr_Mocked(t *testing.T) {
 	t.Parallel()
 
-	resolver := NewDoHResolver("https://8.8.8.8/dns-query", "dns.google")
-
-	// Mocking the http.Client's Transport
-	resolver.client.Transport = roundTripperFunc(func(req *http.Request) (*http.Response, error) {
+	// Mock transport for HTTP requests
+	mockTransport := roundTripperFunc(func(req *http.Request) (*http.Response, error) {
 		query := req.URL.Query().Get("name")
 		qtype := req.URL.Query().Get("type")
 
@@ -296,6 +296,11 @@ func TestDoHResolver_LookupIPAddr_Mocked(t *testing.T) {
 			Request:    req,
 		}, nil
 	})
+
+	mockClient := &http.Client{Transport: mockTransport}
+
+	// Pass the mock client as the universal doer parameter
+	resolver := NewDoHResolver("https://8.8.8.8/dns-query", "dns.google", mockClient)
 
 	ips, err := resolver.LookupIPAddr(t.Context(), "example.test")
 	require.NoError(t, err)
@@ -320,12 +325,14 @@ func TestDoHResolver_LookupIPAddr_Mocked(t *testing.T) {
 func TestDoHResolver_LookupIPAddr_QueryFailure(t *testing.T) {
 	t.Parallel()
 
-	resolver := NewDoHResolver("https://8.8.8.8/dns-query", "dns.google")
-
 	// Simulate DNS query connection error inside LookupIPAddr
-	resolver.client.Transport = roundTripperFunc(func(req *http.Request) (*http.Response, error) {
-		return nil, io.ErrUnexpectedEOF
-	})
+	mockClient := &http.Client{
+		Transport: roundTripperFunc(func(req *http.Request) (*http.Response, error) {
+			return nil, io.ErrUnexpectedEOF
+		}),
+	}
+
+	resolver := NewDoHResolver("https://8.8.8.8/dns-query", "dns.google", mockClient)
 
 	_, err := resolver.LookupIPAddr(t.Context(), "example.test")
 	assert.ErrorIs(t, err, io.ErrUnexpectedEOF)
@@ -623,7 +630,7 @@ func TestDoHResolver_QueryEncoding(t *testing.T) {
 	r := &DoHResolver{
 		Endpoint: ts.URL,
 		Host:     "cloudflare-dns.com",
-		client:   ts.Client(),
+		doer:     aoni.NewClient(ts.Client()),
 	}
 
 	ctx := t.Context()

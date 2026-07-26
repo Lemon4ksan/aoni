@@ -85,7 +85,7 @@ func TestFramesSerializationRoundtrip(t *testing.T) {
 			frame: &Data{
 				endStream:  true,
 				hasPadding: false,
-				b:          []byte("hello aoni h2engine"),
+				b:          []byte("hello h2engine"),
 			},
 		},
 		{

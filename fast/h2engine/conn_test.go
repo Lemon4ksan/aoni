@@ -159,7 +159,7 @@ func TestClientServerEndToEnd(t *testing.T) {
 		}
 
 		resp.SetStatusCode(200)
-		resp.SetBodyString("aoni h2engine success")
+		resp.SetBodyString("h2engine success")
 	})
 
 	dialer := &Dialer{
@@ -188,8 +188,8 @@ func TestClientServerEndToEnd(t *testing.T) {
 		t.Fatalf("expected status code 200, got %d", resp.StatusCode())
 	}
 
-	if string(resp.Body()) != "aoni h2engine success" {
-		t.Fatalf("body mismatch: got %q, want %q", resp.Body(), "aoni h2engine success")
+	if string(resp.Body()) != "h2engine success" {
+		t.Fatalf("body mismatch: got %q, want %q", resp.Body(), "h2engine success")
 	}
 }
 

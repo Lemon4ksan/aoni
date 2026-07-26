@@ -6,47 +6,41 @@ package dns
 
 import (
 	"context"
-	"crypto/tls"
 	"encoding/json"
 	"fmt"
 	"net"
 	"net/http"
 	"net/url"
 	"time"
+
+	"github.com/lemon4ksan/aoni"
+	"github.com/lemon4ksan/aoni/fast"
+	"github.com/lemon4ksan/aoni/option"
 )
 
-// DoHResolver resolves DNS via HTTPS, supporting both A and AAAA records.
-// Uses an isolated [http.Client] that connects directly to the DoH server by IP,
-// bypassing the system resolver entirely to avoid circular DNS lookups.
+// DoHResolver resolves DNS via HTTPS (A and AAAA records) using a universal HTTP execution engine.
 type DoHResolver struct {
 	Endpoint string // IP-based URL, e.g. "https://1.1.1.1/dns-query"
 	Host     string // Host header override, e.g. "cloudflare-dns.com"
 
-	client *http.Client
+	doer aoni.RequestDoer
 }
 
-// NewDoHResolver creates a [DoHResolver] that queries the given IP-based endpoint.
-// The endpoint should be an IP-based URL (e.g. "https://1.1.1.1/dns-query"),
-// and host is the Host header value (e.g. "cloudflare-dns.com").
-func NewDoHResolver(endpoint, host string) *DoHResolver {
-	transport := &http.Transport{
-		TLSClientConfig: &tls.Config{
-			MinVersion: tls.VersionTLS12,
-		},
-		DialContext: (&net.Dialer{
-			Timeout:   5 * time.Second,
-			KeepAlive: 5 * time.Second,
-		}).DialContext,
-		ForceAttemptHTTP2: true,
+// NewDoHResolver creates a DoHResolver.
+// The doer parameter accepts any client implementation (*fast.Client, *aoni.Client, *http.Client, or nil).
+// If doer is nil, it defaults to a high-performance fast.Client.
+func NewDoHResolver(endpoint, host string, doer any) *DoHResolver {
+	var engine aoni.RequestDoer
+	if doer == nil {
+		engine = fast.NewClient(option.WithTimeout(5 * time.Second))
+	} else {
+		engine = aoni.Configure(doer)
 	}
 
 	return &DoHResolver{
-		client: &http.Client{
-			Timeout:   5 * time.Second,
-			Transport: transport,
-		},
 		Endpoint: endpoint,
 		Host:     host,
+		doer:     engine,
 	}
 }
 
@@ -79,26 +73,35 @@ func (r *DoHResolver) LookupIPAddr(ctx context.Context, host string) ([]net.IPAd
 func (r *DoHResolver) query(ctx context.Context, host string, qtype uint16) ([]net.IPAddr, error) {
 	reqURL := fmt.Sprintf("%s?name=%s&type=%d", r.Endpoint, url.QueryEscape(host), qtype)
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, reqURL, nil) //nolint:gosec
-	if err != nil {
-		return nil, err
-	}
+	req := fast.NewRequest(nil)
+	defer req.Release()
 
-	req.Header.Set("Accept", "application/dns-json")
+	req.SetContext(ctx)
+	req.SetMethod(http.MethodGet)
+	req.SetURL(reqURL)
+	req.SetHeader("Accept", "application/dns-json")
 
 	if r.Host != "" {
-		req.Host = r.Host
+		req.SetHeader("Host", r.Host)
 	}
 
-	resp, err := r.client.Do(req) //nolint:gosec
+	resp, err := r.doer.Do(req)
 	if err != nil {
 		return nil, err
 	}
-	defer resp.Body.Close()
+	defer resp.Close()
 
 	var apiResp dohResponse
-	if err := json.NewDecoder(resp.Body).Decode(&apiResp); err != nil {
-		return nil, err
+
+	// Fast path: attempt zero-copy decoding if the response provides direct buffer access
+	if unsafe, ok := resp.(interface{ UnsafeBodyBytes() []byte }); ok {
+		if err := json.Unmarshal(unsafe.UnsafeBodyBytes(), &apiResp); err != nil {
+			return nil, err
+		}
+	} else {
+		if err := json.Unmarshal(resp.BodyBytes(), &apiResp); err != nil {
+			return nil, err
+		}
 	}
 
 	var ips []net.IPAddr

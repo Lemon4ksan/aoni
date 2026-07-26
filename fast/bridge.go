@@ -50,6 +50,10 @@ func (t *Transport) RoundTrip(req *http.Request) (*http.Response, error) {
 	fastReq.SetMethod(req.Method)
 	fastReq.SetURL(req.URL.String())
 
+	if req.Host != "" {
+		fastReq.SetHeader("Host", req.Host)
+	}
+
 	copyHeaders(fastReq, req.Header)
 
 	if req.Body != nil {

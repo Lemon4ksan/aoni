@@ -6,7 +6,11 @@ package fast
 
 import (
 	"context"
+	"crypto/tls"
 	"net"
+	"net/url"
+	"strings"
+	"time"
 
 	utls "github.com/refraction-networking/utls"
 
@@ -24,41 +28,34 @@ func newFastDialer(cfg *aoni.Config) *fastDialer {
 	return &fastDialer{config: cfg}
 }
 
-// Dial executes an L4 TCP dial followed by an optional uTLS handshake,
-// wrapping HTTP/1.1 connections with header ordering decorators when configured.
+// Dial executes an L4 TCP dial followed by an optional uTLS handshake.
 func (d *fastDialer) Dial(addr string) (net.Conn, error) {
-	ctx := context.Background()
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
 
-	host, port, err := net.SplitHostPort(addr)
-	if err != nil {
-		host = addr
-		port = "80"
+	return d.DialContext(ctx, "tcp", addr)
+}
+
+// DialContext establishes a raw L4 TCP connection using the request context,
+// applying per-request proxy overrides, SSRF guards, p0f signatures, and host rewrites.
+func (d *fastDialer) DialContext(ctx context.Context, network, addr string) (net.Conn, error) {
+	if err := aoni.ApplyTCPDelay(ctx); err != nil {
+		return nil, err
 	}
 
-	host = netutil.CleanHost(host)
+	host, port, dialOpts := d.resolveDialOptions(ctx, network, addr)
+	if port == "80" && !strings.Contains(addr, ":") {
+		port = "443"
+	}
 	targetAddr := net.JoinHostPort(host, port)
 
-	isTLS := port == "443" || d.isTLSEnabled()
+	isTLS := port != "80" && (port == "443" || d.isTLSEnabled())
 
-	dialOpts := netdial.DialOptions{
-		ProxyURL:           d.config.Network.ProxyAddr,
-		DNSResolver:        d.config.Network.DNSResolver,
-		SourceRotator:      d.config.Network.SourceRotator,
-		P0fSignature:       d.config.Fingerprint.P0fSignature,
-		SocketController:   d.config.Network.SocketController,
-		FragmentConfig:     d.config.Network.FragmentConfig,
-		HappyEyeballs:      d.config.Network.HappyEyeballsDelay,
-		SSRFGuard:          d.config.Network.SSRFGuard,
-		ProxyDNS:           d.config.Network.ProxyDNS,
-		InsecureSkipVerify: d.config.Engine.InsecureSkipVerify,
-	}
-
-	rawConn, err := netdial.DialL4(ctx, "tcp", targetAddr, dialOpts)
+	rawConn, err := netdial.DialL4(ctx, network, targetAddr, dialOpts)
 	if err != nil {
 		return nil, err
 	}
 
-	// Track written bytes for zero-byte write idle retry logic
 	trackingConn := netutil.NewWriteTrackingConn(rawConn)
 
 	var (
@@ -67,18 +64,19 @@ func (d *fastDialer) Dial(addr string) (net.Conn, error) {
 	)
 
 	if isTLS {
-		utlsOpts := netdial.RTLSOptions{
-			HelloID:            d.resolveHelloID(),
-			SpecProvider:       d.config.Fingerprint.TLSClientHelloSpecProvider,
-			SessionCache:       d.config.Fingerprint.SessionCache,
-			CertificatePins:    d.config.Fingerprint.CertificatePins,
-			JA4Callback:        d.config.Fingerprint.JA4Callback,
-			InsecureSkipVerify: d.config.Engine.InsecureSkipVerify,
+		utlsOpts := d.resolveRTLSOptions(ctx, host)
+		// Для fasthttp принудительно ограничиваем ALPN до http/1.1
+		if len(utlsOpts.ALPNOverride) == 0 {
+			utlsOpts.ALPNOverride = []string{aoni.AlpnHTTP}
 		}
 
-		uConn, _, err := netdial.HandshakeUTLS(ctx, trackingConn, host, utlsOpts)
+		uConn, report, err := netdial.HandshakeUTLS(ctx, trackingConn, host, utlsOpts)
 		if err != nil {
 			return nil, err
+		}
+
+		if reqCfg := aoni.GetRequestConfig(ctx); reqCfg != nil && reqCfg.JA4ReportStore != nil {
+			reqCfg.JA4ReportStore.Report = &report
 		}
 
 		conn = uConn
@@ -95,14 +93,107 @@ func (d *fastDialer) Dial(addr string) (net.Conn, error) {
 	return conn, nil
 }
 
-// DialH2 dials an L4 connection and performs a uTLS handshake forcing ALPN "h2".
-func (d *fastDialer) DialH2(ctx context.Context, addr string) (net.Conn, error) {
-	host, _, err := net.SplitHostPort(addr)
-	if err != nil {
-		host = addr
+// DialTLSContext dials an L4 connection and performs a full uTLS client handshake.
+func (d *fastDialer) DialTLSContext(ctx context.Context, network, addr string) (net.Conn, error) {
+	if err := aoni.ApplyTCPDelay(ctx); err != nil {
+		return nil, err
 	}
 
-	dialOpts := netdial.DialOptions{
+	host, port, dialOpts, utlsOpts := d.resolveTLSContextOptions(ctx, network, addr)
+	targetAddr := net.JoinHostPort(host, port)
+
+	if port == "80" && strings.HasSuffix(addr, ":80") {
+		return netdial.DialL4(ctx, network, targetAddr, dialOpts)
+	}
+
+	rawConn, err := netdial.DialL4(ctx, network, targetAddr, dialOpts)
+	if err != nil {
+		return nil, err
+	}
+
+	uConn, report, err := netdial.HandshakeUTLS(ctx, rawConn, host, utlsOpts)
+	if err != nil {
+		return nil, err
+	}
+
+	if reqCfg := aoni.GetRequestConfig(ctx); reqCfg != nil && reqCfg.JA4ReportStore != nil {
+		reqCfg.JA4ReportStore.Report = &report
+	}
+
+	return uConn, nil
+}
+
+// DialH2 dials an L4 connection and performs a uTLS handshake forcing ALPN "h2".
+func (d *fastDialer) DialH2(ctx context.Context, addr string) (net.Conn, error) {
+	host, port, dialOpts, utlsOpts := d.resolveTLSContextOptions(ctx, "tcp", addr)
+	targetAddr := net.JoinHostPort(host, port)
+
+	if port == "80" && strings.HasSuffix(addr, ":80") {
+		return netdial.DialL4(ctx, "tcp", targetAddr, dialOpts)
+	}
+
+	rawConn, err := netdial.DialL4(ctx, "tcp", targetAddr, dialOpts)
+	if err != nil {
+		return nil, err
+	}
+
+	utlsOpts.ALPNOverride = []string{aoni.AlpnH2, aoni.AlpnHTTP}
+
+	uConn, report, err := netdial.HandshakeUTLS(ctx, rawConn, host, utlsOpts)
+	if err != nil {
+		return nil, err
+	}
+
+	if reqCfg := aoni.GetRequestConfig(ctx); reqCfg != nil && reqCfg.JA4ReportStore != nil {
+		reqCfg.JA4ReportStore.Report = &report
+	}
+
+	return uConn, nil
+}
+
+func splitHostPortTLS(addr string) (host, port string) {
+	h, p, err := net.SplitHostPort(addr)
+	if err != nil {
+		return netutil.CleanHost(addr), "443"
+	}
+
+	return netutil.CleanHost(h), p
+}
+
+func splitHostPortDefault(addr string) (host, port string) {
+	h, p, err := net.SplitHostPort(addr)
+	if err != nil {
+		return netutil.CleanHost(addr), "80"
+	}
+
+	return netutil.CleanHost(h), p
+}
+
+func applyHostRewriteRules(ctx context.Context, host, port string) (string, string) {
+	rules := aoni.HostRewriteRules(ctx)
+	if rewritten, exists := rules[host]; exists {
+		if newHost, newPort, err := net.SplitHostPort(rewritten); err == nil {
+			host = newHost
+
+			if newPort != "" {
+				port = newPort
+			}
+		}
+	}
+
+	return host, port
+}
+
+func (d *fastDialer) resolveDialOptions(
+	ctx context.Context,
+	_, addr string,
+) (host, port string, dialOpts netdial.DialOptions) {
+	host, port = splitHostPortDefault(addr)
+	host, port = applyHostRewriteRules(ctx, host, port)
+
+	reqCfg := aoni.GetRequestConfig(ctx)
+
+	dialOpts = netdial.DialOptions{
 		ProxyURL:           d.config.Network.ProxyAddr,
 		DNSResolver:        d.config.Network.DNSResolver,
 		SourceRotator:      d.config.Network.SourceRotator,
@@ -115,9 +206,121 @@ func (d *fastDialer) DialH2(ctx context.Context, addr string) (net.Conn, error) 
 		InsecureSkipVerify: d.config.Engine.InsecureSkipVerify,
 	}
 
-	rawConn, err := netdial.DialL4(ctx, "tcp", addr, dialOpts)
-	if err != nil {
-		return nil, err
+	if reqCfg != nil {
+		dialOpts.SSRFGuard = reqCfg.SSRFGuard
+		dialOpts.ProxyDNS = reqCfg.ProxyDNS
+		dialOpts.FragmentConfig = reqCfg.Fragment
+
+		if reqCfg.P0fSignature != nil {
+			dialOpts.P0fSignature = reqCfg.P0fSignature
+		}
+
+		if reqCfg.SocketController != nil {
+			dialOpts.SocketController = reqCfg.SocketController
+		}
+
+		if reqCfg.HappyEyeballsDelay > 0 {
+			dialOpts.HappyEyeballs = reqCfg.HappyEyeballsDelay
+		}
+	}
+
+	if rawProxy, ok := aoni.GetProxyOverride(ctx).Value(); ok && rawProxy != "" {
+		if parsed, parseErr := url.Parse(rawProxy); parseErr == nil {
+			dialOpts.ProxyURL = parsed
+		}
+	} else if reqCfg != nil && reqCfg.ProxyAddr != nil {
+		dialOpts.ProxyURL = reqCfg.ProxyAddr
+	}
+
+	return host, port, dialOpts
+}
+
+func (d *fastDialer) resolveTLSContextOptions(
+	ctx context.Context,
+	network, addr string,
+) (host, port string, dialOpts netdial.DialOptions, utlsOpts netdial.RTLSOptions) {
+	host, port = splitHostPortTLS(addr)
+	host, port = applyHostRewriteRules(ctx, host, port)
+
+	reqCfg := aoni.GetRequestConfig(ctx)
+
+	dialOpts = netdial.DialOptions{
+		ProxyURL:           d.config.Network.ProxyAddr,
+		DNSResolver:        d.config.Network.DNSResolver,
+		SourceRotator:      d.config.Network.SourceRotator,
+		P0fSignature:       d.config.Fingerprint.P0fSignature,
+		SocketController:   d.config.Network.SocketController,
+		FragmentConfig:     d.config.Network.FragmentConfig,
+		HappyEyeballs:      d.config.Network.HappyEyeballsDelay,
+		SSRFGuard:          d.config.Network.SSRFGuard,
+		ProxyDNS:           d.config.Network.ProxyDNS,
+		InsecureSkipVerify: d.config.Engine.InsecureSkipVerify,
+	}
+
+	if reqCfg != nil {
+		dialOpts.SSRFGuard = reqCfg.SSRFGuard
+		dialOpts.ProxyDNS = reqCfg.ProxyDNS
+		dialOpts.FragmentConfig = reqCfg.Fragment
+
+		if reqCfg.P0fSignature != nil {
+			dialOpts.P0fSignature = reqCfg.P0fSignature
+		}
+
+		if reqCfg.SocketController != nil {
+			dialOpts.SocketController = reqCfg.SocketController
+		}
+
+		if reqCfg.HappyEyeballsDelay > 0 {
+			dialOpts.HappyEyeballs = reqCfg.HappyEyeballsDelay
+		}
+	}
+
+	if rawProxy, ok := aoni.GetProxyOverride(ctx).Value(); ok && rawProxy != "" {
+		if parsed, parseErr := url.Parse(rawProxy); parseErr == nil {
+			dialOpts.ProxyURL = parsed
+		}
+	} else if reqCfg != nil && reqCfg.ProxyAddr != nil {
+		dialOpts.ProxyURL = reqCfg.ProxyAddr
+	}
+
+	utlsOpts = d.resolveRTLSOptions(ctx, host)
+
+	if reqCfg != nil {
+		if reqCfg.ClientHelloSpecProvider != nil {
+			utlsOpts.SpecProvider = reqCfg.ClientHelloSpecProvider
+		}
+
+		if reqCfg.SessionCache != nil {
+			utlsOpts.SessionCache = reqCfg.SessionCache
+		}
+
+		if reqCfg.JA4Callback != nil {
+			utlsOpts.JA4Callback = reqCfg.JA4Callback
+		}
+
+		if len(reqCfg.CertificatePins) > 0 {
+			utlsOpts.CertificatePins = reqCfg.CertificatePins
+		}
+
+		if len(reqCfg.ALPNOverride) > 0 {
+			utlsOpts.ALPNOverride = reqCfg.ALPNOverride
+		}
+	}
+
+	return host, port, dialOpts, utlsOpts
+}
+
+func (d *fastDialer) resolveRTLSOptions(ctx context.Context, host string) netdial.RTLSOptions {
+	reqCfg := aoni.GetRequestConfig(ctx)
+
+	serverName := host
+	if net.ParseIP(host) != nil {
+		serverName = ""
+		if reqCfg != nil && reqCfg.TargetHost != "" && net.ParseIP(reqCfg.TargetHost) == nil {
+			serverName = reqCfg.TargetHost
+		} else if d.config.Defaults.BaseURL != nil && d.config.Defaults.BaseURL.Hostname() != "" && net.ParseIP(d.config.Defaults.BaseURL.Hostname()) == nil {
+			serverName = d.config.Defaults.BaseURL.Hostname()
+		}
 	}
 
 	utlsOpts := netdial.RTLSOptions{
@@ -125,14 +328,34 @@ func (d *fastDialer) DialH2(ctx context.Context, addr string) (net.Conn, error) 
 		SpecProvider:       d.config.Fingerprint.TLSClientHelloSpecProvider,
 		SessionCache:       d.config.Fingerprint.SessionCache,
 		CertificatePins:    d.config.Fingerprint.CertificatePins,
-		ALPNOverride:       []string{aoni.AlpnH2},
 		JA4Callback:        d.config.Fingerprint.JA4Callback,
-		InsecureSkipVerify: d.config.Engine.InsecureSkipVerify,
+		BaseTLSConfig:      &tls.Config{ServerName: serverName},
+		InsecureSkipVerify: aoni.GetInsecureSkipVerify(ctx) || d.config.Engine.InsecureSkipVerify,
 	}
 
-	uConn, _, err := netdial.HandshakeUTLS(ctx, rawConn, host, utlsOpts)
+	if reqCfg != nil {
+		if reqCfg.ClientHelloSpecProvider != nil {
+			utlsOpts.SpecProvider = reqCfg.ClientHelloSpecProvider
+		}
 
-	return uConn, err
+		if reqCfg.SessionCache != nil {
+			utlsOpts.SessionCache = reqCfg.SessionCache
+		}
+
+		if reqCfg.JA4Callback != nil {
+			utlsOpts.JA4Callback = reqCfg.JA4Callback
+		}
+
+		if len(reqCfg.CertificatePins) > 0 {
+			utlsOpts.CertificatePins = reqCfg.CertificatePins
+		}
+
+		if len(reqCfg.ALPNOverride) > 0 {
+			utlsOpts.ALPNOverride = reqCfg.ALPNOverride
+		}
+	}
+
+	return utlsOpts
 }
 
 func (d *fastDialer) isTLSEnabled() bool {

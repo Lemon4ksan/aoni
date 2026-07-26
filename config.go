@@ -495,6 +495,7 @@ type ProgressFunc = io.ProgressFunc
 type RequestConfig struct {
 	Decoder                 any
 	ErrorModel              any
+	TargetHost              string
 	ForceContentType        string
 	Label                   string
 	UploadProgress          ProgressFunc

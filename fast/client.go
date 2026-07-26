@@ -7,6 +7,7 @@ package fast
 
 import (
 	"bytes"
+	"compress/gzip"
 	"context"
 	"crypto/tls"
 	"encoding/base64"
@@ -15,22 +16,40 @@ import (
 	"net"
 	"net/http"
 	"net/url"
-	"slices"
 	"strconv"
 	"strings"
 	"sync"
 	"time"
 
+	"github.com/andybalholm/brotli"
+	"github.com/klauspost/compress/zstd"
 	"github.com/quic-go/quic-go"
 	"github.com/valyala/fasthttp"
 	"golang.org/x/sys/cpu"
 
 	"github.com/lemon4ksan/aoni"
+	"github.com/lemon4ksan/aoni/cookie"
 	"github.com/lemon4ksan/aoni/fast/h2engine"
 	"github.com/lemon4ksan/aoni/fast/h3engine"
 	"github.com/lemon4ksan/aoni/internal/bytesconv"
 	"github.com/lemon4ksan/aoni/netutil"
+	"github.com/lemon4ksan/aoni/netutil/fragment"
 )
+
+var (
+	requestConfigPool = sync.Pool{
+		New: func() any {
+			return &aoni.RequestConfig{}
+		},
+	}
+	defaultAcceptEncoding = []string{"zstd, br, gzip"}
+	fastZstdDecoder, _    = zstd.NewReader(nil)
+)
+
+// HTTPDoer executes an HTTP request transaction.
+type HTTPDoer interface {
+	Do(req *http.Request) (*http.Response, error)
+}
 
 // Client executes ultra-high-performance HTTP requests over fasthttp,
 // seamlessly multiplexing native H1 (fasthttp), native H2 (h2engine), and native H3 (h3engine).
@@ -47,16 +66,13 @@ type Client struct {
 	_       cpu.CacheLinePad
 }
 
-// Option is an alias for [aoni.ClientOption].
-type Option = aoni.ClientOption
-
 // NewClient creates a new multiprotocol Client configured with fasthttp, uTLS,
 // native HTTP/2 framing, and native HTTP/3 QUIC support.
 func NewClient(opts ...aoni.ClientOption) *Client {
 	c := &Client{
 		engine: &fasthttp.Client{
-			ReadTimeout:         15 * time.Second,
-			WriteTimeout:        15 * time.Second,
+			ReadTimeout:         0,
+			WriteTimeout:        0,
 			MaxConnsPerHost:     512,
 			MaxIdleConnDuration: 90 * time.Second,
 		},
@@ -150,8 +166,18 @@ func (c *Client) Request(
 		return nil, err
 	}
 
-	c.applyDefaultHeaders(reqAdapter)
-	c.applyModifiers(reqAdapter, mods)
+	reqCfg := aoni.GetOrInitRequestConfig(ctx)
+	if reqCfg.TargetHost == "" {
+		if u, err := url.Parse(reqAdapter.URL()); err == nil && u.Hostname() != "" {
+			reqCfg.TargetHost = u.Hostname()
+		} else if hostStr := string(fastReq.URI().Host()); hostStr != "" {
+			h, _, _ := net.SplitHostPort(hostStr)
+			if h == "" {
+				h = hostStr
+			}
+			reqCfg.TargetHost = h
+		}
+	}
 
 	isAutoAE := len(fastReq.Header.Peek("Accept-Encoding")) == 0
 	c.applyDefaultHeaders(reqAdapter)
@@ -209,6 +235,19 @@ func (c *Client) Do(req aoni.Request) (aoni.Response, error) {
 		}
 	}
 
+	reqCfg := aoni.GetOrInitRequestConfig(ctx)
+	if reqCfg.TargetHost == "" {
+		if u, err := url.Parse(req.URL()); err == nil && u.Hostname() != "" {
+			reqCfg.TargetHost = u.Hostname()
+		} else if hostStr := string(fastReq.URI().Host()); hostStr != "" {
+			h, _, _ := net.SplitHostPort(hostStr)
+			if h == "" {
+				h = hostStr
+			}
+			reqCfg.TargetHost = h
+		}
+	}
+
 	fastResp := fasthttp.AcquireResponse()
 
 	trailers, err, autoReleased := c.dispatchPipeline(ctx, fastReq, fastResp, reqAdapter)
@@ -230,6 +269,50 @@ func (c *Client) Do(req aoni.Request) (aoni.Response, error) {
 
 	return respAdapter, nil
 }
+
+// DialContext establishes a raw L4 connection applying active proxy, DNS, and anti-DPI configurations.
+func (c *Client) DialContext(ctx context.Context, network, addr string) (net.Conn, error) {
+	dialer := newFastDialer(&c.config)
+	return dialer.DialContext(ctx, network, addr)
+}
+
+// DialTLSContext establishes an encrypted TLS socket connection using uTLS ClientHello specifications.
+func (c *Client) DialTLSContext(ctx context.Context, network, addr string) (net.Conn, error) {
+	dialer := newFastDialer(&c.config)
+	return dialer.DialTLSContext(ctx, network, addr)
+}
+
+// DialPlainForWS satisfies [aoni.WSDialer] by establishing a plain TCP socket for WebSocket upgrades.
+func (c *Client) DialPlainForWS(ctx context.Context, addr string) (net.Conn, error) {
+	conn, err := c.DialContext(ctx, "tcp", addr)
+	if err != nil {
+		return nil, err
+	}
+
+	return c.applyWSFragmentation(ctx, conn), nil
+}
+
+// DialTLSForWS satisfies [aoni.WSDialer] by establishing an encrypted TLS connection for WebSocket upgrades.
+func (c *Client) DialTLSForWS(ctx context.Context, addr string) (net.Conn, error) {
+	return c.DialTLSContext(ctx, "tcp", addr)
+}
+
+func (c *Client) applyWSFragmentation(ctx context.Context, conn net.Conn) net.Conn {
+	if cfg := aoni.GetRequestConfig(ctx); cfg != nil && cfg.Fragment != nil {
+		return fragment.NewFragmentedConn(conn, cfg.Fragment)
+	}
+
+	if c.config.Network.FragmentConfig != nil {
+		return fragment.NewFragmentedConn(conn, c.config.Network.FragmentConfig)
+	}
+
+	return conn
+}
+
+var (
+	_ aoni.RequestDoer = (*Client)(nil)
+	_ aoni.WSDialer    = (*Client)(nil)
+)
 
 func (c *Client) resolveProtocolHandler(rawURL string) http.RoundTripper {
 	if len(c.config.Engine.Protocols) == 0 {
@@ -261,9 +344,6 @@ func (c *Client) dispatchPipeline(
 		startTime = time.Now()
 	}
 
-	c.applyCookies(fastReq)
-
-	// Direct Fast-Path: Bypass hedging & failover wrappers when disabled
 	if c.config.Defaults.Pipeline.ProxyFailover == nil &&
 		c.config.Network.HedgingDelay <= 0 &&
 		c.config.Defaults.Pipeline.Hedging == nil {
@@ -280,7 +360,7 @@ func (c *Client) dispatchPipeline(
 		return nil, err, autoReleased
 	}
 
-	c.captureCookies(fastReq, fastResp)
+	decompressFastResponse(fastResp)
 
 	if valErr := c.validateResponse(fastReq, fastResp); valErr != nil {
 		if hasTelemetry {
@@ -303,6 +383,65 @@ func (c *Client) dispatchPipeline(
 	}
 
 	return trailers, nil, false
+}
+
+func decompressFastResponse(resp *fasthttp.Response) {
+	encodingBytes := peekHeaderCaseInsensitiveFast(resp, "Content-Encoding")
+	if len(encodingBytes) == 0 {
+		return
+	}
+
+	encoding := strings.ToLower(bytesconv.B2S(encodingBytes))
+	body := resp.Body()
+	if len(body) == 0 {
+		return
+	}
+
+	var (
+		decompressed []byte
+		err          error
+	)
+
+	switch {
+	case strings.Contains(encoding, "zstd"):
+		decompressed, err = fastZstdDecoder.DecodeAll(body, make([]byte, 0, len(body)*2))
+
+	case strings.Contains(encoding, "br"):
+		brReader := brotli.NewReader(bytes.NewReader(body))
+		decompressed, err = io.ReadAll(brReader)
+
+	case strings.Contains(encoding, "gzip"), strings.Contains(encoding, "deflate"):
+		gzReader, gzErr := gzip.NewReader(bytes.NewReader(body))
+		if gzErr == nil {
+			decompressed, err = io.ReadAll(gzReader)
+			_ = gzReader.Close()
+		} else {
+			err = gzErr
+		}
+	}
+
+	if err == nil && len(decompressed) > 0 {
+		resp.SetBody(decompressed)
+		deleteHeaderCaseInsensitiveFast(resp, "Content-Encoding")
+		deleteHeaderCaseInsensitiveFast(resp, "Content-Length")
+	}
+}
+
+func peekHeaderCaseInsensitiveFast(resp *fasthttp.Response, key string) []byte {
+	var found []byte
+	resp.Header.All()(func(k, v []byte) bool {
+		if bytesconv.EqualFoldASCII(bytesconv.B2S(k), key) {
+			found = v
+			return false
+		}
+		return true
+	})
+	return found
+}
+
+func deleteHeaderCaseInsensitiveFast(resp *fasthttp.Response, key string) {
+	resp.Header.Del(key)
+	resp.Header.Del(strings.ToLower(key))
 }
 
 func (c *Client) recordTelemetry(
@@ -433,8 +572,15 @@ func (c *Client) launchHedgedAttempt(
 	}()
 }
 
-func (c *Client) applyCookies(req *fasthttp.Request) {
+func (c *Client) applyCookies(ctx context.Context, req *fasthttp.Request) {
 	jar := c.config.Engine.CookieJar
+	if jar == nil {
+		return
+	}
+
+	if pJar, ok := jar.(*cookie.ProxyIsolatedJar); ok {
+		jar = pJar.GetJar(ctx)
+	}
 	if jar == nil {
 		return
 	}
@@ -445,13 +591,36 @@ func (c *Client) applyCookies(req *fasthttp.Request) {
 	}
 
 	cookies := jar.Cookies(u)
-	for _, cookie := range cookies {
-		req.Header.SetCookie(cookie.Name, cookie.Value)
+	if len(cookies) == 0 {
+		return
+	}
+
+	var cookieHeader strings.Builder
+	for i, c := range cookies {
+		if i > 0 {
+			cookieHeader.WriteString("; ")
+		}
+		cookieHeader.WriteString(c.Name)
+		cookieHeader.WriteByte('=')
+		cookieHeader.WriteString(c.Value)
+	}
+
+	if existing := req.Header.Peek("Cookie"); len(existing) > 0 {
+		req.Header.Set("Cookie", string(existing)+"; "+cookieHeader.String())
+	} else {
+		req.Header.Set("Cookie", cookieHeader.String())
 	}
 }
 
-func (c *Client) captureCookies(req *fasthttp.Request, resp *fasthttp.Response) {
+func (c *Client) captureCookies(ctx context.Context, req *fasthttp.Request, resp *fasthttp.Response) {
 	jar := c.config.Engine.CookieJar
+	if jar == nil {
+		return
+	}
+
+	if pJar, ok := jar.(*cookie.ProxyIsolatedJar); ok {
+		jar = pJar.GetJar(ctx)
+	}
 	if jar == nil {
 		return
 	}
@@ -618,8 +787,13 @@ func (c *Client) executeWithRedirects(
 ) (trailers map[string][]string, err error, autoReleased bool) {
 	redirectLimit := c.resolveRedirectLimit()
 	if redirectLimit == 0 {
+		c.applyCookies(ctx, fastReq)
 		extractUserInfoAndSetAuth(fastReq)
-		return c.dispatchSingleRequest(ctx, fastReq, fastResp)
+		trailers, err, autoReleased = c.dispatchSingleRequest(ctx, fastReq, fastResp)
+		if err == nil {
+			c.captureCookies(ctx, fastReq, fastResp)
+		}
+		return trailers, err, autoReleased
 	}
 
 	currentURI := fasthttp.AcquireURI()
@@ -628,6 +802,7 @@ func (c *Client) executeWithRedirects(
 	var redirectsFollowed int
 
 	for {
+		c.applyCookies(ctx, fastReq)
 		fastReq.URI().CopyTo(currentURI)
 		extractUserInfoAndSetAuth(fastReq)
 
@@ -635,6 +810,8 @@ func (c *Client) executeWithRedirects(
 		if err != nil {
 			return nil, err, autoReleased
 		}
+
+		c.captureCookies(ctx, fastReq, fastResp)
 
 		statusCode := fastResp.StatusCode()
 		if !isRedirectStatus(statusCode) {
@@ -659,7 +836,7 @@ func (c *Client) executeWithRedirects(
 		fastReq.URI().UpdateBytes(location)
 		fastReq.URI().CopyTo(nextURI)
 
-		if isCrossOriginURI(currentURI, nextURI) {
+		if !isSameHost(currentURI, nextURI) {
 			scrubSensitiveHeaders(fastReq, currentURI, nextURI)
 		}
 
@@ -672,6 +849,12 @@ func (c *Client) executeWithRedirects(
 	}
 }
 
+func isSameHost(u1, u2 *fasthttp.URI) bool {
+	h1 := strings.ToLower(netutil.CleanHost(string(u1.Host())))
+	h2 := strings.ToLower(netutil.CleanHost(string(u2.Host())))
+	return h1 == h2
+}
+
 func isHTTPSDowngrade(u1, u2 *fasthttp.URI) bool {
 	return bytes.EqualFold(u1.Scheme(), []byte("https")) &&
 		bytes.EqualFold(u2.Scheme(), []byte("http"))
@@ -679,7 +862,6 @@ func isHTTPSDowngrade(u1, u2 *fasthttp.URI) bool {
 
 func extractUserInfoAndSetAuth(req *fasthttp.Request) {
 	fullURI := req.URI().FullURI()
-	// Fast-Check: In 99.9% of URLs there is no '@' character (no user:pass in URI)
 	if bytes.IndexByte(fullURI, '@') == -1 {
 		return
 	}
@@ -715,7 +897,6 @@ var globalAltSvcCache = &altSvcCache{
 	cooldowns: make(map[string]time.Time),
 }
 
-// MarkH3Failed puts host in a temporary HTTP/3 cooldown upon QUIC dial or network errors.
 func (c *altSvcCache) MarkH3Failed(host string) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -724,11 +905,9 @@ func (c *altSvcCache) MarkH3Failed(host string) {
 		c.cooldowns = make(map[string]time.Time)
 	}
 
-	// Disable H3 attempts for this host for 5 minutes after a QUIC/UDP block
 	c.cooldowns[host] = time.Now().Add(5 * time.Minute)
 }
 
-// IsH3Supported reports whether HTTP/3 is supported for host and not currently in cooldown.
 func (c *altSvcCache) IsH3Supported(host string) bool {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
@@ -774,9 +953,8 @@ func (c *altSvcCache) Record(host, headerVal string) {
 
 func parseMaxAge(headerVal string) time.Duration {
 	maxAge := 86400 * time.Second
-	parts := strings.Split(headerVal, ";")
 
-	for _, p := range parts {
+	for p := range strings.SplitSeq(headerVal, ";") {
 		p = strings.TrimSpace(p)
 		if strings.HasPrefix(p, "ma=") {
 			if seconds, err := strconv.ParseInt(p[3:], 10, 64); err == nil && seconds > 0 {
@@ -794,7 +972,7 @@ func (c *Client) dispatchSingleRequest(
 	fastResp *fasthttp.Response,
 ) (trailers map[string][]string, err error, autoReleased bool) {
 	host := string(fastReq.URI().Host())
-	alpnMode := resolveALPNMode(ctx, &c.config, host)
+	alpnMode := resolveALPNMode(ctx, &c.config, fastReq)
 
 	if alpnMode == aoni.AlpnH3 {
 		h3 := c.getH3Client()
@@ -804,31 +982,66 @@ func (c *Client) dispatchSingleRequest(
 			return tr, nil, false
 		}
 
-		// QUIC/UDP network block or handshake failure: fallback to H2/H1 transparently
 		globalAltSvcCache.MarkH3Failed(host)
 		fastResp.Reset()
 
-		alpnMode = resolveALPNMode(ctx, &c.config, host)
+		alpnMode = resolveALPNMode(ctx, &c.config, fastReq)
 	}
 
 	if alpnMode == aoni.AlpnH2 {
 		h2Cl := c.getH2Client(host)
 		tr, err := h2Cl.DoWithTrailers(ctx, fastReq, fastResp)
 
-		if altSvc := fastResp.Header.Peek("Alt-Svc"); len(altSvc) > 0 {
-			globalAltSvcCache.Record(host, string(altSvc))
+		if err == nil {
+			if altSvc := fastResp.Header.Peek("Alt-Svc"); len(altSvc) > 0 {
+				globalAltSvcCache.Record(host, string(altSvc))
+			}
+			return tr, nil, false
 		}
 
-		return tr, err, false
+		c.removeH2Client(host)
+		fastResp.Reset()
 	}
 
 	err, autoReleased = c.executeFastHTTP(ctx, fastReq, fastResp)
+
+	if err != nil && isH2FrameOnH1Error(err) {
+		fastResp.Reset()
+		h2Cl := c.getH2Client(host)
+		tr, h2Err := h2Cl.DoWithTrailers(ctx, fastReq, fastResp)
+		if h2Err == nil {
+			if altSvc := fastResp.Header.Peek("Alt-Svc"); len(altSvc) > 0 {
+				globalAltSvcCache.Record(host, string(altSvc))
+			}
+			return tr, nil, false
+		}
+		err = h2Err
+	}
 
 	if altSvc := fastResp.Header.Peek("Alt-Svc"); len(altSvc) > 0 {
 		globalAltSvcCache.Record(host, string(altSvc))
 	}
 
 	return nil, err, autoReleased
+}
+
+func isH2FrameOnH1Error(err error) bool {
+	if err == nil {
+		return false
+	}
+	errStr := err.Error()
+	return strings.Contains(errStr, "reading response headers") ||
+		strings.Contains(errStr, "\x00\x00\x12\x04") ||
+		strings.Contains(errStr, "\x00\x00\x04")
+}
+
+func (c *Client) removeH2Client(host string) {
+	c.h2Mutex.Lock()
+	defer c.h2Mutex.Unlock()
+
+	if c.h2Clients != nil {
+		delete(c.h2Clients, host)
+	}
 }
 
 func (c *Client) resolveRedirectLimit() int {
@@ -848,7 +1061,7 @@ func isRedirectStatus(code int) bool {
 }
 
 func isCrossOriginURI(u1, u2 *fasthttp.URI) bool {
-	return !bytes.EqualFold(u1.Scheme(), u2.Scheme()) ||
+	return !bytes.EqualFold(u1.Scheme(), []byte("https")) ||
 		!bytes.EqualFold(u1.Host(), u2.Host())
 }
 
@@ -864,7 +1077,6 @@ func scrubSensitiveHeaders(req *fasthttp.Request, currentURI, nextURI *fasthttp.
 	host1 := string(currentURI.Host())
 	host2 := string(nextURI.Host())
 
-	// If cross-domain (not the same domain or parent/subdomain relationship), force-delete manual Cookie headers
 	if !isSameDomainOrSubdomain(host1, host2) {
 		req.Header.Del("Cookie")
 	}
@@ -952,9 +1164,9 @@ func (c *Client) getH2Client(host string) *h2engine.Client {
 
 	dialer := &h2engine.Dialer{
 		Addr: host,
-		RawDial: func(addr string) (net.Conn, error) {
+		RawDialContext: func(ctx context.Context, addr string) (net.Conn, error) {
 			fastD := newFastDialer(&c.config)
-			return fastD.DialH2(context.Background(), addr)
+			return fastD.DialH2(ctx, addr)
 		},
 	}
 
@@ -971,22 +1183,17 @@ func (c *Client) getH2Client(host string) *h2engine.Client {
 	return cl
 }
 
-func resolveALPNMode(ctx context.Context, cfg *aoni.Config, host string) string {
+func resolveALPNMode(ctx context.Context, cfg *aoni.Config, fastReq *fasthttp.Request) string {
+	if !bytes.Equal(fastReq.URI().Scheme(), []byte("https")) {
+		return aoni.AlpnHTTP
+	}
+
+	host := string(fastReq.URI().Host())
 	reqCfg := aoni.GetRequestConfig(ctx)
 	if reqCfg != nil {
-		if len(reqCfg.Modifiers) > 0 && len(reqCfg.ALPNOverride) == 0 {
-			dummyReq := NewRequest(nil)
-			dummyReq.SetContext(ctx)
-			for _, m := range reqCfg.Modifiers {
-				if m != nil {
-					m(dummyReq)
-				}
-			}
-		}
-
 		if len(reqCfg.ALPNOverride) > 0 {
 			first := reqCfg.ALPNOverride[0]
-			if first == aoni.AlpnH3 || first == aoni.AlpnH2 {
+			if first == aoni.AlpnH3 || first == aoni.AlpnH2 || first == aoni.AlpnHTTP {
 				return first
 			}
 		}
@@ -996,11 +1203,7 @@ func resolveALPNMode(ctx context.Context, cfg *aoni.Config, host string) string 
 		return aoni.AlpnH3
 	}
 
-	if len(cfg.Fingerprint.HeaderOrder) > 0 && slices.Contains(cfg.Fingerprint.HeaderOrder, ":method") {
-		return aoni.AlpnH2
-	}
-
-	return aoni.AlpnHTTP
+	return aoni.AlpnH2
 }
 
 func (c *Client) applyEngineConfig() {
@@ -1023,6 +1226,10 @@ func (c *Client) applyCustomDialer() {
 }
 
 func (c *Client) applyDefaultHeaders(req aoni.Request) {
+	if req.Header("Accept-Encoding") == "" {
+		req.SetHeader("Accept-Encoding", "zstd, br, gzip")
+	}
+
 	if len(c.config.Defaults.Headers) == 0 {
 		return
 	}
@@ -1048,12 +1255,6 @@ func (c *Client) applyModifiers(req aoni.Request, mods []aoni.RequestModifier) {
 	}
 }
 
-// executeFastHTTP executes an H1 request via fasthttp, ensuring memory safety
-// and context cancellation without pool corruption or data races.
-//
-// Postconditions:
-//   - If autoReleased is true, ownership of fastReq/fastResp is retained by
-//     the background goroutine; caller MUST NOT release or touch them.
 func (c *Client) executeFastHTTP(
 	ctx context.Context,
 	req *fasthttp.Request,
@@ -1062,6 +1263,32 @@ func (c *Client) executeFastHTTP(
 	if err := ctx.Err(); err != nil {
 		return err, false
 	}
+
+	// Prevent double-TLS while ensuring fasthttp dials port 443
+	isHTTPS := bytes.EqualFold(req.URI().Scheme(), []byte("https"))
+	origHost := req.URI().Host()
+	hasHostHeader := len(req.Header.Peek("Host")) > 0
+
+	if isHTTPS {
+		hostStr := string(origHost)
+		if !hasHostHeader {
+			req.Header.SetHostBytes(origHost)
+		}
+		if !strings.Contains(hostStr, ":") {
+			req.URI().SetHost(hostStr + ":443")
+		}
+		req.URI().SetScheme("http")
+	}
+
+	defer func() {
+		if isHTTPS {
+			req.URI().SetScheme("https")
+			req.URI().SetHostBytes(origHost)
+			if !hasHostHeader {
+				req.Header.Del("Host")
+			}
+		}
+	}()
 
 	// Fast path: if context is standard Background/TODO without active cancellation, execute synchronously!
 	if ctx == context.Background() || ctx == context.TODO() || ctx.Done() == nil {
@@ -1097,6 +1324,13 @@ func (c *Client) executeFastHTTP(
 	case <-ctx.Done():
 		go func() {
 			<-done
+			if isHTTPS {
+				req.URI().SetScheme("https")
+				req.URI().SetHostBytes(origHost)
+				if !hasHostHeader {
+					req.Header.Del("Host")
+				}
+			}
 			fasthttp.ReleaseRequest(req)
 			fasthttp.ReleaseResponse(resp)
 		}()
@@ -1105,7 +1339,6 @@ func (c *Client) executeFastHTTP(
 
 	case err := <-done:
 		if err != nil && isStaleKeepAliveError(err) {
-			// If 0 bytes were written to the wire, retry once on a fresh socket
 			fastRespReset(resp)
 			return c.engine.Do(req, resp), false
 		}
@@ -1119,9 +1352,13 @@ func isStaleKeepAliveError(err error) bool {
 		return false
 	}
 
-	// Check if 0 bytes were sent using the request's connection state or error type
-	return strings.Contains(err.Error(), "connection closed") ||
-		strings.Contains(err.Error(), "broken pipe")
+	errStr := strings.ToLower(err.Error())
+
+	return strings.Contains(errStr, "connection closed") ||
+		strings.Contains(errStr, "broken pipe") ||
+		strings.Contains(errStr, "eof") ||
+		strings.Contains(errStr, "reading response headers") ||
+		strings.Contains(errStr, "use of closed")
 }
 
 func fastRespReset(resp *fasthttp.Response) {
@@ -1156,5 +1393,3 @@ func (c *Client) resolveTargetURL(req aoni.Request, path string) error {
 	req.SetURL(path)
 	return nil
 }
-
-var _ aoni.RequestDoer = (*Client)(nil)

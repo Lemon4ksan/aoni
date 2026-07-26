@@ -7,12 +7,14 @@ package h2engine
 import (
 	"bufio"
 	"bytes"
+	"context"
 	"crypto/tls"
 	"errors"
 	"fmt"
 	"io"
 	"net"
 	"strconv"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -34,7 +36,7 @@ type FrameWithHeaders interface {
 type ConnOpts struct {
 	PingInterval        time.Duration
 	DisablePingChecking bool
-	OnDisconnect        func(c *Conn)
+	OnDisconnect        func(ctx context.Context, c *Conn)
 }
 
 // Conn manages a multiplexed HTTP/2 connection over a net.Conn socket.
@@ -44,7 +46,7 @@ type Conn struct {
 	bw           *bufio.Writer
 	enc          *HPACK
 	dec          *HPACK
-	onDisconnect func(*Conn)
+	onDisconnect func(ctx context.Context, c *Conn)
 	lastErr      error
 	orderedKeys  []string
 
@@ -54,12 +56,14 @@ type Conn struct {
 	_ cpu.CacheLinePad
 
 	// Hot atomic counters isolated on their own 64-byte cache lines
-	serverWindow       int32
-	serverStreamWindow int32
-	maxWindow          int32
-	currentWindow      int32
-	openStreams        int32
-	nextID             uint32
+	serverWindow             int32
+	serverStreamWindow       int32
+	maxWindow                int32
+	currentWindow            int32
+	openStreams              int32
+	pingUnacks               int32
+	consecutiveControlFrames int32
+	nextID                   uint32
 
 	_ cpu.CacheLinePad
 
@@ -79,13 +83,13 @@ type Conn struct {
 func NewConn(c net.Conn, opts ConnOpts) *Conn {
 	nc := &Conn{
 		c:             c,
-		br:            bufio.NewReaderSize(c, 4096),
-		bw:            bufio.NewWriterSize(c, int(maxFrameSize)),
+		br:            bufio.NewReaderSize(c, 16384),
+		bw:            bufio.NewWriterSize(c, 16384),
 		enc:           AcquireHPACK(),
 		dec:           AcquireHPACK(),
 		nextID:        1,
-		maxWindow:     1 << 20,
-		currentWindow: 1 << 20,
+		maxWindow:     15663105,
+		currentWindow: 15663105,
 		in:            make(chan *Context, 128),
 		out:           make(chan *FrameHeader, 128),
 		pingInterval:  opts.PingInterval,
@@ -94,8 +98,10 @@ func NewConn(c net.Conn, opts ConnOpts) *Conn {
 	}
 
 	nc.windowCond = sync.NewCond(&nc.windowMu)
-	nc.current.SetMaxWindowSize(1 << 20)
+	nc.current.SetMaxWindowSize(6291456)
+	nc.current.SetMaxFrameSize(maxFrameSize)
 	nc.current.SetPush(false)
+	nc.enc.DisableDynamicTable = false
 
 	return nc
 }
@@ -137,6 +143,9 @@ func (c *Conn) CancelStream(ctx *Context) {
 
 // Handshake performs HTTP/2 connection initialization.
 func (c *Conn) Handshake() error {
+	_ = c.c.SetDeadline(time.Now().Add(10 * time.Second))
+	defer func() { _ = c.c.SetDeadline(time.Time{}) }()
+
 	if err := PerformHandshake(true, c.bw, &c.current, c.maxWindow-65535); err != nil {
 		_ = c.c.Close()
 		return err
@@ -152,7 +161,7 @@ func (c *Conn) Handshake() error {
 		_ = c.c.Close()
 		ReleaseFrameHeader(fr)
 
-		return fmt.Errorf("aoni h2engine: expected SETTINGS frame, got %s", fr.Type())
+		return fmt.Errorf("h2engine: expected SETTINGS frame, got %s", fr.Type())
 	}
 
 	st := fr.Body().(*Settings)
@@ -222,8 +231,18 @@ func (c *Conn) Close() error {
 	_ = c.c.Close()
 	c.broadcastWindowUpdate()
 
+	c.reqQueued.Range(func(key, value any) bool {
+		if reqCtx, ok := value.(*Context); ok {
+			select {
+			case reqCtx.Err <- ErrStreamClosed:
+			default:
+			}
+		}
+		return true
+	})
+
 	if c.onDisconnect != nil {
-		c.onDisconnect(c)
+		c.onDisconnect(context.Background(), c)
 	}
 
 	return err
@@ -253,7 +272,7 @@ func (c *Conn) writeLoop() {
 			break
 		}
 
-		if !c.disableAcks && c.unacks >= 3 {
+		if !c.disableAcks && c.pingUnacks >= 5 {
 			lastErr = ErrTimeout
 			break
 		}
@@ -301,7 +320,7 @@ func (c *Conn) recoverWriteLoop(lastErr *error) {
 		if err, ok := r.(error); ok {
 			*lastErr = err
 		} else {
-			*lastErr = fmt.Errorf("aoni h2engine panic: %v", r)
+			*lastErr = fmt.Errorf("h2engine panic: %v", r)
 		}
 	}
 
@@ -544,32 +563,103 @@ func (c *Conn) calculateChunkSize(ctx *Context, remaining int) int {
 	return min(chunk, maxFrame)
 }
 
+func isForbiddenH2Header(key []byte) bool {
+	if len(key) == 0 || key[0] == ':' {
+		return true
+	}
+
+	keyStr := bytesconv.B2S(key)
+
+	return bytesconv.EqualFoldASCII(keyStr, "connection") ||
+		bytesconv.EqualFoldASCII(keyStr, "keep-alive") ||
+		bytesconv.EqualFoldASCII(keyStr, "proxy-connection") ||
+		bytesconv.EqualFoldASCII(keyStr, "transfer-encoding") ||
+		bytesconv.EqualFoldASCII(keyStr, "upgrade") ||
+		bytesconv.EqualFoldASCII(keyStr, "host")
+}
+
+func isForbiddenH2HeaderStr(key string) bool {
+	if key == "" || key[0] == ':' {
+		return true
+	}
+
+	return bytesconv.EqualFoldASCII(key, "connection") ||
+		bytesconv.EqualFoldASCII(key, "keep-alive") ||
+		bytesconv.EqualFoldASCII(key, "proxy-connection") ||
+		bytesconv.EqualFoldASCII(key, "transfer-encoding") ||
+		bytesconv.EqualFoldASCII(key, "upgrade") ||
+		bytesconv.EqualFoldASCII(key, "host")
+}
+
 func (c *Conn) encodeRequestHeaders(h *Headers, req *fasthttp.Request) {
 	hf := AcquireHeaderField()
 	defer ReleaseHeaderField(hf)
 
 	enc := c.enc
 
-	hf.SetBytes(StringAuthority, req.URI().Host())
-	enc.AppendHeaderField(h, hf, true)
+	method := req.Header.Method()
+	if len(method) == 0 {
+		method = []byte("GET")
+	}
 
-	hf.SetBytes(StringMethod, req.Header.Method())
-	enc.AppendHeaderField(h, hf, true)
+	host := req.URI().Host()
+	if idx := bytes.IndexByte(host, ':'); idx != -1 {
+		if bytes.Equal(host[idx:], []byte(":443")) || bytes.Equal(host[idx:], []byte(":80")) {
+			host = host[:idx]
+		}
+	}
+	if len(host) == 0 {
+		host = req.Header.Peek("Host")
+	}
 
-	hf.SetBytes(StringPath, req.URI().RequestURI())
-	enc.AppendHeaderField(h, hf, true)
+	scheme := req.URI().Scheme()
+	if len(scheme) == 0 {
+		scheme = []byte("https")
+	}
 
-	hf.SetBytes(StringScheme, req.URI().Scheme())
-	enc.AppendHeaderField(h, hf, true)
+	path := req.URI().RequestURI()
+	if len(path) == 0 {
+		path = []byte("/")
+	}
 
-	hf.SetBytes(StringUserAgent, req.Header.UserAgent())
-	enc.AppendHeaderField(h, hf, true)
+	pseudoOrder := []string{":method", ":authority", ":scheme", ":path"}
+	if len(c.orderedKeys) > 0 {
+		var customPseudo []string
+		for _, k := range c.orderedKeys {
+			if len(k) > 0 && k[0] == ':' {
+				customPseudo = append(customPseudo, k)
+			}
+		}
+		if len(customPseudo) == 4 {
+			pseudoOrder = customPseudo
+		}
+	}
+
+	for _, pk := range pseudoOrder {
+		switch pk {
+		case ":method":
+			hf.SetBytes(StringMethod, method)
+		case ":authority":
+			hf.SetBytes(StringAuthority, host)
+		case ":scheme":
+			hf.SetBytes(StringScheme, scheme)
+		case ":path":
+			hf.SetBytes(StringPath, path)
+		}
+		enc.AppendHeaderField(h, hf, true)
+	}
 
 	if len(c.orderedKeys) > 0 {
 		c.appendOrderedHeaders(h, req, hf)
 	} else {
+		ua := req.Header.UserAgent()
+		if len(ua) > 0 {
+			hf.SetBytes(StringUserAgent, ua)
+			enc.AppendHeaderField(h, hf, true)
+		}
+
 		req.Header.All()(func(k, v []byte) bool {
-			if bytes.EqualFold(k, StringUserAgent) {
+			if isForbiddenH2Header(k) {
 				return true
 			}
 
@@ -580,17 +670,66 @@ func (c *Conn) encodeRequestHeaders(h *Headers, req *fasthttp.Request) {
 	}
 }
 
+func getFastHTTPCookieHeader(req *fasthttp.Request) []byte {
+	var sb strings.Builder
+
+	req.Header.Cookies()(func(key, value []byte) bool {
+		if sb.Len() > 0 {
+			sb.WriteString("; ")
+		}
+		sb.Write(key)
+		sb.WriteByte('=')
+		sb.Write(value)
+		return true
+	})
+
+	if sb.Len() > 0 {
+		return bytesconv.S2B(sb.String())
+	}
+
+	if raw := req.Header.Peek("Cookie"); len(raw) > 0 {
+		return raw
+	}
+
+	if raw := req.Header.Peek("cookie"); len(raw) > 0 {
+		return raw
+	}
+
+	return nil
+}
+
+func peekHeaderCaseInsensitive(req *fasthttp.Request, key string) []byte {
+	var found []byte
+	req.Header.All()(func(k, v []byte) bool {
+		if bytesconv.EqualFoldASCII(bytesconv.B2S(k), key) {
+			found = v
+			return false
+		}
+		return true
+	})
+	return found
+}
+
 func (c *Conn) appendOrderedHeaders(h *Headers, req *fasthttp.Request, hf *HeaderField) {
 	var visitedBits uint64
 	numOrdered := min(len(c.orderedKeys), 64)
 
 	for i := 0; i < numOrdered; i++ {
 		key := c.orderedKeys[i]
-		if key == "" || key[0] == ':' || bytesconv.EqualFoldASCII(key, "user-agent") {
+		if isForbiddenH2HeaderStr(key) {
 			continue
 		}
 
-		val := req.Header.Peek(key)
+		var val []byte
+		if bytesconv.EqualFoldASCII(key, "cookie") {
+			val = getFastHTTPCookieHeader(req)
+		} else {
+			val = req.Header.Peek(key)
+			if len(val) == 0 && len(key) > 0 {
+				val = peekHeaderCaseInsensitive(req, key)
+			}
+		}
+
 		if len(val) > 0 {
 			hf.SetKey(key)
 			hf.SetValueBytes(val)
@@ -600,11 +739,11 @@ func (c *Conn) appendOrderedHeaders(h *Headers, req *fasthttp.Request, hf *Heade
 	}
 
 	req.Header.All()(func(k, v []byte) bool {
-		kStr := bytesconv.B2S(k)
-		if bytesconv.EqualFoldASCII(kStr, "user-agent") {
+		if isForbiddenH2Header(k) {
 			return true
 		}
 
+		kStr := bytesconv.B2S(k)
 		for i := 0; i < numOrdered; i++ {
 			if (visitedBits&(1<<i)) != 0 && bytesconv.EqualFoldASCII(kStr, c.orderedKeys[i]) {
 				return true
@@ -621,16 +760,16 @@ func (c *Conn) appendOrderedHeaders(h *Headers, req *fasthttp.Request, hf *Heade
 
 func (c *Conn) readNext() (*FrameHeader, error) {
 	for {
-		fr, err := ReadFrameFrom(c.br)
+		fr, err := ReadFrameFromWithSize(c.br, maxFrameSize)
 		if err != nil {
 			return nil, err
 		}
 
 		if fr.Type() == FrameData || fr.Type() == FrameHeaders {
-			c.unacks = 0
+			c.consecutiveControlFrames = 0
 		} else {
-			c.unacks++
-			if c.unacks > maxConsecutiveControlFrames {
+			c.consecutiveControlFrames++
+			if c.consecutiveControlFrames > maxConsecutiveControlFrames {
 				ReleaseFrameHeader(fr)
 				return nil, ErrControlFrameFlood
 			}
@@ -652,22 +791,30 @@ func (c *Conn) readNext() (*FrameHeader, error) {
 func (c *Conn) handleConnectionFrame(fr *FrameHeader) error {
 	switch fr.Type() {
 	case FrameSettings:
-		st := fr.Body().(*Settings)
-		if !st.IsAck() {
-			c.handleSettings(st)
+		if fr.Body() != nil {
+			st := fr.Body().(*Settings)
+			if !st.IsAck() {
+				c.handleSettings(st)
+			}
 		}
 	case FrameWindowUpdate:
 		return c.handleWindowUpdate(fr)
 	case FramePing:
-		ping := fr.Body().(*Ping)
-		if !ping.IsAck() {
-			c.handlePing(ping)
-		} else {
-			c.unacks--
+		if fr.Body() != nil {
+			ping := fr.Body().(*Ping)
+			if !ping.IsAck() {
+				c.handlePing(ping)
+			} else {
+				if c.pingUnacks > 0 {
+					c.pingUnacks--
+				}
+			}
 		}
 	case FrameGoAway:
-		ga := fr.Body().(*GoAway)
-		c.handleGoAway(ga)
+		if fr.Body() != nil {
+			ga := fr.Body().(*GoAway)
+			c.handleGoAway(ga)
+		}
 	}
 
 	return nil
@@ -768,7 +915,7 @@ func (c *Conn) writePing() error {
 	if err == nil {
 		err = c.bw.Flush()
 		if err == nil {
-			c.unacks++
+			c.pingUnacks++
 		}
 	}
 
@@ -806,7 +953,7 @@ func (c *Conn) readStream(fr *FrameHeader, reqCtx *Context) error {
 
 		statusCode, err := c.readHeader(h.Headers(), reqCtx.Response)
 		if err == nil {
-			if statusCode < 100 || statusCode >= 200 || statusCode == 101 {
+			if (statusCode < 100 || statusCode >= 200 || statusCode == 101) && fr.Flags().Has(FlagEndHeaders) {
 				reqCtx.headersParsed = true
 			}
 		}
@@ -814,21 +961,35 @@ func (c *Conn) readStream(fr *FrameHeader, reqCtx *Context) error {
 		return err
 
 	case FrameData:
-		c.currentWindow -= int32(fr.Len())
-		currentWin := c.currentWindow
-		c.serverWindow -= int32(fr.Len())
-
 		data := fr.Body().(*Data)
+		dataLen := int32(fr.Len())
+
 		if data.Len() != 0 {
 			reqCtx.Response.AppendBody(data.Data())
-			c.updateWindow(fr.Stream(), fr.Len())
+
+			atomic.AddInt32(&reqCtx.streamWindow, -dataLen)
+			if atomic.LoadInt32(&reqCtx.streamWindow) < 3145728 {
+				inc := 6291456 - atomic.LoadInt32(&reqCtx.streamWindow)
+				atomic.StoreInt32(&reqCtx.streamWindow, 6291456)
+				c.updateWindow(fr.Stream(), int(inc))
+			}
 		}
 
-		if currentWin < c.maxWindow/2 {
-			nValue := c.maxWindow - currentWin
+		c.currentWindow -= dataLen
+		if c.currentWindow < c.maxWindow/2 {
+			inc := c.maxWindow - c.currentWindow
 			c.currentWindow = c.maxWindow
-			c.updateWindow(0, int(nValue))
+			c.updateWindow(0, int(inc))
 		}
+
+	case FrameResetStream:
+		if rst, ok := fr.Body().(*RstStream); ok {
+			return rst.Error()
+		}
+		return ErrStreamClosed
+
+	case FrameGoAway:
+		return ErrGoAwayRetryable
 	}
 
 	return nil
@@ -874,6 +1035,10 @@ func (c *Conn) readTrailers(b []byte, reqCtx *Context) error {
 }
 
 func (c *Conn) updateWindow(streamID uint32, size int) {
+	if size <= 0 || c.Closed() {
+		return
+	}
+
 	fr := AcquireFrameHeader()
 	fr.SetStream(streamID)
 
@@ -881,7 +1046,11 @@ func (c *Conn) updateWindow(streamID uint32, size int) {
 	wu.SetIncrement(size)
 	fr.SetBody(wu)
 
-	c.out <- fr
+	select {
+	case c.out <- fr:
+	case <-time.After(1 * time.Second):
+		ReleaseFrameHeader(fr)
+	}
 }
 
 const defaultMaxHeaderListSize = 10 * 1024 * 1024
@@ -939,16 +1108,22 @@ func (c *Conn) readHeader(b []byte, res *fasthttp.Response) (int, error) {
 
 // Dialer establishes HTTP/2 TLS connections using custom network dialers.
 type Dialer struct {
-	Addr         string
-	TLSConfig    *tls.Config
-	PingInterval time.Duration
-	NetDial      fasthttp.DialFunc
-	RawDial      fasthttp.DialFunc
+	Addr           string
+	TLSConfig      *tls.Config
+	PingInterval   time.Duration
+	NetDial        fasthttp.DialFunc
+	RawDial        fasthttp.DialFunc
+	RawDialContext func(ctx context.Context, addr string) (net.Conn, error)
 }
 
 // Dial creates and performs an HTTP/2 handshake on a new connection.
 func (d *Dialer) Dial(opts ConnOpts) (*Conn, error) {
-	c, err := d.tryDial()
+	return d.DialContext(context.Background(), opts)
+}
+
+// DialContext creates and performs an HTTP/2 handshake using the provided context.
+func (d *Dialer) DialContext(ctx context.Context, opts ConnOpts) (*Conn, error) {
+	c, err := d.tryDial(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -959,7 +1134,11 @@ func (d *Dialer) Dial(opts ConnOpts) (*Conn, error) {
 	return nc, err
 }
 
-func (d *Dialer) tryDial() (net.Conn, error) {
+func (d *Dialer) tryDial(ctx context.Context) (net.Conn, error) {
+	if d.RawDialContext != nil {
+		return d.RawDialContext(ctx, d.Addr)
+	}
+
 	if d.RawDial != nil {
 		return d.RawDial(d.Addr)
 	}
@@ -990,7 +1169,8 @@ func (d *Dialer) tryDial() (net.Conn, error) {
 	if d.NetDial != nil {
 		c, err = d.NetDial(d.Addr)
 	} else {
-		c, err = net.Dial("tcp", d.Addr)
+		var dialer net.Dialer
+		c, err = dialer.DialContext(ctx, "tcp", d.Addr)
 	}
 
 	if err != nil {
@@ -998,7 +1178,7 @@ func (d *Dialer) tryDial() (net.Conn, error) {
 	}
 
 	tlsConn := tls.Client(c, d.TLSConfig)
-	if err := tlsConn.Handshake(); err != nil {
+	if err := tlsConn.HandshakeContext(ctx); err != nil {
 		_ = c.Close()
 		return nil, err
 	}

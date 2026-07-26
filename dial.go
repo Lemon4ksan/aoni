@@ -10,6 +10,7 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"strings"
 
 	utls "github.com/refraction-networking/utls"
 	"golang.org/x/net/http2"
@@ -17,16 +18,6 @@ import (
 	"github.com/lemon4ksan/aoni/netutil/netdial"
 )
 
-// applyDialers binds custom TCP and TLS network dialers to the provided [*http.Transport].
-//
-// It delegates L4 connection establishment, proxy tunneling, SSRF guard checks, p0f OS spoofing,
-// and uTLS ClientHello emulation to the internal [netdial] engine.
-//
-// Preconditions:
-//   - If transport is nil, this function performs no operation.
-//
-// Side Effects:
-//   - Mutates transport.Proxy, transport.DialContext, and transport.DialTLSContext.
 func (c *Client) applyDialers(transport *http.Transport) {
 	if transport == nil {
 		return
@@ -86,6 +77,11 @@ func (c *Client) newDialTLSContextFunc(
 		}
 
 		targetHost, targetPort, dialOpts, utlsOpts := c.resolveTLSContextOptions(ctx, network, addr)
+
+		if targetPort == "80" {
+			targetAddr := net.JoinHostPort(targetHost, targetPort)
+			return netdial.DialL4(ctx, network, targetAddr, dialOpts)
+		}
 
 		if dialOpts.ProxyURL == nil && proxyFn != nil {
 			dummyReq := &http.Request{URL: &url.URL{Host: addr, Scheme: "https"}}
@@ -201,17 +197,13 @@ func (c *Client) resolveTLSContextOptions(
 	network, addr string,
 ) (host, port string, dialOpts netdial.DialOptions, utlsOpts netdial.RTLSOptions) {
 	host, port, dialOpts = c.resolveDialContextOptions(ctx, network, addr)
+	if port == "80" && !strings.Contains(addr, ":") {
+		port = "443"
+	}
+
 	reqCfg := GetRequestConfig(ctx)
 
-	utlsOpts = netdial.RTLSOptions{
-		HelloID:            c.resolveHelloID(),
-		SpecProvider:       c.fingerprint.TLSClientHelloSpecProvider,
-		SessionCache:       c.fingerprint.SessionCache,
-		JA4Callback:        c.fingerprint.JA4Callback,
-		CertificatePins:    c.fingerprint.CertificatePins,
-		BaseTLSConfig:      c.resolveBaseTLSConfig(ctx),
-		InsecureSkipVerify: GetInsecureSkipVerify(ctx),
-	}
+	utlsOpts = c.resolveRTLSOptions(ctx, host)
 
 	if reqCfg != nil {
 		if reqCfg.ClientHelloSpecProvider != nil {
@@ -252,6 +244,62 @@ func (c *Client) resolveHelloID() *utls.ClientHelloID {
 	default:
 		return &utls.HelloChrome_Auto
 	}
+}
+
+func (c *Client) resolveRTLSOptions(ctx context.Context, host string) netdial.RTLSOptions {
+	reqCfg := GetRequestConfig(ctx)
+
+	serverName := host
+	if net.ParseIP(host) != nil {
+		serverName = ""
+		if reqCfg != nil && reqCfg.TargetHost != "" && net.ParseIP(reqCfg.TargetHost) == nil {
+			serverName = reqCfg.TargetHost
+		} else if c.defaults.BaseURL != nil && c.defaults.BaseURL.Hostname() != "" && net.ParseIP(c.defaults.BaseURL.Hostname()) == nil {
+			serverName = c.defaults.BaseURL.Hostname()
+		}
+	}
+
+	utlsOpts := netdial.RTLSOptions{
+		HelloID:            c.resolveHelloID(),
+		SpecProvider:       c.fingerprint.TLSClientHelloSpecProvider,
+		SessionCache:       c.fingerprint.SessionCache,
+		CertificatePins:    c.fingerprint.CertificatePins,
+		JA4Callback:        c.fingerprint.JA4Callback,
+		BaseTLSConfig:      c.resolveBaseTLSConfig(ctx),
+		InsecureSkipVerify: GetInsecureSkipVerify(ctx) || c.engineConfig.InsecureSkipVerify,
+	}
+
+	if utlsOpts.BaseTLSConfig == nil {
+		utlsOpts.BaseTLSConfig = &tls.Config{}
+	}
+
+	if utlsOpts.BaseTLSConfig.ServerName == "" && serverName != "" {
+		utlsOpts.BaseTLSConfig.ServerName = serverName
+	}
+
+	if reqCfg != nil {
+		if reqCfg.ClientHelloSpecProvider != nil {
+			utlsOpts.SpecProvider = reqCfg.ClientHelloSpecProvider
+		}
+
+		if reqCfg.SessionCache != nil {
+			utlsOpts.SessionCache = reqCfg.SessionCache
+		}
+
+		if reqCfg.JA4Callback != nil {
+			utlsOpts.JA4Callback = reqCfg.JA4Callback
+		}
+
+		if len(reqCfg.CertificatePins) > 0 {
+			utlsOpts.CertificatePins = reqCfg.CertificatePins
+		}
+
+		if len(reqCfg.ALPNOverride) > 0 {
+			utlsOpts.ALPNOverride = reqCfg.ALPNOverride
+		}
+	}
+
+	return utlsOpts
 }
 
 func (c *Client) resolveBaseTLSConfig(ctx context.Context) *tls.Config {
@@ -295,7 +343,7 @@ func setupStandardTLSConfig(base *tls.Config, dialOpts netdial.DialOptions, host
 		tlsCfg = &tls.Config{}
 	}
 
-	if tlsCfg.ServerName == "" {
+	if tlsCfg.ServerName == "" && net.ParseIP(host) == nil {
 		cloned := tlsCfg.Clone()
 		cloned.ServerName = host
 		tlsCfg = cloned

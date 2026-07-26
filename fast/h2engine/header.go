@@ -53,7 +53,9 @@ func ReleaseFrameHeader(fr *FrameHeader) {
 		return
 	}
 
-	ReleaseFrame(fr.Body())
+	if fr.Body() != nil {
+		ReleaseFrame(fr.Body())
+	}
 	frameHeaderPool.Put(fr)
 }
 
@@ -92,7 +94,7 @@ func (f *FrameHeader) parseHeader(header []byte) {
 
 // ReadFrameFrom decodes the next HTTP/2 frame from reader using default bounds.
 func ReadFrameFrom(br *bufio.Reader) (*FrameHeader, error) {
-	return ReadFrameFromWithSize(br, defaultMaxLen)
+	return ReadFrameFromWithSize(br, maxFrameSize)
 }
 
 // ReadFrameFromWithSize decodes the next HTTP/2 frame enforcing max payload bounds.
@@ -124,12 +126,25 @@ func (f *FrameHeader) readFrom(br *bufio.Reader) (int64, error) {
 
 	f.parseValues(header)
 	if err = f.checkLen(); err != nil {
-		return 0, err
+		if f.length > 0 {
+			if _, err := io.CopyN(io.Discard, br, int64(f.length)); err != nil {
+				return 0, err
+			}
+			rn += int64(f.length)
+		}
+		f.fr = nil
+		return rn, nil
 	}
 
-	if f.kind > FrameContinuation {
-		_, _ = br.Discard(f.length)
-		return 0, ErrUnknownFrameType
+	if f.kind < 0 || f.kind > FrameContinuation {
+		if f.length > 0 {
+			if _, err := io.CopyN(io.Discard, br, int64(f.length)); err != nil {
+				return 0, err
+			}
+			rn += int64(f.length)
+		}
+		f.fr = nil
+		return rn, nil
 	}
 
 	f.fr = AcquireFrame(f.kind)
@@ -173,7 +188,7 @@ func (f *FrameHeader) Body() Frame { return f.fr }
 
 func (f *FrameHeader) SetBody(fr Frame) {
 	if fr == nil {
-		panic("aoni h2engine: frame body cannot be nil")
+		panic("h2engine: frame body cannot be nil")
 	}
 
 	f.kind = fr.Type()

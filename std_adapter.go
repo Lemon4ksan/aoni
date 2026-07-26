@@ -10,21 +10,18 @@ import (
 	stdio "io"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 
 	"github.com/lemon4ksan/aoni/internal/bytesconv"
 )
 
 // StdRequest adapts a standard net/http [*http.Request] to the unified [Request] contract.
-//
-// Designed as a lightweight value wrapper to enable compiler inlining and stack allocation.
 type StdRequest struct {
 	req *http.Request
 }
 
 // NewStdRequest wraps req into a unified [Request] adapter.
-//
-// Preconditions: If req is nil, instantiates an empty request with initialized headers.
 func NewStdRequest(req *http.Request) *StdRequest {
 	if req == nil {
 		req = &http.Request{Header: make(http.Header)}
@@ -488,5 +485,28 @@ func (a *RequestDoerAdapter) Do(req *http.Request) (*http.Response, error) {
 		return httpResp, nil
 	}
 
-	return nil, ErrNilRequest
+	// Fallback для движков (например fast.Response), у которых HTTPResponse() == nil
+	httpResp := &http.Response{
+		StatusCode:    resp.StatusCode(),
+		Status:        resp.Status(),
+		Header:        make(http.Header),
+		Body:          resp.BodyStream(),
+		ContentLength: -1,
+		Uncompressed:  resp.Uncompressed(),
+		Request:       req,
+	}
+
+	for k, vv := range resp.Headers() {
+		for _, v := range vv {
+			httpResp.Header.Add(k, v)
+		}
+	}
+
+	if clStr := resp.Header("Content-Length"); clStr != "" {
+		if cl, parseErr := strconv.ParseInt(clStr, 10, 64); parseErr == nil {
+			httpResp.ContentLength = cl
+		}
+	}
+
+	return httpResp, nil
 }

@@ -52,10 +52,11 @@ type ClientOption generic.Option[*Config]
 
 // Client is an immutable, thread-safe HTTP and WebSocket client built on top of [HTTPDoer].
 type Client struct {
-	engine      HTTPDoer
-	defaults    ClientDefaults
-	network     NetworkConfig
-	fingerprint FingerprintConfig
+	engine       HTTPDoer
+	engineConfig EngineConfig
+	defaults     ClientDefaults
+	network      NetworkConfig
+	fingerprint  FingerprintConfig
 
 	_                        cpu.CacheLinePad
 	userAgentRotationCounter uint32
@@ -286,6 +287,12 @@ func (c *Client) Request(
 		cfg.ApplyDefaults(c)
 	}
 
+	if cfg != nil && cfg.TargetHost == "" {
+		if parsedURL, parseErr := url.Parse(targetURLStr); parseErr == nil && parsedURL.Hostname() != "" {
+			cfg.TargetHost = parsedURL.Hostname()
+		}
+	}
+
 	req, err := http.NewRequestWithContext(ctx, method, targetURLStr, http.NoBody) //nolint:gosec
 	if err != nil {
 		return nil, &Error{Op: "failed to create request", Err: err}
@@ -349,6 +356,13 @@ func (c *Client) Do(req Request) (Response, error) {
 		httpReq, err = http.NewRequestWithContext(ctx, req.Method(), req.URL(), req.BodyStream())
 		if err != nil {
 			return nil, &Error{Op: "failed to create http request", Err: err}
+		}
+	}
+
+	if httpReq != nil && httpReq.URL != nil {
+		cfg := GetOrInitRequestConfig(httpReq.Context())
+		if cfg.TargetHost == "" && httpReq.URL.Hostname() != "" {
+			cfg.TargetHost = httpReq.URL.Hostname()
 		}
 	}
 
@@ -746,6 +760,7 @@ func (c *Client) snapshotConfig() Config {
 		Network:     c.network.Clone(),
 		Fingerprint: c.fingerprint.Clone(),
 		Defaults:    c.defaults.Clone(),
+		Engine:      c.engineConfig,
 	}
 }
 
@@ -753,6 +768,7 @@ func (c *Client) applyConfig(cfg Config) {
 	c.network = cfg.Network
 	c.fingerprint = cfg.Fingerprint
 	c.defaults = cfg.Defaults
+	c.engineConfig = cfg.Engine
 
 	applyEngineConfig(c, cfg.Engine)
 	c.applyDialers(c.Transport())

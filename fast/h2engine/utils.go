@@ -124,7 +124,7 @@ func cutPadding(payload []byte, length int) ([]byte, error) {
 
 	pad := int(payload[0])
 	if len(payload) < length-pad-1 || length-pad < 1 {
-		return nil, fmt.Errorf("aoni h2engine: padding out of range")
+		return nil, fmt.Errorf("h2engine: padding out of range")
 	}
 
 	return payload[1 : length-pad], nil

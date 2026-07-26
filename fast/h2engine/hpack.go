@@ -278,10 +278,6 @@ func (hp *HPACK) decodeLiteralIndexed(hf *HeaderField, b []byte) ([]byte, error)
 		bytePool.Put(bufPtr)
 	}
 
-	if len(b) > 0 && b[0] == c {
-		b = b[1:]
-	}
-
 	bufPtr := bytePool.Get().(*[]byte)
 	dst := (*bufPtr)[:0]
 
@@ -334,10 +330,6 @@ func (hp *HPACK) decodeLiteralNoIndex(hf *HeaderField, b []byte) ([]byte, error)
 		bytePool.Put(bufPtr)
 	}
 
-	if len(b) > 0 && b[0] == c {
-		b = b[1:]
-	}
-
 	bufPtr := bytePool.Get().(*[]byte)
 	dst := (*bufPtr)[:0]
 
@@ -379,7 +371,7 @@ func (hp *HPACK) AppendHeader(dst []byte, hf *HeaderField, store bool) []byte {
 			}
 		}
 	} else if !store || hp.DisableDynamicTable {
-		dst = append(dst, 0, 0)
+		dst = append(dst, 0)
 	} else {
 		dst = append(dst, literalByte)
 		hp.addDynamic(hf)
@@ -487,14 +479,8 @@ func appendString(dst, src []byte, encode bool) []byte {
 	}
 
 	payloadLen := uint64(len(payload))
-	lastIdx := len(dst) - 1
-
-	if lastIdx >= 0 && dst[lastIdx] != 0 {
-		dst = append(dst, 0)
-		lastIdx++
-	}
-
-	hBitIdx := max(lastIdx, 0)
+	hBitIdx := len(dst)
+	dst = append(dst, 0)
 
 	dst = appendInt(dst, 7, payloadLen)
 	dst = append(dst, payload...)

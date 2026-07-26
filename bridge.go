@@ -140,15 +140,21 @@ func (t *Transport) newSyncModifier(origReq *http.Request) RequestModifier {
 		aoniReq.Body = origReq.Body
 		aoniReq.ContentLength = origReq.ContentLength
 		aoniReq.TransferEncoding = origReq.TransferEncoding
+
 		aoniReq.Close = origReq.Close
-		aoniReq.Host = origReq.Host
+		if origReq.Host != "" {
+			aoniReq.Host = origReq.Host
+		}
+
 		aoniReq.GetBody = origReq.GetBody
 
 		if origReq.URL != nil {
 			u := *origReq.URL
 			if resolvedURL != nil {
 				u.Scheme = resolvedURL.Scheme
-				u.Host = resolvedURL.Host
+				if resolvedURL.Host != "" {
+					u.Host = resolvedURL.Host
+				}
 			}
 
 			aoniReq.URL = &u

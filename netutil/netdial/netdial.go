@@ -2,7 +2,6 @@
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
-// Package netdial provides utilities for establishing L4 network connections.
 package netdial
 
 import (
@@ -84,11 +83,35 @@ func DialL4(ctx context.Context, network, addr string, opts DialOptions) (net.Co
 	return DialDirectTCP(ctx, network, host, port, opts)
 }
 
-// DialDirectTCP establishes a direct TCP socket connection.
+// DialDirectTCP establishes a direct TCP socket connection trying all resolved IP addresses.
 func DialDirectTCP(ctx context.Context, network, host, port string, opts DialOptions) (net.Conn, error) {
 	resolver := opts.DNSResolver
 	if resolver == nil {
 		resolver = &net.Resolver{}
+	}
+
+	if net.ParseIP(host) != nil {
+		target := net.JoinHostPort(host, port)
+
+		dialer := &net.Dialer{
+			Timeout: 10 * time.Second,
+		}
+		if opts.SourceRotator != nil {
+			dialer.LocalAddr = &net.TCPAddr{IP: opts.SourceRotator.Next()}
+		}
+
+		dialer.Control = buildSocketControl(opts)
+
+		conn, err := dialer.DialContext(ctx, network, target)
+		if err != nil {
+			return nil, err
+		}
+
+		if opts.FragmentConfig != nil {
+			return fragment.NewFragmentedConn(conn, opts.FragmentConfig), nil
+		}
+
+		return conn, nil
 	}
 
 	addrs, err := resolver.LookupIPAddr(ctx, host)
@@ -96,33 +119,51 @@ func DialDirectTCP(ctx context.Context, network, host, port string, opts DialOpt
 		return nil, err
 	}
 
+	if len(addrs) == 0 {
+		return nil, fmt.Errorf("aoni netdial: no IP addresses found for host %s", host)
+	}
+
+	ipTimeout := 3 * time.Second
+	if opts.HappyEyeballs > 0 {
+		ipTimeout = opts.HappyEyeballs
+	}
+
+	var lastErr error
 	for _, address := range addrs {
 		if opts.SSRFGuard && ip.IsPrivateIP(address.IP) {
-			return nil, fmt.Errorf("%w: %s", ErrSSRFBlocked, address.IP.String())
+			lastErr = fmt.Errorf("%w: %s", ErrSSRFBlocked, address.IP.String())
+			continue
 		}
+
+		target := net.JoinHostPort(address.IP.String(), port)
+
+		ipCtx, ipCancel := context.WithTimeout(ctx, ipTimeout)
+
+		dialer := &net.Dialer{
+			Timeout: ipTimeout,
+		}
+		if opts.SourceRotator != nil {
+			dialer.LocalAddr = &net.TCPAddr{IP: opts.SourceRotator.Next()}
+		}
+
+		dialer.Control = buildSocketControl(opts)
+
+		conn, err := dialer.DialContext(ipCtx, network, target)
+
+		ipCancel()
+
+		if err == nil {
+			if opts.FragmentConfig != nil {
+				return fragment.NewFragmentedConn(conn, opts.FragmentConfig), nil
+			}
+
+			return conn, nil
+		}
+
+		lastErr = err
 	}
 
-	dialer := &net.Dialer{
-		Timeout:       30 * time.Second,
-		FallbackDelay: opts.HappyEyeballs,
-	}
-
-	if opts.SourceRotator != nil {
-		dialer.LocalAddr = &net.TCPAddr{IP: opts.SourceRotator.Next()}
-	}
-
-	dialer.Control = buildSocketControl(opts)
-
-	conn, err := dialer.DialContext(ctx, network, net.JoinHostPort(host, port))
-	if err != nil {
-		return nil, err
-	}
-
-	if opts.FragmentConfig != nil {
-		return fragment.NewFragmentedConn(conn, opts.FragmentConfig), nil
-	}
-
-	return conn, nil
+	return nil, fmt.Errorf("aoni netdial: all IP connections failed for %s: %w", host, lastErr)
 }
 
 // DialProxy establishes a network socket connection through a SOCKS5 or HTTP CONNECT proxy.

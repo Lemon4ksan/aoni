@@ -15,8 +15,8 @@ import (
 	"errors"
 	"fmt"
 	"net"
-	"slices"
 	"strings"
+	"time"
 
 	utls "github.com/refraction-networking/utls"
 
@@ -25,25 +25,22 @@ import (
 )
 
 var (
-	// ErrUTLSHandshakeFailed is returned when a uTLS handshake attempt fails.
-	ErrUTLSHandshakeFailed = errors.New("netdial: uTLS handshake failed")
-
-	// ErrCertificatePinning is returned when peer public keys do not match expected SHA-256 pins.
-	ErrCertificatePinning = errors.New("netdial: certificate pinning validation failed")
-
-	// ErrNoCertificatesPresented is returned when peer presents empty certificate chains during TLS handshakes.
+	// ErrUTLSHandshakeFailed is returned when the uTLS handshake fails.
+	ErrUTLSHandshakeFailed     = errors.New("netdial: uTLS handshake failed")
+	// ErrCertificatePinning is returned when the certificate pinning validation fails.
+	ErrCertificatePinning      = errors.New("netdial: certificate pinning validation failed")
+	// ErrNoCertificatesPresented is returned when no certificates are presented by the peer.
 	ErrNoCertificatesPresented = errors.New("netdial: no certificates presented by peer")
-
-	// ErrInvalidPinFormat is returned when a certificate pin hash fails string decoding.
-	ErrInvalidPinFormat = errors.New("netdial: invalid pin format")
+	// ErrInvalidPinFormat is returned when the pin format is invalid.
+	ErrInvalidPinFormat        = errors.New("netdial: invalid pin format")
 )
 
-// ClientHelloSpecProvider provides dynamic uTLS ClientHello specifications.
+// ClientHelloSpecProvider is an interface for providing a utls.ClientHelloSpec.
 type ClientHelloSpecProvider interface {
 	ClientHelloSpec() (*utls.ClientHelloSpec, error)
 }
 
-// RTLSOptions configures uTLS client handshake parameters.
+// RTLSOptions holds the options for configuring a utls.UConn connection.
 type RTLSOptions struct {
 	HelloID            *utls.ClientHelloID
 	SpecProvider       ClientHelloSpecProvider
@@ -55,13 +52,12 @@ type RTLSOptions struct {
 	InsecureSkipVerify bool
 }
 
-// UConnWrapper wraps a [*utls.UConn] to expose standard crypto/tls.ConnectionState
-// compatibility so Go's net/http.Transport recognizes HTTP/2 ALPN negotiations.
+// UConnWrapper wraps a utls.UConn and provides a ConnectionState method that returns the TLS connection state.
 type UConnWrapper struct {
 	*utls.UConn
 }
 
-// ConnectionState implements the interface expected by net/http.Transport to extract TLS state.
+// ConnectionState returns the TLS connection state of the wrapped UConn.
 func (w *UConnWrapper) ConnectionState() tls.ConnectionState {
 	uState := w.UConn.ConnectionState()
 
@@ -81,7 +77,6 @@ func (w *UConnWrapper) ConnectionState() tls.ConnectionState {
 }
 
 // HandshakeUTLS executes a uTLS ClientHello handshake over a raw net.Conn socket.
-// isolating TLS SNI from HTTP Host headers for Domain Fronting.
 func HandshakeUTLS(
 	ctx context.Context,
 	conn net.Conn,
@@ -91,13 +86,13 @@ func HandshakeUTLS(
 	cleanHost, _ := netutil.CleanHostPort(host)
 	sniHost := cleanHost
 
-	isIP := net.ParseIP(sniHost) != nil
-	if isIP {
-		sniHost = "" // RFC 6066: IP addresses must not be sent in TLS SNI extension
-	} else if sniHost == "" && opts.BaseTLSConfig != nil && opts.BaseTLSConfig.ServerName != "" {
-		baseSNI, _ := netutil.CleanHostPort(opts.BaseTLSConfig.ServerName)
-		if net.ParseIP(baseSNI) == nil {
-			sniHost = baseSNI
+	if net.ParseIP(cleanHost) != nil {
+		sniHost = ""
+		if opts.BaseTLSConfig != nil && opts.BaseTLSConfig.ServerName != "" {
+			baseSNI, _ := netutil.CleanHostPort(opts.BaseTLSConfig.ServerName)
+			if net.ParseIP(baseSNI) == nil {
+				sniHost = baseSNI
+			}
 		}
 	}
 
@@ -112,7 +107,7 @@ func HandshakeUTLS(
 		OmitEmptyPsk: true,
 	}
 
-	if isIP {
+	if net.ParseIP(cleanHost) != nil {
 		uCfg.InsecureServerNameToVerify = cleanHost
 	}
 
@@ -134,18 +129,39 @@ func HandshakeUTLS(
 		return nil, ja4.Report{}, err
 	}
 
-	if sniHost != "" {
-		uConn.Extensions = ensureSNI(uConn.Extensions, sniHost)
-	}
-
-	uConn.Extensions = forceALPN(uConn.Extensions, nextProtos)
-
 	if err := uConn.BuildHandshakeState(); err != nil {
 		_ = conn.Close()
 		return nil, ja4.Report{}, fmt.Errorf("%w: build handshake state: %w", ErrUTLSHandshakeFailed, err)
 	}
 
+	uConn.Extensions = removeECHExtensions(uConn.Extensions)
+
+	uConn.ClientHelloID = utls.HelloCustom
+	if err := uConn.BuildHandshakeState(); err != nil {
+		_ = conn.Close()
+		return nil, ja4.Report{}, fmt.Errorf("%w: rebuild handshake state: %w", ErrUTLSHandshakeFailed, err)
+	}
+
 	report := ExtractJA4FromUConn(uConn)
+
+	done := make(chan struct{})
+	defer close(done)
+
+	go func() {
+		select {
+		case <-ctx.Done():
+			_ = conn.Close()
+		case <-done:
+		}
+	}()
+
+	if deadline, ok := ctx.Deadline(); ok {
+		_ = conn.SetDeadline(deadline)
+	} else {
+		_ = conn.SetDeadline(time.Now().Add(15 * time.Second))
+	}
+
+	defer func() { _ = conn.SetDeadline(time.Time{}) }()
 
 	if err := uConn.HandshakeContext(ctx); err != nil {
 		_ = conn.Close()
@@ -159,19 +175,38 @@ func HandshakeUTLS(
 	return &UConnWrapper{UConn: uConn}, report, nil
 }
 
+func removeECHExtensions(exts []utls.TLSExtension) []utls.TLSExtension {
+	if len(exts) == 0 {
+		return exts
+	}
+
+	filtered := make([]utls.TLSExtension, 0, len(exts))
+	for _, ext := range exts {
+		if ext == nil {
+			continue
+		}
+
+		tStr := fmt.Sprintf("%T", ext)
+		if strings.Contains(tStr, "EncryptedClientHello") || strings.Contains(tStr, "GREASEECH") ||
+			strings.Contains(tStr, "BoringGREASE") {
+			continue
+		}
+
+		filtered = append(filtered, ext)
+	}
+
+	return filtered
+}
+
 func buildUConn(conn net.Conn, uCfg *utls.Config, opts RTLSOptions) (*utls.UConn, error) {
 	if opts.SpecProvider != nil {
 		spec, err := opts.SpecProvider.ClientHelloSpec()
-		if err != nil {
-			return nil, fmt.Errorf("%w: spec provider: %w", ErrUTLSHandshakeFailed, err)
+		if err == nil && spec != nil {
+			uConn := utls.UClient(conn, uCfg, utls.HelloCustom)
+			if err := uConn.ApplyPreset(spec); err == nil {
+				return uConn, nil
+			}
 		}
-
-		uConn := utls.UClient(conn, uCfg, utls.HelloCustom)
-		if err := uConn.ApplyPreset(spec); err != nil {
-			return nil, fmt.Errorf("%w: apply preset: %w", ErrUTLSHandshakeFailed, err)
-		}
-
-		return uConn, nil
 	}
 
 	helloID := opts.HelloID
@@ -229,7 +264,7 @@ func applyUTLSPeerVerification(uCfg *utls.Config, opts RTLSOptions, host string)
 	}
 }
 
-// VerifyCertificatePins validates raw peer X.509 certificates against expected domain SHA-256 pins.
+// VerifyCertificatePins verifies that the given raw certificates match the specified pins for the given host.
 func VerifyCertificatePins(host string, pins map[string][]string, rawCerts [][]byte) error {
 	if len(rawCerts) == 0 {
 		return ErrNoCertificatesPresented
@@ -321,7 +356,7 @@ func parsePin(pin string) ([]byte, error) {
 	return nil, ErrInvalidPinFormat
 }
 
-// ExtractJA4FromUConn analyzes completed handshakes and extracts pure-Go [ja4.Report] signatures.
+// ExtractJA4FromUConn extracts a JA4 report from a utls.UConn connection.
 func ExtractJA4FromUConn(uConn *utls.UConn) ja4.Report {
 	hello := uConn.HandshakeState.Hello
 
@@ -369,53 +404,4 @@ func ExtractJA4FromUConn(uConn *utls.UConn) ja4.Report {
 	}
 
 	return report
-}
-
-func ensureSNI(extensions []utls.TLSExtension, serverName string) []utls.TLSExtension {
-	if serverName == "" {
-		return extensions
-	}
-
-	found := false
-	filtered := make([]utls.TLSExtension, 0, len(extensions))
-
-	for _, ext := range extensions {
-		if _, ok := ext.(*utls.SNIExtension); ok {
-			filtered = append(filtered, &utls.SNIExtension{ServerName: serverName})
-			found = true
-		} else {
-			filtered = append(filtered, ext)
-		}
-	}
-
-	if !found {
-		filtered = append(filtered, &utls.SNIExtension{ServerName: serverName})
-	}
-
-	return filtered
-}
-
-func forceALPN(extensions []utls.TLSExtension, protos []string) []utls.TLSExtension {
-	found := false
-	filtered := make([]utls.TLSExtension, 0, len(extensions))
-
-	for _, ext := range extensions {
-		switch e := ext.(type) {
-		case *utls.ALPNExtension:
-			filtered = append(filtered, &utls.ALPNExtension{AlpnProtocols: protos})
-			found = true
-		case *utls.ApplicationSettingsExtension:
-			if slices.Contains(protos, "h2") {
-				filtered = append(filtered, e)
-			}
-		default:
-			filtered = append(filtered, e)
-		}
-	}
-
-	if !found {
-		filtered = append(filtered, &utls.ALPNExtension{AlpnProtocols: protos})
-	}
-
-	return filtered
 }

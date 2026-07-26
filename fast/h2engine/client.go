@@ -16,7 +16,7 @@ import (
 	"github.com/valyala/fasthttp"
 )
 
-const DefaultPingInterval = 3 * time.Second
+const DefaultPingInterval = 15 * time.Second
 
 type streamState int32
 
@@ -77,22 +77,22 @@ func (cl *Client) SetOrderedHeaders(keys []string) {
 	cl.orderedKeys = keys
 }
 
-func (cl *Client) onConnectionDropped(c *Conn) {
+func (cl *Client) onConnectionDropped(ctx context.Context, c *Conn) {
 	cl.lck.Lock()
 	defer cl.lck.Unlock()
 
 	for e := cl.conns.Front(); e != nil; e = e.Next() {
 		if e.Value.(*Conn) == c {
 			cl.conns.Remove(e)
-			_, _, _ = cl.createConn()
+			_, _, _ = cl.createConn(ctx)
 
 			break
 		}
 	}
 }
 
-func (cl *Client) createConn() (*Conn, *list.Element, error) {
-	c, err := cl.d.Dial(ConnOpts{
+func (cl *Client) createConn(ctx context.Context) (*Conn, *list.Element, error) {
+	c, err := cl.d.DialContext(ctx, ConnOpts{
 		PingInterval: cl.d.PingInterval,
 		OnDisconnect: cl.onConnectionDropped,
 	})
@@ -148,7 +148,7 @@ func (cl *Client) DoWithTrailers(ctx context.Context, req *fasthttp.Request, res
 }
 
 func (cl *Client) doOnceWithTrailers(ctx context.Context, req *fasthttp.Request, res *fasthttp.Response) (map[string][]string, error) {
-	conn, err := cl.selectConn()
+	conn, err := cl.selectConn(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -173,7 +173,7 @@ func (cl *Client) doOnceWithTrailers(ctx context.Context, req *fasthttp.Request,
 }
 
 func (cl *Client) doOnce(ctx context.Context, req *fasthttp.Request, res *fasthttp.Response) error {
-	conn, err := cl.selectConn()
+	conn, err := cl.selectConn(ctx)
 	if err != nil {
 		return err
 	}
@@ -198,7 +198,7 @@ func (cl *Client) doOnce(ctx context.Context, req *fasthttp.Request, res *fastht
 }
 
 // selectConn selects an available connection from pool with Late-Binding optimization.
-func (cl *Client) selectConn() (*Conn, error) {
+func (cl *Client) selectConn(ctx context.Context) (*Conn, error) {
 	cl.lck.Lock()
 	defer cl.lck.Unlock()
 
@@ -207,7 +207,7 @@ func (cl *Client) selectConn() (*Conn, error) {
 			return conn, nil
 		}
 
-		c, err := cl.dialOrWaitLateBindingLocked()
+		c, err := cl.dialOrWaitLateBindingLocked(ctx)
 		if err != nil {
 			return nil, err
 		}
@@ -238,17 +238,15 @@ func (cl *Client) findAvailableConnLocked() *Conn {
 	return nil
 }
 
-func (cl *Client) dialOrWaitLateBindingLocked() (*Conn, error) {
-	// Release pool lock during network dial to avoid blocking sibling requests
+func (cl *Client) dialOrWaitLateBindingLocked(ctx context.Context) (*Conn, error) {
 	cl.lck.Unlock()
-	c, _, err := cl.createConn()
+	c, _, err := cl.createConn(ctx)
 	cl.lck.Lock()
 
 	if err != nil {
 		return nil, err
 	}
 
-	// Late-Binding Check: If an existing warm connection freed a stream slot during dial, bind to it!
 	if existing := cl.findAvailableConnLocked(); existing != nil && existing != c {
 		return existing, nil
 	}
