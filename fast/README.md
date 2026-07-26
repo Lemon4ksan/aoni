@@ -29,31 +29,18 @@ Using standard HTTP wrappers is like hiring fifty drunk movers to carry a single
 go get github.com/lemon4ksan/aoni
 ```
 
-## Hard Core Performance: The Cold, Hard Math
+## Feature Matrix
 
-Look at the numbers that silence academic excuses. Compared directly against standard Go HTTP stacks under identical workloads:
-
-| Metric (Full Req/Resp Cycle + JSON) | Resty (`net/http`) | `aoni` (Standard) | `aoni` + `fast.Bridge` | `aoni/fast` (Native) | Advantage (`fast` vs Resty) |
-| :--- | :---: | :---: | :---: | :---: | :---: |
-| **GET JSON Latency (`ns/op`)** | 58,393 ns | 56,669 ns | **14,127 ns** | **6,513 ns** | **~9x Faster** |
-| **Heap Memory (`B/op`)** | 9,113 B | 8,217 B | **6,260 B** | **372 B** | **~24x Lighter** |
-| **Heap Allocations (`allocs/op`)** | 91 allocs | 82 allocs | **79 allocs** | **9 allocs** | **~10x Fewer Allocations** |
-| **HTTP/2 Latency (`ns/op`)** | 76,519 ns | 76,519 ns | **71,200 ns** | **68,164 ns** | **Faster H2 Multiplexing** |
-| **HTTP/3 QUIC Latency (`ns/op`)** | 131,281 ns | 131,281 ns | **115,400 ns** | **111,150 ns** | **Faster H3 QUIC Engine** |
-| **Parallel Latency (`ns/op`)** | 11,307 ns | 9,534 ns | **1,940 ns** | **656 ns** | **~17x Faster Parallel I/O** |
-| **Peak Throughput (Single Node)** | ~30k RPS | ~35k RPS | **>70,000 RPS** | **1,522,000+ RPS** | **1.5M+ RPS Silicon Speed** |
-
-* Processors belong to your application - not to bureaucratic frameworks and garbage collector pauses.
-
-## 🛡️ Full RFC Compliance, Security & Why There Is No Reason to Use `net/http` Over `aoni/fast`
-
-`aoni/fast` combines the speed and zero-allocation discipline of `fasthttp` with full RFC compliance and bulletproof security features:
-
-1. **Memory Safety & Race Prevention**: `BodyBytes()` returns a safe cloned slice (`slices.Clone`), avoiding use-after-free when `fasthttp.Response` is recycled into `sync.Pool`. Context cancellations transfer ownership to a background goroutine to prevent data races.
-2. **Streaming & OOM Defense**: Full request body streaming via `SetBodyStreamWriter`, automatic `GetBody` rewind for 307/308 redirects, zip-bomb decompression prior to `SizeLimit` checks, and Keep-Alive connection slurping (up to 2 KB).
-3. **RFC Protocol Security**: RFC 9112 Request Smuggling protection (`Content-Length` deduplication/conflict detection), RFC 7541 HPACK Header Flood limits (10 MB cap), Control Frame Anti-DoS (disconnecting >1000 PING/SETTINGS flood frames), RFC 6265 Subdomain-Aware Cookie scrubbing, RFC 7231 `Referer` stripping on HTTPS ➔ HTTP downgrades, and URL UserInfo Basic Auth extraction.
-4. **H1/H2/H3 & Network Stack**: HTTP/1.1 Anti-DPI (`HeaderOrderingConn`), spin-free H2 Flow Control (`sync.Cond`), H2 Stream FSM lifecycle management, H2/H3 Trailer parsing, H3 QPACK stream draining, QUIC Happy Eyeballs with seamless H2/H1 fallback, RFC 7838 `Alt-Svc` caching, IDN Punycode & IPv6 Zone ID stripping, RFC 6066 Domain Fronting SNI isolation, and `Expect: 100-continue` timer support.
-5. **Stdlib Parity**: `Response.Uncompressed` flag, `nothingWrittenError` 0-byte write retries on idle Keep-Alive sockets, custom protocol scheme handlers (`file://`, `ftp://`, `s3://`), and `httptrace.Got1xxResponse` hooks.
+| Feature / Capability | Standard Go `net/http` | Resty / Wrappers | `aoni` (Base) | `aoni/fast` |
+| :--- | :---: | :---: | :---: | :---: |
+| **Engine Core** | `net/http` | `net/http` | `net/http` | **`fasthttp` + Native H2/H3** |
+| **Execution Latency** | ~50 µs | ~50 µs | ~60 µs | **5.9 µs (8.5x faster)** |
+| **Zero-Alloc Object Pooling** | ✗ | ✗ | ✗ | **✓ (`sync.Pool` Request/Response)** |
+| **Native HTTP/2 (`h2engine`)** | `x/net/http2` | `x/net/http2` | `x/net/http2` | **✓ (Zero-Alloc Byte Engine)** |
+| **Native HTTP/3 (`h3engine`)** | `quic-go` | `quic-go` | `quic-go` | **✓ (QPACK Byte Engine)** |
+| **uTLS & Fingerprinting** | ✗ | ✗ | **✓** | **✓ (uTLS over `fastDialer`)** |
+| **Custom Header Order (JA4H)** | ✗ | ✗ | **✓** | **✓ (Zero-Cost Wire Ordering)** |
+| **`http.Client` Compatibility Bridge** | Native | ✗ | Native | **✓ (`fast.NewStdClient`)** |
 
 ## The Subterranean Monorail: `fast.NewStdClient` & The Bridge
 
@@ -159,19 +146,6 @@ func main() {
 }
 ```
 
-## Feature Matrix
-
-| Feature / Capability | Standard Go `net/http` | Resty / Wrappers | `aoni` (Base) | `aoni/fast` |
-| :--- | :---: | :---: | :---: | :---: |
-| **Engine Core** | `net/http` | `net/http` | `net/http` | **`fasthttp` + Native H2/H3** |
-| **Execution Latency** | ~50 µs | ~50 µs | ~60 µs | **5.9 µs (8.5x faster)** |
-| **Zero-Alloc Object Pooling** | ✗ | ✗ | ✗ | **✓ (`sync.Pool` Request/Response)** |
-| **Native HTTP/2 (`h2engine`)** | `x/net/http2` | `x/net/http2` | `x/net/http2` | **✓ (Zero-Alloc Byte Engine)** |
-| **Native HTTP/3 (`h3engine`)** | `quic-go` | `quic-go` | `quic-go` | **✓ (QPACK Byte Engine)** |
-| **uTLS & Fingerprinting** | ✗ | ✗ | **✓** | **✓ (uTLS over `fastDialer`)** |
-| **Custom Header Order (JA4H)** | ✗ | ✗ | **✓** | **✓ (Zero-Cost Wire Ordering)** |
-| **`http.Client` Compatibility Bridge** | Native | ✗ | Native | **✓ (`fast.NewStdClient`)** |
-
 ## License
 
 Licensed under the **BSD 3-Clause License**. See [LICENSE](LICENSE) for details.
@@ -179,4 +153,3 @@ Licensed under the **BSD 3-Clause License**. See [LICENSE](LICENSE) for details.
 <div align="center">
   <sub>Pure physics. Unyielding performance. Take back your CPU.</sub>
 </div>
-
