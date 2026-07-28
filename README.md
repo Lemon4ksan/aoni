@@ -53,16 +53,6 @@ option / mod ──┼
 * **Need 100% stdlib compatibility & complex middleware?** Use `aoni`.
 * **Need absolute, raw silicon throughput & zero-alloc geometry?** Use [`aoni/fast`](fast).
 
-## 🛡️ Full RFC Compliance, Security & Why There Is No Reason to Use `net/http` Over `aoni/fast`
-
-`aoni/fast` is not just a raw speed engine; it incorporates every academic safeguard, security patch, and RFC standard present in Go's standard `net/http` library while retaining `fasthttp` zero-allocation speed:
-
-1. **Memory Safety & Race Prevention**: `BodyBytes()` returns a safe cloned slice (`slices.Clone`), avoiding use-after-free when `fasthttp.Response` is recycled into `sync.Pool`. Context cancellations transfer ownership to a background goroutine to prevent data races.
-2. **Streaming & OOM Defense**: Full request body streaming via `SetBodyStreamWriter`, automatic `GetBody` rewind for 307/308 redirects, zip-bomb decompression prior to `SizeLimit` checks, and Keep-Alive connection slurping (up to 2 KB).
-3. **RFC Protocol Security**: RFC 9112 Request Smuggling protection (`Content-Length` deduplication/conflict detection), RFC 7541 HPACK Header Flood limits (10 MB cap), Control Frame Anti-DoS (disconnecting >1000 PING/SETTINGS flood frames), RFC 6265 Subdomain-Aware Cookie scrubbing, RFC 7231 `Referer` stripping on HTTPS ➔ HTTP downgrades, and URL UserInfo Basic Auth extraction.
-4. **H1/H2/H3 & Network Stack**: HTTP/1.1 Anti-DPI (`HeaderOrderingConn`), spin-free H2 Flow Control (`sync.Cond`), H2 Stream FSM lifecycle management, H2/H3 Trailer parsing, H3 QPACK stream draining, QUIC Happy Eyeballs with seamless H2/H1 fallback, RFC 7838 `Alt-Svc` caching, IDN Punycode & IPv6 Zone ID stripping, RFC 6066 Domain Fronting SNI isolation, and `Expect: 100-continue` timer support.
-5. **Stdlib Parity**: `Response.Uncompressed` flag, `nothingWrittenError` 0-byte write retries on idle Keep-Alive sockets, custom protocol scheme handlers (`file://`, `ftp://`, `s3://`), and `httptrace.Got1xxResponse` hooks.
-
 ## Quick Start
 
 ### 1. High-Level Universal Generic Interface (`FetchTo`)

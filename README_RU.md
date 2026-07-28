@@ -53,47 +53,6 @@ option / mod ──┼
 * **Нужна 100% совместимость со стандартной библиотекой и сложное промежуточное ПО?** Используйте `aoni`.
 * **Нужна абсолютная, чистая пропускная способность кремния и геометрия нулевого выделения памяти?** Используйте [`aoni/fast`](fast).
 
-## 🛡️ Полное соответствие RFC, безопасность и почему нет причин использовать `net/http` вместо `aoni/fast`
-
-Движок **`aoni/fast`** объединяет скорость и нулевые аллокации `fasthttp` с защитой безопасности и стандартами академического уровня `net/http`:
-
-1. **Управление памятью, `sync.Pool` и предотвращение Use-After-Free / Data Race**:
-   - Безопасная копия тела ответа (`slices.Clone` в `BodyBytes()`), предотвращающая повреждение памяти при возврате объекта в `sync.Pool`.
-   - Явный Zero-Copy метод `UnsafeBodyBytes()` для прецизионных высоконагруженных сценариев.
-   - Передача владения памятью (Ownership Transfer) при отмене контекста: фоновая горутина возвращает ресурсы в `sync.Pool` только после завершения I/O, исключая Data Race.
-   - Защита от Data Race при хеджировании (`executeWithHedging`) с созданием изолированных клонов запросов.
-
-2. **Потоковый ввод-вывод (I/O) и защита от OOM**:
-   - Потоковая передача тел запросов (Streaming Body) через `SetBodyStreamWriter` без вычитывания гигабайтных файлов в память.
-   - Автоматический `GetBody` с rewind (`Seek`) для повторной отправки потоковых тел при 307/308 редиректах.
-   - Защита от Zip-бомб: декомпрессия (`gzip`/`brotli`/`zstd`) выполняется строго перед `SizeLimit` лимитом.
-   - Keep-Alive Slurping: считывание невычитанного остатка (до 2 KB) в `io.Discard` при закрытии/редиректе для сохранения сокета.
-
-3. **Безопасность протоколов (RFC Standards & Anti-Exploit)**:
-   - HTTP Request Smuggling Protection (RFC 9112): дедупликация и отказ от обработки при конфликтах `Content-Length`.
-   - HPACK Header Flood Limit (RFC 7541): жесткий лимит объема заголовков (10 МБ).
-   - Control Frame Flood Protection (Anti-DoS): расторжение соединения при спаме служебными кадрами (`PING`, `SETTINGS` >1000 подряд).
-   - Subdomain-Aware Cookie Scrubbing (RFC 6265): зачистка `Cookie` при Cross-Domain редиректах.
-   - HTTPS ➔ HTTP Referer Strip (RFC 7231): автоудаление `Referer` при даунгрейде схемы.
-   - Автоизвлечение UserInfo из URL в `Authorization: Basic`.
-
-4. **Протоколы H1, H2, H3 и сетевой стек**:
-   - HTTP/1.1 Anti-DPI (`HeaderOrderingConn`) с сохранением регистра и порядка заголовков.
-   - H2 Flow Control без Spin-Wait на условных переменных (`sync.Cond`).
-   - H2 Stream Lifecycle FSM (`streamIdle`, `streamOpen`, `streamHalfClosed`, `streamClosed`).
-   - Поддержка HTTP/2 & HTTP/3 Trailers и вычитка QPACK Encoder Stream.
-   - HTTP/3 QUIC Happy Eyeballs с авто-откатом на H2/H1 при блокировках UDP 443.
-   - Кэширование `Alt-Svc: h3` (RFC 7838).
-   - IDN Punycode & IPv6 Zone ID Stripping (`[fe80::1%eth0]` ➔ `[fe80::1]`).
-   - Domain Fronting изоляция SNI (RFC 6066).
-   - Поддержка паузы `Expect: 100-continue`.
-
-5. **Академические механизмы stdlib `net/http`**:
-   - Флаг `Response.Uncompressed`.
-   - `nothingWrittenError` (0-Byte Write Retry) для безопасного повтора на заснувших Keep-Alive сокетах.
-   - Реестр кастомных схем (`RegisterProtocol` / `WithProtocol`).
-   - Инспекция промежуточных ответов через `httptrace.Got1xxResponse`.
-
 ## Быстрый старт
 
 ### 1. Универсальный интерфейс `FetchTo`
