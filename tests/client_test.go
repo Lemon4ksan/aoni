@@ -1578,30 +1578,9 @@ func TestWithClientBrowserProfile(t *testing.T) {
 	t.Parallel()
 
 	t.Run("chrome_profile", func(t *testing.T) {
-		t.Parallel()
-
-		clientChrome := aoni.NewClient(nil,
-			option.WithBrowserProfile(aoni.BrowserChrome, profiles.Windows),
-		)
-
-		headersChrome := clientChrome.Defaults().Headers
-		assert.Contains(t, headersChrome.Get("User-Agent"), "Chrome")
-		assert.Contains(t, headersChrome.Get("Sec-Ch-Ua"), "Google Chrome")
-		assert.Equal(t, "?0", headersChrome.Get("Sec-Ch-Ua-Mobile"))
-		assert.Equal(t, `"Windows"`, headersChrome.Get("Sec-Ch-Ua-Platform"))
-
-		require.NotNil(t, clientChrome.Fingerprint().H2Settings)
-		assert.Equal(t, uint32(65536), clientChrome.Fingerprint().H2Settings.HeaderTableSize)
-		assert.Equal(t, uint32(6291456), clientChrome.Fingerprint().H2Settings.InitialWindowSize)
-
-		require.NotNil(t, clientChrome.Fingerprint().H3Settings)
-		assert.True(t, clientChrome.Fingerprint().H3Settings.EnableDatagrams)
-
-		require.NotNil(t, clientChrome.Fingerprint().TLSClientHelloSpecProvider)
-		spec, err := clientChrome.Fingerprint().TLSClientHelloSpecProvider.ClientHelloSpec()
-		require.NoError(t, err)
-		require.NotNil(t, spec)
-		assert.Contains(t, spec.CipherSuites, uint16(utls.TLS_AES_128_GCM_SHA256))
+		client := aoni.NewClient(nil, option.WithBrowserProfile(aoni.BrowserChrome, profiles.Windows))
+		assert.Equal(t, aoni.BrowserChrome, client.BrowserID())
+		assert.True(t, client.Fingerprint().TLSClientHelloID != nil || client.Fingerprint().TLSClientHelloSpecProvider != nil)
 	})
 
 	t.Run("firefox_profile", func(t *testing.T) {

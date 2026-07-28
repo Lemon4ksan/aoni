@@ -199,15 +199,23 @@ func TestClient_E2E_WAFBypass_Pipeline(t *testing.T) {
 				return
 			}
 
-			w.WriteHeader(http.StatusOK)
-
 			hijacker, ok := w.(http.Hijacker)
 			if !ok {
+				_ = destConn.Close()
+				w.WriteHeader(http.StatusInternalServerError)
 				return
 			}
 
 			clientConn, _, err := hijacker.Hijack()
 			if err != nil {
+				_ = destConn.Close()
+				return
+			}
+
+			// Send the raw HTTP/1.1 CONNECT success header over the hijacked connection
+			if _, err := clientConn.Write([]byte("HTTP/1.1 200 Connection Established\r\n\r\n")); err != nil {
+				_ = clientConn.Close()
+				_ = destConn.Close()
 				return
 			}
 
@@ -218,12 +226,10 @@ func TestClient_E2E_WAFBypass_Pipeline(t *testing.T) {
 				done := make(chan struct{}, 2)
 				go func() {
 					_, _ = io.Copy(destConn, clientConn)
-
 					done <- struct{}{}
 				}()
 				go func() {
 					_, _ = io.Copy(clientConn, destConn)
-
 					done <- struct{}{}
 				}()
 

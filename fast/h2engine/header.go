@@ -141,7 +141,7 @@ func (f *FrameHeader) readFrom(br *bufio.Reader) (int64, error) {
 		return rn, nil
 	}
 
-	if f.kind < 0 || f.kind > FrameContinuation {
+	if f.kind > FrameContinuation {
 		if f.length > 0 {
 			if _, err := io.CopyN(io.Discard, br, int64(f.length)); err != nil {
 				return 0, err

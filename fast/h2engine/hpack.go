@@ -353,32 +353,31 @@ func (hp *HPACK) AppendHeaderField(h *Headers, hf *HeaderField, store bool) {
 
 func (hp *HPACK) AppendHeader(dst []byte, hf *HeaderField, store bool) []byte {
 	c := !hp.DisableCompression
-	bits := uint8(6)
-
 	index, fullMatch := hp.search(hf)
+
+	if fullMatch {
+		dst = append(dst, indexByte)
+		return appendInt(dst, 7, index)
+	}
+
+	var bits uint8
+
 	switch {
 	case hf.sensible:
 		c = false
+		bits = 4
 
 		dst = append(dst, 16)
-	case index > 0:
-		switch {
-		case fullMatch:
-			bits, dst = 7, append(dst, indexByte)
-		case !store:
-			bits, dst = 4, append(dst, 0)
-		default:
-			dst = append(dst, literalByte)
-
-			if index < maxIndex {
-				hp.addDynamic(hf)
-			}
-		}
 
 	case !store || hp.DisableDynamicTable:
+		bits = 4
+
 		dst = append(dst, 0)
-	case index == 0:
-		dst = appendString(dst, hf.key, c)
+
+	default: // Incremental indexing (0x40)
+		bits = 6
+
+		dst = append(dst, literalByte)
 
 		hp.addDynamic(hf)
 	}
@@ -386,12 +385,11 @@ func (hp *HPACK) AppendHeader(dst []byte, hf *HeaderField, store bool) []byte {
 	if index > 0 {
 		dst = appendInt(dst, bits, index)
 	} else {
+		dst = appendInt(dst, bits, 0)
 		dst = appendString(dst, hf.key, c)
 	}
 
-	if bits != 7 {
-		dst = appendString(dst, hf.value, c)
-	}
+	dst = appendString(dst, hf.value, c)
 
 	return dst
 }

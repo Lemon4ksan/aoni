@@ -10,7 +10,7 @@ import (
 )
 
 // FrameType identifies the protocol function of an HTTP/2 frame (RFC 7540 Section 6).
-type FrameType int8
+type FrameType uint8
 
 const (
 	FrameData         FrameType = 0x0
@@ -53,7 +53,7 @@ func (ft FrameType) String() string {
 }
 
 // FrameFlags defines bit flags controlling payload parsing and stream semantics.
-type FrameFlags int8
+type FrameFlags uint8
 
 // Has reports whether target bit flag set is enabled.
 func (flags FrameFlags) Has(target FrameFlags) bool {

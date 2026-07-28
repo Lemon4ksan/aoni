@@ -168,7 +168,9 @@ func (cl *Client) doOnceWithTrailers(
 		Err:      errCh,
 	}
 
-	conn.Write(reqCtx)
+	if err := conn.Write(reqCtx); err != nil {
+		return nil, ErrGoAwayRetryable
+	}
 
 	select {
 	case <-ctx.Done():
@@ -193,7 +195,9 @@ func (cl *Client) doOnce(ctx context.Context, req *fasthttp.Request, res *fastht
 		Err:      errCh,
 	}
 
-	conn.Write(reqCtx)
+	if err := conn.Write(reqCtx); err != nil {
+		return ErrGoAwayRetryable
+	}
 
 	select {
 	case <-ctx.Done():

@@ -90,7 +90,11 @@ func DialDirectTCP(ctx context.Context, network, host, port string, opts DialOpt
 		resolver = &net.Resolver{}
 	}
 
-	if net.ParseIP(host) != nil {
+	if ipAddr := net.ParseIP(host); ipAddr != nil {
+		if opts.SSRFGuard && ip.IsPrivateIP(ipAddr) {
+			return nil, fmt.Errorf("%w: %s", ErrSSRFBlocked, ipAddr.String())
+		}
+
 		target := net.JoinHostPort(host, port)
 
 		dialer := &net.Dialer{
@@ -231,16 +235,23 @@ func dialHTTPProxy(ctx context.Context, proxyURL *url.URL, forward *net.Dialer, 
 	}
 
 	target := net.JoinHostPort(host, port)
-	connectReq := "CONNECT " + target + " HTTP/1.1\r\nHost: " + target + "\r\n\r\n"
+	connectReqStr := "CONNECT " + target + " HTTP/1.1\r\nHost: " + target + "\r\n\r\n"
 
-	if _, err := conn.Write([]byte(connectReq)); err != nil {
+	if _, err := conn.Write([]byte(connectReqStr)); err != nil {
 		_ = conn.Close()
 		return nil, fmt.Errorf("%w: send CONNECT: %w", ErrProxyConnectFailed, err)
 	}
 
 	br := bufio.NewReader(conn)
 
-	resp, err := http.ReadResponse(br, nil)
+	// Pass a Request with Method: CONNECT so http.ReadResponse
+	// recognizes that 2xx CONNECT responses contain no body.
+	connectReq := &http.Request{
+		Method: http.MethodConnect,
+		URL:    &url.URL{Host: target},
+	}
+
+	resp, err := http.ReadResponse(br, connectReq)
 	if err != nil {
 		_ = conn.Close()
 		return nil, fmt.Errorf("%w: read CONNECT response: %w", ErrProxyConnectFailed, err)

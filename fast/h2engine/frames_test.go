@@ -14,14 +14,14 @@ import (
 func TestFrameHeaderFlags(t *testing.T) {
 	flags := FrameFlags(0)
 
-	flags = flags.Add(FlagAck).Add(FlagEndStream)
-	if !flags.Has(FlagAck) || !flags.Has(FlagEndStream) {
-		t.Fatalf("expected flags to contain FlagAck and FlagEndStream")
+	flags = flags.Add(FlagEndHeaders).Add(FlagEndStream)
+	if !flags.Has(FlagEndHeaders) || !flags.Has(FlagEndStream) {
+		t.Fatalf("expected flags to contain FlagEndHeaders and FlagEndStream")
 	}
 
-	flags = flags.Del(FlagAck)
-	if flags.Has(FlagAck) {
-		t.Fatalf("expected FlagAck to be removed")
+	flags = flags.Del(FlagEndHeaders)
+	if flags.Has(FlagEndHeaders) {
+		t.Fatalf("expected FlagEndHeaders to be removed")
 	}
 
 	if !flags.Has(FlagEndStream) {

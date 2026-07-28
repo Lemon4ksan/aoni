@@ -52,6 +52,8 @@ type Conn struct {
 
 	windowCond *sync.Cond
 	windowMu   sync.Mutex
+	inMu       sync.Mutex // Protects in channel send and close
+	writeMu    sync.Mutex // Protects concurrent writes to bw
 
 	_ cpu.CacheLinePad
 
@@ -75,6 +77,7 @@ type Conn struct {
 	out          chan *FrameHeader
 	pingInterval time.Duration
 	closed       uint64
+	inClosed     bool
 	disableAcks  bool
 }
 
@@ -97,6 +100,8 @@ func NewConn(c net.Conn, opts ConnOpts) *Conn {
 	}
 
 	nc.windowCond = sync.NewCond(&nc.windowMu)
+	nc.current.Reset()
+	nc.serverS.Reset() // Initialize server settings with default maxStreams = 100 (RFC 7540)
 	nc.current.SetMaxWindowSize(6291456)
 	nc.current.SetMaxFrameSize(maxFrameSize)
 	nc.current.SetPush(false)
@@ -145,7 +150,11 @@ func (c *Conn) Handshake() error {
 	_ = c.c.SetDeadline(time.Now().Add(10 * time.Second))
 	defer func() { _ = c.c.SetDeadline(time.Time{}) }()
 
-	if err := PerformHandshake(true, c.bw, &c.current, c.maxWindow-65535); err != nil {
+	c.writeMu.Lock()
+	err := PerformHandshake(true, c.bw, &c.current, c.maxWindow-65535)
+	c.writeMu.Unlock()
+
+	if err != nil {
 		_ = c.c.Close()
 		return err
 	}
@@ -190,9 +199,12 @@ func (c *Conn) sendSettingsAck() {
 	stRes.SetAck(true)
 	fr.SetBody(stRes)
 
+	c.writeMu.Lock()
 	if _, err := fr.WriteTo(c.bw); err == nil {
 		_ = c.bw.Flush()
 	}
+
+	c.writeMu.Unlock()
 
 	ReleaseFrameHeader(fr)
 }
@@ -213,7 +225,13 @@ func (c *Conn) Close() error {
 		return io.EOF
 	}
 
-	close(c.in)
+	c.inMu.Lock()
+	if !c.inClosed {
+		c.inClosed = true
+		close(c.in)
+	}
+
+	c.inMu.Unlock()
 
 	fr := AcquireFrameHeader()
 	defer ReleaseFrameHeader(fr)
@@ -223,10 +241,14 @@ func (c *Conn) Close() error {
 	ga.SetCode(NoError)
 	fr.SetBody(ga)
 
+	c.writeMu.Lock()
+
 	_, err := fr.WriteTo(c.bw)
 	if err == nil {
 		err = c.bw.Flush()
 	}
+
+	c.writeMu.Unlock()
 
 	_ = c.c.Close()
 	c.broadcastWindowUpdate()
@@ -250,8 +272,20 @@ func (c *Conn) Close() error {
 }
 
 // Write enqueues a request context for execution.
-func (c *Conn) Write(r *Context) {
-	c.in <- r
+func (c *Conn) Write(r *Context) error {
+	c.inMu.Lock()
+	defer c.inMu.Unlock()
+
+	if c.inClosed || atomic.LoadUint64(&c.closed) == 1 {
+		return ErrStreamClosed
+	}
+
+	select {
+	case c.in <- r:
+		return nil
+	default:
+		return ErrNotAvailableStreams
+	}
 }
 
 func (c *Conn) writeLoop() {
@@ -304,8 +338,17 @@ func (c *Conn) selectWriteEvent(pingChan <-chan time.Time) (bool, error) {
 
 		defer ReleaseFrameHeader(fr)
 
-		if _, err := fr.WriteTo(c.bw); err != nil || c.bw.Flush() != nil {
-			return true, err
+		c.writeMu.Lock()
+
+		_, wErr := fr.WriteTo(c.bw)
+		if wErr == nil {
+			wErr = c.bw.Flush()
+		}
+
+		c.writeMu.Unlock()
+
+		if wErr != nil {
+			return true, wErr
 		}
 
 	case <-pingChan:
@@ -416,7 +459,7 @@ func (c *Conn) writeRequest(ctx *Context) error {
 	ctx.StreamID = id
 	ctx.SetState(streamOpen)
 
-	initWin := int32(c.serverS.MaxWindowSize()) //nolint:gosec
+	initWin := int32(c.serverS.MaxWindowSize())
 	if initWin <= 0 {
 		initWin = 65535
 	}
@@ -443,7 +486,15 @@ func (c *Conn) writeRequest(ctx *Context) error {
 
 	c.reqQueued.Store(id, ctx)
 
+	c.writeMu.Lock()
+
 	_, err := fr.WriteTo(c.bw)
+	if err == nil {
+		err = c.bw.Flush()
+	}
+
+	c.writeMu.Unlock()
+
 	if err != nil {
 		c.lastErr = err
 		c.reqQueued.Delete(id)
@@ -451,8 +502,6 @@ func (c *Conn) writeRequest(ctx *Context) error {
 
 		return err
 	}
-
-	_ = c.bw.Flush()
 
 	if hasBody {
 		ReleaseFrame(h)
@@ -502,18 +551,27 @@ func (c *Conn) writeData(fh *FrameHeader, ctx *Context, body []byte) error {
 		data.SetPadding(false)
 		data.SetData(body[offset:end])
 
-		if _, err := fh.WriteTo(c.bw); err != nil {
-			return err
+		c.writeMu.Lock()
+
+		_, wErr := fh.WriteTo(c.bw)
+		if wErr == nil {
+			wErr = c.bw.Flush()
 		}
 
-		atomic.AddInt32(&c.serverWindow, -int32(chunkSize))   //nolint:gosec
-		atomic.AddInt32(&ctx.streamWindow, -int32(chunkSize)) //nolint:gosec
+		c.writeMu.Unlock()
+
+		if wErr != nil {
+			return wErr
+		}
+
+		atomic.AddInt32(&c.serverWindow, -int32(chunkSize))
+		atomic.AddInt32(&ctx.streamWindow, -int32(chunkSize))
 
 		offset = end
 	}
 
 	if bodyLen > 0 {
-		ctx.SetState(streamHalfClosed)
+		ctx.State() // half-closed
 	}
 
 	return nil
@@ -928,6 +986,8 @@ func (c *Conn) writePing() error {
 	ping.SetCurrentTime()
 	fr.SetBody(ping)
 
+	c.writeMu.Lock()
+
 	_, err := fr.WriteTo(c.bw)
 	if err == nil {
 		err = c.bw.Flush()
@@ -935,6 +995,8 @@ func (c *Conn) writePing() error {
 			c.pingUnacks++
 		}
 	}
+
+	c.writeMu.Unlock()
 
 	return err
 }

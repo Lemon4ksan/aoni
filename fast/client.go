@@ -1199,14 +1199,19 @@ func (c *Client) getH2Client(host string) *h2engine.Client {
 }
 
 func resolveALPNMode(ctx context.Context, cfg *aoni.Config, fastReq *fasthttp.Request) string {
-	if !bytes.Equal(fastReq.URI().Scheme(), []byte("https")) {
-		return aoni.AlpnHTTP
-	}
-
-	host := string(fastReq.URI().Host())
-
 	reqCfg := aoni.GetRequestConfig(ctx)
 	if reqCfg != nil {
+		if len(reqCfg.Modifiers) > 0 && len(reqCfg.ALPNOverride) == 0 {
+			dummyReq := NewRequest(fastReq)
+			dummyReq.SetContext(ctx) // Attach context so modifiers mutate reqCfg
+
+			for _, m := range reqCfg.Modifiers {
+				if m != nil {
+					m(dummyReq)
+				}
+			}
+		}
+
 		if len(reqCfg.ALPNOverride) > 0 {
 			first := reqCfg.ALPNOverride[0]
 			if first == aoni.AlpnH3 || first == aoni.AlpnH2 || first == aoni.AlpnHTTP {
@@ -1215,11 +1220,24 @@ func resolveALPNMode(ctx context.Context, cfg *aoni.Config, fastReq *fasthttp.Re
 		}
 	}
 
-	if host != "" && globalAltSvcCache.IsH3Supported(host) {
-		return aoni.AlpnH3
+	if bytes.EqualFold(fastReq.URI().Scheme(), []byte("https")) {
+		host := string(fastReq.URI().Host())
+		if host != "" && globalAltSvcCache.IsH3Supported(host) {
+			return aoni.AlpnH3
+		}
+
+		return aoni.AlpnH2
 	}
 
-	return aoni.AlpnH2
+	if cfg != nil {
+		if len(cfg.Fingerprint.HeaderOrder) > 0 ||
+			cfg.Fingerprint.H2Settings != nil ||
+			cfg.Fingerprint.BrowserID != aoni.BrowserNone {
+			return aoni.AlpnH2
+		}
+	}
+
+	return aoni.AlpnHTTP
 }
 
 func (c *Client) applyEngineConfig() {

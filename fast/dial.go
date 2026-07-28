@@ -66,7 +66,6 @@ func (d *fastDialer) DialContext(ctx context.Context, network, addr string) (net
 
 	if isTLS {
 		utlsOpts := d.resolveRTLSOptions(ctx, host)
-		// Для fasthttp принудительно ограничиваем ALPN до http/1.1
 		if len(utlsOpts.ALPNOverride) == 0 {
 			utlsOpts.ALPNOverride = []string{aoni.AlpnHTTP}
 		}
@@ -316,7 +315,7 @@ func (d *fastDialer) resolveRTLSOptions(ctx context.Context, host string) netdia
 
 	serverName := host
 	if net.ParseIP(host) != nil {
-		serverName = ""
+		serverName = host
 		if reqCfg != nil && reqCfg.TargetHost != "" && net.ParseIP(reqCfg.TargetHost) == nil {
 			serverName = reqCfg.TargetHost
 		} else if d.config.Defaults.BaseURL != nil && d.config.Defaults.BaseURL.Hostname() != "" && net.ParseIP(d.config.Defaults.BaseURL.Hostname()) == nil {

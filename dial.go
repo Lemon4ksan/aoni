@@ -251,7 +251,7 @@ func (c *Client) resolveRTLSOptions(ctx context.Context, host string) netdial.RT
 
 	serverName := host
 	if net.ParseIP(host) != nil {
-		serverName = ""
+		serverName = host
 		if reqCfg != nil && reqCfg.TargetHost != "" && net.ParseIP(reqCfg.TargetHost) == nil {
 			serverName = reqCfg.TargetHost
 		} else if c.defaults.BaseURL != nil && c.defaults.BaseURL.Hostname() != "" && net.ParseIP(c.defaults.BaseURL.Hostname()) == nil {
@@ -343,7 +343,7 @@ func setupStandardTLSConfig(base *tls.Config, dialOpts netdial.DialOptions, host
 		tlsCfg = &tls.Config{}
 	}
 
-	if tlsCfg.ServerName == "" && net.ParseIP(host) == nil {
+	if tlsCfg.ServerName == "" && host != "" {
 		cloned := tlsCfg.Clone()
 		cloned.ServerName = host
 		tlsCfg = cloned
