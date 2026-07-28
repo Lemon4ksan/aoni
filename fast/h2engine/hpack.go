@@ -44,7 +44,7 @@ func ReleaseHeaderField(hf *HeaderField) {
 func (hf *HeaderField) String() string     { return string(hf.AppendBytes(nil)) }
 func (hf *HeaderField) Empty() bool        { return len(hf.key) == 0 && len(hf.value) == 0 }
 func (hf *HeaderField) Reset()             { hf.key = hf.key[:0]; hf.value = hf.value[:0]; hf.sensible = false }
-func (hf *HeaderField) Size() uint32       { return uint32(len(hf.key) + len(hf.value) + 32) }
+func (hf *HeaderField) Size() uint32       { return uint32(len(hf.key) + len(hf.value) + 32) } //nolint:gosec
 func (hf *HeaderField) Key() string        { return string(hf.key) }
 func (hf *HeaderField) Value() string      { return string(hf.value) }
 func (hf *HeaderField) KeyBytes() []byte   { return hf.key }
@@ -173,7 +173,7 @@ func (hp *HPACK) peek(n uint64) *HeaderField {
 		return staticTable[idx]
 	}
 
-	idx := len(hp.dynamic) - int(n-maxIndex) - 1
+	idx := len(hp.dynamic) - int(n-maxIndex) - 1 //nolint:gosec
 	if idx < 0 || idx >= len(hp.dynamic) {
 		return nil
 	}
@@ -223,7 +223,7 @@ func (hp *HPACK) Next(hf *HeaderField, b []byte) ([]byte, error) {
 			var n uint64
 
 			b, n = readInt(5, b)
-			hp.maxTableSize = uint32(n)
+			hp.maxTableSize = uint32(n) //nolint:gosec
 			hp.shrink()
 		}
 	}
@@ -356,24 +356,30 @@ func (hp *HPACK) AppendHeader(dst []byte, hf *HeaderField, store bool) []byte {
 	bits := uint8(6)
 
 	index, fullMatch := hp.search(hf)
-	if hf.sensible {
+	switch {
+	case hf.sensible:
 		c = false
+
 		dst = append(dst, 16)
-	} else if index > 0 {
-		if fullMatch {
+	case index > 0:
+		switch {
+		case fullMatch:
 			bits, dst = 7, append(dst, indexByte)
-		} else if !store {
+		case !store:
 			bits, dst = 4, append(dst, 0)
-		} else {
+		default:
 			dst = append(dst, literalByte)
+
 			if index < maxIndex {
 				hp.addDynamic(hf)
 			}
 		}
-	} else if !store || hp.DisableDynamicTable {
+
+	case !store || hp.DisableDynamicTable:
 		dst = append(dst, 0)
-	} else {
-		dst = append(dst, literalByte)
+	case index == 0:
+		dst = appendString(dst, hf.key, c)
+
 		hp.addDynamic(hf)
 	}
 
@@ -426,12 +432,12 @@ func appendInt(dst []byte, bits uint8, index uint64) []byte {
 
 	b0 := uint64(1<<bits - 1)
 
-	if index <= b0 {
+	if index <= b0 { //nolint:gosec
 		dst[len(dst)-1] |= byte(index)
 		return dst
 	}
 
-	dst[len(dst)-1] |= byte(b0)
+	dst[len(dst)-1] |= byte(b0) //nolint:gosec
 	index -= b0
 
 	for index != 0 {

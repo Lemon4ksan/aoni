@@ -26,13 +26,13 @@ import (
 
 var (
 	// ErrUTLSHandshakeFailed is returned when the uTLS handshake fails.
-	ErrUTLSHandshakeFailed     = errors.New("netdial: uTLS handshake failed")
+	ErrUTLSHandshakeFailed = errors.New("netdial: uTLS handshake failed")
 	// ErrCertificatePinning is returned when the certificate pinning validation fails.
-	ErrCertificatePinning      = errors.New("netdial: certificate pinning validation failed")
+	ErrCertificatePinning = errors.New("netdial: certificate pinning validation failed")
 	// ErrNoCertificatesPresented is returned when no certificates are presented by the peer.
 	ErrNoCertificatesPresented = errors.New("netdial: no certificates presented by peer")
 	// ErrInvalidPinFormat is returned when the pin format is invalid.
-	ErrInvalidPinFormat        = errors.New("netdial: invalid pin format")
+	ErrInvalidPinFormat = errors.New("netdial: invalid pin format")
 )
 
 // ClientHelloSpecProvider is an interface for providing a utls.ClientHelloSpec.

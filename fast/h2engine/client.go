@@ -130,7 +130,11 @@ func (cl *Client) Do(ctx context.Context, req *fasthttp.Request, res *fasthttp.R
 }
 
 // DoWithTrailers executes req over an available HTTP/2 stream and returns captured response trailers.
-func (cl *Client) DoWithTrailers(ctx context.Context, req *fasthttp.Request, res *fasthttp.Response) (map[string][]string, error) {
+func (cl *Client) DoWithTrailers(
+	ctx context.Context,
+	req *fasthttp.Request,
+	res *fasthttp.Response,
+) (map[string][]string, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
@@ -147,7 +151,11 @@ func (cl *Client) DoWithTrailers(ctx context.Context, req *fasthttp.Request, res
 	return nil, ErrGoAwayRetryable
 }
 
-func (cl *Client) doOnceWithTrailers(ctx context.Context, req *fasthttp.Request, res *fasthttp.Response) (map[string][]string, error) {
+func (cl *Client) doOnceWithTrailers(
+	ctx context.Context,
+	req *fasthttp.Request,
+	res *fasthttp.Response,
+) (map[string][]string, error) {
 	conn, err := cl.selectConn(ctx)
 	if err != nil {
 		return nil, err

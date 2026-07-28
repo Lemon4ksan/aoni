@@ -53,7 +53,7 @@ linters:
     revive:
       rules:
         - name: exported
-          severity: warning
+          disabled: true
 
     wsl_v5:
       default: default
@@ -73,14 +73,35 @@ linters:
       - common-false-positives
       - std-error-handling
     rules:
-      # Ignoring the lack of comments in tests
+      - linters: [errcheck, revive, staticcheck, protogetter]
+        path: .*(pb\.go|generated\.go)
+
+      - linters: [revive]
+        text: "exported: (exported|comment on exported|should have comment)"
+
+      - linters: [gosec]
+        text: "G103:"
+
+      - linters: [gosec]
+        text: "G404:"
+
+      - linters: [gosec]
+        text: "G115:"
+
+      - linters: [gosec]
+        text: "G306:|G301:"
+
       - linters: [revive]
         path: "_test\\.go"
         text: "exported: (exported|comment on exported)"
 
-      # Ignore most linters in tests
       - linters: [gosec, noctx, bodyclose, errcheck, prealloc]
         path: "_test\\.go"
 
+      - linters: [gosec]
+        text: "G703:|G706:"
+        path: "(cmd|examples)/.*"
+
     paths:
-      - "examples"
+      - "examples/.*"
+      - "tests/.*"

@@ -36,15 +36,7 @@ import (
 	"github.com/lemon4ksan/aoni/netutil/fragment"
 )
 
-var (
-	requestConfigPool = sync.Pool{
-		New: func() any {
-			return &aoni.RequestConfig{}
-		},
-	}
-	defaultAcceptEncoding = []string{"zstd, br, gzip"}
-	fastZstdDecoder, _    = zstd.NewReader(nil)
-)
+var fastZstdDecoder, _ = zstd.NewReader(nil)
 
 // HTTPDoer executes an HTTP request transaction.
 type HTTPDoer interface {
@@ -142,7 +134,7 @@ func (c *Client) Request(
 			return nil, err
 		}
 
-		resp, err := handler.RoundTrip(stdReq)
+		resp, err := handler.RoundTrip(stdReq) //nolint:bodyclose
 		if err != nil {
 			return nil, err
 		}
@@ -175,11 +167,13 @@ func (c *Client) Request(
 			if h == "" {
 				h = hostStr
 			}
+
 			reqCfg.TargetHost = h
 		}
 	}
 
 	isAutoAE := len(fastReq.Header.Peek("Accept-Encoding")) == 0
+
 	c.applyDefaultHeaders(reqAdapter)
 	c.applyModifiers(reqAdapter, mods)
 
@@ -244,6 +238,7 @@ func (c *Client) Do(req aoni.Request) (aoni.Response, error) {
 			if h == "" {
 				h = hostStr
 			}
+
 			reqCfg.TargetHost = h
 		}
 	}
@@ -254,6 +249,7 @@ func (c *Client) Do(req aoni.Request) (aoni.Response, error) {
 	if err != nil {
 		if !autoReleased {
 			fasthttp.ReleaseResponse(fastResp)
+
 			if !isFastReq {
 				fasthttp.ReleaseRequest(fastReq)
 			}
@@ -339,6 +335,7 @@ func (c *Client) dispatchPipeline(
 	reqAdapter *Request,
 ) (trailers map[string][]string, err error, autoReleased bool) {
 	hasTelemetry := c.config.Defaults.Inspector != nil || c.config.Defaults.Pipeline.HAR != nil
+
 	var startTime time.Time
 	if hasTelemetry {
 		startTime = time.Now()
@@ -392,6 +389,7 @@ func decompressFastResponse(resp *fasthttp.Response) {
 	}
 
 	encoding := strings.ToLower(bytesconv.B2S(encodingBytes))
+
 	body := resp.Body()
 	if len(body) == 0 {
 		return
@@ -434,8 +432,10 @@ func peekHeaderCaseInsensitiveFast(resp *fasthttp.Response, key string) []byte {
 			found = v
 			return false
 		}
+
 		return true
 	})
+
 	return found
 }
 
@@ -460,7 +460,7 @@ func (c *Client) recordTelemetry(
 
 	var httpResp *http.Response
 	if fastResp != nil {
-		httpResp = toHTTPResponse(fastReq, fastResp)
+		httpResp = toHTTPResponse(fastReq, fastResp) //nolint:bodyclose
 	} else {
 		reqMethod := string(fastReq.Header.Method())
 		reqURI := string(fastReq.URI().FullURI())
@@ -500,6 +500,7 @@ func (c *Client) executeWithHedging(
 	}
 
 	resultsCh := make(chan hedgeResult, 2)
+
 	hedgeCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
@@ -522,12 +523,14 @@ func (c *Client) executeWithHedging(
 		fasthttp.ReleaseResponse(res.resp)
 
 		if !req2Started {
-			req2Started = true
+			req2Started = true //nolint:ineffassign
+
 			c.launchHedgedAttempt(hedgeCtx, fastReq, reqAdapter, resultsCh)
 		}
 
 	case <-timer.C:
-		req2Started = true
+		req2Started = true //nolint:ineffassign
+
 		c.launchHedgedAttempt(hedgeCtx, fastReq, reqAdapter, resultsCh)
 	}
 
@@ -581,6 +584,7 @@ func (c *Client) applyCookies(ctx context.Context, req *fasthttp.Request) {
 	if pJar, ok := jar.(*cookie.ProxyIsolatedJar); ok {
 		jar = pJar.GetJar(ctx)
 	}
+
 	if jar == nil {
 		return
 	}
@@ -600,6 +604,7 @@ func (c *Client) applyCookies(ctx context.Context, req *fasthttp.Request) {
 		if i > 0 {
 			cookieHeader.WriteString("; ")
 		}
+
 		cookieHeader.WriteString(c.Name)
 		cookieHeader.WriteByte('=')
 		cookieHeader.WriteString(c.Value)
@@ -621,6 +626,7 @@ func (c *Client) captureCookies(ctx context.Context, req *fasthttp.Request, resp
 	if pJar, ok := jar.(*cookie.ProxyIsolatedJar); ok {
 		jar = pJar.GetJar(ctx)
 	}
+
 	if jar == nil {
 		return
 	}
@@ -635,6 +641,7 @@ func (c *Client) captureCookies(ctx context.Context, req *fasthttp.Request, resp
 		if cookie := parseCookie(key, value); cookie != nil {
 			cookies = append(cookies, cookie)
 		}
+
 		return true
 	})
 
@@ -648,6 +655,7 @@ func parseCookie(key, value []byte) *http.Cookie {
 	header.Add("Set-Cookie", string(key)+"="+string(value))
 
 	fakeResp := &http.Response{Header: header}
+
 	parsed := fakeResp.Cookies()
 	if len(parsed) > 0 {
 		return parsed[0]
@@ -720,7 +728,7 @@ func (c *Client) validateResponse(fastReq *fasthttp.Request, fastResp *fasthttp.
 		return nil
 	}
 
-	httpResp := toHTTPResponse(fastReq, fastResp)
+	httpResp := toHTTPResponse(fastReq, fastResp) //nolint:bodyclose
 
 	return validator(httpResp)
 }
@@ -731,12 +739,14 @@ func (c *Client) handleWAFChallenge(
 	fastResp *fasthttp.Response,
 ) error {
 	detector := c.config.Defaults.ChallengeDetector
+
 	solver := c.config.Defaults.ChallengeSolver
 	if detector == nil || solver == nil {
 		return nil
 	}
 
-	httpResp := toHTTPResponse(fastReq, fastResp)
+	httpResp := toHTTPResponse(fastReq, fastResp) //nolint:bodyclose
+
 	isChallenge, err := detector(httpResp)
 	if !isChallenge {
 		return nil
@@ -761,7 +771,7 @@ func (c *Client) handleWAFChallenge(
 func toHTTPResponse(fastReq *fasthttp.Request, fastResp *fasthttp.Response) *http.Response {
 	reqMethod := string(fastReq.Header.Method())
 	reqURI := string(fastReq.URI().FullURI())
-	stdReq, _ := http.NewRequest(reqMethod, reqURI, nil)
+	stdReq, _ := http.NewRequest(reqMethod, reqURI, nil) //nolint:noctx
 
 	httpResp := &http.Response{
 		StatusCode: fastResp.StatusCode(),
@@ -789,10 +799,12 @@ func (c *Client) executeWithRedirects(
 	if redirectLimit == 0 {
 		c.applyCookies(ctx, fastReq)
 		extractUserInfoAndSetAuth(fastReq)
+
 		trailers, err, autoReleased = c.dispatchSingleRequest(ctx, fastReq, fastResp)
 		if err == nil {
 			c.captureCookies(ctx, fastReq, fastResp)
 		}
+
 		return trailers, err, autoReleased
 	}
 
@@ -833,6 +845,7 @@ func (c *Client) executeWithRedirects(
 		}
 
 		nextURI := fasthttp.AcquireURI()
+
 		fastReq.URI().UpdateBytes(location)
 		fastReq.URI().CopyTo(nextURI)
 
@@ -976,8 +989,8 @@ func (c *Client) dispatchSingleRequest(
 
 	if alpnMode == aoni.AlpnH3 {
 		h3 := c.getH3Client()
-		tr, err := h3.Do(ctx, fastReq, fastResp, c.config.Fingerprint.HeaderOrder)
 
+		tr, err := h3.Do(ctx, fastReq, fastResp, c.config.Fingerprint.HeaderOrder)
 		if err == nil {
 			return tr, nil, false
 		}
@@ -990,12 +1003,13 @@ func (c *Client) dispatchSingleRequest(
 
 	if alpnMode == aoni.AlpnH2 {
 		h2Cl := c.getH2Client(host)
-		tr, err := h2Cl.DoWithTrailers(ctx, fastReq, fastResp)
 
+		tr, err := h2Cl.DoWithTrailers(ctx, fastReq, fastResp)
 		if err == nil {
 			if altSvc := fastResp.Header.Peek("Alt-Svc"); len(altSvc) > 0 {
 				globalAltSvcCache.Record(host, string(altSvc))
 			}
+
 			return tr, nil, false
 		}
 
@@ -1007,14 +1021,18 @@ func (c *Client) dispatchSingleRequest(
 
 	if err != nil && isH2FrameOnH1Error(err) {
 		fastResp.Reset()
+
 		h2Cl := c.getH2Client(host)
+
 		tr, h2Err := h2Cl.DoWithTrailers(ctx, fastReq, fastResp)
 		if h2Err == nil {
 			if altSvc := fastResp.Header.Peek("Alt-Svc"); len(altSvc) > 0 {
 				globalAltSvcCache.Record(host, string(altSvc))
 			}
+
 			return tr, nil, false
 		}
+
 		err = h2Err
 	}
 
@@ -1029,7 +1047,9 @@ func isH2FrameOnH1Error(err error) bool {
 	if err == nil {
 		return false
 	}
+
 	errStr := err.Error()
+
 	return strings.Contains(errStr, "reading response headers") ||
 		strings.Contains(errStr, "\x00\x00\x12\x04") ||
 		strings.Contains(errStr, "\x00\x00\x04")
@@ -1058,11 +1078,6 @@ func isRedirectStatus(code int) bool {
 		code == fasthttp.StatusSeeOther ||
 		code == fasthttp.StatusTemporaryRedirect ||
 		code == fasthttp.StatusPermanentRedirect
-}
-
-func isCrossOriginURI(u1, u2 *fasthttp.URI) bool {
-	return !bytes.EqualFold(u1.Scheme(), []byte("https")) ||
-		!bytes.EqualFold(u1.Host(), u2.Host())
 }
 
 func scrubSensitiveHeaders(req *fasthttp.Request, currentURI, nextURI *fasthttp.URI) {
@@ -1123,7 +1138,7 @@ func applyRedirectMethodAndBody(statusCode int, req *fasthttp.Request, reqAdapte
 func (c *Client) getH3Client() *h3engine.Client {
 	c.h3Once.Do(func() {
 		tlsCfg := &tls.Config{
-			InsecureSkipVerify: c.config.Engine.InsecureSkipVerify,
+			InsecureSkipVerify: c.config.Engine.InsecureSkipVerify, //nolint:gosec
 		}
 
 		if spec := c.config.Fingerprint.TLSQUICClientHelloSpec; spec != nil && len(spec.CipherSuites) > 0 {
@@ -1189,6 +1204,7 @@ func resolveALPNMode(ctx context.Context, cfg *aoni.Config, fastReq *fasthttp.Re
 	}
 
 	host := string(fastReq.URI().Host())
+
 	reqCfg := aoni.GetRequestConfig(ctx)
 	if reqCfg != nil {
 		if len(reqCfg.ALPNOverride) > 0 {
@@ -1213,7 +1229,7 @@ func (c *Client) applyEngineConfig() {
 	}
 
 	if c.config.Engine.InsecureSkipVerify {
-		c.engine.TLSConfig = &tls.Config{InsecureSkipVerify: true}
+		c.engine.TLSConfig = &tls.Config{InsecureSkipVerify: true} //nolint:gosec
 	}
 
 	c.engine.DisableHeaderNamesNormalizing = true
@@ -1274,9 +1290,11 @@ func (c *Client) executeFastHTTP(
 		if !hasHostHeader {
 			req.Header.SetHostBytes(origHost)
 		}
+
 		if !strings.Contains(hostStr, ":") {
 			req.URI().SetHost(hostStr + ":443")
 		}
+
 		req.URI().SetScheme("http")
 	}
 
@@ -1284,6 +1302,7 @@ func (c *Client) executeFastHTTP(
 		if isHTTPS {
 			req.URI().SetScheme("https")
 			req.URI().SetHostBytes(origHost)
+
 			if !hasHostHeader {
 				req.Header.Del("Host")
 			}
@@ -1324,13 +1343,16 @@ func (c *Client) executeFastHTTP(
 	case <-ctx.Done():
 		go func() {
 			<-done
+
 			if isHTTPS {
 				req.URI().SetScheme("https")
 				req.URI().SetHostBytes(origHost)
+
 				if !hasHostHeader {
 					req.Header.Del("Host")
 				}
 			}
+
 			fasthttp.ReleaseRequest(req)
 			fasthttp.ReleaseResponse(resp)
 		}()
@@ -1376,6 +1398,7 @@ func (c *Client) resolveTargetURL(req aoni.Request, path string) error {
 	if c.config.Defaults.BaseURL != nil && c.config.Defaults.BaseURL.Host != "" {
 		base := c.config.Defaults.BaseURL
 		basePath := strings.TrimSuffix(base.Path, "/")
+
 		cleanPath := path
 		if cleanPath != "" && cleanPath[0] != '/' {
 			cleanPath = "/" + cleanPath
@@ -1383,6 +1406,7 @@ func (c *Client) resolveTargetURL(req aoni.Request, path string) error {
 
 		fullURL := base.Scheme + "://" + base.Host + basePath + cleanPath
 		req.SetURL(fullURL)
+
 		return nil
 	}
 
@@ -1391,5 +1415,6 @@ func (c *Client) resolveTargetURL(req aoni.Request, path string) error {
 	}
 
 	req.SetURL(path)
+
 	return nil
 }

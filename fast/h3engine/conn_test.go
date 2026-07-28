@@ -6,6 +6,7 @@ package h3engine
 
 import (
 	"bytes"
+	"errors"
 	"io"
 	"testing"
 
@@ -59,7 +60,7 @@ func TestSendRequestH3Framing(t *testing.T) {
 
 	for {
 		hf, err := decodeFn()
-		if err == io.EOF {
+		if errors.Is(err, io.EOF) {
 			break
 		}
 
@@ -118,7 +119,7 @@ func TestReadResponseH3Framing(t *testing.T) {
 
 	for {
 		fType, pLen, err := ReadFrameHeader(r)
-		if err == io.EOF {
+		if errors.Is(err, io.EOF) {
 			break
 		}
 

@@ -6,13 +6,15 @@ package h3engine
 
 import (
 	"bytes"
+	"errors"
 	"io"
 	"strconv"
 	"sync"
 
-	"github.com/lemon4ksan/aoni/internal/bytesconv"
 	"github.com/quic-go/qpack"
 	"github.com/valyala/fasthttp"
+
+	"github.com/lemon4ksan/aoni/internal/bytesconv"
 )
 
 var bufferPool = sync.Pool{
@@ -45,21 +47,22 @@ func (q *QPACKCodec) WriteDecoderTable(_ []byte) error {
 // strictly maintaining the specified orderedKeys sequence for Anti-DPI fingerprinting.
 func (q *QPACKCodec) EncodeRequestHeaders(w io.Writer, req *fasthttp.Request, orderedKeys []string) error {
 	buf := bufferPool.Get().(*bytes.Buffer)
+
 	buf.Reset()
 	defer bufferPool.Put(buf)
 
 	enc := qpack.NewEncoder(buf)
 
-	enc.WriteField(qpack.HeaderField{Name: ":method", Value: string(req.Header.Method())})
-	enc.WriteField(qpack.HeaderField{Name: ":scheme", Value: string(req.URI().Scheme())})
-	enc.WriteField(qpack.HeaderField{Name: ":authority", Value: string(req.URI().Host())})
-	enc.WriteField(qpack.HeaderField{Name: ":path", Value: string(req.URI().RequestURI())})
+	_ = enc.WriteField(qpack.HeaderField{Name: ":method", Value: string(req.Header.Method())})
+	_ = enc.WriteField(qpack.HeaderField{Name: ":scheme", Value: string(req.URI().Scheme())})
+	_ = enc.WriteField(qpack.HeaderField{Name: ":authority", Value: string(req.URI().Host())})
+	_ = enc.WriteField(qpack.HeaderField{Name: ":path", Value: string(req.URI().RequestURI())})
 
 	if len(orderedKeys) > 0 {
 		q.encodeOrderedHeaders(enc, req, orderedKeys)
 	} else {
 		req.Header.All()(func(k, v []byte) bool {
-			enc.WriteField(qpack.HeaderField{Name: toLowerCopy(k), Value: string(v)})
+			_ = enc.WriteField(qpack.HeaderField{Name: toLowerCopy(k), Value: string(v)})
 			return true
 		})
 	}
@@ -71,6 +74,7 @@ func (q *QPACKCodec) EncodeRequestHeaders(w io.Writer, req *fasthttp.Request, or
 
 func (q *QPACKCodec) encodeOrderedHeaders(enc *qpack.Encoder, req *fasthttp.Request, orderedKeys []string) {
 	var visitedBits uint64
+
 	numOrdered := min(len(orderedKeys), 64)
 
 	for i := 0; i < numOrdered; i++ {
@@ -81,7 +85,8 @@ func (q *QPACKCodec) encodeOrderedHeaders(enc *qpack.Encoder, req *fasthttp.Requ
 
 		val := req.Header.Peek(key)
 		if len(val) > 0 {
-			enc.WriteField(qpack.HeaderField{Name: key, Value: bytesconv.B2S(val)})
+			_ = enc.WriteField(qpack.HeaderField{Name: key, Value: bytesconv.B2S(val)})
+
 			visitedBits |= (1 << i)
 		}
 	}
@@ -95,7 +100,7 @@ func (q *QPACKCodec) encodeOrderedHeaders(enc *qpack.Encoder, req *fasthttp.Requ
 			}
 		}
 
-		enc.WriteField(qpack.HeaderField{
+		_ = enc.WriteField(qpack.HeaderField{
 			Name:  bytesconv.B2S(bytesconv.AppendToLower(nil, k)),
 			Value: bytesconv.B2S(v),
 		})
@@ -116,7 +121,7 @@ func (q *QPACKCodec) DecodeResponseHeaders(headerBlock []byte, res *fasthttp.Res
 
 	for {
 		hf, err := decodeFn()
-		if err == io.EOF {
+		if errors.Is(err, io.EOF) {
 			break
 		}
 
@@ -169,7 +174,7 @@ func (q *QPACKCodec) DecodeResponseTrailers(headerBlock []byte) (map[string][]st
 
 	for {
 		hf, err := decodeFn()
-		if err == io.EOF {
+		if errors.Is(err, io.EOF) {
 			break
 		}
 

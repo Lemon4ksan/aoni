@@ -12,6 +12,7 @@ func TestFastRequestAdapter(t *testing.T) {
 	req := NewRequest(nil)
 
 	req.SetMethod("POST")
+
 	if req.Method() != "POST" {
 		t.Errorf("got method %q, want POST", req.Method())
 	}

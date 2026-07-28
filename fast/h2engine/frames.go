@@ -89,6 +89,7 @@ func (d *Data) Serialize(fr *FrameHeader) {
 
 	if d.hasPadding {
 		fr.SetFlags(fr.Flags().Add(FlagPadded))
+
 		d.b = addPadding(d.b)
 	}
 
@@ -217,6 +218,7 @@ func (h *Headers) Serialize(frh *FrameHeader) {
 
 	if h.priority {
 		frh.SetFlags(frh.Flags().Add(FlagPriority))
+
 		h.rawHeaders = append(h.rawHeaders, 0, 0, 0, 0, 0)
 		copy(h.rawHeaders[5:], h.rawHeaders)
 		uint32ToBytes(h.rawHeaders[0:4], frh.stream)
@@ -225,6 +227,7 @@ func (h *Headers) Serialize(frh *FrameHeader) {
 
 	if h.hasPadding {
 		frh.SetFlags(frh.Flags().Add(FlagPadded))
+
 		h.rawHeaders = addPadding(h.rawHeaders)
 	}
 
@@ -399,6 +402,6 @@ func (wu *WindowUpdate) Deserialize(fr *FrameHeader) error {
 }
 
 func (wu *WindowUpdate) Serialize(fr *FrameHeader) {
-	fr.payload = appendUint32Bytes(fr.payload[:0], uint32(wu.increment))
+	fr.payload = appendUint32Bytes(fr.payload[:0], uint32(wu.increment)) //nolint:gosec
 	fr.length = 4
 }

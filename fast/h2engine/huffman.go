@@ -31,7 +31,7 @@ func HuffmanEncode(dst, src []byte) []byte {
 
 		for length >= 8 {
 			length -= 8
-			dst = append(dst, byte(code>>length))
+			dst = append(dst, byte(code>>length)) //nolint:gosec
 		}
 	}
 
@@ -58,7 +58,7 @@ func HuffmanDecode(dst, src []byte) []byte {
 		bits += 8
 
 		for bits >= 8 {
-			root = root.sub[byte(cum>>(bits-8))]
+			root = root.sub[byte(cum>>(bits-8))] //nolint:gosec
 			if root == nil {
 				return dst
 			}
@@ -74,7 +74,7 @@ func HuffmanDecode(dst, src []byte) []byte {
 	}
 
 	for bits > 0 {
-		root = root.sub[byte(cum<<(8-bits))]
+		root = root.sub[byte(cum<<(8-bits))] //nolint:gosec
 		if root == nil || root.sub != nil || root.codeLen > bits {
 			break
 		}
@@ -105,7 +105,7 @@ type huffmanNode struct {
 func (node *huffmanNode) add(sym byte, code uint32, length uint8) {
 	for length > 8 {
 		length -= 8
-		i := uint8(code >> length)
+		i := uint8(code >> length) //nolint:gosec
 
 		if node.sub[i] == nil {
 			node.sub[i] = &huffmanNode{sub: make([]*huffmanNode, 256)}

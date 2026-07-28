@@ -97,6 +97,7 @@ func (st *Settings) applySetting(key uint16, val uint32) error {
 		}
 
 		st.enablePush = val != 0
+
 	case MaxConcurrentStreams:
 		st.maxStreams = val
 	case MaxWindowSize:
@@ -105,12 +106,14 @@ func (st *Settings) applySetting(key uint16, val uint32) error {
 		}
 
 		st.windowSize = val
+
 	case MaxFrameSize:
 		if val < 1<<14 || val > 1<<24-1 {
 			return NewGoAwayError(ProtocolError, "wrong value for SETTINGS_MAX_FRAME_SIZE")
 		}
 
 		st.frameSize = val
+
 	case MaxHeaderListSize:
 		st.headerSize = val
 	}
@@ -138,8 +141,8 @@ func (st *Settings) appendSetting(key uint16, val uint32) {
 	}
 
 	st.rawSettings = append(st.rawSettings,
-		byte(key>>8), byte(key),
-		byte(val>>24), byte(val>>16), byte(val>>8), byte(val),
+		byte(key>>8), byte(key), //nolint:gosec
+		byte(val>>24), byte(val>>16), byte(val>>8), byte(val), //nolint:gosec
 	)
 }
 

@@ -52,6 +52,7 @@ func runMockH2Server(t *testing.T, serverConn net.Conn, handler func(req *fastht
 	}
 
 	_ = bw.Flush()
+
 	ReleaseFrameHeader(ackFrame)
 
 	dec := AcquireHPACK()
@@ -84,11 +85,12 @@ func runMockH2Server(t *testing.T, serverConn net.Conn, handler func(req *fastht
 					break
 				}
 
-				if !hf.IsPseudo() {
+				switch {
+				case !hf.IsPseudo():
 					req.Header.AddBytesKV(hf.KeyBytes(), hf.ValueBytes())
-				} else if bytes.Equal(hf.KeyBytes(), StringMethod) {
+				case bytes.Equal(hf.KeyBytes(), StringMethod):
 					req.Header.SetMethodBytes(hf.ValueBytes())
-				} else if bytes.Equal(hf.KeyBytes(), StringPath) {
+				case bytes.Equal(hf.KeyBytes(), StringPath):
 					req.Header.SetRequestURIBytes(hf.ValueBytes())
 				}
 
@@ -306,7 +308,8 @@ func TestOrderedHeadersSequenceOnWire(t *testing.T) {
 		t.Fatalf("expected at least 3 headers, got %d: %v", len(capturedHeaders), capturedHeaders)
 	}
 
-	if capturedHeaders[0] != "accept-language" || capturedHeaders[1] != "user-agent" || capturedHeaders[2] != "x-custom-a" {
+	if capturedHeaders[0] != "accept-language" || capturedHeaders[1] != "user-agent" ||
+		capturedHeaders[2] != "x-custom-a" {
 		t.Fatalf("headers order sequence violated: got %v, want %v", capturedHeaders, orderedKeys)
 	}
 }

@@ -6,15 +6,17 @@ package fast
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"testing"
 
+	"github.com/valyala/fasthttp"
+
 	"github.com/lemon4ksan/aoni"
 	"github.com/lemon4ksan/aoni/mod"
 	"github.com/lemon4ksan/aoni/option"
-	"github.com/valyala/fasthttp"
 )
 
 func TestResolveTargetURL(t *testing.T) {
@@ -41,7 +43,7 @@ func TestResolveTargetURL(t *testing.T) {
 	emptyClient := NewClient()
 	emptyReq := NewRequest(nil)
 
-	if err := emptyClient.resolveTargetURL(emptyReq, ""); err != ErrTargetURLEmpty {
+	if err := emptyClient.resolveTargetURL(emptyReq, ""); !errors.Is(err, ErrTargetURLEmpty) {
 		t.Fatalf("expected ErrTargetURLEmpty, got %v", err)
 	}
 }

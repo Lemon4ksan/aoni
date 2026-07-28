@@ -435,9 +435,9 @@ func NewPooledResponse(fastReq *fasthttp.Request, fastResp *fasthttp.Response) *
 		pr.Response = &Response{}
 	}
 
-	pr.Response.resp = fastResp
-	pr.Response.trailers = nil
-	pr.Response.uncompressed = false
+	pr.resp = fastResp
+	pr.trailers = nil
+	pr.uncompressed = false
 	pr.fastReq = fastReq
 	pr.fastResp = fastResp
 	pr.closed.Store(false)
@@ -458,9 +458,9 @@ func (r *PooledResponse) Close() error {
 			r.fastResp = nil
 		}
 
-		r.Response.resp = nil
-		r.Response.trailers = nil
-		r.Response.uncompressed = false
+		r.resp = nil
+		r.trailers = nil
+		r.uncompressed = false
 		pooledResponsePool.Put(r)
 	}
 

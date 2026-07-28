@@ -47,6 +47,7 @@ func (d *fastDialer) DialContext(ctx context.Context, network, addr string) (net
 	if port == "80" && !strings.Contains(addr, ":") {
 		port = "443"
 	}
+
 	targetAddr := net.JoinHostPort(host, port)
 
 	isTLS := port != "80" && (port == "443" || d.isTLSEnabled())
@@ -360,6 +361,7 @@ func (d *fastDialer) resolveRTLSOptions(ctx context.Context, host string) netdia
 
 func (d *fastDialer) isTLSEnabled() bool {
 	f := d.config.Fingerprint
+
 	return f.BrowserID != aoni.BrowserNone ||
 		f.TLSClientHelloID != nil ||
 		f.TLSClientHelloSpecProvider != nil

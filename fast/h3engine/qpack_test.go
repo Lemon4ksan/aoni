@@ -6,6 +6,7 @@ package h3engine
 
 import (
 	"bytes"
+	"errors"
 	"io"
 	"testing"
 
@@ -37,7 +38,7 @@ func TestQPACKEncodeRequestHeaders(t *testing.T) {
 
 	for {
 		hf, err := decodeFn()
-		if err == io.EOF {
+		if errors.Is(err, io.EOF) {
 			break
 		}
 
@@ -97,7 +98,7 @@ func TestQPACKOrderedHeadersSequence(t *testing.T) {
 
 	for {
 		hf, err := decodeFn()
-		if err == io.EOF {
+		if errors.Is(err, io.EOF) {
 			break
 		}
 
@@ -161,7 +162,7 @@ func TestQPACKDecodeResponseMissingStatus(t *testing.T) {
 	var respHeader fasthttp.ResponseHeader
 
 	_, err := codec.DecodeResponseHeaders(buf.Bytes(), &respHeader)
-	if err != ErrMissingStatusHeader {
+	if !errors.Is(err, ErrMissingStatusHeader) {
 		t.Fatalf("expected ErrMissingStatusHeader, got %v", err)
 	}
 }

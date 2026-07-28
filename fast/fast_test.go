@@ -212,6 +212,7 @@ func TestFastResponse_Contract(t *testing.T) {
 func BenchmarkFastAdapter_ZeroAllocations(b *testing.B) {
 	fastReq := fasthttp.AcquireRequest()
 	defer fasthttp.ReleaseRequest(fastReq)
+
 	fastReq.SetRequestURI("http://api.example.com/v1/users")
 
 	key := []byte("Authorization")
@@ -235,6 +236,7 @@ func TestFastClient_MiddlewareChain(t *testing.T) {
 	t.Parallel()
 
 	var attempts int
+
 	ln := fasthttputil.NewInmemoryListener()
 	srv := &fasthttp.Server{
 		Handler: func(ctx *fasthttp.RequestCtx) {
@@ -243,6 +245,7 @@ func TestFastClient_MiddlewareChain(t *testing.T) {
 				ctx.SetStatusCode(fasthttp.StatusServiceUnavailable)
 				return
 			}
+
 			ctx.SetStatusCode(fasthttp.StatusOK)
 			ctx.SetBodyString(`{"success":true}`)
 		},
@@ -277,6 +280,7 @@ func TestFastClient_MiddlewareChain(t *testing.T) {
 
 	resp, err := chained.Do(req)
 	require.NoError(t, err)
+
 	defer resp.Close()
 
 	assert.Equal(t, 200, resp.StatusCode())

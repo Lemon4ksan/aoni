@@ -78,6 +78,7 @@ func (s *Settings) Encode() []byte {
 	}
 
 	var frame []byte
+
 	frame = quicvarint.Append(frame, FrameTypeSettings)
 	frame = quicvarint.Append(frame, uint64(len(payload)))
 
@@ -85,7 +86,7 @@ func (s *Settings) Encode() []byte {
 }
 
 // ReadFrameHeader decodes the QUIC varint frame type and payload length from stream r.
-func ReadFrameHeader(r quicvarint.Reader) (frameType uint64, payloadLen uint64, err error) {
+func ReadFrameHeader(r quicvarint.Reader) (frameType, payloadLen uint64, err error) {
 	frameType, err = quicvarint.Read(r)
 	if err != nil {
 		return 0, 0, err

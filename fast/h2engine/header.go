@@ -56,6 +56,7 @@ func ReleaseFrameHeader(fr *FrameHeader) {
 	if fr.Body() != nil {
 		ReleaseFrame(fr.Body())
 	}
+
 	frameHeaderPool.Put(fr)
 }
 
@@ -80,15 +81,15 @@ func (f *FrameHeader) MaxLen() uint32            { return f.maxLen }
 
 func (f *FrameHeader) parseValues(header []byte) {
 	f.length = int(bytesToUint24(header[:3]))
-	f.kind = FrameType(header[3])
-	f.flags = FrameFlags(header[4])
+	f.kind = FrameType(header[3])   //nolint:gosec
+	f.flags = FrameFlags(header[4]) //nolint:gosec
 	f.stream = bytesToUint32(header[5:]) & (1<<31 - 1)
 }
 
 func (f *FrameHeader) parseHeader(header []byte) {
-	uint24ToBytes(header[:3], uint32(f.length))
-	header[3] = byte(f.kind)
-	header[4] = byte(f.flags)
+	uint24ToBytes(header[:3], uint32(f.length)) //nolint:gosec
+	header[3] = byte(f.kind)                    //nolint:gosec
+	header[4] = byte(f.flags)                   //nolint:gosec
 	uint32ToBytes(header[5:], f.stream)
 }
 
@@ -125,14 +126,18 @@ func (f *FrameHeader) readFrom(br *bufio.Reader) (int64, error) {
 	rn := int64(DefaultFrameSize)
 
 	f.parseValues(header)
+
 	if err = f.checkLen(); err != nil {
 		if f.length > 0 {
 			if _, err := io.CopyN(io.Discard, br, int64(f.length)); err != nil {
 				return 0, err
 			}
+
 			rn += int64(f.length)
 		}
+
 		f.fr = nil
+
 		return rn, nil
 	}
 
@@ -141,9 +146,12 @@ func (f *FrameHeader) readFrom(br *bufio.Reader) (int64, error) {
 			if _, err := io.CopyN(io.Discard, br, int64(f.length)); err != nil {
 				return 0, err
 			}
+
 			rn += int64(f.length)
 		}
+
 		f.fr = nil
+
 		return rn, nil
 	}
 

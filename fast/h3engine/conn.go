@@ -7,6 +7,7 @@ package h3engine
 import (
 	"bytes"
 	"context"
+	"errors"
 	"io"
 	"sync"
 
@@ -69,6 +70,7 @@ func (cc *ClientConn) setupControlStream() error {
 	}
 
 	var buf []byte
+
 	buf = quicvarint.Append(buf, StreamTypeControl)
 	buf = append(buf, cc.settings.Encode()...)
 
@@ -135,7 +137,7 @@ func (cc *ClientConn) readControlStream(r quicvarint.Reader) {
 			return
 		}
 
-		if _, err := io.CopyN(io.Discard, r, int64(payloadLen)); err != nil {
+		if _, err := io.CopyN(io.Discard, r, int64(payloadLen)); err != nil { //nolint:gosec
 			return
 		}
 	}
@@ -195,6 +197,7 @@ func (cc *ClientConn) sendRequest(str *quic.Stream, req *fasthttp.Request, heade
 	headerBlock := headerBuf.Bytes()
 
 	var frameHead []byte
+
 	frameHead = appendHeadersHeader(frameHead, uint64(len(headerBlock)))
 
 	if _, err := str.Write(frameHead); err != nil {
@@ -208,6 +211,7 @@ func (cc *ClientConn) sendRequest(str *quic.Stream, req *fasthttp.Request, heade
 	body := req.Body()
 	if len(body) > 0 {
 		var dataHead []byte
+
 		dataHead = appendDataHeader(dataHead, uint64(len(body)))
 
 		if _, err := str.Write(dataHead); err != nil {
@@ -222,13 +226,16 @@ func (cc *ClientConn) sendRequest(str *quic.Stream, req *fasthttp.Request, heade
 	return nil
 }
 
-func (cc *ClientConn) readResponse(str *quic.Stream, resp *fasthttp.Response) (trailers map[string][]string, err error) {
+func (cc *ClientConn) readResponse(
+	str *quic.Stream,
+	resp *fasthttp.Response,
+) (trailers map[string][]string, err error) {
 	r := quicvarint.NewReader(str)
 	headersParsed := false
 
 	for {
 		frameType, payloadLen, err := ReadFrameHeader(r)
-		if err == io.EOF {
+		if errors.Is(err, io.EOF) {
 			break
 		}
 
@@ -264,7 +271,7 @@ func (cc *ClientConn) readResponse(str *quic.Stream, resp *fasthttp.Response) (t
 				return nil, ErrFrameUnexpected
 			}
 
-			lr := io.LimitReader(r, int64(payloadLen))
+			lr := io.LimitReader(r, int64(payloadLen)) //nolint:gosec
 			buf := make([]byte, min(payloadLen, 32768))
 
 			for {
@@ -283,7 +290,7 @@ func (cc *ClientConn) readResponse(str *quic.Stream, resp *fasthttp.Response) (t
 			}
 
 		default:
-			if _, err := io.CopyN(io.Discard, r, int64(payloadLen)); err != nil {
+			if _, err := io.CopyN(io.Discard, r, int64(payloadLen)); err != nil { //nolint:gosec
 				return nil, err
 			}
 		}

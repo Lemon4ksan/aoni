@@ -79,6 +79,7 @@ func (c *Client) getConn(ctx context.Context, host string) (*ClientConn, error) 
 
 		delete(c.conns, host)
 	}
+
 	c.mutex.Unlock()
 
 	tlsConf := c.TLSConfig.Clone()
@@ -121,6 +122,7 @@ func (c *Client) Close() error {
 
 	for host, cc := range c.conns {
 		_ = cc.Close()
+
 		delete(c.conns, host)
 	}
 

@@ -19,10 +19,10 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/valyala/fasthttp"
 	"golang.org/x/sys/cpu"
 
 	"github.com/lemon4ksan/aoni/internal/bytesconv"
-	"github.com/valyala/fasthttp"
 )
 
 const maxConsecutiveControlFrames = 1000
@@ -57,7 +57,7 @@ type Conn struct {
 
 	// Hot atomic counters isolated on their own 64-byte cache lines
 	serverWindow             int32
-	serverStreamWindow       int32
+	serverStreamWindow       uint32
 	maxWindow                int32
 	currentWindow            int32
 	openStreams              int32
@@ -74,7 +74,6 @@ type Conn struct {
 	in           chan *Context
 	out          chan *FrameHeader
 	pingInterval time.Duration
-	unacks       int
 	closed       uint64
 	disableAcks  bool
 }
@@ -159,6 +158,7 @@ func (c *Conn) Handshake() error {
 
 	if fr.Type() != FrameSettings {
 		_ = c.c.Close()
+
 		ReleaseFrameHeader(fr)
 
 		return fmt.Errorf("h2engine: expected SETTINGS frame, got %s", fr.Type())
@@ -167,7 +167,7 @@ func (c *Conn) Handshake() error {
 	st := fr.Body().(*Settings)
 	if !st.IsAck() {
 		st.CopyTo(&c.serverS)
-		c.serverStreamWindow += int32(c.serverS.MaxWindowSize())
+		c.serverStreamWindow += c.serverS.MaxWindowSize()
 
 		if st.HeaderTableSize() <= defaultHeaderTableSize {
 			c.enc.SetMaxTableSize(st.HeaderTableSize())
@@ -199,7 +199,7 @@ func (c *Conn) sendSettingsAck() {
 
 // CanOpenStream reports whether the client can open new concurrent streams.
 func (c *Conn) CanOpenStream() bool {
-	return atomic.LoadInt32(&c.openStreams) < int32(c.serverS.maxStreams)
+	return atomic.LoadInt32(&c.openStreams) < int32(c.serverS.maxStreams) //nolint:gosec
 }
 
 // Closed reports whether the connection has been closed.
@@ -238,6 +238,7 @@ func (c *Conn) Close() error {
 			default:
 			}
 		}
+
 		return true
 	})
 
@@ -288,6 +289,7 @@ func (c *Conn) selectWriteEvent(pingChan <-chan time.Time) (bool, error) {
 
 		if err := c.writeRequest(ctx); err != nil {
 			ctx.Err <- err
+
 			if errors.Is(err, ErrNotAvailableStreams) {
 				return false, nil
 			}
@@ -339,7 +341,9 @@ func (c *Conn) recoverWriteLoop(lastErr *error) {
 
 func (c *Conn) finish(r *Context, stream uint32, err error) {
 	atomic.AddInt32(&c.openStreams, -1)
+
 	r.Err <- err
+
 	c.reqQueued.Delete(stream)
 	close(r.Err)
 }
@@ -412,7 +416,7 @@ func (c *Conn) writeRequest(ctx *Context) error {
 	ctx.StreamID = id
 	ctx.SetState(streamOpen)
 
-	initWin := int32(c.serverS.MaxWindowSize())
+	initWin := int32(c.serverS.MaxWindowSize()) //nolint:gosec
 	if initWin <= 0 {
 		initWin = 65535
 	}
@@ -502,8 +506,9 @@ func (c *Conn) writeData(fh *FrameHeader, ctx *Context, body []byte) error {
 			return err
 		}
 
-		atomic.AddInt32(&c.serverWindow, -int32(chunkSize))
-		atomic.AddInt32(&ctx.streamWindow, -int32(chunkSize))
+		atomic.AddInt32(&c.serverWindow, -int32(chunkSize))   //nolint:gosec
+		atomic.AddInt32(&ctx.streamWindow, -int32(chunkSize)) //nolint:gosec
+
 		offset = end
 	}
 
@@ -608,6 +613,7 @@ func (c *Conn) encodeRequestHeaders(h *Headers, req *fasthttp.Request) {
 			host = host[:idx]
 		}
 	}
+
 	if len(host) == 0 {
 		host = req.Header.Peek("Host")
 	}
@@ -630,6 +636,7 @@ func (c *Conn) encodeRequestHeaders(h *Headers, req *fasthttp.Request) {
 				customPseudo = append(customPseudo, k)
 			}
 		}
+
 		if len(customPseudo) == 4 {
 			pseudoOrder = customPseudo
 		}
@@ -646,6 +653,7 @@ func (c *Conn) encodeRequestHeaders(h *Headers, req *fasthttp.Request) {
 		case ":path":
 			hf.SetBytes(StringPath, path)
 		}
+
 		enc.AppendHeaderField(h, hf, true)
 	}
 
@@ -665,6 +673,7 @@ func (c *Conn) encodeRequestHeaders(h *Headers, req *fasthttp.Request) {
 
 			hf.SetBytes(toLowerCopy(k), v)
 			enc.AppendHeaderField(h, hf, false)
+
 			return true
 		})
 	}
@@ -677,9 +686,11 @@ func getFastHTTPCookieHeader(req *fasthttp.Request) []byte {
 		if sb.Len() > 0 {
 			sb.WriteString("; ")
 		}
+
 		sb.Write(key)
 		sb.WriteByte('=')
 		sb.Write(value)
+
 		return true
 	})
 
@@ -705,13 +716,16 @@ func peekHeaderCaseInsensitive(req *fasthttp.Request, key string) []byte {
 			found = v
 			return false
 		}
+
 		return true
 	})
+
 	return found
 }
 
 func (c *Conn) appendOrderedHeaders(h *Headers, req *fasthttp.Request, hf *HeaderField) {
 	var visitedBits uint64
+
 	numOrdered := min(len(c.orderedKeys), 64)
 
 	for i := 0; i < numOrdered; i++ {
@@ -734,6 +748,7 @@ func (c *Conn) appendOrderedHeaders(h *Headers, req *fasthttp.Request, hf *Heade
 			hf.SetKey(key)
 			hf.SetValueBytes(val)
 			c.enc.AppendHeaderField(h, hf, false)
+
 			visitedBits |= (1 << i)
 		}
 	}
@@ -797,6 +812,7 @@ func (c *Conn) handleConnectionFrame(fr *FrameHeader) error {
 				c.handleSettings(st)
 			}
 		}
+
 	case FrameWindowUpdate:
 		return c.handleWindowUpdate(fr)
 	case FramePing:
@@ -804,12 +820,11 @@ func (c *Conn) handleConnectionFrame(fr *FrameHeader) error {
 			ping := fr.Body().(*Ping)
 			if !ping.IsAck() {
 				c.handlePing(ping)
-			} else {
-				if c.pingUnacks > 0 {
-					c.pingUnacks--
-				}
+			} else if c.pingUnacks > 0 {
+				c.pingUnacks--
 			}
 		}
+
 	case FrameGoAway:
 		if fr.Body() != nil {
 			ga := fr.Body().(*GoAway)
@@ -822,7 +837,8 @@ func (c *Conn) handleConnectionFrame(fr *FrameHeader) error {
 
 func (c *Conn) handleWindowUpdate(fr *FrameHeader) error {
 	wu := fr.Body().(*WindowUpdate)
-	inc := int32(wu.Increment())
+
+	inc := int32(wu.Increment()) //nolint:gosec
 	if inc <= 0 {
 		return ErrInvalidWindowIncrement
 	}
@@ -891,6 +907,7 @@ func (c *Conn) handleGoAway(ga *GoAway) {
 
 		if streamID > lastStreamID {
 			c.reqQueued.Delete(streamID)
+
 			select {
 			case reqCtx.Err <- ErrGoAwayRetryable:
 			default:
@@ -924,7 +941,7 @@ func (c *Conn) writePing() error {
 
 func (c *Conn) handleSettings(st *Settings) {
 	st.CopyTo(&c.serverS)
-	c.serverStreamWindow += int32(c.serverS.MaxWindowSize())
+	c.serverStreamWindow += c.serverS.MaxWindowSize()
 	c.enc.SetMaxTableSize(st.HeaderTableSize())
 
 	fr := AcquireFrameHeader()
@@ -937,6 +954,7 @@ func (c *Conn) handleSettings(st *Settings) {
 
 func (c *Conn) handlePing(ping *Ping) {
 	fr := AcquireFrameHeader()
+
 	ping.SetAck(true)
 	fr.SetBody(ping)
 
@@ -968,6 +986,7 @@ func (c *Conn) readStream(fr *FrameHeader, reqCtx *Context) error {
 			reqCtx.Response.AppendBody(data.Data())
 
 			atomic.AddInt32(&reqCtx.streamWindow, -dataLen)
+
 			if atomic.LoadInt32(&reqCtx.streamWindow) < 3145728 {
 				inc := 6291456 - atomic.LoadInt32(&reqCtx.streamWindow)
 				atomic.StoreInt32(&reqCtx.streamWindow, 6291456)
@@ -986,6 +1005,7 @@ func (c *Conn) readStream(fr *FrameHeader, reqCtx *Context) error {
 		if rst, ok := fr.Body().(*RstStream); ok {
 			return rst.Error()
 		}
+
 		return ErrStreamClosed
 
 	case FrameGoAway:
@@ -1014,8 +1034,8 @@ func (c *Conn) readTrailers(b []byte, reqCtx *Context) error {
 
 	for len(b) > 0 {
 		var err error
-		b, err = c.dec.Next(hf, b)
 
+		b, err = c.dec.Next(hf, b)
 		if err != nil {
 			return err
 		}
@@ -1170,6 +1190,7 @@ func (d *Dialer) tryDial(ctx context.Context) (net.Conn, error) {
 		c, err = d.NetDial(d.Addr)
 	} else {
 		var dialer net.Dialer
+
 		c, err = dialer.DialContext(ctx, "tcp", d.Addr)
 	}
 

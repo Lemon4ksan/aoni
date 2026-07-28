@@ -7,7 +7,7 @@ package h2engine
 import (
 	"bufio"
 	"bytes"
-	"fmt"
+	"errors"
 	"io"
 	"strconv"
 
@@ -124,7 +124,7 @@ func cutPadding(payload []byte, length int) ([]byte, error) {
 
 	pad := int(payload[0])
 	if len(payload) < length-pad-1 || length-pad < 1 {
-		return nil, fmt.Errorf("h2engine: padding out of range")
+		return nil, errors.New("h2engine: padding out of range")
 	}
 
 	return payload[1 : length-pad], nil
@@ -136,7 +136,7 @@ func addPadding(b []byte) []byte {
 
 	b = resizeSlice(b, nn+n)
 	b = append(b[:1], b...)
-	b[0] = uint8(n)
+	b[0] = uint8(n) //nolint:gosec
 
 	return b
 }
