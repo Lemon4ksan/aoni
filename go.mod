@@ -7,7 +7,7 @@ require (
 	github.com/go-resty/resty/v2 v2.17.2
 	github.com/gorilla/websocket v1.5.3
 	github.com/klauspost/compress v1.19.1
-	github.com/lemon4ksan/miyako v0.2.1-0.20260718175055-4d923876d502
+	github.com/lemon4ksan/miyako v0.3.0
 	github.com/quic-go/qpack v0.6.0
 	github.com/quic-go/quic-go v0.61.0
 	github.com/stretchr/testify v1.11.1
