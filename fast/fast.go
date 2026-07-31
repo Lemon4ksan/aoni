@@ -318,19 +318,40 @@ func (f *Response) StatusBytes() []byte {
 
 // Header yields single value for header key as a string.
 func (f *Response) Header(key string) string {
-	return bytesconv.B2S(f.resp.Header.Peek(key))
+	val := f.resp.Header.Peek(key)
+	if len(val) == 0 {
+		val = f.resp.Header.Peek(http.CanonicalHeaderKey(key))
+	}
+
+	if len(val) == 0 {
+		f.resp.Header.All()(func(k, v []byte) bool {
+			if bytesconv.EqualFoldASCII(bytesconv.B2S(k), key) {
+				val = v
+				return false
+			}
+
+			return true
+		})
+	}
+
+	return bytesconv.B2S(val)
 }
 
 // HeaderBytes yields direct access to header value byte slice inside internal buffers.
 func (f *Response) HeaderBytes(key []byte) []byte {
-	return f.resp.Header.PeekBytes(key)
+	val := f.resp.Header.PeekBytes(key)
+	if len(val) == 0 {
+		val = f.resp.Header.Peek(http.CanonicalHeaderKey(bytesconv.B2S(key)))
+	}
+
+	return val
 }
 
 // Headers yields all response headers as a key-value map.
 func (f *Response) Headers() map[string][]string {
 	m := make(map[string][]string)
 	f.resp.Header.All()(func(k, v []byte) bool {
-		sk := string(k)
+		sk := http.CanonicalHeaderKey(string(k))
 		m[sk] = append(m[sk], string(v))
 		return true
 	})

@@ -5,6 +5,7 @@
 package fast
 
 import (
+	"crypto/tls"
 	"maps"
 	"net/http"
 	"net/url"
@@ -76,6 +77,13 @@ func (t *Transport) RoundTrip(req *http.Request) (*http.Response, error) {
 	}
 
 	maps.Copy(httpResp.Header, resp.Headers())
+
+	if req.URL != nil && req.URL.Scheme == "https" {
+		httpResp.TLS = &tls.ConnectionState{
+			HandshakeComplete: true,
+			Version:           tls.VersionTLS13,
+		}
+	}
 
 	return httpResp, nil
 }

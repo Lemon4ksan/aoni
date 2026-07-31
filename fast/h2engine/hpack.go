@@ -402,6 +402,10 @@ var bytePool = sync.Pool{
 }
 
 func readInt(n int, b []byte) ([]byte, uint64) {
+	if len(b) == 0 {
+		return b, 0
+	}
+
 	b0 := byte(1<<n - 1)
 	if b0&b[0] != b0 {
 		return b[1:], uint64(b[0] & b0)
@@ -412,15 +416,16 @@ func readInt(n int, b []byte) ([]byte, uint64) {
 	i := 1
 
 	for i < len(b) {
-		nn |= uint64(b[i]&127) << ((i - 1) * 7)
-		if b[i]&128 != 128 {
+		c := b[i]
+		nn |= uint64(c&127) << ((i - 1) * 7)
+		i++
+
+		if c&128 != 128 {
 			break
 		}
-
-		i++
 	}
 
-	return b[i+1:], nn + uint64(b0)
+	return b[i:], nn + uint64(b0)
 }
 
 func appendInt(dst []byte, bits uint8, index uint64) []byte {

@@ -172,14 +172,12 @@ func (c *Client) Request(
 		}
 	}
 
-	isAutoAE := len(fastReq.Header.Peek("Accept-Encoding")) == 0
-
 	c.applyDefaultHeaders(reqAdapter)
 	c.applyModifiers(reqAdapter, mods)
 
 	reqCtx := reqAdapter.Context()
 
-	trailers, err, autoReleased := c.dispatchPipeline(reqCtx, fastReq, fastResp, reqAdapter)
+	trailers, uncompressed, err, autoReleased := c.dispatchPipeline(reqCtx, fastReq, fastResp, reqAdapter)
 	if err != nil {
 		if !autoReleased {
 			fasthttp.ReleaseRequest(fastReq)
@@ -195,7 +193,7 @@ func (c *Client) Request(
 		pooledResp.SetTrailers(trailers)
 	}
 
-	if isAutoAE && len(fastResp.Header.Peek("Content-Encoding")) > 0 {
+	if uncompressed {
 		pooledResp.SetUncompressed(true)
 	}
 
@@ -245,7 +243,7 @@ func (c *Client) Do(req aoni.Request) (aoni.Response, error) {
 
 	fastResp := fasthttp.AcquireResponse()
 
-	trailers, err, autoReleased := c.dispatchPipeline(ctx, fastReq, fastResp, reqAdapter)
+	trailers, uncompressed, err, autoReleased := c.dispatchPipeline(ctx, fastReq, fastResp, reqAdapter)
 	if err != nil {
 		if !autoReleased {
 			fasthttp.ReleaseResponse(fastResp)
@@ -261,6 +259,10 @@ func (c *Client) Do(req aoni.Request) (aoni.Response, error) {
 	respAdapter := NewResponse(fastResp)
 	if len(trailers) > 0 {
 		respAdapter.SetTrailers(trailers)
+	}
+
+	if uncompressed {
+		respAdapter.SetUncompressed(true)
 	}
 
 	return respAdapter, nil
@@ -333,7 +335,7 @@ func (c *Client) dispatchPipeline(
 	fastReq *fasthttp.Request,
 	fastResp *fasthttp.Response,
 	reqAdapter *Request,
-) (trailers map[string][]string, err error, autoReleased bool) {
+) (trailers map[string][]string, uncompressed bool, err error, autoReleased bool) {
 	hasTelemetry := c.config.Defaults.Inspector != nil || c.config.Defaults.Pipeline.HAR != nil
 
 	var startTime time.Time
@@ -354,17 +356,17 @@ func (c *Client) dispatchPipeline(
 			c.recordTelemetry(ctx, fastReq, nil, err, startTime)
 		}
 
-		return nil, err, autoReleased
+		return nil, false, err, autoReleased
 	}
 
-	decompressFastResponse(fastResp)
+	uncompressed = decompressFastResponse(fastResp)
 
 	if valErr := c.validateResponse(fastReq, fastResp); valErr != nil {
 		if hasTelemetry {
 			c.recordTelemetry(ctx, fastReq, fastResp, valErr, startTime)
 		}
 
-		return nil, valErr, false
+		return nil, false, valErr, false
 	}
 
 	if wafErr := c.handleWAFChallenge(ctx, fastReq, fastResp); wafErr != nil {
@@ -372,27 +374,27 @@ func (c *Client) dispatchPipeline(
 			c.recordTelemetry(ctx, fastReq, fastResp, wafErr, startTime)
 		}
 
-		return nil, wafErr, false
+		return nil, false, wafErr, false
 	}
 
 	if hasTelemetry {
 		c.recordTelemetry(ctx, fastReq, fastResp, nil, startTime)
 	}
 
-	return trailers, nil, false
+	return trailers, uncompressed, nil, false
 }
 
-func decompressFastResponse(resp *fasthttp.Response) {
+func decompressFastResponse(resp *fasthttp.Response) bool {
 	encodingBytes := peekHeaderCaseInsensitiveFast(resp, "Content-Encoding")
 	if len(encodingBytes) == 0 {
-		return
+		return false
 	}
 
 	encoding := strings.ToLower(bytesconv.B2S(encodingBytes))
 
 	body := resp.Body()
 	if len(body) == 0 {
-		return
+		return false
 	}
 
 	var (
@@ -422,7 +424,11 @@ func decompressFastResponse(resp *fasthttp.Response) {
 		resp.SetBody(decompressed)
 		deleteHeaderCaseInsensitiveFast(resp, "Content-Encoding")
 		deleteHeaderCaseInsensitiveFast(resp, "Content-Length")
+
+		return true
 	}
+
+	return false
 }
 
 func peekHeaderCaseInsensitiveFast(resp *fasthttp.Response, key string) []byte {
@@ -599,21 +605,10 @@ func (c *Client) applyCookies(ctx context.Context, req *fasthttp.Request) {
 		return
 	}
 
-	var cookieHeader strings.Builder
-	for i, c := range cookies {
-		if i > 0 {
-			cookieHeader.WriteString("; ")
-		}
+	req.Header.Del("Cookie")
 
-		cookieHeader.WriteString(c.Name)
-		cookieHeader.WriteByte('=')
-		cookieHeader.WriteString(c.Value)
-	}
-
-	if existing := req.Header.Peek("Cookie"); len(existing) > 0 {
-		req.Header.Set("Cookie", string(existing)+"; "+cookieHeader.String())
-	} else {
-		req.Header.Set("Cookie", cookieHeader.String())
+	for _, ck := range cookies {
+		req.Header.SetCookie(ck.Name, ck.Value)
 	}
 }
 
@@ -652,7 +647,7 @@ func (c *Client) captureCookies(ctx context.Context, req *fasthttp.Request, resp
 
 func parseCookie(key, value []byte) *http.Cookie {
 	header := http.Header{}
-	header.Add("Set-Cookie", string(key)+"="+string(value))
+	header.Add("Set-Cookie", string(value))
 
 	fakeResp := &http.Response{Header: header}
 
@@ -855,6 +850,8 @@ func (c *Client) executeWithRedirects(
 
 		if isHTTPSDowngrade(currentURI, nextURI) {
 			fastReq.Header.Del("Referer")
+		} else {
+			fastReq.Header.SetBytesK(bytesconv.S2B("Referer"), string(currentURI.FullURI()))
 		}
 
 		fasthttp.ReleaseURI(nextURI)
@@ -1018,6 +1015,9 @@ func (c *Client) dispatchSingleRequest(
 	}
 
 	err, autoReleased = c.executeFastHTTP(ctx, fastReq, fastResp)
+	if autoReleased {
+		return nil, err, true
+	}
 
 	if err != nil && isH2FrameOnH1Error(err) {
 		fastResp.Reset()
@@ -1036,11 +1036,13 @@ func (c *Client) dispatchSingleRequest(
 		err = h2Err
 	}
 
-	if altSvc := fastResp.Header.Peek("Alt-Svc"); len(altSvc) > 0 {
-		globalAltSvcCache.Record(host, string(altSvc))
+	if err == nil {
+		if altSvc := fastResp.Header.Peek("Alt-Svc"); len(altSvc) > 0 {
+			globalAltSvcCache.Record(host, string(altSvc))
+		}
 	}
 
-	return nil, err, autoReleased
+	return nil, err, false
 }
 
 func isH2FrameOnH1Error(err error) bool {
@@ -1115,6 +1117,8 @@ func applyRedirectMethodAndBody(statusCode int, req *fasthttp.Request, reqAdapte
 		if method != http.MethodGet && method != http.MethodHead {
 			req.Header.SetMethod(http.MethodGet)
 			req.SetBody(nil)
+			req.Header.Del("Content-Type")
+			req.Header.Del("Content-Length")
 		}
 
 	case fasthttp.StatusTemporaryRedirect, fasthttp.StatusPermanentRedirect:
@@ -1298,34 +1302,34 @@ func (c *Client) executeFastHTTP(
 		return err, false
 	}
 
-	// Prevent double-TLS while ensuring fasthttp dials port 443
-	isHTTPS := bytes.EqualFold(req.URI().Scheme(), []byte("https"))
 	origHost := req.URI().Host()
 	hasHostHeader := len(req.Header.Peek("Host")) > 0
 
-	if isHTTPS {
-		hostStr := string(origHost)
-		if !hasHostHeader {
-			req.Header.SetHostBytes(origHost)
-		}
-
-		if !strings.Contains(hostStr, ":") {
-			req.URI().SetHost(hostStr + ":443")
-		}
-
-		req.URI().SetScheme("http")
+	if !hasHostHeader && len(origHost) > 0 {
+		req.Header.SetHostBytes(origHost)
 	}
 
-	defer func() {
-		if isHTTPS {
-			req.URI().SetScheme("https")
-			req.URI().SetHostBytes(origHost)
+	isHTTPS := bytes.EqualFold(req.URI().Scheme(), []byte("https"))
 
-			if !hasHostHeader {
-				req.Header.Del("Host")
-			}
+	var proxyURL *url.URL
+	if c.config.Network.ProxyAddr != nil {
+		proxyURL = c.config.Network.ProxyAddr
+	}
+
+	if reqCfg := aoni.GetRequestConfig(ctx); reqCfg != nil && reqCfg.ProxyAddr != nil {
+		proxyURL = reqCfg.ProxyAddr
+	}
+
+	if rawProxy, ok := aoni.GetProxyOverride(ctx).Value(); ok && rawProxy != "" {
+		if parsed, parseErr := url.Parse(rawProxy); parseErr == nil {
+			proxyURL = parsed
 		}
-	}()
+	}
+
+	if proxyURL != nil && (proxyURL.Scheme == "http" || proxyURL.Scheme == "https") && !isHTTPS {
+		req.UseHostHeader = true
+		req.Header.SetRequestURIBytes(req.URI().FullURI())
+	}
 
 	// Fast path: if context is standard Background/TODO without active cancellation, execute synchronously!
 	if ctx == context.Background() || ctx == context.TODO() || ctx.Done() == nil {
