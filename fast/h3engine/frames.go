@@ -5,8 +5,13 @@
 package h3engine
 
 import (
+	"errors"
+	"io"
+
 	"github.com/quic-go/quic-go/quicvarint"
 )
+
+var ErrH3SettingsError = errors.New("aoni h3engine: reserved H2 setting ID in H3 SETTINGS frame")
 
 const (
 	FrameTypeData        uint64 = 0x00
@@ -83,6 +88,53 @@ func (s *Settings) Encode() []byte {
 	frame = quicvarint.Append(frame, uint64(len(payload)))
 
 	return append(frame, payload...)
+}
+
+// DecodeSettings decodes an incoming H3 SETTINGS frame and checks for reserved H2 settings
+func DecodeSettings(r io.Reader, payloadLen uint64) (*Settings, error) {
+	lr := io.LimitReader(r, int64(payloadLen))
+	qr := quicvarint.NewReader(lr)
+
+	st := &Settings{
+		Other: make(map[uint64]uint64),
+	}
+
+	for {
+		id, err := quicvarint.Read(qr)
+		if errors.Is(err, io.EOF) {
+			break
+		}
+
+		if err != nil {
+			return nil, err
+		}
+
+		val, err := quicvarint.Read(qr)
+		if err != nil {
+			return nil, err
+		}
+
+		// RFC 9114 Section 7.2.4.1: reserved H2 settings (0x00, 0x02, 0x03, 0x04, 0x05)
+		switch id {
+		case 0x00, 0x02, 0x03, 0x04, 0x05:
+			return nil, ErrH3SettingsError
+
+		case SettingMaxFieldSectionSize:
+			st.MaxFieldSectionSize = int64(val)
+		case SettingQpackMaxTableCapacity:
+			st.QpackMaxTableCap = val
+		case SettingQpackBlockedStreams:
+			st.QpackBlockedStreams = val
+		case SettingH3Datagram:
+			st.EnableDatagrams = (val == 1)
+		case SettingEnableConnectProtocol:
+			st.EnableConnect = (val == 1)
+		default:
+			st.Other[id] = val
+		}
+	}
+
+	return st, nil
 }
 
 // ReadFrameHeader decodes the QUIC varint frame type and payload length from stream r.

@@ -126,19 +126,47 @@ func (cc *ClientConn) readQPACKEncoderStream(r quicvarint.Reader) {
 }
 
 func (cc *ClientConn) readControlStream(r quicvarint.Reader) {
+	firstFrame := true
+
 	for {
 		frameType, payloadLen, err := ReadFrameHeader(r)
 		if err != nil {
 			return
 		}
 
-		if frameType == FrameTypeGoAway {
-			cc.handleGoAway(r, payloadLen)
-			return
+		// RFC 9114 Section 6.2.1: The first frame on the control stream MUST be SETTINGS
+		if firstFrame {
+			if frameType != FrameTypeSettings {
+				_ = cc.conn.CloseWithError(0x010a, "H3_MISSING_SETTINGS: first frame must be SETTINGS")
+				return
+			}
+
+			firstFrame = false
 		}
 
-		if _, err := io.CopyN(io.Discard, r, int64(payloadLen)); err != nil { //nolint:gosec
+		switch frameType {
+		case FrameTypeSettings:
+			st, err := DecodeSettings(r, payloadLen)
+			if err != nil {
+				if errors.Is(err, ErrH3SettingsError) {
+					_ = cc.conn.CloseWithError(0x0109, "H3_SETTINGS_ERROR: reserved H2 setting ID")
+				} else {
+					_ = cc.conn.CloseWithError(0x0109, "H3_SETTINGS_ERROR: invalid settings payload")
+				}
+
+				return
+			}
+
+			cc.settings = *st
+
+		case FrameTypeGoAway:
+			cc.handleGoAway(r, payloadLen)
 			return
+
+		default:
+			if _, err := io.CopyN(io.Discard, r, int64(payloadLen)); err != nil { //nolint:gosec
+				return
+			}
 		}
 	}
 }
