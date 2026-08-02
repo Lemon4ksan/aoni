@@ -449,6 +449,61 @@ func WithMultipart(fields map[string]string, files map[string]stdio.Reader) aoni
 	}
 }
 
+type MultipartField struct {
+	Name        string
+	Value       string
+	Filename    string
+	ContentType string
+	Reader      stdio.Reader
+}
+
+// WithMultipartFields accepts an ordered slice of form fields with support for duplicate names (RFC 7578 Section 5.2)
+func WithMultipartFields(fields []MultipartField) aoni.RequestModifier {
+	return func(req aoni.Request) {
+		body := &bytes.Buffer{}
+		writer := multipart.NewWriter(body)
+
+		if cfg := aoni.GetOrInitRequestConfig(req); cfg.MultipartBoundary != "" {
+			_ = writer.SetBoundary(cfg.MultipartBoundary)
+		}
+
+		for _, f := range fields {
+			if f.Reader != nil || f.Filename != "" {
+				ct := f.ContentType
+				if ct == "" {
+					ct = "application/octet-stream"
+				}
+
+				part, err := createFormFileHeader(writer, f.Name, f.Filename, ct)
+				if err != nil {
+					aoni.GetOrInitRequestConfig(req).BodyError = err
+					return
+				}
+
+				if f.Reader != nil {
+					if _, err = io.CopyZeroAlloc(part, f.Reader); err != nil {
+						aoni.GetOrInitRequestConfig(req).BodyError = err
+						return
+					}
+				}
+			} else {
+				if err := writer.WriteField(f.Name, f.Value); err != nil {
+					aoni.GetOrInitRequestConfig(req).BodyError = err
+					return
+				}
+			}
+		}
+
+		if err := writer.Close(); err != nil {
+			aoni.GetOrInitRequestConfig(req).BodyError = err
+			return
+		}
+
+		req.SetBodyBytes(body.Bytes())
+		req.SetHeader("Content-Type", writer.FormDataContentType())
+	}
+}
+
 // WithStreamingMultipart constructs an [aoni.RequestModifier] streaming multipart/form-data via an asynchronous pipe without in-memory buffering.
 func WithStreamingMultipart(fields map[string]string, files map[string]stdio.Reader) aoni.RequestModifier {
 	return func(req aoni.Request) {
