@@ -1437,6 +1437,24 @@ func (c *Client) applyModifiers(req aoni.Request, mods []aoni.RequestModifier) {
 	}
 }
 
+func ensureConnectionTE(req *fasthttp.Request) {
+	te := req.Header.Peek("TE")
+	if len(te) == 0 {
+		return
+	}
+
+	existingConn := string(req.Header.Peek("Connection"))
+	if strings.Contains(strings.ToLower(existingConn), "te") {
+		return
+	}
+
+	if existingConn != "" {
+		req.Header.Set("Connection", existingConn+", TE")
+	} else {
+		req.Header.Set("Connection", "TE")
+	}
+}
+
 func (c *Client) executeFastHTTP(
 	ctx context.Context,
 	req *fasthttp.Request,
@@ -1445,6 +1463,8 @@ func (c *Client) executeFastHTTP(
 	if err := ctx.Err(); err != nil {
 		return err, false
 	}
+
+	ensureConnectionTE(req)
 
 	// Prevent double-TLS while ensuring fasthttp dials port 443
 	isHTTPS := bytes.EqualFold(req.URI().Scheme(), []byte("https"))
