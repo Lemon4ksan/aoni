@@ -7,15 +7,28 @@ package netutil
 
 import (
 	"mime"
+	"net/url"
 	"path/filepath"
 	"strings"
+	"unicode/utf8"
+
+	"golang.org/x/text/encoding/htmlindex"
 )
 
-// SanitizeFileName cleans a string by stripping path traversal sequences, null bytes, and path separators.
+// SanitizeFileName cleans a string by stripping path traversal sequences, null bytes,
+// control characters, and Windows reserved device names per RFC 6266 Section 4.3.
 func SanitizeFileName(filename string) string {
-	filename = strings.ReplaceAll(filename, "\x00", "")
-	filename = strings.TrimSpace(filename)
-	filename = filepath.Base(filepath.Clean(filename))
+	var sb strings.Builder
+	sb.Grow(len(filename))
+
+	for i := 0; i < len(filename); i++ {
+		b := filename[i]
+		if b >= 32 && b != 127 {
+			sb.WriteByte(b)
+		}
+	}
+
+	filename = filepath.Base(filepath.Clean(strings.TrimSpace(sb.String())))
 
 	for strings.HasPrefix(filename, "..") || strings.HasPrefix(filename, ".") {
 		filename = strings.TrimPrefix(filename, "..")
@@ -23,14 +36,17 @@ func SanitizeFileName(filename string) string {
 	}
 
 	filename = strings.TrimSpace(filename)
-	if filename == "" || filename == "." || filename == "/" || filename == "\\" {
+
+	if isWindowsReservedDeviceName(filename) || filename == "" || filename == "." || filename == "/" ||
+		filename == "\\" {
 		return "downloaded_file"
 	}
 
 	return filename
 }
 
-// ExtractSanitizedFilename extracts and cleans the filename parameter from a Content-Disposition HTTP header.
+// ExtractSanitizedFilename extracts, RFC 8187-decodes, and cleans the filename parameter
+// from a Content-Disposition HTTP header according to RFC 6266 Section 4.3.
 func ExtractSanitizedFilename(contentDispositionHeader string) string {
 	if contentDispositionHeader == "" {
 		return "downloaded_file"
@@ -42,7 +58,9 @@ func ExtractSanitizedFilename(contentDispositionHeader string) string {
 	}
 
 	filename, ok := params["filename*"]
-	if !ok || filename == "" {
+	if ok && filename != "" {
+		filename = decodeRFC8187(filename)
+	} else {
 		filename = params["filename"]
 	}
 
@@ -50,9 +68,78 @@ func ExtractSanitizedFilename(contentDispositionHeader string) string {
 		return "downloaded_file"
 	}
 
-	if idx := strings.Index(filename, "''"); idx != -1 {
-		filename = filename[idx+2:]
+	return SanitizeFileName(filename)
+}
+
+func decodeRFC8187(extValue string) string {
+	firstQuote := strings.IndexByte(extValue, '\'')
+	if firstQuote == -1 {
+		return extValue
 	}
 
-	return SanitizeFileName(filename)
+	secondQuote := strings.IndexByte(extValue[firstQuote+1:], '\'')
+	if secondQuote == -1 {
+		return extValue
+	}
+
+	secondQuote += firstQuote + 1
+
+	charset := strings.ToLower(strings.TrimSpace(extValue[:firstQuote]))
+	// language := extValue[firstQuote+1 : secondQuote] // Language tag is optional and ignored for file names
+	rawEncoded := extValue[secondQuote+1:]
+
+	unescaped, err := url.PathUnescape(rawEncoded)
+	if err != nil {
+		unescaped = rawEncoded
+	}
+
+	switch charset {
+	case "utf-8", "utf8", "":
+		if utf8.ValidString(unescaped) {
+			return unescaped
+		}
+
+		return strings.ToValidUTF8(unescaped, "")
+
+	case "iso-8859-1", "latin1":
+		return iso88591ToUTF8(unescaped)
+
+	default:
+		if enc, err := htmlindex.Get(charset); err == nil {
+			if decoded, err := enc.NewDecoder().String(unescaped); err == nil {
+				return decoded
+			}
+		}
+
+		if utf8.ValidString(unescaped) {
+			return unescaped
+		}
+
+		return strings.ToValidUTF8(unescaped, "")
+	}
+}
+
+func iso88591ToUTF8(s string) string {
+	var buf strings.Builder
+	buf.Grow(len(s) * 2)
+
+	for i := 0; i < len(s); i++ {
+		buf.WriteRune(rune(s[i]))
+	}
+
+	return buf.String()
+}
+
+func isWindowsReservedDeviceName(filename string) bool {
+	ext := filepath.Ext(filename)
+	stem := strings.ToUpper(strings.TrimSuffix(filename, ext))
+
+	switch stem {
+	case "CON", "PRN", "AUX", "NUL",
+		"COM1", "COM2", "COM3", "COM4", "COM5", "COM6", "COM7", "COM8", "COM9",
+		"LPT1", "LPT2", "LPT3", "LPT4", "LPT5", "LPT6", "LPT7", "LPT8", "LPT9":
+		return true
+	}
+
+	return false
 }
