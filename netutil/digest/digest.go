@@ -39,13 +39,13 @@ var (
 var digestHashFuncs = map[string]func() hash.Hash{
 	"":                 md5.New,
 	"MD5":              md5.New,
-	"MD5-sess":         md5.New,
+	"MD5-SESS":         md5.New,
 	"SHA-256":          sha256.New,
-	"SHA-256-sess":     sha256.New,
+	"SHA-256-SESS":     sha256.New,
 	"SHA-512":          sha512.New,
-	"SHA-512-sess":     sha512.New,
+	"SHA-512-SESS":     sha512.New,
 	"SHA-512-256":      sha512.New512_256,
-	"SHA-512-256-sess": sha512.New512_256,
+	"SHA-512-256-SESS": sha512.New512_256,
 }
 
 const (
@@ -77,14 +77,39 @@ func (dt *Transport) RoundTrip(req *http.Request) (*http.Response, error) {
 	_, _ = io.Copy(io.Discard, res.Body)
 	_ = res.Body.Close()
 
-	chaHdrValue := strings.TrimSpace(res.Header.Get("WWW-Authenticate"))
-	if chaHdrValue == "" {
+	// RFC 7616 Section 3.7: Iterate over all WWW-Authenticate challenges
+	headers := res.Header.Values("WWW-Authenticate")
+	if len(headers) == 0 {
+		if h := res.Header.Get("WWW-Authenticate"); h != "" {
+			headers = []string{h}
+		}
+	}
+
+	if len(headers) == 0 {
 		return nil, ErrDigestBadChallenge
 	}
 
-	cha, err := dt.parseChallenge(chaHdrValue)
-	if err != nil {
-		return nil, err
+	var (
+		cha     *digestChallenge
+		lastErr error
+	)
+
+	for _, headerVal := range headers {
+		c, parseErr := dt.parseChallenge(headerVal)
+		if parseErr == nil {
+			cha = c
+			break
+		}
+
+		lastErr = parseErr
+	}
+
+	if cha == nil {
+		if lastErr != nil {
+			return nil, lastErr
+		}
+
+		return nil, ErrDigestBadChallenge
 	}
 
 	req2 := dt.cloneReq(req, false)
@@ -187,7 +212,7 @@ func (dt *Transport) createCredentials(cha *digestChallenge, req *http.Request) 
 		nonce:         cha.nonce,
 		nc:            cha.nc,
 		algorithm:     cha.algorithm,
-		sessAlgorithm: strings.HasSuffix(cha.algorithm, "-sess"),
+		sessAlgorithm: strings.HasSuffix(strings.ToLower(cha.algorithm), "-sess"),
 		opaque:        cha.opaque,
 		userHash:      cha.userHash,
 	}
@@ -347,7 +372,12 @@ func (dc *digestCredentials) h(data string) string {
 }
 
 func (dc *digestCredentials) digest(cha *digestChallenge) (string, error) {
-	if _, ok := digestHashFuncs[dc.algorithm]; !ok {
+	normAlg := strings.ToUpper(strings.TrimSpace(dc.algorithm))
+	if normAlg == "" {
+		normAlg = "MD5"
+	}
+
+	if _, ok := digestHashFuncs[normAlg]; !ok {
 		return "", ErrDigestAlgNotSupported
 	}
 
@@ -397,11 +427,13 @@ func (dc *digestCredentials) ha2() string {
 func (dc *digestCredentials) String() string {
 	sl := make([]string, 0, 10)
 
+	// RFC 7616 Section 3.4.4: Compute userhash without mutating the original dc.username
+	displayUsername := dc.username
 	if dc.userHash == "true" {
-		dc.username = dc.h(fmt.Sprintf("%s:%s", dc.username, dc.realm))
+		displayUsername = dc.h(fmt.Sprintf("%s:%s", dc.username, dc.realm))
 	}
 
-	sl = append(sl, fmt.Sprintf(`username="%s"`, dc.username))
+	sl = append(sl, fmt.Sprintf(`username="%s"`, displayUsername))
 	sl = append(sl, fmt.Sprintf(`realm="%s"`, dc.realm))
 	sl = append(sl, fmt.Sprintf(`nonce="%s"`, dc.nonce))
 	sl = append(sl, fmt.Sprintf(`uri="%s"`, dc.uri))
@@ -430,7 +462,9 @@ func (dc *digestCredentials) String() string {
 }
 
 func newHashFunc(algorithm string) hash.Hash {
-	hf := digestHashFuncs[algorithm]
+	normAlg := strings.ToUpper(strings.TrimSpace(algorithm))
+
+	hf := digestHashFuncs[normAlg]
 	if hf == nil {
 		hf = md5.New
 	}
