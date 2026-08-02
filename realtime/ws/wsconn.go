@@ -9,6 +9,7 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -245,12 +246,22 @@ func (c *wsRawConn) readFrame() (byte, []byte, error) {
 		return 0, nil, err
 	}
 
+	// RFC 6455 Section 5.2: Check reserved bits RSV1, RSV2, RSV3 (0x70 = 01110000b)
+	if (header[0] & 0x70) != 0 {
+		return 0, nil, errors.New("aoni ws: reserved RSV bits set without negotiated extension")
+	}
+
 	opcode := header[0] & 0x0f
 	masked := header[1]&0x80 != 0
 
 	length, err := c.readFrameLength(header[1] & 0x7f)
 	if err != nil {
 		return 0, nil, err
+	}
+
+	// RFC 6455 Section 5.5: Control frames cannot have payload > 125 bytes
+	if opcode >= wsFrameClose && length > 125 {
+		return 0, nil, errors.New("aoni ws: control frame payload cannot exceed 125 bytes")
 	}
 
 	payload, err := c.readFramePayload(length, masked)
@@ -311,6 +322,11 @@ func (c *wsRawConn) readFramePayload(length uint64, masked bool) ([]byte, error)
 }
 
 func (c *wsRawConn) writeFrame(opcode byte, payload []byte) error {
+	// RFC 6455 Section 5.5: Control frames cannot have payload > 125 bytes
+	if opcode >= wsFrameClose && len(payload) > 125 {
+		return errors.New("aoni ws: control frame payload cannot exceed 125 bytes")
+	}
+
 	header := []byte{0x80 | opcode, 0}
 	if c.isClient {
 		header[1] = 0x80
@@ -341,10 +357,10 @@ func (c *wsRawConn) writeFrame(opcode byte, payload []byte) error {
 		header = append(header, mask[:]...)
 
 		masked := make([]byte, len(payload))
-		for i := range payload {
-			masked[i] = payload[i] ^ mask[i%4]
-		}
+		copy(masked, payload)
 
+		// Оптимизированное быстрыми блоками uint64 (SWAR) XOR-маскирование
+		applyFastMask(masked, mask)
 		payload = masked
 	}
 
@@ -355,6 +371,25 @@ func (c *wsRawConn) writeFrame(opcode byte, payload []byte) error {
 	_, err := c.base.Write(payload)
 
 	return err
+}
+
+func applyFastMask(payload []byte, mask [4]byte) {
+	if len(payload) == 0 {
+		return
+	}
+
+	maskKey := uint64(binary.LittleEndian.Uint32(mask[:]))
+	maskKey |= maskKey << 32
+
+	for len(payload) >= 8 {
+		v := binary.LittleEndian.Uint64(payload)
+		binary.LittleEndian.PutUint64(payload, v^maskKey)
+		payload = payload[8:]
+	}
+
+	for i := range payload {
+		payload[i] ^= mask[i%4]
+	}
 }
 
 func wrapRawConn(conn net.Conn, isClient bool) *wsRawConn {
