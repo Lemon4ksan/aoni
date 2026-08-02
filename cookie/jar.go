@@ -186,7 +186,7 @@ func (pj *PersistentJar) purgeExpired() {
 	changed := false
 
 	for k, c := range pj.cookiesMap {
-		if !c.Expires.IsZero() && c.Expires.Before(now) {
+		if (!c.Expires.IsZero() && c.Expires.Before(now)) || c.MaxAge < 0 {
 			delete(pj.cookiesMap, k)
 
 			changed = true
@@ -278,7 +278,7 @@ func (pj *PersistentJar) Cookies(u *url.URL) []*http.Cookie {
 
 	pj.mu.Lock()
 	for _, c := range cookies {
-		if !c.Expires.IsZero() && c.Expires.Before(now) {
+		if (!c.Expires.IsZero() && c.Expires.Before(now)) || c.MaxAge < 0 {
 			key := cookieKey{domain: c.Domain, path: c.Path, name: c.Name}
 			delete(pj.cookiesMap, key)
 
@@ -313,8 +313,14 @@ func (pj *PersistentJar) SetCookies(u *url.URL, cookies []*http.Cookie) {
 	changed := false
 
 	for _, c := range cookies {
-		key := cookieKey{domain: c.Domain, path: c.Path, name: c.Name}
-		if !c.Expires.IsZero() && c.Expires.Before(now) {
+		rawDomain := generic.Coalesce(c.Domain, u.Hostname())
+		domain := strings.ToLower(rawDomain)
+		path := generic.Coalesce(c.Path, "/")
+
+		key := cookieKey{domain: domain, path: path, name: c.Name}
+
+		isExpired := (!c.Expires.IsZero() && c.Expires.Before(now)) || c.MaxAge < 0
+		if isExpired {
 			if _, exists := pj.cookiesMap[key]; exists {
 				delete(pj.cookiesMap, key)
 
@@ -324,10 +330,6 @@ func (pj *PersistentJar) SetCookies(u *url.URL, cookies []*http.Cookie) {
 			continue
 		}
 
-		domain := generic.Coalesce(c.Domain, u.Hostname())
-		path := generic.Coalesce(c.Path, "/")
-
-		key = cookieKey{domain: domain, path: path, name: c.Name}
 		pj.cookiesMap[key] = Cookie{
 			Name:     c.Name,
 			Value:    c.Value,
@@ -336,12 +338,13 @@ func (pj *PersistentJar) SetCookies(u *url.URL, cookies []*http.Cookie) {
 			Expires:  c.Expires,
 			HTTPOnly: c.HttpOnly,
 			Secure:   c.Secure,
+			MaxAge:   c.MaxAge,
 		}
 		changed = true
 	}
 
 	for k, c := range pj.cookiesMap {
-		if !c.Expires.IsZero() && c.Expires.Before(now) {
+		if (!c.Expires.IsZero() && c.Expires.Before(now)) || c.MaxAge < 0 {
 			delete(pj.cookiesMap, k)
 
 			changed = true

@@ -26,6 +26,7 @@ type Cookie struct {
 	Path     string    `json:"path"`
 	HTTPOnly bool      `json:"httpOnly"`
 	Secure   bool      `json:"secure"`
+	MaxAge   int       `json:"maxAge"`
 }
 
 // PathMatch reports whether requestPath matches cookiePath according to RFC 6265 Section 5.1.4.
@@ -241,6 +242,7 @@ func Export(jar http.CookieJar, u *url.URL) []Cookie {
 			Expires:  c.Expires,
 			HTTPOnly: c.HttpOnly,
 			Secure:   c.Secure,
+			MaxAge:   c.MaxAge,
 		}
 	}
 
@@ -278,6 +280,7 @@ func Import(jar http.CookieJar, u *url.URL, cookies []Cookie) {
 			Expires:  c.Expires,
 			HttpOnly: c.HTTPOnly,
 			Secure:   c.Secure,
+			MaxAge:   c.MaxAge,
 		}
 	}
 
