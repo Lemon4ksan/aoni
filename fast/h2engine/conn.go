@@ -633,12 +633,16 @@ func (c *Conn) calculateChunkSize(ctx *Context, remaining int) int {
 	return min(chunk, maxFrame)
 }
 
-func isForbiddenH2Header(key []byte) bool {
+func isForbiddenH2Header(key, value []byte) bool {
 	if len(key) == 0 || key[0] == ':' {
 		return true
 	}
 
 	keyStr := bytesconv.B2S(key)
+
+	if bytesconv.EqualFoldASCII(keyStr, "te") {
+		return !bytesconv.EqualFoldASCII(bytesconv.B2S(value), "trailers")
+	}
 
 	return bytesconv.EqualFoldASCII(keyStr, "connection") ||
 		bytesconv.EqualFoldASCII(keyStr, "keep-alive") ||
@@ -732,7 +736,7 @@ func (c *Conn) encodeRequestHeaders(h *Headers, req *fasthttp.Request) {
 		}
 
 		req.Header.All()(func(k, v []byte) bool {
-			if isForbiddenH2Header(k) {
+			if isForbiddenH2Header(k, v) {
 				return true
 			}
 
@@ -819,7 +823,7 @@ func (c *Conn) appendOrderedHeaders(h *Headers, req *fasthttp.Request, hf *Heade
 	}
 
 	req.Header.All()(func(k, v []byte) bool {
-		if isForbiddenH2Header(k) {
+		if isForbiddenH2Header(k, v) {
 			return true
 		}
 
