@@ -62,7 +62,12 @@ func (q *QPACKCodec) EncodeRequestHeaders(w io.Writer, req *fasthttp.Request, or
 		q.encodeOrderedHeaders(enc, req, orderedKeys)
 	} else {
 		req.Header.All()(func(k, v []byte) bool {
+			if isForbiddenH3Header(k, v) {
+				return true
+			}
+
 			_ = enc.WriteField(qpack.HeaderField{Name: toLowerCopy(k), Value: string(v)})
+
 			return true
 		})
 	}
@@ -72,6 +77,47 @@ func (q *QPACKCodec) EncodeRequestHeaders(w io.Writer, req *fasthttp.Request, or
 	return err
 }
 
+func isForbiddenH3Header(key, val []byte) bool {
+	if len(key) == 0 || key[0] == ':' {
+		return true
+	}
+
+	keyStr := bytesconv.B2S(key)
+	if bytesconv.EqualFoldASCII(keyStr, "connection") ||
+		bytesconv.EqualFoldASCII(keyStr, "keep-alive") ||
+		bytesconv.EqualFoldASCII(keyStr, "proxy-connection") ||
+		bytesconv.EqualFoldASCII(keyStr, "transfer-encoding") ||
+		bytesconv.EqualFoldASCII(keyStr, "upgrade") {
+		return true
+	}
+
+	if bytesconv.EqualFoldASCII(keyStr, "te") {
+		return !bytesconv.EqualFoldASCII(bytesconv.B2S(val), "trailers")
+	}
+
+	return false
+}
+
+func isForbiddenH3HeaderStr(key string, val []byte) bool {
+	if key == "" || key[0] == ':' {
+		return true
+	}
+
+	if bytesconv.EqualFoldASCII(key, "connection") ||
+		bytesconv.EqualFoldASCII(key, "keep-alive") ||
+		bytesconv.EqualFoldASCII(key, "proxy-connection") ||
+		bytesconv.EqualFoldASCII(key, "transfer-encoding") ||
+		bytesconv.EqualFoldASCII(key, "upgrade") {
+		return true
+	}
+
+	if bytesconv.EqualFoldASCII(key, "te") {
+		return !bytesconv.EqualFoldASCII(bytesconv.B2S(val), "trailers")
+	}
+
+	return false
+}
+
 func (q *QPACKCodec) encodeOrderedHeaders(enc *qpack.Encoder, req *fasthttp.Request, orderedKeys []string) {
 	var visitedBits uint64
 
@@ -79,11 +125,12 @@ func (q *QPACKCodec) encodeOrderedHeaders(enc *qpack.Encoder, req *fasthttp.Requ
 
 	for i := 0; i < numOrdered; i++ {
 		key := orderedKeys[i]
-		if key == "" || key[0] == ':' {
+		val := req.Header.Peek(key)
+
+		if isForbiddenH3HeaderStr(key, val) {
 			continue
 		}
 
-		val := req.Header.Peek(key)
 		if len(val) > 0 {
 			_ = enc.WriteField(qpack.HeaderField{Name: key, Value: bytesconv.B2S(val)})
 
@@ -93,6 +140,10 @@ func (q *QPACKCodec) encodeOrderedHeaders(enc *qpack.Encoder, req *fasthttp.Requ
 
 	req.Header.All()(func(k, v []byte) bool {
 		kStr := bytesconv.B2S(k)
+
+		if isForbiddenH3Header(k, v) {
+			return true
+		}
 
 		for i := 0; i < numOrdered; i++ {
 			if (visitedBits&(1<<i)) != 0 && bytesconv.EqualFoldASCII(kStr, orderedKeys[i]) {
