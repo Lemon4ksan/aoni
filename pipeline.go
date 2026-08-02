@@ -414,6 +414,20 @@ func (c *Client) saveToCache(req *http.Request, resp *http.Response, cfg *CacheC
 	_ = cfg.Store.Set(req.Context(), CacheKey{Method: req.Method, URL: req.URL.String()}, cachedData, ttl)
 }
 
+func (c *Client) invalidateCache(req *http.Request, resp *http.Response, cfg *CacheConfig) {
+	if cfg == nil || cfg.Store == nil || resp == nil || resp.StatusCode >= 400 {
+		return
+	}
+
+	// Invalidate the cache only on successful unsafe methods (RFC 9111 Section 4.4)
+	if req.Method == http.MethodPost || req.Method == http.MethodPut ||
+		req.Method == http.MethodDelete || req.Method == http.MethodPatch {
+
+		key := CacheKey{Method: http.MethodGet, URL: req.URL.String()}
+		_ = cfg.Store.Set(req.Context(), key, nil, 0)
+	}
+}
+
 func extractVaryHeaders(req *http.Request, varyHeader string) map[string]string {
 	if varyHeader == "" {
 		return nil
@@ -480,8 +494,12 @@ func (c *Client) postProcessResponse(
 		}
 	}
 
-	if pipe.Cache != nil && req.Method == http.MethodGet {
-		c.saveToCache(req, resp, pipe.Cache)
+	if pipe.Cache != nil {
+		if req.Method == http.MethodGet {
+			c.saveToCache(req, resp, pipe.Cache)
+		} else {
+			c.invalidateCache(req, resp, pipe.Cache)
+		}
 	}
 
 	return resp, nil
