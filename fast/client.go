@@ -1218,8 +1218,13 @@ func applyRedirectMethodAndBody(statusCode int, req *fasthttp.Request, reqAdapte
 		if method != http.MethodGet && method != http.MethodHead {
 			req.Header.SetMethod(http.MethodGet)
 			req.SetBody(nil)
+
 			req.Header.Del("Content-Type")
 			req.Header.Del("Content-Length")
+			req.Header.Del("Content-Encoding")
+			req.Header.Del("Content-Language")
+			req.Header.Del("Content-Location")
+			req.Header.Del("Digest")
 		}
 
 	case fasthttp.StatusTemporaryRedirect, fasthttp.StatusPermanentRedirect:
