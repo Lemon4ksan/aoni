@@ -338,6 +338,32 @@ func matchVaryHeaders(req *http.Request, varyHeaders map[string]string) bool {
 	return true
 }
 
+func parseFreshnessLifetime(resp *http.Response) (time.Duration, bool) {
+	cc := resp.Header.Get("Cache-Control")
+	for p := range strings.SplitSeq(cc, ",") {
+		p = strings.TrimSpace(p)
+		if strings.HasPrefix(p, "s-maxage=") {
+			if secs, err := strconv.ParseInt(p[9:], 10, 64); err == nil && secs >= 0 {
+				return time.Duration(secs) * time.Second, true
+			}
+		}
+
+		if strings.HasPrefix(p, "max-age=") {
+			if secs, err := strconv.ParseInt(p[8:], 10, 64); err == nil && secs >= 0 {
+				return time.Duration(secs) * time.Second, true
+			}
+		}
+	}
+
+	if exp := resp.Header.Get("Expires"); exp != "" {
+		if t, err := http.ParseTime(exp); err == nil {
+			return max(time.Until(t), 0), true
+		}
+	}
+
+	return 0, false
+}
+
 func (c *Client) saveToCache(req *http.Request, resp *http.Response, cfg *CacheConfig) {
 	if req.Method != http.MethodGet || resp == nil || resp.StatusCode != http.StatusOK || cfg == nil ||
 		cfg.Store == nil {
@@ -381,6 +407,8 @@ func (c *Client) saveToCache(req *http.Request, resp *http.Response, cfg *CacheC
 	ttl := cfg.DefaultTTL
 	if reqCfg := GetRequestConfig(req.Context()); reqCfg != nil && reqCfg.CacheTTL > 0 {
 		ttl = reqCfg.CacheTTL
+	} else if parsedTTL, ok := parseFreshnessLifetime(resp); ok {
+		ttl = parsedTTL
 	}
 
 	_ = cfg.Store.Set(req.Context(), CacheKey{Method: req.Method, URL: req.URL.String()}, cachedData, ttl)
