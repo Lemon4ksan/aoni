@@ -1061,11 +1061,21 @@ func parseMaxAge(headerVal string) time.Duration {
 	return maxAge
 }
 
+func sanitizeTraceHeaders(req *fasthttp.Request) {
+	if bytesconv.EqualFoldASCII(bytesconv.B2S(req.Header.Method()), "TRACE") {
+		req.Header.Del("Authorization")
+		req.Header.Del("Proxy-Authorization")
+		req.Header.Del("Cookie")
+	}
+}
+
 func (c *Client) dispatchSingleRequest(
 	ctx context.Context,
 	fastReq *fasthttp.Request,
 	fastResp *fasthttp.Response,
 ) (trailers map[string][]string, err error, autoReleased bool) {
+	sanitizeTraceHeaders(fastReq)
+
 	host := string(fastReq.URI().Host())
 	alpnMode := resolveALPNMode(ctx, &c.config, fastReq)
 
