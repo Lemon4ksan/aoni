@@ -7,7 +7,9 @@ package fast
 
 import (
 	"bytes"
+	"compress/flate"
 	"compress/gzip"
+	"compress/zlib"
 	"context"
 	"crypto/tls"
 	"encoding/base64"
@@ -464,13 +466,24 @@ func decompressFastResponse(resp *fasthttp.Response) bool {
 		brReader := brotli.NewReader(bytes.NewReader(body))
 		decompressed, err = io.ReadAll(brReader)
 
-	case strings.Contains(encoding, "gzip"), strings.Contains(encoding, "deflate"):
+	case strings.Contains(encoding, "gzip"):
 		gzReader, gzErr := gzip.NewReader(bytes.NewReader(body))
 		if gzErr == nil {
 			decompressed, err = io.ReadAll(gzReader)
 			_ = gzReader.Close()
 		} else {
 			err = gzErr
+		}
+
+	case strings.Contains(encoding, "deflate"):
+		zr, zErr := zlib.NewReader(bytes.NewReader(body))
+		if zErr == nil {
+			decompressed, err = io.ReadAll(zr)
+			_ = zr.Close()
+		} else {
+			fr := flate.NewReader(bytes.NewReader(body))
+			decompressed, err = io.ReadAll(fr)
+			_ = fr.Close()
 		}
 	}
 
