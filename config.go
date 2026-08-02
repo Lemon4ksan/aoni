@@ -303,6 +303,7 @@ type CachedResponse struct {
 	VaryHeaders map[string]string   `json:"vary_headers,omitempty"`
 	BodyBase64  string              `json:"body_base64"`
 	StatusCode  int                 `json:"status_code"`
+	CachedAt    time.Time           `json:"cached_at,omitempty"`
 }
 
 // PipelineConfig configures request-response execution phases,

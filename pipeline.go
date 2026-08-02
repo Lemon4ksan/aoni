@@ -315,9 +315,16 @@ func (c *Client) tryGetFromCache(req *http.Request, cfg *CacheConfig) *http.Resp
 
 	bodyBytes, _ := base64.StdEncoding.DecodeString(cached.BodyBase64)
 
+	// Clone the headers to set Age (RFC 9111 Section 5.1)
+	respHeaders := http.Header(cached.Header).Clone()
+	if !cached.CachedAt.IsZero() {
+		ageSeconds := int64(time.Since(cached.CachedAt).Seconds())
+		respHeaders.Set("Age", strconv.FormatInt(max(ageSeconds, 0), 10))
+	}
+
 	return &http.Response{
 		StatusCode:    cached.StatusCode,
-		Header:        cached.Header,
+		Header:        respHeaders,
 		Body:          stdio.NopCloser(bytes.NewReader(bodyBytes)),
 		ContentLength: int64(len(bodyBytes)),
 		Request:       req,
@@ -397,6 +404,7 @@ func (c *Client) saveToCache(req *http.Request, resp *http.Response, cfg *CacheC
 		Header:      resp.Header,
 		VaryHeaders: extractVaryHeaders(req, varyHeader),
 		BodyBase64:  base64.StdEncoding.EncodeToString(bodyBytes),
+		CachedAt:    time.Now().UTC(),
 	}
 
 	cachedData, marshalErr := json.Marshal(cached)
@@ -422,7 +430,6 @@ func (c *Client) invalidateCache(req *http.Request, resp *http.Response, cfg *Ca
 	// Invalidate the cache only on successful unsafe methods (RFC 9111 Section 4.4)
 	if req.Method == http.MethodPost || req.Method == http.MethodPut ||
 		req.Method == http.MethodDelete || req.Method == http.MethodPatch {
-
 		key := CacheKey{Method: http.MethodGet, URL: req.URL.String()}
 		_ = cfg.Store.Set(req.Context(), key, nil, 0)
 	}
