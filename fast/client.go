@@ -16,6 +16,7 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"reflect"
 	"strconv"
 	"strings"
 	"sync"
@@ -46,10 +47,12 @@ type HTTPDoer interface {
 // Client executes ultra-high-performance HTTP requests over fasthttp,
 // seamlessly multiplexing native H1 (fasthttp), native H2 (h2engine), and native H3 (h3engine).
 type Client struct {
-	engine    *fasthttp.Client
-	h2Clients map[string]*h2engine.Client
-	h3Client  *h3engine.Client
-	config    aoni.Config
+	engine      *fasthttp.Client
+	dialer      *fastDialer
+	defaultDial func(string) (net.Conn, error)
+	h2Clients   map[string]*h2engine.Client
+	h3Client    *h3engine.Client
+	config      aoni.Config
 
 	_       cpu.CacheLinePad
 	h2Mutex sync.Mutex
@@ -89,9 +92,52 @@ func NewClient(opts ...aoni.ClientOption) *Client {
 
 // With produces a deep-copied [Client] with the provided functional options applied.
 func (c *Client) With(opts ...aoni.ClientOption) *Client {
+	var clonedEngine *fasthttp.Client
+
+	isCustomDial := false
+
+	if c.engine != nil {
+		clonedEngine = &fasthttp.Client{
+			Transport:                     c.engine.Transport,
+			DialTimeout:                   c.engine.DialTimeout,
+			Dial:                          c.engine.Dial,
+			TLSConfig:                     c.engine.TLSConfig,
+			RetryIf:                       c.engine.RetryIf, //nolint:staticcheck
+			RetryIfErr:                    c.engine.RetryIfErr,
+			RetryIfErrUpstream:            c.engine.RetryIfErrUpstream,
+			ConfigureClient:               c.engine.ConfigureClient,
+			Name:                          c.engine.Name,
+			MaxConnsPerHost:               c.engine.MaxConnsPerHost,
+			MaxIdleConnDuration:           c.engine.MaxIdleConnDuration,
+			MaxConnDuration:               c.engine.MaxConnDuration,
+			MaxIdemponentCallAttempts:     c.engine.MaxIdemponentCallAttempts,
+			ReadBufferSize:                c.engine.ReadBufferSize,
+			WriteBufferSize:               c.engine.WriteBufferSize,
+			ReadTimeout:                   c.engine.ReadTimeout,
+			WriteTimeout:                  c.engine.WriteTimeout,
+			MaxResponseBodySize:           c.engine.MaxResponseBodySize,
+			MaxConnWaitTimeout:            c.engine.MaxConnWaitTimeout,
+			ConnPoolStrategy:              c.engine.ConnPoolStrategy,
+			NoDefaultUserAgentHeader:      c.engine.NoDefaultUserAgentHeader,
+			DialDualStack:                 c.engine.DialDualStack,
+			DisableHeaderNamesNormalizing: c.engine.DisableHeaderNamesNormalizing,
+			DisablePathNormalizing:        c.engine.DisablePathNormalizing,
+			StreamResponseBody:            c.engine.StreamResponseBody,
+		}
+
+		if c.engine.Dial != nil && c.defaultDial != nil {
+			isCustomDial = reflect.ValueOf(c.engine.Dial).Pointer() != reflect.ValueOf(c.defaultDial).Pointer()
+		} else if c.engine.Dial != nil && c.defaultDial == nil {
+			isCustomDial = true
+		}
+	} else {
+		clonedEngine = &fasthttp.Client{}
+	}
+
 	c2 := &Client{
-		engine: c.engine,
-		config: c.config.Clone(),
+		engine:      clonedEngine,
+		defaultDial: c.defaultDial,
+		config:      c.config.Clone(),
 	}
 
 	for _, opt := range opts {
@@ -101,7 +147,10 @@ func (c *Client) With(opts ...aoni.ClientOption) *Client {
 	}
 
 	c2.applyEngineConfig()
-	c2.applyCustomDialer()
+
+	if !isCustomDial {
+		c2.applyCustomDialer()
+	}
 
 	return c2
 }
@@ -1324,6 +1373,8 @@ func (c *Client) applyEngineConfig() {
 
 func (c *Client) applyCustomDialer() {
 	dialer := newFastDialer(&c.config)
+	c.dialer = dialer
+	c.defaultDial = dialer.Dial
 	c.engine.Dial = dialer.Dial
 	c.engine.DialDualStack = true
 }
@@ -1379,7 +1430,13 @@ func (c *Client) executeFastHTTP(
 		}
 
 		if !strings.Contains(hostStr, ":") {
-			req.URI().SetHost(hostStr + ":443")
+			hostStr += ":443"
+			req.URI().SetHost(hostStr)
+		}
+
+		if c.dialer != nil {
+			c.dialer.TrackHTTPSTarget(hostStr)
+			defer c.dialer.UntrackHTTPSTarget(hostStr)
 		}
 
 		req.URI().SetScheme("http")

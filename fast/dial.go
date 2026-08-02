@@ -10,18 +10,21 @@ import (
 	"net"
 	"net/url"
 	"strings"
+	"sync"
 	"time"
 
 	utls "github.com/refraction-networking/utls"
 
 	"github.com/lemon4ksan/aoni"
+	"github.com/lemon4ksan/aoni/fast/h2engine"
 	"github.com/lemon4ksan/aoni/internal/h1"
 	"github.com/lemon4ksan/aoni/netutil"
 	"github.com/lemon4ksan/aoni/netutil/netdial"
 )
 
 type fastDialer struct {
-	config *aoni.Config
+	config        *aoni.Config
+	activeTargets sync.Map
 }
 
 func newFastDialer(cfg *aoni.Config) *fastDialer {
@@ -50,7 +53,7 @@ func (d *fastDialer) DialContext(ctx context.Context, network, addr string) (net
 
 	targetAddr := net.JoinHostPort(host, port)
 
-	isTLS := port != "80" && (port == "443" || d.isTLSEnabled())
+	isTLS := port == "443" || d.IsHTTPSTarget(addr) || d.IsHTTPSTarget(host) || (port != "80" && d.isTLSEnabled())
 
 	rawConn, err := netdial.DialL4(ctx, network, targetAddr, dialOpts)
 	if err != nil {
@@ -144,11 +147,40 @@ func (d *fastDialer) DialH2(ctx context.Context, addr string) (net.Conn, error) 
 		return nil, err
 	}
 
+	if uConn.ConnectionState().NegotiatedProtocol != aoni.AlpnH2 {
+		_ = uConn.Close()
+		return nil, h2engine.ErrServerSupport
+	}
+
 	if reqCfg := aoni.GetRequestConfig(ctx); reqCfg != nil && reqCfg.JA4ReportStore != nil {
 		reqCfg.JA4ReportStore.Report = &report
 	}
 
 	return uConn, nil
+}
+
+func (d *fastDialer) TrackHTTPSTarget(addr string) {
+	if val, ok := d.activeTargets.Load(addr); ok {
+		d.activeTargets.Store(addr, val.(int)+1)
+	} else {
+		d.activeTargets.Store(addr, 1)
+	}
+}
+
+func (d *fastDialer) UntrackHTTPSTarget(addr string) {
+	if val, ok := d.activeTargets.Load(addr); ok {
+		count := val.(int) - 1
+		if count <= 0 {
+			d.activeTargets.Delete(addr)
+		} else {
+			d.activeTargets.Store(addr, count)
+		}
+	}
+}
+
+func (d *fastDialer) IsHTTPSTarget(addr string) bool {
+	_, ok := d.activeTargets.Load(addr)
+	return ok
 }
 
 func splitHostPortTLS(addr string) (host, port string) {
