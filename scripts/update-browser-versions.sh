@@ -15,18 +15,34 @@ if [ ! -f "$CHROME_FILE" ] || [ ! -f "$FIREFOX_FILE" ] || [ ! -f "$SAFARI_FILE" 
     exit 1
 fi
 
+sed_i() {
+    if [[ "$OSTYPE" == "darwin"* ]]; then
+        sed -i '' "$@"
+    else
+        sed -i "$@"
+    fi
+}
+
 get_major() { echo "$1" | cut -d. -f1; }
 get_major_minor() { echo "$1" | cut -d. -f1-2; }
 
 # ---------- Fetch latest browser versions ----------
-echo "Fetching Chrome versions..."
+echo "Fetching browser versions..."
 
-CHROME_WIN_RAW=$(curl -sf "https://versionhistory.googleapis.com/v1/chrome/platforms/win/channels/stable/versions/all/releases?filter=fraction%3E0" | jq -r '.releases[0].version' || echo "")
-CHROME_ANDROID_RAW=$(curl -sf "https://versionhistory.googleapis.com/v1/chrome/platforms/android/channels/stable/versions/all/releases?filter=fraction%3E0" | jq -r '.releases[0].version' || echo "")
-CHROME_IOS_RAW=$(curl -sf "https://versionhistory.googleapis.com/v1/chrome/platforms/ios/channels/stable/versions/all/releases?filter=fraction%3E0" | jq -r '.releases[0].version' || echo "")
+VERSIONS_OUTPUT=$(go run ./scripts/fetch-versions/ 2>/dev/null || echo "")
+
+CHROME_WIN_RAW=$(echo "$VERSIONS_OUTPUT" | sed -n 's/^CHROME_WIN=\(.*\)/\1/p')
+CHROME_ANDROID_RAW=$(echo "$VERSIONS_OUTPUT" | sed -n 's/^CHROME_ANDROID=\(.*\)/\1/p')
+CHROME_IOS_RAW=$(echo "$VERSIONS_OUTPUT" | sed -n 's/^CHROME_IOS=\(.*\)/\1/p')
+FIREFOX_RAW=$(echo "$VERSIONS_OUTPUT" | sed -n 's/^FIREFOX=\(.*\)/\1/p')
 
 if [ -z "$CHROME_WIN_RAW" ]; then
-    echo "ERROR: Failed to fetch Chrome version from Google API."
+    echo "ERROR: Failed to fetch Chrome version."
+    exit 1
+fi
+
+if [ -z "$FIREFOX_RAW" ]; then
+    echo "ERROR: Failed to fetch Firefox version."
     exit 1
 fi
 
@@ -37,21 +53,13 @@ CHROME_IOS_BUILD=$(echo "$CHROME_IOS_RAW" | cut -d. -f3-)
 
 echo "Chrome major: $CHROME_MAJOR (win=$CHROME_WIN_RAW android=$CHROME_ANDROID_RAW ios=$CHROME_IOS_RAW)"
 
-echo "Fetching Firefox version..."
-
-FIREFOX_RAW=$(curl -sf "https://product-details.mozilla.org/1.0/firefox_versions.json" | jq -r '.LATEST_FIREFOX_VERSION' || echo "")
-if [ -z "$FIREFOX_RAW" ]; then
-    echo "ERROR: Failed to fetch Firefox version from Mozilla API."
-    exit 1
-fi
-
 FIREFOX_MAJOR_MINOR=$(get_major_minor "$FIREFOX_RAW")
 
 echo "Firefox: $FIREFOX_RAW (major.minor=$FIREFOX_MAJOR_MINOR)"
 
 echo "Fetching iOS version..."
-IOS_FULL=$(curl -sf "https://api.ipsw.me/v4/device/iPhone16,2" | \
-    jq -r '[.firmwares[] | select(.signed == true)] | .[0].version' 2>/dev/null || echo "")
+IPSW_JSON=$(curl -sSkL -A "Mozilla/5.0" "https://api.ipsw.me/v4/device/iPhone16,2" 2>/dev/null || echo "")
+IOS_FULL=$(echo "$IPSW_JSON" | jq -r '[.firmwares[] | select(.signed == true)] | .[0].version' 2>/dev/null || echo "")
 if [ -n "$IOS_FULL" ]; then
     IOS_UA=$(echo "$IOS_FULL" | tr '.' '_')
     echo "iOS: $IOS_FULL (UA format: $IOS_UA)"
@@ -61,24 +69,20 @@ else
 fi
 
 echo "Fetching Android version (for Firefox UA)..."
-ANDROID_MAJOR=$(curl -sf \
-    "https://www.wikidata.org/w/api.php?action=wbgetentities&format=json&ids=Q94&props=claims" | \
-    jq -r '[.entities.Q94.claims.P348[] |
-            select(.rank == "preferred") |
-            .mainsnak.datavalue.value] |
-           sort_by(split(".") | map(tonumber)) | last | split(".") | .[0]' 2>/dev/null || echo "")
+WIKI_JSON=$(curl -sSkL -A "Mozilla/5.0" "https://www.wikidata.org/w/api.php?action=wbgetentities&format=json&ids=Q94&props=claims" 2>/dev/null || echo "")
+ANDROID_MAJOR=$(echo "$WIKI_JSON" | jq -r '[.entities.Q94.claims.P348[] | select(.rank == "preferred") | .mainsnak.datavalue.value] | sort_by(split(".") | map(tonumber)) | last | split(".") | .[0]' 2>/dev/null || echo "")
 
 # ---------- Read current versions directly from User-Agent strings ----------
-CURRENT_CHROME_MAJOR=$(grep -oP 'Chrome/\K[0-9]+' "$CHROME_FILE" | head -1)
-CURRENT_CHROME_WIN_BUILD=$(grep -oP 'Chrome/[0-9]+\.0\.\K[0-9]+\.[0-9]+' "$CHROME_FILE" | head -1 || echo "")
+CURRENT_CHROME_MAJOR=$(sed -n 's/.*Chrome\/\([0-9]*\)\..*/\1/p' "$CHROME_FILE" | head -1)
+CURRENT_CHROME_WIN_BUILD=$(sed -n 's/.*Chrome\/[0-9]*\.0\.\([0-9]*\.[0-9]*\).*/\1/p' "$CHROME_FILE" | head -1 || echo "")
 
-CURRENT_FIREFOX_MAJORMINOR=$(grep -oP 'Firefox/\K[0-9]+\.[0-9]+' "$FIREFOX_FILE" | head -1)
-CURRENT_IOS_CHROME=$(grep -oP 'iPhone; CPU iPhone OS \K[0-9_]+' "$CHROME_FILE" | head -1 || echo "")
-CURRENT_IOS_FIREFOX=$(grep -oP 'iPhone; CPU iPhone OS \K[0-9_]+' "$FIREFOX_FILE" | head -1 || echo "")
-CURRENT_ANDROID_FIREFOX=$(grep -oP 'Android \K[0-9]+(?=;)' "$FIREFOX_FILE" | head -1 || echo "")
+CURRENT_FIREFOX_MAJORMINOR=$(sed -n 's/.*Firefox\/\([0-9]*\.[0-9]*\).*/\1/p' "$FIREFOX_FILE" | head -1)
+CURRENT_IOS_CHROME=$(sed -n 's/.*iPhone; CPU iPhone OS \([0-9_]*\).*/\1/p' "$CHROME_FILE" | head -1 || echo "")
+CURRENT_IOS_FIREFOX=$(sed -n 's/.*iPhone; CPU iPhone OS \([0-9_]*\).*/\1/p' "$FIREFOX_FILE" | head -1 || echo "")
+CURRENT_ANDROID_FIREFOX=$(sed -n 's/.*Android \([0-9]*\);.*/\1/p' "$FIREFOX_FILE" | head -1 || echo "")
 
-CURRENT_IOS_SAFARI=$(grep -oP 'iPhone; CPU iPhone OS \K[0-9_]+' "$SAFARI_FILE" | head -1 || echo "")
-CURRENT_SAFARI_VERSION=$(grep -oP 'Version/\K[0-9]+\.[0-9]+' "$SAFARI_FILE" | head -1 || echo "")
+CURRENT_IOS_SAFARI=$(sed -n 's/.*iPhone; CPU iPhone OS \([0-9_]*\).*/\1/p' "$SAFARI_FILE" | head -1 || echo "")
+CURRENT_SAFARI_VERSION=$(sed -n 's/.*Version\/\([0-9]*\.[0-9]*\).*/\1/p' "$SAFARI_FILE" | head -1 || echo "")
 
 echo ""
 echo "Current Chrome: $CURRENT_CHROME_MAJOR (win build=$CURRENT_CHROME_WIN_BUILD)"
@@ -96,18 +100,18 @@ if [ "$CHROME_MAJOR" != "$CURRENT_CHROME_MAJOR" ]; then
     UPDATED=true
 
     # Update Sec-CH-UA header
-    sed -i "s/\"Google Chrome\";v=\"${CURRENT_CHROME_MAJOR}\"/\"Google Chrome\";v=\"${CHROME_MAJOR}\"/g" "$CHROME_FILE"
-    sed -i "s/\"Chromium\";v=\"${CURRENT_CHROME_MAJOR}\"/\"Chromium\";v=\"${CHROME_MAJOR}\"/g" "$CHROME_FILE"
+    sed_i "s/\"Google Chrome\";v=\"${CURRENT_CHROME_MAJOR}\"/\"Google Chrome\";v=\"${CHROME_MAJOR}\"/g" "$CHROME_FILE"
+    sed_i "s/\"Chromium\";v=\"${CURRENT_CHROME_MAJOR}\"/\"Chromium\";v=\"${CHROME_MAJOR}\"/g" "$CHROME_FILE"
 
     # Update User-Agent strings
-    sed -i "s/Chrome\/${CURRENT_CHROME_MAJOR}\.0\.0\.0/Chrome\/${CHROME_MAJOR}.0.0.0/g" "$CHROME_FILE"
+    sed_i "s/Chrome\/${CURRENT_CHROME_MAJOR}\.0\.0\.0/Chrome\/${CHROME_MAJOR}.0.0.0/g" "$CHROME_FILE"
 
     if [ -n "$CURRENT_CHROME_WIN_BUILD" ] && [ -n "$CHROME_WIN_BUILD" ]; then
-        sed -i "s/Chrome\/${CURRENT_CHROME_MAJOR}\.0\.${CURRENT_CHROME_WIN_BUILD}/Chrome\/${CHROME_MAJOR}.0.${CHROME_WIN_BUILD}/g" "$CHROME_FILE"
+        sed_i "s/Chrome\/${CURRENT_CHROME_MAJOR}\.0\.${CURRENT_CHROME_WIN_BUILD}/Chrome\/${CHROME_MAJOR}.0.${CHROME_WIN_BUILD}/g" "$CHROME_FILE"
     fi
 
-    sed -i "s/Chrome\/${CURRENT_CHROME_MAJOR}\.0\.[0-9]*\.[0-9]*/Chrome\/${CHROME_MAJOR}.0.${CHROME_ANDROID_BUILD}/g" "$CHROME_FILE"
-    sed -i "s/CriOS\/${CURRENT_CHROME_MAJOR}\.0\.[0-9]*\.[0-9]*/CriOS\/${CHROME_MAJOR}.0.${CHROME_IOS_BUILD}/g" "$CHROME_FILE"
+    sed_i "s/Chrome\/${CURRENT_CHROME_MAJOR}\.0\.[0-9]*\.[0-9]*/Chrome\/${CHROME_MAJOR}.0.${CHROME_ANDROID_BUILD}/g" "$CHROME_FILE"
+    sed_i "s/CriOS\/${CURRENT_CHROME_MAJOR}\.0\.[0-9]*\.[0-9]*/CriOS\/${CHROME_MAJOR}.0.${CHROME_IOS_BUILD}/g" "$CHROME_FILE"
 
     echo "Chrome updated."
 else
@@ -119,9 +123,9 @@ if [ "$FIREFOX_MAJOR_MINOR" != "$CURRENT_FIREFOX_MAJORMINOR" ]; then
     echo "Updating Firefox strings: $CURRENT_FIREFOX_MAJORMINOR -> $FIREFOX_MAJOR_MINOR"
     UPDATED=true
 
-    sed -i "s/rv:${CURRENT_FIREFOX_MAJORMINOR}/rv:${FIREFOX_MAJOR_MINOR}/g" "$FIREFOX_FILE"
-    sed -i "s/Firefox\/${CURRENT_FIREFOX_MAJORMINOR}/Firefox\/${FIREFOX_MAJOR_MINOR}/g" "$FIREFOX_FILE"
-    sed -i "s/FxiOS\/${CURRENT_FIREFOX_MAJORMINOR}/FxiOS\/${FIREFOX_MAJOR_MINOR}/g" "$FIREFOX_FILE"
+    sed_i "s/rv:${CURRENT_FIREFOX_MAJORMINOR}/rv:${FIREFOX_MAJOR_MINOR}/g" "$FIREFOX_FILE"
+    sed_i "s/Firefox\/${CURRENT_FIREFOX_MAJORMINOR}/Firefox\/${FIREFOX_MAJOR_MINOR}/g" "$FIREFOX_FILE"
+    sed_i "s/FxiOS\/${CURRENT_FIREFOX_MAJORMINOR}/FxiOS\/${FIREFOX_MAJOR_MINOR}/g" "$FIREFOX_FILE"
 
     echo "Firefox updated."
 else
@@ -136,7 +140,7 @@ if [ -n "$IOS_FULL" ]; then
         echo "Updating Safari strings: $CURRENT_SAFARI_VERSION -> $SAFARI_VERSION"
         UPDATED=true
 
-        sed -i "s/Version\/${CURRENT_SAFARI_VERSION}/Version\/${SAFARI_VERSION}/g" "$SAFARI_FILE"
+        sed_i "s/Version\/${CURRENT_SAFARI_VERSION}/Version\/${SAFARI_VERSION}/g" "$SAFARI_FILE"
 
         echo "Safari updated."
     else
@@ -148,19 +152,19 @@ fi
 if [ -n "$IOS_UA" ]; then
     if [ -n "$CURRENT_IOS_CHROME" ] && [ "$IOS_UA" != "$CURRENT_IOS_CHROME" ]; then
         echo "Updating Chrome iOS OS: $CURRENT_IOS_CHROME -> $IOS_UA"
-        sed -i "s/iPhone; CPU iPhone OS ${CURRENT_IOS_CHROME}/iPhone; CPU iPhone OS ${IOS_UA}/g" "$CHROME_FILE"
+        sed_i "s/iPhone; CPU iPhone OS ${CURRENT_IOS_CHROME}/iPhone; CPU iPhone OS ${IOS_UA}/g" "$CHROME_FILE"
         UPDATED=true
     fi
 
     if [ -n "$CURRENT_IOS_FIREFOX" ] && [ "$IOS_UA" != "$CURRENT_IOS_FIREFOX" ]; then
         echo "Updating Firefox iOS OS: $CURRENT_IOS_FIREFOX -> $IOS_UA"
-        sed -i "s/iPhone; CPU iPhone OS ${CURRENT_IOS_FIREFOX}/iPhone; CPU iPhone OS ${IOS_UA}/g" "$FIREFOX_FILE"
+        sed_i "s/iPhone; CPU iPhone OS ${CURRENT_IOS_FIREFOX}/iPhone; CPU iPhone OS ${IOS_UA}/g" "$FIREFOX_FILE"
         UPDATED=true
     fi
 
     if [ -n "$CURRENT_IOS_SAFARI" ] && [ "$IOS_UA" != "$CURRENT_IOS_SAFARI" ]; then
         echo "Updating Safari iOS OS: $CURRENT_IOS_SAFARI -> $IOS_UA"
-        sed -i "s/iPhone; CPU iPhone OS ${CURRENT_IOS_SAFARI}/iPhone; CPU iPhone OS ${IOS_UA}/g" "$SAFARI_FILE"
+        sed_i "s/iPhone; CPU iPhone OS ${CURRENT_IOS_SAFARI}/iPhone; CPU iPhone OS ${IOS_UA}/g" "$SAFARI_FILE"
         UPDATED=true
     fi
 fi
@@ -169,7 +173,7 @@ fi
 if [ -n "$ANDROID_MAJOR" ] && [ -n "$CURRENT_ANDROID_FIREFOX" ]; then
     if [ "$ANDROID_MAJOR" != "$CURRENT_ANDROID_FIREFOX" ]; then
         echo "Updating Firefox Android OS: $CURRENT_ANDROID_FIREFOX -> $ANDROID_MAJOR"
-        sed -i "s/Android ${CURRENT_ANDROID_FIREFOX};/Android ${ANDROID_MAJOR};/g" "$FIREFOX_FILE"
+        sed_i "s/Android ${CURRENT_ANDROID_FIREFOX};/Android ${ANDROID_MAJOR};/g" "$FIREFOX_FILE"
         UPDATED=true
     fi
 fi
@@ -183,7 +187,7 @@ UTLS_LATEST=""
 
 if command -v go &>/dev/null; then
     UTLS_CURRENT=$(grep 'refraction-networking/utls' go.mod | awk '{print $2}')
-    UTLS_LATEST=$(go list -m -json github.com/refraction-networking/utls@latest 2>/dev/null | jq -r '.Version' || echo "")
+    UTLS_LATEST=$(go list -m github.com/refraction-networking/utls@latest 2>/dev/null | awk '{print $2}' || echo "")
 
     if [ -n "$UTLS_LATEST" ] && [ "$UTLS_LATEST" != "$UTLS_CURRENT" ]; then
         echo "Updating utls: $UTLS_CURRENT -> $UTLS_LATEST"
