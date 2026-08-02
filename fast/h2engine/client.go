@@ -31,6 +31,7 @@ const (
 type ClientOpts struct {
 	PingInterval time.Duration
 	OnRTT        func(time.Duration)
+	Settings     *Settings
 }
 
 // Context maps a fasthttp request/response pair to an asynchronous stream execution.
@@ -62,13 +63,15 @@ type Client struct {
 	lck         sync.Mutex
 	conns       list.List
 	orderedKeys []string
+	settings    *Settings
 }
 
 // NewClient constructs an HTTP/2 Client instance using dialer and options.
 func NewClient(d *Dialer, opts ClientOpts) *Client {
 	return &Client{
-		d:     d,
-		onRTT: opts.OnRTT,
+		d:        d,
+		onRTT:    opts.OnRTT,
+		settings: opts.Settings,
 	}
 }
 
@@ -95,6 +98,7 @@ func (cl *Client) createConn(ctx context.Context) (*Conn, *list.Element, error) 
 	c, err := cl.d.DialContext(ctx, ConnOpts{
 		PingInterval: cl.d.PingInterval,
 		OnDisconnect: cl.onConnectionDropped,
+		Settings:     cl.settings,
 	})
 	if err != nil {
 		return nil, nil, err

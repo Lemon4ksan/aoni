@@ -6,31 +6,45 @@ package fast
 
 import (
 	"crypto/tls"
+	"io"
 	"maps"
 	"net/http"
 	"net/url"
 	"strconv"
 
 	"github.com/lemon4ksan/aoni"
+	"github.com/lemon4ksan/aoni/option"
 )
 
 // NewStdClient adapts a fast [Client] into a standard [*http.Client].
 //
 // Bridges fasthttp with standard library HTTP abstractions.
+// The returned client does NOT follow redirects: it is intended to be used as
+// an [http.RoundTripper] backend so that the outer [*http.Client] retains full
+// control over the redirect policy (including [http.Client.CheckRedirect]).
 func NewStdClient(c *Client) *http.Client {
 	return &http.Client{
 		Transport: NewTransport(c),
+		CheckRedirect: func(_ *http.Request, _ []*http.Request) error {
+			return http.ErrUseLastResponse
+		},
 	}
 }
 
 // NewTransport constructs an [http.RoundTripper] adapter backed by a fast [Client].
+// The Transport dispatches exactly one request per call (redirect limit = 0)
+// so the outer [*http.Client] retains full redirect control.
 func NewTransport(c *Client) *Transport {
-	return &Transport{client: c}
+	return &Transport{
+		client:           c,
+		noRedirectClient: c.With(option.WithRedirectLimit(0)),
+	}
 }
 
 // Transport adapts a fast [Client] to satisfy the standard [http.RoundTripper] contract.
 type Transport struct {
-	client *Client
+	client           *Client
+	noRedirectClient *Client
 }
 
 // RoundTrip satisfies [http.RoundTripper], executing standard requests over fasthttp.
@@ -47,6 +61,8 @@ func (t *Transport) RoundTrip(req *http.Request) (*http.Response, error) {
 	}
 
 	fastReq := NewRequest(nil)
+	defer fastReq.Release()
+
 	fastReq.SetContext(req.Context())
 	fastReq.SetMethod(req.Method)
 	fastReq.SetURL(req.URL.String())
@@ -61,7 +77,7 @@ func (t *Transport) RoundTrip(req *http.Request) (*http.Response, error) {
 		fastReq.SetBodyStream(req.Body, req.ContentLength)
 	}
 
-	resp, err := t.client.Do(fastReq)
+	resp, err := t.noRedirectClient.Do(fastReq)
 	if err != nil {
 		return nil, err
 	}
@@ -70,7 +86,7 @@ func (t *Transport) RoundTrip(req *http.Request) (*http.Response, error) {
 		StatusCode:    resp.StatusCode(),
 		Status:        resp.Status(),
 		Header:        make(http.Header),
-		Body:          resp.BodyStream(),
+		Body:          &responseBodyCloser{ReadCloser: resp.BodyStream(), resp: resp},
 		ContentLength: resolveContentLength(resp),
 		Uncompressed:  resp.Uncompressed(),
 		Request:       req,
@@ -86,6 +102,24 @@ func (t *Transport) RoundTrip(req *http.Request) (*http.Response, error) {
 	}
 
 	return httpResp, nil
+}
+
+type responseBodyCloser struct {
+	io.ReadCloser
+	resp aoni.Response
+}
+
+func (r *responseBodyCloser) Close() error {
+	var err error
+	if r.ReadCloser != nil {
+		err = r.ReadCloser.Close()
+	}
+
+	if r.resp != nil {
+		_ = r.resp.Close()
+	}
+
+	return err
 }
 
 func copyHeaders(dst aoni.Request, src http.Header) {

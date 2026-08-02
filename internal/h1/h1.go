@@ -105,7 +105,8 @@ func ReorderHeaders(raw []byte, order []string) ([]byte, bool) {
 
 	for _, targetKey := range order {
 		for i := 0; i < numHeaders; i++ {
-			if (writtenBits&(1<<i)) == 0 && bytesconv.EqualFoldASCII(bytesconv.B2S(parsed[i].key), targetKey) {
+			if (writtenBits&(1<<i)) == 0 && (bytesconv.EqualFoldASCII(bytesconv.B2S(parsed[i].key), targetKey) ||
+				(targetKey == ":authority" && bytesconv.EqualFoldASCII(bytesconv.B2S(parsed[i].key), "host"))) {
 				newHeader.Write(parsed[i].line)
 				newHeader.WriteString(lineTerminator)
 

@@ -10,6 +10,7 @@ import (
 	stdio "io"
 	"net/http"
 	"net/url"
+	"reflect"
 	"strconv"
 	"strings"
 
@@ -440,6 +441,20 @@ func (a *HTTPDoerAdapter) Do(req Request) (Response, error) {
 		if err != nil {
 			return nil, err
 		}
+
+		if engReq := req.EngineRequest(); engReq != nil {
+			if typeVal := reflect.TypeOf(engReq).String(); strings.Contains(typeVal, "fasthttp.Request") {
+				val := reflect.ValueOf(engReq)
+				if peekHost := val.MethodByName("Header").Call(nil); len(peekHost) > 0 {
+					hdr := peekHost[0]
+					if hostBytes := hdr.MethodByName("Peek").
+						Call([]reflect.Value{reflect.ValueOf("Host")}); len(hostBytes) > 0 &&
+						!hostBytes[0].IsNil() {
+						httpReq.Host = string(hostBytes[0].Bytes())
+					}
+				}
+			}
+		}
 	}
 
 	resp, err := a.doer.Do(httpReq) //nolint:bodyclose
@@ -448,6 +463,24 @@ func (a *HTTPDoerAdapter) Do(req Request) (Response, error) {
 	}
 
 	return NewStdResponse(resp), nil
+}
+
+type responseBodyCloser struct {
+	stdio.ReadCloser
+	resp Response
+}
+
+func (r *responseBodyCloser) Close() error {
+	var err error
+	if r.ReadCloser != nil {
+		err = r.ReadCloser.Close()
+	}
+
+	if r.resp != nil {
+		_ = r.resp.Close()
+	}
+
+	return err
 }
 
 // RequestDoerAdapter adapts a [RequestDoer] to the legacy [HTTPDoer] interface.
@@ -490,7 +523,7 @@ func (a *RequestDoerAdapter) Do(req *http.Request) (*http.Response, error) {
 		StatusCode:    resp.StatusCode(),
 		Status:        resp.Status(),
 		Header:        make(http.Header),
-		Body:          resp.BodyStream(),
+		Body:          &responseBodyCloser{ReadCloser: resp.BodyStream(), resp: resp},
 		ContentLength: -1,
 		Uncompressed:  resp.Uncompressed(),
 		Request:       req,

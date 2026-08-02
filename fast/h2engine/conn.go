@@ -37,6 +37,7 @@ type ConnOpts struct {
 	PingInterval        time.Duration
 	DisablePingChecking bool
 	OnDisconnect        func(ctx context.Context, c *Conn)
+	Settings            *Settings
 }
 
 // Conn manages a multiplexed HTTP/2 connection over a net.Conn socket.
@@ -102,9 +103,15 @@ func NewConn(c net.Conn, opts ConnOpts) *Conn {
 	nc.windowCond = sync.NewCond(&nc.windowMu)
 	nc.current.Reset()
 	nc.serverS.Reset() // Initialize server settings with default maxStreams = 100 (RFC 7540)
-	nc.current.SetMaxWindowSize(6291456)
-	nc.current.SetMaxFrameSize(maxFrameSize)
-	nc.current.SetPush(false)
+
+	if opts.Settings != nil {
+		opts.Settings.CopyTo(&nc.current)
+	} else {
+		nc.current.SetMaxWindowSize(6291456)
+		nc.current.SetMaxFrameSize(defaultDataFrameSize)
+		nc.current.SetPush(false)
+	}
+
 	nc.enc.DisableDynamicTable = false
 
 	return nc

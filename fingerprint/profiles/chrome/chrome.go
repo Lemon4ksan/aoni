@@ -73,15 +73,15 @@ var defaultHelloQUICSpec = utls.ClientHelloSpec{
 }
 
 // SecCHUA is the Chrome user agent string.
-const SecCHUA = `"Not:A-Brand";v="99", "Google Chrome";v="150", "Chromium";v="150"`
+const SecCHUA = `"Google Chrome";v="151", "Chromium";v="151", "Not_A Brand";v="24"`
 
 // Various user agent strings for different platforms.
 const (
-	UserAgentWindows = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/150.0.0.0 Safari/537.36"
-	UserAgentMacOS   = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/150.0.0.0 Safari/537.36"
-	UserAgentLinux   = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/150.0.0.0 Safari/537.36"
-	UserAgentAndroid = "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/150.0.7871.124 Mobile Safari/537.36"
-	UserAgentIOS     = "Mozilla/5.0 (iPhone; CPU iPhone OS 26_2_1 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) CriOS/150.0.7922.25 Mobile/15E148 Safari/604.1"
+	UserAgentWindows = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/151.0.0.0 Safari/537.36"
+	UserAgentMacOS   = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/151.0.0.0 Safari/537.36"
+	UserAgentLinux   = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/151.0.0.0 Safari/537.36"
+	UserAgentAndroid = "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/151.0.7922.71 Mobile Safari/537.36"
+	UserAgentIOS     = "Mozilla/5.0 (iPhone; CPU iPhone OS 17_6_1 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) CriOS/151.0.7922.57 Mobile/15E148 Safari/604.1"
 
 	PlatformWindows = `"Windows"`
 	PlatformMacOS   = `"macOS"`
@@ -177,7 +177,7 @@ func configureH2Desktop(s *profiles.H2Settings) {
 	s.MaxHeaderListSize = 262144
 	s.ConnectionFlow = 15663105
 	s.PriorityWeight = 255
-	s.PriorityExclusive = true
+	s.PriorityExclusive = false
 }
 
 func configureH3Desktop(s *profiles.H3Settings) {

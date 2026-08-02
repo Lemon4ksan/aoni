@@ -343,6 +343,11 @@ func (c *Client) dispatchPipeline(
 		startTime = time.Now()
 	}
 
+	if reqAdapter != nil {
+		c.applyDefaultHeaders(reqAdapter)
+		c.applyModifiers(reqAdapter, nil)
+	}
+
 	if c.config.Defaults.Pipeline.ProxyFailover == nil &&
 		c.config.Network.HedgingDelay <= 0 &&
 		c.config.Defaults.Pipeline.Hedging == nil {
@@ -605,10 +610,21 @@ func (c *Client) applyCookies(ctx context.Context, req *fasthttp.Request) {
 		return
 	}
 
-	req.Header.Del("Cookie")
+	var cookieHeader strings.Builder
+	for i, c := range cookies {
+		if i > 0 {
+			cookieHeader.WriteString("; ")
+		}
 
-	for _, ck := range cookies {
-		req.Header.SetCookie(ck.Name, ck.Value)
+		cookieHeader.WriteString(c.Name)
+		cookieHeader.WriteByte('=')
+		cookieHeader.WriteString(c.Value)
+	}
+
+	if existing := req.Header.Peek("Cookie"); len(existing) > 0 {
+		req.Header.Set("Cookie", string(existing)+"; "+cookieHeader.String())
+	} else {
+		req.Header.Set("Cookie", cookieHeader.String())
 	}
 }
 
@@ -809,6 +825,10 @@ func (c *Client) executeWithRedirects(
 	var redirectsFollowed int
 
 	for {
+		if reqAdapter != nil && redirectsFollowed == 0 {
+			c.applyModifiers(reqAdapter, nil)
+		}
+
 		c.applyCookies(ctx, fastReq)
 		fastReq.URI().CopyTo(currentURI)
 		extractUserInfoAndSetAuth(fastReq)
@@ -841,11 +861,27 @@ func (c *Client) executeWithRedirects(
 
 		nextURI := fasthttp.AcquireURI()
 
-		fastReq.URI().UpdateBytes(location)
-		fastReq.URI().CopyTo(nextURI)
+		currentURI.CopyTo(nextURI)
+		nextURI.UpdateBytes(location)
+
+		if len(nextURI.Scheme()) == 0 {
+			nextURI.SetSchemeBytes(currentURI.Scheme())
+		}
+
+		if len(nextURI.Host()) == 0 {
+			nextURI.SetHostBytes(currentURI.Host())
+		}
+
+		nextURI.CopyTo(fastReq.URI())
 
 		if !isSameHost(currentURI, nextURI) {
 			scrubSensitiveHeaders(fastReq, currentURI, nextURI)
+
+			if len(fastReq.Header.Peek("sec-fetch-site")) > 0 {
+				fastReq.Header.Set("sec-fetch-site", "cross-site")
+			}
+		} else if len(fastReq.Header.Peek("sec-fetch-site")) > 0 {
+			fastReq.Header.Set("sec-fetch-site", "same-origin")
 		}
 
 		if isHTTPSDowngrade(currentURI, nextURI) {
@@ -1012,6 +1048,22 @@ func (c *Client) dispatchSingleRequest(
 
 		c.removeH2Client(host)
 		fastResp.Reset()
+
+		if c.config.Fingerprint.BrowserID != aoni.BrowserNone {
+			freshH2Cl := c.getH2Client(host)
+
+			trFresh, errFresh := freshH2Cl.DoWithTrailers(ctx, fastReq, fastResp)
+			if errFresh == nil {
+				if altSvc := fastResp.Header.Peek("Alt-Svc"); len(altSvc) > 0 {
+					globalAltSvcCache.Record(host, string(altSvc))
+				}
+
+				return trFresh, nil, false
+			}
+
+			c.removeH2Client(host)
+			fastResp.Reset()
+		}
 	}
 
 	err, autoReleased = c.executeFastHTTP(ctx, fastReq, fastResp)
@@ -1189,8 +1241,21 @@ func (c *Client) getH2Client(host string) *h2engine.Client {
 		},
 	}
 
+	var h2s *h2engine.Settings
+	if c.config.Fingerprint.H2Settings != nil {
+		s := c.config.Fingerprint.H2Settings
+		h2s = &h2engine.Settings{}
+		h2s.SetHeaderTableSize(s.HeaderTableSize)
+		h2s.SetPush(s.EnablePush == 1)
+		h2s.SetMaxConcurrentStreams(s.MaxConcurrentStreams)
+		h2s.SetMaxWindowSize(s.InitialWindowSize)
+		h2s.SetMaxFrameSize(s.MaxFrameSize)
+		h2s.SetMaxHeaderListSize(s.MaxHeaderListSize)
+	}
+
 	cl := h2engine.NewClient(dialer, h2engine.ClientOpts{
 		PingInterval: 15 * time.Second,
+		Settings:     h2s,
 	})
 
 	if len(c.config.Fingerprint.HeaderOrder) > 0 {
@@ -1302,14 +1367,34 @@ func (c *Client) executeFastHTTP(
 		return err, false
 	}
 
+	// Prevent double-TLS while ensuring fasthttp dials port 443
+	isHTTPS := bytes.EqualFold(req.URI().Scheme(), []byte("https"))
 	origHost := req.URI().Host()
 	hasHostHeader := len(req.Header.Peek("Host")) > 0
 
-	if !hasHostHeader && len(origHost) > 0 {
-		req.Header.SetHostBytes(origHost)
+	if isHTTPS {
+		hostStr := string(origHost)
+		if !hasHostHeader {
+			req.Header.SetHostBytes(origHost)
+		}
+
+		if !strings.Contains(hostStr, ":") {
+			req.URI().SetHost(hostStr + ":443")
+		}
+
+		req.URI().SetScheme("http")
 	}
 
-	isHTTPS := bytes.EqualFold(req.URI().Scheme(), []byte("https"))
+	defer func() {
+		if isHTTPS {
+			req.URI().SetScheme("https")
+			req.URI().SetHostBytes(origHost)
+
+			if !hasHostHeader {
+				req.Header.Del("Host")
+			}
+		}
+	}()
 
 	var proxyURL *url.URL
 	if c.config.Network.ProxyAddr != nil {
@@ -1333,15 +1418,29 @@ func (c *Client) executeFastHTTP(
 
 	// Fast path: if context is standard Background/TODO without active cancellation, execute synchronously!
 	if ctx == context.Background() || ctx == context.TODO() || ctx.Done() == nil {
+		var err error
 		if deadline, ok := ctx.Deadline(); ok {
-			return c.engine.DoDeadline(req, resp, deadline), false
+			err = c.engine.DoDeadline(req, resp, deadline)
+		} else if c.config.Engine.Timeout > 0 {
+			err = c.engine.DoTimeout(req, resp, c.config.Engine.Timeout)
+		} else {
+			err = c.engine.Do(req, resp)
 		}
 
-		if c.config.Engine.Timeout > 0 {
-			return c.engine.DoTimeout(req, resp, c.config.Engine.Timeout), false
+		if err != nil && isStaleKeepAliveError(err) {
+			fastRespReset(resp)
+
+			if isHTTPS {
+				req.URI().SetScheme("https")
+				req.URI().SetHostBytes(origHost)
+			}
+
+			req.SetConnectionClose()
+
+			return c.engine.Do(req, resp), false
 		}
 
-		return c.engine.Do(req, resp), false
+		return err, false
 	}
 
 	// Slow path: context carries active cancellation (channel + watcher goroutine)
@@ -1384,6 +1483,14 @@ func (c *Client) executeFastHTTP(
 	case err := <-done:
 		if err != nil && isStaleKeepAliveError(err) {
 			fastRespReset(resp)
+
+			if isHTTPS {
+				req.URI().SetScheme("https")
+				req.URI().SetHostBytes(origHost)
+			}
+
+			req.SetConnectionClose()
+
 			return c.engine.Do(req, resp), false
 		}
 
@@ -1399,10 +1506,12 @@ func isStaleKeepAliveError(err error) bool {
 	errStr := strings.ToLower(err.Error())
 
 	return strings.Contains(errStr, "connection closed") ||
+		strings.Contains(errStr, "closed connection") ||
 		strings.Contains(errStr, "broken pipe") ||
 		strings.Contains(errStr, "eof") ||
 		strings.Contains(errStr, "reading response headers") ||
-		strings.Contains(errStr, "use of closed")
+		strings.Contains(errStr, "use of closed") ||
+		strings.Contains(errStr, "reset by peer")
 }
 
 func fastRespReset(resp *fasthttp.Response) {
