@@ -573,8 +573,7 @@ func TestWSRawConn_FrameTooLarge(t *testing.T) {
 
 	buf := make([]byte, 100)
 	_, err := raw.Read(buf)
-	assert.Error(t, err)
-	assert.Contains(t, err.Error(), "payload too large")
+	assert.ErrorIs(t, err, ErrFrameTooLarge)
 }
 
 func TestWSRawConn_ControlFramesAndOpcodes(t *testing.T) {

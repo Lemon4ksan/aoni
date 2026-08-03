@@ -14,6 +14,12 @@ var (
 	// ErrUnsupportedWSScheme indicates an invalid URI scheme was provided (expected ws:// or wss://).
 	ErrUnsupportedWSScheme = errors.New("aoni ws: unsupported scheme (expected ws or wss)")
 
+	// ErrInvalidWellKnownSuffix indicates that an empty or invalid well-known URI suffix was provided.
+	ErrInvalidWellKnownSuffix = errors.New("aoni ws: invalid well-known URI suffix")
+
+	// ErrPathTraversalBlocked indicates a path traversal attempt was detected in a well-known URI.
+	ErrPathTraversalBlocked = errors.New("aoni ws: path traversal blocked in well-known URI")
+
 	// ErrH2ConnectNotSupported indicates the HTTP/2 peer does not support Extended CONNECT (RFC 8441).
 	ErrH2ConnectNotSupported = errors.New("aoni ws: http2 extended connect not supported by peer")
 
@@ -36,5 +42,5 @@ var (
 	ErrControlFrameTooLarge = errors.New("aoni ws: control frame payload cannot exceed 125 bytes")
 
 	// ErrFrameTooLarge indicates an incoming frame exceeded the maximum allowed memory buffer size.
-	ErrFrameTooLarge = errors.New("aoni ws: frame payload too large")
+	ErrFrameTooLarge = errors.New("aoni ws: frame payload exceeds maximum allowed size")
 )

@@ -24,12 +24,55 @@ import (
 	"github.com/lemon4ksan/aoni/internal/bytesconv"
 )
 
-const websocketMagicGUID = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"
+const (
+	websocketMagicGUID = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"
+
+	// WellKnownPrefix specifies the RFC 5785 / RFC 8307 path prefix for well-known URIs.
+	WellKnownPrefix = "/.well-known/"
+)
 
 // DialWebSocketConfig specifies buffer sizes for WebSocket connections.
 type DialWebSocketConfig struct {
 	ReadBufferSize  int
 	WriteBufferSize int
+}
+
+// BuildWellKnownURI constructs an RFC 8307 compliant well-known WebSocket URI.
+//
+// Preconditions:
+//   - scheme must be "ws" or "wss".
+//   - suffix must not be empty or contain path traversal ("..").
+func BuildWellKnownURI(scheme, host, suffix string) (string, error) {
+	cleanScheme := strings.ToLower(strings.TrimSpace(scheme))
+	if cleanScheme != "ws" && cleanScheme != "wss" {
+		return "", ErrUnsupportedWSScheme
+	}
+
+	cleanSuffix := strings.TrimPrefix(strings.TrimSpace(suffix), "/")
+	if cleanSuffix == "" {
+		return "", ErrInvalidWellKnownSuffix
+	}
+
+	if strings.Contains(cleanSuffix, "..") {
+		return "", ErrPathTraversalBlocked
+	}
+
+	return cleanScheme + "://" + host + WellKnownPrefix + cleanSuffix, nil
+}
+
+// DialWellKnown establishes a WebSocket connection to an RFC 8307 well-known URI (e.g. wss://host/.well-known/suffix).
+func DialWellKnown(
+	ctx context.Context,
+	dialer aoni.WSDialer,
+	scheme, host, suffix string,
+	mods ...aoni.RequestModifier,
+) (Conn, *http.Response, error) {
+	targetURL, err := BuildWellKnownURI(scheme, host, suffix)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	return DialWebSocket(ctx, dialer, targetURL, mods...)
 }
 
 // DialWebSocket establishes an encrypted or plain WebSocket connection using aoni's
@@ -103,13 +146,19 @@ func parseWSURL(rawURL string) (*parsedURL, error) {
 		return nil, ErrUnsupportedWSScheme
 	}
 
+	path := generic.Coalesce(u.RequestURI(), "/")
+
+	if strings.HasPrefix(path, WellKnownPrefix) && strings.Contains(path, "..") {
+		return nil, ErrPathTraversalBlocked
+	}
+
 	defaultPort := generic.Ternary(scheme == "wss", "443", "80")
 
 	return &parsedURL{
 		scheme: scheme,
 		host:   u.Hostname(),
 		port:   generic.Coalesce(u.Port(), defaultPort),
-		path:   generic.Coalesce(u.RequestURI(), "/"),
+		path:   path,
 	}, nil
 }
 
@@ -221,7 +270,7 @@ func performHTTP1Handshake(
 
 func tokenContainsValue(header http.Header, name, value string) bool {
 	for _, s := range header[name] {
-		for _, token := range strings.Split(s, ",") {
+		for token := range strings.SplitSeq(s, ",") {
 			if bytesconv.EqualFoldASCII(strings.TrimSpace(token), value) {
 				return true
 			}
