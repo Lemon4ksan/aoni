@@ -164,7 +164,7 @@ func tryH2ExtendedConnect(
 		return nil, nil, false
 	}
 
-	wsConn, err := dialH2ExtendedConnect(ctx, baseConn, targetURL, parsed.host)
+	wsConn, respHeaders, err := dialH2ExtendedConnect(ctx, baseConn, targetURL, parsed.host, req)
 	if err != nil {
 		return nil, nil, false
 	}
@@ -173,7 +173,7 @@ func tryH2ExtendedConnect(
 		StatusCode: http.StatusOK,
 		Proto:      "HTTP/2.0",
 		ProtoMajor: 2,
-		Header:     make(http.Header),
+		Header:     respHeaders,
 		Body:       http.NoBody,
 		Request:    req,
 	}

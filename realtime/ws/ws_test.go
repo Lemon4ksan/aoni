@@ -965,7 +965,7 @@ func TestDialH2ExtendedConnect_Success(t *testing.T) {
 	}()
 
 	ctx := context.Background()
-	conn, err := dialH2ExtendedConnect(ctx, client, "wss://example.com/ws", "example.com")
+	conn, _, err := dialH2ExtendedConnect(ctx, client, "wss://example.com/ws", "example.com", nil)
 	require.NoError(t, err)
 	assert.NotNil(t, conn)
 	require.NoError(t, <-errCh)
@@ -1067,7 +1067,7 @@ func TestDialH2ExtendedConnect_Failures(t *testing.T) {
 				errCh <- nil
 			}()
 
-			_, err := dialH2ExtendedConnect(t.Context(), client, "wss://example.com/ws", "example.com")
+			_, _, err := dialH2ExtendedConnect(t.Context(), client, "wss://example.com/ws", "example.com", nil)
 			assert.ErrorIs(t, err, tt.expectErr)
 			require.NoError(t, <-errCh)
 		})
@@ -1178,7 +1178,7 @@ func TestH2Preface_ContextCancellation(t *testing.T) {
 			defer conn.Close()
 
 			start := time.Now()
-			_, err = dialH2ExtendedConnect(ctx, conn, "ws://example.com/ws", "example.com")
+			_, _, err = dialH2ExtendedConnect(ctx, conn, "ws://example.com/ws", "example.com", nil)
 			elapsed := time.Since(start)
 
 			assert.Error(t, err)

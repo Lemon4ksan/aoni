@@ -13,6 +13,8 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"net/http"
+	"strings"
 	"sync"
 	"time"
 	"unicode/utf8"
@@ -548,10 +550,15 @@ func (c *wsH2Conn) Close() error {
 	return c.base.Close()
 }
 
-func dialH2ExtendedConnect(ctx context.Context, conn net.Conn, targetURL, host string) (Conn, error) {
+func dialH2ExtendedConnect(
+	ctx context.Context,
+	conn net.Conn,
+	targetURL, host string,
+	req *http.Request,
+) (Conn, http.Header, error) {
 	select {
 	case <-ctx.Done():
-		return nil, ctx.Err()
+		return nil, nil, ctx.Err()
 	default:
 	}
 
@@ -570,25 +577,26 @@ func dialH2ExtendedConnect(ctx context.Context, conn net.Conn, targetURL, host s
 
 	if err := h2c.clientPreface(); err != nil {
 		_ = conn.SetReadDeadline(time.Time{})
-		return nil, err
+		return nil, nil, err
 	}
 
 	_ = conn.SetReadDeadline(time.Time{})
 
 	u, err := parseWSURL(targetURL)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
-	if err := h2c.writeConnectHeaders(u, generic.Coalesce(host, u.host)); err != nil {
-		return nil, err
+	if err := h2c.writeConnectHeaders(u, generic.Coalesce(host, u.host), req); err != nil {
+		return nil, nil, err
 	}
 
-	if err := h2c.readConnectResponse(); err != nil {
-		return nil, err
+	respHeaders, err := h2c.readConnectResponse()
+	if err != nil {
+		return nil, nil, err
 	}
 
-	return wrapRawConn(h2c, true), nil
+	return wrapRawConn(h2c, true), respHeaders, nil
 }
 
 func (c *wsH2Conn) clientPreface() error {
@@ -664,22 +672,41 @@ func (c *wsH2Conn) processPrefaceSettingsFrame(f *http2.SettingsFrame) error {
 	return nil
 }
 
-func (c *wsH2Conn) writeConnectHeaders(u *parsedURL, host string) error {
+func (c *wsH2Conn) writeConnectHeaders(u *parsedURL, host string, req *http.Request) error {
 	var buf bytes.Buffer
 
 	encoder := hpack.NewEncoder(&buf)
 
-	headers := []hpack.HeaderField{
+	pseudoHeaders := []hpack.HeaderField{
 		{Name: ":method", Value: "CONNECT"},
-		{Name: ":scheme", Value: generic.Ternary(u.scheme == "ws", "http", "https")},
-		{Name: ":authority", Value: host},
-		{Name: ":path", Value: u.path},
 		{Name: ":protocol", Value: "websocket"},
+		{Name: ":scheme", Value: generic.Ternary(u.scheme == "wss", "https", "http")},
+		{Name: ":path", Value: u.path},
+		{Name: ":authority", Value: host},
 	}
 
-	for _, h := range headers {
+	for _, h := range pseudoHeaders {
 		if err := encoder.WriteField(h); err != nil {
 			return err
+		}
+	}
+
+	if err := encoder.WriteField(hpack.HeaderField{Name: "sec-websocket-version", Value: "13"}); err != nil {
+		return err
+	}
+
+	if req != nil {
+		for k, vv := range req.Header {
+			lowerKey := strings.ToLower(k)
+			if isForbiddenH2ConnectHeader(lowerKey) {
+				continue
+			}
+
+			for _, v := range vv {
+				if err := encoder.WriteField(hpack.HeaderField{Name: lowerKey, Value: v}); err != nil {
+					return err
+				}
+			}
 		}
 	}
 
@@ -694,18 +721,29 @@ func (c *wsH2Conn) writeConnectHeaders(u *parsedURL, host string) error {
 	})
 }
 
-func (c *wsH2Conn) readConnectResponse() error {
+func isForbiddenH2ConnectHeader(key string) bool {
+	switch key {
+	case "upgrade", "connection", "host", "sec-websocket-key", "sec-websocket-accept":
+		return true
+	default:
+		return false
+	}
+}
+
+func (c *wsH2Conn) readConnectResponse() (http.Header, error) {
 	decoder := hpack.NewDecoder(4096, nil)
+	respHeaders := make(http.Header)
+
 	for {
 		frame, err := c.framer.ReadFrame()
 		if err != nil {
-			return err
+			return nil, err
 		}
 
 		switch f := frame.(type) {
 		case *http2.HeadersFrame:
 			if f.StreamID == c.streamID {
-				return c.processResponseHeaders(f, decoder)
+				return c.processResponseHeaders(f, decoder, respHeaders)
 			}
 		case *http2.SettingsFrame:
 			if !f.IsAck() {
@@ -714,16 +752,16 @@ func (c *wsH2Conn) readConnectResponse() error {
 				c.writeMu.Unlock()
 
 				if err != nil {
-					return err
+					return nil, err
 				}
 			}
 
 		case *http2.RSTStreamFrame:
 			if f.StreamID == c.streamID {
-				return ErrH2StreamClosed
+				return nil, ErrH2StreamClosed
 			}
 		case *http2.GoAwayFrame:
-			return ErrH2GoAway
+			return nil, ErrH2GoAway
 
 		case *http2.PingFrame:
 			if !f.IsAck() {
@@ -732,30 +770,38 @@ func (c *wsH2Conn) readConnectResponse() error {
 				c.writeMu.Unlock()
 
 				if err != nil {
-					return err
+					return nil, err
 				}
 			}
 		}
 	}
 }
 
-func (c *wsH2Conn) processResponseHeaders(f *http2.HeadersFrame, decoder *hpack.Decoder) error {
+func (c *wsH2Conn) processResponseHeaders(
+	f *http2.HeadersFrame,
+	decoder *hpack.Decoder,
+	headers http.Header,
+) (http.Header, error) {
 	fields, err := decoder.DecodeFull(f.HeaderBlockFragment())
 	if err != nil {
-		return err
+		return nil, err
 	}
 
 	status := ""
 	for _, field := range fields {
 		if field.Name == ":status" {
 			status = field.Value
-			break
+			continue
+		}
+
+		if !strings.HasPrefix(field.Name, ":") {
+			headers.Add(field.Name, field.Value)
 		}
 	}
 
 	if status != "200" {
-		return ErrH2ConnectFailed
+		return nil, ErrH2ConnectFailed
 	}
 
-	return nil
+	return headers, nil
 }
