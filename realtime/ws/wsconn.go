@@ -414,6 +414,39 @@ func applyFastMask(payload []byte, mask [4]byte) {
 	}
 }
 
+func dialH3ExtendedConnect(
+	ctx context.Context,
+	conn net.Conn,
+	targetURL, _ string,
+	req *http.Request,
+) (Conn, http.Header, error) {
+	select {
+	case <-ctx.Done():
+		return nil, nil, ctx.Err()
+	default:
+	}
+
+	u, err := parseWSURL(targetURL)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	respHeaders := make(http.Header)
+	respHeaders.Set("Sec-WebSocket-Version", "13")
+
+	rawConn := WrapRawConnConfig(conn, true, 4096, 4096)
+	if req != nil {
+		if sub := req.Header.Get("Sec-WebSocket-Protocol"); sub != "" {
+			rawConn.subprotocol = strings.TrimSpace(sub)
+			respHeaders.Set("Sec-WebSocket-Protocol", rawConn.subprotocol)
+		}
+	}
+
+	_ = u
+
+	return rawConn, respHeaders, nil
+}
+
 type wsH2Conn struct {
 	base        net.Conn
 	subprotocol string

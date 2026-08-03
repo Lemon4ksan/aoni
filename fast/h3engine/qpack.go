@@ -44,7 +44,7 @@ func (q *QPACKCodec) WriteDecoderTable(_ []byte) error {
 }
 
 // EncodeRequestHeaders encodes a fasthttp request header into a QPACK block,
-// strictly maintaining the specified orderedKeys sequence for Anti-DPI fingerprinting.
+// strictly maintaining the specified orderedKeys sequence for Anti-DPI fingerprinting and RFC 9220 Extended CONNECT.
 func (q *QPACKCodec) EncodeRequestHeaders(w io.Writer, req *fasthttp.Request, orderedKeys []string) error {
 	buf := bufferPool.Get().(*bytes.Buffer)
 
@@ -53,10 +53,15 @@ func (q *QPACKCodec) EncodeRequestHeaders(w io.Writer, req *fasthttp.Request, or
 
 	enc := qpack.NewEncoder(buf)
 
-	_ = enc.WriteField(qpack.HeaderField{Name: ":method", Value: string(req.Header.Method())})
-	_ = enc.WriteField(qpack.HeaderField{Name: ":scheme", Value: string(req.URI().Scheme())})
-	_ = enc.WriteField(qpack.HeaderField{Name: ":authority", Value: string(req.URI().Host())})
-	_ = enc.WriteField(qpack.HeaderField{Name: ":path", Value: string(req.URI().RequestURI())})
+	method := bytesconv.B2S(req.Header.Method())
+	_ = enc.WriteField(qpack.HeaderField{Name: ":method", Value: method})
+	_ = enc.WriteField(qpack.HeaderField{Name: ":scheme", Value: bytesconv.B2S(req.URI().Scheme())})
+	_ = enc.WriteField(qpack.HeaderField{Name: ":authority", Value: bytesconv.B2S(req.URI().Host())})
+	_ = enc.WriteField(qpack.HeaderField{Name: ":path", Value: bytesconv.B2S(req.URI().RequestURI())})
+
+	if protoVal := req.Header.Peek(":protocol"); len(protoVal) > 0 {
+		_ = enc.WriteField(qpack.HeaderField{Name: ":protocol", Value: bytesconv.B2S(protoVal)})
+	}
 
 	if len(orderedKeys) > 0 {
 		q.encodeOrderedHeaders(enc, req, orderedKeys)
@@ -66,7 +71,7 @@ func (q *QPACKCodec) EncodeRequestHeaders(w io.Writer, req *fasthttp.Request, or
 				return true
 			}
 
-			_ = enc.WriteField(qpack.HeaderField{Name: toLowerCopy(k), Value: string(v)})
+			_ = enc.WriteField(qpack.HeaderField{Name: toLowerCopy(k), Value: bytesconv.B2S(v)})
 
 			return true
 		})
@@ -87,7 +92,9 @@ func isForbiddenH3Header(key, val []byte) bool {
 		bytesconv.EqualFoldASCII(keyStr, "keep-alive") ||
 		bytesconv.EqualFoldASCII(keyStr, "proxy-connection") ||
 		bytesconv.EqualFoldASCII(keyStr, "transfer-encoding") ||
-		bytesconv.EqualFoldASCII(keyStr, "upgrade") {
+		bytesconv.EqualFoldASCII(keyStr, "upgrade") ||
+		bytesconv.EqualFoldASCII(keyStr, "sec-websocket-key") ||
+		bytesconv.EqualFoldASCII(keyStr, "sec-websocket-accept") {
 		return true
 	}
 
@@ -107,7 +114,9 @@ func isForbiddenH3HeaderStr(key string, val []byte) bool {
 		bytesconv.EqualFoldASCII(key, "keep-alive") ||
 		bytesconv.EqualFoldASCII(key, "proxy-connection") ||
 		bytesconv.EqualFoldASCII(key, "transfer-encoding") ||
-		bytesconv.EqualFoldASCII(key, "upgrade") {
+		bytesconv.EqualFoldASCII(key, "upgrade") ||
+		bytesconv.EqualFoldASCII(key, "sec-websocket-key") ||
+		bytesconv.EqualFoldASCII(key, "sec-websocket-accept") {
 		return true
 	}
 

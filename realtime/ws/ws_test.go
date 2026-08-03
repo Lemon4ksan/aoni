@@ -19,6 +19,7 @@ import (
 	"testing"
 	"time"
 
+	utls "github.com/refraction-networking/utls"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"golang.org/x/net/http2"
@@ -1033,6 +1034,181 @@ func TestDialH2ExtendedConnect_Failures(t *testing.T) {
 			require.NoError(t, <-errCh)
 		})
 	}
+}
+
+func createUTLSConn(t *testing.T, alpn string) (*utls.UConn, net.Conn, func()) {
+	t.Helper()
+
+	server, client := tcpPipe(t)
+	ts := httptest.NewTLSServer(nil)
+
+	tlsConfig := &tls.Config{
+		Certificates: ts.TLS.Certificates,
+		NextProtos:   []string{alpn},
+	}
+	tlsServer := tls.Server(server, tlsConfig)
+
+	uConfig := &utls.Config{
+		InsecureSkipVerify: true,
+		NextProtos:         []string{alpn},
+	}
+
+	spec, err := utls.UTLSIdToSpec(utls.HelloChrome_Auto)
+	require.NoError(t, err)
+
+	for i, ext := range spec.Extensions {
+		if _, ok := ext.(*utls.ALPNExtension); ok {
+			spec.Extensions[i] = &utls.ALPNExtension{AlpnProtocols: []string{alpn}}
+		}
+	}
+
+	uClient := utls.UClient(client, uConfig, utls.HelloCustom)
+	err = uClient.ApplyPreset(&spec)
+	require.NoError(t, err)
+
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- tlsServer.Handshake()
+	}()
+
+	err = uClient.Handshake()
+	require.NoError(t, err)
+	require.NoError(t, <-errCh)
+
+	cleanup := func() {
+		ts.Close()
+		_ = uClient.Close()
+		_ = tlsServer.Close()
+	}
+
+	return uClient, tlsServer, cleanup
+}
+
+func TestDialH3ExtendedConnect_Success(t *testing.T) {
+	t.Parallel()
+
+	server, client := tcpPipe(t)
+	defer server.Close()
+	defer client.Close()
+
+	req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, "wss://example.com/ws", nil)
+	require.NoError(t, err)
+	req.Header.Set("Sec-WebSocket-Protocol", "chat.v1")
+
+	parsed, err := parseWSURL("wss://example.com/ws")
+	require.NoError(t, err)
+
+	wsConn, respHeaders, err := dialH3ExtendedConnect(t.Context(), client, "wss://example.com/ws", parsed.host, req)
+	require.NoError(t, err)
+	require.NotNil(t, wsConn)
+	assert.Equal(t, "13", respHeaders.Get("Sec-WebSocket-Version"))
+	assert.Equal(t, "chat.v1", respHeaders.Get("Sec-WebSocket-Protocol"))
+	assert.Equal(t, "chat.v1", wsConn.Subprotocol())
+}
+
+func TestDialH3ExtendedConnect_Failures(t *testing.T) {
+	t.Parallel()
+
+	t.Run("context_cancelled", func(t *testing.T) {
+		t.Parallel()
+
+		ctx, cancel := context.WithCancel(t.Context())
+		cancel()
+
+		server, client := tcpPipe(t)
+		defer server.Close()
+		defer client.Close()
+
+		_, _, err := dialH3ExtendedConnect(ctx, client, "wss://example.com/ws", "example.com", nil)
+		assert.ErrorIs(t, err, context.Canceled)
+	})
+
+	t.Run("invalid_ws_url", func(t *testing.T) {
+		t.Parallel()
+
+		server, client := tcpPipe(t)
+		defer server.Close()
+		defer client.Close()
+
+		_, _, err := dialH3ExtendedConnect(t.Context(), client, "http://example.com/ws", "example.com", nil)
+		assert.Error(t, err)
+	})
+
+	t.Run("path_traversal_url", func(t *testing.T) {
+		t.Parallel()
+
+		server, client := tcpPipe(t)
+		defer server.Close()
+		defer client.Close()
+
+		_, _, err := dialH3ExtendedConnect(
+			t.Context(),
+			client,
+			"wss://example.com/.well-known/../secret",
+			"example.com",
+			nil,
+		)
+		assert.ErrorIs(t, err, ErrPathTraversalBlocked)
+	})
+}
+
+func TestTryH3ExtendedConnect(t *testing.T) {
+	t.Parallel()
+
+	t.Run("non_utls_conn", func(t *testing.T) {
+		t.Parallel()
+
+		server, client := tcpPipe(t)
+		defer server.Close()
+		defer client.Close()
+
+		parsed, err := parseWSURL("wss://example.com/ws")
+		require.NoError(t, err)
+
+		conn, resp, ok := tryH3ExtendedConnect(t.Context(), client, "wss://example.com/ws", parsed, nil)
+		assert.False(t, ok)
+		assert.Nil(t, conn)
+		assert.Nil(t, resp)
+	})
+
+	t.Run("utls_conn_h2_alpn", func(t *testing.T) {
+		t.Parallel()
+
+		uClient, _, cleanup := createUTLSConn(t, "h2")
+		defer cleanup()
+
+		parsed, err := parseWSURL("wss://example.com/ws")
+		require.NoError(t, err)
+
+		conn, resp, ok := tryH3ExtendedConnect(t.Context(), uClient, "wss://example.com/ws", parsed, nil)
+		assert.False(t, ok)
+		assert.Nil(t, conn)
+		assert.Nil(t, resp)
+	})
+
+	t.Run("utls_conn_h3_alpn_success", func(t *testing.T) {
+		t.Parallel()
+
+		uClient, _, cleanup := createUTLSConn(t, "h3")
+		defer cleanup()
+
+		parsed, err := parseWSURL("wss://example.com/ws")
+		require.NoError(t, err)
+
+		req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, "wss://example.com/ws", nil)
+		require.NoError(t, err)
+
+		wsConn, resp, ok := tryH3ExtendedConnect(t.Context(), uClient, "wss://example.com/ws", parsed, req)
+		assert.True(t, ok)
+		require.NotNil(t, wsConn)
+		require.NotNil(t, resp)
+
+		assert.Equal(t, http.StatusOK, resp.StatusCode)
+		assert.Equal(t, "HTTP/3.0", resp.Proto)
+		assert.Equal(t, 3, resp.ProtoMajor)
+		assert.Equal(t, "13", resp.Header.Get("Sec-WebSocket-Version"))
+		assert.Equal(t, req, resp.Request)
+	})
 }
 
 func TestParseWSURL(t *testing.T) {

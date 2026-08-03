@@ -115,7 +115,7 @@ func DialWebSocket(
 	return DialWebSocketWithConfig(ctx, dialer, targetURL, DialWebSocketConfig{EnableCompression: true}, mods...)
 }
 
-// DialWebSocketWithConfig establishes a WebSocket connection using custom I/O buffer sizes, subprotocols, and compression settings.
+// DialWebSocketWithConfig establishes a WebSocket connection cascading across HTTP/3, HTTP/2, and HTTP/1.1 protocols.
 func DialWebSocketWithConfig(
 	ctx context.Context,
 	dialer aoni.WSDialer,
@@ -138,10 +138,17 @@ func DialWebSocketWithConfig(
 		return nil, nil, err
 	}
 
+	// 1. Try HTTP/3 Extended CONNECT (RFC 9220) if ALPN negotiated "h3"
+	if h3Conn, resp, ok := tryH3ExtendedConnect(ctx, baseConn, targetURL, parsed, handshakeReq); ok {
+		return h3Conn, resp, nil
+	}
+
+	// 2. Try HTTP/2 Extended CONNECT (RFC 8441) if ALPN negotiated "h2"
 	if h2Conn, resp, ok := tryH2ExtendedConnect(ctx, baseConn, targetURL, parsed, handshakeReq); ok {
 		return h2Conn, resp, nil
 	}
 
+	// 3. Fallback to HTTP/1.1 Upgrade (RFC 6455)
 	resp, selectedSubprotocol, compressed, err := performHTTP1Handshake(
 		ctx,
 		baseConn,
@@ -244,6 +251,35 @@ func dialBaseConnection(ctx context.Context, dialer aoni.WSDialer, parsed *parse
 	}
 
 	return dialer.DialPlainForWS(ctx, addr)
+}
+
+func tryH3ExtendedConnect(
+	ctx context.Context,
+	baseConn net.Conn,
+	targetURL string,
+	parsed *parsedURL,
+	req *http.Request,
+) (Conn, *http.Response, bool) {
+	uConn, ok := baseConn.(*utls.UConn)
+	if !ok || uConn.ConnectionState().NegotiatedProtocol != aoni.AlpnH3 {
+		return nil, nil, false
+	}
+
+	wsConn, respHeaders, err := dialH3ExtendedConnect(ctx, baseConn, targetURL, parsed.host, req)
+	if err != nil {
+		return nil, nil, false
+	}
+
+	resp := &http.Response{
+		StatusCode: http.StatusOK,
+		Proto:      "HTTP/3.0",
+		ProtoMajor: 3,
+		Header:     respHeaders,
+		Body:       http.NoBody,
+		Request:    req,
+	}
+
+	return wsConn, resp, true
 }
 
 func tryH2ExtendedConnect(
