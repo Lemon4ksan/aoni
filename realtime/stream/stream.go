@@ -8,7 +8,6 @@ package stream
 import (
 	"bufio"
 	"bytes"
-	"compress/gzip"
 	"context"
 	"encoding/base64"
 	"encoding/binary"
@@ -22,6 +21,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/klauspost/compress/gzip"
 	"github.com/lemon4ksan/miyako/generic"
 	"google.golang.org/protobuf/proto"
 

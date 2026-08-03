@@ -32,11 +32,12 @@ const (
 	WellKnownPrefix = "/.well-known/"
 )
 
-// DialWebSocketConfig specifies buffer sizes for WebSocket connections.
+// DialWebSocketConfig specifies I/O buffer sizes, subprotocols, and compression settings for WebSocket connections.
 type DialWebSocketConfig struct {
-	ReadBufferSize  int
-	WriteBufferSize int
-	Subprotocols    []string
+	ReadBufferSize    int
+	WriteBufferSize   int
+	Subprotocols      []string
+	EnableCompression bool
 }
 
 // ValidateSubprotocol performs strict case-sensitive matching of the server's selected subprotocol
@@ -70,10 +71,6 @@ func char(b byte) byte {
 }
 
 // BuildWellKnownURI constructs an RFC 8307 compliant well-known WebSocket URI.
-//
-// Preconditions:
-//   - scheme must be "ws" or "wss".
-//   - suffix must not be empty or contain path traversal ("..").
 func BuildWellKnownURI(scheme, host, suffix string) (string, error) {
 	cleanScheme := strings.ToLower(strings.TrimSpace(scheme))
 	if cleanScheme != "ws" && cleanScheme != "wss" {
@@ -109,22 +106,16 @@ func DialWellKnown(
 
 // DialWebSocket establishes an encrypted or plain WebSocket connection using aoni's
 // anti-detect uTLS and proxy pipeline without external dependencies.
-//
-// Preconditions:
-//   - targetURL must be a valid ws:// or wss:// URL.
-//
-// Postconditions:
-//   - Returns an established Conn satisfying net.Conn, or an error alongside the HTTP response.
 func DialWebSocket(
 	ctx context.Context,
 	dialer aoni.WSDialer,
 	targetURL string,
 	mods ...aoni.RequestModifier,
 ) (Conn, *http.Response, error) {
-	return DialWebSocketWithConfig(ctx, dialer, targetURL, DialWebSocketConfig{}, mods...)
+	return DialWebSocketWithConfig(ctx, dialer, targetURL, DialWebSocketConfig{EnableCompression: true}, mods...)
 }
 
-// DialWebSocketWithConfig establishes a WebSocket connection using custom I/O buffer sizes and subprotocols.
+// DialWebSocketWithConfig establishes a WebSocket connection using custom I/O buffer sizes, subprotocols, and compression settings.
 func DialWebSocketWithConfig(
 	ctx context.Context,
 	dialer aoni.WSDialer,
@@ -137,7 +128,7 @@ func DialWebSocketWithConfig(
 		return nil, nil, err
 	}
 
-	handshakeReq, challengeKey, err := buildHandshakeRequest(ctx, targetURL, config.Subprotocols, mods...)
+	handshakeReq, challengeKey, err := buildHandshakeRequest(ctx, targetURL, config, mods...)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -151,7 +142,7 @@ func DialWebSocketWithConfig(
 		return h2Conn, resp, nil
 	}
 
-	resp, selectedSubprotocol, err := performHTTP1Handshake(
+	resp, selectedSubprotocol, compressed, err := performHTTP1Handshake(
 		ctx,
 		baseConn,
 		handshakeReq,
@@ -163,8 +154,9 @@ func DialWebSocketWithConfig(
 		return nil, resp, err
 	}
 
-	rawConn := wrapRawConn(baseConn, true)
+	rawConn := WrapRawConnConfig(baseConn, true, config.ReadBufferSize, config.WriteBufferSize)
 	rawConn.subprotocol = selectedSubprotocol
+	rawConn.compress = compressed
 
 	return rawConn, resp, nil
 }
@@ -206,7 +198,7 @@ func parseWSURL(rawURL string) (*parsedURL, error) {
 func buildHandshakeRequest(
 	ctx context.Context,
 	targetURL string,
-	subprotocols []string,
+	config DialWebSocketConfig,
 	mods ...aoni.RequestModifier,
 ) (*http.Request, string, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, targetURL, nil)
@@ -224,8 +216,15 @@ func buildHandshakeRequest(
 	req.Header.Set("Sec-WebSocket-Key", key)
 	req.Header.Set("Sec-WebSocket-Version", "13")
 
-	if len(subprotocols) > 0 {
-		req.Header.Set("Sec-WebSocket-Protocol", strings.Join(subprotocols, ", "))
+	if len(config.Subprotocols) > 0 {
+		req.Header.Set("Sec-WebSocket-Protocol", strings.Join(config.Subprotocols, ", "))
+	}
+
+	if config.EnableCompression {
+		req.Header.Set(
+			"Sec-WebSocket-Extensions",
+			"permessage-deflate; server_no_context_takeover; client_no_context_takeover",
+		)
 	}
 
 	stdReq := aoni.NewStdRequest(req)
@@ -282,42 +281,54 @@ func performHTTP1Handshake(
 	req *http.Request,
 	challengeKey string,
 	requestedSubprotocols []string,
-) (*http.Response, string, error) {
+) (*http.Response, string, bool, error) {
 	if deadline, ok := ctx.Deadline(); ok {
 		_ = conn.SetDeadline(deadline)
 		defer func() { _ = conn.SetDeadline(time.Time{}) }()
 	}
 
 	if err := req.Write(conn); err != nil {
-		return nil, "", fmt.Errorf("aoni ws: write handshake: %w", err)
+		return nil, "", false, fmt.Errorf("aoni ws: write handshake: %w", err)
 	}
 
 	br := bufio.NewReader(conn)
 
 	resp, err := http.ReadResponse(br, req)
 	if err != nil {
-		return nil, "", fmt.Errorf("aoni ws: read handshake response: %w", err)
+		return nil, "", false, fmt.Errorf("aoni ws: read handshake response: %w", err)
 	}
 
 	if resp.StatusCode != http.StatusSwitchingProtocols {
-		return resp, "", ErrBadHandshake
+		return resp, "", false, ErrBadHandshake
 	}
 
 	if !tokenContainsValue(resp.Header, "Upgrade", "websocket") ||
 		!tokenContainsValue(resp.Header, "Connection", "upgrade") {
-		return resp, "", ErrBadHandshake
+		return resp, "", false, ErrBadHandshake
 	}
 
 	if resp.Header.Get("Sec-WebSocket-Accept") != computeAcceptKey(challengeKey) {
-		return resp, "", ErrBadHandshake
+		return resp, "", false, ErrBadHandshake
 	}
 
 	selectedSubprotocol := strings.TrimSpace(resp.Header.Get("Sec-WebSocket-Protocol"))
 	if !ValidateSubprotocol(requestedSubprotocols, selectedSubprotocol) {
-		return resp, "", ErrSubprotocolMismatch
+		return resp, "", false, ErrSubprotocolMismatch
 	}
 
-	return resp, selectedSubprotocol, nil
+	isCompressed := hasPermessageDeflateExtension(resp.Header)
+
+	return resp, selectedSubprotocol, isCompressed, nil
+}
+
+func hasPermessageDeflateExtension(header http.Header) bool {
+	for _, ext := range header["Sec-Websocket-Extensions"] {
+		if strings.Contains(ext, "permessage-deflate") {
+			return true
+		}
+	}
+
+	return false
 }
 
 func tokenContainsValue(header http.Header, name, value string) bool {

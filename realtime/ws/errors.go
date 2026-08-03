@@ -26,6 +26,15 @@ var (
 	// ErrInvalidSubprotocol indicates a subprotocol token contains invalid characters according to RFC 2616.
 	ErrInvalidSubprotocol = errors.New("aoni ws: invalid subprotocol token")
 
+	// ErrInvalidCompression indicates invalid or unsupported compression extension parameters.
+	ErrInvalidCompression = errors.New("aoni ws: invalid compression negotiation")
+
+	// ErrFlateDecompressFailed indicates a failure while decompressing a permessage-deflate payload.
+	ErrFlateDecompressFailed = errors.New("aoni ws: flate decompression failed")
+
+	// ErrFlateCompressFailed indicates a failure while compressing a permessage-deflate payload.
+	ErrFlateCompressFailed = errors.New("aoni ws: flate compression failed")
+
 	// ErrH2ConnectNotSupported indicates the HTTP/2 peer does not support Extended CONNECT (RFC 8441).
 	ErrH2ConnectNotSupported = errors.New("aoni ws: http2 extended connect not supported by peer")
 

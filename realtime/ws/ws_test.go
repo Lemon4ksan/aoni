@@ -95,7 +95,7 @@ func testUpgradeToWS(w http.ResponseWriter, r *http.Request) (Conn, error) {
 		return nil, err
 	}
 
-	return wrapRawConn(conn, false), nil
+	return WrapRawConn(conn, false), nil
 }
 
 func TestDialWebSocket_Basic(t *testing.T) {
@@ -422,7 +422,7 @@ func TestWSRawConn_RoundTrip(t *testing.T) {
 	server, client := tcpPipe(t)
 	defer server.Close()
 
-	raw := wrapRawConn(client, true)
+	raw := WrapRawConn(client, true)
 	defer raw.Close()
 
 	go func() {
@@ -473,8 +473,8 @@ func TestWSRawConn_FrameLengthsAndMasking(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			s, c := tcpPipe(t)
-			clientRaw := wrapRawConn(c, true)
-			serverRaw := wrapRawConn(s, false)
+			clientRaw := WrapRawConn(c, true)
+			serverRaw := WrapRawConn(s, false)
 
 			defer clientRaw.Close()
 			defer serverRaw.Close()
@@ -523,7 +523,7 @@ func TestWSRawConn_FrameTooLarge(t *testing.T) {
 	defer s.Close()
 	defer c.Close()
 
-	raw := wrapRawConn(c, true)
+	raw := WrapRawConn(c, true)
 	defer raw.Close()
 
 	go func() {
@@ -545,7 +545,7 @@ func TestWSRawConn_ControlFramesAndOpcodes(t *testing.T) {
 		t.Parallel()
 		s, c := tcpPipe(t)
 
-		raw := wrapRawConn(c, true)
+		raw := WrapRawConn(c, true)
 		defer raw.Close()
 		defer s.Close()
 
@@ -559,7 +559,7 @@ func TestWSRawConn_ControlFramesAndOpcodes(t *testing.T) {
 		t.Parallel()
 		s, c := tcpPipe(t)
 
-		raw := wrapRawConn(c, true)
+		raw := WrapRawConn(c, true)
 		defer raw.Close()
 		defer s.Close()
 
@@ -624,7 +624,7 @@ func TestWSRawConn_ControlFramesAndOpcodes(t *testing.T) {
 		t.Parallel()
 		s, c := tcpPipe(t)
 
-		raw := wrapRawConn(c, true)
+		raw := WrapRawConn(c, true)
 		defer raw.Close()
 		defer s.Close()
 
@@ -646,7 +646,7 @@ func TestWSRawConn_WriteTextVsBinary(t *testing.T) {
 	defer s.Close()
 	defer c.Close()
 
-	raw := wrapRawConn(c, true)
+	raw := WrapRawConn(c, true)
 	defer raw.Close()
 
 	errCh := make(chan byte, 2)
@@ -684,7 +684,7 @@ func TestWSRawConn_Close(t *testing.T) {
 	server, client := tcpPipe(t)
 	defer server.Close()
 
-	raw := wrapRawConn(client, true)
+	raw := WrapRawConn(client, true)
 
 	closed := raw.CloseChan()
 	select {
@@ -709,7 +709,7 @@ func TestWSRawConn_Timeout(t *testing.T) {
 	defer server.Close()
 	defer client.Close()
 
-	raw := wrapRawConn(client, true)
+	raw := WrapRawConn(client, true)
 	defer raw.Close()
 
 	err := raw.SetReadDeadline(time.Now().Add(50 * time.Millisecond))
@@ -726,7 +726,7 @@ func TestWSRawConn_NetConnMethods(t *testing.T) {
 	defer s.Close()
 	defer c.Close()
 
-	raw := wrapRawConn(c, true)
+	raw := WrapRawConn(c, true)
 	defer raw.Close()
 
 	assert.NotNil(t, raw.LocalAddr())

@@ -5,6 +5,7 @@
 package ws
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"crypto/rand"
@@ -36,7 +37,7 @@ const (
 	maxConsecutiveEmptyReads = 100
 	h2DefaultMaxFrameSize    = 16 * 1024
 	h2InitialWindowSize      = 65535
-	maxFrameHeaderSize       = 14 // 2 fixed + 8 extended length + 4 mask key
+	maxFrameHeaderSize       = 14
 )
 
 // Conn represents a thread-safe, zero-allocation WebSocket connection contract extending net.Conn.
@@ -52,8 +53,10 @@ type Conn interface {
 
 type wsRawConn struct {
 	base        net.Conn
+	br          *bufio.Reader // Buffered reader for socket read syscall reduction
 	subprotocol string
 	isClient    bool
+	compress    bool // RFC 7692 permessage-deflate negotiated flag
 	reader      io.Reader
 	payloadBuf  []byte                   // Reusable zero-alloc read payload buffer
 	readHdr     [maxFrameHeaderSize]byte // Fixed-size header buffer avoiding escape analysis
@@ -66,23 +69,32 @@ type wsRawConn struct {
 	once        sync.Once
 }
 
-func wrapRawConn(conn net.Conn, isClient bool) *wsRawConn {
+// WrapRawConn wraps a net.Conn into a zero-alloc ws.Conn using default buffer sizes.
+func WrapRawConn(conn net.Conn, isClient bool) Conn {
+	return WrapRawConnConfig(conn, isClient, 4096, 4096)
+}
+
+func WrapRawConnConfig(conn net.Conn, isClient bool, readBufSize, writeBufSize int) *wsRawConn {
+	if readBufSize <= 0 {
+		readBufSize = 4096
+	}
+
+	if writeBufSize <= 0 {
+		writeBufSize = 4096
+	}
+
 	c := &wsRawConn{
 		base:       conn,
+		br:         bufio.NewReaderSize(conn, readBufSize),
 		isClient:   isClient,
-		payloadBuf: make([]byte, 0, 4096),
-		writeBuf:   make([]byte, 0, 4096),
+		payloadBuf: make([]byte, 0, readBufSize),
+		writeBuf:   make([]byte, 0, writeBufSize),
 		closed:     make(chan struct{}),
 		writeMu:    make(chan struct{}, 1),
 	}
 	c.writeMu <- struct{}{}
 
 	return c
-}
-
-// WrapRawConn wraps a net.Conn into a zero-alloc ws.Conn.
-func WrapRawConn(conn net.Conn, isClient bool) Conn {
-	return wrapRawConn(conn, isClient)
 }
 
 func (c *wsRawConn) Subprotocol() string {
@@ -194,31 +206,53 @@ func (c *wsRawConn) Close() error {
 	return nil
 }
 
+// readFrame reads and parses an incoming frame using bufio.Reader for syscall reduction and handles RFC 7692 decompression.
 func (c *wsRawConn) readFrame() (byte, []byte, error) {
-	if _, err := io.ReadFull(c.base, c.readHdr[:2]); err != nil {
+	if _, err := io.ReadFull(c.br, c.readHdr[:2]); err != nil {
 		return 0, nil, err
 	}
 
-	if (c.readHdr[0] & 0x70) != 0 {
+	// Check RSV2 and RSV3 bits (MUST be 0)
+	if (c.readHdr[0] & 0x30) != 0 {
 		return 0, nil, ErrReservedBitsSet
 	}
 
+	rsv1 := (c.readHdr[0] & 0x40) != 0
 	opcode := c.readHdr[0] & 0x0f
 	masked := c.readHdr[1]&0x80 != 0
 	basicLen := c.readHdr[1] & 0x7f
+
+	if rsv1 && !c.compress {
+		return 0, nil, ErrReservedBitsSet
+	}
 
 	length, err := c.readFrameLengthZeroAlloc(basicLen)
 	if err != nil {
 		return 0, nil, err
 	}
 
-	if opcode >= FrameClose && length > 125 {
-		return 0, nil, ErrControlFrameTooLarge
+	if opcode >= FrameClose {
+		if rsv1 {
+			return 0, nil, ErrReservedBitsSet
+		}
+
+		if length > 125 {
+			return 0, nil, ErrControlFrameTooLarge
+		}
 	}
 
 	payload, err := c.readFramePayloadZeroAlloc(length, masked)
 	if err != nil {
 		return 0, nil, err
+	}
+
+	if rsv1 && c.compress {
+		decompressed, decErr := decompressNoContextTakeover(payload)
+		if decErr != nil {
+			return 0, nil, decErr
+		}
+
+		return opcode, decompressed, nil
 	}
 
 	return opcode, payload, nil
@@ -227,14 +261,14 @@ func (c *wsRawConn) readFrame() (byte, []byte, error) {
 func (c *wsRawConn) readFrameLengthZeroAlloc(basicLen byte) (uint64, error) {
 	switch basicLen {
 	case 126:
-		if _, err := io.ReadFull(c.base, c.readHdr[2:4]); err != nil {
+		if _, err := io.ReadFull(c.br, c.readHdr[2:4]); err != nil {
 			return 0, err
 		}
 
 		return uint64(binary.BigEndian.Uint16(c.readHdr[2:4])), nil
 
 	case 127:
-		if _, err := io.ReadFull(c.base, c.readHdr[2:10]); err != nil {
+		if _, err := io.ReadFull(c.br, c.readHdr[2:10]); err != nil {
 			return 0, err
 		}
 
@@ -251,7 +285,7 @@ func (c *wsRawConn) readFramePayloadZeroAlloc(length uint64, masked bool) ([]byt
 	}
 
 	if masked {
-		if _, err := io.ReadFull(c.base, c.readMask[:]); err != nil {
+		if _, err := io.ReadFull(c.br, c.readMask[:]); err != nil {
 			return nil, err
 		}
 	}
@@ -262,7 +296,7 @@ func (c *wsRawConn) readFramePayloadZeroAlloc(length uint64, masked bool) ([]byt
 		c.payloadBuf = c.payloadBuf[:length]
 	}
 
-	if _, err := io.ReadFull(c.base, c.payloadBuf); err != nil {
+	if _, err := io.ReadFull(c.br, c.payloadBuf); err != nil {
 		return nil, err
 	}
 
@@ -278,7 +312,21 @@ func (c *wsRawConn) writeFrame(opcode byte, payload []byte) error {
 		return ErrControlFrameTooLarge
 	}
 
-	hdrLen := c.buildFrameHeaderZeroAlloc(opcode, len(payload), c.writeHdr[:])
+	var (
+		err        error
+		compressed bool
+	)
+
+	if c.compress && (opcode == FrameText || opcode == FrameBinary) {
+		payload, err = compressNoContextTakeover(payload)
+		if err != nil {
+			return err
+		}
+
+		compressed = true
+	}
+
+	hdrLen := c.buildFrameHeaderZeroAlloc(opcode, len(payload), compressed, c.writeHdr[:])
 
 	if c.isClient {
 		return c.writeMaskedFrameZeroAlloc(c.writeHdr[:hdrLen], payload)
@@ -288,7 +336,7 @@ func (c *wsRawConn) writeFrame(opcode byte, payload []byte) error {
 		return err
 	}
 
-	_, err := c.base.Write(payload)
+	_, err = c.base.Write(payload)
 
 	return err
 }
@@ -316,8 +364,12 @@ func (c *wsRawConn) writeMaskedFrameZeroAlloc(header, payload []byte) error {
 	return err
 }
 
-func (c *wsRawConn) buildFrameHeaderZeroAlloc(opcode byte, length int, hdr []byte) int {
+func (c *wsRawConn) buildFrameHeaderZeroAlloc(opcode byte, length int, compress bool, hdr []byte) int {
 	hdr[0] = 0x80 | opcode
+	if compress {
+		hdr[0] |= 0x40 // Set RSV1 bit for permessage-deflate
+	}
+
 	hdr[1] = 0
 
 	if c.isClient {
@@ -578,7 +630,7 @@ func dialH2ExtendedConnect(
 		return nil, nil, err
 	}
 
-	rawConn := wrapRawConn(h2c, true)
+	rawConn := WrapRawConnConfig(h2c, true, 4096, 4096)
 	if selected := respHeaders.Get("Sec-WebSocket-Protocol"); selected != "" {
 		rawConn.subprotocol = strings.TrimSpace(selected)
 	}
