@@ -6,7 +6,10 @@ package socketio
 
 import (
 	"context"
+	"crypto/sha1"
+	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -15,7 +18,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/gorilla/websocket"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -27,25 +29,56 @@ func int64Ptr(i int64) *int64 {
 	return &i
 }
 
-type mockSIOServer struct {
-	server    *httptest.Server
-	upgrader  websocket.Upgrader
-	onConnect func(conn *websocket.Conn)
+func upgradeTestWS(w http.ResponseWriter, r *http.Request) (ws.Conn, error) {
+	hj, ok := w.(http.Hijacker)
+	if !ok {
+		http.Error(w, "hijack not supported", http.StatusInternalServerError)
+		return nil, errors.New("hijack failed")
+	}
+
+	conn, bufrw, err := hj.Hijack()
+	if err != nil {
+		return nil, err
+	}
+
+	challengeKey := r.Header.Get("Sec-WebSocket-Key")
+	h := sha1.New()
+	_, _ = h.Write([]byte(challengeKey))
+	_, _ = h.Write([]byte("258EAFA5-E914-47DA-95CA-C5AB0DC85B11"))
+	acceptKey := base64.StdEncoding.EncodeToString(h.Sum(nil))
+
+	resp := "HTTP/1.1 101 Switching Protocols\r\n" +
+		"Upgrade: websocket\r\n" +
+		"Connection: Upgrade\r\n" +
+		"Sec-WebSocket-Accept: " + acceptKey + "\r\n\r\n"
+
+	if _, err := bufrw.WriteString(resp); err != nil {
+		_ = conn.Close()
+		return nil, err
+	}
+
+	if err := bufrw.Flush(); err != nil {
+		_ = conn.Close()
+		return nil, err
+	}
+
+	return ws.WrapRawConn(conn, false), nil
 }
 
-func newMockSIOServer(t *testing.T, onConnect func(conn *websocket.Conn)) *mockSIOServer {
+type mockSIOServer struct {
+	server    *httptest.Server
+	onConnect func(conn ws.Conn)
+}
+
+func newMockSIOServer(t *testing.T, onConnect func(conn ws.Conn)) *mockSIOServer {
 	t.Helper()
 
 	m := &mockSIOServer{
-		upgrader: websocket.Upgrader{
-			ReadBufferSize:  1024,
-			WriteBufferSize: 1024,
-		},
 		onConnect: onConnect,
 	}
 
 	m.server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		conn, err := m.upgrader.Upgrade(w, r, nil)
+		conn, err := upgradeTestWS(w, r)
 		require.NoError(t, err)
 		t.Cleanup(func() { _ = conn.Close() })
 
@@ -631,9 +664,9 @@ func TestReadSingleEIOPacket_TooLarge(t *testing.T) {
 func TestSocketIO_Handshake_UnexpectedEIOOpen(t *testing.T) {
 	t.Parallel()
 
-	server := newMockSIOServer(t, func(conn *websocket.Conn) {
+	server := newMockSIOServer(t, func(conn ws.Conn) {
 		// Send unexpected EIO packet (eioMessage '4' instead of EIO open '0')
-		_ = conn.WriteMessage(websocket.TextMessage, []byte("42"))
+		_ = conn.WriteMessage(ws.FrameText, []byte("42"))
 	})
 
 	wsURL := strings.Replace(server.server.URL, "http://", "ws://", 1)
@@ -649,8 +682,8 @@ func TestSocketIO_Handshake_UnexpectedEIOOpen(t *testing.T) {
 func TestSocketIO_Handshake_MalformedEIOOpenJSON(t *testing.T) {
 	t.Parallel()
 
-	server := newMockSIOServer(t, func(conn *websocket.Conn) {
-		_ = conn.WriteMessage(websocket.TextMessage, []byte("0invalid_json_params"))
+	server := newMockSIOServer(t, func(conn ws.Conn) {
+		_ = conn.WriteMessage(ws.FrameText, []byte("0invalid_json_params"))
 	})
 
 	wsURL := strings.Replace(server.server.URL, "http://", "ws://", 1)
@@ -666,11 +699,11 @@ func TestSocketIO_Handshake_MalformedEIOOpenJSON(t *testing.T) {
 func TestSocketIO_Handshake_UnexpectedConnectResponse(t *testing.T) {
 	t.Parallel()
 
-	server := newMockSIOServer(t, func(conn *websocket.Conn) {
-		_ = conn.WriteMessage(websocket.TextMessage, []byte(`0{"sid":"s","pingInterval":100,"pingTimeout":100}`))
+	server := newMockSIOServer(t, func(conn ws.Conn) {
+		_ = conn.WriteMessage(ws.FrameText, []byte(`0{"sid":"s","pingInterval":100,"pingTimeout":100}`))
 		_, _, _ = conn.ReadMessage()
 		// Send some unexpected message packet format
-		_ = conn.WriteMessage(websocket.TextMessage, []byte(`42["unexpected_type"]`))
+		_ = conn.WriteMessage(ws.FrameText, []byte(`42["unexpected_type"]`))
 	})
 
 	wsURL := strings.Replace(server.server.URL, "http://", "ws://", 1)
@@ -686,13 +719,13 @@ func TestSocketIO_Handshake_UnexpectedConnectResponse(t *testing.T) {
 func TestSocketIO_Handshake_ConnectRejected(t *testing.T) {
 	t.Parallel()
 
-	server := newMockSIOServer(t, func(conn *websocket.Conn) {
+	server := newMockSIOServer(t, func(conn ws.Conn) {
 		_ = conn.WriteMessage(
-			websocket.TextMessage,
+			ws.FrameText,
 			[]byte(`0{"sid":"session-abc","pingInterval":100,"pingTimeout":100}`),
 		)
 		_, _, _ = conn.ReadMessage()
-		_ = conn.WriteMessage(websocket.TextMessage, []byte(`44{"message":"unauthorized"}`))
+		_ = conn.WriteMessage(ws.FrameText, []byte(`44{"message":"unauthorized"}`))
 	})
 
 	wsURL := strings.Replace(server.server.URL, "http://", "ws://", 1)
@@ -710,24 +743,24 @@ func TestSocketIO_SuccessfulFlow(t *testing.T) {
 
 	eventCh := make(chan string, 1)
 
-	server := newMockSIOServer(t, func(conn *websocket.Conn) {
+	server := newMockSIOServer(t, func(conn ws.Conn) {
 		err := conn.WriteMessage(
-			websocket.TextMessage,
+			ws.FrameText,
 			[]byte(`0{"sid":"session-abc","pingInterval":100,"pingTimeout":100}`),
 		)
 		require.NoError(t, err)
 
 		mt, data, err := conn.ReadMessage()
 		require.NoError(t, err)
-		assert.Equal(t, websocket.TextMessage, mt)
+		assert.Equal(t, ws.FrameText, mt)
 		assert.Equal(t, "40", string(data))
 
-		err = conn.WriteMessage(websocket.TextMessage, []byte(`40{"sid":"session-abc","pid":"pid-123"}`))
+		err = conn.WriteMessage(ws.FrameText, []byte(`40{"sid":"session-abc","pid":"pid-123"}`))
 		require.NoError(t, err)
 
 		time.Sleep(10 * time.Millisecond)
 
-		err = conn.WriteMessage(websocket.TextMessage, []byte(`42["message",{"content":"hello"}]`))
+		err = conn.WriteMessage(ws.FrameText, []byte(`42["message",{"content":"hello"}]`))
 		require.NoError(t, err)
 	})
 
@@ -767,17 +800,17 @@ func TestSocketIO_Reconnection(t *testing.T) {
 
 	reconnectedCh := make(chan struct{})
 
-	server := newMockSIOServer(t, func(conn *websocket.Conn) {
+	server := newMockSIOServer(t, func(conn ws.Conn) {
 		count := atomic.AddInt32(&connCount, 1)
 
 		switch count {
 		case 1:
 			_ = conn.WriteMessage(
-				websocket.TextMessage,
+				ws.FrameText,
 				[]byte(`0{"sid":"session-1","pingInterval":200,"pingTimeout":200}`),
 			)
 			_, _, _ = conn.ReadMessage()
-			_ = conn.WriteMessage(websocket.TextMessage, []byte(`40{"sid":"session-1"}`))
+			_ = conn.WriteMessage(ws.FrameText, []byte(`40{"sid":"session-1"}`))
 
 			time.Sleep(50 * time.Millisecond)
 
@@ -785,11 +818,11 @@ func TestSocketIO_Reconnection(t *testing.T) {
 
 		case 2:
 			_ = conn.WriteMessage(
-				websocket.TextMessage,
+				ws.FrameText,
 				[]byte(`0{"sid":"session-2","pingInterval":200,"pingTimeout":200}`),
 			)
 			_, _, _ = conn.ReadMessage()
-			_ = conn.WriteMessage(websocket.TextMessage, []byte(`40{"sid":"session-2"}`))
+			_ = conn.WriteMessage(ws.FrameText, []byte(`40{"sid":"session-2"}`))
 		}
 	})
 
@@ -826,18 +859,18 @@ func TestSocketIO_Reconnection(t *testing.T) {
 func TestSocketIO_Acknowledgment(t *testing.T) {
 	t.Parallel()
 
-	server := newMockSIOServer(t, func(conn *websocket.Conn) {
-		_ = conn.WriteMessage(websocket.TextMessage, []byte(`0{"sid":"s","pingInterval":500,"pingTimeout":500}`))
+	server := newMockSIOServer(t, func(conn ws.Conn) {
+		_ = conn.WriteMessage(ws.FrameText, []byte(`0{"sid":"s","pingInterval":500,"pingTimeout":500}`))
 		_, _, _ = conn.ReadMessage()
-		_ = conn.WriteMessage(websocket.TextMessage, []byte(`40{"sid":"s"}`))
+		_ = conn.WriteMessage(ws.FrameText, []byte(`40{"sid":"s"}`))
 
 		mt, data, err := conn.ReadMessage()
 		require.NoError(t, err)
-		assert.Equal(t, websocket.TextMessage, mt)
+		assert.Equal(t, ws.FrameText, mt)
 
 		msgStr := string(data)
 		if strings.Contains(msgStr, "ask") {
-			err = conn.WriteMessage(websocket.TextMessage, []byte(`431["response_val"]`))
+			err = conn.WriteMessage(ws.FrameText, []byte(`431["response_val"]`))
 			require.NoError(t, err)
 		}
 	})
@@ -865,10 +898,10 @@ func TestSocketIO_Namespaces(t *testing.T) {
 
 	adminConnected := make(chan struct{})
 
-	server := newMockSIOServer(t, func(conn *websocket.Conn) {
-		_ = conn.WriteMessage(websocket.TextMessage, []byte(`0{"sid":"s","pingInterval":500,"pingTimeout":500}`))
+	server := newMockSIOServer(t, func(conn ws.Conn) {
+		_ = conn.WriteMessage(ws.FrameText, []byte(`0{"sid":"s","pingInterval":500,"pingTimeout":500}`))
 		_, _, _ = conn.ReadMessage()
-		_ = conn.WriteMessage(websocket.TextMessage, []byte(`40{"sid":"s"}`))
+		_ = conn.WriteMessage(ws.FrameText, []byte(`40{"sid":"s"}`))
 
 		_, data, _ := conn.ReadMessage()
 		if strings.Contains(string(data), "/admin,") && strings.Contains(string(data), "foo") {
@@ -905,14 +938,14 @@ func TestSocketIO_OnAny(t *testing.T) {
 
 	anyCh := make(chan string, 1)
 
-	server := newMockSIOServer(t, func(conn *websocket.Conn) {
-		_ = conn.WriteMessage(websocket.TextMessage, []byte(`0{"sid":"s","pingInterval":500,"pingTimeout":500}`))
+	server := newMockSIOServer(t, func(conn ws.Conn) {
+		_ = conn.WriteMessage(ws.FrameText, []byte(`0{"sid":"s","pingInterval":500,"pingTimeout":500}`))
 		_, _, _ = conn.ReadMessage()
-		_ = conn.WriteMessage(websocket.TextMessage, []byte(`40{"sid":"s"}`))
+		_ = conn.WriteMessage(ws.FrameText, []byte(`40{"sid":"s"}`))
 
 		time.Sleep(10 * time.Millisecond)
 
-		_ = conn.WriteMessage(websocket.TextMessage, []byte(`42["any_event","any_payload"]`))
+		_ = conn.WriteMessage(ws.FrameText, []byte(`42["any_event","any_payload"]`))
 	})
 
 	wsURL := strings.Replace(server.server.URL, "http://", "ws://", 1)
@@ -1115,15 +1148,15 @@ func TestCallbacksSetting(t *testing.T) {
 func TestReadLoopUnrecognizedEIOType(t *testing.T) {
 	t.Parallel()
 
-	server := newMockSIOServer(t, func(conn *websocket.Conn) {
-		_ = conn.WriteMessage(websocket.TextMessage, []byte(`0{"sid":"s","pingInterval":500,"pingTimeout":500}`))
+	server := newMockSIOServer(t, func(conn ws.Conn) {
+		_ = conn.WriteMessage(ws.FrameText, []byte(`0{"sid":"s","pingInterval":500,"pingTimeout":500}`))
 		_, _, _ = conn.ReadMessage()
-		_ = conn.WriteMessage(websocket.TextMessage, []byte(`40{"sid":"s"}`))
+		_ = conn.WriteMessage(ws.FrameText, []byte(`40{"sid":"s"}`))
 
 		time.Sleep(10 * time.Millisecond)
 
-		_ = conn.WriteMessage(websocket.TextMessage, []byte("6")) // EIO Noop
-		_ = conn.WriteMessage(websocket.TextMessage, []byte("1")) // EIO Close
+		_ = conn.WriteMessage(ws.FrameText, []byte("6")) // EIO Noop
+		_ = conn.WriteMessage(ws.FrameText, []byte("1")) // EIO Close
 	})
 
 	wsURL := strings.Replace(server.server.URL, "http://", "ws://", 1)
@@ -1143,15 +1176,15 @@ func TestReadLoopUnrecognizedEIOType(t *testing.T) {
 func TestReadLoopBinaryBufNil(t *testing.T) {
 	t.Parallel()
 
-	server := newMockSIOServer(t, func(conn *websocket.Conn) {
-		_ = conn.WriteMessage(websocket.TextMessage, []byte(`0{"sid":"s","pingInterval":500,"pingTimeout":500}`))
+	server := newMockSIOServer(t, func(conn ws.Conn) {
+		_ = conn.WriteMessage(ws.FrameText, []byte(`0{"sid":"s","pingInterval":500,"pingTimeout":500}`))
 		_, _, _ = conn.ReadMessage()
-		_ = conn.WriteMessage(websocket.TextMessage, []byte(`40{"sid":"s"}`))
+		_ = conn.WriteMessage(ws.FrameText, []byte(`40{"sid":"s"}`))
 
 		time.Sleep(10 * time.Millisecond)
 
-		_ = conn.WriteMessage(websocket.BinaryMessage, []byte{1, 2, 3})
-		_ = conn.WriteMessage(websocket.TextMessage, []byte("1"))
+		_ = conn.WriteMessage(ws.FrameBinary, []byte{1, 2, 3})
+		_ = conn.WriteMessage(ws.FrameText, []byte("1"))
 	})
 
 	wsURL := strings.Replace(server.server.URL, "http://", "ws://", 1)
@@ -1209,14 +1242,14 @@ func TestReadEIOPacketCtxCancellation(t *testing.T) {
 func TestNamespaceSocket_EmitAndAck(t *testing.T) {
 	t.Parallel()
 
-	server := newMockSIOServer(t, func(conn *websocket.Conn) {
-		_ = conn.WriteMessage(websocket.TextMessage, []byte(`0{"sid":"s","pingInterval":500,"pingTimeout":500}`))
+	server := newMockSIOServer(t, func(conn ws.Conn) {
+		_ = conn.WriteMessage(ws.FrameText, []byte(`0{"sid":"s","pingInterval":500,"pingTimeout":500}`))
 		_, _, _ = conn.ReadMessage()
-		_ = conn.WriteMessage(websocket.TextMessage, []byte(`40{"sid":"s"}`))
+		_ = conn.WriteMessage(ws.FrameText, []byte(`40{"sid":"s"}`))
 
 		_, data, _ := conn.ReadMessage()
 		if strings.Contains(string(data), "/admin,") && strings.Contains(string(data), "foo") {
-			_ = conn.WriteMessage(websocket.TextMessage, []byte(`43/admin,1["ack_foo"]`))
+			_ = conn.WriteMessage(ws.FrameText, []byte(`43/admin,1["ack_foo"]`))
 		}
 	})
 
@@ -1245,10 +1278,10 @@ func TestNamespaceSocket_EmitAndAck(t *testing.T) {
 func TestNamespaceSocket_EmitCallback(t *testing.T) {
 	t.Parallel()
 
-	server := newMockSIOServer(t, func(conn *websocket.Conn) {
-		_ = conn.WriteMessage(websocket.TextMessage, []byte(`0{"sid":"s","pingInterval":500,"pingTimeout":500}`))
+	server := newMockSIOServer(t, func(conn ws.Conn) {
+		_ = conn.WriteMessage(ws.FrameText, []byte(`0{"sid":"s","pingInterval":500,"pingTimeout":500}`))
 		_, _, _ = conn.ReadMessage()
-		_ = conn.WriteMessage(websocket.TextMessage, []byte(`40{"sid":"s"}`))
+		_ = conn.WriteMessage(ws.FrameText, []byte(`40{"sid":"s"}`))
 
 		_, data, _ := conn.ReadMessage()
 		msg := string(data)
@@ -1263,7 +1296,7 @@ func TestNamespaceSocket_EmitCallback(t *testing.T) {
 			}
 
 			idStr := msg[start:end]
-			_ = conn.WriteMessage(websocket.TextMessage, []byte(`43/admin,`+idStr+`["ack_cb"]`))
+			_ = conn.WriteMessage(ws.FrameText, []byte(`43/admin,`+idStr+`["ack_cb"]`))
 		}
 	})
 
@@ -1297,10 +1330,10 @@ func TestNamespaceSocket_EmitCallback(t *testing.T) {
 func TestNamespaceSocket_EmitBinary(t *testing.T) {
 	t.Parallel()
 
-	server := newMockSIOServer(t, func(conn *websocket.Conn) {
-		_ = conn.WriteMessage(websocket.TextMessage, []byte(`0{"sid":"s","pingInterval":500,"pingTimeout":500}`))
+	server := newMockSIOServer(t, func(conn ws.Conn) {
+		_ = conn.WriteMessage(ws.FrameText, []byte(`0{"sid":"s","pingInterval":500,"pingTimeout":500}`))
 		_, _, _ = conn.ReadMessage()
-		_ = conn.WriteMessage(websocket.TextMessage, []byte(`40{"sid":"s"}`))
+		_ = conn.WriteMessage(ws.FrameText, []byte(`40{"sid":"s"}`))
 
 		var (
 			headerData     []byte
@@ -1315,11 +1348,11 @@ func TestNamespaceSocket_EmitBinary(t *testing.T) {
 
 			switch {
 			case strings.Contains(string(data), "51-/admin,"):
-				headerData = data
-			case msgType == websocket.BinaryMessage:
-				attachmentData = data
+				headerData = append([]byte(nil), data...)
+			case msgType == ws.FrameBinary:
+				attachmentData = append([]byte(nil), data...)
 			case len(data) > 0 && data[0] == 'b':
-				attachmentData = data[1:]
+				attachmentData = append([]byte(nil), data[1:]...)
 			}
 		}
 
@@ -1355,10 +1388,10 @@ func TestSocketIO_PingTimeout(t *testing.T) {
 
 	var reconnectedClosed int32
 
-	server := newMockSIOServer(t, func(conn *websocket.Conn) {
-		_ = conn.WriteMessage(websocket.TextMessage, []byte(`0{"sid":"s","pingInterval":100,"pingTimeout":100}`))
+	server := newMockSIOServer(t, func(conn ws.Conn) {
+		_ = conn.WriteMessage(ws.FrameText, []byte(`0{"sid":"s","pingInterval":100,"pingTimeout":100}`))
 		_, _, _ = conn.ReadMessage()
-		_ = conn.WriteMessage(websocket.TextMessage, []byte(`40{"sid":"s"}`))
+		_ = conn.WriteMessage(ws.FrameText, []byte(`40{"sid":"s"}`))
 
 		_, _, err := conn.ReadMessage()
 		if err == nil {
@@ -1396,13 +1429,13 @@ func TestSocketIO_ReconnectFailed(t *testing.T) {
 
 	failedCh := make(chan struct{})
 
-	server := newMockSIOServer(t, func(conn *websocket.Conn) {
+	server := newMockSIOServer(t, func(conn ws.Conn) {
 		count := atomic.AddInt32(&connCount, 1)
 
 		if count == 1 {
-			_ = conn.WriteMessage(websocket.TextMessage, []byte(`0{"sid":"s","pingInterval":100,"pingTimeout":100}`))
+			_ = conn.WriteMessage(ws.FrameText, []byte(`0{"sid":"s","pingInterval":100,"pingTimeout":100}`))
 			_, _, _ = conn.ReadMessage()
-			_ = conn.WriteMessage(websocket.TextMessage, []byte(`40{"sid":"s"}`))
+			_ = conn.WriteMessage(ws.FrameText, []byte(`40{"sid":"s"}`))
 
 			time.Sleep(20 * time.Millisecond)
 
@@ -1440,10 +1473,10 @@ func TestSocketIO_ReconnectFailed(t *testing.T) {
 func TestSocketIO_CloseMultipleTimes(t *testing.T) {
 	t.Parallel()
 
-	server := newMockSIOServer(t, func(conn *websocket.Conn) {
-		_ = conn.WriteMessage(websocket.TextMessage, []byte(`0{"sid":"s","pingInterval":500,"pingTimeout":500}`))
+	server := newMockSIOServer(t, func(conn ws.Conn) {
+		_ = conn.WriteMessage(ws.FrameText, []byte(`0{"sid":"s","pingInterval":500,"pingTimeout":500}`))
 		_, _, _ = conn.ReadMessage()
-		_ = conn.WriteMessage(websocket.TextMessage, []byte(`40{"sid":"s"}`))
+		_ = conn.WriteMessage(ws.FrameText, []byte(`40{"sid":"s"}`))
 	})
 
 	wsURL := strings.Replace(server.server.URL, "http://", "ws://", 1)

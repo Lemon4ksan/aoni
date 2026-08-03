@@ -19,7 +19,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/gorilla/websocket"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"golang.org/x/net/http2"
@@ -60,15 +59,50 @@ func tcpPipe(t *testing.T) (net.Conn, net.Conn) {
 	return res.conn, client
 }
 
+func testUpgradeToWS(w http.ResponseWriter, r *http.Request) (Conn, error) {
+	hj, ok := w.(http.Hijacker)
+	if !ok {
+		http.Error(w, "hijack not supported", http.StatusInternalServerError)
+		return nil, errors.New("hijack failed")
+	}
+
+	conn, bufrw, err := hj.Hijack()
+	if err != nil {
+		return nil, err
+	}
+
+	challengeKey := r.Header.Get("Sec-WebSocket-Key")
+	acceptKey := computeAcceptKey(challengeKey)
+
+	resp := "HTTP/1.1 101 Switching Protocols\r\n" +
+		"Upgrade: websocket\r\n" +
+		"Connection: Upgrade\r\n" +
+		"Sec-WebSocket-Accept: " + acceptKey + "\r\n"
+	if subprotocol := r.Header.Get("Sec-WebSocket-Protocol"); subprotocol != "" {
+		protocols := strings.Split(subprotocol, ",")
+		resp += "Sec-WebSocket-Protocol: " + strings.TrimSpace(protocols[0]) + "\r\n"
+	}
+
+	resp += "\r\n"
+
+	if _, err := bufrw.WriteString(resp); err != nil {
+		_ = conn.Close()
+		return nil, err
+	}
+
+	if err := bufrw.Flush(); err != nil {
+		_ = conn.Close()
+		return nil, err
+	}
+
+	return wrapRawConn(conn, false), nil
+}
+
 func TestDialWebSocket_Basic(t *testing.T) {
 	t.Parallel()
 
-	upgrader := websocket.Upgrader{
-		CheckOrigin: func(r *http.Request) bool { return true },
-	}
-
 	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		ws, err := upgrader.Upgrade(w, r, nil)
+		ws, err := testUpgradeToWS(w, r)
 		if err != nil {
 			return
 		}
@@ -152,12 +186,8 @@ func TestDialWebSocket_Basic(t *testing.T) {
 func TestDialWebSocket_CustomDialers(t *testing.T) {
 	t.Parallel()
 
-	upgrader := websocket.Upgrader{
-		CheckOrigin: func(r *http.Request) bool { return true },
-	}
-
 	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		ws, err := upgrader.Upgrade(w, r, nil)
+		ws, err := testUpgradeToWS(w, r)
 		if err != nil {
 			return
 		}
@@ -258,12 +288,8 @@ func TestDialWebSocket_CustomDialers(t *testing.T) {
 func TestDialWebSocket_WithTraceJA4(t *testing.T) {
 	t.Parallel()
 
-	upgrader := websocket.Upgrader{
-		CheckOrigin: func(r *http.Request) bool { return true },
-	}
-
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		ws, err := upgrader.Upgrade(w, r, nil)
+		ws, err := testUpgradeToWS(w, r)
 		if err != nil {
 			return
 		}
@@ -306,12 +332,8 @@ func TestDialWebSocket_InvalidURL(t *testing.T) {
 func TestDialWebSocket_WithFragmentation(t *testing.T) {
 	t.Parallel()
 
-	upgrader := websocket.Upgrader{
-		CheckOrigin: func(r *http.Request) bool { return true },
-	}
-
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		ws, err := upgrader.Upgrade(w, r, nil)
+		ws, err := testUpgradeToWS(w, r)
 		if err != nil {
 			return
 		}
@@ -350,12 +372,8 @@ func TestDialWebSocket_WithFragmentation(t *testing.T) {
 func TestDialWebSocket_TLSFingerprint(t *testing.T) {
 	t.Parallel()
 
-	upgrader := websocket.Upgrader{
-		CheckOrigin: func(r *http.Request) bool { return true },
-	}
-
 	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		conn, err := upgrader.Upgrade(w, r, nil)
+		conn, err := testUpgradeToWS(w, r)
 		if err != nil {
 			return
 		}
