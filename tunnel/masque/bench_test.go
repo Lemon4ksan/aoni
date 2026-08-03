@@ -12,7 +12,7 @@ import (
 	"testing"
 
 	"github.com/lemon4ksan/aoni"
-	"github.com/lemon4ksan/aoni/netutil/masque"
+	"github.com/lemon4ksan/aoni/tunnel/masque"
 )
 
 func BenchmarkBuildIPProxyURI(b *testing.B) {

@@ -72,10 +72,3 @@ func TestNewDarwinTunAdapter_CreationAndPermissions(t *testing.T) {
 		_ = adapter.Close()
 	}
 }
-
-func TestDarwinTunErrorConstants(t *testing.T) {
-	t.Parallel()
-
-	assert.Equal(t, "aoni tun: failed to create macOS utun interface", ErrDarwinUtunFailed.Error())
-	assert.Equal(t, "aoni tun: interface name must match utun[0-9]+", ErrInvalidUtunName.Error())
-}

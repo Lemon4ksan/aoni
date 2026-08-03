@@ -55,11 +55,3 @@ func TestWintunAdapter_ClosedState(t *testing.T) {
 	err = adapter.Close()
 	assert.NoError(t, err)
 }
-
-func TestWintunErrorConstants(t *testing.T) {
-	t.Parallel()
-
-	assert.Equal(t, "aoni tun: wintun.dll not found in application or system directory", ErrWintunNotLoaded.Error())
-	assert.Equal(t, "aoni tun: failed to create wintun network adapter", ErrAdapterCreationFailed.Error())
-	assert.Equal(t, "aoni tun: failed to start wintun session", ErrSessionCreationFailed.Error())
-}

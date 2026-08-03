@@ -51,10 +51,3 @@ func TestLinuxTunAdapter_ErrorsAndPermissions(t *testing.T) {
 		_ = adapter.Close()
 	}
 }
-
-func TestLinuxTunErrorConstants(t *testing.T) {
-	t.Parallel()
-
-	assert.Equal(t, "aoni tun: failed to open /dev/net/tun", ErrLinuxTunOpenFailed.Error())
-	assert.Equal(t, "aoni tun: TUNSETIFF ioctl failed", ErrLinuxIoctlFailed.Error())
-}

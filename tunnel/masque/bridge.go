@@ -11,7 +11,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/lemon4ksan/aoni/netutil/tun"
+	"github.com/lemon4ksan/aoni/tunnel/tun"
 )
 
 // BridgeOptions configures BCP 38 ingress filtering and MTU limits for BridgeTUN.
