@@ -431,7 +431,7 @@ func TestWSGorillaConn_Full(t *testing.T) {
 	gConn := wrapGorillaConn(ws)
 	defer gConn.Close()
 
-	msg := []byte("hello gorilla")
+	msg := []byte("bye gorilla, hello DIY")
 	n, err := gConn.Write(msg)
 	require.NoError(t, err)
 	assert.Equal(t, len(msg), n)
@@ -439,7 +439,7 @@ func TestWSGorillaConn_Full(t *testing.T) {
 	buf := make([]byte, 100)
 	n, err = gConn.Read(buf)
 	require.NoError(t, err)
-	assert.Equal(t, "hello gorilla", string(buf[:n]))
+	assert.Equal(t, "bye gorilla, hello DIY", string(buf[:n]))
 
 	assert.NotNil(t, gConn.RawConn())
 	assert.NotNil(t, gConn.LocalAddr())
@@ -1104,7 +1104,7 @@ func TestParseWSURL(t *testing.T) {
 		assert.Equal(t, tt.scheme, u.scheme, tt.url)
 		assert.Equal(t, tt.host, u.host, tt.url)
 		assert.Equal(t, tt.port, u.port, tt.url)
-		assert.Equal(t, tt.path, u.Path, tt.url)
+		assert.Equal(t, tt.path, u.path, tt.url)
 	}
 }
 

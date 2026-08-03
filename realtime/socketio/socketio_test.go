@@ -20,6 +20,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/lemon4ksan/aoni"
+	"github.com/lemon4ksan/aoni/realtime/ws"
 )
 
 func int64Ptr(i int64) *int64 {
@@ -1053,9 +1054,13 @@ type mockSizeLimitConn struct {
 	net.Conn
 }
 
-func (m *mockSizeLimitConn) Read(b []byte) (int, error) {
-	return copy(b, strings.Repeat("a", len(b))), nil
+func (m *mockSizeLimitConn) ReadMessage() (int, []byte, error) {
+	return ws.FrameText, []byte(strings.Repeat("a", maxEIOPacketSize+10)), nil
 }
+
+func (m *mockSizeLimitConn) WriteMessage(messageType int, data []byte) error { return nil }
+func (m *mockSizeLimitConn) UnderlyingConn() any                             { return nil }
+func (m *mockSizeLimitConn) CloseChan() <-chan struct{}                      { return nil }
 
 func TestEmitVolatile(t *testing.T) {
 	t.Parallel()
@@ -1188,7 +1193,7 @@ func TestReadEIOPacketCtxCancellation(t *testing.T) {
 	ctx, cancel := context.WithCancel(t.Context())
 	cancel()
 
-	_, _, err = readEIOPacketCtx(ctx, conn)
+	_, _, err = readEIOPacketCtx(ctx, ws.WrapRawConn(conn, true))
 	assert.Error(t, err)
 }
 
@@ -1294,15 +1299,18 @@ func TestNamespaceSocket_EmitBinary(t *testing.T) {
 		)
 
 		for range 5 {
-			_, data, err := conn.ReadMessage()
+			msgType, data, err := conn.ReadMessage()
 			if err != nil {
 				break
 			}
 
-			if strings.Contains(string(data), "51-/admin,") {
+			switch {
+			case strings.Contains(string(data), "51-/admin,"):
 				headerData = data
-			} else if len(data) > 0 && data[0] == 'b' {
+			case msgType == websocket.BinaryMessage:
 				attachmentData = data
+			case len(data) > 0 && data[0] == 'b':
+				attachmentData = data[1:]
 			}
 		}
 
@@ -1310,7 +1318,7 @@ func TestNamespaceSocket_EmitBinary(t *testing.T) {
 		assert.NotEmpty(t, attachmentData, "binary attachment not found")
 
 		if len(attachmentData) > 0 {
-			assert.Equal(t, []byte{1, 2, 3}, attachmentData[1:])
+			assert.Equal(t, []byte{1, 2, 3}, attachmentData)
 		}
 	})
 
@@ -1464,7 +1472,7 @@ func TestReadEIOPacketCtx_ConnClosed(t *testing.T) {
 
 	defer conn.Close()
 
-	_, _, err = readEIOPacketCtx(t.Context(), conn)
+	_, _, err = readEIOPacketCtx(t.Context(), ws.WrapRawConn(conn, true))
 	assert.Error(t, err)
 }
 

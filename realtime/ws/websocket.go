@@ -5,121 +5,133 @@
 package ws
 
 import (
+	"bufio"
 	"context"
-	"errors"
+	"crypto/rand"
+	"crypto/sha1" //nolint:gosec
+	"encoding/base64"
 	"fmt"
-	"maps"
 	"net"
 	"net/http"
 	"net/url"
 	"strings"
+	"time"
 
-	"github.com/gorilla/websocket"
 	"github.com/lemon4ksan/miyako/generic"
 	utls "github.com/refraction-networking/utls"
 
 	"github.com/lemon4ksan/aoni"
+	"github.com/lemon4ksan/aoni/internal/bytesconv"
 )
 
-var (
-	// ErrUnsupportedWSScheme is returned when a target URL uses a scheme other than ws:// or wss://.
-	ErrUnsupportedWSScheme = errors.New("aoni ws: unsupported scheme (expected ws or wss)")
+const websocketMagicGUID = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"
 
-	// ErrH2ConnectNotSupported is returned when the remote server does not support HTTP/2 Extended CONNECT.
-	ErrH2ConnectNotSupported = errors.New("aoni ws: http2 extended connect not supported by peer")
-
-	// ErrH2StreamClosed is returned when an active HTTP/2 stream closes prematurely.
-	ErrH2StreamClosed = errors.New("aoni ws: http2 stream closed")
-
-	// ErrH2ConnectFailed is returned when HTTP/2 Extended CONNECT handshake yields a non-200 status code.
-	ErrH2ConnectFailed = errors.New("aoni ws: http2 websocket connect failed")
-
-	// ErrH2GoAway is returned when an HTTP/2 GOAWAY frame is received during handshake.
-	ErrH2GoAway = errors.New("aoni ws: http2 connection closed")
-
-	// ErrH2UnexpectedFrame is returned when an unexpected HTTP/2 frame type is received during connection setup.
-	ErrH2UnexpectedFrame = errors.New("aoni ws: unexpected frame during h2 handshake")
-)
-
-type parsedURL struct {
-	scheme string
-	host   string
-	port   string
-	Path   string
-}
-
-// DialWebSocket establishes a WebSocket connection using the provided [aoni.WSDialer] for raw socket dialing.
-func DialWebSocket(
-	ctx context.Context,
-	c aoni.WSDialer,
-	targetURL string,
-	mods ...aoni.RequestModifier,
-) (net.Conn, *http.Response, error) {
-	return dialWS(ctx, c, targetURL, 4096, 4096, mods...)
-}
-
-// DialWebSocketConfig configures custom I/O buffer capacities for [DialWebSocketWithConfig].
+// DialWebSocketConfig specifies buffer sizes for WebSocket connections.
 type DialWebSocketConfig struct {
 	ReadBufferSize  int
 	WriteBufferSize int
 }
 
-// DialWebSocketWithConfig connects to a WebSocket endpoint applying custom buffer sizing.
+// DialWebSocket establishes an encrypted or plain WebSocket connection using aoni's
+// anti-detect uTLS and proxy pipeline without external dependencies.
+//
+// Preconditions:
+//   - targetURL must be a valid ws:// or wss:// URL.
+//
+// Postconditions:
+//   - Returns an established Conn satisfying net.Conn, or an error alongside the HTTP response.
+func DialWebSocket(
+	ctx context.Context,
+	dialer aoni.WSDialer,
+	targetURL string,
+	mods ...aoni.RequestModifier,
+) (Conn, *http.Response, error) {
+	return DialWebSocketWithConfig(ctx, dialer, targetURL, DialWebSocketConfig{}, mods...)
+}
+
+// DialWebSocketWithConfig establishes a WebSocket connection using custom I/O buffer sizes.
 func DialWebSocketWithConfig(
 	ctx context.Context,
-	c aoni.WSDialer,
+	dialer aoni.WSDialer,
 	targetURL string,
 	config DialWebSocketConfig,
 	mods ...aoni.RequestModifier,
-) (net.Conn, *http.Response, error) {
-	readSize := generic.Ternary(config.ReadBufferSize > 0, config.ReadBufferSize, 4096)
-	writeSize := generic.Ternary(config.WriteBufferSize > 0, config.WriteBufferSize, 4096)
-
-	return dialWS(ctx, c, targetURL, readSize, writeSize, mods...)
-}
-
-func dialWS(
-	ctx context.Context,
-	c aoni.WSDialer,
-	targetURL string,
-	readBuf, writeBuf int,
-	mods ...aoni.RequestModifier,
-) (net.Conn, *http.Response, error) {
+) (Conn, *http.Response, error) {
 	parsed, err := parseWSURL(targetURL)
 	if err != nil {
 		return nil, nil, err
 	}
 
-	tmpReq, err := buildTemporaryWSRequest(ctx, c, targetURL, mods...)
+	handshakeReq, challengeKey, err := buildHandshakeRequest(ctx, targetURL, mods...)
 	if err != nil {
 		return nil, nil, err
 	}
 
-	baseConn, err := dialBaseWSConnection(tmpReq.Context(), c, parsed)
+	baseConn, err := dialBaseConnection(ctx, dialer, parsed)
 	if err != nil {
 		return nil, nil, err
 	}
 
-	if h2Conn, resp, ok := tryH2ExtendedConnect(tmpReq.Context(), baseConn, targetURL, parsed, tmpReq); ok {
+	if h2Conn, resp, ok := tryH2ExtendedConnect(ctx, baseConn, targetURL, parsed, handshakeReq); ok {
 		return h2Conn, resp, nil
 	}
 
-	header := http.Header{}
-	maps.Copy(header, tmpReq.Header)
+	resp, err := performHTTP1Handshake(ctx, baseConn, handshakeReq, challengeKey)
+	if err != nil {
+		_ = baseConn.Close()
+		return nil, resp, err
+	}
 
-	return dialWSUpgradeWithBuffers(tmpReq.Context(), baseConn, targetURL, header, readBuf, writeBuf)
+	return wrapRawConn(baseConn, true), resp, nil
 }
 
-func buildTemporaryWSRequest(
+type parsedURL struct {
+	scheme string
+	host   string
+	port   string
+	path   string
+}
+
+func parseWSURL(rawURL string) (*parsedURL, error) {
+	u, err := url.Parse(rawURL)
+	if err != nil {
+		return nil, fmt.Errorf("aoni ws: invalid url: %w", err)
+	}
+
+	scheme := strings.ToLower(u.Scheme)
+	if scheme != "ws" && scheme != "wss" {
+		return nil, ErrUnsupportedWSScheme
+	}
+
+	defaultPort := generic.Ternary(scheme == "wss", "443", "80")
+
+	return &parsedURL{
+		scheme: scheme,
+		host:   u.Hostname(),
+		port:   generic.Coalesce(u.Port(), defaultPort),
+		path:   generic.Coalesce(u.RequestURI(), "/"),
+	}, nil
+}
+
+func buildHandshakeRequest(
 	ctx context.Context,
-	_ aoni.WSDialer,
 	targetURL string,
 	mods ...aoni.RequestModifier,
-) (*http.Request, error) {
+) (*http.Request, string, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, targetURL, nil)
 	if err != nil {
-		return nil, fmt.Errorf("aoni ws: failed to create request: %w", err)
+		return nil, "", fmt.Errorf("aoni ws: create request: %w", err)
 	}
+
+	key, err := generateChallengeKey()
+	if err != nil {
+		return nil, "", err
+	}
+
+	req.Header.Set("Upgrade", "websocket")
+	req.Header.Set("Connection", "Upgrade")
+	req.Header.Set("Sec-WebSocket-Key", key)
+	req.Header.Set("Sec-WebSocket-Version", "13")
 
 	stdReq := aoni.NewStdRequest(req)
 	for _, m := range mods {
@@ -128,16 +140,16 @@ func buildTemporaryWSRequest(
 		}
 	}
 
-	return req, nil
+	return req, key, nil
 }
 
-func dialBaseWSConnection(ctx context.Context, c aoni.WSDialer, parsed *parsedURL) (net.Conn, error) {
+func dialBaseConnection(ctx context.Context, dialer aoni.WSDialer, parsed *parsedURL) (net.Conn, error) {
 	addr := net.JoinHostPort(parsed.host, parsed.port)
 	if parsed.scheme == "wss" {
-		return c.DialTLSForWS(ctx, addr)
+		return dialer.DialTLSForWS(ctx, addr)
 	}
 
-	return c.DialPlainForWS(ctx, addr)
+	return dialer.DialPlainForWS(ctx, addr)
 }
 
 func tryH2ExtendedConnect(
@@ -145,8 +157,8 @@ func tryH2ExtendedConnect(
 	baseConn net.Conn,
 	targetURL string,
 	parsed *parsedURL,
-	tmpReq *http.Request,
-) (net.Conn, *http.Response, bool) {
+	req *http.Request,
+) (Conn, *http.Response, bool) {
 	uConn, ok := baseConn.(*utls.UConn)
 	if !ok || uConn.ConnectionState().NegotiatedProtocol != aoni.AlpnH2 {
 		return nil, nil, false
@@ -154,7 +166,6 @@ func tryH2ExtendedConnect(
 
 	wsConn, err := dialH2ExtendedConnect(ctx, baseConn, targetURL, parsed.host)
 	if err != nil {
-		_ = baseConn.Close()
 		return nil, nil, false
 	}
 
@@ -162,57 +173,77 @@ func tryH2ExtendedConnect(
 		StatusCode: http.StatusOK,
 		Proto:      "HTTP/2.0",
 		ProtoMajor: 2,
-		ProtoMinor: 0,
 		Header:     make(http.Header),
 		Body:       http.NoBody,
-		Request:    tmpReq,
+		Request:    req,
 	}
 
 	return wsConn, resp, true
 }
 
-func dialWSUpgradeWithBuffers(
+func performHTTP1Handshake(
 	ctx context.Context,
 	conn net.Conn,
-	targetURL string,
-	header http.Header,
-	readBuf, writeBuf int,
-) (net.Conn, *http.Response, error) {
-	dialer := &websocket.Dialer{
-		NetDialContext: func(_ context.Context, _, _ string) (net.Conn, error) {
-			return conn, nil
-		},
-		NetDialTLSContext: func(_ context.Context, _, _ string) (net.Conn, error) {
-			return conn, nil
-		},
-		ReadBufferSize:  readBuf,
-		WriteBufferSize: writeBuf,
+	req *http.Request,
+	challengeKey string,
+) (*http.Response, error) {
+	if deadline, ok := ctx.Deadline(); ok {
+		_ = conn.SetDeadline(deadline)
+		defer func() { _ = conn.SetDeadline(time.Time{}) }()
 	}
 
-	ws, resp, err := dialer.DialContext(ctx, targetURL, header)
+	if err := req.Write(conn); err != nil {
+		return nil, fmt.Errorf("aoni ws: write handshake: %w", err)
+	}
+
+	br := bufio.NewReader(conn)
+
+	resp, err := http.ReadResponse(br, req)
 	if err != nil {
-		_ = conn.Close()
-		return nil, nil, err
+		return nil, fmt.Errorf("aoni ws: read handshake response: %w", err)
 	}
 
-	return wrapGorillaConn(ws), resp, nil
+	if resp.StatusCode != http.StatusSwitchingProtocols {
+		return resp, ErrBadHandshake
+	}
+
+	if !tokenContainsValue(resp.Header, "Upgrade", "websocket") ||
+		!tokenContainsValue(resp.Header, "Connection", "upgrade") {
+		return resp, ErrBadHandshake
+	}
+
+	if resp.Header.Get("Sec-WebSocket-Accept") != computeAcceptKey(challengeKey) {
+		return resp, ErrBadHandshake
+	}
+
+	return resp, nil
 }
 
-func parseWSURL(rawURL string) (*parsedURL, error) {
-	u, err := url.Parse(rawURL)
-	if err != nil {
-		return nil, fmt.Errorf("aoni ws: invalid websocket url: %w", err)
+func tokenContainsValue(header http.Header, name, value string) bool {
+	for _, s := range header[name] {
+		for _, token := range strings.Split(s, ",") {
+			if bytesconv.EqualFoldASCII(strings.TrimSpace(token), value) {
+				return true
+			}
+		}
 	}
 
-	scheme := strings.ToLower(u.Scheme)
-	if scheme != "ws" && scheme != "wss" {
-		return nil, ErrUnsupportedWSScheme
+	return false
+}
+
+func generateChallengeKey() (string, error) {
+	var nonce [16]byte
+	if _, err := rand.Read(nonce[:]); err != nil {
+		return "", fmt.Errorf("aoni ws: generate key: %w", err)
 	}
 
-	return &parsedURL{
-		scheme: scheme,
-		host:   u.Hostname(),
-		port:   generic.Coalesce(u.Port(), generic.Ternary(scheme == "wss", "443", "80")),
-		Path:   generic.Coalesce(u.RequestURI(), "/"),
-	}, nil
+	return base64.StdEncoding.EncodeToString(nonce[:]), nil
+}
+
+func computeAcceptKey(challengeKey string) string {
+	h := sha1.New() //nolint:gosec
+	_, _ = h.Write(bytesconv.S2B(challengeKey))
+	_, _ = h.Write(bytesconv.S2B(websocketMagicGUID))
+
+	return base64.StdEncoding.EncodeToString(h.Sum(nil))
 }
