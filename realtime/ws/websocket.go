@@ -5,7 +5,6 @@
 package ws
 
 import (
-	"slices"
 	"bufio"
 	"context"
 	"crypto/rand"
@@ -15,6 +14,7 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"slices"
 	"strings"
 	"time"
 

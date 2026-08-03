@@ -1124,3 +1124,153 @@ func TestMaxWebSocketFrameSize(t *testing.T) {
 	t.Parallel()
 	assert.Equal(t, 16*1024*1024, maxWebSocketFrameSize)
 }
+
+func tcpPipeBench(b *testing.B) (net.Conn, net.Conn) {
+	b.Helper()
+
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		b.Fatalf("aoni ws test: failed to listen on loopback: %v", err)
+	}
+	defer ln.Close()
+
+	connCh := make(chan net.Conn, 1)
+	errCh := make(chan error, 1)
+
+	go func() {
+		conn, err := ln.Accept()
+		if err != nil {
+			errCh <- err
+			return
+		}
+
+		connCh <- conn
+	}()
+
+	client, err := net.Dial("tcp", ln.Addr().String())
+	if err != nil {
+		b.Fatalf("aoni ws test: failed to dial loopback: %v", err)
+	}
+
+	select {
+	case err := <-errCh:
+		_ = client.Close()
+
+		b.Fatalf("aoni ws test: failed to accept loopback connection: %v", err)
+
+		return nil, nil
+
+	case server := <-connCh:
+		if tcpConn, ok := client.(*net.TCPConn); ok {
+			_ = tcpConn.SetNoDelay(true)
+		}
+
+		if tcpConn, ok := server.(*net.TCPConn); ok {
+			_ = tcpConn.SetNoDelay(true)
+		}
+
+		return client, server
+
+	case <-time.After(5 * time.Second):
+		_ = client.Close()
+
+		b.Fatal("aoni ws test: loopback connection accept timeout")
+
+		return nil, nil
+	}
+}
+
+func BenchmarkWS_ReadWrite(b *testing.B) {
+	clientConn, serverConn := tcpPipeBench(b)
+	defer clientConn.Close()
+	defer serverConn.Close()
+
+	c := WrapRawConn(clientConn, true)
+	s := WrapRawConn(serverConn, false)
+
+	payload := []byte("hello zero alloc websocket payload")
+	readBuf := make([]byte, 1024)
+
+	b.SetBytes(int64(len(payload)))
+
+	ch := make(chan struct{}, 256)
+	done := make(chan struct{})
+
+	go func() {
+		for range ch {
+			_ = c.WriteMessage(FrameText, payload)
+		}
+
+		close(done)
+	}()
+
+	b.ReportAllocs()
+	b.ResetTimer()
+
+	for range b.N {
+		ch <- struct{}{}
+
+		_, _, err := s.ReadMessageTo(readBuf)
+		if err != nil {
+			b.Fatal(err)
+		}
+	}
+
+	b.StopTimer()
+	close(ch)
+	<-done
+}
+
+func BenchmarkWS_PayloadSizes(b *testing.B) {
+	benchmarks := []struct {
+		name string
+		size int
+	}{
+		{name: "Small_32B", size: 32},
+		{name: "Medium_1KB", size: 1024},
+		{name: "Large_64KB", size: 64 * 1024},
+	}
+
+	for _, bm := range benchmarks {
+		b.Run(bm.name, func(b *testing.B) {
+			clientConn, serverConn := tcpPipeBench(b)
+			defer clientConn.Close()
+			defer serverConn.Close()
+
+			c := WrapRawConn(clientConn, true)
+			s := WrapRawConn(serverConn, false)
+
+			payload := make([]byte, bm.size)
+			readBuf := make([]byte, bm.size)
+
+			b.SetBytes(int64(bm.size))
+
+			ch := make(chan struct{}, 256)
+			done := make(chan struct{})
+
+			go func() {
+				for range ch {
+					_ = c.WriteMessage(FrameBinary, payload)
+				}
+
+				close(done)
+			}()
+
+			b.ReportAllocs()
+			b.ResetTimer()
+
+			for range b.N {
+				ch <- struct{}{}
+
+				_, _, err := s.ReadMessageTo(readBuf)
+				if err != nil {
+					b.Fatal(err)
+				}
+			}
+
+			b.StopTimer()
+			close(ch)
+			<-done
+		})
+	}
+}

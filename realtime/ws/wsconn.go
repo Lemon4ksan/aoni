@@ -36,12 +36,14 @@ const (
 	maxConsecutiveEmptyReads = 100
 	h2DefaultMaxFrameSize    = 16 * 1024
 	h2InitialWindowSize      = 65535
+	maxFrameHeaderSize       = 14 // 2 fixed + 8 extended length + 4 mask key
 )
 
-// Conn represents a thread-safe WebSocket connection contract extending net.Conn.
+// Conn represents a thread-safe, zero-allocation WebSocket connection contract extending net.Conn.
 type Conn interface {
 	net.Conn
 	ReadMessage() (messageType int, payload []byte, err error)
+	ReadMessageTo(buf []byte) (messageType, n int, err error)
 	WriteMessage(messageType int, data []byte) error
 	Subprotocol() string
 	UnderlyingConn() any
@@ -53,6 +55,12 @@ type wsRawConn struct {
 	subprotocol string
 	isClient    bool
 	reader      io.Reader
+	payloadBuf  []byte                   // Reusable zero-alloc read payload buffer
+	readHdr     [maxFrameHeaderSize]byte // Fixed-size header buffer avoiding escape analysis
+	readMask    [4]byte                  // Reusable mask buffer for zero-alloc reading
+	writeHdr    [maxFrameHeaderSize]byte // Fixed-size header buffer for zero-alloc writing
+	writeMask   [4]byte                  // Reusable mask buffer for zero-alloc writing
+	writeBuf    []byte                   // Reusable write buffer (protected by writeMu)
 	closed      chan struct{}
 	writeMu     chan struct{}
 	once        sync.Once
@@ -60,17 +68,19 @@ type wsRawConn struct {
 
 func wrapRawConn(conn net.Conn, isClient bool) *wsRawConn {
 	c := &wsRawConn{
-		base:     conn,
-		isClient: isClient,
-		closed:   make(chan struct{}),
-		writeMu:  make(chan struct{}, 1),
+		base:       conn,
+		isClient:   isClient,
+		payloadBuf: make([]byte, 0, 4096),
+		writeBuf:   make([]byte, 0, 4096),
+		closed:     make(chan struct{}),
+		writeMu:    make(chan struct{}, 1),
 	}
 	c.writeMu <- struct{}{}
 
 	return c
 }
 
-// WrapRawConn wraps a net.Conn into a ws.Conn.
+// WrapRawConn wraps a net.Conn into a zero-alloc ws.Conn.
 func WrapRawConn(conn net.Conn, isClient bool) Conn {
 	return wrapRawConn(conn, isClient)
 }
@@ -138,6 +148,7 @@ func (c *wsRawConn) Write(b []byte) (int, error) {
 	return len(b), nil
 }
 
+// ReadMessage returns the next message reusing internal buffers (0 B/op after buffer warmup).
 func (c *wsRawConn) ReadMessage() (int, []byte, error) {
 	opcode, payload, err := c.readFrame()
 	if err != nil {
@@ -145,6 +156,18 @@ func (c *wsRawConn) ReadMessage() (int, []byte, error) {
 	}
 
 	return int(opcode), payload, nil
+}
+
+// ReadMessageTo reads the next message payload directly into user-provided buf achieving absolute 0 B/op.
+func (c *wsRawConn) ReadMessageTo(buf []byte) (int, int, error) {
+	opcode, payload, err := c.readFrame()
+	if err != nil {
+		return 0, 0, err
+	}
+
+	n := copy(buf, payload)
+
+	return int(opcode), n, nil
 }
 
 func (c *wsRawConn) WriteMessage(messageType int, data []byte) error {
@@ -172,19 +195,19 @@ func (c *wsRawConn) Close() error {
 }
 
 func (c *wsRawConn) readFrame() (byte, []byte, error) {
-	header := make([]byte, 2)
-	if _, err := io.ReadFull(c.base, header); err != nil {
+	if _, err := io.ReadFull(c.base, c.readHdr[:2]); err != nil {
 		return 0, nil, err
 	}
 
-	if (header[0] & 0x70) != 0 {
+	if (c.readHdr[0] & 0x70) != 0 {
 		return 0, nil, ErrReservedBitsSet
 	}
 
-	opcode := header[0] & 0x0f
-	masked := header[1]&0x80 != 0
+	opcode := c.readHdr[0] & 0x0f
+	masked := c.readHdr[1]&0x80 != 0
+	basicLen := c.readHdr[1] & 0x7f
 
-	length, err := c.readFrameLength(header[1] & 0x7f)
+	length, err := c.readFrameLengthZeroAlloc(basicLen)
 	if err != nil {
 		return 0, nil, err
 	}
@@ -193,7 +216,7 @@ func (c *wsRawConn) readFrame() (byte, []byte, error) {
 		return 0, nil, ErrControlFrameTooLarge
 	}
 
-	payload, err := c.readFramePayload(length, masked)
+	payload, err := c.readFramePayloadZeroAlloc(length, masked)
 	if err != nil {
 		return 0, nil, err
 	}
@@ -201,51 +224,53 @@ func (c *wsRawConn) readFrame() (byte, []byte, error) {
 	return opcode, payload, nil
 }
 
-func (c *wsRawConn) readFrameLength(basicLen byte) (uint64, error) {
+func (c *wsRawConn) readFrameLengthZeroAlloc(basicLen byte) (uint64, error) {
 	switch basicLen {
 	case 126:
-		extended := make([]byte, 2)
-		if _, err := io.ReadFull(c.base, extended); err != nil {
+		if _, err := io.ReadFull(c.base, c.readHdr[2:4]); err != nil {
 			return 0, err
 		}
 
-		return uint64(binary.BigEndian.Uint16(extended)), nil
+		return uint64(binary.BigEndian.Uint16(c.readHdr[2:4])), nil
 
 	case 127:
-		extended := make([]byte, 8)
-		if _, err := io.ReadFull(c.base, extended); err != nil {
+		if _, err := io.ReadFull(c.base, c.readHdr[2:10]); err != nil {
 			return 0, err
 		}
 
-		return binary.BigEndian.Uint64(extended), nil
+		return binary.BigEndian.Uint64(c.readHdr[2:10]), nil
 
 	default:
 		return uint64(basicLen), nil
 	}
 }
 
-func (c *wsRawConn) readFramePayload(length uint64, masked bool) ([]byte, error) {
+func (c *wsRawConn) readFramePayloadZeroAlloc(length uint64, masked bool) ([]byte, error) {
 	if length > maxWebSocketFrameSize {
 		return nil, fmt.Errorf("%w: %d bytes", ErrFrameTooLarge, length)
 	}
 
-	var mask [4]byte
 	if masked {
-		if _, err := io.ReadFull(c.base, mask[:]); err != nil {
+		if _, err := io.ReadFull(c.base, c.readMask[:]); err != nil {
 			return nil, err
 		}
 	}
 
-	payload := make([]byte, length)
-	if _, err := io.ReadFull(c.base, payload); err != nil {
+	if uint64(cap(c.payloadBuf)) < length {
+		c.payloadBuf = make([]byte, length)
+	} else {
+		c.payloadBuf = c.payloadBuf[:length]
+	}
+
+	if _, err := io.ReadFull(c.base, c.payloadBuf); err != nil {
 		return nil, err
 	}
 
 	if masked {
-		applyFastMask(payload, mask)
+		applyFastMask(c.payloadBuf, c.readMask)
 	}
 
-	return payload, nil
+	return c.payloadBuf, nil
 }
 
 func (c *wsRawConn) writeFrame(opcode byte, payload []byte) error {
@@ -253,12 +278,13 @@ func (c *wsRawConn) writeFrame(opcode byte, payload []byte) error {
 		return ErrControlFrameTooLarge
 	}
 
-	header := c.buildFrameHeader(opcode, len(payload))
+	hdrLen := c.buildFrameHeaderZeroAlloc(opcode, len(payload), c.writeHdr[:])
+
 	if c.isClient {
-		return c.writeMaskedFrame(header, payload)
+		return c.writeMaskedFrameZeroAlloc(c.writeHdr[:hdrLen], payload)
 	}
 
-	if _, err := c.base.Write(header); err != nil {
+	if _, err := c.base.Write(c.writeHdr[:hdrLen]); err != nil {
 		return err
 	}
 
@@ -267,49 +293,54 @@ func (c *wsRawConn) writeFrame(opcode byte, payload []byte) error {
 	return err
 }
 
-func (c *wsRawConn) writeMaskedFrame(header, payload []byte) error {
-	var mask [4]byte
-	if _, err := rand.Read(mask[:]); err != nil {
+func (c *wsRawConn) writeMaskedFrameZeroAlloc(header, payload []byte) error {
+	if _, err := rand.Read(c.writeMask[:]); err != nil {
 		return err
 	}
 
-	header = append(header, mask[:]...)
-
-	masked := make([]byte, len(payload))
-	copy(masked, payload)
-	applyFastMask(masked, mask)
-
-	if _, err := c.base.Write(header); err != nil {
-		return err
+	neededLen := len(header) + 4 + len(payload)
+	if cap(c.writeBuf) < neededLen {
+		c.writeBuf = make([]byte, neededLen)
+	} else {
+		c.writeBuf = c.writeBuf[:neededLen]
 	}
 
-	_, err := c.base.Write(masked)
+	copy(c.writeBuf, header)
+	copy(c.writeBuf[len(header):], c.writeMask[:])
+	copy(c.writeBuf[len(header)+4:], payload)
+
+	applyFastMask(c.writeBuf[len(header)+4:], c.writeMask)
+
+	_, err := c.base.Write(c.writeBuf)
 
 	return err
 }
 
-func (c *wsRawConn) buildFrameHeader(opcode byte, length int) []byte {
-	header := []byte{0x80 | opcode, 0}
+func (c *wsRawConn) buildFrameHeaderZeroAlloc(opcode byte, length int, hdr []byte) int {
+	hdr[0] = 0x80 | opcode
+	hdr[1] = 0
+
 	if c.isClient {
-		header[1] = 0x80
+		hdr[1] = 0x80
 	}
 
 	switch {
 	case length < 126:
-		header[1] |= byte(length)
-	case length <= 0xffff:
-		header[1] |= 126
-		extended := make([]byte, 2)
-		binary.BigEndian.PutUint16(extended, uint16(length))
-		header = append(header, extended...)
-	default:
-		header[1] |= 127
-		extended := make([]byte, 8)
-		binary.BigEndian.PutUint64(extended, uint64(length))
-		header = append(header, extended...)
-	}
+		hdr[1] |= byte(length)
+		return 2
 
-	return header
+	case length <= 0xffff:
+		hdr[1] |= 126
+		binary.BigEndian.PutUint16(hdr[2:4], uint16(length))
+
+		return 4
+
+	default:
+		hdr[1] |= 127
+		binary.BigEndian.PutUint64(hdr[2:10], uint64(length))
+
+		return 10
+	}
 }
 
 func applyFastMask(payload []byte, mask [4]byte) {
@@ -466,6 +497,15 @@ func (c *wsH2Conn) ReadMessage() (int, []byte, error) {
 	}
 
 	return FrameText, b[:n], nil
+}
+
+func (c *wsH2Conn) ReadMessageTo(buf []byte) (int, int, error) {
+	n, err := c.Read(buf)
+	if err != nil {
+		return 0, 0, err
+	}
+
+	return FrameText, n, nil
 }
 
 func (c *wsH2Conn) WriteMessage(messageType int, data []byte) error {

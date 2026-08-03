@@ -1058,6 +1058,11 @@ func (m *mockSizeLimitConn) Subprotocol() string {
 	return "socket.io"
 }
 
+func (m *mockSizeLimitConn) ReadMessageTo(b []byte) (int, int, error) {
+	n := copy(b, strings.Repeat("a", maxEIOPacketSize+10))
+	return ws.FrameText, n, nil
+}
+
 func (m *mockSizeLimitConn) ReadMessage() (int, []byte, error) {
 	return ws.FrameText, []byte(strings.Repeat("a", maxEIOPacketSize+10)), nil
 }
