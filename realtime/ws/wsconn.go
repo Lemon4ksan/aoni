@@ -19,7 +19,6 @@ import (
 	"time"
 	"unicode/utf8"
 
-	"github.com/gorilla/websocket"
 	"github.com/lemon4ksan/miyako/generic"
 	"golang.org/x/net/http2"
 	"golang.org/x/net/http2/hpack"
@@ -33,101 +32,30 @@ const (
 	FramePing         = 0x9
 	FramePong         = 0xA
 
-	wsFrameContinuation = FrameContinuation
-	wsFrameText         = FrameText
-	wsFrameBinary       = FrameBinary
-	wsFrameClose        = FrameClose
-	wsFramePing         = FramePing
-	wsFramePong         = FramePong
-
 	maxWebSocketFrameSize    = 16 * 1024 * 1024
 	maxConsecutiveEmptyReads = 100
 	h2DefaultMaxFrameSize    = 16 * 1024
 	h2InitialWindowSize      = 65535
 )
 
-type wsGorillaConn struct {
-	base   *websocket.Conn
-	closed chan struct{}
-	once   sync.Once
-}
-
-func (c *wsGorillaConn) Read(b []byte) (int, error) {
-	_, p, err := c.base.ReadMessage()
-	if err != nil {
-		return 0, err
-	}
-
-	return copy(b, p), nil
-}
-
-func (c *wsGorillaConn) Write(b []byte) (int, error) {
-	err := c.base.WriteMessage(websocket.TextMessage, b)
-	return len(b), err
-}
-
-func (c *wsGorillaConn) ReadMessage() (int, []byte, error) {
-	return c.base.ReadMessage()
-}
-
-func (c *wsGorillaConn) WriteMessage(messageType int, data []byte) error {
-	return c.base.WriteMessage(messageType, data)
-}
-
-func (c *wsGorillaConn) Close() error {
-	c.once.Do(func() {
-		close(c.closed)
-		_ = c.base.Close()
-	})
-
-	return nil
-}
-
-func (c *wsGorillaConn) RawConn() *websocket.Conn { return c.base }
-func (c *wsGorillaConn) UnderlyingConn() any      { return c.base.UnderlyingConn() }
-func (c *wsGorillaConn) LocalAddr() net.Addr      { return c.base.LocalAddr() }
-func (c *wsGorillaConn) RemoteAddr() net.Addr     { return c.base.RemoteAddr() }
-func (c *wsGorillaConn) SetDeadline(t time.Time) error {
-	if err := c.base.SetReadDeadline(t); err != nil {
-		return err
-	}
-
-	return c.base.SetWriteDeadline(t)
-}
-func (c *wsGorillaConn) SetReadDeadline(t time.Time) error  { return c.base.SetReadDeadline(t) }
-func (c *wsGorillaConn) SetWriteDeadline(t time.Time) error { return c.base.SetWriteDeadline(t) }
-func (c *wsGorillaConn) CloseChan() <-chan struct{}         { return c.closed }
-
-func wrapGorillaConn(conn *websocket.Conn) *wsGorillaConn {
-	return &wsGorillaConn{base: conn, closed: make(chan struct{})}
-}
-
-// WrapGorillaConn wraps a gorilla websocket.Conn into a ws.Conn.
-func WrapGorillaConn(conn *websocket.Conn) Conn {
-	return wrapGorillaConn(conn)
-}
-
-// WrapRawConn wraps a net.Conn into a ws.Conn.
-func WrapRawConn(conn net.Conn, isClient bool) Conn {
-	return wrapRawConn(conn, isClient)
-}
-
 // Conn represents a thread-safe WebSocket connection contract extending net.Conn.
 type Conn interface {
 	net.Conn
 	ReadMessage() (messageType int, payload []byte, err error)
 	WriteMessage(messageType int, data []byte) error
+	Subprotocol() string
 	UnderlyingConn() any
 	CloseChan() <-chan struct{}
 }
 
 type wsRawConn struct {
-	base     net.Conn
-	isClient bool
-	reader   io.Reader
-	closed   chan struct{}
-	writeMu  chan struct{}
-	once     sync.Once
+	base        net.Conn
+	subprotocol string
+	isClient    bool
+	reader      io.Reader
+	closed      chan struct{}
+	writeMu     chan struct{}
+	once        sync.Once
 }
 
 func wrapRawConn(conn net.Conn, isClient bool) *wsRawConn {
@@ -140,6 +68,15 @@ func wrapRawConn(conn net.Conn, isClient bool) *wsRawConn {
 	c.writeMu <- struct{}{}
 
 	return c
+}
+
+// WrapRawConn wraps a net.Conn into a ws.Conn.
+func WrapRawConn(conn net.Conn, isClient bool) Conn {
+	return wrapRawConn(conn, isClient)
+}
+
+func (c *wsRawConn) Subprotocol() string {
+	return c.subprotocol
 }
 
 func (c *wsRawConn) Read(b []byte) (int, error) {
@@ -174,14 +111,14 @@ func (c *wsRawConn) processNextFrame() error {
 		}
 
 		switch opcode {
-		case wsFrameBinary, wsFrameText, wsFrameContinuation:
+		case FrameBinary, FrameText, FrameContinuation:
 			c.reader = bytes.NewReader(payload)
 			return nil
-		case wsFrameClose:
+		case FrameClose:
 			return io.EOF
-		case wsFramePing:
-			_ = c.writeFrame(wsFramePong, payload)
-		case wsFramePong:
+		case FramePing:
+			_ = c.writeFrame(FramePong, payload)
+		case FramePong:
 		}
 	}
 
@@ -192,7 +129,7 @@ func (c *wsRawConn) Write(b []byte) (int, error) {
 	<-c.writeMu
 	defer func() { c.writeMu <- struct{}{} }()
 
-	opcode := generic.Ternary(utf8.Valid(b), byte(wsFrameText), byte(wsFrameBinary))
+	opcode := generic.Ternary(utf8.Valid(b), byte(FrameText), byte(FrameBinary))
 	if err := c.writeFrame(opcode, b); err != nil {
 		_ = c.Close()
 		return 0, err
@@ -252,7 +189,7 @@ func (c *wsRawConn) readFrame() (byte, []byte, error) {
 		return 0, nil, err
 	}
 
-	if opcode >= wsFrameClose && length > 125 {
+	if opcode >= FrameClose && length > 125 {
 		return 0, nil, ErrControlFrameTooLarge
 	}
 
@@ -312,7 +249,7 @@ func (c *wsRawConn) readFramePayload(length uint64, masked bool) ([]byte, error)
 }
 
 func (c *wsRawConn) writeFrame(opcode byte, payload []byte) error {
-	if opcode >= wsFrameClose && len(payload) > 125 {
+	if opcode >= FrameClose && len(payload) > 125 {
 		return ErrControlFrameTooLarge
 	}
 
@@ -396,6 +333,7 @@ func applyFastMask(payload []byte, mask [4]byte) {
 
 type wsH2Conn struct {
 	base        net.Conn
+	subprotocol string
 	framer      *http2.Framer
 	streamID    uint32
 	readBuf     bytes.Buffer
@@ -404,6 +342,10 @@ type wsH2Conn struct {
 	writeMu     sync.Mutex
 	closed      chan struct{}
 	once        sync.Once
+}
+
+func (c *wsH2Conn) Subprotocol() string {
+	return c.subprotocol
 }
 
 func (c *wsH2Conn) Read(b []byte) (int, error) {
@@ -523,7 +465,7 @@ func (c *wsH2Conn) ReadMessage() (int, []byte, error) {
 		return 0, nil, err
 	}
 
-	return wsFrameText, b[:n], nil
+	return FrameText, b[:n], nil
 }
 
 func (c *wsH2Conn) WriteMessage(messageType int, data []byte) error {
@@ -596,7 +538,12 @@ func dialH2ExtendedConnect(
 		return nil, nil, err
 	}
 
-	return wrapRawConn(h2c, true), respHeaders, nil
+	rawConn := wrapRawConn(h2c, true)
+	if selected := respHeaders.Get("Sec-WebSocket-Protocol"); selected != "" {
+		rawConn.subprotocol = strings.TrimSpace(selected)
+	}
+
+	return rawConn, respHeaders, nil
 }
 
 func (c *wsH2Conn) clientPreface() error {

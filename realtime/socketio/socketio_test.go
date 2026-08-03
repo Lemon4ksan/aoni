@@ -1054,6 +1054,10 @@ type mockSizeLimitConn struct {
 	net.Conn
 }
 
+func (m *mockSizeLimitConn) Subprotocol() string {
+	return "socket.io"
+}
+
 func (m *mockSizeLimitConn) ReadMessage() (int, []byte, error) {
 	return ws.FrameText, []byte(strings.Repeat("a", maxEIOPacketSize+10)), nil
 }

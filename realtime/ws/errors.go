@@ -20,6 +20,12 @@ var (
 	// ErrPathTraversalBlocked indicates a path traversal attempt was detected in a well-known URI.
 	ErrPathTraversalBlocked = errors.New("aoni ws: path traversal blocked in well-known URI")
 
+	// ErrSubprotocolMismatch indicates the server selected a subprotocol not requested by the client.
+	ErrSubprotocolMismatch = errors.New("aoni ws: server selected unrequested subprotocol")
+
+	// ErrInvalidSubprotocol indicates a subprotocol token contains invalid characters according to RFC 2616.
+	ErrInvalidSubprotocol = errors.New("aoni ws: invalid subprotocol token")
+
 	// ErrH2ConnectNotSupported indicates the HTTP/2 peer does not support Extended CONNECT (RFC 8441).
 	ErrH2ConnectNotSupported = errors.New("aoni ws: http2 extended connect not supported by peer")
 

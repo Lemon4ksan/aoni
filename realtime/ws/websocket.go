@@ -5,6 +5,7 @@
 package ws
 
 import (
+	"slices"
 	"bufio"
 	"context"
 	"crypto/rand"
@@ -35,6 +36,37 @@ const (
 type DialWebSocketConfig struct {
 	ReadBufferSize  int
 	WriteBufferSize int
+	Subprotocols    []string
+}
+
+// ValidateSubprotocol performs strict case-sensitive matching of the server's selected subprotocol
+// against client requested subprotocols per RFC 6455 and RFC 7936.
+func ValidateSubprotocol(requested []string, selected string) bool {
+	if selected == "" || len(requested) == 0 {
+		return true
+	}
+
+	return slices.Contains(requested, selected)
+}
+
+// IsValidSubprotocolToken checks whether a token complies with RFC 2616 ABNF token rules.
+func IsValidSubprotocolToken(token string) bool {
+	if token == "" {
+		return false
+	}
+
+	for i := 0; i < len(token); i++ {
+		b := token[i]
+		if b <= 32 || b >= 127 || strings.IndexByte("()<>@,;:\\\"/[]?={} \t", char(b)) >= 0 {
+			return false
+		}
+	}
+
+	return true
+}
+
+func char(b byte) byte {
+	return b
 }
 
 // BuildWellKnownURI constructs an RFC 8307 compliant well-known WebSocket URI.
@@ -92,7 +124,7 @@ func DialWebSocket(
 	return DialWebSocketWithConfig(ctx, dialer, targetURL, DialWebSocketConfig{}, mods...)
 }
 
-// DialWebSocketWithConfig establishes a WebSocket connection using custom I/O buffer sizes.
+// DialWebSocketWithConfig establishes a WebSocket connection using custom I/O buffer sizes and subprotocols.
 func DialWebSocketWithConfig(
 	ctx context.Context,
 	dialer aoni.WSDialer,
@@ -105,7 +137,7 @@ func DialWebSocketWithConfig(
 		return nil, nil, err
 	}
 
-	handshakeReq, challengeKey, err := buildHandshakeRequest(ctx, targetURL, mods...)
+	handshakeReq, challengeKey, err := buildHandshakeRequest(ctx, targetURL, config.Subprotocols, mods...)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -119,13 +151,22 @@ func DialWebSocketWithConfig(
 		return h2Conn, resp, nil
 	}
 
-	resp, err := performHTTP1Handshake(ctx, baseConn, handshakeReq, challengeKey)
+	resp, selectedSubprotocol, err := performHTTP1Handshake(
+		ctx,
+		baseConn,
+		handshakeReq,
+		challengeKey,
+		config.Subprotocols,
+	)
 	if err != nil {
 		_ = baseConn.Close()
 		return nil, resp, err
 	}
 
-	return wrapRawConn(baseConn, true), resp, nil
+	rawConn := wrapRawConn(baseConn, true)
+	rawConn.subprotocol = selectedSubprotocol
+
+	return rawConn, resp, nil
 }
 
 type parsedURL struct {
@@ -165,6 +206,7 @@ func parseWSURL(rawURL string) (*parsedURL, error) {
 func buildHandshakeRequest(
 	ctx context.Context,
 	targetURL string,
+	subprotocols []string,
 	mods ...aoni.RequestModifier,
 ) (*http.Request, string, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, targetURL, nil)
@@ -181,6 +223,10 @@ func buildHandshakeRequest(
 	req.Header.Set("Connection", "Upgrade")
 	req.Header.Set("Sec-WebSocket-Key", key)
 	req.Header.Set("Sec-WebSocket-Version", "13")
+
+	if len(subprotocols) > 0 {
+		req.Header.Set("Sec-WebSocket-Protocol", strings.Join(subprotocols, ", "))
+	}
 
 	stdReq := aoni.NewStdRequest(req)
 	for _, m := range mods {
@@ -235,37 +281,43 @@ func performHTTP1Handshake(
 	conn net.Conn,
 	req *http.Request,
 	challengeKey string,
-) (*http.Response, error) {
+	requestedSubprotocols []string,
+) (*http.Response, string, error) {
 	if deadline, ok := ctx.Deadline(); ok {
 		_ = conn.SetDeadline(deadline)
 		defer func() { _ = conn.SetDeadline(time.Time{}) }()
 	}
 
 	if err := req.Write(conn); err != nil {
-		return nil, fmt.Errorf("aoni ws: write handshake: %w", err)
+		return nil, "", fmt.Errorf("aoni ws: write handshake: %w", err)
 	}
 
 	br := bufio.NewReader(conn)
 
 	resp, err := http.ReadResponse(br, req)
 	if err != nil {
-		return nil, fmt.Errorf("aoni ws: read handshake response: %w", err)
+		return nil, "", fmt.Errorf("aoni ws: read handshake response: %w", err)
 	}
 
 	if resp.StatusCode != http.StatusSwitchingProtocols {
-		return resp, ErrBadHandshake
+		return resp, "", ErrBadHandshake
 	}
 
 	if !tokenContainsValue(resp.Header, "Upgrade", "websocket") ||
 		!tokenContainsValue(resp.Header, "Connection", "upgrade") {
-		return resp, ErrBadHandshake
+		return resp, "", ErrBadHandshake
 	}
 
 	if resp.Header.Get("Sec-WebSocket-Accept") != computeAcceptKey(challengeKey) {
-		return resp, ErrBadHandshake
+		return resp, "", ErrBadHandshake
 	}
 
-	return resp, nil
+	selectedSubprotocol := strings.TrimSpace(resp.Header.Get("Sec-WebSocket-Protocol"))
+	if !ValidateSubprotocol(requestedSubprotocols, selectedSubprotocol) {
+		return resp, "", ErrSubprotocolMismatch
+	}
+
+	return resp, selectedSubprotocol, nil
 }
 
 func tokenContainsValue(header http.Header, name, value string) bool {

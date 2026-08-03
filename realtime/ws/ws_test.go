@@ -398,62 +398,6 @@ func TestDialWebSocket_TLSH2HandshakeFailure(t *testing.T) {
 	assert.Error(t, err)
 }
 
-func TestWSGorillaConn_Full(t *testing.T) {
-	t.Parallel()
-
-	upgrader := websocket.Upgrader{
-		CheckOrigin: func(r *http.Request) bool { return true },
-	}
-
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		conn, err := upgrader.Upgrade(w, r, nil)
-		if err != nil {
-			return
-		}
-		defer conn.Close()
-
-		for {
-			mt, p, err := conn.ReadMessage()
-			if err != nil {
-				return
-			}
-
-			_ = conn.WriteMessage(mt, p)
-		}
-	}))
-	defer server.Close()
-
-	wsURL := "ws" + strings.TrimPrefix(server.URL, "http")
-	dialer := websocket.Dialer{}
-	ws, _, err := dialer.Dial(wsURL, nil)
-	require.NoError(t, err)
-
-	gConn := wrapGorillaConn(ws)
-	defer gConn.Close()
-
-	msg := []byte("bye gorilla, hello DIY")
-	n, err := gConn.Write(msg)
-	require.NoError(t, err)
-	assert.Equal(t, len(msg), n)
-
-	buf := make([]byte, 100)
-	n, err = gConn.Read(buf)
-	require.NoError(t, err)
-	assert.Equal(t, "bye gorilla, hello DIY", string(buf[:n]))
-
-	assert.NotNil(t, gConn.RawConn())
-	assert.NotNil(t, gConn.LocalAddr())
-	assert.NotNil(t, gConn.RemoteAddr())
-	assert.NoError(t, gConn.SetDeadline(time.Now().Add(10*time.Second)))
-	assert.NoError(t, gConn.SetReadDeadline(time.Now().Add(10*time.Second)))
-	assert.NoError(t, gConn.SetWriteDeadline(time.Now().Add(10*time.Second)))
-	assert.NotNil(t, gConn.CloseChan())
-
-	require.NoError(t, gConn.Close())
-	_, err = gConn.Read(buf)
-	assert.Error(t, err)
-}
-
 func TestWSRawConn_RoundTrip(t *testing.T) {
 	t.Parallel()
 
@@ -1105,16 +1049,6 @@ func TestParseWSURL(t *testing.T) {
 		assert.Equal(t, tt.port, u.port, tt.url)
 		assert.Equal(t, tt.path, u.path, tt.url)
 	}
-}
-
-func TestWSConn_ImplementsNetConn(t *testing.T) {
-	t.Parallel()
-
-	var (
-		_ Conn     = (*wsGorillaConn)(nil)
-		_ Conn     = (*wsRawConn)(nil)
-		_ net.Conn = (*wsH2Conn)(nil)
-	)
 }
 
 func TestH2Preface_ContextCancellation(t *testing.T) {
