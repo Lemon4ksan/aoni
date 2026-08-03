@@ -53,7 +53,7 @@ func TestNewDarwinTunAdapter_InvalidName(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			_, err := NewDarwinTunAdapter(name)
+			_, err := NewDarwinAdapter(name)
 			assert.ErrorIs(t, err, ErrInvalidUtunName, "name %s should return ErrInvalidUtunName", name)
 		})
 	}
@@ -62,7 +62,7 @@ func TestNewDarwinTunAdapter_InvalidName(t *testing.T) {
 func TestNewDarwinTunAdapter_CreationAndPermissions(t *testing.T) {
 	t.Parallel()
 
-	adapter, err := NewDarwinTunAdapter("utun9")
+	adapter, err := NewDarwinAdapter("utun9")
 	if err != nil {
 		assert.Error(t, err)
 		assert.True(t, errors.Is(err, ErrDarwinUtunFailed) || errors.Is(err, ErrInvalidUtunName))

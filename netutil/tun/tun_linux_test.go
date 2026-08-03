@@ -41,7 +41,7 @@ func TestCStringToGoString(t *testing.T) {
 func TestLinuxTunAdapter_ErrorsAndPermissions(t *testing.T) {
 	t.Parallel()
 
-	adapter, err := NewLinuxTunAdapter("tun99")
+	adapter, err := NewLinuxAdapter("tun99")
 	if err != nil {
 		assert.Error(t, err)
 		assert.True(t, errors.Is(err, ErrLinuxTunOpenFailed) || errors.Is(err, ErrLinuxIoctlFailed))

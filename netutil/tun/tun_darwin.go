@@ -47,18 +47,18 @@ type sockaddrCtl struct {
 	ScReserved [5]uint32
 }
 
-// DarwinTunAdapter encapsulates a macOS utun virtual network interface.
-type DarwinTunAdapter struct {
+// DarwinAdapter encapsulates a macOS utun virtual network interface.
+type DarwinAdapter struct {
 	file *os.File
 	name string
 }
 
-// NewDarwinTunAdapter creates and registers a Layer 3 utun interface on macOS without CGO.
+// NewDarwinAdapter creates and registers a Layer 3 utun interface on macOS without CGO.
 //
 // Preconditions:
 //   - devName must match "utun[0-9]+" (e.g., "utun0", "utun1") or be empty for auto-assignment.
 //   - Requires root or sudo privileges on macOS to allocate system control sockets.
-func NewDarwinTunAdapter(devName string) (*DarwinTunAdapter, error) {
+func NewDarwinAdapter(devName string) (*DarwinAdapter, error) {
 	unit := 0
 	if devName != "" {
 		after, found := strings.CutPrefix(devName, "utun")
@@ -141,7 +141,7 @@ func NewDarwinTunAdapter(devName string) (*DarwinTunAdapter, error) {
 	realName := cStringToGoString(ifNameBuf[:ifNameLen])
 	file := os.NewFile(uintptr(fd), realName)
 
-	return &DarwinTunAdapter{
+	return &DarwinAdapter{
 		file: file,
 		name: realName,
 	}, nil
@@ -158,21 +158,21 @@ func cStringToGoString(b []byte) string {
 }
 
 // Name returns the actual utun interface name assigned by macOS kernel (e.g. "utun0").
-func (a *DarwinTunAdapter) Name() string {
+func (a *DarwinAdapter) Name() string {
 	return a.name
 }
 
 // Read reads one Layer 3 IP packet from the macOS kernel utun interface.
-func (a *DarwinTunAdapter) Read(b []byte) (int, error) {
+func (a *DarwinAdapter) Read(b []byte) (int, error) {
 	return a.file.Read(b)
 }
 
 // Write transmits an IP packet back into the macOS kernel network stack.
-func (a *DarwinTunAdapter) Write(b []byte) (int, error) {
+func (a *DarwinAdapter) Write(b []byte) (int, error) {
 	return a.file.Write(b)
 }
 
 // Close releases the file descriptor and destroys the macOS utun interface.
-func (a *DarwinTunAdapter) Close() error {
+func (a *DarwinAdapter) Close() error {
 	return a.file.Close()
 }

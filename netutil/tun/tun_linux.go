@@ -34,17 +34,17 @@ type ifreq struct {
 	_     [22]byte
 }
 
-// LinuxTunAdapter encapsulates a Linux /dev/net/tun virtual network interface.
-type LinuxTunAdapter struct {
+// LinuxAdapter encapsulates a Linux /dev/net/tun virtual network interface.
+type LinuxAdapter struct {
 	file *os.File
 	name string
 }
 
-// NewLinuxTunAdapter creates and registers a Layer 3 TUN network interface on Linux.
+// NewLinuxAdapter creates and registers a Layer 3 TUN network interface on Linux.
 //
 // Preconditions:
 //   - Requires CAP_NET_ADMIN privileges on Linux (or running as root).
-func NewLinuxTunAdapter(devName string) (*LinuxTunAdapter, error) {
+func NewLinuxAdapter(devName string) (*LinuxAdapter, error) {
 	file, err := os.OpenFile("/dev/net/tun", os.O_RDWR, 0)
 	if err != nil {
 		return nil, fmt.Errorf("%w: %v", ErrLinuxTunOpenFailed, err)
@@ -71,7 +71,7 @@ func NewLinuxTunAdapter(devName string) (*LinuxTunAdapter, error) {
 
 	realName := cStringToGoString(ifr.Name[:])
 
-	return &LinuxTunAdapter{
+	return &LinuxAdapter{
 		file: file,
 		name: realName,
 	}, nil
@@ -88,21 +88,21 @@ func cStringToGoString(b []byte) string {
 }
 
 // Name returns the actual interface name assigned by the Linux kernel (e.g. "tun0").
-func (a *LinuxTunAdapter) Name() string {
+func (a *LinuxAdapter) Name() string {
 	return a.name
 }
 
 // Read reads one Layer 3 IP packet from the Linux kernel virtual network interface.
-func (a *LinuxTunAdapter) Read(b []byte) (int, error) {
+func (a *LinuxAdapter) Read(b []byte) (int, error) {
 	return a.file.Read(b)
 }
 
 // Write transmits an IP packet back into the Linux kernel network stack.
-func (a *LinuxTunAdapter) Write(b []byte) (int, error) {
+func (a *LinuxAdapter) Write(b []byte) (int, error) {
 	return a.file.Write(b)
 }
 
 // Close releases the file descriptor and destroys the Linux TUN interface.
-func (a *LinuxTunAdapter) Close() error {
+func (a *LinuxAdapter) Close() error {
 	return a.file.Close()
 }
