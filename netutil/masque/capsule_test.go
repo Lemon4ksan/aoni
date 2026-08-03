@@ -7,6 +7,7 @@ package masque
 import (
 	"bytes"
 	"net"
+	"net/netip"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -138,12 +139,12 @@ func TestDecodeAddressAssignPayload(t *testing.T) {
 
 		assert.Equal(t, uint64(1), entries[0].RequestID)
 		assert.Equal(t, byte(4), entries[0].IPVersion)
-		assert.Equal(t, "192.168.1.100", entries[0].IP.String())
+		assert.Equal(t, "192.168.1.100", entries[0].Addr.String())
 		assert.Equal(t, byte(32), entries[0].PrefixLength)
 
 		assert.Equal(t, uint64(2), entries[1].RequestID)
 		assert.Equal(t, byte(6), entries[1].IPVersion)
-		assert.Equal(t, "2001:db8::1", entries[1].IP.String())
+		assert.Equal(t, "2001:db8::1", entries[1].Addr.String())
 		assert.Equal(t, byte(128), entries[1].PrefixLength)
 	})
 
@@ -226,25 +227,25 @@ func TestCapsuleStructs(t *testing.T) {
 	t.Parallel()
 
 	addr := AssignedAddress{
-		IP:           net.ParseIP("192.168.1.1"),
+		Addr:         netip.MustParseAddr("192.168.1.1"),
 		RequestID:    1,
 		IPVersion:    4,
 		PrefixLength: 24,
 	}
-	assert.Equal(t, "192.168.1.1", addr.IP.String())
+	assert.Equal(t, "192.168.1.1", addr.Addr.String())
 	assert.Equal(t, uint64(1), addr.RequestID)
 
 	reqAddr := RequestedAddress{
-		IP:           net.ParseIP("10.0.0.1"),
+		Addr:         netip.MustParseAddr("10.0.0.1"),
 		RequestID:    2,
 		IPVersion:    4,
 		PrefixLength: 32,
 	}
-	assert.Equal(t, "10.0.0.1", reqAddr.IP.String())
+	assert.Equal(t, "10.0.0.1", reqAddr.Addr.String())
 
 	ipRange := IPAddressRange{
-		StartIP:    net.ParseIP("10.0.0.1"),
-		EndIP:      net.ParseIP("10.0.0.255"),
+		StartIP:    netip.MustParseAddr("10.0.0.1"),
+		EndIP:      netip.MustParseAddr("10.0.0.255"),
 		IPVersion:  4,
 		IPProtocol: 17,
 	}

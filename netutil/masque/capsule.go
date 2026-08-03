@@ -7,7 +7,7 @@ package masque
 import (
 	"encoding/binary"
 	"fmt"
-	"net"
+	"net/netip"
 )
 
 const (
@@ -23,7 +23,7 @@ const (
 
 // AssignedAddress represents an assigned IP address/prefix entry in ADDRESS_ASSIGN capsules.
 type AssignedAddress struct {
-	IP           net.IP
+	Addr         netip.Addr
 	RequestID    uint64
 	IPVersion    byte
 	PrefixLength byte
@@ -31,7 +31,7 @@ type AssignedAddress struct {
 
 // RequestedAddress represents a requested IP address/prefix entry in ADDRESS_REQUEST capsules.
 type RequestedAddress struct {
-	IP           net.IP
+	Addr         netip.Addr
 	RequestID    uint64
 	IPVersion    byte
 	PrefixLength byte
@@ -39,8 +39,8 @@ type RequestedAddress struct {
 
 // IPAddressRange represents an advertised route range entry in ROUTE_ADVERTISEMENT capsules.
 type IPAddressRange struct {
-	StartIP    net.IP
-	EndIP      net.IP
+	StartIP    netip.Addr
+	EndIP      netip.Addr
 	IPVersion  byte
 	IPProtocol byte
 }
@@ -81,12 +81,14 @@ func DecodeVarint(b []byte) (uint64, int, error) {
 		}
 
 		return uint64(binary.BigEndian.Uint16(b[:2]) & 0x3fff), 2, nil
+
 	case 2:
 		if len(b) < 4 {
 			return 0, 0, ErrInvalidCapsule
 		}
 
 		return uint64(binary.BigEndian.Uint32(b[:4]) & 0x3fffffff), 4, nil
+
 	default:
 		if len(b) < 8 {
 			return 0, 0, ErrInvalidCapsule
@@ -103,10 +105,14 @@ func EncodeAddressAssignHeader(payloadLen uint64, b []byte) int {
 	return n1 + n2
 }
 
-// DecodeAddressAssignPayload parses AssignedAddress entries from payload bytes.
+// DecodeAddressAssignPayload parses AssignedAddress entries from payload bytes into a new slice.
 func DecodeAddressAssignPayload(payload []byte) ([]AssignedAddress, error) {
-	var entries []AssignedAddress
+	entries := make([]AssignedAddress, 0, len(payload)/8)
+	return DecodeAddressAssignPayloadTo(payload, entries)
+}
 
+// DecodeAddressAssignPayloadTo parses AssignedAddress entries into pre-allocated dst slice achieving 0 B/op.
+func DecodeAddressAssignPayloadTo(payload []byte, dst []AssignedAddress) ([]AssignedAddress, error) {
 	offset := 0
 
 	for offset < len(payload) {
@@ -124,31 +130,42 @@ func DecodeAddressAssignPayload(payload []byte) ([]AssignedAddress, error) {
 		ipVer := payload[offset]
 		offset++
 
-		ipLen := 4
-		if ipVer == 6 {
-			ipLen = 16
-		} else if ipVer != 4 {
+		var addr netip.Addr
+		switch ipVer {
+		case 4:
+			if offset+4+1 > len(payload) {
+				return nil, ErrInvalidCapsule
+			}
+
+			var ip4 [4]byte
+			copy(ip4[:], payload[offset:offset+4])
+			addr = netip.AddrFrom4(ip4)
+			offset += 4
+
+		case 6:
+			if offset+16+1 > len(payload) {
+				return nil, ErrInvalidCapsule
+			}
+
+			var ip6 [16]byte
+			copy(ip6[:], payload[offset:offset+16])
+			addr = netip.AddrFrom16(ip6)
+			offset += 16
+
+		default:
 			return nil, fmt.Errorf("%w: invalid IP version %d", ErrInvalidCapsule, ipVer)
 		}
-
-		if offset+ipLen+1 > len(payload) {
-			return nil, ErrInvalidCapsule
-		}
-
-		ipBytes := make(net.IP, ipLen)
-		copy(ipBytes, payload[offset:offset+ipLen])
-		offset += ipLen
 
 		prefixLen := payload[offset]
 		offset++
 
-		entries = append(entries, AssignedAddress{
+		dst = append(dst, AssignedAddress{
+			Addr:         addr,
 			RequestID:    reqID,
 			IPVersion:    ipVer,
-			IP:           ipBytes,
 			PrefixLength: prefixLen,
 		})
 	}
 
-	return entries, nil
+	return dst, nil
 }

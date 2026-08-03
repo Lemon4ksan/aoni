@@ -11,6 +11,7 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 	"time"
 
@@ -26,7 +27,7 @@ const (
 	ConnectIPUpgradeToken = "connect-ip"
 )
 
-// BuildIPProxyURI constructs an RFC 9484 compliant IP Proxy URI.
+// BuildIPProxyURI constructs an RFC 9484 compliant IP Proxy URI using single-pass zero-allocation string builder.
 //
 // Preconditions:
 //   - target can be an IP address/prefix, hostname, or "*" wildcard.
@@ -42,16 +43,50 @@ func BuildIPProxyURI(host string, port int, target, ipproto string) string {
 		cleanProto = "*"
 	}
 
-	// Percent-encode colons for IPv6 literal targets per RFC 9484 Section 4.6
-	if strings.Contains(cleanTarget, ":") {
-		cleanTarget = strings.ReplaceAll(cleanTarget, ":", "%3A")
+	var portBuf [10]byte
+
+	portBytes := strconv.AppendInt(portBuf[:0], int64(port), 10)
+
+	var sb strings.Builder
+	sb.Grow(
+		len(
+			"https://",
+		) + len(
+			host,
+		) + 1 + len(
+			portBytes,
+		) + len(
+			DefaultMASQUEPathPrefix,
+		) + len(
+			cleanTarget,
+		)*3 + 1 + len(
+			cleanProto,
+		) + 2,
+	)
+
+	sb.WriteString("https://")
+	sb.WriteString(host)
+	sb.WriteByte(':')
+	sb.Write(portBytes)
+	sb.WriteString(DefaultMASQUEPathPrefix)
+
+	for i := 0; i < len(cleanTarget); i++ {
+		b := cleanTarget[i]
+		switch b {
+		case ':':
+			sb.WriteString("%3A")
+		case '/':
+			sb.WriteString("%2F")
+		default:
+			sb.WriteByte(b)
+		}
 	}
 
-	if strings.Contains(cleanTarget, "/") {
-		cleanTarget = strings.ReplaceAll(cleanTarget, "/", "%2F")
-	}
+	sb.WriteByte('/')
+	sb.WriteString(cleanProto)
+	sb.WriteString("/")
 
-	return fmt.Sprintf("https://%s:%d%s%s/%s/", host, port, DefaultMASQUEPathPrefix, cleanTarget, cleanProto)
+	return sb.String()
 }
 
 // DialIPProxy establishes an IP tunneling connection over HTTP/1.1 or HTTP/2 Extended CONNECT.
