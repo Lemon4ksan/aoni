@@ -634,7 +634,7 @@ func TestDoHResolver_QueryEncoding(t *testing.T) {
 	}
 
 	ctx := t.Context()
-	_, _ = r.query(ctx, "example.com", 1)
+	_, _ = r.queryWire(ctx, "example.com", 1)
 
 	assert.Contains(t, capturedURL, "name=example.com")
 	assert.Contains(t, capturedURL, "type=1")

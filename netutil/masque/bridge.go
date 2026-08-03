@@ -7,18 +7,35 @@ package masque
 import (
 	"context"
 	"net"
+	"net/netip"
 	"sync"
 	"time"
 
 	"github.com/lemon4ksan/aoni/netutil/tun"
 )
 
-// BridgeTUN connects a TUN Adapter to an RFC 9484 connect-ip MASQUE tunnel.
-//
-// Execution Flow:
-//   - Goroutine 1 (Kernel -> MASQUE): Reads IP packets from TUN device and writes to masqueConn.
-//   - Goroutine 2 (MASQUE -> Kernel): Reads IP packets from masqueConn and writes back to TUN device.
+// BridgeOptions configures BCP 38 ingress filtering and MTU limits for BridgeTUN.
+type BridgeOptions struct {
+	AllowedPrefixes []netip.Prefix
+	MaxMTU          int
+}
+
+// BridgeTUN connects a tun.Adapter to an RFC 9484 connect-ip MASQUE tunnel.
 func BridgeTUN(ctx context.Context, adapter tun.Adapter, masqueConn net.Conn) error {
+	return BridgeTUNWithOptions(ctx, adapter, masqueConn, BridgeOptions{})
+}
+
+// BridgeTUNWithOptions connects a tun.Adapter to a MASQUE tunnel enforcing BCP 38 uRPF and MTU limits.
+//
+// Preconditions:
+//   - adapter must be an active Layer 3 TUN interface (Windows, Linux, or macOS).
+//   - masqueConn must be an established connect-ip stream.
+func BridgeTUNWithOptions(
+	ctx context.Context,
+	adapter tun.Adapter,
+	masqueConn net.Conn,
+	opts BridgeOptions,
+) error {
 	var wg sync.WaitGroup
 
 	ctx, cancel := context.WithCancel(ctx)
@@ -50,11 +67,35 @@ func BridgeTUN(ctx context.Context, adapter tun.Adapter, masqueConn net.Conn) er
 					return
 				}
 
-				if n > 0 {
-					if _, writeErr := masqueConn.Write(buf[:n]); writeErr != nil {
-						cancel()
-						return
+				if n == 0 {
+					continue
+				}
+
+				packet := buf[:n]
+
+				// BCP 38 / BCP 84 uRPF Ingress Source Address Validation (RFC 2827 / RFC 3704)
+				srcIP := ExtractSrcIP(packet)
+				if err := ValidateIngressSourceAddress(srcIP, opts.AllowedPrefixes); err != nil {
+					// Drop spoofed / Martian packet without forwarding
+					continue
+				}
+
+				// RFC 9484 Section 10.1 PMTUD MTU Limit Check
+				if opts.MaxMTU > 0 && n > opts.MaxMTU {
+					if icmpPkt, err := BuildICMPPacketTooBig(
+						packet,
+						uint32(opts.MaxMTU),
+					); err == nil &&
+						len(icmpPkt) > 0 {
+						_, _ = adapter.Write(icmpPkt)
 					}
+
+					continue
+				}
+
+				if _, writeErr := masqueConn.Write(packet); writeErr != nil {
+					cancel()
+					return
 				}
 			}
 		}
@@ -90,4 +131,22 @@ func BridgeTUN(ctx context.Context, adapter tun.Adapter, masqueConn net.Conn) er
 	wg.Wait()
 
 	return nil
+}
+
+// BuildICMPPacketTooBig automatically creates an IPv4 (RFC 1191) or IPv6 (RFC 4443) ICMP Packet Too Big error.
+func BuildICMPPacketTooBig(packet []byte, mtu uint32) ([]byte, error) {
+	if len(packet) == 0 {
+		return nil, ErrInvalidIPHeader
+	}
+
+	version := packet[0] >> 4
+	if version == 4 {
+		return BuildICMPPacketTooBig4(packet, uint16(mtu)) //nolint:gosec
+	}
+
+	if version == 6 {
+		return BuildICMPPacketTooBig6(packet, mtu)
+	}
+
+	return nil, ErrInvalidIPHeader
 }

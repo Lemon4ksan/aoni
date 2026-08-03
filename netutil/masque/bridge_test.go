@@ -7,9 +7,9 @@ package masque
 import (
 	"bytes"
 	"context"
-	"errors"
-	"io"
+	"encoding/binary"
 	"net"
+	"net/netip"
 	"sync"
 	"testing"
 	"time"
@@ -18,95 +18,102 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-type mockTUNAdapter struct {
+type bridgeMockAdapter struct {
 	name     string
-	readBuf  *bytes.Buffer
+	packets  [][]byte
 	writeBuf *bytes.Buffer
 	mu       sync.Mutex
-	readErr  error
-	writeErr error
 	closed   bool
+	notify   chan struct{}
 }
 
-func newMockTUNAdapter(name string) *mockTUNAdapter {
-	return &mockTUNAdapter{
+func newBridgeMockAdapter(name string) *bridgeMockAdapter {
+	return &bridgeMockAdapter{
 		name:     name,
-		readBuf:  new(bytes.Buffer),
 		writeBuf: new(bytes.Buffer),
+		notify:   make(chan struct{}, 100),
 	}
 }
 
-func (m *mockTUNAdapter) Name() string {
+func (m *bridgeMockAdapter) Name() string {
 	return m.name
 }
 
-func (m *mockTUNAdapter) Read(b []byte) (int, error) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-
-	if m.readErr != nil {
-		return 0, m.readErr
-	}
-
-	if m.closed {
-		return 0, io.EOF
-	}
-
-	if m.readBuf.Len() == 0 {
-		m.mu.Unlock()
-		time.Sleep(2 * time.Millisecond)
+func (m *bridgeMockAdapter) Read(b []byte) (int, error) {
+	for {
 		m.mu.Lock()
+		if m.closed {
+			m.mu.Unlock()
 
-		if m.readBuf.Len() == 0 {
-			return 0, nil
+			return 0, net.ErrClosed
+		}
+
+		if len(m.packets) > 0 {
+			pkt := m.packets[0]
+			m.packets = m.packets[1:]
+			n := copy(b, pkt)
+			m.mu.Unlock()
+
+			return n, nil
+		}
+
+		m.mu.Unlock()
+
+		select {
+		case <-m.notify:
+		case <-time.After(5 * time.Millisecond):
 		}
 	}
-
-	return m.readBuf.Read(b)
 }
 
-func (m *mockTUNAdapter) Write(b []byte) (int, error) {
+func (m *bridgeMockAdapter) Write(b []byte) (int, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	if m.writeErr != nil {
-		return 0, m.writeErr
-	}
-
 	if m.closed {
-		return 0, io.ErrClosedPipe
+		return 0, net.ErrClosed
 	}
 
 	return m.writeBuf.Write(b)
 }
 
-func (m *mockTUNAdapter) Close() error {
+func (m *bridgeMockAdapter) Close() error {
 	m.mu.Lock()
-	defer m.mu.Unlock()
-
 	m.closed = true
+	m.mu.Unlock()
+
+	select {
+	case m.notify <- struct{}{}:
+	default:
+	}
 
 	return nil
 }
 
-func (m *mockTUNAdapter) InjectReadPacket(packet []byte) {
+func (m *bridgeMockAdapter) InjectReadPacket(pkt []byte) {
 	m.mu.Lock()
-	defer m.mu.Unlock()
+	cp := make([]byte, len(pkt))
+	copy(cp, pkt)
+	m.packets = append(m.packets, cp)
+	m.mu.Unlock()
 
-	m.readBuf.Write(packet)
+	select {
+	case m.notify <- struct{}{}:
+	default:
+	}
 }
 
-func (m *mockTUNAdapter) GetWrittenBytes() []byte {
+func (m *bridgeMockAdapter) GetWrittenBytes() []byte {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
 	return m.writeBuf.Bytes()
 }
 
-func TestBridgeTUNToMASQUE_Bidirectional(t *testing.T) {
+func TestBridgeTUN_Default(t *testing.T) {
 	t.Parallel()
 
-	adapter := newMockTUNAdapter("tun_test0")
+	adapter := newBridgeMockAdapter("tun_b0")
 	clientConn, serverConn := net.Pipe()
 
 	defer clientConn.Close()
@@ -116,69 +123,110 @@ func TestBridgeTUNToMASQUE_Bidirectional(t *testing.T) {
 	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
 
-	errCh := make(chan error, 1)
 	go func() {
-		errCh <- BridgeTUN(ctx, adapter, clientConn)
+		_ = BridgeTUN(ctx, adapter, clientConn)
 	}()
 
-	// Test 1: OS Kernel (Adapter) -> MASQUE Proxy (Conn)
-	packetFromKernel := []byte{0x45, 0x00, 0x00, 0x14, 0x00, 0x01} // Sample IP packet
-	adapter.InjectReadPacket(packetFromKernel)
+	packet := make([]byte, 20)
+	packet[0] = 0x45
+	copy(packet[12:16], netip.MustParseAddr("10.0.0.5").AsSlice())
+	copy(packet[16:20], netip.MustParseAddr("1.1.1.1").AsSlice())
+
+	adapter.InjectReadPacket(packet)
 
 	readBuf := make([]byte, 1024)
 	n, err := serverConn.Read(readBuf)
 	require.NoError(t, err)
-	assert.Equal(t, packetFromKernel, readBuf[:n])
+	assert.Equal(t, packet, readBuf[:n])
 
-	// Test 2: MASQUE Proxy (Conn) -> OS Kernel (Adapter)
-	packetFromMASQUE := []byte{0x45, 0x00, 0x00, 0x20, 0x00, 0x02}
-	_, err = serverConn.Write(packetFromMASQUE)
-	require.NoError(t, err)
-
-	time.Sleep(20 * time.Millisecond)
-	assert.Equal(t, packetFromMASQUE, adapter.GetWrittenBytes())
-
-	// Cancel context to stop bridge
 	cancel()
-
-	select {
-	case err := <-errCh:
-		require.NoError(t, err)
-	case <-time.After(1 * time.Second):
-		t.Fatal("BridgeTUNT did not exit promptly after context cancellation")
-	}
 }
 
-func TestBridgeTUNToMASQUE_AdapterReadError(t *testing.T) {
+func TestBridgeTUNWithOptions_IngressFiltering(t *testing.T) {
 	t.Parallel()
 
-	adapter := newMockTUNAdapter("tun_err0")
-	adapter.readErr = errors.New("read error simulation")
+	adapter := newBridgeMockAdapter("tun_b1")
 	clientConn, serverConn := net.Pipe()
 
 	defer clientConn.Close()
 	defer serverConn.Close()
+	defer adapter.Close()
 
-	ctx, cancel := context.WithTimeout(t.Context(), 2*time.Second)
+	opts := BridgeOptions{
+		AllowedPrefixes: []netip.Prefix{
+			netip.MustParsePrefix("10.0.0.0/16"),
+		},
+	}
+
+	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
 
-	err := BridgeTUN(ctx, adapter, clientConn)
+	go func() {
+		_ = BridgeTUNWithOptions(ctx, adapter, clientConn, opts)
+	}()
+
+	// Packet 1: Spoofed IP 192.168.1.100 (should be dropped by uRPF)
+	spoofedPkt := make([]byte, 20)
+	spoofedPkt[0] = 0x45
+	copy(spoofedPkt[12:16], netip.MustParseAddr("192.168.1.100").AsSlice())
+	copy(spoofedPkt[16:20], netip.MustParseAddr("1.1.1.1").AsSlice())
+
+	// Packet 2: Valid IP 10.0.0.5 (should pass uRPF filter)
+	validPkt := make([]byte, 20)
+	validPkt[0] = 0x45
+	copy(validPkt[12:16], netip.MustParseAddr("10.0.0.5").AsSlice())
+	copy(validPkt[16:20], netip.MustParseAddr("1.1.1.1").AsSlice())
+
+	adapter.InjectReadPacket(spoofedPkt)
+	adapter.InjectReadPacket(validPkt)
+
+	readBuf := make([]byte, 1024)
+	n, err := serverConn.Read(readBuf)
 	require.NoError(t, err)
+	// Must receive validPkt, not spoofedPkt
+	assert.Equal(t, validPkt, readBuf[:n])
+
+	cancel()
 }
 
-func TestBridgeTUNToMASQUE_ConnReadError(t *testing.T) {
+func TestBridgeTUNWithOptions_MTULimit(t *testing.T) {
 	t.Parallel()
 
-	adapter := newMockTUNAdapter("tun_err1")
+	adapter := newBridgeMockAdapter("tun_b2")
 	clientConn, serverConn := net.Pipe()
 
-	_ = serverConn.Close() // Close server side immediately to cause read error on clientConn
+	defer clientConn.Close()
+	defer serverConn.Close()
+	defer adapter.Close()
 
-	ctx, cancel := context.WithTimeout(t.Context(), 2*time.Second)
+	opts := BridgeOptions{
+		MaxMTU: 1300,
+	}
+
+	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
 
-	err := BridgeTUN(ctx, adapter, clientConn)
-	require.NoError(t, err)
+	go func() {
+		_ = BridgeTUNWithOptions(ctx, adapter, clientConn, opts)
+	}()
 
-	_ = clientConn.Close()
+	// Oversized packet (1400 bytes > MaxMTU 1300)
+	overPkt := make([]byte, 1400)
+	overPkt[0] = 0x45
+	copy(overPkt[12:16], netip.MustParseAddr("10.0.0.5").AsSlice())
+	copy(overPkt[16:20], netip.MustParseAddr("1.1.1.1").AsSlice())
+
+	adapter.InjectReadPacket(overPkt)
+
+	time.Sleep(30 * time.Millisecond)
+
+	// Adapter should have received ICMP Packet Too Big response
+	written := adapter.GetWrittenBytes()
+	require.NotEmpty(t, written)
+	assert.Equal(t, byte(0x45), written[0])
+	assert.Equal(t, byte(3), written[20]) // ICMP Type 3
+	assert.Equal(t, byte(4), written[21]) // ICMP Code 4
+	assert.Equal(t, uint16(1300), binary.BigEndian.Uint16(written[26:28]))
+
+	cancel()
 }

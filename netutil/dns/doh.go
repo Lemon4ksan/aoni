@@ -6,11 +6,13 @@ package dns
 
 import (
 	"context"
-	"encoding/json"
+	"crypto/rand"
+	"encoding/base64"
+	"encoding/binary"
 	"fmt"
 	"net"
 	"net/http"
-	"net/url"
+	"net/netip"
 	"time"
 
 	"github.com/lemon4ksan/aoni"
@@ -18,17 +20,31 @@ import (
 	"github.com/lemon4ksan/aoni/option"
 )
 
-// DoHResolver resolves DNS via HTTPS (A and AAAA records) using a universal HTTP execution engine.
-type DoHResolver struct {
-	Endpoint string // IP-based URL, e.g. "https://1.1.1.1/dns-query"
-	Host     string // Host header override, e.g. "cloudflare-dns.com"
+const (
+	// DoHMediaType specifies the official IETF RFC 8484 media type for DoH queries and responses.
+	DoHMediaType = "application/dns-message"
+)
 
-	doer aoni.RequestDoer
+// DoHMethod specifies the HTTP method used for DoH queries (GET or POST per RFC 8484).
+type DoHMethod int
+
+const (
+	// DoHMethodPost uses HTTP POST with raw wire format body (RFC 8484 Section 4.1).
+	DoHMethodPost DoHMethod = iota
+
+	// DoHMethodGet uses HTTP GET with base64url-encoded ?dns= parameter (RFC 8484 Section 4.1).
+	DoHMethodGet
+)
+
+// DoHResolver resolves DNS via HTTPS using RFC 1035 wire format and RFC 8484 DoH specifications.
+type DoHResolver struct {
+	Endpoint string    // e.g. "https://1.1.1.1/dns-query"
+	Host     string    // Host header override, e.g. "cloudflare-dns.com"
+	Method   DoHMethod // DoHMethodPost or DoHMethodGet
+	doer     aoni.RequestDoer
 }
 
-// NewDoHResolver creates a DoHResolver.
-// The doer parameter accepts any client implementation (*fast.Client, *aoni.Client, *http.Client, or nil).
-// If doer is nil, it defaults to a high-performance fast.Client.
+// NewDoHResolver creates a new RFC 8484 compliant DoHResolver.
 func NewDoHResolver(endpoint, host string, doer any) *DoHResolver {
 	var engine aoni.RequestDoer
 	if doer == nil {
@@ -40,49 +56,69 @@ func NewDoHResolver(endpoint, host string, doer any) *DoHResolver {
 	return &DoHResolver{
 		Endpoint: endpoint,
 		Host:     host,
+		Method:   DoHMethodPost,
 		doer:     engine,
 	}
 }
 
-type dohResponse struct {
-	Answer []dohAnswer `json:"Answer"`
-}
-
-type dohAnswer struct {
-	Type int    `json:"type"` // 1 = A, 28 = AAAA
-	Data string `json:"data"`
-}
-
-// LookupIPAddr queries both A and AAAA records via DoH.
+// LookupIPAddr queries A and AAAA records via RFC 8484 DoH using RFC 1035 wire format.
 func (r *DoHResolver) LookupIPAddr(ctx context.Context, host string) ([]net.IPAddr, error) {
-	// Query A records
-	aIPs, err := r.query(ctx, host, 1)
+	addrs, err := r.LookupNetIP(ctx, host)
 	if err != nil {
-		return nil, wrapDNSError(host, "DoH", r.Endpoint, err)
+		return nil, err
 	}
 
-	// Query AAAA records
-	aaaaIPs, err := r.query(ctx, host, 28)
-	if err != nil {
-		return aIPs, nil //nolint:nilerr
+	ipAddrs := make([]net.IPAddr, len(addrs))
+	for i, a := range addrs {
+		ipAddrs[i] = net.IPAddr{IP: a.AsSlice()}
 	}
 
-	return append(aIPs, aaaaIPs...), nil
+	return ipAddrs, nil
 }
 
-func (r *DoHResolver) query(ctx context.Context, host string, qtype uint16) ([]net.IPAddr, error) {
-	reqURL := fmt.Sprintf("%s?name=%s&type=%d", r.Endpoint, url.QueryEscape(host), qtype)
+// LookupNetIP queries A and AAAA records returning zero-alloc netip.Addr structures.
+func (r *DoHResolver) LookupNetIP(ctx context.Context, host string) ([]netip.Addr, error) {
+	v4Addrs, err4 := r.queryWire(ctx, host, TypeA)
+	v6Addrs, err6 := r.queryWire(ctx, host, TypeAAAA)
+
+	if err4 != nil && err6 != nil {
+		return nil, wrapDNSError(host, "DoH", r.Endpoint, err4)
+	}
+
+	return append(v4Addrs, v6Addrs...), nil
+}
+
+func (r *DoHResolver) queryWire(ctx context.Context, host string, qtype uint16) ([]netip.Addr, error) {
+	var idBuf [2]byte
+
+	_, _ = rand.Read(idBuf[:])
+	queryID := binary.BigEndian.Uint16(idBuf[:])
+
+	wireQuery, err := PackDNSQuery(queryID, host, qtype)
+	if err != nil {
+		return nil, err
+	}
 
 	req := fast.NewRequest(nil)
 	defer req.Release()
 
 	req.SetContext(ctx)
-	req.SetMethod(http.MethodGet)
-	req.SetURL(reqURL)
-	req.SetHeader("Accept", "application/dns-json")
+	req.SetHeader("Accept", DoHMediaType)
 
 	if r.Host != "" {
 		req.SetHeader("Host", r.Host)
+	}
+
+	if r.Method == DoHMethodGet {
+		encoded := base64.RawURLEncoding.EncodeToString(wireQuery)
+
+		req.SetMethod(http.MethodGet)
+		req.SetURL(r.Endpoint + "?dns=" + encoded)
+	} else {
+		req.SetMethod(http.MethodPost)
+		req.SetURL(r.Endpoint)
+		req.SetHeader("Content-Type", DoHMediaType)
+		req.SetBodyBytes(wireQuery)
 	}
 
 	resp, err := r.doer.Do(req)
@@ -91,27 +127,9 @@ func (r *DoHResolver) query(ctx context.Context, host string, qtype uint16) ([]n
 	}
 	defer resp.Close()
 
-	var apiResp dohResponse
-
-	// Fast path: attempt zero-copy decoding if the response provides direct buffer access
-	if unsafe, ok := resp.(interface{ UnsafeBodyBytes() []byte }); ok {
-		if err := json.Unmarshal(unsafe.UnsafeBodyBytes(), &apiResp); err != nil {
-			return nil, err
-		}
-	} else {
-		if err := json.Unmarshal(resp.BodyBytes(), &apiResp); err != nil {
-			return nil, err
-		}
+	if resp.StatusCode() != http.StatusOK {
+		return nil, fmt.Errorf("aoni doh: http status %d", resp.StatusCode())
 	}
 
-	var ips []net.IPAddr
-	for _, ans := range apiResp.Answer {
-		if ans.Type == int(qtype) {
-			if ip := net.ParseIP(ans.Data); ip != nil {
-				ips = append(ips, net.IPAddr{IP: ip})
-			}
-		}
-	}
-
-	return ips, nil
+	return ParseDNSResponse(resp.BodyBytes(), queryID)
 }
