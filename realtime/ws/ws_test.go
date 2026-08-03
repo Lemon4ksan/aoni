@@ -1292,3 +1292,293 @@ func BenchmarkWS_PayloadSizes(b *testing.B) {
 		})
 	}
 }
+
+func TestRFC8307_BuildWellKnownURI(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name      string
+		scheme    string
+		host      string
+		suffix    string
+		want      string
+		expectErr error
+	}{
+		{
+			name:   "valid_ws",
+			scheme: "ws",
+			host:   "example.com",
+			suffix: "chat",
+			want:   "ws://example.com/.well-known/chat",
+		},
+		{
+			name:   "valid_wss_leading_slash",
+			scheme: "wss",
+			host:   "example.com",
+			suffix: "/oauth/token",
+			want:   "wss://example.com/.well-known/oauth/token",
+		},
+		{
+			name:   "uppercase_scheme",
+			scheme: "WSS",
+			host:   "example.com",
+			suffix: "test",
+			want:   "wss://example.com/.well-known/test",
+		},
+		{
+			name:      "unsupported_scheme",
+			scheme:    "http",
+			host:      "example.com",
+			suffix:    "test",
+			expectErr: ErrUnsupportedWSScheme,
+		},
+		{
+			name:      "empty_suffix",
+			scheme:    "ws",
+			host:      "example.com",
+			suffix:    "   ",
+			expectErr: ErrInvalidWellKnownSuffix,
+		},
+		{
+			name:      "path_traversal",
+			scheme:    "wss",
+			host:      "example.com",
+			suffix:    "../admin",
+			expectErr: ErrPathTraversalBlocked,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			got, err := BuildWellKnownURI(tt.scheme, tt.host, tt.suffix)
+			if tt.expectErr != nil {
+				assert.ErrorIs(t, err, tt.expectErr)
+			} else {
+				require.NoError(t, err)
+				assert.Equal(t, tt.want, got)
+			}
+		})
+	}
+}
+
+func TestRFC8307_DialWellKnown(t *testing.T) {
+	t.Parallel()
+
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.True(t, strings.HasPrefix(r.URL.Path, WellKnownPrefix))
+
+		ws, err := testUpgradeToWS(w, r)
+		if err != nil {
+			return
+		}
+		defer ws.Close()
+
+		mt, msg, err := ws.ReadMessage()
+		if err == nil {
+			_ = ws.WriteMessage(mt, msg)
+		}
+	})
+
+	server := httptest.NewServer(handler)
+	defer server.Close()
+
+	host := strings.TrimPrefix(server.URL, "http://")
+	client := aoni.NewClient(nil)
+
+	conn, resp, err := DialWellKnown(t.Context(), client, "ws", host, "my-service")
+	require.NoError(t, err)
+	require.NotNil(t, resp)
+	assert.Equal(t, http.StatusSwitchingProtocols, resp.StatusCode)
+
+	defer conn.Close()
+
+	testMsg := []byte("well-known test")
+	_, err = conn.Write(testMsg)
+	require.NoError(t, err)
+
+	buf := make([]byte, 100)
+	n, err := conn.Read(buf)
+	require.NoError(t, err)
+	assert.Equal(t, "well-known test", string(buf[:n]))
+}
+
+func TestRFC7936_Subprotocols(t *testing.T) {
+	t.Parallel()
+
+	t.Run("ValidateSubprotocol", func(t *testing.T) {
+		t.Parallel()
+		assert.True(t, ValidateSubprotocol([]string{"chat", "v1"}, "chat"))
+		assert.True(t, ValidateSubprotocol([]string{"chat", "v1"}, "v1"))
+		assert.False(t, ValidateSubprotocol([]string{"chat", "v1"}, "v2"))
+		assert.True(t, ValidateSubprotocol(nil, "chat"))
+		assert.True(t, ValidateSubprotocol([]string{"chat"}, ""))
+	})
+
+	t.Run("IsValidSubprotocolToken", func(t *testing.T) {
+		t.Parallel()
+
+		valid := []string{"chat", "graphql-ws", "v1.0", "sip", "wamp.2.json"}
+		for _, v := range valid {
+			assert.True(t, IsValidSubprotocolToken(v), "should be valid: %s", v)
+		}
+
+		invalid := []string{"", "chat ", "chat\t", "chat\n", "chat(v1)", "a,b", "foo/bar", "a{b}", "a<b"}
+		for _, inv := range invalid {
+			assert.False(t, IsValidSubprotocolToken(inv), "should be invalid: %s", inv)
+		}
+	})
+}
+
+func TestRFC7936_SubprotocolHandshake(t *testing.T) {
+	t.Parallel()
+
+	t.Run("matching_subprotocol", func(t *testing.T) {
+		t.Parallel()
+
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			ws, err := testUpgradeToWS(w, r)
+			if err != nil {
+				return
+			}
+
+			ws.Close()
+		}))
+		defer server.Close()
+
+		client := aoni.NewClient(nil)
+		wsURL := "ws" + strings.TrimPrefix(server.URL, "http")
+
+		conn, resp, err := DialWebSocketWithConfig(t.Context(), client, wsURL, DialWebSocketConfig{
+			Subprotocols: []string{"chat.v1", "chat.v2"},
+		})
+		require.NoError(t, err)
+		assert.Equal(t, http.StatusSwitchingProtocols, resp.StatusCode)
+		assert.Equal(t, "chat.v1", conn.Subprotocol())
+		conn.Close()
+	})
+
+	t.Run("mismatched_subprotocol", func(t *testing.T) {
+		t.Parallel()
+
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			challengeKey := r.Header.Get("Sec-WebSocket-Key")
+			acceptKey := computeAcceptKey(challengeKey)
+
+			w.Header().Set("Upgrade", "websocket")
+			w.Header().Set("Connection", "Upgrade")
+			w.Header().Set("Sec-WebSocket-Accept", acceptKey)
+			w.Header().Set("Sec-WebSocket-Protocol", "unrequested-protocol")
+			w.WriteHeader(http.StatusSwitchingProtocols)
+		}))
+		defer server.Close()
+
+		client := aoni.NewClient(nil)
+		wsURL := "ws" + strings.TrimPrefix(server.URL, "http")
+
+		_, _, err := DialWebSocketWithConfig(t.Context(), client, wsURL, DialWebSocketConfig{
+			Subprotocols: []string{"requested-protocol"},
+		})
+		assert.ErrorIs(t, err, ErrSubprotocolMismatch)
+	})
+}
+
+func TestRFC7692_PermessageDeflate(t *testing.T) {
+	t.Parallel()
+
+	t.Run("compress_decompress_roundtrip", func(t *testing.T) {
+		t.Parallel()
+
+		payloads := [][]byte{
+			[]byte("hello world"),
+			[]byte(strings.Repeat("aoni high performance zero allocation web sockets", 100)),
+			[]byte(""),
+		}
+
+		for _, original := range payloads {
+			compressed, err := compressNoContextTakeover(original)
+			require.NoError(t, err)
+
+			decompressed, err := decompressNoContextTakeover(compressed)
+			require.NoError(t, err)
+			assert.Equal(t, original, decompressed)
+		}
+	})
+
+	t.Run("decompress_invalid_data", func(t *testing.T) {
+		t.Parallel()
+
+		_, err := decompressNoContextTakeover([]byte("invalid flate stream"))
+		assert.ErrorIs(t, err, ErrFlateDecompressFailed)
+	})
+}
+
+func TestRFC7692_PermessageDeflate_EndToEnd(t *testing.T) {
+	t.Parallel()
+
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.Contains(t, r.Header.Get("Sec-WebSocket-Extensions"), "permessage-deflate")
+
+		ws, err := testUpgradeToWS(w, r)
+		if err != nil {
+			return
+		}
+		defer ws.Close()
+
+		for {
+			mt, msg, err := ws.ReadMessage()
+			if err != nil {
+				return
+			}
+
+			if err := ws.WriteMessage(mt, msg); err != nil {
+				return
+			}
+		}
+	})
+
+	server := httptest.NewServer(handler)
+	defer server.Close()
+
+	client := aoni.NewClient(nil)
+	wsURL := "ws" + strings.TrimPrefix(server.URL, "http")
+
+	conn, resp, err := DialWebSocketWithConfig(t.Context(), client, wsURL, DialWebSocketConfig{
+		EnableCompression: true,
+	})
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusSwitchingProtocols, resp.StatusCode)
+
+	defer conn.Close()
+
+	testMsg := []byte("permessage deflate compressed message")
+	_, err = conn.Write(testMsg)
+	require.NoError(t, err)
+
+	buf := make([]byte, 100)
+	n, err := conn.Read(buf)
+	require.NoError(t, err)
+	assert.Equal(t, string(testMsg), string(buf[:n]))
+}
+
+func TestParseWSURL_PathTraversal(t *testing.T) {
+	t.Parallel()
+
+	_, err := parseWSURL("ws://example.com/.well-known/../secret")
+	assert.ErrorIs(t, err, ErrPathTraversalBlocked)
+}
+
+func TestIsForbiddenH2ConnectHeader(t *testing.T) {
+	t.Parallel()
+
+	forbidden := []string{"upgrade", "connection", "host", "sec-websocket-key", "sec-websocket-accept"}
+	for _, h := range forbidden {
+		assert.True(t, isForbiddenH2ConnectHeader(h), "header %s should be forbidden", h)
+	}
+
+	allowed := []string{"authorization", "user-agent", "cookie", "x-custom-header"}
+	for _, h := range allowed {
+		assert.False(t, isForbiddenH2ConnectHeader(h), "header %s should be allowed", h)
+	}
+}
