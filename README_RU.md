@@ -2,12 +2,12 @@
 
 # aoni
 
-### Высокопроизводительный безаллокационный сетевой движок для Go HTTP, Protobuf и сетей реального времени
+### Высокопроизводительный Zero-Alloc движок для Go HTTP, Protobuf и Real-Time сетей
 
 [![Go Reference](https://img.shields.io/badge/go-reference-007d9c?logo=go&logoColor=white&style=flat-square)](https://pkg.go.dev/github.com/lemon4ksan/aoni)
 [![License](https://img.shields.io/github/license/lemon4ksan/aoni?style=flat-square)](LICENSE)
 
-> _"Нуль компромиссов. Дисциплина нулевых аллокаций. Несокрушимая сетевая стойкость."_
+> _"В сетях хаос — это данность. Пусть aoni станет вашим ледяным якорем."_
 
 #### [English](README.md) • Русский
 
