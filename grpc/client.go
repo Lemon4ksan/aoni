@@ -1,0 +1,146 @@
+// Copyright (c) 2026 Lemon4ksan All rights reserved.
+// Use of this source code is governed by a BSD-style
+// license that can be found in the LICENSE file.
+
+// Package grpc provides a native lightweight gRPC client implementation over aoni's stealth HTTP/2 transport.
+package grpc
+
+import (
+	"bytes"
+	"context"
+	"encoding/base64"
+	"fmt"
+	"net/http"
+	"strings"
+	"time"
+
+	"google.golang.org/protobuf/proto"
+
+	"github.com/lemon4ksan/aoni"
+	"github.com/lemon4ksan/aoni/mod"
+	"github.com/lemon4ksan/aoni/request"
+)
+
+// Metadata represents Custom-Metadata key-value headers per PROTOCOL-HTTP2.md.
+type Metadata map[string]string
+
+// Invoke executes a native gRPC call over aoni's stealth HTTP/2 transport.
+//
+// Zero-Dependency gRPC:
+// Operates directly on raw HTTP/2 frames without dragging in google.golang.org/grpc.
+// Inherits aoni's uTLS Chrome fingerprints, p0f OS spoofing, and HPACK header ordering.
+func Invoke[Resp any](
+	ctx context.Context,
+	doer aoni.RequestDoer,
+	fullMethod string,
+	reqMsg proto.Message,
+	mods ...aoni.RequestModifier,
+) (*Resp, error) {
+	frameBytes, err := MarshalFrame(reqMsg, false)
+	if err != nil {
+		return nil, err
+	}
+
+	path := fullMethod
+	if !strings.HasPrefix(path, "/") {
+		path = "/" + path
+	}
+
+	var rawResp *http.Response
+
+	grpcMods := make([]aoni.RequestModifier, 0, len(mods)+6)
+	grpcMods = append(grpcMods,
+		mod.WithContentType("application/grpc+proto"),
+		mod.WithHeader("te", "trailers"),
+		mod.WithHeader("user-agent", "grpc-aoni/1.0"),
+		mod.WithBody(bytes.NewReader(frameBytes)),
+		mod.WithCaptureResponse(&rawResp),
+	)
+
+	if deadline, ok := ctx.Deadline(); ok {
+		grpcMods = append(grpcMods, mod.WithHeader("grpc-timeout", FormatTimeout(time.Until(deadline))))
+	}
+
+	grpcMods = append(grpcMods, mods...)
+
+	requester := request.AsRequester(doer)
+
+	resp, err := requester.Request(ctx, http.MethodPost, path, grpcMods...)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	if err := validateResponseHeadersAndTrailers(rawResp, resp); err != nil {
+		return nil, err
+	}
+
+	result := new(Resp)
+
+	msg, ok := any(result).(proto.Message)
+	if !ok {
+		return nil, fmt.Errorf("aoni grpc: response type %T does not implement proto.Message", result)
+	}
+
+	if _, err := UnmarshalFrame(resp.Body, msg); err != nil {
+		return nil, err
+	}
+
+	return result, nil
+}
+
+func validateResponseHeadersAndTrailers(rawResp, resp *http.Response) error {
+	ct := resp.Header.Get("Content-Type")
+	if ct != "" && !strings.HasPrefix(ct, "application/grpc") {
+		return fmt.Errorf("%w: %s", ErrInvalidContentType, ct)
+	}
+
+	var trailers http.Header
+	if rawResp != nil && len(rawResp.Trailer) > 0 {
+		trailers = rawResp.Trailer
+	} else {
+		trailers = resp.Header
+	}
+
+	statusCode := trailers.Get("grpc-status")
+	if statusCode == "" {
+		statusCode = resp.Header.Get("grpc-status")
+	}
+
+	if statusCode == "" {
+		if resp.StatusCode != http.StatusOK {
+			return &StatusError{
+				Code:    StatusUnknown,
+				Message: "non-200 HTTP status: " + resp.Status,
+			}
+		}
+
+		return ErrMissingGRPCStatus
+	}
+
+	if statusCode != "0" {
+		statusMsg := trailers.Get("grpc-message")
+		if statusMsg == "" {
+			statusMsg = resp.Header.Get("grpc-message")
+		}
+
+		return parseGRPCStatus(statusCode, statusMsg)
+	}
+
+	return nil
+}
+
+// EncodeBinaryHeader base64-encodes binary metadata for headers ending in "-bin".
+func EncodeBinaryHeader(val []byte) string {
+	return base64.RawStdEncoding.EncodeToString(val)
+}
+
+// DecodeBinaryHeader base64-decodes binary metadata for headers ending in "-bin".
+func DecodeBinaryHeader(val string) ([]byte, error) {
+	val = strings.TrimSpace(val)
+	if b, err := base64.RawStdEncoding.DecodeString(val); err == nil {
+		return b, nil
+	}
+
+	return base64.StdEncoding.DecodeString(val)
+}
