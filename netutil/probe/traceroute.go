@@ -8,6 +8,7 @@ import (
 	"context"
 	"fmt"
 	"net"
+	"os"
 	"strconv"
 	"syscall"
 	"time"
@@ -15,6 +16,18 @@ import (
 	"golang.org/x/net/icmp"
 	"golang.org/x/net/ipv4"
 	"golang.org/x/net/ipv6"
+)
+
+// TraceMode defines the strategy used for traceroute path discovery.
+type TraceMode int
+
+const (
+	// TraceModeAuto automatically selects Privileged ICMP if running as root, falling back to Unprivileged TCP.
+	TraceModeAuto TraceMode = iota
+	// TraceModeTCP forces unprivileged TCP SYN probing on a target port (No root required).
+	TraceModeTCP
+	// TraceModeICMP forces raw ICMP Echo probing (Requires root / CAP_NET_RAW).
+	TraceModeICMP
 )
 
 // Hop represents a single intermediate router or final host discovered on a network path.
@@ -96,6 +109,36 @@ func Traceroute(
 	}
 
 	return res, nil
+}
+
+// SmartTraceroute executes network path discovery using the optimal mode for current OS privileges.
+func SmartTraceroute(
+	ctx context.Context,
+	target string,
+	port int,
+	maxHops int,
+	mode TraceMode,
+) (*TracerouteResult, error) {
+	switch mode {
+	case TraceModeAuto:
+		if isRootUser() {
+			res, err := TracerouteRawICMP(ctx, target, maxHops, 1*time.Second)
+			if err == nil {
+				return res, nil
+			}
+		}
+
+		return Traceroute(ctx, target, port, maxHops, 1*time.Second)
+
+	case TraceModeICMP:
+		return TracerouteRawICMP(ctx, target, maxHops, 1*time.Second)
+	default:
+		return Traceroute(ctx, target, port, maxHops, 1*time.Second)
+	}
+}
+
+func isRootUser() bool {
+	return os.Geteuid() == 0
 }
 
 func probeHop(
