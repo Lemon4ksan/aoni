@@ -35,6 +35,7 @@ import (
 	"github.com/lemon4ksan/aoni/mod"
 	"github.com/lemon4ksan/aoni/netutil/fragment"
 	"github.com/lemon4ksan/aoni/netutil/ip"
+	"github.com/lemon4ksan/aoni/netutil/ipc"
 	"github.com/lemon4ksan/aoni/netutil/proxy"
 	"github.com/lemon4ksan/aoni/telemetry"
 )
@@ -178,6 +179,24 @@ func WithHTTP2Configurer(configurer aoni.HTTP2Configurer) aoni.ClientOption {
 func WithInsecureSkipVerify() aoni.ClientOption {
 	return func(cfg *aoni.Config) {
 		cfg.Engine.InsecureSkipVerify = true
+	}
+}
+
+// WithUnixSocket binds the client transport directly to a local Unix domain socket (e.g., "/var/run/docker.sock").
+func WithUnixSocket(socketPath string) aoni.ClientOption {
+	return func(cfg *aoni.Config) {
+		cfg.Engine.CustomEngine = &http.Client{
+			Transport: ipc.NewUnixTransport(socketPath),
+		}
+	}
+}
+
+// WithNamedPipe binds the client transport to a Windows Named Pipe (e.g., "\\.\pipe\docker_engine").
+func WithNamedPipe(pipePath string) aoni.ClientOption {
+	return func(cfg *aoni.Config) {
+		cfg.Engine.CustomEngine = &http.Client{
+			Transport: ipc.NewNamedPipeTransport(pipePath),
+		}
 	}
 }
 
