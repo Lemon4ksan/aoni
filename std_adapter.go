@@ -399,6 +399,13 @@ func (s *StdResponse) Uncompressed() bool {
 	return s.resp.Uncompressed
 }
 
+// SetUncompressed sets whether the response body was transparently decompressed.
+func (s *StdResponse) SetUncompressed(v bool) {
+	if s.resp != nil {
+		s.resp.Uncompressed = v
+	}
+}
+
 // Close closes response body stream.
 func (s *StdResponse) Close() error {
 	if s.resp != nil && s.resp.Body != nil {

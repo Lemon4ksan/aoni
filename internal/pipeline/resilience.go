@@ -1,0 +1,342 @@
+// Copyright (c) 2026 Lemon4ksan All rights reserved.
+// Use of this source code is governed by a BSD-style
+// license that can be found in the LICENSE file.
+
+package pipeline
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"net/http"
+	"net/url"
+	"sync"
+	"sync/atomic"
+	"time"
+
+	"github.com/lemon4ksan/aoni/cookie"
+	"github.com/lemon4ksan/aoni/internal/io"
+	"github.com/lemon4ksan/aoni/telemetry"
+)
+
+var ErrHedgingBodyNonRepeatable = errors.New("aoni: request body is not repeatable for hedging attempt")
+
+func (p *Pipeline) executeWithProxyFailover(
+	req *http.Request,
+	doer Doer,
+	failover *ProxyFailoverConfig,
+	hedging *HedgingConfig,
+) (*http.Response, error) {
+	proxies := parseProxyURLs(failover.Proxies)
+	if len(proxies) == 0 {
+		return p.dispatchProxyAttempt(req, doer, hedging)
+	}
+
+	retryLimit := failover.RetryLimit
+	if retryLimit <= 0 {
+		retryLimit = len(proxies)
+	}
+
+	var lastErr error
+	for attempt := 0; attempt <= retryLimit; attempt++ {
+		proxyURL := p.selectNextProxy(proxies, attempt > 0)
+
+		proxyReq, prepErr := p.prepareRequestForProxy(req, proxyURL)
+		if prepErr != nil {
+			lastErr = prepErr
+			continue
+		}
+
+		resp, err := p.dispatchProxyAttempt(proxyReq, doer, hedging)
+		if err == nil && resp != nil {
+			if resp.StatusCode != http.StatusBadGateway && resp.StatusCode != http.StatusServiceUnavailable {
+				return resp, nil
+			}
+
+			_ = resp.Body.Close()
+		}
+
+		if err != nil {
+			lastErr = err
+		} else {
+			lastErr = fmt.Errorf(
+				"aoni: proxy failover received HTTP status %d from %s",
+				resp.StatusCode,
+				proxyURL.String(),
+			)
+		}
+	}
+
+	return nil, lastErr
+}
+
+func (p *Pipeline) dispatchProxyAttempt(req *http.Request, doer Doer, hedging *HedgingConfig) (*http.Response, error) {
+	if hedging != nil {
+		return p.executeWithHedging(req, doer, hedging)
+	}
+
+	return doer.Do(req)
+}
+
+func parseProxyURLs(proxies []string) []*url.URL {
+	parsed := make([]*url.URL, 0, len(proxies))
+	for _, pr := range proxies {
+		if u, err := url.Parse(pr); err == nil {
+			parsed = append(parsed, u)
+		}
+	}
+
+	return parsed
+}
+
+func (p *Pipeline) selectNextProxy(proxies []*url.URL, isRetry bool) *url.URL {
+	var idx uint32
+	if isRetry {
+		idx = atomic.AddUint32(&p.counter, 1)
+	} else {
+		idx = atomic.LoadUint32(&p.counter)
+	}
+
+	return proxies[idx%uint32(len(proxies))] //nolint:gosec
+}
+
+func (p *Pipeline) prepareRequestForProxy(req *http.Request, proxyURL *url.URL) (*http.Request, error) {
+	newReq := req
+
+	cfg := GetRequestConfig(req.Context())
+	if cfg != nil {
+		ctx := cookie.WithProxyAddress(req.Context(), proxyURL.String())
+		newReq = req.WithContext(ctx)
+	}
+
+	if req.Body != nil && req.Body != http.NoBody && req.GetBody != nil {
+		body, err := req.GetBody()
+		if err != nil {
+			return nil, err
+		}
+
+		newReq.Body = body
+	}
+
+	return newReq, nil
+}
+
+func isIdempotentMethod(method string) bool {
+	switch method {
+	case http.MethodGet, http.MethodHead, http.MethodOptions, http.MethodTrace:
+		return true
+	default:
+		return false
+	}
+}
+
+func (p *Pipeline) executeWithHedging(
+	req *http.Request,
+	doer Doer,
+	pipeHedging *HedgingConfig,
+) (*http.Response, error) {
+	cfg := GetRequestConfig(req.Context())
+
+	allowNonReadOnly := (cfg != nil && cfg.AllowNonReadOnlyHedging) ||
+		(pipeHedging != nil && pipeHedging.AllowNonReadOnly)
+
+	if !allowNonReadOnly && !isIdempotentMethod(req.Method) {
+		return doer.Do(req)
+	}
+
+	requestStart := time.Now()
+	delay := p.resolveHedgingDelay(cfg, pipeHedging)
+
+	var (
+		resp *http.Response
+		err  error
+	)
+
+	if delay > 0 {
+		resp, err = p.dispatchHedgingAttempts(req, doer, delay)
+	} else {
+		resp, err = doer.Do(req)
+	}
+
+	tracker := p.resolveRTTTracker(pipeHedging)
+	if tracker != nil && err == nil {
+		tracker.Record(time.Since(requestStart))
+	}
+
+	return resp, err
+}
+
+func (p *Pipeline) resolveHedgingDelay(cfg *RequestConfig, pipeHedging *HedgingConfig) time.Duration {
+	switch {
+	case cfg != nil && cfg.HedgingDelayOverride != nil:
+		return *cfg.HedgingDelayOverride
+	case pipeHedging != nil && pipeHedging.DynamicHedging != nil:
+		return pipeHedging.DynamicHedging.ComputeDelay()
+	case pipeHedging != nil:
+		return pipeHedging.DefaultDelay
+	default:
+		return 0
+	}
+}
+
+func (p *Pipeline) resolveRTTTracker(pipeHedging *HedgingConfig) *telemetry.RTTTracker {
+	if pipeHedging != nil && pipeHedging.DynamicHedging != nil {
+		return pipeHedging.DynamicHedging.Tracker
+	}
+
+	return nil
+}
+
+type hedgeResult struct {
+	resp *http.Response
+	err  error
+}
+
+func (p *Pipeline) dispatchHedgingAttempts(req *http.Request, doer Doer, delay time.Duration) (*http.Response, error) {
+	resultsCh := make(chan hedgeResult, 2)
+
+	ctx1, ctx2, cancel1, cancel2, cleanup := p.buildHedgeContext(req)
+	defer func() { cleanup(0) }()
+
+	p.launchHedgeAttempt(ctx1, req, doer, resultsCh)
+
+	timer := time.NewTimer(delay)
+	defer timer.Stop()
+
+	var (
+		req2Started bool
+		firstErr    error
+	)
+
+	activeCount := 1
+
+	for activeCount > 0 {
+		select {
+		case <-req.Context().Done():
+			return nil, req.Context().Err()
+
+		case <-timer.C:
+			if !req2Started {
+				req2Started = true
+				activeCount++
+
+				p.launchHedgeAttempt(ctx2, req, doer, resultsCh)
+			}
+
+		case res := <-resultsCh:
+			activeCount--
+
+			if res.err == nil {
+				return p.handleHedgeWinner(res, ctx2, cancel1, cancel2, cleanup), nil
+			}
+
+			if firstErr == nil {
+				firstErr = res.err
+			}
+
+			if activeCount == 0 && !req2Started {
+				timer.Stop()
+
+				req2Started = true
+				activeCount++
+
+				p.launchHedgeAttempt(ctx2, req, doer, resultsCh)
+			}
+		}
+	}
+
+	return nil, firstErr
+}
+
+func (p *Pipeline) handleHedgeWinner(
+	res hedgeResult,
+	ctx2 context.Context,
+	cancel1, cancel2 context.CancelFunc,
+	cleanup func(int),
+) *http.Response {
+	winner := 1
+
+	cancelWinner := cancel1
+	if res.resp.Request != nil && res.resp.Request.Context() == ctx2 {
+		winner = 2
+		cancelWinner = cancel2
+	}
+
+	cleanup(winner)
+
+	res.resp.Body = &io.ContextCancelingReadCloser{
+		ReadCloser: res.resp.Body,
+		Cancel:     cancelWinner,
+	}
+
+	return res.resp
+}
+
+func (p *Pipeline) launchHedgeAttempt(ctx context.Context, req *http.Request, doer Doer, resultsCh chan<- hedgeResult) {
+	cloned, err := p.cloneRequest(req, ctx)
+	if err != nil {
+		resultsCh <- hedgeResult{err: err}
+		return
+	}
+
+	go func() {
+		resp, err := doer.Do(cloned) //nolint:bodyclose
+		resultsCh <- hedgeResult{resp: resp, err: err}
+	}()
+}
+
+func (p *Pipeline) buildHedgeContext(
+	req *http.Request,
+) (context.Context, context.Context, context.CancelFunc, context.CancelFunc, func(winner int)) {
+	ctx := req.Context()
+	ctx1, cancel1 := context.WithCancel(ctx)
+	ctx2, cancel2 := context.WithCancel(ctx)
+
+	var (
+		cleaned bool
+		mu      sync.Mutex
+	)
+
+	cleanup := func(winner int) {
+		mu.Lock()
+		defer mu.Unlock()
+
+		if cleaned {
+			return
+		}
+
+		cleaned = true
+
+		switch winner {
+		case 1:
+			cancel2()
+		case 2:
+			cancel1()
+		default:
+			cancel1()
+			cancel2()
+		}
+	}
+
+	return ctx1, ctx2, cancel1, cancel2, cleanup
+}
+
+func (p *Pipeline) cloneRequest(orig *http.Request, reqCtx context.Context) (*http.Request, error) {
+	cloned := orig.Clone(reqCtx)
+	if orig.Body == nil || orig.Body == http.NoBody {
+		return cloned, nil
+	}
+
+	if orig.GetBody == nil {
+		return nil, ErrHedgingBodyNonRepeatable
+	}
+
+	body, err := orig.GetBody()
+	if err != nil {
+		return nil, err
+	}
+
+	cloned.Body = body
+
+	return cloned, nil
+}

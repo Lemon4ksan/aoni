@@ -928,7 +928,7 @@ func WithErrorModel(model any) aoni.RequestModifier {
 }
 
 // WithDecoder constructs an [aoni.RequestModifier] overriding the response decoder implementation for the request.
-func WithDecoder(d any) aoni.RequestModifier {
+func WithDecoder(d aoni.ResponseDecoder) aoni.RequestModifier {
 	return func(req aoni.Request) {
 		aoni.GetOrInitRequestConfig(req).Decoder = d
 	}

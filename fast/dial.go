@@ -8,17 +8,21 @@ import (
 	"context"
 	"crypto/tls"
 	"net"
+	"net/http"
 	"net/url"
+	"reflect"
 	"strings"
 	"sync"
 	"time"
 
 	utls "github.com/refraction-networking/utls"
+	"github.com/valyala/fasthttp"
 
 	"github.com/lemon4ksan/aoni"
 	"github.com/lemon4ksan/aoni/fast/h2engine"
 	"github.com/lemon4ksan/aoni/internal/h1"
 	"github.com/lemon4ksan/aoni/netutil"
+	"github.com/lemon4ksan/aoni/netutil/fragment"
 	"github.com/lemon4ksan/aoni/netutil/netdial"
 )
 
@@ -39,8 +43,7 @@ func (d *fastDialer) Dial(addr string) (net.Conn, error) {
 	return d.DialContext(ctx, "tcp", addr)
 }
 
-// DialContext establishes a raw L4 TCP connection using the request context,
-// applying per-request proxy overrides, SSRF guards, p0f signatures, and host rewrites.
+// DialContext establishes a raw L4 TCP connection using request context.
 func (d *fastDialer) DialContext(ctx context.Context, network, addr string) (net.Conn, error) {
 	if err := aoni.ApplyTCPDelay(ctx); err != nil {
 		return nil, err
@@ -52,7 +55,6 @@ func (d *fastDialer) DialContext(ctx context.Context, network, addr string) (net
 	}
 
 	targetAddr := net.JoinHostPort(host, port)
-
 	isTLS := port == "443" || d.IsHTTPSTarget(addr) || d.IsHTTPSTarget(host) || (port != "80" && d.isTLSEnabled())
 
 	rawConn, err := netdial.DialL4(ctx, network, targetAddr, dialOpts)
@@ -183,37 +185,142 @@ func (d *fastDialer) IsHTTPSTarget(addr string) bool {
 	return ok
 }
 
-func splitHostPortTLS(addr string) (host, port string) {
-	h, p, err := net.SplitHostPort(addr)
-	if err != nil {
-		return netutil.CleanHost(addr), "443"
-	}
-
-	return netutil.CleanHost(h), p
+// DialContext establishes a raw L4 connection applying active proxy, DNS, and anti-DPI configurations.
+func (c *Client) DialContext(ctx context.Context, network, addr string) (net.Conn, error) {
+	dialer := newFastDialer(&c.config)
+	return dialer.DialContext(ctx, network, addr)
 }
 
-func splitHostPortDefault(addr string) (host, port string) {
-	h, p, err := net.SplitHostPort(addr)
-	if err != nil {
-		return netutil.CleanHost(addr), "80"
-	}
-
-	return netutil.CleanHost(h), p
+// DialTLSContext establishes an encrypted TLS socket connection using uTLS ClientHello specifications.
+func (c *Client) DialTLSContext(ctx context.Context, network, addr string) (net.Conn, error) {
+	dialer := newFastDialer(&c.config)
+	return dialer.DialTLSContext(ctx, network, addr)
 }
 
-func applyHostRewriteRules(ctx context.Context, host, port string) (string, string) {
-	rules := aoni.HostRewriteRules(ctx)
-	if rewritten, exists := rules[host]; exists {
-		if newHost, newPort, err := net.SplitHostPort(rewritten); err == nil {
-			host = newHost
+// DialPlainForWS satisfies [aoni.WSDialer] by establishing a plain TCP socket for WebSocket upgrades.
+func (c *Client) DialPlainForWS(ctx context.Context, addr string) (net.Conn, error) {
+	conn, err := c.DialContext(ctx, "tcp", addr)
+	if err != nil {
+		return nil, err
+	}
 
-			if newPort != "" {
-				port = newPort
-			}
+	return c.applyWSFragmentation(ctx, conn), nil
+}
+
+// DialTLSForWS satisfies [aoni.WSDialer] by establishing an encrypted TLS connection for WebSocket upgrades.
+func (c *Client) DialTLSForWS(ctx context.Context, addr string) (net.Conn, error) {
+	return c.DialTLSContext(ctx, "tcp", addr)
+}
+
+func (c *Client) applyWSFragmentation(ctx context.Context, conn net.Conn) net.Conn {
+	if cfg := aoni.GetRequestConfig(ctx); cfg != nil && cfg.Fragment != nil {
+		return fragment.NewFragmentedConn(conn, cfg.Fragment)
+	}
+
+	if c.config.Network.FragmentConfig != nil {
+		return fragment.NewFragmentedConn(conn, c.config.Network.FragmentConfig)
+	}
+
+	return conn
+}
+
+func (c *Client) applyEngineConfig() {
+	if c.config.Engine.Timeout > 0 {
+		c.engine.ReadTimeout = c.config.Engine.Timeout
+		c.engine.WriteTimeout = c.config.Engine.Timeout
+	}
+
+	if c.config.Engine.InsecureSkipVerify {
+		c.engine.TLSConfig = &tls.Config{InsecureSkipVerify: true} //nolint:gosec
+	}
+
+	c.engine.DisableHeaderNamesNormalizing = true
+}
+
+func (c *Client) applyCustomDialer() {
+	dialer := newFastDialer(&c.config)
+	c.dialer = dialer
+	c.defaultDial = dialer.Dial
+	c.engine.Dial = dialer.Dial
+	c.engine.DialDualStack = true
+}
+
+func (c *Client) applyDefaultHeaders(req aoni.Request) {
+	if req.Header("Accept-Encoding") == "" {
+		req.SetHeader("Accept-Encoding", "zstd, br, gzip")
+	}
+
+	if len(c.config.Defaults.Headers) == 0 {
+		return
+	}
+
+	for k, vv := range c.config.Defaults.Headers {
+		if req.Header(k) == "" && len(vv) > 0 {
+			req.SetHeader(k, vv[0])
+		}
+	}
+}
+
+func (c *Client) applyModifiers(req aoni.Request, mods []aoni.RequestModifier) {
+	for _, defaultMod := range c.config.Defaults.DefaultMods {
+		if defaultMod != nil {
+			defaultMod(req)
 		}
 	}
 
-	return host, port
+	for _, m := range mods {
+		if m != nil {
+			m(req)
+		}
+	}
+}
+
+func (c *Client) resolveTargetURL(req aoni.Request, path string) error {
+	if len(path) >= 7 && (strings.HasPrefix(path, "http://") || strings.HasPrefix(path, "https://")) {
+		req.SetURL(path)
+		return nil
+	}
+
+	if c.config.Defaults.BaseURL != nil && c.config.Defaults.BaseURL.Host != "" {
+		base := c.config.Defaults.BaseURL
+		basePath := strings.TrimSuffix(base.Path, "/")
+
+		cleanPath := path
+		if cleanPath != "" && cleanPath[0] != '/' {
+			cleanPath = "/" + cleanPath
+		}
+
+		fullURL := base.Scheme + "://" + base.Host + basePath + cleanPath
+		req.SetURL(fullURL)
+
+		return nil
+	}
+
+	if path == "" {
+		return ErrTargetURLEmpty
+	}
+
+	req.SetURL(path)
+
+	return nil
+}
+
+func (c *Client) resolveProtocolHandler(rawURL string) http.RoundTripper {
+	if len(c.config.Engine.Protocols) == 0 {
+		return nil
+	}
+
+	scheme, _, ok := strings.Cut(rawURL, "://")
+	if !ok {
+		return nil
+	}
+
+	normScheme := strings.ToLower(strings.TrimSpace(scheme))
+	if normScheme == "http" || normScheme == "https" || normScheme == "ws" || normScheme == "wss" {
+		return nil
+	}
+
+	return c.config.Engine.Protocols[normScheme]
 }
 
 func (d *fastDialer) resolveDialOptions(
@@ -413,4 +520,92 @@ func (d *fastDialer) resolveHelloID() *utls.ClientHelloID {
 	default:
 		return &utls.HelloChrome_Auto
 	}
+}
+
+func defaultFasthttpClient() *fasthttp.Client {
+	return &fasthttp.Client{
+		ReadTimeout:         0,
+		WriteTimeout:        0,
+		MaxConnsPerHost:     512,
+		MaxIdleConnDuration: 90 * time.Second,
+	}
+}
+
+func cloneFasthttpClient(c *fasthttp.Client) *fasthttp.Client {
+	if c == nil {
+		return &fasthttp.Client{}
+	}
+
+	return &fasthttp.Client{
+		Transport:                     c.Transport,
+		DialTimeout:                   c.DialTimeout,
+		Dial:                          c.Dial,
+		TLSConfig:                     c.TLSConfig,
+		RetryIf:                       c.RetryIf, //nolint:staticcheck
+		RetryIfErr:                    c.RetryIfErr,
+		RetryIfErrUpstream:            c.RetryIfErrUpstream,
+		ConfigureClient:               c.ConfigureClient,
+		Name:                          c.Name,
+		MaxConnsPerHost:               c.MaxConnsPerHost,
+		MaxIdleConnDuration:           c.MaxIdleConnDuration,
+		MaxConnDuration:               c.MaxConnDuration,
+		MaxIdemponentCallAttempts:     c.MaxIdemponentCallAttempts,
+		ReadBufferSize:                c.ReadBufferSize,
+		WriteBufferSize:               c.WriteBufferSize,
+		ReadTimeout:                   c.ReadTimeout,
+		WriteTimeout:                  c.WriteTimeout,
+		MaxResponseBodySize:           c.MaxResponseBodySize,
+		MaxConnWaitTimeout:            c.MaxConnWaitTimeout,
+		ConnPoolStrategy:              c.ConnPoolStrategy,
+		NoDefaultUserAgentHeader:      c.NoDefaultUserAgentHeader,
+		DialDualStack:                 c.DialDualStack,
+		DisableHeaderNamesNormalizing: c.DisableHeaderNamesNormalizing,
+		DisablePathNormalizing:        c.DisablePathNormalizing,
+		StreamResponseBody:            c.StreamResponseBody,
+	}
+}
+
+func isCustomDialerSet(engine *fasthttp.Client, defaultDial func(string) (net.Conn, error)) bool {
+	if engine == nil || engine.Dial == nil {
+		return false
+	}
+
+	if defaultDial == nil {
+		return true
+	}
+
+	return reflect.ValueOf(engine.Dial).Pointer() != reflect.ValueOf(defaultDial).Pointer()
+}
+
+func splitHostPortTLS(addr string) (host, port string) {
+	h, p, err := net.SplitHostPort(addr)
+	if err != nil {
+		return netutil.CleanHost(addr), "443"
+	}
+
+	return netutil.CleanHost(h), p
+}
+
+func splitHostPortDefault(addr string) (host, port string) {
+	h, p, err := net.SplitHostPort(addr)
+	if err != nil {
+		return netutil.CleanHost(addr), "80"
+	}
+
+	return netutil.CleanHost(h), p
+}
+
+func applyHostRewriteRules(ctx context.Context, host, port string) (string, string) {
+	rules := aoni.HostRewriteRules(ctx)
+	if rewritten, exists := rules[host]; exists {
+		if newHost, newPort, err := net.SplitHostPort(rewritten); err == nil {
+			host = newHost
+
+			if newPort != "" {
+				port = newPort
+			}
+		}
+	}
+
+	return host, port
 }
