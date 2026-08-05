@@ -189,6 +189,8 @@ type NetworkConfig struct {
 	HostRewrite        *HostRewriteConfig
 	HappyEyeballsDelay time.Duration
 	HedgingDelay       time.Duration
+	InterfaceName      string
+	SocketMark         uint32
 	ProxyDNS           bool
 	SSRFGuard          bool
 }

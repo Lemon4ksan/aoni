@@ -293,6 +293,20 @@ func WithRefererAutomaton(enabled bool) aoni.ClientOption {
 // 4. NETWORK, PROXY & DNS OPTIONS
 // ============================================================================
 
+// WithInterface binds outgoing TCP sockets directly to a specific network interface (e.g. "eth0", "wg0").
+func WithInterface(iface string) aoni.ClientOption {
+	return func(cfg *aoni.Config) {
+		cfg.Network.InterfaceName = iface
+	}
+}
+
+// WithSocketMark assigns a Linux netfilter socket mark (SO_MARK) for policy-based routing.
+func WithSocketMark(mark uint32) aoni.ClientOption {
+	return func(cfg *aoni.Config) {
+		cfg.Network.SocketMark = mark
+	}
+}
+
 // WithLocalAddr returns an [aoni.ClientOption] binding outgoing TCP connections to a single local IP address.
 func WithLocalAddr(addr string) aoni.ClientOption {
 	return func(cfg *aoni.Config) {
