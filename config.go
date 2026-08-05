@@ -22,6 +22,7 @@ import (
 	"github.com/lemon4ksan/aoni/internal/pipeline"
 	"github.com/lemon4ksan/aoni/netutil/fragment"
 	"github.com/lemon4ksan/aoni/netutil/ip"
+	"github.com/lemon4ksan/aoni/netutil/netdial"
 	"github.com/lemon4ksan/aoni/telemetry"
 )
 
@@ -187,6 +188,8 @@ type NetworkConfig struct {
 	ProxyAddr          *url.URL
 	TransportProxy     func(*http.Request) (*url.URL, error)
 	DNSResolver        DNSResolver
+	StackDriver        netdial.RawStackDriver
+	L2Device           netdial.L2Device
 	SourceRotator      *ip.SourceIPRotator
 	DynamicHedging     *telemetry.DynamicHedgingConfig
 	SocketController   SocketController

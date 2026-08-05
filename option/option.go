@@ -35,6 +35,7 @@ import (
 	"github.com/lemon4ksan/aoni/mod"
 	"github.com/lemon4ksan/aoni/netutil/fragment"
 	"github.com/lemon4ksan/aoni/netutil/ip"
+	"github.com/lemon4ksan/aoni/netutil/netdial"
 	"github.com/lemon4ksan/aoni/netutil/proxy"
 	"github.com/lemon4ksan/aoni/telemetry"
 )
@@ -306,6 +307,20 @@ func WithRefererAutomaton(enabled bool) aoni.ClientOption {
 // ============================================================================
 // 4. NETWORK, PROXY & DNS OPTIONS
 // ============================================================================
+
+// WithCustomNetworkDriver returns an [aoni.ClientOption] attaching a custom L3/L4 network stack driver.
+func WithCustomNetworkDriver(driver netdial.RawStackDriver) aoni.ClientOption {
+	return func(cfg *aoni.Config) {
+		cfg.Network.StackDriver = driver
+	}
+}
+
+// WithL2Device returns an [aoni.ClientOption] attaching a custom Data Link Layer (Ethernet) L2Device driver.
+func WithL2Device(device netdial.L2Device) aoni.ClientOption {
+	return func(cfg *aoni.Config) {
+		cfg.Network.L2Device = device
+	}
+}
 
 // WithLocalAddr returns an [aoni.ClientOption] binding outgoing TCP connections to a single local IP address.
 func WithLocalAddr(addr string) aoni.ClientOption {

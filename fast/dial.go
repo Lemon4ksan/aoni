@@ -344,6 +344,8 @@ func (d *fastDialer) resolveDialOptions(
 	dialOpts = netdial.DialOptions{
 		ProxyURL:           d.config.Network.ProxyAddr,
 		DNSResolver:        d.config.Network.DNSResolver,
+		StackDriver:        d.config.Network.StackDriver,
+		L2Device:           d.config.Network.L2Device,
 		SourceRotator:      d.config.Network.SourceRotator,
 		P0fSignature:       d.config.Fingerprint.P0fSignature,
 		SocketController:   d.config.Network.SocketController,
@@ -395,6 +397,8 @@ func (d *fastDialer) resolveTLSContextOptions(
 	dialOpts = netdial.DialOptions{
 		ProxyURL:           d.config.Network.ProxyAddr,
 		DNSResolver:        d.config.Network.DNSResolver,
+		StackDriver:        d.config.Network.StackDriver,
+		L2Device:           d.config.Network.L2Device,
 		SourceRotator:      d.config.Network.SourceRotator,
 		P0fSignature:       d.config.Fingerprint.P0fSignature,
 		SocketController:   d.config.Network.SocketController,
