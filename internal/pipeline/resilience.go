@@ -21,6 +21,28 @@ import (
 
 var ErrHedgingBodyNonRepeatable = errors.New("aoni: request body is not repeatable for hedging attempt")
 
+func (p *Pipeline) dispatchRequest(req *http.Request, doer Doer, tx *Tx) (*http.Response, error) {
+	var (
+		resp *http.Response
+		err  error
+	)
+
+	switch {
+	case tx.Flags&FlagProxyFailover != 0 && tx.ProxyFailover != nil:
+		resp, err = p.executeWithProxyFailover(req, doer, tx.ProxyFailover, tx.Hedging)
+	case tx.Flags&FlagHedging != 0 && tx.Hedging != nil:
+		resp, err = p.executeWithHedging(req, doer, tx.Hedging)
+	default:
+		resp, err = doer.Do(req)
+	}
+
+	if resp != nil && resp.Request == nil {
+		resp.Request = req
+	}
+
+	return resp, err
+}
+
 func (p *Pipeline) executeWithProxyFailover(
 	req *http.Request,
 	doer Doer,

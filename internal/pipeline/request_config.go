@@ -80,6 +80,7 @@ type RequestConfig struct {
 	Modifiers               []RequestModifier
 	QueryEncoder            QueryEncoder
 	Decoders                map[string]ResponseDecoder
+	UnsafePhaseOrder        []PhaseID
 
 	MultiReadThreshold int64
 	TimeoutOverride    time.Duration

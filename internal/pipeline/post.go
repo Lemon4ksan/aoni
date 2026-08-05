@@ -22,9 +22,9 @@ import (
 var ErrConflictingContentLength = errors.New("aoni: conflicting Content-Length headers detected")
 
 func (p *Pipeline) postProcessResponse(
-	req *http.Request,
+	stdReq *http.Request,
 	resp *http.Response,
-	pipe PipelineConfig,
+	tx *Tx,
 ) (*http.Response, error) {
 	if err := validateAndNormalizeContentLength(resp); err != nil {
 		if resp != nil && resp.Body != nil {
@@ -34,48 +34,49 @@ func (p *Pipeline) postProcessResponse(
 		return nil, err
 	}
 
-	if pipe.Decompress {
-		resp = p.handleDecompressionAndTranscoding(req, resp)
+	// ⚡ Проверка флагов через 1 такт CPU на битовую маску:
+	if tx.Flags&FlagDecompress != 0 {
+		resp = p.handleDecompressionAndTranscoding(stdReq, resp)
 	}
 
-	if pipe.SizeLimit > 0 {
-		if limitErr := p.limitResponseSize(resp, pipe.SizeLimit); limitErr != nil {
+	if tx.SizeLimit > 0 {
+		if limitErr := p.limitResponseSize(resp, tx.SizeLimit); limitErr != nil {
 			return nil, limitErr
 		}
 	}
 
-	if pipe.Challenge {
+	if tx.Flags&FlagChallenge != 0 {
 		var err error
 
-		resp, err = p.handleWAFChallenge(req, resp)
+		resp, err = p.handleWAFChallenge(stdReq, resp)
 		if err != nil {
 			return nil, err
 		}
 	}
 
-	if pipe.Validate {
-		if valErr := p.validateResponse(resp); valErr != nil {
+	if tx.Flags&FlagValidate != 0 {
+		if valErr := p.validateResponse(resp, tx); valErr != nil {
 			return nil, valErr
 		}
 	}
 
-	if p.defaults.RefererAutomaton && p.defaults.RefererState != nil && req != nil && req.URL != nil {
+	if p.defaults.RefererAutomaton && p.defaults.RefererState != nil && stdReq != nil && stdReq.URL != nil {
 		p.defaults.RefererState.Mu.Lock()
-		p.defaults.RefererState.LastURL = req.URL.String()
+		p.defaults.RefererState.LastURL = stdReq.URL.String()
 		p.defaults.RefererState.Mu.Unlock()
 	}
 
 	if resp != nil && resp.Body != nil {
-		if bufErr := p.applyMultiReadBuffering(req, resp, GetRequestConfig(req.Context())); bufErr != nil {
+		if bufErr := p.applyMultiReadBuffering(resp, tx); bufErr != nil {
 			return nil, bufErr
 		}
 	}
 
-	if pipe.Cache != nil {
-		if req.Method == http.MethodGet {
-			p.saveToCache(req, resp, pipe.Cache)
+	if tx.Flags&FlagCache != 0 && tx.Cache != nil {
+		if stdReq.Method == http.MethodGet {
+			p.saveToCache(stdReq, resp, tx.Cache)
 		} else {
-			p.invalidateCache(req, resp, pipe.Cache)
+			p.invalidateCache(stdReq, resp, tx.Cache)
 		}
 	}
 
@@ -123,24 +124,18 @@ func (p *Pipeline) limitResponseSize(resp *http.Response, maxSize int64) error {
 	return nil
 }
 
-func (p *Pipeline) validateResponse(resp *http.Response) error {
-	if resp == nil || resp.Request == nil {
+func (p *Pipeline) validateResponse(resp *http.Response, tx *Tx) error {
+	if resp == nil {
 		return nil
 	}
 
-	cfg := GetRequestConfig(resp.Request.Context())
-	if cfg != nil && cfg.ResponseValidator != nil {
-		if err := cfg.ResponseValidator(resp); err != nil {
-			if resp.Body != nil {
-				_ = resp.Body.Close()
-			}
-
-			return err
-		}
+	validator := tx.ResponseValidator
+	if validator == nil {
+		validator = p.defaults.ResponseValidator
 	}
 
-	if p.defaults.ResponseValidator != nil {
-		if err := p.defaults.ResponseValidator(resp); err != nil {
+	if validator != nil {
+		if err := validator(resp); err != nil {
 			if resp.Body != nil {
 				_ = resp.Body.Close()
 			}
@@ -152,18 +147,16 @@ func (p *Pipeline) validateResponse(resp *http.Response) error {
 	return nil
 }
 
-func (p *Pipeline) applyMultiReadBuffering(_ *http.Request, resp *http.Response, cfg *RequestConfig) error {
+func (p *Pipeline) applyMultiReadBuffering(resp *http.Response, tx *Tx) error {
 	threshold := p.defaults.MultiReadThreshold
 	disableDisk := p.defaults.MultiReadDisableDisk
 
-	if cfg != nil {
-		if cfg.MultiReadThreshold > 0 {
-			threshold = cfg.MultiReadThreshold
-		}
+	if tx.MultiReadThreshold > 0 {
+		threshold = tx.MultiReadThreshold
+	}
 
-		if cfg.MultiReadDisableDisk {
-			disableDisk = cfg.MultiReadDisableDisk
-		}
+	if tx.MultiReadDisableDisk {
+		disableDisk = tx.MultiReadDisableDisk
 	}
 
 	if threshold <= 0 || resp == nil || resp.Body == nil || resp.Body == http.NoBody {

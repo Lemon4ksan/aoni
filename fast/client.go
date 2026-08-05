@@ -159,12 +159,7 @@ func (c *Client) Request(
 
 	reqCtx := reqAdapter.Context()
 
-	stdResp, err := c.pipelineEngine.Execute(
-		reqCtx,
-		reqAdapter,
-		c.HTTP(),
-		c.config.Defaults.Pipeline,
-	) //nolint:bodyclose
+	stdResp, err := c.pipelineEngine.Execute(reqCtx, reqAdapter, c.HTTP(), c.resolvePipeline(reqCtx)) //nolint:bodyclose
 	if err != nil {
 		fasthttp.ReleaseRequest(fastReq)
 		fasthttp.ReleaseResponse(fastResp)
@@ -183,7 +178,7 @@ func (c *Client) Do(req aoni.Request) (aoni.Response, error) {
 
 	ctx := req.Context()
 
-	stdResp, err := c.pipelineEngine.Execute(ctx, req, c.HTTP(), c.config.Defaults.Pipeline) //nolint:bodyclose
+	stdResp, err := c.pipelineEngine.Execute(ctx, req, c.HTTP(), c.resolvePipeline(ctx)) //nolint:bodyclose
 	if err != nil {
 		return nil, err
 	}
@@ -248,6 +243,34 @@ func (c *Client) HTTP() aoni.HTTPDoer {
 
 		return httpResp, nil
 	})
+}
+
+func (c *Client) resolvePipeline(ctx context.Context) aoni.PipelineConfig {
+	if reqPipe, ok := aoni.GetPipeline(ctx); ok {
+		return reqPipe
+	}
+
+	pipe := c.config.Defaults.Pipeline
+	if !pipe.RotateUA && len(c.config.Defaults.UARotationProfiles) > 0 {
+		pipe.RotateUA = true
+	}
+
+	if pipe.SizeLimit == 0 {
+		pipe.SizeLimit = c.config.Defaults.MaxResponseSize
+	}
+
+	if !pipe.Inspect && c.config.Defaults.Inspector != nil {
+		pipe.Inspect = true
+	}
+
+	if pipe.Hedging == nil && (c.config.Network.HedgingDelay > 0 || c.config.Network.DynamicHedging != nil) {
+		pipe.Hedging = &aoni.HedgingConfig{
+			DefaultDelay:   c.config.Network.HedgingDelay,
+			DynamicHedging: c.config.Network.DynamicHedging,
+		}
+	}
+
+	return pipe
 }
 
 var (

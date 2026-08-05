@@ -12,7 +12,7 @@ import (
 	"golang.org/x/sys/cpu"
 )
 
-// Pipeline orchestrates unified request execution across any underlying engine.
+// Pipeline orchestrates zero-allocation transaction execution.
 type Pipeline struct {
 	defaults    ClientDefaults
 	fingerprint ClientFingerprint
@@ -29,22 +29,41 @@ func NewPipeline(defaults ClientDefaults, fingerprint ClientFingerprint) *Pipeli
 	}
 }
 
-// Execute runs the complete request execution flow.
+// Execute runs the pipeline against the provided request using Fast-Path or Unsafe-Path.
 func (p *Pipeline) Execute(
 	ctx context.Context,
 	req Request,
 	doer Doer,
 	pipe PipelineConfig,
 ) (*http.Response, error) {
-	startTime := time.Now()
-	stdReq := p.prepareRequest(req, pipe)
+	tx := AcquireTx(ctx)
+	defer ReleaseTx(tx)
 
-	if cachedResp := p.tryGetFromCache(stdReq, pipe.Cache); cachedResp != nil {
-		return cachedResp, nil
+	p.initTx(tx, pipe)
+
+	if len(tx.UnsafePhaseOrder) == 0 {
+		return p.executeStandardFastPath(tx, req, doer, time.Now())
 	}
 
-	stdReq, traceInfo, traceEnd := p.traceRequest(stdReq, pipe)
-	resp, err := p.dispatchRequest(stdReq, doer, pipe)
+	return p.executeCustomPhaseOrder(tx, req, doer, tx.UnsafePhaseOrder)
+}
+
+func (p *Pipeline) executeStandardFastPath(
+	tx *Tx,
+	req Request,
+	doer Doer,
+	startTime time.Time,
+) (*http.Response, error) {
+	stdReq := p.prepareRequest(req, tx)
+
+	if tx.Flags&FlagCache != 0 {
+		if cachedResp := p.tryGetFromCache(stdReq, tx.Cache); cachedResp != nil {
+			return cachedResp, nil
+		}
+	}
+
+	stdReq, traceInfo, traceEnd := p.traceRequest(stdReq, tx)
+	resp, err := p.dispatchRequest(stdReq, doer, tx)
 	duration := time.Since(startTime).Milliseconds()
 
 	for _, hook := range p.defaults.AfterResponse {
@@ -55,29 +74,93 @@ func (p *Pipeline) Execute(
 		traceEnd(resp)
 	}
 
-	if pipe.Inspect && p.defaults.Inspector != nil {
+	if tx.Flags&FlagInspect != 0 && p.defaults.Inspector != nil {
 		p.defaults.Inspector.Capture(stdReq, resp, err, traceInfo)
 	}
 
-	if pipe.HAR != nil && pipe.HAR.Tracker != nil {
-		pipe.HAR.Tracker.Record(stdReq, resp, startTime, duration)
+	if tx.Flags&FlagHAR != 0 && tx.HAR != nil && tx.HAR.Tracker != nil {
+		tx.HAR.Tracker.Record(stdReq, resp, startTime, duration)
 	}
 
 	if err != nil {
 		return nil, err
 	}
 
-	p.finalizeJA4Report(GetRequestConfig(stdReq.Context()))
+	p.finalizeJA4Report(tx)
 
-	return p.postProcessResponse(stdReq, resp, pipe)
+	return p.postProcessResponse(stdReq, resp, tx)
 }
 
-func (p *Pipeline) finalizeJA4Report(cfg *RequestConfig) {
-	if cfg == nil || cfg.JA4ReportStore == nil || cfg.JA4ReportStore.Report == nil || cfg.JA4ReportStore.Target == nil {
+func (p *Pipeline) executeCustomPhaseOrder(
+	tx *Tx,
+	req Request,
+	doer Doer,
+	phases []PhaseID,
+) (*http.Response, error) {
+	var (
+		stdReq *http.Request
+		resp   *http.Response
+		err    error
+	)
+
+	for _, phase := range phases {
+		switch phase {
+		case PhasePrep:
+			stdReq = p.prepareRequest(req, tx)
+
+		case PhaseCacheLookup:
+			if stdReq != nil && tx.Flags&FlagCache != 0 {
+				if cached := p.tryGetFromCache(stdReq, tx.Cache); cached != nil {
+					return cached, nil
+				}
+			}
+
+		case PhaseDispatch:
+			if stdReq == nil {
+				stdReq = p.prepareRequest(req, tx)
+			}
+
+			resp, err = p.dispatchRequest(stdReq, doer, tx)
+			if err != nil {
+				return nil, err
+			}
+
+		case PhaseDecompress:
+			if resp != nil && tx.Flags&FlagDecompress != 0 {
+				resp = p.handleDecompressionAndTranscoding(stdReq, resp)
+			}
+
+		case PhaseWAF:
+			if resp != nil && tx.Flags&FlagChallenge != 0 {
+				resp, err = p.handleWAFChallenge(stdReq, resp)
+				if err != nil {
+					return nil, err
+				}
+			}
+
+		case PhaseValidate:
+			if resp != nil && tx.Flags&FlagValidate != 0 {
+				if valErr := p.validateResponse(resp, tx); valErr != nil {
+					return nil, valErr
+				}
+			}
+
+		case PhaseCacheSave:
+			if stdReq != nil && resp != nil && tx.Flags&FlagCache != 0 {
+				p.saveToCache(stdReq, resp, tx.Cache)
+			}
+		}
+	}
+
+	return resp, nil
+}
+
+func (p *Pipeline) finalizeJA4Report(tx *Tx) {
+	if tx == nil || tx.JA4ReportStore == nil || tx.JA4ReportStore.Report == nil || tx.JA4ReportStore.Target == nil {
 		return
 	}
 
-	store := cfg.JA4ReportStore
+	store := tx.JA4ReportStore
 	if store.Target.JA4 == nil {
 		store.Target.JA4 = store.Report
 	} else {
@@ -89,26 +172,4 @@ func (p *Pipeline) finalizeJA4Report(cfg *RequestConfig) {
 		store.Target.JA4.ExtCount = store.Report.ExtCount
 		store.Target.JA4.ALPN = store.Report.ALPN
 	}
-}
-
-func (p *Pipeline) dispatchRequest(req *http.Request, doer Doer, pipe PipelineConfig) (*http.Response, error) {
-	var (
-		resp *http.Response
-		err  error
-	)
-
-	switch {
-	case pipe.ProxyFailover != nil:
-		resp, err = p.executeWithProxyFailover(req, doer, pipe.ProxyFailover, pipe.Hedging)
-	case pipe.Hedging != nil:
-		resp, err = p.executeWithHedging(req, doer, pipe.Hedging)
-	default:
-		resp, err = doer.Do(req)
-	}
-
-	if resp != nil && resp.Request == nil {
-		resp.Request = req
-	}
-
-	return resp, err
 }

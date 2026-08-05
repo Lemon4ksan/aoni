@@ -33,6 +33,7 @@ import (
 	"github.com/lemon4ksan/aoni/fingerprint/p0f"
 	"github.com/lemon4ksan/aoni/internal/bytesconv"
 	"github.com/lemon4ksan/aoni/internal/io"
+	"github.com/lemon4ksan/aoni/internal/pipeline"
 	"github.com/lemon4ksan/aoni/netutil/fragment"
 	"github.com/lemon4ksan/aoni/telemetry"
 )
@@ -822,6 +823,26 @@ func WithTimeout(d time.Duration) aoni.RequestModifier {
 func WithPipeline(pipe aoni.PipelineConfig) aoni.RequestModifier {
 	return func(req aoni.Request) {
 		aoni.GetOrInitRequestConfig(req).Pipeline = &pipe
+	}
+}
+
+// PhaseID identifies fixed transaction execution phases.
+type PhaseID = pipeline.PhaseID
+
+const (
+	PhasePrep        = pipeline.PhasePrep
+	PhaseCacheLookup = pipeline.PhaseCacheLookup
+	PhaseDispatch    = pipeline.PhaseDispatch
+	PhaseDecompress  = pipeline.PhaseDecompress
+	PhaseWAF         = pipeline.PhaseWAF
+	PhaseValidate    = pipeline.PhaseValidate
+	PhaseCacheSave   = pipeline.PhaseCacheSave
+)
+
+// WithUnsafePhaseOrder sets a custom phase order for the pipeline.
+func WithUnsafePhaseOrder(phases ...PhaseID) aoni.RequestModifier {
+	return func(req aoni.Request) {
+		aoni.GetOrInitRequestConfig(req).UnsafePhaseOrder = phases
 	}
 }
 

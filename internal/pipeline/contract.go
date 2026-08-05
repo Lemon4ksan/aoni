@@ -2,6 +2,7 @@
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
+// Package pipeline implements the zero-allocation transaction execution core.
 package pipeline
 
 import (
@@ -18,6 +19,34 @@ import (
 	"github.com/lemon4ksan/aoni/fingerprint"
 	"github.com/lemon4ksan/aoni/fingerprint/ja4"
 	"github.com/lemon4ksan/aoni/telemetry"
+)
+
+// PhaseID identifies fixed transaction execution phases.
+type PhaseID uint8
+
+const (
+	PhasePrep PhaseID = iota + 1
+	PhaseCacheLookup
+	PhaseDispatch
+	PhaseDecompress
+	PhaseWAF
+	PhaseValidate
+	PhaseCacheSave
+)
+
+// Transaction Flags (bitmask).
+const (
+	FlagRotateUA uint32 = 1 << iota
+	FlagDPIJitter
+	FlagRedact
+	FlagDecompress
+	FlagValidate
+	FlagChallenge
+	FlagCache
+	FlagProxyFailover
+	FlagHedging
+	FlagInspect
+	FlagHAR
 )
 
 // Request defines the unified execution contract required by the pipeline.
@@ -97,10 +126,6 @@ type BaseResponse interface {
 	IsSuccess() bool
 	Error() error
 	SetData(data any)
-}
-
-type Doer interface {
-	Do(req *http.Request) (*http.Response, error)
 }
 
 type RetryCondition = func(resp Response, err error) bool

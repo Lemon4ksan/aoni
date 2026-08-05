@@ -21,14 +21,12 @@ import (
 	"github.com/lemon4ksan/aoni/telemetry"
 )
 
-func (p *Pipeline) prepareRequest(req Request, pipe PipelineConfig) *http.Request {
+func (p *Pipeline) prepareRequest(req Request, tx *Tx) *http.Request {
 	stdReq := req.HTTPRequest()
 	if stdReq == nil {
-		ctx := req.Context()
-
 		var err error
 
-		stdReq, err = http.NewRequestWithContext(ctx, req.Method(), req.URL(), req.BodyStream())
+		stdReq, err = http.NewRequestWithContext(req.Context(), req.Method(), req.URL(), req.BodyStream())
 		if err != nil {
 			return &http.Request{}
 		}
@@ -48,25 +46,16 @@ func (p *Pipeline) prepareRequest(req Request, pipe PipelineConfig) *http.Reques
 		p.applyRefererHeader(stdReq)
 	}
 
-	if pipe.RotateUA {
+	if tx.Flags&FlagRotateUA != 0 {
 		p.rotateUserAgentAndHints(stdReq)
 	}
 
-	if pipe.DPIJitter != nil {
-		p.applyDPIJitter(stdReq, pipe.DPIJitter)
+	if tx.Flags&FlagDPIJitter != 0 && tx.DPIJitter != nil {
+		p.applyDPIJitter(stdReq, tx.DPIJitter)
 	}
 
-	if pipe.Redact != nil {
-		stdReq = p.redactSensitiveData(stdReq, pipe.Redact)
-	}
-
-	cfg := GetRequestConfig(stdReq.Context())
-	if cfg != nil && cfg.UploadProgress != nil && stdReq.Body != nil && stdReq.Body != http.NoBody {
-		stdReq.Body = &io.ProgressReader{
-			Reader:     stdReq.Body,
-			Total:      stdReq.ContentLength,
-			OnProgress: cfg.UploadProgress,
-		}
+	if tx.Flags&FlagRedact != 0 && tx.Redact != nil {
+		stdReq = p.redactSensitiveData(stdReq, tx.Redact)
 	}
 
 	return stdReq
@@ -107,29 +96,29 @@ func (p *Pipeline) prepareRequestContext(req Request, stdReq *http.Request) *htt
 }
 
 func (p *Pipeline) traceRequest(
-	req *http.Request,
-	pipe PipelineConfig,
+	stdReq *http.Request,
+	tx *Tx,
 ) (*http.Request, *telemetry.TraceInfo, func(resp *http.Response)) {
-	cfg := GetRequestConfig(req.Context())
-
 	var traceInfo *telemetry.TraceInfo
 
 	switch {
-	case cfg != nil && cfg.TraceInfo != nil:
-		traceInfo = cfg.TraceInfo
-	case pipe.Inspect && p.defaults.Inspector != nil:
+	case tx.TraceInfo != nil:
+		traceInfo = tx.TraceInfo
+
+	case tx.Flags&FlagInspect != 0 && p.defaults.Inspector != nil:
 		traceInfo = &telemetry.TraceInfo{}
 
-		store := &JA4ReportStore{Target: traceInfo}
-		if cfg != nil {
-			cfg.JA4ReportStore = store
+		if tx.JA4ReportStore == nil {
+			tx.JA4ReportStore = &JA4ReportStore{Target: traceInfo}
+		} else {
+			tx.JA4ReportStore.Target = traceInfo
 		}
 
-		traceInfo.JA4 = &ja4.Report{JA4H: telemetry.ComputeJA4HFromRequest(req)}
+		traceInfo.JA4 = &ja4.Report{JA4H: telemetry.ComputeJA4HFromRequest(stdReq)}
 	}
 
 	if traceInfo == nil {
-		return req, nil, nil
+		return stdReq, nil, nil
 	}
 
 	trace := &httptrace.ClientTrace{
@@ -155,9 +144,9 @@ func (p *Pipeline) traceRequest(
 		GotFirstResponseByte: func() { traceInfo.ServerProcessing = time.Since(traceInfo.GotConn) },
 	}
 
-	req = req.WithContext(httptrace.WithClientTrace(req.Context(), trace))
+	stdReq = stdReq.WithContext(httptrace.WithClientTrace(stdReq.Context(), trace))
 
-	return req, traceInfo, traceInfo.Start() //nolint:bodyclose
+	return stdReq, traceInfo, traceInfo.Start() //nolint:bodyclose
 }
 
 func (p *Pipeline) redactSensitiveData(req *http.Request, redact *RedactConfig) *http.Request {
