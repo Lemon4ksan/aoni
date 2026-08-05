@@ -55,6 +55,10 @@ func applyFragmentation(conn net.Conn, cfg fragment.Config) net.Conn {
 
 func (c *Client) resolvePipeline(req *http.Request) PipelineConfig {
 	if reqPipe, ok := GetPipeline(req.Context()); ok {
+		if reqPipe.PrecomputedFlags == 0 {
+			reqPipe.BuildFlags()
+		}
+
 		return reqPipe
 	}
 
@@ -77,6 +81,8 @@ func (c *Client) resolvePipeline(req *http.Request) PipelineConfig {
 			DynamicHedging: c.network.DynamicHedging,
 		}
 	}
+
+	pipe.BuildFlags()
 
 	return pipe
 }

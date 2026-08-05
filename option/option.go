@@ -77,6 +77,20 @@ func WithFingerprintBlock(fingerprint aoni.FingerprintConfig) aoni.ClientOption 
 	}
 }
 
+// WithBaremetal switches the client to maximum-speed ("bare-metal") mode:
+// it disables background rotation, HTML tag validation, copying of default headers, and unnecessary wrappers.
+func WithBaremetal() aoni.ClientOption {
+	return func(cfg *aoni.Config) {
+		cfg.Defaults.Pipeline.Decompress = false
+		cfg.Defaults.Pipeline.Validate = false
+		cfg.Defaults.Pipeline.Challenge = false
+		cfg.Defaults.MaxResponseSize = -1
+		cfg.Defaults.MultiReadThreshold = -1
+		cfg.Defaults.RefererAutomaton = false
+		cfg.Defaults.Headers = nil
+	}
+}
+
 // ============================================================================
 // 2. ENGINE, BASE URL & TRANSPORT OPTIONS
 // ============================================================================

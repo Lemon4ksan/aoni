@@ -9,6 +9,7 @@ import (
 	stdio "io"
 	"mime"
 	"net/http"
+	"strconv"
 	"strings"
 
 	"github.com/andybalholm/brotli"
@@ -34,9 +35,18 @@ func (p *Pipeline) postProcessResponse(
 		return nil, err
 	}
 
-	// ⚡ Проверка флагов через 1 такт CPU на битовую маску:
 	if tx.Flags&FlagDecompress != 0 {
 		resp = p.handleDecompressionAndTranscoding(stdReq, resp)
+	} else {
+		applyCharsetTranscoding(resp)
+	}
+
+	if tx.Flags&FlagCache != 0 && tx.Cache != nil {
+		if stdReq.Method == http.MethodGet {
+			p.saveToCache(stdReq, resp, tx.Cache)
+		} else {
+			p.invalidateCache(stdReq, resp, tx.Cache)
+		}
 	}
 
 	if tx.SizeLimit > 0 {
@@ -72,14 +82,6 @@ func (p *Pipeline) postProcessResponse(
 		}
 	}
 
-	if tx.Flags&FlagCache != 0 && tx.Cache != nil {
-		if stdReq.Method == http.MethodGet {
-			p.saveToCache(stdReq, resp, tx.Cache)
-		} else {
-			p.invalidateCache(stdReq, resp, tx.Cache)
-		}
-	}
-
 	return resp, nil
 }
 
@@ -107,11 +109,21 @@ func (p *Pipeline) limitResponseSize(resp *http.Response, maxSize int64) error {
 		return nil
 	}
 
-	if resp.ContentLength > 0 && resp.ContentLength <= maxSize {
+	cl := resp.ContentLength
+	if cl <= 0 {
+		if clStr := resp.Header.Get("Content-Length"); clStr != "" {
+			if parsed, err := strconv.ParseInt(strings.TrimSpace(clStr), 10, 64); err == nil {
+				cl = parsed
+				resp.ContentLength = parsed
+			}
+		}
+	}
+
+	if cl > 0 && cl <= maxSize {
 		return nil
 	}
 
-	if resp.ContentLength > maxSize {
+	if cl > maxSize {
 		_ = resp.Body.Close()
 		return io.ErrResponseTooLarge
 	}
@@ -153,6 +165,8 @@ func (p *Pipeline) applyMultiReadBuffering(resp *http.Response, tx *Tx) error {
 
 	if tx.MultiReadThreshold > 0 {
 		threshold = tx.MultiReadThreshold
+	} else if tx.MultiReadThreshold < 0 || tx.Flags&FlagMultiRead == 0 {
+		threshold = -1
 	}
 
 	if tx.MultiReadDisableDisk {
@@ -271,7 +285,7 @@ func applyCharsetTranscoding(resp *http.Response) {
 		return
 	}
 
-	_, params, err := mime.ParseMediaType(contentType)
+	mediaType, params, err := mime.ParseMediaType(contentType)
 	if err != nil {
 		return
 	}
@@ -295,6 +309,9 @@ func applyCharsetTranscoding(resp *http.Response) {
 		Reader: transform.NewReader(resp.Body, enc.NewDecoder()),
 		Closer: resp.Body,
 	}
+
+	delete(params, "charset")
+	resp.Header.Set("Content-Type", mime.FormatMediaType(mediaType, params))
 }
 
 func (p *Pipeline) handleWAFChallenge(req *http.Request, resp *http.Response) (*http.Response, error) {

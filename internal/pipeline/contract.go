@@ -47,6 +47,13 @@ const (
 	FlagHedging
 	FlagInspect
 	FlagHAR
+	FlagMultiRead
+)
+
+const (
+	PrepMask = FlagRotateUA | FlagDPIJitter | FlagRedact
+
+	PostProcessMask = FlagDecompress | FlagValidate | FlagChallenge | FlagCache | FlagMultiRead
 )
 
 // Request defines the unified execution contract required by the pipeline.
@@ -139,18 +146,75 @@ type RetryOverride struct {
 type FallbackFunc = func(req Request, origErr error) (Response, error)
 
 type PipelineConfig struct {
-	DPIJitter     *DPIJitterConfig
-	ProxyFailover *ProxyFailoverConfig
-	Hedging       *HedgingConfig
-	Cache         *CacheConfig
-	HAR           *HARConfig
-	Redact        *RedactConfig
-	SizeLimit     int64
-	RotateUA      bool
-	Inspect       bool
-	Decompress    bool
-	Validate      bool
-	Challenge     bool
+	DPIJitter          *DPIJitterConfig
+	ProxyFailover      *ProxyFailoverConfig
+	Hedging            *HedgingConfig
+	Cache              *CacheConfig
+	HAR                *HARConfig
+	Redact             *RedactConfig
+	SizeLimit          int64
+	MultiReadThreshold int64
+	PrecomputedFlags   uint32
+	RotateUA           bool
+	Inspect            bool
+	Decompress         bool
+	Validate           bool
+	Challenge          bool
+}
+
+func (p *PipelineConfig) BuildFlags() uint32 {
+	var flags uint32
+	if p.RotateUA {
+		flags |= FlagRotateUA
+	}
+
+	if p.DPIJitter != nil {
+		flags |= FlagDPIJitter
+	}
+
+	if p.Redact != nil {
+		flags |= FlagRedact
+	}
+
+	if p.Decompress {
+		flags |= FlagDecompress
+	}
+
+	if p.Validate {
+		flags |= FlagValidate
+	}
+
+	if p.Challenge {
+		flags |= FlagChallenge
+	}
+
+	if p.Cache != nil {
+		flags |= FlagCache
+	}
+
+	if p.ProxyFailover != nil {
+		flags |= FlagProxyFailover
+	}
+
+	if p.Hedging != nil {
+		flags |= FlagHedging
+	}
+
+	if p.Inspect {
+		flags |= FlagInspect
+	}
+
+	if p.HAR != nil {
+		flags |= FlagHAR
+	}
+
+	if p.MultiReadThreshold > 0 {
+		flags |= FlagMultiRead
+	}
+
+	p.PrecomputedFlags = flags
+
+	return flags
 }
 
 type DPIJitterConfig struct {

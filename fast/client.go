@@ -247,6 +247,10 @@ func (c *Client) HTTP() aoni.HTTPDoer {
 
 func (c *Client) resolvePipeline(ctx context.Context) aoni.PipelineConfig {
 	if reqPipe, ok := aoni.GetPipeline(ctx); ok {
+		if reqPipe.PrecomputedFlags == 0 {
+			reqPipe.BuildFlags()
+		}
+
 		return reqPipe
 	}
 
@@ -269,6 +273,8 @@ func (c *Client) resolvePipeline(ctx context.Context) aoni.PipelineConfig {
 			DynamicHedging: c.config.Network.DynamicHedging,
 		}
 	}
+
+	pipe.BuildFlags()
 
 	return pipe
 }

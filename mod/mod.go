@@ -846,6 +846,27 @@ func WithUnsafePhaseOrder(phases ...PhaseID) aoni.RequestModifier {
 	}
 }
 
+// WithUnsafeDisableFlags allows to disable pipeline phases instantly (by clearing bits in 1 CPU cycle).
+// Example: mod.WithUnsafeDisableFlags(pipeline.FlagChallenge | pipeline.FlagCache)
+func WithUnsafeDisableFlags(flags uint32) aoni.RequestModifier {
+	return func(req aoni.Request) {
+		cfg := aoni.GetOrInitRequestConfig(req)
+		cfg.DisabledFlags |= flags
+	}
+}
+
+// WithUnsafeHook inserts a zero-allocation hook before the specified pipeline phase.
+func WithUnsafeHook(phase pipeline.PhaseID, hook pipeline.UnsafeHook) aoni.RequestModifier {
+	return func(req aoni.Request) {
+		cfg := aoni.GetOrInitRequestConfig(req)
+		if cfg.UnsafeHooks == nil {
+			cfg.UnsafeHooks = make(map[pipeline.PhaseID][]pipeline.UnsafeHook)
+		}
+
+		cfg.UnsafeHooks[phase] = append(cfg.UnsafeHooks[phase], hook)
+	}
+}
+
 // WithRetryPolicy constructs an [aoni.RequestModifier] assigning custom retry parameters to the request.
 func WithRetryPolicy(override aoni.RetryOverride) aoni.RequestModifier {
 	policy := override

@@ -113,12 +113,6 @@ func (c *Client) Request(
 		ApplyRequestConfigDefaults(cfg, c)
 	}
 
-	if cfg != nil && cfg.TargetHost == "" {
-		if parsedURL, parseErr := url.Parse(targetURLStr); parseErr == nil && parsedURL.Hostname() != "" {
-			cfg.TargetHost = parsedURL.Hostname()
-		}
-	}
-
 	req, err := http.NewRequestWithContext(ctx, method, targetURLStr, http.NoBody) //nolint:gosec
 	if err != nil {
 		return nil, &Error{Op: "failed to create request", Err: err}
@@ -126,10 +120,6 @@ func (c *Client) Request(
 
 	if len(c.defaults.Headers) > 0 {
 		maps.Copy(req.Header, c.defaults.Headers)
-	}
-
-	if len(req.Header["Accept-Encoding"]) == 0 {
-		req.Header["Accept-Encoding"] = DefaultAcceptEncoding
 	}
 
 	stdReq := NewStdRequest(req)
@@ -146,17 +136,10 @@ func (c *Client) Request(
 		}
 	}
 
-	if cfg != nil {
-		if cfg.BodyError != nil {
-			return nil, &Error{Op: "body encoding failed", Err: cfg.BodyError}
-		}
-
-		if cfg.QueryError != nil {
-			return nil, &Error{Op: "query encoding failed", Err: cfg.QueryError}
-		}
-	}
-
 	resp, err := c.execute(req, c.resolvePipeline(req))
+
+	ReleaseStdRequest(stdReq) // Возврат в пул
+
 	if err != nil {
 		return nil, &Error{Op: "request failed", Err: err}
 	}
@@ -539,12 +522,20 @@ func defaultClientDefaults() ClientDefaults {
 }
 
 func (c *Client) ensureUserAgent() {
+	if c.defaults.Headers == nil {
+		return
+	}
+
 	if c.defaults.Headers.Get("User-Agent") == "" {
 		c.defaults.Headers.Set("User-Agent", DefaultUserAgent)
 	}
 }
 
 func (c *Client) resolveTargetURL(path string) (string, error) {
+	if len(path) >= 7 && (strings.HasPrefix(path, "http://") || strings.HasPrefix(path, "https://")) {
+		return path, nil
+	}
+
 	if c.defaults.BaseURL == nil || c.defaults.BaseURL.Host == "" {
 		return path, nil
 	}
@@ -557,23 +548,8 @@ func (c *Client) resolveTargetURL(path string) (string, error) {
 		return c.defaults.BaseURL.String(), nil
 	}
 
-	if strings.HasPrefix(path, "http://") || strings.HasPrefix(path, "https://") {
-		return path, nil
-	}
-
-	if path[0] == '/' && (c.defaults.BaseURL.Path == "" || c.defaults.BaseURL.Path == "/") {
-		if c.defaults.BaseURLTrimmedString != "" {
-			return c.defaults.BaseURLTrimmedString + path, nil
-		}
-
-		if c.defaults.BaseURLString != "" {
-			return strings.TrimSuffix(c.defaults.BaseURLString, "/") + path, nil
-		}
-
-		uCopy := *c.defaults.BaseURL
-		uCopy.Path = path
-
-		return uCopy.String(), nil
+	if path[0] == '/' && c.defaults.BaseURLTrimmedString != "" {
+		return c.defaults.BaseURLTrimmedString + path, nil
 	}
 
 	rel, err := url.Parse(strings.TrimLeft(path, "/"))

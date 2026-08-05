@@ -86,12 +86,6 @@ func (p *Pipeline) prepareRequestContext(req Request, stdReq *http.Request) *htt
 		ctx = cookie.WithProxyAddress(ctx, proxyStr)
 	}
 
-	for _, mod := range cfg.Modifiers {
-		if mod != nil {
-			mod(req)
-		}
-	}
-
 	return stdReq.WithContext(ctx)
 }
 
@@ -165,9 +159,11 @@ func (p *Pipeline) redactSensitiveData(req *http.Request, redact *RedactConfig) 
 		}
 	}
 
-	cfg := GetRequestConfig(req.Context())
+	ctx := req.Context()
+
+	cfg := GetRequestConfig(ctx)
 	if cfg == nil {
-		cfg = &RequestConfig{}
+		ctx, cfg = AllocRequestConfig(ctx)
 	}
 
 	cfg.Redact = &RedactConfig{
@@ -176,8 +172,7 @@ func (p *Pipeline) redactSensitiveData(req *http.Request, redact *RedactConfig) 
 		JSONKeysToRedact: redact.JSONKeysToRedact,
 	}
 
-	ctx := context.WithValue(req.Context(), RedactConfigCtxKey{}, cfg.Redact)
-	ctx = context.WithValue(ctx, requestConfigKey{}, cfg)
+	ctx = context.WithValue(ctx, RedactConfigCtxKey{}, cfg.Redact)
 
 	return req.WithContext(ctx)
 }

@@ -22,6 +22,8 @@ var txPool = sync.Pool{
 	New: func() any { return &Tx{} },
 }
 
+type UnsafeHook func(tx *Tx, req *http.Request, resp *http.Response) error
+
 // Tx is a pooled transaction object holding all execution parameters.
 type Tx struct {
 	Ctx context.Context // Strictly used for Cancel/Deadline propagation!
@@ -71,6 +73,7 @@ type Tx struct {
 
 	// Unsafe mode custom phase sequence
 	UnsafePhaseOrder []PhaseID
+	UnsafeHooks      map[PhaseID][]UnsafeHook
 }
 
 // AcquireTx fetches a clean Tx instance from pool.
@@ -133,7 +136,7 @@ func ReleaseTx(tx *Tx) {
 	txPool.Put(tx)
 }
 
-func (p *Pipeline) initTx(tx *Tx, pipe PipelineConfig) {
+func (p *Pipeline) initTx(tx *Tx, req Request, pipe PipelineConfig) {
 	tx.DPIJitter = pipe.DPIJitter
 	tx.ProxyFailover = pipe.ProxyFailover
 	tx.Hedging = pipe.Hedging
@@ -142,44 +145,12 @@ func (p *Pipeline) initTx(tx *Tx, pipe PipelineConfig) {
 	tx.Redact = pipe.Redact
 	tx.SizeLimit = pipe.SizeLimit
 
-	var flags uint32
-	if pipe.RotateUA || len(p.defaults.UARotationProfiles) > 0 {
-		flags |= FlagRotateUA
+	flags := pipe.PrecomputedFlags
+	if flags == 0 {
+		flags = pipe.BuildFlags()
 	}
 
-	if pipe.DPIJitter != nil {
-		flags |= FlagDPIJitter
-	}
-
-	if pipe.Redact != nil {
-		flags |= FlagRedact
-	}
-
-	if pipe.Decompress {
-		flags |= FlagDecompress
-	}
-
-	if pipe.Validate {
-		flags |= FlagValidate
-	}
-
-	if pipe.Challenge {
-		flags |= FlagChallenge
-	}
-
-	if pipe.Cache != nil {
-		flags |= FlagCache
-	}
-
-	if pipe.ProxyFailover != nil {
-		flags |= FlagProxyFailover
-	}
-
-	if pipe.Hedging != nil {
-		flags |= FlagHedging
-	}
-
-	if pipe.Inspect || p.defaults.Inspector != nil {
+	if p.defaults.Inspector != nil {
 		flags |= FlagInspect
 	}
 
@@ -187,9 +158,13 @@ func (p *Pipeline) initTx(tx *Tx, pipe PipelineConfig) {
 		flags |= FlagHAR
 	}
 
-	tx.Flags = flags
-
 	if reqCfg := GetRequestConfig(tx.Ctx); reqCfg != nil {
+		for _, mod := range reqCfg.Modifiers {
+			if mod != nil {
+				mod(req)
+			}
+		}
+
 		tx.TimeoutOverride = reqCfg.TimeoutOverride
 		tx.MultiReadThreshold = reqCfg.MultiReadThreshold
 		tx.MultiReadDisableDisk = reqCfg.MultiReadDisableDisk
@@ -198,5 +173,13 @@ func (p *Pipeline) initTx(tx *Tx, pipe PipelineConfig) {
 		tx.TraceInfo = reqCfg.TraceInfo
 		tx.ResponseValidator = reqCfg.ResponseValidator
 		tx.UnsafePhaseOrder = reqCfg.UnsafePhaseOrder
+
+		if reqCfg.DisabledFlags != 0 {
+			flags &^= reqCfg.DisabledFlags
+		}
+
+		tx.UnsafeHooks = reqCfg.UnsafeHooks
 	}
+
+	tx.Flags = flags
 }

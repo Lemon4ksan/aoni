@@ -13,8 +13,18 @@ import (
 	"reflect"
 	"strconv"
 	"strings"
+	"sync"
 
 	"github.com/lemon4ksan/aoni/internal/bytesconv"
+)
+
+var (
+	stdRequestPool = sync.Pool{
+		New: func() any { return &StdRequest{} },
+	}
+	stdResponsePool = sync.Pool{
+		New: func() any { return &StdResponse{} },
+	}
 )
 
 // StdRequest adapts a standard net/http [*http.Request] to the unified [Request] contract.
@@ -23,12 +33,28 @@ type StdRequest struct {
 }
 
 // NewStdRequest wraps req into a unified [Request] adapter.
+//
+// Postconditions:
+//   - The returned request must be executed or released via [ReleaseStdRequest] to prevent pool leaks.
 func NewStdRequest(req *http.Request) *StdRequest {
 	if req == nil {
 		req = &http.Request{Header: make(http.Header)}
 	}
 
-	return &StdRequest{req: req}
+	r := stdRequestPool.Get().(*StdRequest)
+	r.req = req
+
+	return r
+}
+
+// ReleaseStdRequest returns the request to the pool after execution.
+func ReleaseStdRequest(r *StdRequest) {
+	if r == nil {
+		return
+	}
+
+	r.req = nil
+	stdRequestPool.Put(r)
 }
 
 // Context returns the request execution context.
@@ -299,8 +325,26 @@ type StdResponse struct {
 }
 
 // NewStdResponse wraps resp into a unified [Response] adapter.
+//
+// Postconditions:
+//   - The returned response must be released via [ReleaseStdResponse] to prevent pool leaks.
 func NewStdResponse(resp *http.Response) *StdResponse {
-	return &StdResponse{resp: resp}
+	r := stdResponsePool.Get().(*StdResponse)
+	r.resp = resp
+	r.body = nil
+
+	return r
+}
+
+// ReleaseStdResponse returns the response to the pool after execution.
+func ReleaseStdResponse(r *StdResponse) {
+	if r == nil {
+		return
+	}
+
+	r.resp = nil
+	r.body = nil
+	stdResponsePool.Put(r)
 }
 
 // StatusCode returns the HTTP response status code, or 0 if response is nil.
@@ -411,6 +455,8 @@ func (s *StdResponse) Close() error {
 	if s.resp != nil && s.resp.Body != nil {
 		return s.resp.Body.Close()
 	}
+
+	ReleaseStdResponse(s)
 
 	return nil
 }

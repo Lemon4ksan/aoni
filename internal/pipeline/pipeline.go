@@ -39,7 +39,7 @@ func (p *Pipeline) Execute(
 	tx := AcquireTx(ctx)
 	defer ReleaseTx(tx)
 
-	p.initTx(tx, pipe)
+	p.initTx(tx, req, pipe)
 
 	if len(tx.UnsafePhaseOrder) == 0 {
 		return p.executeStandardFastPath(tx, req, doer, time.Now())
@@ -66,12 +66,26 @@ func (p *Pipeline) executeStandardFastPath(
 	resp, err := p.dispatchRequest(stdReq, doer, tx)
 	duration := time.Since(startTime).Milliseconds()
 
-	for _, hook := range p.defaults.AfterResponse {
-		hook(resp, err)
-	}
-
 	if traceEnd != nil {
 		traceEnd(resp)
+	}
+
+	if err != nil {
+		for _, hook := range p.defaults.AfterResponse {
+			hook(nil, err)
+		}
+
+		if tx.Flags&FlagInspect != 0 && p.defaults.Inspector != nil {
+			p.defaults.Inspector.Capture(stdReq, nil, err, traceInfo)
+		}
+
+		return nil, err
+	}
+
+	resp, err = p.postProcessResponse(stdReq, resp, tx)
+
+	for _, hook := range p.defaults.AfterResponse {
+		hook(resp, err)
 	}
 
 	if tx.Flags&FlagInspect != 0 && p.defaults.Inspector != nil {
@@ -88,7 +102,7 @@ func (p *Pipeline) executeStandardFastPath(
 
 	p.finalizeJA4Report(tx)
 
-	return p.postProcessResponse(stdReq, resp, tx)
+	return resp, nil
 }
 
 func (p *Pipeline) executeCustomPhaseOrder(
@@ -104,6 +118,14 @@ func (p *Pipeline) executeCustomPhaseOrder(
 	)
 
 	for _, phase := range phases {
+		if hooks, ok := tx.UnsafeHooks[phase]; ok {
+			for _, hook := range hooks {
+				if hookErr := hook(tx, stdReq, resp); hookErr != nil {
+					return nil, hookErr
+				}
+			}
+		}
+
 		switch phase {
 		case PhasePrep:
 			stdReq = p.prepareRequest(req, tx)

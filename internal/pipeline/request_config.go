@@ -80,7 +80,10 @@ type RequestConfig struct {
 	Modifiers               []RequestModifier
 	QueryEncoder            QueryEncoder
 	Decoders                map[string]ResponseDecoder
-	UnsafePhaseOrder        []PhaseID
+
+	DisabledFlags    uint32
+	UnsafePhaseOrder []PhaseID
+	UnsafeHooks      map[PhaseID][]UnsafeHook
 
 	MultiReadThreshold int64
 	TimeoutOverride    time.Duration
@@ -182,7 +185,11 @@ func CloseResponse(resp *http.Response) {
 		return
 	}
 
-	_, _ = stdio.CopyN(stdio.Discard, resp.Body, maxBodySlurpBytes)
+	var buf [maxBodySlurpBytes]byte
+	if r, ok := resp.Body.(stdio.Reader); ok {
+		_, _ = r.Read(buf[:])
+	}
+
 	_ = resp.Body.Close()
 
 	if rb, ok := io.UnwrapBody(resp.Body).(interface{ ReallyClose() }); ok {
