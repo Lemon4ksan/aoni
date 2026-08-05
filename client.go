@@ -265,11 +265,6 @@ func (c *Client) WithHTTP3Config(config *QUICMigrationConfig) *Client {
 	return cloned
 }
 
-// RegisterDecoder returns a cloned [Client] with a registered custom response decoder for the specified MIME content type.
-func (c *Client) RegisterDecoder(contentType string, decoder ResponseDecoder) *Client {
-	return c.WithDecoder(contentType, decoder)
-}
-
 // WithDecoder returns a cloned [Client] with a registered custom response decoder for the specified MIME content type.
 func (c *Client) WithDecoder(contentType string, decoder ResponseDecoder) *Client {
 	return c.With(func(cfg *Config) {

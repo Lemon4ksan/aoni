@@ -1895,16 +1895,6 @@ func TestClient_CustomMIMEDecoders(t *testing.T) {
 		require.NotNil(t, result)
 		assert.Equal(t, "msgpack:binary_payload", *result)
 	})
-
-	t.Run("via client.RegisterDecoder", func(t *testing.T) {
-		client := aoni.NewClient(ts.Client(), option.WithBaseURL(ts.URL)).
-			RegisterDecoder("application/x-msgpack", msgpackTestDecoder{})
-
-		result, err := request.GetTo[string](context.Background(), client, "/")
-		require.NoError(t, err)
-		require.NotNil(t, result)
-		assert.Equal(t, "msgpack:binary_payload", *result)
-	})
 }
 
 func TestClient_BrowserProfile_HTTP2(t *testing.T) {
