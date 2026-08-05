@@ -274,13 +274,19 @@ func (s *StdRequest) BodyBytes() []byte {
 		return nil
 	}
 
-	b, err := stdio.ReadAll(s.req.Body)
+	bodyRC := s.req.Body
+	if s.req.GetBody != nil {
+		if b, err := s.req.GetBody(); err == nil && b != nil {
+			bodyRC = b
+		}
+	}
+
+	b, err := stdio.ReadAll(bodyRC)
+	_ = bodyRC.Close()
+
 	if err != nil {
 		return nil
 	}
-
-	_ = s.req.Body.Close()
-	s.req.Body = stdio.NopCloser(bytes.NewReader(b))
 
 	return b
 }

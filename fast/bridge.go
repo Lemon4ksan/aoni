@@ -64,7 +64,18 @@ func (t *Transport) RoundTrip(req *http.Request) (*http.Response, error) {
 	copyHeaders(fastReq, req.Header)
 
 	if req.Body != nil {
-		fastReq.SetBodyStream(req.Body, req.ContentLength)
+		body := req.Body
+		if req.GetBody != nil {
+			if b, err := req.GetBody(); err == nil && b != nil {
+				body = b
+			}
+		}
+
+		fastReq.SetBodyStream(body, req.ContentLength)
+
+		if req.GetBody != nil {
+			fastReq.SetGetBody(req.GetBody)
+		}
 	}
 
 	resp, err := t.noRedirectClient.Do(fastReq)

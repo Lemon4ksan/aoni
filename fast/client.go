@@ -7,14 +7,21 @@ package fast
 
 import (
 	"bytes"
+	"compress/gzip"
 	"context"
+	"io"
 	"net"
 	"net/http"
 	"net/url"
+	"strconv"
+	"strings"
 
+	"github.com/andybalholm/brotli"
+	"github.com/klauspost/compress/zstd"
 	"github.com/valyala/fasthttp"
 
 	"github.com/lemon4ksan/aoni"
+	"github.com/lemon4ksan/aoni/internal/bytesconv"
 	"github.com/lemon4ksan/aoni/internal/pipeline"
 )
 
@@ -194,6 +201,7 @@ func (c *Client) HTTP() aoni.HTTPDoer {
 
 		fastReq.Header.SetMethod(req.Method)
 		fastReq.SetRequestURI(req.URL.String())
+		fastReq.Header.SetHost(req.URL.Host)
 
 		for k, vv := range req.Header {
 			for _, v := range vv {
@@ -202,14 +210,21 @@ func (c *Client) HTTP() aoni.HTTPDoer {
 		}
 
 		if req.Body != nil && req.Body != http.NoBody {
-			fastReq.SetBodyStream(req.Body, int(req.ContentLength))
+			contentLen := req.ContentLength
+			if contentLen <= 0 {
+				if clStr := req.Header.Get("Content-Length"); clStr != "" {
+					if parsed, err := strconv.ParseInt(strings.TrimSpace(clStr), 10, 64); err == nil {
+						contentLen = parsed
+					}
+				}
+			}
+
+			fastReq.SetBodyStream(req.Body, int(contentLen))
 		}
 
 		ctx := req.Context()
-		c.applyCookies(ctx, fastReq)
-		extractUserInfoAndSetAuth(fastReq)
 
-		_, err, autoReleased := c.dispatchSingleRequest(ctx, fastReq, fastResp)
+		_, err, autoReleased := c.executeWithRedirects(ctx, fastReq, fastResp)
 		if err != nil {
 			if !autoReleased {
 				fasthttp.ReleaseRequest(fastReq)
@@ -219,7 +234,7 @@ func (c *Client) HTTP() aoni.HTTPDoer {
 			return nil, err
 		}
 
-		c.captureCookies(ctx, fastReq, fastResp)
+		uncompressed := decompressFastResponse(fastResp)
 
 		bodyRC := &fastBodyReadCloser{
 			Reader:   bytes.NewReader(fastResp.Body()),
@@ -233,6 +248,7 @@ func (c *Client) HTTP() aoni.HTTPDoer {
 			Header:        make(http.Header),
 			Body:          bodyRC,
 			ContentLength: int64(len(fastResp.Body())),
+			Uncompressed:  uncompressed,
 			Request:       req,
 		}
 
@@ -243,6 +259,171 @@ func (c *Client) HTTP() aoni.HTTPDoer {
 
 		return httpResp, nil
 	})
+}
+
+func (c *Client) executeWithRedirects(
+	ctx context.Context,
+	fastReq *fasthttp.Request,
+	fastResp *fasthttp.Response,
+) (trailers map[string][]string, err error, autoReleased bool) {
+	redirectLimit := c.config.Engine.RedirectLimit
+	if redirectLimit < 0 {
+		redirectLimit = 10
+	}
+
+	if redirectLimit == 0 {
+		c.applyCookies(ctx, fastReq)
+		extractUserInfoAndSetAuth(fastReq)
+
+		trailers, err, autoReleased = c.dispatchSingleRequest(ctx, fastReq, fastResp)
+		if err == nil {
+			c.captureCookies(ctx, fastReq, fastResp)
+		}
+
+		return trailers, err, autoReleased
+	}
+
+	currentURI := fasthttp.AcquireURI()
+	defer fasthttp.ReleaseURI(currentURI)
+
+	var redirectsFollowed int
+
+	for {
+		c.applyCookies(ctx, fastReq)
+		fastReq.URI().CopyTo(currentURI)
+		extractUserInfoAndSetAuth(fastReq)
+
+		trailers, err, autoReleased = c.dispatchSingleRequest(ctx, fastReq, fastResp)
+		if err != nil {
+			return nil, err, autoReleased
+		}
+
+		c.captureCookies(ctx, fastReq, fastResp)
+
+		statusCode := fastResp.StatusCode()
+		if !isRedirectStatus(statusCode) {
+			return trailers, nil, false
+		}
+
+		location := fastResp.Header.Peek("Location")
+		if len(location) == 0 {
+			return trailers, nil, false
+		}
+
+		redirectsFollowed++
+		if redirectsFollowed > redirectLimit {
+			return nil, ErrMaxRedirectsExceeded, false
+		}
+
+		if err := applyRedirectMethodAndBody(statusCode, fastReq); err != nil {
+			return nil, err, false
+		}
+
+		nextURI := fasthttp.AcquireURI()
+		currentURI.CopyTo(nextURI)
+		nextURI.UpdateBytes(location)
+
+		if len(nextURI.Scheme()) == 0 {
+			nextURI.SetSchemeBytes(currentURI.Scheme())
+		}
+
+		if len(nextURI.Host()) == 0 {
+			nextURI.SetHostBytes(currentURI.Host())
+		}
+
+		nextURI.CopyTo(fastReq.URI())
+
+		if !isSameHost(currentURI, nextURI) {
+			scrubSensitiveHeaders(fastReq, currentURI, nextURI)
+		}
+
+		if isHTTPSDowngrade(currentURI, nextURI) {
+			fastReq.Header.Del("Referer")
+		} else {
+			fastReq.Header.SetBytesK(bytesconv.S2B("Referer"), string(currentURI.FullURI()))
+		}
+
+		fasthttp.ReleaseURI(nextURI)
+		fastResp.Reset()
+	}
+}
+
+func isRedirectStatus(code int) bool {
+	return code == fasthttp.StatusMovedPermanently ||
+		code == fasthttp.StatusFound ||
+		code == fasthttp.StatusSeeOther ||
+		code == fasthttp.StatusTemporaryRedirect ||
+		code == fasthttp.StatusPermanentRedirect
+}
+
+func isSameHost(u1, u2 *fasthttp.URI) bool {
+	return bytes.EqualFold(u1.Host(), u2.Host())
+}
+
+func isHTTPSDowngrade(u1, u2 *fasthttp.URI) bool {
+	return bytes.EqualFold(u1.Scheme(), []byte("https")) && bytes.EqualFold(u2.Scheme(), []byte("http"))
+}
+
+func applyRedirectMethodAndBody(statusCode int, req *fasthttp.Request) error {
+	switch statusCode {
+	case fasthttp.StatusMovedPermanently, fasthttp.StatusFound, fasthttp.StatusSeeOther:
+		method := string(req.Header.Method())
+		if method != http.MethodGet && method != http.MethodHead {
+			req.Header.SetMethod(http.MethodGet)
+			req.SetBody(nil)
+			req.Header.Del("Content-Type")
+			req.Header.Del("Content-Length")
+		}
+	}
+
+	return nil
+}
+
+func decompressFastResponse(resp *fasthttp.Response) bool {
+	encodingBytes := resp.Header.Peek("Content-Encoding")
+	if len(encodingBytes) == 0 {
+		return false
+	}
+
+	encoding := strings.ToLower(bytesconv.B2S(encodingBytes))
+
+	body := resp.Body()
+	if len(body) == 0 {
+		return false
+	}
+
+	var (
+		decompressed []byte
+		err          error
+	)
+
+	switch {
+	case strings.Contains(encoding, "gzip"):
+		gzReader, gzErr := gzip.NewReader(bytes.NewReader(body))
+		if gzErr == nil {
+			decompressed, err = io.ReadAll(gzReader)
+			_ = gzReader.Close()
+		}
+
+	case strings.Contains(encoding, "br"):
+		brReader := brotli.NewReader(bytes.NewReader(body))
+		decompressed, err = io.ReadAll(brReader)
+	case strings.Contains(encoding, "zstd"):
+		if zDec, zErr := zstd.NewReader(bytes.NewReader(body)); zErr == nil {
+			decompressed, err = io.ReadAll(zDec)
+			zDec.Close()
+		}
+	}
+
+	if err == nil && len(decompressed) > 0 {
+		resp.SetBody(decompressed)
+		resp.Header.Del("Content-Encoding")
+		resp.Header.Del("Content-Length")
+
+		return true
+	}
+
+	return false
 }
 
 func (c *Client) resolvePipeline(ctx context.Context) aoni.PipelineConfig {

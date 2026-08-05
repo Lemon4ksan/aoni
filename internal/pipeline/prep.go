@@ -5,14 +5,18 @@
 package pipeline
 
 import (
+	"bytes"
 	"context"
 	"crypto/tls"
 	"encoding/hex"
+	stdio "io"
 	"net/http"
 	"net/http/httptrace"
 	"strings"
 	"sync/atomic"
 	"time"
+
+	"github.com/valyala/fasthttp"
 
 	"github.com/lemon4ksan/aoni/cookie"
 	"github.com/lemon4ksan/aoni/fingerprint"
@@ -24,11 +28,52 @@ import (
 func (p *Pipeline) prepareRequest(req Request, tx *Tx) *http.Request {
 	stdReq := req.HTTPRequest()
 	if stdReq == nil {
+		var (
+			bodyReader stdio.Reader
+			contentLen int64 = -1
+		)
+
+		if fastAdapter, ok := req.(interface{ FastHTTPRequest() *fasthttp.Request }); ok {
+			fastReq := fastAdapter.FastHTTPRequest()
+			if fastReq != nil {
+				if cl := fastReq.Header.ContentLength(); cl > 0 {
+					contentLen = int64(cl)
+				}
+			}
+		}
+
+		if bs := req.BodyStream(); bs != nil {
+			bodyReader = bs
+		} else if bb := req.BodyBytes(); len(bb) > 0 {
+			bodyReader = bytes.NewReader(bb)
+			if contentLen <= 0 {
+				contentLen = int64(len(bb))
+			}
+		}
+
 		var err error
 
-		stdReq, err = http.NewRequestWithContext(req.Context(), req.Method(), req.URL(), req.BodyStream())
+		stdReq, err = http.NewRequestWithContext(req.Context(), req.Method(), req.URL(), bodyReader)
 		if err != nil {
 			return &http.Request{}
+		}
+
+		if contentLen > 0 {
+			stdReq.ContentLength = contentLen
+		}
+
+		if fastAdapter, ok := req.(interface{ FastHTTPRequest() *fasthttp.Request }); ok {
+			fastReq := fastAdapter.FastHTTPRequest()
+			if fastReq != nil {
+				fastReq.Header.All()(func(k, v []byte) bool {
+					stdReq.Header.Add(string(k), string(v))
+					return true
+				})
+
+				if host := string(fastReq.Header.Peek("Host")); host != "" {
+					stdReq.Host = host
+				}
+			}
 		}
 	}
 
@@ -56,6 +101,32 @@ func (p *Pipeline) prepareRequest(req Request, tx *Tx) *http.Request {
 
 	if tx.Flags&FlagRedact != 0 && tx.Redact != nil {
 		stdReq = p.redactSensitiveData(stdReq, tx.Redact)
+	}
+
+	cfg := GetRequestConfig(stdReq.Context())
+	if cfg != nil && cfg.UploadProgress != nil && stdReq.Body != nil && stdReq.Body != http.NoBody {
+		progressReader := &io.ProgressReader{
+			Reader:     stdReq.Body,
+			Total:      stdReq.ContentLength,
+			OnProgress: cfg.UploadProgress,
+		}
+		stdReq.Body = progressReader
+
+		if stdReq.GetBody != nil {
+			origGetBody := stdReq.GetBody
+			stdReq.GetBody = func() (stdio.ReadCloser, error) {
+				rc, err := origGetBody()
+				if err != nil {
+					return nil, err
+				}
+
+				return &io.ProgressReader{
+					Reader:     rc,
+					Total:      stdReq.ContentLength,
+					OnProgress: cfg.UploadProgress,
+				}, nil
+			}
+		}
 	}
 
 	return stdReq

@@ -2,10 +2,11 @@
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
+// FILE: fast/cookies.go
+
 package fast
 
 import (
-	"bytes"
 	"context"
 	"encoding/base64"
 	"net/http"
@@ -14,8 +15,10 @@ import (
 
 	"github.com/valyala/fasthttp"
 
+	"github.com/lemon4ksan/aoni"
 	"github.com/lemon4ksan/aoni/cookie"
 	"github.com/lemon4ksan/aoni/internal/bytesconv"
+	"github.com/lemon4ksan/aoni/netutil"
 )
 
 func (c *Client) applyCookies(ctx context.Context, req *fasthttp.Request) {
@@ -108,22 +111,44 @@ func parseCookie(key, value []byte) *http.Cookie {
 }
 
 func extractUserInfoAndSetAuth(req *fasthttp.Request) {
-	fullURI := req.URI().FullURI()
-	if bytes.IndexByte(fullURI, '@') == -1 {
-		return
+	user := string(req.URI().Username())
+	pass := string(req.URI().Password())
+
+	if user != "" {
+		if len(req.Header.Peek("Authorization")) == 0 {
+			encoded := base64.StdEncoding.EncodeToString(bytesconv.S2B(user + ":" + pass))
+			req.Header.Set("Authorization", "Basic "+encoded)
+		}
+
+		req.URI().SetUsername("")
+		req.URI().SetPassword("")
+	}
+}
+
+func scrubSensitiveHeaders(req *fasthttp.Request, currentURI, nextURI *fasthttp.URI) {
+	for _, h := range aoni.DefaultSensitiveHeaders {
+		req.Header.Del(h)
 	}
 
-	userInfo := req.URI().Username()
-	if len(userInfo) == 0 {
-		return
+	req.Header.Del("Cookie2")
+	req.Header.Del("Proxy-Authenticate")
+	req.Header.Del("WWW-Authenticate")
+
+	host1 := string(currentURI.Host())
+	host2 := string(nextURI.Host())
+
+	if !isSameDomainOrSubdomain(host1, host2) {
+		req.Header.Del("Cookie")
+	}
+}
+
+func isSameDomainOrSubdomain(h1, h2 string) bool {
+	clean1 := strings.ToLower(netutil.CleanHost(h1))
+	clean2 := strings.ToLower(netutil.CleanHost(h2))
+
+	if clean1 == clean2 {
+		return true
 	}
 
-	if len(req.Header.Peek("Authorization")) == 0 {
-		user := string(req.URI().Username())
-		pass := string(req.URI().Password())
-		encoded := base64.StdEncoding.EncodeToString(bytesconv.S2B(user + ":" + pass))
-		req.Header.Set("Authorization", "Basic "+encoded)
-	}
-
-	req.URI().SetUsername("")
+	return strings.HasSuffix(clean1, "."+clean2) || strings.HasSuffix(clean2, "."+clean1)
 }

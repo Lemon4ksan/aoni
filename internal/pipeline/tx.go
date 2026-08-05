@@ -165,6 +165,8 @@ func (p *Pipeline) initTx(tx *Tx, req Request, pipe PipelineConfig) {
 			}
 		}
 
+		reqCfg.Modifiers = nil
+
 		tx.TimeoutOverride = reqCfg.TimeoutOverride
 		tx.MultiReadThreshold = reqCfg.MultiReadThreshold
 		tx.MultiReadDisableDisk = reqCfg.MultiReadDisableDisk

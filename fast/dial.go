@@ -55,7 +55,9 @@ func (d *fastDialer) DialContext(ctx context.Context, network, addr string) (net
 	}
 
 	targetAddr := net.JoinHostPort(host, port)
-	isTLS := port == "443" || d.IsHTTPSTarget(addr) || d.IsHTTPSTarget(host) || (port != "80" && d.isTLSEnabled())
+
+	isTLS := port == "443" || d.IsHTTPSTarget(addr) || d.IsHTTPSTarget(host) || d.IsHTTPSTarget(targetAddr) ||
+		(port != "80" && d.isTLSEnabled())
 
 	rawConn, err := netdial.DialL4(ctx, network, targetAddr, dialOpts)
 	if err != nil {
@@ -246,6 +248,13 @@ func (c *Client) applyCustomDialer() {
 }
 
 func (c *Client) applyDefaultHeaders(req aoni.Request) {
+	if fastAdapter, ok := req.(interface{ FastHTTPRequest() *fasthttp.Request }); ok {
+		fastReq := fastAdapter.FastHTTPRequest()
+		if fastReq != nil {
+			extractUserInfoAndSetAuth(fastReq)
+		}
+	}
+
 	if req.Header("Accept-Encoding") == "" {
 		req.SetHeader("Accept-Encoding", "zstd, br, gzip")
 	}

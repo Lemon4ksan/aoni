@@ -196,7 +196,11 @@ func (f *Request) BodyBytes() []byte {
 func (f *Request) SetBodyStream(r io.Reader, contentLength int64) {
 	f.req.SetBodyStream(r, int(contentLength))
 
-	if seeker, ok := r.(io.Seeker); ok {
+	if rc, ok := r.(io.ReadCloser); ok {
+		f.getBody = func() (io.ReadCloser, error) {
+			return rc, nil
+		}
+	} else if seeker, ok := r.(io.Seeker); ok {
 		f.getBody = func() (io.ReadCloser, error) {
 			if _, err := seeker.Seek(0, io.SeekStart); err != nil {
 				return nil, err
