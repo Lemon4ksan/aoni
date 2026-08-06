@@ -23,6 +23,7 @@ import (
 
 	"github.com/lemon4ksan/aoni/fingerprint/ja4"
 	"github.com/lemon4ksan/aoni/netutil"
+	"github.com/lemon4ksan/aoni/netutil/cert"
 )
 
 var (
@@ -48,6 +49,7 @@ type RTLSOptions struct {
 	SessionCache       utls.ClientSessionCache
 	BaseTLSConfig      *tls.Config
 	CertificatePins    map[string][]string
+	CertCompression    []cert.CompressionAlgorythm
 	ALPNOverride       []string
 	JA4Callback        func(ja4.Report)
 	InsecureSkipVerify bool
@@ -130,6 +132,10 @@ func HandshakeUTLS(
 		return nil, ja4.Report{}, err
 	}
 
+	if len(opts.CertCompression) > 0 {
+		applyCertCompression(uConn, opts.CertCompression)
+	}
+
 	if err := uConn.BuildHandshakeState(); err != nil {
 		_ = conn.Close()
 		return nil, ja4.Report{}, fmt.Errorf("%w: build handshake state: %w", ErrUTLSHandshakeFailed, err)
@@ -174,6 +180,28 @@ func HandshakeUTLS(
 	}
 
 	return &UConnWrapper{UConn: uConn}, report, nil
+}
+
+func applyCertCompression(uConn *utls.UConn, algos []cert.CompressionAlgorythm) {
+	if len(algos) == 0 {
+		return
+	}
+
+	utlsAlgos := make([]utls.CertCompressionAlgo, len(algos))
+	for i, a := range algos {
+		utlsAlgos[i] = a.ToUTLS()
+	}
+
+	for _, ext := range uConn.Extensions {
+		if compExt, ok := ext.(*utls.UtlsCompressCertExtension); ok {
+			compExt.Algorithms = utlsAlgos
+			return
+		}
+	}
+
+	uConn.Extensions = append(uConn.Extensions, &utls.UtlsCompressCertExtension{
+		Algorithms: utlsAlgos,
+	})
 }
 
 func removeECHExtensions(exts []utls.TLSExtension) []utls.TLSExtension {

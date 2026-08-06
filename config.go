@@ -25,6 +25,7 @@ import (
 	"github.com/lemon4ksan/aoni/fingerprint/ja4"
 	"github.com/lemon4ksan/aoni/fingerprint/p0f"
 	"github.com/lemon4ksan/aoni/internal/io"
+	"github.com/lemon4ksan/aoni/netutil/cert"
 	"github.com/lemon4ksan/aoni/netutil/fragment"
 	"github.com/lemon4ksan/aoni/netutil/ip"
 	"github.com/lemon4ksan/aoni/telemetry"
@@ -234,6 +235,7 @@ type FingerprintConfig struct {
 	SessionCache               SessionCache
 	PacketPadding              *fingerprint.PaddingConfig
 	CertificatePins            map[string][]string
+	CertCompression            []cert.CompressionAlgorythm
 	BrowserID                  BrowserID
 }
 
@@ -248,6 +250,10 @@ func (f FingerprintConfig) Clone() FingerprintConfig {
 
 	if len(f.HeaderOrder) > 0 {
 		cloned.HeaderOrder = slices.Clone(f.HeaderOrder)
+	}
+
+	if len(f.CertCompression) > 0 {
+		cloned.CertCompression = slices.Clone(f.CertCompression)
 	}
 
 	if len(f.CertificatePins) > 0 {

@@ -16,6 +16,7 @@ import (
 	"encoding/base64"
 	"net/http"
 	"net/url"
+	"slices"
 	"strings"
 	"time"
 
@@ -33,6 +34,7 @@ import (
 	"github.com/lemon4ksan/aoni/fingerprint/profiles/chrome"
 	"github.com/lemon4ksan/aoni/fingerprint/profiles/firefox"
 	"github.com/lemon4ksan/aoni/mod"
+	"github.com/lemon4ksan/aoni/netutil/cert"
 	"github.com/lemon4ksan/aoni/netutil/fragment"
 	"github.com/lemon4ksan/aoni/netutil/ip"
 	"github.com/lemon4ksan/aoni/netutil/proxy"
@@ -402,6 +404,23 @@ func WithSocketController(controller aoni.SocketController) aoni.ClientOption {
 // ============================================================================
 // 5. FINGERPRINT, TLS & H2/H3 EVASION OPTIONS
 // ============================================================================
+
+// WithCertCompression enables RFC 8879 TLS Certificate Compression during handshakes
+// using the specified algorithms (Brotli, Zstd, Zlib) to reduce packet count and latency.
+func WithCertCompression(algos ...cert.CompressionAlgorythm) aoni.ClientOption {
+	return func(cfg *aoni.Config) {
+		if len(algos) == 0 {
+			cfg.Fingerprint.CertCompression = []cert.CompressionAlgorythm{
+				cert.CompressionBrotli,
+				cert.CompressionZstd,
+			}
+
+			return
+		}
+
+		cfg.Fingerprint.CertCompression = slices.Clone(algos)
+	}
+}
 
 // WithTLSFingerprint returns an [aoni.ClientOption] selecting a pre-defined [aoni.BrowserID] uTLS ClientHello profile.
 func WithTLSFingerprint(browser aoni.BrowserID) aoni.ClientOption {
