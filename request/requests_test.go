@@ -18,6 +18,8 @@ import (
 	"github.com/lemon4ksan/miyako/log"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"google.golang.org/protobuf/proto"
+	"google.golang.org/protobuf/types/known/wrapperspb"
 
 	"github.com/lemon4ksan/aoni"
 	"github.com/lemon4ksan/aoni/codec/decode"
@@ -58,7 +60,7 @@ func TestClient_GetTo(t *testing.T) {
 
 	expected := reqTestPayload{Message: "hello", Status: http.StatusOK}
 
-	_, client := setupTestReqServer(t, func(w http.ResponseWriter, r *http.Request) {
+	_, client := setupTestReqServer(t, func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(expected)
 	})
@@ -75,7 +77,7 @@ func TestClient_GetToEx(t *testing.T) {
 
 	expected := reqTestPayload{Message: "hello_ex", Status: http.StatusOK}
 
-	_, client := setupTestReqServer(t, func(w http.ResponseWriter, r *http.Request) {
+	_, client := setupTestReqServer(t, func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(expected)
 	})
@@ -190,6 +192,7 @@ func TestClient_DeleteTo(t *testing.T) {
 
 func TestClient_DeleteTo_NilPayload(t *testing.T) {
 	t.Parallel()
+
 	_, client := setupTestReqServer(t, func(w http.ResponseWriter, r *http.Request) {
 		assert.Equal(t, http.MethodDelete, r.Method)
 
@@ -203,6 +206,182 @@ func TestClient_DeleteTo_NilPayload(t *testing.T) {
 
 	_, err := DeleteTo[any](t.Context(), client, "/delete-nil", nil)
 	require.NoError(t, err)
+}
+
+func TestClient_NoResponseSentinel(t *testing.T) {
+	t.Parallel()
+
+	_, client := setupTestReqServer(t, func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"message":"ignored"}`))
+	})
+
+	resGet, err := GetTo[NoResponse](t.Context(), client, "/no-resp-get")
+	require.NoError(t, err)
+	assert.Nil(t, resGet)
+
+	resPost, err := PostTo[NoResponse](t.Context(), client, "/no-resp-post", map[string]string{"foo": "bar"})
+	require.NoError(t, err)
+	assert.Nil(t, resPost)
+}
+
+func TestClient_ExtendedToExHelpers(t *testing.T) {
+	t.Parallel()
+
+	expected := reqTestPayload{Message: "ex_payload", Status: 200}
+
+	_, client := setupTestReqServer(t, func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_ = json.NewEncoder(w).Encode(expected)
+	})
+
+	t.Run("PostToEx", func(t *testing.T) {
+		res, raw, err := PostToEx[reqTestPayload](t.Context(), client, "/post", expected)
+		require.NoError(t, err)
+		require.NotNil(t, raw)
+		assert.Equal(t, expected.Message, res.Message)
+		assert.Equal(t, http.StatusOK, raw.StatusCode)
+	})
+
+	t.Run("PutToEx", func(t *testing.T) {
+		res, raw, err := PutToEx[reqTestPayload](t.Context(), client, "/put", expected)
+		require.NoError(t, err)
+		require.NotNil(t, raw)
+		assert.Equal(t, expected.Message, res.Message)
+		assert.Equal(t, http.StatusOK, raw.StatusCode)
+	})
+
+	t.Run("PatchToEx", func(t *testing.T) {
+		res, raw, err := PatchToEx[reqTestPayload](t.Context(), client, "/patch", expected)
+		require.NoError(t, err)
+		require.NotNil(t, raw)
+		assert.Equal(t, expected.Message, res.Message)
+		assert.Equal(t, http.StatusOK, raw.StatusCode)
+	})
+
+	t.Run("DeleteToEx", func(t *testing.T) {
+		res, raw, err := DeleteToEx[reqTestPayload](t.Context(), client, "/delete", expected)
+		require.NoError(t, err)
+		require.NotNil(t, raw)
+		assert.Equal(t, expected.Message, res.Message)
+		assert.Equal(t, http.StatusOK, raw.StatusCode)
+	})
+
+	t.Run("DoToEx", func(t *testing.T) {
+		res, raw, err := DoToEx[reqTestPayload](t.Context(), client, http.MethodPost, "/do", expected)
+		require.NoError(t, err)
+		require.NotNil(t, raw)
+		assert.Equal(t, expected.Message, res.Message)
+		assert.Equal(t, http.StatusOK, raw.StatusCode)
+	})
+}
+
+func TestClient_ProtoAndGRPCWebHelpers(t *testing.T) {
+	t.Parallel()
+
+	input := wrapperspb.String("proto_input")
+	response := wrapperspb.String("proto_response")
+
+	respBytes, err := proto.Marshal(response)
+	require.NoError(t, err)
+
+	_, client := setupTestReqServer(t, func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/x-protobuf")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write(respBytes)
+	})
+
+	t.Run("PostProtoTo", func(t *testing.T) {
+		res, err := PostProtoTo[wrapperspb.StringValue](t.Context(), client, "/proto-post", input)
+		require.NoError(t, err)
+		assert.Equal(t, "proto_response", res.GetValue())
+	})
+
+	t.Run("PutProtoTo", func(t *testing.T) {
+		res, err := PutProtoTo[wrapperspb.StringValue](t.Context(), client, "/proto-put", input)
+		require.NoError(t, err)
+		assert.Equal(t, "proto_response", res.GetValue())
+	})
+
+	t.Run("DoProtoTo", func(t *testing.T) {
+		res, err := DoProtoTo[wrapperspb.StringValue](t.Context(), client, http.MethodPost, "/proto-do", input)
+		require.NoError(t, err)
+		assert.Equal(t, "proto_response", res.GetValue())
+	})
+}
+
+func TestClient_ModifierAsBodyError(t *testing.T) {
+	t.Parallel()
+
+	client := aoni.NewClient(nil)
+
+	// Passing a RequestModifier accidentally as body payload
+	badBodyMod := mod.WithHeader("X-Key", "Val")
+
+	_, errPost := PostTo[reqTestPayload](t.Context(), client, "/bad", badBodyMod)
+	assert.ErrorIs(t, errPost, ErrModifierAsBody)
+
+	_, errPut := PutTo[reqTestPayload](t.Context(), client, "/bad", badBodyMod)
+	assert.ErrorIs(t, errPut, ErrModifierAsBody)
+
+	_, errDo := DoTo[reqTestPayload](t.Context(), client, http.MethodPost, "/bad", badBodyMod)
+	assert.ErrorIs(t, errDo, ErrModifierAsBody)
+}
+
+func TestClient_ExtendedHTTPMethods(t *testing.T) {
+	t.Parallel()
+
+	var capturedMethod string
+
+	_, client := setupTestReqServer(t, func(w http.ResponseWriter, r *http.Request) {
+		capturedMethod = r.Method
+
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"message":"extended_ok"}`))
+	})
+
+	t.Run("Head", func(t *testing.T) {
+		resp, err := Head(t.Context(), client, "/head")
+		require.NoError(t, err)
+
+		defer resp.Body.Close()
+
+		assert.Equal(t, http.MethodHead, capturedMethod)
+	})
+
+	t.Run("OptionsTo", func(t *testing.T) {
+		res, err := OptionsTo[reqTestPayload](t.Context(), client, "/options")
+		require.NoError(t, err)
+		assert.Equal(t, "extended_ok", res.Message)
+		assert.Equal(t, http.MethodOptions, capturedMethod)
+	})
+
+	t.Run("Trace", func(t *testing.T) {
+		resp, err := Trace(t.Context(), client, "/trace")
+		require.NoError(t, err)
+
+		defer resp.Body.Close()
+
+		assert.Equal(t, http.MethodTrace, capturedMethod)
+	})
+
+	t.Run("Connect", func(t *testing.T) {
+		resp, err := Connect(t.Context(), client, "/connect")
+		require.NoError(t, err)
+
+		defer resp.Body.Close()
+
+		assert.Equal(t, http.MethodConnect, capturedMethod)
+	})
+
+	t.Run("DoTo", func(t *testing.T) {
+		res, err := DoTo[reqTestPayload](t.Context(), client, http.MethodPost, "/do", map[string]string{"foo": "bar"})
+		require.NoError(t, err)
+		assert.Equal(t, "extended_ok", res.Message)
+		assert.Equal(t, http.MethodPost, capturedMethod)
+	})
 }
 
 func TestGenericToHelpers(t *testing.T) {
@@ -270,6 +449,74 @@ func TestGenericToHelpers(t *testing.T) {
 		)
 		require.NoError(t, err)
 		assert.Equal(t, "xml-success", res.Message)
+	})
+}
+
+func TestGenericIntoHelpers(t *testing.T) {
+	t.Parallel()
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"message":"into-success","status":200}`))
+	}))
+	t.Cleanup(server.Close)
+
+	client := aoni.NewClient(nil, option.WithBaseURL(server.URL))
+
+	t.Run("GetInto", func(t *testing.T) {
+		var res reqTestPayload
+
+		err := GetInto(t.Context(), client, "/", &res)
+		require.NoError(t, err)
+		assert.Equal(t, "into-success", res.Message)
+	})
+
+	t.Run("PostInto", func(t *testing.T) {
+		var res reqTestPayload
+
+		err := PostInto(t.Context(), client, "/", reqTestPayload{Message: "test"}, &res)
+		require.NoError(t, err)
+		assert.Equal(t, "into-success", res.Message)
+	})
+
+	t.Run("PutInto", func(t *testing.T) {
+		var res reqTestPayload
+
+		err := PutInto(t.Context(), client, "/", reqTestPayload{Message: "test"}, &res)
+		require.NoError(t, err)
+		assert.Equal(t, "into-success", res.Message)
+	})
+
+	t.Run("PatchInto", func(t *testing.T) {
+		var res reqTestPayload
+
+		err := PatchInto(t.Context(), client, "/", reqTestPayload{Message: "test"}, &res)
+		require.NoError(t, err)
+		assert.Equal(t, "into-success", res.Message)
+	})
+
+	t.Run("DeleteInto", func(t *testing.T) {
+		var res reqTestPayload
+
+		err := DeleteInto(t.Context(), client, "/", nil, &res)
+		require.NoError(t, err)
+		assert.Equal(t, "into-success", res.Message)
+	})
+
+	t.Run("OptionsInto", func(t *testing.T) {
+		var res reqTestPayload
+
+		err := OptionsInto(t.Context(), client, "/", &res)
+		require.NoError(t, err)
+		assert.Equal(t, "into-success", res.Message)
+	})
+
+	t.Run("DoInto", func(t *testing.T) {
+		var res reqTestPayload
+
+		err := DoInto(t.Context(), client, http.MethodPost, "/", reqTestPayload{Message: "test"}, &res)
+		require.NoError(t, err)
+		assert.Equal(t, "into-success", res.Message)
 	})
 }
 
@@ -375,7 +622,8 @@ func TestClient_UnexpectedHTML_Detection(t *testing.T) {
 
 	t.Run("unexpected_html_error", func(t *testing.T) {
 		t.Parallel()
-		_, client := setupTestReqServer(t, func(w http.ResponseWriter, r *http.Request) {
+
+		_, client := setupTestReqServer(t, func(w http.ResponseWriter, _ *http.Request) {
 			w.Header().Set("Content-Type", "text/html")
 			_, _ = w.Write([]byte("<!doctype html><html><body>error page</body></html>"))
 		})
@@ -386,7 +634,8 @@ func TestClient_UnexpectedHTML_Detection(t *testing.T) {
 
 	t.Run("cloudflare_challenge_detected", func(t *testing.T) {
 		t.Parallel()
-		_, client := setupTestReqServer(t, func(w http.ResponseWriter, r *http.Request) {
+
+		_, client := setupTestReqServer(t, func(w http.ResponseWriter, _ *http.Request) {
 			w.Header().Set("Content-Type", "text/html")
 			_, _ = w.Write(
 				[]byte("<html><head><title>Just a moment...</title></head><body>cf-challenge ray id</body></html>"),
@@ -401,7 +650,7 @@ func TestClient_UnexpectedHTML_Detection(t *testing.T) {
 func TestClient_APIError_With_ErrorModel(t *testing.T) {
 	t.Parallel()
 
-	_, client := setupTestReqServer(t, func(w http.ResponseWriter, r *http.Request) {
+	_, client := setupTestReqServer(t, func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusBadRequest)
 		_, _ = w.Write([]byte(`{"code":"INVALID_AUTH","details":"token expired"}`))
 	})
@@ -427,9 +676,8 @@ func TestClient_Diagnostics_SensitiveHeaderRedaction(t *testing.T) {
 
 	mockLogger := &mockLoggerWriter{out: &debugOutput}
 
-	// Build a client configured to log diagnostics via custom logger
 	client := aoni.NewClient(nil, option.WithLogger(mockLogger))
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Set-Cookie", "secret-cookie-value")
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
@@ -443,7 +691,6 @@ func TestClient_Diagnostics_SensitiveHeaderRedaction(t *testing.T) {
 	require.NoError(t, err)
 	req.Header.Set("Authorization", "Bearer sensitive-token-here")
 
-	// Call GetTo so that handleResponse is executed and diagnostics are triggered
 	_, err = GetTo[testPayload](
 		t.Context(),
 		client,
@@ -459,13 +706,12 @@ func TestClient_Diagnostics_SensitiveHeaderRedaction(t *testing.T) {
 	assert.NotContains(t, outputStr, "sensitive-token-here")
 }
 
-// Helpers for logger mocking inside diagnostic tests.
 type mockLoggerWriter struct {
 	log.DiscardType
 	out io.Writer
 }
 
-func (m *mockLoggerWriter) Debug(msg string, args ...any) {
+func (m *mockLoggerWriter) Debug(_ string, args ...any) {
 	for _, arg := range args {
 		if s, ok := arg.(string); ok {
 			_, _ = m.out.Write([]byte(s))
@@ -502,72 +748,4 @@ func TestRedactHeaders(t *testing.T) {
 	assert.Contains(t, result, "Content-Type: text/plain")
 	assert.NotContains(t, result, "secret-token")
 	assert.NotContains(t, result, "session=abc123")
-}
-
-func TestGenericIntoHelpers(t *testing.T) {
-	t.Parallel()
-
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"message":"into-success","status":200}`))
-	}))
-	defer server.Close()
-
-	client := aoni.NewClient(nil, option.WithBaseURL(server.URL))
-
-	t.Run("GetInto", func(t *testing.T) {
-		var res reqTestPayload
-
-		err := GetInto(t.Context(), client, "/", &res)
-		require.NoError(t, err)
-		assert.Equal(t, "into-success", res.Message)
-	})
-
-	t.Run("PostInto", func(t *testing.T) {
-		var res reqTestPayload
-
-		err := PostInto(t.Context(), client, "/", reqTestPayload{Message: "test"}, &res)
-		require.NoError(t, err)
-		assert.Equal(t, "into-success", res.Message)
-	})
-
-	t.Run("PutInto", func(t *testing.T) {
-		var res reqTestPayload
-
-		err := PutInto(t.Context(), client, "/", reqTestPayload{Message: "test"}, &res)
-		require.NoError(t, err)
-		assert.Equal(t, "into-success", res.Message)
-	})
-
-	t.Run("PatchInto", func(t *testing.T) {
-		var res reqTestPayload
-
-		err := PatchInto(t.Context(), client, "/", reqTestPayload{Message: "test"}, &res)
-		require.NoError(t, err)
-		assert.Equal(t, "into-success", res.Message)
-	})
-
-	t.Run("DeleteInto", func(t *testing.T) {
-		var res reqTestPayload
-
-		err := DeleteInto(t.Context(), client, "/", nil, &res)
-		require.NoError(t, err)
-		assert.Equal(t, "into-success", res.Message)
-	})
-
-	t.Run("OptionsInto", func(t *testing.T) {
-		var res reqTestPayload
-
-		err := OptionsInto(t.Context(), client, "/", &res)
-		require.NoError(t, err)
-		assert.Equal(t, "into-success", res.Message)
-	})
-
-	t.Run("DoInto", func(t *testing.T) {
-		var res reqTestPayload
-
-		err := DoInto(t.Context(), client, http.MethodPost, "/", reqTestPayload{Message: "test"}, &res)
-		require.NoError(t, err)
-		assert.Equal(t, "into-success", res.Message)
-	})
 }

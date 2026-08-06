@@ -5,6 +5,8 @@
 package ip
 
 import (
+	"net"
+	"net/netip"
 	"sync"
 	"testing"
 
@@ -133,6 +135,36 @@ func TestSourceIPRotator_Concurrency(t *testing.T) {
 	wg.Wait()
 }
 
+func TestIsPrivateIP(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		ip        string
+		isPrivate bool
+	}{
+		{ip: "127.0.0.1", isPrivate: true},
+		{ip: "10.0.1.5", isPrivate: true},
+		{ip: "172.16.0.1", isPrivate: true},
+		{ip: "192.168.1.1", isPrivate: true},
+		{ip: "100.64.0.1", isPrivate: true}, // CGNAT (RFC 6598)
+		{ip: "8.8.8.8", isPrivate: false},   // Public IPv4
+		{ip: "1.1.1.1", isPrivate: false},   // Public IPv4
+		{ip: "::1", isPrivate: true},        // IPv6 Loopback
+		{ip: "fc00::1", isPrivate: true},    // IPv6 Unique Local Address
+		{ip: "2001:db8::1", isPrivate: false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.ip, func(t *testing.T) {
+			t.Parallel()
+
+			parsed := net.ParseIP(tt.ip)
+			require.NotNil(t, parsed)
+			assert.Equal(t, tt.isPrivate, IsPrivateIP(parsed))
+		})
+	}
+}
+
 func TestNetutil_IP(t *testing.T) {
 	t.Parallel()
 
@@ -157,6 +189,9 @@ func TestNetutil_IP(t *testing.T) {
 
 		generatedIP := rotator.Next()
 		require.NotNil(t, generatedIP)
-		assert.True(t, generatedIP.To16() != nil)
+
+		prefix, _ := netip.ParsePrefix("2001:db8::/64")
+		parsedAddr, _ := netip.ParseAddr(generatedIP.String())
+		assert.True(t, prefix.Contains(parsedAddr))
 	})
 }

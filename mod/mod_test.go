@@ -8,7 +8,14 @@ import (
 	"context"
 	"io"
 	"net/http"
+	"net/url"
+	"strings"
 	"testing"
+	"time"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+	"google.golang.org/protobuf/types/known/wrapperspb"
 
 	"github.com/lemon4ksan/aoni"
 	"github.com/lemon4ksan/aoni/mod"
@@ -24,14 +31,16 @@ type dummyRequest struct {
 	ctx     context.Context
 	url     string
 	body    []byte
+	bodyRdr io.Reader
 }
 
 func newDummyRequest() *dummyRequest {
-	req, _ := http.NewRequest("GET", "http://example.com", nil)
+	req, _ := http.NewRequest("GET", "http://example.com/v1/item/{id}", nil)
 
 	return &dummyRequest{
 		httpReq: req,
 		ctx:     context.Background(),
+		url:     "http://example.com/v1/item/{id}",
 	}
 }
 
@@ -48,10 +57,18 @@ func (r *dummyRequest) SetPath(p string)               { r.httpReq.URL.Path = p 
 func (r *dummyRequest) RawQuery() string               { return r.httpReq.URL.RawQuery }
 func (r *dummyRequest) SetRawQuery(q string)           { r.httpReq.URL.RawQuery = q }
 func (r *dummyRequest) SetRawQueryBytes(q []byte)      { r.httpReq.URL.RawQuery = string(q) }
-func (r *dummyRequest) AddQueryParam(k, v string)      {}
-func (r *dummyRequest) AddQueryParamBytes(k, v []byte) {}
-func (r *dummyRequest) SetQueryParam(k, v string)      {}
-func (r *dummyRequest) SetQueryParamBytes(k, v []byte) {}
+func (r *dummyRequest) AddQueryParam(k, v string) {
+	q := r.httpReq.URL.Query()
+	q.Add(k, v)
+	r.httpReq.URL.RawQuery = q.Encode()
+}
+func (r *dummyRequest) AddQueryParamBytes(k, v []byte) { r.AddQueryParam(string(k), string(v)) }
+func (r *dummyRequest) SetQueryParam(k, v string) {
+	q := r.httpReq.URL.Query()
+	q.Set(k, v)
+	r.httpReq.URL.RawQuery = q.Encode()
+}
+func (r *dummyRequest) SetQueryParamBytes(k, v []byte) { r.SetQueryParam(string(k), string(v)) }
 func (r *dummyRequest) Header(key string) string       { return r.httpReq.Header.Get(key) }
 func (r *dummyRequest) HeaderBytes(key []byte) []byte {
 	return []byte(r.httpReq.Header.Get(string(key)))
@@ -64,124 +81,325 @@ func (r *dummyRequest) AddHeader(key, val string) { r.httpReq.Header.Add(key, va
 func (r *dummyRequest) AddHeaderBytes(key, val []byte) {
 	r.httpReq.Header.Add(string(key), string(val))
 }
-func (r *dummyRequest) DelHeader(key string)                  { r.httpReq.Header.Del(key) }
-func (r *dummyRequest) DelHeaderBytes(key []byte)             { r.httpReq.Header.Del(string(key)) }
-func (r *dummyRequest) ResetHeaders()                         { r.httpReq.Header = make(http.Header) }
-func (r *dummyRequest) SetBodyBytes(b []byte)                 { r.body = b }
-func (r *dummyRequest) BodyBytes() []byte                     { return r.body }
-func (r *dummyRequest) SetBodyStream(rdr io.Reader, cl int64) {}
-func (r *dummyRequest) BodyStream() io.Reader                 { return nil }
-func (r *dummyRequest) SetBody(body io.Reader) error {
-	if body != nil {
-		r.body, _ = io.ReadAll(body)
-	}
-
-	return nil
-}
-func (r *dummyRequest) EngineRequest() any         { return r.httpReq }
-func (r *dummyRequest) HTTPRequest() *http.Request { return r.httpReq }
+func (r *dummyRequest) DelHeader(key string)                 { r.httpReq.Header.Del(key) }
+func (r *dummyRequest) DelHeaderBytes(key []byte)            { r.httpReq.Header.Del(string(key)) }
+func (r *dummyRequest) ResetHeaders()                        { r.httpReq.Header = make(http.Header) }
+func (r *dummyRequest) SetBodyBytes(b []byte)                { r.body = b }
+func (r *dummyRequest) BodyBytes() []byte                    { return r.body }
+func (r *dummyRequest) SetBodyStream(rdr io.Reader, _ int64) { r.bodyRdr = rdr }
+func (r *dummyRequest) BodyStream() io.Reader                { return r.bodyRdr }
+func (r *dummyRequest) EngineRequest() any                   { return r.httpReq }
+func (r *dummyRequest) HTTPRequest() *http.Request           { return r.httpReq }
 
 var _ aoni.Request = (*dummyRequest)(nil)
 
-func TestModifierBuilders(t *testing.T) {
-	reqAdapter := newDummyRequest()
+func TestMod_URIAndPathModifiers(t *testing.T) {
+	t.Parallel()
 
-	mods := []aoni.RequestModifier{
-		mod.WithHeader("X-Request-ID", "req-12345"),
-		mod.WithBearer("secret-token-xyz"),
-		mod.WithQuery("filter=active"),
-		mod.WithForceHTTP2(),
-	}
+	t.Run("with_var_single_substitution", func(t *testing.T) {
+		t.Parallel()
 
-	for _, m := range mods {
-		if m != nil {
-			m(reqAdapter)
-		}
-	}
+		req := newDummyRequest()
+		mod.WithVar("id", 42)(req)
 
-	if reqAdapter.Header("X-Request-ID") != "req-12345" {
-		t.Errorf("got X-Request-ID %q, want req-12345", reqAdapter.Header("X-Request-ID"))
-	}
-
-	if reqAdapter.Header("Authorization") != "Bearer secret-token-xyz" {
-		t.Errorf("got Auth %q, want Bearer secret-token-xyz", reqAdapter.Header("Authorization"))
-	}
-
-	ctx := reqAdapter.Context()
-
-	reqCfg := aoni.GetRequestConfig(ctx)
-	if reqCfg == nil || len(reqCfg.ALPNOverride) == 0 || reqCfg.ALPNOverride[0] != aoni.AlpnH2 {
-		t.Errorf("expected ALPN h2 override in request config")
-	}
-}
-
-func TestWithJSONBody(t *testing.T) {
-	reqAdapter := newDummyRequest()
-
-	user := dummyUser{Name: "Alice", Email: "alice@example.com"}
-	mod.WithJSONBody(user)(reqAdapter)
-
-	if reqAdapter.Header("Content-Type") != "application/json" {
-		t.Errorf("got Content-Type %q, want application/json", reqAdapter.Header("Content-Type"))
-	}
-
-	if len(reqAdapter.body) == 0 {
-		t.Errorf("expected non-empty JSON body")
-	}
-}
-
-func TestWithForceHTTP3(t *testing.T) {
-	ctx := context.Background()
-	ctxH3 := aoni.WithContextModifier(ctx, mod.WithForceHTTP3())
-
-	reqCfg := aoni.GetRequestConfig(ctxH3)
-	if reqCfg == nil {
-		t.Fatalf("expected non-nil RequestConfig in context")
-	}
-
-	reqAdapter := newDummyRequest()
-	reqAdapter.SetContext(ctxH3)
-
-	for _, m := range reqCfg.Modifiers {
-		if m != nil {
-			m(reqAdapter)
-		}
-	}
-
-	activeCfg := aoni.GetRequestConfig(reqAdapter.Context())
-	if activeCfg == nil || len(activeCfg.ALPNOverride) == 0 || activeCfg.ALPNOverride[0] != aoni.AlpnH3 {
-		t.Errorf("expected ALPN h3 override in request config")
-	}
-}
-
-func TestWithURL(t *testing.T) {
-	reqAdapter := newDummyRequest()
-	mod.WithURL("https://api.custom-target.com/v1/data")(reqAdapter)
-
-	if reqAdapter.URL() != "https://api.custom-target.com/v1/data" {
-		t.Errorf("got URL %q, want https://api.custom-target.com/v1/data", reqAdapter.URL())
-	}
-}
-
-func TestWithDynamicHeader(t *testing.T) {
-	reqAdapter := newDummyRequest()
-	token := "initial-token"
-
-	headerMod := mod.WithDynamicHeader("X-Short-Lived-Token", func() string {
-		return token
+		assert.Equal(t, "/v1/item/42", req.Path())
 	})
 
-	headerMod(reqAdapter)
+	t.Run("with_vars_multiple_pairs", func(t *testing.T) {
+		t.Parallel()
 
-	if reqAdapter.Header("X-Short-Lived-Token") != "initial-token" {
-		t.Errorf("got header %q, want initial-token", reqAdapter.Header("X-Short-Lived-Token"))
-	}
+		req := newDummyRequest()
+		req.SetPath("/v1/users/{userId}/orders/{orderId}")
 
-	token = "refreshed-token"
+		mod.WithVars("userId", "usr_123", "orderId", "ord_999")(req)
 
-	headerMod(reqAdapter)
+		assert.Equal(t, "/v1/users/usr_123/orders/ord_999", req.Path())
+	})
 
-	if reqAdapter.Header("X-Short-Lived-Token") != "refreshed-token" {
-		t.Errorf("got header %q, want refreshed-token", reqAdapter.Header("X-Short-Lived-Token"))
-	}
+	t.Run("with_vars_odd_pair_count_fails", func(t *testing.T) {
+		t.Parallel()
+
+		req := newDummyRequest()
+		mod.WithVars("key_without_value")(req)
+
+		cfg := aoni.GetRequestConfig(req.Context())
+		require.NotNil(t, cfg)
+		assert.ErrorIs(t, cfg.BodyError, mod.ErrInvalidPairCount)
+	})
+
+	t.Run("with_url_override", func(t *testing.T) {
+		t.Parallel()
+
+		req := newDummyRequest()
+		mod.WithURL("https://api.custom-target.com/v1/data")(req)
+
+		assert.Equal(t, "https://api.custom-target.com/v1/data", req.URL())
+	})
+
+	t.Run("without_base_url", func(t *testing.T) {
+		t.Parallel()
+
+		req := newDummyRequest()
+		req.SetPath("/local/path")
+
+		mod.WithoutBaseURL()(req)
+
+		assert.Equal(t, "/local/path", req.URL())
+	})
+
+	t.Run("with_query_struct_and_map", func(t *testing.T) {
+		t.Parallel()
+
+		req := newDummyRequest()
+
+		queryMap := map[string]string{"sort": "desc", "page": "1"}
+		mod.WithQuery(queryMap)(req)
+
+		assert.Contains(t, req.RawQuery(), "sort=desc")
+		assert.Contains(t, req.RawQuery(), "page=1")
+	})
+}
+
+func TestMod_HeadersAndAuthModifiers(t *testing.T) {
+	t.Parallel()
+
+	t.Run("header_mutations", func(t *testing.T) {
+		t.Parallel()
+
+		req := newDummyRequest()
+
+		mod.WithHeader("X-Request-ID", "req-12345")(req)
+		mod.WithHeaderBytes([]byte("X-Engine"), []byte("aoni-fast"))(req)
+		mod.WithHeaders(map[string]string{"X-App": "demo", "X-Env": "prod"})(req)
+
+		assert.Equal(t, "req-12345", req.Header("X-Request-ID"))
+		assert.Equal(t, "aoni-fast", string(req.HeaderBytes([]byte("X-Engine"))))
+		assert.Equal(t, "demo", req.Header("X-App"))
+		assert.Equal(t, "prod", req.Header("X-Env"))
+
+		mod.ResetHeaders()(req)
+		assert.Empty(t, req.Header("X-App"))
+	})
+
+	t.Run("bearer_and_basic_auth", func(t *testing.T) {
+		t.Parallel()
+
+		req1 := newDummyRequest()
+		mod.WithBearer("secret-token-xyz")(req1)
+		assert.Equal(t, "Bearer secret-token-xyz", req1.Header("Authorization"))
+
+		req2 := newDummyRequest()
+		mod.WithBasicAuth("admin", "secret123")(req2)
+		assert.True(t, len(req2.Header("Authorization")) > 0)
+		assert.True(t, req2.Header("Authorization") != "Bearer secret-token-xyz")
+	})
+
+	t.Run("dynamic_header", func(t *testing.T) {
+		t.Parallel()
+
+		req := newDummyRequest()
+		token := "initial-token"
+
+		headerMod := mod.WithDynamicHeader("X-Short-Lived-Token", func() string {
+			return token
+		})
+
+		headerMod(req)
+		assert.Equal(t, "initial-token", req.Header("X-Short-Lived-Token"))
+
+		token = "refreshed-token"
+
+		headerMod(req)
+		assert.Equal(t, "refreshed-token", req.Header("X-Short-Lived-Token"))
+	})
+
+	t.Run("cookies_modifiers", func(t *testing.T) {
+		t.Parallel()
+
+		req := newDummyRequest()
+
+		mod.WithCookie(&http.Cookie{Name: "session", Value: "sess123"})(req)
+		mod.WithCookies(map[string]string{"theme": "dark", "lang": "en"})(req)
+
+		cookieValues := req.HTTPRequest().Header.Values("Cookie")
+		combined := strings.Join(cookieValues, "; ")
+
+		assert.Contains(t, combined, "session=sess123")
+		assert.Contains(t, combined, "theme=dark")
+		assert.Contains(t, combined, "lang=en")
+	})
+
+	t.Run("conditional_headers", func(t *testing.T) {
+		t.Parallel()
+
+		req := newDummyRequest()
+
+		mod.WithIfMatch(`"etag123"`)(req)
+		mod.WithIfNoneMatch(`"etag456"`)(req)
+
+		now := time.Now().UTC().Truncate(time.Second)
+		mod.WithIfModifiedSince(now)(req)
+
+		assert.Equal(t, `"etag123"`, req.Header("If-Match"))
+		assert.Equal(t, `"etag456"`, req.Header("If-None-Match"))
+		assert.Equal(t, now.Format(http.TimeFormat), req.Header("If-Modified-Since"))
+	})
+}
+
+func TestMod_BodyAndPayloadModifiers(t *testing.T) {
+	t.Parallel()
+
+	t.Run("json_body", func(t *testing.T) {
+		t.Parallel()
+
+		req := newDummyRequest()
+		user := dummyUser{Name: "Alice", Email: "alice@example.com"}
+
+		mod.WithJSONBody(user)(req)
+
+		assert.Equal(t, "application/json", req.Header("Content-Type"))
+		assert.JSONEq(t, `{"name":"Alice","email":"alice@example.com"}`, string(req.BodyBytes()))
+	})
+
+	t.Run("form_values_and_form_body", func(t *testing.T) {
+		t.Parallel()
+
+		req := newDummyRequest()
+		vals := url.Values{}
+		vals.Set("foo", "bar")
+		vals.Add("foo", "baz")
+
+		mod.WithFormValues(vals)(req)
+
+		assert.Equal(t, "application/x-www-form-urlencoded", req.Header("Content-Type"))
+		assert.Equal(t, "foo=bar&foo=baz", string(req.BodyBytes()))
+	})
+
+	t.Run("proto_and_grpc_web_body", func(t *testing.T) {
+		t.Parallel()
+
+		msg := wrapperspb.String("protobuf_test_payload")
+
+		// Proto body
+		req1 := newDummyRequest()
+		mod.WithProtoBody(msg)(req1)
+
+		assert.Equal(t, "application/x-protobuf", req1.Header("Content-Type"))
+		assert.NotEmpty(t, req1.BodyBytes())
+
+		// gRPC-Web body
+		req2 := newDummyRequest()
+		mod.WithGRPCWebBody(msg)(req2)
+
+		assert.Equal(t, "application/grpc-web+proto", req2.Header("Content-Type"))
+		assert.Equal(t, "1", req2.Header("X-Grpc-Web"))
+		assert.True(t, len(req2.BodyBytes()) >= 5)
+		assert.Equal(t, byte(0x00), req2.BodyBytes()[0]) // 5-byte header prefix
+	})
+
+	t.Run("multipart_fields", func(t *testing.T) {
+		t.Parallel()
+
+		req := newDummyRequest()
+		fields := []mod.MultipartField{
+			{Name: "username", Value: "administrator"},
+			{Name: "role", Value: "admin"},
+		}
+
+		mod.WithMultipartFields(fields)(req)
+
+		contentType := req.Header("Content-Type")
+		assert.Contains(t, contentType, "multipart/form-data")
+		assert.NotEmpty(t, req.BodyBytes())
+	})
+}
+
+func TestMod_ProtocolAndNetworkModifiers(t *testing.T) {
+	t.Parallel()
+
+	t.Run("force_http_versions_and_alpn", func(t *testing.T) {
+		t.Parallel()
+
+		req1 := newDummyRequest()
+		mod.WithForceHTTP2()(req1)
+
+		cfg1 := aoni.GetRequestConfig(req1.Context())
+		require.NotNil(t, cfg1)
+		require.NotEmpty(t, cfg1.ALPNOverride)
+		assert.Equal(t, aoni.AlpnH2, cfg1.ALPNOverride[0])
+
+		req2 := newDummyRequest()
+		mod.WithForceHTTP3()(req2)
+
+		cfg2 := aoni.GetRequestConfig(req2.Context())
+		require.NotNil(t, cfg2)
+		require.NotEmpty(t, cfg2.ALPNOverride)
+		assert.Equal(t, aoni.AlpnH3, cfg2.ALPNOverride[0])
+	})
+
+	t.Run("ordered_headers", func(t *testing.T) {
+		t.Parallel()
+
+		req := newDummyRequest()
+		order := []string{":method", ":authority", ":scheme", ":path", "user-agent"}
+
+		mod.WithOrderedHeaders(order)(req)
+
+		cfg := aoni.GetRequestConfig(req.Context())
+		require.NotNil(t, cfg)
+		assert.Equal(t, order, cfg.OrderedHeaders)
+	})
+
+	t.Run("network_and_security_flags", func(t *testing.T) {
+		t.Parallel()
+
+		req := newDummyRequest()
+
+		mod.WithProxyOverride("http://proxy.internal:8080")(req)
+		mod.WithSSRFGuard()(req)
+		mod.WithInsecureSkipVerify()(req)
+		mod.WithProxyDNS()(req)
+
+		cfg := aoni.GetRequestConfig(req.Context())
+		require.NotNil(t, cfg)
+
+		require.NotNil(t, cfg.ProxyAddr)
+		assert.Equal(t, "proxy.internal:8080", cfg.ProxyAddr.Host)
+		assert.True(t, cfg.SSRFGuard)
+		assert.True(t, cfg.InsecureSkipVerify)
+		assert.True(t, cfg.ProxyDNS)
+	})
+}
+
+func TestMod_TelemetryAndTracingModifiers(t *testing.T) {
+	t.Parallel()
+
+	t.Run("correlation_id_and_label", func(t *testing.T) {
+		t.Parallel()
+
+		req := newDummyRequest()
+
+		mod.WithCorrelationID("corr_abc123")(req)
+		mod.WithLabel("user-login-route")(req)
+
+		assert.Equal(t, "corr_abc123", req.Header("X-Correlation-ID"))
+
+		cfg := aoni.GetRequestConfig(req.Context())
+		require.NotNil(t, cfg)
+		assert.Equal(t, "user-login-route", cfg.Label)
+	})
+
+	t.Run("debug_flag_and_trace_context", func(t *testing.T) {
+		t.Parallel()
+
+		req := newDummyRequest()
+
+		mod.WithDebug()(req)
+		mod.WithTraceContext()(req)
+
+		cfg := aoni.GetRequestConfig(req.Context())
+		require.NotNil(t, cfg)
+		assert.True(t, cfg.Debug)
+		assert.NotNil(t, cfg.TraceInfo)
+	})
 }

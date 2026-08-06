@@ -2,7 +2,7 @@
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
-package cookie
+package cookie_test
 
 import (
 	"context"
@@ -10,24 +10,27 @@ import (
 	"net/url"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/lemon4ksan/aoni/cookie"
 )
 
 func TestProxyIsolatedCookieJar_Basic(t *testing.T) {
 	t.Parallel()
 
-	pJar := NewProxyIsolatedJar()
+	pJar := cookie.NewProxyIsolatedJar()
 	require.NotNil(t, pJar)
 
 	u, err := url.Parse("https://example.com")
 	require.NoError(t, err)
 
-	cookie := &http.Cookie{Name: "session", Value: "abc"}
+	c := &http.Cookie{Name: "session", Value: "abc"}
 
 	// 1. Test standard http.CookieJar interface fallback (empty proxy URL)
-	pJar.SetCookies(u, []*http.Cookie{cookie})
+	pJar.SetCookies(u, []*http.Cookie{c})
 	cookies := pJar.Cookies(u)
 	require.Len(t, cookies, 1)
 	assert.Equal(t, "session", cookies[0].Name)
@@ -37,7 +40,7 @@ func TestProxyIsolatedCookieJar_Basic(t *testing.T) {
 func TestProxyIsolatedCookieJar_ContextRetrieval(t *testing.T) {
 	t.Parallel()
 
-	pJar := NewProxyIsolatedJar()
+	pJar := cookie.NewProxyIsolatedJar()
 	u, err := url.Parse("https://google.com")
 	require.NoError(t, err)
 
@@ -46,13 +49,15 @@ func TestProxyIsolatedCookieJar_ContextRetrieval(t *testing.T) {
 	assert.NotNil(t, jarNoProxy)
 
 	// Context with proxy
-	ctxWithProxy := context.WithValue(t.Context(), proxyCtxKey{}, "http://proxy1.test:8080")
+	ctxWithProxy := cookie.WithProxyAddress(t.Context(), "http://proxy1.test:8080")
+	assert.Equal(t, "http://proxy1.test:8080", cookie.GetProxyAddress(ctxWithProxy))
+
 	jarWithProxy := pJar.GetJar(ctxWithProxy)
 	assert.NotNil(t, jarWithProxy)
 
 	// Verify they are different isolated jars
-	cookie := &http.Cookie{Name: "auth", Value: "token-proxy"}
-	jarWithProxy.SetCookies(u, []*http.Cookie{cookie})
+	c := &http.Cookie{Name: "auth", Value: "token-proxy"}
+	jarWithProxy.SetCookies(u, []*http.Cookie{c})
 
 	// Jar with proxy has the cookie
 	assert.Len(t, jarWithProxy.Cookies(u), 1)
@@ -63,7 +68,7 @@ func TestProxyIsolatedCookieJar_ContextRetrieval(t *testing.T) {
 func TestProxyIsolatedCookieJar_DX_Methods(t *testing.T) {
 	t.Parallel()
 
-	pJar := NewProxyIsolatedJar()
+	pJar := cookie.NewProxyIsolatedJar()
 	u, err := url.Parse("https://yahoo.com")
 	require.NoError(t, err)
 
@@ -90,16 +95,43 @@ func TestProxyIsolatedCookieJar_DX_Methods(t *testing.T) {
 	assert.Equal(t, cProxy1, jar1.Cookies(u))
 }
 
+func TestProxyIsolatedCookieJar_JanitorAndPurgeExpired(t *testing.T) {
+	t.Parallel()
+
+	pJar := cookie.NewProxyIsolatedJar()
+	u, err := url.Parse("https://example.com")
+	require.NoError(t, err)
+
+	ctx, cancel := context.WithCancel(t.Context())
+	t.Cleanup(cancel)
+
+	pJar.StartJanitor(ctx, 10*time.Millisecond)
+
+	// Expired cookie
+	expired := &http.Cookie{
+		Name:    "expired_session",
+		Value:   "val",
+		Expires: time.Now().Add(-1 * time.Hour),
+	}
+
+	pJar.SetCookiesForProxy("http://proxy.test:8080", u, []*http.Cookie{expired})
+
+	// PurgeExpired should clean expired cookies
+	pJar.PurgeExpired()
+	cookies := pJar.CookiesForProxy("http://proxy.test:8080", u)
+	assert.Empty(t, cookies)
+}
+
 func TestProxyIsolatedCookieJar_ConcurrentUsage(t *testing.T) {
 	t.Parallel()
 
-	pJar := NewProxyIsolatedJar()
+	pJar := cookie.NewProxyIsolatedJar()
 
 	var wg sync.WaitGroup
 
 	proxies := []string{
 		"http://p1.com", "http://p2.com", "http://p3.com", "http://p4.com",
-		"http://p1.com", "http://p2.com", "http://p3.com", "http://p4.com", // triggers RLock hits
+		"http://p1.com", "http://p2.com", "http://p3.com", "http://p4.com",
 	}
 
 	for _, proxy := range proxies {

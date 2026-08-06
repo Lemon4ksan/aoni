@@ -17,21 +17,22 @@ import (
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+
 	"github.com/lemon4ksan/aoni/netutil/cert"
 )
 
-func generateTestKeyPair(t *testing.T, dir string) (certPath, keyPath string) {
+func generateTestKeyPair(t *testing.T, dir, org string) (certPath, keyPath string) {
 	t.Helper()
 
 	priv, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
-	if err != nil {
-		t.Fatalf("failed to generate key: %v", err)
-	}
+	require.NoError(t, err)
 
 	template := x509.Certificate{
-		SerialNumber: big.NewInt(1),
+		SerialNumber: big.NewInt(time.Now().UnixNano()),
 		Subject: pkix.Name{
-			Organization: []string{"Aoni Test"},
+			Organization: []string{org},
 		},
 		NotBefore:             time.Now().Add(-1 * time.Hour),
 		NotAfter:              time.Now().Add(24 * time.Hour),
@@ -41,30 +42,22 @@ func generateTestKeyPair(t *testing.T, dir string) (certPath, keyPath string) {
 	}
 
 	certDER, err := x509.CreateCertificate(rand.Reader, &template, &template, &priv.PublicKey, priv)
-	if err != nil {
-		t.Fatalf("failed to create certificate: %v", err)
-	}
+	require.NoError(t, err)
 
 	certPath = filepath.Join(dir, "cert.pem")
 	keyPath = filepath.Join(dir, "key.pem")
 
 	certOut, err := os.Create(certPath)
-	if err != nil {
-		t.Fatalf("failed to open cert.pem: %v", err)
-	}
+	require.NoError(t, err)
 
 	_ = pem.Encode(certOut, &pem.Block{Type: "CERTIFICATE", Bytes: certDER})
 	_ = certOut.Close()
 
 	keyOut, err := os.Create(keyPath)
-	if err != nil {
-		t.Fatalf("failed to open key.pem: %v", err)
-	}
+	require.NoError(t, err)
 
 	privBytes, err := x509.MarshalECPrivateKey(priv)
-	if err != nil {
-		t.Fatalf("failed to marshal key: %v", err)
-	}
+	require.NoError(t, err)
 
 	_ = pem.Encode(keyOut, &pem.Block{Type: "EC PRIVATE KEY", Bytes: privBytes})
 	_ = keyOut.Close()
@@ -73,22 +66,71 @@ func generateTestKeyPair(t *testing.T, dir string) (certPath, keyPath string) {
 }
 
 func TestCertWatcher(t *testing.T) {
+	t.Parallel()
+
 	dir := t.TempDir()
-	certPath, keyPath := generateTestKeyPair(t, dir)
+	certPath, keyPath := generateTestKeyPair(t, dir, "Aoni Test Org")
 
 	watcher, err := cert.NewWatcher(certPath, keyPath, 50*time.Millisecond)
-	if err != nil {
-		t.Fatalf("NewWatcher failed: %v", err)
-	}
-	defer watcher.Close()
+	require.NoError(t, err)
+	t.Cleanup(watcher.Close)
 
 	tlsCert, err := watcher.GetCertificate(nil)
-	if err != nil || tlsCert == nil {
-		t.Fatalf("GetCertificate failed: %v", err)
-	}
+	require.NoError(t, err)
+	require.NotNil(t, tlsCert)
 
 	clientCert, err := watcher.GetClientCertificate(nil)
-	if err != nil || clientCert == nil {
-		t.Fatalf("GetClientCertificate failed: %v", err)
-	}
+	require.NoError(t, err)
+	require.NotNil(t, clientCert)
+
+	// Verify certificate organization
+	parsed, err := x509.ParseCertificate(tlsCert.Certificate[0])
+	require.NoError(t, err)
+	assert.Equal(t, "Aoni Test Org", parsed.Subject.Organization[0])
+}
+
+func TestCertWatcher_HotReload(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	certPath, keyPath := generateTestKeyPair(t, dir, "Initial Org")
+
+	watcher, err := cert.NewWatcher(certPath, keyPath, 20*time.Millisecond)
+	require.NoError(t, err)
+	t.Cleanup(watcher.Close)
+
+	initialCert, err := watcher.GetCertificate(nil)
+	require.NoError(t, err)
+
+	parsedInitial, err := x509.ParseCertificate(initialCert.Certificate[0])
+	require.NoError(t, err)
+	assert.Equal(t, "Initial Org", parsedInitial.Subject.Organization[0])
+
+	// Ensure modification time changes on disk
+	time.Sleep(100 * time.Millisecond)
+
+	// Regenerate certificate with new Organization
+	generateTestKeyPair(t, dir, "Updated Org")
+
+	// Wait for watcher ticker to trigger reload
+	assert.Eventually(t, func() bool {
+		currentCert, err := watcher.GetCertificate(nil)
+		if err != nil || currentCert == nil {
+			return false
+		}
+
+		parsedCurrent, err := x509.ParseCertificate(currentCert.Certificate[0])
+		if err != nil {
+			return false
+		}
+
+		return parsedCurrent.Subject.Organization[0] == "Updated Org"
+	}, 1*time.Second, 10*time.Millisecond)
+}
+
+func TestCertWatcher_InvalidFiles(t *testing.T) {
+	t.Parallel()
+
+	_, err := cert.NewWatcher("/nonexistent/cert.pem", "/nonexistent/key.pem", 50*time.Millisecond)
+	require.Error(t, err)
 }
