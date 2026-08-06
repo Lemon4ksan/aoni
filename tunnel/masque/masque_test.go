@@ -7,9 +7,11 @@ package masque
 import (
 	"bufio"
 	"context"
+	"encoding/binary"
 	"errors"
 	"net"
 	"net/http"
+	"net/netip"
 	"testing"
 	"time"
 
@@ -372,4 +374,104 @@ func TestErrorConstants(t *testing.T) {
 	assert.Equal(t, "aoni masque: invalid uri template", ErrInvalidURITemplate.Error())
 	assert.Equal(t, "aoni masque: unsupported http version for connect-ip", ErrUnsupportedHTTPVersion.Error())
 	assert.Equal(t, "aoni masque: address request capsule cannot be empty", ErrEmptyAddressRequest.Error())
+}
+
+func TestTCPMSSClamping(t *testing.T) {
+	t.Parallel()
+
+	t.Run("ipv4 tcp syn mss clamping", func(t *testing.T) {
+		t.Parallel()
+
+		// Construct sample IPv4 TCP SYN packet with original MSS = 1460 (kind 2, len 4)
+		// IPv4 Header (20B) + TCP Header (24B with MSS option)
+		packet := make([]byte, 44)
+		packet[0] = 0x45 // IPv4, IHL 5 (20B)
+		packet[9] = 6    // TCP Protocol
+
+		tcpHdr := packet[20:]
+		tcpHdr[12] = 0x60 // TCP Data Offset = 6 (24B header)
+		tcpHdr[13] = 0x02 // TCP SYN flag set
+
+		// TCP Options: MSS Option (Kind: 2, Len: 4, Value: 1460)
+		tcpHdr[20] = 2 // Option Kind: MSS
+		tcpHdr[21] = 4 // Option Length: 4
+		binary.BigEndian.PutUint16(tcpHdr[22:24], 1460)
+
+		// Clamp MSS to MaxMTU = 1300 (MaxMSS = 1300 - 40 = 1260)
+		ClampTCPMSSInPlace(packet, 1300)
+
+		// Verify MSS option was clamped from 1460 down to 1260
+		clampedMSS := binary.BigEndian.Uint16(tcpHdr[22:24])
+		assert.Equal(t, uint16(1260), clampedMSS)
+
+		// Verify TCP checksum was recalculated
+		assert.NotZero(t, binary.BigEndian.Uint16(tcpHdr[16:18]))
+	})
+
+	t.Run("ipv6 tcp syn mss clamping", func(t *testing.T) {
+		t.Parallel()
+
+		// IPv6 Header (40B) + TCP Header (24B with MSS option)
+		packet := make([]byte, 64)
+		packet[0] = 0x60 // IPv6
+		packet[6] = 6    // Next Header = TCP
+
+		tcpHdr := packet[40:]
+		tcpHdr[12] = 0x60 // TCP Data Offset = 6 (24B header)
+		tcpHdr[13] = 0x02 // TCP SYN flag set
+
+		tcpHdr[20] = 2
+		tcpHdr[21] = 4
+		binary.BigEndian.PutUint16(tcpHdr[22:24], 1440)
+
+		// Clamp MSS for IPv6 to MaxMTU = 1300 (MaxMSS = 1300 - 60 = 1240)
+		ClampTCPMSSInPlace(packet, 1300)
+
+		clampedMSS := binary.BigEndian.Uint16(tcpHdr[22:24])
+		assert.Equal(t, uint16(1240), clampedMSS)
+	})
+
+	t.Run("non_syn_packet_unmodified", func(t *testing.T) {
+		t.Parallel()
+
+		packet := make([]byte, 44)
+		packet[0] = 0x45
+		packet[9] = 6
+
+		tcpHdr := packet[20:]
+		tcpHdr[12] = 0x60
+		tcpHdr[13] = 0x10 // TCP ACK flag (NOT SYN)
+
+		tcpHdr[20] = 2
+		tcpHdr[21] = 4
+		binary.BigEndian.PutUint16(tcpHdr[22:24], 1460)
+
+		ClampTCPMSSInPlace(packet, 1300)
+
+		// MSS should remain unchanged (1460) because SYN flag was not set
+		assert.Equal(t, uint16(1460), binary.BigEndian.Uint16(tcpHdr[22:24]))
+	})
+}
+
+func TestICMPChecksumCalculations(t *testing.T) {
+	t.Parallel()
+
+	t.Run("calculate_internet_checksum", func(t *testing.T) {
+		t.Parallel()
+
+		data := []byte{0x45, 0x00, 0x00, 0x3c, 0x1c, 0x46, 0x40, 0x00, 0x40, 0x06, 0x00, 0x00, 0xac, 0x10, 0x0a, 0x63, 0xac, 0x10, 0x0a, 0x0c}
+		csum := calculateInternetChecksum(data)
+		assert.NotZero(t, csum)
+	})
+
+	t.Run("calculate_icmpv6_checksum", func(t *testing.T) {
+		t.Parallel()
+
+		src := netip.MustParseAddr("2001:db8::1")
+		dst := netip.MustParseAddr("2001:db8::2")
+		icmpMsg := []byte{0x02, 0x00, 0x00, 0x00, 0x00, 0x00, 0x05, 0x00}
+
+		csum := calculateICMPv6Checksum(src, dst, icmpMsg)
+		assert.NotZero(t, csum)
+	})
 }
