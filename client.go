@@ -7,68 +7,38 @@ package aoni
 import (
 	"context"
 	"crypto/tls"
-	stdio "io"
 	"maps"
 	"net"
 	"net/http"
 	"net/url"
 	"strings"
-	"sync"
 	"time"
 
-	"github.com/lemon4ksan/miyako/generic"
 	"github.com/lemon4ksan/miyako/log"
 	"github.com/quic-go/quic-go"
 	"github.com/quic-go/quic-go/http3"
 	utls "github.com/refraction-networking/utls"
-	"golang.org/x/net/http2"
-	"golang.org/x/sys/cpu"
 
 	"github.com/lemon4ksan/aoni/cookie"
 	"github.com/lemon4ksan/aoni/fingerprint"
 	"github.com/lemon4ksan/aoni/fingerprint/h2"
-	"github.com/lemon4ksan/aoni/internal/io"
+	"github.com/lemon4ksan/aoni/internal/pipeline"
 )
-
-var (
-	requestConfigPool = sync.Pool{
-		New: func() any {
-			return &RequestConfig{}
-		},
-	}
-	defaultAcceptEncoding = []string{"zstd, br, gzip"}
-)
-
-// HTTPDoer executes an HTTP request transaction.
-type HTTPDoer interface {
-	Do(req *http.Request) (*http.Response, error)
-}
-
-// RequestModifier represents a functional hook that mutates an outgoing [Request] contract prior to dispatch.
-type RequestModifier = generic.Option[Request]
-
-// ClientOption represents a functional option that configures [Client] initialization or cloning.
-type ClientOption generic.Option[*Config]
 
 // Client is an immutable, thread-safe HTTP and WebSocket client built on top of [HTTPDoer].
 type Client struct {
-	engine       HTTPDoer
-	engineConfig EngineConfig
-	defaults     ClientDefaults
-	network      NetworkConfig
-	fingerprint  FingerprintConfig
-
-	_                        cpu.CacheLinePad
-	userAgentRotationCounter uint32
-	_                        cpu.CacheLinePad
-	proxyFailoverCounter     uint32
-	_                        cpu.CacheLinePad
+	engine         HTTPDoer
+	pipelineEngine *pipeline.Pipeline
+	engineConfig   EngineConfig
+	defaults       ClientDefaults
+	network        NetworkConfig
+	fingerprint    FingerprintConfig
 }
 
 // NewClient instantiates a new thread-safe [Client] wrapping the specified doer.
 func NewClient(doer any, opts ...ClientOption) *Client {
 	client := &Client{
-		engine:   defaultEngine(doer),
+		engine:   DefaultEngine(doer),
 		defaults: defaultClientDefaults(),
 		network: NetworkConfig{
 			HappyEyeballsDelay: 300 * time.Millisecond,
@@ -88,9 +58,19 @@ func NewClient(doer any, opts ...ClientOption) *Client {
 	return client
 }
 
-// Config returns a snapshot copy of the active client configuration.
-func (c *Client) Config() Config {
-	return c.snapshotConfig()
+// Clone creates a deep copy of the client, isolating transports, cookie jars, and configuration structs.
+func (c *Client) Clone() *Client {
+	cloned := &Client{
+		engine: c.engine,
+	}
+	if httpClient, ok := cloned.engine.(*http.Client); ok {
+		cloned.engine = CloneHTTPClient(httpClient)
+	}
+
+	cfg := c.snapshotConfig()
+	cloned.applyConfig(cfg)
+
+	return cloned
 }
 
 // With produces a deep-copied [Client] with the provided functional options applied.
@@ -114,159 +94,6 @@ func (c *Client) With(opts ...ClientOption) *Client {
 	return cloned
 }
 
-// RegisterDecoder returns a cloned [Client] with a registered custom response decoder for the specified MIME content type.
-func (c *Client) RegisterDecoder(contentType string, decoder ResponseDecoder) *Client {
-	return c.WithDecoder(contentType, decoder)
-}
-
-// WithDecoder returns a cloned [Client] with a registered custom response decoder for the specified MIME content type.
-func (c *Client) WithDecoder(contentType string, decoder ResponseDecoder) *Client {
-	return c.With(func(cfg *Config) {
-		mediaType, _, _ := strings.Cut(contentType, ";")
-
-		norm := strings.ToLower(strings.TrimSpace(mediaType))
-		if norm == "" {
-			return
-		}
-
-		if cfg.Defaults.Decoders == nil {
-			cfg.Defaults.Decoders = make(map[string]ResponseDecoder)
-		}
-
-		if decoder == nil {
-			delete(cfg.Defaults.Decoders, norm)
-		} else {
-			cfg.Defaults.Decoders[norm] = decoder
-		}
-	})
-}
-
-// WithTLSClientHelloID returns a cloned [Client] configured with the specified uTLS ClientHello ID.
-func (c *Client) WithTLSClientHelloID(id utls.ClientHelloID) *Client {
-	cloned := c.Clone()
-	cloned.fingerprint.TLSClientHelloID = &id
-
-	transport := cloned.Transport()
-	if transport == nil {
-		return cloned
-	}
-
-	transport.DialTLSContext = cloned.newDialTLSContextFunc(transport.Proxy)
-
-	return cloned
-}
-
-// WithPersona configures TLS ClientHello ID, HTTP/2 SETTINGS frames, header order, p0f signature, and User-Agent matching Persona.
-func (c *Client) WithPersona(p fingerprint.Persona) *Client {
-	newClient := c.WithTLSClientHelloID(p.TLSID)
-	newClient.fingerprint.H2Settings = &p.H2Settings
-	newClient.fingerprint.HeaderOrder = p.HeaderOrder
-	newClient.fingerprint.P0fSignature = p.P0fSignature
-
-	if transport := newClient.Transport(); transport != nil {
-		framed := h2.NewFramedTransport(transport, p.H2Settings, p.HeaderOrder...)
-		if httpClient, ok := newClient.engine.(*http.Client); ok {
-			httpClient.Transport = framed
-		}
-	}
-
-	newClient = newClient.With(func(cfg *Config) {
-		cfg.Defaults.Headers.Set("User-Agent", p.UserAgent)
-	})
-
-	if len(p.HeaderOrder) == 0 {
-		return newClient
-	}
-
-	return newClient.With(func(cfg *Config) {
-		cfg.Defaults.DefaultMods = append(cfg.Defaults.DefaultMods, func(req Request) {
-			GetOrInitRequestConfig(req).OrderedHeaders = p.HeaderOrder
-		})
-	})
-}
-
-// WithHTTP3 creates a clone of the client configured for HTTP/3 over QUIC using default migration settings.
-func (c *Client) WithHTTP3() *Client {
-	return c.WithHTTP3Config(nil)
-}
-
-// WithHTTP3Config creates a clone of the client configured for HTTP/3 over QUIC using custom QUIC migration parameters.
-func (c *Client) WithHTTP3Config(config *QUICMigrationConfig) *Client {
-	cloned := c.Clone()
-
-	if config == nil {
-		cfg := DefaultQUICMigrationConfig()
-		config = &cfg
-	}
-
-	quicCfg := c.buildQUICConfig(config)
-	tlsCfg := c.buildQUICTLSConfig()
-
-	cloned.engine = &http.Client{
-		Transport: &http3.Transport{
-			TLSClientConfig: tlsCfg,
-			QUICConfig:      quicCfg,
-		},
-	}
-
-	return cloned
-}
-
-func (c *Client) buildQUICConfig(config *QUICMigrationConfig) *quic.Config {
-	quicCfg := &quic.Config{
-		EnableDatagrams:         true,
-		DisablePathMTUDiscovery: config.DisablePathMTUDiscovery,
-		InitialPacketSize:       config.InitialPacketSize,
-	}
-
-	if config.KeepAlivePeriod > 0 {
-		quicCfg.KeepAlivePeriod = config.KeepAlivePeriod
-	}
-
-	if config.MaxIdleTimeout > 0 {
-		quicCfg.MaxIdleTimeout = config.MaxIdleTimeout
-	}
-
-	if h3s := c.fingerprint.H3Settings; h3s != nil {
-		quicCfg.InitialStreamReceiveWindow = h3s.InitialStreamReceiveWindow
-		quicCfg.MaxStreamReceiveWindow = h3s.MaxStreamReceiveWindow
-		quicCfg.InitialConnectionReceiveWindow = h3s.InitialConnectionReceiveWindow
-		quicCfg.MaxConnectionReceiveWindow = h3s.MaxConnectionReceiveWindow
-		quicCfg.MaxIncomingStreams = h3s.MaxIncomingStreams
-		quicCfg.MaxIncomingUniStreams = h3s.MaxIncomingUniStreams
-		quicCfg.EnableDatagrams = h3s.EnableDatagrams
-	}
-
-	return quicCfg
-}
-
-func (c *Client) buildQUICTLSConfig() *tls.Config {
-	tlsCfg := &tls.Config{
-		NextProtos: []string{AlpnH3},
-	}
-
-	if spec := c.fingerprint.TLSQUICClientHelloSpec; spec != nil && len(spec.CipherSuites) > 0 {
-		tlsCfg.CipherSuites = spec.CipherSuites
-	}
-
-	return tlsCfg
-}
-
-// Clone creates a deep copy of the client, isolating transports, cookie jars, and configuration structs.
-func (c *Client) Clone() *Client {
-	cloned := &Client{
-		engine: c.engine,
-	}
-	if httpClient, ok := cloned.engine.(*http.Client); ok {
-		cloned.engine = CloneHTTPClient(httpClient)
-	}
-
-	cfg := c.snapshotConfig()
-	cloned.applyConfig(cfg)
-
-	return cloned
-}
-
 // Request executes an HTTP transaction and yields the response stream.
 func (c *Client) Request(
 	ctx context.Context,
@@ -280,17 +107,10 @@ func (c *Client) Request(
 
 	cfg := GetRequestConfig(ctx)
 	if cfg != nil {
-		cfg.ApplyDefaults(c)
+		ApplyRequestConfigDefaults(cfg, c)
 	} else if len(mods) > 0 || len(c.defaults.DefaultMods) > 0 || c.needsRequestConfig() {
-		cfg = requestConfigPool.Get().(*RequestConfig)
-		ctx = context.WithValue(ctx, requestConfigKey{}, cfg)
-		cfg.ApplyDefaults(c)
-	}
-
-	if cfg != nil && cfg.TargetHost == "" {
-		if parsedURL, parseErr := url.Parse(targetURLStr); parseErr == nil && parsedURL.Hostname() != "" {
-			cfg.TargetHost = parsedURL.Hostname()
-		}
+		ctx, cfg = AllocRequestConfig(ctx)
+		ApplyRequestConfigDefaults(cfg, c)
 	}
 
 	req, err := http.NewRequestWithContext(ctx, method, targetURLStr, http.NoBody) //nolint:gosec
@@ -300,10 +120,6 @@ func (c *Client) Request(
 
 	if len(c.defaults.Headers) > 0 {
 		maps.Copy(req.Header, c.defaults.Headers)
-	}
-
-	if len(req.Header["Accept-Encoding"]) == 0 {
-		req.Header["Accept-Encoding"] = defaultAcceptEncoding
 	}
 
 	stdReq := NewStdRequest(req)
@@ -320,17 +136,10 @@ func (c *Client) Request(
 		}
 	}
 
-	if cfg != nil {
-		if cfg.BodyError != nil {
-			return nil, &Error{Op: "body encoding failed", Err: cfg.BodyError}
-		}
-
-		if cfg.QueryError != nil {
-			return nil, &Error{Op: "query encoding failed", Err: cfg.QueryError}
-		}
-	}
-
 	resp, err := c.execute(req, c.resolvePipeline(req))
+
+	ReleaseStdRequest(stdReq) // Возврат в пул
+
 	if err != nil {
 		return nil, &Error{Op: "request failed", Err: err}
 	}
@@ -374,17 +183,108 @@ func (c *Client) Do(req Request) (Response, error) {
 	return NewStdResponse(resp), nil
 }
 
-func (c *Client) needsRequestConfig() bool {
-	return c.network.SocketController != nil ||
-		c.fingerprint.TLSClientHelloSpecProvider != nil ||
-		len(c.fingerprint.CertificatePins) > 0 ||
-		c.fingerprint.P0fSignature != nil ||
-		c.fingerprint.JA4Callback != nil ||
-		c.defaults.QueryEncoder != nil ||
-		len(c.defaults.Decoders) > 0 ||
-		c.defaults.MultiReadThreshold > 0 ||
-		c.network.SSRFGuard ||
-		c.network.ProxyAddr != nil
+// HTTP returns an [HTTPDoer] adapter executing requests through the full pipeline.
+func (c *Client) HTTP() HTTPDoer {
+	return HTTPDoerFunc(func(req *http.Request) (*http.Response, error) {
+		return c.execute(req, c.resolvePipeline(req))
+	})
+}
+
+func (c *Client) execute(req *http.Request, pipe PipelineConfig) (*http.Response, error) {
+	return c.pipelineEngine.Execute(req.Context(), NewStdRequest(req), c.engine, pipe)
+}
+
+// WithPersona configures TLS ClientHello ID, HTTP/2 SETTINGS frames, header order, p0f signature, and User-Agent matching Persona.
+func (c *Client) WithPersona(p fingerprint.Persona) *Client {
+	newClient := c.WithTLSClientHelloID(p.TLSID)
+	newClient.fingerprint.H2Settings = &p.H2Settings
+	newClient.fingerprint.HeaderOrder = p.HeaderOrder
+	newClient.fingerprint.P0fSignature = p.P0fSignature
+
+	if transport := newClient.Transport(); transport != nil {
+		framed := h2.NewFramedTransport(transport, p.H2Settings, p.HeaderOrder...)
+		if httpClient, ok := newClient.engine.(*http.Client); ok {
+			httpClient.Transport = framed
+		}
+	}
+
+	newClient = newClient.With(func(cfg *Config) {
+		cfg.Defaults.Headers.Set("User-Agent", p.UserAgent)
+	})
+
+	if len(p.HeaderOrder) == 0 {
+		return newClient
+	}
+
+	return newClient.With(func(cfg *Config) {
+		cfg.Defaults.DefaultMods = append(cfg.Defaults.DefaultMods, func(req Request) {
+			GetOrInitRequestConfig(req).OrderedHeaders = p.HeaderOrder
+		})
+	})
+}
+
+// WithTLSClientHelloID returns a cloned [Client] configured with the specified uTLS ClientHello ID.
+func (c *Client) WithTLSClientHelloID(id utls.ClientHelloID) *Client {
+	cloned := c.Clone()
+	cloned.fingerprint.TLSClientHelloID = &id
+
+	transport := cloned.Transport()
+	if transport == nil {
+		return cloned
+	}
+
+	transport.DialTLSContext = cloned.newDialTLSContextFunc(transport.Proxy)
+
+	return cloned
+}
+
+// WithHTTP3 creates a clone of the client configured for HTTP/3 over QUIC using default migration settings.
+func (c *Client) WithHTTP3() *Client {
+	return c.WithHTTP3Config(nil)
+}
+
+// WithHTTP3Config creates a clone of the client configured for HTTP/3 over QUIC using custom QUIC migration parameters.
+func (c *Client) WithHTTP3Config(config *QUICMigrationConfig) *Client {
+	cloned := c.Clone()
+
+	if config == nil {
+		cfg := DefaultQUICMigrationConfig()
+		config = &cfg
+	}
+
+	quicCfg := c.buildQUICConfig(config)
+	tlsCfg := c.buildQUICTLSConfig()
+
+	cloned.engine = &http.Client{
+		Transport: &http3.Transport{
+			TLSClientConfig: tlsCfg,
+			QUICConfig:      quicCfg,
+		},
+	}
+
+	return cloned
+}
+
+// WithDecoder returns a cloned [Client] with a registered custom response decoder for the specified MIME content type.
+func (c *Client) WithDecoder(contentType string, decoder ResponseDecoder) *Client {
+	return c.With(func(cfg *Config) {
+		mediaType, _, _ := strings.Cut(contentType, ";")
+
+		norm := strings.ToLower(strings.TrimSpace(mediaType))
+		if norm == "" {
+			return
+		}
+
+		if cfg.Defaults.Decoders == nil {
+			cfg.Defaults.Decoders = make(map[string]ResponseDecoder)
+		}
+
+		if decoder == nil {
+			delete(cfg.Defaults.Decoders, norm)
+		} else {
+			cfg.Defaults.Decoders[norm] = decoder
+		}
+	})
 }
 
 // DialContext establishes a raw L4 TCP socket connection applying active proxy, DNS, p0f, and SSRF guards.
@@ -446,12 +346,9 @@ func (c *Client) DialPlainForWS(ctx context.Context, addr string) (net.Conn, err
 	return c.applyWSFragmentation(ctx, conn), nil
 }
 
-func (c *Client) applyWSFragmentation(ctx context.Context, conn net.Conn) net.Conn {
-	if cfg := GetRequestConfig(ctx); cfg != nil && cfg.Fragment != nil {
-		return applyFragmentation(conn, *cfg.Fragment)
-	}
-
-	return conn
+// Config returns a snapshot copy of the active client configuration.
+func (c *Client) Config() Config {
+	return c.snapshotConfig()
 }
 
 // Engine yields the underlying, undecorated [HTTPDoer] engine.
@@ -525,21 +422,6 @@ func (c *Client) Logger() Logger {
 	return c.defaults.Logger
 }
 
-// HTTPDoerFunc adapts a plain function matching the HTTP execution signature to the [HTTPDoer] interface.
-type HTTPDoerFunc func(req *http.Request) (*http.Response, error)
-
-// Do executes the underlying function against the provided HTTP request.
-func (f HTTPDoerFunc) Do(req *http.Request) (*http.Response, error) {
-	return f(req)
-}
-
-// HTTP returns an [HTTPDoer] adapter executing requests through the full pipeline.
-func (c *Client) HTTP() HTTPDoer {
-	return HTTPDoerFunc(func(req *http.Request) (*http.Response, error) {
-		return c.execute(req, c.resolvePipeline(req))
-	})
-}
-
 // Transport retrieves the underlying [*http.Transport] from the engine.
 func (c *Client) Transport() *http.Transport {
 	httpClient, ok := c.engine.(*http.Client)
@@ -581,12 +463,13 @@ func (c *Client) Transport() *http.Transport {
 func (c *Client) InitRequestConfig(req *http.Request) *http.Request {
 	cfg := GetRequestConfig(req.Context())
 	if cfg == nil {
-		cfg = requestConfigPool.Get().(*RequestConfig)
-		ctx := context.WithValue(req.Context(), requestConfigKey{}, cfg)
+		var ctx context.Context
+
+		ctx, cfg = AllocRequestConfig(req.Context())
 		req = req.WithContext(ctx)
 	}
 
-	cfg.ApplyDefaults(c)
+	ApplyRequestConfigDefaults(cfg, c)
 
 	return req
 }
@@ -598,141 +481,25 @@ func (c *Client) CloseIdleConnections() {
 	}
 }
 
-// GetOrInitRequestConfig retrieves or allocates a [RequestConfig] associated with the provided target.
-func GetOrInitRequestConfig(v any) *RequestConfig {
-	switch req := v.(type) {
-	case Request:
-		if req == nil {
-			return &RequestConfig{}
-		}
-
-		cfg := GetRequestConfig(req.Context())
-		if cfg == nil {
-			cfg = requestConfigPool.Get().(*RequestConfig)
-			ctx := context.WithValue(req.Context(), requestConfigKey{}, cfg)
-			req.SetContext(ctx)
-		}
-
-		return cfg
-
-	case *http.Request:
-		if req == nil {
-			return &RequestConfig{}
-		}
-
-		cfg := GetRequestConfig(req.Context())
-		if cfg == nil {
-			cfg = requestConfigPool.Get().(*RequestConfig)
-			ctx := context.WithValue(req.Context(), requestConfigKey{}, cfg)
-			*req = *req.WithContext(ctx)
-		}
-
-		return cfg
-
-	case context.Context:
-		cfg := GetRequestConfig(req)
-		if cfg == nil {
-			cfg = requestConfigPool.Get().(*RequestConfig)
-		}
-
-		return cfg
-
-	default:
-		return &RequestConfig{}
+func (c *Client) applyWSFragmentation(ctx context.Context, conn net.Conn) net.Conn {
+	if cfg := GetRequestConfig(ctx); cfg != nil && cfg.Fragment != nil {
+		return applyFragmentation(conn, *cfg.Fragment)
 	}
+
+	return conn
 }
 
-// CloneHTTPClient produces a deep copy of an [*http.Client] and its transport wrappers.
-func CloneHTTPClient(c *http.Client) *http.Client {
-	cloned := *c
-	baseTr := cloned.Transport
-
-	var wrappedJar *cookie.ProxyIsolatedJar
-	if cjTr, ok := baseTr.(*cookie.Transport); ok {
-		wrappedJar = cjTr.CookieJar
-		baseTr = cjTr.Next
-	}
-
-	var framedTr *h2.FramedTransport
-	if ft, ok := baseTr.(*h2.FramedTransport); ok {
-		framedTr = ft
-		baseTr = ft.Transport
-	}
-
-	if tr, ok := baseTr.(*http.Transport); ok && tr != nil {
-		baseTr = tr.Clone()
-	}
-
-	if framedTr != nil {
-		if tr, ok := baseTr.(*http.Transport); ok {
-			baseTr = framedTr.Clone(tr)
-		}
-	}
-
-	if wrappedJar != nil {
-		cloned.Transport = &cookie.Transport{
-			Next:      baseTr,
-			CookieJar: wrappedJar,
-		}
-	} else {
-		cloned.Transport = baseTr
-	}
-
-	return &cloned
-}
-
-const maxBodySlurpBytes int64 = 2048
-
-// CloseResponse drains up to 2KB of unread body payload to preserve Keep-Alive sockets,
-// closes the response body stream, and recycles request context resources.
-func CloseResponse(resp *http.Response) {
-	if resp == nil || resp.Body == nil {
-		return
-	}
-
-	_, _ = stdio.CopyN(stdio.Discard, resp.Body, maxBodySlurpBytes)
-	_ = resp.Body.Close()
-
-	if rb, ok := io.UnwrapBody(resp.Body).(interface{ ReallyClose() }); ok {
-		rb.ReallyClose()
-	}
-
-	if resp.Request == nil {
-		return
-	}
-
-	cfg := GetRequestConfig(resp.Request.Context())
-	if cfg == nil {
-		return
-	}
-
-	if cfg.RequestTimeoutCancel != nil {
-		cfg.RequestTimeoutCancel()
-	}
-
-	*cfg = RequestConfig{}
-	requestConfigPool.Put(cfg)
-}
-
-func defaultEngine(doer any) HTTPDoer {
-	if doer != nil {
-		if rd, ok := doer.(RequestDoer); ok {
-			return NewRequestDoerAdapter(rd)
-		}
-
-		if httpClient, ok := doer.(*http.Client); ok {
-			return CloneHTTPClient(httpClient)
-		}
-
-		if hd, ok := doer.(HTTPDoer); ok {
-			return hd
-		}
-	}
-
-	return &http.Client{
-		Timeout:       15 * time.Second,
-		CheckRedirect: DefaultRedirectPolicy(10),
-	}
+func (c *Client) needsRequestConfig() bool {
+	return c.network.SocketController != nil ||
+		c.fingerprint.TLSClientHelloSpecProvider != nil ||
+		len(c.fingerprint.CertificatePins) > 0 ||
+		c.fingerprint.P0fSignature != nil ||
+		c.fingerprint.JA4Callback != nil ||
+		c.defaults.QueryEncoder != nil ||
+		len(c.defaults.Decoders) > 0 ||
+		c.defaults.MultiReadThreshold > 0 ||
+		c.network.SSRFGuard ||
+		c.network.ProxyAddr != nil
 }
 
 func defaultClientDefaults() ClientDefaults {
@@ -749,35 +516,83 @@ func defaultClientDefaults() ClientDefaults {
 	}
 }
 
-func (c *Client) reapplyH2Settings(tr *http.Transport) {
-	if tr == nil {
+func (c *Client) ensureUserAgent() {
+	if c.defaults.Headers == nil {
 		return
 	}
 
-	if c.fingerprint.H2Configurer != nil {
-		t2, err := http2.ConfigureTransports(tr)
-		if err == nil && t2 != nil {
-			t2.TLSClientConfig = tr.TLSClientConfig
-			_ = c.fingerprint.H2Configurer.ConfigureHTTP2(t2)
+	if c.defaults.Headers.Get("User-Agent") == "" {
+		c.defaults.Headers.Set("User-Agent", DefaultUserAgent)
+	}
+}
+
+func (c *Client) resolveTargetURL(path string) (string, error) {
+	if len(path) >= 7 && (strings.HasPrefix(path, "http://") || strings.HasPrefix(path, "https://")) {
+		return path, nil
+	}
+
+	if c.defaults.BaseURL == nil || c.defaults.BaseURL.Host == "" {
+		return path, nil
+	}
+
+	if path == "" || path == "/" {
+		if c.defaults.BaseURLString != "" {
+			return c.defaults.BaseURLString, nil
 		}
+
+		return c.defaults.BaseURL.String(), nil
 	}
 
-	if c.fingerprint.H2Settings == nil {
-		return
+	if path[0] == '/' && c.defaults.BaseURLTrimmedString != "" {
+		return c.defaults.BaseURLTrimmedString + path, nil
 	}
 
-	framed := h2.NewFramedTransport(tr, *c.fingerprint.H2Settings)
-
-	httpClient, ok := c.engine.(*http.Client)
-	if !ok {
-		return
+	rel, err := url.Parse(strings.TrimLeft(path, "/"))
+	if err != nil {
+		return "", &Error{Op: "invalid path", Err: ErrInvalidPath}
 	}
 
-	if cjTrans, ok := httpClient.Transport.(*cookie.Transport); ok {
-		cjTrans.Next = framed
-	} else {
-		httpClient.Transport = framed
+	return c.defaults.BaseURL.ResolveReference(rel).String(), nil
+}
+
+func (c *Client) buildQUICConfig(config *QUICMigrationConfig) *quic.Config {
+	quicCfg := &quic.Config{
+		EnableDatagrams:         true,
+		DisablePathMTUDiscovery: config.DisablePathMTUDiscovery,
+		InitialPacketSize:       config.InitialPacketSize,
 	}
+
+	if config.KeepAlivePeriod > 0 {
+		quicCfg.KeepAlivePeriod = config.KeepAlivePeriod
+	}
+
+	if config.MaxIdleTimeout > 0 {
+		quicCfg.MaxIdleTimeout = config.MaxIdleTimeout
+	}
+
+	if h3s := c.fingerprint.H3Settings; h3s != nil {
+		quicCfg.InitialStreamReceiveWindow = h3s.InitialStreamReceiveWindow
+		quicCfg.MaxStreamReceiveWindow = h3s.MaxStreamReceiveWindow
+		quicCfg.InitialConnectionReceiveWindow = h3s.InitialConnectionReceiveWindow
+		quicCfg.MaxConnectionReceiveWindow = h3s.MaxConnectionReceiveWindow
+		quicCfg.MaxIncomingStreams = h3s.MaxIncomingStreams
+		quicCfg.MaxIncomingUniStreams = h3s.MaxIncomingUniStreams
+		quicCfg.EnableDatagrams = h3s.EnableDatagrams
+	}
+
+	return quicCfg
+}
+
+func (c *Client) buildQUICTLSConfig() *tls.Config {
+	tlsCfg := &tls.Config{
+		NextProtos: []string{AlpnH3},
+	}
+
+	if spec := c.fingerprint.TLSQUICClientHelloSpec; spec != nil && len(spec.CipherSuites) > 0 {
+		tlsCfg.CipherSuites = spec.CipherSuites
+	}
+
+	return tlsCfg
 }
 
 func (c *Client) snapshotConfig() Config {
@@ -798,158 +613,11 @@ func (c *Client) applyConfig(cfg Config) {
 	applyEngineConfig(c, cfg.Engine)
 	c.applyDialers(c.Transport())
 	c.reapplyH2Settings(c.Transport())
-}
 
-func (c *Client) ensureUserAgent() {
-	if c.defaults.Headers.Get("User-Agent") == "" {
-		c.defaults.Headers.Set("User-Agent", DefaultUserAgent)
-	}
-}
-
-func applyEngineConfig(c *Client, eng EngineConfig) {
-	if eng.CustomEngine != nil {
-		if httpClient, ok := eng.CustomEngine.(*http.Client); ok {
-			c.engine = CloneHTTPClient(httpClient)
-		} else {
-			c.engine = eng.CustomEngine
-			return
-		}
-	}
-
-	httpClient, ok := c.engine.(*http.Client)
-	if !ok {
-		return
-	}
-
-	if eng.Timeout > 0 {
-		httpClient.Timeout = eng.Timeout
-	}
-
-	applyRedirectPolicy(httpClient, eng)
-	applyCookieJar(c, httpClient, eng.CookieJar)
-	applyTransportOverrides(c, eng)
-}
-
-func applyRedirectPolicy(httpClient *http.Client, eng EngineConfig) {
-	if eng.CheckRedirect != nil {
-		httpClient.CheckRedirect = eng.CheckRedirect
-		return
-	}
-
-	limit := eng.RedirectLimit
-	if limit == redirectLimitUnset {
-		return
-	}
-
-	switch {
-	case limit == 0:
-		httpClient.CheckRedirect = func(req *http.Request, via []*http.Request) error {
-			return http.ErrUseLastResponse
-		}
-	case limit > 0:
-		httpClient.CheckRedirect = DefaultRedirectPolicy(limit)
-	default:
-		httpClient.CheckRedirect = DefaultRedirectPolicy(10)
-	}
-}
-
-func (c *Client) resolveTargetURL(path string) (string, error) {
-	if c.defaults.BaseURL == nil || c.defaults.BaseURL.Host == "" {
-		return path, nil
-	}
-
-	if path == "" || path == "/" {
-		if c.defaults.BaseURLString != "" {
-			return c.defaults.BaseURLString, nil
-		}
-
-		return c.defaults.BaseURL.String(), nil
-	}
-
-	if strings.HasPrefix(path, "http://") || strings.HasPrefix(path, "https://") {
-		return path, nil
-	}
-
-	if path[0] == '/' && (c.defaults.BaseURL.Path == "" || c.defaults.BaseURL.Path == "/") {
-		if c.defaults.BaseURLTrimmedString != "" {
-			return c.defaults.BaseURLTrimmedString + path, nil
-		}
-
-		if c.defaults.BaseURLString != "" {
-			return strings.TrimSuffix(c.defaults.BaseURLString, "/") + path, nil
-		}
-
-		uCopy := *c.defaults.BaseURL
-		uCopy.Path = path
-
-		return uCopy.String(), nil
-	}
-
-	rel, err := url.Parse(strings.TrimLeft(path, "/"))
-	if err != nil {
-		return "", &Error{Op: "invalid path", Err: ErrInvalidPath}
-	}
-
-	return c.defaults.BaseURL.ResolveReference(rel).String(), nil
-}
-
-func applyCookieJar(c *Client, httpClient *http.Client, jar http.CookieJar) {
-	if jar == nil {
-		return
-	}
-
-	httpClient.Jar = jar
-
-	pJar, ok := jar.(*cookie.ProxyIsolatedJar)
-	if !ok {
-		return
-	}
-
-	c.defaults.HeadersCookieJar = jar
-
-	baseTr := httpClient.Transport
-	if baseTr == nil {
-		baseTr = http.DefaultTransport
-	}
-
-	if cjTrans, ok := baseTr.(*cookie.Transport); ok {
-		baseTr = cjTrans.Unwrap()
-	}
-
-	httpClient.Transport = &cookie.Transport{Next: baseTr, CookieJar: pJar}
-}
-
-func applyTransportOverrides(c *Client, eng EngineConfig) {
-	tr := c.Transport()
-	if tr == nil {
-		return
-	}
-
-	if eng.InsecureSkipVerify {
-		if tr.TLSClientConfig == nil {
-			tr.TLSClientConfig = &tls.Config{}
-		}
-
-		tr.TLSClientConfig.InsecureSkipVerify = true
-	}
-
-	if pool := eng.ConnectionPool; pool != nil {
-		tr.MaxIdleConns = generic.Coalesce(pool.MaxIdleConns, tr.MaxIdleConns)
-		tr.MaxIdleConnsPerHost = generic.Coalesce(pool.MaxIdleConnsPerHost, tr.MaxIdleConnsPerHost)
-		tr.MaxConnsPerHost = generic.Coalesce(pool.MaxConnsPerHost, tr.MaxConnsPerHost)
-		tr.IdleConnTimeout = generic.Coalesce(pool.IdleConnTimeout, tr.IdleConnTimeout)
-		tr.ResponseHeaderTimeout = generic.Coalesce(pool.ResponseHeaderTimeout, tr.ResponseHeaderTimeout)
-		tr.ReadBufferSize = generic.Coalesce(pool.ReadBufferSize, tr.ReadBufferSize)
-		tr.WriteBufferSize = generic.Coalesce(pool.WriteBufferSize, tr.WriteBufferSize)
-	}
-
-	if h2Cfg := eng.HTTP2Config; h2Cfg != nil {
-		if t2, err := http2.ConfigureTransports(tr); err == nil && t2 != nil {
-			t2.ReadIdleTimeout = h2Cfg.ReadIdleTimeout
-			t2.PingTimeout = h2Cfg.PingTimeout
-			t2.AllowHTTP = h2Cfg.AllowHTTP
-		}
-	}
+	c.pipelineEngine = pipeline.NewPipeline(
+		c.defaults.ToPipelineDefaults(),
+		c.fingerprint.ToPipelineFingerprint(),
+	)
 }
 
 var _ RequestDoer = (*Client)(nil)

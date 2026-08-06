@@ -7,31 +7,28 @@ package bytesconv
 import (
 	"bytes"
 	"testing"
+
+	"github.com/stretchr/testify/assert"
 )
 
 func TestB2SAndS2B(t *testing.T) {
-	if s := B2S(nil); s != "" {
-		t.Errorf("B2S(nil) = %q, want empty", s)
-	}
+	t.Parallel()
 
-	if b := S2B(""); b != nil {
-		t.Errorf("S2B(\"\") = %v, want nil", b)
-	}
+	assert.Empty(t, B2S(nil))
+	assert.Nil(t, S2B(""))
 
 	str := "Hello, Aoni!"
 
 	b := S2B(str)
-	if !bytes.Equal(b, []byte(str)) {
-		t.Errorf("S2B(%q) = %v, want %v", str, b, []byte(str))
-	}
+	assert.True(t, bytes.Equal(b, []byte(str)))
 
 	s := B2S(b)
-	if s != str {
-		t.Errorf("B2S(%v) = %q, want %q", b, s, str)
-	}
+	assert.Equal(t, str, s)
 }
 
 func TestLowercaseByte(t *testing.T) {
+	t.Parallel()
+
 	tests := []struct {
 		in   byte
 		want byte
@@ -45,13 +42,13 @@ func TestLowercaseByte(t *testing.T) {
 	}
 
 	for _, tt := range tests {
-		if got := LowercaseByte(tt.in); got != tt.want {
-			t.Errorf("LowercaseByte(%c) = %c, want %c", tt.in, got, tt.want)
-		}
+		assert.Equal(t, tt.want, LowercaseByte(tt.in))
 	}
 }
 
 func TestEqualFoldASCII(t *testing.T) {
+	t.Parallel()
+
 	tests := []struct {
 		a, b string
 		want bool
@@ -64,28 +61,25 @@ func TestEqualFoldASCII(t *testing.T) {
 	}
 
 	for _, tt := range tests {
-		if got := EqualFoldASCII(tt.a, tt.b); got != tt.want {
-			t.Errorf("EqualFoldASCII(%q, %q) = %v, want %v", tt.a, tt.b, got, tt.want)
-		}
+		assert.Equal(t, tt.want, EqualFoldASCII(tt.a, tt.b))
 	}
 }
 
 func TestAppendToLower(t *testing.T) {
-	if got := AppendToLower(nil, nil); len(got) != 0 {
-		t.Errorf("AppendToLower(nil, nil) = %v, want empty", got)
-	}
+	t.Parallel()
+
+	assert.Empty(t, AppendToLower(nil, nil))
 
 	dst := []byte("Header: ")
 	src := []byte("X-Aoni-Test")
 	got := AppendToLower(dst, src)
 
-	want := "Header: x-aoni-test"
-	if string(got) != want {
-		t.Errorf("AppendToLower result = %q, want %q", string(got), want)
-	}
+	assert.Equal(t, "Header: x-aoni-test", string(got))
 }
 
 func TestTrimQuotes(t *testing.T) {
+	t.Parallel()
+
 	tests := []struct {
 		in   string
 		want string
@@ -99,8 +93,6 @@ func TestTrimQuotes(t *testing.T) {
 
 	for _, tt := range tests {
 		got := TrimQuotes([]byte(tt.in))
-		if string(got) != tt.want {
-			t.Errorf("TrimQuotes(%q) = %q, want %q", tt.in, string(got), tt.want)
-		}
+		assert.Equal(t, tt.want, string(got))
 	}
 }

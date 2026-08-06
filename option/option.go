@@ -36,6 +36,7 @@ import (
 	"github.com/lemon4ksan/aoni/netutil/fragment"
 	"github.com/lemon4ksan/aoni/netutil/ip"
 	"github.com/lemon4ksan/aoni/netutil/ipc"
+	"github.com/lemon4ksan/aoni/netutil/netdial"
 	"github.com/lemon4ksan/aoni/netutil/proxy"
 	"github.com/lemon4ksan/aoni/telemetry"
 )
@@ -75,6 +76,20 @@ func WithNetworkBlock(network aoni.NetworkConfig) aoni.ClientOption {
 func WithFingerprintBlock(fingerprint aoni.FingerprintConfig) aoni.ClientOption {
 	return func(cfg *aoni.Config) {
 		cfg.Fingerprint = fingerprint.Clone()
+	}
+}
+
+// WithBaremetal switches the client to maximum-speed ("bare-metal") mode:
+// it disables background rotation, HTML tag validation, copying of default headers, and unnecessary wrappers.
+func WithBaremetal() aoni.ClientOption {
+	return func(cfg *aoni.Config) {
+		cfg.Defaults.Pipeline.Decompress = false
+		cfg.Defaults.Pipeline.Validate = false
+		cfg.Defaults.Pipeline.Challenge = false
+		cfg.Defaults.MaxResponseSize = -1
+		cfg.Defaults.MultiReadThreshold = -1
+		cfg.Defaults.RefererAutomaton = false
+		cfg.Defaults.Headers = nil
 	}
 }
 
@@ -311,6 +326,20 @@ func WithRefererAutomaton(enabled bool) aoni.ClientOption {
 // ============================================================================
 // 4. NETWORK, PROXY & DNS OPTIONS
 // ============================================================================
+
+// WithCustomNetworkDriver returns an [aoni.ClientOption] attaching a custom L3/L4 network stack driver.
+func WithCustomNetworkDriver(driver netdial.RawStackDriver) aoni.ClientOption {
+	return func(cfg *aoni.Config) {
+		cfg.Network.StackDriver = driver
+	}
+}
+
+// WithL2Device returns an [aoni.ClientOption] attaching a custom Data Link Layer (Ethernet) L2Device driver.
+func WithL2Device(device netdial.L2Device) aoni.ClientOption {
+	return func(cfg *aoni.Config) {
+		cfg.Network.L2Device = device
+	}
+}
 
 // WithLocalAddr returns an [aoni.ClientOption] binding outgoing TCP connections to a single local IP address.
 func WithLocalAddr(addr string) aoni.ClientOption {

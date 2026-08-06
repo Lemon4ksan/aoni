@@ -29,7 +29,7 @@ var (
 	ErrResponseTooLarge = errors.New("aoni: response size limit exceeded")
 )
 
-// ProgressFunc reports periodic stream transfer progress (current bytes and total Content-Length).
+// ProgressFunc represents a callback triggered periodically to monitor stream transfer progress.
 type ProgressFunc func(current, total int64)
 
 const maxPoolBufferSize = 64 * 1024

@@ -15,7 +15,9 @@ import (
 )
 
 func TestCurlFromRequest_CleanURLAndHeaders(t *testing.T) {
-	req, err := http.NewRequest(http.MethodGet, "https://example.com/api/users", nil)
+	t.Parallel()
+
+	req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, "https://example.com/api/users", nil)
 	require.NoError(t, err)
 
 	req.Header.Set("Accept", "application/json")
@@ -26,7 +28,9 @@ func TestCurlFromRequest_CleanURLAndHeaders(t *testing.T) {
 }
 
 func TestCurlFromRequest_Redaction(t *testing.T) {
-	req, err := http.NewRequest(http.MethodPost, "https://example.com/api/login", nil)
+	t.Parallel()
+
+	req, err := http.NewRequestWithContext(t.Context(), http.MethodPost, "https://example.com/api/login", nil)
 	require.NoError(t, err)
 
 	req.Header.Set("Authorization", "Bearer secretToken123")
@@ -38,8 +42,28 @@ func TestCurlFromRequest_Redaction(t *testing.T) {
 	assert.Contains(t, curl, "*****REDACTED*****")
 }
 
+func TestCurlFromRequestWithOptions_CustomRedaction(t *testing.T) {
+	t.Parallel()
+
+	req, err := http.NewRequestWithContext(t.Context(), http.MethodPost, "https://example.com/api/login", nil)
+	require.NoError(t, err)
+
+	req.Header.Set("X-Custom-Secret", "my-hidden-value")
+
+	opts := &telemetry.CurlOptions{
+		RedactHeaders: []string{"x-custom-secret"},
+		RedactSecret:  "[CONFIDENTIAL]",
+	}
+
+	curl := telemetry.CurlFromRequestWithOptions(req, nil, opts)
+	assert.NotContains(t, curl, "my-hidden-value")
+	assert.Contains(t, curl, "[CONFIDENTIAL]")
+}
+
 func TestCurlFromRequest_Multipart(t *testing.T) {
-	req, err := http.NewRequest(http.MethodPost, "https://example.com/upload", nil)
+	t.Parallel()
+
+	req, err := http.NewRequestWithContext(t.Context(), http.MethodPost, "https://example.com/upload", nil)
 	require.NoError(t, err)
 
 	req.Header.Set("Content-Type", "multipart/form-data; boundary=---------------------------12345")
@@ -50,7 +74,9 @@ func TestCurlFromRequest_Multipart(t *testing.T) {
 }
 
 func TestCurlFromRequest_CookieExtraction(t *testing.T) {
-	req, err := http.NewRequest(http.MethodGet, "https://example.com/dashboard", nil)
+	t.Parallel()
+
+	req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, "https://example.com/dashboard", nil)
 	require.NoError(t, err)
 
 	req.AddCookie(&http.Cookie{Name: "session", Value: "abc123xyz"})

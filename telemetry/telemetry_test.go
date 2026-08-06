@@ -129,7 +129,6 @@ func TestRTTTracker_Reset(t *testing.T) {
 	tracker.Record(50 * time.Millisecond)
 	tracker.Record(100 * time.Millisecond)
 
-	// Trigger calculation to build cache slice
 	_ = tracker.Percentile(95)
 
 	tracker.Reset()
@@ -269,7 +268,6 @@ func TestHARGenerator_Record_And_Export(t *testing.T) {
 
 		gen.Record(req, resp, time.Now(), 120)
 
-		// Verify body remains readable
 		bodyBytes, err := io.ReadAll(resp.Body)
 		require.NoError(t, err)
 		assert.Equal(t, `{"status":"ok"}`, string(bodyBytes))

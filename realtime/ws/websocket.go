@@ -23,6 +23,7 @@ import (
 
 	"github.com/lemon4ksan/aoni"
 	"github.com/lemon4ksan/aoni/internal/bytesconv"
+	"github.com/lemon4ksan/aoni/internal/io"
 )
 
 const (
@@ -149,7 +150,7 @@ func DialWebSocketWithConfig(
 	}
 
 	// 3. Fallback to HTTP/1.1 Upgrade (RFC 6455)
-	resp, selectedSubprotocol, compressed, err := performHTTP1Handshake(
+	activeConn, resp, selectedSubprotocol, compressed, err := performHTTP1Handshake(
 		ctx,
 		baseConn,
 		handshakeReq,
@@ -161,7 +162,7 @@ func DialWebSocketWithConfig(
 		return nil, resp, err
 	}
 
-	rawConn := WrapRawConnConfig(baseConn, true, config.ReadBufferSize, config.WriteBufferSize)
+	rawConn := WrapRawConnConfig(activeConn, true, config.ReadBufferSize, config.WriteBufferSize)
 	rawConn.subprotocol = selectedSubprotocol
 	rawConn.compress = compressed
 
@@ -317,48 +318,54 @@ func performHTTP1Handshake(
 	req *http.Request,
 	challengeKey string,
 	requestedSubprotocols []string,
-) (*http.Response, string, bool, error) {
+) (net.Conn, *http.Response, string, bool, error) {
 	if deadline, ok := ctx.Deadline(); ok {
 		_ = conn.SetDeadline(deadline)
 		defer func() { _ = conn.SetDeadline(time.Time{}) }()
 	}
 
 	if err := req.Write(conn); err != nil {
-		return nil, "", false, fmt.Errorf("aoni ws: write handshake: %w", err)
+		return nil, nil, "", false, fmt.Errorf("aoni ws: write handshake: %w", err)
 	}
 
 	br := bufio.NewReader(conn)
 
 	resp, err := http.ReadResponse(br, req)
 	if err != nil {
-		return nil, "", false, fmt.Errorf("aoni ws: read handshake response: %w", err)
+		return nil, nil, "", false, fmt.Errorf("aoni ws: read handshake response: %w", err)
 	}
 
 	if resp.StatusCode != http.StatusSwitchingProtocols {
-		return resp, "", false, ErrBadHandshake
+		return nil, resp, "", false, ErrBadHandshake
 	}
 
 	if !tokenContainsValue(resp.Header, "Upgrade", "websocket") ||
 		!tokenContainsValue(resp.Header, "Connection", "upgrade") {
-		return resp, "", false, ErrBadHandshake
+		return nil, resp, "", false, ErrBadHandshake
 	}
 
 	if resp.Header.Get("Sec-WebSocket-Accept") != computeAcceptKey(challengeKey) {
-		return resp, "", false, ErrBadHandshake
+		return nil, resp, "", false, ErrBadHandshake
 	}
 
 	selectedSubprotocol := strings.TrimSpace(resp.Header.Get("Sec-WebSocket-Protocol"))
 	if !ValidateSubprotocol(requestedSubprotocols, selectedSubprotocol) {
-		return resp, "", false, ErrSubprotocolMismatch
+		return nil, resp, "", false, ErrSubprotocolMismatch
 	}
 
 	isCompressed := hasPermessageDeflateExtension(resp.Header)
 
-	return resp, selectedSubprotocol, isCompressed, nil
+	// Preserve any unread WebSocket frame bytes buffered in br during HTTP 101 response reading
+	activeConn := conn
+	if br.Buffered() > 0 {
+		activeConn = &io.BufferedConn{Conn: conn, R: br}
+	}
+
+	return activeConn, resp, selectedSubprotocol, isCompressed, nil
 }
 
 func hasPermessageDeflateExtension(header http.Header) bool {
-	for _, ext := range header["Sec-Websocket-Extensions"] {
+	for _, ext := range header.Values("Sec-WebSocket-Extensions") {
 		if strings.Contains(ext, "permessage-deflate") {
 			return true
 		}

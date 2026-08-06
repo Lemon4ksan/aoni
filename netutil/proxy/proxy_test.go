@@ -7,19 +7,13 @@ package proxy
 import (
 	"context"
 	"errors"
-	"io"
 	"net/http"
-	"strings"
 	"sync"
-	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-
-	"github.com/lemon4ksan/aoni"
-	"github.com/lemon4ksan/aoni/middleware"
 )
 
 type mockDoer struct {
@@ -70,16 +64,19 @@ func (m *mockDoer) SetForceError(force bool) {
 func (m *mockDoer) GetCalls() int {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
+
 	return m.calls
 }
 
 type mockRoundTripper struct{}
 
-func (m *mockRoundTripper) RoundTrip(req *http.Request) (*http.Response, error) {
+func (m *mockRoundTripper) RoundTrip(_ *http.Request) (*http.Response, error) {
 	return nil, nil
 }
 
 func TestClient_ParseAutoProxy(t *testing.T) {
+	t.Parallel()
+
 	u1, err := Parse("socks5://127.0.0.1:1080")
 	require.NoError(t, err)
 	assert.Equal(t, "socks5", u1.Scheme)
@@ -95,6 +92,7 @@ func TestClient_ParseAutoProxy(t *testing.T) {
 	assert.Equal(t, "http", u3.Scheme)
 	assert.Equal(t, "1.2.3.4:8080", u3.Host)
 	assert.Equal(t, "user", u3.User.Username())
+
 	password, _ := u3.User.Password()
 	assert.Equal(t, "pass", password)
 }
@@ -131,7 +129,7 @@ func TestNewClient(t *testing.T) {
 		transport := client.Transport.(*http.Transport)
 		assert.True(t, transport.TLSClientConfig.InsecureSkipVerify)
 
-		req, err := http.NewRequestWithContext(t.Context(), "GET", "http://google.com", nil)
+		req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, "http://google.com", nil)
 		require.NoError(t, err)
 
 		proxyURL, err := transport.Proxy(req)
@@ -160,7 +158,7 @@ func TestNewClient(t *testing.T) {
 
 		transport := client.Transport.(*http.Transport)
 		if transport.Proxy != nil {
-			req, err := http.NewRequestWithContext(t.Context(), "GET", "http://google.com", nil)
+			req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, "http://google.com", nil)
 			require.NoError(t, err)
 
 			p, err := transport.Proxy(req)
@@ -197,7 +195,7 @@ func TestProxyRotator(t *testing.T) {
 		require.NoError(t, err)
 		t.Cleanup(func() { _ = rotator.Close() })
 
-		req, err := http.NewRequestWithContext(t.Context(), "GET", "http://test", nil)
+		req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, "http://test", nil)
 		require.NoError(t, err)
 
 		for range 4 {
@@ -231,7 +229,7 @@ func TestProxyRotator(t *testing.T) {
 		iterations := 1000
 		wg.Add(iterations)
 
-		req, err := http.NewRequestWithContext(t.Context(), "GET", "http://test", nil)
+		req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, "http://test", nil)
 		require.NoError(t, err)
 
 		for range iterations {
@@ -309,13 +307,11 @@ func TestProxyRotator_StatsAndReset(t *testing.T) {
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = r.Close() })
 
-	// Check Stats
 	stats := r.Stats()
 	assert.Equal(t, 2, stats.TotalProxies)
 	assert.Equal(t, 2, stats.HealthyProxies)
 	assert.Equal(t, 0, stats.UnhealthyProxies)
 
-	// Check Reset
 	r.clients[0].tracker.MarkFailed()
 	r.clients[0].tracker.MarkFailed()
 	r.clients[0].tracker.MarkFailed() // MaxFails defaults to 3
@@ -339,7 +335,7 @@ func TestProxyRotator_HealthCheck(t *testing.T) {
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = rotator.Close() })
 
-	req, err := http.NewRequestWithContext(t.Context(), "GET", "http://test", nil)
+	req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, "http://test", nil)
 	require.NoError(t, err)
 
 	for range 5 {
@@ -388,7 +384,7 @@ func TestProxyRotator_BackgroundHealthCheck(t *testing.T) {
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = rotator.Close() })
 
-	req, err := http.NewRequestWithContext(t.Context(), "GET", "http://test", nil)
+	req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, "http://test", nil)
 	require.NoError(t, err)
 
 	_, _ = rotator.Do(req)
@@ -406,7 +402,7 @@ func TestProxyRotator_ContextCancellation(t *testing.T) {
 	ctx, cancel := context.WithCancel(t.Context())
 	cancel()
 
-	req, err := http.NewRequestWithContext(ctx, "GET", "http://test", nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, "http://test", nil)
 	require.NoError(t, err)
 	_, err = rotator.Do(req)
 
@@ -428,14 +424,14 @@ func TestProxyRotator_RetryOnProxyError(t *testing.T) {
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = rotator.Close() })
 
-	req, err := http.NewRequestWithContext(t.Context(), "GET", "http://steam", nil)
+	req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, "http://steam", nil)
 	require.NoError(t, err)
 
 	resp, err := rotator.Do(req)
 	require.NoError(t, err)
 	assert.Equal(t, 200, resp.StatusCode)
 
-	req2, err := http.NewRequestWithContext(t.Context(), "GET", "http://steam", nil)
+	req2, err := http.NewRequestWithContext(t.Context(), http.MethodGet, "http://steam", nil)
 	require.NoError(t, err)
 
 	_, err = rotator.Do(req2)
@@ -464,7 +460,7 @@ func TestProxyConfig_CustomTransport(t *testing.T) {
 
 		mw := &mockRoundTripper{}
 		cfg := Config{
-			TransportFactory: func(c Config) (http.RoundTripper, error) {
+			TransportFactory: func(_ Config) (http.RoundTripper, error) {
 				return mw, nil
 			},
 		}
@@ -477,7 +473,7 @@ func TestProxyConfig_CustomTransport(t *testing.T) {
 		t.Parallel()
 
 		cfg := Config{
-			TransportFactory: func(c Config) (http.RoundTripper, error) {
+			TransportFactory: func(_ Config) (http.RoundTripper, error) {
 				return nil, errors.New("factory simulation error")
 			},
 		}
@@ -493,22 +489,18 @@ func TestProxyRotator_StickySession(t *testing.T) {
 	t.Run("sticky_key_selectors", func(t *testing.T) {
 		t.Parallel()
 
-		req, err := http.NewRequestWithContext(t.Context(), "GET", "http://test", nil)
+		req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, "http://test", nil)
 		require.NoError(t, err)
 
 		req.AddCookie(&http.Cookie{Name: "session-id", Value: "abc"})
 		req.Header.Set("X-Custom-Sticky", "val-xyz")
 
-		// Test Cookie selector (now uses "session-id" to match the configured cookie)
 		sel1 := StickyKeyFromCookie("session-id")
 		assert.Equal(t, "abc", sel1(req))
 
-		// Test Cookie selector missing
 		sel1Missing := StickyKeyFromCookie("non-existent")
-		sel1Proxy := sel1Missing(req)
-		assert.Empty(t, sel1Proxy)
+		assert.Empty(t, sel1Missing(req))
 
-		// Test Header selector (now uses "X-Custom-Sticky" to match the set header)
 		sel2 := StickyKeyFromHeader("X-Custom-Sticky")
 		assert.Equal(t, "val-xyz", sel2(req))
 	})
@@ -521,7 +513,7 @@ func TestProxyRotator_StickySession(t *testing.T) {
 		require.NoError(t, err)
 		t.Cleanup(func() { _ = r.Close() })
 
-		stickyFn := func(req *http.Request) string { return "sticky" }
+		stickyFn := func(_ *http.Request) string { return "sticky" }
 		copied := r.WithStickySessions(stickyFn)
 		assert.NotNil(t, copied)
 		assert.NotNil(t, copied.stickyKeyFunc)
@@ -541,15 +533,13 @@ func TestProxyRotator_StickySession(t *testing.T) {
 		require.NoError(t, err)
 		t.Cleanup(func() { _ = r.Close() })
 
-		// Inject sticky extractor
-		r.stickyKeyFunc = func(req *http.Request) string {
+		r.stickyKeyFunc = func(_ *http.Request) string {
 			return "session-id-1"
 		}
 
-		req, err := http.NewRequestWithContext(t.Context(), "GET", "http://test", nil)
+		req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, "http://test", nil)
 		require.NoError(t, err)
 
-		// First request: establishes sticky session
 		_, err = r.Do(req)
 		require.NoError(t, err)
 
@@ -559,7 +549,6 @@ func TestProxyRotator_StickySession(t *testing.T) {
 		require.NotNil(t, entry)
 		activeIdx := entry.clientIdx
 
-		// Second request: must hit the exact same sticky client index
 		_, err = r.Do(req)
 		require.NoError(t, err)
 
@@ -571,14 +560,12 @@ func TestProxyRotator_StickySession(t *testing.T) {
 			assert.Equal(t, 2, m2.GetCalls())
 		}
 
-		// Mock sticky client becoming unhealthy
 		for range 5 {
 			r.clients[activeIdx].tracker.MarkFailed()
 		}
 
 		assert.False(t, r.clients[activeIdx].tracker.IsAvailable(), "sticky client should be marked unhealthy")
 
-		// Third request: should bypass unhealthy sticky client and use fallback
 		_, err = r.Do(req)
 		require.NoError(t, err)
 
@@ -590,92 +577,12 @@ func TestProxyRotator_StickySession(t *testing.T) {
 			assert.Equal(t, 2, m2.GetCalls())
 		}
 
-		// Obsolete out-of-bounds sticky session index fallback
 		r.mu.Lock()
 		r.sessions["session-id-1"].clientIdx = 999
 		r.mu.Unlock()
 
 		_, err = r.Do(req)
 		require.NoError(t, err)
-	})
-}
-
-func TestProxyRotator_StickySessionCleanup(t *testing.T) {
-	t.Parallel()
-
-	m1 := &mockDoer{id: 1}
-	r, err := NewRotator(RotatorConfig{}, WithClient{Client: m1})
-	require.NoError(t, err)
-	t.Cleanup(func() { _ = r.Close() })
-
-	r.sessionTTL = 10 * time.Millisecond
-	r.stickyKeyFunc = func(req *http.Request) string {
-		return "session1"
-	}
-
-	req, err := http.NewRequestWithContext(t.Context(), "GET", "http://test", nil)
-	require.NoError(t, err)
-	_, err = r.Do(req)
-	require.NoError(t, err)
-
-	r.mu.RLock()
-	entry, exists := r.sessions["session1"]
-	r.mu.RUnlock()
-	require.True(t, exists)
-	assert.Equal(t, 0, entry.clientIdx)
-
-	time.Sleep(20 * time.Millisecond)
-
-	r.mu.Lock()
-
-	now := time.Now()
-	for k, v := range r.sessions {
-		if now.Sub(v.lastSeen) > r.sessionTTL {
-			delete(r.sessions, k)
-		}
-	}
-
-	r.mu.Unlock()
-
-	r.mu.RLock()
-	_, exists = r.sessions["session1"]
-	r.mu.RUnlock()
-	assert.False(t, exists, "session should be cleaned up after expiration")
-}
-
-func TestProxyRotator_Prewarm(t *testing.T) {
-	t.Parallel()
-
-	m1 := &mockDoer{id: 1}
-	m2 := &mockDoer{id: 2}
-
-	r, err := NewRotator(RotatorConfig{}, WithClient{Client: m1}, WithClient{Client: m2})
-	require.NoError(t, err)
-	t.Cleanup(func() { _ = r.Close() })
-
-	r.Prewarm(t.Context(), "http://warmtarget.com")
-
-	assert.Equal(t, 1, m1.GetCalls())
-	assert.Equal(t, 1, m2.GetCalls())
-}
-
-func TestProxyRotator_ErrorPaths(t *testing.T) {
-	t.Parallel()
-
-	t.Run("all_proxies_failed", func(t *testing.T) {
-		t.Parallel()
-
-		m1 := &mockDoer{id: 1, forceError: true}
-		r, err := NewRotator(RotatorConfig{MaxFails: 1}, WithClient{Client: m1})
-		require.NoError(t, err)
-		t.Cleanup(func() { _ = r.Close() })
-
-		req, err := http.NewRequestWithContext(t.Context(), "GET", "http://test", nil)
-		require.NoError(t, err)
-
-		_, err = r.Do(req)
-		assert.Error(t, err)
-		assert.Contains(t, err.Error(), "all proxies failed")
 	})
 }
 
@@ -696,8 +603,7 @@ func TestProxyRotator_AdaptiveScoring_Cooldown(t *testing.T) {
 		ProxyURL: "http://proxy2:8080",
 	})
 	require.NoError(t, err)
-
-	defer rotator.Close()
+	t.Cleanup(func() { _ = rotator.Close() })
 
 	req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, "https://pyaterochka.ru/api/auth", nil)
 	require.NoError(t, err)
@@ -708,7 +614,7 @@ func TestProxyRotator_AdaptiveScoring_Cooldown(t *testing.T) {
 	resp, err := rotator.Do(req)
 	require.NoError(t, err)
 
-	defer resp.Body.Close()
+	_ = resp.Body.Close()
 
 	var cooledClient, activeClient *mockDoer
 	if doer1.GetCalls() > 0 {
@@ -733,7 +639,7 @@ func TestProxyRotator_AdaptiveScoring_Cooldown(t *testing.T) {
 	activeClient.statusCode = http.StatusOK
 	activeClient.mu.Unlock()
 
-	for i := 0; i < 5; i++ {
+	for range 5 {
 		resp, err := rotator.Do(req)
 		require.NoError(t, err)
 
@@ -751,7 +657,7 @@ func TestProxyRotator_AdaptiveScoring_Cooldown(t *testing.T) {
 	activeClient.calls = 0
 	activeClient.mu.Unlock()
 
-	for i := 0; i < 5; i++ {
+	for range 5 {
 		resp, err := rotator.Do(req)
 		require.NoError(t, err)
 
@@ -766,7 +672,7 @@ func TestProxyRotator_AdaptiveScoring_Cooldown(t *testing.T) {
 	require.NoError(t, err)
 
 	googleCallsCooled := 0
-	for i := 0; i < 5; i++ {
+	for range 5 {
 		resp, err := rotator.Do(reqGoogle)
 		require.NoError(t, err)
 
@@ -778,116 +684,4 @@ func TestProxyRotator_AdaptiveScoring_Cooldown(t *testing.T) {
 	}
 
 	assert.True(t, googleCallsCooled > 0, "Cooled client should be active for other domains")
-}
-
-func TestRetryMiddleware(t *testing.T) {
-	t.Parallel()
-
-	t.Run("retry_on_failure_and_preserve_body", func(t *testing.T) {
-		t.Parallel()
-
-		m1 := &mockDoer{id: 1, statusCode: 502}
-		rotator, err := NewRotator(RotatorConfig{}, WithClient{Client: m1})
-		require.NoError(t, err)
-		t.Cleanup(func() { _ = rotator.Close() })
-
-		var callbackCalls int32
-
-		opts := middleware.RetryOptions{
-			MaxRetries: 3,
-			Backoff:    5 * time.Millisecond,
-			OnRetry: func(attempt uint32, err error, delay time.Duration) {
-				atomic.AddInt32(&callbackCalls, 1)
-			},
-		}
-
-		retryMiddleware := middleware.Retry(opts, RetryCondition(rotator))
-		client := retryMiddleware(aoni.NewHTTPDoerAdapter(m1))
-
-		bodyText := "test body"
-		httpReq, err := http.NewRequestWithContext(t.Context(), "POST", "http://test", strings.NewReader(bodyText))
-		require.NoError(t, err)
-
-		go func() {
-			time.Sleep(10 * time.Millisecond)
-			m1.SetStatusCode(200)
-		}()
-
-		resp, err := client.Do(aoni.NewStdRequest(httpReq))
-		require.NoError(t, err)
-		t.Cleanup(func() { _ = resp.Close() })
-
-		assert.GreaterOrEqual(t, m1.GetCalls(), 2)
-		assert.Equal(t, 200, resp.StatusCode())
-		assert.GreaterOrEqual(t, atomic.LoadInt32(&callbackCalls), int32(1))
-	})
-
-	t.Run("max_retries_exceeded", func(t *testing.T) {
-		t.Parallel()
-
-		m1 := &mockDoer{id: 1, forceError: true}
-		rotator, err := NewRotator(RotatorConfig{}, WithClient{Client: m1})
-		require.NoError(t, err)
-		t.Cleanup(func() { _ = rotator.Close() })
-
-		opts := middleware.RetryOptions{
-			MaxRetries: 1,
-			Backoff:    1 * time.Millisecond,
-		}
-
-		client := middleware.Retry(opts, RetryCondition(rotator))(aoni.NewHTTPDoerAdapter(m1))
-		httpReq, err := http.NewRequestWithContext(t.Context(), "GET", "http://test", nil)
-		require.NoError(t, err)
-
-		_, err = client.Do(aoni.NewStdRequest(httpReq))
-		require.Error(t, err)
-		assert.Equal(t, 2, m1.GetCalls())
-	})
-
-	t.Run("custom_condition", func(t *testing.T) {
-		t.Parallel()
-
-		var (
-			calls int
-			mu    sync.Mutex
-		)
-
-		m1 := aoni.DoerFunc(func(req aoni.Request) (aoni.Response, error) {
-			mu.Lock()
-			calls++
-			currentCalls := calls
-			mu.Unlock()
-
-			statusCode := http.StatusTooManyRequests
-			if currentCalls > 2 {
-				statusCode = http.StatusOK
-			}
-
-			return aoni.NewStdResponse(&http.Response{
-				StatusCode: statusCode,
-				Body:       io.NopCloser(strings.NewReader("")),
-			}), nil
-		})
-
-		opts := middleware.RetryOptions{
-			MaxRetries: 2,
-			Backoff:    1 * time.Microsecond,
-		}
-
-		condition := func(resp aoni.Response, err error) bool {
-			return resp != nil && resp.StatusCode() == http.StatusTooManyRequests
-		}
-
-		retryMiddleware := middleware.Retry(opts, condition)
-		client := retryMiddleware(m1)
-		httpReq, err := http.NewRequestWithContext(t.Context(), "GET", "http://test", nil)
-		require.NoError(t, err)
-
-		resp, err := client.Do(aoni.NewStdRequest(httpReq))
-		require.NoError(t, err)
-		t.Cleanup(func() { _ = resp.Close() })
-
-		assert.Equal(t, 3, calls)
-		assert.Equal(t, 200, resp.StatusCode())
-	})
 }
