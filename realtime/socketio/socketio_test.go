@@ -22,6 +22,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/lemon4ksan/aoni"
+	"github.com/lemon4ksan/aoni/internal/io"
 	"github.com/lemon4ksan/aoni/realtime/ws"
 )
 
@@ -62,7 +63,12 @@ func upgradeTestWS(w http.ResponseWriter, r *http.Request) (ws.Conn, error) {
 		return nil, err
 	}
 
-	return ws.WrapRawConn(conn, false), nil
+	netConn := conn
+	if bufrw.Reader.Buffered() > 0 {
+		netConn = &io.BufferedConn{Conn: conn, R: bufrw.Reader}
+	}
+
+	return ws.WrapRawConn(netConn, false), nil
 }
 
 type mockSIOServer struct {
