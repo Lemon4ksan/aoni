@@ -15,6 +15,9 @@ var (
 
 	// ErrUnexpectedStatus is returned when response status code violates [Request.ExpectStatus] criteria.
 	ErrUnexpectedStatus = errors.New("aoni fluent: response status code mismatch")
+
+	// ErrRangeNotSatisfiable is returned when the requested byte range exceeds the remote file size (HTTP 416).
+	ErrRangeNotSatisfiable = errors.New("aoni fluent: requested byte range not satisfiable by server")
 )
 
 // Error describes an operational failure occurring during request building or execution.

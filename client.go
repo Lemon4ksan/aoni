@@ -5,8 +5,10 @@
 package aoni
 
 import (
+	"bytes"
 	"context"
 	"crypto/tls"
+	stdio "io"
 	"maps"
 	"net"
 	"net/http"
@@ -18,11 +20,13 @@ import (
 	"github.com/quic-go/quic-go"
 	"github.com/quic-go/quic-go/http3"
 	utls "github.com/refraction-networking/utls"
+	"github.com/valyala/fasthttp"
 
 	"github.com/lemon4ksan/aoni/cookie"
 	"github.com/lemon4ksan/aoni/fingerprint"
 	"github.com/lemon4ksan/aoni/fingerprint/h2"
 	"github.com/lemon4ksan/aoni/internal/pipeline"
+	"github.com/lemon4ksan/aoni/netutil"
 )
 
 // Client is an immutable, thread-safe HTTP and WebSocket client built on top of [HTTPDoer].
@@ -160,11 +164,32 @@ func (c *Client) Do(req Request) (Response, error) {
 			ctx = context.Background()
 		}
 
+		var bodyReader stdio.Reader
+		if bs := req.BodyStream(); bs != nil {
+			bodyReader = bs
+		} else if bb := req.BodyBytes(); len(bb) > 0 {
+			bodyReader = bytes.NewReader(bb)
+		}
+
 		var err error
 
-		httpReq, err = http.NewRequestWithContext(ctx, req.Method(), req.URL(), req.BodyStream())
+		httpReq, err = http.NewRequestWithContext(ctx, req.Method(), req.URL(), bodyReader)
 		if err != nil {
 			return nil, &Error{Op: "failed to create http request", Err: err}
+		}
+
+		if fastAdapter, ok := req.(interface{ FastHTTPRequest() *fasthttp.Request }); ok {
+			fastReq := fastAdapter.FastHTTPRequest()
+			if fastReq != nil {
+				fastReq.Header.All()(func(k, v []byte) bool {
+					httpReq.Header.Add(string(k), string(v))
+					return true
+				})
+
+				if host := string(fastReq.Header.Peek("Host")); host != "" {
+					httpReq.Host = host
+				}
+			}
 		}
 	}
 
@@ -585,7 +610,8 @@ func (c *Client) buildQUICConfig(config *QUICMigrationConfig) *quic.Config {
 
 func (c *Client) buildQUICTLSConfig() *tls.Config {
 	tlsCfg := &tls.Config{
-		NextProtos: []string{AlpnH3},
+		NextProtos:         []string{AlpnH3},
+		ClientSessionCache: netutil.ResolveStdSessionCache(c.fingerprint.SessionCache),
 	}
 
 	if spec := c.fingerprint.TLSQUICClientHelloSpec; spec != nil && len(spec.CipherSuites) > 0 {

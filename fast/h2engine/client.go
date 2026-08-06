@@ -29,9 +29,10 @@ const (
 
 // ClientOpts configures the HTTP/2 client multiplexer.
 type ClientOpts struct {
-	PingInterval time.Duration
-	OnRTT        func(time.Duration)
-	Settings     *Settings
+	PingInterval  time.Duration
+	OnRTT         func(time.Duration)
+	OnPushPromise func(pushReq *fasthttp.Request, pushResp *fasthttp.Response)
+	Settings      *Settings
 }
 
 // Context maps a fasthttp request/response pair to an asynchronous stream execution.
@@ -58,20 +59,22 @@ func (ctx *Context) SetState(s streamState) {
 
 // Client manages connection pooling and stream allocation for HTTP/2.
 type Client struct {
-	d           *Dialer
-	onRTT       func(time.Duration)
-	lck         sync.Mutex
-	conns       list.List
-	orderedKeys []string
-	settings    *Settings
+	d             *Dialer
+	onRTT         func(time.Duration)
+	onPushPromise func(pushReq *fasthttp.Request, pushResp *fasthttp.Response)
+	lck           sync.Mutex
+	conns         list.List
+	orderedKeys   []string
+	settings      *Settings
 }
 
 // NewClient constructs an HTTP/2 Client instance using dialer and options.
 func NewClient(d *Dialer, opts ClientOpts) *Client {
 	return &Client{
-		d:        d,
-		onRTT:    opts.OnRTT,
-		settings: opts.Settings,
+		d:             d,
+		onRTT:         opts.OnRTT,
+		onPushPromise: opts.OnPushPromise,
+		settings:      opts.Settings,
 	}
 }
 
@@ -96,12 +99,18 @@ func (cl *Client) onConnectionDropped(ctx context.Context, c *Conn) {
 
 func (cl *Client) createConn(ctx context.Context) (*Conn, *list.Element, error) {
 	c, err := cl.d.DialContext(ctx, ConnOpts{
-		PingInterval: cl.d.PingInterval,
-		OnDisconnect: cl.onConnectionDropped,
-		Settings:     cl.settings,
+		PingInterval:  cl.d.PingInterval,
+		OnDisconnect:  cl.onConnectionDropped,
+		OnRTT:         cl.onRTT,
+		OnPushPromise: cl.onPushPromise,
+		Settings:      cl.settings,
 	})
 	if err != nil {
 		return nil, nil, err
+	}
+
+	if cl.onRTT != nil {
+		c.reqQueued.Store("rtt_callback", cl.onRTT)
 	}
 
 	if len(cl.orderedKeys) > 0 {

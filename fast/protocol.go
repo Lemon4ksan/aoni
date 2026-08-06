@@ -8,7 +8,9 @@ import (
 	"bytes"
 	"context"
 	"crypto/tls"
+	"io"
 	"net"
+	"net/http"
 	"strconv"
 	"strings"
 	"sync"
@@ -21,6 +23,7 @@ import (
 	"github.com/lemon4ksan/aoni"
 	"github.com/lemon4ksan/aoni/fast/h2engine"
 	"github.com/lemon4ksan/aoni/fast/h3engine"
+	"github.com/lemon4ksan/aoni/netutil"
 )
 
 type protocolState struct {
@@ -161,6 +164,7 @@ func (c *Client) getH3Client() *h3engine.Client {
 	c.protocolState.h3Once.Do(func() {
 		tlsCfg := &tls.Config{
 			InsecureSkipVerify: c.config.Engine.InsecureSkipVerify, //nolint:gosec
+			ClientSessionCache: netutil.ResolveStdSessionCache(c.config.Fingerprint.SessionCache),
 		}
 
 		if spec := c.config.Fingerprint.TLSQUICClientHelloSpec; spec != nil && len(spec.CipherSuites) > 0 {
@@ -219,9 +223,26 @@ func (c *Client) getH2Client(host string) *h2engine.Client {
 		h2s.SetMaxHeaderListSize(s.MaxHeaderListSize)
 	}
 
+	var onRTTCallback func(time.Duration)
+	if c.config.Network.DynamicHedging != nil && c.config.Network.DynamicHedging.Tracker != nil {
+		tracker := c.config.Network.DynamicHedging.Tracker
+		onRTTCallback = func(rtt time.Duration) {
+			tracker.Record(rtt)
+		}
+	}
+
+	var pushHandler func(pushReq *fasthttp.Request, pushResp *fasthttp.Response)
+	if cacheCfg := c.config.Defaults.Pipeline.Cache; cacheCfg != nil && cacheCfg.Store != nil {
+		pushHandler = func(pushReq *fasthttp.Request, pushResp *fasthttp.Response) {
+			c.cachePushedResponse(pushReq, pushResp, cacheCfg)
+		}
+	}
+
 	cl := h2engine.NewClient(dialer, h2engine.ClientOpts{
-		PingInterval: 15 * time.Second,
-		Settings:     h2s,
+		PingInterval:  15 * time.Second,
+		OnRTT:         onRTTCallback,
+		OnPushPromise: pushHandler,
+		Settings:      h2s,
 	})
 
 	if len(c.config.Fingerprint.HeaderOrder) > 0 {
@@ -231,6 +252,38 @@ func (c *Client) getH2Client(host string) *h2engine.Client {
 	c.protocolState.h2Clients[host] = cl
 
 	return cl
+}
+
+func (c *Client) cachePushedResponse(
+	fastReq *fasthttp.Request,
+	fastResp *fasthttp.Response,
+	cacheCfg *aoni.CacheConfig,
+) {
+	req, err := http.NewRequest(string(fastReq.Header.Method()), string(fastReq.URI().FullURI()), nil) //nolint:noctx
+	if err != nil {
+		return
+	}
+
+	fastReq.Header.All()(func(k, v []byte) bool {
+		req.Header.Add(string(k), string(v))
+		return true
+	})
+
+	resp := &http.Response{
+		StatusCode: fastResp.StatusCode(),
+		Header:     make(http.Header),
+		Body:       io.NopCloser(bytes.NewReader(fastResp.Body())),
+	}
+
+	fastResp.Header.All()(func(k, v []byte) bool {
+		resp.Header.Add(string(k), string(v))
+		return true
+	})
+
+	pipe := c.pipelineEngine
+	if pipe != nil {
+		pipe.SavePushedResponseToCache(req, resp, cacheCfg)
+	}
 }
 
 func (c *Client) removeH2Client(host string) {

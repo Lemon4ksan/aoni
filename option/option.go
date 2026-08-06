@@ -16,6 +16,7 @@ import (
 	"encoding/base64"
 	"net/http"
 	"net/url"
+	"slices"
 	"strings"
 	"time"
 
@@ -32,7 +33,9 @@ import (
 	"github.com/lemon4ksan/aoni/fingerprint/profiles"
 	"github.com/lemon4ksan/aoni/fingerprint/profiles/chrome"
 	"github.com/lemon4ksan/aoni/fingerprint/profiles/firefox"
+	"github.com/lemon4ksan/aoni/fingerprint/profiles/safari"
 	"github.com/lemon4ksan/aoni/mod"
+	"github.com/lemon4ksan/aoni/netutil/cert"
 	"github.com/lemon4ksan/aoni/netutil/fragment"
 	"github.com/lemon4ksan/aoni/netutil/ip"
 	"github.com/lemon4ksan/aoni/netutil/ipc"
@@ -184,6 +187,22 @@ func WithHTTP2Config(cfg aoni.HTTP2Config) aoni.ClientOption {
 func WithHTTP2Configurer(configurer aoni.HTTP2Configurer) aoni.ClientOption {
 	return func(cfg *aoni.Config) {
 		cfg.Fingerprint.H2Configurer = configurer
+	}
+}
+
+// WithH2ServerPush configures whether the HTTP/2 client accepts server-pushed resources (RFC 9113 §8.4),
+// storing them directly in the response cache to avoid duplicate asset fetches.
+func WithH2ServerPush(enable bool) aoni.ClientOption {
+	return func(cfg *aoni.Config) {
+		if cfg.Fingerprint.H2Settings == nil {
+			cfg.Fingerprint.H2Settings = &h2.ChromeSettings
+		}
+
+		if enable {
+			cfg.Fingerprint.H2Settings.EnablePush = 1
+		} else {
+			cfg.Fingerprint.H2Settings.EnablePush = 0
+		}
 	}
 }
 
@@ -451,6 +470,78 @@ func WithSocketController(controller aoni.SocketController) aoni.ClientOption {
 // 5. FINGERPRINT, TLS & H2/H3 EVASION OPTIONS
 // ============================================================================
 
+// WithChrome applies a production-grade, zero-configuration Chrome profile (DX)
+// combining uTLS Chrome 120+, H2/H3 settings, High-Entropy Client Hints, ECH, 0-RTT,
+// Certificate Compression, and CHIPS cookie partitioning in one call.
+func WithChrome() aoni.ClientOption {
+	return func(cfg *aoni.Config) {
+		WithProfileVariant(chrome.Desktop, profiles.Windows)(cfg)
+		With0RTT(true)(cfg)
+		WithAutoECH(true)(cfg)
+		WithCertCompression(cert.CompressionBrotli, cert.CompressionZstd)(cfg)
+		WithH2ServerPush(true)(cfg)
+
+		if cfg.Engine.CookieJar == nil {
+			cfg.Engine.CookieJar = cookie.NewProxyIsolatedJar()
+		}
+
+		hints := fingerprint.BuildClientHintsForOS(fingerprint.DefaultUserAgent, profiles.Windows)
+
+		cfg.Defaults.DefaultMods = append(cfg.Defaults.DefaultMods, func(req aoni.Request) {
+			hints.ApplyHeaders(req.SetHeader)
+		})
+	}
+}
+
+// WithChromeMobile applies a zero-configuration Chrome Android profile (DX) with mobile High-Entropy Client Hints.
+func WithChromeMobile() aoni.ClientOption {
+	return func(cfg *aoni.Config) {
+		WithProfileVariant(chrome.Mobile, profiles.Android)(cfg)
+		With0RTT(true)(cfg)
+		WithAutoECH(true)(cfg)
+		WithCertCompression(cert.CompressionBrotli, cert.CompressionZstd)(cfg)
+		WithH2ServerPush(true)(cfg)
+
+		if cfg.Engine.CookieJar == nil {
+			cfg.Engine.CookieJar = cookie.NewProxyIsolatedJar()
+		}
+
+		hints := fingerprint.BuildClientHintsForOS(chrome.UserAgentAndroid, profiles.Android)
+
+		cfg.Defaults.DefaultMods = append(cfg.Defaults.DefaultMods, func(req aoni.Request) {
+			hints.ApplyHeaders(req.SetHeader)
+		})
+	}
+}
+
+// WithFirefox applies a zero-configuration Firefox profile (DX) with 0-RTT, ECH, and Cert Compression.
+func WithFirefox() aoni.ClientOption {
+	return func(cfg *aoni.Config) {
+		WithProfileVariant(firefox.Desktop, profiles.Windows)(cfg)
+		With0RTT(true)(cfg)
+		WithAutoECH(true)(cfg)
+		WithCertCompression(cert.CompressionBrotli, cert.CompressionZstd)(cfg)
+
+		if cfg.Engine.CookieJar == nil {
+			cfg.Engine.CookieJar = cookie.NewProxyIsolatedJar()
+		}
+	}
+}
+
+// WithSafariDX applies a zero-configuration Safari macOS profile (DX) with 0-RTT, ECH, and Cert Compression.
+func WithSafariDX() aoni.ClientOption {
+	return func(cfg *aoni.Config) {
+		WithProfileVariant(safari.Desktop, profiles.MacOS)(cfg)
+		With0RTT(true)(cfg)
+		WithAutoECH(true)(cfg)
+		WithCertCompression(cert.CompressionBrotli, cert.CompressionZstd)(cfg)
+
+		if cfg.Engine.CookieJar == nil {
+			cfg.Engine.CookieJar = cookie.NewProxyIsolatedJar()
+		}
+	}
+}
+
 // WithTLSFingerprint returns an [aoni.ClientOption] selecting a pre-defined [aoni.BrowserID] uTLS ClientHello profile.
 func WithTLSFingerprint(browser aoni.BrowserID) aoni.ClientOption {
 	return func(cfg *aoni.Config) {
@@ -540,6 +631,37 @@ func WithSessionCache(cache aoni.SessionCache) aoni.ClientOption {
 	}
 }
 
+// With0RTT enables TLS 1.3 and QUIC 0-RTT (Early Data) session resumption (RFC 9001 / RFC 8446)
+// to send initial request payloads in the first packet, reducing connection setup latency to zero RTTs.
+//
+// Security Note:
+// 0-RTT data can be subject to network replay attacks. Use primarily for idempotent GET/HEAD requests.
+func With0RTT(enable bool) aoni.ClientOption {
+	return func(cfg *aoni.Config) {
+		cfg.Fingerprint.Enable0RTT = enable
+		if enable && cfg.Fingerprint.SessionCache == nil {
+			cfg.Fingerprint.SessionCache = proxy.NewProxyAwareSessionCache()
+		}
+	}
+}
+
+// WithCertCompression enables RFC 8879 TLS Certificate Compression during handshakes
+// using the specified algorithms to reduce packet count and latency.
+func WithCertCompression(algos ...cert.CompressionAlgorithm) aoni.ClientOption {
+	return func(cfg *aoni.Config) {
+		if len(algos) == 0 {
+			cfg.Fingerprint.CertCompression = []cert.CompressionAlgorithm{
+				cert.CompressionBrotli,
+				cert.CompressionZstd,
+			}
+
+			return
+		}
+
+		cfg.Fingerprint.CertCompression = slices.Clone(algos)
+	}
+}
+
 // WithCertificatePin returns an [aoni.ClientOption] pinning SHA-256 public key hashes globally for a domain.
 func WithCertificatePin(domain, hash string) aoni.ClientOption {
 	return func(cfg *aoni.Config) {
@@ -561,6 +683,30 @@ func WithCertificatePins(pins map[string][]string) aoni.ClientOption {
 		for domain, hashes := range pins {
 			cfg.Fingerprint.CertificatePins[domain] = append(cfg.Fingerprint.CertificatePins[domain], hashes...)
 		}
+	}
+}
+
+// WithECHConfig configures raw RFC 9484 TLS 1.3 Encrypted Client Hello (ECH) bytes to encrypt SNI.
+func WithECHConfig(raw []byte) aoni.ClientOption {
+	return func(cfg *aoni.Config) {
+		cfg.Fingerprint.ECHConfigList = slices.Clone(raw)
+	}
+}
+
+// WithECHConfigBase64 configures base64-encoded ECHConfigList parameters to encrypt SNI.
+func WithECHConfigBase64(rawBase64 string) aoni.ClientOption {
+	return func(cfg *aoni.Config) {
+		decoded, err := fingerprint.ParseECHConfigBase64(rawBase64)
+		if err == nil {
+			cfg.Fingerprint.ECHConfigList = decoded
+		}
+	}
+}
+
+// WithAutoECH enables automatic DNS HTTPS (Type 65) record resolution to retrieve ECHConfig keys.
+func WithAutoECH(enable bool) aoni.ClientOption {
+	return func(cfg *aoni.Config) {
+		cfg.Fingerprint.AutoECH = enable
 	}
 }
 

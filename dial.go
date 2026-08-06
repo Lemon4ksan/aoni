@@ -266,6 +266,7 @@ func (c *Client) resolveRTLSOptions(ctx context.Context, host string) netdial.RT
 		SpecProvider:       c.fingerprint.TLSClientHelloSpecProvider,
 		SessionCache:       c.fingerprint.SessionCache,
 		CertificatePins:    c.fingerprint.CertificatePins,
+		CertCompression:    c.fingerprint.CertCompression,
 		JA4Callback:        c.fingerprint.JA4Callback,
 		BaseTLSConfig:      c.resolveBaseTLSConfig(ctx),
 		InsecureSkipVerify: GetInsecureSkipVerify(ctx) || c.engineConfig.InsecureSkipVerify,

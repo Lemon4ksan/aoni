@@ -15,6 +15,11 @@ import (
 	"time"
 )
 
+// SavePushedResponseToCache validates and stores an HTTP/2 server-pushed response into the cache store.
+func (p *Pipeline) SavePushedResponseToCache(req *http.Request, resp *http.Response, cfg *CacheConfig) {
+	p.saveToCache(req, resp, cfg)
+}
+
 func (p *Pipeline) tryGetFromCache(req *http.Request, cfg *CacheConfig) *http.Response {
 	if req.Method != http.MethodGet || cfg == nil || cfg.Store == nil {
 		return nil

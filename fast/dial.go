@@ -480,6 +480,7 @@ func (d *fastDialer) resolveRTLSOptions(ctx context.Context, host string) netdia
 		SpecProvider:       d.config.Fingerprint.TLSClientHelloSpecProvider,
 		SessionCache:       d.config.Fingerprint.SessionCache,
 		CertificatePins:    d.config.Fingerprint.CertificatePins,
+		CertCompression:    d.config.Fingerprint.CertCompression,
 		JA4Callback:        d.config.Fingerprint.JA4Callback,
 		BaseTLSConfig:      &tls.Config{ServerName: serverName},
 		InsecureSkipVerify: aoni.GetInsecureSkipVerify(ctx) || d.config.Engine.InsecureSkipVerify,

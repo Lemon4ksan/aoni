@@ -20,6 +20,7 @@ import (
 	"github.com/lemon4ksan/aoni/fingerprint/ja4"
 	"github.com/lemon4ksan/aoni/fingerprint/p0f"
 	"github.com/lemon4ksan/aoni/internal/pipeline"
+	"github.com/lemon4ksan/aoni/netutil/cert"
 	"github.com/lemon4ksan/aoni/netutil/fragment"
 	"github.com/lemon4ksan/aoni/netutil/ip"
 	"github.com/lemon4ksan/aoni/netutil/netdial"
@@ -230,11 +231,16 @@ type FingerprintConfig struct {
 	SessionCache               SessionCache
 	PacketPadding              *fingerprint.PaddingConfig
 	CertificatePins            map[string][]string
+	CertCompression            []cert.CompressionAlgorithm
+	ECHConfigList              []byte
 	BrowserID                  BrowserID
+	AutoECH                    bool
+	Enable0RTT                 bool
 }
 
 func (f FingerprintConfig) Clone() FingerprintConfig {
 	cloned := f
+
 	cloned.TLSClientHelloID = clonePtr(f.TLSClientHelloID)
 	cloned.H2Settings = clonePtr(f.H2Settings)
 	cloned.H3Settings = clonePtr(f.H3Settings)
@@ -242,6 +248,14 @@ func (f FingerprintConfig) Clone() FingerprintConfig {
 
 	if len(f.HeaderOrder) > 0 {
 		cloned.HeaderOrder = slices.Clone(f.HeaderOrder)
+	}
+
+	if len(f.CertCompression) > 0 {
+		cloned.CertCompression = slices.Clone(f.CertCompression)
+	}
+
+	if len(f.ECHConfigList) > 0 {
+		cloned.ECHConfigList = slices.Clone(f.ECHConfigList)
 	}
 
 	if len(f.CertificatePins) > 0 {
