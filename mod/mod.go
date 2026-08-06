@@ -28,6 +28,7 @@ import (
 
 	"github.com/lemon4ksan/aoni"
 	"github.com/lemon4ksan/aoni/codec/values"
+	"github.com/lemon4ksan/aoni/cookie"
 	"github.com/lemon4ksan/aoni/fingerprint"
 	"github.com/lemon4ksan/aoni/fingerprint/ja4"
 	"github.com/lemon4ksan/aoni/fingerprint/p0f"
@@ -302,6 +303,13 @@ func WithCookies(kv map[string]string) aoni.RequestModifier {
 		for k, v := range kv {
 			req.AddHeader("Cookie", k+"="+v)
 		}
+	}
+}
+
+// WithPartitionKey constructs an [aoni.RequestModifier] attaching a CHIPS (RFC 6265bis) partition key for iFrame/widget context.
+func WithPartitionKey(key string) aoni.RequestModifier {
+	return func(req aoni.Request) {
+		req.SetContext(cookie.WithPartitionKey(req.Context(), key))
 	}
 }
 

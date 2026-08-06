@@ -2,7 +2,6 @@
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
-// Package cookie provides proxy-isolated cookie management, persistence, and transport decoration.
 package cookie
 
 import (
@@ -17,22 +16,95 @@ import (
 	"github.com/lemon4ksan/aoni/internal/bytesconv"
 )
 
-// Cookie represents a browser cookie structure formatted for JSON persistence and external automation tools.
+// Cookie represents a browser cookie structure formatted for JSON persistence,
+// including CHIPS (RFC 6265bis) Partitioned attributes and SameSite policies.
 type Cookie struct {
-	Expires  time.Time `json:"expires"`
-	Name     string    `json:"name"`
-	Value    string    `json:"value"`
-	Domain   string    `json:"domain"`
-	Path     string    `json:"path"`
-	HTTPOnly bool      `json:"httpOnly"`
-	Secure   bool      `json:"secure"`
-	MaxAge   int       `json:"maxAge"`
+	Expires      time.Time `json:"expires,omitempty"`
+	Name         string    `json:"name"`
+	Value        string    `json:"value"`
+	Domain       string    `json:"domain"`
+	Path         string    `json:"path"`
+	SameSite     string    `json:"sameSite,omitempty"`
+	PartitionKey string    `json:"partitionKey,omitempty"`
+	HTTPOnly     bool      `json:"httpOnly,omitempty"`
+	Secure       bool      `json:"secure,omitempty"`
+	Partitioned  bool      `json:"partitioned,omitempty"`
+	MaxAge       int       `json:"maxAge,omitempty"`
 }
 
-// PathMatch reports whether requestPath matches cookiePath according to RFC 6265 Section 5.1.4.
-//
-// Postconditions:
-//   - Correctly handles sub-paths requiring explicit slash boundaries (e.g., "/api" matches "/api/v1" but NOT "/api-v2").
+// ParseSetCookieHeader parses a raw Set-Cookie header value into a Cookie structure,
+// extracting CHIPS Partitioned attributes, SameSite policies, and standard metadata.
+func ParseSetCookieHeader(headerVal, defaultDomain, defaultPath string) Cookie {
+	if headerVal == "" {
+		return Cookie{}
+	}
+
+	parts := strings.Split(headerVal, ";")
+	if len(parts) == 0 {
+		return Cookie{}
+	}
+
+	nameVal := strings.TrimSpace(parts[0])
+
+	eqIdx := strings.IndexByte(nameVal, '=')
+	if eqIdx <= 0 {
+		return Cookie{}
+	}
+
+	c := Cookie{
+		Name:   strings.TrimSpace(nameVal[:eqIdx]),
+		Value:  strings.TrimSpace(nameVal[eqIdx+1:]),
+		Domain: defaultDomain,
+		Path:   defaultPath,
+	}
+
+	for _, attr := range parts[1:] {
+		parseCookieAttribute(strings.TrimSpace(attr), &c)
+	}
+
+	return c
+}
+
+func parseCookieAttribute(attr string, c *Cookie) {
+	if attr == "" {
+		return
+	}
+
+	lower := strings.ToLower(attr)
+	switch {
+	case lower == "httponly":
+		c.HTTPOnly = true
+	case lower == "secure":
+		c.Secure = true
+	case lower == "partitioned":
+		c.Partitioned = true
+	case strings.HasPrefix(lower, "samesite="):
+		c.SameSite = parseAttributeValue(attr)
+	case strings.HasPrefix(lower, "domain="):
+		c.Domain = strings.TrimPrefix(parseAttributeValue(attr), ".")
+	case strings.HasPrefix(lower, "path="):
+		c.Path = parseAttributeValue(attr)
+	case strings.HasPrefix(lower, "max-age="):
+		if maxAge, err := strconv.Atoi(parseAttributeValue(attr)); err == nil {
+			c.MaxAge = maxAge
+		}
+	case strings.HasPrefix(lower, "expires="):
+		if exp, err := http.ParseTime(parseAttributeValue(attr)); err == nil {
+			c.Expires = exp
+		}
+	}
+}
+
+func parseAttributeValue(attr string) string {
+	_, val, ok := strings.Cut(attr, "=")
+	if !ok {
+		return ""
+	}
+
+	return strings.TrimSpace(val)
+}
+
+// PathMatch reports whether reqPath matches cookiePath according to RFC 6265 Section 5.1.4.
 func PathMatch(reqPath, cookiePath string) bool {
 	if cookiePath == "" {
 		cookiePath = "/"
@@ -121,8 +193,6 @@ func SortForBrowser(cookies []*http.Cookie) {
 }
 
 // BuildCookieHeader constructs an RFC 6265 compliant 'Cookie' header string.
-//
-// Sorts cookies according to path length precedence without mutating the original slice.
 func BuildCookieHeader(cookies []*http.Cookie) string {
 	if len(cookies) == 0 {
 		return ""
