@@ -7,6 +7,7 @@ package dns
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/binary"
 	"errors"
 	"io"
@@ -277,45 +278,52 @@ func TestNewDoHResolver(t *testing.T) {
 func TestDoHResolver_LookupIPAddr_Mocked(t *testing.T) {
 	t.Parallel()
 
-	// Mock transport for HTTP requests
 	mockTransport := roundTripperFunc(func(req *http.Request) (*http.Response, error) {
-		query := req.URL.Query().Get("name")
-		qtype := req.URL.Query().Get("type")
+		body, _ := io.ReadAll(req.Body)
+		if len(body) < 12 {
+			return nil, errors.New("invalid doh wire query")
+		}
 
-		var response string
-		if query == "example.test" || query == "example.test." {
-			switch qtype {
-			case "1": // A record
-				response = `{"Answer":[{"type":1,"data":"192.168.1.100"}]}`
-			case "28": // AAAA record
-				response = `{"Answer":[{"type":28,"data":"2001:db8::1"}]}`
+		queryID := binary.BigEndian.Uint16(body[0:2])
+
+		qtypeOffset, err := skipDomainName(body, 12)
+
+		respIP := netip.MustParseAddr("192.168.1.100")
+		if err == nil && qtypeOffset+2 <= len(body) {
+			qtype := binary.BigEndian.Uint16(body[qtypeOffset : qtypeOffset+2])
+			if qtype == TypeAAAA {
+				respIP = netip.MustParseAddr("2001:db8::1")
 			}
 		}
 
+		respWire := buildMockDoQDNSResponse(queryID, respIP)
+
+		header := make(http.Header)
+		header.Set("Content-Type", DoHMediaType)
+
 		return &http.Response{
 			StatusCode: http.StatusOK,
-			Body:       io.NopCloser(strings.NewReader(response)),
-			Header:     make(http.Header),
+			Body:       io.NopCloser(bytes.NewReader(respWire)),
+			Header:     header,
 			Request:    req,
 		}, nil
 	})
 
 	mockClient := &http.Client{Transport: mockTransport}
 
-	// Pass the mock client as the universal doer parameter
 	resolver := NewDoHResolver("https://8.8.8.8/dns-query", "dns.google", mockClient)
 
 	ips, err := resolver.LookupIPAddr(t.Context(), "example.test")
 	require.NoError(t, err)
 
 	var ipv4, ipv6 bool
-	for _, ip := range ips {
-		if ip.IP.To4() != nil {
-			assert.Equal(t, "192.168.1.100", ip.IP.String())
+	for _, ipAddr := range ips {
+		if ipAddr.IP.To4() != nil {
+			assert.Equal(t, "192.168.1.100", ipAddr.IP.String())
 
 			ipv4 = true
-		} else if ip.IP.To16() != nil {
-			assert.Equal(t, "2001:db8::1", ip.IP.String())
+		} else if ipAddr.IP.To16() != nil {
+			assert.Equal(t, "2001:db8::1", ipAddr.IP.String())
 
 			ipv6 = true
 		}
@@ -621,12 +629,23 @@ func TestDNSResolvers(t *testing.T) {
 func TestDoHResolver_QueryEncoding(t *testing.T) {
 	t.Parallel()
 
-	var capturedURL string
+	var (
+		capturedContentType string
+		capturedBody        []byte
+	)
 
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		capturedURL = r.URL.String()
+		capturedContentType = r.Header.Get("Content-Type")
+		capturedBody, _ = io.ReadAll(r.Body)
 
+		w.Header().Set("Content-Type", DoHMediaType)
 		w.WriteHeader(http.StatusOK)
+
+		if len(capturedBody) >= 2 {
+			queryID := binary.BigEndian.Uint16(capturedBody[0:2])
+			respWire := buildMockDoQDNSResponse(queryID, netip.MustParseAddr("127.0.0.1"))
+			_, _ = w.Write(respWire)
+		}
 	}))
 	t.Cleanup(ts.Close)
 
@@ -637,10 +656,11 @@ func TestDoHResolver_QueryEncoding(t *testing.T) {
 	}
 
 	ctx := t.Context()
-	_, _ = r.queryWire(ctx, "example.com", 1)
+	_, err := r.queryWire(ctx, "example.com", 1)
+	require.NoError(t, err)
 
-	assert.Contains(t, capturedURL, "name=example.com")
-	assert.Contains(t, capturedURL, "type=1")
+	assert.Equal(t, DoHMediaType, capturedContentType)
+	assert.NotEmpty(t, capturedBody)
 }
 
 func TestInMemoryDNSCache_Eviction(t *testing.T) {
@@ -695,14 +715,18 @@ func TestDoHResolver_EDNS0_And_GetMethod(t *testing.T) {
 			w.Header().Set("Content-Type", DoHMediaType)
 			w.WriteHeader(http.StatusOK)
 
-			// Generate a dummy valid DNS response header (12 bytes)
-			var resp [12]byte
-			if len(capturedQuery) >= 2 {
-				// Copy Transaction ID from query if possible
-				copy(resp[0:2], capturedQuery[:2])
+			if capturedQuery != "" {
+				wireQuery, err := base64.RawURLEncoding.DecodeString(capturedQuery)
+				if err == nil && len(wireQuery) >= 2 {
+					queryID := binary.BigEndian.Uint16(wireQuery[0:2])
+					respWire := buildMockDoQDNSResponse(queryID, netip.MustParseAddr("1.1.1.1"))
+					_, _ = w.Write(respWire)
+
+					return
+				}
 			}
 
-			_, _ = w.Write(resp[:])
+			w.WriteHeader(http.StatusBadRequest)
 		}))
 		t.Cleanup(ts.Close)
 
@@ -734,12 +758,11 @@ func TestDoHResolver_EDNS0_And_GetMethod(t *testing.T) {
 			w.Header().Set("Content-Type", DoHMediaType)
 			w.WriteHeader(http.StatusOK)
 
-			var resp [12]byte
 			if len(capturedBody) >= 2 {
-				copy(resp[0:2], capturedBody[:2])
+				queryID := binary.BigEndian.Uint16(capturedBody[0:2])
+				respWire := buildMockDoQDNSResponse(queryID, netip.MustParseAddr("1.1.1.1"))
+				_, _ = w.Write(respWire)
 			}
-
-			_, _ = w.Write(resp[:])
 		}))
 		t.Cleanup(ts.Close)
 

@@ -10,9 +10,10 @@ import (
 	stdio "io"
 	"net/http"
 	"net/url"
-	"reflect"
 	"strconv"
 	"strings"
+
+	"github.com/valyala/fasthttp"
 
 	"github.com/lemon4ksan/aoni/internal/bytesconv"
 )
@@ -435,23 +436,30 @@ func (a *HTTPDoerAdapter) Do(req Request) (Response, error) {
 			ctx = context.Background()
 		}
 
+		var bodyReader stdio.Reader
+		if bs := req.BodyStream(); bs != nil {
+			bodyReader = bs
+		} else if bb := req.BodyBytes(); len(bb) > 0 {
+			bodyReader = bytes.NewReader(bb)
+		}
+
 		var err error
 
-		httpReq, err = http.NewRequestWithContext(ctx, req.Method(), req.URL(), req.BodyStream())
+		httpReq, err = http.NewRequestWithContext(ctx, req.Method(), req.URL(), bodyReader)
 		if err != nil {
 			return nil, err
 		}
 
-		if engReq := req.EngineRequest(); engReq != nil {
-			if typeVal := reflect.TypeOf(engReq).String(); strings.Contains(typeVal, "fasthttp.Request") {
-				val := reflect.ValueOf(engReq)
-				if peekHost := val.MethodByName("Header").Call(nil); len(peekHost) > 0 {
-					hdr := peekHost[0]
-					if hostBytes := hdr.MethodByName("Peek").
-						Call([]reflect.Value{reflect.ValueOf("Host")}); len(hostBytes) > 0 &&
-						!hostBytes[0].IsNil() {
-						httpReq.Host = string(hostBytes[0].Bytes())
-					}
+		if fastAdapter, ok := req.(interface{ FastHTTPRequest() *fasthttp.Request }); ok {
+			fastReq := fastAdapter.FastHTTPRequest()
+			if fastReq != nil {
+				fastReq.Header.All()(func(k, v []byte) bool {
+					httpReq.Header.Add(string(k), string(v))
+					return true
+				})
+
+				if host := string(fastReq.Header.Peek("Host")); host != "" {
+					httpReq.Host = host
 				}
 			}
 		}
