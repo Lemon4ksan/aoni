@@ -8,7 +8,6 @@ package io
 import (
 	"bufio"
 	"bytes"
-	"compress/gzip"
 	"context"
 	"errors"
 	"io"
@@ -18,6 +17,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/klauspost/compress/gzip"
 	"github.com/lemon4ksan/miyako/generic"
 )
 

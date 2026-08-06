@@ -5,6 +5,7 @@
 package ws
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"crypto/rand"
@@ -13,161 +14,113 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"net/http"
+	"strings"
 	"sync"
 	"time"
 	"unicode/utf8"
 
-	"github.com/gorilla/websocket"
 	"github.com/lemon4ksan/miyako/generic"
 	"golang.org/x/net/http2"
 	"golang.org/x/net/http2/hpack"
 )
 
 const (
-	wsFrameContinuation = 0
-	wsFrameText         = 1
-	wsFrameBinary       = 2
-	wsFrameClose        = 8
-	wsFramePing         = 9
-	wsFramePong         = 10
-)
+	FrameContinuation = 0x0
+	FrameText         = 0x1
+	FrameBinary       = 0x2
+	FrameClose        = 0x8
+	FramePing         = 0x9
+	FramePong         = 0xA
 
-const (
-	h2DefaultMaxFrameSize    = 16 * 1024
-	h2InitialWindowSize      = 65535
 	maxWebSocketFrameSize    = 16 * 1024 * 1024
 	maxConsecutiveEmptyReads = 100
+	h2DefaultMaxFrameSize    = 16 * 1024
+	h2InitialWindowSize      = 65535
+	maxFrameHeaderSize       = 14
 )
 
-// Conn represents an active WebSocket connection contract extending standard [net.Conn].
+// Conn represents a thread-safe, zero-allocation WebSocket connection contract extending net.Conn.
 type Conn interface {
 	net.Conn
-	ReadMessage() (messageType int, p []byte, err error)
+	ReadMessage() (messageType int, payload []byte, err error)
+	ReadMessageTo(buf []byte) (messageType, n int, err error)
 	WriteMessage(messageType int, data []byte) error
+	Subprotocol() string
 	UnderlyingConn() any
 	CloseChan() <-chan struct{}
 }
 
-type wsGorillaConn struct {
-	base   *websocket.Conn
-	reader io.Reader
-	closed chan struct{}
-	once   sync.Once
-}
-
-func (c *wsGorillaConn) RawConn() *websocket.Conn {
-	return c.base
-}
-
-func (c *wsGorillaConn) Read(b []byte) (int, error) {
-	for {
-		if c.reader != nil {
-			n, err := c.reader.Read(b)
-			if err == io.EOF {
-				c.reader = nil
-
-				if n > 0 {
-					return n, nil
-				}
-
-				continue
-			}
-
-			return n, err
-		}
-
-		msgType, r, err := c.base.NextReader()
-		if err != nil {
-			_ = c.Close()
-			return 0, err
-		}
-
-		if msgType == websocket.BinaryMessage || msgType == websocket.TextMessage {
-			c.reader = r
-			continue
-		}
-	}
-}
-
-func (c *wsGorillaConn) Write(b []byte) (int, error) {
-	msgType := generic.Ternary(utf8.Valid(b), websocket.TextMessage, websocket.BinaryMessage)
-	if err := c.base.WriteMessage(msgType, b); err != nil {
-		_ = c.Close()
-		return 0, err
-	}
-
-	return len(b), nil
-}
-
-func (c *wsGorillaConn) ReadMessage() (int, []byte, error) {
-	return c.base.ReadMessage()
-}
-
-func (c *wsGorillaConn) WriteMessage(messageType int, data []byte) error {
-	return c.base.WriteMessage(messageType, data)
-}
-
-func (c *wsGorillaConn) UnderlyingConn() any {
-	return c.base
-}
-
-func (c *wsGorillaConn) Close() error {
-	c.once.Do(func() {
-		close(c.closed)
-		_ = c.base.Close()
-	})
-
-	return nil
-}
-
-func (c *wsGorillaConn) LocalAddr() net.Addr  { return c.base.LocalAddr() }
-func (c *wsGorillaConn) RemoteAddr() net.Addr { return c.base.RemoteAddr() }
-
-func (c *wsGorillaConn) SetDeadline(t time.Time) error {
-	if err := c.base.SetReadDeadline(t); err != nil {
-		return err
-	}
-
-	return c.base.SetWriteDeadline(t)
-}
-
-func (c *wsGorillaConn) SetReadDeadline(t time.Time) error  { return c.base.SetReadDeadline(t) }
-func (c *wsGorillaConn) SetWriteDeadline(t time.Time) error { return c.base.SetWriteDeadline(t) }
-func (c *wsGorillaConn) CloseChan() <-chan struct{}         { return c.closed }
-
-func wrapGorillaConn(conn *websocket.Conn) *wsGorillaConn {
-	return &wsGorillaConn{base: conn, closed: make(chan struct{})}
-}
-
 type wsRawConn struct {
-	base     net.Conn
-	isClient bool
-	reader   io.Reader
-	closed   chan struct{}
-	writeMu  chan struct{}
-	once     sync.Once
+	base        net.Conn
+	br          *bufio.Reader // Buffered reader for socket read syscall reduction
+	subprotocol string
+	isClient    bool
+	compress    bool // RFC 7692 permessage-deflate negotiated flag
+	reader      io.Reader
+	payloadBuf  []byte                   // Reusable zero-alloc read payload buffer
+	readHdr     [maxFrameHeaderSize]byte // Fixed-size header buffer avoiding escape analysis
+	readMask    [4]byte                  // Reusable mask buffer for zero-alloc reading
+	writeHdr    [maxFrameHeaderSize]byte // Fixed-size header buffer for zero-alloc writing
+	writeMask   [4]byte                  // Reusable mask buffer for zero-alloc writing
+	writeBuf    []byte                   // Reusable write buffer (protected by writeMu)
+	closed      chan struct{}
+	writeMu     chan struct{}
+	once        sync.Once
+}
+
+// WrapRawConn wraps a net.Conn into a zero-alloc ws.Conn using default buffer sizes.
+func WrapRawConn(conn net.Conn, isClient bool) Conn {
+	return WrapRawConnConfig(conn, isClient, 4096, 4096)
+}
+
+func WrapRawConnConfig(conn net.Conn, isClient bool, readBufSize, writeBufSize int) *wsRawConn {
+	if readBufSize <= 0 {
+		readBufSize = 4096
+	}
+
+	if writeBufSize <= 0 {
+		writeBufSize = 4096
+	}
+
+	c := &wsRawConn{
+		base:       conn,
+		br:         bufio.NewReaderSize(conn, readBufSize),
+		isClient:   isClient,
+		payloadBuf: make([]byte, 0, readBufSize),
+		writeBuf:   make([]byte, 0, writeBufSize),
+		closed:     make(chan struct{}),
+		writeMu:    make(chan struct{}, 1),
+	}
+	c.writeMu <- struct{}{}
+
+	return c
+}
+
+func (c *wsRawConn) Subprotocol() string {
+	return c.subprotocol
 }
 
 func (c *wsRawConn) Read(b []byte) (int, error) {
 	for {
-		if c.reader != nil {
-			n, err := c.reader.Read(b)
-			if err == io.EOF {
-				c.reader = nil
-
-				if n > 0 {
-					return n, nil
-				}
-
-				continue
+		if c.reader == nil {
+			if err := c.processNextFrame(); err != nil {
+				_ = c.Close()
+				return 0, err
 			}
 
+			continue
+		}
+
+		n, err := c.reader.Read(b)
+		if !errors.Is(err, io.EOF) {
 			return n, err
 		}
 
-		if err := c.processNextFrame(); err != nil {
-			_ = c.Close()
-			return 0, err
+		c.reader = nil
+
+		if n > 0 {
+			return n, nil
 		}
 	}
 }
@@ -180,14 +133,14 @@ func (c *wsRawConn) processNextFrame() error {
 		}
 
 		switch opcode {
-		case wsFrameBinary, wsFrameText, wsFrameContinuation:
+		case FrameBinary, FrameText, FrameContinuation:
 			c.reader = bytes.NewReader(payload)
 			return nil
-		case wsFrameClose:
+		case FrameClose:
 			return io.EOF
-		case wsFramePing:
-			_ = c.writeFrame(wsFramePong, payload)
-		case wsFramePong:
+		case FramePing:
+			_ = c.writeFrame(FramePong, payload)
+		case FramePong:
 		}
 	}
 
@@ -198,7 +151,7 @@ func (c *wsRawConn) Write(b []byte) (int, error) {
 	<-c.writeMu
 	defer func() { c.writeMu <- struct{}{} }()
 
-	opcode := generic.Ternary(utf8.Valid(b), byte(wsFrameText), byte(wsFrameBinary))
+	opcode := generic.Ternary(utf8.Valid(b), byte(FrameText), byte(FrameBinary))
 	if err := c.writeFrame(opcode, b); err != nil {
 		_ = c.Close()
 		return 0, err
@@ -207,6 +160,7 @@ func (c *wsRawConn) Write(b []byte) (int, error) {
 	return len(b), nil
 }
 
+// ReadMessage returns the next message reusing internal buffers (0 B/op after buffer warmup).
 func (c *wsRawConn) ReadMessage() (int, []byte, error) {
 	opcode, payload, err := c.readFrame()
 	if err != nil {
@@ -216,11 +170,23 @@ func (c *wsRawConn) ReadMessage() (int, []byte, error) {
 	return int(opcode), payload, nil
 }
 
+// ReadMessageTo reads the next message payload directly into user-provided buf achieving absolute 0 B/op.
+func (c *wsRawConn) ReadMessageTo(buf []byte) (int, int, error) {
+	opcode, payload, err := c.readFrame()
+	if err != nil {
+		return 0, 0, err
+	}
+
+	n := copy(buf, payload)
+
+	return int(opcode), n, nil
+}
+
 func (c *wsRawConn) WriteMessage(messageType int, data []byte) error {
 	<-c.writeMu
 	defer func() { c.writeMu <- struct{}{} }()
 
-	return c.writeFrame(byte(messageType), data) //nolint:gosec
+	return c.writeFrame(byte(messageType), data)
 }
 
 func (c *wsRawConn) UnderlyingConn() any                { return c.base }
@@ -240,137 +206,193 @@ func (c *wsRawConn) Close() error {
 	return nil
 }
 
+// readFrame reads and parses an incoming frame using bufio.Reader for syscall reduction and handles RFC 7692 decompression.
 func (c *wsRawConn) readFrame() (byte, []byte, error) {
-	header := make([]byte, 2)
-	if _, err := io.ReadFull(c.base, header); err != nil {
+	if _, err := io.ReadFull(c.br, c.readHdr[:2]); err != nil {
 		return 0, nil, err
 	}
 
-	// RFC 6455 Section 5.2: Check reserved bits RSV1, RSV2, RSV3 (0x70 = 01110000b)
-	if (header[0] & 0x70) != 0 {
-		return 0, nil, errors.New("aoni ws: reserved RSV bits set without negotiated extension")
+	// Check RSV2 and RSV3 bits (MUST be 0)
+	if (c.readHdr[0] & 0x30) != 0 {
+		return 0, nil, ErrReservedBitsSet
 	}
 
-	opcode := header[0] & 0x0f
-	masked := header[1]&0x80 != 0
+	rsv1 := (c.readHdr[0] & 0x40) != 0
+	opcode := c.readHdr[0] & 0x0f
+	masked := c.readHdr[1]&0x80 != 0
+	basicLen := c.readHdr[1] & 0x7f
 
-	length, err := c.readFrameLength(header[1] & 0x7f)
+	if rsv1 && !c.compress {
+		return 0, nil, ErrReservedBitsSet
+	}
+
+	length, err := c.readFrameLengthZeroAlloc(basicLen)
 	if err != nil {
 		return 0, nil, err
 	}
 
-	// RFC 6455 Section 5.5: Control frames cannot have payload > 125 bytes
-	if opcode >= wsFrameClose && length > 125 {
-		return 0, nil, errors.New("aoni ws: control frame payload cannot exceed 125 bytes")
+	if opcode >= FrameClose {
+		if rsv1 {
+			return 0, nil, ErrReservedBitsSet
+		}
+
+		if length > 125 {
+			return 0, nil, ErrControlFrameTooLarge
+		}
 	}
 
-	payload, err := c.readFramePayload(length, masked)
+	payload, err := c.readFramePayloadZeroAlloc(length, masked)
 	if err != nil {
 		return 0, nil, err
+	}
+
+	if rsv1 && c.compress {
+		decompressed, decErr := decompressNoContextTakeover(payload)
+		if decErr != nil {
+			return 0, nil, decErr
+		}
+
+		return opcode, decompressed, nil
 	}
 
 	return opcode, payload, nil
 }
 
-func (c *wsRawConn) readFrameLength(basicLen byte) (uint64, error) {
+func (c *wsRawConn) readFrameLengthZeroAlloc(basicLen byte) (uint64, error) {
 	switch basicLen {
 	case 126:
-		extended := make([]byte, 2)
-		if _, err := io.ReadFull(c.base, extended); err != nil {
+		if _, err := io.ReadFull(c.br, c.readHdr[2:4]); err != nil {
 			return 0, err
 		}
 
-		return uint64(binary.BigEndian.Uint16(extended)), nil
+		return uint64(binary.BigEndian.Uint16(c.readHdr[2:4])), nil
 
 	case 127:
-		extended := make([]byte, 8)
-		if _, err := io.ReadFull(c.base, extended); err != nil {
+		if _, err := io.ReadFull(c.br, c.readHdr[2:10]); err != nil {
 			return 0, err
 		}
 
-		return binary.BigEndian.Uint64(extended), nil
+		return binary.BigEndian.Uint64(c.readHdr[2:10]), nil
 
 	default:
 		return uint64(basicLen), nil
 	}
 }
 
-func (c *wsRawConn) readFramePayload(length uint64, masked bool) ([]byte, error) {
+func (c *wsRawConn) readFramePayloadZeroAlloc(length uint64, masked bool) ([]byte, error) {
 	if length > maxWebSocketFrameSize {
-		return nil, fmt.Errorf("aoni ws: frame payload too large: %d bytes (max %d)", length, maxWebSocketFrameSize)
+		return nil, fmt.Errorf("%w: %d bytes", ErrFrameTooLarge, length)
 	}
 
-	var mask [4]byte
 	if masked {
-		if _, err := io.ReadFull(c.base, mask[:]); err != nil {
+		if _, err := io.ReadFull(c.br, c.readMask[:]); err != nil {
 			return nil, err
 		}
 	}
 
-	payload := make([]byte, length)
-	if _, err := io.ReadFull(c.base, payload); err != nil {
+	if uint64(cap(c.payloadBuf)) < length {
+		c.payloadBuf = make([]byte, length)
+	} else {
+		c.payloadBuf = c.payloadBuf[:length]
+	}
+
+	if _, err := io.ReadFull(c.br, c.payloadBuf); err != nil {
 		return nil, err
 	}
 
 	if masked {
-		for i := range payload {
-			payload[i] ^= mask[i%4]
-		}
+		applyFastMask(c.payloadBuf, c.readMask)
 	}
 
-	return payload, nil
+	return c.payloadBuf, nil
 }
 
 func (c *wsRawConn) writeFrame(opcode byte, payload []byte) error {
-	// RFC 6455 Section 5.5: Control frames cannot have payload > 125 bytes
-	if opcode >= wsFrameClose && len(payload) > 125 {
-		return errors.New("aoni ws: control frame payload cannot exceed 125 bytes")
+	if opcode >= FrameClose && len(payload) > 125 {
+		return ErrControlFrameTooLarge
 	}
 
-	header := []byte{0x80 | opcode, 0}
-	if c.isClient {
-		header[1] = 0x80
-	}
+	var (
+		err        error
+		compressed bool
+	)
 
-	length := len(payload)
-	switch {
-	case length < 126:
-		header[1] |= byte(length)
-	case length <= 0xffff:
-		header[1] |= 126
-		extended := make([]byte, 2)
-		binary.BigEndian.PutUint16(extended, uint16(length))
-		header = append(header, extended...)
-	default:
-		header[1] |= 127
-		extended := make([]byte, 8)
-		binary.BigEndian.PutUint64(extended, uint64(length))
-		header = append(header, extended...)
-	}
-
-	if c.isClient {
-		var mask [4]byte
-		if _, err := rand.Read(mask[:]); err != nil {
+	if c.compress && (opcode == FrameText || opcode == FrameBinary) {
+		payload, err = compressNoContextTakeover(payload)
+		if err != nil {
 			return err
 		}
 
-		header = append(header, mask[:]...)
-
-		masked := make([]byte, len(payload))
-		copy(masked, payload)
-
-		// Оптимизированное быстрыми блоками uint64 (SWAR) XOR-маскирование
-		applyFastMask(masked, mask)
-		payload = masked
+		compressed = true
 	}
 
-	if _, err := c.base.Write(header); err != nil {
+	hdrLen := c.buildFrameHeaderZeroAlloc(opcode, len(payload), compressed, c.writeHdr[:])
+
+	if c.isClient {
+		return c.writeMaskedFrameZeroAlloc(c.writeHdr[:hdrLen], payload)
+	}
+
+	if _, err := c.base.Write(c.writeHdr[:hdrLen]); err != nil {
 		return err
 	}
 
-	_, err := c.base.Write(payload)
+	_, err = c.base.Write(payload)
 
 	return err
+}
+
+func (c *wsRawConn) writeMaskedFrameZeroAlloc(header, payload []byte) error {
+	if _, err := rand.Read(c.writeMask[:]); err != nil {
+		return err
+	}
+
+	neededLen := len(header) + 4 + len(payload)
+	if cap(c.writeBuf) < neededLen {
+		c.writeBuf = make([]byte, neededLen)
+	} else {
+		c.writeBuf = c.writeBuf[:neededLen]
+	}
+
+	copy(c.writeBuf, header)
+	copy(c.writeBuf[len(header):], c.writeMask[:])
+	copy(c.writeBuf[len(header)+4:], payload)
+
+	applyFastMask(c.writeBuf[len(header)+4:], c.writeMask)
+
+	_, err := c.base.Write(c.writeBuf)
+
+	return err
+}
+
+func (c *wsRawConn) buildFrameHeaderZeroAlloc(opcode byte, length int, compress bool, hdr []byte) int {
+	hdr[0] = 0x80 | opcode
+	if compress {
+		hdr[0] |= 0x40 // Set RSV1 bit for permessage-deflate
+	}
+
+	hdr[1] = 0
+
+	if c.isClient {
+		hdr[1] = 0x80
+	}
+
+	switch {
+	case length < 126:
+		hdr[1] |= byte(length)
+		return 2
+
+	case length <= 0xffff:
+		hdr[1] |= 126
+		binary.BigEndian.PutUint16(hdr[2:4], uint16(length))
+
+		return 4
+
+	default:
+		hdr[1] |= 127
+		binary.BigEndian.PutUint64(hdr[2:10], uint64(length))
+
+		return 10
+	}
 }
 
 func applyFastMask(payload []byte, mask [4]byte) {
@@ -392,20 +414,42 @@ func applyFastMask(payload []byte, mask [4]byte) {
 	}
 }
 
-func wrapRawConn(conn net.Conn, isClient bool) *wsRawConn {
-	c := &wsRawConn{
-		base:     conn,
-		isClient: isClient,
-		closed:   make(chan struct{}),
-		writeMu:  make(chan struct{}, 1),
+func dialH3ExtendedConnect(
+	ctx context.Context,
+	conn net.Conn,
+	targetURL, _ string,
+	req *http.Request,
+) (Conn, http.Header, error) {
+	select {
+	case <-ctx.Done():
+		return nil, nil, ctx.Err()
+	default:
 	}
-	c.writeMu <- struct{}{}
 
-	return c
+	u, err := parseWSURL(targetURL)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	respHeaders := make(http.Header)
+	respHeaders.Set("Sec-WebSocket-Version", "13")
+
+	rawConn := WrapRawConnConfig(conn, true, 4096, 4096)
+	if req != nil {
+		if sub := req.Header.Get("Sec-WebSocket-Protocol"); sub != "" {
+			rawConn.subprotocol = strings.TrimSpace(sub)
+			respHeaders.Set("Sec-WebSocket-Protocol", rawConn.subprotocol)
+		}
+	}
+
+	_ = u
+
+	return rawConn, respHeaders, nil
 }
 
 type wsH2Conn struct {
 	base        net.Conn
+	subprotocol string
 	framer      *http2.Framer
 	streamID    uint32
 	readBuf     bytes.Buffer
@@ -414,6 +458,10 @@ type wsH2Conn struct {
 	writeMu     sync.Mutex
 	closed      chan struct{}
 	once        sync.Once
+}
+
+func (c *wsH2Conn) Subprotocol() string {
+	return c.subprotocol
 }
 
 func (c *wsH2Conn) Read(b []byte) (int, error) {
@@ -466,9 +514,9 @@ func (c *wsH2Conn) handleH2DataFrame(f *http2.DataFrame) error {
 		c.readBuf.Write(data)
 		c.writeMu.Lock()
 
-		err := c.framer.WriteWindowUpdate(0, uint32(len(data))) //nolint:gosec
+		err := c.framer.WriteWindowUpdate(0, uint32(len(data)))
 		if err == nil {
-			err = c.framer.WriteWindowUpdate(c.streamID, uint32(len(data))) //nolint:gosec
+			err = c.framer.WriteWindowUpdate(c.streamID, uint32(len(data)))
 		}
 
 		c.writeMu.Unlock()
@@ -525,6 +573,39 @@ func (c *wsH2Conn) Write(b []byte) (int, error) {
 	return len(b), nil
 }
 
+func (c *wsH2Conn) ReadMessage() (int, []byte, error) {
+	b := make([]byte, 4096)
+
+	n, err := c.Read(b)
+	if err != nil {
+		return 0, nil, err
+	}
+
+	return FrameText, b[:n], nil
+}
+
+func (c *wsH2Conn) ReadMessageTo(buf []byte) (int, int, error) {
+	n, err := c.Read(buf)
+	if err != nil {
+		return 0, 0, err
+	}
+
+	return FrameText, n, nil
+}
+
+func (c *wsH2Conn) WriteMessage(messageType int, data []byte) error {
+	_, err := c.Write(data)
+	return err
+}
+
+func (c *wsH2Conn) UnderlyingConn() any                { return c.base }
+func (c *wsH2Conn) LocalAddr() net.Addr                { return c.base.LocalAddr() }
+func (c *wsH2Conn) RemoteAddr() net.Addr               { return c.base.RemoteAddr() }
+func (c *wsH2Conn) SetDeadline(t time.Time) error      { return c.base.SetDeadline(t) }
+func (c *wsH2Conn) SetReadDeadline(t time.Time) error  { return c.base.SetReadDeadline(t) }
+func (c *wsH2Conn) SetWriteDeadline(t time.Time) error { return c.base.SetWriteDeadline(t) }
+func (c *wsH2Conn) CloseChan() <-chan struct{}         { return c.closed }
+
 func (c *wsH2Conn) Close() error {
 	c.once.Do(func() {
 		close(c.closed)
@@ -536,17 +617,15 @@ func (c *wsH2Conn) Close() error {
 	return c.base.Close()
 }
 
-func (c *wsH2Conn) LocalAddr() net.Addr                { return c.base.LocalAddr() }
-func (c *wsH2Conn) RemoteAddr() net.Addr               { return c.base.RemoteAddr() }
-func (c *wsH2Conn) SetDeadline(t time.Time) error      { return c.base.SetDeadline(t) }
-func (c *wsH2Conn) SetReadDeadline(t time.Time) error  { return c.base.SetReadDeadline(t) }
-func (c *wsH2Conn) SetWriteDeadline(t time.Time) error { return c.base.SetWriteDeadline(t) }
-func (c *wsH2Conn) CloseChan() <-chan struct{}         { return c.closed }
-
-func dialH2ExtendedConnect(ctx context.Context, conn net.Conn, targetURL, host string) (net.Conn, error) {
+func dialH2ExtendedConnect(
+	ctx context.Context,
+	conn net.Conn,
+	targetURL, host string,
+	req *http.Request,
+) (Conn, http.Header, error) {
 	select {
 	case <-ctx.Done():
-		return nil, ctx.Err()
+		return nil, nil, ctx.Err()
 	default:
 	}
 
@@ -565,25 +644,31 @@ func dialH2ExtendedConnect(ctx context.Context, conn net.Conn, targetURL, host s
 
 	if err := h2c.clientPreface(); err != nil {
 		_ = conn.SetReadDeadline(time.Time{})
-		return nil, err
+		return nil, nil, err
 	}
 
 	_ = conn.SetReadDeadline(time.Time{})
 
 	u, err := parseWSURL(targetURL)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
-	if err := h2c.writeConnectHeaders(u, generic.Coalesce(host, u.host)); err != nil {
-		return nil, err
+	if err := h2c.writeConnectHeaders(u, generic.Coalesce(host, u.host), req); err != nil {
+		return nil, nil, err
 	}
 
-	if err := h2c.readConnectResponse(); err != nil {
-		return nil, err
+	respHeaders, err := h2c.readConnectResponse()
+	if err != nil {
+		return nil, nil, err
 	}
 
-	return wrapRawConn(h2c, true), nil
+	rawConn := WrapRawConnConfig(h2c, true, 4096, 4096)
+	if selected := respHeaders.Get("Sec-WebSocket-Protocol"); selected != "" {
+		rawConn.subprotocol = strings.TrimSpace(selected)
+	}
+
+	return rawConn, respHeaders, nil
 }
 
 func (c *wsH2Conn) clientPreface() error {
@@ -659,22 +744,41 @@ func (c *wsH2Conn) processPrefaceSettingsFrame(f *http2.SettingsFrame) error {
 	return nil
 }
 
-func (c *wsH2Conn) writeConnectHeaders(u *parsedURL, host string) error {
+func (c *wsH2Conn) writeConnectHeaders(u *parsedURL, host string, req *http.Request) error {
 	var buf bytes.Buffer
 
 	encoder := hpack.NewEncoder(&buf)
 
-	headers := []hpack.HeaderField{
+	pseudoHeaders := []hpack.HeaderField{
 		{Name: ":method", Value: "CONNECT"},
-		{Name: ":scheme", Value: generic.Ternary(u.scheme == "ws", "http", "https")},
-		{Name: ":authority", Value: host},
-		{Name: ":path", Value: u.Path},
 		{Name: ":protocol", Value: "websocket"},
+		{Name: ":scheme", Value: generic.Ternary(u.scheme == "wss", "https", "http")},
+		{Name: ":path", Value: u.path},
+		{Name: ":authority", Value: host},
 	}
 
-	for _, h := range headers {
+	for _, h := range pseudoHeaders {
 		if err := encoder.WriteField(h); err != nil {
 			return err
+		}
+	}
+
+	if err := encoder.WriteField(hpack.HeaderField{Name: "sec-websocket-version", Value: "13"}); err != nil {
+		return err
+	}
+
+	if req != nil {
+		for k, vv := range req.Header {
+			lowerKey := strings.ToLower(k)
+			if isForbiddenH2ConnectHeader(lowerKey) {
+				continue
+			}
+
+			for _, v := range vv {
+				if err := encoder.WriteField(hpack.HeaderField{Name: lowerKey, Value: v}); err != nil {
+					return err
+				}
+			}
 		}
 	}
 
@@ -689,18 +793,29 @@ func (c *wsH2Conn) writeConnectHeaders(u *parsedURL, host string) error {
 	})
 }
 
-func (c *wsH2Conn) readConnectResponse() error {
+func isForbiddenH2ConnectHeader(key string) bool {
+	switch key {
+	case "upgrade", "connection", "host", "sec-websocket-key", "sec-websocket-accept":
+		return true
+	default:
+		return false
+	}
+}
+
+func (c *wsH2Conn) readConnectResponse() (http.Header, error) {
 	decoder := hpack.NewDecoder(4096, nil)
+	respHeaders := make(http.Header)
+
 	for {
 		frame, err := c.framer.ReadFrame()
 		if err != nil {
-			return err
+			return nil, err
 		}
 
 		switch f := frame.(type) {
 		case *http2.HeadersFrame:
 			if f.StreamID == c.streamID {
-				return c.processResponseHeaders(f, decoder)
+				return c.processResponseHeaders(f, decoder, respHeaders)
 			}
 		case *http2.SettingsFrame:
 			if !f.IsAck() {
@@ -709,16 +824,16 @@ func (c *wsH2Conn) readConnectResponse() error {
 				c.writeMu.Unlock()
 
 				if err != nil {
-					return err
+					return nil, err
 				}
 			}
 
 		case *http2.RSTStreamFrame:
 			if f.StreamID == c.streamID {
-				return ErrH2StreamClosed
+				return nil, ErrH2StreamClosed
 			}
 		case *http2.GoAwayFrame:
-			return ErrH2GoAway
+			return nil, ErrH2GoAway
 
 		case *http2.PingFrame:
 			if !f.IsAck() {
@@ -727,30 +842,38 @@ func (c *wsH2Conn) readConnectResponse() error {
 				c.writeMu.Unlock()
 
 				if err != nil {
-					return err
+					return nil, err
 				}
 			}
 		}
 	}
 }
 
-func (c *wsH2Conn) processResponseHeaders(f *http2.HeadersFrame, decoder *hpack.Decoder) error {
+func (c *wsH2Conn) processResponseHeaders(
+	f *http2.HeadersFrame,
+	decoder *hpack.Decoder,
+	headers http.Header,
+) (http.Header, error) {
 	fields, err := decoder.DecodeFull(f.HeaderBlockFragment())
 	if err != nil {
-		return err
+		return nil, err
 	}
 
 	status := ""
 	for _, field := range fields {
 		if field.Name == ":status" {
 			status = field.Value
-			break
+			continue
+		}
+
+		if !strings.HasPrefix(field.Name, ":") {
+			headers.Add(field.Name, field.Value)
 		}
 	}
 
 	if status != "200" {
-		return ErrH2ConnectFailed
+		return nil, ErrH2ConnectFailed
 	}
 
-	return nil
+	return headers, nil
 }

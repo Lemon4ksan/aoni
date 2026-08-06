@@ -2,8 +2,6 @@
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
-//go:build bench_fast
-
 package aoni_test
 
 import (
@@ -15,7 +13,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/go-resty/resty/v2"
 	"github.com/valyala/fasthttp"
 	"github.com/valyala/fasthttp/fasthttputil"
 
@@ -210,41 +207,6 @@ func BenchmarkGET_JSON_Standard_NetHTTP(b *testing.B) {
 		_ = resp.Body.Close()
 		if err != nil {
 			b.Fatal(err)
-		}
-	}
-}
-
-func BenchmarkGET_JSON_Resty_FastBridged(b *testing.B) {
-	ln, srv := setupFastBenchServer()
-	defer func() {
-		_ = srv.Shutdown()
-		_ = ln.Close()
-	}()
-
-	fastClient := fast.NewClient(
-		option.WithBaseURL("http://inmemory"),
-		option.WithTimeout(5*time.Second),
-	)
-	fastClient.Engine().Dial = func(_ string) (net.Conn, error) {
-		return ln.Dial()
-	}
-
-	stdHTTPClient := fast.NewStdClient(fastClient)
-	restyClient := resty.NewWithClient(stdHTTPClient)
-	ctx := context.Background()
-
-	b.ReportAllocs()
-	b.ResetTimer()
-
-	for b.Loop() {
-		var user fastBenchUser
-		resp, err := restyClient.R().SetContext(ctx).SetResult(&user).Get("http://inmemory/user")
-		if err != nil {
-			b.Fatalf("resty fast request failed: %v", err)
-		}
-
-		if resp.StatusCode() != http.StatusOK || user.ID != 42 {
-			b.Fatalf("invalid resty fast response: %v", resp.StatusCode())
 		}
 	}
 }

@@ -5,8 +5,8 @@
 package aoni_test
 
 import (
-	"compress/gzip"
 	"context"
+	"github.com/klauspost/compress/gzip"
 	"io"
 	"net/http"
 	"net/http/httptest"

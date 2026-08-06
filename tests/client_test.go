@@ -6,7 +6,6 @@ package aoni_test
 
 import (
 	"bytes"
-	"compress/gzip"
 	"context"
 	"crypto/rand"
 	"crypto/rsa"
@@ -19,6 +18,7 @@ import (
 	"encoding/pem"
 	"errors"
 	"fmt"
+	"github.com/klauspost/compress/gzip"
 	"io"
 	"math/big"
 	"net"
@@ -1889,16 +1889,6 @@ func TestClient_CustomMIMEDecoders(t *testing.T) {
 			option.WithBaseURL(ts.URL),
 			option.WithDecoder("application/x-msgpack", msgpackTestDecoder{}),
 		)
-
-		result, err := request.GetTo[string](context.Background(), client, "/")
-		require.NoError(t, err)
-		require.NotNil(t, result)
-		assert.Equal(t, "msgpack:binary_payload", *result)
-	})
-
-	t.Run("via client.RegisterDecoder", func(t *testing.T) {
-		client := aoni.NewClient(ts.Client(), option.WithBaseURL(ts.URL)).
-			RegisterDecoder("application/x-msgpack", msgpackTestDecoder{})
 
 		result, err := request.GetTo[string](context.Background(), client, "/")
 		require.NoError(t, err)

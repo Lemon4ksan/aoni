@@ -7,7 +7,6 @@ package decode
 import (
 	"bufio"
 	"bytes"
-	"compress/gzip"
 	"encoding/base64"
 	"encoding/binary"
 	"encoding/json"
@@ -18,6 +17,7 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/klauspost/compress/gzip"
 	"google.golang.org/protobuf/encoding/protojson"
 	"google.golang.org/protobuf/proto"
 
