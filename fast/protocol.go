@@ -21,6 +21,7 @@ import (
 	"github.com/lemon4ksan/aoni"
 	"github.com/lemon4ksan/aoni/fast/h2engine"
 	"github.com/lemon4ksan/aoni/fast/h3engine"
+	"github.com/lemon4ksan/aoni/netutil"
 )
 
 type protocolState struct {
@@ -161,6 +162,7 @@ func (c *Client) getH3Client() *h3engine.Client {
 	c.protocolState.h3Once.Do(func() {
 		tlsCfg := &tls.Config{
 			InsecureSkipVerify: c.config.Engine.InsecureSkipVerify, //nolint:gosec
+			ClientSessionCache: netutil.ResolveStdSessionCache(c.config.Fingerprint.SessionCache),
 		}
 
 		if spec := c.config.Fingerprint.TLSQUICClientHelloSpec; spec != nil && len(spec.CipherSuites) > 0 {

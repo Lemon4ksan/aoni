@@ -542,6 +542,20 @@ func WithSessionCache(cache aoni.SessionCache) aoni.ClientOption {
 	}
 }
 
+// With0RTT enables TLS 1.3 and QUIC 0-RTT (Early Data) session resumption (RFC 9001 / RFC 8446)
+// to send initial request payloads in the first packet, reducing connection setup latency to zero RTTs.
+//
+// Security Note:
+// 0-RTT data can be subject to network replay attacks. Use primarily for idempotent GET/HEAD requests.
+func With0RTT(enable bool) aoni.ClientOption {
+	return func(cfg *aoni.Config) {
+		cfg.Fingerprint.Enable0RTT = enable
+		if enable && cfg.Fingerprint.SessionCache == nil {
+			cfg.Fingerprint.SessionCache = proxy.NewProxyAwareSessionCache()
+		}
+	}
+}
+
 // WithCertCompression enables RFC 8879 TLS Certificate Compression during handshakes
 // using the specified algorithms to reduce packet count and latency.
 func WithCertCompression(algos ...cert.CompressionAlgorithm) aoni.ClientOption {

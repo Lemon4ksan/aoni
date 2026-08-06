@@ -235,6 +235,7 @@ type FingerprintConfig struct {
 	ECHConfigList              []byte
 	BrowserID                  BrowserID
 	AutoECH                    bool
+	Enable0RTT                 bool
 }
 
 func (f FingerprintConfig) Clone() FingerprintConfig {

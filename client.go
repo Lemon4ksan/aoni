@@ -26,6 +26,7 @@ import (
 	"github.com/lemon4ksan/aoni/fingerprint"
 	"github.com/lemon4ksan/aoni/fingerprint/h2"
 	"github.com/lemon4ksan/aoni/internal/pipeline"
+	"github.com/lemon4ksan/aoni/netutil"
 )
 
 // Client is an immutable, thread-safe HTTP and WebSocket client built on top of [HTTPDoer].
@@ -609,7 +610,8 @@ func (c *Client) buildQUICConfig(config *QUICMigrationConfig) *quic.Config {
 
 func (c *Client) buildQUICTLSConfig() *tls.Config {
 	tlsCfg := &tls.Config{
-		NextProtos: []string{AlpnH3},
+		NextProtos:         []string{AlpnH3},
+		ClientSessionCache: netutil.ResolveStdSessionCache(c.fingerprint.SessionCache),
 	}
 
 	if spec := c.fingerprint.TLSQUICClientHelloSpec; spec != nil && len(spec.CipherSuites) > 0 {

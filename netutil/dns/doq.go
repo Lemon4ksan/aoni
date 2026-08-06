@@ -34,11 +34,12 @@ const (
 // DoQResolver resolves DNS queries over dedicated QUIC connections (RFC 9250),
 // eliminating head-of-line blocking while providing TLS 1.3 transport encryption.
 type DoQResolver struct {
-	Endpoint  string
-	Host      string
-	Timeout   time.Duration
-	EDNS      wire.EDNSOptions
-	TLSConfig *tls.Config
+	Endpoint   string
+	Host       string
+	Timeout    time.Duration
+	EDNS       wire.EDNSOptions
+	TLSConfig  *tls.Config
+	Enable0RTT bool
 
 	mu   sync.Mutex
 	conn *quic.Conn
