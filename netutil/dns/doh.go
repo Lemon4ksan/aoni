@@ -20,10 +20,8 @@ import (
 	"github.com/lemon4ksan/aoni/option"
 )
 
-const (
-	// DoHMediaType specifies the official IETF RFC 8484 media type for DoH queries and responses.
-	DoHMediaType = "application/dns-message"
-)
+// DoHMediaType specifies the official IETF RFC 8484 media type for DoH queries and responses.
+const DoHMediaType = "application/dns-message"
 
 // DoHMethod specifies the HTTP method used for DoH queries (GET or POST per RFC 8484).
 type DoHMethod int
@@ -36,15 +34,17 @@ const (
 	DoHMethodGet
 )
 
-// DoHResolver resolves DNS via HTTPS using RFC 1035 wire format and RFC 8484 DoH specifications.
+// DoHResolver resolves hostnames using DNS over HTTPS (RFC 8484)
+// with support for EDNS0 Client Subnet (ECS) and message padding.
 type DoHResolver struct {
-	Endpoint string    // e.g. "https://1.1.1.1/dns-query"
-	Host     string    // Host header override, e.g. "cloudflare-dns.com"
-	Method   DoHMethod // DoHMethodPost or DoHMethodGet
+	Endpoint string
+	Host     string
+	Method   DoHMethod
+	EDNS     EDNSOptions
 	doer     aoni.RequestDoer
 }
 
-// NewDoHResolver creates a new RFC 8484 compliant DoHResolver.
+// NewDoHResolver constructs a DoHResolver configured with a 5-second timeout engine.
 func NewDoHResolver(endpoint, host string, doer any) *DoHResolver {
 	var engine aoni.RequestDoer
 	if doer == nil {
@@ -57,11 +57,12 @@ func NewDoHResolver(endpoint, host string, doer any) *DoHResolver {
 		Endpoint: endpoint,
 		Host:     host,
 		Method:   DoHMethodPost,
+		EDNS:     EDNSOptions{PadToBlock: 128},
 		doer:     engine,
 	}
 }
 
-// LookupIPAddr queries A and AAAA records via RFC 8484 DoH using RFC 1035 wire format.
+// LookupIPAddr queries A and AAAA records over DoH and returns IP addresses.
 func (r *DoHResolver) LookupIPAddr(ctx context.Context, host string) ([]net.IPAddr, error) {
 	addrs, err := r.LookupNetIP(ctx, host)
 	if err != nil {
@@ -76,25 +77,45 @@ func (r *DoHResolver) LookupIPAddr(ctx context.Context, host string) ([]net.IPAd
 	return ipAddrs, nil
 }
 
-// LookupNetIP queries A and AAAA records returning zero-alloc netip.Addr structures.
+// LookupNetIP queries A and AAAA records over DoH and returns netip.Addr structures.
 func (r *DoHResolver) LookupNetIP(ctx context.Context, host string) ([]netip.Addr, error) {
-	v4Addrs, err4 := r.queryWire(ctx, host, TypeA)
-	v6Addrs, err6 := r.queryWire(ctx, host, TypeAAAA)
+	records, err := r.LookupDNSRecords(ctx, host)
+	if err != nil {
+		return nil, err
+	}
+
+	addrs := make([]netip.Addr, len(records))
+	for i, rec := range records {
+		addrs[i] = rec.Addr
+	}
+
+	return addrs, nil
+}
+
+// LookupDNSRecords queries A and AAAA records over DoH, returning DNS records with authoritative TTLs.
+func (r *DoHResolver) LookupDNSRecords(ctx context.Context, host string) ([]DNSRecord, error) {
+	v4Records, err4 := r.queryWire(ctx, host, TypeA)
+	v6Records, err6 := r.queryWire(ctx, host, TypeAAAA)
 
 	if err4 != nil && err6 != nil {
 		return nil, wrapDNSError(host, "DoH", r.Endpoint, err4)
 	}
 
-	return append(v4Addrs, v6Addrs...), nil
+	return append(v4Records, v6Records...), nil
 }
 
-func (r *DoHResolver) queryWire(ctx context.Context, host string, qtype uint16) ([]netip.Addr, error) {
+func (r *DoHResolver) queryWire(ctx context.Context, host string, qtype uint16) ([]DNSRecord, error) {
 	var idBuf [2]byte
 
 	_, _ = rand.Read(idBuf[:])
 	queryID := binary.BigEndian.Uint16(idBuf[:])
 
-	wireQuery, err := PackDNSQuery(queryID, host, qtype)
+	edns := r.EDNS
+	if edns.PadToBlock <= 0 {
+		edns.PadToBlock = 128
+	}
+
+	wireQuery, err := PackDNSQueryExtended(queryID, host, qtype, edns)
 	if err != nil {
 		return nil, err
 	}
@@ -131,5 +152,5 @@ func (r *DoHResolver) queryWire(ctx context.Context, host string, qtype uint16) 
 		return nil, fmt.Errorf("aoni doh: http status %d", resp.StatusCode())
 	}
 
-	return ParseDNSResponse(resp.BodyBytes(), queryID)
+	return ParseDNSResponseRecords(resp.BodyBytes(), queryID)
 }

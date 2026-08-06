@@ -5,12 +5,15 @@
 package dns
 
 import (
+	"bytes"
 	"context"
+	"encoding/binary"
 	"errors"
 	"io"
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"net/netip"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -672,4 +675,249 @@ func TestInMemoryDNSCache_Eviction(t *testing.T) {
 
 	assert.False(t, expiredExists, "expired entry should be removed")
 	assert.True(t, validExists, "valid entry should remain")
+}
+
+func TestDoHResolver_EDNS0_And_GetMethod(t *testing.T) {
+	t.Parallel()
+
+	t.Run("doh_get_method_base64_encoded", func(t *testing.T) {
+		t.Parallel()
+
+		var (
+			capturedMethod string
+			capturedQuery  string
+		)
+
+		ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			capturedMethod = r.Method
+			capturedQuery = r.URL.Query().Get("dns")
+
+			w.Header().Set("Content-Type", DoHMediaType)
+			w.WriteHeader(http.StatusOK)
+
+			// Generate a dummy valid DNS response header (12 bytes)
+			var resp [12]byte
+			if len(capturedQuery) >= 2 {
+				// Copy Transaction ID from query if possible
+				copy(resp[0:2], capturedQuery[:2])
+			}
+
+			_, _ = w.Write(resp[:])
+		}))
+		t.Cleanup(ts.Close)
+
+		resolver := NewDoHResolver(ts.URL, "cloudflare-dns.com", aoni.NewClient(ts.Client()))
+		resolver.Method = DoHMethodGet
+		resolver.EDNS = EDNSOptions{PadToBlock: 128}
+
+		_, err := resolver.LookupNetIP(t.Context(), "example.com")
+		require.NoError(t, err)
+
+		assert.Equal(t, http.MethodGet, capturedMethod)
+		assert.NotEmpty(t, capturedQuery)
+	})
+
+	t.Run("doh_post_method_wire_payload", func(t *testing.T) {
+		t.Parallel()
+
+		var (
+			capturedMethod      string
+			capturedContentType string
+			capturedBody        []byte
+		)
+
+		ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			capturedMethod = r.Method
+			capturedContentType = r.Header.Get("Content-Type")
+			capturedBody, _ = io.ReadAll(r.Body)
+
+			w.Header().Set("Content-Type", DoHMediaType)
+			w.WriteHeader(http.StatusOK)
+
+			var resp [12]byte
+			if len(capturedBody) >= 2 {
+				copy(resp[0:2], capturedBody[:2])
+			}
+
+			_, _ = w.Write(resp[:])
+		}))
+		t.Cleanup(ts.Close)
+
+		resolver := NewDoHResolver(ts.URL, "dns.google", aoni.NewClient(ts.Client()))
+		resolver.Method = DoHMethodPost
+		resolver.EDNS = EDNSOptions{
+			ClientIP:   netip.MustParseAddr("192.168.1.50"),
+			PadToBlock: 128,
+		}
+
+		_, err := resolver.LookupNetIP(t.Context(), "example.com")
+		require.NoError(t, err)
+
+		assert.Equal(t, http.MethodPost, capturedMethod)
+		assert.Equal(t, DoHMediaType, capturedContentType)
+		assert.NotEmpty(t, capturedBody)
+	})
+
+	t.Run("doh_non_200_http_status_error", func(t *testing.T) {
+		t.Parallel()
+
+		ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			w.WriteHeader(http.StatusServiceUnavailable)
+		}))
+		t.Cleanup(ts.Close)
+
+		resolver := NewDoHResolver(ts.URL, "dns.google", aoni.NewClient(ts.Client()))
+		_, err := resolver.LookupDNSRecords(t.Context(), "example.com")
+
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "http status 503")
+	})
+}
+
+func TestPackDNSQueryExtended_EDNSOptions(t *testing.T) {
+	t.Parallel()
+
+	t.Run("invalid_empty_domain", func(t *testing.T) {
+		t.Parallel()
+
+		_, err := PackDNSQueryExtended(1, "", TypeA, EDNSOptions{})
+		assert.ErrorIs(t, err, ErrInvalidDomain)
+	})
+
+	t.Run("edns_client_subnet_ipv4", func(t *testing.T) {
+		t.Parallel()
+
+		edns := EDNSOptions{
+			ClientIP:   netip.MustParseAddr("10.0.1.20"),
+			PadToBlock: 128,
+		}
+
+		wire, err := PackDNSQueryExtended(0x1234, "test.org", TypeA, edns)
+		require.NoError(t, err)
+		require.NotEmpty(t, wire)
+
+		// Additional count (ARCOUNT) at bytes 10..11 must be 1 for EDNS0 OPT RR
+		arCount := binary.BigEndian.Uint16(wire[10:12])
+		assert.Equal(t, uint16(1), arCount)
+
+		// Verify padding aligns total message size to multiple of 128
+		assert.Zero(t, len(wire)%128, "wire packet length %d should be padded to 128", len(wire))
+	})
+
+	t.Run("edns_client_subnet_ipv6", func(t *testing.T) {
+		t.Parallel()
+
+		edns := EDNSOptions{
+			ClientIP:   netip.MustParseAddr("2001:db8::1"),
+			PadToBlock: 256,
+		}
+
+		wire, err := PackDNSQueryExtended(0x5678, "ipv6.test", TypeAAAA, edns)
+		require.NoError(t, err)
+
+		assert.Zero(t, len(wire)%256, "wire packet length %d should be padded to 256", len(wire))
+	})
+}
+
+func TestParseDNSResponseRecords_WireParsing(t *testing.T) {
+	t.Parallel()
+
+	t.Run("truncated_message_less_than_12_bytes", func(t *testing.T) {
+		t.Parallel()
+
+		_, err := ParseDNSResponseRecords([]byte{0x00, 0x01}, 0x0001)
+		assert.ErrorIs(t, err, ErrTruncatedDNSMessage)
+	})
+
+	t.Run("non_zero_rcode_returns_error", func(t *testing.T) {
+		t.Parallel()
+
+		// RCODE = 3 (NXDOMAIN)
+		var msg [12]byte
+		binary.BigEndian.PutUint16(msg[0:2], 0x1000)
+		binary.BigEndian.PutUint16(msg[2:4], 0x8003) // Response flag + RCODE 3
+
+		_, err := ParseDNSResponseRecords(msg[:], 0x1000)
+		require.Error(t, err)
+		assert.ErrorIs(t, err, ErrDNSResponseCode)
+		assert.Contains(t, err.Error(), "rcode=3")
+	})
+
+	t.Run("parse_valid_response_with_ttl", func(t *testing.T) {
+		t.Parallel()
+
+		// Build valid response wire: ID 0x1122, 1 Question, 1 Answer (Type A, TTL 300, IP 192.168.1.1)
+		var buf bytes.Buffer
+
+		var hdr [12]byte
+		binary.BigEndian.PutUint16(hdr[0:2], 0x1122)
+		binary.BigEndian.PutUint16(hdr[2:4], 0x8100) // Response, RD, RA
+		binary.BigEndian.PutUint16(hdr[4:6], 1)      // QDCOUNT
+		binary.BigEndian.PutUint16(hdr[6:8], 1)      // ANCOUNT
+		buf.Write(hdr[:])
+
+		// Question: "example.com", TypeA, ClassIN
+		buf.Write([]byte{7, 'e', 'x', 'a', 'm', 'p', 'l', 'e', 3, 'c', 'o', 'm', 0})
+
+		var qTail [4]byte
+		binary.BigEndian.PutUint16(qTail[0:2], TypeA)
+		binary.BigEndian.PutUint16(qTail[2:4], ClassIN)
+		buf.Write(qTail[:])
+
+		// Answer: Name pointer (0xc00c), TypeA, ClassIN, TTL 300, RDLen 4, IP 192.168.1.1
+		buf.Write([]byte{0xc0, 0x0c}) // Pointer to offset 12
+
+		var ansHdr [10]byte
+		binary.BigEndian.PutUint16(ansHdr[0:2], TypeA)
+		binary.BigEndian.PutUint16(ansHdr[2:4], ClassIN)
+		binary.BigEndian.PutUint32(ansHdr[4:8], 300) // TTL = 300s
+		binary.BigEndian.PutUint16(ansHdr[8:10], 4)  // RDLENGTH = 4
+		buf.Write(ansHdr[:])
+		buf.Write(net.ParseIP("192.168.1.1").To4())
+
+		records, err := ParseDNSResponseRecords(buf.Bytes(), 0x1122)
+		require.NoError(t, err)
+		require.Len(t, records, 1)
+
+		assert.Equal(t, "192.168.1.1", records[0].Addr.String())
+		assert.Equal(t, uint32(300), records[0].TTL)
+	})
+}
+
+type extendedResolverMock struct {
+	records []DNSRecord
+}
+
+func (m *extendedResolverMock) LookupIPAddr(_ context.Context, _ string) ([]net.IPAddr, error) {
+	return nil, nil
+}
+
+func (m *extendedResolverMock) LookupDNSRecords(_ context.Context, _ string) ([]DNSRecord, error) {
+	return m.records, nil
+}
+
+func TestInMemoryDNSCache_ExtendedDNSRecordsStorage(t *testing.T) {
+	t.Parallel()
+
+	records := []DNSRecord{
+		{Addr: netip.MustParseAddr("10.20.30.40"), TTL: 120},
+		{Addr: netip.MustParseAddr("10.20.30.41"), TTL: 60},
+	}
+
+	extResolver := &extendedResolverMock{records: records}
+	cache := NewInMemoryDNSCache(time.Minute, extResolver)
+	t.Cleanup(cache.Close)
+
+	ips, err := cache.LookupIPAddr(t.Context(), "ext.test")
+	require.NoError(t, err)
+	require.Len(t, ips, 2)
+	assert.Equal(t, "10.20.30.40", ips[0].IP.String())
+
+	// Verify cached entry effective TTL equals minimum record TTL (60s)
+	cache.mu.RLock()
+	entry, ok := cache.cache["ext.test"]
+	cache.mu.RUnlock()
+
+	assert.True(t, ok)
+	assert.True(t, entry.expiry.After(time.Now().Add(55*time.Second)))
 }

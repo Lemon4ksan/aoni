@@ -9,48 +9,106 @@ import (
 	"errors"
 	"fmt"
 	"net/netip"
+	"strings"
 )
 
 var (
-	// ErrTruncatedDNSMessage is returned when a DNS message is shorter than the required header or payload length.
+	// ErrTruncatedDNSMessage indicates that DNS message is shorter than the required header or payload length.
 	ErrTruncatedDNSMessage = errors.New("aoni dns: truncated or malformed dns message")
-
 	// ErrDNSResponseCode indicates that the DNS server returned a non-zero RCODE (e.g. NXDOMAIN or SERVFAIL).
 	ErrDNSResponseCode = errors.New("aoni dns: server returned error response code")
-
-	// ErrInvalidDomain is returned when an invalid or empty domain name is provided.
+	// ErrInvalidDomain indicates an invalid or empty domain name is provided.
 	ErrInvalidDomain = errors.New("aoni dns: invalid or empty domain name")
+	// ErrInvalidIPVersion indicates an unsupported IP version is provided for EDNS Client Subnet.
+	ErrInvalidIPVersion = errors.New("aoni dns: unsupported IP version for EDNS Client Subnet")
 )
 
 const (
 	TypeA    uint16 = 1  // IPv4 host address (RFC 1035)
 	TypeAAAA uint16 = 28 // IPv6 host address (RFC 3596)
 	ClassIN  uint16 = 1  // Internet class (RFC 1035)
+	TypeOPT  uint16 = 41 // OPT record (RFC 6891)
+
+	EDNS0OptionECS     uint16 = 8  // RFC 7871
+	EDNS0OptionPadding uint16 = 12 // RFC 7830
 )
 
-// PackDNSQuery builds a binary RFC 1035 DNS query packet for domain and query type (TypeA or TypeAAAA).
+// EDNSOptions configures Extension Mechanisms for DNS (EDNS0) features,
+// including EDNS Client Subnet (ECS, RFC 7871) and Message Padding (RFC 7830).
+type EDNSOptions struct {
+	// ClientIP specifies the client IP address to include in the ECS option
+	// for localized CDN node resolution. An invalid address disables ECS.
+	ClientIP netip.Addr
+
+	// PadToBlock specifies the block size in bytes (e.g., 128) to pad the
+	// message to, preventing side-channel size analysis over encrypted transports.
+	// A value <= 0 disables padding.
+	PadToBlock int
+}
+
+// DNSRecord represents an IP address record along with its authoritative TTL.
+type DNSRecord struct {
+	Addr netip.Addr
+	TTL  uint32
+}
+
+// PackDNSQuery Encodes a DNS question section into RFC 1035 wire format,
+// automatically applying EDNS0 128-byte block padding for encrypted transports.
+func PackDNSQuery(id uint16, domain string, qtype uint16) ([]byte, error) {
+	return PackDNSQueryExtended(id, domain, qtype, EDNSOptions{PadToBlock: 128})
+}
+
+// PackDNSQueryExtended encodes a DNS question into RFC 1035 wire format,
+// applying EDNS0 Extension Mechanisms (Padding and Client Subnet) if requested.
 //
 // Preconditions:
-//   - domain must be a valid non-empty hostname (e.g. "example.com").
-func PackDNSQuery(id uint16, domain string, qtype uint16) ([]byte, error) {
+//   - domain must be a valid, non-empty hostname.
+//
+// Postconditions:
+//   - Returns a binary payload with OPT RR in the Additional section if EDNS is enabled.
+func PackDNSQueryExtended(id uint16, domain string, qtype uint16, edns EDNSOptions) ([]byte, error) {
 	if domain == "" {
 		return nil, ErrInvalidDomain
 	}
 
-	buf := make([]byte, 0, 12+len(domain)+6)
+	buf := make([]byte, 0, 256)
 
 	var header [12]byte
 	binary.BigEndian.PutUint16(header[0:2], id)
-	binary.BigEndian.PutUint16(header[2:4], 0x0100) // Standard Query, Recursion Desired (RD = 1)
-	binary.BigEndian.PutUint16(header[4:6], 1)      // QDCOUNT = 1
+	binary.BigEndian.PutUint16(header[2:4], 0x0100)
+	binary.BigEndian.PutUint16(header[4:6], 1)
+
+	hasEDNS := edns.PadToBlock > 0 || edns.ClientIP.IsValid()
+	if hasEDNS {
+		binary.BigEndian.PutUint16(header[10:12], 1)
+	}
 
 	buf = append(buf, header[:]...)
 
+	var err error
+
+	buf, err = appendQName(buf, domain)
+	if err != nil {
+		return nil, err
+	}
+
+	var tail [4]byte
+	binary.BigEndian.PutUint16(tail[0:2], qtype)
+	binary.BigEndian.PutUint16(tail[2:4], ClassIN)
+	buf = append(buf, tail[:]...)
+
+	if hasEDNS {
+		buf = appendEDNS0OPT(buf, edns)
+	}
+
+	return buf, nil
+}
+
+func appendQName(buf []byte, domain string) ([]byte, error) {
 	rest := domain
 	for len(rest) > 0 {
 		label := rest
-
-		if idx := indexByte(rest, '.'); idx >= 0 {
+		if idx := strings.IndexByte(rest, '.'); idx >= 0 {
 			label = rest[:idx]
 			rest = rest[idx+1:]
 		} else {
@@ -65,32 +123,107 @@ func PackDNSQuery(id uint16, domain string, qtype uint16) ([]byte, error) {
 			return nil, ErrInvalidDomain
 		}
 
-		buf = append(buf, byte(len(label))) //nolint:gosec
+		buf = append(buf, byte(len(label)))
 		buf = append(buf, label...)
 	}
 
-	buf = append(buf, 0x00) // Root label terminator
-
-	var tail [4]byte
-	binary.BigEndian.PutUint16(tail[0:2], qtype)
-	binary.BigEndian.PutUint16(tail[2:4], ClassIN)
-	buf = append(buf, tail[:]...)
-
-	return buf, nil
+	return append(buf, 0x00), nil
 }
 
-func indexByte(s string, c byte) int {
-	for i := 0; i < len(s); i++ {
-		if s[i] == c {
-			return i
-		}
+func appendEDNS0OPT(buf []byte, edns EDNSOptions) []byte {
+	buf = append(buf, 0x00)
+	buf = appendUint16(buf, TypeOPT)
+	buf = appendUint16(buf, 4096)
+	buf = append(buf, 0x00, 0x00, 0x00, 0x00)
+
+	rdLenOffset := len(buf)
+	buf = appendUint16(buf, 0)
+	rdataStart := len(buf)
+
+	if edns.ClientIP.IsValid() {
+		buf = appendECSOption(buf, edns.ClientIP)
 	}
 
-	return -1
+	if edns.PadToBlock > 0 {
+		buf = appendPaddingOption(buf, edns.PadToBlock)
+	}
+
+	rdataLen := uint16(len(buf) - rdataStart)
+	binary.BigEndian.PutUint16(buf[rdLenOffset:rdLenOffset+2], rdataLen)
+
+	return buf
 }
 
-// ParseDNSResponse parses an RFC 1035 binary DNS response packet and extracts netip.Addr records.
+func appendECSOption(buf []byte, clientIP netip.Addr) []byte {
+	var (
+		family     uint16
+		sourceMask byte
+		ipBytes    []byte
+	)
+
+	if clientIP.Is6() {
+		family = 2
+		sourceMask = 56
+		raw := clientIP.As16()
+		ipBytes = raw[:7]
+	} else {
+		family = 1
+		sourceMask = 24
+		raw := clientIP.As4()
+		ipBytes = raw[:3]
+	}
+
+	optLen := uint16(2 + 1 + 1 + len(ipBytes))
+	buf = appendUint16(buf, EDNS0OptionECS)
+	buf = appendUint16(buf, optLen)
+	buf = appendUint16(buf, family)
+	buf = append(buf, sourceMask, 0x00)
+
+	return append(buf, ipBytes...)
+}
+
+func appendPaddingOption(buf []byte, padToBlock int) []byte {
+	currentLen := len(buf) + 4
+	remainder := currentLen % padToBlock
+
+	paddingNeeded := 0
+	if remainder > 0 {
+		paddingNeeded = padToBlock - remainder
+	}
+
+	buf = appendUint16(buf, EDNS0OptionPadding)
+
+	buf = appendUint16(buf, uint16(paddingNeeded))
+	if paddingNeeded > 0 {
+		padding := make([]byte, paddingNeeded)
+		buf = append(buf, padding...)
+	}
+
+	return buf
+}
+
+func appendUint16(b []byte, v uint16) []byte {
+	return append(b, byte(v>>8), byte(v))
+}
+
+// ParseDNSResponse extracts IP addresses from a binary RFC 1035 DNS response.
 func ParseDNSResponse(msg []byte, expectedID uint16) ([]netip.Addr, error) {
+	records, err := ParseDNSResponseRecords(msg, expectedID)
+	if err != nil {
+		return nil, err
+	}
+
+	addrs := make([]netip.Addr, len(records))
+	for i, r := range records {
+		addrs[i] = r.Addr
+	}
+
+	return addrs, nil
+}
+
+// ParseDNSResponseRecords parses an RFC 1035 binary DNS response packet
+// and extracts IP address records along with their authoritative TTLs.
+func ParseDNSResponseRecords(msg []byte, expectedID uint16) ([]DNSRecord, error) {
 	if len(msg) < 12 {
 		return nil, ErrTruncatedDNSMessage
 	}
@@ -101,10 +234,8 @@ func ParseDNSResponse(msg []byte, expectedID uint16) ([]netip.Addr, error) {
 	}
 
 	flags := binary.BigEndian.Uint16(msg[2:4])
-
-	rcode := flags & 0x000f
-	if rcode != 0 {
-		return nil, fmt.Errorf("%w: rcode=%d", ErrDNSResponseCode, rcode)
+	if flags&0x000f != 0 {
+		return nil, fmt.Errorf("%w: rcode=%d", ErrDNSResponseCode, flags&0x000f)
 	}
 
 	qdCount := int(binary.BigEndian.Uint16(msg[4:6]))
@@ -112,10 +243,9 @@ func ParseDNSResponse(msg []byte, expectedID uint16) ([]netip.Addr, error) {
 
 	offset := 12
 
-	// Skip Question section
-	for range qdCount {
-		var err error
+	var err error
 
+	for range qdCount {
 		offset, err = skipDomainName(msg, offset)
 		if err != nil {
 			return nil, err
@@ -125,54 +255,72 @@ func ParseDNSResponse(msg []byte, expectedID uint16) ([]netip.Addr, error) {
 			return nil, ErrTruncatedDNSMessage
 		}
 
-		offset += 4 // QTYPE (2B) + QCLASS (2B)
+		offset += 4
 	}
 
-	// Parse Answer section
-	var addrs []netip.Addr
-
+	records := make([]DNSRecord, 0, anCount)
 	for range anCount {
 		if offset >= len(msg) {
 			break
 		}
 
-		var err error
+		var (
+			rec      DNSRecord
+			consumed int
+		)
 
-		offset, err = skipDomainName(msg, offset)
+		rec, consumed, err = parseAnswerRecord(msg, offset)
 		if err != nil {
 			return nil, err
 		}
 
-		if offset+10 > len(msg) {
-			return nil, ErrTruncatedDNSMessage
-		}
+		offset += consumed
 
-		rrType := binary.BigEndian.Uint16(msg[offset : offset+2])
-		rdLength := int(binary.BigEndian.Uint16(msg[offset+8 : offset+10]))
-		offset += 10
-
-		if offset+rdLength > len(msg) {
-			return nil, ErrTruncatedDNSMessage
-		}
-
-		rdata := msg[offset : offset+rdLength]
-		offset += rdLength
-
-		if rrType == TypeA && rdLength == 4 {
-			var ip4 [4]byte
-			copy(ip4[:], rdata)
-			addrs = append(addrs, netip.AddrFrom4(ip4))
-		} else if rrType == TypeAAAA && rdLength == 16 {
-			var ip6 [16]byte
-			copy(ip6[:], rdata)
-			addrs = append(addrs, netip.AddrFrom16(ip6))
+		if rec.Addr.IsValid() {
+			records = append(records, rec)
 		}
 	}
 
-	return addrs, nil
+	return records, nil
 }
 
-// skipDomainName advances offset past an RFC 1035 compressed or uncompressed domain name.
+func parseAnswerRecord(msg []byte, offset int) (DNSRecord, int, error) {
+	nextOffset, err := skipDomainName(msg, offset)
+	if err != nil {
+		return DNSRecord{}, 0, err
+	}
+
+	if nextOffset+10 > len(msg) {
+		return DNSRecord{}, 0, ErrTruncatedDNSMessage
+	}
+
+	rrType := binary.BigEndian.Uint16(msg[nextOffset : nextOffset+2])
+	ttl := binary.BigEndian.Uint32(msg[nextOffset+4 : nextOffset+8])
+	rdLength := int(binary.BigEndian.Uint16(msg[nextOffset+8 : nextOffset+10]))
+	rdataOffset := nextOffset + 10
+
+	if rdataOffset+rdLength > len(msg) {
+		return DNSRecord{}, 0, ErrTruncatedDNSMessage
+	}
+
+	totalConsumed := (rdataOffset + rdLength) - offset
+	rdata := msg[rdataOffset : rdataOffset+rdLength]
+
+	if rrType == TypeA && rdLength == 4 {
+		var ip4 [4]byte
+		copy(ip4[:], rdata)
+		return DNSRecord{Addr: netip.AddrFrom4(ip4), TTL: ttl}, totalConsumed, nil
+	}
+
+	if rrType == TypeAAAA && rdLength == 16 {
+		var ip6 [16]byte
+		copy(ip6[:], rdata)
+		return DNSRecord{Addr: netip.AddrFrom16(ip6), TTL: ttl}, totalConsumed, nil
+	}
+
+	return DNSRecord{}, totalConsumed, nil
+}
+
 func skipDomainName(msg []byte, offset int) (int, error) {
 	visited := 0
 
@@ -182,8 +330,6 @@ func skipDomainName(msg []byte, offset int) (int, error) {
 		}
 
 		length := int(msg[offset])
-
-		// RFC 1035 Section 4.1.4: Compression pointer (top 2 bits set = 0xC0)
 		if (length & 0xc0) == 0xc0 {
 			if offset+2 > len(msg) {
 				return 0, ErrTruncatedDNSMessage
