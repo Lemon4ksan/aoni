@@ -33,6 +33,7 @@ import (
 	"github.com/lemon4ksan/aoni/fingerprint/profiles"
 	"github.com/lemon4ksan/aoni/fingerprint/profiles/chrome"
 	"github.com/lemon4ksan/aoni/fingerprint/profiles/firefox"
+	"github.com/lemon4ksan/aoni/fingerprint/profiles/safari"
 	"github.com/lemon4ksan/aoni/mod"
 	"github.com/lemon4ksan/aoni/netutil/cert"
 	"github.com/lemon4ksan/aoni/netutil/fragment"
@@ -468,6 +469,78 @@ func WithSocketController(controller aoni.SocketController) aoni.ClientOption {
 // ============================================================================
 // 5. FINGERPRINT, TLS & H2/H3 EVASION OPTIONS
 // ============================================================================
+
+// WithChrome applies a production-grade, zero-configuration Chrome profile (DX)
+// combining uTLS Chrome 120+, H2/H3 settings, High-Entropy Client Hints, ECH, 0-RTT,
+// Certificate Compression, and CHIPS cookie partitioning in one call.
+func WithChrome() aoni.ClientOption {
+	return func(cfg *aoni.Config) {
+		WithProfileVariant(chrome.Desktop, profiles.Windows)(cfg)
+		With0RTT(true)(cfg)
+		WithAutoECH(true)(cfg)
+		WithCertCompression(cert.CompressionBrotli, cert.CompressionZstd)(cfg)
+		WithH2ServerPush(true)(cfg)
+
+		if cfg.Engine.CookieJar == nil {
+			cfg.Engine.CookieJar = cookie.NewProxyIsolatedJar()
+		}
+
+		hints := fingerprint.BuildClientHintsForOS(fingerprint.DefaultUserAgent, profiles.Windows)
+
+		cfg.Defaults.DefaultMods = append(cfg.Defaults.DefaultMods, func(req aoni.Request) {
+			hints.ApplyHeaders(req.SetHeader)
+		})
+	}
+}
+
+// WithChromeMobile applies a zero-configuration Chrome Android profile (DX) with mobile High-Entropy Client Hints.
+func WithChromeMobile() aoni.ClientOption {
+	return func(cfg *aoni.Config) {
+		WithProfileVariant(chrome.Mobile, profiles.Android)(cfg)
+		With0RTT(true)(cfg)
+		WithAutoECH(true)(cfg)
+		WithCertCompression(cert.CompressionBrotli, cert.CompressionZstd)(cfg)
+		WithH2ServerPush(true)(cfg)
+
+		if cfg.Engine.CookieJar == nil {
+			cfg.Engine.CookieJar = cookie.NewProxyIsolatedJar()
+		}
+
+		hints := fingerprint.BuildClientHintsForOS(chrome.UserAgentAndroid, profiles.Android)
+
+		cfg.Defaults.DefaultMods = append(cfg.Defaults.DefaultMods, func(req aoni.Request) {
+			hints.ApplyHeaders(req.SetHeader)
+		})
+	}
+}
+
+// WithFirefox applies a zero-configuration Firefox profile (DX) with 0-RTT, ECH, and Cert Compression.
+func WithFirefox() aoni.ClientOption {
+	return func(cfg *aoni.Config) {
+		WithProfileVariant(firefox.Desktop, profiles.Windows)(cfg)
+		With0RTT(true)(cfg)
+		WithAutoECH(true)(cfg)
+		WithCertCompression(cert.CompressionBrotli, cert.CompressionZstd)(cfg)
+
+		if cfg.Engine.CookieJar == nil {
+			cfg.Engine.CookieJar = cookie.NewProxyIsolatedJar()
+		}
+	}
+}
+
+// WithSafariDX applies a zero-configuration Safari macOS profile (DX) with 0-RTT, ECH, and Cert Compression.
+func WithSafariDX() aoni.ClientOption {
+	return func(cfg *aoni.Config) {
+		WithProfileVariant(safari.Desktop, profiles.MacOS)(cfg)
+		With0RTT(true)(cfg)
+		WithAutoECH(true)(cfg)
+		WithCertCompression(cert.CompressionBrotli, cert.CompressionZstd)(cfg)
+
+		if cfg.Engine.CookieJar == nil {
+			cfg.Engine.CookieJar = cookie.NewProxyIsolatedJar()
+		}
+	}
+}
 
 // WithTLSFingerprint returns an [aoni.ClientOption] selecting a pre-defined [aoni.BrowserID] uTLS ClientHello profile.
 func WithTLSFingerprint(browser aoni.BrowserID) aoni.ClientOption {
