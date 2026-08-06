@@ -46,6 +46,8 @@ type DoHResolver struct {
 }
 
 // NewDoHResolver constructs a DoHResolver configured with a 5-second timeout engine.
+// The doer parameter accepts any client implementation (*fast.Client, *aoni.Client, *http.Client, or nil).
+// If doer is nil, it defaults to a high-performance fast.Client.
 func NewDoHResolver(endpoint, host string, doer any) *DoHResolver {
 	var engine aoni.RequestDoer
 	if doer == nil {

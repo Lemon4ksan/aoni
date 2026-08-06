@@ -49,20 +49,12 @@ func BuildIPProxyURI(host string, port int, target, ipproto string) string {
 	portBytes := strconv.AppendInt(portBuf[:0], int64(port), 10)
 
 	var sb strings.Builder
-	sb.Grow(
-		len(
-			"https://",
-		) + len(
-			host,
-		) + 1 + len(
-			portBytes,
-		) + len(
-			DefaultMASQUEPathPrefix,
-		) + len(
-			cleanTarget,
-		)*3 + 1 + len(
-			cleanProto,
-		) + 2,
+	sb.Grow(8 +
+		len(host) + 1 +
+		len(portBytes) +
+		len(DefaultMASQUEPathPrefix) +
+		len(cleanTarget)*3 + 1 +
+		len(cleanProto) + 2,
 	)
 
 	sb.WriteString("https://")

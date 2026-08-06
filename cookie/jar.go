@@ -61,6 +61,8 @@ type cookieKey struct {
 }
 
 // ProxyIsolatedJar provides per-proxy and CHIPS partitioned cookie storage isolation.
+// Cookies set or read for a specific proxy exit node are stored in an independent http.CookieJar,
+// preventing session correlation and cookie leakage across different exit nodes.
 type ProxyIsolatedJar struct {
 	mu      sync.RWMutex
 	jars    map[string]http.CookieJar
@@ -75,12 +77,16 @@ func NewProxyIsolatedJar() *ProxyIsolatedJar {
 	}
 }
 
+// SetCookies satisfies [http.CookieJar].
+// Delegates to the default (empty key) cookie jar when invoked without a proxy context.
 func (p *ProxyIsolatedJar) SetCookies(u *url.URL, cookies []*http.Cookie) {
 	if jar := p.GetJarForProxy(""); jar != nil {
 		jar.SetCookies(u, cookies)
 	}
 }
 
+// Cookies satisfies [http.CookieJar].
+// Returns cookies from the default (empty key) jar when invoked without request context.
 func (p *ProxyIsolatedJar) Cookies(u *url.URL) []*http.Cookie {
 	if jar := p.GetJarForProxy(""); jar != nil {
 		return jar.Cookies(u)
