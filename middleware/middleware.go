@@ -546,6 +546,10 @@ func FallbackEx(isFailure func(aoni.Response, error) bool) aoni.Middleware {
 				return resp, err
 			}
 
+			if cfg.Fallback == nil {
+				return resp, err
+			}
+
 			fallbackResp, fallbackErr := cfg.Fallback(req, err)
 			if fallbackErr != nil {
 				return resp, err

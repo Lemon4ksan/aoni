@@ -5,6 +5,7 @@
 package values
 
 import (
+	"encoding/json"
 	"errors"
 	"testing"
 
@@ -32,6 +33,97 @@ func TestValueError_FormattingAndUnwrap(t *testing.T) {
 	assert.Equal(t, "aoni values: aoni values: unsupported type for encoding", errFallback.Error())
 
 	assert.Equal(t, ErrUnsupportedType, errFallback.Unwrap())
+}
+
+func TestNumericStringTypes(t *testing.T) {
+	t.Parallel()
+
+	t.Run("Uint64String", func(t *testing.T) {
+		t.Parallel()
+
+		var u Uint64String
+
+		// From quoted string
+		err := json.Unmarshal([]byte(`"18446744073709551615"`), &u)
+		require.NoError(t, err)
+		assert.Equal(t, Uint64String(18446744073709551615), u)
+
+		// From number
+		err = json.Unmarshal([]byte(`12345`), &u)
+		require.NoError(t, err)
+		assert.Equal(t, Uint64String(12345), u)
+
+		// From null
+		err = json.Unmarshal([]byte(`null`), &u)
+		require.NoError(t, err)
+		assert.Equal(t, Uint64String(0), u)
+
+		// Marshal JSON
+		b, err := u.MarshalJSON()
+		require.NoError(t, err)
+		assert.Equal(t, `"0"`, string(b))
+	})
+
+	t.Run("Int64String", func(t *testing.T) {
+		t.Parallel()
+
+		var i Int64String
+
+		err := json.Unmarshal([]byte(`"-9223372036854775808"`), &i)
+		require.NoError(t, err)
+		assert.Equal(t, Int64String(-9223372036854775808), i)
+
+		b, err := i.MarshalJSON()
+		require.NoError(t, err)
+		assert.Equal(t, `"-9223372036854775808"`, string(b))
+	})
+
+	t.Run("Float64String", func(t *testing.T) {
+		t.Parallel()
+
+		var f Float64String
+
+		err := json.Unmarshal([]byte(`"3.14159"`), &f)
+		require.NoError(t, err)
+		assert.InDelta(t, 3.14159, float64(f), 0.00001)
+
+		b, err := f.MarshalJSON()
+		require.NoError(t, err)
+		assert.Equal(t, `"3.14159"`, string(b))
+	})
+}
+
+func TestTimestampTypes(t *testing.T) {
+	t.Parallel()
+
+	t.Run("UnixTimestamp", func(t *testing.T) {
+		t.Parallel()
+
+		var ts UnixTimestamp
+
+		err := json.Unmarshal([]byte(`"1700000000"`), &ts)
+		require.NoError(t, err)
+		assert.Equal(t, int64(1700000000), ts.Time().Unix())
+
+		b, err := ts.MarshalJSON()
+		require.NoError(t, err)
+		assert.Equal(t, "1700000000", string(b))
+	})
+
+	t.Run("RFC3339Timestamp", func(t *testing.T) {
+		t.Parallel()
+
+		var ts RFC3339Timestamp
+
+		err := json.Unmarshal([]byte(`"2026-08-05T12:00:00Z"`), &ts)
+		require.NoError(t, err)
+		assert.Equal(t, 2026, ts.Time().Year())
+		assert.Equal(t, "2026-08-05T12:00:00Z", ts.String())
+
+		b, err := ts.MarshalJSON()
+		require.NoError(t, err)
+		assert.Equal(t, `"2026-08-05T12:00:00Z"`, string(b))
+	})
 }
 
 func TestCommaSlice(t *testing.T) {
@@ -86,6 +178,47 @@ func TestProtobufIntegration(t *testing.T) {
 		require.NoError(t, err)
 		assert.Equal(t, "aoni", v.Get("q"))
 		assert.JSONEq(t, `{"name":"nested_proto_val"}`, v.Get("meta"))
+	})
+}
+
+func TestStructToQueryString(t *testing.T) {
+	t.Parallel()
+
+	type SearchQuery struct {
+		Term  string `url:"q"`
+		Page  int    `url:"page,omitempty"`
+		Sort  string `url:"sort,omitempty"`
+		Group string `url:"group"          default:"public"`
+	}
+
+	t.Run("struct_encoding", func(t *testing.T) {
+		t.Parallel()
+
+		q := SearchQuery{
+			Term: "aoni",
+		}
+
+		qStr, err := StructToQueryString(q)
+		require.NoError(t, err)
+
+		assert.Contains(t, qStr, "q=aoni")
+		assert.Contains(t, qStr, "group=public")
+		assert.NotContains(t, qStr, "sort=")
+	})
+
+	t.Run("map_direct_encoding", func(t *testing.T) {
+		t.Parallel()
+
+		m := map[string]string{
+			"key":   "val",
+			"query": "hello world",
+		}
+
+		qStr, err := StructToQueryString(m)
+		require.NoError(t, err)
+
+		assert.Contains(t, qStr, "key=val")
+		assert.Contains(t, qStr, "query=hello+world")
 	})
 }
 

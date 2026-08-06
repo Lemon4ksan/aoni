@@ -1,0 +1,61 @@
+// Copyright (c) 2026 Lemon4ksan All rights reserved.
+// Use of this source code is governed by a BSD-style
+// license that can be found in the LICENSE file.
+
+package ws
+
+import "errors"
+
+var (
+	// ErrBadHandshake indicates the server rejected the WebSocket handshake
+	// or returned invalid upgrade response headers.
+	ErrBadHandshake = errors.New("aoni ws: bad handshake")
+
+	// ErrUnsupportedWSScheme indicates an invalid URI scheme was provided (expected ws:// or wss://).
+	ErrUnsupportedWSScheme = errors.New("aoni ws: unsupported scheme (expected ws or wss)")
+
+	// ErrInvalidWellKnownSuffix indicates that an empty or invalid well-known URI suffix was provided.
+	ErrInvalidWellKnownSuffix = errors.New("aoni ws: invalid well-known URI suffix")
+
+	// ErrPathTraversalBlocked indicates a path traversal attempt was detected in a well-known URI.
+	ErrPathTraversalBlocked = errors.New("aoni ws: path traversal blocked in well-known URI")
+
+	// ErrSubprotocolMismatch indicates the server selected a subprotocol not requested by the client.
+	ErrSubprotocolMismatch = errors.New("aoni ws: server selected unrequested subprotocol")
+
+	// ErrInvalidSubprotocol indicates a subprotocol token contains invalid characters according to RFC 2616.
+	ErrInvalidSubprotocol = errors.New("aoni ws: invalid subprotocol token")
+
+	// ErrInvalidCompression indicates invalid or unsupported compression extension parameters.
+	ErrInvalidCompression = errors.New("aoni ws: invalid compression negotiation")
+
+	// ErrFlateDecompressFailed indicates a failure while decompressing a permessage-deflate payload.
+	ErrFlateDecompressFailed = errors.New("aoni ws: flate decompression failed")
+
+	// ErrFlateCompressFailed indicates a failure while compressing a permessage-deflate payload.
+	ErrFlateCompressFailed = errors.New("aoni ws: flate compression failed")
+
+	// ErrH2ConnectNotSupported indicates the HTTP/2 peer does not support Extended CONNECT (RFC 8441).
+	ErrH2ConnectNotSupported = errors.New("aoni ws: http2 extended connect not supported by peer")
+
+	// ErrH2StreamClosed indicates the HTTP/2 WebSocket stream was closed unexpectedly.
+	ErrH2StreamClosed = errors.New("aoni ws: http2 stream closed")
+
+	// ErrH2ConnectFailed indicates the HTTP/2 Extended CONNECT handshake returned a non-200 status code.
+	ErrH2ConnectFailed = errors.New("aoni ws: http2 websocket connect failed")
+
+	// ErrH2GoAway indicates the HTTP/2 connection received a GOAWAY frame during handshake.
+	ErrH2GoAway = errors.New("aoni ws: http2 connection closed")
+
+	// ErrH2UnexpectedFrame indicates an unhandled frame type was received during the HTTP/2 handshake.
+	ErrH2UnexpectedFrame = errors.New("aoni ws: unexpected frame during h2 handshake")
+
+	// ErrReservedBitsSet indicates non-zero RSV bits were received without a negotiated extension.
+	ErrReservedBitsSet = errors.New("aoni ws: reserved RSV bits set without negotiated extension")
+
+	// ErrControlFrameTooLarge indicates a control frame payload exceeded the 125-byte RFC 6455 limit.
+	ErrControlFrameTooLarge = errors.New("aoni ws: control frame payload cannot exceed 125 bytes")
+
+	// ErrFrameTooLarge indicates an incoming frame exceeded the maximum allowed memory buffer size.
+	ErrFrameTooLarge = errors.New("aoni ws: frame payload exceeds maximum allowed size")
+)

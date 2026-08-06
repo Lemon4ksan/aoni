@@ -2,7 +2,7 @@
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
-package fast_test
+package aoni_test
 
 import (
 	"bufio"
@@ -19,26 +19,10 @@ import (
 	"github.com/stretchr/testify/require"
 	"github.com/valyala/fasthttp"
 
-	"github.com/lemon4ksan/aoni"
 	"github.com/lemon4ksan/aoni/fast"
 	"github.com/lemon4ksan/aoni/fast/h2engine"
 	"github.com/lemon4ksan/aoni/fast/h3engine"
-	"github.com/lemon4ksan/aoni/mod"
 )
-
-func TestH2_ALPNResolutionAndHeaderOrdering(t *testing.T) {
-	cfg := &aoni.Config{
-		Fingerprint: aoni.FingerprintConfig{
-			HeaderOrder: []string{":method", ":path", ":authority", ":scheme", "user-agent"},
-		},
-	}
-
-	fastReq := fasthttp.AcquireRequest()
-	defer fasthttp.ReleaseRequest(fastReq)
-
-	mode := fast.ResolveALPNModeForTest(context.Background(), cfg, fastReq)
-	assert.Equal(t, aoni.AlpnH2, mode)
-}
 
 func TestH2_HPACKEncoderDecoderSymmetry(t *testing.T) {
 	hpEnc := h2engine.AcquireHPACK()
@@ -202,18 +186,6 @@ func TestH3_AltSvcParsingAndCaching(t *testing.T) {
 
 	assert.Equal(t, http.StatusOK, resp.StatusCode())
 	assert.Equal(t, `h3=":443"; ma=86400, h3-29=":443"; ma=86400`, resp.Header("Alt-Svc"))
-}
-
-func TestH3_ForceHTTP3ContextModifier(t *testing.T) {
-	ctx := context.Background()
-	ctxH3 := aoni.WithContextModifier(ctx, mod.WithForceHTTP3())
-
-	fastReq := fasthttp.AcquireRequest()
-	defer fasthttp.ReleaseRequest(fastReq)
-
-	cfg := &aoni.Config{}
-	mode := fast.ResolveALPNModeForTest(ctxH3, cfg, fastReq)
-	assert.Equal(t, aoni.AlpnH3, mode)
 }
 
 func TestH2_SettingsAckAndFlowControl(t *testing.T) {

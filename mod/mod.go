@@ -33,6 +33,7 @@ import (
 	"github.com/lemon4ksan/aoni/fingerprint/p0f"
 	"github.com/lemon4ksan/aoni/internal/bytesconv"
 	"github.com/lemon4ksan/aoni/internal/io"
+	"github.com/lemon4ksan/aoni/internal/pipeline"
 	"github.com/lemon4ksan/aoni/netutil/fragment"
 	"github.com/lemon4ksan/aoni/telemetry"
 )
@@ -825,6 +826,47 @@ func WithPipeline(pipe aoni.PipelineConfig) aoni.RequestModifier {
 	}
 }
 
+// PhaseID identifies fixed transaction execution phases.
+type PhaseID = pipeline.PhaseID
+
+const (
+	PhasePrep        = pipeline.PhasePrep
+	PhaseCacheLookup = pipeline.PhaseCacheLookup
+	PhaseDispatch    = pipeline.PhaseDispatch
+	PhaseDecompress  = pipeline.PhaseDecompress
+	PhaseWAF         = pipeline.PhaseWAF
+	PhaseValidate    = pipeline.PhaseValidate
+	PhaseCacheSave   = pipeline.PhaseCacheSave
+)
+
+// WithUnsafePhaseOrder sets a custom phase order for the pipeline.
+func WithUnsafePhaseOrder(phases ...PhaseID) aoni.RequestModifier {
+	return func(req aoni.Request) {
+		aoni.GetOrInitRequestConfig(req).UnsafePhaseOrder = phases
+	}
+}
+
+// WithUnsafeDisableFlags allows to disable pipeline phases instantly (by clearing bits in 1 CPU cycle).
+// Example: mod.WithUnsafeDisableFlags(pipeline.FlagChallenge | pipeline.FlagCache)
+func WithUnsafeDisableFlags(flags uint32) aoni.RequestModifier {
+	return func(req aoni.Request) {
+		cfg := aoni.GetOrInitRequestConfig(req)
+		cfg.DisabledFlags |= flags
+	}
+}
+
+// WithUnsafeHook inserts a zero-allocation hook before the specified pipeline phase.
+func WithUnsafeHook(phase pipeline.PhaseID, hook pipeline.UnsafeHook) aoni.RequestModifier {
+	return func(req aoni.Request) {
+		cfg := aoni.GetOrInitRequestConfig(req)
+		if cfg.UnsafeHooks == nil {
+			cfg.UnsafeHooks = make(map[pipeline.PhaseID][]pipeline.UnsafeHook)
+		}
+
+		cfg.UnsafeHooks[phase] = append(cfg.UnsafeHooks[phase], hook)
+	}
+}
+
 // WithRetryPolicy constructs an [aoni.RequestModifier] assigning custom retry parameters to the request.
 func WithRetryPolicy(override aoni.RetryOverride) aoni.RequestModifier {
 	policy := override
@@ -928,7 +970,7 @@ func WithErrorModel(model any) aoni.RequestModifier {
 }
 
 // WithDecoder constructs an [aoni.RequestModifier] overriding the response decoder implementation for the request.
-func WithDecoder(d any) aoni.RequestModifier {
+func WithDecoder(d aoni.ResponseDecoder) aoni.RequestModifier {
 	return func(req aoni.Request) {
 		aoni.GetOrInitRequestConfig(req).Decoder = d
 	}

@@ -1,6 +1,7 @@
 // Copyright (c) 2026 Lemon4ksan All rights reserved.
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
+
 package ja4
 
 import (
@@ -326,6 +327,24 @@ func TestParseExtensionsFromRaw(t *testing.T) {
 	assert.Equal(t, uint16(0x0804), sigAlgos[1])
 }
 
+func TestParseExtensionsFromRaw_RecordHeaderWrapper(t *testing.T) {
+	t.Parallel()
+
+	// 5-byte TLS Record Header (0x16 = Handshake, 0x03 0x03 = TLS 1.2, length 42)
+	recordHeader := []byte{0x16, 0x03, 0x03, 0x00, 0x2a}
+	// 4-byte Handshake Header (0x01 = ClientHello, length 38)
+	handshakeHeader := []byte{0x01, 0x00, 0x00, 0x26}
+
+	clientHelloBody := make([]byte, 38)
+
+	raw := append(recordHeader, handshakeHeader...) //nolint:gocritic
+	raw = append(raw, clientHelloBody...)
+
+	exts, sigAlgos := ParseExtensionsFromRaw(raw)
+	assert.Nil(t, exts)
+	assert.Nil(t, sigAlgos)
+}
+
 func TestParseExtensionsFromRaw_BoundaryAndErrorCases(t *testing.T) {
 	t.Parallel()
 
@@ -470,10 +489,9 @@ func BenchmarkComputeJA4(b *testing.B) {
 	alpn := []string{"h2"}
 	sigAlgos := []uint16{0x0403, 0x0804, 0x0401, 0x0503, 0x0805, 0x0501, 0x0806, 0x0601}
 
-	b.ResetTimer()
 	b.ReportAllocs()
 
-	for range b.N {
+	for b.Loop() {
 		_ = ComputeJA4(ciphers, extensions, supportedVersions, true, alpn, sigAlgos)
 	}
 }
@@ -483,10 +501,9 @@ func BenchmarkComputeJA4H(b *testing.B) {
 	cookieNames := []string{"session", "token"}
 	cookieValues := []string{"abc123", "xyz789"}
 
-	b.ResetTimer()
 	b.ReportAllocs()
 
-	for range b.N {
+	for b.Loop() {
 		_ = ComputeJA4H("POST", "HTTP/1.1", headers, true, true, "en-US", cookieNames, cookieValues)
 	}
 }

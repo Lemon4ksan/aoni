@@ -2,20 +2,19 @@
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
-//go:build bench_fast
-
 package aoni_test
 
 import (
 	"context"
 	"encoding/json"
+	"fmt"
+	"io"
 	"net"
 	"net/http"
 	"net/http/httptest"
 	"testing"
 	"time"
 
-	"github.com/go-resty/resty/v2"
 	"github.com/valyala/fasthttp"
 	"github.com/valyala/fasthttp/fasthttputil"
 
@@ -47,6 +46,154 @@ func setupFastBenchServer() (*fasthttputil.InmemoryListener, *fasthttp.Server) {
 	}()
 
 	return ln, srv
+}
+
+func BenchmarkClient_Get_Fast(b *testing.B) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/plain")
+		w.WriteHeader(http.StatusOK)
+		_, _ = fmt.Fprint(w, "aoni fast benchmark payload")
+	}))
+	defer ts.Close()
+
+	c := fast.NewClient()
+
+	b.ResetTimer()
+	b.ReportAllocs()
+
+	b.RunParallel(func(pb *testing.PB) {
+		ctx := context.Background()
+		for pb.Next() {
+			resp, err := c.Request(ctx, "GET", ts.URL)
+			if err != nil {
+				b.Fatalf("fast request failed: %v", err)
+			}
+
+			if resp.StatusCode() != http.StatusOK {
+				b.Fatalf("unexpected status: %d", resp.StatusCode())
+			}
+
+			resp.Close()
+		}
+	})
+}
+
+func BenchmarkClient_Get_StdHTTP(b *testing.B) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/plain")
+		w.WriteHeader(http.StatusOK)
+		_, _ = fmt.Fprint(w, "aoni fast benchmark payload")
+	}))
+	defer ts.Close()
+
+	c := &http.Client{
+		Transport: &http.Transport{
+			MaxIdleConnsPerHost: 100,
+		},
+	}
+
+	b.ResetTimer()
+	b.ReportAllocs()
+
+	b.RunParallel(func(pb *testing.PB) {
+		for pb.Next() {
+			req, err := http.NewRequestWithContext(context.Background(), "GET", ts.URL, nil)
+			if err != nil {
+				b.Fatalf("std new request failed: %v", err)
+			}
+
+			resp, err := c.Do(req)
+			if err != nil {
+				b.Fatalf("std request failed: %v", err)
+			}
+
+			_, _ = io.Copy(io.Discard, resp.Body)
+			_ = resp.Body.Close()
+		}
+	})
+}
+
+func BenchmarkClient_Get_RawFastHTTP(b *testing.B) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/plain")
+		w.WriteHeader(http.StatusOK)
+		_, _ = fmt.Fprint(w, "aoni fast benchmark payload")
+	}))
+	defer ts.Close()
+
+	c := &fasthttp.Client{}
+
+	b.ResetTimer()
+	b.ReportAllocs()
+
+	b.RunParallel(func(pb *testing.PB) {
+		req := fasthttp.AcquireRequest()
+		resp := fasthttp.AcquireResponse()
+
+		req.SetRequestURI(ts.URL)
+
+		for pb.Next() {
+			if err := c.Do(req, resp); err != nil {
+				b.Fatalf("fasthttp do failed: %v", err)
+			}
+
+			req.Reset()
+			resp.Reset()
+			req.SetRequestURI(ts.URL)
+		}
+
+		fasthttp.ReleaseRequest(req)
+		fasthttp.ReleaseResponse(resp)
+	})
+}
+
+func BenchmarkClient_Get_BridgeStdClient(b *testing.B) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "text/plain")
+		w.WriteHeader(http.StatusOK)
+		_, _ = fmt.Fprint(w, "aoni fast benchmark payload")
+	}))
+	b.Cleanup(ts.Close)
+
+	c := fast.NewClient()
+	stdClient := fast.NewStdClient(c)
+
+	b.ResetTimer()
+	b.ReportAllocs()
+
+	b.RunParallel(func(pb *testing.PB) {
+		for pb.Next() {
+			resp, err := stdClient.Get(ts.URL)
+			if err != nil {
+				b.Fatalf("std bridge request failed: %v", err)
+			}
+
+			_, _ = io.Copy(io.Discard, resp.Body)
+			_ = resp.Body.Close()
+		}
+	})
+}
+
+func BenchmarkFastAdapter_ZeroAllocations(b *testing.B) {
+	fastReq := fasthttp.AcquireRequest()
+	defer fasthttp.ReleaseRequest(fastReq)
+
+	fastReq.SetRequestURI("http://api.example.com/v1/users")
+
+	key := []byte("Authorization")
+	val := []byte("Bearer secret-token-12345")
+	queryKey := []byte("page")
+	queryVal := []byte("10")
+
+	req := fast.NewRequest(fastReq)
+
+	b.ReportAllocs()
+
+	for b.Loop() {
+		req.SetHeaderBytes(key, val)
+		req.SetQueryParamBytes(queryKey, queryVal)
+		_ = req.HeaderBytes(key)
+	}
 }
 
 func BenchmarkGET_JSON_FastClient(b *testing.B) {
@@ -210,41 +357,6 @@ func BenchmarkGET_JSON_Standard_NetHTTP(b *testing.B) {
 		_ = resp.Body.Close()
 		if err != nil {
 			b.Fatal(err)
-		}
-	}
-}
-
-func BenchmarkGET_JSON_Resty_FastBridged(b *testing.B) {
-	ln, srv := setupFastBenchServer()
-	defer func() {
-		_ = srv.Shutdown()
-		_ = ln.Close()
-	}()
-
-	fastClient := fast.NewClient(
-		option.WithBaseURL("http://inmemory"),
-		option.WithTimeout(5*time.Second),
-	)
-	fastClient.Engine().Dial = func(_ string) (net.Conn, error) {
-		return ln.Dial()
-	}
-
-	stdHTTPClient := fast.NewStdClient(fastClient)
-	restyClient := resty.NewWithClient(stdHTTPClient)
-	ctx := context.Background()
-
-	b.ReportAllocs()
-	b.ResetTimer()
-
-	for b.Loop() {
-		var user fastBenchUser
-		resp, err := restyClient.R().SetContext(ctx).SetResult(&user).Get("http://inmemory/user")
-		if err != nil {
-			b.Fatalf("resty fast request failed: %v", err)
-		}
-
-		if resp.StatusCode() != http.StatusOK || user.ID != 42 {
-			b.Fatalf("invalid resty fast response: %v", resp.StatusCode())
 		}
 	}
 }

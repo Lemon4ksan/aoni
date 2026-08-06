@@ -7,12 +7,18 @@ package profiles_test
 import (
 	"testing"
 
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+
 	"github.com/lemon4ksan/aoni/fingerprint/profiles"
 	"github.com/lemon4ksan/aoni/fingerprint/profiles/chrome"
 	"github.com/lemon4ksan/aoni/fingerprint/profiles/firefox"
+	"github.com/lemon4ksan/aoni/fingerprint/profiles/safari"
 )
 
 func TestOSKeyIsMobile(t *testing.T) {
+	t.Parallel()
+
 	tests := []struct {
 		os       profiles.OSKey
 		expected bool
@@ -25,13 +31,13 @@ func TestOSKeyIsMobile(t *testing.T) {
 	}
 
 	for _, tt := range tests {
-		if got := tt.os.IsMobile(); got != tt.expected {
-			t.Errorf("OSKey(%d).IsMobile() = %v, want %v", tt.os, got, tt.expected)
-		}
+		assert.Equal(t, tt.expected, tt.os.IsMobile())
 	}
 }
 
 func TestOSKeyMobile(t *testing.T) {
+	t.Parallel()
+
 	tests := []struct {
 		os       profiles.OSKey
 		expected string
@@ -44,167 +50,165 @@ func TestOSKeyMobile(t *testing.T) {
 	}
 
 	for _, tt := range tests {
-		if got := tt.os.Mobile(); got != tt.expected {
-			t.Errorf("OSKey(%d).Mobile() = %q, want %q", tt.os, got, tt.expected)
-		}
+		assert.Equal(t, tt.expected, tt.os.Mobile())
 	}
 }
 
-func TestChromeVariantNotNil(t *testing.T) {
-	if chrome.Desktop == nil {
-		t.Error("chrome.Desktop is nil")
-	}
+func TestVariantNotNil(t *testing.T) {
+	t.Parallel()
 
-	if chrome.Mobile == nil {
-		t.Error("chrome.Mobile is nil")
-	}
+	require.NotNil(t, chrome.Desktop)
+	require.NotNil(t, chrome.Mobile)
+	require.NotNil(t, firefox.Desktop)
+	require.NotNil(t, firefox.Mobile)
+	require.NotNil(t, safari.Desktop)
 }
 
-func TestFirefoxVariantNotNil(t *testing.T) {
-	if firefox.Desktop == nil {
-		t.Error("firefox.Desktop is nil")
-	}
+func TestBoundaries(t *testing.T) {
+	t.Parallel()
 
-	if firefox.Mobile == nil {
-		t.Error("firefox.Mobile is nil")
-	}
+	t.Run("chrome_boundary", func(t *testing.T) {
+		t.Parallel()
+
+		b := chrome.Boundary()
+		assert.NotEmpty(t, b)
+		assert.GreaterOrEqual(t, len(b), 20)
+		assert.Contains(t, b, "----WebKitFormBoundary")
+	})
+
+	t.Run("firefox_boundary", func(t *testing.T) {
+		t.Parallel()
+
+		b := firefox.Boundary()
+		assert.NotEmpty(t, b)
+		assert.GreaterOrEqual(t, len(b), 20)
+		assert.Contains(t, b, "---------------------------")
+	})
+
+	t.Run("safari_boundary", func(t *testing.T) {
+		t.Parallel()
+
+		b := safari.Boundary()
+		assert.NotEmpty(t, b)
+		assert.GreaterOrEqual(t, len(b), 20)
+		assert.Contains(t, b, "----WebKitFormBoundary")
+	})
 }
 
-func TestChromeBoundary(t *testing.T) {
-	b := chrome.Boundary()
-	if len(b) == 0 {
-		t.Error("Boundary() returned empty string")
-	}
+func TestHeaderCacheEnumsAndSort(t *testing.T) {
+	t.Parallel()
 
-	if len(b) < 20 {
-		t.Errorf("Boundary() too short: %q", b)
-	}
-}
-
-func TestFirefoxBoundary(t *testing.T) {
-	b := firefox.Boundary()
-	if len(b) == 0 {
-		t.Error("Boundary() returned empty string")
-	}
-
-	if len(b) < 20 {
-		t.Errorf("Boundary() too short: %q", b)
-	}
-}
-
-func TestHeaderCacheEnums(t *testing.T) {
 	cache := profiles.NewHeaderCache(
-		map[string][]string{"GET": {"accept", "user-agent"}},
-		map[string][]string{"GET": {"user-agent", "accept"}},
+		map[string][]string{"GET": {"accept", "user-agent", "cookie"}},
+		map[string][]string{"GET": {"cookie", "user-agent", "accept"}},
 	)
 
 	desktopEnums := cache.Enums(false)
-	if len(desktopEnums) == 0 {
-		t.Error("desktop enums is empty")
-	}
+	require.NotEmpty(t, desktopEnums)
 
 	mobileEnums := cache.Enums(true)
-	if len(mobileEnums) == 0 {
-		t.Error("mobile enums is empty")
+	require.NotEmpty(t, mobileEnums)
+
+	// Test SortByOrder
+	inputHeaders := []profiles.HeaderEntry{
+		{Name: "cookie", Value: "sess=1"},
+		{Name: "accept", Value: "*/*"},
+		{Name: "user-agent", Value: "Go"},
 	}
+
+	sortedDesktop := cache.SortByOrder(inputHeaders, "GET", false)
+	require.Len(t, sortedDesktop, 3)
+	assert.Equal(t, "accept", sortedDesktop[0].Name)
+	assert.Equal(t, "user-agent", sortedDesktop[1].Name)
+	assert.Equal(t, "cookie", sortedDesktop[2].Name)
+
+	sortedMobile := cache.SortByOrder(inputHeaders, "GET", true)
+	require.Len(t, sortedMobile, 3)
+	assert.Equal(t, "cookie", sortedMobile[0].Name)
+	assert.Equal(t, "user-agent", sortedMobile[1].Name)
+	assert.Equal(t, "accept", sortedMobile[2].Name)
 }
 
-func TestChromeBuildHeaders(t *testing.T) {
-	headers := chrome.Desktop.BuildHeaders(profiles.Windows)
-	if len(headers) == 0 {
-		t.Error("BuildHeaders returned empty")
-	}
+func TestBuildHeaders(t *testing.T) {
+	t.Parallel()
 
-	foundUA := false
-	for _, h := range headers {
-		if h.Name == profiles.USER_AGENT {
-			foundUA = true
+	t.Run("chrome_build_headers", func(t *testing.T) {
+		t.Parallel()
 
-			if h.Value == "" {
-				t.Error("User-Agent value is empty")
+		headers := chrome.Desktop.BuildHeaders(profiles.Windows)
+		require.NotEmpty(t, headers)
+
+		foundUA := false
+		for _, h := range headers {
+			if h.Name == profiles.USER_AGENT {
+				foundUA = true
+
+				assert.NotEmpty(t, h.Value)
 			}
 		}
-	}
 
-	if !foundUA {
-		t.Error("User-Agent header not found")
-	}
-}
+		assert.True(t, foundUA, "User-Agent header should be present")
+	})
 
-func TestFirefoxBuildHeaders(t *testing.T) {
-	headers := firefox.Desktop.BuildHeaders(profiles.Windows)
-	if len(headers) == 0 {
-		t.Error("BuildHeaders returned empty")
-	}
+	t.Run("firefox_build_headers", func(t *testing.T) {
+		t.Parallel()
 
-	foundUA := false
-	for _, h := range headers {
-		if h.Name == profiles.USER_AGENT {
-			foundUA = true
+		headers := firefox.Desktop.BuildHeaders(profiles.Windows)
+		require.NotEmpty(t, headers)
 
-			if h.Value == "" {
-				t.Error("User-Agent value is empty")
+		foundUA := false
+		for _, h := range headers {
+			if h.Name == profiles.USER_AGENT {
+				foundUA = true
+
+				assert.NotEmpty(t, h.Value)
 			}
 		}
-	}
 
-	if !foundUA {
-		t.Error("User-Agent header not found")
-	}
+		assert.True(t, foundUA, "User-Agent header should be present")
+	})
 }
 
-func TestChromeConfigureH2(t *testing.T) {
-	var s profiles.H2Settings
-	chrome.Desktop.ConfigureH2(&s)
+func TestConfigureH2AndH3(t *testing.T) {
+	t.Parallel()
 
-	if s.HeaderTableSize != 65536 {
-		t.Errorf("HeaderTableSize = %d, want 65536", s.HeaderTableSize)
-	}
+	t.Run("chrome_h2_h3", func(t *testing.T) {
+		t.Parallel()
 
-	if s.EnablePush != 0 {
-		t.Errorf("EnablePush = %d, want 0", s.EnablePush)
-	}
+		var h2s profiles.H2Settings
+		chrome.Desktop.ConfigureH2(&h2s)
+		assert.Equal(t, uint32(65536), h2s.HeaderTableSize)
+		assert.Equal(t, uint32(0), h2s.EnablePush)
+		assert.Equal(t, uint32(6291456), h2s.InitialWindowSize)
 
-	if s.InitialWindowSize != 6291456 {
-		t.Errorf("InitialWindowSize = %d, want 6291456", s.InitialWindowSize)
-	}
+		var h3s profiles.H3Settings
+		chrome.Desktop.ConfigureH3(&h3s)
+		assert.Equal(t, uint64(65536), h3s.QpackMaxTableCapacity)
+		assert.Equal(t, uint64(262144), h3s.MaxFieldSectionSize)
+	})
+
+	t.Run("firefox_h2_h3", func(t *testing.T) {
+		t.Parallel()
+
+		var h2s profiles.H2Settings
+		firefox.Desktop.ConfigureH2(&h2s)
+		assert.Equal(t, uint32(3), h2s.InitialStreamID)
+		assert.Equal(t, uint32(65536), h2s.HeaderTableSize)
+
+		var h3s profiles.H3Settings
+		firefox.Desktop.ConfigureH3(&h3s)
+		assert.Equal(t, uint64(65536), h3s.QpackMaxTableCapacity)
+		assert.Equal(t, uint64(1), h3s.EnableConnectProtocol)
+	})
 }
 
-func TestFirefoxConfigureH2(t *testing.T) {
-	var s profiles.H2Settings
-	firefox.Desktop.ConfigureH2(&s)
+func TestInsertHeaders(t *testing.T) {
+	t.Parallel()
 
-	if s.InitialStreamID != 3 {
-		t.Errorf("InitialStreamID = %d, want 3", s.InitialStreamID)
-	}
+	headers := make(map[string]string)
+	chrome.Desktop.InsertHeaders(headers, "GET")
 
-	if s.HeaderTableSize != 65536 {
-		t.Errorf("HeaderTableSize = %d, want 65536", s.HeaderTableSize)
-	}
-}
-
-func TestChromeConfigureH3(t *testing.T) {
-	var s profiles.H3Settings
-	chrome.Desktop.ConfigureH3(&s)
-
-	if s.QpackMaxTableCapacity != 65536 {
-		t.Errorf("QpackMaxTableCapacity = %d, want 65536", s.QpackMaxTableCapacity)
-	}
-
-	if s.MaxFieldSectionSize != 262144 {
-		t.Errorf("MaxFieldSectionSize = %d, want 262144", s.MaxFieldSectionSize)
-	}
-}
-
-func TestFirefoxConfigureH3(t *testing.T) {
-	var s profiles.H3Settings
-	firefox.Desktop.ConfigureH3(&s)
-
-	if s.QpackMaxTableCapacity != 65536 {
-		t.Errorf("QpackMaxTableCapacity = %d, want 65536", s.QpackMaxTableCapacity)
-	}
-
-	if s.EnableConnectProtocol != 1 {
-		t.Errorf("EnableConnectProtocol = %d, want 1", s.EnableConnectProtocol)
-	}
+	assert.Equal(t, "document", headers[profiles.SEC_FETCH_DEST])
+	assert.Equal(t, "navigate", headers[profiles.SEC_FETCH_MODE])
+	assert.Equal(t, "1", headers[profiles.UPGRADE_INSECURE_REQUESTS])
 }

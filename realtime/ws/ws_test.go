@@ -19,7 +19,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/gorilla/websocket"
+	utls "github.com/refraction-networking/utls"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"golang.org/x/net/http2"
@@ -60,15 +60,50 @@ func tcpPipe(t *testing.T) (net.Conn, net.Conn) {
 	return res.conn, client
 }
 
+func testUpgradeToWS(w http.ResponseWriter, r *http.Request) (Conn, error) {
+	hj, ok := w.(http.Hijacker)
+	if !ok {
+		http.Error(w, "hijack not supported", http.StatusInternalServerError)
+		return nil, errors.New("hijack failed")
+	}
+
+	conn, bufrw, err := hj.Hijack()
+	if err != nil {
+		return nil, err
+	}
+
+	challengeKey := r.Header.Get("Sec-WebSocket-Key")
+	acceptKey := computeAcceptKey(challengeKey)
+
+	resp := "HTTP/1.1 101 Switching Protocols\r\n" +
+		"Upgrade: websocket\r\n" +
+		"Connection: Upgrade\r\n" +
+		"Sec-WebSocket-Accept: " + acceptKey + "\r\n"
+	if subprotocol := r.Header.Get("Sec-WebSocket-Protocol"); subprotocol != "" {
+		protocols := strings.Split(subprotocol, ",")
+		resp += "Sec-WebSocket-Protocol: " + strings.TrimSpace(protocols[0]) + "\r\n"
+	}
+
+	resp += "\r\n"
+
+	if _, err := bufrw.WriteString(resp); err != nil {
+		_ = conn.Close()
+		return nil, err
+	}
+
+	if err := bufrw.Flush(); err != nil {
+		_ = conn.Close()
+		return nil, err
+	}
+
+	return WrapRawConn(conn, false), nil
+}
+
 func TestDialWebSocket_Basic(t *testing.T) {
 	t.Parallel()
 
-	upgrader := websocket.Upgrader{
-		CheckOrigin: func(r *http.Request) bool { return true },
-	}
-
 	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		ws, err := upgrader.Upgrade(w, r, nil)
+		ws, err := testUpgradeToWS(w, r)
 		if err != nil {
 			return
 		}
@@ -152,12 +187,8 @@ func TestDialWebSocket_Basic(t *testing.T) {
 func TestDialWebSocket_CustomDialers(t *testing.T) {
 	t.Parallel()
 
-	upgrader := websocket.Upgrader{
-		CheckOrigin: func(r *http.Request) bool { return true },
-	}
-
 	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		ws, err := upgrader.Upgrade(w, r, nil)
+		ws, err := testUpgradeToWS(w, r)
 		if err != nil {
 			return
 		}
@@ -258,12 +289,8 @@ func TestDialWebSocket_CustomDialers(t *testing.T) {
 func TestDialWebSocket_WithTraceJA4(t *testing.T) {
 	t.Parallel()
 
-	upgrader := websocket.Upgrader{
-		CheckOrigin: func(r *http.Request) bool { return true },
-	}
-
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		ws, err := upgrader.Upgrade(w, r, nil)
+		ws, err := testUpgradeToWS(w, r)
 		if err != nil {
 			return
 		}
@@ -306,12 +333,8 @@ func TestDialWebSocket_InvalidURL(t *testing.T) {
 func TestDialWebSocket_WithFragmentation(t *testing.T) {
 	t.Parallel()
 
-	upgrader := websocket.Upgrader{
-		CheckOrigin: func(r *http.Request) bool { return true },
-	}
-
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		ws, err := upgrader.Upgrade(w, r, nil)
+		ws, err := testUpgradeToWS(w, r)
 		if err != nil {
 			return
 		}
@@ -350,12 +373,8 @@ func TestDialWebSocket_WithFragmentation(t *testing.T) {
 func TestDialWebSocket_TLSFingerprint(t *testing.T) {
 	t.Parallel()
 
-	upgrader := websocket.Upgrader{
-		CheckOrigin: func(r *http.Request) bool { return true },
-	}
-
 	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		conn, err := upgrader.Upgrade(w, r, nil)
+		conn, err := testUpgradeToWS(w, r)
 		if err != nil {
 			return
 		}
@@ -398,69 +417,13 @@ func TestDialWebSocket_TLSH2HandshakeFailure(t *testing.T) {
 	assert.Error(t, err)
 }
 
-func TestWSGorillaConn_Full(t *testing.T) {
-	t.Parallel()
-
-	upgrader := websocket.Upgrader{
-		CheckOrigin: func(r *http.Request) bool { return true },
-	}
-
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		conn, err := upgrader.Upgrade(w, r, nil)
-		if err != nil {
-			return
-		}
-		defer conn.Close()
-
-		for {
-			mt, p, err := conn.ReadMessage()
-			if err != nil {
-				return
-			}
-
-			_ = conn.WriteMessage(mt, p)
-		}
-	}))
-	defer server.Close()
-
-	wsURL := "ws" + strings.TrimPrefix(server.URL, "http")
-	dialer := websocket.Dialer{}
-	ws, _, err := dialer.Dial(wsURL, nil)
-	require.NoError(t, err)
-
-	gConn := wrapGorillaConn(ws)
-	defer gConn.Close()
-
-	msg := []byte("hello gorilla")
-	n, err := gConn.Write(msg)
-	require.NoError(t, err)
-	assert.Equal(t, len(msg), n)
-
-	buf := make([]byte, 100)
-	n, err = gConn.Read(buf)
-	require.NoError(t, err)
-	assert.Equal(t, "hello gorilla", string(buf[:n]))
-
-	assert.NotNil(t, gConn.RawConn())
-	assert.NotNil(t, gConn.LocalAddr())
-	assert.NotNil(t, gConn.RemoteAddr())
-	assert.NoError(t, gConn.SetDeadline(time.Now().Add(10*time.Second)))
-	assert.NoError(t, gConn.SetReadDeadline(time.Now().Add(10*time.Second)))
-	assert.NoError(t, gConn.SetWriteDeadline(time.Now().Add(10*time.Second)))
-	assert.NotNil(t, gConn.CloseChan())
-
-	require.NoError(t, gConn.Close())
-	_, err = gConn.Read(buf)
-	assert.Error(t, err)
-}
-
 func TestWSRawConn_RoundTrip(t *testing.T) {
 	t.Parallel()
 
 	server, client := tcpPipe(t)
 	defer server.Close()
 
-	raw := wrapRawConn(client, true)
+	raw := WrapRawConn(client, true)
 	defer raw.Close()
 
 	go func() {
@@ -511,8 +474,8 @@ func TestWSRawConn_FrameLengthsAndMasking(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			s, c := tcpPipe(t)
-			clientRaw := wrapRawConn(c, true)
-			serverRaw := wrapRawConn(s, false)
+			clientRaw := WrapRawConn(c, true)
+			serverRaw := WrapRawConn(s, false)
 
 			defer clientRaw.Close()
 			defer serverRaw.Close()
@@ -561,7 +524,7 @@ func TestWSRawConn_FrameTooLarge(t *testing.T) {
 	defer s.Close()
 	defer c.Close()
 
-	raw := wrapRawConn(c, true)
+	raw := WrapRawConn(c, true)
 	defer raw.Close()
 
 	go func() {
@@ -573,8 +536,7 @@ func TestWSRawConn_FrameTooLarge(t *testing.T) {
 
 	buf := make([]byte, 100)
 	_, err := raw.Read(buf)
-	assert.Error(t, err)
-	assert.Contains(t, err.Error(), "payload too large")
+	assert.ErrorIs(t, err, ErrFrameTooLarge)
 }
 
 func TestWSRawConn_ControlFramesAndOpcodes(t *testing.T) {
@@ -584,7 +546,7 @@ func TestWSRawConn_ControlFramesAndOpcodes(t *testing.T) {
 		t.Parallel()
 		s, c := tcpPipe(t)
 
-		raw := wrapRawConn(c, true)
+		raw := WrapRawConn(c, true)
 		defer raw.Close()
 		defer s.Close()
 
@@ -598,7 +560,7 @@ func TestWSRawConn_ControlFramesAndOpcodes(t *testing.T) {
 		t.Parallel()
 		s, c := tcpPipe(t)
 
-		raw := wrapRawConn(c, true)
+		raw := WrapRawConn(c, true)
 		defer raw.Close()
 		defer s.Close()
 
@@ -663,7 +625,7 @@ func TestWSRawConn_ControlFramesAndOpcodes(t *testing.T) {
 		t.Parallel()
 		s, c := tcpPipe(t)
 
-		raw := wrapRawConn(c, true)
+		raw := WrapRawConn(c, true)
 		defer raw.Close()
 		defer s.Close()
 
@@ -685,7 +647,7 @@ func TestWSRawConn_WriteTextVsBinary(t *testing.T) {
 	defer s.Close()
 	defer c.Close()
 
-	raw := wrapRawConn(c, true)
+	raw := WrapRawConn(c, true)
 	defer raw.Close()
 
 	errCh := make(chan byte, 2)
@@ -723,7 +685,7 @@ func TestWSRawConn_Close(t *testing.T) {
 	server, client := tcpPipe(t)
 	defer server.Close()
 
-	raw := wrapRawConn(client, true)
+	raw := WrapRawConn(client, true)
 
 	closed := raw.CloseChan()
 	select {
@@ -748,7 +710,7 @@ func TestWSRawConn_Timeout(t *testing.T) {
 	defer server.Close()
 	defer client.Close()
 
-	raw := wrapRawConn(client, true)
+	raw := WrapRawConn(client, true)
 	defer raw.Close()
 
 	err := raw.SetReadDeadline(time.Now().Add(50 * time.Millisecond))
@@ -765,7 +727,7 @@ func TestWSRawConn_NetConnMethods(t *testing.T) {
 	defer s.Close()
 	defer c.Close()
 
-	raw := wrapRawConn(c, true)
+	raw := WrapRawConn(c, true)
 	defer raw.Close()
 
 	assert.NotNil(t, raw.LocalAddr())
@@ -965,7 +927,7 @@ func TestDialH2ExtendedConnect_Success(t *testing.T) {
 	}()
 
 	ctx := context.Background()
-	conn, err := dialH2ExtendedConnect(ctx, client, "wss://example.com/ws", "example.com")
+	conn, _, err := dialH2ExtendedConnect(ctx, client, "wss://example.com/ws", "example.com", nil)
 	require.NoError(t, err)
 	assert.NotNil(t, conn)
 	require.NoError(t, <-errCh)
@@ -1067,11 +1029,186 @@ func TestDialH2ExtendedConnect_Failures(t *testing.T) {
 				errCh <- nil
 			}()
 
-			_, err := dialH2ExtendedConnect(t.Context(), client, "wss://example.com/ws", "example.com")
+			_, _, err := dialH2ExtendedConnect(t.Context(), client, "wss://example.com/ws", "example.com", nil)
 			assert.ErrorIs(t, err, tt.expectErr)
 			require.NoError(t, <-errCh)
 		})
 	}
+}
+
+func createUTLSConn(t *testing.T, alpn string) (*utls.UConn, net.Conn, func()) {
+	t.Helper()
+
+	server, client := tcpPipe(t)
+	ts := httptest.NewTLSServer(nil)
+
+	tlsConfig := &tls.Config{
+		Certificates: ts.TLS.Certificates,
+		NextProtos:   []string{alpn},
+	}
+	tlsServer := tls.Server(server, tlsConfig)
+
+	uConfig := &utls.Config{
+		InsecureSkipVerify: true,
+		NextProtos:         []string{alpn},
+	}
+
+	spec, err := utls.UTLSIdToSpec(utls.HelloChrome_Auto)
+	require.NoError(t, err)
+
+	for i, ext := range spec.Extensions {
+		if _, ok := ext.(*utls.ALPNExtension); ok {
+			spec.Extensions[i] = &utls.ALPNExtension{AlpnProtocols: []string{alpn}}
+		}
+	}
+
+	uClient := utls.UClient(client, uConfig, utls.HelloCustom)
+	err = uClient.ApplyPreset(&spec)
+	require.NoError(t, err)
+
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- tlsServer.Handshake()
+	}()
+
+	err = uClient.Handshake()
+	require.NoError(t, err)
+	require.NoError(t, <-errCh)
+
+	cleanup := func() {
+		ts.Close()
+		_ = uClient.Close()
+		_ = tlsServer.Close()
+	}
+
+	return uClient, tlsServer, cleanup
+}
+
+func TestDialH3ExtendedConnect_Success(t *testing.T) {
+	t.Parallel()
+
+	server, client := tcpPipe(t)
+	defer server.Close()
+	defer client.Close()
+
+	req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, "wss://example.com/ws", nil)
+	require.NoError(t, err)
+	req.Header.Set("Sec-WebSocket-Protocol", "chat.v1")
+
+	parsed, err := parseWSURL("wss://example.com/ws")
+	require.NoError(t, err)
+
+	wsConn, respHeaders, err := dialH3ExtendedConnect(t.Context(), client, "wss://example.com/ws", parsed.host, req)
+	require.NoError(t, err)
+	require.NotNil(t, wsConn)
+	assert.Equal(t, "13", respHeaders.Get("Sec-WebSocket-Version"))
+	assert.Equal(t, "chat.v1", respHeaders.Get("Sec-WebSocket-Protocol"))
+	assert.Equal(t, "chat.v1", wsConn.Subprotocol())
+}
+
+func TestDialH3ExtendedConnect_Failures(t *testing.T) {
+	t.Parallel()
+
+	t.Run("context_cancelled", func(t *testing.T) {
+		t.Parallel()
+
+		ctx, cancel := context.WithCancel(t.Context())
+		cancel()
+
+		server, client := tcpPipe(t)
+		defer server.Close()
+		defer client.Close()
+
+		_, _, err := dialH3ExtendedConnect(ctx, client, "wss://example.com/ws", "example.com", nil)
+		assert.ErrorIs(t, err, context.Canceled)
+	})
+
+	t.Run("invalid_ws_url", func(t *testing.T) {
+		t.Parallel()
+
+		server, client := tcpPipe(t)
+		defer server.Close()
+		defer client.Close()
+
+		_, _, err := dialH3ExtendedConnect(t.Context(), client, "http://example.com/ws", "example.com", nil)
+		assert.Error(t, err)
+	})
+
+	t.Run("path_traversal_url", func(t *testing.T) {
+		t.Parallel()
+
+		server, client := tcpPipe(t)
+		defer server.Close()
+		defer client.Close()
+
+		_, _, err := dialH3ExtendedConnect(
+			t.Context(),
+			client,
+			"wss://example.com/.well-known/../secret",
+			"example.com",
+			nil,
+		)
+		assert.ErrorIs(t, err, ErrPathTraversalBlocked)
+	})
+}
+
+func TestTryH3ExtendedConnect(t *testing.T) {
+	t.Parallel()
+
+	t.Run("non_utls_conn", func(t *testing.T) {
+		t.Parallel()
+
+		server, client := tcpPipe(t)
+		defer server.Close()
+		defer client.Close()
+
+		parsed, err := parseWSURL("wss://example.com/ws")
+		require.NoError(t, err)
+
+		conn, resp, ok := tryH3ExtendedConnect(t.Context(), client, "wss://example.com/ws", parsed, nil)
+		assert.False(t, ok)
+		assert.Nil(t, conn)
+		assert.Nil(t, resp)
+	})
+
+	t.Run("utls_conn_h2_alpn", func(t *testing.T) {
+		t.Parallel()
+
+		uClient, _, cleanup := createUTLSConn(t, "h2")
+		defer cleanup()
+
+		parsed, err := parseWSURL("wss://example.com/ws")
+		require.NoError(t, err)
+
+		conn, resp, ok := tryH3ExtendedConnect(t.Context(), uClient, "wss://example.com/ws", parsed, nil)
+		assert.False(t, ok)
+		assert.Nil(t, conn)
+		assert.Nil(t, resp)
+	})
+
+	t.Run("utls_conn_h3_alpn_success", func(t *testing.T) {
+		t.Parallel()
+
+		uClient, _, cleanup := createUTLSConn(t, "h3")
+		defer cleanup()
+
+		parsed, err := parseWSURL("wss://example.com/ws")
+		require.NoError(t, err)
+
+		req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, "wss://example.com/ws", nil)
+		require.NoError(t, err)
+
+		wsConn, resp, ok := tryH3ExtendedConnect(t.Context(), uClient, "wss://example.com/ws", parsed, req)
+		assert.True(t, ok)
+		require.NotNil(t, wsConn)
+		require.NotNil(t, resp)
+
+		assert.Equal(t, http.StatusOK, resp.StatusCode)
+		assert.Equal(t, "HTTP/3.0", resp.Proto)
+		assert.Equal(t, 3, resp.ProtoMajor)
+		assert.Equal(t, "13", resp.Header.Get("Sec-WebSocket-Version"))
+		assert.Equal(t, req, resp.Request)
+	})
 }
 
 func TestParseWSURL(t *testing.T) {
@@ -1104,18 +1241,8 @@ func TestParseWSURL(t *testing.T) {
 		assert.Equal(t, tt.scheme, u.scheme, tt.url)
 		assert.Equal(t, tt.host, u.host, tt.url)
 		assert.Equal(t, tt.port, u.port, tt.url)
-		assert.Equal(t, tt.path, u.Path, tt.url)
+		assert.Equal(t, tt.path, u.path, tt.url)
 	}
-}
-
-func TestWSConn_ImplementsNetConn(t *testing.T) {
-	t.Parallel()
-
-	var (
-		_ Conn     = (*wsGorillaConn)(nil)
-		_ Conn     = (*wsRawConn)(nil)
-		_ net.Conn = (*wsH2Conn)(nil)
-	)
 }
 
 func TestH2Preface_ContextCancellation(t *testing.T) {
@@ -1178,7 +1305,7 @@ func TestH2Preface_ContextCancellation(t *testing.T) {
 			defer conn.Close()
 
 			start := time.Now()
-			_, err = dialH2ExtendedConnect(ctx, conn, "ws://example.com/ws", "example.com")
+			_, _, err = dialH2ExtendedConnect(ctx, conn, "ws://example.com/ws", "example.com", nil)
 			elapsed := time.Since(start)
 
 			assert.Error(t, err)
@@ -1190,4 +1317,444 @@ func TestH2Preface_ContextCancellation(t *testing.T) {
 func TestMaxWebSocketFrameSize(t *testing.T) {
 	t.Parallel()
 	assert.Equal(t, 16*1024*1024, maxWebSocketFrameSize)
+}
+
+func tcpPipeBench(b *testing.B) (net.Conn, net.Conn) {
+	b.Helper()
+
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		b.Fatalf("aoni ws test: failed to listen on loopback: %v", err)
+	}
+	defer ln.Close()
+
+	connCh := make(chan net.Conn, 1)
+	errCh := make(chan error, 1)
+
+	go func() {
+		conn, err := ln.Accept()
+		if err != nil {
+			errCh <- err
+			return
+		}
+
+		connCh <- conn
+	}()
+
+	client, err := net.Dial("tcp", ln.Addr().String())
+	if err != nil {
+		b.Fatalf("aoni ws test: failed to dial loopback: %v", err)
+	}
+
+	select {
+	case err := <-errCh:
+		_ = client.Close()
+
+		b.Fatalf("aoni ws test: failed to accept loopback connection: %v", err)
+
+		return nil, nil
+
+	case server := <-connCh:
+		if tcpConn, ok := client.(*net.TCPConn); ok {
+			_ = tcpConn.SetNoDelay(true)
+		}
+
+		if tcpConn, ok := server.(*net.TCPConn); ok {
+			_ = tcpConn.SetNoDelay(true)
+		}
+
+		return client, server
+
+	case <-time.After(5 * time.Second):
+		_ = client.Close()
+
+		b.Fatal("aoni ws test: loopback connection accept timeout")
+
+		return nil, nil
+	}
+}
+
+func BenchmarkWS_ReadWrite(b *testing.B) {
+	clientConn, serverConn := tcpPipeBench(b)
+	defer clientConn.Close()
+	defer serverConn.Close()
+
+	c := WrapRawConn(clientConn, true)
+	s := WrapRawConn(serverConn, false)
+
+	payload := []byte("hello zero alloc websocket payload")
+	readBuf := make([]byte, 1024)
+
+	b.SetBytes(int64(len(payload)))
+
+	ch := make(chan struct{}, 256)
+	done := make(chan struct{})
+
+	go func() {
+		for range ch {
+			_ = c.WriteMessage(FrameText, payload)
+		}
+
+		close(done)
+	}()
+
+	b.ReportAllocs()
+	b.ResetTimer()
+
+	for range b.N {
+		ch <- struct{}{}
+
+		_, _, err := s.ReadMessageTo(readBuf)
+		if err != nil {
+			b.Fatal(err)
+		}
+	}
+
+	b.StopTimer()
+	close(ch)
+	<-done
+}
+
+func BenchmarkWS_PayloadSizes(b *testing.B) {
+	benchmarks := []struct {
+		name string
+		size int
+	}{
+		{name: "Small_32B", size: 32},
+		{name: "Medium_1KB", size: 1024},
+		{name: "Large_64KB", size: 64 * 1024},
+	}
+
+	for _, bm := range benchmarks {
+		b.Run(bm.name, func(b *testing.B) {
+			clientConn, serverConn := tcpPipeBench(b)
+			defer clientConn.Close()
+			defer serverConn.Close()
+
+			c := WrapRawConn(clientConn, true)
+			s := WrapRawConn(serverConn, false)
+
+			payload := make([]byte, bm.size)
+			readBuf := make([]byte, bm.size)
+
+			b.SetBytes(int64(bm.size))
+
+			ch := make(chan struct{}, 256)
+			done := make(chan struct{})
+
+			go func() {
+				for range ch {
+					_ = c.WriteMessage(FrameBinary, payload)
+				}
+
+				close(done)
+			}()
+
+			b.ReportAllocs()
+			b.ResetTimer()
+
+			for range b.N {
+				ch <- struct{}{}
+
+				_, _, err := s.ReadMessageTo(readBuf)
+				if err != nil {
+					b.Fatal(err)
+				}
+			}
+
+			b.StopTimer()
+			close(ch)
+			<-done
+		})
+	}
+}
+
+func TestRFC8307_BuildWellKnownURI(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name      string
+		scheme    string
+		host      string
+		suffix    string
+		want      string
+		expectErr error
+	}{
+		{
+			name:   "valid_ws",
+			scheme: "ws",
+			host:   "example.com",
+			suffix: "chat",
+			want:   "ws://example.com/.well-known/chat",
+		},
+		{
+			name:   "valid_wss_leading_slash",
+			scheme: "wss",
+			host:   "example.com",
+			suffix: "/oauth/token",
+			want:   "wss://example.com/.well-known/oauth/token",
+		},
+		{
+			name:   "uppercase_scheme",
+			scheme: "WSS",
+			host:   "example.com",
+			suffix: "test",
+			want:   "wss://example.com/.well-known/test",
+		},
+		{
+			name:      "unsupported_scheme",
+			scheme:    "http",
+			host:      "example.com",
+			suffix:    "test",
+			expectErr: ErrUnsupportedWSScheme,
+		},
+		{
+			name:      "empty_suffix",
+			scheme:    "ws",
+			host:      "example.com",
+			suffix:    "   ",
+			expectErr: ErrInvalidWellKnownSuffix,
+		},
+		{
+			name:      "path_traversal",
+			scheme:    "wss",
+			host:      "example.com",
+			suffix:    "../admin",
+			expectErr: ErrPathTraversalBlocked,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			got, err := BuildWellKnownURI(tt.scheme, tt.host, tt.suffix)
+			if tt.expectErr != nil {
+				assert.ErrorIs(t, err, tt.expectErr)
+			} else {
+				require.NoError(t, err)
+				assert.Equal(t, tt.want, got)
+			}
+		})
+	}
+}
+
+func TestRFC8307_DialWellKnown(t *testing.T) {
+	t.Parallel()
+
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.True(t, strings.HasPrefix(r.URL.Path, WellKnownPrefix))
+
+		ws, err := testUpgradeToWS(w, r)
+		if err != nil {
+			return
+		}
+		defer ws.Close()
+
+		mt, msg, err := ws.ReadMessage()
+		if err == nil {
+			_ = ws.WriteMessage(mt, msg)
+		}
+	})
+
+	server := httptest.NewServer(handler)
+	defer server.Close()
+
+	host := strings.TrimPrefix(server.URL, "http://")
+	client := aoni.NewClient(nil)
+
+	conn, resp, err := DialWellKnown(t.Context(), client, "ws", host, "my-service")
+	require.NoError(t, err)
+	require.NotNil(t, resp)
+	assert.Equal(t, http.StatusSwitchingProtocols, resp.StatusCode)
+
+	defer conn.Close()
+
+	testMsg := []byte("well-known test")
+	_, err = conn.Write(testMsg)
+	require.NoError(t, err)
+
+	buf := make([]byte, 100)
+	n, err := conn.Read(buf)
+	require.NoError(t, err)
+	assert.Equal(t, "well-known test", string(buf[:n]))
+}
+
+func TestRFC7936_Subprotocols(t *testing.T) {
+	t.Parallel()
+
+	t.Run("ValidateSubprotocol", func(t *testing.T) {
+		t.Parallel()
+		assert.True(t, ValidateSubprotocol([]string{"chat", "v1"}, "chat"))
+		assert.True(t, ValidateSubprotocol([]string{"chat", "v1"}, "v1"))
+		assert.False(t, ValidateSubprotocol([]string{"chat", "v1"}, "v2"))
+		assert.True(t, ValidateSubprotocol(nil, "chat"))
+		assert.True(t, ValidateSubprotocol([]string{"chat"}, ""))
+	})
+
+	t.Run("IsValidSubprotocolToken", func(t *testing.T) {
+		t.Parallel()
+
+		valid := []string{"chat", "graphql-ws", "v1.0", "sip", "wamp.2.json"}
+		for _, v := range valid {
+			assert.True(t, IsValidSubprotocolToken(v), "should be valid: %s", v)
+		}
+
+		invalid := []string{"", "chat ", "chat\t", "chat\n", "chat(v1)", "a,b", "foo/bar", "a{b}", "a<b"}
+		for _, inv := range invalid {
+			assert.False(t, IsValidSubprotocolToken(inv), "should be invalid: %s", inv)
+		}
+	})
+}
+
+func TestRFC7936_SubprotocolHandshake(t *testing.T) {
+	t.Parallel()
+
+	t.Run("matching_subprotocol", func(t *testing.T) {
+		t.Parallel()
+
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			ws, err := testUpgradeToWS(w, r)
+			if err != nil {
+				return
+			}
+
+			ws.Close()
+		}))
+		defer server.Close()
+
+		client := aoni.NewClient(nil)
+		wsURL := "ws" + strings.TrimPrefix(server.URL, "http")
+
+		conn, resp, err := DialWebSocketWithConfig(t.Context(), client, wsURL, DialWebSocketConfig{
+			Subprotocols: []string{"chat.v1", "chat.v2"},
+		})
+		require.NoError(t, err)
+		assert.Equal(t, http.StatusSwitchingProtocols, resp.StatusCode)
+		assert.Equal(t, "chat.v1", conn.Subprotocol())
+		conn.Close()
+	})
+
+	t.Run("mismatched_subprotocol", func(t *testing.T) {
+		t.Parallel()
+
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			challengeKey := r.Header.Get("Sec-WebSocket-Key")
+			acceptKey := computeAcceptKey(challengeKey)
+
+			w.Header().Set("Upgrade", "websocket")
+			w.Header().Set("Connection", "Upgrade")
+			w.Header().Set("Sec-WebSocket-Accept", acceptKey)
+			w.Header().Set("Sec-WebSocket-Protocol", "unrequested-protocol")
+			w.WriteHeader(http.StatusSwitchingProtocols)
+		}))
+		defer server.Close()
+
+		client := aoni.NewClient(nil)
+		wsURL := "ws" + strings.TrimPrefix(server.URL, "http")
+
+		_, _, err := DialWebSocketWithConfig(t.Context(), client, wsURL, DialWebSocketConfig{
+			Subprotocols: []string{"requested-protocol"},
+		})
+		assert.ErrorIs(t, err, ErrSubprotocolMismatch)
+	})
+}
+
+func TestRFC7692_PermessageDeflate(t *testing.T) {
+	t.Parallel()
+
+	t.Run("compress_decompress_roundtrip", func(t *testing.T) {
+		t.Parallel()
+
+		payloads := [][]byte{
+			[]byte("hello world"),
+			[]byte(strings.Repeat("aoni high performance zero allocation web sockets", 100)),
+			[]byte(""),
+		}
+
+		for _, original := range payloads {
+			compressed, err := compressNoContextTakeover(original)
+			require.NoError(t, err)
+
+			decompressed, err := decompressNoContextTakeover(compressed)
+			require.NoError(t, err)
+			assert.Equal(t, original, decompressed)
+		}
+	})
+
+	t.Run("decompress_invalid_data", func(t *testing.T) {
+		t.Parallel()
+
+		_, err := decompressNoContextTakeover([]byte("invalid flate stream"))
+		assert.ErrorIs(t, err, ErrFlateDecompressFailed)
+	})
+}
+
+func TestRFC7692_PermessageDeflate_EndToEnd(t *testing.T) {
+	t.Parallel()
+
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.Contains(t, r.Header.Get("Sec-WebSocket-Extensions"), "permessage-deflate")
+
+		ws, err := testUpgradeToWS(w, r)
+		if err != nil {
+			return
+		}
+		defer ws.Close()
+
+		for {
+			mt, msg, err := ws.ReadMessage()
+			if err != nil {
+				return
+			}
+
+			if err := ws.WriteMessage(mt, msg); err != nil {
+				return
+			}
+		}
+	})
+
+	server := httptest.NewServer(handler)
+	defer server.Close()
+
+	client := aoni.NewClient(nil)
+	wsURL := "ws" + strings.TrimPrefix(server.URL, "http")
+
+	conn, resp, err := DialWebSocketWithConfig(t.Context(), client, wsURL, DialWebSocketConfig{
+		EnableCompression: true,
+	})
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusSwitchingProtocols, resp.StatusCode)
+
+	defer conn.Close()
+
+	testMsg := []byte("permessage deflate compressed message")
+	_, err = conn.Write(testMsg)
+	require.NoError(t, err)
+
+	buf := make([]byte, 100)
+	n, err := conn.Read(buf)
+	require.NoError(t, err)
+	assert.Equal(t, string(testMsg), string(buf[:n]))
+}
+
+func TestParseWSURL_PathTraversal(t *testing.T) {
+	t.Parallel()
+
+	_, err := parseWSURL("ws://example.com/.well-known/../secret")
+	assert.ErrorIs(t, err, ErrPathTraversalBlocked)
+}
+
+func TestIsForbiddenH2ConnectHeader(t *testing.T) {
+	t.Parallel()
+
+	forbidden := []string{"upgrade", "connection", "host", "sec-websocket-key", "sec-websocket-accept"}
+	for _, h := range forbidden {
+		assert.True(t, isForbiddenH2ConnectHeader(h), "header %s should be forbidden", h)
+	}
+
+	allowed := []string{"authorization", "user-agent", "cookie", "x-custom-header"}
+	for _, h := range allowed {
+		assert.False(t, isForbiddenH2ConnectHeader(h), "header %s should be allowed", h)
+	}
 }

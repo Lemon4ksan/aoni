@@ -21,10 +21,10 @@ func TestHealthTracker_Transitions(t *testing.T) {
 		recoveredCount int32
 	)
 
-	onUnhealthy := func(name string, fails uint32, retryAfter time.Duration) {
+	onUnhealthy := func(_ string, _ uint32, _ time.Duration) {
 		atomic.AddInt32(&unhealthyCount, 1)
 	}
-	onRecovered := func(name string) {
+	onRecovered := func(_ string) {
 		atomic.AddInt32(&recoveredCount, 1)
 	}
 
@@ -80,7 +80,7 @@ func TestHealthTracker_Reset(t *testing.T) {
 
 	var recoveredCount int32
 
-	onRecovered := func(name string) {
+	onRecovered := func(_ string) {
 		atomic.AddInt32(&recoveredCount, 1)
 	}
 
@@ -93,7 +93,7 @@ func TestHealthTracker_Reset(t *testing.T) {
 	// Reset from Degraded
 	tracker.Reset()
 	assert.Equal(t, StatusHealthy, tracker.Status())
-	assert.Equal(t, int32(0), atomic.LoadInt32(&recoveredCount)) // No onRecovered callback if it wasn't unhealthy
+	assert.Equal(t, int32(0), atomic.LoadInt32(&recoveredCount))
 
 	// Go to Unhealthy
 	tracker.MarkFailed()
@@ -103,10 +103,11 @@ func TestHealthTracker_Reset(t *testing.T) {
 	// Reset from Unhealthy
 	tracker.Reset()
 	assert.Equal(t, StatusHealthy, tracker.Status())
-	assert.Equal(t, int32(1), atomic.LoadInt32(&recoveredCount)) // Triggers onRecovered
+	assert.Equal(t, int32(1), atomic.LoadInt32(&recoveredCount))
 }
 
 func TestHealthStatus_StringUnknown(t *testing.T) {
 	t.Parallel()
+
 	assert.Equal(t, "Unknown", Status(999).String())
 }

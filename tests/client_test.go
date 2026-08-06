@@ -6,7 +6,6 @@ package aoni_test
 
 import (
 	"bytes"
-	"compress/gzip"
 	"context"
 	"crypto/rand"
 	"crypto/rsa"
@@ -16,9 +15,11 @@ import (
 	"crypto/x509/pkix"
 	"encoding/base64"
 	"encoding/hex"
+	"encoding/json"
 	"encoding/pem"
 	"errors"
 	"fmt"
+	"github.com/klauspost/compress/gzip"
 	"io"
 	"math/big"
 	"net"
@@ -38,14 +39,18 @@ import (
 
 	"github.com/lemon4ksan/aoni"
 	"github.com/lemon4ksan/aoni/codec/decode"
+	"github.com/lemon4ksan/aoni/codec/values"
 	"github.com/lemon4ksan/aoni/cookie"
 	"github.com/lemon4ksan/aoni/fast"
 	"github.com/lemon4ksan/aoni/fingerprint"
 	"github.com/lemon4ksan/aoni/fingerprint/h3"
 	"github.com/lemon4ksan/aoni/fingerprint/ja4"
 	"github.com/lemon4ksan/aoni/fingerprint/profiles"
+	"github.com/lemon4ksan/aoni/fluent"
 	"github.com/lemon4ksan/aoni/middleware"
 	"github.com/lemon4ksan/aoni/mod"
+	"github.com/lemon4ksan/aoni/netutil"
+	"github.com/lemon4ksan/aoni/netutil/digest"
 	"github.com/lemon4ksan/aoni/netutil/ip"
 	"github.com/lemon4ksan/aoni/netutil/netdial"
 	"github.com/lemon4ksan/aoni/netutil/proxy"
@@ -1895,16 +1900,6 @@ func TestClient_CustomMIMEDecoders(t *testing.T) {
 		require.NotNil(t, result)
 		assert.Equal(t, "msgpack:binary_payload", *result)
 	})
-
-	t.Run("via client.RegisterDecoder", func(t *testing.T) {
-		client := aoni.NewClient(ts.Client(), option.WithBaseURL(ts.URL)).
-			RegisterDecoder("application/x-msgpack", msgpackTestDecoder{})
-
-		result, err := request.GetTo[string](context.Background(), client, "/")
-		require.NoError(t, err)
-		require.NotNil(t, result)
-		assert.Equal(t, "msgpack:binary_payload", *result)
-	})
 }
 
 func TestClient_BrowserProfile_HTTP2(t *testing.T) {
@@ -1962,4 +1957,446 @@ func TestClient_SNI_CleanHostPort_Handshake(t *testing.T) {
 	defer resp.Body.Close()
 
 	assert.Equal(t, http.StatusOK, resp.StatusCode)
+}
+
+func TestRFC6265_CookiePathMatching(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name       string
+		reqPath    string
+		cookiePath string
+		wantMatch  bool
+	}{
+		{
+			name:       "exact_path_match",
+			reqPath:    "/api/v1",
+			cookiePath: "/api/v1",
+			wantMatch:  true,
+		},
+		{
+			name:       "prefix_match_with_subpath_slash_boundary",
+			reqPath:    "/api/v1/users",
+			cookiePath: "/api/v1",
+			wantMatch:  true,
+		},
+		{
+			name:       "prefix_match_with_trailing_slash_in_cookie_path",
+			reqPath:    "/api/v1/users",
+			cookiePath: "/api/v1/",
+			wantMatch:  true,
+		},
+		{
+			name:       "must_not_match_subpath_without_slash_boundary",
+			reqPath:    "/api-v2/users",
+			cookiePath: "/api",
+			wantMatch:  false, // RFC 6265 §5.1.4: "/api-v2" does NOT match "/api"
+		},
+		{
+			name:       "root_path_matches_everything",
+			reqPath:    "/any/resource/path",
+			cookiePath: "/",
+			wantMatch:  true,
+		},
+		{
+			name:       "empty_cookie_path_defaults_to_root",
+			reqPath:    "/test",
+			cookiePath: "",
+			wantMatch:  true,
+		},
+		{
+			name:       "disjoint_paths",
+			reqPath:    "/user/profile",
+			cookiePath: "/admin",
+			wantMatch:  false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			got := cookie.PathMatch(tt.reqPath, tt.cookiePath)
+			assert.Equal(t, tt.wantMatch, got, "PathMatch(%q, %q)", tt.reqPath, tt.cookiePath)
+		})
+	}
+}
+
+func TestRFC9112_ConflictingContentLengthHeaders(t *testing.T) {
+	t.Parallel()
+
+	t.Run("identical_multiple_content_length_normalized", func(t *testing.T) {
+		t.Parallel()
+
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			w.Header()["Content-Length"] = []string{"13", "13"}
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte("hello world!\n"))
+		}))
+		t.Cleanup(server.Close)
+
+		client := aoni.NewClient(nil, option.WithBaseURL(server.URL))
+		resp, err := client.Request(t.Context(), http.MethodGet, "/")
+		require.NoError(t, err)
+
+		defer aoni.CloseResponse(resp)
+
+		assert.Equal(t, http.StatusOK, resp.StatusCode)
+		assert.Equal(t, []string{"13"}, resp.Header["Content-Length"])
+	})
+
+	t.Run("conflicting_multiple_content_length_rejected", func(t *testing.T) {
+		t.Parallel()
+
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			w.Header()["Content-Length"] = []string{"10", "20"}
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte("0123456789"))
+		}))
+		t.Cleanup(server.Close)
+
+		client := aoni.NewClient(nil, option.WithBaseURL(server.URL))
+		_, err := client.Request(t.Context(), http.MethodGet, "/")
+		require.Error(t, err)
+
+		isConflictingCLErr := errors.Is(err, aoni.ErrConflictingContentLength) ||
+			strings.Contains(err.Error(), "multiple Content-Length headers")
+		assert.True(t, isConflictingCLErr, "expected conflicting Content-Length error, got: %v", err)
+	})
+}
+
+func TestRFC6266_RFC8187_ContentDispositionFilenameExtraction(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name       string
+		header     string
+		wantResult string
+	}{
+		{
+			name:       "rfc8187_utf8_encoded_filename_cyrillic",
+			header:     `attachment; filename*=UTF-8''foo%20bar%20%D0%BF%D1%80%D0%B8%D0%B2%D0%B5%D1%82.txt`,
+			wantResult: "foo bar привет.txt",
+		},
+		{
+			name:       "rfc8187_utf8_encoded_filename_umlaut",
+			header:     `attachment; filename*=UTF-8''t%C3%B6st.txt`,
+			wantResult: "töst.txt",
+		},
+		{
+			name:       "fallback_to_standard_filename_when_extended_missing",
+			header:     `attachment; filename="report_2026.pdf"`,
+			wantResult: "report_2026.pdf",
+		},
+		{
+			name:       "strip_path_traversal_sequences",
+			header:     `attachment; filename="../../../../../etc/passwd"`,
+			wantResult: "passwd",
+		},
+		{
+			name:       "windows_reserved_device_name_con_fallback",
+			header:     `attachment; filename="CON.txt"`,
+			wantResult: "downloaded_file",
+		},
+		{
+			name:       "windows_reserved_device_name_nul_fallback",
+			header:     `attachment; filename="NUL"`,
+			wantResult: "downloaded_file",
+		},
+		{
+			name:       "empty_header_fallback",
+			header:     "",
+			wantResult: "downloaded_file",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			got := netutil.ExtractSanitizedFilename(tt.header)
+			assert.Equal(t, tt.wantResult, got)
+		})
+	}
+}
+
+func TestRFC6874_HostNormalization(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name     string
+		rawHost  string
+		wantHost string
+	}{
+		{
+			name:     "strip_ipv6_zone_id_bracketed",
+			rawHost:  "[fe80::1%eth0]",
+			wantHost: "[fe80::1]",
+		},
+		{
+			name:     "strip_ipv6_zone_id_unbracketed",
+			rawHost:  "fe80::1%eth0",
+			wantHost: "fe80::1",
+		},
+		{
+			name:     "convert_idn_punycode_cyrillic",
+			rawHost:  "президент.рф",
+			wantHost: "xn--d1abbgf6aiiy.xn--p1ai",
+		},
+		{
+			name:     "standard_ascii_hostname_remains_unchanged",
+			rawHost:  "api.example.com",
+			wantHost: "api.example.com",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			got := netutil.CleanHost(tt.rawHost)
+			assert.Equal(t, tt.wantHost, got)
+		})
+	}
+}
+
+func TestRFC7616_DigestAuthentication(t *testing.T) {
+	t.Parallel()
+
+	realm := "restricted-area"
+	username := "admin"
+	password := "secret123"
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		authHeader := r.Header.Get("Authorization")
+		if authHeader == "" {
+			w.Header().Set("WWW-Authenticate", `Digest realm="`+realm+`", nonce="dcd98b7102dd2f0e8b11d0f600bfb0c093", qop="auth,auth-int", algorithm=MD5`)
+			w.WriteHeader(http.StatusUnauthorized)
+			return
+		}
+
+		require.True(t, strings.HasPrefix(authHeader, "Digest "))
+		assert.Contains(t, authHeader, `username="admin"`)
+		assert.Contains(t, authHeader, `realm="restricted-area"`)
+		assert.Contains(t, authHeader, `response=`)
+
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"status": "authenticated"}`))
+	}))
+	t.Cleanup(server.Close)
+
+	digestTr := &digest.Transport{
+		Username: username,
+		Password: password,
+		Transport: &http.Transport{
+			Proxy: http.ProxyFromEnvironment,
+		},
+	}
+
+	client := aoni.NewClient(nil,
+		option.WithBaseURL(server.URL),
+		option.WithEngine(&http.Client{Transport: digestTr}),
+	)
+
+	type authResponse struct {
+		Status string `json:"status"`
+	}
+
+	res, err := request.GetTo[authResponse](t.Context(), client, "/protected")
+	require.NoError(t, err)
+	assert.Equal(t, "authenticated", res.Status)
+}
+
+func TestValues_CustomUnmarshalersAndTags(t *testing.T) {
+	t.Parallel()
+
+	t.Run("bool_int_json_unmarshaling", func(t *testing.T) {
+		t.Parallel()
+
+		tests := []struct {
+			input string
+			want  bool
+		}{
+			{input: `"1"`, want: true},
+			{input: `"true"`, want: true},
+			{input: `1`, want: true},
+			{input: `"0"`, want: false},
+			{input: `"false"`, want: false},
+			{input: `0`, want: false},
+			{input: `null`, want: false},
+		}
+
+		for _, tt := range tests {
+			var bi values.BoolInt
+			err := json.Unmarshal([]byte(tt.input), &bi)
+			require.NoError(t, err, "input: %s", tt.input)
+			assert.Equal(t, tt.want, bool(bi))
+		}
+	})
+
+	t.Run("struct_to_values_custom_delimiters", func(t *testing.T) {
+		t.Parallel()
+
+		type FilterParams struct {
+			CommaTags values.CommaSlice[string] `url:"comma_tags"`
+			PipeTags  []string                  `url:"pipe_tags,pipe"`
+			SpaceTags []string                  `url:"space_tags,space"`
+		}
+
+		p := FilterParams{
+			CommaTags: []string{"go", "rust", "zig"},
+			PipeTags:  []string{"read", "write"},
+			SpaceTags: []string{"foo", "bar"},
+		}
+
+		vals, err := values.StructToValues(p)
+		require.NoError(t, err)
+
+		assert.Equal(t, "go,rust,zig", vals.Get("comma_tags"))
+		assert.Equal(t, "read|write", vals.Get("pipe_tags"))
+		assert.Equal(t, "foo bar", vals.Get("space_tags"))
+	})
+}
+
+func TestGRPCWeb_TrailerValidation(t *testing.T) {
+	t.Parallel()
+
+	t.Run("valid_grpc_status_zero_succeeds", func(t *testing.T) {
+		t.Parallel()
+
+		trailerPayload := []byte("grpc-status:0\r\ngrpc-message:OK\r\n")
+		err := decode.VerifyGRPCTrailer(trailerPayload)
+		assert.NoError(t, err)
+	})
+
+	t.Run("non_zero_grpc_status_returns_error", func(t *testing.T) {
+		t.Parallel()
+
+		trailerPayload := []byte("grpc-status:14\r\ngrpc-message:UNAVAILABLE\r\n")
+		err := decode.VerifyGRPCTrailer(trailerPayload)
+		require.Error(t, err)
+
+		var grpcErr *decode.GRPCWebError
+		require.ErrorAs(t, err, &grpcErr)
+		assert.Equal(t, "14", grpcErr.StatusCode)
+		assert.Equal(t, "UNAVAILABLE", grpcErr.StatusMsg)
+		assert.ErrorIs(t, err, decode.ErrGRPCWebStatusError)
+	})
+}
+
+func TestRealtimeStream_SSEMultiLineAndCommentParsing(t *testing.T) {
+	t.Parallel()
+
+	ssePayload := `: heartbeat comment line
+event: user_created
+id: evt_101
+retry: 5000
+data: {
+data:   "id": 42,
+data:   "name": "Alice"
+data: }
+
+`
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = w.Write([]byte(ssePayload))
+	}))
+	t.Cleanup(server.Close)
+
+	client := aoni.NewClient(nil, option.WithBaseURL(server.URL))
+	streamResp, err := stream.Get(t.Context(), client, "/events")
+	require.NoError(t, err)
+
+	type UserEvent struct {
+		ID   int    `json:"id"`
+		Name string `json:"name"`
+	}
+
+	ch, errs := stream.ParseSSE[UserEvent](t.Context(), streamResp)
+
+	var received []UserEvent
+	for val := range ch {
+		received = append(received, val)
+	}
+
+	select {
+	case err := <-errs:
+		require.NoError(t, err)
+	default:
+	}
+
+	require.Len(t, received, 1)
+	assert.Equal(t, 42, received[0].ID)
+	assert.Equal(t, "Alice", received[0].Name)
+}
+
+func TestNetUtil_PrivateIPClassification(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		ip        string
+		isPrivate bool
+	}{
+		{ip: "127.0.0.1", isPrivate: true},
+		{ip: "10.0.1.5", isPrivate: true},
+		{ip: "172.16.0.1", isPrivate: true},
+		{ip: "192.168.1.1", isPrivate: true},
+		{ip: "100.64.0.1", isPrivate: true}, // CGNAT (RFC 6598)
+		{ip: "8.8.8.8", isPrivate: false},   // Public IPv4
+		{ip: "1.1.1.1", isPrivate: false},   // Public IPv4
+		{ip: "::1", isPrivate: true},        // IPv6 Loopback
+		{ip: "fc00::1", isPrivate: true},    // IPv6 Unique Local Address (ULA)
+		{ip: "2001:db8::1", isPrivate: false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.ip, func(t *testing.T) {
+			t.Parallel()
+
+			parsed := net.ParseIP(tt.ip)
+			require.NotNil(t, parsed)
+
+			got := ip.IsPrivateIP(parsed)
+			assert.Equal(t, tt.isPrivate, got)
+		})
+	}
+}
+
+func TestFluentAPI_PathInterpolationAndDownload(t *testing.T) {
+	t.Parallel()
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, "/v1/users/usr_42/orders/ord_100", r.URL.Path)
+		assert.Equal(t, "desc", r.URL.Query().Get("sort"))
+
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"status": "success", "message": "found"}`))
+	}))
+	t.Cleanup(server.Close)
+
+	client := aoni.NewClient(nil, option.WithBaseURL(server.URL))
+
+	type apiResult struct {
+		Status  string `json:"status"`
+		Message string `json:"message"`
+	}
+
+	var res apiResult
+	resp, err := fluent.R(client).
+		SetContext(t.Context()).
+		SetPathParam("userId", "usr_42").
+		SetPathParam("orderId", "ord_100").
+		SetQueryParam("sort", "desc").
+		SetResult(&res).
+		Get("/v1/users/{userId}/orders/{orderId}")
+
+	require.NoError(t, err)
+	t.Cleanup(func() { aoni.CloseResponse(resp) })
+
+	assert.Equal(t, http.StatusOK, resp.StatusCode)
+	assert.Equal(t, "found", res.Message)
+	assert.Equal(t, "success", res.Status)
 }

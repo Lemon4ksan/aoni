@@ -26,7 +26,8 @@ func TestWithTimeout(t *testing.T) {
 
 	t.Run("request_completes_within_timeout", func(t *testing.T) {
 		t.Parallel()
-		_, client := setupTestReqServer(t, func(w http.ResponseWriter, r *http.Request) {
+
+		_, client := setupTestReqServer(t, func(w http.ResponseWriter, _ *http.Request) {
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusOK)
 			_, _ = fmt.Fprint(w, `{"message":"ok","status":200}`)
@@ -41,11 +42,11 @@ func TestWithTimeout(t *testing.T) {
 		t.Parallel()
 
 		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			// Hang until the client's deadline fires.
 			<-r.Context().Done()
 			w.WriteHeader(http.StatusServiceUnavailable)
 		}))
 		t.Cleanup(server.Close)
+
 		client := aoni.NewClient(nil, option.WithBaseURL(server.URL))
 
 		_, err := GetTo[reqTestPayload](t.Context(), client, "/slow", mod.WithTimeout(100*time.Millisecond))
@@ -82,6 +83,7 @@ func TestConditionalHeaders(t *testing.T) {
 
 	t.Run("WithIfNoneMatch", func(t *testing.T) {
 		t.Parallel()
+
 		_, client := setupTestReqServer(t, func(w http.ResponseWriter, r *http.Request) {
 			assert.Equal(t, `"abc123"`, r.Header.Get("If-None-Match"))
 			w.WriteHeader(http.StatusNotModified)
@@ -97,6 +99,7 @@ func TestConditionalHeaders(t *testing.T) {
 
 	t.Run("WithIfMatch", func(t *testing.T) {
 		t.Parallel()
+
 		_, client := setupTestReqServer(t, func(w http.ResponseWriter, r *http.Request) {
 			assert.Equal(t, `"abc123"`, r.Header.Get("If-Match"))
 			w.WriteHeader(http.StatusOK)
@@ -192,7 +195,7 @@ func TestConcurrentWithMods(t *testing.T) {
 func TestAsRequester(t *testing.T) {
 	t.Parallel()
 
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte(`{"message":"ok","status":200}`))
@@ -211,7 +214,7 @@ func TestAsRequester(t *testing.T) {
 func TestRequest_Configure(t *testing.T) {
 	t.Parallel()
 
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte(`{"message":"configured","status":200}`))
@@ -227,4 +230,14 @@ func TestRequest_Configure(t *testing.T) {
 	res, err := GetTo[reqTestPayload](t.Context(), reqr2, "/test")
 	require.NoError(t, err)
 	assert.Equal(t, "configured", res.Message)
+}
+
+func TestUnwrapClient(t *testing.T) {
+	t.Parallel()
+
+	client := aoni.NewClient(nil)
+	reqr := AsRequester(client)
+
+	unwrapped := UnwrapClient(reqr)
+	assert.Same(t, client, unwrapped)
 }

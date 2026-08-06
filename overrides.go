@@ -19,6 +19,7 @@ import (
 	"github.com/lemon4ksan/miyako/generic"
 
 	"github.com/lemon4ksan/aoni/internal/io"
+	"github.com/lemon4ksan/aoni/internal/pipeline"
 	"github.com/lemon4ksan/aoni/internal/timer"
 	"github.com/lemon4ksan/aoni/telemetry"
 )
@@ -62,8 +63,7 @@ func WithContextModifier(ctx context.Context, mods ...RequestModifier) context.C
 
 	cfg := GetRequestConfig(ctx)
 	if cfg == nil {
-		cfg = requestConfigPool.Get().(*RequestConfig)
-		ctx = context.WithValue(ctx, requestConfigKey{}, cfg)
+		ctx, cfg = AllocRequestConfig(ctx)
 	}
 
 	cfg.Modifiers = append(cfg.Modifiers, mods...)
@@ -72,7 +72,8 @@ func WithContextModifier(ctx context.Context, mods ...RequestModifier) context.C
 }
 
 // ContextModifiers retrieves all [RequestModifier] functions stored in the context.
-func ContextModifiers(ctx context.Context) []RequestModifier {
+// Note: returns pipeline.RequestModifier slice since modifiers are stored wrapped.
+func ContextModifiers(ctx context.Context) []pipeline.RequestModifier {
 	cfg := GetRequestConfig(ctx)
 	if cfg != nil {
 		return cfg.Modifiers
@@ -108,10 +109,7 @@ func GetInsecureSkipVerify(ctx context.Context) bool {
 }
 
 // TCPDelayRange defines the bounds for randomized pre-dial TCP delay jitter.
-type TCPDelayRange struct {
-	Min time.Duration
-	Max time.Duration
-}
+type TCPDelayRange = pipeline.TCPDelayRange
 
 // GetTCPDelay retrieves the configured [TCPDelayRange] from context.
 func GetTCPDelay(ctx context.Context) generic.Optional[TCPDelayRange] {
@@ -190,9 +188,6 @@ func GetCacheTTL(ctx context.Context) generic.Optional[time.Duration] {
 	return generic.Some(cfg.CacheTTL)
 }
 
-// RetryCondition evaluates whether a failed request attempt should trigger a retry.
-type RetryCondition func(resp Response, err error) bool
-
 // Or combines multiple [RetryCondition] predicates, returning true if ANY condition is satisfied.
 func Or(conditions ...RetryCondition) RetryCondition {
 	return func(resp Response, err error) bool {
@@ -218,9 +213,6 @@ func And(conditions ...RetryCondition) RetryCondition {
 		return true
 	}
 }
-
-// FallbackFunc generates an alternative [Response] when a request fails.
-type FallbackFunc func(req Request, origErr error) (Response, error)
 
 // FallbackString constructs a [FallbackFunc] returning plain text with the specified status code.
 func FallbackString(statusCode int, text string) FallbackFunc {
@@ -277,13 +269,6 @@ func FallbackJSON(statusCode int, data any) FallbackFunc {
 	}
 }
 
-// RetryOverride holds request-scoped retry parameters that take precedence over global middleware defaults.
-type RetryOverride struct {
-	Condition   RetryCondition
-	Backoff     time.Duration
-	MaxAttempts int
-}
-
 // GetRetryOverride retrieves the per-request [RetryOverride] configuration from context.
 func GetRetryOverride(ctx context.Context) generic.Optional[RetryOverride] {
 	cfg := GetRequestConfig(ctx)
@@ -291,7 +276,11 @@ func GetRetryOverride(ctx context.Context) generic.Optional[RetryOverride] {
 		return generic.None[RetryOverride]()
 	}
 
-	return generic.Some(*cfg.RetryPolicy)
+	if cfg.RetryPolicy != nil {
+		return generic.Some(*cfg.RetryPolicy)
+	}
+
+	return generic.None[RetryOverride]()
 }
 
 // ProxyFuncWithOverride wraps a base proxy resolution function so that per-request proxy overrides take precedence.

@@ -329,12 +329,14 @@ func TestLoadBalancer_Prewarm(t *testing.T) {
 	c1 := aoni.HTTPDoerFunc(func(req *http.Request) (*http.Response, error) {
 		calls1.Add(1)
 		assert.Equal(t, http.MethodHead, req.Method)
+
 		return &http.Response{StatusCode: http.StatusOK}, nil
 	})
 
 	c2 := aoni.HTTPDoerFunc(func(req *http.Request) (*http.Response, error) {
 		calls2.Add(1)
 		assert.Equal(t, http.MethodHead, req.Method)
+
 		return &http.Response{StatusCode: http.StatusOK}, nil
 	})
 
@@ -382,15 +384,10 @@ func TestLoadBalancer_InvalidBackendURL(t *testing.T) {
 	assert.Contains(t, err.Error(), "all backends failed")
 }
 
-func TestLoadBalancer_SetBackendPool(t *testing.T) {
+func TestLoadBalancer_SRVError(t *testing.T) {
 	t.Parallel()
 
-	lb, err := New(Config{}, "http://b1")
-	require.NoError(t, err)
-	t.Cleanup(func() { _ = lb.Close() })
-
-	assert.Equal(t, 1, lb.Stats().TotalBackends)
-
-	lb.UpdateBackends("http://b1", "http://b2", "http://b3")
-	assert.Equal(t, 3, lb.Stats().TotalBackends)
+	_, err := NewSRV(t.Context(), "invalid_service", "tcp", "invalid_domain.local", "http", 0, nil)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "srv loadbalancer")
 }
