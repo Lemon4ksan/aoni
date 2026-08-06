@@ -453,23 +453,6 @@ func WithSocketController(controller aoni.SocketController) aoni.ClientOption {
 // 5. FINGERPRINT, TLS & H2/H3 EVASION OPTIONS
 // ============================================================================
 
-// WithCertCompression enables RFC 8879 TLS Certificate Compression during handshakes
-// using the specified algorithms (Brotli, Zstd, Zlib) to reduce packet count and latency.
-func WithCertCompression(algos ...cert.CompressionAlgorythm) aoni.ClientOption {
-	return func(cfg *aoni.Config) {
-		if len(algos) == 0 {
-			cfg.Fingerprint.CertCompression = []cert.CompressionAlgorythm{
-				cert.CompressionBrotli,
-				cert.CompressionZstd,
-			}
-
-			return
-		}
-
-		cfg.Fingerprint.CertCompression = slices.Clone(algos)
-	}
-}
-
 // WithTLSFingerprint returns an [aoni.ClientOption] selecting a pre-defined [aoni.BrowserID] uTLS ClientHello profile.
 func WithTLSFingerprint(browser aoni.BrowserID) aoni.ClientOption {
 	return func(cfg *aoni.Config) {
@@ -556,6 +539,23 @@ func WithP0fSignature(sig *p0f.Signature) aoni.ClientOption {
 func WithSessionCache(cache aoni.SessionCache) aoni.ClientOption {
 	return func(cfg *aoni.Config) {
 		cfg.Fingerprint.SessionCache = cache
+	}
+}
+
+// WithCertCompression enables RFC 8879 TLS Certificate Compression during handshakes
+// using the specified algorithms to reduce packet count and latency.
+func WithCertCompression(algos ...cert.CompressionAlgorithm) aoni.ClientOption {
+	return func(cfg *aoni.Config) {
+		if len(algos) == 0 {
+			cfg.Fingerprint.CertCompression = []cert.CompressionAlgorithm{
+				cert.CompressionBrotli,
+				cert.CompressionZstd,
+			}
+
+			return
+		}
+
+		cfg.Fingerprint.CertCompression = slices.Clone(algos)
 	}
 }
 

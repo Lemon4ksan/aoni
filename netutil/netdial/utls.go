@@ -49,7 +49,7 @@ type RTLSOptions struct {
 	SessionCache       utls.ClientSessionCache
 	BaseTLSConfig      *tls.Config
 	CertificatePins    map[string][]string
-	CertCompression    []cert.CompressionAlgorythm
+	CertCompression    []cert.CompressionAlgorithm
 	ALPNOverride       []string
 	JA4Callback        func(ja4.Report)
 	InsecureSkipVerify bool
@@ -182,7 +182,7 @@ func HandshakeUTLS(
 	return &UConnWrapper{UConn: uConn}, report, nil
 }
 
-func applyCertCompression(uConn *utls.UConn, algos []cert.CompressionAlgorythm) {
+func applyCertCompression(uConn *utls.UConn, algos []cert.CompressionAlgorithm) {
 	if len(algos) == 0 {
 		return
 	}

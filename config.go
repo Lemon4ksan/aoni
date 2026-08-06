@@ -19,8 +19,8 @@ import (
 	"github.com/lemon4ksan/aoni/fingerprint/h3"
 	"github.com/lemon4ksan/aoni/fingerprint/ja4"
 	"github.com/lemon4ksan/aoni/fingerprint/p0f"
-	"github.com/lemon4ksan/aoni/netutil/cert"
 	"github.com/lemon4ksan/aoni/internal/pipeline"
+	"github.com/lemon4ksan/aoni/netutil/cert"
 	"github.com/lemon4ksan/aoni/netutil/fragment"
 	"github.com/lemon4ksan/aoni/netutil/ip"
 	"github.com/lemon4ksan/aoni/netutil/netdial"
@@ -231,7 +231,7 @@ type FingerprintConfig struct {
 	SessionCache               SessionCache
 	PacketPadding              *fingerprint.PaddingConfig
 	CertificatePins            map[string][]string
-	CertCompression            []cert.CompressionAlgorythm
+	CertCompression            []cert.CompressionAlgorithm
 	BrowserID                  BrowserID
 }
 

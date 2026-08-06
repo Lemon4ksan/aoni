@@ -732,7 +732,6 @@ func TestResolutionError(t *testing.T) {
 	wrapped := wrapDNSError("example.com", "DoT", "1.1.1.1:853", baseErr)
 	require.Error(t, wrapped)
 	assert.Contains(t, wrapped.Error(), "aoni dns: resolve example.com via DoT")
-
 }
 
 func TestDoHResolver_EDNS0_And_GetMethod(t *testing.T) {
