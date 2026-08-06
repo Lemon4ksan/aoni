@@ -38,19 +38,22 @@ type ConnOpts struct {
 	DisablePingChecking bool
 	OnDisconnect        func(ctx context.Context, c *Conn)
 	OnRTT               func(time.Duration)
+	OnPushPromise       func(pushReq *fasthttp.Request, pushResp *fasthttp.Response)
 	Settings            *Settings
 }
 
 // Conn manages a multiplexed HTTP/2 connection over a net.Conn socket.
 type Conn struct {
-	c            net.Conn
-	br           *bufio.Reader
-	bw           *bufio.Writer
-	enc          *HPACK
-	dec          *HPACK
-	onDisconnect func(ctx context.Context, c *Conn)
-	lastErr      error
-	orderedKeys  []string
+	c             net.Conn
+	br            *bufio.Reader
+	bw            *bufio.Writer
+	enc           *HPACK
+	dec           *HPACK
+	onDisconnect  func(ctx context.Context, c *Conn)
+	onRTT         func(time.Duration)
+	onPushPromise func(pushReq *fasthttp.Request, pushResp *fasthttp.Response)
+	lastErr       error
+	orderedKeys   []string
 
 	windowCond *sync.Cond
 	windowMu   sync.Mutex
@@ -99,6 +102,8 @@ func NewConn(c net.Conn, opts ConnOpts) *Conn {
 		pingInterval:  opts.PingInterval,
 		disableAcks:   opts.DisablePingChecking,
 		onDisconnect:  opts.OnDisconnect,
+		onRTT:         opts.OnRTT,
+		onPushPromise: opts.OnPushPromise,
 	}
 
 	nc.windowCond = sync.NewCond(&nc.windowMu)
@@ -1084,6 +1089,14 @@ func (c *Conn) readStream(fr *FrameHeader, reqCtx *Context) error {
 
 		return err
 
+	case FramePushPromise:
+		pp, ok := fr.Body().(*PushPromise)
+		if !ok {
+			return ErrUnknownFrameType
+		}
+
+		return c.handlePushPromise(pp)
+
 	case FrameData:
 		data := fr.Body().(*Data)
 		dataLen := int32(fr.Len())
@@ -1119,6 +1132,107 @@ func (c *Conn) readStream(fr *FrameHeader, reqCtx *Context) error {
 	}
 
 	return nil
+}
+
+func (c *Conn) handlePushPromise(pp *PushPromise) error {
+	if !c.current.Push() {
+		return nil
+	}
+
+	promisedID := pp.stream
+	if promisedID == 0 || (promisedID%2 != 0) {
+		return NewGoAwayError(ProtocolError, "invalid promised stream id")
+	}
+
+	pushReq := fasthttp.AcquireRequest()
+	if err := c.decodePushHeaders(pp.header, pushReq); err != nil {
+		fasthttp.ReleaseRequest(pushReq)
+		return err
+	}
+
+	method := string(pushReq.Header.Method())
+	if method != "GET" && method != "HEAD" {
+		fasthttp.ReleaseRequest(pushReq)
+		c.resetStream(promisedID, StreamCanceled)
+		return nil
+	}
+
+	pushResp := fasthttp.AcquireResponse()
+	errCh := make(chan error, 1)
+
+	ctx := &Context{
+		Request:  pushReq,
+		Response: pushResp,
+		Err:      errCh,
+		StreamID: promisedID,
+	}
+
+	ctx.SetState(streamOpen)
+	c.reqQueued.Store(promisedID, ctx)
+
+	go c.awaitPushedResponse(ctx, pushReq, pushResp)
+
+	return nil
+}
+
+func (c *Conn) decodePushHeaders(headerBlock []byte, pushReq *fasthttp.Request) error {
+	hf := AcquireHeaderField()
+	defer ReleaseHeaderField(hf)
+
+	b := headerBlock
+	for len(b) > 0 {
+		var err error
+
+		b, err = c.dec.Next(hf, b)
+		if err != nil {
+			return err
+		}
+
+		key := hf.Key()
+		val := hf.Value()
+
+		switch key {
+		case ":method":
+			pushReq.Header.SetMethod(val)
+		case ":authority":
+			pushReq.Header.SetHost(val)
+		case ":scheme":
+			pushReq.URI().SetScheme(val)
+		case ":path":
+			pushReq.SetRequestURI(val)
+		default:
+			if !hf.IsPseudo() {
+				pushReq.Header.Add(key, val)
+			}
+		}
+	}
+
+	return nil
+}
+
+func (c *Conn) awaitPushedResponse(ctx *Context, pushReq *fasthttp.Request, pushResp *fasthttp.Response) {
+	err := <-ctx.Err
+	if err == nil && c.onPushPromise != nil {
+		c.onPushPromise(pushReq, pushResp)
+	}
+
+	fasthttp.ReleaseRequest(pushReq)
+	fasthttp.ReleaseResponse(pushResp)
+}
+
+func (c *Conn) resetStream(streamID uint32, code ErrorCode) {
+	fr := AcquireFrameHeader()
+	fr.SetStream(streamID)
+
+	rst := AcquireFrame(FrameResetStream).(*RstStream)
+	rst.SetCode(code)
+	fr.SetBody(rst)
+
+	select {
+	case c.out <- fr:
+	default:
+		ReleaseFrameHeader(fr)
+	}
 }
 
 func (c *Conn) readTrailers(b []byte, reqCtx *Context) error {

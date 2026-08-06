@@ -189,6 +189,22 @@ func WithHTTP2Configurer(configurer aoni.HTTP2Configurer) aoni.ClientOption {
 	}
 }
 
+// WithH2ServerPush configures whether the HTTP/2 client accepts server-pushed resources (RFC 9113 §8.4),
+// storing them directly in the response cache to avoid duplicate asset fetches.
+func WithH2ServerPush(enable bool) aoni.ClientOption {
+	return func(cfg *aoni.Config) {
+		if cfg.Fingerprint.H2Settings == nil {
+			cfg.Fingerprint.H2Settings = &h2.ChromeSettings
+		}
+
+		if enable {
+			cfg.Fingerprint.H2Settings.EnablePush = 1
+		} else {
+			cfg.Fingerprint.H2Settings.EnablePush = 0
+		}
+	}
+}
+
 // WithInsecureSkipVerify returns an [aoni.ClientOption] bypassing TLS certificate verification globally on the transport.
 //
 // Warning:
