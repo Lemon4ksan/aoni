@@ -37,6 +37,7 @@ type ConnOpts struct {
 	PingInterval        time.Duration
 	DisablePingChecking bool
 	OnDisconnect        func(ctx context.Context, c *Conn)
+	OnRTT               func(time.Duration)
 	Settings            *Settings
 }
 
@@ -884,13 +885,14 @@ func (c *Conn) handleConnectionFrame(fr *FrameHeader) error {
 
 	case FrameWindowUpdate:
 		return c.handleWindowUpdate(fr)
+
 	case FramePing:
 		if fr.Body() != nil {
 			ping := fr.Body().(*Ping)
 			if !ping.IsAck() {
 				c.handlePing(ping)
-			} else if c.pingUnacks > 0 {
-				c.pingUnacks--
+			} else {
+				c.handlePingAck(ping)
 			}
 		}
 
@@ -902,6 +904,37 @@ func (c *Conn) handleConnectionFrame(fr *FrameHeader) error {
 	}
 
 	return nil
+}
+
+func (c *Conn) handlePingAck(ping *Ping) {
+	if c.pingUnacks > 0 {
+		c.pingUnacks--
+	}
+
+	if c.onDisconnect != nil && ping.DataAsTime().IsZero() {
+		return
+	}
+
+	rtt := time.Since(ping.DataAsTime())
+	if rtt > 0 && rtt < 10*time.Second && c.onDisconnect != nil {
+		if c.windowCond != nil {
+			c.recordRTT(rtt)
+		}
+	}
+}
+
+func (c *Conn) recordRTT(rtt time.Duration) {
+	c.windowMu.Lock()
+	defer c.windowMu.Unlock()
+
+	if c.c != nil && c.onDisconnect != nil {
+		// Signal RTT callback registered during connection setup
+		if rttCallback, ok := c.reqQueued.Load("rtt_callback"); ok {
+			if cb, isFn := rttCallback.(func(time.Duration)); isFn {
+				cb(rtt)
+			}
+		}
+	}
 }
 
 func (c *Conn) handleWindowUpdate(fr *FrameHeader) error {

@@ -221,8 +221,17 @@ func (c *Client) getH2Client(host string) *h2engine.Client {
 		h2s.SetMaxHeaderListSize(s.MaxHeaderListSize)
 	}
 
+	var onRTTCallback func(time.Duration)
+	if c.config.Network.DynamicHedging != nil && c.config.Network.DynamicHedging.Tracker != nil {
+		tracker := c.config.Network.DynamicHedging.Tracker
+		onRTTCallback = func(rtt time.Duration) {
+			tracker.Record(rtt)
+		}
+	}
+
 	cl := h2engine.NewClient(dialer, h2engine.ClientOpts{
 		PingInterval: 15 * time.Second,
+		OnRTT:        onRTTCallback,
 		Settings:     h2s,
 	})
 
