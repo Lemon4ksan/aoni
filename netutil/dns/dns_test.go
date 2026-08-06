@@ -26,6 +26,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/lemon4ksan/aoni"
+	"github.com/lemon4ksan/aoni/netutil/dns/wire"
 )
 
 type failingResolver struct{}
@@ -313,12 +314,12 @@ func TestDoHResolver_LookupIPAddr_Mocked(t *testing.T) {
 
 		queryID := binary.BigEndian.Uint16(body[0:2])
 
-		qtypeOffset, err := skipDomainName(body, 12)
+		qtypeOffset, err := wire.SkipDomainName(body, 12)
 
 		respIP := netip.MustParseAddr("192.168.1.100")
 		if err == nil && qtypeOffset+2 <= len(body) {
 			qtype := binary.BigEndian.Uint16(body[qtypeOffset : qtypeOffset+2])
-			if qtype == TypeAAAA {
+			if qtype == wire.TypeAAAA {
 				respIP = netip.MustParseAddr("2001:db8::1")
 			}
 		}
@@ -769,7 +770,7 @@ func TestDoHResolver_EDNS0_And_GetMethod(t *testing.T) {
 
 		resolver := NewDoHResolver(ts.URL, "cloudflare-dns.com", aoni.NewClient(ts.Client()))
 		resolver.Method = DoHMethodGet
-		resolver.EDNS = EDNSOptions{PadToBlock: 128}
+		resolver.EDNS = wire.EDNSOptions{PadToBlock: 128}
 
 		_, err := resolver.LookupNetIP(t.Context(), "example.com")
 		require.NoError(t, err)
@@ -805,7 +806,7 @@ func TestDoHResolver_EDNS0_And_GetMethod(t *testing.T) {
 
 		resolver := NewDoHResolver(ts.URL, "dns.google", aoni.NewClient(ts.Client()))
 		resolver.Method = DoHMethodPost
-		resolver.EDNS = EDNSOptions{
+		resolver.EDNS = wire.EDNSOptions{
 			ClientIP:   netip.MustParseAddr("192.168.1.50"),
 			PadToBlock: 128,
 		}
@@ -840,19 +841,19 @@ func TestPackDNSQueryExtended_EDNSOptions(t *testing.T) {
 	t.Run("invalid_empty_domain", func(t *testing.T) {
 		t.Parallel()
 
-		_, err := PackDNSQueryExtended(1, "", TypeA, EDNSOptions{})
-		assert.ErrorIs(t, err, ErrInvalidDomain)
+		_, err := wire.PackDNSQueryExtended(1, "", wire.TypeA, wire.EDNSOptions{})
+		assert.ErrorIs(t, err, wire.ErrInvalidDomain)
 	})
 
 	t.Run("edns_client_subnet_ipv4", func(t *testing.T) {
 		t.Parallel()
 
-		edns := EDNSOptions{
+		edns := wire.EDNSOptions{
 			ClientIP:   netip.MustParseAddr("10.0.1.20"),
 			PadToBlock: 128,
 		}
 
-		wire, err := PackDNSQueryExtended(0x1234, "test.org", TypeA, edns)
+		wire, err := wire.PackDNSQueryExtended(0x1234, "test.org", wire.TypeA, edns)
 		require.NoError(t, err)
 		require.NotEmpty(t, wire)
 
@@ -867,12 +868,12 @@ func TestPackDNSQueryExtended_EDNSOptions(t *testing.T) {
 	t.Run("edns_client_subnet_ipv6", func(t *testing.T) {
 		t.Parallel()
 
-		edns := EDNSOptions{
+		edns := wire.EDNSOptions{
 			ClientIP:   netip.MustParseAddr("2001:db8::1"),
 			PadToBlock: 256,
 		}
 
-		wire, err := PackDNSQueryExtended(0x5678, "ipv6.test", TypeAAAA, edns)
+		wire, err := wire.PackDNSQueryExtended(0x5678, "ipv6.test", wire.TypeAAAA, edns)
 		require.NoError(t, err)
 
 		assert.Zero(t, len(wire)%256, "wire packet length %d should be padded to 256", len(wire))
@@ -885,8 +886,8 @@ func TestParseDNSResponseRecords_WireParsing(t *testing.T) {
 	t.Run("truncated_message_less_than_12_bytes", func(t *testing.T) {
 		t.Parallel()
 
-		_, err := ParseDNSResponseRecords([]byte{0x00, 0x01}, 0x0001)
-		assert.ErrorIs(t, err, ErrTruncatedDNSMessage)
+		_, err := wire.ParseDNSResponseRecords([]byte{0x00, 0x01}, 0x0001)
+		assert.ErrorIs(t, err, wire.ErrTruncatedDNSMessage)
 	})
 
 	t.Run("non_zero_rcode_returns_error", func(t *testing.T) {
@@ -897,9 +898,9 @@ func TestParseDNSResponseRecords_WireParsing(t *testing.T) {
 		binary.BigEndian.PutUint16(msg[0:2], 0x1000)
 		binary.BigEndian.PutUint16(msg[2:4], 0x8003) // Response flag + RCODE 3
 
-		_, err := ParseDNSResponseRecords(msg[:], 0x1000)
+		_, err := wire.ParseDNSResponseRecords(msg[:], 0x1000)
 		require.Error(t, err)
-		assert.ErrorIs(t, err, ErrDNSResponseCode)
+		assert.ErrorIs(t, err, wire.ErrDNSResponseCode)
 		assert.Contains(t, err.Error(), "rcode=3")
 	})
 
@@ -920,22 +921,22 @@ func TestParseDNSResponseRecords_WireParsing(t *testing.T) {
 		buf.Write([]byte{7, 'e', 'x', 'a', 'm', 'p', 'l', 'e', 3, 'c', 'o', 'm', 0})
 
 		var qTail [4]byte
-		binary.BigEndian.PutUint16(qTail[0:2], TypeA)
-		binary.BigEndian.PutUint16(qTail[2:4], ClassIN)
+		binary.BigEndian.PutUint16(qTail[0:2], wire.TypeA)
+		binary.BigEndian.PutUint16(qTail[2:4], wire.ClassIN)
 		buf.Write(qTail[:])
 
 		// Answer: Name pointer (0xc00c), TypeA, ClassIN, TTL 300, RDLen 4, IP 192.168.1.1
 		buf.Write([]byte{0xc0, 0x0c}) // Pointer to offset 12
 
 		var ansHdr [10]byte
-		binary.BigEndian.PutUint16(ansHdr[0:2], TypeA)
-		binary.BigEndian.PutUint16(ansHdr[2:4], ClassIN)
+		binary.BigEndian.PutUint16(ansHdr[0:2], wire.TypeA)
+		binary.BigEndian.PutUint16(ansHdr[2:4], wire.ClassIN)
 		binary.BigEndian.PutUint32(ansHdr[4:8], 300) // TTL = 300s
 		binary.BigEndian.PutUint16(ansHdr[8:10], 4)  // RDLENGTH = 4
 		buf.Write(ansHdr[:])
 		buf.Write(net.ParseIP("192.168.1.1").To4())
 
-		records, err := ParseDNSResponseRecords(buf.Bytes(), 0x1122)
+		records, err := wire.ParseDNSResponseRecords(buf.Bytes(), 0x1122)
 		require.NoError(t, err)
 		require.Len(t, records, 1)
 
@@ -945,21 +946,21 @@ func TestParseDNSResponseRecords_WireParsing(t *testing.T) {
 }
 
 type extendedResolverMock struct {
-	records []DNSRecord
+	records []wire.DNSRecord
 }
 
 func (m *extendedResolverMock) LookupIPAddr(_ context.Context, _ string) ([]net.IPAddr, error) {
 	return nil, nil
 }
 
-func (m *extendedResolverMock) LookupDNSRecords(_ context.Context, _ string) ([]DNSRecord, error) {
+func (m *extendedResolverMock) LookupDNSRecords(_ context.Context, _ string) ([]wire.DNSRecord, error) {
 	return m.records, nil
 }
 
 func TestInMemoryDNSCache_ExtendedDNSRecordsStorage(t *testing.T) {
 	t.Parallel()
 
-	records := []DNSRecord{
+	records := []wire.DNSRecord{
 		{Addr: netip.MustParseAddr("10.20.30.40"), TTL: 120},
 		{Addr: netip.MustParseAddr("10.20.30.41"), TTL: 60},
 	}

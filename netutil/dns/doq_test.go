@@ -23,6 +23,8 @@ import (
 	"github.com/quic-go/quic-go"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/lemon4ksan/aoni/netutil/dns/wire"
 )
 
 func generateDoQTLSConfig(t *testing.T) *tls.Config {
@@ -120,10 +122,10 @@ func defaultMockDoQStreamHandler(stream *quic.Stream) {
 	respIP := netip.MustParseAddr("127.0.0.1")
 
 	// Parse QTYPE by skipping domain name in question section (offset 12)
-	qtypeOffset, err := skipDomainName(reqBuf, 12)
+	qtypeOffset, err := wire.SkipDomainName(reqBuf, 12)
 	if err == nil && qtypeOffset+2 <= len(reqBuf) {
 		qtype := binary.BigEndian.Uint16(reqBuf[qtypeOffset : qtypeOffset+2])
-		if qtype == TypeAAAA {
+		if qtype == wire.TypeAAAA {
 			respIP = netip.MustParseAddr("::1")
 		}
 	}
@@ -151,12 +153,12 @@ func buildMockDoQDNSResponse(id uint16, ip netip.Addr) []byte {
 
 	var qTail [4]byte
 	if ip.Is4() {
-		binary.BigEndian.PutUint16(qTail[0:2], TypeA)
+		binary.BigEndian.PutUint16(qTail[0:2], wire.TypeA)
 	} else {
-		binary.BigEndian.PutUint16(qTail[0:2], TypeAAAA)
+		binary.BigEndian.PutUint16(qTail[0:2], wire.TypeAAAA)
 	}
 
-	binary.BigEndian.PutUint16(qTail[2:4], ClassIN)
+	binary.BigEndian.PutUint16(qTail[2:4], wire.ClassIN)
 	buf.Write(qTail[:])
 
 	// Answer Section
@@ -164,14 +166,14 @@ func buildMockDoQDNSResponse(id uint16, ip netip.Addr) []byte {
 
 	var ansHdr [10]byte
 	if ip.Is4() {
-		binary.BigEndian.PutUint16(ansHdr[0:2], TypeA)
+		binary.BigEndian.PutUint16(ansHdr[0:2], wire.TypeA)
 		binary.BigEndian.PutUint16(ansHdr[8:10], 4)
 	} else {
-		binary.BigEndian.PutUint16(ansHdr[0:2], TypeAAAA)
+		binary.BigEndian.PutUint16(ansHdr[0:2], wire.TypeAAAA)
 		binary.BigEndian.PutUint16(ansHdr[8:10], 16)
 	}
 
-	binary.BigEndian.PutUint16(ansHdr[2:4], ClassIN)
+	binary.BigEndian.PutUint16(ansHdr[2:4], wire.ClassIN)
 	binary.BigEndian.PutUint32(ansHdr[4:8], 120) // TTL = 120s
 	buf.Write(ansHdr[:])
 

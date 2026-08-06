@@ -11,6 +11,8 @@ import (
 	"time"
 
 	"github.com/lemon4ksan/miyako/batto"
+
+	"github.com/lemon4ksan/aoni/netutil/dns/wire"
 )
 
 var evictInterval = time.Minute
@@ -94,7 +96,7 @@ func (c *InMemoryDNSCache) LookupIPAddr(ctx context.Context, host string) ([]net
 	}
 
 	if extendedResolver, ok := c.resolver.(interface {
-		LookupDNSRecords(ctx context.Context, host string) ([]DNSRecord, error)
+		LookupDNSRecords(ctx context.Context, host string) ([]wire.DNSRecord, error)
 	}); ok {
 		records, err := extendedResolver.LookupDNSRecords(ctx, host)
 		if err == nil && len(records) > 0 {
@@ -119,7 +121,7 @@ func (c *InMemoryDNSCache) LookupIPAddr(ctx context.Context, host string) ([]net
 	return ips, nil
 }
 
-func (c *InMemoryDNSCache) storeRecords(host string, records []DNSRecord) ([]net.IPAddr, error) {
+func (c *InMemoryDNSCache) storeRecords(host string, records []wire.DNSRecord) ([]net.IPAddr, error) {
 	var minTTL uint32 = 3600
 
 	ips := make([]net.IPAddr, len(records))

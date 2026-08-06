@@ -24,6 +24,7 @@ import (
 	"github.com/lemon4ksan/aoni/fingerprint/ja4"
 	"github.com/lemon4ksan/aoni/netutil"
 	"github.com/lemon4ksan/aoni/netutil/cert"
+	"github.com/lemon4ksan/aoni/netutil/dns/wire"
 )
 
 var (
@@ -46,13 +47,16 @@ type ClientHelloSpecProvider interface {
 type RTLSOptions struct {
 	HelloID            *utls.ClientHelloID
 	SpecProvider       ClientHelloSpecProvider
+	DNSResolver        DNSResolver
 	SessionCache       utls.ClientSessionCache
 	BaseTLSConfig      *tls.Config
 	CertificatePins    map[string][]string
 	CertCompression    []cert.CompressionAlgorithm
+	ECHConfigList      []byte
 	ALPNOverride       []string
 	JA4Callback        func(ja4.Report)
 	InsecureSkipVerify bool
+	AutoECH            bool
 }
 
 // UConnWrapper wraps a utls.UConn and provides a ConnectionState method that returns the TLS connection state.
@@ -126,6 +130,15 @@ func HandshakeUTLS(
 		uCfg.ClientSessionCache = opts.SessionCache
 	}
 
+	echConfig := opts.ECHConfigList
+	if len(echConfig) == 0 && opts.AutoECH && opts.DNSResolver != nil && cleanHost != "" {
+		echConfig = resolveECHViaDNS(ctx, opts.DNSResolver, cleanHost)
+	}
+
+	if len(echConfig) > 0 {
+		uCfg.EncryptedClientHelloConfigList = echConfig
+	}
+
 	uConn, err := buildUConn(conn, uCfg, opts)
 	if err != nil {
 		_ = conn.Close()
@@ -141,7 +154,7 @@ func HandshakeUTLS(
 		return nil, ja4.Report{}, fmt.Errorf("%w: build handshake state: %w", ErrUTLSHandshakeFailed, err)
 	}
 
-	uConn.Extensions = removeECHExtensions(uConn.Extensions)
+	uConn.Extensions = removeECHExtensions(uConn.Extensions, len(echConfig) > 0)
 
 	uConn.ClientHelloID = utls.HelloCustom
 	if err := uConn.BuildHandshakeState(); err != nil {
@@ -182,6 +195,22 @@ func HandshakeUTLS(
 	return &UConnWrapper{UConn: uConn}, report, nil
 }
 
+func resolveECHViaDNS(ctx context.Context, resolver DNSResolver, host string) []byte {
+	type extendedResolver interface {
+		LookupWireRecord(ctx context.Context, host string, qtype uint16) ([]byte, error)
+	}
+
+	if ext, ok := resolver.(extendedResolver); ok {
+		msg, err := ext.LookupWireRecord(ctx, host, wire.TypeHTTPS)
+		if err == nil {
+			ech, _ := wire.ExtractECHFromHTTPSResponse(msg, 0)
+			return ech
+		}
+	}
+
+	return nil
+}
+
 func applyCertCompression(uConn *utls.UConn, algos []cert.CompressionAlgorithm) {
 	if len(algos) == 0 {
 		return
@@ -204,7 +233,7 @@ func applyCertCompression(uConn *utls.UConn, algos []cert.CompressionAlgorithm) 
 	})
 }
 
-func removeECHExtensions(exts []utls.TLSExtension) []utls.TLSExtension {
+func removeECHExtensions(exts []utls.TLSExtension, keepECH bool) []utls.TLSExtension {
 	if len(exts) == 0 {
 		return exts
 	}
@@ -216,8 +245,11 @@ func removeECHExtensions(exts []utls.TLSExtension) []utls.TLSExtension {
 		}
 
 		tStr := fmt.Sprintf("%T", ext)
-		if strings.Contains(tStr, "EncryptedClientHello") || strings.Contains(tStr, "GREASEECH") ||
-			strings.Contains(tStr, "BoringGREASE") {
+		isECH := strings.Contains(tStr, "EncryptedClientHello") ||
+			strings.Contains(tStr, "GREASEECH") ||
+			strings.Contains(tStr, "BoringGREASE")
+
+		if isECH && !keepECH {
 			continue
 		}
 

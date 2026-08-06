@@ -16,6 +16,8 @@ import (
 	"time"
 
 	"github.com/quic-go/quic-go"
+
+	"github.com/lemon4ksan/aoni/netutil/dns/wire"
 )
 
 var (
@@ -35,7 +37,7 @@ type DoQResolver struct {
 	Endpoint  string
 	Host      string
 	Timeout   time.Duration
-	EDNS      EDNSOptions
+	EDNS      wire.EDNSOptions
 	TLSConfig *tls.Config
 
 	mu   sync.Mutex
@@ -48,7 +50,7 @@ func NewDoQResolver(endpoint, host string) *DoQResolver {
 		Endpoint: endpoint,
 		Host:     host,
 		Timeout:  5 * time.Second,
-		EDNS:     EDNSOptions{PadToBlock: 128},
+		EDNS:     wire.EDNSOptions{PadToBlock: 128},
 	}
 }
 
@@ -68,9 +70,9 @@ func (r *DoQResolver) LookupIPAddr(ctx context.Context, host string) ([]net.IPAd
 }
 
 // LookupDNSRecords queries A and AAAA records over DoQ, returning DNS records with authoritative TTLs.
-func (r *DoQResolver) LookupDNSRecords(ctx context.Context, host string) ([]DNSRecord, error) {
-	v4Records, err4 := r.queryStreamRecords(ctx, host, TypeA)
-	v6Records, err6 := r.queryStreamRecords(ctx, host, TypeAAAA)
+func (r *DoQResolver) LookupDNSRecords(ctx context.Context, host string) ([]wire.DNSRecord, error) {
+	v4Records, err4 := r.queryStreamRecords(ctx, host, wire.TypeA)
+	v6Records, err6 := r.queryStreamRecords(ctx, host, wire.TypeAAAA)
 
 	if err4 != nil && err6 != nil {
 		return nil, err4
@@ -79,7 +81,38 @@ func (r *DoQResolver) LookupDNSRecords(ctx context.Context, host string) ([]DNSR
 	return append(v4Records, v6Records...), nil
 }
 
-func (r *DoQResolver) queryStreamRecords(ctx context.Context, host string, qtype uint16) ([]DNSRecord, error) {
+// LookupWireRecord queries a raw DNS wire format response over DoQ for a specific query type.
+func (r *DoQResolver) LookupWireRecord(ctx context.Context, host string, qtype uint16) ([]byte, error) {
+	qConn, err := r.getOrCreateConn(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	stream, err := qConn.OpenStreamSync(ctx)
+	if err != nil {
+		r.closeConn()
+		return nil, fmt.Errorf("%w: %w", ErrDoQStreamClosed, err)
+	}
+	defer stream.Close()
+
+	edns := r.EDNS
+	if edns.PadToBlock <= 0 {
+		edns.PadToBlock = 128
+	}
+
+	wireQuery, err := wire.PackDNSQueryExtended(0, host, qtype, edns)
+	if err != nil {
+		return nil, err
+	}
+
+	if err := sendDoQQuery(stream, wireQuery); err != nil {
+		return nil, err
+	}
+
+	return readDoQResponse(stream)
+}
+
+func (r *DoQResolver) queryStreamRecords(ctx context.Context, host string, qtype uint16) ([]wire.DNSRecord, error) {
 	qConn, err := r.getOrCreateConn(ctx)
 	if err != nil {
 		return nil, err
@@ -98,7 +131,7 @@ func (r *DoQResolver) queryStreamRecords(ctx context.Context, host string, qtype
 	}
 
 	// RFC 9250 Section 4.2.1: DNS Message ID MUST be set to 0 over DoQ
-	wireQuery, err := PackDNSQueryExtended(0, host, qtype, edns)
+	wireQuery, err := wire.PackDNSQueryExtended(0, host, qtype, edns)
 	if err != nil {
 		return nil, err
 	}
@@ -112,7 +145,7 @@ func (r *DoQResolver) queryStreamRecords(ctx context.Context, host string, qtype
 		return nil, err
 	}
 
-	return ParseDNSResponseRecords(payload, 0)
+	return wire.ParseDNSResponseRecords(payload, 0)
 }
 
 func sendDoQQuery(stream *quic.Stream, wireQuery []byte) error {

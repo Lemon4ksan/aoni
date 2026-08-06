@@ -2,7 +2,8 @@
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
-package dns
+// Package wire provides utilities for encoding and decoding DNS messages.
+package wire
 
 import (
 	"encoding/binary"
@@ -21,13 +22,17 @@ var (
 	ErrInvalidDomain = errors.New("aoni dns: invalid or empty domain name")
 	// ErrInvalidIPVersion indicates an unsupported IP version is provided for EDNS Client Subnet.
 	ErrInvalidIPVersion = errors.New("aoni dns: unsupported IP version for EDNS Client Subnet")
+	// ErrECHConfigNotFound indicates that the ECH config parameter was not found in the HTTPS record.
+	ErrECHConfigNotFound = errors.New("aoni dns: ech config parameter not found in https record")
 )
 
 const (
-	TypeA    uint16 = 1  // IPv4 host address (RFC 1035)
-	TypeAAAA uint16 = 28 // IPv6 host address (RFC 3596)
-	ClassIN  uint16 = 1  // Internet class (RFC 1035)
-	TypeOPT  uint16 = 41 // OPT record (RFC 6891)
+	TypeA     uint16 = 1  // IPv4 host address (RFC 1035)
+	TypeAAAA  uint16 = 28 // IPv6 host address (RFC 3596)
+	TypeOPT   uint16 = 41 // OPT record (RFC 6891)
+	TypeHTTPS uint16 = 65 // HTTPS record (RFC 9460)
+
+	ClassIN uint16 = 1 // Internet class (RFC 1035)
 
 	EDNS0OptionECS     uint16 = 8  // RFC 7871
 	EDNS0OptionPadding uint16 = 12 // RFC 7830
@@ -246,7 +251,7 @@ func ParseDNSResponseRecords(msg []byte, expectedID uint16) ([]DNSRecord, error)
 	var err error
 
 	for range qdCount {
-		offset, err = skipDomainName(msg, offset)
+		offset, err = SkipDomainName(msg, offset)
 		if err != nil {
 			return nil, err
 		}
@@ -285,7 +290,7 @@ func ParseDNSResponseRecords(msg []byte, expectedID uint16) ([]DNSRecord, error)
 }
 
 func parseAnswerRecord(msg []byte, offset int) (DNSRecord, int, error) {
-	nextOffset, err := skipDomainName(msg, offset)
+	nextOffset, err := SkipDomainName(msg, offset)
 	if err != nil {
 		return DNSRecord{}, 0, err
 	}
@@ -321,7 +326,8 @@ func parseAnswerRecord(msg []byte, offset int) (DNSRecord, int, error) {
 	return DNSRecord{}, totalConsumed, nil
 }
 
-func skipDomainName(msg []byte, offset int) (int, error) {
+// SkipDomainName skips over a domain name in a DNS message, following DNS compression pointers if necessary.
+func SkipDomainName(msg []byte, offset int) (int, error) {
 	visited := 0
 
 	for {
@@ -345,4 +351,113 @@ func skipDomainName(msg []byte, offset int) (int, error) {
 		offset += 1 + length
 		visited++
 	}
+}
+
+// ExtractECHFromHTTPSResponse extracts raw ECHConfigList bytes from an RFC 9460 HTTPS (Type 65) DNS response packet.
+func ExtractECHFromHTTPSResponse(msg []byte, expectedID uint16) ([]byte, error) {
+	if len(msg) < 12 {
+		return nil, ErrTruncatedDNSMessage
+	}
+
+	id := binary.BigEndian.Uint16(msg[0:2])
+	if id != 0 && expectedID != 0 && id != expectedID {
+		return nil, ErrDNSResponseCode
+	}
+
+	qdCount := int(binary.BigEndian.Uint16(msg[4:6]))
+	anCount := int(binary.BigEndian.Uint16(msg[6:8]))
+
+	offset := 12
+
+	var err error
+
+	for range qdCount {
+		offset, err = SkipDomainName(msg, offset)
+		if err != nil {
+			return nil, err
+		}
+
+		if offset+4 > len(msg) {
+			return nil, ErrTruncatedDNSMessage
+		}
+
+		offset += 4
+	}
+
+	for range anCount {
+		if offset >= len(msg) {
+			break
+		}
+
+		var (
+			ech      []byte
+			consumed int
+		)
+
+		ech, consumed, err = parseHTTPSRecord(msg, offset)
+		if err == nil && len(ech) > 0 {
+			return ech, nil
+		}
+
+		if consumed == 0 {
+			break
+		}
+
+		offset += consumed
+	}
+
+	return nil, ErrECHConfigNotFound
+}
+
+func parseHTTPSRecord(msg []byte, offset int) ([]byte, int, error) {
+	nextOffset, err := SkipDomainName(msg, offset)
+	if err != nil {
+		return nil, 0, err
+	}
+
+	if nextOffset+10 > len(msg) {
+		return nil, 0, ErrTruncatedDNSMessage
+	}
+
+	rrType := binary.BigEndian.Uint16(msg[nextOffset : nextOffset+2])
+	rdLength := int(binary.BigEndian.Uint16(msg[nextOffset+8 : nextOffset+10]))
+	rdataOffset := nextOffset + 10
+
+	if rdataOffset+rdLength > len(msg) {
+		return nil, 0, ErrTruncatedDNSMessage
+	}
+
+	totalConsumed := (rdataOffset + rdLength) - offset
+	if rrType != TypeHTTPS || rdLength < 4 {
+		return nil, totalConsumed, nil
+	}
+
+	rdata := msg[rdataOffset : rdataOffset+rdLength]
+	svcOffset := 2 // Skip SvcPriority
+
+	svcOffset, err = SkipDomainName(rdata, svcOffset)
+	if err != nil {
+		return nil, totalConsumed, nil //nolint:nilerr
+	}
+
+	for svcOffset+4 <= len(rdata) {
+		paramKey := binary.BigEndian.Uint16(rdata[svcOffset : svcOffset+2])
+		paramLen := int(binary.BigEndian.Uint16(rdata[svcOffset+2 : svcOffset+4]))
+		svcOffset += 4
+
+		if svcOffset+paramLen > len(rdata) {
+			break
+		}
+
+		// SvcParamKey 5 = "ech"
+		if paramKey == 5 {
+			echBytes := make([]byte, paramLen)
+			copy(echBytes, rdata[svcOffset:svcOffset+paramLen])
+			return echBytes, totalConsumed, nil
+		}
+
+		svcOffset += paramLen
+	}
+
+	return nil, totalConsumed, nil
 }

@@ -232,11 +232,14 @@ type FingerprintConfig struct {
 	PacketPadding              *fingerprint.PaddingConfig
 	CertificatePins            map[string][]string
 	CertCompression            []cert.CompressionAlgorithm
+	ECHConfigList              []byte
 	BrowserID                  BrowserID
+	AutoECH                    bool
 }
 
 func (f FingerprintConfig) Clone() FingerprintConfig {
 	cloned := f
+
 	cloned.TLSClientHelloID = clonePtr(f.TLSClientHelloID)
 	cloned.H2Settings = clonePtr(f.H2Settings)
 	cloned.H3Settings = clonePtr(f.H3Settings)
@@ -248,6 +251,10 @@ func (f FingerprintConfig) Clone() FingerprintConfig {
 
 	if len(f.CertCompression) > 0 {
 		cloned.CertCompression = slices.Clone(f.CertCompression)
+	}
+
+	if len(f.ECHConfigList) > 0 {
+		cloned.ECHConfigList = slices.Clone(f.ECHConfigList)
 	}
 
 	if len(f.CertificatePins) > 0 {

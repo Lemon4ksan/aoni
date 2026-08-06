@@ -583,6 +583,30 @@ func WithCertificatePins(pins map[string][]string) aoni.ClientOption {
 	}
 }
 
+// WithECHConfig configures raw RFC 9484 TLS 1.3 Encrypted Client Hello (ECH) bytes to encrypt SNI.
+func WithECHConfig(raw []byte) aoni.ClientOption {
+	return func(cfg *aoni.Config) {
+		cfg.Fingerprint.ECHConfigList = slices.Clone(raw)
+	}
+}
+
+// WithECHConfigBase64 configures base64-encoded ECHConfigList parameters to encrypt SNI.
+func WithECHConfigBase64(rawBase64 string) aoni.ClientOption {
+	return func(cfg *aoni.Config) {
+		decoded, err := fingerprint.ParseECHConfigBase64(rawBase64)
+		if err == nil {
+			cfg.Fingerprint.ECHConfigList = decoded
+		}
+	}
+}
+
+// WithAutoECH enables automatic DNS HTTPS (Type 65) record resolution to retrieve ECHConfig keys.
+func WithAutoECH(enable bool) aoni.ClientOption {
+	return func(cfg *aoni.Config) {
+		cfg.Fingerprint.AutoECH = enable
+	}
+}
+
 // WithPacketPadding returns an [aoni.ClientOption] configuring random packet padding headers to confuse DPI length analysis.
 func WithPacketPadding(padding fingerprint.PaddingConfig) aoni.ClientOption {
 	return func(cfg *aoni.Config) {
