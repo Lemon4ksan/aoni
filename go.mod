@@ -4,7 +4,6 @@ go 1.25.4
 
 require (
 	github.com/andybalholm/brotli v1.2.2
-	github.com/gorilla/websocket v1.5.3
 	github.com/klauspost/compress v1.19.1
 	github.com/lemon4ksan/miyako v0.3.0
 	github.com/quic-go/qpack v0.6.0

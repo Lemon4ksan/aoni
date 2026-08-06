@@ -7,7 +7,6 @@ package fast
 
 import (
 	"bytes"
-	"compress/gzip"
 	"context"
 	"io"
 	"net"
@@ -17,6 +16,7 @@ import (
 	"strings"
 
 	"github.com/andybalholm/brotli"
+	"github.com/klauspost/compress/gzip"
 	"github.com/klauspost/compress/zstd"
 	"github.com/valyala/fasthttp"
 
@@ -408,6 +408,7 @@ func decompressFastResponse(resp *fasthttp.Response) bool {
 	case strings.Contains(encoding, "br"):
 		brReader := brotli.NewReader(bytes.NewReader(body))
 		decompressed, err = io.ReadAll(brReader)
+
 	case strings.Contains(encoding, "zstd"):
 		if zDec, zErr := zstd.NewReader(bytes.NewReader(body)); zErr == nil {
 			decompressed, err = io.ReadAll(zDec)

@@ -2,18 +2,16 @@
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
-// Package socketio provides client implementation for Socket.IO v5 and Engine.IO v4 over WebSockets.
+// Package socketio provides client implementation for Socket.IO v5 and Engine.IO v4 over aoni's native WebSockets.
 package socketio
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"maps"
-	"net"
 	"slices"
 	"strconv"
 	"strings"
@@ -21,7 +19,6 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/gorilla/websocket"
 	"github.com/lemon4ksan/miyako/generic"
 	"github.com/lemon4ksan/miyako/jobs"
 	"github.com/lemon4ksan/miyako/kata"
@@ -31,13 +28,13 @@ import (
 )
 
 var (
-	// ErrNotConnected is returned when attempting to emit events on an inactive Socket.IO connection.
+	// ErrNotConnected indicates that an event emission was attempted on a closed or uninitialized socket.
 	ErrNotConnected = errors.New("aoni sio: connection closed or not connected")
 
-	// ErrAckTimeout is returned when a server acknowledgment is not received within the configured deadline.
+	// ErrAckTimeout indicates that a server acknowledgment was not received within the deadline.
 	ErrAckTimeout = errors.New("aoni sio: acknowledgment timeout")
 
-	// ErrEmptyPacket is returned when attempting to decode a zero-length Socket.IO payload frame.
+	// ErrEmptyPacket indicates a zero-length Socket.IO payload frame was received.
 	ErrEmptyPacket = errors.New("aoni sio: empty packet")
 )
 
@@ -149,9 +146,9 @@ func (ns *NamespaceSocket) EmitVolatile(event string, args ...any) error {
 	return ns.conn.emitVolatileNS(ns.nsp, event, args...)
 }
 
-// Conn manages Socket.IO v5 / Engine.IO v4 client connections over WebSockets.
+// Conn manages Socket.IO v5 / Engine.IO v4 client connections over native WebSockets.
 type Conn struct {
-	conn atomic.Pointer[net.Conn]
+	conn atomic.Pointer[ws.Conn]
 	sid  string
 
 	writeMu sync.Mutex
@@ -192,8 +189,8 @@ type Conn struct {
 	offset string
 }
 
-// NewSocketIOConn initializes Engine.IO v4 and Socket.IO v5 protocols over an existing [net.Conn].
-func NewSocketIOConn(ctx context.Context, conn net.Conn, config Config) (*Conn, error) {
+// NewSocketIOConn initializes Engine.IO v4 and Socket.IO v5 protocols over an established ws.Conn.
+func NewSocketIOConn(ctx context.Context, conn ws.Conn, config Config) (*Conn, error) {
 	config.ResolveDefaults()
 
 	sio := &Conn{
@@ -263,7 +260,7 @@ func initFSM() *kata.FSM[sioConnState, sioEventType] {
 	return fsm
 }
 
-// DialSocketIO connects to a Socket.IO v5 server via the aoni uTLS WebSocket pipeline.
+// DialSocketIO connects to a Socket.IO v5 server via aoni's uTLS WebSocket pipeline.
 func DialSocketIO(
 	ctx context.Context,
 	c *aoni.Client,
@@ -271,7 +268,11 @@ func DialSocketIO(
 	config Config,
 	mods ...aoni.RequestModifier,
 ) (*Conn, error) {
-	conn, _, err := ws.DialWebSocket(ctx, c, targetURL, mods...) //nolint:bodyclose
+	conn, resp, err := ws.DialWebSocket(ctx, c, targetURL, mods...)
+	if resp != nil && resp.Body != nil {
+		_ = resp.Body.Close()
+	}
+
 	if err != nil {
 		return nil, fmt.Errorf("aoni sio: dial websocket: %w", err)
 	}
@@ -315,7 +316,7 @@ func (s *Conn) OnAny(handler func(event string, args []json.RawMessage)) {
 	})
 }
 
-// OnNamespace returns a [NamespaceSocket] scoped to nsp.
+// OnNamespace returns a NamespaceSocket scoped to nsp.
 func (s *Conn) OnNamespace(nsp string) *NamespaceSocket {
 	s.setNamespaceHandler(nsp, "", nil)
 	return &NamespaceSocket{conn: s, nsp: nsp}
@@ -578,7 +579,7 @@ func (s *Conn) readLoop() {
 			return
 		}
 
-		if shouldExit := s.dispatchEIOPacket(pType, payload); shouldExit {
+		if s.dispatchEIOPacket(pType, payload) {
 			return
 		}
 	}
@@ -610,7 +611,7 @@ func (s *Conn) cleanupConnection() {
 	}
 }
 
-func (s *Conn) dispatchEIOPacket(pType byte, payload []byte) (shouldExit bool) {
+func (s *Conn) dispatchEIOPacket(pType byte, payload []byte) bool {
 	switch pType {
 	case eioClose:
 		return true
@@ -837,9 +838,12 @@ func (s *Conn) attemptReconnection(attempt int, onReconnecting func(int)) bool {
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), s.config.ConnectTimeout)
-	conn, _, err := ws.DialWebSocket(ctx, s.client, s.targetURL, s.mods...) //nolint:bodyclose
+	defer cancel()
 
-	cancel()
+	conn, resp, err := ws.DialWebSocket(ctx, s.client, s.targetURL, s.mods...)
+	if resp != nil && resp.Body != nil {
+		_ = resp.Body.Close()
+	}
 
 	if err != nil {
 		return s.handleReconnectFailure()
@@ -906,12 +910,12 @@ func (s *Conn) finalizeReconnection() {
 }
 
 func (s *Conn) doHandshake(ctx context.Context) error {
-	conn := s.conn.Load()
-	if conn == nil {
+	c := s.conn.Load()
+	if c == nil {
 		return ErrNotConnected
 	}
 
-	if err := s.readAndParseEIOOpen(ctx, *conn); err != nil {
+	if err := s.readAndParseEIOOpen(ctx, *c); err != nil {
 		return err
 	}
 
@@ -919,10 +923,10 @@ func (s *Conn) doHandshake(ctx context.Context) error {
 		return fmt.Errorf("aoni sio: send connect: %w", err)
 	}
 
-	return s.readAndParseSIOConnect(ctx, *conn)
+	return s.readAndParseSIOConnect(ctx, *c)
 }
 
-func (s *Conn) readAndParseEIOOpen(ctx context.Context, conn net.Conn) error {
+func (s *Conn) readAndParseEIOOpen(ctx context.Context, conn ws.Conn) error {
 	pType, payload, err := readEIOPacketCtx(ctx, conn)
 	if err != nil {
 		return fmt.Errorf("aoni sio: handshake failed: %w", err)
@@ -950,7 +954,7 @@ func (s *Conn) readAndParseEIOOpen(ctx context.Context, conn net.Conn) error {
 	return nil
 }
 
-func (s *Conn) readAndParseSIOConnect(ctx context.Context, conn net.Conn) error {
+func (s *Conn) readAndParseSIOConnect(ctx context.Context, conn ws.Conn) error {
 	pType, payload, err := readEIOPacketCtx(ctx, conn)
 	if err != nil {
 		return fmt.Errorf("aoni sio: read connect response: %w", err)
@@ -1030,15 +1034,15 @@ func (s *Conn) sendConnect() error {
 }
 
 func (s *Conn) readEIOPacket() (byte, []byte, error) {
-	conn := s.conn.Load()
-	if conn == nil {
+	c := s.conn.Load()
+	if c == nil {
 		return 0, nil, ErrNotConnected
 	}
 
-	return readSingleEIOPacket(*conn)
+	return readSingleEIOPacket(*c)
 }
 
-func readEIOPacketCtx(ctx context.Context, conn net.Conn) (byte, []byte, error) {
+func readEIOPacketCtx(ctx context.Context, conn ws.Conn) (byte, []byte, error) {
 	type result struct {
 		pType   byte
 		payload []byte
@@ -1065,50 +1069,22 @@ func readEIOPacketCtx(ctx context.Context, conn net.Conn) (byte, []byte, error) 
 	}
 }
 
-func readSingleEIOPacket(conn net.Conn) (byte, []byte, error) {
-	if wc, ok := conn.(interface{ RawConn() *websocket.Conn }); ok {
-		msgType, data, err := wc.RawConn().ReadMessage()
-		if err != nil {
-			return 0, nil, err
-		}
-
-		if len(data) == 0 {
-			return 0, nil, io.EOF
-		}
-
-		if msgType == websocket.BinaryMessage {
-			return eioBinary, data, nil
-		}
-
-		return data[0], data[1:], nil
+func readSingleEIOPacket(conn ws.Conn) (byte, []byte, error) {
+	msgType, data, err := conn.ReadMessage()
+	if err != nil {
+		return 0, nil, err
 	}
 
-	var buf bytes.Buffer
-
-	tmp := make([]byte, 4096)
-
-	for {
-		n, err := conn.Read(tmp)
-		if n > 0 {
-			buf.Write(tmp[:n])
-		}
-
-		if buf.Len() > maxEIOPacketSize {
-			return 0, nil, fmt.Errorf("aoni eio: packet too large (exceeds %d bytes)", maxEIOPacketSize)
-		}
-
-		if err != nil {
-			if errors.Is(err, io.EOF) {
-				break
-			}
-
-			return 0, nil, err
-		}
-	}
-
-	data := buf.Bytes()
 	if len(data) == 0 {
 		return 0, nil, io.EOF
+	}
+
+	if len(data) > maxEIOPacketSize {
+		return 0, nil, errors.New("aoni socketio: packet too large")
+	}
+
+	if msgType == ws.FrameBinary {
+		return eioBinary, data, nil
 	}
 
 	return data[0], data[1:], nil
@@ -1118,18 +1094,20 @@ func (s *Conn) writeEIOPacket(pType byte, payload []byte) error {
 	s.writeMu.Lock()
 	defer s.writeMu.Unlock()
 
-	conn := s.conn.Load()
-	if conn == nil {
+	c := s.conn.Load()
+	if c == nil {
 		return ErrNotConnected
+	}
+
+	if pType == eioBinary {
+		return (*c).WriteMessage(ws.FrameBinary, payload)
 	}
 
 	data := make([]byte, 1+len(payload))
 	data[0] = pType
 	copy(data[1:], payload)
 
-	_, err := (*conn).Write(data)
-
-	return err
+	return (*c).WriteMessage(ws.FrameText, data)
 }
 
 type sioPacket struct {
@@ -1189,14 +1167,14 @@ func (br *binaryReconstructor) reconstruct() (*sioPacket, error) {
 		return nil, fmt.Errorf("aoni sio: unmarshal binary packet: %w", err)
 	}
 
-	var data []any
-	for _, raw := range rawArgs {
+	data := make([]any, len(rawArgs))
+	for i, raw := range rawArgs {
 		var v any
 		if err := json.Unmarshal(raw, &v); err != nil {
 			return nil, fmt.Errorf("aoni sio: unmarshal binary arg: %w", err)
 		}
 
-		data = append(data, reconstructBinary(v, br.buffers))
+		data[i] = reconstructBinary(v, br.buffers)
 	}
 
 	pkt.Data, _ = json.Marshal(data)
@@ -1287,40 +1265,40 @@ func parseAttachments(data []byte, offset *int) (int, error) {
 
 func parseNamespace(data []byte, offset *int) string {
 	i := *offset
-	if i < len(data) && data[i] == '/' {
-		start := i
-		for i < len(data) && data[i] != ',' {
-			i++
-		}
-
-		nsp := string(data[start:i])
-		if i < len(data) {
-			i++
-		}
-
-		*offset = i
-
-		return nsp
+	if i >= len(data) || data[i] != '/' {
+		return "/"
 	}
 
-	return "/"
+	start := i
+	for i < len(data) && data[i] != ',' {
+		i++
+	}
+
+	nsp := string(data[start:i])
+	if i < len(data) {
+		i++
+	}
+
+	*offset = i
+
+	return nsp
 }
 
 func parseAckID(data []byte, offset *int) *int64 {
 	i := *offset
-	if i < len(data) && data[i] >= '0' && data[i] <= '9' {
-		start := i
-		for i < len(data) && data[i] >= '0' && data[i] <= '9' {
-			i++
-		}
-
-		id, _ := strconv.ParseInt(string(data[start:i]), 10, 64)
-		*offset = i
-
-		return &id
+	if i >= len(data) || data[i] < '0' || data[i] > '9' {
+		return nil
 	}
 
-	return nil
+	start := i
+	for i < len(data) && data[i] >= '0' && data[i] <= '9' {
+		i++
+	}
+
+	id, _ := strconv.ParseInt(string(data[start:i]), 10, 64)
+	*offset = i
+
+	return &id
 }
 
 func hasBinary(obj any) bool {
@@ -1397,22 +1375,8 @@ func deconstructBinaryWithOffset(data any, buffers *[][]byte) any {
 func reconstructBinary(data any, buffers [][]byte) any {
 	switch v := data.(type) {
 	case map[string]any:
-		if ph, ok := v["_placeholder"]; ok && ph == true {
-			idx := -1
-
-			switch n := v["num"].(type) {
-			case float64:
-				idx = int(n)
-			case int:
-				idx = n
-			case json.Number:
-				val, _ := n.Int64()
-				idx = int(val)
-			}
-
-			if idx >= 0 && idx < len(buffers) {
-				return buffers[idx]
-			}
+		if isPlaceholder(v) {
+			return resolvePlaceholderBuffer(v, buffers)
 		}
 
 		result := make(map[string]any, len(v))
@@ -1432,4 +1396,28 @@ func reconstructBinary(data any, buffers [][]byte) any {
 	}
 
 	return data
+}
+
+func isPlaceholder(m map[string]any) bool {
+	ph, ok := m["_placeholder"]
+	return ok && ph == true
+}
+
+func resolvePlaceholderBuffer(m map[string]any, buffers [][]byte) any {
+	idx := -1
+	switch n := m["num"].(type) {
+	case float64:
+		idx = int(n)
+	case int:
+		idx = n
+	case json.Number:
+		val, _ := n.Int64()
+		idx = int(val)
+	}
+
+	if idx >= 0 && idx < len(buffers) {
+		return buffers[idx]
+	}
+
+	return m
 }

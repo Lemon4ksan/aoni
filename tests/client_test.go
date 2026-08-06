@@ -6,7 +6,6 @@ package aoni_test
 
 import (
 	"bytes"
-	"compress/gzip"
 	"context"
 	"crypto/rand"
 	"crypto/rsa"
@@ -20,6 +19,7 @@ import (
 	"encoding/pem"
 	"errors"
 	"fmt"
+	"github.com/klauspost/compress/gzip"
 	"io"
 	"math/big"
 	"net"
