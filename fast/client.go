@@ -224,7 +224,7 @@ func (c *Client) HTTP() aoni.HTTPDoer {
 
 		ctx := req.Context()
 
-		_, err, autoReleased := c.executeWithRedirects(ctx, fastReq, fastResp)
+		trailers, err, autoReleased := c.executeWithRedirects(ctx, fastReq, fastResp)
 		if err != nil {
 			if !autoReleased {
 				fasthttp.ReleaseRequest(fastReq)
@@ -246,6 +246,7 @@ func (c *Client) HTTP() aoni.HTTPDoer {
 			StatusCode:    fastResp.StatusCode(),
 			Status:        http.StatusText(fastResp.StatusCode()),
 			Header:        make(http.Header),
+			Trailer:       make(http.Header),
 			Body:          bodyRC,
 			ContentLength: int64(len(fastResp.Body())),
 			Uncompressed:  uncompressed,
@@ -256,6 +257,14 @@ func (c *Client) HTTP() aoni.HTTPDoer {
 			httpResp.Header.Add(string(k), string(v))
 			return true
 		})
+
+		if len(trailers) > 0 {
+			for k, vv := range trailers {
+				for _, v := range vv {
+					httpResp.Trailer.Add(k, v)
+				}
+			}
+		}
 
 		return httpResp, nil
 	})

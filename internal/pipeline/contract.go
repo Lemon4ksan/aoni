@@ -110,6 +110,9 @@ type Response interface {
 	HeaderBytes(key []byte) []byte
 	Headers() map[string][]string
 
+	Trailers() map[string][]string
+	SetTrailers(trailers map[string][]string)
+
 	BodyBytes() []byte
 	BodyStream() stdio.ReadCloser
 

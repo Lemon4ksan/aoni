@@ -65,16 +65,6 @@ func NewResponse(resp *fasthttp.Response) *Response {
 	return r
 }
 
-// SetTrailers registers HTTP trailers captured during frame execution.
-func (f *Response) SetTrailers(trailers map[string][]string) {
-	f.trailers = trailers
-}
-
-// Trailers returns HTTP trailers parsed after the body stream.
-func (f *Response) Trailers() map[string][]string {
-	return f.trailers
-}
-
 // StatusCode yields the HTTP status code.
 func (f *Response) StatusCode() int {
 	return f.resp.StatusCode()
@@ -131,6 +121,16 @@ func (f *Response) Headers() map[string][]string {
 	})
 
 	return m
+}
+
+// SetTrailers registers HTTP trailers captured during frame execution.
+func (f *Response) SetTrailers(trailers map[string][]string) {
+	f.trailers = trailers
+}
+
+// Trailers returns HTTP trailers parsed after the body stream.
+func (f *Response) Trailers() map[string][]string {
+	return f.trailers
 }
 
 // BodyBytes returns an independent, memory-safe copy of the response body bytes.
