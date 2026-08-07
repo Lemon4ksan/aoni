@@ -14,6 +14,7 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/andybalholm/brotli"
 	"github.com/klauspost/compress/gzip"
@@ -23,6 +24,7 @@ import (
 	"github.com/lemon4ksan/aoni"
 	"github.com/lemon4ksan/aoni/internal/bytesconv"
 	"github.com/lemon4ksan/aoni/internal/pipeline"
+	"github.com/lemon4ksan/aoni/netutil/power"
 )
 
 // HTTPDoer executes an HTTP request transaction.
@@ -38,6 +40,7 @@ type Client struct {
 	dialer         *fastDialer
 	defaultDial    func(string) (net.Conn, error)
 	config         aoni.Config
+	powerWatcher   *power.Watcher
 
 	protocolState protocolState
 }
@@ -62,6 +65,7 @@ func NewClient(opts ...aoni.ClientOption) *Client {
 
 	c.applyEngineConfig()
 	c.applyCustomDialer()
+	c.applyPowerManagement(c.config.Network.EnablePowerManagement)
 
 	c.pipelineEngine = pipeline.NewPipeline(
 		c.config.Defaults.ToPipelineDefaults(),
@@ -92,6 +96,8 @@ func (c *Client) With(opts ...aoni.ClientOption) *Client {
 	if !isCustomDialerSet(c.engine, c.defaultDial) {
 		c2.applyCustomDialer()
 	}
+
+	c2.applyPowerManagement(c2.config.Network.EnablePowerManagement)
 
 	c2.pipelineEngine = pipeline.NewPipeline(
 		c2.config.Defaults.ToPipelineDefaults(),
@@ -268,6 +274,27 @@ func (c *Client) HTTP() aoni.HTTPDoer {
 
 		return httpResp, nil
 	})
+}
+
+// CloseIdleConnections purges all idle H1, H2, and H3 keep-alive sockets from connection pools.
+func (c *Client) CloseIdleConnections() {
+	if c.engine != nil {
+		c.engine.CloseIdleConnections()
+	}
+
+	c.protocolState.h2Mutex.Lock()
+	for host, h2Cl := range c.protocolState.h2Clients {
+		delete(c.protocolState.h2Clients, host)
+
+		_ = h2Cl
+	}
+
+	c.protocolState.h2Mutex.Unlock()
+
+	if c.protocolState.h3Client != nil {
+		_ = c.protocolState.h3Client.Close()
+		c.protocolState.h3Client = nil
+	}
 }
 
 func (c *Client) executeWithRedirects(
@@ -468,6 +495,26 @@ func (c *Client) resolvePipeline(ctx context.Context) aoni.PipelineConfig {
 	pipe.BuildFlags()
 
 	return pipe
+}
+
+func (c *Client) applyPowerManagement(enable bool) {
+	if !enable {
+		if c.powerWatcher != nil {
+			c.powerWatcher.Close()
+			c.powerWatcher = nil
+		}
+
+		return
+	}
+
+	if c.powerWatcher == nil {
+		watcher := power.NewWatcher(5 * time.Second)
+		watcher.OnSuspend(func() {
+			c.CloseIdleConnections()
+		})
+
+		c.powerWatcher = watcher
+	}
 }
 
 var (

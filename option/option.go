@@ -931,3 +931,11 @@ func WithDecoders(decoders map[string]decode.Decoder) aoni.ClientOption {
 		}
 	}
 }
+
+// WithOSPowerManagement enables OS sleep and resume monitoring, automatically purging
+// stale zombie sockets and connection pools when the system wakes up from sleep.
+func WithOSPowerManagement(enable bool) aoni.ClientOption {
+	return func(cfg *aoni.Config) {
+		cfg.Network.EnablePowerManagement = enable
+	}
+}
