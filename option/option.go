@@ -412,6 +412,28 @@ func WithProxyDNS() aoni.ClientOption {
 	}
 }
 
+// WithAdaptiveProxyTimeout enables dynamic proxy connection timeout calculation
+// based on observed network round-trip time (RTT) metrics.
+func WithAdaptiveProxyTimeout(cfg ...proxy.AdaptiveTimeoutConfig) aoni.ClientOption {
+	activeCfg := proxy.DefaultAdaptiveTimeoutConfig()
+	if len(cfg) > 0 {
+		activeCfg = cfg[0]
+	}
+
+	return func(c *aoni.Config) {
+		if c.Network.DynamicHedging == nil {
+			dhc := telemetry.DefaultDynamicHedgingConfig()
+			c.Network.DynamicHedging = &dhc
+		}
+
+		tracker := c.Network.DynamicHedging.Tracker
+		c.Defaults.DefaultMods = append(c.Defaults.DefaultMods, func(req aoni.Request) {
+			adaptiveTimeout := proxy.ComputeProxyTimeout(tracker, activeCfg)
+			aoni.GetOrInitRequestConfig(req).TimeoutOverride = adaptiveTimeout
+		})
+	}
+}
+
 // WithDNSResolver returns an [aoni.ClientOption] replacing the default system DNS resolver with an [aoni.DNSResolver].
 func WithDNSResolver(resolver aoni.DNSResolver) aoni.ClientOption {
 	return func(cfg *aoni.Config) {
