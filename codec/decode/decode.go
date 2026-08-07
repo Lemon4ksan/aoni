@@ -276,7 +276,10 @@ func decompressProtoPayload(payload []byte) ([]byte, error) {
 }
 
 func verifyGRPCTrailer(trailerPayload []byte) error {
-	var statusCode, statusMsg string
+	var (
+		statusCode, statusMsg string
+		statusDetails         []byte
+	)
 
 	for len(trailerPayload) > 0 {
 		var line []byte
@@ -294,18 +297,26 @@ func verifyGRPCTrailer(trailerPayload []byte) error {
 			continue
 		}
 
-		if bytesconv.EqualFoldASCII(key, "grpc-status") {
+		switch {
+		case bytesconv.EqualFoldASCII(key, "grpc-status"):
 			statusCode = val
-		} else if bytesconv.EqualFoldASCII(key, "grpc-message") {
+		case bytesconv.EqualFoldASCII(key, "grpc-message"):
 			statusMsg = val
+		case bytesconv.EqualFoldASCII(key, "grpc-status-details-bin"):
+			if decoded, err := base64.RawStdEncoding.DecodeString(val); err == nil {
+				statusDetails = decoded
+			} else if decoded, err := base64.StdEncoding.DecodeString(val); err == nil {
+				statusDetails = decoded
+			}
 		}
 	}
 
 	if statusCode != "" && statusCode != "0" {
 		return &GRPCWebError{
-			StatusCode: statusCode,
-			StatusMsg:  statusMsg,
-			Err:        ErrGRPCWebStatusError,
+			StatusCode:    statusCode,
+			StatusMsg:     statusMsg,
+			StatusDetails: statusDetails,
+			Err:           ErrGRPCWebStatusError,
 		}
 	}
 

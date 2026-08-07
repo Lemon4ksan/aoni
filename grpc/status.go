@@ -6,6 +6,7 @@ package grpc
 
 import (
 	"fmt"
+	"net/http"
 	"net/url"
 	"strconv"
 )
@@ -33,15 +34,29 @@ const (
 	StatusUnauthenticated    StatusCode = 16
 )
 
-// StatusError describes an RPC execution failure per PROTOCOL-HTTP2.md.
+// StatusError describes an RPC execution failure per PROTOCOL-HTTP2.md,
+// including binary error details from the 'grpc-status-details-bin' trailer.
 type StatusError struct {
-	Code    StatusCode
-	Message string
+	Code       StatusCode
+	Message    string
+	RawDetails []byte
+	Header     http.Header
+	Trailer    http.Header
 }
 
 func (e *StatusError) Error() string {
 	if e == nil {
 		return "<nil>"
+	}
+
+	if len(e.RawDetails) > 0 {
+		return fmt.Sprintf(
+			"aoni grpc: status=%s (%d) msg=%s details_len=%d",
+			e.Code.String(),
+			e.Code,
+			e.Message,
+			len(e.RawDetails),
+		)
 	}
 
 	return fmt.Sprintf("aoni grpc: status=%s (%d) msg=%s", e.Code.String(), e.Code, e.Message)
@@ -88,7 +103,10 @@ func (c StatusCode) String() string {
 	}
 }
 
-func parseGRPCStatus(codeStr, msgStr string) *StatusError {
+func parseGRPCStatus(trailers http.Header) *StatusError {
+	codeStr := trailers.Get("grpc-status")
+	msgStr := trailers.Get("grpc-message")
+
 	code, err := strconv.ParseUint(codeStr, 10, 32)
 	if err != nil {
 		code = uint64(StatusUnknown)
@@ -99,8 +117,17 @@ func parseGRPCStatus(codeStr, msgStr string) *StatusError {
 		decodedMsg = msgStr
 	}
 
+	var rawDetails []byte
+	if detailsBin := trailers.Get("grpc-status-details-bin"); detailsBin != "" {
+		if decoded, err := DecodeBinaryHeader(detailsBin); err == nil {
+			rawDetails = decoded
+		}
+	}
+
 	return &StatusError{
-		Code:    StatusCode(code),
-		Message: decodedMsg,
+		Code:       StatusCode(code),
+		Message:    decodedMsg,
+		RawDetails: rawDetails,
+		Trailer:    trailers,
 	}
 }

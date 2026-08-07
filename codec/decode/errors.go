@@ -43,10 +43,11 @@ func (e *Error) Unwrap() error { return e.Err }
 
 // GRPCWebError describes a framing, status code, or stream error specific to gRPC-Web response processing.
 type GRPCWebError struct {
-	Op         string
-	StatusCode string
-	StatusMsg  string
-	Err        error
+	Op            string
+	StatusCode    string
+	StatusMsg     string
+	StatusDetails []byte
+	Err           error
 }
 
 func (e *GRPCWebError) Error() string {

@@ -7,9 +7,13 @@ package grpc
 
 import (
 	"bytes"
+	"compress/gzip"
 	"context"
 	"encoding/base64"
+	"encoding/binary"
+	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"strings"
 	"time"
@@ -171,8 +175,7 @@ func validateInitialHeaders(resp *http.Response) error {
 
 	// Check "Trailers-Only" response case (when error status is delivered directly in initial response headers)
 	if statusCode := resp.Header.Get("grpc-status"); statusCode != "" && statusCode != "0" {
-		statusMsg := resp.Header.Get("grpc-message")
-		return parseGRPCStatus(statusCode, statusMsg)
+		return parseGRPCStatus(resp.Header)
 	}
 
 	return nil
@@ -190,8 +193,7 @@ func validateResponseTrailers(resp *http.Response) error {
 	}
 
 	if statusCode != "0" {
-		statusMsg := trailers.Get("grpc-message")
-		return parseGRPCStatus(statusCode, statusMsg)
+		return parseGRPCStatus(trailers)
 	}
 
 	return nil
@@ -210,4 +212,132 @@ func DecodeBinaryHeader(val string) ([]byte, error) {
 	}
 
 	return base64.StdEncoding.DecodeString(val)
+}
+
+// StreamResponse represents an active Server-Streaming gRPC session.
+type StreamResponse[Resp any] struct {
+	stream io.ReadCloser
+	resp   *http.Response
+}
+
+// Recv reads and decodes the next Protobuf message frame from the streaming response.
+// Returns io.EOF when the server finishes sending messages.
+func (s *StreamResponse[Resp]) Recv() (*Resp, error) {
+	result := new(Resp)
+
+	msg, ok := any(result).(proto.Message)
+	if !ok {
+		return nil, fmt.Errorf("aoni grpc: response type %T does not implement proto.Message", result)
+	}
+
+	_, err := UnmarshalFrame(s.stream, msg)
+	if err != nil {
+		if errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF) {
+			if validateErr := validateResponseTrailers(s.resp); validateErr != nil {
+				return nil, validateErr
+			}
+
+			return nil, io.EOF
+		}
+
+		return nil, err
+	}
+
+	return result, nil
+}
+
+// Close terminates the streaming RPC session.
+func (s *StreamResponse[Resp]) Close() error {
+	if s.stream != nil {
+		return s.stream.Close()
+	}
+
+	return nil
+}
+
+// ServerStream executes a Server-Streaming gRPC call (/Service/Method),
+// allowing the client to receive multiple Protobuf responses over time.
+func ServerStream[Resp any](
+	ctx context.Context,
+	doer aoni.RequestDoer,
+	fullMethod string,
+	reqMsg proto.Message,
+	mods ...aoni.RequestModifier,
+) (*StreamResponse[Resp], error) {
+	frameBytes, err := MarshalFrame(reqMsg, false)
+	if err != nil {
+		return nil, err
+	}
+
+	path := fullMethod
+	if !strings.HasPrefix(path, "/") {
+		path = "/" + path
+	}
+
+	grpcMods := make([]aoni.RequestModifier, 0, len(mods)+5)
+	grpcMods = append(grpcMods,
+		mod.WithContentType("application/grpc"),
+		mod.WithHeader("te", "trailers"),
+		mod.WithHeader("grpc-accept-encoding", "gzip, identity"),
+		mod.WithHeader("user-agent", "grpc-aoni/1.0"),
+		mod.WithBody(bytes.NewReader(frameBytes)),
+	)
+
+	if deadline, ok := ctx.Deadline(); ok {
+		grpcMods = append(grpcMods, mod.WithHeader("grpc-timeout", FormatTimeout(time.Until(deadline))))
+	}
+
+	grpcMods = append(grpcMods, mods...)
+	requester := request.AsRequester(doer)
+
+	resp, err := requester.Request(ctx, http.MethodPost, path, grpcMods...)
+	if err != nil {
+		return nil, err
+	}
+
+	if err := validateInitialHeaders(resp); err != nil {
+		_ = resp.Body.Close()
+		return nil, err
+	}
+
+	return &StreamResponse[Resp]{
+		stream: resp.Body,
+		resp:   resp,
+	}, nil
+}
+
+// MarshalFrameCompressed encodes a Protobuf message with optional Gzip compression.
+func MarshalFrameCompressed(msg proto.Message, compress bool) ([]byte, error) {
+	if msg == nil {
+		return []byte{0, 0, 0, 0, 0}, nil
+	}
+
+	payload, err := proto.Marshal(msg)
+	if err != nil {
+		return nil, fmt.Errorf("aoni grpc: marshal proto failed: %w", err)
+	}
+
+	var compressedFlag byte = 0x00
+	if compress {
+		var buf bytes.Buffer
+
+		gz := gzip.NewWriter(&buf)
+		if _, err := gz.Write(payload); err != nil {
+			return nil, fmt.Errorf("aoni grpc: compress payload failed: %w", err)
+		}
+
+		_ = gz.Close()
+
+		payload = buf.Bytes()
+		compressedFlag = 0x01
+	}
+
+	payloadLen := len(payload)
+	frame := make([]byte, 5+payloadLen)
+	frame[0] = compressedFlag
+
+	binary.BigEndian.PutUint32(frame[1:5], uint32(payloadLen)) //nolint:gosec
+	copy(frame[5:], payload)
+
+	return frame, nil
 }

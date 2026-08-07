@@ -4,7 +4,9 @@
 
 package grpc
 
-import "errors"
+import (
+	"errors"
+)
 
 var (
 	// ErrInvalidGRPCFrame is returned when a gRPC 5-byte length header is corrupted or truncated.
