@@ -46,15 +46,12 @@ func Invoke[Resp any](
 		path = "/" + path
 	}
 
-	var rawResp *http.Response
-
-	grpcMods := make([]aoni.RequestModifier, 0, len(mods)+6)
+	grpcMods := make([]aoni.RequestModifier, 0, len(mods)+4)
 	grpcMods = append(grpcMods,
-		mod.WithContentType("application/grpc+proto"),
+		mod.WithContentType("application/grpc"),
 		mod.WithHeader("te", "trailers"),
 		mod.WithHeader("user-agent", "grpc-aoni/1.0"),
 		mod.WithBody(bytes.NewReader(frameBytes)),
-		mod.WithCaptureResponse(&rawResp),
 	)
 
 	if deadline, ok := ctx.Deadline(); ok {
@@ -71,12 +68,11 @@ func Invoke[Resp any](
 	}
 	defer resp.Body.Close()
 
-	if err := validateResponseHeadersAndTrailers(rawResp, resp); err != nil {
+	if err := validateInitialHeaders(resp); err != nil {
 		return nil, err
 	}
 
 	result := new(Resp)
-
 	msg, ok := any(result).(proto.Message)
 	if !ok {
 		return nil, fmt.Errorf("aoni grpc: response type %T does not implement proto.Message", result)
@@ -86,44 +82,48 @@ func Invoke[Resp any](
 		return nil, err
 	}
 
+	if err := validateResponseTrailers(resp); err != nil {
+		return nil, err
+	}
+
 	return result, nil
 }
 
-func validateResponseHeadersAndTrailers(rawResp, resp *http.Response) error {
+func validateInitialHeaders(resp *http.Response) error {
+	if resp.StatusCode != http.StatusOK {
+		return &StatusError{
+			Code:    StatusUnknown,
+			Message: "non-200 HTTP status: " + resp.Status,
+		}
+	}
+
 	ct := resp.Header.Get("Content-Type")
 	if ct != "" && !strings.HasPrefix(ct, "application/grpc") {
 		return fmt.Errorf("%w: %s", ErrInvalidContentType, ct)
 	}
 
-	var trailers http.Header
-	if rawResp != nil && len(rawResp.Trailer) > 0 {
-		trailers = rawResp.Trailer
-	} else {
+	// Check "Trailers-Only" response case (when error status is delivered directly in initial response headers)
+	if statusCode := resp.Header.Get("grpc-status"); statusCode != "" && statusCode != "0" {
+		statusMsg := resp.Header.Get("grpc-message")
+		return parseGRPCStatus(statusCode, statusMsg)
+	}
+
+	return nil
+}
+
+func validateResponseTrailers(resp *http.Response) error {
+	trailers := resp.Trailer
+	if len(trailers) == 0 {
 		trailers = resp.Header
 	}
 
 	statusCode := trailers.Get("grpc-status")
 	if statusCode == "" {
-		statusCode = resp.Header.Get("grpc-status")
-	}
-
-	if statusCode == "" {
-		if resp.StatusCode != http.StatusOK {
-			return &StatusError{
-				Code:    StatusUnknown,
-				Message: "non-200 HTTP status: " + resp.Status,
-			}
-		}
-
 		return ErrMissingGRPCStatus
 	}
 
 	if statusCode != "0" {
 		statusMsg := trailers.Get("grpc-message")
-		if statusMsg == "" {
-			statusMsg = resp.Header.Get("grpc-message")
-		}
-
 		return parseGRPCStatus(statusCode, statusMsg)
 	}
 

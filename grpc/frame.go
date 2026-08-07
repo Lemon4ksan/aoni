@@ -5,10 +5,13 @@
 package grpc
 
 import (
+	"bytes"
 	"encoding/binary"
 	"fmt"
 	"io"
 	"sync"
+
+	"github.com/klauspost/compress/gzip"
 
 	"google.golang.org/protobuf/proto"
 )
@@ -62,6 +65,19 @@ func UnmarshalFrame(r io.Reader, target proto.Message) (compressed bool, err err
 	payload := make([]byte, length)
 	if _, err := io.ReadFull(r, payload); err != nil {
 		return false, fmt.Errorf("%w: %w", ErrInvalidGRPCFrame, err)
+	}
+
+	if compressed {
+		gz, err := gzip.NewReader(bytes.NewReader(payload))
+		if err != nil {
+			return true, fmt.Errorf("aoni grpc: decompress frame failed: %w", err)
+		}
+		defer gz.Close()
+
+		payload, err = io.ReadAll(gz)
+		if err != nil {
+			return true, fmt.Errorf("aoni grpc: read decompressed frame failed: %w", err)
+		}
 	}
 
 	if err := proto.Unmarshal(payload, target); err != nil {
