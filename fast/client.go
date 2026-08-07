@@ -416,6 +416,8 @@ func applyRedirectMethodAndBody(statusCode int, req *fasthttp.Request) error {
 }
 
 func decompressFastResponse(resp *fasthttp.Response) bool {
+	enforceContentLengthTruncation(resp)
+
 	encodingBytes := resp.Header.Peek("Content-Encoding")
 	if len(encodingBytes) == 0 {
 		return false
@@ -461,6 +463,35 @@ func decompressFastResponse(resp *fasthttp.Response) bool {
 	}
 
 	return false
+}
+
+func enforceContentLengthTruncation(resp *fasthttp.Response) {
+	if resp == nil {
+		return
+	}
+
+	clBytes := resp.Header.Peek("Content-Length")
+	if len(clBytes) == 0 {
+		return
+	}
+
+	cl, err := strconv.ParseInt(bytesconv.B2S(clBytes), 10, 64)
+	if err != nil || cl < 0 {
+		return
+	}
+
+	if !resp.IsBodyStream() {
+		body := resp.Body()
+		if int64(len(body)) > cl {
+			resp.SetBody(body[:cl])
+		}
+
+		return
+	}
+
+	if stream := resp.BodyStream(); stream != nil {
+		resp.SetBodyStream(io.LimitReader(stream, cl), int(cl))
+	}
 }
 
 func (c *Client) resolvePipeline(ctx context.Context) aoni.PipelineConfig {

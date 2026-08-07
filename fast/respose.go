@@ -9,6 +9,7 @@ import (
 	"io"
 	"net/http"
 	"slices"
+	"strconv"
 	"sync"
 	"sync/atomic"
 
@@ -198,11 +199,23 @@ const maxBodySlurpBytes int64 = 2048
 
 // Close releases resources bound to the response wrapper and slurps unread stream bytes to preserve sockets.
 func (f *Response) Close() error {
-	if f.resp != nil && f.resp.IsBodyStream() {
-		if stream := f.resp.BodyStream(); stream != nil {
-			_, _ = io.CopyN(io.Discard, stream, maxBodySlurpBytes)
-		}
+	if f.resp == nil || !f.resp.IsBodyStream() {
+		return nil
 	}
+
+	stream := f.resp.BodyStream()
+	if stream == nil {
+		return nil
+	}
+
+	clStr := f.Header("Content-Length")
+	slurpLimit := maxBodySlurpBytes
+
+	if cl, err := strconv.ParseInt(clStr, 10, 64); err == nil && cl >= 0 {
+		slurpLimit = min(cl, maxBodySlurpBytes)
+	}
+
+	_, _ = io.CopyN(io.Discard, stream, slurpLimit)
 
 	return nil
 }
