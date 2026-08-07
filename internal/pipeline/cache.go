@@ -10,6 +10,7 @@ import (
 	"encoding/json"
 	stdio "io"
 	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
 	"time"
@@ -18,6 +19,85 @@ import (
 // SavePushedResponseToCache validates and stores an HTTP/2 server-pushed response into the cache store.
 func (p *Pipeline) SavePushedResponseToCache(req *http.Request, resp *http.Response, cfg *CacheConfig) {
 	p.saveToCache(req, resp, cfg)
+}
+
+// DefaultIgnoredTrackingParams lists standard marketing and tracking parameters ignored by No-Vary-Search.
+var DefaultIgnoredTrackingParams = []string{
+	"utm_source", "utm_medium", "utm_campaign", "utm_term",
+	"utm_content", "fbclid", "gclid", "msclkid", "_ga", "ref",
+}
+
+// NoVarySearchConfig specifies query parameter normalization rules (W3C No-Vary-Search) for caching.
+type NoVarySearchConfig struct {
+	IgnoreParams    []string
+	ExceptParams    []string
+	IgnoreAllParams bool
+}
+
+// DefaultNoVarySearchConfig provides standard No-Vary-Search rules ignoring common tracking parameters.
+var DefaultNoVarySearchConfig = NoVarySearchConfig{
+	IgnoreParams: DefaultIgnoredTrackingParams,
+}
+
+// NormalizeCacheURL applies No-Vary-Search rules to strip tracking query parameters and order keys.
+func NormalizeCacheURL(rawURL string, cfg *NoVarySearchConfig) string {
+	if rawURL == "" {
+		return ""
+	}
+
+	u, err := url.Parse(rawURL)
+	if err != nil || u.RawQuery == "" {
+		return rawURL
+	}
+
+	query := u.Query()
+	if len(query) == 0 {
+		return rawURL
+	}
+
+	activeCfg := cfg
+	if activeCfg == nil {
+		activeCfg = &DefaultNoVarySearchConfig
+	}
+
+	normalizedQuery := filterQueryParams(query, activeCfg)
+	u.RawQuery = normalizedQuery.Encode()
+
+	return u.String()
+}
+
+func filterQueryParams(query url.Values, cfg *NoVarySearchConfig) url.Values {
+	result := make(url.Values, len(query))
+
+	for key, values := range query {
+		if shouldIgnoreQueryParam(key, cfg) {
+			continue
+		}
+
+		result[key] = values
+	}
+
+	return result
+}
+
+func shouldIgnoreQueryParam(key string, cfg *NoVarySearchConfig) bool {
+	if cfg.IgnoreAllParams {
+		for _, exc := range cfg.ExceptParams {
+			if strings.EqualFold(key, exc) {
+				return false
+			}
+		}
+
+		return true
+	}
+
+	for _, ign := range cfg.IgnoreParams {
+		if strings.EqualFold(key, ign) {
+			return true
+		}
+	}
+
+	return false
 }
 
 func (p *Pipeline) tryGetFromCache(req *http.Request, cfg *CacheConfig) *http.Response {
@@ -30,7 +110,9 @@ func (p *Pipeline) tryGetFromCache(req *http.Request, cfg *CacheConfig) *http.Re
 		return nil
 	}
 
-	cachedData, err := cfg.Store.Get(req.Context(), CacheKey{Method: req.Method, URL: req.URL.String()})
+	normURL := NormalizeCacheURL(req.URL.String(), cfg.NoVarySearch)
+
+	cachedData, err := cfg.Store.Get(req.Context(), CacheKey{Method: req.Method, URL: normURL})
 	if err != nil {
 		return nil
 	}
@@ -149,7 +231,71 @@ func (p *Pipeline) saveToCache(req *http.Request, resp *http.Response, cfg *Cach
 		ttl = parsedTTL
 	}
 
-	_ = cfg.Store.Set(req.Context(), CacheKey{Method: req.Method, URL: req.URL.String()}, cachedData, ttl)
+	effectiveConfig := resolveEffectiveNoVarySearch(resp, cfg)
+	normURL := NormalizeCacheURL(req.URL.String(), effectiveConfig)
+
+	_ = cfg.Store.Set(req.Context(), CacheKey{Method: req.Method, URL: normURL}, cachedData, ttl)
+}
+
+func resolveEffectiveNoVarySearch(resp *http.Response, cfg *CacheConfig) *NoVarySearchConfig {
+	nvsHeader := resp.Header.Get("No-Vary-Search")
+	if nvsHeader == "" {
+		if cfg != nil {
+			return cfg.NoVarySearch
+		}
+
+		return &DefaultNoVarySearchConfig
+	}
+
+	parsed := ParseNoVarySearchHeader(nvsHeader)
+	if cfg != nil && cfg.NoVarySearch != nil {
+		parsed.IgnoreParams = append(parsed.IgnoreParams, cfg.NoVarySearch.IgnoreParams...)
+	}
+
+	return parsed
+}
+
+// ParseNoVarySearchHeader parses the W3C 'No-Vary-Search' response header into a NoVarySearchConfig.
+func ParseNoVarySearchHeader(header string) *NoVarySearchConfig {
+	cfg := &NoVarySearchConfig{}
+	if header == "" {
+		return cfg
+	}
+
+	if strings.Contains(header, "params") && !strings.Contains(header, "params=(") {
+		cfg.IgnoreAllParams = true
+		return cfg
+	}
+
+	if start := strings.Index(header, "params=("); start != -1 {
+		end := strings.IndexByte(header[start:], ')')
+		if end != -1 {
+			paramsStr := header[start+8 : start+end]
+			cfg.IgnoreParams = parseHeaderParamsList(paramsStr)
+		}
+	}
+
+	if start := strings.Index(header, "except=("); start != -1 {
+		end := strings.IndexByte(header[start:], ')')
+		if end != -1 {
+			paramsStr := header[start+8 : start+end]
+			cfg.ExceptParams = parseHeaderParamsList(paramsStr)
+		}
+	}
+
+	return cfg
+}
+
+func parseHeaderParamsList(paramsStr string) []string {
+	var params []string
+	for p := range strings.FieldsSeq(paramsStr) {
+		cleaned := strings.Trim(p, `"'`)
+		if cleaned != "" {
+			params = append(params, cleaned)
+		}
+	}
+
+	return params
 }
 
 func (p *Pipeline) invalidateCache(req *http.Request, resp *http.Response, cfg *CacheConfig) {
@@ -159,7 +305,8 @@ func (p *Pipeline) invalidateCache(req *http.Request, resp *http.Response, cfg *
 
 	if req.Method == http.MethodPost || req.Method == http.MethodPut ||
 		req.Method == http.MethodDelete || req.Method == http.MethodPatch {
-		key := CacheKey{Method: http.MethodGet, URL: req.URL.String()}
+		normURL := NormalizeCacheURL(req.URL.String(), cfg.NoVarySearch)
+		key := CacheKey{Method: http.MethodGet, URL: normURL}
 		_ = cfg.Store.Set(req.Context(), key, nil, 0)
 	}
 }

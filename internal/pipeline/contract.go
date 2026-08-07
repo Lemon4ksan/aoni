@@ -254,7 +254,8 @@ type CacheConfig struct {
 		Get(ctx context.Context, key any) ([]byte, error)
 		Set(ctx context.Context, key any, val []byte, ttl time.Duration) error
 	}
-	DefaultTTL time.Duration
+	DefaultTTL   time.Duration
+	NoVarySearch *NoVarySearchConfig
 }
 
 type JA4ReportStore struct {
