@@ -47,7 +47,7 @@ func Invoke[Resp any](
 	}
 
 	path := fullMethod
-	if !strings.HasPrefix(path, "/") {
+	if !strings.HasPrefix(path, "/") && !strings.HasPrefix(path, "http://") && !strings.HasPrefix(path, "https://") {
 		path = "/" + path
 	}
 
@@ -109,7 +109,7 @@ func InvokeFast[Resp any](
 	}
 
 	path := fullMethod
-	if !strings.HasPrefix(path, "/") {
+	if !strings.HasPrefix(path, "/") && !strings.HasPrefix(path, "http://") && !strings.HasPrefix(path, "https://") {
 		path = "/" + path
 	}
 
@@ -270,7 +270,7 @@ func ServerStream[Resp any](
 	}
 
 	path := fullMethod
-	if !strings.HasPrefix(path, "/") {
+	if !strings.HasPrefix(path, "/") && !strings.HasPrefix(path, "http://") && !strings.HasPrefix(path, "https://") {
 		path = "/" + path
 	}
 
