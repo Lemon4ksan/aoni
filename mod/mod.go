@@ -660,6 +660,14 @@ func WithALPN(protos ...string) aoni.RequestModifier {
 	}
 }
 
+// WithoutAltSvc constructs an [aoni.RequestModifier] that disables Alt-Svc connection
+// upgrades and IP pooling for a request, forcing direct resolution over a fresh socket.
+func WithoutAltSvc() aoni.RequestModifier {
+	return func(req aoni.Request) {
+		aoni.GetOrInitRequestConfig(req).DisableAltSvc = true
+	}
+}
+
 // WithForceHTTP1 constructs an [aoni.RequestModifier] restricting ALPN negotiation strictly to HTTP/1.1.
 func WithForceHTTP1() aoni.RequestModifier {
 	return func(req aoni.Request) {

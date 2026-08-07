@@ -140,9 +140,11 @@ func resolveALPNMode(ctx context.Context, cfg *aoni.Config, fastReq *fasthttp.Re
 		}
 	}
 
+	disableAltSvc := reqCfg != nil && reqCfg.DisableAltSvc
+
 	if bytes.EqualFold(fastReq.URI().Scheme(), []byte("https")) {
 		host := string(fastReq.URI().Host())
-		if host != "" && globalAltSvcCache.IsH3Supported(host) {
+		if host != "" && !disableAltSvc && globalAltSvcCache.IsH3Supported(host) {
 			return aoni.AlpnH3
 		}
 

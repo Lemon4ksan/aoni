@@ -7,6 +7,7 @@ package fast
 import (
 	"bytes"
 	"context"
+	"net/http"
 	"net/url"
 	"strings"
 
@@ -26,11 +27,18 @@ func (c *Client) dispatchSingleRequest(
 	host := string(fastReq.URI().Host())
 	alpnMode := resolveALPNMode(ctx, &c.config, fastReq)
 
+	// 1. HTTP/3 Execution
 	if alpnMode == aoni.AlpnH3 {
 		h3 := c.getH3Client()
 
 		tr, err := h3.Do(ctx, fastReq, fastResp, c.config.Fingerprint.HeaderOrder)
 		if err == nil {
+			if fastResp.StatusCode() == http.StatusMisdirectedRequest {
+				globalAltSvcCache.MarkH3Failed(host)
+				fastResp.Reset()
+				return c.retry421Misdirected(ctx, fastReq, fastResp)
+			}
+
 			return tr, nil, false
 		}
 
@@ -40,11 +48,18 @@ func (c *Client) dispatchSingleRequest(
 		alpnMode = resolveALPNMode(ctx, &c.config, fastReq)
 	}
 
+	// 2. HTTP/2 Execution
 	if alpnMode == aoni.AlpnH2 {
 		h2Cl := c.getH2Client(host)
 
 		tr, err := h2Cl.DoWithTrailers(ctx, fastReq, fastResp)
 		if err == nil {
+			if fastResp.StatusCode() == http.StatusMisdirectedRequest {
+				c.removeH2Client(host)
+				fastResp.Reset()
+				return c.retry421Misdirected(ctx, fastReq, fastResp)
+			}
+
 			if altSvc := fastResp.Header.Peek("Alt-Svc"); len(altSvc) > 0 {
 				globalAltSvcCache.Record(host, string(altSvc))
 			}
@@ -60,6 +75,12 @@ func (c *Client) dispatchSingleRequest(
 
 			trFresh, errFresh := freshH2Cl.DoWithTrailers(ctx, fastReq, fastResp)
 			if errFresh == nil {
+				if fastResp.StatusCode() == http.StatusMisdirectedRequest {
+					c.removeH2Client(host)
+					fastResp.Reset()
+					return c.retry421Misdirected(ctx, fastReq, fastResp)
+				}
+
 				if altSvc := fastResp.Header.Peek("Alt-Svc"); len(altSvc) > 0 {
 					globalAltSvcCache.Record(host, string(altSvc))
 				}
@@ -72,6 +93,7 @@ func (c *Client) dispatchSingleRequest(
 		}
 	}
 
+	// 3. HTTP/1.1 Execution with H2-frame Fallback and Alt-Svc Discovery
 	err, autoReleased = c.executeFastHTTP(ctx, fastReq, fastResp)
 	if autoReleased {
 		return nil, err, true
@@ -84,6 +106,12 @@ func (c *Client) dispatchSingleRequest(
 
 		tr, h2Err := h2Cl.DoWithTrailers(ctx, fastReq, fastResp)
 		if h2Err == nil {
+			if fastResp.StatusCode() == http.StatusMisdirectedRequest {
+				c.removeH2Client(host)
+				fastResp.Reset()
+				return c.retry421Misdirected(ctx, fastReq, fastResp)
+			}
+
 			if altSvc := fastResp.Header.Peek("Alt-Svc"); len(altSvc) > 0 {
 				globalAltSvcCache.Record(host, string(altSvc))
 			}
@@ -95,12 +123,34 @@ func (c *Client) dispatchSingleRequest(
 	}
 
 	if err == nil {
+		if fastResp.StatusCode() == http.StatusMisdirectedRequest {
+			fastResp.Reset()
+			return c.retry421Misdirected(ctx, fastReq, fastResp)
+		}
+
 		if altSvc := fastResp.Header.Peek("Alt-Svc"); len(altSvc) > 0 {
 			globalAltSvcCache.Record(host, string(altSvc))
 		}
 	}
 
 	return nil, err, false
+}
+
+func (c *Client) retry421Misdirected(
+	ctx context.Context,
+	fastReq *fasthttp.Request,
+	fastResp *fasthttp.Response,
+) (trailers map[string][]string, err error, autoReleased bool) {
+	reqCfg := aoni.GetOrInitRequestConfig(ctx)
+	reqCfg.DisableAltSvc = true
+
+	host := string(fastReq.URI().Host())
+	globalAltSvcCache.MarkH3Failed(host)
+	c.removeH2Client(host)
+
+	fastReq.Header.Del("Alt-Svc")
+
+	return c.dispatchSingleRequest(ctx, fastReq, fastResp)
 }
 
 func (c *Client) executeFastHTTP(
