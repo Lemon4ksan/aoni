@@ -58,44 +58,37 @@ const (
 
 // Request defines the unified execution contract required by the pipeline.
 type Request interface {
+	// Context management
 	Context() context.Context
 	SetContext(ctx context.Context)
 
+	// Method and Destination URL
 	Method() string
 	SetMethod(method string)
-	SetMethodBytes(method []byte)
-
 	URL() string
 	SetURL(urlStr string)
-	SetURIBytes(uri []byte)
-
 	Path() string
 	SetPath(path string)
 
+	// Query Parameters
 	RawQuery() string
 	SetRawQuery(query string)
-	SetRawQueryBytes(query []byte)
-
 	AddQueryParam(key, value string)
-	AddQueryParamBytes(key, value []byte)
-	SetQueryParam(key, value string)
-	SetQueryParamBytes(key, value []byte)
 
+	// Header Operations
 	Header(key string) string
-	HeaderBytes(key []byte) []byte
 	SetHeader(key, value string)
-	SetHeaderBytes(key, value []byte)
 	AddHeader(key, value string)
-	AddHeaderBytes(key, value []byte)
 	DelHeader(key string)
-	DelHeaderBytes(key []byte)
 	ResetHeaders()
 
+	// Payload Body Operations
 	SetBodyBytes(body []byte)
 	BodyBytes() []byte
 	SetBodyStream(r stdio.Reader, contentLength int64)
 	BodyStream() stdio.Reader
 
+	// Underlying Engine Requests
 	HTTPRequest() *http.Request
 	EngineRequest() any
 }
