@@ -47,6 +47,7 @@ func GenerateCorrelationID() string {
 }
 
 // TraceInfo records network layer execution timings, TLS details, and JA4 signatures for a request.
+// TraceInfo records network layer execution timings, TLS details, and JA4 signatures for a request.
 type TraceInfo struct {
 	CorrelationID    string
 	Label            string
@@ -61,6 +62,7 @@ type TraceInfo struct {
 	ResponseSize int64
 
 	RemoteAddr string
+	IsReused   bool
 	JA4        *ja4.Report
 
 	TLSState         *tls.ConnectionState

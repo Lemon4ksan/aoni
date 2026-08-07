@@ -17,6 +17,8 @@ import (
 	"github.com/lemon4ksan/aoni/internal/bytesconv"
 )
 
+// dispatchSingleRequest routes an HTTP request through H3, H2, or H1 protocol handlers
+// with automatic recovery for 421 Misdirected Request, 408 Request Timeout, and H1-to-H2 frame fallbacks.
 func (c *Client) dispatchSingleRequest(
 	ctx context.Context,
 	fastReq *fasthttp.Request,
@@ -27,113 +29,157 @@ func (c *Client) dispatchSingleRequest(
 	host := string(fastReq.URI().Host())
 	alpnMode := resolveALPNMode(ctx, &c.config, fastReq)
 
-	// 1. HTTP/3 Execution
 	if alpnMode == aoni.AlpnH3 {
-		h3 := c.getH3Client()
-
-		tr, err := h3.Do(ctx, fastReq, fastResp, c.config.Fingerprint.HeaderOrder)
-		if err == nil {
-			if fastResp.StatusCode() == http.StatusMisdirectedRequest {
-				globalAltSvcCache.MarkH3Failed(host)
-				fastResp.Reset()
-				return c.retry421Misdirected(ctx, fastReq, fastResp)
-			}
-
-			return tr, nil, false
+		if tr, h3Err, handled := c.tryDispatchH3(ctx, host, fastReq, fastResp); handled {
+			return tr, h3Err, false
 		}
-
-		globalAltSvcCache.MarkH3Failed(host)
-		fastResp.Reset()
 
 		alpnMode = resolveALPNMode(ctx, &c.config, fastReq)
 	}
 
-	// 2. HTTP/2 Execution
 	if alpnMode == aoni.AlpnH2 {
-		h2Cl := c.getH2Client(host)
-
-		tr, err := h2Cl.DoWithTrailers(ctx, fastReq, fastResp)
-		if err == nil {
-			if fastResp.StatusCode() == http.StatusMisdirectedRequest {
-				c.removeH2Client(host)
-				fastResp.Reset()
-				return c.retry421Misdirected(ctx, fastReq, fastResp)
-			}
-
-			if altSvc := fastResp.Header.Peek("Alt-Svc"); len(altSvc) > 0 {
-				globalAltSvcCache.Record(host, string(altSvc))
-			}
-
-			return tr, nil, false
-		}
-
-		c.removeH2Client(host)
-		fastResp.Reset()
-
-		if c.config.Fingerprint.BrowserID != aoni.BrowserNone {
-			freshH2Cl := c.getH2Client(host)
-
-			trFresh, errFresh := freshH2Cl.DoWithTrailers(ctx, fastReq, fastResp)
-			if errFresh == nil {
-				if fastResp.StatusCode() == http.StatusMisdirectedRequest {
-					c.removeH2Client(host)
-					fastResp.Reset()
-					return c.retry421Misdirected(ctx, fastReq, fastResp)
-				}
-
-				if altSvc := fastResp.Header.Peek("Alt-Svc"); len(altSvc) > 0 {
-					globalAltSvcCache.Record(host, string(altSvc))
-				}
-
-				return trFresh, nil, false
-			}
-
-			c.removeH2Client(host)
-			fastResp.Reset()
+		if tr, h2Err, handled := c.tryDispatchH2(ctx, host, fastReq, fastResp); handled {
+			return tr, h2Err, false
 		}
 	}
 
-	// 3. HTTP/1.1 Execution with H2-frame Fallback and Alt-Svc Discovery
-	err, autoReleased = c.executeFastHTTP(ctx, fastReq, fastResp)
+	return c.dispatchH1WithFallbacks(ctx, host, fastReq, fastResp)
+}
+
+func (c *Client) tryDispatchH3(
+	ctx context.Context,
+	host string,
+	fastReq *fasthttp.Request,
+	fastResp *fasthttp.Response,
+) (map[string][]string, error, bool) {
+	h3 := c.getH3Client()
+
+	tr, err := h3.Do(ctx, fastReq, fastResp, c.config.Fingerprint.HeaderOrder)
+	if err != nil {
+		globalAltSvcCache.MarkH3Failed(host)
+		fastResp.Reset()
+
+		return nil, err, false
+	}
+
+	if c.isRecoverableStatus(fastResp.StatusCode()) {
+		tr, errRec, _ := c.recoverSpecialStatus(ctx, host, fastReq, fastResp)
+		return tr, errRec, true
+	}
+
+	return tr, nil, true
+}
+
+func (c *Client) tryDispatchH2(
+	ctx context.Context,
+	host string,
+	fastReq *fasthttp.Request,
+	fastResp *fasthttp.Response,
+) (map[string][]string, error, bool) {
+	h2Cl := c.getH2Client(host)
+
+	tr, err := h2Cl.DoWithTrailers(ctx, fastReq, fastResp)
+	if err != nil && c.config.Fingerprint.BrowserID != aoni.BrowserNone {
+		c.removeH2Client(host)
+		fastResp.Reset()
+
+		freshH2Cl := c.getH2Client(host)
+		tr, err = freshH2Cl.DoWithTrailers(ctx, fastReq, fastResp)
+	}
+
+	if err != nil {
+		c.removeH2Client(host)
+		fastResp.Reset()
+
+		return nil, err, false
+	}
+
+	if c.isRecoverableStatus(fastResp.StatusCode()) {
+		c.removeH2Client(host)
+		trRec, errRec, _ := c.recoverSpecialStatus(ctx, host, fastReq, fastResp)
+
+		return trRec, errRec, true
+	}
+
+	recordAltSvcIfPresent(host, fastResp)
+
+	return tr, nil, true
+}
+
+func (c *Client) dispatchH1WithFallbacks(
+	ctx context.Context,
+	host string,
+	fastReq *fasthttp.Request,
+	fastResp *fasthttp.Response,
+) (map[string][]string, error, bool) {
+	err, autoReleased := c.executeFastHTTP(ctx, fastReq, fastResp)
 	if autoReleased {
 		return nil, err, true
 	}
 
 	if err != nil && isH2FrameOnH1Error(err) {
-		fastResp.Reset()
-
-		h2Cl := c.getH2Client(host)
-
-		tr, h2Err := h2Cl.DoWithTrailers(ctx, fastReq, fastResp)
-		if h2Err == nil {
-			if fastResp.StatusCode() == http.StatusMisdirectedRequest {
-				c.removeH2Client(host)
-				fastResp.Reset()
-				return c.retry421Misdirected(ctx, fastReq, fastResp)
-			}
-
-			if altSvc := fastResp.Header.Peek("Alt-Svc"); len(altSvc) > 0 {
-				globalAltSvcCache.Record(host, string(altSvc))
-			}
-
-			return tr, nil, false
-		}
-
-		err = h2Err
+		return c.fallbackH1ToH2(ctx, host, fastReq, fastResp)
 	}
 
-	if err == nil {
-		if fastResp.StatusCode() == http.StatusMisdirectedRequest {
-			fastResp.Reset()
-			return c.retry421Misdirected(ctx, fastReq, fastResp)
-		}
-
-		if altSvc := fastResp.Header.Peek("Alt-Svc"); len(altSvc) > 0 {
-			globalAltSvcCache.Record(host, string(altSvc))
-		}
+	if err != nil {
+		return nil, err, false
 	}
 
-	return nil, err, false
+	if c.isRecoverableStatus(fastResp.StatusCode()) {
+		tr, errRec, released := c.recoverSpecialStatus(ctx, host, fastReq, fastResp)
+		return tr, errRec, released
+	}
+
+	recordAltSvcIfPresent(host, fastResp)
+
+	return nil, nil, false
+}
+
+func (c *Client) fallbackH1ToH2(
+	ctx context.Context,
+	host string,
+	fastReq *fasthttp.Request,
+	fastResp *fasthttp.Response,
+) (map[string][]string, error, bool) {
+	fastResp.Reset()
+
+	h2Cl := c.getH2Client(host)
+
+	tr, err := h2Cl.DoWithTrailers(ctx, fastReq, fastResp)
+	if err != nil {
+		return nil, err, false
+	}
+
+	if c.isRecoverableStatus(fastResp.StatusCode()) {
+		c.removeH2Client(host)
+		trRec, errRec, released := c.recoverSpecialStatus(ctx, host, fastReq, fastResp)
+
+		return trRec, errRec, released
+	}
+
+	recordAltSvcIfPresent(host, fastResp)
+
+	return tr, nil, false
+}
+
+func (c *Client) isRecoverableStatus(code int) bool {
+	return code == http.StatusMisdirectedRequest || code == http.StatusRequestTimeout
+}
+
+func (c *Client) recoverSpecialStatus(
+	ctx context.Context,
+	host string,
+	fastReq *fasthttp.Request,
+	fastResp *fasthttp.Response,
+) (map[string][]string, error, bool) {
+	code := fastResp.StatusCode()
+	fastResp.Reset()
+
+	if code == http.StatusMisdirectedRequest {
+		return c.retry421Misdirected(ctx, fastReq, fastResp)
+	}
+
+	return c.retry408Timeout(ctx, fastReq, fastResp)
 }
 
 func (c *Client) retry421Misdirected(
@@ -151,6 +197,24 @@ func (c *Client) retry421Misdirected(
 	fastReq.Header.Del("Alt-Svc")
 
 	return c.dispatchSingleRequest(ctx, fastReq, fastResp)
+}
+
+func (c *Client) retry408Timeout(
+	ctx context.Context,
+	fastReq *fasthttp.Request,
+	fastResp *fasthttp.Response,
+) (trailers map[string][]string, err error, autoReleased bool) {
+	host := string(fastReq.URI().Host())
+	c.removeH2Client(host)
+	fastReq.SetConnectionClose()
+
+	return c.dispatchSingleRequest(ctx, fastReq, fastResp)
+}
+
+func recordAltSvcIfPresent(host string, fastResp *fasthttp.Response) {
+	if altSvc := fastResp.Header.Peek("Alt-Svc"); len(altSvc) > 0 {
+		globalAltSvcCache.Record(host, string(altSvc))
+	}
 }
 
 func (c *Client) executeFastHTTP(

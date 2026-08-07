@@ -202,6 +202,8 @@ func (p *Pipeline) traceRequest(
 		},
 		GotConn: func(info httptrace.GotConnInfo) {
 			traceInfo.GotConn = time.Now()
+
+			traceInfo.IsReused = info.Reused
 			if info.Conn != nil && info.Conn.RemoteAddr() != nil {
 				traceInfo.RemoteAddr = info.Conn.RemoteAddr().String()
 			}
