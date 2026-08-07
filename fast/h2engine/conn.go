@@ -13,6 +13,7 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"net/http"
 	"strconv"
 	"strings"
 	"sync"
@@ -23,6 +24,7 @@ import (
 	"golang.org/x/sys/cpu"
 
 	"github.com/lemon4ksan/aoni/internal/bytesconv"
+	"github.com/lemon4ksan/aoni/telemetry"
 )
 
 const maxConsecutiveControlFrames = 1000
@@ -1310,6 +1312,8 @@ func (c *Conn) readHeader(b []byte, res *fasthttp.Response) (int, error) {
 		maxList = defaultMaxHeaderListSize
 	}
 
+	informationalHeader := make(http.Header)
+
 	for len(b) > 0 {
 		b, err = c.dec.Next(hf, b)
 		if err != nil {
@@ -1335,12 +1339,21 @@ func (c *Conn) readHeader(b []byte, res *fasthttp.Response) (int, error) {
 			continue
 		}
 
+		if statusCode >= 100 && statusCode < 200 && statusCode != 101 {
+			informationalHeader.Add(hf.Key(), hf.Value())
+			continue
+		}
+
 		if bytes.Equal(hf.KeyBytes(), StringContentLength) {
 			n, _ := strconv.Atoi(hf.Value())
 			res.Header.SetContentLength(n)
 		} else {
 			res.Header.AddBytesKV(hf.KeyBytes(), hf.ValueBytes())
 		}
+	}
+
+	if statusCode == 103 {
+		_ = telemetry.TriggerGot1xxResponse(context.Background(), statusCode, informationalHeader)
 	}
 
 	return statusCode, nil

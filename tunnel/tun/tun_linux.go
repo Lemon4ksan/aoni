@@ -47,10 +47,11 @@ type LinuxAdapter struct {
 func NewLinuxAdapter(devName string) (*LinuxAdapter, error) {
 	file, err := os.OpenFile("/dev/net/tun", os.O_RDWR, 0)
 	if err != nil {
-		return nil, fmt.Errorf("%w: %v", ErrLinuxTunOpenFailed, err)
+		return nil, fmt.Errorf("%w: %w", ErrLinuxTunOpenFailed, err)
 	}
 
 	var ifr ifreq
+
 	ifr.Flags = iffTun | iffNoPI
 
 	if devName != "" {
@@ -66,7 +67,7 @@ func NewLinuxAdapter(devName string) (*LinuxAdapter, error) {
 
 	if errno != 0 {
 		_ = file.Close()
-		return nil, fmt.Errorf("%w: %v", ErrLinuxIoctlFailed, errno)
+		return nil, fmt.Errorf("%w: %w", ErrLinuxIoctlFailed, errno)
 	}
 
 	realName := cStringToGoString(ifr.Name[:])

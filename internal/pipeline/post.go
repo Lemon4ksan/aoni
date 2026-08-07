@@ -9,6 +9,7 @@ import (
 	stdio "io"
 	"mime"
 	"net/http"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -20,14 +21,18 @@ import (
 	"github.com/lemon4ksan/aoni/internal/io"
 )
 
-var ErrConflictingContentLength = errors.New("aoni: conflicting Content-Length headers detected")
+var (
+	ErrConflictingContentLength  = errors.New("aoni: conflicting Content-Length headers detected")
+	ErrConflictingLocationHeader = errors.New("aoni: conflicting Location headers detected in response")
+	ErrHeaderInjectionDetected   = errors.New("aoni: CRLF control characters detected in response headers")
+)
 
 func (p *Pipeline) postProcessResponse(
 	stdReq *http.Request,
 	resp *http.Response,
 	tx *Tx,
 ) (*http.Response, error) {
-	if err := validateAndNormalizeContentLength(resp); err != nil {
+	if err := validateResponseSmugglingGuards(resp); err != nil {
 		if resp != nil && resp.Body != nil {
 			_ = resp.Body.Close()
 		}
@@ -85,14 +90,33 @@ func (p *Pipeline) postProcessResponse(
 	return resp, nil
 }
 
-func validateAndNormalizeContentLength(resp *http.Response) error {
-	if resp == nil || len(resp.Header["Content-Length"]) <= 1 {
+func validateResponseSmugglingGuards(resp *http.Response) error {
+	if resp == nil || len(resp.Header) == 0 {
 		return nil
 	}
 
-	clValues := resp.Header["Content-Length"]
-	firstVal := strings.TrimSpace(clValues[0])
+	if err := validateContentLengthHeaders(resp); err != nil {
+		return err
+	}
 
+	if err := validateLocationHeaders(resp); err != nil {
+		return err
+	}
+
+	if err := validateTransferEncodingAndContentLength(resp); err != nil {
+		return err
+	}
+
+	return validateHeaderInjections(resp)
+}
+
+func validateContentLengthHeaders(resp *http.Response) error {
+	clValues := resp.Header["Content-Length"]
+	if len(clValues) <= 1 {
+		return nil
+	}
+
+	firstVal := strings.TrimSpace(clValues[0])
 	for _, val := range clValues[1:] {
 		if strings.TrimSpace(val) != firstVal {
 			return ErrConflictingContentLength
@@ -102,6 +126,62 @@ func validateAndNormalizeContentLength(resp *http.Response) error {
 	resp.Header["Content-Length"] = []string{firstVal}
 
 	return nil
+}
+
+func validateLocationHeaders(resp *http.Response) error {
+	locValues := resp.Header["Location"]
+	if len(locValues) <= 1 {
+		return nil
+	}
+
+	firstLoc := strings.TrimSpace(locValues[0])
+	for _, loc := range locValues[1:] {
+		if strings.TrimSpace(loc) != firstLoc {
+			return ErrConflictingLocationHeader
+		}
+	}
+
+	resp.Header["Location"] = []string{firstLoc}
+
+	return nil
+}
+
+func validateTransferEncodingAndContentLength(resp *http.Response) error {
+	te := resp.Header.Get("Transfer-Encoding")
+	if te == "" || !strings.Contains(strings.ToLower(te), "chunked") {
+		return nil
+	}
+
+	// RFC 9112 Section 6.3: If Transfer-Encoding is chunked, Content-Length MUST be stripped to prevent desync
+	resp.Header.Del("Content-Length")
+	resp.ContentLength = -1
+
+	return nil
+}
+
+func validateHeaderInjections(resp *http.Response) error {
+	for k, vv := range resp.Header {
+		if containsControlChars(k) {
+			return ErrHeaderInjectionDetected
+		}
+
+		if slices.ContainsFunc(vv, containsControlChars) {
+			return ErrHeaderInjectionDetected
+		}
+	}
+
+	return nil
+}
+
+func containsControlChars(s string) bool {
+	for i := 0; i < len(s); i++ {
+		b := s[i]
+		if b == '\r' || b == '\n' || b == 0 {
+			return true
+		}
+	}
+
+	return false
 }
 
 func (p *Pipeline) limitResponseSize(resp *http.Response, maxSize int64) error {

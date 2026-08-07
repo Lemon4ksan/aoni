@@ -14,6 +14,7 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/andybalholm/brotli"
 	"github.com/klauspost/compress/gzip"
@@ -23,6 +24,7 @@ import (
 	"github.com/lemon4ksan/aoni"
 	"github.com/lemon4ksan/aoni/internal/bytesconv"
 	"github.com/lemon4ksan/aoni/internal/pipeline"
+	"github.com/lemon4ksan/aoni/netutil/power"
 )
 
 // HTTPDoer executes an HTTP request transaction.
@@ -38,6 +40,7 @@ type Client struct {
 	dialer         *fastDialer
 	defaultDial    func(string) (net.Conn, error)
 	config         aoni.Config
+	powerWatcher   *power.Watcher
 
 	protocolState protocolState
 }
@@ -62,6 +65,7 @@ func NewClient(opts ...aoni.ClientOption) *Client {
 
 	c.applyEngineConfig()
 	c.applyCustomDialer()
+	c.applyPowerManagement(c.config.Network.EnablePowerManagement)
 
 	c.pipelineEngine = pipeline.NewPipeline(
 		c.config.Defaults.ToPipelineDefaults(),
@@ -92,6 +96,8 @@ func (c *Client) With(opts ...aoni.ClientOption) *Client {
 	if !isCustomDialerSet(c.engine, c.defaultDial) {
 		c2.applyCustomDialer()
 	}
+
+	c2.applyPowerManagement(c2.config.Network.EnablePowerManagement)
 
 	c2.pipelineEngine = pipeline.NewPipeline(
 		c2.config.Defaults.ToPipelineDefaults(),
@@ -224,7 +230,7 @@ func (c *Client) HTTP() aoni.HTTPDoer {
 
 		ctx := req.Context()
 
-		_, err, autoReleased := c.executeWithRedirects(ctx, fastReq, fastResp)
+		trailers, err, autoReleased := c.executeWithRedirects(ctx, fastReq, fastResp)
 		if err != nil {
 			if !autoReleased {
 				fasthttp.ReleaseRequest(fastReq)
@@ -246,6 +252,7 @@ func (c *Client) HTTP() aoni.HTTPDoer {
 			StatusCode:    fastResp.StatusCode(),
 			Status:        http.StatusText(fastResp.StatusCode()),
 			Header:        make(http.Header),
+			Trailer:       make(http.Header),
 			Body:          bodyRC,
 			ContentLength: int64(len(fastResp.Body())),
 			Uncompressed:  uncompressed,
@@ -257,8 +264,37 @@ func (c *Client) HTTP() aoni.HTTPDoer {
 			return true
 		})
 
+		if len(trailers) > 0 {
+			for k, vv := range trailers {
+				for _, v := range vv {
+					httpResp.Trailer.Add(k, v)
+				}
+			}
+		}
+
 		return httpResp, nil
 	})
+}
+
+// CloseIdleConnections purges all idle H1, H2, and H3 keep-alive sockets from connection pools.
+func (c *Client) CloseIdleConnections() {
+	if c.engine != nil {
+		c.engine.CloseIdleConnections()
+	}
+
+	c.protocolState.h2Mutex.Lock()
+	for host, h2Cl := range c.protocolState.h2Clients {
+		delete(c.protocolState.h2Clients, host)
+
+		_ = h2Cl
+	}
+
+	c.protocolState.h2Mutex.Unlock()
+
+	if c.protocolState.h3Client != nil {
+		_ = c.protocolState.h3Client.Close()
+		c.protocolState.h3Client = nil
+	}
 }
 
 func (c *Client) executeWithRedirects(
@@ -380,6 +416,8 @@ func applyRedirectMethodAndBody(statusCode int, req *fasthttp.Request) error {
 }
 
 func decompressFastResponse(resp *fasthttp.Response) bool {
+	enforceContentLengthTruncation(resp)
+
 	encodingBytes := resp.Header.Peek("Content-Encoding")
 	if len(encodingBytes) == 0 {
 		return false
@@ -427,6 +465,35 @@ func decompressFastResponse(resp *fasthttp.Response) bool {
 	return false
 }
 
+func enforceContentLengthTruncation(resp *fasthttp.Response) {
+	if resp == nil {
+		return
+	}
+
+	clBytes := resp.Header.Peek("Content-Length")
+	if len(clBytes) == 0 {
+		return
+	}
+
+	cl, err := strconv.ParseInt(bytesconv.B2S(clBytes), 10, 64)
+	if err != nil || cl < 0 {
+		return
+	}
+
+	if !resp.IsBodyStream() {
+		body := resp.Body()
+		if int64(len(body)) > cl {
+			resp.SetBody(body[:cl])
+		}
+
+		return
+	}
+
+	if stream := resp.BodyStream(); stream != nil {
+		resp.SetBodyStream(io.LimitReader(stream, cl), int(cl))
+	}
+}
+
 func (c *Client) resolvePipeline(ctx context.Context) aoni.PipelineConfig {
 	if reqPipe, ok := aoni.GetPipeline(ctx); ok {
 		if reqPipe.PrecomputedFlags == 0 {
@@ -459,6 +526,26 @@ func (c *Client) resolvePipeline(ctx context.Context) aoni.PipelineConfig {
 	pipe.BuildFlags()
 
 	return pipe
+}
+
+func (c *Client) applyPowerManagement(enable bool) {
+	if !enable {
+		if c.powerWatcher != nil {
+			c.powerWatcher.Close()
+			c.powerWatcher = nil
+		}
+
+		return
+	}
+
+	if c.powerWatcher == nil {
+		watcher := power.NewWatcher(5 * time.Second)
+		watcher.OnSuspend(func() {
+			c.CloseIdleConnections()
+		})
+
+		c.powerWatcher = watcher
+	}
 }
 
 var (

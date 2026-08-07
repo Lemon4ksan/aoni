@@ -198,11 +198,12 @@ const (
 	JitterFull
 )
 
-// RetryOptions configures backoff behavior and repetition bounds for [Retry].
+// RetryOptions configures backoff behavior, repetition bounds, and async starvation guards for [Retry].
 type RetryOptions struct {
 	OnRetry        func(attempt uint32, err error, delay time.Duration)
 	Backoff        time.Duration
 	MaxRetries     uint32
+	AsyncThreshold uint32
 	JitterStrategy JitterStrategy
 }
 
@@ -274,12 +275,12 @@ func RetryOnGRPCStatus(statusCodes ...string) aoni.RetryCondition {
 }
 
 // Retry automatically re-executes failed transactions up to opts.MaxRetries times.
-//
-// Zero-Allocation Optimization:
-// Payload buffering is performed lazily only when re-executing non-repeatable stream bodies.
+// Switches to asynchronous time.AfterFunc dispatch if attempts exceed opts.AsyncThreshold
+// to prevent Go runtime goroutine scheduler priority starvation.
 func Retry(opts RetryOptions, condition aoni.RetryCondition) aoni.Middleware {
 	opts.MaxRetries = generic.Coalesce(opts.MaxRetries, 3)
 	opts.Backoff = max(generic.Coalesce(opts.Backoff, 1*time.Second), 0)
+	opts.AsyncThreshold = generic.Coalesce(opts.AsyncThreshold, 25)
 
 	return func(next aoni.RequestDoer) aoni.RequestDoer {
 		return aoni.DoerFunc(func(req aoni.Request) (aoni.Response, error) {
@@ -325,18 +326,57 @@ func Retry(opts RetryOptions, condition aoni.RetryCondition) aoni.Middleware {
 					activeOpts.OnRetry(attempt+1, err, sleepDuration)
 				}
 
-				t := timer.Acquire(sleepDuration)
-				select {
-				case <-req.Context().Done():
-					timer.Release(t)
-					return nil, req.Context().Err()
-				case <-t.C:
-					timer.Release(t)
+				if waitErr := waitRetryDelay(
+					req.Context(),
+					sleepDuration,
+					attempt+1,
+					activeOpts.AsyncThreshold,
+				); waitErr != nil {
+					return nil, waitErr
 				}
 			}
 
 			return nil, ErrMaxRetriesExceeded
 		})
+	}
+}
+
+func waitRetryDelay(ctx context.Context, delay time.Duration, attempt, asyncThreshold uint32) error {
+	if asyncThreshold > 0 && attempt >= asyncThreshold {
+		return waitAsync(ctx, delay)
+	}
+
+	return waitSync(ctx, delay)
+}
+
+func waitSync(ctx context.Context, delay time.Duration) error {
+	t := timer.Acquire(delay)
+	defer timer.Release(t)
+
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-t.C:
+		return nil
+	}
+}
+
+func waitAsync(ctx context.Context, delay time.Duration) error {
+	done := make(chan struct{})
+	t := time.AfterFunc(delay, func() {
+		close(done)
+	})
+
+	select {
+	case <-ctx.Done():
+		if !t.Stop() {
+			<-done
+		}
+
+		return ctx.Err()
+
+	case <-done:
+		return nil
 	}
 }
 

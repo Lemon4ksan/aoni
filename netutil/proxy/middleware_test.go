@@ -19,19 +19,21 @@ type customResponseAdapter struct {
 	statusCode int
 }
 
-func (c *customResponseAdapter) StatusCode() int              { return c.statusCode }
-func (c *customResponseAdapter) Status() string               { return http.StatusText(c.statusCode) }
-func (c *customResponseAdapter) StatusBytes() []byte          { return []byte(c.Status()) }
-func (c *customResponseAdapter) Header(_ string) string       { return "" }
-func (c *customResponseAdapter) HeaderBytes(_ []byte) []byte  { return nil }
-func (c *customResponseAdapter) Headers() map[string][]string { return nil }
-func (c *customResponseAdapter) BodyBytes() []byte            { return nil }
-func (c *customResponseAdapter) BodyStream() io.ReadCloser    { return nil }
-func (c *customResponseAdapter) HTTPResponse() *http.Response { return nil } // Simulates fast.Response adapter
-func (c *customResponseAdapter) EngineResponse() any          { return nil }
-func (c *customResponseAdapter) Uncompressed() bool           { return false }
-func (c *customResponseAdapter) SetUncompressed(_ bool)       {}
-func (c *customResponseAdapter) Close() error                 { return nil }
+func (c *customResponseAdapter) StatusCode() int                   { return c.statusCode }
+func (c *customResponseAdapter) Status() string                    { return http.StatusText(c.statusCode) }
+func (c *customResponseAdapter) StatusBytes() []byte               { return []byte(c.Status()) }
+func (c *customResponseAdapter) Header(_ string) string            { return "" }
+func (c *customResponseAdapter) HeaderBytes(_ []byte) []byte       { return nil }
+func (c *customResponseAdapter) Headers() map[string][]string      { return nil }
+func (c *customResponseAdapter) BodyBytes() []byte                 { return nil }
+func (c *customResponseAdapter) BodyStream() io.ReadCloser         { return nil }
+func (c *customResponseAdapter) HTTPResponse() *http.Response      { return nil } // Simulates fast.Response adapter
+func (c *customResponseAdapter) EngineResponse() any               { return nil }
+func (c *customResponseAdapter) Uncompressed() bool                { return false }
+func (c *customResponseAdapter) SetUncompressed(_ bool)            {}
+func (c *customResponseAdapter) Close() error                      { return nil }
+func (c *customResponseAdapter) Trailers() map[string][]string     { return nil }
+func (c *customResponseAdapter) SetTrailers(_ map[string][]string) {}
 
 func TestProxy_RetryCondition(t *testing.T) {
 	t.Parallel()

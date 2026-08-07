@@ -26,6 +26,16 @@ import (
 	"github.com/lemon4ksan/aoni/netutil"
 )
 
+const (
+	minH3Cooldown = 5 * time.Minute
+	maxH3Cooldown = 48 * time.Hour
+)
+
+type brokenH3Entry struct {
+	cooldownUntil    time.Time
+	consecutiveFails int
+}
+
 type protocolState struct {
 	h2Clients map[string]*h2engine.Client
 	h3Client  *h3engine.Client
@@ -38,36 +48,62 @@ type altSvcCache struct {
 
 	_ cpu.CacheLinePad
 
-	hosts     map[string]time.Time
-	cooldowns map[string]time.Time
+	hosts  map[string]time.Time
+	broken map[string]brokenH3Entry
 
 	_ cpu.CacheLinePad
 }
 
 var globalAltSvcCache = &altSvcCache{
-	hosts:     make(map[string]time.Time),
-	cooldowns: make(map[string]time.Time),
+	hosts:  make(map[string]time.Time),
+	broken: make(map[string]brokenH3Entry),
 }
 
+// MarkH3Failed records a failed HTTP/3 connection attempt, applying exponential backoff from 5m up to 48h.
 func (c *altSvcCache) MarkH3Failed(host string) {
+	if host == "" {
+		return
+	}
+
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
-	if c.cooldowns == nil {
-		c.cooldowns = make(map[string]time.Time)
+	if c.broken == nil {
+		c.broken = make(map[string]brokenH3Entry)
 	}
 
-	c.cooldowns[host] = time.Now().Add(5 * time.Minute)
+	entry := c.broken[host]
+	entry.consecutiveFails++
+
+	backoff := calculateH3Backoff(entry.consecutiveFails)
+	entry.cooldownUntil = time.Now().Add(backoff)
+
+	c.broken[host] = entry
 }
 
+// MarkH3Success clears the broken status and resets consecutive failure counters upon successful H3 request.
+func (c *altSvcCache) MarkH3Success(host string) {
+	if host == "" {
+		return
+	}
+
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	delete(c.broken, host)
+}
+
+// IsH3Supported reports whether HTTP/3 is supported for host and not currently in broken backoff cooldown.
 func (c *altSvcCache) IsH3Supported(host string) bool {
+	if host == "" {
+		return false
+	}
+
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 
-	if c.cooldowns != nil {
-		if until, ok := c.cooldowns[host]; ok && time.Now().Before(until) {
-			return false
-		}
+	if entry, ok := c.broken[host]; ok && time.Now().Before(entry.cooldownUntil) {
+		return false
 	}
 
 	exp, ok := c.hosts[host]
@@ -78,6 +114,17 @@ func (c *altSvcCache) IsH3Supported(host string) bool {
 	return true
 }
 
+func calculateH3Backoff(fails int) time.Duration {
+	if fails <= 1 {
+		return minH3Cooldown
+	}
+
+	shift := min(fails-1, 10)
+	backoff := minH3Cooldown * time.Duration(1<<shift)
+
+	return min(backoff, maxH3Cooldown)
+}
+
 func (c *altSvcCache) Record(host, headerVal string) {
 	if host == "" || headerVal == "" {
 		return
@@ -86,7 +133,7 @@ func (c *altSvcCache) Record(host, headerVal string) {
 	if headerVal == "clear" {
 		c.mu.Lock()
 		delete(c.hosts, host)
-		delete(c.cooldowns, host)
+		delete(c.broken, host)
 		c.mu.Unlock()
 
 		return
@@ -140,9 +187,11 @@ func resolveALPNMode(ctx context.Context, cfg *aoni.Config, fastReq *fasthttp.Re
 		}
 	}
 
+	disableAltSvc := reqCfg != nil && reqCfg.DisableAltSvc
+
 	if bytes.EqualFold(fastReq.URI().Scheme(), []byte("https")) {
 		host := string(fastReq.URI().Host())
-		if host != "" && globalAltSvcCache.IsH3Supported(host) {
+		if host != "" && !disableAltSvc && globalAltSvcCache.IsH3Supported(host) {
 			return aoni.AlpnH3
 		}
 

@@ -91,6 +91,8 @@ type RequestConfig struct {
 	HappyEyeballsDelay time.Duration
 	TCPDelay           TCPDelayRange
 
+	DisableAltSvc             bool
+	Disable0RTT               bool
 	MultiReadDisableDisk      bool
 	AllowNonReadOnlyHedging   bool
 	HasExplicitAcceptEncoding bool
