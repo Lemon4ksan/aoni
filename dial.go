@@ -153,6 +153,8 @@ func (c *Client) resolveDialContextOptions(
 
 	dialOpts = netdial.DialOptions{
 		DNSResolver:        c.network.DNSResolver,
+		StackDriver:        c.network.StackDriver,
+		L2Device:           c.network.L2Device,
 		SourceRotator:      c.network.SourceRotator,
 		HappyEyeballs:      c.network.HappyEyeballsDelay,
 		SSRFGuard:          c.network.SSRFGuard,
@@ -264,6 +266,7 @@ func (c *Client) resolveRTLSOptions(ctx context.Context, host string) netdial.RT
 		SpecProvider:       c.fingerprint.TLSClientHelloSpecProvider,
 		SessionCache:       c.fingerprint.SessionCache,
 		CertificatePins:    c.fingerprint.CertificatePins,
+		CertCompression:    c.fingerprint.CertCompression,
 		JA4Callback:        c.fingerprint.JA4Callback,
 		BaseTLSConfig:      c.resolveBaseTLSConfig(ctx),
 		InsecureSkipVerify: GetInsecureSkipVerify(ctx) || c.engineConfig.InsecureSkipVerify,

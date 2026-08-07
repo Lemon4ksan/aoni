@@ -6,6 +6,7 @@ package fluent
 
 import (
 	"context"
+	"fmt"
 	stdio "io"
 	"maps"
 	"net/http"
@@ -620,51 +621,129 @@ func (r *Request) executeDownload(
 	mods []aoni.RequestModifier,
 	outputFile string,
 ) (*http.Response, error) {
-	resp, err := client.Request(ctx, method, path, mods...)
-	if err != nil {
-		return nil, err
+	maxAttempts := 5
+	if r.retryOverride != nil && r.retryOverride.MaxAttempts > 0 {
+		maxAttempts = r.retryOverride.MaxAttempts
 	}
-	defer resp.Body.Close()
 
-	if resp.StatusCode >= http.StatusBadRequest {
-		if r.resultError != nil {
-			_ = request.HandleResponse(resp, r.resultError, client)
+	var (
+		lastResp *http.Response
+		lastErr  error
+	)
+
+	attemptMods := make([]aoni.RequestModifier, 0, len(mods)+1)
+	for range maxAttempts {
+		attemptMods = attemptMods[:0]
+		attemptMods = append(attemptMods, mods...)
+		existingSize := getFileSize(outputFile, r.outputDirectory, respHeaderFilename(lastResp))
+
+		if existingSize > 0 {
+			attemptMods = append(attemptMods, mod.WithHeader("Range", fmt.Sprintf("bytes=%d-", existingSize)))
 		}
 
-		return resp, &Error{
-			Op:   "download",
-			Path: path,
-			Code: resp.StatusCode,
-			Err:  ErrDownloadFailed,
+		resp, err := client.Request(ctx, method, path, attemptMods...)
+		if err != nil {
+			lastErr = err
+
+			if ctx.Err() != nil {
+				return nil, ctx.Err()
+			}
+
+			continue
+		}
+
+		lastResp = resp
+		targetPath := resolveOutputPath(outputFile, r.outputDirectory, resp.Header.Get("Content-Disposition"))
+
+		if resp.StatusCode == http.StatusRequestedRangeNotSatisfiable {
+			_ = resp.Body.Close()
+			return resp, &Error{Op: "download", Path: targetPath, Code: resp.StatusCode, Err: ErrRangeNotSatisfiable}
+		}
+
+		if resp.StatusCode >= http.StatusBadRequest {
+			if r.resultError != nil {
+				_ = request.HandleResponse(resp, r.resultError, client)
+			} else {
+				_ = resp.Body.Close()
+			}
+
+			return resp, &Error{Op: "download", Path: targetPath, Code: resp.StatusCode, Err: ErrDownloadFailed}
+		}
+
+		writeErr := writeDownloadedStream(targetPath, resp, existingSize)
+		if writeErr == nil {
+			return resp, nil
+		}
+
+		lastErr = writeErr
+		_ = resp.Body.Close()
+
+		if ctx.Err() != nil {
+			return nil, ctx.Err()
 		}
 	}
 
-	if outputFile == "" && r.outputDirectory != "" {
-		filename := netutil.ExtractSanitizedFilename(resp.Header.Get("Content-Disposition"))
-		outputFile = filepath.Join(r.outputDirectory, filename)
-	}
-
-	if err := saveStreamToFile(outputFile, resp.Body); err != nil {
-		return resp, &Error{Op: "download", Path: outputFile, Err: err}
-	}
-
-	return resp, nil
+	return lastResp, lastErr
 }
 
-func saveStreamToFile(outputFile string, body stdio.Reader) error {
-	if err := os.MkdirAll(filepath.Dir(outputFile), 0o755); err != nil { //nolint:gosec
+func writeDownloadedStream(outputFile string, resp *http.Response, previousSize int64) error {
+	defer resp.Body.Close()
+
+	if err := os.MkdirAll(filepath.Dir(outputFile), 0o755); err != nil {
 		return err
 	}
 
-	outFile, err := os.Create(outputFile)
+	flags := os.O_CREATE | os.O_WRONLY
+	if resp.StatusCode == http.StatusPartialContent && previousSize > 0 {
+		flags |= os.O_APPEND
+	} else {
+		flags |= os.O_TRUNC
+	}
+
+	outFile, err := os.OpenFile(outputFile, flags, 0o644) //nolint:gosec
 	if err != nil {
 		return err
 	}
 	defer outFile.Close()
 
-	_, err = io.CopyZeroAlloc(outFile, body)
+	_, err = io.CopyZeroAlloc(outFile, resp.Body)
 
 	return err
+}
+
+func getFileSize(outputFile, outputDirectory, headerFilename string) int64 {
+	targetPath := resolveOutputPath(outputFile, outputDirectory, headerFilename)
+	if targetPath == "" {
+		return 0
+	}
+
+	info, err := os.Stat(targetPath)
+	if err != nil || info.IsDir() {
+		return 0
+	}
+
+	return info.Size()
+}
+
+func resolveOutputPath(outputFile, outputDirectory, contentDisposition string) string {
+	if outputFile != "" {
+		return outputFile
+	}
+
+	if outputDirectory != "" {
+		filename := netutil.ExtractSanitizedFilename(contentDisposition)
+		return filepath.Join(outputDirectory, filename)
+	}
+
+	return ""
+}
+
+func respHeaderFilename(resp *http.Response) string {
+	if resp == nil {
+		return ""
+	}
+
+	return resp.Header.Get("Content-Disposition")
 }
 
 // Get executes a GET request against path.

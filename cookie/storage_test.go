@@ -7,7 +7,6 @@ package cookie_test
 import (
 	"net/http"
 	"net/url"
-	"os"
 	"path/filepath"
 	"testing"
 
@@ -18,11 +17,9 @@ import (
 )
 
 func TestJSONFileCookieStorage_Persistence(t *testing.T) {
-	tempDir, err := os.MkdirTemp("", "aoni-cookie-test-*")
-	require.NoError(t, err)
+	t.Parallel()
 
-	defer os.RemoveAll(tempDir)
-
+	tempDir := t.TempDir()
 	filePath := filepath.Join(tempDir, "cookies.json")
 
 	backend1 := cookie.NewJSONFileStorage(filePath)
@@ -50,4 +47,17 @@ func TestJSONFileCookieStorage_Persistence(t *testing.T) {
 	require.Len(t, cookies, 1)
 	assert.Equal(t, "session_token", cookies[0].Name)
 	assert.Equal(t, "valid_session_12345", cookies[0].Value)
+}
+
+func TestJSONFileCookieStorage_EmptyLoad(t *testing.T) {
+	t.Parallel()
+
+	tempDir := t.TempDir()
+	filePath := filepath.Join(tempDir, "empty_cookies.json")
+
+	backend := cookie.NewJSONFileStorage(filePath)
+
+	cookies, err := backend.Load("nonexistent_proxy_key")
+	require.NoError(t, err)
+	assert.Nil(t, cookies)
 }

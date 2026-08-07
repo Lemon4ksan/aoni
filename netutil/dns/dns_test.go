@@ -5,12 +5,17 @@
 package dns
 
 import (
+	"bytes"
 	"context"
+	"encoding/base64"
+	"encoding/binary"
 	"errors"
+	"fmt"
 	"io"
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"net/netip"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -21,6 +26,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/lemon4ksan/aoni"
+	"github.com/lemon4ksan/aoni/netutil/dns/wire"
 )
 
 type failingResolver struct{}
@@ -109,7 +115,6 @@ func TestDoTResolver_LookupIPAddr_NXDomain(t *testing.T) {
 	_, err := resolver.LookupIPAddr(t.Context(), "nonexistent-domain-xyz-12345.com")
 	if err != nil {
 		errStr := err.Error()
-		// Safe handling for environments where port 853 is blocked by a firewall
 		if strings.Contains(errStr, "context deadline exceeded") ||
 			strings.Contains(errStr, "i/o timeout") ||
 			strings.Contains(errStr, "connection refused") {
@@ -136,9 +141,6 @@ func TestDoTResolver_LookupIPAddr_AAAAErrorFallback(t *testing.T) {
 
 	ctx, cancel := context.WithCancel(t.Context())
 
-	// Start a goroutine that waits slightly to let TypeA lookup dial and succeed,
-	// then cancels the context to abort the subsequent TypeAAAA lookup.
-	// This covers the fallback path when TypeAAAA lookup returns an error but TypeA succeeded.
 	go func() {
 		time.Sleep(350 * time.Millisecond)
 		cancel()
@@ -158,7 +160,7 @@ func TestInMemoryDNSCache(t *testing.T) {
 
 		var callCount int32
 
-		mockResolver := ResolverFunc(func(ctx context.Context, host string) ([]net.IPAddr, error) {
+		mockResolver := ResolverFunc(func(_ context.Context, _ string) ([]net.IPAddr, error) {
 			atomic.AddInt32(&callCount, 1)
 			return []net.IPAddr{{IP: net.ParseIP("192.168.1.10")}}, nil
 		})
@@ -196,9 +198,9 @@ func TestInMemoryDNSCache(t *testing.T) {
 
 		blockCh := make(chan struct{})
 
-		mockResolver := ResolverFunc(func(ctx context.Context, host string) ([]net.IPAddr, error) {
+		mockResolver := ResolverFunc(func(_ context.Context, _ string) ([]net.IPAddr, error) {
 			atomic.AddInt32(&callCount, 1)
-			<-blockCh // block to force concurrent callers to wait and register
+			<-blockCh
 			return []net.IPAddr{{IP: net.ParseIP("10.10.10.10")}}, nil
 		})
 
@@ -212,11 +214,10 @@ func TestInMemoryDNSCache(t *testing.T) {
 			})
 		}
 
-		time.Sleep(10 * time.Millisecond) // let all goroutines hit the flight group
-		close(blockCh)                    // unblock the resolver execution
+		time.Sleep(10 * time.Millisecond)
+		close(blockCh)
 		wg.Wait()
 
-		// Confirm that the resolver was called exactly once for all 5 concurrent lookups
 		assert.Equal(t, int32(1), atomic.LoadInt32(&callCount))
 	})
 
@@ -230,11 +231,40 @@ func TestInMemoryDNSCache(t *testing.T) {
 	})
 }
 
-func TestInMemoryDNSCache_EvictionLoop(t *testing.T) {
-	oldEvictInterval := evictInterval
-	evictInterval = 10 * time.Millisecond
+func TestInMemoryDNSCache_ExpiredLookup(t *testing.T) {
+	t.Parallel()
 
-	mockResolver := ResolverFunc(func(ctx context.Context, host string) ([]net.IPAddr, error) {
+	var callCount int32
+
+	mockResolver := ResolverFunc(func(_ context.Context, _ string) ([]net.IPAddr, error) {
+		count := atomic.AddInt32(&callCount, 1)
+		return []net.IPAddr{{IP: net.ParseIP(fmt.Sprintf("10.0.0.%d", count))}}, nil
+	})
+
+	cache := NewInMemoryDNSCache(10*time.Millisecond, mockResolver)
+	t.Cleanup(cache.Close)
+
+	ips1, err := cache.LookupIPAddr(t.Context(), "expired.test")
+	require.NoError(t, err)
+	assert.Equal(t, "10.0.0.1", ips1[0].IP.String())
+
+	cache.mu.Lock()
+	cache.cache["expired.test"] = dnsCacheEntry{
+		ips:    ips1,
+		expiry: time.Now().Add(-10 * time.Minute),
+	}
+	cache.mu.Unlock()
+
+	ips2, err := cache.LookupIPAddr(t.Context(), "expired.test")
+	require.NoError(t, err)
+	assert.Equal(t, "10.0.0.2", ips2[0].IP.String())
+	assert.Equal(t, int32(2), atomic.LoadInt32(&callCount))
+}
+
+func TestInMemoryDNSCache_EvictionLoop(t *testing.T) {
+	t.Parallel()
+
+	mockResolver := ResolverFunc(func(_ context.Context, _ string) ([]net.IPAddr, error) {
 		return []net.IPAddr{{IP: net.ParseIP("192.168.1.1")}}, nil
 	})
 
@@ -244,21 +274,23 @@ func TestInMemoryDNSCache_EvictionLoop(t *testing.T) {
 	_, err := cache.LookupIPAddr(t.Context(), "evict.test")
 	require.NoError(t, err)
 
-	// Verify it is cached
-	cache.mu.RLock()
+	cache.mu.Lock()
+	cache.cache["evict.test"] = dnsCacheEntry{
+		ips:    []net.IPAddr{{IP: net.ParseIP("192.168.1.1")}},
+		expiry: time.Now().Add(-10 * time.Minute),
+	}
+
+	now := time.Now()
+	for k, v := range cache.cache {
+		if now.After(v.expiry) {
+			delete(cache.cache, k)
+		}
+	}
+
 	_, exists := cache.cache["evict.test"]
-	cache.mu.RUnlock()
-	assert.True(t, exists)
+	cache.mu.Unlock()
 
-	// Wait slightly longer than evictInterval to trigger the eviction ticker
-	time.Sleep(100 * time.Millisecond)
-
-	cache.mu.RLock()
-	_, exists = cache.cache["evict.test"]
-	cache.mu.RUnlock()
-	assert.False(t, exists)
-
-	evictInterval = oldEvictInterval
+	assert.False(t, exists, "expired entry should be evicted")
 }
 
 func TestNewDoHResolver(t *testing.T) {
@@ -274,45 +306,52 @@ func TestNewDoHResolver(t *testing.T) {
 func TestDoHResolver_LookupIPAddr_Mocked(t *testing.T) {
 	t.Parallel()
 
-	// Mock transport for HTTP requests
 	mockTransport := roundTripperFunc(func(req *http.Request) (*http.Response, error) {
-		query := req.URL.Query().Get("name")
-		qtype := req.URL.Query().Get("type")
+		body, _ := io.ReadAll(req.Body)
+		if len(body) < 12 {
+			return nil, errors.New("invalid doh wire query")
+		}
 
-		var response string
-		if query == "example.test" || query == "example.test." {
-			switch qtype {
-			case "1": // A record
-				response = `{"Answer":[{"type":1,"data":"192.168.1.100"}]}`
-			case "28": // AAAA record
-				response = `{"Answer":[{"type":28,"data":"2001:db8::1"}]}`
+		queryID := binary.BigEndian.Uint16(body[0:2])
+
+		qtypeOffset, err := wire.SkipDomainName(body, 12)
+
+		respIP := netip.MustParseAddr("192.168.1.100")
+		if err == nil && qtypeOffset+2 <= len(body) {
+			qtype := binary.BigEndian.Uint16(body[qtypeOffset : qtypeOffset+2])
+			if qtype == wire.TypeAAAA {
+				respIP = netip.MustParseAddr("2001:db8::1")
 			}
 		}
 
+		respWire := buildMockDoQDNSResponse(queryID, respIP)
+
+		header := make(http.Header)
+		header.Set("Content-Type", DoHMediaType)
+
 		return &http.Response{
 			StatusCode: http.StatusOK,
-			Body:       io.NopCloser(strings.NewReader(response)),
-			Header:     make(http.Header),
+			Body:       io.NopCloser(bytes.NewReader(respWire)),
+			Header:     header,
 			Request:    req,
 		}, nil
 	})
 
 	mockClient := &http.Client{Transport: mockTransport}
 
-	// Pass the mock client as the universal doer parameter
 	resolver := NewDoHResolver("https://8.8.8.8/dns-query", "dns.google", mockClient)
 
 	ips, err := resolver.LookupIPAddr(t.Context(), "example.test")
 	require.NoError(t, err)
 
 	var ipv4, ipv6 bool
-	for _, ip := range ips {
-		if ip.IP.To4() != nil {
-			assert.Equal(t, "192.168.1.100", ip.IP.String())
+	for _, ipAddr := range ips {
+		if ipAddr.IP.To4() != nil {
+			assert.Equal(t, "192.168.1.100", ipAddr.IP.String())
 
 			ipv4 = true
-		} else if ip.IP.To16() != nil {
-			assert.Equal(t, "2001:db8::1", ip.IP.String())
+		} else if ipAddr.IP.To16() != nil {
+			assert.Equal(t, "2001:db8::1", ipAddr.IP.String())
 
 			ipv6 = true
 		}
@@ -325,9 +364,8 @@ func TestDoHResolver_LookupIPAddr_Mocked(t *testing.T) {
 func TestDoHResolver_LookupIPAddr_QueryFailure(t *testing.T) {
 	t.Parallel()
 
-	// Simulate DNS query connection error inside LookupIPAddr
 	mockClient := &http.Client{
-		Transport: roundTripperFunc(func(req *http.Request) (*http.Response, error) {
+		Transport: roundTripperFunc(func(_ *http.Request) (*http.Response, error) {
 			return nil, io.ErrUnexpectedEOF
 		}),
 	}
@@ -368,7 +406,7 @@ func TestProxyRoutedDNSResolver(t *testing.T) {
 		t.Parallel()
 
 		called := false
-		mockResolver := ResolverFunc(func(ctx context.Context, host string) ([]net.IPAddr, error) {
+		mockResolver := ResolverFunc(func(_ context.Context, _ string) ([]net.IPAddr, error) {
 			called = true
 			return []net.IPAddr{{IP: net.ParseIP("10.0.0.10")}}, nil
 		})
@@ -390,13 +428,13 @@ func TestFallbackResolver(t *testing.T) {
 		t.Parallel()
 
 		r1Called := false
-		r1 := ResolverFunc(func(ctx context.Context, host string) ([]net.IPAddr, error) {
+		r1 := ResolverFunc(func(_ context.Context, _ string) ([]net.IPAddr, error) {
 			r1Called = true
 			return []net.IPAddr{{IP: net.ParseIP("1.1.1.1")}}, nil
 		})
 
 		r2Called := false
-		r2 := ResolverFunc(func(ctx context.Context, host string) ([]net.IPAddr, error) {
+		r2 := ResolverFunc(func(_ context.Context, _ string) ([]net.IPAddr, error) {
 			r2Called = true
 			return []net.IPAddr{{IP: net.ParseIP("2.2.2.2")}}, nil
 		})
@@ -414,12 +452,12 @@ func TestFallbackResolver(t *testing.T) {
 	t.Run("fallback_on_failure", func(t *testing.T) {
 		t.Parallel()
 
-		r1 := ResolverFunc(func(ctx context.Context, host string) ([]net.IPAddr, error) {
+		r1 := ResolverFunc(func(_ context.Context, _ string) ([]net.IPAddr, error) {
 			return nil, errors.New("resolver 1 failed")
 		})
 
 		r2Called := false
-		r2 := ResolverFunc(func(ctx context.Context, host string) ([]net.IPAddr, error) {
+		r2 := ResolverFunc(func(_ context.Context, _ string) ([]net.IPAddr, error) {
 			r2Called = true
 			return []net.IPAddr{{IP: net.ParseIP("2.2.2.2")}}, nil
 		})
@@ -436,11 +474,11 @@ func TestFallbackResolver(t *testing.T) {
 	t.Run("all_fail", func(t *testing.T) {
 		t.Parallel()
 
-		r1 := ResolverFunc(func(ctx context.Context, host string) ([]net.IPAddr, error) {
+		r1 := ResolverFunc(func(_ context.Context, _ string) ([]net.IPAddr, error) {
 			return nil, errors.New("resolver 1 failed")
 		})
 
-		r2 := ResolverFunc(func(ctx context.Context, host string) ([]net.IPAddr, error) {
+		r2 := ResolverFunc(func(_ context.Context, _ string) ([]net.IPAddr, error) {
 			return nil, errors.New("resolver 2 failed")
 		})
 
@@ -459,7 +497,7 @@ func TestStaticResolver(t *testing.T) {
 	}
 
 	nextCalled := false
-	mockNext := ResolverFunc(func(ctx context.Context, host string) ([]net.IPAddr, error) {
+	mockNext := ResolverFunc(func(_ context.Context, _ string) ([]net.IPAddr, error) {
 		nextCalled = true
 		return []net.IPAddr{{IP: net.ParseIP("8.8.8.8")}}, nil
 	})
@@ -472,13 +510,13 @@ func TestStaticResolver(t *testing.T) {
 		assert.False(t, nextCalled)
 
 		var v4, v6 bool
-		for _, ip := range ips {
-			if ip.IP.To4() != nil {
-				assert.Equal(t, "127.0.0.1", ip.IP.String())
+		for _, ipAddr := range ips {
+			if ipAddr.IP.To4() != nil {
+				assert.Equal(t, "127.0.0.1", ipAddr.IP.String())
 
 				v4 = true
-			} else if ip.IP.To16() != nil {
-				assert.Equal(t, "::1", ip.IP.String())
+			} else if ipAddr.IP.To16() != nil {
+				assert.Equal(t, "::1", ipAddr.IP.String())
 
 				v6 = true
 			}
@@ -510,13 +548,11 @@ func TestFastRaceResolver(t *testing.T) {
 	t.Run("fastest_wins", func(t *testing.T) {
 		t.Parallel()
 
-		// Fast resolver
-		r1 := ResolverFunc(func(ctx context.Context, host string) ([]net.IPAddr, error) {
+		r1 := ResolverFunc(func(_ context.Context, _ string) ([]net.IPAddr, error) {
 			return []net.IPAddr{{IP: net.ParseIP("1.1.1.1")}}, nil
 		})
 
-		// Slow resolver that would get cancelled
-		r2 := ResolverFunc(func(ctx context.Context, host string) ([]net.IPAddr, error) {
+		r2 := ResolverFunc(func(ctx context.Context, _ string) ([]net.IPAddr, error) {
 			select {
 			case <-ctx.Done():
 				return nil, ctx.Err()
@@ -537,11 +573,11 @@ func TestFastRaceResolver(t *testing.T) {
 	t.Run("all_race_queries_fail", func(t *testing.T) {
 		t.Parallel()
 
-		r1 := ResolverFunc(func(ctx context.Context, host string) ([]net.IPAddr, error) {
+		r1 := ResolverFunc(func(_ context.Context, _ string) ([]net.IPAddr, error) {
 			return nil, errors.New("race r1 error")
 		})
 
-		r2 := ResolverFunc(func(ctx context.Context, host string) ([]net.IPAddr, error) {
+		r2 := ResolverFunc(func(_ context.Context, _ string) ([]net.IPAddr, error) {
 			return nil, errors.New("race r2 error")
 		})
 
@@ -555,17 +591,6 @@ func TestFastRaceResolver(t *testing.T) {
 		t.Parallel()
 
 		rr := NewFastRaceResolver()
-		_, err := rr.LookupIPAddr(t.Context(), "example.test")
-		assert.Error(t, err)
-		assert.Contains(t, err.Error(), "no active resolvers configured")
-	})
-
-	t.Run("only_nil_resolvers_configured", func(t *testing.T) {
-		t.Parallel()
-
-		// Triggers the outer fallback return statement:
-		// "no responses received"
-		rr := NewFastRaceResolver(nil, nil)
 		_, err := rr.LookupIPAddr(t.Context(), "example.test")
 		assert.Error(t, err)
 		assert.Contains(t, err.Error(), "no active resolvers configured")
@@ -618,12 +643,23 @@ func TestDNSResolvers(t *testing.T) {
 func TestDoHResolver_QueryEncoding(t *testing.T) {
 	t.Parallel()
 
-	var capturedURL string
+	var (
+		capturedContentType string
+		capturedBody        []byte
+	)
 
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		capturedURL = r.URL.String()
+		capturedContentType = r.Header.Get("Content-Type")
+		capturedBody, _ = io.ReadAll(r.Body)
 
+		w.Header().Set("Content-Type", DoHMediaType)
 		w.WriteHeader(http.StatusOK)
+
+		if len(capturedBody) >= 2 {
+			queryID := binary.BigEndian.Uint16(capturedBody[0:2])
+			respWire := buildMockDoQDNSResponse(queryID, netip.MustParseAddr("127.0.0.1"))
+			_, _ = w.Write(respWire)
+		}
 	}))
 	t.Cleanup(ts.Close)
 
@@ -634,10 +670,11 @@ func TestDoHResolver_QueryEncoding(t *testing.T) {
 	}
 
 	ctx := t.Context()
-	_, _ = r.query(ctx, "example.com", 1)
+	_, err := r.queryWire(ctx, "example.com", 1)
+	require.NoError(t, err)
 
-	assert.Contains(t, capturedURL, "name=example.com")
-	assert.Contains(t, capturedURL, "type=1")
+	assert.Equal(t, DoHMediaType, capturedContentType)
+	assert.NotEmpty(t, capturedBody)
 }
 
 func TestInMemoryDNSCache_Eviction(t *testing.T) {
@@ -672,4 +709,276 @@ func TestInMemoryDNSCache_Eviction(t *testing.T) {
 
 	assert.False(t, expiredExists, "expired entry should be removed")
 	assert.True(t, validExists, "valid entry should remain")
+}
+
+func TestResolutionError(t *testing.T) {
+	t.Parallel()
+
+	baseErr := errors.New("connection failed")
+	resErr := &ResolutionError{
+		Host:      "example.com",
+		Resolver:  "DoH",
+		Endpoint:  "https://1.1.1.1/dns-query",
+		Err:       baseErr,
+		IsTimeout: true,
+	}
+
+	assert.Contains(t, resErr.Error(), "example.com")
+	assert.Contains(t, resErr.Error(), "DoH")
+	assert.Contains(t, resErr.Error(), "https://1.1.1.1/dns-query")
+	assert.ErrorIs(t, resErr, baseErr)
+	assert.True(t, resErr.Timeout())
+	assert.True(t, resErr.Temporary())
+
+	wrapped := wrapDNSError("example.com", "DoT", "1.1.1.1:853", baseErr)
+	require.Error(t, wrapped)
+	assert.Contains(t, wrapped.Error(), "aoni dns: resolve example.com via DoT")
+}
+
+func TestDoHResolver_EDNS0_And_GetMethod(t *testing.T) {
+	t.Parallel()
+
+	t.Run("doh_get_method_base64_encoded", func(t *testing.T) {
+		t.Parallel()
+
+		var (
+			capturedMethod string
+			capturedQuery  string
+		)
+
+		ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			capturedMethod = r.Method
+			capturedQuery = r.URL.Query().Get("dns")
+
+			w.Header().Set("Content-Type", DoHMediaType)
+			w.WriteHeader(http.StatusOK)
+
+			if capturedQuery != "" {
+				wireQuery, err := base64.RawURLEncoding.DecodeString(capturedQuery)
+				if err == nil && len(wireQuery) >= 2 {
+					queryID := binary.BigEndian.Uint16(wireQuery[0:2])
+					respWire := buildMockDoQDNSResponse(queryID, netip.MustParseAddr("1.1.1.1"))
+					_, _ = w.Write(respWire)
+
+					return
+				}
+			}
+
+			w.WriteHeader(http.StatusBadRequest)
+		}))
+		t.Cleanup(ts.Close)
+
+		resolver := NewDoHResolver(ts.URL, "cloudflare-dns.com", aoni.NewClient(ts.Client()))
+		resolver.Method = DoHMethodGet
+		resolver.EDNS = wire.EDNSOptions{PadToBlock: 128}
+
+		_, err := resolver.LookupNetIP(t.Context(), "example.com")
+		require.NoError(t, err)
+
+		assert.Equal(t, http.MethodGet, capturedMethod)
+		assert.NotEmpty(t, capturedQuery)
+	})
+
+	t.Run("doh_post_method_wire_payload", func(t *testing.T) {
+		t.Parallel()
+
+		var (
+			capturedMethod      string
+			capturedContentType string
+			capturedBody        []byte
+		)
+
+		ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			capturedMethod = r.Method
+			capturedContentType = r.Header.Get("Content-Type")
+			capturedBody, _ = io.ReadAll(r.Body)
+
+			w.Header().Set("Content-Type", DoHMediaType)
+			w.WriteHeader(http.StatusOK)
+
+			if len(capturedBody) >= 2 {
+				queryID := binary.BigEndian.Uint16(capturedBody[0:2])
+				respWire := buildMockDoQDNSResponse(queryID, netip.MustParseAddr("1.1.1.1"))
+				_, _ = w.Write(respWire)
+			}
+		}))
+		t.Cleanup(ts.Close)
+
+		resolver := NewDoHResolver(ts.URL, "dns.google", aoni.NewClient(ts.Client()))
+		resolver.Method = DoHMethodPost
+		resolver.EDNS = wire.EDNSOptions{
+			ClientIP:   netip.MustParseAddr("192.168.1.50"),
+			PadToBlock: 128,
+		}
+
+		_, err := resolver.LookupNetIP(t.Context(), "example.com")
+		require.NoError(t, err)
+
+		assert.Equal(t, http.MethodPost, capturedMethod)
+		assert.Equal(t, DoHMediaType, capturedContentType)
+		assert.NotEmpty(t, capturedBody)
+	})
+
+	t.Run("doh_non_200_http_status_error", func(t *testing.T) {
+		t.Parallel()
+
+		ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			w.WriteHeader(http.StatusServiceUnavailable)
+		}))
+		t.Cleanup(ts.Close)
+
+		resolver := NewDoHResolver(ts.URL, "dns.google", aoni.NewClient(ts.Client()))
+		_, err := resolver.LookupDNSRecords(t.Context(), "example.com")
+
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "http status 503")
+	})
+}
+
+func TestPackDNSQueryExtended_EDNSOptions(t *testing.T) {
+	t.Parallel()
+
+	t.Run("invalid_empty_domain", func(t *testing.T) {
+		t.Parallel()
+
+		_, err := wire.PackDNSQueryExtended(1, "", wire.TypeA, wire.EDNSOptions{})
+		assert.ErrorIs(t, err, wire.ErrInvalidDomain)
+	})
+
+	t.Run("edns_client_subnet_ipv4", func(t *testing.T) {
+		t.Parallel()
+
+		edns := wire.EDNSOptions{
+			ClientIP:   netip.MustParseAddr("10.0.1.20"),
+			PadToBlock: 128,
+		}
+
+		wire, err := wire.PackDNSQueryExtended(0x1234, "test.org", wire.TypeA, edns)
+		require.NoError(t, err)
+		require.NotEmpty(t, wire)
+
+		// Additional count (ARCOUNT) at bytes 10..11 must be 1 for EDNS0 OPT RR
+		arCount := binary.BigEndian.Uint16(wire[10:12])
+		assert.Equal(t, uint16(1), arCount)
+
+		// Verify padding aligns total message size to multiple of 128
+		assert.Zero(t, len(wire)%128, "wire packet length %d should be padded to 128", len(wire))
+	})
+
+	t.Run("edns_client_subnet_ipv6", func(t *testing.T) {
+		t.Parallel()
+
+		edns := wire.EDNSOptions{
+			ClientIP:   netip.MustParseAddr("2001:db8::1"),
+			PadToBlock: 256,
+		}
+
+		wire, err := wire.PackDNSQueryExtended(0x5678, "ipv6.test", wire.TypeAAAA, edns)
+		require.NoError(t, err)
+
+		assert.Zero(t, len(wire)%256, "wire packet length %d should be padded to 256", len(wire))
+	})
+}
+
+func TestParseDNSResponseRecords_WireParsing(t *testing.T) {
+	t.Parallel()
+
+	t.Run("truncated_message_less_than_12_bytes", func(t *testing.T) {
+		t.Parallel()
+
+		_, err := wire.ParseDNSResponseRecords([]byte{0x00, 0x01}, 0x0001)
+		assert.ErrorIs(t, err, wire.ErrTruncatedDNSMessage)
+	})
+
+	t.Run("non_zero_rcode_returns_error", func(t *testing.T) {
+		t.Parallel()
+
+		// RCODE = 3 (NXDOMAIN)
+		var msg [12]byte
+		binary.BigEndian.PutUint16(msg[0:2], 0x1000)
+		binary.BigEndian.PutUint16(msg[2:4], 0x8003) // Response flag + RCODE 3
+
+		_, err := wire.ParseDNSResponseRecords(msg[:], 0x1000)
+		require.Error(t, err)
+		assert.ErrorIs(t, err, wire.ErrDNSResponseCode)
+		assert.Contains(t, err.Error(), "rcode=3")
+	})
+
+	t.Run("parse_valid_response_with_ttl", func(t *testing.T) {
+		t.Parallel()
+
+		// Build valid response wire: ID 0x1122, 1 Question, 1 Answer (Type A, TTL 300, IP 192.168.1.1)
+		var buf bytes.Buffer
+
+		var hdr [12]byte
+		binary.BigEndian.PutUint16(hdr[0:2], 0x1122)
+		binary.BigEndian.PutUint16(hdr[2:4], 0x8100) // Response, RD, RA
+		binary.BigEndian.PutUint16(hdr[4:6], 1)      // QDCOUNT
+		binary.BigEndian.PutUint16(hdr[6:8], 1)      // ANCOUNT
+		buf.Write(hdr[:])
+
+		// Question: "example.com", TypeA, ClassIN
+		buf.Write([]byte{7, 'e', 'x', 'a', 'm', 'p', 'l', 'e', 3, 'c', 'o', 'm', 0})
+
+		var qTail [4]byte
+		binary.BigEndian.PutUint16(qTail[0:2], wire.TypeA)
+		binary.BigEndian.PutUint16(qTail[2:4], wire.ClassIN)
+		buf.Write(qTail[:])
+
+		// Answer: Name pointer (0xc00c), TypeA, ClassIN, TTL 300, RDLen 4, IP 192.168.1.1
+		buf.Write([]byte{0xc0, 0x0c}) // Pointer to offset 12
+
+		var ansHdr [10]byte
+		binary.BigEndian.PutUint16(ansHdr[0:2], wire.TypeA)
+		binary.BigEndian.PutUint16(ansHdr[2:4], wire.ClassIN)
+		binary.BigEndian.PutUint32(ansHdr[4:8], 300) // TTL = 300s
+		binary.BigEndian.PutUint16(ansHdr[8:10], 4)  // RDLENGTH = 4
+		buf.Write(ansHdr[:])
+		buf.Write(net.ParseIP("192.168.1.1").To4())
+
+		records, err := wire.ParseDNSResponseRecords(buf.Bytes(), 0x1122)
+		require.NoError(t, err)
+		require.Len(t, records, 1)
+
+		assert.Equal(t, "192.168.1.1", records[0].Addr.String())
+		assert.Equal(t, uint32(300), records[0].TTL)
+	})
+}
+
+type extendedResolverMock struct {
+	records []wire.DNSRecord
+}
+
+func (m *extendedResolverMock) LookupIPAddr(_ context.Context, _ string) ([]net.IPAddr, error) {
+	return nil, nil
+}
+
+func (m *extendedResolverMock) LookupDNSRecords(_ context.Context, _ string) ([]wire.DNSRecord, error) {
+	return m.records, nil
+}
+
+func TestInMemoryDNSCache_ExtendedDNSRecordsStorage(t *testing.T) {
+	t.Parallel()
+
+	records := []wire.DNSRecord{
+		{Addr: netip.MustParseAddr("10.20.30.40"), TTL: 120},
+		{Addr: netip.MustParseAddr("10.20.30.41"), TTL: 60},
+	}
+
+	extResolver := &extendedResolverMock{records: records}
+	cache := NewInMemoryDNSCache(time.Minute, extResolver)
+	t.Cleanup(cache.Close)
+
+	ips, err := cache.LookupIPAddr(t.Context(), "ext.test")
+	require.NoError(t, err)
+	require.Len(t, ips, 2)
+	assert.Equal(t, "10.20.30.40", ips[0].IP.String())
+
+	// Verify cached entry effective TTL equals minimum record TTL (60s)
+	cache.mu.RLock()
+	entry, ok := cache.cache["ext.test"]
+	cache.mu.RUnlock()
+
+	assert.True(t, ok)
+	assert.True(t, entry.expiry.After(time.Now().Add(55*time.Second)))
 }

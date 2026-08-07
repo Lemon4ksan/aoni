@@ -7,27 +7,37 @@ package aoni
 import (
 	"context"
 	"maps"
-	"net"
 	"net/http"
 	"net/url"
 	"slices"
-	"strings"
-	"sync"
 	"time"
 
-	"github.com/lemon4ksan/miyako/generic"
 	utls "github.com/refraction-networking/utls"
-	"golang.org/x/net/http2"
 
 	"github.com/lemon4ksan/aoni/fingerprint"
 	"github.com/lemon4ksan/aoni/fingerprint/h2"
 	"github.com/lemon4ksan/aoni/fingerprint/h3"
 	"github.com/lemon4ksan/aoni/fingerprint/ja4"
 	"github.com/lemon4ksan/aoni/fingerprint/p0f"
-	"github.com/lemon4ksan/aoni/internal/io"
+	"github.com/lemon4ksan/aoni/internal/pipeline"
+	"github.com/lemon4ksan/aoni/netutil/cert"
 	"github.com/lemon4ksan/aoni/netutil/fragment"
 	"github.com/lemon4ksan/aoni/netutil/ip"
+	"github.com/lemon4ksan/aoni/netutil/netdial"
 	"github.com/lemon4ksan/aoni/telemetry"
+)
+
+type (
+	PipelineConfig      = pipeline.PipelineConfig
+	DPIJitterConfig     = pipeline.DPIJitterConfig
+	ProxyFailoverConfig = pipeline.ProxyFailoverConfig
+	HedgingConfig       = pipeline.HedgingConfig
+	HARConfig           = pipeline.HARConfig
+	RedactConfig        = pipeline.RedactConfig
+	CacheConfig         = pipeline.CacheConfig
+	HostRewriteConfig   = pipeline.HostRewriteConfig
+	BrowserProfile      = pipeline.BrowserProfile
+	RefererState        = pipeline.RefererState
 )
 
 const (
@@ -40,29 +50,27 @@ const (
 
 	// AlpnHTTP is the ALPN token used to negotiate classic HTTP/1.1 over TLS.
 	AlpnHTTP = "http/1.1"
+
+	// DefaultUserAgent specifies the standard User-Agent header value applied to outbound requests
+	// when no custom User-Agent is declared.
+	DefaultUserAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+
+	redirectLimitUnset = -2
 )
 
 // BrowserID represents a pre-defined uTLS ClientHello profile identifier used to emulate
-// specific browser TLS handshake fingerprints.
+// modern web browsers during TLS handshake negotiations.
 type BrowserID int
 
 const (
 	// BrowserNone disables TLS fingerprint emulation, falling back to standard Go TLS.
 	BrowserNone BrowserID = iota
-
-	// BrowserChrome emulates Google Chrome TLS handshake fingerprints.
 	BrowserChrome
-
-	// BrowserFirefox emulates Mozilla Firefox TLS handshake fingerprints.
 	BrowserFirefox
-
-	// BrowserSafari emulates Apple Safari TLS handshake fingerprints.
 	BrowserSafari
 )
 
-// DefaultUserAgent specifies the standard User-Agent header value applied to outbound requests
-// when no custom User-Agent is declared.
-const DefaultUserAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+var DefaultAcceptEncoding = []string{"zstd, br, gzip"}
 
 // DefaultBrowserProfiles provides realistic, modern Chrome browser profiles with
 // matching User-Agent strings and Client Hints to pass anti-bot heuristics.
@@ -114,6 +122,15 @@ type Config struct {
 	Engine      EngineConfig
 }
 
+func (c Config) Clone() Config {
+	return Config{
+		Network:     c.Network.Clone(),
+		Fingerprint: c.Fingerprint.Clone(),
+		Defaults:    c.Defaults.Clone(),
+		Engine:      c.Engine,
+	}
+}
+
 // EngineConfig configures settings applied directly to the underlying [HTTPDoer]
 // engine (typically [*http.Client]) rather than modular transport layers.
 type EngineConfig struct {
@@ -125,10 +142,8 @@ type EngineConfig struct {
 	RedirectLimit      int
 	InsecureSkipVerify bool
 	CheckRedirect      func(req *http.Request, via []*http.Request) error
-	Protocols          map[string]http.RoundTripper // Custom scheme handlers (e.g., "file", "ftp")
+	Protocols          map[string]http.RoundTripper
 }
-
-const redirectLimitUnset = -2
 
 // ConnectionPoolConfig configures keep-alive connection boundaries
 // on the underlying [http.Transport] instance.
@@ -168,20 +183,14 @@ func DefaultQUICMigrationConfig() QUICMigrationConfig {
 	}
 }
 
-type staticSpecProvider struct {
-	Spec *utls.ClientHelloSpec
-}
-
-func (s staticSpecProvider) ClientHelloSpec() (*utls.ClientHelloSpec, error) {
-	return s.Spec, nil
-}
-
 // NetworkConfig configures the network transport layer, proxies, DNS resolution,
 // SSRF safeguards, IP rotation, and socket controllers.
 type NetworkConfig struct {
 	ProxyAddr          *url.URL
 	TransportProxy     func(*http.Request) (*url.URL, error)
 	DNSResolver        DNSResolver
+	StackDriver        netdial.RawStackDriver
+	L2Device           netdial.L2Device
 	SourceRotator      *ip.SourceIPRotator
 	DynamicHedging     *telemetry.DynamicHedgingConfig
 	SocketController   SocketController
@@ -193,10 +202,8 @@ type NetworkConfig struct {
 	SSRFGuard          bool
 }
 
-// Clone creates an independent deep copy of [NetworkConfig].
 func (n NetworkConfig) Clone() NetworkConfig {
 	cloned := n
-
 	cloned.DynamicHedging = clonePtr(n.DynamicHedging)
 	cloned.FragmentConfig = clonePtr(n.FragmentConfig)
 
@@ -207,16 +214,6 @@ func (n NetworkConfig) Clone() NetworkConfig {
 	}
 
 	return cloned
-}
-
-// HostRewriteConfig stores custom hostname-to-IP remapping rules for DNS overrides.
-type HostRewriteConfig struct {
-	Rules map[string]string
-}
-
-// DNSResolver defines the hostname-to-IP lookup resolution contract.
-type DNSResolver interface {
-	LookupIPAddr(ctx context.Context, host string) ([]net.IPAddr, error)
 }
 
 // FingerprintConfig groups settings related to browser TLS/JA4 evasion,
@@ -234,10 +231,13 @@ type FingerprintConfig struct {
 	SessionCache               SessionCache
 	PacketPadding              *fingerprint.PaddingConfig
 	CertificatePins            map[string][]string
+	CertCompression            []cert.CompressionAlgorithm
+	ECHConfigList              []byte
 	BrowserID                  BrowserID
+	AutoECH                    bool
+	Enable0RTT                 bool
 }
 
-// Clone creates an independent deep copy of [FingerprintConfig].
 func (f FingerprintConfig) Clone() FingerprintConfig {
 	cloned := f
 
@@ -248,6 +248,14 @@ func (f FingerprintConfig) Clone() FingerprintConfig {
 
 	if len(f.HeaderOrder) > 0 {
 		cloned.HeaderOrder = slices.Clone(f.HeaderOrder)
+	}
+
+	if len(f.CertCompression) > 0 {
+		cloned.CertCompression = slices.Clone(f.CertCompression)
+	}
+
+	if len(f.ECHConfigList) > 0 {
+		cloned.ECHConfigList = slices.Clone(f.ECHConfigList)
 	}
 
 	if len(f.CertificatePins) > 0 {
@@ -261,121 +269,6 @@ func (f FingerprintConfig) Clone() FingerprintConfig {
 
 	return cloned
 }
-
-// SessionCache extends the uTLS session caching contract to support proxy-isolated TLS tickets.
-type SessionCache interface {
-	utls.ClientSessionCache
-	SetProxyKey(key string)
-}
-
-// JA4ReportStore acts as a shared carrier used by low-level TLS dialers to record
-// computed JA4 signatures and propagate them to the active telemetry context.
-type JA4ReportStore struct {
-	Report *ja4.Report
-	Target *telemetry.TraceInfo
-}
-
-// CacheKey uniquely identifies a cached HTTP request without string concatenations.
-type CacheKey struct {
-	Method string
-	URL    string
-}
-
-func (k CacheKey) String() string {
-	return k.Method + ":" + k.URL
-}
-
-// CacheStore defines the persistence contract for response caching backends.
-type CacheStore interface {
-	Get(ctx context.Context, key any) ([]byte, error)
-	Set(ctx context.Context, key any, val []byte, ttl time.Duration) error
-}
-
-// CacheConfig configures HTTP response caching behavior and default TTL.
-type CacheConfig struct {
-	Store      CacheStore
-	DefaultTTL time.Duration
-}
-
-// CachedResponse holds a serialized HTTP response stored in cache backends.
-type CachedResponse struct {
-	Header      map[string][]string `json:"header"`
-	VaryHeaders map[string]string   `json:"vary_headers,omitempty"`
-	BodyBase64  string              `json:"body_base64"`
-	StatusCode  int                 `json:"status_code"`
-	CachedAt    time.Time           `json:"cached_at,omitempty"`
-}
-
-// PipelineConfig configures request-response execution phases,
-// including User-Agent rotation, DPI jittering, HAR logging, and body size limits.
-type PipelineConfig struct {
-	DPIJitter     *DPIJitterConfig
-	ProxyFailover *ProxyFailoverConfig
-	Hedging       *HedgingConfig
-	Cache         *CacheConfig
-	HAR           *HARConfig
-	Redact        *RedactConfig
-	SizeLimit     int64
-	RotateUA      bool
-	Inspect       bool
-	Decompress    bool
-	Validate      bool
-	Challenge     bool
-}
-
-// GetPipeline retrieves the request-specific PipelineConfig from context.
-func GetPipeline(ctx context.Context) (PipelineConfig, bool) {
-	cfg := GetRequestConfig(ctx)
-	if cfg != nil && cfg.Pipeline != nil {
-		return *cfg.Pipeline, true
-	}
-
-	return PipelineConfig{}, false
-}
-
-// DPIJitterConfig configures randomized delays before sending headers or body.
-type DPIJitterConfig struct {
-	MinDelay time.Duration
-	MaxDelay time.Duration
-}
-
-// ProxyFailoverConfig configures automatic proxy switching on connection or gateway errors.
-type ProxyFailoverConfig struct {
-	Proxies    []string
-	RetryLimit int
-}
-
-// HedgingConfig configures request hedging delays, rate limits, and idempotency rules.
-type HedgingConfig struct {
-	DynamicHedging       *telemetry.DynamicHedgingConfig
-	DefaultDelay         time.Duration
-	MaxRequestsPerSecond int
-	AllowNonReadOnly     bool
-}
-
-// HARConfig configures capturing completed session logging to a HAR Tracker.
-type HARConfig struct {
-	Tracker HARTracker
-}
-
-// RedactConfig holds the configuration for redacting sensitive headers and payload keys.
-type RedactConfig struct {
-	Headers          map[string]struct{}
-	HeadersToRedact  []string
-	JSONKeysToRedact []string
-}
-
-// RedactConfigCtxKey is the context key used to store RedactConfig in the request context.
-type RedactConfigCtxKey struct{}
-
-// ChallengeSolver delegates WAF challenge resolution (e.g. Cloudflare JavaScript challenges)
-// to an automated external driver.
-type ChallengeSolver interface {
-	Solve(ctx context.Context, err error, req *http.Request) (*http.Response, error)
-}
-
-// ChallengeDetector decides whether an incoming HTTP response represents a WAF challenge.
-type ChallengeDetector func(resp *http.Response) (bool, error)
 
 // ClientDefaults configures standard request defaults, hooks, WAF solvers, and body buffer limits.
 type ClientDefaults struct {
@@ -405,9 +298,18 @@ type ClientDefaults struct {
 	MultiReadDisableDisk bool
 }
 
-// Clone creates an independent deep copy of [ClientDefaults].
 func (d ClientDefaults) Clone() ClientDefaults {
 	cloned := d
+
+	if d.RefererState != nil {
+		d.RefererState.Mu.Lock()
+		lastURL := d.RefererState.LastURL
+		d.RefererState.Mu.Unlock()
+
+		cloned.RefererState = &RefererState{LastURL: lastURL}
+	} else {
+		cloned.RefererState = &RefererState{}
+	}
 
 	if d.Headers != nil {
 		cloned.Headers = d.Headers.Clone()
@@ -464,7 +366,6 @@ func (d ClientDefaults) Clone() ClientDefaults {
 		for i, prof := range d.UARotationProfiles {
 			hintsCopy := make(map[string]string, len(prof.ClientHints))
 			maps.Copy(hintsCopy, prof.ClientHints)
-
 			profilesCopy[i] = BrowserProfile{
 				UserAgent:   prof.UserAgent,
 				ClientHints: hintsCopy,
@@ -477,280 +378,6 @@ func (d ClientDefaults) Clone() ClientDefaults {
 	return cloned
 }
 
-// BrowserProfile aligns a User-Agent string with modern browser Client Hints.
-type BrowserProfile struct {
-	UserAgent   string
-	ClientHints map[string]string
-}
-
-// RefererState maintains thread-safe state for automatic Referer tracking.
-type RefererState struct {
-	mu      sync.Mutex
-	lastURL string
-}
-
-// ProgressFunc represents a callback triggered periodically to monitor stream transfer progress.
-type ProgressFunc = io.ProgressFunc
-
-// RequestConfig aggregates request-scoped options and transport overrides.
-type RequestConfig struct {
-	Decoder                 any
-	ErrorModel              any
-	TargetHost              string
-	ForceContentType        string
-	Label                   string
-	UploadProgress          ProgressFunc
-	DownloadProgress        ProgressFunc
-	Capturer                any
-	BodyError               error
-	QueryError              error
-	MultipartBoundary       string
-	OrderedHeaders          []string
-	ALPNOverride            []string
-	JA4ReportStore          *JA4ReportStore
-	Fallback                FallbackFunc
-	RequestTimeoutCancel    context.CancelFunc
-	HedgingDelayOverride    *time.Duration
-	ProxyAddr               *url.URL
-	ResponseValidator       func(resp *http.Response) error
-	RetryPolicy             *RetryOverride
-	P0fSignature            *p0f.Signature
-	SessionCache            SessionCache
-	PacketPadding           *fingerprint.PaddingConfig
-	SocketController        SocketController
-	ClientHelloSpecProvider ClientHelloSpecProvider
-	JA4Callback             func(ja4.Report)
-	Metadata                map[string]any
-	TraceInfo               *telemetry.TraceInfo
-	HostRewrite             *HostRewriteConfig
-	Pipeline                *PipelineConfig
-	Fragment                *fragment.Config
-	Redact                  *RedactConfig
-	CertificatePins         map[string][]string
-	Modifiers               []RequestModifier
-	QueryEncoder            QueryEncoder
-	Decoders                map[string]ResponseDecoder
-
-	MultiReadThreshold int64
-	TimeoutOverride    time.Duration
-	CacheTTL           time.Duration
-	HappyEyeballsDelay time.Duration
-	TCPDelay           TCPDelayRange
-
-	MultiReadDisableDisk      bool
-	AllowNonReadOnlyHedging   bool
-	HasExplicitAcceptEncoding bool
-	Debug                     bool
-	InsecureSkipVerify        bool
-	SSRFGuard                 bool
-	ProxyDNS                  bool
-	DisableBaseResponse       bool
-	BaseResponseOverride      func() BaseResponse
-}
-
-// ApplyDefaults merges client-level defaults into uninitialized fields of [RequestConfig].
-func (cfg *RequestConfig) ApplyDefaults(c *Client) {
-	if !cfg.SSRFGuard {
-		cfg.SSRFGuard = c.network.SSRFGuard
-	}
-
-	if !cfg.ProxyDNS {
-		cfg.ProxyDNS = c.network.ProxyDNS
-	}
-
-	if !cfg.MultiReadDisableDisk {
-		cfg.MultiReadDisableDisk = c.defaults.MultiReadDisableDisk
-	}
-
-	cfg.HappyEyeballsDelay = generic.Coalesce(cfg.HappyEyeballsDelay, c.network.HappyEyeballsDelay)
-	cfg.MultiReadThreshold = generic.Coalesce(c.defaults.MultiReadThreshold, cfg.MultiReadThreshold)
-
-	cfg.ProxyAddr = generic.CoalesceNil(cfg.ProxyAddr, c.network.ProxyAddr)
-	cfg.P0fSignature = generic.CoalesceNil(cfg.P0fSignature, c.fingerprint.P0fSignature)
-	cfg.SessionCache = generic.CoalesceNil(cfg.SessionCache, c.fingerprint.SessionCache)
-	cfg.PacketPadding = generic.CoalesceNil(cfg.PacketPadding, c.fingerprint.PacketPadding)
-	cfg.SocketController = generic.CoalesceNil(cfg.SocketController, c.network.SocketController)
-	cfg.ClientHelloSpecProvider = generic.CoalesceNil(
-		cfg.ClientHelloSpecProvider,
-		c.fingerprint.TLSClientHelloSpecProvider,
-	)
-	cfg.JA4Callback = generic.CoalesceNil(cfg.JA4Callback, c.fingerprint.JA4Callback)
-	cfg.QueryEncoder = generic.CoalesceNil(cfg.QueryEncoder, c.defaults.QueryEncoder)
-
-	if len(c.defaults.Decoders) > 0 {
-		if cfg.Decoders == nil {
-			cfg.Decoders = make(map[string]ResponseDecoder, len(c.defaults.Decoders))
-		}
-
-		for k, v := range c.defaults.Decoders {
-			if _, ok := cfg.Decoders[k]; !ok {
-				cfg.Decoders[k] = v
-			}
-		}
-	}
-
-	if len(c.fingerprint.CertificatePins) > 0 {
-		c.mergeCertificatePins(cfg)
-	}
-}
-
-// LookupDecoder resolves a registered [ResponseDecoder] for contentType using request-level decoders or client defaults.
-func (cfg *RequestConfig) LookupDecoder(contentType string) ResponseDecoder {
-	mediaType, _, _ := strings.Cut(contentType, ";")
-
-	norm := strings.ToLower(strings.TrimSpace(mediaType))
-	if norm != "" && cfg.Decoders != nil {
-		if d, ok := cfg.Decoders[norm]; ok {
-			return d
-		}
-	}
-
-	return nil
-}
-
-func (c *Client) mergeCertificatePins(cfg *RequestConfig) {
-	for domain, hashes := range c.fingerprint.CertificatePins {
-		for _, h := range hashes {
-			if cfg.CertificatePins == nil {
-				cfg.CertificatePins = make(map[string][]string)
-			}
-
-			if !slices.Contains(cfg.CertificatePins[domain], h) {
-				cfg.CertificatePins[domain] = append(cfg.CertificatePins[domain], h)
-			}
-		}
-	}
-}
-
-type requestConfigKey struct{}
-
-// GetRequestConfig retrieves the RequestConfig instance attached to the context.
-func GetRequestConfig(ctx context.Context) *RequestConfig {
-	cfg, _ := ctx.Value(requestConfigKey{}).(*RequestConfig)
-	return cfg
-}
-
-// QueryEncoder marshals arbitrary structures or maps into [url.Values].
-type QueryEncoder func(any) (url.Values, error)
-
-// ClientHelloSpecProvider generates or retrieves a uTLS ClientHelloSpec dynamically.
-type ClientHelloSpecProvider interface {
-	ClientHelloSpec() (*utls.ClientHelloSpec, error)
-}
-
-// TrafficInspector captures and records request traces and headers for diagnostics.
-type TrafficInspector interface {
-	Capture(req *http.Request, resp *http.Response, err error, traceInfo *telemetry.TraceInfo)
-}
-
-// SocketController directly configures underlying TCP sockets before SYN packets are written.
-type SocketController interface {
-	Control(fd uintptr, network, address string) error
-}
-
-// HTTP2Configurer customizes the [golang.org/x/net/http2.Transport] instance.
-type HTTP2Configurer interface {
-	ConfigureHTTP2(t *http2.Transport) error
-}
-
-// Logger specifies the structured diagnostic logging interface.
-type Logger interface {
-	Debug(msg string, args ...any)
-	DebugContext(ctx context.Context, msg string, args ...any)
-	Info(msg string, args ...any)
-	InfoContext(ctx context.Context, msg string, args ...any)
-	Warn(msg string, args ...any)
-	WarnContext(ctx context.Context, msg string, args ...any)
-	Error(msg string, args ...any)
-	ErrorContext(ctx context.Context, msg string, args ...any)
-}
-
-// BaseResponseProvider provides a [BaseResponse] model for structured unwrapping.
-type BaseResponseProvider interface {
-	BaseResponse() BaseResponse
-}
-
-// LoggerProvider provides access to the diagnostic Logger instance.
-type LoggerProvider interface {
-	Logger() Logger
-}
-
-// BaseResponse is implemented by user-defined response wrappers for unified API response parsing.
-type BaseResponse interface {
-	IsSuccess() bool
-	Error() error
-	SetData(data any)
-}
-
-// HARTracker records HTTP transactions into HAR session logs.
-type HARTracker interface {
-	Record(req *http.Request, resp *http.Response, startTime time.Time, duration int64)
-}
-
-// AllowedDomainsRedirectPolicy restricts HTTP redirects strictly to allowed domain patterns.
-// Supports exact domain matches ("example.com") and wildcard subdomains ("*.example.com").
-func AllowedDomainsRedirectPolicy(allowedDomains ...string) func(req *http.Request, via []*http.Request) error {
-	return func(req *http.Request, via []*http.Request) error {
-		if len(via) >= 10 {
-			return &Error{Op: "redirect", Err: ErrMaxRedirectsExceeded}
-		}
-
-		if req.URL == nil {
-			return nil
-		}
-
-		host := strings.ToLower(req.URL.Hostname())
-		for _, domainPattern := range allowedDomains {
-			if matchDomainPattern(host, domainPattern) {
-				return nil
-			}
-		}
-
-		return &Error{Op: "redirect", Target: host, Err: ErrRedirectDomainForbidden}
-	}
-}
-
-func matchDomainPattern(host, pattern string) bool {
-	p := strings.ToLower(pattern)
-	if !strings.HasPrefix(p, "*.") {
-		return host == p
-	}
-
-	suffix := p[1:]
-
-	return strings.HasSuffix(host, suffix) || host == p[2:]
-}
-
-// DefaultRedirectPolicy creates an http.Client.CheckRedirect function enforcing redirect limits
-// and scrubbing sensitive authentication headers during cross-origin redirects.
-func DefaultRedirectPolicy(
-	maxRedirects int,
-	sensitiveHeaders ...string,
-) func(req *http.Request, via []*http.Request) error {
-	return func(req *http.Request, via []*http.Request) error {
-		if maxRedirects >= 0 && len(via) >= maxRedirects {
-			return &Error{Op: "redirect", Err: ErrMaxRedirectsExceeded}
-		}
-
-		if len(via) == 0 {
-			return nil
-		}
-
-		headersToScrub := sensitiveHeaders
-		if len(headersToScrub) == 0 {
-			headersToScrub = DefaultSensitiveHeaders
-		}
-
-		if isCrossOrigin(req.URL, via[0].URL) {
-			for _, h := range headersToScrub {
-				req.Header.Del(h)
-			}
-		}
-
-		return nil
-	}
-}
-
 func clonePtr[T any](p *T) *T {
 	if p == nil {
 		return nil
@@ -759,14 +386,4 @@ func clonePtr[T any](p *T) *T {
 	val := *p
 
 	return &val
-}
-
-// Clone produces a deep copy of the [Config] instance.
-func (c Config) Clone() Config {
-	return Config{
-		Network:     c.Network.Clone(),
-		Fingerprint: c.Fingerprint.Clone(),
-		Defaults:    c.Defaults.Clone(),
-		Engine:      c.Engine,
-	}
 }

@@ -13,6 +13,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	"github.com/lemon4ksan/aoni"
 	"github.com/lemon4ksan/aoni/option"
@@ -27,10 +28,13 @@ type MockChallengeSolver struct {
 
 func (m *MockChallengeSolver) Solve(ctx context.Context, err error, req *http.Request) (*http.Response, error) {
 	m.solveCount++
+
 	return m.solveFunc(ctx, err, req)
 }
 
 func TestChallengeSolver_BypassesChallenge(t *testing.T) {
+	t.Parallel()
+
 	requestCount := 0
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -48,7 +52,7 @@ func TestChallengeSolver_BypassesChallenge(t *testing.T) {
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte(`{"success": true}`))
 	}))
-	defer server.Close()
+	t.Cleanup(server.Close)
 
 	solver := &MockChallengeSolver{
 		solveFunc: func(ctx context.Context, err error, req *http.Request) (*http.Response, error) {
@@ -78,14 +82,16 @@ func TestChallengeSolver_BypassesChallenge(t *testing.T) {
 		Success bool `json:"success"`
 	}
 
-	res, err := request.GetTo[Response](context.Background(), client, "/")
-	assert.NoError(t, err)
+	res, err := request.GetTo[Response](t.Context(), client, "/")
+	require.NoError(t, err)
 	assert.True(t, res.Success)
 	assert.Equal(t, 1, solver.solveCount)
 	assert.Equal(t, 2, requestCount)
 }
 
 func TestChallengeSolver_CustomDetector(t *testing.T) {
+	t.Parallel()
+
 	requestCount := 0
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -103,12 +109,11 @@ func TestChallengeSolver_CustomDetector(t *testing.T) {
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte(`{"success": true}`))
 	}))
-	defer server.Close()
+	t.Cleanup(server.Close)
 
 	customErr := errors.New("custom WAF error")
 
 	detector := func(resp *http.Response) (bool, error) {
-		// Custom detection: detect WAF blocks by status code
 		if resp.StatusCode == http.StatusForbidden {
 			return true, customErr
 		}
@@ -144,9 +149,59 @@ func TestChallengeSolver_CustomDetector(t *testing.T) {
 		Success bool `json:"success"`
 	}
 
-	res, err := request.GetTo[Response](context.Background(), client, "/")
-	assert.NoError(t, err)
+	res, err := request.GetTo[Response](t.Context(), client, "/")
+	require.NoError(t, err)
 	assert.True(t, res.Success)
 	assert.Equal(t, 1, solver.solveCount)
 	assert.Equal(t, 2, requestCount)
+}
+
+func TestChallengeDetector_NoChallenge(t *testing.T) {
+	t.Parallel()
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"status": "ok"}`))
+	}))
+	t.Cleanup(server.Close)
+
+	client := aoni.NewClient(nil, option.WithBaseURL(server.URL))
+
+	resp, err := client.Request(t.Context(), http.MethodGet, "/")
+	require.NoError(t, err)
+
+	defer aoni.CloseResponse(resp)
+
+	detected, err := challenge.DetectCloudflareChallenge(resp)
+	assert.NoError(t, err)
+	assert.False(t, detected)
+}
+
+func TestChallengeSolver_SolverError(t *testing.T) {
+	t.Parallel()
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "text/html")
+		w.WriteHeader(http.StatusForbidden)
+		_, _ = w.Write([]byte("<html><body>cf-challenge error cloudflare ray id 123</body></html>"))
+	}))
+	t.Cleanup(server.Close)
+
+	solverErr := errors.New("failed to solve captcha")
+	solver := &MockChallengeSolver{
+		solveFunc: func(_ context.Context, _ error, _ *http.Request) (*http.Response, error) {
+			return nil, solverErr
+		},
+	}
+
+	client := aoni.NewClient(nil,
+		option.WithBaseURL(server.URL),
+		option.WithChallengeDetector(challenge.DefaultDetector),
+		option.WithChallengeSolver(solver),
+	)
+
+	_, err := client.Request(t.Context(), http.MethodGet, "/")
+	require.Error(t, err)
+	assert.ErrorIs(t, err, solverErr)
 }

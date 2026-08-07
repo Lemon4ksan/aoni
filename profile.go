@@ -120,6 +120,14 @@ func ApplyProfileHeaders(req Request, variant *profiles.Variant, os profiles.OSK
 	}
 }
 
+type staticSpecProvider struct {
+	Spec *utls.ClientHelloSpec
+}
+
+func (s staticSpecProvider) ClientHelloSpec() (*utls.ClientHelloSpec, error) {
+	return s.Spec, nil
+}
+
 func setOrderedHeaders(req Request, variant *profiles.Variant, os profiles.OSKey) {
 	enums := variant.HeaderCache.Enums(os.IsMobile())
 

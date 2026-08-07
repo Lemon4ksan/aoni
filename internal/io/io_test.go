@@ -6,8 +6,9 @@ package io
 
 import (
 	"bytes"
+	"compress/gzip"
 	"context"
-	"io"
+	stdio "io"
 	"os"
 	"strings"
 	"sync"
@@ -29,7 +30,7 @@ func (r *threadSafeReader) Read(p []byte) (int, error) {
 	defer r.mu.Unlock()
 
 	if r.pos >= len(r.data) {
-		return 0, io.EOF
+		return 0, stdio.EOF
 	}
 
 	n := copy(p, r.data[r.pos:])
@@ -39,12 +40,16 @@ func (r *threadSafeReader) Read(p []byte) (int, error) {
 }
 
 type customTestCloser struct {
-	io.Closer
+	stdio.Closer
 	marker int
 }
 
+func (c *customTestCloser) Unwrap() stdio.Closer {
+	return c.Closer
+}
+
 type mockTrackedCloser struct {
-	io.Reader
+	stdio.Reader
 	closed bool
 }
 
@@ -62,6 +67,7 @@ func (r *ioErrorReader) Read(p []byte) (int, error) {
 	if len(r.data) > 0 {
 		n := copy(p, r.data)
 		r.data = r.data[n:]
+
 		return n, nil
 	}
 
@@ -75,7 +81,7 @@ func (r *ioErrorReader) Close() error {
 func TestUnwrapTo(t *testing.T) {
 	t.Parallel()
 
-	inner := io.NopCloser(strings.NewReader("test"))
+	inner := stdio.NopCloser(strings.NewReader("test"))
 	wrapped := &customTestCloser{Closer: inner, marker: 999}
 
 	target, ok := UnwrapTo[*customTestCloser](wrapped)
@@ -84,6 +90,29 @@ func TestUnwrapTo(t *testing.T) {
 
 	_, ok = UnwrapTo[string](wrapped)
 	assert.False(t, ok)
+}
+
+func TestUnwrapBody(t *testing.T) {
+	t.Parallel()
+
+	rawCloser := &mockTrackedCloser{Reader: strings.NewReader("raw")}
+	wrapped := &customTestCloser{Closer: rawCloser, marker: 123}
+
+	unwrapped := UnwrapBody(wrapped)
+	assert.Same(t, rawCloser, unwrapped)
+}
+
+func TestCopyZeroAlloc(t *testing.T) {
+	t.Parallel()
+
+	var buf bytes.Buffer
+
+	src := strings.NewReader("zero_alloc_copy_payload")
+
+	n, err := CopyZeroAlloc(&buf, src)
+	require.NoError(t, err)
+	assert.Equal(t, int64(23), n)
+	assert.Equal(t, "zero_alloc_copy_payload", buf.String())
 }
 
 func TestAsReplayable_Operations(t *testing.T) {
@@ -97,18 +126,17 @@ func TestAsReplayable_Operations(t *testing.T) {
 	t.Run("wrap_and_read_multiple_times", func(t *testing.T) {
 		t.Parallel()
 
-		inner := io.NopCloser(strings.NewReader("hello world"))
+		inner := stdio.NopCloser(strings.NewReader("hello world"))
 		rep := AsReplayable(inner)
 		require.NotNil(t, rep)
 
-		// First read
-		b1, err := io.ReadAll(rep)
+		b1, err := stdio.ReadAll(rep)
 		require.NoError(t, err)
 		assert.Equal(t, "hello world", string(b1))
 
-		// Reset and read again
 		rep.Reset()
-		b2, err := io.ReadAll(rep)
+
+		b2, err := stdio.ReadAll(rep)
 		require.NoError(t, err)
 		assert.Equal(t, "hello world", string(b2))
 	})
@@ -116,10 +144,9 @@ func TestAsReplayable_Operations(t *testing.T) {
 	t.Run("unwrap_already_replayable", func(t *testing.T) {
 		t.Parallel()
 
-		inner := io.NopCloser(strings.NewReader("data"))
+		inner := stdio.NopCloser(strings.NewReader("data"))
 		rep1 := AsReplayable(inner)
 
-		// Wrapping a replayable should return the same replayable
 		rep2 := AsReplayable(rep1)
 		assert.Equal(t, rep1, rep2)
 	})
@@ -131,14 +158,13 @@ func TestReadAllHelpers(t *testing.T) {
 	t.Run("read_all_string_and_bytes", func(t *testing.T) {
 		t.Parallel()
 
-		inner := io.NopCloser(strings.NewReader("reusable stream content"))
+		inner := stdio.NopCloser(strings.NewReader("reusable stream content"))
 		rep := AsReplayable(inner)
 
 		str, err := ReadAllString(rep)
 		require.NoError(t, err)
 		assert.Equal(t, "reusable stream content", str)
 
-		// Helpers must call Reset() internally, so we can immediately read bytes
 		data, err := ReadAllBytes(rep)
 		require.NoError(t, err)
 		assert.Equal(t, []byte("reusable stream content"), data)
@@ -160,7 +186,7 @@ func TestReadAllHelpers(t *testing.T) {
 func TestProgressReader(t *testing.T) {
 	t.Parallel()
 
-	inner := io.NopCloser(strings.NewReader("abcdefghij")) // 10 bytes
+	inner := stdio.NopCloser(strings.NewReader("abcdefghij"))
 
 	var (
 		lastCurrent int64
@@ -189,7 +215,7 @@ func TestProgressReader(t *testing.T) {
 func TestContextCancelingReadCloser(t *testing.T) {
 	t.Parallel()
 
-	inner := io.NopCloser(strings.NewReader("test"))
+	inner := stdio.NopCloser(strings.NewReader("test"))
 	ctx, cancel := context.WithCancel(t.Context())
 
 	cc := &ContextCancelingReadCloser{
@@ -221,13 +247,32 @@ func TestDecompressReadCloser(t *testing.T) {
 	assert.True(t, m2.closed)
 }
 
+func TestNewPooledGzipReader(t *testing.T) {
+	t.Parallel()
+
+	var gzBuf bytes.Buffer
+
+	gw := gzip.NewWriter(&gzBuf)
+	_, _ = gw.Write([]byte("pooled_gzip_data"))
+	_ = gw.Close()
+
+	gzReader, err := NewPooledGzipReader(&gzBuf)
+	require.NoError(t, err)
+
+	data, err := stdio.ReadAll(gzReader)
+	require.NoError(t, err)
+	assert.Equal(t, "pooled_gzip_data", string(data))
+
+	_ = gzReader.Close()
+}
+
 func TestLimitCheckingReadCloser(t *testing.T) {
 	t.Parallel()
 
 	t.Run("within_limit", func(t *testing.T) {
 		t.Parallel()
 
-		inner := io.NopCloser(strings.NewReader("abc"))
+		inner := stdio.NopCloser(strings.NewReader("abc"))
 		lc := &LimitCheckingReadCloser{ReadCloser: inner, Limit: 5}
 
 		buf := make([]byte, 10)
@@ -239,7 +284,7 @@ func TestLimitCheckingReadCloser(t *testing.T) {
 	t.Run("exceeds_limit", func(t *testing.T) {
 		t.Parallel()
 
-		inner := io.NopCloser(strings.NewReader("abcdefg")) // 7 bytes
+		inner := stdio.NopCloser(strings.NewReader("abcdefg"))
 		lc := &LimitCheckingReadCloser{ReadCloser: inner, Limit: 5}
 
 		buf := make([]byte, 10)
@@ -254,20 +299,18 @@ func TestMultiReadBody(t *testing.T) {
 	t.Run("under_threshold_memory_buffered", func(t *testing.T) {
 		t.Parallel()
 
-		inner := io.NopCloser(strings.NewReader("under_threshold"))
+		inner := stdio.NopCloser(strings.NewReader("under_threshold"))
 		m, err := NewMultiReadBody(inner, 50, false)
 		require.NoError(t, err)
 
-		// Read first time
-		b1, _ := io.ReadAll(m)
+		b1, _ := stdio.ReadAll(m)
 		assert.Equal(t, "under_threshold", string(b1))
 
-		// Close / Reset and read again
 		_ = m.Close()
-		b2, _ := io.ReadAll(m)
+
+		b2, _ := stdio.ReadAll(m)
 		assert.Equal(t, "under_threshold", string(b2))
 
-		// Test ReallyClose is safe
 		if really, ok := m.(interface{ ReallyClose() }); ok {
 			really.ReallyClose()
 		}
@@ -276,20 +319,18 @@ func TestMultiReadBody(t *testing.T) {
 	t.Run("above_threshold_temp_file", func(t *testing.T) {
 		t.Parallel()
 
-		inner := io.NopCloser(strings.NewReader("above_threshold_large_content_stream"))
+		inner := stdio.NopCloser(strings.NewReader("above_threshold_large_content_stream"))
 		m, err := NewMultiReadBody(inner, 10, false)
 		require.NoError(t, err)
 
-		// Read first time
-		b1, _ := io.ReadAll(m)
+		b1, _ := stdio.ReadAll(m)
 		assert.Equal(t, "above_threshold_large_content_stream", string(b1))
 
-		// Close / Reset and read again
 		_ = m.Close()
-		b2, _ := io.ReadAll(m)
+
+		b2, _ := stdio.ReadAll(m)
 		assert.Equal(t, "above_threshold_large_content_stream", string(b2))
 
-		// Clean up file via ReallyClose
 		if really, ok := m.(interface{ ReallyClose() }); ok {
 			really.ReallyClose()
 		}
@@ -298,15 +339,15 @@ func TestMultiReadBody(t *testing.T) {
 	t.Run("read_buffering_error", func(t *testing.T) {
 		t.Parallel()
 
-		errReader := &ioErrorReader{data: []byte("partial"), err: io.ErrUnexpectedEOF}
+		errReader := &ioErrorReader{data: []byte("partial"), err: stdio.ErrUnexpectedEOF}
 		_, err := NewMultiReadBody(errReader, 50, false)
-		assert.ErrorIs(t, err, io.ErrUnexpectedEOF)
+		assert.ErrorIs(t, err, stdio.ErrUnexpectedEOF)
 	})
 
 	t.Run("disable_disk_cache_error", func(t *testing.T) {
 		t.Parallel()
 
-		inner := io.NopCloser(strings.NewReader("above_threshold_large_content_stream"))
+		inner := stdio.NopCloser(strings.NewReader("above_threshold_large_content_stream"))
 		_, err := NewMultiReadBody(inner, 10, true)
 		assert.ErrorIs(t, err, ErrBufferLimitExceeded)
 	})
@@ -317,7 +358,7 @@ func TestMultiReadBody_FileCleanup(t *testing.T) {
 
 	data := strings.Repeat("x", 64*1024)
 
-	body := io.NopCloser(strings.NewReader(data))
+	body := stdio.NopCloser(strings.NewReader(data))
 	mrb, err := NewMultiReadBody(body, 32*1024, false)
 	require.NoError(t, err)
 
@@ -327,7 +368,7 @@ func TestMultiReadBody_FileCleanup(t *testing.T) {
 	tmpPath := mrc.tmpFile.Name()
 
 	buf := make([]byte, len(data))
-	n, err := io.ReadFull(mrc, buf)
+	n, err := stdio.ReadFull(mrc, buf)
 	require.NoError(t, err)
 	assert.Equal(t, len(data), n)
 
@@ -348,12 +389,13 @@ func TestResponseBodyReadCloser_CallsReallyClose(t *testing.T) {
 
 	data := strings.Repeat("y", 64*1024)
 
-	body := io.NopCloser(strings.NewReader(data))
+	body := stdio.NopCloser(strings.NewReader(data))
 	mrb, err := NewMultiReadBody(body, 32*1024, false)
 	require.NoError(t, err)
 
 	mrc := mrb.(*MultiReadBody)
 	require.NotNil(t, mrc.tmpFile)
+
 	tmpPath := mrc.tmpFile.Name()
 
 	frc := ResponseBodyReadCloser{ReadCloser: mrb}
@@ -369,14 +411,14 @@ func TestMultiReadBody_InMemory_NoTmpFile(t *testing.T) {
 	t.Parallel()
 
 	data := "small data"
-	body := io.NopCloser(strings.NewReader(data))
+	body := stdio.NopCloser(strings.NewReader(data))
 	mrb, err := NewMultiReadBody(body, 1024, false)
 	require.NoError(t, err)
 
 	mrc := mrb.(*MultiReadBody)
 	assert.Nil(t, mrc.tmpFile)
 
-	buf, err := io.ReadAll(mrc)
+	buf, err := stdio.ReadAll(mrc)
 	require.NoError(t, err)
 	assert.Equal(t, data, string(buf))
 
@@ -404,7 +446,7 @@ func TestProgressReader_AtomicIncrement(t *testing.T) {
 	pr := &ProgressReader{
 		Reader: bytes.NewReader(data),
 		Total:  int64(len(data)),
-		OnProgress: func(current, total int64) {
+		OnProgress: func(current, _ int64) {
 			mu.Lock()
 			seen[current] = true
 			totalRead = current
@@ -413,13 +455,12 @@ func TestProgressReader_AtomicIncrement(t *testing.T) {
 	}
 
 	buf := make([]byte, 256)
+
 	for {
-		n, err := pr.Read(buf)
+		_, err := pr.Read(buf)
 		if err != nil {
 			break
 		}
-
-		_ = n
 	}
 
 	mu.Lock()
@@ -438,6 +479,7 @@ func TestProgressReader_ConcurrentSafety(t *testing.T) {
 	}
 
 	var wg sync.WaitGroup
+
 	for range 10 {
 		wg.Go(func() {
 			buf := make([]byte, 64)
@@ -451,6 +493,7 @@ func TestProgressReader_ConcurrentSafety(t *testing.T) {
 	}
 
 	done := make(chan struct{})
+
 	go func() {
 		wg.Wait()
 		close(done)
@@ -466,7 +509,7 @@ func TestProgressReader_ConcurrentSafety(t *testing.T) {
 func TestMultiReadBody_DoubleCloseIdempotency(t *testing.T) {
 	t.Parallel()
 
-	rc := io.NopCloser(strings.NewReader("payload to write onto temp file in disk storage"))
+	rc := stdio.NopCloser(strings.NewReader("payload to write onto temp file in disk storage"))
 	mBody, err := NewMultiReadBody(rc, 5, false)
 	require.NoError(t, err)
 

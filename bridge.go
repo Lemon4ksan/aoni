@@ -65,34 +65,34 @@ type Transport struct {
 // is guaranteed to be closed to prevent resource leaks.
 //
 // The incoming request's URL field must not be nil, otherwise [ErrNilURL] is returned.
-func (t *Transport) RoundTrip(origReq *http.Request) (*http.Response, error) {
-	if origReq.URL == nil {
-		if origReq.Body != nil {
-			_ = origReq.Body.Close()
+func (t *Transport) RoundTrip(req *http.Request) (*http.Response, error) {
+	if req.URL == nil {
+		if req.Body != nil {
+			_ = req.Body.Close()
 		}
 
 		return nil, &url.Error{
-			Op:  origReq.Method,
+			Op:  req.Method,
 			URL: "",
 			Err: ErrNilURL,
 		}
 	}
 
-	cloned := t.prepareClient(origReq)
-	ctxMods := ContextModifiers(origReq.Context())
+	cloned := t.prepareClient(req)
+	ctxMods := ContextModifiers(req.Context())
 
 	modifiers := make([]RequestModifier, 0, 1+len(ctxMods))
-	modifiers = append(modifiers, t.newSyncModifier(origReq))
+	modifiers = append(modifiers, t.newSyncModifier(req))
 	modifiers = append(modifiers, ctxMods...)
 
 	resp, err := cloned.Request(
-		origReq.Context(),
-		origReq.Method,
-		origReq.URL.RequestURI(),
+		req.Context(),
+		req.Method,
+		req.URL.RequestURI(),
 		modifiers...,
 	)
 	if err != nil {
-		return nil, t.wrapError(origReq, err)
+		return nil, t.wrapError(req, err)
 	}
 
 	return resp, nil
@@ -140,8 +140,8 @@ func (t *Transport) newSyncModifier(origReq *http.Request) RequestModifier {
 		aoniReq.Body = origReq.Body
 		aoniReq.ContentLength = origReq.ContentLength
 		aoniReq.TransferEncoding = origReq.TransferEncoding
-
 		aoniReq.Close = origReq.Close
+
 		if origReq.Host != "" {
 			aoniReq.Host = origReq.Host
 		}

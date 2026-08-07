@@ -55,6 +55,37 @@ func TestMirrorCookies(t *testing.T) {
 	assert.Equal(t, "session", cookies2[0].Name)
 }
 
+func TestFilterForRequest(t *testing.T) {
+	t.Parallel()
+
+	c1 := &http.Cookie{Name: "c1", Path: "/api/v1"}
+	c2 := &http.Cookie{Name: "c2", Path: "/admin"}
+
+	u, _ := url.Parse("https://example.com/api/v1/users")
+	filtered := cookie.FilterForRequest([]*http.Cookie{c1, c2}, u)
+
+	require.Len(t, filtered, 1)
+	assert.Equal(t, "c1", filtered[0].Name)
+}
+
+func TestBuildCookieHeader_And_SortForBrowser(t *testing.T) {
+	t.Parallel()
+
+	c1 := &http.Cookie{Name: "short", Value: "val1", Path: "/api"}
+	c2 := &http.Cookie{Name: "long", Value: "val2", Path: "/api/v1/users"}
+	c3 := &http.Cookie{Name: "root", Value: "val3", Path: "/"}
+
+	cookies := []*http.Cookie{c1, c2, c3}
+	cookie.SortForBrowser(cookies)
+
+	assert.Equal(t, "/api/v1/users", cookies[0].Path)
+	assert.Equal(t, "/api", cookies[1].Path)
+	assert.Equal(t, "/", cookies[2].Path)
+
+	hdr := cookie.BuildCookieHeader(cookies)
+	assert.Equal(t, "long=val2; short=val1; root=val3", hdr)
+}
+
 func TestCookieExportAndImport_Slice(t *testing.T) {
 	t.Parallel()
 
@@ -81,9 +112,6 @@ func TestCookieExportAndImport_Slice(t *testing.T) {
 		},
 	})
 
-	// Note: Go's standard net/http/cookiejar.Cookies(u) only returns Name and Value fields,
-	// leaving other attributes (Secure, HttpOnly, Domain, Path, etc.) at their zero values
-	// because they are not used when sending cookies inside HTTP Request headers.
 	exported := cookie.Export(jar1, u)
 	require.Len(t, exported, 1)
 	assert.Equal(t, "session", exported[0].Name)
@@ -136,4 +164,19 @@ func TestCookieExportAndImport_JSON(t *testing.T) {
 	// Import invalid JSON error handling
 	err = cookie.ImportJSON(jar2, u, "{invalid-json")
 	assert.Error(t, err)
+}
+
+func TestExportNetscape(t *testing.T) {
+	t.Parallel()
+
+	jar, _ := cookiejar.New(nil)
+	u, _ := url.Parse("https://example.com/api")
+
+	jar.SetCookies(u, []*http.Cookie{
+		{Name: "session", Value: "abc123", Domain: ".example.com", Path: "/api", Secure: true},
+	})
+
+	netscapeText := cookie.ExportNetscape(jar, u)
+	assert.Contains(t, netscapeText, "# Netscape HTTP Cookie File")
+	assert.Contains(t, netscapeText, "example.com\tFALSE\t/\tFALSE\t0\tsession\tabc123")
 }

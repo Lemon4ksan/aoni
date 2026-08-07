@@ -15,24 +15,26 @@ const (
 )
 
 const (
-	HeaderTableSize      uint16 = 0x1
-	EnablePush           uint16 = 0x2
-	MaxConcurrentStreams uint16 = 0x3
-	MaxWindowSize        uint16 = 0x4
-	MaxFrameSize         uint16 = 0x5
-	MaxHeaderListSize    uint16 = 0x6
+	HeaderTableSize       uint16 = 0x1
+	EnablePush            uint16 = 0x2
+	MaxConcurrentStreams  uint16 = 0x3
+	MaxWindowSize         uint16 = 0x4
+	MaxFrameSize          uint16 = 0x5
+	MaxHeaderListSize     uint16 = 0x6
+	EnableConnectProtocol uint16 = 0x8 // RFC 8441: SETTINGS_ENABLE_CONNECT_PROTOCOL
 )
 
 // Settings manages parameters negotiated between HTTP/2 endpoints.
 type Settings struct {
-	ack         bool
-	rawSettings []byte
-	tableSize   uint32
-	enablePush  bool
-	maxStreams  uint32
-	windowSize  uint32
-	frameSize   uint32
-	headerSize  uint32
+	ack           bool
+	rawSettings   []byte
+	tableSize     uint32
+	enablePush    bool
+	maxStreams    uint32
+	windowSize    uint32
+	frameSize     uint32
+	headerSize    uint32
+	enableConnect bool
 }
 
 func (st *Settings) Type() FrameType { return FrameSettings }
@@ -43,6 +45,7 @@ func (st *Settings) Reset() {
 	st.windowSize = defaultWindowSize
 	st.frameSize = defaultDataFrameSize
 	st.enablePush = false
+	st.enableConnect = false
 	st.headerSize = 0
 	st.rawSettings = st.rawSettings[:0]
 	st.ack = false
@@ -57,6 +60,7 @@ func (st *Settings) CopyTo(dst *Settings) {
 	dst.windowSize = st.windowSize
 	dst.frameSize = st.frameSize
 	dst.headerSize = st.headerSize
+	dst.enableConnect = st.enableConnect
 }
 
 func (st *Settings) SetHeaderTableSize(size uint32)   { st.tableSize = size }
@@ -71,6 +75,8 @@ func (st *Settings) SetMaxFrameSize(size uint32)      { st.frameSize = size }
 func (st *Settings) MaxFrameSize() uint32             { return st.frameSize }
 func (st *Settings) SetMaxHeaderListSize(size uint32) { st.headerSize = size }
 func (st *Settings) MaxHeaderListSize() uint32        { return st.headerSize }
+func (st *Settings) SetEnableConnect(enabled bool)    { st.enableConnect = enabled }
+func (st *Settings) EnableConnect() bool              { return st.enableConnect }
 func (st *Settings) IsAck() bool                      { return st.ack }
 func (st *Settings) SetAck(ack bool)                  { st.ack = ack }
 
@@ -116,6 +122,13 @@ func (st *Settings) applySetting(key uint16, val uint32) error {
 
 	case MaxHeaderListSize:
 		st.headerSize = val
+
+	case EnableConnectProtocol:
+		if val != 0 && val != 1 {
+			return NewGoAwayError(ProtocolError, "wrong value for SETTINGS_ENABLE_CONNECT_PROTOCOL")
+		}
+
+		st.enableConnect = val == 1
 	}
 
 	return nil
@@ -133,16 +146,20 @@ func (st *Settings) Encode() {
 	st.appendSetting(MaxWindowSize, st.windowSize)
 	st.appendSetting(MaxFrameSize, st.frameSize)
 	st.appendSetting(MaxHeaderListSize, st.headerSize)
+
+	if st.enableConnect {
+		st.appendSetting(EnableConnectProtocol, 1)
+	}
 }
 
 func (st *Settings) appendSetting(key uint16, val uint32) {
-	if val == 0 && key != EnablePush {
+	if val == 0 && key != EnablePush && key != EnableConnectProtocol {
 		return
 	}
 
 	st.rawSettings = append(st.rawSettings,
-		byte(key>>8), byte(key), //nolint:gosec
-		byte(val>>24), byte(val>>16), byte(val>>8), byte(val), //nolint:gosec
+		byte(key>>8), byte(key),
+		byte(val>>24), byte(val>>16), byte(val>>8), byte(val),
 	)
 }
 

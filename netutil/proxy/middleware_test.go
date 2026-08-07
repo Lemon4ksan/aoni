@@ -5,6 +5,7 @@
 package proxy_test
 
 import (
+	"context"
 	"errors"
 	"io"
 	"net/http"
@@ -72,6 +73,25 @@ func (m *mockDoer) GetCalls() int {
 	defer m.mu.RUnlock()
 	return m.calls
 }
+
+type customResponseAdapter struct {
+	statusCode int
+}
+
+func (c *customResponseAdapter) StatusCode() int              { return c.statusCode }
+func (c *customResponseAdapter) Status() string               { return http.StatusText(c.statusCode) }
+func (c *customResponseAdapter) StatusBytes() []byte          { return []byte(c.Status()) }
+func (c *customResponseAdapter) Header(_ string) string       { return "" }
+func (c *customResponseAdapter) HeaderBytes(_ []byte) []byte  { return nil }
+func (c *customResponseAdapter) Headers() map[string][]string { return nil }
+func (c *customResponseAdapter) BodyBytes() []byte            { return nil }
+func (c *customResponseAdapter) BodyStream() io.ReadCloser    { return nil }
+func (c *customResponseAdapter) HTTPResponse() *http.Response { return nil } // Simulates fast.Response adapter
+func (c *customResponseAdapter) EngineResponse() any          { return nil }
+func (c *customResponseAdapter) Uncompressed() bool           { return false }
+func (c *customResponseAdapter) SetUncompressed(_ bool)       {}
+func (c *customResponseAdapter) Close() error                 { return nil }
+func (c *customResponseAdapter) UnsafeBodyBytes() []byte      { return nil }
 
 func TestRetryMiddleware(t *testing.T) {
 	t.Parallel()
@@ -182,5 +202,48 @@ func TestRetryMiddleware(t *testing.T) {
 
 		assert.Equal(t, 3, calls)
 		assert.Equal(t, 200, resp.StatusCode())
+	})
+}
+
+func TestProxy_RetryCondition(t *testing.T) {
+	t.Parallel()
+
+	m1 := &mockDoer{id: 1}
+	rotator, err := proxy.NewRotator(proxy.RotatorConfig{}, proxy.WithClient{Client: m1})
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = rotator.Close() })
+
+	cond := proxy.RetryCondition(rotator)
+
+	t.Run("retry_on_network_error", func(t *testing.T) {
+		t.Parallel()
+
+		netErr := errors.New("dial tcp: connection refused")
+		assert.True(t, cond(nil, netErr))
+	})
+
+	t.Run("do_not_retry_on_context_canceled", func(t *testing.T) {
+		t.Parallel()
+		assert.False(t, cond(nil, context.Canceled))
+	})
+
+	t.Run("adapter_response_fault_status_codes", func(t *testing.T) {
+		t.Parallel()
+
+		faultCodes := []int{
+			http.StatusProxyAuthRequired,
+			http.StatusTooManyRequests,
+			http.StatusBadGateway,
+			http.StatusServiceUnavailable,
+			http.StatusGatewayTimeout,
+		}
+
+		for _, code := range faultCodes {
+			resp := &customResponseAdapter{statusCode: code}
+			assert.True(t, cond(resp, nil), "status code %d should trigger proxy retry", code)
+		}
+
+		okResp := &customResponseAdapter{statusCode: http.StatusOK}
+		assert.False(t, cond(okResp, nil))
 	})
 }
