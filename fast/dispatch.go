@@ -10,15 +10,17 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"time"
 
 	"github.com/valyala/fasthttp"
 
 	"github.com/lemon4ksan/aoni"
 	"github.com/lemon4ksan/aoni/internal/bytesconv"
+	"github.com/lemon4ksan/aoni/internal/timer"
 )
 
-// dispatchSingleRequest routes an HTTP request through H3, H2, or H1 protocol handlers
-// with automatic recovery for 421 Misdirected Request, 408 Request Timeout, and H1-to-H2 frame fallbacks.
+// dispatchSingleRequest routes an HTTP request through Happy Eyeballs v3 (Protocol Racing),
+// racing HTTP/3 (QUIC) against HTTP/2/HTTP/1 (TCP/TLS) with a staggered fallback timer.
 func (c *Client) dispatchSingleRequest(
 	ctx context.Context,
 	fastReq *fasthttp.Request,
@@ -29,6 +31,11 @@ func (c *Client) dispatchSingleRequest(
 	host := string(fastReq.URI().Host())
 	alpnMode := resolveALPNMode(ctx, &c.config, fastReq)
 
+	staggerDelay := c.config.Network.HappyEyeballsDelay
+	if alpnMode == aoni.AlpnH3 && c.shouldRaceProtocols(ctx) {
+		return c.raceProtocolHandshakes(ctx, host, fastReq, fastResp, staggerDelay)
+	}
+
 	if alpnMode == aoni.AlpnH3 {
 		if tr, h3Err, handled := c.tryDispatchH3(ctx, host, fastReq, fastResp); handled {
 			return tr, h3Err, false
@@ -37,6 +44,143 @@ func (c *Client) dispatchSingleRequest(
 		alpnMode = resolveALPNMode(ctx, &c.config, fastReq)
 	}
 
+	if alpnMode == aoni.AlpnH2 {
+		if tr, h2Err, handled := c.tryDispatchH2(ctx, host, fastReq, fastResp); handled {
+			return tr, h2Err, false
+		}
+	}
+
+	return c.dispatchH1WithFallbacks(ctx, host, fastReq, fastResp)
+}
+
+func (c *Client) shouldRaceProtocols(ctx context.Context) bool {
+	reqCfg := aoni.GetRequestConfig(ctx)
+	if reqCfg != nil && reqCfg.DisableAltSvc {
+		return false
+	}
+
+	return true
+}
+
+type raceResult struct {
+	trailers     map[string][]string
+	err          error
+	autoReleased bool
+	isH3         bool
+	resp         *fasthttp.Response
+}
+
+func (c *Client) raceProtocolHandshakes(
+	ctx context.Context,
+	host string,
+	fastReq *fasthttp.Request,
+	fastResp *fasthttp.Response,
+	staggerDelay time.Duration,
+) (map[string][]string, error, bool) {
+	if staggerDelay <= 0 {
+		staggerDelay = 250 * time.Millisecond
+	}
+
+	results := make(chan raceResult, 2)
+	raceCtx, cancelRace := context.WithCancel(ctx)
+
+	// Safe pool drainer preventing memory leak from late losing goroutine responses
+	defer func() {
+		cancelRace()
+
+		go drainLateRaceResponses(results)
+	}()
+
+	go func() {
+		h3Resp := fasthttp.AcquireResponse()
+
+		tr, h3Err, handled := c.tryDispatchH3(raceCtx, host, fastReq, h3Resp)
+		if handled && h3Err == nil {
+			results <- raceResult{trailers: tr, err: nil, isH3: true, resp: h3Resp}
+			return
+		}
+
+		fasthttp.ReleaseResponse(h3Resp)
+
+		results <- raceResult{err: h3Err, isH3: true}
+	}()
+
+	staggerTimer := timer.Acquire(staggerDelay)
+	defer timer.Release(staggerTimer)
+
+	var tcpStarted bool
+
+	select {
+	case res := <-results:
+		if res.isH3 && res.err == nil {
+			res.resp.CopyTo(fastResp)
+			fasthttp.ReleaseResponse(res.resp)
+			return res.trailers, nil, false
+		}
+
+	case <-staggerTimer.C:
+		tcpStarted = true
+
+		go func() {
+			tcpResp := fasthttp.AcquireResponse()
+
+			tr, tcpErr, released := c.dispatchH1OrH2(raceCtx, host, fastReq, tcpResp)
+			if tcpErr == nil {
+				results <- raceResult{trailers: tr, err: nil, autoReleased: released, isH3: false, resp: tcpResp}
+				return
+			}
+
+			fasthttp.ReleaseResponse(tcpResp)
+
+			results <- raceResult{err: tcpErr, autoReleased: released, isH3: false}
+		}()
+	}
+
+	if !tcpStarted {
+		return c.dispatchH1OrH2(ctx, host, fastReq, fastResp)
+	}
+
+	var firstErr error
+	for range 2 {
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err(), false
+		case res := <-results:
+			if res.err == nil && res.resp != nil {
+				res.resp.CopyTo(fastResp)
+				fasthttp.ReleaseResponse(res.resp)
+				return res.trailers, nil, res.autoReleased
+			}
+
+			if firstErr == nil {
+				firstErr = res.err
+			}
+		}
+	}
+
+	return nil, firstErr, false
+}
+
+func drainLateRaceResponses(results chan raceResult) {
+	for range 2 {
+		select {
+		case res := <-results:
+			if res.resp != nil {
+				fasthttp.ReleaseResponse(res.resp)
+			}
+		case <-time.After(2 * time.Second):
+			return
+		}
+	}
+}
+
+func (c *Client) dispatchH1OrH2(
+	ctx context.Context,
+	host string,
+	fastReq *fasthttp.Request,
+	fastResp *fasthttp.Response,
+) (map[string][]string, error, bool) {
+	alpnMode := resolveALPNMode(ctx, &c.config, fastReq)
 	if alpnMode == aoni.AlpnH2 {
 		if tr, h2Err, handled := c.tryDispatchH2(ctx, host, fastReq, fastResp); handled {
 			return tr, h2Err, false
@@ -178,10 +322,10 @@ func (c *Client) recoverSpecialStatus(
 	fastResp.Reset()
 
 	switch code {
-	case http.StatusMisdirectedRequest:
-		return c.retry421Misdirected(ctx, fastReq, fastResp)
 	case http.StatusTooEarly:
 		return c.retry425TooEarly(ctx, fastReq, fastResp)
+	case http.StatusMisdirectedRequest:
+		return c.retry421Misdirected(ctx, fastReq, fastResp)
 	default:
 		return c.retry408Timeout(ctx, fastReq, fastResp)
 	}
