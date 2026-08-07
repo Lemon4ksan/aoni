@@ -76,6 +76,12 @@ func Configure(doer any, opts ...ClientOption) RequestDoer {
 	return NewClient(doer, opts...)
 }
 
+// RequestFactory is implemented by engines capable of pooling their own high-performance Request instances.
+type RequestFactory interface {
+	AcquireRequest() Request
+	ReleaseRequest(req Request)
+}
+
 // Request defines the unified, engine-agnostic HTTP request interface.
 //
 // It provides both string-based and byte-based accessors to ensure zero-allocation
@@ -201,6 +207,9 @@ type Response interface {
 	// BodyBytes returns direct access to the response body byte slice.
 	// For fast engines, this returns the internal socket buffer directly without memory copying.
 	BodyBytes() []byte
+
+	// UnsafeBodyBytes returns direct access to the response body byte slice without memory copying.
+	UnsafeBodyBytes() []byte
 
 	// BodyStream returns an io.ReadCloser for reading streaming responses.
 	BodyStream() stdio.ReadCloser

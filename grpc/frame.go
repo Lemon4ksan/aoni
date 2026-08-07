@@ -12,7 +12,6 @@ import (
 	"sync"
 
 	"github.com/klauspost/compress/gzip"
-
 	"google.golang.org/protobuf/proto"
 )
 

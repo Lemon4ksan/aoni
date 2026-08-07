@@ -17,6 +17,7 @@ import (
 	"google.golang.org/protobuf/proto"
 
 	"github.com/lemon4ksan/aoni"
+	"github.com/lemon4ksan/aoni/fast"
 	"github.com/lemon4ksan/aoni/mod"
 	"github.com/lemon4ksan/aoni/request"
 )
@@ -73,6 +74,7 @@ func Invoke[Resp any](
 	}
 
 	result := new(Resp)
+
 	msg, ok := any(result).(proto.Message)
 	if !ok {
 		return nil, fmt.Errorf("aoni grpc: response type %T does not implement proto.Message", result)
@@ -87,6 +89,71 @@ func Invoke[Resp any](
 	}
 
 	return result, nil
+}
+
+// InvokeFast is a fast gRPC client that does not create a *http.Response.
+func InvokeFast[Resp any](
+	ctx context.Context,
+	fastClient *fast.Client,
+	fullMethod string,
+	reqMsg proto.Message,
+	mods ...aoni.RequestModifier,
+) (*Resp, error) {
+	frameBytes, err := MarshalFrame(reqMsg, false)
+	if err != nil {
+		return nil, err
+	}
+
+	path := fullMethod
+	if !strings.HasPrefix(path, "/") {
+		path = "/" + path
+	}
+
+	req := fast.NewRequest(nil)
+	defer req.Release()
+
+	req.SetContext(ctx)
+	req.SetMethod(http.MethodPost)
+	req.SetURL(path)
+	req.SetHeader("Content-Type", "application/grpc")
+	req.SetHeader("TE", "trailers")
+	req.SetBodyBytes(frameBytes)
+
+	for _, m := range mods {
+		if m != nil {
+			m(req)
+		}
+	}
+
+	resp, err := fastClient.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Close()
+
+	result := new(Resp)
+
+	msg, ok := any(result).(proto.Message)
+	if !ok {
+		return nil, fmt.Errorf("aoni grpc: response type %T does not implement proto.Message", result)
+	}
+
+	if err := unmarshalFastGRPCFrame(resp, msg); err != nil {
+		return nil, err
+	}
+
+	return result, nil
+}
+
+func unmarshalFastGRPCFrame(resp aoni.Response, msg proto.Message) error {
+	if stream := resp.BodyStream(); stream != nil && resp.HTTPResponse() == nil { //nolint:bodyclose
+		_, err := UnmarshalFrame(stream, msg)
+		return err
+	}
+
+	_, err := UnmarshalFrame(bytes.NewReader(resp.UnsafeBodyBytes()), msg)
+
+	return err
 }
 
 func validateInitialHeaders(resp *http.Response) error {

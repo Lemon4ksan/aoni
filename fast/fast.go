@@ -382,6 +382,10 @@ func (f *Response) BodyBytes() []byte {
 //   - Points directly to volatile internal buffers managed by sync.Pool.
 //   - MUST NOT be referenced, mutated, or retained after closing or recycling the response.
 func (f *Response) UnsafeBodyBytes() []byte {
+	if f.resp == nil {
+		return nil
+	}
+
 	return f.resp.Body()
 }
 
