@@ -63,6 +63,10 @@ func Invoke[Resp any](
 		grpcMods = append(grpcMods, mod.WithHeader("grpc-timeout", FormatTimeout(time.Until(deadline))))
 	}
 
+	if md, ok := FromContext(ctx); ok && len(md) > 0 {
+		grpcMods = append(grpcMods, WithMetadata(md))
+	}
+
 	grpcMods = append(grpcMods, mods...)
 
 	requester := request.AsRequester(doer)
@@ -285,6 +289,10 @@ func ServerStream[Resp any](
 
 	if deadline, ok := ctx.Deadline(); ok {
 		grpcMods = append(grpcMods, mod.WithHeader("grpc-timeout", FormatTimeout(time.Until(deadline))))
+	}
+
+	if md, ok := FromContext(ctx); ok && len(md) > 0 {
+		grpcMods = append(grpcMods, WithMetadata(md))
 	}
 
 	grpcMods = append(grpcMods, mods...)
