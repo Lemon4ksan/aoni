@@ -295,10 +295,10 @@ func ComputeJA4HFromRequest(req *http.Request) string {
 	)
 }
 
-// TriggerGot1xxResponse signals an 1xx informational response (102, 103) to active httptrace hooks.
+// TriggerGot1xxResponse notifies active httptrace ClientTrace hooks of intermediate 1xx responses (100, 102, 103).
 //
 // Postconditions:
-//   - If the active Got1xxResponse hook returns a non-nil error, the request MUST be aborted immediately.
+//   - If the active Got1xxResponse callback returns a non-nil error, the request execution MUST be aborted immediately.
 func TriggerGot1xxResponse(ctx context.Context, code int, header http.Header) error {
 	trace := httptrace.ContextClientTrace(ctx)
 	if trace == nil || trace.Got1xxResponse == nil {
