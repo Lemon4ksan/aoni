@@ -6,14 +6,19 @@ package pipeline
 
 import (
 	"bytes"
+	"crypto/sha256"
 	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	stdio "io"
 	"net/http"
 	"net/url"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/lemon4ksan/aoni/internal/bytesconv"
 )
 
 // SavePushedResponseToCache validates and stores an HTTP/2 server-pushed response into the cache store.
@@ -66,6 +71,55 @@ func NormalizeCacheURL(rawURL string, cfg *NoVarySearchConfig) string {
 	return u.String()
 }
 
+// ComputeCookieIndicesHash calculates a SHA-256 hash of specific requested cookie names.
+func ComputeCookieIndicesHash(req *http.Request, cookieNames []string) string {
+	if req == nil || len(cookieNames) == 0 {
+		return ""
+	}
+
+	cookies := req.Cookies()
+	if len(cookies) == 0 {
+		return ""
+	}
+
+	var matched []string
+	for _, name := range cookieNames {
+		for _, c := range cookies {
+			if strings.EqualFold(c.Name, name) {
+				matched = append(matched, c.Name+"="+c.Value)
+				break
+			}
+		}
+	}
+
+	if len(matched) == 0 {
+		return ""
+	}
+
+	slices.Sort(matched)
+	concat := strings.Join(matched, ";")
+	hash := sha256.Sum256(bytesconv.S2B(concat))
+
+	return hex.EncodeToString(hash[:6])
+}
+
+// ParseCookieIndicesHeader parses the 'Cookie-Indices' response header (e.g. 'Cookie-Indices: "theme", "lang"').
+func ParseCookieIndicesHeader(header string) []string {
+	if header == "" {
+		return nil
+	}
+
+	var names []string
+	for p := range strings.SplitSeq(header, ",") {
+		cleaned := strings.Trim(strings.TrimSpace(p), `"'`)
+		if cleaned != "" {
+			names = append(names, cleaned)
+		}
+	}
+
+	return names
+}
+
 func filterQueryParams(query url.Values, cfg *NoVarySearchConfig) url.Values {
 	result := make(url.Values, len(query))
 
@@ -111,8 +165,13 @@ func (p *Pipeline) tryGetFromCache(req *http.Request, cfg *CacheConfig) *http.Re
 	}
 
 	normURL := NormalizeCacheURL(req.URL.String(), cfg.NoVarySearch)
+	cookieHash := ComputeCookieIndicesHash(req, cfg.CookieIndices)
 
-	cachedData, err := cfg.Store.Get(req.Context(), CacheKey{Method: req.Method, URL: normURL})
+	cachedData, err := cfg.Store.Get(req.Context(), CacheKey{
+		Method:     req.Method,
+		URL:        normURL,
+		CookieHash: cookieHash,
+	})
 	if err != nil {
 		return nil
 	}
@@ -234,7 +293,32 @@ func (p *Pipeline) saveToCache(req *http.Request, resp *http.Response, cfg *Cach
 	effectiveConfig := resolveEffectiveNoVarySearch(resp, cfg)
 	normURL := NormalizeCacheURL(req.URL.String(), effectiveConfig)
 
-	_ = cfg.Store.Set(req.Context(), CacheKey{Method: req.Method, URL: normURL}, cachedData, ttl)
+	effectiveCookieNames := resolveEffectiveCookieIndices(resp, cfg)
+	cookieHash := ComputeCookieIndicesHash(req, effectiveCookieNames)
+
+	_ = cfg.Store.Set(req.Context(), CacheKey{
+		Method:     req.Method,
+		URL:        normURL,
+		CookieHash: cookieHash,
+	}, cachedData, ttl)
+}
+
+func resolveEffectiveCookieIndices(resp *http.Response, cfg *CacheConfig) []string {
+	ciHeader := resp.Header.Get("Cookie-Indices")
+	if ciHeader == "" {
+		if cfg != nil {
+			return cfg.CookieIndices
+		}
+
+		return nil
+	}
+
+	parsed := ParseCookieIndicesHeader(ciHeader)
+	if cfg != nil && len(cfg.CookieIndices) > 0 {
+		parsed = append(parsed, cfg.CookieIndices...)
+	}
+
+	return parsed
 }
 
 func resolveEffectiveNoVarySearch(resp *http.Response, cfg *CacheConfig) *NoVarySearchConfig {

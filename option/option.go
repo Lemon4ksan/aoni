@@ -821,6 +821,18 @@ func WithCookieJanitor(ctx context.Context, interval time.Duration) aoni.ClientO
 	}
 }
 
+// WithCookieIndices enables selective cookie-based response caching, hashing only specified
+// cookie names (e.g., "theme", "lang") into the cache key to maximize hit rates for static pages.
+func WithCookieIndices(cookieNames ...string) aoni.ClientOption {
+	return func(c *aoni.Config) {
+		if c.Defaults.Pipeline.Cache == nil {
+			c.Defaults.Pipeline.Cache = &aoni.CacheConfig{}
+		}
+
+		c.Defaults.Pipeline.Cache.CookieIndices = slices.Clone(cookieNames)
+	}
+}
+
 // ============================================================================
 // 7. HOOKS, OBSERVABILITY & CHALLENGE OPTIONS
 // ============================================================================

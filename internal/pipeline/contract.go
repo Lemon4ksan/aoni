@@ -254,8 +254,9 @@ type CacheConfig struct {
 		Get(ctx context.Context, key any) ([]byte, error)
 		Set(ctx context.Context, key any, val []byte, ttl time.Duration) error
 	}
-	DefaultTTL   time.Duration
-	NoVarySearch *NoVarySearchConfig
+	DefaultTTL    time.Duration
+	NoVarySearch  *NoVarySearchConfig
+	CookieIndices []string
 }
 
 type JA4ReportStore struct {
@@ -264,8 +265,9 @@ type JA4ReportStore struct {
 }
 
 type CacheKey struct {
-	Method string
-	URL    string
+	Method     string
+	URL        string
+	CookieHash string
 }
 
 func (k CacheKey) String() string {
