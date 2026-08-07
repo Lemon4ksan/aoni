@@ -211,6 +211,8 @@ func (c *Client) tryDispatchH3(
 		return tr, errRec, true
 	}
 
+	globalAltSvcCache.MarkH3Success(host)
+
 	return tr, nil, true
 }
 
