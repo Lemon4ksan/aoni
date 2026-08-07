@@ -833,6 +833,30 @@ func WithCookieIndices(cookieNames ...string) aoni.ClientOption {
 	}
 }
 
+// WithDuplicateRequestGuard enables ring-buffer duplicate request detection,
+// triggering a diagnostic alert if the same URL is fetched within the window (e.g. 10s).
+func WithDuplicateRequestGuard(window time.Duration, logger aoni.Logger) aoni.ClientOption {
+	if window <= 0 {
+		window = 10 * time.Second
+	}
+
+	guard := telemetry.NewDuplicateRequestGuard(128, window, func(method, rawURL string, elapsed time.Duration) {
+		if logger != nil {
+			logger.Warn("aoni telemetry: potential duplicate request loop detected",
+				"method", method,
+				"url", rawURL,
+				"elapsed", elapsed,
+			)
+		}
+	})
+
+	return func(cfg *aoni.Config) {
+		cfg.Defaults.BeforeRequest = append(cfg.Defaults.BeforeRequest, func(req *http.Request) {
+			guard.CheckAndRecord(req.Method, req.URL.String())
+		})
+	}
+}
+
 // ============================================================================
 // 7. HOOKS, OBSERVABILITY & CHALLENGE OPTIONS
 // ============================================================================
