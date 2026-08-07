@@ -45,12 +45,47 @@ func (p *Pipeline) dispatchRequest(req *http.Request, doer Doer, tx *Tx) (*http.
 			return p.handle408Recovery(req, doer, resp)
 		}
 
+		if resp.StatusCode == http.StatusTooEarly {
+			return p.handle425Recovery(req, doer, resp)
+		}
+
 		if resp.Request == nil {
 			resp.Request = req
 		}
 	}
 
 	return resp, err
+}
+
+func (p *Pipeline) handle425Recovery(
+	req *http.Request,
+	doer Doer,
+	origResp *http.Response,
+) (*http.Response, error) {
+	if origResp != nil && origResp.Body != nil {
+		_ = origResp.Body.Close()
+	}
+
+	if httpClient, ok := doer.(*http.Client); ok {
+		httpClient.CloseIdleConnections()
+	}
+
+	reqCfg := GetOrInitRequestConfig(req.Context())
+	reqCfg.Disable0RTT = true
+
+	clonedReq, err := p.cloneRequest(req, req.Context())
+	if err != nil {
+		return nil, err
+	}
+
+	clonedReq.Header.Del("Early-Data")
+
+	retryResp, retryErr := doer.Do(clonedReq)
+	if retryResp != nil && retryResp.Request == nil {
+		retryResp.Request = clonedReq
+	}
+
+	return retryResp, retryErr
 }
 
 func (p *Pipeline) handle408Recovery(

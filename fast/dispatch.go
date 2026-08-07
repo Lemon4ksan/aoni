@@ -163,7 +163,9 @@ func (c *Client) fallbackH1ToH2(
 }
 
 func (c *Client) isRecoverableStatus(code int) bool {
-	return code == http.StatusMisdirectedRequest || code == http.StatusRequestTimeout
+	return code == http.StatusMisdirectedRequest ||
+		code == http.StatusRequestTimeout ||
+		code == http.StatusTooEarly
 }
 
 func (c *Client) recoverSpecialStatus(
@@ -175,11 +177,30 @@ func (c *Client) recoverSpecialStatus(
 	code := fastResp.StatusCode()
 	fastResp.Reset()
 
-	if code == http.StatusMisdirectedRequest {
+	switch code {
+	case http.StatusMisdirectedRequest:
 		return c.retry421Misdirected(ctx, fastReq, fastResp)
+	case http.StatusTooEarly:
+		return c.retry425TooEarly(ctx, fastReq, fastResp)
+	default:
+		return c.retry408Timeout(ctx, fastReq, fastResp)
 	}
+}
 
-	return c.retry408Timeout(ctx, fastReq, fastResp)
+func (c *Client) retry425TooEarly(
+	ctx context.Context,
+	fastReq *fasthttp.Request,
+	fastResp *fasthttp.Response,
+) (trailers map[string][]string, err error, autoReleased bool) {
+	reqCfg := aoni.GetOrInitRequestConfig(ctx)
+	reqCfg.Disable0RTT = true
+
+	host := string(fastReq.URI().Host())
+	c.removeH2Client(host)
+
+	fastReq.Header.Del("Early-Data")
+
+	return c.dispatchSingleRequest(ctx, fastReq, fastResp)
 }
 
 func (c *Client) retry421Misdirected(

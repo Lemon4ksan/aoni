@@ -92,6 +92,7 @@ type RequestConfig struct {
 	TCPDelay           TCPDelayRange
 
 	DisableAltSvc             bool
+	Disable0RTT               bool
 	MultiReadDisableDisk      bool
 	AllowNonReadOnlyHedging   bool
 	HasExplicitAcceptEncoding bool

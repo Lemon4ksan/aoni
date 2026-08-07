@@ -689,6 +689,14 @@ func WithForceHTTP3() aoni.RequestModifier {
 	}
 }
 
+// Without0RTT constructs an [aoni.RequestModifier] that disables TLS 1.3 / QUIC 0-RTT
+// Early Data for a request, forcing standard 1-RTT handshake negotiation.
+func Without0RTT() aoni.RequestModifier {
+	return func(req aoni.Request) {
+		aoni.GetOrInitRequestConfig(req).Disable0RTT = true
+	}
+}
+
 // WithTCPDelay constructs an [aoni.RequestModifier] adding randomized jitter delays prior to TCP socket dialing.
 func WithTCPDelay(min, max time.Duration) aoni.RequestModifier {
 	minDelay, maxDelay := min, max
