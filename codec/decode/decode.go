@@ -92,7 +92,14 @@ func NewJSONDecoder(cfg JSONDecoderConfig) Decoder {
 type jsonDecoder struct{}
 
 func (jsonDecoder) Decode(reader stdio.Reader, target any) error {
-	return json.NewDecoder(reader).Decode(target)
+	buf := engine.GlobalBufferPool.Get()
+	defer engine.GlobalBufferPool.Put(buf)
+
+	if _, err := buf.ReadFrom(reader); err != nil {
+		return err
+	}
+
+	return json.Unmarshal(buf.Bytes(), target)
 }
 
 type xmlDecoder struct{}

@@ -17,6 +17,9 @@ type PreparedConfig struct {
 	BaseURL                *url.URL
 	BaseURLString          string
 	BaseURLTrimmedString   string
+	BaseURLTrimmedBytes    []byte
+	BaseURLHostBytes       []byte
+	BaseURLSchemeBytes     []byte
 	DefaultHostHeader      string
 	DefaultALPN            []string
 	StaticHeaders          http.Header
@@ -35,6 +38,9 @@ func NewPreparedConfig(baseURL *url.URL, headers ...http.Header) PreparedConfig 
 	if baseURL != nil {
 		prep.BaseURLString = baseURL.String()
 		prep.BaseURLTrimmedString = strings.TrimSuffix(prep.BaseURLString, "/")
+		prep.BaseURLTrimmedBytes = []byte(prep.BaseURLTrimmedString)
+		prep.BaseURLHostBytes = []byte(baseURL.Host)
+		prep.BaseURLSchemeBytes = []byte(baseURL.Scheme)
 		prep.DefaultHostHeader = baseURL.Host
 	}
 

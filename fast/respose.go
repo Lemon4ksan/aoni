@@ -24,7 +24,7 @@ var (
 		New: func() any { return &Response{} },
 	}
 	pooledResponsePool = sync.Pool{
-		New: func() any { return &PooledResponse{Response: &Response{}} },
+		New: func() any { return &PooledResponse{} },
 	}
 )
 
@@ -233,7 +233,7 @@ func (f *Response) Close() error {
 
 // PooledResponse wraps a fasthttp response and returns instances back to [sync.Pool] upon Close.
 type PooledResponse struct {
-	*Response
+	Response
 	fastReq  *fasthttp.Request
 	fastResp *fasthttp.Response
 	closed   atomic.Bool
@@ -243,10 +243,6 @@ type PooledResponse struct {
 // The caller is responsible for releasing the request and response objects.
 func NewPooledResponse(fastReq *fasthttp.Request, fastResp *fasthttp.Response) *PooledResponse {
 	pr := pooledResponsePool.Get().(*PooledResponse)
-	if pr.Response == nil {
-		pr.Response = &Response{}
-	}
-
 	pr.resp = fastResp
 	pr.trailers = nil
 	pr.uncompressed = false

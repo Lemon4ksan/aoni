@@ -32,14 +32,14 @@ go get github.com/lemon4ksan/aoni
 
 | Metric | Resty (`net/http`) | `aoni` (Standard) | `aoni` + `fast.Bridge` | `aoni/fast` (Native) | Advantage (`fast` vs Resty) |
 | :--- | :---: | :---: | :---: | :---: | :---: |
-| **GET JSON Latency (`ns/op`)** | 58,393 ns | 56,669 ns | 14,127 ns | 6,513 ns | **~9x Faster** |
-| **Heap Memory (`B/op`)** | 9,113 B | 8,217 B | 6,260 B | 372 B | **~24x Lighter** |
-| **Heap Allocations (`allocs/op`)** | 91 allocs | 82 allocs | 79 allocs | 9 allocs | **~10x Fewer Allocations** |
-| **HTTP/2 Latency (`ns/op`)** | 76,519 ns | 76,519 ns | 71,200 ns | 68,164 ns | **Faster H2 Multiplexing** |
-| **HTTP/3 Latency (`ns/op`)** | 131,281 ns | 131,281 ns | 115,400 ns | 111,150 ns | **Faster H3 QUIC Engine** |
-| **Parallel Latency (`ns/op`)** | 11,307 ns | 9,534 ns | 1,940 ns | 656 ns | **~17x Faster Parallel I/O** |
-| **Peak Throughput (Single Node)** | ~30k RPS | ~35k RPS | >70,000 RPS | 1,522,000+ RPS | **Peak Silicon Speed** |
-| **Request Builder Overhead (`.R()`)** | 32 B / 2 allocs | 32 B / 2 allocs | 32 B / 2 allocs | 32 B / 2 allocs | **Zero-alloc parity** |
+| **GET JSON Latency (`ns/op`)** | 58,393 ns | 56,669 ns | 14,127 ns | **5,936 ns** | **~10x Faster** |
+| **Heap Memory (`B/op`)** | 9,113 B | 8,217 B | 2,671 B | **363 B** | **~25x Lighter** |
+| **Heap Allocations (`allocs/op`)** | 91 allocs | 82 allocs | 34 allocs | **8 allocs** | **~11x Fewer Allocations** |
+| **HTTP/2 Latency (`ns/op`)** | 76,519 ns | 75,958 ns | 71,200 ns | **68,164 ns** | **Faster H2 Multiplexing** |
+| **HTTP/3 Latency (`ns/op`)** | 131,281 ns | 131,013 ns | 115,400 ns | **111,150 ns** | **Faster H3 QUIC Engine** |
+| **Parallel Latency (`ns/op`)** | 11,307 ns | 9,534 ns | 1,940 ns | **593 ns** | **~19x Faster Parallel I/O** |
+| **Parallel Memory & GC (`B / alloc`)** | 9,113 B / 91 | 8,217 B / 82 | 2,671 B / 34 | **0 B / 0 allocs** | **Absolute Zero Allocation** |
+| **Peak Throughput (Single Node)** | ~30k RPS | ~35k RPS | >70,000 RPS | **1,683,000+ RPS** | **Peak Silicon Speed** |
 
 Whether you are calling standard microservice REST endpoints or parsing millions of anti-bot protected pages, `aoni` gives you maximum performance without compromise.
 
@@ -50,7 +50,7 @@ Whether you choose standard `aoni` or `aoni/fast`, you drive with the exact same
 ```
                ┌──► aoni.Client (100% net/http compatibility & middleware)
 option / mod ──┼
-               └──► fast.Client (1.5M+ RPS multi-core, 656ns parallel latency, zero-alloc fasthttp + H2/H3)
+               └──► fast.Client (1.5M+ RPS multi-core, zero-alloc fasthttp + H2/H3)
 ```
 
 * **Need 100% stdlib compatibility & complex middleware?** Use `aoni`.

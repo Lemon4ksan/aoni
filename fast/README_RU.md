@@ -6,7 +6,7 @@
 
 [![Go Reference](https://img.shields.io/badge/go-reference-007d9c?logo=go&logoColor=white&style=flat-square)](https://pkg.go.dev/github.com/lemon4ksan/aoni/fast)
 [![License](https://img.shields.io/github/license/lemon4ksan/aoni?style=flat-square)](LICENSE)
-[![RPS](https://img.shields.io/badge/throughput-1.5M%2B%20RPS-brightgreen?style=flat-square)](#бескомпромиссная-производительность-сухая-математика)
+[![RPS](https://img.shields.io/badge/throughput-1.68M%2B%20RPS-brightgreen?style=flat-square)](#бескомпромиссная-производительность-сухая-математика)
 
 > _"Никаких компромиссов. Строгая геометрия памяти. Чистая скорость кремния."_
 
@@ -34,7 +34,7 @@ go get github.com/lemon4ksan/aoni
 | Возможность / Фича | Стандартный `net/http` | Resty / Обертки | `aoni` (Базовый) | `aoni/fast` |
 | :--- | :---: | :---: | :---: | :---: |
 | **Ядро движка** | `net/http` | `net/http` | `net/http` | **`fasthttp` + Нативный H2/H3** |
-| **Задержка выполнения** | ~50 мкс | ~50 мкс | ~60 мкс | **5.9 мкс (в 8.5 раз быстрее)** |
+| **Задержка выполнения** | ~50 мкс | ~50 мкс | ~56 мкс | **5.9 мкс (в 10 раз быстрее)** |
 | **Пулинг объектов (Zero-Alloc)** | ✗ | ✗ | ✗ | **✓ (`sync.Pool` Request/Response)** |
 | **Нативный HTTP/2 (`h2engine`)** | `x/net/http2` | `x/net/http2` | `x/net/http2` | **✓ (Zero-Alloc байтовый движок)** |
 | **Нативный HTTP/3 (`h3engine`)** | `quic-go` | `quic-go` | `quic-go` | **✓ (QPACK байтовый движок)** |

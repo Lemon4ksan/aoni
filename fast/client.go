@@ -205,11 +205,41 @@ func (c *Client) resolveProtocolHandler(rawURL string) http.RoundTripper {
 }
 
 func (c *Client) resolveTargetURL(req aoni.Request, path string) error {
+	if fastReqAdapter, ok := req.(*Request); ok && len(c.prepared.BaseURLHostBytes) > 0 && len(path) > 0 &&
+		path[0] == '/' &&
+		!strings.Contains(path, "://") {
+		fastReq := fastReqAdapter.req
+		fastReq.URI().SetSchemeBytes(c.prepared.BaseURLSchemeBytes)
+		fastReq.URI().SetHostBytes(c.prepared.BaseURLHostBytes)
+
+		if c.config.Defaults.BaseURL != nil && c.config.Defaults.BaseURL.Path != "" &&
+			c.config.Defaults.BaseURL.Path != "/" {
+			basePath := strings.TrimSuffix(c.config.Defaults.BaseURL.Path, "/")
+			fastReq.URI().SetPathBytes(bytesconv.S2B(basePath + path))
+		} else {
+			fastReq.URI().SetPathBytes(bytesconv.S2B(path))
+		}
+
+		return nil
+	}
+
 	var targetURL string
 	switch {
 	case len(path) >= 7 && (strings.HasPrefix(path, "http://") ||
 		strings.HasPrefix(path, "https://")):
 		targetURL = path
+	case c.prepared.BaseURLTrimmedString != "":
+		switch path == "" || path == "/" {
+		case true:
+			targetURL = c.prepared.BaseURLString
+		case false:
+			if path[0] == '/' {
+				targetURL = c.prepared.BaseURLTrimmedString + path
+			} else {
+				targetURL = c.prepared.BaseURLTrimmedString + "/" + path
+			}
+		}
+
 	case c.config.Defaults.BaseURL != nil && c.config.Defaults.BaseURL.Host != "":
 		base := c.config.Defaults.BaseURL
 		basePath := strings.TrimSuffix(base.Path, "/")
@@ -229,14 +259,16 @@ func (c *Client) resolveTargetURL(req aoni.Request, path string) error {
 
 	req.SetURL(targetURL)
 
-	if parsed, err := url.Parse(targetURL); err == nil && parsed.User != nil {
-		username := parsed.User.Username()
-		password, _ := parsed.User.Password()
-		auth := username + ":" + password
+	if strings.Contains(targetURL, "@") {
+		if parsed, err := url.Parse(targetURL); err == nil && parsed.User != nil {
+			username := parsed.User.Username()
+			password, _ := parsed.User.Password()
+			auth := username + ":" + password
 
-		basicAuth := "Basic " + base64.StdEncoding.EncodeToString([]byte(auth))
-		if req.Header("Authorization") == "" {
-			req.SetHeader("Authorization", basicAuth)
+			basicAuth := "Basic " + base64.StdEncoding.EncodeToString(bytesconv.S2B(auth))
+			if req.Header("Authorization") == "" {
+				req.SetHeader("Authorization", basicAuth)
+			}
 		}
 	}
 
@@ -253,6 +285,50 @@ func (c *Client) Close() {
 		c.powerWatcher.Close()
 		c.powerWatcher = nil
 	}
+}
+
+var (
+	methodGetBytes    = []byte("GET")
+	methodPostBytes   = []byte("POST")
+	methodPutBytes    = []byte("PUT")
+	methodDeleteBytes = []byte("DELETE")
+	methodPatchBytes  = []byte("PATCH")
+	methodHeadBytes   = []byte("HEAD")
+)
+
+func getMethodBytes(method string) []byte {
+	switch method {
+	case "GET", "get":
+		return methodGetBytes
+	case "POST", "post":
+		return methodPostBytes
+	case "PUT", "put":
+		return methodPutBytes
+	case "DELETE", "delete":
+		return methodDeleteBytes
+	case "PATCH", "patch":
+		return methodPatchBytes
+	case "HEAD", "head":
+		return methodHeadBytes
+	default:
+		return bytesconv.S2B(method)
+	}
+}
+
+func (c *Client) isFastPathEligible(ctx context.Context, mods []aoni.RequestModifier) bool {
+	if len(mods) > 0 {
+		return false
+	}
+
+	if ctx != nil && ctx.Done() != nil {
+		return false
+	}
+
+	if c.config.Engine.CookieJar != nil || c.config.Defaults.Inspector != nil {
+		return false
+	}
+
+	return true
 }
 
 // Request executes an HTTP request across HTTP/1.1, native HTTP/2, or native HTTP/3.
@@ -278,11 +354,12 @@ func (c *Client) Request(
 	fastReq := fasthttp.AcquireRequest()
 	fastResp := fasthttp.AcquireResponse()
 
+	fastReq.Header.SetMethodBytes(getMethodBytes(method))
+
 	reqAdapter := NewRequest(fastReq)
 	defer reqAdapter.Release()
 
 	reqAdapter.SetContext(ctx)
-	reqAdapter.SetMethod(method)
 
 	if err := c.resolveTargetURL(reqAdapter, path); err != nil {
 		fasthttp.ReleaseRequest(fastReq)
@@ -291,21 +368,25 @@ func (c *Client) Request(
 		return nil, err
 	}
 
-	reqCfg := aoni.GetOrInitRequestConfig(ctx)
-	if reqCfg.TargetHost == "" {
-		if u, err := url.Parse(reqAdapter.URL()); err == nil && u.Hostname() != "" {
-			reqCfg.TargetHost = u.Hostname()
-		} else if hostStr := string(fastReq.URI().Host()); hostStr != "" {
-			h, _, _ := net.SplitHostPort(hostStr)
-			if h == "" {
-				h = hostStr
-			}
+	c.applyDefaultHeaders(reqAdapter)
 
-			reqCfg.TargetHost = h
+	if c.isFastPathEligible(ctx, mods) {
+		extractUserInfoAndSetAuth(fastReq)
+
+		err := c.engine.Do(fastReq, fastResp)
+		if err != nil {
+			fasthttp.ReleaseRequest(fastReq)
+			fasthttp.ReleaseResponse(fastResp)
+			return nil, err
 		}
+
+		return NewPooledResponse(fastReq, fastResp), nil
 	}
 
-	c.applyDefaultHeaders(reqAdapter)
+	reqAdapter = NewRequest(fastReq)
+	defer reqAdapter.Release()
+
+	reqAdapter.SetContext(ctx)
 	c.applyModifiers(reqAdapter, mods)
 
 	reqCtx := reqAdapter.Context()
