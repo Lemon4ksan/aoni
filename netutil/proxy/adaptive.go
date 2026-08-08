@@ -7,6 +7,7 @@ package proxy
 import (
 	"time"
 
+	"github.com/lemon4ksan/aoni/internal/mathutil"
 	"github.com/lemon4ksan/aoni/telemetry"
 )
 
@@ -56,4 +57,35 @@ func ComputeProxyTimeout(tracker *telemetry.RTTTracker, cfg AdaptiveTimeoutConfi
 	calculated := time.Duration(float64(p95) * mult)
 
 	return max(minT, min(calculated, maxT))
+}
+
+// AdaptiveVegasLimiter uses control theory ([mathutil.VegasEngine])
+// to dynamically regulate proxy concurrency limits based on RTT latency measurements.
+type AdaptiveVegasLimiter struct {
+	vegas *mathutil.VegasEngine
+}
+
+// NewAdaptiveVegasLimiter constructs an [AdaptiveVegasLimiter].
+func NewAdaptiveVegasLimiter(minCwnd, maxCwnd int) *AdaptiveVegasLimiter {
+	return &AdaptiveVegasLimiter{
+		vegas: mathutil.NewVegasEngine(2.0, 4.0, minCwnd, maxCwnd),
+	}
+}
+
+// RecordLatency feeds a sample RTT measurement to the control engine.
+func (l *AdaptiveVegasLimiter) RecordLatency(sample time.Duration) int {
+	if l == nil || l.vegas == nil {
+		return 10
+	}
+
+	return l.vegas.Update(sample)
+}
+
+// CurrentLimit returns the adaptive concurrency limit computed by the Vegas engine.
+func (l *AdaptiveVegasLimiter) CurrentLimit() int {
+	if l == nil || l.vegas == nil {
+		return 10
+	}
+
+	return l.vegas.Limit()
 }

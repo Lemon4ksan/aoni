@@ -8,7 +8,6 @@ import (
 	"bufio"
 	"bytes"
 	"encoding/base64"
-	"encoding/binary"
 	"encoding/json"
 	"encoding/xml"
 	"errors"
@@ -23,6 +22,7 @@ import (
 
 	"github.com/lemon4ksan/aoni"
 	"github.com/lemon4ksan/aoni/internal/bytesconv"
+	"github.com/lemon4ksan/aoni/internal/framing"
 	"github.com/lemon4ksan/aoni/internal/io"
 	"github.com/lemon4ksan/aoni/mod"
 )
@@ -187,26 +187,23 @@ func (grpcWebDecoder) Decode(r stdio.Reader, target any) error {
 }
 
 func readGRPCWebFrames(reader stdio.Reader, msg proto.Message) error {
-	var (
-		header      [5]byte
-		payloadRead bool
-	)
+	var payloadRead bool
+
+	framer := framing.NewLengthPrefixedFramer(0)
 
 	for {
-		if _, err := stdio.ReadFull(reader, header[:]); err != nil {
+		flags, payload, err := framer.ReadFrame(reader)
+		if err != nil {
 			if (errors.Is(err, stdio.EOF) || errors.Is(err, stdio.ErrUnexpectedEOF)) && payloadRead {
 				return nil
 			}
 
-			return &GRPCWebError{Op: "read_header", Err: ErrInvalidGRPCWebFrame}
-		}
+			op := "read_header"
+			if errors.Is(err, framing.ErrTruncatedPayload) {
+				op = "read_payload"
+			}
 
-		flags := header[0]
-		length := binary.BigEndian.Uint32(header[1:5])
-
-		payload := make([]byte, length)
-		if _, err := stdio.ReadFull(reader, payload); err != nil {
-			return &GRPCWebError{Op: "read_payload", Err: ErrInvalidGRPCWebFrame}
+			return &GRPCWebError{Op: op, Err: ErrInvalidGRPCWebFrame}
 		}
 
 		done, err := processGRPCWebFrame(flags, payload, msg)

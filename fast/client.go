@@ -214,6 +214,7 @@ func (c *Client) resolveTargetURL(req aoni.Request, path string) error {
 		}
 
 		targetURL = base.Scheme + "://" + base.Host + basePath + cleanPath
+
 	case path == "":
 		return ErrTargetURLEmpty
 	default:
