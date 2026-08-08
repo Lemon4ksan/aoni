@@ -27,6 +27,7 @@ import (
 
 	"github.com/lemon4ksan/aoni/fingerprint/ja4"
 	"github.com/lemon4ksan/aoni/internal/bytesconv"
+	"github.com/lemon4ksan/aoni/netutil/probe"
 )
 
 // GenerateCorrelationID generates a fast, monotonic Base36 correlation ID string.
@@ -66,12 +67,21 @@ type TraceInfo struct {
 	JA4        *ja4.Report
 
 	TLSState         *tls.ConnectionState
+	CertChain        *probe.CertChainInfo
+	Probe            *probe.FullReport
 	PeerCertificates []*x509.Certificate
 
 	DNSStart     time.Time
 	ConnectStart time.Time
 	TLSStart     time.Time
 	GotConn      time.Time
+}
+
+// EnrichTLSState populates CertChain metadata from the active TLS connection state.
+func (t *TraceInfo) EnrichTLSState() {
+	if t.TLSState != nil && t.CertChain == nil {
+		t.CertChain = probe.InspectTLSChain(t.TLSState)
+	}
 }
 
 // LogValue implements [slog.LogValuer] for structured logging with log/slog.

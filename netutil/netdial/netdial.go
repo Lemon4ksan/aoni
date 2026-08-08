@@ -53,6 +53,8 @@ type DialOptions struct {
 	P0fSignature         *p0f.Signature
 	SocketController     SocketController
 	FragmentConfig       *fragment.Config
+	InterfaceName        string
+	SocketMark           uint32
 	HappyEyeballs        time.Duration
 	ProxyTimeout         time.Duration
 	BusyPollMicroseconds int

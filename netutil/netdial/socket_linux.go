@@ -6,9 +6,7 @@
 
 package netdial
 
-import (
-	"syscall"
-)
+import "golang.org/x/sys/unix"
 
 const (
 	soBusyPoll  = 50 // SOL_SOCKET SO_BUSY_POLL
@@ -18,18 +16,23 @@ const (
 func applyLinuxSocketOptions(fd uintptr, opts DialOptions) error {
 	sfd := int(fd)
 
-	// Enable SO_BUSY_POLL (Kernel network device driver busy polling in microseconds)
+	if opts.InterfaceName != "" {
+		_ = unix.SetsockoptString(sfd, unix.SOL_SOCKET, unix.SO_BINDTODEVICE, opts.InterfaceName)
+	}
+
+	if opts.SocketMark > 0 {
+		_ = unix.SetsockoptInt(sfd, unix.SOL_SOCKET, unix.SO_MARK, int(opts.SocketMark))
+	}
+
 	if opts.BusyPollMicroseconds > 0 {
-		_ = syscall.SetsockoptInt(sfd, syscall.SOL_SOCKET, soBusyPoll, opts.BusyPollMicroseconds)
+		_ = unix.SetsockoptInt(sfd, unix.SOL_SOCKET, soBusyPoll, opts.BusyPollMicroseconds)
 	}
 
-	// Enable TCP_QUICKACK (Immediate ACK transmission bypassing delayed ACK timers)
 	if opts.TCPQuickACK {
-		_ = syscall.SetsockoptInt(sfd, syscall.IPPROTO_TCP, tcpQuickACK, 1)
+		_ = unix.SetsockoptInt(sfd, unix.IPPROTO_TCP, tcpQuickACK, 1)
 	}
 
-	// Enable TCP_NODELAY (Disable Nagle's algorithm for instant frame writes)
-	_ = syscall.SetsockoptInt(sfd, syscall.IPPROTO_TCP, syscall.TCP_NODELAY, 1)
+	_ = unix.SetsockoptInt(sfd, unix.IPPROTO_TCP, unix.TCP_NODELAY, 1)
 
 	return nil
 }

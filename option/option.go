@@ -346,6 +346,20 @@ func WithRefererAutomaton(enabled bool) aoni.ClientOption {
 // 4. NETWORK, PROXY & DNS OPTIONS
 // ============================================================================
 
+// WithInterface binds outgoing TCP sockets directly to a specific network interface (e.g. "eth0", "wg0").
+func WithInterface(iface string) aoni.ClientOption {
+	return func(cfg *aoni.Config) {
+		cfg.Network.InterfaceName = iface
+	}
+}
+
+// WithSocketMark assigns a Linux netfilter socket mark (SO_MARK) for policy-based routing.
+func WithSocketMark(mark uint32) aoni.ClientOption {
+	return func(cfg *aoni.Config) {
+		cfg.Network.SocketMark = mark
+	}
+}
+
 // WithCustomNetworkDriver returns an [aoni.ClientOption] attaching a custom L3/L4 network stack driver.
 func WithCustomNetworkDriver(driver netdial.RawStackDriver) aoni.ClientOption {
 	return func(cfg *aoni.Config) {

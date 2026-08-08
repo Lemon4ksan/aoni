@@ -19,7 +19,6 @@ import (
 	"encoding/pem"
 	"errors"
 	"fmt"
-	"github.com/klauspost/compress/gzip"
 	"io"
 	"math/big"
 	"net"
@@ -30,6 +29,8 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/klauspost/compress/gzip"
 
 	"github.com/andybalholm/brotli"
 	"github.com/klauspost/compress/zstd"

@@ -153,6 +153,8 @@ func (c *Client) resolveDialContextOptions(
 
 	dialOpts = netdial.DialOptions{
 		DNSResolver:        c.network.DNSResolver,
+		InterfaceName:      c.network.InterfaceName,
+		SocketMark:         c.network.SocketMark,
 		StackDriver:        c.network.StackDriver,
 		L2Device:           c.network.L2Device,
 		SourceRotator:      c.network.SourceRotator,

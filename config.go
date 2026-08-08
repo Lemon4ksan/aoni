@@ -65,12 +65,16 @@ type BrowserID int
 const (
 	// BrowserNone disables TLS fingerprint emulation, falling back to standard Go TLS.
 	BrowserNone BrowserID = iota
+
+	// BrowserChrome emulates Google Chrome TLS handshake fingerprints.
 	BrowserChrome
+
+	// BrowserFirefox emulates Mozilla Firefox TLS handshake fingerprints.
 	BrowserFirefox
+
+	// BrowserSafari emulates Apple Safari TLS handshake fingerprints.
 	BrowserSafari
 )
-
-var DefaultAcceptEncoding = []string{"zstd, br, gzip"}
 
 // DefaultBrowserProfiles provides realistic, modern Chrome browser profiles with
 // matching User-Agent strings and Client Hints to pass anti-bot heuristics.
@@ -198,6 +202,8 @@ type NetworkConfig struct {
 	HostRewrite           *HostRewriteConfig
 	HappyEyeballsDelay    time.Duration
 	HedgingDelay          time.Duration
+	InterfaceName         string
+	SocketMark            uint32
 	ProxyDNS              bool
 	SSRFGuard             bool
 	EnablePowerManagement bool
