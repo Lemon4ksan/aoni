@@ -217,6 +217,19 @@ func (ft *FramedTransport) H2Transport() *http2.Transport {
 	return &ft.h2Transport
 }
 
+// Unwrap returns the wrapped [*http.Transport] layer.
+func (ft *FramedTransport) Unwrap() http.RoundTripper {
+	return ft.Transport
+}
+
+// CloneTransport creates a copy of [FramedTransport] wrapping next.
+func (ft *FramedTransport) CloneTransport(next http.RoundTripper) http.RoundTripper {
+	if base, ok := next.(*http.Transport); ok {
+		return NewFramedTransport(base, ft.settings, ft.orderedKeys...)
+	}
+	return ft
+}
+
 // RoundTrip executes an HTTP request transaction, handling uTLS ALPN negotiation for HTTP/2 vs HTTP/1.1.
 func (ft *FramedTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 	if req.URL == nil || req.URL.Scheme != "https" {
