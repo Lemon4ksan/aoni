@@ -20,6 +20,7 @@ import (
 	"github.com/lemon4ksan/aoni/fingerprint/ja4"
 	"github.com/lemon4ksan/aoni/fingerprint/p0f"
 	"github.com/lemon4ksan/aoni/internal/pipeline"
+	"github.com/lemon4ksan/aoni/internal/transport"
 	"github.com/lemon4ksan/aoni/netutil/cert"
 	"github.com/lemon4ksan/aoni/netutil/fragment"
 	"github.com/lemon4ksan/aoni/netutil/ip"
@@ -45,6 +46,12 @@ const (
 	// RedirectLimitUnset is a special value that indicates using the default redirect limit.
 	RedirectLimitUnset = -2
 )
+
+// ConnFilter defines a 7-Zip-style stream transformation codec evaluated during socket dialing.
+type ConnFilter = transport.ConnFilter
+
+// DialConfig is an alias for transport.DialConfig.
+type DialConfig = transport.DialConfig
 
 // DefaultSensitiveHeaders defines sensitive credential and session headers
 // automatically scrubbed during cross-origin HTTP redirects (RFC 9110 §15.4)
@@ -249,6 +256,9 @@ type NetworkConfig struct {
 
 	// HostRewrite configures static hostname-to-IP/host remapping rules.
 	HostRewrite *HostRewriteConfig
+
+	// ConnFilters registers custom 7-Zip-style stream codec filters evaluated during socket dialing.
+	ConnFilters []ConnFilter
 
 	// HappyEyeballsDelay sets the IPv4/IPv6 connection racing delay (RFC 8305).
 	// Default: 300ms.

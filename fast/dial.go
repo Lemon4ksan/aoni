@@ -149,6 +149,7 @@ func (c *Client) buildDialConfig(ctx context.Context) transport.DialConfig {
 		AutoECH:            c.config.Fingerprint.AutoECH,
 		Enable0RTT:         c.config.Fingerprint.Enable0RTT,
 		ECHConfigList:      c.config.Fingerprint.ECHConfigList,
+		ConnFilters:        c.config.Network.ConnFilters,
 	}
 
 	if reqCfg != nil {

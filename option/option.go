@@ -984,3 +984,10 @@ func WithOSPowerManagement(enable bool) aoni.ClientOption {
 		cfg.Network.EnablePowerManagement = enable
 	}
 }
+
+// WithConnFilter registers custom 7-Zip-style stream codec filters evaluated during socket dialing.
+func WithConnFilter(filters ...aoni.ConnFilter) aoni.ClientOption {
+	return func(cfg *aoni.Config) {
+		cfg.Network.ConnFilters = append(cfg.Network.ConnFilters, filters...)
+	}
+}

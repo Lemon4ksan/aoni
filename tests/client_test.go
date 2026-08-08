@@ -2401,3 +2401,31 @@ func TestFluentAPI_PathInterpolationAndDownload(t *testing.T) {
 	assert.Equal(t, "found", res.Message)
 	assert.Equal(t, "success", res.Status)
 }
+
+func TestClient_CustomConnFilter(t *testing.T) {
+	t.Parallel()
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	t.Cleanup(server.Close)
+
+	var filterCalled int32
+
+	customFilter := func(ctx context.Context, conn net.Conn, targetHost string, cfg *aoni.DialConfig) (net.Conn, error) {
+		atomic.StoreInt32(&filterCalled, 1)
+		return conn, nil
+	}
+
+	client := aoni.NewClient(nil,
+		option.WithBaseURL(server.URL),
+		option.WithConnFilter(customFilter),
+	)
+
+	resp, err := client.Request(t.Context(), http.MethodGet, "/")
+	require.NoError(t, err)
+	t.Cleanup(func() { aoni.CloseResponse(resp) })
+
+	assert.Equal(t, http.StatusOK, resp.StatusCode)
+	assert.Equal(t, int32(1), atomic.LoadInt32(&filterCalled))
+}

@@ -148,6 +148,7 @@ func (c *Client) buildDialConfig(ctx context.Context) transport.DialConfig {
 		CertCompression:    c.fingerprint.CertCompression,
 		HeaderOrder:        c.fingerprint.HeaderOrder,
 		JA4Callback:        c.fingerprint.JA4Callback,
+		ConnFilters:        c.network.ConnFilters,
 	}
 
 	if reqCfg != nil {

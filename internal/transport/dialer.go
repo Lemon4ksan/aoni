@@ -21,7 +21,6 @@ import (
 
 	"github.com/lemon4ksan/aoni/fingerprint/ja4"
 	"github.com/lemon4ksan/aoni/fingerprint/p0f"
-	"github.com/lemon4ksan/aoni/internal/h1"
 	"github.com/lemon4ksan/aoni/netutil"
 	"github.com/lemon4ksan/aoni/netutil/cert"
 	"github.com/lemon4ksan/aoni/netutil/fragment"
@@ -70,6 +69,7 @@ type DialConfig struct {
 	HeaderOrder     []string
 	JA4Callback     func(ja4.Report)
 	JA4ReportStore  *ja4.Report
+	ConnFilters     []ConnFilter
 	AutoECH         bool
 	Enable0RTT      bool
 }
@@ -89,6 +89,26 @@ func NewUniversalDialer() *UniversalDialer {
 	}
 }
 
+// buildPipeline constructs the slice of active ConnFilter codecs based on DialConfig.
+// If no L7 filters are needed, it returns an empty slice for zero-allocation execution.
+func (d *UniversalDialer) buildPipeline(cfg *DialConfig, isTLS bool) []ConnFilter {
+	if !isTLS && len(cfg.ConnFilters) == 0 {
+		return nil
+	}
+
+	filters := make([]ConnFilter, 0, 1+len(cfg.ConnFilters))
+
+	if isTLS {
+		filters = append(filters, TLSHandshakeFilter)
+	}
+
+	if len(cfg.ConnFilters) > 0 {
+		filters = append(filters, cfg.ConnFilters...)
+	}
+
+	return filters
+}
+
 // DialContext establishes a raw L4 TCP connection applying DNS resolution,
 // SSRF guards, IP rotation, p0f spoofing, and TCP write fragmentation.
 func (d *UniversalDialer) DialContext(ctx context.Context, network, addr string, cfg DialConfig) (net.Conn, error) {
@@ -104,7 +124,14 @@ func (d *UniversalDialer) DialContext(ctx context.Context, network, addr string,
 
 	dialOpts := buildNetdialOptions(cfg)
 
-	return netdial.DialL4(ctx, network, targetAddr, dialOpts)
+	rawConn, err := netdial.DialL4(ctx, network, targetAddr, dialOpts)
+	if err != nil {
+		return nil, err
+	}
+
+	filters := d.buildPipeline(&cfg, false)
+
+	return ExecutePipeline(ctx, rawConn, host, &cfg, filters)
 }
 
 // DialTLSContext establishes an encrypted TLS or uTLS connection over L4 TCP,
@@ -120,6 +147,7 @@ func (d *UniversalDialer) DialTLSContext(ctx context.Context, network, addr stri
 	host, port = applyRewriteRules(host, port, cfg.HostRewriteRules)
 
 	targetAddr := net.JoinHostPort(host, port)
+	cfg.ServerName = resolveServerName(cfg.ServerName, host)
 
 	dialOpts := buildNetdialOptions(cfg)
 
@@ -133,15 +161,9 @@ func (d *UniversalDialer) DialTLSContext(ctx context.Context, network, addr stri
 		return nil, err
 	}
 
-	trackingConn := netutil.NewWriteTrackingConn(rawConn)
+	filters := d.buildPipeline(&cfg, true)
 
-	// Use uTLS fingerprinting if HelloID, SpecProvider, or custom TLS settings are active
-	if cfg.HelloID != nil || cfg.SpecProvider != nil {
-		return d.handshakeUTLS(ctx, trackingConn, host, cfg)
-	}
-
-	// Standard Go crypto/tls fallback
-	return d.handshakeStandardTLS(ctx, rawConn, host, dialOpts, cfg)
+	return ExecutePipeline(ctx, rawConn, host, &cfg, filters)
 }
 
 // DialH2 dials an L4 connection and forces uTLS handshake with ALPN "h2".
@@ -163,123 +185,6 @@ func (d *UniversalDialer) DialH2(ctx context.Context, addr string, cfg DialConfi
 	return conn, nil
 }
 
-func (d *UniversalDialer) handshakeUTLS(ctx context.Context, conn net.Conn, host string, cfg DialConfig) (net.Conn, error) {
-	utlsOpts := netdial.RTLSOptions{
-		HelloID:            cfg.HelloID,
-		SpecProvider:       cfg.SpecProvider,
-		SessionCache:       cfg.SessionCache,
-		CertificatePins:    cfg.CertificatePins,
-		CertCompression:    cfg.CertCompression,
-		JA4Callback:        cfg.JA4Callback,
-		BaseTLSConfig:      cfg.BaseTLSConfig,
-		ALPNOverride:       cfg.ALPNOverride,
-		ECHConfigList:      cfg.ECHConfigList,
-		AutoECH:            cfg.AutoECH,
-		InsecureSkipVerify: cfg.InsecureSkipVerify || (cfg.BaseTLSConfig != nil && cfg.BaseTLSConfig.InsecureSkipVerify),
-		DNSResolver:        cfg.DNSResolver,
-	}
-
-	if utlsOpts.BaseTLSConfig == nil {
-		utlsOpts.BaseTLSConfig = &tls.Config{}
-	}
-
-	serverName := resolveServerName(cfg.ServerName, host)
-	if utlsOpts.BaseTLSConfig.ServerName == "" && serverName != "" {
-		utlsOpts.BaseTLSConfig.ServerName = serverName
-	}
-
-	if len(utlsOpts.ALPNOverride) == 0 {
-		if utlsOpts.BaseTLSConfig != nil && len(utlsOpts.BaseTLSConfig.NextProtos) > 0 {
-			utlsOpts.ALPNOverride = utlsOpts.BaseTLSConfig.NextProtos
-		} else {
-			utlsOpts.ALPNOverride = []string{"h2", "http/1.1"}
-		}
-	}
-
-	uConn, report, err := netdial.HandshakeUTLS(ctx, conn, host, utlsOpts)
-	if err != nil {
-		return nil, err
-	}
-
-	if cfg.JA4ReportStore != nil {
-		report.JA4H = cfg.JA4ReportStore.JA4H
-		*cfg.JA4ReportStore = report
-	}
-
-	negotiatedProto := uConn.ConnectionState().NegotiatedProtocol
-
-	wrappedConn := &uTLSConnWrapper{uConn}
-
-	// If HTTP/1.1 was negotiated and custom header ordering is requested, wrap in HeaderOrderingConn
-	if negotiatedProto != "h2" && len(cfg.HeaderOrder) > 0 {
-		return &h1.HeaderOrderingConn{
-			Conn:        wrappedConn,
-			OrderedKeys: cfg.HeaderOrder,
-		}, nil
-	}
-
-	return wrappedConn, nil
-}
-
-type uTLSConnWrapper struct {
-	*netdial.UConnWrapper
-}
-
-func (w *uTLSConnWrapper) Handshake() error {
-	return nil
-}
-
-func (w *uTLSConnWrapper) ConnectionState() tls.ConnectionState {
-	uState := w.UConn.ConnectionState()
-	return tls.ConnectionState{
-		Version:                    uState.Version,
-		HandshakeComplete:          true,
-		DidResume:                  uState.DidResume,
-		CipherSuite:                uState.CipherSuite,
-		NegotiatedProtocol:         uState.NegotiatedProtocol,
-		NegotiatedProtocolIsMutual: true,
-		ServerName:                 uState.ServerName,
-		PeerCertificates:           uState.PeerCertificates,
-		VerifiedChains:             uState.VerifiedChains,
-	}
-}
-
-func (d *UniversalDialer) handshakeStandardTLS(
-	ctx context.Context,
-	conn net.Conn,
-	host string,
-	dialOpts netdial.DialOptions,
-	cfg DialConfig,
-) (net.Conn, error) {
-	baseCfg := cfg.BaseTLSConfig
-	if baseCfg == nil {
-		baseCfg = &tls.Config{}
-	}
-
-	tlsCfg := baseCfg
-	serverName := resolveServerName(cfg.ServerName, host)
-
-	if tlsCfg.ServerName == "" && serverName != "" {
-		cloned := tlsCfg.Clone()
-		cloned.ServerName = serverName
-		tlsCfg = cloned
-	}
-
-	if dialOpts.InsecureSkipVerify {
-		cloned := tlsCfg.Clone()
-		cloned.InsecureSkipVerify = true
-		tlsCfg = cloned
-	}
-
-	tlsConn := tls.Client(conn, tlsCfg)
-	if err := tlsConn.HandshakeContext(ctx); err != nil {
-		_ = conn.Close()
-		return nil, err
-	}
-
-	return tlsConn, nil
-}
-
 func buildNetdialOptions(cfg DialConfig) netdial.DialOptions {
 	return netdial.DialOptions{
 		ProxyURL:             cfg.ProxyURL,
@@ -297,6 +202,18 @@ func buildNetdialOptions(cfg DialConfig) netdial.DialOptions {
 		ProxyDNS:             cfg.ProxyDNS,
 		InsecureSkipVerify:   cfg.InsecureSkipVerify,
 		BusyPollMicroseconds: cfg.BusyPollMicroseconds,
+	}
+}
+
+func applyDelay(ctx context.Context, d time.Duration) error {
+	t := time.NewTimer(d)
+	defer t.Stop()
+
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-t.C:
+		return nil
 	}
 }
 
@@ -351,16 +268,4 @@ func applyRewriteRules(host, port string, rules map[string]string) (string, stri
 	}
 
 	return host, port
-}
-
-func applyDelay(ctx context.Context, delay time.Duration) error {
-	t := time.NewTimer(delay)
-	defer t.Stop()
-
-	select {
-	case <-ctx.Done():
-		return ctx.Err()
-	case <-t.C:
-		return nil
-	}
 }
