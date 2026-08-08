@@ -5,9 +5,9 @@
 package probe_test
 
 import (
+	"crypto/tls"
 	"crypto/x509"
 	"crypto/x509/pkix"
-	"crypto/tls"
 	"math/big"
 	"net"
 	"testing"
@@ -96,9 +96,11 @@ func TestPredictor(t *testing.T) {
 	for _, pred := range predictions {
 		if pred.Port == 443 {
 			found443 = true
+
 			assert.Greater(t, pred.Confidence, 0.5)
 		}
 	}
+
 	assert.True(t, found443, "Predictor should recommend port 443 when port 80 is open")
 }
 

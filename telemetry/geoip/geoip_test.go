@@ -17,6 +17,7 @@ func TestDB_NilSafety(t *testing.T) {
 	t.Parallel()
 
 	var db *geoip.DB
+
 	meta, err := db.Lookup(netip.MustParseAddr("8.8.8.8"))
 	assert.NoError(t, err)
 	assert.Nil(t, meta)

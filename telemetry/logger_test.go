@@ -20,6 +20,7 @@ func TestSlogAdapter(t *testing.T) {
 	t.Parallel()
 
 	var buf bytes.Buffer
+
 	handler := slog.NewTextHandler(&buf, nil)
 	slogger := slog.New(handler)
 
@@ -46,9 +47,11 @@ func TestSlogAdapter_DefaultFallback(t *testing.T) {
 func TestStructuredAdapter_ZapAndZerologSimulation(t *testing.T) {
 	t.Parallel()
 
-	var loggedMsg string
-	var loggedLevel telemetry.LogLevel
-	var loggedKV []any
+	var (
+		loggedMsg   string
+		loggedLevel telemetry.LogLevel
+		loggedKV    []any
+	)
 
 	adapter := telemetry.NewStructuredAdapter(func(level telemetry.LogLevel, msg string, kv ...any) {
 		loggedLevel = level
