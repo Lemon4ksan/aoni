@@ -18,6 +18,7 @@ import (
 	"github.com/lemon4ksan/aoni/fingerprint/p0f"
 	"github.com/lemon4ksan/aoni/internal/io"
 	"github.com/lemon4ksan/aoni/netutil/fragment"
+	"github.com/lemon4ksan/aoni/netutil/netdial"
 	"github.com/lemon4ksan/aoni/telemetry"
 )
 
@@ -62,6 +63,7 @@ type RequestConfig struct {
 	RequestTimeoutCancel    context.CancelFunc
 	HedgingDelayOverride    *time.Duration
 	ProxyAddr               *url.URL
+	DNSResolver             netdial.DNSResolver
 	ResponseValidator       func(resp *http.Response) error
 	RetryPolicy             *RetryOverride
 	P0fSignature            *p0f.Signature

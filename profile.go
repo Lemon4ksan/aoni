@@ -14,9 +14,18 @@ import (
 	"github.com/lemon4ksan/aoni/fingerprint/profiles"
 )
 
-// ApplyTLSVariantToConfig translates and applies TLS fingerprint configurations
-// from a browser profile variant to the client configuration.
+// ApplyTLSVariantToConfig maps uTLS ClientHello specifications, presets, and QUIC TLS parameters
+// from a browser profile variant ([profiles.Variant]) into the target client configuration.
+//
+// TLS Emulation Precedence:
+//  1. HelloSpec (explicit uTLS ClientHelloSpec builder)
+//  2. HelloID (predefined uTLS ClientHelloID preset)
+//  3. BrowserID (fallback browser profile identifier)
 func ApplyTLSVariantToConfig(cfg *Config, variant *profiles.Variant) {
+	if variant == nil {
+		return
+	}
+
 	if cfg.Fingerprint.BrowserID == BrowserNone {
 		if variant.HelloID.Client == "Firefox" {
 			cfg.Fingerprint.BrowserID = BrowserFirefox
@@ -41,9 +50,17 @@ func ApplyTLSVariantToConfig(cfg *Config, variant *profiles.Variant) {
 	}
 }
 
-// ApplyHTTPVariantToConfig maps HTTP/2, HTTP/3 transport frames and base browser headers
-// from a browser profile variant to the client configuration.
+// ApplyHTTPVariantToConfig translates HTTP/2 SETTINGS frames, HTTP/3 QUIC transport limits,
+// default browser request headers, and method-specific header ordering rules into the client configuration.
+//
+// Modern WAF and anti-bot systems (e.g. Akamai, Cloudflare) inspect the exact order of pseudo-headers
+// (:method, :authority, :scheme, :path) and standard headers. ApplyHTTPVariantToConfig populates
+// Fingerprint.HeaderOrder with the browser-authentic header sequence extracted from variant.HeaderCache.
 func ApplyHTTPVariantToConfig(cfg *Config, variant *profiles.Variant, os profiles.OSKey) {
+	if variant == nil {
+		return
+	}
+
 	h2Settings, h3Settings := applyHTTPSettings(variant)
 	if h2Settings != nil {
 		cfg.Fingerprint.H2Settings = h2Settings
@@ -84,29 +101,35 @@ func ApplyHTTPVariantToConfig(cfg *Config, variant *profiles.Variant, os profile
 	cfg.Fingerprint.HeaderOrder = getHeadersOrder
 }
 
-// ApplyProfileHeaders populates the target outgoing request with browser-grade headers,
-// boundary lines, and frame order sequences matching the profile variant.
+// ApplyProfileHeaders injects method-specific browser headers, WebKit/Gecko multipart boundary lines,
+// and method-tailored header serialization sequences into the outgoing request contract.
+//
+// Allocates headersMap only if the profile variant defines an InsertHeaders closure.
 func ApplyProfileHeaders(req Request, variant *profiles.Variant, os profiles.OSKey) {
-	headersMap := make(map[string]string)
-	if stdReq := req.HTTPRequest(); stdReq != nil {
-		for k, v := range stdReq.Header {
-			if len(v) > 0 {
-				headersMap[k] = v[0]
-			}
-		}
+	if variant == nil {
+		return
 	}
 
 	if variant.InsertHeaders != nil {
-		variant.InsertHeaders(headersMap, req.Method())
-	}
-
-	for k, v := range headersMap {
-		if k[0] == byte(':') {
-			continue
+		headersMap := make(map[string]string)
+		if stdReq := req.HTTPRequest(); stdReq != nil {
+			for k, v := range stdReq.Header {
+				if len(v) > 0 {
+					headersMap[k] = v[0]
+				}
+			}
 		}
 
-		if v != "" && req.Header(k) == "" {
-			req.SetHeader(k, v)
+		variant.InsertHeaders(headersMap, req.Method())
+
+		for k, v := range headersMap {
+			if len(k) > 0 && k[0] == ':' {
+				continue
+			}
+
+			if v != "" && req.Header(k) == "" {
+				req.SetHeader(k, v)
+			}
 		}
 	}
 
@@ -120,6 +143,7 @@ func ApplyProfileHeaders(req Request, variant *profiles.Variant, os profiles.OSK
 	}
 }
 
+// staticSpecProvider wraps a static *utls.ClientHelloSpec to satisfy the ClientHelloSpecProvider interface.
 type staticSpecProvider struct {
 	Spec *utls.ClientHelloSpec
 }

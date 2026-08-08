@@ -36,6 +36,7 @@ import (
 	"github.com/lemon4ksan/aoni/internal/io"
 	"github.com/lemon4ksan/aoni/internal/pipeline"
 	"github.com/lemon4ksan/aoni/netutil/fragment"
+	"github.com/lemon4ksan/aoni/netutil/netdial"
 	"github.com/lemon4ksan/aoni/telemetry"
 )
 
@@ -1209,5 +1210,12 @@ func WithJA4Callback(fn func(ja4.Report)) aoni.RequestModifier {
 func WithClientHelloSpecProvider(provider aoni.ClientHelloSpecProvider) aoni.RequestModifier {
 	return func(req aoni.Request) {
 		aoni.GetOrInitRequestConfig(req).ClientHelloSpecProvider = provider
+	}
+}
+
+// WithDNSResolver constructs an [aoni.RequestModifier] assigning a per-request custom DNS resolver override.
+func WithDNSResolver(resolver netdial.DNSResolver) aoni.RequestModifier {
+	return func(req aoni.Request) {
+		aoni.GetOrInitRequestConfig(req).DNSResolver = resolver
 	}
 }

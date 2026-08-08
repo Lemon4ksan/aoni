@@ -991,3 +991,14 @@ func WithConnFilter(filters ...aoni.ConnFilter) aoni.ClientOption {
 		cfg.Network.ConnFilters = append(cfg.Network.ConnFilters, filters...)
 	}
 }
+
+// WithLocale returns an [aoni.ClientOption] that configures the Accept-Language header
+// for localization matching target proxy countries (e.g., "fr-FR,fr;q=0.9,en-US;q=0.8").
+func WithLocale(locale string) aoni.ClientOption {
+	return func(cfg *aoni.Config) {
+		if cfg.Defaults.Headers == nil {
+			cfg.Defaults.Headers = make(http.Header)
+		}
+		cfg.Defaults.Headers.Set("Accept-Language", locale)
+	}
+}

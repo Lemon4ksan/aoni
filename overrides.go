@@ -21,14 +21,17 @@ import (
 	"github.com/lemon4ksan/aoni/internal/io"
 	"github.com/lemon4ksan/aoni/internal/pipeline"
 	"github.com/lemon4ksan/aoni/internal/timer"
+	"github.com/lemon4ksan/aoni/netutil/netdial"
 	"github.com/lemon4ksan/aoni/telemetry"
 )
 
-// AsReplayable wraps rc into a [io.ReplayableBody] using active buffers or tee-buffered fallback.
+// AsReplayable wraps an io.ReadCloser into a replayable stream ([io.ReplayableBody])
+// using in-memory byte buffers or tee-buffered fallbacks to support stream rewinding.
 var AsReplayable = io.AsReplayable
 
-// ResponseTrace extracts the [TraceInfo] previously captured via [WithTraceContext].
-// Returns nil if no trace was registered on the request.
+// ResponseTrace extracts fine-grained execution metrics and network timing details
+// ([telemetry.TraceInfo]) captured during request execution from the response context.
+// Returns nil if no trace container was registered on the request.
 func ResponseTrace(resp *http.Response) *telemetry.TraceInfo {
 	if resp == nil || resp.Request == nil {
 		return nil
@@ -42,8 +45,8 @@ func ResponseTrace(resp *http.Response) *telemetry.TraceInfo {
 	return nil
 }
 
-// HostRewriteRules extracts and returns active host rewrite rules from the context.
-// Returns nil if no rewrite rules are attached to the context.
+// HostRewriteRules extracts per-request hostname-to-IP/host remapping rules from the context.
+// Returns nil if no host rewrite rules are attached to the request context.
 func HostRewriteRules(ctx context.Context) map[string]string {
 	cfg := GetRequestConfig(ctx)
 	if cfg != nil && cfg.HostRewrite != nil {
@@ -53,9 +56,9 @@ func HostRewriteRules(ctx context.Context) map[string]string {
 	return nil
 }
 
-// WithContextModifier attaches request modifiers to the context.
-// Third-party HTTP libraries carrying this context will propagate these modifiers
-// into the aoni execution pipeline automatically.
+// WithContextModifier attaches functional [RequestModifier] closures directly to a context.
+// Third-party HTTP SDKs (e.g. Resty, AWS SDK, Azure SDK) carrying this context will
+// automatically propagate these modifiers into the aoni execution pipeline.
 func WithContextModifier(ctx context.Context, mods ...RequestModifier) context.Context {
 	if len(mods) == 0 {
 		return ctx
@@ -71,8 +74,7 @@ func WithContextModifier(ctx context.Context, mods ...RequestModifier) context.C
 	return ctx
 }
 
-// ContextModifiers retrieves all [RequestModifier] functions stored in the context.
-// Note: returns pipeline.RequestModifier slice since modifiers are stored wrapped.
+// ContextModifiers retrieves all per-request [RequestModifier] closures stored in the context.
 func ContextModifiers(ctx context.Context) []pipeline.RequestModifier {
 	cfg := GetRequestConfig(ctx)
 	if cfg != nil {
@@ -82,8 +84,8 @@ func ContextModifiers(ctx context.Context) []pipeline.RequestModifier {
 	return nil
 }
 
-// MarkModifierError attaches a serialization or setup error to the request config,
-// causing the client to abort request dispatching before sending wire data.
+// MarkModifierError attaches a serialization or setup error to the request context.
+// When an error is present, the client pipeline aborts execution prior to transmitting data on the wire.
 func MarkModifierError(req any, err error) {
 	if err == nil {
 		return
@@ -92,7 +94,8 @@ func MarkModifierError(req any, err error) {
 	GetOrInitRequestConfig(req).BodyError = err
 }
 
-// GetProxyOverride returns the per-request proxy URL string stored in the context.
+// GetProxyOverride retrieves the per-request proxy server URL stored in the context.
+// Returns generic.None if no proxy override is set for the current execution.
 func GetProxyOverride(ctx context.Context) generic.Optional[string] {
 	cfg := GetRequestConfig(ctx)
 	if cfg == nil || cfg.ProxyAddr == nil {
@@ -102,16 +105,17 @@ func GetProxyOverride(ctx context.Context) generic.Optional[string] {
 	return generic.Some(cfg.ProxyAddr.String())
 }
 
-// GetInsecureSkipVerify reports whether TLS certificate verification is bypassed for this request.
+// GetInsecureSkipVerify reports whether TLS certificate and hostname verification is bypassed
+// for the current request execution context.
 func GetInsecureSkipVerify(ctx context.Context) bool {
 	cfg := GetRequestConfig(ctx)
 	return cfg != nil && cfg.InsecureSkipVerify
 }
 
-// TCPDelayRange defines the bounds for randomized pre-dial TCP delay jitter.
+// TCPDelayRange defines minimum and maximum bounds for randomized pre-dial TCP delay jitter.
 type TCPDelayRange = pipeline.TCPDelayRange
 
-// GetTCPDelay retrieves the configured [TCPDelayRange] from context.
+// GetTCPDelay retrieves the configured pre-dial TCP delay jitter range from context.
 func GetTCPDelay(ctx context.Context) generic.Optional[TCPDelayRange] {
 	cfg := GetRequestConfig(ctx)
 	if cfg == nil || cfg.TCPDelay.Max <= 0 {
@@ -121,10 +125,8 @@ func GetTCPDelay(ctx context.Context) generic.Optional[TCPDelayRange] {
 	return generic.Some(cfg.TCPDelay)
 }
 
-// ApplyTCPDelay inspects the context for TCP delay range jitter and sleeps
-// for a random duration within those bounds before dialing.
-//
-// Respects context cancellation and recycles timer instances via the internal pool.
+// ApplyTCPDelay inspects the context for pre-dial TCP delay jitter settings and pauses
+// execution for a randomized duration within those bounds prior to opening L4 sockets.
 func ApplyTCPDelay(ctx context.Context) error {
 	r, ok := GetTCPDelay(ctx).Value()
 	if !ok || r.Max <= 0 {
@@ -153,7 +155,7 @@ func ApplyTCPDelay(ctx context.Context) error {
 	}
 }
 
-// GetConnMetadata retrieves connection metadata stored under key from context.
+// GetConnMetadata retrieves custom connection metadata stored under key in the request context.
 func GetConnMetadata(ctx context.Context, key string) generic.Optional[any] {
 	cfg := GetRequestConfig(ctx)
 	if cfg == nil || cfg.Metadata == nil {
@@ -168,7 +170,7 @@ func GetConnMetadata(ctx context.Context, key string) generic.Optional[any] {
 	return generic.Some(val)
 }
 
-// GetResponseValidator returns the per-request response validator function from context.
+// GetResponseValidator retrieves the per-request response validation callback from context.
 func GetResponseValidator(ctx context.Context) func(resp *http.Response) error {
 	cfg := GetRequestConfig(ctx)
 	if cfg == nil {
@@ -178,7 +180,7 @@ func GetResponseValidator(ctx context.Context) func(resp *http.Response) error {
 	return cfg.ResponseValidator
 }
 
-// GetCacheTTL returns the per-request cache TTL duration from context.
+// GetCacheTTL retrieves the per-request HTTP response caching TTL duration from context.
 func GetCacheTTL(ctx context.Context) generic.Optional[time.Duration] {
 	cfg := GetRequestConfig(ctx)
 	if cfg == nil || cfg.CacheTTL <= 0 {
@@ -186,6 +188,26 @@ func GetCacheTTL(ctx context.Context) generic.Optional[time.Duration] {
 	}
 
 	return generic.Some(cfg.CacheTTL)
+}
+
+// GetTimeoutOverride retrieves the per-request timeout duration override from context.
+func GetTimeoutOverride(ctx context.Context) generic.Optional[time.Duration] {
+	cfg := GetRequestConfig(ctx)
+	if cfg == nil || cfg.TimeoutOverride <= 0 {
+		return generic.None[time.Duration]()
+	}
+
+	return generic.Some(cfg.TimeoutOverride)
+}
+
+// GetDNSResolverOverride retrieves the per-request DNS resolver override from context.
+func GetDNSResolverOverride(ctx context.Context) netdial.DNSResolver {
+	cfg := GetRequestConfig(ctx)
+	if cfg != nil {
+		return cfg.DNSResolver
+	}
+
+	return nil
 }
 
 // Or combines multiple [RetryCondition] predicates, returning true if ANY condition is satisfied.
@@ -214,7 +236,7 @@ func And(conditions ...RetryCondition) RetryCondition {
 	}
 }
 
-// FallbackString constructs a [FallbackFunc] returning plain text with the specified status code.
+// FallbackString constructs a synthetic [FallbackFunc] returning plain text with the specified status code.
 func FallbackString(statusCode int, text string) FallbackFunc {
 	return func(req Request, _ error) (Response, error) {
 		header := make(http.Header)
@@ -239,7 +261,7 @@ func FallbackString(statusCode int, text string) FallbackFunc {
 	}
 }
 
-// FallbackJSON constructs a [FallbackFunc] returning JSON-encoded data with the specified status code.
+// FallbackJSON constructs a synthetic [FallbackFunc] returning JSON-encoded data with the specified status code.
 func FallbackJSON(statusCode int, data any) FallbackFunc {
 	return func(req Request, _ error) (Response, error) {
 		bodyBytes, err := json.Marshal(data)
@@ -276,14 +298,11 @@ func GetRetryOverride(ctx context.Context) generic.Optional[RetryOverride] {
 		return generic.None[RetryOverride]()
 	}
 
-	if cfg.RetryPolicy != nil {
-		return generic.Some(*cfg.RetryPolicy)
-	}
-
-	return generic.None[RetryOverride]()
+	return generic.Some(*cfg.RetryPolicy)
 }
 
-// ProxyFuncWithOverride wraps a base proxy resolution function so that per-request proxy overrides take precedence.
+// ProxyFuncWithOverride wraps a base proxy resolution function so that per-request
+// proxy overrides attached to the context take precedence.
 func ProxyFuncWithOverride(base func(*http.Request) (*url.URL, error)) func(*http.Request) (*url.URL, error) {
 	return func(req *http.Request) (*url.URL, error) {
 		if raw, ok := GetProxyOverride(req.Context()).Value(); ok && raw != "" {
@@ -298,7 +317,8 @@ func ProxyFuncWithOverride(base func(*http.Request) (*url.URL, error)) func(*htt
 	}
 }
 
-// TLSConfigWithOverride clones base and applies per-request TLS settings (e.g. InsecureSkipVerify) from context.
+// TLSConfigWithOverride clones base and applies per-request TLS settings
+// (such as InsecureSkipVerify) extracted from the request context.
 func TLSConfigWithOverride(ctx context.Context, base *tls.Config) *tls.Config {
 	if !GetInsecureSkipVerify(ctx) {
 		return base

@@ -626,7 +626,7 @@ func TestRateLimitMiddleware_ClampsNegative(t *testing.T) {
 func TestSlidingWindowRateLimit(t *testing.T) {
 	t.Parallel()
 
-	mw := SlidingWindowRateLimit(3, 100*time.Millisecond)
+	mw := LimitEnforcer(NewSlidingWindowLimiter(3, 100*time.Millisecond))
 
 	var calls int
 

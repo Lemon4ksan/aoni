@@ -49,6 +49,9 @@ var (
 
 	// ErrCircuitOpen is returned when a circuit breaker blocks requests to an unhealthy host.
 	ErrCircuitOpen = errors.New("aoni: circuit breaker open for target host")
+
+	// ErrRetryAfterExceeded is returned when the server's Retry-After delay exceeds opts.MaxRetryAfter.
+	ErrRetryAfterExceeded = errors.New("aoni: server Retry-After exceeds MaxRetryAfter limit")
 )
 
 // RetryOnProxyFault is a convenience alias for [proxy.RetryCondition],
@@ -155,48 +158,41 @@ func (l *SlidingWindowLimiter) Allow(now time.Time) (bool, time.Duration) {
 		l.timestamps[l.tail] = now
 		l.tail = (l.tail + 1) % l.limit
 		l.count++
-
 		return true, 0
 	}
 
 	oldest := l.timestamps[l.head]
-	waitTime := oldest.Add(l.window).Sub(now)
-
-	return false, max(waitTime, 0)
+	return false, oldest.Add(l.window).Sub(now)
 }
 
-// SlidingWindowRateLimit enforces sliding-window request throttling using a [SlidingWindowLimiter].
-func SlidingWindowRateLimit(limit int, window time.Duration) aoni.Middleware {
-	limiter := NewSlidingWindowLimiter(limit, window)
-
+// LimitEnforcer creates a [aoni.Middleware] enforcing limits via [SlidingWindowLimiter].
+func LimitEnforcer(limiter *SlidingWindowLimiter) aoni.Middleware {
 	return func(next aoni.RequestDoer) aoni.RequestDoer {
 		return aoni.DoerFunc(func(req aoni.Request) (aoni.Response, error) {
 			for {
-				allowed, waitTime := limiter.Allow(time.Now())
+				allowed, wait := limiter.Allow(time.Now())
 				if allowed {
-					break
+					return next.Do(req)
 				}
 
-				t := timer.Acquire(waitTime)
+				t := timer.Acquire(wait)
 				select {
 				case <-req.Context().Done():
 					timer.Release(t)
-					return nil, fmt.Errorf("%w: %w", ErrSlidingWindowCanceled, req.Context().Err())
+					return nil, ErrSlidingWindowCanceled
 				case <-t.C:
 					timer.Release(t)
 				}
 			}
-
-			return next.Do(req)
 		})
 	}
 }
 
-// JitterStrategy selects the noise calculation algorithm for retry backoff delays.
+// JitterStrategy defines how randomized jitter is added to retry delays.
 type JitterStrategy int
 
 const (
-	// JitterEqual adds +/- 50% randomized noise to exponential backoff delays.
+	// JitterEqual splits backoff into a deterministic base and a randomized component.
 	JitterEqual JitterStrategy = iota
 
 	// JitterFull selects a random duration between zero and the computed delay cap.
@@ -205,11 +201,14 @@ const (
 
 // RetryOptions configures backoff behavior, repetition bounds, and async starvation guards for [Retry].
 type RetryOptions struct {
-	OnRetry        func(attempt uint32, err error, delay time.Duration)
-	Backoff        time.Duration
-	MaxRetries     uint32
-	AsyncThreshold uint32
-	JitterStrategy JitterStrategy
+	OnRetry            func(attempt uint32, err error, delay time.Duration)
+	Backoff            time.Duration
+	MaxBackoff         time.Duration
+	MaxRetryAfter      time.Duration
+	MaxRetries         uint32
+	AsyncThreshold     uint32
+	JitterStrategy     JitterStrategy
+	RetryNonIdempotent bool
 }
 
 // RetryOnErr triggers retries on any non-nil execution error.
@@ -285,15 +284,19 @@ func RetryOnGRPCStatus(statusCodes ...string) aoni.RetryCondition {
 func Retry(opts RetryOptions, condition aoni.RetryCondition) aoni.Middleware {
 	opts.MaxRetries = generic.Coalesce(opts.MaxRetries, 3)
 	opts.Backoff = max(generic.Coalesce(opts.Backoff, 1*time.Second), 0)
+	opts.MaxBackoff = generic.Coalesce(opts.MaxBackoff, opts.Backoff*32)
+	opts.MaxRetryAfter = generic.Coalesce(opts.MaxRetryAfter, 60*time.Second)
 	opts.AsyncThreshold = generic.Coalesce(opts.AsyncThreshold, 25)
 
 	return func(next aoni.RequestDoer) aoni.RequestDoer {
 		return aoni.DoerFunc(func(req aoni.Request) (aoni.Response, error) {
 			activeOpts, activeCond := resolveRetryOverrides(req.Context(), opts, condition)
+			isIdempotent := isIdempotentMethod(req.Method())
 
 			var (
 				bufferedBytes []byte
 				bufferErr     error
+				lastResp      aoni.Response
 			)
 
 			bodyBytes := req.BodyBytes()
@@ -310,6 +313,14 @@ func Retry(opts RetryOptions, condition aoni.RetryCondition) aoni.Middleware {
 
 			for attempt := uint32(0); attempt <= activeOpts.MaxRetries; attempt++ {
 				if attempt > 0 {
+					if !allowRetryForMethod(req, activeOpts, lastResp) {
+						break
+					}
+
+					if !isIdempotent && activeOpts.RetryNonIdempotent {
+						ensureIdempotencyKey(req)
+					}
+
 					if len(bufferedBytes) > 0 {
 						req.SetBodyBytes(bufferedBytes)
 					} else if len(bodyBytes) > 0 {
@@ -318,7 +329,12 @@ func Retry(opts RetryOptions, condition aoni.RetryCondition) aoni.Middleware {
 				}
 
 				resp, err := next.Do(req)
+				lastResp = resp
 				if attempt == activeOpts.MaxRetries || !activeCond(resp, err) {
+					return resp, err
+				}
+
+				if !allowRetryForMethod(req, activeOpts, resp) {
 					return resp, err
 				}
 
@@ -326,7 +342,11 @@ func Retry(opts RetryOptions, condition aoni.RetryCondition) aoni.Middleware {
 					return resp, err
 				}
 
-				sleepDuration := calculateRetrySleep(resp, backoff)
+				sleepDuration, exceeded := calculateRetrySleep(resp, backoff, activeOpts)
+				if exceeded {
+					return resp, ErrRetryAfterExceeded
+				}
+
 				if activeOpts.OnRetry != nil {
 					activeOpts.OnRetry(attempt+1, err, sleepDuration)
 				}
@@ -343,6 +363,37 @@ func Retry(opts RetryOptions, condition aoni.RetryCondition) aoni.Middleware {
 
 			return nil, ErrMaxRetriesExceeded
 		})
+	}
+}
+
+func isIdempotentMethod(method string) bool {
+	switch method {
+	case http.MethodGet, http.MethodHead, http.MethodPut, http.MethodDelete, http.MethodOptions, http.MethodTrace:
+		return true
+	default:
+		return false
+	}
+}
+
+func allowRetryForMethod(req aoni.Request, opts RetryOptions, resp aoni.Response) bool {
+	if isIdempotentMethod(req.Method()) || opts.RetryNonIdempotent {
+		return true
+	}
+	if req.Header("Idempotency-Key") != "" || req.Header("X-Request-ID") != "" {
+		return true
+	}
+	if resp != nil && (resp.Header("X-Proxy-Fault") != "" || resp.StatusCode() == http.StatusBadGateway) {
+		return true
+	}
+	return false
+}
+
+func ensureIdempotencyKey(req aoni.Request) {
+	if req.Header("Idempotency-Key") == "" && req.Header("X-Request-ID") == "" {
+		var randBuf [16]byte
+		_, _ = rand.Read(randBuf[:])
+		key := fmt.Sprintf("%x-%x-%x-%x-%x", randBuf[0:4], randBuf[4:6], randBuf[6:8], randBuf[8:10], randBuf[10:])
+		req.SetHeader("Idempotency-Key", key)
 	}
 }
 
@@ -411,24 +462,28 @@ func resolveRetryOverrides(
 }
 
 func createBackoffGenerator(opts RetryOptions) *generic.Backoff {
+	maxBackoff := generic.Coalesce(opts.MaxBackoff, opts.Backoff*32)
 	if opts.JitterStrategy == JitterFull {
-		return generic.NewBackoff(opts.Backoff, opts.Backoff*32, 2, 1.0)
+		return generic.NewBackoff(opts.Backoff, maxBackoff, 2, 1.0)
 	}
 
-	return generic.NewBackoff(opts.Backoff, opts.Backoff*32, 2, 0.5)
+	return generic.NewBackoff(opts.Backoff, maxBackoff, 2, 0.5)
 }
 
-func calculateRetrySleep(resp aoni.Response, bo *generic.Backoff) time.Duration {
+func calculateRetrySleep(resp aoni.Response, bo *generic.Backoff, opts RetryOptions) (time.Duration, bool) {
 	retryAfter, hasRetryAfter := parseRetryAfter(resp)
 	if resp != nil {
 		_ = resp.Close()
 	}
 
 	if hasRetryAfter {
-		return retryAfter
+		if opts.MaxRetryAfter > 0 && retryAfter > opts.MaxRetryAfter {
+			return 0, true
+		}
+		return retryAfter, false
 	}
 
-	return bo.Next()
+	return bo.Next(), false
 }
 
 // Recover catches panics occurring during request execution and converts them to structured error instances.

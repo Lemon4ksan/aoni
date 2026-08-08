@@ -156,6 +156,9 @@ func (c *Client) buildDialConfig(ctx context.Context) transport.DialConfig {
 		if reqCfg.ProxyAddr != nil {
 			cfg.ProxyURL = reqCfg.ProxyAddr
 		}
+		if reqCfg.DNSResolver != nil {
+			cfg.DNSResolver = reqCfg.DNSResolver
+		}
 		if reqCfg.P0fSignature != nil {
 			cfg.P0fSignature = reqCfg.P0fSignature
 		}
@@ -188,6 +191,9 @@ func (c *Client) buildDialConfig(ctx context.Context) transport.DialConfig {
 		}
 		if len(reqCfg.CertificatePins) > 0 {
 			cfg.CertificatePins = reqCfg.CertificatePins
+		}
+		if len(reqCfg.OrderedHeaders) > 0 {
+			cfg.HeaderOrder = reqCfg.OrderedHeaders
 		}
 		if reqCfg.HostRewrite != nil {
 			cfg.HostRewriteRules = reqCfg.HostRewrite.Rules
