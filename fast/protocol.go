@@ -23,6 +23,7 @@ import (
 	"github.com/lemon4ksan/aoni"
 	"github.com/lemon4ksan/aoni/fast/h2engine"
 	"github.com/lemon4ksan/aoni/fast/h3engine"
+	"github.com/lemon4ksan/aoni/internal/pipeline"
 	"github.com/lemon4ksan/aoni/netutil"
 )
 
@@ -330,8 +331,21 @@ func (c *Client) cachePushedResponse(
 	})
 
 	pipe := c.pipelineEngine
-	if pipe != nil {
-		pipe.SavePushedResponseToCache(req, resp, cacheCfg)
+	if pipe != nil && cacheCfg != nil {
+		var nvs *pipeline.NoVarySearchConfig
+		if cacheCfg.NoVarySearch != nil {
+			nvs = &pipeline.NoVarySearchConfig{
+				IgnoreParams:    cacheCfg.NoVarySearch.IgnoreParams,
+				ExceptParams:    cacheCfg.NoVarySearch.ExceptParams,
+				IgnoreAllParams: cacheCfg.NoVarySearch.IgnoreAllParams,
+			}
+		}
+		pipe.SavePushedResponseToCache(req, resp, &pipeline.CacheConfig{
+			Store:         cacheCfg.Store,
+			DefaultTTL:    cacheCfg.DefaultTTL,
+			NoVarySearch:  nvs,
+			CookieIndices: cacheCfg.CookieIndices,
+		})
 	}
 }
 

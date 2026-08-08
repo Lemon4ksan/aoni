@@ -25,6 +25,7 @@ import (
 	"github.com/lemon4ksan/aoni/cookie"
 	"github.com/lemon4ksan/aoni/fingerprint"
 	"github.com/lemon4ksan/aoni/fingerprint/h2"
+	"github.com/lemon4ksan/aoni/internal/engine"
 	"github.com/lemon4ksan/aoni/internal/pipeline"
 	"github.com/lemon4ksan/aoni/netutil"
 	"github.com/lemon4ksan/aoni/netutil/power"
@@ -39,6 +40,8 @@ type Client struct {
 	network        NetworkConfig
 	fingerprint    FingerprintConfig
 	powerWatcher   *power.Watcher
+	referer        *pipeline.RefererState
+	prepared       engine.PreparedConfig
 }
 
 // NewClient instantiates a new thread-safe [Client] wrapping the specified doer.
@@ -49,6 +52,7 @@ func NewClient(doer any, opts ...ClientOption) *Client {
 		network: NetworkConfig{
 			HappyEyeballsDelay: 300 * time.Millisecond,
 		},
+		referer: &pipeline.RefererState{},
 	}
 
 	cfg := client.snapshotConfig()
@@ -66,8 +70,16 @@ func NewClient(doer any, opts ...ClientOption) *Client {
 
 // Clone creates a deep copy of the client, isolating transports, cookie jars, and configuration structs.
 func (c *Client) Clone() *Client {
+	clonedReferer := &pipeline.RefererState{}
+	if c.referer != nil {
+		c.referer.Mu.Lock()
+		clonedReferer.LastURL = c.referer.LastURL
+		c.referer.Mu.Unlock()
+	}
+
 	cloned := &Client{
-		engine: c.engine,
+		engine:  c.engine,
+		referer: clonedReferer,
 	}
 	if httpClient, ok := cloned.engine.(*http.Client); ok {
 		cloned.engine = CloneHTTPClient(httpClient)
@@ -81,6 +93,13 @@ func (c *Client) Clone() *Client {
 
 // With produces a deep-copied [Client] with the provided functional options applied.
 func (c *Client) With(opts ...ClientOption) *Client {
+	clonedReferer := &pipeline.RefererState{}
+	if c.referer != nil {
+		c.referer.Mu.Lock()
+		clonedReferer.LastURL = c.referer.LastURL
+		c.referer.Mu.Unlock()
+	}
+
 	cfg := c.snapshotConfig()
 	for _, opt := range opts {
 		if opt != nil {
@@ -89,7 +108,8 @@ func (c *Client) With(opts ...ClientOption) *Client {
 	}
 
 	cloned := &Client{
-		engine: c.engine,
+		engine:  c.engine,
+		referer: clonedReferer,
 	}
 	if httpClient, ok := cloned.engine.(*http.Client); ok {
 		cloned.engine = CloneHTTPClient(httpClient)
@@ -144,7 +164,7 @@ func (c *Client) Request(
 
 	resp, err := c.execute(req, c.resolvePipeline(req))
 
-	ReleaseStdRequest(stdReq) // Возврат в пул
+	ReleaseStdRequest(stdReq)
 
 	if err != nil {
 		return nil, &Error{Op: "request failed", Err: err}
@@ -218,7 +238,7 @@ func (c *Client) HTTP() HTTPDoer {
 }
 
 func (c *Client) execute(req *http.Request, pipe PipelineConfig) (*http.Response, error) {
-	return c.pipelineEngine.Execute(req.Context(), NewStdRequest(req), c.engine, pipe)
+	return c.pipelineEngine.Execute(req.Context(), NewStdRequest(req), c.engine, pipe.toInternal())
 }
 
 // WithPersona configures TLS ClientHello ID, HTTP/2 SETTINGS frames, header order, p0f signature, and User-Agent matching Persona.
@@ -534,7 +554,6 @@ func defaultClientDefaults() ClientDefaults {
 		BaseURL:         &url.URL{},
 		Headers:         make(http.Header),
 		MaxResponseSize: 10 * 1024 * 1024,
-		RefererState:    &RefererState{},
 		Pipeline: PipelineConfig{
 			Decompress: true,
 			Validate:   true,
@@ -563,15 +582,15 @@ func (c *Client) resolveTargetURL(path string) (string, error) {
 	}
 
 	if path == "" || path == "/" {
-		if c.defaults.BaseURLString != "" {
-			return c.defaults.BaseURLString, nil
+		if c.prepared.BaseURLString != "" {
+			return c.prepared.BaseURLString, nil
 		}
 
 		return c.defaults.BaseURL.String(), nil
 	}
 
-	if path[0] == '/' && c.defaults.BaseURLTrimmedString != "" {
-		return c.defaults.BaseURLTrimmedString + path, nil
+	if path[0] == '/' && c.prepared.BaseURLTrimmedString != "" {
+		return c.prepared.BaseURLTrimmedString + path, nil
 	}
 
 	rel, err := url.Parse(strings.TrimLeft(path, "/"))
@@ -637,6 +656,7 @@ func (c *Client) applyConfig(cfg Config) {
 	c.fingerprint = cfg.Fingerprint
 	c.defaults = cfg.Defaults
 	c.engineConfig = cfg.Engine
+	c.prepared = engine.NewPreparedConfig(cfg.Defaults.BaseURL)
 
 	applyEngineConfig(c, cfg.Engine)
 	c.applyDialers(c.Transport())
@@ -644,7 +664,7 @@ func (c *Client) applyConfig(cfg Config) {
 	c.applyPowerManagement(cfg.Network.EnablePowerManagement)
 
 	c.pipelineEngine = pipeline.NewPipeline(
-		c.defaults.ToPipelineDefaults(),
+		c.toPipelineDefaults(),
 		c.fingerprint.ToPipelineFingerprint(),
 	)
 }

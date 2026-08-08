@@ -6,6 +6,7 @@ package option_test
 
 import (
 	"net/http"
+	"net/url"
 	"testing"
 	"time"
 
@@ -53,8 +54,11 @@ func TestOption_BaseURL_Normalization(t *testing.T) {
 			cfg := &aoni.Config{}
 			option.WithBaseURL(tt.input)(cfg)
 
-			assert.Equal(t, tt.expectedStr, cfg.Defaults.BaseURLString)
-			assert.Equal(t, tt.expectedTrim, cfg.Defaults.BaseURLTrimmedString)
+			if tt.input == "" {
+				assert.Equal(t, &url.URL{}, cfg.Defaults.BaseURL)
+			} else {
+				assert.Equal(t, tt.expectedStr, cfg.Defaults.BaseURL.String())
+			}
 		})
 	}
 }

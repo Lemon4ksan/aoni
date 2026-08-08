@@ -4,7 +4,12 @@
 
 package aoni
 
-import "github.com/lemon4ksan/aoni/internal/pipeline"
+import (
+	"context"
+	"slices"
+
+	"github.com/lemon4ksan/aoni/internal/pipeline"
+)
 
 // RequestConfig aggregates request-scoped options and transport overrides.
 type RequestConfig = pipeline.RequestConfig
@@ -29,7 +34,12 @@ var GetRequestConfig = pipeline.GetRequestConfig
 var GetOrInitRequestConfig = pipeline.GetOrInitRequestConfig
 
 // GetPipeline retrieves the request-specific PipelineConfig from context.
-var GetPipeline = pipeline.GetPipeline
+func GetPipeline(ctx context.Context) (PipelineConfig, bool) {
+	if p, ok := pipeline.GetPipeline(ctx); ok {
+		return pipelineToAoniConfig(p), true
+	}
+	return PipelineConfig{}, false
+}
 
 // AllocRequestConfig allocates a pooled [RequestConfig] and stores it in ctx, returning the
 // enriched context and the config pointer.
@@ -118,15 +128,7 @@ func (c *Client) mergeCertificatePins(cfg *RequestConfig) {
 				cfg.CertificatePins = make(map[string][]string)
 			}
 
-			hasHash := false
-			for _, existing := range cfg.CertificatePins[domain] {
-				if existing == h {
-					hasHash = true
-					break
-				}
-			}
-
-			if !hasHash {
+			if !slices.Contains(cfg.CertificatePins[domain], h) {
 				cfg.CertificatePins[domain] = append(cfg.CertificatePins[domain], h)
 			}
 		}

@@ -41,6 +41,7 @@ type Client struct {
 	defaultDial    func(string) (net.Conn, error)
 	config         aoni.Config
 	powerWatcher   *power.Watcher
+	referer        *pipeline.RefererState
 
 	protocolState protocolState
 }
@@ -55,6 +56,7 @@ func NewClient(opts ...aoni.ClientOption) *Client {
 				Headers: make(http.Header),
 			},
 		},
+		referer: &pipeline.RefererState{},
 	}
 
 	for _, opt := range opts {
@@ -68,7 +70,7 @@ func NewClient(opts ...aoni.ClientOption) *Client {
 	c.applyPowerManagement(c.config.Network.EnablePowerManagement)
 
 	c.pipelineEngine = pipeline.NewPipeline(
-		c.config.Defaults.ToPipelineDefaults(),
+		toPipelineDefaults(c.config.Defaults, c.referer),
 		c.config.Fingerprint.ToPipelineFingerprint(),
 	)
 
@@ -79,10 +81,18 @@ func NewClient(opts ...aoni.ClientOption) *Client {
 func (c *Client) With(opts ...aoni.ClientOption) *Client {
 	clonedEngine := cloneFasthttpClient(c.engine)
 
+	clonedReferer := &pipeline.RefererState{}
+	if c.referer != nil {
+		c.referer.Mu.Lock()
+		clonedReferer.LastURL = c.referer.LastURL
+		c.referer.Mu.Unlock()
+	}
+
 	c2 := &Client{
 		engine:      clonedEngine,
 		defaultDial: c.defaultDial,
 		config:      c.config.Clone(),
+		referer:     clonedReferer,
 	}
 
 	for _, opt := range opts {
@@ -100,7 +110,7 @@ func (c *Client) With(opts ...aoni.ClientOption) *Client {
 	c2.applyPowerManagement(c2.config.Network.EnablePowerManagement)
 
 	c2.pipelineEngine = pipeline.NewPipeline(
-		c2.config.Defaults.ToPipelineDefaults(),
+		toPipelineDefaults(c2.config.Defaults, c2.referer),
 		c2.config.Fingerprint.ToPipelineFingerprint(),
 	)
 
@@ -506,13 +516,9 @@ func enforceContentLengthTruncation(resp *fasthttp.Response) {
 	}
 }
 
-func (c *Client) resolvePipeline(ctx context.Context) aoni.PipelineConfig {
+func (c *Client) resolvePipeline(ctx context.Context) pipeline.PipelineConfig {
 	if reqPipe, ok := aoni.GetPipeline(ctx); ok {
-		if reqPipe.PrecomputedFlags == 0 {
-			reqPipe.BuildFlags()
-		}
-
-		return reqPipe
+		return toInternalPipelineConfig(reqPipe)
 	}
 
 	pipe := c.config.Defaults.Pipeline
@@ -535,9 +541,97 @@ func (c *Client) resolvePipeline(ctx context.Context) aoni.PipelineConfig {
 		}
 	}
 
-	pipe.BuildFlags()
+	return toInternalPipelineConfig(pipe)
+}
 
-	return pipe
+func toPipelineDefaults(d aoni.ClientDefaults, referer *pipeline.RefererState) pipeline.ClientDefaults {
+	var profiles []pipeline.BrowserProfile
+	if len(d.UARotationProfiles) > 0 {
+		profiles = make([]pipeline.BrowserProfile, len(d.UARotationProfiles))
+		for i, p := range d.UARotationProfiles {
+			profiles[i] = pipeline.BrowserProfile{
+				UserAgent:   p.UserAgent,
+				ClientHints: p.ClientHints,
+			}
+		}
+	}
+	return pipeline.ClientDefaults{
+		Headers:              d.Headers,
+		BeforeRequest:        d.BeforeRequest,
+		AfterResponse:        d.AfterResponse,
+		Inspector:            d.Inspector,
+		ResponseValidator:    d.ResponseValidator,
+		ChallengeDetector:    d.ChallengeDetector,
+		ChallengeSolver:      d.ChallengeSolver,
+		UARotationProfiles:   profiles,
+		RefererState:         referer,
+		MaxResponseSize:      d.MaxResponseSize,
+		MultiReadThreshold:   d.MultiReadThreshold,
+		MultiReadDisableDisk: d.MultiReadDisableDisk,
+		RefererAutomaton:     d.RefererAutomaton,
+	}
+}
+
+func toInternalPipelineConfig(p aoni.PipelineConfig) pipeline.PipelineConfig {
+	res := pipeline.PipelineConfig{
+		SizeLimit:          p.SizeLimit,
+		MultiReadThreshold: p.MultiReadThreshold,
+		RotateUA:           p.RotateUA,
+		Inspect:            p.Inspect,
+		Decompress:         p.Decompress,
+		Validate:           p.Validate,
+		Challenge:          p.Challenge,
+	}
+	if p.DPIJitter != nil {
+		res.DPIJitter = &pipeline.DPIJitterConfig{
+			MinDelay: p.DPIJitter.MinDelay,
+			MaxDelay: p.DPIJitter.MaxDelay,
+		}
+	}
+	if p.ProxyFailover != nil {
+		res.ProxyFailover = &pipeline.ProxyFailoverConfig{
+			Proxies:    p.ProxyFailover.Proxies,
+			RetryLimit: p.ProxyFailover.RetryLimit,
+		}
+	}
+	if p.Hedging != nil {
+		res.Hedging = &pipeline.HedgingConfig{
+			DynamicHedging:       p.Hedging.DynamicHedging,
+			DefaultDelay:         p.Hedging.DefaultDelay,
+			MaxRequestsPerSecond: p.Hedging.MaxRequestsPerSecond,
+			AllowNonReadOnly:     p.Hedging.AllowNonReadOnly,
+		}
+	}
+	if p.Cache != nil {
+		var nvs *pipeline.NoVarySearchConfig
+		if p.Cache.NoVarySearch != nil {
+			nvs = &pipeline.NoVarySearchConfig{
+				IgnoreParams:    p.Cache.NoVarySearch.IgnoreParams,
+				ExceptParams:    p.Cache.NoVarySearch.ExceptParams,
+				IgnoreAllParams: p.Cache.NoVarySearch.IgnoreAllParams,
+			}
+		}
+		res.Cache = &pipeline.CacheConfig{
+			Store:         p.Cache.Store,
+			DefaultTTL:    p.Cache.DefaultTTL,
+			NoVarySearch:  nvs,
+			CookieIndices: p.Cache.CookieIndices,
+		}
+	}
+	if p.HAR != nil {
+		res.HAR = &pipeline.HARConfig{
+			Tracker: p.HAR.Tracker,
+		}
+	}
+	if p.Redact != nil {
+		res.Redact = &pipeline.RedactConfig{
+			Headers:          p.Redact.Headers,
+			HeadersToRedact:  p.Redact.HeadersToRedact,
+			JSONKeysToRedact: p.Redact.JSONKeysToRedact,
+		}
+	}
+	res.BuildFlags()
+	return res
 }
 
 func (c *Client) applyPowerManagement(enable bool) {

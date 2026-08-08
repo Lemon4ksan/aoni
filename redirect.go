@@ -72,7 +72,7 @@ func applyRedirectPolicy(httpClient *http.Client, eng EngineConfig) {
 	}
 
 	limit := eng.RedirectLimit
-	if limit == redirectLimitUnset {
+	if limit == RedirectLimitUnset {
 		return
 	}
 

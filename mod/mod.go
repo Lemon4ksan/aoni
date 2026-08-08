@@ -761,7 +761,7 @@ func WithFragment(cfg fragment.Config) aoni.RequestModifier {
 // WithHostRewrite constructs an [aoni.RequestModifier] replacing host DNS remapping rules for the request.
 func WithHostRewrite(rules map[string]string) aoni.RequestModifier {
 	return func(req aoni.Request) {
-		aoni.GetOrInitRequestConfig(req).HostRewrite = &aoni.HostRewriteConfig{Rules: rules}
+		aoni.GetOrInitRequestConfig(req).HostRewrite = &pipeline.HostRewriteConfig{Rules: rules}
 	}
 }
 
@@ -776,7 +776,7 @@ func WithAppendHostRewrite(rules map[string]string) aoni.RequestModifier {
 		}
 
 		maps.Copy(newRules, rules)
-		cfg.HostRewrite = &aoni.HostRewriteConfig{Rules: newRules}
+		cfg.HostRewrite = &pipeline.HostRewriteConfig{Rules: newRules}
 	}
 }
 
@@ -846,8 +846,71 @@ func WithTimeout(d time.Duration) aoni.RequestModifier {
 // WithPipeline constructs an [aoni.RequestModifier] overriding execution pipeline configurations for the request.
 func WithPipeline(pipe aoni.PipelineConfig) aoni.RequestModifier {
 	return func(req aoni.Request) {
-		aoni.GetOrInitRequestConfig(req).Pipeline = &pipe
+		p := toInternalPipelineConfig(pipe)
+		aoni.GetOrInitRequestConfig(req).Pipeline = &p
 	}
+}
+
+func toInternalPipelineConfig(p aoni.PipelineConfig) pipeline.PipelineConfig {
+	res := pipeline.PipelineConfig{
+		SizeLimit:          p.SizeLimit,
+		MultiReadThreshold: p.MultiReadThreshold,
+		RotateUA:           p.RotateUA,
+		Inspect:            p.Inspect,
+		Decompress:         p.Decompress,
+		Validate:           p.Validate,
+		Challenge:          p.Challenge,
+	}
+	if p.DPIJitter != nil {
+		res.DPIJitter = &pipeline.DPIJitterConfig{
+			MinDelay: p.DPIJitter.MinDelay,
+			MaxDelay: p.DPIJitter.MaxDelay,
+		}
+	}
+	if p.ProxyFailover != nil {
+		res.ProxyFailover = &pipeline.ProxyFailoverConfig{
+			Proxies:    p.ProxyFailover.Proxies,
+			RetryLimit: p.ProxyFailover.RetryLimit,
+		}
+	}
+	if p.Hedging != nil {
+		res.Hedging = &pipeline.HedgingConfig{
+			DynamicHedging:       p.Hedging.DynamicHedging,
+			DefaultDelay:         p.Hedging.DefaultDelay,
+			MaxRequestsPerSecond: p.Hedging.MaxRequestsPerSecond,
+			AllowNonReadOnly:     p.Hedging.AllowNonReadOnly,
+		}
+	}
+	if p.Cache != nil {
+		var nvs *pipeline.NoVarySearchConfig
+		if p.Cache.NoVarySearch != nil {
+			nvs = &pipeline.NoVarySearchConfig{
+				IgnoreParams:    p.Cache.NoVarySearch.IgnoreParams,
+				ExceptParams:    p.Cache.NoVarySearch.ExceptParams,
+				IgnoreAllParams: p.Cache.NoVarySearch.IgnoreAllParams,
+			}
+		}
+		res.Cache = &pipeline.CacheConfig{
+			Store:         p.Cache.Store,
+			DefaultTTL:    p.Cache.DefaultTTL,
+			NoVarySearch:  nvs,
+			CookieIndices: p.Cache.CookieIndices,
+		}
+	}
+	if p.HAR != nil {
+		res.HAR = &pipeline.HARConfig{
+			Tracker: p.HAR.Tracker,
+		}
+	}
+	if p.Redact != nil {
+		res.Redact = &pipeline.RedactConfig{
+			Headers:          p.Redact.Headers,
+			HeadersToRedact:  p.Redact.HeadersToRedact,
+			JSONKeysToRedact: p.Redact.JSONKeysToRedact,
+		}
+	}
+	res.BuildFlags()
+	return res
 }
 
 // PhaseID identifies fixed transaction execution phases.
@@ -963,7 +1026,12 @@ func WithCacheTTL(ttl time.Duration) aoni.RequestModifier {
 // WithRedact constructs an [aoni.RequestModifier] configuring header and key redaction rules for logging.
 func WithRedact(cfg aoni.RedactConfig) aoni.RequestModifier {
 	return func(req aoni.Request) {
-		aoni.GetOrInitRequestConfig(req).Redact = &cfg
+		r := pipeline.RedactConfig{
+			Headers:          cfg.Headers,
+			HeadersToRedact:  cfg.HeadersToRedact,
+			JSONKeysToRedact: cfg.JSONKeysToRedact,
+		}
+		aoni.GetOrInitRequestConfig(req).Redact = &r
 	}
 }
 

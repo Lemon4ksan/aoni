@@ -6,11 +6,8 @@ package aoni
 
 import (
 	"errors"
-	"maps"
 	"net/http"
 	"net/url"
-
-	"github.com/lemon4ksan/miyako/generic"
 )
 
 // ErrNilURL is returned when attempting to route an outbound HTTP request
@@ -21,9 +18,9 @@ var ErrNilURL = errors.New("aoni bridge: request URL is nil")
 //
 // This client bridges third-party libraries (e.g., resty or custom API SDKs)
 // with aoni's custom transport pipeline. It configures the underlying
-// transport and intentionally disables the client's default cookie jar.
-// This allows the internal aoni pipeline (such as [ProxyIsolatedCookieJar])
-// to manage cookies internally, preventing double-cookie handling issues.
+// transport and intentionally disables the client's default cookie jar
+// on the stdlib client wrapper, allowing aoni's internal pipeline (such as
+// [ProxyIsolatedJar]) to manage cookies internally without double-handling issues.
 func NewStdClient(c *Client) *http.Client {
 	return &http.Client{
 		Transport: NewTransport(c),
@@ -49,11 +46,12 @@ type Transport struct {
 	// BeforeRoundTrip runs immediately before a request enters the aoni engine.
 	//
 	// It provides a clone of the executing [Client] and the original request,
-	// allowing dynamic modifications (e.g., adding headers or altering configuration)
-	// on a per-request basis. The callback must return the final [Client] state.
+	// allowing dynamic modifications (e.g., altering TLS configuration or proxies)
+	// on a per-request basis. The callback must return the modified [Client].
 	//
-	// To prevent concurrent state sharing or race conditions, the modified client
-	// is isolated strictly to the current request execution cycle.
+	// Fast Path Optimization:
+	// If BeforeRoundTrip is nil, the request executes directly on the shared client
+	// without memory allocations or client cloning.
 	BeforeRoundTrip func(cloned *Client, origReq *http.Request) *Client
 }
 
@@ -78,19 +76,16 @@ func (t *Transport) RoundTrip(req *http.Request) (*http.Response, error) {
 		}
 	}
 
-	cloned := t.prepareClient(req)
-	ctxMods := ContextModifiers(req.Context())
+	if req.URL.Host != "" && req.URL.Scheme == "" {
+		req.URL.Scheme = "https"
+	}
 
-	modifiers := make([]RequestModifier, 0, 1+len(ctxMods))
-	modifiers = append(modifiers, t.newSyncModifier(req))
-	modifiers = append(modifiers, ctxMods...)
+	activeClient := t.client
+	if t.BeforeRoundTrip != nil {
+		activeClient = t.BeforeRoundTrip(t.client.Clone(), req)
+	}
 
-	resp, err := cloned.Request(
-		req.Context(),
-		req.Method,
-		req.URL.RequestURI(),
-		modifiers...,
-	)
+	resp, err := activeClient.HTTP().Do(req)
 	if err != nil {
 		return nil, t.wrapError(req, err)
 	}
@@ -98,94 +93,31 @@ func (t *Transport) RoundTrip(req *http.Request) (*http.Response, error) {
 	return resp, nil
 }
 
-func (t *Transport) prepareClient(origReq *http.Request) *Client {
-	cloned := t.client.Clone()
-
-	if t.BeforeRoundTrip != nil {
-		cloned = t.BeforeRoundTrip(cloned, origReq)
-	}
-
-	if origReq.URL.Host != "" {
-		cloned.defaults.BaseURL = &url.URL{
-			Scheme: generic.Coalesce(origReq.URL.Scheme, "https"),
-			Host:   origReq.URL.Host,
-		}
-	}
-
-	return cloned
-}
-
-func (t *Transport) newSyncModifier(origReq *http.Request) RequestModifier {
-	return func(req Request) {
-		aoniReq := req.HTTPRequest()
-		if aoniReq == nil {
-			req.SetMethod(origReq.Method)
-
-			if origReq.URL != nil {
-				req.SetURL(origReq.URL.String())
-			}
-
-			for k, vv := range origReq.Header {
-				for _, v := range vv {
-					req.AddHeader(k, v)
-				}
-			}
-
-			return
-		}
-
-		resolvedURL := aoniReq.URL
-
-		aoniReq.Method = origReq.Method
-		aoniReq.Body = origReq.Body
-		aoniReq.ContentLength = origReq.ContentLength
-		aoniReq.TransferEncoding = origReq.TransferEncoding
-		aoniReq.Close = origReq.Close
-
-		if origReq.Host != "" {
-			aoniReq.Host = origReq.Host
-		}
-
-		aoniReq.GetBody = origReq.GetBody
-
-		if origReq.URL != nil {
-			u := *origReq.URL
-			if resolvedURL != nil {
-				u.Scheme = resolvedURL.Scheme
-				if resolvedURL.Host != "" {
-					u.Host = resolvedURL.Host
-				}
-			}
-
-			aoniReq.URL = &u
-		}
-
-		if aoniReq.Header == nil {
-			aoniReq.Header = make(http.Header)
-		}
-
-		maps.Copy(aoniReq.Header, origReq.Header)
-	}
-}
-
 func (t *Transport) wrapError(origReq *http.Request, err error) error {
 	if origReq.Body != nil {
 		_ = origReq.Body.Close()
 	}
 
+	var reqURL, host, scheme string
+	if origReq.URL != nil {
+		reqURL = origReq.URL.String()
+		host = origReq.URL.Host
+		scheme = origReq.URL.Scheme
+	}
+
 	bridgeErr := &BridgeError{
 		Op:  origReq.Method,
-		URL: origReq.URL.String(),
+		URL: reqURL,
 		Err: err,
 		Metadata: map[string]any{
-			"host":   origReq.URL.Host,
-			"scheme": origReq.URL.Scheme,
+			"host":   host,
+			"scheme": scheme,
 		},
 	}
 
 	return &url.Error{
 		Op:  origReq.Method,
-		URL: origReq.URL.String(),
+		URL: reqURL,
 		Err: bridgeErr,
 	}
 }

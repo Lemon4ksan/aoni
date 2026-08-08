@@ -126,9 +126,6 @@ func WithBaseURL(raw string) aoni.ClientOption {
 	return func(cfg *aoni.Config) {
 		if raw == "" {
 			cfg.Defaults.BaseURL = &url.URL{}
-			cfg.Defaults.BaseURLString = ""
-			cfg.Defaults.BaseURLTrimmedString = ""
-
 			return
 		}
 
@@ -143,8 +140,6 @@ func WithBaseURL(raw string) aoni.ClientOption {
 		}
 
 		cfg.Defaults.BaseURL = baseURL
-		cfg.Defaults.BaseURLString = baseURL.String()
-		cfg.Defaults.BaseURLTrimmedString = strings.TrimSuffix(baseURL.String(), "/")
 	}
 }
 
