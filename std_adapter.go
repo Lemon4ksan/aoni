@@ -10,11 +10,22 @@ import (
 	stdio "io"
 	"net/http"
 	"net/url"
-	"reflect"
 	"strconv"
 	"strings"
+	"sync"
+
+	"github.com/valyala/fasthttp"
 
 	"github.com/lemon4ksan/aoni/internal/bytesconv"
+)
+
+var (
+	stdRequestPool = sync.Pool{
+		New: func() any { return &StdRequest{} },
+	}
+	stdResponsePool = sync.Pool{
+		New: func() any { return &StdResponse{} },
+	}
 )
 
 // StdRequest adapts a standard net/http [*http.Request] to the unified [Request] contract.
@@ -23,12 +34,28 @@ type StdRequest struct {
 }
 
 // NewStdRequest wraps req into a unified [Request] adapter.
+//
+// Postconditions:
+//   - The returned request must be executed or released via [ReleaseStdRequest] to prevent pool leaks.
 func NewStdRequest(req *http.Request) *StdRequest {
 	if req == nil {
 		req = &http.Request{Header: make(http.Header)}
 	}
 
-	return &StdRequest{req: req}
+	r := stdRequestPool.Get().(*StdRequest)
+	r.req = req
+
+	return r
+}
+
+// ReleaseStdRequest returns the request to the pool after execution.
+func ReleaseStdRequest(r *StdRequest) {
+	if r == nil {
+		return
+	}
+
+	r.req = nil
+	stdRequestPool.Put(r)
 }
 
 // Context returns the request execution context.
@@ -248,13 +275,19 @@ func (s *StdRequest) BodyBytes() []byte {
 		return nil
 	}
 
-	b, err := stdio.ReadAll(s.req.Body)
+	bodyRC := s.req.Body
+	if s.req.GetBody != nil {
+		if b, err := s.req.GetBody(); err == nil && b != nil {
+			bodyRC = b
+		}
+	}
+
+	b, err := stdio.ReadAll(bodyRC)
+	_ = bodyRC.Close()
+
 	if err != nil {
 		return nil
 	}
-
-	_ = s.req.Body.Close()
-	s.req.Body = stdio.NopCloser(bytes.NewReader(b))
 
 	return b
 }
@@ -299,8 +332,26 @@ type StdResponse struct {
 }
 
 // NewStdResponse wraps resp into a unified [Response] adapter.
+//
+// Postconditions:
+//   - The returned response must be released via [ReleaseStdResponse] to prevent pool leaks.
 func NewStdResponse(resp *http.Response) *StdResponse {
-	return &StdResponse{resp: resp}
+	r := stdResponsePool.Get().(*StdResponse)
+	r.resp = resp
+	r.body = nil
+
+	return r
+}
+
+// ReleaseStdResponse returns the response to the pool after execution.
+func ReleaseStdResponse(r *StdResponse) {
+	if r == nil {
+		return
+	}
+
+	r.resp = nil
+	r.body = nil
+	stdResponsePool.Put(r)
 }
 
 // StatusCode returns the HTTP response status code, or 0 if response is nil.
@@ -349,6 +400,32 @@ func (s *StdResponse) Headers() map[string][]string {
 	return s.resp.Header
 }
 
+// Trailers returns HTTP response trailers attached to the underlying response.
+func (s *StdResponse) Trailers() map[string][]string {
+	if s.resp == nil || s.resp.Trailer == nil {
+		return nil
+	}
+
+	return s.resp.Trailer
+}
+
+// SetTrailers updates HTTP response trailers on the underlying response.
+func (s *StdResponse) SetTrailers(trailers map[string][]string) {
+	if s.resp == nil {
+		return
+	}
+
+	if s.resp.Trailer == nil {
+		s.resp.Trailer = make(http.Header, len(trailers))
+	}
+
+	for k, vv := range trailers {
+		for _, v := range vv {
+			s.resp.Trailer.Add(k, v)
+		}
+	}
+}
+
 // BodyBytes reads, caches, and returns response body bytes.
 func (s *StdResponse) BodyBytes() []byte {
 	if s.body != nil {
@@ -369,6 +446,11 @@ func (s *StdResponse) BodyBytes() []byte {
 	s.resp.Body = stdio.NopCloser(bytes.NewReader(b))
 
 	return b
+}
+
+// UnsafeBodyBytes provides direct access to cached response body bytes.
+func (s *StdResponse) UnsafeBodyBytes() []byte {
+	return s.BodyBytes()
 }
 
 // BodyStream yields response body stream [stdio.ReadCloser].
@@ -399,11 +481,20 @@ func (s *StdResponse) Uncompressed() bool {
 	return s.resp.Uncompressed
 }
 
+// SetUncompressed sets whether the response body was transparently decompressed.
+func (s *StdResponse) SetUncompressed(v bool) {
+	if s.resp != nil {
+		s.resp.Uncompressed = v
+	}
+}
+
 // Close closes response body stream.
 func (s *StdResponse) Close() error {
 	if s.resp != nil && s.resp.Body != nil {
 		return s.resp.Body.Close()
 	}
+
+	ReleaseStdResponse(s)
 
 	return nil
 }
@@ -435,23 +526,30 @@ func (a *HTTPDoerAdapter) Do(req Request) (Response, error) {
 			ctx = context.Background()
 		}
 
+		var bodyReader stdio.Reader
+		if bs := req.BodyStream(); bs != nil {
+			bodyReader = bs
+		} else if bb := req.BodyBytes(); len(bb) > 0 {
+			bodyReader = bytes.NewReader(bb)
+		}
+
 		var err error
 
-		httpReq, err = http.NewRequestWithContext(ctx, req.Method(), req.URL(), req.BodyStream())
+		httpReq, err = http.NewRequestWithContext(ctx, req.Method(), req.URL(), bodyReader)
 		if err != nil {
 			return nil, err
 		}
 
-		if engReq := req.EngineRequest(); engReq != nil {
-			if typeVal := reflect.TypeOf(engReq).String(); strings.Contains(typeVal, "fasthttp.Request") {
-				val := reflect.ValueOf(engReq)
-				if peekHost := val.MethodByName("Header").Call(nil); len(peekHost) > 0 {
-					hdr := peekHost[0]
-					if hostBytes := hdr.MethodByName("Peek").
-						Call([]reflect.Value{reflect.ValueOf("Host")}); len(hostBytes) > 0 &&
-						!hostBytes[0].IsNil() {
-						httpReq.Host = string(hostBytes[0].Bytes())
-					}
+		if fastAdapter, ok := req.(interface{ FastHTTPRequest() *fasthttp.Request }); ok {
+			fastReq := fastAdapter.FastHTTPRequest()
+			if fastReq != nil {
+				fastReq.Header.All()(func(k, v []byte) bool {
+					httpReq.Header.Add(string(k), string(v))
+					return true
+				})
+
+				if host := string(fastReq.Header.Peek("Host")); host != "" {
+					httpReq.Host = host
 				}
 			}
 		}
@@ -515,14 +613,23 @@ func (a *RequestDoerAdapter) Do(req *http.Request) (*http.Response, error) {
 	}
 
 	if httpResp := resp.HTTPResponse(); httpResp != nil {
+		if httpResp.Trailer == nil && len(resp.Trailers()) > 0 {
+			httpResp.Trailer = make(http.Header)
+			for k, vv := range resp.Trailers() {
+				for _, v := range vv {
+					httpResp.Trailer.Add(k, v)
+				}
+			}
+		}
+
 		return httpResp, nil
 	}
 
-	// Fallback для движков (например fast.Response), у которых HTTPResponse() == nil
 	httpResp := &http.Response{
 		StatusCode:    resp.StatusCode(),
 		Status:        resp.Status(),
 		Header:        make(http.Header),
+		Trailer:       make(http.Header),
 		Body:          &responseBodyCloser{ReadCloser: resp.BodyStream(), resp: resp},
 		ContentLength: -1,
 		Uncompressed:  resp.Uncompressed(),
@@ -532,6 +639,12 @@ func (a *RequestDoerAdapter) Do(req *http.Request) (*http.Response, error) {
 	for k, vv := range resp.Headers() {
 		for _, v := range vv {
 			httpResp.Header.Add(k, v)
+		}
+	}
+
+	for k, vv := range resp.Trailers() {
+		for _, v := range vv {
+			httpResp.Trailer.Add(k, v)
 		}
 	}
 

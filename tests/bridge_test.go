@@ -5,8 +5,8 @@
 package aoni_test
 
 import (
-	"compress/gzip"
 	"context"
+	"github.com/klauspost/compress/gzip"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -31,7 +31,7 @@ type mockReadWriteCloser struct {
 	closed atomic.Bool
 }
 
-func (m *mockReadWriteCloser) Read(p []byte) (int, error) {
+func (m *mockReadWriteCloser) Read(_ []byte) (int, error) {
 	return 0, io.EOF
 }
 
@@ -216,7 +216,7 @@ func TestStdClient_SendRequest(t *testing.T) {
 
 		largeData := strings.Repeat("A", 100*1024)
 
-		server, stdClient := setupBridgeTest(t, func(w http.ResponseWriter, r *http.Request) {
+		server, stdClient := setupBridgeTest(t, func(w http.ResponseWriter, _ *http.Request) {
 			w.Header().Set("Content-Type", "text/plain")
 			_, _ = w.Write([]byte(largeData))
 		})
@@ -235,7 +235,7 @@ func TestStdClient_SendRequest(t *testing.T) {
 	t.Run("gzip_compressed_response", func(t *testing.T) {
 		t.Parallel()
 
-		server, stdClient := setupBridgeTest(t, func(w http.ResponseWriter, r *http.Request) {
+		server, stdClient := setupBridgeTest(t, func(w http.ResponseWriter, _ *http.Request) {
 			w.Header().Set("Content-Encoding", "gzip")
 			w.Header().Set("Content-Type", "text/plain")
 
@@ -286,7 +286,7 @@ func TestStdClient_SyncFields_PreservesProperties(t *testing.T) {
 
 	resp, err := stdClient.Do(req)
 	require.NoError(t, err)
-	resp.Body.Close()
+	_ = resp.Body.Close()
 
 	assert.Equal(t, "custom-host.test", capturedHost)
 	assert.True(t, capturedClose)
@@ -394,9 +394,9 @@ func TestContextModifiers_Retrieve(t *testing.T) {
 
 		called := make([]string, 0, 3)
 
-		m1 := func(req aoni.Request) { called = append(called, "m1") }
-		m2 := func(req aoni.Request) { called = append(called, "m2") }
-		m3 := func(req aoni.Request) { called = append(called, "m3") }
+		m1 := func(_ aoni.Request) { called = append(called, "m1") }
+		m2 := func(_ aoni.Request) { called = append(called, "m2") }
+		m3 := func(_ aoni.Request) { called = append(called, "m3") }
 
 		ctx := aoni.WithContextModifier(t.Context(), m1, m2, m3)
 		mods := aoni.ContextModifiers(ctx)
@@ -424,7 +424,7 @@ func TestNewStdClient_DefaultSetup(t *testing.T) {
 func TestNewTransport_ExposesRoundTripper(t *testing.T) {
 	t.Parallel()
 
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	}))
 	t.Cleanup(server.Close)
@@ -439,7 +439,7 @@ func TestNewTransport_ExposesRoundTripper(t *testing.T) {
 
 	resp, err := customClient.Get(server.URL)
 	require.NoError(t, err)
-	resp.Body.Close()
+	_ = resp.Body.Close()
 
 	assert.Equal(t, http.StatusOK, resp.StatusCode)
 }
@@ -517,7 +517,7 @@ func TestTransport_RoundTrip_RequestFailure_ClosesBody(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 
-			mockDoer := aoni.HTTPDoerFunc(func(req *http.Request) (*http.Response, error) {
+			mockDoer := aoni.HTTPDoerFunc(func(_ *http.Request) (*http.Response, error) {
 				return nil, io.ErrUnexpectedEOF
 			})
 
@@ -607,7 +607,7 @@ func TestTransport_RoundTrip_BaseURL_Rewriting(t *testing.T) {
 
 			resp, err := tr.RoundTrip(req)
 			require.NoError(t, err)
-			resp.Body.Close()
+			_ = resp.Body.Close()
 
 			if tt.shouldRewrite {
 				require.NotNil(t, capturedURL)
@@ -639,6 +639,7 @@ func TestTransport_RoundTrip_BeforeRoundTripHook(t *testing.T) {
 	tr.BeforeRoundTrip = func(cloned *aoni.Client, origReq *http.Request) *aoni.Client {
 		hookCalled.Store(true)
 		assert.Equal(t, "/test", origReq.URL.Path)
+
 		return cloned
 	}
 
@@ -647,7 +648,7 @@ func TestTransport_RoundTrip_BeforeRoundTripHook(t *testing.T) {
 
 	resp, err := tr.RoundTrip(req)
 	require.NoError(t, err)
-	resp.Body.Close()
+	_ = resp.Body.Close()
 
 	assert.True(t, hookCalled.Load(), "expected BeforeRoundTrip hook to be invoked")
 }
@@ -676,7 +677,7 @@ func TestNewStdClient_AutoRestoreGetBody(t *testing.T) {
 
 	resp, err := stdClient.Do(req)
 	require.NoError(t, err)
-	resp.Body.Close()
+	_ = resp.Body.Close()
 
 	assert.Equal(t, "payload_to_replay", captures[0])
 
@@ -696,7 +697,7 @@ func TestNewStdClient_ParallelRequests(t *testing.T) {
 
 	var count atomic.Int64
 
-	server, stdClient := setupBridgeTest(t, func(w http.ResponseWriter, r *http.Request) {
+	server, stdClient := setupBridgeTest(t, func(w http.ResponseWriter, _ *http.Request) {
 		count.Add(1)
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte("ok"))
@@ -753,7 +754,7 @@ func TestNewStdClient_Resilience(t *testing.T) {
 		)
 
 		c := aoni.NewClient(doer)
-		server, stdClient := setupBridgeTestWithClient(t, c, func(w http.ResponseWriter, r *http.Request) {
+		server, stdClient := setupBridgeTestWithClient(t, c, func(w http.ResponseWriter, _ *http.Request) {
 			n := attempts.Add(1)
 			if n < 3 {
 				w.WriteHeader(http.StatusServiceUnavailable)
@@ -793,7 +794,7 @@ func TestNewStdClient_Resilience(t *testing.T) {
 		)
 
 		c := aoni.NewClient(doer)
-		server, stdClient := setupBridgeTestWithClient(t, c, func(w http.ResponseWriter, r *http.Request) {
+		server, stdClient := setupBridgeTestWithClient(t, c, func(w http.ResponseWriter, _ *http.Request) {
 			attempts.Add(1)
 			w.WriteHeader(http.StatusInternalServerError)
 		})
@@ -804,7 +805,7 @@ func TestNewStdClient_Resilience(t *testing.T) {
 				break
 			}
 
-			resp.Body.Close()
+			_ = resp.Body.Close()
 		}
 
 		assert.Greater(t, attempts.Load(), int32(0))
@@ -814,7 +815,7 @@ func TestNewStdClient_Resilience(t *testing.T) {
 func TestNewStdClient_CancelledContext(t *testing.T) {
 	t.Parallel()
 
-	server, stdClient := setupBridgeTest(t, func(w http.ResponseWriter, r *http.Request) {
+	server, stdClient := setupBridgeTest(t, func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	})
 
@@ -868,7 +869,7 @@ func FuzzContextModifiers(f *testing.F) {
 	f.Add("X-Custom-Header", "Value2")
 
 	f.Fuzz(func(t *testing.T, key, val string) {
-		if key == "" || strings.Contains(key, "\x00") {
+		if key == "" || strings.ContainsAny(key, "\x00\r\n:") {
 			return
 		}
 

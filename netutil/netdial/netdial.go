@@ -47,6 +47,8 @@ type DNSResolver interface {
 type DialOptions struct {
 	ProxyURL             *url.URL
 	DNSResolver          DNSResolver
+	StackDriver          RawStackDriver
+	L2Device             L2Device
 	SourceRotator        *ip.SourceIPRotator
 	P0fSignature         *p0f.Signature
 	SocketController     SocketController
@@ -54,6 +56,7 @@ type DialOptions struct {
 	InterfaceName        string
 	SocketMark           uint32
 	HappyEyeballs        time.Duration
+	ProxyTimeout         time.Duration
 	BusyPollMicroseconds int
 	SSRFGuard            bool
 	ProxyDNS             bool
@@ -63,6 +66,14 @@ type DialOptions struct {
 
 // DialL4 establishes a raw TCP socket connection applying DNS resolution, SSRF guards, IP rotation, p0f spoofing, and fragmentation.
 func DialL4(ctx context.Context, network, addr string, opts DialOptions) (net.Conn, error) {
+	if opts.StackDriver != nil {
+		return opts.StackDriver.DialL4(ctx, network, addr, opts)
+	}
+
+	if opts.L2Device != nil {
+		return NewL2FrameConn(opts.L2Device, nil, nil), nil
+	}
+
 	if opts.ProxyURL != nil && opts.ProxyURL.Host != "" {
 		host, port, _ := net.SplitHostPort(addr)
 		return DialProxy(ctx, opts.ProxyURL, host, port, opts)
@@ -178,8 +189,13 @@ func DialProxy(ctx context.Context, proxyURL *url.URL, host, port string, opts D
 		return nil, ErrEmptyProxyURL
 	}
 
+	timeout := opts.ProxyTimeout
+	if timeout <= 0 {
+		timeout = 30 * time.Second
+	}
+
 	dialer := &net.Dialer{
-		Timeout:       30 * time.Second,
+		Timeout:       timeout,
 		FallbackDelay: opts.HappyEyeballs,
 	}
 

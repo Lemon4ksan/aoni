@@ -6,19 +6,61 @@ package aoni
 
 import (
 	"context"
-	stdio "io"
 	"net"
 	"net/http"
+	"net/url"
 	"reflect"
+	"time"
+
+	"github.com/lemon4ksan/miyako/generic"
+	utls "github.com/refraction-networking/utls"
+	"golang.org/x/net/http2"
+
+	"github.com/lemon4ksan/aoni/internal/io"
+	"github.com/lemon4ksan/aoni/internal/pipeline"
+	"github.com/lemon4ksan/aoni/telemetry"
 )
+
+// Request defines the unified, engine-agnostic HTTP request interface.
+//
+// It provides both string-based and byte-based accessors to ensure zero-allocation
+// operations for high-performance engines while remaining 100% compatible with standard net/http.
+type Request = pipeline.Request
+
+// Response defines the unified, engine-agnostic HTTP response interface.
+type Response = pipeline.Response
+
+// ResponseDecoder defines the contract for unmarshaling response payload streams into Go structures.
+type ResponseDecoder = pipeline.ResponseDecoder
+
+// RequestDoer represents an engine capable of executing unified [Request] objects,
+// satisfied by both [aoni.Client] and [fast.Client].
+type RequestDoer = pipeline.RequestDoer
 
 // DoerFunc adapts a plain function matching the request execution signature to the [RequestDoer] interface.
 type DoerFunc func(req Request) (Response, error)
 
-// Do executes the underlying function against the provided request contract.
 func (f DoerFunc) Do(req Request) (Response, error) {
 	return f(req)
 }
+
+// RetryCondition evaluates whether a failed request attempt should trigger a retry.
+type RetryCondition = pipeline.RetryCondition
+
+// RetryOverride overrides the default retry behavior for a specific request.
+type RetryOverride = pipeline.RetryOverride
+
+// FallbackFunc generates an alternative [Response] when a request fails.
+type FallbackFunc = pipeline.FallbackFunc
+
+// BaseResponse is the interface implemented by all response types returned by the client.
+type BaseResponse = pipeline.BaseResponse
+
+// RequestModifier represents a functional hook that mutates an outgoing [Request] contract prior to dispatch.
+type RequestModifier = generic.Option[Request]
+
+// ClientOption represents a functional option that configures [Client] initialization or cloning.
+type ClientOption generic.Option[*Config]
 
 // Middleware decorates a [RequestDoer] with request and response interception logic.
 type Middleware func(next RequestDoer) RequestDoer
@@ -76,165 +118,92 @@ func Configure(doer any, opts ...ClientOption) RequestDoer {
 	return NewClient(doer, opts...)
 }
 
-// Request defines the unified, engine-agnostic HTTP request interface.
-//
-// It provides both string-based and byte-based accessors to ensure zero-allocation
-// operations for high-performance engines while remaining 100% compatible with standard net/http.
-type Request interface {
-	// Context returns the execution context associated with the request.
-	Context() context.Context
-
-	// SetContext updates the execution context of the request.
-	SetContext(ctx context.Context)
-
-	// Method returns the HTTP method (e.g. "GET", "POST").
-	Method() string
-
-	// SetMethod sets the HTTP method using a string.
-	SetMethod(method string)
-
-	// SetMethodBytes sets the HTTP method using a byte slice without string allocation.
-	SetMethodBytes(method []byte)
-
-	// URL returns the full target URL string.
-	URL() string
-
-	// SetURL sets the full destination address using a string.
-	SetURL(urlStr string)
-
-	// SetURIBytes sets the full destination address using a byte slice.
-	SetURIBytes(uri []byte)
-
-	// Path returns the path component of the URI.
-	Path() string
-
-	// SetPath sets the path component of the URI.
-	SetPath(path string)
-
-	// RawQuery returns the raw URL query string.
-	RawQuery() string
-
-	// SetRawQuery sets the raw URL query string.
-	SetRawQuery(query string)
-
-	// SetRawQueryBytes sets the raw URL query string using a byte slice.
-	SetRawQueryBytes(query []byte)
-
-	// AddQueryParam appends a query key-value pair to the URI.
-	AddQueryParam(key, value string)
-
-	// AddQueryParamBytes appends a query key-value pair using byte slices.
-	AddQueryParamBytes(key, value []byte)
-
-	// SetQueryParam sets or replaces a query key-value pair in the URI.
-	SetQueryParam(key, value string)
-
-	// SetQueryParamBytes sets or replaces a query key-value pair using byte slices.
-	SetQueryParamBytes(key, value []byte)
-
-	// Header returns the single string value associated with key.
-	Header(key string) string
-
-	// HeaderBytes returns the value associated with key as a byte slice.
-	HeaderBytes(key []byte) []byte
-
-	// SetHeader sets the header key to value.
-	SetHeader(key, value string)
-
-	// SetHeaderBytes sets the header key to value using byte slices.
-	SetHeaderBytes(key, value []byte)
-
-	// AddHeader appends value to header key.
-	AddHeader(key, value string)
-
-	// AddHeaderBytes appends value to header key using byte slices.
-	AddHeaderBytes(key, value []byte)
-
-	// DelHeader removes the header key.
-	DelHeader(key string)
-
-	// DelHeaderBytes removes the header key using a byte slice.
-	DelHeaderBytes(key []byte)
-
-	// ResetHeaders removes all headers from the request.
-	ResetHeaders()
-
-	// SetBodyBytes sets the request body to a raw byte slice.
-	SetBodyBytes(body []byte)
-
-	// BodyBytes returns the request body as a byte slice if stored in memory.
-	BodyBytes() []byte
-
-	// SetBodyStream sets a streaming body reader with an optional content length (-1 if unknown).
-	SetBodyStream(r stdio.Reader, contentLength int64)
-
-	// BodyStream returns an io.Reader for the request body.
-	BodyStream() stdio.Reader
-
-	// HTTPRequest returns the underlying *http.Request if available (returns nil for non-net/http engines).
-	HTTPRequest() *http.Request
-
-	// EngineRequest returns the underlying raw request object of the active engine.
-	EngineRequest() any
+// RequestFactory is implemented by engines capable of pooling their own high-performance Request instances.
+type RequestFactory interface {
+	AcquireRequest() Request
+	ReleaseRequest(req Request)
 }
 
-// Response defines the unified, engine-agnostic HTTP response interface.
-type Response interface {
-	// StatusCode returns the response HTTP status code.
-	StatusCode() int
-
-	// Status returns the response status string (e.g. "200 OK").
-	Status() string
-
-	// StatusBytes returns the response status line as a byte slice.
-	StatusBytes() []byte
-
-	// Header returns the single value for response header key.
-	Header(key string) string
-
-	// HeaderBytes returns the response header value as a byte slice.
-	HeaderBytes(key []byte) []byte
-
-	// Headers returns all response headers as a key-value map.
-	Headers() map[string][]string
-
-	// BodyBytes returns direct access to the response body byte slice.
-	// For fast engines, this returns the internal socket buffer directly without memory copying.
-	BodyBytes() []byte
-
-	// BodyStream returns an io.ReadCloser for reading streaming responses.
-	BodyStream() stdio.ReadCloser
-
-	// HTTPResponse returns the underlying *http.Response if available (returns nil for non-net/http engines).
-	HTTPResponse() *http.Response
-
-	// EngineResponse returns the underlying raw response object of the active engine.
-	EngineResponse() any
-
-	// Uncompressed reports whether the response body was transparently decompressed by the client.
-	Uncompressed() bool
-
-	// Close releases any resources associated with the response body.
-	Close() error
+// BaseResponseProvider provides a [BaseResponse] model for structured unwrapping.
+type BaseResponseProvider interface {
+	BaseResponse() BaseResponse
 }
 
-// RequestDoer represents an engine capable of executing unified [Request] objects,
-// satisfied by both [aoni.Client] and [fast.Client].
-type RequestDoer interface {
-	Do(req Request) (Response, error)
-}
-
-// ResponseDecoder defines the contract for unmarshaling response payload streams into Go structures.
-type ResponseDecoder interface {
-	Decode(reader stdio.Reader, target any) error
-}
+// QueryEncoder marshals arbitrary structures or maps into [url.Values].
+type QueryEncoder func(any) (url.Values, error)
 
 // WSDialer is implemented by clients that support raw TCP/TLS socket dialing for WebSocket upgrades.
-// Both [*Client] and any custom dialer can satisfy this interface to be used with the ws package.
 type WSDialer interface {
-	// DialTLSForWS establishes an encrypted TLS connection to addr for WebSocket use.
 	DialTLSForWS(ctx context.Context, addr string) (net.Conn, error)
-
-	// DialPlainForWS establishes a plain TCP connection to addr for WebSocket use.
 	DialPlainForWS(ctx context.Context, addr string) (net.Conn, error)
+}
+
+// DNSResolver defines the hostname-to-IP lookup resolution contract.
+type DNSResolver interface {
+	LookupIPAddr(ctx context.Context, host string) ([]net.IPAddr, error)
+}
+
+// SocketController directly configures underlying TCP sockets before SYN packets are written.
+type SocketController interface {
+	Control(fd uintptr, network, address string) error
+}
+
+// SessionCache extends the uTLS session caching contract to support proxy-isolated TLS tickets.
+type SessionCache interface {
+	utls.ClientSessionCache
+	SetProxyKey(key string)
+}
+
+// ClientHelloSpecProvider generates or retrieves a uTLS ClientHelloSpec dynamically.
+type ClientHelloSpecProvider interface {
+	ClientHelloSpec() (*utls.ClientHelloSpec, error)
+}
+
+// HTTP2Configurer customizes the [golang.org/x/net/http2.Transport] instance.
+type HTTP2Configurer interface {
+	ConfigureHTTP2(t *http2.Transport) error
+}
+
+// ProgressFunc represents a callback triggered periodically to monitor stream transfer progress.
+type ProgressFunc = io.ProgressFunc
+
+// CacheStore defines the persistence contract for response caching backends.
+type CacheStore interface {
+	Get(ctx context.Context, key any) ([]byte, error)
+	Set(ctx context.Context, key any, val []byte, ttl time.Duration) error
+}
+
+// ChallengeSolver delegates WAF challenge resolution to an automated external driver.
+type ChallengeSolver interface {
+	Solve(ctx context.Context, err error, req *http.Request) (*http.Response, error)
+}
+
+// ChallengeDetector decides whether an incoming HTTP response represents a WAF challenge.
+type ChallengeDetector func(resp *http.Response) (bool, error)
+
+// TrafficInspector captures and records request traces and headers for diagnostics.
+type TrafficInspector interface {
+	Capture(req *http.Request, resp *http.Response, err error, traceInfo *telemetry.TraceInfo)
+}
+
+// HARTracker records HTTP transactions into HAR session logs.
+type HARTracker interface {
+	Record(req *http.Request, resp *http.Response, startTime time.Time, duration int64)
+}
+
+// Logger specifies the structured diagnostic logging interface.
+type Logger interface {
+	Debug(msg string, args ...any)
+	DebugContext(ctx context.Context, msg string, args ...any)
+	Info(msg string, args ...any)
+	InfoContext(ctx context.Context, msg string, args ...any)
+	Warn(msg string, args ...any)
+	WarnContext(ctx context.Context, msg string, args ...any)
+	Error(msg string, args ...any)
+	ErrorContext(ctx context.Context, msg string, args ...any)
+}
+
+// LoggerProvider provides access to the diagnostic Logger instance.
+type LoggerProvider interface {
+	Logger() Logger
 }

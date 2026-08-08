@@ -6,6 +6,7 @@ package stream_test
 
 import (
 	"context"
+	"encoding/binary"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -15,13 +16,15 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"google.golang.org/protobuf/proto"
+	"google.golang.org/protobuf/types/known/wrapperspb"
 
 	"github.com/lemon4ksan/aoni"
 	"github.com/lemon4ksan/aoni/option"
 	"github.com/lemon4ksan/aoni/realtime/stream"
 )
 
-// setupTestServer creates a test server and pre-configures a client With its URL.
+// setupTestServer creates a test server and pre-configures a client with its URL.
 // It registers resource cleanup automatically through t.Cleanup.
 func setupTestServer(t *testing.T, handler http.HandlerFunc) (*httptest.Server, *aoni.Client) {
 	t.Helper()
@@ -39,28 +42,31 @@ func TestStream(t *testing.T) {
 
 	t.Run("stream_response_body", func(t *testing.T) {
 		t.Parallel()
-		_, client := setupTestServer(t, func(w http.ResponseWriter, r *http.Request) {
+
+		_, client := setupTestServer(t, func(w http.ResponseWriter, _ *http.Request) {
 			w.Header().Set("Content-Type", "application/octet-stream")
 			w.Header().Set("Content-Length", "11")
 			w.WriteHeader(http.StatusOK)
 			_, _ = w.Write([]byte("hello world"))
 		})
 
-		stream, err := stream.Get(t.Context(), client, "/stream")
+		s, err := stream.Get(t.Context(), client, "/stream")
 		require.NoError(t, err)
-		t.Cleanup(func() { _ = stream.Close() })
+		t.Cleanup(func() { _ = s.Close() })
 
-		data, err := io.ReadAll(stream)
+		data, err := io.ReadAll(s)
 		require.NoError(t, err)
+
 		assert.Equal(t, "hello world", string(data))
-		assert.Equal(t, int64(11), stream.ContentLength())
-		assert.Equal(t, "application/octet-stream", stream.ContentType())
-		assert.Equal(t, http.StatusOK, stream.StatusCode())
+		assert.Equal(t, int64(11), s.ContentLength())
+		assert.Equal(t, "application/octet-stream", s.ContentType())
+		assert.Equal(t, http.StatusOK, s.StatusCode())
 	})
 
 	t.Run("stream_error_status", func(t *testing.T) {
 		t.Parallel()
-		_, client := setupTestServer(t, func(w http.ResponseWriter, r *http.Request) {
+
+		_, client := setupTestServer(t, func(w http.ResponseWriter, _ *http.Request) {
 			w.WriteHeader(http.StatusNotFound)
 		})
 
@@ -74,6 +80,7 @@ func TestStream(t *testing.T) {
 
 	t.Run("stream_with_query_params", func(t *testing.T) {
 		t.Parallel()
+
 		_, client := setupTestServer(t, func(w http.ResponseWriter, r *http.Request) {
 			assert.Equal(t, "bar", r.URL.Query().Get("foo"))
 
@@ -81,15 +88,16 @@ func TestStream(t *testing.T) {
 		})
 
 		query := map[string]string{"foo": "bar"}
-		stream, err := stream.Get(t.Context(), client, "/test", func(req aoni.Request) {
+		s, err := stream.Get(t.Context(), client, "/test", func(req aoni.Request) {
 			for k, v := range query {
 				req.AddQueryParam(k, v)
 			}
 		})
 		require.NoError(t, err)
-		t.Cleanup(func() { _ = stream.Close() })
 
-		data, err := io.ReadAll(stream)
+		t.Cleanup(func() { _ = s.Close() })
+
+		data, err := io.ReadAll(s)
 		require.NoError(t, err)
 		assert.Equal(t, "ok", string(data))
 	})
@@ -99,41 +107,66 @@ func TestStream(t *testing.T) {
 
 		largeBody := strings.Repeat("x", 1024*1024)
 
-		_, client := setupTestServer(t, func(w http.ResponseWriter, r *http.Request) {
+		_, client := setupTestServer(t, func(w http.ResponseWriter, _ *http.Request) {
 			w.Header().Set("Content-Length", "1048576")
 			_, _ = w.Write([]byte(largeBody))
 		})
 
-		stream, err := stream.Get(t.Context(), client, "/large")
+		s, err := stream.Get(t.Context(), client, "/large")
 		require.NoError(t, err)
-		t.Cleanup(func() { _ = stream.Close() })
 
-		data, err := io.ReadAll(stream)
+		t.Cleanup(func() { _ = s.Close() })
+
+		data, err := io.ReadAll(s)
 		require.NoError(t, err)
 		assert.Equal(t, len(largeBody), len(data))
 	})
 
 	t.Run("response_method", func(t *testing.T) {
 		t.Parallel()
-		_, client := setupTestServer(t, func(w http.ResponseWriter, r *http.Request) {
+
+		_, client := setupTestServer(t, func(w http.ResponseWriter, _ *http.Request) {
 			w.Header().Set("X-Custom", "value")
 			_, _ = w.Write([]byte("ok"))
 		})
 
-		stream, err := stream.Get(t.Context(), client, "/test")
+		s, err := stream.Get(t.Context(), client, "/test")
 		require.NoError(t, err)
-		t.Cleanup(func() { _ = stream.Close() })
 
-		resp := stream.Response()
+		t.Cleanup(func() { _ = s.Close() })
+
+		resp := s.Response()
 		assert.Equal(t, "value", resp.Header.Get("X-Custom"))
 
-		_, _ = io.ReadAll(stream)
+		_, _ = io.ReadAll(s)
 	})
+}
+
+func TestStreamWithBody(t *testing.T) {
+	t.Parallel()
+
+	_, client := setupTestServer(t, func(w http.ResponseWriter, r *http.Request) {
+		body, err := io.ReadAll(r.Body)
+		require.NoError(t, err)
+		assert.Equal(t, "post_payload_data", string(body))
+
+		_, _ = w.Write([]byte("response_payload"))
+	})
+
+	s, err := stream.WithBody(t.Context(), client, http.MethodPost, "/", strings.NewReader("post_payload_data"))
+	require.NoError(t, err)
+
+	t.Cleanup(func() { _ = s.Close() })
+
+	data, err := io.ReadAll(s)
+	require.NoError(t, err)
+	assert.Equal(t, "response_payload", string(data))
 }
 
 func TestStreamNDJSON(t *testing.T) {
 	t.Parallel()
-	_, client := setupTestServer(t, func(w http.ResponseWriter, r *http.Request) {
+
+	_, client := setupTestServer(t, func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/x-ndjson")
 		_, _ = w.Write([]byte(`{"message": "msg1"}` + "\n" + `{"message": "msg2"}` + "\n"))
 	})
@@ -159,9 +192,45 @@ func TestStreamNDJSON(t *testing.T) {
 	assert.Equal(t, []string{"msg1", "msg2"}, messages)
 }
 
+func TestStreamNDJSON_ContextCancellation(t *testing.T) {
+	t.Parallel()
+
+	_, client := setupTestServer(t, func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(`{"message":"first"}` + "\n"))
+
+		time.Sleep(1 * time.Second)
+
+		_, _ = w.Write([]byte(`{"message":"second"}` + "\n"))
+	})
+
+	s, err := stream.Get(t.Context(), client, "/")
+	require.NoError(t, err)
+
+	ctx, cancel := context.WithCancel(t.Context())
+
+	type Msg struct {
+		Message string `json:"message"`
+	}
+
+	out, errs := stream.GetNDJSON[Msg](ctx, s)
+
+	msg1 := <-out
+	assert.Equal(t, "first", msg1.Message)
+
+	cancel()
+
+	var errList []error
+	for err := range errs {
+		errList = append(errList, err)
+	}
+
+	assert.Contains(t, errList, context.Canceled)
+}
+
 func TestStreamSSE(t *testing.T) {
 	t.Parallel()
-	_, client := setupTestServer(t, func(w http.ResponseWriter, r *http.Request) {
+
+	_, client := setupTestServer(t, func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "text/event-stream")
 		_, _ = w.Write([]byte("event: first\ndata: value1\nid: 1\n\nevent: second\ndata: value2\n\n"))
 	})
@@ -176,8 +245,6 @@ func TestStreamSSE(t *testing.T) {
 		events = append(events, ev)
 	}
 
-	require.NoError(t, err)
-
 	for err := range errs {
 		require.NoError(t, err)
 	}
@@ -191,28 +258,10 @@ func TestStreamSSE(t *testing.T) {
 	assert.Equal(t, "value2", events[1].Data)
 }
 
-func TestStreamWithBody(t *testing.T) {
-	t.Parallel()
-	_, client := setupTestServer(t, func(w http.ResponseWriter, r *http.Request) {
-		body, err := io.ReadAll(r.Body)
-		require.NoError(t, err)
-		assert.Equal(t, "post_payload_data", string(body))
-
-		_, _ = w.Write([]byte("response_payload"))
-	})
-
-	stream, err := stream.WithBody(t.Context(), client, http.MethodPost, "/", strings.NewReader("post_payload_data"))
-	require.NoError(t, err)
-	t.Cleanup(func() { _ = stream.Close() })
-
-	data, err := io.ReadAll(stream)
-	require.NoError(t, err)
-	assert.Equal(t, "response_payload", string(data))
-}
-
 func TestStreamSSE_Integration(t *testing.T) {
 	t.Parallel()
-	_, client := setupTestServer(t, func(w http.ResponseWriter, r *http.Request) {
+
+	_, client := setupTestServer(t, func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "text/event-stream")
 		_, _ = w.Write([]byte("event: welcome\ndata: joined\n\n"))
 	})
@@ -234,67 +283,6 @@ func TestStreamSSE_Integration(t *testing.T) {
 	assert.Equal(t, "joined", events[0].Data)
 }
 
-func TestStreamChunks(t *testing.T) {
-	t.Parallel()
-	_, client := setupTestServer(t, func(w http.ResponseWriter, r *http.Request) {
-		_, _ = w.Write([]byte("token1_token2_token3"))
-	})
-
-	s, err := stream.Get(t.Context(), client, "/")
-	require.NoError(t, err)
-
-	out, errs := stream.Chunks(t.Context(), s)
-
-	var chunks []string
-	for chunk := range out {
-		chunks = append(chunks, chunk)
-	}
-
-	for err := range errs {
-		require.NoError(t, err)
-	}
-
-	assert.NotEmpty(t, chunks)
-	assert.Equal(t, "token1_token2_token3", strings.Join(chunks, ""))
-}
-
-func TestStreamNDJSON_ContextCancellation(t *testing.T) {
-	t.Parallel()
-	_, client := setupTestServer(t, func(w http.ResponseWriter, r *http.Request) {
-		// Send first record, wait/block, then send second
-		_, _ = w.Write([]byte(`{"message":"first"}` + "\n"))
-
-		time.Sleep(1 * time.Second)
-
-		_, _ = w.Write([]byte(`{"message":"second"}` + "\n"))
-	})
-
-	s, err := stream.Get(t.Context(), client, "/")
-	require.NoError(t, err)
-
-	ctx, cancel := context.WithCancel(t.Context())
-
-	type Msg struct {
-		Message string `json:"message"`
-	}
-
-	out, errs := stream.GetNDJSON[Msg](ctx, s)
-
-	// Consume the first available message
-	msg1 := <-out
-	assert.Equal(t, "first", msg1.Message)
-
-	// Instantly cancel context to interrupt background reader goroutine
-	cancel()
-
-	var errList []error
-	for err := range errs {
-		errList = append(errList, err)
-	}
-
-	assert.Contains(t, errList, context.Canceled)
-}
-
 func TestResumableSSE_LastEventID(t *testing.T) {
 	t.Parallel()
 
@@ -310,7 +298,6 @@ func TestResumableSSE_LastEventID(t *testing.T) {
 
 		if attempts == 1 {
 			_, _ = w.Write([]byte("id: 42\ndata: event1\nretry: 10\n\n"))
-			// Disconnect abruptly without EOF
 			return
 		}
 
@@ -334,4 +321,115 @@ func TestResumableSSE_LastEventID(t *testing.T) {
 	assert.Equal(t, "43", e2.ID)
 	assert.Equal(t, "event2", e2.Data)
 	assert.Equal(t, "42", receivedLastID)
+}
+
+func TestResumableSSE_MaxReconnectsExceeded(t *testing.T) {
+	t.Parallel()
+
+	_, client := setupTestServer(t, func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+	})
+
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+
+	_, errs, err := stream.ResumableSSE[stream.SSEEvent](
+		ctx, client, "/",
+		stream.SSEReconnectOptions{
+			MaxReconnects: 2,
+			DefaultRetry:  5 * time.Millisecond,
+		},
+	)
+	require.NoError(t, err)
+
+	var errList []error
+	for err := range errs {
+		errList = append(errList, err)
+	}
+
+	require.NotEmpty(t, errList)
+	assert.Contains(t, errList[0].Error(), "max reconnect attempts reached")
+}
+
+func TestStreamChunks(t *testing.T) {
+	t.Parallel()
+
+	_, client := setupTestServer(t, func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte("token1_token2_token3"))
+	})
+
+	s, err := stream.Get(t.Context(), client, "/")
+	require.NoError(t, err)
+
+	out, errs := stream.Chunks(t.Context(), s)
+
+	var chunks []string
+	for chunk := range out {
+		chunks = append(chunks, chunk)
+	}
+
+	for err := range errs {
+		require.NoError(t, err)
+	}
+
+	assert.NotEmpty(t, chunks)
+	assert.Equal(t, "token1_token2_token3", strings.Join(chunks, ""))
+}
+
+func TestParseGRPCWebStream(t *testing.T) {
+	t.Parallel()
+
+	msg1 := wrapperspb.String("grpc_msg_1")
+	msg1Bytes, err := proto.Marshal(msg1)
+	require.NoError(t, err)
+
+	msg2 := wrapperspb.String("grpc_msg_2")
+	msg2Bytes, err := proto.Marshal(msg2)
+	require.NoError(t, err)
+
+	_, client := setupTestServer(t, func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/grpc-web+proto")
+
+		// Frame 1: Data frame (flags: 0x00) with msg1
+		var f1 [5]byte
+
+		f1[0] = 0x00
+		binary.BigEndian.PutUint32(f1[1:5], uint32(len(msg1Bytes))) //nolint:gosec
+		_, _ = w.Write(f1[:])
+		_, _ = w.Write(msg1Bytes)
+
+		// Frame 2: Data frame (flags: 0x00) with msg2
+		var f2 [5]byte
+
+		f2[0] = 0x00
+		binary.BigEndian.PutUint32(f2[1:5], uint32(len(msg2Bytes))) //nolint:gosec
+		_, _ = w.Write(f2[:])
+		_, _ = w.Write(msg2Bytes)
+
+		// Frame 3: Trailer frame (flags: 0x80) with grpc-status:0
+		trailerText := []byte("grpc-status:0\r\ngrpc-message:OK\r\n")
+
+		var f3 [5]byte
+
+		f3[0] = 0x80
+		binary.BigEndian.PutUint32(f3[1:5], uint32(len(trailerText))) //nolint:gosec
+		_, _ = w.Write(f3[:])
+		_, _ = w.Write(trailerText)
+	})
+
+	s, err := stream.Get(t.Context(), client, "/")
+	require.NoError(t, err)
+
+	out, errs := stream.ParseGRPCWebStream[wrapperspb.StringValue](t.Context(), s)
+
+	var msgs []string
+	for val := range out { //nolint:govet
+		msgs = append(msgs, val.GetValue())
+	}
+
+	for err := range errs {
+		require.NoError(t, err)
+	}
+
+	assert.Equal(t, []string{"grpc_msg_1", "grpc_msg_2"}, msgs)
 }

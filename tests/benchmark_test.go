@@ -10,6 +10,7 @@ import (
 	"encoding/json"
 	"io"
 	"mime/multipart"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -21,6 +22,8 @@ import (
 	"github.com/lemon4ksan/aoni"
 	"github.com/lemon4ksan/aoni/codec/decode"
 	"github.com/lemon4ksan/aoni/codec/values"
+	"github.com/lemon4ksan/aoni/fast"
+	"github.com/lemon4ksan/aoni/internal/pipeline"
 	"github.com/lemon4ksan/aoni/mod"
 	"github.com/lemon4ksan/aoni/option"
 	"github.com/lemon4ksan/aoni/request"
@@ -447,5 +450,163 @@ func BenchmarkRequest_WithHedging_Aoni(b *testing.B) {
 		}
 
 		_ = resp.Body.Close()
+	}
+}
+
+// BenchmarkGET_JSON_Aoni_Minimal measures aoni performance in Baremetal mode.
+func BenchmarkGET_JSON_Aoni_Minimal(b *testing.B) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(benchPayload{ID: 100, Message: "hello benchmark"})
+	}))
+	defer server.Close()
+
+	client := aoni.NewClient(nil,
+		option.WithBaseURL(server.URL),
+		option.WithBaremetal(),
+	)
+	ctx := context.Background()
+
+	b.ResetTimer()
+	b.ReportAllocs()
+
+	for b.Loop() {
+		var payload benchPayload
+
+		err := request.GetInto(ctx, client, "/", &payload)
+		if err != nil {
+			b.Fatal(err)
+		}
+
+		if payload.ID != 100 {
+			b.Fatal("invalid id")
+		}
+	}
+}
+
+// BenchmarkGET_JSON_Aoni_UnsafeDisableFlags measures per-request Unsafe phase bypass without loop allocations.
+func BenchmarkGET_JSON_Aoni_UnsafeDisableFlags(b *testing.B) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(benchPayload{ID: 100, Message: "hello benchmark"})
+	}))
+	defer server.Close()
+
+	client := aoni.NewClient(nil, option.WithBaseURL(server.URL))
+
+	ctx := aoni.WithContextModifier(context.Background(),
+		mod.WithUnsafeDisableFlags(
+			pipeline.FlagChallenge|
+				pipeline.FlagValidate|
+				pipeline.FlagDecompress|
+				pipeline.FlagRotateUA|
+				pipeline.FlagRedact|
+				pipeline.FlagMultiRead,
+		),
+	)
+
+	b.ResetTimer()
+	b.ReportAllocs()
+
+	for b.Loop() {
+		var payload benchPayload
+
+		err := request.GetInto(ctx, client, "/", &payload)
+		if err != nil {
+			b.Fatal(err)
+		}
+
+		if payload.ID != 100 {
+			b.Fatal("invalid id")
+		}
+	}
+}
+
+func BenchmarkGET_JSON_Fast_Aoni_UnsafeDisableFlags(b *testing.B) {
+	ln, srv := setupFastBenchServer()
+	defer func() {
+		_ = srv.Shutdown()
+		_ = ln.Close()
+	}()
+
+	client := fast.NewClient(
+		option.WithBaseURL("http://inmemory"),
+		option.WithBaremetal(),
+	)
+
+	client.Engine().Dial = func(_ string) (net.Conn, error) {
+		return ln.Dial()
+	}
+
+	ctx := context.Background()
+
+	b.ReportAllocs()
+	b.ResetTimer()
+
+	for b.Loop() {
+		var user fastBenchUser
+		resp, err := client.Request(ctx, "GET", "/user")
+		if err != nil {
+			b.Fatalf("request failed: %v", err)
+		}
+
+		if err := json.Unmarshal(resp.BodyBytes(), &user); err != nil {
+			_ = resp.Close()
+			b.Fatalf("decode failed: %v", err)
+		}
+		_ = resp.Close()
+
+		if user.ID != 42 {
+			b.Fatalf("expected ID 42, got %d", user.ID)
+		}
+	}
+}
+
+func BenchmarkGET_JSON_Fast_Aoni_Minimal(b *testing.B) {
+	ln, srv := setupFastBenchServer()
+	defer func() {
+		_ = srv.Shutdown()
+		_ = ln.Close()
+	}()
+
+	client := fast.NewClient(
+		option.WithBaseURL("http://inmemory"),
+		option.WithBaremetal(),
+	)
+
+	client.Engine().Dial = func(_ string) (net.Conn, error) {
+		return ln.Dial()
+	}
+
+	ctx := aoni.WithContextModifier(context.Background(),
+		mod.WithUnsafeDisableFlags(
+			pipeline.FlagChallenge|
+				pipeline.FlagValidate|
+				pipeline.FlagDecompress|
+				pipeline.FlagRotateUA|
+				pipeline.FlagRedact|
+				pipeline.FlagMultiRead,
+		),
+	)
+
+	b.ReportAllocs()
+	b.ResetTimer()
+
+	for b.Loop() {
+		var user fastBenchUser
+		resp, err := client.Request(ctx, "GET", "/user")
+		if err != nil {
+			b.Fatalf("request failed: %v", err)
+		}
+
+		if err := json.Unmarshal(resp.BodyBytes(), &user); err != nil {
+			_ = resp.Close()
+			b.Fatalf("decode failed: %v", err)
+		}
+		_ = resp.Close()
+
+		if user.ID != 42 {
+			b.Fatalf("expected ID 42, got %d", user.ID)
+		}
 	}
 }

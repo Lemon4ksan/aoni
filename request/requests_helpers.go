@@ -399,9 +399,7 @@ func resolveDecoder(resp *http.Response) decode.Decoder {
 					return d
 				}
 
-				if rdec, ok := cfg.Decoder.(aoni.ResponseDecoder); ok && rdec != nil {
-					return decode.DecoderFunc(rdec.Decode)
-				}
+				return cfg.Decoder
 			}
 
 			contentType := resp.Header.Get("Content-Type")

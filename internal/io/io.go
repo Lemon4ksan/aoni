@@ -8,7 +8,6 @@ package io
 import (
 	"bufio"
 	"bytes"
-	"compress/gzip"
 	"context"
 	"errors"
 	"io"
@@ -18,6 +17,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/klauspost/compress/gzip"
 	"github.com/lemon4ksan/miyako/generic"
 )
 
@@ -29,7 +29,7 @@ var (
 	ErrResponseTooLarge = errors.New("aoni: response size limit exceeded")
 )
 
-// ProgressFunc reports periodic stream transfer progress (current bytes and total Content-Length).
+// ProgressFunc represents a callback triggered periodically to monitor stream transfer progress.
 type ProgressFunc func(current, total int64)
 
 const maxPoolBufferSize = 64 * 1024
@@ -39,6 +39,16 @@ var copyBufPool = sync.Pool{
 		b := make([]byte, 32*1024)
 		return &b
 	},
+}
+
+// LimitToContentLength caps the reader at contentLen bytes when contentLen >= 0,
+// protecting Keep-Alive sockets from trailing garbage bytes sent by misbehaved servers.
+func LimitToContentLength(r io.Reader, contentLen int64) io.Reader {
+	if contentLen < 0 || r == nil {
+		return r
+	}
+
+	return io.LimitReader(r, contentLen)
 }
 
 // CopyZeroAlloc streams data from r to w using kernel zero-copy paths or pooled 32KB buffers.

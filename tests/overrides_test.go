@@ -22,6 +22,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/lemon4ksan/aoni"
+	"github.com/lemon4ksan/aoni/codec/decode"
 	"github.com/lemon4ksan/aoni/middleware"
 	"github.com/lemon4ksan/aoni/mod"
 	"github.com/lemon4ksan/aoni/option"
@@ -329,6 +330,51 @@ func TestConnMetadata(t *testing.T) {
 	}
 }
 
+func TestCacheTTL(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name        string
+		applyMod    bool
+		ttl         time.Duration
+		expectSet   bool
+		expectedTTL time.Duration
+	}{
+		{
+			name:        "cache_ttl_set",
+			applyMod:    true,
+			ttl:         5 * time.Minute,
+			expectSet:   true,
+			expectedTTL: 5 * time.Minute,
+		},
+		{
+			name:      "cache_ttl_not_set",
+			applyMod:  false,
+			expectSet: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, "http://example.com", nil)
+			require.NoError(t, err)
+
+			if tt.applyMod {
+				mod.WithCacheTTL(tt.ttl)(aoni.NewStdRequest(req))
+			}
+
+			d, ok := aoni.GetCacheTTL(req.Context()).Value()
+			assert.Equal(t, tt.expectSet, ok)
+
+			if tt.expectSet {
+				assert.Equal(t, tt.expectedTTL, d)
+			}
+		})
+	}
+}
+
 func TestResponseValidator(t *testing.T) {
 	t.Parallel()
 
@@ -385,51 +431,6 @@ func TestResponseValidator(t *testing.T) {
 		assert.Nil(t, resp)
 		assert.Contains(t, err.Error(), "access denied by validator")
 	})
-}
-
-func TestCacheTTL(t *testing.T) {
-	t.Parallel()
-
-	tests := []struct {
-		name        string
-		applyMod    bool
-		ttl         time.Duration
-		expectSet   bool
-		expectedTTL time.Duration
-	}{
-		{
-			name:        "cache_ttl_set",
-			applyMod:    true,
-			ttl:         5 * time.Minute,
-			expectSet:   true,
-			expectedTTL: 5 * time.Minute,
-		},
-		{
-			name:      "cache_ttl_not_set",
-			applyMod:  false,
-			expectSet: false,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
-
-			req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, "http://example.com", nil)
-			require.NoError(t, err)
-
-			if tt.applyMod {
-				mod.WithCacheTTL(tt.ttl)(aoni.NewStdRequest(req))
-			}
-
-			d, ok := aoni.GetCacheTTL(req.Context()).Value()
-			assert.Equal(t, tt.expectSet, ok)
-
-			if tt.expectSet {
-				assert.Equal(t, tt.expectedTTL, d)
-			}
-		})
-	}
 }
 
 func TestRetryPolicyAndConditions(t *testing.T) {
@@ -568,6 +569,19 @@ func TestRetryPolicyAndConditions(t *testing.T) {
 	})
 }
 
+func TestRetryOnGRPCStatus(t *testing.T) {
+	t.Parallel()
+
+	cond := middleware.RetryOnGRPCStatus("14", "13")
+
+	grpcErr14 := &decode.GRPCWebError{StatusCode: "14", Err: decode.ErrGRPCWebStatusError}
+	grpcErr5 := &decode.GRPCWebError{StatusCode: "5", Err: decode.ErrGRPCWebStatusError}
+
+	assert.True(t, cond(nil, grpcErr14))
+	assert.False(t, cond(nil, grpcErr5))
+	assert.False(t, cond(nil, errors.New("plain error")))
+}
+
 func TestFallbackFunctions(t *testing.T) {
 	t.Parallel()
 
@@ -602,6 +616,47 @@ func TestFallbackFunctions(t *testing.T) {
 		body := resp.BodyBytes()
 		assert.Contains(t, string(body), "service unavailable")
 	})
+}
+
+func TestResponseTrace(t *testing.T) {
+	t.Parallel()
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	t.Cleanup(srv.Close)
+
+	c := aoni.NewClient(nil, option.WithBaseURL(srv.URL))
+
+	resp, err := request.Get(t.Context(), c, "/", mod.WithTraceContext())
+	require.NoError(t, err)
+
+	defer resp.Body.Close()
+
+	extracted := aoni.ResponseTrace(resp)
+	require.NotNil(t, extracted)
+	assert.NotEmpty(t, extracted.JA4.JA4H)
+}
+
+func TestAsReplayable_MultipleReads(t *testing.T) {
+	t.Parallel()
+
+	originalData := "replayable stream content"
+	rc := io.NopCloser(strings.NewReader(originalData))
+
+	replayable := aoni.AsReplayable(rc)
+	require.NotNil(t, replayable)
+
+	// Read 1
+	data1, err := io.ReadAll(replayable)
+	require.NoError(t, err)
+	assert.Equal(t, originalData, string(data1))
+
+	// Reset & Read 2
+	replayable.Reset()
+	data2, err := io.ReadAll(replayable)
+	require.NoError(t, err)
+	assert.Equal(t, originalData, string(data2))
 }
 
 func TestContextModifiersAndRules(t *testing.T) {
@@ -647,6 +702,46 @@ func TestContextModifiersAndRules(t *testing.T) {
 		require.NotNil(t, cfg)
 		assert.ErrorIs(t, cfg.BodyError, testErr)
 	})
+}
+
+func TestMod_WithVars_Validation(t *testing.T) {
+	t.Parallel()
+
+	req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, "http://example.com/item/{id}", nil)
+	require.NoError(t, err)
+
+	// Odd number of arguments must trigger ErrInvalidPairCount in BodyError
+	mod.WithVars("key_without_value")(aoni.NewStdRequest(req))
+
+	cfg := aoni.GetRequestConfig(req.Context())
+	require.NotNil(t, cfg)
+	assert.ErrorIs(t, cfg.BodyError, mod.ErrInvalidPairCount)
+}
+
+func TestMiddleware_Recover(t *testing.T) {
+	t.Parallel()
+
+	var panicCaught any
+
+	panicMiddleware := func(_ aoni.RequestDoer) aoni.RequestDoer {
+		return aoni.DoerFunc(func(_ aoni.Request) (aoni.Response, error) {
+			panic("simulated fatal pipeline panic")
+		})
+	}
+
+	recoverMid := middleware.Recover(func(r any) {
+		panicCaught = r
+	})
+
+	chained := middleware.Chain(aoni.NewClient(nil), recoverMid, panicMiddleware)
+
+	req := aoni.NewStdRequest(&http.Request{})
+	resp, err := chained.Do(req)
+
+	assert.Nil(t, resp)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "panic recovered")
+	assert.Equal(t, "simulated fatal pipeline panic", panicCaught)
 }
 
 func TestRetryOnTransientErrors(t *testing.T) {

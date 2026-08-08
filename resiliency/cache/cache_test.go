@@ -5,48 +5,96 @@
 package cache_test
 
 import (
-	"context"
-	"errors"
+	"sync"
 	"testing"
 	"time"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	"github.com/lemon4ksan/aoni/resiliency/cache"
 )
 
 func TestInMemoryStore_SetGetEviction(t *testing.T) {
-	ctx := context.Background()
-	store := cache.NewInMemoryStore(50 * time.Millisecond)
+	t.Parallel()
+
+	ctx := t.Context()
+	store := cache.NewInMemoryStore(20 * time.Millisecond)
+	t.Cleanup(store.Close)
 
 	key := "user:123"
 	val := []byte(`{"id":123,"name":"Test User"}`)
 
-	// Miss
-	if _, err := store.Get(ctx, key); !errors.Is(err, cache.ErrCacheMiss) {
-		t.Fatalf("expected ErrCacheMiss, got %v", err)
-	}
+	// 1. Miss
+	_, err := store.Get(ctx, key)
+	assert.ErrorIs(t, err, cache.ErrCacheMiss)
 
-	// Set with 100ms TTL
-	if err := store.Set(ctx, key, val, 100*time.Millisecond); err != nil {
-		t.Fatalf("Set failed: %v", err)
-	}
+	// 2. Set with 80ms TTL
+	err = store.Set(ctx, key, val, 80*time.Millisecond)
+	require.NoError(t, err)
 
-	// Hit
+	// 3. Hit
 	got, err := store.Get(ctx, key)
-	if err != nil {
-		t.Fatalf("Get failed: %v", err)
+	require.NoError(t, err)
+	assert.Equal(t, string(val), string(got))
+
+	// 4. Expiration
+	time.Sleep(120 * time.Millisecond)
+
+	// 5. Miss after expiration
+	_, err = store.Get(ctx, key)
+	assert.ErrorIs(t, err, cache.ErrCacheMiss)
+}
+
+func TestInMemoryStore_Overwrite(t *testing.T) {
+	t.Parallel()
+
+	ctx := t.Context()
+	store := cache.NewInMemoryStore(50 * time.Millisecond)
+	t.Cleanup(store.Close)
+
+	key := "config:flags"
+	val1 := []byte("v1")
+	val2 := []byte("v2")
+
+	require.NoError(t, store.Set(ctx, key, val1, 200*time.Millisecond))
+
+	got, err := store.Get(ctx, key)
+	require.NoError(t, err)
+	assert.Equal(t, "v1", string(got))
+
+	// Overwrite key
+	require.NoError(t, store.Set(ctx, key, val2, 200*time.Millisecond))
+
+	gotUpdated, err := store.Get(ctx, key)
+	require.NoError(t, err)
+	assert.Equal(t, "v2", string(gotUpdated))
+}
+
+func TestInMemoryStore_ConcurrentAccess(t *testing.T) {
+	t.Parallel()
+
+	ctx := t.Context()
+	store := cache.NewInMemoryStore(10 * time.Millisecond)
+	t.Cleanup(store.Close)
+
+	const goroutines = 20
+
+	var wg sync.WaitGroup
+
+	for i := range goroutines {
+		wg.Add(1)
+
+		go func(idx int) {
+			defer wg.Done()
+
+			key := "item"
+			val := []byte("content")
+
+			_ = store.Set(ctx, key, val, 50*time.Millisecond)
+			_, _ = store.Get(ctx, key)
+		}(i)
 	}
 
-	if string(got) != string(val) {
-		t.Errorf("got %q, want %q", string(got), string(val))
-	}
-
-	// Wait for expiration
-	time.Sleep(150 * time.Millisecond)
-
-	// Miss after expiration
-	if _, err := store.Get(ctx, key); !errors.Is(err, cache.ErrCacheMiss) {
-		t.Fatalf("expected ErrCacheMiss after expiration, got %v", err)
-	}
-
-	store.Close()
+	wg.Wait()
 }

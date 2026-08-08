@@ -2,12 +2,13 @@
 
 # aoni
 
-### The High-Performance, Zero-Alloc Engine for Go HTTP, Protobuf & Real-Time Networks
+### The Unified High-Performance Internet Protocol Stack for Go
 
 [![Go Reference](https://img.shields.io/badge/go-reference-007d9c?logo=go&logoColor=white&style=flat-square)](https://pkg.go.dev/github.com/lemon4ksan/aoni)
 [![License](https://img.shields.io/github/license/lemon4ksan/aoni?style=flat-square)](LICENSE)
+![Resilience](https://img.shields.io/badge/stability-Chromium--Grade-blue?style=flat-square)
 
-> _"Zero compromise. Zero-allocation discipline. Unrivaled network resilience."_
+> _"In networks, chaos is the default. Let aoni be your ice-cold anchor."_
 
 #### English • [Русский](README_RU.md)
 
@@ -15,9 +16,11 @@
 
 ## Why Aoni?
 
-When building modern Go applications, developers often face a forced tradeoff: choose a barebones wrapper for speed, or write thousands of lines of boilerplate to handle real-world network challenges like proxy isolation, gRPC-Web, TLS fingerprinting, and WAF challenge solving.
+Building modern Go applications usually means assembling a fragile "Frankenstein" of 10+ unmaintained networking packages—gluing together separate libraries for HTTP/3, uTLS, DNS-over-HTTPS, WebSockets, gRPC-Web, SSH tunneling, and resilience. Each package manages its own memory pools and context models, leading to heap bloat, GC latency spikes, and flaky connection failures under load.
 
-`aoni` eliminates this compromise. It is engineered from the ground up with profile-driven zero-allocation discipline, beating standard HTTP wrappers in both memory footprint and execution speed while delivering full-stack browser-grade evasion, uTLS, JA4, and gRPC-Web capabilities.
+`aoni` eliminates this fragmentation. It is the **Unified Internet Protocol Engine for Go** - consolidating all modern IETF RFCs, W3C standards, and Chromium-grade network resilience into a single, profile-driven zero-allocation architecture.
+
+Whether you are building standard microservice REST APIs, high-throughput gateways, real-time WebSockets, or stealthy anti-analysis tools, `aoni` delivers peak silicon performance without compromising on features, memory footprint, or reliability.
 
 ```shell
 go get github.com/lemon4ksan/aoni
@@ -82,7 +85,7 @@ func main() {
 	client := aoni.NewClient(nil,
 		option.WithBaseURL("https://api.example.com"),
 		option.WithTimeout(15*time.Second),
-		option.WithTLSFingerprint(aoni.BrowserChrome),
+		option.WithChrome(), // One-line Chrome-grade stealth, ECH, 0-RTT & resilience
 	)
 
 	// Single-line type-safe execution
@@ -114,7 +117,11 @@ userResp, resp, err := fluent.PostGRPCWebTo[pb.UserResponse](ctx, client, "/User
 | **Zero-Alloc Builder Pooling** | ✗ | ✗ | **✓ (`sync.Pool` Request Builder)** |
 | **Generics-first Decoding** | ✗ (Manual) | ✗ (Interface-based) | **✓ (Type-safe `[T]`)** |
 | **Native Protobuf & gRPC-Web** | ✗ | ✗ | **✓ (Binary, Text & Stream)** |
-| **Parallel "Happy Eyeballs" Dialing** | ⚠️ (Basic) | ✗ | **✓ (RFC 8305)** |
+| **Chromium Happy Eyeballs v3** | ⚠️ (IPv4/v6 only) | ✗ | **✓ (H3 vs H2/H1 Protocol Racing)** |
+| **Auto-Recovery Pipeline** | ✗ | ✗ | **✓ (HTTP 421, 408, 425 & Alt-Svc Backoff)** |
+| **W3C `No-Vary-Search` Caching** | ✗ | ✗ | **✓ (Smart URL Normalization)** |
+| **TLS 1.3 Encrypted Client Hello** | ✗ | ✗ | **✓ (ECH / RFC 9460 via DoH/DoQ)** |
+| **OS Power Management** | ✗ | ✗ | **✓ (Auto-purge zombie pools on sleep)** |
 | **Active Circuit Breaking** | ✗ | ✗ | **✓ (Native Middleware)** |
 | **Polite `Retry-After` Parsing** | ✗ | ✗ | **✓ (Delta-sec & RFC1123)** |
 | **Non-UTF8 Charset Translation** | ✗ | ✗ | **✓ (Automatic)** |
@@ -144,6 +151,9 @@ aoni/
 ```
 
 ## Advanced Guides
+
+> **Curious about the network architecture & Chromium resilience?**  
+> Read the complete [**Network Stack Specification**](docs/NETWORK_STACK.md) to learn how `aoni` handles Happy Eyeballs v3, 421/408/425 auto-recovery, ECH, and zero-alloc geometry.
 
 > **Need usage examples?**  
 > Check out the [examples](examples) directory for runnable code snippets and [evasion examples](examples/evasions) for Playwright/browser integrations.

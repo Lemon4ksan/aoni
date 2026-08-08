@@ -28,11 +28,13 @@ import (
 
 	"github.com/lemon4ksan/aoni"
 	"github.com/lemon4ksan/aoni/codec/values"
+	"github.com/lemon4ksan/aoni/cookie"
 	"github.com/lemon4ksan/aoni/fingerprint"
 	"github.com/lemon4ksan/aoni/fingerprint/ja4"
 	"github.com/lemon4ksan/aoni/fingerprint/p0f"
 	"github.com/lemon4ksan/aoni/internal/bytesconv"
 	"github.com/lemon4ksan/aoni/internal/io"
+	"github.com/lemon4ksan/aoni/internal/pipeline"
 	"github.com/lemon4ksan/aoni/netutil/fragment"
 	"github.com/lemon4ksan/aoni/telemetry"
 )
@@ -182,7 +184,7 @@ func WithHeader(key, value string) aoni.RequestModifier {
 // WithHeaderBytes constructs an [aoni.RequestModifier] setting a request header using byte slices for zero-allocation setup.
 func WithHeaderBytes(key, value []byte) aoni.RequestModifier {
 	return func(req aoni.Request) {
-		req.SetHeaderBytes(key, value)
+		req.SetHeader(bytesconv.B2S(key), bytesconv.B2S(value))
 	}
 }
 
@@ -301,6 +303,13 @@ func WithCookies(kv map[string]string) aoni.RequestModifier {
 		for k, v := range kv {
 			req.AddHeader("Cookie", k+"="+v)
 		}
+	}
+}
+
+// WithPartitionKey constructs an [aoni.RequestModifier] attaching a CHIPS (RFC 6265bis) partition key for iFrame/widget context.
+func WithPartitionKey(key string) aoni.RequestModifier {
+	return func(req aoni.Request) {
+		req.SetContext(cookie.WithPartitionKey(req.Context(), key))
 	}
 }
 
@@ -651,6 +660,14 @@ func WithALPN(protos ...string) aoni.RequestModifier {
 	}
 }
 
+// WithoutAltSvc constructs an [aoni.RequestModifier] that disables Alt-Svc connection
+// upgrades and IP pooling for a request, forcing direct resolution over a fresh socket.
+func WithoutAltSvc() aoni.RequestModifier {
+	return func(req aoni.Request) {
+		aoni.GetOrInitRequestConfig(req).DisableAltSvc = true
+	}
+}
+
 // WithForceHTTP1 constructs an [aoni.RequestModifier] restricting ALPN negotiation strictly to HTTP/1.1.
 func WithForceHTTP1() aoni.RequestModifier {
 	return func(req aoni.Request) {
@@ -669,6 +686,14 @@ func WithForceHTTP2() aoni.RequestModifier {
 func WithForceHTTP3() aoni.RequestModifier {
 	return func(req aoni.Request) {
 		aoni.GetOrInitRequestConfig(req).ALPNOverride = []string{aoni.AlpnH3}
+	}
+}
+
+// Without0RTT constructs an [aoni.RequestModifier] that disables TLS 1.3 / QUIC 0-RTT
+// Early Data for a request, forcing standard 1-RTT handshake negotiation.
+func Without0RTT() aoni.RequestModifier {
+	return func(req aoni.Request) {
+		aoni.GetOrInitRequestConfig(req).Disable0RTT = true
 	}
 }
 
@@ -825,6 +850,47 @@ func WithPipeline(pipe aoni.PipelineConfig) aoni.RequestModifier {
 	}
 }
 
+// PhaseID identifies fixed transaction execution phases.
+type PhaseID = pipeline.PhaseID
+
+const (
+	PhasePrep        = pipeline.PhasePrep
+	PhaseCacheLookup = pipeline.PhaseCacheLookup
+	PhaseDispatch    = pipeline.PhaseDispatch
+	PhaseDecompress  = pipeline.PhaseDecompress
+	PhaseWAF         = pipeline.PhaseWAF
+	PhaseValidate    = pipeline.PhaseValidate
+	PhaseCacheSave   = pipeline.PhaseCacheSave
+)
+
+// WithUnsafePhaseOrder sets a custom phase order for the pipeline.
+func WithUnsafePhaseOrder(phases ...PhaseID) aoni.RequestModifier {
+	return func(req aoni.Request) {
+		aoni.GetOrInitRequestConfig(req).UnsafePhaseOrder = phases
+	}
+}
+
+// WithUnsafeDisableFlags allows to disable pipeline phases instantly (by clearing bits in 1 CPU cycle).
+// Example: mod.WithUnsafeDisableFlags(pipeline.FlagChallenge | pipeline.FlagCache)
+func WithUnsafeDisableFlags(flags uint32) aoni.RequestModifier {
+	return func(req aoni.Request) {
+		cfg := aoni.GetOrInitRequestConfig(req)
+		cfg.DisabledFlags |= flags
+	}
+}
+
+// WithUnsafeHook inserts a zero-allocation hook before the specified pipeline phase.
+func WithUnsafeHook(phase pipeline.PhaseID, hook pipeline.UnsafeHook) aoni.RequestModifier {
+	return func(req aoni.Request) {
+		cfg := aoni.GetOrInitRequestConfig(req)
+		if cfg.UnsafeHooks == nil {
+			cfg.UnsafeHooks = make(map[pipeline.PhaseID][]pipeline.UnsafeHook)
+		}
+
+		cfg.UnsafeHooks[phase] = append(cfg.UnsafeHooks[phase], hook)
+	}
+}
+
 // WithRetryPolicy constructs an [aoni.RequestModifier] assigning custom retry parameters to the request.
 func WithRetryPolicy(override aoni.RetryOverride) aoni.RequestModifier {
 	policy := override
@@ -928,7 +994,7 @@ func WithErrorModel(model any) aoni.RequestModifier {
 }
 
 // WithDecoder constructs an [aoni.RequestModifier] overriding the response decoder implementation for the request.
-func WithDecoder(d any) aoni.RequestModifier {
+func WithDecoder(d aoni.ResponseDecoder) aoni.RequestModifier {
 	return func(req aoni.Request) {
 		aoni.GetOrInitRequestConfig(req).Decoder = d
 	}

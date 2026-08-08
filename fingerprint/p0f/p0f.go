@@ -96,6 +96,8 @@ func (s *Signature) String() string {
 		windowStr = "*,-1"
 	case WindowMSS:
 		windowStr = "mss*" + strconv.Itoa(s.WindowSize) + "," + strconv.Itoa(s.WindowScale)
+	case WindowMTU:
+		windowStr = "mtu*" + strconv.Itoa(s.WindowSize) + "," + strconv.Itoa(s.WindowScale)
 	default:
 		windowStr = strconv.Itoa(s.WindowSize) + "," + strconv.Itoa(s.WindowScale)
 	}

@@ -17,11 +17,6 @@ import (
 )
 
 // NewStdClient adapts a fast [Client] into a standard [*http.Client].
-//
-// Bridges fasthttp with standard library HTTP abstractions.
-// The returned client does NOT follow redirects: it is intended to be used as
-// an [http.RoundTripper] backend so that the outer [*http.Client] retains full
-// control over the redirect policy (including [http.Client.CheckRedirect]).
 func NewStdClient(c *Client) *http.Client {
 	return &http.Client{
 		Transport: NewTransport(c),
@@ -32,8 +27,6 @@ func NewStdClient(c *Client) *http.Client {
 }
 
 // NewTransport constructs an [http.RoundTripper] adapter backed by a fast [Client].
-// The Transport dispatches exactly one request per call (redirect limit = 0)
-// so the outer [*http.Client] retains full redirect control.
 func NewTransport(c *Client) *Transport {
 	return &Transport{
 		client:           c,
@@ -48,9 +41,6 @@ type Transport struct {
 }
 
 // RoundTrip satisfies [http.RoundTripper], executing standard requests over fasthttp.
-//
-// Postconditions:
-//   - Request bodies are streamed directly without buffering full payloads in RAM.
 func (t *Transport) RoundTrip(req *http.Request) (*http.Response, error) {
 	if req.URL == nil {
 		return nil, &url.Error{
@@ -74,7 +64,18 @@ func (t *Transport) RoundTrip(req *http.Request) (*http.Response, error) {
 	copyHeaders(fastReq, req.Header)
 
 	if req.Body != nil {
-		fastReq.SetBodyStream(req.Body, req.ContentLength)
+		body := req.Body
+		if req.GetBody != nil {
+			if b, err := req.GetBody(); err == nil && b != nil {
+				body = b
+			}
+		}
+
+		fastReq.SetBodyStream(body, req.ContentLength)
+
+		if req.GetBody != nil {
+			fastReq.SetGetBody(req.GetBody)
+		}
 	}
 
 	resp, err := t.noRedirectClient.Do(fastReq)

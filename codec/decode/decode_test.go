@@ -6,14 +6,15 @@ package decode
 
 import (
 	"bytes"
-	"compress/gzip"
 	"encoding/base64"
 	"encoding/binary"
+	"encoding/json"
 	"errors"
 	"io"
 	"strings"
 	"testing"
 
+	"github.com/klauspost/compress/gzip"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/protobuf/proto"
@@ -23,7 +24,7 @@ import (
 
 type errorReader struct{}
 
-func (errorReader) Read(p []byte) (int, error) {
+func (errorReader) Read(_ []byte) (int, error) {
 	return 0, io.ErrUnexpectedEOF
 }
 
@@ -177,6 +178,45 @@ func TestProtoDecoder_Decode(t *testing.T) {
 	})
 }
 
+func TestJSONDecoder_CustomConfig(t *testing.T) {
+	t.Parallel()
+
+	t.Run("disallow_unknown_fields", func(t *testing.T) {
+		t.Parallel()
+
+		type User struct {
+			Name string `json:"name"`
+		}
+
+		dec := NewJSONDecoder(JSONDecoderConfig{DisallowUnknownFields: true})
+
+		var u User
+
+		err := dec.Decode(strings.NewReader(`{"name":"Alice","extra":123}`), &u)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "unknown field")
+	})
+
+	t.Run("use_number", func(t *testing.T) {
+		t.Parallel()
+
+		type User struct {
+			ID any `json:"id"`
+		}
+
+		dec := NewJSONDecoder(JSONDecoderConfig{UseNumber: true})
+
+		var u User
+
+		err := dec.Decode(strings.NewReader(`{"id":1234567890123456789}`), &u)
+		require.NoError(t, err)
+
+		num, ok := u.ID.(json.Number)
+		require.True(t, ok)
+		assert.Equal(t, "1234567890123456789", num.String())
+	})
+}
+
 func TestProtoJSONDecoder_Decode(t *testing.T) {
 	t.Parallel()
 
@@ -202,13 +242,35 @@ func TestProtoJSONDecoder_Decode(t *testing.T) {
 	})
 }
 
+func TestXMLDecoder_Decode(t *testing.T) {
+	t.Parallel()
+
+	type Item struct {
+		Name  string  `xml:"name"`
+		Price float64 `xml:"price"`
+	}
+
+	xmlData := `<Item><name>Laptop</name><price>999.99</price></Item>`
+
+	var item Item
+
+	err := XMLDecoder.Decode(strings.NewReader(xmlData), &item)
+	require.NoError(t, err)
+	assert.Equal(t, "Laptop", item.Name)
+	assert.Equal(t, 999.99, item.Price)
+
+	val, err := XML[Item](strings.NewReader(xmlData))
+	require.NoError(t, err)
+	assert.Equal(t, "Laptop", val.Name)
+}
+
 func TestGRPCWebDecoder_Decode(t *testing.T) {
 	t.Parallel()
 
 	buildFrame := func(flags byte, payload []byte) []byte {
 		buf := make([]byte, 5+len(payload))
 		buf[0] = flags
-		binary.BigEndian.PutUint32(buf[1:5], uint32(len(payload)))
+		binary.BigEndian.PutUint32(buf[1:5], uint32(len(payload))) //nolint:gosec
 		copy(buf[5:], payload)
 
 		return buf
@@ -280,6 +342,29 @@ func TestGRPCWebDecoder_Decode(t *testing.T) {
 		assert.ErrorIs(t, err, ErrGRPCWebStatusError)
 	})
 
+	t.Run("trailer_frame_with_status_details_bin", func(t *testing.T) {
+		t.Parallel()
+
+		details := []byte{0x08, 0x07, 0x12, 0x05, 0x65, 0x72, 0x72, 0x6f, 0x72} // proto bytes
+		encodedDetails := base64.RawStdEncoding.EncodeToString(details)
+
+		trailer := []byte(
+			"grpc-status: 7\r\ngrpc-message: permission denied\r\ngrpc-status-details-bin: " + encodedDetails + "\r\n",
+		)
+		frame := buildFrame(0x80, trailer)
+
+		var target wrapperspb.StringValue
+
+		err := GRPCWebDecoder.Decode(bytes.NewReader(frame), &target)
+		assert.Error(t, err)
+
+		var grpcErr *GRPCWebError
+		require.ErrorAs(t, err, &grpcErr)
+		assert.Equal(t, "7", grpcErr.StatusCode)
+		assert.Equal(t, "permission denied", grpcErr.StatusMsg)
+		assert.Equal(t, details, grpcErr.StatusDetails)
+	})
+
 	t.Run("trailer_frame_with_zero_status", func(t *testing.T) {
 		t.Parallel()
 
@@ -325,7 +410,7 @@ func TestGRPCWebDecoder_Decode(t *testing.T) {
 
 		header := make([]byte, 5)
 		header[0] = 0x00
-		binary.BigEndian.PutUint32(header[1:5], 100) // Claims 100 bytes payload, but stream ends
+		binary.BigEndian.PutUint32(header[1:5], 100)
 
 		var target wrapperspb.StringValue
 
@@ -336,6 +421,29 @@ func TestGRPCWebDecoder_Decode(t *testing.T) {
 		require.ErrorAs(t, err, &grpcErr)
 		assert.Equal(t, "read_payload", grpcErr.Op)
 	})
+}
+
+func TestLimitDecoder(t *testing.T) {
+	t.Parallel()
+
+	ld := LimitDecoder(JSONDecoder, 10)
+
+	type Data struct {
+		A string `json:"a"`
+	}
+
+	var d Data
+
+	err := ld.Decode(strings.NewReader(`{"a":"too_long_value"}`), &d)
+	assert.Error(t, err)
+}
+
+func TestIsBase64Header(t *testing.T) {
+	t.Parallel()
+
+	assert.True(t, IsBase64Header([]byte("AAAAA=")))
+	assert.False(t, IsBase64Header([]byte{0x00, 0x00, 0x00, 0x01, 0x00}))
+	assert.False(t, IsBase64Header([]byte("abc")))
 }
 
 func TestStripBOM(t *testing.T) {
@@ -412,7 +520,7 @@ func TestGenericHelpersAndModifiers(t *testing.T) {
 		pbData, _ := proto.Marshal(wrapperspb.String("generic_grpc"))
 		buf := make([]byte, 5+len(pbData))
 		buf[0] = 0x00
-		binary.BigEndian.PutUint32(buf[1:5], uint32(len(pbData)))
+		binary.BigEndian.PutUint32(buf[1:5], uint32(len(pbData))) //nolint:gosec
 		copy(buf[5:], pbData)
 
 		val, err := GRPCWeb[wrapperspb.StringValue](bytes.NewReader(buf))
@@ -431,8 +539,32 @@ func TestGenericHelpersAndModifiers(t *testing.T) {
 	})
 }
 
-func TestByContentType_Extensions(t *testing.T) {
+func TestByContentType_JSONAndXMLAndFallback(t *testing.T) {
 	t.Parallel()
+
+	type Simple struct {
+		Val string `json:"val" xml:"val"`
+	}
+
+	t.Run("application/json", func(t *testing.T) {
+		t.Parallel()
+
+		var s Simple
+
+		err := ByContentType(strings.NewReader(`{"val":"json_ok"}`), "application/json; charset=utf-8", &s)
+		require.NoError(t, err)
+		assert.Equal(t, "json_ok", s.Val)
+	})
+
+	t.Run("application/xml", func(t *testing.T) {
+		t.Parallel()
+
+		var s Simple
+
+		err := ByContentType(strings.NewReader(`<Simple><val>xml_ok</val></Simple>`), "application/xml", &s)
+		require.NoError(t, err)
+		assert.Equal(t, "xml_ok", s.Val)
+	})
 
 	t.Run("protobuf_content_type", func(t *testing.T) {
 		t.Parallel()
@@ -452,7 +584,7 @@ func TestByContentType_Extensions(t *testing.T) {
 		pbData, _ := proto.Marshal(wrapperspb.String("content_type_grpc"))
 		buf := make([]byte, 5+len(pbData))
 		buf[0] = 0x00
-		binary.BigEndian.PutUint32(buf[1:5], uint32(len(pbData)))
+		binary.BigEndian.PutUint32(buf[1:5], uint32(len(pbData))) //nolint:gosec
 		copy(buf[5:], pbData)
 
 		var target wrapperspb.StringValue
@@ -460,6 +592,16 @@ func TestByContentType_Extensions(t *testing.T) {
 		err := ByContentType(bytes.NewReader(buf), "application/grpc-web+proto", &target)
 		require.NoError(t, err)
 		assert.Equal(t, "content_type_grpc", target.GetValue())
+	})
+
+	t.Run("fallback_raw_decoder", func(t *testing.T) {
+		t.Parallel()
+
+		var raw []byte
+
+		err := ByContentType(strings.NewReader("unknown_raw_bytes"), "application/unknown", &raw)
+		require.NoError(t, err)
+		assert.Equal(t, "unknown_raw_bytes", string(raw))
 	})
 }
 
@@ -491,7 +633,7 @@ func TestRegisterDecoder_Global(t *testing.T) {
 
 	var target string
 
-	err := ByContentType(bytes.NewReader([]byte("hello")), mime, &target)
+	err := ByContentType(strings.NewReader("hello"), mime, &target)
 	require.NoError(t, err)
 	assert.Equal(t, "custom:hello", target)
 
