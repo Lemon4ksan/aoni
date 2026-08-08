@@ -33,14 +33,6 @@ var GetRequestConfig = pipeline.GetRequestConfig
 // GetOrInitRequestConfig retrieves or allocates a [RequestConfig] associated with the provided target.
 var GetOrInitRequestConfig = pipeline.GetOrInitRequestConfig
 
-// GetPipeline retrieves the request-specific PipelineConfig from context.
-func GetPipeline(ctx context.Context) (PipelineConfig, bool) {
-	if p, ok := pipeline.GetPipeline(ctx); ok {
-		return pipelineToAoniConfig(p), true
-	}
-	return PipelineConfig{}, false
-}
-
 // AllocRequestConfig allocates a pooled [RequestConfig] and stores it in ctx, returning the
 // enriched context and the config pointer.
 var AllocRequestConfig = pipeline.AllocRequestConfig
@@ -48,6 +40,14 @@ var AllocRequestConfig = pipeline.AllocRequestConfig
 // CloseResponse drains up to 2KB of unread body payload to preserve Keep-Alive sockets,
 // closes the response body stream, and recycles request context resources.
 var CloseResponse = pipeline.CloseResponse
+
+// GetPipeline retrieves the request-specific PipelineConfig from context.
+func GetPipeline(ctx context.Context) (PipelineConfig, bool) {
+	if p, ok := pipeline.GetPipeline(ctx); ok {
+		return pipelineToAoniConfig(p), true
+	}
+	return PipelineConfig{}, false
+}
 
 // ApplyRequestConfigDefaults merges client-level defaults into uninitialized fields of [RequestConfig].
 func ApplyRequestConfigDefaults(cfg *RequestConfig, c *Client) {
@@ -100,7 +100,6 @@ func ApplyRequestConfigDefaults(cfg *RequestConfig, c *Client) {
 	}
 
 	if cfg.QueryEncoder == nil && c.defaults.QueryEncoder != nil {
-		// QueryEncoder has identical underlying type in both packages: func(any) (url.Values, error)
 		cfg.QueryEncoder = pipeline.QueryEncoder(c.defaults.QueryEncoder)
 	}
 
