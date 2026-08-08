@@ -256,8 +256,7 @@ func (c *Client) getH2Client(host string) *h2engine.Client {
 	dialer := &h2engine.Dialer{
 		Addr: host,
 		RawDialContext: func(ctx context.Context, addr string) (net.Conn, error) {
-			fastD := newFastDialer(&c.config)
-			return fastD.DialH2(ctx, addr)
+			return c.DialH2(ctx, addr)
 		},
 	}
 

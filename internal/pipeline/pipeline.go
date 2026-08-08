@@ -193,5 +193,8 @@ func (p *Pipeline) finalizeJA4Report(tx *Tx) {
 		store.Target.JA4.CipherCount = store.Report.CipherCount
 		store.Target.JA4.ExtCount = store.Report.ExtCount
 		store.Target.JA4.ALPN = store.Report.ALPN
+		if store.Report.JA4H != "" {
+			store.Target.JA4.JA4H = store.Report.JA4H
+		}
 	}
 }

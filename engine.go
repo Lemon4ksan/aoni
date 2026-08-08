@@ -99,29 +99,25 @@ func (c *Client) reapplyH2Settings(tr *http.Transport) {
 		return
 	}
 
-	if c.fingerprint.H2Configurer != nil {
-		t2, err := http2.ConfigureTransports(tr)
-		if err == nil && t2 != nil {
-			t2.TLSClientConfig = tr.TLSClientConfig
-			_ = c.fingerprint.H2Configurer.ConfigureHTTP2(t2)
+	if c.fingerprint.H2Configurer != nil || c.fingerprint.H2Settings != nil {
+		settings := h2.Settings{}
+		if c.fingerprint.H2Settings != nil {
+			settings = *c.fingerprint.H2Settings
 		}
-	}
 
-	if c.fingerprint.H2Settings == nil {
-		return
-	}
+		framed := h2.NewFramedTransport(tr, settings)
+		if c.fingerprint.H2Configurer != nil && framed.H2Transport() != nil {
+			_ = c.fingerprint.H2Configurer.ConfigureHTTP2(framed.H2Transport())
+		}
 
-	framed := h2.NewFramedTransport(tr, *c.fingerprint.H2Settings)
-
-	httpClient, ok := c.engine.(*http.Client)
-	if !ok {
-		return
-	}
-
-	if cjTrans, ok := httpClient.Transport.(*cookie.Transport); ok {
-		cjTrans.Next = framed
-	} else {
-		httpClient.Transport = framed
+		httpClient, ok := c.engine.(*http.Client)
+		if ok {
+			if cjTrans, ok := httpClient.Transport.(*cookie.Transport); ok {
+				cjTrans.Next = framed
+			} else {
+				httpClient.Transport = framed
+			}
+		}
 	}
 }
 

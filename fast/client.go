@@ -8,12 +8,14 @@ package fast
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"io"
 	"net"
 	"net/http"
 	"net/url"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/andybalholm/brotli"
@@ -37,11 +39,11 @@ type HTTPDoer interface {
 type Client struct {
 	engine         *fasthttp.Client
 	pipelineEngine *pipeline.Pipeline
-	dialer         *fastDialer
 	defaultDial    func(string) (net.Conn, error)
 	config         aoni.Config
 	powerWatcher   *power.Watcher
 	referer        *pipeline.RefererState
+	activeTargets  sync.Map
 
 	protocolState protocolState
 }
@@ -122,6 +124,45 @@ func (c *Client) Config() aoni.Config {
 	return c.config
 }
 
+func (c *Client) applyEngineConfig() {
+	if c.config.Engine.Timeout > 0 {
+		c.engine.ReadTimeout = c.config.Engine.Timeout
+		c.engine.WriteTimeout = c.config.Engine.Timeout
+	}
+
+	if c.config.Engine.InsecureSkipVerify {
+		c.engine.TLSConfig = nil
+	}
+
+	c.engine.DisableHeaderNamesNormalizing = true
+}
+
+func (c *Client) applyCustomDialer() {
+	c.defaultDial = c.Dial
+	c.engine.Dial = c.Dial
+	c.engine.DialDualStack = true
+}
+
+func (c *Client) applyDefaultHeaders(req aoni.Request) {
+	if c.config.Defaults.Headers == nil {
+		return
+	}
+
+	for k, vv := range c.config.Defaults.Headers {
+		if req.Header(k) == "" && len(vv) > 0 {
+			req.SetHeader(k, vv[0])
+		}
+	}
+}
+
+func (c *Client) applyModifiers(req aoni.Request, mods []aoni.RequestModifier) {
+	for _, m := range mods {
+		if m != nil {
+			m(req)
+		}
+	}
+}
+
 // Engine returns the underlying [*fasthttp.Client] engine instance.
 func (c *Client) Engine() *fasthttp.Client {
 	return c.engine
@@ -137,6 +178,59 @@ func (c *Client) ReleaseRequest(req aoni.Request) {
 	if fastReq, ok := req.(*Request); ok {
 		fastReq.Release()
 	}
+}
+
+func (c *Client) resolveProtocolHandler(rawURL string) http.RoundTripper {
+	if len(c.config.Engine.Protocols) == 0 {
+		return nil
+	}
+
+	scheme, _, ok := strings.Cut(rawURL, "://")
+	if !ok {
+		return nil
+	}
+
+	normScheme := strings.ToLower(strings.TrimSpace(scheme))
+	if normScheme == "http" || normScheme == "https" || normScheme == "ws" || normScheme == "wss" {
+		return nil
+	}
+
+	return c.config.Engine.Protocols[normScheme]
+}
+
+func (c *Client) resolveTargetURL(req aoni.Request, path string) error {
+	var targetURL string
+	if len(path) >= 7 && (strings.HasPrefix(path, "http://") || strings.HasPrefix(path, "https://")) {
+		targetURL = path
+	} else if c.config.Defaults.BaseURL != nil && c.config.Defaults.BaseURL.Host != "" {
+		base := c.config.Defaults.BaseURL
+		basePath := strings.TrimSuffix(base.Path, "/")
+
+		cleanPath := path
+		if cleanPath != "" && cleanPath[0] != '/' {
+			cleanPath = "/" + cleanPath
+		}
+
+		targetURL = base.Scheme + "://" + base.Host + basePath + cleanPath
+	} else if path == "" {
+		return ErrTargetURLEmpty
+	} else {
+		targetURL = path
+	}
+
+	req.SetURL(targetURL)
+
+	if parsed, err := url.Parse(targetURL); err == nil && parsed.User != nil {
+		username := parsed.User.Username()
+		password, _ := parsed.User.Password()
+		auth := username + ":" + password
+		basicAuth := "Basic " + base64.StdEncoding.EncodeToString([]byte(auth))
+		if req.Header("Authorization") == "" {
+			req.SetHeader("Authorization", basicAuth)
+		}
+	}
+
+	return nil
 }
 
 // Request executes an HTTP request across HTTP/1.1, native HTTP/2, or native HTTP/3.

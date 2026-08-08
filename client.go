@@ -334,65 +334,6 @@ func (c *Client) WithDecoder(contentType string, decoder ResponseDecoder) *Clien
 	})
 }
 
-// DialContext establishes a raw L4 TCP socket connection applying active proxy, DNS, p0f, and SSRF guards.
-func (c *Client) DialContext(ctx context.Context, network, addr string) (net.Conn, error) {
-	tr := c.Transport()
-	if tr != nil && tr.DialContext != nil {
-		return tr.DialContext(ctx, network, addr)
-	}
-
-	dialCtx := c.newDialContextFunc()
-
-	return dialCtx(ctx, network, addr)
-}
-
-// DialTLSContext establishes an encrypted TLS socket connection applying uTLS browser profiles,
-// proxy settings, JA4 telemetry, and certificate pins.
-func (c *Client) DialTLSContext(ctx context.Context, network, addr string) (net.Conn, error) {
-	tr := c.Transport()
-	if tr != nil && tr.DialTLSContext != nil {
-		return tr.DialTLSContext(ctx, network, addr)
-	}
-
-	dialTLS := c.newDialTLSContextFunc(c.network.TransportProxy)
-
-	return dialTLS(ctx, network, addr)
-}
-
-// DialTLSForWS establishes an encrypted TLS socket connection for WebSockets using active uTLS profiles.
-func (c *Client) DialTLSForWS(ctx context.Context, addr string) (net.Conn, error) {
-	tr := c.Transport()
-	if tr != nil && tr.DialTLSContext != nil {
-		return tr.DialTLSContext(ctx, "tcp", addr)
-	}
-
-	dialTLS := c.newDialTLSContextFunc(c.network.TransportProxy)
-
-	return dialTLS(ctx, "tcp", addr)
-}
-
-// DialPlainForWS establishes a raw TCP socket connection applying active proxy and SSRF guards.
-func (c *Client) DialPlainForWS(ctx context.Context, addr string) (net.Conn, error) {
-	tr := c.Transport()
-	if tr != nil && tr.DialContext != nil {
-		conn, err := tr.DialContext(ctx, "tcp", addr)
-		if err != nil {
-			return nil, err
-		}
-
-		return c.applyWSFragmentation(ctx, conn), nil
-	}
-
-	dialCtx := c.newDialContextFunc()
-
-	conn, err := dialCtx(ctx, "tcp", addr)
-	if err != nil {
-		return nil, err
-	}
-
-	return c.applyWSFragmentation(ctx, conn), nil
-}
-
 // Config returns a snapshot copy of the active client configuration.
 func (c *Client) Config() Config {
 	return c.snapshotConfig()

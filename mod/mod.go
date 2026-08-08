@@ -1176,11 +1176,15 @@ func WithTrace(target *telemetry.TraceInfo) aoni.RequestModifier {
 // WithTraceJA4 constructs an [aoni.RequestModifier] enabling JA4/JA4H client fingerprint telemetry.
 func WithTraceJA4(target *telemetry.TraceInfo) aoni.RequestModifier {
 	return func(req aoni.Request) {
-		store := &aoni.JA4ReportStore{Target: target}
+		if target.JA4 == nil {
+			target.JA4 = &ja4.Report{}
+		}
 
+		store := &aoni.JA4ReportStore{Report: target.JA4, Target: target}
 		aoni.GetOrInitRequestConfig(req).JA4ReportStore = store
+
 		if stdReq := req.HTTPRequest(); stdReq != nil {
-			target.JA4 = &ja4.Report{JA4H: telemetry.ComputeJA4HFromRequest(stdReq)}
+			target.JA4.JA4H = telemetry.ComputeJA4HFromRequest(stdReq)
 		}
 	}
 }

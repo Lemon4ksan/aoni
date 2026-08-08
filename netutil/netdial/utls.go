@@ -68,12 +68,18 @@ type UConnWrapper struct {
 func (w *UConnWrapper) ConnectionState() tls.ConnectionState {
 	uState := w.UConn.ConnectionState()
 
+	isMutual := uState.NegotiatedProtocolIsMutual
+	if uState.NegotiatedProtocol != "" {
+		isMutual = true
+	}
+
 	return tls.ConnectionState{
 		Version:                     uState.Version,
-		HandshakeComplete:           uState.HandshakeComplete,
+		HandshakeComplete:           true,
 		DidResume:                   uState.DidResume,
 		CipherSuite:                 uState.CipherSuite,
 		NegotiatedProtocol:          uState.NegotiatedProtocol,
+		NegotiatedProtocolIsMutual:  isMutual,
 		ServerName:                  uState.ServerName,
 		PeerCertificates:            uState.PeerCertificates,
 		VerifiedChains:              uState.VerifiedChains,

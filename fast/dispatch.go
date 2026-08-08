@@ -410,10 +410,8 @@ func (c *Client) executeFastHTTP(
 			req.URI().SetHost(hostStr)
 		}
 
-		if c.dialer != nil {
-			c.dialer.TrackHTTPSTarget(hostStr)
-			defer c.dialer.UntrackHTTPSTarget(hostStr)
-		}
+		c.TrackHTTPSTarget(hostStr)
+		defer c.UntrackHTTPSTarget(hostStr)
 
 		req.URI().SetScheme("http")
 	}

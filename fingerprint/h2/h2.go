@@ -212,6 +212,11 @@ func NewFramedTransport(base *http.Transport, settings Settings, orderedKeys ...
 	return ft
 }
 
+// H2Transport returns a pointer to the underlying [http2.Transport] instance.
+func (ft *FramedTransport) H2Transport() *http2.Transport {
+	return &ft.h2Transport
+}
+
 // RoundTrip executes an HTTP request transaction, handling uTLS ALPN negotiation for HTTP/2 vs HTTP/1.1.
 func (ft *FramedTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 	if req.URL == nil || req.URL.Scheme != "https" {
