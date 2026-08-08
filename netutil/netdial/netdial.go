@@ -54,6 +54,7 @@ type DialOptions struct {
 	SocketController     SocketController
 	FragmentConfig       *fragment.Config
 	HappyEyeballs        time.Duration
+	ProxyTimeout         time.Duration
 	BusyPollMicroseconds int
 	SSRFGuard            bool
 	ProxyDNS             bool
@@ -186,8 +187,13 @@ func DialProxy(ctx context.Context, proxyURL *url.URL, host, port string, opts D
 		return nil, ErrEmptyProxyURL
 	}
 
+	timeout := opts.ProxyTimeout
+	if timeout <= 0 {
+		timeout = 30 * time.Second
+	}
+
 	dialer := &net.Dialer{
-		Timeout:       30 * time.Second,
+		Timeout:       timeout,
 		FallbackDelay: opts.HappyEyeballs,
 	}
 

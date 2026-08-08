@@ -27,6 +27,7 @@ import (
 	"github.com/lemon4ksan/aoni/fingerprint/h2"
 	"github.com/lemon4ksan/aoni/internal/pipeline"
 	"github.com/lemon4ksan/aoni/netutil"
+	"github.com/lemon4ksan/aoni/netutil/power"
 )
 
 // Client is an immutable, thread-safe HTTP and WebSocket client built on top of [HTTPDoer].
@@ -37,6 +38,7 @@ type Client struct {
 	defaults       ClientDefaults
 	network        NetworkConfig
 	fingerprint    FingerprintConfig
+	powerWatcher   *power.Watcher
 }
 
 // NewClient instantiates a new thread-safe [Client] wrapping the specified doer.
@@ -501,8 +503,8 @@ func (c *Client) InitRequestConfig(req *http.Request) *http.Request {
 
 // CloseIdleConnections closes all idle keep-alive connections maintained in the pool.
 func (c *Client) CloseIdleConnections() {
-	if httpClient, ok := c.engine.(*http.Client); ok {
-		httpClient.CloseIdleConnections()
+	if closer, ok := c.engine.(interface{ CloseIdleConnections() }); ok {
+		closer.CloseIdleConnections()
 	}
 }
 
@@ -639,11 +641,32 @@ func (c *Client) applyConfig(cfg Config) {
 	applyEngineConfig(c, cfg.Engine)
 	c.applyDialers(c.Transport())
 	c.reapplyH2Settings(c.Transport())
+	c.applyPowerManagement(cfg.Network.EnablePowerManagement)
 
 	c.pipelineEngine = pipeline.NewPipeline(
 		c.defaults.ToPipelineDefaults(),
 		c.fingerprint.ToPipelineFingerprint(),
 	)
+}
+
+func (c *Client) applyPowerManagement(enable bool) {
+	if !enable {
+		if c.powerWatcher != nil {
+			c.powerWatcher.Close()
+			c.powerWatcher = nil
+		}
+
+		return
+	}
+
+	if c.powerWatcher == nil {
+		watcher := power.NewWatcher(5 * time.Second)
+		watcher.OnSuspend(func() {
+			c.CloseIdleConnections()
+		})
+
+		c.powerWatcher = watcher
+	}
 }
 
 var _ RequestDoer = (*Client)(nil)

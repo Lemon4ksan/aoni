@@ -11,6 +11,7 @@ import (
 
 	"github.com/lemon4ksan/aoni/internal/bytesconv"
 	"github.com/lemon4ksan/aoni/internal/io"
+	"github.com/lemon4ksan/aoni/internal/pipeline"
 )
 
 var (
@@ -36,7 +37,13 @@ var (
 	ErrHedgingBodyNonRepeatable = errors.New("aoni: request body cannot be duplicated for hedging")
 
 	// ErrConflictingContentLength is returned when a response carries multiple conflicting Content-Length headers (RFC 9112).
-	ErrConflictingContentLength = errors.New("aoni: conflicting Content-Length headers detected")
+	ErrConflictingContentLength = pipeline.ErrConflictingContentLength
+
+	// ErrConflictingLocationHeader is returned when a response carries multiple conflicting Location headers.
+	ErrConflictingLocationHeader = pipeline.ErrConflictingLocationHeader
+
+	// ErrHeaderInjectionDetected is returned when a response header contains CRLF control characters.
+	ErrHeaderInjectionDetected = pipeline.ErrHeaderInjectionDetected
 )
 
 // Error describes a structured operational failure in the aoni package.

@@ -660,6 +660,14 @@ func WithALPN(protos ...string) aoni.RequestModifier {
 	}
 }
 
+// WithoutAltSvc constructs an [aoni.RequestModifier] that disables Alt-Svc connection
+// upgrades and IP pooling for a request, forcing direct resolution over a fresh socket.
+func WithoutAltSvc() aoni.RequestModifier {
+	return func(req aoni.Request) {
+		aoni.GetOrInitRequestConfig(req).DisableAltSvc = true
+	}
+}
+
 // WithForceHTTP1 constructs an [aoni.RequestModifier] restricting ALPN negotiation strictly to HTTP/1.1.
 func WithForceHTTP1() aoni.RequestModifier {
 	return func(req aoni.Request) {
@@ -678,6 +686,14 @@ func WithForceHTTP2() aoni.RequestModifier {
 func WithForceHTTP3() aoni.RequestModifier {
 	return func(req aoni.Request) {
 		aoni.GetOrInitRequestConfig(req).ALPNOverride = []string{aoni.AlpnH3}
+	}
+}
+
+// Without0RTT constructs an [aoni.RequestModifier] that disables TLS 1.3 / QUIC 0-RTT
+// Early Data for a request, forcing standard 1-RTT handshake negotiation.
+func Without0RTT() aoni.RequestModifier {
+	return func(req aoni.Request) {
+		aoni.GetOrInitRequestConfig(req).Disable0RTT = true
 	}
 }
 

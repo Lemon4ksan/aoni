@@ -186,20 +186,21 @@ func DefaultQUICMigrationConfig() QUICMigrationConfig {
 // NetworkConfig configures the network transport layer, proxies, DNS resolution,
 // SSRF safeguards, IP rotation, and socket controllers.
 type NetworkConfig struct {
-	ProxyAddr          *url.URL
-	TransportProxy     func(*http.Request) (*url.URL, error)
-	DNSResolver        DNSResolver
-	StackDriver        netdial.RawStackDriver
-	L2Device           netdial.L2Device
-	SourceRotator      *ip.SourceIPRotator
-	DynamicHedging     *telemetry.DynamicHedgingConfig
-	SocketController   SocketController
-	FragmentConfig     *fragment.Config
-	HostRewrite        *HostRewriteConfig
-	HappyEyeballsDelay time.Duration
-	HedgingDelay       time.Duration
-	ProxyDNS           bool
-	SSRFGuard          bool
+	ProxyAddr             *url.URL
+	TransportProxy        func(*http.Request) (*url.URL, error)
+	DNSResolver           DNSResolver
+	StackDriver           netdial.RawStackDriver
+	L2Device              netdial.L2Device
+	SourceRotator         *ip.SourceIPRotator
+	DynamicHedging        *telemetry.DynamicHedgingConfig
+	SocketController      SocketController
+	FragmentConfig        *fragment.Config
+	HostRewrite           *HostRewriteConfig
+	HappyEyeballsDelay    time.Duration
+	HedgingDelay          time.Duration
+	ProxyDNS              bool
+	SSRFGuard             bool
+	EnablePowerManagement bool
 }
 
 func (n NetworkConfig) Clone() NetworkConfig {

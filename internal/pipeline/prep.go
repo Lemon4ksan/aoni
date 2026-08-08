@@ -10,8 +10,11 @@ import (
 	"crypto/tls"
 	"encoding/hex"
 	stdio "io"
+	"net"
 	"net/http"
 	"net/http/httptrace"
+	"net/textproto"
+	"net/url"
 	"strings"
 	"sync/atomic"
 	"time"
@@ -22,6 +25,7 @@ import (
 	"github.com/lemon4ksan/aoni/fingerprint"
 	"github.com/lemon4ksan/aoni/fingerprint/ja4"
 	"github.com/lemon4ksan/aoni/internal/io"
+	"github.com/lemon4ksan/aoni/netutil/netdial"
 	"github.com/lemon4ksan/aoni/telemetry"
 )
 
@@ -202,16 +206,77 @@ func (p *Pipeline) traceRequest(
 		},
 		GotConn: func(info httptrace.GotConnInfo) {
 			traceInfo.GotConn = time.Now()
+			traceInfo.IsReused = info.Reused
+
 			if info.Conn != nil && info.Conn.RemoteAddr() != nil {
 				traceInfo.RemoteAddr = info.Conn.RemoteAddr().String()
 			}
 		},
 		GotFirstResponseByte: func() { traceInfo.ServerProcessing = time.Since(traceInfo.GotConn) },
+		Got1xxResponse: func(code int, header textproto.MIMEHeader) error {
+			if code == 103 {
+				ProcessEarlyHints(stdReq.Context(), http.Header(header), p.prewarmTargetOrigin)
+			}
+
+			return nil
+		},
 	}
 
 	stdReq = stdReq.WithContext(httptrace.WithClientTrace(stdReq.Context(), trace))
 
 	return stdReq, traceInfo, traceInfo.Start() //nolint:bodyclose
+}
+
+func (p *Pipeline) prewarmTargetOrigin(ctx context.Context, targetURL string) {
+	if targetURL == "" {
+		return
+	}
+
+	u, err := url.Parse(targetURL)
+	if err != nil || u.Host == "" {
+		return
+	}
+
+	dialCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+
+	host, port := u.Hostname(), u.Port()
+	if port == "" {
+		if u.Scheme == "http" {
+			port = "80"
+		} else {
+			port = "443"
+		}
+	}
+
+	targetAddr := net.JoinHostPort(host, port)
+
+	dialOpts := netdial.DialOptions{
+		HappyEyeballs: 250 * time.Millisecond,
+	}
+
+	conn, err := netdial.DialL4(dialCtx, "tcp", targetAddr, dialOpts)
+	if err != nil {
+		return
+	}
+
+	if u.Scheme == "https" {
+		utlsOpts := netdial.RTLSOptions{
+			ALPNOverride: []string{"h2", "http/1.1"},
+		}
+
+		uConn, _, handshakeErr := netdial.HandshakeUTLS(dialCtx, conn, host, utlsOpts)
+		if handshakeErr != nil {
+			_ = conn.Close()
+			return
+		}
+
+		_ = uConn.Close()
+
+		return
+	}
+
+	_ = conn.Close()
 }
 
 func (p *Pipeline) redactSensitiveData(req *http.Request, redact *RedactConfig) *http.Request {

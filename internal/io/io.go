@@ -41,6 +41,16 @@ var copyBufPool = sync.Pool{
 	},
 }
 
+// LimitToContentLength caps the reader at contentLen bytes when contentLen >= 0,
+// protecting Keep-Alive sockets from trailing garbage bytes sent by misbehaved servers.
+func LimitToContentLength(r io.Reader, contentLen int64) io.Reader {
+	if contentLen < 0 || r == nil {
+		return r
+	}
+
+	return io.LimitReader(r, contentLen)
+}
+
 // CopyZeroAlloc streams data from r to w using kernel zero-copy paths or pooled 32KB buffers.
 func CopyZeroAlloc(w io.Writer, r io.Reader) (int64, error) {
 	if r == nil || w == nil {

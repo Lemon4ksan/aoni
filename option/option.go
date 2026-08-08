@@ -412,6 +412,28 @@ func WithProxyDNS() aoni.ClientOption {
 	}
 }
 
+// WithAdaptiveProxyTimeout enables dynamic proxy connection timeout calculation
+// based on observed network round-trip time (RTT) metrics.
+func WithAdaptiveProxyTimeout(cfg ...proxy.AdaptiveTimeoutConfig) aoni.ClientOption {
+	activeCfg := proxy.DefaultAdaptiveTimeoutConfig()
+	if len(cfg) > 0 {
+		activeCfg = cfg[0]
+	}
+
+	return func(c *aoni.Config) {
+		if c.Network.DynamicHedging == nil {
+			dhc := telemetry.DefaultDynamicHedgingConfig()
+			c.Network.DynamicHedging = &dhc
+		}
+
+		tracker := c.Network.DynamicHedging.Tracker
+		c.Defaults.DefaultMods = append(c.Defaults.DefaultMods, func(req aoni.Request) {
+			adaptiveTimeout := proxy.ComputeProxyTimeout(tracker, activeCfg)
+			aoni.GetOrInitRequestConfig(req).TimeoutOverride = adaptiveTimeout
+		})
+	}
+}
+
 // WithDNSResolver returns an [aoni.ClientOption] replacing the default system DNS resolver with an [aoni.DNSResolver].
 func WithDNSResolver(resolver aoni.DNSResolver) aoni.ClientOption {
 	return func(cfg *aoni.Config) {
@@ -799,6 +821,42 @@ func WithCookieJanitor(ctx context.Context, interval time.Duration) aoni.ClientO
 	}
 }
 
+// WithCookieIndices enables selective cookie-based response caching, hashing only specified
+// cookie names (e.g., "theme", "lang") into the cache key to maximize hit rates for static pages.
+func WithCookieIndices(cookieNames ...string) aoni.ClientOption {
+	return func(c *aoni.Config) {
+		if c.Defaults.Pipeline.Cache == nil {
+			c.Defaults.Pipeline.Cache = &aoni.CacheConfig{}
+		}
+
+		c.Defaults.Pipeline.Cache.CookieIndices = slices.Clone(cookieNames)
+	}
+}
+
+// WithDuplicateRequestGuard enables ring-buffer duplicate request detection,
+// triggering a diagnostic alert if the same URL is fetched within the window (e.g. 10s).
+func WithDuplicateRequestGuard(window time.Duration, logger aoni.Logger) aoni.ClientOption {
+	if window <= 0 {
+		window = 10 * time.Second
+	}
+
+	guard := telemetry.NewDuplicateRequestGuard(128, window, func(method, rawURL string, elapsed time.Duration) {
+		if logger != nil {
+			logger.Warn("aoni telemetry: potential duplicate request loop detected",
+				"method", method,
+				"url", rawURL,
+				"elapsed", elapsed,
+			)
+		}
+	})
+
+	return func(cfg *aoni.Config) {
+		cfg.Defaults.BeforeRequest = append(cfg.Defaults.BeforeRequest, func(req *http.Request) {
+			guard.CheckAndRecord(req.Method, req.URL.String())
+		})
+	}
+}
+
 // ============================================================================
 // 7. HOOKS, OBSERVABILITY & CHALLENGE OPTIONS
 // ============================================================================
@@ -907,5 +965,13 @@ func WithDecoders(decoders map[string]decode.Decoder) aoni.ClientOption {
 				}
 			}
 		}
+	}
+}
+
+// WithOSPowerManagement enables OS sleep and resume monitoring, automatically purging
+// stale zombie sockets and connection pools when the system wakes up from sleep.
+func WithOSPowerManagement(enable bool) aoni.ClientOption {
+	return func(cfg *aoni.Config) {
+		cfg.Network.EnablePowerManagement = enable
 	}
 }

@@ -16,16 +16,19 @@ import (
 	"strings"
 	"time"
 
+	"github.com/lemon4ksan/aoni/codec/values"
+	"github.com/lemon4ksan/aoni/fingerprint"
 	"github.com/lemon4ksan/aoni/mod"
 	"github.com/lemon4ksan/aoni/option"
+	"github.com/lemon4ksan/aoni/request"
+	"github.com/lemon4ksan/aoni/resiliency/cache"
 	"github.com/lemon4ksan/aoni/telemetry"
-	"github.com/lemon4ksan/aoni/values"
 
 	"github.com/lemon4ksan/aoni"
 	"github.com/lemon4ksan/aoni/cookie"
-	"github.com/lemon4ksan/aoni/dns"
-	"github.com/lemon4ksan/aoni/inspector"
-	"github.com/lemon4ksan/aoni/p0f"
+	"github.com/lemon4ksan/aoni/fingerprint/p0f"
+	"github.com/lemon4ksan/aoni/netutil/dns"
+	"github.com/lemon4ksan/aoni/telemetry/inspector"
 )
 
 // ProtectedUserData describes the target data structure using custom aoni values.
@@ -77,7 +80,7 @@ func main() {
 
 	// High-speed race DNS resolver.
 	raceResolver := dns.NewFastRaceResolver(
-		dns.NewDoHResolver("https://1.1.1.1/dns-query", "cloudflare-dns.com"),
+		dns.NewDoHResolver("https://1.1.1.1/dns-query", "cloudflare-dns.com", nil),
 		dns.NewDoTResolver("8.8.8.8:853", "dns.google"),
 	)
 
@@ -95,11 +98,11 @@ func main() {
 		option.WithCookieJar(cookieJar),
 		option.WithDynamicHedging(nil),         // Enables dynamic tail-latency reduction (hedging)
 		option.WithP0fSignature(p0f.Windows10), // Emulate Windows 10 TCP/IP stack
-		option.WithPacketPadding(aoni.PaddingConfig{
+		option.WithPacketPadding(fingerprint.PaddingConfig{
 			MaxSegmentSize:  512, // Lower MSS to force packet fragmentation
 			MinPaddingBytes: 32,
 			MaxPaddingBytes: 128,
-			HeaderPool:      aoni.CloudflareHeaderPool, // Disguise padding as Cloudflare headers
+			HeaderPool:      fingerprint.CloudflareHeaderPool, // Disguise padding as Cloudflare headers
 		}),
 		option.WithChallengeSolver(&HeadlessWAFSolver{}),
 	)
@@ -120,7 +123,7 @@ func main() {
 		"socks5://user:pass@185.120.10.2:1080",
 		"http://user:pass@190.45.20.1:8080",
 	}
-	cacheStore := aoni.NewInMemoryCacheStore()
+	cacheStore := cache.NewInMemoryStore(5 * time.Minute)
 
 	client = client.With(option.WithPipeline(aoni.PipelineConfig{
 		RotateUA: true,
@@ -166,10 +169,8 @@ func main() {
 		return nil
 	})
 
-	userData, rawResp, err := aoni.GetToEx[ProtectedUserData](
-		ctx,
-		client,
-		"/v1/users/profile",
+	userData, rawResp, err := request.GetToEx[ProtectedUserData](
+		ctx, client, "/v1/users/profile",
 		antiBotValidator,
 		mod.WithHeader("X-Client-Build", "release-v2.0"),
 	)

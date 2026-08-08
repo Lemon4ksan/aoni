@@ -400,6 +400,32 @@ func (s *StdResponse) Headers() map[string][]string {
 	return s.resp.Header
 }
 
+// Trailers returns HTTP response trailers attached to the underlying response.
+func (s *StdResponse) Trailers() map[string][]string {
+	if s.resp == nil || s.resp.Trailer == nil {
+		return nil
+	}
+
+	return s.resp.Trailer
+}
+
+// SetTrailers updates HTTP response trailers on the underlying response.
+func (s *StdResponse) SetTrailers(trailers map[string][]string) {
+	if s.resp == nil {
+		return
+	}
+
+	if s.resp.Trailer == nil {
+		s.resp.Trailer = make(http.Header, len(trailers))
+	}
+
+	for k, vv := range trailers {
+		for _, v := range vv {
+			s.resp.Trailer.Add(k, v)
+		}
+	}
+}
+
 // BodyBytes reads, caches, and returns response body bytes.
 func (s *StdResponse) BodyBytes() []byte {
 	if s.body != nil {
@@ -587,14 +613,23 @@ func (a *RequestDoerAdapter) Do(req *http.Request) (*http.Response, error) {
 	}
 
 	if httpResp := resp.HTTPResponse(); httpResp != nil {
+		if httpResp.Trailer == nil && len(resp.Trailers()) > 0 {
+			httpResp.Trailer = make(http.Header)
+			for k, vv := range resp.Trailers() {
+				for _, v := range vv {
+					httpResp.Trailer.Add(k, v)
+				}
+			}
+		}
+
 		return httpResp, nil
 	}
 
-	// Fallback для движков (например fast.Response), у которых HTTPResponse() == nil
 	httpResp := &http.Response{
 		StatusCode:    resp.StatusCode(),
 		Status:        resp.Status(),
 		Header:        make(http.Header),
+		Trailer:       make(http.Header),
 		Body:          &responseBodyCloser{ReadCloser: resp.BodyStream(), resp: resp},
 		ContentLength: -1,
 		Uncompressed:  resp.Uncompressed(),
@@ -604,6 +639,12 @@ func (a *RequestDoerAdapter) Do(req *http.Request) (*http.Response, error) {
 	for k, vv := range resp.Headers() {
 		for _, v := range vv {
 			httpResp.Header.Add(k, v)
+		}
+	}
+
+	for k, vv := range resp.Trailers() {
+		for _, v := range vv {
+			httpResp.Trailer.Add(k, v)
 		}
 	}
 

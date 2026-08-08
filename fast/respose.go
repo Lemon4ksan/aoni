@@ -9,6 +9,7 @@ import (
 	"io"
 	"net/http"
 	"slices"
+	"strconv"
 	"sync"
 	"sync/atomic"
 
@@ -63,16 +64,6 @@ func NewResponse(resp *fasthttp.Response) *Response {
 	r.uncompressed = false
 
 	return r
-}
-
-// SetTrailers registers HTTP trailers captured during frame execution.
-func (f *Response) SetTrailers(trailers map[string][]string) {
-	f.trailers = trailers
-}
-
-// Trailers returns HTTP trailers parsed after the body stream.
-func (f *Response) Trailers() map[string][]string {
-	return f.trailers
 }
 
 // StatusCode yields the HTTP status code.
@@ -131,6 +122,16 @@ func (f *Response) Headers() map[string][]string {
 	})
 
 	return m
+}
+
+// SetTrailers registers HTTP trailers captured during frame execution.
+func (f *Response) SetTrailers(trailers map[string][]string) {
+	f.trailers = trailers
+}
+
+// Trailers returns HTTP trailers parsed after the body stream.
+func (f *Response) Trailers() map[string][]string {
+	return f.trailers
 }
 
 // BodyBytes returns an independent, memory-safe copy of the response body bytes.
@@ -209,11 +210,23 @@ const maxBodySlurpBytes int64 = 2048
 
 // Close releases resources bound to the response wrapper and slurps unread stream bytes to preserve sockets.
 func (f *Response) Close() error {
-	if f.resp != nil && f.resp.IsBodyStream() {
-		if stream := f.resp.BodyStream(); stream != nil {
-			_, _ = io.CopyN(io.Discard, stream, maxBodySlurpBytes)
-		}
+	if f.resp == nil || !f.resp.IsBodyStream() {
+		return nil
 	}
+
+	stream := f.resp.BodyStream()
+	if stream == nil {
+		return nil
+	}
+
+	clStr := f.Header("Content-Length")
+	slurpLimit := maxBodySlurpBytes
+
+	if cl, err := strconv.ParseInt(clStr, 10, 64); err == nil && cl >= 0 {
+		slurpLimit = min(cl, maxBodySlurpBytes)
+	}
+
+	_, _ = io.CopyN(io.Discard, stream, slurpLimit)
 
 	return nil
 }
