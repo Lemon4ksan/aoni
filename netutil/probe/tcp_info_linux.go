@@ -33,10 +33,10 @@ func GetTCPInfo(conn net.Conn) (*TCPInfo, error) {
 	err = raw.Control(func(fd uintptr) {
 		info, getErr = unix.GetsockoptTCPInfo(int(fd), unix.IPPROTO_TCP, unix.TCP_INFO)
 	})
-
 	if err != nil {
 		return nil, err
 	}
+
 	if getErr != nil {
 		return nil, getErr
 	}
