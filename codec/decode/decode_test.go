@@ -342,6 +342,29 @@ func TestGRPCWebDecoder_Decode(t *testing.T) {
 		assert.ErrorIs(t, err, ErrGRPCWebStatusError)
 	})
 
+	t.Run("trailer_frame_with_status_details_bin", func(t *testing.T) {
+		t.Parallel()
+
+		details := []byte{0x08, 0x07, 0x12, 0x05, 0x65, 0x72, 0x72, 0x6f, 0x72} // proto bytes
+		encodedDetails := base64.RawStdEncoding.EncodeToString(details)
+
+		trailer := []byte(
+			"grpc-status: 7\r\ngrpc-message: permission denied\r\ngrpc-status-details-bin: " + encodedDetails + "\r\n",
+		)
+		frame := buildFrame(0x80, trailer)
+
+		var target wrapperspb.StringValue
+
+		err := GRPCWebDecoder.Decode(bytes.NewReader(frame), &target)
+		assert.Error(t, err)
+
+		var grpcErr *GRPCWebError
+		require.ErrorAs(t, err, &grpcErr)
+		assert.Equal(t, "7", grpcErr.StatusCode)
+		assert.Equal(t, "permission denied", grpcErr.StatusMsg)
+		assert.Equal(t, details, grpcErr.StatusDetails)
+	})
+
 	t.Run("trailer_frame_with_zero_status", func(t *testing.T) {
 		t.Parallel()
 

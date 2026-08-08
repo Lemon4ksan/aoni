@@ -14,6 +14,7 @@ import (
 
 	"github.com/valyala/fasthttp"
 
+	"github.com/lemon4ksan/aoni"
 	"github.com/lemon4ksan/aoni/internal/bytesconv"
 )
 
@@ -271,3 +272,5 @@ func (f *Request) Release() {
 	f.isAcquired = false
 	requestAdapterPool.Put(f)
 }
+
+var _ aoni.Request = (*Request)(nil)

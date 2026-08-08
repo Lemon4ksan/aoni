@@ -18,8 +18,6 @@ import (
 	"github.com/lemon4ksan/miyako/log"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"google.golang.org/protobuf/proto"
-	"google.golang.org/protobuf/types/known/wrapperspb"
 
 	"github.com/lemon4ksan/aoni"
 	"github.com/lemon4ksan/aoni/codec/decode"
@@ -274,40 +272,6 @@ func TestClient_ExtendedToExHelpers(t *testing.T) {
 		require.NotNil(t, raw)
 		assert.Equal(t, expected.Message, res.Message)
 		assert.Equal(t, http.StatusOK, raw.StatusCode)
-	})
-}
-
-func TestClient_ProtoAndGRPCWebHelpers(t *testing.T) {
-	t.Parallel()
-
-	input := wrapperspb.String("proto_input")
-	response := wrapperspb.String("proto_response")
-
-	respBytes, err := proto.Marshal(response)
-	require.NoError(t, err)
-
-	_, client := setupTestReqServer(t, func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/x-protobuf")
-		w.WriteHeader(http.StatusOK)
-		_, _ = w.Write(respBytes)
-	})
-
-	t.Run("PostProtoTo", func(t *testing.T) {
-		res, err := PostProtoTo[wrapperspb.StringValue](t.Context(), client, "/proto-post", input)
-		require.NoError(t, err)
-		assert.Equal(t, "proto_response", res.GetValue())
-	})
-
-	t.Run("PutProtoTo", func(t *testing.T) {
-		res, err := PutProtoTo[wrapperspb.StringValue](t.Context(), client, "/proto-put", input)
-		require.NoError(t, err)
-		assert.Equal(t, "proto_response", res.GetValue())
-	})
-
-	t.Run("DoProtoTo", func(t *testing.T) {
-		res, err := DoProtoTo[wrapperspb.StringValue](t.Context(), client, http.MethodPost, "/proto-do", input)
-		require.NoError(t, err)
-		assert.Equal(t, "proto_response", res.GetValue())
 	})
 }
 

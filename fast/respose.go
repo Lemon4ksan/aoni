@@ -135,12 +135,23 @@ func (f *Response) Trailers() map[string][]string {
 }
 
 // BodyBytes returns an independent, memory-safe copy of the response body bytes.
+//
+// Postconditions:
+//   - The returned slice is safe to retain or mutate beyond response pool recycling.
 func (f *Response) BodyBytes() []byte {
 	return slices.Clone(f.resp.Body())
 }
 
 // UnsafeBodyBytes provides zero-allocation direct access to internal response buffers.
+//
+// Warning:
+//   - Points directly to volatile internal buffers managed by sync.Pool.
+//   - MUST NOT be referenced, mutated, or retained after closing or recycling the response.
 func (f *Response) UnsafeBodyBytes() []byte {
+	if f.resp == nil {
+		return nil
+	}
+
 	return f.resp.Body()
 }
 
@@ -229,6 +240,7 @@ type PooledResponse struct {
 }
 
 // NewPooledResponse acquires a pooled PooledResponse adapter wrapping fastReq and fastResp.
+// The caller is responsible for releasing the request and response objects.
 func NewPooledResponse(fastReq *fasthttp.Request, fastResp *fasthttp.Response) *PooledResponse {
 	pr := pooledResponsePool.Get().(*PooledResponse)
 	if pr.Response == nil {
@@ -268,7 +280,6 @@ func (r *PooledResponse) Close() error {
 }
 
 var (
-	_ aoni.Request  = (*Request)(nil)
 	_ aoni.Response = (*Response)(nil)
 	_ aoni.Response = (*PooledResponse)(nil)
 )

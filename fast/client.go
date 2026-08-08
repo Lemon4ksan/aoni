@@ -117,6 +117,18 @@ func (c *Client) Engine() *fasthttp.Client {
 	return c.engine
 }
 
+// AcquireRequest satisfies [aoni.RequestFactory] by acquiring a pooled [Request] instance.
+func (c *Client) AcquireRequest() aoni.Request {
+	return NewRequest(nil)
+}
+
+// ReleaseRequest satisfies [aoni.RequestFactory] by returning req back to the memory pool.
+func (c *Client) ReleaseRequest(req aoni.Request) {
+	if fastReq, ok := req.(*Request); ok {
+		fastReq.Release()
+	}
+}
+
 // Request executes an HTTP request across HTTP/1.1, native HTTP/2, or native HTTP/3.
 func (c *Client) Request(
 	ctx context.Context,

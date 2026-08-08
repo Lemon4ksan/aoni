@@ -118,6 +118,12 @@ func Configure(doer any, opts ...ClientOption) RequestDoer {
 	return NewClient(doer, opts...)
 }
 
+// RequestFactory is implemented by engines capable of pooling their own high-performance Request instances.
+type RequestFactory interface {
+	AcquireRequest() Request
+	ReleaseRequest(req Request)
+}
+
 // BaseResponseProvider provides a [BaseResponse] model for structured unwrapping.
 type BaseResponseProvider interface {
 	BaseResponse() BaseResponse

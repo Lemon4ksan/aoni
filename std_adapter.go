@@ -448,6 +448,11 @@ func (s *StdResponse) BodyBytes() []byte {
 	return b
 }
 
+// UnsafeBodyBytes provides direct access to cached response body bytes.
+func (s *StdResponse) UnsafeBodyBytes() []byte {
+	return s.BodyBytes()
+}
+
 // BodyStream yields response body stream [stdio.ReadCloser].
 func (s *StdResponse) BodyStream() stdio.ReadCloser {
 	if s.resp == nil {

@@ -34,6 +34,7 @@ import (
 	"github.com/lemon4ksan/aoni/codec/decode"
 	"github.com/lemon4ksan/aoni/internal/timer"
 	"github.com/lemon4ksan/aoni/netutil/netdial"
+	"github.com/lemon4ksan/aoni/netutil/proxy"
 )
 
 var (
@@ -49,6 +50,10 @@ var (
 	// ErrCircuitOpen is returned when a circuit breaker blocks requests to an unhealthy host.
 	ErrCircuitOpen = errors.New("aoni: circuit breaker open for target host")
 )
+
+// RetryOnProxyFault is a convenience alias for [proxy.RetryCondition],
+// triggering retries when the proxy rotator detects an exit node fault.
+var RetryOnProxyFault = proxy.RetryCondition
 
 // Chain composes an execution engine with an ordered sequence of [aoni.Middleware] layers.
 //

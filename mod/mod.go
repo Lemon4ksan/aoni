@@ -184,7 +184,7 @@ func WithHeader(key, value string) aoni.RequestModifier {
 // WithHeaderBytes constructs an [aoni.RequestModifier] setting a request header using byte slices for zero-allocation setup.
 func WithHeaderBytes(key, value []byte) aoni.RequestModifier {
 	return func(req aoni.Request) {
-		req.SetHeaderBytes(key, value)
+		req.SetHeader(bytesconv.B2S(key), bytesconv.B2S(value))
 	}
 }
 
