@@ -42,8 +42,8 @@ func (p *Pipeline) postProcessResponse(
 
 	if tx.Flags&FlagDecompress != 0 {
 		resp = p.handleDecompressionAndTranscoding(stdReq, resp)
-	} else {
-		applyCharsetTranscoding(resp)
+	} else if resp != nil && resp.Body != nil {
+		resp.Body = applyCharsetTranscoding(resp, resp.Body)
 	}
 
 	if tx.Flags&FlagCache != 0 && tx.Cache != nil {
@@ -273,17 +273,36 @@ func (p *Pipeline) handleDecompressionAndTranscoding(req *http.Request, resp *ht
 		return resp
 	}
 
-	if cfg := GetRequestConfig(req.Context()); cfg != nil && cfg.DownloadProgress != nil {
-		applyDownloadProgress(resp, cfg.DownloadProgress)
-	}
+	var filters []StreamFilter
 
 	if !hasExplicitAcceptEncoding(req) {
-		if decompressed := applyContentDecompression(resp); decompressed {
-			resp.Uncompressed = true
-		}
+		filters = append(filters, func(r *http.Response, body stdio.ReadCloser) (stdio.ReadCloser, error) {
+			decompressedBody, decompressed := applyContentDecompression(r, body)
+			if decompressed {
+				r.Uncompressed = true
+			}
+
+			return decompressedBody, nil
+		})
 	}
 
-	applyCharsetTranscoding(resp)
+	filters = append(filters, func(r *http.Response, body stdio.ReadCloser) (stdio.ReadCloser, error) {
+		return applyCharsetTranscoding(r, body), nil
+	})
+
+	if cfg := GetRequestConfig(req.Context()); cfg != nil && cfg.DownloadProgress != nil {
+		progress := cfg.DownloadProgress
+
+		filters = append(filters, func(r *http.Response, body stdio.ReadCloser) (stdio.ReadCloser, error) {
+			return &io.ProgressReader{
+				Reader:     body,
+				Total:      r.ContentLength,
+				OnProgress: progress,
+			}, nil
+		})
+	}
+
+	_ = ExecuteStreamPipeline(resp, filters)
 
 	return resp
 }
@@ -298,50 +317,35 @@ func hasExplicitAcceptEncoding(req *http.Request) bool {
 	return cfg != nil && cfg.HasExplicitAcceptEncoding
 }
 
-func applyDownloadProgress(resp *http.Response, progress io.ProgressFunc) {
-	if resp == nil || resp.Body == nil || progress == nil {
-		return
-	}
-
-	resp.Body = &io.ProgressReader{
-		Reader:     resp.Body,
-		Total:      resp.ContentLength,
-		OnProgress: progress,
-	}
-}
-
-func applyContentDecompression(resp *http.Response) bool {
+func applyContentDecompression(resp *http.Response, body stdio.ReadCloser) (stdio.ReadCloser, bool) {
 	encoding := resp.Header.Get("Content-Encoding")
 	switch encoding {
 	case "br":
-		resp.Body = &io.DecompressReadCloser{
-			Reader: brotli.NewReader(resp.Body),
-			Closer: resp.Body,
-		}
 		resetDecompressedHeader(resp)
 
-		return true
+		return &io.DecompressReadCloser{
+			Reader: brotli.NewReader(body),
+			Closer: body,
+		}, true
 
 	case "zstd":
-		if zstdDec, err := zstd.NewReader(resp.Body); err == nil {
-			resp.Body = &io.DecompressReadCloser{
-				Reader: zstdDec,
-				Closer: resp.Body,
-			}
+		if zstdDec, err := zstd.NewReader(body); err == nil {
 			resetDecompressedHeader(resp)
 
-			return true
+			return &io.DecompressReadCloser{
+				Reader: zstdDec,
+				Closer: body,
+			}, true
 		}
 
 	case "gzip":
-		if gzReader, err := io.NewPooledGzipReader(resp.Body); err == nil {
-			resp.Body = gzReader
+		if gzReader, err := io.NewPooledGzipReader(body); err == nil {
 			resetDecompressedHeader(resp)
-			return true
+			return gzReader, true
 		}
 	}
 
-	return false
+	return body, false
 }
 
 func resetDecompressedHeader(resp *http.Response) {
@@ -350,48 +354,43 @@ func resetDecompressedHeader(resp *http.Response) {
 	resp.ContentLength = -1
 }
 
-func applyCharsetTranscoding(resp *http.Response) {
-	if resp == nil || resp.Body == nil {
-		return
+func applyCharsetTranscoding(resp *http.Response, body stdio.ReadCloser) stdio.ReadCloser {
+	if resp == nil || body == nil {
+		return body
 	}
 
 	contentType := resp.Header.Get("Content-Type")
 	if contentType == "" {
-		return
+		return body
 	}
 
 	lower := strings.ToLower(contentType)
 	if !strings.Contains(lower, "charset=") || strings.Contains(lower, "charset=utf-8") {
-		return
+		return body
 	}
 
 	mediaType, params, err := mime.ParseMediaType(contentType)
 	if err != nil {
-		return
+		return body
 	}
 
 	charset := strings.ToLower(params["charset"])
 	if charset == "" || charset == "utf-8" || charset == "utf8" {
-		return
+		return body
 	}
 
 	enc, err := htmlindex.Get(charset)
 	if err != nil {
-		return
+		return body
 	}
 
-	type transcodeReadCloser struct {
-		stdio.Reader
-		stdio.Closer
-	}
+	newContentType := mediaType + "; charset=utf-8"
+	resp.Header.Set("Content-Type", newContentType)
 
-	resp.Body = &transcodeReadCloser{
-		Reader: transform.NewReader(resp.Body, enc.NewDecoder()),
-		Closer: resp.Body,
+	return &io.DecompressReadCloser{
+		Reader: transform.NewReader(body, enc.NewDecoder()),
+		Closer: body,
 	}
-
-	delete(params, "charset")
-	resp.Header.Set("Content-Type", mime.FormatMediaType(mediaType, params))
 }
 
 func (p *Pipeline) handleWAFChallenge(req *http.Request, resp *http.Response) (*http.Response, error) {

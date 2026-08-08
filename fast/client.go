@@ -200,9 +200,11 @@ func (c *Client) resolveProtocolHandler(rawURL string) http.RoundTripper {
 
 func (c *Client) resolveTargetURL(req aoni.Request, path string) error {
 	var targetURL string
-	if len(path) >= 7 && (strings.HasPrefix(path, "http://") || strings.HasPrefix(path, "https://")) {
+	switch {
+	case len(path) >= 7 && (strings.HasPrefix(path, "http://") ||
+		strings.HasPrefix(path, "https://")):
 		targetURL = path
-	} else if c.config.Defaults.BaseURL != nil && c.config.Defaults.BaseURL.Host != "" {
+	case c.config.Defaults.BaseURL != nil && c.config.Defaults.BaseURL.Host != "":
 		base := c.config.Defaults.BaseURL
 		basePath := strings.TrimSuffix(base.Path, "/")
 
@@ -212,9 +214,9 @@ func (c *Client) resolveTargetURL(req aoni.Request, path string) error {
 		}
 
 		targetURL = base.Scheme + "://" + base.Host + basePath + cleanPath
-	} else if path == "" {
+	case path == "":
 		return ErrTargetURLEmpty
-	} else {
+	default:
 		targetURL = path
 	}
 
@@ -224,6 +226,7 @@ func (c *Client) resolveTargetURL(req aoni.Request, path string) error {
 		username := parsed.User.Username()
 		password, _ := parsed.User.Password()
 		auth := username + ":" + password
+
 		basicAuth := "Basic " + base64.StdEncoding.EncodeToString([]byte(auth))
 		if req.Header("Authorization") == "" {
 			req.SetHeader("Authorization", basicAuth)
@@ -649,6 +652,7 @@ func toPipelineDefaults(d aoni.ClientDefaults, referer *pipeline.RefererState) p
 			}
 		}
 	}
+
 	return pipeline.ClientDefaults{
 		Headers:              d.Headers,
 		BeforeRequest:        d.BeforeRequest,
@@ -682,12 +686,14 @@ func toInternalPipelineConfig(p aoni.PipelineConfig) pipeline.PipelineConfig {
 			MaxDelay: p.DPIJitter.MaxDelay,
 		}
 	}
+
 	if p.ProxyFailover != nil {
 		res.ProxyFailover = &pipeline.ProxyFailoverConfig{
 			Proxies:    p.ProxyFailover.Proxies,
 			RetryLimit: p.ProxyFailover.RetryLimit,
 		}
 	}
+
 	if p.Hedging != nil {
 		res.Hedging = &pipeline.HedgingConfig{
 			DynamicHedging:       p.Hedging.DynamicHedging,
@@ -696,6 +702,7 @@ func toInternalPipelineConfig(p aoni.PipelineConfig) pipeline.PipelineConfig {
 			AllowNonReadOnly:     p.Hedging.AllowNonReadOnly,
 		}
 	}
+
 	if p.Cache != nil {
 		var nvs *pipeline.NoVarySearchConfig
 		if p.Cache.NoVarySearch != nil {
@@ -705,6 +712,7 @@ func toInternalPipelineConfig(p aoni.PipelineConfig) pipeline.PipelineConfig {
 				IgnoreAllParams: p.Cache.NoVarySearch.IgnoreAllParams,
 			}
 		}
+
 		res.Cache = &pipeline.CacheConfig{
 			Store:         p.Cache.Store,
 			DefaultTTL:    p.Cache.DefaultTTL,
@@ -712,11 +720,13 @@ func toInternalPipelineConfig(p aoni.PipelineConfig) pipeline.PipelineConfig {
 			CookieIndices: p.Cache.CookieIndices,
 		}
 	}
+
 	if p.HAR != nil {
 		res.HAR = &pipeline.HARConfig{
 			Tracker: p.HAR.Tracker,
 		}
 	}
+
 	if p.Redact != nil {
 		res.Redact = &pipeline.RedactConfig{
 			Headers:          p.Redact.Headers,
@@ -724,7 +734,9 @@ func toInternalPipelineConfig(p aoni.PipelineConfig) pipeline.PipelineConfig {
 			JSONKeysToRedact: p.Redact.JSONKeysToRedact,
 		}
 	}
+
 	res.BuildFlags()
+
 	return res
 }
 

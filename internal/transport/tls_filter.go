@@ -25,6 +25,7 @@ func (w *uTLSConnWrapper) Handshake() error {
 
 func (w *uTLSConnWrapper) ConnectionState() tls.ConnectionState {
 	uState := w.UConn.ConnectionState()
+
 	return tls.ConnectionState{
 		Version:                    uState.Version,
 		HandshakeComplete:          true,
@@ -38,7 +39,7 @@ func (w *uTLSConnWrapper) ConnectionState() tls.ConnectionState {
 	}
 }
 
-// TLSHandshakeFilter is the 7-Zip-style codec filter for L7 TLS/uTLS encryption, ALPN negotiation, and ECH.
+// TLSHandshakeFilter is the codec filter for L7 TLS/uTLS encryption, ALPN negotiation, and ECH.
 func TLSHandshakeFilter(ctx context.Context, conn net.Conn, targetHost string, cfg *DialConfig) (net.Conn, error) {
 	if cfg == nil {
 		return conn, nil
@@ -55,18 +56,19 @@ func TLSHandshakeFilter(ctx context.Context, conn net.Conn, targetHost string, c
 
 func handshakeUTLS(ctx context.Context, conn net.Conn, host string, cfg *DialConfig) (net.Conn, error) {
 	utlsOpts := netdial.RTLSOptions{
-		HelloID:            cfg.HelloID,
-		SpecProvider:       cfg.SpecProvider,
-		SessionCache:       cfg.SessionCache,
-		CertificatePins:    cfg.CertificatePins,
-		CertCompression:    cfg.CertCompression,
-		JA4Callback:        cfg.JA4Callback,
-		BaseTLSConfig:      cfg.BaseTLSConfig,
-		ALPNOverride:       cfg.ALPNOverride,
-		ECHConfigList:      cfg.ECHConfigList,
-		AutoECH:            cfg.AutoECH,
-		InsecureSkipVerify: cfg.InsecureSkipVerify || (cfg.BaseTLSConfig != nil && cfg.BaseTLSConfig.InsecureSkipVerify),
-		DNSResolver:        cfg.DNSResolver,
+		HelloID:         cfg.HelloID,
+		SpecProvider:    cfg.SpecProvider,
+		SessionCache:    cfg.SessionCache,
+		CertificatePins: cfg.CertificatePins,
+		CertCompression: cfg.CertCompression,
+		JA4Callback:     cfg.JA4Callback,
+		BaseTLSConfig:   cfg.BaseTLSConfig,
+		ALPNOverride:    cfg.ALPNOverride,
+		ECHConfigList:   cfg.ECHConfigList,
+		AutoECH:         cfg.AutoECH,
+		InsecureSkipVerify: cfg.InsecureSkipVerify ||
+			(cfg.BaseTLSConfig != nil && cfg.BaseTLSConfig.InsecureSkipVerify),
+		DNSResolver: cfg.DNSResolver,
 	}
 
 	if utlsOpts.BaseTLSConfig == nil {

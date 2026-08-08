@@ -7,25 +7,12 @@ package aoni
 import (
 	"net"
 	"net/http"
-	"net/url"
 	"slices"
 
 	"github.com/lemon4ksan/aoni/internal/pipeline"
 	"github.com/lemon4ksan/aoni/internal/tcp"
 	"github.com/lemon4ksan/aoni/netutil/fragment"
 )
-
-func (c *Client) determineProxy(req *http.Request) (*url.URL, error) {
-	if raw, ok := GetProxyOverride(req.Context()).Value(); ok && raw != "" {
-		return url.Parse(raw)
-	}
-
-	if c.network.ProxyAddr != nil {
-		return c.network.ProxyAddr, nil
-	}
-
-	return http.ProxyFromEnvironment(req)
-}
 
 func applyMSSLimit(conn net.Conn, mss int) net.Conn {
 	if mss <= 0 {
@@ -104,6 +91,7 @@ func (d ClientDefaults) toInternalProfiles() []pipeline.BrowserProfile {
 	if len(d.UARotationProfiles) == 0 {
 		return nil
 	}
+
 	res := make([]pipeline.BrowserProfile, len(d.UARotationProfiles))
 	for i, p := range d.UARotationProfiles {
 		res[i] = pipeline.BrowserProfile{
@@ -111,6 +99,7 @@ func (d ClientDefaults) toInternalProfiles() []pipeline.BrowserProfile {
 			ClientHints: p.ClientHints,
 		}
 	}
+
 	return res
 }
 
@@ -130,12 +119,14 @@ func (p PipelineConfig) toInternal() pipeline.PipelineConfig {
 			MaxDelay: p.DPIJitter.MaxDelay,
 		}
 	}
+
 	if p.ProxyFailover != nil {
 		res.ProxyFailover = &pipeline.ProxyFailoverConfig{
 			Proxies:    p.ProxyFailover.Proxies,
 			RetryLimit: p.ProxyFailover.RetryLimit,
 		}
 	}
+
 	if p.Hedging != nil {
 		res.Hedging = &pipeline.HedgingConfig{
 			DynamicHedging:       p.Hedging.DynamicHedging,
@@ -144,6 +135,7 @@ func (p PipelineConfig) toInternal() pipeline.PipelineConfig {
 			AllowNonReadOnly:     p.Hedging.AllowNonReadOnly,
 		}
 	}
+
 	if p.Cache != nil {
 		var nvs *pipeline.NoVarySearchConfig
 		if p.Cache.NoVarySearch != nil {
@@ -153,6 +145,7 @@ func (p PipelineConfig) toInternal() pipeline.PipelineConfig {
 				IgnoreAllParams: p.Cache.NoVarySearch.IgnoreAllParams,
 			}
 		}
+
 		res.Cache = &pipeline.CacheConfig{
 			Store:         p.Cache.Store,
 			DefaultTTL:    p.Cache.DefaultTTL,
@@ -160,11 +153,13 @@ func (p PipelineConfig) toInternal() pipeline.PipelineConfig {
 			CookieIndices: p.Cache.CookieIndices,
 		}
 	}
+
 	if p.HAR != nil {
 		res.HAR = &pipeline.HARConfig{
 			Tracker: p.HAR.Tracker,
 		}
 	}
+
 	if p.Redact != nil {
 		res.Redact = &pipeline.RedactConfig{
 			Headers:          p.Redact.Headers,
@@ -172,7 +167,9 @@ func (p PipelineConfig) toInternal() pipeline.PipelineConfig {
 			JSONKeysToRedact: p.Redact.JSONKeysToRedact,
 		}
 	}
+
 	res.BuildFlags()
+
 	return res
 }
 
@@ -192,12 +189,14 @@ func pipelineToAoniConfig(p pipeline.PipelineConfig) PipelineConfig {
 			MaxDelay: p.DPIJitter.MaxDelay,
 		}
 	}
+
 	if p.ProxyFailover != nil {
 		res.ProxyFailover = &ProxyFailoverConfig{
 			Proxies:    slices.Clone(p.ProxyFailover.Proxies),
 			RetryLimit: p.ProxyFailover.RetryLimit,
 		}
 	}
+
 	if p.Hedging != nil {
 		res.Hedging = &HedgingConfig{
 			DynamicHedging:       p.Hedging.DynamicHedging,
@@ -206,6 +205,7 @@ func pipelineToAoniConfig(p pipeline.PipelineConfig) PipelineConfig {
 			AllowNonReadOnly:     p.Hedging.AllowNonReadOnly,
 		}
 	}
+
 	if p.Cache != nil {
 		var nvs *NoVarySearchConfig
 		if p.Cache.NoVarySearch != nil {
@@ -215,6 +215,7 @@ func pipelineToAoniConfig(p pipeline.PipelineConfig) PipelineConfig {
 				IgnoreAllParams: p.Cache.NoVarySearch.IgnoreAllParams,
 			}
 		}
+
 		res.Cache = &CacheConfig{
 			Store:         p.Cache.Store,
 			DefaultTTL:    p.Cache.DefaultTTL,
@@ -222,11 +223,13 @@ func pipelineToAoniConfig(p pipeline.PipelineConfig) PipelineConfig {
 			CookieIndices: p.Cache.CookieIndices,
 		}
 	}
+
 	if p.HAR != nil {
 		res.HAR = &HARConfig{
 			Tracker: p.HAR.Tracker,
 		}
 	}
+
 	if p.Redact != nil {
 		res.Redact = &RedactConfig{
 			Headers:          p.Redact.Headers,
@@ -234,5 +237,6 @@ func pipelineToAoniConfig(p pipeline.PipelineConfig) PipelineConfig {
 			JSONKeysToRedact: p.Redact.JSONKeysToRedact,
 		}
 	}
+
 	return res
 }

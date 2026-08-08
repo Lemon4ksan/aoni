@@ -14,7 +14,6 @@ import (
 	"net/netip"
 	"net/url"
 	"strings"
-	"sync"
 	"time"
 
 	utls "github.com/refraction-networking/utls"
@@ -79,7 +78,6 @@ type DialConfig struct {
 // across standard HTTP, fasthttp, WebSockets, gRPC, and MASQUE tunnels.
 type UniversalDialer struct {
 	activeHTTPS map[string]int
-	activeMu    sync.RWMutex
 }
 
 // NewUniversalDialer initializes a new UniversalDialer.
@@ -259,6 +257,7 @@ func applyRewriteRules(host, port string, rules map[string]string) (string, stri
 	if rewritten, exists := rules[host]; exists {
 		if newHost, newPort, err := net.SplitHostPort(rewritten); err == nil {
 			host = newHost
+
 			if newPort != "" {
 				port = newPort
 			}

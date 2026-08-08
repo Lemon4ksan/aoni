@@ -34,10 +34,12 @@ func (c *Client) DialContext(ctx context.Context, network, addr string) (net.Con
 	dialCfg := c.buildDialConfig(ctx)
 
 	host, port := splitHostPortDefault(addr)
+
 	host, port = applyHostRewriteRules(ctx, host, port)
 	if port == "80" && !strings.Contains(addr, ":") {
 		port = "443"
 	}
+
 	targetAddr := net.JoinHostPort(host, port)
 
 	isTLS := port == "443" || c.IsHTTPSTarget(addr) || c.IsHTTPSTarget(host) || c.IsHTTPSTarget(targetAddr) ||
@@ -52,6 +54,7 @@ func (c *Client) DialContext(ctx context.Context, network, addr string) (net.Con
 
 func (c *Client) isTLSEnabled() bool {
 	f := c.config.Fingerprint
+
 	return f.BrowserID != aoni.BrowserNone ||
 		f.TLSClientHelloID != nil ||
 		f.TLSClientHelloSpecProvider != nil
@@ -156,45 +159,59 @@ func (c *Client) buildDialConfig(ctx context.Context) transport.DialConfig {
 		if reqCfg.ProxyAddr != nil {
 			cfg.ProxyURL = reqCfg.ProxyAddr
 		}
+
 		if reqCfg.DNSResolver != nil {
 			cfg.DNSResolver = reqCfg.DNSResolver
 		}
+
 		if reqCfg.P0fSignature != nil {
 			cfg.P0fSignature = reqCfg.P0fSignature
 		}
+
 		if reqCfg.SocketController != nil {
 			cfg.SocketController = reqCfg.SocketController
 		}
+
 		if reqCfg.Fragment != nil {
 			cfg.FragmentConfig = reqCfg.Fragment
 		}
+
 		if reqCfg.ClientHelloSpecProvider != nil {
 			cfg.SpecProvider = reqCfg.ClientHelloSpecProvider
 		}
+
 		if reqCfg.SessionCache != nil {
 			cfg.SessionCache = reqCfg.SessionCache
 		}
+
 		if reqCfg.JA4Callback != nil {
 			cfg.JA4Callback = reqCfg.JA4Callback
 		}
+
 		if len(reqCfg.ALPNOverride) > 0 {
 			cfg.ALPNOverride = reqCfg.ALPNOverride
 		}
+
 		if reqCfg.JA4ReportStore != nil {
 			if reqCfg.JA4ReportStore.Report == nil {
 				reqCfg.JA4ReportStore.Report = &ja4.Report{}
 			}
+
 			if reqCfg.JA4ReportStore.Target != nil {
 				reqCfg.JA4ReportStore.Target.JA4 = reqCfg.JA4ReportStore.Report
 			}
+
 			cfg.JA4ReportStore = reqCfg.JA4ReportStore.Report
 		}
+
 		if len(reqCfg.CertificatePins) > 0 {
 			cfg.CertificatePins = reqCfg.CertificatePins
 		}
+
 		if len(reqCfg.OrderedHeaders) > 0 {
 			cfg.HeaderOrder = reqCfg.OrderedHeaders
 		}
+
 		if reqCfg.HostRewrite != nil {
 			cfg.HostRewriteRules = reqCfg.HostRewrite.Rules
 		}
@@ -272,9 +289,11 @@ func applyHostRewriteRules(ctx context.Context, host, port string) (string, stri
 	if len(rules) == 0 {
 		return host, port
 	}
+
 	if rewritten, exists := rules[host]; exists {
 		if newHost, newPort, err := net.SplitHostPort(rewritten); err == nil {
 			host = newHost
+
 			if newPort != "" {
 				port = newPort
 			}
@@ -282,5 +301,6 @@ func applyHostRewriteRules(ctx context.Context, host, port string) (string, stri
 			host = rewritten
 		}
 	}
+
 	return host, port
 }

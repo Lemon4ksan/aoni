@@ -68,7 +68,7 @@ type UConnWrapper struct {
 func (w *UConnWrapper) ConnectionState() tls.ConnectionState {
 	uState := w.UConn.ConnectionState()
 
-	isMutual := uState.NegotiatedProtocolIsMutual
+	isMutual := uState.NegotiatedProtocolIsMutual //nolint:staticcheck
 	if uState.NegotiatedProtocol != "" {
 		isMutual = true
 	}

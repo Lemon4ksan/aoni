@@ -473,7 +473,7 @@ func TestPipeline_PostProcessResponse_Full(t *testing.T) {
 		Header: http.Header{"Content-Type": []string{"application/json; charset=windows-1251"}},
 		Body:   stdio.NopCloser(strings.NewReader("\xef\xf0\xe8\xe2\xe5\xf2")),
 	}
-	applyCharsetTranscoding(respTranscode)
+	respTranscode.Body = applyCharsetTranscoding(respTranscode, respTranscode.Body)
 	transcodedBytes, _ := stdio.ReadAll(respTranscode.Body)
 	assert.Equal(t, "привет", string(transcodedBytes))
 	assert.NotContains(t, respTranscode.Header.Get("Content-Type"), "windows-1251")

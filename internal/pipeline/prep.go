@@ -137,6 +137,7 @@ func (p *Pipeline) prepareRequest(req Request, tx *Tx) *http.Request {
 		if cfg.JA4ReportStore.Target.JA4 == nil {
 			cfg.JA4ReportStore.Target.JA4 = &ja4.Report{}
 		}
+
 		cfg.JA4ReportStore.Target.JA4.JA4H = telemetry.ComputeJA4HFromRequest(stdReq)
 	}
 

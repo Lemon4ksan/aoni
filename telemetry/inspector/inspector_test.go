@@ -142,3 +142,20 @@ func TestTrafficInspector_LimitHistory(t *testing.T) {
 	reqs := insp.GetRequests()
 	assert.Len(t, reqs, 500)
 }
+
+func TestMultiInspector_Broadcasting(t *testing.T) {
+	t.Parallel()
+
+	insp1 := inspector.NewTrafficInspector("127.0.0.1:0")
+	insp2 := inspector.NewTrafficInspector("127.0.0.1:0")
+
+	multi := inspector.NewMultiInspector(insp1, insp2)
+
+	req, _ := http.NewRequestWithContext(t.Context(), http.MethodGet, "http://example.com/multi", nil)
+	resp := &http.Response{StatusCode: http.StatusOK}
+
+	multi.Capture(req, resp, nil, nil)
+
+	assert.Len(t, insp1.GetRequests(), 1)
+	assert.Len(t, insp2.GetRequests(), 1)
+}

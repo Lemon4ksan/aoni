@@ -339,6 +339,7 @@ func (c *Client) cachePushedResponse(
 				IgnoreAllParams: cacheCfg.NoVarySearch.IgnoreAllParams,
 			}
 		}
+
 		pipe.SavePushedResponseToCache(req, resp, &pipeline.CacheConfig{
 			Store:         cacheCfg.Store,
 			DefaultTTL:    cacheCfg.DefaultTTL,

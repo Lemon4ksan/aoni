@@ -47,7 +47,7 @@ const (
 	RedirectLimitUnset = -2
 )
 
-// ConnFilter defines a 7-Zip-style stream transformation codec evaluated during socket dialing.
+// ConnFilter defines a stream transformation codec evaluated during socket dialing.
 type ConnFilter = transport.ConnFilter
 
 // DialConfig is an alias for transport.DialConfig.
@@ -144,8 +144,10 @@ func (e EngineConfig) Clone() EngineConfig {
 		cloned.Protocols = make(map[string]http.RoundTripper, len(e.Protocols))
 		maps.Copy(cloned.Protocols, e.Protocols)
 	}
+
 	cloned.ConnectionPool = clonePtr(e.ConnectionPool)
 	cloned.HTTP2Config = clonePtr(e.HTTP2Config)
+
 	return cloned
 }
 
@@ -257,7 +259,7 @@ type NetworkConfig struct {
 	// HostRewrite configures static hostname-to-IP/host remapping rules.
 	HostRewrite *HostRewriteConfig
 
-	// ConnFilters registers custom 7-Zip-style stream codec filters evaluated during socket dialing.
+	// ConnFilters registers custom stream codec filters evaluated during socket dialing.
 	ConnFilters []ConnFilter
 
 	// HappyEyeballsDelay sets the IPv4/IPv6 connection racing delay (RFC 8305).
@@ -398,17 +400,21 @@ func (f FingerprintConfig) Clone() FingerprintConfig {
 	if len(f.HeaderOrder) > 0 {
 		cloned.HeaderOrder = slices.Clone(f.HeaderOrder)
 	}
+
 	if len(f.CertCompression) > 0 {
 		cloned.CertCompression = slices.Clone(f.CertCompression)
 	}
+
 	if len(f.ECHConfigList) > 0 {
 		cloned.ECHConfigList = slices.Clone(f.ECHConfigList)
 	}
+
 	if len(f.CertificatePins) > 0 {
 		pinsCopy := make(map[string][]string, len(f.CertificatePins))
 		for k, v := range f.CertificatePins {
 			pinsCopy[k] = slices.Clone(v)
 		}
+
 		cloned.CertificatePins = pinsCopy
 	}
 
@@ -496,22 +502,28 @@ func (d ClientDefaults) Clone() ClientDefaults {
 	if d.BaseURL != nil {
 		cloned.BaseURL = cloneURL(d.BaseURL)
 	}
+
 	if d.Headers != nil {
 		cloned.Headers = d.Headers.Clone()
 	}
+
 	if len(d.BeforeRequest) > 0 {
 		cloned.BeforeRequest = slices.Clone(d.BeforeRequest)
 	}
+
 	if len(d.AfterResponse) > 0 {
-		cloned.AfterResponse = slices.Clone(d.AfterResponse)
+		cloned.AfterResponse = slices.Clone(d.AfterResponse) //nolint:bodyclose
 	}
+
 	if len(d.DefaultMods) > 0 {
 		cloned.DefaultMods = slices.Clone(d.DefaultMods)
 	}
+
 	if d.Decoders != nil {
 		cloned.Decoders = make(map[string]ResponseDecoder, len(d.Decoders))
 		maps.Copy(cloned.Decoders, d.Decoders)
 	}
+
 	if len(d.UARotationProfiles) > 0 {
 		cloned.UARotationProfiles = slices.Clone(d.UARotationProfiles)
 	}
@@ -677,10 +689,12 @@ func cloneURL(u *url.URL) *url.URL {
 	if u == nil {
 		return nil
 	}
+
 	uCopy := *u
 	if u.User != nil {
 		uCopy.User = u.User
 	}
+
 	return &uCopy
 }
 
@@ -688,6 +702,8 @@ func clonePtr[T any](p *T) *T {
 	if p == nil {
 		return nil
 	}
+
 	val := *p
+
 	return &val
 }

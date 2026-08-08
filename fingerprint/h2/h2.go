@@ -227,6 +227,7 @@ func (ft *FramedTransport) CloneTransport(next http.RoundTripper) http.RoundTrip
 	if base, ok := next.(*http.Transport); ok {
 		return NewFramedTransport(base, ft.settings, ft.orderedKeys...)
 	}
+
 	return ft
 }
 

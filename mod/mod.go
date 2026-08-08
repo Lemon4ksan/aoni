@@ -868,12 +868,14 @@ func toInternalPipelineConfig(p aoni.PipelineConfig) pipeline.PipelineConfig {
 			MaxDelay: p.DPIJitter.MaxDelay,
 		}
 	}
+
 	if p.ProxyFailover != nil {
 		res.ProxyFailover = &pipeline.ProxyFailoverConfig{
 			Proxies:    p.ProxyFailover.Proxies,
 			RetryLimit: p.ProxyFailover.RetryLimit,
 		}
 	}
+
 	if p.Hedging != nil {
 		res.Hedging = &pipeline.HedgingConfig{
 			DynamicHedging:       p.Hedging.DynamicHedging,
@@ -882,6 +884,7 @@ func toInternalPipelineConfig(p aoni.PipelineConfig) pipeline.PipelineConfig {
 			AllowNonReadOnly:     p.Hedging.AllowNonReadOnly,
 		}
 	}
+
 	if p.Cache != nil {
 		var nvs *pipeline.NoVarySearchConfig
 		if p.Cache.NoVarySearch != nil {
@@ -891,6 +894,7 @@ func toInternalPipelineConfig(p aoni.PipelineConfig) pipeline.PipelineConfig {
 				IgnoreAllParams: p.Cache.NoVarySearch.IgnoreAllParams,
 			}
 		}
+
 		res.Cache = &pipeline.CacheConfig{
 			Store:         p.Cache.Store,
 			DefaultTTL:    p.Cache.DefaultTTL,
@@ -898,11 +902,13 @@ func toInternalPipelineConfig(p aoni.PipelineConfig) pipeline.PipelineConfig {
 			CookieIndices: p.Cache.CookieIndices,
 		}
 	}
+
 	if p.HAR != nil {
 		res.HAR = &pipeline.HARConfig{
 			Tracker: p.HAR.Tracker,
 		}
 	}
+
 	if p.Redact != nil {
 		res.Redact = &pipeline.RedactConfig{
 			Headers:          p.Redact.Headers,
@@ -910,7 +916,9 @@ func toInternalPipelineConfig(p aoni.PipelineConfig) pipeline.PipelineConfig {
 			JSONKeysToRedact: p.Redact.JSONKeysToRedact,
 		}
 	}
+
 	res.BuildFlags()
+
 	return res
 }
 

@@ -127,6 +127,7 @@ func isCrossOrigin(u1, u2 *url.URL) bool {
 
 	// 2. Compare Hostname (ignoring FQDN trailing dots and ports)
 	h1 := strings.ToLower(strings.TrimSuffix(u1.Hostname(), "."))
+
 	h2 := strings.ToLower(strings.TrimSuffix(u2.Hostname(), "."))
 	if h1 != h2 {
 		return true

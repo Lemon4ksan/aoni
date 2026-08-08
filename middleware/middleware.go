@@ -158,10 +158,12 @@ func (l *SlidingWindowLimiter) Allow(now time.Time) (bool, time.Duration) {
 		l.timestamps[l.tail] = now
 		l.tail = (l.tail + 1) % l.limit
 		l.count++
+
 		return true, 0
 	}
 
 	oldest := l.timestamps[l.head]
+
 	return false, oldest.Add(l.window).Sub(now)
 }
 
@@ -329,6 +331,7 @@ func Retry(opts RetryOptions, condition aoni.RetryCondition) aoni.Middleware {
 				}
 
 				resp, err := next.Do(req)
+
 				lastResp = resp
 				if attempt == activeOpts.MaxRetries || !activeCond(resp, err) {
 					return resp, err
@@ -379,18 +382,22 @@ func allowRetryForMethod(req aoni.Request, opts RetryOptions, resp aoni.Response
 	if isIdempotentMethod(req.Method()) || opts.RetryNonIdempotent {
 		return true
 	}
+
 	if req.Header("Idempotency-Key") != "" || req.Header("X-Request-ID") != "" {
 		return true
 	}
+
 	if resp != nil && (resp.Header("X-Proxy-Fault") != "" || resp.StatusCode() == http.StatusBadGateway) {
 		return true
 	}
+
 	return false
 }
 
 func ensureIdempotencyKey(req aoni.Request) {
 	if req.Header("Idempotency-Key") == "" && req.Header("X-Request-ID") == "" {
 		var randBuf [16]byte
+
 		_, _ = rand.Read(randBuf[:])
 		key := fmt.Sprintf("%x-%x-%x-%x-%x", randBuf[0:4], randBuf[4:6], randBuf[6:8], randBuf[8:10], randBuf[10:])
 		req.SetHeader("Idempotency-Key", key)
@@ -480,6 +487,7 @@ func calculateRetrySleep(resp aoni.Response, bo *generic.Backoff, opts RetryOpti
 		if opts.MaxRetryAfter > 0 && retryAfter > opts.MaxRetryAfter {
 			return 0, true
 		}
+
 		return retryAfter, false
 	}
 

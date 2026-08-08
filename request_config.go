@@ -46,6 +46,7 @@ func GetPipeline(ctx context.Context) (PipelineConfig, bool) {
 	if p, ok := pipeline.GetPipeline(ctx); ok {
 		return pipelineToAoniConfig(p), true
 	}
+
 	return PipelineConfig{}, false
 }
 

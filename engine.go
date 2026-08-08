@@ -95,6 +95,7 @@ func CloneHTTPClient(c *http.Client) *http.Client {
 	}
 
 	cloned.Transport = cloneRoundTripper(cloned.Transport)
+
 	return &cloned
 }
 

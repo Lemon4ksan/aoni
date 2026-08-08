@@ -205,3 +205,31 @@ func TestChallengeSolver_SolverError(t *testing.T) {
 	require.Error(t, err)
 	assert.ErrorIs(t, err, solverErr)
 }
+
+func TestChallengePipeline_Cascading(t *testing.T) {
+	t.Parallel()
+
+	detector1 := func(resp *http.Response) (bool, error) {
+		return resp != nil && resp.StatusCode == 403, nil
+	}
+
+	solvedResp1 := &http.Response{StatusCode: 200}
+	solver1 := &MockChallengeSolver{
+		solveFunc: func(_ context.Context, _ error, _ *http.Request) (*http.Response, error) {
+			return solvedResp1, nil
+		},
+	}
+
+	pipeline := challenge.NewPipeline(challenge.ChallengePair{
+		Detector: detector1,
+		Solver:   solver1,
+	})
+
+	req, _ := http.NewRequestWithContext(t.Context(), "GET", "http://test", nil)
+	resp403 := &http.Response{StatusCode: 403}
+
+	solved, finalResp, err := pipeline.SolveCascading(req, resp403)
+	require.NoError(t, err)
+	assert.True(t, solved)
+	assert.Equal(t, 200, finalResp.StatusCode)
+}

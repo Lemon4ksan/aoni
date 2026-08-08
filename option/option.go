@@ -985,7 +985,7 @@ func WithOSPowerManagement(enable bool) aoni.ClientOption {
 	}
 }
 
-// WithConnFilter registers custom 7-Zip-style stream codec filters evaluated during socket dialing.
+// WithConnFilter registers custom stream codec filters evaluated during socket dialing.
 func WithConnFilter(filters ...aoni.ConnFilter) aoni.ClientOption {
 	return func(cfg *aoni.Config) {
 		cfg.Network.ConnFilters = append(cfg.Network.ConnFilters, filters...)
@@ -999,6 +999,7 @@ func WithLocale(locale string) aoni.ClientOption {
 		if cfg.Defaults.Headers == nil {
 			cfg.Defaults.Headers = make(http.Header)
 		}
+
 		cfg.Defaults.Headers.Set("Accept-Language", locale)
 	}
 }
