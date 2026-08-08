@@ -22,16 +22,11 @@ import (
 
 	"github.com/lemon4ksan/aoni"
 	"github.com/lemon4ksan/aoni/internal/bytesconv"
+	"github.com/lemon4ksan/aoni/internal/engine"
 	"github.com/lemon4ksan/aoni/internal/framing"
 	"github.com/lemon4ksan/aoni/internal/io"
 	"github.com/lemon4ksan/aoni/mod"
 )
-
-var bufferPool = sync.Pool{
-	New: func() any {
-		return new(bytes.Buffer)
-	},
-}
 
 var (
 	// RawDecoder reads the entire response payload stream directly into a byte slice pointer (*[]byte).
@@ -136,7 +131,7 @@ func (protoDecoder) Decode(r stdio.Reader, target any) error {
 	if err != nil {
 		return err
 	}
-	defer bufferPool.Put(buf)
+	defer engine.GlobalBufferPool.Put(buf)
 
 	if err := proto.Unmarshal(buf.Bytes(), msg); err != nil {
 		return &Error{Format: "proto", Target: typeName(msg), Err: err}
@@ -157,7 +152,7 @@ func (protoJSONDecoder) Decode(r stdio.Reader, target any) error {
 	if err != nil {
 		return err
 	}
-	defer bufferPool.Put(buf)
+	defer engine.GlobalBufferPool.Put(buf)
 
 	opts := protojson.UnmarshalOptions{DiscardUnknown: true}
 
@@ -245,11 +240,10 @@ func processGRPCWebFrame(flags byte, payload []byte, msg proto.Message) (done bo
 }
 
 func copyToBuffer(r stdio.Reader) (*bytes.Buffer, error) {
-	buf := bufferPool.Get().(*bytes.Buffer)
-	buf.Reset()
+	buf := engine.GlobalBufferPool.Get()
 
 	if _, err := io.CopyZeroAlloc(buf, r); err != nil {
-		bufferPool.Put(buf)
+		engine.GlobalBufferPool.Put(buf)
 		return nil, err
 	}
 

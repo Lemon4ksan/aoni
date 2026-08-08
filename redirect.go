@@ -101,16 +101,16 @@ func applyRedirectPolicy(httpClient *http.Client, eng EngineConfig) {
 
 // matchDomainPattern checks if host matches pattern (supporting exact and *.wildcard matches).
 func matchDomainPattern(host, pattern string) bool {
-	h := strings.ToLower(strings.TrimSuffix(host, "."))
-	p := strings.ToLower(strings.TrimSuffix(pattern, "."))
+	host = strings.ToLower(strings.TrimSuffix(host, "."))
+	pattern = strings.ToLower(strings.TrimSuffix(pattern, "."))
 
-	if !strings.HasPrefix(p, "*.") {
-		return h == p
+	if !strings.HasPrefix(pattern, "*.") {
+		return host == pattern
 	}
 
-	suffix := p[1:] // ".example.com"
+	suffix := pattern[1:] // ".example.com"
 
-	return strings.HasSuffix(h, suffix) || h == p[2:]
+	return strings.HasSuffix(host, suffix) || host == pattern[2:]
 }
 
 // isCrossOrigin determines whether u1 and u2 belong to different RFC 6454 web origins.
@@ -120,20 +120,17 @@ func isCrossOrigin(u1, u2 *url.URL) bool {
 		return false
 	}
 
-	// 1. Compare Scheme (https vs http)
 	if !strings.EqualFold(u1.Scheme, u2.Scheme) {
 		return true
 	}
 
-	// 2. Compare Hostname (ignoring FQDN trailing dots and ports)
 	h1 := strings.ToLower(strings.TrimSuffix(u1.Hostname(), "."))
-
 	h2 := strings.ToLower(strings.TrimSuffix(u2.Hostname(), "."))
+
 	if h1 != h2 {
 		return true
 	}
 
-	// 3. Compare Canonical Port
 	return canonicalPort(u1) != canonicalPort(u2)
 }
 

@@ -25,6 +25,7 @@ import (
 
 	"github.com/lemon4ksan/aoni"
 	"github.com/lemon4ksan/aoni/internal/bytesconv"
+	"github.com/lemon4ksan/aoni/internal/engine"
 	"github.com/lemon4ksan/aoni/internal/pipeline"
 	"github.com/lemon4ksan/aoni/netutil/power"
 )
@@ -46,6 +47,8 @@ type Client struct {
 	activeTargets  sync.Map
 
 	protocolState protocolState
+	coreEngine    *engine.Engine
+	prepared      engine.PreparedConfig
 }
 
 // NewClient creates a new multiprotocol Client configured with fasthttp, uTLS,
@@ -70,6 +73,9 @@ func NewClient(opts ...aoni.ClientOption) *Client {
 	c.applyEngineConfig()
 	c.applyCustomDialer()
 	c.applyPowerManagement(c.config.Network.EnablePowerManagement)
+
+	c.coreEngine = engine.NewEngine(c.config.Defaults.BaseURL, c.config.Defaults.Headers, nil, 15*time.Second, 0)
+	c.prepared = c.coreEngine.Prepared
 
 	c.pipelineEngine = pipeline.NewPipeline(
 		toPipelineDefaults(c.config.Defaults, c.referer),
@@ -235,6 +241,18 @@ func (c *Client) resolveTargetURL(req aoni.Request, path string) error {
 	}
 
 	return nil
+}
+
+// Close shuts down idle connections and releases core engine janitor resources.
+func (c *Client) Close() {
+	if c.coreEngine != nil {
+		c.coreEngine.Close()
+	}
+
+	if c.powerWatcher != nil {
+		c.powerWatcher.Close()
+		c.powerWatcher = nil
+	}
 }
 
 // Request executes an HTTP request across HTTP/1.1, native HTTP/2, or native HTTP/3.

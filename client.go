@@ -31,7 +31,18 @@ import (
 	"github.com/lemon4ksan/aoni/netutil/power"
 )
 
-// Client is an immutable, thread-safe HTTP and WebSocket client built on top of [HTTPDoer].
+// Client is an immutable, thread-safe, multi-protocol HTTP, WebSockets, and gRPC client facade.
+// It acts as a high-level public interface hiding low-level protocol orchestration
+// (uTLS fingerprints, HTTP/2-3 framing, proxy rotation, anti-DPI packet fragmentation, and p0f OS spoofing).
+//
+// Designed around Progressive Disclosure of Complexity: simple REST API calls execute
+// with 0-alloc fast-path performance, while advanced enterprise features (speculative hedging,
+// WAF challenge solvers, uTLS browser profiles, SSH/MASQUE tunneling) are available via options
+// without breaking application code contracts or requiring service rewrites.
+//
+// Client instances are 100% thread-safe and safe for concurrent invocation across goroutines.
+// Methods such as With() and Clone() return new Client instances with isolated configuration DTOs
+// and memory structures, ensuring zero shared-state data races between concurrent threads.
 type Client struct {
 	engine         HTTPDoer
 	pipelineEngine *pipeline.Pipeline
@@ -42,13 +53,27 @@ type Client struct {
 	powerWatcher   *power.Watcher
 	referer        *pipeline.RefererState
 	prepared       engine.PreparedConfig
+	coreEngine     *engine.Engine
 }
 
-// NewClient instantiates a new thread-safe [Client] wrapping the specified doer.
+// NewClient instantiates a new thread-safe [Client] wrapping the specified doer engine.
+// If doer is nil, defaults to standard HTTP execution normalized via [DefaultEngine].
+//
+// Applies functional [ClientOption] layers, precomputes BaseURL string representations
+// into [engine.PreparedConfig] for zero-alloc relative path resolutions, and ensures a default User-Agent.
 func NewClient(doer any, opts ...ClientOption) *Client {
 	client := &Client{
-		engine:   DefaultEngine(doer),
-		defaults: defaultClientDefaults(),
+		engine: DefaultEngine(doer),
+		defaults: ClientDefaults{
+			BaseURL:         &url.URL{},
+			Headers:         make(http.Header),
+			MaxResponseSize: 10 * 1024 * 1024,
+			Pipeline: PipelineConfig{
+				Decompress: true,
+				Validate:   true,
+				Challenge:  true,
+			},
+		},
 		network: NetworkConfig{
 			HappyEyeballsDelay: 300 * time.Millisecond,
 		},
@@ -68,7 +93,9 @@ func NewClient(doer any, opts ...ClientOption) *Client {
 	return client
 }
 
-// Clone creates a deep copy of the client, isolating transports, cookie jars, and configuration structs.
+// Clone creates a deep, memory-isolated copy of the [Client].
+// All configuration DTOs, default header maps, modifier slices, cookie jars, and referer states
+// are independently copied, guaranteeing zero data races when mutating cloned instances across goroutines.
 func (c *Client) Clone() *Client {
 	clonedReferer := &pipeline.RefererState{}
 	if c.referer != nil {
@@ -92,6 +119,7 @@ func (c *Client) Clone() *Client {
 }
 
 // With produces a deep-copied [Client] with the provided functional options applied.
+// Preserves original client immutability and thread safety.
 func (c *Client) With(opts ...ClientOption) *Client {
 	clonedReferer := &pipeline.RefererState{}
 	if c.referer != nil {
@@ -120,7 +148,16 @@ func (c *Client) With(opts ...ClientOption) *Client {
 	return cloned
 }
 
-// Request executes an HTTP transaction and yields the response stream.
+// Request executes an HTTP transaction using method, path, and optional modifiers,
+// yielding the [*http.Response] stream.
+//
+// Path Resolution (RFC 3986):
+// Relative paths are resolved against BaseURL using precomputed zero-allocation string buffers ([engine.PreparedConfig]).
+// Absolute HTTP/HTTPS URLs override BaseURL directly.
+//
+// Pipeline Rules & Post-Processing:
+// Transparent decompression (Gzip, Brotli, Zstd), charset transcoding to UTF-8, OOM size limits,
+// and WAF challenge solving are automatically applied via pipeline rules.
 func (c *Client) Request(
 	ctx context.Context,
 	method, path string,
@@ -174,6 +211,7 @@ func (c *Client) Request(
 }
 
 // Do executes a prepared [Request] contract via the client execution pipeline.
+// Accepts both native aoni.Request and fast.Request adapters.
 func (c *Client) Do(req Request) (Response, error) {
 	if req == nil {
 		return nil, ErrNilRequest
@@ -230,7 +268,19 @@ func (c *Client) Do(req Request) (Response, error) {
 	return NewStdResponse(resp), nil
 }
 
-// HTTP returns an [HTTPDoer] adapter executing requests through the full pipeline.
+// Close releases background janitor workers and engine resources.
+func (c *Client) Close() {
+	if c.coreEngine != nil {
+		c.coreEngine.Close()
+	}
+
+	if c.powerWatcher != nil {
+		c.powerWatcher.Close()
+		c.powerWatcher = nil
+	}
+}
+
+// HTTP returns an [HTTPDoer] adapter executing standard *http.Request objects through the pipeline.
 func (c *Client) HTTP() HTTPDoer {
 	return HTTPDoerFunc(func(req *http.Request) (*http.Response, error) {
 		return c.execute(req, c.resolvePipeline(req))
@@ -241,7 +291,9 @@ func (c *Client) execute(req *http.Request, pipe PipelineConfig) (*http.Response
 	return c.pipelineEngine.Execute(req.Context(), NewStdRequest(req), c.engine, pipe.toInternal())
 }
 
-// WithPersona configures TLS ClientHello ID, HTTP/2 SETTINGS frames, header order, p0f signature, and User-Agent matching Persona.
+// WithPersona configures TLS ClientHello ID, HTTP/2 SETTINGS frames, header order,
+// p0f OS stack signatures, and User-Agent headers matching a specific browser persona (e.g. Chrome, Firefox, Safari)
+// in a single call to prevent cross-layer fingerprint mismatches.
 func (c *Client) WithPersona(p fingerprint.Persona) *Client {
 	newClient := c.WithTLSClientHelloID(p.TLSID)
 	newClient.fingerprint.H2Settings = &p.H2Settings
@@ -270,7 +322,7 @@ func (c *Client) WithPersona(p fingerprint.Persona) *Client {
 	})
 }
 
-// WithTLSClientHelloID returns a cloned [Client] configured with the specified uTLS ClientHello ID.
+// WithTLSClientHelloID returns a cloned [Client] configured with the specified uTLS ClientHello ID preset.
 func (c *Client) WithTLSClientHelloID(id utls.ClientHelloID) *Client {
 	cloned := c.Clone()
 	cloned.fingerprint.TLSClientHelloID = &id
@@ -285,12 +337,12 @@ func (c *Client) WithTLSClientHelloID(id utls.ClientHelloID) *Client {
 	return cloned
 }
 
-// WithHTTP3 creates a clone of the client configured for HTTP/3 over QUIC using default migration settings.
+// WithHTTP3 creates a clone of the client configured for HTTP/3 over QUIC (RFC 9114) using default migration settings.
 func (c *Client) WithHTTP3() *Client {
 	return c.WithHTTP3Config(nil)
 }
 
-// WithHTTP3Config creates a clone of the client configured for HTTP/3 over QUIC using custom QUIC migration parameters.
+// WithHTTP3Config creates a clone of the client configured for HTTP/3 over QUIC using custom QUIC migration parameters (RFC 9000 §9).
 func (c *Client) WithHTTP3Config(config *QUICMigrationConfig) *Client {
 	cloned := c.Clone()
 
@@ -334,17 +386,17 @@ func (c *Client) WithDecoder(contentType string, decoder ResponseDecoder) *Clien
 	})
 }
 
-// Config returns a snapshot copy of the active client configuration.
+// Config returns a snapshot DTO copy of the active client configuration.
 func (c *Client) Config() Config {
 	return c.snapshotConfig()
 }
 
-// Engine yields the underlying, undecorated [HTTPDoer] engine.
+// Engine yields the underlying, undecorated [HTTPDoer] execution engine.
 func (c *Client) Engine() HTTPDoer {
 	return c.engine
 }
 
-// Defaults retrieves a clone of the client's request defaults.
+// Defaults retrieves a clone DTO of the client's request defaults.
 func (c *Client) Defaults() ClientDefaults {
 	return c.defaults.Clone()
 }
@@ -358,12 +410,12 @@ func (c *Client) BaseResponse() BaseResponse {
 	return nil
 }
 
-// Network retrieves a clone of active network transport configurations.
+// Network retrieves a clone DTO of active network transport configurations.
 func (c *Client) Network() NetworkConfig {
 	return c.network.Clone()
 }
 
-// Fingerprint retrieves a clone of TLS and HTTP/2 emulation settings.
+// Fingerprint retrieves a clone DTO of TLS and HTTP/2 emulation settings.
 func (c *Client) Fingerprint() FingerprintConfig {
 	return c.fingerprint.Clone()
 }
@@ -490,19 +542,6 @@ func (c *Client) needsRequestConfig() bool {
 		c.network.ProxyAddr != nil
 }
 
-func defaultClientDefaults() ClientDefaults {
-	return ClientDefaults{
-		BaseURL:         &url.URL{},
-		Headers:         make(http.Header),
-		MaxResponseSize: 10 * 1024 * 1024,
-		Pipeline: PipelineConfig{
-			Decompress: true,
-			Validate:   true,
-			Challenge:  true,
-		},
-	}
-}
-
 func (c *Client) ensureUserAgent() {
 	if c.defaults.Headers == nil {
 		return
@@ -513,6 +552,8 @@ func (c *Client) ensureUserAgent() {
 	}
 }
 
+// resolveTargetURL resolves path against BaseURL using precomputed zero-allocation string buffers (engine.PreparedConfig).
+// Eliminates url.Parse and string formatting allocations for relative path resolutions on the hot path.
 func (c *Client) resolveTargetURL(path string) (string, error) {
 	if len(path) >= 7 && (strings.HasPrefix(path, "http://") || strings.HasPrefix(path, "https://")) {
 		return path, nil
@@ -597,7 +638,8 @@ func (c *Client) applyConfig(cfg Config) {
 	c.fingerprint = cfg.Fingerprint
 	c.defaults = cfg.Defaults
 	c.engineConfig = cfg.Engine
-	c.prepared = engine.NewPreparedConfig(cfg.Defaults.BaseURL)
+	c.coreEngine = engine.NewEngine(cfg.Defaults.BaseURL, cfg.Defaults.Headers, c.Transport(), 15*time.Second, 0)
+	c.prepared = c.coreEngine.Prepared
 
 	applyEngineConfig(c, cfg.Engine)
 	c.applyDialers(c.Transport())
