@@ -1,13 +1,13 @@
-# Discover library packages, excluding examples, scripts, and vendor
-PKG       := $(shell go list ./... | grep -v /examples | grep -v /scripts | grep -v /vendor/)
-COVER_PKG := $(shell go list ./... | grep -v /examples | grep -v /scripts | grep -v /vendor/ | tr '\n' ',' | sed 's/,$$//')
+# Discover library packages, excluding examples, scripts, cmd, and vendor
+PKG       := $(shell go list ./... | grep -v /examples | grep -v /scripts | grep -v /cmd/ | grep -v /vendor/)
+COVER_PKG := $(shell go list ./... | grep -v /examples | grep -v /scripts | grep -v /vendor/)
 COVER_OUT ?= coverage.out
 
 # Colors for console output
 CYAN  := \033[0;36m
 RESET := \033[0m
 
-.PHONY: test race cover cover-html lint format clean check-tls-spec update-browsers update-browsers-apply help
+.PHONY: test race cover cover-clean cover-html lint format clean check-tls-spec update-browsers update-browsers-apply help
 
 test: ## Run quick unit tests
 	@printf "$(CYAN)Running unit tests...$(RESET)\n"
@@ -19,8 +19,13 @@ race: ## Run unit tests with race detector enabled
 
 cover: ## Calculate and print exact core library coverage report
 	@printf "$(CYAN)Generating exact coverage report...$(RESET)\n"
-	go test -coverpkg=$(COVER_PKG) -coverprofile=$(COVER_OUT) $(PKG)
-	go tool cover -func=$(COVER_OUT)
+	go test -coverpkg=$(COVER_PKG) -coverprofile=$(COVER_OUT) ./...
+	go run ./cmd/coverage -file=$(COVER_OUT)
+
+cover-clean: ## Generate clean coverage report and run deduplicated coverage analysis tool
+	@printf "$(CYAN)Generating clean coverage report...$(RESET)\n"
+	go test -coverpkg=$(COVER_PKG) -coverprofile=$(COVER_OUT) ./...
+	go run ./cmd/coverage -file=$(COVER_OUT)
 
 cover-html: cover ## Generate coverage report and open interactive HTML in browser
 	@printf "$(CYAN)Opening coverage report in browser...$(RESET)\n"
