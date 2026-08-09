@@ -17,6 +17,7 @@ import (
 	"os"
 	"runtime"
 	"runtime/pprof"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -60,6 +61,7 @@ func main() {
 
 	if *pprofFlag {
 		cpuFile, err := os.Create("cpu.pprof")
+
 		if err == nil {
 			_ = pprof.StartCPUProfile(cpuFile)
 
@@ -102,25 +104,26 @@ func main() {
 	parOps := 10000000
 	opsPerWorker := parOps / numWorkers
 
+	var wg sync.WaitGroup
+
 	start := time.Now()
-	done := make(chan struct{}, numWorkers)
 
 	for w := 0; w < numWorkers; w++ {
+		wg.Add(1)
+
 		go func() {
+			defer wg.Done()
+
 			for i := 0; i < opsPerWorker; i++ {
 				req := client.AcquireRequest()
 				req.SetMethod("GET")
 				req.SetURL("http://127.0.0.1:8080/api/v1/health")
 				client.ReleaseRequest(req)
 			}
-
-			done <- struct{}{}
 		}()
 	}
 
-	for w := 0; w < numWorkers; w++ {
-		<-done
-	}
+	wg.Wait()
 
 	elapsed := time.Since(start)
 
@@ -179,21 +182,21 @@ func main() {
 	start = time.Now()
 
 	for w := 0; w < numWorkers; w++ {
+		wg.Add(1)
+
 		go func() {
+			defer wg.Done()
+
 			for i := 0; i < fastOpsPerWorker; i++ {
 				resp, err := fastBenchClient.Request(ctx, "GET", "/health")
 				if err == nil && resp != nil {
 					_ = resp.Close()
 				}
 			}
-
-			done <- struct{}{}
 		}()
 	}
 
-	for w := 0; w < numWorkers; w++ {
-		<-done
-	}
+	wg.Wait()
 
 	elapsed = time.Since(start)
 
@@ -221,7 +224,7 @@ func main() {
 	}
 
 	// 5. TLS Impersonation & Fingerprint Synthesis
-	fpOps := 1000000
+	fpOps := 100000000
 	start = time.Now()
 
 	for i := 0; i < fpOps; i++ {
@@ -272,10 +275,13 @@ func main() {
 	start = time.Now()
 
 	for w := 0; w < numWorkers; w++ {
+		wg.Add(1)
+
 		go func() {
+			defer wg.Done()
+
 			for {
 				if atomicNetOps.Add(1) > uint64(netOps) {
-					done <- struct{}{}
 					return
 				}
 
@@ -293,9 +299,7 @@ func main() {
 		}()
 	}
 
-	for w := 0; w < numWorkers; w++ {
-		<-done
-	}
+	wg.Wait()
 
 	elapsed = time.Since(start)
 

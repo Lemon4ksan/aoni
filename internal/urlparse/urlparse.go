@@ -9,13 +9,12 @@ import (
 	"strings"
 	"sync"
 	"unsafe"
-
-	"github.com/lemon4ksan/aoni/internal/bytesconv"
 )
 
-var builderPool = sync.Pool{
+var bufPool = sync.Pool{
 	New: func() any {
-		return new(strings.Builder)
+		b := make([]byte, 0, 512)
+		return &b
 	},
 }
 
@@ -28,49 +27,45 @@ func ReplaceVar(path, key, value string) string {
 		return path
 	}
 
-	sb := builderPool.Get().(*strings.Builder)
+	bufPtr := bufPool.Get().(*[]byte)
+	buf := (*bufPtr)[:0]
 
-	sb.Reset()
-	defer builderPool.Put(sb)
+	buf = append(buf, before...)
+	buf = append(buf, value...)
+	buf = append(buf, after...)
 
-	sb.Grow(len(path) + len(value) - len(target))
+	res := unsafe.String(unsafe.SliceData(buf), len(buf))
 
-	sb.WriteString(before)
-	sb.WriteString(value)
-	sb.WriteString(after)
+	*bufPtr = buf
+	bufPool.Put(bufPtr)
 
-	return sb.String()
+	return res
 }
 
-// FastAppendQuery appends a key-value query parameter to rawURL with zero heap allocations when capacity allows.
-func FastAppendQuery(rawURL, key, value string) string {
+// FastAppendQuery appends key=value to targetURL with zero allocations.
+func FastAppendQuery(targetURL, key, value string) string {
 	if key == "" {
-		return rawURL
+		return targetURL
 	}
 
-	sb := builderPool.Get().(*strings.Builder)
+	bufPtr := bufPool.Get().(*[]byte)
+	buf := (*bufPtr)[:0]
 
-	sb.Reset()
-	defer builderPool.Put(sb)
-
-	sb.Grow(len(rawURL) + len(key) + len(value) + 2)
-	sb.WriteString(rawURL)
-
-	if strings.Contains(rawURL, "?") {
-		sb.WriteByte('&')
+	buf = append(buf, targetURL...)
+	if strings.Contains(targetURL, "?") {
+		buf = append(buf, '&')
 	} else {
-		sb.WriteByte('?')
+		buf = append(buf, '?')
 	}
 
-	sb.WriteString(key)
-	sb.WriteByte('=')
-	sb.WriteString(value)
+	buf = append(buf, key...)
+	buf = append(buf, '=')
+	buf = append(buf, value...)
 
-	return sb.String()
+	res := unsafe.String(unsafe.SliceData(buf), len(buf))
+
+	*bufPtr = buf
+	bufPool.Put(bufPtr)
+
+	return res
 }
-
-// Suppress unused warning for bytesconv import if any.
-var (
-	_ = bytesconv.B2S(nil)
-	_ = unsafe.Sizeof(0)
-)
