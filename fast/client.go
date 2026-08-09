@@ -27,6 +27,7 @@ import (
 	"github.com/lemon4ksan/aoni/internal/bytesconv"
 	"github.com/lemon4ksan/aoni/internal/engine"
 	"github.com/lemon4ksan/aoni/internal/pipeline"
+	"github.com/lemon4ksan/aoni/internal/rio"
 	"github.com/lemon4ksan/aoni/netutil/power"
 )
 
@@ -385,6 +386,12 @@ func (c *Client) Request(
 
 	if c.isFastPathEligible(ctx, mods) {
 		extractUserInfoAndSetAuth(fastReq)
+
+		if c.config.Network.HasExperimental(aoni.ExpRIO) || c.config.Network.HasExperimental(aoni.ExpKernelBypass) {
+			if reg, err := rio.RegisterBuffer(fastReq.Body()); err == nil && reg != nil {
+				defer reg.Deregister()
+			}
+		}
 
 		err := c.engine.Do(fastReq, fastResp)
 		if err != nil {

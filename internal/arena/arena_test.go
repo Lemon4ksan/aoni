@@ -31,3 +31,14 @@ func TestArenaOverflowFallback(t *testing.T) {
 	big := ar.AllocBytes(arena.DefaultSlabSize + 1024)
 	assert.Equal(t, arena.DefaultSlabSize+1024, len(big))
 }
+
+func TestHugePageArenaAllocations(t *testing.T) {
+	ar := arena.AcquireHugePageArena(2 * 1024 * 1024)
+	defer ar.Release()
+
+	b := ar.AllocBytes(1024)
+	assert.Equal(t, 1024, len(b))
+
+	str := ar.AllocString("hugepage string test")
+	assert.Equal(t, "hugepage string test", str)
+}

@@ -67,7 +67,8 @@ func (s *Slab) AllocString(str string) string {
 
 // Arena manages contiguous slab allocations for temporary request lifecycles.
 type Arena struct {
-	current *Slab
+	current    *Slab
+	isHugePage bool
 }
 
 // AcquireArena checks out a slab from pool for current goroutine request execution.
@@ -78,9 +79,33 @@ func AcquireArena() *Arena {
 	return &Arena{current: slab}
 }
 
-// Release returns the arena slab back to memory pool.
+// AcquireHugePageArena allocates a LargePage slab arena backed by 2 MB VirtualAlloc / mmap HugePages.
+func AcquireHugePageArena(size int) *Arena {
+	if size <= 0 {
+		size = 2 * 1024 * 1024 // 2 MB LargePage
+	}
+
+	buf := AllocateHugePages(size)
+
+	return &Arena{
+		current: &Slab{
+			buf: buf,
+			off: 0,
+		},
+		isHugePage: true,
+	}
+}
+
+// Release returns the arena slab back to memory pool or frees HugePage memory.
 func (a *Arena) Release() {
 	if a == nil || a.current == nil {
+		return
+	}
+
+	if a.isHugePage {
+		FreeHugePages(a.current.buf)
+		a.current = nil
+
 		return
 	}
 
