@@ -11,6 +11,7 @@ import (
 	"net"
 
 	"github.com/lemon4ksan/aoni/internal/bytesconv"
+	"github.com/lemon4ksan/aoni/internal/simd"
 )
 
 // ErrInvalidHeaderTerminator is returned when HTTP/1.1 header section terminators (\r\n\r\n) are missing or corrupted.
@@ -61,10 +62,15 @@ func ReorderHeaders(raw []byte, order []string) ([]byte, bool) {
 	for len(rest) > 0 {
 		var line []byte
 
-		idx := bytes.Index(rest, bytesconv.S2B(lineTerminator))
+		idx := simd.IndexByteSWAR(rest, '\n')
 		if idx >= 0 {
-			line = rest[:idx]
-			rest = rest[idx+2:]
+			if idx > 0 && rest[idx-1] == '\r' {
+				line = rest[:idx-1]
+			} else {
+				line = rest[:idx]
+			}
+
+			rest = rest[idx+1:]
 		} else {
 			line = rest
 			rest = nil
@@ -75,13 +81,13 @@ func ReorderHeaders(raw []byte, order []string) ([]byte, bool) {
 			continue
 		}
 
-		before, _, hasColon := bytes.Cut(line, []byte{':'})
-		if !hasColon {
+		colonIdx := simd.IndexByteSWAR(line, ':')
+		if colonIdx < 0 {
 			continue
 		}
 
 		entry := headerEntry{
-			key:  bytes.TrimSpace(before),
+			key:  bytes.TrimSpace(line[:colonIdx]),
 			line: line,
 		}
 

@@ -11,7 +11,7 @@ RESET := \033[0m
 
 test: ## Run quick unit tests
 	@printf "$(CYAN)Running unit tests...$(RESET)\n"
-	go test -v $(PKG)
+	go test -v -timeout 30s $(PKG)
 
 race: ## Run unit tests with race detector enabled
 	@printf "$(CYAN)Running tests with race detector...$(RESET)\n"

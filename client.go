@@ -27,6 +27,7 @@ import (
 	"github.com/lemon4ksan/aoni/fingerprint/h2"
 	"github.com/lemon4ksan/aoni/internal/engine"
 	"github.com/lemon4ksan/aoni/internal/pipeline"
+	"github.com/lemon4ksan/aoni/internal/urlcache"
 	"github.com/lemon4ksan/aoni/netutil"
 	"github.com/lemon4ksan/aoni/netutil/power"
 )
@@ -176,7 +177,12 @@ func (c *Client) Request(
 		ApplyRequestConfigDefaults(cfg, c)
 	}
 
-	req, err := http.NewRequestWithContext(ctx, method, targetURLStr, http.NoBody) //nolint:gosec
+	u, err := urlcache.Parse(targetURLStr)
+	if err != nil {
+		return nil, &Error{Op: "failed to parse URL", Err: err}
+	}
+
+	req, err := http.NewRequestWithContext(ctx, method, u.String(), http.NoBody) //nolint:gosec
 	if err != nil {
 		return nil, &Error{Op: "failed to create request", Err: err}
 	}
@@ -575,7 +581,7 @@ func (c *Client) resolveTargetURL(path string) (string, error) {
 		return c.prepared.BaseURLTrimmedString + path, nil
 	}
 
-	rel, err := url.Parse(strings.TrimLeft(path, "/"))
+	rel, err := urlcache.Parse(strings.TrimLeft(path, "/"))
 	if err != nil {
 		return "", &Error{Op: "invalid path", Err: ErrInvalidPath}
 	}

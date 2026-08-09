@@ -35,6 +35,7 @@ import (
 	"github.com/lemon4ksan/aoni/internal/bytesconv"
 	"github.com/lemon4ksan/aoni/internal/io"
 	"github.com/lemon4ksan/aoni/internal/pipeline"
+	"github.com/lemon4ksan/aoni/internal/urlparse"
 	"github.com/lemon4ksan/aoni/netutil/fragment"
 	"github.com/lemon4ksan/aoni/netutil/netdial"
 	"github.com/lemon4ksan/aoni/telemetry"
@@ -60,13 +61,10 @@ var quoteEscaper = strings.NewReplacer("\\", "\\\\", `"`, "\\\"")
 //   - Escapes value using [url.PathEscape].
 func WithVar(key string, value any) aoni.RequestModifier {
 	return func(req aoni.Request) {
-		placeholder := "{" + key + "}"
 		escapedValue := url.PathEscape(fmt.Sprint(value))
 
 		path := req.Path()
-		if strings.Contains(path, placeholder) {
-			req.SetPath(strings.ReplaceAll(path, placeholder, escapedValue))
-		}
+		req.SetPath(urlparse.ReplaceVar(path, key, escapedValue))
 	}
 }
 

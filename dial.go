@@ -13,6 +13,7 @@ import (
 
 	utls "github.com/refraction-networking/utls"
 
+	"github.com/lemon4ksan/aoni/internal/sysnet"
 	"github.com/lemon4ksan/aoni/internal/transport"
 )
 
@@ -47,7 +48,12 @@ func (c *Client) DialContext(ctx context.Context, network, addr string) (net.Con
 	dialer := transport.NewUniversalDialer()
 	dialCfg := c.buildDialConfig(ctx)
 
-	return dialer.DialContext(ctx, network, addr, dialCfg)
+	conn, err := dialer.DialContext(ctx, network, addr, dialCfg)
+	if err == nil {
+		sysnet.TuneSocketConn(conn)
+	}
+
+	return conn, err
 }
 
 // DialTLSContext establishes an encrypted L7 TLS or uTLS connection over L4 TCP.
@@ -69,7 +75,12 @@ func (c *Client) DialTLSContext(ctx context.Context, network, addr string) (net.
 	dialer := transport.NewUniversalDialer()
 	dialCfg := c.buildDialConfig(ctx)
 
-	return dialer.DialTLSContext(ctx, network, addr, dialCfg)
+	conn, err := dialer.DialTLSContext(ctx, network, addr, dialCfg)
+	if err == nil {
+		sysnet.TuneSocketConn(conn)
+	}
+
+	return conn, err
 }
 
 // DialTLSForWS establishes an encrypted TLS socket connection tailored for WebSocket upgrades.
