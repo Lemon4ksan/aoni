@@ -95,3 +95,86 @@ func FastAppendQuery(targetURL, key, value string) string {
 
 	return res
 }
+
+// CloneURL returns a deep copy of u.
+func CloneURL(u *url.URL) *url.URL {
+	if u == nil {
+		return nil
+	}
+
+	cloned := *u
+	if u.User != nil {
+		userCopy := *u.User
+		cloned.User = &userCopy
+	}
+
+	return &cloned
+}
+
+// MatchDomainPattern checks if host matches pattern (supporting exact and *.wildcard matches).
+func MatchDomainPattern(host, pattern string) bool {
+	host = strings.ToLower(strings.TrimSuffix(host, "."))
+	pattern = strings.ToLower(strings.TrimSuffix(pattern, "."))
+
+	if !strings.HasPrefix(pattern, "*.") {
+		return host == pattern
+	}
+
+	suffix := pattern[1:] // ".example.com"
+
+	return strings.HasSuffix(host, suffix) || host == pattern[2:]
+}
+
+// IsCrossOrigin determines whether u1 and u2 belong to different RFC 6454 web origins.
+func IsCrossOrigin(u1, u2 *url.URL) bool {
+	if u1 == nil || u2 == nil {
+		return false
+	}
+
+	if !strings.EqualFold(u1.Scheme, u2.Scheme) {
+		return true
+	}
+
+	h1 := strings.ToLower(strings.TrimSuffix(u1.Hostname(), "."))
+	h2 := strings.ToLower(strings.TrimSuffix(u2.Hostname(), "."))
+
+	if h1 != h2 {
+		return true
+	}
+
+	return CanonicalPort(u1) != CanonicalPort(u2)
+}
+
+// CanonicalPort resolves effective port number considering scheme defaults.
+func CanonicalPort(u *url.URL) string {
+	if u == nil {
+		return ""
+	}
+
+	port := u.Port()
+	if port != "" {
+		return port
+	}
+
+	if strings.EqualFold(u.Scheme, "https") {
+		return "443"
+	}
+
+	if strings.EqualFold(u.Scheme, "http") {
+		return "80"
+	}
+
+	return ""
+}
+
+// IsSameDomainOrSubdomain reports whether clean host h1 and h2 match domain or subdomain suffix.
+func IsSameDomainOrSubdomain(clean1, clean2 string) bool {
+	clean1 = strings.ToLower(clean1)
+	clean2 = strings.ToLower(clean2)
+
+	if clean1 == clean2 {
+		return true
+	}
+
+	return strings.HasSuffix(clean1, "."+clean2) || strings.HasSuffix(clean2, "."+clean1)
+}

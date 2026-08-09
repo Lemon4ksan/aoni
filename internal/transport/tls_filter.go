@@ -9,7 +9,6 @@ import (
 	"crypto/tls"
 	"net"
 
-	"github.com/lemon4ksan/aoni/internal/h1"
 	"github.com/lemon4ksan/aoni/netutil"
 	"github.com/lemon4ksan/aoni/netutil/netdial"
 )
@@ -102,7 +101,7 @@ func handshakeUTLS(ctx context.Context, conn net.Conn, host string, cfg *DialCon
 	wrappedConn := &uTLSConnWrapper{uConn}
 
 	if negotiatedProto != "h2" && len(cfg.HeaderOrder) > 0 {
-		return &h1.HeaderOrderingConn{
+		return &HeaderOrderingConn{
 			Conn:        wrappedConn,
 			OrderedKeys: cfg.HeaderOrder,
 		}, nil

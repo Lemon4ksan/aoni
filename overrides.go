@@ -19,8 +19,8 @@ import (
 
 	"github.com/lemon4ksan/aoni/internal/io"
 	"github.com/lemon4ksan/aoni/internal/pipeline"
+	"github.com/lemon4ksan/aoni/internal/pool"
 	fastrand "github.com/lemon4ksan/aoni/internal/rand"
-	"github.com/lemon4ksan/aoni/internal/timer"
 	"github.com/lemon4ksan/aoni/netutil/netdial"
 	"github.com/lemon4ksan/aoni/telemetry"
 )
@@ -144,13 +144,13 @@ func ApplyTCPDelay(ctx context.Context) error {
 		return nil
 	}
 
-	t := timer.Acquire(delay)
+	t := pool.AcquireTimer(delay)
 	select {
 	case <-t.C:
-		timer.Release(t)
+		pool.ReleaseTimer(t)
 		return nil
 	case <-ctx.Done():
-		timer.Release(t)
+		pool.ReleaseTimer(t)
 		return ctx.Err()
 	}
 }
@@ -320,18 +320,5 @@ func ProxyFuncWithOverride(base func(*http.Request) (*url.URL, error)) func(*htt
 // TLSConfigWithOverride clones base and applies per-request TLS settings
 // (such as InsecureSkipVerify) extracted from the request context.
 func TLSConfigWithOverride(ctx context.Context, base *tls.Config) *tls.Config {
-	if !GetInsecureSkipVerify(ctx) {
-		return base
-	}
-
-	var cloned *tls.Config
-	if base != nil {
-		cloned = base.Clone()
-	} else {
-		cloned = &tls.Config{}
-	}
-
-	cloned.InsecureSkipVerify = true
-
-	return cloned
+	return pipeline.TLSConfigWithOverride(base, GetInsecureSkipVerify(ctx))
 }

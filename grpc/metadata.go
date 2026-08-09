@@ -42,7 +42,7 @@ func WithBinaryHeader(key string, val []byte) aoni.RequestModifier {
 
 // WithTimeout produces an [aoni.RequestModifier] setting the gRPC-Timeout header.
 func WithTimeout(d time.Duration) aoni.RequestModifier {
-	return mod.WithHeader("grpc-timeout", FormatTimeout(d))
+	return mod.WithHeader("grpc-timeout", formatTimeout(d))
 }
 
 // NewContext returns a new context carrying gRPC metadata.

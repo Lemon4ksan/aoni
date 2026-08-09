@@ -9,8 +9,8 @@ import (
 	"time"
 )
 
-// FormatTimeout converts d into a PROTOCOL-HTTP2.md compliant "grpc-timeout" header string.
-func FormatTimeout(d time.Duration) string {
+// formatTimeout converts d into a PROTOCOL-HTTP2.md compliant "grpc-timeout" header string.
+func formatTimeout(d time.Duration) string {
 	if d <= 0 {
 		return "0m"
 	}

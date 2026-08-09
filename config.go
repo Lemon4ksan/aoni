@@ -7,9 +7,11 @@ package aoni
 import (
 	"context"
 	"maps"
+	"net"
 	"net/http"
 	"net/url"
 	"slices"
+	"strings"
 	"time"
 
 	utls "github.com/refraction-networking/utls"
@@ -21,6 +23,7 @@ import (
 	"github.com/lemon4ksan/aoni/fingerprint/p0f"
 	"github.com/lemon4ksan/aoni/internal/pipeline"
 	"github.com/lemon4ksan/aoni/internal/transport"
+	"github.com/lemon4ksan/aoni/internal/urlutil"
 	"github.com/lemon4ksan/aoni/netutil/cert"
 	"github.com/lemon4ksan/aoni/netutil/fragment"
 	"github.com/lemon4ksan/aoni/netutil/ip"
@@ -721,16 +724,7 @@ type NoVarySearchConfig struct {
 }
 
 func cloneURL(u *url.URL) *url.URL {
-	if u == nil {
-		return nil
-	}
-
-	uCopy := *u
-	if u.User != nil {
-		uCopy.User = u.User
-	}
-
-	return &uCopy
+	return urlutil.CloneURL(u)
 }
 
 func clonePtr[T any](p *T) *T {
@@ -741,4 +735,413 @@ func clonePtr[T any](p *T) *T {
 	val := *p
 
 	return &val
+}
+
+// RequestConfig aggregates request-scoped options and transport overrides.
+type RequestConfig = pipeline.RequestConfig
+
+// RedactConfigCtxKey is the context key used to store RedactConfig in the request context.
+type RedactConfigCtxKey = pipeline.RedactConfigCtxKey
+
+// JA4ReportStore acts as a shared carrier used by low-level TLS dialers to record
+// computed JA4 signatures and propagate them to the active telemetry context.
+type JA4ReportStore = pipeline.JA4ReportStore
+
+// CacheKey uniquely identifies a cached HTTP request without string concatenations.
+type CacheKey = pipeline.CacheKey
+
+// CachedResponse holds a serialized HTTP response stored in cache backends.
+type CachedResponse = pipeline.CachedResponse
+
+// GetRequestConfig retrieves the RequestConfig instance attached to the context.
+var GetRequestConfig = pipeline.GetRequestConfig
+
+// GetOrInitRequestConfig retrieves or allocates a [RequestConfig] associated with the provided target.
+var GetOrInitRequestConfig = pipeline.GetOrInitRequestConfig
+
+// AllocRequestConfig allocates a pooled [RequestConfig] and stores it in ctx, returning the
+// enriched context and the config pointer.
+var AllocRequestConfig = pipeline.AllocRequestConfig
+
+// CloseResponse drains up to 2KB of unread body payload to preserve Keep-Alive sockets,
+// closes the response body stream, and recycles request context resources.
+var CloseResponse = pipeline.CloseResponse
+
+// GetPipeline retrieves the request-specific PipelineConfig from context.
+func GetPipeline(ctx context.Context) (PipelineConfig, bool) {
+	if p, ok := pipeline.GetPipeline(ctx); ok {
+		return pipelineToAoniConfig(p), true
+	}
+
+	return PipelineConfig{}, false
+}
+
+// ApplyRequestConfigDefaults merges client-level defaults into uninitialized fields of [RequestConfig].
+func ApplyRequestConfigDefaults(cfg *RequestConfig, c *Client) {
+	if !cfg.SSRFGuard {
+		cfg.SSRFGuard = c.network.SSRFGuard
+	}
+
+	if !cfg.ProxyDNS {
+		cfg.ProxyDNS = c.network.ProxyDNS
+	}
+
+	if !cfg.MultiReadDisableDisk {
+		cfg.MultiReadDisableDisk = c.defaults.MultiReadDisableDisk
+	}
+
+	if cfg.HappyEyeballsDelay == 0 {
+		cfg.HappyEyeballsDelay = c.network.HappyEyeballsDelay
+	}
+
+	if cfg.MultiReadThreshold == 0 {
+		cfg.MultiReadThreshold = c.defaults.MultiReadThreshold
+	}
+
+	if cfg.ProxyAddr == nil {
+		cfg.ProxyAddr = c.network.ProxyAddr
+	}
+
+	if cfg.P0fSignature == nil {
+		cfg.P0fSignature = c.fingerprint.P0fSignature
+	}
+
+	if cfg.SessionCache == nil {
+		cfg.SessionCache = c.fingerprint.SessionCache
+	}
+
+	if cfg.PacketPadding == nil {
+		cfg.PacketPadding = c.fingerprint.PacketPadding
+	}
+
+	if cfg.SocketController == nil {
+		cfg.SocketController = c.network.SocketController
+	}
+
+	if cfg.ClientHelloSpecProvider == nil {
+		cfg.ClientHelloSpecProvider = c.fingerprint.TLSClientHelloSpecProvider
+	}
+
+	if cfg.JA4Callback == nil {
+		cfg.JA4Callback = c.fingerprint.JA4Callback
+	}
+
+	if cfg.QueryEncoder == nil && c.defaults.QueryEncoder != nil {
+		cfg.QueryEncoder = pipeline.QueryEncoder(c.defaults.QueryEncoder)
+	}
+
+	if len(c.defaults.Decoders) > 0 {
+		if cfg.Decoders == nil {
+			cfg.Decoders = make(map[string]pipeline.ResponseDecoder, len(c.defaults.Decoders))
+		}
+
+		for k, v := range c.defaults.Decoders {
+			if _, ok := cfg.Decoders[k]; !ok {
+				cfg.Decoders[k] = v
+			}
+		}
+	}
+
+	if len(c.fingerprint.CertificatePins) > 0 {
+		c.mergeCertificatePins(cfg)
+	}
+}
+
+func (c *Client) mergeCertificatePins(cfg *RequestConfig) {
+	for domain, hashes := range c.fingerprint.CertificatePins {
+		for _, h := range hashes {
+			if cfg.CertificatePins == nil {
+				cfg.CertificatePins = make(map[string][]string)
+			}
+
+			if !slices.Contains(cfg.CertificatePins[domain], h) {
+				cfg.CertificatePins[domain] = append(cfg.CertificatePins[domain], h)
+			}
+		}
+	}
+}
+
+func (c *Client) resolvePipeline(req *http.Request) PipelineConfig {
+	if reqPipe, ok := GetPipeline(req.Context()); ok {
+		return reqPipe
+	}
+
+	pipe := c.defaults.Pipeline
+	if !pipe.RotateUA && len(c.defaults.UARotationProfiles) > 0 {
+		pipe.RotateUA = true
+	}
+
+	if pipe.SizeLimit == 0 {
+		pipe.SizeLimit = c.defaults.MaxResponseSize
+	}
+
+	if !pipe.Inspect && c.defaults.Inspector != nil {
+		pipe.Inspect = true
+	}
+
+	if pipe.Hedging == nil && (c.network.HedgingDelay > 0 || c.network.DynamicHedging != nil) {
+		pipe.Hedging = &HedgingConfig{
+			DefaultDelay:   c.network.HedgingDelay,
+			DynamicHedging: c.network.DynamicHedging,
+		}
+	}
+
+	return pipe
+}
+
+func (c *Client) toPipelineDefaults() pipeline.ClientDefaults {
+	return pipeline.ClientDefaults{
+		Headers:              c.defaults.Headers,
+		BeforeRequest:        c.defaults.BeforeRequest,
+		AfterResponse:        c.defaults.AfterResponse,
+		Inspector:            c.defaults.Inspector,
+		ResponseValidator:    c.defaults.ResponseValidator,
+		ChallengeDetector:    c.defaults.ChallengeDetector,
+		ChallengeSolver:      c.defaults.ChallengeSolver,
+		UARotationProfiles:   c.defaults.toInternalProfiles(),
+		RefererState:         c.referer,
+		MaxResponseSize:      c.defaults.MaxResponseSize,
+		MultiReadThreshold:   c.defaults.MultiReadThreshold,
+		MultiReadDisableDisk: c.defaults.MultiReadDisableDisk,
+		RefererAutomaton:     c.defaults.RefererAutomaton,
+	}
+}
+
+func (d ClientDefaults) toInternalProfiles() []pipeline.BrowserProfile {
+	if len(d.UARotationProfiles) == 0 {
+		return nil
+	}
+
+	res := make([]pipeline.BrowserProfile, len(d.UARotationProfiles))
+	for i, p := range d.UARotationProfiles {
+		res[i] = pipeline.BrowserProfile{
+			UserAgent:   p.UserAgent,
+			ClientHints: p.ClientHints,
+		}
+	}
+
+	return res
+}
+
+func (p PipelineConfig) toInternal() pipeline.PipelineConfig {
+	res := pipeline.PipelineConfig{
+		SizeLimit:          p.SizeLimit,
+		MultiReadThreshold: p.MultiReadThreshold,
+		RotateUA:           p.RotateUA,
+		Inspect:            p.Inspect,
+		Decompress:         p.Decompress,
+		Validate:           p.Validate,
+		Challenge:          p.Challenge,
+	}
+	if p.DPIJitter != nil {
+		res.DPIJitter = &pipeline.DPIJitterConfig{
+			MinDelay: p.DPIJitter.MinDelay,
+			MaxDelay: p.DPIJitter.MaxDelay,
+		}
+	}
+
+	if p.ProxyFailover != nil {
+		res.ProxyFailover = &pipeline.ProxyFailoverConfig{
+			Proxies:    p.ProxyFailover.Proxies,
+			RetryLimit: p.ProxyFailover.RetryLimit,
+		}
+	}
+
+	if p.Hedging != nil {
+		res.Hedging = &pipeline.HedgingConfig{
+			DynamicHedging:       p.Hedging.DynamicHedging,
+			DefaultDelay:         p.Hedging.DefaultDelay,
+			MaxRequestsPerSecond: p.Hedging.MaxRequestsPerSecond,
+			AllowNonReadOnly:     p.Hedging.AllowNonReadOnly,
+		}
+	}
+
+	if p.Cache != nil {
+		var nvs *pipeline.NoVarySearchConfig
+		if p.Cache.NoVarySearch != nil {
+			nvs = &pipeline.NoVarySearchConfig{
+				IgnoreParams:    p.Cache.NoVarySearch.IgnoreParams,
+				ExceptParams:    p.Cache.NoVarySearch.ExceptParams,
+				IgnoreAllParams: p.Cache.NoVarySearch.IgnoreAllParams,
+			}
+		}
+
+		res.Cache = &pipeline.CacheConfig{
+			Store:         p.Cache.Store,
+			DefaultTTL:    p.Cache.DefaultTTL,
+			NoVarySearch:  nvs,
+			CookieIndices: p.Cache.CookieIndices,
+		}
+	}
+
+	if p.HAR != nil {
+		res.HAR = &pipeline.HARConfig{
+			Tracker: p.HAR.Tracker,
+		}
+	}
+
+	if p.Redact != nil {
+		res.Redact = &pipeline.RedactConfig{
+			Headers:          p.Redact.Headers,
+			HeadersToRedact:  p.Redact.HeadersToRedact,
+			JSONKeysToRedact: p.Redact.JSONKeysToRedact,
+		}
+	}
+
+	res.BuildFlags()
+
+	return res
+}
+
+func pipelineToAoniConfig(p pipeline.PipelineConfig) PipelineConfig {
+	res := PipelineConfig{
+		SizeLimit:          p.SizeLimit,
+		MultiReadThreshold: p.MultiReadThreshold,
+		RotateUA:           p.RotateUA,
+		Inspect:            p.Inspect,
+		Decompress:         p.Decompress,
+		Validate:           p.Validate,
+		Challenge:          p.Challenge,
+	}
+	if p.DPIJitter != nil {
+		res.DPIJitter = &DPIJitterConfig{
+			MinDelay: p.DPIJitter.MinDelay,
+			MaxDelay: p.DPIJitter.MaxDelay,
+		}
+	}
+
+	if p.ProxyFailover != nil {
+		res.ProxyFailover = &ProxyFailoverConfig{
+			Proxies:    slices.Clone(p.ProxyFailover.Proxies),
+			RetryLimit: p.ProxyFailover.RetryLimit,
+		}
+	}
+
+	if p.Hedging != nil {
+		res.Hedging = &HedgingConfig{
+			DynamicHedging:       p.Hedging.DynamicHedging,
+			DefaultDelay:         p.Hedging.DefaultDelay,
+			MaxRequestsPerSecond: p.Hedging.MaxRequestsPerSecond,
+			AllowNonReadOnly:     p.Hedging.AllowNonReadOnly,
+		}
+	}
+
+	if p.Cache != nil {
+		var nvs *NoVarySearchConfig
+		if p.Cache.NoVarySearch != nil {
+			nvs = &NoVarySearchConfig{
+				IgnoreParams:    p.Cache.NoVarySearch.IgnoreParams,
+				ExceptParams:    p.Cache.NoVarySearch.ExceptParams,
+				IgnoreAllParams: p.Cache.NoVarySearch.IgnoreAllParams,
+			}
+		}
+
+		res.Cache = &CacheConfig{
+			Store:         p.Cache.Store,
+			DefaultTTL:    p.Cache.DefaultTTL,
+			NoVarySearch:  nvs,
+			CookieIndices: p.Cache.CookieIndices,
+		}
+	}
+
+	if p.HAR != nil {
+		res.HAR = &HARConfig{
+			Tracker: p.HAR.Tracker,
+		}
+	}
+
+	if p.Redact != nil {
+		res.Redact = &RedactConfig{
+			Headers:          p.Redact.Headers,
+			HeadersToRedact:  p.Redact.HeadersToRedact,
+			JSONKeysToRedact: p.Redact.JSONKeysToRedact,
+		}
+	}
+
+	return res
+}
+
+// AllowedDomainsRedirectPolicy constructs an [http.Client.CheckRedirect] policy function
+// restricting HTTP redirects strictly to allowed domain patterns.
+func AllowedDomainsRedirectPolicy(allowedDomains ...string) func(req *http.Request, via []*http.Request) error {
+	return func(req *http.Request, via []*http.Request) error {
+		if len(via) >= 10 {
+			return &Error{Op: "redirect", Err: ErrMaxRedirectsExceeded}
+		}
+
+		if req.URL == nil {
+			return nil
+		}
+
+		host := strings.ToLower(strings.TrimSuffix(req.URL.Hostname(), "."))
+		for _, domainPattern := range allowedDomains {
+			if urlutil.MatchDomainPattern(host, domainPattern) {
+				return nil
+			}
+		}
+
+		return &Error{Op: "redirect", Target: host, Err: ErrRedirectDomainForbidden}
+	}
+}
+
+// DefaultRedirectPolicy constructs an [http.Client.CheckRedirect] policy function enforcing
+// redirect chain length limits and scrubbing sensitive authentication headers during cross-origin
+// or HTTPS-to-HTTP downgrade redirects (RFC 9110 §15.4 / RFC 7231 §6.4).
+func DefaultRedirectPolicy(
+	maxRedirects int,
+	sensitiveHeaders ...string,
+) func(req *http.Request, via []*http.Request) error {
+	return func(req *http.Request, via []*http.Request) error {
+		if maxRedirects >= 0 && len(via) >= maxRedirects {
+			return &Error{Op: "redirect", Err: ErrMaxRedirectsExceeded}
+		}
+
+		if len(via) == 0 {
+			return nil
+		}
+
+		headersToScrub := sensitiveHeaders
+		if len(headersToScrub) == 0 {
+			headersToScrub = DefaultSensitiveHeaders
+		}
+
+		if urlutil.IsCrossOrigin(req.URL, via[0].URL) {
+			for _, h := range headersToScrub {
+				req.Header.Del(h)
+			}
+		}
+
+		return nil
+	}
+}
+
+func applyRedirectPolicy(httpClient *http.Client, eng EngineConfig) {
+	if eng.CheckRedirect != nil {
+		httpClient.CheckRedirect = eng.CheckRedirect
+		return
+	}
+
+	limit := eng.RedirectLimit
+	if limit == RedirectLimitUnset {
+		return
+	}
+
+	switch {
+	case limit == 0:
+		httpClient.CheckRedirect = func(req *http.Request, via []*http.Request) error {
+			return http.ErrUseLastResponse
+		}
+	case limit > 0:
+		httpClient.CheckRedirect = DefaultRedirectPolicy(limit)
+	default:
+		httpClient.CheckRedirect = DefaultRedirectPolicy(10)
+	}
+}
+
+func applyMSSLimit(conn net.Conn, mss int) net.Conn {
+	return pipeline.ApplyMSSLimit(conn, mss)
+}
+
+func applyFragmentation(conn net.Conn, cfg fragment.Config) net.Conn {
+	return pipeline.ApplyFragmentation(conn, cfg)
 }

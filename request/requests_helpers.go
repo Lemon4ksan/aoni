@@ -22,16 +22,10 @@ import (
 	"github.com/lemon4ksan/aoni/codec/decode"
 	"github.com/lemon4ksan/aoni/internal/bytesconv"
 	"github.com/lemon4ksan/aoni/internal/io"
+	"github.com/lemon4ksan/aoni/internal/requestutil"
 	"github.com/lemon4ksan/aoni/resiliency/challenge"
 	"github.com/lemon4ksan/aoni/telemetry"
 )
-
-var sensitiveHeaderBytes = [][]byte{
-	[]byte("authorization"),
-	[]byte("cookie"),
-	[]byte("set-cookie"),
-	[]byte("proxy-authorization"),
-}
 
 var bytePool = sync.Pool{
 	New: func() any {
@@ -41,46 +35,7 @@ var bytePool = sync.Pool{
 }
 
 func redactHeaders(raw []byte) []byte {
-	if len(raw) == 0 {
-		return raw
-	}
-
-	var buf bytes.Buffer
-	buf.Grow(len(raw))
-
-	lines := bytes.Split(raw, []byte("\r\n"))
-	for i, line := range lines {
-		if i > 0 {
-			buf.Write([]byte("\r\n"))
-		}
-
-		key, _, ok := bytes.Cut(line, []byte{':'})
-		if !ok {
-			buf.Write(line)
-			continue
-		}
-
-		trimmedKey := bytes.TrimSpace(key)
-		if isSensitiveHeader(trimmedKey) {
-			buf.Write(bytes.ToLower(trimmedKey))
-			buf.WriteString(": <redacted>")
-		} else {
-			buf.Write(line)
-		}
-	}
-
-	return buf.Bytes()
-}
-
-func isSensitiveHeader(key []byte) bool {
-	keyStr := bytesconv.B2S(key)
-	for _, target := range sensitiveHeaderBytes {
-		if bytesconv.EqualFoldASCII(keyStr, bytesconv.B2S(target)) {
-			return true
-		}
-	}
-
-	return false
+	return requestutil.RedactHeaders(raw)
 }
 
 type responseDecoder struct{}
@@ -326,28 +281,11 @@ func (responseDecoder) checkHTML(buf *bufio.Reader) error {
 }
 
 func findFirstNonWhitespaceByte(b []byte) byte {
-	n := len(b)
-	if n == 0 {
-		return 0
-	}
-
-	// BCE hint: prove bounds to SSA compiler
-	_ = b[n-1]
-
-	for i := 0; i < n; i++ {
-		ch := b[i]
-		if ch != ' ' && ch != '\t' && ch != '\r' && ch != '\n' {
-			return ch
-		}
-	}
-
-	return 0
+	return requestutil.FindFirstNonWhitespaceByte(b)
 }
 
 func isCloudflareChallengeBytes(lower []byte) bool {
-	return bytes.Contains(lower, []byte("cf-challenge")) ||
-		bytes.Contains(lower, []byte("ray id")) ||
-		bytes.Contains(lower, []byte("cloudflare"))
+	return requestutil.IsCloudflareChallengeBytes(lower)
 }
 
 // HandleResponse processes and decodes an HTTP response stream into a target structure or API error.

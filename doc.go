@@ -2,103 +2,77 @@
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
-// Package aoni provides a middleware-driven HTTP and WebSocket client built on
-// top of [net/http]. It is designed for unreliable networks, aggressive
-// firewalls, rotating proxy pools, and environments where deep-packet
-// inspection must be evaded.
+// Package aoni provides a unified, high-performance Internet Protocol engine for Go.
 //
-// Standard HTTP clients are built for stable internal services. aoni fills the
-// gap when connections are unstable, proxies fail frequently, or transport
-// fingerprints must match a specific browser.
+// It consolidates IETF RFC standards, W3C specifications, and Chromium-grade network resilience
+// mechanisms into a single, profile-driven zero-allocation architecture.
+//
+// # Dual Engines
+//
+// aoni provides two execution engines under a unified conceptual framework:
+//   - [Client] — 100% net/http compatibility, full middleware chain support, and seamless ecosystem integration.
+//   - [github.com/lemon4ksan/aoni/fast.Client] — Native fasthttp + H2/H3 engine built for extreme throughput
+//     and zero heap allocations under parallel I/O.
 //
 // # Request Pipeline
 //
-// Every outgoing request passes through four stages:
-//  1. [RequestModifier] chain - declarative header, query, and body setup.
-//  2. [Middleware] chain - rate limiting, retries, circuit breaking, hedging.
-//  3. Transport layer - TLS fingerprinting (uTLS), HTTP/3, proxy rotation,
-//     TCP/IP spoofing.
-//  4. Response decoding - automatic decompression (gzip, brotli, zstd),
-//     charset transcoding, and structured binding via [Decoder].
+// Every outgoing request passes through five stages:
+//  1. RequestModifiers ([mod]) - declarative header, query, context, and body setup.
+//  2. Middleware chain ([middleware]) - rate limiting, retries, circuit breaking, speculative hedging.
+//  3. Execution Engine ([aoni.Client] or [fast.Client]) - protocol dispatch, pool janitors, Alt-Svc cache.
+//  4. Transport layer ([internal/transport]) - uTLS browser fingerprinting, HTTP/3 QUIC, proxy rotation,
+//     Happy Eyeballs v3 protocol racing, p0f OS stack spoofing.
+//  5. Response decoding ([codec]) - automatic decompression (gzip, brotli, zstd),
+//     charset transcoding, and structured binding via generic decoders.
 //
-// # Core Types
+// # Domain Architecture & Subpackages
 //
-//   - [Client] is the central immutable HTTP client. Configuration is done via
-//     functional options passed to [NewClient] (e.g. [option.WithBaseURL],
-//     [option.WithTimeout]). Per-request overrides are applied via
-//     [RequestModifier] values (e.g. [WithHeader], [WithQuery]).
-//   - [LoadBalancer] distributes requests across multiple [Client] instances
-//     with health checking and automatic failover.
-//   - [ProxyRotator] manages a pool of proxy clients with sticky sessions,
-//     fault tracking, and recovery.
-//   - [Decoder] controls how response bodies are deserialized. Built-in
-//     implementations: [JSONDecoder], [XMLDecoder], [YAMLDecoder], [RawDecoder].
-//   - [ProxyIsolatedCookieJar] stores cookies separately per proxy URL to
-//     prevent session leakage across different exit nodes.
-//
-// # Subpackages
-//
-//   - [github.com/lemon4ksan/aoni/ws] - WebSocket dialing over uTLS and
-//     HTTP/2 Extended CONNECT ([RFC 8441]).
-//   - [github.com/lemon4ksan/aoni/socketio] - Socket.IO v5 / Engine.IO v4
-//     client with automatic reconnection and namespace multiplexing.
-//   - [github.com/lemon4ksan/aoni/inspector] - Traffic inspector for
-//     capturing and replaying HTTP exchanges.
-//   - [github.com/lemon4ksan/aoni/ja4] - Pure-Go JA4/JA4H fingerprint
-//     computation.
-//   - [github.com/lemon4ksan/aoni/p0f] - TCP/IP stack fingerprint signatures.
-//
-// # Fingerprint Evasion
-//
-// aoni can make outbound connections appear as specific browsers:
-//
-//   - [option.WithTLSFingerprint] selects a uTLS ClientHello profile
-//     (Chrome, Firefox, Safari) for JA3/JA4 matching.
-//   - [option.WithP0fSignature] sets TTL, Don't Fragment, and TCP window
-//     size to mimic an OS-level network stack.
-//   - [option.WithModifiers] combined with [WithOrderedHeaders] controls the
-//     HTTP/1.1 header serialization order. For HTTP/2, [FramedTransport]
-//     reorders HPACK-encoded HEADERS frames.
-//   - [WithClientFramedTransport] injects browser-specific SETTINGS and
-//     PRIORITY frames into the HTTP/2 connection preface.
-//
-// # Resilience
-//
-//   - Hedging ([WithHedging]) sends a second request after a delay
-//     if the first has not completed, cutting tail latency.
-//   - [AdaptiveLimiter] dynamically adjusts concurrency based on observed
-//     RTT, similar to the Vegas TCP congestion algorithm.
-//   - [RetryMiddleware] retries failed requests with exponential backoff
-//     and respects Retry-After headers.
-//   - [CircuitBreaker] tracks per-host failures and stops sending requests
-//     until the host recovers.
-//
-// # Network Protocols
-//
-//   - HTTP/3 over QUIC via [WithClientHTTP3].
-//   - DNS-over-HTTPS ([DoHResolver]) and DNS-over-TLS ([DoTResolver])
-//     bypass local ISP DNS interception.
-//   - WebSocket via uTLS with HTTP/2 Extended CONNECT: see [github.com/lemon4ksan/aoni/ws].
+//   - [github.com/lemon4ksan/aoni/option] - Functional client configuration options (e.g. WithProxy, WithTimeout, WithChrome).
+//   - [github.com/lemon4ksan/aoni/mod] - Per-request modifiers (e.g. WithJSONBody, WithHeader, WithQuery).
+//   - [github.com/lemon4ksan/aoni/fluent] - Chainable Request Builder API (e.g. fluent.FetchTo[T]).
+//   - [github.com/lemon4ksan/aoni/request] - Generic single-line execution helpers (e.g. request.GetTo[T]).
+//   - [github.com/lemon4ksan/aoni/fast] - Ultra-high-throughput fasthttp + H2/H3 client facade.
+//   - [github.com/lemon4ksan/aoni/grpc] - Native gRPC client (Invoke, ServerStream, DynamicInvoker).
+//   - [github.com/lemon4ksan/aoni/cookie] - Proxy-isolated cookie jars (ProxyIsolatedJar, SQLStorage, JSONFileStorage).
+//   - [github.com/lemon4ksan/aoni/codec] - Unified response body decoders and struct-to-values encoders.
+//   - [github.com/lemon4ksan/aoni/fingerprint] - TLS/JA4/p0f evasion, browser profiles, and personas.
+//   - [github.com/lemon4ksan/aoni/resiliency] - Response caching, load balancing, circuit breakers, WAF challenge solvers.
+//   - [github.com/lemon4ksan/aoni/realtime] - WebSockets over H2 Extended CONNECT, Socket.IO v5, SSE, and NDJSON streams.
+//   - [github.com/lemon4ksan/aoni/telemetry] - HAR generators, EWMA latency trackers, embedded web inspector, GeoIP.
+//   - [github.com/lemon4ksan/aoni/tunnel] - MASQUE HTTP CONNECT-UDP tunnels and TUN adapter bindings.
 //
 // # Basic Usage
 //
-//	client := aoni.NewClient(nil,
-//		option.WithBaseURL("https://api.example.com"),
-//		option.WithTimeout(10*time.Second),
+//	package main
+//
+//	import (
+//		"context"
+//		"fmt"
+//		"log"
+//		"time"
+//
+//		"github.com/lemon4ksan/aoni"
+//		"github.com/lemon4ksan/aoni/option"
+//		"github.com/lemon4ksan/aoni/request"
 //	)
 //
-//	// 1. Get structured data with generics:
-//	user, err := aoni.GetTo[User](ctx, client, "/users/123")
-//	if err != nil {
-//		log.Fatal(err)
+//	type User struct {
+//		ID   int    `json:"id"`
+//		Name string `json:"name"`
 //	}
 //
-//	// 2. Or execute raw requests directly via convenience methods:
-//	resp, err := client.Get(ctx, "/raw-data")
-//	if err != nil {
-//		log.Fatal(err)
-//	}
-//	defer resp.Body.Close()
+//	func main() {
+//		client := aoni.NewClient(
+//			option.WithBaseURL("https://api.example.com"),
+//			option.WithTimeout(10*time.Second),
+//			option.WithChrome(),
+//		)
 //
-// The full example directory contains runnable programs for each feature.
+//		user, err := request.GetTo[User](context.Background(), client, "/users/123")
+//		if err != nil {
+//			log.Fatal(err)
+//		}
+//
+//		fmt.Printf("User: %s (ID: %d)\n", user.Name, user.ID)
+//	}
 package aoni

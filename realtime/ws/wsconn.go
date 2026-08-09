@@ -24,6 +24,7 @@ import (
 	"golang.org/x/net/http2"
 	"golang.org/x/net/http2/hpack"
 
+	"github.com/lemon4ksan/aoni/internal/realtime/ws"
 	"github.com/lemon4ksan/aoni/internal/simd"
 )
 
@@ -737,41 +738,11 @@ func (c *wsH2Conn) processPrefaceSettingsFrame(f *http2.SettingsFrame) error {
 }
 
 func (c *wsH2Conn) writeConnectHeaders(u *parsedURL, host string, req *http.Request) error {
-	var buf bytes.Buffer
+	scheme := generic.Ternary(u.scheme == "wss", "https", "http")
 
-	encoder := hpack.NewEncoder(&buf)
-
-	pseudoHeaders := []hpack.HeaderField{
-		{Name: ":method", Value: "CONNECT"},
-		{Name: ":protocol", Value: "websocket"},
-		{Name: ":scheme", Value: generic.Ternary(u.scheme == "wss", "https", "http")},
-		{Name: ":path", Value: u.path},
-		{Name: ":authority", Value: host},
-	}
-
-	for _, h := range pseudoHeaders {
-		if err := encoder.WriteField(h); err != nil {
-			return err
-		}
-	}
-
-	if err := encoder.WriteField(hpack.HeaderField{Name: "sec-websocket-version", Value: "13"}); err != nil {
+	block, err := ws.EncodeConnectHeaders(scheme, u.path, host, req, isForbiddenH2ConnectHeader)
+	if err != nil {
 		return err
-	}
-
-	if req != nil {
-		for k, vv := range req.Header {
-			lowerKey := strings.ToLower(k)
-			if isForbiddenH2ConnectHeader(lowerKey) {
-				continue
-			}
-
-			for _, v := range vv {
-				if err := encoder.WriteField(hpack.HeaderField{Name: lowerKey, Value: v}); err != nil {
-					return err
-				}
-			}
-		}
 	}
 
 	c.writeMu.Lock()
@@ -779,7 +750,7 @@ func (c *wsH2Conn) writeConnectHeaders(u *parsedURL, host string, req *http.Requ
 
 	return c.framer.WriteHeaders(http2.HeadersFrameParam{
 		StreamID:      c.streamID,
-		BlockFragment: buf.Bytes(),
+		BlockFragment: block,
 		EndHeaders:    true,
 		EndStream:     false,
 	})

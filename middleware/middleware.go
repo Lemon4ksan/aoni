@@ -32,7 +32,7 @@ import (
 
 	"github.com/lemon4ksan/aoni"
 	"github.com/lemon4ksan/aoni/codec/decode"
-	"github.com/lemon4ksan/aoni/internal/timer"
+	"github.com/lemon4ksan/aoni/internal/pool"
 	"github.com/lemon4ksan/aoni/netutil/netdial"
 	"github.com/lemon4ksan/aoni/netutil/proxy"
 )
@@ -177,13 +177,13 @@ func LimitEnforcer(limiter *SlidingWindowLimiter) aoni.Middleware {
 					return next.Do(req)
 				}
 
-				t := timer.Acquire(wait)
+				t := pool.AcquireTimer(wait)
 				select {
 				case <-req.Context().Done():
-					timer.Release(t)
+					pool.ReleaseTimer(t)
 					return nil, ErrSlidingWindowCanceled
 				case <-t.C:
-					timer.Release(t)
+					pool.ReleaseTimer(t)
 				}
 			}
 		})
@@ -413,8 +413,8 @@ func waitRetryDelay(ctx context.Context, delay time.Duration, attempt, asyncThre
 }
 
 func waitSync(ctx context.Context, delay time.Duration) error {
-	t := timer.Acquire(delay)
-	defer timer.Release(t)
+	t := pool.AcquireTimer(delay)
+	defer pool.ReleaseTimer(t)
 
 	select {
 	case <-ctx.Done():
@@ -731,13 +731,13 @@ func applyChaosDelay(ctx context.Context, cfg ChaosConfig) error {
 		return nil
 	}
 
-	t := timer.Acquire(delay)
+	t := pool.AcquireTimer(delay)
 	select {
 	case <-ctx.Done():
-		timer.Release(t)
+		pool.ReleaseTimer(t)
 		return ctx.Err()
 	case <-t.C:
-		timer.Release(t)
+		pool.ReleaseTimer(t)
 		return nil
 	}
 }

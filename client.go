@@ -25,7 +25,6 @@ import (
 	"github.com/lemon4ksan/aoni/cookie"
 	"github.com/lemon4ksan/aoni/fingerprint"
 	"github.com/lemon4ksan/aoni/fingerprint/h2"
-	"github.com/lemon4ksan/aoni/internal/engine"
 	"github.com/lemon4ksan/aoni/internal/experimental"
 	"github.com/lemon4ksan/aoni/internal/pipeline"
 	"github.com/lemon4ksan/aoni/internal/urlutil"
@@ -54,8 +53,8 @@ type Client struct {
 	fingerprint    FingerprintConfig
 	powerWatcher   *power.Watcher
 	referer        *pipeline.RefererState
-	prepared       engine.PreparedConfig
-	coreEngine     *engine.Engine
+	prepared       pipeline.PreparedConfig
+	coreEngine     *pipeline.Engine
 }
 
 // NewClient instantiates a new thread-safe [Client] wrapping the specified doer engine.
@@ -645,7 +644,7 @@ func (c *Client) applyConfig(cfg Config) {
 	c.fingerprint = cfg.Fingerprint
 	c.defaults = cfg.Defaults
 	c.engineConfig = cfg.Engine
-	c.coreEngine = engine.NewEngine(cfg.Defaults.BaseURL, cfg.Defaults.Headers, c.Transport(), 15*time.Second, 0)
+	c.coreEngine = pipeline.NewEngine(cfg.Defaults.BaseURL, cfg.Defaults.Headers, c.Transport(), 15*time.Second, 0)
 	c.prepared = c.coreEngine.Prepared
 
 	applyEngineConfig(c, cfg.Engine)

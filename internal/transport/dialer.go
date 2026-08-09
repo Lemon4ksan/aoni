@@ -2,8 +2,6 @@
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
-// Package transport provides L4 (TCP/UDP) and L7 (TLS/uTLS) network
-// connection utilities for the aoni project.
 package transport
 
 import (

@@ -5,15 +5,12 @@
 package aoni
 
 import (
-	"crypto/tls"
 	"net/http"
 	"time"
 
-	"github.com/lemon4ksan/miyako/generic"
-	"golang.org/x/net/http2"
-
 	"github.com/lemon4ksan/aoni/cookie"
 	"github.com/lemon4ksan/aoni/fingerprint/h2"
+	"github.com/lemon4ksan/aoni/internal/pipeline"
 )
 
 // HTTPDoer specifies the minimal execution contract for processing standard *http.Request transactions.
@@ -211,29 +208,27 @@ func applyTransportOverrides(c *Client, eng EngineConfig) {
 		return
 	}
 
-	if eng.InsecureSkipVerify {
-		if tr.TLSClientConfig == nil {
-			tr.TLSClientConfig = &tls.Config{}
-		}
-
-		tr.TLSClientConfig.InsecureSkipVerify = true
-	}
-
+	var poolDTO *pipeline.ConnectionPoolConfigDTO
 	if pool := eng.ConnectionPool; pool != nil {
-		tr.MaxIdleConns = generic.Coalesce(pool.MaxIdleConns, tr.MaxIdleConns)
-		tr.MaxIdleConnsPerHost = generic.Coalesce(pool.MaxIdleConnsPerHost, tr.MaxIdleConnsPerHost)
-		tr.MaxConnsPerHost = generic.Coalesce(pool.MaxConnsPerHost, tr.MaxConnsPerHost)
-		tr.IdleConnTimeout = generic.Coalesce(pool.IdleConnTimeout, tr.IdleConnTimeout)
-		tr.ResponseHeaderTimeout = generic.Coalesce(pool.ResponseHeaderTimeout, tr.ResponseHeaderTimeout)
-		tr.ReadBufferSize = generic.Coalesce(pool.ReadBufferSize, tr.ReadBufferSize)
-		tr.WriteBufferSize = generic.Coalesce(pool.WriteBufferSize, tr.WriteBufferSize)
-	}
-
-	if h2Cfg := eng.HTTP2Config; h2Cfg != nil {
-		if t2, err := http2.ConfigureTransports(tr); err == nil && t2 != nil {
-			t2.ReadIdleTimeout = h2Cfg.ReadIdleTimeout
-			t2.PingTimeout = h2Cfg.PingTimeout
-			t2.AllowHTTP = h2Cfg.AllowHTTP
+		poolDTO = &pipeline.ConnectionPoolConfigDTO{
+			MaxIdleConns:          pool.MaxIdleConns,
+			MaxIdleConnsPerHost:   pool.MaxIdleConnsPerHost,
+			MaxConnsPerHost:       pool.MaxConnsPerHost,
+			IdleConnTimeout:       pool.IdleConnTimeout,
+			ResponseHeaderTimeout: pool.ResponseHeaderTimeout,
+			ReadBufferSize:        pool.ReadBufferSize,
+			WriteBufferSize:       pool.WriteBufferSize,
 		}
 	}
+
+	var h2DTO *pipeline.HTTP2ConfigDTO
+	if h2Cfg := eng.HTTP2Config; h2Cfg != nil {
+		h2DTO = &pipeline.HTTP2ConfigDTO{
+			ReadIdleTimeout: h2Cfg.ReadIdleTimeout,
+			PingTimeout:     h2Cfg.PingTimeout,
+			AllowHTTP:       h2Cfg.AllowHTTP,
+		}
+	}
+
+	pipeline.ApplyTransportOverrides(tr, eng.InsecureSkipVerify, poolDTO, h2DTO)
 }

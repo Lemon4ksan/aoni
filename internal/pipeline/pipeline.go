@@ -2,14 +2,20 @@
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
+// Package pipeline implements the unified execution orchestrator, transaction state machine,
+// connection pool janitors, protocol dispatchers, and Alt-Svc caches.
 package pipeline
 
 import (
 	"context"
+	"net"
 	"net/http"
 	"time"
 
 	"golang.org/x/sys/cpu"
+
+	"github.com/lemon4ksan/aoni/internal/sysnet"
+	"github.com/lemon4ksan/aoni/netutil/fragment"
 )
 
 // Pipeline orchestrates zero-allocation transaction execution.
@@ -197,5 +203,34 @@ func (p *Pipeline) finalizeJA4Report(tx *Tx) {
 		if store.Report.JA4H != "" {
 			store.Target.JA4.JA4H = store.Report.JA4H
 		}
+	}
+}
+
+// ApplyMSSLimit applies TCP MSS limits via OS socket options.
+func ApplyMSSLimit(conn net.Conn, mss int) net.Conn {
+	if mss <= 0 {
+		return conn
+	}
+
+	if tc, ok := conn.(*net.TCPConn); ok {
+		raw, err := tc.SyscallConn()
+		if err != nil {
+			return conn
+		}
+
+		_ = raw.Control(func(fd uintptr) {
+			sysnet.SetTCPMaxSeg(fd, mss)
+		})
+	}
+
+	return conn
+}
+
+// ApplyFragmentation wraps conn with packet chunk fragmentation settings.
+func ApplyFragmentation(conn net.Conn, cfg fragment.Config) net.Conn {
+	return &fragment.FragmentedConn{
+		Conn:      conn,
+		ChunkSize: cfg.ChunkSize,
+		MaxDelay:  cfg.MaxDelay,
 	}
 }

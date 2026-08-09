@@ -7,10 +7,8 @@ package h2
 
 import (
 	"bufio"
-	"bytes"
 	"context"
 	"crypto/tls"
-	"encoding/binary"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -23,13 +21,8 @@ import (
 	"golang.org/x/net/http2"
 
 	"github.com/lemon4ksan/aoni/fingerprint/profiles"
+	impl "github.com/lemon4ksan/aoni/internal/fingerprint/h2"
 )
-
-var h2BufferPool = sync.Pool{
-	New: func() any {
-		return new(bytes.Buffer)
-	},
-}
 
 var (
 	// ChromeSettings provides HTTP/2 settings matching standard Google Chrome clients.
@@ -274,14 +267,21 @@ func (ft *FramedTransport) RoundTrip(req *http.Request) (*http.Response, error) 
 	alpn := getALPN(conn)
 
 	if alpn == "h2" {
-		framed, ok := conn.(*framedConn)
-		if !ok {
-			framed = &framedConn{
-				Conn:        conn,
-				settings:    ft.settings,
-				orderedKeys: ft.orderedKeys,
-			}
+		dto := impl.SettingsDTO{
+			HeaderTableSize:      ft.settings.HeaderTableSize,
+			EnablePush:           ft.settings.EnablePush,
+			MaxConcurrentStreams: ft.settings.MaxConcurrentStreams,
+			InitialWindowSize:    ft.settings.InitialWindowSize,
+			MaxFrameSize:         ft.settings.MaxFrameSize,
+			MaxHeaderListSize:    ft.settings.MaxHeaderListSize,
+			ConnectionFlow:       ft.settings.ConnectionFlow,
+			InitialStreamID:      ft.settings.InitialStreamID,
+			PriorityStreamDep:    ft.settings.PriorityStreamDep,
+			PriorityExclusive:    ft.settings.PriorityExclusive,
+			PriorityWeight:       ft.settings.PriorityWeight,
 		}
+
+		framed := impl.WrapConn(conn, dto, ft.orderedKeys)
 
 		cc, err := ft.h2Transport.NewClientConn(framed)
 		if err != nil {
@@ -409,194 +409,4 @@ func (ft *FramedTransport) Clone(base *http.Transport) *FramedTransport {
 	}
 
 	return NewFramedTransport(base, ft.settings, ft.orderedKeys...)
-}
-
-type framedConn struct {
-	net.Conn
-	settings       Settings
-	orderedKeys    []string
-	mu             sync.Mutex
-	prefaceSent    bool
-	prefaceWritten bool
-}
-
-// ConnectionState delegates to the underlying connection's ConnectionState if available.
-func (c *framedConn) ConnectionState() tls.ConnectionState {
-	if cs, ok := c.Conn.(interface{ ConnectionState() tls.ConnectionState }); ok {
-		return cs.ConnectionState()
-	}
-
-	return tls.ConnectionState{}
-}
-
-// Handshake delegates to the underlying connection's Handshake if available.
-func (c *framedConn) Handshake() error {
-	if hs, ok := c.Conn.(interface{ Handshake() error }); ok {
-		return hs.Handshake()
-	}
-
-	return nil
-}
-
-func (c *framedConn) Write(b []byte) (int, error) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-
-	if c.prefaceSent {
-		return c.Conn.Write(b)
-	}
-
-	const h2Preface = "PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n"
-	if len(b) < 24 || !bytes.Equal(b[:24], []byte(h2Preface)) {
-		return c.Conn.Write(b)
-	}
-
-	c.prefaceSent = true
-	if len(b) < 33 {
-		return c.Conn.Write(b)
-	}
-
-	preface := b[:24]
-
-	settingsFrame := b[24:]
-	if len(settingsFrame) < 9 {
-		return c.Conn.Write(b)
-	}
-
-	payloadLen := int(settingsFrame[0])<<16 | int(settingsFrame[1])<<8 | int(settingsFrame[2])
-	if len(settingsFrame) < 9+payloadLen {
-		return c.Conn.Write(b)
-	}
-
-	replacement := c.buildSettingsFrame()
-	if c.settings.ConnectionFlow > 65535 {
-		increment := c.settings.ConnectionFlow - 65535
-		windowUpdate := c.buildWindowUpdateFrame(increment)
-		replacement = append(replacement, windowUpdate...)
-	}
-
-	remaining := settingsFrame[9+payloadLen:]
-
-	var newRemaining []byte
-
-	if len(remaining) >= 9 && remaining[3] == 0x2 {
-		frameLen := 9 + int(remaining[0])<<16 | int(remaining[1])<<8 | int(remaining[2])
-		if len(remaining) >= frameLen {
-			newRemaining = c.buildPriorityFrame(remaining[:frameLen])
-			remaining = remaining[frameLen:]
-		}
-	}
-
-	buf := h2BufferPool.Get().(*bytes.Buffer)
-	buf.Reset()
-	buf.Grow(len(preface) + len(replacement) + len(newRemaining) + len(remaining))
-
-	buf.Write(preface)
-	buf.Write(replacement)
-
-	if len(newRemaining) > 0 {
-		buf.Write(newRemaining)
-	}
-
-	buf.Write(remaining)
-
-	written, err := c.Conn.Write(buf.Bytes())
-	h2BufferPool.Put(buf)
-
-	if err != nil {
-		return written, err
-	}
-
-	c.prefaceWritten = true
-
-	return len(b), nil
-}
-
-func (c *framedConn) buildWindowUpdateFrame(increment uint32) []byte {
-	frame := make([]byte, 13)
-	frame[0], frame[1], frame[2] = 0x0, 0x0, 0x4
-	frame[3] = 0x8 // WINDOW_UPDATE
-	frame[4] = 0x0
-
-	binary.BigEndian.PutUint32(frame[9:13], increment&0x7FFFFFFF)
-
-	return frame
-}
-
-func (c *framedConn) buildSettingsFrame() []byte {
-	var payload bytes.Buffer
-
-	if c.settings.HeaderTableSize > 0 {
-		writeSettingEntry(&payload, 0x1, c.settings.HeaderTableSize)
-	}
-
-	if c.settings.EnablePush > 0 || c.settings.InitialWindowSize > 0 {
-		writeSettingEntry(&payload, 0x2, c.settings.EnablePush)
-	}
-
-	if c.settings.MaxConcurrentStreams > 0 {
-		writeSettingEntry(&payload, 0x3, c.settings.MaxConcurrentStreams)
-	}
-
-	if c.settings.InitialWindowSize > 0 {
-		writeSettingEntry(&payload, 0x4, c.settings.InitialWindowSize)
-	}
-
-	if c.settings.MaxFrameSize > 0 {
-		writeSettingEntry(&payload, 0x5, c.settings.MaxFrameSize)
-	}
-
-	if c.settings.MaxHeaderListSize > 0 {
-		writeSettingEntry(&payload, 0x6, c.settings.MaxHeaderListSize)
-	}
-
-	frame := make([]byte, 9+payload.Len())
-	frame[0] = byte(payload.Len() >> 16) //nolint:gosec
-	frame[1] = byte(payload.Len() >> 8)  //nolint:gosec
-	frame[2] = byte(payload.Len())       //nolint:gosec
-	frame[3] = 0x4                       // SETTINGS
-
-	copy(frame[9:], payload.Bytes())
-
-	return frame
-}
-
-func (c *framedConn) buildPriorityFrame(original []byte) []byte {
-	if len(original) < 9 {
-		return nil
-	}
-
-	payload := make([]byte, 5)
-	streamDep := c.settings.PriorityStreamDep
-
-	binary.BigEndian.PutUint32(payload[0:4], streamDep&0x7FFFFFFF)
-
-	if c.settings.PriorityExclusive {
-		payload[0] |= 0x80
-	}
-
-	payload[4] = c.settings.PriorityWeight
-
-	frame := make([]byte, 14)
-	frame[0], frame[1], frame[2] = 0x0, 0x0, 0x5
-	frame[3] = 0x2 // PRIORITY
-	frame[4] = 0x0
-
-	copy(frame[5:9], original[5:9])
-	copy(frame[9:], payload)
-
-	return frame
-}
-
-func writeSettingEntry(w io.Writer, id uint16, value uint32) {
-	var buf [6]byte
-
-	buf[0] = byte(id >> 8)     //nolint:gosec
-	buf[1] = byte(id)          //nolint:gosec
-	buf[2] = byte(value >> 24) //nolint:gosec
-	buf[3] = byte(value >> 16) //nolint:gosec
-	buf[4] = byte(value >> 8)  //nolint:gosec
-	buf[5] = byte(value)       //nolint:gosec
-
-	_, _ = w.Write(buf[:])
 }

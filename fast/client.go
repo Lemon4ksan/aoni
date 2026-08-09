@@ -25,10 +25,9 @@ import (
 
 	"github.com/lemon4ksan/aoni"
 	"github.com/lemon4ksan/aoni/internal/bytesconv"
-	"github.com/lemon4ksan/aoni/internal/engine"
 	"github.com/lemon4ksan/aoni/internal/experimental"
 	"github.com/lemon4ksan/aoni/internal/pipeline"
-	"github.com/lemon4ksan/aoni/internal/rio"
+	"github.com/lemon4ksan/aoni/internal/sysnet"
 	"github.com/lemon4ksan/aoni/netutil/power"
 )
 
@@ -51,8 +50,8 @@ type Client struct {
 	activeTargets  sync.Map
 
 	protocolState protocolState
-	coreEngine    *engine.Engine
-	prepared      engine.PreparedConfig
+	coreEngine    *pipeline.Engine
+	prepared      pipeline.PreparedConfig
 }
 
 // NewClient instantiates a multi-protocol ultra-high-throughput [Client] wrapping fasthttp, uTLS,
@@ -84,7 +83,7 @@ func NewClient(opts ...aoni.ClientOption) *Client {
 	c.applyCustomDialer()
 	c.applyPowerManagement(c.config.Network.EnablePowerManagement)
 
-	c.coreEngine = engine.NewEngine(c.config.Defaults.BaseURL, c.config.Defaults.Headers, nil, 15*time.Second, 0)
+	c.coreEngine = pipeline.NewEngine(c.config.Defaults.BaseURL, c.config.Defaults.Headers, nil, 15*time.Second, 0)
 	c.prepared = c.coreEngine.Prepared
 
 	c.pipelineEngine = pipeline.NewPipeline(
@@ -388,7 +387,7 @@ func (c *Client) Request(
 		extractUserInfoAndSetAuth(fastReq)
 
 		if c.config.Network.HasExperimental(aoni.ExpRIO) || c.config.Network.HasExperimental(aoni.ExpKernelBypass) {
-			if reg, err := rio.RegisterBuffer(fastReq.Body()); err == nil && reg != nil {
+			if reg, err := sysnet.RegisterBuffer(fastReq.Body()); err == nil && reg != nil {
 				defer reg.Deregister()
 			}
 		}

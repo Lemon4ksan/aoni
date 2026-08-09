@@ -10,6 +10,7 @@ import (
 
 	"github.com/lemon4ksan/aoni"
 	"github.com/lemon4ksan/aoni/codec/decode"
+	"github.com/lemon4ksan/aoni/codec/values"
 	"github.com/lemon4ksan/aoni/mod"
 )
 
@@ -78,3 +79,12 @@ func (grpcWebCodec) Decode() aoni.RequestModifier { return decode.WithGRPCWeb() 
 // Postconditions:
 //   - Outbound requests set 'Content-Type: application/grpc-web+proto' and 'X-Grpc-Web: 1'.
 var GRPCWebCodec Codec = grpcWebCodec{}
+
+// Decoder re-export from decode package.
+type Decoder = decode.Decoder
+
+// StructToValues encodes a struct into [url.Values].
+var StructToValues = values.StructToValues
+
+// StructToQueryString converts a struct into a URL query parameter string.
+var StructToQueryString = values.StructToQueryString

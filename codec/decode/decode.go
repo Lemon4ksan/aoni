@@ -22,9 +22,9 @@ import (
 
 	"github.com/lemon4ksan/aoni"
 	"github.com/lemon4ksan/aoni/internal/bytesconv"
-	"github.com/lemon4ksan/aoni/internal/engine"
-	"github.com/lemon4ksan/aoni/internal/framing"
 	"github.com/lemon4ksan/aoni/internal/io"
+	"github.com/lemon4ksan/aoni/internal/pipeline"
+	"github.com/lemon4ksan/aoni/internal/transport"
 	"github.com/lemon4ksan/aoni/mod"
 )
 
@@ -92,8 +92,8 @@ func NewJSONDecoder(cfg JSONDecoderConfig) Decoder {
 type jsonDecoder struct{}
 
 func (jsonDecoder) Decode(reader stdio.Reader, target any) error {
-	buf := engine.GlobalBufferPool.Get()
-	defer engine.GlobalBufferPool.Put(buf)
+	buf := pipeline.GlobalBufferPool.Get()
+	defer pipeline.GlobalBufferPool.Put(buf)
 
 	if _, err := buf.ReadFrom(reader); err != nil {
 		return err
@@ -138,7 +138,7 @@ func (protoDecoder) Decode(r stdio.Reader, target any) error {
 	if err != nil {
 		return err
 	}
-	defer engine.GlobalBufferPool.Put(buf)
+	defer pipeline.GlobalBufferPool.Put(buf)
 
 	if err := proto.Unmarshal(buf.Bytes(), msg); err != nil {
 		return &Error{Format: "proto", Target: typeName(msg), Err: err}
@@ -159,7 +159,7 @@ func (protoJSONDecoder) Decode(r stdio.Reader, target any) error {
 	if err != nil {
 		return err
 	}
-	defer engine.GlobalBufferPool.Put(buf)
+	defer pipeline.GlobalBufferPool.Put(buf)
 
 	opts := protojson.UnmarshalOptions{DiscardUnknown: true}
 
@@ -191,17 +191,20 @@ func (grpcWebDecoder) Decode(r stdio.Reader, target any) error {
 func readGRPCWebFrames(reader stdio.Reader, msg proto.Message) error {
 	var payloadRead bool
 
-	framer := framing.NewLengthPrefixedFramer(0)
-
+	framer := transport.NewLengthPrefixedFramer(0)
 	for {
 		flags, payload, err := framer.ReadFrame(reader)
 		if err != nil {
-			if (errors.Is(err, stdio.EOF) || errors.Is(err, stdio.ErrUnexpectedEOF)) && payloadRead {
+			if errors.Is(err, stdio.EOF) {
+				return nil
+			}
+
+			if errors.Is(err, transport.ErrTruncatedPayload) && payloadRead {
 				return nil
 			}
 
 			op := "read_header"
-			if errors.Is(err, framing.ErrTruncatedPayload) {
+			if errors.Is(err, transport.ErrTruncatedPayload) {
 				op = "read_payload"
 			}
 
@@ -247,10 +250,10 @@ func processGRPCWebFrame(flags byte, payload []byte, msg proto.Message) (done bo
 }
 
 func copyToBuffer(r stdio.Reader) (*bytes.Buffer, error) {
-	buf := engine.GlobalBufferPool.Get()
+	buf := pipeline.GlobalBufferPool.Get()
 
 	if _, err := io.CopyZeroAlloc(buf, r); err != nil {
-		engine.GlobalBufferPool.Put(buf)
+		pipeline.GlobalBufferPool.Put(buf)
 		return nil, err
 	}
 

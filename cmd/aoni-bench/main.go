@@ -28,8 +28,8 @@ import (
 	"github.com/lemon4ksan/aoni/fast"
 	"github.com/lemon4ksan/aoni/fingerprint"
 	"github.com/lemon4ksan/aoni/internal/experimental"
-	"github.com/lemon4ksan/aoni/internal/rio"
 	"github.com/lemon4ksan/aoni/internal/simd"
+	"github.com/lemon4ksan/aoni/internal/sysnet"
 	"github.com/lemon4ksan/aoni/internal/urlutil"
 	"github.com/lemon4ksan/aoni/option"
 )
@@ -85,7 +85,7 @@ func main() {
 		fmt.Printf("OS / Arch            : %s / %s (%d CPU threads)\n", runtime.GOOS, runtime.GOARCH, runtime.NumCPU())
 		fmt.Printf("AVX2 SIMD Hardware   : %t\n", feats.HasAVX2)
 		fmt.Printf("AVX-512 Hardware     : %t\n", feats.HasAVX512)
-		fmt.Printf("Windows RIO (mswsock): %t\n", rio.IsSupported())
+		fmt.Printf("Windows RIO (mswsock): %t\n", sysnet.IsRIOSupported())
 		fmt.Printf("Linux io_uring       : %t\n", runtime.GOOS == "linux")
 		fmt.Println("--------------------------------------------------------------------------")
 		fmt.Println("Running 7-Module Benchmark Suite (Hardware -> Memory -> TLS -> Sockets)")
@@ -302,7 +302,7 @@ func main() {
 			CPUThreads:             runtime.NumCPU(),
 			AVX2Supported:          cpu.X86.HasAVX2,
 			AVX512Supported:        cpu.X86.HasAVX512F,
-			WindowsRIOSupported:    rio.IsSupported(),
+			WindowsRIOSupported:    sysnet.IsRIOSupported(),
 			RequestPoolOpsSec:      poolOpsPerSec,
 			URLTemplateOpsSec:      urlOpsPerSec,
 			FastEnginePipelinedRPS: fastEngineRPS,
