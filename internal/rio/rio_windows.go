@@ -11,6 +11,7 @@ package rio
 import (
 	"errors"
 	"sync/atomic"
+	"syscall"
 	"unsafe"
 )
 
@@ -19,6 +20,13 @@ var (
 
 	rioAvailable atomic.Bool
 )
+
+func init() {
+	mswsock := syscall.NewLazyDLL("mswsock.dll")
+	if mswsock.Load() == nil {
+		rioAvailable.Store(true)
+	}
+}
 
 // BufferRegistration represents a registered memory page buffer bound to Winsock kernel drivers.
 type BufferRegistration struct {

@@ -14,19 +14,21 @@ import (
 
 // Features holds hardware capability flags evaluated at runtime.
 type Features struct {
-	HasAVX2             bool
-	HasAVX512           bool
-	IsLinuxKernelBypass bool
-	IsZeroCopySupported bool
+	HasAVX2              bool
+	HasAVX512            bool
+	IsLinuxKernelBypass  bool
+	IsZeroCopySupported  bool
+	IsHugePagesSupported bool
 }
 
 // InspectFeatures queries CPU registers and OS runtime capabilities.
 func InspectFeatures() Features {
 	return Features{
-		HasAVX2:             cpu.X86.HasAVX2,
-		HasAVX512:           cpu.X86.HasAVX512F,
-		IsLinuxKernelBypass: runtime.GOOS == "linux",
-		IsZeroCopySupported: runtime.GOOS == "linux",
+		HasAVX2:              cpu.X86.HasAVX2,
+		HasAVX512:            cpu.X86.HasAVX512F,
+		IsLinuxKernelBypass:  runtime.GOOS == "linux",
+		IsZeroCopySupported:  runtime.GOOS == "linux",
+		IsHugePagesSupported: runtime.GOOS == "windows" || runtime.GOOS == "linux",
 	}
 }
 
