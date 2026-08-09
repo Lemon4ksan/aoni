@@ -159,7 +159,10 @@ aoni/
 > Read the complete [**Network Stack Specification**](docs/NETWORK_STACK.md) to learn how `aoni` handles Happy Eyeballs v3, 421/408/425 auto-recovery, ECH, and zero-alloc geometry.
 
 > **Need usage examples?**  
-> Check out the [examples](examples) directory for runnable code snippets and [evasion examples](examples/evasions) for Playwright/browser integrations.
+> Check out the [**examples**](examples) directory for runnable code snippets and [evasion examples](examples/evasions) for Playwright/browser integrations.
+
+> **Curious about the CPU assembly & hardware sympathy stack?**  
+> Read the complete [**CPU & Silicon Sympathy Specification**](docs/CPU_STACK.md) detailing native PLAN9 AVX2 assembly, 2MB LargePages slab arenas, and nanosecond execution budgets.
 
 > **Curious about the network physics?**  
 > Read [**Demystifying the Voodoo**](docs/VOODOO.md) to understand how `aoni` manipulates HPACK states, overrides OS-level TCP window sizes via syscalls, and injects chaotic padding without breaking connections.

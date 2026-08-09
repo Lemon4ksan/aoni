@@ -61,7 +61,6 @@ func main() {
 
 	if *pprofFlag {
 		cpuFile, err := os.Create("cpu.pprof")
-
 		if err == nil {
 			_ = pprof.StartCPUProfile(cpuFile)
 
