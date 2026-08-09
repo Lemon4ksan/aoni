@@ -44,7 +44,7 @@ func RegisterBuffer(data []byte) (*BufferRegistration, error) {
 	}, nil
 }
 
-// DeregisterBuffer unbinds a registered memory page buffer from kernel drivers.
+// Deregister unbinds a registered memory page buffer from kernel drivers.
 func (b *BufferRegistration) Deregister() {
 	if b == nil {
 		return
