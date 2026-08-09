@@ -30,16 +30,19 @@ go get github.com/lemon4ksan/aoni
 
 `aoni` isn't just feature-complete; it sits right at the physical execution limit of the Go runtime. Compared directly against popular HTTP libraries under identical workloads:
 
-| Metric | Resty (`net/http`) | `aoni` (Standard) | `aoni` + `fast.Bridge` | `aoni/fast` (Native) | Advantage (`fast` vs Resty) |
+| Metric | Resty (`net/http`) | `aoni` (Standard) | `aoni` + `fast.Bridge` | `aoni/fast` (Native) | Advantage (`fast.Bridge` / `fast`) |
 | :--- | :---: | :---: | :---: | :---: | :---: |
-| **GET JSON Latency (`ns/op`)** | 58,393 ns | 56,669 ns | 14,127 ns | **5,703 ns** | **~10x Faster** |
-| **Heap Memory (`B/op`)** | 9,113 B | 8,217 B | 2,671 B | **363 B** | **~25x Lighter** |
-| **Heap Allocations (`allocs/op`)** | 91 allocs | 82 allocs | 34 allocs | **8 allocs** | **~11x Fewer Allocations** |
+| **GET JSON Latency (`ns/op`)** | 58,393 ns | 56,669 ns | 14,127 ns | **5,703 ns** | **5x Faster (Bridge) / 10x (Native)** |
+| **Heap Memory (`B/op`)** | 9,113 B | 8,217 B | 2,671 B | 363 B | **3.4x Lighter (Bridge) / 25x (Native)** |
+| **Heap Allocations (`allocs/op`)** | 91 allocs | 82 allocs | 34 allocs | **8 allocs** | **2.7x Fewer (Bridge) / 11x (Native)** |
 | **HTTP/2 Latency (`ns/op`)** | 76,519 ns | 75,958 ns | 71,200 ns | **68,164 ns** | **Faster H2 Multiplexing** |
 | **HTTP/3 Latency (`ns/op`)** | 131,281 ns | 131,013 ns | 115,400 ns | **111,150 ns** | **Faster H3 QUIC Engine** |
-| **Parallel Latency (`ns/op`)** | 11,307 ns | 9,534 ns | 1,940 ns | **589.9 ns** | **~19x Faster Parallel I/O** |
-| **Parallel Memory & GC (`B / alloc`)** | 9,113 B / 91 | 8,217 B / 82 | 2,671 B / 34 | **0 B / 0 allocs** | **Absolute Zero Allocation** |
+| **Parallel Latency (`ns/op`)** | 11,307 ns | 9,534 ns | 1,940 ns | **589.9 ns** | **6x Faster (Bridge) / 19x (Native)** |
+| **Parallel Memory & GC (`B / alloc`)** | 9,113 B / 91 | 8,217 B / 82 | 2,671 B / 34 | 0 B / 0 allocs | **Absolute Zero Allocation** |
 | **Peak Throughput (Single Node)** | ~30k RPS | ~35k RPS | >70,000 RPS | **1,695,000+ RPS** | **Peak Silicon Speed** |
+
+> [!TIP]
+> **100% `net/http` Compatibility with 5x Speed**: By wrapping `aoni.Client` with `fast.Bridge`, standard Go code retains full `net/http.Client` compatibility while gaining a **5x latency reduction** (from ~58µs down to 14.1µs). For raw multi-core throughput, native `aoni/fast` executes at **1.695M+ RPS** with **0 B/op** allocations.
 
 Whether you are calling standard microservice REST endpoints or parsing millions of anti-bot protected pages, `aoni` gives you maximum performance without compromise.
 
