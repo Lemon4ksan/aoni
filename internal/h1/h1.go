@@ -62,7 +62,7 @@ func ReorderHeaders(raw []byte, order []string) ([]byte, bool) {
 	for len(rest) > 0 {
 		var line []byte
 
-		idx := simd.IndexByteSWAR(rest, '\n')
+		idx := simd.IndexByteVector(rest, '\n')
 		if idx >= 0 {
 			if idx > 0 && rest[idx-1] == '\r' {
 				line = rest[:idx-1]
@@ -81,7 +81,7 @@ func ReorderHeaders(raw []byte, order []string) ([]byte, bool) {
 			continue
 		}
 
-		colonIdx := simd.IndexByteSWAR(line, ':')
+		colonIdx := simd.IndexByteVector(line, ':')
 		if colonIdx < 0 {
 			continue
 		}
