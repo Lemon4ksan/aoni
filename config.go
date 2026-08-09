@@ -230,14 +230,20 @@ const (
 	// ExpKernelBypass enables io_uring / RIO kernel ring buffer I/O.
 	ExpKernelBypass ExperimentalFlag = 1 << iota
 
+	// ExpSIMD enables AVX2 / AVX-512 hardware vector acceleration.
+	ExpSIMD
+
 	// ExpZeroCopy enables Linux splice / sendfile zero-copy socket transfers.
 	ExpZeroCopy
 
-	// ExpHugePages enables 2 MB LargePage VirtualAlloc / mmap slab memory arenas.
-	ExpHugePages
-
 	// ExpRIO enables Windows Winsock Registered I/O extensions.
 	ExpRIO
+
+	// ExpTCPFastOpen enables 0-RTT TCP FastOpen socket connection tuning (RFC 7413).
+	ExpTCPFastOpen
+
+	// ExpBusyPoll enables low-latency kernel socket driver polling (SO_BUSY_POLL).
+	ExpBusyPoll
 )
 
 // NetworkConfig configures L3/L4 transport parameters, proxy routing, DNS resolution,

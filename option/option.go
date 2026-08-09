@@ -1017,11 +1017,14 @@ const (
 	// ExpZeroCopy enables Linux splice / sendfile zero-copy socket transfers.
 	ExpZeroCopy = aoni.ExpZeroCopy
 
-	// ExpHugePages enables 2 MB LargePage VirtualAlloc / mmap slab memory arenas.
-	ExpHugePages = aoni.ExpHugePages
-
 	// ExpRIO enables Windows Winsock Registered I/O extensions.
 	ExpRIO = aoni.ExpRIO
+
+	// ExpTCPFastOpen enables 0-RTT TCP FastOpen socket connection tuning (RFC 7413).
+	ExpTCPFastOpen = aoni.ExpTCPFastOpen
+
+	// ExpBusyPoll enables low-latency kernel socket driver polling (SO_BUSY_POLL).
+	ExpBusyPoll = aoni.ExpBusyPoll
 )
 
 // WithExperimental enables one or more experimental hardware/OS features via bitwise flags or list.

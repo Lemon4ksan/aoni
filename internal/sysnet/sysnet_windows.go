@@ -6,10 +6,12 @@
 
 package sysnet
 
-import (
-	"syscall"
-)
+import "golang.org/x/sys/windows"
 
 func tuneSocketFD(fd uintptr) {
-	_ = syscall.SetsockoptInt(syscall.Handle(fd), syscall.IPPROTO_TCP, syscall.TCP_NODELAY, 1)
+	_ = windows.SetsockoptInt(windows.Handle(fd), windows.IPPROTO_TCP, windows.TCP_NODELAY, 1)
+}
+
+func tuneSocketFlagsFD(fd uintptr, flags uint64) {
+	_ = windows.SetsockoptInt(windows.Handle(fd), windows.IPPROTO_TCP, windows.TCP_NODELAY, 1)
 }

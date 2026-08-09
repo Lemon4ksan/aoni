@@ -4,7 +4,7 @@
 
 //go:build windows
 
-// Package rio implements high-performance Windows Registered I/O (RIO) extensions via mswsock.dll,
+// Package rio implements high-performance Windows Registered I/O (RIO) extensions via mswsock.dll and VirtualLock,
 // pre-registering memory buffers with the Windows kernel to bypass WSASend/WSARecv memory page pinning.
 package rio
 
@@ -13,28 +13,102 @@ import (
 	"sync/atomic"
 	"syscall"
 	"unsafe"
+
+	"golang.org/x/sys/windows"
 )
 
 var (
 	ErrRIONotSupported = errors.New("rio: Registered I/O extensions not supported on this OS")
+	ErrRIOFailed       = errors.New("rio: RIORegisterBuffer kernel syscall failed")
 
-	rioAvailable atomic.Bool
+	modkernel32       = syscall.NewLazyDLL("kernel32.dll")
+	procVirtualLock   = modkernel32.NewProc("VirtualLock")
+	procVirtualUnlock = modkernel32.NewProc("VirtualUnlock")
+
+	rioAvailable       atomic.Bool
+	rioRegisterBufFn   uintptr
+	rioDeregisterBufFn uintptr
 )
 
+type RIO_EXTENSION_FUNCTION_TABLE struct {
+	CbSize                uint32
+	RIOReceive            uintptr
+	RIOReceiveEx          uintptr
+	RIOSend               uintptr
+	RIOSendEx             uintptr
+	CloseCompletionQueue  uintptr
+	CreateCompletionQueue uintptr
+	CreateRequestQueue    uintptr
+	DequeueCompletion     uintptr
+	DeregisterBuffer      uintptr
+	RegisterBuffer        uintptr
+	ResizeCompletionQueue uintptr
+	ResizeRequestQueue    uintptr
+}
+
 func init() {
-	mswsock := syscall.NewLazyDLL("mswsock.dll")
-	if mswsock.Load() == nil {
+	// 1. Try loading RIO function table via WSAIoctl on a dummy socket
+	if err := initRIOFunctionTable(); err == nil && rioRegisterBufFn != 0 {
+		rioAvailable.Store(true)
+		return
+	}
+
+	// 2. Fallback to VirtualLock / VirtualUnlock on Windows kernel32
+	if procVirtualLock.Find() == nil && procVirtualUnlock.Find() == nil {
 		rioAvailable.Store(true)
 	}
+}
+
+func initRIOFunctionTable() error {
+	sock, err := windows.Socket(windows.AF_INET, windows.SOCK_STREAM, windows.IPPROTO_TCP)
+	if err != nil {
+		return err
+	}
+
+	defer func() { _ = windows.Closesocket(sock) }()
+
+	guid := windows.GUID{
+		Data1: 0x8509b001,
+		Data2: 0x9604,
+		Data3: 0x4060,
+		Data4: [8]byte{0x96, 0xb7, 0xe6, 0x0b, 0x45, 0x22, 0x8a, 0x35},
+	}
+
+	var table RIO_EXTENSION_FUNCTION_TABLE
+
+	table.CbSize = uint32(unsafe.Sizeof(table))
+
+	var bytesReturned uint32
+
+	err = windows.WSAIoctl(
+		sock,
+		0x40047424, // SIO_GET_MULTIPLE_RIO_FUNCTION_POINTER_WITH_SIZE
+		(*byte)(unsafe.Pointer(&guid)),
+		uint32(unsafe.Sizeof(guid)),
+		(*byte)(unsafe.Pointer(&table)),
+		uint32(unsafe.Sizeof(table)),
+		&bytesReturned,
+		nil,
+		0,
+	)
+	if err != nil {
+		return err
+	}
+
+	rioRegisterBufFn = table.RegisterBuffer
+	rioDeregisterBufFn = table.DeregisterBuffer
+
+	return nil
 }
 
 // BufferRegistration represents a registered memory page buffer bound to Winsock kernel drivers.
 type BufferRegistration struct {
 	BufferID uintptr
 	Data     []byte
+	IsRIO    bool
 }
 
-// IsSupported returns true if Windows Winsock Registered I/O (RIO) extensions are available.
+// IsSupported returns true if Windows Winsock Registered I/O (RIO) or VirtualLock page pinning extensions are available.
 func IsSupported() bool {
 	return rioAvailable.Load()
 }
@@ -45,17 +119,61 @@ func RegisterBuffer(data []byte) (*BufferRegistration, error) {
 		return nil, nil
 	}
 
-	// Returns pre-registered buffer handle
+	if !IsSupported() {
+		return nil, ErrRIONotSupported
+	}
+
+	if rioRegisterBufFn != 0 {
+		r1, _, err := syscall.SyscallN(
+			rioRegisterBufFn,
+			uintptr(unsafe.Pointer(&data[0])),
+			uintptr(uint32(len(data))),
+		)
+
+		if r1 != 0 && r1 != ^uintptr(0) {
+			return &BufferRegistration{
+				BufferID: r1,
+				Data:     data,
+				IsRIO:    true,
+			}, nil
+		}
+
+		_ = err
+	}
+
+	// VirtualLock page pinning fallback
+	r1, _, err := procVirtualLock.Call(
+		uintptr(unsafe.Pointer(&data[0])),
+		uintptr(len(data)),
+	)
+	if r1 == 0 {
+		if err != nil && !errors.Is(err, syscall.Errno(0)) {
+			return nil, err
+		}
+
+		return nil, ErrRIOFailed
+	}
+
 	return &BufferRegistration{
 		BufferID: uintptr(unsafe.Pointer(&data[0])),
 		Data:     data,
+		IsRIO:    false,
 	}, nil
 }
 
-// Deregister unbinds a registered memory page buffer from kernel drivers.
+// Deregister unbinds a registered memory page buffer from Winsock kernel drivers or unlocks virtual memory pages.
 func (b *BufferRegistration) Deregister() {
-	if b == nil {
+	if b == nil || b.BufferID == 0 || b.BufferID == ^uintptr(0) {
 		return
+	}
+
+	if b.IsRIO && rioDeregisterBufFn != 0 {
+		_, _, _ = syscall.SyscallN(rioDeregisterBufFn, b.BufferID)
+	} else if len(b.Data) > 0 {
+		_, _, _ = procVirtualUnlock.Call(
+			uintptr(unsafe.Pointer(&b.Data[0])),
+			uintptr(len(b.Data)),
+		)
 	}
 
 	b.BufferID = 0

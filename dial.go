@@ -50,7 +50,7 @@ func (c *Client) DialContext(ctx context.Context, network, addr string) (net.Con
 
 	conn, err := dialer.DialContext(ctx, network, addr, dialCfg)
 	if err == nil {
-		sysnet.TuneSocketConn(conn)
+		sysnet.TuneSocketConnWithFlags(conn, uint64(c.network.ExperimentalFlags))
 	}
 
 	return conn, err

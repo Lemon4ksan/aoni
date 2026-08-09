@@ -4,9 +4,7 @@
 
 package simd
 
-import (
-	"math/bits"
-)
+import "math/bits"
 
 // ExtractBits extracts contiguous bits from val according to mask (BMI2 PEXT emulation).
 func ExtractBits(val, mask uint64) uint64 {

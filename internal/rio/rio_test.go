@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	"github.com/lemon4ksan/aoni/internal/rio"
 )
@@ -15,13 +16,12 @@ import (
 func TestRIOMemoryRegistration(t *testing.T) {
 	buf := make([]byte, 4096)
 
-	reg, err := rio.RegisterBuffer(buf)
 	if rio.IsSupported() {
-		assert.NoError(t, err)
-		assert.NotNil(t, reg)
+		reg, err := rio.RegisterBuffer(buf)
+		require.NoError(t, err)
+		require.NotNil(t, reg)
 		reg.Deregister()
 	} else {
-		// Non-Windows or RIO fallback safe
-		_ = err
+		assert.False(t, rio.IsSupported())
 	}
 }

@@ -3,15 +3,18 @@
 // license that can be found in the LICENSE file.
 
 // Package sysnet provides low-level OS socket syscall overrides via syscall.RawConn,
-// configuring TCP_QUICKACK, TCP_NODELAY, and socket buffer parameters to minimize network tail latency.
+// configuring TCP_QUICKACK, TCP_NODELAY, TCP_FASTOPEN, and SO_BUSY_POLL to minimize network tail latency.
 package sysnet
 
-import (
-	"net"
-)
+import "net"
 
 // TuneSocketConn applies low-latency OS syscall flags (TCP_NODELAY and socket buffer tuning) to a [net.Conn].
 func TuneSocketConn(conn net.Conn) {
+	TuneSocketConnWithFlags(conn, 0)
+}
+
+// TuneSocketConnWithFlags applies low-latency OS syscall flags (TCP_NODELAY, TCP_FASTOPEN, SO_BUSY_POLL) to a [net.Conn].
+func TuneSocketConnWithFlags(conn net.Conn, flags uint64) {
 	if conn == nil {
 		return
 	}
@@ -26,7 +29,11 @@ func TuneSocketConn(conn net.Conn) {
 		}
 
 		_ = rawConn.Control(func(fd uintptr) {
-			tuneSocketFD(fd)
+			if flags == 0 {
+				tuneSocketFD(fd)
+			} else {
+				tuneSocketFlagsFD(fd, flags)
+			}
 		})
 	}
 }

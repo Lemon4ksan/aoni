@@ -26,6 +26,7 @@ import (
 	"github.com/lemon4ksan/aoni"
 	"github.com/lemon4ksan/aoni/internal/bytesconv"
 	"github.com/lemon4ksan/aoni/internal/engine"
+	"github.com/lemon4ksan/aoni/internal/experimental"
 	"github.com/lemon4ksan/aoni/internal/pipeline"
 	"github.com/lemon4ksan/aoni/internal/rio"
 	"github.com/lemon4ksan/aoni/netutil/power"
@@ -90,6 +91,10 @@ func NewClient(opts ...aoni.ClientOption) *Client {
 		toPipelineDefaults(c.config.Defaults, c.referer),
 		c.config.Fingerprint.ToPipelineFingerprint(),
 	)
+
+	if len(c.config.Network.CPUAffinityCores) > 0 {
+		experimental.ApplyCPUAffinity(c.config.Network.CPUAffinityCores)
+	}
 
 	return c
 }

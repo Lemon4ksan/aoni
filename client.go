@@ -26,6 +26,7 @@ import (
 	"github.com/lemon4ksan/aoni/fingerprint"
 	"github.com/lemon4ksan/aoni/fingerprint/h2"
 	"github.com/lemon4ksan/aoni/internal/engine"
+	"github.com/lemon4ksan/aoni/internal/experimental"
 	"github.com/lemon4ksan/aoni/internal/pipeline"
 	"github.com/lemon4ksan/aoni/internal/urlutil"
 	"github.com/lemon4ksan/aoni/netutil"
@@ -651,6 +652,10 @@ func (c *Client) applyConfig(cfg Config) {
 	c.applyDialers(c.Transport())
 	c.reapplyH2Settings(c.Transport())
 	c.applyPowerManagement(cfg.Network.EnablePowerManagement)
+
+	if len(cfg.Network.CPUAffinityCores) > 0 {
+		experimental.ApplyCPUAffinity(cfg.Network.CPUAffinityCores)
+	}
 
 	c.pipelineEngine = pipeline.NewPipeline(
 		c.toPipelineDefaults(),

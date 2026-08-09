@@ -13,3 +13,17 @@ import (
 func tuneSocketFD(fd uintptr) {
 	_ = syscall.SetsockoptInt(int(fd), syscall.IPPROTO_TCP, syscall.TCP_NODELAY, 1)
 }
+
+func tuneSocketFlagsFD(fd uintptr, flags uint64) {
+	_ = syscall.SetsockoptInt(int(fd), syscall.IPPROTO_TCP, syscall.TCP_NODELAY, 1)
+
+	// ExpTCPFastOpen (bitmask flag 1<<4)
+	if flags&(1<<4) != 0 {
+		_ = syscall.SetsockoptInt(int(fd), syscall.IPPROTO_TCP, 30 /* TCP_FASTOPEN_CONNECT */, 1)
+	}
+
+	// ExpBusyPoll (bitmask flag 1<<5)
+	if flags&(1<<5) != 0 {
+		_ = syscall.SetsockoptInt(int(fd), syscall.SOL_SOCKET, 46 /* SO_BUSY_POLL */, 50)
+	}
+}

@@ -192,12 +192,12 @@ func TestOption_Baremetal_And_BlockOverrides(t *testing.T) {
 		t.Parallel()
 
 		cfg := &aoni.Config{}
-		option.WithExperimental(option.ExpKernelBypass, option.ExpSIMD, option.ExpHugePages)(cfg)
+		option.WithExperimental(option.ExpKernelBypass, option.ExpSIMD, option.ExpTCPFastOpen)(cfg)
 		option.WithCPUAffinity(0, 2)(cfg)
 
 		assert.True(t, cfg.Network.HasExperimental(option.ExpKernelBypass))
 		assert.True(t, cfg.Network.HasExperimental(option.ExpSIMD))
-		assert.True(t, cfg.Network.HasExperimental(option.ExpHugePages))
+		assert.True(t, cfg.Network.HasExperimental(option.ExpTCPFastOpen))
 		assert.False(t, cfg.Network.HasExperimental(option.ExpZeroCopy))
 		assert.Equal(t, []int{0, 2}, cfg.Network.CPUAffinityCores)
 	})

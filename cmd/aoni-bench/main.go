@@ -86,6 +86,7 @@ func main() {
 		fmt.Printf("AVX2 SIMD Hardware   : %t\n", feats.HasAVX2)
 		fmt.Printf("AVX-512 Hardware     : %t\n", feats.HasAVX512)
 		fmt.Printf("Windows RIO (mswsock): %t\n", rio.IsSupported())
+		fmt.Printf("Linux io_uring       : %t\n", runtime.GOOS == "linux")
 		fmt.Println("--------------------------------------------------------------------------")
 		fmt.Println("Running 7-Module Benchmark Suite (Hardware -> Memory -> TLS -> Sockets)")
 		fmt.Println("--------------------------------------------------------------------------")
@@ -96,7 +97,7 @@ func main() {
 	// 1. Request Object Pool Lifecycle
 	client := fast.NewClient(
 		option.WithBaseURL("http://127.0.0.1:8080"),
-		option.WithExperimental(option.ExpHugePages, option.ExpRIO),
+		option.WithExperimental(option.ExpTCPFastOpen, option.ExpRIO),
 	)
 	defer client.Close()
 
@@ -108,18 +109,14 @@ func main() {
 	start := time.Now()
 
 	for w := 0; w < numWorkers; w++ {
-		wg.Add(1)
-
-		go func() {
-			defer wg.Done()
-
+		wg.Go(func() {
 			for i := 0; i < opsPerWorker; i++ {
 				req := client.AcquireRequest()
 				req.SetMethod("GET")
 				req.SetURL("http://127.0.0.1:8080/api/v1/health")
 				client.ReleaseRequest(req)
 			}
-		}()
+		})
 	}
 
 	wg.Wait()
@@ -181,18 +178,14 @@ func main() {
 	start = time.Now()
 
 	for w := 0; w < numWorkers; w++ {
-		wg.Add(1)
-
-		go func() {
-			defer wg.Done()
-
+		wg.Go(func() {
 			for i := 0; i < fastOpsPerWorker; i++ {
 				resp, err := fastBenchClient.Request(ctx, "GET", "/health")
 				if err == nil && resp != nil {
 					_ = resp.Close()
 				}
 			}
-		}()
+		})
 	}
 
 	wg.Wait()
@@ -274,11 +267,7 @@ func main() {
 	start = time.Now()
 
 	for w := 0; w < numWorkers; w++ {
-		wg.Add(1)
-
-		go func() {
-			defer wg.Done()
-
+		wg.Go(func() {
 			for {
 				if atomicNetOps.Add(1) > uint64(netOps) {
 					return
@@ -295,7 +284,7 @@ func main() {
 
 				osClient.ReleaseRequest(req)
 			}
-		}()
+		})
 	}
 
 	wg.Wait()
@@ -305,20 +294,6 @@ func main() {
 	osNetRPS := float64(netOps) / elapsed.Seconds()
 	if !*jsonFlag {
 		fmt.Printf("[7/7] OS Network (net/http.Server) : %12.0f RPS      (127.0.0.1 Loopback)\n", osNetRPS)
-
-		fmt.Println("--------------------------------------------------------------------------")
-		fmt.Println("Engine Capability & Hardware Grade Matrix:")
-		fmt.Printf(
-			" - Hardware Acceleration : AVX2=%t | BMI2=%t | AVX-512=%t\n",
-			cpu.X86.HasAVX2,
-			cpu.X86.HasBMI2,
-			cpu.X86.HasAVX512F,
-		)
-		fmt.Printf(
-			" - Platform Kernel I/O   : RIO (Windows)=%t | io_uring (Linux)=%t\n",
-			rio.IsSupported(),
-			runtime.GOOS == "linux",
-		)
 		fmt.Println("==========================================================================")
 	} else {
 		report := JSONReport{
