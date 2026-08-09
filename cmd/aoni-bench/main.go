@@ -30,8 +30,7 @@ import (
 	"github.com/lemon4ksan/aoni/internal/experimental"
 	"github.com/lemon4ksan/aoni/internal/rio"
 	"github.com/lemon4ksan/aoni/internal/simd"
-	"github.com/lemon4ksan/aoni/internal/urlcache"
-	"github.com/lemon4ksan/aoni/internal/urlparse"
+	"github.com/lemon4ksan/aoni/internal/urlutil"
 	"github.com/lemon4ksan/aoni/option"
 )
 
@@ -43,7 +42,6 @@ type JSONReport struct {
 	AVX2Supported          bool    `json:"avx2_supported"`
 	AVX512Supported        bool    `json:"avx512_supported"`
 	WindowsRIOSupported    bool    `json:"windows_rio_supported"`
-	HugePagesSupported     bool    `json:"hugepages_supported"`
 	RequestPoolOpsSec      float64 `json:"request_pool_ops_sec"`
 	URLTemplateOpsSec      float64 `json:"url_template_ops_sec"`
 	FastEnginePipelinedRPS float64 `json:"fast_engine_pipelined_rps"`
@@ -88,7 +86,6 @@ func main() {
 		fmt.Printf("AVX2 SIMD Hardware   : %t\n", feats.HasAVX2)
 		fmt.Printf("AVX-512 Hardware     : %t\n", feats.HasAVX512)
 		fmt.Printf("Windows RIO (mswsock): %t\n", rio.IsSupported())
-		fmt.Printf("HugePages 2MB Slab   : %t\n", feats.IsHugePagesSupported)
 		fmt.Println("--------------------------------------------------------------------------")
 		fmt.Println("Running 7-Module Benchmark Suite (Hardware -> Memory -> TLS -> Sockets)")
 		fmt.Println("--------------------------------------------------------------------------")
@@ -97,7 +94,10 @@ func main() {
 	numWorkers := runtime.NumCPU()
 
 	// 1. Request Object Pool Lifecycle
-	client := fast.NewClient(option.WithBaseURL("http://127.0.0.1:8080"))
+	client := fast.NewClient(
+		option.WithBaseURL("http://127.0.0.1:8080"),
+		option.WithExperimental(option.ExpHugePages, option.ExpRIO),
+	)
 	defer client.Close()
 
 	parOps := 10000000
@@ -136,8 +136,8 @@ func main() {
 	start = time.Now()
 
 	for i := 0; i < urlOps; i++ {
-		_ = urlparse.ReplaceVar("/api/v1/users/{id}/orders/{order_id}", "id", "42")
-		_, _ = urlcache.Parse("https://api.example.com/v1/resource")
+		_ = urlutil.ReplaceVar("/api/v1/users/{id}/orders/{order_id}", "id", "42")
+		_, _ = urlutil.Parse("https://api.example.com/v1/resource")
 	}
 
 	elapsed = time.Since(start)
@@ -319,7 +319,6 @@ func main() {
 			rio.IsSupported(),
 			runtime.GOOS == "linux",
 		)
-		fmt.Printf(" - Memory Management     : HugePages 2MB Slab=%t\n", feats.IsHugePagesSupported)
 		fmt.Println("==========================================================================")
 	} else {
 		report := JSONReport{
@@ -329,7 +328,6 @@ func main() {
 			AVX2Supported:          cpu.X86.HasAVX2,
 			AVX512Supported:        cpu.X86.HasAVX512F,
 			WindowsRIOSupported:    rio.IsSupported(),
-			HugePagesSupported:     feats.IsHugePagesSupported,
 			RequestPoolOpsSec:      poolOpsPerSec,
 			URLTemplateOpsSec:      urlOpsPerSec,
 			FastEnginePipelinedRPS: fastEngineRPS,

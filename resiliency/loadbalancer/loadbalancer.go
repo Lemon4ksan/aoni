@@ -10,7 +10,6 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
-	"math/rand/v2"
 	"net"
 	"net/http"
 	"net/url"
@@ -24,6 +23,7 @@ import (
 
 	"github.com/lemon4ksan/aoni"
 	"github.com/lemon4ksan/aoni/internal/health"
+	fastrand "github.com/lemon4ksan/aoni/internal/rand"
 )
 
 var (
@@ -380,9 +380,10 @@ func (b *Balancer) buildBackendIndices(n uint64, backends []*Backend) []uint64 {
 			indices[i] = uint64(i)
 		}
 
-		rand.Shuffle(len(indices), func(i, j int) {
+		for i := len(indices) - 1; i > 0; i-- {
+			j := fastrand.Intn(i + 1)
 			indices[i], indices[j] = indices[j], indices[i]
-		})
+		}
 
 	case WeightedRoundRobin:
 		for i := range indices {

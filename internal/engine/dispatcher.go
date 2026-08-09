@@ -6,6 +6,8 @@ package engine
 
 import (
 	"net/url"
+
+	"github.com/lemon4ksan/aoni/internal/ringbuf"
 )
 
 // Protocol represents the underlying L7 transport protocol version.
@@ -23,6 +25,7 @@ const (
 // Dispatcher determines the protocol version and routing strategy for outbound requests.
 type Dispatcher struct {
 	altSvcCache *AltSvcCache
+	queue       *ringbuf.RingBuffer[any]
 }
 
 // NewDispatcher constructs a [Dispatcher].
@@ -31,7 +34,10 @@ func NewDispatcher(altSvc *AltSvcCache) *Dispatcher {
 		altSvc = NewAltSvcCache()
 	}
 
-	return &Dispatcher{altSvcCache: altSvc}
+	return &Dispatcher{
+		altSvcCache: altSvc,
+		queue:       ringbuf.NewRingBuffer[any](1024),
+	}
 }
 
 // ResolveProtocol selects the optimal protocol for a target URL taking Alt-Svc cache into account.

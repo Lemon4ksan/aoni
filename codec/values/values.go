@@ -12,13 +12,13 @@ import (
 	"slices"
 	"strconv"
 	"strings"
-	"sync"
 	"time"
 
 	"google.golang.org/protobuf/encoding/protojson"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/lemon4ksan/aoni/internal/bytesconv"
+	"github.com/lemon4ksan/aoni/internal/mapper"
 )
 
 // Uint64String parses uint64 values from numeric or quoted string JSON payloads.
@@ -234,88 +234,13 @@ type QueryEncoder interface {
 	EncodeValues() url.Values
 }
 
-type fieldSchema struct {
-	subSchema   *structSchema
-	name        string
-	key         string
-	defaultVal  string
-	index       int
-	isInline    bool
-	isAnonymous bool
-	omitempty   bool
-	hasComma    bool
-	hasSpace    bool
-	hasPipe     bool
-	isIgnored   bool
+func getStructSchema(t reflect.Type) *mapper.StructSchema {
+	return mapper.DefaultSchemaCache.GetSchema(t)
 }
 
-type structSchema struct {
-	fields []fieldSchema
-}
-
-var schemaCache sync.Map
-
-func getStructSchema(t reflect.Type) *structSchema {
-	if cached, ok := schemaCache.Load(t); ok {
-		return cached.(*structSchema)
-	}
-
-	schema := buildStructSchema(t)
-	cached, _ := schemaCache.LoadOrStore(t, schema)
-
-	return cached.(*structSchema)
-}
-
-func buildStructSchema(t reflect.Type) *structSchema {
-	numField := t.NumField()
-	fields := make([]fieldSchema, 0, numField)
-
-	for i := range numField {
-		field := t.Field(i)
-		defaultVal := field.Tag.Get("default")
-
-		tag := field.Tag.Get("url")
-		if tag == "" {
-			tag = field.Tag.Get("json")
-		}
-
-		parts := strings.Split(tag, ",")
-		key := parts[0]
-
-		fSchema := fieldSchema{
-			index:       i,
-			name:        field.Name,
-			key:         key,
-			defaultVal:  defaultVal,
-			isInline:    slices.Contains(parts[1:], "inline"),
-			isAnonymous: field.Anonymous,
-			omitempty:   slices.Contains(parts[1:], "omitempty"),
-			hasComma:    slices.Contains(parts[1:], "comma"),
-			hasSpace:    slices.Contains(parts[1:], "space"),
-			hasPipe:     slices.Contains(parts[1:], "pipe"),
-			isIgnored:   key == "-",
-		}
-
-		fieldType := field.Type
-		if fieldType.Kind() == reflect.Pointer {
-			fieldType = fieldType.Elem()
-		}
-
-		if (field.Anonymous || fSchema.isInline) && fieldType.Kind() == reflect.Struct {
-			fSchema.subSchema = buildStructSchema(fieldType)
-		} else if key == "" && !field.Anonymous && !fSchema.isInline {
-			fSchema.isIgnored = true
-		}
-
-		fields = append(fields, fSchema)
-	}
-
-	return &structSchema{fields: fields}
-}
-
-func (s *structSchema) fillValues(v reflect.Value, values url.Values) error {
-	for i := range s.fields {
-		if err := s.fields[i].fillField(v.Field(s.fields[i].index), values); err != nil {
+func fillValues(s *mapper.StructSchema, v reflect.Value, values url.Values) error {
+	for i := range s.Fields {
+		if err := fillField(&s.Fields[i], v.Field(s.Fields[i].Index), values); err != nil {
 			return err
 		}
 	}
@@ -323,11 +248,11 @@ func (s *structSchema) fillValues(v reflect.Value, values url.Values) error {
 	return nil
 }
 
-func (f *fieldSchema) fillField(fieldValue reflect.Value, values url.Values) error {
+func fillField(f *mapper.FieldSchema, fieldValue reflect.Value, values url.Values) error {
 	if fieldValue.Kind() == reflect.Pointer {
 		if fieldValue.IsNil() {
-			if f.defaultVal != "" && f.key != "" && f.key != "-" {
-				values.Set(f.key, f.defaultVal)
+			if f.DefaultVal != "" && f.Key != "" && f.Key != "-" {
+				values.Set(f.Key, f.DefaultVal)
 			}
 
 			return nil
@@ -336,39 +261,39 @@ func (f *fieldSchema) fillField(fieldValue reflect.Value, values url.Values) err
 		fieldValue = fieldValue.Elem()
 	}
 
-	if (f.isAnonymous || f.isInline) && fieldValue.Kind() == reflect.Struct {
-		if f.subSchema != nil {
-			return f.subSchema.fillValues(fieldValue, values)
+	if (f.IsAnonymous || f.IsInline) && fieldValue.Kind() == reflect.Struct {
+		if f.SubSchema != nil {
+			return fillValues(f.SubSchema, fieldValue, values)
 		}
 
-		return getStructSchema(fieldValue.Type()).fillValues(fieldValue, values)
+		return fillValues(getStructSchema(fieldValue.Type()), fieldValue, values)
 	}
 
-	if f.isIgnored || f.key == "" || f.key == "-" {
+	if f.IsIgnored || f.Key == "" || f.Key == "-" {
 		return nil
 	}
 
-	if f.shouldSkipZeroValue(fieldValue, values) {
+	if shouldSkipZeroValue(f, fieldValue, values) {
 		return nil
 	}
 
-	return f.serializeValue(fieldValue, values)
+	return serializeValue(f, fieldValue, values)
 }
 
-func (f *fieldSchema) shouldSkipZeroValue(fieldValue reflect.Value, values url.Values) bool {
+func shouldSkipZeroValue(f *mapper.FieldSchema, fieldValue reflect.Value, values url.Values) bool {
 	if !fieldValue.IsZero() {
 		return false
 	}
 
-	if f.defaultVal != "" {
-		values.Set(f.key, f.defaultVal)
+	if f.DefaultVal != "" {
+		values.Set(f.Key, f.DefaultVal)
 		return true
 	}
 
-	return f.omitempty
+	return f.OmitEmpty
 }
 
-func (f *fieldSchema) serializeValue(fieldValue reflect.Value, values url.Values) error {
+func serializeValue(f *mapper.FieldSchema, fieldValue reflect.Value, values url.Values) error {
 	if !fieldValue.CanInterface() {
 		return nil
 	}
@@ -380,10 +305,10 @@ func (f *fieldSchema) serializeValue(fieldValue reflect.Value, values url.Values
 
 		b, err := opts.Marshal(pm)
 		if err != nil {
-			return &ValueError{Field: f.name, Err: err}
+			return &ValueError{Field: f.Name, Err: err}
 		}
 
-		values.Set(f.key, bytesconv.B2S(b))
+		values.Set(f.Key, bytesconv.B2S(b))
 
 		return nil
 	}
@@ -391,10 +316,10 @@ func (f *fieldSchema) serializeValue(fieldValue reflect.Value, values url.Values
 	if hasTextOrStringerRepresentation(fieldValue) {
 		str, err := toString(fieldValue)
 		if err != nil {
-			return &ValueError{Field: f.name, Err: err}
+			return &ValueError{Field: f.Name, Err: err}
 		}
 
-		values.Set(f.key, str)
+		values.Set(f.Key, str)
 
 		return nil
 	}
@@ -402,31 +327,31 @@ func (f *fieldSchema) serializeValue(fieldValue reflect.Value, values url.Values
 	if fieldValue.Kind() == reflect.Struct || fieldValue.Kind() == reflect.Map {
 		b, err := json.Marshal(val)
 		if err != nil {
-			return &ValueError{Field: f.name, Err: err}
+			return &ValueError{Field: f.Name, Err: err}
 		}
 
-		values.Set(f.key, bytesconv.B2S(b))
+		values.Set(f.Key, bytesconv.B2S(b))
 
 		return nil
 	}
 
 	if fieldValue.Kind() == reflect.Slice || fieldValue.Kind() == reflect.Array {
-		return f.serializeSlice(fieldValue, values)
+		return serializeSlice(f, fieldValue, values)
 	}
 
 	str, err := toString(fieldValue)
 	if err != nil {
-		return &ValueError{Field: f.name, Err: err}
+		return &ValueError{Field: f.Name, Err: err}
 	}
 
-	values.Set(f.key, str)
+	values.Set(f.Key, str)
 
 	return nil
 }
 
-func (f *fieldSchema) serializeSlice(fieldValue reflect.Value, values url.Values) error {
-	if f.hasComma || f.hasSpace || f.hasPipe {
-		return f.serializeDelimitedSlice(fieldValue, values)
+func serializeSlice(f *mapper.FieldSchema, fieldValue reflect.Value, values url.Values) error {
+	if f.HasComma || f.HasSpace || f.HasPipe {
+		return serializeDelimitedSlice(f, fieldValue, values)
 	}
 
 	for j := range fieldValue.Len() {
@@ -437,20 +362,20 @@ func (f *fieldSchema) serializeSlice(fieldValue reflect.Value, values url.Values
 
 		strValue, err := toString(val)
 		if err != nil {
-			return &ValueError{Field: f.name, Index: j, Err: err}
+			return &ValueError{Field: f.Name, Index: j, Err: err}
 		}
 
-		values.Add(f.key, strValue)
+		values.Add(f.Key, strValue)
 	}
 
 	return nil
 }
 
-func (f *fieldSchema) serializeDelimitedSlice(fieldValue reflect.Value, values url.Values) error {
+func serializeDelimitedSlice(f *mapper.FieldSchema, fieldValue reflect.Value, values url.Values) error {
 	sep := ","
-	if f.hasSpace {
+	if f.HasSpace {
 		sep = " "
-	} else if f.hasPipe {
+	} else if f.HasPipe {
 		sep = "|"
 	}
 
@@ -463,7 +388,7 @@ func (f *fieldSchema) serializeDelimitedSlice(fieldValue reflect.Value, values u
 
 		str, err := toString(val)
 		if err != nil {
-			return &ValueError{Field: f.name, Index: j, Err: err}
+			return &ValueError{Field: f.Name, Index: j, Err: err}
 		}
 
 		if j > 0 {
@@ -473,7 +398,7 @@ func (f *fieldSchema) serializeDelimitedSlice(fieldValue reflect.Value, values u
 		sb.WriteString(str)
 	}
 
-	values.Set(f.key, sb.String())
+	values.Set(f.Key, sb.String())
 
 	return nil
 }
@@ -538,7 +463,7 @@ func StructToValues(s any) (url.Values, error) {
 	schema := getStructSchema(v.Type())
 	values := make(url.Values)
 
-	if err := schema.fillValues(v, values); err != nil {
+	if err := fillValues(schema, v, values); err != nil {
 		return nil, err
 	}
 
@@ -584,9 +509,9 @@ func StructToQueryString(s any) (string, error) {
 	schema := getStructSchema(v.Type())
 
 	var sb strings.Builder
-	sb.Grow(len(schema.fields) * 20)
+	sb.Grow(len(schema.Fields) * 20)
 
-	if err := schema.writeQueryString(v, &sb); err != nil {
+	if err := writeQueryString(schema, v, &sb); err != nil {
 		return "", err
 	}
 
@@ -617,17 +542,17 @@ func encodeMapDirect(m map[string]string) string {
 	return sb.String()
 }
 
-func (s *structSchema) writeQueryString(v reflect.Value, sb *strings.Builder) error {
+func writeQueryString(s *mapper.StructSchema, v reflect.Value, sb *strings.Builder) error {
 	first := true
 
-	for i := range s.fields {
-		f := &s.fields[i]
-		val := v.Field(f.index)
+	for i := range s.Fields {
+		f := &s.Fields[i]
+		val := v.Field(f.Index)
 
 		if val.Kind() == reflect.Pointer {
 			if val.IsNil() {
-				if f.defaultVal != "" && f.key != "" && f.key != "-" {
-					writeQueryKeyValuePair(sb, f.key, f.defaultVal, &first)
+				if f.DefaultVal != "" && f.Key != "" && f.Key != "-" {
+					writeQueryKeyValuePair(sb, f.Key, f.DefaultVal, &first)
 				}
 
 				continue
@@ -636,27 +561,27 @@ func (s *structSchema) writeQueryString(v reflect.Value, sb *strings.Builder) er
 			val = val.Elem()
 		}
 
-		if f.isIgnored || f.key == "" || f.key == "-" {
+		if f.IsIgnored || f.Key == "" || f.Key == "-" {
 			continue
 		}
 
 		if val.IsZero() {
-			if f.defaultVal != "" {
-				writeQueryKeyValuePair(sb, f.key, f.defaultVal, &first)
+			if f.DefaultVal != "" {
+				writeQueryKeyValuePair(sb, f.Key, f.DefaultVal, &first)
 				continue
 			}
 
-			if f.omitempty {
+			if f.OmitEmpty {
 				continue
 			}
 		}
 
 		strVal, err := toString(val)
 		if err != nil {
-			return &ValueError{Field: f.name, Err: err}
+			return &ValueError{Field: f.Name, Err: err}
 		}
 
-		writeQueryKeyValuePair(sb, f.key, strVal, &first)
+		writeQueryKeyValuePair(sb, f.Key, strVal, &first)
 	}
 
 	return nil

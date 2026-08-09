@@ -230,9 +230,6 @@ const (
 	// ExpKernelBypass enables io_uring / RIO kernel ring buffer I/O.
 	ExpKernelBypass ExperimentalFlag = 1 << iota
 
-	// ExpSIMD enables AVX2 / AVX-512 hardware vector acceleration.
-	ExpSIMD
-
 	// ExpZeroCopy enables Linux splice / sendfile zero-copy socket transfers.
 	ExpZeroCopy
 

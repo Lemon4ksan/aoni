@@ -2,34 +2,47 @@
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
-// Package mapper provides zero-allocation reflection schema caching and struct field mapping.
+// Package mapper provides high-performance zero-allocation reflection schema caching and struct field mapping.
 package mapper
 
 import (
-	"fmt"
 	"reflect"
+	"slices"
 	"strings"
 	"sync"
 )
 
-// FieldPlan describes a pre-computed struct field index and tag mapping.
-type FieldPlan struct {
-	Index    int
-	Name     string
-	TagValue string
-	Omit     bool
+// FieldSchema describes a pre-computed struct field index, tag options, and nested sub-schemas.
+type FieldSchema struct {
+	SubSchema   *StructSchema
+	Name        string
+	Key         string
+	DefaultVal  string
+	Index       int
+	IsInline    bool
+	IsAnonymous bool
+	OmitEmpty   bool
+	HasComma    bool
+	HasSpace    bool
+	HasPipe     bool
+	IsIgnored   bool
 }
 
-// SchemaCache caches reflection field plans by reflect.Type to eliminate runtime reflection overhead.
+// StructSchema holds pre-computed field metadata for a target struct type.
+type StructSchema struct {
+	Fields []FieldSchema
+}
+
+// SchemaCache caches reflection struct schemas by [reflect.Type] using [sync.Map] to eliminate runtime reflection overhead.
 type SchemaCache struct {
-	cache sync.Map // map[reflect.Type][]FieldPlan
+	cache sync.Map
 }
 
-// DefaultSchemaCache is the global default schema plan cache.
+// DefaultSchemaCache is the global default schema cache instance.
 var DefaultSchemaCache = &SchemaCache{}
 
-// GetPlans returns or computes the cached [FieldPlan] slice for type t and tagKey.
-func (s *SchemaCache) GetPlans(t reflect.Type, tagKey string) []FieldPlan {
+// GetSchema returns or computes the cached [StructSchema] for type t.
+func (s *SchemaCache) GetSchema(t reflect.Type) *StructSchema {
 	if t.Kind() == reflect.Pointer {
 		t = t.Elem()
 	}
@@ -38,85 +51,68 @@ func (s *SchemaCache) GetPlans(t reflect.Type, tagKey string) []FieldPlan {
 		return nil
 	}
 
-	key := fmt.Sprintf("%s:%s", t.PkgPath()+"."+t.Name(), tagKey)
-	if cached, ok := s.cache.Load(key); ok {
-		return cached.([]FieldPlan)
+	if cached, ok := s.cache.Load(t); ok {
+		return cached.(*StructSchema)
 	}
 
-	plans := make([]FieldPlan, 0, t.NumField())
-	for i := 0; i < t.NumField(); i++ {
-		field := t.Field(i)
-		if !field.IsExported() {
-			continue
-		}
+	schema := BuildStructSchema(t)
+	cached, _ := s.cache.LoadOrStore(t, schema)
 
-		tagVal := field.Tag.Get(tagKey)
-		if tagVal == "-" {
-			continue
-		}
-
-		name := field.Name
-		omit := false
-
-		if tagVal != "" {
-			parts := strings.Split(tagVal, ",")
-			if len(parts) > 0 && parts[0] != "" {
-				name = parts[0]
-			}
-
-			for _, p := range parts[1:] {
-				if p == "omitempty" {
-					omit = true
-				}
-			}
-		}
-
-		plans = append(plans, FieldPlan{
-			Index:    i,
-			Name:     name,
-			TagValue: tagVal,
-			Omit:     omit,
-		})
-	}
-
-	s.cache.Store(key, plans)
-
-	return plans
+	return cached.(*StructSchema)
 }
 
-// MapStructToMap extracts key-value string mappings from val using cached FieldPlans.
-func (s *SchemaCache) MapStructToMap(val any, tagKey string) map[string]string {
-	if val == nil {
+// BuildStructSchema parses [reflect.Type] t and constructs a pre-computed [StructSchema].
+func BuildStructSchema(t reflect.Type) *StructSchema {
+	if t.Kind() == reflect.Pointer {
+		t = t.Elem()
+	}
+
+	if t.Kind() != reflect.Struct {
 		return nil
 	}
 
-	v := reflect.ValueOf(val)
-	if v.Kind() == reflect.Pointer {
-		if v.IsNil() {
-			return nil
+	numField := t.NumField()
+	fields := make([]FieldSchema, 0, numField)
+
+	for i := range numField {
+		field := t.Field(i)
+		defaultVal := field.Tag.Get("default")
+
+		tag := field.Tag.Get("url")
+		if tag == "" {
+			tag = field.Tag.Get("json")
 		}
 
-		v = v.Elem()
-	}
+		parts := strings.Split(tag, ",")
+		key := parts[0]
 
-	if v.Kind() != reflect.Struct {
-		return nil
-	}
-
-	plans := s.GetPlans(v.Type(), tagKey)
-	if len(plans) == 0 {
-		return nil
-	}
-
-	result := make(map[string]string, len(plans))
-	for _, plan := range plans {
-		fv := v.Field(plan.Index)
-		if plan.Omit && fv.IsZero() {
-			continue
+		fSchema := FieldSchema{
+			Index:       i,
+			Name:        field.Name,
+			Key:         key,
+			DefaultVal:  defaultVal,
+			IsInline:    slices.Contains(parts[1:], "inline"),
+			IsAnonymous: field.Anonymous,
+			OmitEmpty:   slices.Contains(parts[1:], "omitempty"),
+			HasComma:    slices.Contains(parts[1:], "comma"),
+			HasSpace:    slices.Contains(parts[1:], "space"),
+			HasPipe:     slices.Contains(parts[1:], "pipe"),
+			IsIgnored:   key == "-",
 		}
 
-		result[plan.Name] = fmt.Sprint(fv.Interface())
+		fieldType := field.Type
+		if fieldType.Kind() == reflect.Pointer {
+			fieldType = fieldType.Elem()
+		}
+
+		if (field.Anonymous || fSchema.IsInline) && fieldType.Kind() == reflect.Struct {
+			fSchema.SubSchema = BuildStructSchema(fieldType)
+		} else if key == "" && !field.Anonymous && !fSchema.IsInline {
+			fSchema.IsIgnored = true
+		}
+
+		fields = append(fields, fSchema)
 	}
 
-	return result
+	return &StructSchema{Fields: fields}
 }

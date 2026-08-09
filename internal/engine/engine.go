@@ -12,6 +12,8 @@ import (
 	"net/http"
 	"net/url"
 	"time"
+
+	"github.com/lemon4ksan/aoni/internal/experimental"
 )
 
 // Engine is the central runtime execution engine orchestrator.
@@ -22,6 +24,7 @@ type Engine struct {
 	AltSvc     *AltSvcCache
 	Referer    *RefererAutomaton
 	BufferPool *BufferPool
+	Features   experimental.Features
 }
 
 // NewEngine constructs a central execution [Engine].
@@ -41,6 +44,7 @@ func NewEngine(
 		AltSvc:     altSvc,
 		Referer:    NewRefererAutomaton(PolicyStrictOriginWhenCrossOrigin),
 		BufferPool: GlobalBufferPool,
+		Features:   experimental.InspectFeatures(),
 	}
 }
 

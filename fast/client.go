@@ -31,12 +31,7 @@ import (
 	"github.com/lemon4ksan/aoni/netutil/power"
 )
 
-// HTTPDoer executes an HTTP request transaction.
-type HTTPDoer interface {
-	Do(req *http.Request) (*http.Response, error)
-}
-
-// Client executes ultra-high-performance HTTP requests over fasthttp,
+// Client encapsulates an ultra-high-performance multi-protocol client
 // seamlessly multiplexing native H1 (fasthttp), native H2 (h2engine), and native H3 (h3engine).
 //
 // Thread Safety & Concurrency:

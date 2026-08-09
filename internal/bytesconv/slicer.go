@@ -4,7 +4,11 @@
 
 package bytesconv
 
-import "bytes"
+import (
+	"bytes"
+
+	"github.com/lemon4ksan/aoni/internal/simd"
+)
 
 // PatternSlicer is a zero-allocation byte slice pattern matcher and splitter.
 // It searches for pattern in data and splits the byte slice at pattern + offset.
@@ -21,6 +25,18 @@ func NewPatternSlicer(pattern []byte, offset int) *PatternSlicer {
 	}
 }
 
+func (s *PatternSlicer) findIndex(data []byte) int {
+	if len(s.Pattern) == 1 {
+		return simd.IndexByteVector(data, s.Pattern[0])
+	}
+
+	if len(s.Pattern) == 2 {
+		return simd.IndexTwoBytesVector(data, s.Pattern[0], s.Pattern[1])
+	}
+
+	return bytes.Index(data, s.Pattern)
+}
+
 // Slice finds the first occurrence of Pattern in data, splitting data into two parts at Index + Offset.
 // Returns [][]byte{data[:splitPoint], data[splitPoint:]} and true if matched, or [][]byte{data} and false if not matched.
 func (s *PatternSlicer) Slice(data []byte) ([][]byte, bool) {
@@ -28,7 +44,7 @@ func (s *PatternSlicer) Slice(data []byte) ([][]byte, bool) {
 		return [][]byte{data}, false
 	}
 
-	idx := bytes.Index(data, s.Pattern)
+	idx := s.findIndex(data)
 	if idx == -1 {
 		return [][]byte{data}, false
 	}
@@ -52,7 +68,7 @@ func (s *PatternSlicer) SliceAll(data []byte) [][]byte {
 	curr := data
 
 	for len(curr) > 0 {
-		idx := bytes.Index(curr, s.Pattern)
+		idx := s.findIndex(curr)
 		if idx == -1 {
 			result = append(result, curr)
 			break

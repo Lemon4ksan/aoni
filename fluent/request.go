@@ -24,6 +24,7 @@ import (
 	"github.com/lemon4ksan/aoni/codec"
 	"github.com/lemon4ksan/aoni/codec/decode"
 	"github.com/lemon4ksan/aoni/internal/io"
+	"github.com/lemon4ksan/aoni/internal/reqpool"
 	"github.com/lemon4ksan/aoni/middleware"
 	"github.com/lemon4ksan/aoni/mod"
 	"github.com/lemon4ksan/aoni/netutil"
@@ -151,7 +152,11 @@ func (r *Request) Reset() {
 	r.useProtoDecoder = false
 	r.useGRPCWebDecoder = false
 
-	clear(r.headers)
+	if r.headers != nil {
+		reqpool.ReleaseHeader(r.headers)
+		r.headers = nil
+	}
+
 	clear(r.queryParams)
 	clear(r.pathParams)
 	clear(r.formFields)
@@ -173,6 +178,15 @@ func (r *Request) Discard() {
 	r.Release()
 }
 
+// Header returns or acquires the internal [http.Header] map.
+func (r *Request) Header() http.Header {
+	if r.headers == nil {
+		r.headers = reqpool.AcquireHeader()
+	}
+
+	return r.headers
+}
+
 // SetContext associates execution context with the request.
 func (r *Request) SetContext(ctx context.Context) *Request {
 	r.ctx = ctx
@@ -182,7 +196,7 @@ func (r *Request) SetContext(ctx context.Context) *Request {
 // SetHeader sets an HTTP header key-value pair.
 func (r *Request) SetHeader(header, value string) *Request {
 	if r.headers == nil {
-		r.headers = make(http.Header, 4)
+		r.headers = reqpool.AcquireHeader()
 	}
 
 	r.headers.Set(header, value)
@@ -193,7 +207,7 @@ func (r *Request) SetHeader(header, value string) *Request {
 // SetHeaders bulk-sets HTTP headers from a map.
 func (r *Request) SetHeaders(headers map[string]string) *Request {
 	if r.headers == nil {
-		r.headers = make(http.Header, len(headers))
+		r.headers = reqpool.AcquireHeader()
 	}
 
 	for k, v := range headers {

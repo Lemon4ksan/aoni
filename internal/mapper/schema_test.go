@@ -5,29 +5,28 @@
 package mapper_test
 
 import (
+	"reflect"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	"github.com/lemon4ksan/aoni/internal/mapper"
 )
 
-type SampleQuery struct {
-	Page    int    `url:"page"`
-	Search  string `url:"q,omitempty"`
-	Ignored string `url:"-"`
+type sampleUser struct {
+	ID    int    `url:"id"`
+	Name  string `url:"name,omitempty"`
+	Email string `url:"-"`
 }
 
 func TestSchemaCache(t *testing.T) {
-	t.Parallel()
+	typ := reflect.TypeOf(sampleUser{})
 
-	cache := &mapper.SchemaCache{}
+	s1 := mapper.DefaultSchemaCache.GetSchema(typ)
+	require.NotNil(t, s1)
+	assert.Len(t, s1.Fields, 3)
 
-	s := SampleQuery{Page: 2, Search: "golang", Ignored: "secret"}
-	m := cache.MapStructToMap(s, "url")
-
-	assert.Equal(t, "2", m["page"])
-	assert.Equal(t, "golang", m["q"])
-	_, hasIgnored := m["Ignored"]
-	assert.False(t, hasIgnored)
+	s2 := mapper.DefaultSchemaCache.GetSchema(typ)
+	assert.Same(t, s1, s2)
 }

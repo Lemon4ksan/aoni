@@ -10,7 +10,6 @@ import (
 	"crypto/tls"
 	"encoding/json"
 	stdio "io"
-	"math/rand/v2"
 	"net/http"
 	"net/url"
 	"strings"
@@ -20,6 +19,7 @@ import (
 
 	"github.com/lemon4ksan/aoni/internal/io"
 	"github.com/lemon4ksan/aoni/internal/pipeline"
+	fastrand "github.com/lemon4ksan/aoni/internal/rand"
 	"github.com/lemon4ksan/aoni/internal/timer"
 	"github.com/lemon4ksan/aoni/netutil/netdial"
 	"github.com/lemon4ksan/aoni/telemetry"
@@ -137,7 +137,7 @@ func ApplyTCPDelay(ctx context.Context) error {
 
 	delay := r.Min
 	if window > 0 {
-		delay += time.Duration(rand.Int64N(int64(window))) //nolint:gosec
+		delay += fastrand.FastJitter(window)
 	}
 
 	if delay <= 0 {

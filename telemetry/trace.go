@@ -14,7 +14,6 @@ import (
 	"io"
 	"log/slog"
 	"maps"
-	"math/rand/v2"
 	"mime"
 	"mime/multipart"
 	"net/http"
@@ -27,12 +26,13 @@ import (
 
 	"github.com/lemon4ksan/aoni/fingerprint/ja4"
 	"github.com/lemon4ksan/aoni/internal/bytesconv"
+	fastrand "github.com/lemon4ksan/aoni/internal/rand"
 	"github.com/lemon4ksan/aoni/netutil/probe"
 )
 
 // GenerateCorrelationID generates a fast, monotonic Base36 correlation ID string.
 func GenerateCorrelationID() string {
-	timestamp := uint64(time.Now().UnixMicro())*1000 + uint64(rand.Int64N(1000)) //nolint:gosec
+	timestamp := uint64(time.Now().UnixMicro())*1000 + uint64(fastrand.Intn(1000))
 
 	var buf [32]byte
 

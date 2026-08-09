@@ -35,7 +35,7 @@ import (
 	"github.com/lemon4ksan/aoni/internal/bytesconv"
 	"github.com/lemon4ksan/aoni/internal/io"
 	"github.com/lemon4ksan/aoni/internal/pipeline"
-	"github.com/lemon4ksan/aoni/internal/urlparse"
+	"github.com/lemon4ksan/aoni/internal/urlutil"
 	"github.com/lemon4ksan/aoni/netutil/fragment"
 	"github.com/lemon4ksan/aoni/netutil/netdial"
 	"github.com/lemon4ksan/aoni/telemetry"
@@ -64,7 +64,7 @@ func WithVar(key string, value any) aoni.RequestModifier {
 		escapedValue := url.PathEscape(fmt.Sprint(value))
 
 		path := req.Path()
-		req.SetPath(urlparse.ReplaceVar(path, key, escapedValue))
+		req.SetPath(urlutil.ReplaceVar(path, key, escapedValue))
 	}
 }
 
