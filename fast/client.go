@@ -37,6 +37,13 @@ type HTTPDoer interface {
 
 // Client executes ultra-high-performance HTTP requests over fasthttp,
 // seamlessly multiplexing native H1 (fasthttp), native H2 (h2engine), and native H3 (h3engine).
+//
+// Thread Safety & Concurrency:
+// 100% thread-safe; safe for concurrent invocation across arbitrary goroutines.
+//
+// Memory Lifetime Invariants & Fast-Path Geometry:
+// Achieves zero heap allocations on hot execution paths by recycling internal request/response buffers
+// via sync.Pool. Callers MUST NOT retain or mutate byte slices obtained from unsafe body accessors beyond request lifecycle.
 type Client struct {
 	engine         *fasthttp.Client
 	pipelineEngine *pipeline.Pipeline
@@ -51,8 +58,14 @@ type Client struct {
 	prepared      engine.PreparedConfig
 }
 
-// NewClient creates a new multiprotocol Client configured with fasthttp, uTLS,
+// NewClient instantiates a multi-protocol ultra-high-throughput [Client] wrapping fasthttp, uTLS,
 // native HTTP/2 framing, and native HTTP/3 QUIC support.
+//
+// Preconditions:
+//   - Applies functional [aoni.ClientOption] layers sequentially to build prepared configuration state.
+//
+// Postconditions:
+//   - Yields a ready-to-use, thread-safe [Client] pointer configured for zero-allocation execution.
 func NewClient(opts ...aoni.ClientOption) *Client {
 	c := &Client{
 		engine: defaultFasthttpClient(),

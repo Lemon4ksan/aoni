@@ -18,6 +18,13 @@ import (
 
 // Cookie represents a browser cookie structure formatted for JSON persistence,
 // including CHIPS (RFC 6265bis) Partitioned attributes and SameSite policies.
+//
+// Specification Adherence:
+// Conforms to IETF RFC 6265 (HTTP State Management Mechanism) and RFC 6265bis
+// (Cookies: HTTP State Management Mechanism - CHIPS Partitioned Cookies).
+//
+// Thread Safety:
+// Struct values are pass-by-value DTOs; concurrent reads are safe after construction.
 type Cookie struct {
 	Expires      time.Time `json:"expires,omitempty"`
 	Name         string    `json:"name"`
@@ -32,8 +39,17 @@ type Cookie struct {
 	MaxAge       int       `json:"maxAge,omitempty"`
 }
 
-// ParseSetCookieHeader parses a raw Set-Cookie header value into a Cookie structure,
-// extracting CHIPS Partitioned attributes, SameSite policies, and standard metadata.
+// ParseSetCookieHeader parses a raw 'Set-Cookie' header line into a structured [Cookie].
+//
+// Specification Adherence:
+// Conforms to RFC 6265 §5.2 for attribute parsing and RFC 6265bis for CHIPS 'Partitioned' directives.
+//
+// Preconditions:
+//   - headerVal must contain a valid key-value pair separated by '='; otherwise an empty [Cookie] is returned.
+//   - defaultDomain and defaultPath are applied if the header omits explicit 'Domain=' or 'Path=' attributes.
+//
+// Postconditions:
+//   - Returns a populated [Cookie] value with normalized domain names (leading dot stripped per RFC 6265 §5.2.3).
 func ParseSetCookieHeader(headerVal, defaultDomain, defaultPath string) Cookie {
 	if headerVal == "" {
 		return Cookie{}
@@ -104,7 +120,13 @@ func parseAttributeValue(attr string) string {
 	return strings.TrimSpace(val)
 }
 
-// PathMatch reports whether reqPath matches cookiePath according to RFC 6265 Section 5.1.4.
+// PathMatch reports whether reqPath matches cookiePath according to RFC 6265 §5.1.4.
+//
+// Specification Adherence:
+// Follows RFC 6265 §5.1.4 path-matching rules (exact match, prefix match with trailing slash, or prefix match before path boundary slash).
+//
+// Preconditions:
+//   - If reqPath or cookiePath are empty strings, they default to "/".
 func PathMatch(reqPath, cookiePath string) bool {
 	if cookiePath == "" {
 		cookiePath = "/"
@@ -131,7 +153,13 @@ func PathMatch(reqPath, cookiePath string) bool {
 	return false
 }
 
-// FilterForRequest filters cookies matching destination u using RFC 6265 path-matching rules.
+// FilterForRequest filters a slice of cookies, returning only those matching destination u per RFC 6265 §5.1.4.
+//
+// Preconditions:
+//   - Returns nil if cookies is empty or u is nil.
+//
+// Postconditions:
+//   - Yields a fresh slice containing pointers to matching cookies without mutating input slices.
 func FilterForRequest(cookies []*http.Cookie, u *url.URL) []*http.Cookie {
 	if len(cookies) == 0 || u == nil {
 		return nil
@@ -152,7 +180,13 @@ func FilterForRequest(cookies []*http.Cookie, u *url.URL) []*http.Cookie {
 	return filtered
 }
 
-// Mirror copies matching cookies from sourceURL to each targetURL in jar.
+// Mirror copies specified cookies by name from sourceURL to each destination URL in targetURLs inside jar.
+//
+// Preconditions:
+//   - Returns immediately with no operation if jar, sourceURL, targetURLs, or cookieNames are empty/nil.
+//
+// Postconditions:
+//   - Target URLs in jar receive duplicate cookie entries carrying identical values and path metadata.
 func Mirror(jar http.CookieJar, sourceURL *url.URL, targetURLs []*url.URL, cookieNames ...string) {
 	if jar == nil || sourceURL == nil || len(targetURLs) == 0 || len(cookieNames) == 0 {
 		return
@@ -181,7 +215,13 @@ func Mirror(jar http.CookieJar, sourceURL *url.URL, targetURLs []*url.URL, cooki
 	}
 }
 
-// SortForBrowser sorts cookies according to RFC 6265 Section 5.4 (longest path first).
+// SortForBrowser sorts cookies in-place according to RFC 6265 §5.4 (longest path length first).
+//
+// Specification Adherence:
+// Conforms to RFC 6265 §5.4 requirement: cookies with longer paths MUST precede cookies with shorter paths.
+//
+// Postconditions:
+//   - Uses stable sort (`slices.SortStableFunc`) to preserve original creation ordering for cookies with equal path lengths.
 func SortForBrowser(cookies []*http.Cookie) {
 	if len(cookies) <= 1 {
 		return
@@ -192,7 +232,13 @@ func SortForBrowser(cookies []*http.Cookie) {
 	})
 }
 
-// BuildCookieHeader constructs an RFC 6265 compliant 'Cookie' header string.
+// BuildCookieHeader constructs an RFC 6265 compliant 'Cookie' request header string.
+//
+// Specification Adherence:
+// Sorts cookies by path length per RFC 6265 §5.4 prior to formatting.
+//
+// Memory Allocation Fast-Path:
+// Uses a 16-element stack array for typical request headers, avoiding heap allocations for standard cookie lists.
 func BuildCookieHeader(cookies []*http.Cookie) string {
 	if len(cookies) == 0 {
 		return ""

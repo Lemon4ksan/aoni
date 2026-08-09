@@ -105,8 +105,18 @@ func DialWellKnown(
 	return DialWebSocket(ctx, dialer, targetURL, mods...)
 }
 
-// DialWebSocket establishes an encrypted or plain WebSocket connection using aoni's
-// anti-detect uTLS and proxy pipeline without external dependencies.
+// DialWebSocket establishes an encrypted (wss://) or unencrypted (ws://) WebSocket connection
+// using aoni's anti-detect uTLS stack, HTTP/2 Extended CONNECT (RFC 8441), and proxy pipeline.
+//
+// Specification Adherence:
+// Conforms to IETF RFC 6455 (The WebSocket Protocol) and RFC 8441 (Bootstrapping WebSockets with HTTP/2).
+//
+// Preconditions:
+//   - targetURL must be a valid 'ws://' or 'wss://' scheme endpoint.
+//
+// Postconditions:
+//   - On success, returns an active, thread-safe [Conn] wrapping the upgraded socket along with the 101 Switching Protocols response.
+//   - On error, closes underlying net.Conn sockets to prevent connection leaks.
 func DialWebSocket(
 	ctx context.Context,
 	dialer aoni.WSDialer,
@@ -116,7 +126,17 @@ func DialWebSocket(
 	return DialWebSocketWithConfig(ctx, dialer, targetURL, DialWebSocketConfig{EnableCompression: true}, mods...)
 }
 
-// DialWebSocketWithConfig establishes a WebSocket connection cascading across HTTP/3, HTTP/2, and HTTP/1.1 protocols.
+// DialWebSocketWithConfig establishes a WebSocket connection with explicit buffer and subprotocol configuration,
+// cascading across HTTP/3, HTTP/2 Extended CONNECT (RFC 8441), and HTTP/1.1 101 Switching Protocols.
+//
+// Specification Adherence:
+// Conforms to RFC 6455 §4 (Client Handshake) and RFC 7692 (Compression Extensions for WebSocket: permessage-deflate).
+//
+// Preconditions:
+//   - targetURL must specify a valid WebSocket endpoint; dialer defaults to aoni standard transport if nil.
+//
+// Postconditions:
+//   - Validates the server's 'Sec-WebSocket-Accept' header hash per RFC 6455 §4.2.2.
 func DialWebSocketWithConfig(
 	ctx context.Context,
 	dialer aoni.WSDialer,

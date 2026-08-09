@@ -36,7 +36,13 @@ const (
 )
 
 // DoHResolver resolves hostnames using DNS over HTTPS (RFC 8484)
-// with support for EDNS0 Client Subnet (ECS) and message padding.
+// with support for EDNS0 Client Subnet (ECS, RFC 7871) and message padding (RFC 8467).
+//
+// Specification Adherence:
+// Conforms strictly to IETF RFC 8484 (DNS Queries over HTTPS) and RFC 9460 (SVCB/HTTPS RRs).
+//
+// Thread Safety & Concurrency:
+// 100% thread-safe; resolver instances are read-only after construction and safe for concurrent queries across goroutines.
 type DoHResolver struct {
 	Endpoint string
 	Host     string
@@ -45,9 +51,15 @@ type DoHResolver struct {
 	doer     aoni.RequestDoer
 }
 
-// NewDoHResolver constructs a DoHResolver configured with a 5-second timeout engine.
-// The doer parameter accepts any client implementation (*fast.Client, *aoni.Client, *http.Client, or nil).
-// If doer is nil, it defaults to a high-performance fast.Client.
+// NewDoHResolver constructs a [DoHResolver] bound to endpoint and host.
+// The doer parameter accepts any engine implementation (*fast.Client, *aoni.Client, *http.Client, or nil).
+//
+// Preconditions:
+//   - endpoint must be a valid HTTP/HTTPS URL string.
+//   - If doer is nil, defaults to a 5-second timeout [fast.Client] engine.
+//
+// Postconditions:
+//   - Yields a non-nil, thread-safe [DoHResolver] pointer ready for hostname resolution.
 func NewDoHResolver(endpoint, host string, doer any) *DoHResolver {
 	var engine aoni.RequestDoer
 	if doer == nil {

@@ -8,9 +8,13 @@
 // window sizes, stream limits, and datagram capabilities of modern browsers over QUIC.
 package h3
 
-// Settings holds QUIC flow control and stream parameters
-// for browser-grade HTTP/3 fingerprint impersonation. Each field
-// directly configures the underlying QUIC transport layer parameters.
+// Settings holds QUIC flow control and stream parameters for browser-grade HTTP/3 fingerprint impersonation.
+//
+// Specification Adherence:
+// Conforms to IETF RFC 9114 (HTTP/3) and RFC 9000 (QUIC: A UDP-Based Multiplexed and Secure Transport).
+//
+// Thread Safety:
+// Struct values are immutable configuration DTOs; concurrent reads across goroutines are 100% safe.
 type Settings struct {
 	InitialStreamReceiveWindow     uint64
 	MaxStreamReceiveWindow         uint64

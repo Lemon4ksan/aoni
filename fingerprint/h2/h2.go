@@ -56,6 +56,12 @@ var (
 )
 
 // Settings holds the full set of HTTP/2 connection parameters for browser-grade frame impersonation.
+//
+// Specification Adherence:
+// Conforms strictly to IETF RFC 9113 §6.5 (HTTP/2 SETTINGS frame format and parameters).
+//
+// Thread Safety:
+// Struct instances are immutable configuration values; concurrent reads are safe.
 type Settings struct {
 	HeaderTableSize      uint32
 	EnablePush           uint32
@@ -70,7 +76,10 @@ type Settings struct {
 	PriorityWeight       uint8
 }
 
-// SettingsFromProfile populates [Settings] from a [profiles.H2Settings].
+// SettingsFromProfile populates [Settings] from a [profiles.H2Settings] profile definition.
+//
+// Postconditions:
+//   - Yields a non-nil pointer to a newly initialized [Settings] struct.
 func SettingsFromProfile(s profiles.H2Settings) *Settings {
 	return &Settings{
 		HeaderTableSize:      s.HeaderTableSize,
@@ -101,7 +110,13 @@ type settingsProxy struct {
 	PriorityWeight       *uint8  `json:"priority_weight"`
 }
 
-// ParseSettings parses HTTP/2 settings from a JSON-encoded string.
+// ParseSettings unmarshals a JSON-encoded string representation into an HTTP/2 [Settings] struct.
+//
+// Specification Adherence:
+// Validates parameters against RFC 9113 bounds.
+//
+// Preconditions:
+//   - jsonStr must contain valid JSON key-value pairs matching snake_case or PascalCase HTTP/2 setting names.
 func ParseSettings(jsonStr string) (Settings, error) {
 	var p settingsProxy
 	if err := json.Unmarshal([]byte(jsonStr), &p); err != nil {
