@@ -44,3 +44,24 @@ func TestIndexByteVector(t *testing.T) {
 	missingIdx := simd.IndexByteVector(data, 'Z')
 	assert.Equal(t, -1, missingIdx)
 }
+
+func TestIndexTwoBytesVector(t *testing.T) {
+	data := []byte("Host: api.example.com\r\nAccept: application/json\r\nUser-Agent: aoni-fast-client/1.0\r\n")
+
+	idx := simd.IndexTwoBytesVector(data, ':', '\n')
+	assert.Equal(t, 4, idx)
+}
+
+func TestApplyFastMaskVector(t *testing.T) {
+	payload := []byte("Hello WebSocket World! 123456789012345678901234567890")
+	orig := make([]byte, len(payload))
+	copy(orig, payload)
+
+	mask := uint32(0x12345678)
+	simd.ApplyFastMaskVector(payload, mask)
+	assert.NotEqual(t, orig, payload)
+
+	// Unmasking
+	simd.ApplyFastMaskVector(payload, mask)
+	assert.Equal(t, orig, payload)
+}

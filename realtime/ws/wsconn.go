@@ -23,6 +23,8 @@ import (
 	"github.com/lemon4ksan/miyako/generic"
 	"golang.org/x/net/http2"
 	"golang.org/x/net/http2/hpack"
+
+	"github.com/lemon4ksan/aoni/internal/simd"
 )
 
 const (
@@ -400,18 +402,8 @@ func applyFastMask(payload []byte, mask [4]byte) {
 		return
 	}
 
-	maskKey := uint64(binary.LittleEndian.Uint32(mask[:]))
-	maskKey |= maskKey << 32
-
-	for len(payload) >= 8 {
-		v := binary.LittleEndian.Uint64(payload)
-		binary.LittleEndian.PutUint64(payload, v^maskKey)
-		payload = payload[8:]
-	}
-
-	for i := range payload {
-		payload[i] ^= mask[i%4]
-	}
+	maskKey := binary.LittleEndian.Uint32(mask[:])
+	simd.ApplyFastMaskVector(payload, maskKey)
 }
 
 func dialH3ExtendedConnect(
