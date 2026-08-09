@@ -1003,3 +1003,43 @@ func WithLocale(locale string) aoni.ClientOption {
 		cfg.Defaults.Headers.Set("Accept-Language", locale)
 	}
 }
+
+// ExperimentalFlag defines bitwise feature flags for opt-in hardware and OS optimizations.
+type ExperimentalFlag = aoni.ExperimentalFlag
+
+const (
+	// ExpKernelBypass enables io_uring / RIO kernel ring buffer I/O.
+	ExpKernelBypass = aoni.ExpKernelBypass
+
+	// ExpSIMD enables AVX2 / AVX-512 hardware vector acceleration.
+	ExpSIMD = aoni.ExpSIMD
+
+	// ExpZeroCopy enables Linux splice / sendfile zero-copy socket transfers.
+	ExpZeroCopy = aoni.ExpZeroCopy
+
+	// ExpHugePages enables 2 MB LargePage VirtualAlloc / mmap slab memory arenas.
+	ExpHugePages = aoni.ExpHugePages
+
+	// ExpRIO enables Windows Winsock Registered I/O extensions.
+	ExpRIO = aoni.ExpRIO
+)
+
+// WithExperimental enables one or more experimental hardware/OS features via bitwise flags or list.
+//
+// Backward Compatibility Guarantee:
+// Gating experimental features under a single option protects the public API contract,
+// allowing future experimental flags to be added, renamed, or retired without breaking changes.
+func WithExperimental(flags ...ExperimentalFlag) aoni.ClientOption {
+	return func(cfg *aoni.Config) {
+		for _, f := range flags {
+			cfg.Network.ExperimentalFlags |= f
+		}
+	}
+}
+
+// WithCPUAffinity locks worker OS threads to designated CPU core indices.
+func WithCPUAffinity(cores ...int) aoni.ClientOption {
+	return func(cfg *aoni.Config) {
+		cfg.Network.CPUAffinityCores = append(cfg.Network.CPUAffinityCores, cores...)
+	}
+}

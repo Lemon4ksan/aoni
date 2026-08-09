@@ -223,6 +223,26 @@ func DefaultQUICMigrationConfig() QUICMigrationConfig {
 	}
 }
 
+// ExperimentalFlag defines bitwise feature flags for opt-in hardware and OS optimizations.
+type ExperimentalFlag uint64
+
+const (
+	// ExpKernelBypass enables io_uring / RIO kernel ring buffer I/O.
+	ExpKernelBypass ExperimentalFlag = 1 << iota
+
+	// ExpSIMD enables AVX2 / AVX-512 hardware vector acceleration.
+	ExpSIMD
+
+	// ExpZeroCopy enables Linux splice / sendfile zero-copy socket transfers.
+	ExpZeroCopy
+
+	// ExpHugePages enables 2 MB LargePage VirtualAlloc / mmap slab memory arenas.
+	ExpHugePages
+
+	// ExpRIO enables Windows Winsock Registered I/O extensions.
+	ExpRIO
+)
+
 // NetworkConfig configures L3/L4 transport parameters, proxy routing, DNS resolution,
 // dual-stack IPv4/IPv6 racing, SSRF guards, and socket controllers.
 type NetworkConfig struct {
@@ -283,6 +303,17 @@ type NetworkConfig struct {
 
 	// EnablePowerManagement monitors OS sleep/resume transitions and purges zombie connections.
 	EnablePowerManagement bool
+
+	// ExperimentalFlags consolidates all opt-in hardware and OS experimental features under a single bitmask.
+	ExperimentalFlags ExperimentalFlag
+
+	// CPUAffinityCores locks worker OS threads to designated CPU core indices.
+	CPUAffinityCores []int
+}
+
+// HasExperimental returns true if the specified experimental flag is enabled.
+func (n NetworkConfig) HasExperimental(flag ExperimentalFlag) bool {
+	return (n.ExperimentalFlags & flag) != 0
 }
 
 // Clone creates a deep copy of NetworkConfig and its nested pointer structures.
@@ -290,6 +321,7 @@ func (n NetworkConfig) Clone() NetworkConfig {
 	cloned := n
 	cloned.DynamicHedging = clonePtr(n.DynamicHedging)
 	cloned.FragmentConfig = clonePtr(n.FragmentConfig)
+	cloned.CPUAffinityCores = slices.Clone(n.CPUAffinityCores)
 
 	if n.HostRewrite != nil && n.HostRewrite.Rules != nil {
 		rulesCopy := make(map[string]string, len(n.HostRewrite.Rules))
