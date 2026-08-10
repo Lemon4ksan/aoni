@@ -51,7 +51,7 @@ func (e *StatusError) Error() string {
 
 	if len(e.RawDetails) > 0 {
 		return fmt.Sprintf(
-			"aoni grpc: status=%s (%d) msg=%s details_len=%d",
+			"aoni/grpc: status=%s (%d) msg=%s details_len=%d",
 			e.Code.String(),
 			e.Code,
 			e.Message,
@@ -59,7 +59,7 @@ func (e *StatusError) Error() string {
 		)
 	}
 
-	return fmt.Sprintf("aoni grpc: status=%s (%d) msg=%s", e.Code.String(), e.Code, e.Message)
+	return fmt.Sprintf("aoni/grpc: status=%s (%d) msg=%s", e.Code.String(), e.Code, e.Message)
 }
 
 func (c StatusCode) String() string {

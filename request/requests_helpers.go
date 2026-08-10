@@ -350,6 +350,14 @@ func resolveDecoder(resp *http.Response) decode.Decoder {
 					return decode.DecoderFunc(d.Decode)
 				}
 			}
+
+			if cfg.AutoDecode && contentType != "" {
+				if customDec := decode.GetDecoder(contentType); customDec != nil {
+					return customDec
+				}
+
+				return decode.LookupDecoder(contentType)
+			}
 		}
 	}
 

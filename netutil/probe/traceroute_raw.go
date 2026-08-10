@@ -36,7 +36,7 @@ func TracerouteRawICMP(
 
 	ipAddr, err := net.ResolveIPAddr("ip", target)
 	if err != nil {
-		return nil, fmt.Errorf("aoni probe: resolve ip failed: %w", err)
+		return nil, fmt.Errorf("aoni/probe: resolve ip failed: %w", err)
 	}
 
 	isV6 := ipAddr.IP.To4() == nil
@@ -50,7 +50,7 @@ func TracerouteRawICMP(
 
 	pconn, err := icmp.ListenPacket(network, bindAddr)
 	if err != nil {
-		return nil, fmt.Errorf("aoni probe: listen raw icmp failed: %w", err)
+		return nil, fmt.Errorf("aoni/probe: listen raw icmp failed: %w", err)
 	}
 	defer pconn.Close()
 

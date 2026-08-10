@@ -45,14 +45,19 @@ func (b *fastBodyReadCloser) Close() error {
 }
 
 // Response adapts a high-performance [*fasthttp.Response] to the unified [aoni.Response] contract.
+//
+// Memory Lifetime Invariants & Thread Safety:
+// Response instances are recycled via [sync.Pool]. Callers MUST call [Response.Close] or [Response.Release]
+// when finished processing the response to avoid socket leaks and memory fragmentation.
 type Response struct {
 	resp         *fasthttp.Response
 	trailers     map[string][]string
 	uncompressed bool
 }
 
-// NewResponse wraps resp into a unified [aoni.Response] adapter.
-// The caller is responsible for releasing the response object.
+// NewResponse acquires a pooled [Response] adapter wrapping an active [*fasthttp.Response].
+// If resp is nil, a new [*fasthttp.Response] is acquired automatically from [fasthttp.AcquireResponse].
+// Yields a zero-allocation adapter instance configured for pipeline processing.
 func NewResponse(resp *fasthttp.Response) *Response {
 	if resp == nil {
 		resp = fasthttp.AcquireResponse()
@@ -66,22 +71,22 @@ func NewResponse(resp *fasthttp.Response) *Response {
 	return r
 }
 
-// StatusCode yields the HTTP status code.
+// StatusCode yields the HTTP status code (e.g. 200, 404, 500).
 func (f *Response) StatusCode() int {
 	return f.resp.StatusCode()
 }
 
-// Status yields the response status text.
+// Status yields standard HTTP status text corresponding to StatusCode (e.g. "200 OK").
 func (f *Response) Status() string {
 	return http.StatusText(f.resp.StatusCode())
 }
 
-// StatusBytes yields status text as a byte slice.
+// StatusBytes yields status text as a zero-allocation byte slice.
 func (f *Response) StatusBytes() []byte {
 	return bytesconv.S2B(f.Status())
 }
 
-// Header yields single value for header key as a string.
+// Header yields a single value for key as a string, using case-insensitive header lookup.
 func (f *Response) Header(key string) string {
 	val := f.resp.Header.Peek(key)
 	if len(val) == 0 {
@@ -103,6 +108,9 @@ func (f *Response) Header(key string) string {
 }
 
 // HeaderBytes yields direct access to header value byte slice inside internal buffers.
+//
+// Memory Lifetime Warning:
+//   - The returned byte slice points into internal buffer memory. It MUST NOT be retained beyond the response lifecycle.
 func (f *Response) HeaderBytes(key []byte) []byte {
 	val := f.resp.Header.PeekBytes(key)
 	if len(val) == 0 {
@@ -112,7 +120,7 @@ func (f *Response) HeaderBytes(key []byte) []byte {
 	return val
 }
 
-// Headers yields all response headers as a key-value map.
+// Headers yields all response headers as a canonical key-value map.
 func (f *Response) Headers() map[string][]string {
 	m := make(map[string][]string)
 	f.resp.Header.All()(func(k, v []byte) bool {
@@ -135,18 +143,16 @@ func (f *Response) Trailers() map[string][]string {
 }
 
 // BodyBytes returns an independent, memory-safe copy of the response body bytes.
-//
-// Postconditions:
-//   - The returned slice is safe to retain or mutate beyond response pool recycling.
+// The returned slice is completely safe to retain or mutate beyond response pool recycling.
 func (f *Response) BodyBytes() []byte {
 	return slices.Clone(f.resp.Body())
 }
 
 // UnsafeBodyBytes provides zero-allocation direct access to internal response buffers.
 //
-// Warning:
-//   - Points directly to volatile internal buffers managed by sync.Pool.
-//   - MUST NOT be referenced, mutated, or retained after closing or recycling the response.
+// Critical Memory Lifetime Warning:
+//   - Points directly into volatile internal buffers managed by [sync.Pool].
+//   - Callers MUST NOT reference, mutate, or retain this byte slice beyond closing or releasing the response.
 func (f *Response) UnsafeBodyBytes() []byte {
 	if f.resp == nil {
 		return nil
@@ -155,7 +161,7 @@ func (f *Response) UnsafeBodyBytes() []byte {
 	return f.resp.Body()
 }
 
-// BodyStream yields an io.ReadCloser wrapping the response body stream or bytes.
+// BodyStream yields an [io.ReadCloser] wrapping the response body stream or bytes.
 func (f *Response) BodyStream() io.ReadCloser {
 	if f.resp.IsBodyStream() {
 		stream := f.resp.BodyStream()
@@ -169,7 +175,7 @@ func (f *Response) BodyStream() io.ReadCloser {
 	return io.NopCloser(bytes.NewReader(f.BodyBytes()))
 }
 
-// HTTPResponse yields nil for fasthttp response adapters.
+// HTTPResponse yields nil for fasthttp response adapters (standard net/http.Response unavailable).
 func (f *Response) HTTPResponse() *http.Response {
 	return nil
 }
@@ -194,7 +200,7 @@ func (f *Response) Uncompressed() bool {
 	return f.uncompressed
 }
 
-// Release returns the Response adapter back to memory pool.
+// Release returns the Response adapter instance back to [sync.Pool] for memory recycling.
 func (f *Response) Release() {
 	if f == nil {
 		return
@@ -208,7 +214,7 @@ func (f *Response) Release() {
 
 const maxBodySlurpBytes int64 = 2048
 
-// Close releases resources bound to the response wrapper and slurps unread stream bytes to preserve sockets.
+// Close releases resources bound to the response wrapper and slurps unread stream bytes to preserve Keep-Alive sockets.
 func (f *Response) Close() error {
 	if f.resp == nil || !f.resp.IsBodyStream() {
 		return nil
@@ -231,7 +237,7 @@ func (f *Response) Close() error {
 	return nil
 }
 
-// PooledResponse wraps a fasthttp response and returns instances back to [sync.Pool] upon Close.
+// PooledResponse wraps a fasthttp request/response pair, automatically releasing objects back to [sync.Pool] upon Close.
 type PooledResponse struct {
 	Response
 	fastReq  *fasthttp.Request
@@ -239,8 +245,8 @@ type PooledResponse struct {
 	closed   atomic.Bool
 }
 
-// NewPooledResponse acquires a pooled PooledResponse adapter wrapping fastReq and fastResp.
-// The caller is responsible for releasing the request and response objects.
+// NewPooledResponse acquires a pooled [PooledResponse] adapter wrapping active fastReq and fastResp.
+// Calling Close() thread-safely releases both fasthttp objects and recycles the adapter.
 func NewPooledResponse(fastReq *fasthttp.Request, fastResp *fasthttp.Response) *PooledResponse {
 	pr := pooledResponsePool.Get().(*PooledResponse)
 	pr.resp = fastResp

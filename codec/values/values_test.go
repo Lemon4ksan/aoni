@@ -21,16 +21,16 @@ func TestValueError_FormattingAndUnwrap(t *testing.T) {
 	assert.Equal(t, "<nil>", nilErr.Error())
 
 	errWithIndex := &ValueError{Field: "IDs", Index: 2, Err: errors.New("invalid int")}
-	assert.Equal(t, "aoni values: field IDs[2]: invalid int", errWithIndex.Error())
+	assert.Equal(t, "aoni/values: field IDs[2]: invalid int", errWithIndex.Error())
 
 	errWithFieldOnly := &ValueError{Field: "Name", Index: -1, Err: errors.New("empty string")}
-	assert.Equal(t, "aoni values: field Name: empty string", errWithFieldOnly.Error())
+	assert.Equal(t, "aoni/values: field Name: empty string", errWithFieldOnly.Error())
 
 	errWithType := &ValueError{Type: "Uint64String", Err: errors.New("parse uint error")}
-	assert.Equal(t, "aoni values: Uint64String: parse uint error", errWithType.Error())
+	assert.Equal(t, "aoni/values: Uint64String: parse uint error", errWithType.Error())
 
 	errFallback := &ValueError{Err: ErrUnsupportedType}
-	assert.Equal(t, "aoni values: aoni values: unsupported type for encoding", errFallback.Error())
+	assert.Equal(t, "aoni/values: aoni/values: unsupported type for encoding", errFallback.Error())
 
 	assert.Equal(t, ErrUnsupportedType, errFallback.Unwrap())
 }

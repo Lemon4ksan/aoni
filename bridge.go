@@ -12,7 +12,7 @@ import (
 
 // ErrNilURL is returned when attempting to route an outbound HTTP request
 // that does not specify a destination URL.
-var ErrNilURL = errors.New("aoni bridge: request URL is nil")
+var ErrNilURL = errors.New("aoni/bridge: request URL is nil")
 
 // NewStdClient adapts an aoni [Client] into a standard [*http.Client].
 //

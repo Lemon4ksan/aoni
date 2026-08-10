@@ -40,7 +40,7 @@ func TestErrorStructures(t *testing.T) {
 		errWithTarget := &Error{Format: "proto", Target: "*pb.User", Err: ErrInvalidProtoTarget}
 		assert.Equal(
 			t,
-			"aoni: decode proto into *pb.User: aoni: ProtoDecoder requires proto.Message output target",
+			"aoni: decode proto into *pb.User: aoni/decode: ProtoDecoder requires proto.Message output target",
 			errWithTarget.Error(),
 		)
 
@@ -59,7 +59,7 @@ func TestErrorStructures(t *testing.T) {
 		errWithStatus := &GRPCWebError{StatusCode: "16", StatusMsg: "unauthenticated", Err: ErrGRPCWebStatusError}
 		assert.Equal(
 			t,
-			"aoni: grpc-web status=16 msg=unauthenticated: aoni: gRPC-Web endpoint returned error status",
+			"aoni: grpc-web status=16 msg=unauthenticated: aoni/decode: gRPC-Web endpoint returned error status",
 			errWithStatus.Error(),
 		)
 
@@ -67,7 +67,7 @@ func TestErrorStructures(t *testing.T) {
 		assert.Equal(t, "aoni: grpc-web decompress: unexpected EOF", errWithOp.Error())
 
 		errFallback := &GRPCWebError{Err: ErrInvalidGRPCWebFrame}
-		assert.Equal(t, "aoni: grpc-web: aoni: invalid gRPC-Web frame format", errFallback.Error())
+		assert.Equal(t, "aoni: grpc-web: aoni/decode: invalid gRPC-Web frame format", errFallback.Error())
 
 		assert.Equal(t, ErrGRPCWebStatusError, errWithStatus.Unwrap())
 	})

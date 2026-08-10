@@ -41,13 +41,13 @@ import (
 // Achieves zero heap allocations on hot execution paths by recycling internal request/response buffers
 // via sync.Pool. Callers MUST NOT retain or mutate byte slices obtained from unsafe body accessors beyond request lifecycle.
 type Client struct {
-	engine         *fasthttp.Client
-	pipelineEngine *pipeline.Pipeline
-	defaultDial    func(string) (net.Conn, error)
-	config         aoni.Config
-	powerWatcher   *power.Watcher
-	referer        *pipeline.RefererState
-	activeTargets  sync.Map
+	engine        *fasthttp.Client
+	pipeline      *pipeline.Pipeline
+	defaultDial   func(string) (net.Conn, error)
+	config        aoni.Config
+	powerWatcher  *power.Watcher
+	referer       *pipeline.RefererState
+	activeTargets sync.Map
 
 	protocolState protocolState
 	coreEngine    *pipeline.Engine
@@ -56,12 +56,8 @@ type Client struct {
 
 // NewClient instantiates a multi-protocol ultra-high-throughput [Client] wrapping fasthttp, uTLS,
 // native HTTP/2 framing, and native HTTP/3 QUIC support.
-//
-// Preconditions:
-//   - Applies functional [aoni.ClientOption] layers sequentially to build prepared configuration state.
-//
-// Postconditions:
-//   - Yields a ready-to-use, thread-safe [Client] pointer configured for zero-allocation execution.
+// Applies functional [aoni.ClientOption] layers sequentially to build prepared configuration state.
+// Yields a ready-to-use, thread-safe [Client] pointer configured for zero-allocation execution.
 func NewClient(opts ...aoni.ClientOption) *Client {
 	c := &Client{
 		engine: defaultFasthttpClient(),
@@ -86,7 +82,7 @@ func NewClient(opts ...aoni.ClientOption) *Client {
 	c.coreEngine = pipeline.NewEngine(c.config.Defaults.BaseURL, c.config.Defaults.Headers, nil, 15*time.Second, 0)
 	c.prepared = c.coreEngine.Prepared
 
-	c.pipelineEngine = pipeline.NewPipeline(
+	c.pipeline = pipeline.New(
 		toPipelineDefaults(c.config.Defaults, c.referer),
 		c.config.Fingerprint.ToPipelineFingerprint(),
 	)
@@ -96,11 +92,6 @@ func NewClient(opts ...aoni.ClientOption) *Client {
 	}
 
 	return c
-}
-
-// ApplyOptions applies functional options to the client and returns a configured [aoni.RequestDoer].
-func (c *Client) ApplyOptions(opts ...aoni.ClientOption) aoni.RequestDoer {
-	return c.With(opts...)
 }
 
 // With produces a deep-copied [Client] with the provided functional options applied.
@@ -114,7 +105,7 @@ func (c *Client) With(opts ...aoni.ClientOption) *Client {
 		c.referer.Mu.Unlock()
 	}
 
-	c2 := &Client{
+	cloned := &Client{
 		engine:      clonedEngine,
 		defaultDial: c.defaultDial,
 		config:      c.config.Clone(),
@@ -123,24 +114,252 @@ func (c *Client) With(opts ...aoni.ClientOption) *Client {
 
 	for _, opt := range opts {
 		if opt != nil {
-			opt(&c2.config)
+			opt(&cloned.config)
 		}
 	}
 
-	c2.applyEngineConfig()
+	cloned.applyEngineConfig()
 
 	if !isCustomDialerSet(c.engine, c.defaultDial) {
-		c2.applyCustomDialer()
+		cloned.applyCustomDialer()
 	}
 
-	c2.applyPowerManagement(c2.config.Network.EnablePowerManagement)
+	cloned.applyPowerManagement(cloned.config.Network.EnablePowerManagement)
 
-	c2.pipelineEngine = pipeline.NewPipeline(
-		toPipelineDefaults(c2.config.Defaults, c2.referer),
-		c2.config.Fingerprint.ToPipelineFingerprint(),
+	cloned.pipeline = pipeline.New(
+		toPipelineDefaults(cloned.config.Defaults, cloned.referer),
+		cloned.config.Fingerprint.ToPipelineFingerprint(),
 	)
 
-	return c2
+	return cloned
+}
+
+// ApplyOptions applies functional options to the client and returns a configured [aoni.RequestDoer].
+func (c *Client) ApplyOptions(opts ...aoni.ClientOption) aoni.RequestDoer {
+	return c.With(opts...)
+}
+
+// Request executes an HTTP request across HTTP/1.1, native HTTP/2, or native HTTP/3.
+func (c *Client) Request(
+	ctx context.Context,
+	method, path string,
+	mods ...aoni.RequestModifier,
+) (aoni.Response, error) {
+	if handler := c.resolveProtocolHandler(path); handler != nil {
+		stdReq, err := http.NewRequestWithContext(ctx, method, path, nil)
+		if err != nil {
+			return nil, err
+		}
+
+		resp, err := handler.RoundTrip(stdReq) //nolint:bodyclose
+		if err != nil {
+			return nil, err
+		}
+
+		return aoni.NewStdResponse(resp), nil //nolint:bodyclose
+	}
+
+	fastReq := fasthttp.AcquireRequest()
+	fastResp := fasthttp.AcquireResponse()
+
+	fastReq.Header.SetMethodBytes(getMethodBytes(method))
+
+	reqAdapter := NewRequest(fastReq)
+	defer reqAdapter.Release()
+
+	reqAdapter.SetContext(ctx)
+
+	if err := c.resolveTargetURL(reqAdapter, path); err != nil {
+		fasthttp.ReleaseRequest(fastReq)
+		fasthttp.ReleaseResponse(fastResp)
+
+		return nil, err
+	}
+
+	c.applyDefaultHeaders(reqAdapter)
+
+	if c.isFastPathEligible(ctx, mods) {
+		extractUserInfoAndSetAuth(fastReq)
+
+		if c.config.Network.HasExperimental(aoni.ExpRIO) || c.config.Network.HasExperimental(aoni.ExpKernelBypass) {
+			if reg, err := sysnet.RegisterBuffer(fastReq.Body()); err == nil && reg != nil {
+				defer reg.Deregister()
+			}
+		}
+
+		err := c.engine.Do(fastReq, fastResp)
+		if err != nil {
+			fasthttp.ReleaseRequest(fastReq)
+			fasthttp.ReleaseResponse(fastResp)
+			return nil, err
+		}
+
+		return NewPooledResponse(fastReq, fastResp), nil
+	}
+
+	reqAdapter = NewRequest(fastReq)
+	defer reqAdapter.Release()
+
+	reqAdapter.SetContext(ctx)
+	c.applyModifiers(reqAdapter, mods)
+
+	reqCtx := reqAdapter.Context()
+
+	stdResp, err := c.pipeline.Execute(reqCtx, reqAdapter, c.HTTP(), c.resolvePipeline(reqCtx)) //nolint:bodyclose
+	if err != nil {
+		fasthttp.ReleaseRequest(fastReq)
+		fasthttp.ReleaseResponse(fastResp)
+
+		return nil, err
+	}
+
+	return aoni.NewStdResponse(stdResp), nil //nolint:bodyclose
+}
+
+// Do executes a prepared [aoni.Request] contract, routing through the target native protocol engine (H1, H2, or H3).
+func (c *Client) Do(req aoni.Request) (aoni.Response, error) {
+	if req == nil {
+		req = NewRequest(nil)
+	}
+
+	ctx := req.Context()
+
+	stdResp, err := c.pipeline.Execute(ctx, req, c.HTTP(), c.resolvePipeline(ctx)) //nolint:bodyclose
+	if err != nil {
+		return nil, err
+	}
+
+	return aoni.NewStdResponse(stdResp), nil //nolint:bodyclose
+}
+
+// Close shuts down idle TCP/TLS/H2/H3 connections and releases internal janitor background goroutines.
+//
+// Thread Safety & Cleanup Contract:
+//   - Thread-safe; safe to call concurrently or during client shutdown.
+//   - Releases internal ring buffer pools, idle H2 connections, and background power management watchers.
+func (c *Client) Close() {
+	if c.coreEngine != nil {
+		c.coreEngine.Close()
+	}
+
+	if c.powerWatcher != nil {
+		c.powerWatcher.Close()
+		c.powerWatcher = nil
+	}
+}
+
+// CloseIdleConnections purges all idle H1, H2, and H3 keep-alive sockets from connection pools.
+func (c *Client) CloseIdleConnections() {
+	if c.engine != nil {
+		c.engine.CloseIdleConnections()
+	}
+
+	c.protocolState.h2Mutex.Lock()
+	for host, h2Cl := range c.protocolState.h2Clients {
+		delete(c.protocolState.h2Clients, host)
+
+		_ = h2Cl
+	}
+
+	c.protocolState.h2Mutex.Unlock()
+
+	if c.protocolState.h3Client != nil {
+		_ = c.protocolState.h3Client.Close()
+		c.protocolState.h3Client = nil
+	}
+}
+
+// HTTP returns an [aoni.HTTPDoer] executing requests via fasthttp, H2, or H3.
+func (c *Client) HTTP() aoni.HTTPDoer {
+	return aoni.HTTPDoerFunc(func(req *http.Request) (*http.Response, error) {
+		fastReq := fasthttp.AcquireRequest()
+		fastResp := fasthttp.AcquireResponse()
+
+		fastReq.Header.SetMethod(req.Method)
+		fastReq.SetRequestURI(req.URL.String())
+		fastReq.Header.SetHost(req.URL.Host)
+
+		for k, vv := range req.Header {
+			for _, v := range vv {
+				fastReq.Header.Add(k, v)
+			}
+		}
+
+		if req.Body != nil && req.Body != http.NoBody {
+			contentLen := req.ContentLength
+			if contentLen <= 0 {
+				if clStr := req.Header.Get("Content-Length"); clStr != "" {
+					if parsed, err := strconv.ParseInt(strings.TrimSpace(clStr), 10, 64); err == nil {
+						contentLen = parsed
+					}
+				}
+			}
+
+			fastReq.SetBodyStream(req.Body, int(contentLen))
+		}
+
+		ctx := req.Context()
+
+		trailers, err, autoReleased := c.executeWithRedirects(ctx, fastReq, fastResp)
+		if err != nil {
+			if !autoReleased {
+				fasthttp.ReleaseRequest(fastReq)
+				fasthttp.ReleaseResponse(fastResp)
+			}
+
+			return nil, err
+		}
+
+		uncompressed := decompressFastResponse(fastResp)
+
+		bodyRC := &fastBodyReadCloser{
+			Reader:   bytes.NewReader(fastResp.Body()),
+			fastReq:  fastReq,
+			fastResp: fastResp,
+		}
+
+		httpResp := &http.Response{
+			StatusCode:    fastResp.StatusCode(),
+			Status:        http.StatusText(fastResp.StatusCode()),
+			Header:        make(http.Header),
+			Trailer:       make(http.Header),
+			Body:          bodyRC,
+			ContentLength: int64(len(fastResp.Body())),
+			Uncompressed:  uncompressed,
+			Request:       req,
+		}
+
+		fastResp.Header.All()(func(k, v []byte) bool {
+			httpResp.Header.Add(string(k), string(v))
+			return true
+		})
+
+		if len(trailers) > 0 {
+			for k, vv := range trailers {
+				for _, v := range vv {
+					httpResp.Trailer.Add(k, v)
+				}
+			}
+		}
+
+		return httpResp, nil
+	})
+}
+
+// AcquireRequest satisfies [aoni.RequestFactory] by acquiring a pooled [Request] instance.
+// Safe for concurrent invocation across arbitrary goroutines.
+// Callers MUST release the acquired request via [Client.ReleaseRequest] or [Request.Release] when finished.
+// Yields a zero-allocation pooled [Request] ready for payload initialization.
+func (c *Client) AcquireRequest() aoni.Request {
+	return NewRequest(nil)
+}
+
+// ReleaseRequest satisfies [aoni.RequestFactory] by returning req back to the [sync.Pool] memory pool.
+// The request object is zeroed out and returned to the pool. Callers MUST NOT reference req after releasing.
+func (c *Client) ReleaseRequest(req aoni.Request) {
+	if fastReq, ok := req.(*Request); ok {
+		fastReq.Release()
+	}
 }
 
 // Config returns a copy of active client configurations.
@@ -148,60 +367,25 @@ func (c *Client) Config() aoni.Config {
 	return c.config
 }
 
-func (c *Client) applyEngineConfig() {
-	if c.config.Engine.Timeout > 0 {
-		c.engine.ReadTimeout = c.config.Engine.Timeout
-		c.engine.WriteTimeout = c.config.Engine.Timeout
-	}
-
-	if c.config.Engine.InsecureSkipVerify {
-		c.engine.TLSConfig = nil
-	}
-
-	c.engine.DisableHeaderNamesNormalizing = true
-}
-
-func (c *Client) applyCustomDialer() {
-	c.defaultDial = c.Dial
-	c.engine.Dial = c.Dial
-	c.engine.DialDualStack = true
-}
-
-func (c *Client) applyDefaultHeaders(req aoni.Request) {
-	if c.config.Defaults.Headers == nil {
-		return
-	}
-
-	for k, vv := range c.config.Defaults.Headers {
-		if req.Header(k) == "" && len(vv) > 0 {
-			req.SetHeader(k, vv[0])
-		}
-	}
-}
-
-func (c *Client) applyModifiers(req aoni.Request, mods []aoni.RequestModifier) {
-	for _, m := range mods {
-		if m != nil {
-			m(req)
-		}
-	}
-}
-
 // Engine returns the underlying [*fasthttp.Client] engine instance.
 func (c *Client) Engine() *fasthttp.Client {
 	return c.engine
 }
 
-// AcquireRequest satisfies [aoni.RequestFactory] by acquiring a pooled [Request] instance.
-func (c *Client) AcquireRequest() aoni.Request {
-	return NewRequest(nil)
-}
-
-// ReleaseRequest satisfies [aoni.RequestFactory] by returning req back to the memory pool.
-func (c *Client) ReleaseRequest(req aoni.Request) {
-	if fastReq, ok := req.(*Request); ok {
-		fastReq.Release()
+func (c *Client) isFastPathEligible(ctx context.Context, mods []aoni.RequestModifier) bool {
+	if len(mods) > 0 {
+		return false
 	}
+
+	if ctx != nil && ctx.Done() != nil {
+		return false
+	}
+
+	if c.config.Engine.CookieJar != nil || c.config.Defaults.Inspector != nil {
+		return false
+	}
+
+	return true
 }
 
 func (c *Client) resolveProtocolHandler(rawURL string) http.RoundTripper {
@@ -293,253 +477,6 @@ func (c *Client) resolveTargetURL(req aoni.Request, path string) error {
 	return nil
 }
 
-// Close shuts down idle connections and releases core engine janitor resources.
-func (c *Client) Close() {
-	if c.coreEngine != nil {
-		c.coreEngine.Close()
-	}
-
-	if c.powerWatcher != nil {
-		c.powerWatcher.Close()
-		c.powerWatcher = nil
-	}
-}
-
-var (
-	methodGetBytes    = []byte("GET")
-	methodPostBytes   = []byte("POST")
-	methodPutBytes    = []byte("PUT")
-	methodDeleteBytes = []byte("DELETE")
-	methodPatchBytes  = []byte("PATCH")
-	methodHeadBytes   = []byte("HEAD")
-)
-
-func getMethodBytes(method string) []byte {
-	switch method {
-	case "GET", "get":
-		return methodGetBytes
-	case "POST", "post":
-		return methodPostBytes
-	case "PUT", "put":
-		return methodPutBytes
-	case "DELETE", "delete":
-		return methodDeleteBytes
-	case "PATCH", "patch":
-		return methodPatchBytes
-	case "HEAD", "head":
-		return methodHeadBytes
-	default:
-		return bytesconv.S2B(method)
-	}
-}
-
-func (c *Client) isFastPathEligible(ctx context.Context, mods []aoni.RequestModifier) bool {
-	if len(mods) > 0 {
-		return false
-	}
-
-	if ctx != nil && ctx.Done() != nil {
-		return false
-	}
-
-	if c.config.Engine.CookieJar != nil || c.config.Defaults.Inspector != nil {
-		return false
-	}
-
-	return true
-}
-
-// Request executes an HTTP request across HTTP/1.1, native HTTP/2, or native HTTP/3.
-func (c *Client) Request(
-	ctx context.Context,
-	method, path string,
-	mods ...aoni.RequestModifier,
-) (aoni.Response, error) {
-	if handler := c.resolveProtocolHandler(path); handler != nil {
-		stdReq, err := http.NewRequestWithContext(ctx, method, path, nil)
-		if err != nil {
-			return nil, err
-		}
-
-		resp, err := handler.RoundTrip(stdReq) //nolint:bodyclose
-		if err != nil {
-			return nil, err
-		}
-
-		return aoni.NewStdResponse(resp), nil
-	}
-
-	fastReq := fasthttp.AcquireRequest()
-	fastResp := fasthttp.AcquireResponse()
-
-	fastReq.Header.SetMethodBytes(getMethodBytes(method))
-
-	reqAdapter := NewRequest(fastReq)
-	defer reqAdapter.Release()
-
-	reqAdapter.SetContext(ctx)
-
-	if err := c.resolveTargetURL(reqAdapter, path); err != nil {
-		fasthttp.ReleaseRequest(fastReq)
-		fasthttp.ReleaseResponse(fastResp)
-
-		return nil, err
-	}
-
-	c.applyDefaultHeaders(reqAdapter)
-
-	if c.isFastPathEligible(ctx, mods) {
-		extractUserInfoAndSetAuth(fastReq)
-
-		if c.config.Network.HasExperimental(aoni.ExpRIO) || c.config.Network.HasExperimental(aoni.ExpKernelBypass) {
-			if reg, err := sysnet.RegisterBuffer(fastReq.Body()); err == nil && reg != nil {
-				defer reg.Deregister()
-			}
-		}
-
-		err := c.engine.Do(fastReq, fastResp)
-		if err != nil {
-			fasthttp.ReleaseRequest(fastReq)
-			fasthttp.ReleaseResponse(fastResp)
-			return nil, err
-		}
-
-		return NewPooledResponse(fastReq, fastResp), nil
-	}
-
-	reqAdapter = NewRequest(fastReq)
-	defer reqAdapter.Release()
-
-	reqAdapter.SetContext(ctx)
-	c.applyModifiers(reqAdapter, mods)
-
-	reqCtx := reqAdapter.Context()
-
-	stdResp, err := c.pipelineEngine.Execute(reqCtx, reqAdapter, c.HTTP(), c.resolvePipeline(reqCtx)) //nolint:bodyclose
-	if err != nil {
-		fasthttp.ReleaseRequest(fastReq)
-		fasthttp.ReleaseResponse(fastResp)
-
-		return nil, err
-	}
-
-	return aoni.NewStdResponse(stdResp), nil
-}
-
-// Do executes a prepared [aoni.Request] contract, routing through the target native protocol engine (H1, H2, or H3).
-func (c *Client) Do(req aoni.Request) (aoni.Response, error) {
-	if req == nil {
-		req = NewRequest(nil)
-	}
-
-	ctx := req.Context()
-
-	stdResp, err := c.pipelineEngine.Execute(ctx, req, c.HTTP(), c.resolvePipeline(ctx)) //nolint:bodyclose
-	if err != nil {
-		return nil, err
-	}
-
-	return aoni.NewStdResponse(stdResp), nil
-}
-
-// HTTP returns an [aoni.HTTPDoer] executing requests via fasthttp, H2, or H3.
-func (c *Client) HTTP() aoni.HTTPDoer {
-	return aoni.HTTPDoerFunc(func(req *http.Request) (*http.Response, error) {
-		fastReq := fasthttp.AcquireRequest()
-		fastResp := fasthttp.AcquireResponse()
-
-		fastReq.Header.SetMethod(req.Method)
-		fastReq.SetRequestURI(req.URL.String())
-		fastReq.Header.SetHost(req.URL.Host)
-
-		for k, vv := range req.Header {
-			for _, v := range vv {
-				fastReq.Header.Add(k, v)
-			}
-		}
-
-		if req.Body != nil && req.Body != http.NoBody {
-			contentLen := req.ContentLength
-			if contentLen <= 0 {
-				if clStr := req.Header.Get("Content-Length"); clStr != "" {
-					if parsed, err := strconv.ParseInt(strings.TrimSpace(clStr), 10, 64); err == nil {
-						contentLen = parsed
-					}
-				}
-			}
-
-			fastReq.SetBodyStream(req.Body, int(contentLen))
-		}
-
-		ctx := req.Context()
-
-		trailers, err, autoReleased := c.executeWithRedirects(ctx, fastReq, fastResp)
-		if err != nil {
-			if !autoReleased {
-				fasthttp.ReleaseRequest(fastReq)
-				fasthttp.ReleaseResponse(fastResp)
-			}
-
-			return nil, err
-		}
-
-		uncompressed := decompressFastResponse(fastResp)
-
-		bodyRC := &fastBodyReadCloser{
-			Reader:   bytes.NewReader(fastResp.Body()),
-			fastReq:  fastReq,
-			fastResp: fastResp,
-		}
-
-		httpResp := &http.Response{
-			StatusCode:    fastResp.StatusCode(),
-			Status:        http.StatusText(fastResp.StatusCode()),
-			Header:        make(http.Header),
-			Trailer:       make(http.Header),
-			Body:          bodyRC,
-			ContentLength: int64(len(fastResp.Body())),
-			Uncompressed:  uncompressed,
-			Request:       req,
-		}
-
-		fastResp.Header.All()(func(k, v []byte) bool {
-			httpResp.Header.Add(string(k), string(v))
-			return true
-		})
-
-		if len(trailers) > 0 {
-			for k, vv := range trailers {
-				for _, v := range vv {
-					httpResp.Trailer.Add(k, v)
-				}
-			}
-		}
-
-		return httpResp, nil
-	})
-}
-
-// CloseIdleConnections purges all idle H1, H2, and H3 keep-alive sockets from connection pools.
-func (c *Client) CloseIdleConnections() {
-	if c.engine != nil {
-		c.engine.CloseIdleConnections()
-	}
-
-	c.protocolState.h2Mutex.Lock()
-	for host, h2Cl := range c.protocolState.h2Clients {
-		delete(c.protocolState.h2Clients, host)
-
-		_ = h2Cl
-	}
-
-	c.protocolState.h2Mutex.Unlock()
-
-	if c.protocolState.h3Client != nil {
-		_ = c.protocolState.h3Client.Close()
-		c.protocolState.h3Client = nil
-	}
-}
-
 func (c *Client) executeWithRedirects(
 	ctx context.Context,
 	fastReq *fasthttp.Request,
@@ -627,113 +564,62 @@ func (c *Client) executeWithRedirects(
 	}
 }
 
-func isRedirectStatus(code int) bool {
-	return code == fasthttp.StatusMovedPermanently ||
-		code == fasthttp.StatusFound ||
-		code == fasthttp.StatusSeeOther ||
-		code == fasthttp.StatusTemporaryRedirect ||
-		code == fasthttp.StatusPermanentRedirect
-}
-
-func isSameHost(u1, u2 *fasthttp.URI) bool {
-	return bytes.EqualFold(u1.Host(), u2.Host())
-}
-
-func isHTTPSDowngrade(u1, u2 *fasthttp.URI) bool {
-	return bytes.EqualFold(u1.Scheme(), []byte("https")) && bytes.EqualFold(u2.Scheme(), []byte("http"))
-}
-
-func applyRedirectMethodAndBody(statusCode int, req *fasthttp.Request) error {
-	switch statusCode {
-	case fasthttp.StatusMovedPermanently, fasthttp.StatusFound, fasthttp.StatusSeeOther:
-		method := string(req.Header.Method())
-		if method != http.MethodGet && method != http.MethodHead {
-			req.Header.SetMethod(http.MethodGet)
-			req.SetBody(nil)
-			req.Header.Del("Content-Type")
-			req.Header.Del("Content-Length")
-		}
+func (c *Client) applyEngineConfig() {
+	if c.config.Engine.Timeout > 0 {
+		c.engine.ReadTimeout = c.config.Engine.Timeout
+		c.engine.WriteTimeout = c.config.Engine.Timeout
 	}
 
-	return nil
+	if c.config.Engine.InsecureSkipVerify {
+		c.engine.TLSConfig = nil
+	}
+
+	c.engine.DisableHeaderNamesNormalizing = true
 }
 
-func decompressFastResponse(resp *fasthttp.Response) bool {
-	enforceContentLengthTruncation(resp)
-
-	encodingBytes := resp.Header.Peek("Content-Encoding")
-	if len(encodingBytes) == 0 {
-		return false
-	}
-
-	encoding := strings.ToLower(bytesconv.B2S(encodingBytes))
-
-	body := resp.Body()
-	if len(body) == 0 {
-		return false
-	}
-
-	var (
-		decompressed []byte
-		err          error
-	)
-
-	switch {
-	case strings.Contains(encoding, "gzip"):
-		gzReader, gzErr := gzip.NewReader(bytes.NewReader(body))
-		if gzErr == nil {
-			decompressed, err = io.ReadAll(gzReader)
-			_ = gzReader.Close()
-		}
-
-	case strings.Contains(encoding, "br"):
-		brReader := brotli.NewReader(bytes.NewReader(body))
-		decompressed, err = io.ReadAll(brReader)
-
-	case strings.Contains(encoding, "zstd"):
-		if zDec, zErr := zstd.NewReader(bytes.NewReader(body)); zErr == nil {
-			decompressed, err = io.ReadAll(zDec)
-			zDec.Close()
-		}
-	}
-
-	if err == nil && len(decompressed) > 0 {
-		resp.SetBody(decompressed)
-		resp.Header.Del("Content-Encoding")
-		resp.Header.Del("Content-Length")
-
-		return true
-	}
-
-	return false
+func (c *Client) applyCustomDialer() {
+	c.defaultDial = c.Dial
+	c.engine.Dial = c.Dial
+	c.engine.DialDualStack = true
 }
 
-func enforceContentLengthTruncation(resp *fasthttp.Response) {
-	if resp == nil {
+func (c *Client) applyDefaultHeaders(req aoni.Request) {
+	if c.config.Defaults.Headers == nil {
 		return
 	}
 
-	clBytes := resp.Header.Peek("Content-Length")
-	if len(clBytes) == 0 {
-		return
+	for k, vv := range c.config.Defaults.Headers {
+		if req.Header(k) == "" && len(vv) > 0 {
+			req.SetHeader(k, vv[0])
+		}
 	}
+}
 
-	cl, err := strconv.ParseInt(bytesconv.B2S(clBytes), 10, 64)
-	if err != nil || cl < 0 {
-		return
+func (c *Client) applyModifiers(req aoni.Request, mods []aoni.RequestModifier) {
+	for _, m := range mods {
+		if m != nil {
+			m(req)
+		}
 	}
+}
 
-	if !resp.IsBodyStream() {
-		body := resp.Body()
-		if int64(len(body)) > cl {
-			resp.SetBody(body[:cl])
+func (c *Client) applyPowerManagement(enable bool) {
+	if !enable {
+		if c.powerWatcher != nil {
+			c.powerWatcher.Close()
+			c.powerWatcher = nil
 		}
 
 		return
 	}
 
-	if stream := resp.BodyStream(); stream != nil {
-		resp.SetBodyStream(io.LimitReader(stream, cl), int(cl))
+	if c.powerWatcher == nil {
+		watcher := power.NewWatcher(5 * time.Second)
+		watcher.OnSuspend(func() {
+			c.CloseIdleConnections()
+		})
+
+		c.powerWatcher = watcher
 	}
 }
 
@@ -864,23 +750,141 @@ func toInternalPipelineConfig(p aoni.PipelineConfig) pipeline.PipelineConfig {
 	return res
 }
 
-func (c *Client) applyPowerManagement(enable bool) {
-	if !enable {
-		if c.powerWatcher != nil {
-			c.powerWatcher.Close()
-			c.powerWatcher = nil
+var (
+	methodGetBytes    = []byte("GET")
+	methodPostBytes   = []byte("POST")
+	methodPutBytes    = []byte("PUT")
+	methodDeleteBytes = []byte("DELETE")
+	methodPatchBytes  = []byte("PATCH")
+	methodHeadBytes   = []byte("HEAD")
+)
+
+func getMethodBytes(method string) []byte {
+	switch method {
+	case "GET", "get":
+		return methodGetBytes
+	case "POST", "post":
+		return methodPostBytes
+	case "PUT", "put":
+		return methodPutBytes
+	case "DELETE", "delete":
+		return methodDeleteBytes
+	case "PATCH", "patch":
+		return methodPatchBytes
+	case "HEAD", "head":
+		return methodHeadBytes
+	default:
+		return bytesconv.S2B(method)
+	}
+}
+
+func isRedirectStatus(code int) bool {
+	return code == fasthttp.StatusMovedPermanently ||
+		code == fasthttp.StatusFound ||
+		code == fasthttp.StatusSeeOther ||
+		code == fasthttp.StatusTemporaryRedirect ||
+		code == fasthttp.StatusPermanentRedirect
+}
+
+func isSameHost(u1, u2 *fasthttp.URI) bool {
+	return bytes.EqualFold(u1.Host(), u2.Host())
+}
+
+func isHTTPSDowngrade(u1, u2 *fasthttp.URI) bool {
+	return bytes.EqualFold(u1.Scheme(), []byte("https")) && bytes.EqualFold(u2.Scheme(), []byte("http"))
+}
+
+func applyRedirectMethodAndBody(statusCode int, req *fasthttp.Request) error {
+	switch statusCode {
+	case fasthttp.StatusMovedPermanently, fasthttp.StatusFound, fasthttp.StatusSeeOther:
+		method := string(req.Header.Method())
+		if method != http.MethodGet && method != http.MethodHead {
+			req.Header.SetMethod(http.MethodGet)
+			req.SetBody(nil)
+			req.Header.Del("Content-Type")
+			req.Header.Del("Content-Length")
+		}
+	}
+
+	return nil
+}
+
+func decompressFastResponse(resp *fasthttp.Response) bool {
+	enforceContentLengthTruncation(resp)
+
+	encodingBytes := resp.Header.Peek("Content-Encoding")
+	if len(encodingBytes) == 0 {
+		return false
+	}
+
+	encoding := strings.ToLower(bytesconv.B2S(encodingBytes))
+
+	body := resp.Body()
+	if len(body) == 0 {
+		return false
+	}
+
+	var (
+		decompressed []byte
+		err          error
+	)
+
+	switch {
+	case strings.Contains(encoding, "gzip"):
+		gzReader, gzErr := gzip.NewReader(bytes.NewReader(body))
+		if gzErr == nil {
+			decompressed, err = io.ReadAll(gzReader)
+			_ = gzReader.Close()
+		}
+
+	case strings.Contains(encoding, "br"):
+		brReader := brotli.NewReader(bytes.NewReader(body))
+		decompressed, err = io.ReadAll(brReader)
+
+	case strings.Contains(encoding, "zstd"):
+		if zDec, zErr := zstd.NewReader(bytes.NewReader(body)); zErr == nil {
+			decompressed, err = io.ReadAll(zDec)
+			zDec.Close()
+		}
+	}
+
+	if err == nil && len(decompressed) > 0 {
+		resp.SetBody(decompressed)
+		resp.Header.Del("Content-Encoding")
+		resp.Header.Del("Content-Length")
+
+		return true
+	}
+
+	return false
+}
+
+func enforceContentLengthTruncation(resp *fasthttp.Response) {
+	if resp == nil {
+		return
+	}
+
+	clBytes := resp.Header.Peek("Content-Length")
+	if len(clBytes) == 0 {
+		return
+	}
+
+	cl, err := strconv.ParseInt(bytesconv.B2S(clBytes), 10, 64)
+	if err != nil || cl < 0 {
+		return
+	}
+
+	if !resp.IsBodyStream() {
+		body := resp.Body()
+		if int64(len(body)) > cl {
+			resp.SetBody(body[:cl])
 		}
 
 		return
 	}
 
-	if c.powerWatcher == nil {
-		watcher := power.NewWatcher(5 * time.Second)
-		watcher.OnSuspend(func() {
-			c.CloseIdleConnections()
-		})
-
-		c.powerWatcher = watcher
+	if stream := resp.BodyStream(); stream != nil {
+		resp.SetBodyStream(io.LimitReader(stream, cl), int(cl))
 	}
 }
 

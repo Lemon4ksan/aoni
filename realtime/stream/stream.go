@@ -32,7 +32,7 @@ import (
 )
 
 // ErrTargetNotProtoMessage is returned when a target output variable does not implement [proto.Message].
-var ErrTargetNotProtoMessage = errors.New("aoni stream: target type does not implement proto.Message")
+var ErrTargetNotProtoMessage = errors.New("aoni/stream: target type does not implement proto.Message")
 
 // Stream wraps an [*http.Response] and manages live connection response stream reads.
 type Stream struct {
@@ -208,7 +208,7 @@ func dispatchSSEEvent[T any](ctx context.Context, currentEvent SSEEvent, out cha
 		val = s
 	} else {
 		if err := json.Unmarshal([]byte(currentEvent.Data), &val); err != nil {
-			return fmt.Errorf("aoni sse: unmarshal failed: %w", err)
+			return fmt.Errorf("aoni/stream: unmarshal sse failed: %w", err)
 		}
 	}
 
@@ -564,14 +564,14 @@ func decodeProtoPayload[T any](payload []byte, flags byte) (T, error) {
 	if flags&0x01 != 0 {
 		gzReader, err := gzip.NewReader(bytes.NewReader(payload))
 		if err != nil {
-			return zero, fmt.Errorf("aoni stream: decompress gRPC-Web frame failed: %w", err)
+			return zero, fmt.Errorf("aoni/stream: decompress gRPC-Web frame failed: %w", err)
 		}
 
 		decompressed, err := io.ReadAll(gzReader)
 		_ = gzReader.Close()
 
 		if err != nil {
-			return zero, fmt.Errorf("aoni stream: read decompressed gRPC-Web payload failed: %w", err)
+			return zero, fmt.Errorf("aoni/stream: read decompressed gRPC-Web payload failed: %w", err)
 		}
 
 		payload = decompressed
@@ -581,11 +581,11 @@ func decodeProtoPayload[T any](payload []byte, flags byte) (T, error) {
 
 	msg, err := resolveProtoTargetInstance(&target)
 	if err != nil {
-		return zero, fmt.Errorf("aoni stream: %w", err)
+		return zero, fmt.Errorf("aoni/stream: %w", err)
 	}
 
 	if err := proto.Unmarshal(payload, msg); err != nil {
-		return zero, fmt.Errorf("aoni stream: unmarshal gRPC-Web payload failed: %w", err)
+		return zero, fmt.Errorf("aoni/stream: unmarshal gRPC-Web payload failed: %w", err)
 	}
 
 	return target, nil

@@ -28,10 +28,10 @@ import (
 
 var (
 	// ErrNoBackends is returned when attempting to initialize a load balancer without target backends.
-	ErrNoBackends = errors.New("aoni: load balancer requires at least one backend")
+	ErrNoBackends = errors.New("aoni/loadbalancer: at least one backend is required")
 
 	// ErrNoHealthyBackends is returned when all registered backends are marked unhealthy or in cooldown.
-	ErrNoHealthyBackends = errors.New("aoni: no healthy backends available")
+	ErrNoHealthyBackends = errors.New("aoni/loadbalancer: no healthy backends available")
 )
 
 // Strategy defines the backend selection algorithm.
@@ -236,14 +236,10 @@ func resolveSRVBackends(
 			tracker: health.NewTracker(
 				targetURL, cfg.MaxFails, cfg.RetryAfter,
 				func(name string, fails uint32, retryAfter time.Duration) {
-					slog.Warn(
-						"srv backend marked unhealthy",
-						"backend",
-						name,
-						"fails",
-						fails,
-						"retry_after",
-						retryAfter,
+					slog.Warn("srv backend marked unhealthy",
+						"backend", name,
+						"fails", fails,
+						"retry_after", retryAfter,
 					)
 				},
 				func(name string) {

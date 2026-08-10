@@ -10,11 +10,11 @@ import (
 
 var (
 	// ErrInvalidGRPCFrame is returned when a gRPC 5-byte length header is corrupted or truncated.
-	ErrInvalidGRPCFrame = errors.New("aoni grpc: invalid or truncated gRPC frame header")
+	ErrInvalidGRPCFrame = errors.New("aoni/grpc: invalid or truncated gRPC frame header")
 
 	// ErrInvalidContentType is returned when the response Content-Type is not application/grpc.
-	ErrInvalidContentType = errors.New("aoni grpc: invalid content-type in response (expected application/grpc)")
+	ErrInvalidContentType = errors.New("aoni/grpc: invalid content-type in response (expected application/grpc)")
 
 	// ErrMissingGRPCStatus is returned when the HTTP/2 response trailers lack the mandatory grpc-status header.
-	ErrMissingGRPCStatus = errors.New("aoni grpc: missing mandatory grpc-status header in response trailers")
+	ErrMissingGRPCStatus = errors.New("aoni/grpc: missing mandatory grpc-status header in response trailers")
 )

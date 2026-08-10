@@ -27,10 +27,10 @@ const (
 
 var (
 	// ErrDarwinUtunFailed indicates that utun interface creation failed on macOS.
-	ErrDarwinUtunFailed = errors.New("aoni tun: failed to create macOS utun interface")
+	ErrDarwinUtunFailed = errors.New("aoni/tun: failed to create macOS utun interface")
 
 	// ErrInvalidUtunName indicates an interface name that does not match utun[0-9]+ format.
-	ErrInvalidUtunName = errors.New("aoni tun: interface name must match utun[0-9]+")
+	ErrInvalidUtunName = errors.New("aoni/tun: interface name must match utun[0-9]+")
 )
 
 type ctlInfo struct {
@@ -54,10 +54,7 @@ type DarwinAdapter struct {
 }
 
 // NewDarwinAdapter creates and registers a Layer 3 utun interface on macOS without CGO.
-//
-// Preconditions:
-//   - devName must match "utun[0-9]+" (e.g., "utun0", "utun1") or be empty for auto-assignment.
-//   - Requires root or sudo privileges on macOS to allocate system control sockets.
+// Requires root or sudo privileges on macOS to allocate system control sockets.
 func NewDarwinAdapter(devName string) (*DarwinAdapter, error) {
 	unit := 0
 	if devName != "" {

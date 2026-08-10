@@ -22,10 +22,10 @@ const (
 
 var (
 	// ErrLinuxTunOpenFailed indicates that /dev/net/tun could not be opened.
-	ErrLinuxTunOpenFailed = errors.New("aoni tun: failed to open /dev/net/tun")
+	ErrLinuxTunOpenFailed = errors.New("aoni/tun: failed to open /dev/net/tun")
 
 	// ErrLinuxIoctlFailed indicates that TUNSETIFF ioctl registration failed.
-	ErrLinuxIoctlFailed = errors.New("aoni tun: TUNSETIFF ioctl failed")
+	ErrLinuxIoctlFailed = errors.New("aoni/tun: TUNSETIFF ioctl failed")
 )
 
 type ifreq struct {
@@ -41,9 +41,7 @@ type LinuxAdapter struct {
 }
 
 // NewLinuxAdapter creates and registers a Layer 3 TUN network interface on Linux.
-//
-// Preconditions:
-//   - Requires CAP_NET_ADMIN privileges on Linux (or running as root).
+// Requires CAP_NET_ADMIN privileges on Linux (or running as root).
 func NewLinuxAdapter(devName string) (*LinuxAdapter, error) {
 	file, err := os.OpenFile("/dev/net/tun", os.O_RDWR, 0)
 	if err != nil {

@@ -11,7 +11,7 @@ import (
 	"strings"
 )
 
-var ErrInvalidECHConfig = errors.New("aoni fingerprint: invalid base64 ech config")
+var ErrInvalidECHConfig = errors.New("aoni/fingerprint: invalid base64 ech config")
 
 // ParseECHConfigBase64 decodes a base64-encoded ECHConfigList string.
 func ParseECHConfigBase64(raw string) ([]byte, error) {

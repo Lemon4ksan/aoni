@@ -113,7 +113,7 @@ type settingsProxy struct {
 func ParseSettings(jsonStr string) (Settings, error) {
 	var p settingsProxy
 	if err := json.Unmarshal([]byte(jsonStr), &p); err != nil {
-		return Settings{}, fmt.Errorf("aoni h2: failed to decode settings JSON: %w", err)
+		return Settings{}, fmt.Errorf("aoni/h2: failed to decode settings JSON: %w", err)
 	}
 
 	var settings Settings
@@ -286,7 +286,7 @@ func (ft *FramedTransport) RoundTrip(req *http.Request) (*http.Response, error) 
 		cc, err := ft.h2Transport.NewClientConn(framed)
 		if err != nil {
 			_ = conn.Close()
-			return nil, fmt.Errorf("aoni h2: failed to create h2 client conn: %w", err)
+			return nil, fmt.Errorf("aoni/h2: failed to create h2 client conn: %w", err)
 		}
 
 		ft.saveH2Conn(addr, cc)
@@ -375,7 +375,7 @@ func canonicalAddr(u *url.URL) string {
 func http1RoundTrip(req *http.Request, conn net.Conn) (*http.Response, error) {
 	if err := req.Write(conn); err != nil {
 		_ = conn.Close()
-		return nil, fmt.Errorf("aoni h2: failed to write h1 request: %w", err)
+		return nil, fmt.Errorf("aoni/h2: failed to write h1 request: %w", err)
 	}
 
 	br := bufio.NewReader(conn)
@@ -383,7 +383,7 @@ func http1RoundTrip(req *http.Request, conn net.Conn) (*http.Response, error) {
 	resp, err := http.ReadResponse(br, req)
 	if err != nil {
 		_ = conn.Close()
-		return nil, fmt.Errorf("aoni h2: failed to read h1 response: %w", err)
+		return nil, fmt.Errorf("aoni/h2: failed to read h1 response: %w", err)
 	}
 
 	resp.Body = &connCloser{ReadCloser: resp.Body, conn: conn}

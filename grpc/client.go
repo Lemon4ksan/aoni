@@ -83,7 +83,7 @@ func Invoke[Resp any](
 
 	msg, ok := any(result).(proto.Message)
 	if !ok {
-		return nil, fmt.Errorf("aoni grpc: response type %T does not implement proto.Message", result)
+		return nil, fmt.Errorf("aoni/grpc: response type %T does not implement proto.Message", result)
 	}
 
 	if _, err := unmarshalFrame(resp.Body, msg); err != nil {
@@ -141,7 +141,7 @@ func InvokeFast[Resp any](
 
 	msg, ok := any(result).(proto.Message)
 	if !ok {
-		return nil, fmt.Errorf("aoni grpc: response type %T does not implement proto.Message", result)
+		return nil, fmt.Errorf("aoni/grpc: response type %T does not implement proto.Message", result)
 	}
 
 	if err := unmarshalFastGRPCFrame(resp, msg); err != nil {
@@ -229,7 +229,7 @@ func (s *StreamResponse[Resp]) Recv() (*Resp, error) {
 
 	msg, ok := any(result).(proto.Message)
 	if !ok {
-		return nil, fmt.Errorf("aoni grpc: response type %T does not implement proto.Message", result)
+		return nil, fmt.Errorf("aoni/grpc: response type %T does not implement proto.Message", result)
 	}
 
 	_, err := unmarshalFrame(s.stream, msg)

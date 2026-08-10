@@ -12,8 +12,8 @@ import (
 )
 
 var (
-	ErrInvalidIPHeader = errors.New("aoni masque: invalid ip packet header")
-	ErrMTUTooSmall     = errors.New("aoni masque: mtu below protocol minimum")
+	ErrInvalidIPHeader = errors.New("aoni/masque: invalid ip packet header")
+	ErrMTUTooSmall     = errors.New("aoni/masque: mtu below protocol minimum")
 )
 
 // BuildICMPPacketTooBig4 constructs an ICMPv4 Fragmentation Needed packet.
@@ -171,22 +171,28 @@ func EncodeVarintSlice(v uint64, b []byte) int {
 	}
 }
 
-// EncodeVarint writes a QUIC-style variable length integer to buf.
+// EncodeVarint encodes val as a QUIC-style variable length integer (RFC 9000).
 func EncodeVarint(val uint64) []byte {
 	switch {
 	case val <= 63:
 		return []byte{byte(val)}
+
 	case val <= 16383:
 		b := make([]byte, 2)
 		binary.BigEndian.PutUint16(b, uint16(val)|0x4000)
+
 		return b
+
 	case val <= 1073741823:
 		b := make([]byte, 4)
 		binary.BigEndian.PutUint32(b, uint32(val)|0x80000000)
+
 		return b
+
 	default:
 		b := make([]byte, 8)
 		binary.BigEndian.PutUint64(b, val|0xc000000000000000)
+
 		return b
 	}
 }
@@ -194,7 +200,7 @@ func EncodeVarint(val uint64) []byte {
 // DecodeVarint decodes a QUIC-style variable length integer from payload.
 func DecodeVarint(payload []byte) (val uint64, readLen int, err error) {
 	if len(payload) == 0 {
-		return 0, 0, errors.New("aoni masque: truncated varint payload")
+		return 0, 0, errors.New("aoni/masque: truncated varint payload")
 	}
 
 	first := payload[0]
@@ -206,7 +212,7 @@ func DecodeVarint(payload []byte) (val uint64, readLen int, err error) {
 
 	case 1:
 		if len(payload) < 2 {
-			return 0, 0, errors.New("aoni masque: truncated 2-byte varint")
+			return 0, 0, errors.New("aoni/masque: truncated 2-byte varint")
 		}
 
 		v := binary.BigEndian.Uint16(payload[:2]) & 0x3fff
@@ -215,7 +221,7 @@ func DecodeVarint(payload []byte) (val uint64, readLen int, err error) {
 
 	case 2:
 		if len(payload) < 4 {
-			return 0, 0, errors.New("aoni masque: truncated 4-byte varint")
+			return 0, 0, errors.New("aoni/masque: truncated 4-byte varint")
 		}
 
 		v := binary.BigEndian.Uint32(payload[:4]) & 0x3fffffff
@@ -224,7 +230,7 @@ func DecodeVarint(payload []byte) (val uint64, readLen int, err error) {
 
 	case 3:
 		if len(payload) < 8 {
-			return 0, 0, errors.New("aoni masque: truncated 8-byte varint")
+			return 0, 0, errors.New("aoni/masque: truncated 8-byte varint")
 		}
 
 		v := binary.BigEndian.Uint64(payload[:8]) & 0x3fffffffffffffff
@@ -232,5 +238,5 @@ func DecodeVarint(payload []byte) (val uint64, readLen int, err error) {
 		return v, 8, nil
 	}
 
-	return 0, 0, errors.New("aoni masque: invalid varint tag")
+	return 0, 0, errors.New("aoni/masque: invalid varint tag")
 }

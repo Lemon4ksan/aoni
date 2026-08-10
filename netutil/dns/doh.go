@@ -53,13 +53,7 @@ type DoHResolver struct {
 
 // NewDoHResolver constructs a [DoHResolver] bound to endpoint and host.
 // The doer parameter accepts any engine implementation (*fast.Client, *aoni.Client, *http.Client, or nil).
-//
-// Preconditions:
-//   - endpoint must be a valid HTTP/HTTPS URL string.
-//   - If doer is nil, defaults to a 5-second timeout [fast.Client] engine.
-//
-// Postconditions:
-//   - Yields a non-nil, thread-safe [DoHResolver] pointer ready for hostname resolution.
+// Defaults to a 5-second timeout [fast.Client] engine if doer is nil.
 func NewDoHResolver(endpoint, host string, doer any) *DoHResolver {
 	var engine aoni.RequestDoer
 	if doer == nil {
@@ -165,7 +159,7 @@ func (r *DoHResolver) LookupWireRecord(ctx context.Context, host string, qtype u
 	defer resp.Close()
 
 	if resp.StatusCode() != http.StatusOK {
-		return nil, fmt.Errorf("aoni doh: http status %d", resp.StatusCode())
+		return nil, fmt.Errorf("aoni/doh: http status %d", resp.StatusCode())
 	}
 
 	return resp.BodyBytes(), nil
@@ -216,7 +210,7 @@ func (r *DoHResolver) queryWire(ctx context.Context, host string, qtype uint16) 
 	defer resp.Close()
 
 	if resp.StatusCode() != http.StatusOK {
-		return nil, fmt.Errorf("aoni doh: http status %d", resp.StatusCode())
+		return nil, fmt.Errorf("aoni/doh: http status %d", resp.StatusCode())
 	}
 
 	return wire.ParseDNSResponseRecords(resp.BodyBytes(), queryID)

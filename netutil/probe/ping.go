@@ -31,6 +31,8 @@ type PingResult struct {
 // Unprivileged Compatibility:
 // Attempts unprivileged datagram ICMP sockets ("udp4"/"udp6") first, allowing rootless execution
 // on Linux and macOS, falling back to raw ICMP sockets ("ip4:icmp") if elevated privileges are present.
+//
+// On success, returns a [*PingResult] populated with target IP, RTT duration, and payload byte size.
 func Ping(ctx context.Context, target string, timeout time.Duration) (*PingResult, error) {
 	if timeout <= 0 {
 		timeout = 3 * time.Second
@@ -38,7 +40,7 @@ func Ping(ctx context.Context, target string, timeout time.Duration) (*PingResul
 
 	ipAddr, err := net.ResolveIPAddr("ip", target)
 	if err != nil {
-		return nil, fmt.Errorf("aoni probe: resolve ip failed: %w", err)
+		return nil, fmt.Errorf("aoni/probe: resolve ip failed: %w", err)
 	}
 
 	isV6 := ipAddr.IP.To4() == nil
@@ -73,7 +75,7 @@ func Ping(ctx context.Context, target string, timeout time.Duration) (*PingResul
 		return nil, fmt.Errorf("%w: send failed: %w", ErrICMPEchoFailed, err)
 	}
 
-	return readEchoReply(ctx, pconn, isV6, id, seq, sendTime, target, ipAddr.IP, timeout)
+	return readEchoReply(ctx, pconn, isV6, id, seq, sendTime, target, ipAddr.IP)
 }
 
 func listenICMP(isV6 bool) (*icmp.PacketConn, bool, error) {
@@ -97,7 +99,7 @@ func listenICMP(isV6 bool) (*icmp.PacketConn, bool, error) {
 
 	pconn, err = icmp.ListenPacket(rawNetwork, bindAddr)
 	if err != nil {
-		return nil, false, fmt.Errorf("aoni probe: listen icmp failed: %w", err)
+		return nil, false, fmt.Errorf("aoni/probe: listen icmp failed: %w", err)
 	}
 
 	return pconn, false, nil
@@ -130,7 +132,6 @@ func readEchoReply(
 	sendTime time.Time,
 	target string,
 	ip net.IP,
-	timeout time.Duration,
 ) (*PingResult, error) {
 	replyBuf := make([]byte, 1500)
 

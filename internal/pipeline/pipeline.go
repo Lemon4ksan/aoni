@@ -28,7 +28,7 @@ type Pipeline struct {
 	_       cpu.CacheLinePad
 }
 
-func NewPipeline(defaults ClientDefaults, fingerprint ClientFingerprint) *Pipeline {
+func New(defaults ClientDefaults, fingerprint ClientFingerprint) *Pipeline {
 	return &Pipeline{
 		defaults:    defaults,
 		fingerprint: fingerprint,

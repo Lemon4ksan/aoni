@@ -54,13 +54,13 @@ func (d *DynamicInvoker) InvokeJSON(
 	mods ...aoni.RequestModifier,
 ) (string, error) {
 	if inputDesc == nil || outputDesc == nil {
-		return "", errors.New("aoni grpc: input and output MessageDescriptors must not be nil")
+		return "", errors.New("aoni/grpc: input and output MessageDescriptors must not be nil")
 	}
 
 	reqMsg := dynamicpb.NewMessage(inputDesc)
 	if strings.TrimSpace(reqJSON) != "" {
 		if err := d.jsonUnmarshal.Unmarshal([]byte(reqJSON), reqMsg); err != nil {
-			return "", fmt.Errorf("aoni grpc: unmarshal JSON request failed: %w", err)
+			return "", fmt.Errorf("aoni/grpc: unmarshal JSON request failed: %w", err)
 		}
 	}
 

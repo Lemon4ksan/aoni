@@ -13,7 +13,7 @@ import (
 )
 
 // ErrInvalidP0fSignature is returned when a p0f signature string violates the 8-field spec format.
-var ErrInvalidP0fSignature = errors.New("aoni p0f: invalid p0f signature string")
+var ErrInvalidP0fSignature = errors.New("aoni/p0f: invalid p0f signature string")
 
 // Error describes a parsing or parsing validation error for a specific signature field.
 type Error struct {
@@ -27,7 +27,7 @@ func (e *Error) Error() string {
 		return "<nil>"
 	}
 
-	return "aoni p0f: field " + e.Field + " (" + e.Val + "): " + e.Err.Error()
+	return "aoni/p0f: field " + e.Field + " (" + e.Val + "): " + e.Err.Error()
 }
 
 func (e *Error) Unwrap() error { return e.Err }

@@ -24,17 +24,13 @@ type (
 )
 
 // WithProxyAddress returns a new Context carrying the active proxy URL string for cookie jar partitioning.
-//
-// Postconditions:
-//   - Yields a child context containing proxyCtxKey with value addr.
+// Yields a child context containing proxyCtxKey with value addr.
 func WithProxyAddress(ctx context.Context, addr string) context.Context {
 	return context.WithValue(ctx, proxyCtxKey{}, addr)
 }
 
 // GetProxyAddress retrieves the active proxy URL string stored in the context.
-//
-// Postconditions:
-//   - Returns the proxy URL string if present; otherwise returns an empty string.
+// Returns the proxy URL string if present; otherwise returns an empty string.
 func GetProxyAddress(ctx context.Context) string {
 	val, ok := ctx.Value(proxyCtxKey{}).(string)
 	if !ok {
@@ -85,9 +81,7 @@ type ProxyIsolatedJar struct {
 }
 
 // NewProxyIsolatedJar creates a new, thread-safe [ProxyIsolatedJar] ready for concurrent request execution.
-//
-// Postconditions:
-//   - Initializes internal concurrency locks and map storage for proxy-isolated jars.
+// Initializes internal concurrency locks and map storage for proxy-isolated jars.
 func NewProxyIsolatedJar() *ProxyIsolatedJar {
 	return &ProxyIsolatedJar{
 		jars: make(map[string]http.CookieJar),
@@ -95,9 +89,7 @@ func NewProxyIsolatedJar() *ProxyIsolatedJar {
 }
 
 // SetCookies satisfies the standard [http.CookieJar] interface.
-//
-// Preconditions:
-//   - Delegates to the default (unproxied) internal jar when invoked without a proxy-aware context.
+// Delegates to the default (unproxied) internal jar when invoked without a proxy-aware context.
 func (p *ProxyIsolatedJar) SetCookies(u *url.URL, cookies []*http.Cookie) {
 	if jar := p.GetJarForProxy(""); jar != nil {
 		jar.SetCookies(u, cookies)
@@ -105,9 +97,7 @@ func (p *ProxyIsolatedJar) SetCookies(u *url.URL, cookies []*http.Cookie) {
 }
 
 // Cookies satisfies the standard [http.CookieJar] interface.
-//
-// Postconditions:
-//   - Returns cookies matching destination u from the default (unproxied) internal jar when context is absent.
+// Returns cookies matching destination u from the default (unproxied) internal jar when context is absent.
 func (p *ProxyIsolatedJar) Cookies(u *url.URL) []*http.Cookie {
 	if jar := p.GetJarForProxy(""); jar != nil {
 		return jar.Cookies(u)

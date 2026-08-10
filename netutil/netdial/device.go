@@ -13,7 +13,7 @@ import (
 )
 
 // ErrL2DeviceNil is returned when attempting to bind an uninitialized L2Device.
-var ErrL2DeviceNil = errors.New("aoni netdial: L2Device cannot be nil")
+var ErrL2DeviceNil = errors.New("aoni/netdial: L2Device cannot be nil")
 
 // L2Addr represents a Data Link Layer (MAC) hardware network address satisfying net.Addr.
 type L2Addr struct {

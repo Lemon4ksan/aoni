@@ -329,7 +329,7 @@ func (c *Client) cachePushedResponse(
 		return true
 	})
 
-	pipe := c.pipelineEngine
+	pipe := c.pipeline
 	if pipe != nil && cacheCfg != nil {
 		var nvs *pipeline.NoVarySearchConfig
 		if cacheCfg.NoVarySearch != nil {

@@ -19,7 +19,8 @@ import (
 	"github.com/lemon4ksan/aoni/netutil"
 )
 
-// Dial executes an L4 TCP dial followed by an optional uTLS handshake.
+// Dial executes an L4 TCP dial followed by an optional uTLS handshake to target addr ("host:port" or "host").
+// Yields an active, tuned [net.Conn] socket configured for low latency.
 func (c *Client) Dial(addr string) (net.Conn, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
@@ -27,7 +28,8 @@ func (c *Client) Dial(addr string) (net.Conn, error) {
 	return c.DialContext(ctx, "tcp", addr)
 }
 
-// DialContext establishes a raw L4 TCP connection using request context.
+// DialContext establishes a raw L4 TCP connection or uTLS socket using the provided request context.
+// Yields an active, tuned [net.Conn] socket applying low-latency OS syscall flags (TCP_NODELAY).
 func (c *Client) DialContext(ctx context.Context, network, addr string) (net.Conn, error) {
 	dialer := transport.NewUniversalDialer()
 	dialCfg := c.buildDialConfig(ctx)
@@ -59,7 +61,8 @@ func (c *Client) isTLSEnabled() bool {
 		f.TLSClientHelloSpecProvider != nil
 }
 
-// DialTLS establishes an encrypted L7 TLS or uTLS connection over L4 TCP.
+// DialTLS establishes an encrypted L7 TLS or uTLS connection over an L4 TCP transport.
+// Yields a negotiated TLS socket configured with active uTLS browser impersonation profiles.
 func (c *Client) DialTLS(ctx context.Context, network, addr string) (net.Conn, error) {
 	dialer := transport.NewUniversalDialer()
 	dialCfg := c.buildDialConfig(ctx)
@@ -67,11 +70,12 @@ func (c *Client) DialTLS(ctx context.Context, network, addr string) (net.Conn, e
 	return dialer.DialTLSContext(ctx, network, addr, dialCfg)
 }
 
-// DialTLSContext is an alias for [DialTLS] retained for backward compatibility.
+// DialTLSContext is an alias for [Client.DialTLS] retained for backward compatibility with custom dialers.
 func (c *Client) DialTLSContext(ctx context.Context, network, addr string) (net.Conn, error) {
 	return c.DialTLS(ctx, network, addr)
 }
 
+// DialH2 establishes a multiplexed HTTP/2 socket connection directly to the target host.
 func (c *Client) DialH2(ctx context.Context, addr string) (net.Conn, error) {
 	dialer := transport.NewUniversalDialer()
 	dialCfg := c.buildDialConfig(ctx)
@@ -79,6 +83,7 @@ func (c *Client) DialH2(ctx context.Context, addr string) (net.Conn, error) {
 	return dialer.DialH2(ctx, addr, dialCfg)
 }
 
+// TrackHTTPSTarget increments the active HTTPS target reference count for addr.
 func (c *Client) TrackHTTPSTarget(addr string) {
 	if val, ok := c.activeTargets.Load(addr); ok {
 		c.activeTargets.Store(addr, val.(int)+1)
@@ -87,6 +92,7 @@ func (c *Client) TrackHTTPSTarget(addr string) {
 	}
 }
 
+// UntrackHTTPSTarget decrements the active HTTPS target reference count for addr.
 func (c *Client) UntrackHTTPSTarget(addr string) {
 	if val, ok := c.activeTargets.Load(addr); ok {
 		count := val.(int) - 1
@@ -98,6 +104,7 @@ func (c *Client) UntrackHTTPSTarget(addr string) {
 	}
 }
 
+// IsHTTPSTarget reports whether addr has been tracked as an active HTTPS target.
 func (c *Client) IsHTTPSTarget(addr string) bool {
 	_, ok := c.activeTargets.Load(addr)
 	return ok
@@ -124,7 +131,7 @@ func (c *Client) DialTLSForWS(ctx context.Context, addr string) (net.Conn, error
 	return c.DialTLSContext(ctx, "tcp", addr)
 }
 
-// DialPlainForWS establishes a raw TCP socket connection applying active proxy and SSRF guards.
+// DialPlainForWS establishes a raw TCP socket connection applying active proxy and SSRF guards for WebSockets.
 func (c *Client) DialPlainForWS(ctx context.Context, addr string) (net.Conn, error) {
 	return c.DialContext(ctx, "tcp", addr)
 }

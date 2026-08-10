@@ -15,9 +15,7 @@ import (
 )
 
 // New acquires a pooled [Request] builder bound to the provided client engine or [aoni.Client].
-//
-// Postconditions:
-//   - The returned request must be executed or released via [Request.Discard] to prevent pool leaks.
+// The returned request must be executed or released via [Request.Discard] to prevent pool leaks.
 func New(doer any) *Request {
 	return requestPool.Get(doer)
 }

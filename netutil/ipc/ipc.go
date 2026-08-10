@@ -13,12 +13,6 @@ import (
 	"time"
 )
 
-// Transport provides an [http.RoundTripper] routing HTTP/gRPC requests directly over local Unix domain sockets or Windows Named Pipes.
-type Transport struct {
-	SocketPath string
-	Network    string
-}
-
 // NewUnixTransport creates an [http.RoundTripper] bound to a local Unix domain socket path.
 func NewUnixTransport(socketPath string) *http.Transport {
 	return &http.Transport{

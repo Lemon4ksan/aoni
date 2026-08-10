@@ -103,7 +103,7 @@ func performCONNECTUDPHandshake(
 	}
 
 	if err := req.Write(conn); err != nil {
-		return nil, fmt.Errorf("aoni masque: write udp request: %w", err)
+		return nil, fmt.Errorf("aoni/masque: write udp request: %w", err)
 	}
 
 	br, ok := bufioReaderPool.Get().(*bufio.Reader)
@@ -120,7 +120,7 @@ func performCONNECTUDPHandshake(
 
 	resp, err := http.ReadResponse(br, req)
 	if err != nil {
-		return nil, fmt.Errorf("aoni masque: read udp response: %w", err)
+		return nil, fmt.Errorf("aoni/masque: read udp response: %w", err)
 	}
 
 	if resp.StatusCode != http.StatusSwitchingProtocols && resp.StatusCode != http.StatusOK {

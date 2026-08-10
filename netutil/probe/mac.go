@@ -62,7 +62,7 @@ func getMACFromARP(ip string) (string, error) {
 		}
 	}
 
-	return "", fmt.Errorf("aoni probe: mac not found in arp table for %s", ip)
+	return "", fmt.Errorf("aoni/probe: mac not found in arp table for %s", ip)
 }
 
 func lookupOUIVendor(macStr string) string {

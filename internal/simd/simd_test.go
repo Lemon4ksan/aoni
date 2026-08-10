@@ -5,6 +5,7 @@
 package simd_test
 
 import (
+	"bytes"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -64,4 +65,79 @@ func TestApplyFastMaskVector(t *testing.T) {
 	// Unmasking
 	simd.ApplyFastMaskVector(payload, mask)
 	assert.Equal(t, orig, payload)
+}
+
+func BenchmarkIndexByte_Std(b *testing.B) {
+	data := make([]byte, 1024)
+	for i := range data {
+		data[i] = 'a'
+	}
+
+	data[1023] = 'z'
+
+	b.ReportAllocs()
+
+	for b.Loop() {
+		_ = bytes.IndexByte(data, 'z')
+	}
+}
+
+func BenchmarkIndexByte_SWAR(b *testing.B) {
+	data := make([]byte, 1024)
+	for i := range data {
+		data[i] = 'a'
+	}
+
+	data[1023] = 'z'
+
+	b.ReportAllocs()
+
+	for b.Loop() {
+		_ = simd.IndexByteSWAR(data, 'z')
+	}
+}
+
+func BenchmarkIndexByte_AVX2(b *testing.B) {
+	data := make([]byte, 1024)
+	for i := range data {
+		data[i] = 'a'
+	}
+
+	data[1023] = 'z'
+
+	b.ReportAllocs()
+
+	for b.Loop() {
+		_ = simd.IndexByteVector(data, 'z')
+	}
+}
+
+func BenchmarkIndexTwoBytes_SWAR(b *testing.B) {
+	data := make([]byte, 1024)
+	for i := range data {
+		data[i] = 'a'
+	}
+
+	data[1023] = '\n'
+
+	b.ReportAllocs()
+
+	for b.Loop() {
+		_ = simd.IndexByteTwoSWAR(data, '\r', '\n')
+	}
+}
+
+func BenchmarkIndexTwoBytes_AVX2(b *testing.B) {
+	data := make([]byte, 1024)
+	for i := range data {
+		data[i] = 'a'
+	}
+
+	data[1023] = '\n'
+
+	b.ReportAllocs()
+
+	for b.Loop() {
+		_ = simd.IndexTwoBytesVector(data, '\r', '\n')
+	}
 }

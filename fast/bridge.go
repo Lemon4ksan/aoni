@@ -16,7 +16,13 @@ import (
 	"github.com/lemon4ksan/aoni/option"
 )
 
-// NewStdClient adapts a fast [Client] into a standard [*http.Client].
+// NewStdClient adapts a fast [Client] into a standard Go [*http.Client].
+//
+// It bridges third-party libraries (e.g., resty, go-resty, AWS SDKs, or custom API SDKs)
+// with aoni/fast's ultra-high-throughput fasthttp transport pipeline (1.5M+ RPS, 0 allocs).
+// Sets [http.Client.CheckRedirect] to [http.ErrUseLastResponse], delegating all redirect handling
+// internally to aoni's pipeline to prevent double-handling or socket leaks.
+// Returns a fully compatible [*http.Client] that routes all requests through aoni/fast's fasthttp engine.
 func NewStdClient(c *Client) *http.Client {
 	return &http.Client{
 		Transport: NewTransport(c),
@@ -26,7 +32,11 @@ func NewStdClient(c *Client) *http.Client {
 	}
 }
 
-// NewTransport constructs an [http.RoundTripper] adapter backed by a fast [Client].
+// NewTransport constructs an [http.RoundTripper] (as a [*Transport]) configured
+// to pass all outgoing requests through the provided fast [Client].
+//
+// Swap this transport into an existing [*http.Client] to seamlessly inject
+// aoni/fast's high-throughput transport features into third-party Go libraries without changing application code.
 func NewTransport(c *Client) *Transport {
 	return &Transport{
 		client:           c,
@@ -34,7 +44,8 @@ func NewTransport(c *Client) *Transport {
 	}
 }
 
-// Transport adapts a fast [Client] to satisfy the standard [http.RoundTripper] contract.
+// Transport implements the standard [http.RoundTripper] interface, intercepting
+// outbound requests and delegating them to an active fast [Client] pipeline.
 type Transport struct {
 	client           *Client
 	noRedirectClient *Client

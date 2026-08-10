@@ -26,8 +26,8 @@ import (
 )
 
 var (
-	ErrServerH2NotSupported = errors.New("aoni transport: server does not support HTTP/2 ALPN")
-	ErrTargetURLEmpty       = errors.New("aoni transport: target address is empty")
+	ErrServerH2NotSupported = errors.New("aoni/transport: server does not support HTTP/2 ALPN")
+	ErrTargetURLEmpty       = errors.New("aoni/transport: target address is empty")
 )
 
 // DialConfig is an independent, self-contained configuration DTO

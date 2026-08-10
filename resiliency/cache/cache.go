@@ -13,7 +13,7 @@ import (
 )
 
 // ErrCacheMiss is returned when a requested HTTP response is not found in the cache or has expired.
-var ErrCacheMiss = errors.New("aoni cache: miss")
+var ErrCacheMiss = errors.New("aoni/cache: miss")
 
 // InMemoryStore provides a thread-safe, in-memory cache backend with background janitor cleanup.
 type InMemoryStore struct {

@@ -11,7 +11,7 @@ import (
 	"github.com/quic-go/quic-go/quicvarint"
 )
 
-var ErrH3SettingsError = errors.New("aoni h3engine: reserved H2 setting ID in H3 SETTINGS frame")
+var ErrH3SettingsError = errors.New("aoni/h3engine: reserved H2 setting ID in H3 SETTINGS frame")
 
 const (
 	FrameTypeData        uint64 = 0x00

@@ -15,7 +15,7 @@ import (
 )
 
 // ErrInvalidCookieData is returned when persisted cookie data cannot be unmarshaled.
-var ErrInvalidCookieData = errors.New("aoni cookie: invalid persisted cookie payload")
+var ErrInvalidCookieData = errors.New("aoni/cookie: invalid persisted cookie payload")
 
 // Storage defines the persistence interface contract for saving and loading proxy-isolated cookie jars.
 //
@@ -43,10 +43,7 @@ type JSONFileStorage struct {
 type fileStorageData map[string][]Cookie
 
 // NewJSONFileStorage instantiates a [JSONFileStorage] bound to the specified filePath.
-//
-// Preconditions:
-//   - If filePath exists and contains valid JSON, cookies are automatically loaded into memory.
-//   - If filePath does not exist, an empty storage map is initialized.
+// Automatically loads cookies into memory if filePath exists and contains valid JSON, or initializes empty storage.
 func NewJSONFileStorage(filePath string) *JSONFileStorage {
 	s := &JSONFileStorage{
 		filePath: filePath,

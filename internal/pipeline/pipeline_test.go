@@ -239,7 +239,7 @@ func TestPipeline_Execute_FastPath(t *testing.T) {
 	t.Parallel()
 
 	defaults := ClientDefaults{}
-	pipe := NewPipeline(defaults, ClientFingerprint{})
+	pipe := New(defaults, ClientFingerprint{})
 
 	doer := DoerFunc(func(req *http.Request) (*http.Response, error) {
 		return &http.Response{
@@ -265,7 +265,7 @@ func TestPipeline_Execute_FastPath(t *testing.T) {
 func TestPipeline_UnsafePhaseOrder_And_Hooks(t *testing.T) {
 	t.Parallel()
 
-	pipeEngine := NewPipeline(ClientDefaults{}, ClientFingerprint{})
+	pipeEngine := New(ClientDefaults{}, ClientFingerprint{})
 	doer := &mockDoer{}
 
 	mReq := newMockRequest(t.Context(), "GET", "http://unsafe.com")
@@ -313,7 +313,7 @@ func TestPipeline_DisabledFlagsAndLookupDecoder(t *testing.T) {
 	ctx, reqCfg := AllocRequestConfig(t.Context())
 	reqCfg.DisabledFlags = FlagDecompress | FlagValidate
 
-	pipeEngine := NewPipeline(ClientDefaults{}, ClientFingerprint{})
+	pipeEngine := New(ClientDefaults{}, ClientFingerprint{})
 
 	mReq := newMockRequest(t.Context(), "GET", "http://example.com/flags")
 	mReq.SetContext(ctx)
@@ -337,7 +337,7 @@ func TestPipeline_DisabledFlagsAndLookupDecoder(t *testing.T) {
 func TestPipeline_ResponseSizeLimit(t *testing.T) {
 	t.Parallel()
 
-	pipe := NewPipeline(ClientDefaults{}, ClientFingerprint{})
+	pipe := New(ClientDefaults{}, ClientFingerprint{})
 
 	t.Run("exceeds_content_length_fails_early", func(t *testing.T) {
 		t.Parallel()
@@ -388,7 +388,7 @@ func TestPipeline_ResponseSizeLimit(t *testing.T) {
 func TestPipeline_DecompressionAndExplicitAcceptEncoding(t *testing.T) {
 	t.Parallel()
 
-	pipeEngine := NewPipeline(ClientDefaults{}, ClientFingerprint{})
+	pipeEngine := New(ClientDefaults{}, ClientFingerprint{})
 
 	var gzBuf bytes.Buffer
 
@@ -431,7 +431,7 @@ func TestPipeline_PostProcessResponse_Full(t *testing.T) {
 	respConflict := &http.Response{
 		Header: http.Header{"Content-Length": []string{"100", "200"}},
 	}
-	pipeEngine := NewPipeline(ClientDefaults{}, ClientFingerprint{})
+	pipeEngine := New(ClientDefaults{}, ClientFingerprint{})
 	_, errConflict := pipeEngine.postProcessResponse(&http.Request{}, respConflict, AcquireTx(t.Context()))
 	assert.ErrorIs(t, errConflict, ErrConflictingContentLength)
 
@@ -453,7 +453,7 @@ func TestPipeline_PostProcessResponse_Full(t *testing.T) {
 		ChallengeSolver: solver,
 	}
 
-	pipeWAF := NewPipeline(defaultsWAF, ClientFingerprint{})
+	pipeWAF := New(defaultsWAF, ClientFingerprint{})
 	txWAF := AcquireTx(t.Context())
 	txWAF.Flags = FlagChallenge
 
@@ -482,7 +482,7 @@ func TestPipeline_PostProcessResponse_Full(t *testing.T) {
 func TestPipeline_Hedging_IdempotencyAndBody(t *testing.T) {
 	t.Parallel()
 
-	pipeEngine := NewPipeline(ClientDefaults{}, ClientFingerprint{})
+	pipeEngine := New(ClientDefaults{}, ClientFingerprint{})
 
 	var calls atomic.Int32
 
@@ -528,7 +528,7 @@ func TestPipeline_Hedging_IdempotencyAndBody(t *testing.T) {
 func TestPipeline_ProxyFailover_And_Hedging(t *testing.T) {
 	t.Parallel()
 
-	pipeEngine := NewPipeline(ClientDefaults{}, ClientFingerprint{})
+	pipeEngine := New(ClientDefaults{}, ClientFingerprint{})
 
 	var attempts atomic.Int32
 
@@ -568,7 +568,7 @@ func TestPipeline_Caching_Full(t *testing.T) {
 	t.Parallel()
 
 	cacheStore := newMockCacheStore()
-	pipeEngine := NewPipeline(ClientDefaults{}, ClientFingerprint{})
+	pipeEngine := New(ClientDefaults{}, ClientFingerprint{})
 
 	cacheCfg := &CacheConfig{
 		Store:      cacheStore,
@@ -620,7 +620,7 @@ func TestPipeline_Caching_Full(t *testing.T) {
 func TestPipeline_TraceInfoCallbacks(t *testing.T) {
 	t.Parallel()
 
-	pipeEngine := NewPipeline(ClientDefaults{}, ClientFingerprint{})
+	pipeEngine := New(ClientDefaults{}, ClientFingerprint{})
 	stdReq, _ := http.NewRequestWithContext(t.Context(), http.MethodGet, "http://example.com/trace", nil)
 
 	traceInfo := &telemetry.TraceInfo{}
@@ -654,7 +654,7 @@ func TestPipeline_TraceInfoCallbacks(t *testing.T) {
 func TestPipeline_FinalizeJA4Report(t *testing.T) {
 	t.Parallel()
 
-	pipeEngine := NewPipeline(ClientDefaults{}, ClientFingerprint{})
+	pipeEngine := New(ClientDefaults{}, ClientFingerprint{})
 
 	pipeEngine.finalizeJA4Report(nil)
 
@@ -751,7 +751,7 @@ func TestPipeline_PhasePrep_Full(t *testing.T) {
 		},
 	}
 
-	pipeEngine := NewPipeline(defaults, fingerprintConfig)
+	pipeEngine := New(defaults, fingerprintConfig)
 
 	mReq := newMockRequest(t.Context(), "POST", "http://example.com/api")
 	mReq.SetBodyBytes([]byte("upload payload"))
@@ -791,7 +791,7 @@ func TestPipeline_PhasePrep_Full(t *testing.T) {
 }
 
 func TestPipeline_Cloudflare403WAF(t *testing.T) {
-	pipeEngine := NewPipeline(ClientDefaults{}, ClientFingerprint{})
+	pipeEngine := New(ClientDefaults{}, ClientFingerprint{})
 
 	var attempts atomic.Int32
 
@@ -820,7 +820,7 @@ func TestPipeline_Cloudflare403WAF(t *testing.T) {
 }
 
 func TestPipeline_MisdirectedRequest421(t *testing.T) {
-	pipeEngine := NewPipeline(ClientDefaults{}, ClientFingerprint{})
+	pipeEngine := New(ClientDefaults{}, ClientFingerprint{})
 
 	var attempts atomic.Int32
 
@@ -845,7 +845,7 @@ func TestPipeline_MisdirectedRequest421(t *testing.T) {
 }
 
 func TestPipeline_TooManyRequests429_RetryAfter(t *testing.T) {
-	pipeEngine := NewPipeline(ClientDefaults{}, ClientFingerprint{})
+	pipeEngine := New(ClientDefaults{}, ClientFingerprint{})
 
 	doer := DoerFunc(func(req *http.Request) (*http.Response, error) {
 		hdr := make(http.Header)
@@ -870,7 +870,7 @@ func TestPipeline_TooManyRequests429_RetryAfter(t *testing.T) {
 }
 
 func TestPipeline_ServiceUnavailable503(t *testing.T) {
-	pipeEngine := NewPipeline(ClientDefaults{}, ClientFingerprint{})
+	pipeEngine := New(ClientDefaults{}, ClientFingerprint{})
 
 	doer := DoerFunc(func(req *http.Request) (*http.Response, error) {
 		return &http.Response{

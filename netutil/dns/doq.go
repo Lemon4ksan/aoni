@@ -8,7 +8,6 @@ import (
 	"context"
 	"crypto/tls"
 	"encoding/binary"
-	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -18,12 +17,6 @@ import (
 	"github.com/quic-go/quic-go"
 
 	"github.com/lemon4ksan/aoni/netutil/dns/wire"
-)
-
-var (
-	ErrDoQHandshakeFailed = errors.New("aoni doq: quic connection handshake failed")
-	ErrDoQStreamClosed    = errors.New("aoni doq: quic stream closed prematurely")
-	ErrDoQInvalidMessage  = errors.New("aoni doq: invalid dns message response")
 )
 
 const (

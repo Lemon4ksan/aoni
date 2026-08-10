@@ -102,6 +102,7 @@ type RequestConfig struct {
 	InsecureSkipVerify        bool
 	SSRFGuard                 bool
 	ProxyDNS                  bool
+	AutoDecode                bool
 	DisableBaseResponse       bool
 	BaseResponseOverride      func() BaseResponse
 }

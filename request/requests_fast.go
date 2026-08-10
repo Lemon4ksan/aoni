@@ -302,7 +302,7 @@ func applyFastBody(req aoni.Request, body any) error {
 	if msg, ok := body.(proto.Message); ok {
 		bodyBytes, err := proto.Marshal(msg)
 		if err != nil {
-			return fmt.Errorf("aoni request: failed to marshal proto payload: %w", err)
+			return fmt.Errorf("aoni/request: failed to marshal proto payload: %w", err)
 		}
 
 		req.SetBodyBytes(bodyBytes)
@@ -316,7 +316,7 @@ func applyFastBody(req aoni.Request, body any) error {
 
 	bodyBytes, err := json.Marshal(body)
 	if err != nil {
-		return fmt.Errorf("aoni request: failed to marshal payload: %w", err)
+		return fmt.Errorf("aoni/request: failed to marshal payload: %w", err)
 	}
 
 	req.SetBodyBytes(bodyBytes)

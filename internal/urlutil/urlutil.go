@@ -96,6 +96,31 @@ func FastAppendQuery(targetURL, key, value string) string {
 	return res
 }
 
+// AppendRawQuery appends raw query string to targetURL using SIMD byte detection and pooled buffers.
+func AppendRawQuery(targetURL, rawQuery string) string {
+	if rawQuery == "" {
+		return targetURL
+	}
+
+	bufPtr := bufPool.Get().(*[]byte)
+	buf := (*bufPtr)[:0]
+
+	buf = append(buf, targetURL...)
+	if simd.IndexByteVector([]byte(targetURL), '?') >= 0 {
+		buf = append(buf, '&')
+	} else {
+		buf = append(buf, '?')
+	}
+
+	buf = append(buf, rawQuery...)
+	res := string(buf)
+
+	*bufPtr = buf
+	bufPool.Put(bufPtr)
+
+	return res
+}
+
 // CloneURL returns a deep copy of u.
 func CloneURL(u *url.URL) *url.URL {
 	if u == nil {

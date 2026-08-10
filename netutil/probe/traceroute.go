@@ -47,11 +47,13 @@ type TracerouteResult struct {
 	Reached bool
 }
 
-// Traceroute discovers the network path to target by incrementing TCP SYN packet TTL.
+// Traceroute discovers the network path to target by incrementing TCP SYN packet TTL or ICMP probes.
 //
 // Rootless Execution:
 // Leverages socket-level IP_TTL options on standard TCP dialers combined with unprivileged
 // ICMP listeners to capture Time Exceeded responses without requiring root/CAP_NET_RAW.
+//
+// On success, returns a [*TracerouteResult] containing the ordered list of intermediate router [Hop] entries.
 func Traceroute(
 	ctx context.Context,
 	target string,
@@ -73,7 +75,7 @@ func Traceroute(
 
 	ipAddr, err := net.ResolveIPAddr("ip", target)
 	if err != nil {
-		return nil, fmt.Errorf("aoni probe: resolve ip failed: %w", err)
+		return nil, fmt.Errorf("aoni/probe: resolve ip failed: %w", err)
 	}
 
 	isV6 := ipAddr.IP.To4() == nil

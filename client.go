@@ -45,16 +45,16 @@ import (
 // Methods such as With() and Clone() return new Client instances with isolated configuration DTOs
 // and memory structures, ensuring zero shared-state data races between concurrent threads.
 type Client struct {
-	engine         HTTPDoer
-	pipelineEngine *pipeline.Pipeline
-	engineConfig   EngineConfig
-	defaults       ClientDefaults
-	network        NetworkConfig
-	fingerprint    FingerprintConfig
-	powerWatcher   *power.Watcher
-	referer        *pipeline.RefererState
-	prepared       pipeline.PreparedConfig
-	coreEngine     *pipeline.Engine
+	engine       HTTPDoer
+	pipeline     *pipeline.Pipeline
+	engineConfig EngineConfig
+	defaults     ClientDefaults
+	network      NetworkConfig
+	fingerprint  FingerprintConfig
+	powerWatcher *power.Watcher
+	referer      *pipeline.RefererState
+	prepared     pipeline.PreparedConfig
+	coreEngine   *pipeline.Engine
 }
 
 // NewClient instantiates a new thread-safe [Client] wrapping the specified doer engine.
@@ -294,7 +294,7 @@ func (c *Client) HTTP() HTTPDoer {
 }
 
 func (c *Client) execute(req *http.Request, pipe PipelineConfig) (*http.Response, error) {
-	return c.pipelineEngine.Execute(req.Context(), NewStdRequest(req), c.engine, pipe.toInternal())
+	return c.pipeline.Execute(req.Context(), NewStdRequest(req), c.engine, pipe.toInternal())
 }
 
 // WithPersona configures TLS ClientHello ID, HTTP/2 SETTINGS frames, header order,
@@ -656,7 +656,7 @@ func (c *Client) applyConfig(cfg Config) {
 		experimental.ApplyCPUAffinity(cfg.Network.CPUAffinityCores)
 	}
 
-	c.pipelineEngine = pipeline.NewPipeline(
+	c.pipeline = pipeline.New(
 		c.toPipelineDefaults(),
 		c.fingerprint.ToPipelineFingerprint(),
 	)
