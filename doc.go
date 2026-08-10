@@ -41,6 +41,39 @@
 //   - [github.com/lemon4ksan/aoni/telemetry] - HAR generators, EWMA latency trackers, embedded web inspector, GeoIP.
 //   - [github.com/lemon4ksan/aoni/tunnel] - MASQUE HTTP CONNECT-UDP tunnels and TUN adapter bindings.
 //
+// # Three Tiers of Usage (Zero-Friction DX)
+//
+// aoni is designed for maximum simplicity for newcomers while supporting extreme customization for high-load systems:
+//
+//  1. Single-Line Zero Config (Complete Beginner):
+//     Fetch and decode JSON/XML payloads into a typed struct with zero boilerplate or client setup:
+//
+//     user, err := request.GetTo[User](ctx, nil, "https://api.github.com/users/octocat")
+//
+//  2. Production-Grade Stealth Client (Standard App):
+//     Configure TLS browser impersonation, base URLs, timeouts, and proxy rotators:
+//
+//     client := aoni.NewClient(option.WithChrome(), option.WithTimeout(10*time.Second))
+//     user, err := request.GetTo[User](ctx, client, "/users/123")
+//
+//  3. Extreme RPS Engine (High-Throughput 1.5M RPS):
+//     Use [github.com/lemon4ksan/aoni/fast.Client] for zero-allocation performance:
+//
+//     fastClient := fast.NewClient()
+//     resp, err := fastClient.Get(ctx, "/users/123")
+//     defer resp.Close()
+//
+// # Memory Management & Error Handling
+//
+//   - **Fast Engine Memory**: Calls via [github.com/lemon4ksan/aoni/fast] return pooled responses. Callers MUST invoke `resp.Close()` to release pooled memory.
+//
+//   - **Error Handling**: Non-2xx HTTP responses return an [*APIError] containing the status code and raw response body:
+//
+//     var apiErr *aoni.APIError
+//     if errors.As(err, &apiErr) {
+//     log.Printf("HTTP Error %d: %s", apiErr.StatusCode, string(apiErr.Body))
+//     }
+//
 // # Basic Usage
 //
 //	package main
@@ -62,13 +95,8 @@
 //	}
 //
 //	func main() {
-//		client := aoni.NewClient(
-//			option.WithBaseURL("https://api.example.com"),
-//			option.WithTimeout(10*time.Second),
-//			option.WithChrome(),
-//		)
-//
-//		user, err := request.GetTo[User](context.Background(), client, "/users/123")
+//		// Zero-config 1-line GET request
+//		user, err := request.GetTo[User](context.Background(), nil, "https://api.github.com/users/octocat")
 //		if err != nil {
 //			log.Fatal(err)
 //		}

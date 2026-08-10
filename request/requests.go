@@ -88,6 +88,10 @@ func Configure(doer any, opts ...aoni.ClientOption) Requester {
 
 // Get performs a GET request through c and returns the raw [*http.Response].
 func Get(ctx context.Context, c Requester, path string, mods ...aoni.RequestModifier) (*http.Response, error) {
+	if c == nil {
+		c = DefaultClient
+	}
+
 	return c.Request(ctx, http.MethodGet, path, mods...)
 }
 
@@ -98,6 +102,10 @@ func GetTo[Resp any](
 	path string,
 	mods ...aoni.RequestModifier,
 ) (*Resp, error) {
+	if c == nil {
+		c = DefaultClient
+	}
+
 	resp, err := c.Request(ctx, http.MethodGet, path, mods...) //nolint:bodyclose
 	if err != nil {
 		return nil, err
@@ -123,6 +131,10 @@ func GetInto[T any](
 	target *T,
 	mods ...aoni.RequestModifier,
 ) error {
+	if c == nil {
+		c = DefaultClient
+	}
+
 	resp, err := c.Request(ctx, http.MethodGet, path, mods...) //nolint:bodyclose
 	if err != nil {
 		return err
@@ -682,6 +694,10 @@ func Do(
 	body any,
 	mods ...aoni.RequestModifier,
 ) (*http.Response, error) {
+	if c == nil {
+		c = DefaultClient
+	}
+
 	if body != nil {
 		bodyReader, err := validateAndMarshal(body)
 		if err != nil {
@@ -706,6 +722,10 @@ func DoTo[Resp any](
 	body any,
 	mods ...aoni.RequestModifier,
 ) (*Resp, error) {
+	if c == nil {
+		c = DefaultClient
+	}
+
 	if body != nil {
 		bodyReader, err := validateAndMarshal(body)
 		if err != nil {
@@ -745,6 +765,10 @@ func DoInto[T any](
 	target *T,
 	mods ...aoni.RequestModifier,
 ) error {
+	if c == nil {
+		c = DefaultClient
+	}
+
 	if body != nil {
 		bodyReader, err := validateAndMarshal(body)
 		if err != nil {

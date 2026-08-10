@@ -8,16 +8,16 @@ import "errors"
 
 var (
 	// ErrInvalidRawTarget is returned when [RawDecoder] is supplied with a target output type other than *[]byte.
-	ErrInvalidRawTarget = errors.New("aoni: RawDecoder requires *[]byte output target")
+	ErrInvalidRawTarget = errors.New("aoni/decode: RawDecoder requires *[]byte output target")
 
 	// ErrInvalidProtoTarget is returned when [ProtoDecoder] or [GRPCWebDecoder] is supplied with a target not implementing [proto.Message].
-	ErrInvalidProtoTarget = errors.New("aoni: ProtoDecoder requires proto.Message output target")
+	ErrInvalidProtoTarget = errors.New("aoni/decode: ProtoDecoder requires proto.Message output target")
 
 	// ErrInvalidGRPCWebFrame is returned when a gRPC-Web frame header or payload is corrupted or truncated.
-	ErrInvalidGRPCWebFrame = errors.New("aoni: invalid gRPC-Web frame format")
+	ErrInvalidGRPCWebFrame = errors.New("aoni/decode: invalid gRPC-Web frame format")
 
 	// ErrGRPCWebStatusError is returned when a gRPC-Web endpoint returns a non-zero status code in its trailer frame.
-	ErrGRPCWebStatusError = errors.New("aoni: gRPC-Web endpoint returned error status")
+	ErrGRPCWebStatusError = errors.New("aoni/decode: gRPC-Web endpoint returned error status")
 )
 
 // Error describes a structural or unmarshaling failure encountered during stream decoding.
