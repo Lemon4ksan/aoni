@@ -15,10 +15,8 @@ import (
 type ConcurrentResult[Resp any] struct {
 	// Index represents the position of this result in the original input path slice.
 	Index int
-
 	// Value points to the unmarshaled response structure. It is nil when Err is non-nil.
 	Value *Resp
-
 	// Err holds any execution error encountered. It is nil on success.
 	Err error
 }

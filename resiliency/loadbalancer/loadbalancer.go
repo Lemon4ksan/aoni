@@ -23,7 +23,7 @@ import (
 
 	"github.com/lemon4ksan/aoni"
 	"github.com/lemon4ksan/aoni/internal/health"
-	fastrand "github.com/lemon4ksan/aoni/internal/rand"
+	"github.com/lemon4ksan/aoni/internal/rand"
 )
 
 var (
@@ -141,16 +141,6 @@ func (b *Balancer) WithClients(clients ...aoni.HTTPDoer) *Balancer {
 // NewSRV creates a new [Balancer] that dynamically discovers and balances requests across
 // backends resolved from DNS SRV records (e.g. service="_http", proto="_tcp", name="service.consul").
 func NewSRV(
-	ctx context.Context,
-	service, proto, name, scheme string,
-	refreshInterval time.Duration,
-	clientFactory func(targetURL string) aoni.HTTPDoer,
-) (*Balancer, error) {
-	return NewSRVWeightedRoundRobin(ctx, service, proto, name, scheme, refreshInterval, clientFactory)
-}
-
-// NewSRVWeightedRoundRobin initializes a Weighted Round-Robin load balancer populated from DNS SRV records.
-func NewSRVWeightedRoundRobin(
 	ctx context.Context,
 	service, proto, name, scheme string,
 	refreshInterval time.Duration,
@@ -377,7 +367,7 @@ func (b *Balancer) buildBackendIndices(n uint64, backends []*Backend) []uint64 {
 		}
 
 		for i := len(indices) - 1; i > 0; i-- {
-			j := fastrand.Intn(i + 1)
+			j := rand.Intn(i + 1)
 			indices[i], indices[j] = indices[j], indices[i]
 		}
 
