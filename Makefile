@@ -61,12 +61,3 @@ update-browsers-apply: ## Apply browser version updates (Chrome, Firefox, Safari
 help: ## Show this help message
 	@printf "Usage: make [target]\n\nTargets:\n"
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | sort | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-22s\033[0m %s\n", $$1, $$2}'
-
-generate:
-	cd ".\\cmd\\openapi\\" && go build -o openapi.exe
-
-	".\\cmd\\openapi\\openapi.exe" -spec swagger.json \
-        -skip-deprecated -fast \
-        -include-path "(v2/classifieds|agent|inventory|classifieds/alerts|notifications)" \
-        -include-path "IGet(Prices|Currencies|PriceHistory|Users)" \
-        -include-path "users/info"
