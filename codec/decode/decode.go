@@ -586,3 +586,14 @@ func typeName(target any) string {
 
 	return reflect.TypeOf(target).String()
 }
+
+// DecodePayload decodes rawBody into target based on contentType using auto-matched or default decoders.
+func DecodePayload(contentType string, rawBody []byte, target any) error {
+	if target == nil {
+		return nil
+	}
+
+	decoder := LookupDecoder(contentType)
+
+	return decoder.Decode(bytes.NewReader(rawBody), target)
+}

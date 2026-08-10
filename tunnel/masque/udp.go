@@ -43,7 +43,7 @@ func BuildUDPProxyURI(host string, port int, targetHost string, targetPort int) 
 // DialUDPProxy establishes a CONNECT-UDP proxying tunnel over HTTP/1.1 Upgrade or Extended CONNECT.
 func DialUDPProxy(
 	ctx context.Context,
-	dialer aoni.WSDialer,
+	dialer aoni.WebSocketDialer,
 	targetURL string,
 	mods ...aoni.RequestModifier,
 ) (net.Conn, *http.Response, error) {

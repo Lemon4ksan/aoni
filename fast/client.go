@@ -98,6 +98,11 @@ func NewClient(opts ...aoni.ClientOption) *Client {
 	return c
 }
 
+// ApplyOptions applies functional options to the client and returns a configured [aoni.RequestDoer].
+func (c *Client) ApplyOptions(opts ...aoni.ClientOption) aoni.RequestDoer {
+	return c.With(opts...)
+}
+
 // With produces a deep-copied [Client] with the provided functional options applied.
 func (c *Client) With(opts ...aoni.ClientOption) *Client {
 	clonedEngine := cloneFasthttpClient(c.engine)
@@ -880,6 +885,6 @@ func (c *Client) applyPowerManagement(enable bool) {
 }
 
 var (
-	_ aoni.RequestDoer = (*Client)(nil)
-	_ aoni.WSDialer    = (*Client)(nil)
+	_ aoni.RequestDoer     = (*Client)(nil)
+	_ aoni.WebSocketDialer = (*Client)(nil)
 )

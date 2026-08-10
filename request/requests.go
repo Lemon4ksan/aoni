@@ -64,14 +64,18 @@ type Requester interface {
 	) (*http.Response, error)
 }
 
-// AsRequester adapts any [aoni.RequestDoer] engine into a [Requester] for use with [request] package helpers.
-func AsRequester(doer aoni.RequestDoer) Requester {
+// AsRequester adapts any execution engine, client, or [aoni.RequestDoer] into a [Requester].
+func AsRequester(doer any) Requester {
 	if doer == nil {
 		return DefaultClient
 	}
 
 	if r, ok := doer.(Requester); ok {
 		return r
+	}
+
+	if rd, ok := doer.(aoni.RequestDoer); ok {
+		return aoni.NewClient(rd)
 	}
 
 	return aoni.NewClient(doer)

@@ -51,6 +51,16 @@ var (
 
 var quoteEscaper = strings.NewReplacer("\\", "\\\\", `"`, "\\\"")
 
+// Apply executes a slice of [aoni.RequestModifier] options sequentially on req.
+// Nil modifiers in mods are ignored safely without allocation.
+func Apply(req aoni.Request, mods ...aoni.RequestModifier) {
+	for _, m := range mods {
+		if m != nil {
+			m(req)
+		}
+	}
+}
+
 // ============================================================================
 // 1. URI & PATH PARAMETER MODIFIERS
 // ============================================================================

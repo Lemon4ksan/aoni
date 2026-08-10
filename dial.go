@@ -56,7 +56,7 @@ func (c *Client) DialContext(ctx context.Context, network, addr string) (net.Con
 	return conn, err
 }
 
-// DialTLSContext establishes an encrypted L7 TLS or uTLS connection over L4 TCP.
+// DialTLS establishes an encrypted L7 TLS or uTLS connection over L4 TCP.
 // It negotiates ALPN protocols ("h2", "http/1.1"), applies browser ClientHello emulation
 // (Chrome, Firefox, Safari), performs Encrypted Client Hello (ECH, RFC 9484) resolution,
 // supports 0-RTT Early Data (RFC 8446/9001), and validates SPKI certificate pins.
@@ -71,7 +71,7 @@ func (c *Client) DialContext(ctx context.Context, network, addr string) (net.Con
 // Telemetry & JA4:
 // After a successful TLS handshake, computed JA4 fingerprint reports are written to
 // JA4ReportStore in ctx and passed to JA4Callback if registered.
-func (c *Client) DialTLSContext(ctx context.Context, network, addr string) (net.Conn, error) {
+func (c *Client) DialTLS(ctx context.Context, network, addr string) (net.Conn, error) {
 	dialer := transport.NewUniversalDialer()
 	dialCfg := c.buildDialConfig(ctx)
 
@@ -95,7 +95,7 @@ func (c *Client) DialTLSForWS(ctx context.Context, addr string) (net.Conn, error
 		return tr.DialTLSContext(ctx, "tcp", addr)
 	}
 
-	return c.DialTLSContext(ctx, "tcp", addr)
+	return c.DialTLS(ctx, "tcp", addr)
 }
 
 // DialPlainForWS establishes an unencrypted raw TCP socket connection for WebSocket upgrades,
@@ -128,7 +128,7 @@ func (c *Client) applyDialers(tr *http.Transport) {
 	}
 
 	tr.DialContext = c.DialContext
-	tr.DialTLSContext = c.DialTLSContext
+	tr.DialTLSContext = c.DialTLS
 }
 
 // buildDialConfig constructs a self-contained transport.DialConfig DTO by merging

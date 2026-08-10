@@ -9,7 +9,6 @@ import (
 	"net"
 	"net/http"
 	"net/url"
-	"reflect"
 	"time"
 
 	"github.com/lemon4ksan/miyako/generic"
@@ -125,32 +124,22 @@ func Configure(doer any, opts ...ClientOption) RequestDoer {
 		return NewClient(nil, opts...)
 	}
 
+	if c, ok := doer.(*Client); ok {
+		return c.With(opts...)
+	}
+
+	type optionApplier interface {
+		ApplyOptions(opts ...ClientOption) RequestDoer
+	}
+	if a, ok := doer.(optionApplier); ok {
+		return a.ApplyOptions(opts...)
+	}
+
 	type withRequestDoer interface {
 		With(opts ...ClientOption) RequestDoer
 	}
 	if w, ok := doer.(withRequestDoer); ok {
 		return w.With(opts...)
-	}
-
-	type withClient interface {
-		With(opts ...ClientOption) *Client
-	}
-	if w, ok := doer.(withClient); ok {
-		return w.With(opts...)
-	}
-
-	val := reflect.ValueOf(doer)
-
-	method := val.MethodByName("With")
-	if method.IsValid() && method.Type().NumIn() == 1 && method.Type().IsVariadic() {
-		args := []reflect.Value{reflect.ValueOf(opts)}
-
-		out := method.CallSlice(args)
-		if len(out) == 1 {
-			if res, ok := out[0].Interface().(RequestDoer); ok {
-				return res
-			}
-		}
 	}
 
 	return NewClient(doer, opts...)
@@ -171,9 +160,9 @@ type BaseResponseProvider interface {
 // QueryEncoder marshals arbitrary structures or maps into [url.Values].
 type QueryEncoder func(any) (url.Values, error)
 
-// WSDialer is implemented by clients supporting raw TCP/TLS socket dialing
+// WebSocketDialer is implemented by clients supporting raw TCP/TLS socket dialing
 // for WebSocket upgrades over uTLS or HTTP/2 Extended CONNECT (RFC 8441).
-type WSDialer interface {
+type WebSocketDialer interface {
 	DialTLSForWS(ctx context.Context, addr string) (net.Conn, error)
 	DialPlainForWS(ctx context.Context, addr string) (net.Conn, error)
 }
@@ -250,4 +239,17 @@ type Logger interface {
 // LoggerProvider provides access to the diagnostic Logger instance.
 type LoggerProvider interface {
 	Logger() Logger
+}
+
+// AcquireRequest obtains a pooled [Request] instance from doer if supported via [RequestFactory],
+// or allocates a standard request wrapper. Returns the request and a release cleanup closure.
+func AcquireRequest(doer any) (Request, func()) {
+	if factory, ok := doer.(RequestFactory); ok {
+		r := factory.AcquireRequest()
+		return r, func() { factory.ReleaseRequest(r) }
+	}
+
+	stdReq := NewStdRequest(nil)
+
+	return stdReq, func() {}
 }

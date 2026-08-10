@@ -93,7 +93,7 @@ func BuildWellKnownURI(scheme, host, suffix string) (string, error) {
 // DialWellKnown establishes a WebSocket connection to an RFC 8307 well-known URI (e.g. wss://host/.well-known/suffix).
 func DialWellKnown(
 	ctx context.Context,
-	dialer aoni.WSDialer,
+	dialer aoni.WebSocketDialer,
 	scheme, host, suffix string,
 	mods ...aoni.RequestModifier,
 ) (Conn, *http.Response, error) {
@@ -119,7 +119,7 @@ func DialWellKnown(
 //   - On error, closes underlying net.Conn sockets to prevent connection leaks.
 func DialWebSocket(
 	ctx context.Context,
-	dialer aoni.WSDialer,
+	dialer aoni.WebSocketDialer,
 	targetURL string,
 	mods ...aoni.RequestModifier,
 ) (Conn, *http.Response, error) {
@@ -139,7 +139,7 @@ func DialWebSocket(
 //   - Validates the server's 'Sec-WebSocket-Accept' header hash per RFC 6455 §4.2.2.
 func DialWebSocketWithConfig(
 	ctx context.Context,
-	dialer aoni.WSDialer,
+	dialer aoni.WebSocketDialer,
 	targetURL string,
 	config DialWebSocketConfig,
 	mods ...aoni.RequestModifier,
@@ -265,7 +265,7 @@ func buildHandshakeRequest(
 	return req, key, nil
 }
 
-func dialBaseConnection(ctx context.Context, dialer aoni.WSDialer, parsed *parsedURL) (net.Conn, error) {
+func dialBaseConnection(ctx context.Context, dialer aoni.WebSocketDialer, parsed *parsedURL) (net.Conn, error) {
 	addr := net.JoinHostPort(parsed.host, parsed.port)
 	if parsed.scheme == "wss" {
 		return dialer.DialTLSForWS(ctx, addr)

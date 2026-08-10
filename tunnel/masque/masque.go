@@ -85,7 +85,7 @@ func BuildIPProxyURI(host string, port int, target, ipproto string) string {
 // DialIPProxy establishes an IP tunneling connection over HTTP/1.1 or HTTP/2 Extended CONNECT.
 func DialIPProxy(
 	ctx context.Context,
-	dialer aoni.WSDialer,
+	dialer aoni.WebSocketDialer,
 	targetURL string,
 	mods ...aoni.RequestModifier,
 ) (net.Conn, *http.Response, error) {

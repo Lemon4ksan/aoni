@@ -38,8 +38,10 @@ type TypedRequestPool struct {
 	items []*Request
 }
 
-// Get retrieves a pooled [Request] instance bound to client.
-func (p *TypedRequestPool) Get(client *aoni.Client) *Request {
+// Get retrieves a pooled [Request] instance bound to any engine or client.
+func (p *TypedRequestPool) Get(doer any) *Request {
+	reqClient := request.AsRequester(doer)
+
 	p.mu.Lock()
 
 	n := len(p.items)
@@ -48,7 +50,7 @@ func (p *TypedRequestPool) Get(client *aoni.Client) *Request {
 		p.items = p.items[:n-1]
 		p.mu.Unlock()
 
-		r.client = client
+		r.client = reqClient
 
 		return r
 	}
@@ -56,16 +58,16 @@ func (p *TypedRequestPool) Get(client *aoni.Client) *Request {
 	p.mu.Unlock()
 
 	return &Request{
-		client: client,
+		client: reqClient,
 	}
 }
 
 // Put recycles a [Request] instance back to the free-list pool after resetting fields.
 func (p *TypedRequestPool) Put(r *Request) {
 	r.Reset()
-	p.mu.Lock()
 
-	if len(p.items) < 1024 {
+	p.mu.Lock()
+	if len(p.items) < 256 {
 		p.items = append(p.items, r)
 	}
 
@@ -93,7 +95,7 @@ type Request struct {
 	label            string
 	proxyOverride    string
 
-	client           *aoni.Client
+	client           request.Requester
 	basicAuth        *basicAuth
 	digestAuth       *digestAuth
 	headers          http.Header
@@ -630,7 +632,7 @@ func (r *Request) buildModifiers() []aoni.RequestModifier {
 
 func (r *Request) executeDownload(
 	ctx context.Context,
-	client *aoni.Client,
+	client request.Requester,
 	method, path string,
 	mods []aoni.RequestModifier,
 	outputFile string,

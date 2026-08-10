@@ -74,47 +74,16 @@ $$\text{Throughput} = \frac{32\text{ bytes}}{\text{1 instruction cycle}} \approx
 2. **Vector Unrolling**: Loads 32-byte payload slices (`VMOVDQU`), performs vector XOR (`VPXOR YMM0, YMM1, YMM1`), and writes back output (`VMOVDQU YMM1, (R8)`).
 3. **Tail Byte Processing**: Any residual bytes (< 32 bytes) are processed using single-byte XOR logic.
 
-## 3. Zero-Allocation Memory Arena & 2MB LargePages (`internal/arena`)
+## 3. Kernel I/O Acceleration Subsystems (`internal/sysnet`)
 
-To prevent OS virtual memory page table thrashing (TLB misses) during high-throughput allocation workloads, `aoni` implements a 2MB LargePage slab allocation system.
+For operating systems supporting direct kernel memory registration, `aoni` provides optional registered I/O acceleration hooks.
 
-```text
-       +---------------------------------------------------------------+
-       |             2 MB Contiguous Virtual Memory Slab               |
-       |  (VirtualAlloc MEM_LARGE_PAGES / mmap MAP_HUGETLB)            |
-       +---------------------------------------------------------------+
-         |                     |                     |               |
-         v                     v                     v               v
-  +--------------+      +--------------+      +--------------+  ...
-  | 64 KB Buffer |      | 64 KB Buffer |      | 64 KB Buffer |
-  +--------------+      +--------------+      +--------------+
-```
-
-### 3.1 Kernel OS Allocation Mechanisms
-
-#### Windows Kernel (`VirtualAlloc`):
-- Calls `windows.VirtualAlloc` with allocation flags `MEM_COMMIT | MEM_RESERVE | MEM_LARGE_PAGES`.
-- Obtains pre-pinned 2 MB contiguous physical memory slabs directly from the Windows kernel manager.
-
-#### POSIX Kernel (`mmap`):
-- Issues `unix.Mmap` with flags `MAP_ANONYMOUS | MAP_PRIVATE | MAP_HUGETLB`.
-- Allocates 2 MB Transparent HugePages (THP) bypassing standard 4 KB page allocation overhead.
-
-### 3.2 Pre-Allocated Slab Management (`AcquireHugePageArena`)
-- Slabs are partitioned into fixed 64 KB request/response buffer chunks.
-- Buffer reuse is managed via lock-free atomic offsets (`atomic.AddUintptr`), eliminating global GC scanning of pre-registered memory slabs.
-
-## 4. Kernel I/O Acceleration Subsystems (`internal/rio`)
-
-For operating systems supporting direct kernel memory registration, `aoni` bypasses standard socket memory page pinning.
-
-### 4.1 Windows Registered I/O (RIO via `mswsock.dll`)
+### 3.1 Windows Registered I/O (RIO via `mswsock.dll`)
 - **Mechanism**: Registers user-space memory buffers with Winsock kernel drivers via `RIORegisterBuffer`.
 - **Elimination of Page Pinning**: Standard `WSASend` / `WSARecv` syscalls lock user-space memory pages in physical RAM on every socket call. RIO pre-locks memory pages once upon client initialization, reducing Win32 kernel transition overhead.
 
-### 4.2 Linux `io_uring` and Zero-Copy Sockets
-- **Mechanism**: Uses `io_uring` submission and completion ring buffers (`SQ` / `CQ`) with `IORING_SETUP_SQPOLL`.
-- **Asynchronous I/O**: Eliminates syscall overhead by kernel-polling submission queues without issuing traditional `read`/`write` system calls.
+### 3.2 Linux Zero-Copy Sockets & Socket Options
+- **Mechanism**: Socket controllers apply socket options (`SO_MARK`, `TCP_MAXSEG`, `TCP_QUICKACK`) directly prior to TCP SYN dispatch.
 
 ## 5. Instruction Budget & Microarchitectural Limits
 

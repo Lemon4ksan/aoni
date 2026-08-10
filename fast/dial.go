@@ -59,11 +59,17 @@ func (c *Client) isTLSEnabled() bool {
 		f.TLSClientHelloSpecProvider != nil
 }
 
-func (c *Client) DialTLSContext(ctx context.Context, network, addr string) (net.Conn, error) {
+// DialTLS establishes an encrypted L7 TLS or uTLS connection over L4 TCP.
+func (c *Client) DialTLS(ctx context.Context, network, addr string) (net.Conn, error) {
 	dialer := transport.NewUniversalDialer()
 	dialCfg := c.buildDialConfig(ctx)
 
 	return dialer.DialTLSContext(ctx, network, addr, dialCfg)
+}
+
+// DialTLSContext is an alias for [DialTLS] retained for backward compatibility.
+func (c *Client) DialTLSContext(ctx context.Context, network, addr string) (net.Conn, error) {
+	return c.DialTLS(ctx, network, addr)
 }
 
 func (c *Client) DialH2(ctx context.Context, addr string) (net.Conn, error) {
@@ -126,33 +132,10 @@ func (c *Client) DialPlainForWS(ctx context.Context, addr string) (net.Conn, err
 func (c *Client) buildDialConfig(ctx context.Context) transport.DialConfig {
 	reqCfg := aoni.GetRequestConfig(ctx)
 
-	cfg := transport.DialConfig{
-		DNSResolver:        c.config.Network.DNSResolver,
-		InterfaceName:      c.config.Network.InterfaceName,
-		SocketMark:         c.config.Network.SocketMark,
-		StackDriver:        c.config.Network.StackDriver,
-		L2Device:           c.config.Network.L2Device,
-		SourceRotator:      c.config.Network.SourceRotator,
-		HappyEyeballs:      c.config.Network.HappyEyeballsDelay,
-		SSRFGuard:          c.config.Network.SSRFGuard,
-		ProxyDNS:           c.config.Network.ProxyDNS,
-		P0fSignature:       c.config.Fingerprint.P0fSignature,
-		SocketController:   c.config.Network.SocketController,
-		FragmentConfig:     c.config.Network.FragmentConfig,
-		ProxyURL:           c.config.Network.ProxyAddr,
-		InsecureSkipVerify: aoni.GetInsecureSkipVerify(ctx) || c.config.Engine.InsecureSkipVerify,
-		HelloID:            c.resolveHelloID(),
-		SpecProvider:       c.config.Fingerprint.TLSClientHelloSpecProvider,
-		SessionCache:       c.config.Fingerprint.SessionCache,
-		CertificatePins:    c.config.Fingerprint.CertificatePins,
-		CertCompression:    c.config.Fingerprint.CertCompression,
-		HeaderOrder:        c.config.Fingerprint.HeaderOrder,
-		JA4Callback:        c.config.Fingerprint.JA4Callback,
-		AutoECH:            c.config.Fingerprint.AutoECH,
-		Enable0RTT:         c.config.Fingerprint.Enable0RTT,
-		ECHConfigList:      c.config.Fingerprint.ECHConfigList,
-		ConnFilters:        c.config.Network.ConnFilters,
-	}
+	cfg := c.config.BuildDialConfig(ctx)
+	cfg.HelloID = c.resolveHelloID()
+	cfg.InterfaceName = c.config.Network.InterfaceName
+	cfg.SocketMark = c.config.Network.SocketMark
 
 	cfg.ApplyRequestOverrides(reqCfg)
 

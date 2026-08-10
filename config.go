@@ -1145,3 +1145,35 @@ func applyMSSLimit(conn net.Conn, mss int) net.Conn {
 func applyFragmentation(conn net.Conn, cfg fragment.Config) net.Conn {
 	return pipeline.ApplyFragmentation(conn, cfg)
 }
+
+// BuildDialConfig converts the [Config] into a self-contained [transport.DialConfig] DTO for socket dialing.
+func (c *Config) BuildDialConfig(ctx context.Context) transport.DialConfig {
+	if c == nil {
+		return transport.DialConfig{}
+	}
+
+	return transport.DialConfig{
+		DNSResolver:        c.Network.DNSResolver,
+		StackDriver:        c.Network.StackDriver,
+		L2Device:           c.Network.L2Device,
+		SourceRotator:      c.Network.SourceRotator,
+		HappyEyeballs:      c.Network.HappyEyeballsDelay,
+		SSRFGuard:          c.Network.SSRFGuard,
+		ProxyDNS:           c.Network.ProxyDNS,
+		P0fSignature:       c.Fingerprint.P0fSignature,
+		SocketController:   c.Network.SocketController,
+		FragmentConfig:     c.Network.FragmentConfig,
+		ProxyURL:           c.Network.ProxyAddr,
+		InsecureSkipVerify: GetInsecureSkipVerify(ctx) || c.Engine.InsecureSkipVerify,
+		SpecProvider:       c.Fingerprint.TLSClientHelloSpecProvider,
+		SessionCache:       c.Fingerprint.SessionCache,
+		CertificatePins:    c.Fingerprint.CertificatePins,
+		CertCompression:    c.Fingerprint.CertCompression,
+		HeaderOrder:        c.Fingerprint.HeaderOrder,
+		JA4Callback:        c.Fingerprint.JA4Callback,
+		AutoECH:            c.Fingerprint.AutoECH,
+		Enable0RTT:         c.Fingerprint.Enable0RTT,
+		ECHConfigList:      c.Fingerprint.ECHConfigList,
+		ConnFilters:        c.Network.ConnFilters,
+	}
+}

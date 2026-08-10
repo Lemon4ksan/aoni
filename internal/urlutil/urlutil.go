@@ -178,3 +178,25 @@ func IsSameDomainOrSubdomain(clean1, clean2 string) bool {
 
 	return strings.HasSuffix(clean1, "."+clean2) || strings.HasSuffix(clean2, "."+clean1)
 }
+
+// BuildPath constructs a final URL path by interpolating pathParams and appending queryParams efficiently.
+func BuildPath(basePath string, pathParams map[string]string, queryParams url.Values) string {
+	res := basePath
+
+	for k, v := range pathParams {
+		res = ReplaceVar(res, k, url.PathEscape(v))
+	}
+
+	if len(queryParams) > 0 {
+		encoded := queryParams.Encode()
+		if encoded != "" {
+			if strings.Contains(res, "?") {
+				res += "&" + encoded
+			} else {
+				res += "?" + encoded
+			}
+		}
+	}
+
+	return res
+}

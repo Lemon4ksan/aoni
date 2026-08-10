@@ -338,7 +338,7 @@ func (c *Client) WithTLSClientHelloID(id utls.ClientHelloID) *Client {
 		return cloned
 	}
 
-	transport.DialTLSContext = cloned.DialTLSContext
+	transport.DialTLSContext = cloned.DialTLS
 
 	return cloned
 }
