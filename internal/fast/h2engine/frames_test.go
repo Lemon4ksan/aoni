@@ -7,6 +7,7 @@ package h2engine
 import (
 	"bufio"
 	"bytes"
+	"errors"
 	"reflect"
 	"testing"
 )
@@ -187,5 +188,87 @@ func TestPaddingHelpers(t *testing.T) {
 
 	if !bytes.Equal(unpadded, data) {
 		t.Fatalf("unpadded data mismatch: got %q, want %q", unpadded, data)
+	}
+}
+
+func TestPingInvalidPayload(t *testing.T) {
+	p := &Ping{}
+
+	fh := AcquireFrameHeader()
+	defer ReleaseFrameHeader(fh)
+
+	fh.setPayload([]byte("short")) // 5 bytes instead of 8
+
+	err := p.Deserialize(fh)
+	if err == nil {
+		t.Fatalf("expected ErrInvalidPingPayload for 5-byte payload")
+	}
+}
+
+func TestRstStreamErrorFormatting(t *testing.T) {
+	rst := &RstStream{code: StreamCanceled}
+	if rst.Code() != StreamCanceled {
+		t.Fatalf("code mismatch: got %v, want StreamCanceled", rst.Code())
+	}
+
+	if !errors.Is(rst.Error(), StreamCanceled) {
+		t.Fatalf("error mismatch: got %v, want StreamCanceled", rst.Error())
+	}
+
+	rst.Reset()
+
+	if rst.Code() != 0 {
+		t.Fatalf("expected code 0 after Reset")
+	}
+}
+
+func TestGoAwayErrorFormatting(t *testing.T) {
+	ga := &GoAway{
+		stream: 10,
+		code:   ProtocolError,
+		data:   []byte("broken frame"),
+	}
+
+	if ga.Stream() != 10 {
+		t.Fatalf("stream mismatch")
+	}
+
+	if ga.Code() != ProtocolError {
+		t.Fatalf("code mismatch")
+	}
+
+	if !bytes.Equal(ga.Data(), []byte("broken frame")) {
+		t.Fatalf("data mismatch")
+	}
+
+	if ga.Error() == "" {
+		t.Fatalf("expected non-empty error string")
+	}
+
+	ga.Reset()
+
+	if ga.Stream() != 0 || ga.Code() != 0 || len(ga.Data()) != 0 {
+		t.Fatalf("expected empty GoAway after Reset")
+	}
+}
+
+func TestContinuationFrame(t *testing.T) {
+	c := &Continuation{}
+	c.SetEndHeaders(true)
+	c.SetHeader([]byte("foo"))
+	c.AppendHeader([]byte("bar"))
+
+	if !c.EndHeaders() {
+		t.Fatalf("expected EndHeaders true")
+	}
+
+	if !bytes.Equal(c.Headers(), []byte("foobar")) {
+		t.Fatalf("headers mismatch: got %s", c.Headers())
+	}
+
+	c.Reset()
+
+	if c.EndHeaders() || len(c.Headers()) != 0 {
+		t.Fatalf("expected empty Continuation after Reset")
 	}
 }

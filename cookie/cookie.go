@@ -12,7 +12,7 @@ import (
 	"time"
 
 	"github.com/lemon4ksan/aoni/internal/bytesconv"
-	internalCookie "github.com/lemon4ksan/aoni/internal/cookie"
+	impl "github.com/lemon4ksan/aoni/internal/cookie"
 )
 
 // Cookie represents a browser cookie structure formatted for JSON persistence,
@@ -40,7 +40,7 @@ type Cookie struct {
 
 // ParseSetCookieHeader parses a raw 'Set-Cookie' header line into a structured [Cookie].
 func ParseSetCookieHeader(headerVal, defaultDomain, defaultPath string) Cookie {
-	dto := internalCookie.ParseSetCookieHeader(headerVal, defaultDomain, defaultPath)
+	dto := impl.ParseSetCookieHeader(headerVal, defaultDomain, defaultPath)
 
 	return Cookie{
 		Expires:      dto.Expires,
@@ -59,7 +59,7 @@ func ParseSetCookieHeader(headerVal, defaultDomain, defaultPath string) Cookie {
 
 // PathMatch reports whether reqPath matches cookiePath according to RFC 6265 §5.1.4.
 func PathMatch(reqPath, cookiePath string) bool {
-	return internalCookie.PathMatch(reqPath, cookiePath)
+	return impl.PathMatch(reqPath, cookiePath)
 }
 
 // FilterForRequest filters a slice of cookies, returning only those matching destination u per RFC 6265 §5.1.4.
@@ -114,12 +114,12 @@ func Mirror(jar http.CookieJar, sourceURL *url.URL, targetURLs []*url.URL, cooki
 
 // SortForBrowser sorts cookies in-place according to RFC 6265 §5.4 (longest path length first).
 func SortForBrowser(cookies []*http.Cookie) {
-	internalCookie.SortForBrowser(cookies)
+	impl.SortForBrowser(cookies)
 }
 
 // BuildCookieHeader constructs an RFC 6265 compliant 'Cookie' request header string.
 func BuildCookieHeader(cookies []*http.Cookie) string {
-	return internalCookie.BuildCookieHeader(cookies)
+	return impl.BuildCookieHeader(cookies)
 }
 
 // ExportNetscape exports cookies formatted as a standard Netscape HTTP Cookie File (cookies.txt).
@@ -128,9 +128,7 @@ func ExportNetscape(jar http.CookieJar, u *url.URL) string {
 		return ""
 	}
 
-	cookies := jar.Cookies(u)
-
-	return internalCookie.ExportNetscape(cookies, u.Hostname())
+	return impl.ExportNetscape(jar.Cookies(u), u.Hostname())
 }
 
 // Export converts cookies for u from jar into exported [Cookie] structures.

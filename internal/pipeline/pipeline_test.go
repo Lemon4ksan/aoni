@@ -789,3 +789,123 @@ func TestPipeline_PhasePrep_Full(t *testing.T) {
 
 	ReleaseTx(tx)
 }
+
+func TestPipeline_Cloudflare403WAF(t *testing.T) {
+	pipeEngine := NewPipeline(ClientDefaults{}, ClientFingerprint{})
+
+	var attempts atomic.Int32
+
+	doer := DoerFunc(func(req *http.Request) (*http.Response, error) {
+		attempts.Add(1)
+
+		hdr := make(http.Header)
+		hdr.Set("cf-mitigated", "challenge")
+
+		return &http.Response{
+			StatusCode: http.StatusForbidden,
+			Header:     hdr,
+			Body:       stdio.NopCloser(strings.NewReader("Cloudflare WAF Challenge")),
+			Request:    req,
+		}, nil
+	})
+
+	mReq := newMockRequest(t.Context(), "GET", "http://example.com/protected")
+	resp, err := pipeEngine.Execute(t.Context(), mReq, doer, PipelineConfig{})
+	require.NoError(t, err)
+
+	defer resp.Body.Close()
+
+	assert.Equal(t, http.StatusForbidden, resp.StatusCode)
+	assert.Equal(t, "challenge", resp.Header.Get("cf-mitigated"))
+}
+
+func TestPipeline_MisdirectedRequest421(t *testing.T) {
+	pipeEngine := NewPipeline(ClientDefaults{}, ClientFingerprint{})
+
+	var attempts atomic.Int32
+
+	doer := DoerFunc(func(req *http.Request) (*http.Response, error) {
+		attempts.Add(1)
+
+		return &http.Response{
+			StatusCode: http.StatusMisdirectedRequest,
+			Header:     make(http.Header),
+			Body:       stdio.NopCloser(strings.NewReader("421 Misdirected Request")),
+			Request:    req,
+		}, nil
+	})
+
+	mReq := newMockRequest(t.Context(), "GET", "http://example.com/misdirected")
+	resp, err := pipeEngine.Execute(t.Context(), mReq, doer, PipelineConfig{})
+	require.NoError(t, err)
+
+	defer resp.Body.Close()
+
+	assert.Equal(t, http.StatusMisdirectedRequest, resp.StatusCode)
+}
+
+func TestPipeline_TooManyRequests429_RetryAfter(t *testing.T) {
+	pipeEngine := NewPipeline(ClientDefaults{}, ClientFingerprint{})
+
+	doer := DoerFunc(func(req *http.Request) (*http.Response, error) {
+		hdr := make(http.Header)
+		hdr.Set("Retry-After", "1")
+
+		return &http.Response{
+			StatusCode: http.StatusTooManyRequests,
+			Header:     hdr,
+			Body:       stdio.NopCloser(strings.NewReader("Rate Limited")),
+			Request:    req,
+		}, nil
+	})
+
+	mReq := newMockRequest(t.Context(), "GET", "http://example.com/rate-limited")
+	resp, err := pipeEngine.Execute(t.Context(), mReq, doer, PipelineConfig{})
+	require.NoError(t, err)
+
+	defer resp.Body.Close()
+
+	assert.Equal(t, http.StatusTooManyRequests, resp.StatusCode)
+	assert.Equal(t, "1", resp.Header.Get("Retry-After"))
+}
+
+func TestPipeline_ServiceUnavailable503(t *testing.T) {
+	pipeEngine := NewPipeline(ClientDefaults{}, ClientFingerprint{})
+
+	doer := DoerFunc(func(req *http.Request) (*http.Response, error) {
+		return &http.Response{
+			StatusCode: http.StatusServiceUnavailable,
+			Header:     make(http.Header),
+			Body:       stdio.NopCloser(strings.NewReader("503 Service Unavailable")),
+			Request:    req,
+		}, nil
+	})
+
+	mReq := newMockRequest(t.Context(), "GET", "http://example.com/down")
+	resp, err := pipeEngine.Execute(t.Context(), mReq, doer, PipelineConfig{})
+	require.NoError(t, err)
+
+	defer resp.Body.Close()
+
+	assert.Equal(t, http.StatusServiceUnavailable, resp.StatusCode)
+}
+
+func TestAltSvcCache_RecordingAndLookup(t *testing.T) {
+	cache := NewAltSvcCache()
+	cache.ParseAndStore("example.com", `h3=":443"; ma=3600`)
+
+	assert.True(t, cache.HasH3Support("example.com"))
+
+	cache.RecordH3Failure("example.com", 5*time.Minute)
+	assert.False(t, cache.HasH3Support("example.com"))
+}
+
+func TestRefererAutomaton_PolicyTransitions(t *testing.T) {
+	auto := NewRefererAutomaton(PolicyNoRefererWhenDowngrade)
+	u1, _ := url.Parse("https://origin.com/page1")
+	u2, _ := url.Parse("https://origin.com/page2")
+
+	auto.UpdateLastURL(u1)
+	ref := auto.ComputeReferer(u2)
+	assert.Equal(t, "https://origin.com/page1", ref)
+}

@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	internalCookie "github.com/lemon4ksan/aoni/internal/cookie"
 )
@@ -41,4 +42,30 @@ func TestInternalCookie_BuildCookieHeader(t *testing.T) {
 
 	hdr := internalCookie.BuildCookieHeader(cookies)
 	assert.Equal(t, "c2=v2; c1=v1", hdr)
+}
+
+func TestInternalCookie_ExportNetscape(t *testing.T) {
+	cookies := []*http.Cookie{
+		{Name: "session", Value: "123", Domain: ".example.com", Path: "/api", Secure: true},
+	}
+
+	netscape := internalCookie.ExportNetscape(cookies, "example.com")
+	assert.Contains(t, netscape, "# Netscape HTTP Cookie File")
+	assert.Contains(t, netscape, ".example.com\tTRUE\t/api\tTRUE\t0\tsession\t123")
+	assert.Equal(t, "", internalCookie.ExportNetscape(nil, ""))
+}
+
+func TestInternalCookie_ParseSingleCookie(t *testing.T) {
+	ck := internalCookie.ParseSingleCookie([]byte("foo"), []byte("foo=bar; Path=/"))
+	require.NotNil(t, ck)
+	assert.Equal(t, "foo", ck.Name)
+	assert.Equal(t, "bar", ck.Value)
+
+	emptyCk := internalCookie.ParseSingleCookie(nil, []byte(""))
+	assert.Nil(t, emptyCk)
+}
+
+func TestInternalCookie_EmptyParse(t *testing.T) {
+	c := internalCookie.ParseSetCookieHeader("", "domain.com", "/")
+	assert.Equal(t, "", c.Name)
 }
