@@ -1,17 +1,17 @@
-# Discover library packages, excluding examples, scripts, and vendor
-PKG       := $(shell go list ./... | grep -v /examples | grep -v /scripts | grep -v /vendor/)
-COVER_PKG := $(shell go list ./... | grep -v /examples | grep -v /scripts | grep -v /vendor/ | tr '\n' ',' | sed 's/,$$//')
+# Discover library packages, excluding examples, scripts, cmd, and vendor
+PKG       := $(shell go list ./... | grep -v /examples | grep -v /scripts | grep -v /cmd/ | grep -v /vendor/)
+COVER_PKG := $(shell go list ./... | grep -v /examples | grep -v /scripts | grep -v /vendor/)
 COVER_OUT ?= coverage.out
 
 # Colors for console output
 CYAN  := \033[0;36m
 RESET := \033[0m
 
-.PHONY: test race cover cover-html lint format clean check-tls-spec update-browsers update-browsers-apply help
+.PHONY: test race cover cover-clean cover-html lint format clean check-tls-spec update-browsers update-browsers-apply help
 
 test: ## Run quick unit tests
 	@printf "$(CYAN)Running unit tests...$(RESET)\n"
-	go test -v $(PKG)
+	go test -v -timeout 30s $(PKG)
 
 race: ## Run unit tests with race detector enabled
 	@printf "$(CYAN)Running tests with race detector...$(RESET)\n"
@@ -19,8 +19,13 @@ race: ## Run unit tests with race detector enabled
 
 cover: ## Calculate and print exact core library coverage report
 	@printf "$(CYAN)Generating exact coverage report...$(RESET)\n"
-	go test -coverpkg=$(COVER_PKG) -coverprofile=$(COVER_OUT) $(PKG)
-	go tool cover -func=$(COVER_OUT)
+	go test -coverpkg=$(COVER_PKG) -coverprofile=$(COVER_OUT) ./...
+	go run ./cmd/coverage -file=$(COVER_OUT)
+
+cover-clean: ## Generate clean coverage report and run deduplicated coverage analysis tool
+	@printf "$(CYAN)Generating clean coverage report...$(RESET)\n"
+	go test -coverpkg=$(COVER_PKG) -coverprofile=$(COVER_OUT) ./...
+	go run ./cmd/coverage -file=$(COVER_OUT)
 
 cover-html: cover ## Generate coverage report and open interactive HTML in browser
 	@printf "$(CYAN)Opening coverage report in browser...$(RESET)\n"
@@ -56,12 +61,3 @@ update-browsers-apply: ## Apply browser version updates (Chrome, Firefox, Safari
 help: ## Show this help message
 	@printf "Usage: make [target]\n\nTargets:\n"
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | sort | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-22s\033[0m %s\n", $$1, $$2}'
-
-generate:
-	cd ".\\cmd\\openapi\\" && go build -o openapi.exe
-
-	".\\cmd\\openapi\\openapi.exe" -spec swagger.json \
-        -skip-deprecated -fast \
-        -include-path "(v2/classifieds|agent|inventory|classifieds/alerts|notifications)" \
-        -include-path "IGet(Prices|Currencies|PriceHistory|Users)" \
-        -include-path "users/info"

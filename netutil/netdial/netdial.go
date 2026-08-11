@@ -2,6 +2,7 @@
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
+// Package netdial provides utilities for network dialing and proxy configuration.
 package netdial
 
 import (
@@ -26,11 +27,11 @@ import (
 
 var (
 	// ErrSSRFBlocked is returned when the request is blocked by the SSRF guard.
-	ErrSSRFBlocked = errors.New("aoni netdial: request blocked by SSRF guard")
+	ErrSSRFBlocked = errors.New("aoni/netdial: request blocked by SSRF guard")
 	// ErrEmptyProxyURL is returned when the proxy target address is empty.
-	ErrEmptyProxyURL = errors.New("aoni netdial: proxy target address is empty")
+	ErrEmptyProxyURL = errors.New("aoni/netdial: proxy target address is empty")
 	// ErrProxyConnectFailed is returned when the proxy connection fails.
-	ErrProxyConnectFailed = errors.New("aoni netdial: proxy connection failed")
+	ErrProxyConnectFailed = errors.New("aoni/netdial: proxy connection failed")
 )
 
 // SocketController is an interface for controlling socket operations.
@@ -64,7 +65,11 @@ type DialOptions struct {
 	TCPQuickACK          bool
 }
 
-// DialL4 establishes a raw TCP socket connection applying DNS resolution, SSRF guards, IP rotation, p0f spoofing, and fragmentation.
+// DialL4 establishes a low-latency L4 socket connection applying DNS resolution, SSRF guards,
+// IPv6 subnet rotation, p0f TCP/IP stack spoofing, and optional TCP packet fragmentation.
+//
+// Target addr must be formatted as "host:port", "host", or "unix:///path/to/socket".
+// Yields an active, tuned [net.Conn] socket configured with TCP_NODELAY and socket buffer tuning.
 func DialL4(ctx context.Context, network, addr string, opts DialOptions) (net.Conn, error) {
 	if opts.StackDriver != nil {
 		return opts.StackDriver.DialL4(ctx, network, addr, opts)
@@ -96,7 +101,8 @@ func DialL4(ctx context.Context, network, addr string, opts DialOptions) (net.Co
 	return DialDirectTCP(ctx, network, host, port, opts)
 }
 
-// DialDirectTCP establishes a direct TCP socket connection trying all resolved IP addresses.
+// DialDirectTCP establishes a direct TCP socket connection trying all resolved IP addresses in sequence.
+// Returns an active TCP socket or an aggregated connection error if all resolved IPs fail.
 func DialDirectTCP(ctx context.Context, network, host, port string, opts DialOptions) (net.Conn, error) {
 	resolver := opts.DNSResolver
 	if resolver == nil {
@@ -137,7 +143,7 @@ func DialDirectTCP(ctx context.Context, network, host, port string, opts DialOpt
 	}
 
 	if len(addrs) == 0 {
-		return nil, fmt.Errorf("aoni netdial: no IP addresses found for host %s", host)
+		return nil, fmt.Errorf("aoni/netdial: no IP addresses found for host %s", host)
 	}
 
 	ipTimeout := 3 * time.Second
@@ -180,7 +186,7 @@ func DialDirectTCP(ctx context.Context, network, host, port string, opts DialOpt
 		lastErr = err
 	}
 
-	return nil, fmt.Errorf("aoni netdial: all IP connections failed for %s: %w", host, lastErr)
+	return nil, fmt.Errorf("aoni/netdial: all IP connections failed for %s: %w", host, lastErr)
 }
 
 // DialProxy establishes a network socket connection through a SOCKS5 or HTTP CONNECT proxy.

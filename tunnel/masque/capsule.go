@@ -5,9 +5,10 @@
 package masque
 
 import (
-	"encoding/binary"
 	"fmt"
 	"net/netip"
+
+	internalMasque "github.com/lemon4ksan/aoni/internal/masque"
 )
 
 const (
@@ -47,55 +48,17 @@ type IPAddressRange struct {
 
 // EncodeVarint encodes v into b using QUIC variable-length integer encoding (RFC 9000).
 func EncodeVarint(v uint64, b []byte) int {
-	switch {
-	case v < 1<<6:
-		b[0] = byte(v)
-		return 1
-	case v < 1<<14:
-		binary.BigEndian.PutUint16(b[:2], uint16(v)|0x4000)
-		return 2
-	case v < 1<<30:
-		binary.BigEndian.PutUint32(b[:4], uint32(v)|0x80000000)
-		return 4
-	default:
-		binary.BigEndian.PutUint64(b[:8], v|0xc000000000000000)
-		return 8
-	}
+	return internalMasque.EncodeVarintSlice(v, b)
 }
 
 // DecodeVarint decodes a QUIC variable-length integer from b, returning value and byte length.
 func DecodeVarint(b []byte) (uint64, int, error) {
-	if len(b) == 0 {
+	v, n, err := internalMasque.DecodeVarint(b)
+	if err != nil {
 		return 0, 0, ErrInvalidCapsule
 	}
 
-	first := b[0]
-	tag := first >> 6
-
-	switch tag {
-	case 0:
-		return uint64(first), 1, nil
-	case 1:
-		if len(b) < 2 {
-			return 0, 0, ErrInvalidCapsule
-		}
-
-		return uint64(binary.BigEndian.Uint16(b[:2]) & 0x3fff), 2, nil
-
-	case 2:
-		if len(b) < 4 {
-			return 0, 0, ErrInvalidCapsule
-		}
-
-		return uint64(binary.BigEndian.Uint32(b[:4]) & 0x3fffffff), 4, nil
-
-	default:
-		if len(b) < 8 {
-			return 0, 0, ErrInvalidCapsule
-		}
-
-		return binary.BigEndian.Uint64(b[:8]) & 0x3fffffffffffffff, 8, nil
-	}
+	return v, n, nil
 }
 
 // EncodeAddressAssignHeader writes type (0x01) and payload length varints for ADDRESS_ASSIGN capsule.

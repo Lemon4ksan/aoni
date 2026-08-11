@@ -21,8 +21,9 @@ import (
 	"golang.org/x/sys/cpu"
 
 	"github.com/lemon4ksan/aoni"
-	"github.com/lemon4ksan/aoni/fast/h2engine"
-	"github.com/lemon4ksan/aoni/fast/h3engine"
+	"github.com/lemon4ksan/aoni/internal/fast/h2engine"
+	"github.com/lemon4ksan/aoni/internal/fast/h3engine"
+	"github.com/lemon4ksan/aoni/internal/pipeline"
 	"github.com/lemon4ksan/aoni/netutil"
 )
 
@@ -255,8 +256,7 @@ func (c *Client) getH2Client(host string) *h2engine.Client {
 	dialer := &h2engine.Dialer{
 		Addr: host,
 		RawDialContext: func(ctx context.Context, addr string) (net.Conn, error) {
-			fastD := newFastDialer(&c.config)
-			return fastD.DialH2(ctx, addr)
+			return c.DialH2(ctx, addr)
 		},
 	}
 
@@ -329,9 +329,23 @@ func (c *Client) cachePushedResponse(
 		return true
 	})
 
-	pipe := c.pipelineEngine
-	if pipe != nil {
-		pipe.SavePushedResponseToCache(req, resp, cacheCfg)
+	pipe := c.pipeline
+	if pipe != nil && cacheCfg != nil {
+		var nvs *pipeline.NoVarySearchConfig
+		if cacheCfg.NoVarySearch != nil {
+			nvs = &pipeline.NoVarySearchConfig{
+				IgnoreParams:    cacheCfg.NoVarySearch.IgnoreParams,
+				ExceptParams:    cacheCfg.NoVarySearch.ExceptParams,
+				IgnoreAllParams: cacheCfg.NoVarySearch.IgnoreAllParams,
+			}
+		}
+
+		pipe.SavePushedResponseToCache(req, resp, &pipeline.CacheConfig{
+			Store:         cacheCfg.Store,
+			DefaultTTL:    cacheCfg.DefaultTTL,
+			NoVarySearch:  nvs,
+			CookieIndices: cacheCfg.CookieIndices,
+		})
 	}
 }
 

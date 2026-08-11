@@ -2401,3 +2401,67 @@ func TestFluentAPI_PathInterpolationAndDownload(t *testing.T) {
 	assert.Equal(t, "found", res.Message)
 	assert.Equal(t, "success", res.Status)
 }
+
+func TestClient_CustomConnFilter(t *testing.T) {
+	t.Parallel()
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	t.Cleanup(server.Close)
+
+	var filterCalled int32
+
+	customFilter := func(ctx context.Context, conn net.Conn, targetHost string, cfg *aoni.DialConfig) (net.Conn, error) {
+		atomic.StoreInt32(&filterCalled, 1)
+		return conn, nil
+	}
+
+	client := aoni.NewClient(nil,
+		option.WithBaseURL(server.URL),
+		option.WithConnFilter(customFilter),
+	)
+
+	resp, err := client.Request(t.Context(), http.MethodGet, "/")
+	require.NoError(t, err)
+	t.Cleanup(func() { aoni.CloseResponse(resp) })
+
+	assert.Equal(t, http.StatusOK, resp.StatusCode)
+	assert.Equal(t, int32(1), atomic.LoadInt32(&filterCalled))
+}
+
+func TestClient_AuditFeatures(t *testing.T) {
+	t.Parallel()
+
+	t.Run("with_locale", func(t *testing.T) {
+		t.Parallel()
+
+		var rLang string
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			rLang = r.Header.Get("Accept-Language")
+			w.WriteHeader(http.StatusOK)
+		}))
+		t.Cleanup(server.Close)
+
+		client := aoni.NewClient(nil,
+			option.WithBaseURL(server.URL),
+			option.WithLocale("fr-FR,fr;q=0.9,en-US;q=0.8"),
+		)
+
+		resp, err := client.Request(t.Context(), http.MethodGet, "/")
+		require.NoError(t, err)
+		t.Cleanup(func() { aoni.CloseResponse(resp) })
+
+		assert.Equal(t, "fr-FR,fr;q=0.9,en-US;q=0.8", rLang)
+	})
+
+	t.Run("dns_resolver_override_helper", func(t *testing.T) {
+		t.Parallel()
+
+		ctx, cfg := aoni.AllocRequestConfig(t.Context())
+		assert.Nil(t, aoni.GetDNSResolverOverride(ctx))
+
+		mod.WithDNSResolver(nil)(aoni.NewStdRequest(&http.Request{}))
+		_ = cfg
+	})
+}

@@ -39,6 +39,19 @@ func (t *Transport) RoundTrip(req *http.Request) (*http.Response, error) {
 	return resp, nil
 }
 
+// Unwrap returns the next wrapped [http.RoundTripper] layer.
+func (t *Transport) Unwrap() http.RoundTripper {
+	return t.Next
+}
+
+// CloneTransport creates a copy of [Transport] wrapping next.
+func (t *Transport) CloneTransport(next http.RoundTripper) http.RoundTripper {
+	return &Transport{
+		Next:      next,
+		CookieJar: t.CookieJar,
+	}
+}
+
 func (t *Transport) setCookies(req *http.Request) {
 	if t.CookieJar == nil || req.URL == nil {
 		return
@@ -72,12 +85,4 @@ func (t *Transport) setCookies(req *http.Request) {
 	sb.WriteString(cookieHeader)
 
 	req.Header.Set("Cookie", sb.String())
-}
-
-func (t *Transport) Unwrap() http.RoundTripper {
-	if t.Next != nil {
-		return t.Next
-	}
-
-	return http.DefaultTransport
 }

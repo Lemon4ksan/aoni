@@ -23,6 +23,11 @@ var requestAdapterPool = sync.Pool{
 }
 
 // Request adapts a high-performance [*fasthttp.Request] to the unified [aoni.Request] contract.
+//
+// Thread Safety & Memory Lifetime Invariants:
+// Request instances are pooled via [sync.Pool] for zero-allocation execution.
+// Callers acquiring requests via [NewRequest] or [Client.AcquireRequest] MUST release them
+// via [Client.ReleaseRequest] or [Request.Release] when request lifecycle terminates.
 type Request struct {
 	req        *fasthttp.Request
 	ctx        context.Context
@@ -30,8 +35,9 @@ type Request struct {
 	isAcquired bool
 }
 
-// NewRequest acquires a pooled Request adapter wrapping req.
-// The caller is responsible for releasing the request object.
+// NewRequest acquires a pooled [Request] adapter wrapping an active [*fasthttp.Request].
+// If req is nil, a new [*fasthttp.Request] is acquired automatically from [fasthttp.AcquireRequest].
+// Yields a ready-to-use [Request] adapter bound to the pool. Caller MUST call Release() when finished.
 func NewRequest(req *fasthttp.Request) *Request {
 	isAcquired := false
 	if req == nil {

@@ -5,7 +5,6 @@
 package request
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -15,6 +14,7 @@ import (
 
 	"github.com/lemon4ksan/aoni"
 	"github.com/lemon4ksan/aoni/codec/decode"
+	"github.com/lemon4ksan/aoni/mod"
 )
 
 // DoFast executes a fast HTTP request over doer, bypassing *http.Response and http.Header allocations
@@ -46,11 +46,7 @@ func DoFast(
 		}
 	}
 
-	for _, m := range mods {
-		if m != nil {
-			m(req)
-		}
-	}
+	mod.Apply(req, mods...)
 
 	return doer.Do(req)
 }
@@ -75,10 +71,7 @@ func DoToFast[Resp any](
 	}
 
 	result := new(Resp)
-	contentType := resp.Header("Content-Type")
-	decoder := decode.LookupDecoder(contentType)
-
-	if err := decoder.Decode(bytes.NewReader(resp.UnsafeBodyBytes()), result); err != nil {
+	if err := decode.DecodePayload(resp.Header("Content-Type"), resp.UnsafeBodyBytes(), result); err != nil {
 		return nil, err
 	}
 
@@ -104,10 +97,7 @@ func DoIntoFast[T any](
 		return &aoni.APIError{StatusCode: resp.StatusCode(), Body: resp.BodyBytes()}
 	}
 
-	contentType := resp.Header("Content-Type")
-	decoder := decode.LookupDecoder(contentType)
-
-	return decoder.Decode(bytes.NewReader(resp.UnsafeBodyBytes()), target)
+	return decode.DecodePayload(resp.Header("Content-Type"), resp.UnsafeBodyBytes(), target)
 }
 
 // GetFast executes a fast GET request, returning a pooled aoni.Response.
@@ -295,14 +285,7 @@ func OptionsFast(
 }
 
 func acquireRequestFromDoer(doer aoni.RequestDoer) (aoni.Request, func()) {
-	if factory, ok := doer.(aoni.RequestFactory); ok {
-		r := factory.AcquireRequest()
-		return r, func() { factory.ReleaseRequest(r) }
-	}
-
-	stdReq := aoni.NewStdRequest(nil)
-
-	return stdReq, func() {}
+	return aoni.AcquireRequest(doer)
 }
 
 func applyFastBody(req aoni.Request, body any) error {
@@ -319,7 +302,7 @@ func applyFastBody(req aoni.Request, body any) error {
 	if msg, ok := body.(proto.Message); ok {
 		bodyBytes, err := proto.Marshal(msg)
 		if err != nil {
-			return fmt.Errorf("aoni request: failed to marshal proto payload: %w", err)
+			return fmt.Errorf("aoni/request: failed to marshal proto payload: %w", err)
 		}
 
 		req.SetBodyBytes(bodyBytes)
@@ -333,7 +316,7 @@ func applyFastBody(req aoni.Request, body any) error {
 
 	bodyBytes, err := json.Marshal(body)
 	if err != nil {
-		return fmt.Errorf("aoni request: failed to marshal payload: %w", err)
+		return fmt.Errorf("aoni/request: failed to marshal payload: %w", err)
 	}
 
 	req.SetBodyBytes(bodyBytes)

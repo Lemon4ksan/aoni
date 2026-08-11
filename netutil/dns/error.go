@@ -10,6 +10,12 @@ import (
 	"net"
 )
 
+var (
+	ErrDoQHandshakeFailed = errors.New("aoni/dns: quic connection handshake failed")
+	ErrDoQStreamClosed    = errors.New("aoni/dns: quic stream closed prematurely")
+	ErrDoQInvalidMessage  = errors.New("aoni/dns: invalid doq message response")
+)
+
 // ResolutionError represents an error occurring during DNS resolution in the aoni package.
 type ResolutionError struct {
 	// Host is the domain name that was queried for resolution.

@@ -11,6 +11,7 @@ import (
 
 	"github.com/lemon4ksan/aoni"
 	"github.com/lemon4ksan/aoni/codec/decode"
+	"github.com/lemon4ksan/aoni/middleware"
 	"github.com/lemon4ksan/aoni/mod"
 	"github.com/lemon4ksan/aoni/request"
 )
@@ -31,6 +32,15 @@ var (
 
 	// WithGRPCWeb creates an [aoni.RequestModifier] that assigns GRPCWebDecoder for response parsing.
 	WithGRPCWeb = decode.WithGRPCWeb
+
+	// RetryOnGRPCStatus triggers retries when gRPC trailer status matches codes.
+	RetryOnGRPCStatus = middleware.RetryOnGRPCStatus
+
+	// WithGRPCWebTimeout assigns standard gRPC-Web timeout headers.
+	WithGRPCWebTimeout = middleware.GRPCWebTimeout
+
+	// WithGRPCMetadata assigns gRPC-Web binary metadata headers.
+	WithGRPCMetadata = middleware.GRPCMetadata
 )
 
 // ProtoGetTo executes an HTTP GET request expecting a binary Protocol Buffer response stream unmarshaled into Resp.

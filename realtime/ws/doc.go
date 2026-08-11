@@ -52,7 +52,7 @@
 //		"github.com/lemon4ksan/aoni"
 //		"github.com/lemon4ksan/aoni/mod"
 //		"github.com/lemon4ksan/aoni/option"
-//		"github.com/lemon4ksan/aoni/ws"
+//		"github.com/lemon4ksan/aoni/realtime/ws"
 //	)
 //
 //	func main() {

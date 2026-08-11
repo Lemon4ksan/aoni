@@ -327,7 +327,7 @@ func TestDialIPProxy(t *testing.T) {
 
 		_, _, err := DialIPProxy(t.Context(), dialer, "https://proxy.example.com/.well-known/masque/ip/*/*/")
 		assert.Error(t, err)
-		assert.Contains(t, err.Error(), "aoni masque: write request:")
+		assert.Contains(t, err.Error(), "aoni/masque: write request:")
 	})
 
 	t.Run("read response error", func(t *testing.T) {
@@ -349,7 +349,7 @@ func TestDialIPProxy(t *testing.T) {
 
 		_, _, err := DialIPProxy(t.Context(), dialer, "https://proxy.example.com/.well-known/masque/ip/*/*/")
 		assert.Error(t, err)
-		assert.Contains(t, err.Error(), "aoni masque: read response:")
+		assert.Contains(t, err.Error(), "aoni/masque: read response:")
 	})
 }
 
@@ -369,11 +369,11 @@ func TestTokenContainsValue(t *testing.T) {
 func TestErrorConstants(t *testing.T) {
 	t.Parallel()
 
-	assert.Equal(t, "aoni masque: connect-ip handshake failed", ErrHandshakeFailed.Error())
-	assert.Equal(t, "aoni masque: invalid capsule format", ErrInvalidCapsule.Error())
-	assert.Equal(t, "aoni masque: invalid uri template", ErrInvalidURITemplate.Error())
-	assert.Equal(t, "aoni masque: unsupported http version for connect-ip", ErrUnsupportedHTTPVersion.Error())
-	assert.Equal(t, "aoni masque: address request capsule cannot be empty", ErrEmptyAddressRequest.Error())
+	assert.Equal(t, "aoni/masque: connect-ip handshake failed", ErrHandshakeFailed.Error())
+	assert.Equal(t, "aoni/masque: invalid capsule format", ErrInvalidCapsule.Error())
+	assert.Equal(t, "aoni/masque: invalid uri template", ErrInvalidURITemplate.Error())
+	assert.Equal(t, "aoni/masque: unsupported http version for connect-ip", ErrUnsupportedHTTPVersion.Error())
+	assert.Equal(t, "aoni/masque: address request capsule cannot be empty", ErrEmptyAddressRequest.Error())
 }
 
 func TestTCPMSSClamping(t *testing.T) {

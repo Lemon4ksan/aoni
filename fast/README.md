@@ -6,7 +6,7 @@
 
 [![Go Reference](https://img.shields.io/badge/go-reference-007d9c?logo=go&logoColor=white&style=flat-square)](https://pkg.go.dev/github.com/lemon4ksan/aoni/fast)
 [![License](https://img.shields.io/github/license/lemon4ksan/aoni?style=flat-square)](LICENSE)
-[![RPS](https://img.shields.io/badge/throughput-1.5M%2B%20RPS-brightgreen?style=flat-square)](#hard-core-performance-the-cold-hard-math)
+[![RPS](https://img.shields.io/badge/throughput-1.68M%2B%20RPS-brightgreen?style=flat-square)](#hard-core-performance-the-cold-hard-math)
 
 > _"Zero compromise. Strict memory geometry. Raw silicon speed."_
 
@@ -34,7 +34,7 @@ go get github.com/lemon4ksan/aoni
 | Feature / Capability | Standard Go `net/http` | Resty / Wrappers | `aoni` (Base) | `aoni/fast` |
 | :--- | :---: | :---: | :---: | :---: |
 | **Engine Core** | `net/http` | `net/http` | `net/http` | **`fasthttp` + Native H2/H3** |
-| **Execution Latency** | ~50 µs | ~50 µs | ~60 µs | **5.9 µs (8.5x faster)** |
+| **Execution Latency** | ~50 µs | ~50 µs | ~56 µs | **5.9 µs (10x faster)** |
 | **Zero-Alloc Object Pooling** | ✗ | ✗ | ✗ | **✓ (`sync.Pool` Request/Response)** |
 | **Native HTTP/2 (`h2engine`)** | `x/net/http2` | `x/net/http2` | `x/net/http2` | **✓ (Zero-Alloc Byte Engine)** |
 | **Native HTTP/3 (`h3engine`)** | `quic-go` | `quic-go` | `quic-go` | **✓ (QPACK Byte Engine)** |

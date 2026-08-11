@@ -15,19 +15,34 @@ import (
 )
 
 // HARGenerator captures and aggregates HTTP request-response sessions into HAR 1.2 JSON format.
+//
+// Specification Adherence:
+// Conforms strictly to W3C HTTP Archive (HAR) 1.2 specification format.
+//
+// Thread Safety & Concurrency:
+// 100% thread-safe; guarded by internal read-write mutex lock (`sync.RWMutex`).
 type HARGenerator struct {
 	mu      sync.RWMutex
 	entries []HAREntry
 }
 
-// NewHARGenerator instantiates an empty thread-safe [HARGenerator].
+// NewHARGenerator instantiates an empty, thread-safe [HARGenerator] ready for recording.
+//
+// Postconditions:
+//   - Yields a non-nil [HARGenerator] pointer with initialized slice storage.
 func NewHARGenerator() *HARGenerator {
 	return &HARGenerator{
 		entries: make([]HAREntry, 0),
 	}
 }
 
-// Record captures details of a completed request-response cycle into a structured [HAREntry].
+// Record captures details of a completed request-response transaction into a structured [HAREntry].
+//
+// Preconditions:
+//   - If resp is nil, the invocation is safely ignored without state mutation.
+//
+// Postconditions:
+//   - Appends a newly created [HAREntry] to internal thread-safe slice storage.
 func (g *HARGenerator) Record(
 	req *http.Request,
 	resp *http.Response,

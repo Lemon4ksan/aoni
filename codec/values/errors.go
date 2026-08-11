@@ -12,10 +12,10 @@ import (
 
 var (
 	// ErrUnsupportedType is returned when a type cannot be encoded into URL query or form parameters.
-	ErrUnsupportedType = errors.New("aoni values: unsupported type for encoding")
+	ErrUnsupportedType = errors.New("aoni/values: unsupported type for encoding")
 
 	// ErrInvalidFormat is returned when a raw string representation fails parsing into a structured type.
-	ErrInvalidFormat = errors.New("aoni values: invalid value format")
+	ErrInvalidFormat = errors.New("aoni/values: invalid value format")
 )
 
 // ValueError describes an error encountered during structure reflection or value marshaling.
@@ -33,7 +33,7 @@ func (e *ValueError) Error() string {
 
 	var sb strings.Builder
 	sb.Grow(64)
-	sb.WriteString("aoni values: ")
+	sb.WriteString("aoni/values: ")
 
 	if e.Field != "" {
 		sb.WriteString("field ")

@@ -131,7 +131,7 @@ func TestMod_URIAndPathModifiers(t *testing.T) {
 		t.Parallel()
 
 		req := newDummyRequest()
-		mod.WithURL("https://api.custom-target.com/v1/data")(req)
+		mod.WithBaseURL("https://api.custom-target.com/v1/data")(req)
 
 		assert.Equal(t, "https://api.custom-target.com/v1/data", req.URL())
 	})

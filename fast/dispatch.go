@@ -16,7 +16,7 @@ import (
 
 	"github.com/lemon4ksan/aoni"
 	"github.com/lemon4ksan/aoni/internal/bytesconv"
-	"github.com/lemon4ksan/aoni/internal/timer"
+	"github.com/lemon4ksan/aoni/internal/pool"
 )
 
 // dispatchSingleRequest routes an HTTP request through Happy Eyeballs v3 (Protocol Racing),
@@ -105,8 +105,8 @@ func (c *Client) raceProtocolHandshakes(
 		results <- raceResult{err: h3Err, isH3: true}
 	}()
 
-	staggerTimer := timer.Acquire(staggerDelay)
-	defer timer.Release(staggerTimer)
+	staggerTimer := pool.AcquireTimer(staggerDelay)
+	defer pool.ReleaseTimer(staggerTimer)
 
 	var tcpStarted bool
 
@@ -410,10 +410,8 @@ func (c *Client) executeFastHTTP(
 			req.URI().SetHost(hostStr)
 		}
 
-		if c.dialer != nil {
-			c.dialer.TrackHTTPSTarget(hostStr)
-			defer c.dialer.UntrackHTTPSTarget(hostStr)
-		}
+		c.TrackHTTPSTarget(hostStr)
+		defer c.UntrackHTTPSTarget(hostStr)
 
 		req.URI().SetScheme("http")
 	}

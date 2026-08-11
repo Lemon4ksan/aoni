@@ -5,18 +5,19 @@
 package aoni
 
 import (
-	"net/http"
-
 	utls "github.com/refraction-networking/utls"
 
-	"github.com/lemon4ksan/aoni/fingerprint/h2"
-	"github.com/lemon4ksan/aoni/fingerprint/h3"
 	"github.com/lemon4ksan/aoni/fingerprint/profiles"
+	internalProfile "github.com/lemon4ksan/aoni/internal/profile"
 )
 
-// ApplyTLSVariantToConfig translates and applies TLS fingerprint configurations
-// from a browser profile variant to the client configuration.
+// ApplyTLSVariantToConfig maps uTLS ClientHello specifications, presets, and QUIC TLS parameters
+// from a browser profile variant ([profiles.Variant]) into the target client configuration.
 func ApplyTLSVariantToConfig(cfg *Config, variant *profiles.Variant) {
+	if variant == nil {
+		return
+	}
+
 	if cfg.Fingerprint.BrowserID == BrowserNone {
 		if variant.HelloID.Client == "Firefox" {
 			cfg.Fingerprint.BrowserID = BrowserFirefox
@@ -28,7 +29,7 @@ func ApplyTLSVariantToConfig(cfg *Config, variant *profiles.Variant) {
 	}
 
 	if variant.HelloSpec != nil {
-		cfg.Fingerprint.TLSClientHelloSpecProvider = staticSpecProvider{Spec: variant.HelloSpec}
+		cfg.Fingerprint.TLSClientHelloSpecProvider = internalProfile.StaticSpecProvider{Spec: variant.HelloSpec}
 		cfg.Fingerprint.TLSClientHelloID = nil
 	} else if variant.HelloID != (utls.ClientHelloID{}) {
 		helloID := variant.HelloID
@@ -41,72 +42,50 @@ func ApplyTLSVariantToConfig(cfg *Config, variant *profiles.Variant) {
 	}
 }
 
-// ApplyHTTPVariantToConfig maps HTTP/2, HTTP/3 transport frames and base browser headers
-// from a browser profile variant to the client configuration.
+// ApplyHTTPVariantToConfig translates HTTP/2 SETTINGS frames, HTTP/3 QUIC transport limits,
+// default browser request headers, and method-specific header ordering rules into the client configuration.
 func ApplyHTTPVariantToConfig(cfg *Config, variant *profiles.Variant, os profiles.OSKey) {
-	h2Settings, h3Settings := applyHTTPSettings(variant)
+	if variant == nil {
+		return
+	}
+
+	h2Settings, h3Settings := internalProfile.ApplyHTTPSettings(variant)
 	if h2Settings != nil {
 		cfg.Fingerprint.H2Settings = h2Settings
 	}
 
 	cfg.Fingerprint.H3Settings = &h3Settings
-
-	if variant.BuildHeaders != nil {
-		if cfg.Defaults.Headers == nil {
-			cfg.Defaults.Headers = make(http.Header)
-		}
-
-		for _, h := range variant.BuildHeaders(os) {
-			if h.Value != "" {
-				cfg.Defaults.Headers.Set(h.Name, h.Value)
-			}
-		}
-	}
-
-	if variant.HeaderCache == nil {
-		return
-	}
-
-	enums := variant.HeaderCache.Enums(os.IsMobile())
-
-	methodOrder, ok := enums["GET"]
-	if !ok {
-		return
-	}
-
-	getHeadersOrder := make([]string, len(methodOrder))
-	for h, idx := range methodOrder {
-		if idx >= 0 && idx < len(getHeadersOrder) {
-			getHeadersOrder[idx] = h
-		}
-	}
-
-	cfg.Fingerprint.HeaderOrder = getHeadersOrder
+	cfg.Defaults.Headers = internalProfile.PopulateHeaders(cfg.Defaults.Headers, variant, os)
+	cfg.Fingerprint.HeaderOrder = internalProfile.BuildHeaderOrder(variant, os, "GET")
 }
 
-// ApplyProfileHeaders populates the target outgoing request with browser-grade headers,
-// boundary lines, and frame order sequences matching the profile variant.
+// ApplyProfileHeaders injects method-specific browser headers, WebKit/Gecko multipart boundary lines,
+// and method-tailored header serialization sequences into the outgoing request contract.
 func ApplyProfileHeaders(req Request, variant *profiles.Variant, os profiles.OSKey) {
-	headersMap := make(map[string]string)
-	if stdReq := req.HTTPRequest(); stdReq != nil {
-		for k, v := range stdReq.Header {
-			if len(v) > 0 {
-				headersMap[k] = v[0]
-			}
-		}
+	if variant == nil {
+		return
 	}
 
 	if variant.InsertHeaders != nil {
-		variant.InsertHeaders(headersMap, req.Method())
-	}
-
-	for k, v := range headersMap {
-		if k[0] == byte(':') {
-			continue
+		headersMap := make(map[string]string)
+		if stdReq := req.HTTPRequest(); stdReq != nil {
+			for k, v := range stdReq.Header {
+				if len(v) > 0 {
+					headersMap[k] = v[0]
+				}
+			}
 		}
 
-		if v != "" && req.Header(k) == "" {
-			req.SetHeader(k, v)
+		variant.InsertHeaders(headersMap, req.Method())
+
+		for k, v := range headersMap {
+			if len(k) > 0 && k[0] == ':' {
+				continue
+			}
+
+			if v != "" && req.Header(k) == "" {
+				req.SetHeader(k, v)
+			}
 		}
 	}
 
@@ -120,45 +99,7 @@ func ApplyProfileHeaders(req Request, variant *profiles.Variant, os profiles.OSK
 	}
 }
 
-type staticSpecProvider struct {
-	Spec *utls.ClientHelloSpec
-}
-
-func (s staticSpecProvider) ClientHelloSpec() (*utls.ClientHelloSpec, error) {
-	return s.Spec, nil
-}
-
 func setOrderedHeaders(req Request, variant *profiles.Variant, os profiles.OSKey) {
-	enums := variant.HeaderCache.Enums(os.IsMobile())
-
-	methodOrder, ok := enums[req.Method()]
-	if !ok {
-		methodOrder = enums["GET"]
-	}
-
-	ordered := make([]string, len(methodOrder))
-	for h, idx := range methodOrder {
-		if idx >= 0 && idx < len(ordered) {
-			ordered[idx] = h
-		}
-	}
-
 	cfg := GetOrInitRequestConfig(req)
-	cfg.OrderedHeaders = ordered
-}
-
-func applyHTTPSettings(variant *profiles.Variant) (http2 *h2.Settings, http3 h3.Settings) {
-	if variant.ConfigureH2 != nil {
-		var h2s profiles.H2Settings
-		variant.ConfigureH2(&h2s)
-		http2 = h2.SettingsFromProfile(h2s)
-	}
-
-	if variant.HelloID.Client == "Firefox" {
-		http3 = h3.FirefoxSettings
-	} else {
-		http3 = h3.ChromeSettings
-	}
-
-	return http2, http3
+	cfg.OrderedHeaders = internalProfile.BuildHeaderOrder(variant, os, req.Method())
 }

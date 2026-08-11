@@ -20,8 +20,8 @@ import (
 	"github.com/valyala/fasthttp"
 
 	"github.com/lemon4ksan/aoni/fast"
-	"github.com/lemon4ksan/aoni/fast/h2engine"
-	"github.com/lemon4ksan/aoni/fast/h3engine"
+	"github.com/lemon4ksan/aoni/internal/fast/h2engine"
+	"github.com/lemon4ksan/aoni/internal/fast/h3engine"
 )
 
 func TestH2_HPACKEncoderDecoderSymmetry(t *testing.T) {

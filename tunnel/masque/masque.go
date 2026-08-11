@@ -29,10 +29,7 @@ const (
 )
 
 // BuildIPProxyURI constructs an RFC 9484 compliant IP Proxy URI using single-pass zero-allocation string builder.
-//
-// Preconditions:
-//   - target can be an IP address/prefix, hostname, or "*" wildcard.
-//   - ipproto can be an IP protocol number (e.g. "17" for UDP, "6" for TCP) or "*" wildcard.
+// Target can be an IP address/prefix, hostname, or "*" wildcard; ipproto can be an IP protocol number or "*" wildcard.
 func BuildIPProxyURI(host string, port int, target, ipproto string) string {
 	cleanTarget := strings.TrimSpace(target)
 	if cleanTarget == "" {
@@ -85,7 +82,7 @@ func BuildIPProxyURI(host string, port int, target, ipproto string) string {
 // DialIPProxy establishes an IP tunneling connection over HTTP/1.1 or HTTP/2 Extended CONNECT.
 func DialIPProxy(
 	ctx context.Context,
-	dialer aoni.WSDialer,
+	dialer aoni.WebSocketDialer,
 	targetURL string,
 	mods ...aoni.RequestModifier,
 ) (net.Conn, *http.Response, error) {
@@ -145,14 +142,14 @@ func performCONNECTIPHandshake(
 	}
 
 	if err := req.Write(conn); err != nil {
-		return nil, fmt.Errorf("aoni masque: write request: %w", err)
+		return nil, fmt.Errorf("aoni/masque: write request: %w", err)
 	}
 
 	br := bufio.NewReader(conn)
 
 	resp, err := http.ReadResponse(br, req)
 	if err != nil {
-		return nil, fmt.Errorf("aoni masque: read response: %w", err)
+		return nil, fmt.Errorf("aoni/masque: read response: %w", err)
 	}
 
 	if resp.StatusCode != http.StatusSwitchingProtocols && resp.StatusCode != http.StatusOK {

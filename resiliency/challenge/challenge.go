@@ -29,8 +29,18 @@ var ErrCloudflareDetected = errors.New("aoni: cloudflare challenge detected")
 // DefaultDetector serves as the standard detector used across the pipeline.
 var DefaultDetector aoni.ChallengeDetector = DetectCloudflareChallenge
 
-// DetectCloudflareChallenge inspects the response headers and buffered HTML prefix
-// to determine if Cloudflare JS/WAF challenge page was returned.
+// DetectCloudflareChallenge inspects response status codes, headers, and buffered HTML body prefixes
+// to determine whether a Cloudflare JavaScript or CAPTCHA challenge page was returned.
+//
+// Black-Box Behavior:
+// Performs non-destructive inspection of up to 4096 bytes of the response body prefix (using pre-buffered fast paths when available).
+//
+// Preconditions:
+//   - If resp or resp.Body are nil, returns (false, nil).
+//
+// Postconditions:
+//   - Returns (true, ErrCloudflareDetected) if Cloudflare JS/CAPTCHA signatures are present; otherwise returns (false, nil).
+//   - Leaves the response body readable for subsequent downstream handlers without corrupting stream state.
 func DetectCloudflareChallenge(resp *http.Response) (bool, error) {
 	if resp == nil || resp.Body == nil {
 		return false, nil

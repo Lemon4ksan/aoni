@@ -15,6 +15,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/lemon4ksan/aoni/fingerprint/profiles"
+	internalH2 "github.com/lemon4ksan/aoni/internal/fingerprint/h2"
 )
 
 func TestH2SettingsFromProfile(t *testing.T) {
@@ -110,7 +111,7 @@ func TestH2FramedConn_PrefaceChecks(t *testing.T) {
 			_ = client.Close()
 		})
 
-		conn := &framedConn{
+		conn := &internalH2.FramedConn{
 			Conn: client,
 		}
 
@@ -137,7 +138,7 @@ func TestH2FramedConn_PrefaceChecks(t *testing.T) {
 			_ = client.Close()
 		})
 
-		conn := &framedConn{
+		conn := &internalH2.FramedConn{
 			Conn: client,
 		}
 
@@ -165,7 +166,7 @@ func TestH2FramedConn_PrefaceChecks(t *testing.T) {
 			_ = client.Close()
 		})
 
-		conn := &framedConn{
+		conn := &internalH2.FramedConn{
 			Conn: client,
 		}
 
@@ -195,10 +196,7 @@ func TestH2FramedConn_PrefaceChecks(t *testing.T) {
 			_ = client.Close()
 		})
 
-		conn := &framedConn{
-			Conn:        client,
-			prefaceSent: true,
-		}
+		conn := internalH2.WrapConn(client, internalH2.SettingsDTO{}, nil)
 
 		done := make(chan struct{})
 		go func() {
@@ -224,9 +222,9 @@ func TestH2FramedConn_WithPriorityFrame(t *testing.T) {
 		_ = client.Close()
 	})
 
-	conn := &framedConn{
+	conn := &internalH2.FramedConn{
 		Conn: client,
-		settings: Settings{
+		Settings: internalH2.SettingsDTO{
 			HeaderTableSize:   65536,
 			PriorityStreamDep: 13,
 			PriorityExclusive: true,
@@ -258,7 +256,6 @@ func TestH2FramedConn_WithPriorityFrame(t *testing.T) {
 	require.NoError(t, err)
 	<-done
 
-	assert.True(t, conn.prefaceSent)
 	assert.NotEmpty(t, received)
 
 	// Confirm we re-wrote the Priority frame payload to include Weight (16)
@@ -274,9 +271,9 @@ func TestH2FramedConn_WithWindowUpdate(t *testing.T) {
 		_ = client.Close()
 	})
 
-	conn := &framedConn{
+	conn := &internalH2.FramedConn{
 		Conn: client,
-		settings: Settings{
+		Settings: internalH2.SettingsDTO{
 			HeaderTableSize: 65536,
 			ConnectionFlow:  15663105, // > 65535, triggers WINDOW_UPDATE frame (0x8)
 		},
@@ -302,7 +299,6 @@ func TestH2FramedConn_WithWindowUpdate(t *testing.T) {
 	require.NoError(t, err)
 	<-done
 
-	assert.True(t, conn.prefaceSent)
 	assert.NotEmpty(t, received)
 
 	// Check for WINDOW_UPDATE frame (type 0x8) in wire bytes
@@ -312,8 +308,8 @@ func TestH2FramedConn_WithWindowUpdate(t *testing.T) {
 func TestH2FramedConn_BuildPriorityFrame_TooShort(t *testing.T) {
 	t.Parallel()
 
-	conn := &framedConn{}
-	res := conn.buildPriorityFrame([]byte{0x00, 0x01})
+	conn := &internalH2.FramedConn{}
+	res := conn.BuildPriorityFrame([]byte{0x00, 0x01})
 	assert.Nil(t, res)
 }
 

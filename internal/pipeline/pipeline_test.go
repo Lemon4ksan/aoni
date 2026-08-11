@@ -239,7 +239,7 @@ func TestPipeline_Execute_FastPath(t *testing.T) {
 	t.Parallel()
 
 	defaults := ClientDefaults{}
-	pipe := NewPipeline(defaults, ClientFingerprint{})
+	pipe := New(defaults, ClientFingerprint{})
 
 	doer := DoerFunc(func(req *http.Request) (*http.Response, error) {
 		return &http.Response{
@@ -265,7 +265,7 @@ func TestPipeline_Execute_FastPath(t *testing.T) {
 func TestPipeline_UnsafePhaseOrder_And_Hooks(t *testing.T) {
 	t.Parallel()
 
-	pipeEngine := NewPipeline(ClientDefaults{}, ClientFingerprint{})
+	pipeEngine := New(ClientDefaults{}, ClientFingerprint{})
 	doer := &mockDoer{}
 
 	mReq := newMockRequest(t.Context(), "GET", "http://unsafe.com")
@@ -313,7 +313,7 @@ func TestPipeline_DisabledFlagsAndLookupDecoder(t *testing.T) {
 	ctx, reqCfg := AllocRequestConfig(t.Context())
 	reqCfg.DisabledFlags = FlagDecompress | FlagValidate
 
-	pipeEngine := NewPipeline(ClientDefaults{}, ClientFingerprint{})
+	pipeEngine := New(ClientDefaults{}, ClientFingerprint{})
 
 	mReq := newMockRequest(t.Context(), "GET", "http://example.com/flags")
 	mReq.SetContext(ctx)
@@ -337,7 +337,7 @@ func TestPipeline_DisabledFlagsAndLookupDecoder(t *testing.T) {
 func TestPipeline_ResponseSizeLimit(t *testing.T) {
 	t.Parallel()
 
-	pipe := NewPipeline(ClientDefaults{}, ClientFingerprint{})
+	pipe := New(ClientDefaults{}, ClientFingerprint{})
 
 	t.Run("exceeds_content_length_fails_early", func(t *testing.T) {
 		t.Parallel()
@@ -388,7 +388,7 @@ func TestPipeline_ResponseSizeLimit(t *testing.T) {
 func TestPipeline_DecompressionAndExplicitAcceptEncoding(t *testing.T) {
 	t.Parallel()
 
-	pipeEngine := NewPipeline(ClientDefaults{}, ClientFingerprint{})
+	pipeEngine := New(ClientDefaults{}, ClientFingerprint{})
 
 	var gzBuf bytes.Buffer
 
@@ -431,7 +431,7 @@ func TestPipeline_PostProcessResponse_Full(t *testing.T) {
 	respConflict := &http.Response{
 		Header: http.Header{"Content-Length": []string{"100", "200"}},
 	}
-	pipeEngine := NewPipeline(ClientDefaults{}, ClientFingerprint{})
+	pipeEngine := New(ClientDefaults{}, ClientFingerprint{})
 	_, errConflict := pipeEngine.postProcessResponse(&http.Request{}, respConflict, AcquireTx(t.Context()))
 	assert.ErrorIs(t, errConflict, ErrConflictingContentLength)
 
@@ -453,7 +453,7 @@ func TestPipeline_PostProcessResponse_Full(t *testing.T) {
 		ChallengeSolver: solver,
 	}
 
-	pipeWAF := NewPipeline(defaultsWAF, ClientFingerprint{})
+	pipeWAF := New(defaultsWAF, ClientFingerprint{})
 	txWAF := AcquireTx(t.Context())
 	txWAF.Flags = FlagChallenge
 
@@ -473,7 +473,7 @@ func TestPipeline_PostProcessResponse_Full(t *testing.T) {
 		Header: http.Header{"Content-Type": []string{"application/json; charset=windows-1251"}},
 		Body:   stdio.NopCloser(strings.NewReader("\xef\xf0\xe8\xe2\xe5\xf2")),
 	}
-	applyCharsetTranscoding(respTranscode)
+	respTranscode.Body = applyCharsetTranscoding(respTranscode, respTranscode.Body)
 	transcodedBytes, _ := stdio.ReadAll(respTranscode.Body)
 	assert.Equal(t, "привет", string(transcodedBytes))
 	assert.NotContains(t, respTranscode.Header.Get("Content-Type"), "windows-1251")
@@ -482,7 +482,7 @@ func TestPipeline_PostProcessResponse_Full(t *testing.T) {
 func TestPipeline_Hedging_IdempotencyAndBody(t *testing.T) {
 	t.Parallel()
 
-	pipeEngine := NewPipeline(ClientDefaults{}, ClientFingerprint{})
+	pipeEngine := New(ClientDefaults{}, ClientFingerprint{})
 
 	var calls atomic.Int32
 
@@ -528,7 +528,7 @@ func TestPipeline_Hedging_IdempotencyAndBody(t *testing.T) {
 func TestPipeline_ProxyFailover_And_Hedging(t *testing.T) {
 	t.Parallel()
 
-	pipeEngine := NewPipeline(ClientDefaults{}, ClientFingerprint{})
+	pipeEngine := New(ClientDefaults{}, ClientFingerprint{})
 
 	var attempts atomic.Int32
 
@@ -568,7 +568,7 @@ func TestPipeline_Caching_Full(t *testing.T) {
 	t.Parallel()
 
 	cacheStore := newMockCacheStore()
-	pipeEngine := NewPipeline(ClientDefaults{}, ClientFingerprint{})
+	pipeEngine := New(ClientDefaults{}, ClientFingerprint{})
 
 	cacheCfg := &CacheConfig{
 		Store:      cacheStore,
@@ -620,7 +620,7 @@ func TestPipeline_Caching_Full(t *testing.T) {
 func TestPipeline_TraceInfoCallbacks(t *testing.T) {
 	t.Parallel()
 
-	pipeEngine := NewPipeline(ClientDefaults{}, ClientFingerprint{})
+	pipeEngine := New(ClientDefaults{}, ClientFingerprint{})
 	stdReq, _ := http.NewRequestWithContext(t.Context(), http.MethodGet, "http://example.com/trace", nil)
 
 	traceInfo := &telemetry.TraceInfo{}
@@ -654,7 +654,7 @@ func TestPipeline_TraceInfoCallbacks(t *testing.T) {
 func TestPipeline_FinalizeJA4Report(t *testing.T) {
 	t.Parallel()
 
-	pipeEngine := NewPipeline(ClientDefaults{}, ClientFingerprint{})
+	pipeEngine := New(ClientDefaults{}, ClientFingerprint{})
 
 	pipeEngine.finalizeJA4Report(nil)
 
@@ -751,7 +751,7 @@ func TestPipeline_PhasePrep_Full(t *testing.T) {
 		},
 	}
 
-	pipeEngine := NewPipeline(defaults, fingerprintConfig)
+	pipeEngine := New(defaults, fingerprintConfig)
 
 	mReq := newMockRequest(t.Context(), "POST", "http://example.com/api")
 	mReq.SetBodyBytes([]byte("upload payload"))
@@ -788,4 +788,124 @@ func TestPipeline_PhasePrep_Full(t *testing.T) {
 	assert.Greater(t, uploadBytesRead, int64(0))
 
 	ReleaseTx(tx)
+}
+
+func TestPipeline_Cloudflare403WAF(t *testing.T) {
+	pipeEngine := New(ClientDefaults{}, ClientFingerprint{})
+
+	var attempts atomic.Int32
+
+	doer := DoerFunc(func(req *http.Request) (*http.Response, error) {
+		attempts.Add(1)
+
+		hdr := make(http.Header)
+		hdr.Set("cf-mitigated", "challenge")
+
+		return &http.Response{
+			StatusCode: http.StatusForbidden,
+			Header:     hdr,
+			Body:       stdio.NopCloser(strings.NewReader("Cloudflare WAF Challenge")),
+			Request:    req,
+		}, nil
+	})
+
+	mReq := newMockRequest(t.Context(), "GET", "http://example.com/protected")
+	resp, err := pipeEngine.Execute(t.Context(), mReq, doer, PipelineConfig{})
+	require.NoError(t, err)
+
+	defer resp.Body.Close()
+
+	assert.Equal(t, http.StatusForbidden, resp.StatusCode)
+	assert.Equal(t, "challenge", resp.Header.Get("cf-mitigated"))
+}
+
+func TestPipeline_MisdirectedRequest421(t *testing.T) {
+	pipeEngine := New(ClientDefaults{}, ClientFingerprint{})
+
+	var attempts atomic.Int32
+
+	doer := DoerFunc(func(req *http.Request) (*http.Response, error) {
+		attempts.Add(1)
+
+		return &http.Response{
+			StatusCode: http.StatusMisdirectedRequest,
+			Header:     make(http.Header),
+			Body:       stdio.NopCloser(strings.NewReader("421 Misdirected Request")),
+			Request:    req,
+		}, nil
+	})
+
+	mReq := newMockRequest(t.Context(), "GET", "http://example.com/misdirected")
+	resp, err := pipeEngine.Execute(t.Context(), mReq, doer, PipelineConfig{})
+	require.NoError(t, err)
+
+	defer resp.Body.Close()
+
+	assert.Equal(t, http.StatusMisdirectedRequest, resp.StatusCode)
+}
+
+func TestPipeline_TooManyRequests429_RetryAfter(t *testing.T) {
+	pipeEngine := New(ClientDefaults{}, ClientFingerprint{})
+
+	doer := DoerFunc(func(req *http.Request) (*http.Response, error) {
+		hdr := make(http.Header)
+		hdr.Set("Retry-After", "1")
+
+		return &http.Response{
+			StatusCode: http.StatusTooManyRequests,
+			Header:     hdr,
+			Body:       stdio.NopCloser(strings.NewReader("Rate Limited")),
+			Request:    req,
+		}, nil
+	})
+
+	mReq := newMockRequest(t.Context(), "GET", "http://example.com/rate-limited")
+	resp, err := pipeEngine.Execute(t.Context(), mReq, doer, PipelineConfig{})
+	require.NoError(t, err)
+
+	defer resp.Body.Close()
+
+	assert.Equal(t, http.StatusTooManyRequests, resp.StatusCode)
+	assert.Equal(t, "1", resp.Header.Get("Retry-After"))
+}
+
+func TestPipeline_ServiceUnavailable503(t *testing.T) {
+	pipeEngine := New(ClientDefaults{}, ClientFingerprint{})
+
+	doer := DoerFunc(func(req *http.Request) (*http.Response, error) {
+		return &http.Response{
+			StatusCode: http.StatusServiceUnavailable,
+			Header:     make(http.Header),
+			Body:       stdio.NopCloser(strings.NewReader("503 Service Unavailable")),
+			Request:    req,
+		}, nil
+	})
+
+	mReq := newMockRequest(t.Context(), "GET", "http://example.com/down")
+	resp, err := pipeEngine.Execute(t.Context(), mReq, doer, PipelineConfig{})
+	require.NoError(t, err)
+
+	defer resp.Body.Close()
+
+	assert.Equal(t, http.StatusServiceUnavailable, resp.StatusCode)
+}
+
+func TestAltSvcCache_RecordingAndLookup(t *testing.T) {
+	cache := NewAltSvcCache()
+	cache.ParseAndStore("example.com", `h3=":443"; ma=3600`)
+
+	assert.True(t, cache.HasH3Support("example.com"))
+
+	cache.RecordH3Failure("example.com", 5*time.Minute)
+	assert.False(t, cache.HasH3Support("example.com"))
+}
+
+func TestRefererAutomaton_PolicyTransitions(t *testing.T) {
+	auto := NewRefererAutomaton(PolicyNoRefererWhenDowngrade)
+	u1, _ := url.Parse("https://origin.com/page1")
+	u2, _ := url.Parse("https://origin.com/page2")
+
+	auto.UpdateLastURL(u1)
+	ref := auto.ComputeReferer(u2)
+	assert.Equal(t, "https://origin.com/page1", ref)
 }

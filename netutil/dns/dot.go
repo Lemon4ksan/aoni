@@ -141,8 +141,7 @@ func packDNSQuery(id uint16, domain string, qtype uint16) ([]byte, error) {
 
 	buf = append(buf, header[:]...)
 
-	parts := strings.Split(domain, ".")
-	for _, part := range parts {
+	for part := range strings.SplitSeq(domain, ".") {
 		if len(part) == 0 {
 			continue
 		}
@@ -251,7 +250,6 @@ func skipDNSName(msg []byte, offset int) (int, error) {
 
 		length := int(msg[offset])
 
-		// Указатель сжатия (0xC0 в двух старших битах)
 		if (length & 0xC0) == 0xC0 {
 			if offset+2 > len(msg) {
 				return 0, errors.New("truncated pointer")

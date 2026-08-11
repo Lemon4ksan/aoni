@@ -15,16 +15,25 @@ import (
 )
 
 // ErrInvalidCookieData is returned when persisted cookie data cannot be unmarshaled.
-var ErrInvalidCookieData = errors.New("aoni cookie: invalid persisted cookie payload")
+var ErrInvalidCookieData = errors.New("aoni/cookie: invalid persisted cookie payload")
 
-// Storage defines the persistence interface for proxy-isolated cookie jars.
+// Storage defines the persistence interface contract for saving and loading proxy-isolated cookie jars.
+//
+// Thread Safety Requirement:
+// Implementations MUST be thread-safe for concurrent read and write operations across goroutines.
 type Storage interface {
 	Save(key string, cookies []Cookie) error
 	Load(key string) ([]Cookie, error)
 }
 
-// JSONFileStorage implements Storage using a single JSON file on disk.
-// File updates are performed via atomic temp file swaps to prevent corruption on crash.
+// JSONFileStorage implements thread-safe [Storage] using atomic file writes to disk.
+//
+// Atomic Write Guarantees:
+// Writes are performed via temporary file creation and atomic OS file swaps (`os.Rename`),
+// guaranteeing zero file corruption even in the event of abrupt process termination.
+//
+// Thread Safety:
+// 100% thread-safe; guarded by internal read-write mutex lock (`sync.RWMutex`).
 type JSONFileStorage struct {
 	mu       sync.RWMutex
 	filePath string
@@ -33,7 +42,8 @@ type JSONFileStorage struct {
 
 type fileStorageData map[string][]Cookie
 
-// NewJSONFileStorage creates a [JSONFileStorage] bound to filePath.
+// NewJSONFileStorage instantiates a [JSONFileStorage] bound to the specified filePath.
+// Automatically loads cookies into memory if filePath exists and contains valid JSON, or initializes empty storage.
 func NewJSONFileStorage(filePath string) *JSONFileStorage {
 	s := &JSONFileStorage{
 		filePath: filePath,
@@ -47,7 +57,10 @@ func NewJSONFileStorage(filePath string) *JSONFileStorage {
 	return s
 }
 
-// Save stores cookies under key and flushes the updated JSON structure atomically to disk.
+// Save stores cookie slices under key and flushes the JSON payload to disk via atomic temp file swaps.
+//
+// Postconditions:
+//   - Creates parent directories if missing and atomically renames the temporary file to target path.
 func (s *JSONFileStorage) Save(key string, cookies []Cookie) error {
 	s.mu.Lock()
 	s.data[key] = cookies

@@ -7,10 +7,8 @@ package grpc
 
 import (
 	"bytes"
-	"compress/gzip"
 	"context"
 	"encoding/base64"
-	"encoding/binary"
 	"errors"
 	"fmt"
 	"io"
@@ -41,7 +39,7 @@ func Invoke[Resp any](
 	reqMsg proto.Message,
 	mods ...aoni.RequestModifier,
 ) (*Resp, error) {
-	frameBytes, err := MarshalFrame(reqMsg, false)
+	frameBytes, err := marshalFrame(reqMsg, false)
 	if err != nil {
 		return nil, err
 	}
@@ -60,7 +58,7 @@ func Invoke[Resp any](
 	)
 
 	if deadline, ok := ctx.Deadline(); ok {
-		grpcMods = append(grpcMods, mod.WithHeader("grpc-timeout", FormatTimeout(time.Until(deadline))))
+		grpcMods = append(grpcMods, mod.WithHeader("grpc-timeout", formatTimeout(time.Until(deadline))))
 	}
 
 	if md, ok := FromContext(ctx); ok && len(md) > 0 {
@@ -85,10 +83,10 @@ func Invoke[Resp any](
 
 	msg, ok := any(result).(proto.Message)
 	if !ok {
-		return nil, fmt.Errorf("aoni grpc: response type %T does not implement proto.Message", result)
+		return nil, fmt.Errorf("aoni/grpc: response type %T does not implement proto.Message", result)
 	}
 
-	if _, err := UnmarshalFrame(resp.Body, msg); err != nil {
+	if _, err := unmarshalFrame(resp.Body, msg); err != nil {
 		return nil, err
 	}
 
@@ -107,7 +105,7 @@ func InvokeFast[Resp any](
 	reqMsg proto.Message,
 	mods ...aoni.RequestModifier,
 ) (*Resp, error) {
-	frameBytes, err := MarshalFrame(reqMsg, false)
+	frameBytes, err := marshalFrame(reqMsg, false)
 	if err != nil {
 		return nil, err
 	}
@@ -143,7 +141,7 @@ func InvokeFast[Resp any](
 
 	msg, ok := any(result).(proto.Message)
 	if !ok {
-		return nil, fmt.Errorf("aoni grpc: response type %T does not implement proto.Message", result)
+		return nil, fmt.Errorf("aoni/grpc: response type %T does not implement proto.Message", result)
 	}
 
 	if err := unmarshalFastGRPCFrame(resp, msg); err != nil {
@@ -155,11 +153,11 @@ func InvokeFast[Resp any](
 
 func unmarshalFastGRPCFrame(resp aoni.Response, msg proto.Message) error {
 	if stream := resp.BodyStream(); stream != nil && resp.HTTPResponse() == nil { //nolint:bodyclose
-		_, err := UnmarshalFrame(stream, msg)
+		_, err := unmarshalFrame(stream, msg)
 		return err
 	}
 
-	_, err := UnmarshalFrame(bytes.NewReader(resp.UnsafeBodyBytes()), msg)
+	_, err := unmarshalFrame(bytes.NewReader(resp.UnsafeBodyBytes()), msg)
 
 	return err
 }
@@ -231,10 +229,10 @@ func (s *StreamResponse[Resp]) Recv() (*Resp, error) {
 
 	msg, ok := any(result).(proto.Message)
 	if !ok {
-		return nil, fmt.Errorf("aoni grpc: response type %T does not implement proto.Message", result)
+		return nil, fmt.Errorf("aoni/grpc: response type %T does not implement proto.Message", result)
 	}
 
-	_, err := UnmarshalFrame(s.stream, msg)
+	_, err := unmarshalFrame(s.stream, msg)
 	if err != nil {
 		if errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF) {
 			if validateErr := validateResponseTrailers(s.resp); validateErr != nil {
@@ -268,7 +266,7 @@ func ServerStream[Resp any](
 	reqMsg proto.Message,
 	mods ...aoni.RequestModifier,
 ) (*StreamResponse[Resp], error) {
-	frameBytes, err := MarshalFrame(reqMsg, false)
+	frameBytes, err := marshalFrame(reqMsg, false)
 	if err != nil {
 		return nil, err
 	}
@@ -288,7 +286,7 @@ func ServerStream[Resp any](
 	)
 
 	if deadline, ok := ctx.Deadline(); ok {
-		grpcMods = append(grpcMods, mod.WithHeader("grpc-timeout", FormatTimeout(time.Until(deadline))))
+		grpcMods = append(grpcMods, mod.WithHeader("grpc-timeout", formatTimeout(time.Until(deadline))))
 	}
 
 	if md, ok := FromContext(ctx); ok && len(md) > 0 {
@@ -312,40 +310,4 @@ func ServerStream[Resp any](
 		stream: resp.Body,
 		resp:   resp,
 	}, nil
-}
-
-// MarshalFrameCompressed encodes a Protobuf message with optional Gzip compression.
-func MarshalFrameCompressed(msg proto.Message, compress bool) ([]byte, error) {
-	if msg == nil {
-		return []byte{0, 0, 0, 0, 0}, nil
-	}
-
-	payload, err := proto.Marshal(msg)
-	if err != nil {
-		return nil, fmt.Errorf("aoni grpc: marshal proto failed: %w", err)
-	}
-
-	var compressedFlag byte = 0x00
-	if compress {
-		var buf bytes.Buffer
-
-		gz := gzip.NewWriter(&buf)
-		if _, err := gz.Write(payload); err != nil {
-			return nil, fmt.Errorf("aoni grpc: compress payload failed: %w", err)
-		}
-
-		_ = gz.Close()
-
-		payload = buf.Bytes()
-		compressedFlag = 0x01
-	}
-
-	payloadLen := len(payload)
-	frame := make([]byte, 5+payloadLen)
-	frame[0] = compressedFlag
-
-	binary.BigEndian.PutUint32(frame[1:5], uint32(payloadLen)) //nolint:gosec
-	copy(frame[5:], payload)
-
-	return frame, nil
 }

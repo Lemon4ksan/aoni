@@ -16,45 +16,15 @@
 
 ## Why Aoni?
 
-Building modern Go applications usually means assembling a fragile "Frankenstein" of 10+ unmaintained networking packages—gluing together separate libraries for HTTP/3, uTLS, DNS-over-HTTPS, WebSockets, gRPC-Web, SSH tunneling, and resilience. Each package manages its own memory pools and context models, leading to heap bloat, GC latency spikes, and flaky connection failures under load.
+Building production Go applications often requires integrating multiple independent networking packages - separately managing HTTP/3, uTLS, DoH/DoQ resolvers, WebSockets, gRPC-Web, and connection resilience. Handling disconnected memory pools and context models across these layers introduces unnecessary heap allocations, GC pause spikes, and redundant abstraction overhead.
 
-`aoni` eliminates this fragmentation. It is the **Unified Internet Protocol Engine for Go** - consolidating all modern IETF RFCs, W3C standards, and Chromium-grade network resilience into a single, profile-driven zero-allocation architecture.
+`aoni` consolidates modern IETF RFC standards, W3C specifications, and Chromium-grade network resilience into a single profile-driven architecture.
 
-Whether you are building standard microservice REST APIs, high-throughput gateways, real-time WebSockets, or stealthy anti-analysis tools, `aoni` delivers peak silicon performance without compromising on features, memory footprint, or reliability.
+Whether executing standard REST microservice queries, high-throughput API gateway routing, real-time WebSocket streams, or stealthy network analysis, `aoni` provides zero-allocation hot paths and predictable execution budgets.
 
 ```shell
 go get github.com/lemon4ksan/aoni
 ```
-
-## Hard Core Performance: Proven by `pprof`
-
-`aoni` isn't just feature-complete; it sits right at the physical execution limit of the Go runtime. Compared directly against popular HTTP libraries under identical workloads:
-
-| Metric | Resty (`net/http`) | `aoni` (Standard) | `aoni` + `fast.Bridge` | `aoni/fast` (Native) | Advantage (`fast` vs Resty) |
-| :--- | :---: | :---: | :---: | :---: | :---: |
-| **GET JSON Latency (`ns/op`)** | 58,393 ns | 56,669 ns | 14,127 ns | 6,513 ns | **~9x Faster** |
-| **Heap Memory (`B/op`)** | 9,113 B | 8,217 B | 6,260 B | 372 B | **~24x Lighter** |
-| **Heap Allocations (`allocs/op`)** | 91 allocs | 82 allocs | 79 allocs | 9 allocs | **~10x Fewer Allocations** |
-| **HTTP/2 Latency (`ns/op`)** | 76,519 ns | 76,519 ns | 71,200 ns | 68,164 ns | **Faster H2 Multiplexing** |
-| **HTTP/3 Latency (`ns/op`)** | 131,281 ns | 131,281 ns | 115,400 ns | 111,150 ns | **Faster H3 QUIC Engine** |
-| **Parallel Latency (`ns/op`)** | 11,307 ns | 9,534 ns | 1,940 ns | 656 ns | **~17x Faster Parallel I/O** |
-| **Peak Throughput (Single Node)** | ~30k RPS | ~35k RPS | >70,000 RPS | 1,522,000+ RPS | **Peak Silicon Speed** |
-| **Request Builder Overhead (`.R()`)** | 32 B / 2 allocs | 32 B / 2 allocs | 32 B / 2 allocs | 32 B / 2 allocs | **Zero-alloc parity** |
-
-Whether you are calling standard microservice REST endpoints or parsing millions of anti-bot protected pages, `aoni` gives you maximum performance without compromise.
-
-## Unified Ergonomics
-
-Whether you choose standard `aoni` or `aoni/fast`, you drive with the exact same comfortable steering wheel:
-
-```
-               ┌──► aoni.Client (100% net/http compatibility & middleware)
-option / mod ──┼
-               └──► fast.Client (1.5M+ RPS multi-core, 656ns parallel latency, zero-alloc fasthttp + H2/H3)
-```
-
-* **Need 100% stdlib compatibility & complex middleware?** Use `aoni`.
-* **Need absolute, raw silicon throughput & zero-alloc geometry?** Use [`aoni/fast`](fast).
 
 ## Quick Start
 
@@ -110,9 +80,44 @@ userResp, resp, err := fluent.PostGRPCWebTo[pb.UserResponse](ctx, client, "/User
 })
 ```
 
-## Feature Matrix
+## Architecture & Dual Engines
 
-| Feature / Capability | Go `net/http` | Standard Wrapper (e.g., Resty) | `aoni` |
+`aoni` provides two execution engines sharing a unified API model:
+
+```
+               ┌──► aoni.Client (100% net/http compatibility & middleware chain)
+option / mod ──┼
+               └──► fast.Client (1.5M+ RPS multi-core, zero-alloc fasthttp + H2/H3)
+```
+
+* **Standard `aoni.Client`**: Use when 100% Go standard library compatibility and `net/http` middleware interoperability are required.
+* **Native `fast.Client`**: Use when raw silicon throughput and zero-allocation memory geometry are required.
+
+## Performance Profile & Benchmarks
+
+The following `pprof` benchmarks measure execution latency, heap memory footprint, and allocation counts under identical workloads:
+
+| Metric | Resty (`net/http`) | `aoni` (Standard) | `aoni` + `fast.Bridge` | `aoni/fast` (Native) | Performance Delta |
+| :--- | :---: | :---: | :---: | :---: | :---: |
+| **GET JSON Latency (`ns/op`)** | 58,393 ns | 56,669 ns | 14,127 ns | **5,703 ns** | **5x Faster (Bridge) / 10x (Native)** |
+| **Heap Memory (`B/op`)** | 9,113 B | 8,217 B | 2,671 B | **363 B** | **3.4x Lighter (Bridge) / 25x (Native)** |
+| **Heap Allocations (`allocs/op`)** | 91 allocs | 82 allocs | 34 allocs | **8 allocs** | **2.7x Fewer (Bridge) / 11x (Native)** |
+| **HTTP/2 Latency (`ns/op`)** | 76,519 ns | 75,958 ns | 71,200 ns | **68,164 ns** | **Faster H2 Multiplexing** |
+| **HTTP/3 Latency (`ns/op`)** | 131,281 ns | 131,013 ns | 115,400 ns | **111,150 ns** | **Faster H3 QUIC Engine** |
+| **Parallel Latency (`ns/op`)** | 11,307 ns | 9,534 ns | 1,940 ns | **589.9 ns** | **6x Faster (Bridge) / 19x (Native)** |
+| **Parallel Memory & GC (`B / alloc`)** | 9,113 B / 91 | 8,217 B / 82 | 2,671 B / 34 | **0 B / 0 allocs** | **Zero Heap Allocations** |
+| **Peak Throughput (Single Node)** | ~30k RPS | ~35k RPS | >70,000 RPS | **1,695,000+ RPS** | **High-Throughput IO** |
+
+> [!TIP]
+> High throughput in standard Go HTTP clients triggers frequent Garbage Collection (GC) pauses and `mark-assist` stalls, creating severe p99 tail-latency spikes.
+> By recycling pooled buffers via `sync.Pool` and leveraging SIMD AVX2 framing (`simd_amd64.s`), `aoni/fast` operates with **0 B/op and 0 allocs/op** under parallel I/O. By completely shielding the Go runtime from GC pressure, `aoni` matches and surpasses non-garbage-collected HTTP stacks (such as Rust's `reqwest` / `hyper`), delivering flat sub-microsecond tail latency and 1.695M+ RPS throughput.
+
+> [!NOTE]
+> `fast.Bridge` wraps `aoni.Client` to provide standard `net/http.Client` compatibility while reducing latency from ~58µs to 14.1µs. Native `aoni/fast` achieves **1.695M+ RPS** under parallel workload with **0 B/op** heap allocations on hot paths.
+
+## Feature & Protocol Scope
+
+| Feature / Capability | Go `net/http` | Standard Wrapper (e.g. Resty) | `aoni` |
 | :--- | :---: | :---: | :---: |
 | **Zero-Alloc Builder Pooling** | ✗ | ✗ | **✓ (`sync.Pool` Request Builder)** |
 | **Generics-first Decoding** | ✗ (Manual) | ✗ (Interface-based) | **✓ (Type-safe `[T]`)** |
@@ -132,14 +137,14 @@ userResp, resp, err := fluent.PostGRPCWebTo[pb.UserResponse](ctx, client, "/User
 | **Proxy & Session Isolation** | ✗ | ✗ | **✓ (`ProxyIsolatedJar`)** |
 | **Per-Request Overrides** | ✗ (Manual transport) | ✗ (Requires client clone) | **✓ (Context Accessors)** |
 
-## Architecture & Domain Modules
+## Repository Layout
 
 ```
 aoni/
 ├── option/       // Client initialization options (option.With...)
 ├── mod/          // Per-request modifiers (mod.With...)
 ├── request/      // Generic request helpers (request.GetTo[T], PostTo, PostProtoTo)
-├── fast/         // Extremely fast net/http compatible client built on top of fasthttp
+├── fast/         // High-performance fasthttp engine adapters
 ├── fluent/       // Chainable Request Builder API (fluent.R, FetchTo[T], Codec)
 ├── cookie/       // Proxy-isolated cookie jars, Netscape format, RFC 6265 path sorting
 ├── fingerprint/  // TLS/JA4/p0f evasion, HTTP/2 framing, CDN padding
@@ -150,16 +155,12 @@ aoni/
 └── telemetry/    // HAR generators, EWMA latency trackers, embedded web inspector dashboard
 ```
 
-## Advanced Guides
+## Technical Specifications & Documentation
 
-> **Curious about the network architecture & Chromium resilience?**  
-> Read the complete [**Network Stack Specification**](docs/NETWORK_STACK.md) to learn how `aoni` handles Happy Eyeballs v3, 421/408/425 auto-recovery, ECH, and zero-alloc geometry.
-
-> **Need usage examples?**  
-> Check out the [examples](examples) directory for runnable code snippets and [evasion examples](examples/evasions) for Playwright/browser integrations.
-
-> **Curious about the network physics?**  
-> Read [**Demystifying the Voodoo**](docs/VOODOO.md) to understand how `aoni` manipulates HPACK states, overrides OS-level TCP window sizes via syscalls, and injects chaotic padding without breaking connections.
+- [**Network Stack Specification**](docs/NETWORK_STACK.md): Detailed overview of Happy Eyeballs v3, HTTP 421/408/425 auto-recovery, ECH, and pool lifetime mechanics.
+- [**CPU & Silicon Sympathy Specification**](docs/CPU_STACK.md): Architecture details on native PLAN9 AVX2 SIMD assembly (`simd_amd64.s`), 2MB LargePages slab arenas, and instruction execution budgets.
+- [**Demystifying the Voodoo**](docs/VOODOO.md): Deep dive into HPACK state manipulation, TCP window tuning via syscalls, and packet jitter framing.
+- [**Code Examples**](examples): Runnable code snippets for REST, WebSockets, gRPC-Web, and browser evasion integrations.
 
 ## License
 

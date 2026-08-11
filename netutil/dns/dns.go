@@ -215,10 +215,10 @@ func (r *FastRaceResolver) LookupIPAddr(ctx context.Context, host string) ([]net
 			failedCount++
 
 			if failedCount == activeCount {
-				return nil, errors.New("aoni race resolver: all concurrent resolutions failed: " + lastErr.Error())
+				return nil, errors.New("aoni/dns: all concurrent resolutions failed: " + lastErr.Error())
 			}
 		}
 	}
 
-	return nil, errors.New("aoni: race resolver: no responses received")
+	return nil, errors.New("aoni/dns: race resolver: no responses received")
 }

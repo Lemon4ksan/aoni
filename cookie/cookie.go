@@ -9,15 +9,21 @@ import (
 	"net/http"
 	"net/url"
 	"slices"
-	"strconv"
-	"strings"
 	"time"
 
 	"github.com/lemon4ksan/aoni/internal/bytesconv"
+	impl "github.com/lemon4ksan/aoni/internal/cookie"
 )
 
 // Cookie represents a browser cookie structure formatted for JSON persistence,
 // including CHIPS (RFC 6265bis) Partitioned attributes and SameSite policies.
+//
+// Specification Adherence:
+// Conforms to IETF RFC 6265 (HTTP State Management Mechanism) and RFC 6265bis
+// (Cookies: HTTP State Management Mechanism - CHIPS Partitioned Cookies).
+//
+// Thread Safety:
+// Struct values are pass-by-value DTOs; concurrent reads are safe after construction.
 type Cookie struct {
 	Expires      time.Time `json:"expires,omitempty"`
 	Name         string    `json:"name"`
@@ -32,106 +38,31 @@ type Cookie struct {
 	MaxAge       int       `json:"maxAge,omitempty"`
 }
 
-// ParseSetCookieHeader parses a raw Set-Cookie header value into a Cookie structure,
-// extracting CHIPS Partitioned attributes, SameSite policies, and standard metadata.
+// ParseSetCookieHeader parses a raw 'Set-Cookie' header line into a structured [Cookie].
 func ParseSetCookieHeader(headerVal, defaultDomain, defaultPath string) Cookie {
-	if headerVal == "" {
-		return Cookie{}
-	}
+	dto := impl.ParseSetCookieHeader(headerVal, defaultDomain, defaultPath)
 
-	parts := strings.Split(headerVal, ";")
-	if len(parts) == 0 {
-		return Cookie{}
-	}
-
-	nameVal := strings.TrimSpace(parts[0])
-
-	eqIdx := strings.IndexByte(nameVal, '=')
-	if eqIdx <= 0 {
-		return Cookie{}
-	}
-
-	c := Cookie{
-		Name:   strings.TrimSpace(nameVal[:eqIdx]),
-		Value:  strings.TrimSpace(nameVal[eqIdx+1:]),
-		Domain: defaultDomain,
-		Path:   defaultPath,
-	}
-
-	for _, attr := range parts[1:] {
-		parseCookieAttribute(strings.TrimSpace(attr), &c)
-	}
-
-	return c
-}
-
-func parseCookieAttribute(attr string, c *Cookie) {
-	if attr == "" {
-		return
-	}
-
-	lower := strings.ToLower(attr)
-	switch {
-	case lower == "httponly":
-		c.HTTPOnly = true
-	case lower == "secure":
-		c.Secure = true
-	case lower == "partitioned":
-		c.Partitioned = true
-	case strings.HasPrefix(lower, "samesite="):
-		c.SameSite = parseAttributeValue(attr)
-	case strings.HasPrefix(lower, "domain="):
-		c.Domain = strings.TrimPrefix(parseAttributeValue(attr), ".")
-	case strings.HasPrefix(lower, "path="):
-		c.Path = parseAttributeValue(attr)
-	case strings.HasPrefix(lower, "max-age="):
-		if maxAge, err := strconv.Atoi(parseAttributeValue(attr)); err == nil {
-			c.MaxAge = maxAge
-		}
-	case strings.HasPrefix(lower, "expires="):
-		if exp, err := http.ParseTime(parseAttributeValue(attr)); err == nil {
-			c.Expires = exp
-		}
+	return Cookie{
+		Expires:      dto.Expires,
+		Name:         dto.Name,
+		Value:        dto.Value,
+		Domain:       dto.Domain,
+		Path:         dto.Path,
+		SameSite:     dto.SameSite,
+		PartitionKey: dto.PartitionKey,
+		HTTPOnly:     dto.HTTPOnly,
+		Secure:       dto.Secure,
+		Partitioned:  dto.Partitioned,
+		MaxAge:       dto.MaxAge,
 	}
 }
 
-func parseAttributeValue(attr string) string {
-	_, val, ok := strings.Cut(attr, "=")
-	if !ok {
-		return ""
-	}
-
-	return strings.TrimSpace(val)
-}
-
-// PathMatch reports whether reqPath matches cookiePath according to RFC 6265 Section 5.1.4.
+// PathMatch reports whether reqPath matches cookiePath according to RFC 6265 §5.1.4.
 func PathMatch(reqPath, cookiePath string) bool {
-	if cookiePath == "" {
-		cookiePath = "/"
-	}
-
-	if reqPath == "" {
-		reqPath = "/"
-	}
-
-	if reqPath == cookiePath {
-		return true
-	}
-
-	if strings.HasPrefix(reqPath, cookiePath) {
-		if strings.HasSuffix(cookiePath, "/") {
-			return true
-		}
-
-		if len(reqPath) > len(cookiePath) && reqPath[len(cookiePath)] == '/' {
-			return true
-		}
-	}
-
-	return false
+	return impl.PathMatch(reqPath, cookiePath)
 }
 
-// FilterForRequest filters cookies matching destination u using RFC 6265 path-matching rules.
+// FilterForRequest filters a slice of cookies, returning only those matching destination u per RFC 6265 §5.1.4.
 func FilterForRequest(cookies []*http.Cookie, u *url.URL) []*http.Cookie {
 	if len(cookies) == 0 || u == nil {
 		return nil
@@ -152,7 +83,7 @@ func FilterForRequest(cookies []*http.Cookie, u *url.URL) []*http.Cookie {
 	return filtered
 }
 
-// Mirror copies matching cookies from sourceURL to each targetURL in jar.
+// Mirror copies specified cookies by name from sourceURL to each destination URL in targetURLs inside jar.
 func Mirror(jar http.CookieJar, sourceURL *url.URL, targetURLs []*url.URL, cookieNames ...string) {
 	if jar == nil || sourceURL == nil || len(targetURLs) == 0 || len(cookieNames) == 0 {
 		return
@@ -181,51 +112,14 @@ func Mirror(jar http.CookieJar, sourceURL *url.URL, targetURLs []*url.URL, cooki
 	}
 }
 
-// SortForBrowser sorts cookies according to RFC 6265 Section 5.4 (longest path first).
+// SortForBrowser sorts cookies in-place according to RFC 6265 §5.4 (longest path length first).
 func SortForBrowser(cookies []*http.Cookie) {
-	if len(cookies) <= 1 {
-		return
-	}
-
-	slices.SortStableFunc(cookies, func(a, b *http.Cookie) int {
-		return len(b.Path) - len(a.Path)
-	})
+	impl.SortForBrowser(cookies)
 }
 
-// BuildCookieHeader constructs an RFC 6265 compliant 'Cookie' header string.
+// BuildCookieHeader constructs an RFC 6265 compliant 'Cookie' request header string.
 func BuildCookieHeader(cookies []*http.Cookie) string {
-	if len(cookies) == 0 {
-		return ""
-	}
-
-	var (
-		stackBuf [16]*http.Cookie
-		sorted   []*http.Cookie
-	)
-
-	if len(cookies) <= len(stackBuf) {
-		sorted = stackBuf[:len(cookies)]
-		copy(sorted, cookies)
-	} else {
-		sorted = slices.Clone(cookies)
-	}
-
-	SortForBrowser(sorted)
-
-	var sb strings.Builder
-	sb.Grow(len(sorted) * 36)
-
-	for i, c := range sorted {
-		if i > 0 {
-			sb.WriteString("; ")
-		}
-
-		sb.WriteString(c.Name)
-		sb.WriteByte('=')
-		sb.WriteString(c.Value)
-	}
-
-	return sb.String()
+	return impl.BuildCookieHeader(cookies)
 }
 
 // ExportNetscape exports cookies formatted as a standard Netscape HTTP Cookie File (cookies.txt).
@@ -234,61 +128,7 @@ func ExportNetscape(jar http.CookieJar, u *url.URL) string {
 		return ""
 	}
 
-	cookies := jar.Cookies(u)
-	if len(cookies) == 0 {
-		return ""
-	}
-
-	var sb strings.Builder
-	sb.Grow(len(cookies) * 80)
-	sb.WriteString("# Netscape HTTP Cookie File\n\n")
-
-	var numBuf [20]byte
-
-	for _, c := range cookies {
-		domain := c.Domain
-		if domain == "" {
-			domain = u.Hostname()
-		}
-
-		includeSubdomains := "FALSE"
-		if len(domain) > 0 && domain[0] == '.' {
-			includeSubdomains = "TRUE"
-		}
-
-		path := c.Path
-		if path == "" {
-			path = "/"
-		}
-
-		secure := "FALSE"
-		if c.Secure {
-			secure = "TRUE"
-		}
-
-		expires := "0"
-		if !c.Expires.IsZero() {
-			b := strconv.AppendInt(numBuf[:0], c.Expires.Unix(), 10)
-			expires = bytesconv.B2S(b)
-		}
-
-		sb.WriteString(domain)
-		sb.WriteByte('\t')
-		sb.WriteString(includeSubdomains)
-		sb.WriteByte('\t')
-		sb.WriteString(path)
-		sb.WriteByte('\t')
-		sb.WriteString(secure)
-		sb.WriteByte('\t')
-		sb.WriteString(expires)
-		sb.WriteByte('\t')
-		sb.WriteString(c.Name)
-		sb.WriteByte('\t')
-		sb.WriteString(c.Value)
-		sb.WriteByte('\n')
-	}
-
-	return sb.String()
+	return impl.ExportNetscape(jar.Cookies(u), u.Hostname())
 }
 
 // Export converts cookies for u from jar into exported [Cookie] structures.

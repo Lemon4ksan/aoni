@@ -9,27 +9,33 @@ import (
 	"net"
 	"sync"
 	"time"
+
+	"github.com/lemon4ksan/aoni/internal/bytesconv"
 )
 
 // Config configures write chunking and inter-chunk delays for TCP packet fragmentation.
 type Config struct {
-	LimitBytes   int64
-	MaxDelay     time.Duration
-	MinDelay     time.Duration
-	ChunkSize    int
-	MinChunkSize int
-	MaxChunkSize int
+	LimitBytes    int64
+	MaxDelay      time.Duration
+	MinDelay      time.Duration
+	ChunkSize     int
+	MinChunkSize  int
+	MaxChunkSize  int
+	Pattern       []byte
+	PatternOffset int
 }
 
 // FragmentedConn wraps a [net.Conn] and splits socket writes into variable-sized chunks with inter-chunk delays.
 type FragmentedConn struct {
 	net.Conn
-	ChunkSize    int
-	MaxDelay     time.Duration
-	MinDelay     time.Duration
-	MaxChunkSize int
-	MinChunkSize int
-	LimitBytes   int64
+	ChunkSize     int
+	MaxDelay      time.Duration
+	MinDelay      time.Duration
+	MaxChunkSize  int
+	MinChunkSize  int
+	LimitBytes    int64
+	Pattern       []byte
+	PatternOffset int
 
 	totalWritten int64
 	mu           sync.Mutex
@@ -52,13 +58,15 @@ func NewFragmentedConn(conn net.Conn, cfg *Config) net.Conn {
 	}
 
 	return &FragmentedConn{
-		Conn:         conn,
-		ChunkSize:    cfg.ChunkSize,
-		MaxDelay:     cfg.MaxDelay,
-		MinDelay:     cfg.MinDelay,
-		MaxChunkSize: cfg.MaxChunkSize,
-		MinChunkSize: cfg.MinChunkSize,
-		LimitBytes:   limit,
+		Conn:          conn,
+		ChunkSize:     cfg.ChunkSize,
+		MaxDelay:      cfg.MaxDelay,
+		MinDelay:      cfg.MinDelay,
+		MaxChunkSize:  cfg.MaxChunkSize,
+		MinChunkSize:  cfg.MinChunkSize,
+		LimitBytes:    limit,
+		Pattern:       cfg.Pattern,
+		PatternOffset: cfg.PatternOffset,
 	}
 }
 
@@ -75,6 +83,26 @@ func (c *FragmentedConn) Write(b []byte) (n int, err error) {
 
 	if limitExceeded {
 		return c.Conn.Write(b)
+	}
+
+	if len(c.Pattern) > 0 {
+		slicer := bytesconv.NewPatternSlicer(c.Pattern, c.PatternOffset)
+		if chunks, ok := slicer.Slice(b); ok && len(chunks) > 1 {
+			for idx, chunk := range chunks {
+				if idx > 0 && c.MaxDelay > 0 {
+					c.sleepWithJitter()
+				}
+
+				nw, err := c.Conn.Write(chunk)
+
+				n += nw
+				if err != nil {
+					return n, err
+				}
+			}
+
+			return n, nil
+		}
 	}
 
 	if len(b) <= c.ChunkSize {

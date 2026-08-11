@@ -153,7 +153,7 @@ func (e *BridgeError) Error() string {
 
 	var sb strings.Builder
 	sb.Grow(len(e.Op) + len(e.URL) + 32)
-	sb.WriteString("aoni bridge: ")
+	sb.WriteString("aoni/bridge: ")
 	sb.WriteString(e.Op)
 	sb.WriteByte(' ')
 	sb.WriteString(e.URL)

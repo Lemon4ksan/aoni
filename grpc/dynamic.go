@@ -54,17 +54,17 @@ func (d *DynamicInvoker) InvokeJSON(
 	mods ...aoni.RequestModifier,
 ) (string, error) {
 	if inputDesc == nil || outputDesc == nil {
-		return "", errors.New("aoni grpc: input and output MessageDescriptors must not be nil")
+		return "", errors.New("aoni/grpc: input and output MessageDescriptors must not be nil")
 	}
 
 	reqMsg := dynamicpb.NewMessage(inputDesc)
 	if strings.TrimSpace(reqJSON) != "" {
 		if err := d.jsonUnmarshal.Unmarshal([]byte(reqJSON), reqMsg); err != nil {
-			return "", fmt.Errorf("aoni grpc: unmarshal JSON request failed: %w", err)
+			return "", fmt.Errorf("aoni/grpc: unmarshal JSON request failed: %w", err)
 		}
 	}
 
-	frameBytes, err := MarshalFrame(reqMsg, false)
+	frameBytes, err := marshalFrame(reqMsg, false)
 	if err != nil {
 		return "", err
 	}
@@ -83,7 +83,7 @@ func (d *DynamicInvoker) InvokeJSON(
 	)
 
 	if deadline, ok := ctx.Deadline(); ok {
-		grpcMods = append(grpcMods, mod.WithHeader("grpc-timeout", FormatTimeout(time.Until(deadline))))
+		grpcMods = append(grpcMods, mod.WithHeader("grpc-timeout", formatTimeout(time.Until(deadline))))
 	}
 
 	grpcMods = append(grpcMods, mods...)
@@ -100,7 +100,7 @@ func (d *DynamicInvoker) InvokeJSON(
 	}
 
 	respMsg := dynamicpb.NewMessage(outputDesc)
-	if _, err := UnmarshalFrame(resp.Body, respMsg); err != nil {
+	if _, err := unmarshalFrame(resp.Body, respMsg); err != nil {
 		return "", err
 	}
 

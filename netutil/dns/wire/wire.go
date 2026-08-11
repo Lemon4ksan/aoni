@@ -15,15 +15,15 @@ import (
 
 var (
 	// ErrTruncatedDNSMessage indicates that DNS message is shorter than the required header or payload length.
-	ErrTruncatedDNSMessage = errors.New("aoni dns: truncated or malformed dns message")
+	ErrTruncatedDNSMessage = errors.New("aoni/dns: truncated or malformed dns message")
 	// ErrDNSResponseCode indicates that the DNS server returned a non-zero RCODE (e.g. NXDOMAIN or SERVFAIL).
-	ErrDNSResponseCode = errors.New("aoni dns: server returned error response code")
+	ErrDNSResponseCode = errors.New("aoni/dns: server returned error response code")
 	// ErrInvalidDomain indicates an invalid or empty domain name is provided.
-	ErrInvalidDomain = errors.New("aoni dns: invalid or empty domain name")
+	ErrInvalidDomain = errors.New("aoni/dns: invalid or empty domain name")
 	// ErrInvalidIPVersion indicates an unsupported IP version is provided for EDNS Client Subnet.
-	ErrInvalidIPVersion = errors.New("aoni dns: unsupported IP version for EDNS Client Subnet")
+	ErrInvalidIPVersion = errors.New("aoni/dns: unsupported IP version for EDNS Client Subnet")
 	// ErrECHConfigNotFound indicates that the ECH config parameter was not found in the HTTPS record.
-	ErrECHConfigNotFound = errors.New("aoni dns: ech config parameter not found in https record")
+	ErrECHConfigNotFound = errors.New("aoni/dns: ech config parameter not found in https record")
 )
 
 const (

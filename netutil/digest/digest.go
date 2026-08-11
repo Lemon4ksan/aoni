@@ -24,16 +24,16 @@ import (
 
 var (
 	// ErrDigestBadChallenge is returned when the server responds with a malformed Digest WWW-Authenticate challenge.
-	ErrDigestBadChallenge = errors.New("aoni: digest: bad challenge")
+	ErrDigestBadChallenge = errors.New("aoni/digest: bad challenge")
 
 	// ErrDigestInvalidCharset is returned when the server challenge specifies an unsupported character encoding.
-	ErrDigestInvalidCharset = errors.New("aoni: digest: invalid charset")
+	ErrDigestInvalidCharset = errors.New("aoni/digest: invalid charset")
 
 	// ErrDigestAlgNotSupported is returned when the server requires an unsupported hash algorithm.
-	ErrDigestAlgNotSupported = errors.New("aoni: digest: algorithm not supported")
+	ErrDigestAlgNotSupported = errors.New("aoni/digest: algorithm not supported")
 
 	// ErrDigestQopNotSupported is returned when the server requires an unsupported quality of protection mode.
-	ErrDigestQopNotSupported = errors.New("aoni: digest: qop not supported")
+	ErrDigestQopNotSupported = errors.New("aoni/digest: qop not supported")
 )
 
 var digestHashFuncs = map[string]func() hash.Hash{

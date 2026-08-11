@@ -54,7 +54,7 @@ func ScanPorts(
 
 	ipAddr, err := net.ResolveIPAddr("ip", target)
 	if err != nil {
-		return nil, fmt.Errorf("aoni probe: resolve ip failed: %w", err)
+		return nil, fmt.Errorf("aoni/probe: resolve ip failed: %w", err)
 	}
 
 	results := make([]OpenPortResult, 0, len(ports))

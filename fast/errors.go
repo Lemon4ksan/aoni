@@ -7,27 +7,27 @@ package fast
 import "errors"
 
 var (
-	// ErrNilURL indicates an attempt to dispatch an HTTP request without a destination address.
-	ErrNilURL = errors.New("fast: request URL is nil")
+	// ErrNilURL is returned when attempting to dispatch an HTTP request without a destination address.
+	ErrNilURL = errors.New("aoni/fast: request URL is nil")
 
 	// ErrTargetURLEmpty is returned when no target URL is provided for request execution.
-	ErrTargetURLEmpty = errors.New("fast: target URL is empty")
+	ErrTargetURLEmpty = errors.New("aoni/fast: target URL is empty")
 
 	// ErrUTLSHandshakeFailed is returned when uTLS negotiation fails over a fasthttp socket.
-	ErrUTLSHandshakeFailed = errors.New("fast: uTLS handshake failed")
+	ErrUTLSHandshakeFailed = errors.New("aoni/fast: uTLS handshake failed")
 
 	// ErrProxyConnectionFailed is returned when establishing an outbound proxy tunnel fails.
-	ErrProxyConnectionFailed = errors.New("fast: proxy connection failed")
+	ErrProxyConnectionFailed = errors.New("aoni/fast: proxy connection failed")
 
 	// ErrMaxRedirectsExceeded is returned when the request halts because the maximum redirect threshold was reached.
-	ErrMaxRedirectsExceeded = errors.New("fast: maximum redirects limit exceeded")
+	ErrMaxRedirectsExceeded = errors.New("aoni/fast: maximum redirects limit exceeded")
 
 	// ErrCannotRewind is returned when a stream request body cannot be rewound for a 307/308 redirect.
-	ErrCannotRewind = errors.New("fast: cannot rewind request body stream for redirect")
+	ErrCannotRewind = errors.New("aoni/fast: cannot rewind request body stream for redirect")
 
 	// ErrHedgingFailed is returned when all hedged request attempts fail to execute.
-	ErrHedgingFailed = errors.New("fast: all hedged request attempts failed")
+	ErrHedgingFailed = errors.New("aoni/fast: all hedged request attempts failed")
 
 	// ErrNothingWritten indicates a network error occurred before any request bytes reached the socket.
-	ErrNothingWritten = errors.New("fast: connection closed before any request bytes were written")
+	ErrNothingWritten = errors.New("aoni/fast: connection closed before any request bytes were written")
 )

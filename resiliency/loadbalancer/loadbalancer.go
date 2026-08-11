@@ -10,7 +10,6 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
-	"math/rand/v2"
 	"net"
 	"net/http"
 	"net/url"
@@ -24,14 +23,15 @@ import (
 
 	"github.com/lemon4ksan/aoni"
 	"github.com/lemon4ksan/aoni/internal/health"
+	"github.com/lemon4ksan/aoni/internal/rand"
 )
 
 var (
 	// ErrNoBackends is returned when attempting to initialize a load balancer without target backends.
-	ErrNoBackends = errors.New("aoni: load balancer requires at least one backend")
+	ErrNoBackends = errors.New("aoni/loadbalancer: at least one backend is required")
 
 	// ErrNoHealthyBackends is returned when all registered backends are marked unhealthy or in cooldown.
-	ErrNoHealthyBackends = errors.New("aoni: no healthy backends available")
+	ErrNoHealthyBackends = errors.New("aoni/loadbalancer: no healthy backends available")
 )
 
 // Strategy defines the backend selection algorithm.
@@ -146,16 +146,6 @@ func NewSRV(
 	refreshInterval time.Duration,
 	clientFactory func(targetURL string) aoni.HTTPDoer,
 ) (*Balancer, error) {
-	return NewSRVWeightedRoundRobin(ctx, service, proto, name, scheme, refreshInterval, clientFactory)
-}
-
-// NewSRVWeightedRoundRobin initializes a Weighted Round-Robin load balancer populated from DNS SRV records.
-func NewSRVWeightedRoundRobin(
-	ctx context.Context,
-	service, proto, name, scheme string,
-	refreshInterval time.Duration,
-	clientFactory func(targetURL string) aoni.HTTPDoer,
-) (*Balancer, error) {
 	backends, err := resolveSRVBackends(service, proto, name, scheme, clientFactory)
 	if err != nil {
 		return nil, fmt.Errorf("aoni: srv loadbalancer: initial DNS SRV lookup failed: %w", err)
@@ -236,14 +226,10 @@ func resolveSRVBackends(
 			tracker: health.NewTracker(
 				targetURL, cfg.MaxFails, cfg.RetryAfter,
 				func(name string, fails uint32, retryAfter time.Duration) {
-					slog.Warn(
-						"srv backend marked unhealthy",
-						"backend",
-						name,
-						"fails",
-						fails,
-						"retry_after",
-						retryAfter,
+					slog.Warn("srv backend marked unhealthy",
+						"backend", name,
+						"fails", fails,
+						"retry_after", retryAfter,
 					)
 				},
 				func(name string) {
@@ -380,9 +366,10 @@ func (b *Balancer) buildBackendIndices(n uint64, backends []*Backend) []uint64 {
 			indices[i] = uint64(i)
 		}
 
-		rand.Shuffle(len(indices), func(i, j int) {
+		for i := len(indices) - 1; i > 0; i-- {
+			j := rand.Intn(i + 1)
 			indices[i], indices[j] = indices[j], indices[i]
-		})
+		}
 
 	case WeightedRoundRobin:
 		for i := range indices {

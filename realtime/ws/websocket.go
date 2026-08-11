@@ -93,7 +93,7 @@ func BuildWellKnownURI(scheme, host, suffix string) (string, error) {
 // DialWellKnown establishes a WebSocket connection to an RFC 8307 well-known URI (e.g. wss://host/.well-known/suffix).
 func DialWellKnown(
 	ctx context.Context,
-	dialer aoni.WSDialer,
+	dialer aoni.WebSocketDialer,
 	scheme, host, suffix string,
 	mods ...aoni.RequestModifier,
 ) (Conn, *http.Response, error) {
@@ -105,21 +105,27 @@ func DialWellKnown(
 	return DialWebSocket(ctx, dialer, targetURL, mods...)
 }
 
-// DialWebSocket establishes an encrypted or plain WebSocket connection using aoni's
-// anti-detect uTLS and proxy pipeline without external dependencies.
+// DialWebSocket establishes an encrypted (wss://) or unencrypted (ws://) WebSocket connection
+// using aoni's anti-detect uTLS stack, HTTP/2 Extended CONNECT (RFC 8441), and proxy pipeline.
+// Conforms to IETF RFC 6455 (The WebSocket Protocol) and RFC 8441 (Bootstrapping WebSockets with HTTP/2).
+// On success, returns an active, thread-safe [Conn] wrapping the upgraded socket along with the 101 Switching Protocols response.
+// On error, closes underlying net.Conn sockets to prevent connection leaks.
 func DialWebSocket(
 	ctx context.Context,
-	dialer aoni.WSDialer,
+	dialer aoni.WebSocketDialer,
 	targetURL string,
 	mods ...aoni.RequestModifier,
 ) (Conn, *http.Response, error) {
 	return DialWebSocketWithConfig(ctx, dialer, targetURL, DialWebSocketConfig{EnableCompression: true}, mods...)
 }
 
-// DialWebSocketWithConfig establishes a WebSocket connection cascading across HTTP/3, HTTP/2, and HTTP/1.1 protocols.
+// DialWebSocketWithConfig establishes a WebSocket connection with explicit buffer and subprotocol configuration,
+// cascading across HTTP/3, HTTP/2 Extended CONNECT (RFC 8441), and HTTP/1.1 101 Switching Protocols.
+// Conforms to RFC 6455 §4 (Client Handshake) and RFC 7692 (Compression Extensions for WebSocket: permessage-deflate).
+// Validates the server's 'Sec-WebSocket-Accept' header hash per RFC 6455 §4.2.2.
 func DialWebSocketWithConfig(
 	ctx context.Context,
-	dialer aoni.WSDialer,
+	dialer aoni.WebSocketDialer,
 	targetURL string,
 	config DialWebSocketConfig,
 	mods ...aoni.RequestModifier,
@@ -179,7 +185,7 @@ type parsedURL struct {
 func parseWSURL(rawURL string) (*parsedURL, error) {
 	u, err := url.Parse(rawURL)
 	if err != nil {
-		return nil, fmt.Errorf("aoni ws: invalid url: %w", err)
+		return nil, fmt.Errorf("aoni/ws: invalid url: %w", err)
 	}
 
 	scheme := strings.ToLower(u.Scheme)
@@ -245,7 +251,7 @@ func buildHandshakeRequest(
 	return req, key, nil
 }
 
-func dialBaseConnection(ctx context.Context, dialer aoni.WSDialer, parsed *parsedURL) (net.Conn, error) {
+func dialBaseConnection(ctx context.Context, dialer aoni.WebSocketDialer, parsed *parsedURL) (net.Conn, error) {
 	addr := net.JoinHostPort(parsed.host, parsed.port)
 	if parsed.scheme == "wss" {
 		return dialer.DialTLSForWS(ctx, addr)
@@ -325,14 +331,14 @@ func performHTTP1Handshake(
 	}
 
 	if err := req.Write(conn); err != nil {
-		return nil, nil, "", false, fmt.Errorf("aoni ws: write handshake: %w", err)
+		return nil, nil, "", false, fmt.Errorf("aoni/ws: write handshake: %w", err)
 	}
 
 	br := bufio.NewReader(conn)
 
 	resp, err := http.ReadResponse(br, req)
 	if err != nil {
-		return nil, nil, "", false, fmt.Errorf("aoni ws: read handshake response: %w", err)
+		return nil, nil, "", false, fmt.Errorf("aoni/ws: read handshake response: %w", err)
 	}
 
 	if resp.StatusCode != http.StatusSwitchingProtocols {
@@ -389,7 +395,7 @@ func tokenContainsValue(header http.Header, name, value string) bool {
 func generateChallengeKey() (string, error) {
 	var nonce [16]byte
 	if _, err := rand.Read(nonce[:]); err != nil {
-		return "", fmt.Errorf("aoni ws: generate key: %w", err)
+		return "", fmt.Errorf("aoni/ws: generate key: %w", err)
 	}
 
 	return base64.StdEncoding.EncodeToString(nonce[:]), nil

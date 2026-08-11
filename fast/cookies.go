@@ -18,6 +18,8 @@ import (
 	"github.com/lemon4ksan/aoni"
 	"github.com/lemon4ksan/aoni/cookie"
 	"github.com/lemon4ksan/aoni/internal/bytesconv"
+	internalCookie "github.com/lemon4ksan/aoni/internal/cookie"
+	"github.com/lemon4ksan/aoni/internal/urlutil"
 	"github.com/lemon4ksan/aoni/netutil"
 )
 
@@ -97,17 +99,7 @@ func (c *Client) captureCookies(ctx context.Context, req *fasthttp.Request, resp
 }
 
 func parseCookie(key, value []byte) *http.Cookie {
-	header := http.Header{}
-	header.Add("Set-Cookie", string(value))
-
-	fakeResp := &http.Response{Header: header}
-
-	parsed := fakeResp.Cookies()
-	if len(parsed) > 0 {
-		return parsed[0]
-	}
-
-	return nil
+	return internalCookie.ParseSingleCookie(key, value)
 }
 
 func extractUserInfoAndSetAuth(req *fasthttp.Request) {
@@ -143,12 +135,8 @@ func scrubSensitiveHeaders(req *fasthttp.Request, currentURI, nextURI *fasthttp.
 }
 
 func isSameDomainOrSubdomain(h1, h2 string) bool {
-	clean1 := strings.ToLower(netutil.CleanHost(h1))
-	clean2 := strings.ToLower(netutil.CleanHost(h2))
+	clean1 := netutil.CleanHost(h1)
+	clean2 := netutil.CleanHost(h2)
 
-	if clean1 == clean2 {
-		return true
-	}
-
-	return strings.HasSuffix(clean1, "."+clean2) || strings.HasSuffix(clean2, "."+clean1)
+	return urlutil.IsSameDomainOrSubdomain(clean1, clean2)
 }

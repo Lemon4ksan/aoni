@@ -251,7 +251,7 @@ func TestDialUDPProxy(t *testing.T) {
 			"https://proxy.example.com/.well-known/masque/udp/dns.google/53/",
 		)
 		assert.Error(t, err)
-		assert.Contains(t, err.Error(), "aoni masque: write udp request:")
+		assert.Contains(t, err.Error(), "aoni/masque: write udp request:")
 	})
 
 	t.Run("read response error", func(t *testing.T) {
@@ -277,7 +277,7 @@ func TestDialUDPProxy(t *testing.T) {
 			"https://proxy.example.com/.well-known/masque/udp/dns.google/53/",
 		)
 		assert.Error(t, err)
-		assert.Contains(t, err.Error(), "aoni masque: read udp response:")
+		assert.Contains(t, err.Error(), "aoni/masque: read udp response:")
 	})
 }
 

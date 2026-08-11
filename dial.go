@@ -9,149 +9,139 @@ import (
 	"crypto/tls"
 	"net"
 	"net/http"
-	"net/url"
-	"strings"
+	"time"
 
 	utls "github.com/refraction-networking/utls"
-	"golang.org/x/net/http2"
 
-	"github.com/lemon4ksan/aoni/netutil/netdial"
+	"github.com/lemon4ksan/aoni/internal/sysnet"
+	"github.com/lemon4ksan/aoni/internal/transport"
 )
 
-func (c *Client) applyDialers(transport *http.Transport) {
-	if transport == nil {
-		return
-	}
+// Dial establishes an unencrypted L4 TCP socket connection to addr using a default 15-second timeout.
+// It acts as a convenience wrapper around DialContext using context.Background.
+//
+// For production workloads, use DialContext with an explicit context deadline
+// to prevent socket dial leaks during network stalls.
+func (c *Client) Dial(addr string) (net.Conn, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
 
-	configureH2Transport(transport, c.fingerprint.H2Configurer)
-
-	transport.Proxy = c.determineProxy
-	transport.DialContext = c.newDialContextFunc()
-
-	if c.hasBrowserFingerprint() {
-		transport.DialTLSContext = c.newDialTLSContextFunc(transport.Proxy)
-		return
-	}
-
-	transport.DialTLSContext = c.dialContext
+	return c.DialContext(ctx, "tcp", addr)
 }
 
-func configureH2Transport(transport *http.Transport, configurer HTTP2Configurer) {
-	t2, err := http2.ConfigureTransports(transport)
-	if err != nil || t2 == nil {
-		return
+// DialContext establishes a raw L4 TCP socket connection applying active proxy tunneling,
+// DNS resolution, Happy Eyeballs v2 dual-stack racing (RFC 8305), p0f OS stack spoofing,
+// SSRF IP guards, and pre-dial TCP delay jitter.
+//
+// Pipeline Stages Executed:
+//  1. Pre-dial TCP jitter delay (ApplyTCPDelay).
+//  2. Static Host rewrite rules (HostRewriteRules).
+//  3. Happy Eyeballs v2 IPv4/IPv6 dual-stack resolution and racing.
+//  4. SSRF private/loopback/link-local IP filtering (if SSRFGuard is enabled).
+//  5. OS kernel socket option configuration (SO_MARK, TCP_MAXSEG, SO_BUSY_POLL, p0f).
+//  6. SOCKS5 / SOCKS5h / HTTP CONNECT proxy tunneling (if ProxyURL is configured).
+//  7. TCP payload write-chunking fragmentation (if FragmentConfig is active).
+//
+// Fully thread-safe and safe for concurrent invocation across multiple goroutines.
+// Aborts immediately if ctx is canceled or reaches its deadline.
+func (c *Client) DialContext(ctx context.Context, network, addr string) (net.Conn, error) {
+	dialer := transport.NewUniversalDialer()
+	dialCfg := c.buildDialConfig(ctx)
+
+	conn, err := dialer.DialContext(ctx, network, addr, dialCfg)
+	if err == nil {
+		sysnet.TuneSocketConnWithFlags(conn, uint64(c.network.ExperimentalFlags))
 	}
 
-	t2.TLSClientConfig = transport.TLSClientConfig
+	return conn, err
+}
 
-	if configurer != nil {
-		_ = configurer.ConfigureHTTP2(t2)
+// DialTLS establishes an encrypted L7 TLS or uTLS connection over L4 TCP.
+// It negotiates ALPN protocols ("h2", "http/1.1"), applies browser ClientHello emulation
+// (Chrome, Firefox, Safari), performs Encrypted Client Hello (ECH, RFC 9484) resolution,
+// supports 0-RTT Early Data (RFC 8446/9001), and validates SPKI certificate pins.
+//
+// Fingerprint Precedence:
+// If multiple TLS fingerprint options are configured, transport.UniversalDialer applies them
+// in the following order:
+//  1. ClientHelloSpecProvider (custom full spec builder)
+//  2. TLSClientHelloID (explicit uTLS profile preset)
+//  3. BrowserID (predefined high-level browser profile)
+//
+// Telemetry & JA4:
+// After a successful TLS handshake, computed JA4 fingerprint reports are written to
+// JA4ReportStore in ctx and passed to JA4Callback if registered.
+func (c *Client) DialTLS(ctx context.Context, network, addr string) (net.Conn, error) {
+	dialer := transport.NewUniversalDialer()
+	dialCfg := c.buildDialConfig(ctx)
+
+	conn, err := dialer.DialTLSContext(ctx, network, addr, dialCfg)
+	if err == nil {
+		sysnet.TuneSocketConn(conn)
 	}
+
+	return conn, err
 }
 
-func (c *Client) hasBrowserFingerprint() bool {
-	return c.fingerprint.BrowserID != BrowserNone ||
-		c.fingerprint.TLSClientHelloID != nil ||
-		c.fingerprint.TLSClientHelloSpecProvider != nil
+// DialTLSForWS establishes an encrypted TLS socket connection tailored for WebSocket upgrades.
+// If the underlying http.Transport has a custom DialTLSContext registered, it delegates to that
+// function to maintain transport consistency; otherwise, it delegates to DialTLSContext.
+//
+// Protocol Application:
+// Handshakes created by DialTLSForWS negotiate ALPN protocols ("http/1.1" or "h2")
+// and apply the client's active uTLS browser fingerprint profiles.
+func (c *Client) DialTLSForWS(ctx context.Context, addr string) (net.Conn, error) {
+	if tr := c.Transport(); tr != nil && tr.DialTLSContext != nil {
+		return tr.DialTLSContext(ctx, "tcp", addr)
+	}
+
+	return c.DialTLS(ctx, "tcp", addr)
 }
 
-func (c *Client) newDialContextFunc() func(context.Context, string, string) (net.Conn, error) {
-	return func(ctx context.Context, network, addr string) (net.Conn, error) {
-		if err := ApplyTCPDelay(ctx); err != nil {
+// DialPlainForWS establishes an unencrypted raw TCP socket connection for WebSocket upgrades,
+// applying active proxy routing, SSRF guards, and TCP write-chunking fragmentation.
+// If the underlying http.Transport has a custom DialContext registered, it delegates to that
+// function before applying WebSocket payload fragmentation wrappers.
+func (c *Client) DialPlainForWS(ctx context.Context, addr string) (net.Conn, error) {
+	if tr := c.Transport(); tr != nil && tr.DialContext != nil {
+		conn, err := tr.DialContext(ctx, "tcp", addr)
+		if err != nil {
 			return nil, err
 		}
 
-		targetHost, targetPort, dialOpts := c.resolveDialContextOptions(ctx, network, addr)
-		targetAddr := net.JoinHostPort(targetHost, targetPort)
-
-		return netdial.DialL4(ctx, network, targetAddr, dialOpts)
-	}
-}
-
-func (c *Client) newDialTLSContextFunc(
-	proxyFn func(*http.Request) (*url.URL, error),
-) func(context.Context, string, string) (net.Conn, error) {
-	return func(ctx context.Context, network, addr string) (net.Conn, error) {
-		if err := ApplyTCPDelay(ctx); err != nil {
-			return nil, err
-		}
-
-		targetHost, targetPort, dialOpts, utlsOpts := c.resolveTLSContextOptions(ctx, network, addr)
-
-		if targetPort == "80" {
-			targetAddr := net.JoinHostPort(targetHost, targetPort)
-			return netdial.DialL4(ctx, network, targetAddr, dialOpts)
-		}
-
-		if dialOpts.ProxyURL == nil && proxyFn != nil {
-			dummyReq := &http.Request{URL: &url.URL{Host: addr, Scheme: "https"}}
-			dialOpts.ProxyURL, _ = proxyFn(dummyReq)
-		}
-
-		return c.dialTLSWithUTLS(ctx, network, targetHost, targetPort, dialOpts, utlsOpts)
-	}
-}
-
-func (c *Client) dialContext(ctx context.Context, network, addr string) (net.Conn, error) {
-	if err := ApplyTCPDelay(ctx); err != nil {
-		return nil, err
+		return c.applyWSFragmentation(ctx, conn), nil
 	}
 
-	targetHost, targetPort, dialOpts := c.resolveDialContextOptions(ctx, network, addr)
-	targetAddr := net.JoinHostPort(targetHost, targetPort)
-
-	rawConn, err := netdial.DialL4(ctx, network, targetAddr, dialOpts)
+	conn, err := c.DialContext(ctx, "tcp", addr)
 	if err != nil {
 		return nil, err
 	}
 
-	baseTLSConfig := c.resolveBaseTLSConfig(ctx)
-	tlsCfg := setupStandardTLSConfig(baseTLSConfig, dialOpts, targetHost)
-	tlsConn := tls.Client(rawConn, tlsCfg)
-
-	if err := tlsConn.HandshakeContext(ctx); err != nil {
-		_ = rawConn.Close()
-		return nil, err
-	}
-
-	return tlsConn, nil
+	return c.applyWSFragmentation(ctx, conn), nil
 }
 
-func (c *Client) dialTLSWithUTLS(
-	ctx context.Context,
-	network, host, port string,
-	dialOpts netdial.DialOptions,
-	utlsOpts netdial.RTLSOptions,
-) (net.Conn, error) {
-	targetAddr := net.JoinHostPort(host, port)
-
-	rawConn, err := netdial.DialL4(ctx, network, targetAddr, dialOpts)
-	if err != nil {
-		return nil, err
+// applyDialers binds the client's dialing functions (DialContext, DialTLSContext)
+// to a standard http.Transport instance, injecting aoni's transport features into stdlib clients.
+func (c *Client) applyDialers(tr *http.Transport) {
+	if tr == nil {
+		return
 	}
 
-	uConn, report, err := netdial.HandshakeUTLS(ctx, rawConn, host, utlsOpts)
-	if err != nil {
-		return nil, err
-	}
-
-	if reqCfg := GetRequestConfig(ctx); reqCfg != nil && reqCfg.JA4ReportStore != nil {
-		reqCfg.JA4ReportStore.Report = &report
-	}
-
-	return uConn, nil
+	tr.DialContext = c.DialContext
+	tr.DialTLSContext = c.DialTLS
 }
 
-func (c *Client) resolveDialContextOptions(
-	ctx context.Context,
-	_, addr string,
-) (host, port string, dialOpts netdial.DialOptions) {
-	host, port = splitHostPortDefault(addr)
-	host, port = applyHostRewriteRules(ctx, host, port)
-
+// buildDialConfig constructs a self-contained transport.DialConfig DTO by merging
+// client-level defaults with per-request context overrides extracted via GetRequestConfig.
+//
+// Precedence Hierarchy:
+// Options set in the request context (RequestConfig) override client-level defaults.
+// For example, a per-request ProxyAddr, P0fSignature, or ALPNOverride takes precedence
+// over the global NetworkConfig or FingerprintConfig declared on Client.
+func (c *Client) buildDialConfig(ctx context.Context) transport.DialConfig {
 	reqCfg := GetRequestConfig(ctx)
 
-	dialOpts = netdial.DialOptions{
+	cfg := transport.DialConfig{
 		DNSResolver:        c.network.DNSResolver,
 		InterfaceName:      c.network.InterfaceName,
 		SocketMark:         c.network.SocketMark,
@@ -160,80 +150,41 @@ func (c *Client) resolveDialContextOptions(
 		SourceRotator:      c.network.SourceRotator,
 		HappyEyeballs:      c.network.HappyEyeballsDelay,
 		SSRFGuard:          c.network.SSRFGuard,
-		InsecureSkipVerify: GetInsecureSkipVerify(ctx),
+		ProxyDNS:           c.network.ProxyDNS,
+		P0fSignature:       c.fingerprint.P0fSignature,
+		SocketController:   c.network.SocketController,
+		FragmentConfig:     c.network.FragmentConfig,
+		ProxyURL:           c.network.ProxyAddr,
+		InsecureSkipVerify: GetInsecureSkipVerify(ctx) || c.engineConfig.InsecureSkipVerify,
+		BaseTLSConfig:      c.resolveBaseTLSConfig(ctx),
+		HelloID:            c.resolveHelloID(),
+		SpecProvider:       c.fingerprint.TLSClientHelloSpecProvider,
+		SessionCache:       c.fingerprint.SessionCache,
+		CertificatePins:    c.fingerprint.CertificatePins,
+		CertCompression:    c.fingerprint.CertCompression,
+		HeaderOrder:        c.fingerprint.HeaderOrder,
+		JA4Callback:        c.fingerprint.JA4Callback,
+		ConnFilters:        c.network.ConnFilters,
 	}
 
-	dialOpts.P0fSignature = c.fingerprint.P0fSignature
-	dialOpts.SocketController = c.network.SocketController
-	dialOpts.ProxyURL = c.network.ProxyAddr
+	cfg.ApplyRequestOverrides(reqCfg)
 
-	if reqCfg != nil {
-		dialOpts.SSRFGuard = reqCfg.SSRFGuard
-		dialOpts.ProxyDNS = reqCfg.ProxyDNS
-		dialOpts.FragmentConfig = reqCfg.Fragment
-
-		if reqCfg.P0fSignature != nil {
-			dialOpts.P0fSignature = reqCfg.P0fSignature
-		}
-
-		if reqCfg.SocketController != nil {
-			dialOpts.SocketController = reqCfg.SocketController
-		}
-
-		if reqCfg.HappyEyeballsDelay > 0 {
-			dialOpts.HappyEyeballs = reqCfg.HappyEyeballsDelay
-		}
-	}
-
-	if rawProxy, ok := GetProxyOverride(ctx).Value(); ok && rawProxy != "" {
-		if parsed, parseErr := url.Parse(rawProxy); parseErr == nil {
-			dialOpts.ProxyURL = parsed
-		}
-	} else if reqCfg != nil && reqCfg.ProxyAddr != nil {
-		dialOpts.ProxyURL = reqCfg.ProxyAddr
-	}
-
-	return host, port, dialOpts
+	return cfg
 }
 
-func (c *Client) resolveTLSContextOptions(
-	ctx context.Context,
-	network, addr string,
-) (host, port string, dialOpts netdial.DialOptions, utlsOpts netdial.RTLSOptions) {
-	host, port, dialOpts = c.resolveDialContextOptions(ctx, network, addr)
-	if port == "80" && !strings.Contains(addr, ":") {
-		port = "443"
+// resolveBaseTLSConfig extracts the base tls.Config from the underlying http.Transport
+// and applies per-request TLS overrides (e.g. InsecureSkipVerify) from ctx.
+func (c *Client) resolveBaseTLSConfig(ctx context.Context) *tls.Config {
+	var base *tls.Config
+	if tr := c.Transport(); tr != nil {
+		base = tr.TLSClientConfig
 	}
 
-	reqCfg := GetRequestConfig(ctx)
-
-	utlsOpts = c.resolveRTLSOptions(ctx, host)
-
-	if reqCfg != nil {
-		if reqCfg.ClientHelloSpecProvider != nil {
-			utlsOpts.SpecProvider = reqCfg.ClientHelloSpecProvider
-		}
-
-		if reqCfg.SessionCache != nil {
-			utlsOpts.SessionCache = reqCfg.SessionCache
-		}
-
-		if reqCfg.JA4Callback != nil {
-			utlsOpts.JA4Callback = reqCfg.JA4Callback
-		}
-
-		if len(reqCfg.CertificatePins) > 0 {
-			utlsOpts.CertificatePins = reqCfg.CertificatePins
-		}
-
-		if len(reqCfg.ALPNOverride) > 0 {
-			utlsOpts.ALPNOverride = reqCfg.ALPNOverride
-		}
-	}
-
-	return host, port, dialOpts, utlsOpts
+	return TLSConfigWithOverride(ctx, base)
 }
 
+// resolveHelloID maps the active BrowserID preset (Chrome, Firefox, Safari) to its
+// corresponding uTLS HelloID auto-preset, or returns the explicitly set TLSClientHelloID.
 func (c *Client) resolveHelloID() *utls.ClientHelloID {
 	f := c.fingerprint
 	if f.TLSClientHelloID != nil {
@@ -248,117 +199,4 @@ func (c *Client) resolveHelloID() *utls.ClientHelloID {
 	default:
 		return &utls.HelloChrome_Auto
 	}
-}
-
-func (c *Client) resolveRTLSOptions(ctx context.Context, host string) netdial.RTLSOptions {
-	reqCfg := GetRequestConfig(ctx)
-
-	serverName := host
-	if net.ParseIP(host) != nil {
-		serverName = host
-		if reqCfg != nil && reqCfg.TargetHost != "" && net.ParseIP(reqCfg.TargetHost) == nil {
-			serverName = reqCfg.TargetHost
-		} else if c.defaults.BaseURL != nil && c.defaults.BaseURL.Hostname() != "" && net.ParseIP(c.defaults.BaseURL.Hostname()) == nil {
-			serverName = c.defaults.BaseURL.Hostname()
-		}
-	}
-
-	utlsOpts := netdial.RTLSOptions{
-		HelloID:            c.resolveHelloID(),
-		SpecProvider:       c.fingerprint.TLSClientHelloSpecProvider,
-		SessionCache:       c.fingerprint.SessionCache,
-		CertificatePins:    c.fingerprint.CertificatePins,
-		CertCompression:    c.fingerprint.CertCompression,
-		JA4Callback:        c.fingerprint.JA4Callback,
-		BaseTLSConfig:      c.resolveBaseTLSConfig(ctx),
-		InsecureSkipVerify: GetInsecureSkipVerify(ctx) || c.engineConfig.InsecureSkipVerify,
-	}
-
-	if utlsOpts.BaseTLSConfig == nil {
-		utlsOpts.BaseTLSConfig = &tls.Config{}
-	}
-
-	if utlsOpts.BaseTLSConfig.ServerName == "" && serverName != "" {
-		utlsOpts.BaseTLSConfig.ServerName = serverName
-	}
-
-	if reqCfg != nil {
-		if reqCfg.ClientHelloSpecProvider != nil {
-			utlsOpts.SpecProvider = reqCfg.ClientHelloSpecProvider
-		}
-
-		if reqCfg.SessionCache != nil {
-			utlsOpts.SessionCache = reqCfg.SessionCache
-		}
-
-		if reqCfg.JA4Callback != nil {
-			utlsOpts.JA4Callback = reqCfg.JA4Callback
-		}
-
-		if len(reqCfg.CertificatePins) > 0 {
-			utlsOpts.CertificatePins = reqCfg.CertificatePins
-		}
-
-		if len(reqCfg.ALPNOverride) > 0 {
-			utlsOpts.ALPNOverride = reqCfg.ALPNOverride
-		}
-	}
-
-	return utlsOpts
-}
-
-func (c *Client) resolveBaseTLSConfig(ctx context.Context) *tls.Config {
-	var base *tls.Config
-	if tr := c.Transport(); tr != nil {
-		base = tr.TLSClientConfig
-	}
-
-	return TLSConfigWithOverride(ctx, base)
-}
-
-func splitHostPortDefault(addr string) (host, port string) {
-	var err error
-
-	host, port, err = net.SplitHostPort(addr)
-	if err != nil {
-		return addr, "80"
-	}
-
-	return host, port
-}
-
-func applyHostRewriteRules(ctx context.Context, host, port string) (string, string) {
-	rules := HostRewriteRules(ctx)
-	if rewritten, exists := rules[host]; exists {
-		if newHost, newPort, err := net.SplitHostPort(rewritten); err == nil {
-			host = newHost
-
-			if newPort != "" {
-				port = newPort
-			}
-		}
-	}
-
-	return host, port
-}
-
-func setupStandardTLSConfig(base *tls.Config, dialOpts netdial.DialOptions, host string) *tls.Config {
-	tlsCfg := base
-	if tlsCfg == nil {
-		tlsCfg = &tls.Config{}
-	}
-
-	if tlsCfg.ServerName == "" && host != "" {
-		cloned := tlsCfg.Clone()
-		cloned.ServerName = host
-		tlsCfg = cloned
-	}
-
-	if dialOpts.InsecureSkipVerify {
-		cloned := tlsCfg.Clone()
-		cloned.InsecureSkipVerify = true
-		tlsCfg = cloned
-	}
-
-	return tlsCfg
 }

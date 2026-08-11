@@ -8,17 +8,17 @@ import "errors"
 
 var (
 	// ErrHandshakeFailed indicates the connect-ip proxy request failed or returned a non-200/101 status code.
-	ErrHandshakeFailed = errors.New("aoni masque: connect-ip handshake failed")
+	ErrHandshakeFailed = errors.New("aoni/masque: connect-ip handshake failed")
 
 	// ErrInvalidCapsule indicates a corrupted or truncated Capsule Protocol frame was received.
-	ErrInvalidCapsule = errors.New("aoni masque: invalid capsule format")
+	ErrInvalidCapsule = errors.New("aoni/masque: invalid capsule format")
 
 	// ErrInvalidURITemplate indicates that the provided MASQUE URI template is malformed.
-	ErrInvalidURITemplate = errors.New("aoni masque: invalid uri template")
+	ErrInvalidURITemplate = errors.New("aoni/masque: invalid uri template")
 
 	// ErrUnsupportedHTTPVersion indicates that connect-ip was attempted on an unsupported transport.
-	ErrUnsupportedHTTPVersion = errors.New("aoni masque: unsupported http version for connect-ip")
+	ErrUnsupportedHTTPVersion = errors.New("aoni/masque: unsupported http version for connect-ip")
 
 	// ErrEmptyAddressRequest indicates an ADDRESS_REQUEST capsule contained zero requested addresses.
-	ErrEmptyAddressRequest = errors.New("aoni masque: address request capsule cannot be empty")
+	ErrEmptyAddressRequest = errors.New("aoni/masque: address request capsule cannot be empty")
 )

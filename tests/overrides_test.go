@@ -285,11 +285,12 @@ func TestTCPDelay(t *testing.T) {
 func TestConnMetadata(t *testing.T) {
 	t.Parallel()
 
-	req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, "http://example.com", nil)
+	stdReq, err := http.NewRequestWithContext(t.Context(), http.MethodGet, "http://example.com", nil)
 	require.NoError(t, err)
 
-	mod.WithConnMetadata("pool", "eu-west")(aoni.NewStdRequest(req))
-	mod.WithConnMetadata("trace-id", "abc123")(aoni.NewStdRequest(req))
+	sReq := aoni.NewStdRequest(stdReq)
+	mod.WithConnMetadata("pool", "eu-west")(sReq)
+	mod.WithConnMetadata("trace-id", "abc123")(sReq)
 
 	tests := []struct {
 		name        string
@@ -318,9 +319,7 @@ func TestConnMetadata(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
-
-			val, ok := aoni.GetConnMetadata(req.Context(), tt.key).Value()
+			val, ok := aoni.GetConnMetadata(sReq.Context(), tt.key).Value()
 			assert.Equal(t, tt.expectFound, ok)
 
 			if tt.expectFound {

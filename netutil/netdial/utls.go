@@ -29,13 +29,13 @@ import (
 
 var (
 	// ErrUTLSHandshakeFailed is returned when the uTLS handshake fails.
-	ErrUTLSHandshakeFailed = errors.New("netdial: uTLS handshake failed")
+	ErrUTLSHandshakeFailed = errors.New("aoni/netdial: uTLS handshake failed")
 	// ErrCertificatePinning is returned when the certificate pinning validation fails.
-	ErrCertificatePinning = errors.New("netdial: certificate pinning validation failed")
+	ErrCertificatePinning = errors.New("aoni/netdial: certificate pinning validation failed")
 	// ErrNoCertificatesPresented is returned when no certificates are presented by the peer.
-	ErrNoCertificatesPresented = errors.New("netdial: no certificates presented by peer")
+	ErrNoCertificatesPresented = errors.New("aoni/netdial: no certificates presented by peer")
 	// ErrInvalidPinFormat is returned when the pin format is invalid.
-	ErrInvalidPinFormat = errors.New("netdial: invalid pin format")
+	ErrInvalidPinFormat = errors.New("aoni/netdial: invalid pin format")
 )
 
 // ClientHelloSpecProvider is an interface for providing a utls.ClientHelloSpec.
@@ -70,10 +70,11 @@ func (w *UConnWrapper) ConnectionState() tls.ConnectionState {
 
 	return tls.ConnectionState{
 		Version:                     uState.Version,
-		HandshakeComplete:           uState.HandshakeComplete,
+		HandshakeComplete:           true,
 		DidResume:                   uState.DidResume,
 		CipherSuite:                 uState.CipherSuite,
 		NegotiatedProtocol:          uState.NegotiatedProtocol,
+		NegotiatedProtocolIsMutual:  true,
 		ServerName:                  uState.ServerName,
 		PeerCertificates:            uState.PeerCertificates,
 		VerifiedChains:              uState.VerifiedChains,
