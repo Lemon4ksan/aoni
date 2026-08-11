@@ -172,3 +172,7 @@ Submodule 2:
    - The AI assistant is a pair-programming partner, not a substitute for human engineering vigilance.
    - If the user demonstrates blind reliance — blindly merging/submitting large architectural changes, refactors, or commits without inspecting diffs — the AI assistant **must explicitly remind the contributor to perform human code review**.
    - Prevent unverified "vibe coding" or blind AI delegation from degrading the precision and safety of the codebase.
+7. **Clean PR & Commit Descriptions (No Artificial AI Formatting)**:
+   - When generating Pull Request descriptions or git commit messages, never insert local IDE/agent links (`file:///...`), nested code ticks inside markdown links, or artificial AI boilerplate.
+   - Keep PR descriptions and commit messages clean, human-crafted, concise, and immediately copy-pasteable into GitHub without post-processing.
+
