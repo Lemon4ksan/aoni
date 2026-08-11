@@ -155,6 +155,11 @@ aoni/
 └── telemetry/    // HAR generators, EWMA latency trackers, embedded web inspector dashboard
 ```
 
+## Real-World Case Studies & Integrations
+
+- [discordgo-aoni](https://github.com/lemon4ksan/discordgo-aoni): High-throughput, zero-allocation fork of official `discordgo` powered by `aoni` & `aoni/realtime/ws`.
+  - Delivers 6.8x higher REST throughput (203,000+ RPS) and 3.1x faster WebSocket operations with 0 B/op memory allocations on frame framing.
+
 ## Technical Specifications & Documentation
 
 - [**Network Stack Specification**](docs/NETWORK_STACK.md): Detailed overview of Happy Eyeballs v3, HTTP 421/408/425 auto-recovery, ECH, and pool lifetime mechanics.
