@@ -126,9 +126,7 @@ func InvokeFast[Resp any](
 	req.SetBodyBytes(frameBytes)
 
 	for _, m := range mods {
-		if m != nil {
-			m(req)
-		}
+		m.Apply(req)
 	}
 
 	resp, err := fastClient.Do(req)

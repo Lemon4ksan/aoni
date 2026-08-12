@@ -11,6 +11,7 @@ import (
 	"reflect"
 	"strings"
 	"sync"
+	"sync/atomic"
 
 	"github.com/lemon4ksan/aoni"
 	"github.com/lemon4ksan/aoni/internal/bytesconv"
@@ -70,6 +71,7 @@ func LimitDecoder(decoder Decoder, maxBytes int64) Decoder {
 var (
 	decodersMu         sync.RWMutex
 	registeredDecoders = make(map[string]Decoder)
+	hasCustomDecoders  atomic.Bool
 )
 
 func normalizeContentType(contentType string) string {
@@ -89,8 +91,11 @@ func RegisterDecoder(contentType string, decoder Decoder) {
 
 	if decoder == nil {
 		delete(registeredDecoders, norm)
+		hasCustomDecoders.Store(len(registeredDecoders) > 0)
 	} else {
 		registeredDecoders[norm] = decoder
+
+		hasCustomDecoders.Store(true)
 	}
 }
 
@@ -101,6 +106,10 @@ func UnregisterDecoder(contentType string) {
 
 // GetDecoder retrieves the custom [Decoder] globally registered for contentType, or nil if none is registered.
 func GetDecoder(contentType string) Decoder {
+	if !hasCustomDecoders.Load() {
+		return nil
+	}
+
 	norm := normalizeContentType(contentType)
 	if norm == "" {
 		return nil
@@ -115,18 +124,26 @@ func GetDecoder(contentType string) Decoder {
 // LookupDecoder resolves a [Decoder] for contentType, checking registered custom decoders first,
 // then standard MIME types (JSON, Proto, gRPC-Web, XML), falling back to RawDecoder.
 func LookupDecoder(contentType string) Decoder {
-	norm := normalizeContentType(contentType)
-	if norm != "" {
-		decodersMu.RLock()
+	if contentType == "application/json" || contentType == "application/json; charset=utf-8" {
+		return JSONDecoder
+	}
 
-		d, ok := registeredDecoders[norm]
+	if hasCustomDecoders.Load() {
+		norm := normalizeContentType(contentType)
+		if norm != "" {
+			decodersMu.RLock()
 
-		decodersMu.RUnlock()
+			d, ok := registeredDecoders[norm]
 
-		if ok {
-			return d
+			decodersMu.RUnlock()
+
+			if ok {
+				return d
+			}
 		}
 	}
+
+	norm := normalizeContentType(contentType)
 
 	switch {
 	case bytesconv.EqualFoldASCII(norm, "application/json"), bytesconv.EqualFoldASCII(norm, "text/json"):

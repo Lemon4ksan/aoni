@@ -100,7 +100,7 @@ func TestMod_URIAndPathModifiers(t *testing.T) {
 		t.Parallel()
 
 		req := newDummyRequest()
-		mod.WithVar("id", 42)(req)
+		mod.WithVar("id", 42).Apply(req)
 
 		assert.Equal(t, "/v1/item/42", req.Path())
 	})
@@ -111,7 +111,7 @@ func TestMod_URIAndPathModifiers(t *testing.T) {
 		req := newDummyRequest()
 		req.SetPath("/v1/users/{userId}/orders/{orderId}")
 
-		mod.WithVars("userId", "usr_123", "orderId", "ord_999")(req)
+		mod.WithVars("userId", "usr_123", "orderId", "ord_999").Apply(req)
 
 		assert.Equal(t, "/v1/users/usr_123/orders/ord_999", req.Path())
 	})
@@ -120,7 +120,7 @@ func TestMod_URIAndPathModifiers(t *testing.T) {
 		t.Parallel()
 
 		req := newDummyRequest()
-		mod.WithVars("key_without_value")(req)
+		mod.WithVars("key_without_value").Apply(req)
 
 		cfg := aoni.GetRequestConfig(req.Context())
 		require.NotNil(t, cfg)
@@ -131,7 +131,7 @@ func TestMod_URIAndPathModifiers(t *testing.T) {
 		t.Parallel()
 
 		req := newDummyRequest()
-		mod.WithBaseURL("https://api.custom-target.com/v1/data")(req)
+		mod.WithBaseURL("https://api.custom-target.com/v1/data").Apply(req)
 
 		assert.Equal(t, "https://api.custom-target.com/v1/data", req.URL())
 	})
@@ -142,7 +142,7 @@ func TestMod_URIAndPathModifiers(t *testing.T) {
 		req := newDummyRequest()
 		req.SetPath("/local/path")
 
-		mod.WithoutBaseURL()(req)
+		mod.WithoutBaseURL().Apply(req)
 
 		assert.Equal(t, "/local/path", req.URL())
 	})
@@ -153,7 +153,7 @@ func TestMod_URIAndPathModifiers(t *testing.T) {
 		req := newDummyRequest()
 
 		queryMap := map[string]string{"sort": "desc", "page": "1"}
-		mod.WithQuery(queryMap)(req)
+		mod.WithQuery(queryMap).Apply(req)
 
 		assert.Contains(t, req.RawQuery(), "sort=desc")
 		assert.Contains(t, req.RawQuery(), "page=1")
@@ -168,16 +168,16 @@ func TestMod_HeadersAndAuthModifiers(t *testing.T) {
 
 		req := newDummyRequest()
 
-		mod.WithHeader("X-Request-ID", "req-12345")(req)
-		mod.WithHeaderBytes([]byte("X-Engine"), []byte("aoni-fast"))(req)
-		mod.WithHeaders(map[string]string{"X-App": "demo", "X-Env": "prod"})(req)
+		mod.WithHeader("X-Request-ID", "req-12345").Apply(req)
+		mod.WithHeaderBytes([]byte("X-Engine"), []byte("aoni-fast")).Apply(req)
+		mod.WithHeaders(map[string]string{"X-App": "demo", "X-Env": "prod"}).Apply(req)
 
 		assert.Equal(t, "req-12345", req.Header("X-Request-ID"))
 		assert.Equal(t, "aoni-fast", string(req.HeaderBytes([]byte("X-Engine"))))
 		assert.Equal(t, "demo", req.Header("X-App"))
 		assert.Equal(t, "prod", req.Header("X-Env"))
 
-		mod.ResetHeaders()(req)
+		mod.ResetHeaders().Apply(req)
 		assert.Empty(t, req.Header("X-App"))
 	})
 
@@ -185,11 +185,11 @@ func TestMod_HeadersAndAuthModifiers(t *testing.T) {
 		t.Parallel()
 
 		req1 := newDummyRequest()
-		mod.WithBearer("secret-token-xyz")(req1)
+		mod.WithBearer("secret-token-xyz").Apply(req1)
 		assert.Equal(t, "Bearer secret-token-xyz", req1.Header("Authorization"))
 
 		req2 := newDummyRequest()
-		mod.WithBasicAuth("admin", "secret123")(req2)
+		mod.WithBasicAuth("admin", "secret123").Apply(req2)
 		assert.True(t, len(req2.Header("Authorization")) > 0)
 		assert.True(t, req2.Header("Authorization") != "Bearer secret-token-xyz")
 	})
@@ -204,12 +204,12 @@ func TestMod_HeadersAndAuthModifiers(t *testing.T) {
 			return token
 		})
 
-		headerMod(req)
+		headerMod.Apply(req)
 		assert.Equal(t, "initial-token", req.Header("X-Short-Lived-Token"))
 
 		token = "refreshed-token"
 
-		headerMod(req)
+		headerMod.Apply(req)
 		assert.Equal(t, "refreshed-token", req.Header("X-Short-Lived-Token"))
 	})
 
@@ -218,8 +218,8 @@ func TestMod_HeadersAndAuthModifiers(t *testing.T) {
 
 		req := newDummyRequest()
 
-		mod.WithCookie(&http.Cookie{Name: "session", Value: "sess123"})(req)
-		mod.WithCookies(map[string]string{"theme": "dark", "lang": "en"})(req)
+		mod.WithCookie(&http.Cookie{Name: "session", Value: "sess123"}).Apply(req)
+		mod.WithCookies(map[string]string{"theme": "dark", "lang": "en"}).Apply(req)
 
 		cookieValues := req.HTTPRequest().Header.Values("Cookie")
 		combined := strings.Join(cookieValues, "; ")
@@ -234,11 +234,11 @@ func TestMod_HeadersAndAuthModifiers(t *testing.T) {
 
 		req := newDummyRequest()
 
-		mod.WithIfMatch(`"etag123"`)(req)
-		mod.WithIfNoneMatch(`"etag456"`)(req)
+		mod.WithIfMatch(`"etag123"`).Apply(req)
+		mod.WithIfNoneMatch(`"etag456"`).Apply(req)
 
 		now := time.Now().UTC().Truncate(time.Second)
-		mod.WithIfModifiedSince(now)(req)
+		mod.WithIfModifiedSince(now).Apply(req)
 
 		assert.Equal(t, `"etag123"`, req.Header("If-Match"))
 		assert.Equal(t, `"etag456"`, req.Header("If-None-Match"))
@@ -255,7 +255,7 @@ func TestMod_BodyAndPayloadModifiers(t *testing.T) {
 		req := newDummyRequest()
 		user := dummyUser{Name: "Alice", Email: "alice@example.com"}
 
-		mod.WithJSONBody(user)(req)
+		mod.WithJSONBody(user).Apply(req)
 
 		assert.Equal(t, "application/json", req.Header("Content-Type"))
 		assert.JSONEq(t, `{"name":"Alice","email":"alice@example.com"}`, string(req.BodyBytes()))
@@ -269,7 +269,7 @@ func TestMod_BodyAndPayloadModifiers(t *testing.T) {
 		vals.Set("foo", "bar")
 		vals.Add("foo", "baz")
 
-		mod.WithFormValues(vals)(req)
+		mod.WithFormValues(vals).Apply(req)
 
 		assert.Equal(t, "application/x-www-form-urlencoded", req.Header("Content-Type"))
 		assert.Equal(t, "foo=bar&foo=baz", string(req.BodyBytes()))
@@ -282,14 +282,14 @@ func TestMod_BodyAndPayloadModifiers(t *testing.T) {
 
 		// Proto body
 		req1 := newDummyRequest()
-		mod.WithProtoBody(msg)(req1)
+		mod.WithProtoBody(msg).Apply(req1)
 
 		assert.Equal(t, "application/x-protobuf", req1.Header("Content-Type"))
 		assert.NotEmpty(t, req1.BodyBytes())
 
 		// gRPC-Web body
 		req2 := newDummyRequest()
-		mod.WithGRPCWebBody(msg)(req2)
+		mod.WithGRPCWebBody(msg).Apply(req2)
 
 		assert.Equal(t, "application/grpc-web+proto", req2.Header("Content-Type"))
 		assert.Equal(t, "1", req2.Header("X-Grpc-Web"))
@@ -306,7 +306,7 @@ func TestMod_BodyAndPayloadModifiers(t *testing.T) {
 			{Name: "role", Value: "admin"},
 		}
 
-		mod.WithMultipartFields(fields)(req)
+		mod.WithMultipartFields(fields).Apply(req)
 
 		contentType := req.Header("Content-Type")
 		assert.Contains(t, contentType, "multipart/form-data")
@@ -321,7 +321,7 @@ func TestMod_ProtocolAndNetworkModifiers(t *testing.T) {
 		t.Parallel()
 
 		req1 := newDummyRequest()
-		mod.WithForceHTTP2()(req1)
+		mod.WithForceHTTP2().Apply(req1)
 
 		cfg1 := aoni.GetRequestConfig(req1.Context())
 		require.NotNil(t, cfg1)
@@ -329,7 +329,7 @@ func TestMod_ProtocolAndNetworkModifiers(t *testing.T) {
 		assert.Equal(t, aoni.AlpnH2, cfg1.ALPNOverride[0])
 
 		req2 := newDummyRequest()
-		mod.WithForceHTTP3()(req2)
+		mod.WithForceHTTP3().Apply(req2)
 
 		cfg2 := aoni.GetRequestConfig(req2.Context())
 		require.NotNil(t, cfg2)
@@ -343,7 +343,7 @@ func TestMod_ProtocolAndNetworkModifiers(t *testing.T) {
 		req := newDummyRequest()
 		order := []string{":method", ":authority", ":scheme", ":path", "user-agent"}
 
-		mod.WithOrderedHeaders(order)(req)
+		mod.WithOrderedHeaders(order).Apply(req)
 
 		cfg := aoni.GetRequestConfig(req.Context())
 		require.NotNil(t, cfg)
@@ -355,10 +355,10 @@ func TestMod_ProtocolAndNetworkModifiers(t *testing.T) {
 
 		req := newDummyRequest()
 
-		mod.WithProxyOverride("http://proxy.internal:8080")(req)
-		mod.WithSSRFGuard()(req)
-		mod.WithInsecureSkipVerify()(req)
-		mod.WithProxyDNS()(req)
+		mod.WithProxyOverride("http://proxy.internal:8080").Apply(req)
+		mod.WithSSRFGuard().Apply(req)
+		mod.WithInsecureSkipVerify().Apply(req)
+		mod.WithProxyDNS().Apply(req)
 
 		cfg := aoni.GetRequestConfig(req.Context())
 		require.NotNil(t, cfg)
@@ -379,8 +379,8 @@ func TestMod_TelemetryAndTracingModifiers(t *testing.T) {
 
 		req := newDummyRequest()
 
-		mod.WithCorrelationID("corr_abc123")(req)
-		mod.WithLabel("user-login-route")(req)
+		mod.WithCorrelationID("corr_abc123").Apply(req)
+		mod.WithLabel("user-login-route").Apply(req)
 
 		assert.Equal(t, "corr_abc123", req.Header("X-Correlation-ID"))
 
@@ -394,8 +394,8 @@ func TestMod_TelemetryAndTracingModifiers(t *testing.T) {
 
 		req := newDummyRequest()
 
-		mod.WithDebug()(req)
-		mod.WithTraceContext()(req)
+		mod.WithDebug().Apply(req)
+		mod.WithTraceContext().Apply(req)
 
 		cfg := aoni.GetRequestConfig(req.Context())
 		require.NotNil(t, cfg)

@@ -464,7 +464,7 @@ func TestFallbackMiddleware(t *testing.T) {
 		require.NoError(t, err)
 
 		req := aoni.NewStdRequest(httpReq)
-		mod.WithFallback(fallback)(req)
+		mod.WithFallback(fallback).Apply(req)
 
 		resp, err := client.Do(req)
 		require.NoError(t, err)
@@ -489,7 +489,7 @@ func TestFallbackMiddleware(t *testing.T) {
 		require.NoError(t, err)
 
 		req := aoni.NewStdRequest(httpReq)
-		mod.WithFallback(fallback)(req)
+		mod.WithFallback(fallback).Apply(req)
 
 		resp, err := client.Do(req)
 		require.NoError(t, err)
@@ -518,7 +518,7 @@ func TestFallbackMiddleware(t *testing.T) {
 		require.NoError(t, err)
 
 		req := aoni.NewStdRequest(httpReq)
-		mod.WithFallback(fallback)(req)
+		mod.WithFallback(fallback).Apply(req)
 
 		resp, err := client.Do(req)
 		require.NoError(t, err)

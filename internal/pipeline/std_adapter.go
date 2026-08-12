@@ -31,7 +31,9 @@ func (s *stdRequestAdapter) Context() context.Context {
 }
 
 func (s *stdRequestAdapter) SetContext(ctx context.Context) {
-	s.req = s.req.WithContext(ctx)
+	if s.req != nil {
+		*s.req = *s.req.WithContext(ctx)
+	}
 }
 
 func (s *stdRequestAdapter) Method() string {

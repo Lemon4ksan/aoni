@@ -394,9 +394,9 @@ func TestContextModifiers_Retrieve(t *testing.T) {
 
 		called := make([]string, 0, 3)
 
-		m1 := func(_ aoni.Request) { called = append(called, "m1") }
-		m2 := func(_ aoni.Request) { called = append(called, "m2") }
-		m3 := func(_ aoni.Request) { called = append(called, "m3") }
+		m1 := mod.Custom(func(_ aoni.Request) { called = append(called, "m1") })
+		m2 := mod.Custom(func(_ aoni.Request) { called = append(called, "m2") })
+		m3 := mod.Custom(func(_ aoni.Request) { called = append(called, "m3") })
 
 		ctx := aoni.WithContextModifier(t.Context(), m1, m2, m3)
 		mods := aoni.ContextModifiers(ctx)
@@ -404,7 +404,7 @@ func TestContextModifiers_Retrieve(t *testing.T) {
 		require.Len(t, mods, 3)
 
 		for _, m := range mods {
-			m(nil)
+			m.Apply(nil)
 		}
 
 		assert.Equal(t, []string{"m1", "m2", "m3"}, called)
@@ -851,7 +851,7 @@ func TestTransport_RoundTrip_TraceContext(t *testing.T) {
 	req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, "http://localhost", nil)
 	require.NoError(t, err)
 
-	mod.WithTraceContext()(aoni.NewStdRequest(req))
+	mod.WithTraceContext().ApplyStd(req)
 
 	resp, err := tr.RoundTrip(req)
 	require.NoError(t, err)
@@ -888,7 +888,7 @@ func FuzzContextModifiers(f *testing.F) {
 		}
 
 		for _, m := range mods {
-			m(aoni.NewStdRequest(req))
+			m.ApplyStd(req)
 		}
 
 		if req.Header.Get(key) != val {

@@ -220,8 +220,6 @@ func (c *Client) Request(
 		return pr, nil
 	}
 
-	c.applyModifiers(reqAdapter, mods)
-
 	reqCtx := reqAdapter.Context()
 
 	return c.pipeline.Execute(
@@ -687,9 +685,7 @@ func (c *Client) applyDefaultHeaders(req aoni.Request) {
 
 func (c *Client) applyModifiers(req aoni.Request, mods []aoni.RequestModifier) {
 	for _, m := range mods {
-		if m != nil {
-			m(req)
-		}
+		m.Apply(req)
 	}
 }
 

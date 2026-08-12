@@ -43,7 +43,7 @@ type protoCodec struct{}
 func (protoCodec) Encode(body any) aoni.RequestModifier {
 	msg, ok := body.(proto.Message)
 	if !ok {
-		return nil
+		return aoni.RequestModifier{}
 	}
 
 	return mod.WithProtoBody(msg)
@@ -62,7 +62,7 @@ type grpcWebCodec struct{}
 func (grpcWebCodec) Encode(body any) aoni.RequestModifier {
 	msg, ok := body.(proto.Message)
 	if !ok {
-		return nil
+		return aoni.RequestModifier{}
 	}
 
 	return mod.WithGRPCWebBody(msg)

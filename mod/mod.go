@@ -15,18 +15,26 @@ import (
 var ErrInvalidPairCount = errors.New("aoni/mod: WithVars requires an even number of key-value pairs")
 
 // Apply executes a slice of [aoni.RequestModifier] options sequentially on req.
-// Nil modifiers in mods are ignored safely without allocation.
 func Apply(req aoni.Request, mods ...aoni.RequestModifier) {
 	for _, m := range mods {
-		if m != nil {
-			m(req)
-		}
+		m.Apply(req)
 	}
 }
 
 // WithAutoDecode constructs an [aoni.RequestModifier] enabling content-type header detection for response parsing.
 func WithAutoDecode() aoni.RequestModifier {
-	return func(req aoni.Request) {
-		aoni.GetOrInitRequestConfig(req).AutoDecode = true
+	return aoni.RequestModifier{
+		Kind: aoni.ModCustom,
+		Fn: func(req aoni.Request) {
+			aoni.GetOrInitRequestConfig(req).AutoDecode = true
+		},
+	}
+}
+
+// Custom constructs a custom [aoni.RequestModifier] wrapping an arbitrary closure function.
+func Custom(fn func(aoni.Request)) aoni.RequestModifier {
+	return aoni.RequestModifier{
+		Kind: aoni.ModCustom,
+		Fn:   fn,
 	}
 }

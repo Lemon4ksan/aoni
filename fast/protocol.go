@@ -176,9 +176,7 @@ func resolveALPNMode(ctx context.Context, cfg *aoni.Config, fastReq *fasthttp.Re
 			dummyReq.SetContext(ctx)
 
 			for _, m := range reqCfg.Modifiers {
-				if m != nil {
-					m(dummyReq)
-				}
+				m.Apply(dummyReq)
 			}
 		}
 

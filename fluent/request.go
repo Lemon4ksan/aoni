@@ -294,11 +294,11 @@ func (r *Request) WithCodec(c codec.Codec, body any) *Request {
 		return r
 	}
 
-	if encMod := c.Encode(body); encMod != nil {
+	if encMod := c.Encode(body); encMod.Kind != aoni.ModNone {
 		r.appliedMods = append(r.appliedMods, encMod)
 	}
 
-	if decMod := c.Decode(); decMod != nil {
+	if decMod := c.Decode(); decMod.Kind != aoni.ModNone {
 		r.appliedMods = append(r.appliedMods, decMod)
 	}
 

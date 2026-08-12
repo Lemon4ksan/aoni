@@ -313,7 +313,7 @@ func BenchmarkModifiers_FastVsStd(b *testing.B) {
 		b.ResetTimer()
 
 		for b.Loop() {
-			modifier(req)
+			modifier.Apply(req)
 		}
 	})
 
@@ -326,7 +326,7 @@ func BenchmarkModifiers_FastVsStd(b *testing.B) {
 		b.ResetTimer()
 
 		for b.Loop() {
-			modifier(req)
+			modifier.Apply(req)
 		}
 	})
 }

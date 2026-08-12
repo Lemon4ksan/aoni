@@ -384,8 +384,13 @@ func resolveDecoder(resp *http.Response) decode.Decoder {
 	if resp != nil {
 		contentType := resp.Header.Get("Content-Type")
 		if contentType != "" {
-			if customDec := decode.GetDecoder(contentType); customDec != nil {
-				return customDec
+			if contentType == "application/json" || contentType == "application/json; charset=utf-8" {
+				return decode.JSONDecoder
+			}
+
+			d := decode.LookupDecoder(contentType)
+			if !decode.IsRawDecoder(d) {
+				return d
 			}
 
 			mediaType, _, _ := strings.Cut(contentType, ";")

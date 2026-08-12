@@ -76,11 +76,8 @@ func DialUDPProxy(
 	req.Header.Set("Upgrade", ConnectUDPUpgradeToken)
 	req.Header.Set("Connection", "Upgrade")
 
-	stdReq := aoni.NewStdRequest(req)
 	for _, m := range mods {
-		if m != nil {
-			m(stdReq)
-		}
+		m.ApplyStd(req)
 	}
 
 	resp, err := performCONNECTUDPHandshake(ctx, conn, req)

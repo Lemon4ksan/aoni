@@ -59,7 +59,7 @@ func TestGetProxyOverride(t *testing.T) {
 			require.NoError(t, err)
 
 			if tt.proxyURL != "" {
-				mod.WithProxyOverride(tt.proxyURL)(aoni.NewStdRequest(req))
+				mod.WithProxyOverride(tt.proxyURL).Apply(aoni.NewStdRequest(req))
 			}
 
 			raw, ok := aoni.GetProxyOverride(req.Context()).Value()
@@ -114,7 +114,7 @@ func TestProxyFuncWithOverride(t *testing.T) {
 			require.NoError(t, err)
 
 			if tt.overrideURL != "" {
-				mod.WithProxyOverride(tt.overrideURL)(aoni.NewStdRequest(req))
+				mod.WithProxyOverride(tt.overrideURL).Apply(aoni.NewStdRequest(req))
 			}
 
 			u, err := wrapped(req)
@@ -158,7 +158,7 @@ func TestInsecureSkipVerify(t *testing.T) {
 			require.NoError(t, err)
 
 			if tt.applyMod {
-				mod.WithInsecureSkipVerify()(aoni.NewStdRequest(req))
+				mod.WithInsecureSkipVerify().Apply(aoni.NewStdRequest(req))
 			}
 
 			assert.Equal(t, tt.expectedVal, aoni.GetInsecureSkipVerify(req.Context()))
@@ -220,7 +220,7 @@ func TestTCPDelay(t *testing.T) {
 				require.NoError(t, err)
 
 				if tt.expectSet {
-					mod.WithTCPDelay(tt.minDelay, tt.maxDelay)(aoni.NewStdRequest(req))
+					mod.WithTCPDelay(tt.minDelay, tt.maxDelay).Apply(aoni.NewStdRequest(req))
 				}
 
 				r, ok := aoni.GetTCPDelay(req.Context()).Value()
@@ -255,7 +255,7 @@ func TestTCPDelay(t *testing.T) {
 			req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, "http://example.com", nil)
 			require.NoError(t, err)
 
-			mod.WithTCPDelay(20*time.Millisecond, 30*time.Millisecond)(aoni.NewStdRequest(req))
+			mod.WithTCPDelay(20*time.Millisecond, 30*time.Millisecond).Apply(aoni.NewStdRequest(req))
 
 			start := time.Now()
 			err = aoni.ApplyTCPDelay(req.Context())
@@ -272,7 +272,7 @@ func TestTCPDelay(t *testing.T) {
 			req, err := http.NewRequestWithContext(ctx, http.MethodGet, "http://example.com", nil)
 			require.NoError(t, err)
 
-			mod.WithTCPDelay(500*time.Millisecond, 1*time.Second)(aoni.NewStdRequest(req))
+			mod.WithTCPDelay(500*time.Millisecond, 1*time.Second).Apply(aoni.NewStdRequest(req))
 
 			cancel()
 
@@ -289,8 +289,8 @@ func TestConnMetadata(t *testing.T) {
 	require.NoError(t, err)
 
 	sReq := aoni.NewStdRequest(stdReq)
-	mod.WithConnMetadata("pool", "eu-west")(sReq)
-	mod.WithConnMetadata("trace-id", "abc123")(sReq)
+	mod.WithConnMetadata("pool", "eu-west").Apply(sReq)
+	mod.WithConnMetadata("trace-id", "abc123").Apply(sReq)
 
 	tests := []struct {
 		name        string
@@ -361,7 +361,7 @@ func TestCacheTTL(t *testing.T) {
 			require.NoError(t, err)
 
 			if tt.applyMod {
-				mod.WithCacheTTL(tt.ttl)(aoni.NewStdRequest(req))
+				mod.WithCacheTTL(tt.ttl).Apply(aoni.NewStdRequest(req))
 			}
 
 			d, ok := aoni.GetCacheTTL(req.Context()).Value()
@@ -474,7 +474,7 @@ func TestRetryPolicyAndConditions(t *testing.T) {
 				require.NoError(t, err)
 
 				if tt.applyMod {
-					mod.WithRetryPolicy(tt.override)(aoni.NewStdRequest(req))
+					mod.WithRetryPolicy(tt.override).Apply(aoni.NewStdRequest(req))
 				}
 
 				o, ok := aoni.GetRetryOverride(req.Context()).Value()
@@ -665,7 +665,7 @@ func TestContextModifiersAndRules(t *testing.T) {
 		t.Parallel()
 
 		ctx := context.Background()
-		dummyMod := func(_ aoni.Request) {}
+		dummyMod := mod.Custom(func(_ aoni.Request) {})
 
 		ctx = aoni.WithContextModifier(ctx, dummyMod)
 		mods := aoni.ContextModifiers(ctx)
@@ -681,7 +681,7 @@ func TestContextModifiersAndRules(t *testing.T) {
 		require.NoError(t, err)
 
 		rules := map[string]string{"example.com": "127.0.0.1:8080"}
-		mod.WithHostRewrite(rules)(aoni.NewStdRequest(req))
+		mod.WithHostRewrite(rules).Apply(aoni.NewStdRequest(req))
 
 		extracted := aoni.HostRewriteRules(req.Context())
 		require.NotNil(t, extracted)
@@ -710,7 +710,7 @@ func TestMod_WithVars_Validation(t *testing.T) {
 	require.NoError(t, err)
 
 	// Odd number of arguments must trigger ErrInvalidPairCount in BodyError
-	mod.WithVars("key_without_value")(aoni.NewStdRequest(req))
+	mod.WithVars("key_without_value").Apply(aoni.NewStdRequest(req))
 
 	cfg := aoni.GetRequestConfig(req.Context())
 	require.NotNil(t, cfg)

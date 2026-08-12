@@ -241,11 +241,8 @@ func buildHandshakeRequest(
 		)
 	}
 
-	stdReq := aoni.NewStdRequest(req)
 	for _, m := range mods {
-		if m != nil {
-			m(stdReq)
-		}
+		m.ApplyStd(req)
 	}
 
 	return req, key, nil

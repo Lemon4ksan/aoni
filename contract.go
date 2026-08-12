@@ -73,6 +73,7 @@ func (f DoerFunc) Do(req Request) (Response, error) {
 type RetryCondition = pipeline.RetryCondition
 
 // RetryOverride overrides default client retry behavior for a specific request execution.
+// Inspects the response status code, transport errors, or gRPC status trailers.
 type RetryOverride = pipeline.RetryOverride
 
 // FallbackFunc generates a synthetic fallback [Response] when a request execution permanently fails.
@@ -87,8 +88,24 @@ type BaseResponse = pipeline.BaseResponse
 //   - total: total expected bytes from Content-Length (-1 if unknown).
 type ProgressFunc = io.ProgressFunc
 
-// RequestModifier represents a functional hook that mutates an outgoing [Request] contract prior to dispatch.
-type RequestModifier = generic.Option[Request]
+// ModifierType specifies the discrete operation type of a [RequestModifier] value.
+type ModifierType = pipeline.ModifierType
+
+const (
+	ModNone       = pipeline.ModNone
+	ModHeader     = pipeline.ModHeader
+	ModHeaderAdd  = pipeline.ModHeaderAdd
+	ModQuery      = pipeline.ModQuery
+	ModQueryAdd   = pipeline.ModQueryAdd
+	ModBearer     = pipeline.ModBearer
+	ModBasicAuth  = pipeline.ModBasicAuth
+	ModBodyBytes  = pipeline.ModBodyBytes
+	ModBodyStream = pipeline.ModBodyStream
+	ModCustom     = pipeline.ModCustom
+)
+
+// RequestModifier represents a zero-allocation value-based modification payload.
+type RequestModifier = pipeline.RequestModifier
 
 // ClientOption represents a functional option configuring immutable [Client] initialization.
 type ClientOption generic.Option[*Config]

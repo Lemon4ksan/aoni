@@ -8,6 +8,7 @@ package request
 import (
 	"context"
 	"errors"
+	stdio "io"
 	"net/http"
 	"reflect"
 
@@ -179,13 +180,9 @@ func Post(
 		return nil, err
 	}
 
-	mods = append([]aoni.RequestModifier{
-		mod.WithContentType("application/json"),
-		mod.WithAccept("application/json"),
-		mod.WithBody(bodyReader),
-	}, mods...)
+	allMods := buildPostMods(bodyReader, mods)
 
-	return c.Request(ctx, http.MethodPost, path, mods...)
+	return c.Request(ctx, http.MethodPost, path, allMods...)
 }
 
 // PostTo executes a POST request with body payload and unmarshals the response into Resp.
@@ -201,13 +198,9 @@ func PostTo[Resp any](
 		return nil, err
 	}
 
-	mods = append([]aoni.RequestModifier{
-		mod.WithContentType("application/json"),
-		mod.WithAccept("application/json"),
-		mod.WithBody(bodyReader),
-	}, mods...)
+	allMods := buildPostMods(bodyReader, mods)
 
-	resp, err := c.Request(ctx, http.MethodPost, path, mods...) //nolint:bodyclose
+	resp, err := c.Request(ctx, http.MethodPost, path, allMods...) //nolint:bodyclose
 	if err != nil {
 		return nil, err
 	}
@@ -812,4 +805,22 @@ func DoToEx[Resp any](
 	}
 
 	return result, raw, nil
+}
+
+func buildPostMods(bodyReader stdio.Reader, mods []aoni.RequestModifier) []aoni.RequestModifier {
+	if len(mods) == 0 {
+		return []aoni.RequestModifier{
+			mod.WithContentType("application/json"),
+			mod.WithAccept("application/json"),
+			mod.WithBody(bodyReader),
+		}
+	}
+
+	res := make([]aoni.RequestModifier, 3+len(mods))
+	res[0] = mod.WithContentType("application/json")
+	res[1] = mod.WithAccept("application/json")
+	res[2] = mod.WithBody(bodyReader)
+	copy(res[3:], mods)
+
+	return res
 }

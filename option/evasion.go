@@ -18,6 +18,7 @@ import (
 	"github.com/lemon4ksan/aoni/fingerprint/profiles/chrome"
 	"github.com/lemon4ksan/aoni/fingerprint/profiles/firefox"
 	"github.com/lemon4ksan/aoni/fingerprint/profiles/safari"
+	"github.com/lemon4ksan/aoni/mod"
 	"github.com/lemon4ksan/aoni/netutil/cert"
 	"github.com/lemon4ksan/aoni/netutil/proxy"
 )
@@ -39,9 +40,9 @@ func WithChrome() aoni.ClientOption {
 
 		hints := fingerprint.BuildClientHintsForOS(fingerprint.DefaultUserAgent, profiles.Windows)
 
-		cfg.Defaults.DefaultMods = append(cfg.Defaults.DefaultMods, func(req aoni.Request) {
+		cfg.Defaults.DefaultMods = append(cfg.Defaults.DefaultMods, mod.Custom(func(req aoni.Request) {
 			hints.ApplyHeaders(req.SetHeader)
-		})
+		}))
 	}
 }
 
@@ -60,9 +61,9 @@ func WithChromeMobile() aoni.ClientOption {
 
 		hints := fingerprint.BuildClientHintsForOS(chrome.UserAgentAndroid, profiles.Android)
 
-		cfg.Defaults.DefaultMods = append(cfg.Defaults.DefaultMods, func(req aoni.Request) {
+		cfg.Defaults.DefaultMods = append(cfg.Defaults.DefaultMods, mod.Custom(func(req aoni.Request) {
 			hints.ApplyHeaders(req.SetHeader)
-		})
+		}))
 	}
 }
 
@@ -80,13 +81,12 @@ func WithFirefox() aoni.ClientOption {
 	}
 }
 
-// WithSafariDX applies a zero-configuration Safari macOS profile (DX) with 0-RTT, ECH, and Cert Compression.
-func WithSafariDX() aoni.ClientOption {
+// WithSafari applies a zero-configuration Safari macOS profile (DX) with 0-RTT and Brotli compression.
+func WithSafari() aoni.ClientOption {
 	return func(cfg *aoni.Config) {
 		WithProfileVariant(safari.Desktop, profiles.MacOS)(cfg)
 		With0RTT(true)(cfg)
-		WithAutoECH(true)(cfg)
-		WithCertCompression(cert.CompressionBrotli, cert.CompressionZstd)(cfg)
+		WithCertCompression(cert.CompressionBrotli)(cfg)
 
 		if cfg.Engine.CookieJar == nil {
 			cfg.Engine.CookieJar = cookie.NewProxyIsolatedJar()
@@ -123,9 +123,9 @@ func WithProfileVariant(variant *profiles.Variant, os profiles.OSKey) aoni.Clien
 		aoni.ApplyTLSVariantToConfig(cfg, variant)
 		aoni.ApplyHTTPVariantToConfig(cfg, variant, os)
 
-		cfg.Defaults.DefaultMods = append(cfg.Defaults.DefaultMods, func(req aoni.Request) {
+		cfg.Defaults.DefaultMods = append(cfg.Defaults.DefaultMods, mod.Custom(func(req aoni.Request) {
 			aoni.ApplyProfileHeaders(req, variant, os)
-		})
+		}))
 	}
 }
 

@@ -115,11 +115,8 @@ func DialIPProxy(
 	req.Header.Set("Upgrade", ConnectIPUpgradeToken)
 	req.Header.Set("Connection", "Upgrade")
 
-	stdReq := aoni.NewStdRequest(req)
 	for _, m := range mods {
-		if m != nil {
-			m(stdReq)
-		}
+		m.ApplyStd(req)
 	}
 
 	resp, err := performCONNECTIPHandshake(ctx, conn, req)

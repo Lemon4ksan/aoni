@@ -163,7 +163,6 @@ func (c *Client) Request(
 	method, path string,
 	mods ...RequestModifier,
 ) (*http.Response, error) {
-	// ── Baremetal fast path ─────────────────────────────────────────────────────
 	// Checked BEFORE any allocation. When the client has no pipeline rules, hooks,
 	// modifiers, or per-request config we bypass AcquireTx, NewStdRequest and the
 	// full pipeline.Execute and route directly to the underlying engine.
@@ -179,25 +178,9 @@ func (c *Client) Request(
 		ApplyRequestConfigDefaults(cfg, c)
 	}
 
-	var u *url.URL
-	if len(path) > 0 && path[0] == '/' && c.prepared.BaseURL != nil {
-		u = &url.URL{
-			Scheme: c.prepared.BaseURL.Scheme,
-			Host:   c.prepared.BaseURL.Host,
-			Path:   path,
-		}
-	} else {
-		targetURLStr, resolveErr := c.resolveTargetURL(path)
-		if resolveErr != nil {
-			return nil, resolveErr
-		}
-
-		var parseErr error
-
-		u, parseErr = urlutil.Parse(targetURLStr)
-		if parseErr != nil {
-			return nil, &Error{Op: "failed to parse URL", Err: parseErr}
-		}
+	url, err := c.resolveURL(path)
+	if err != nil {
+		return nil, err
 	}
 
 	reqHeader := make(http.Header, len(c.prepared.PrecomputedDefaultHeaders)+len(c.defaults.Headers))
@@ -214,37 +197,28 @@ func (c *Client) Request(
 
 	req := &http.Request{
 		Method:     method,
-		URL:        u,
+		URL:        url,
 		Proto:      "HTTP/1.1",
 		ProtoMajor: 1,
 		ProtoMinor: 1,
 		Header:     reqHeader,
 		Body:       http.NoBody,
-		Host:       u.Host,
+		Host:       url.Host,
 	}
 
 	if ctx != nil {
 		req = req.WithContext(ctx)
 	}
 
-	stdReq := NewStdRequest(req)
-
 	for _, m := range c.defaults.DefaultMods {
-		if m != nil {
-			m(stdReq)
-		}
+		m.ApplyStd(req)
 	}
 
 	for _, m := range mods {
-		if m != nil {
-			m(stdReq)
-		}
+		m.ApplyStd(req)
 	}
 
 	resp, err := c.execute(req, c.resolvePipeline(req))
-
-	ReleaseStdRequest(stdReq)
-
 	if err != nil {
 		return nil, &Error{Op: "request failed", Err: err}
 	}
@@ -255,31 +229,10 @@ func (c *Client) Request(
 // doBaremetal executes a request on the minimal allocation path — bypassing AcquireTx,
 // NewStdRequest, and the full pipeline. Called only when isBaremetalStaticEligible is true
 // and no per-request mods or config are present.
-//
-// Allocation budget vs stdlib http.NewRequestWithContext:
-//   - url.URL struct    : 1 alloc  (same as stdlib url.Parse output)
-//   - http.Request struct : 1 alloc
-//   - req.WithContext   : 2 allocs (new Request + URL copy) — skipped for context.Background/TODO.
 func (c *Client) doBaremetal(ctx context.Context, method, path string) (*http.Response, error) {
-	var u *url.URL
-	if len(path) > 0 && path[0] == '/' && c.prepared.BaseURL != nil {
-		u = &url.URL{
-			Scheme: c.prepared.BaseURL.Scheme,
-			Host:   c.prepared.BaseURL.Host,
-			Path:   path,
-		}
-	} else {
-		targetURLStr, resolveErr := c.resolveTargetURL(path)
-		if resolveErr != nil {
-			return nil, resolveErr
-		}
-
-		var parseErr error
-
-		u, parseErr = urlutil.Parse(targetURLStr)
-		if parseErr != nil {
-			return nil, &Error{Op: "failed to parse URL", Err: parseErr}
-		}
+	u, err := c.resolveURL(path)
+	if err != nil {
+		return nil, err
 	}
 
 	// nil Header is safe: net/http handles absent request headers correctly.
@@ -316,40 +269,9 @@ func (c *Client) Do(req Request) (Response, error) {
 		return nil, ErrNilRequest
 	}
 
-	httpReq := req.HTTPRequest()
-	if httpReq == nil {
-		ctx := req.Context()
-		if ctx == nil {
-			ctx = context.Background()
-		}
-
-		var bodyReader stdio.Reader
-		if bs := req.BodyStream(); bs != nil {
-			bodyReader = bs
-		} else if bb := req.BodyBytes(); len(bb) > 0 {
-			bodyReader = bytes.NewReader(bb)
-		}
-
-		var err error
-
-		httpReq, err = http.NewRequestWithContext(ctx, req.Method(), req.URL(), bodyReader)
-		if err != nil {
-			return nil, &Error{Op: "failed to create http request", Err: err}
-		}
-
-		if fastAdapter, ok := req.(interface{ FastHTTPRequest() *fasthttp.Request }); ok {
-			fastReq := fastAdapter.FastHTTPRequest()
-			if fastReq != nil {
-				fastReq.Header.All()(func(k, v []byte) bool {
-					httpReq.Header.Add(string(k), string(v))
-					return true
-				})
-
-				if host := string(fastReq.Header.Peek("Host")); host != "" {
-					httpReq.Host = host
-				}
-			}
-		}
+	httpReq, err := c.resolveHTTPRequest(req)
+	if err != nil {
+		return nil, err
 	}
 
 	if httpReq != nil && httpReq.URL != nil {
@@ -415,8 +337,11 @@ func (c *Client) WithPersona(p fingerprint.Persona) *Client {
 	}
 
 	return newClient.With(func(cfg *Config) {
-		cfg.Defaults.DefaultMods = append(cfg.Defaults.DefaultMods, func(req Request) {
-			GetOrInitRequestConfig(req).OrderedHeaders = p.HeaderOrder
+		cfg.Defaults.DefaultMods = append(cfg.Defaults.DefaultMods, RequestModifier{
+			Kind: ModCustom,
+			Fn: func(req Request) {
+				GetOrInitRequestConfig(req).OrderedHeaders = p.HeaderOrder
+			},
 		})
 	})
 }
@@ -679,6 +604,28 @@ func (c *Client) ensureUserAgent() {
 	}
 }
 
+func (c *Client) resolveURL(path string) (*url.URL, error) {
+	if len(path) > 0 && path[0] == '/' && c.prepared.BaseURL != nil {
+		return &url.URL{
+			Scheme: c.prepared.BaseURL.Scheme,
+			Host:   c.prepared.BaseURL.Host,
+			Path:   path,
+		}, nil
+	}
+
+	targetURLStr, resolveErr := c.resolveTargetURL(path)
+	if resolveErr != nil {
+		return nil, resolveErr
+	}
+
+	u, parseErr := urlutil.Parse(targetURLStr)
+	if parseErr != nil {
+		return nil, &Error{Op: "failed to parse URL", Err: parseErr}
+	}
+
+	return u, nil
+}
+
 // resolveTargetURL resolves path against BaseURL using precomputed zero-allocation string buffers (engine.PreparedConfig).
 // Eliminates url.Parse and string formatting allocations for relative path resolutions on the hot path.
 func (c *Client) resolveTargetURL(path string) (string, error) {
@@ -708,6 +655,48 @@ func (c *Client) resolveTargetURL(path string) (string, error) {
 	}
 
 	return c.defaults.BaseURL.ResolveReference(rel).String(), nil
+}
+
+func (c *Client) resolveHTTPRequest(req Request) (*http.Request, error) {
+	if httpReq := req.HTTPRequest(); httpReq != nil {
+		return httpReq, nil
+	}
+
+	ctx := req.Context()
+	if ctx == nil {
+		ctx = context.Background()
+	}
+
+	var bodyReader stdio.Reader
+	if bs := req.BodyStream(); bs != nil {
+		bodyReader = bs
+	} else if bb := req.BodyBytes(); len(bb) > 0 {
+		bodyReader = bytes.NewReader(bb)
+	}
+
+	httpReq, err := http.NewRequestWithContext(ctx, req.Method(), req.URL(), bodyReader)
+	if err != nil {
+		return nil, &Error{Op: "failed to create http request", Err: err}
+	}
+
+	fastAdapter, ok := req.(interface{ FastHTTPRequest() *fasthttp.Request })
+	if !ok {
+		return httpReq, nil
+	}
+
+	fastReq := fastAdapter.FastHTTPRequest()
+	if fastReq != nil {
+		fastReq.Header.All()(func(k, v []byte) bool {
+			httpReq.Header.Add(string(k), string(v))
+			return true
+		})
+
+		if host := string(fastReq.Header.Peek("Host")); host != "" {
+			httpReq.Host = host
+		}
+	}
+
+	return httpReq, nil
 }
 
 func (c *Client) buildQUICConfig(config *QUICMigrationConfig) *quic.Config {

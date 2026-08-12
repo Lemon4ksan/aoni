@@ -20,6 +20,7 @@ import (
 	"google.golang.org/protobuf/types/known/wrapperspb"
 
 	"github.com/lemon4ksan/aoni"
+	"github.com/lemon4ksan/aoni/mod"
 	"github.com/lemon4ksan/aoni/option"
 	"github.com/lemon4ksan/aoni/realtime/stream"
 )
@@ -88,11 +89,7 @@ func TestStream(t *testing.T) {
 		})
 
 		query := map[string]string{"foo": "bar"}
-		s, err := stream.Get(t.Context(), client, "/test", func(req aoni.Request) {
-			for k, v := range query {
-				req.AddQueryParam(k, v)
-			}
-		})
+		s, err := stream.Get(t.Context(), client, "/test", mod.WithQuery(query))
 		require.NoError(t, err)
 
 		t.Cleanup(func() { _ = s.Close() })

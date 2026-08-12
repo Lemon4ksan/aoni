@@ -257,7 +257,7 @@ func TestFastRequest_UnifiedModifiers(t *testing.T) {
 
 	fReq := fast.NewRequest(fastReq)
 	for _, m := range modifiers {
-		m(fReq)
+		m.Apply(fReq)
 	}
 
 	assert.Equal(t, "aoni-v1", fReq.Header("X-App-ID"))

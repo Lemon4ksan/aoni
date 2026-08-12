@@ -32,60 +32,12 @@ import (
 func (p *Pipeline[Req, Resp]) prepareRequest(req any, tx *Tx) *http.Request {
 	var stdReq *http.Request
 
-	if r, ok := req.(*http.Request); ok {
+	switch r := req.(type) {
+	case *http.Request:
 		stdReq = r
-	} else if r, ok := req.(Request); ok {
-		stdReq = r.HTTPRequest()
-		if stdReq == nil {
-			var (
-				bodyReader stdio.Reader
-				contentLen int64 = -1
-			)
-
-			if fastAdapter, ok := r.(interface{ FastHTTPRequest() *fasthttp.Request }); ok {
-				fastReq := fastAdapter.FastHTTPRequest()
-				if fastReq != nil {
-					if cl := fastReq.Header.ContentLength(); cl > 0 {
-						contentLen = int64(cl)
-					}
-				}
-			}
-
-			if bs := r.BodyStream(); bs != nil {
-				bodyReader = bs
-			} else if bb := r.BodyBytes(); len(bb) > 0 {
-				bodyReader = bytes.NewReader(bb)
-				if contentLen <= 0 {
-					contentLen = int64(len(bb))
-				}
-			}
-
-			var err error
-
-			stdReq, err = http.NewRequestWithContext(r.Context(), r.Method(), r.URL(), bodyReader) //nolint:gosec
-			if err != nil {
-				return &http.Request{}
-			}
-
-			if contentLen > 0 {
-				stdReq.ContentLength = contentLen
-			}
-
-			if fastAdapter, ok := r.(interface{ FastHTTPRequest() *fasthttp.Request }); ok {
-				fastReq := fastAdapter.FastHTTPRequest()
-				if fastReq != nil {
-					fastReq.Header.All()(func(k, v []byte) bool {
-						stdReq.Header.Add(string(k), string(v))
-						return true
-					})
-
-					if host := string(fastReq.Header.Peek("Host")); host != "" {
-						stdReq.Host = host
-					}
-				}
-			}
-		}
-	} else {
+	case Request:
+		stdReq = convertRequestToStd(r)
+	default:
 		return &http.Request{}
 	}
 
@@ -161,16 +113,13 @@ func (p *Pipeline[Req, Resp]) prepareRequestContext(req any, stdReq *http.Reques
 	}
 
 	if len(cfg.Modifiers) > 0 {
-		var reqAdapter Request
 		if r, ok := req.(Request); ok {
-			reqAdapter = r
+			for _, mod := range cfg.Modifiers {
+				mod.Apply(r)
+			}
 		} else {
-			reqAdapter = NewStdRequestAdapter(stdReq)
-		}
-
-		for _, mod := range cfg.Modifiers {
-			if mod != nil {
-				mod(reqAdapter)
+			for _, mod := range cfg.Modifiers {
+				mod.ApplyStd(stdReq)
 			}
 		}
 
@@ -409,4 +358,57 @@ func (p *Pipeline[Req, Resp]) applyRefererHeader(req *http.Request) {
 	if lastURL != "" {
 		req.Header.Set("Referer", lastURL)
 	}
+}
+
+func convertRequestToStd(r Request) *http.Request {
+	if stdReq := r.HTTPRequest(); stdReq != nil {
+		return stdReq
+	}
+
+	var (
+		bodyReader stdio.Reader
+		contentLen int64 = -1
+	)
+
+	fastAdapter, isFast := r.(interface{ FastHTTPRequest() *fasthttp.Request })
+	if isFast {
+		if fastReq := fastAdapter.FastHTTPRequest(); fastReq != nil {
+			if cl := fastReq.Header.ContentLength(); cl > 0 {
+				contentLen = int64(cl)
+			}
+		}
+	}
+
+	if bs := r.BodyStream(); bs != nil {
+		bodyReader = bs
+	} else if bb := r.BodyBytes(); len(bb) > 0 {
+		bodyReader = bytes.NewReader(bb)
+		if contentLen <= 0 {
+			contentLen = int64(len(bb))
+		}
+	}
+
+	stdReq, err := http.NewRequestWithContext(r.Context(), r.Method(), r.URL(), bodyReader) //nolint:gosec
+	if err != nil {
+		return &http.Request{}
+	}
+
+	if contentLen > 0 {
+		stdReq.ContentLength = contentLen
+	}
+
+	if isFast {
+		if fastReq := fastAdapter.FastHTTPRequest(); fastReq != nil {
+			fastReq.Header.All()(func(k, v []byte) bool {
+				stdReq.Header.Add(string(k), string(v))
+				return true
+			})
+
+			if host := string(fastReq.Header.Peek("Host")); host != "" {
+				stdReq.Host = host
+			}
+		}
+	}
+
+	return stdReq
 }
