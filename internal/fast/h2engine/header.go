@@ -155,6 +155,46 @@ func (f *FrameHeader) readFrom(br *bufio.Reader) (int64, error) {
 		return rn, nil
 	}
 
+	if f.kind == FrameData {
+		d := framePools[FrameData].Get().(*Data)
+		d.Reset()
+		f.fr = d
+
+		if f.length > 0 {
+			f.payload = resizeSlice(f.payload, f.length)
+
+			n, err := io.ReadFull(br, f.payload[:f.length])
+			if err != nil {
+				ReleaseFrame(f.fr)
+				return 0, err
+			}
+
+			rn += int64(n)
+		}
+
+		return rn, d.Deserialize(f)
+	}
+
+	if f.kind == FrameHeaders {
+		h := framePools[FrameHeaders].Get().(*Headers)
+		h.Reset()
+		f.fr = h
+
+		if f.length > 0 {
+			f.payload = resizeSlice(f.payload, f.length)
+
+			n, err := io.ReadFull(br, f.payload[:f.length])
+			if err != nil {
+				ReleaseFrame(f.fr)
+				return 0, err
+			}
+
+			rn += int64(n)
+		}
+
+		return rn, h.Deserialize(f)
+	}
+
 	f.fr = AcquireFrame(f.kind)
 
 	if f.length > 0 {

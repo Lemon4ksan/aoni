@@ -21,4 +21,7 @@ var (
 
 	// ErrEmptyAddressRequest indicates an ADDRESS_REQUEST capsule contained zero requested addresses.
 	ErrEmptyAddressRequest = errors.New("aoni/masque: address request capsule cannot be empty")
+
+	// ErrUnhandledProtocol indicates that an IP protocol handler is not registered in the protocol VTable.
+	ErrUnhandledProtocol = errors.New("aoni masque: unhandled ip protocol")
 )
