@@ -14,6 +14,7 @@ import (
 
 	"golang.org/x/sys/cpu"
 
+	"github.com/lemon4ksan/aoni/internal/experimental"
 	"github.com/lemon4ksan/aoni/internal/sysnet"
 	"github.com/lemon4ksan/aoni/netutil/fragment"
 )
@@ -269,4 +270,9 @@ func ApplyFragmentation(conn net.Conn, cfg fragment.Config) net.Conn {
 		ChunkSize: cfg.ChunkSize,
 		MaxDelay:  cfg.MaxDelay,
 	}
+}
+
+// ApplyCPUAffinity delegates core pinning to internal/experimental.
+func ApplyCPUAffinity(cores []int) {
+	experimental.ApplyCPUAffinity(cores)
 }

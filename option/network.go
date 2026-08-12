@@ -227,3 +227,10 @@ func WithNamedPipe(pipePath string) aoni.ClientOption {
 		}
 	}
 }
+
+// WithCoreAffinity returns an [aoni.ClientOption] locking calling threads to target physical CPU cores.
+func WithCoreAffinity(cores ...int) aoni.ClientOption {
+	return func(_ *aoni.Config) {
+		aoni.ApplyCPUAffinity(cores)
+	}
+}

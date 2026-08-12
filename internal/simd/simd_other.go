@@ -43,3 +43,19 @@ func ApplyFastMaskVector(b []byte, mask uint32) {
 		b[i] ^= maskBytes[i&3]
 	}
 }
+
+func extractBitsHW(val, mask uint64) uint64 {
+	return extractBitsSWAR(val, mask)
+}
+
+func depositBitsHW(val, mask uint64) uint64 {
+	return depositBitsSWAR(val, mask)
+}
+
+// PrefetchL1 is a no-op fallback for non-amd64 architectures.
+func PrefetchL1(_ unsafe.Pointer) {}
+
+// StreamCopy256 falls back to standard copy on non-amd64 architectures.
+func StreamCopy256(dst, src []byte) int {
+	return copy(dst, src)
+}

@@ -322,3 +322,8 @@ func ProxyFuncWithOverride(base func(*http.Request) (*url.URL, error)) func(*htt
 func TLSConfigWithOverride(ctx context.Context, base *tls.Config) *tls.Config {
 	return pipeline.TLSConfigWithOverride(base, GetInsecureSkipVerify(ctx))
 }
+
+// ApplyCPUAffinity locks the calling goroutine's OS thread to designated physical CPU cores.
+func ApplyCPUAffinity(cores []int) {
+	pipeline.ApplyCPUAffinity(cores)
+}

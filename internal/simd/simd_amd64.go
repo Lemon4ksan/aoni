@@ -15,6 +15,8 @@ import (
 
 var hasAVX2 = cpu.X86.HasAVX2
 
+var hasBMI2 = cpu.X86.HasBMI2
+
 //go:noescape
 func indexByteAVX2(b []byte, c byte) int
 
@@ -23,6 +25,62 @@ func indexTwoBytesAVX2(b []byte, c1, c2 byte) int
 
 //go:noescape
 func applyFastMaskAVX2(b []byte, mask uint32)
+
+//go:noescape
+func pext64(val, mask uint64) uint64
+
+//go:noescape
+func pdep64(val, mask uint64) uint64
+
+//go:noescape
+func prefetchL1(ptr unsafe.Pointer)
+
+//go:noescape
+func streamCopy256(dst, src []byte)
+
+func extractBitsHW(val, mask uint64) uint64 {
+	if hasBMI2 {
+		return pext64(val, mask)
+	}
+
+	return extractBitsSWAR(val, mask)
+}
+
+func depositBitsHW(val, mask uint64) uint64 {
+	if hasBMI2 {
+		return pdep64(val, mask)
+	}
+
+	return depositBitsSWAR(val, mask)
+}
+
+// PrefetchL1 issues a PREFETCHT0 instruction to load ptr's cache line into L1 data cache.
+func PrefetchL1(ptr unsafe.Pointer) {
+	if ptr != nil {
+		prefetchL1(ptr)
+	}
+}
+
+// StreamCopy256 copies src bytes to dst using VMOVNTDQ non-temporal streaming stores, bypassing CPU L1/L2/L3 cache.
+func StreamCopy256(dst, src []byte) int {
+	if len(dst) == 0 || len(src) == 0 {
+		return 0
+	}
+
+	n := min(len(dst), len(src))
+	if n >= 64 && hasAVX2 {
+		streamCopy256(dst[:n], src[:n])
+
+		rem := n &^ 31
+		if rem < n {
+			copy(dst[rem:n], src[rem:n])
+		}
+
+		return n
+	}
+
+	return copy(dst, src)
+}
 
 // IndexByteVector scans slice b for byte c using 256-bit AVX2 SIMD hardware assembly instructions.
 func IndexByteVector(b []byte, c byte) int {
