@@ -109,10 +109,6 @@ func (cl *Client) createConn(ctx context.Context) (*Conn, *list.Element, error) 
 		return nil, nil, err
 	}
 
-	if cl.onRTT != nil {
-		c.reqQueued.Store("rtt_callback", cl.onRTT)
-	}
-
 	if len(cl.orderedKeys) > 0 {
 		c.SetOrderedHeaders(cl.orderedKeys)
 	}

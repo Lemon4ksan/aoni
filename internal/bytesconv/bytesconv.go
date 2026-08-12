@@ -120,3 +120,35 @@ func TrimQuotes(b []byte) []byte {
 
 	return b
 }
+
+// ContainsFoldASCII reports whether ASCII substring target is present in src case-insensitively with zero heap allocations.
+func ContainsFoldASCII(src []byte, target string) bool {
+	n := len(src)
+
+	m := len(target)
+	if m == 0 {
+		return true
+	}
+
+	if n < m {
+		return false
+	}
+
+	_ = toLowerTable[255]
+
+	for i := 0; i <= n-m; i++ {
+		match := true
+		for j := 0; j < m; j++ {
+			if toLowerTable[src[i+j]] != toLowerTable[target[j]] {
+				match = false
+				break
+			}
+		}
+
+		if match {
+			return true
+		}
+	}
+
+	return false
+}

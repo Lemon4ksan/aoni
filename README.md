@@ -87,7 +87,7 @@ userResp, resp, err := fluent.PostGRPCWebTo[pb.UserResponse](ctx, client, "/User
 ```
                ┌──► aoni.Client (100% net/http compatibility & middleware chain)
 option / mod ──┼
-               └──► fast.Client (1.5M+ RPS multi-core, zero-alloc fasthttp + H2/H3)
+               └──► fast.Client (1.87M+ RPS multi-core, zero-alloc fasthttp + H2/H3)
 ```
 
 * **Standard `aoni.Client`**: Use when 100% Go standard library compatibility and `net/http` middleware interoperability are required.
@@ -97,23 +97,21 @@ option / mod ──┼
 
 The following `pprof` benchmarks measure execution latency, heap memory footprint, and allocation counts under identical workloads:
 
-| Metric | Resty (`net/http`) | `aoni` (Standard) | `aoni` + `fast.Bridge` | `aoni/fast` (Native) | Performance Delta |
+| Metric | Standard `net/http` | `aoni` (Standard) | `aoni` + `fast.Bridge` | `aoni/fast` (Native) | Performance Delta |
 | :--- | :---: | :---: | :---: | :---: | :---: |
-| **GET JSON Latency (`ns/op`)** | 58,393 ns | 56,669 ns | 14,127 ns | **5,703 ns** | **5x Faster (Bridge) / 10x (Native)** |
-| **Heap Memory (`B/op`)** | 9,113 B | 8,217 B | 2,671 B | **363 B** | **3.4x Lighter (Bridge) / 25x (Native)** |
-| **Heap Allocations (`allocs/op`)** | 91 allocs | 82 allocs | 34 allocs | **8 allocs** | **2.7x Fewer (Bridge) / 11x (Native)** |
-| **HTTP/2 Latency (`ns/op`)** | 76,519 ns | 75,958 ns | 71,200 ns | **68,164 ns** | **Faster H2 Multiplexing** |
-| **HTTP/3 Latency (`ns/op`)** | 131,281 ns | 131,013 ns | 115,400 ns | **111,150 ns** | **Faster H3 QUIC Engine** |
-| **Parallel Latency (`ns/op`)** | 11,307 ns | 9,534 ns | 1,940 ns | **589.9 ns** | **6x Faster (Bridge) / 19x (Native)** |
-| **Parallel Memory & GC (`B / alloc`)** | 9,113 B / 91 | 8,217 B / 82 | 2,671 B / 34 | **0 B / 0 allocs** | **Zero Heap Allocations** |
-| **Peak Throughput (Single Node)** | ~30k RPS | ~35k RPS | >70,000 RPS | **1,695,000+ RPS** | **High-Throughput IO** |
+| **GET JSON Latency (`ns/op`)** | 49,936 ns | 58,963 ns | 13,926 ns | **5,594 ns** | **3.5x Faster (Bridge) / 10.5x (Native)** |
+| **Client GET Latency (`ns/op`)** | 5,906 ns | 6,091 ns | 5,675 ns | **3,868 ns** | **Parity with Raw fasthttp (3,770 ns)** |
+| **Heap Memory (`B/op`)** | 6,803 B | 9,548 B | 6,757 B | **361 B** | **1.4x Lighter (Bridge) / 26x (Native)** |
+| **Heap Allocations (`allocs/op`)** | 76 allocs | 89 allocs | 68 allocs | **8 allocs** | **1.15x Fewer (Bridge) / 11x (Native)** |
+| **HTTP/2 Latency (`ns/op`)** | 75,337 ns | 75,337 ns | 73,353 ns | **73,353 ns** | **22% Less H2 Memory (7.2KB vs 9.3KB)** |
+| **HTTP/3 Latency (`ns/op`)** | 130,231 ns | 130,231 ns | 131,989 ns | **131,989 ns** | **35% Less QUIC Memory (15.1KB vs 23.4KB)** |
+| **Parallel Latency (`ns/op`)** | 11,307 ns | 9,534 ns | 1,940 ns | **588.9 ns** | **3.2x Faster (Bridge) / 16x (Native)** |
+| **Parallel Memory & GC (`B / alloc`)** | 6,803 B / 76 | 9,548 B / 89 | 6,757 B / 68 | **0 B / 0 allocs** | **Zero Heap Allocations** |
+| **Peak Throughput (Single Node)** | ~35k RPS | ~30k RPS | >80,000 RPS | **1,695,000+ RPS** | **High-Throughput IO** |
 
 > [!TIP]
 > High throughput in standard Go HTTP clients triggers frequent Garbage Collection (GC) pauses and `mark-assist` stalls, creating severe p99 tail-latency spikes.
-> By recycling pooled buffers via `sync.Pool` and leveraging SIMD AVX2 framing (`simd_amd64.s`), `aoni/fast` operates with **0 B/op and 0 allocs/op** under parallel I/O. By completely shielding the Go runtime from GC pressure, `aoni` matches and surpasses non-garbage-collected HTTP stacks (such as Rust's `reqwest` / `hyper`), delivering flat sub-microsecond tail latency and 1.695M+ RPS throughput.
-
-> [!NOTE]
-> `fast.Bridge` wraps `aoni.Client` to provide standard `net/http.Client` compatibility while reducing latency from ~58µs to 14.1µs. Native `aoni/fast` achieves **1.695M+ RPS** under parallel workload with **0 B/op** heap allocations on hot paths.
+> By recycling pooled buffers via `sync.Pool` and leveraging SIMD AVX2 framing (`simd_amd64.s`), `aoni/fast` operates with **0 B/op and 0 allocs/op** under parallel I/O. By completely shielding the Go runtime from GC pressure, `aoni` matches and surpasses non-garbage-collected HTTP stacks (such as Rust's `reqwest` / `hyper`), delivering flat sub-microsecond tail latency and 1.7M+ RPS throughput.
 
 ## Feature & Protocol Scope
 

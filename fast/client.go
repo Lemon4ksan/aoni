@@ -81,6 +81,7 @@ func NewClient(opts ...aoni.ClientOption) *Client {
 
 	c.coreEngine = pipeline.NewEngine(c.config.Defaults.BaseURL, c.config.Defaults.Headers, nil, 15*time.Second, 0)
 	c.prepared = c.coreEngine.Prepared
+	c.prepared.FastPathCapable = (c.config.Engine.CookieJar == nil && c.config.Defaults.Inspector == nil)
 
 	c.pipeline = pipeline.New(
 		toPipelineDefaults(c.config.Defaults, c.referer),
@@ -125,6 +126,16 @@ func (c *Client) With(opts ...aoni.ClientOption) *Client {
 	}
 
 	cloned.applyPowerManagement(cloned.config.Network.EnablePowerManagement)
+
+	cloned.coreEngine = pipeline.NewEngine(
+		cloned.config.Defaults.BaseURL,
+		cloned.config.Defaults.Headers,
+		nil,
+		15*time.Second,
+		0,
+	)
+	cloned.prepared = cloned.coreEngine.Prepared
+	cloned.prepared.FastPathCapable = (cloned.config.Engine.CookieJar == nil && cloned.config.Defaults.Inspector == nil)
 
 	cloned.pipeline = pipeline.New(
 		toPipelineDefaults(cloned.config.Defaults, cloned.referer),
@@ -373,15 +384,11 @@ func (c *Client) Engine() *fasthttp.Client {
 }
 
 func (c *Client) isFastPathEligible(ctx context.Context, mods []aoni.RequestModifier) bool {
-	if len(mods) > 0 {
+	if len(mods) > 0 || !c.prepared.FastPathCapable {
 		return false
 	}
 
 	if ctx != nil && ctx.Done() != nil {
-		return false
-	}
-
-	if c.config.Engine.CookieJar != nil || c.config.Defaults.Inspector != nil {
 		return false
 	}
 
@@ -414,10 +421,11 @@ func (c *Client) resolveTargetURL(req aoni.Request, path string) error {
 		fastReq.URI().SetSchemeBytes(c.prepared.BaseURLSchemeBytes)
 		fastReq.URI().SetHostBytes(c.prepared.BaseURLHostBytes)
 
-		if c.config.Defaults.BaseURL != nil && c.config.Defaults.BaseURL.Path != "" &&
-			c.config.Defaults.BaseURL.Path != "/" {
-			basePath := strings.TrimSuffix(c.config.Defaults.BaseURL.Path, "/")
-			fastReq.URI().SetPathBytes(bytesconv.S2B(basePath + path))
+		if len(c.prepared.BaseURLCleanPathBytes) > 0 {
+			pathBuf := make([]byte, 0, len(c.prepared.BaseURLCleanPathBytes)+len(path))
+			pathBuf = append(pathBuf, c.prepared.BaseURLCleanPathBytes...)
+			pathBuf = append(pathBuf, path...)
+			fastReq.URI().SetPathBytes(pathBuf)
 		} else {
 			fastReq.URI().SetPathBytes(bytesconv.S2B(path))
 		}
@@ -584,13 +592,25 @@ func (c *Client) applyCustomDialer() {
 }
 
 func (c *Client) applyDefaultHeaders(req aoni.Request) {
-	if c.config.Defaults.Headers == nil {
+	if len(c.prepared.PrecomputedDefaultHeaders) == 0 {
 		return
 	}
 
-	for k, vv := range c.config.Defaults.Headers {
-		if req.Header(k) == "" && len(vv) > 0 {
-			req.SetHeader(k, vv[0])
+	if fastReqAdapter, ok := req.(*Request); ok {
+		for i := range c.prepared.PrecomputedDefaultHeaders {
+			h := &c.prepared.PrecomputedDefaultHeaders[i]
+			if len(fastReqAdapter.HeaderBytes(h.KeyBytes)) == 0 {
+				fastReqAdapter.SetHeaderBytes(h.KeyBytes, h.ValBytes)
+			}
+		}
+
+		return
+	}
+
+	for i := range c.prepared.PrecomputedDefaultHeaders {
+		h := &c.prepared.PrecomputedDefaultHeaders[i]
+		if req.Header(h.Key) == "" {
+			req.SetHeader(h.Key, h.Val)
 		}
 	}
 }
@@ -817,8 +837,6 @@ func decompressFastResponse(resp *fasthttp.Response) bool {
 		return false
 	}
 
-	encoding := strings.ToLower(bytesconv.B2S(encodingBytes))
-
 	body := resp.Body()
 	if len(body) == 0 {
 		return false
@@ -830,18 +848,18 @@ func decompressFastResponse(resp *fasthttp.Response) bool {
 	)
 
 	switch {
-	case strings.Contains(encoding, "gzip"):
+	case bytesconv.ContainsFoldASCII(encodingBytes, "gzip"):
 		gzReader, gzErr := gzip.NewReader(bytes.NewReader(body))
 		if gzErr == nil {
 			decompressed, err = io.ReadAll(gzReader)
 			_ = gzReader.Close()
 		}
 
-	case strings.Contains(encoding, "br"):
+	case bytesconv.ContainsFoldASCII(encodingBytes, "br"):
 		brReader := brotli.NewReader(bytes.NewReader(body))
 		decompressed, err = io.ReadAll(brReader)
 
-	case strings.Contains(encoding, "zstd"):
+	case bytesconv.ContainsFoldASCII(encodingBytes, "zstd"):
 		if zDec, zErr := zstd.NewReader(bytes.NewReader(body)); zErr == nil {
 			decompressed, err = io.ReadAll(zDec)
 			zDec.Close()

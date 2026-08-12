@@ -96,3 +96,27 @@ func TestTrimQuotes(t *testing.T) {
 		assert.Equal(t, tt.want, string(got))
 	}
 }
+
+func TestContainsFoldASCII(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		src    string
+		target string
+		want   bool
+	}{
+		{"gzip, deflate", "gzip", true},
+		{"Bz gZip", "gzip", true},
+		{"GZIP", "gzip", true},
+		{"gZip", "gzip", true},
+		{"BR", "br", true},
+		{"zStD, gzip", "zstd", true},
+		{"gzip", "br", false},
+		{"", "gzip", false},
+		{"gzip", "", true},
+	}
+
+	for _, tt := range tests {
+		assert.Equal(t, tt.want, ContainsFoldASCII([]byte(tt.src), tt.target))
+	}
+}

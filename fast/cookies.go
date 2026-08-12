@@ -10,7 +10,6 @@ import (
 	"context"
 	"encoding/base64"
 	"net/http"
-	"net/url"
 	"strings"
 
 	"github.com/valyala/fasthttp"
@@ -37,7 +36,7 @@ func (c *Client) applyCookies(ctx context.Context, req *fasthttp.Request) {
 		return
 	}
 
-	u, err := url.Parse(string(req.URI().FullURI()))
+	u, err := urlutil.Parse(bytesconv.B2S(req.URI().FullURI()))
 	if err != nil {
 		return
 	}
@@ -79,7 +78,7 @@ func (c *Client) captureCookies(ctx context.Context, req *fasthttp.Request, resp
 		return
 	}
 
-	u, err := url.Parse(string(req.URI().FullURI()))
+	u, err := urlutil.Parse(bytesconv.B2S(req.URI().FullURI()))
 	if err != nil {
 		return
 	}
@@ -103,18 +102,21 @@ func parseCookie(key, value []byte) *http.Cookie {
 }
 
 func extractUserInfoAndSetAuth(req *fasthttp.Request) {
-	user := string(req.URI().Username())
-	pass := string(req.URI().Password())
-
-	if user != "" {
-		if len(req.Header.Peek("Authorization")) == 0 {
-			encoded := base64.StdEncoding.EncodeToString(bytesconv.S2B(user + ":" + pass))
-			req.Header.Set("Authorization", "Basic "+encoded)
-		}
-
-		req.URI().SetUsername("")
-		req.URI().SetPassword("")
+	uBytes := req.URI().Username()
+	if len(uBytes) == 0 {
+		return
 	}
+
+	user := bytesconv.B2S(uBytes)
+	pass := bytesconv.B2S(req.URI().Password())
+
+	if len(req.Header.Peek("Authorization")) == 0 {
+		encoded := base64.StdEncoding.EncodeToString(bytesconv.S2B(user + ":" + pass))
+		req.Header.Set("Authorization", "Basic "+encoded)
+	}
+
+	req.URI().SetUsername("")
+	req.URI().SetPassword("")
 }
 
 func scrubSensitiveHeaders(req *fasthttp.Request, currentURI, nextURI *fasthttp.URI) {
