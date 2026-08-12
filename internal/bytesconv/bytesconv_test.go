@@ -120,3 +120,29 @@ func TestContainsFoldASCII(t *testing.T) {
 		assert.Equal(t, tt.want, ContainsFoldASCII([]byte(tt.src), tt.target))
 	}
 }
+
+func TestParseUintFast(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		in      string
+		wantVal int64
+		wantOK  bool
+	}{
+		{"200", 200, true},
+		{"0", 0, true},
+		{"1234567890", 1234567890, true},
+		{"", 0, false},
+		{"abc", 0, false},
+		{"12a34", 0, false},
+	}
+
+	for _, tt := range tests {
+		val, ok := ParseUintFast([]byte(tt.in))
+		assert.Equal(t, tt.wantOK, ok)
+
+		if ok {
+			assert.Equal(t, tt.wantVal, val)
+		}
+	}
+}

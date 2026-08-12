@@ -34,6 +34,9 @@ var toLowerTable = [256]byte{
 //
 // Preconditions:
 //   - The backing array of b MUST NOT be mutated while the returned string is referenced.
+//
+//go:inline
+//go:nosplit
 func B2S(b []byte) string {
 	if len(b) == 0 {
 		return ""
@@ -46,6 +49,9 @@ func B2S(b []byte) string {
 //
 // Preconditions:
 //   - The returned byte slice MUST NOT be written to or mutated.
+//
+//go:inline
+//go:nosplit
 func S2B(s string) []byte {
 	if len(s) == 0 {
 		return nil
@@ -55,11 +61,17 @@ func S2B(s string) []byte {
 }
 
 // LowercaseByte converts an ASCII byte character b to lowercase in O(1) time without branching.
+//
+//go:inline
+//go:nosplit
 func LowercaseByte(b byte) byte {
 	return toLowerTable[b]
 }
 
 // EqualFoldASCII performs case-insensitive comparison of ASCII strings with zero allocations and BCE hints.
+//
+//go:inline
+//go:nosplit
 func EqualFoldASCII(a, b string) bool {
 	n := len(a)
 	if n != len(b) {
@@ -109,6 +121,9 @@ func AppendToLower(dst, src []byte) []byte {
 }
 
 // TrimQuotes strips leading and trailing JSON double-quote characters from b with zero allocations and BCE hints.
+//
+//go:inline
+//go:nosplit
 func TrimQuotes(b []byte) []byte {
 	n := len(b)
 	if n >= 2 {
@@ -122,6 +137,8 @@ func TrimQuotes(b []byte) []byte {
 }
 
 // ContainsFoldASCII reports whether ASCII substring target is present in src case-insensitively with zero heap allocations.
+//
+//go:inline
 func ContainsFoldASCII(src []byte, target string) bool {
 	n := len(src)
 
@@ -151,4 +168,27 @@ func ContainsFoldASCII(src []byte, target string) bool {
 	}
 
 	return false
+}
+
+// ParseUintFast parses an ASCII decimal integer from b with zero heap allocations in O(N) time.
+//
+//go:inline
+//go:nosplit
+func ParseUintFast(b []byte) (int64, bool) {
+	n := len(b)
+	if n == 0 {
+		return 0, false
+	}
+
+	var val int64
+	for i := 0; i < n; i++ {
+		ch := b[i]
+		if ch < '0' || ch > '9' {
+			return 0, false
+		}
+
+		val = val*10 + int64(ch-'0')
+	}
+
+	return val, true
 }

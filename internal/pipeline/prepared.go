@@ -13,28 +13,28 @@ import (
 // PrecomputedHeader stores precomputed header key-value pairs as strings and byte slices
 // for zero-allocation header application.
 type PrecomputedHeader struct {
-	Key      string
-	Val      string
 	KeyBytes []byte
 	ValBytes []byte
+	Key      string
+	Val      string
 }
 
 // PreparedConfig holds immutable precomputed configuration values, wire-format header blocks,
 // ALPN token slices, and client hint headers.
 type PreparedConfig struct {
-	BaseURL                   *url.URL
-	BaseURLString             string
-	BaseURLTrimmedString      string
 	BaseURLTrimmedBytes       []byte
 	BaseURLCleanPathBytes     []byte
 	BaseURLHostBytes          []byte
 	BaseURLSchemeBytes        []byte
-	DefaultHostHeader         string
-	DefaultALPN               []string
-	StaticHeaders             http.Header
 	RawHeaderBlock            []byte
 	PrecomputedClientHints    []byte
+	DefaultALPN               []string
 	PrecomputedDefaultHeaders []PrecomputedHeader
+	BaseURLString             string
+	BaseURLTrimmedString      string
+	DefaultHostHeader         string
+	BaseURL                   *url.URL
+	StaticHeaders             http.Header
 	FastPathCapable           bool
 }
 

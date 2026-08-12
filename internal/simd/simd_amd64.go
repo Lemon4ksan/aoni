@@ -13,6 +13,8 @@ import (
 	"golang.org/x/sys/cpu"
 )
 
+var hasAVX2 = cpu.X86.HasAVX2
+
 //go:noescape
 func indexByteAVX2(b []byte, c byte) int
 
@@ -24,7 +26,7 @@ func applyFastMaskAVX2(b []byte, mask uint32)
 
 // IndexByteVector scans slice b for byte c using 256-bit AVX2 SIMD hardware assembly instructions.
 func IndexByteVector(b []byte, c byte) int {
-	if len(b) >= 32 && cpu.X86.HasAVX2 {
+	if len(b) >= 32 && hasAVX2 {
 		if idx := indexByteAVX2(b, c); idx >= 0 {
 			return idx
 		}
@@ -44,7 +46,7 @@ func IndexByteVector(b []byte, c byte) int {
 
 // IndexTwoBytesVector searches for the first occurrence of c1 or c2 using 256-bit AVX2 SIMD hardware assembly.
 func IndexTwoBytesVector(b []byte, c1, c2 byte) int {
-	if len(b) >= 32 && cpu.X86.HasAVX2 {
+	if len(b) >= 32 && hasAVX2 {
 		if idx := indexTwoBytesAVX2(b, c1, c2); idx >= 0 {
 			return idx
 		}
@@ -64,7 +66,7 @@ func IndexTwoBytesVector(b []byte, c1, c2 byte) int {
 
 // ApplyFastMaskVector masks slice b using a 4-byte mask via 256-bit AVX2 VPXOR vector instructions.
 func ApplyFastMaskVector(b []byte, mask uint32) {
-	if len(b) >= 32 && cpu.X86.HasAVX2 {
+	if len(b) >= 32 && hasAVX2 {
 		applyFastMaskAVX2(b, mask)
 
 		rem := len(b) &^ 31

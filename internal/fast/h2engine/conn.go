@@ -76,10 +76,11 @@ type Conn struct {
 
 	_ cpu.CacheLinePad
 
-	current   Settings
-	serverS   Settings
-	reqMu     sync.RWMutex
-	reqQueued map[uint32]*Context
+	current     Settings
+	serverS     Settings
+	reqStreams  [1024]atomic.Pointer[Context]
+	reqMu       sync.RWMutex
+	reqOverflow map[uint32]*Context
 
 	in           chan *Context
 	out          chan *FrameHeader
@@ -100,7 +101,6 @@ func NewConn(c net.Conn, opts ConnOpts) *Conn {
 		nextID:        1,
 		maxWindow:     15663105,
 		currentWindow: 15663105,
-		reqQueued:     make(map[uint32]*Context, 128),
 		in:            make(chan *Context, 128),
 		out:           make(chan *FrameHeader, 128),
 		pingInterval:  opts.PingInterval,
@@ -132,6 +132,100 @@ func (c *Conn) SetOrderedHeaders(keys []string) {
 	c.orderedKeys = keys
 }
 
+func (c *Conn) getStream(streamID uint32) *Context {
+	idx := (streamID / 2) % 1024
+	if ctx := c.reqStreams[idx].Load(); ctx != nil && ctx.StreamID == streamID {
+		return ctx
+	}
+
+	c.reqMu.RLock()
+	ctx := c.reqOverflow[streamID]
+	c.reqMu.RUnlock()
+
+	return ctx
+}
+
+func (c *Conn) storeStream(ctx *Context) {
+	idx := (ctx.StreamID / 2) % 1024
+	if c.reqStreams[idx].CompareAndSwap(nil, ctx) {
+		return
+	}
+
+	c.reqMu.Lock()
+	if c.reqOverflow == nil {
+		c.reqOverflow = make(map[uint32]*Context, 16)
+	}
+
+	c.reqOverflow[ctx.StreamID] = ctx
+	c.reqMu.Unlock()
+}
+
+func (c *Conn) deleteStream(streamID uint32) {
+	idx := (streamID / 2) % 1024
+	if cur := c.reqStreams[idx].Load(); cur != nil && cur.StreamID == streamID {
+		c.reqStreams[idx].Store(nil)
+		return
+	}
+
+	c.reqMu.Lock()
+	if c.reqOverflow != nil {
+		delete(c.reqOverflow, streamID)
+	}
+
+	c.reqMu.Unlock()
+}
+
+func (c *Conn) broadcastErrorToAllStreams(err error) {
+	for i := 0; i < 1024; i++ {
+		if ctx := c.reqStreams[i].Load(); ctx != nil {
+			select {
+			case ctx.Err <- err:
+			default:
+			}
+		}
+	}
+
+	c.reqMu.RLock()
+
+	for _, ctx := range c.reqOverflow {
+		if ctx != nil {
+			select {
+			case ctx.Err <- err:
+			default:
+			}
+		}
+	}
+
+	c.reqMu.RUnlock()
+}
+
+func (c *Conn) purgeStreamsAfterID(lastStreamID uint32, err error) {
+	for i := 0; i < 1024; i++ {
+		if ctx := c.reqStreams[i].Load(); ctx != nil && ctx.StreamID > lastStreamID {
+			c.reqStreams[i].Store(nil)
+
+			select {
+			case ctx.Err <- err:
+			default:
+			}
+		}
+	}
+
+	c.reqMu.Lock()
+	for streamID, ctx := range c.reqOverflow {
+		if ctx != nil && streamID > lastStreamID {
+			delete(c.reqOverflow, streamID)
+
+			select {
+			case ctx.Err <- err:
+			default:
+			}
+		}
+	}
+
+	c.reqMu.Unlock()
+}
+
 // CancelStream terminates an active HTTP/2 stream by transmitting an RST_STREAM frame.
 func (c *Conn) CancelStream(ctx *Context) {
 	if ctx == nil || ctx.StreamID == 0 {
@@ -143,9 +237,7 @@ func (c *Conn) CancelStream(ctx *Context) {
 	}
 
 	ctx.SetState(streamClosed)
-	c.reqMu.Lock()
-	delete(c.reqQueued, ctx.StreamID)
-	c.reqMu.Unlock()
+	c.deleteStream(ctx.StreamID)
 	atomic.AddInt32(&c.openStreams, -1)
 
 	fr := AcquireFrameHeader()
@@ -160,8 +252,48 @@ func (c *Conn) CancelStream(ctx *Context) {
 	default:
 		ReleaseFrameHeader(fr)
 	}
+}
 
+// Close gracefully terminates the HTTP/2 connection.
+func (c *Conn) Close() error {
+	if !atomic.CompareAndSwapUint64(&c.closed, 0, 1) {
+		return io.EOF
+	}
+
+	c.inMu.Lock()
+	if !c.inClosed {
+		c.inClosed = true
+		close(c.in)
+	}
+
+	c.inMu.Unlock()
+
+	fr := AcquireFrameHeader()
+	defer ReleaseFrameHeader(fr)
+
+	ga := AcquireFrame(FrameGoAway).(*GoAway)
+	ga.SetStream(0)
+	ga.SetCode(NoError)
+	fr.SetBody(ga)
+
+	c.writeMu.Lock()
+
+	_, err := fr.WriteTo(c.bw)
+	if err == nil {
+		_ = c.bw.Flush()
+	}
+
+	c.writeMu.Unlock()
+
+	_ = c.c.Close()
 	c.broadcastWindowUpdate()
+	c.broadcastErrorToAllStreams(ErrStreamClosed)
+
+	if c.onDisconnect != nil {
+		c.onDisconnect(context.Background(), c)
+	}
+
+	return nil
 }
 
 // Handshake performs HTTP/2 connection initialization.
@@ -236,60 +368,6 @@ func (c *Conn) CanOpenStream() bool {
 // Closed reports whether the connection has been closed.
 func (c *Conn) Closed() bool {
 	return atomic.LoadUint64(&c.closed) == 1
-}
-
-// Close gracefully terminates the HTTP/2 connection.
-func (c *Conn) Close() error {
-	if !atomic.CompareAndSwapUint64(&c.closed, 0, 1) {
-		return io.EOF
-	}
-
-	c.inMu.Lock()
-	if !c.inClosed {
-		c.inClosed = true
-		close(c.in)
-	}
-
-	c.inMu.Unlock()
-
-	fr := AcquireFrameHeader()
-	defer ReleaseFrameHeader(fr)
-
-	ga := AcquireFrame(FrameGoAway).(*GoAway)
-	ga.SetStream(0)
-	ga.SetCode(NoError)
-	fr.SetBody(ga)
-
-	c.writeMu.Lock()
-
-	_, err := fr.WriteTo(c.bw)
-	if err == nil {
-		err = c.bw.Flush()
-	}
-
-	c.writeMu.Unlock()
-
-	_ = c.c.Close()
-	c.broadcastWindowUpdate()
-
-	c.reqMu.RLock()
-
-	for _, reqCtx := range c.reqQueued {
-		if reqCtx != nil {
-			select {
-			case reqCtx.Err <- ErrStreamClosed:
-			default:
-			}
-		}
-	}
-
-	c.reqMu.RUnlock()
-
-	if c.onDisconnect != nil {
-		c.onDisconnect(context.Background(), c)
-	}
-
-	return err
 }
 
 // Write enqueues a request context for execution.
@@ -394,18 +472,7 @@ func (c *Conn) recoverWriteLoop(lastErr *error) {
 		*lastErr = io.ErrUnexpectedEOF
 	}
 
-	c.reqMu.RLock()
-
-	for _, ctx := range c.reqQueued {
-		if ctx != nil {
-			select {
-			case ctx.Err <- *lastErr:
-			default:
-			}
-		}
-	}
-
-	c.reqMu.RUnlock()
+	c.broadcastErrorToAllStreams(*lastErr)
 }
 
 func (c *Conn) finish(r *Context, stream uint32, err error) {
@@ -416,9 +483,7 @@ func (c *Conn) finish(r *Context, stream uint32, err error) {
 	default:
 	}
 
-	c.reqMu.Lock()
-	delete(c.reqQueued, stream)
-	c.reqMu.Unlock()
+	c.deleteStream(stream)
 	close(r.Err)
 }
 
@@ -432,11 +497,9 @@ func (c *Conn) readLoop() {
 			break
 		}
 
-		c.reqMu.RLock()
-		r, ok := c.reqQueued[fr.Stream()]
-		c.reqMu.RUnlock()
+		r := c.getStream(fr.Stream())
 
-		if ok {
+		if r != nil {
 			if r.State() == streamClosed {
 				ReleaseFrameHeader(fr)
 				continue
@@ -518,9 +581,7 @@ func (c *Conn) writeRequest(ctx *Context) error {
 		ctx.SetState(streamHalfClosed)
 	}
 
-	c.reqMu.Lock()
-	c.reqQueued[id] = ctx
-	c.reqMu.Unlock()
+	c.storeStream(ctx)
 
 	c.writeMu.Lock()
 
@@ -533,9 +594,7 @@ func (c *Conn) writeRequest(ctx *Context) error {
 
 	if err != nil {
 		c.lastErr = err
-		c.reqMu.Lock()
-		delete(c.reqQueued, id)
-		c.reqMu.Unlock()
+		c.deleteStream(id)
 		ctx.SetState(streamClosed)
 
 		return err
@@ -555,9 +614,7 @@ func (c *Conn) writeRequest(ctx *Context) error {
 		atomic.AddInt32(&c.openStreams, 1)
 	} else {
 		c.lastErr = err
-		c.reqMu.Lock()
-		delete(c.reqQueued, id)
-		c.reqMu.Unlock()
+		c.deleteStream(id)
 		ctx.SetState(streamClosed)
 	}
 
@@ -1000,11 +1057,9 @@ func (c *Conn) updateServerWindow(inc int32) error {
 }
 
 func (c *Conn) updateStreamWindow(streamID uint32, inc int32) error {
-	c.reqMu.RLock()
-	reqCtx, ok := c.reqQueued[streamID]
-	c.reqMu.RUnlock()
+	reqCtx := c.getStream(streamID)
 
-	if !ok {
+	if reqCtx == nil {
 		return nil
 	}
 
@@ -1020,20 +1075,7 @@ func (c *Conn) updateStreamWindow(streamID uint32, inc int32) error {
 
 func (c *Conn) handleGoAway(ga *GoAway) {
 	lastStreamID := ga.Stream()
-
-	c.reqMu.Lock()
-	for streamID, reqCtx := range c.reqQueued {
-		if reqCtx != nil && streamID > lastStreamID {
-			delete(c.reqQueued, streamID)
-
-			select {
-			case reqCtx.Err <- ErrGoAwayRetryable:
-			default:
-			}
-		}
-	}
-
-	c.reqMu.Unlock()
+	c.purgeStreamsAfterID(lastStreamID, ErrGoAwayRetryable)
 
 	_ = c.Close()
 }
@@ -1179,9 +1221,7 @@ func (c *Conn) handlePushPromise(pp *PushPromise) error {
 	}
 
 	ctx.SetState(streamOpen)
-	c.reqMu.Lock()
-	c.reqQueued[promisedID] = ctx
-	c.reqMu.Unlock()
+	c.storeStream(ctx)
 
 	go c.awaitPushedResponse(ctx, pushReq, pushResp)
 

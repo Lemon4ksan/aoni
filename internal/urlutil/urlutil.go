@@ -14,8 +14,15 @@ import (
 	"github.com/lemon4ksan/aoni/internal/simd"
 )
 
+type urlCache struct {
+	mu sync.RWMutex
+	m  map[string]*url.URL
+}
+
 var (
-	cache   sync.Map
+	cache = urlCache{
+		m: make(map[string]*url.URL, 256),
+	}
 	bufPool = sync.Pool{
 		New: func() any {
 			b := make([]byte, 0, 512)
@@ -30,18 +37,28 @@ func Parse(rawURL string) (*url.URL, error) {
 		return &url.URL{}, nil
 	}
 
-	if val, ok := cache.Load(rawURL); ok {
-		return val.(*url.URL), nil
+	cache.mu.RLock()
+	u, ok := cache.m[rawURL]
+	cache.mu.RUnlock()
+
+	if ok {
+		return u, nil
 	}
 
-	u, err := url.Parse(rawURL)
+	parsed, err := url.Parse(rawURL)
 	if err != nil {
 		return nil, err
 	}
 
-	cache.Store(rawURL, u)
+	cache.mu.Lock()
+	if len(cache.m) > 4096 {
+		cache.m = make(map[string]*url.URL, 256)
+	}
 
-	return u, nil
+	cache.m[rawURL] = parsed
+	cache.mu.Unlock()
+
+	return parsed, nil
 }
 
 // ReplaceVar performs path variable replacement ({key} -> value) in path.

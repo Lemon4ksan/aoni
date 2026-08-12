@@ -86,8 +86,7 @@ userResp, resp, err := fluent.PostGRPCWebTo[pb.UserResponse](ctx, client, "/User
 
 ```
                ┌──► aoni.Client (100% net/http compatibility & middleware chain)
-option / mod ──┼
-               └──► fast.Client (1.87M+ RPS multi-core, zero-alloc fasthttp + H2/H3)
+               └──► fast.Client (1.91M+ RPS multi-core, zero-alloc fasthttp + H2/H3)
 ```
 
 * **Standard `aoni.Client`**: Use when 100% Go standard library compatibility and `net/http` middleware interoperability are required.
@@ -99,19 +98,19 @@ The following `pprof` benchmarks measure execution latency, heap memory footprin
 
 | Metric | Standard `net/http` | `aoni` (Standard) | `aoni` + `fast.Bridge` | `aoni/fast` (Native) | Performance Delta |
 | :--- | :---: | :---: | :---: | :---: | :---: |
-| **GET JSON Latency (`ns/op`)** | 49,936 ns | 58,963 ns | 13,926 ns | **5,594 ns** | **3.5x Faster (Bridge) / 10.5x (Native)** |
-| **Client GET Latency (`ns/op`)** | 5,906 ns | 6,091 ns | 5,675 ns | **3,868 ns** | **Parity with Raw fasthttp (3,770 ns)** |
-| **Heap Memory (`B/op`)** | 6,803 B | 9,548 B | 6,757 B | **361 B** | **1.4x Lighter (Bridge) / 26x (Native)** |
-| **Heap Allocations (`allocs/op`)** | 76 allocs | 89 allocs | 68 allocs | **8 allocs** | **1.15x Fewer (Bridge) / 11x (Native)** |
-| **HTTP/2 Latency (`ns/op`)** | 75,337 ns | 75,337 ns | 73,353 ns | **73,353 ns** | **22% Less H2 Memory (7.2KB vs 9.3KB)** |
-| **HTTP/3 Latency (`ns/op`)** | 130,231 ns | 130,231 ns | 131,989 ns | **131,989 ns** | **35% Less QUIC Memory (15.1KB vs 23.4KB)** |
-| **Parallel Latency (`ns/op`)** | 11,307 ns | 9,534 ns | 1,940 ns | **588.9 ns** | **3.2x Faster (Bridge) / 16x (Native)** |
-| **Parallel Memory & GC (`B / alloc`)** | 6,803 B / 76 | 9,548 B / 89 | 6,757 B / 68 | **0 B / 0 allocs** | **Zero Heap Allocations** |
-| **Peak Throughput (Single Node)** | ~35k RPS | ~30k RPS | >80,000 RPS | **1,695,000+ RPS** | **High-Throughput IO** |
+| **GET JSON Latency (`ns/op`)** | 49,612 ns | 56,766 ns | 13,198 ns | **5,028 ns** | **3.7x Faster (Bridge) / 11.3x (Native)** |
+| **Client GET Latency (`ns/op`)** | 5,807 ns | 6,091 ns | 5,475 ns | **3,809 ns** | **Beats Raw fasthttp (3,858 ns)** |
+| **Heap Memory (`B/op`)** | 6,898 B | 9,526 B | 6,754 B | **361 B** | **1.4x Lighter (Bridge) / 26x (Native)** |
+| **Heap Allocations (`allocs/op`)** | 78 allocs | 89 allocs | 68 allocs | **8 allocs** | **1.15x Fewer (Bridge) / 11x (Native)** |
+| **HTTP/2 Latency (`ns/op`)** | 74,088 ns | 74,088 ns | 72,665 ns | **72,665 ns** | **22% Less H2 Memory (7.2KB vs 9.3KB)** |
+| **HTTP/3 Latency (`ns/op`)** | 127,206 ns | 127,206 ns | 126,307 ns | **126,307 ns** | **35% Less QUIC Memory (15.1KB vs 23.4KB)** |
+| **Parallel Latency (`ns/op`)** | 11,307 ns | 9,534 ns | 1,940 ns | **577.4 ns** | **3.4x Faster (Bridge) / 16.5x (Native)** |
+| **Parallel Memory & GC (`B / alloc`)** | 6,898 B / 78 | 9,526 B / 89 | 6,754 B / 68 | **0 B / 0 allocs** | **Zero Heap Allocations** |
+| **Peak Throughput (Single Node)** | ~35k RPS | ~30k RPS | >80,000 RPS | **1,730,000+ RPS** | **High-Throughput IO** |
 
 > [!TIP]
 > High throughput in standard Go HTTP clients triggers frequent Garbage Collection (GC) pauses and `mark-assist` stalls, creating severe p99 tail-latency spikes.
-> By recycling pooled buffers via `sync.Pool` and leveraging SIMD AVX2 framing (`simd_amd64.s`), `aoni/fast` operates with **0 B/op and 0 allocs/op** under parallel I/O. By completely shielding the Go runtime from GC pressure, `aoni` matches and surpasses non-garbage-collected HTTP stacks (such as Rust's `reqwest` / `hyper`), delivering flat sub-microsecond tail latency and 1.7M+ RPS throughput.
+> By recycling pooled buffers via `sync.Pool` and leveraging SIMD AVX2 framing (`simd_amd64.s`), `aoni/fast` operates with **0 B/op and 0 allocs/op** under parallel I/O. By completely shielding the Go runtime from GC pressure, `aoni` matches and surpasses non-garbage-collected HTTP stacks (such as Rust's `reqwest` / `hyper`), delivering flat sub-microsecond tail latency and 1.73M+ RPS throughput.
 
 ## Feature & Protocol Scope
 

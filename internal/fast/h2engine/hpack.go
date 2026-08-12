@@ -181,11 +181,115 @@ func (hp *HPACK) peek(n uint64) *HeaderField {
 	return hp.dynamic[idx]
 }
 
+//go:inline
+//go:nosplit
+func fastStaticLookup(key, val []byte) (n uint64, fullMatch, found bool) {
+	if len(key) == 0 {
+		return 0, false, false
+	}
+
+	switch key[0] {
+	case ':':
+		switch string(key) {
+		case ":authority":
+			return 1, false, true
+		case ":method":
+			if bytes.Equal(val, []byte("GET")) {
+				return 2, true, true
+			}
+
+			if bytes.Equal(val, []byte("POST")) {
+				return 3, true, true
+			}
+
+			return 2, false, true
+
+		case ":path":
+			if bytes.Equal(val, []byte("/")) {
+				return 4, true, true
+			}
+
+			if bytes.Equal(val, []byte("/index.html")) {
+				return 5, true, true
+			}
+
+			return 4, false, true
+
+		case ":scheme":
+			if bytes.Equal(val, []byte("http")) {
+				return 6, true, true
+			}
+
+			if bytes.Equal(val, []byte("https")) {
+				return 7, true, true
+			}
+
+			return 7, false, true
+
+		case ":status":
+			if bytes.Equal(val, []byte("200")) {
+				return 8, true, true
+			}
+
+			return 8, false, true
+		}
+
+	case 'a':
+		if bytes.Equal(key, []byte("accept-encoding")) {
+			if bytes.Equal(val, []byte("gzip, deflate")) {
+				return 16, true, true
+			}
+
+			return 16, false, true
+		}
+
+		if bytes.Equal(key, []byte("accept")) {
+			return 19, false, true
+		}
+
+	case 'c':
+		if bytes.Equal(key, []byte("content-type")) {
+			return 31, false, true
+		}
+
+		if bytes.Equal(key, []byte("cookie")) {
+			return 32, false, true
+		}
+
+		if bytes.Equal(key, []byte("content-length")) {
+			return 28, false, true
+		}
+
+		if bytes.Equal(key, []byte("content-encoding")) {
+			return 27, false, true
+		}
+
+	case 'h':
+		if bytes.Equal(key, []byte("host")) {
+			return 38, false, true
+		}
+	case 'u':
+		if bytes.Equal(key, []byte("user-agent")) {
+			return 58, false, true
+		}
+	}
+
+	return 0, false, false
+}
+
 func (hp *HPACK) search(hf *HeaderField) (n uint64, fullMatch bool) {
 	for i, hf2 := range hp.dynamic {
 		if bytes.Equal(hf.key, hf2.key) && bytes.Equal(hf.value, hf2.value) {
 			return uint64(maxIndex + len(hp.dynamic) - i - 1), true
 		}
+	}
+
+	if idx, full, found := fastStaticLookup(hf.key, hf.value); found {
+		if full {
+			return idx, true
+		}
+
+		n = idx
 	}
 
 	for i, hf2 := range staticTable {

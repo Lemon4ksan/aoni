@@ -422,7 +422,17 @@ func (c *Client) resolveTargetURL(req aoni.Request, path string) error {
 		fastReq.URI().SetHostBytes(c.prepared.BaseURLHostBytes)
 
 		if len(c.prepared.BaseURLCleanPathBytes) > 0 {
-			pathBuf := make([]byte, 0, len(c.prepared.BaseURLCleanPathBytes)+len(path))
+			var stackBuf [256]byte
+
+			needed := len(c.prepared.BaseURLCleanPathBytes) + len(path)
+
+			var pathBuf []byte
+			if needed <= len(stackBuf) {
+				pathBuf = stackBuf[:0]
+			} else {
+				pathBuf = make([]byte, 0, needed)
+			}
+
 			pathBuf = append(pathBuf, c.prepared.BaseURLCleanPathBytes...)
 			pathBuf = append(pathBuf, path...)
 			fastReq.URI().SetPathBytes(pathBuf)
@@ -887,8 +897,8 @@ func enforceContentLengthTruncation(resp *fasthttp.Response) {
 		return
 	}
 
-	cl, err := strconv.ParseInt(bytesconv.B2S(clBytes), 10, 64)
-	if err != nil || cl < 0 {
+	cl, ok := bytesconv.ParseUintFast(clBytes)
+	if !ok || cl < 0 {
 		return
 	}
 
