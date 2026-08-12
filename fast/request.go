@@ -42,6 +42,8 @@ func NewRequest(req *fasthttp.Request) *Request {
 	isAcquired := false
 	if req == nil {
 		req = fasthttp.AcquireRequest()
+		req.Reset()
+
 		isAcquired = true
 	}
 
@@ -90,7 +92,20 @@ func (f *Request) URL() string {
 
 // SetURL assigns the destination address string.
 func (f *Request) SetURL(urlStr string) {
+	var methodBuf [16]byte
+
+	rawMethod := f.req.Header.Method()
+	n := copy(methodBuf[:], rawMethod)
+
 	f.req.SetRequestURI(urlStr)
+
+	if n > 0 {
+		f.req.Header.SetMethodBytes(methodBuf[:n])
+	}
+
+	if host := f.req.URI().Host(); len(host) > 0 {
+		f.req.Header.SetHostBytes(host)
+	}
 }
 
 // SetURIBytes assigns the destination address from a byte slice.
@@ -103,9 +118,16 @@ func (f *Request) Path() string {
 	return bytesconv.B2S(f.req.URI().Path())
 }
 
-// SetPath assigns the path component of the URL.
+// SetPath sets the request URI path component.
 func (f *Request) SetPath(path string) {
 	f.req.URI().SetPath(path)
+	f.req.Header.SetRequestURIBytes(f.req.URI().RequestURI())
+}
+
+// SetPathBytes sets the request URI path component from a byte slice.
+func (f *Request) SetPathBytes(path []byte) {
+	f.req.URI().SetPathBytes(path)
+	f.req.Header.SetRequestURIBytes(f.req.URI().RequestURI())
 }
 
 // RawQuery yields the raw query string.
@@ -116,31 +138,37 @@ func (f *Request) RawQuery() string {
 // SetRawQuery assigns the raw query string.
 func (f *Request) SetRawQuery(query string) {
 	f.req.URI().SetQueryString(query)
+	f.req.Header.SetRequestURIBytes(f.req.URI().RequestURI())
 }
 
 // SetRawQueryBytes assigns the raw query string from a byte slice.
 func (f *Request) SetRawQueryBytes(query []byte) {
 	f.req.URI().SetQueryStringBytes(query)
+	f.req.Header.SetRequestURIBytes(f.req.URI().RequestURI())
 }
 
 // AddQueryParam appends a key-value query parameter to the URI.
 func (f *Request) AddQueryParam(key, value string) {
 	f.req.URI().QueryArgs().Add(key, value)
+	f.req.Header.SetRequestURIBytes(f.req.URI().RequestURI())
 }
 
 // AddQueryParamBytes appends a key-value query parameter using byte slices.
 func (f *Request) AddQueryParamBytes(key, value []byte) {
 	f.req.URI().QueryArgs().AddBytesKV(key, value)
+	f.req.Header.SetRequestURIBytes(f.req.URI().RequestURI())
 }
 
 // SetQueryParam sets or replaces a query parameter in the URI.
 func (f *Request) SetQueryParam(key, value string) {
 	f.req.URI().QueryArgs().Set(key, value)
+	f.req.Header.SetRequestURIBytes(f.req.URI().RequestURI())
 }
 
 // SetQueryParamBytes sets or replaces a query parameter using byte slices.
 func (f *Request) SetQueryParamBytes(key, value []byte) {
 	f.req.URI().QueryArgs().SetBytesKV(key, value)
+	f.req.Header.SetRequestURIBytes(f.req.URI().RequestURI())
 }
 
 // Header yields the header value for key as a string.
@@ -266,10 +294,6 @@ func (f *Request) EngineRequest() any {
 func (f *Request) Release() {
 	if f == nil {
 		return
-	}
-
-	if f.isAcquired && f.req != nil {
-		fasthttp.ReleaseRequest(f.req)
 	}
 
 	f.req = nil

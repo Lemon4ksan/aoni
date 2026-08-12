@@ -59,7 +59,7 @@ type ResponseDecoder = pipeline.ResponseDecoder
 // Thread Safety Requirement:
 // Implementations MUST be fully thread-safe and safe for concurrent invocation
 // across multiple goroutines.
-type RequestDoer = pipeline.RequestDoer
+type RequestDoer = pipeline.RequestDoer[Request, Response]
 
 // DoerFunc adapts a plain function matching the execution signature to [RequestDoer].
 type DoerFunc func(req Request) (Response, error)

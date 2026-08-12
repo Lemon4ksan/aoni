@@ -29,56 +29,64 @@ import (
 	"github.com/lemon4ksan/aoni/telemetry"
 )
 
-func (p *Pipeline) prepareRequest(req Request, tx *Tx) *http.Request {
-	stdReq := req.HTTPRequest()
-	if stdReq == nil {
-		var (
-			bodyReader stdio.Reader
-			contentLen int64 = -1
-		)
+func (p *Pipeline[Req, Resp]) prepareRequest(req any, tx *Tx) *http.Request {
+	var stdReq *http.Request
 
-		if fastAdapter, ok := req.(interface{ FastHTTPRequest() *fasthttp.Request }); ok {
-			fastReq := fastAdapter.FastHTTPRequest()
-			if fastReq != nil {
-				if cl := fastReq.Header.ContentLength(); cl > 0 {
-					contentLen = int64(cl)
+	if r, ok := req.(*http.Request); ok {
+		stdReq = r
+	} else if r, ok := req.(Request); ok {
+		stdReq = r.HTTPRequest()
+		if stdReq == nil {
+			var (
+				bodyReader stdio.Reader
+				contentLen int64 = -1
+			)
+
+			if fastAdapter, ok := r.(interface{ FastHTTPRequest() *fasthttp.Request }); ok {
+				fastReq := fastAdapter.FastHTTPRequest()
+				if fastReq != nil {
+					if cl := fastReq.Header.ContentLength(); cl > 0 {
+						contentLen = int64(cl)
+					}
+				}
+			}
+
+			if bs := r.BodyStream(); bs != nil {
+				bodyReader = bs
+			} else if bb := r.BodyBytes(); len(bb) > 0 {
+				bodyReader = bytes.NewReader(bb)
+				if contentLen <= 0 {
+					contentLen = int64(len(bb))
+				}
+			}
+
+			var err error
+
+			stdReq, err = http.NewRequestWithContext(r.Context(), r.Method(), r.URL(), bodyReader) //nolint:gosec
+			if err != nil {
+				return &http.Request{}
+			}
+
+			if contentLen > 0 {
+				stdReq.ContentLength = contentLen
+			}
+
+			if fastAdapter, ok := r.(interface{ FastHTTPRequest() *fasthttp.Request }); ok {
+				fastReq := fastAdapter.FastHTTPRequest()
+				if fastReq != nil {
+					fastReq.Header.All()(func(k, v []byte) bool {
+						stdReq.Header.Add(string(k), string(v))
+						return true
+					})
+
+					if host := string(fastReq.Header.Peek("Host")); host != "" {
+						stdReq.Host = host
+					}
 				}
 			}
 		}
-
-		if bs := req.BodyStream(); bs != nil {
-			bodyReader = bs
-		} else if bb := req.BodyBytes(); len(bb) > 0 {
-			bodyReader = bytes.NewReader(bb)
-			if contentLen <= 0 {
-				contentLen = int64(len(bb))
-			}
-		}
-
-		var err error
-
-		stdReq, err = http.NewRequestWithContext(req.Context(), req.Method(), req.URL(), bodyReader)
-		if err != nil {
-			return &http.Request{}
-		}
-
-		if contentLen > 0 {
-			stdReq.ContentLength = contentLen
-		}
-
-		if fastAdapter, ok := req.(interface{ FastHTTPRequest() *fasthttp.Request }); ok {
-			fastReq := fastAdapter.FastHTTPRequest()
-			if fastReq != nil {
-				fastReq.Header.All()(func(k, v []byte) bool {
-					stdReq.Header.Add(string(k), string(v))
-					return true
-				})
-
-				if host := string(fastReq.Header.Peek("Host")); host != "" {
-					stdReq.Host = host
-				}
-			}
-		}
+	} else {
+		return &http.Request{}
 	}
 
 	stdReq = p.prepareRequestContext(req, stdReq)
@@ -144,12 +152,29 @@ func (p *Pipeline) prepareRequest(req Request, tx *Tx) *http.Request {
 	return stdReq
 }
 
-func (p *Pipeline) prepareRequestContext(req Request, stdReq *http.Request) *http.Request {
+func (p *Pipeline[Req, Resp]) prepareRequestContext(req any, stdReq *http.Request) *http.Request {
 	ctx := stdReq.Context()
 
 	cfg := GetRequestConfig(ctx)
 	if cfg == nil {
 		return stdReq
+	}
+
+	if len(cfg.Modifiers) > 0 {
+		var reqAdapter Request
+		if r, ok := req.(Request); ok {
+			reqAdapter = r
+		} else {
+			reqAdapter = NewStdRequestAdapter(stdReq)
+		}
+
+		for _, mod := range cfg.Modifiers {
+			if mod != nil {
+				mod(reqAdapter)
+			}
+		}
+
+		cfg.Modifiers = nil
 	}
 
 	if cfg.TimeoutOverride > 0 {
@@ -176,7 +201,7 @@ func (p *Pipeline) prepareRequestContext(req Request, stdReq *http.Request) *htt
 	return stdReq
 }
 
-func (p *Pipeline) traceRequest(
+func (p *Pipeline[Req, Resp]) traceRequest(
 	stdReq *http.Request,
 	tx *Tx,
 ) (*http.Request, *telemetry.TraceInfo, func(resp *http.Response)) {
@@ -239,7 +264,7 @@ func (p *Pipeline) traceRequest(
 	return stdReq, traceInfo, traceInfo.Start() //nolint:bodyclose
 }
 
-func (p *Pipeline) prewarmTargetOrigin(ctx context.Context, targetURL string) {
+func (p *Pipeline[Req, Resp]) prewarmTargetOrigin(ctx context.Context, targetURL string) {
 	if targetURL == "" {
 		return
 	}
@@ -291,7 +316,7 @@ func (p *Pipeline) prewarmTargetOrigin(ctx context.Context, targetURL string) {
 	_ = conn.Close()
 }
 
-func (p *Pipeline) redactSensitiveData(req *http.Request, redact *RedactConfig) *http.Request {
+func (p *Pipeline[Req, Resp]) redactSensitiveData(req *http.Request, redact *RedactConfig) *http.Request {
 	headers := make(map[string]struct{}, len(redact.HeadersToRedact))
 	for _, h := range redact.HeadersToRedact {
 		headers[strings.ToLower(h)] = struct{}{}
@@ -325,7 +350,7 @@ func (p *Pipeline) redactSensitiveData(req *http.Request, redact *RedactConfig) 
 	return req.WithContext(ctx)
 }
 
-func (p *Pipeline) rotateUserAgentAndHints(req *http.Request) {
+func (p *Pipeline[Req, Resp]) rotateUserAgentAndHints(req *http.Request) {
 	profiles := p.defaults.UARotationProfiles
 	if len(profiles) == 0 {
 		return
@@ -341,7 +366,7 @@ func (p *Pipeline) rotateUserAgentAndHints(req *http.Request) {
 	}
 }
 
-func (p *Pipeline) applyDPIJitter(req *http.Request, cfg *DPIJitterConfig) {
+func (p *Pipeline[Req, Resp]) applyDPIJitter(req *http.Request, cfg *DPIJitterConfig) {
 	delay := cfg.MinDelay
 	if cfg.MinDelay > 0 && cfg.MaxDelay >= cfg.MinDelay {
 		if delta := cfg.MaxDelay - cfg.MinDelay; delta > 0 {
@@ -365,14 +390,14 @@ func (p *Pipeline) applyDPIJitter(req *http.Request, cfg *DPIJitterConfig) {
 	time.Sleep(delay)
 }
 
-func (p *Pipeline) applyPacketPadding(req *http.Request) {
+func (p *Pipeline[Req, Resp]) applyPacketPadding(req *http.Request) {
 	if padding := fingerprint.GeneratePadding(*p.fingerprint.PacketPadding); len(padding) > 0 {
 		headerName := fingerprint.PaddingHeaderName(*p.fingerprint.PacketPadding)
 		req.Header.Set(headerName, hex.EncodeToString(padding))
 	}
 }
 
-func (p *Pipeline) applyRefererHeader(req *http.Request) {
+func (p *Pipeline[Req, Resp]) applyRefererHeader(req *http.Request) {
 	if req.Header.Get("Referer") != "" || p.defaults.RefererState == nil {
 		return
 	}

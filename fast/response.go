@@ -175,9 +175,27 @@ func (f *Response) BodyStream() io.ReadCloser {
 	return io.NopCloser(bytes.NewReader(f.BodyBytes()))
 }
 
-// HTTPResponse yields nil for fasthttp response adapters (standard net/http.Response unavailable).
+// HTTPResponse converts fasthttp response adapter into standard *http.Response.
 func (f *Response) HTTPResponse() *http.Response {
-	return nil
+	if f == nil || f.resp == nil {
+		return nil
+	}
+
+	header := make(http.Header)
+	f.resp.Header.All()(func(k, v []byte) bool {
+		header.Add(string(k), string(v))
+		return true
+	})
+
+	body := slices.Clone(f.resp.Body())
+
+	return &http.Response{
+		StatusCode:    f.resp.StatusCode(),
+		Status:        http.StatusText(f.resp.StatusCode()),
+		Header:        header,
+		Body:          io.NopCloser(bytes.NewReader(body)),
+		ContentLength: int64(len(body)),
+	}
 }
 
 // FastHTTPResponse yields the underlying [*fasthttp.Response] instance.
@@ -257,6 +275,29 @@ func NewPooledResponse(fastReq *fasthttp.Request, fastResp *fasthttp.Response) *
 	pr.closed.Store(false)
 
 	return pr
+}
+
+// HTTPResponse converts PooledResponse into standard *http.Response.
+func (r *PooledResponse) HTTPResponse() *http.Response {
+	if r == nil || r.fastResp == nil {
+		return nil
+	}
+
+	header := make(http.Header)
+	r.fastResp.Header.All()(func(k, v []byte) bool {
+		header.Add(bytesconv.B2S(k), bytesconv.B2S(v))
+		return true
+	})
+
+	body := slices.Clone(r.fastResp.Body())
+
+	return &http.Response{
+		StatusCode:    r.fastResp.StatusCode(),
+		Status:        http.StatusText(r.fastResp.StatusCode()),
+		Header:        header,
+		Body:          io.NopCloser(bytes.NewReader(body)),
+		ContentLength: int64(len(body)),
+	}
 }
 
 // Close releases underlying fasthttp objects and returns PooledResponse to memory pool.

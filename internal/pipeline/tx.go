@@ -138,7 +138,7 @@ func ReleaseTx(tx *Tx) {
 	txPool.Put(tx)
 }
 
-func (p *Pipeline) initTx(tx *Tx, req Request, pipe PipelineConfig) {
+func (p *Pipeline[Req, Resp]) initTx(tx *Tx, req any, pipe PipelineConfig) {
 	tx.DPIJitter = pipe.DPIJitter
 	tx.ProxyFailover = pipe.ProxyFailover
 	tx.Hedging = pipe.Hedging
@@ -161,14 +161,6 @@ func (p *Pipeline) initTx(tx *Tx, req Request, pipe PipelineConfig) {
 	}
 
 	if reqCfg := GetRequestConfig(tx.Ctx); reqCfg != nil {
-		for _, mod := range reqCfg.Modifiers {
-			if mod != nil {
-				mod(req)
-			}
-		}
-
-		reqCfg.Modifiers = nil
-
 		tx.TimeoutOverride = reqCfg.TimeoutOverride
 		tx.MultiReadThreshold = reqCfg.MultiReadThreshold
 		tx.MultiReadDisableDisk = reqCfg.MultiReadDisableDisk

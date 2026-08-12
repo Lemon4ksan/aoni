@@ -22,7 +22,7 @@ import (
 )
 
 // SavePushedResponseToCache validates and stores an HTTP/2 server-pushed response into the cache store.
-func (p *Pipeline) SavePushedResponseToCache(req *http.Request, resp *http.Response, cfg *CacheConfig) {
+func (p *Pipeline[Req, Resp]) SavePushedResponseToCache(req *http.Request, resp *http.Response, cfg *CacheConfig) {
 	p.saveToCache(req, resp, cfg)
 }
 
@@ -154,7 +154,7 @@ func shouldIgnoreQueryParam(key string, cfg *NoVarySearchConfig) bool {
 	return false
 }
 
-func (p *Pipeline) tryGetFromCache(req *http.Request, cfg *CacheConfig) *http.Response {
+func (p *Pipeline[Req, Resp]) tryGetFromCache(req *http.Request, cfg *CacheConfig) *http.Response {
 	if req.Method != http.MethodGet || cfg == nil || cfg.Store == nil {
 		return nil
 	}
@@ -242,7 +242,7 @@ func parseFreshnessLifetime(resp *http.Response) (time.Duration, bool) {
 	return 0, false
 }
 
-func (p *Pipeline) saveToCache(req *http.Request, resp *http.Response, cfg *CacheConfig) {
+func (p *Pipeline[Req, Resp]) saveToCache(req *http.Request, resp *http.Response, cfg *CacheConfig) {
 	if req.Method != http.MethodGet || resp == nil || resp.StatusCode != http.StatusOK || cfg == nil ||
 		cfg.Store == nil {
 		return
@@ -382,7 +382,7 @@ func parseHeaderParamsList(paramsStr string) []string {
 	return params
 }
 
-func (p *Pipeline) invalidateCache(req *http.Request, resp *http.Response, cfg *CacheConfig) {
+func (p *Pipeline[Req, Resp]) invalidateCache(req *http.Request, resp *http.Response, cfg *CacheConfig) {
 	if cfg == nil || cfg.Store == nil || resp == nil || resp.StatusCode >= 400 {
 		return
 	}

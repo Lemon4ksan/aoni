@@ -45,7 +45,7 @@ import (
 // and memory structures, ensuring zero shared-state data races between concurrent threads.
 type Client struct {
 	engine       HTTPDoer
-	pipeline     *pipeline.Pipeline
+	pipeline     *pipeline.Pipeline[*http.Request, *http.Response]
 	engineConfig EngineConfig
 	defaults     ClientDefaults
 	network      NetworkConfig
@@ -387,7 +387,7 @@ func (c *Client) HTTP() HTTPDoer {
 }
 
 func (c *Client) execute(req *http.Request, pipe PipelineConfig) (*http.Response, error) {
-	return c.pipeline.Execute(req.Context(), NewStdRequest(req), c.engine, pipe.toInternal())
+	return c.pipeline.Execute(req.Context(), req, c.engine, pipe.toInternal())
 }
 
 // WithPersona configures TLS ClientHello ID, HTTP/2 SETTINGS frames, header order,

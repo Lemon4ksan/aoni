@@ -26,7 +26,7 @@ var (
 	ErrHeaderInjectionDetected   = errors.New("aoni: CRLF control characters detected in response headers")
 )
 
-func (p *Pipeline) postProcessResponse(
+func (p *Pipeline[Req, Resp]) postProcessResponse(
 	stdReq *http.Request,
 	resp *http.Response,
 	tx *Tx,
@@ -187,7 +187,7 @@ func containsControlChars(s string) bool {
 	return false
 }
 
-func (p *Pipeline) limitResponseSize(resp *http.Response, maxSize int64) error {
+func (p *Pipeline[Req, Resp]) limitResponseSize(resp *http.Response, maxSize int64) error {
 	if resp == nil || resp.Body == nil || maxSize <= 0 {
 		return nil
 	}
@@ -228,7 +228,7 @@ func (p *Pipeline) limitResponseSize(resp *http.Response, maxSize int64) error {
 	return nil
 }
 
-func (p *Pipeline) validateResponse(resp *http.Response, tx *Tx) error {
+func (p *Pipeline[Req, Resp]) validateResponse(resp *http.Response, tx *Tx) error {
 	if resp == nil {
 		return nil
 	}
@@ -251,7 +251,7 @@ func (p *Pipeline) validateResponse(resp *http.Response, tx *Tx) error {
 	return nil
 }
 
-func (p *Pipeline) applyMultiReadBuffering(resp *http.Response, tx *Tx) error {
+func (p *Pipeline[Req, Resp]) applyMultiReadBuffering(resp *http.Response, tx *Tx) error {
 	threshold := p.defaults.MultiReadThreshold
 	disableDisk := p.defaults.MultiReadDisableDisk
 
@@ -280,7 +280,7 @@ func (p *Pipeline) applyMultiReadBuffering(resp *http.Response, tx *Tx) error {
 	return nil
 }
 
-func (p *Pipeline) handleDecompressionAndTranscoding(req *http.Request, resp *http.Response) *http.Response {
+func (p *Pipeline[Req, Resp]) handleDecompressionAndTranscoding(req *http.Request, resp *http.Response) *http.Response {
 	if resp == nil || resp.Body == nil {
 		return resp
 	}
@@ -416,7 +416,7 @@ func applyCharsetTranscoding(resp *http.Response, body stdio.ReadCloser) stdio.R
 	}
 }
 
-func (p *Pipeline) handleWAFChallenge(req *http.Request, resp *http.Response) (*http.Response, error) {
+func (p *Pipeline[Req, Resp]) handleWAFChallenge(req *http.Request, resp *http.Response) (*http.Response, error) {
 	if p.defaults.ChallengeDetector == nil || p.defaults.ChallengeSolver == nil || resp == nil || resp.Body == nil {
 		return resp, nil
 	}

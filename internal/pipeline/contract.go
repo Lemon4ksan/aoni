@@ -118,12 +118,20 @@ type Response interface {
 	Close() error
 }
 
-type RequestDoer interface {
-	Do(req Request) (Response, error)
+type GenericDoer[Req any, Resp any] interface {
+	Do(req Req) (Resp, error)
 }
+
+type RequestDoer[Req any, Resp any] = GenericDoer[Req, Resp]
 
 type Doer interface {
 	Do(req *http.Request) (*http.Response, error)
+}
+
+type DoerFunc func(req *http.Request) (*http.Response, error)
+
+func (f DoerFunc) Do(req *http.Request) (*http.Response, error) {
+	return f(req)
 }
 
 type BaseResponse interface {

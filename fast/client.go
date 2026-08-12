@@ -13,7 +13,6 @@ import (
 	"net"
 	"net/http"
 	"net/url"
-	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -42,7 +41,7 @@ import (
 // via sync.Pool. Callers MUST NOT retain or mutate byte slices obtained from unsafe body accessors beyond request lifecycle.
 type Client struct {
 	engine        *fasthttp.Client
-	pipeline      *pipeline.Pipeline
+	pipeline      *pipeline.Pipeline[aoni.Request, aoni.Response]
 	defaultDial   func(string) (net.Conn, error)
 	config        aoni.Config
 	powerWatcher  *power.Watcher
@@ -52,6 +51,7 @@ type Client struct {
 	protocolState protocolState
 	coreEngine    *pipeline.Engine
 	prepared      pipeline.PreparedConfig
+	nativeDoer    fastNativeDoer
 }
 
 // NewClient instantiates a multi-protocol ultra-high-throughput [Client] wrapping fasthttp, uTLS,
@@ -83,7 +83,7 @@ func NewClient(opts ...aoni.ClientOption) *Client {
 	c.prepared = c.coreEngine.Prepared
 	c.prepared.FastPathCapable = (c.config.Engine.CookieJar == nil && c.config.Defaults.Inspector == nil)
 
-	c.pipeline = pipeline.New(
+	c.pipeline = pipeline.NewGeneric[aoni.Request, aoni.Response](
 		toPipelineDefaults(c.config.Defaults, c.referer),
 		c.config.Fingerprint.ToPipelineFingerprint(),
 	)
@@ -91,6 +91,8 @@ func NewClient(opts ...aoni.ClientOption) *Client {
 	if len(c.config.Network.CPUAffinityCores) > 0 {
 		experimental.ApplyCPUAffinity(c.config.Network.CPUAffinityCores)
 	}
+
+	c.nativeDoer.client = c
 
 	return c
 }
@@ -112,6 +114,8 @@ func (c *Client) With(opts ...aoni.ClientOption) *Client {
 		config:      c.config.Clone(),
 		referer:     clonedReferer,
 	}
+
+	cloned.nativeDoer.client = cloned
 
 	for _, opt := range opts {
 		if opt != nil {
@@ -137,7 +141,7 @@ func (c *Client) With(opts ...aoni.ClientOption) *Client {
 	cloned.prepared = cloned.coreEngine.Prepared
 	cloned.prepared.FastPathCapable = (cloned.config.Engine.CookieJar == nil && cloned.config.Defaults.Inspector == nil)
 
-	cloned.pipeline = pipeline.New(
+	cloned.pipeline = pipeline.NewGeneric[aoni.Request, aoni.Response](
 		toPipelineDefaults(cloned.config.Defaults, cloned.referer),
 		cloned.config.Fingerprint.ToPipelineFingerprint(),
 	)
@@ -171,7 +175,10 @@ func (c *Client) Request(
 	}
 
 	fastReq := fasthttp.AcquireRequest()
+	fastReq.Reset()
+
 	fastResp := fasthttp.AcquireResponse()
+	fastResp.Reset()
 
 	fastReq.Header.SetMethodBytes(getMethodBytes(method))
 
@@ -188,6 +195,7 @@ func (c *Client) Request(
 	}
 
 	c.applyDefaultHeaders(reqAdapter)
+	c.applyModifiers(reqAdapter, mods)
 
 	if c.isFastPathEligible(ctx, mods) {
 		extractUserInfoAndSetAuth(fastReq)
@@ -205,26 +213,71 @@ func (c *Client) Request(
 			return nil, err
 		}
 
-		return NewPooledResponse(fastReq, fastResp), nil
+		uncompressed := decompressFastResponse(fastResp)
+		pr := NewPooledResponse(fastReq, fastResp)
+		pr.SetUncompressed(uncompressed)
+
+		return pr, nil
 	}
 
-	reqAdapter = NewRequest(fastReq)
-	defer reqAdapter.Release()
-
-	reqAdapter.SetContext(ctx)
 	c.applyModifiers(reqAdapter, mods)
 
 	reqCtx := reqAdapter.Context()
 
-	stdResp, err := c.pipeline.Execute(reqCtx, reqAdapter, c.HTTP(), c.resolvePipeline(reqCtx)) //nolint:bodyclose
+	return c.pipeline.Execute(
+		reqCtx,
+		reqAdapter,
+		&c.nativeDoer,
+		c.resolvePipeline(reqCtx),
+	)
+}
+
+type fastNativeDoer struct {
+	client *Client
+}
+
+func (f *fastNativeDoer) Do(req pipeline.Request) (pipeline.Response, error) {
+	fastReq, ok := req.EngineRequest().(*fasthttp.Request)
+	if !ok || fastReq == nil {
+		stdReq, err := http.NewRequestWithContext(
+			req.Context(),
+			req.Method(),
+			req.URL(),
+			req.BodyStream(),
+		) //nolint:gosec
+		if err != nil {
+			return nil, err
+		}
+
+		stdResp, err := f.client.HTTP().Do(stdReq) //nolint:bodyclose
+		if err != nil {
+			return nil, err
+		}
+
+		return aoni.NewStdResponse(stdResp), nil //nolint:bodyclose
+	}
+
+	fastResp := fasthttp.AcquireResponse()
+	ctx := req.Context()
+
+	trailers, err, autoReleased := f.client.executeWithRedirects(ctx, fastReq, fastResp)
 	if err != nil {
-		fasthttp.ReleaseRequest(fastReq)
-		fasthttp.ReleaseResponse(fastResp)
+		if !autoReleased {
+			fasthttp.ReleaseResponse(fastResp)
+		}
 
 		return nil, err
 	}
 
-	return aoni.NewStdResponse(stdResp), nil //nolint:bodyclose
+	uncompressed := decompressFastResponse(fastResp)
+	pr := NewPooledResponse(fastReq, fastResp)
+	pr.SetUncompressed(uncompressed)
+
+	if len(trailers) > 0 {
+		pr.SetTrailers(trailers)
+	}
+
+	return pr, nil
 }
 
 // Do executes a prepared [aoni.Request] contract, routing through the target native protocol engine (H1, H2, or H3).
@@ -233,14 +286,13 @@ func (c *Client) Do(req aoni.Request) (aoni.Response, error) {
 		req = NewRequest(nil)
 	}
 
-	ctx := req.Context()
-
-	stdResp, err := c.pipeline.Execute(ctx, req, c.HTTP(), c.resolvePipeline(ctx)) //nolint:bodyclose
-	if err != nil {
-		return nil, err
+	if u := req.URL(); u != "" {
+		_ = c.resolveTargetURL(req, u)
 	}
 
-	return aoni.NewStdResponse(stdResp), nil //nolint:bodyclose
+	ctx := req.Context()
+
+	return c.pipeline.Execute(ctx, req, &c.nativeDoer, c.resolvePipeline(ctx))
 }
 
 // Close shuts down idle TCP/TLS/H2/H3 connections and releases internal janitor background goroutines.
@@ -286,8 +338,8 @@ func (c *Client) HTTP() aoni.HTTPDoer {
 		fastReq := fasthttp.AcquireRequest()
 		fastResp := fasthttp.AcquireResponse()
 
-		fastReq.Header.SetMethod(req.Method)
 		fastReq.SetRequestURI(req.URL.String())
+		fastReq.Header.SetMethod(req.Method)
 		fastReq.Header.SetHost(req.URL.Host)
 
 		for k, vv := range req.Header {
@@ -297,16 +349,12 @@ func (c *Client) HTTP() aoni.HTTPDoer {
 		}
 
 		if req.Body != nil && req.Body != http.NoBody {
-			contentLen := req.ContentLength
-			if contentLen <= 0 {
-				if clStr := req.Header.Get("Content-Length"); clStr != "" {
-					if parsed, err := strconv.ParseInt(strings.TrimSpace(clStr), 10, 64); err == nil {
-						contentLen = parsed
-					}
-				}
+			buf := pipeline.GlobalBufferPool.Get()
+			if _, err := buf.ReadFrom(req.Body); err == nil {
+				fastReq.SetBody(buf.Bytes())
 			}
 
-			fastReq.SetBodyStream(req.Body, int(contentLen))
+			pipeline.GlobalBufferPool.Put(buf)
 		}
 
 		ctx := req.Context()
@@ -321,7 +369,8 @@ func (c *Client) HTTP() aoni.HTTPDoer {
 			return nil, err
 		}
 
-		uncompressed := decompressFastResponse(fastResp)
+		hadEncoding := len(fastResp.Header.Peek("Content-Encoding")) > 0
+		uncompressed := decompressFastResponse(fastResp) || hadEncoding
 
 		bodyRC := &fastBodyReadCloser{
 			Reader:   bytes.NewReader(fastResp.Body()),
@@ -384,7 +433,8 @@ func (c *Client) Engine() *fasthttp.Client {
 }
 
 func (c *Client) isFastPathEligible(ctx context.Context, mods []aoni.RequestModifier) bool {
-	if len(mods) > 0 || !c.prepared.FastPathCapable {
+	if len(mods) > 0 || !c.prepared.FastPathCapable || c.config.Defaults.Inspector != nil ||
+		c.config.Engine.CookieJar != nil {
 		return false
 	}
 
@@ -553,6 +603,7 @@ func (c *Client) executeWithRedirects(
 			return nil, err, false
 		}
 
+		method := bytes.Clone(fastReq.Header.Method())
 		nextURI := fasthttp.AcquireURI()
 		currentURI.CopyTo(nextURI)
 		nextURI.UpdateBytes(location)
@@ -566,6 +617,15 @@ func (c *Client) executeWithRedirects(
 		}
 
 		nextURI.CopyTo(fastReq.URI())
+		fastReq.Header.SetRequestURIBytes(nextURI.RequestURI())
+
+		if len(method) > 0 {
+			fastReq.Header.SetMethodBytes(method)
+		}
+
+		if host := nextURI.Host(); len(host) > 0 {
+			fastReq.Header.SetHostBytes(host)
+		}
 
 		if !isSameHost(currentURI, nextURI) {
 			scrubSensitiveHeaders(fastReq, currentURI, nextURI)

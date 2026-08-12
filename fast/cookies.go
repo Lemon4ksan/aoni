@@ -7,9 +7,11 @@
 package fast
 
 import (
+	"bytes"
 	"context"
 	"encoding/base64"
 	"net/http"
+	"net/url"
 	"strings"
 
 	"github.com/valyala/fasthttp"
@@ -102,28 +104,25 @@ func parseCookie(key, value []byte) *http.Cookie {
 }
 
 func extractUserInfoAndSetAuth(req *fasthttp.Request) {
-	uBytes := req.URI().Username()
-	if len(uBytes) == 0 {
+	if len(req.Header.Peek("Authorization")) > 0 {
 		return
 	}
 
-	user := bytesconv.B2S(uBytes)
-	pass := bytesconv.B2S(req.URI().Password())
-
-	if len(req.Header.Peek("Authorization")) == 0 {
-		totalLen := len(user) + 1 + len(pass)
-		if totalLen <= 128 {
-			var buf [128]byte
-
-			n := copy(buf[:], user)
-			buf[n] = ':'
-			copy(buf[n+1:], pass)
-
-			encoded := base64.StdEncoding.EncodeToString(buf[:totalLen])
-			req.Header.Set("Authorization", "Basic "+encoded)
-		} else {
-			encoded := base64.StdEncoding.EncodeToString(bytesconv.S2B(user + ":" + pass))
-			req.Header.Set("Authorization", "Basic "+encoded)
+	uBytes := req.URI().Username()
+	if len(uBytes) > 0 {
+		user := bytesconv.B2S(uBytes)
+		pass := bytesconv.B2S(req.URI().Password())
+		encoded := base64.StdEncoding.EncodeToString(bytesconv.S2B(user + ":" + pass))
+		req.Header.Set("Authorization", "Basic "+encoded)
+	} else {
+		rawURI := req.URI().FullURI()
+		if bytes.IndexByte(rawURI, '@') >= 0 {
+			if parsed, err := url.Parse(bytesconv.B2S(rawURI)); err == nil && parsed.User != nil {
+				user := parsed.User.Username()
+				pass, _ := parsed.User.Password()
+				encoded := base64.StdEncoding.EncodeToString(bytesconv.S2B(user + ":" + pass))
+				req.Header.Set("Authorization", "Basic "+encoded)
+			}
 		}
 	}
 
