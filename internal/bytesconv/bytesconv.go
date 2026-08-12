@@ -192,3 +192,51 @@ func ParseUintFast(b []byte) (int64, bool) {
 
 	return val, true
 }
+
+// CanonicalHeaderKeyBytes converts header key b to MIME canonical format in-place on a 64-byte stack array without heap allocations.
+//
+//go:inline
+func CanonicalHeaderKeyBytes(src []byte) []byte {
+	n := len(src)
+	if n == 0 {
+		return nil
+	}
+
+	var (
+		buf [64]byte
+		out []byte
+	)
+
+	if n <= 64 {
+		out = buf[:n]
+	} else {
+		out = make([]byte, n)
+	}
+
+	upper := true
+	for i := 0; i < n; i++ {
+		c := src[i]
+		if upper && 'a' <= c && c <= 'z' {
+			c -= 'a' - 'A'
+		} else if !upper && 'A' <= c && c <= 'Z' {
+			c += 'a' - 'A'
+		}
+
+		out[i] = c
+		upper = (c == '-')
+	}
+
+	return out
+}
+
+// CanonicalHeaderKey converts header key string s to MIME canonical format without heap allocations if s fits in stack buffer.
+//
+//go:inline
+func CanonicalHeaderKey(s string) string {
+	b := CanonicalHeaderKeyBytes(S2B(s))
+	if len(b) == 0 {
+		return ""
+	}
+
+	return string(b)
+}

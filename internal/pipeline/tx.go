@@ -76,14 +76,15 @@ type Tx struct {
 	UnsafeHooks      map[PhaseID][]UnsafeHook
 }
 
-// AcquireTx fetches a clean Tx instance from pool.
+// AcquireTx retrieves a clean [Tx] from pool.
 func AcquireTx(ctx context.Context) *Tx {
 	tx := txPool.Get().(*Tx)
 	tx.Ctx = ctx
+
 	return tx
 }
 
-// ReleaseTx returns the Tx instance to pool after resetting fields.
+// ReleaseTx zeroes fields and returns tx back to pool.
 func ReleaseTx(tx *Tx) {
 	if tx == nil {
 		return
@@ -132,6 +133,7 @@ func ReleaseTx(tx *Tx) {
 	tx.QueryEncoder = nil
 	tx.Decoders = nil
 	tx.UnsafePhaseOrder = nil
+	tx.UnsafeHooks = nil
 
 	txPool.Put(tx)
 }

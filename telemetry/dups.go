@@ -5,10 +5,12 @@
 package telemetry
 
 import (
+	"hash/crc32"
 	"sync"
 	"time"
 
 	"github.com/lemon4ksan/aoni/internal/bytesconv"
+	"github.com/lemon4ksan/aoni/internal/clock"
 )
 
 type duplicateEntry struct {
@@ -17,7 +19,7 @@ type duplicateEntry struct {
 }
 
 // DuplicateRequestGuard detects request loops and rapid duplicate dispatches
-// using a zero-allocation ring buffer and FNV-1a 64-bit hashing.
+// using a zero-allocation ring buffer and hardware CRC32 hashing.
 type DuplicateRequestGuard struct {
 	mu          sync.Mutex
 	onDuplicate func(method, rawURL string, elapsed time.Duration)
@@ -56,7 +58,7 @@ func (g *DuplicateRequestGuard) CheckAndRecord(method, rawURL string) {
 	}
 
 	hash := computeRequestHash(method, rawURL)
-	now := time.Now()
+	now := clock.CoarseTime()
 
 	g.mu.Lock()
 	defer g.mu.Unlock()
@@ -76,11 +78,11 @@ func (g *DuplicateRequestGuard) CheckAndRecord(method, rawURL string) {
 }
 
 func (g *DuplicateRequestGuard) findDuplicate(hash uint64, now time.Time) (time.Duration, bool) {
-	for i := range g.entries {
+	for i := 0; i < g.capacity; i++ {
 		entry := g.entries[i]
 		if entry.hash == hash && !entry.timestamp.IsZero() {
 			elapsed := now.Sub(entry.timestamp)
-			if elapsed < g.window {
+			if elapsed <= g.window {
 				return elapsed, true
 			}
 		}
@@ -89,28 +91,10 @@ func (g *DuplicateRequestGuard) findDuplicate(hash uint64, now time.Time) (time.
 	return 0, false
 }
 
+//go:inline
 func computeRequestHash(method, rawURL string) uint64 {
-	const (
-		offset64 = 14695981039346656037
-		prime64  = 1099511628211
-	)
+	h1 := uint64(crc32.ChecksumIEEE(bytesconv.S2B(method)))
+	h2 := uint64(crc32.ChecksumIEEE(bytesconv.S2B(rawURL)))
 
-	var h uint64 = offset64
-
-	methodBytes := bytesconv.S2B(method)
-	for i := range methodBytes {
-		h ^= uint64(methodBytes[i])
-		h *= prime64
-	}
-
-	h ^= uint64(':')
-	h *= prime64
-
-	urlBytes := bytesconv.S2B(rawURL)
-	for i := range urlBytes {
-		h ^= uint64(urlBytes[i])
-		h *= prime64
-	}
-
-	return h
+	return (h1 << 32) | h2
 }

@@ -17,6 +17,7 @@ import (
 
 	"github.com/lemon4ksan/aoni/internal/bytesconv"
 	"github.com/lemon4ksan/aoni/internal/mapper"
+	"github.com/lemon4ksan/aoni/internal/urlutil"
 )
 
 func getStructSchema(t reflect.Type) *mapper.StructSchema {
@@ -193,9 +194,12 @@ func writeQueryKeyValuePair(sb *strings.Builder, key, value string, first *bool)
 		sb.WriteByte('&')
 	}
 
-	sb.WriteString(url.QueryEscape(key))
-	sb.WriteByte('=')
-	sb.WriteString(url.QueryEscape(value))
+	buf := make([]byte, 0, len(key)+len(value)+16)
+	buf = urlutil.AppendQueryEscapeString(buf, key)
+	buf = append(buf, '=')
+	buf = urlutil.AppendQueryEscapeString(buf, value)
+
+	sb.Write(buf)
 
 	*first = false
 }

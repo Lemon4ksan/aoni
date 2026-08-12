@@ -265,6 +265,17 @@ type CacheKey struct {
 }
 
 func (k CacheKey) String() string {
+	totalLen := len(k.Method) + len(k.URL) + 1
+	if totalLen <= 128 {
+		var buf [128]byte
+
+		n := copy(buf[:], k.Method)
+		buf[n] = ':'
+		copy(buf[n+1:], k.URL)
+
+		return string(buf[:totalLen])
+	}
+
 	return k.Method + ":" + k.URL
 }
 

@@ -65,6 +65,18 @@ func extractURLFromLink(link string) string {
 
 	rawURL := strings.TrimSpace(link[start+1 : end])
 	if u, err := url.Parse(rawURL); err == nil && u.Host != "" {
+		totalLen := len(u.Scheme) + 3 + len(u.Host)
+		if totalLen <= 128 {
+			var buf [128]byte
+
+			n := copy(buf[:], u.Scheme)
+			copy(buf[n:], "://")
+			n += 3
+			copy(buf[n:], u.Host)
+
+			return string(buf[:totalLen])
+		}
+
 		return u.Scheme + "://" + u.Host
 	}
 

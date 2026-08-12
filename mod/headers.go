@@ -117,6 +117,19 @@ func WithBearerAuth(token string) aoni.RequestModifier {
 // WithBasicAuth constructs an [aoni.RequestModifier] setting HTTP Basic Authentication credentials.
 func WithBasicAuth(username, password string) aoni.RequestModifier {
 	return func(req aoni.Request) {
+		totalLen := len(username) + 1 + len(password)
+		if totalLen <= 128 {
+			var buf [128]byte
+
+			n := copy(buf[:], username)
+			buf[n] = ':'
+			copy(buf[n+1:], password)
+
+			req.SetHeader("Authorization", "Basic "+base64.StdEncoding.EncodeToString(buf[:totalLen]))
+
+			return
+		}
+
 		auth := username + ":" + password
 		req.SetHeader("Authorization", "Basic "+base64.StdEncoding.EncodeToString(bytesconv.S2B(auth)))
 	}

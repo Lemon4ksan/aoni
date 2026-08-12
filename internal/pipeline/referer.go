@@ -72,6 +72,19 @@ func (a *RefererAutomaton) ComputeReferer(targetURL *url.URL) string {
 	}
 
 	if policy == PolicyStrictOriginWhenCrossOrigin {
+		totalLen := len(last.Scheme) + 4 + len(last.Host)
+		if totalLen <= 128 {
+			var buf [128]byte
+
+			n := copy(buf[:], last.Scheme)
+			copy(buf[n:], "://")
+			n += 3
+			n += copy(buf[n:], last.Host)
+			buf[n] = '/'
+
+			return string(buf[:totalLen])
+		}
+
 		return last.Scheme + "://" + last.Host + "/"
 	}
 

@@ -396,8 +396,19 @@ func applyCharsetTranscoding(resp *http.Response, body stdio.ReadCloser) stdio.R
 		return body
 	}
 
-	newContentType := mediaType + "; charset=utf-8"
-	resp.Header.Set("Content-Type", newContentType)
+	const suffix = "; charset=utf-8"
+
+	totalLen := len(mediaType) + len(suffix)
+	if totalLen <= 64 {
+		var buf [64]byte
+
+		n := copy(buf[:], mediaType)
+		copy(buf[n:], suffix)
+
+		resp.Header.Set("Content-Type", string(buf[:totalLen]))
+	} else {
+		resp.Header.Set("Content-Type", mediaType+suffix)
+	}
 
 	return &io.DecompressReadCloser{
 		Reader: transform.NewReader(body, enc.NewDecoder()),

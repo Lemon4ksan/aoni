@@ -125,6 +125,22 @@ func WithBasicAuth(username, password string) aoni.ClientOption {
 			cfg.Defaults.Headers = make(http.Header)
 		}
 
+		totalLen := len(username) + 1 + len(password)
+		if totalLen <= 128 {
+			var buf [128]byte
+
+			n := copy(buf[:], username)
+			buf[n] = ':'
+			copy(buf[n+1:], password)
+
+			cfg.Defaults.Headers.Set(
+				"Authorization",
+				"Basic "+base64.StdEncoding.EncodeToString(buf[:totalLen]),
+			)
+
+			return
+		}
+
 		auth := username + ":" + password
 		cfg.Defaults.Headers.Set(
 			"Authorization",

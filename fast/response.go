@@ -90,7 +90,7 @@ func (f *Response) StatusBytes() []byte {
 func (f *Response) Header(key string) string {
 	val := f.resp.Header.Peek(key)
 	if len(val) == 0 {
-		val = f.resp.Header.Peek(http.CanonicalHeaderKey(key))
+		val = f.resp.Header.Peek(bytesconv.CanonicalHeaderKey(key))
 	}
 
 	if len(val) == 0 {
@@ -114,7 +114,7 @@ func (f *Response) Header(key string) string {
 func (f *Response) HeaderBytes(key []byte) []byte {
 	val := f.resp.Header.PeekBytes(key)
 	if len(val) == 0 {
-		val = f.resp.Header.Peek(http.CanonicalHeaderKey(bytesconv.B2S(key)))
+		val = f.resp.Header.PeekBytes(bytesconv.CanonicalHeaderKeyBytes(key))
 	}
 
 	return val
@@ -124,7 +124,7 @@ func (f *Response) HeaderBytes(key []byte) []byte {
 func (f *Response) Headers() map[string][]string {
 	m := make(map[string][]string)
 	f.resp.Header.All()(func(k, v []byte) bool {
-		sk := http.CanonicalHeaderKey(string(k))
+		sk := bytesconv.CanonicalHeaderKey(bytesconv.B2S(k))
 		m[sk] = append(m[sk], string(v))
 		return true
 	})
