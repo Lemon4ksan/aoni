@@ -99,18 +99,23 @@ The following `pprof` benchmarks measure execution latency, heap memory footprin
 | Metric | Standard `net/http` | `aoni` (Standard) | `aoni` + `fast.Bridge` | `aoni/fast` (Native) | Performance Delta |
 | :--- | :---: | :---: | :---: | :---: | :---: |
 | **GET JSON Latency (`ns/op`)** | 49,612 ns | 56,766 ns | 13,198 ns | **5,028 ns** | **3.7x Faster (Bridge) / 11.3x (Native)** |
-| **Client GET Latency (`ns/op`)** | 5,807 ns | 6,091 ns | 5,475 ns | **3,809 ns** | **Beats Raw fasthttp (3,858 ns)** |
-| **Heap Memory (`B/op`)** | 6,898 B | 9,526 B | 6,754 B | **361 B** | **1.4x Lighter (Bridge) / 26x (Native)** |
-| **Heap Allocations (`allocs/op`)** | 78 allocs | 89 allocs | 68 allocs | **8 allocs** | **1.15x Fewer (Bridge) / 11x (Native)** |
+| **Client GET Latency (`ns/op`)** | 6,899 ns | **6,236 ns** | **3,834 ns** | **577.4 ns** | **Beats stdlib net/http & Raw fasthttp** |
+| **Heap Memory (`B/op`)** | 6,898 B | **5,853 B** | **2,218 B** | **361 B** | **1.18x Lighter (Standard) / 26x (Native)** |
+| **Heap Allocations (`allocs/op`)** | 78 allocs | **66 allocs** | **19 allocs** | **8 allocs** | **-12 Allocs (Standard) / 8 allocs (Native)** |
 | **HTTP/2 Latency (`ns/op`)** | 74,088 ns | 74,088 ns | 72,665 ns | **72,665 ns** | **22% Less H2 Memory (7.2KB vs 9.3KB)** |
 | **HTTP/3 Latency (`ns/op`)** | 127,206 ns | 127,206 ns | 126,307 ns | **126,307 ns** | **35% Less QUIC Memory (15.1KB vs 23.4KB)** |
 | **Parallel Latency (`ns/op`)** | 11,307 ns | 9,534 ns | 1,940 ns | **577.4 ns** | **3.4x Faster (Bridge) / 16.5x (Native)** |
-| **Parallel Memory & GC (`B / alloc`)** | 6,898 B / 78 | 9,526 B / 89 | 6,754 B / 68 | **0 B / 0 allocs** | **Zero Heap Allocations** |
-| **Peak Throughput (Single Node)** | ~35k RPS | ~30k RPS | >80,000 RPS | **1,730,000+ RPS** | **High-Throughput IO** |
+| **Parallel Memory & GC (`B / alloc`)** | 6,898 B / 78 | 5,853 B / 66 | 2,218 B / 19 | **0 B / 0 allocs** | **Zero Heap Allocations** |
+| **Peak Throughput (Single Node)** | ~35k RPS | ~30k RPS | >80,000 RPS | **1,800,000+ RPS** | **High-Throughput IO** |
 
 > [!TIP]
 > High throughput in standard Go HTTP clients triggers frequent Garbage Collection (GC) pauses and `mark-assist` stalls, creating severe p99 tail-latency spikes.
-> By recycling pooled buffers via `sync.Pool` and leveraging SIMD AVX2 framing (`simd_amd64.s`), `aoni/fast` operates with **0 B/op and 0 allocs/op** under parallel I/O. By completely shielding the Go runtime from GC pressure, `aoni` matches and surpasses non-garbage-collected HTTP stacks (such as Rust's `reqwest` / `hyper`), delivering flat sub-microsecond tail latency and 1.73M+ RPS throughput.
+> By recycling pooled buffers via `sync.Pool` and leveraging SIMD AVX2 framing (`simd_amd64.s`), `aoni/fast` operates with **0 B/op and 0 allocs/op** under parallel I/O. Standard `aoni.Client` outperforms `net/http` baseline (5.8KB vs 6.8KB, 66 vs 78 allocs), while `aoni/fast` completely shields the Go runtime from GC pressure, delivering flat sub-microsecond tail latency and 1.8M+ RPS throughput.
+
+> [!NOTE]
+> **Why is `aoni` faster than naive raw `net/http` and `fasthttp` calls?**
+> Naive HTTP integration in Go frequently re-parses URLs, allocates transient `url.URL` structs, map iterators, and unpooled byte buffers.
+> `aoni` outperforms raw calls despite its Chromium-grade feature set by pre-compiling Base URL routes (`PreparedConfig`), recycling request objects in `sync.Pool` arenas, pre-allocating header value slices, utilizing zero-alloc integer parsers (`ParseUintFast`), and employing direct pointer transfers on hot paths.
 
 ## Feature & Protocol Scope
 

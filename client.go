@@ -219,6 +219,15 @@ func (c *Client) Request(
 		req = req.WithContext(ctx)
 	}
 
+	if c.isBaremetalEligible(ctx, mods) {
+		resp, err := c.engine.Do(req)
+		if err != nil {
+			return nil, &Error{Op: "request failed", Err: err}
+		}
+
+		return resp, nil
+	}
+
 	stdReq := NewStdRequest(req)
 
 	for _, m := range c.defaults.DefaultMods {
@@ -574,6 +583,38 @@ func (c *Client) needsRequestConfig() bool {
 		c.defaults.MultiReadThreshold > 0 ||
 		c.network.SSRFGuard ||
 		c.network.ProxyAddr != nil
+}
+
+func (c *Client) isBaremetalEligible(ctx context.Context, mods []RequestModifier) bool {
+	if len(mods) > 0 || len(c.defaults.DefaultMods) > 0 {
+		return false
+	}
+
+	if GetRequestConfig(ctx) != nil {
+		return false
+	}
+
+	if c.needsRequestConfig() {
+		return false
+	}
+
+	if c.defaults.Inspector != nil || len(c.defaults.BeforeRequest) > 0 || len(c.defaults.AfterResponse) > 0 ||
+		len(c.defaults.UARotationProfiles) > 0 {
+		return false
+	}
+
+	if c.defaults.RefererAutomaton || c.fingerprint.PacketPadding != nil {
+		return false
+	}
+
+	pipe := c.defaults.Pipeline
+	if pipe.Decompress || pipe.Validate || pipe.Challenge || pipe.HAR != nil || pipe.Cache != nil ||
+		pipe.Hedging != nil ||
+		pipe.DPIJitter != nil {
+		return false
+	}
+
+	return true
 }
 
 func (c *Client) ensureUserAgent() {
