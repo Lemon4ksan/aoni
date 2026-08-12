@@ -8,6 +8,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"mime/multipart"
 	"net"
@@ -18,6 +19,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/valyala/fasthttp/fasthttputil"
 
 	"github.com/lemon4ksan/aoni"
 	"github.com/lemon4ksan/aoni/codec/decode"
@@ -41,15 +44,160 @@ type queryParams struct {
 	Limit int    `url:"limit,omitempty"`
 }
 
-// BenchmarkGET_JSON_Aoni measures generic payload unmarshaling overhead over HTTP transactions.
-func BenchmarkGET_JSON_Aoni(b *testing.B) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+// setupInmemoryStdServer starts an in-memory net/http server over fasthttputil.InmemoryListener
+// and returns a pre-configured *http.Client that routes connections to it.
+func setupInmemoryStdServer(b *testing.B, handler http.Handler) (*fasthttputil.InmemoryListener, *http.Client) {
+	b.Helper()
+
+	ln := fasthttputil.NewInmemoryListener()
+	srv := &http.Server{Handler: handler}
+
+	go func() { _ = srv.Serve(ln) }()
+
+	b.Cleanup(func() {
+		_ = srv.Close()
+		_ = ln.Close()
+	})
+
+	client := &http.Client{
+		Transport: &http.Transport{
+			DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
+				return ln.Dial()
+			},
+			MaxIdleConnsPerHost: 64,
+		},
+	}
+
+	return ln, client
+}
+
+// BenchmarkGET_Raw_NetHTTP measures raw stdlib net/http execution over in-memory transport (Do + body drain).
+func BenchmarkGET_Raw_NetHTTP(b *testing.B) {
+	handler := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"id":100,"message":"hello benchmark"}`))
+	})
+	_, client := setupInmemoryStdServer(b, handler)
+	ctx := context.Background()
+
+	b.ResetTimer()
+	b.ReportAllocs()
+
+	for b.Loop() {
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, "http://inmemory/", nil)
+		if err != nil {
+			b.Fatal(err)
+		}
+
+		resp, err := client.Do(req)
+		if err != nil {
+			b.Fatal(err)
+		}
+
+		_, _ = io.Copy(io.Discard, resp.Body)
+		_ = resp.Body.Close()
+	}
+}
+
+// BenchmarkGET_Raw_Aoni measures raw aoni.Client execution over in-memory transport (c.Request + body drain, baremetal mode).
+func BenchmarkGET_Raw_Aoni(b *testing.B) {
+	handler := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"id":100,"message":"hello benchmark"}`))
+	})
+	_, httpClient := setupInmemoryStdServer(b, handler)
+
+	// Wrap as HTTPDoerFunc so aoni accepts it as an opaque HTTPDoer and does not
+	// call applyDialers, which would overwrite the custom in-memory DialContext.
+	client := aoni.NewClient(aoni.HTTPDoerFunc(httpClient.Do), option.WithBaseURL("http://inmemory"), option.WithBaremetal())
+	ctx := context.Background()
+
+	b.ResetTimer()
+	b.ReportAllocs()
+
+	for b.Loop() {
+		resp, err := client.Request(ctx, http.MethodGet, "/")
+		if err != nil {
+			b.Fatal(err)
+		}
+
+		_, _ = io.Copy(io.Discard, resp.Body)
+		_ = resp.Body.Close()
+	}
+}
+
+func netHTTPGetTo[T any](ctx context.Context, client *http.Client, urlStr string) (*T, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, urlStr, nil)
+	if err != nil {
+		return nil, err
+	}
+
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer func() {
+		_, _ = io.Copy(io.Discard, resp.Body)
+		_ = resp.Body.Close()
+	}()
+
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return nil, fmt.Errorf("unexpected status code: %d", resp.StatusCode)
+	}
+
+	contentType := resp.Header.Get("Content-Type")
+	mediaType, _, _ := strings.Cut(contentType, ";")
+	mediaType = strings.TrimSpace(mediaType)
+
+	result := new(T)
+
+	switch {
+	case strings.EqualFold(mediaType, "application/json"):
+		if err := json.NewDecoder(resp.Body).Decode(result); err != nil {
+			return nil, err
+		}
+	default:
+		return nil, fmt.Errorf("unsupported content type: %s", contentType)
+	}
+
+	return result, nil
+}
+
+// BenchmarkGET_Generic_NetHTTP measures generic net/http response unmarshaling over in-memory transport.
+func BenchmarkGET_Generic_NetHTTP(b *testing.B) {
+	handler := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(benchPayload{ID: 100, Message: "hello benchmark"})
-	}))
-	defer server.Close()
+	})
+	_, client := setupInmemoryStdServer(b, handler)
+	ctx := context.Background()
 
-	client := aoni.NewClient(nil, option.WithBaseURL(server.URL))
+	b.ResetTimer()
+	b.ReportAllocs()
+
+	for b.Loop() {
+		res, err := netHTTPGetTo[benchPayload](ctx, client, "http://inmemory/")
+		if err != nil {
+			b.Fatal(err)
+		}
+
+		if res.ID != 100 {
+			b.Fatal("invalid id")
+		}
+	}
+}
+
+// BenchmarkGET_Generic_Aoni measures generic aoni response unmarshaling over in-memory transport via request.GetTo[T] (baremetal mode).
+func BenchmarkGET_Generic_Aoni(b *testing.B) {
+	handler := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(benchPayload{ID: 100, Message: "hello benchmark"})
+	})
+	_, httpClient := setupInmemoryStdServer(b, handler)
+
+	// Wrap as HTTPDoerFunc so aoni accepts it as an opaque HTTPDoer and does not
+	// call applyDialers, which would overwrite the custom in-memory DialContext.
+	client := aoni.NewClient(aoni.HTTPDoerFunc(httpClient.Do), option.WithBaseURL("http://inmemory"), option.WithBaremetal())
 	ctx := context.Background()
 
 	b.ResetTimer()
@@ -62,67 +210,6 @@ func BenchmarkGET_JSON_Aoni(b *testing.B) {
 		}
 
 		if res.ID != 100 {
-			b.Fatal("invalid id")
-		}
-	}
-}
-
-func BenchmarkGET_JSON_Into_Aoni(b *testing.B) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(benchPayload{ID: 100, Message: "hello benchmark"})
-	}))
-	defer server.Close()
-
-	client := aoni.NewClient(nil, option.WithBaseURL(server.URL))
-	ctx := context.Background()
-
-	b.ResetTimer()
-	b.ReportAllocs()
-
-	for b.Loop() {
-		var payload benchPayload
-
-		err := request.GetInto(ctx, client, "/", &payload)
-		if err != nil {
-			b.Fatal(err)
-		}
-
-		if payload.ID != 100 {
-			b.Fatal("invalid id")
-		}
-	}
-}
-
-// BenchmarkGET_JSON_NetHTTP measures standard net/http JSON decoding performance.
-func BenchmarkGET_JSON_NetHTTP(b *testing.B) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(benchPayload{ID: 100, Message: "hello benchmark"})
-	}))
-	defer server.Close()
-
-	client := &http.Client{}
-
-	b.ResetTimer()
-	b.ReportAllocs()
-
-	for b.Loop() {
-		resp, err := client.Get(server.URL)
-		if err != nil {
-			b.Fatal(err)
-		}
-
-		var payload benchPayload
-
-		err = json.NewDecoder(resp.Body).Decode(&payload)
-		_ = resp.Body.Close()
-
-		if err != nil {
-			b.Fatal(err)
-		}
-
-		if payload.ID != 100 {
 			b.Fatal("invalid id")
 		}
 	}

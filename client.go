@@ -163,6 +163,14 @@ func (c *Client) Request(
 	method, path string,
 	mods ...RequestModifier,
 ) (*http.Response, error) {
+	// ── Baremetal fast path ─────────────────────────────────────────────────────
+	// Checked BEFORE any allocation. When the client has no pipeline rules, hooks,
+	// modifiers, or per-request config we bypass AcquireTx, NewStdRequest and the
+	// full pipeline.Execute and route directly to the underlying engine.
+	if len(mods) == 0 && c.isBaremetalStaticEligible() && GetRequestConfig(ctx) == nil {
+		return c.doBaremetal(ctx, method, path)
+	}
+
 	cfg := GetRequestConfig(ctx)
 	if cfg != nil {
 		ApplyRequestConfigDefaults(cfg, c)
@@ -219,15 +227,6 @@ func (c *Client) Request(
 		req = req.WithContext(ctx)
 	}
 
-	if c.isBaremetalEligible(ctx, mods) {
-		resp, err := c.engine.Do(req)
-		if err != nil {
-			return nil, &Error{Op: "request failed", Err: err}
-		}
-
-		return resp, nil
-	}
-
 	stdReq := NewStdRequest(req)
 
 	for _, m := range c.defaults.DefaultMods {
@@ -246,6 +245,63 @@ func (c *Client) Request(
 
 	ReleaseStdRequest(stdReq)
 
+	if err != nil {
+		return nil, &Error{Op: "request failed", Err: err}
+	}
+
+	return resp, nil
+}
+
+// doBaremetal executes a request on the minimal allocation path — bypassing AcquireTx,
+// NewStdRequest, and the full pipeline. Called only when isBaremetalStaticEligible is true
+// and no per-request mods or config are present.
+//
+// Allocation budget vs stdlib http.NewRequestWithContext:
+//   - url.URL struct    : 1 alloc  (same as stdlib url.Parse output)
+//   - http.Request struct : 1 alloc
+//   - req.WithContext   : 2 allocs (new Request + URL copy) — skipped for context.Background/TODO.
+func (c *Client) doBaremetal(ctx context.Context, method, path string) (*http.Response, error) {
+	var u *url.URL
+	if len(path) > 0 && path[0] == '/' && c.prepared.BaseURL != nil {
+		u = &url.URL{
+			Scheme: c.prepared.BaseURL.Scheme,
+			Host:   c.prepared.BaseURL.Host,
+			Path:   path,
+		}
+	} else {
+		targetURLStr, resolveErr := c.resolveTargetURL(path)
+		if resolveErr != nil {
+			return nil, resolveErr
+		}
+
+		var parseErr error
+
+		u, parseErr = urlutil.Parse(targetURLStr)
+		if parseErr != nil {
+			return nil, &Error{Op: "failed to parse URL", Err: parseErr}
+		}
+	}
+
+	// nil Header is safe: net/http handles absent request headers correctly.
+	// Avoids make(http.Header, 0) allocation on the hot baremetal path.
+	req := &http.Request{
+		Method:     method,
+		URL:        u,
+		Proto:      "HTTP/1.1",
+		ProtoMajor: 1,
+		ProtoMinor: 1,
+		Header:     nil,
+		Host:       u.Host,
+	}
+
+	// Avoid the 2-alloc req.WithContext copy for the common context.Background / context.TODO
+	// case. http.Request.Context() already returns context.Background() when r.ctx is nil,
+	// so the behavior is identical while saving a heap allocation.
+	if ctx != nil && ctx != context.Background() && ctx != context.TODO() {
+		req = req.WithContext(ctx)
+	}
+
+	resp, err := c.engine.Do(req)
 	if err != nil {
 		return nil, &Error{Op: "request failed", Err: err}
 	}
@@ -585,12 +641,8 @@ func (c *Client) needsRequestConfig() bool {
 		c.network.ProxyAddr != nil
 }
 
-func (c *Client) isBaremetalEligible(ctx context.Context, mods []RequestModifier) bool {
-	if len(mods) > 0 || len(c.defaults.DefaultMods) > 0 {
-		return false
-	}
-
-	if GetRequestConfig(ctx) != nil {
+func (c *Client) isBaremetalStaticEligible() bool {
+	if len(c.defaults.DefaultMods) > 0 {
 		return false
 	}
 

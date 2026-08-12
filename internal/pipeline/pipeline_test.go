@@ -432,7 +432,9 @@ func TestPipeline_PostProcessResponse_Full(t *testing.T) {
 		Header: http.Header{"Content-Length": []string{"100", "200"}},
 	}
 	pipeEngine := New(ClientDefaults{}, ClientFingerprint{})
-	_, errConflict := pipeEngine.postProcessResponse(&http.Request{}, respConflict, AcquireTx(t.Context()))
+	txConflict := AcquireTx(t.Context())
+	txConflict.Flags = FlagValidate
+	_, errConflict := pipeEngine.postProcessResponse(&http.Request{}, respConflict, txConflict)
 	assert.ErrorIs(t, errConflict, ErrConflictingContentLength)
 
 	respTooLarge := &http.Response{

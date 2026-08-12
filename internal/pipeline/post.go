@@ -31,12 +31,14 @@ func (p *Pipeline) postProcessResponse(
 	resp *http.Response,
 	tx *Tx,
 ) (*http.Response, error) {
-	if err := validateResponseSmugglingGuards(resp); err != nil {
-		if resp != nil && resp.Body != nil {
-			_ = resp.Body.Close()
-		}
+	if tx.Flags&FlagValidate != 0 {
+		if err := validateResponseSmugglingGuards(resp); err != nil {
+			if resp != nil && resp.Body != nil {
+				_ = resp.Body.Close()
+			}
 
-		return nil, err
+			return nil, err
+		}
 	}
 
 	if tx.Flags&FlagDecompress != 0 {
