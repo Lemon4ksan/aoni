@@ -62,6 +62,26 @@ func (d responseDecoder) ValidateState(resp *http.Response, decoder decode.Decod
 }
 
 func isStructuredDataMIME(contentType string) bool {
+	if len(contentType) >= 16 && bytesconv.EqualFoldASCII(contentType[:16], "application/json") {
+		return true
+	}
+
+	if len(contentType) >= 9 && bytesconv.EqualFoldASCII(contentType[:9], "text/json") {
+		return true
+	}
+
+	if len(contentType) >= 20 && bytesconv.EqualFoldASCII(contentType[:20], "application/x-protobuf") {
+		return true
+	}
+
+	if len(contentType) >= 20 && bytesconv.EqualFoldASCII(contentType[:20], "application/protobuf") {
+		return true
+	}
+
+	if len(contentType) >= 24 && bytesconv.EqualFoldASCII(contentType[:24], "application/grpc-web+proto") {
+		return true
+	}
+
 	mediaType, _, _ := strings.Cut(contentType, ";")
 	mediaType = strings.TrimSpace(mediaType)
 

@@ -13,6 +13,7 @@ import (
 // PrecomputedHeader stores precomputed header key-value pairs as strings and byte slices
 // for zero-allocation header application.
 type PrecomputedHeader struct {
+	Slice    []string
 	KeyBytes []byte
 	ValBytes []byte
 	Key      string
@@ -62,13 +63,16 @@ func NewPreparedConfig(baseURL *url.URL, headers ...http.Header) PreparedConfig 
 
 	if len(headers) > 0 && headers[0] != nil {
 		for k, v := range headers[0] {
-			prep.StaticHeaders[k] = append([]string(nil), v...)
+			copiedVal := append([]string(nil), v...)
+
+			prep.StaticHeaders[k] = copiedVal
 			if len(v) > 0 {
 				prep.PrecomputedDefaultHeaders = append(prep.PrecomputedDefaultHeaders, PrecomputedHeader{
 					Key:      k,
 					Val:      v[0],
 					KeyBytes: []byte(k),
 					ValBytes: []byte(v[0]),
+					Slice:    copiedVal,
 				})
 			}
 		}

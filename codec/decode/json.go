@@ -7,8 +7,6 @@ package decode
 import (
 	"encoding/json"
 	stdio "io"
-
-	"github.com/lemon4ksan/aoni/internal/pipeline"
 )
 
 // JSONDecoderConfig configures parsing options for JSON response streams.
@@ -42,12 +40,5 @@ func NewJSONDecoder(cfg JSONDecoderConfig) Decoder {
 type jsonDecoder struct{}
 
 func (jsonDecoder) Decode(reader stdio.Reader, target any) error {
-	buf := pipeline.GlobalBufferPool.Get()
-	defer pipeline.GlobalBufferPool.Put(buf)
-
-	if _, err := buf.ReadFrom(reader); err != nil {
-		return err
-	}
-
-	return json.Unmarshal(buf.Bytes(), target)
+	return json.NewDecoder(reader).Decode(target)
 }

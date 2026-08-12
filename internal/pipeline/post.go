@@ -9,7 +9,6 @@ import (
 	stdio "io"
 	"mime"
 	"net/http"
-	"slices"
 	"strconv"
 	"strings"
 
@@ -165,8 +164,10 @@ func validateHeaderInjections(resp *http.Response) error {
 			return ErrHeaderInjectionDetected
 		}
 
-		if slices.ContainsFunc(vv, containsControlChars) {
-			return ErrHeaderInjectionDetected
+		for i := 0; i < len(vv); i++ {
+			if containsControlChars(vv[i]) {
+				return ErrHeaderInjectionDetected
+			}
 		}
 	}
 

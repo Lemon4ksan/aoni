@@ -9,7 +9,6 @@ import (
 	"context"
 	"crypto/tls"
 	stdio "io"
-	"maps"
 	"net"
 	"net/http"
 	"net/url"
@@ -164,11 +163,6 @@ func (c *Client) Request(
 	method, path string,
 	mods ...RequestModifier,
 ) (*http.Response, error) {
-	targetURLStr, err := c.resolveTargetURL(path)
-	if err != nil {
-		return nil, err
-	}
-
 	cfg := GetRequestConfig(ctx)
 	if cfg != nil {
 		ApplyRequestConfigDefaults(cfg, c)
@@ -177,18 +171,52 @@ func (c *Client) Request(
 		ApplyRequestConfigDefaults(cfg, c)
 	}
 
-	u, err := urlutil.Parse(targetURLStr)
-	if err != nil {
-		return nil, &Error{Op: "failed to parse URL", Err: err}
+	var u *url.URL
+	if len(path) > 0 && path[0] == '/' && c.prepared.BaseURL != nil {
+		u = &url.URL{
+			Scheme: c.prepared.BaseURL.Scheme,
+			Host:   c.prepared.BaseURL.Host,
+			Path:   path,
+		}
+	} else {
+		targetURLStr, resolveErr := c.resolveTargetURL(path)
+		if resolveErr != nil {
+			return nil, resolveErr
+		}
+
+		var parseErr error
+
+		u, parseErr = urlutil.Parse(targetURLStr)
+		if parseErr != nil {
+			return nil, &Error{Op: "failed to parse URL", Err: parseErr}
+		}
 	}
 
-	req, err := http.NewRequestWithContext(ctx, method, u.String(), http.NoBody) //nolint:gosec
-	if err != nil {
-		return nil, &Error{Op: "failed to create request", Err: err}
+	reqHeader := make(http.Header, len(c.prepared.PrecomputedDefaultHeaders)+len(c.defaults.Headers))
+	if len(c.prepared.PrecomputedDefaultHeaders) > 0 {
+		for i := range c.prepared.PrecomputedDefaultHeaders {
+			h := &c.prepared.PrecomputedDefaultHeaders[i]
+			reqHeader[h.Key] = h.Slice
+		}
+	} else if len(c.defaults.Headers) > 0 {
+		for k, v := range c.defaults.Headers {
+			reqHeader[k] = append([]string(nil), v...)
+		}
 	}
 
-	if len(c.defaults.Headers) > 0 {
-		maps.Copy(req.Header, c.defaults.Headers)
+	req := &http.Request{
+		Method:     method,
+		URL:        u,
+		Proto:      "HTTP/1.1",
+		ProtoMajor: 1,
+		ProtoMinor: 1,
+		Header:     reqHeader,
+		Body:       http.NoBody,
+		Host:       u.Host,
+	}
+
+	if ctx != nil {
+		req = req.WithContext(ctx)
 	}
 
 	stdReq := NewStdRequest(req)
