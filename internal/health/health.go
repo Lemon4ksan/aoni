@@ -10,6 +10,8 @@ import (
 	"time"
 
 	"golang.org/x/sys/cpu"
+
+	"github.com/lemon4ksan/aoni/internal/clock"
 )
 
 // Status represents the operational health state of a tracked network endpoint.
@@ -18,15 +20,15 @@ type Status int
 const (
 	// StatusHealthy indicates the endpoint is fully operational with zero consecutive failures.
 	StatusHealthy Status = iota
-	// StatusDegraded indicates the endpoint experienced failures but remains below the threshold.
+	// StatusDegraded indicates the endpoint has experienced non-fatal transient failures.
 	StatusDegraded
-	// StatusUnhealthy indicates the endpoint exceeded max failures and is currently in cooldown.
+	// StatusUnhealthy indicates consecutive failures reached threshold; traffic is paused during cooldown.
 	StatusUnhealthy
-	// StatusRecovering indicates the cooldown period elapsed and the endpoint is ready for a trial probe.
+	// StatusRecovering indicates cooldown expired and endpoint is undergoing trial recovery traffic.
 	StatusRecovering
 )
 
-// String returns a human-readable representation of [Status].
+// String returns the human-readable text representation of Status.
 func (s Status) String() string {
 	switch s {
 	case StatusHealthy:
@@ -42,31 +44,39 @@ func (s Status) String() string {
 	}
 }
 
-// Tracker monitors endpoint reliability via failure thresholds and manages cooldown state recovery.
+// Tracker maintains atomic health counters and exponential cooldown states for a single host/endpoint.
 type Tracker struct {
+	_ cpu.CacheLinePad
+
+	name        string
+	maxFails    uint32
+	retryAfter  time.Duration
+	failCount   atomic.Uint32
+	recoveredAt atomic.Int64
+	unhealthy   atomic.Bool
+
 	onUnhealthy func(name string, fails uint32, retryAfter time.Duration)
 	onRecovered func(name string)
-	name        string
-	retryAfter  time.Duration
-	maxFails    uint32
 
-	_           cpu.CacheLinePad
-	recoveredAt atomic.Int64
-	_           cpu.CacheLinePad
-	failCount   atomic.Uint32
-	_           cpu.CacheLinePad
-	unhealthy   atomic.Bool
-	_           cpu.CacheLinePad
+	_ cpu.CacheLinePad
 }
 
-// NewTracker creates a thread-safe [Tracker] configured with failure thresholds and state callbacks.
+// NewTracker constructs a [Tracker] with maxFails failure threshold and retryAfter cooldown.
 func NewTracker(
 	name string,
 	maxFails uint32,
 	retryAfter time.Duration,
-	onUnhealthy func(string, uint32, time.Duration),
-	onRecovered func(string),
+	onUnhealthy func(name string, fails uint32, retryAfter time.Duration),
+	onRecovered func(name string),
 ) *Tracker {
+	if maxFails == 0 {
+		maxFails = 3
+	}
+
+	if retryAfter <= 0 {
+		retryAfter = 10 * time.Second
+	}
+
 	return &Tracker{
 		name:        name,
 		maxFails:    maxFails,
@@ -80,7 +90,7 @@ func NewTracker(
 func (h *Tracker) MarkFailed() {
 	fails := h.failCount.Add(1)
 	if fails >= h.maxFails {
-		h.recoveredAt.Store(time.Now().Add(h.retryAfter).UnixNano())
+		h.recoveredAt.Store(clock.CoarseNowNano() + h.retryAfter.Nanoseconds())
 
 		if h.unhealthy.CompareAndSwap(false, true) && h.onUnhealthy != nil {
 			h.onUnhealthy(h.name, fails, h.retryAfter)
@@ -103,7 +113,7 @@ func (h *Tracker) IsAvailable() bool {
 		return true
 	}
 
-	return time.Now().UnixNano() >= h.recoveredAt.Load()
+	return clock.CoarseNowNano() >= h.recoveredAt.Load()
 }
 
 // FailCount returns the current consecutive recorded failure count.
@@ -137,7 +147,7 @@ func (h *Tracker) Status() Status {
 		return StatusHealthy
 	}
 
-	if time.Now().UnixNano() >= h.recoveredAt.Load() {
+	if clock.CoarseNowNano() >= h.recoveredAt.Load() {
 		return StatusRecovering
 	}
 

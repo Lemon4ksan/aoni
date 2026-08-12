@@ -10,6 +10,8 @@ import (
 	"errors"
 	"sync"
 	"time"
+
+	"github.com/lemon4ksan/aoni/internal/clock"
 )
 
 // ErrCacheMiss is returned when a requested HTTP response is not found in the cache or has expired.
@@ -48,7 +50,7 @@ func (s *InMemoryStore) Get(_ context.Context, key any) ([]byte, error) {
 	entry, ok := s.items[key]
 	s.mu.RUnlock()
 
-	if !ok || time.Now().After(entry.expiresAt) {
+	if !ok || clock.CoarseTime().After(entry.expiresAt) {
 		return nil, ErrCacheMiss
 	}
 
@@ -62,7 +64,7 @@ func (s *InMemoryStore) Set(_ context.Context, key any, val []byte, ttl time.Dur
 
 	s.items[key] = inMemoryEntry{
 		value:     val,
-		expiresAt: time.Now().Add(ttl),
+		expiresAt: clock.CoarseTime().Add(ttl),
 	}
 
 	return nil

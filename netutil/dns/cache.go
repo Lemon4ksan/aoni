@@ -12,6 +12,7 @@ import (
 
 	"github.com/lemon4ksan/miyako/batto"
 
+	"github.com/lemon4ksan/aoni/internal/clock"
 	"github.com/lemon4ksan/aoni/netutil/dns/wire"
 )
 
@@ -75,7 +76,7 @@ func (c *InMemoryDNSCache) evictionLoop(ctx context.Context) {
 func (c *InMemoryDNSCache) purgeExpired() {
 	c.mu.Lock()
 
-	now := time.Now()
+	now := clock.CoarseTime()
 	for k, v := range c.cache {
 		if now.After(v.expiry) {
 			delete(c.cache, k)
@@ -91,7 +92,7 @@ func (c *InMemoryDNSCache) LookupIPAddr(ctx context.Context, host string) ([]net
 	entry, ok := c.cache[host]
 	c.mu.RUnlock()
 
-	if ok && time.Now().Before(entry.expiry) {
+	if ok && clock.CoarseTime().Before(entry.expiry) {
 		return entry.ips, nil
 	}
 

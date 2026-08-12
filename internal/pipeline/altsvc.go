@@ -8,6 +8,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/lemon4ksan/aoni/internal/clock"
 )
 
 type altSvcEntry struct {
@@ -45,7 +47,7 @@ func (c *AltSvcCache) ParseAndStore(host, headerVal string) {
 
 	c.entries[host] = altSvcEntry{
 		target:    "h3",
-		expiresAt: time.Now().Add(24 * time.Hour),
+		expiresAt: clock.CoarseTime().Add(24 * time.Hour),
 	}
 }
 
@@ -58,13 +60,14 @@ func (c *AltSvcCache) HasH3Support(host string) bool {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 
-	if cd, exists := c.cooldowns[host]; exists && time.Now().Before(cd) {
+	now := clock.CoarseTime()
+	if cd, exists := c.cooldowns[host]; exists && now.Before(cd) {
 		return false
 	}
 
 	entry, exists := c.entries[host]
 
-	return exists && time.Now().Before(entry.expiresAt)
+	return exists && now.Before(entry.expiresAt)
 }
 
 // RecordH3Failure marks a host in QUIC/H3 cooldown after connection drops, falling back to H2/H1.
@@ -80,5 +83,5 @@ func (c *AltSvcCache) RecordH3Failure(host string, cooldownDuration time.Duratio
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
-	c.cooldowns[host] = time.Now().Add(cooldownDuration)
+	c.cooldowns[host] = clock.CoarseTime().Add(cooldownDuration)
 }

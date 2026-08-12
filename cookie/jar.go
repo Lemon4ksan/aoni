@@ -16,6 +16,8 @@ import (
 	"github.com/lemon4ksan/miyako/generic"
 	"github.com/lemon4ksan/miyako/sync/keylock"
 	"golang.org/x/net/publicsuffix"
+
+	"github.com/lemon4ksan/aoni/internal/clock"
 )
 
 type (
@@ -276,7 +278,7 @@ func (pj *PersistentJar) Cookies(u *url.URL) []*http.Cookie {
 		return nil
 	}
 
-	now := time.Now()
+	now := clock.CoarseTime()
 	validCookies := make([]*http.Cookie, 0, len(cookies))
 	hasExpired := false
 
@@ -312,7 +314,7 @@ func (pj *PersistentJar) purgeExpired() {
 	pj.mu.Lock()
 	defer pj.mu.Unlock()
 
-	now := time.Now()
+	now := clock.CoarseTime()
 	changed := false
 
 	for k, c := range pj.cookiesMap {
@@ -338,7 +340,7 @@ func (pj *PersistentJar) SetCookies(u *url.URL, cookies []*http.Cookie) {
 	pj.CookieJar.SetCookies(u, cookies)
 
 	pj.mu.Lock()
-	now := time.Now()
+	now := clock.CoarseTime()
 	changed := false
 
 	for _, c := range cookies {
