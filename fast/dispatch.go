@@ -207,7 +207,7 @@ func (c *Client) tryDispatchH3(
 	}
 
 	if c.isRecoverableStatus(fastResp.StatusCode()) {
-		tr, errRec, _ := c.recoverSpecialStatus(ctx, host, fastReq, fastResp)
+		tr, errRec, _ := c.recoverSpecialStatus(ctx, fastReq, fastResp)
 		return tr, errRec, true
 	}
 
@@ -242,7 +242,7 @@ func (c *Client) tryDispatchH2(
 
 	if c.isRecoverableStatus(fastResp.StatusCode()) {
 		c.removeH2Client(host)
-		trRec, errRec, _ := c.recoverSpecialStatus(ctx, host, fastReq, fastResp)
+		trRec, errRec, _ := c.recoverSpecialStatus(ctx, fastReq, fastResp)
 
 		return trRec, errRec, true
 	}
@@ -272,7 +272,7 @@ func (c *Client) dispatchH1WithFallbacks(
 	}
 
 	if c.isRecoverableStatus(fastResp.StatusCode()) {
-		tr, errRec, released := c.recoverSpecialStatus(ctx, host, fastReq, fastResp)
+		tr, errRec, released := c.recoverSpecialStatus(ctx, fastReq, fastResp)
 		return tr, errRec, released
 	}
 
@@ -298,7 +298,7 @@ func (c *Client) fallbackH1ToH2(
 
 	if c.isRecoverableStatus(fastResp.StatusCode()) {
 		c.removeH2Client(host)
-		trRec, errRec, released := c.recoverSpecialStatus(ctx, host, fastReq, fastResp)
+		trRec, errRec, released := c.recoverSpecialStatus(ctx, fastReq, fastResp)
 
 		return trRec, errRec, released
 	}
@@ -316,7 +316,6 @@ func (c *Client) isRecoverableStatus(code int) bool {
 
 func (c *Client) recoverSpecialStatus(
 	ctx context.Context,
-	host string,
 	fastReq *fasthttp.Request,
 	fastResp *fasthttp.Response,
 ) (map[string][]string, error, bool) {

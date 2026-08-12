@@ -754,7 +754,7 @@ func (c *Client) applyConfig(cfg Config) {
 	c.fingerprint = cfg.Fingerprint
 	c.defaults = cfg.Defaults
 	c.engineConfig = cfg.Engine
-	c.coreEngine = pipeline.NewEngine(cfg.Defaults.BaseURL, cfg.Defaults.Headers, c.Transport(), 15*time.Second, 0)
+	c.coreEngine = pipeline.NewEngine(cfg.Defaults.BaseURL, cfg.Defaults.Headers)
 	c.prepared = c.coreEngine.Prepared
 
 	applyEngineConfig(c, cfg.Engine)

@@ -319,7 +319,7 @@ func TestPipeline_DisabledFlagsAndLookupDecoder(t *testing.T) {
 		Challenge:  true,
 	}
 
-	pipeEngine.initTx(tx, mReq, pipeCfg)
+	pipeEngine.initTx(tx, pipeCfg)
 
 	assert.Equal(t, uint32(0), tx.Flags&FlagDecompress)
 	assert.Equal(t, uint32(0), tx.Flags&FlagValidate)

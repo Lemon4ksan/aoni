@@ -57,7 +57,7 @@ func (p *Pipeline[Req, Resp]) Execute(
 	tx := AcquireTx(ctx)
 	defer ReleaseTx(tx)
 
-	p.initTx(tx, req, pipe)
+	p.initTx(tx, pipe)
 
 	if stdReq, ok := any(req).(*http.Request); ok {
 		if stdDoer, okDoer := any(doer).(interface {

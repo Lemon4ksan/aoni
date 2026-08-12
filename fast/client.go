@@ -79,7 +79,7 @@ func NewClient(opts ...aoni.ClientOption) *Client {
 	c.applyCustomDialer()
 	c.applyPowerManagement(c.config.Network.EnablePowerManagement)
 
-	c.coreEngine = pipeline.NewEngine(c.config.Defaults.BaseURL, c.config.Defaults.Headers, nil, 15*time.Second, 0)
+	c.coreEngine = pipeline.NewEngine(c.config.Defaults.BaseURL, c.config.Defaults.Headers)
 	c.prepared = c.coreEngine.Prepared
 	c.prepared.FastPathCapable = (c.config.Engine.CookieJar == nil && c.config.Defaults.Inspector == nil)
 
@@ -131,13 +131,7 @@ func (c *Client) With(opts ...aoni.ClientOption) *Client {
 
 	cloned.applyPowerManagement(cloned.config.Network.EnablePowerManagement)
 
-	cloned.coreEngine = pipeline.NewEngine(
-		cloned.config.Defaults.BaseURL,
-		cloned.config.Defaults.Headers,
-		nil,
-		15*time.Second,
-		0,
-	)
+	cloned.coreEngine = pipeline.NewEngine(cloned.config.Defaults.BaseURL, cloned.config.Defaults.Headers)
 	cloned.prepared = cloned.coreEngine.Prepared
 	cloned.prepared.FastPathCapable = (cloned.config.Engine.CookieJar == nil && cloned.config.Defaults.Inspector == nil)
 
@@ -597,9 +591,7 @@ func (c *Client) executeWithRedirects(
 			return nil, ErrMaxRedirectsExceeded, false
 		}
 
-		if err := applyRedirectMethodAndBody(statusCode, fastReq); err != nil {
-			return nil, err, false
-		}
+		applyRedirectMethodAndBody(statusCode, fastReq)
 
 		method := bytes.Clone(fastReq.Header.Method())
 		nextURI := fasthttp.AcquireURI()
@@ -880,7 +872,7 @@ func isHTTPSDowngrade(u1, u2 *fasthttp.URI) bool {
 	return bytes.EqualFold(u1.Scheme(), []byte("https")) && bytes.EqualFold(u2.Scheme(), []byte("http"))
 }
 
-func applyRedirectMethodAndBody(statusCode int, req *fasthttp.Request) error {
+func applyRedirectMethodAndBody(statusCode int, req *fasthttp.Request) {
 	switch statusCode {
 	case fasthttp.StatusMovedPermanently, fasthttp.StatusFound, fasthttp.StatusSeeOther:
 		method := string(req.Header.Method())
@@ -891,8 +883,6 @@ func applyRedirectMethodAndBody(statusCode int, req *fasthttp.Request) error {
 			req.Header.Del("Content-Length")
 		}
 	}
-
-	return nil
 }
 
 func decompressFastResponse(resp *fasthttp.Response) bool {

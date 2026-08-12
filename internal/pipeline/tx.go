@@ -138,7 +138,7 @@ func ReleaseTx(tx *Tx) {
 	txPool.Put(tx)
 }
 
-func (p *Pipeline[Req, Resp]) initTx(tx *Tx, req any, pipe PipelineConfig) {
+func (p *Pipeline[Req, Resp]) initTx(tx *Tx, pipe PipelineConfig) {
 	tx.DPIJitter = pipe.DPIJitter
 	tx.ProxyFailover = pipe.ProxyFailover
 	tx.Hedging = pipe.Hedging
