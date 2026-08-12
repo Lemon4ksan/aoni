@@ -24,6 +24,7 @@ import (
 	"golang.org/x/sys/cpu"
 
 	"github.com/lemon4ksan/aoni/internal/bytesconv"
+	"github.com/lemon4ksan/aoni/internal/ringbuf"
 	"github.com/lemon4ksan/aoni/telemetry"
 )
 
@@ -84,6 +85,7 @@ type Conn struct {
 
 	in           chan *Context
 	out          chan *FrameHeader
+	outRing      *ringbuf.SPSCRingBuffer[FrameHeader]
 	pingInterval time.Duration
 	closed       uint64
 	inClosed     bool
@@ -103,6 +105,7 @@ func NewConn(c net.Conn, opts ConnOpts) *Conn {
 		currentWindow: 15663105,
 		in:            make(chan *Context, 128),
 		out:           make(chan *FrameHeader, 128),
+		outRing:       ringbuf.NewSPSCRingBuffer[FrameHeader](512),
 		pingInterval:  opts.PingInterval,
 		disableAcks:   opts.DisablePingChecking,
 		onDisconnect:  opts.OnDisconnect,
@@ -247,10 +250,11 @@ func (c *Conn) CancelStream(ctx *Context) {
 	rst.SetCode(StreamCanceled)
 	fr.SetBody(rst)
 
-	select {
-	case c.out <- fr:
-	default:
-		ReleaseFrameHeader(fr)
+	if !c.outRing.Push(fr) {
+		select {
+		case c.out <- fr:
+		default:
+		}
 	}
 }
 
@@ -414,6 +418,25 @@ func (c *Conn) writeLoop() {
 }
 
 func (c *Conn) selectWriteEvent(pingChan <-chan time.Time) (bool, error) {
+	if fr := c.outRing.Pop(); fr != nil {
+		defer ReleaseFrameHeader(fr)
+
+		c.writeMu.Lock()
+
+		_, wErr := fr.WriteTo(c.bw)
+		if wErr == nil {
+			wErr = c.bw.Flush()
+		}
+
+		c.writeMu.Unlock()
+
+		if wErr != nil {
+			return true, wErr
+		}
+
+		return false, nil
+	}
+
 	select {
 	case ctx, ok := <-c.in:
 		if !ok {

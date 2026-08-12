@@ -80,6 +80,16 @@ func forwardAdapterToMasque(
 	opts BridgeOptions,
 ) {
 	buf := make([]byte, 65535)
+	vtable := NewIPProtocolVTable()
+
+	// Register fast-path handlers for TCP (6), UDP (17), and ICMP (1/58)
+	vtable.Register(6, func(packet []byte) error {
+		if opts.MaxMTU > 0 {
+			ClampTCPMSSInPlace(packet, opts.MaxMTU)
+		}
+
+		return nil
+	})
 
 	for {
 		select {
@@ -103,13 +113,11 @@ func forwardAdapterToMasque(
 				continue
 			}
 
-			if opts.MaxMTU > 0 {
-				ClampTCPMSSInPlace(packet, opts.MaxMTU)
+			_ = vtable.DispatchIPPacket(packet)
 
-				if n > opts.MaxMTU {
-					handleMTUOverflow(adapter, packet, uint32(opts.MaxMTU))
-					continue
-				}
+			if opts.MaxMTU > 0 && n > opts.MaxMTU {
+				handleMTUOverflow(adapter, packet, uint32(opts.MaxMTU))
+				continue
 			}
 
 			if _, writeErr := masqueConn.Write(packet); writeErr != nil {
