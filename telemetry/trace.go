@@ -22,6 +22,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/lemon4ksan/aoni/fingerprint/ja4"
@@ -30,9 +31,12 @@ import (
 	"github.com/lemon4ksan/aoni/netutil/probe"
 )
 
+var correlationCounter uint64
+
 // GenerateCorrelationID generates a fast, monotonic Base36 correlation ID string.
 func GenerateCorrelationID() string {
-	timestamp := uint64(time.Now().UnixMicro())*1000 + uint64(fastrand.Intn(1000))
+	seq := atomic.AddUint64(&correlationCounter, 1)
+	timestamp := uint64(time.Now().UnixMicro())*1000 + (uint64(fastrand.Intn(1000)) ^ (seq & 0x3ff))
 
 	var buf [32]byte
 

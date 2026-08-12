@@ -169,11 +169,11 @@ func (p *Pipeline) prepareRequestContext(req Request, stdReq *http.Request) *htt
 		ctx = cookie.WithProxyAddress(ctx, proxyStr)
 	}
 
-	if ctx == stdReq.Context() {
-		return stdReq
+	if ctx != stdReq.Context() {
+		return stdReq.WithContext(ctx)
 	}
 
-	return stdReq.WithContext(ctx)
+	return stdReq
 }
 
 func (p *Pipeline) traceRequest(

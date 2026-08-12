@@ -190,6 +190,15 @@ func (p *Pipeline) limitResponseSize(resp *http.Response, maxSize int64) error {
 		return nil
 	}
 
+	if resp.ContentLength > 0 && resp.ContentLength <= maxSize {
+		return nil
+	}
+
+	if resp.ContentLength > maxSize {
+		_ = resp.Body.Close()
+		return io.ErrResponseTooLarge
+	}
+
 	cl := resp.ContentLength
 	if cl <= 0 {
 		if clStr := resp.Header.Get("Content-Length"); clStr != "" {
