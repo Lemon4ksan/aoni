@@ -11,7 +11,9 @@ import (
 	"net/netip"
 	"sync"
 	"time"
+	"unsafe"
 
+	"github.com/lemon4ksan/aoni/internal/offheap"
 	"github.com/lemon4ksan/aoni/internal/sysnet"
 	"github.com/lemon4ksan/aoni/tunnel/tun"
 )
@@ -80,7 +82,6 @@ func forwardAdapterToMasque(
 	masqueConn net.Conn,
 	opts BridgeOptions,
 ) {
-	buf := make([]byte, 65535)
 	vtable := NewIPProtocolVTable()
 
 	// Register fast-path handlers for TCP (6), UDP (17), and ICMP (1/58)
@@ -92,41 +93,51 @@ func forwardAdapterToMasque(
 		return nil
 	})
 
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		default:
-			n, err := adapter.Read(buf)
-			if err != nil || n == 0 {
-				if err != nil {
+	_ = offheap.Scope(64*1024, func(arena *offheap.Arena) {
+		ptr := arena.Alloc(65535)
+		var buf []byte
+		if ptr != nil {
+			buf = unsafe.Slice((*byte)(ptr), 65535)
+		} else {
+			buf = make([]byte, 65535)
+		}
+
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			default:
+				n, err := adapter.Read(buf)
+				if err != nil || n == 0 {
+					if err != nil {
+						cancel()
+						return
+					}
+
+					continue
+				}
+
+				packet := buf[:n]
+
+				srcIP := ExtractSrcIP(packet)
+				if err := ValidateIngressSourceAddress(srcIP, opts.AllowedPrefixes); err != nil {
+					continue
+				}
+
+				_ = vtable.DispatchIPPacket(packet)
+
+				if opts.MaxMTU > 0 && n > opts.MaxMTU {
+					handleMTUOverflow(adapter, packet, uint32(opts.MaxMTU))
+					continue
+				}
+
+				if _, writeErr := sysnet.WriteVectorBuffers(masqueConn, [][]byte{packet}); writeErr != nil {
 					cancel()
 					return
 				}
-
-				continue
-			}
-
-			packet := buf[:n]
-
-			srcIP := ExtractSrcIP(packet)
-			if err := ValidateIngressSourceAddress(srcIP, opts.AllowedPrefixes); err != nil {
-				continue
-			}
-
-			_ = vtable.DispatchIPPacket(packet)
-
-			if opts.MaxMTU > 0 && n > opts.MaxMTU {
-				handleMTUOverflow(adapter, packet, uint32(opts.MaxMTU))
-				continue
-			}
-
-			if _, writeErr := sysnet.WriteVectorBuffers(masqueConn, [][]byte{packet}); writeErr != nil {
-				cancel()
-				return
 			}
 		}
-	}
+	})
 }
 
 func handleMTUOverflow(adapter tun.Adapter, packet []byte, mtu uint32) {
@@ -142,27 +153,35 @@ func forwardMasqueToAdapter(
 	adapter tun.Adapter,
 	masqueConn net.Conn,
 ) {
-	buf := make([]byte, 65535)
+	_ = offheap.Scope(64*1024, func(arena *offheap.Arena) {
+		ptr := arena.Alloc(65535)
+		var buf []byte
+		if ptr != nil {
+			buf = unsafe.Slice((*byte)(ptr), 65535)
+		} else {
+			buf = make([]byte, 65535)
+		}
 
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		default:
-			n, err := masqueConn.Read(buf)
-			if err != nil {
-				cancel()
+		for {
+			select {
+			case <-ctx.Done():
 				return
-			}
-
-			if n > 0 {
-				if _, writeErr := adapter.Write(buf[:n]); writeErr != nil {
+			default:
+				n, err := masqueConn.Read(buf)
+				if err != nil {
 					cancel()
 					return
 				}
+
+				if n > 0 {
+					if _, writeErr := adapter.Write(buf[:n]); writeErr != nil {
+						cancel()
+						return
+					}
+				}
 			}
 		}
-	}
+	})
 }
 
 // ClampTCPMSSInPlace inspects TCP SYN packets and overwrites the MSS option

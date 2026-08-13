@@ -12,10 +12,12 @@ import (
 	"mime/multipart"
 	"net/http"
 	"net/textproto"
+	"slices"
 	"strings"
 
 	"github.com/lemon4ksan/aoni"
 	"github.com/lemon4ksan/aoni/internal/io"
+	"github.com/lemon4ksan/aoni/internal/offheap"
 )
 
 // WithMultipart constructs an [aoni.RequestModifier] building an in-memory multipart/form-data request body.
@@ -23,7 +25,16 @@ func WithMultipart(fields map[string]string, files map[string]stdio.Reader) aoni
 	return aoni.RequestModifier{
 		Kind: aoni.ModCustom,
 		Fn: func(req aoni.Request) {
-			body := &bytes.Buffer{}
+			offBuf, err := offheap.NewBuffer(64 * 1024)
+			var body stdio.Writer = &bytes.Buffer{}
+			var getBytes = func() []byte { return body.(*bytes.Buffer).Bytes() }
+
+			if err == nil {
+				defer offBuf.Release()
+				body = offBuf
+				getBytes = func() []byte { return slices.Clone(offBuf.Bytes()) }
+			}
+
 			writer := multipart.NewWriter(body)
 
 			if cfg := aoni.GetOrInitRequestConfig(req); cfg.MultipartBoundary != "" {
@@ -55,7 +66,7 @@ func WithMultipart(fields map[string]string, files map[string]stdio.Reader) aoni
 				return
 			}
 
-			req.SetBodyBytes(body.Bytes())
+			req.SetBodyBytes(getBytes())
 			req.SetHeader("Content-Type", writer.FormDataContentType())
 		},
 	}
@@ -74,7 +85,16 @@ func WithMultipartFields(fields []MultipartField) aoni.RequestModifier {
 	return aoni.RequestModifier{
 		Kind: aoni.ModCustom,
 		Fn: func(req aoni.Request) {
-			body := &bytes.Buffer{}
+			offBuf, err := offheap.NewBuffer(64 * 1024)
+			var body stdio.Writer = &bytes.Buffer{}
+			var getBytes = func() []byte { return body.(*bytes.Buffer).Bytes() }
+
+			if err == nil {
+				defer offBuf.Release()
+				body = offBuf
+				getBytes = func() []byte { return slices.Clone(offBuf.Bytes()) }
+			}
+
 			writer := multipart.NewWriter(body)
 
 			if cfg := aoni.GetOrInitRequestConfig(req); cfg.MultipartBoundary != "" {
@@ -113,7 +133,7 @@ func WithMultipartFields(fields []MultipartField) aoni.RequestModifier {
 				return
 			}
 
-			req.SetBodyBytes(body.Bytes())
+			req.SetBodyBytes(getBytes())
 			req.SetHeader("Content-Type", writer.FormDataContentType())
 		},
 	}

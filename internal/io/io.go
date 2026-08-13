@@ -13,12 +13,15 @@ import (
 	"io"
 	"net"
 	"os"
+	"slices"
 	"sync"
 	"sync/atomic"
 	"time"
 
 	"github.com/klauspost/compress/gzip"
 	"github.com/lemon4ksan/miyako/generic"
+
+	"github.com/lemon4ksan/aoni/internal/offheap"
 )
 
 var (
@@ -358,6 +361,7 @@ type MultiReadBody struct {
 	tmpFile *os.File
 	reader  io.Reader
 	data    []byte
+	offBuf  *offheap.OffHeapBuffer
 	mu      sync.Mutex
 	closed  bool
 }
@@ -366,6 +370,40 @@ type MultiReadBody struct {
 func NewMultiReadBody(rc io.ReadCloser, threshold int64, disableDisk bool) (io.ReadCloser, error) {
 	if rc == nil {
 		return nil, nil
+	}
+
+	if threshold >= 64*1024 {
+		offBuf, err := offheap.NewBuffer(int(threshold + 1))
+		if err == nil {
+			limitReader := io.LimitReader(rc, threshold+1)
+			if _, cErr := CopyZeroAlloc(offBuf, limitReader); cErr != nil {
+				offBuf.Release()
+				_ = rc.Close()
+				return nil, cErr
+			}
+
+			if int64(offBuf.Len()) <= threshold {
+				_ = rc.Close()
+				data := offBuf.Bytes()
+
+				return &MultiReadBody{
+					offBuf: offBuf,
+					data:   data,
+					reader: bytes.NewReader(data),
+				}, nil
+			}
+
+			if disableDisk {
+				offBuf.Release()
+				_ = rc.Close()
+				return nil, ErrBufferLimitExceeded
+			}
+
+			initialBytes := slices.Clone(offBuf.Bytes())
+			offBuf.Release()
+
+			return createDiskBackedMultiReadBody(rc, initialBytes)
+		}
 	}
 
 	var buf bytes.Buffer
@@ -470,6 +508,11 @@ func (m *MultiReadBody) ReallyClose() {
 	}
 
 	m.closed = true
+
+	if m.offBuf != nil {
+		m.offBuf.Release()
+		m.offBuf = nil
+	}
 
 	if m.tmpFile != nil {
 		_ = m.tmpFile.Close()

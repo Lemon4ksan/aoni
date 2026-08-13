@@ -27,6 +27,7 @@ import (
 
 	"github.com/lemon4ksan/aoni"
 	"github.com/lemon4ksan/aoni/codec/decode"
+	"github.com/lemon4ksan/aoni/internal/offheap"
 	"github.com/lemon4ksan/aoni/mod"
 	"github.com/lemon4ksan/aoni/request"
 )
@@ -537,9 +538,26 @@ func readNextGRPCWebFrame[T any](reader io.Reader) (val T, done bool, err error)
 	flags := header[0]
 	length := binary.BigEndian.Uint32(header[1:5])
 
-	payload := make([]byte, length)
-	if _, err := io.ReadFull(reader, payload); err != nil {
-		return zero, false, err
+	var payload []byte
+	if length >= 16*1024 {
+		offBuf, err := offheap.NewBuffer(int(length))
+		if err == nil {
+			defer offBuf.Release()
+			payload = offBuf.Bytes()[:length]
+			if _, rErr := io.ReadFull(reader, payload); rErr != nil {
+				return zero, false, rErr
+			}
+		} else {
+			payload = make([]byte, length)
+			if _, rErr := io.ReadFull(reader, payload); rErr != nil {
+				return zero, false, rErr
+			}
+		}
+	} else {
+		payload = make([]byte, length)
+		if _, rErr := io.ReadFull(reader, payload); rErr != nil {
+			return zero, false, rErr
+		}
 	}
 
 	if flags&0x80 != 0 {

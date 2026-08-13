@@ -20,6 +20,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/lemon4ksan/aoni"
+	"github.com/lemon4ksan/aoni/internal/offheap"
 	"github.com/lemon4ksan/aoni/option"
 	"github.com/lemon4ksan/aoni/telemetry"
 )
@@ -182,24 +183,51 @@ func (i *TrafficInspector) captureBody(req *http.Request) string {
 	if err != nil {
 		return ""
 	}
+	defer bodyRc.Close()
 
-	bodyBytes, readErr := io.ReadAll(io.LimitReader(bodyRc, 128*1024))
-	_ = bodyRc.Close()
+	var bodyStr string
+	_ = offheap.Scope(128*1024, func(arena *offheap.Arena) {
+		buf := arena.AllocBuffer(128 * 1024)
+		if buf == nil {
+			bodyBytes, readErr := io.ReadAll(io.LimitReader(bodyRc, 128*1024))
+			if readErr == nil && len(bodyBytes) > 0 {
+				if utf8.Valid(bodyBytes) {
+					bodyStr = string(bodyBytes)
+				}
+			}
+			return
+		}
 
-	if readErr != nil || len(bodyBytes) == 0 {
-		return ""
-	}
+		tmp := make([]byte, 32*1024)
+		for {
+			nr, rErr := bodyRc.Read(tmp)
+			if nr > 0 {
+				_, _ = buf.Write(tmp[:nr])
+			}
+			if rErr != nil {
+				break
+			}
+		}
 
-	contentType := req.Header.Get("Content-Type")
-	if strings.HasPrefix(strings.ToLower(contentType), "multipart/form-data") {
-		return telemetry.SummarizeMultipartBody(bodyBytes, contentType)
-	}
+		bodyBytes := buf.Bytes()
+		if len(bodyBytes) == 0 {
+			return
+		}
 
-	if utf8.Valid(bodyBytes) {
-		return string(bodyBytes)
-	}
+		contentType := req.Header.Get("Content-Type")
+		if strings.HasPrefix(strings.ToLower(contentType), "multipart/form-data") {
+			bodyStr = telemetry.SummarizeMultipartBody(bodyBytes, contentType)
+			return
+		}
 
-	return "(binary payload omitted)"
+		if utf8.Valid(bodyBytes) {
+			bodyStr = string(bodyBytes)
+		} else {
+			bodyStr = "(binary payload omitted)"
+		}
+	})
+
+	return bodyStr
 }
 
 func (i *TrafficInspector) saveAndBroadcast(req CapturedRequest) {
