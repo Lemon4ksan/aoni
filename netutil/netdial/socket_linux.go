@@ -6,7 +6,12 @@
 
 package netdial
 
-import "golang.org/x/sys/unix"
+import (
+	"context"
+	"net"
+
+	"golang.org/x/sys/unix"
+)
 
 const (
 	soBusyPoll  = 50 // SOL_SOCKET SO_BUSY_POLL
@@ -35,4 +40,9 @@ func applyLinuxSocketOptions(fd uintptr, opts DialOptions) error {
 	_ = unix.SetsockoptInt(sfd, unix.IPPROTO_TCP, unix.TCP_NODELAY, 1)
 
 	return nil
+}
+
+// DialRIOSocket falls back to standard DialDirectTCP on Linux OS.
+func DialRIOSocket(ctx context.Context, network, target string, opts DialOptions) (net.Conn, error) {
+	return DialDirectTCP(ctx, network, target, "", opts)
 }

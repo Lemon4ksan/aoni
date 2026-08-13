@@ -165,6 +165,8 @@ func (c *Client) buildDialConfig(ctx context.Context) transport.DialConfig {
 		HeaderOrder:        c.fingerprint.HeaderOrder,
 		JA4Callback:        c.fingerprint.JA4Callback,
 		ConnFilters:        c.network.ConnFilters,
+		TCPQuickACK:        c.network.TCPQuickACK,
+		RegisteredIO:       c.network.HasExperimental(ExpRIO),
 	}
 
 	cfg.ApplyRequestOverrides(reqCfg)

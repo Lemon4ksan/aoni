@@ -307,6 +307,9 @@ type NetworkConfig struct {
 	// SSRFGuard blocks requests targeting private, loopback, link-local, or CGNAT IP ranges.
 	SSRFGuard bool
 
+	// TCPQuickACK enables TCP quick ACK socket option.
+	TCPQuickACK bool
+
 	// EnablePowerManagement monitors OS sleep/resume transitions and purges zombie connections.
 	EnablePowerManagement bool
 
@@ -1175,5 +1178,7 @@ func (c *Config) BuildDialConfig(ctx context.Context) transport.DialConfig {
 		Enable0RTT:         c.Fingerprint.Enable0RTT,
 		ECHConfigList:      c.Fingerprint.ECHConfigList,
 		ConnFilters:        c.Network.ConnFilters,
+		TCPQuickACK:        c.Network.TCPQuickACK,
+		RegisteredIO:       c.Network.HasExperimental(ExpRIO),
 	}
 }

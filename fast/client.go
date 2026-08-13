@@ -195,8 +195,10 @@ func (c *Client) Request(
 		extractUserInfoAndSetAuth(fastReq)
 
 		if c.config.Network.HasExperimental(aoni.ExpRIO) || c.config.Network.HasExperimental(aoni.ExpKernelBypass) {
-			if reg, err := sysnet.RegisterBuffer(fastReq.Body()); err == nil && reg != nil {
-				defer reg.Deregister()
+			if sysnet.IsRIOSupported() {
+				if reg, err := sysnet.RegisterBuffer(fastReq.Body()); err == nil && reg != nil {
+					defer reg.Deregister()
+				}
 			}
 		}
 

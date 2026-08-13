@@ -172,3 +172,32 @@ func (c *BatchUDPConn) WriteVectorTo(buffers [][]byte, addr net.Addr) (int64, er
 
 	return total, nil
 }
+
+// SetReadBuffer sets the size of the operating system's receive buffer associated with the UDP connection.
+func (c *BatchUDPConn) SetReadBuffer(bytes int) error {
+	if u, ok := c.PacketConn.(*net.UDPConn); ok {
+		return u.SetReadBuffer(bytes)
+	}
+
+	return nil
+}
+
+// SetWriteBuffer sets the size of the operating system's transmit buffer associated with the UDP connection.
+func (c *BatchUDPConn) SetWriteBuffer(bytes int) error {
+	if u, ok := c.PacketConn.(*net.UDPConn); ok {
+		return u.SetWriteBuffer(bytes)
+	}
+
+	return nil
+}
+
+// SyscallConn returns a raw network connection for OS syscall access.
+func (c *BatchUDPConn) SyscallConn() (syscallConn, error) {
+	if sys, ok := c.PacketConn.(interface {
+		SyscallConn() (syscallConn, error)
+	}); ok {
+		return sys.SyscallConn()
+	}
+
+	return nil, nil
+}
