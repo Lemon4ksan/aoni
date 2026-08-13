@@ -19,13 +19,7 @@ func AcquireTimer(d time.Duration) *time.Timer {
 	}
 
 	t := v.(*time.Timer)
-	if !t.Stop() {
-		select {
-		case <-t.C:
-		default:
-		}
-	}
-
+	stopAndDrainTimer(t)
 	t.Reset(d)
 
 	return t
@@ -37,12 +31,15 @@ func ReleaseTimer(t *time.Timer) {
 		return
 	}
 
+	stopAndDrainTimer(t)
+	timerPool.Put(t)
+}
+
+func stopAndDrainTimer(t *time.Timer) {
 	if !t.Stop() {
 		select {
 		case <-t.C:
 		default:
 		}
 	}
-
-	timerPool.Put(t)
 }
