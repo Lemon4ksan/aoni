@@ -12,11 +12,13 @@ import (
 	"strconv"
 	"sync"
 	"sync/atomic"
+	"unsafe"
 
 	"github.com/valyala/fasthttp"
 
 	"github.com/lemon4ksan/aoni"
 	"github.com/lemon4ksan/aoni/internal/bytesconv"
+	"github.com/lemon4ksan/aoni/internal/offheap"
 )
 
 var (
@@ -216,6 +218,62 @@ func (f *Response) SetUncompressed(v bool) {
 // Uncompressed reports whether the response body was transparently decompressed by the client.
 func (f *Response) Uncompressed() bool {
 	return f.uncompressed
+}
+
+// WriteTo streams response body payload to w using off-heap kernel pages for zero mheap pressure.
+func (f *Response) WriteTo(w io.Writer) (int64, error) {
+	if f == nil || f.resp == nil {
+		return 0, nil
+	}
+
+	body := f.resp.Body()
+	if len(body) > 0 {
+		n, err := w.Write(body)
+		return int64(n), err
+	}
+
+	if !f.resp.IsBodyStream() {
+		return 0, nil
+	}
+
+	stream := f.resp.BodyStream()
+	if stream == nil {
+		return 0, nil
+	}
+
+	var total int64
+	var streamErr error
+
+	_ = offheap.Scope(64*1024, func(arena *offheap.Arena) {
+		ptr := arena.Alloc(64 * 1024)
+		if ptr == nil {
+			total, streamErr = io.Copy(w, stream)
+			return
+		}
+
+		tmp := unsafe.Slice((*byte)(ptr), 64*1024)
+
+		for {
+			nr, rErr := stream.Read(tmp)
+			if nr > 0 {
+				nw, wErr := w.Write(tmp[:nr])
+				total += int64(nw)
+				if wErr != nil {
+					streamErr = wErr
+					return
+				}
+			}
+			if rErr == io.EOF {
+				return
+			}
+			if rErr != nil {
+				streamErr = rErr
+				return
+			}
+		}
+	})
+
+	return total, streamErr
 }
 
 // Release returns the Response adapter instance back to [sync.Pool] for memory recycling.
