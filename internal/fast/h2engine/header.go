@@ -39,6 +39,7 @@ type FrameHeader struct {
 	rawHeader [DefaultFrameSize]byte
 	payload   []byte
 	fr        Frame
+	arena     *offheap.Arena
 }
 
 // AcquireFrameHeader fetches a clean FrameHeader from memory pools.
@@ -212,7 +213,7 @@ func (f *FrameHeader) readFrom(br *bufio.Reader) (int64, error) {
 		return rn, h.Deserialize(f)
 	}
 
-	f.fr = AcquireFrame(f.kind)
+	f.fr = AcquireFrameInArena(f.arena, f.kind)
 
 	if f.length > 0 {
 		f.payload = resizeSlice(f.payload, f.length)

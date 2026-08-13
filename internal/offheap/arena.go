@@ -101,3 +101,45 @@ func (a *Arena) Release() {
 		a.size = 0
 	}
 }
+
+//go:noinline
+func fallbackAllocStruct[T any]() *T {
+	return new(T)
+}
+
+// AllocStruct allocates memory for a structure T directly inside the off-heap arena.
+// It executes zero heap allocations in Go's mheap when arena capacity suffices.
+//
+// CRITICAL GC RULE: Type T MUST be a Plain Old Data (POD) structure.
+// It MUST NOT contain Go heap pointers, strings, maps, channels, or slices,
+// because Go's Garbage Collector does not scan off-heap physical pages and
+// will collect any referenced heap objects as unreachable.
+func AllocStruct[T any](a *Arena) *T {
+	if a == nil {
+		return nil
+	}
+
+	var zero T
+	size := int(unsafe.Sizeof(zero))
+	if size == 0 {
+		return &zero
+	}
+
+	align := int(unsafe.Alignof(zero))
+	if align > 1 {
+		rem := int(a.offset) % align
+		if rem != 0 {
+			a.offset += int32(align - rem)
+		}
+	}
+
+	ptr := a.Alloc(size)
+	if ptr == nil {
+		return fallbackAllocStruct[T]()
+	}
+
+	// Zero-initialize off-heap memory directly without escaping local zero variable.
+	clear(unsafe.Slice((*byte)(ptr), size))
+
+	return (*T)(ptr)
+}

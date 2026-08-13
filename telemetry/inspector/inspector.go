@@ -53,6 +53,44 @@ type CapturedRequest struct {
 	ContentTransfer  time.Duration     `json:"content_transfer"`
 }
 
+// CapturedRequestPOD represents a zero-alloc Plain Old Data representation of captured request metrics.
+type CapturedRequestPOD struct {
+	ID               uint64
+	TimestampNs      int64
+	DurationNs       int64
+	RequestSize      int64
+	ResponseSize     int64
+	DNSLookupNs      int64
+	TCPConnNs        int64
+	TLSHandshakeNs   int64
+	ServerProcessNs  int64
+	ContentTransNs   int64
+	StatusCode       uint16
+	MethodCode       uint8
+}
+
+// AllocCapturedRequestPOD allocates a CapturedRequestPOD inside the specified off-heap arena.
+func AllocCapturedRequestPOD(arena *offheap.Arena, req CapturedRequest) *CapturedRequestPOD {
+	pod := offheap.AllocStruct[CapturedRequestPOD](arena)
+	if pod == nil {
+		return nil
+	}
+
+	pod.ID = uint64(req.ID)
+	pod.TimestampNs = req.Timestamp.UnixNano()
+	pod.DurationNs = int64(req.Duration)
+	pod.RequestSize = req.RequestSize
+	pod.ResponseSize = req.ResponseSize
+	pod.DNSLookupNs = int64(req.DNSLookup)
+	pod.TCPConnNs = int64(req.TCPConn)
+	pod.TLSHandshakeNs = int64(req.TLSHandshake)
+	pod.ServerProcessNs = int64(req.ServerProcessing)
+	pod.ContentTransNs = int64(req.ContentTransfer)
+	pod.StatusCode = uint16(req.Status)
+
+	return pod
+}
+
 // TrafficInspector holds request history and runs the embedded dashboard HTTP server.
 type TrafficInspector struct {
 	mu        sync.RWMutex

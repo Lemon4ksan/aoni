@@ -9,6 +9,7 @@ import (
 	"net/netip"
 
 	internalMasque "github.com/lemon4ksan/aoni/internal/masque"
+	"github.com/lemon4ksan/aoni/internal/offheap"
 )
 
 const (
@@ -21,6 +22,75 @@ const (
 	// CapsuleRouteAdvertisement specifies capsule type 0x03 per RFC 9484 Section 4.7.3.
 	CapsuleRouteAdvertisement uint64 = 0x03
 )
+
+// AssignedAddressPOD is a 100% Plain Old Data representation of assigned IP addresses for zero-alloc off-heap processing.
+type AssignedAddressPOD struct {
+	RequestID    uint64
+	IPVersion    byte
+	PrefixLength byte
+	RawIP        [16]byte
+}
+
+// DecodeAddressAssignPayloadPOD parses AssignedAddressPOD entries using offheap.AllocStruct when arena is provided.
+func DecodeAddressAssignPayloadPOD(arena *offheap.Arena, payload []byte) ([]*AssignedAddressPOD, error) {
+	var entries []*AssignedAddressPOD
+	offset := 0
+
+	for offset < len(payload) {
+		reqID, n, err := DecodeVarint(payload[offset:])
+		if err != nil {
+			return nil, err
+		}
+
+		offset += n
+
+		if offset+2 > len(payload) {
+			return nil, ErrInvalidCapsule
+		}
+
+		ipVer := payload[offset]
+		offset++
+
+		var rawIP [16]byte
+		switch ipVer {
+		case 4:
+			if offset+4+1 > len(payload) {
+				return nil, ErrInvalidCapsule
+			}
+			copy(rawIP[:4], payload[offset:offset+4])
+			offset += 4
+
+		case 6:
+			if offset+16+1 > len(payload) {
+				return nil, ErrInvalidCapsule
+			}
+			copy(rawIP[:16], payload[offset:offset+16])
+			offset += 16
+
+		default:
+			return nil, fmt.Errorf("%w: invalid IP version %d", ErrInvalidCapsule, ipVer)
+		}
+
+		prefixLen := payload[offset]
+		offset++
+
+		var pod *AssignedAddressPOD
+		if arena != nil {
+			pod = offheap.AllocStruct[AssignedAddressPOD](arena)
+		} else {
+			pod = &AssignedAddressPOD{}
+		}
+
+		pod.RequestID = reqID
+		pod.IPVersion = ipVer
+		pod.PrefixLength = prefixLen
+		pod.RawIP = rawIP
+
+		entries = append(entries, pod)
+	}
+
+	return entries, nil
+}
 
 // AssignedAddress represents an assigned IP address/prefix entry in ADDRESS_ASSIGN capsules.
 type AssignedAddress struct {

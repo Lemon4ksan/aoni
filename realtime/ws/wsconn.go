@@ -72,6 +72,7 @@ type wsRawConn struct {
 	writeMu    chan struct{}
 	once       sync.Once
 	offheapBuf *offheap.OffHeapBuffer
+	arena      *offheap.Arena
 }
 
 // WrapRawConn wraps a net.Conn into a zero-alloc ws.Conn using default buffer sizes.
@@ -88,6 +89,8 @@ func WrapRawConnConfig(conn net.Conn, isClient bool, readBufSize, writeBufSize i
 		writeBufSize = 4096
 	}
 
+	ar, _ := offheap.NewArena(64 * 1024)
+
 	c := &wsRawConn{
 		base:       conn,
 		br:         bufio.NewReaderSize(conn, readBufSize),
@@ -96,6 +99,7 @@ func WrapRawConnConfig(conn net.Conn, isClient bool, readBufSize, writeBufSize i
 		writeBuf:   make([]byte, 0, writeBufSize),
 		closed:     make(chan struct{}),
 		writeMu:    make(chan struct{}, 1),
+		arena:      ar,
 	}
 	c.writeMu <- struct{}{}
 
@@ -209,10 +213,57 @@ func (c *wsRawConn) Close() error {
 			c.offheapBuf.Release()
 			c.offheapBuf = nil
 		}
+		if c.arena != nil {
+			c.arena.Release()
+			c.arena = nil
+		}
 		_ = c.base.Close()
 	})
 
 	return nil
+}
+
+// WSFrameHeaderPOD is a zero-alloc Plain Old Data structure describing a WebSocket frame header.
+type WSFrameHeaderPOD struct {
+	PayloadLen uint64
+	MaskKey    [4]byte
+	Opcode     uint8
+	Fin        bool
+	Masked     bool
+}
+
+// ReadFrameHeaderPOD reads frame header metadata using offheap.AllocStruct when arena is provided.
+func (c *wsRawConn) ReadFrameHeaderPOD(arena *offheap.Arena) (*WSFrameHeaderPOD, error) {
+	if _, err := io.ReadFull(c.br, c.readHdr[:2]); err != nil {
+		return nil, err
+	}
+
+	fin := c.readHdr[0]&0x80 != 0
+	opcode := c.readHdr[0] & 0x0f
+	masked := c.readHdr[1]&0x80 != 0
+	basicLen := c.readHdr[1] & 0x7f
+
+	length, err := c.parseExtendedPayloadLength(basicLen)
+	if err != nil {
+		return nil, err
+	}
+
+	var hdr *WSFrameHeaderPOD
+	if arena != nil {
+		hdr = offheap.AllocStruct[WSFrameHeaderPOD](arena)
+	} else {
+		hdr = &WSFrameHeaderPOD{}
+	}
+
+	hdr.Fin = fin
+	hdr.Opcode = opcode
+	hdr.Masked = masked
+	hdr.PayloadLen = length
+	if masked {
+		hdr.MaskKey = c.readMask
+	}
+
+	return hdr, nil
 }
 
 // readFrame reads and parses an incoming frame using bufio.Reader for syscall reduction and handles RFC 7692 decompression.
@@ -238,6 +289,22 @@ func (c *wsRawConn) readFrame() (byte, []byte, error) {
 	length, err := c.parseExtendedPayloadLength(basicLen)
 	if err != nil {
 		return 0, nil, err
+	}
+
+	var hdr *WSFrameHeaderPOD
+	if c.arena != nil {
+		hdr = offheap.AllocStruct[WSFrameHeaderPOD](c.arena)
+		c.arena.Reset()
+	} else {
+		hdr = &WSFrameHeaderPOD{}
+	}
+
+	hdr.Fin = (c.readHdr[0] & 0x80) != 0
+	hdr.Opcode = opcode
+	hdr.Masked = masked
+	hdr.PayloadLen = length
+	if masked {
+		hdr.MaskKey = c.readMask
 	}
 
 	if opcode >= FrameClose {

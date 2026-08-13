@@ -10,6 +10,8 @@ import (
 	"errors"
 	"reflect"
 	"testing"
+
+	"github.com/lemon4ksan/aoni/internal/offheap"
 )
 
 func TestFrameHeaderFlags(t *testing.T) {
@@ -271,4 +273,33 @@ func TestContinuationFrame(t *testing.T) {
 	if c.EndHeaders() || len(c.Headers()) != 0 {
 		t.Fatalf("expected empty Continuation after Reset")
 	}
+}
+
+func TestAcquireFrameInArena(t *testing.T) {
+	_ = offheap.Scope(64*1024, func(arena *offheap.Arena) {
+		ping := AcquireFrameInArena(arena, FramePing)
+		if ping == nil || ping.Type() != FramePing {
+			t.Fatalf("expected FramePing instance")
+		}
+
+		prio := AcquireFrameInArena(arena, FramePriority)
+		if prio == nil || prio.Type() != FramePriority {
+			t.Fatalf("expected FramePriority instance")
+		}
+
+		wu := AcquireFrameInArena(arena, FrameWindowUpdate)
+		if wu == nil || wu.Type() != FrameWindowUpdate {
+			t.Fatalf("expected FrameWindowUpdate instance")
+		}
+
+		rst := AcquireFrameInArena(arena, FrameResetStream)
+		if rst == nil || rst.Type() != FrameResetStream {
+			t.Fatalf("expected FrameResetStream instance")
+		}
+
+		ReleaseFrame(ping)
+		ReleaseFrame(prio)
+		ReleaseFrame(wu)
+		ReleaseFrame(rst)
+	})
 }

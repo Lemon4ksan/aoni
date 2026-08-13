@@ -7,6 +7,8 @@ package h2engine
 import (
 	"strconv"
 	"sync"
+
+	"github.com/lemon4ksan/aoni/internal/offheap"
 )
 
 // FrameType identifies the protocol function of an HTTP/2 frame (RFC 7540 Section 6).
@@ -101,6 +103,34 @@ func AcquireFrame(frameType FrameType) Frame {
 	fr.Reset()
 
 	return fr
+}
+
+// AcquireFrameInArena fetches a clean Frame instance.
+// For POD frames (Ping, Priority, WindowUpdate, RstStream), if arena is non-nil,
+// it uses offheap.AllocStruct[T](arena) for 0-alloc single-cycle off-heap construction.
+func AcquireFrameInArena(arena *offheap.Arena, frameType FrameType) Frame {
+	if arena != nil {
+		switch frameType {
+		case FramePing:
+			p := offheap.AllocStruct[Ping](arena)
+			p.Reset()
+			return p
+		case FramePriority:
+			pr := offheap.AllocStruct[Priority](arena)
+			pr.Reset()
+			return pr
+		case FrameWindowUpdate:
+			wu := offheap.AllocStruct[WindowUpdate](arena)
+			wu.Reset()
+			return wu
+		case FrameResetStream:
+			rs := offheap.AllocStruct[RstStream](arena)
+			rs.Reset()
+			return rs
+		}
+	}
+
+	return AcquireFrame(frameType)
 }
 
 // ReleaseFrame returns a Frame instance back to memory pools.
