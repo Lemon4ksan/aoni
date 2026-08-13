@@ -13,6 +13,8 @@ import (
 
 	"github.com/quic-go/quic-go"
 	"github.com/valyala/fasthttp"
+
+	"github.com/lemon4ksan/aoni/internal/sysnet"
 )
 
 // Client manages connection pooling and multiplexing for HTTP/3 over QUIC.
@@ -92,8 +94,25 @@ func (c *Client) getConn(ctx context.Context, host string) (*ClientConn, error) 
 		}
 	}
 
-	qConn, err := quic.DialAddr(ctx, host, tlsConf, c.QUICConfig)
+	udpConn, err := net.ListenUDP("udp", nil)
 	if err != nil {
+		return nil, err
+	}
+
+	batchConn := sysnet.NewBatchUDPConn(udpConn)
+	tr := &quic.Transport{Conn: batchConn}
+
+	udpAddr, err := net.ResolveUDPAddr("udp", host)
+	if err != nil {
+		_ = tr.Close()
+
+		return nil, err
+	}
+
+	qConn, err := tr.Dial(ctx, udpAddr, tlsConf, c.QUICConfig)
+	if err != nil {
+		_ = tr.Close()
+
 		return nil, err
 	}
 

@@ -25,6 +25,7 @@ import (
 
 	"github.com/lemon4ksan/aoni/internal/bytesconv"
 	"github.com/lemon4ksan/aoni/internal/ringbuf"
+	"github.com/lemon4ksan/aoni/internal/sysnet"
 	"github.com/lemon4ksan/aoni/telemetry"
 )
 
@@ -419,13 +420,51 @@ func (c *Conn) writeLoop() {
 
 func (c *Conn) selectWriteEvent(pingChan <-chan time.Time) (bool, error) {
 	if fr := c.outRing.Pop(); fr != nil {
-		defer ReleaseFrameHeader(fr)
-
 		c.writeMu.Lock()
 
-		_, wErr := fr.WriteTo(c.bw)
-		if wErr == nil {
-			wErr = c.bw.Flush()
+		var batch [16]*FrameHeader
+
+		batch[0] = fr
+		n := 1
+
+		for n < 16 {
+			next := c.outRing.Pop()
+			if next == nil {
+				break
+			}
+
+			batch[n] = next
+			n++
+		}
+
+		var wErr error
+
+		if n == 1 {
+			_, wErr = fr.WriteTo(c.bw)
+			if wErr == nil {
+				wErr = c.bw.Flush()
+			}
+
+			ReleaseFrameHeader(fr)
+		} else {
+			var bufs [][]byte
+
+			for i := 0; i < n; i++ {
+				_, _ = batch[i].WriteTo(c.bw)
+				ReleaseFrameHeader(batch[i])
+			}
+
+			if c.bw.Buffered() > 0 {
+				writtenBuf := c.bw.AvailableBuffer()
+				if len(writtenBuf) > 0 {
+					bufs = [][]byte{writtenBuf}
+					_, wErr = sysnet.WriteVectorBuffers(c.c, bufs)
+				}
+
+				if wErr == nil {
+					wErr = c.bw.Flush()
+				}
+			}
 		}
 
 		c.writeMu.Unlock()

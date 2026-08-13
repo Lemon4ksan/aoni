@@ -12,6 +12,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/lemon4ksan/aoni/internal/sysnet"
 	"github.com/lemon4ksan/aoni/tunnel/tun"
 )
 
@@ -120,7 +121,7 @@ func forwardAdapterToMasque(
 				continue
 			}
 
-			if _, writeErr := masqueConn.Write(packet); writeErr != nil {
+			if _, writeErr := sysnet.WriteVectorBuffers(masqueConn, [][]byte{packet}); writeErr != nil {
 				cancel()
 				return
 			}
