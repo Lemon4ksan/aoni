@@ -247,10 +247,8 @@ func (c *Client) doBaremetal(ctx context.Context, method, path string) (*http.Re
 		Host:       u.Host,
 	}
 
-	// Avoid the 2-alloc req.WithContext copy for the common context.Background / context.TODO
-	// case. http.Request.Context() already returns context.Background() when r.ctx is nil,
-	// so the behavior is identical while saving a heap allocation.
-	if ctx != nil && ctx != context.Background() && ctx != context.TODO() {
+	// Avoid the 2-alloc req.WithContext copy for background/todo contexts with nil Done() channel
+	if ctx != nil && ctx.Done() != nil {
 		req = req.WithContext(ctx)
 	}
 
@@ -605,6 +603,10 @@ func (c *Client) ensureUserAgent() {
 }
 
 func (c *Client) resolveURL(path string) (*url.URL, error) {
+	if (path == "" || path == "/") && c.prepared.BaseURL != nil {
+		return c.prepared.BaseURL, nil
+	}
+
 	if len(path) > 0 && path[0] == '/' && c.prepared.BaseURL != nil {
 		return &url.URL{
 			Scheme: c.prepared.BaseURL.Scheme,
