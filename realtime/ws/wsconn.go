@@ -24,6 +24,7 @@ import (
 	"golang.org/x/net/http2"
 	"golang.org/x/net/http2/hpack"
 
+	"github.com/lemon4ksan/aoni/internal/offheap"
 	"github.com/lemon4ksan/aoni/internal/realtime/ws"
 	"github.com/lemon4ksan/aoni/internal/simd"
 )
@@ -67,9 +68,10 @@ type wsRawConn struct {
 	writeHdr    [maxFrameHeaderSize]byte // Fixed-size header buffer for zero-alloc writing
 	writeMask   [4]byte                  // Reusable mask buffer for zero-alloc writing
 	writeBuf    []byte                   // Reusable write buffer (protected by writeMu)
-	closed      chan struct{}
-	writeMu     chan struct{}
-	once        sync.Once
+	closed     chan struct{}
+	writeMu    chan struct{}
+	once       sync.Once
+	offheapBuf *offheap.OffHeapBuffer
 }
 
 // WrapRawConn wraps a net.Conn into a zero-alloc ws.Conn using default buffer sizes.
@@ -203,6 +205,10 @@ func (c *wsRawConn) CloseChan() <-chan struct{}         { return c.closed }
 func (c *wsRawConn) Close() error {
 	c.once.Do(func() {
 		close(c.closed)
+		if c.offheapBuf != nil {
+			c.offheapBuf.Release()
+			c.offheapBuf = nil
+		}
 		_ = c.base.Close()
 	})
 
@@ -229,7 +235,7 @@ func (c *wsRawConn) readFrame() (byte, []byte, error) {
 		return 0, nil, ErrReservedBitsSet
 	}
 
-	length, err := c.readFrameLengthZeroAlloc(basicLen)
+	length, err := c.parseExtendedPayloadLength(basicLen)
 	if err != nil {
 		return 0, nil, err
 	}
@@ -261,7 +267,7 @@ func (c *wsRawConn) readFrame() (byte, []byte, error) {
 	return opcode, payload, nil
 }
 
-func (c *wsRawConn) readFrameLengthZeroAlloc(basicLen byte) (uint64, error) {
+func (c *wsRawConn) parseExtendedPayloadLength(basicLen byte) (uint64, error) {
 	switch basicLen {
 	case 126:
 		if _, err := io.ReadFull(c.br, c.readHdr[2:4]); err != nil {
@@ -293,7 +299,24 @@ func (c *wsRawConn) readFramePayloadZeroAlloc(length uint64, masked bool) ([]byt
 		}
 	}
 
-	if uint64(cap(c.payloadBuf)) < length {
+	if length >= 64*1024 {
+		if c.offheapBuf == nil || uint64(c.offheapBuf.Cap()) < length {
+			if c.offheapBuf != nil {
+				c.offheapBuf.Release()
+			}
+			ohBuf, err := offheap.NewBuffer(int(length))
+			if err == nil {
+				c.offheapBuf = ohBuf
+			}
+		}
+		if c.offheapBuf != nil && c.offheapBuf.Bytes() != nil {
+			c.payloadBuf = c.offheapBuf.Bytes()[:length]
+		} else if uint64(cap(c.payloadBuf)) < length {
+			c.payloadBuf = make([]byte, length)
+		} else {
+			c.payloadBuf = c.payloadBuf[:length]
+		}
+	} else if uint64(cap(c.payloadBuf)) < length {
 		c.payloadBuf = make([]byte, length)
 	} else {
 		c.payloadBuf = c.payloadBuf[:length]
