@@ -23,8 +23,8 @@ var (
 	UserAgentFirefoxWindows = "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:153.0) Gecko/20100101 Firefox/153.0"
 	UserAgentFirefoxMacOS   = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:153.0) Gecko/20100101 Firefox/153.0"
 	UserAgentFirefoxLinux   = "Mozilla/5.0 (X11; Linux x86_64; rv:153.0) Gecko/20100101 Firefox/153.0"
-	UserAgentFirefoxAndroid = "Mozilla/5.0 (Android 16; Mobile; rv:153.0) Gecko/148.0 Firefox/153.0"
-	UserAgentFirefoxIOS     = "Mozilla/5.0 (iPhone; CPU iPhone OS 18_7 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) FxiOS/153.0 Mobile/15E148 Safari/605.1.15"
+	UserAgentFirefoxAndroid = "Mozilla/5.0 (Android 17; Mobile; rv:153.0) Gecko/148.0 Firefox/153.0"
+	UserAgentFirefoxIOS     = "Mozilla/5.0 (iPhone; CPU iPhone OS 26_6 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) FxiOS/153.0 Mobile/15E148 Safari/605.1.15"
 )
 
 var userAgents = map[profiles.OSKey]string{
