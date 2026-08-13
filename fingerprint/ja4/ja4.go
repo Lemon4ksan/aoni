@@ -43,13 +43,6 @@ var tlsVersionMap = map[uint16]string{
 	0x0002: "s2",
 }
 
-var greaseValues = map[uint16]struct{}{
-	0x0a0a: {}, 0x1a1a: {}, 0x2a2a: {}, 0x3a3a: {},
-	0x4a4a: {}, 0x5a5a: {}, 0x6a6a: {}, 0x7a7a: {},
-	0x8a8a: {}, 0x9a9a: {}, 0xaaaa: {}, 0xbaba: {},
-	0xcaca: {}, 0xdada: {}, 0xeaea: {}, 0xfafa: {},
-}
-
 var bufferPool = sync.Pool{
 	New: func() any {
 		return new(bytes.Buffer)
@@ -73,10 +66,10 @@ func releaseBuffer(buf *bytes.Buffer) {
 	}
 }
 
-// IsGREASE reports whether v matches a reserved TLS GREASE value.
+// IsGREASE reports whether v matches a reserved TLS GREASE value (RFC 8701).
+// Executed in 1 CPU cycle using zero-alloc bitwise mask verification.
 func IsGREASE(v uint16) bool {
-	_, ok := greaseValues[v]
-	return ok
+	return (v&0x0f0f) == 0x0a0a && byte(v) == byte(v>>8)
 }
 
 // Report holds computed TLS (JA4) and HTTP (JA4H) fingerprints alongside TLS metadata.

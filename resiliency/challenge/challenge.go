@@ -11,9 +11,9 @@ import (
 	"io"
 	"mime"
 	"net/http"
-	"strings"
 
 	"github.com/lemon4ksan/aoni"
+	"github.com/lemon4ksan/aoni/internal/bytesconv"
 )
 
 // prefixProvider allows inspecting the pre-buffered byte prefix of a response body
@@ -55,8 +55,7 @@ func DetectCloudflareChallenge(resp *http.Response) (bool, error) {
 		return false, nil
 	}
 
-	bodyStr := strings.ToLower(string(prefix))
-	if containsCloudflareSignatures(bodyStr) {
+	if containsCloudflareSignatures(prefix) {
 		return true, ErrCloudflareDetected
 	}
 
@@ -100,12 +99,12 @@ func isHTMLContentType(contentType string) bool {
 }
 
 func hasHTMLTags(prefix []byte) bool {
-	lower := strings.ToLower(string(prefix))
-	return strings.Contains(lower, "<html") || strings.Contains(lower, "<!doctype html")
+	return bytesconv.ContainsFoldASCII(prefix, "<html") ||
+		bytesconv.ContainsFoldASCII(prefix, "<!doctype html")
 }
 
-func containsCloudflareSignatures(body string) bool {
-	return strings.Contains(body, "cf-challenge") ||
-		strings.Contains(body, "ray id") ||
-		strings.Contains(body, "cloudflare")
+func containsCloudflareSignatures(prefix []byte) bool {
+	return bytesconv.ContainsFoldASCII(prefix, "cf-challenge") ||
+		bytesconv.ContainsFoldASCII(prefix, "ray id") ||
+		bytesconv.ContainsFoldASCII(prefix, "cloudflare")
 }
