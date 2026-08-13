@@ -12,6 +12,7 @@ import (
 	"slices"
 
 	"github.com/valyala/fasthttp"
+	"golang.org/x/sys/cpu"
 
 	"github.com/lemon4ksan/aoni"
 	"github.com/lemon4ksan/aoni/internal/bytesconv"
@@ -29,10 +30,13 @@ var requestAdapterStorage = pool.NewPerPStorage(func() *Request {
 // Callers acquiring requests via [NewRequest] or [Client.AcquireRequest] MUST release them
 // via [Client.ReleaseRequest] or [Request.Release] when request lifecycle terminates.
 type Request struct {
+	_          cpu.CacheLinePad
 	req        *fasthttp.Request
+	_          cpu.CacheLinePad
 	ctx        context.Context
 	getBody    func() (io.ReadCloser, error)
 	isAcquired bool
+	_          cpu.CacheLinePad
 }
 
 // NewRequest acquires a pooled [Request] adapter wrapping an active [*fasthttp.Request].

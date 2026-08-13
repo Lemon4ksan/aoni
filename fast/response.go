@@ -15,6 +15,7 @@ import (
 	"unsafe"
 
 	"github.com/valyala/fasthttp"
+	"golang.org/x/sys/cpu"
 
 	"github.com/lemon4ksan/aoni"
 	"github.com/lemon4ksan/aoni/internal/bytesconv"
@@ -53,9 +54,12 @@ func (b *fastBodyReadCloser) Close() error {
 // Response instances are recycled via [sync.Pool]. Callers MUST call [Response.Close] or [Response.Release]
 // when finished processing the response to avoid socket leaks and memory fragmentation.
 type Response struct {
+	_            cpu.CacheLinePad
 	resp         *fasthttp.Response
+	_            cpu.CacheLinePad
 	trailers     map[string][]string
 	uncompressed bool
+	_            cpu.CacheLinePad
 }
 
 // NewResponse acquires a pooled [Response] adapter wrapping an active [*fasthttp.Response].
@@ -321,10 +325,13 @@ func (f *Response) Close() error {
 
 // PooledResponse wraps a fasthttp request/response pair, automatically releasing objects back to [sync.Pool] upon Close.
 type PooledResponse struct {
+	_ cpu.CacheLinePad
 	Response
+	_        cpu.CacheLinePad
 	fastReq  *fasthttp.Request
 	fastResp *fasthttp.Response
 	closed   atomic.Bool
+	_        cpu.CacheLinePad
 }
 
 // NewPooledResponse acquires a pooled [PooledResponse] adapter wrapping active fastReq and fastResp.

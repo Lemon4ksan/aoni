@@ -214,6 +214,9 @@ func CanonicalHeaderKeyBytes(src []byte) []byte {
 	}
 
 	upper := true
+	_ = src[n-1]
+	_ = out[n-1]
+
 	for i := 0; i < n; i++ {
 		c := src[i]
 		if upper && 'a' <= c && c <= 'z' {
