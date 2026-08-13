@@ -168,13 +168,17 @@ func (f *FrameHeader) readFrom(br *bufio.Reader) (int64, error) {
 				offBuf, err := offheap.NewBuffer(int(f.length))
 				if err == nil {
 					defer offBuf.Release()
+
 					f.payload = offBuf.Bytes()[:f.length]
+
 					n, rErr := io.ReadFull(br, f.payload[:f.length])
 					if rErr != nil {
 						ReleaseFrame(f.fr)
 						return 0, rErr
 					}
+
 					rn += int64(n)
+
 					return rn, d.Deserialize(f)
 				}
 			}

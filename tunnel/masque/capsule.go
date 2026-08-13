@@ -34,6 +34,7 @@ type AssignedAddressPOD struct {
 // DecodeAddressAssignPayloadPOD parses AssignedAddressPOD entries using offheap.AllocStruct when arena is provided.
 func DecodeAddressAssignPayloadPOD(arena *offheap.Arena, payload []byte) ([]*AssignedAddressPOD, error) {
 	var entries []*AssignedAddressPOD
+
 	offset := 0
 
 	for offset < len(payload) {
@@ -57,6 +58,7 @@ func DecodeAddressAssignPayloadPOD(arena *offheap.Arena, payload []byte) ([]*Ass
 			if offset+4+1 > len(payload) {
 				return nil, ErrInvalidCapsule
 			}
+
 			copy(rawIP[:4], payload[offset:offset+4])
 			offset += 4
 
@@ -64,6 +66,7 @@ func DecodeAddressAssignPayloadPOD(arena *offheap.Arena, payload []byte) ([]*Ass
 			if offset+16+1 > len(payload) {
 				return nil, ErrInvalidCapsule
 			}
+
 			copy(rawIP[:16], payload[offset:offset+16])
 			offset += 16
 

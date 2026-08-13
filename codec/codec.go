@@ -11,7 +11,16 @@ import (
 	"github.com/lemon4ksan/aoni"
 	"github.com/lemon4ksan/aoni/codec/decode"
 	"github.com/lemon4ksan/aoni/codec/values"
+	"github.com/lemon4ksan/aoni/internal/rodata"
 	"github.com/lemon4ksan/aoni/mod"
+)
+
+// Static header constants precompiled into read-only binary memory (.rodata) for zero-allocation framing.
+var (
+	StaticHeaderContentTypeJSON     = rodata.ValApplicationJSON
+	StaticHeaderContentTypeForm     = rodata.ValApplicationForm
+	StaticHeaderAcceptEncodingGzip  = rodata.ValAcceptEncodingGzip
+	StaticHeaderConnectionKeepAlive = rodata.ValConnectionKeepAlive
 )
 
 // Codec defines a unified strategy for marshaling outbound request payloads and unmarshaling incoming response streams.

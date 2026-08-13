@@ -58,6 +58,7 @@ func LimitToContentLength(r io.Reader, contentLen int64) io.Reader {
 // It avoids the heap allocation that io.LimitReader would incur.
 func copyWithLimit(w io.Writer, r io.ReadCloser, limit int64) (int64, error) {
 	bufPtr := copyBufPool.Get().(*[]byte)
+
 	buf := *bufPtr
 	defer func() {
 		if cap(*bufPtr) <= maxPoolBufferSize {
@@ -70,6 +71,7 @@ func copyWithLimit(w io.Writer, r io.ReadCloser, limit int64) (int64, error) {
 		n, err := r.Read(buf)
 		if n > 0 {
 			wn, werr := w.Write(buf[:n])
+
 			total += int64(wn)
 			if werr != nil {
 				return total, werr
@@ -404,13 +406,13 @@ func (r *ResponseBodyReadCloser) Unwrap() io.Closer { return r.ReadCloser }
 
 // MultiReadBody buffers payload streams in RAM or temp files for repeatable reads.
 type MultiReadBody struct {
-	tmpFile    *os.File
-	reader     io.Reader
-	bytesRd    bytes.Reader
-	data       []byte
-	offBuf     *offheap.OffHeapBuffer
-	mu         sync.Mutex
-	closed     bool
+	tmpFile *os.File
+	reader  io.Reader
+	bytesRd bytes.Reader
+	data    []byte
+	offBuf  *offheap.OffHeapBuffer
+	mu      sync.Mutex
+	closed  bool
 }
 
 // Bytes returns the buffered payload data and whether the backing store is off-heap.
@@ -431,7 +433,9 @@ func NewMultiReadBody(rc io.ReadCloser, threshold int64, disableDisk bool) (io.R
 			wrote, cErr := copyWithLimit(offBuf, rc, threshold)
 			if cErr != nil {
 				offBuf.Release()
+
 				_ = rc.Close()
+
 				return nil, cErr
 			}
 
@@ -451,7 +455,9 @@ func NewMultiReadBody(rc io.ReadCloser, threshold int64, disableDisk bool) (io.R
 
 			if disableDisk {
 				offBuf.Release()
+
 				_ = rc.Close()
+
 				return nil, ErrBufferLimitExceeded
 			}
 

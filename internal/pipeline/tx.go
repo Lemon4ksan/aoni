@@ -8,19 +8,19 @@ import (
 	"context"
 	"net/http"
 	"net/url"
-	"sync"
 	"time"
 
 	"github.com/lemon4ksan/aoni/fingerprint"
 	"github.com/lemon4ksan/aoni/fingerprint/ja4"
 	"github.com/lemon4ksan/aoni/fingerprint/p0f"
+	"github.com/lemon4ksan/aoni/internal/pool"
 	"github.com/lemon4ksan/aoni/netutil/fragment"
 	"github.com/lemon4ksan/aoni/telemetry"
 )
 
-var txPool = sync.Pool{
-	New: func() any { return &Tx{} },
-}
+var txStorage = pool.NewPerPStorage(func() *Tx {
+	return &Tx{}
+})
 
 type UnsafeHook func(tx *Tx, req *http.Request, resp *http.Response) error
 
@@ -78,7 +78,8 @@ type Tx struct {
 
 // AcquireTx retrieves a clean [Tx] from pool.
 func AcquireTx(ctx context.Context) *Tx {
-	tx := txPool.Get().(*Tx)
+	tx := txStorage.Get()
+	*tx = Tx{}
 	tx.Ctx = ctx
 
 	return tx
@@ -135,7 +136,7 @@ func ReleaseTx(tx *Tx) {
 	tx.UnsafePhaseOrder = nil
 	tx.UnsafeHooks = nil
 
-	txPool.Put(tx)
+	txStorage.Put(tx)
 }
 
 func (p *Pipeline[Req, Resp]) initTx(tx *Tx, pipe PipelineConfig) {

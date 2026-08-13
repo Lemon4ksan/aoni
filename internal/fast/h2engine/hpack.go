@@ -8,6 +8,9 @@ import (
 	"bytes"
 	"fmt"
 	"sync"
+
+	"github.com/lemon4ksan/aoni/internal/pool"
+	"github.com/lemon4ksan/aoni/internal/rodata"
 )
 
 const (
@@ -17,9 +20,9 @@ const (
 	maxIndex    = 62
 )
 
-var headerPool = sync.Pool{
-	New: func() any { return &HeaderField{} },
-}
+var headerStorage = pool.NewPerPStorage(func() *HeaderField {
+	return &HeaderField{}
+})
 
 // HeaderField represents a key-value header entry inside HPACK tables.
 type HeaderField struct {
@@ -30,20 +33,24 @@ type HeaderField struct {
 
 // AcquireHeaderField retrieves a recycled HeaderField from memory pools.
 func AcquireHeaderField() *HeaderField {
-	return headerPool.Get().(*HeaderField)
+	return headerStorage.Get()
 }
 
 // ReleaseHeaderField clears and returns a HeaderField to memory pools.
 func ReleaseHeaderField(hf *HeaderField) {
 	if hf != nil {
 		hf.Reset()
-		headerPool.Put(hf)
+		headerStorage.Put(hf)
 	}
 }
 
-func (hf *HeaderField) String() string     { return string(hf.AppendBytes(nil)) }
-func (hf *HeaderField) Empty() bool        { return len(hf.key) == 0 && len(hf.value) == 0 }
-func (hf *HeaderField) Reset()             { hf.key = hf.key[:0]; hf.value = hf.value[:0]; hf.sensible = false }
+func (hf *HeaderField) String() string { return string(hf.AppendBytes(nil)) }
+func (hf *HeaderField) Empty() bool    { return len(hf.key) == 0 && len(hf.value) == 0 }
+func (hf *HeaderField) Reset() {
+	hf.key = nil
+	hf.value = nil
+	hf.sensible = false
+}
 func (hf *HeaderField) Size() uint32       { return uint32(len(hf.key) + len(hf.value) + 32) } //nolint:gosec
 func (hf *HeaderField) Key() string        { return string(hf.key) }
 func (hf *HeaderField) Value() string      { return string(hf.value) }
@@ -62,14 +69,59 @@ func (hf *HeaderField) SetBytes(k, v []byte) {
 	hf.SetValueBytes(v)
 }
 
-func (hf *HeaderField) SetKey(key string)          { hf.key = append(hf.key[:0], key...) }
-func (hf *HeaderField) SetValue(value string)      { hf.value = append(hf.value[:0], value...) }
-func (hf *HeaderField) SetKeyBytes(key []byte)     { hf.key = append(hf.key[:0], key...) }
-func (hf *HeaderField) SetValueBytes(value []byte) { hf.value = append(hf.value[:0], value...) }
+func (hf *HeaderField) SetKey(key string) {
+	if ik := rodata.InternKey(key); ik != nil {
+		hf.key = ik
+		return
+	}
+
+	hf.key = nil
+	hf.key = append(hf.key, key...)
+}
+
+func (hf *HeaderField) SetValue(value string) {
+	if iv := rodata.InternValue(value); iv != nil {
+		hf.value = iv
+		return
+	}
+
+	hf.value = nil
+	hf.value = append(hf.value, value...)
+}
+
+func (hf *HeaderField) SetKeyBytes(key []byte) {
+	if ik := rodata.InternKeyBytes(key); ik != nil {
+		hf.key = ik
+		return
+	}
+
+	hf.key = nil
+	hf.key = append(hf.key, key...)
+}
+
+func (hf *HeaderField) SetValueBytes(value []byte) {
+	if iv := rodata.InternValueBytes(value); iv != nil {
+		hf.value = iv
+		return
+	}
+
+	hf.value = nil
+	hf.value = append(hf.value, value...)
+}
 
 func (hf *HeaderField) CopyTo(other *HeaderField) {
-	other.key = append(other.key[:0], hf.key...)
-	other.value = append(other.value[:0], hf.value...)
+	if ik := rodata.InternKeyBytes(hf.key); ik != nil {
+		other.key = ik
+	} else {
+		other.key = append(other.key[:0], hf.key...)
+	}
+
+	if iv := rodata.InternValueBytes(hf.value); iv != nil {
+		other.value = iv
+	} else {
+		other.value = append(other.value[:0], hf.value...)
+	}
+
 	other.sensible = hf.sensible
 }
 

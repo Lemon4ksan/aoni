@@ -12,20 +12,20 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
-	"sync"
 
 	"github.com/valyala/fasthttp"
 
 	"github.com/lemon4ksan/aoni/internal/bytesconv"
+	"github.com/lemon4ksan/aoni/internal/pool"
 )
 
 var (
-	stdRequestPool = sync.Pool{
-		New: func() any { return &StdRequest{} },
-	}
-	stdResponsePool = sync.Pool{
-		New: func() any { return &StdResponse{} },
-	}
+	stdRequestStorage = pool.NewPerPStorage(func() *StdRequest {
+		return &StdRequest{}
+	})
+	stdResponseStorage = pool.NewPerPStorage(func() *StdResponse {
+		return &StdResponse{}
+	})
 )
 
 // StdRequest adapts a standard net/http [*http.Request] to the unified [Request] contract.
@@ -42,7 +42,7 @@ func NewStdRequest(req *http.Request) *StdRequest {
 		req = &http.Request{Header: make(http.Header)}
 	}
 
-	r := stdRequestPool.Get().(*StdRequest)
+	r := stdRequestStorage.Get()
 	r.req = req
 
 	return r
@@ -55,7 +55,7 @@ func ReleaseStdRequest(r *StdRequest) {
 	}
 
 	r.req = nil
-	stdRequestPool.Put(r)
+	stdRequestStorage.Put(r)
 }
 
 // Context returns the request execution context.
@@ -336,7 +336,7 @@ type StdResponse struct {
 // Postconditions:
 //   - The returned response must be released via [ReleaseStdResponse] to prevent pool leaks.
 func NewStdResponse(resp *http.Response) *StdResponse {
-	r := stdResponsePool.Get().(*StdResponse)
+	r := stdResponseStorage.Get()
 	r.resp = resp
 	r.body = nil
 
@@ -351,7 +351,7 @@ func ReleaseStdResponse(r *StdResponse) {
 
 	r.resp = nil
 	r.body = nil
-	stdResponsePool.Put(r)
+	stdResponseStorage.Put(r)
 }
 
 // StatusCode returns the HTTP response status code, or 0 if response is nil.

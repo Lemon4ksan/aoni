@@ -17,6 +17,7 @@ import (
 func TestOffHeapBuffer_WriteRead(t *testing.T) {
 	buf, err := offheap.NewBuffer(64 * 1024)
 	require.NoError(t, err)
+
 	require.NotNil(t, buf)
 	defer buf.Release()
 
@@ -106,8 +107,6 @@ func TestAllocStruct(t *testing.T) {
 	assert.NoError(t, err)
 }
 
-
-
 var testPool = sync.Pool{
 	New: func() any { return new(testFrameHeader) },
 }
@@ -116,24 +115,30 @@ var benchSum uint64
 
 func BenchmarkAllocStruct_Heap(b *testing.B) {
 	var sum uint64
+
 	b.ReportAllocs()
+
 	for i := 0; i < b.N; i++ {
 		hdr := new(testFrameHeader)
 		hdr.StreamID = uint32(i)
 		sum += uint64(hdr.StreamID)
 	}
+
 	benchSum = sum
 }
 
 func BenchmarkAllocStruct_SyncPool(b *testing.B) {
 	var sum uint64
+
 	b.ReportAllocs()
+
 	for i := 0; i < b.N; i++ {
 		hdr := testPool.Get().(*testFrameHeader)
 		hdr.StreamID = uint32(i)
 		sum += uint64(hdr.StreamID)
 		testPool.Put(hdr)
 	}
+
 	benchSum = sum
 }
 
@@ -145,6 +150,7 @@ func BenchmarkAllocStruct_OffHeap(b *testing.B) {
 	defer arena.Release()
 
 	var sum uint64
+
 	b.ResetTimer()
 	b.ReportAllocs()
 
@@ -152,7 +158,9 @@ func BenchmarkAllocStruct_OffHeap(b *testing.B) {
 		hdr := offheap.AllocStruct[testFrameHeader](arena)
 		hdr.StreamID = uint32(i)
 		sum += uint64(hdr.StreamID)
+
 		arena.Reset()
 	}
+
 	benchSum = sum
 }

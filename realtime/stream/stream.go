@@ -543,6 +543,7 @@ func readNextGRPCWebFrame[T any](reader io.Reader) (val T, done bool, err error)
 		offBuf, err := offheap.NewBuffer(int(length))
 		if err == nil {
 			defer offBuf.Release()
+
 			payload = offBuf.Bytes()[:length]
 			if _, rErr := io.ReadFull(reader, payload); rErr != nil {
 				return zero, false, rErr

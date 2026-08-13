@@ -29,7 +29,7 @@ func allocKernelPage(size int) (unsafe.Pointer, error) {
 		return nil, fmt.Errorf("offheap: VirtualAlloc failed: %w", err)
 	}
 
-	return unsafe.Pointer(ptr), nil
+	return unsafe.Pointer(ptr), nil //nolint:govet
 }
 
 // freeKernelPage releases raw physical memory page back to OS kernel.

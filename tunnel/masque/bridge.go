@@ -95,6 +95,7 @@ func forwardAdapterToMasque(
 
 	_ = offheap.Scope(64*1024, func(arena *offheap.Arena) {
 		ptr := arena.Alloc(65535)
+
 		var buf []byte
 		if ptr != nil {
 			buf = unsafe.Slice((*byte)(ptr), 65535)
@@ -155,6 +156,7 @@ func forwardMasqueToAdapter(
 ) {
 	_ = offheap.Scope(64*1024, func(arena *offheap.Arena) {
 		ptr := arena.Alloc(65535)
+
 		var buf []byte
 		if ptr != nil {
 			buf = unsafe.Slice((*byte)(ptr), 65535)

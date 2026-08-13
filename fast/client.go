@@ -193,8 +193,6 @@ func (c *Client) Request(
 	if c.isFastPathEligible(ctx, mods) {
 		extractUserInfoAndSetAuth(fastReq)
 
-
-
 		err := c.engine.Do(fastReq, fastResp)
 		if err != nil {
 			fasthttp.ReleaseRequest(fastReq)

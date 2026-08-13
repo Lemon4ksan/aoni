@@ -10,22 +10,22 @@ import (
 	"io"
 	"net/http"
 	"slices"
-	"sync"
 
 	"github.com/valyala/fasthttp"
 
 	"github.com/lemon4ksan/aoni"
 	"github.com/lemon4ksan/aoni/internal/bytesconv"
+	"github.com/lemon4ksan/aoni/internal/pool"
 )
 
-var requestAdapterPool = sync.Pool{
-	New: func() any { return &Request{} },
-}
+var requestAdapterStorage = pool.NewPerPStorage(func() *Request {
+	return &Request{}
+})
 
 // Request adapts a high-performance [*fasthttp.Request] to the unified [aoni.Request] contract.
 //
 // Thread Safety & Memory Lifetime Invariants:
-// Request instances are pooled via [sync.Pool] for zero-allocation execution.
+// Request instances are recycled via sharded [pool.PerPStorage] for zero-allocation, zero-lock execution.
 // Callers acquiring requests via [NewRequest] or [Client.AcquireRequest] MUST release them
 // via [Client.ReleaseRequest] or [Request.Release] when request lifecycle terminates.
 type Request struct {
@@ -47,7 +47,7 @@ func NewRequest(req *fasthttp.Request) *Request {
 		isAcquired = true
 	}
 
-	r := requestAdapterPool.Get().(*Request)
+	r := requestAdapterStorage.Get()
 	r.req = req
 	r.ctx = nil
 	r.getBody = nil
@@ -300,7 +300,7 @@ func (f *Request) Release() {
 	f.ctx = nil
 	f.getBody = nil
 	f.isAcquired = false
-	requestAdapterPool.Put(f)
+	requestAdapterStorage.Put(f)
 }
 
 var _ aoni.Request = (*Request)(nil)

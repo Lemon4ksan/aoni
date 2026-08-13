@@ -65,6 +65,7 @@ func (b *OffHeapBuffer) Write(p []byte) (int, error) {
 
 	dst := unsafe.Slice((*byte)(unsafe.Add(b.ptr, b.len)), n)
 	copy(dst, p)
+
 	b.len += int32(n)
 
 	return n, nil
@@ -97,6 +98,9 @@ func (b *OffHeapBuffer) Read(p []byte) (int, error) {
 }
 
 // Bytes returns a volatile slice view over the active off-heap buffer data without heap allocation.
+//
+//go:nosplit
+//go:inline
 func (b *OffHeapBuffer) Bytes() []byte {
 	if b == nil || b.ptr == nil || b.len <= 0 {
 		return nil
@@ -106,6 +110,9 @@ func (b *OffHeapBuffer) Bytes() []byte {
 }
 
 // Len returns the current written length in bytes.
+//
+//go:nosplit
+//go:inline
 func (b *OffHeapBuffer) Len() int {
 	if b == nil {
 		return 0
@@ -115,6 +122,9 @@ func (b *OffHeapBuffer) Len() int {
 }
 
 // Cap returns the total allocated capacity in bytes.
+//
+//go:nosplit
+//go:inline
 func (b *OffHeapBuffer) Cap() int {
 	if b == nil {
 		return 0
@@ -124,6 +134,9 @@ func (b *OffHeapBuffer) Cap() int {
 }
 
 // Reset clears the buffer length in O(1) time without zeroing memory.
+//
+//go:nosplit
+//go:inline
 func (b *OffHeapBuffer) Reset() {
 	if b != nil {
 		b.len = 0

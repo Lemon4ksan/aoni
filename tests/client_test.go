@@ -329,8 +329,8 @@ func TestClient_ErrorModel(t *testing.T) {
 	t.Parallel()
 
 	_, client := setupTestServer(t, func(w http.ResponseWriter, _ *http.Request) {
-		w.WriteHeader(http.StatusBadRequest)
 		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadRequest)
 		_, _ = w.Write([]byte(`{"error": "invalid_grant", "error_description": "expired token"}`))
 	})
 

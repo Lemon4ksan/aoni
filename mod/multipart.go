@@ -26,11 +26,17 @@ func WithMultipart(fields map[string]string, files map[string]stdio.Reader) aoni
 		Kind: aoni.ModCustom,
 		Fn: func(req aoni.Request) {
 			offBuf, err := offheap.NewBuffer(64 * 1024)
-			var body stdio.Writer = &bytes.Buffer{}
-			var getBytes = func() []byte { return body.(*bytes.Buffer).Bytes() }
+
+			var (
+				body     stdio.Writer = &bytes.Buffer{}
+				getBytes              = func() []byte {
+					return body.(*bytes.Buffer).Bytes()
+				}
+			)
 
 			if err == nil {
 				defer offBuf.Release()
+
 				body = offBuf
 				getBytes = func() []byte { return slices.Clone(offBuf.Bytes()) }
 			}
@@ -86,11 +92,17 @@ func WithMultipartFields(fields []MultipartField) aoni.RequestModifier {
 		Kind: aoni.ModCustom,
 		Fn: func(req aoni.Request) {
 			offBuf, err := offheap.NewBuffer(64 * 1024)
-			var body stdio.Writer = &bytes.Buffer{}
-			var getBytes = func() []byte { return body.(*bytes.Buffer).Bytes() }
+
+			var (
+				body     stdio.Writer = &bytes.Buffer{}
+				getBytes              = func() []byte {
+					return body.(*bytes.Buffer).Bytes()
+				}
+			)
 
 			if err == nil {
 				defer offBuf.Release()
+
 				body = offBuf
 				getBytes = func() []byte { return slices.Clone(offBuf.Bytes()) }
 			}

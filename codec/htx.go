@@ -7,6 +7,7 @@ package codec
 import (
 	"encoding/binary"
 
+	"github.com/lemon4ksan/aoni/internal/rodata"
 	"github.com/lemon4ksan/aoni/internal/simd"
 )
 
@@ -75,7 +76,12 @@ func (idx *RequestHeaderIndex) GetHeader(buf []byte, targetKey string) ([]byte, 
 			vEnd := vStart + int(slot.ValLen)
 
 			if vEnd <= len(buf) {
-				return buf[vStart:vEnd], true
+				val := buf[vStart:vEnd]
+				if iv := rodata.InternValueBytes(val); iv != nil {
+					return iv, true
+				}
+
+				return val, true
 			}
 		}
 	}

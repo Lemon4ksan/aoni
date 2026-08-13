@@ -6,7 +6,7 @@
 
 [![Go Reference](https://img.shields.io/badge/go-reference-007d9c?logo=go&logoColor=white&style=flat-square)](https://pkg.go.dev/github.com/lemon4ksan/aoni/fast)
 [![License](https://img.shields.io/github/license/lemon4ksan/aoni?style=flat-square)](LICENSE)
-[![RPS](https://img.shields.io/badge/throughput-1.68M%2B%20RPS-brightgreen?style=flat-square)](#бескомпромиссная-производительность-сухая-математика)
+[![RPS](https://img.shields.io/badge/throughput-2.00M%2B%20RPS-brightgreen?style=flat-square)](#бескомпромиссная-производительность-сухая-математика)
 
 > _"Никаких компромиссов. Строгая геометрия памяти. Чистая скорость кремния."_
 

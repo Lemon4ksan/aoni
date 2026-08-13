@@ -54,6 +54,9 @@ func Scope(size int, fn func(arena *Arena)) error {
 }
 
 // Alloc allocates n bytes inside the arena via a single 1-cycle pointer bump.
+//
+//go:nosplit
+//go:inline
 func (a *Arena) Alloc(n int) unsafe.Pointer {
 	if a == nil || a.page == nil || n <= 0 {
 		return nil
@@ -85,6 +88,9 @@ func (a *Arena) AllocBuffer(capacity int) *OffHeapBuffer {
 }
 
 // Reset clears arena offset in O(1) time without clearing page bytes.
+//
+//go:nosplit
+//go:inline
 func (a *Arena) Reset() {
 	if a != nil {
 		a.offset = 0
@@ -120,6 +126,7 @@ func AllocStruct[T any](a *Arena) *T {
 	}
 
 	var zero T
+
 	size := int(unsafe.Sizeof(zero))
 	if size == 0 {
 		return &zero

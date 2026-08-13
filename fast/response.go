@@ -19,15 +19,16 @@ import (
 	"github.com/lemon4ksan/aoni"
 	"github.com/lemon4ksan/aoni/internal/bytesconv"
 	"github.com/lemon4ksan/aoni/internal/offheap"
+	"github.com/lemon4ksan/aoni/internal/pool"
 )
 
 var (
-	responseAdapterPool = sync.Pool{
-		New: func() any { return &Response{} },
-	}
-	pooledResponsePool = sync.Pool{
-		New: func() any { return &PooledResponse{} },
-	}
+	responseAdapterStorage = pool.NewPerPStorage(func() *Response {
+		return &Response{}
+	})
+	pooledResponseStorage = pool.NewPerPStorage(func() *PooledResponse {
+		return &PooledResponse{}
+	})
 )
 
 type fastBodyReadCloser struct {
@@ -65,7 +66,7 @@ func NewResponse(resp *fasthttp.Response) *Response {
 		resp = fasthttp.AcquireResponse()
 	}
 
-	r := responseAdapterPool.Get().(*Response)
+	r := responseAdapterStorage.Get()
 	r.resp = resp
 	r.trailers = nil
 	r.uncompressed = false
@@ -241,8 +242,10 @@ func (f *Response) WriteTo(w io.Writer) (int64, error) {
 		return 0, nil
 	}
 
-	var total int64
-	var streamErr error
+	var (
+		total     int64
+		streamErr error
+	)
 
 	_ = offheap.Scope(64*1024, func(arena *offheap.Arena) {
 		ptr := arena.Alloc(64 * 1024)
@@ -258,14 +261,17 @@ func (f *Response) WriteTo(w io.Writer) (int64, error) {
 			if nr > 0 {
 				nw, wErr := w.Write(tmp[:nr])
 				total += int64(nw)
+
 				if wErr != nil {
 					streamErr = wErr
 					return
 				}
 			}
+
 			if rErr == io.EOF {
 				return
 			}
+
 			if rErr != nil {
 				streamErr = rErr
 				return
@@ -285,7 +291,7 @@ func (f *Response) Release() {
 	f.resp = nil
 	f.trailers = nil
 	f.uncompressed = false
-	responseAdapterPool.Put(f)
+	responseAdapterStorage.Put(f)
 }
 
 const maxBodySlurpBytes int64 = 2048
@@ -324,7 +330,7 @@ type PooledResponse struct {
 // NewPooledResponse acquires a pooled [PooledResponse] adapter wrapping active fastReq and fastResp.
 // Calling Close() thread-safely releases both fasthttp objects and recycles the adapter.
 func NewPooledResponse(fastReq *fasthttp.Request, fastResp *fasthttp.Response) *PooledResponse {
-	pr := pooledResponsePool.Get().(*PooledResponse)
+	pr := pooledResponseStorage.Get()
 	pr.resp = fastResp
 	pr.trailers = nil
 	pr.uncompressed = false
@@ -374,7 +380,7 @@ func (r *PooledResponse) Close() error {
 		r.resp = nil
 		r.trailers = nil
 		r.uncompressed = false
-		pooledResponsePool.Put(r)
+		pooledResponseStorage.Put(r)
 	}
 
 	return nil

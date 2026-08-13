@@ -38,11 +38,11 @@ type FrameWithHeaders interface {
 
 // ConnOpts defines connection configuration options.
 type ConnOpts struct {
-	PingInterval          time.Duration
-	DisablePingChecking   bool
-	OnDisconnect          func(ctx context.Context, c *Conn)
-	OnRTT                 func(time.Duration)
-	OnPushPromise         func(pushReq *fasthttp.Request, pushResp *fasthttp.Response)
+	PingInterval        time.Duration
+	DisablePingChecking bool
+	OnDisconnect        func(ctx context.Context, c *Conn)
+	OnRTT               func(time.Duration)
+	OnPushPromise       func(pushReq *fasthttp.Request, pushResp *fasthttp.Response)
 	Settings            *Settings
 }
 
