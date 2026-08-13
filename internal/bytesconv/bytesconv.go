@@ -232,14 +232,78 @@ func CanonicalHeaderKeyBytes(src []byte) []byte {
 	return out
 }
 
-// CanonicalHeaderKey converts header key string s to MIME canonical format without heap allocations if s fits in stack buffer.
+// CanonicalHeaderKey converts header key string s to MIME canonical format in O(1) time for common headers.
 //
 //go:inline
 func CanonicalHeaderKey(s string) string {
+	if len(s) == 0 {
+		return ""
+	}
+
+	switch s {
+	case "Content-Type", "content-type", "CONTENT-TYPE":
+		return "Content-Type"
+	case "Content-Length", "content-length", "CONTENT-LENGTH":
+		return "Content-Length"
+	case "Server", "server", "SERVER":
+		return "Server"
+	case "Date", "date", "DATE":
+		return "Date"
+	case "Set-Cookie", "set-cookie", "SET-COOKIE":
+		return "Set-Cookie"
+	case "Location", "location", "LOCATION":
+		return "Location"
+	case "Connection", "connection", "CONNECTION":
+		return "Connection"
+	case "Cache-Control", "cache-control", "CACHE-CONTROL":
+		return "Cache-Control"
+	case "Accept", "accept", "ACCEPT":
+		return "Accept"
+	case "Accept-Encoding", "accept-encoding", "ACCEPT-ENCODING":
+		return "Accept-Encoding"
+	case "Authorization", "authorization", "AUTHORIZATION":
+		return "Authorization"
+	case "User-Agent", "user-agent", "USER-AGENT":
+		return "User-Agent"
+	case "Transfer-Encoding", "transfer-encoding", "TRANSFER-ENCODING":
+		return "Transfer-Encoding"
+	case "Keep-Alive", "keep-alive", "KEEP-ALIVE":
+		return "Keep-Alive"
+	case "ETag", "etag", "ETAG":
+		return "ETag"
+	case "Host", "host", "HOST":
+		return "Host"
+	}
+
 	b := CanonicalHeaderKeyBytes(S2B(s))
 	if len(b) == 0 {
 		return ""
 	}
 
 	return string(b)
+}
+
+// FastHash64 computes a zero-allocation 64-bit FNV1a-SWAR hash of b in 8-byte chunks.
+//
+//go:inline
+func FastHash64(b []byte) uint64 {
+	n := len(b)
+	if n == 0 {
+		return 14695981039346656037
+	}
+
+	var h uint64 = 14695981039346656037
+	i := 0
+
+	for i+8 <= n {
+		word := *(*uint64)(unsafe.Pointer(&b[i]))
+		h = (h ^ word) * 1099511628211
+		i += 8
+	}
+
+	for ; i < n; i++ {
+		h = (h ^ uint64(b[i])) * 1099511628211
+	}
+
+	return h
 }

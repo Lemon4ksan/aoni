@@ -166,3 +166,15 @@ func TestCanonicalHeaderKey(t *testing.T) {
 		assert.Equal(t, tt.want, string(CanonicalHeaderKeyBytes([]byte(tt.in))))
 	}
 }
+
+func TestFastHash64(t *testing.T) {
+	t.Parallel()
+
+	h1 := FastHash64([]byte("hello world"))
+	h2 := FastHash64([]byte("hello world"))
+	h3 := FastHash64([]byte("different data"))
+
+	assert.Equal(t, h1, h2)
+	assert.NotEqual(t, h1, h3)
+	assert.NotZero(t, FastHash64(nil))
+}
