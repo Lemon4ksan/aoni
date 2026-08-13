@@ -148,6 +148,12 @@ func (c *Client) ApplyOptions(opts ...aoni.ClientOption) aoni.RequestDoer {
 }
 
 // Request executes an HTTP request across HTTP/1.1, native HTTP/2, or native HTTP/3.
+//
+// Preconditions:
+//   - ctx MUST NOT be nil (pass [context.Background] if no timeout is desired).
+//   - method SHOULD be a standard HTTP method ("GET", "POST", etc.) or custom string.
+//
+// Yields an [aoni.Response] contract backed by pooled response memory.
 func (c *Client) Request(
 	ctx context.Context,
 	method, path string,
@@ -167,12 +173,7 @@ func (c *Client) Request(
 		return aoni.NewStdResponse(resp), nil //nolint:bodyclose
 	}
 
-	fastReq := fasthttp.AcquireRequest()
-	fastReq.Reset()
-
-	fastResp := fasthttp.AcquireResponse()
-	fastResp.Reset()
-
+	fastReq, fastResp := acquireFastPair()
 	fastReq.Header.SetMethodBytes(getMethodBytes(method))
 
 	reqAdapter := NewRequest(fastReq)
@@ -181,9 +182,7 @@ func (c *Client) Request(
 	reqAdapter.SetContext(ctx)
 
 	if err := c.resolveTargetURL(reqAdapter, path); err != nil {
-		fasthttp.ReleaseRequest(fastReq)
-		fasthttp.ReleaseResponse(fastResp)
-
+		releaseFastPair(fastReq, fastResp)
 		return nil, err
 	}
 
@@ -191,20 +190,7 @@ func (c *Client) Request(
 	c.applyModifiers(reqAdapter, mods)
 
 	if c.isFastPathEligible(ctx, mods) {
-		extractUserInfoAndSetAuth(fastReq)
-
-		err := c.engine.Do(fastReq, fastResp)
-		if err != nil {
-			fasthttp.ReleaseRequest(fastReq)
-			fasthttp.ReleaseResponse(fastResp)
-			return nil, err
-		}
-
-		uncompressed := decompressFastResponse(fastResp)
-		pr := NewPooledResponse(fastReq, fastResp)
-		pr.SetUncompressed(uncompressed)
-
-		return pr, nil
+		return c.executeFastPath(fastReq, fastResp)
 	}
 
 	reqCtx := reqAdapter.Context()
@@ -215,6 +201,42 @@ func (c *Client) Request(
 		&c.nativeDoer,
 		c.resolvePipeline(reqCtx),
 	)
+}
+
+func acquireFastPair() (*fasthttp.Request, *fasthttp.Response) {
+	req := fasthttp.AcquireRequest()
+	req.Reset()
+
+	resp := fasthttp.AcquireResponse()
+	resp.Reset()
+
+	return req, resp
+}
+
+func releaseFastPair(req *fasthttp.Request, resp *fasthttp.Response) {
+	if req != nil {
+		fasthttp.ReleaseRequest(req)
+	}
+
+	if resp != nil {
+		fasthttp.ReleaseResponse(resp)
+	}
+}
+
+func (c *Client) executeFastPath(fastReq *fasthttp.Request, fastResp *fasthttp.Response) (aoni.Response, error) {
+	extractUserInfoAndSetAuth(fastReq)
+
+	err := c.engine.Do(fastReq, fastResp)
+	if err != nil {
+		releaseFastPair(fastReq, fastResp)
+		return nil, err
+	}
+
+	uncompressed := decompressFastResponse(fastResp)
+	pr := NewPooledResponse(fastReq, fastResp)
+	pr.SetUncompressed(uncompressed)
+
+	return pr, nil
 }
 
 type fastNativeDoer struct {
@@ -320,8 +342,7 @@ func (c *Client) CloseIdleConnections() {
 // HTTP returns an [aoni.HTTPDoer] executing requests via fasthttp, H2, or H3.
 func (c *Client) HTTP() aoni.HTTPDoer {
 	return aoni.HTTPDoerFunc(func(req *http.Request) (*http.Response, error) {
-		fastReq := fasthttp.AcquireRequest()
-		fastResp := fasthttp.AcquireResponse()
+		fastReq, fastResp := acquireFastPair()
 
 		fastReq.SetRequestURI(req.URL.String())
 		fastReq.Header.SetMethod(req.Method)
@@ -347,8 +368,7 @@ func (c *Client) HTTP() aoni.HTTPDoer {
 		trailers, err, autoReleased := c.executeWithRedirects(ctx, fastReq, fastResp)
 		if err != nil {
 			if !autoReleased {
-				fasthttp.ReleaseRequest(fastReq)
-				fasthttp.ReleaseResponse(fastResp)
+				releaseFastPair(fastReq, fastResp)
 			}
 
 			return nil, err

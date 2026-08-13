@@ -157,8 +157,8 @@ func (c *wsRawConn) processNextFrame() error {
 }
 
 func (c *wsRawConn) Write(b []byte) (int, error) {
-	<-c.writeMu
-	defer func() { c.writeMu <- struct{}{} }()
+	c.lockWrite()
+	defer c.unlockWrite()
 
 	opcode := generic.Ternary(utf8.Valid(b), byte(FrameText), byte(FrameBinary))
 	if err := c.writeFrame(opcode, b); err != nil {
@@ -192,10 +192,18 @@ func (c *wsRawConn) ReadMessageTo(buf []byte) (int, int, error) {
 }
 
 func (c *wsRawConn) WriteMessage(messageType int, data []byte) error {
-	<-c.writeMu
-	defer func() { c.writeMu <- struct{}{} }()
+	c.lockWrite()
+	defer c.unlockWrite()
 
 	return c.writeFrame(byte(messageType), data)
+}
+
+func (c *wsRawConn) lockWrite() {
+	<-c.writeMu
+}
+
+func (c *wsRawConn) unlockWrite() {
+	c.writeMu <- struct{}{}
 }
 
 func (c *wsRawConn) UnderlyingConn() any                { return c.base }
