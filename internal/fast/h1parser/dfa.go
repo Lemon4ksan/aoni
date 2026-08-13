@@ -5,7 +5,10 @@
 // Package h1parser implements an Nginx-style single-pass DFA state machine for parsing HTTP/1.x requests.
 package h1parser
 
-import "github.com/lemon4ksan/aoni/codec"
+import (
+	"github.com/lemon4ksan/aoni/codec"
+	"github.com/lemon4ksan/aoni/internal/simd"
+)
 
 type dfaState uint8
 
@@ -97,6 +100,11 @@ func ParseHTTP1SinglePass(
 			}
 
 		case stateHeaderKey:
+			if idx := simd.IndexTwoBytesVector(buf[i:], ':', '\r'); idx > 0 {
+				i += idx
+				b = buf[i]
+			}
+
 			switch b {
 			case ':':
 				kEnd = i
@@ -123,6 +131,11 @@ func ParseHTTP1SinglePass(
 			}
 
 		case stateHeaderVal:
+			if idx := simd.IndexTwoBytesVector(buf[i:], '\r', '\n'); idx > 0 {
+				i += idx
+				b = buf[i]
+			}
+
 			switch b {
 			case '\r':
 				vEnd = i

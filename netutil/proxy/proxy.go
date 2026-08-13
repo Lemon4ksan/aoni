@@ -460,8 +460,17 @@ func (r *Rotator) Do(req *http.Request) (*http.Response, error) {
 		}
 	}
 
+	mask := n - 1
+	isPowerOfTwo := (n & mask) == 0
+
 	for range n {
-		idx := r.current.Add(1) % n
+		var idx uint32
+		if isPowerOfTwo {
+			idx = (r.current.Add(1) - 1) & mask
+		} else {
+			idx = r.current.Add(1) % n
+		}
+
 		if int(idx) == stickyIdx {
 			continue
 		}

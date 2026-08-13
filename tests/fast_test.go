@@ -49,7 +49,9 @@ func TestLatencyProfile_Fast_Vs_StdHTTP(t *testing.T) {
 	)
 
 	// 1. Profile aoni/fast
-	fastClient := fast.NewClient()
+	fastClient := fast.NewClient(option.WithConnectionPool(aoni.ConnectionPoolConfig{
+		MaxConnsPerHost: concurrency,
+	}))
 	fastLatencies := make([]time.Duration, totalReqs)
 
 	var (
