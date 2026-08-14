@@ -142,7 +142,7 @@ type UploadAvatarResponse struct {
 		println("PARSE ERR: " + parseErr.Error())
 		println("CODE:\n" + string(code))
 	}
-	require.NoError(t, parseErr, "Generated code syntax error:\n%s", string(code))
+	require.NoError(t, parseErr, "PARSE ERR: %v", parseErr)
 
 	codeStr := string(code)
 

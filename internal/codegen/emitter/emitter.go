@@ -71,8 +71,22 @@ func (e *Emitter) emitImports(buf *bytes.Buffer, root *ir.RootIR) {
 		fmt.Fprintf(buf, "\t\"%s\"\n", pkg)
 	}
 
+	hasFastClient := false
+	if root != nil {
+		for _, svc := range root.Services {
+			isStrict := svc.Engine == ir.EngineRequired || svc.RequesterType != ""
+			if !isStrict && svc.Engine != ir.EngineNetHTTP && svc.Engine != ir.EngineCustom {
+				hasFastClient = true
+			}
+		}
+	}
+
 	buf.WriteString("\n\t\"github.com/lemon4ksan/aoni\"\n")
-	buf.WriteString("\t\"github.com/lemon4ksan/aoni/fast\"\n")
+
+	if hasFastClient {
+		buf.WriteString("\t\"github.com/lemon4ksan/aoni/fast\"\n")
+	}
+
 	buf.WriteString("\t\"github.com/lemon4ksan/aoni/mod\"\n")
 	buf.WriteString("\t\"github.com/lemon4ksan/aoni/option\"\n")
 	buf.WriteString("\t\"github.com/lemon4ksan/aoni/request\"\n")
@@ -107,6 +121,10 @@ func collectStdImports(root *ir.RootIR) []string {
 	}
 
 	for _, svc := range root.Services {
+		if svc.Engine == ir.EngineRequired || svc.RequesterType != "" {
+			needed["errors"] = true
+		}
+
 		for _, m := range svc.Methods {
 			if m.Extract != nil {
 				needed["bytes"] = true
@@ -217,6 +235,119 @@ func (e *Emitter) emitService(buf *bytes.Buffer, svc *ir.ServiceIR) {
 	constructorName := "New"
 	if svc.Name != "Client" && svc.Name != "API" {
 		constructorName = "New" + svc.Name
+	}
+
+	mustConstructorName := "Must" + constructorName
+
+	isStrict := svc.Engine == ir.EngineRequired || svc.RequesterType != ""
+
+	reqArgType := "aoni.RequestDoer"
+	if svc.RequesterType != "" {
+		reqArgType = svc.RequesterType
+	}
+
+	if isStrict {
+		fmt.Fprintf(
+			buf,
+			"// %s creates a new %s client instance backed by an authenticated %s.\n",
+			constructorName,
+			svc.Name,
+			reqArgType,
+		)
+		fmt.Fprintf(
+			buf,
+			"func %s(client %s, opts ...aoni.ClientOption) (%s, error) {\n",
+			constructorName,
+			reqArgType,
+			svc.Name,
+		)
+		fmt.Fprintf(
+			buf,
+			"\tif client == nil {\n\t\treturn nil, errors.New(\"aoni: client (%s) is required to initialize %s\")\n\t}\n\n",
+			reqArgType,
+			svc.Name,
+		)
+
+		// Base options
+		buf.WriteString("\tvar baseOpts []aoni.ClientOption\n")
+
+		for _, h := range svc.Headers {
+			if h.DynamicTemplate == nil && h.StaticValue != "" {
+				if strings.EqualFold(h.Key, "User-Agent") {
+					fmt.Fprintf(buf, "\tbaseOpts = append(baseOpts, option.WithUserAgent(%q))\n", h.StaticValue)
+				} else {
+					fmt.Fprintf(buf, "\tbaseOpts = append(baseOpts, option.WithHeader(%q, %q))\n", h.Key, h.StaticValue)
+				}
+			}
+		}
+
+		if svc.Persona != "" {
+			fmt.Fprintf(buf, "\tbaseOpts = append(baseOpts, option.WithPersona(%q))\n", svc.Persona)
+		}
+
+		if svc.Timeout != "" {
+			fmt.Fprintf(buf, "\tbaseOpts = append(baseOpts, option.WithTimeoutString(%q))\n", svc.Timeout)
+		}
+
+		buf.WriteString("\tbaseOpts = append(baseOpts, opts...)\n\n")
+
+		// If preconfigured requester is passed without new options, reuse directly
+		buf.WriteString("\tif req, ok := any(client).(request.Requester); ok && len(opts) == 0 {\n")
+		fmt.Fprintf(buf, "\t\treturn &%s{\n", clientStructName)
+
+		for _, sub := range svc.SubRequesters {
+			fmt.Fprintf(buf, "\t\t\t%s: req,\n", sub.FieldName)
+		}
+
+		buf.WriteString("\t\t}, nil\n\t}\n\n")
+
+		// Target requester resolution
+		buf.WriteString("\tvar targetReq request.Requester\n")
+		buf.WriteString("\tif d, ok := any(client).(aoni.RequestDoer); ok {\n")
+		fmt.Fprintf(
+			buf,
+			"\t\ttargetReq = request.AsRequester(aoni.Configure(d, append([]aoni.ClientOption{option.WithBaseURL(%q)}, baseOpts...)...))\n",
+			svc.BaseURL,
+		)
+		buf.WriteString("\t} else if req, ok := any(client).(request.Requester); ok {\n")
+		buf.WriteString("\t\ttargetReq = req\n")
+		buf.WriteString("\t} else {\n")
+		buf.WriteString("\t\treturn nil, errors.New(\"aoni: unsupported requester interface\")\n")
+		buf.WriteString("\t}\n\n")
+
+		// Instantiate SubRequesters
+		fmt.Fprintf(buf, "\treturn &%s{\n", clientStructName)
+
+		for _, sub := range svc.SubRequesters {
+			fmt.Fprintf(buf, "\t\t%s: targetReq,\n", sub.FieldName)
+		}
+
+		buf.WriteString("\t}, nil\n}\n\n")
+
+		// MustNew helper
+		fmt.Fprintf(
+			buf,
+			"// %s initializes %s and panics if an error occurs.\n",
+			mustConstructorName,
+			svc.Name,
+		)
+		fmt.Fprintf(
+			buf,
+			"func %s(client %s, opts ...aoni.ClientOption) %s {\n",
+			mustConstructorName,
+			reqArgType,
+			svc.Name,
+		)
+		fmt.Fprintf(buf, "\tapi, err := %s(client, opts...)\n", constructorName)
+		buf.WriteString("\tif err != nil {\n\t\tpanic(err)\n\t}\n")
+		buf.WriteString("\treturn api\n}\n\n")
+
+		// Methods
+		for _, m := range svc.Methods {
+			e.emitMethod(buf, clientStructName, m)
+		}
+
+		return
 	}
 
 	fmt.Fprintf(

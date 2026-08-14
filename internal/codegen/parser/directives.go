@@ -30,14 +30,33 @@ func ApplyServiceDirective(s *ir.ServiceIR, d *Directive) {
 			s.Engine = ir.EngineFast
 		case "net/http", "std":
 			s.Engine = ir.EngineNetHTTP
+		case "required":
+			s.Engine = ir.EngineRequired
 		case "custom":
 			s.Engine = ir.EngineCustom
 			if c, ok := d.Args["type"]; ok {
 				s.CustomEngine = c
+				s.RequesterType = c
 			}
+
+			if _, ok := d.Args["required"]; ok {
+				s.Engine = ir.EngineRequired
+			}
+
 		default:
 			s.Engine = ir.EngineCustom
 			s.CustomEngine = d.Value
+			s.RequesterType = d.Value
+		}
+
+	case "requester":
+		s.RequesterType = d.Value
+		if typ, ok := d.Args["type"]; ok {
+			s.RequesterType = typ
+		}
+
+		if _, ok := d.Args["required"]; ok {
+			s.Engine = ir.EngineRequired
 		}
 
 	case "persona":

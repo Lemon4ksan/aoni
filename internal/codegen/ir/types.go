@@ -27,6 +27,7 @@ type ServiceIR struct {
 	Protocol      ProtocolKind
 	Engine        EngineKind
 	CustomEngine  string
+	RequesterType string
 	BaseURL       string
 	SubRequesters []SubRequesterIR
 	Persona       string
@@ -72,6 +73,9 @@ const (
 
 	// EngineCustom selects an externally provided doer or requester implementation.
 	EngineCustom EngineKind = "custom"
+
+	// EngineRequired enforces an explicitly provided, authenticated doer/requester at construction time.
+	EngineRequired EngineKind = "required"
 )
 
 // SubRequesterIR defines an isolated Requester client instance partitioned by distinct BaseURLs.
