@@ -29,7 +29,6 @@ func buildBenchPayload() []byte {
 	return buf.Bytes()
 }
 
-// BenchmarkDecodeAddressAssign_Heap — plain heap allocation (baseline).
 func BenchmarkDecodeAddressAssign_Heap(b *testing.B) {
 	payload := buildBenchPayload()
 
@@ -42,7 +41,6 @@ func BenchmarkDecodeAddressAssign_Heap(b *testing.B) {
 	}
 }
 
-// BenchmarkDecodeAddressAssign_Arena — bump-allocator (existing approach).
 func BenchmarkDecodeAddressAssign_Arena(b *testing.B) {
 	payload := buildBenchPayload()
 
@@ -63,7 +61,6 @@ func BenchmarkDecodeAddressAssign_Arena(b *testing.B) {
 	}
 }
 
-// BenchmarkDecodeAddressAssign_Slab — slab allocator with individual Free per entry.
 func BenchmarkDecodeAddressAssign_Slab(b *testing.B) {
 	payload := buildBenchPayload()
 

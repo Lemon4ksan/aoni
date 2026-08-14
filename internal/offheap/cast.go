@@ -25,7 +25,7 @@ func StructBytes[T any](s *T) []byte {
 }
 
 // CastBytes reinterprets a byte slice as a typed slice of T without allocation.
-// The returned slice shares underlying memory with b — no data is copied.
+// The returned slice shares underlying memory with b - no data is copied.
 //
 // len(b) should be an exact multiple of sizeof(T); any trailing bytes that do not
 // fill a complete T are silently ignored.

@@ -33,7 +33,7 @@ func (rawDecoder) Decode(r stdio.Reader, target any) error {
 		return &Error{Format: "raw", Target: typeName(target), Err: ErrInvalidRawTarget}
 	}
 
-	// Fast-path: reader exposes pre-buffered bytes — avoid io.ReadAll's growing-buffer allocs.
+	// Fast-path: reader exposes pre-buffered bytes - avoid io.ReadAll's growing-buffer allocs.
 	if br, ok := r.(bufferedBytesReader); ok {
 		data, onOffHeap := br.Bytes()
 		if len(data) > 0 {

@@ -78,7 +78,7 @@ func BenchmarkAcquireRelease_ConnPool_RstStream(b *testing.B) {
 	}
 }
 
-// BenchmarkAcquireRelease_PerGoroutinePool — the correct usage pattern:
+// BenchmarkAcquireRelease_PerGoroutinePool - the correct usage pattern:
 // each goroutine owns its own pool (simulates H2 read/write loop).
 func BenchmarkAcquireRelease_PerGoroutinePool_Parallel(b *testing.B) {
 	b.ReportAllocs()

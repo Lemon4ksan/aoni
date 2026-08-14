@@ -2,7 +2,8 @@
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
-// Package cache provides in-memory HTTP response caching implementations for the aoni pipeline.
+// Package cache provides in-memory HTTP response caching implementations for the aoni pipeline
+// conforming to RFC 9111 (HTTP Caching) with automated background TTL eviction.
 package cache
 
 import (
@@ -15,10 +16,10 @@ import (
 	"github.com/lemon4ksan/aoni/internal/clock"
 )
 
-// ErrCacheMiss is returned when a requested HTTP response is not found in the cache or has expired.
+// ErrCacheMiss is returned when a requested HTTP response is not found in the cache or has expired per RFC 9111 §3.
 var ErrCacheMiss = errors.New("aoni/cache: miss")
 
-// InMemoryStore provides a thread-safe, in-memory cache backend with background janitor cleanup.
+// InMemoryStore provides a thread-safe, in-memory cache backend with background janitor cleanup conforming to RFC 9111.
 // All methods are safe for concurrent access across multiple goroutines.
 type InMemoryStore struct {
 	mu     sync.RWMutex

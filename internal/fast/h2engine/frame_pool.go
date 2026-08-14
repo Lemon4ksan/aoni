@@ -117,7 +117,7 @@ func (p *ConnectionFramePool) AcquireFrame(frameType FrameType) Frame {
 		}
 	}
 
-	// Non-POD types or exhausted slab — use the global sync.Pool.
+	// Non-POD types or exhausted slab - use the global sync.Pool.
 	return AcquireFrame(frameType)
 }
 

@@ -8,9 +8,9 @@
 //
 // Exit codes:
 //
-//	0 — specs match
-//	1 — differences found (manual review required)
-//	2 — internal error
+//	0 - specs match
+//	1 - differences found (manual review required)
+//	2 - internal error
 package main
 
 import (

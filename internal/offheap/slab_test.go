@@ -180,7 +180,7 @@ func TestSlabAllocator_ZeroInit_AfterFree(t *testing.T) {
 
 	slab.Free(p)
 
-	// After Free, the memory must be zeroed — verified by re-allocating the slot.
+	// After Free, the memory must be zeroed - verified by re-allocating the slot.
 	p2 := slab.Alloc()
 	require.NotNil(t, p2)
 	assert.Equal(t, uint32(0), p2.StreamID)

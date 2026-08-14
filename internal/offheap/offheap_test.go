@@ -297,7 +297,7 @@ func TestAllocStruct_AlignmentOverflow_NoCorruption(t *testing.T) {
 	require.NotNil(t, p1, "first allocation must succeed")
 	p1.X = 0xDEADBEEF_CAFEBABE
 
-	// Second must fall back to heap — but must NOT panic or corrupt state
+	// Second must fall back to heap - but must NOT panic or corrupt state
 	p2 := offheap.AllocStruct[u64](arena)
 	require.NotNil(t, p2, "fallback must return valid heap pointer")
 	p2.X = 0x1234
@@ -413,7 +413,7 @@ func FuzzArena_AllocStruct(f *testing.F) {
 		for i := 0; i < allocCount; i++ {
 			hdr := offheap.AllocStruct[testFrameHeader](arena)
 			if hdr == nil {
-				// Arena exhausted, fell back to heap — expected.
+				// Arena exhausted, fell back to heap - expected.
 				break
 			}
 

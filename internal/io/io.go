@@ -563,7 +563,7 @@ func (m *MultiReadBody) Close() error {
 		_, _ = m.tmpFile.Seek(0, io.SeekStart)
 		m.reader = m.tmpFile
 	} else {
-		// Reuse the embedded bytes.Reader — no heap allocation.
+		// Reuse the embedded bytes.Reader - no heap allocation.
 		m.bytesRd.Reset(m.data)
 		m.reader = &m.bytesRd
 	}

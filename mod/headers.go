@@ -88,7 +88,8 @@ func ResetHeaders() aoni.RequestModifier {
 	}
 }
 
-// WithBearer constructs an [aoni.RequestModifier] setting an "Authorization: Bearer <token>" header.
+// WithBearer constructs an [aoni.RequestModifier] setting an "Authorization: Bearer <token>" header
+// per RFC 6750 §2.1 (The OAuth 2.0 Authorization Framework: Bearer Token Usage).
 func WithBearer(token string) aoni.RequestModifier {
 	return aoni.RequestModifier{
 		Kind:  aoni.ModBearer,
@@ -96,12 +97,8 @@ func WithBearer(token string) aoni.RequestModifier {
 	}
 }
 
-// WithBearerAuth is an alias for [WithBearer].
-func WithBearerAuth(token string) aoni.RequestModifier {
-	return WithBearer(token)
-}
-
-// WithBasicAuth constructs an [aoni.RequestModifier] setting HTTP Basic Authentication credentials.
+// WithBasicAuth constructs an [aoni.RequestModifier] setting HTTP Basic Authentication credentials
+// per RFC 7617 (The 'Basic' HTTP Authentication Scheme).
 func WithBasicAuth(username, password string) aoni.RequestModifier {
 	return aoni.RequestModifier{
 		Kind:  aoni.ModBasicAuth,
@@ -110,32 +107,32 @@ func WithBasicAuth(username, password string) aoni.RequestModifier {
 	}
 }
 
-// WithUserAgent constructs an [aoni.RequestModifier] overriding the standard User-Agent header.
+// WithUserAgent constructs an [aoni.RequestModifier] overriding the standard User-Agent header (RFC 9110 §10.1.5).
 func WithUserAgent(ua string) aoni.RequestModifier {
 	return WithHeader("User-Agent", ua)
 }
 
-// WithContentType constructs an [aoni.RequestModifier] overriding the standard Content-Type header.
+// WithContentType constructs an [aoni.RequestModifier] overriding the standard Content-Type header (RFC 9110 §8.3).
 func WithContentType(ct string) aoni.RequestModifier {
 	return WithHeader("Content-Type", ct)
 }
 
-// WithAccept constructs an [aoni.RequestModifier] overriding the standard Accept header.
+// WithAccept constructs an [aoni.RequestModifier] overriding the standard Accept header (RFC 9110 §12.5.1).
 func WithAccept(accept string) aoni.RequestModifier {
 	return WithHeader("Accept", accept)
 }
 
-// WithOrigin constructs an [aoni.RequestModifier] overriding the standard Origin header.
+// WithOrigin constructs an [aoni.RequestModifier] overriding the standard Origin header (RFC 6454 §7).
 func WithOrigin(origin string) aoni.RequestModifier {
 	return WithHeader("Origin", origin)
 }
 
-// WithIfNoneMatch constructs an [aoni.RequestModifier] setting the If-None-Match conditional header.
+// WithIfNoneMatch constructs an [aoni.RequestModifier] setting the If-None-Match conditional header (RFC 9110 §13.1.2).
 func WithIfNoneMatch(etag string) aoni.RequestModifier {
 	return WithHeader("If-None-Match", etag)
 }
 
-// WithIfMatch constructs an [aoni.RequestModifier] setting the If-Match conditional header.
+// WithIfMatch constructs an [aoni.RequestModifier] setting the If-Match conditional header (RFC 9110 §13.1.1).
 func WithIfMatch(etag string) aoni.RequestModifier {
 	return WithHeader("If-Match", etag)
 }

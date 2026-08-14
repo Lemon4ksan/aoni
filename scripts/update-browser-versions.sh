@@ -65,7 +65,7 @@ if [ -n "$IOS_FULL" ]; then
     echo "iOS: $IOS_FULL (UA format: $IOS_UA)"
 else
     IOS_UA=""
-    echo "Warning: could not fetch iOS version — iOS OS strings will not be updated."
+    echo "Warning: could not fetch iOS version - iOS OS strings will not be updated."
 fi
 
 echo "Fetching Android version (for Firefox UA)..."

@@ -13,7 +13,8 @@ import (
 	"github.com/lemon4ksan/aoni/internal/urlutil"
 )
 
-// WithVar constructs an [aoni.RequestModifier] that interpolates a single URI template placeholder (e.g. "{key}") with value.
+// WithVar constructs an [aoni.RequestModifier] that interpolates a single URI template placeholder
+// (e.g. "{key}") with value according to RFC 6570 Level 1 URI Template variable expansion.
 func WithVar(key string, value any) aoni.RequestModifier {
 	return aoni.RequestModifier{
 		Kind: aoni.ModCustom,
@@ -25,8 +26,8 @@ func WithVar(key string, value any) aoni.RequestModifier {
 	}
 }
 
-// WithVars constructs an [aoni.RequestModifier] replacing multiple path template placeholders using key-value pairs.
-// Requires an even number of arguments (alternating key and value pairs).
+// WithVars constructs an [aoni.RequestModifier] replacing multiple path template placeholders using key-value pairs
+// per RFC 6570 URI Template variable substitution. Requires an even number of arguments (alternating key and value pairs).
 func WithVars(pairs ...any) aoni.RequestModifier {
 	if len(pairs)%2 != 0 {
 		return aoni.RequestModifier{
@@ -49,7 +50,7 @@ func WithVars(pairs ...any) aoni.RequestModifier {
 	}
 }
 
-// WithBaseURL constructs an [aoni.RequestModifier] overriding target request URL base.
+// WithBaseURL constructs an [aoni.RequestModifier] overriding the target request URL base (RFC 3986 §5).
 func WithBaseURL(baseURL string) aoni.RequestModifier {
 	return aoni.RequestModifier{
 		Kind: aoni.ModCustom,

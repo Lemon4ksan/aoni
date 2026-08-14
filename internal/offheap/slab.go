@@ -27,7 +27,7 @@ type SlabAllocator[T any] struct {
 	page   unsafe.Pointer // OS kernel-managed memory slab
 	bitmap []uint64       // packed bit array: 1=free slot, 0=used slot
 	stride int            // bytes between adjacent slots: sizeof(T) rounded up to alignof(T)
-	size   int            // sizeof(T) — bytes to zero on alloc/free
+	size   int            // sizeof(T) - bytes to zero on alloc/free
 	cap    int            // total number of T slots in the slab
 	free   int            // number of currently free slots
 }
@@ -91,7 +91,7 @@ func NewSlabAllocator[T any](slotCount int) (*SlabAllocator[T], error) {
 // Alloc checks out one zero-initialized T slot from the slab.
 // Returns nil if all slots are currently in use.
 //
-// Time complexity: O(slots/64) — scans bitmap words until a free slot is found.
+// Time complexity: O(slots/64) - scans bitmap words until a free slot is found.
 func (s *SlabAllocator[T]) Alloc() *T {
 	if s == nil || s.page == nil || s.free == 0 {
 		return nil
@@ -102,7 +102,7 @@ func (s *SlabAllocator[T]) Alloc() *T {
 			continue
 		}
 
-		// bits.TrailingZeros64 compiles to TZCNT/BSF on amd64 — single instruction.
+		// bits.TrailingZeros64 compiles to TZCNT/BSF on amd64 - single instruction.
 		bit := bits.TrailingZeros64(word)
 		s.bitmap[i] &^= 1 << uint(bit)
 		s.free--
@@ -134,7 +134,7 @@ func (s *SlabAllocator[T]) Free(p *T) {
 	// Compute slot index from pointer offset within the slab page.
 	offset := int(uintptr(unsafe.Pointer(p)) - uintptr(s.page))
 	if offset < 0 || offset >= s.stride*s.cap || offset%s.stride != 0 {
-		return // pointer not from this slab, or misaligned — ignore
+		return // pointer not from this slab, or misaligned - ignore
 	}
 
 	idx := offset / s.stride
@@ -149,7 +149,7 @@ func (s *SlabAllocator[T]) Free(p *T) {
 }
 
 // Reset marks all slots as free in O(slots/64) time.
-// Slot memory is NOT zeroed — it will be zeroed lazily on the next [SlabAllocator.Alloc].
+// Slot memory is NOT zeroed - it will be zeroed lazily on the next [SlabAllocator.Alloc].
 //
 // All previously returned pointers are invalidated after Reset.
 func (s *SlabAllocator[T]) Reset() {

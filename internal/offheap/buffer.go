@@ -91,7 +91,7 @@ func (b *OffHeapBuffer) WriteString(s string) (int, error) {
 		return 0, ErrBufferFull
 	}
 
-	// unsafe.StringData avoids []byte(s) heap allocation — zero-copy string-to-bytes view.
+	// unsafe.StringData avoids []byte(s) heap allocation - zero-copy string-to-bytes view.
 	dst := unsafe.Slice((*byte)(unsafe.Add(b.ptr, b.len)), n)
 	copy(dst, unsafe.Slice(unsafe.StringData(s), n))
 

@@ -12,10 +12,9 @@
 //
 // # Platform Backends
 //
-//   - Linux: mmap(MAP_ANON|MAP_PRIVATE) via golang.org/x/sys/unix
-//   - macOS (Darwin): mmap(MAP_ANON|MAP_PRIVATE) via golang.org/x/sys/unix
+//   - Linux & macOS (Darwin): mmap(MAP_ANON|MAP_PRIVATE) via golang.org/x/sys/unix
 //   - Windows: VirtualAlloc(MEM_COMMIT|MEM_RESERVE) via golang.org/x/sys/windows
-//   - Other (FreeBSD, plan9, wasm): heap fallback — no off-heap guarantee
+//   - Other (FreeBSD, plan9, wasm): heap fallback - no off-heap guarantee
 //
 // # Thread Safety
 //
@@ -23,7 +22,7 @@
 //   - [OffHeapBuffer] is NOT thread-safe.
 //   - [ArenaPool] is thread-safe via sync.Pool. Use it for concurrent arena access.
 //
-// # GC Safety — CRITICAL
+// # GC Safety - CRITICAL
 //
 // Types allocated with [AllocStruct] MUST be Plain Old Data (POD) structures.
 // They MUST NOT contain Go heap pointers, strings, maps, channels, or slice headers.

@@ -99,7 +99,7 @@ func TestConnectionFramePool_FreeAndReallocate(t *testing.T) {
 }
 
 func TestConnectionFramePool_PerGoroutinePool(t *testing.T) {
-	// Each goroutine creates and owns its own pool — no sharing, no contention.
+	// Each goroutine creates and owns its own pool - no sharing, no contention.
 	const (
 		goroutines = 32
 		iterations = 500

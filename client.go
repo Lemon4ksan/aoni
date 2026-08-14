@@ -214,7 +214,7 @@ func (c *Client) Request(
 	return resp, nil
 }
 
-// doBaremetal executes a request on the minimal allocation path — bypassing AcquireTx,
+// doBaremetal executes a request on the minimal allocation path - bypassing AcquireTx,
 // NewStdRequest, and the full pipeline. Called only when isBaremetalStaticEligible is true
 // and no per-request mods or config are present.
 func (c *Client) doBaremetal(ctx context.Context, method, path string) (*http.Response, error) {
