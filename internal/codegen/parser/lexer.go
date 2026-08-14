@@ -5,6 +5,7 @@
 package parser
 
 import (
+	"strconv"
 	"strings"
 	"unicode"
 
@@ -147,8 +148,15 @@ func unquote(s string) string {
 	s = strings.TrimSpace(s)
 	if len(s) >= 2 {
 		if (s[0] == '"' && s[len(s)-1] == '"') ||
-			(s[0] == '\'' && s[len(s)-1] == '\'') ||
 			(s[0] == '`' && s[len(s)-1] == '`') {
+			if unq, err := strconv.Unquote(s); err == nil {
+				return unq
+			}
+
+			return strings.ReplaceAll(s[1:len(s)-1], `\"`, `"`)
+		}
+
+		if s[0] == '\'' && s[len(s)-1] == '\'' {
 			return s[1 : len(s)-1]
 		}
 	}

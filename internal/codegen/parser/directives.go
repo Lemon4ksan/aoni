@@ -173,6 +173,10 @@ func ApplyMethodDirective(m *ir.MethodIR, d *Directive) {
 			m.Encoder = custom
 		}
 
+	case "extract":
+		m.Extract = parseExtractDirective(d)
+	case "multipart":
+		m.PayloadKind = ir.PayloadMultipart
 	case "form":
 		m.PayloadKind = ir.PayloadForm
 	case "json":
@@ -374,4 +378,76 @@ func parseTypeMapDirective(tm map[string]ir.FormatStrategy, d *Directive) {
 			tm[from] = ir.FormatCustomStringer
 		}
 	}
+}
+
+func parseExtractDirective(d *Directive) *ir.ExtractIR {
+	if d == nil {
+		return nil
+	}
+
+	ext := &ir.ExtractIR{}
+	if rx, ok := d.Args["regex"]; ok {
+		ext.Kind = ir.ExtractRegex
+		ext.RegexPattern = rx
+		return ext
+	}
+
+	if bet, ok := d.Args["between"]; ok {
+		ext.Kind = ir.ExtractBetween
+
+		ext.Prefix = bet
+		if and, ok := d.Args["and"]; ok {
+			ext.Suffix = and
+		}
+
+		return ext
+	}
+
+	if pref, ok := d.Args["prefix"]; ok {
+		ext.Kind = ir.ExtractBetween
+
+		ext.Prefix = pref
+		if suff, ok := d.Args["suffix"]; ok {
+			ext.Suffix = suff
+		}
+
+		return ext
+	}
+
+	if tag, ok := d.Args["tag"]; ok {
+		ext.Kind = ir.ExtractHTMLToken
+		ext.Tag = tag
+		ext.ID = d.Args["id"]
+		ext.Attr = d.Args["attr"]
+
+		return ext
+	}
+
+	if css, ok := d.Args["css"]; ok {
+		ext.Kind = ir.ExtractHTMLToken
+		if strings.HasPrefix(css, "#") {
+			ext.ID = strings.TrimPrefix(css, "#")
+			ext.Tag = "div"
+		} else {
+			ext.Tag = css
+		}
+
+		ext.Attr = d.Args["attr"]
+
+		return ext
+	}
+
+	if custom, ok := d.Args["custom"]; ok {
+		ext.Kind = ir.ExtractCustom
+		ext.CustomFunc = custom
+		return ext
+	}
+
+	if d.Value != "" {
+		ext.Kind = ir.ExtractCustom
+		ext.CustomFunc = d.Value
+		return ext
+	}
+
+	return nil
 }

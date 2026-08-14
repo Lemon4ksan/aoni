@@ -65,13 +65,17 @@ func (e *Emitter) Emit(root *ir.RootIR) ([]byte, error) {
 
 func (e *Emitter) emitImports(buf *bytes.Buffer, root *ir.RootIR) {
 	buf.WriteString("import (\n")
+	buf.WriteString("\t\"bytes\"\n")
 	buf.WriteString("\t\"context\"\n")
 	buf.WriteString("\t\"encoding/json\"\n")
 	buf.WriteString("\t\"errors\"\n")
 	buf.WriteString("\t\"fmt\"\n")
 	buf.WriteString("\t\"io\"\n")
+	buf.WriteString("\t\"mime/multipart\"\n")
 	buf.WriteString("\t\"net/http\"\n")
+	buf.WriteString("\t\"net/textproto\"\n")
 	buf.WriteString("\t\"net/url\"\n")
+	buf.WriteString("\t\"regexp\"\n")
 	buf.WriteString("\t\"strconv\"\n")
 	buf.WriteString("\t\"time\"\n\n")
 
@@ -85,9 +89,10 @@ func (e *Emitter) emitImports(buf *bytes.Buffer, root *ir.RootIR) {
 
 	// User custom imports (exclude standard imports already emitted)
 	stdImports := map[string]bool{
-		"context": true, "encoding/json": true, "errors": true,
-		"fmt": true, "io": true, "net/http": true, "net/url": true,
-		"strconv": true, "strings": true, "time": true,
+		"bytes": true, "context": true, "encoding/json": true, "errors": true,
+		"fmt": true, "io": true, "mime/multipart": true, "net/http": true,
+		"net/textproto": true, "net/url": true, "regexp": true, "strconv": true,
+		"strings": true, "time": true,
 	}
 
 	for _, imp := range root.Imports {
@@ -213,14 +218,36 @@ func (e *Emitter) emitMethod(buf *bytes.Buffer, clientStructName string, m *ir.M
 
 	// Build Query String on Stack Buffer if there are query parameters
 	var (
-		queryParams   []*ir.ParamIR
-		pathParams    []*ir.ParamIR
-		formParams    []*ir.ParamIR
-		bodyParam     *ir.ParamIR
-		userModsParam *ir.ParamIR
+		queryParams     []*ir.ParamIR
+		pathParams      []*ir.ParamIR
+		formParams      []*ir.ParamIR
+		multipartParams []*ir.ParamIR
+		bodyParam       *ir.ParamIR
+		userModsParam   *ir.ParamIR
 	)
 
+	consumedFileVars := make(map[string]bool)
 	for _, p := range m.Params {
+		if p.Location == ir.LocMultipartFile {
+			if strings.HasPrefix(p.FileName, "{") && strings.HasSuffix(p.FileName, "}") {
+				v := strings.Trim(p.FileName, "{}")
+				consumedFileVars[v] = true
+				consumedFileVars[strings.ToLower(v)] = true
+			}
+
+			if strings.HasPrefix(p.ContentType, "{") && strings.HasSuffix(p.ContentType, "}") {
+				v := strings.Trim(p.ContentType, "{}")
+				consumedFileVars[v] = true
+				consumedFileVars[strings.ToLower(v)] = true
+			}
+		}
+	}
+
+	for _, p := range m.Params {
+		if consumedFileVars[p.GoName] || consumedFileVars[strings.ToLower(p.GoName)] {
+			continue
+		}
+
 		switch p.Location {
 		case ir.LocQuery, ir.LocQueryStruct:
 			queryParams = append(queryParams, p)
@@ -228,6 +255,8 @@ func (e *Emitter) emitMethod(buf *bytes.Buffer, clientStructName string, m *ir.M
 			pathParams = append(pathParams, p)
 		case ir.LocFormFields:
 			formParams = append(formParams, p)
+		case ir.LocMultipartField, ir.LocMultipartFile:
+			multipartParams = append(multipartParams, p)
 		case ir.LocBody:
 			bodyParam = p
 		case ir.LocModifiers:
@@ -242,7 +271,12 @@ func (e *Emitter) emitMethod(buf *bytes.Buffer, clientStructName string, m *ir.M
 
 	// Form body serialization
 	if m.PayloadKind == ir.PayloadForm && len(formParams) > 0 {
-		e.emitFormBuffer(buf, formParams, m.StackBufSize)
+		e.emitFormBuffer(buf, m, formParams, m.StackBufSize)
+	}
+
+	// Multipart body serialization
+	if m.PayloadKind == ir.PayloadMultipart && len(multipartParams) > 0 {
+		e.emitMultipartBuffer(buf, multipartParams)
 	}
 
 	// Path variables
@@ -395,7 +429,7 @@ func (e *Emitter) emitQueryBuffer(buf *bytes.Buffer, params []*ir.ParamIR, bufSi
 	buf.WriteString("\tallMods = append(allMods, mod.WithRawQuery(bytesconv.B2S(qBytes)))\n\n")
 }
 
-func (e *Emitter) emitFormBuffer(buf *bytes.Buffer, params []*ir.ParamIR, bufSize int) {
+func (e *Emitter) emitFormBuffer(buf *bytes.Buffer, m *ir.MethodIR, params []*ir.ParamIR, bufSize int) {
 	if bufSize <= 0 {
 		bufSize = 256
 	}
@@ -427,6 +461,17 @@ func (e *Emitter) emitFormBuffer(buf *bytes.Buffer, params []*ir.ParamIR, bufSiz
 		fmt.Fprintf(buf, "\tformBytes = append(formBytes, %q...)\n", prefix)
 
 		switch p.Formatter {
+		case ir.FormatJSONString:
+			fmt.Fprintf(buf, "\t%sJSON, err := json.Marshal(%s)\n", p.GoName, p.GoName)
+
+			errRet := "\tif err != nil {\n\t\treturn err\n\t}\n"
+			if m != nil && m.Return != nil && !m.Return.IsVoid {
+				errRet = "\tif err != nil {\n\t\treturn nil, err\n\t}\n"
+			}
+
+			buf.WriteString(errRet)
+			fmt.Fprintf(buf, "\tformBytes = urlutil.AppendQueryEscape(formBytes, %sJSON)\n", p.GoName)
+
 		case ir.FormatIntAppend:
 			fmt.Fprintf(buf, "\tformBytes = strconv.AppendInt(formBytes, int64(%s), 10)\n", p.GoName)
 		case ir.FormatUintAppend:
@@ -441,7 +486,60 @@ func (e *Emitter) emitFormBuffer(buf *bytes.Buffer, params []*ir.ParamIR, bufSiz
 	buf.WriteString("\tallMods = append(allMods, mod.WithBodyBytes(formBytes))\n\n")
 }
 
+func (e *Emitter) emitMultipartBuffer(buf *bytes.Buffer, params []*ir.ParamIR) {
+	buf.WriteString("\tvar bodyBuf bytes.Buffer\n")
+	buf.WriteString("\tmw := multipart.NewWriter(&bodyBuf)\n")
+
+	for _, p := range params {
+		switch p.Location {
+		case ir.LocMultipartField:
+			fmt.Fprintf(buf, "\t_ = mw.WriteField(%q, fmt.Sprint(%s))\n", p.WireKey, p.GoName)
+		case ir.LocMultipartFile:
+			fn := p.FileName
+			switch {
+			case fn == "" || fn == "{filename}":
+				fn = "filename"
+			case strings.HasPrefix(fn, "{") && strings.HasSuffix(fn, "}"):
+				fn = strings.Trim(fn, "{}")
+			case !strings.HasPrefix(fn, `"`):
+				fn = fmt.Sprintf("%q", fn)
+			}
+
+			ct := p.ContentType
+			switch {
+			case ct == "" || ct == "{content_type}":
+				ct = "contentType"
+			case strings.HasPrefix(ct, "{") && strings.HasSuffix(ct, "}"):
+				ct = strings.Trim(ct, "{}")
+			case !strings.HasPrefix(ct, `"`):
+				ct = fmt.Sprintf("%q", ct)
+			}
+
+			fmt.Fprintf(buf, "\thdr := make(textproto.MIMEHeader)\n")
+			fmt.Fprintf(
+				buf,
+				"\thdr.Set(\"Content-Disposition\", fmt.Sprintf(`form-data; name=%%q; filename=%%q`, %q, %s))\n",
+				p.WireKey,
+				fn,
+			)
+			fmt.Fprintf(buf, "\thdr.Set(\"Content-Type\", %s)\n", ct)
+			fmt.Fprintf(buf, "\tpw, err := mw.CreatePart(hdr)\n")
+			fmt.Fprintf(buf, "\tif err == nil {\n\t\t_, _ = pw.Write(%s)\n\t}\n", p.GoName)
+		}
+	}
+
+	buf.WriteString("\t_ = mw.Close()\n")
+	buf.WriteString(
+		"\tallMods = append(allMods, mod.WithHeader(\"Content-Type\", mw.FormDataContentType()), mod.WithBodyBytes(bodyBuf.Bytes()))\n\n",
+	)
+}
+
 func (e *Emitter) emitExecution(buf *bytes.Buffer, m *ir.MethodIR, targetReq, rawPath string, bodyParam *ir.ParamIR) {
+	if m.Extract != nil {
+		e.emitExtractExecution(buf, m, targetReq, rawPath)
+		return
+	}
+
 	methodVerb := m.HTTPMethod
 	if methodVerb == "" {
 		methodVerb = "GET"
@@ -567,6 +665,113 @@ func (e *Emitter) emitExecution(buf *bytes.Buffer, m *ir.MethodIR, targetReq, ra
 			e.emitChecks(buf, m)
 			buf.WriteString("\treturn resp, nil\n")
 		}
+	}
+}
+
+func (e *Emitter) emitExtractExecution(buf *bytes.Buffer, m *ir.MethodIR, targetReq, rawPath string) {
+	methodVerb := m.HTTPMethod
+	if methodVerb == "" {
+		methodVerb = "GET"
+	}
+
+	resultType := "any"
+	if m.Return != nil && m.Return.SuccessType.Name != "" {
+		resultType = strings.TrimPrefix(m.Return.SuccessType.Name, "*")
+	}
+
+	httpVerb := "MethodGet"
+	switch methodVerb {
+	case "POST":
+		httpVerb = "MethodPost"
+	case "PUT":
+		httpVerb = "MethodPut"
+	case "DELETE":
+		httpVerb = "MethodDelete"
+	}
+
+	fmt.Fprintf(buf, "\tresp, err := %s.Request(ctx, http.%s, %q, allMods...)\n", targetReq, httpVerb, rawPath)
+	buf.WriteString("\tif err != nil {\n\t\treturn nil, err\n\t}\n")
+	buf.WriteString("\tdefer resp.Body.Close()\n\n")
+
+	ext := m.Extract
+	switch ext.Kind {
+	case ir.ExtractCustom:
+		fmt.Fprintf(buf, "\treturn %s(resp.Body)\n", ext.CustomFunc)
+
+	case ir.ExtractRegex:
+		buf.WriteString("\tbodyBytes, err := io.ReadAll(resp.Body)\n")
+		buf.WriteString("\tif err != nil {\n\t\treturn nil, err\n\t}\n\n")
+		fmt.Fprintf(buf, "\trx := regexp.MustCompile(`%s`)\n", ext.RegexPattern)
+		buf.WriteString("\tmatches := rx.FindSubmatch(bodyBytes)\n")
+		buf.WriteString(
+			"\tif len(matches) < 2 {\n\t\treturn nil, errors.New(\"extract: regex pattern not matched\")\n\t}\n\n",
+		)
+		fmt.Fprintf(buf, "\tvar result %s\n", resultType)
+		buf.WriteString(
+			"\tif err := json.Unmarshal(matches[1], &result); err != nil {\n\t\treturn nil, fmt.Errorf(\"extract: failed to unmarshal payload: %w\", err)\n\t}\n\n",
+		)
+		buf.WriteString("\treturn &result, nil\n")
+
+	case ir.ExtractBetween:
+		buf.WriteString("\tbodyBytes, err := io.ReadAll(resp.Body)\n")
+		buf.WriteString("\tif err != nil {\n\t\treturn nil, err\n\t}\n\n")
+		fmt.Fprintf(buf, "\tprefix := []byte(%q)\n", ext.Prefix)
+		buf.WriteString("\tstart := bytes.Index(bodyBytes, prefix)\n")
+		buf.WriteString("\tif start == -1 {\n\t\treturn nil, errors.New(\"extract: prefix not found\")\n\t}\n")
+		buf.WriteString("\tstart += len(prefix)\n\n")
+
+		if ext.Suffix != "" {
+			fmt.Fprintf(buf, "\tsuffix := []byte(%q)\n", ext.Suffix)
+			buf.WriteString("\tvar end int\n")
+			buf.WriteString(
+				"\tif len(suffix) == 1 {\n\t\tend = bytes.IndexByte(bodyBytes[start:], suffix[0])\n\t} else {\n\t\tend = bytes.Index(bodyBytes[start:], suffix)\n\t}\n",
+			)
+			buf.WriteString("\tif end == -1 {\n\t\treturn nil, errors.New(\"extract: suffix not found\")\n\t}\n\n")
+			fmt.Fprintf(buf, "\tvar result %s\n", resultType)
+			buf.WriteString(
+				"\tif err := json.Unmarshal(bodyBytes[start:start+end], &result); err != nil {\n\t\treturn nil, fmt.Errorf(\"extract: failed to unmarshal payload: %w\", err)\n\t}\n\n",
+			)
+		} else {
+			fmt.Fprintf(buf, "\tvar result %s\n", resultType)
+			buf.WriteString(
+				"\tif err := json.Unmarshal(bodyBytes[start:], &result); err != nil {\n\t\treturn nil, fmt.Errorf(\"extract: failed to unmarshal payload: %w\", err)\n\t}\n\n",
+			)
+		}
+
+		buf.WriteString("\treturn &result, nil\n")
+
+	case ir.ExtractHTMLToken:
+		buf.WriteString("\tbodyBytes, err := io.ReadAll(resp.Body)\n")
+		buf.WriteString("\tif err != nil {\n\t\treturn nil, err\n\t}\n\n")
+
+		searchKey := ext.Attr + "=\""
+		if ext.ID != "" {
+			searchKey = ext.ID + "\""
+		}
+
+		fmt.Fprintf(buf, "\tstart := bytes.Index(bodyBytes, []byte(%q))\n", searchKey)
+		buf.WriteString("\tif start == -1 {\n\t\treturn nil, errors.New(\"extract: target element not found\")\n\t}\n")
+
+		if ext.Attr != "" && ext.ID != "" {
+			fmt.Fprintf(buf, "\tattrIdx := bytes.Index(bodyBytes[start:], []byte(%q))\n", ext.Attr+"=\"")
+			buf.WriteString("\tif attrIdx == -1 {\n\t\treturn nil, errors.New(\"extract: attribute not found\")\n\t}\n")
+			fmt.Fprintf(buf, "\tstart = start + attrIdx + len(%q)\n", ext.Attr+"=\"")
+		} else {
+			fmt.Fprintf(buf, "\tstart += len(%q)\n", searchKey)
+		}
+
+		buf.WriteString("\tend := bytes.IndexByte(bodyBytes[start:], '\"')\n")
+		buf.WriteString(
+			"\tif end == -1 {\n\t\treturn nil, errors.New(\"extract: attribute boundary not found\")\n\t}\n\n",
+		)
+		fmt.Fprintf(buf, "\tvar result %s\n", resultType)
+		buf.WriteString(
+			"\tunescaped := bytes.ReplaceAll(bodyBytes[start:start+end], []byte(\"&quot;\"), []byte(\"\\\"\"))\n",
+		)
+		buf.WriteString(
+			"\tif err := json.Unmarshal(unescaped, &result); err != nil {\n\t\treturn nil, fmt.Errorf(\"extract: failed to unmarshal payload: %w\", err)\n\t}\n\n",
+		)
+		buf.WriteString("\treturn &result, nil\n")
 	}
 }
 

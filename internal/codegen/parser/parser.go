@@ -195,11 +195,14 @@ func (p *Parser) parseMethodParams(
 		}
 	}
 
+	prevLine := p.fset.Position(fields.Opening).Line
 	for _, field := range fields.List {
 		paramDoc := extractDocLines(field.Doc, field.Comment)
 		if len(paramDoc) == 0 && len(fileComments) > 0 {
-			paramDoc = p.findCommentsForNode(fileComments, field)
+			paramDoc = p.findCommentsForParam(fileComments, prevLine, field)
 		}
+
+		prevLine = p.fset.Position(field.End()).Line
 
 		paramDirectives := extractDirectives(paramDoc)
 		goType := p.extractGoType(field.Type)
@@ -218,11 +221,19 @@ func (p *Parser) parseMethodParams(
 				}
 			}
 
+			loc := ir.LocQuery
+			switch m.PayloadKind {
+			case ir.PayloadForm:
+				loc = ir.LocFormFields
+			case ir.PayloadMultipart:
+				loc = ir.LocMultipartField
+			}
+
 			paramName := ident.Name
 			param := &ir.ParamIR{
 				GoName:    paramName,
 				GoType:    goType,
-				Location:  ir.LocQuery, // Default candidate
+				Location:  loc,
 				WireKey:   paramName,
 				Formatter: formatter,
 			}
@@ -255,6 +266,8 @@ func (p *Parser) parseMethodParams(
 						param.TimeLayout = layout
 					} else {
 						switch strings.ToLower(d.Value) {
+						case "json_string", "json":
+							param.Formatter = ir.FormatJSONString
 						case "bool_int", "01", "10", "int":
 							param.Formatter = ir.FormatBoolInt
 						case "flag", "bool_flag":
@@ -274,6 +287,39 @@ func (p *Parser) parseMethodParams(
 						case "bracket":
 							param.Formatter = ir.FormatSliceBracket
 						}
+					}
+
+				case "field":
+					if d.Value != "" {
+						param.WireKey = d.Value
+					}
+
+					if m.PayloadKind == ir.PayloadMultipart {
+						param.Location = ir.LocMultipartField
+					} else {
+						param.Location = ir.LocFormFields
+					}
+
+				case "part":
+					param.Location = ir.LocMultipartField
+					if d.Value != "" {
+						param.WireKey = d.Value
+					}
+
+				case "file":
+					param.Location = ir.LocMultipartFile
+					if name, ok := d.Args["name"]; ok {
+						param.WireKey = name
+					} else if d.Value != "" {
+						param.WireKey = d.Value
+					}
+
+					if fn, ok := d.Args["filename"]; ok {
+						param.FileName = fn
+					}
+
+					if ct, ok := d.Args["content_type"]; ok {
+						param.ContentType = ct
 					}
 
 				case "query":
@@ -296,34 +342,41 @@ func (p *Parser) parseMethodParams(
 				}
 			}
 
-			// Implicit inference if location not explicitly set by directive
-			if len(paramDirectives) == 0 {
-				switch {
-				case goType.Name == "context.Context" || goType.Name == "Context":
-					param.Location = ir.LocContext
-				case goType.IsVariadic && strings.Contains(goType.Name, "RequestModifier"):
-					param.Location = ir.LocModifiers
-				case pathVars[paramName] || pathVars[strings.ToLower(paramName)]:
-					// Automatically binds to path template / dynamic header variable!
-					param.Location = ir.LocPath
-					if pathVars[strings.ToLower(paramName)] {
-						param.WireKey = strings.ToLower(paramName)
-					}
-				case (m.HTTPMethod == "GET" || m.HTTPMethod == "DELETE" || m.HTTPMethod == "HEAD") && isDTOQueryStruct(goType.Name):
-					param.Location = ir.LocQueryStruct
-					param.Formatter = ir.FormatCompiledEncode
-				case m.PayloadKind == ir.PayloadForm && isDTOQueryStruct(goType.Name):
-					param.Location = ir.LocFormFields
-					param.Formatter = ir.FormatCompiledEncode
-				case m.HTTPMethod == "POST" || m.HTTPMethod == "PUT" || m.HTTPMethod == "PATCH":
-					if m.PayloadKind == ir.PayloadForm {
-						param.Location = ir.LocFormFields
-					} else if param.Location != ir.LocContext && param.Location != ir.LocModifiers {
-						if m.PayloadKind == ir.PayloadNone {
-							m.PayloadKind = ir.PayloadJSON
+			// Mandatory types take precedence
+			switch {
+			case goType.Name == "context.Context" || goType.Name == "Context":
+				param.Location = ir.LocContext
+			case goType.IsVariadic && strings.Contains(goType.Name, "RequestModifier"):
+				param.Location = ir.LocModifiers
+			default:
+				// Implicit inference if location not explicitly set by directive
+				if len(paramDirectives) == 0 {
+					switch {
+					case pathVars[paramName] || pathVars[strings.ToLower(paramName)]:
+						// Automatically binds to path template / dynamic header variable!
+						param.Location = ir.LocPath
+						if pathVars[strings.ToLower(paramName)] {
+							param.WireKey = strings.ToLower(paramName)
 						}
+					case (m.HTTPMethod == "GET" || m.HTTPMethod == "DELETE" || m.HTTPMethod == "HEAD") && isDTOQueryStruct(goType.Name):
+						param.Location = ir.LocQueryStruct
+						param.Formatter = ir.FormatCompiledEncode
+					case m.PayloadKind == ir.PayloadForm && isDTOQueryStruct(goType.Name):
+						param.Location = ir.LocFormFields
+						param.Formatter = ir.FormatCompiledEncode
+					case m.HTTPMethod == "POST" || m.HTTPMethod == "PUT" || m.HTTPMethod == "PATCH":
+						switch {
+						case m.PayloadKind == ir.PayloadForm:
+							param.Location = ir.LocFormFields
+						case m.PayloadKind == ir.PayloadMultipart:
+							param.Location = ir.LocMultipartField
+						case param.Location != ir.LocContext && param.Location != ir.LocModifiers:
+							if m.PayloadKind == ir.PayloadNone {
+								m.PayloadKind = ir.PayloadJSON
+							}
 
-						param.Location = ir.LocBody
+							param.Location = ir.LocBody
+						}
 					}
 				}
 			}
@@ -718,19 +771,24 @@ func toDelimited(s string, delimiter byte) string {
 	return b.String()
 }
 
-func (p *Parser) findCommentsForNode(fileComments []*ast.CommentGroup, node ast.Node) []string {
-	if node == nil || len(fileComments) == 0 {
+func (p *Parser) findCommentsForParam(fileComments []*ast.CommentGroup, prevLine int, field *ast.Field) []string {
+	if field == nil || len(fileComments) == 0 {
 		return nil
 	}
 
-	nodePos := p.fset.Position(node.Pos())
-	nodeEnd := p.fset.Position(node.End())
+	fieldStart := p.fset.Position(field.Pos()).Line
+	fieldEnd := p.fset.Position(field.End()).Line
 
 	var lines []string
 	for _, cg := range fileComments {
 		for _, c := range cg.List {
 			cPos := p.fset.Position(c.Pos())
-			if cPos.Line >= nodePos.Line && cPos.Line <= nodeEnd.Line {
+			// 1. Trailing comment on the same line as the field
+			isTrailing := cPos.Line >= fieldStart && cPos.Line <= fieldEnd
+			// 2. Preceding comments strictly between previous field's end line and this field's start line
+			isPreceding := cPos.Line < fieldStart && cPos.Line > prevLine
+
+			if isTrailing || isPreceding {
 				lines = append(lines, c.Text)
 			}
 		}

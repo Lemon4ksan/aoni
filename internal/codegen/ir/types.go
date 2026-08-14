@@ -152,6 +152,7 @@ type MethodIR struct {
 	Decoder         string
 	Encoder         string
 	Codec           string
+	Extract         *ExtractIR
 	StackModsSize   int
 	StackBufSize    int
 }
@@ -209,6 +210,9 @@ const (
 	// PayloadForm encodes the request body as application/x-www-form-urlencoded.
 	PayloadForm PayloadKind = "form"
 
+	// PayloadMultipart encodes the request body as multipart/form-data.
+	PayloadMultipart PayloadKind = "multipart"
+
 	// PayloadProto encodes the request body as Protocol Buffers.
 	PayloadProto PayloadKind = "proto"
 
@@ -221,6 +225,35 @@ const (
 	// PayloadNone indicates no request body payload.
 	PayloadNone PayloadKind = "none"
 )
+
+// ExtractKind categorizes HTML/DOM/Script scraping extractors.
+type ExtractKind string
+
+const (
+	// ExtractRegex extracts payload via compiled regular expressions.
+	ExtractRegex ExtractKind = "regex"
+
+	// ExtractBetween extracts payload between prefix and suffix boundaries with zero allocations.
+	ExtractBetween ExtractKind = "between"
+
+	// ExtractHTMLToken extracts payload from specific HTML element attributes using html.Tokenizer.
+	ExtractHTMLToken ExtractKind = "html_token"
+
+	// ExtractCustom delegates scraping to a user-provided extraction function.
+	ExtractCustom ExtractKind = "custom"
+)
+
+// ExtractIR defines response payload extraction and HTML/DOM scraping rules.
+type ExtractIR struct {
+	Kind         ExtractKind
+	RegexPattern string
+	Prefix       string
+	Suffix       string
+	Tag          string
+	ID           string
+	Attr         string
+	CustomFunc   string
+}
 
 // StreamKind identifies response streaming encoding.
 type StreamKind string
@@ -241,12 +274,14 @@ const (
 
 // ParamIR models an individual function parameter and its HTTP/RPC binding.
 type ParamIR struct {
-	GoName     string
-	GoType     GoTypeIR
-	Location   ParamLocation
-	WireKey    string
-	Formatter  FormatStrategy
-	TimeLayout string
+	GoName      string
+	GoType      GoTypeIR
+	Location    ParamLocation
+	WireKey     string
+	Formatter   FormatStrategy
+	TimeLayout  string
+	FileName    string
+	ContentType string
 }
 
 // ParamLocation specifies where a parameter is mapped in the network transaction.
@@ -276,6 +311,12 @@ const (
 
 	// LocFormFields maps struct fields or arguments directly into form body urlencoded bytes.
 	LocFormFields ParamLocation = "form_fields"
+
+	// LocMultipartField maps a parameter into a multipart form data field.
+	LocMultipartField ParamLocation = "multipart_field"
+
+	// LocMultipartFile maps a parameter into a multipart file upload part.
+	LocMultipartFile ParamLocation = "multipart_file"
 
 	// LocModifiers maps variadic ...aoni.RequestModifier parameters.
 	LocModifiers ParamLocation = "modifiers"
@@ -347,6 +388,9 @@ const (
 
 	// FormatSliceBracket formats slices as array brackets (e.g. key[]=a&key[]=b).
 	FormatSliceBracket FormatStrategy = "slice_bracket"
+
+	// FormatJSONString marshals the struct/value to a JSON string within form fields.
+	FormatJSONString FormatStrategy = "json_string"
 
 	// FormatBufferAppender invokes AppendBytes(dst []byte) []byte directly on stack (0 B/op).
 	FormatBufferAppender FormatStrategy = "buffer_appender"
