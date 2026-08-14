@@ -11,6 +11,7 @@ import (
 	"go/parser"
 	"go/token"
 	"os"
+	"reflect"
 	"strings"
 	"unicode"
 
@@ -488,6 +489,13 @@ func (p *Parser) parseStruct(name string, docLines []string, strct *ast.StructTy
 
 			if field.Tag != nil {
 				customTag = strings.Trim(field.Tag.Value, "`")
+
+				st := reflect.StructTag(customTag)
+				if u := st.Get("url"); u != "" && u != "-" {
+					wireName = strings.Split(u, ",")[0]
+				} else if j := st.Get("json"); j != "" && j != "-" {
+					wireName = strings.Split(j, ",")[0]
+				}
 			}
 
 			for _, d := range fieldDirectives {

@@ -123,7 +123,7 @@ func TestEmitter(t *testing.T) {
 	codeStr := string(code)
 	require.Contains(t, codeStr, "package githubapi")
 	require.Contains(t, codeStr, "type gitHubAPIClient struct")
-	require.Contains(t, codeStr, "func NewGitHubAPI(doer aoni.RequestDoer, opts ...aoni.ClientOption) GitHubAPI")
+	require.Contains(t, codeStr, "func NewGitHubAPI(doer any, opts ...aoni.ClientOption) GitHubAPI")
 	require.Contains(
 		t,
 		codeStr,

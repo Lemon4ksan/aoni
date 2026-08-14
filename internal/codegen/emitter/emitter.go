@@ -65,25 +65,14 @@ func (e *Emitter) Emit(root *ir.RootIR) ([]byte, error) {
 
 func (e *Emitter) emitImports(buf *bytes.Buffer, root *ir.RootIR) {
 	buf.WriteString("import (\n")
-	buf.WriteString("\t\"bytes\"\n")
-	buf.WriteString("\t\"context\"\n")
-	buf.WriteString("\t\"encoding/json\"\n")
-	buf.WriteString("\t\"errors\"\n")
-	buf.WriteString("\t\"fmt\"\n")
-	buf.WriteString("\t\"io\"\n")
-	buf.WriteString("\t\"mime/multipart\"\n")
-	buf.WriteString("\t\"net/http\"\n")
-	buf.WriteString("\t\"net/textproto\"\n")
-	buf.WriteString("\t\"net/url\"\n")
-	buf.WriteString("\t\"os\"\n")
-	buf.WriteString("\t\"regexp\"\n")
-	buf.WriteString("\t\"strconv\"\n")
-	buf.WriteString("\t\"time\"\n\n")
 
-	buf.WriteString("\t\"github.com/lemon4ksan/aoni\"\n")
+	stdList := collectStdImports(root)
+	for _, pkg := range stdList {
+		fmt.Fprintf(buf, "\t\"%s\"\n", pkg)
+	}
+
+	buf.WriteString("\n\t\"github.com/lemon4ksan/aoni\"\n")
 	buf.WriteString("\t\"github.com/lemon4ksan/aoni/fast\"\n")
-	buf.WriteString("\t\"github.com/lemon4ksan/aoni/internal/bytesconv\"\n")
-	buf.WriteString("\t\"github.com/lemon4ksan/aoni/internal/urlutil\"\n")
 	buf.WriteString("\t\"github.com/lemon4ksan/aoni/mod\"\n")
 	buf.WriteString("\t\"github.com/lemon4ksan/aoni/option\"\n")
 	buf.WriteString("\t\"github.com/lemon4ksan/aoni/request\"\n")
@@ -111,6 +100,107 @@ func (e *Emitter) emitImports(buf *bytes.Buffer, root *ir.RootIR) {
 	buf.WriteString(")\n\n")
 }
 
+func collectStdImports(root *ir.RootIR) []string {
+	needed := map[string]bool{
+		"context":  true,
+		"net/http": true,
+	}
+
+	for _, svc := range root.Services {
+		for _, m := range svc.Methods {
+			if m.Extract != nil {
+				needed["bytes"] = true
+				needed["errors"] = true
+				needed["io"] = true
+
+				needed["encoding/json"] = true
+				if m.Extract.Kind == ir.ExtractRegex {
+					needed["regexp"] = true
+				}
+
+				if m.Extract.Kind == ir.ExtractHTMLToken {
+					needed["fmt"] = true
+				}
+			}
+
+			if m.PayloadKind == ir.PayloadMultipart {
+				needed["bytes"] = true
+				needed["mime/multipart"] = true
+				needed["net/textproto"] = true
+				needed["fmt"] = true
+			}
+
+			if m.PayloadKind == ir.PayloadForm {
+				needed["net/url"] = true
+			}
+
+			if m.SignHMAC != nil && m.SignHMAC.KeyEnv != "" {
+				needed["os"] = true
+			}
+
+			if m.UnwrapField != "" {
+				needed["encoding/json"] = true
+				needed["errors"] = true
+			}
+
+			for _, p := range m.Params {
+				if p.Location == ir.LocQuery || p.Location == ir.LocFormFields {
+					needed["net/url"] = true
+					if p.Formatter == ir.FormatJSONString {
+						needed["encoding/json"] = true
+					}
+
+					if p.Formatter == ir.FormatIntAppend || p.Formatter == ir.FormatUintAppend ||
+						p.Formatter == ir.FormatBoolAppend {
+						needed["strconv"] = true
+					}
+
+					if p.Formatter == ir.FormatTimeRFC3339 || p.Formatter == ir.FormatTimeUnixS ||
+						p.Formatter == ir.FormatTimeUnixMS ||
+						p.Formatter == ir.FormatTimeLayout {
+						needed["time"] = true
+						needed["strconv"] = true
+					}
+				}
+			}
+		}
+	}
+
+	for _, s := range root.Structs {
+		for _, f := range s.Fields {
+			if f.Type.Name == "time.Time" {
+				needed["time"] = true
+			}
+
+			if strings.HasPrefix(f.Type.Name, "int") || strings.HasPrefix(f.Type.Name, "uint") {
+				needed["strconv"] = true
+			}
+
+			needed["net/url"] = true
+		}
+	}
+
+	for range root.Tuples {
+		needed["encoding/json"] = true
+		needed["fmt"] = true
+	}
+
+	order := []string{
+		"bytes", "context", "encoding/json", "errors", "fmt", "io",
+		"mime/multipart", "net/http", "net/textproto", "net/url", "os", "regexp",
+		"strconv", "time",
+	}
+
+	var res []string
+	for _, pkg := range order {
+		if needed[pkg] {
+			res = append(res, pkg)
+		}
+	}
+
+	return res
+}
+
 func (e *Emitter) emitService(buf *bytes.Buffer, svc *ir.ServiceIR) {
 	clientStructName := lowerFirst(svc.Name) + "Client"
 
@@ -135,7 +225,7 @@ func (e *Emitter) emitService(buf *bytes.Buffer, svc *ir.ServiceIR) {
 		constructorName,
 		svc.Name,
 	)
-	fmt.Fprintf(buf, "func %s(doer aoni.RequestDoer, opts ...aoni.ClientOption) %s {\n", constructorName, svc.Name)
+	fmt.Fprintf(buf, "func %s(doer any, opts ...aoni.ClientOption) %s {\n", constructorName, svc.Name)
 	buf.WriteString("\tif doer == nil {\n")
 
 	switch svc.Engine {
@@ -148,6 +238,16 @@ func (e *Emitter) emitService(buf *bytes.Buffer, svc *ir.ServiceIR) {
 	}
 
 	buf.WriteString("\t}\n\n")
+
+	// If preconfigured requester is passed without new options, reuse directly
+	buf.WriteString("\tif req, ok := doer.(request.Requester); ok && len(opts) == 0 {\n")
+	fmt.Fprintf(buf, "\t\treturn &%s{\n", clientStructName)
+
+	for _, sub := range svc.SubRequesters {
+		fmt.Fprintf(buf, "\t\t\t%s: req,\n", sub.FieldName)
+	}
+
+	buf.WriteString("\t\t}\n\t}\n\n")
 
 	// Base options
 	buf.WriteString("\tvar baseOpts []aoni.ClientOption\n")
@@ -172,17 +272,43 @@ func (e *Emitter) emitService(buf *bytes.Buffer, svc *ir.ServiceIR) {
 
 	buf.WriteString("\tbaseOpts = append(baseOpts, opts...)\n\n")
 
+	// Target requester resolution
+	buf.WriteString("\tvar targetReq request.Requester\n")
+	buf.WriteString("\tif d, ok := doer.(aoni.RequestDoer); ok {\n")
+	fmt.Fprintf(
+		buf,
+		"\t\ttargetReq = request.AsRequester(aoni.Configure(d, append([]aoni.ClientOption{option.WithBaseURL(%q)}, baseOpts...)...))\n",
+		svc.BaseURL,
+	)
+	buf.WriteString("\t} else if req, ok := doer.(request.Requester); ok {\n")
+	buf.WriteString("\t\ttargetReq = req\n")
+	buf.WriteString("\t} else {\n")
+	fmt.Fprintf(
+		buf,
+		"\t\ttargetReq = request.AsRequester(aoni.Configure(fast.NewClient(), append([]aoni.ClientOption{option.WithBaseURL(%q)}, baseOpts...)...))\n",
+		svc.BaseURL,
+	)
+	buf.WriteString("\t}\n\n")
+
 	// Instantiate SubRequesters
 	fmt.Fprintf(buf, "\treturn &%s{\n", clientStructName)
 
 	for _, sub := range svc.SubRequesters {
-		fmt.Fprintf(buf, "\t\t%s: request.AsRequester(\n", sub.FieldName)
-		fmt.Fprintf(
-			buf,
-			"\t\t\taoni.Configure(doer, append([]aoni.ClientOption{option.WithBaseURL(%q)}, baseOpts...)...),\n",
-			sub.BaseURL,
-		)
-		buf.WriteString("\t\t),\n")
+		baseURL := sub.BaseURL
+		if baseURL == "" {
+			baseURL = svc.BaseURL
+		}
+
+		if sub.FieldName == "r" && baseURL == svc.BaseURL {
+			fmt.Fprintf(buf, "\t\t%s: targetReq,\n", sub.FieldName)
+		} else {
+			fmt.Fprintf(
+				buf,
+				"\t\t%s: request.AsRequester(aoni.Configure(fast.NewClient(), append([]aoni.ClientOption{option.WithBaseURL(%q)}, baseOpts...)...)),\n",
+				sub.FieldName,
+				baseURL,
+			)
+		}
 	}
 
 	buf.WriteString("\t}\n}\n\n")
@@ -211,7 +337,7 @@ func (e *Emitter) emitMethod(buf *bytes.Buffer, clientStructName string, m *ir.M
 	// Build dynamic headers (e.g. Referer)
 	for _, h := range m.Headers {
 		if h.DynamicTemplate != nil {
-			e.emitDynamicHeader(buf, h)
+			e.emitDynamicHeader(buf, &h)
 		} else if h.StaticValue != "" {
 			fmt.Fprintf(buf, "\tallMods = append(allMods, mod.WithHeader(%q, %q))\n", h.Key, h.StaticValue)
 		}
@@ -345,7 +471,7 @@ func (e *Emitter) emitMethod(buf *bytes.Buffer, clientStructName string, m *ir.M
 	buf.WriteString("}\n\n")
 }
 
-func (e *Emitter) emitDynamicHeader(buf *bytes.Buffer, h ir.HeaderIR) {
+func (e *Emitter) emitDynamicHeader(buf *bytes.Buffer, h *ir.HeaderIR) {
 	buf.WriteString("\tvar refBuf [128]byte\n")
 	buf.WriteString("\tref := refBuf[:0]\n")
 
@@ -361,7 +487,7 @@ func (e *Emitter) emitDynamicHeader(buf *bytes.Buffer, h ir.HeaderIR) {
 		}
 	}
 
-	fmt.Fprintf(buf, "\tallMods = append(allMods, mod.WithHeader(%q, bytesconv.B2S(ref)))\n\n", h.Key)
+	fmt.Fprintf(buf, "\tallMods = append(allMods, mod.WithHeader(%q, string(ref)))\n\n", h.Key)
 }
 
 func (e *Emitter) emitQueryBuffer(buf *bytes.Buffer, params []*ir.ParamIR, bufSize int) {
@@ -405,7 +531,7 @@ func (e *Emitter) emitQueryBuffer(buf *bytes.Buffer, params []*ir.ParamIR, bufSi
 			)
 
 		case ir.FormatTimeRFC3339:
-			fmt.Fprintf(buf, "\tqBytes = urlutil.AppendQueryEscapeString(qBytes, %s.Format(time.RFC3339))\n", p.GoName)
+			fmt.Fprintf(buf, "\tqBytes = append(qBytes, url.QueryEscape(%s.Format(time.RFC3339))...)\n", p.GoName)
 		case ir.FormatTimeUnixS:
 			fmt.Fprintf(buf, "\tqBytes = strconv.AppendInt(qBytes, %s.Unix(), 10)\n", p.GoName)
 		case ir.FormatTimeUnixMS:
@@ -416,7 +542,7 @@ func (e *Emitter) emitQueryBuffer(buf *bytes.Buffer, params []*ir.ParamIR, bufSi
 				layout = "2006-01-02"
 			}
 
-			fmt.Fprintf(buf, "\tqBytes = urlutil.AppendQueryEscapeString(qBytes, %s.Format(%q))\n", p.GoName, layout)
+			fmt.Fprintf(buf, "\tqBytes = append(qBytes, url.QueryEscape(%s.Format(%q))...)\n", p.GoName, layout)
 
 		case ir.FormatSliceComma:
 			fmt.Fprintf(buf, "\tfor idx, v := range %s {\n", p.GoName)
@@ -439,15 +565,15 @@ func (e *Emitter) emitQueryBuffer(buf *bytes.Buffer, params []*ir.ParamIR, bufSi
 		case ir.FormatBufferAppender:
 			fmt.Fprintf(buf, "\tqBytes = %s.AppendBytes(qBytes)\n", p.GoName)
 		case ir.FormatCustomStringer:
-			fmt.Fprintf(buf, "\tqBytes = urlutil.AppendQueryEscapeString(qBytes, %s.String())\n", p.GoName)
+			fmt.Fprintf(buf, "\tqBytes = append(qBytes, url.QueryEscape(%s.String())...)\n", p.GoName)
 		case ir.FormatQueryEscaped, ir.FormatDirectString:
 			fallthrough
 		default:
-			fmt.Fprintf(buf, "\tqBytes = urlutil.AppendQueryEscapeString(qBytes, %s)\n", p.GoName)
+			fmt.Fprintf(buf, "\tqBytes = append(qBytes, url.QueryEscape(%s)...)\n", p.GoName)
 		}
 	}
 
-	buf.WriteString("\tallMods = append(allMods, mod.WithRawQuery(bytesconv.B2S(qBytes)))\n\n")
+	buf.WriteString("\tallMods = append(allMods, mod.WithRawQuery(string(qBytes)))\n\n")
 }
 
 func (e *Emitter) emitFormBuffer(buf *bytes.Buffer, m *ir.MethodIR, params []*ir.ParamIR, bufSize int) {
@@ -491,7 +617,7 @@ func (e *Emitter) emitFormBuffer(buf *bytes.Buffer, m *ir.MethodIR, params []*ir
 			}
 
 			buf.WriteString(errRet)
-			fmt.Fprintf(buf, "\tformBytes = urlutil.AppendQueryEscape(formBytes, %sJSON)\n", p.GoName)
+			fmt.Fprintf(buf, "\tformBytes = append(formBytes, url.QueryEscape(string(%sJSON))...)\n", p.GoName)
 
 		case ir.FormatIntAppend:
 			fmt.Fprintf(buf, "\tformBytes = strconv.AppendInt(formBytes, int64(%s), 10)\n", p.GoName)
@@ -500,7 +626,7 @@ func (e *Emitter) emitFormBuffer(buf *bytes.Buffer, m *ir.MethodIR, params []*ir
 		case ir.FormatBoolAppend:
 			fmt.Fprintf(buf, "\tformBytes = strconv.AppendBool(formBytes, %s)\n", p.GoName)
 		default:
-			fmt.Fprintf(buf, "\tformBytes = urlutil.AppendQueryEscapeString(formBytes, %s)\n", p.GoName)
+			fmt.Fprintf(buf, "\tformBytes = append(formBytes, url.QueryEscape(%s)...)\n", p.GoName)
 		}
 	}
 
@@ -765,26 +891,50 @@ func (e *Emitter) emitExtractExecution(buf *bytes.Buffer, m *ir.MethodIR, target
 		buf.WriteString("\tbodyBytes, err := io.ReadAll(resp.Body)\n")
 		buf.WriteString("\tif err != nil {\n\t\treturn nil, err\n\t}\n\n")
 
-		searchKey := ext.Attr + "=\""
 		if ext.ID != "" {
-			searchKey = ext.ID + "\""
+			fmt.Fprintf(buf, "\tstart := bytes.Index(bodyBytes, []byte(%q))\n", ext.ID)
+			buf.WriteString(
+				"\tif start == -1 {\n\t\treturn nil, errors.New(\"extract: target element not found\")\n\t}\n",
+			)
+
+			if ext.Attr != "" {
+				fmt.Fprintf(buf, "\tattrIdx := bytes.Index(bodyBytes[start:], []byte(%q))\n", ext.Attr+"=")
+				buf.WriteString(
+					"\tif attrIdx == -1 {\n\t\treturn nil, errors.New(\"extract: attribute not found\")\n\t}\n",
+				)
+				fmt.Fprintf(buf, "\tstart = start + attrIdx + len(%q)\n", ext.Attr+"=")
+				buf.WriteString(
+					"\tif start >= len(bodyBytes) {\n\t\treturn nil, errors.New(\"extract: unexpected EOF\")\n\t}\n",
+				)
+				buf.WriteString("\tquote := bodyBytes[start]\n")
+				buf.WriteString("\tstart++\n")
+				buf.WriteString("\tend := bytes.IndexByte(bodyBytes[start:], quote)\n")
+				buf.WriteString(
+					"\tif end == -1 {\n\t\treturn nil, errors.New(\"extract: attribute boundary not found\")\n\t}\n\n",
+				)
+			} else {
+				fmt.Fprintf(buf, "\tstart += len(%q)\n", ext.ID)
+				buf.WriteString("\tend := bytes.IndexByte(bodyBytes[start:], '\"')\n")
+				buf.WriteString("\tif end == -1 { end = bytes.IndexByte(bodyBytes[start:], 0x27) }\n")
+				buf.WriteString(
+					"\tif end == -1 {\n\t\treturn nil, errors.New(\"extract: attribute boundary not found\")\n\t}\n\n",
+				)
+			}
+		} else if ext.Attr != "" {
+			fmt.Fprintf(buf, "\tstart := bytes.Index(bodyBytes, []byte(%q))\n", ext.Attr+"=")
+			buf.WriteString("\tif start == -1 {\n\t\treturn nil, errors.New(\"extract: attribute not found\")\n\t}\n")
+			fmt.Fprintf(buf, "\tstart += len(%q)\n", ext.Attr+"=")
+			buf.WriteString(
+				"\tif start >= len(bodyBytes) {\n\t\treturn nil, errors.New(\"extract: unexpected EOF\")\n\t}\n",
+			)
+			buf.WriteString("\tquote := bodyBytes[start]\n")
+			buf.WriteString("\tstart++\n")
+			buf.WriteString("\tend := bytes.IndexByte(bodyBytes[start:], quote)\n")
+			buf.WriteString(
+				"\tif end == -1 {\n\t\treturn nil, errors.New(\"extract: attribute boundary not found\")\n\t}\n\n",
+			)
 		}
 
-		fmt.Fprintf(buf, "\tstart := bytes.Index(bodyBytes, []byte(%q))\n", searchKey)
-		buf.WriteString("\tif start == -1 {\n\t\treturn nil, errors.New(\"extract: target element not found\")\n\t}\n")
-
-		if ext.Attr != "" && ext.ID != "" {
-			fmt.Fprintf(buf, "\tattrIdx := bytes.Index(bodyBytes[start:], []byte(%q))\n", ext.Attr+"=\"")
-			buf.WriteString("\tif attrIdx == -1 {\n\t\treturn nil, errors.New(\"extract: attribute not found\")\n\t}\n")
-			fmt.Fprintf(buf, "\tstart = start + attrIdx + len(%q)\n", ext.Attr+"=\"")
-		} else {
-			fmt.Fprintf(buf, "\tstart += len(%q)\n", searchKey)
-		}
-
-		buf.WriteString("\tend := bytes.IndexByte(bodyBytes[start:], '\"')\n")
-		buf.WriteString(
-			"\tif end == -1 {\n\t\treturn nil, errors.New(\"extract: attribute boundary not found\")\n\t}\n\n",
-		)
 		fmt.Fprintf(buf, "\tvar result %s\n", resultType)
 		buf.WriteString(
 			"\tunescaped := bytes.ReplaceAll(bodyBytes[start:start+end], []byte(\"&quot;\"), []byte(\"\\\"\"))\n",
@@ -857,23 +1007,6 @@ func (e *Emitter) emitChecks(buf *bytes.Buffer, m *ir.MethodIR) {
 }
 
 func (e *Emitter) emitStruct(buf *bytes.Buffer, s *ir.StructIR) {
-	fmt.Fprintf(buf, "type %s struct {\n", s.Name)
-
-	for _, f := range s.Fields {
-		tag := f.CustomTag
-		if tag == "" {
-			if f.IsOmitEmpty {
-				tag = fmt.Sprintf("json:\"%s,omitempty\"", f.WireName)
-			} else {
-				tag = fmt.Sprintf("json:\"%s\"", f.WireName)
-			}
-		}
-
-		fmt.Fprintf(buf, "\t%s %s `%s`\n", f.GoName, f.Type.Name, tag)
-	}
-
-	buf.WriteString("}\n\n")
-
 	// Emit AppendFormData & AppendQuery methods for zero-alloc serialization
 	if s.GenValueEncoder {
 		fmt.Fprintf(
@@ -890,7 +1023,7 @@ func (e *Emitter) emitStruct(buf *bytes.Buffer, s *ir.StructIR) {
 				fmt.Fprintf(buf, "\tif r.%s != \"\" {\n", f.GoName)
 				buf.WriteString("\t\tif len(dst) > 0 { dst = append(dst, '&') }\n")
 				fmt.Fprintf(buf, "\t\tdst = append(dst, %q...)\n", f.WireName+"=")
-				fmt.Fprintf(buf, "\t\tdst = urlutil.AppendQueryEscapeString(dst, r.%s)\n", f.GoName)
+				fmt.Fprintf(buf, "\t\tdst = append(dst, url.QueryEscape(r.%s)...)\n", f.GoName)
 				buf.WriteString("\t}\n")
 
 			case "int", "int64":
@@ -913,7 +1046,7 @@ func (e *Emitter) emitStruct(buf *bytes.Buffer, s *ir.StructIR) {
 				fmt.Fprintf(buf, "\t\tdst = append(dst, %q...)\n", f.WireName+"=")
 				fmt.Fprintf(
 					buf,
-					"\t\tdst = urlutil.AppendQueryEscapeString(dst, r.%s.Format(time.RFC3339))\n",
+					"\t\tdst = append(dst, url.QueryEscape(r.%s.Format(time.RFC3339))...)\n",
 					f.GoName,
 				)
 				buf.WriteString("\t}\n")
@@ -944,7 +1077,7 @@ func (e *Emitter) emitStruct(buf *bytes.Buffer, s *ir.StructIR) {
 				fmt.Fprintf(buf, "\tfor _, v := range r.%s {\n", f.GoName)
 				buf.WriteString("\t\tif len(dst) > 0 { dst = append(dst, '&') }\n")
 				fmt.Fprintf(buf, "\t\tdst = append(dst, %q...)\n", f.WireName+"=")
-				fmt.Fprintf(buf, "\t\tdst = urlutil.AppendQueryEscapeString(dst, v)\n")
+				fmt.Fprintf(buf, "\t\tdst = append(dst, url.QueryEscape(v)...)\n")
 				buf.WriteString("\t}\n")
 
 			case "any", "interface{}":
@@ -1053,7 +1186,7 @@ func emitSliceElementFormat(buf *bytes.Buffer, elemType, targetBuf, valVar strin
 	elemType = strings.TrimPrefix(elemType, "*")
 	switch elemType {
 	case "string":
-		fmt.Fprintf(buf, "\t\t%s = urlutil.AppendQueryEscapeString(%s, %s)\n", targetBuf, targetBuf, valVar)
+		fmt.Fprintf(buf, "\t\t%s = append(%s, url.QueryEscape(%s)...)\n", targetBuf, targetBuf, valVar)
 	case "int", "int8", "int16", "int32", "int64":
 		fmt.Fprintf(buf, "\t\t%s = strconv.AppendInt(%s, int64(%s), 10)\n", targetBuf, targetBuf, valVar)
 	case "uint", "uint8", "uint16", "uint32", "uint64", "uintptr", "byte":
@@ -1061,6 +1194,6 @@ func emitSliceElementFormat(buf *bytes.Buffer, elemType, targetBuf, valVar strin
 	case "bool":
 		fmt.Fprintf(buf, "\t\t%s = strconv.AppendBool(%s, %s)\n", targetBuf, targetBuf, valVar)
 	default:
-		fmt.Fprintf(buf, "\t\t%s = urlutil.AppendQueryEscapeString(%s, fmt.Sprint(%s))\n", targetBuf, targetBuf, valVar)
+		fmt.Fprintf(buf, "\t\t%s = append(%s, url.QueryEscape(fmt.Sprint(%s))...)\n", targetBuf, targetBuf, valVar)
 	}
 }

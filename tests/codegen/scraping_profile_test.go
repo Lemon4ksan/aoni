@@ -147,8 +147,8 @@ type UploadAvatarResponse struct {
 	codeStr := string(code)
 
 	// 1. Verify HTML Token/CSS extraction
-	require.Contains(t, codeStr, `start := bytes.Index(bodyBytes, []byte("profile_edit_config\""))`)
-	require.Contains(t, codeStr, `attrIdx := bytes.Index(bodyBytes[start:], []byte("data-profile-edit=\""))`)
+	require.Contains(t, codeStr, `start := bytes.Index(bodyBytes, []byte("profile_edit_config"))`)
+	require.Contains(t, codeStr, `attrIdx := bytes.Index(bodyBytes[start:], []byte("data-profile-edit="))`)
 
 	// 2. Verify Regex extraction
 	require.Contains(t, codeStr, "rx := regexp.MustCompile(`CBoosterCreatorPage")
@@ -160,7 +160,7 @@ type UploadAvatarResponse struct {
 
 	// 4. Verify JSON-in-Form serialization
 	require.Contains(t, codeStr, "privacyJSON, err := json.Marshal(privacy)")
-	require.Contains(t, codeStr, "formBytes = urlutil.AppendQueryEscape(formBytes, privacyJSON)")
+	require.Contains(t, codeStr, "formBytes = append(formBytes, url.QueryEscape(string(privacyJSON))...)")
 
 	// 5. Verify Multipart writer code
 	require.Contains(t, codeStr, "mw := multipart.NewWriter(&bodyBuf)")

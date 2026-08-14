@@ -402,7 +402,7 @@ type GiftDetailsResponse struct {
 		"resp.PurchaseEResult != 1",
 		"resp.Success != 1",
 		"!resp.Success",
-		`json:"goo_value_received ,omitempty"`,
+		`vals.Set("goo_value_received "`,
 		"func (t *GraphPoint) UnmarshalJSON(data []byte) error",
 		"func (t *PriceHistoryPoint) UnmarshalJSON(data []byte) error",
 		"allMods := stackMods[:0]",

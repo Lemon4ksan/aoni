@@ -94,10 +94,10 @@ type ImportResponse struct {
 	require.Contains(t, codeStr, "qBytes = strconv.AppendInt(qBytes, from.UnixMilli(), 10)")
 
 	// 2. Verify custom date layout
-	require.Contains(t, codeStr, `qBytes = urlutil.AppendQueryEscapeString(qBytes, to.Format("2006-01-02"))`)
+	require.Contains(t, codeStr, `qBytes = append(qBytes, url.QueryEscape(to.Format("2006-01-02"))...)`)
 
-	// 3. Verify slice formatting with comma delimiter for strings (urlutil.AppendQueryEscapeString)
-	require.Contains(t, codeStr, "qBytes = urlutil.AppendQueryEscapeString(qBytes, v)")
+	// 3. Verify slice formatting with comma delimiter for strings (url.QueryEscape)
+	require.Contains(t, codeStr, "qBytes = append(qBytes, url.QueryEscape(v)...)")
 
 	// 4. Verify slice formatting with comma delimiter for ints (0 alloc strconv.AppendInt)
 	require.Contains(t, codeStr, "qBytes = strconv.AppendInt(qBytes, int64(v), 10)")

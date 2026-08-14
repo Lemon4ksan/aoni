@@ -91,7 +91,7 @@ type GraphPoint struct {
 	require.Contains(t, codeStr, "var refBuf [128]byte")
 	require.Contains(t, codeStr, "ref = append(ref, \"https://steamcommunity.com/profiles/\"...)")
 	require.Contains(t, codeStr, "ref = strconv.AppendUint(ref, uint64(steam_id), 10)")
-	require.Contains(t, codeStr, "mod.WithHeader(\"Referer\", bytesconv.B2S(ref))")
+	require.Contains(t, codeStr, "mod.WithHeader(\"Referer\", string(ref))")
 	require.Contains(t, codeStr, "opts.AppendFormData(formBuf[:0])")
 	require.Contains(t, codeStr, "if !resp.Success")
 	require.Contains(t, codeStr, "func (t *GraphPoint) UnmarshalJSON(data []byte) error")
