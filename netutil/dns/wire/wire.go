@@ -109,6 +109,7 @@ func PackDNSQueryExtended(id uint16, domain string, qtype uint16, edns EDNSOptio
 	return buf, nil
 }
 
+// appendQName encodes a standard domain name string into DNS question label format.
 func appendQName(buf []byte, domain string) ([]byte, error) {
 	rest := domain
 	for len(rest) > 0 {
@@ -135,6 +136,7 @@ func appendQName(buf []byte, domain string) ([]byte, error) {
 	return append(buf, 0x00), nil
 }
 
+// appendEDNS0OPT serializes an OPT pseudo-RR containing EDNS0 options onto buf.
 func appendEDNS0OPT(buf []byte, edns EDNSOptions) []byte {
 	buf = append(buf, 0x00)
 	buf = appendUint16(buf, TypeOPT)
@@ -159,6 +161,7 @@ func appendEDNS0OPT(buf []byte, edns EDNSOptions) []byte {
 	return buf
 }
 
+// appendECSOption encodes an EDNS Client Subnet (ECS, RFC 7871) option.
 func appendECSOption(buf []byte, clientIP netip.Addr) []byte {
 	var (
 		family     uint16
@@ -187,6 +190,7 @@ func appendECSOption(buf []byte, clientIP netip.Addr) []byte {
 	return append(buf, ipBytes...)
 }
 
+// appendPaddingOption adds EDNS0 padding bytes (RFC 7830) to pad query to block length.
 func appendPaddingOption(buf []byte, padToBlock int) []byte {
 	currentLen := len(buf) + 4
 	remainder := currentLen % padToBlock
@@ -207,6 +211,7 @@ func appendPaddingOption(buf []byte, padToBlock int) []byte {
 	return buf
 }
 
+// appendUint16 writes a 16-bit unsigned integer in big-endian byte order.
 func appendUint16(b []byte, v uint16) []byte {
 	return append(b, byte(v>>8), byte(v))
 }
@@ -289,6 +294,7 @@ func ParseDNSResponseRecords(msg []byte, expectedID uint16) ([]DNSRecord, error)
 	return records, nil
 }
 
+// parseAnswerRecord unpacks an RFC 1035 Resource Record from msg into a DNSRecord.
 func parseAnswerRecord(msg []byte, offset int) (DNSRecord, int, error) {
 	nextOffset, err := SkipDomainName(msg, offset)
 	if err != nil {
@@ -409,6 +415,7 @@ func ExtractECHFromHTTPSResponse(msg []byte, expectedID uint16) ([]byte, error) 
 	return nil, ErrECHConfigNotFound
 }
 
+// parseHTTPSRecord parses an RFC 9460 HTTPS RR extracting ECH configuration bytes.
 func parseHTTPSRecord(msg []byte, offset int) ([]byte, int, error) {
 	nextOffset, err := SkipDomainName(msg, offset)
 	if err != nil {

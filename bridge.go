@@ -12,6 +12,8 @@ import (
 
 // ErrNilURL is returned when attempting to route an outbound HTTP request
 // that does not specify a destination URL.
+//
+// See also [BridgeError] and [Transport.RoundTrip].
 var ErrNilURL = errors.New("aoni/bridge: request URL is nil")
 
 // NewStdClient adapts an aoni [Client] into a standard [*http.Client].
@@ -21,6 +23,9 @@ var ErrNilURL = errors.New("aoni/bridge: request URL is nil")
 // transport and intentionally disables the client's default cookie jar
 // on the stdlib client wrapper, allowing aoni's internal pipeline (such as
 // [ProxyIsolatedJar]) to manage cookies internally without double-handling issues.
+//
+// The returned client is safe for concurrent use by multiple goroutines.
+// If c is nil, execution behavior is undefined.
 func NewStdClient(c *Client) *http.Client {
 	return &http.Client{
 		Transport: NewTransport(c),
@@ -34,12 +39,16 @@ func NewStdClient(c *Client) *http.Client {
 // Swap this transport into an existing [*http.Client] to seamlessly inject
 // aoni's advanced transport features (like JA4, happy eyeballs, and SSRF protection)
 // without replacing the client itself.
+//
+// The returned [*Transport] is safe for concurrent use by multiple goroutines.
 func NewTransport(c *Client) *Transport {
 	return &Transport{client: c}
 }
 
 // Transport implements the standard [http.RoundTripper] interface, intercepting
 // outbound requests and delegating them to an active aoni [Client] pipeline.
+//
+// Transport instances are safe for concurrent use by multiple goroutines.
 type Transport struct {
 	client *Client
 
@@ -55,29 +64,36 @@ type Transport struct {
 	BeforeRoundTrip func(cloned *Client, origReq *http.Request) *Client
 }
 
-// RoundTrip satisfies [http.RoundTripper] by extracting request modifiers from
-// the context, merging request metadata, and executing the request via aoni.
+// RoundTrip satisfies [http.RoundTripper] by executing requests through the aoni pipeline.
 //
-// Following standard specifications, all errors encountered
-// during execution are returned wrapped in a [*url.Error], and the request body
-// is guaranteed to be closed to prevent resource leaks.
+// If req or req.URL is nil, RoundTrip closes req.Body (if present) and returns a [*url.Error] wrapping [ErrNilURL].
 //
-// The incoming request's URL field must not be nil, otherwise [ErrNilURL] is returned.
+// Following the [http.RoundTripper] contract, RoundTrip never mutates the incoming req or its URL.
+// If req.URL.Scheme is missing, an internal clone is created. On any execution error, req.Body is guaranteed to be closed.
+//
+// RoundTrip is safe for concurrent use by multiple goroutines.
 func (t *Transport) RoundTrip(req *http.Request) (*http.Response, error) {
-	if req.URL == nil {
-		if req.Body != nil {
-			_ = req.Body.Close()
+	if req == nil || req.URL == nil {
+		closeReqBody(req)
+
+		op := ""
+		if req != nil {
+			op = req.Method
 		}
 
 		return nil, &url.Error{
-			Op:  req.Method,
+			Op:  op,
 			URL: "",
 			Err: ErrNilURL,
 		}
 	}
 
 	if req.URL.Host != "" && req.URL.Scheme == "" {
-		req.URL.Scheme = "https"
+		u := *req.URL
+		u.Scheme = "https"
+		reqClone := req.Clone(req.Context())
+		reqClone.URL = &u
+		req = reqClone
 	}
 
 	activeClient := t.client
@@ -93,25 +109,19 @@ func (t *Transport) RoundTrip(req *http.Request) (*http.Response, error) {
 	return resp, nil
 }
 
+// wrapError constructs a standardized [*url.Error] containing a [*BridgeError] metadata container
+// and guarantees that the original request body is closed.
 func (t *Transport) wrapError(origReq *http.Request, err error) error {
-	if origReq.Body != nil {
-		_ = origReq.Body.Close()
-	}
+	closeReqBody(origReq)
 
-	var reqURL, host, scheme string
-	if origReq.URL != nil {
-		reqURL = origReq.URL.String()
-		host = origReq.URL.Host
-		scheme = origReq.URL.Scheme
-	}
-
+	reqURL := origReq.URL.String()
 	bridgeErr := &BridgeError{
 		Op:  origReq.Method,
 		URL: reqURL,
 		Err: err,
 		Metadata: map[string]any{
-			"host":   host,
-			"scheme": scheme,
+			"host":   origReq.URL.Host,
+			"scheme": origReq.URL.Scheme,
 		},
 	}
 
@@ -119,6 +129,12 @@ func (t *Transport) wrapError(origReq *http.Request, err error) error {
 		Op:  origReq.Method,
 		URL: reqURL,
 		Err: bridgeErr,
+	}
+}
+
+func closeReqBody(req *http.Request) {
+	if req != nil && req.Body != nil {
+		_ = req.Body.Close()
 	}
 }
 

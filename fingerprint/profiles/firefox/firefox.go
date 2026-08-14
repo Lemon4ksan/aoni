@@ -96,82 +96,45 @@ func configureH3Desktop(s *profiles.H3Settings) {
 	s.EnableConnectProtocol = 1
 }
 
-var headerOrderDesktop = map[string][]string{
-	"GET": {
-		":method", ":path", ":authority", ":scheme",
-		profiles.USER_AGENT, profiles.ACCEPT, profiles.ACCEPT_LANGUAGE,
-		profiles.ACCEPT_ENCODING, profiles.REFERER, profiles.AUTHORIZATION,
-		profiles.COOKIE, profiles.UPGRADE_INSECURE_REQUESTS,
-		profiles.SEC_FETCH_DEST, profiles.SEC_FETCH_MODE, profiles.SEC_FETCH_SITE,
-		profiles.SEC_FETCH_USER, profiles.PRIORITY,
-	},
-	"GEThttp3": {
-		":method", ":scheme", ":authority", ":path",
-		profiles.USER_AGENT, profiles.ACCEPT, profiles.ACCEPT_LANGUAGE,
-		profiles.ACCEPT_ENCODING, profiles.REFERER, profiles.AUTHORIZATION,
-		profiles.COOKIE, profiles.UPGRADE_INSECURE_REQUESTS,
-		profiles.SEC_FETCH_DEST, profiles.SEC_FETCH_MODE, profiles.SEC_FETCH_SITE,
-		profiles.SEC_FETCH_USER, profiles.PRIORITY,
-	},
-	"POST": {
-		":method", ":path", ":authority", ":scheme",
-		profiles.USER_AGENT, profiles.ACCEPT, profiles.ACCEPT_LANGUAGE,
-		profiles.ACCEPT_ENCODING, profiles.REFERER, profiles.CONTENT_TYPE,
-		profiles.AUTHORIZATION, profiles.CONTENT_LENGTH, profiles.ORIGIN,
-		profiles.COOKIE, profiles.SEC_FETCH_DEST, profiles.SEC_FETCH_MODE,
-		profiles.SEC_FETCH_SITE, profiles.PRIORITY, profiles.PRAGMA,
-		profiles.CACHE_CONTROL,
-	},
-	"POSThttp3": {
-		":method", ":scheme", ":authority", ":path",
-		profiles.USER_AGENT, profiles.ACCEPT, profiles.ACCEPT_LANGUAGE,
-		profiles.ACCEPT_ENCODING, profiles.REFERER, profiles.CONTENT_TYPE,
-		profiles.AUTHORIZATION, profiles.CONTENT_LENGTH, profiles.ORIGIN,
-		profiles.COOKIE, profiles.SEC_FETCH_DEST, profiles.SEC_FETCH_MODE,
-		profiles.SEC_FETCH_SITE, profiles.PRIORITY, profiles.PRAGMA,
-		profiles.CACHE_CONTROL,
-	},
-}
-
-var headerOrderMobile = map[string][]string{
-	"GET": {
-		":method", ":path", ":authority", ":scheme",
-		profiles.USER_AGENT, profiles.ACCEPT, profiles.ACCEPT_LANGUAGE,
-		profiles.ACCEPT_ENCODING, profiles.REFERER, profiles.AUTHORIZATION,
-		profiles.COOKIE, profiles.UPGRADE_INSECURE_REQUESTS,
-		profiles.SEC_FETCH_DEST, profiles.SEC_FETCH_MODE, profiles.SEC_FETCH_SITE,
-		profiles.SEC_FETCH_USER, profiles.PRIORITY,
-	},
-	"GEThttp3": {
-		":method", ":scheme", ":authority", ":path",
-		profiles.USER_AGENT, profiles.ACCEPT, profiles.ACCEPT_LANGUAGE,
-		profiles.ACCEPT_ENCODING, profiles.REFERER, profiles.AUTHORIZATION,
-		profiles.COOKIE, profiles.UPGRADE_INSECURE_REQUESTS,
-		profiles.SEC_FETCH_DEST, profiles.SEC_FETCH_MODE, profiles.SEC_FETCH_SITE,
-		profiles.SEC_FETCH_USER, profiles.PRIORITY,
-	},
-	"POST": {
-		":method", ":path", ":authority", ":scheme",
-		profiles.USER_AGENT, profiles.ACCEPT, profiles.ACCEPT_LANGUAGE,
-		profiles.ACCEPT_ENCODING, profiles.REFERER, profiles.CONTENT_TYPE,
-		profiles.AUTHORIZATION, profiles.CONTENT_LENGTH, profiles.ORIGIN,
-		profiles.COOKIE, profiles.SEC_FETCH_DEST, profiles.SEC_FETCH_MODE,
-		profiles.SEC_FETCH_SITE, profiles.PRIORITY, profiles.PRAGMA,
-		profiles.CACHE_CONTROL,
-	},
-	"POSThttp3": {
-		":method", ":scheme", ":authority", ":path",
-		profiles.USER_AGENT, profiles.ACCEPT, profiles.ACCEPT_LANGUAGE,
-		profiles.ACCEPT_ENCODING, profiles.REFERER, profiles.CONTENT_TYPE,
-		profiles.AUTHORIZATION, profiles.CONTENT_LENGTH, profiles.ORIGIN,
-		profiles.COOKIE, profiles.SEC_FETCH_DEST, profiles.SEC_FETCH_MODE,
-		profiles.SEC_FETCH_SITE, profiles.PRIORITY, profiles.PRAGMA,
-		profiles.CACHE_CONTROL,
-	},
-}
-
 // HeaderCache is the header cache for the Firefox profile.
-var HeaderCache = profiles.NewHeaderCache(headerOrderDesktop, headerOrderMobile)
+var HeaderCache = profiles.NewHeaderCache(headerOrderFirefox, headerOrderFirefox)
+
+var headerOrderFirefox = map[string][]string{
+	"GET": {
+		":method", ":path", ":authority", ":scheme",
+		profiles.USER_AGENT, profiles.ACCEPT, profiles.ACCEPT_LANGUAGE,
+		profiles.ACCEPT_ENCODING, profiles.REFERER, profiles.AUTHORIZATION,
+		profiles.COOKIE, profiles.UPGRADE_INSECURE_REQUESTS,
+		profiles.SEC_FETCH_DEST, profiles.SEC_FETCH_MODE, profiles.SEC_FETCH_SITE,
+		profiles.SEC_FETCH_USER, profiles.PRIORITY,
+	},
+	"GEThttp3": {
+		":method", ":scheme", ":authority", ":path",
+		profiles.USER_AGENT, profiles.ACCEPT, profiles.ACCEPT_LANGUAGE,
+		profiles.ACCEPT_ENCODING, profiles.REFERER, profiles.AUTHORIZATION,
+		profiles.COOKIE, profiles.UPGRADE_INSECURE_REQUESTS,
+		profiles.SEC_FETCH_DEST, profiles.SEC_FETCH_MODE, profiles.SEC_FETCH_SITE,
+		profiles.SEC_FETCH_USER, profiles.PRIORITY,
+	},
+	"POST": {
+		":method", ":path", ":authority", ":scheme",
+		profiles.USER_AGENT, profiles.ACCEPT, profiles.ACCEPT_LANGUAGE,
+		profiles.ACCEPT_ENCODING, profiles.REFERER, profiles.CONTENT_TYPE,
+		profiles.AUTHORIZATION, profiles.CONTENT_LENGTH, profiles.ORIGIN,
+		profiles.COOKIE, profiles.SEC_FETCH_DEST, profiles.SEC_FETCH_MODE,
+		profiles.SEC_FETCH_SITE, profiles.PRIORITY, profiles.PRAGMA,
+		profiles.CACHE_CONTROL,
+	},
+	"POSThttp3": {
+		":method", ":scheme", ":authority", ":path",
+		profiles.USER_AGENT, profiles.ACCEPT, profiles.ACCEPT_LANGUAGE,
+		profiles.ACCEPT_ENCODING, profiles.REFERER, profiles.CONTENT_TYPE,
+		profiles.AUTHORIZATION, profiles.CONTENT_LENGTH, profiles.ORIGIN,
+		profiles.COOKIE, profiles.SEC_FETCH_DEST, profiles.SEC_FETCH_MODE,
+		profiles.SEC_FETCH_SITE, profiles.PRIORITY, profiles.PRAGMA,
+		profiles.CACHE_CONTROL,
+	},
+}
 
 func buildHeadersDesktop(os profiles.OSKey) []profiles.HeaderEntry {
 	ua := userAgents[os]
@@ -192,21 +155,7 @@ func buildHeadersDesktop(os profiles.OSKey) []profiles.HeaderEntry {
 }
 
 func buildHeadersMobile(os profiles.OSKey) []profiles.HeaderEntry {
-	ua := userAgents[os]
-
-	return []profiles.HeaderEntry{
-		{Name: ":authority", Value: ""},
-		{Name: ":method", Value: ""},
-		{Name: ":path", Value: ""},
-		{Name: ":scheme", Value: ""},
-		{Name: profiles.ACCEPT_ENCODING, Value: "gzip, deflate, br, zstd"},
-		{Name: profiles.ACCEPT_LANGUAGE, Value: "en-US,en;q=0.5"},
-		{Name: profiles.AUTHORIZATION, Value: ""},
-		{Name: profiles.COOKIE, Value: ""},
-		{Name: profiles.ORIGIN, Value: ""},
-		{Name: profiles.REFERER, Value: ""},
-		{Name: profiles.USER_AGENT, Value: ua},
-	}
+	return buildHeadersDesktop(os)
 }
 
 func insertDesktopHeaders(headers map[string]string, method string) {
@@ -234,25 +183,5 @@ func insertDesktopHeaders(headers map[string]string, method string) {
 }
 
 func insertMobileHeaders(headers map[string]string, method string) {
-	switch method {
-	case "POST":
-		headers[profiles.ACCEPT] = "*/*"
-		headers[profiles.CACHE_CONTROL] = "no-cache"
-		headers[profiles.CONTENT_TYPE] = ""
-		headers[profiles.CONTENT_LENGTH] = ""
-		headers[profiles.PRAGMA] = "no-cache"
-		headers[profiles.PRIORITY] = "u=1, i"
-		headers[profiles.SEC_FETCH_DEST] = "empty"
-		headers[profiles.SEC_FETCH_MODE] = "cors"
-		headers[profiles.SEC_FETCH_SITE] = "same-origin"
-
-	default:
-		headers[profiles.ACCEPT] = "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8"
-		headers[profiles.PRIORITY] = "u=0, i"
-		headers[profiles.SEC_FETCH_DEST] = "document"
-		headers[profiles.SEC_FETCH_MODE] = "navigate"
-		headers[profiles.SEC_FETCH_SITE] = "none"
-		headers[profiles.SEC_FETCH_USER] = "?1"
-		headers[profiles.UPGRADE_INSECURE_REQUESTS] = "1"
-	}
+	insertDesktopHeaders(headers, method)
 }

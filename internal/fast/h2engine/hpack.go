@@ -8,6 +8,9 @@ import (
 	"bytes"
 	"fmt"
 	"sync"
+
+	"github.com/lemon4ksan/aoni/internal/pool"
+	"github.com/lemon4ksan/aoni/internal/rodata"
 )
 
 const (
@@ -17,9 +20,9 @@ const (
 	maxIndex    = 62
 )
 
-var headerPool = sync.Pool{
-	New: func() any { return &HeaderField{} },
-}
+var headerStorage = pool.NewPerPStorage(func() *HeaderField {
+	return &HeaderField{}
+})
 
 // HeaderField represents a key-value header entry inside HPACK tables.
 type HeaderField struct {
@@ -30,20 +33,24 @@ type HeaderField struct {
 
 // AcquireHeaderField retrieves a recycled HeaderField from memory pools.
 func AcquireHeaderField() *HeaderField {
-	return headerPool.Get().(*HeaderField)
+	return headerStorage.Get()
 }
 
 // ReleaseHeaderField clears and returns a HeaderField to memory pools.
 func ReleaseHeaderField(hf *HeaderField) {
 	if hf != nil {
 		hf.Reset()
-		headerPool.Put(hf)
+		headerStorage.Put(hf)
 	}
 }
 
-func (hf *HeaderField) String() string     { return string(hf.AppendBytes(nil)) }
-func (hf *HeaderField) Empty() bool        { return len(hf.key) == 0 && len(hf.value) == 0 }
-func (hf *HeaderField) Reset()             { hf.key = hf.key[:0]; hf.value = hf.value[:0]; hf.sensible = false }
+func (hf *HeaderField) String() string { return string(hf.AppendBytes(nil)) }
+func (hf *HeaderField) Empty() bool    { return len(hf.key) == 0 && len(hf.value) == 0 }
+func (hf *HeaderField) Reset() {
+	hf.key = nil
+	hf.value = nil
+	hf.sensible = false
+}
 func (hf *HeaderField) Size() uint32       { return uint32(len(hf.key) + len(hf.value) + 32) } //nolint:gosec
 func (hf *HeaderField) Key() string        { return string(hf.key) }
 func (hf *HeaderField) Value() string      { return string(hf.value) }
@@ -62,14 +69,59 @@ func (hf *HeaderField) SetBytes(k, v []byte) {
 	hf.SetValueBytes(v)
 }
 
-func (hf *HeaderField) SetKey(key string)          { hf.key = append(hf.key[:0], key...) }
-func (hf *HeaderField) SetValue(value string)      { hf.value = append(hf.value[:0], value...) }
-func (hf *HeaderField) SetKeyBytes(key []byte)     { hf.key = append(hf.key[:0], key...) }
-func (hf *HeaderField) SetValueBytes(value []byte) { hf.value = append(hf.value[:0], value...) }
+func (hf *HeaderField) SetKey(key string) {
+	if ik := rodata.InternKey(key); ik != nil {
+		hf.key = ik
+		return
+	}
+
+	hf.key = nil
+	hf.key = append(hf.key, key...)
+}
+
+func (hf *HeaderField) SetValue(value string) {
+	if iv := rodata.InternValue(value); iv != nil {
+		hf.value = iv
+		return
+	}
+
+	hf.value = nil
+	hf.value = append(hf.value, value...)
+}
+
+func (hf *HeaderField) SetKeyBytes(key []byte) {
+	if ik := rodata.InternKeyBytes(key); ik != nil {
+		hf.key = ik
+		return
+	}
+
+	hf.key = nil
+	hf.key = append(hf.key, key...)
+}
+
+func (hf *HeaderField) SetValueBytes(value []byte) {
+	if iv := rodata.InternValueBytes(value); iv != nil {
+		hf.value = iv
+		return
+	}
+
+	hf.value = nil
+	hf.value = append(hf.value, value...)
+}
 
 func (hf *HeaderField) CopyTo(other *HeaderField) {
-	other.key = append(other.key[:0], hf.key...)
-	other.value = append(other.value[:0], hf.value...)
+	if ik := rodata.InternKeyBytes(hf.key); ik != nil {
+		other.key = ik
+	} else {
+		other.key = append(other.key[:0], hf.key...)
+	}
+
+	if iv := rodata.InternValueBytes(hf.value); iv != nil {
+		other.value = iv
+	} else {
+		other.value = append(other.value[:0], hf.value...)
+	}
+
 	other.sensible = hf.sensible
 }
 
@@ -181,11 +233,115 @@ func (hp *HPACK) peek(n uint64) *HeaderField {
 	return hp.dynamic[idx]
 }
 
+//go:inline
+//go:nosplit
+func fastStaticLookup(key, val []byte) (n uint64, fullMatch, found bool) {
+	if len(key) == 0 {
+		return 0, false, false
+	}
+
+	switch key[0] {
+	case ':':
+		switch string(key) {
+		case ":authority":
+			return 1, false, true
+		case ":method":
+			if bytes.Equal(val, []byte("GET")) {
+				return 2, true, true
+			}
+
+			if bytes.Equal(val, []byte("POST")) {
+				return 3, true, true
+			}
+
+			return 2, false, true
+
+		case ":path":
+			if bytes.Equal(val, []byte("/")) {
+				return 4, true, true
+			}
+
+			if bytes.Equal(val, []byte("/index.html")) {
+				return 5, true, true
+			}
+
+			return 4, false, true
+
+		case ":scheme":
+			if bytes.Equal(val, []byte("http")) {
+				return 6, true, true
+			}
+
+			if bytes.Equal(val, []byte("https")) {
+				return 7, true, true
+			}
+
+			return 7, false, true
+
+		case ":status":
+			if bytes.Equal(val, []byte("200")) {
+				return 8, true, true
+			}
+
+			return 8, false, true
+		}
+
+	case 'a':
+		if bytes.Equal(key, []byte("accept-encoding")) {
+			if bytes.Equal(val, []byte("gzip, deflate")) {
+				return 16, true, true
+			}
+
+			return 16, false, true
+		}
+
+		if bytes.Equal(key, []byte("accept")) {
+			return 19, false, true
+		}
+
+	case 'c':
+		if bytes.Equal(key, []byte("content-type")) {
+			return 31, false, true
+		}
+
+		if bytes.Equal(key, []byte("cookie")) {
+			return 32, false, true
+		}
+
+		if bytes.Equal(key, []byte("content-length")) {
+			return 28, false, true
+		}
+
+		if bytes.Equal(key, []byte("content-encoding")) {
+			return 27, false, true
+		}
+
+	case 'h':
+		if bytes.Equal(key, []byte("host")) {
+			return 38, false, true
+		}
+	case 'u':
+		if bytes.Equal(key, []byte("user-agent")) {
+			return 58, false, true
+		}
+	}
+
+	return 0, false, false
+}
+
 func (hp *HPACK) search(hf *HeaderField) (n uint64, fullMatch bool) {
 	for i, hf2 := range hp.dynamic {
 		if bytes.Equal(hf.key, hf2.key) && bytes.Equal(hf.value, hf2.value) {
 			return uint64(maxIndex + len(hp.dynamic) - i - 1), true
 		}
+	}
+
+	if idx, full, found := fastStaticLookup(hf.key, hf.value); found {
+		if full {
+			return idx, true
+		}
+
+		n = idx
 	}
 
 	for i, hf2 := range staticTable {

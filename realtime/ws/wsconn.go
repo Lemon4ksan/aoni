@@ -24,6 +24,7 @@ import (
 	"golang.org/x/net/http2"
 	"golang.org/x/net/http2/hpack"
 
+	"github.com/lemon4ksan/aoni/internal/offheap"
 	"github.com/lemon4ksan/aoni/internal/realtime/ws"
 	"github.com/lemon4ksan/aoni/internal/simd"
 )
@@ -151,8 +152,8 @@ func (c *wsRawConn) processNextFrame() error {
 }
 
 func (c *wsRawConn) Write(b []byte) (int, error) {
-	<-c.writeMu
-	defer func() { c.writeMu <- struct{}{} }()
+	c.lockWrite()
+	defer c.unlockWrite()
 
 	opcode := generic.Ternary(utf8.Valid(b), byte(FrameText), byte(FrameBinary))
 	if err := c.writeFrame(opcode, b); err != nil {
@@ -186,10 +187,18 @@ func (c *wsRawConn) ReadMessageTo(buf []byte) (int, int, error) {
 }
 
 func (c *wsRawConn) WriteMessage(messageType int, data []byte) error {
-	<-c.writeMu
-	defer func() { c.writeMu <- struct{}{} }()
+	c.lockWrite()
+	defer c.unlockWrite()
 
 	return c.writeFrame(byte(messageType), data)
+}
+
+func (c *wsRawConn) lockWrite() {
+	<-c.writeMu
+}
+
+func (c *wsRawConn) unlockWrite() {
+	c.writeMu <- struct{}{}
 }
 
 func (c *wsRawConn) UnderlyingConn() any                { return c.base }
@@ -207,6 +216,50 @@ func (c *wsRawConn) Close() error {
 	})
 
 	return nil
+}
+
+// WSFrameHeaderPOD is a zero-alloc Plain Old Data structure describing a WebSocket frame header.
+type WSFrameHeaderPOD struct {
+	PayloadLen uint64
+	MaskKey    [4]byte
+	Opcode     uint8
+	Fin        bool
+	Masked     bool
+}
+
+// ReadFrameHeaderPOD reads frame header metadata using offheap.AllocStruct when arena is provided.
+func (c *wsRawConn) ReadFrameHeaderPOD(arena *offheap.Arena) (*WSFrameHeaderPOD, error) {
+	if _, err := io.ReadFull(c.br, c.readHdr[:2]); err != nil {
+		return nil, err
+	}
+
+	fin := c.readHdr[0]&0x80 != 0
+	opcode := c.readHdr[0] & 0x0f
+	masked := c.readHdr[1]&0x80 != 0
+	basicLen := c.readHdr[1] & 0x7f
+
+	length, err := c.parseExtendedPayloadLength(basicLen)
+	if err != nil {
+		return nil, err
+	}
+
+	var hdr *WSFrameHeaderPOD
+	if arena != nil {
+		hdr = offheap.AllocStruct[WSFrameHeaderPOD](arena)
+	} else {
+		hdr = &WSFrameHeaderPOD{}
+	}
+
+	hdr.Fin = fin
+	hdr.Opcode = opcode
+	hdr.Masked = masked
+
+	hdr.PayloadLen = length
+	if masked {
+		hdr.MaskKey = c.readMask
+	}
+
+	return hdr, nil
 }
 
 // readFrame reads and parses an incoming frame using bufio.Reader for syscall reduction and handles RFC 7692 decompression.
@@ -229,7 +282,7 @@ func (c *wsRawConn) readFrame() (byte, []byte, error) {
 		return 0, nil, ErrReservedBitsSet
 	}
 
-	length, err := c.readFrameLengthZeroAlloc(basicLen)
+	length, err := c.parseExtendedPayloadLength(basicLen)
 	if err != nil {
 		return 0, nil, err
 	}
@@ -261,7 +314,7 @@ func (c *wsRawConn) readFrame() (byte, []byte, error) {
 	return opcode, payload, nil
 }
 
-func (c *wsRawConn) readFrameLengthZeroAlloc(basicLen byte) (uint64, error) {
+func (c *wsRawConn) parseExtendedPayloadLength(basicLen byte) (uint64, error) {
 	switch basicLen {
 	case 126:
 		if _, err := io.ReadFull(c.br, c.readHdr[2:4]); err != nil {

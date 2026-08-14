@@ -313,7 +313,7 @@ func BenchmarkModifiers_FastVsStd(b *testing.B) {
 		b.ResetTimer()
 
 		for b.Loop() {
-			modifier(req)
+			modifier.Apply(req)
 		}
 	})
 
@@ -326,7 +326,7 @@ func BenchmarkModifiers_FastVsStd(b *testing.B) {
 		b.ResetTimer()
 
 		for b.Loop() {
-			modifier(req)
+			modifier.Apply(req)
 		}
 	})
 }
@@ -346,17 +346,13 @@ func BenchmarkGET_JSON_Standard_NetHTTP(b *testing.B) {
 	b.ResetTimer()
 
 	for b.Loop() {
-		req, _ := http.NewRequestWithContext(ctx, "GET", server.URL, nil)
-		resp, err := client.Do(req)
+		user, err := netHTTPGetTo[fastBenchUser](ctx, client, server.URL)
 		if err != nil {
 			b.Fatal(err)
 		}
 
-		var user fastBenchUser
-		err = json.NewDecoder(resp.Body).Decode(&user)
-		_ = resp.Body.Close()
-		if err != nil {
-			b.Fatal(err)
+		if user.ID != 42 {
+			b.Fatalf("expected ID 42, got %d", user.ID)
 		}
 	}
 }

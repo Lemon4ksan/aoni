@@ -17,7 +17,6 @@ import (
 	"hash"
 	"io"
 	"net/http"
-	"slices"
 	"strconv"
 	"strings"
 )
@@ -286,7 +285,13 @@ type digestChallenge struct {
 }
 
 func (dc *digestChallenge) isQopSupported(qop string) bool {
-	return slices.Contains(dc.qop, qop)
+	for _, item := range dc.qop {
+		if strings.TrimSpace(item) == qop {
+			return true
+		}
+	}
+
+	return false
 }
 
 func (dc *digestChallenge) setValue(k, v string) error {
@@ -305,8 +310,14 @@ func (dc *digestChallenge) setValue(k, v string) error {
 		dc.algorithm = v
 	case "qop":
 		if v != "" {
-			dc.qop = strings.Split(v, ",")
+			parts := strings.Split(v, ",")
+
+			dc.qop = make([]string, len(parts))
+			for i, p := range parts {
+				dc.qop[i] = strings.TrimSpace(p)
+			}
 		}
+
 	case "charset":
 		if strings.ToUpper(v) != "UTF-8" {
 			return ErrDigestInvalidCharset
@@ -397,9 +408,9 @@ func (dc *digestCredentials) digest(cha *digestChallenge) (string, error) {
 	var resp string
 	switch dc.qop {
 	case "":
-		resp = fmt.Sprintf("%s:%s:%s", ha1, dc.nonce, ha2)
+		resp = ha1 + ":" + dc.nonce + ":" + ha2
 	case qopAuth, qopAuthInt:
-		resp = fmt.Sprintf("%s:%s:%08x:%s:%s:%s", ha1, dc.nonce, dc.nc, dc.cnonce, dc.qop, ha2)
+		resp = ha1 + ":" + dc.nonce + ":" + fmt.Sprintf("%08x", dc.nc) + ":" + dc.cnonce + ":" + dc.qop + ":" + ha2
 	}
 
 	dc.response = dc.h(resp)
@@ -408,9 +419,9 @@ func (dc *digestCredentials) digest(cha *digestChallenge) (string, error) {
 }
 
 func (dc *digestCredentials) ha1() string {
-	a1 := dc.h(fmt.Sprintf("%s:%s:%s", dc.username, dc.realm, dc.password))
+	a1 := dc.h(dc.username + ":" + dc.realm + ":" + dc.password)
 	if dc.sessAlgorithm {
-		return dc.h(fmt.Sprintf("%s:%s:%s", a1, dc.nonce, dc.cnonce))
+		return dc.h(a1 + ":" + dc.nonce + ":" + dc.cnonce)
 	}
 
 	return a1
@@ -418,10 +429,10 @@ func (dc *digestCredentials) ha1() string {
 
 func (dc *digestCredentials) ha2() string {
 	if dc.qop == qopAuthInt {
-		return dc.h(fmt.Sprintf("%s:%s:%s", dc.method, dc.uri, dc.bodyHash))
+		return dc.h(dc.method + ":" + dc.uri + ":" + dc.bodyHash)
 	}
 
-	return dc.h(fmt.Sprintf("%s:%s", dc.method, dc.uri))
+	return dc.h(dc.method + ":" + dc.uri)
 }
 
 func (dc *digestCredentials) String() string {
@@ -430,33 +441,33 @@ func (dc *digestCredentials) String() string {
 	// RFC 7616 Section 3.4.4: Compute userhash without mutating the original dc.username
 	displayUsername := dc.username
 	if dc.userHash == "true" {
-		displayUsername = dc.h(fmt.Sprintf("%s:%s", dc.username, dc.realm))
+		displayUsername = dc.h(dc.username + ":" + dc.realm)
 	}
 
-	sl = append(sl, fmt.Sprintf(`username="%s"`, displayUsername))
-	sl = append(sl, fmt.Sprintf(`realm="%s"`, dc.realm))
-	sl = append(sl, fmt.Sprintf(`nonce="%s"`, dc.nonce))
-	sl = append(sl, fmt.Sprintf(`uri="%s"`, dc.uri))
+	sl = append(sl, `username="`+displayUsername+`"`)
+	sl = append(sl, `realm="`+dc.realm+`"`)
+	sl = append(sl, `nonce="`+dc.nonce+`"`)
+	sl = append(sl, `uri="`+dc.uri+`"`)
 
 	if dc.algorithm != "" {
 		sl = append(sl, "algorithm="+dc.algorithm)
 	}
 
 	if dc.opaque != "" {
-		sl = append(sl, fmt.Sprintf(`opaque="%s"`, dc.opaque))
+		sl = append(sl, `opaque="`+dc.opaque+`"`)
 	}
 
 	if dc.qop != "" {
 		sl = append(sl, "qop="+dc.qop)
 		sl = append(sl, fmt.Sprintf("nc=%08x", dc.nc))
-		sl = append(sl, fmt.Sprintf(`cnonce="%s"`, dc.cnonce))
+		sl = append(sl, `cnonce="`+dc.cnonce+`"`)
 	}
 
 	if dc.userHash == "true" {
 		sl = append(sl, "userhash="+dc.userHash)
 	}
 
-	sl = append(sl, fmt.Sprintf(`response="%s"`, dc.response))
+	sl = append(sl, `response="`+dc.response+`"`)
 
 	return strings.Join(sl, ", ")
 }

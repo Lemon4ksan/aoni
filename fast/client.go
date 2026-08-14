@@ -13,7 +13,6 @@ import (
 	"net"
 	"net/http"
 	"net/url"
-	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -27,7 +26,6 @@ import (
 	"github.com/lemon4ksan/aoni/internal/bytesconv"
 	"github.com/lemon4ksan/aoni/internal/experimental"
 	"github.com/lemon4ksan/aoni/internal/pipeline"
-	"github.com/lemon4ksan/aoni/internal/sysnet"
 	"github.com/lemon4ksan/aoni/netutil/power"
 )
 
@@ -42,7 +40,7 @@ import (
 // via sync.Pool. Callers MUST NOT retain or mutate byte slices obtained from unsafe body accessors beyond request lifecycle.
 type Client struct {
 	engine        *fasthttp.Client
-	pipeline      *pipeline.Pipeline
+	pipeline      *pipeline.Pipeline[aoni.Request, aoni.Response]
 	defaultDial   func(string) (net.Conn, error)
 	config        aoni.Config
 	powerWatcher  *power.Watcher
@@ -52,6 +50,7 @@ type Client struct {
 	protocolState protocolState
 	coreEngine    *pipeline.Engine
 	prepared      pipeline.PreparedConfig
+	nativeDoer    fastNativeDoer
 }
 
 // NewClient instantiates a multi-protocol ultra-high-throughput [Client] wrapping fasthttp, uTLS,
@@ -79,10 +78,11 @@ func NewClient(opts ...aoni.ClientOption) *Client {
 	c.applyCustomDialer()
 	c.applyPowerManagement(c.config.Network.EnablePowerManagement)
 
-	c.coreEngine = pipeline.NewEngine(c.config.Defaults.BaseURL, c.config.Defaults.Headers, nil, 15*time.Second, 0)
+	c.coreEngine = pipeline.NewEngine(c.config.Defaults.BaseURL, c.config.Defaults.Headers)
 	c.prepared = c.coreEngine.Prepared
+	c.prepared.FastPathCapable = (c.config.Engine.CookieJar == nil && c.config.Defaults.Inspector == nil)
 
-	c.pipeline = pipeline.New(
+	c.pipeline = pipeline.NewGeneric[aoni.Request, aoni.Response](
 		toPipelineDefaults(c.config.Defaults, c.referer),
 		c.config.Fingerprint.ToPipelineFingerprint(),
 	)
@@ -90,6 +90,8 @@ func NewClient(opts ...aoni.ClientOption) *Client {
 	if len(c.config.Network.CPUAffinityCores) > 0 {
 		experimental.ApplyCPUAffinity(c.config.Network.CPUAffinityCores)
 	}
+
+	c.nativeDoer.client = c
 
 	return c
 }
@@ -112,6 +114,8 @@ func (c *Client) With(opts ...aoni.ClientOption) *Client {
 		referer:     clonedReferer,
 	}
 
+	cloned.nativeDoer.client = cloned
+
 	for _, opt := range opts {
 		if opt != nil {
 			opt(&cloned.config)
@@ -126,7 +130,11 @@ func (c *Client) With(opts ...aoni.ClientOption) *Client {
 
 	cloned.applyPowerManagement(cloned.config.Network.EnablePowerManagement)
 
-	cloned.pipeline = pipeline.New(
+	cloned.coreEngine = pipeline.NewEngine(cloned.config.Defaults.BaseURL, cloned.config.Defaults.Headers)
+	cloned.prepared = cloned.coreEngine.Prepared
+	cloned.prepared.FastPathCapable = (cloned.config.Engine.CookieJar == nil && cloned.config.Defaults.Inspector == nil)
+
+	cloned.pipeline = pipeline.NewGeneric[aoni.Request, aoni.Response](
 		toPipelineDefaults(cloned.config.Defaults, cloned.referer),
 		cloned.config.Fingerprint.ToPipelineFingerprint(),
 	)
@@ -140,6 +148,12 @@ func (c *Client) ApplyOptions(opts ...aoni.ClientOption) aoni.RequestDoer {
 }
 
 // Request executes an HTTP request across HTTP/1.1, native HTTP/2, or native HTTP/3.
+//
+// Preconditions:
+//   - ctx MUST NOT be nil (pass [context.Background] if no timeout is desired).
+//   - method SHOULD be a standard HTTP method ("GET", "POST", etc.) or custom string.
+//
+// Yields an [aoni.Response] contract backed by pooled response memory.
 func (c *Client) Request(
 	ctx context.Context,
 	method, path string,
@@ -159,9 +173,7 @@ func (c *Client) Request(
 		return aoni.NewStdResponse(resp), nil //nolint:bodyclose
 	}
 
-	fastReq := fasthttp.AcquireRequest()
-	fastResp := fasthttp.AcquireResponse()
-
+	fastReq, fastResp := acquireFastPair()
 	fastReq.Header.SetMethodBytes(getMethodBytes(method))
 
 	reqAdapter := NewRequest(fastReq)
@@ -170,50 +182,109 @@ func (c *Client) Request(
 	reqAdapter.SetContext(ctx)
 
 	if err := c.resolveTargetURL(reqAdapter, path); err != nil {
-		fasthttp.ReleaseRequest(fastReq)
-		fasthttp.ReleaseResponse(fastResp)
-
+		releaseFastPair(fastReq, fastResp)
 		return nil, err
 	}
 
 	c.applyDefaultHeaders(reqAdapter)
+	c.applyModifiers(reqAdapter, mods)
 
 	if c.isFastPathEligible(ctx, mods) {
-		extractUserInfoAndSetAuth(fastReq)
-
-		if c.config.Network.HasExperimental(aoni.ExpRIO) || c.config.Network.HasExperimental(aoni.ExpKernelBypass) {
-			if reg, err := sysnet.RegisterBuffer(fastReq.Body()); err == nil && reg != nil {
-				defer reg.Deregister()
-			}
-		}
-
-		err := c.engine.Do(fastReq, fastResp)
-		if err != nil {
-			fasthttp.ReleaseRequest(fastReq)
-			fasthttp.ReleaseResponse(fastResp)
-			return nil, err
-		}
-
-		return NewPooledResponse(fastReq, fastResp), nil
+		return c.executeFastPath(fastReq, fastResp)
 	}
-
-	reqAdapter = NewRequest(fastReq)
-	defer reqAdapter.Release()
-
-	reqAdapter.SetContext(ctx)
-	c.applyModifiers(reqAdapter, mods)
 
 	reqCtx := reqAdapter.Context()
 
-	stdResp, err := c.pipeline.Execute(reqCtx, reqAdapter, c.HTTP(), c.resolvePipeline(reqCtx)) //nolint:bodyclose
+	return c.pipeline.Execute(
+		reqCtx,
+		reqAdapter,
+		&c.nativeDoer,
+		c.resolvePipeline(reqCtx),
+	)
+}
+
+func acquireFastPair() (*fasthttp.Request, *fasthttp.Response) {
+	req := fasthttp.AcquireRequest()
+	req.Reset()
+
+	resp := fasthttp.AcquireResponse()
+	resp.Reset()
+
+	return req, resp
+}
+
+func releaseFastPair(req *fasthttp.Request, resp *fasthttp.Response) {
+	if req != nil {
+		fasthttp.ReleaseRequest(req)
+	}
+
+	if resp != nil {
+		fasthttp.ReleaseResponse(resp)
+	}
+}
+
+func (c *Client) executeFastPath(fastReq *fasthttp.Request, fastResp *fasthttp.Response) (aoni.Response, error) {
+	extractUserInfoAndSetAuth(fastReq)
+
+	err := c.engine.Do(fastReq, fastResp)
 	if err != nil {
-		fasthttp.ReleaseRequest(fastReq)
-		fasthttp.ReleaseResponse(fastResp)
+		releaseFastPair(fastReq, fastResp)
+		return nil, err
+	}
+
+	uncompressed := decompressFastResponse(fastResp)
+	pr := NewPooledResponse(fastReq, fastResp)
+	pr.SetUncompressed(uncompressed)
+
+	return pr, nil
+}
+
+type fastNativeDoer struct {
+	client *Client
+}
+
+func (f *fastNativeDoer) Do(req pipeline.Request) (pipeline.Response, error) {
+	fastReq, ok := req.EngineRequest().(*fasthttp.Request)
+	if !ok || fastReq == nil {
+		stdReq, err := http.NewRequestWithContext(
+			req.Context(),
+			req.Method(),
+			req.URL(),
+			req.BodyStream(),
+		) //nolint:gosec
+		if err != nil {
+			return nil, err
+		}
+
+		stdResp, err := f.client.HTTP().Do(stdReq) //nolint:bodyclose
+		if err != nil {
+			return nil, err
+		}
+
+		return aoni.NewStdResponse(stdResp), nil //nolint:bodyclose
+	}
+
+	fastResp := fasthttp.AcquireResponse()
+	ctx := req.Context()
+
+	trailers, err, autoReleased := f.client.executeWithRedirects(ctx, fastReq, fastResp)
+	if err != nil {
+		if !autoReleased {
+			fasthttp.ReleaseResponse(fastResp)
+		}
 
 		return nil, err
 	}
 
-	return aoni.NewStdResponse(stdResp), nil //nolint:bodyclose
+	uncompressed := decompressFastResponse(fastResp)
+	pr := NewPooledResponse(fastReq, fastResp)
+	pr.SetUncompressed(uncompressed)
+
+	if len(trailers) > 0 {
+		pr.SetTrailers(trailers)
+	}
+
+	return pr, nil
 }
 
 // Do executes a prepared [aoni.Request] contract, routing through the target native protocol engine (H1, H2, or H3).
@@ -222,14 +293,13 @@ func (c *Client) Do(req aoni.Request) (aoni.Response, error) {
 		req = NewRequest(nil)
 	}
 
-	ctx := req.Context()
-
-	stdResp, err := c.pipeline.Execute(ctx, req, c.HTTP(), c.resolvePipeline(ctx)) //nolint:bodyclose
-	if err != nil {
-		return nil, err
+	if u := req.URL(); u != "" {
+		_ = c.resolveTargetURL(req, u)
 	}
 
-	return aoni.NewStdResponse(stdResp), nil //nolint:bodyclose
+	ctx := req.Context()
+
+	return c.pipeline.Execute(ctx, req, &c.nativeDoer, c.resolvePipeline(ctx))
 }
 
 // Close shuts down idle TCP/TLS/H2/H3 connections and releases internal janitor background goroutines.
@@ -272,11 +342,10 @@ func (c *Client) CloseIdleConnections() {
 // HTTP returns an [aoni.HTTPDoer] executing requests via fasthttp, H2, or H3.
 func (c *Client) HTTP() aoni.HTTPDoer {
 	return aoni.HTTPDoerFunc(func(req *http.Request) (*http.Response, error) {
-		fastReq := fasthttp.AcquireRequest()
-		fastResp := fasthttp.AcquireResponse()
+		fastReq, fastResp := acquireFastPair()
 
-		fastReq.Header.SetMethod(req.Method)
 		fastReq.SetRequestURI(req.URL.String())
+		fastReq.Header.SetMethod(req.Method)
 		fastReq.Header.SetHost(req.URL.Host)
 
 		for k, vv := range req.Header {
@@ -286,16 +355,12 @@ func (c *Client) HTTP() aoni.HTTPDoer {
 		}
 
 		if req.Body != nil && req.Body != http.NoBody {
-			contentLen := req.ContentLength
-			if contentLen <= 0 {
-				if clStr := req.Header.Get("Content-Length"); clStr != "" {
-					if parsed, err := strconv.ParseInt(strings.TrimSpace(clStr), 10, 64); err == nil {
-						contentLen = parsed
-					}
-				}
+			buf := pipeline.GlobalBufferPool.Get()
+			if _, err := buf.ReadFrom(req.Body); err == nil {
+				fastReq.SetBody(buf.Bytes())
 			}
 
-			fastReq.SetBodyStream(req.Body, int(contentLen))
+			pipeline.GlobalBufferPool.Put(buf)
 		}
 
 		ctx := req.Context()
@@ -303,14 +368,14 @@ func (c *Client) HTTP() aoni.HTTPDoer {
 		trailers, err, autoReleased := c.executeWithRedirects(ctx, fastReq, fastResp)
 		if err != nil {
 			if !autoReleased {
-				fasthttp.ReleaseRequest(fastReq)
-				fasthttp.ReleaseResponse(fastResp)
+				releaseFastPair(fastReq, fastResp)
 			}
 
 			return nil, err
 		}
 
-		uncompressed := decompressFastResponse(fastResp)
+		hadEncoding := len(fastResp.Header.Peek("Content-Encoding")) > 0
+		uncompressed := decompressFastResponse(fastResp) || hadEncoding
 
 		bodyRC := &fastBodyReadCloser{
 			Reader:   bytes.NewReader(fastResp.Body()),
@@ -330,7 +395,7 @@ func (c *Client) HTTP() aoni.HTTPDoer {
 		}
 
 		fastResp.Header.All()(func(k, v []byte) bool {
-			httpResp.Header.Add(string(k), string(v))
+			httpResp.Header.Add(bytesconv.B2S(k), bytesconv.B2S(v))
 			return true
 		})
 
@@ -373,15 +438,12 @@ func (c *Client) Engine() *fasthttp.Client {
 }
 
 func (c *Client) isFastPathEligible(ctx context.Context, mods []aoni.RequestModifier) bool {
-	if len(mods) > 0 {
+	if len(mods) > 0 || !c.prepared.FastPathCapable || c.config.Defaults.Inspector != nil ||
+		c.config.Engine.CookieJar != nil {
 		return false
 	}
 
 	if ctx != nil && ctx.Done() != nil {
-		return false
-	}
-
-	if c.config.Engine.CookieJar != nil || c.config.Defaults.Inspector != nil {
 		return false
 	}
 
@@ -414,10 +476,21 @@ func (c *Client) resolveTargetURL(req aoni.Request, path string) error {
 		fastReq.URI().SetSchemeBytes(c.prepared.BaseURLSchemeBytes)
 		fastReq.URI().SetHostBytes(c.prepared.BaseURLHostBytes)
 
-		if c.config.Defaults.BaseURL != nil && c.config.Defaults.BaseURL.Path != "" &&
-			c.config.Defaults.BaseURL.Path != "/" {
-			basePath := strings.TrimSuffix(c.config.Defaults.BaseURL.Path, "/")
-			fastReq.URI().SetPathBytes(bytesconv.S2B(basePath + path))
+		if len(c.prepared.BaseURLCleanPathBytes) > 0 {
+			var stackBuf [256]byte
+
+			needed := len(c.prepared.BaseURLCleanPathBytes) + len(path)
+
+			var pathBuf []byte
+			if needed <= len(stackBuf) {
+				pathBuf = stackBuf[:0]
+			} else {
+				pathBuf = make([]byte, 0, needed)
+			}
+
+			pathBuf = append(pathBuf, c.prepared.BaseURLCleanPathBytes...)
+			pathBuf = append(pathBuf, path...)
+			fastReq.URI().SetPathBytes(pathBuf)
 		} else {
 			fastReq.URI().SetPathBytes(bytesconv.S2B(path))
 		}
@@ -531,10 +604,9 @@ func (c *Client) executeWithRedirects(
 			return nil, ErrMaxRedirectsExceeded, false
 		}
 
-		if err := applyRedirectMethodAndBody(statusCode, fastReq); err != nil {
-			return nil, err, false
-		}
+		applyRedirectMethodAndBody(statusCode, fastReq)
 
+		method := bytes.Clone(fastReq.Header.Method())
 		nextURI := fasthttp.AcquireURI()
 		currentURI.CopyTo(nextURI)
 		nextURI.UpdateBytes(location)
@@ -548,6 +620,15 @@ func (c *Client) executeWithRedirects(
 		}
 
 		nextURI.CopyTo(fastReq.URI())
+		fastReq.Header.SetRequestURIBytes(nextURI.RequestURI())
+
+		if len(method) > 0 {
+			fastReq.Header.SetMethodBytes(method)
+		}
+
+		if host := nextURI.Host(); len(host) > 0 {
+			fastReq.Header.SetHostBytes(host)
+		}
 
 		if !isSameHost(currentURI, nextURI) {
 			scrubSensitiveHeaders(fastReq, currentURI, nextURI)
@@ -584,22 +665,32 @@ func (c *Client) applyCustomDialer() {
 }
 
 func (c *Client) applyDefaultHeaders(req aoni.Request) {
-	if c.config.Defaults.Headers == nil {
+	if len(c.prepared.PrecomputedDefaultHeaders) == 0 {
 		return
 	}
 
-	for k, vv := range c.config.Defaults.Headers {
-		if req.Header(k) == "" && len(vv) > 0 {
-			req.SetHeader(k, vv[0])
+	if fastReqAdapter, ok := req.(*Request); ok {
+		for i := range c.prepared.PrecomputedDefaultHeaders {
+			h := &c.prepared.PrecomputedDefaultHeaders[i]
+			if len(fastReqAdapter.HeaderBytes(h.KeyBytes)) == 0 {
+				fastReqAdapter.SetHeaderBytes(h.KeyBytes, h.ValBytes)
+			}
+		}
+
+		return
+	}
+
+	for i := range c.prepared.PrecomputedDefaultHeaders {
+		h := &c.prepared.PrecomputedDefaultHeaders[i]
+		if req.Header(h.Key) == "" {
+			req.SetHeader(h.Key, h.Val)
 		}
 	}
 }
 
 func (c *Client) applyModifiers(req aoni.Request, mods []aoni.RequestModifier) {
 	for _, m := range mods {
-		if m != nil {
-			m(req)
-		}
+		m.Apply(req)
 	}
 }
 
@@ -681,73 +772,7 @@ func toPipelineDefaults(d aoni.ClientDefaults, referer *pipeline.RefererState) p
 }
 
 func toInternalPipelineConfig(p aoni.PipelineConfig) pipeline.PipelineConfig {
-	res := pipeline.PipelineConfig{
-		SizeLimit:          p.SizeLimit,
-		MultiReadThreshold: p.MultiReadThreshold,
-		RotateUA:           p.RotateUA,
-		Inspect:            p.Inspect,
-		Decompress:         p.Decompress,
-		Validate:           p.Validate,
-		Challenge:          p.Challenge,
-	}
-	if p.DPIJitter != nil {
-		res.DPIJitter = &pipeline.DPIJitterConfig{
-			MinDelay: p.DPIJitter.MinDelay,
-			MaxDelay: p.DPIJitter.MaxDelay,
-		}
-	}
-
-	if p.ProxyFailover != nil {
-		res.ProxyFailover = &pipeline.ProxyFailoverConfig{
-			Proxies:    p.ProxyFailover.Proxies,
-			RetryLimit: p.ProxyFailover.RetryLimit,
-		}
-	}
-
-	if p.Hedging != nil {
-		res.Hedging = &pipeline.HedgingConfig{
-			DynamicHedging:       p.Hedging.DynamicHedging,
-			DefaultDelay:         p.Hedging.DefaultDelay,
-			MaxRequestsPerSecond: p.Hedging.MaxRequestsPerSecond,
-			AllowNonReadOnly:     p.Hedging.AllowNonReadOnly,
-		}
-	}
-
-	if p.Cache != nil {
-		var nvs *pipeline.NoVarySearchConfig
-		if p.Cache.NoVarySearch != nil {
-			nvs = &pipeline.NoVarySearchConfig{
-				IgnoreParams:    p.Cache.NoVarySearch.IgnoreParams,
-				ExceptParams:    p.Cache.NoVarySearch.ExceptParams,
-				IgnoreAllParams: p.Cache.NoVarySearch.IgnoreAllParams,
-			}
-		}
-
-		res.Cache = &pipeline.CacheConfig{
-			Store:         p.Cache.Store,
-			DefaultTTL:    p.Cache.DefaultTTL,
-			NoVarySearch:  nvs,
-			CookieIndices: p.Cache.CookieIndices,
-		}
-	}
-
-	if p.HAR != nil {
-		res.HAR = &pipeline.HARConfig{
-			Tracker: p.HAR.Tracker,
-		}
-	}
-
-	if p.Redact != nil {
-		res.Redact = &pipeline.RedactConfig{
-			Headers:          p.Redact.Headers,
-			HeadersToRedact:  p.Redact.HeadersToRedact,
-			JSONKeysToRedact: p.Redact.JSONKeysToRedact,
-		}
-	}
-
-	res.BuildFlags()
-
-	return res
+	return p.ToInternal()
 }
 
 var (
@@ -794,7 +819,7 @@ func isHTTPSDowngrade(u1, u2 *fasthttp.URI) bool {
 	return bytes.EqualFold(u1.Scheme(), []byte("https")) && bytes.EqualFold(u2.Scheme(), []byte("http"))
 }
 
-func applyRedirectMethodAndBody(statusCode int, req *fasthttp.Request) error {
+func applyRedirectMethodAndBody(statusCode int, req *fasthttp.Request) {
 	switch statusCode {
 	case fasthttp.StatusMovedPermanently, fasthttp.StatusFound, fasthttp.StatusSeeOther:
 		method := string(req.Header.Method())
@@ -805,8 +830,6 @@ func applyRedirectMethodAndBody(statusCode int, req *fasthttp.Request) error {
 			req.Header.Del("Content-Length")
 		}
 	}
-
-	return nil
 }
 
 func decompressFastResponse(resp *fasthttp.Response) bool {
@@ -816,8 +839,6 @@ func decompressFastResponse(resp *fasthttp.Response) bool {
 	if len(encodingBytes) == 0 {
 		return false
 	}
-
-	encoding := strings.ToLower(bytesconv.B2S(encodingBytes))
 
 	body := resp.Body()
 	if len(body) == 0 {
@@ -830,18 +851,18 @@ func decompressFastResponse(resp *fasthttp.Response) bool {
 	)
 
 	switch {
-	case strings.Contains(encoding, "gzip"):
+	case bytesconv.ContainsFoldASCII(encodingBytes, "gzip"):
 		gzReader, gzErr := gzip.NewReader(bytes.NewReader(body))
 		if gzErr == nil {
 			decompressed, err = io.ReadAll(gzReader)
 			_ = gzReader.Close()
 		}
 
-	case strings.Contains(encoding, "br"):
+	case bytesconv.ContainsFoldASCII(encodingBytes, "br"):
 		brReader := brotli.NewReader(bytes.NewReader(body))
 		decompressed, err = io.ReadAll(brReader)
 
-	case strings.Contains(encoding, "zstd"):
+	case bytesconv.ContainsFoldASCII(encodingBytes, "zstd"):
 		if zDec, zErr := zstd.NewReader(bytes.NewReader(body)); zErr == nil {
 			decompressed, err = io.ReadAll(zDec)
 			zDec.Close()
@@ -869,8 +890,8 @@ func enforceContentLengthTruncation(resp *fasthttp.Response) {
 		return
 	}
 
-	cl, err := strconv.ParseInt(bytesconv.B2S(clBytes), 10, 64)
-	if err != nil || cl < 0 {
+	cl, ok := bytesconv.ParseUintFast(clBytes)
+	if !ok || cl < 0 {
 		return
 	}
 

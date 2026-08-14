@@ -16,6 +16,7 @@ import (
 	"net/http"
 	"net/http/httptrace"
 	"net/url"
+	"strings"
 	"sync"
 
 	"golang.org/x/net/http2"
@@ -198,8 +199,11 @@ type FramedTransport struct {
 	orderedKeys []string
 
 	h2Transport http2.Transport
-	h2Conns     map[string]*http2.ClientConn
-	mu          sync.Mutex
+	// h2Conns stores active *http2.ClientConn values keyed by canonical host:port.
+	// sync.Map is chosen because each key is written once (on new connection) and read
+	// on every subsequent request — the ideal write-once-read-many pattern for sync.Map's
+	// lock-free Load path.
+	h2Conns sync.Map
 }
 
 // NewFramedTransport creates a [FramedTransport] wrapping base with custom HTTP/2 settings and header ordering rules.
@@ -208,7 +212,6 @@ func NewFramedTransport(base *http.Transport, settings Settings, orderedKeys ...
 		Transport:   base,
 		settings:    settings,
 		orderedKeys: orderedKeys,
-		h2Conns:     make(map[string]*http2.ClientConn),
 	}
 
 	if base == nil {
@@ -298,16 +301,16 @@ func (ft *FramedTransport) RoundTrip(req *http.Request) (*http.Response, error) 
 }
 
 func (ft *FramedTransport) getH2Conn(addr string) *http2.ClientConn {
-	ft.mu.Lock()
-	defer ft.mu.Unlock()
-
-	cc, ok := ft.h2Conns[addr]
+	v, ok := ft.h2Conns.Load(addr)
 	if !ok {
 		return nil
 	}
 
+	cc := v.(*http2.ClientConn)
+
 	if !cc.CanTakeNewRequest() {
-		delete(ft.h2Conns, addr)
+		// Evict stale connection; subsequent callers will dial a fresh one.
+		ft.h2Conns.Delete(addr)
 
 		_ = cc.Close()
 
@@ -317,17 +320,12 @@ func (ft *FramedTransport) getH2Conn(addr string) *http2.ClientConn {
 	return cc
 }
 
+// saveH2Conn stores an active HTTP/2 client connection in the transport pool under addr.
 func (ft *FramedTransport) saveH2Conn(addr string, cc *http2.ClientConn) {
-	ft.mu.Lock()
-	defer ft.mu.Unlock()
-
-	if ft.h2Conns == nil {
-		ft.h2Conns = make(map[string]*http2.ClientConn)
-	}
-
-	ft.h2Conns[addr] = cc
+	ft.h2Conns.Store(addr, cc)
 }
 
+// dialTLS establishes an encrypted TLS socket connection with ALPN support for HTTP/2 and HTTP/1.1.
 func (ft *FramedTransport) dialTLS(ctx context.Context, addr string) (net.Conn, error) {
 	if ft.Transport != nil && ft.DialTLSContext != nil {
 		return ft.DialTLSContext(ctx, "tcp", addr)
@@ -353,6 +351,7 @@ func (ft *FramedTransport) dialTLS(ctx context.Context, addr string) (net.Conn, 
 	return d.DialContext(ctx, "tcp", addr)
 }
 
+// getALPN retrieves the negotiated ALPN protocol string from an active TLS connection.
 func getALPN(conn net.Conn) string {
 	if cs, ok := conn.(interface{ ConnectionState() tls.ConnectionState }); ok {
 		return cs.ConnectionState().NegotiatedProtocol
@@ -361,17 +360,21 @@ func getALPN(conn net.Conn) string {
 	return ""
 }
 
+// canonicalAddr normalizes URL host and port into a standard host:port address string.
 func canonicalAddr(u *url.URL) string {
-	host := u.Hostname()
-
-	port := u.Port()
-	if port == "" {
-		port = "443"
+	host := u.Host
+	if host == "" {
+		return ":443"
 	}
 
-	return net.JoinHostPort(host, port)
+	if strings.Contains(host, ":") {
+		return host
+	}
+
+	return host + ":443"
 }
 
+// http1RoundTrip executes an HTTP/1.1 transaction over an existing TLS connection if ALPN negotiation falls back.
 func http1RoundTrip(req *http.Request, conn net.Conn) (*http.Response, error) {
 	if err := req.Write(conn); err != nil {
 		_ = conn.Close()
@@ -391,6 +394,7 @@ func http1RoundTrip(req *http.Request, conn net.Conn) (*http.Response, error) {
 	return resp, nil
 }
 
+// connCloser ensures both response stream and underlying network connection are closed on completion.
 type connCloser struct {
 	io.ReadCloser
 	conn net.Conn

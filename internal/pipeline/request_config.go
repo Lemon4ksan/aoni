@@ -10,21 +10,21 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/lemon4ksan/aoni/fingerprint"
 	"github.com/lemon4ksan/aoni/fingerprint/ja4"
 	"github.com/lemon4ksan/aoni/fingerprint/p0f"
 	"github.com/lemon4ksan/aoni/internal/io"
+	"github.com/lemon4ksan/aoni/internal/pool"
 	"github.com/lemon4ksan/aoni/netutil/fragment"
 	"github.com/lemon4ksan/aoni/netutil/netdial"
 	"github.com/lemon4ksan/aoni/telemetry"
 )
 
-var requestConfigPool = sync.Pool{
-	New: func() any { return &RequestConfig{} },
-}
+var requestConfigStorage = pool.NewPerPStorage(func() *RequestConfig {
+	return &RequestConfig{}
+})
 
 type requestConfigKey struct{}
 
@@ -35,8 +35,14 @@ type RequestConfigCtxKey = requestConfigKey
 // AllocRequestConfig allocates a pooled [RequestConfig] and stores it in ctx, returning the
 // enriched context and the config pointer.
 func AllocRequestConfig(ctx context.Context) (context.Context, *RequestConfig) {
-	cfg := requestConfigPool.Get().(*RequestConfig)
+	if existing := GetRequestConfig(ctx); existing != nil {
+		return ctx, existing
+	}
+
+	cfg := requestConfigStorage.Get()
+	*cfg = RequestConfig{}
 	ctx = context.WithValue(ctx, requestConfigKey{}, cfg)
+
 	return ctx, cfg
 }
 
@@ -147,7 +153,8 @@ func GetOrInitRequestConfig(v any) *RequestConfig {
 
 		cfg := GetRequestConfig(req.Context())
 		if cfg == nil {
-			cfg = requestConfigPool.Get().(*RequestConfig)
+			cfg = requestConfigStorage.Get()
+			*cfg = RequestConfig{}
 			ctx := context.WithValue(req.Context(), requestConfigKey{}, cfg)
 			req.SetContext(ctx)
 		}
@@ -161,7 +168,8 @@ func GetOrInitRequestConfig(v any) *RequestConfig {
 
 		cfg := GetRequestConfig(req.Context())
 		if cfg == nil {
-			cfg = requestConfigPool.Get().(*RequestConfig)
+			cfg = requestConfigStorage.Get()
+			*cfg = RequestConfig{}
 			ctx := context.WithValue(req.Context(), requestConfigKey{}, cfg)
 			*req = *req.WithContext(ctx)
 		}
@@ -171,7 +179,8 @@ func GetOrInitRequestConfig(v any) *RequestConfig {
 	case context.Context:
 		cfg := GetRequestConfig(req)
 		if cfg == nil {
-			cfg = requestConfigPool.Get().(*RequestConfig)
+			cfg = requestConfigStorage.Get()
+			*cfg = RequestConfig{}
 		}
 
 		return cfg
@@ -213,7 +222,4 @@ func CloseResponse(resp *http.Response) {
 	if cfg.RequestTimeoutCancel != nil {
 		cfg.RequestTimeoutCancel()
 	}
-
-	*cfg = RequestConfig{}
-	requestConfigPool.Put(cfg)
 }

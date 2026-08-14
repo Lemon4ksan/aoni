@@ -45,11 +45,14 @@ const defaultRingCapacity uint32 = 0x400000 // 4MB Ring Buffer Capacity
 
 // WintunAdapter encapsulates a Windows Wintun L3 network interface session.
 type WintunAdapter struct {
+	name          string
 	adapterHandle uintptr
 	sessionHandle uintptr
 	waitEvent     windows.Handle
 	closed        atomic.Bool
 }
+
+var _ Adapter = (*WintunAdapter)(nil)
 
 // NewWintunAdapter creates and initializes a Wintun Layer 3 network interface on Windows.
 //
@@ -81,7 +84,10 @@ func NewWintunAdapter(adapterName, tunnelType string) (*WintunAdapter, error) {
 		return nil, fmt.Errorf("%w: %w", ErrAdapterCreationFailed, errCall)
 	}
 
-	adapter := &WintunAdapter{adapterHandle: r1}
+	adapter := &WintunAdapter{
+		name:          adapterName,
+		adapterHandle: r1,
+	}
 
 	if err := adapter.startSession(defaultRingCapacity); err != nil {
 		_ = adapter.Close()
@@ -91,6 +97,7 @@ func NewWintunAdapter(adapterName, tunnelType string) (*WintunAdapter, error) {
 	return adapter, nil
 }
 
+// startSession initializes a Wintun ring-buffer session and retrieves the kernel wait-event handle.
 func (a *WintunAdapter) startSession(capacity uint32) error {
 	r1, _, errCall := procWintunStartSession.Call(a.adapterHandle, uintptr(capacity))
 	if r1 == 0 {
@@ -103,6 +110,37 @@ func (a *WintunAdapter) startSession(capacity uint32) error {
 	a.waitEvent = windows.Handle(eventHandle)
 
 	return nil
+}
+
+// Name returns the Windows network adapter interface name.
+func (a *WintunAdapter) Name() string {
+	return a.name
+}
+
+// Read reads one Layer 3 IP packet from the Wintun ring buffer into b.
+func (a *WintunAdapter) Read(b []byte) (int, error) {
+	pkt, err := a.ReceivePacket()
+	if err != nil {
+		return 0, err
+	}
+	defer a.ReleaseReceivePacket(pkt)
+
+	if len(pkt) > len(b) {
+		return 0, io.ErrShortBuffer
+	}
+
+	copy(b, pkt)
+
+	return len(pkt), nil
+}
+
+// Write transmits an IP packet from b back into the Windows network stack.
+func (a *WintunAdapter) Write(b []byte) (int, error) {
+	if err := a.SendPacket(b); err != nil {
+		return 0, err
+	}
+
+	return len(b), nil
 }
 
 // ReceivePacket reads one Layer 3 IP packet directly from Wintun's shared ring-buffer.

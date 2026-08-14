@@ -63,6 +63,7 @@ type DialOptions struct {
 	ProxyDNS             bool
 	InsecureSkipVerify   bool
 	TCPQuickACK          bool
+	RegisteredIO         bool
 }
 
 // DialL4 establishes a low-latency L4 socket connection applying DNS resolution, SSRF guards,
@@ -115,6 +116,10 @@ func DialDirectTCP(ctx context.Context, network, host, port string, opts DialOpt
 		}
 
 		target := net.JoinHostPort(host, port)
+
+		if opts.RegisteredIO {
+			return DialRIOSocket(ctx, network, target, opts)
+		}
 
 		dialer := &net.Dialer{
 			Timeout: 10 * time.Second,

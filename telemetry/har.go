@@ -144,6 +144,7 @@ func (g *HARGenerator) Record(
 	})
 }
 
+// captureHARResponseBody buffers up to 150 KB of textual response body payload for HAR export.
 func captureHARResponseBody(resp *http.Response) []byte {
 	if resp.Body == nil {
 		return nil

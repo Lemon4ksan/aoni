@@ -53,6 +53,8 @@ type DarwinAdapter struct {
 	name string
 }
 
+var _ Adapter = (*DarwinAdapter)(nil)
+
 // NewDarwinAdapter creates and registers a Layer 3 utun interface on macOS without CGO.
 // Requires root or sudo privileges on macOS to allocate system control sockets.
 func NewDarwinAdapter(devName string) (*DarwinAdapter, error) {
@@ -142,16 +144,6 @@ func NewDarwinAdapter(devName string) (*DarwinAdapter, error) {
 		file: file,
 		name: realName,
 	}, nil
-}
-
-func cStringToGoString(b []byte) string {
-	for i, v := range b {
-		if v == 0 {
-			return string(b[:i])
-		}
-	}
-
-	return string(b)
 }
 
 // Name returns the actual utun interface name assigned by macOS kernel (e.g. "utun0").

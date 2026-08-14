@@ -51,6 +51,8 @@ type DialConfig struct {
 	SSRFGuard            bool
 	ProxyDNS             bool
 	InsecureSkipVerify   bool
+	TCPQuickACK          bool
+	RegisteredIO         bool
 	BusyPollMicroseconds int
 
 	// TLS / uTLS Options
@@ -198,6 +200,8 @@ func buildNetdialOptions(cfg DialConfig) netdial.DialOptions {
 		ProxyDNS:             cfg.ProxyDNS,
 		InsecureSkipVerify:   cfg.InsecureSkipVerify,
 		BusyPollMicroseconds: cfg.BusyPollMicroseconds,
+		TCPQuickACK:          cfg.TCPQuickACK,
+		RegisteredIO:         cfg.RegisteredIO,
 	}
 }
 

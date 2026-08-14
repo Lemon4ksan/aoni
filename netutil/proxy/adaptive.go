@@ -28,22 +28,28 @@ func DefaultAdaptiveTimeoutConfig() AdaptiveTimeoutConfig {
 	}
 }
 
-// ComputeProxyTimeout calculates the dynamic proxy connection timeout based on p95 RTT.
-func ComputeProxyTimeout(tracker *telemetry.RTTTracker, cfg AdaptiveTimeoutConfig) time.Duration {
-	minT := cfg.MinTimeout
+func (cfg AdaptiveTimeoutConfig) normalize() (minT, maxT time.Duration, mult float64) {
+	minT = cfg.MinTimeout
 	if minT <= 0 {
 		minT = 8 * time.Second
 	}
 
-	maxT := cfg.MaxTimeout
+	maxT = cfg.MaxTimeout
 	if maxT <= 0 {
 		maxT = 30 * time.Second
 	}
 
-	mult := cfg.Multiplier
+	mult = cfg.Multiplier
 	if mult <= 0 {
 		mult = 4.0
 	}
+
+	return minT, maxT, mult
+}
+
+// ComputeProxyTimeout calculates the dynamic proxy connection timeout based on p95 RTT.
+func ComputeProxyTimeout(tracker *telemetry.RTTTracker, cfg AdaptiveTimeoutConfig) time.Duration {
+	minT, maxT, mult := cfg.normalize()
 
 	if tracker == nil || tracker.Count() < 3 {
 		return 15 * time.Second

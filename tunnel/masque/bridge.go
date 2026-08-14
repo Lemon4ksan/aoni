@@ -11,7 +11,9 @@ import (
 	"net/netip"
 	"sync"
 	"time"
+	"unsafe"
 
+	"github.com/lemon4ksan/aoni/internal/offheap"
 	"github.com/lemon4ksan/aoni/tunnel/tun"
 )
 
@@ -72,6 +74,7 @@ func BuildICMPPacketTooBig(packet []byte, mtu uint32) ([]byte, error) {
 	return nil, ErrInvalidIPHeader
 }
 
+// forwardAdapterToMasque reads IP frames from the virtual TUN adapter and writes them to the MASQUE tunnel connection.
 func forwardAdapterToMasque(
 	ctx context.Context,
 	cancel context.CancelFunc,
@@ -79,47 +82,66 @@ func forwardAdapterToMasque(
 	masqueConn net.Conn,
 	opts BridgeOptions,
 ) {
-	buf := make([]byte, 65535)
+	vtable := NewIPProtocolVTable()
 
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		default:
-			n, err := adapter.Read(buf)
-			if err != nil || n == 0 {
-				if err != nil {
-					cancel()
-					return
+	// Register fast-path handlers for TCP (6), UDP (17), and ICMP (1/58)
+	vtable.Register(6, func(packet []byte) error {
+		if opts.MaxMTU > 0 {
+			ClampTCPMSSInPlace(packet, opts.MaxMTU)
+		}
+
+		return nil
+	})
+
+	_ = offheap.Scope(64*1024, func(arena *offheap.Arena) {
+		ptr := arena.Alloc(65535)
+
+		var buf []byte
+		if ptr != nil {
+			buf = unsafe.Slice((*byte)(ptr), 65535)
+		} else {
+			buf = make([]byte, 65535)
+		}
+
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			default:
+				n, err := adapter.Read(buf)
+				if err != nil || n == 0 {
+					if err != nil {
+						cancel()
+						return
+					}
+
+					continue
 				}
 
-				continue
-			}
+				packet := buf[:n]
 
-			packet := buf[:n]
+				srcIP := ExtractSrcIP(packet)
+				if err := ValidateIngressSourceAddress(srcIP, opts.AllowedPrefixes); err != nil {
+					continue
+				}
 
-			srcIP := ExtractSrcIP(packet)
-			if err := ValidateIngressSourceAddress(srcIP, opts.AllowedPrefixes); err != nil {
-				continue
-			}
+				_ = vtable.DispatchIPPacket(packet)
 
-			if opts.MaxMTU > 0 {
-				ClampTCPMSSInPlace(packet, opts.MaxMTU)
-
-				if n > opts.MaxMTU {
+				if opts.MaxMTU > 0 && n > opts.MaxMTU {
 					handleMTUOverflow(adapter, packet, uint32(opts.MaxMTU))
 					continue
 				}
-			}
 
-			if _, writeErr := masqueConn.Write(packet); writeErr != nil {
-				cancel()
-				return
+				if _, writeErr := masqueConn.Write(packet); writeErr != nil {
+					cancel()
+					return
+				}
 			}
 		}
-	}
+	})
 }
 
+// handleMTUOverflow generates an ICMP Packet Too Big response when ingress packet exceeds tunnel MTU bounds.
 func handleMTUOverflow(adapter tun.Adapter, packet []byte, mtu uint32) {
 	icmpPkt, err := BuildICMPPacketTooBig(packet, mtu)
 	if err == nil && len(icmpPkt) > 0 {
@@ -127,33 +149,43 @@ func handleMTUOverflow(adapter tun.Adapter, packet []byte, mtu uint32) {
 	}
 }
 
+// forwardMasqueToAdapter streams incoming IP packets from the MASQUE tunnel back to the virtual TUN device.
 func forwardMasqueToAdapter(
 	ctx context.Context,
 	cancel context.CancelFunc,
 	adapter tun.Adapter,
 	masqueConn net.Conn,
 ) {
-	buf := make([]byte, 65535)
+	_ = offheap.Scope(64*1024, func(arena *offheap.Arena) {
+		ptr := arena.Alloc(65535)
 
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		default:
-			n, err := masqueConn.Read(buf)
-			if err != nil {
-				cancel()
+		var buf []byte
+		if ptr != nil {
+			buf = unsafe.Slice((*byte)(ptr), 65535)
+		} else {
+			buf = make([]byte, 65535)
+		}
+
+		for {
+			select {
+			case <-ctx.Done():
 				return
-			}
-
-			if n > 0 {
-				if _, writeErr := adapter.Write(buf[:n]); writeErr != nil {
+			default:
+				n, err := masqueConn.Read(buf)
+				if err != nil {
 					cancel()
 					return
 				}
+
+				if n > 0 {
+					if _, writeErr := adapter.Write(buf[:n]); writeErr != nil {
+						cancel()
+						return
+					}
+				}
 			}
 		}
-	}
+	})
 }
 
 // ClampTCPMSSInPlace inspects TCP SYN packets and overwrites the MSS option
@@ -186,6 +218,7 @@ func ClampTCPMSSInPlace(packet []byte, maxMTU int) {
 	}
 }
 
+// calculateMaxMSS computes the optimal TCP Maximum Segment Size for a given IP version and MTU limit.
 func calculateMaxMSS(packet []byte, version byte, maxMTU int) (uint16, int, bool) {
 	if version == 4 {
 		ipHdrLen := int(packet[0]&0x0f) * 4
@@ -208,6 +241,7 @@ func calculateMaxMSS(packet []byte, version byte, maxMTU int) (uint16, int, bool
 	return 0, 0, false
 }
 
+// updateMSSOption scans TCP option bytes and overrides the MSS value if higher than maxMSS.
 func updateMSSOption(options []byte, maxMSS uint16) bool {
 	optIdx := 0
 	for optIdx < len(options) {
@@ -246,6 +280,7 @@ func updateMSSOption(options []byte, maxMSS uint16) bool {
 	return false
 }
 
+// recalculateTCPChecksum recomputes and writes the TCP pseudo-header and payload checksum in-place.
 func recalculateTCPChecksum(packet []byte, version byte, ipHdrLen int) {
 	tcpHdr := packet[ipHdrLen:]
 	tcpLen := len(packet) - ipHdrLen

@@ -7,11 +7,11 @@
 package fast
 
 import (
+	"bytes"
 	"context"
 	"encoding/base64"
 	"net/http"
 	"net/url"
-	"strings"
 
 	"github.com/valyala/fasthttp"
 
@@ -23,6 +23,7 @@ import (
 	"github.com/lemon4ksan/aoni/netutil"
 )
 
+// applyCookies populates outbound fasthttp request headers with matching cookies from the active jar.
 func (c *Client) applyCookies(ctx context.Context, req *fasthttp.Request) {
 	jar := c.config.Engine.CookieJar
 	if jar == nil {
@@ -37,7 +38,7 @@ func (c *Client) applyCookies(ctx context.Context, req *fasthttp.Request) {
 		return
 	}
 
-	u, err := url.Parse(string(req.URI().FullURI()))
+	u, err := urlutil.Parse(bytesconv.B2S(req.URI().FullURI()))
 	if err != nil {
 		return
 	}
@@ -47,24 +48,19 @@ func (c *Client) applyCookies(ctx context.Context, req *fasthttp.Request) {
 		return
 	}
 
-	var cookieHeader strings.Builder
-	for i, c := range cookies {
-		if i > 0 {
-			cookieHeader.WriteString("; ")
-		}
-
-		cookieHeader.WriteString(c.Name)
-		cookieHeader.WriteByte('=')
-		cookieHeader.WriteString(c.Value)
+	cookieHeader := internalCookie.BuildCookieHeader(cookies)
+	if cookieHeader == "" {
+		return
 	}
 
 	if existing := req.Header.Peek("Cookie"); len(existing) > 0 {
-		req.Header.Set("Cookie", string(existing)+"; "+cookieHeader.String())
+		req.Header.Set("Cookie", bytesconv.B2S(existing)+"; "+cookieHeader)
 	} else {
-		req.Header.Set("Cookie", cookieHeader.String())
+		req.Header.Set("Cookie", cookieHeader)
 	}
 }
 
+// captureCookies extracts response Set-Cookie headers and saves valid cookies to the active jar.
 func (c *Client) captureCookies(ctx context.Context, req *fasthttp.Request, resp *fasthttp.Response) {
 	jar := c.config.Engine.CookieJar
 	if jar == nil {
@@ -79,7 +75,7 @@ func (c *Client) captureCookies(ctx context.Context, req *fasthttp.Request, resp
 		return
 	}
 
-	u, err := url.Parse(string(req.URI().FullURI()))
+	u, err := urlutil.Parse(bytesconv.B2S(req.URI().FullURI()))
 	if err != nil {
 		return
 	}
@@ -98,25 +94,70 @@ func (c *Client) captureCookies(ctx context.Context, req *fasthttp.Request, resp
 	}
 }
 
-func parseCookie(key, value []byte) *http.Cookie {
-	return internalCookie.ParseSingleCookie(key, value)
-}
+// parseCookie parses Set-Cookie header value bytes into an *http.Cookie without synthetic HTTP response allocations.
+func parseCookie(_, value []byte) *http.Cookie {
+	if len(value) == 0 {
+		return nil
+	}
 
-func extractUserInfoAndSetAuth(req *fasthttp.Request) {
-	user := string(req.URI().Username())
-	pass := string(req.URI().Password())
+	dto := internalCookie.ParseSetCookieHeader(bytesconv.B2S(value), "", "")
+	if dto.Name == "" {
+		return nil
+	}
 
-	if user != "" {
-		if len(req.Header.Peek("Authorization")) == 0 {
-			encoded := base64.StdEncoding.EncodeToString(bytesconv.S2B(user + ":" + pass))
-			req.Header.Set("Authorization", "Basic "+encoded)
-		}
+	var sameSite http.SameSite
+	switch dto.SameSite {
+	case "Lax":
+		sameSite = http.SameSiteLaxMode
+	case "Strict":
+		sameSite = http.SameSiteStrictMode
+	case "None":
+		sameSite = http.SameSiteNoneMode
+	}
 
-		req.URI().SetUsername("")
-		req.URI().SetPassword("")
+	return &http.Cookie{ //nolint:gosec
+		Name:        dto.Name,
+		Value:       dto.Value,
+		Domain:      dto.Domain,
+		Path:        dto.Path,
+		Expires:     dto.Expires,
+		HttpOnly:    dto.HTTPOnly,
+		Secure:      dto.Secure,
+		SameSite:    sameSite,
+		Partitioned: dto.Partitioned,
+		MaxAge:      dto.MaxAge,
 	}
 }
 
+// extractUserInfoAndSetAuth inspects URI credentials and constructs HTTP Basic Authorization headers if missing.
+func extractUserInfoAndSetAuth(req *fasthttp.Request) {
+	if len(req.Header.Peek("Authorization")) > 0 {
+		return
+	}
+
+	uBytes := req.URI().Username()
+	if len(uBytes) > 0 {
+		user := bytesconv.B2S(uBytes)
+		pass := bytesconv.B2S(req.URI().Password())
+		encoded := base64.StdEncoding.EncodeToString(bytesconv.S2B(user + ":" + pass))
+		req.Header.Set("Authorization", "Basic "+encoded)
+	} else {
+		rawURI := req.URI().FullURI()
+		if bytes.IndexByte(rawURI, '@') >= 0 {
+			if parsed, err := url.Parse(bytesconv.B2S(rawURI)); err == nil && parsed.User != nil {
+				user := parsed.User.Username()
+				pass, _ := parsed.User.Password()
+				encoded := base64.StdEncoding.EncodeToString(bytesconv.S2B(user + ":" + pass))
+				req.Header.Set("Authorization", "Basic "+encoded)
+			}
+		}
+	}
+
+	req.URI().SetUsername("")
+	req.URI().SetPassword("")
+}
+
+// scrubSensitiveHeaders strips sensitive credentials and cookie headers upon cross-domain redirects per RFC 9110 §15.4.
 func scrubSensitiveHeaders(req *fasthttp.Request, currentURI, nextURI *fasthttp.URI) {
 	for _, h := range aoni.DefaultSensitiveHeaders {
 		req.Header.Del(h)
@@ -134,6 +175,7 @@ func scrubSensitiveHeaders(req *fasthttp.Request, currentURI, nextURI *fasthttp.
 	}
 }
 
+// isSameDomainOrSubdomain reports whether h1 and h2 belong to the same domain or subdomain hierarchy.
 func isSameDomainOrSubdomain(h1, h2 string) bool {
 	clean1 := netutil.CleanHost(h1)
 	clean2 := netutil.CleanHost(h2)

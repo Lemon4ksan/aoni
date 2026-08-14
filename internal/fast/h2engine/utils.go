@@ -141,8 +141,19 @@ func addPadding(b []byte) []byte {
 	return b
 }
 
+// toLowerCopy converts ASCII header name bytes to lowercase using a stack-allocated buffer to prevent heap allocations.
 func toLowerCopy(b []byte) []byte {
-	out := make([]byte, len(b))
+	var (
+		stackBuf [64]byte
+		out      []byte
+	)
+
+	if len(b) <= len(stackBuf) {
+		out = stackBuf[:len(b)]
+	} else {
+		out = make([]byte, len(b))
+	}
+
 	for i := range b {
 		if b[i] >= 'A' && b[i] <= 'Z' {
 			out[i] = b[i] + 32

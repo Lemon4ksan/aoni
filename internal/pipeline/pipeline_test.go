@@ -30,12 +30,6 @@ import (
 	"github.com/lemon4ksan/aoni/telemetry"
 )
 
-type DoerFunc func(req *http.Request) (*http.Response, error)
-
-func (f DoerFunc) Do(req *http.Request) (*http.Response, error) {
-	return f(req)
-}
-
 type mockDoer struct {
 	fn func(req *http.Request) (*http.Response, error)
 }
@@ -252,7 +246,7 @@ func TestPipeline_Execute_FastPath(t *testing.T) {
 	req := newMockRequest(t.Context(), http.MethodGet, "http://example.com/fast")
 	pipeCfg := PipelineConfig{Decompress: true}
 
-	resp, err := pipe.Execute(t.Context(), req, doer, pipeCfg)
+	resp, err := pipe.Execute(t.Context(), req.HTTPRequest(), doer, pipeCfg)
 	require.NoError(t, err)
 
 	defer resp.Body.Close()
@@ -284,7 +278,7 @@ func TestPipeline_UnsafePhaseOrder_And_Hooks(t *testing.T) {
 		},
 	}
 
-	resp, err := pipeEngine.executeCustomPhaseOrder(tx, mReq, doer, tx.UnsafePhaseOrder)
+	resp, err := pipeEngine.executeCustomPhaseOrder(tx, mReq.HTTPRequest(), doer, tx.UnsafePhaseOrder)
 	require.NoError(t, err)
 	assert.True(t, hookExecuted)
 	assert.Equal(t, http.StatusOK, resp.StatusCode)
@@ -300,7 +294,7 @@ func TestPipeline_UnsafePhaseOrder_And_Hooks(t *testing.T) {
 		},
 	}
 
-	_, errHook := pipeEngine.executeCustomPhaseOrder(txError, mReq, doer, txError.UnsafePhaseOrder)
+	_, errHook := pipeEngine.executeCustomPhaseOrder(txError, mReq.HTTPRequest(), doer, txError.UnsafePhaseOrder)
 	assert.ErrorIs(t, errHook, errExpected)
 
 	ReleaseTx(tx)
@@ -325,7 +319,7 @@ func TestPipeline_DisabledFlagsAndLookupDecoder(t *testing.T) {
 		Challenge:  true,
 	}
 
-	pipeEngine.initTx(tx, mReq, pipeCfg)
+	pipeEngine.initTx(tx, pipeCfg)
 
 	assert.Equal(t, uint32(0), tx.Flags&FlagDecompress)
 	assert.Equal(t, uint32(0), tx.Flags&FlagValidate)
@@ -354,7 +348,7 @@ func TestPipeline_ResponseSizeLimit(t *testing.T) {
 		req := newMockRequest(t.Context(), http.MethodGet, "http://example.com/large")
 		pipeCfg := PipelineConfig{SizeLimit: 1024}
 
-		_, err := pipe.Execute(t.Context(), req, doer, pipeCfg)
+		_, err := pipe.Execute(t.Context(), req.HTTPRequest(), doer, pipeCfg)
 		require.Error(t, err)
 		assert.ErrorIs(t, err, io.ErrResponseTooLarge)
 	})
@@ -374,7 +368,7 @@ func TestPipeline_ResponseSizeLimit(t *testing.T) {
 		req := newMockRequest(t.Context(), http.MethodGet, "http://example.com/chunked")
 		pipeCfg := PipelineConfig{SizeLimit: 1024}
 
-		resp, err := pipe.Execute(t.Context(), req, doer, pipeCfg)
+		resp, err := pipe.Execute(t.Context(), req.HTTPRequest(), doer, pipeCfg)
 		require.NoError(t, err)
 
 		defer resp.Body.Close()
@@ -432,7 +426,9 @@ func TestPipeline_PostProcessResponse_Full(t *testing.T) {
 		Header: http.Header{"Content-Length": []string{"100", "200"}},
 	}
 	pipeEngine := New(ClientDefaults{}, ClientFingerprint{})
-	_, errConflict := pipeEngine.postProcessResponse(&http.Request{}, respConflict, AcquireTx(t.Context()))
+	txConflict := AcquireTx(t.Context())
+	txConflict.Flags = FlagValidate
+	_, errConflict := pipeEngine.postProcessResponse(&http.Request{}, respConflict, txConflict)
 	assert.ErrorIs(t, errConflict, ErrConflictingContentLength)
 
 	respTooLarge := &http.Response{
@@ -810,7 +806,7 @@ func TestPipeline_Cloudflare403WAF(t *testing.T) {
 	})
 
 	mReq := newMockRequest(t.Context(), "GET", "http://example.com/protected")
-	resp, err := pipeEngine.Execute(t.Context(), mReq, doer, PipelineConfig{})
+	resp, err := pipeEngine.Execute(t.Context(), mReq.HTTPRequest(), doer, PipelineConfig{})
 	require.NoError(t, err)
 
 	defer resp.Body.Close()
@@ -836,7 +832,7 @@ func TestPipeline_MisdirectedRequest421(t *testing.T) {
 	})
 
 	mReq := newMockRequest(t.Context(), "GET", "http://example.com/misdirected")
-	resp, err := pipeEngine.Execute(t.Context(), mReq, doer, PipelineConfig{})
+	resp, err := pipeEngine.Execute(t.Context(), mReq.HTTPRequest(), doer, PipelineConfig{})
 	require.NoError(t, err)
 
 	defer resp.Body.Close()
@@ -860,7 +856,7 @@ func TestPipeline_TooManyRequests429_RetryAfter(t *testing.T) {
 	})
 
 	mReq := newMockRequest(t.Context(), "GET", "http://example.com/rate-limited")
-	resp, err := pipeEngine.Execute(t.Context(), mReq, doer, PipelineConfig{})
+	resp, err := pipeEngine.Execute(t.Context(), mReq.HTTPRequest(), doer, PipelineConfig{})
 	require.NoError(t, err)
 
 	defer resp.Body.Close()
@@ -882,7 +878,7 @@ func TestPipeline_ServiceUnavailable503(t *testing.T) {
 	})
 
 	mReq := newMockRequest(t.Context(), "GET", "http://example.com/down")
-	resp, err := pipeEngine.Execute(t.Context(), mReq, doer, PipelineConfig{})
+	resp, err := pipeEngine.Execute(t.Context(), mReq.HTTPRequest(), doer, PipelineConfig{})
 	require.NoError(t, err)
 
 	defer resp.Body.Close()

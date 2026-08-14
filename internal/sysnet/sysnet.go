@@ -37,3 +37,167 @@ func TuneSocketConnWithFlags(conn net.Conn, flags uint64) {
 		})
 	}
 }
+
+// WriteVectorBuffers writes multiple byte slice buffers to conn in a single OS vectorized syscall (WSASend on Windows, writev on Linux).
+func WriteVectorBuffers(conn net.Conn, buffers [][]byte) (int64, error) {
+	if conn == nil || len(buffers) == 0 {
+		return 0, nil
+	}
+
+	if sysConn, ok := conn.(interface {
+		SyscallConn() (syscallConn, error)
+	}); ok {
+		raw, err := sysConn.SyscallConn()
+		if err == nil {
+			var (
+				written int64
+				sysErr  error
+			)
+
+			errCtrl := raw.Write(func(fd uintptr) bool {
+				written, sysErr = writeVectorBuffersFD(fd, buffers)
+
+				return true
+			})
+			if errCtrl == nil && sysErr == nil {
+				return written, nil
+			}
+		}
+	}
+
+	netBufs := make(net.Buffers, len(buffers))
+	copy(netBufs, buffers)
+
+	return netBufs.WriteTo(conn)
+}
+
+type syscallConn interface {
+	Control(func(fd uintptr)) error
+	Read(func(fd uintptr) bool) error
+	Write(func(fd uintptr) bool) error
+}
+
+// BatchUDPConn wraps a [net.PacketConn] to execute vectorized UDP datagram batching.
+type BatchUDPConn struct {
+	net.PacketConn
+}
+
+// NewBatchUDPConn wraps pconn with vectorized socket datagram batching capabilities.
+func NewBatchUDPConn(pconn net.PacketConn) *BatchUDPConn {
+	return &BatchUDPConn{PacketConn: pconn}
+}
+
+// WriteVector writes multiple UDP datagram payload buffers in a single vectorized syscall.
+func (c *BatchUDPConn) WriteVector(buffers [][]byte) (int64, error) {
+	if c == nil || c.PacketConn == nil || len(buffers) == 0 {
+		return 0, nil
+	}
+
+	if sysConn, ok := c.PacketConn.(interface {
+		SyscallConn() (syscallConn, error)
+	}); ok {
+		raw, err := sysConn.SyscallConn()
+		if err == nil {
+			var (
+				written int64
+				sysErr  error
+			)
+
+			errCtrl := raw.Write(func(fd uintptr) bool {
+				written, sysErr = writeVectorBuffersFD(fd, buffers)
+
+				return true
+			})
+			if errCtrl == nil && sysErr == nil {
+				return written, nil
+			}
+		}
+	}
+
+	var total int64
+	for _, buf := range buffers {
+		if len(buf) > 0 {
+			n, err := c.WriteTo(buf, nil)
+
+			total += int64(n)
+			if err != nil {
+				return total, err
+			}
+		}
+	}
+
+	return total, nil
+}
+
+type SyscallConnector interface {
+	SyscallConn() (syscallConn, error)
+}
+
+// WriteVectorTo writes multiple UDP datagram payload buffers to a target destination address in a single vectorized syscall.
+func (c *BatchUDPConn) WriteVectorTo(buffers [][]byte, addr net.Addr) (int64, error) {
+	if c == nil || c.PacketConn == nil || len(buffers) == 0 {
+		return 0, nil
+	}
+
+	if sysConn, ok := c.PacketConn.(SyscallConnector); ok {
+		raw, err := sysConn.SyscallConn()
+		if err == nil {
+			var (
+				written int64
+				sysErr  error
+			)
+
+			errCtrl := raw.Write(func(fd uintptr) bool {
+				written, sysErr = writeVectorBuffersFD(fd, buffers)
+
+				return true
+			})
+			if errCtrl == nil && sysErr == nil {
+				return written, nil
+			}
+		}
+	}
+
+	var total int64
+	for _, buf := range buffers {
+		if len(buf) > 0 {
+			n, err := c.WriteTo(buf, addr)
+
+			total += int64(n)
+			if err != nil {
+				return total, err
+			}
+		}
+	}
+
+	return total, nil
+}
+
+// SetReadBuffer sets the size of the operating system's receive buffer associated with the UDP connection.
+func (c *BatchUDPConn) SetReadBuffer(bytes int) error {
+	if u, ok := c.PacketConn.(*net.UDPConn); ok {
+		return u.SetReadBuffer(bytes)
+	}
+
+	return nil
+}
+
+// SetWriteBuffer sets the size of the operating system's transmit buffer associated with the UDP connection.
+func (c *BatchUDPConn) SetWriteBuffer(bytes int) error {
+	if u, ok := c.PacketConn.(*net.UDPConn); ok {
+		return u.SetWriteBuffer(bytes)
+	}
+
+	return nil
+}
+
+// SyscallConn returns a raw network connection for OS syscall access.
+func (c *BatchUDPConn) SyscallConn() (syscallConn, error) {
+	if sys, ok := c.PacketConn.(interface {
+		SyscallConn() (syscallConn, error)
+	}); ok {
+		return sys.SyscallConn()
+	}
+
+	return nil, nil
+}

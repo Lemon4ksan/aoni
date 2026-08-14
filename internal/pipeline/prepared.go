@@ -10,28 +10,42 @@ import (
 	"strings"
 )
 
+// PrecomputedHeader stores precomputed header key-value pairs as strings and byte slices
+// for zero-allocation header application.
+type PrecomputedHeader struct {
+	Slice    []string
+	KeyBytes []byte
+	ValBytes []byte
+	Key      string
+	Val      string
+}
+
 // PreparedConfig holds immutable precomputed configuration values, wire-format header blocks,
 // ALPN token slices, and client hint headers.
 type PreparedConfig struct {
-	BaseURL                *url.URL
-	BaseURLString          string
-	BaseURLTrimmedString   string
-	BaseURLTrimmedBytes    []byte
-	BaseURLHostBytes       []byte
-	BaseURLSchemeBytes     []byte
-	DefaultHostHeader      string
-	DefaultALPN            []string
-	StaticHeaders          http.Header
-	RawHeaderBlock         []byte
-	PrecomputedClientHints []byte
+	BaseURLTrimmedBytes       []byte
+	BaseURLCleanPathBytes     []byte
+	BaseURLHostBytes          []byte
+	BaseURLSchemeBytes        []byte
+	RawHeaderBlock            []byte
+	PrecomputedClientHints    []byte
+	DefaultALPN               []string
+	PrecomputedDefaultHeaders []PrecomputedHeader
+	BaseURLString             string
+	BaseURLTrimmedString      string
+	DefaultHostHeader         string
+	BaseURL                   *url.URL
+	StaticHeaders             http.Header
+	FastPathCapable           bool
 }
 
 // NewPreparedConfig constructs an immutable [PreparedConfig].
 func NewPreparedConfig(baseURL *url.URL, headers ...http.Header) PreparedConfig {
 	prep := PreparedConfig{
-		BaseURL:       baseURL,
-		DefaultALPN:   []string{"h3", "h2", "http/1.1"},
-		StaticHeaders: make(http.Header),
+		BaseURL:         baseURL,
+		DefaultALPN:     []string{"h3", "h2", "http/1.1"},
+		StaticHeaders:   make(http.Header),
+		FastPathCapable: true,
 	}
 
 	if baseURL != nil {
@@ -40,12 +54,27 @@ func NewPreparedConfig(baseURL *url.URL, headers ...http.Header) PreparedConfig 
 		prep.BaseURLTrimmedBytes = []byte(prep.BaseURLTrimmedString)
 		prep.BaseURLHostBytes = []byte(baseURL.Host)
 		prep.BaseURLSchemeBytes = []byte(baseURL.Scheme)
+
 		prep.DefaultHostHeader = baseURL.Host
+		if baseURL.Path != "" && baseURL.Path != "/" {
+			prep.BaseURLCleanPathBytes = []byte(strings.TrimSuffix(baseURL.Path, "/"))
+		}
 	}
 
 	if len(headers) > 0 && headers[0] != nil {
 		for k, v := range headers[0] {
-			prep.StaticHeaders[k] = append([]string(nil), v...)
+			copiedVal := append([]string(nil), v...)
+
+			prep.StaticHeaders[k] = copiedVal
+			if len(v) > 0 {
+				prep.PrecomputedDefaultHeaders = append(prep.PrecomputedDefaultHeaders, PrecomputedHeader{
+					Key:      k,
+					Val:      v[0],
+					KeyBytes: []byte(k),
+					ValBytes: []byte(v[0]),
+					Slice:    copiedVal,
+				})
+			}
 		}
 
 		prep.RawHeaderBlock = buildRawHeaderBlock(prep.StaticHeaders)

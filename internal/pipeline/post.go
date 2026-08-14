@@ -9,7 +9,6 @@ import (
 	stdio "io"
 	"mime"
 	"net/http"
-	"slices"
 	"strconv"
 	"strings"
 
@@ -27,17 +26,19 @@ var (
 	ErrHeaderInjectionDetected   = errors.New("aoni: CRLF control characters detected in response headers")
 )
 
-func (p *Pipeline) postProcessResponse(
+func (p *Pipeline[Req, Resp]) postProcessResponse(
 	stdReq *http.Request,
 	resp *http.Response,
 	tx *Tx,
 ) (*http.Response, error) {
-	if err := validateResponseSmugglingGuards(resp); err != nil {
-		if resp != nil && resp.Body != nil {
-			_ = resp.Body.Close()
-		}
+	if tx.Flags&FlagValidate != 0 {
+		if err := validateResponseSmugglingGuards(resp); err != nil {
+			if resp != nil && resp.Body != nil {
+				_ = resp.Body.Close()
+			}
 
-		return nil, err
+			return nil, err
+		}
 	}
 
 	if tx.Flags&FlagDecompress != 0 {
@@ -90,6 +91,7 @@ func (p *Pipeline) postProcessResponse(
 	return resp, nil
 }
 
+// validateResponseSmugglingGuards applies RFC HTTP request/response smuggling and desynchronization protections.
 func validateResponseSmugglingGuards(resp *http.Response) error {
 	if resp == nil || len(resp.Header) == 0 {
 		return nil
@@ -110,6 +112,7 @@ func validateResponseSmugglingGuards(resp *http.Response) error {
 	return validateHeaderInjections(resp)
 }
 
+// validateContentLengthHeaders ensures Content-Length duplicates carry identical values per RFC 9112 §6.3.
 func validateContentLengthHeaders(resp *http.Response) error {
 	clValues := resp.Header["Content-Length"]
 	if len(clValues) <= 1 {
@@ -128,6 +131,7 @@ func validateContentLengthHeaders(resp *http.Response) error {
 	return nil
 }
 
+// validateLocationHeaders detects and deduplicates multiple conflicting Location headers in redirect responses.
 func validateLocationHeaders(resp *http.Response) error {
 	locValues := resp.Header["Location"]
 	if len(locValues) <= 1 {
@@ -146,6 +150,7 @@ func validateLocationHeaders(resp *http.Response) error {
 	return nil
 }
 
+// validateTransferEncodingAndContentLength strips Content-Length if Transfer-Encoding is chunked per RFC 9112 §6.3.
 func validateTransferEncodingAndContentLength(resp *http.Response) error {
 	te := resp.Header.Get("Transfer-Encoding")
 	if te == "" || !strings.Contains(strings.ToLower(te), "chunked") {
@@ -159,20 +164,24 @@ func validateTransferEncodingAndContentLength(resp *http.Response) error {
 	return nil
 }
 
+// validateHeaderInjections scans header keys and values for illegal CRLF and null control characters.
 func validateHeaderInjections(resp *http.Response) error {
 	for k, vv := range resp.Header {
 		if containsControlChars(k) {
 			return ErrHeaderInjectionDetected
 		}
 
-		if slices.ContainsFunc(vv, containsControlChars) {
-			return ErrHeaderInjectionDetected
+		for i := 0; i < len(vv); i++ {
+			if containsControlChars(vv[i]) {
+				return ErrHeaderInjectionDetected
+			}
 		}
 	}
 
 	return nil
 }
 
+// containsControlChars checks whether s contains CRLF or null bytes.
 func containsControlChars(s string) bool {
 	for i := 0; i < len(s); i++ {
 		b := s[i]
@@ -184,9 +193,18 @@ func containsControlChars(s string) bool {
 	return false
 }
 
-func (p *Pipeline) limitResponseSize(resp *http.Response, maxSize int64) error {
+func (p *Pipeline[Req, Resp]) limitResponseSize(resp *http.Response, maxSize int64) error {
 	if resp == nil || resp.Body == nil || maxSize <= 0 {
 		return nil
+	}
+
+	if resp.ContentLength > 0 && resp.ContentLength <= maxSize {
+		return nil
+	}
+
+	if resp.ContentLength > maxSize {
+		_ = resp.Body.Close()
+		return io.ErrResponseTooLarge
 	}
 
 	cl := resp.ContentLength
@@ -216,7 +234,7 @@ func (p *Pipeline) limitResponseSize(resp *http.Response, maxSize int64) error {
 	return nil
 }
 
-func (p *Pipeline) validateResponse(resp *http.Response, tx *Tx) error {
+func (p *Pipeline[Req, Resp]) validateResponse(resp *http.Response, tx *Tx) error {
 	if resp == nil {
 		return nil
 	}
@@ -239,7 +257,7 @@ func (p *Pipeline) validateResponse(resp *http.Response, tx *Tx) error {
 	return nil
 }
 
-func (p *Pipeline) applyMultiReadBuffering(resp *http.Response, tx *Tx) error {
+func (p *Pipeline[Req, Resp]) applyMultiReadBuffering(resp *http.Response, tx *Tx) error {
 	threshold := p.defaults.MultiReadThreshold
 	disableDisk := p.defaults.MultiReadDisableDisk
 
@@ -268,7 +286,7 @@ func (p *Pipeline) applyMultiReadBuffering(resp *http.Response, tx *Tx) error {
 	return nil
 }
 
-func (p *Pipeline) handleDecompressionAndTranscoding(req *http.Request, resp *http.Response) *http.Response {
+func (p *Pipeline[Req, Resp]) handleDecompressionAndTranscoding(req *http.Request, resp *http.Response) *http.Response {
 	if resp == nil || resp.Body == nil {
 		return resp
 	}
@@ -384,8 +402,19 @@ func applyCharsetTranscoding(resp *http.Response, body stdio.ReadCloser) stdio.R
 		return body
 	}
 
-	newContentType := mediaType + "; charset=utf-8"
-	resp.Header.Set("Content-Type", newContentType)
+	const suffix = "; charset=utf-8"
+
+	totalLen := len(mediaType) + len(suffix)
+	if totalLen <= 64 {
+		var buf [64]byte
+
+		n := copy(buf[:], mediaType)
+		copy(buf[n:], suffix)
+
+		resp.Header.Set("Content-Type", string(buf[:totalLen]))
+	} else {
+		resp.Header.Set("Content-Type", mediaType+suffix)
+	}
 
 	return &io.DecompressReadCloser{
 		Reader: transform.NewReader(body, enc.NewDecoder()),
@@ -393,7 +422,7 @@ func applyCharsetTranscoding(resp *http.Response, body stdio.ReadCloser) stdio.R
 	}
 }
 
-func (p *Pipeline) handleWAFChallenge(req *http.Request, resp *http.Response) (*http.Response, error) {
+func (p *Pipeline[Req, Resp]) handleWAFChallenge(req *http.Request, resp *http.Response) (*http.Response, error) {
 	if p.defaults.ChallengeDetector == nil || p.defaults.ChallengeSolver == nil || resp == nil || resp.Body == nil {
 		return resp, nil
 	}

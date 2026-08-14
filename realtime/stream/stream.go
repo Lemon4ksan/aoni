@@ -27,6 +27,7 @@ import (
 
 	"github.com/lemon4ksan/aoni"
 	"github.com/lemon4ksan/aoni/codec/decode"
+	"github.com/lemon4ksan/aoni/internal/offheap"
 	"github.com/lemon4ksan/aoni/mod"
 	"github.com/lemon4ksan/aoni/request"
 )
@@ -306,18 +307,9 @@ func ResumableSSE[T any](
 			default:
 			}
 
-			reqMods := make([]aoni.RequestModifier, 0, len(mods)+4)
-			reqMods = append(reqMods,
-				mod.WithHeader("Accept", "text/event-stream"),
-				mod.WithHeader("Cache-Control", "no-cache"),
-				mod.WithHeader("Connection", "keep-alive"),
-			)
+			var stackBuf [stackModCapacity]aoni.RequestModifier
 
-			if lastEventID != "" {
-				reqMods = append(reqMods, mod.WithHeader("Last-Event-ID", lastEventID))
-			}
-
-			reqMods = append(reqMods, mods...)
+			reqMods := buildSSERequestModifiers(mods, lastEventID, &stackBuf)
 
 			resp, err := Get(ctx, c, path, reqMods...)
 			if err != nil {
@@ -335,48 +327,10 @@ func ResumableSSE[T any](
 			}
 
 			attempts = 0
-			reader := bufio.NewReader(resp)
 
-			var currentEvent SSEEvent
-
-			for {
-				select {
-				case <-ctx.Done():
-					_ = resp.Close()
-
-					errs <- ctx.Err()
-
-					return
-
-				default:
-				}
-
-				line, err := reader.ReadString('\n')
-				if err != nil {
-					_ = resp.Close()
-					break
-				}
-
-				if strings.TrimSpace(line) == "" {
-					if currentEvent.ID != "" {
-						lastEventID = currentEvent.ID
-					}
-
-					if currentEvent.Retry > 0 {
-						reconnectDelay = time.Duration(currentEvent.Retry) * time.Millisecond
-					}
-
-					if err := dispatchSSEEvent(ctx, currentEvent, out); err != nil {
-						errs <- err
-						return
-					}
-
-					currentEvent = SSEEvent{}
-
-					continue
-				}
-
-				parseSSELine(line, &currentEvent)
+			if err := consumeSSEResponse(ctx, resp, out, &lastEventID, &reconnectDelay); err != nil {
+				errs <- err
+				return
 			}
 
 			if resp.StatusCode() == http.StatusNoContent {
@@ -390,6 +344,94 @@ func ResumableSSE[T any](
 	}()
 
 	return out, errs, nil
+}
+
+const stackModCapacity = 16
+
+func buildSSERequestModifiers(
+	mods []aoni.RequestModifier,
+	lastEventID string,
+	stackBuf *[stackModCapacity]aoni.RequestModifier,
+) []aoni.RequestModifier {
+	baseCount := 3
+	if lastEventID != "" {
+		baseCount = 4
+	}
+
+	total := baseCount + len(mods)
+	if total <= stackModCapacity {
+		stackBuf[0] = mod.WithHeader("Accept", "text/event-stream")
+		stackBuf[1] = mod.WithHeader("Cache-Control", "no-cache")
+
+		stackBuf[2] = mod.WithHeader("Connection", "keep-alive")
+		if lastEventID != "" {
+			stackBuf[3] = mod.WithHeader("Last-Event-ID", lastEventID)
+		}
+
+		copy(stackBuf[baseCount:], mods)
+
+		return stackBuf[:total]
+	}
+
+	res := make([]aoni.RequestModifier, total)
+	res[0] = mod.WithHeader("Accept", "text/event-stream")
+	res[1] = mod.WithHeader("Cache-Control", "no-cache")
+
+	res[2] = mod.WithHeader("Connection", "keep-alive")
+	if lastEventID != "" {
+		res[3] = mod.WithHeader("Last-Event-ID", lastEventID)
+	}
+
+	copy(res[baseCount:], mods)
+
+	return res
+}
+
+func consumeSSEResponse[T any](
+	ctx context.Context,
+	resp *Stream,
+	out chan<- T,
+	lastEventID *string,
+	reconnectDelay *time.Duration,
+) error {
+	defer resp.Close()
+
+	reader := bufio.NewReader(resp)
+
+	var currentEvent SSEEvent
+
+	for {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		default:
+		}
+
+		line, err := reader.ReadString('\n')
+		if err != nil {
+			return nil
+		}
+
+		if strings.TrimSpace(line) == "" {
+			if currentEvent.ID != "" {
+				*lastEventID = currentEvent.ID
+			}
+
+			if currentEvent.Retry > 0 {
+				*reconnectDelay = time.Duration(currentEvent.Retry) * time.Millisecond
+			}
+
+			if err := dispatchSSEEvent(ctx, currentEvent, out); err != nil {
+				return err
+			}
+
+			currentEvent = SSEEvent{}
+
+			continue
+		}
+
+		parseSSELine(line, &currentEvent)
+	}
 }
 
 func sleepOrCancel(ctx context.Context, delay time.Duration, errs chan<- error) bool {
@@ -412,13 +454,11 @@ func SSE[T any](
 	path string,
 	mods ...aoni.RequestModifier,
 ) (<-chan T, <-chan error, error) {
-	mods = append([]aoni.RequestModifier{
-		mod.WithHeader("Accept", "text/event-stream"),
-		mod.WithHeader("Cache-Control", "no-cache"),
-		mod.WithHeader("Connection", "keep-alive"),
-	}, mods...)
+	var stackBuf [stackModCapacity]aoni.RequestModifier
 
-	resp, err := Get(ctx, c, path, mods...)
+	allMods := buildSSERequestModifiers(mods, "", &stackBuf)
+
+	resp, err := Get(ctx, c, path, allMods...)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -537,9 +577,27 @@ func readNextGRPCWebFrame[T any](reader io.Reader) (val T, done bool, err error)
 	flags := header[0]
 	length := binary.BigEndian.Uint32(header[1:5])
 
-	payload := make([]byte, length)
-	if _, err := io.ReadFull(reader, payload); err != nil {
-		return zero, false, err
+	var payload []byte
+	if length >= 16*1024 {
+		offBuf, err := offheap.NewBuffer(int(length))
+		if err == nil {
+			defer offBuf.Release()
+
+			payload = offBuf.Bytes()[:length]
+			if _, rErr := io.ReadFull(reader, payload); rErr != nil {
+				return zero, false, rErr
+			}
+		} else {
+			payload = make([]byte, length)
+			if _, rErr := io.ReadFull(reader, payload); rErr != nil {
+				return zero, false, rErr
+			}
+		}
+	} else {
+		payload = make([]byte, length)
+		if _, rErr := io.ReadFull(reader, payload); rErr != nil {
+			return zero, false, rErr
+		}
 	}
 
 	if flags&0x80 != 0 {

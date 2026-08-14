@@ -13,6 +13,7 @@ import (
 
 // ApplyTLSVariantToConfig maps uTLS ClientHello specifications, presets, and QUIC TLS parameters
 // from a browser profile variant ([profiles.Variant]) into the target client configuration.
+// If variant is nil, this function is a no-op.
 func ApplyTLSVariantToConfig(cfg *Config, variant *profiles.Variant) {
 	if variant == nil {
 		return
@@ -44,6 +45,7 @@ func ApplyTLSVariantToConfig(cfg *Config, variant *profiles.Variant) {
 
 // ApplyHTTPVariantToConfig translates HTTP/2 SETTINGS frames, HTTP/3 QUIC transport limits,
 // default browser request headers, and method-specific header ordering rules into the client configuration.
+// If variant is nil, this function is a no-op.
 func ApplyHTTPVariantToConfig(cfg *Config, variant *profiles.Variant, os profiles.OSKey) {
 	if variant == nil {
 		return
@@ -61,14 +63,22 @@ func ApplyHTTPVariantToConfig(cfg *Config, variant *profiles.Variant, os profile
 
 // ApplyProfileHeaders injects method-specific browser headers, WebKit/Gecko multipart boundary lines,
 // and method-tailored header serialization sequences into the outgoing request contract.
+// Safe for concurrent use across multiple goroutines.
 func ApplyProfileHeaders(req Request, variant *profiles.Variant, os profiles.OSKey) {
 	if variant == nil {
 		return
 	}
 
 	if variant.InsertHeaders != nil {
-		headersMap := make(map[string]string)
-		if stdReq := req.HTTPRequest(); stdReq != nil {
+		capHint := 8
+
+		stdReq := req.HTTPRequest()
+		if stdReq != nil {
+			capHint += len(stdReq.Header)
+		}
+
+		headersMap := make(map[string]string, capHint)
+		if stdReq != nil {
 			for k, v := range stdReq.Header {
 				if len(v) > 0 {
 					headersMap[k] = v[0]
@@ -99,6 +109,7 @@ func ApplyProfileHeaders(req Request, variant *profiles.Variant, os profiles.OSK
 	}
 }
 
+// setOrderedHeaders calculates and attaches method-specific ordered header keys to the request config.
 func setOrderedHeaders(req Request, variant *profiles.Variant, os profiles.OSKey) {
 	cfg := GetOrInitRequestConfig(req)
 	cfg.OrderedHeaders = internalProfile.BuildHeaderOrder(variant, os, req.Method())

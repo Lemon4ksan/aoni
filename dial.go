@@ -19,9 +19,7 @@ import (
 
 // Dial establishes an unencrypted L4 TCP socket connection to addr using a default 15-second timeout.
 // It acts as a convenience wrapper around DialContext using context.Background.
-//
-// For production workloads, use DialContext with an explicit context deadline
-// to prevent socket dial leaks during network stalls.
+// Safe for concurrent use across multiple goroutines.
 func (c *Client) Dial(addr string) (net.Conn, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
@@ -42,8 +40,7 @@ func (c *Client) Dial(addr string) (net.Conn, error) {
 //  6. SOCKS5 / SOCKS5h / HTTP CONNECT proxy tunneling (if ProxyURL is configured).
 //  7. TCP payload write-chunking fragmentation (if FragmentConfig is active).
 //
-// Fully thread-safe and safe for concurrent invocation across multiple goroutines.
-// Aborts immediately if ctx is canceled or reaches its deadline.
+// Safe for concurrent use across multiple goroutines.
 func (c *Client) DialContext(ctx context.Context, network, addr string) (net.Conn, error) {
 	dialer := transport.NewUniversalDialer()
 	dialCfg := c.buildDialConfig(ctx)
@@ -68,9 +65,7 @@ func (c *Client) DialContext(ctx context.Context, network, addr string) (net.Con
 //  2. TLSClientHelloID (explicit uTLS profile preset)
 //  3. BrowserID (predefined high-level browser profile)
 //
-// Telemetry & JA4:
-// After a successful TLS handshake, computed JA4 fingerprint reports are written to
-// JA4ReportStore in ctx and passed to JA4Callback if registered.
+// Safe for concurrent use across multiple goroutines.
 func (c *Client) DialTLS(ctx context.Context, network, addr string) (net.Conn, error) {
 	dialer := transport.NewUniversalDialer()
 	dialCfg := c.buildDialConfig(ctx)
@@ -86,10 +81,7 @@ func (c *Client) DialTLS(ctx context.Context, network, addr string) (net.Conn, e
 // DialTLSForWS establishes an encrypted TLS socket connection tailored for WebSocket upgrades.
 // If the underlying http.Transport has a custom DialTLSContext registered, it delegates to that
 // function to maintain transport consistency; otherwise, it delegates to DialTLSContext.
-//
-// Protocol Application:
-// Handshakes created by DialTLSForWS negotiate ALPN protocols ("http/1.1" or "h2")
-// and apply the client's active uTLS browser fingerprint profiles.
+// Safe for concurrent use across multiple goroutines.
 func (c *Client) DialTLSForWS(ctx context.Context, addr string) (net.Conn, error) {
 	if tr := c.Transport(); tr != nil && tr.DialTLSContext != nil {
 		return tr.DialTLSContext(ctx, "tcp", addr)
@@ -102,6 +94,7 @@ func (c *Client) DialTLSForWS(ctx context.Context, addr string) (net.Conn, error
 // applying active proxy routing, SSRF guards, and TCP write-chunking fragmentation.
 // If the underlying http.Transport has a custom DialContext registered, it delegates to that
 // function before applying WebSocket payload fragmentation wrappers.
+// Safe for concurrent use across multiple goroutines.
 func (c *Client) DialPlainForWS(ctx context.Context, addr string) (net.Conn, error) {
 	if tr := c.Transport(); tr != nil && tr.DialContext != nil {
 		conn, err := tr.DialContext(ctx, "tcp", addr)
@@ -120,6 +113,15 @@ func (c *Client) DialPlainForWS(ctx context.Context, addr string) (net.Conn, err
 	return c.applyWSFragmentation(ctx, conn), nil
 }
 
+// applyWSFragmentation decorates a raw socket with TCP payload write-chunking if configured.
+func (c *Client) applyWSFragmentation(ctx context.Context, conn net.Conn) net.Conn {
+	if cfg := GetRequestConfig(ctx); cfg != nil && cfg.Fragment != nil {
+		return applyFragmentation(conn, *cfg.Fragment)
+	}
+
+	return conn
+}
+
 // applyDialers binds the client's dialing functions (DialContext, DialTLSContext)
 // to a standard http.Transport instance, injecting aoni's transport features into stdlib clients.
 func (c *Client) applyDialers(tr *http.Transport) {
@@ -133,41 +135,14 @@ func (c *Client) applyDialers(tr *http.Transport) {
 
 // buildDialConfig constructs a self-contained transport.DialConfig DTO by merging
 // client-level defaults with per-request context overrides extracted via GetRequestConfig.
-//
-// Precedence Hierarchy:
-// Options set in the request context (RequestConfig) override client-level defaults.
-// For example, a per-request ProxyAddr, P0fSignature, or ALPNOverride takes precedence
-// over the global NetworkConfig or FingerprintConfig declared on Client.
 func (c *Client) buildDialConfig(ctx context.Context) transport.DialConfig {
-	reqCfg := GetRequestConfig(ctx)
-
-	cfg := transport.DialConfig{
-		DNSResolver:        c.network.DNSResolver,
-		InterfaceName:      c.network.InterfaceName,
-		SocketMark:         c.network.SocketMark,
-		StackDriver:        c.network.StackDriver,
-		L2Device:           c.network.L2Device,
-		SourceRotator:      c.network.SourceRotator,
-		HappyEyeballs:      c.network.HappyEyeballsDelay,
-		SSRFGuard:          c.network.SSRFGuard,
-		ProxyDNS:           c.network.ProxyDNS,
-		P0fSignature:       c.fingerprint.P0fSignature,
-		SocketController:   c.network.SocketController,
-		FragmentConfig:     c.network.FragmentConfig,
-		ProxyURL:           c.network.ProxyAddr,
-		InsecureSkipVerify: GetInsecureSkipVerify(ctx) || c.engineConfig.InsecureSkipVerify,
-		BaseTLSConfig:      c.resolveBaseTLSConfig(ctx),
-		HelloID:            c.resolveHelloID(),
-		SpecProvider:       c.fingerprint.TLSClientHelloSpecProvider,
-		SessionCache:       c.fingerprint.SessionCache,
-		CertificatePins:    c.fingerprint.CertificatePins,
-		CertCompression:    c.fingerprint.CertCompression,
-		HeaderOrder:        c.fingerprint.HeaderOrder,
-		JA4Callback:        c.fingerprint.JA4Callback,
-		ConnFilters:        c.network.ConnFilters,
-	}
-
-	cfg.ApplyRequestOverrides(reqCfg)
+	cfgDTO := c.snapshotConfig()
+	cfg := cfgDTO.BuildDialConfig(ctx)
+	cfg.InterfaceName = c.network.InterfaceName
+	cfg.SocketMark = c.network.SocketMark
+	cfg.BaseTLSConfig = c.resolveBaseTLSConfig(ctx)
+	cfg.HelloID = c.resolveHelloID()
+	cfg.ApplyRequestOverrides(GetRequestConfig(ctx))
 
 	return cfg
 }

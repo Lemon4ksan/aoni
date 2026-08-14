@@ -96,3 +96,85 @@ func TestTrimQuotes(t *testing.T) {
 		assert.Equal(t, tt.want, string(got))
 	}
 }
+
+func TestContainsFoldASCII(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		src    string
+		target string
+		want   bool
+	}{
+		{"gzip, deflate", "gzip", true},
+		{"Bz gZip", "gzip", true},
+		{"GZIP", "gzip", true},
+		{"gZip", "gzip", true},
+		{"BR", "br", true},
+		{"zStD, gzip", "zstd", true},
+		{"gzip", "br", false},
+		{"", "gzip", false},
+		{"gzip", "", true},
+	}
+
+	for _, tt := range tests {
+		assert.Equal(t, tt.want, ContainsFoldASCII([]byte(tt.src), tt.target))
+	}
+}
+
+func TestParseUintFast(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		in      string
+		wantVal int64
+		wantOK  bool
+	}{
+		{"200", 200, true},
+		{"0", 0, true},
+		{"1234567890", 1234567890, true},
+		{"", 0, false},
+		{"abc", 0, false},
+		{"12a34", 0, false},
+	}
+
+	for _, tt := range tests {
+		val, ok := ParseUintFast([]byte(tt.in))
+		assert.Equal(t, tt.wantOK, ok)
+
+		if ok {
+			assert.Equal(t, tt.wantVal, val)
+		}
+	}
+}
+
+func TestCanonicalHeaderKey(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		in   string
+		want string
+	}{
+		{"user-agent", "User-Agent"},
+		{"content-type", "Content-Type"},
+		{"x-custom-trace-id", "X-Custom-Trace-Id"},
+		{"ACCEPT", "Accept"},
+		{"", ""},
+	}
+
+	for _, tt := range tests {
+		assert.Equal(t, tt.want, CanonicalHeaderKey(tt.in))
+		assert.Equal(t, tt.want, string(CanonicalHeaderKeyBytes([]byte(tt.in))))
+	}
+}
+
+func TestFastHash64(t *testing.T) {
+	t.Parallel()
+
+	h1 := FastHash64([]byte("hello world"))
+	h2 := FastHash64([]byte("hello world"))
+	h3 := FastHash64([]byte("different data"))
+
+	assert.Equal(t, h1, h2)
+	assert.NotEqual(t, h1, h3)
+	assert.NotZero(t, FastHash64(nil))
+}

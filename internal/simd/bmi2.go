@@ -6,8 +6,28 @@ package simd
 
 import "math/bits"
 
-// ExtractBits extracts contiguous bits from val according to mask (BMI2 PEXT emulation).
+// ExtractBits extracts contiguous bits from val according to mask (BMI2 PEXT hardware or SWAR fallback).
 func ExtractBits(val, mask uint64) uint64 {
+	return extractBitsHW(val, mask)
+}
+
+// DepositBits deposits contiguous bits from val into mask locations (BMI2 PDEP hardware or SWAR fallback).
+func DepositBits(val, mask uint64) uint64 {
+	return depositBitsHW(val, mask)
+}
+
+// CountTrailingZeros returns the number of trailing zero bits in x (TZCNT).
+func CountTrailingZeros(x uint64) int {
+	return bits.TrailingZeros64(x)
+}
+
+// CountLeadingZeros returns the number of leading zero bits in x (LZCNT).
+func CountLeadingZeros(x uint64) int {
+	return bits.LeadingZeros64(x)
+}
+
+// extractBitsSWAR emulates BMI2 PEXT in software using SIMD-Within-A-Register bit operations.
+func extractBitsSWAR(val, mask uint64) uint64 {
 	res := uint64(0)
 	outBit := uint64(0)
 
@@ -24,8 +44,8 @@ func ExtractBits(val, mask uint64) uint64 {
 	return res
 }
 
-// DepositBits deposits contiguous bits from val into mask locations (BMI2 PDEP emulation).
-func DepositBits(val, mask uint64) uint64 {
+// depositBitsSWAR emulates BMI2 PDEP in software using SIMD-Within-A-Register bit operations.
+func depositBitsSWAR(val, mask uint64) uint64 {
 	res := uint64(0)
 	inBit := uint64(0)
 
@@ -40,14 +60,4 @@ func DepositBits(val, mask uint64) uint64 {
 	}
 
 	return res
-}
-
-// CountTrailingZeros returns the number of trailing zero bits in x (TZCNT).
-func CountTrailingZeros(x uint64) int {
-	return bits.TrailingZeros64(x)
-}
-
-// CountLeadingZeros returns the number of leading zero bits in x (LZCNT).
-func CountLeadingZeros(x uint64) int {
-	return bits.LeadingZeros64(x)
 }

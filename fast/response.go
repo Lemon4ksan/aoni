@@ -12,20 +12,24 @@ import (
 	"strconv"
 	"sync"
 	"sync/atomic"
+	"unsafe"
 
 	"github.com/valyala/fasthttp"
+	"golang.org/x/sys/cpu"
 
 	"github.com/lemon4ksan/aoni"
 	"github.com/lemon4ksan/aoni/internal/bytesconv"
+	"github.com/lemon4ksan/aoni/internal/offheap"
+	"github.com/lemon4ksan/aoni/internal/pool"
 )
 
 var (
-	responseAdapterPool = sync.Pool{
-		New: func() any { return &Response{} },
-	}
-	pooledResponsePool = sync.Pool{
-		New: func() any { return &PooledResponse{} },
-	}
+	responseAdapterStorage = pool.NewPerPStorage(func() *Response {
+		return &Response{}
+	})
+	pooledResponseStorage = pool.NewPerPStorage(func() *PooledResponse {
+		return &PooledResponse{}
+	})
 )
 
 type fastBodyReadCloser struct {
@@ -50,9 +54,12 @@ func (b *fastBodyReadCloser) Close() error {
 // Response instances are recycled via [sync.Pool]. Callers MUST call [Response.Close] or [Response.Release]
 // when finished processing the response to avoid socket leaks and memory fragmentation.
 type Response struct {
+	_            cpu.CacheLinePad
 	resp         *fasthttp.Response
+	_            cpu.CacheLinePad
 	trailers     map[string][]string
 	uncompressed bool
+	_            cpu.CacheLinePad
 }
 
 // NewResponse acquires a pooled [Response] adapter wrapping an active [*fasthttp.Response].
@@ -63,7 +70,7 @@ func NewResponse(resp *fasthttp.Response) *Response {
 		resp = fasthttp.AcquireResponse()
 	}
 
-	r := responseAdapterPool.Get().(*Response)
+	r := responseAdapterStorage.Get()
 	r.resp = resp
 	r.trailers = nil
 	r.uncompressed = false
@@ -90,7 +97,7 @@ func (f *Response) StatusBytes() []byte {
 func (f *Response) Header(key string) string {
 	val := f.resp.Header.Peek(key)
 	if len(val) == 0 {
-		val = f.resp.Header.Peek(http.CanonicalHeaderKey(key))
+		val = f.resp.Header.Peek(bytesconv.CanonicalHeaderKey(key))
 	}
 
 	if len(val) == 0 {
@@ -114,7 +121,7 @@ func (f *Response) Header(key string) string {
 func (f *Response) HeaderBytes(key []byte) []byte {
 	val := f.resp.Header.PeekBytes(key)
 	if len(val) == 0 {
-		val = f.resp.Header.Peek(http.CanonicalHeaderKey(bytesconv.B2S(key)))
+		val = f.resp.Header.PeekBytes(bytesconv.CanonicalHeaderKeyBytes(key))
 	}
 
 	return val
@@ -124,7 +131,7 @@ func (f *Response) HeaderBytes(key []byte) []byte {
 func (f *Response) Headers() map[string][]string {
 	m := make(map[string][]string)
 	f.resp.Header.All()(func(k, v []byte) bool {
-		sk := http.CanonicalHeaderKey(string(k))
+		sk := bytesconv.CanonicalHeaderKey(bytesconv.B2S(k))
 		m[sk] = append(m[sk], string(v))
 		return true
 	})
@@ -175,9 +182,27 @@ func (f *Response) BodyStream() io.ReadCloser {
 	return io.NopCloser(bytes.NewReader(f.BodyBytes()))
 }
 
-// HTTPResponse yields nil for fasthttp response adapters (standard net/http.Response unavailable).
+// HTTPResponse converts fasthttp response adapter into standard *http.Response.
 func (f *Response) HTTPResponse() *http.Response {
-	return nil
+	if f == nil || f.resp == nil {
+		return nil
+	}
+
+	header := make(http.Header)
+	f.resp.Header.All()(func(k, v []byte) bool {
+		header.Add(string(k), string(v))
+		return true
+	})
+
+	body := slices.Clone(f.resp.Body())
+
+	return &http.Response{
+		StatusCode:    f.resp.StatusCode(),
+		Status:        http.StatusText(f.resp.StatusCode()),
+		Header:        header,
+		Body:          io.NopCloser(bytes.NewReader(body)),
+		ContentLength: int64(len(body)),
+	}
 }
 
 // FastHTTPResponse yields the underlying [*fasthttp.Response] instance.
@@ -200,6 +225,67 @@ func (f *Response) Uncompressed() bool {
 	return f.uncompressed
 }
 
+// WriteTo streams response body payload to w using off-heap kernel pages for zero mheap pressure.
+func (f *Response) WriteTo(w io.Writer) (int64, error) {
+	if f == nil || f.resp == nil {
+		return 0, nil
+	}
+
+	body := f.resp.Body()
+	if len(body) > 0 {
+		n, err := w.Write(body)
+		return int64(n), err
+	}
+
+	if !f.resp.IsBodyStream() {
+		return 0, nil
+	}
+
+	stream := f.resp.BodyStream()
+	if stream == nil {
+		return 0, nil
+	}
+
+	var (
+		total     int64
+		streamErr error
+	)
+
+	_ = offheap.Scope(64*1024, func(arena *offheap.Arena) {
+		ptr := arena.Alloc(64 * 1024)
+		if ptr == nil {
+			total, streamErr = io.Copy(w, stream)
+			return
+		}
+
+		tmp := unsafe.Slice((*byte)(ptr), 64*1024)
+
+		for {
+			nr, rErr := stream.Read(tmp)
+			if nr > 0 {
+				nw, wErr := w.Write(tmp[:nr])
+				total += int64(nw)
+
+				if wErr != nil {
+					streamErr = wErr
+					return
+				}
+			}
+
+			if rErr == io.EOF {
+				return
+			}
+
+			if rErr != nil {
+				streamErr = rErr
+				return
+			}
+		}
+	})
+
+	return total, streamErr
+}
+
 // Release returns the Response adapter instance back to [sync.Pool] for memory recycling.
 func (f *Response) Release() {
 	if f == nil {
@@ -209,7 +295,7 @@ func (f *Response) Release() {
 	f.resp = nil
 	f.trailers = nil
 	f.uncompressed = false
-	responseAdapterPool.Put(f)
+	responseAdapterStorage.Put(f)
 }
 
 const maxBodySlurpBytes int64 = 2048
@@ -239,16 +325,19 @@ func (f *Response) Close() error {
 
 // PooledResponse wraps a fasthttp request/response pair, automatically releasing objects back to [sync.Pool] upon Close.
 type PooledResponse struct {
+	_ cpu.CacheLinePad
 	Response
+	_        cpu.CacheLinePad
 	fastReq  *fasthttp.Request
 	fastResp *fasthttp.Response
 	closed   atomic.Bool
+	_        cpu.CacheLinePad
 }
 
 // NewPooledResponse acquires a pooled [PooledResponse] adapter wrapping active fastReq and fastResp.
 // Calling Close() thread-safely releases both fasthttp objects and recycles the adapter.
 func NewPooledResponse(fastReq *fasthttp.Request, fastResp *fasthttp.Response) *PooledResponse {
-	pr := pooledResponsePool.Get().(*PooledResponse)
+	pr := pooledResponseStorage.Get()
 	pr.resp = fastResp
 	pr.trailers = nil
 	pr.uncompressed = false
@@ -257,6 +346,29 @@ func NewPooledResponse(fastReq *fasthttp.Request, fastResp *fasthttp.Response) *
 	pr.closed.Store(false)
 
 	return pr
+}
+
+// HTTPResponse converts PooledResponse into standard *http.Response.
+func (r *PooledResponse) HTTPResponse() *http.Response {
+	if r == nil || r.fastResp == nil {
+		return nil
+	}
+
+	header := make(http.Header)
+	r.fastResp.Header.All()(func(k, v []byte) bool {
+		header.Add(bytesconv.B2S(k), bytesconv.B2S(v))
+		return true
+	})
+
+	body := slices.Clone(r.fastResp.Body())
+
+	return &http.Response{
+		StatusCode:    r.fastResp.StatusCode(),
+		Status:        http.StatusText(r.fastResp.StatusCode()),
+		Header:        header,
+		Body:          io.NopCloser(bytes.NewReader(body)),
+		ContentLength: int64(len(body)),
+	}
 }
 
 // Close releases underlying fasthttp objects and returns PooledResponse to memory pool.
@@ -275,7 +387,7 @@ func (r *PooledResponse) Close() error {
 		r.resp = nil
 		r.trailers = nil
 		r.uncompressed = false
-		pooledResponsePool.Put(r)
+		pooledResponseStorage.Put(r)
 	}
 
 	return nil

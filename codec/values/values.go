@@ -224,7 +224,7 @@ func StructToValues(v any) (url.Values, error) {
 	return Encode(v)
 }
 
-// StructToQueryString serializes structure v into a URL query string.
+// StructToQueryString serializes structure v into a URL query parameter string.
 func StructToQueryString(v any) (string, error) {
 	var sb strings.Builder
 	if err := EncodeQueryString(v, &sb); err != nil {

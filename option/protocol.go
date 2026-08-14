@@ -40,15 +40,20 @@ func WithHTTP3Settings(settings h3.Settings) aoni.ClientOption {
 // WithH2ServerPush configures whether the HTTP/2 client accepts server-pushed resources (RFC 9113 §8.4).
 func WithH2ServerPush(enable bool) aoni.ClientOption {
 	return func(cfg *aoni.Config) {
-		if cfg.Fingerprint.H2Settings == nil {
-			cfg.Fingerprint.H2Settings = &h2.ChromeSettings
+		var s h2.Settings
+		if cfg.Fingerprint.H2Settings != nil {
+			s = *cfg.Fingerprint.H2Settings
+		} else {
+			s = h2.ChromeSettings
 		}
 
 		if enable {
-			cfg.Fingerprint.H2Settings.EnablePush = 1
+			s.EnablePush = 1
 		} else {
-			cfg.Fingerprint.H2Settings.EnablePush = 0
+			s.EnablePush = 0
 		}
+
+		cfg.Fingerprint.H2Settings = &s
 	}
 }
 

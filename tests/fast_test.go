@@ -49,7 +49,9 @@ func TestLatencyProfile_Fast_Vs_StdHTTP(t *testing.T) {
 	)
 
 	// 1. Profile aoni/fast
-	fastClient := fast.NewClient()
+	fastClient := fast.NewClient(option.WithConnectionPool(aoni.ConnectionPoolConfig{
+		MaxConnsPerHost: concurrency,
+	}))
 	fastLatencies := make([]time.Duration, totalReqs)
 
 	var (
@@ -257,7 +259,7 @@ func TestFastRequest_UnifiedModifiers(t *testing.T) {
 
 	fReq := fast.NewRequest(fastReq)
 	for _, m := range modifiers {
-		m(fReq)
+		m.Apply(fReq)
 	}
 
 	assert.Equal(t, "aoni-v1", fReq.Header("X-App-ID"))

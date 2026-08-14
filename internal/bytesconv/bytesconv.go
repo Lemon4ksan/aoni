@@ -11,6 +11,7 @@ import (
 	"unsafe"
 )
 
+// toLowerTable maps all 256 ASCII byte values to their lowercase equivalent in O(1) time.
 var toLowerTable = [256]byte{
 	0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0a, 0x0b, 0x0c, 0x0d, 0x0e, 0x0f,
 	0x10, 0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17, 0x18, 0x19, 0x1a, 0x1b, 0x1c, 0x1d, 0x1e, 0x1f,
@@ -32,8 +33,12 @@ var toLowerTable = [256]byte{
 
 // B2S converts a byte slice to a string without heap allocations using [unsafe.StringData].
 //
-// Preconditions:
-//   - The backing array of b MUST NOT be mutated while the returned string is referenced.
+// Safety Invariant:
+// The returned string references the backing memory of b directly without copying.
+// Callers MUST NOT mutate the underlying byte slice b during the lifetime of the returned string.
+//
+//go:inline
+//go:nosplit
 func B2S(b []byte) string {
 	if len(b) == 0 {
 		return ""
@@ -44,8 +49,12 @@ func B2S(b []byte) string {
 
 // S2B converts a string to a byte slice without heap allocations using [unsafe.StringData].
 //
-// Preconditions:
-//   - The returned byte slice MUST NOT be written to or mutated.
+// Safety Invariant:
+// The returned byte slice references the string's immutable memory directly.
+// Callers MUST NOT write to, mutate, or cast-modify the returned byte slice.
+//
+//go:inline
+//go:nosplit
 func S2B(s string) []byte {
 	if len(s) == 0 {
 		return nil
@@ -55,11 +64,17 @@ func S2B(s string) []byte {
 }
 
 // LowercaseByte converts an ASCII byte character b to lowercase in O(1) time without branching.
+//
+//go:inline
+//go:nosplit
 func LowercaseByte(b byte) byte {
 	return toLowerTable[b]
 }
 
 // EqualFoldASCII performs case-insensitive comparison of ASCII strings with zero allocations and BCE hints.
+//
+//go:inline
+//go:nosplit
 func EqualFoldASCII(a, b string) bool {
 	n := len(a)
 	if n != len(b) {
@@ -109,6 +124,9 @@ func AppendToLower(dst, src []byte) []byte {
 }
 
 // TrimQuotes strips leading and trailing JSON double-quote characters from b with zero allocations and BCE hints.
+//
+//go:inline
+//go:nosplit
 func TrimQuotes(b []byte) []byte {
 	n := len(b)
 	if n >= 2 {
@@ -119,4 +137,177 @@ func TrimQuotes(b []byte) []byte {
 	}
 
 	return b
+}
+
+// ContainsFoldASCII reports whether ASCII substring target is present in src case-insensitively with zero heap allocations.
+//
+//go:inline
+func ContainsFoldASCII(src []byte, target string) bool {
+	n := len(src)
+
+	m := len(target)
+	if m == 0 {
+		return true
+	}
+
+	if n < m {
+		return false
+	}
+
+	_ = toLowerTable[255]
+
+	for i := 0; i <= n-m; i++ {
+		match := true
+		for j := 0; j < m; j++ {
+			if toLowerTable[src[i+j]] != toLowerTable[target[j]] {
+				match = false
+				break
+			}
+		}
+
+		if match {
+			return true
+		}
+	}
+
+	return false
+}
+
+// ParseUintFast parses an ASCII decimal integer from b with zero heap allocations in O(N) time.
+//
+//go:inline
+//go:nosplit
+func ParseUintFast(b []byte) (int64, bool) {
+	n := len(b)
+	if n == 0 {
+		return 0, false
+	}
+
+	var val int64
+	for i := 0; i < n; i++ {
+		ch := b[i]
+		if ch < '0' || ch > '9' {
+			return 0, false
+		}
+
+		val = val*10 + int64(ch-'0')
+	}
+
+	return val, true
+}
+
+// CanonicalHeaderKeyBytes converts header key b to MIME canonical format in-place on a 64-byte stack array without heap allocations.
+//
+//go:inline
+func CanonicalHeaderKeyBytes(src []byte) []byte {
+	n := len(src)
+	if n == 0 {
+		return nil
+	}
+
+	var (
+		buf [64]byte
+		out []byte
+	)
+
+	if n <= 64 {
+		out = buf[:n]
+	} else {
+		out = make([]byte, n)
+	}
+
+	upper := true
+	_ = src[n-1]
+	_ = out[n-1]
+
+	for i := 0; i < n; i++ {
+		c := src[i]
+		if upper && 'a' <= c && c <= 'z' {
+			c -= 'a' - 'A'
+		} else if !upper && 'A' <= c && c <= 'Z' {
+			c += 'a' - 'A'
+		}
+
+		out[i] = c
+		upper = (c == '-')
+	}
+
+	return out
+}
+
+// CanonicalHeaderKey converts header key string s to MIME canonical format in O(1) time for common headers.
+//
+//go:inline
+func CanonicalHeaderKey(s string) string {
+	if len(s) == 0 {
+		return ""
+	}
+
+	switch s {
+	case "Content-Type", "content-type", "CONTENT-TYPE":
+		return "Content-Type"
+	case "Content-Length", "content-length", "CONTENT-LENGTH":
+		return "Content-Length"
+	case "Server", "server", "SERVER":
+		return "Server"
+	case "Date", "date", "DATE":
+		return "Date"
+	case "Set-Cookie", "set-cookie", "SET-COOKIE":
+		return "Set-Cookie"
+	case "Location", "location", "LOCATION":
+		return "Location"
+	case "Connection", "connection", "CONNECTION":
+		return "Connection"
+	case "Cache-Control", "cache-control", "CACHE-CONTROL":
+		return "Cache-Control"
+	case "Accept", "accept", "ACCEPT":
+		return "Accept"
+	case "Accept-Encoding", "accept-encoding", "ACCEPT-ENCODING":
+		return "Accept-Encoding"
+	case "Authorization", "authorization", "AUTHORIZATION":
+		return "Authorization"
+	case "User-Agent", "user-agent", "USER-AGENT":
+		return "User-Agent"
+	case "Transfer-Encoding", "transfer-encoding", "TRANSFER-ENCODING":
+		return "Transfer-Encoding"
+	case "Keep-Alive", "keep-alive", "KEEP-ALIVE":
+		return "Keep-Alive"
+	case "ETag", "etag", "ETAG":
+		return "ETag"
+	case "Host", "host", "HOST":
+		return "Host"
+	}
+
+	b := CanonicalHeaderKeyBytes(S2B(s))
+	if len(b) == 0 {
+		return ""
+	}
+
+	return string(b)
+}
+
+// FastHash64 computes a zero-allocation 64-bit FNV1a-SWAR hash of b in 8-byte chunks.
+//
+//go:inline
+func FastHash64(b []byte) uint64 {
+	n := len(b)
+	if n == 0 {
+		return 14695981039346656037
+	}
+
+	var h uint64 = 14695981039346656037
+
+	i := 0
+
+	for i+8 <= n {
+		word := *(*uint64)(unsafe.Pointer(&b[i]))
+		h = (h ^ word) * 1099511628211
+		i += 8
+	}
+
+	for ; i < n; i++ {
+		h = (h ^ uint64(b[i])) * 1099511628211
+	}
+
+	return h
 }

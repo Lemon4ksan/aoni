@@ -21,6 +21,7 @@ import (
 	"golang.org/x/sys/cpu"
 
 	"github.com/lemon4ksan/aoni"
+	"github.com/lemon4ksan/aoni/internal/clock"
 	"github.com/lemon4ksan/aoni/internal/fast/h2engine"
 	"github.com/lemon4ksan/aoni/internal/fast/h3engine"
 	"github.com/lemon4ksan/aoni/internal/pipeline"
@@ -77,7 +78,7 @@ func (c *altSvcCache) MarkH3Failed(host string) {
 	entry.consecutiveFails++
 
 	backoff := calculateH3Backoff(entry.consecutiveFails)
-	entry.cooldownUntil = time.Now().Add(backoff)
+	entry.cooldownUntil = clock.CoarseTime().Add(backoff)
 
 	c.broken[host] = entry
 }
@@ -103,12 +104,13 @@ func (c *altSvcCache) IsH3Supported(host string) bool {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 
-	if entry, ok := c.broken[host]; ok && time.Now().Before(entry.cooldownUntil) {
+	now := clock.CoarseTime()
+	if entry, ok := c.broken[host]; ok && now.Before(entry.cooldownUntil) {
 		return false
 	}
 
 	exp, ok := c.hosts[host]
-	if !ok || time.Now().After(exp) {
+	if !ok || now.After(exp) {
 		return false
 	}
 
@@ -147,7 +149,7 @@ func (c *altSvcCache) Record(host, headerVal string) {
 	maxAge := parseMaxAge(headerVal)
 
 	c.mu.Lock()
-	c.hosts[host] = time.Now().Add(maxAge)
+	c.hosts[host] = clock.CoarseTime().Add(maxAge)
 	c.mu.Unlock()
 }
 
@@ -174,9 +176,7 @@ func resolveALPNMode(ctx context.Context, cfg *aoni.Config, fastReq *fasthttp.Re
 			dummyReq.SetContext(ctx)
 
 			for _, m := range reqCfg.Modifiers {
-				if m != nil {
-					m(dummyReq)
-				}
+				m.Apply(dummyReq)
 			}
 		}
 

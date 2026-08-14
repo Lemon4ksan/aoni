@@ -6,7 +6,6 @@ package fluent
 
 import (
 	"context"
-	"fmt"
 	stdio "io"
 	"maps"
 	"net/http"
@@ -14,6 +13,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -28,57 +28,62 @@ import (
 	"github.com/lemon4ksan/aoni/middleware"
 	"github.com/lemon4ksan/aoni/mod"
 	"github.com/lemon4ksan/aoni/netutil"
+	"github.com/lemon4ksan/aoni/netutil/digest"
+	"github.com/lemon4ksan/aoni/option"
 	"github.com/lemon4ksan/aoni/request"
 	"github.com/lemon4ksan/aoni/telemetry"
 )
 
-// TypedRequestPool provides a zero-boxing free-list pool for [Request] instances.
+// TypedRequestPool provides a zero-boxing pool for [Request] instances backed by [sync.Pool].
 type TypedRequestPool struct {
-	mu    sync.Mutex
-	items []*Request
+	pool sync.Pool
+}
+
+func newTypedRequestPool() *TypedRequestPool {
+	return &TypedRequestPool{
+		pool: sync.Pool{
+			New: func() any {
+				return &Request{}
+			},
+		},
+	}
 }
 
 // Get retrieves a pooled [Request] instance bound to any engine or client.
 func (p *TypedRequestPool) Get(doer any) *Request {
 	reqClient := request.AsRequester(doer)
 
-	p.mu.Lock()
-
-	n := len(p.items)
-	if n > 0 {
-		r := p.items[n-1]
-		p.items = p.items[:n-1]
-		p.mu.Unlock()
-
-		r.client = reqClient
-
-		return r
+	r, ok := p.pool.Get().(*Request)
+	if !ok {
+		r = &Request{}
 	}
 
-	p.mu.Unlock()
+	r.client = reqClient
 
-	return &Request{
-		client: reqClient,
-	}
+	return r
 }
 
 // Put recycles a [Request] instance back to the free-list pool after resetting fields.
 func (p *TypedRequestPool) Put(r *Request) {
-	r.Reset()
-
-	p.mu.Lock()
-	if len(p.items) < 256 {
-		p.items = append(p.items, r)
+	if r == nil {
+		return
 	}
 
-	p.mu.Unlock()
+	r.Reset()
+	p.pool.Put(r)
 }
 
-var requestPool = &TypedRequestPool{
-	items: make([]*Request, 0, 128),
+var requestPool = newTypedRequestPool()
+
+func acquireRequest(doer any) *Request {
+	return requestPool.Get(doer)
 }
 
 // Request is a pooled request builder offering a chainable, fluent configuration API.
+//
+// Thread Safety:
+// Request instances are NOT safe for concurrent use across multiple goroutines.
+// They are intended for single-goroutine linear construction and execution before being returned to the pool.
 type Request struct {
 	ctx              context.Context
 	body             any
@@ -115,11 +120,13 @@ type Request struct {
 	useGRPCWebDecoder bool
 }
 
+// basicAuth stores HTTP Basic Authentication credentials.
 type basicAuth struct {
 	username string
 	password string
 }
 
+// digestAuth stores RFC 7616 Digest Access Authentication credentials.
 type digestAuth struct {
 	username string
 	password string
@@ -294,11 +301,11 @@ func (r *Request) WithCodec(c codec.Codec, body any) *Request {
 		return r
 	}
 
-	if encMod := c.Encode(body); encMod != nil {
+	if encMod := c.Encode(body); encMod.Kind != aoni.ModNone {
 		r.appliedMods = append(r.appliedMods, encMod)
 	}
 
-	if decMod := c.Decode(); decMod != nil {
+	if decMod := c.Decode(); decMod.Kind != aoni.ModNone {
 		r.appliedMods = append(r.appliedMods, decMod)
 	}
 
@@ -490,7 +497,17 @@ func (r *Request) Execute(method, path string) (*http.Response, error) {
 		ctx = context.Background()
 	}
 
-	mods := r.buildModifiers()
+	if r.digestAuth != nil {
+		dt := &digest.Transport{
+			Username: r.digestAuth.username,
+			Password: r.digestAuth.password,
+		}
+		client = request.Configure(client, option.WithEngine(&http.Client{Transport: dt}))
+	}
+
+	var stackBuf [stackModCapacity]aoni.RequestModifier
+
+	mods := r.buildModifiers(&stackBuf)
 
 	if outputFile != "" || r.outputDirectory != "" {
 		return r.executeDownload(ctx, client, method, finalPath, mods, outputFile)
@@ -525,6 +542,7 @@ func (r *Request) Execute(method, path string) (*http.Response, error) {
 	return resp, nil
 }
 
+// checkExpectedStatus verifies that the response status code matches expectations configured via [Request.ExpectStatus].
 func (r *Request) checkExpectedStatus(resp *http.Response, finalPath string) error {
 	if len(r.expectedStatuses) == 0 || resp == nil {
 		return nil
@@ -542,10 +560,35 @@ func (r *Request) checkExpectedStatus(resp *http.Response, finalPath string) err
 	}
 }
 
-func (r *Request) buildModifiers() []aoni.RequestModifier {
-	estimatedCap := len(r.headers) + len(r.appliedMods) + 12
-	mods := make([]aoni.RequestModifier, 0, estimatedCap)
+const stackModCapacity = 16
 
+// buildModifiers constructs value modifiers for headers, auth, body serialization, decoding, and telemetry.
+func (r *Request) buildModifiers(stackBuf *[stackModCapacity]aoni.RequestModifier) []aoni.RequestModifier {
+	estimatedCap := len(r.headers) + len(r.appliedMods) + 12
+
+	var mods []aoni.RequestModifier
+	if estimatedCap <= stackModCapacity {
+		mods = stackBuf[:0]
+	} else {
+		mods = make([]aoni.RequestModifier, 0, estimatedCap)
+	}
+
+	mods = r.appendHeaderAndAuthModifiers(mods)
+	mods = r.appendQueryAndBodyModifiers(mods)
+	mods = r.appendTelemetryAndMiscModifiers(mods)
+
+	if len(r.appliedMods) > 0 {
+		mods = append(mods, r.appliedMods...)
+	}
+
+	if r.timeout > 0 {
+		mods = append(mods, mod.WithTimeout(r.timeout))
+	}
+
+	return mods
+}
+
+func (r *Request) appendHeaderAndAuthModifiers(mods []aoni.RequestModifier) []aoni.RequestModifier {
 	if len(r.headers) > 0 {
 		for k, v := range r.headers {
 			for _, val := range v {
@@ -562,6 +605,10 @@ func (r *Request) buildModifiers() []aoni.RequestModifier {
 		mods = append(mods, mod.WithBasicAuth(r.basicAuth.username, r.basicAuth.password))
 	}
 
+	return mods
+}
+
+func (r *Request) appendQueryAndBodyModifiers(mods []aoni.RequestModifier) []aoni.RequestModifier {
 	if len(r.queryParams) > 0 {
 		mods = append(mods, mod.WithQuery(r.queryParams))
 	}
@@ -591,6 +638,10 @@ func (r *Request) buildModifiers() []aoni.RequestModifier {
 		mods = append(mods, decode.WithGRPCWeb())
 	}
 
+	return mods
+}
+
+func (r *Request) appendTelemetryAndMiscModifiers(mods []aoni.RequestModifier) []aoni.RequestModifier {
 	if r.resultError != nil {
 		mods = append(mods, mod.WithErrorModel(r.resultError))
 	}
@@ -619,17 +670,10 @@ func (r *Request) buildModifiers() []aoni.RequestModifier {
 		mods = append(mods, mod.WithLabel(r.label))
 	}
 
-	if len(r.appliedMods) > 0 {
-		mods = append(mods, r.appliedMods...)
-	}
-
-	if r.timeout > 0 {
-		mods = append(mods, mod.WithTimeout(r.timeout))
-	}
-
 	return mods
 }
 
+// executeDownload manages multi-part resumable file downloads with exponential backoff retries.
 func (r *Request) executeDownload(
 	ctx context.Context,
 	client request.Requester,
@@ -654,7 +698,7 @@ func (r *Request) executeDownload(
 		existingSize := getFileSize(outputFile, r.outputDirectory, respHeaderFilename(lastResp))
 
 		if existingSize > 0 {
-			attemptMods = append(attemptMods, mod.WithHeader("Range", fmt.Sprintf("bytes=%d-", existingSize)))
+			attemptMods = append(attemptMods, mod.WithHeader("Range", "bytes="+strconv.FormatInt(existingSize, 10)+"-"))
 		}
 
 		resp, err := client.Request(ctx, method, path, attemptMods...)
@@ -702,6 +746,7 @@ func (r *Request) executeDownload(
 	return lastResp, lastErr
 }
 
+// writeDownloadedStream writes HTTP response payload into outputFile on disk.
 func writeDownloadedStream(outputFile string, resp *http.Response, previousSize int64) error {
 	defer resp.Body.Close()
 
@@ -727,6 +772,7 @@ func writeDownloadedStream(outputFile string, resp *http.Response, previousSize 
 	return err
 }
 
+// getFileSize returns the byte size of existing local file for Range requests.
 func getFileSize(outputFile, outputDirectory, headerFilename string) int64 {
 	targetPath := resolveOutputPath(outputFile, outputDirectory, headerFilename)
 	if targetPath == "" {
@@ -741,6 +787,7 @@ func getFileSize(outputFile, outputDirectory, headerFilename string) int64 {
 	return info.Size()
 }
 
+// resolveOutputPath resolves destination local path from explicit path, output directory, or Content-Disposition.
 func resolveOutputPath(outputFile, outputDirectory, contentDisposition string) string {
 	if outputFile != "" {
 		return outputFile
@@ -754,6 +801,7 @@ func resolveOutputPath(outputFile, outputDirectory, contentDisposition string) s
 	return ""
 }
 
+// respHeaderFilename extracts the Content-Disposition header string from resp.
 func respHeaderFilename(resp *http.Response) string {
 	if resp == nil {
 		return ""
@@ -812,6 +860,7 @@ func (r *Request) Do(method, path string) (*http.Response, error) {
 	return r.Execute(method, path)
 }
 
+// interpolatePathParams replaces {param} placeholders in rawPath with URL-escaped values from params.
 func interpolatePathParams(rawPath string, params map[string]string) string {
 	if len(params) == 0 || strings.IndexByte(rawPath, '{') == -1 {
 		return rawPath

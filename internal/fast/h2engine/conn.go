@@ -24,6 +24,8 @@ import (
 	"golang.org/x/sys/cpu"
 
 	"github.com/lemon4ksan/aoni/internal/bytesconv"
+	"github.com/lemon4ksan/aoni/internal/ringbuf"
+	"github.com/lemon4ksan/aoni/internal/sysnet"
 	"github.com/lemon4ksan/aoni/telemetry"
 )
 
@@ -76,16 +78,20 @@ type Conn struct {
 
 	_ cpu.CacheLinePad
 
-	current   Settings
-	serverS   Settings
-	reqQueued sync.Map
+	current     Settings
+	serverS     Settings
+	reqStreams  [1024]atomic.Pointer[Context]
+	reqMu       sync.RWMutex
+	reqOverflow map[uint32]*Context
 
 	in           chan *Context
 	out          chan *FrameHeader
+	outRing      *ringbuf.SPSCRingBuffer[FrameHeader]
 	pingInterval time.Duration
 	closed       uint64
 	inClosed     bool
-	disableAcks  bool
+
+	disableAcks bool
 }
 
 // NewConn instantiates a new Conn wrapping socket c.
@@ -101,6 +107,7 @@ func NewConn(c net.Conn, opts ConnOpts) *Conn {
 		currentWindow: 15663105,
 		in:            make(chan *Context, 128),
 		out:           make(chan *FrameHeader, 128),
+		outRing:       ringbuf.NewSPSCRingBuffer[FrameHeader](512),
 		pingInterval:  opts.PingInterval,
 		disableAcks:   opts.DisablePingChecking,
 		onDisconnect:  opts.OnDisconnect,
@@ -130,6 +137,100 @@ func (c *Conn) SetOrderedHeaders(keys []string) {
 	c.orderedKeys = keys
 }
 
+func (c *Conn) getStream(streamID uint32) *Context {
+	idx := (streamID / 2) % 1024
+	if ctx := c.reqStreams[idx].Load(); ctx != nil && ctx.StreamID == streamID {
+		return ctx
+	}
+
+	c.reqMu.RLock()
+	ctx := c.reqOverflow[streamID]
+	c.reqMu.RUnlock()
+
+	return ctx
+}
+
+func (c *Conn) storeStream(ctx *Context) {
+	idx := (ctx.StreamID / 2) % 1024
+	if c.reqStreams[idx].CompareAndSwap(nil, ctx) {
+		return
+	}
+
+	c.reqMu.Lock()
+	if c.reqOverflow == nil {
+		c.reqOverflow = make(map[uint32]*Context, 16)
+	}
+
+	c.reqOverflow[ctx.StreamID] = ctx
+	c.reqMu.Unlock()
+}
+
+func (c *Conn) deleteStream(streamID uint32) {
+	idx := (streamID / 2) % 1024
+	if cur := c.reqStreams[idx].Load(); cur != nil && cur.StreamID == streamID {
+		c.reqStreams[idx].Store(nil)
+		return
+	}
+
+	c.reqMu.Lock()
+	if c.reqOverflow != nil {
+		delete(c.reqOverflow, streamID)
+	}
+
+	c.reqMu.Unlock()
+}
+
+func (c *Conn) broadcastErrorToAllStreams(err error) {
+	for i := 0; i < 1024; i++ {
+		if ctx := c.reqStreams[i].Load(); ctx != nil {
+			select {
+			case ctx.Err <- err:
+			default:
+			}
+		}
+	}
+
+	c.reqMu.RLock()
+
+	for _, ctx := range c.reqOverflow {
+		if ctx != nil {
+			select {
+			case ctx.Err <- err:
+			default:
+			}
+		}
+	}
+
+	c.reqMu.RUnlock()
+}
+
+func (c *Conn) purgeStreamsAfterID(lastStreamID uint32, err error) {
+	for i := 0; i < 1024; i++ {
+		if ctx := c.reqStreams[i].Load(); ctx != nil && ctx.StreamID > lastStreamID {
+			c.reqStreams[i].Store(nil)
+
+			select {
+			case ctx.Err <- err:
+			default:
+			}
+		}
+	}
+
+	c.reqMu.Lock()
+	for streamID, ctx := range c.reqOverflow {
+		if ctx != nil && streamID > lastStreamID {
+			delete(c.reqOverflow, streamID)
+
+			select {
+			case ctx.Err <- err:
+			default:
+			}
+		}
+	}
+
+	c.reqMu.Unlock()
+}
+
 // CancelStream terminates an active HTTP/2 stream by transmitting an RST_STREAM frame.
 func (c *Conn) CancelStream(ctx *Context) {
 	if ctx == nil || ctx.StreamID == 0 {
@@ -141,7 +242,7 @@ func (c *Conn) CancelStream(ctx *Context) {
 	}
 
 	ctx.SetState(streamClosed)
-	c.reqQueued.Delete(ctx.StreamID)
+	c.deleteStream(ctx.StreamID)
 	atomic.AddInt32(&c.openStreams, -1)
 
 	fr := AcquireFrameHeader()
@@ -151,13 +252,54 @@ func (c *Conn) CancelStream(ctx *Context) {
 	rst.SetCode(StreamCanceled)
 	fr.SetBody(rst)
 
-	select {
-	case c.out <- fr:
-	default:
-		ReleaseFrameHeader(fr)
+	if !c.outRing.Push(fr) {
+		select {
+		case c.out <- fr:
+		default:
+		}
+	}
+}
+
+// Close gracefully terminates the HTTP/2 connection.
+func (c *Conn) Close() error {
+	if !atomic.CompareAndSwapUint64(&c.closed, 0, 1) {
+		return io.EOF
 	}
 
+	c.inMu.Lock()
+	if !c.inClosed {
+		c.inClosed = true
+		close(c.in)
+	}
+
+	c.inMu.Unlock()
+
+	fr := AcquireFrameHeader()
+	defer ReleaseFrameHeader(fr)
+
+	ga := AcquireFrame(FrameGoAway).(*GoAway)
+	ga.SetStream(0)
+	ga.SetCode(NoError)
+	fr.SetBody(ga)
+
+	c.writeMu.Lock()
+
+	_, err := fr.WriteTo(c.bw)
+	if err == nil {
+		_ = c.bw.Flush()
+	}
+
+	c.writeMu.Unlock()
+
+	_ = c.c.Close()
 	c.broadcastWindowUpdate()
+	c.broadcastErrorToAllStreams(ErrStreamClosed)
+
+	if c.onDisconnect != nil {
+		c.onDisconnect(context.Background(), c)
+	}
+
+	return nil
 }
 
 // Handshake performs HTTP/2 connection initialization.
@@ -234,58 +376,6 @@ func (c *Conn) Closed() bool {
 	return atomic.LoadUint64(&c.closed) == 1
 }
 
-// Close gracefully terminates the HTTP/2 connection.
-func (c *Conn) Close() error {
-	if !atomic.CompareAndSwapUint64(&c.closed, 0, 1) {
-		return io.EOF
-	}
-
-	c.inMu.Lock()
-	if !c.inClosed {
-		c.inClosed = true
-		close(c.in)
-	}
-
-	c.inMu.Unlock()
-
-	fr := AcquireFrameHeader()
-	defer ReleaseFrameHeader(fr)
-
-	ga := AcquireFrame(FrameGoAway).(*GoAway)
-	ga.SetStream(0)
-	ga.SetCode(NoError)
-	fr.SetBody(ga)
-
-	c.writeMu.Lock()
-
-	_, err := fr.WriteTo(c.bw)
-	if err == nil {
-		err = c.bw.Flush()
-	}
-
-	c.writeMu.Unlock()
-
-	_ = c.c.Close()
-	c.broadcastWindowUpdate()
-
-	c.reqQueued.Range(func(key, value any) bool {
-		if reqCtx, ok := value.(*Context); ok {
-			select {
-			case reqCtx.Err <- ErrStreamClosed:
-			default:
-			}
-		}
-
-		return true
-	})
-
-	if c.onDisconnect != nil {
-		c.onDisconnect(context.Background(), c)
-	}
-
-	return err
-}
-
 // Write enqueues a request context for execution.
 func (c *Conn) Write(r *Context) error {
 	c.inMu.Lock()
@@ -330,6 +420,63 @@ func (c *Conn) writeLoop() {
 }
 
 func (c *Conn) selectWriteEvent(pingChan <-chan time.Time) (bool, error) {
+	if fr := c.outRing.Pop(); fr != nil {
+		c.writeMu.Lock()
+
+		var batch [16]*FrameHeader
+
+		batch[0] = fr
+		n := 1
+
+		for n < 16 {
+			next := c.outRing.Pop()
+			if next == nil {
+				break
+			}
+
+			batch[n] = next
+			n++
+		}
+
+		var wErr error
+
+		if n == 1 {
+			_, wErr = fr.WriteTo(c.bw)
+			if wErr == nil {
+				wErr = c.bw.Flush()
+			}
+
+			ReleaseFrameHeader(fr)
+		} else {
+			var bufs [][]byte
+
+			for i := 0; i < n; i++ {
+				_, _ = batch[i].WriteTo(c.bw)
+				ReleaseFrameHeader(batch[i])
+			}
+
+			if c.bw.Buffered() > 0 {
+				writtenBuf := c.bw.AvailableBuffer()
+				if len(writtenBuf) > 0 {
+					bufs = [][]byte{writtenBuf}
+					_, wErr = sysnet.WriteVectorBuffers(c.c, bufs)
+				}
+
+				if wErr == nil {
+					wErr = c.bw.Flush()
+				}
+			}
+		}
+
+		c.writeMu.Unlock()
+
+		if wErr != nil {
+			return true, wErr
+		}
+
+		return false, nil
+	}
+
 	select {
 	case ctx, ok := <-c.in:
 		if !ok {
@@ -388,21 +535,18 @@ func (c *Conn) recoverWriteLoop(lastErr *error) {
 		*lastErr = io.ErrUnexpectedEOF
 	}
 
-	c.reqQueued.Range(func(_, v any) bool {
-		if ctx, ok := v.(*Context); ok {
-			ctx.Err <- *lastErr
-		}
-
-		return true
-	})
+	c.broadcastErrorToAllStreams(*lastErr)
 }
 
 func (c *Conn) finish(r *Context, stream uint32, err error) {
 	atomic.AddInt32(&c.openStreams, -1)
 
-	r.Err <- err
+	select {
+	case r.Err <- err:
+	default:
+	}
 
-	c.reqQueued.Delete(stream)
+	c.deleteStream(stream)
 	close(r.Err)
 }
 
@@ -416,8 +560,9 @@ func (c *Conn) readLoop() {
 			break
 		}
 
-		if ri, ok := c.reqQueued.Load(fr.Stream()); ok {
-			r := ri.(*Context)
+		r := c.getStream(fr.Stream())
+
+		if r != nil {
 			if r.State() == streamClosed {
 				ReleaseFrameHeader(fr)
 				continue
@@ -499,12 +644,12 @@ func (c *Conn) writeRequest(ctx *Context) error {
 		ctx.SetState(streamHalfClosed)
 	}
 
-	c.reqQueued.Store(id, ctx)
+	c.storeStream(ctx)
 
 	c.writeMu.Lock()
 
 	_, err := fr.WriteTo(c.bw)
-	if err == nil {
+	if err == nil && !hasBody {
 		err = c.bw.Flush()
 	}
 
@@ -512,15 +657,13 @@ func (c *Conn) writeRequest(ctx *Context) error {
 
 	if err != nil {
 		c.lastErr = err
-		c.reqQueued.Delete(id)
+		c.deleteStream(id)
 		ctx.SetState(streamClosed)
 
 		return err
 	}
 
 	if hasBody {
-		ReleaseFrame(h)
-
 		if isExpectContinue(req) {
 			c.waitExpectContinue(ctx)
 		}
@@ -534,7 +677,7 @@ func (c *Conn) writeRequest(ctx *Context) error {
 		atomic.AddInt32(&c.openStreams, 1)
 	} else {
 		c.lastErr = err
-		c.reqQueued.Delete(id)
+		c.deleteStream(id)
 		ctx.SetState(streamClosed)
 	}
 
@@ -673,6 +816,8 @@ func isForbiddenH2HeaderStr(key string) bool {
 		bytesconv.EqualFoldASCII(key, "host")
 }
 
+var defaultPseudoOrder = [4]string{":method", ":authority", ":scheme", ":path"}
+
 func (c *Conn) encodeRequestHeaders(h *Headers, req *fasthttp.Request) {
 	hf := AcquireHeaderField()
 	defer ReleaseHeaderField(hf)
@@ -705,7 +850,7 @@ func (c *Conn) encodeRequestHeaders(h *Headers, req *fasthttp.Request) {
 		path = []byte("/")
 	}
 
-	pseudoOrder := []string{":method", ":authority", ":scheme", ":path"}
+	pseudoOrder := defaultPseudoOrder[:]
 	if len(c.orderedKeys) > 0 {
 		var customPseudo []string
 		for _, k := range c.orderedKeys {
@@ -934,13 +1079,8 @@ func (c *Conn) recordRTT(rtt time.Duration) {
 	c.windowMu.Lock()
 	defer c.windowMu.Unlock()
 
-	if c.c != nil && c.onDisconnect != nil {
-		// Signal RTT callback registered during connection setup
-		if rttCallback, ok := c.reqQueued.Load("rtt_callback"); ok {
-			if cb, isFn := rttCallback.(func(time.Duration)); isFn {
-				cb(rtt)
-			}
-		}
+	if c.c != nil && c.onDisconnect != nil && c.onRTT != nil {
+		c.onRTT(rtt)
 	}
 }
 
@@ -980,13 +1120,9 @@ func (c *Conn) updateServerWindow(inc int32) error {
 }
 
 func (c *Conn) updateStreamWindow(streamID uint32, inc int32) error {
-	v, ok := c.reqQueued.Load(streamID)
-	if !ok {
-		return nil
-	}
+	reqCtx := c.getStream(streamID)
 
-	reqCtx, ok := v.(*Context)
-	if !ok {
+	if reqCtx == nil {
 		return nil
 	}
 
@@ -1002,29 +1138,7 @@ func (c *Conn) updateStreamWindow(streamID uint32, inc int32) error {
 
 func (c *Conn) handleGoAway(ga *GoAway) {
 	lastStreamID := ga.Stream()
-
-	c.reqQueued.Range(func(key, value any) bool {
-		streamID, ok := key.(uint32)
-		if !ok {
-			return true
-		}
-
-		reqCtx, ok := value.(*Context)
-		if !ok {
-			return true
-		}
-
-		if streamID > lastStreamID {
-			c.reqQueued.Delete(streamID)
-
-			select {
-			case reqCtx.Err <- ErrGoAwayRetryable:
-			default:
-			}
-		}
-
-		return true
-	})
+	c.purgeStreamsAfterID(lastStreamID, ErrGoAwayRetryable)
 
 	_ = c.Close()
 }
@@ -1170,7 +1284,7 @@ func (c *Conn) handlePushPromise(pp *PushPromise) error {
 	}
 
 	ctx.SetState(streamOpen)
-	c.reqQueued.Store(promisedID, ctx)
+	c.storeStream(ctx)
 
 	go c.awaitPushedResponse(ctx, pushReq, pushResp)
 

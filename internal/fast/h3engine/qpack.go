@@ -66,12 +66,25 @@ func (q *QPACKCodec) EncodeRequestHeaders(w io.Writer, req *fasthttp.Request, or
 	if len(orderedKeys) > 0 {
 		q.encodeOrderedHeaders(enc, req, orderedKeys)
 	} else {
+		var stackKeyBuf [128]byte
 		req.Header.All()(func(k, v []byte) bool {
 			if isForbiddenH3Header(k, v) {
 				return true
 			}
 
-			_ = enc.WriteField(qpack.HeaderField{Name: toLowerCopy(k), Value: bytesconv.B2S(v)})
+			var keyStr string
+			if len(k) <= len(stackKeyBuf) {
+				keyBuf := stackKeyBuf[:len(k)]
+				for i := range k {
+					keyBuf[i] = bytesconv.LowercaseByte(k[i])
+				}
+
+				keyStr = bytesconv.B2S(keyBuf)
+			} else {
+				keyStr = bytesconv.B2S(bytesconv.AppendToLower(nil, k))
+			}
+
+			_ = enc.WriteField(qpack.HeaderField{Name: keyStr, Value: bytesconv.B2S(v)})
 
 			return true
 		})
@@ -160,8 +173,24 @@ func (q *QPACKCodec) encodeOrderedHeaders(enc *qpack.Encoder, req *fasthttp.Requ
 			}
 		}
 
+		var (
+			stackKeyBuf [128]byte
+			keyStr      string
+		)
+
+		if len(k) <= len(stackKeyBuf) {
+			keyBuf := stackKeyBuf[:len(k)]
+			for i := range k {
+				keyBuf[i] = bytesconv.LowercaseByte(k[i])
+			}
+
+			keyStr = bytesconv.B2S(keyBuf)
+		} else {
+			keyStr = bytesconv.B2S(bytesconv.AppendToLower(nil, k))
+		}
+
 		_ = enc.WriteField(qpack.HeaderField{
-			Name:  bytesconv.B2S(bytesconv.AppendToLower(nil, k)),
+			Name:  keyStr,
 			Value: bytesconv.B2S(v),
 		})
 
@@ -250,17 +279,4 @@ func (q *QPACKCodec) DecodeResponseTrailers(headerBlock []byte) (map[string][]st
 	}
 
 	return trailers, nil
-}
-
-func toLowerCopy(b []byte) string {
-	out := make([]byte, len(b))
-	for i := range b {
-		if b[i] >= 'A' && b[i] <= 'Z' {
-			out[i] = b[i] + 32
-		} else {
-			out[i] = b[i]
-		}
-	}
-
-	return string(out)
 }

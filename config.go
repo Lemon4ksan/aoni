@@ -51,9 +51,10 @@ const (
 )
 
 // ConnFilter defines a stream transformation codec evaluated during socket dialing.
+// See [transport.ConnFilter].
 type ConnFilter = transport.ConnFilter
 
-// DialConfig is an alias for transport.DialConfig.
+// DialConfig is an alias for [transport.DialConfig].
 type DialConfig = transport.DialConfig
 
 // DefaultSensitiveHeaders defines sensitive credential and session headers
@@ -306,6 +307,9 @@ type NetworkConfig struct {
 
 	// SSRFGuard blocks requests targeting private, loopback, link-local, or CGNAT IP ranges.
 	SSRFGuard bool
+
+	// TCPQuickACK enables TCP quick ACK socket option.
+	TCPQuickACK bool
 
 	// EnablePowerManagement monitors OS sleep/resume transitions and purges zombie connections.
 	EnablePowerManagement bool
@@ -777,6 +781,7 @@ func GetPipeline(ctx context.Context) (PipelineConfig, bool) {
 }
 
 // ApplyRequestConfigDefaults merges client-level defaults into uninitialized fields of [RequestConfig].
+// It is not safe for concurrent mutation on the same RequestConfig instance.
 func ApplyRequestConfigDefaults(cfg *RequestConfig, c *Client) {
 	if !cfg.SSRFGuard {
 		cfg.SSRFGuard = c.network.SSRFGuard
@@ -847,20 +852,34 @@ func ApplyRequestConfigDefaults(cfg *RequestConfig, c *Client) {
 	}
 }
 
+// mergeCertificatePins merges client-level SHA-256 certificate pins into a per-request config.
 func (c *Client) mergeCertificatePins(cfg *RequestConfig) {
 	for domain, hashes := range c.fingerprint.CertificatePins {
-		for _, h := range hashes {
-			if cfg.CertificatePins == nil {
-				cfg.CertificatePins = make(map[string][]string)
-			}
+		if len(hashes) == 0 {
+			continue
+		}
 
-			if !slices.Contains(cfg.CertificatePins[domain], h) {
-				cfg.CertificatePins[domain] = append(cfg.CertificatePins[domain], h)
+		if cfg.CertificatePins == nil {
+			cfg.CertificatePins = make(map[string][]string, len(c.fingerprint.CertificatePins))
+		}
+
+		existing := cfg.CertificatePins[domain]
+		if len(existing) == 0 {
+			cfg.CertificatePins[domain] = slices.Clone(hashes)
+			continue
+		}
+
+		for _, h := range hashes {
+			if !slices.Contains(existing, h) {
+				existing = append(existing, h)
 			}
 		}
+
+		cfg.CertificatePins[domain] = existing
 	}
 }
 
+// resolvePipeline computes the active PipelineConfig for an outgoing HTTP request context.
 func (c *Client) resolvePipeline(req *http.Request) PipelineConfig {
 	if reqPipe, ok := GetPipeline(req.Context()); ok {
 		return reqPipe
@@ -889,6 +908,7 @@ func (c *Client) resolvePipeline(req *http.Request) PipelineConfig {
 	return pipe
 }
 
+// toPipelineDefaults maps ClientDefaults into internal pipeline.ClientDefaults DTOs.
 func (c *Client) toPipelineDefaults() pipeline.ClientDefaults {
 	return pipeline.ClientDefaults{
 		Headers:              c.defaults.Headers,
@@ -907,6 +927,7 @@ func (c *Client) toPipelineDefaults() pipeline.ClientDefaults {
 	}
 }
 
+// toInternalProfiles translates public BrowserProfile slices to internal pipeline DTOs.
 func (d ClientDefaults) toInternalProfiles() []pipeline.BrowserProfile {
 	if len(d.UARotationProfiles) == 0 {
 		return nil
@@ -923,6 +944,12 @@ func (d ClientDefaults) toInternalProfiles() []pipeline.BrowserProfile {
 	return res
 }
 
+// ToInternal translates PipelineConfig into internal [pipeline.PipelineConfig] DTOs.
+func (p PipelineConfig) ToInternal() pipeline.PipelineConfig {
+	return p.toInternal()
+}
+
+// toInternal translates PipelineConfig into internal pipeline.PipelineConfig DTOs.
 func (p PipelineConfig) toInternal() pipeline.PipelineConfig {
 	res := pipeline.PipelineConfig{
 		SizeLimit:          p.SizeLimit,
@@ -993,6 +1020,7 @@ func (p PipelineConfig) toInternal() pipeline.PipelineConfig {
 	return res
 }
 
+// pipelineToAoniConfig translates an internal pipeline.PipelineConfig DTO back into a public PipelineConfig structure.
 func pipelineToAoniConfig(p pipeline.PipelineConfig) PipelineConfig {
 	res := PipelineConfig{
 		SizeLimit:          p.SizeLimit,
@@ -1062,7 +1090,8 @@ func pipelineToAoniConfig(p pipeline.PipelineConfig) PipelineConfig {
 }
 
 // AllowedDomainsRedirectPolicy constructs an [http.Client.CheckRedirect] policy function
-// restricting HTTP redirects strictly to allowed domain patterns.
+// restricting HTTP redirects strictly to allowed domain patterns (e.g., "*.example.com").
+// The returned policy function is stateless and safe for concurrent use.
 func AllowedDomainsRedirectPolicy(allowedDomains ...string) func(req *http.Request, via []*http.Request) error {
 	return func(req *http.Request, via []*http.Request) error {
 		if len(via) >= 10 {
@@ -1087,6 +1116,8 @@ func AllowedDomainsRedirectPolicy(allowedDomains ...string) func(req *http.Reque
 // DefaultRedirectPolicy constructs an [http.Client.CheckRedirect] policy function enforcing
 // redirect chain length limits and scrubbing sensitive authentication headers during cross-origin
 // or HTTPS-to-HTTP downgrade redirects (RFC 9110 §15.4 / RFC 7231 §6.4).
+// If maxRedirects is negative, defaults to 10 redirects.
+// The returned policy function is stateless and safe for concurrent use.
 func DefaultRedirectPolicy(
 	maxRedirects int,
 	sensitiveHeaders ...string,
@@ -1115,6 +1146,7 @@ func DefaultRedirectPolicy(
 	}
 }
 
+// applyRedirectPolicy applies redirect policies to standard http.Client instances.
 func applyRedirectPolicy(httpClient *http.Client, eng EngineConfig) {
 	if eng.CheckRedirect != nil {
 		httpClient.CheckRedirect = eng.CheckRedirect
@@ -1138,15 +1170,18 @@ func applyRedirectPolicy(httpClient *http.Client, eng EngineConfig) {
 	}
 }
 
+// applyMSSLimit applies maximum segment size boundaries to TCP socket streams.
 func applyMSSLimit(conn net.Conn, mss int) net.Conn {
 	return pipeline.ApplyMSSLimit(conn, mss)
 }
 
+// applyFragmentation applies TCP write payload fragmentation to socket streams.
 func applyFragmentation(conn net.Conn, cfg fragment.Config) net.Conn {
 	return pipeline.ApplyFragmentation(conn, cfg)
 }
 
 // BuildDialConfig converts the [Config] into a self-contained [transport.DialConfig] DTO for socket dialing.
+// Read-only and safe for concurrent use.
 func (c *Config) BuildDialConfig(ctx context.Context) transport.DialConfig {
 	if c == nil {
 		return transport.DialConfig{}
@@ -1175,5 +1210,7 @@ func (c *Config) BuildDialConfig(ctx context.Context) transport.DialConfig {
 		Enable0RTT:         c.Fingerprint.Enable0RTT,
 		ECHConfigList:      c.Fingerprint.ECHConfigList,
 		ConnFilters:        c.Network.ConnFilters,
+		TCPQuickACK:        c.Network.TCPQuickACK,
+		RegisteredIO:       c.Network.HasExperimental(ExpRIO),
 	}
 }

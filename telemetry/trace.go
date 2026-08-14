@@ -5,34 +5,35 @@
 package telemetry
 
 import (
-	"bytes"
 	"context"
 	"crypto/sha256"
 	"crypto/tls"
 	"crypto/x509"
 	"encoding/hex"
-	"io"
 	"log/slog"
 	"maps"
-	"mime"
-	"mime/multipart"
 	"net/http"
 	"net/http/httptrace"
 	"net/textproto"
 	"slices"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/lemon4ksan/aoni/fingerprint/ja4"
 	"github.com/lemon4ksan/aoni/internal/bytesconv"
 	fastrand "github.com/lemon4ksan/aoni/internal/rand"
+	"github.com/lemon4ksan/aoni/internal/requestutil"
 	"github.com/lemon4ksan/aoni/netutil/probe"
 )
 
+var correlationCounter uint64
+
 // GenerateCorrelationID generates a fast, monotonic Base36 correlation ID string.
 func GenerateCorrelationID() string {
-	timestamp := uint64(time.Now().UnixMicro())*1000 + uint64(fastrand.Intn(1000))
+	seq := atomic.AddUint64(&correlationCounter, 1)
+	timestamp := uint64(time.Now().UnixMicro())*1000 + (uint64(fastrand.Intn(1000)) ^ (seq & 0x3ff))
 
 	var buf [32]byte
 
@@ -47,7 +48,6 @@ func GenerateCorrelationID() string {
 	return bytesconv.B2S(b)
 }
 
-// TraceInfo records network layer execution timings, TLS details, and JA4 signatures for a request.
 // TraceInfo records network layer execution timings, TLS details, and JA4 signatures for a request.
 type TraceInfo struct {
 	CorrelationID    string
@@ -323,95 +323,15 @@ func TriggerGot1xxResponse(ctx context.Context, code int, header http.Header) er
 
 // TruncateBody limits output payload representations to maxBytes without unnecessary allocations.
 func TruncateBody(body []byte, maxBytes int) string {
-	limit := maxBytes
-	if limit <= 0 {
-		limit = 4096
-	}
-
-	if len(body) <= limit {
-		return bytesconv.B2S(body)
-	}
-
-	var numBuf [20]byte
-
-	truncatedBytes := strconv.AppendInt(numBuf[:0], int64(len(body)-limit), 10)
-
-	var sb strings.Builder
-	sb.Grow(limit + 32 + len(truncatedBytes))
-	sb.WriteString(bytesconv.B2S(body[:limit]))
-	sb.WriteString("... [truncated ")
-	sb.Write(truncatedBytes)
-	sb.WriteString(" bytes]")
-
-	return sb.String()
+	return requestutil.TruncateBody(body, maxBytes)
 }
 
 // IsStreamingResponse detects whether an HTTP response represents a real-time stream (SSE, NDJSON, Chunked).
 func IsStreamingResponse(resp *http.Response) bool {
-	if resp == nil {
-		return false
-	}
-
-	contentType := strings.ToLower(resp.Header.Get("Content-Type"))
-	streamingTypes := [...]string{
-		"text/event-stream",
-		"application/stream",
-		"application/x-ndjson",
-		"application/x-stream",
-		"text/stream",
-	}
-
-	for _, st := range streamingTypes {
-		if strings.Contains(contentType, st) {
-			return true
-		}
-	}
-
-	chunked := strings.Contains(strings.ToLower(resp.Header.Get("Transfer-Encoding")), "chunked")
-
-	return strings.Contains(contentType, "text/plain") && chunked && resp.ContentLength == -1
+	return requestutil.IsStreamingResponse(resp)
 }
 
 // SummarizeMultipartBody extracts form field names and file metadata from a multipart payload.
 func SummarizeMultipartBody(body []byte, contentType string) string {
-	if len(body) == 0 || contentType == "" {
-		return ""
-	}
-
-	_, params, err := mime.ParseMediaType(contentType)
-	if err != nil || params["boundary"] == "" {
-		return "(multipart/form-data payload)"
-	}
-
-	reader := multipart.NewReader(bytes.NewReader(body), params["boundary"])
-
-	var parts []string
-
-	for {
-		part, err := reader.NextPart()
-		if err == io.EOF || err != nil {
-			break
-		}
-
-		name := part.FormName()
-		if name == "" {
-			continue
-		}
-
-		if filename := part.FileName(); filename != "" {
-			parts = append(parts, name+"=@"+filename)
-			continue
-		}
-
-		var sb strings.Builder
-		if _, err := io.Copy(&sb, part); err == nil {
-			parts = append(parts, name+"="+sb.String())
-		}
-	}
-
-	if len(parts) == 0 {
-		return "(multipart/form-data payload)"
-	}
-
-	return strings.Join(parts, "&")
+	return requestutil.SummarizeMultipartBody(body, contentType)
 }

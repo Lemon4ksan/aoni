@@ -179,6 +179,7 @@ func Parse(sig string) (*Signature, error) {
 	return s, nil
 }
 
+// parseWindow parses window size, multiplier rules (mss*, mtu*), and scale factor.
 func parseWindow(field string, s *Signature) error {
 	if field == "" {
 		return errors.New("p0f: empty window field")

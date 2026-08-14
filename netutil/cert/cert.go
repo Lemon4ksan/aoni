@@ -91,6 +91,7 @@ func (w *Watcher) Close() {
 	}
 }
 
+// watchLoop runs periodic timer checking certificate files on disk.
 func (w *Watcher) watchLoop(ctx context.Context, interval time.Duration) {
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
@@ -105,6 +106,7 @@ func (w *Watcher) watchLoop(ctx context.Context, interval time.Duration) {
 	}
 }
 
+// checkAndReload verifies modification time on disk and triggers reload when changed.
 func (w *Watcher) checkAndReload() {
 	info, err := os.Stat(w.certPath)
 	if err != nil {
@@ -116,6 +118,7 @@ func (w *Watcher) checkAndReload() {
 	}
 }
 
+// reload reads keypair from disk and atomically updates active certificate reference.
 func (w *Watcher) reload() error {
 	cert, err := tls.LoadX509KeyPair(w.certPath, w.keyPath)
 	if err != nil {

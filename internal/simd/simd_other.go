@@ -2,7 +2,7 @@
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
-//go:build !amd64 || purego
+//go:build (!amd64 && !arm64) || purego
 
 package simd
 
@@ -42,4 +42,20 @@ func ApplyFastMaskVector(b []byte, mask uint32) {
 	for ; i < len(b); i++ {
 		b[i] ^= maskBytes[i&3]
 	}
+}
+
+func extractBitsHW(val, mask uint64) uint64 {
+	return extractBitsSWAR(val, mask)
+}
+
+func depositBitsHW(val, mask uint64) uint64 {
+	return depositBitsSWAR(val, mask)
+}
+
+// PrefetchL1 is a no-op fallback for non-amd64 architectures.
+func PrefetchL1(_ unsafe.Pointer) {}
+
+// StreamCopy256 falls back to standard copy on non-amd64 architectures.
+func StreamCopy256(dst, src []byte) int {
+	return copy(dst, src)
 }

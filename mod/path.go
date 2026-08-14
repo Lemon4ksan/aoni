@@ -13,48 +13,60 @@ import (
 	"github.com/lemon4ksan/aoni/internal/urlutil"
 )
 
-// WithVar constructs an [aoni.RequestModifier] that interpolates a single URI template placeholder (e.g. "{key}") with value.
-//
-// Preconditions:
-//   - Escapes value using [url.PathEscape].
+// WithVar constructs an [aoni.RequestModifier] that interpolates a single URI template placeholder
+// (e.g. "{key}") with value according to RFC 6570 Level 1 URI Template variable expansion.
 func WithVar(key string, value any) aoni.RequestModifier {
-	return func(req aoni.Request) {
-		escapedValue := url.PathEscape(fmt.Sprint(value))
-
-		path := req.Path()
-		req.SetPath(urlutil.ReplaceVar(path, key, escapedValue))
+	return aoni.RequestModifier{
+		Kind: aoni.ModCustom,
+		Fn: func(req aoni.Request) {
+			escapedValue := url.PathEscape(fmt.Sprint(value))
+			path := req.Path()
+			req.SetPath(urlutil.ReplaceVar(path, key, escapedValue))
+		},
 	}
 }
 
-// WithVars constructs an [aoni.RequestModifier] replacing multiple path template placeholders using key-value pairs.
-// Requires an even number of arguments (alternating key and value pairs).
+// WithVars constructs an [aoni.RequestModifier] replacing multiple path template placeholders using key-value pairs
+// per RFC 6570 URI Template variable substitution. Requires an even number of arguments (alternating key and value pairs).
 func WithVars(pairs ...any) aoni.RequestModifier {
 	if len(pairs)%2 != 0 {
-		return func(req aoni.Request) {
-			aoni.GetOrInitRequestConfig(req).BodyError = ErrInvalidPairCount
+		return aoni.RequestModifier{
+			Kind: aoni.ModCustom,
+			Fn: func(req aoni.Request) {
+				aoni.GetOrInitRequestConfig(req).BodyError = ErrInvalidPairCount
+			},
 		}
 	}
 
-	return func(req aoni.Request) {
-		for i := 0; i < len(pairs); i += 2 {
-			key := fmt.Sprint(pairs[i])
-			value := fmt.Sprint(pairs[i+1])
-			WithVar(key, value)(req)
-		}
+	return aoni.RequestModifier{
+		Kind: aoni.ModCustom,
+		Fn: func(req aoni.Request) {
+			for i := 0; i < len(pairs); i += 2 {
+				key := fmt.Sprint(pairs[i])
+				value := fmt.Sprint(pairs[i+1])
+				WithVar(key, value).Apply(req)
+			}
+		},
 	}
 }
 
-// WithBaseURL constructs an [aoni.RequestModifier] overriding target request URL base.
+// WithBaseURL constructs an [aoni.RequestModifier] overriding the target request URL base (RFC 3986 §5).
 func WithBaseURL(baseURL string) aoni.RequestModifier {
-	return func(req aoni.Request) {
-		req.SetURL(baseURL)
+	return aoni.RequestModifier{
+		Kind: aoni.ModCustom,
+		Fn: func(req aoni.Request) {
+			req.SetURL(baseURL)
+		},
 	}
 }
 
 // WithoutBaseURL constructs an [aoni.RequestModifier] resetting target request URL base to local path.
 func WithoutBaseURL() aoni.RequestModifier {
-	return func(req aoni.Request) {
-		req.SetURL(req.Path())
+	return aoni.RequestModifier{
+		Kind: aoni.ModCustom,
+		Fn: func(req aoni.Request) {
+			req.SetURL(req.Path())
+		},
 	}
 }
 
@@ -69,39 +81,45 @@ func WithQuery(args ...any) aoni.RequestModifier {
 		key := fmt.Sprint(args[0])
 		valStr := fmt.Sprint(args[1])
 
-		return func(req aoni.Request) {
-			req.AddQueryParam(key, valStr)
+		return aoni.RequestModifier{
+			Kind:  aoni.ModQueryAdd,
+			Key:   key,
+			Value: valStr,
 		}
 	}
 
-	return func(req aoni.Request) {}
+	return aoni.RequestModifier{}
 }
 
 // WithQueryParams constructs an [aoni.RequestModifier] encoding structure or map query into URL query parameters.
 func WithQueryParams(query any) aoni.RequestModifier {
-	return func(req aoni.Request) {
-		if query == nil {
-			return
-		}
+	return aoni.RequestModifier{
+		Kind: aoni.ModCustom,
+		Fn: func(req aoni.Request) {
+			if query == nil {
+				return
+			}
 
-		encodedQuery, err := resolveQueryString(req, query)
-		if err != nil {
-			aoni.GetOrInitRequestConfig(req).BodyError = err
-			return
-		}
+			encodedQuery, err := resolveQueryString(req, query)
+			if err != nil {
+				aoni.GetOrInitRequestConfig(req).BodyError = err
+				return
+			}
 
-		if encodedQuery == "" {
-			return
-		}
+			if encodedQuery == "" {
+				return
+			}
 
-		if raw := req.RawQuery(); raw != "" {
-			req.SetRawQuery(raw + "&" + encodedQuery)
-		} else {
-			req.SetRawQuery(encodedQuery)
-		}
+			if raw := req.RawQuery(); raw != "" {
+				req.SetRawQuery(raw + "&" + encodedQuery)
+			} else {
+				req.SetRawQuery(encodedQuery)
+			}
+		},
 	}
 }
 
+// resolveQueryString encodes query into URL query parameters using configured query encoder or default codec.
 func resolveQueryString(req aoni.Request, query any) (string, error) {
 	cfg := aoni.GetRequestConfig(req.Context())
 	if cfg != nil && cfg.QueryEncoder != nil {

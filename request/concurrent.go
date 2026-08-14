@@ -23,6 +23,9 @@ type ConcurrentResult[Resp any] struct {
 
 // Concurrent executes fn concurrently across paths using the provided [Requester], preserving original slice order.
 //
+// Invariants:
+//   - c must be thread-safe for concurrent request execution across goroutines (such as [*aoni.Client]).
+//
 // Postconditions:
 //   - The length of the returned results slice matches paths.
 //   - Context cancellation on individual requests does not abort sibling operations.
@@ -32,26 +35,21 @@ func Concurrent[Resp any](
 	paths []string,
 	fn func(ctx context.Context, c Requester, path string) (*Resp, error),
 ) []ConcurrentResult[Resp] {
-	results := make([]ConcurrentResult[Resp], len(paths))
-
-	var wg sync.WaitGroup
-	wg.Add(len(paths))
-
-	for i, path := range paths {
-		go func(idx int, targetPath string) {
-			defer wg.Done()
-
-			val, err := fn(ctx, c, targetPath)
-			results[idx] = ConcurrentResult[Resp]{Index: idx, Value: val, Err: err}
-		}(i, path)
-	}
-
-	wg.Wait()
-
-	return results
+	return ConcurrentWithMods(
+		ctx,
+		c,
+		paths,
+		nil,
+		func(ctx context.Context, c Requester, path string, _ ...aoni.RequestModifier) (*Resp, error) {
+			return fn(ctx, c, path)
+		},
+	)
 }
 
 // ConcurrentWithMods is like [Concurrent], but applies per-request [aoni.RequestModifier] slices matching each path.
+//
+// Invariants:
+//   - c must be thread-safe for concurrent request execution across goroutines (such as [*aoni.Client]).
 func ConcurrentWithMods[Resp any](
 	ctx context.Context,
 	c Requester,

@@ -143,6 +143,7 @@ func (c *FramedConn) Write(b []byte) (int, error) {
 	return len(b), nil
 }
 
+// buildWindowUpdateFrame constructs an HTTP/2 WINDOW_UPDATE frame (Type 0x8) with increment bytes.
 func (c *FramedConn) buildWindowUpdateFrame(increment uint32) []byte {
 	frame := make([]byte, 13)
 	frame[0], frame[1], frame[2] = 0x0, 0x0, 0x4
@@ -154,6 +155,7 @@ func (c *FramedConn) buildWindowUpdateFrame(increment uint32) []byte {
 	return frame
 }
 
+// buildSettingsFrame serializes active SettingsDTO parameters into an HTTP/2 SETTINGS frame (Type 0x4).
 func (c *FramedConn) buildSettingsFrame() []byte {
 	var payload bytes.Buffer
 
@@ -192,6 +194,7 @@ func (c *FramedConn) buildSettingsFrame() []byte {
 	return frame
 }
 
+// BuildPriorityFrame constructs an HTTP/2 PRIORITY frame (Type 0x2) based on configured priority weights.
 func (c *FramedConn) BuildPriorityFrame(original []byte) []byte {
 	if len(original) < 9 {
 		return nil
@@ -219,6 +222,7 @@ func (c *FramedConn) BuildPriorityFrame(original []byte) []byte {
 	return frame
 }
 
+// writeSettingEntry encodes a 2-byte setting ID and 4-byte setting value into w.
 func writeSettingEntry(w io.Writer, id uint16, value uint32) {
 	var buf [6]byte
 

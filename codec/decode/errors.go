@@ -22,9 +22,12 @@ var (
 
 // Error describes a structural or unmarshaling failure encountered during stream decoding.
 type Error struct {
+	// Format identifies the encoding format (e.g. "json", "protobuf", "xml").
 	Format string
+	// Target identifies the target Go type name into which decoding was attempted.
 	Target string
-	Err    error
+	// Err holds the underlying unmarshaling or I/O error cause.
+	Err error
 }
 
 func (e *Error) Error() string {
@@ -43,11 +46,16 @@ func (e *Error) Unwrap() error { return e.Err }
 
 // GRPCWebError describes a framing, status code, or stream error specific to gRPC-Web response processing.
 type GRPCWebError struct {
-	Op            string
-	StatusCode    string
-	StatusMsg     string
+	// Op identifies the operation stage (e.g., "header", "frame", "trailer").
+	Op string
+	// StatusCode records the string representation of the gRPC status code (e.g., "0", "14").
+	StatusCode string
+	// StatusMsg provides the error message string returned in gRPC trailers.
+	StatusMsg string
+	// StatusDetails contains raw binary status detail payloads.
 	StatusDetails []byte
-	Err           error
+	// Err holds the underlying cause error.
+	Err error
 }
 
 func (e *GRPCWebError) Error() string {

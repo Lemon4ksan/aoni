@@ -27,13 +27,9 @@ type Storage interface {
 }
 
 // JSONFileStorage implements thread-safe [Storage] using atomic file writes to disk.
-//
-// Atomic Write Guarantees:
 // Writes are performed via temporary file creation and atomic OS file swaps (`os.Rename`),
 // guaranteeing zero file corruption even in the event of abrupt process termination.
-//
-// Thread Safety:
-// 100% thread-safe; guarded by internal read-write mutex lock (`sync.RWMutex`).
+// Safe for concurrent use across multiple goroutines.
 type JSONFileStorage struct {
 	mu       sync.RWMutex
 	filePath string
@@ -58,9 +54,7 @@ func NewJSONFileStorage(filePath string) *JSONFileStorage {
 }
 
 // Save stores cookie slices under key and flushes the JSON payload to disk via atomic temp file swaps.
-//
-// Postconditions:
-//   - Creates parent directories if missing and atomically renames the temporary file to target path.
+// Creates parent directories if missing and atomically renames the temporary file to target path.
 func (s *JSONFileStorage) Save(key string, cookies []Cookie) error {
 	s.mu.Lock()
 	s.data[key] = cookies
@@ -75,7 +69,7 @@ func (s *JSONFileStorage) Save(key string, cookies []Cookie) error {
 	return writeDataAtomically(s.filePath, fileBytes)
 }
 
-// Load retrieves cookies associated with key from memory.
+// Load retrieves cookies associated with key from memory. Safe for concurrent execution.
 func (s *JSONFileStorage) Load(key string) ([]Cookie, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -91,6 +85,8 @@ func (s *JSONFileStorage) Load(key string) ([]Cookie, error) {
 	return copied, nil
 }
 
+// writeDataAtomically writes data to a temporary file in the target directory before renaming it to filePath.
+// This guarantees zero partial writes or file corruption on process termination or disk failures.
 func writeDataAtomically(filePath string, data []byte) error {
 	dir := filepath.Dir(filePath)
 	if err := os.MkdirAll(dir, 0o750); err != nil { //nolint:gosec
@@ -118,7 +114,8 @@ func writeDataAtomically(filePath string, data []byte) error {
 	return os.Rename(tmpName, filePath) //nolint:gosec
 }
 
-// SQLStorage implements [Storage] backed by an SQL database.
+// SQLStorage implements [Storage] backed by an SQL database (*sql.DB).
+// The provided *sql.DB handle MUST be thread-safe for concurrent operations across goroutines.
 type SQLStorage struct {
 	db        *sql.DB
 	tableName string

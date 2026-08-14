@@ -578,7 +578,6 @@ func TestFluent_BasicAuth_DigestAuth_And_Timeout(t *testing.T) {
 
 	resp, err := fluent.R(client).
 		SetBasicAuth("admin", "pass123").
-		SetDigestAuth("user", "pass").
 		SetTimeout(5 * time.Second).
 		Get("/")
 
@@ -587,6 +586,53 @@ func TestFluent_BasicAuth_DigestAuth_And_Timeout(t *testing.T) {
 	defer resp.Body.Close()
 
 	assert.Equal(t, http.StatusOK, resp.StatusCode)
+}
+
+func TestFluent_DigestAuth_RFC7616(t *testing.T) {
+	t.Parallel()
+
+	const (
+		username = "admin"
+		password = "secretpassword"
+		realm    = "TestRealm"
+		nonce    = "1234567890abcdef"
+	)
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		auth := r.Header.Get("Authorization")
+		if auth == "" {
+			w.Header().Set("WWW-Authenticate", `Digest realm="TestRealm", nonce="1234567890abcdef", qop="auth"`)
+			w.WriteHeader(http.StatusUnauthorized)
+			return
+		}
+
+		if !strings.HasPrefix(auth, "Digest ") {
+			w.WriteHeader(http.StatusForbidden)
+			return
+		}
+
+		assert.Contains(t, auth, `username="admin"`)
+		assert.Contains(t, auth, `realm="TestRealm"`)
+		assert.Contains(t, auth, `nonce="1234567890abcdef"`)
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte("digest success!"))
+	}))
+	t.Cleanup(server.Close)
+
+	client := aoni.NewClient(server.Client(), option.WithBaseURL(server.URL))
+
+	resp, err := fluent.R(client).
+		SetDigestAuth(username, password).
+		Get("/")
+
+	require.NoError(t, err)
+
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusOK, resp.StatusCode)
+	assert.Equal(t, "digest success!", string(body))
 }
 
 func TestFluent_Download_Shortcut(t *testing.T) {

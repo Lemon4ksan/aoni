@@ -12,49 +12,69 @@ import (
 	"mime/multipart"
 	"net/http"
 	"net/textproto"
+	"slices"
 	"strings"
 
 	"github.com/lemon4ksan/aoni"
 	"github.com/lemon4ksan/aoni/internal/io"
+	"github.com/lemon4ksan/aoni/internal/offheap"
 )
 
 // WithMultipart constructs an [aoni.RequestModifier] building an in-memory multipart/form-data request body.
 func WithMultipart(fields map[string]string, files map[string]stdio.Reader) aoni.RequestModifier {
-	return func(req aoni.Request) {
-		body := &bytes.Buffer{}
-		writer := multipart.NewWriter(body)
+	return aoni.RequestModifier{
+		Kind: aoni.ModCustom,
+		Fn: func(req aoni.Request) {
+			offBuf, err := offheap.NewBuffer(64 * 1024)
 
-		if cfg := aoni.GetOrInitRequestConfig(req); cfg.MultipartBoundary != "" {
-			_ = writer.SetBoundary(cfg.MultipartBoundary)
-		}
+			var (
+				body     stdio.Writer = &bytes.Buffer{}
+				getBytes              = func() []byte {
+					return body.(*bytes.Buffer).Bytes()
+				}
+			)
 
-		for k, v := range fields {
-			if err := writer.WriteField(k, v); err != nil {
+			if err == nil {
+				defer offBuf.Release()
+
+				body = offBuf
+				getBytes = func() []byte { return slices.Clone(offBuf.Bytes()) }
+			}
+
+			writer := multipart.NewWriter(body)
+
+			if cfg := aoni.GetOrInitRequestConfig(req); cfg.MultipartBoundary != "" {
+				_ = writer.SetBoundary(cfg.MultipartBoundary)
+			}
+
+			for k, v := range fields {
+				if err := writer.WriteField(k, v); err != nil {
+					aoni.GetOrInitRequestConfig(req).BodyError = err
+					return
+				}
+			}
+
+			for key, r := range files {
+				part, err := writer.CreateFormFile(key, key)
+				if err != nil {
+					aoni.GetOrInitRequestConfig(req).BodyError = err
+					return
+				}
+
+				if _, err = io.CopyZeroAlloc(part, r); err != nil {
+					aoni.GetOrInitRequestConfig(req).BodyError = err
+					return
+				}
+			}
+
+			if err := writer.Close(); err != nil {
 				aoni.GetOrInitRequestConfig(req).BodyError = err
 				return
 			}
-		}
 
-		for key, r := range files {
-			part, err := writer.CreateFormFile(key, key)
-			if err != nil {
-				aoni.GetOrInitRequestConfig(req).BodyError = err
-				return
-			}
-
-			if _, err = io.CopyZeroAlloc(part, r); err != nil {
-				aoni.GetOrInitRequestConfig(req).BodyError = err
-				return
-			}
-		}
-
-		if err := writer.Close(); err != nil {
-			aoni.GetOrInitRequestConfig(req).BodyError = err
-			return
-		}
-
-		req.SetBodyBytes(body.Bytes())
-		req.SetHeader("Content-Type", writer.FormDataContentType())
+			req.SetBodyBytes(getBytes())
+			req.SetHeader("Content-Type", writer.FormDataContentType())
+		},
 	}
 }
 
@@ -68,69 +88,91 @@ type MultipartField struct {
 
 // WithMultipartFields accepts an ordered slice of form fields with support for duplicate names (RFC 7578 Section 5.2)
 func WithMultipartFields(fields []MultipartField) aoni.RequestModifier {
-	return func(req aoni.Request) {
-		body := &bytes.Buffer{}
-		writer := multipart.NewWriter(body)
+	return aoni.RequestModifier{
+		Kind: aoni.ModCustom,
+		Fn: func(req aoni.Request) {
+			offBuf, err := offheap.NewBuffer(64 * 1024)
 
-		if cfg := aoni.GetOrInitRequestConfig(req); cfg.MultipartBoundary != "" {
-			_ = writer.SetBoundary(cfg.MultipartBoundary)
-		}
-
-		for _, f := range fields {
-			if f.Reader != nil || f.Filename != "" {
-				ct := f.ContentType
-				if ct == "" {
-					ct = "application/octet-stream"
+			var (
+				body     stdio.Writer = &bytes.Buffer{}
+				getBytes              = func() []byte {
+					return body.(*bytes.Buffer).Bytes()
 				}
+			)
 
-				part, err := createFormFileHeader(writer, f.Name, f.Filename, ct)
-				if err != nil {
-					aoni.GetOrInitRequestConfig(req).BodyError = err
-					return
-				}
+			if err == nil {
+				defer offBuf.Release()
 
-				if f.Reader != nil {
-					if _, err = io.CopyZeroAlloc(part, f.Reader); err != nil {
+				body = offBuf
+				getBytes = func() []byte { return slices.Clone(offBuf.Bytes()) }
+			}
+
+			writer := multipart.NewWriter(body)
+
+			if cfg := aoni.GetOrInitRequestConfig(req); cfg.MultipartBoundary != "" {
+				_ = writer.SetBoundary(cfg.MultipartBoundary)
+			}
+
+			for _, f := range fields {
+				if f.Reader != nil || f.Filename != "" {
+					ct := f.ContentType
+					if ct == "" {
+						ct = "application/octet-stream"
+					}
+
+					part, err := createFormFileHeader(writer, f.Name, f.Filename, ct)
+					if err != nil {
+						aoni.GetOrInitRequestConfig(req).BodyError = err
+						return
+					}
+
+					if f.Reader != nil {
+						if _, err = io.CopyZeroAlloc(part, f.Reader); err != nil {
+							aoni.GetOrInitRequestConfig(req).BodyError = err
+							return
+						}
+					}
+				} else {
+					if err := writer.WriteField(f.Name, f.Value); err != nil {
 						aoni.GetOrInitRequestConfig(req).BodyError = err
 						return
 					}
 				}
-			} else {
-				if err := writer.WriteField(f.Name, f.Value); err != nil {
-					aoni.GetOrInitRequestConfig(req).BodyError = err
-					return
-				}
 			}
-		}
 
-		if err := writer.Close(); err != nil {
-			aoni.GetOrInitRequestConfig(req).BodyError = err
-			return
-		}
+			if err := writer.Close(); err != nil {
+				aoni.GetOrInitRequestConfig(req).BodyError = err
+				return
+			}
 
-		req.SetBodyBytes(body.Bytes())
-		req.SetHeader("Content-Type", writer.FormDataContentType())
+			req.SetBodyBytes(getBytes())
+			req.SetHeader("Content-Type", writer.FormDataContentType())
+		},
 	}
 }
 
 // WithStreamingMultipart constructs an [aoni.RequestModifier] streaming multipart/form-data via an asynchronous pipe without in-memory buffering.
 func WithStreamingMultipart(fields map[string]string, files map[string]stdio.Reader) aoni.RequestModifier {
-	return func(req aoni.Request) {
-		pr, pw := stdio.Pipe()
+	return aoni.RequestModifier{
+		Kind: aoni.ModCustom,
+		Fn: func(req aoni.Request) {
+			pr, pw := stdio.Pipe()
 
-		writer := multipart.NewWriter(pw)
-		if cfg := aoni.GetOrInitRequestConfig(req); cfg.MultipartBoundary != "" {
-			_ = writer.SetBoundary(cfg.MultipartBoundary)
-		}
+			writer := multipart.NewWriter(pw)
+			if cfg := aoni.GetOrInitRequestConfig(req); cfg.MultipartBoundary != "" {
+				_ = writer.SetBoundary(cfg.MultipartBoundary)
+			}
 
-		ctx := req.Context()
-		go streamMultipartPayload(ctx, pw, writer, fields, files)
+			ctx := req.Context()
+			go streamMultipartPayload(ctx, pw, writer, fields, files)
 
-		req.SetBodyStream(pr, -1)
-		req.SetHeader("Content-Type", writer.FormDataContentType())
+			req.SetBodyStream(pr, -1)
+			req.SetHeader("Content-Type", writer.FormDataContentType())
+		},
 	}
 }
 
+// streamMultipartPayload continuously encodes and streams multipart fields and files through pw.
 func streamMultipartPayload(
 	ctx context.Context,
 	pw *stdio.PipeWriter,
@@ -167,6 +209,7 @@ func streamMultipartPayload(
 	}
 }
 
+// detectMIMEAndReader peeks at the first 512 bytes of r on the stack to sniff Content-Type.
 func detectMIMEAndReader(r stdio.Reader) (string, stdio.Reader) {
 	var buf [512]byte
 
@@ -185,6 +228,7 @@ func detectMIMEAndReader(r stdio.Reader) (string, stdio.Reader) {
 	return "application/octet-stream", r
 }
 
+// createFormFileHeader builds a multipart MIME header with proper Content-Disposition and Content-Type.
 func createFormFileHeader(w *multipart.Writer, fieldname, filename, contentType string) (stdio.Writer, error) {
 	h := make(textproto.MIMEHeader)
 	h.Set("Content-Disposition",
@@ -201,6 +245,7 @@ func createFormFileHeader(w *multipart.Writer, fieldname, filename, contentType 
 
 var quoteEscaper = strings.NewReplacer("\\", "\\\\", `"`, "\\\"")
 
+// escapeQuotes escapes backslashes and double quotes for MIME header parameter values.
 func escapeQuotes(s string) string {
 	return quoteEscaper.Replace(s)
 }

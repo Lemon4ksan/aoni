@@ -12,6 +12,7 @@ import (
 	"net"
 	"net/netip"
 	"sync"
+	"sync/atomic"
 )
 
 var (
@@ -84,10 +85,12 @@ func extractIP(addr net.Addr) net.IP {
 }
 
 // SourceIPRotator maintains a pool of local IP addresses and cycles through them for socket binding.
+// The pool slice is stored in an [atomic.Pointer] using Copy-On-Write semantics, making [SourceIPRotator.Next]
+// and [SourceIPRotator.NextForFamily] completely lock-free under parallel execution.
 type SourceIPRotator struct {
-	ips []net.IP
-	mu  sync.Mutex
-	idx int
+	ips atomic.Pointer[[]net.IP]
+	idx atomic.Uint64
+	mu  sync.Mutex // serializes UpdatePool
 }
 
 // NewSourceIPRotator instantiates a [SourceIPRotator] with parsed local network addresses.
@@ -97,29 +100,50 @@ func NewSourceIPRotator(addrs []string) (*SourceIPRotator, error) {
 		return nil, err
 	}
 
-	return &SourceIPRotator{ips: ips}, nil
+	r := &SourceIPRotator{}
+	r.ips.Store(&ips)
+
+	return r, nil
 }
 
 // Next returns the next local IP address using round-robin rotation.
+// Lock-free and contention-free under parallel execution.
 func (r *SourceIPRotator) Next() net.IP {
-	r.mu.Lock()
-	defer r.mu.Unlock()
+	ipsPtr := r.ips.Load()
+	if ipsPtr == nil {
+		return nil
+	}
 
-	ip := r.ips[r.idx]
-	r.idx = (r.idx + 1) % len(r.ips)
+	ips := *ipsPtr
 
-	return ip
+	n := uint64(len(ips))
+	if n == 0 {
+		return nil
+	}
+
+	i := r.idx.Add(1) - 1
+
+	return ips[i%n]
 }
 
 // NextForFamily selects the next local IP matching the specified address family (IPv4 if isIPv4 is true, IPv6 otherwise).
+// Lock-free and contention-free under parallel execution.
 func (r *SourceIPRotator) NextForFamily(isIPv4 bool) net.IP {
-	r.mu.Lock()
-	defer r.mu.Unlock()
+	ipsPtr := r.ips.Load()
+	if ipsPtr == nil {
+		return nil
+	}
 
-	n := len(r.ips)
+	ips := *ipsPtr
+
+	n := uint64(len(ips))
+	if n == 0 {
+		return nil
+	}
+
 	for range n {
-		ip := r.ips[r.idx]
-		r.idx = (r.idx + 1) % n
+		i := r.idx.Add(1) - 1
+		ip := ips[i%n]
 
 		hasV4 := ip.To4() != nil
 		if isIPv4 == hasV4 {
@@ -138,28 +162,34 @@ func (r *SourceIPRotator) UpdatePool(addrs []string) error {
 	}
 
 	r.mu.Lock()
-	r.ips = ips
-	r.idx = 0
-	r.mu.Unlock()
+	defer r.mu.Unlock()
+
+	r.ips.Store(&ips)
+	r.idx.Store(0)
 
 	return nil
 }
 
 // Size returns the count of IP addresses currently registered in the pool.
 func (r *SourceIPRotator) Size() int {
-	r.mu.Lock()
-	defer r.mu.Unlock()
+	ipsPtr := r.ips.Load()
+	if ipsPtr == nil {
+		return 0
+	}
 
-	return len(r.ips)
+	return len(*ipsPtr)
 }
 
 // IPs returns a copy of all IP addresses in the current pool.
 func (r *SourceIPRotator) IPs() []net.IP {
-	r.mu.Lock()
-	defer r.mu.Unlock()
+	ipsPtr := r.ips.Load()
+	if ipsPtr == nil {
+		return nil
+	}
 
-	copied := make([]net.IP, len(r.ips))
-	copy(copied, r.ips)
+	ips := *ipsPtr
+	copied := make([]net.IP, len(ips))
+	copy(copied, ips)
 
 	return copied
 }
@@ -200,15 +230,27 @@ func NewIPv6SubnetRotator(cidr string) (*IPv6SubnetRotator, error) {
 // Next generates a new cryptographically random IPv6 address inside the configured prefix range.
 func (r *IPv6SubnetRotator) Next() net.IP {
 	bits := r.prefix.Bits()
-	bytes := r.prefix.Addr().As16()
+	addrBytes := r.prefix.Addr().As16()
 
 	var randomBytes [16]byte
 
 	_, _ = rand.Read(randomBytes[:])
 
-	for i := bits / 8; i < 16; i++ {
-		bytes[i] = randomBytes[i]
+	byteIdx := bits / 8
+	bitRem := bits % 8
+
+	if bitRem > 0 && byteIdx < 16 {
+		mask := byte(0xFF << (8 - bitRem))
+		addrBytes[byteIdx] = (addrBytes[byteIdx] & mask) | (randomBytes[byteIdx] & ^mask)
+		byteIdx++
 	}
 
-	return net.IP(bytes[:])
+	for i := byteIdx; i < 16; i++ {
+		addrBytes[i] = randomBytes[i]
+	}
+
+	res := make(net.IP, 16)
+	copy(res, addrBytes[:])
+
+	return res
 }

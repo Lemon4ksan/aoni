@@ -37,11 +37,16 @@ const (
 // StatusError describes an RPC execution failure per PROTOCOL-HTTP2.md,
 // including binary error details from the 'grpc-status-details-bin' trailer.
 type StatusError struct {
-	Code       StatusCode
-	Message    string
+	// Code represents the official gRPC status code (e.g. StatusNotFound, StatusInternal).
+	Code StatusCode
+	// Message contains human-readable error description from grpc-message.
+	Message string
+	// RawDetails holds decoded bytes from grpc-status-details-bin.
 	RawDetails []byte
-	Header     http.Header
-	Trailer    http.Header
+	// Header contains initial HTTP response headers.
+	Header http.Header
+	// Trailer contains HTTP response trailers.
+	Trailer http.Header
 }
 
 func (e *StatusError) Error() string {
@@ -103,6 +108,7 @@ func (c StatusCode) String() string {
 	}
 }
 
+// parseGRPCStatus constructs a [StatusError] from gRPC trailer headers (grpc-status, grpc-message, grpc-status-details-bin).
 func parseGRPCStatus(trailers http.Header) *StatusError {
 	codeStr := trailers.Get("grpc-status")
 	msgStr := trailers.Get("grpc-message")

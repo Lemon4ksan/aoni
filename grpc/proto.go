@@ -50,12 +50,11 @@ func ProtoGetTo[Resp any](
 	path string,
 	mods ...aoni.RequestModifier,
 ) (*Resp, error) {
-	mods = append([]aoni.RequestModifier{
-		mod.WithHeader("Accept", "application/x-protobuf"),
-		mod.WithDecoder(decode.ProtoDecoder),
-	}, mods...)
+	var stackBuf [stackModCapacity]aoni.RequestModifier
 
-	return request.GetTo[Resp](ctx, c, path, mods...)
+	allMods := withProtoGetMods(&stackBuf, mods)
+
+	return request.GetTo[Resp](ctx, c, path, allMods...)
 }
 
 // ProtoGetInto executes an HTTP GET request expecting a binary Protocol Buffer stream unmarshaled directly into target.
@@ -66,12 +65,11 @@ func ProtoGetInto[T any](
 	target *T,
 	mods ...aoni.RequestModifier,
 ) error {
-	mods = append([]aoni.RequestModifier{
-		mod.WithHeader("Accept", "application/x-protobuf"),
-		mod.WithDecoder(decode.ProtoDecoder),
-	}, mods...)
+	var stackBuf [stackModCapacity]aoni.RequestModifier
 
-	return request.GetInto(ctx, c, path, target, mods...)
+	allMods := withProtoGetMods(&stackBuf, mods)
+
+	return request.GetInto(ctx, c, path, target, allMods...)
 }
 
 // ProtoPostTo executes an HTTP POST request carrying a binary [proto.Message] payload and unmarshals the response into Resp.
@@ -82,12 +80,11 @@ func ProtoPostTo[Resp any](
 	msg proto.Message,
 	mods ...aoni.RequestModifier,
 ) (*Resp, error) {
-	mods = append([]aoni.RequestModifier{
-		mod.WithProtoBody(msg),
-		mod.WithDecoder(decode.ProtoDecoder),
-	}, mods...)
+	var stackBuf [stackModCapacity]aoni.RequestModifier
 
-	return request.PostTo[Resp](ctx, c, path, nil, mods...)
+	allMods := withProtoPostMods(&stackBuf, msg, mods)
+
+	return request.PostTo[Resp](ctx, c, path, nil, allMods...)
 }
 
 // ProtoPostInto executes an HTTP POST request carrying a binary [proto.Message] payload and unmarshals the response directly into target.
@@ -99,12 +96,11 @@ func ProtoPostInto[T any](
 	target *T,
 	mods ...aoni.RequestModifier,
 ) error {
-	mods = append([]aoni.RequestModifier{
-		mod.WithProtoBody(msg),
-		mod.WithDecoder(decode.ProtoDecoder),
-	}, mods...)
+	var stackBuf [stackModCapacity]aoni.RequestModifier
 
-	return request.PostInto(ctx, c, path, nil, target, mods...)
+	allMods := withProtoPostMods(&stackBuf, msg, mods)
+
+	return request.PostInto(ctx, c, path, nil, target, allMods...)
 }
 
 // WebPostTo executes an HTTP POST request carrying a 5-byte gRPC-Web framed payload and unmarshals the response into Resp.
@@ -115,12 +111,11 @@ func WebPostTo[Resp any](
 	msg proto.Message,
 	mods ...aoni.RequestModifier,
 ) (*Resp, error) {
-	mods = append([]aoni.RequestModifier{
-		mod.WithGRPCWebBody(msg),
-		mod.WithDecoder(decode.GRPCWebDecoder),
-	}, mods...)
+	var stackBuf [stackModCapacity]aoni.RequestModifier
 
-	return request.PostTo[Resp](ctx, c, path, nil, mods...)
+	allMods := withWebPostMods(&stackBuf, msg, mods)
+
+	return request.PostTo[Resp](ctx, c, path, nil, allMods...)
 }
 
 // WebPostInto executes an HTTP POST request carrying a 5-byte gRPC-Web framed payload and unmarshals the response directly into target.
@@ -132,10 +127,76 @@ func WebPostInto[T any](
 	target *T,
 	mods ...aoni.RequestModifier,
 ) error {
-	mods = append([]aoni.RequestModifier{
-		mod.WithGRPCWebBody(msg),
-		mod.WithDecoder(decode.GRPCWebDecoder),
-	}, mods...)
+	var stackBuf [stackModCapacity]aoni.RequestModifier
 
-	return request.PostInto(ctx, c, path, nil, target, mods...)
+	allMods := withWebPostMods(&stackBuf, msg, mods)
+
+	return request.PostInto(ctx, c, path, nil, target, allMods...)
+}
+
+const stackModCapacity = 16
+
+func withProtoGetMods(
+	stackBuf *[stackModCapacity]aoni.RequestModifier,
+	mods []aoni.RequestModifier,
+) []aoni.RequestModifier {
+	total := 2 + len(mods)
+	if total <= stackModCapacity {
+		stackBuf[0] = mod.WithHeader("Accept", "application/x-protobuf")
+		stackBuf[1] = mod.WithDecoder(decode.ProtoDecoder)
+		copy(stackBuf[2:], mods)
+
+		return stackBuf[:total]
+	}
+
+	res := make([]aoni.RequestModifier, total)
+	res[0] = mod.WithHeader("Accept", "application/x-protobuf")
+	res[1] = mod.WithDecoder(decode.ProtoDecoder)
+	copy(res[2:], mods)
+
+	return res
+}
+
+func withProtoPostMods(
+	stackBuf *[stackModCapacity]aoni.RequestModifier,
+	msg proto.Message,
+	mods []aoni.RequestModifier,
+) []aoni.RequestModifier {
+	total := 2 + len(mods)
+	if total <= stackModCapacity {
+		stackBuf[0] = mod.WithProtoBody(msg)
+		stackBuf[1] = mod.WithDecoder(decode.ProtoDecoder)
+		copy(stackBuf[2:], mods)
+
+		return stackBuf[:total]
+	}
+
+	res := make([]aoni.RequestModifier, total)
+	res[0] = mod.WithProtoBody(msg)
+	res[1] = mod.WithDecoder(decode.ProtoDecoder)
+	copy(res[2:], mods)
+
+	return res
+}
+
+func withWebPostMods(
+	stackBuf *[stackModCapacity]aoni.RequestModifier,
+	msg proto.Message,
+	mods []aoni.RequestModifier,
+) []aoni.RequestModifier {
+	total := 2 + len(mods)
+	if total <= stackModCapacity {
+		stackBuf[0] = mod.WithGRPCWebBody(msg)
+		stackBuf[1] = mod.WithDecoder(decode.GRPCWebDecoder)
+		copy(stackBuf[2:], mods)
+
+		return stackBuf[:total]
+	}
+
+	res := make([]aoni.RequestModifier, total)
+	res[0] = mod.WithGRPCWebBody(msg)
+	res[1] = mod.WithDecoder(decode.GRPCWebDecoder)
+	copy(res[2:], mods)
+
+	return res
 }

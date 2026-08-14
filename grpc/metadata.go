@@ -13,12 +13,13 @@ import (
 	"github.com/lemon4ksan/aoni/mod"
 )
 
+// metadataContextKey is a private context key for carrying gRPC metadata.
 type metadataContextKey struct{}
 
 // WithMetadata produces an [aoni.RequestModifier] that injects gRPC metadata headers.
 // Keys ending in "-bin" are automatically encoded using Base64 per PROTOCOL-HTTP2.md.
 func WithMetadata(md Metadata) aoni.RequestModifier {
-	return func(req aoni.Request) {
+	return mod.Custom(func(req aoni.Request) {
 		for k, v := range md {
 			if strings.HasSuffix(strings.ToLower(k), "-bin") {
 				req.SetHeader(k, EncodeBinaryHeader([]byte(v)))
@@ -26,7 +27,7 @@ func WithMetadata(md Metadata) aoni.RequestModifier {
 				req.SetHeader(k, v)
 			}
 		}
-	}
+	})
 }
 
 // WithBinaryHeader produces an [aoni.RequestModifier] that encodes raw binary bytes as a Base64 gRPC header.

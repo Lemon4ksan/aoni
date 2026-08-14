@@ -25,7 +25,9 @@ import (
 
 	"github.com/lemon4ksan/aoni"
 	"github.com/lemon4ksan/aoni/cookie"
+	"github.com/lemon4ksan/aoni/internal/clock"
 	"github.com/lemon4ksan/aoni/internal/health"
+	"github.com/lemon4ksan/aoni/internal/trie"
 )
 
 var (
@@ -458,8 +460,17 @@ func (r *Rotator) Do(req *http.Request) (*http.Response, error) {
 		}
 	}
 
+	mask := n - 1
+	isPowerOfTwo := (n & mask) == 0
+
 	for range n {
-		idx := r.current.Add(1) % n
+		var idx uint32
+		if isPowerOfTwo {
+			idx = (r.current.Add(1) - 1) & mask
+		} else {
+			idx = r.current.Add(1) % n
+		}
+
 		if int(idx) == stickyIdx {
 			continue
 		}
@@ -656,7 +667,7 @@ func (r *Rotator) cleanupSessionsLoop() {
 		case <-ticker.C:
 			r.mu.Lock()
 
-			now := time.Now()
+			now := clock.CoarseTime()
 			for k, v := range r.sessions {
 				if now.Sub(v.lastSeen) > r.sessionTTL {
 					delete(r.sessions, k)
@@ -666,4 +677,33 @@ func (r *Rotator) cleanupSessionsLoop() {
 			r.mu.Unlock()
 		}
 	}
+}
+
+// DomainProxyRouter maps domain patterns (e.g., "*.google.com", "api.target.com") to target proxy URLs
+// using an O(K) reverse domain radix tree trie instead of regular expressions.
+type DomainProxyRouter struct {
+	rt *trie.ReverseDomainTrie[*url.URL]
+}
+
+// NewDomainProxyRouter instantiates a new [DomainProxyRouter].
+func NewDomainProxyRouter() *DomainProxyRouter {
+	return &DomainProxyRouter{
+		rt: trie.NewReverseDomainTrie[*url.URL](),
+	}
+}
+
+// AddRoute registers a domain pattern (e.g. "*.example.com" or "api.target.org") mapped to proxyURL.
+func (r *DomainProxyRouter) AddRoute(pattern string, proxyURL *url.URL) {
+	if r != nil && r.rt != nil {
+		r.rt.Insert(pattern, proxyURL)
+	}
+}
+
+// RouteForDomain matches targetDomain against registered patterns in O(K) time and yields the matching proxy URL.
+func (r *DomainProxyRouter) RouteForDomain(targetDomain string) (*url.URL, bool) {
+	if r == nil || r.rt == nil {
+		return nil, false
+	}
+
+	return r.rt.Match(targetDomain)
 }

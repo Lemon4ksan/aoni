@@ -19,7 +19,6 @@ import (
 // Engine is the central runtime execution engine orchestrator.
 type Engine struct {
 	Prepared   PreparedConfig
-	Janitor    *Janitor
 	Dispatcher *Dispatcher
 	AltSvc     *AltSvcCache
 	Referer    *RefererAutomaton
@@ -31,15 +30,11 @@ type Engine struct {
 func NewEngine(
 	baseURL *url.URL,
 	staticHeaders http.Header,
-	evictor IdleEvictor,
-	evictInterval time.Duration,
-	maxInflight int,
 ) *Engine {
 	altSvc := NewAltSvcCache()
 
 	return &Engine{
 		Prepared:   NewPreparedConfig(baseURL, staticHeaders),
-		Janitor:    NewJanitor(evictor, evictInterval, maxInflight),
 		Dispatcher: NewDispatcher(altSvc),
 		AltSvc:     altSvc,
 		Referer:    NewRefererAutomaton(PolicyStrictOriginWhenCrossOrigin),
@@ -59,13 +54,6 @@ func (e *Engine) NewCycle(
 
 // Close shuts down background janitors and releases resources.
 func (e *Engine) Close() {
-	if e == nil {
-		return
-	}
-
-	if e.Janitor != nil {
-		e.Janitor.Stop()
-	}
 }
 
 type ConnectionPoolConfigDTO struct {

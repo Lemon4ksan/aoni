@@ -7,16 +7,17 @@ package decode
 import (
 	"encoding/json"
 	stdio "io"
-
-	"github.com/lemon4ksan/aoni/internal/pipeline"
 )
 
 // JSONDecoderConfig configures parsing options for JSON response streams.
 type JSONDecoderConfig struct {
+	// DisallowUnknownFields causes the decoder to return an error if the input contains keys that do not match fields in the target struct.
 	DisallowUnknownFields bool
-	UseNumber             bool
+	// UseNumber causes the decoder to unmarshal numbers into Interface{} as a [json.Number] instead of a float64.
+	UseNumber bool
 }
 
+// customJSONDecoder applies custom decoding flags (DisallowUnknownFields, UseNumber) during JSON stream parsing.
 type customJSONDecoder struct {
 	cfg JSONDecoderConfig
 }
@@ -39,15 +40,9 @@ func NewJSONDecoder(cfg JSONDecoderConfig) Decoder {
 	return customJSONDecoder{cfg: cfg}
 }
 
+// jsonDecoder parses response payload streams as standard JSON using [json.NewDecoder].
 type jsonDecoder struct{}
 
 func (jsonDecoder) Decode(reader stdio.Reader, target any) error {
-	buf := pipeline.GlobalBufferPool.Get()
-	defer pipeline.GlobalBufferPool.Put(buf)
-
-	if _, err := buf.ReadFrom(reader); err != nil {
-		return err
-	}
-
-	return json.Unmarshal(buf.Bytes(), target)
+	return json.NewDecoder(reader).Decode(target)
 }

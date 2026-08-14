@@ -19,6 +19,7 @@ type StaticSpecProvider struct {
 	Spec *utls.ClientHelloSpec
 }
 
+// ClientHelloSpec returns the static uTLS ClientHello specification.
 func (s StaticSpecProvider) ClientHelloSpec() (*utls.ClientHelloSpec, error) {
 	return s.Spec, nil
 }

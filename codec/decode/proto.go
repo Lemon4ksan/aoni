@@ -16,6 +16,7 @@ import (
 	"github.com/lemon4ksan/aoni/internal/pipeline"
 )
 
+// protoDecoder unmarshals binary Protocol Buffer response streams into [proto.Message] targets.
 type protoDecoder struct{}
 
 func (protoDecoder) Decode(r stdio.Reader, target any) error {
@@ -37,6 +38,7 @@ func (protoDecoder) Decode(r stdio.Reader, target any) error {
 	return nil
 }
 
+// protoJSONDecoder unmarshals JSON response streams into [proto.Message] targets using protojson options.
 type protoJSONDecoder struct{}
 
 func (protoJSONDecoder) Decode(r stdio.Reader, target any) error {
@@ -60,6 +62,7 @@ func (protoJSONDecoder) Decode(r stdio.Reader, target any) error {
 	return nil
 }
 
+// copyToBuffer streams r contents into a pooled byte buffer using zero-allocation copying.
 func copyToBuffer(r stdio.Reader) (*bytes.Buffer, error) {
 	buf := pipeline.GlobalBufferPool.Get()
 
@@ -71,6 +74,7 @@ func copyToBuffer(r stdio.Reader) (*bytes.Buffer, error) {
 	return buf, nil
 }
 
+// castOrResolveProto type-asserts target to [proto.Message] or initializes nil pointer targets via reflection.
 func castOrResolveProto(target any) (proto.Message, error) {
 	if msg, ok := target.(proto.Message); ok {
 		return msg, nil

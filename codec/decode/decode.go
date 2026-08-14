@@ -11,6 +11,7 @@ import (
 	"reflect"
 	"strings"
 	"sync"
+	"sync/atomic"
 
 	"github.com/lemon4ksan/aoni"
 	"github.com/lemon4ksan/aoni/internal/bytesconv"
@@ -68,16 +69,21 @@ func LimitDecoder(decoder Decoder, maxBytes int64) Decoder {
 }
 
 var (
+	bomUTF8 = []byte{0xEF, 0xBB, 0xBF}
+
 	decodersMu         sync.RWMutex
 	registeredDecoders = make(map[string]Decoder)
+	hasCustomDecoders  atomic.Bool
 )
 
+// normalizeContentType extracts the media type from a Content-Type header string (e.g. "application/json; charset=utf-8" -> "application/json").
 func normalizeContentType(contentType string) string {
 	mediaType, _, _ := strings.Cut(contentType, ";")
 	return strings.ToLower(strings.TrimSpace(mediaType))
 }
 
 // RegisterDecoder registers a custom [Decoder] globally for a MIME content type (e.g. "application/x-msgpack").
+// Thread-safe for concurrent invocation across goroutines.
 func RegisterDecoder(contentType string, decoder Decoder) {
 	norm := normalizeContentType(contentType)
 	if norm == "" {
@@ -89,8 +95,11 @@ func RegisterDecoder(contentType string, decoder Decoder) {
 
 	if decoder == nil {
 		delete(registeredDecoders, norm)
+		hasCustomDecoders.Store(len(registeredDecoders) > 0)
 	} else {
 		registeredDecoders[norm] = decoder
+
+		hasCustomDecoders.Store(true)
 	}
 }
 
@@ -100,7 +109,12 @@ func UnregisterDecoder(contentType string) {
 }
 
 // GetDecoder retrieves the custom [Decoder] globally registered for contentType, or nil if none is registered.
+// Thread-safe for concurrent invocation.
 func GetDecoder(contentType string) Decoder {
+	if !hasCustomDecoders.Load() {
+		return nil
+	}
+
 	norm := normalizeContentType(contentType)
 	if norm == "" {
 		return nil
@@ -114,19 +128,28 @@ func GetDecoder(contentType string) Decoder {
 
 // LookupDecoder resolves a [Decoder] for contentType, checking registered custom decoders first,
 // then standard MIME types (JSON, Proto, gRPC-Web, XML), falling back to RawDecoder.
+// Thread-safe for concurrent invocation.
 func LookupDecoder(contentType string) Decoder {
-	norm := normalizeContentType(contentType)
-	if norm != "" {
-		decodersMu.RLock()
+	if contentType == "application/json" || contentType == "application/json; charset=utf-8" {
+		return JSONDecoder
+	}
 
-		d, ok := registeredDecoders[norm]
+	if hasCustomDecoders.Load() {
+		norm := normalizeContentType(contentType)
+		if norm != "" {
+			decodersMu.RLock()
 
-		decodersMu.RUnlock()
+			d, ok := registeredDecoders[norm]
 
-		if ok {
-			return d
+			decodersMu.RUnlock()
+
+			if ok {
+				return d
+			}
 		}
 	}
+
+	norm := normalizeContentType(contentType)
 
 	switch {
 	case bytesconv.EqualFoldASCII(norm, "application/json"), bytesconv.EqualFoldASCII(norm, "text/json"):
@@ -175,7 +198,7 @@ func StripBOM(reader stdio.Reader) stdio.Reader {
 	}
 
 	peek, err := br.Peek(3)
-	if err == nil && len(peek) >= 3 && bytes.HasPrefix(peek, []byte{0xEF, 0xBB, 0xBF}) {
+	if err == nil && len(peek) >= 3 && bytes.HasPrefix(peek, bomUTF8) {
 		_, _ = br.Discard(3)
 		return br
 	}
@@ -225,6 +248,7 @@ func WithProto() aoni.RequestModifier { return mod.WithDecoder(ProtoDecoder) }
 // WithGRPCWeb creates an [aoni.RequestModifier] that assigns [GRPCWebDecoder] for response parsing.
 func WithGRPCWeb() aoni.RequestModifier { return mod.WithDecoder(GRPCWebDecoder) }
 
+// typeName extracts a string representation of target's concrete type for error reporting.
 func typeName(target any) string {
 	if target == nil {
 		return "<nil>"
@@ -234,6 +258,7 @@ func typeName(target any) string {
 }
 
 // DecodePayload decodes rawBody into target based on contentType using auto-matched or default decoders.
+// Thread-safe for concurrent execution.
 func DecodePayload(contentType string, rawBody []byte, target any) error {
 	if target == nil {
 		return nil

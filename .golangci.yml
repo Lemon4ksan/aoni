@@ -76,9 +76,6 @@ linters:
       - linters: [errcheck, revive, staticcheck, protogetter]
         path: .*(pb\.go|generated\.go)
 
-      - linters: [revive]
-        text: "exported: (exported|comment on exported|should have comment)"
-
       - linters: [gosec]
         text: "G103:"
 

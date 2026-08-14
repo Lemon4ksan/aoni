@@ -32,6 +32,10 @@ type Metadata map[string]string
 // Zero-Dependency gRPC:
 // Operates directly on raw HTTP/2 frames without dragging in google.golang.org/grpc.
 // Inherits aoni's uTLS Chrome fingerprints, p0f OS spoofing, and HPACK header ordering.
+//
+// Preconditions:
+//   - ctx and reqMsg must be non-nil.
+//   - Resp must be a pointer or struct type implementing [proto.Message].
 func Invoke[Resp any](
 	ctx context.Context,
 	doer aoni.RequestDoer,
@@ -44,28 +48,8 @@ func Invoke[Resp any](
 		return nil, err
 	}
 
-	path := fullMethod
-	if !strings.HasPrefix(path, "/") && !strings.HasPrefix(path, "http://") && !strings.HasPrefix(path, "https://") {
-		path = "/" + path
-	}
-
-	grpcMods := make([]aoni.RequestModifier, 0, len(mods)+4)
-	grpcMods = append(grpcMods,
-		mod.WithContentType("application/grpc"),
-		mod.WithHeader("te", "trailers"),
-		mod.WithHeader("user-agent", "grpc-aoni/1.0"),
-		mod.WithBody(bytes.NewReader(frameBytes)),
-	)
-
-	if deadline, ok := ctx.Deadline(); ok {
-		grpcMods = append(grpcMods, mod.WithHeader("grpc-timeout", formatTimeout(time.Until(deadline))))
-	}
-
-	if md, ok := FromContext(ctx); ok && len(md) > 0 {
-		grpcMods = append(grpcMods, WithMetadata(md))
-	}
-
-	grpcMods = append(grpcMods, mods...)
+	path := normalizeMethodPath(fullMethod)
+	grpcMods := prepareGRPCModifiers(ctx, frameBytes, false, mods)
 
 	requester := request.AsRequester(doer)
 
@@ -97,7 +81,10 @@ func Invoke[Resp any](
 	return result, nil
 }
 
-// InvokeFast is a fast gRPC client that does not create a *http.Response.
+// InvokeFast executes a high-performance gRPC unary call using the fast client engine without allocating *http.Response.
+//
+// Preconditions:
+//   - ctx, fastClient, and reqMsg must be non-nil.
 func InvokeFast[Resp any](
 	ctx context.Context,
 	fastClient *fast.Client,
@@ -110,10 +97,7 @@ func InvokeFast[Resp any](
 		return nil, err
 	}
 
-	path := fullMethod
-	if !strings.HasPrefix(path, "/") && !strings.HasPrefix(path, "http://") && !strings.HasPrefix(path, "https://") {
-		path = "/" + path
-	}
+	path := normalizeMethodPath(fullMethod)
 
 	req := fast.NewRequest(nil)
 	defer req.Release()
@@ -126,9 +110,7 @@ func InvokeFast[Resp any](
 	req.SetBodyBytes(frameBytes)
 
 	for _, m := range mods {
-		if m != nil {
-			m(req)
-		}
+		m.Apply(req)
 	}
 
 	resp, err := fastClient.Do(req)
@@ -151,6 +133,49 @@ func InvokeFast[Resp any](
 	return result, nil
 }
 
+// normalizeMethodPath guarantees that the gRPC method path starts with a leading slash.
+func normalizeMethodPath(fullMethod string) string {
+	if !strings.HasPrefix(fullMethod, "/") && !strings.HasPrefix(fullMethod, "http://") &&
+		!strings.HasPrefix(fullMethod, "https://") {
+		return "/" + fullMethod
+	}
+
+	return fullMethod
+}
+
+// prepareGRPCModifiers builds standard gRPC request headers (Content-Type, TE, User-Agent, Timeout, and Metadata).
+func prepareGRPCModifiers(
+	ctx context.Context,
+	frameBytes []byte,
+	isStreaming bool,
+	mods []aoni.RequestModifier,
+) []aoni.RequestModifier {
+	grpcMods := make([]aoni.RequestModifier, 0, len(mods)+5)
+	grpcMods = append(grpcMods,
+		mod.WithContentType("application/grpc"),
+		mod.WithHeader("te", "trailers"),
+		mod.WithHeader("user-agent", "grpc-aoni/1.0"),
+		mod.WithBody(bytes.NewReader(frameBytes)),
+	)
+
+	if isStreaming {
+		grpcMods = append(grpcMods, mod.WithHeader("grpc-accept-encoding", "gzip, identity"))
+	}
+
+	if deadline, ok := ctx.Deadline(); ok {
+		grpcMods = append(grpcMods, mod.WithHeader("grpc-timeout", formatTimeout(time.Until(deadline))))
+	}
+
+	if md, ok := FromContext(ctx); ok && len(md) > 0 {
+		grpcMods = append(grpcMods, WithMetadata(md))
+	}
+
+	grpcMods = append(grpcMods, mods...)
+
+	return grpcMods
+}
+
+// unmarshalFastGRPCFrame decodes Protobuf payload bytes from a fast client response.
 func unmarshalFastGRPCFrame(resp aoni.Response, msg proto.Message) error {
 	if stream := resp.BodyStream(); stream != nil && resp.HTTPResponse() == nil { //nolint:bodyclose
 		_, err := unmarshalFrame(stream, msg)
@@ -162,6 +187,7 @@ func unmarshalFastGRPCFrame(resp aoni.Response, msg proto.Message) error {
 	return err
 }
 
+// validateInitialHeaders verifies that HTTP status is 200 and Content-Type starts with application/grpc.
 func validateInitialHeaders(resp *http.Response) error {
 	if resp.StatusCode != http.StatusOK {
 		return &StatusError{
@@ -183,6 +209,7 @@ func validateInitialHeaders(resp *http.Response) error {
 	return nil
 }
 
+// validateResponseTrailers inspects HTTP/2 response trailers for grpc-status codes.
 func validateResponseTrailers(resp *http.Response) error {
 	trailers := resp.Trailer
 	if len(trailers) == 0 {
@@ -248,7 +275,7 @@ func (s *StreamResponse[Resp]) Recv() (*Resp, error) {
 	return result, nil
 }
 
-// Close terminates the streaming RPC session.
+// Close terminates the streaming RPC session and closes the underlying response body stream.
 func (s *StreamResponse[Resp]) Close() error {
 	if s.stream != nil {
 		return s.stream.Close()
@@ -271,29 +298,9 @@ func ServerStream[Resp any](
 		return nil, err
 	}
 
-	path := fullMethod
-	if !strings.HasPrefix(path, "/") && !strings.HasPrefix(path, "http://") && !strings.HasPrefix(path, "https://") {
-		path = "/" + path
-	}
+	path := normalizeMethodPath(fullMethod)
+	grpcMods := prepareGRPCModifiers(ctx, frameBytes, true, mods)
 
-	grpcMods := make([]aoni.RequestModifier, 0, len(mods)+5)
-	grpcMods = append(grpcMods,
-		mod.WithContentType("application/grpc"),
-		mod.WithHeader("te", "trailers"),
-		mod.WithHeader("grpc-accept-encoding", "gzip, identity"),
-		mod.WithHeader("user-agent", "grpc-aoni/1.0"),
-		mod.WithBody(bytes.NewReader(frameBytes)),
-	)
-
-	if deadline, ok := ctx.Deadline(); ok {
-		grpcMods = append(grpcMods, mod.WithHeader("grpc-timeout", formatTimeout(time.Until(deadline))))
-	}
-
-	if md, ok := FromContext(ctx); ok && len(md) > 0 {
-		grpcMods = append(grpcMods, WithMetadata(md))
-	}
-
-	grpcMods = append(grpcMods, mods...)
 	requester := request.AsRequester(doer)
 
 	resp, err := requester.Request(ctx, http.MethodPost, path, grpcMods...)

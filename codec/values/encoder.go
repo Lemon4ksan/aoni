@@ -17,12 +17,15 @@ import (
 
 	"github.com/lemon4ksan/aoni/internal/bytesconv"
 	"github.com/lemon4ksan/aoni/internal/mapper"
+	"github.com/lemon4ksan/aoni/internal/urlutil"
 )
 
+// getStructSchema resolves cached struct field metadata schema for type t.
 func getStructSchema(t reflect.Type) *mapper.StructSchema {
 	return mapper.DefaultSchemaCache.GetSchema(t)
 }
 
+// fillValues populates target url.Values with query key-value pairs derived from struct value v.
 func fillValues(s *mapper.StructSchema, v reflect.Value, values url.Values) error {
 	for i := range s.Fields {
 		if err := fillField(&s.Fields[i], v.Field(s.Fields[i].Index), values); err != nil {
@@ -33,6 +36,7 @@ func fillValues(s *mapper.StructSchema, v reflect.Value, values url.Values) erro
 	return nil
 }
 
+// fillField serializes an individual struct field into url.Values based on tag rules and default values.
 func fillField(f *mapper.FieldSchema, fieldValue reflect.Value, values url.Values) error {
 	if fieldValue.Kind() == reflect.Pointer {
 		if fieldValue.IsNil() {
@@ -65,6 +69,7 @@ func fillField(f *mapper.FieldSchema, fieldValue reflect.Value, values url.Value
 	return serializeValue(f, fieldValue, values)
 }
 
+// shouldSkipZeroValue checks whether a zero-value field should be omitted or assigned its default value.
 func shouldSkipZeroValue(f *mapper.FieldSchema, fieldValue reflect.Value, values url.Values) bool {
 	if !fieldValue.IsZero() {
 		return false
@@ -78,6 +83,7 @@ func shouldSkipZeroValue(f *mapper.FieldSchema, fieldValue reflect.Value, values
 	return f.OmitEmpty
 }
 
+// serializeValue converts a concrete field value into its string representation and sets it in values.
 func serializeValue(f *mapper.FieldSchema, fieldValue reflect.Value, values url.Values) error {
 	if !fieldValue.CanInterface() {
 		return nil
@@ -134,6 +140,7 @@ func serializeValue(f *mapper.FieldSchema, fieldValue reflect.Value, values url.
 	return nil
 }
 
+// serializeSlice serializes a slice or array field into multiple query parameter entries.
 func serializeSlice(f *mapper.FieldSchema, fieldValue reflect.Value, values url.Values) error {
 	if f.HasComma || f.HasSpace || f.HasPipe {
 		return serializeDelimitedSlice(f, fieldValue, values)
@@ -156,6 +163,7 @@ func serializeSlice(f *mapper.FieldSchema, fieldValue reflect.Value, values url.
 	return nil
 }
 
+// serializeDelimitedSlice joins slice element values with a configured delimiter (comma, space, or pipe).
 func serializeDelimitedSlice(f *mapper.FieldSchema, fieldValue reflect.Value, values url.Values) error {
 	sep := ","
 	if f.HasSpace {
@@ -188,18 +196,24 @@ func serializeDelimitedSlice(f *mapper.FieldSchema, fieldValue reflect.Value, va
 	return nil
 }
 
+// writeQueryKeyValuePair appends a URL-escaped key=value pair to sb using a stack-allocated buffer for zero allocations.
 func writeQueryKeyValuePair(sb *strings.Builder, key, value string, first *bool) {
 	if !*first {
 		sb.WriteByte('&')
 	}
 
-	sb.WriteString(url.QueryEscape(key))
-	sb.WriteByte('=')
-	sb.WriteString(url.QueryEscape(value))
+	var tmpBuf [64]byte
+
+	buf := urlutil.AppendQueryEscapeString(tmpBuf[:0], key)
+	buf = append(buf, '=')
+	buf = urlutil.AppendQueryEscapeString(buf, value)
+
+	sb.Write(buf)
 
 	*first = false
 }
 
+// protoToValues encodes a Protocol Buffer message into url.Values via protojson.
 func protoToValues(pm proto.Message) (url.Values, error) {
 	opts := protojson.MarshalOptions{UseProtoNames: true}
 
@@ -227,6 +241,7 @@ func protoToValues(pm proto.Message) (url.Values, error) {
 	return res, nil
 }
 
+// derefPointer unwraps nested pointer values until reaching a concrete value or nil pointer.
 func derefPointer(v reflect.Value) reflect.Value {
 	for v.Kind() == reflect.Pointer {
 		if v.IsNil() {
@@ -239,6 +254,7 @@ func derefPointer(v reflect.Value) reflect.Value {
 	return v
 }
 
+// hasTextOrStringerRepresentation reports whether value v implements encoding.TextMarshaler or fmt.Stringer.
 func hasTextOrStringerRepresentation(v reflect.Value) bool {
 	if !v.CanInterface() {
 		return false
@@ -251,6 +267,7 @@ func hasTextOrStringerRepresentation(v reflect.Value) bool {
 	return hasText || hasStringer
 }
 
+// toString formats primitive values, TextMarshalers, and Stringers into a string.
 func toString(v reflect.Value) (string, error) {
 	for v.Kind() == reflect.Interface || v.Kind() == reflect.Pointer {
 		if v.IsNil() {

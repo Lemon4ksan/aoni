@@ -13,12 +13,15 @@ import (
 	"io"
 	"net"
 	"os"
+	"slices"
 	"sync"
 	"sync/atomic"
 	"time"
 
 	"github.com/klauspost/compress/gzip"
 	"github.com/lemon4ksan/miyako/generic"
+
+	"github.com/lemon4ksan/aoni/internal/offheap"
 )
 
 var (
@@ -49,6 +52,44 @@ func LimitToContentLength(r io.Reader, contentLen int64) io.Reader {
 	}
 
 	return io.LimitReader(r, contentLen)
+}
+
+// copyWithLimit copies from r into w up to limit+1 bytes and returns the number of bytes written.
+// It avoids the heap allocation that io.LimitReader would incur.
+func copyWithLimit(w io.Writer, r io.ReadCloser, limit int64) (int64, error) {
+	bufPtr := copyBufPool.Get().(*[]byte)
+
+	buf := *bufPtr
+	defer func() {
+		if cap(*bufPtr) <= maxPoolBufferSize {
+			copyBufPool.Put(bufPtr)
+		}
+	}()
+
+	var total int64
+	for {
+		n, err := r.Read(buf)
+		if n > 0 {
+			wn, werr := w.Write(buf[:n])
+
+			total += int64(wn)
+			if werr != nil {
+				return total, werr
+			}
+		}
+
+		if err != nil {
+			if err == io.EOF {
+				return total, nil
+			}
+
+			return total, err
+		}
+
+		if total > limit {
+			return total, nil
+		}
+	}
 }
 
 // CopyZeroAlloc streams data from r to w using kernel zero-copy paths or pooled 32KB buffers.
@@ -288,6 +329,7 @@ func NewPooledGzipReader(r io.Reader) (io.ReadCloser, error) {
 	return &pooledGzipReadCloser{gr: gr, reader: r}, nil
 }
 
+// pooledGzipReadCloser wraps a pooled gzip.Reader and recycles it upon stream closure.
 type pooledGzipReadCloser struct {
 	gr     *gzip.Reader
 	reader io.Reader
@@ -351,15 +393,39 @@ func (r *ResponseBodyReadCloser) Close() error {
 	return err
 }
 
+// Bytes returns the pre-buffered payload bytes from the inner [MultiReadBody], if present.
+// For off-heap buffers (onOffHeap=true), callers must copy before the response body is closed.
+func (r *ResponseBodyReadCloser) Bytes() (data []byte, onOffHeap bool) {
+	if mrb, ok := UnwrapBody(r.ReadCloser).(*MultiReadBody); ok {
+		return mrb.Bytes()
+	}
+
+	return nil, false
+}
+
 func (r *ResponseBodyReadCloser) Unwrap() io.Closer { return r.ReadCloser }
 
-// MultiReadBody buffers payload streams in RAM or temp files for repeatable reads.
+// MultiReadBody buffers payload streams in RAM, off-heap pages, or temp files for repeatable reads.
+//
+// Lifecycle & RAM/Disk Transition Invariants:
+// - Payload is initially buffered in RAM (or direct kernel off-heap memory if threshold >= 64KB).
+// - If the payload exceeds threshold and disableDisk is false, it spills to a temporary disk file.
+// - Calling Close() merely rewinds the read cursor to 0, allowing repeated reads of the response body.
+// - ReallyClose() performs actual resource teardown: unmaps off-heap memory and deletes temporary files.
 type MultiReadBody struct {
 	tmpFile *os.File
 	reader  io.Reader
+	bytesRd bytes.Reader
 	data    []byte
+	offBuf  *offheap.OffHeapBuffer
 	mu      sync.Mutex
 	closed  bool
+}
+
+// Bytes returns the buffered payload data and whether the backing store is off-heap.
+// For off-heap buffers, callers must copy the data before [ReallyClose] is invoked.
+func (m *MultiReadBody) Bytes() (data []byte, onOffHeap bool) {
+	return m.data, m.offBuf != nil
 }
 
 // NewMultiReadBody creates a [MultiReadBody] wrapping rc using RAM or disk buffers.
@@ -368,23 +434,66 @@ func NewMultiReadBody(rc io.ReadCloser, threshold int64, disableDisk bool) (io.R
 		return nil, nil
 	}
 
+	if threshold >= 64*1024 {
+		offBuf, err := offheap.NewBuffer(int(threshold + 1))
+		if err == nil {
+			wrote, cErr := copyWithLimit(offBuf, rc, threshold)
+			if cErr != nil {
+				offBuf.Release()
+
+				_ = rc.Close()
+
+				return nil, cErr
+			}
+
+			if wrote <= threshold {
+				_ = rc.Close()
+				data := offBuf.Bytes()
+
+				mrb := &MultiReadBody{
+					offBuf: offBuf,
+					data:   data,
+				}
+				mrb.bytesRd.Reset(data)
+				mrb.reader = &mrb.bytesRd
+
+				return mrb, nil
+			}
+
+			if disableDisk {
+				offBuf.Release()
+
+				_ = rc.Close()
+
+				return nil, ErrBufferLimitExceeded
+			}
+
+			initialBytes := slices.Clone(offBuf.Bytes())
+			offBuf.Release()
+
+			return createDiskBackedMultiReadBody(rc, initialBytes)
+		}
+	}
+
 	var buf bytes.Buffer
 
-	limitReader := io.LimitReader(rc, threshold+1)
-
-	if _, err := CopyZeroAlloc(&buf, limitReader); err != nil {
+	wrote, err := copyWithLimit(&buf, rc, threshold)
+	if err != nil {
 		_ = rc.Close()
 		return nil, err
 	}
 
-	if int64(buf.Len()) <= threshold {
+	if wrote <= threshold {
 		_ = rc.Close()
 		data := buf.Bytes()
 
-		return &MultiReadBody{
-			data:   data,
-			reader: bytes.NewReader(data),
-		}, nil
+		mrb := &MultiReadBody{
+			data: data,
+		}
+		mrb.bytesRd.Reset(data)
+		mrb.reader = &mrb.bytesRd
+
+		return mrb, nil
 	}
 
 	if disableDisk {
@@ -454,7 +563,9 @@ func (m *MultiReadBody) Close() error {
 		_, _ = m.tmpFile.Seek(0, io.SeekStart)
 		m.reader = m.tmpFile
 	} else {
-		m.reader = bytes.NewReader(m.data)
+		// Reuse the embedded bytes.Reader - no heap allocation.
+		m.bytesRd.Reset(m.data)
+		m.reader = &m.bytesRd
 	}
 
 	return nil
@@ -470,6 +581,11 @@ func (m *MultiReadBody) ReallyClose() {
 	}
 
 	m.closed = true
+
+	if m.offBuf != nil {
+		m.offBuf.Release()
+		m.offBuf = nil
+	}
 
 	if m.tmpFile != nil {
 		_ = m.tmpFile.Close()

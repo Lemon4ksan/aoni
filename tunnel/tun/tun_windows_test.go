@@ -47,11 +47,29 @@ func TestWintunAdapter_ClosedState(t *testing.T) {
 	err = adapter.SendPacket([]byte{0x45, 0x00, 0x00, 0x14})
 	assert.NoError(t, err)
 
-	// ReleaseReceivePacket on closed or empty slice returns safely
-	adapter.ReleaseReceivePacket(nil)
-	adapter.ReleaseReceivePacket([]byte{})
+	// Read on closed adapter returns io.EOF
+	var buf [1500]byte
+
+	n, err := adapter.Read(buf[:])
+	assert.Equal(t, 0, n)
+	assert.ErrorIs(t, err, io.EOF)
+
+	// Write on closed adapter returns nil without error
+	n, err = adapter.Write([]byte{0x45, 0x00, 0x00, 0x14})
+	assert.Equal(t, 4, n)
+	assert.NoError(t, err)
+
+	// Name returns adapter name
+	adapter.name = "TestWintun0"
+	assert.Equal(t, "TestWintun0", adapter.Name())
 
 	// Close on already closed adapter is idempotent
 	err = adapter.Close()
 	assert.NoError(t, err)
+}
+
+func TestWintunAdapter_ImplementsAdapterInterface(t *testing.T) {
+	t.Parallel()
+
+	var _ Adapter = (*WintunAdapter)(nil)
 }

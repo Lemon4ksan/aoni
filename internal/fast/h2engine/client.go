@@ -90,14 +90,14 @@ func (cl *Client) onConnectionDropped(ctx context.Context, c *Conn) {
 	for e := cl.conns.Front(); e != nil; e = e.Next() {
 		if e.Value.(*Conn) == c {
 			cl.conns.Remove(e)
-			_, _, _ = cl.createConn(ctx)
+			_, _ = cl.createConn(ctx)
 
 			break
 		}
 	}
 }
 
-func (cl *Client) createConn(ctx context.Context) (*Conn, *list.Element, error) {
+func (cl *Client) createConn(ctx context.Context) (*Conn, error) {
 	c, err := cl.d.DialContext(ctx, ConnOpts{
 		PingInterval:  cl.d.PingInterval,
 		OnDisconnect:  cl.onConnectionDropped,
@@ -106,18 +106,16 @@ func (cl *Client) createConn(ctx context.Context) (*Conn, *list.Element, error) 
 		Settings:      cl.settings,
 	})
 	if err != nil {
-		return nil, nil, err
-	}
-
-	if cl.onRTT != nil {
-		c.reqQueued.Store("rtt_callback", cl.onRTT)
+		return nil, err
 	}
 
 	if len(cl.orderedKeys) > 0 {
 		c.SetOrderedHeaders(cl.orderedKeys)
 	}
 
-	return c, cl.conns.PushFront(c), nil
+	cl.conns.PushFront(c)
+
+	return c, nil
 }
 
 // Do executes req over an available HTTP/2 stream, automatically retrying
@@ -265,7 +263,7 @@ func (cl *Client) findAvailableConnLocked() *Conn {
 
 func (cl *Client) dialOrWaitLateBindingLocked(ctx context.Context) (*Conn, error) {
 	cl.lck.Unlock()
-	c, _, err := cl.createConn(ctx)
+	c, err := cl.createConn(ctx)
 	cl.lck.Lock()
 
 	if err != nil {

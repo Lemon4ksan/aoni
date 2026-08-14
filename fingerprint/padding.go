@@ -97,6 +97,7 @@ func PaddingHeaderName(cfg PaddingConfig) string {
 	return "X-Padding"
 }
 
+// secureRandomInt generates a cryptographically secure random integer in the range [0, maxVal) using crypto/rand.
 func secureRandomInt(maxVal int) int {
 	if maxVal <= 0 {
 		return 0

@@ -10,8 +10,8 @@
 // # Dual Engines
 //
 // aoni provides two execution engines under a unified conceptual framework:
-//   - [Client] — 100% net/http compatibility, full middleware chain support, and seamless ecosystem integration.
-//   - [github.com/lemon4ksan/aoni/fast.Client] — Native fasthttp + H2/H3 engine built for extreme throughput
+//   - [Client] - 100% net/http compatibility, full middleware chain support, and seamless ecosystem integration.
+//   - [github.com/lemon4ksan/aoni/fast.Client] - Native fasthttp + H2/H3 engine built for extreme throughput
 //     and zero heap allocations under parallel I/O.
 //
 // # Request Pipeline

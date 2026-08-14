@@ -86,7 +86,7 @@ func TestStdRequest_UnifiedModifiers(t *testing.T) {
 
 	stdReq := aoni.NewStdRequest(httpReq)
 	for _, m := range modifiers {
-		m(stdReq)
+		m.Apply(stdReq)
 	}
 
 	assert.Equal(t, "aoni-v1", stdReq.Header("X-App-ID"))

@@ -7,16 +7,35 @@
 package urlutil
 
 import (
+	"hash/crc32"
 	"net/url"
 	"strings"
 	"sync"
 
+	"github.com/lemon4ksan/aoni/internal/bytesconv"
 	"github.com/lemon4ksan/aoni/internal/simd"
 )
 
+// fastHash computes a hardware CRC32 hash of string s to select a cache shard index.
+//
+//go:inline
+func fastHash(s string) uint32 {
+	return crc32.ChecksumIEEE(bytesconv.S2B(s))
+}
+
+// cacheShard protects an isolated hash map partition with an RWMutex to minimize lock contention.
+type cacheShard struct {
+	mu sync.RWMutex
+	m  map[string]*url.URL
+}
+
+type shardedURLCache struct {
+	shards [16]cacheShard
+}
+
 var (
-	cache   sync.Map
-	bufPool = sync.Pool{
+	globalURLCache shardedURLCache
+	bufPool        = sync.Pool{
 		New: func() any {
 			b := make([]byte, 0, 512)
 			return &b
@@ -24,24 +43,43 @@ var (
 	}
 )
 
+func init() {
+	for i := 0; i < 16; i++ {
+		globalURLCache.shards[i].m = make(map[string]*url.URL, 16)
+	}
+}
+
 // Parse parses rawURL string or returns a cached [*url.URL] pointer with zero heap allocations.
 func Parse(rawURL string) (*url.URL, error) {
 	if rawURL == "" {
 		return &url.URL{}, nil
 	}
 
-	if val, ok := cache.Load(rawURL); ok {
-		return val.(*url.URL), nil
+	idx := fastHash(rawURL) & 15
+	sh := &globalURLCache.shards[idx]
+
+	sh.mu.RLock()
+	u, ok := sh.m[rawURL]
+	sh.mu.RUnlock()
+
+	if ok {
+		return u, nil
 	}
 
-	u, err := url.Parse(rawURL)
+	parsed, err := url.Parse(rawURL)
 	if err != nil {
 		return nil, err
 	}
 
-	cache.Store(rawURL, u)
+	sh.mu.Lock()
+	if len(sh.m) > 512 {
+		clear(sh.m)
+	}
 
-	return u, nil
+	sh.m[rawURL] = parsed
+	sh.mu.Unlock()
+
+	return parsed, nil
 }
 
 // ReplaceVar performs path variable replacement ({key} -> value) in path.
@@ -224,4 +262,48 @@ func BuildPath(basePath string, pathParams map[string]string, queryParams url.Va
 	}
 
 	return res
+}
+
+const hexDigits = "0123456789ABCDEF"
+
+//go:inline
+//go:nosplit
+func shouldEscape(c byte) bool {
+	if 'a' <= c && c <= 'z' || 'A' <= c && c <= 'Z' || '0' <= c && c <= '9' {
+		return false
+	}
+
+	switch c {
+	case '-', '_', '.', '~':
+		return false
+	}
+
+	return true
+}
+
+// AppendQueryEscape appends percent-encoded bytes of src to dst without heap allocations.
+func AppendQueryEscape(dst, src []byte) []byte {
+	for _, b := range src {
+		if !shouldEscape(b) {
+			dst = append(dst, b)
+		} else {
+			dst = append(dst, '%', hexDigits[b>>4], hexDigits[b&15])
+		}
+	}
+
+	return dst
+}
+
+// AppendQueryEscapeString appends percent-encoded bytes of string src to dst without heap allocations.
+func AppendQueryEscapeString(dst []byte, src string) []byte {
+	for i := 0; i < len(src); i++ {
+		b := src[i]
+		if !shouldEscape(b) {
+			dst = append(dst, b)
+		} else {
+			dst = append(dst, '%', hexDigits[b>>4], hexDigits[b&15])
+		}
+	}
+
+	return dst
 }

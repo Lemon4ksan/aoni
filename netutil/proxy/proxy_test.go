@@ -8,6 +8,7 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"net/url"
 	"sync"
 	"testing"
 	"time"
@@ -684,4 +685,27 @@ func TestProxyRotator_AdaptiveScoring_Cooldown(t *testing.T) {
 	}
 
 	assert.True(t, googleCallsCooled > 0, "Cooled client should be active for other domains")
+}
+
+func TestDomainProxyRouter(t *testing.T) {
+	t.Parallel()
+
+	router := NewDomainProxyRouter()
+
+	p1, _ := url.Parse("http://proxy1.example.com:8080")
+	p2, _ := url.Parse("http://proxy2.example.com:8080")
+
+	router.AddRoute("*.google.com", p1)
+	router.AddRoute("api.target.org", p2)
+
+	matched, found := router.RouteForDomain("mail.google.com")
+	require.True(t, found)
+	assert.Equal(t, p1, matched)
+
+	matched2, found2 := router.RouteForDomain("api.target.org")
+	require.True(t, found2)
+	assert.Equal(t, p2, matched2)
+
+	_, found3 := router.RouteForDomain("unknown.domain.com")
+	assert.False(t, found3)
 }

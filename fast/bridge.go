@@ -7,7 +7,6 @@ package fast
 import (
 	"crypto/tls"
 	"io"
-	"maps"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -97,14 +96,12 @@ func (t *Transport) RoundTrip(req *http.Request) (*http.Response, error) {
 	httpResp := &http.Response{
 		StatusCode:    resp.StatusCode(),
 		Status:        resp.Status(),
-		Header:        make(http.Header),
+		Header:        resp.Headers(),
 		Body:          &responseBodyCloser{ReadCloser: resp.BodyStream(), resp: resp},
 		ContentLength: resolveContentLength(resp),
 		Uncompressed:  resp.Uncompressed(),
 		Request:       req,
 	}
-
-	maps.Copy(httpResp.Header, resp.Headers())
 
 	if req.URL != nil && req.URL.Scheme == "https" {
 		httpResp.TLS = &tls.ConnectionState{
@@ -116,6 +113,7 @@ func (t *Transport) RoundTrip(req *http.Request) (*http.Response, error) {
 	return httpResp, nil
 }
 
+// responseBodyCloser wraps a response stream to ensure both stream and underlying pooled response memory are closed.
 type responseBodyCloser struct {
 	io.ReadCloser
 	resp aoni.Response
@@ -134,6 +132,7 @@ func (r *responseBodyCloser) Close() error {
 	return err
 }
 
+// copyHeaders copies standard HTTP headers from src into destination aoni request.
 func copyHeaders(dst aoni.Request, src http.Header) {
 	for k, vv := range src {
 		for _, v := range vv {
@@ -142,6 +141,7 @@ func copyHeaders(dst aoni.Request, src http.Header) {
 	}
 }
 
+// resolveContentLength parses Content-Length from response headers or returns -1 if absent/invalid.
 func resolveContentLength(resp aoni.Response) int64 {
 	clStr := resp.Header("Content-Length")
 	if clStr == "" {

@@ -14,23 +14,23 @@ import (
 
 // FieldSchema describes a pre-computed struct field index, tag options, and nested sub-schemas.
 type FieldSchema struct {
-	SubSchema   *StructSchema
-	Name        string
-	Key         string
-	DefaultVal  string
-	Index       int
-	IsInline    bool
-	IsAnonymous bool
-	OmitEmpty   bool
-	HasComma    bool
-	HasSpace    bool
-	HasPipe     bool
-	IsIgnored   bool
+	SubSchema   *StructSchema // Parsed sub-schema for embedded/anonymous or inlined struct fields
+	Name        string        // Go struct field identifier
+	Key         string        // Serialized query/json key extracted from struct tags
+	DefaultVal  string        // Default fallback value from the `default` tag
+	Index       int           // Zero-based index within the struct definition
+	IsInline    bool          // True if tagged with `inline` for flattened sub-fields
+	IsAnonymous bool          // True if the field is an embedded anonymous struct
+	OmitEmpty   bool          // True if tagged with `omitempty`
+	HasComma    bool          // True if slice values should be formatted as comma-separated values
+	HasSpace    bool          // True if slice values should be formatted as space-separated values
+	HasPipe     bool          // True if slice values should be formatted as pipe-separated values
+	IsIgnored   bool          // True if tagged with `json:"-"` / `url:"-"` or unexported
 }
 
 // StructSchema holds pre-computed field metadata for a target struct type.
 type StructSchema struct {
-	Fields []FieldSchema
+	Fields []FieldSchema // Ordered slice of pre-computed field reflection descriptors
 }
 
 // SchemaCache caches reflection struct schemas by [reflect.Type] using [sync.Map] to eliminate runtime reflection overhead.

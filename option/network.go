@@ -114,10 +114,10 @@ func WithAdaptiveProxyTimeout(cfg ...proxy.AdaptiveTimeoutConfig) aoni.ClientOpt
 		}
 
 		tracker := c.Network.DynamicHedging.Tracker
-		c.Defaults.DefaultMods = append(c.Defaults.DefaultMods, func(req aoni.Request) {
+		c.Defaults.DefaultMods = append(c.Defaults.DefaultMods, mod.Custom(func(req aoni.Request) {
 			adaptiveTimeout := proxy.ComputeProxyTimeout(tracker, activeCfg)
 			aoni.GetOrInitRequestConfig(req).TimeoutOverride = adaptiveTimeout
-		})
+		}))
 	}
 }
 
@@ -225,5 +225,12 @@ func WithNamedPipe(pipePath string) aoni.ClientOption {
 		cfg.Engine.CustomEngine = &http.Client{
 			Transport: ipc.NewNamedPipeTransport(pipePath),
 		}
+	}
+}
+
+// WithCoreAffinity returns an [aoni.ClientOption] locking calling threads to target physical CPU cores.
+func WithCoreAffinity(cores ...int) aoni.ClientOption {
+	return func(_ *aoni.Config) {
+		aoni.ApplyCPUAffinity(cores)
 	}
 }

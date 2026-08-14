@@ -5,6 +5,7 @@
 package aoni
 
 import (
+	"bytes"
 	"errors"
 	"strconv"
 	"strings"
@@ -48,9 +49,13 @@ var (
 
 // Error describes a structured operational failure in the aoni package.
 type Error struct {
-	Err    error
-	Op     string
-	Path   string
+	// Err holds the underlying cause error.
+	Err error
+	// Op identifies the high-level operation during which the failure occurred.
+	Op string
+	// Path specifies the request path or URI associated with the error.
+	Path string
+	// Target identifies the remote target host or address.
 	Target string
 }
 
@@ -89,8 +94,11 @@ func (e *Error) Unwrap() error { return e.Err }
 
 // APIError describes an HTTP response status failure (>= 400).
 type APIError struct {
-	Model      any
-	Body       []byte
+	// Model holds an unmarshaled error envelope structure if parsed by a decoder.
+	Model any
+	// Body contains a snippet or full payload of the HTTP response error body.
+	Body []byte
+	// StatusCode records the non-2xx HTTP response status code (e.g., 400, 404, 500).
 	StatusCode int
 }
 
@@ -110,40 +118,35 @@ func (e *APIError) Error() string {
 	limit := min(len(e.Body), 128)
 	bodySlice := e.Body[:limit]
 
+	cleanBody := bytes.Map(func(r rune) rune {
+		if r == '\n' || r == '\r' {
+			return ' '
+		}
+
+		return r
+	}, bodySlice)
+
 	var sb strings.Builder
-	sb.Grow(32 + len(bodySlice))
+	sb.Grow(32 + len(cleanBody))
 	sb.WriteString("aoni: status ")
 	sb.Write(statusBytes)
 	sb.WriteString(" (body: ")
-
-	for _, b := range bodySlice {
-		if b == '\n' || b == '\r' {
-			sb.WriteByte(' ')
-		} else {
-			sb.WriteByte(b)
-		}
-	}
-
+	sb.Write(cleanBody)
 	sb.WriteByte(')')
 
 	return sb.String()
 }
 
-// ValidationError reports that a required field failed schema validation.
-type ValidationError struct {
-	Field string
-}
-
-func (e *ValidationError) Error() string {
-	return "aoni: missing required field: " + e.Field
-}
-
 // BridgeError describes an execution failure during stdlib [http.Client] bridging.
 type BridgeError struct {
-	Err      error
+	// Err holds the underlying transport or pipeline error.
+	Err error
+	// Metadata contains additional context metadata (e.g. host, scheme).
 	Metadata map[string]any
-	Op       string
-	URL      string
+	// Op specifies the HTTP request method during which the error occurred.
+	Op string
+	// URL specifies the target request URL string.
+	URL string
 }
 
 func (e *BridgeError) Error() string {

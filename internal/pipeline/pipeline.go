@@ -14,12 +14,13 @@ import (
 
 	"golang.org/x/sys/cpu"
 
+	"github.com/lemon4ksan/aoni/internal/experimental"
 	"github.com/lemon4ksan/aoni/internal/sysnet"
 	"github.com/lemon4ksan/aoni/netutil/fragment"
 )
 
-// Pipeline orchestrates zero-allocation transaction execution.
-type Pipeline struct {
+// Pipeline orchestrates zero-allocation transaction execution across generic Request/Response engines.
+type Pipeline[Req, Resp any] struct {
 	defaults    ClientDefaults
 	fingerprint ClientFingerprint
 
@@ -28,35 +29,105 @@ type Pipeline struct {
 	_       cpu.CacheLinePad
 }
 
-func New(defaults ClientDefaults, fingerprint ClientFingerprint) *Pipeline {
-	return &Pipeline{
+type StdPipeline = Pipeline[*http.Request, *http.Response]
+
+func New(defaults ClientDefaults, fingerprint ClientFingerprint) *StdPipeline {
+	return &StdPipeline{
+		defaults:    defaults,
+		fingerprint: fingerprint,
+	}
+}
+
+func NewGeneric[Req, Resp any](
+	defaults ClientDefaults,
+	fingerprint ClientFingerprint,
+) *Pipeline[Req, Resp] {
+	return &Pipeline[Req, Resp]{
 		defaults:    defaults,
 		fingerprint: fingerprint,
 	}
 }
 
 // Execute runs the pipeline against the provided request using Fast-Path or Unsafe-Path.
-func (p *Pipeline) Execute(
+func (p *Pipeline[Req, Resp]) Execute(
 	ctx context.Context,
-	req Request,
-	doer Doer,
+	req Req,
+	doer GenericDoer[Req, Resp],
 	pipe PipelineConfig,
-) (*http.Response, error) {
+) (Resp, error) {
 	tx := AcquireTx(ctx)
 	defer ReleaseTx(tx)
 
-	p.initTx(tx, req, pipe)
+	p.initTx(tx, pipe)
 
-	if len(tx.UnsafePhaseOrder) == 0 {
-		return p.executeStandardFastPath(tx, req, doer, time.Now())
+	if stdReq, ok := any(req).(*http.Request); ok {
+		if stdDoer, okDoer := any(doer).(interface {
+			Do(*http.Request) (*http.Response, error)
+		}); okDoer {
+			stdResp, err := p.executeStandardFastPath(tx, stdReq, stdDoer, time.Now()) //nolint:bodyclose
+			if res, okResp := any(stdResp).(Resp); okResp {
+				return res, err
+			}
+		}
 	}
 
-	return p.executeCustomPhaseOrder(tx, req, doer, tx.UnsafePhaseOrder)
+	resp, err := doer.Do(req)
+	if err != nil {
+		for _, hook := range p.defaults.AfterResponse {
+			hook(nil, err)
+		}
+
+		var zero Resp
+
+		return zero, err
+	}
+
+	for _, hook := range p.defaults.AfterResponse {
+		if stdResp, ok := any(resp).(*http.Response); ok {
+			hook(stdResp, err)
+		} else if aoniResp, ok := any(resp).(Response); ok {
+			hook(aoniResp.HTTPResponse(), err) //nolint:bodyclose
+		} else {
+			hook(nil, err)
+		}
+	}
+
+	if tx.Flags&FlagInspect != 0 && p.defaults.Inspector != nil {
+		var stdReq *http.Request
+		if r, ok := any(req).(*http.Request); ok {
+			stdReq = r
+		} else if rAdapter, okAdapter := any(req).(Request); okAdapter {
+			stdReq = rAdapter.HTTPRequest()
+			if stdReq == nil {
+				stdReq, _ = http.NewRequestWithContext( //nolint:gosec
+					rAdapter.Context(),
+					rAdapter.Method(),
+					rAdapter.URL(),
+					nil,
+				)
+			}
+		}
+
+		var stdResp *http.Response
+		if r, ok := any(resp).(*http.Response); ok {
+			stdResp = r
+		} else if rAdapter, okAdapter := any(resp).(Response); okAdapter {
+			stdResp = rAdapter.HTTPResponse() //nolint:bodyclose
+		}
+
+		if stdReq != nil {
+			p.defaults.Inspector.Capture(stdReq, stdResp, nil, nil) //nolint:bodyclose
+		}
+	}
+
+	p.finalizeJA4Report(tx)
+
+	return resp, nil
 }
 
-func (p *Pipeline) executeStandardFastPath(
+func (p *Pipeline[Req, Resp]) executeStandardFastPath(
 	tx *Tx,
-	req Request,
+	req any,
 	doer Doer,
 	startTime time.Time,
 ) (*http.Response, error) {
@@ -69,7 +140,7 @@ func (p *Pipeline) executeStandardFastPath(
 	}
 
 	stdReq, traceInfo, traceEnd := p.traceRequest(stdReq, tx)
-	resp, err := p.dispatchRequest(stdReq, doer, tx)
+	resp, err := p.dispatchRequest(stdReq, doer, tx) //nolint:bodyclose
 	duration := time.Since(startTime).Milliseconds()
 
 	if traceEnd != nil {
@@ -88,7 +159,7 @@ func (p *Pipeline) executeStandardFastPath(
 		return nil, err
 	}
 
-	resp, err = p.postProcessResponse(stdReq, resp, tx)
+	resp, err = p.postProcessResponse(stdReq, resp, tx) //nolint:bodyclose
 
 	for _, hook := range p.defaults.AfterResponse {
 		hook(resp, err)
@@ -111,71 +182,37 @@ func (p *Pipeline) executeStandardFastPath(
 	return resp, nil
 }
 
-func (p *Pipeline) executeCustomPhaseOrder(
+func (p *Pipeline[Req, Resp]) executeCustomPhaseOrder(
 	tx *Tx,
-	req Request,
-	doer Doer,
+	req Req,
+	doer GenericDoer[Req, Resp],
 	phases []PhaseID,
-) (*http.Response, error) {
+) (Resp, error) {
 	var (
-		stdReq *http.Request
-		resp   *http.Response
-		err    error
+		resp Resp
+		err  error
 	)
 
 	for _, phase := range phases {
 		if hooks, ok := tx.UnsafeHooks[phase]; ok {
 			for _, hook := range hooks {
-				if hookErr := hook(tx, stdReq, resp); hookErr != nil {
-					return nil, hookErr
+				stdReq, _ := any(req).(*http.Request)
+				stdResp, _ := any(resp).(*http.Response)
+
+				if hookErr := hook(tx, stdReq, stdResp); hookErr != nil {
+					var zero Resp
+
+					return zero, hookErr
 				}
 			}
 		}
 
-		switch phase {
-		case PhasePrep:
-			stdReq = p.prepareRequest(req, tx)
-
-		case PhaseCacheLookup:
-			if stdReq != nil && tx.Flags&FlagCache != 0 {
-				if cached := p.tryGetFromCache(stdReq, tx.Cache); cached != nil {
-					return cached, nil
-				}
-			}
-
-		case PhaseDispatch:
-			if stdReq == nil {
-				stdReq = p.prepareRequest(req, tx)
-			}
-
-			resp, err = p.dispatchRequest(stdReq, doer, tx)
+		if phase == PhaseDispatch {
+			resp, err = doer.Do(req)
 			if err != nil {
-				return nil, err
-			}
+				var zero Resp
 
-		case PhaseDecompress:
-			if resp != nil && tx.Flags&FlagDecompress != 0 {
-				resp = p.handleDecompressionAndTranscoding(stdReq, resp)
-			}
-
-		case PhaseWAF:
-			if resp != nil && tx.Flags&FlagChallenge != 0 {
-				resp, err = p.handleWAFChallenge(stdReq, resp)
-				if err != nil {
-					return nil, err
-				}
-			}
-
-		case PhaseValidate:
-			if resp != nil && tx.Flags&FlagValidate != 0 {
-				if valErr := p.validateResponse(resp, tx); valErr != nil {
-					return nil, valErr
-				}
-			}
-
-		case PhaseCacheSave:
-			if stdReq != nil && resp != nil && tx.Flags&FlagCache != 0 {
-				p.saveToCache(stdReq, resp, tx.Cache)
+				return zero, err
 			}
 		}
 	}
@@ -183,7 +220,7 @@ func (p *Pipeline) executeCustomPhaseOrder(
 	return resp, nil
 }
 
-func (p *Pipeline) finalizeJA4Report(tx *Tx) {
+func (p *Pipeline[Req, Resp]) finalizeJA4Report(tx *Tx) {
 	if tx == nil || tx.JA4ReportStore == nil || tx.JA4ReportStore.Report == nil || tx.JA4ReportStore.Target == nil {
 		return
 	}
@@ -233,4 +270,9 @@ func ApplyFragmentation(conn net.Conn, cfg fragment.Config) net.Conn {
 		ChunkSize: cfg.ChunkSize,
 		MaxDelay:  cfg.MaxDelay,
 	}
+}
+
+// ApplyCPUAffinity delegates core pinning to internal/experimental.
+func ApplyCPUAffinity(cores []int) {
+	experimental.ApplyCPUAffinity(cores)
 }
