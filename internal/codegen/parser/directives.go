@@ -175,6 +175,14 @@ func ApplyMethodDirective(m *ir.MethodIR, d *Directive) {
 
 	case "extract":
 		m.Extract = parseExtractDirective(d)
+	case "idempotent", "idempotency_key":
+		m.Idempotent = true
+	case "coalesce":
+		m.Coalesce = true
+	case "etag":
+		m.ETag = true
+	case "sign":
+		m.SignHMAC = parseSignDirective(d)
 	case "multipart":
 		m.PayloadKind = ir.PayloadMultipart
 	case "form":
@@ -450,4 +458,43 @@ func parseExtractDirective(d *Directive) *ir.ExtractIR {
 	}
 
 	return nil
+}
+
+func parseSignDirective(d *Directive) *ir.SignHMACIR {
+	if d == nil {
+		return nil
+	}
+
+	sig := &ir.SignHMACIR{
+		Algorithm:  "hmac_sha256",
+		HeaderName: "X-Signature",
+	}
+
+	if d.Value != "" {
+		sig.Algorithm = d.Value
+	}
+
+	if algo, ok := d.Args["algo"]; ok {
+		sig.Algorithm = algo
+	} else if algo, ok := d.Args["algorithm"]; ok {
+		sig.Algorithm = algo
+	}
+
+	if key, ok := d.Args["key"]; ok {
+		sig.SecretKey = key
+	} else if secret, ok := d.Args["secret"]; ok {
+		sig.SecretKey = secret
+	}
+
+	if env, ok := d.Args["key_env"]; ok {
+		sig.KeyEnv = env
+	} else if env, ok := d.Args["env"]; ok {
+		sig.KeyEnv = env
+	}
+
+	if hdr, ok := d.Args["header"]; ok {
+		sig.HeaderName = hdr
+	}
+
+	return sig
 }

@@ -75,6 +75,7 @@ func (e *Emitter) emitImports(buf *bytes.Buffer, root *ir.RootIR) {
 	buf.WriteString("\t\"net/http\"\n")
 	buf.WriteString("\t\"net/textproto\"\n")
 	buf.WriteString("\t\"net/url\"\n")
+	buf.WriteString("\t\"os\"\n")
 	buf.WriteString("\t\"regexp\"\n")
 	buf.WriteString("\t\"strconv\"\n")
 	buf.WriteString("\t\"time\"\n\n")
@@ -91,8 +92,8 @@ func (e *Emitter) emitImports(buf *bytes.Buffer, root *ir.RootIR) {
 	stdImports := map[string]bool{
 		"bytes": true, "context": true, "encoding/json": true, "errors": true,
 		"fmt": true, "io": true, "mime/multipart": true, "net/http": true,
-		"net/textproto": true, "net/url": true, "regexp": true, "strconv": true,
-		"strings": true, "time": true,
+		"net/textproto": true, "net/url": true, "os": true, "regexp": true,
+		"strconv": true, "strings": true, "time": true,
 	}
 
 	for _, imp := range root.Imports {
@@ -305,6 +306,26 @@ func (e *Emitter) emitMethod(buf *bytes.Buffer, clientStructName string, m *ir.M
 
 	if m.Encoder != "" {
 		fmt.Fprintf(buf, "\tallMods = append(allMods, mod.WithEncoder(%s))\n", m.Encoder)
+	}
+
+	if m.Idempotent {
+		buf.WriteString("\tallMods = append(allMods, mod.WithIdempotencyKey())\n")
+	}
+
+	if m.Coalesce {
+		buf.WriteString("\tallMods = append(allMods, mod.WithCoalesce())\n")
+	}
+
+	if m.ETag {
+		buf.WriteString("\tallMods = append(allMods, mod.WithETag())\n")
+	}
+
+	if m.SignHMAC != nil {
+		if m.SignHMAC.KeyEnv != "" {
+			fmt.Fprintf(buf, "\tallMods = append(allMods, mod.WithSignHMAC(os.Getenv(%q)))\n", m.SignHMAC.KeyEnv)
+		} else {
+			fmt.Fprintf(buf, "\tallMods = append(allMods, mod.WithSignHMAC(%q))\n", m.SignHMAC.SecretKey)
+		}
 	}
 
 	// Target requester

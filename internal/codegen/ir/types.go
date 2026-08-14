@@ -153,8 +153,20 @@ type MethodIR struct {
 	Encoder         string
 	Codec           string
 	Extract         *ExtractIR
+	Idempotent      bool
+	Coalesce        bool
+	ETag            bool
+	SignHMAC        *SignHMACIR
 	StackModsSize   int
 	StackBufSize    int
+}
+
+// SignHMACIR models cryptographic HMAC request signing settings.
+type SignHMACIR struct {
+	SecretKey  string
+	KeyEnv     string
+	Algorithm  string
+	HeaderName string
 }
 
 // OperationKind specifies the type of method operation.
