@@ -296,10 +296,5 @@ func TestAcquireFrameInArena(t *testing.T) {
 		if rst == nil || rst.Type() != FrameResetStream {
 			t.Fatalf("expected FrameResetStream instance")
 		}
-
-		ReleaseFrame(ping)
-		ReleaseFrame(prio)
-		ReleaseFrame(wu)
-		ReleaseFrame(rst)
 	})
 }

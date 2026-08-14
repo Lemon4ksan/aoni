@@ -128,34 +128,31 @@ func (p *ConnectionFramePool) AcquireFrame(frameType FrameType) Frame {
 //
 // Must only be called from the goroutine that owns this pool.
 func (p *ConnectionFramePool) ReleaseFrame(fr Frame) {
-	if p == nil || fr == nil {
-		ReleaseFrame(fr)
+	if fr == nil {
 		return
 	}
 
-	switch f := fr.(type) {
-	case *Ping:
-		if p.ping != nil {
-			p.ping.Free(f)
-			return
-		}
+	if p != nil {
+		switch f := fr.(type) {
+		case *Ping:
+			if p.ping != nil && p.ping.Free(f) {
+				return
+			}
 
-	case *WindowUpdate:
-		if p.wu != nil {
-			p.wu.Free(f)
-			return
-		}
+		case *WindowUpdate:
+			if p.wu != nil && p.wu.Free(f) {
+				return
+			}
 
-	case *RstStream:
-		if p.rst != nil {
-			p.rst.Free(f)
-			return
-		}
+		case *RstStream:
+			if p.rst != nil && p.rst.Free(f) {
+				return
+			}
 
-	case *Priority:
-		if p.prio != nil {
-			p.prio.Free(f)
-			return
+		case *Priority:
+			if p.prio != nil && p.prio.Free(f) {
+				return
+			}
 		}
 	}
 

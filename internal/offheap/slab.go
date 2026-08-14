@@ -122,19 +122,19 @@ func (s *SlabAllocator[T]) Alloc() *T {
 // Free returns a slot previously obtained via [SlabAllocator.Alloc] back to the slab.
 // The slot memory is zeroed before being marked free.
 //
-// Passing a pointer not obtained from this slab, or a misaligned pointer, is silently ignored.
-// Double-free is a programming error and is not detected.
+// Returns true if the pointer belonged to this slab and was freed, or false if the
+// pointer did not originate from this slab (or was nil).
 //
 // Time complexity: O(1).
-func (s *SlabAllocator[T]) Free(p *T) {
+func (s *SlabAllocator[T]) Free(p *T) bool {
 	if s == nil || s.page == nil || p == nil {
-		return
+		return false
 	}
 
 	// Compute slot index from pointer offset within the slab page.
 	offset := int(uintptr(unsafe.Pointer(p)) - uintptr(s.page))
 	if offset < 0 || offset >= s.stride*s.cap || offset%s.stride != 0 {
-		return // pointer not from this slab, or misaligned - ignore
+		return false // pointer not from this slab, or misaligned - ignore
 	}
 
 	idx := offset / s.stride
@@ -146,6 +146,8 @@ func (s *SlabAllocator[T]) Free(p *T) {
 	bit := uint(idx % 64)
 	s.bitmap[word] |= 1 << bit
 	s.free++
+
+	return true
 }
 
 // Reset marks all slots as free in O(slots/64) time.
