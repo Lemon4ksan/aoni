@@ -5,7 +5,6 @@
 package fingerprint
 
 import (
-	"fmt"
 	"strings"
 
 	"github.com/lemon4ksan/aoni/fingerprint/profiles"
@@ -33,19 +32,11 @@ func BuildClientHintsForOS(ua string, os profiles.OSKey) ClientHints {
 	majorVersion := extractMajorVersion(fullVersion)
 
 	hints := ClientHints{
-		Brand: fmt.Sprintf(
-			`"Not_A Brand";v="8", "Chromium";v="%s", "Google Chrome";v="%s"`,
-			majorVersion,
-			majorVersion,
-		),
-		FullVersion: fullVersion,
-		FullVersionList: fmt.Sprintf(
-			`"Not_A Brand";v="8.0.0.0", "Chromium";v="%s", "Google Chrome";v="%s"`,
-			fullVersion,
-			fullVersion,
-		),
-		Mobile:      os.Mobile(),
-		FormFactors: resolveFormFactor(os),
+		Brand:           `"Not_A Brand";v="8", "Chromium";v="` + majorVersion + `", "Google Chrome";v="` + majorVersion + `"`,
+		FullVersion:     fullVersion,
+		FullVersionList: `"Not_A Brand";v="8.0.0.0", "Chromium";v="` + fullVersion + `", "Google Chrome";v="` + fullVersion + `"`,
+		Mobile:          os.Mobile(),
+		FormFactors:     resolveFormFactor(os),
 	}
 
 	populateOSDetails(&hints, os)

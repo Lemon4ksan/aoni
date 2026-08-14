@@ -12,6 +12,7 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"slices"
 	"strings"
 	"time"
 
@@ -178,7 +179,7 @@ func (c *Client) Request(
 			}
 		} else if len(c.defaults.Headers) > 0 {
 			for k, v := range c.defaults.Headers {
-				reqHeader[k] = append([]string(nil), v...)
+				reqHeader[k] = slices.Clone(v)
 			}
 		}
 	}

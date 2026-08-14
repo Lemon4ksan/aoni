@@ -307,7 +307,9 @@ func ResumableSSE[T any](
 			default:
 			}
 
-			reqMods := buildSSERequestModifiers(mods, lastEventID)
+			var stackBuf [stackModCapacity]aoni.RequestModifier
+
+			reqMods := buildSSERequestModifiers(mods, lastEventID, &stackBuf)
 
 			resp, err := Get(ctx, c, path, reqMods...)
 			if err != nil {
@@ -344,19 +346,45 @@ func ResumableSSE[T any](
 	return out, errs, nil
 }
 
-func buildSSERequestModifiers(mods []aoni.RequestModifier, lastEventID string) []aoni.RequestModifier {
-	reqMods := make([]aoni.RequestModifier, 0, len(mods)+4)
-	reqMods = append(reqMods,
-		mod.WithHeader("Accept", "text/event-stream"),
-		mod.WithHeader("Cache-Control", "no-cache"),
-		mod.WithHeader("Connection", "keep-alive"),
-	)
+const stackModCapacity = 16
 
+func buildSSERequestModifiers(
+	mods []aoni.RequestModifier,
+	lastEventID string,
+	stackBuf *[stackModCapacity]aoni.RequestModifier,
+) []aoni.RequestModifier {
+	baseCount := 3
 	if lastEventID != "" {
-		reqMods = append(reqMods, mod.WithHeader("Last-Event-ID", lastEventID))
+		baseCount = 4
 	}
 
-	return append(reqMods, mods...)
+	total := baseCount + len(mods)
+	if total <= stackModCapacity {
+		stackBuf[0] = mod.WithHeader("Accept", "text/event-stream")
+		stackBuf[1] = mod.WithHeader("Cache-Control", "no-cache")
+
+		stackBuf[2] = mod.WithHeader("Connection", "keep-alive")
+		if lastEventID != "" {
+			stackBuf[3] = mod.WithHeader("Last-Event-ID", lastEventID)
+		}
+
+		copy(stackBuf[baseCount:], mods)
+
+		return stackBuf[:total]
+	}
+
+	res := make([]aoni.RequestModifier, total)
+	res[0] = mod.WithHeader("Accept", "text/event-stream")
+	res[1] = mod.WithHeader("Cache-Control", "no-cache")
+
+	res[2] = mod.WithHeader("Connection", "keep-alive")
+	if lastEventID != "" {
+		res[3] = mod.WithHeader("Last-Event-ID", lastEventID)
+	}
+
+	copy(res[baseCount:], mods)
+
+	return res
 }
 
 func consumeSSEResponse[T any](
@@ -426,13 +454,11 @@ func SSE[T any](
 	path string,
 	mods ...aoni.RequestModifier,
 ) (<-chan T, <-chan error, error) {
-	mods = append([]aoni.RequestModifier{
-		mod.WithHeader("Accept", "text/event-stream"),
-		mod.WithHeader("Cache-Control", "no-cache"),
-		mod.WithHeader("Connection", "keep-alive"),
-	}, mods...)
+	var stackBuf [stackModCapacity]aoni.RequestModifier
 
-	resp, err := Get(ctx, c, path, mods...)
+	allMods := buildSSERequestModifiers(mods, "", &stackBuf)
+
+	resp, err := Get(ctx, c, path, allMods...)
 	if err != nil {
 		return nil, nil, err
 	}

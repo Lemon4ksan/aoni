@@ -11,8 +11,6 @@ import (
 	"google.golang.org/protobuf/proto"
 
 	"github.com/lemon4ksan/aoni"
-	"github.com/lemon4ksan/aoni/codec/decode"
-	"github.com/lemon4ksan/aoni/mod"
 	"github.com/lemon4ksan/aoni/request"
 )
 
@@ -23,12 +21,11 @@ func ProtoGetToFast[Resp any](
 	path string,
 	mods ...aoni.RequestModifier,
 ) (*Resp, error) {
-	mods = append([]aoni.RequestModifier{
-		mod.WithHeader("Accept", "application/x-protobuf"),
-		mod.WithDecoder(decode.ProtoDecoder),
-	}, mods...)
+	var stackBuf [stackModCapacity]aoni.RequestModifier
 
-	return request.DoToFast[Resp](ctx, doer, http.MethodGet, path, nil, mods...)
+	allMods := withProtoGetMods(&stackBuf, mods)
+
+	return request.DoToFast[Resp](ctx, doer, http.MethodGet, path, nil, allMods...)
 }
 
 // ProtoGetIntoFast executes a fast GET request expecting binary Protobuf response decoded into target.
@@ -39,12 +36,11 @@ func ProtoGetIntoFast[T any](
 	target *T,
 	mods ...aoni.RequestModifier,
 ) error {
-	mods = append([]aoni.RequestModifier{
-		mod.WithHeader("Accept", "application/x-protobuf"),
-		mod.WithDecoder(decode.ProtoDecoder),
-	}, mods...)
+	var stackBuf [stackModCapacity]aoni.RequestModifier
 
-	return request.DoIntoFast[T](ctx, doer, http.MethodGet, path, nil, target, mods...)
+	allMods := withProtoGetMods(&stackBuf, mods)
+
+	return request.DoIntoFast[T](ctx, doer, http.MethodGet, path, nil, target, allMods...)
 }
 
 // ProtoPostToFast executes a fast POST request carrying a binary proto.Message payload decoded into Resp.
@@ -55,12 +51,11 @@ func ProtoPostToFast[Resp any](
 	msg proto.Message,
 	mods ...aoni.RequestModifier,
 ) (*Resp, error) {
-	mods = append([]aoni.RequestModifier{
-		mod.WithProtoBody(msg),
-		mod.WithDecoder(decode.ProtoDecoder),
-	}, mods...)
+	var stackBuf [stackModCapacity]aoni.RequestModifier
 
-	return request.DoToFast[Resp](ctx, doer, http.MethodPost, path, nil, mods...)
+	allMods := withProtoPostMods(&stackBuf, msg, mods)
+
+	return request.DoToFast[Resp](ctx, doer, http.MethodPost, path, nil, allMods...)
 }
 
 // ProtoPostIntoFast executes a fast POST request carrying a binary proto.Message payload decoded into target.
@@ -72,12 +67,11 @@ func ProtoPostIntoFast[T any](
 	target *T,
 	mods ...aoni.RequestModifier,
 ) error {
-	mods = append([]aoni.RequestModifier{
-		mod.WithProtoBody(msg),
-		mod.WithDecoder(decode.ProtoDecoder),
-	}, mods...)
+	var stackBuf [stackModCapacity]aoni.RequestModifier
 
-	return request.DoIntoFast[T](ctx, doer, http.MethodPost, path, nil, target, mods...)
+	allMods := withProtoPostMods(&stackBuf, msg, mods)
+
+	return request.DoIntoFast[T](ctx, doer, http.MethodPost, path, nil, target, allMods...)
 }
 
 // WebPostToFast executes a fast POST request carrying a gRPC-Web framed payload decoded into Resp.
@@ -88,12 +82,11 @@ func WebPostToFast[Resp any](
 	msg proto.Message,
 	mods ...aoni.RequestModifier,
 ) (*Resp, error) {
-	mods = append([]aoni.RequestModifier{
-		mod.WithGRPCWebBody(msg),
-		mod.WithDecoder(decode.GRPCWebDecoder),
-	}, mods...)
+	var stackBuf [stackModCapacity]aoni.RequestModifier
 
-	return request.DoToFast[Resp](ctx, doer, http.MethodPost, path, nil, mods...)
+	allMods := withWebPostMods(&stackBuf, msg, mods)
+
+	return request.DoToFast[Resp](ctx, doer, http.MethodPost, path, nil, allMods...)
 }
 
 // WebPostIntoFast executes a fast POST request carrying a gRPC-Web framed payload decoded into target.
@@ -105,10 +98,9 @@ func WebPostIntoFast[T any](
 	target *T,
 	mods ...aoni.RequestModifier,
 ) error {
-	mods = append([]aoni.RequestModifier{
-		mod.WithGRPCWebBody(msg),
-		mod.WithDecoder(decode.GRPCWebDecoder),
-	}, mods...)
+	var stackBuf [stackModCapacity]aoni.RequestModifier
 
-	return request.DoIntoFast[T](ctx, doer, http.MethodPost, path, nil, target, mods...)
+	allMods := withWebPostMods(&stackBuf, msg, mods)
+
+	return request.DoIntoFast[T](ctx, doer, http.MethodPost, path, nil, target, allMods...)
 }

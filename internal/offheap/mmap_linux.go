@@ -40,6 +40,7 @@ func freeKernelPage(ptr unsafe.Pointer, size int) error {
 	}
 
 	b := unsafe.Slice((*byte)(ptr), size)
+
 	err := unix.Munmap(b)
 	if err != nil {
 		return fmt.Errorf("offheap: munmap failed: %w", err)

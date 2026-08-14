@@ -158,7 +158,9 @@ func Post(
 		return nil, err
 	}
 
-	allMods := buildPostMods(bodyReader, mods)
+	var stackBuf [stackModCapacity]aoni.RequestModifier
+
+	allMods := withJSONBodyMods(&stackBuf, bodyReader, mods)
 
 	return c.Request(ctx, http.MethodPost, path, allMods...)
 }
@@ -176,7 +178,9 @@ func PostTo[Resp any](
 		return nil, err
 	}
 
-	allMods := buildPostMods(bodyReader, mods)
+	var stackBuf [stackModCapacity]aoni.RequestModifier
+
+	allMods := withJSONBodyMods(&stackBuf, bodyReader, mods)
 
 	resp, err := c.Request(ctx, http.MethodPost, path, allMods...) //nolint:bodyclose
 	if err != nil {
@@ -200,13 +204,11 @@ func PostInto[T any](
 		return err
 	}
 
-	mods = append([]aoni.RequestModifier{
-		mod.WithContentType("application/json"),
-		mod.WithAccept("application/json"),
-		mod.WithBody(bodyReader),
-	}, mods...)
+	var stackBuf [stackModCapacity]aoni.RequestModifier
 
-	resp, err := c.Request(ctx, http.MethodPost, path, mods...) //nolint:bodyclose
+	allMods := withJSONBodyMods(&stackBuf, bodyReader, mods)
+
+	resp, err := c.Request(ctx, http.MethodPost, path, allMods...) //nolint:bodyclose
 	if err != nil {
 		return err
 	}
@@ -238,13 +240,11 @@ func Put(
 		return nil, err
 	}
 
-	mods = append([]aoni.RequestModifier{
-		mod.WithContentType("application/json"),
-		mod.WithAccept("application/json"),
-		mod.WithBody(bodyReader),
-	}, mods...)
+	var stackBuf [stackModCapacity]aoni.RequestModifier
 
-	return c.Request(ctx, http.MethodPut, path, mods...)
+	allMods := withJSONBodyMods(&stackBuf, bodyReader, mods)
+
+	return c.Request(ctx, http.MethodPut, path, allMods...)
 }
 
 // PutTo executes a PUT request and unmarshals the response payload into Resp.
@@ -260,13 +260,11 @@ func PutTo[Resp any](
 		return nil, err
 	}
 
-	mods = append([]aoni.RequestModifier{
-		mod.WithContentType("application/json"),
-		mod.WithAccept("application/json"),
-		mod.WithBody(bodyReader),
-	}, mods...)
+	var stackBuf [stackModCapacity]aoni.RequestModifier
 
-	resp, err := c.Request(ctx, http.MethodPut, path, mods...) //nolint:bodyclose
+	allMods := withJSONBodyMods(&stackBuf, bodyReader, mods)
+
+	resp, err := c.Request(ctx, http.MethodPut, path, allMods...) //nolint:bodyclose
 	if err != nil {
 		return nil, err
 	}
@@ -288,13 +286,11 @@ func PutInto[T any](
 		return err
 	}
 
-	mods = append([]aoni.RequestModifier{
-		mod.WithContentType("application/json"),
-		mod.WithAccept("application/json"),
-		mod.WithBody(bodyReader),
-	}, mods...)
+	var stackBuf [stackModCapacity]aoni.RequestModifier
 
-	resp, err := c.Request(ctx, http.MethodPut, path, mods...) //nolint:bodyclose
+	allMods := withJSONBodyMods(&stackBuf, bodyReader, mods)
+
+	resp, err := c.Request(ctx, http.MethodPut, path, allMods...) //nolint:bodyclose
 	if err != nil {
 		return err
 	}
@@ -326,13 +322,11 @@ func Patch(
 		return nil, err
 	}
 
-	mods = append([]aoni.RequestModifier{
-		mod.WithContentType("application/json"),
-		mod.WithAccept("application/json"),
-		mod.WithBody(bodyReader),
-	}, mods...)
+	var stackBuf [stackModCapacity]aoni.RequestModifier
 
-	return c.Request(ctx, http.MethodPatch, path, mods...)
+	allMods := withJSONBodyMods(&stackBuf, bodyReader, mods)
+
+	return c.Request(ctx, http.MethodPatch, path, allMods...)
 }
 
 // PatchTo executes a PATCH request and unmarshals the response payload into Resp.
@@ -348,13 +342,11 @@ func PatchTo[Resp any](
 		return nil, err
 	}
 
-	mods = append([]aoni.RequestModifier{
-		mod.WithContentType("application/json"),
-		mod.WithAccept("application/json"),
-		mod.WithBody(bodyReader),
-	}, mods...)
+	var stackBuf [stackModCapacity]aoni.RequestModifier
 
-	resp, err := c.Request(ctx, http.MethodPatch, path, mods...) //nolint:bodyclose
+	allMods := withJSONBodyMods(&stackBuf, bodyReader, mods)
+
+	resp, err := c.Request(ctx, http.MethodPatch, path, allMods...) //nolint:bodyclose
 	if err != nil {
 		return nil, err
 	}
@@ -376,13 +368,11 @@ func PatchInto[T any](
 		return err
 	}
 
-	mods = append([]aoni.RequestModifier{
-		mod.WithContentType("application/json"),
-		mod.WithAccept("application/json"),
-		mod.WithBody(bodyReader),
-	}, mods...)
+	var stackBuf [stackModCapacity]aoni.RequestModifier
 
-	resp, err := c.Request(ctx, http.MethodPatch, path, mods...) //nolint:bodyclose
+	allMods := withJSONBodyMods(&stackBuf, bodyReader, mods)
+
+	resp, err := c.Request(ctx, http.MethodPatch, path, allMods...) //nolint:bodyclose
 	if err != nil {
 		return err
 	}
@@ -414,13 +404,11 @@ func Delete(
 		return nil, err
 	}
 
-	mods = append([]aoni.RequestModifier{
-		mod.WithContentType("application/json"),
-		mod.WithAccept("application/json"),
-		mod.WithBody(bodyReader),
-	}, mods...)
+	var stackBuf [stackModCapacity]aoni.RequestModifier
 
-	return c.Request(ctx, http.MethodDelete, path, mods...)
+	allMods := withJSONBodyMods(&stackBuf, bodyReader, mods)
+
+	return c.Request(ctx, http.MethodDelete, path, allMods...)
 }
 
 // DeleteTo executes a DELETE request and unmarshals the response payload into Resp.
@@ -436,13 +424,11 @@ func DeleteTo[Resp any](
 		return nil, err
 	}
 
-	mods = append([]aoni.RequestModifier{
-		mod.WithContentType("application/json"),
-		mod.WithAccept("application/json"),
-		mod.WithBody(bodyReader),
-	}, mods...)
+	var stackBuf [stackModCapacity]aoni.RequestModifier
 
-	resp, err := c.Request(ctx, http.MethodDelete, path, mods...) //nolint:bodyclose
+	allMods := withJSONBodyMods(&stackBuf, bodyReader, mods)
+
+	resp, err := c.Request(ctx, http.MethodDelete, path, allMods...) //nolint:bodyclose
 	if err != nil {
 		return nil, err
 	}
@@ -464,13 +450,11 @@ func DeleteInto[T any](
 		return err
 	}
 
-	mods = append([]aoni.RequestModifier{
-		mod.WithContentType("application/json"),
-		mod.WithAccept("application/json"),
-		mod.WithBody(bodyReader),
-	}, mods...)
+	var stackBuf [stackModCapacity]aoni.RequestModifier
 
-	resp, err := c.Request(ctx, http.MethodDelete, path, mods...) //nolint:bodyclose
+	allMods := withJSONBodyMods(&stackBuf, bodyReader, mods)
+
+	resp, err := c.Request(ctx, http.MethodDelete, path, allMods...) //nolint:bodyclose
 	if err != nil {
 		return err
 	}
@@ -550,7 +534,7 @@ func Trace(
 	return c.Request(ctx, http.MethodTrace, path, mods...)
 }
 
-// Connect performs a CONNECT request through c and returns the raw [*http.Response].
+// Connect performs a CONNECT tunnel handshake through c and returns the raw [*http.Response].
 func Connect(
 	ctx context.Context,
 	c Requester,
@@ -560,7 +544,30 @@ func Connect(
 	return c.Request(ctx, http.MethodConnect, path, mods...)
 }
 
-// Do performs an HTTP request using method and optional body, returning the raw [*http.Response].
+// Fetch performs an HTTP request using method and unmarshals the response body directly into target.
+func Fetch[T any](
+	ctx context.Context,
+	c Requester,
+	method, path string,
+	body any,
+	target *T,
+	mods ...aoni.RequestModifier,
+) error {
+	return DoInto(ctx, c, method, path, body, target, mods...)
+}
+
+// FetchTo executes an HTTP request using method and unmarshals the response payload into Resp.
+func FetchTo[Resp any](
+	ctx context.Context,
+	c Requester,
+	method, path string,
+	body any,
+	mods ...aoni.RequestModifier,
+) (*Resp, error) {
+	return DoTo[Resp](ctx, c, method, path, body, mods...)
+}
+
+// Do performs an HTTP request using method and returns the raw [*http.Response].
 func Do(
 	ctx context.Context,
 	c Requester,
@@ -578,11 +585,9 @@ func Do(
 			return nil, err
 		}
 
-		mods = append([]aoni.RequestModifier{
-			mod.WithContentType("application/json"),
-			mod.WithAccept("application/json"),
-			mod.WithBody(bodyReader),
-		}, mods...)
+		var stackBuf [stackModCapacity]aoni.RequestModifier
+
+		mods = withJSONBodyMods(&stackBuf, bodyReader, mods)
 	}
 
 	return c.Request(ctx, method, path, mods...)
@@ -606,11 +611,9 @@ func DoTo[Resp any](
 			return nil, err
 		}
 
-		mods = append([]aoni.RequestModifier{
-			mod.WithContentType("application/json"),
-			mod.WithAccept("application/json"),
-			mod.WithBody(bodyReader),
-		}, mods...)
+		var stackBuf [stackModCapacity]aoni.RequestModifier
+
+		mods = withJSONBodyMods(&stackBuf, bodyReader, mods)
 	}
 
 	resp, err := c.Request(ctx, method, path, mods...) //nolint:bodyclose
@@ -640,11 +643,9 @@ func DoInto[T any](
 			return err
 		}
 
-		mods = append([]aoni.RequestModifier{
-			mod.WithContentType("application/json"),
-			mod.WithAccept("application/json"),
-			mod.WithBody(bodyReader),
-		}, mods...)
+		var stackBuf [stackModCapacity]aoni.RequestModifier
+
+		mods = withJSONBodyMods(&stackBuf, bodyReader, mods)
 	}
 
 	resp, err := c.Request(ctx, method, path, mods...) //nolint:bodyclose
@@ -690,9 +691,9 @@ func executeToEx[Resp any](
 ) (*Resp, *http.Response, error) {
 	var raw *http.Response
 
-	reqMods := make([]aoni.RequestModifier, 0, len(mods)+1)
-	reqMods = append(reqMods, mod.WithCaptureResponse(&raw))
-	reqMods = append(reqMods, mods...)
+	var stackBuf [stackModCapacity]aoni.RequestModifier
+
+	reqMods := withCaptureMod(&stackBuf, &raw, mods)
 
 	result, err := DoTo[Resp](ctx, c, method, path, body, reqMods...)
 	if err != nil {
@@ -706,14 +707,48 @@ func executeToEx[Resp any](
 	return result, raw, nil
 }
 
-func buildPostMods(bodyReader stdio.Reader, mods []aoni.RequestModifier) []aoni.RequestModifier {
-	res := make([]aoni.RequestModifier, 0, 3+len(mods))
-	res = append(res,
-		mod.WithContentType("application/json"),
-		mod.WithAccept("application/json"),
-		mod.WithBody(bodyReader),
-	)
-	res = append(res, mods...)
+const stackModCapacity = 16
+
+func withJSONBodyMods(
+	stackBuf *[stackModCapacity]aoni.RequestModifier,
+	bodyReader stdio.Reader,
+	mods []aoni.RequestModifier,
+) []aoni.RequestModifier {
+	total := 3 + len(mods)
+	if total <= stackModCapacity {
+		stackBuf[0] = mod.WithContentType("application/json")
+		stackBuf[1] = mod.WithAccept("application/json")
+		stackBuf[2] = mod.WithBody(bodyReader)
+		copy(stackBuf[3:], mods)
+
+		return stackBuf[:total]
+	}
+
+	res := make([]aoni.RequestModifier, total)
+	res[0] = mod.WithContentType("application/json")
+	res[1] = mod.WithAccept("application/json")
+	res[2] = mod.WithBody(bodyReader)
+	copy(res[3:], mods)
+
+	return res
+}
+
+func withCaptureMod(
+	stackBuf *[stackModCapacity]aoni.RequestModifier,
+	raw **http.Response,
+	mods []aoni.RequestModifier,
+) []aoni.RequestModifier {
+	total := 1 + len(mods)
+	if total <= stackModCapacity {
+		stackBuf[0] = mod.WithCaptureResponse(raw)
+		copy(stackBuf[1:], mods)
+
+		return stackBuf[:total]
+	}
+
+	res := make([]aoni.RequestModifier, total)
+	res[0] = mod.WithCaptureResponse(raw)
+	copy(res[1:], mods)
 
 	return res
 }

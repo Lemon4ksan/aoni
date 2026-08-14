@@ -14,6 +14,7 @@ import (
 	"net/http"
 	"net/url"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -204,7 +205,7 @@ func resolveSRVBackends(
 	backends := make([]*Backend, 0, len(records))
 	for _, rec := range records {
 		targetHost := strings.TrimSuffix(rec.Target, ".")
-		targetURL := fmt.Sprintf("%s://%s:%d", scheme, targetHost, rec.Port)
+		targetURL := scheme + "://" + targetHost + ":" + strconv.Itoa(int(rec.Port))
 
 		parsed, parseErr := url.Parse(targetURL)
 

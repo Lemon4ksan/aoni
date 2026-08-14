@@ -6,7 +6,6 @@ package fluent
 
 import (
 	"context"
-	"fmt"
 	stdio "io"
 	"maps"
 	"net/http"
@@ -14,6 +13,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -505,7 +505,9 @@ func (r *Request) Execute(method, path string) (*http.Response, error) {
 		client = request.Configure(client, option.WithEngine(&http.Client{Transport: dt}))
 	}
 
-	mods := r.buildModifiers()
+	var stackBuf [stackModCapacity]aoni.RequestModifier
+
+	mods := r.buildModifiers(&stackBuf)
 
 	if outputFile != "" || r.outputDirectory != "" {
 		return r.executeDownload(ctx, client, method, finalPath, mods, outputFile)
@@ -558,10 +560,18 @@ func (r *Request) checkExpectedStatus(resp *http.Response, finalPath string) err
 	}
 }
 
+const stackModCapacity = 16
+
 // buildModifiers constructs value modifiers for headers, auth, body serialization, decoding, and telemetry.
-func (r *Request) buildModifiers() []aoni.RequestModifier {
+func (r *Request) buildModifiers(stackBuf *[stackModCapacity]aoni.RequestModifier) []aoni.RequestModifier {
 	estimatedCap := len(r.headers) + len(r.appliedMods) + 12
-	mods := make([]aoni.RequestModifier, 0, estimatedCap)
+
+	var mods []aoni.RequestModifier
+	if estimatedCap <= stackModCapacity {
+		mods = stackBuf[:0]
+	} else {
+		mods = make([]aoni.RequestModifier, 0, estimatedCap)
+	}
 
 	mods = r.appendHeaderAndAuthModifiers(mods)
 	mods = r.appendQueryAndBodyModifiers(mods)
@@ -688,7 +698,7 @@ func (r *Request) executeDownload(
 		existingSize := getFileSize(outputFile, r.outputDirectory, respHeaderFilename(lastResp))
 
 		if existingSize > 0 {
-			attemptMods = append(attemptMods, mod.WithHeader("Range", fmt.Sprintf("bytes=%d-", existingSize)))
+			attemptMods = append(attemptMods, mod.WithHeader("Range", "bytes="+strconv.FormatInt(existingSize, 10)+"-"))
 		}
 
 		resp, err := client.Request(ctx, method, path, attemptMods...)
