@@ -86,7 +86,7 @@ func (p *Parser) ParseSource(filename string, src []byte) (*ir.RootIR, error) {
 
 			switch t := typeSpec.Type.(type) {
 			case *ast.InterfaceType:
-				if svc := p.parseInterface(typeSpec.Name.Name, docLines, t); svc != nil {
+				if svc := p.parseInterface(file.Comments, typeSpec.Name.Name, docLines, t); svc != nil {
 					root.Services = append(root.Services, svc)
 				}
 			case *ast.StructType:
@@ -104,7 +104,12 @@ func (p *Parser) ParseSource(filename string, src []byte) (*ir.RootIR, error) {
 	return root, nil
 }
 
-func (p *Parser) parseInterface(name string, docLines []string, iface *ast.InterfaceType) *ir.ServiceIR {
+func (p *Parser) parseInterface(
+	fileComments []*ast.CommentGroup,
+	name string,
+	docLines []string,
+	iface *ast.InterfaceType,
+) *ir.ServiceIR {
 	directives := extractDirectives(docLines)
 	if !hasServiceDirective(directives) {
 		return nil
@@ -149,7 +154,7 @@ func (p *Parser) parseInterface(name string, docLines []string, iface *ast.Inter
 		}
 
 		// Parse Method Parameters
-		p.parseMethodParams(m, funcType.Params)
+		p.parseMethodParams(fileComments, svc, m, funcType.Params)
 
 		// Parse Method Return Values
 		p.parseMethodReturns(m, funcType.Results)
@@ -160,7 +165,12 @@ func (p *Parser) parseInterface(name string, docLines []string, iface *ast.Inter
 	return svc
 }
 
-func (p *Parser) parseMethodParams(m *ir.MethodIR, fields *ast.FieldList) {
+func (p *Parser) parseMethodParams(
+	fileComments []*ast.CommentGroup,
+	svc *ir.ServiceIR,
+	m *ir.MethodIR,
+	fields *ast.FieldList,
+) {
 	if fields == nil {
 		return
 	}
@@ -187,6 +197,10 @@ func (p *Parser) parseMethodParams(m *ir.MethodIR, fields *ast.FieldList) {
 
 	for _, field := range fields.List {
 		paramDoc := extractDocLines(field.Doc, field.Comment)
+		if len(paramDoc) == 0 && len(fileComments) > 0 {
+			paramDoc = p.findCommentsForNode(fileComments, field)
+		}
+
 		paramDirectives := extractDirectives(paramDoc)
 		goType := p.extractGoType(field.Type)
 
@@ -197,13 +211,20 @@ func (p *Parser) parseMethodParams(m *ir.MethodIR, fields *ast.FieldList) {
 		}
 
 		for _, ident := range names {
+			formatter := selectFormatStrategy(goType)
+			if svc != nil && svc.TypeMaps != nil {
+				if mapped, ok := svc.TypeMaps[goType.Name]; ok {
+					formatter = mapped
+				}
+			}
+
 			paramName := ident.Name
 			param := &ir.ParamIR{
 				GoName:    paramName,
 				GoType:    goType,
 				Location:  ir.LocQuery, // Default candidate
 				WireKey:   paramName,
-				Formatter: selectFormatStrategy(goType),
+				Formatter: formatter,
 			}
 
 			// Check explicit directives
@@ -229,13 +250,30 @@ func (p *Parser) parseMethodParams(m *ir.MethodIR, fields *ast.FieldList) {
 					}
 
 				case "format":
-					switch strings.ToLower(d.Value) {
-					case "bool_int", "01", "10", "int":
-						param.Formatter = ir.FormatBoolInt
-					case "flag", "bool_flag":
-						param.Formatter = ir.FormatBoolFlag
-					case "rfc3339", "time":
-						param.Formatter = ir.FormatTimeRFC3339
+					if layout, ok := d.Args["layout"]; ok {
+						param.Formatter = ir.FormatTimeLayout
+						param.TimeLayout = layout
+					} else {
+						switch strings.ToLower(d.Value) {
+						case "bool_int", "01", "10", "int":
+							param.Formatter = ir.FormatBoolInt
+						case "flag", "bool_flag":
+							param.Formatter = ir.FormatBoolFlag
+						case "rfc3339", "time":
+							param.Formatter = ir.FormatTimeRFC3339
+						case "unix_s", "unix":
+							param.Formatter = ir.FormatTimeUnixS
+						case "unix_ms", "unix_milli":
+							param.Formatter = ir.FormatTimeUnixMS
+						case "comma":
+							param.Formatter = ir.FormatSliceComma
+						case "space":
+							param.Formatter = ir.FormatSliceSpace
+						case "pipe":
+							param.Formatter = ir.FormatSlicePipe
+						case "bracket":
+							param.Formatter = ir.FormatSliceBracket
+						}
 					}
 
 				case "query":
@@ -271,10 +309,10 @@ func (p *Parser) parseMethodParams(m *ir.MethodIR, fields *ast.FieldList) {
 					if pathVars[strings.ToLower(paramName)] {
 						param.WireKey = strings.ToLower(paramName)
 					}
-				case (m.HTTPMethod == "GET" || m.HTTPMethod == "DELETE" || m.HTTPMethod == "HEAD") && !goType.IsSlice && (goType.Name != "string" && !isPrimitive(goType.Name)):
+				case (m.HTTPMethod == "GET" || m.HTTPMethod == "DELETE" || m.HTTPMethod == "HEAD") && isDTOQueryStruct(goType.Name):
 					param.Location = ir.LocQueryStruct
 					param.Formatter = ir.FormatCompiledEncode
-				case m.PayloadKind == ir.PayloadForm && !goType.IsSlice && (goType.Name != "string" && !isPrimitive(goType.Name)):
+				case m.PayloadKind == ir.PayloadForm && isDTOQueryStruct(goType.Name):
 					param.Location = ir.LocFormFields
 					param.Formatter = ir.FormatCompiledEncode
 				case m.HTTPMethod == "POST" || m.HTTPMethod == "PUT" || m.HTTPMethod == "PATCH":
@@ -406,13 +444,30 @@ func (p *Parser) parseStruct(name string, docLines []string, strct *ast.StructTy
 						wireName = d.Value
 					}
 				case "format":
-					switch strings.ToLower(d.Value) {
-					case "bool_int", "01", "10", "int":
-						formatter = ir.FormatBoolInt
-					case "flag", "bool_flag":
-						formatter = ir.FormatBoolFlag
-					case "rfc3339", "time":
-						formatter = ir.FormatTimeRFC3339
+					if layout, ok := d.Args["layout"]; ok {
+						formatter = ir.FormatTimeLayout
+						_ = layout
+					} else {
+						switch strings.ToLower(d.Value) {
+						case "bool_int", "01", "10", "int":
+							formatter = ir.FormatBoolInt
+						case "flag", "bool_flag":
+							formatter = ir.FormatBoolFlag
+						case "rfc3339", "time":
+							formatter = ir.FormatTimeRFC3339
+						case "unix_s", "unix":
+							formatter = ir.FormatTimeUnixS
+						case "unix_ms", "unix_milli":
+							formatter = ir.FormatTimeUnixMS
+						case "comma":
+							formatter = ir.FormatSliceComma
+						case "space":
+							formatter = ir.FormatSliceSpace
+						case "pipe":
+							formatter = ir.FormatSlicePipe
+						case "bracket":
+							formatter = ir.FormatSliceBracket
+						}
 					}
 				}
 			}
@@ -591,6 +646,25 @@ func isPrimitive(s string) bool {
 	return false
 }
 
+func isDTOQueryStruct(name string) bool {
+	if isPrimitive(name) {
+		return false
+	}
+
+	switch name {
+	case "time.Time", "Time", "time.Duration", "Duration",
+		"values.Int64String", "values.Uint64String", "values.Float64String", "values.BoolInt",
+		"uuid.UUID", "UUID", "decimal.Decimal", "Decimal", "netip.Addr", "Addr":
+		return false
+	}
+
+	if strings.HasPrefix(name, "[]") || strings.HasPrefix(name, "map[") {
+		return false
+	}
+
+	return true
+}
+
 func toCasing(s string, strategy ir.CasingStrategy) string {
 	if s == "" {
 		return ""
@@ -642,4 +716,25 @@ func toDelimited(s string, delimiter byte) string {
 	}
 
 	return b.String()
+}
+
+func (p *Parser) findCommentsForNode(fileComments []*ast.CommentGroup, node ast.Node) []string {
+	if node == nil || len(fileComments) == 0 {
+		return nil
+	}
+
+	nodePos := p.fset.Position(node.Pos())
+	nodeEnd := p.fset.Position(node.End())
+
+	var lines []string
+	for _, cg := range fileComments {
+		for _, c := range cg.List {
+			cPos := p.fset.Position(c.Pos())
+			if cPos.Line >= nodePos.Line && cPos.Line <= nodeEnd.Line {
+				lines = append(lines, c.Text)
+			}
+		}
+	}
+
+	return lines
 }

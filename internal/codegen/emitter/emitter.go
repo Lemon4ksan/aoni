@@ -259,6 +259,20 @@ func (e *Emitter) emitMethod(buf *bytes.Buffer, clientStructName string, m *ir.M
 
 	buf.WriteString("\n")
 
+	// Custom Decoder / Encoder modifiers
+	if m.Decoder != "" {
+		switch strings.ToLower(m.Decoder) {
+		case "json", "xml", "proto", "grpc-web":
+			// Handled natively by aoni codecs
+		default:
+			fmt.Fprintf(buf, "\tallMods = append(allMods, mod.WithDecoder(%s))\n", m.Decoder)
+		}
+	}
+
+	if m.Encoder != "" {
+		fmt.Fprintf(buf, "\tallMods = append(allMods, mod.WithEncoder(%s))\n", m.Encoder)
+	}
+
 	// Target requester
 	targetReq := m.TargetRequester
 	if targetReq == "" {
@@ -323,6 +337,43 @@ func (e *Emitter) emitQueryBuffer(buf *bytes.Buffer, params []*ir.ParamIR, bufSi
 			fmt.Fprintf(buf, "\tqBytes = strconv.AppendUint(qBytes, uint64(%s), 10)\n", p.GoName)
 		case ir.FormatBoolAppend:
 			fmt.Fprintf(buf, "\tqBytes = strconv.AppendBool(qBytes, %s)\n", p.GoName)
+		case ir.FormatBoolInt:
+			fmt.Fprintf(
+				buf,
+				"\tif %s {\n\t\tqBytes = append(qBytes, '1')\n\t} else {\n\t\tqBytes = append(qBytes, '0')\n\t}\n",
+				p.GoName,
+			)
+
+		case ir.FormatTimeRFC3339:
+			fmt.Fprintf(buf, "\tqBytes = urlutil.AppendQueryEscapeString(qBytes, %s.Format(time.RFC3339))\n", p.GoName)
+		case ir.FormatTimeUnixS:
+			fmt.Fprintf(buf, "\tqBytes = strconv.AppendInt(qBytes, %s.Unix(), 10)\n", p.GoName)
+		case ir.FormatTimeUnixMS:
+			fmt.Fprintf(buf, "\tqBytes = strconv.AppendInt(qBytes, %s.UnixMilli(), 10)\n", p.GoName)
+		case ir.FormatTimeLayout:
+			layout := p.TimeLayout
+			if layout == "" {
+				layout = "2006-01-02"
+			}
+
+			fmt.Fprintf(buf, "\tqBytes = urlutil.AppendQueryEscapeString(qBytes, %s.Format(%q))\n", p.GoName, layout)
+
+		case ir.FormatSliceComma:
+			fmt.Fprintf(buf, "\tfor idx, v := range %s {\n", p.GoName)
+			buf.WriteString("\t\tif idx > 0 { qBytes = append(qBytes, ',') }\n")
+			fmt.Fprintf(buf, "\t\tqBytes = urlutil.AppendQueryEscapeString(qBytes, fmt.Sprint(v))\n\t}\n")
+		case ir.FormatSliceSpace:
+			fmt.Fprintf(buf, "\tfor idx, v := range %s {\n", p.GoName)
+			buf.WriteString("\t\tif idx > 0 { qBytes = append(qBytes, '+') }\n")
+			fmt.Fprintf(buf, "\t\tqBytes = urlutil.AppendQueryEscapeString(qBytes, fmt.Sprint(v))\n\t}\n")
+		case ir.FormatSlicePipe:
+			fmt.Fprintf(buf, "\tfor idx, v := range %s {\n", p.GoName)
+			buf.WriteString("\t\tif idx > 0 { qBytes = append(qBytes, '|') }\n")
+			fmt.Fprintf(buf, "\t\tqBytes = urlutil.AppendQueryEscapeString(qBytes, fmt.Sprint(v))\n\t}\n")
+		case ir.FormatBufferAppender:
+			fmt.Fprintf(buf, "\tqBytes = %s.AppendBytes(qBytes)\n", p.GoName)
+		case ir.FormatCustomStringer:
+			fmt.Fprintf(buf, "\tqBytes = urlutil.AppendQueryEscapeString(qBytes, %s.String())\n", p.GoName)
 		case ir.FormatQueryEscaped, ir.FormatDirectString:
 			fallthrough
 		default:

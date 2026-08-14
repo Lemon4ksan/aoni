@@ -39,6 +39,7 @@ type ServiceIR struct {
 	SSHConfig     *SSHConfigIR
 	Headers       []HeaderIR
 	Envelope      *EnvelopeIR
+	TypeMaps      map[string]FormatStrategy
 	Methods       []*MethodIR
 }
 
@@ -148,6 +149,9 @@ type MethodIR struct {
 	LocalCacheTTL   string
 	ExpectStatus    []int
 	UnwrapField     string
+	Decoder         string
+	Encoder         string
+	Codec           string
 	StackModsSize   int
 	StackBufSize    int
 }
@@ -237,11 +241,12 @@ const (
 
 // ParamIR models an individual function parameter and its HTTP/RPC binding.
 type ParamIR struct {
-	GoName    string
-	GoType    GoTypeIR
-	Location  ParamLocation
-	WireKey   string
-	Formatter FormatStrategy
+	GoName     string
+	GoType     GoTypeIR
+	Location   ParamLocation
+	WireKey    string
+	Formatter  FormatStrategy
+	TimeLayout string
 }
 
 // ParamLocation specifies where a parameter is mapped in the network transaction.
@@ -321,6 +326,33 @@ const (
 
 	// FormatTimeRFC3339 formats time.Time via r.Format(time.RFC3339).
 	FormatTimeRFC3339 FormatStrategy = "time_rfc3339"
+
+	// FormatTimeUnixS formats time.Time as Unix epoch seconds (strconv.AppendInt(r.Unix())).
+	FormatTimeUnixS FormatStrategy = "time_unix_s"
+
+	// FormatTimeUnixMS formats time.Time as Unix epoch milliseconds (strconv.AppendInt(r.UnixMilli())).
+	FormatTimeUnixMS FormatStrategy = "time_unix_ms"
+
+	// FormatTimeLayout formats time.Time using a custom layout (e.g. r.Format("2006-01-02")).
+	FormatTimeLayout FormatStrategy = "time_layout"
+
+	// FormatSliceComma formats slices as comma-separated values (e.g. key=a,b,c).
+	FormatSliceComma FormatStrategy = "slice_comma"
+
+	// FormatSliceSpace formats slices as space-separated values (e.g. key=a+b+c).
+	FormatSliceSpace FormatStrategy = "slice_space"
+
+	// FormatSlicePipe formats slices as pipe-separated values (e.g. key=a|b|c).
+	FormatSlicePipe FormatStrategy = "slice_pipe"
+
+	// FormatSliceBracket formats slices as array brackets (e.g. key[]=a&key[]=b).
+	FormatSliceBracket FormatStrategy = "slice_bracket"
+
+	// FormatBufferAppender invokes AppendBytes(dst []byte) []byte directly on stack (0 B/op).
+	FormatBufferAppender FormatStrategy = "buffer_appender"
+
+	// FormatTextMarshaler invokes MarshalText() on encoding.TextMarshaler types.
+	FormatTextMarshaler FormatStrategy = "text_marshaler"
 
 	// FormatCustomStringer formats custom types by casting to underlying primitive or calling String().
 	FormatCustomStringer FormatStrategy = "custom_stringer"
@@ -441,6 +473,7 @@ type FieldIR struct {
 	IsOmitEmpty bool
 	CustomTag   string
 	Formatter   FormatStrategy
+	TimeLayout  string
 }
 
 // TupleIR defines a heterogeneous JSON tuple array mapping to struct fields by index.

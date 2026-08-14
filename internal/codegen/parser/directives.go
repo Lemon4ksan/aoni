@@ -104,6 +104,13 @@ func ApplyServiceDirective(s *ir.ServiceIR, d *Directive) {
 
 		s.Protocol = ir.ProtocolWS
 
+	case "type_map":
+		if s.TypeMaps == nil {
+			s.TypeMaps = make(map[string]ir.FormatStrategy)
+		}
+
+		parseTypeMapDirective(s.TypeMaps, d)
+
 	case "grpc":
 		if d.Value != "" {
 			s.BaseURL = d.Value
@@ -133,6 +140,39 @@ func ApplyMethodDirective(m *ir.MethodIR, d *Directive) {
 		if d.Value != "" {
 			m.TargetRequester = d.Value
 		}
+	case "codec":
+		m.Codec = d.Value
+		switch strings.ToLower(d.Value) {
+		case "msgpack":
+			m.PayloadKind = ir.PayloadKind("msgpack")
+		case "xml":
+			m.PayloadKind = ir.PayloadKind("xml")
+		case "cbor":
+			m.PayloadKind = ir.PayloadKind("cbor")
+		case "yaml":
+			m.PayloadKind = ir.PayloadKind("yaml")
+		case "json":
+			m.PayloadKind = ir.PayloadJSON
+		case "form":
+			m.PayloadKind = ir.PayloadForm
+		case "proto":
+			m.PayloadKind = ir.PayloadProto
+		}
+
+	case "decoder":
+		if d.Value != "" {
+			m.Decoder = d.Value
+		} else if custom, ok := d.Args["custom"]; ok {
+			m.Decoder = custom
+		}
+
+	case "encoder":
+		if d.Value != "" {
+			m.Encoder = d.Value
+		} else if custom, ok := d.Args["custom"]; ok {
+			m.Encoder = custom
+		}
+
 	case "form":
 		m.PayloadKind = ir.PayloadForm
 	case "json":
@@ -282,4 +322,56 @@ func parseSSHDirective(d *Directive) *ir.SSHConfigIR {
 	}
 
 	return ssh
+}
+
+func parseTypeMapDirective(tm map[string]ir.FormatStrategy, d *Directive) {
+	raw := strings.TrimSpace(d.Raw)
+	if strings.HasPrefix(raw, d.Name) {
+		raw = strings.TrimSpace(raw[len(d.Name):])
+	}
+
+	raw = strings.Trim(raw, "\"")
+
+	var from, to string
+	switch {
+	case strings.Contains(raw, "->"):
+		parts := strings.SplitN(raw, "->", 2)
+		from = strings.TrimSpace(parts[0])
+		to = strings.TrimSpace(parts[1])
+	case strings.Contains(raw, "="):
+		parts := strings.SplitN(raw, "=", 2)
+		from = strings.TrimSpace(parts[0])
+		to = strings.TrimSpace(parts[1])
+	default:
+		for k, v := range d.Args {
+			from = k
+			to = v
+			break
+		}
+	}
+
+	if from != "" && to != "" {
+		switch strings.ToLower(to) {
+		case "unix_s", "unix":
+			tm[from] = ir.FormatTimeUnixS
+		case "unix_ms", "unix_milli":
+			tm[from] = ir.FormatTimeUnixMS
+		case "rfc3339":
+			tm[from] = ir.FormatTimeRFC3339
+		case "comma":
+			tm[from] = ir.FormatSliceComma
+		case "space":
+			tm[from] = ir.FormatSliceSpace
+		case "pipe":
+			tm[from] = ir.FormatSlicePipe
+		case "bracket":
+			tm[from] = ir.FormatSliceBracket
+		case "bool_int", "01", "10", "int":
+			tm[from] = ir.FormatBoolInt
+		case "flag", "bool_flag":
+			tm[from] = ir.FormatBoolFlag
+		default:
+			tm[from] = ir.FormatCustomStringer
+		}
+	}
 }
