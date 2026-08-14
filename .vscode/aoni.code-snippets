@@ -1,0 +1,76 @@
+{
+	"Aoni API Service Interface": {
+		"prefix": "aoni-service",
+		"body": [
+			"// @aoni:service",
+			"// @base_url \"${1:https://api.example.com/}\"",
+			"// @engine fast",
+			"type ${2:API} interface {",
+			"\t// @get \"${3:endpoint}\"",
+			"\t${4:GetItem}(ctx context.Context, ${5:id} string, mods ...aoni.RequestModifier) (*${6:Response}, error)",
+			"}"
+		],
+		"description": "Generate an Aoni declarative API service interface"
+	},
+	"Aoni DTO Struct": {
+		"prefix": "aoni-dto",
+		"body": [
+			"// @aoni:dto casing=snake_case omitempty=true",
+			"type ${1:RequestDTO} struct {",
+			"\t${2:Name} string",
+			"}"
+		],
+		"description": "Generate an Aoni zero-tag DTO struct with auto casing"
+	},
+	"Aoni Tuple Struct": {
+		"prefix": "aoni-tuple",
+		"body": [
+			"// @aoni:tuple",
+			"type ${1:DataTuple} struct {",
+			"\t${2:Price} float64",
+			"\t${3:Volume} int64",
+			"\t${4:Description} string",
+			"}"
+		],
+		"description": "Generate an Aoni heterogeneous JSON tuple struct"
+	},
+	"Aoni GET Method": {
+		"prefix": "aoni-get",
+		"body": [
+			"// @get \"${1:path}/{${2:param}}\"",
+			"${3:MethodName}(ctx context.Context, ${2:param} string, mods ...aoni.RequestModifier) (*${4:ResponseType}, error)"
+		],
+		"description": "Declare an Aoni GET method"
+	},
+	"Aoni POST Method": {
+		"prefix": "aoni-post",
+		"body": [
+			"// @post \"${1:path}\"",
+			"${2:CreateItem}(ctx context.Context, req *${3:RequestDTO}, mods ...aoni.RequestModifier) (*${4:ResponseType}, error)"
+		],
+		"description": "Declare an Aoni POST method"
+	},
+	"Aoni Form POST Method": {
+		"prefix": "aoni-form",
+		"body": [
+			"// @post \"${1:path}\"",
+			"// @form",
+			"${2:SubmitForm}(ctx context.Context, opts ${3:FormOptions}, mods ...aoni.RequestModifier) (*${4:ResponseType}, error)"
+		],
+		"description": "Declare an Aoni Form-encoded POST method"
+	},
+	"Aoni Envelope Unwrap": {
+		"prefix": "aoni-unwrap",
+		"body": [
+			"// @unwrap ${1:data}"
+		],
+		"description": "Unwrap a nested envelope response field"
+	},
+	"Aoni Condition Check": {
+		"prefix": "aoni-check",
+		"body": [
+			"// @check \"${1:success} == ${2:true}\""
+		],
+		"description": "Validate 200 OK business response condition"
+	}
+}

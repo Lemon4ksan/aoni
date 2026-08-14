@@ -1,0 +1,645 @@
+// Copyright (c) 2026 Lemon4ksan All rights reserved.
+// Use of this source code is governed by a BSD-style
+// license that can be found in the LICENSE file.
+
+package parser
+
+import (
+	"bytes"
+	"fmt"
+	"go/ast"
+	"go/parser"
+	"go/token"
+	"os"
+	"strings"
+	"unicode"
+
+	"github.com/lemon4ksan/aoni/internal/codegen/ir"
+)
+
+// Parser inspects Go source files and extracts declarative API service definitions and DTOs into an Unchecked IR.
+type Parser struct {
+	fset *token.FileSet
+}
+
+// NewParser creates a new Parser instance.
+func NewParser() *Parser {
+	return &Parser{
+		fset: token.NewFileSet(),
+	}
+}
+
+// ParseFile parses a Go source file from disk.
+func (p *Parser) ParseFile(filePath string) (*ir.RootIR, error) {
+	data, err := os.ReadFile(filePath)
+	if err != nil {
+		return nil, fmt.Errorf("aoni/codegen/parser: failed to read file %q: %w", filePath, err)
+	}
+
+	return p.ParseSource(filePath, data)
+}
+
+// ParseSource parses Go source code from bytes.
+func (p *Parser) ParseSource(filename string, src []byte) (*ir.RootIR, error) {
+	file, err := parser.ParseFile(p.fset, filename, src, parser.ParseComments)
+	if err != nil {
+		return nil, fmt.Errorf("aoni/codegen/parser: syntax error in %q: %w", filename, err)
+	}
+
+	root := &ir.RootIR{
+		PackageName: file.Name.Name,
+		Imports:     make([]ir.ImportIR, 0, len(file.Imports)),
+		Services:    make([]*ir.ServiceIR, 0),
+		Structs:     make([]*ir.StructIR, 0),
+		Tuples:      make([]*ir.TupleIR, 0),
+	}
+
+	// Extract imports
+	for _, imp := range file.Imports {
+		alias := ""
+		if imp.Name != nil {
+			alias = imp.Name.Name
+		}
+
+		pathVal := strings.Trim(imp.Path.Value, "\"")
+		root.Imports = append(root.Imports, ir.ImportIR{
+			Alias: alias,
+			Path:  pathVal,
+		})
+	}
+
+	// Inspect AST declarations
+	for _, decl := range file.Decls {
+		genDecl, ok := decl.(*ast.GenDecl)
+		if !ok || genDecl.Tok != token.TYPE {
+			continue
+		}
+
+		for _, spec := range genDecl.Specs {
+			typeSpec, ok := spec.(*ast.TypeSpec)
+			if !ok {
+				continue
+			}
+
+			// Combine doc comments from GenDecl and TypeSpec
+			docLines := extractDocLines(genDecl.Doc, typeSpec.Doc)
+
+			switch t := typeSpec.Type.(type) {
+			case *ast.InterfaceType:
+				if svc := p.parseInterface(typeSpec.Name.Name, docLines, t); svc != nil {
+					root.Services = append(root.Services, svc)
+				}
+			case *ast.StructType:
+				if strct := p.parseStruct(typeSpec.Name.Name, docLines, t); strct != nil {
+					root.Structs = append(root.Structs, strct)
+				}
+
+				if tuple := p.parseTuple(typeSpec.Name.Name, docLines, t); tuple != nil {
+					root.Tuples = append(root.Tuples, tuple)
+				}
+			}
+		}
+	}
+
+	return root, nil
+}
+
+func (p *Parser) parseInterface(name string, docLines []string, iface *ast.InterfaceType) *ir.ServiceIR {
+	directives := extractDirectives(docLines)
+	if !hasServiceDirective(directives) {
+		return nil
+	}
+
+	svc := &ir.ServiceIR{
+		Name:     name,
+		Doc:      docLines,
+		Protocol: ir.ProtocolHTTP,
+		Engine:   ir.EngineFast, // Default to ultra-fast engine
+		Methods:  make([]*ir.MethodIR, 0, len(iface.Methods.List)),
+	}
+
+	for _, d := range directives {
+		ApplyServiceDirective(svc, d)
+	}
+
+	for _, field := range iface.Methods.List {
+		funcType, ok := field.Type.(*ast.FuncType)
+		if !ok || len(field.Names) == 0 {
+			continue
+		}
+
+		methodName := field.Names[0].Name
+		methodDoc := extractDocLines(field.Doc, field.Comment)
+		methodDirectives := extractDirectives(methodDoc)
+
+		m := &ir.MethodIR{
+			Name:            methodName,
+			Doc:             methodDoc,
+			Operation:       ir.OpHTTP,
+			StreamDirection: ir.StreamNone,
+			PayloadKind:     ir.PayloadNone,
+			StreamKind:      ir.StreamKindNone,
+			Headers:         make([]ir.HeaderIR, 0),
+			Params:          make([]*ir.ParamIR, 0),
+			Checks:          make([]ir.CheckIR, 0),
+		}
+
+		for _, d := range methodDirectives {
+			ApplyMethodDirective(m, d)
+		}
+
+		// Parse Method Parameters
+		p.parseMethodParams(m, funcType.Params)
+
+		// Parse Method Return Values
+		p.parseMethodReturns(m, funcType.Results)
+
+		svc.Methods = append(svc.Methods, m)
+	}
+
+	return svc
+}
+
+func (p *Parser) parseMethodParams(m *ir.MethodIR, fields *ast.FieldList) {
+	if fields == nil {
+		return
+	}
+
+	pathVars := make(map[string]bool)
+	if m.Path != nil {
+		for _, seg := range m.Path.Segments {
+			if seg.IsVariable {
+				pathVars[seg.VarName] = true
+			}
+		}
+	}
+
+	// Check dynamic headers for variables
+	for _, h := range m.Headers {
+		if h.DynamicTemplate != nil {
+			for _, seg := range h.DynamicTemplate.Segments {
+				if seg.IsVariable {
+					pathVars[seg.VarName] = true
+				}
+			}
+		}
+	}
+
+	for _, field := range fields.List {
+		paramDoc := extractDocLines(field.Doc, field.Comment)
+		paramDirectives := extractDirectives(paramDoc)
+		goType := p.extractGoType(field.Type)
+
+		names := field.Names
+		if len(names) == 0 {
+			// Anonymous parameter
+			names = []*ast.Ident{{Name: "_"}}
+		}
+
+		for _, ident := range names {
+			paramName := ident.Name
+			param := &ir.ParamIR{
+				GoName:    paramName,
+				GoType:    goType,
+				Location:  ir.LocQuery, // Default candidate
+				WireKey:   paramName,
+				Formatter: selectFormatStrategy(goType),
+			}
+
+			// Check explicit directives
+			for _, d := range paramDirectives {
+				switch d.Name {
+				case "body":
+					param.Location = ir.LocBody
+
+					if d.Value != "" {
+						m.PayloadKind = ir.PayloadKind(d.Value)
+					}
+
+				case "path", "var":
+					param.Location = ir.LocPath
+					if d.Value != "" {
+						param.WireKey = d.Value
+					}
+				case "param":
+					if d.Value != "" {
+						param.WireKey = d.Value
+					} else if val, ok := d.Args["name"]; ok {
+						param.WireKey = val
+					}
+
+				case "format":
+					switch strings.ToLower(d.Value) {
+					case "bool_int", "01", "10", "int":
+						param.Formatter = ir.FormatBoolInt
+					case "flag", "bool_flag":
+						param.Formatter = ir.FormatBoolFlag
+					case "rfc3339", "time":
+						param.Formatter = ir.FormatTimeRFC3339
+					}
+
+				case "query":
+					param.Location = ir.LocQuery
+					if d.Value != "" {
+						param.WireKey = d.Value
+					}
+				case "query_struct":
+					param.Location = ir.LocQueryStruct
+				case "header":
+					param.Location = ir.LocHeader
+					if d.Value != "" {
+						param.WireKey = d.Value
+					}
+				case "cookie":
+					param.Location = ir.LocCookie
+					if d.Value != "" {
+						param.WireKey = d.Value
+					}
+				}
+			}
+
+			// Implicit inference if location not explicitly set by directive
+			if len(paramDirectives) == 0 {
+				switch {
+				case goType.Name == "context.Context" || goType.Name == "Context":
+					param.Location = ir.LocContext
+				case goType.IsVariadic && strings.Contains(goType.Name, "RequestModifier"):
+					param.Location = ir.LocModifiers
+				case pathVars[paramName] || pathVars[strings.ToLower(paramName)]:
+					// Automatically binds to path template / dynamic header variable!
+					param.Location = ir.LocPath
+					if pathVars[strings.ToLower(paramName)] {
+						param.WireKey = strings.ToLower(paramName)
+					}
+				case (m.HTTPMethod == "GET" || m.HTTPMethod == "DELETE" || m.HTTPMethod == "HEAD") && !goType.IsSlice && (goType.Name != "string" && !isPrimitive(goType.Name)):
+					param.Location = ir.LocQueryStruct
+					param.Formatter = ir.FormatCompiledEncode
+				case m.PayloadKind == ir.PayloadForm && !goType.IsSlice && (goType.Name != "string" && !isPrimitive(goType.Name)):
+					param.Location = ir.LocFormFields
+					param.Formatter = ir.FormatCompiledEncode
+				case m.HTTPMethod == "POST" || m.HTTPMethod == "PUT" || m.HTTPMethod == "PATCH":
+					if m.PayloadKind == ir.PayloadForm {
+						param.Location = ir.LocFormFields
+					} else if param.Location != ir.LocContext && param.Location != ir.LocModifiers {
+						if m.PayloadKind == ir.PayloadNone {
+							m.PayloadKind = ir.PayloadJSON
+						}
+
+						param.Location = ir.LocBody
+					}
+				}
+			}
+
+			m.Params = append(m.Params, param)
+		}
+	}
+}
+
+func (p *Parser) parseMethodReturns(m *ir.MethodIR, fields *ast.FieldList) {
+	if fields == nil || len(fields.List) == 0 {
+		m.Return = &ir.ReturnIR{IsVoid: true}
+		return
+	}
+
+	ret := &ir.ReturnIR{}
+	results := fields.List
+
+	// Analyze return values count and shapes:
+	// 1. error only: (error)
+	// 2. (T, error)
+	// 3. (T, *http.Response, error)
+	// 4. (<-chan T, <-chan error, error)
+	switch len(results) {
+	case 1:
+		ret.IsVoid = true
+	case 2:
+		t := p.extractGoType(results[0].Type)
+		if t.IsChannel {
+			ret.IsStreamChan = true
+		}
+
+		if t.Name == "[]byte" {
+			ret.IsDirectBytes = true
+		}
+
+		ret.SuccessType = t
+
+	case 3:
+		t0 := p.extractGoType(results[0].Type)
+		t1 := p.extractGoType(results[1].Type)
+
+		if t0.IsChannel && t1.IsChannel {
+			ret.IsStreamChan = true
+			ret.SuccessType = t0
+		} else {
+			ret.SuccessType = t0
+			if t1.Name == "*http.Response" || t1.Name == "http.Response" {
+				ret.HasRawResponse = true
+			}
+		}
+	}
+
+	m.Return = ret
+}
+
+func (p *Parser) parseStruct(name string, docLines []string, strct *ast.StructType) *ir.StructIR {
+	directives := extractDirectives(docLines)
+	isDTO := false
+	casing := ir.CasingSnakeCase
+	omitEmpty := true
+
+	for _, d := range directives {
+		if d.Name == "aoni:dto" || d.Name == "dto" {
+			isDTO = true
+
+			if c, ok := d.Args["casing"]; ok {
+				switch strings.ToLower(c) {
+				case "camel_case", "camelcase":
+					casing = ir.CasingCamelCase
+				case "pascal_case", "pascalcase":
+					casing = ir.CasingPascalCase
+				case "kebab_case", "kebabcase":
+					casing = ir.CasingKebabCase
+				default:
+					casing = ir.CasingSnakeCase
+				}
+			}
+
+			if oe, ok := d.Args["omitempty"]; ok {
+				omitEmpty = (oe == "true")
+			}
+		}
+	}
+
+	if !isDTO {
+		return nil
+	}
+
+	s := &ir.StructIR{
+		Name:            name,
+		Doc:             docLines,
+		Casing:          casing,
+		OmitEmpty:       omitEmpty,
+		Fields:          make([]*ir.FieldIR, 0, len(strct.Fields.List)),
+		GenValueEncoder: true,
+	}
+
+	for _, field := range strct.Fields.List {
+		fieldDoc := extractDocLines(field.Doc, field.Comment)
+		fieldDirectives := extractDirectives(fieldDoc)
+		goType := p.extractGoType(field.Type)
+
+		for _, ident := range field.Names {
+			fieldName := ident.Name
+			wireName := toCasing(fieldName, casing)
+			customTag := ""
+			formatter := selectFormatStrategy(goType)
+
+			if field.Tag != nil {
+				customTag = strings.Trim(field.Tag.Value, "`")
+			}
+
+			for _, d := range fieldDirectives {
+				switch d.Name {
+				case "field":
+					if d.Value != "" {
+						wireName = d.Value
+					}
+				case "format":
+					switch strings.ToLower(d.Value) {
+					case "bool_int", "01", "10", "int":
+						formatter = ir.FormatBoolInt
+					case "flag", "bool_flag":
+						formatter = ir.FormatBoolFlag
+					case "rfc3339", "time":
+						formatter = ir.FormatTimeRFC3339
+					}
+				}
+			}
+
+			s.Fields = append(s.Fields, &ir.FieldIR{
+				GoName:      fieldName,
+				WireName:    wireName,
+				Type:        goType,
+				IsOmitEmpty: omitEmpty,
+				CustomTag:   customTag,
+				Formatter:   formatter,
+			})
+		}
+	}
+
+	return s
+}
+
+func (p *Parser) parseTuple(name string, docLines []string, strct *ast.StructType) *ir.TupleIR {
+	directives := extractDirectives(docLines)
+	isTuple := false
+
+	for _, d := range directives {
+		if d.Name == "aoni:tuple" || d.Name == "tuple" {
+			isTuple = true
+			break
+		}
+	}
+
+	if !isTuple {
+		return nil
+	}
+
+	tuple := &ir.TupleIR{
+		Name:   name,
+		Fields: make([]ir.TupleFieldIR, 0, len(strct.Fields.List)),
+	}
+
+	idx := 0
+	for _, field := range strct.Fields.List {
+		goType := p.extractGoType(field.Type)
+		for _, ident := range field.Names {
+			tuple.Fields = append(tuple.Fields, ir.TupleFieldIR{
+				Index:  idx,
+				GoName: ident.Name,
+				Type:   goType,
+			})
+			idx++
+		}
+	}
+
+	return tuple
+}
+
+func (p *Parser) extractGoType(expr ast.Expr) ir.GoTypeIR {
+	var (
+		buf    bytes.Buffer
+		goType ir.GoTypeIR
+	)
+
+	switch t := expr.(type) {
+	case *ast.Ident:
+		goType.Name = t.Name
+		if isPrimitive(t.Name) {
+			goType.Underlying = t.Name
+		}
+	case *ast.StarExpr:
+		elem := p.extractGoType(t.X)
+		goType = elem
+		goType.IsPointer = true
+		goType.Name = "*" + elem.Name
+	case *ast.ArrayType:
+		elem := p.extractGoType(t.Elt)
+		goType = elem
+		goType.IsSlice = true
+		goType.ElemType = elem.Name
+		goType.Name = "[]" + elem.Name
+
+	case *ast.MapType:
+		k := p.extractGoType(t.Key)
+		v := p.extractGoType(t.Value)
+		goType.IsMap = true
+		goType.KeyType = k.Name
+		goType.ElemType = v.Name
+		goType.Name = fmt.Sprintf("map[%s]%s", k.Name, v.Name)
+
+	case *ast.SelectorExpr:
+		pkg := p.extractGoType(t.X)
+		goType.Package = pkg.Name
+		goType.Name = fmt.Sprintf("%s.%s", pkg.Name, t.Sel.Name)
+		goType.IsCustomType = true
+	case *ast.ChanType:
+		elem := p.extractGoType(t.Value)
+		goType = elem
+		goType.IsChannel = true
+		goType.Name = "<-chan " + elem.Name
+	case *ast.Ellipsis:
+		elem := p.extractGoType(t.Elt)
+		goType = elem
+		goType.IsVariadic = true
+		goType.Name = "..." + elem.Name
+	default:
+		_ = buf
+		goType.Name = "any"
+	}
+
+	return goType
+}
+
+func extractDocLines(docs ...*ast.CommentGroup) []string {
+	var lines []string
+	for _, doc := range docs {
+		if doc == nil {
+			continue
+		}
+
+		for _, comment := range doc.List {
+			lines = append(lines, comment.Text)
+		}
+	}
+
+	return lines
+}
+
+func extractDirectives(lines []string) []*Directive {
+	var list []*Directive
+	for _, l := range lines {
+		if d := ParseDirective(l); d != nil {
+			list = append(list, d)
+		}
+	}
+
+	return list
+}
+
+func hasServiceDirective(directives []*Directive) bool {
+	for _, d := range directives {
+		if d.Name == "aoni:service" || d.Name == "service" || d.Name == "base_url" {
+			return true
+		}
+	}
+
+	return false
+}
+
+func selectFormatStrategy(t ir.GoTypeIR) ir.FormatStrategy {
+	name := strings.TrimPrefix(t.Name, "*")
+	switch name {
+	case "string":
+		return ir.FormatDirectString
+	case "time.Time", "Time":
+		return ir.FormatTimeRFC3339
+	case "int", "int8", "int16", "int32", "int64":
+		return ir.FormatIntAppend
+	case "uint", "uint8", "uint16", "uint32", "uint64", "uintptr":
+		return ir.FormatUintAppend
+	case "bool":
+		return ir.FormatBoolAppend
+	default:
+		if t.IsCustomType {
+			return ir.FormatCustomStringer
+		}
+
+		return ir.FormatDirectString
+	}
+}
+
+func isPrimitive(s string) bool {
+	switch s {
+	case "string", "int", "int8", "int16", "int32", "int64",
+		"uint", "uint8", "uint16", "uint32", "uint64", "uintptr",
+		"float32", "float64", "bool", "byte", "rune":
+		return true
+	}
+
+	return false
+}
+
+func toCasing(s string, strategy ir.CasingStrategy) string {
+	if s == "" {
+		return ""
+	}
+
+	switch strategy {
+	case ir.CasingPascalCase:
+		return s
+	case ir.CasingCamelCase:
+		return strings.ToLower(s[:1]) + s[1:]
+	case ir.CasingKebabCase:
+		return toDelimited(s, '-')
+	case ir.CasingSnakeCase:
+		fallthrough
+	default:
+		return toDelimited(s, '_')
+	}
+}
+
+func toDelimited(s string, delimiter byte) string {
+	if s == "" {
+		return ""
+	}
+
+	var b strings.Builder
+
+	runes := []rune(s)
+	n := len(runes)
+
+	for i := 0; i < n; i++ {
+		r := runes[i]
+		if i > 0 && unicode.IsUpper(r) {
+			prev := runes[i-1]
+
+			var next rune
+			if i+1 < n {
+				next = runes[i+1]
+			}
+
+			// Insert delimiter if previous was lowercase or digit
+			// OR if previous was uppercase and next is lowercase (e.g. "URLPath" -> "url_path")
+			if unicode.IsLower(prev) || unicode.IsDigit(prev) ||
+				(unicode.IsUpper(prev) && next != 0 && unicode.IsLower(next)) {
+				b.WriteByte(delimiter)
+			}
+		}
+
+		b.WriteRune(unicode.ToLower(r))
+	}
+
+	return b.String()
+}
