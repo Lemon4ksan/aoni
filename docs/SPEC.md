@@ -85,6 +85,7 @@ Applied to interface method signatures:
 | `@raw` | — | Raw binary stream payload (`io.Reader` / `[]byte`). |
 | `@decoder` | `customDecoderFunc` | Custom response body decoder function. |
 | `@encoder` | `customEncoderFunc` | Custom request body encoder function. |
+| `@call` | `customPkg.Func` | Escape hatch: invokes user-defined generic dispatcher function `func[T](ctx, requester, path, ...mods) (*T, error)`. |
 
 #### Enterprise & Network Reliability
 | Directive | Arguments | Description |

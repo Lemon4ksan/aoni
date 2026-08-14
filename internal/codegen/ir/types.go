@@ -153,6 +153,7 @@ type MethodIR struct {
 	Encoder         string
 	Codec           string
 	Extract         *ExtractIR
+	CallFunc        string
 	Idempotent      bool
 	Coalesce        bool
 	ETag            bool

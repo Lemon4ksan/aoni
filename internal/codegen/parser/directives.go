@@ -127,6 +127,8 @@ func ApplyMethodDirective(m *ir.MethodIR, d *Directive) {
 	}
 
 	switch d.Name {
+	case "call":
+		m.CallFunc = d.Value
 	case "get", "post", "put", "delete", "patch", "head", "options":
 		m.HTTPMethod = strings.ToUpper(d.Name)
 

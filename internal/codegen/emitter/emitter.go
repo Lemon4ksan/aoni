@@ -708,6 +708,36 @@ func (e *Emitter) emitExecution(buf *bytes.Buffer, m *ir.MethodIR, targetReq, ra
 		bodyArg = bodyParam.GoName
 	}
 
+	// Escape hatch for custom package-level helper (@call custom.Func)
+	if m.CallFunc != "" {
+		callArgs := fmt.Sprintf("ctx, %s, %q", targetReq, rawPath)
+		if bodyParam != nil {
+			callArgs = fmt.Sprintf("ctx, %s, %q, %s", targetReq, rawPath, bodyArg)
+		}
+
+		switch {
+		case m.Return.IsVoid:
+			fmt.Fprintf(buf, "\t_, err := %s[%s](%s, allMods...)\n", m.CallFunc, genericType, callArgs)
+			buf.WriteString("\treturn err\n")
+
+		case m.Return.SuccessType.Name == "io.ReadCloser" || m.Return.SuccessType.Name == "io.Reader":
+			fmt.Fprintf(buf, "\treturn %s(%s, allMods...)\n", m.CallFunc, callArgs)
+
+		default:
+			fmt.Fprintf(buf, "\tresp, err := %s[%s](%s, allMods...)\n", m.CallFunc, genericType, callArgs)
+			buf.WriteString("\tif err != nil {\n\t\treturn nil, err\n\t}\n")
+			e.emitChecks(buf, m)
+
+			if m.Return.SuccessType.IsPointer {
+				buf.WriteString("\treturn resp, nil\n")
+			} else {
+				buf.WriteString("\treturn *resp, nil\n")
+			}
+		}
+
+		return
+	}
+
 	switch methodVerb {
 	case "GET":
 		switch {
