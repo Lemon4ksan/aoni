@@ -40,6 +40,7 @@ type BillingAPI interface {
 		to time.Time, // @format layout="2006-01-02"
 		statuses []string, // @format comma
 		categories []string, // @format pipe
+		accountIDs []int64, // @format comma
 		includePending bool, // @format bool_int
 		compact bool, // @format flag
 		mods ...aoni.RequestModifier,
@@ -95,15 +96,18 @@ type ImportResponse struct {
 	// 2. Verify custom date layout
 	require.Contains(t, codeStr, `qBytes = urlutil.AppendQueryEscapeString(qBytes, to.Format("2006-01-02"))`)
 
-	// 3. Verify slice formatting with comma delimiter
-	require.Contains(t, codeStr, "qBytes = append(qBytes, ',')")
+	// 3. Verify slice formatting with comma delimiter for strings (urlutil.AppendQueryEscapeString)
+	require.Contains(t, codeStr, "qBytes = urlutil.AppendQueryEscapeString(qBytes, v)")
 
-	// 4. Verify slice formatting with pipe delimiter
+	// 4. Verify slice formatting with comma delimiter for ints (0 alloc strconv.AppendInt)
+	require.Contains(t, codeStr, "qBytes = strconv.AppendInt(qBytes, int64(v), 10)")
+
+	// 5. Verify slice formatting with pipe delimiter
 	require.Contains(t, codeStr, "qBytes = append(qBytes, '|')")
 
-	// 5. Verify bool_int formatting
+	// 6. Verify bool_int formatting
 	require.Contains(t, codeStr, "qBytes = append(qBytes, '1')")
 
-	// 6. Verify custom decoder attachment
+	// 7. Verify custom decoder attachment
 	require.Contains(t, codeStr, "allMods = append(allMods, mod.WithDecoder(yamlDecoder))")
 }

@@ -330,6 +330,11 @@ func (e *Emitter) emitQueryBuffer(buf *bytes.Buffer, params []*ir.ParamIR, bufSi
 
 		fmt.Fprintf(buf, "\tqBytes = append(qBytes, %q...)\n", prefix)
 
+		elemType := p.GoType.ElemType
+		if elemType == "" {
+			elemType = strings.TrimPrefix(p.GoType.Name, "[]")
+		}
+
 		switch p.Formatter {
 		case ir.FormatIntAppend:
 			fmt.Fprintf(buf, "\tqBytes = strconv.AppendInt(qBytes, int64(%s), 10)\n", p.GoName)
@@ -360,16 +365,22 @@ func (e *Emitter) emitQueryBuffer(buf *bytes.Buffer, params []*ir.ParamIR, bufSi
 
 		case ir.FormatSliceComma:
 			fmt.Fprintf(buf, "\tfor idx, v := range %s {\n", p.GoName)
-			buf.WriteString("\t\tif idx > 0 { qBytes = append(qBytes, ',') }\n")
-			fmt.Fprintf(buf, "\t\tqBytes = urlutil.AppendQueryEscapeString(qBytes, fmt.Sprint(v))\n\t}\n")
+			buf.WriteString("\t\tif idx > 0 {\n\t\t\tqBytes = append(qBytes, ',')\n\t\t}\n")
+			emitSliceElementFormat(buf, elemType, "qBytes", "v")
+			buf.WriteString("\t}\n")
+
 		case ir.FormatSliceSpace:
 			fmt.Fprintf(buf, "\tfor idx, v := range %s {\n", p.GoName)
-			buf.WriteString("\t\tif idx > 0 { qBytes = append(qBytes, '+') }\n")
-			fmt.Fprintf(buf, "\t\tqBytes = urlutil.AppendQueryEscapeString(qBytes, fmt.Sprint(v))\n\t}\n")
+			buf.WriteString("\t\tif idx > 0 {\n\t\t\tqBytes = append(qBytes, '+')\n\t\t}\n")
+			emitSliceElementFormat(buf, elemType, "qBytes", "v")
+			buf.WriteString("\t}\n")
+
 		case ir.FormatSlicePipe:
 			fmt.Fprintf(buf, "\tfor idx, v := range %s {\n", p.GoName)
-			buf.WriteString("\t\tif idx > 0 { qBytes = append(qBytes, '|') }\n")
-			fmt.Fprintf(buf, "\t\tqBytes = urlutil.AppendQueryEscapeString(qBytes, fmt.Sprint(v))\n\t}\n")
+			buf.WriteString("\t\tif idx > 0 {\n\t\t\tqBytes = append(qBytes, '|')\n\t\t}\n")
+			emitSliceElementFormat(buf, elemType, "qBytes", "v")
+			buf.WriteString("\t}\n")
+
 		case ir.FormatBufferAppender:
 			fmt.Fprintf(buf, "\tqBytes = %s.AppendBytes(qBytes)\n", p.GoName)
 		case ir.FormatCustomStringer:
@@ -810,4 +821,20 @@ func (e *Emitter) emitTuple(buf *bytes.Buffer, t *ir.TupleIR) {
 
 	buf.WriteString("\treturn nil\n")
 	buf.WriteString("}\n\n")
+}
+
+func emitSliceElementFormat(buf *bytes.Buffer, elemType, targetBuf, valVar string) {
+	elemType = strings.TrimPrefix(elemType, "*")
+	switch elemType {
+	case "string":
+		fmt.Fprintf(buf, "\t\t%s = urlutil.AppendQueryEscapeString(%s, %s)\n", targetBuf, targetBuf, valVar)
+	case "int", "int8", "int16", "int32", "int64":
+		fmt.Fprintf(buf, "\t\t%s = strconv.AppendInt(%s, int64(%s), 10)\n", targetBuf, targetBuf, valVar)
+	case "uint", "uint8", "uint16", "uint32", "uint64", "uintptr", "byte":
+		fmt.Fprintf(buf, "\t\t%s = strconv.AppendUint(%s, uint64(%s), 10)\n", targetBuf, targetBuf, valVar)
+	case "bool":
+		fmt.Fprintf(buf, "\t\t%s = strconv.AppendBool(%s, %s)\n", targetBuf, targetBuf, valVar)
+	default:
+		fmt.Fprintf(buf, "\t\t%s = urlutil.AppendQueryEscapeString(%s, fmt.Sprint(%s))\n", targetBuf, targetBuf, valVar)
+	}
 }
