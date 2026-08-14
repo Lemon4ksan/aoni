@@ -71,8 +71,6 @@ type wsRawConn struct {
 	closed      chan struct{}
 	writeMu     chan struct{}
 	once        sync.Once
-	offheapBuf  *offheap.OffHeapBuffer
-	arena       *offheap.Arena
 }
 
 // WrapRawConn wraps a net.Conn into a zero-alloc ws.Conn using default buffer sizes.
@@ -89,8 +87,6 @@ func WrapRawConnConfig(conn net.Conn, isClient bool, readBufSize, writeBufSize i
 		writeBufSize = 4096
 	}
 
-	ar, _ := offheap.NewArena(64 * 1024)
-
 	c := &wsRawConn{
 		base:       conn,
 		br:         bufio.NewReaderSize(conn, readBufSize),
@@ -99,7 +95,6 @@ func WrapRawConnConfig(conn net.Conn, isClient bool, readBufSize, writeBufSize i
 		writeBuf:   make([]byte, 0, writeBufSize),
 		closed:     make(chan struct{}),
 		writeMu:    make(chan struct{}, 1),
-		arena:      ar,
 	}
 	c.writeMu <- struct{}{}
 
@@ -217,17 +212,6 @@ func (c *wsRawConn) CloseChan() <-chan struct{}         { return c.closed }
 func (c *wsRawConn) Close() error {
 	c.once.Do(func() {
 		close(c.closed)
-
-		if c.offheapBuf != nil {
-			c.offheapBuf.Release()
-			c.offheapBuf = nil
-		}
-
-		if c.arena != nil {
-			c.arena.Release()
-			c.arena = nil
-		}
-
 		_ = c.base.Close()
 	})
 
@@ -303,23 +287,6 @@ func (c *wsRawConn) readFrame() (byte, []byte, error) {
 		return 0, nil, err
 	}
 
-	var hdr *WSFrameHeaderPOD
-	if c.arena != nil {
-		hdr = offheap.AllocStruct[WSFrameHeaderPOD](c.arena)
-		c.arena.Reset()
-	} else {
-		hdr = &WSFrameHeaderPOD{}
-	}
-
-	hdr.Fin = (c.readHdr[0] & 0x80) != 0
-	hdr.Opcode = opcode
-	hdr.Masked = masked
-
-	hdr.PayloadLen = length
-	if masked {
-		hdr.MaskKey = c.readMask
-	}
-
 	if opcode >= FrameClose {
 		if rsv1 {
 			return 0, nil, ErrReservedBitsSet
@@ -379,31 +346,9 @@ func (c *wsRawConn) readFramePayloadZeroAlloc(length uint64, masked bool) ([]byt
 		}
 	}
 
-	switch {
-	case length >= 64*1024:
-		if c.offheapBuf == nil || uint64(c.offheapBuf.Cap()) < length {
-			if c.offheapBuf != nil {
-				c.offheapBuf.Release()
-			}
-
-			ohBuf, err := offheap.NewBuffer(int(length))
-			if err == nil {
-				c.offheapBuf = ohBuf
-			}
-		}
-
-		switch {
-		case c.offheapBuf != nil && c.offheapBuf.Bytes() != nil:
-			c.payloadBuf = c.offheapBuf.Bytes()[:length]
-		case uint64(cap(c.payloadBuf)) < length:
-			c.payloadBuf = make([]byte, length)
-		default:
-			c.payloadBuf = c.payloadBuf[:length]
-		}
-
-	case uint64(cap(c.payloadBuf)) < length:
+	if uint64(cap(c.payloadBuf)) < length {
 		c.payloadBuf = make([]byte, length)
-	default:
+	} else {
 		c.payloadBuf = c.payloadBuf[:length]
 	}
 
