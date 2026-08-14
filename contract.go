@@ -64,6 +64,7 @@ type RequestDoer = pipeline.RequestDoer[Request, Response]
 // DoerFunc adapts a plain function matching the execution signature to [RequestDoer].
 type DoerFunc func(req Request) (Response, error)
 
+// Do executes the underlying function against req.
 func (f DoerFunc) Do(req Request) (Response, error) {
 	return f(req)
 }
@@ -116,6 +117,7 @@ type Middleware func(next RequestDoer) RequestDoer
 
 // Configurable is implemented by clients capable of cloning themselves with new options.
 type Configurable interface {
+	// With produces a cloned [RequestDoer] with options applied.
 	With(opts ...ClientOption) RequestDoer
 }
 
@@ -124,6 +126,8 @@ type Configurable interface {
 // If doer natively implements [Configurable] or supports option configuration,
 // options are applied directly to the underlying engine without wrapping overhead.
 // If doer is nil or a raw engine without option support, instantiates a configured [*Client].
+//
+// Configure is safe for concurrent use by multiple goroutines.
 func Configure(doer any, opts ...ClientOption) RequestDoer {
 	if len(opts) == 0 {
 		if doer == nil {
@@ -165,12 +169,15 @@ func Configure(doer any, opts ...ClientOption) RequestDoer {
 // RequestFactory is implemented by engines capable of pooling their own high-performance Request instances
 // to minimize GC allocation overhead.
 type RequestFactory interface {
+	// AcquireRequest obtains a pooled [Request] instance.
 	AcquireRequest() Request
+	// ReleaseRequest releases a pooled [Request] instance back to the memory pool.
 	ReleaseRequest(req Request)
 }
 
 // BaseResponseProvider provides a [BaseResponse] model factory for structured envelope unwrapping.
 type BaseResponseProvider interface {
+	// BaseResponse constructs or returns a zero-value BaseResponse envelope instance.
 	BaseResponse() BaseResponse
 }
 
@@ -180,13 +187,16 @@ type QueryEncoder func(any) (url.Values, error)
 // WebSocketDialer is implemented by clients supporting raw TCP/TLS socket dialing
 // for WebSocket upgrades over uTLS or HTTP/2 Extended CONNECT (RFC 8441).
 type WebSocketDialer interface {
+	// DialTLSForWS opens an encrypted TLS connection for WebSockets.
 	DialTLSForWS(ctx context.Context, addr string) (net.Conn, error)
+	// DialPlainForWS opens an unencrypted TCP connection for WebSockets.
 	DialPlainForWS(ctx context.Context, addr string) (net.Conn, error)
 }
 
 // DNSResolver defines the hostname-to-IP lookup resolution contract.
 // Implemented by DoH (RFC 8484), DoT (RFC 7858), DoQ (RFC 9250), and static resolvers.
 type DNSResolver interface {
+	// LookupIPAddr performs DNS A/AAAA resolution for host.
 	LookupIPAddr(ctx context.Context, host string) ([]net.IPAddr, error)
 }
 
@@ -194,6 +204,7 @@ type DNSResolver interface {
 // but prior to TCP SYN packet transmission.
 // Allows applying socket options such as SO_MARK, TCP_MAXSEG, TCP_QUICKACK, or p0f signatures.
 type SocketController interface {
+	// Control applies OS kernel socket options to file descriptor fd.
 	Control(fd uintptr, network, address string) error
 }
 
@@ -201,28 +212,34 @@ type SocketController interface {
 // Ticket storage is partitioned per proxy exit node to prevent cross-proxy tracking via session tickets (RFC 8446 / RFC 9001).
 type SessionCache interface {
 	utls.ClientSessionCache
+	// SetProxyKey sets the active proxy isolation key.
 	SetProxyKey(key string)
 }
 
 // ClientHelloSpecProvider generates or retrieves a uTLS ClientHelloSpec dynamically per handshake.
 type ClientHelloSpecProvider interface {
+	// ClientHelloSpec yields a custom uTLS ClientHelloSpec configuration.
 	ClientHelloSpec() (*utls.ClientHelloSpec, error)
 }
 
 // HTTP2Configurer customizes x/net/http2.Transport settings during connection setup.
 type HTTP2Configurer interface {
+	// ConfigureHTTP2 applies custom settings to an x/net/http2.Transport instance.
 	ConfigureHTTP2(t *http2.Transport) error
 }
 
 // CacheStore defines the persistence interface for HTTP response caching backends (e.g. Memory, Redis).
 type CacheStore interface {
+	// Get retrieves cached payload by key.
 	Get(ctx context.Context, key any) ([]byte, error)
+	// Set stores cached payload by key with ttl expiration.
 	Set(ctx context.Context, key any, val []byte, ttl time.Duration) error
 }
 
 // ChallengeSolver delegates WAF/DDoS challenge page resolution (e.g. Cloudflare JS/Captcha)
 // to automated headless or external solver drivers.
 type ChallengeSolver interface {
+	// Solve resolves a WAF challenge response and retries the request.
 	Solve(ctx context.Context, err error, req *http.Request) (*http.Response, error)
 }
 
@@ -232,11 +249,13 @@ type ChallengeDetector func(resp *http.Response) (bool, error)
 // TrafficInspector captures and records fine-grained request traces, headers, and JA4 signatures
 // for real-time diagnostic web dashboard inspection.
 type TrafficInspector interface {
+	// Capture records execution metrics for an HTTP transaction.
 	Capture(req *http.Request, resp *http.Response, err error, traceInfo *telemetry.TraceInfo)
 }
 
 // HARTracker records HTTP transaction details into HAR 1.2 JSON format logs.
 type HARTracker interface {
+	// Record records transaction telemetry into HAR logs.
 	Record(req *http.Request, resp *http.Response, startTime time.Time, duration int64)
 }
 
@@ -255,11 +274,15 @@ type Logger interface {
 
 // LoggerProvider provides access to the diagnostic Logger instance.
 type LoggerProvider interface {
+	// Logger returns the active diagnostic logger.
 	Logger() Logger
 }
 
+var noopReleaseFunc = func() {}
+
 // AcquireRequest obtains a pooled [Request] instance from doer if supported via [RequestFactory],
 // or allocates a standard request wrapper. Returns the request and a release cleanup closure.
+// Calling the release closure returns pooled resources back to memory pools safely.
 func AcquireRequest(doer any) (Request, func()) {
 	if factory, ok := doer.(RequestFactory); ok {
 		r := factory.AcquireRequest()
@@ -268,5 +291,5 @@ func AcquireRequest(doer any) (Request, func()) {
 
 	stdReq := NewStdRequest(nil)
 
-	return stdReq, func() {}
+	return stdReq, noopReleaseFunc
 }

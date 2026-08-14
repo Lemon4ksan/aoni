@@ -14,6 +14,7 @@ import (
 
 	"github.com/lemon4ksan/aoni"
 	"github.com/lemon4ksan/aoni/codec/decode"
+	"github.com/lemon4ksan/aoni/internal/bytesconv"
 	"github.com/lemon4ksan/aoni/mod"
 )
 
@@ -284,10 +285,12 @@ func OptionsFast(
 	return DoFast(ctx, doer, http.MethodOptions, path, nil, mods...)
 }
 
+// acquireRequestFromDoer borrows an [aoni.Request] instance bound to doer along with a release finalizer.
 func acquireRequestFromDoer(doer aoni.RequestDoer) (aoni.Request, func()) {
 	return aoni.AcquireRequest(doer)
 }
 
+// applyFastBody serializes body payload (bytes, string, proto, or JSON) into req.
 func applyFastBody(req aoni.Request, body any) error {
 	if b, ok := body.([]byte); ok {
 		req.SetBodyBytes(b)
@@ -295,7 +298,7 @@ func applyFastBody(req aoni.Request, body any) error {
 	}
 
 	if s, ok := body.(string); ok {
-		req.SetBodyBytes([]byte(s))
+		req.SetBodyBytes(bytesconv.S2B(s))
 		return nil
 	}
 

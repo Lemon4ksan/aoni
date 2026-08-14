@@ -259,6 +259,7 @@ func parseSigAlgorithmsPayload(payload []byte) []uint16 {
 	return sigs
 }
 
+// computeLanguage formats the first 4 alphanumeric characters of Accept-Language into a 4-character token.
 func computeLanguage(lang string) string {
 	if lang == "" {
 		return "0000"
@@ -295,6 +296,7 @@ func computeLanguage(lang string) string {
 	return bytesconv.B2S(buf[:])
 }
 
+// computeHeadersHash sorts HTTP header names case-insensitively and returns a 12-character SHA-256 hex digest.
 func computeHeadersHash(headers []string) string {
 	if len(headers) == 0 {
 		return "000000000000"
@@ -331,6 +333,7 @@ func computeHeadersHash(headers []string) string {
 	return hash12Hex(buf.Bytes())
 }
 
+// compareLowerASCII performs case-insensitive ASCII comparison with BCE loop hints.
 func compareLowerASCII(a, b string) int {
 	minLen := min(len(a), len(b))
 	if minLen == 0 {
@@ -357,6 +360,7 @@ func compareLowerASCII(a, b string) int {
 	return cmp.Compare(len(a), len(b))
 }
 
+// hashSlice joins items with commas and computes a 12-character SHA-256 hex digest.
 func hashSlice(items []string) string {
 	if len(items) == 0 {
 		return "000000000000"
@@ -376,6 +380,7 @@ func hashSlice(items []string) string {
 	return hash12Hex(buf.Bytes())
 }
 
+// hash12Hex computes the SHA-256 digest of b and formats the first 12 hex characters with zero heap allocations.
 func hash12Hex(b []byte) string {
 	sum := sha256.Sum256(b)
 
@@ -399,6 +404,7 @@ func hash12Hex(b []byte) string {
 	return bytesconv.B2S(dst[:])
 }
 
+// writePaddedTwoDigits formats integer n into a 2-character decimal string with leading zero padding.
 func writePaddedTwoDigits(buf *bytes.Buffer, n int) {
 	if n < 10 {
 		buf.WriteByte('0')
@@ -410,6 +416,7 @@ func writePaddedTwoDigits(buf *bytes.Buffer, n int) {
 	buf.WriteByte(byte('0' + n%10)) //nolint:gosec
 }
 
+// computeCipherHash sorts cipher suite IDs and computes the 12-character hex digest.
 func computeCipherHash(ciphers []uint16) string {
 	if len(ciphers) == 0 {
 		return "000000000000"
@@ -443,6 +450,7 @@ func computeCipherHash(ciphers []uint16) string {
 	return hash12Hex(buf.Bytes())
 }
 
+// computeExtHash filters SNI/ALPN, sorts extension IDs, and formats the 12-character hex digest.
 func computeExtHash(extensions, sigAlgorithms []uint16) string {
 	filteredExts := make([]uint16, 0, len(extensions))
 	for _, e := range extensions {
@@ -485,6 +493,7 @@ func computeExtHash(extensions, sigAlgorithms []uint16) string {
 	return hash12Hex(buf.Bytes())
 }
 
+// writeHex4 formats uint16 v into 4 hexadecimal characters in buf.
 func writeHex4(buf *bytes.Buffer, v uint16) {
 	_ = hexTable[15] // BCE hint: prove bounds for constant hexTable lookups
 
@@ -506,6 +515,7 @@ func FilterGREASE(vals []uint16) []uint16 {
 	return result
 }
 
+// computeVersion extracts the highest non-GREASE TLS version code.
 func computeVersion(supportedVersions []uint16) string {
 	filtered := FilterGREASE(supportedVersions)
 	if len(filtered) == 0 {
@@ -526,6 +536,7 @@ func computeVersion(supportedVersions []uint16) string {
 	return "00"
 }
 
+// computeALPN extracts the first and last characters of the primary ALPN protocol string.
 func computeALPN(protocols []string) string {
 	if len(protocols) == 0 || protocols[0] == "" {
 		return "00"

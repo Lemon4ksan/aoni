@@ -69,6 +69,7 @@ func (p *Predictor) Predict(openPorts []int, threshold float64) []PortPrediction
 	return predictions
 }
 
+// set registers a conditional probability P(target|given) into the correlation matrix.
 func (p *Predictor) set(given, target int, prob float64) {
 	if _, ok := p.correlations[given]; !ok {
 		p.correlations[given] = make(map[int]float64)
@@ -77,6 +78,7 @@ func (p *Predictor) set(given, target int, prob float64) {
 	p.correlations[given][target] = prob
 }
 
+// seedDefaultCorrelations populates standard conditional port probabilities from Internet scan data.
 func (p *Predictor) seedDefaultCorrelations() {
 	// Web & SSH Correlations
 	p.set(80, 443, 0.6343)

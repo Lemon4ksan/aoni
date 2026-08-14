@@ -17,7 +17,7 @@ import (
 	"time"
 
 	"github.com/lemon4ksan/aoni"
-	"github.com/lemon4ksan/aoni/internal/bytesconv"
+	"github.com/lemon4ksan/aoni/internal/requestutil"
 )
 
 const (
@@ -128,6 +128,7 @@ func DialIPProxy(
 	return conn, resp, nil
 }
 
+// performCONNECTIPHandshake transmits the HTTP upgrade request and validates the 101/200 response headers.
 func performCONNECTIPHandshake(
 	ctx context.Context,
 	conn net.Conn,
@@ -163,14 +164,7 @@ func performCONNECTIPHandshake(
 	return resp, nil
 }
 
+// tokenContainsValue reports whether any header value for name matches target token.
 func tokenContainsValue(header http.Header, name, value string) bool {
-	for _, s := range header[name] {
-		for token := range strings.SplitSeq(s, ",") {
-			if bytesconv.EqualFoldASCII(strings.TrimSpace(token), value) {
-				return true
-			}
-		}
-	}
-
-	return false
+	return requestutil.HeaderContainsToken(header, name, value)
 }

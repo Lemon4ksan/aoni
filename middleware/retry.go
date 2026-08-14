@@ -20,6 +20,7 @@ import (
 
 	"github.com/lemon4ksan/aoni"
 	"github.com/lemon4ksan/aoni/codec/decode"
+	"github.com/lemon4ksan/aoni/internal/requestutil"
 	"github.com/lemon4ksan/aoni/netutil/proxy"
 )
 
@@ -225,15 +226,12 @@ func Retry(opts RetryOptions, condition aoni.RetryCondition) aoni.Middleware {
 	}
 }
 
+// isIdempotentMethod reports whether the HTTP method is idempotent per RFC 9110 §9.2.2.
 func isIdempotentMethod(method string) bool {
-	switch method {
-	case http.MethodGet, http.MethodHead, http.MethodOptions, http.MethodTrace, http.MethodPut, http.MethodDelete:
-		return true
-	default:
-		return false
-	}
+	return requestutil.IsIdempotentMethod(method)
 }
 
+// allowRetryForMethod determines whether the HTTP method is eligible for automated retries.
 func allowRetryForMethod(req aoni.Request, opts RetryOptions, resp aoni.Response) bool {
 	method := req.Method()
 
@@ -263,14 +261,21 @@ func allowRetryForMethod(req aoni.Request, opts RetryOptions, resp aoni.Response
 	return false
 }
 
+// ensureIdempotencyKey sets a 128-bit hex Idempotency-Key if not already present on the request.
 func ensureIdempotencyKey(req aoni.Request) {
 	if req.Header("Idempotency-Key") == "" && req.Header("X-Request-ID") == "" {
-		b := make([]byte, 16)
-		_, _ = rand.Read(b)
-		req.SetHeader("Idempotency-Key", hex.EncodeToString(b))
+		var (
+			b   [16]byte
+			dst [32]byte
+		)
+
+		_, _ = rand.Read(b[:])
+		hex.Encode(dst[:], b[:])
+		req.SetHeader("Idempotency-Key", string(dst[:]))
 	}
 }
 
+// waitRetryDelay pauses execution for the calculated backoff duration.
 func waitRetryDelay(ctx context.Context, delay time.Duration, attempt, asyncThreshold uint32) error {
 	if asyncThreshold > 0 && attempt >= asyncThreshold {
 		return waitAsync(ctx, delay)
@@ -279,6 +284,7 @@ func waitRetryDelay(ctx context.Context, delay time.Duration, attempt, asyncThre
 	return waitSync(ctx, delay)
 }
 
+// waitSync blocks synchronously until delay elapses or ctx is canceled.
 func waitSync(ctx context.Context, delay time.Duration) error {
 	t := time.NewTimer(delay)
 	defer t.Stop()
@@ -291,24 +297,20 @@ func waitSync(ctx context.Context, delay time.Duration) error {
 	}
 }
 
+// waitAsync blocks until delay elapses or ctx is canceled.
 func waitAsync(ctx context.Context, delay time.Duration) error {
-	done := make(chan error, 1)
+	t := time.NewTimer(delay)
+	defer t.Stop()
 
-	go func() {
-		t := time.NewTimer(delay)
-		defer t.Stop()
-
-		select {
-		case <-ctx.Done():
-			done <- ctx.Err()
-		case <-t.C:
-			done <- nil
-		}
-	}()
-
-	return <-done
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-t.C:
+		return nil
+	}
 }
 
+// resolveRetryOverrides extracts per-request retry configuration overrides from request context.
 func resolveRetryOverrides(
 	req aoni.Request,
 	baseOpts RetryOptions,
@@ -338,6 +340,7 @@ func resolveRetryOverrides(
 	return opts, cond
 }
 
+// createBackoffGenerator instantiates a new exponential backoff generator with configured jitter strategy.
 func createBackoffGenerator(opts RetryOptions) *generic.Backoff {
 	factor := opts.BackoffFactor
 	if factor <= 0 {
@@ -364,6 +367,7 @@ func createBackoffGenerator(opts RetryOptions) *generic.Backoff {
 	return generic.NewBackoff(initial, opts.MaxBackoff, factor, jitterFactor)
 }
 
+// calculateRetrySleep computes the pause duration for the next retry attempt, respecting Retry-After headers.
 func calculateRetrySleep(resp aoni.Response, bo *generic.Backoff, opts RetryOptions) (time.Duration, bool) {
 	if resp != nil {
 		if dur, ok := parseRetryAfter(resp); ok {

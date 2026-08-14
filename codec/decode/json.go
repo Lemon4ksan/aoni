@@ -11,10 +11,13 @@ import (
 
 // JSONDecoderConfig configures parsing options for JSON response streams.
 type JSONDecoderConfig struct {
+	// DisallowUnknownFields causes the decoder to return an error if the input contains keys that do not match fields in the target struct.
 	DisallowUnknownFields bool
-	UseNumber             bool
+	// UseNumber causes the decoder to unmarshal numbers into Interface{} as a [json.Number] instead of a float64.
+	UseNumber bool
 }
 
+// customJSONDecoder applies custom decoding flags (DisallowUnknownFields, UseNumber) during JSON stream parsing.
 type customJSONDecoder struct {
 	cfg JSONDecoderConfig
 }
@@ -37,6 +40,7 @@ func NewJSONDecoder(cfg JSONDecoderConfig) Decoder {
 	return customJSONDecoder{cfg: cfg}
 }
 
+// jsonDecoder parses response payload streams as standard JSON using [json.NewDecoder].
 type jsonDecoder struct{}
 
 func (jsonDecoder) Decode(reader stdio.Reader, target any) error {

@@ -71,6 +71,7 @@ func ExtractSanitizedFilename(contentDispositionHeader string) string {
 	return SanitizeFileName(filename)
 }
 
+// decodeRFC8187 decodes RFC 8187 encoded string ("charset'lang'encoded-value").
 func decodeRFC8187(extValue string) string {
 	firstQuote := strings.IndexByte(extValue, '\'')
 	if firstQuote == -1 {
@@ -119,6 +120,7 @@ func decodeRFC8187(extValue string) string {
 	}
 }
 
+// iso88591ToUTF8 translates ISO-8859-1 raw bytes into UTF-8 representation.
 func iso88591ToUTF8(s string) string {
 	var buf strings.Builder
 	buf.Grow(len(s) * 2)
@@ -130,6 +132,7 @@ func iso88591ToUTF8(s string) string {
 	return buf.String()
 }
 
+// isWindowsReservedDeviceName checks whether filename stem conflicts with Win32 legacy DOS devices.
 func isWindowsReservedDeviceName(filename string) bool {
 	ext := filepath.Ext(filename)
 	stem := strings.ToUpper(strings.TrimSuffix(filename, ext))

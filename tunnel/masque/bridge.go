@@ -14,7 +14,6 @@ import (
 	"unsafe"
 
 	"github.com/lemon4ksan/aoni/internal/offheap"
-	"github.com/lemon4ksan/aoni/internal/sysnet"
 	"github.com/lemon4ksan/aoni/tunnel/tun"
 )
 
@@ -75,6 +74,7 @@ func BuildICMPPacketTooBig(packet []byte, mtu uint32) ([]byte, error) {
 	return nil, ErrInvalidIPHeader
 }
 
+// forwardAdapterToMasque reads IP frames from the virtual TUN adapter and writes them to the MASQUE tunnel connection.
 func forwardAdapterToMasque(
 	ctx context.Context,
 	cancel context.CancelFunc,
@@ -132,7 +132,7 @@ func forwardAdapterToMasque(
 					continue
 				}
 
-				if _, writeErr := sysnet.WriteVectorBuffers(masqueConn, [][]byte{packet}); writeErr != nil {
+				if _, writeErr := masqueConn.Write(packet); writeErr != nil {
 					cancel()
 					return
 				}
@@ -141,6 +141,7 @@ func forwardAdapterToMasque(
 	})
 }
 
+// handleMTUOverflow generates an ICMP Packet Too Big response when ingress packet exceeds tunnel MTU bounds.
 func handleMTUOverflow(adapter tun.Adapter, packet []byte, mtu uint32) {
 	icmpPkt, err := BuildICMPPacketTooBig(packet, mtu)
 	if err == nil && len(icmpPkt) > 0 {
@@ -148,6 +149,7 @@ func handleMTUOverflow(adapter tun.Adapter, packet []byte, mtu uint32) {
 	}
 }
 
+// forwardMasqueToAdapter streams incoming IP packets from the MASQUE tunnel back to the virtual TUN device.
 func forwardMasqueToAdapter(
 	ctx context.Context,
 	cancel context.CancelFunc,
@@ -216,6 +218,7 @@ func ClampTCPMSSInPlace(packet []byte, maxMTU int) {
 	}
 }
 
+// calculateMaxMSS computes the optimal TCP Maximum Segment Size for a given IP version and MTU limit.
 func calculateMaxMSS(packet []byte, version byte, maxMTU int) (uint16, int, bool) {
 	if version == 4 {
 		ipHdrLen := int(packet[0]&0x0f) * 4
@@ -238,6 +241,7 @@ func calculateMaxMSS(packet []byte, version byte, maxMTU int) (uint16, int, bool
 	return 0, 0, false
 }
 
+// updateMSSOption scans TCP option bytes and overrides the MSS value if higher than maxMSS.
 func updateMSSOption(options []byte, maxMSS uint16) bool {
 	optIdx := 0
 	for optIdx < len(options) {
@@ -276,6 +280,7 @@ func updateMSSOption(options []byte, maxMSS uint16) bool {
 	return false
 }
 
+// recalculateTCPChecksum recomputes and writes the TCP pseudo-header and payload checksum in-place.
 func recalculateTCPChecksum(packet []byte, version byte, ipHdrLen int) {
 	tcpHdr := packet[ipHdrLen:]
 	tcpLen := len(packet) - ipHdrLen

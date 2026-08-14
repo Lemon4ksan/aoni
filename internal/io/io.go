@@ -329,6 +329,7 @@ func NewPooledGzipReader(r io.Reader) (io.ReadCloser, error) {
 	return &pooledGzipReadCloser{gr: gr, reader: r}, nil
 }
 
+// pooledGzipReadCloser wraps a pooled gzip.Reader and recycles it upon stream closure.
 type pooledGzipReadCloser struct {
 	gr     *gzip.Reader
 	reader io.Reader
@@ -404,7 +405,13 @@ func (r *ResponseBodyReadCloser) Bytes() (data []byte, onOffHeap bool) {
 
 func (r *ResponseBodyReadCloser) Unwrap() io.Closer { return r.ReadCloser }
 
-// MultiReadBody buffers payload streams in RAM or temp files for repeatable reads.
+// MultiReadBody buffers payload streams in RAM, off-heap pages, or temp files for repeatable reads.
+//
+// Lifecycle & RAM/Disk Transition Invariants:
+// - Payload is initially buffered in RAM (or direct kernel off-heap memory if threshold >= 64KB).
+// - If the payload exceeds threshold and disableDisk is false, it spills to a temporary disk file.
+// - Calling Close() merely rewinds the read cursor to 0, allowing repeated reads of the response body.
+// - ReallyClose() performs actual resource teardown: unmaps off-heap memory and deletes temporary files.
 type MultiReadBody struct {
 	tmpFile *os.File
 	reader  io.Reader

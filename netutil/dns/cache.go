@@ -96,28 +96,41 @@ func (c *InMemoryDNSCache) LookupIPAddr(ctx context.Context, host string) ([]net
 		return entry.ips, nil
 	}
 
-	if extendedResolver, ok := c.resolver.(interface {
-		LookupDNSRecords(ctx context.Context, host string) ([]wire.DNSRecord, error)
-	}); ok {
-		records, err := extendedResolver.LookupDNSRecords(ctx, host)
-		if err == nil && len(records) > 0 {
-			return c.storeRecords(host, records)
-		}
-	}
-
 	ips, err := c.sflight.Do(ctx, host, func(ctx context.Context) ([]net.IPAddr, error) {
-		return c.resolver.LookupIPAddr(ctx, host)
+		c.mu.RLock()
+		entry, ok := c.cache[host]
+		c.mu.RUnlock()
+
+		if ok && clock.CoarseTime().Before(entry.expiry) {
+			return entry.ips, nil
+		}
+
+		if extendedResolver, ok := c.resolver.(interface {
+			LookupDNSRecords(ctx context.Context, host string) ([]wire.DNSRecord, error)
+		}); ok {
+			records, err := extendedResolver.LookupDNSRecords(ctx, host)
+			if err == nil && len(records) > 0 {
+				return c.storeRecords(host, records)
+			}
+		}
+
+		resolvedIPs, err := c.resolver.LookupIPAddr(ctx, host)
+		if err != nil {
+			return nil, err
+		}
+
+		c.mu.Lock()
+		c.cache[host] = dnsCacheEntry{
+			ips:    resolvedIPs,
+			expiry: time.Now().Add(c.ttl),
+		}
+		c.mu.Unlock()
+
+		return resolvedIPs, nil
 	})
 	if err != nil {
 		return nil, wrapDNSError(host, "InMemoryCache", "", err)
 	}
-
-	c.mu.Lock()
-	c.cache[host] = dnsCacheEntry{
-		ips:    ips,
-		expiry: time.Now().Add(c.ttl),
-	}
-	c.mu.Unlock()
 
 	return ips, nil
 }

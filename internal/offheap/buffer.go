@@ -20,10 +20,16 @@ var (
 
 // OffHeapBuffer wraps an OS kernel memory page in a compile-time safe struct container.
 // Being a struct type, calling append(buf, ...) results in a compile-time type error.
+//
+// OffHeapBuffer is NOT thread-safe. Concurrent reads and writes require external synchronization.
+//
+// Lifetime: memory is valid until [OffHeapBuffer.Release] is called.
+// [OffHeapBuffer.Bytes] returns a volatile slice that becomes invalid after Release.
 type OffHeapBuffer struct {
-	ptr unsafe.Pointer
-	len int32
-	cap int32
+	ptr     unsafe.Pointer // Points into OS kernel-managed memory (mmap / VirtualAlloc)
+	readPos int32          // Current read cursor position within [0, len)
+	len     int32          // Number of bytes written
+	cap     int32          // Total allocated capacity in bytes
 }
 
 // NewBuffer allocates a new OffHeapBuffer of designated capacity directly from OS kernel.
@@ -39,7 +45,6 @@ func NewBuffer(capacity int) (*OffHeapBuffer, error) {
 
 	buf := &OffHeapBuffer{
 		ptr: ptr,
-		len: 0,
 		cap: int32(capacity),
 	}
 
@@ -48,7 +53,7 @@ func NewBuffer(capacity int) (*OffHeapBuffer, error) {
 	return buf, nil
 }
 
-// Write appends bytes p to the OffHeapBuffer (implements io.Writer).
+// Write appends bytes p to the OffHeapBuffer (implements [io.Writer]).
 func (b *OffHeapBuffer) Write(p []byte) (int, error) {
 	if b == nil || b.ptr == nil {
 		return 0, ErrBufferClosed
@@ -71,33 +76,57 @@ func (b *OffHeapBuffer) Write(p []byte) (int, error) {
 	return n, nil
 }
 
-// WriteString appends string s to the OffHeapBuffer in 1 cycle.
+// WriteString appends string s to the OffHeapBuffer without heap allocations.
 func (b *OffHeapBuffer) WriteString(s string) (int, error) {
-	return b.Write([]byte(s))
+	if b == nil || b.ptr == nil {
+		return 0, ErrBufferClosed
+	}
+
+	n := len(s)
+	if n == 0 {
+		return 0, nil
+	}
+
+	if int(b.len)+n > int(b.cap) {
+		return 0, ErrBufferFull
+	}
+
+	// unsafe.StringData avoids []byte(s) heap allocation — zero-copy string-to-bytes view.
+	dst := unsafe.Slice((*byte)(unsafe.Add(b.ptr, b.len)), n)
+	copy(dst, unsafe.Slice(unsafe.StringData(s), n))
+
+	b.len += int32(n)
+
+	return n, nil
 }
 
-// Read reads up to len(p) bytes from the OffHeapBuffer into p (implements io.Reader).
+// Read reads up to len(p) bytes from the current read position into p (implements [io.Reader]).
+// Returns [io.EOF] when all written bytes have been consumed.
 func (b *OffHeapBuffer) Read(p []byte) (int, error) {
 	if b == nil || b.ptr == nil {
 		return 0, ErrBufferClosed
 	}
 
-	if b.len == 0 {
+	available := int(b.len) - int(b.readPos)
+	if available <= 0 {
 		return 0, io.EOF
 	}
 
 	n := len(p)
-	if n > int(b.len) {
-		n = int(b.len)
+	if n > available {
+		n = available
 	}
 
-	src := unsafe.Slice((*byte)(b.ptr), n)
+	src := unsafe.Slice((*byte)(unsafe.Add(b.ptr, b.readPos)), n)
 	copy(p, src)
+
+	b.readPos += int32(n)
 
 	return n, nil
 }
 
 // Bytes returns a volatile slice view over the active off-heap buffer data without heap allocation.
+// The returned slice is invalid after [OffHeapBuffer.Release] is called.
 //
 //go:nosplit
 //go:inline
@@ -109,7 +138,7 @@ func (b *OffHeapBuffer) Bytes() []byte {
 	return unsafe.Slice((*byte)(b.ptr), b.len)
 }
 
-// Len returns the current written length in bytes.
+// Len returns the number of bytes written to the buffer.
 //
 //go:nosplit
 //go:inline
@@ -133,23 +162,38 @@ func (b *OffHeapBuffer) Cap() int {
 	return int(b.cap)
 }
 
-// Reset clears the buffer length in O(1) time without zeroing memory.
+// Reset resets both the write length and the read cursor to zero in O(1) time, without zeroing memory.
+// The buffer can be reused immediately after Reset.
 //
 //go:nosplit
 //go:inline
 func (b *OffHeapBuffer) Reset() {
 	if b != nil {
 		b.len = 0
+		b.readPos = 0
+	}
+}
+
+// RewindRead resets only the read cursor to the beginning without clearing written data.
+// This allows the same content to be re-read without overwriting it.
+//
+//go:nosplit
+//go:inline
+func (b *OffHeapBuffer) RewindRead() {
+	if b != nil {
+		b.readPos = 0
 	}
 }
 
 // Release returns the raw physical memory page back to the OS kernel.
+// After Release, all slice views obtained via [OffHeapBuffer.Bytes] are invalid.
 func (b *OffHeapBuffer) Release() {
 	if b != nil && b.ptr != nil {
 		runtime.SetFinalizer(b, nil)
 		_ = freeKernelPage(b.ptr, int(b.cap))
 		b.ptr = nil
 		b.len = 0
+		b.readPos = 0
 		b.cap = 0
 	}
 }

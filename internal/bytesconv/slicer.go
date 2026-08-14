@@ -25,6 +25,7 @@ func NewPatternSlicer(pattern []byte, offset int) *PatternSlicer {
 	}
 }
 
+// findIndex locates the byte offset of s.Pattern in data using vector-accelerated SIMD routines.
 func (s *PatternSlicer) findIndex(data []byte) int {
 	if len(s.Pattern) == 1 {
 		return simd.IndexByteVector(data, s.Pattern[0])

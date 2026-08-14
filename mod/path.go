@@ -118,6 +118,7 @@ func WithQueryParams(query any) aoni.RequestModifier {
 	}
 }
 
+// resolveQueryString encodes query into URL query parameters using configured query encoder or default codec.
 func resolveQueryString(req aoni.Request, query any) (string, error) {
 	cfg := aoni.GetRequestConfig(req.Context())
 	if cfg != nil && cfg.QueryEncoder != nil {

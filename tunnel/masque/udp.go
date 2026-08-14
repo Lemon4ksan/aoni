@@ -89,6 +89,7 @@ func DialUDPProxy(
 	return conn, resp, nil
 }
 
+// performCONNECTUDPHandshake executes the HTTP upgrade request and validates the 101/200 response headers.
 func performCONNECTUDPHandshake(
 	ctx context.Context,
 	conn net.Conn,

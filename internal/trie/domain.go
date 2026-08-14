@@ -10,6 +10,7 @@ import (
 	"sync"
 )
 
+// node represents an internal radix tree node keyed by domain label.
 type node[V any] struct {
 	children map[string]*node[V]
 	wildcard *node[V]
@@ -94,6 +95,7 @@ func (t *ReverseDomainTrie[V]) Match(domain string) (V, bool) {
 	return val, found
 }
 
+// matchNode recursively traverses the trie nodes right-to-left matching exact labels before wildcards.
 func matchNode[V any](curr *node[V], labels []string, idx int) (V, bool) {
 	if idx == len(labels) {
 		if curr.hasValue {
@@ -133,10 +135,12 @@ func matchNode[V any](curr *node[V], labels []string, idx int) (V, bool) {
 	return zero, false
 }
 
+// splitDomainLabels splits a domain string into individual dot-separated label strings.
 func splitDomainLabels(domain string) []string {
 	return strings.Split(domain, ".")
 }
 
+// reverseLabels reverses a slice of domain label strings in-place.
 func reverseLabels(labels []string) {
 	for i, j := 0, len(labels)-1; i < j; i, j = i+1, j-1 {
 		labels[i], labels[j] = labels[j], labels[i]

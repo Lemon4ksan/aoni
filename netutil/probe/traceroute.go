@@ -139,10 +139,12 @@ func SmartTraceroute(
 	}
 }
 
+// isRootUser reports whether process is executing with superuser EUID 0.
 func isRootUser() bool {
 	return os.Geteuid() == 0
 }
 
+// probeHop sends a single TCP SYN packet with designated TTL to capture intermediate hop IP or final target response.
 func probeHop(
 	ctx context.Context,
 	targetAddr string,
@@ -193,6 +195,7 @@ func probeHop(
 	}, false
 }
 
+// captureICMPTimeExceededIP listens on ICMP socket for incoming Time Exceeded notifications.
 func captureICMPTimeExceededIP(icmpConn *icmp.PacketConn, isV6 bool, timeout time.Duration) net.IP {
 	if icmpConn == nil {
 		return nil
@@ -223,10 +226,12 @@ func captureICMPTimeExceededIP(icmpConn *icmp.PacketConn, isV6 bool, timeout tim
 	return nil
 }
 
+// isTimeExceeded checks whether message type is an ICMP Time Exceeded frame.
 func isTimeExceeded(typ icmp.Type) bool {
 	return typ == ipv4.ICMPTypeTimeExceeded || typ == ipv6.ICMPTypeTimeExceeded
 }
 
+// extractIPFromAddr extracts raw IP from net.Addr instance.
 func extractIPFromAddr(addr net.Addr) net.IP {
 	if addr == nil {
 		return nil

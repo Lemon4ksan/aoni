@@ -31,7 +31,15 @@ type AssignedAddressPOD struct {
 	RawIP        [16]byte
 }
 
+// NewAssignedAddressSlab creates an off-heap [offheap.SlabAllocator] pre-configured for
+// [AssignedAddressPOD] entries. Use the returned slab with [DecodeAddressAssignPayloadPODSlab]
+// to allocate entries with individual Free semantics.
+func NewAssignedAddressSlab(capacity int) (*offheap.SlabAllocator[AssignedAddressPOD], error) {
+	return offheap.NewSlabAllocator[AssignedAddressPOD](capacity)
+}
+
 // DecodeAddressAssignPayloadPOD parses AssignedAddressPOD entries using offheap.AllocStruct when arena is provided.
+
 func DecodeAddressAssignPayloadPOD(arena *offheap.Arena, payload []byte) ([]*AssignedAddressPOD, error) {
 	var entries []*AssignedAddressPOD
 
@@ -53,6 +61,7 @@ func DecodeAddressAssignPayloadPOD(arena *offheap.Arena, payload []byte) ([]*Ass
 		offset++
 
 		var rawIP [16]byte
+
 		switch ipVer {
 		case 4:
 			if offset+4+1 > len(payload) {
@@ -78,9 +87,86 @@ func DecodeAddressAssignPayloadPOD(arena *offheap.Arena, payload []byte) ([]*Ass
 		offset++
 
 		var pod *AssignedAddressPOD
+
 		if arena != nil {
 			pod = offheap.AllocStruct[AssignedAddressPOD](arena)
 		} else {
+			pod = &AssignedAddressPOD{}
+		}
+
+		pod.RequestID = reqID
+		pod.IPVersion = ipVer
+		pod.PrefixLength = prefixLen
+		pod.RawIP = rawIP
+
+		entries = append(entries, pod)
+	}
+
+	return entries, nil
+}
+
+// DecodeAddressAssignPayloadPODSlab parses AssignedAddressPOD entries using a [offheap.SlabAllocator].
+// Unlike [DecodeAddressAssignPayloadPOD] with an arena, individual entries can be returned to the
+// slab via slab.Free(entry) as soon as they are processed, instead of resetting the entire arena.
+//
+// When slab is nil or exhausted, entries are heap-allocated as a safe fallback.
+func DecodeAddressAssignPayloadPODSlab(
+	slab *offheap.SlabAllocator[AssignedAddressPOD],
+	payload []byte,
+) ([]*AssignedAddressPOD, error) {
+	var entries []*AssignedAddressPOD
+
+	offset := 0
+
+	for offset < len(payload) {
+		reqID, n, err := DecodeVarint(payload[offset:])
+		if err != nil {
+			return nil, err
+		}
+
+		offset += n
+
+		if offset+2 > len(payload) {
+			return nil, ErrInvalidCapsule
+		}
+
+		ipVer := payload[offset]
+		offset++
+
+		var rawIP [16]byte
+
+		switch ipVer {
+		case 4:
+			if offset+4+1 > len(payload) {
+				return nil, ErrInvalidCapsule
+			}
+
+			copy(rawIP[:4], payload[offset:offset+4])
+			offset += 4
+
+		case 6:
+			if offset+16+1 > len(payload) {
+				return nil, ErrInvalidCapsule
+			}
+
+			copy(rawIP[:16], payload[offset:offset+16])
+			offset += 16
+
+		default:
+			return nil, fmt.Errorf("%w: invalid IP version %d", ErrInvalidCapsule, ipVer)
+		}
+
+		prefixLen := payload[offset]
+		offset++
+
+		// Use slab allocation for individual Free semantics; fall back to heap when exhausted.
+		var pod *AssignedAddressPOD
+
+		if slab != nil {
+			pod = slab.Alloc()
+		}
+
+		if pod == nil {
 			pod = &AssignedAddressPOD{}
 		}
 

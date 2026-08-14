@@ -11,6 +11,7 @@ import (
 	"unsafe"
 )
 
+// toLowerTable maps all 256 ASCII byte values to their lowercase equivalent in O(1) time.
 var toLowerTable = [256]byte{
 	0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0a, 0x0b, 0x0c, 0x0d, 0x0e, 0x0f,
 	0x10, 0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17, 0x18, 0x19, 0x1a, 0x1b, 0x1c, 0x1d, 0x1e, 0x1f,
@@ -32,8 +33,9 @@ var toLowerTable = [256]byte{
 
 // B2S converts a byte slice to a string without heap allocations using [unsafe.StringData].
 //
-// Preconditions:
-//   - The backing array of b MUST NOT be mutated while the returned string is referenced.
+// Safety Invariant:
+// The returned string references the backing memory of b directly without copying.
+// Callers MUST NOT mutate the underlying byte slice b during the lifetime of the returned string.
 //
 //go:inline
 //go:nosplit
@@ -47,8 +49,9 @@ func B2S(b []byte) string {
 
 // S2B converts a string to a byte slice without heap allocations using [unsafe.StringData].
 //
-// Preconditions:
-//   - The returned byte slice MUST NOT be written to or mutated.
+// Safety Invariant:
+// The returned byte slice references the string's immutable memory directly.
+// Callers MUST NOT write to, mutate, or cast-modify the returned byte slice.
 //
 //go:inline
 //go:nosplit
@@ -293,6 +296,7 @@ func FastHash64(b []byte) uint64 {
 	}
 
 	var h uint64 = 14695981039346656037
+
 	i := 0
 
 	for i+8 <= n {

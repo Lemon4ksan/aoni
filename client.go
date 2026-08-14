@@ -24,6 +24,7 @@ import (
 	"github.com/lemon4ksan/aoni/cookie"
 	"github.com/lemon4ksan/aoni/fingerprint"
 	"github.com/lemon4ksan/aoni/fingerprint/h2"
+	"github.com/lemon4ksan/aoni/internal/bytesconv"
 	"github.com/lemon4ksan/aoni/internal/experimental"
 	"github.com/lemon4ksan/aoni/internal/pipeline"
 	"github.com/lemon4ksan/aoni/internal/urlutil"
@@ -61,6 +62,8 @@ type Client struct {
 //
 // Applies functional [ClientOption] layers, precomputes BaseURL string representations
 // into [engine.PreparedConfig] for zero-alloc relative path resolutions, and ensures a default User-Agent.
+//
+// Client instances are safe for concurrent use by multiple goroutines.
 func NewClient(doer any, opts ...ClientOption) *Client {
 	client := &Client{
 		engine: DefaultEngine(doer),
@@ -97,29 +100,11 @@ func NewClient(doer any, opts ...ClientOption) *Client {
 // All configuration DTOs, default header maps, modifier slices, cookie jars, and referer states
 // are independently copied, guaranteeing zero data races when mutating cloned instances across goroutines.
 func (c *Client) Clone() *Client {
-	clonedReferer := &pipeline.RefererState{}
-	if c.referer != nil {
-		c.referer.Mu.Lock()
-		clonedReferer.LastURL = c.referer.LastURL
-		c.referer.Mu.Unlock()
-	}
-
-	cloned := &Client{
-		engine:  c.engine,
-		referer: clonedReferer,
-	}
-	if httpClient, ok := cloned.engine.(*http.Client); ok {
-		cloned.engine = CloneHTTPClient(httpClient)
-	}
-
-	cfg := c.snapshotConfig()
-	cloned.applyConfig(cfg)
-
-	return cloned
+	return c.With()
 }
 
-// With produces a deep-copied [Client] with the provided functional options applied.
-// Preserves original client immutability and thread safety.
+// With produces a deep-copied [Client] with the provided functional options applied,
+// preserving original client immutability and thread safety.
 func (c *Client) With(opts ...ClientOption) *Client {
 	clonedReferer := &pipeline.RefererState{}
 	if c.referer != nil {
@@ -152,12 +137,10 @@ func (c *Client) With(opts ...ClientOption) *Client {
 // yielding the [*http.Response] stream.
 //
 // Path Resolution (RFC 3986):
-// Relative paths are resolved against BaseURL using precomputed zero-allocation string buffers ([engine.PreparedConfig]).
+// Relative paths are resolved against BaseURL using precomputed zero-allocation string buffers.
 // Absolute HTTP/HTTPS URLs override BaseURL directly.
 //
-// Pipeline Rules & Post-Processing:
-// Transparent decompression (Gzip, Brotli, Zstd), charset transcoding to UTF-8, OOM size limits,
-// and WAF challenge solving are automatically applied via pipeline rules.
+// The caller MUST close the returned response body stream when finished.
 func (c *Client) Request(
 	ctx context.Context,
 	method, path string,
@@ -183,15 +166,20 @@ func (c *Client) Request(
 		return nil, err
 	}
 
-	reqHeader := make(http.Header, len(c.prepared.PrecomputedDefaultHeaders)+len(c.defaults.Headers))
-	if len(c.prepared.PrecomputedDefaultHeaders) > 0 {
-		for i := range c.prepared.PrecomputedDefaultHeaders {
-			h := &c.prepared.PrecomputedDefaultHeaders[i]
-			reqHeader[h.Key] = h.Slice
-		}
-	} else if len(c.defaults.Headers) > 0 {
-		for k, v := range c.defaults.Headers {
-			reqHeader[k] = append([]string(nil), v...)
+	var reqHeader http.Header
+
+	headerCap := len(c.prepared.PrecomputedDefaultHeaders) + len(c.defaults.Headers)
+	if headerCap > 0 {
+		reqHeader = make(http.Header, headerCap)
+		if len(c.prepared.PrecomputedDefaultHeaders) > 0 {
+			for i := range c.prepared.PrecomputedDefaultHeaders {
+				h := &c.prepared.PrecomputedDefaultHeaders[i]
+				reqHeader[h.Key] = h.Slice
+			}
+		} else if len(c.defaults.Headers) > 0 {
+			for k, v := range c.defaults.Headers {
+				reqHeader[k] = append([]string(nil), v...)
+			}
 		}
 	}
 
@@ -260,8 +248,10 @@ func (c *Client) doBaremetal(ctx context.Context, method, path string) (*http.Re
 	return resp, nil
 }
 
-// Do executes a prepared [Request] contract via the client execution pipeline.
-// Accepts both native aoni.Request and fast.Request adapters.
+// Do executes a prepared [Request] contract via the client execution pipeline,
+// accepting both native aoni.Request and fast.Request adapters.
+//
+// The caller MUST call resp.Close() on the returned response to release pooled memory.
 func (c *Client) Do(req Request) (Response, error) {
 	if req == nil {
 		return nil, ErrNilRequest
@@ -287,7 +277,7 @@ func (c *Client) Do(req Request) (Response, error) {
 	return NewStdResponse(resp), nil
 }
 
-// Close releases background janitor workers and engine resources.
+// Close releases background janitor workers and engine resources. Safe for repeated calls.
 func (c *Client) Close() {
 	if c.coreEngine != nil {
 		c.coreEngine.Close()
@@ -312,35 +302,28 @@ func (c *Client) execute(req *http.Request, pipe PipelineConfig) (*http.Response
 
 // WithPersona configures TLS ClientHello ID, HTTP/2 SETTINGS frames, header order,
 // p0f OS stack signatures, and User-Agent headers matching a specific browser persona (e.g. Chrome, Firefox, Safari)
-// in a single call to prevent cross-layer fingerprint mismatches.
+// in a single atomic clone call to prevent cross-layer fingerprint mismatches.
 func (c *Client) WithPersona(p fingerprint.Persona) *Client {
-	newClient := c.WithTLSClientHelloID(p.TLSID)
-	newClient.fingerprint.H2Settings = &p.H2Settings
-	newClient.fingerprint.HeaderOrder = p.HeaderOrder
-	newClient.fingerprint.P0fSignature = p.P0fSignature
+	return c.With(func(cfg *Config) {
+		cfg.Fingerprint.TLSClientHelloID = &p.TLSID
+		cfg.Fingerprint.H2Settings = &p.H2Settings
+		cfg.Fingerprint.HeaderOrder = p.HeaderOrder
+		cfg.Fingerprint.P0fSignature = p.P0fSignature
 
-	if transport := newClient.Transport(); transport != nil {
-		framed := h2.NewFramedTransport(transport, p.H2Settings, p.HeaderOrder...)
-		if httpClient, ok := newClient.engine.(*http.Client); ok {
-			httpClient.Transport = framed
+		if cfg.Defaults.Headers == nil {
+			cfg.Defaults.Headers = make(http.Header)
 		}
-	}
 
-	newClient = newClient.With(func(cfg *Config) {
 		cfg.Defaults.Headers.Set("User-Agent", p.UserAgent)
-	})
 
-	if len(p.HeaderOrder) == 0 {
-		return newClient
-	}
-
-	return newClient.With(func(cfg *Config) {
-		cfg.Defaults.DefaultMods = append(cfg.Defaults.DefaultMods, RequestModifier{
-			Kind: ModCustom,
-			Fn: func(req Request) {
-				GetOrInitRequestConfig(req).OrderedHeaders = p.HeaderOrder
-			},
-		})
+		if len(p.HeaderOrder) > 0 {
+			cfg.Defaults.DefaultMods = append(cfg.Defaults.DefaultMods, RequestModifier{
+				Kind: ModCustom,
+				Fn: func(req Request) {
+					GetOrInitRequestConfig(req).OrderedHeaders = p.HeaderOrder
+				},
+			})
+		}
 	})
 }
 
@@ -543,14 +526,7 @@ func (c *Client) CloseIdleConnections() {
 	}
 }
 
-func (c *Client) applyWSFragmentation(ctx context.Context, conn net.Conn) net.Conn {
-	if cfg := GetRequestConfig(ctx); cfg != nil && cfg.Fragment != nil {
-		return applyFragmentation(conn, *cfg.Fragment)
-	}
-
-	return conn
-}
-
+// needsRequestConfig reports whether active client defaults require attaching a RequestConfig DTO to request contexts.
 func (c *Client) needsRequestConfig() bool {
 	return c.network.SocketController != nil ||
 		c.fingerprint.TLSClientHelloSpecProvider != nil ||
@@ -564,6 +540,7 @@ func (c *Client) needsRequestConfig() bool {
 		c.network.ProxyAddr != nil
 }
 
+// isBaremetalStaticEligible determines if the client configuration permits fast 0-alloc baremetal execution.
 func (c *Client) isBaremetalStaticEligible() bool {
 	if len(c.defaults.DefaultMods) > 0 {
 		return false
@@ -592,6 +569,7 @@ func (c *Client) isBaremetalStaticEligible() bool {
 	return true
 }
 
+// ensureUserAgent guarantees a default User-Agent header is set on client request defaults.
 func (c *Client) ensureUserAgent() {
 	if c.defaults.Headers == nil {
 		return
@@ -602,6 +580,7 @@ func (c *Client) ensureUserAgent() {
 	}
 }
 
+// resolveURL resolves relative path against client BaseURL or parses absolute URL strings.
 func (c *Client) resolveURL(path string) (*url.URL, error) {
 	if (path == "" || path == "/") && c.prepared.BaseURL != nil {
 		return c.prepared.BaseURL, nil
@@ -659,6 +638,8 @@ func (c *Client) resolveTargetURL(path string) (string, error) {
 	return c.defaults.BaseURL.ResolveReference(rel).String(), nil
 }
 
+// resolveHTTPRequest converts a generic [Request] interface into a standard [*http.Request].
+// Uses zero-allocation bytesconv string conversions for header mappings.
 func (c *Client) resolveHTTPRequest(req Request) (*http.Request, error) {
 	if httpReq := req.HTTPRequest(); httpReq != nil {
 		return httpReq, nil
@@ -689,18 +670,19 @@ func (c *Client) resolveHTTPRequest(req Request) (*http.Request, error) {
 	fastReq := fastAdapter.FastHTTPRequest()
 	if fastReq != nil {
 		fastReq.Header.All()(func(k, v []byte) bool {
-			httpReq.Header.Add(string(k), string(v))
+			httpReq.Header.Add(bytesconv.B2S(k), bytesconv.B2S(v))
 			return true
 		})
 
-		if host := string(fastReq.Header.Peek("Host")); host != "" {
-			httpReq.Host = host
+		if host := fastReq.Header.Peek("Host"); len(host) > 0 {
+			httpReq.Host = bytesconv.B2S(host)
 		}
 	}
 
 	return httpReq, nil
 }
 
+// buildQUICConfig constructs a [quic.Config] from client settings and migration parameters.
 func (c *Client) buildQUICConfig(config *QUICMigrationConfig) *quic.Config {
 	quicCfg := &quic.Config{
 		EnableDatagrams:         true,
@@ -729,6 +711,7 @@ func (c *Client) buildQUICConfig(config *QUICMigrationConfig) *quic.Config {
 	return quicCfg
 }
 
+// buildQUICTLSConfig constructs a tls.Config tailored for QUIC/HTTP/3 ALPN negotiations.
 func (c *Client) buildQUICTLSConfig() *tls.Config {
 	tlsCfg := &tls.Config{
 		NextProtos:         []string{AlpnH3},
@@ -742,6 +725,7 @@ func (c *Client) buildQUICTLSConfig() *tls.Config {
 	return tlsCfg
 }
 
+// snapshotConfig extracts a pure data DTO copy of active client configurations.
 func (c *Client) snapshotConfig() Config {
 	return Config{
 		Network:     c.network.Clone(),
@@ -751,6 +735,7 @@ func (c *Client) snapshotConfig() Config {
 	}
 }
 
+// applyConfig applies a Config DTO to the client instance, recreating internal engines and transport dialers.
 func (c *Client) applyConfig(cfg Config) {
 	c.network = cfg.Network
 	c.fingerprint = cfg.Fingerprint
@@ -774,6 +759,7 @@ func (c *Client) applyConfig(cfg Config) {
 	)
 }
 
+// applyPowerManagement manages the lifecycle of OS power suspend/resume watchers.
 func (c *Client) applyPowerManagement(enable bool) {
 	if !enable {
 		if c.powerWatcher != nil {

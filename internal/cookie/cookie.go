@@ -15,7 +15,8 @@ import (
 	"github.com/lemon4ksan/aoni/internal/bytesconv"
 )
 
-// CookieDTO is the data transfer representation of Cookie for internal operations.
+// CookieDTO is the internal lightweight data transfer representation of an HTTP cookie,
+// capturing attributes from Set-Cookie headers before conversion to [http.Cookie].
 type CookieDTO struct {
 	Expires      time.Time
 	Name         string
@@ -62,44 +63,50 @@ func ParseSetCookieHeader(headerVal, defaultDomain, defaultPath string) CookieDT
 	return c
 }
 
-// ParseCookieAttribute sets cookie properties from attribute strings.
+// ParseCookieAttribute parses a single name=value or boolean directive (e.g., "Secure", "HttpOnly", "SameSite=Lax")
+// and sets the corresponding field on [CookieDTO] with zero heap allocations using case-insensitive ASCII comparison.
 func ParseCookieAttribute(attr string, c *CookieDTO) {
 	if attr == "" {
 		return
 	}
 
-	lower := strings.ToLower(attr)
+	key, val, hasVal := strings.Cut(attr, "=")
+	key = strings.TrimSpace(key)
+	val = strings.TrimSpace(val)
+
 	switch {
-	case lower == "httponly":
+	case bytesconv.EqualFoldASCII(key, "httponly"):
 		c.HTTPOnly = true
-	case lower == "secure":
+	case bytesconv.EqualFoldASCII(key, "secure"):
 		c.Secure = true
-	case lower == "partitioned":
+	case bytesconv.EqualFoldASCII(key, "partitioned"):
 		c.Partitioned = true
-	case strings.HasPrefix(lower, "samesite="):
-		c.SameSite = parseAttributeValue(attr)
-	case strings.HasPrefix(lower, "domain="):
-		c.Domain = strings.TrimPrefix(parseAttributeValue(attr), ".")
-	case strings.HasPrefix(lower, "path="):
-		c.Path = parseAttributeValue(attr)
-	case strings.HasPrefix(lower, "max-age="):
-		if maxAge, err := strconv.Atoi(parseAttributeValue(attr)); err == nil {
-			c.MaxAge = maxAge
+	case bytesconv.EqualFoldASCII(key, "samesite"):
+		if hasVal {
+			c.SameSite = val
 		}
-	case strings.HasPrefix(lower, "expires="):
-		if exp, err := http.ParseTime(parseAttributeValue(attr)); err == nil {
-			c.Expires = exp
+	case bytesconv.EqualFoldASCII(key, "domain"):
+		if hasVal {
+			c.Domain = strings.TrimPrefix(val, ".")
+		}
+	case bytesconv.EqualFoldASCII(key, "path"):
+		if hasVal {
+			c.Path = val
+		}
+	case bytesconv.EqualFoldASCII(key, "max-age"):
+		if hasVal {
+			if maxAge, err := strconv.Atoi(val); err == nil {
+				c.MaxAge = maxAge
+			}
+		}
+
+	case bytesconv.EqualFoldASCII(key, "expires"):
+		if hasVal {
+			if exp, err := http.ParseTime(val); err == nil {
+				c.Expires = exp
+			}
 		}
 	}
-}
-
-func parseAttributeValue(attr string) string {
-	_, val, ok := strings.Cut(attr, "=")
-	if !ok {
-		return ""
-	}
-
-	return strings.TrimSpace(val)
 }
 
 // PathMatch reports whether reqPath matches cookiePath per RFC 6265 §5.1.4.

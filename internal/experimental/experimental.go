@@ -20,7 +20,7 @@ type Features struct {
 	IsZeroCopySupported bool
 }
 
-// InspectFeatures queries CPU registers and OS runtime capabilities.
+// InspectFeatures queries CPU registers and OS runtime capabilities to discover hardware acceleration support.
 func InspectFeatures() Features {
 	return Features{
 		HasAVX2:             cpu.X86.HasAVX2,
@@ -30,8 +30,12 @@ func InspectFeatures() Features {
 	}
 }
 
-// ApplyCPUAffinity locks the calling goroutine's OS thread to designated CPU cores.
-// Safe no-op if cores slice is empty or unsupported by target OS.
+// ApplyCPUAffinity locks the calling goroutine's OS thread to designated physical CPU cores.
+//
+// Concurrency & Runtime Invariant:
+// This function calls [runtime.LockOSThread]. The locked OS thread remains bound to the calling
+// goroutine for its entire execution duration to prevent OS scheduler thread migration.
+// Safe no-op if cores slice is empty or unsupported by the host operating system.
 func ApplyCPUAffinity(cores []int) {
 	if len(cores) == 0 {
 		return

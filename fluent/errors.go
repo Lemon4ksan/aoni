@@ -22,10 +22,14 @@ var (
 
 // Error describes an operational failure occurring during request building or execution.
 type Error struct {
-	Op   string
+	// Op identifies the failed operation (e.g., "download", "expect_status").
+	Op string
+	// Path contains the target URL or local file path.
 	Path string
+	// Code represents the returned HTTP status code, if applicable.
 	Code int
-	Err  error
+	// Err is the underlying causal error.
+	Err error
 }
 
 func (e *Error) Error() string {

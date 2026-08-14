@@ -185,6 +185,7 @@ func NewSRV(
 	return lb, nil
 }
 
+// resolveSRVBackends discovers target backend hosts by issuing a DNS SRV query.
 func resolveSRVBackends(
 	service, proto, name, scheme string,
 	clientFactory func(targetURL string) aoni.HTTPDoer,
@@ -244,6 +245,7 @@ func resolveSRVBackends(
 	return backends, nil
 }
 
+// refreshSRV queries DNS SRV records and updates the active backend pool.
 func (b *Balancer) refreshSRV(
 	service, proto, name, scheme string,
 	clientFactory func(targetURL string) aoni.HTTPDoer,
@@ -305,89 +307,128 @@ func (b *Balancer) Do(req *http.Request) (*http.Response, error) {
 	backends := b.backends
 	b.mu.RUnlock()
 
-	n := uint64(len(backends))
+	n := len(backends)
 	if n == 0 {
 		return nil, ErrNoHealthyBackends
 	}
 
-	indices := b.buildBackendIndices(n, backends)
-
 	var lastErr error
 
+	// Zero-allocation hot path for standard RoundRobin
+	if b.config.Strategy == RoundRobin {
+		start := int(b.current.Add(1) % uint64(n))
+		for i := range n {
+			idx := (start + i) % n
+
+			resp, err, ok := b.tryBackend(req, backends[idx])
+			if !ok {
+				if err != nil {
+					lastErr = err
+				}
+
+				continue
+			}
+
+			return resp, err
+		}
+
+		return nil, b.formatBalanceError(lastErr)
+	}
+
+	// Strategy: Random or WeightedRoundRobin with stack-allocated indices
+	var (
+		stackIndices [32]int
+		indices      []int
+	)
+
+	if n <= len(stackIndices) {
+		indices = stackIndices[:n]
+	} else {
+		indices = make([]int, n)
+	}
+
+	b.buildBackendIndices(indices, backends)
+
 	for _, idx := range indices {
-		backend := backends[idx]
-		if !backend.tracker.IsAvailable() {
-			continue
-		}
-
-		if backend.parseErr != nil {
-			backend.tracker.MarkFailed()
-			lastErr = fmt.Errorf("invalid backend URL %q: %w", backend.URL, backend.parseErr)
-			continue
-		}
-
-		backendReq := req.Clone(req.Context())
-		if backend.parsedURL != nil {
-			backendReq.URL.Scheme = backend.parsedURL.Scheme
-			backendReq.URL.Host = backend.parsedURL.Host
-		}
-
-		resp, err := backend.client.Do(backendReq)
-		if b.isFault(resp, err) {
-			backend.tracker.MarkFailed()
-
-			lastErr = err
-
-			if resp != nil && resp.Body != nil {
-				_ = resp.Body.Close()
+		resp, err, ok := b.tryBackend(req, backends[idx])
+		if !ok {
+			if err != nil {
+				lastErr = err
 			}
 
 			continue
 		}
 
-		backend.tracker.MarkSuccess()
-
 		return resp, err
 	}
 
-	if lastErr != nil {
-		return nil, fmt.Errorf("aoni: all backends failed, last error: %w", lastErr)
-	}
-
-	return nil, ErrNoHealthyBackends
+	return nil, b.formatBalanceError(lastErr)
 }
 
-func (b *Balancer) buildBackendIndices(n uint64, backends []*Backend) []uint64 {
-	indices := make([]uint64, n)
+func (b *Balancer) tryBackend(req *http.Request, backend *Backend) (*http.Response, error, bool) {
+	if !backend.tracker.IsAvailable() {
+		return nil, nil, false
+	}
+
+	if backend.parseErr != nil {
+		backend.tracker.MarkFailed()
+		return nil, fmt.Errorf("invalid backend URL %q: %w", backend.URL, backend.parseErr), false
+	}
+
+	backendReq := req.Clone(req.Context())
+	if backend.parsedURL != nil {
+		backendReq.URL.Scheme = backend.parsedURL.Scheme
+		backendReq.URL.Host = backend.parsedURL.Host
+	}
+
+	resp, err := backend.client.Do(backendReq)
+	if b.isFault(resp, err) {
+		backend.tracker.MarkFailed()
+
+		if resp != nil && resp.Body != nil {
+			_ = resp.Body.Close()
+		}
+
+		return nil, err, false
+	}
+
+	backend.tracker.MarkSuccess()
+
+	return resp, err, true
+}
+
+func (b *Balancer) formatBalanceError(lastErr error) error {
+	if lastErr != nil {
+		return fmt.Errorf("aoni: all backends failed, last error: %w", lastErr)
+	}
+
+	return ErrNoHealthyBackends
+}
+
+// buildBackendIndices populates destination indices slice according to the configured load balancing strategy.
+func (b *Balancer) buildBackendIndices(indices []int, backends []*Backend) {
+	for i := range indices {
+		indices[i] = i
+	}
 
 	switch b.config.Strategy {
 	case Random:
-		for i := range indices {
-			indices[i] = uint64(i)
-		}
-
 		for i := len(indices) - 1; i > 0; i-- {
 			j := rand.Intn(i + 1)
 			indices[i], indices[j] = indices[j], indices[i]
 		}
 
 	case WeightedRoundRobin:
-		for i := range indices {
-			indices[i] = uint64(i)
-		}
-
-		slices.SortStableFunc(indices, func(i, j uint64) int {
+		slices.SortStableFunc(indices, func(i, j int) int {
 			return backends[j].Weight - backends[i].Weight
 		})
 
 	default: // RoundRobin
-		start := b.current.Add(1) % n
+		start := int(b.current.Add(1) % uint64(len(indices)))
 		for i := range indices {
-			indices[i] = (start + uint64(i)) % n
+			indices[i] = (start + i) % len(indices)
 		}
 	}
-
-	return indices
 }
 
 // Stats returns snapshot health metrics for all registered backends.
@@ -432,6 +473,7 @@ func (b *Balancer) Reset() {
 	}
 }
 
+// createBackends constructs an internal list of tracked backend instances.
 func createBackends(urls []string, cfg Config) []*Backend {
 	return generic.Map(urls, func(u string) *Backend {
 		parsed, parseErr := url.Parse(u)
@@ -457,6 +499,7 @@ func createBackends(urls []string, cfg Config) []*Backend {
 	})
 }
 
+// isFault checks whether the execution resulted in a connection error or server fault status (502, 503, 504).
 func (b *Balancer) isFault(resp *http.Response, err error) bool {
 	if err != nil {
 		return !errors.Is(err, context.Canceled)
@@ -470,6 +513,7 @@ func (b *Balancer) isFault(resp *http.Response, err error) bool {
 	return false
 }
 
+// healthCheckLoop executes periodic background health checks for unhealthy backends.
 func (b *Balancer) healthCheckLoop() {
 	if b.config.HealthCheckURL == "" {
 		return
@@ -490,6 +534,7 @@ func (b *Balancer) healthCheckLoop() {
 	}
 }
 
+// probeUnhealthyBackends runs health checks across currently unavailable backends.
 func (b *Balancer) probeUnhealthyBackends() {
 	b.mu.RLock()
 	backends := b.backends
@@ -502,6 +547,7 @@ func (b *Balancer) probeUnhealthyBackends() {
 	}
 }
 
+// checkHealth issues a probe request to verify whether an unhealthy backend has recovered.
 func (b *Balancer) checkHealth(backend *Backend) {
 	if backend == nil || backend.client == nil {
 		return

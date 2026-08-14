@@ -70,6 +70,7 @@ func NewCircuitBreaker(cfg CircuitBreakerConfig) *CircuitBreaker {
 	}
 }
 
+// getBreaker retrieves or lazily instantiates a host-isolated [breaker.CircuitBreaker].
 func (cb *CircuitBreaker) getBreaker(host string) *breaker.CircuitBreaker[any] {
 	if val, ok := cb.breakers.Load(host); ok {
 		return val.(*breaker.CircuitBreaker[any])
@@ -226,6 +227,7 @@ func Chaos(cfg ChaosConfig) aoni.Middleware {
 	}
 }
 
+// applyChaosDelay introduces artificial latency into request execution according to [ChaosConfig].
 func applyChaosDelay(ctx context.Context, cfg ChaosConfig) error {
 	minD := cfg.MinLatency
 	if minD == 0 && cfg.LatencyMin > 0 {
@@ -274,6 +276,7 @@ func applyChaosDelay(ctx context.Context, cfg ChaosConfig) error {
 	}
 }
 
+// shouldInjectChaosError determines whether to inject a simulated HTTP 503 error.
 func shouldInjectChaosError(rate float64) bool {
 	if rate <= 0 {
 		return false
@@ -284,6 +287,7 @@ func shouldInjectChaosError(rate float64) bool {
 	return float64(n.Int64())/10000.0 < rate
 }
 
+// isFatalError determines if err is non-recoverable and should terminate retries immediately.
 func isFatalError(err error) bool {
 	if errors.Is(err, netdial.ErrSSRFBlocked) ||
 		errors.Is(err, netdial.ErrCertificatePinning) ||
@@ -302,6 +306,7 @@ func isFatalError(err error) bool {
 	return errors.As(err, &unknownAuth)
 }
 
+// parseRetryAfter parses standard HTTP Retry-After headers (seconds or HTTP date).
 func parseRetryAfter(resp aoni.Response) (time.Duration, bool) {
 	if resp == nil {
 		return 0, false
@@ -335,6 +340,7 @@ func parseRetryAfter(resp aoni.Response) (time.Duration, bool) {
 	return 0, false
 }
 
+// parseHostFromURL extracts the target hostname without port from rawURL.
 func parseHostFromURL(rawURL string) string {
 	u, err := url.Parse(rawURL)
 	if err != nil || u.Host == "" {

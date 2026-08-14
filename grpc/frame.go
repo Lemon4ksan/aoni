@@ -6,6 +6,7 @@ package grpc
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"io"
 
@@ -15,12 +16,15 @@ import (
 	"github.com/lemon4ksan/aoni/internal/transport"
 )
 
-var defaultFramer = transport.NewLengthPrefixedFramer(0)
+var (
+	defaultFramer  = transport.NewLengthPrefixedFramer(0)
+	emptyGRPCFrame = []byte{0, 0, 0, 0, 0}
+)
 
 // marshalFrame encodes a Protobuf message into a 5-byte Length-Prefixed-Message per PROTOCOL-HTTP2.md.
 func marshalFrame(msg proto.Message, compressed bool) ([]byte, error) {
 	if msg == nil {
-		return []byte{0, 0, 0, 0, 0}, nil
+		return emptyGRPCFrame, nil
 	}
 
 	rawBytes, err := proto.Marshal(msg)
@@ -56,7 +60,11 @@ func marshalFrame(msg proto.Message, compressed bool) ([]byte, error) {
 func unmarshalFrame(r io.Reader, target proto.Message) (bool, error) {
 	flags, payload, err := defaultFramer.ReadFrame(r)
 	if err != nil {
-		return false, err
+		if errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF) {
+			return false, err
+		}
+
+		return false, fmt.Errorf("%w: %w", ErrInvalidGRPCFrame, err)
 	}
 
 	compressed := flags&1 != 0

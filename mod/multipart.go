@@ -172,6 +172,7 @@ func WithStreamingMultipart(fields map[string]string, files map[string]stdio.Rea
 	}
 }
 
+// streamMultipartPayload continuously encodes and streams multipart fields and files through pw.
 func streamMultipartPayload(
 	ctx context.Context,
 	pw *stdio.PipeWriter,
@@ -208,6 +209,7 @@ func streamMultipartPayload(
 	}
 }
 
+// detectMIMEAndReader peeks at the first 512 bytes of r on the stack to sniff Content-Type.
 func detectMIMEAndReader(r stdio.Reader) (string, stdio.Reader) {
 	var buf [512]byte
 
@@ -226,6 +228,7 @@ func detectMIMEAndReader(r stdio.Reader) (string, stdio.Reader) {
 	return "application/octet-stream", r
 }
 
+// createFormFileHeader builds a multipart MIME header with proper Content-Disposition and Content-Type.
 func createFormFileHeader(w *multipart.Writer, fieldname, filename, contentType string) (stdio.Writer, error) {
 	h := make(textproto.MIMEHeader)
 	h.Set("Content-Disposition",
@@ -242,6 +245,7 @@ func createFormFileHeader(w *multipart.Writer, fieldname, filename, contentType 
 
 var quoteEscaper = strings.NewReplacer("\\", "\\\\", `"`, "\\\"")
 
+// escapeQuotes escapes backslashes and double quotes for MIME header parameter values.
 func escapeQuotes(s string) string {
 	return quoteEscaper.Replace(s)
 }

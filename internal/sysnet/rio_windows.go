@@ -97,16 +97,19 @@ func initRIOFunctionTable() error {
 	return nil
 }
 
+// BufferRegistration tracks a memory slice locked in physical RAM or registered with Windows RIO.
 type BufferRegistration struct {
 	BufferID uintptr
 	Data     []byte
 	IsRIO    bool
 }
 
+// IsRIOSupported reports whether Windows Registered I/O (RIO) extensions or VirtualLock are available.
 func IsRIOSupported() bool {
 	return rioAvailable.Load()
 }
 
+// RegisterBuffer registers data with Windows RIO (or locks in RAM via VirtualLock) to eliminate page faults during socket I/O.
 func RegisterBuffer(data []byte) (*BufferRegistration, error) {
 	if len(data) == 0 {
 		return nil, nil
@@ -153,6 +156,7 @@ func RegisterBuffer(data []byte) (*BufferRegistration, error) {
 	}, nil
 }
 
+// Deregister unlocks or unregisters the memory buffer from the Windows kernel.
 func (b *BufferRegistration) Deregister() {
 	if b == nil || b.BufferID == 0 || b.BufferID == ^uintptr(0) {
 		return

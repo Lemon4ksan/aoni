@@ -112,16 +112,7 @@ func GetTo[Resp any](
 		return nil, err
 	}
 
-	if reflect.TypeFor[Resp]() == reflect.TypeFor[NoResponse]() {
-		return nil, HandleResponse(resp, nil, c)
-	}
-
-	result := new(Resp)
-	if err := HandleResponse(resp, result, c); err != nil {
-		return nil, err
-	}
-
-	return result, nil
+	return decodeResponseTo[Resp](resp, c)
 }
 
 // GetInto performs a GET request and unmarshals the response body directly into target, eliminating allocations.
@@ -151,20 +142,7 @@ func GetToEx[Resp any](
 	path string,
 	mods ...aoni.RequestModifier,
 ) (*Resp, *http.Response, error) {
-	var raw *http.Response
-
-	mods = append(mods, mod.WithCaptureResponse(&raw))
-
-	result, err := GetTo[Resp](ctx, c, path, mods...)
-	if err != nil {
-		if raw != nil && raw.Body != nil {
-			_ = raw.Body.Close()
-		}
-
-		return nil, raw, err
-	}
-
-	return result, raw, nil
+	return executeToEx[Resp](ctx, c, http.MethodGet, path, nil, mods)
 }
 
 // Post executes a POST request carrying body marshaled as JSON and returns the raw [*http.Response].
@@ -205,16 +183,7 @@ func PostTo[Resp any](
 		return nil, err
 	}
 
-	if reflect.TypeFor[Resp]() == reflect.TypeFor[NoResponse]() {
-		return nil, HandleResponse(resp, nil, c)
-	}
-
-	result := new(Resp)
-	if err := HandleResponse(resp, result, c); err != nil {
-		return nil, err
-	}
-
-	return result, nil
+	return decodeResponseTo[Resp](resp, c)
 }
 
 // PostInto executes a POST request with body payload and unmarshals the response directly into target.
@@ -253,20 +222,7 @@ func PostToEx[Resp any](
 	body any,
 	mods ...aoni.RequestModifier,
 ) (*Resp, *http.Response, error) {
-	var raw *http.Response
-
-	mods = append(mods, mod.WithCaptureResponse(&raw))
-
-	result, err := PostTo[Resp](ctx, c, path, body, mods...)
-	if err != nil {
-		if raw != nil && raw.Body != nil {
-			_ = raw.Body.Close()
-		}
-
-		return nil, raw, err
-	}
-
-	return result, raw, nil
+	return executeToEx[Resp](ctx, c, http.MethodPost, path, body, mods)
 }
 
 // Put performs a PUT request carrying body marshaled as JSON and returns the raw [*http.Response].
@@ -315,16 +271,7 @@ func PutTo[Resp any](
 		return nil, err
 	}
 
-	if reflect.TypeFor[Resp]() == reflect.TypeFor[NoResponse]() {
-		return nil, HandleResponse(resp, nil, c)
-	}
-
-	result := new(Resp)
-	if err := HandleResponse(resp, result, c); err != nil {
-		return nil, err
-	}
-
-	return result, nil
+	return decodeResponseTo[Resp](resp, c)
 }
 
 // PutInto executes a PUT request and unmarshals the response payload directly into target.
@@ -363,20 +310,7 @@ func PutToEx[Resp any](
 	body any,
 	mods ...aoni.RequestModifier,
 ) (*Resp, *http.Response, error) {
-	var raw *http.Response
-
-	mods = append(mods, mod.WithCaptureResponse(&raw))
-
-	result, err := PutTo[Resp](ctx, c, path, body, mods...)
-	if err != nil {
-		if raw != nil && raw.Body != nil {
-			_ = raw.Body.Close()
-		}
-
-		return nil, raw, err
-	}
-
-	return result, raw, nil
+	return executeToEx[Resp](ctx, c, http.MethodPut, path, body, mods)
 }
 
 // Patch performs a PATCH request carrying body marshaled as JSON and returns the raw [*http.Response].
@@ -425,16 +359,7 @@ func PatchTo[Resp any](
 		return nil, err
 	}
 
-	if reflect.TypeFor[Resp]() == reflect.TypeFor[NoResponse]() {
-		return nil, HandleResponse(resp, nil, c)
-	}
-
-	result := new(Resp)
-	if err := HandleResponse(resp, result, c); err != nil {
-		return nil, err
-	}
-
-	return result, nil
+	return decodeResponseTo[Resp](resp, c)
 }
 
 // PatchInto executes a PATCH request and unmarshals the response payload directly into target.
@@ -473,20 +398,7 @@ func PatchToEx[Resp any](
 	body any,
 	mods ...aoni.RequestModifier,
 ) (*Resp, *http.Response, error) {
-	var raw *http.Response
-
-	mods = append(mods, mod.WithCaptureResponse(&raw))
-
-	result, err := PatchTo[Resp](ctx, c, path, body, mods...)
-	if err != nil {
-		if raw != nil && raw.Body != nil {
-			_ = raw.Body.Close()
-		}
-
-		return nil, raw, err
-	}
-
-	return result, raw, nil
+	return executeToEx[Resp](ctx, c, http.MethodPatch, path, body, mods)
 }
 
 // Delete performs a DELETE request carrying body marshaled as JSON and returns the raw [*http.Response].
@@ -535,16 +447,7 @@ func DeleteTo[Resp any](
 		return nil, err
 	}
 
-	if reflect.TypeFor[Resp]() == reflect.TypeFor[NoResponse]() {
-		return nil, HandleResponse(resp, nil, c)
-	}
-
-	result := new(Resp)
-	if err := HandleResponse(resp, result, c); err != nil {
-		return nil, err
-	}
-
-	return result, nil
+	return decodeResponseTo[Resp](resp, c)
 }
 
 // DeleteInto executes a DELETE request and unmarshals the response payload directly into target.
@@ -583,20 +486,7 @@ func DeleteToEx[Resp any](
 	body any,
 	mods ...aoni.RequestModifier,
 ) (*Resp, *http.Response, error) {
-	var raw *http.Response
-
-	mods = append(mods, mod.WithCaptureResponse(&raw))
-
-	result, err := DeleteTo[Resp](ctx, c, path, body, mods...)
-	if err != nil {
-		if raw != nil && raw.Body != nil {
-			_ = raw.Body.Close()
-		}
-
-		return nil, raw, err
-	}
-
-	return result, raw, nil
+	return executeToEx[Resp](ctx, c, http.MethodDelete, path, body, mods)
 }
 
 // Head performs a HEAD request through c and returns the raw [*http.Response].
@@ -631,16 +521,7 @@ func OptionsTo[Resp any](
 		return nil, err
 	}
 
-	if reflect.TypeFor[Resp]() == reflect.TypeFor[NoResponse]() {
-		return nil, HandleResponse(resp, nil, c)
-	}
-
-	result := new(Resp)
-	if err := HandleResponse(resp, result, c); err != nil {
-		return nil, err
-	}
-
-	return result, nil
+	return decodeResponseTo[Resp](resp, c)
 }
 
 // OptionsInto performs an OPTIONS request and unmarshals the response payload directly into target.
@@ -737,16 +618,7 @@ func DoTo[Resp any](
 		return nil, err
 	}
 
-	if reflect.TypeFor[Resp]() == reflect.TypeFor[NoResponse]() {
-		return nil, HandleResponse(resp, nil, c)
-	}
-
-	result := new(Resp)
-	if err := HandleResponse(resp, result, c); err != nil {
-		return nil, err
-	}
-
-	return result, nil
+	return decodeResponseTo[Resp](resp, c)
 }
 
 // DoInto performs an HTTP request using method, marshaling body if provided, and unmarshals response directly into target.
@@ -791,11 +663,38 @@ func DoToEx[Resp any](
 	body any,
 	mods ...aoni.RequestModifier,
 ) (*Resp, *http.Response, error) {
+	return executeToEx[Resp](ctx, c, method, path, body, mods)
+}
+
+// decodeResponseTo unmarshals resp payload into a newly allocated instance of Resp.
+func decodeResponseTo[Resp any](resp *http.Response, c Requester) (*Resp, error) {
+	if reflect.TypeFor[Resp]() == reflect.TypeFor[NoResponse]() {
+		return nil, HandleResponse(resp, nil, c)
+	}
+
+	result := new(Resp)
+	if err := HandleResponse(resp, result, c); err != nil {
+		return nil, err
+	}
+
+	return result, nil
+}
+
+// executeToEx executes a generic typed request while capturing the raw *http.Response.
+func executeToEx[Resp any](
+	ctx context.Context,
+	c Requester,
+	method, path string,
+	body any,
+	mods []aoni.RequestModifier,
+) (*Resp, *http.Response, error) {
 	var raw *http.Response
 
-	mods = append(mods, mod.WithCaptureResponse(&raw))
+	reqMods := make([]aoni.RequestModifier, 0, len(mods)+1)
+	reqMods = append(reqMods, mod.WithCaptureResponse(&raw))
+	reqMods = append(reqMods, mods...)
 
-	result, err := DoTo[Resp](ctx, c, method, path, body, mods...)
+	result, err := DoTo[Resp](ctx, c, method, path, body, reqMods...)
 	if err != nil {
 		if raw != nil && raw.Body != nil {
 			_ = raw.Body.Close()
@@ -808,19 +707,13 @@ func DoToEx[Resp any](
 }
 
 func buildPostMods(bodyReader stdio.Reader, mods []aoni.RequestModifier) []aoni.RequestModifier {
-	if len(mods) == 0 {
-		return []aoni.RequestModifier{
-			mod.WithContentType("application/json"),
-			mod.WithAccept("application/json"),
-			mod.WithBody(bodyReader),
-		}
-	}
-
-	res := make([]aoni.RequestModifier, 3+len(mods))
-	res[0] = mod.WithContentType("application/json")
-	res[1] = mod.WithAccept("application/json")
-	res[2] = mod.WithBody(bodyReader)
-	copy(res[3:], mods)
+	res := make([]aoni.RequestModifier, 0, 3+len(mods))
+	res = append(res,
+		mod.WithContentType("application/json"),
+		mod.WithAccept("application/json"),
+		mod.WithBody(bodyReader),
+	)
+	res = append(res, mods...)
 
 	return res
 }

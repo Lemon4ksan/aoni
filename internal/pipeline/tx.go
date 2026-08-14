@@ -22,58 +22,63 @@ var txStorage = pool.NewPerPStorage(func() *Tx {
 	return &Tx{}
 })
 
+// UnsafeHook defines a phase interception hook function executed within custom phase orders.
 type UnsafeHook func(tx *Tx, req *http.Request, resp *http.Response) error
 
-// Tx is a pooled transaction object holding all execution parameters.
+// Tx is a pooled transaction state container holding all execution parameters for a single HTTP transaction.
+//
+// Concurrency & Lifetime Invariants:
+// - Tx is checked out from [pool.PerPStorage] at request start and returned upon response completion.
+// - It is strictly NOT thread-safe and MUST NOT be accessed concurrently across multiple goroutines.
 type Tx struct {
-	Ctx context.Context // Strictly used for Cancel/Deadline propagation!
+	Ctx context.Context // Strictly used for Cancel/Deadline propagation
 
-	Flags uint32 // Bitmask for zero-alloc feature checking
+	Flags uint32 // Precomputed bitmask for zero-alloc feature checking
 
-	TargetURL            string
-	TargetHost           string
-	ProxyURL             *url.URL
-	TimeoutOverride      time.Duration
-	MultiReadThreshold   int64
-	SizeLimit            int64
-	MultiReadDisableDisk bool
+	TargetURL            string        // Resolved absolute destination URL
+	TargetHost           string        // Cleaned target hostname
+	ProxyURL             *url.URL      // Active proxy endpoint for this transaction
+	TimeoutOverride      time.Duration // Per-request deadline override
+	MultiReadThreshold   int64         // RAM/Disk buffering threshold
+	SizeLimit            int64         // Maximum allowed response body bytes
+	MultiReadDisableDisk bool          // True to disable temporary file disk buffering
 
-	DPIJitter     *DPIJitterConfig
-	ProxyFailover *ProxyFailoverConfig
-	Hedging       *HedgingConfig
-	Cache         *CacheConfig
-	HAR           *HARConfig
-	Redact        *RedactConfig
+	DPIJitter     *DPIJitterConfig     // TCP handshake packet jitter configuration
+	ProxyFailover *ProxyFailoverConfig // Secondary proxy failover policy
+	Hedging       *HedgingConfig       // Request hedging racing configuration
+	Cache         *CacheConfig         // Response caching parameters
+	HAR           *HARConfig           // HAR capture configuration
+	Redact        *RedactConfig        // Header redaction rules
 
-	Decoder                 ResponseDecoder
-	ErrorModel              any
-	ForceContentType        string
-	Label                   string
-	MultipartBoundary       string
-	OrderedHeaders          []string
-	ALPNOverride            []string
-	JA4ReportStore          *JA4ReportStore
-	Fallback                FallbackFunc
-	ResponseValidator       func(resp *http.Response) error
-	RetryPolicy             *RetryOverride
-	P0fSignature            *p0f.Signature
-	SessionCache            SessionCache
-	PacketPadding           *fingerprint.PaddingConfig
-	SocketController        SocketController
-	ClientHelloSpecProvider ClientHelloSpecProvider
-	JA4Callback             func(ja4.Report)
-	Metadata                map[string]any
-	TraceInfo               *telemetry.TraceInfo
-	HostRewrite             *HostRewriteConfig
-	Fragment                *fragment.Config
-	CertificatePins         map[string][]string
-	Modifiers               []RequestModifier
-	QueryEncoder            QueryEncoder
-	Decoders                map[string]ResponseDecoder
+	Decoder                 ResponseDecoder                 // Primary response decoder
+	ErrorModel              any                             // Structured error target model
+	ForceContentType        string                          // Forced MIME content-type override
+	Label                   string                          // Metric tracking label
+	MultipartBoundary       string                          // Custom multipart boundary
+	OrderedHeaders          []string                        // Emulated browser header order
+	ALPNOverride            []string                        // Custom TLS ALPN protocol list
+	JA4ReportStore          *JA4ReportStore                 // Store for computed JA4 fingerprints
+	Fallback                FallbackFunc                    // Failure fallback handler
+	ResponseValidator       func(resp *http.Response) error // Custom response validation predicate
+	RetryPolicy             *RetryOverride                  // Per-request retry policy
+	P0fSignature            *p0f.Signature                  // OS TCP/IP stack signature
+	SessionCache            SessionCache                    // Proxy-isolated TLS session cache
+	PacketPadding           *fingerprint.PaddingConfig      // DPI packet padding settings
+	SocketController        SocketController                // Low-level socket dialer hook
+	ClientHelloSpecProvider ClientHelloSpecProvider         // Custom uTLS ClientHello provider
+	JA4Callback             func(ja4.Report)                // JA4 computation callback
+	Metadata                map[string]any                  // Request metadata store
+	TraceInfo               *telemetry.TraceInfo            // Fine-grained request tracer
+	HostRewrite             *HostRewriteConfig              // DNS hostname rewrite rules
+	Fragment                *fragment.Config                // TCP packet fragmentation configuration
+	CertificatePins         map[string][]string             // Domain public key hash pins
+	Modifiers               []RequestModifier               // Pipeline modifiers
+	QueryEncoder            QueryEncoder                    // Custom query encoder
+	Decoders                map[string]ResponseDecoder      // Map of MIME content-type decoders
 
 	// Unsafe mode custom phase sequence
-	UnsafePhaseOrder []PhaseID
-	UnsafeHooks      map[PhaseID][]UnsafeHook
+	UnsafePhaseOrder []PhaseID                // Custom phase execution order
+	UnsafeHooks      map[PhaseID][]UnsafeHook // Map of phase interceptor hooks
 }
 
 // AcquireTx retrieves a clean [Tx] from pool.

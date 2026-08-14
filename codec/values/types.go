@@ -14,6 +14,12 @@ import (
 	"github.com/lemon4ksan/aoni/internal/bytesconv"
 )
 
+var (
+	bOne  = []byte("1")
+	bZero = []byte("0")
+	bNull = []byte("null")
+)
+
 // Uint64String parses uint64 values from numeric or quoted string JSON payloads.
 type Uint64String uint64
 
@@ -115,10 +121,10 @@ func (bi *BoolInt) UnmarshalJSON(b []byte) error {
 // MarshalJSON serializes [BoolInt] back as numeric "1" or "0" JSON values.
 func (bi BoolInt) MarshalJSON() ([]byte, error) {
 	if bi {
-		return []byte("1"), nil
+		return bOne, nil
 	}
 
-	return []byte("0"), nil
+	return bZero, nil
 }
 
 // UnixTimestamp parses UNIX epoch timestamps from strings or numbers in JSON.
@@ -145,7 +151,7 @@ func (t *UnixTimestamp) UnmarshalJSON(b []byte) error {
 // MarshalJSON serializes [UnixTimestamp] as a numeric Unix epoch timestamp.
 func (t UnixTimestamp) MarshalJSON() ([]byte, error) {
 	if time.Time(t).IsZero() {
-		return []byte("0"), nil
+		return bZero, nil
 	}
 
 	return []byte(strconv.FormatInt(time.Time(t).Unix(), 10)), nil
@@ -178,7 +184,7 @@ func (t *RFC3339Timestamp) UnmarshalJSON(b []byte) error {
 // MarshalJSON implements [json.Marshaler].
 func (t RFC3339Timestamp) MarshalJSON() ([]byte, error) {
 	if time.Time(t).IsZero() {
-		return []byte("null"), nil
+		return bNull, nil
 	}
 
 	return json.Marshal(time.Time(t).Format(time.RFC3339))

@@ -252,3 +252,108 @@ func TestCapsuleStructs(t *testing.T) {
 	assert.Equal(t, "10.0.0.1", ipRange.StartIP.String())
 	assert.Equal(t, byte(17), ipRange.IPProtocol)
 }
+
+func TestDecodeAddressAssignPayloadPODSlab(t *testing.T) {
+	t.Parallel()
+
+	buildPayload := func(reqID uint64, ipVer byte, ip net.IP, prefixLen byte) []byte {
+		var (
+			buf bytes.Buffer
+			tmp [8]byte
+		)
+
+		n := EncodeVarint(reqID, tmp[:])
+		buf.Write(tmp[:n])
+		buf.WriteByte(ipVer)
+
+		if ipVer == 4 {
+			buf.Write(ip.To4())
+		} else {
+			buf.Write(ip.To16())
+		}
+
+		buf.WriteByte(prefixLen)
+
+		return buf.Bytes()
+	}
+
+	t.Run("slab allocation - entries match expected", func(t *testing.T) {
+		t.Parallel()
+
+		slab, err := NewAssignedAddressSlab(8)
+		require.NoError(t, err)
+
+		defer slab.Release()
+
+		var buf bytes.Buffer
+		buf.Write(buildPayload(1, 4, net.ParseIP("10.0.0.1"), 24))
+		buf.Write(buildPayload(2, 6, net.ParseIP("2001:db8::1"), 128))
+
+		entries, err := DecodeAddressAssignPayloadPODSlab(slab, buf.Bytes())
+		require.NoError(t, err)
+		require.Len(t, entries, 2)
+
+		assert.Equal(t, uint64(1), entries[0].RequestID)
+		assert.Equal(t, byte(4), entries[0].IPVersion)
+		assert.Equal(t, byte(24), entries[0].PrefixLength)
+
+		assert.Equal(t, uint64(2), entries[1].RequestID)
+		assert.Equal(t, byte(6), entries[1].IPVersion)
+		assert.Equal(t, byte(128), entries[1].PrefixLength)
+
+		// Verify slab has 2 slots in use.
+		assert.Equal(t, 2, slab.Len())
+
+		// Individual Free as each entry is processed.
+		slab.Free(entries[0])
+		assert.Equal(t, 1, slab.Len())
+
+		slab.Free(entries[1])
+		assert.Equal(t, 0, slab.Len())
+	})
+
+	t.Run("nil slab falls back to heap", func(t *testing.T) {
+		t.Parallel()
+
+		payload := buildPayload(42, 4, net.ParseIP("192.168.0.1"), 32)
+
+		entries, err := DecodeAddressAssignPayloadPODSlab(nil, payload)
+		require.NoError(t, err)
+		require.Len(t, entries, 1)
+		assert.Equal(t, uint64(42), entries[0].RequestID)
+	})
+
+	t.Run("exhausted slab falls back to heap", func(t *testing.T) {
+		t.Parallel()
+
+		// Slab with capacity 1, payload with 2 entries.
+		slab, err := NewAssignedAddressSlab(1)
+		require.NoError(t, err)
+
+		defer slab.Release()
+
+		var buf bytes.Buffer
+		buf.Write(buildPayload(1, 4, net.ParseIP("10.0.0.1"), 24))
+		buf.Write(buildPayload(2, 4, net.ParseIP("10.0.0.2"), 24))
+
+		// Second entry must be heap-allocated (no panic, no nil return).
+		entries, err := DecodeAddressAssignPayloadPODSlab(slab, buf.Bytes())
+		require.NoError(t, err)
+		require.Len(t, entries, 2)
+		assert.Equal(t, uint64(1), entries[0].RequestID)
+		assert.Equal(t, uint64(2), entries[1].RequestID)
+	})
+
+	t.Run("empty payload", func(t *testing.T) {
+		t.Parallel()
+
+		slab, err := NewAssignedAddressSlab(4)
+		require.NoError(t, err)
+
+		defer slab.Release()
+
+		entries, err := DecodeAddressAssignPayloadPODSlab(slab, []byte{})
+		require.NoError(t, err)
+		assert.Empty(t, entries)
+	})
+}

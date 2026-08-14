@@ -6,13 +6,10 @@ package fingerprint
 
 import (
 	"fmt"
-	"regexp"
 	"strings"
 
 	"github.com/lemon4ksan/aoni/fingerprint/profiles"
 )
-
-var chromeVersionRegex = regexp.MustCompile(`Chrome/(\d+\.\d+\.\d+\.\d+)`)
 
 // ClientHints holds W3C High-Entropy and Low-Entropy Client Hints attributes.
 type ClientHints struct {
@@ -94,15 +91,28 @@ func (ch ClientHints) ApplyHeaders(setHeader func(key, val string)) {
 	}
 }
 
+// extractChromeVersion extracts the full version token (e.g. "120.0.6099.109") from a User-Agent without regex heap allocations.
 func extractChromeVersion(ua string) string {
-	matches := chromeVersionRegex.FindStringSubmatch(ua)
-	if len(matches) > 1 {
-		return matches[1]
+	const prefix = "Chrome/"
+
+	idx := strings.Index(ua, prefix)
+	if idx >= 0 {
+		rest := ua[idx+len(prefix):]
+
+		end := strings.IndexAny(rest, " ;/()")
+		if end >= 0 {
+			rest = rest[:end]
+		}
+
+		if len(rest) > 0 {
+			return rest
+		}
 	}
 
 	return "120.0.6099.109"
 }
 
+// extractMajorVersion extracts the leading major version number from a semver string.
 func extractMajorVersion(fullVersion string) string {
 	major, _, _ := strings.Cut(fullVersion, ".")
 	if major == "" {
@@ -112,6 +122,7 @@ func extractMajorVersion(fullVersion string) string {
 	return major
 }
 
+// resolveFormFactor reports whether the target OS corresponds to a Mobile or Desktop form factor.
 func resolveFormFactor(os profiles.OSKey) string {
 	if os.IsMobile() {
 		return `"Mobile"`
@@ -120,6 +131,7 @@ func resolveFormFactor(os profiles.OSKey) string {
 	return `"Desktop"`
 }
 
+// populateOSDetails fills platform, platform version, architecture, bitness, and model hints for the target OS.
 func populateOSDetails(ch *ClientHints, os profiles.OSKey) {
 	switch os {
 	case profiles.Windows:

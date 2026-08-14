@@ -10,8 +10,6 @@ import (
 	"strings"
 
 	"google.golang.org/protobuf/proto"
-
-	"github.com/lemon4ksan/aoni/internal/pool"
 )
 
 // QueryEncoder is implemented by types that encode themselves directly into [url.Values].
@@ -226,13 +224,8 @@ func StructToValues(v any) (url.Values, error) {
 	return Encode(v)
 }
 
-// StructToQueryString serializes structure v into a URL query string using single-cycle RequestArena pointer bump.
+// StructToQueryString serializes structure v into a URL query parameter string.
 func StructToQueryString(v any) (string, error) {
-	arena := pool.GetRequestArena()
-	defer pool.ReleaseRequestArena(arena)
-
-	_ = arena.Alloc(256)
-
 	var sb strings.Builder
 	if err := EncodeQueryString(v, &sb); err != nil {
 		return "", err

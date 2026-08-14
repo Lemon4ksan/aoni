@@ -16,23 +16,26 @@ type Transport struct {
 }
 
 // RoundTrip injects isolated proxy cookies into outbound headers and captures response set-cookie headers.
+// Safe for concurrent execution across multiple goroutines. Clones outbound request before header mutation to comply with [http.RoundTripper] contracts.
 func (t *Transport) RoundTrip(req *http.Request) (*http.Response, error) {
 	next := t.Next
 	if next == nil {
 		next = http.DefaultTransport
 	}
 
-	t.setCookies(req)
+	reqToPass := t.setCookies(req)
 
-	resp, err := next.RoundTrip(req)
-	if err != nil || resp == nil || t.CookieJar == nil || req.URL == nil {
+	resp, err := next.RoundTrip(reqToPass)
+	if err != nil || resp == nil || t.CookieJar == nil || reqToPass.URL == nil {
 		return resp, err
 	}
 
-	jar := t.CookieJar.GetJar(req.Context())
-	if jar != nil {
-		if rc := resp.Cookies(); len(rc) > 0 {
-			jar.SetCookies(req.URL, rc)
+	if len(resp.Header["Set-Cookie"]) > 0 {
+		jar := t.CookieJar.GetJar(reqToPass.Context())
+		if jar != nil {
+			if rc := resp.Cookies(); len(rc) > 0 {
+				jar.SetCookies(reqToPass.URL, rc)
+			}
 		}
 	}
 
@@ -52,30 +55,34 @@ func (t *Transport) CloneTransport(next http.RoundTripper) http.RoundTripper {
 	}
 }
 
-func (t *Transport) setCookies(req *http.Request) {
+// setCookies inspects target URL in req, retrieves matching cookies from the active jar,
+// and returns a cloned request with populated 'Cookie' headers without mutating the input request.
+func (t *Transport) setCookies(req *http.Request) *http.Request {
 	if t.CookieJar == nil || req.URL == nil {
-		return
+		return req
 	}
 
 	jar := t.CookieJar.GetJar(req.Context())
 	if jar == nil {
-		return
+		return req
 	}
 
 	cookies := jar.Cookies(req.URL)
 	if len(cookies) == 0 {
-		return
+		return req
 	}
 
 	cookieHeader := BuildCookieHeader(cookies)
 	if cookieHeader == "" {
-		return
+		return req
 	}
 
-	existing := req.Header.Get("Cookie")
+	reqClone := req.Clone(req.Context())
+
+	existing := reqClone.Header.Get("Cookie")
 	if existing == "" {
-		req.Header.Set("Cookie", cookieHeader)
-		return
+		reqClone.Header.Set("Cookie", cookieHeader)
+		return reqClone
 	}
 
 	var sb strings.Builder
@@ -84,5 +91,7 @@ func (t *Transport) setCookies(req *http.Request) {
 	sb.WriteString("; ")
 	sb.WriteString(cookieHeader)
 
-	req.Header.Set("Cookie", sb.String())
+	reqClone.Header.Set("Cookie", sb.String())
+
+	return reqClone
 }

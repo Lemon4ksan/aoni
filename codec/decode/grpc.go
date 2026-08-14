@@ -10,7 +10,6 @@ import (
 	"encoding/base64"
 	"errors"
 	stdio "io"
-	"strings"
 
 	"github.com/klauspost/compress/gzip"
 	"google.golang.org/protobuf/proto"
@@ -37,6 +36,7 @@ func (grpcWebDecoder) Decode(r stdio.Reader, target any) error {
 	return readGRPCWebFrames(reader, msg)
 }
 
+// readGRPCWebFrames sequentially reads 5-byte length-prefixed frames from reader and unmarshals payload data into msg.
 func readGRPCWebFrames(reader stdio.Reader, msg proto.Message) error {
 	var payloadRead bool
 
@@ -73,6 +73,7 @@ func readGRPCWebFrames(reader stdio.Reader, msg proto.Message) error {
 	}
 }
 
+// processGRPCWebFrame handles frame flags (compression, trailer marker) and unmarshals payload data into msg.
 func processGRPCWebFrame(flags byte, payload []byte, msg proto.Message) (done bool, err error) {
 	if flags&0x80 != 0 {
 		if err := verifyGRPCTrailer(payload); err != nil {
@@ -98,6 +99,7 @@ func processGRPCWebFrame(flags byte, payload []byte, msg proto.Message) (done bo
 	return false, nil
 }
 
+// decompressProtoPayload decompresses a gzip-encoded Protobuf payload stream.
 func decompressProtoPayload(payload []byte) ([]byte, error) {
 	gzReader, err := gzip.NewReader(bytes.NewReader(payload))
 	if err != nil {
@@ -119,6 +121,7 @@ func VerifyGRPCTrailer(trailerPayload []byte) error {
 	return verifyGRPCTrailer(trailerPayload)
 }
 
+// verifyGRPCTrailer inspects raw trailer lines and returns a [GRPCWebError] if grpc-status indicates failure.
 func verifyGRPCTrailer(trailerPayload []byte) error {
 	var (
 		statusCode, statusMsg string
@@ -136,20 +139,23 @@ func verifyGRPCTrailer(trailerPayload []byte) error {
 			trailerPayload = nil
 		}
 
-		key, val, ok := parseTrailerKeyValue(line)
+		keyBytes, valBytes, ok := parseTrailerKeyValue(line)
 		if !ok {
 			continue
 		}
 
+		keyStr := bytesconv.B2S(keyBytes)
+
 		switch {
-		case bytesconv.EqualFoldASCII(key, "grpc-status"):
-			statusCode = val
-		case bytesconv.EqualFoldASCII(key, "grpc-message"):
-			statusMsg = val
-		case bytesconv.EqualFoldASCII(key, "grpc-status-details-bin"):
-			if decoded, err := base64.RawStdEncoding.DecodeString(val); err == nil {
+		case bytesconv.EqualFoldASCII(keyStr, "grpc-status"):
+			statusCode = bytesconv.B2S(valBytes)
+		case bytesconv.EqualFoldASCII(keyStr, "grpc-message"):
+			statusMsg = bytesconv.B2S(valBytes)
+		case bytesconv.EqualFoldASCII(keyStr, "grpc-status-details-bin"):
+			valStr := bytesconv.B2S(valBytes)
+			if decoded, err := base64.RawStdEncoding.DecodeString(valStr); err == nil {
 				statusDetails = decoded
-			} else if decoded, err := base64.StdEncoding.DecodeString(val); err == nil {
+			} else if decoded, err := base64.StdEncoding.DecodeString(valStr); err == nil {
 				statusDetails = decoded
 			}
 		}
@@ -167,16 +173,14 @@ func verifyGRPCTrailer(trailerPayload []byte) error {
 	return nil
 }
 
-func parseTrailerKeyValue(line []byte) (key, val string, ok bool) {
-	keyBytes, valBytes, ok := bytes.Cut(line, []byte{':'})
-	if !ok {
-		return "", "", false
+// parseTrailerKeyValue splits a raw trailer line by ':' and trims leading/trailing whitespace without allocations.
+func parseTrailerKeyValue(line []byte) (keyBytes, valBytes []byte, ok bool) {
+	idx := bytes.IndexByte(line, ':')
+	if idx < 0 {
+		return nil, nil, false
 	}
 
-	key = strings.TrimSpace(bytesconv.B2S(keyBytes))
-	val = strings.TrimSpace(bytesconv.B2S(valBytes))
-
-	return key, val, true
+	return bytes.TrimSpace(line[:idx]), bytes.TrimSpace(line[idx+1:]), true
 }
 
 // IsBase64Header checks whether frame prefix matches Base64 text-encoded gRPC-Web stream.

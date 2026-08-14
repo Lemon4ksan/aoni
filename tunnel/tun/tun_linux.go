@@ -40,6 +40,8 @@ type LinuxAdapter struct {
 	name string
 }
 
+var _ Adapter = (*LinuxAdapter)(nil)
+
 // NewLinuxAdapter creates and registers a Layer 3 TUN network interface on Linux.
 // Requires CAP_NET_ADMIN privileges on Linux (or running as root).
 func NewLinuxAdapter(devName string) (*LinuxAdapter, error) {
@@ -74,16 +76,6 @@ func NewLinuxAdapter(devName string) (*LinuxAdapter, error) {
 		file: file,
 		name: realName,
 	}, nil
-}
-
-func cStringToGoString(b []byte) string {
-	for i, v := range b {
-		if v == 0 {
-			return string(b[:i])
-		}
-	}
-
-	return string(b)
 }
 
 // Name returns the actual interface name assigned by the Linux kernel (e.g. "tun0").

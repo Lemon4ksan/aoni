@@ -20,9 +20,13 @@ var (
 
 // ValueError describes an error encountered during structure reflection or value marshaling.
 type ValueError struct {
-	Err   error
-	Type  string
+	// Err holds the underlying cause error.
+	Err error
+	// Type identifies the target Go type name associated with the encoding error.
+	Type string
+	// Field specifies the struct field name associated with the encoding failure.
 	Field string
+	// Index specifies the element slice/array index if the failure occurred inside a collection.
 	Index int
 }
 

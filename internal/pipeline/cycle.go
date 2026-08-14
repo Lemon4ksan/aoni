@@ -13,15 +13,15 @@ import (
 
 // ExecutionCycle manages the transactional lifecycle state machine of an HTTP request.
 type ExecutionCycle struct {
-	ctx          context.Context
-	cancel       context.CancelFunc
-	StartTime    time.Time
-	MaxAttempts  int
-	AttemptCount int
-	RedirectHops int
-	MaxRedirects int
-	mu           sync.Mutex
-	cleanupStack []stdio.Closer
+	ctx          context.Context    // Cycle-scoped execution context with deadline propagation
+	cancel       context.CancelFunc // Context cancel function triggered upon cycle completion
+	StartTime    time.Time          // Timestamp marking the start of the execution cycle
+	MaxAttempts  int                // Maximum total retry attempts permitted
+	AttemptCount int                // Number of execution attempts initiated so far
+	RedirectHops int                // Current count of followed HTTP redirect hops
+	MaxRedirects int                // Upper bound on followed HTTP redirects
+	mu           sync.Mutex         // Protects cleanupStack and counter state
+	cleanupStack []stdio.Closer     // Stack of resource closers released when Finish() is invoked
 }
 
 // NewExecutionCycle instantiates an [ExecutionCycle] with deadline timeouts and redirect limits.

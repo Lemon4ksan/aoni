@@ -95,9 +95,22 @@ func Mirror(jar http.CookieJar, sourceURL *url.URL, targetURLs []*url.URL, cooki
 	}
 
 	toMirror := make([]*http.Cookie, 0, len(cookieNames))
-	for _, c := range cookies {
-		if slices.Contains(cookieNames, c.Name) {
-			toMirror = append(toMirror, c)
+	if len(cookieNames) > 8 {
+		nameMap := make(map[string]struct{}, len(cookieNames))
+		for _, name := range cookieNames {
+			nameMap[name] = struct{}{}
+		}
+
+		for _, c := range cookies {
+			if _, ok := nameMap[c.Name]; ok {
+				toMirror = append(toMirror, c)
+			}
+		}
+	} else {
+		for _, c := range cookies {
+			if slices.Contains(cookieNames, c.Name) {
+				toMirror = append(toMirror, c)
+			}
 		}
 	}
 
@@ -144,15 +157,27 @@ func Export(jar http.CookieJar, u *url.URL) []Cookie {
 
 	exported := make([]Cookie, len(rawCookies))
 	for i, c := range rawCookies {
+		sameSiteStr := ""
+		switch c.SameSite {
+		case http.SameSiteLaxMode:
+			sameSiteStr = "Lax"
+		case http.SameSiteStrictMode:
+			sameSiteStr = "Strict"
+		case http.SameSiteNoneMode:
+			sameSiteStr = "None"
+		}
+
 		exported[i] = Cookie{
-			Name:     c.Name,
-			Value:    c.Value,
-			Domain:   c.Domain,
-			Path:     c.Path,
-			Expires:  c.Expires,
-			HTTPOnly: c.HttpOnly,
-			Secure:   c.Secure,
-			MaxAge:   c.MaxAge,
+			Name:        c.Name,
+			Value:       c.Value,
+			Domain:      c.Domain,
+			Path:        c.Path,
+			Expires:     c.Expires,
+			HTTPOnly:    c.HttpOnly,
+			Secure:      c.Secure,
+			MaxAge:      c.MaxAge,
+			SameSite:    sameSiteStr,
+			Partitioned: c.Partitioned,
 		}
 	}
 
@@ -182,15 +207,27 @@ func Import(jar http.CookieJar, u *url.URL, cookies []Cookie) {
 
 	httpCookies := make([]*http.Cookie, len(cookies))
 	for i, c := range cookies {
+		var sameSite http.SameSite
+		switch c.SameSite {
+		case "Lax":
+			sameSite = http.SameSiteLaxMode
+		case "Strict":
+			sameSite = http.SameSiteStrictMode
+		case "None":
+			sameSite = http.SameSiteNoneMode
+		}
+
 		httpCookies[i] = &http.Cookie{ //nolint:gosec
-			Name:     c.Name,
-			Value:    c.Value,
-			Domain:   c.Domain,
-			Path:     c.Path,
-			Expires:  c.Expires,
-			HttpOnly: c.HTTPOnly,
-			Secure:   c.Secure,
-			MaxAge:   c.MaxAge,
+			Name:        c.Name,
+			Value:       c.Value,
+			Domain:      c.Domain,
+			Path:        c.Path,
+			Expires:     c.Expires,
+			HttpOnly:    c.HTTPOnly,
+			Secure:      c.Secure,
+			MaxAge:      c.MaxAge,
+			SameSite:    sameSite,
+			Partitioned: c.Partitioned,
 		}
 	}
 

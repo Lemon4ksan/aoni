@@ -79,6 +79,7 @@ func Recover(onPanic func(any)) aoni.Middleware {
 	}
 }
 
+// maskURLString redacts sensitive query parameters from rawURL.
 func maskURLString(rawURL string) string {
 	u, err := url.Parse(rawURL)
 	if err != nil {
@@ -88,6 +89,7 @@ func maskURLString(rawURL string) string {
 	return maskQueryParams(u)
 }
 
+// maskQueryParams redacts values of sensitive query parameters (key, token, password, etc.).
 func maskQueryParams(u *url.URL) string {
 	if u == nil {
 		return ""

@@ -13,6 +13,7 @@ import (
 	"github.com/lemon4ksan/aoni/mod"
 )
 
+// metadataContextKey is a private context key for carrying gRPC metadata.
 type metadataContextKey struct{}
 
 // WithMetadata produces an [aoni.RequestModifier] that injects gRPC metadata headers.

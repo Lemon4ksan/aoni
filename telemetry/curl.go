@@ -6,7 +6,6 @@
 package telemetry
 
 import (
-	"fmt"
 	"net/http"
 	"strings"
 
@@ -68,7 +67,7 @@ func CurlFromRequestWithOptions(req *http.Request, body []byte, opts *CurlOption
 			}
 
 			sb.WriteString(" -H ")
-			sb.WriteString(escapeShell(fmt.Sprintf("%s: %s", key, outVal)))
+			sb.WriteString(escapeShell(key + ": " + outVal))
 		}
 	}
 
@@ -81,6 +80,7 @@ func CurlFromRequestWithOptions(req *http.Request, body []byte, opts *CurlOption
 	return sb.String()
 }
 
+// resolveRedactSecret retrieves the masking placeholder string from opts.
 func resolveRedactSecret(opts *CurlOptions) string {
 	if opts != nil && opts.RedactSecret != "" {
 		return opts.RedactSecret
@@ -89,6 +89,7 @@ func resolveRedactSecret(opts *CurlOptions) string {
 	return defaultRedacted
 }
 
+// resolveSensitiveHeaders combines default sensitive header names with any user overrides.
 func resolveSensitiveHeaders(opts *CurlOptions) []string {
 	if opts == nil || len(opts.RedactHeaders) == 0 {
 		return defaultSensitiveHeaders
@@ -100,6 +101,7 @@ func resolveSensitiveHeaders(opts *CurlOptions) []string {
 	return append(result, opts.RedactHeaders...)
 }
 
+// isHeaderSensitive checks whether key matches any header name in sensitiveList.
 func isHeaderSensitive(key string, sensitiveList []string) bool {
 	for _, target := range sensitiveList {
 		if bytesconv.EqualFoldASCII(key, target) {
@@ -110,6 +112,7 @@ func isHeaderSensitive(key string, sensitiveList []string) bool {
 	return false
 }
 
+// appendJarCookies appends parsed cookie values to the cURL header string builder.
 func appendJarCookies(sb *strings.Builder, cookies []*http.Cookie, isSecret bool, redactSecret string) {
 	if len(cookies) == 0 {
 		return
@@ -135,6 +138,7 @@ func appendJarCookies(sb *strings.Builder, cookies []*http.Cookie, isSecret bool
 	sb.WriteString(escapeShell("Cookie: " + cookieSb.String()))
 }
 
+// appendBodyAndURL formats request body payload and destination URL onto sb.
 func appendBodyAndURL(sb *strings.Builder, req *http.Request, body []byte) {
 	contentType := req.Header.Get("Content-Type")
 	if len(contentType) >= 19 && bytesconv.EqualFoldASCII(contentType[:19], "multipart/form-data") && len(body) > 0 {
@@ -154,6 +158,7 @@ func appendBodyAndURL(sb *strings.Builder, req *http.Request, body []byte) {
 	}
 }
 
+// isShellSafeByte reports whether byte b requires single-quote escaping in POSIX shells.
 func isShellSafeByte(b byte) bool {
 	return (b >= 'a' && b <= 'z') ||
 		(b >= 'A' && b <= 'Z') ||
@@ -163,6 +168,7 @@ func isShellSafeByte(b byte) bool {
 		b == '%' || b == '+' || b == ',' || b == '@' || b == '~'
 }
 
+// escapeShell escapes a string for safe inclusion in POSIX shell command lines.
 func escapeShell(s string) string {
 	if s == "" {
 		return "''"

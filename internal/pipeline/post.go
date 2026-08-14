@@ -91,6 +91,7 @@ func (p *Pipeline[Req, Resp]) postProcessResponse(
 	return resp, nil
 }
 
+// validateResponseSmugglingGuards applies RFC HTTP request/response smuggling and desynchronization protections.
 func validateResponseSmugglingGuards(resp *http.Response) error {
 	if resp == nil || len(resp.Header) == 0 {
 		return nil
@@ -111,6 +112,7 @@ func validateResponseSmugglingGuards(resp *http.Response) error {
 	return validateHeaderInjections(resp)
 }
 
+// validateContentLengthHeaders ensures Content-Length duplicates carry identical values per RFC 9112 §6.3.
 func validateContentLengthHeaders(resp *http.Response) error {
 	clValues := resp.Header["Content-Length"]
 	if len(clValues) <= 1 {
@@ -129,6 +131,7 @@ func validateContentLengthHeaders(resp *http.Response) error {
 	return nil
 }
 
+// validateLocationHeaders detects and deduplicates multiple conflicting Location headers in redirect responses.
 func validateLocationHeaders(resp *http.Response) error {
 	locValues := resp.Header["Location"]
 	if len(locValues) <= 1 {
@@ -147,6 +150,7 @@ func validateLocationHeaders(resp *http.Response) error {
 	return nil
 }
 
+// validateTransferEncodingAndContentLength strips Content-Length if Transfer-Encoding is chunked per RFC 9112 §6.3.
 func validateTransferEncodingAndContentLength(resp *http.Response) error {
 	te := resp.Header.Get("Transfer-Encoding")
 	if te == "" || !strings.Contains(strings.ToLower(te), "chunked") {
@@ -160,6 +164,7 @@ func validateTransferEncodingAndContentLength(resp *http.Response) error {
 	return nil
 }
 
+// validateHeaderInjections scans header keys and values for illegal CRLF and null control characters.
 func validateHeaderInjections(resp *http.Response) error {
 	for k, vv := range resp.Header {
 		if containsControlChars(k) {
@@ -176,6 +181,7 @@ func validateHeaderInjections(resp *http.Response) error {
 	return nil
 }
 
+// containsControlChars checks whether s contains CRLF or null bytes.
 func containsControlChars(s string) bool {
 	for i := 0; i < len(s); i++ {
 		b := s[i]

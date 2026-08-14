@@ -216,6 +216,7 @@ func (i *TrafficInspector) Capture(req *http.Request, resp *http.Response, reqEr
 	i.saveAndBroadcast(capReq)
 }
 
+// captureBody extracts up to 128 KB of request payload using off-heap arena buffers.
 func (i *TrafficInspector) captureBody(req *http.Request) string {
 	bodyRc, err := req.GetBody()
 	if err != nil {
@@ -271,6 +272,7 @@ func (i *TrafficInspector) captureBody(req *http.Request) string {
 	return bodyStr
 }
 
+// saveAndBroadcast appends req to ring history and pushes updates to active SSE clients.
 func (i *TrafficInspector) saveAndBroadcast(req CapturedRequest) {
 	i.mu.Lock()
 	i.requests = append(i.requests, req)
@@ -287,6 +289,7 @@ func (i *TrafficInspector) saveAndBroadcast(req CapturedRequest) {
 	}
 }
 
+// broadcast fans out serialized request JSON to connected web dashboard channels.
 func (i *TrafficInspector) broadcast(msg string) {
 	i.clientsMu.Lock()
 	defer i.clientsMu.Unlock()
@@ -299,6 +302,7 @@ func (i *TrafficInspector) broadcast(msg string) {
 	}
 }
 
+// sseHandler streams captured requests to connected web browsers via Server-Sent Events.
 func (i *TrafficInspector) sseHandler(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.Header().Set("Cache-Control", "no-cache")
@@ -331,6 +335,7 @@ func (i *TrafficInspector) sseHandler(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+// requestsHandler returns historical captured requests in reverse chronological order as JSON.
 func (i *TrafficInspector) requestsHandler(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 
@@ -345,6 +350,7 @@ func (i *TrafficInspector) requestsHandler(w http.ResponseWriter, r *http.Reques
 	_ = json.NewEncoder(w).Encode(reversed)
 }
 
+// clearHandler resets captured request history.
 func (i *TrafficInspector) clearHandler(w http.ResponseWriter, r *http.Request) {
 	i.mu.Lock()
 	i.requests = nil
@@ -356,11 +362,13 @@ func (i *TrafficInspector) clearHandler(w http.ResponseWriter, r *http.Request) 
 //go:embed dashboard.html
 var dashboardHTML []byte
 
+// dashboardHandler serves the embedded single-page web inspector application.
 func (i *TrafficInspector) dashboardHandler(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	_, _ = w.Write(dashboardHTML)
 }
 
+// applyTraceToCapturedRequest maps timing benchmarks and TLS metadata from trace onto req.
 func applyTraceToCapturedRequest(req *CapturedRequest, trace *telemetry.TraceInfo) {
 	req.Duration = trace.Total
 	req.DurationStr = trace.Total.String()
@@ -419,6 +427,7 @@ func applyTraceToCapturedRequest(req *CapturedRequest, trace *telemetry.TraceInf
 	}
 }
 
+// captureHeaders copies and sanitizes HTTP headers, masking sensitive header fields.
 func captureHeaders(reqHeaders http.Header, redactMap map[string]struct{}) map[string]string {
 	headers := make(map[string]string, len(reqHeaders))
 
@@ -435,6 +444,7 @@ func captureHeaders(reqHeaders http.Header, redactMap map[string]struct{}) map[s
 	return headers
 }
 
+// getRedactMap returns configured sensitive header names from request context.
 func getRedactMap(req *http.Request) map[string]struct{} {
 	if cfg := aoni.GetRequestConfig(req.Context()); cfg != nil && cfg.Redact != nil {
 		return cfg.Redact.Headers

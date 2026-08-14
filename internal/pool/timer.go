@@ -35,6 +35,7 @@ func ReleaseTimer(t *time.Timer) {
 	timerPool.Put(t)
 }
 
+// stopAndDrainTimer stops the timer and drains any pending channel delivery without blocking.
 func stopAndDrainTimer(t *time.Timer) {
 	if !t.Stop() {
 		select {

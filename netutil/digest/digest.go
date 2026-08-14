@@ -17,7 +17,6 @@ import (
 	"hash"
 	"io"
 	"net/http"
-	"slices"
 	"strconv"
 	"strings"
 )
@@ -286,7 +285,13 @@ type digestChallenge struct {
 }
 
 func (dc *digestChallenge) isQopSupported(qop string) bool {
-	return slices.Contains(dc.qop, qop)
+	for _, item := range dc.qop {
+		if strings.TrimSpace(item) == qop {
+			return true
+		}
+	}
+
+	return false
 }
 
 func (dc *digestChallenge) setValue(k, v string) error {
@@ -305,8 +310,14 @@ func (dc *digestChallenge) setValue(k, v string) error {
 		dc.algorithm = v
 	case "qop":
 		if v != "" {
-			dc.qop = strings.Split(v, ",")
+			parts := strings.Split(v, ",")
+
+			dc.qop = make([]string, len(parts))
+			for i, p := range parts {
+				dc.qop[i] = strings.TrimSpace(p)
+			}
 		}
+
 	case "charset":
 		if strings.ToUpper(v) != "UTF-8" {
 			return ErrDigestInvalidCharset

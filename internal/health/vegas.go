@@ -13,13 +13,13 @@ import (
 // It inspects RTT measurements to dynamically scale concurrency window limits (cwnd).
 type VegasEngine struct {
 	mu          sync.Mutex
-	alpha       float64
-	beta        float64
-	baseRTT     time.Duration
-	cwnd        float64
-	minCwnd     int
-	maxCwnd     int
-	sampleCount uint64
+	alpha       float64       // Lower queueing threshold; triggers cwnd expansion when diff < alpha
+	beta        float64       // Upper queueing threshold; triggers cwnd reduction when diff > beta
+	baseRTT     time.Duration // Minimum observed baseline round-trip time without congestion
+	cwnd        float64       // Active floating-point congestion window limit
+	minCwnd     int           // Minimum allowed concurrent in-flight requests
+	maxCwnd     int           // Maximum allowed concurrent in-flight requests
+	sampleCount uint64        // Cumulative number of recorded RTT samples
 }
 
 // NewVegasEngine initializes a [VegasEngine] with bounds and thresholds.

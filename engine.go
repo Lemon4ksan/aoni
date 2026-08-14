@@ -39,7 +39,7 @@ func (f HTTPDoerFunc) Do(req *http.Request) (*http.Response, error) {
 //   - *http.Client: Deep-clones the client and its transport layers via CloneHTTPClient.
 //   - HTTPDoer: Used directly as-is.
 //
-// Calling DefaultEngine on doer passed to a [NewClient] is redundant.
+// Safe for concurrent use across multiple goroutines.
 func DefaultEngine(doer any) HTTPDoer {
 	if doer != nil {
 		if rd, ok := doer.(RequestDoer); ok {
@@ -73,6 +73,7 @@ type TransportCloner interface {
 }
 
 // CloneHTTPClient produces a deep, memory-isolated copy of an [*http.Client] and its nested transport layers.
+// If c is nil, returns nil.
 //
 // Copying an *http.Client by value (e.g. *c) performs a shallow copy of its internal pointers.
 // Since http.Client.Transport is a pointer to http.Transport, two shallow-copied clients share the exact same
@@ -81,6 +82,8 @@ type TransportCloner interface {
 //
 // It uses TransportUnwrapper and TransportCloner interfaces to recursively peel off and deep-clone
 // arbitrarily nested transport decorator chains down to the base *http.Transport.
+//
+// Safe for concurrent use across multiple goroutines.
 func CloneHTTPClient(c *http.Client) *http.Client {
 	if c == nil {
 		return nil
@@ -96,6 +99,7 @@ func CloneHTTPClient(c *http.Client) *http.Client {
 	return &cloned
 }
 
+// cloneRoundTripper recursively clones nested RoundTripper transport decorators down to base *http.Transport.
 func cloneRoundTripper(tr http.RoundTripper) http.RoundTripper {
 	if tr == nil {
 		return nil

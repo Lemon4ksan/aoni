@@ -32,6 +32,7 @@ var AsReplayable = io.AsReplayable
 // ResponseTrace extracts fine-grained execution metrics and network timing details
 // ([telemetry.TraceInfo]) captured during request execution from the response context.
 // Returns nil if no trace container was registered on the request.
+// Safe for concurrent access.
 func ResponseTrace(resp *http.Response) *telemetry.TraceInfo {
 	if resp == nil || resp.Request == nil {
 		return nil
@@ -59,6 +60,7 @@ func HostRewriteRules(ctx context.Context) map[string]string {
 // WithContextModifier attaches functional [RequestModifier] closures directly to a context.
 // Third-party HTTP SDKs (e.g. Resty, AWS SDK, Azure SDK) carrying this context will
 // automatically propagate these modifiers into the aoni execution pipeline.
+// Modifiers are attached using thread-safe slice copying to prevent data races.
 func WithContextModifier(ctx context.Context, mods ...RequestModifier) context.Context {
 	if len(mods) == 0 {
 		return ctx
@@ -69,7 +71,10 @@ func WithContextModifier(ctx context.Context, mods ...RequestModifier) context.C
 		ctx, cfg = AllocRequestConfig(ctx)
 	}
 
-	cfg.Modifiers = append(cfg.Modifiers, mods...)
+	modsCopy := make([]pipeline.RequestModifier, 0, len(cfg.Modifiers)+len(mods))
+	modsCopy = append(modsCopy, cfg.Modifiers...)
+	modsCopy = append(modsCopy, mods...)
+	cfg.Modifiers = modsCopy
 
 	return ctx
 }
@@ -127,6 +132,7 @@ func GetTCPDelay(ctx context.Context) generic.Optional[TCPDelayRange] {
 
 // ApplyTCPDelay inspects the context for pre-dial TCP delay jitter settings and pauses
 // execution for a randomized duration within those bounds prior to opening L4 sockets.
+// Safe for concurrent use across multiple goroutines.
 func ApplyTCPDelay(ctx context.Context) error {
 	r, ok := GetTCPDelay(ctx).Value()
 	if !ok || r.Max <= 0 {
@@ -236,28 +242,44 @@ func And(conditions ...RetryCondition) RetryCondition {
 	}
 }
 
+func newSyntheticResponse(
+	statusCode int,
+	contentType string,
+	bodyReader stdio.Reader,
+	contentLength int64,
+	req Request,
+) Response {
+	header := make(http.Header)
+	header.Set("Content-Type", contentType)
+
+	var httpReq *http.Request
+	if req != nil {
+		httpReq = req.HTTPRequest()
+	}
+
+	return NewStdResponse(&http.Response{
+		StatusCode:    statusCode,
+		Status:        http.StatusText(statusCode),
+		Proto:         "HTTP/1.1",
+		ProtoMajor:    1,
+		ProtoMinor:    1,
+		Header:        header,
+		Body:          stdio.NopCloser(bodyReader),
+		ContentLength: contentLength,
+		Request:       httpReq,
+	})
+}
+
 // FallbackString constructs a synthetic [FallbackFunc] returning plain text with the specified status code.
 func FallbackString(statusCode int, text string) FallbackFunc {
 	return func(req Request, _ error) (Response, error) {
-		header := make(http.Header)
-		header.Set("Content-Type", "text/plain; charset=utf-8")
-
-		var httpReq *http.Request
-		if req != nil {
-			httpReq = req.HTTPRequest()
-		}
-
-		return NewStdResponse(&http.Response{
-			StatusCode:    statusCode,
-			Status:        http.StatusText(statusCode),
-			Proto:         "HTTP/1.1",
-			ProtoMajor:    1,
-			ProtoMinor:    1,
-			Header:        header,
-			Body:          stdio.NopCloser(strings.NewReader(text)),
-			ContentLength: int64(len(text)),
-			Request:       httpReq,
-		}), nil
+		return newSyntheticResponse(
+			statusCode,
+			"text/plain; charset=utf-8",
+			strings.NewReader(text),
+			int64(len(text)),
+			req,
+		), nil
 	}
 }
 
@@ -269,25 +291,13 @@ func FallbackJSON(statusCode int, data any) FallbackFunc {
 			return nil, err
 		}
 
-		header := make(http.Header)
-		header.Set("Content-Type", "application/json; charset=utf-8")
-
-		var httpReq *http.Request
-		if req != nil {
-			httpReq = req.HTTPRequest()
-		}
-
-		return NewStdResponse(&http.Response{
-			StatusCode:    statusCode,
-			Status:        http.StatusText(statusCode),
-			Proto:         "HTTP/1.1",
-			ProtoMajor:    1,
-			ProtoMinor:    1,
-			Header:        header,
-			Body:          stdio.NopCloser(bytes.NewReader(bodyBytes)),
-			ContentLength: int64(len(bodyBytes)),
-			Request:       httpReq,
-		}), nil
+		return newSyntheticResponse(
+			statusCode,
+			"application/json; charset=utf-8",
+			bytes.NewReader(bodyBytes),
+			int64(len(bodyBytes)),
+			req,
+		), nil
 	}
 }
 

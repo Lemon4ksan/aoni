@@ -17,6 +17,7 @@ import (
 	"github.com/lemon4ksan/aoni"
 	"github.com/lemon4ksan/aoni/internal/bytesconv"
 	"github.com/lemon4ksan/aoni/internal/pool"
+	"github.com/lemon4ksan/aoni/internal/urlutil"
 )
 
 // dispatchSingleRequest routes an HTTP request through Happy Eyeballs v3 (Protocol Racing),
@@ -394,80 +395,21 @@ func (c *Client) executeFastHTTP(
 
 	ensureConnectionTE(req)
 
-	isHTTPS := bytes.EqualFold(req.URI().Scheme(), []byte("https"))
-	origHost := req.URI().Host()
-	hasHostHeader := len(req.Header.Peek("Host")) > 0
+	isHTTPS, origHost, hasHostHeader, cleanup := c.setupFastHTTPSchemeAndHost(req)
+	defer cleanup()
 
-	if isHTTPS {
-		hostStr := string(origHost)
-		if !hasHostHeader {
-			req.Header.SetHostBytes(origHost)
-		}
+	c.configureFastHTTPProxy(ctx, req, isHTTPS)
 
-		if !strings.Contains(hostStr, ":") {
-			hostStr += ":443"
-			req.URI().SetHost(hostStr)
-		}
-
-		c.TrackHTTPSTarget(hostStr)
-		defer c.UntrackHTTPSTarget(hostStr)
-
-		req.URI().SetScheme("http")
-	}
-
-	defer func() {
+	restoreOriginalTarget := func() {
 		if isHTTPS {
 			req.URI().SetScheme("https")
 			req.URI().SetHostBytes(origHost)
-
-			if !hasHostHeader {
-				req.Header.Del("Host")
-			}
 		}
-	}()
-
-	var proxyURL *url.URL
-	if c.config.Network.ProxyAddr != nil {
-		proxyURL = c.config.Network.ProxyAddr
-	}
-
-	if reqCfg := aoni.GetRequestConfig(ctx); reqCfg != nil && reqCfg.ProxyAddr != nil {
-		proxyURL = reqCfg.ProxyAddr
-	}
-
-	if rawProxy, ok := aoni.GetProxyOverride(ctx).Value(); ok && rawProxy != "" {
-		if parsed, parseErr := url.Parse(rawProxy); parseErr == nil {
-			proxyURL = parsed
-		}
-	}
-
-	if proxyURL != nil && (proxyURL.Scheme == "http" || proxyURL.Scheme == "https") && !isHTTPS {
-		req.UseHostHeader = true
-		req.Header.SetRequestURIBytes(req.URI().FullURI())
 	}
 
 	if ctx == context.Background() || ctx == context.TODO() || ctx.Done() == nil {
-		var err error
-		if deadline, ok := ctx.Deadline(); ok {
-			err = c.engine.DoDeadline(req, resp, deadline)
-		} else if c.config.Engine.Timeout > 0 {
-			err = c.engine.DoTimeout(req, resp, c.config.Engine.Timeout)
-		} else {
-			err = c.engine.Do(req, resp)
-		}
-
-		if err != nil && isStaleKeepAliveError(err) {
-			fastRespReset(resp)
-
-			if isHTTPS {
-				req.URI().SetScheme("https")
-				req.URI().SetHostBytes(origHost)
-			}
-
-			req.SetConnectionClose()
-
-			return c.engine.Do(req, resp), false
-		}
+		exec := func() error { return c.doFastHTTPEngine(ctx, req, resp) }
+		err = c.executeFastHTTPWithStaleRetry(req, resp, exec, restoreOriginalTarget)
 
 		return err, false
 	}
@@ -475,31 +417,17 @@ func (c *Client) executeFastHTTP(
 	done := make(chan error, 1)
 
 	go func() {
-		if deadline, ok := ctx.Deadline(); ok {
-			done <- c.engine.DoDeadline(req, resp, deadline)
-			return
-		}
-
-		if c.config.Engine.Timeout > 0 {
-			done <- c.engine.DoTimeout(req, resp, c.config.Engine.Timeout)
-			return
-		}
-
-		done <- c.engine.Do(req, resp)
+		done <- c.doFastHTTPEngine(ctx, req, resp)
 	}()
 
 	select {
 	case <-ctx.Done():
 		go func() {
 			<-done
+			restoreOriginalTarget()
 
-			if isHTTPS {
-				req.URI().SetScheme("https")
-				req.URI().SetHostBytes(origHost)
-
-				if !hasHostHeader {
-					req.Header.Del("Host")
-				}
+			if isHTTPS && !hasHostHeader {
+				req.Header.Del("Host")
 			}
 
 			fasthttp.ReleaseRequest(req)
@@ -511,12 +439,7 @@ func (c *Client) executeFastHTTP(
 	case err := <-done:
 		if err != nil && isStaleKeepAliveError(err) {
 			fastRespReset(resp)
-
-			if isHTTPS {
-				req.URI().SetScheme("https")
-				req.URI().SetHostBytes(origHost)
-			}
-
+			restoreOriginalTarget()
 			req.SetConnectionClose()
 
 			return c.engine.Do(req, resp), false
@@ -526,41 +449,135 @@ func (c *Client) executeFastHTTP(
 	}
 }
 
+func (c *Client) setupFastHTTPSchemeAndHost(
+	req *fasthttp.Request,
+) (isHTTPS bool, origHost []byte, hasHostHeader bool, cleanup func()) {
+	isHTTPS = bytes.EqualFold(req.URI().Scheme(), []byte("https"))
+	origHost = req.URI().Host()
+	hasHostHeader = len(req.Header.Peek("Host")) > 0
+
+	var hostStr string
+
+	if isHTTPS {
+		hostStr = string(origHost)
+		if !hasHostHeader {
+			req.Header.SetHostBytes(origHost)
+		}
+
+		if !strings.Contains(hostStr, ":") {
+			hostStr += ":443"
+			req.URI().SetHost(hostStr)
+		}
+
+		c.TrackHTTPSTarget(hostStr)
+		req.URI().SetScheme("http")
+	}
+
+	cleanup = func() {
+		if isHTTPS {
+			c.UntrackHTTPSTarget(hostStr)
+			req.URI().SetScheme("https")
+			req.URI().SetHostBytes(origHost)
+
+			if !hasHostHeader {
+				req.Header.Del("Host")
+			}
+		}
+	}
+
+	return isHTTPS, origHost, hasHostHeader, cleanup
+}
+
+func (c *Client) configureFastHTTPProxy(ctx context.Context, req *fasthttp.Request, isHTTPS bool) {
+	var proxyURL *url.URL
+	if c.config.Network.ProxyAddr != nil {
+		proxyURL = c.config.Network.ProxyAddr
+	}
+
+	if reqCfg := aoni.GetRequestConfig(ctx); reqCfg != nil && reqCfg.ProxyAddr != nil {
+		proxyURL = reqCfg.ProxyAddr
+	}
+
+	if rawProxy, ok := aoni.GetProxyOverride(ctx).Value(); ok && rawProxy != "" {
+		if parsed, parseErr := urlutil.Parse(rawProxy); parseErr == nil {
+			proxyURL = parsed
+		}
+	}
+
+	if proxyURL != nil && (proxyURL.Scheme == "http" || proxyURL.Scheme == "https") && !isHTTPS {
+		req.UseHostHeader = true
+		req.Header.SetRequestURIBytes(req.URI().FullURI())
+	}
+}
+
+func (c *Client) doFastHTTPEngine(ctx context.Context, req *fasthttp.Request, resp *fasthttp.Response) error {
+	if deadline, ok := ctx.Deadline(); ok {
+		return c.engine.DoDeadline(req, resp, deadline)
+	}
+
+	if c.config.Engine.Timeout > 0 {
+		return c.engine.DoTimeout(req, resp, c.config.Engine.Timeout)
+	}
+
+	return c.engine.Do(req, resp)
+}
+
+func (c *Client) executeFastHTTPWithStaleRetry(
+	req *fasthttp.Request,
+	resp *fasthttp.Response,
+	do func() error,
+	onRetry func(),
+) error {
+	err := do()
+	if err != nil && isStaleKeepAliveError(err) {
+		fastRespReset(resp)
+		onRetry()
+		req.SetConnectionClose()
+
+		return c.engine.Do(req, resp)
+	}
+
+	return err
+}
+
+// isStaleKeepAliveError inspects socket read errors for broken pipes or EOFs caused by expired keep-alives.
 func isStaleKeepAliveError(err error) bool {
 	if err == nil {
 		return false
 	}
 
-	errStr := strings.ToLower(err.Error())
+	errBytes := bytesconv.S2B(err.Error())
 
-	return strings.Contains(errStr, "connection closed") ||
-		strings.Contains(errStr, "closed connection") ||
-		strings.Contains(errStr, "broken pipe") ||
-		strings.Contains(errStr, "eof") ||
-		strings.Contains(errStr, "reading response headers") ||
-		strings.Contains(errStr, "use of closed") ||
-		strings.Contains(errStr, "reset by peer")
+	return bytesconv.ContainsFoldASCII(errBytes, "connection closed") ||
+		bytesconv.ContainsFoldASCII(errBytes, "closed connection") ||
+		bytesconv.ContainsFoldASCII(errBytes, "broken pipe") ||
+		bytesconv.ContainsFoldASCII(errBytes, "eof") ||
+		bytesconv.ContainsFoldASCII(errBytes, "reading response headers") ||
+		bytesconv.ContainsFoldASCII(errBytes, "use of closed") ||
+		bytesconv.ContainsFoldASCII(errBytes, "reset by peer")
 }
 
+// fastRespReset resets fasthttp response buffers safely.
 func fastRespReset(resp *fasthttp.Response) {
 	if resp != nil {
 		resp.Reset()
 	}
 }
 
+// ensureConnectionTE ensures 'Connection: TE' is present if a 'TE' header is configured on the request.
 func ensureConnectionTE(req *fasthttp.Request) {
 	te := req.Header.Peek("TE")
 	if len(te) == 0 {
 		return
 	}
 
-	existingConn := string(req.Header.Peek("Connection"))
-	if strings.Contains(strings.ToLower(existingConn), "te") {
+	existingConn := req.Header.Peek("Connection")
+	if bytesconv.ContainsFoldASCII(existingConn, "te") {
 		return
 	}
 
-	if existingConn != "" {
-		req.Header.Set("Connection", existingConn+", TE")
+	if len(existingConn) > 0 {
+		req.Header.Set("Connection", bytesconv.B2S(existingConn)+", TE")
 	} else {
 		req.Header.Set("Connection", "TE")
 	}

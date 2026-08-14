@@ -16,11 +16,14 @@ import (
 	"github.com/lemon4ksan/aoni/internal/simd"
 )
 
+// fastHash computes a hardware CRC32 hash of string s to select a cache shard index.
+//
 //go:inline
 func fastHash(s string) uint32 {
 	return crc32.ChecksumIEEE(bytesconv.S2B(s))
 }
 
+// cacheShard protects an isolated hash map partition with an RWMutex to minimize lock contention.
 type cacheShard struct {
 	mu sync.RWMutex
 	m  map[string]*url.URL
@@ -70,7 +73,7 @@ func Parse(rawURL string) (*url.URL, error) {
 
 	sh.mu.Lock()
 	if len(sh.m) > 512 {
-		sh.m = make(map[string]*url.URL, 16)
+		clear(sh.m)
 	}
 
 	sh.m[rawURL] = parsed

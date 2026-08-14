@@ -15,14 +15,19 @@ import (
 )
 
 // New acquires a pooled [Request] builder bound to the provided client engine or [aoni.Client].
-// The returned request must be executed or released via [Request.Discard] to prevent pool leaks.
+//
+// The returned [Request] is borrowed from a global object pool and is not thread-safe.
+// Callers must finalize the request by invoking one of its execution methods (such as [Request.Execute],
+// [Request.Get], [Request.Post]), or explicitly release it back to the pool using [Request.Discard].
 func New(doer any) *Request {
-	return requestPool.Get(doer)
+	return acquireRequest(doer)
 }
 
 // R is a convenient shorthand alias for [New].
+//
+// Callers must finalize the borrowed request with an execution method or [Request.Discard].
 func R(doer any) *Request {
-	return requestPool.Get(doer)
+	return acquireRequest(doer)
 }
 
 // FetchTo executes a request with method, path, and optional [aoni.RequestModifier] options, unmarshaling the 2xx response into T.

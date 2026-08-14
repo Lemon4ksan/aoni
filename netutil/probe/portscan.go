@@ -97,6 +97,7 @@ func ScanPorts(
 	return results, nil
 }
 
+// probePort attempts a TCP dial on target ip:port and reads service banner on success.
 func probePort(ctx context.Context, ip string, port int, timeout time.Duration) (OpenPortResult, bool) {
 	addr := net.JoinHostPort(ip, strconv.Itoa(port))
 	dialer := &net.Dialer{Timeout: timeout}
@@ -121,6 +122,7 @@ func probePort(ctx context.Context, ip string, port int, timeout time.Duration) 
 	}, true
 }
 
+// grabBannerAndService reads initial handshake banner bytes from open connection.
 func grabBannerAndService(conn net.Conn, port int) (banner, service string) {
 	service = guessServiceByPort(port)
 
@@ -140,6 +142,7 @@ func grabBannerAndService(conn net.Conn, port int) (banner, service string) {
 	return banner, service
 }
 
+// guessServiceByPort maps standard IANA port numbers to known service names.
 func guessServiceByPort(port int) string {
 	switch port {
 	case 80, 8080, 8000:
@@ -165,6 +168,7 @@ func guessServiceByPort(port int) string {
 	}
 }
 
+// detectServiceFromBanner inspects banner string heuristics for identifiable protocol greetings.
 func detectServiceFromBanner(banner string) string {
 	lower := strings.ToLower(banner)
 	switch {
@@ -183,6 +187,7 @@ func detectServiceFromBanner(banner string) string {
 	}
 }
 
+// sanitizeBanner filters non-printable ASCII characters from service greetings.
 func sanitizeBanner(s string) string {
 	var sb strings.Builder
 	sb.Grow(len(s))

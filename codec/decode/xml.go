@@ -17,12 +17,14 @@ type bufferedBytesReader interface {
 	Bytes() (data []byte, onOffHeap bool)
 }
 
+// xmlDecoder unmarshals XML response streams into Go target structs.
 type xmlDecoder struct{}
 
 func (xmlDecoder) Decode(reader stdio.Reader, target any) error {
 	return xml.NewDecoder(StripBOM(reader)).Decode(target)
 }
 
+// rawDecoder reads raw response body payload bytes directly into a *[]byte target.
 type rawDecoder struct{}
 
 func (rawDecoder) Decode(r stdio.Reader, target any) error {

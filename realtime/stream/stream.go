@@ -307,18 +307,7 @@ func ResumableSSE[T any](
 			default:
 			}
 
-			reqMods := make([]aoni.RequestModifier, 0, len(mods)+4)
-			reqMods = append(reqMods,
-				mod.WithHeader("Accept", "text/event-stream"),
-				mod.WithHeader("Cache-Control", "no-cache"),
-				mod.WithHeader("Connection", "keep-alive"),
-			)
-
-			if lastEventID != "" {
-				reqMods = append(reqMods, mod.WithHeader("Last-Event-ID", lastEventID))
-			}
-
-			reqMods = append(reqMods, mods...)
+			reqMods := buildSSERequestModifiers(mods, lastEventID)
 
 			resp, err := Get(ctx, c, path, reqMods...)
 			if err != nil {
@@ -336,48 +325,10 @@ func ResumableSSE[T any](
 			}
 
 			attempts = 0
-			reader := bufio.NewReader(resp)
 
-			var currentEvent SSEEvent
-
-			for {
-				select {
-				case <-ctx.Done():
-					_ = resp.Close()
-
-					errs <- ctx.Err()
-
-					return
-
-				default:
-				}
-
-				line, err := reader.ReadString('\n')
-				if err != nil {
-					_ = resp.Close()
-					break
-				}
-
-				if strings.TrimSpace(line) == "" {
-					if currentEvent.ID != "" {
-						lastEventID = currentEvent.ID
-					}
-
-					if currentEvent.Retry > 0 {
-						reconnectDelay = time.Duration(currentEvent.Retry) * time.Millisecond
-					}
-
-					if err := dispatchSSEEvent(ctx, currentEvent, out); err != nil {
-						errs <- err
-						return
-					}
-
-					currentEvent = SSEEvent{}
-
-					continue
-				}
-
-				parseSSELine(line, &currentEvent)
+			if err := consumeSSEResponse(ctx, resp, out, &lastEventID, &reconnectDelay); err != nil {
+				errs <- err
+				return
 			}
 
 			if resp.StatusCode() == http.StatusNoContent {
@@ -391,6 +342,68 @@ func ResumableSSE[T any](
 	}()
 
 	return out, errs, nil
+}
+
+func buildSSERequestModifiers(mods []aoni.RequestModifier, lastEventID string) []aoni.RequestModifier {
+	reqMods := make([]aoni.RequestModifier, 0, len(mods)+4)
+	reqMods = append(reqMods,
+		mod.WithHeader("Accept", "text/event-stream"),
+		mod.WithHeader("Cache-Control", "no-cache"),
+		mod.WithHeader("Connection", "keep-alive"),
+	)
+
+	if lastEventID != "" {
+		reqMods = append(reqMods, mod.WithHeader("Last-Event-ID", lastEventID))
+	}
+
+	return append(reqMods, mods...)
+}
+
+func consumeSSEResponse[T any](
+	ctx context.Context,
+	resp *Stream,
+	out chan<- T,
+	lastEventID *string,
+	reconnectDelay *time.Duration,
+) error {
+	defer resp.Close()
+
+	reader := bufio.NewReader(resp)
+
+	var currentEvent SSEEvent
+
+	for {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		default:
+		}
+
+		line, err := reader.ReadString('\n')
+		if err != nil {
+			return nil
+		}
+
+		if strings.TrimSpace(line) == "" {
+			if currentEvent.ID != "" {
+				*lastEventID = currentEvent.ID
+			}
+
+			if currentEvent.Retry > 0 {
+				*reconnectDelay = time.Duration(currentEvent.Retry) * time.Millisecond
+			}
+
+			if err := dispatchSSEEvent(ctx, currentEvent, out); err != nil {
+				return err
+			}
+
+			currentEvent = SSEEvent{}
+
+			continue
+		}
+
+		parseSSELine(line, &currentEvent)
+	}
 }
 
 func sleepOrCancel(ctx context.Context, delay time.Duration, errs chan<- error) bool {

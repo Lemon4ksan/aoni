@@ -62,6 +62,7 @@ func DetectCloudflareChallenge(resp *http.Response) (bool, error) {
 	return false, nil
 }
 
+// extractBodyPrefix retrieves initial body bytes without exhausting the stream.
 func extractBodyPrefix(resp *http.Response, fallbackLimit int64) ([]byte, error) {
 	// Fast path: body is already buffered by aoni pipeline.
 	if provider, ok := resp.Body.(prefixProvider); ok {
@@ -85,6 +86,7 @@ func extractBodyPrefix(resp *http.Response, fallbackLimit int64) ([]byte, error)
 	return buf, nil
 }
 
+// isHTMLContentType reports whether contentType header signifies HTML markup.
 func isHTMLContentType(contentType string) bool {
 	if contentType == "" {
 		return false
@@ -98,11 +100,13 @@ func isHTMLContentType(contentType string) bool {
 	return mediaType == "text/html" || mediaType == "application/xhtml+xml"
 }
 
+// hasHTMLTags checks whether prefix starts with common HTML doctype or root tags.
 func hasHTMLTags(prefix []byte) bool {
 	return bytesconv.ContainsFoldASCII(prefix, "<html") ||
 		bytesconv.ContainsFoldASCII(prefix, "<!doctype html")
 }
 
+// containsCloudflareSignatures checks whether prefix contains Cloudflare Challenge or CAPTCHA indicators.
 func containsCloudflareSignatures(prefix []byte) bool {
 	return bytesconv.ContainsFoldASCII(prefix, "cf-challenge") ||
 		bytesconv.ContainsFoldASCII(prefix, "ray id") ||

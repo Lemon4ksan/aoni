@@ -504,7 +504,7 @@ type HTTPDoerAdapter struct {
 	doer HTTPDoer
 }
 
-// NewHTTPDoerAdapter wraps doer in a [RequestDoer] adapter.
+// NewHTTPDoerAdapter wraps doer in a [RequestDoer] adapter. Safe for concurrent execution.
 func NewHTTPDoerAdapter(doer HTTPDoer) RequestDoer {
 	if doer == nil {
 		return nil
@@ -513,7 +513,7 @@ func NewHTTPDoerAdapter(doer HTTPDoer) RequestDoer {
 	return &HTTPDoerAdapter{doer: doer}
 }
 
-// Do executes a unified [Request] via the underlying [HTTPDoer].
+// Do executes a unified [Request] via the underlying [HTTPDoer]. Safe for concurrent execution.
 func (a *HTTPDoerAdapter) Do(req Request) (Response, error) {
 	if a == nil || a.doer == nil {
 		return nil, ErrNilRequest
@@ -544,12 +544,12 @@ func (a *HTTPDoerAdapter) Do(req Request) (Response, error) {
 			fastReq := fastAdapter.FastHTTPRequest()
 			if fastReq != nil {
 				fastReq.Header.All()(func(k, v []byte) bool {
-					httpReq.Header.Add(string(k), string(v))
+					httpReq.Header.Add(bytesconv.B2S(k), bytesconv.B2S(v))
 					return true
 				})
 
-				if host := string(fastReq.Header.Peek("Host")); host != "" {
-					httpReq.Host = host
+				if host := fastReq.Header.Peek("Host"); len(host) > 0 {
+					httpReq.Host = bytesconv.B2S(host)
 				}
 			}
 		}
@@ -563,6 +563,7 @@ func (a *HTTPDoerAdapter) Do(req Request) (Response, error) {
 	return NewStdResponse(resp), nil
 }
 
+// responseBodyCloser decorates an [stdio.ReadCloser] stream and ensures the parent [Response] is released upon body close.
 type responseBodyCloser struct {
 	stdio.ReadCloser
 	resp Response
@@ -586,7 +587,7 @@ type RequestDoerAdapter struct {
 	doer RequestDoer
 }
 
-// NewRequestDoerAdapter wraps doer in an [HTTPDoer] adapter.
+// NewRequestDoerAdapter wraps doer in an [HTTPDoer] adapter. Safe for concurrent execution.
 func NewRequestDoerAdapter(doer RequestDoer) HTTPDoer {
 	if doer == nil {
 		return nil
@@ -595,7 +596,7 @@ func NewRequestDoerAdapter(doer RequestDoer) HTTPDoer {
 	return &RequestDoerAdapter{doer: doer}
 }
 
-// Do executes a standard [*http.Request] via the underlying [RequestDoer].
+// Do executes a standard [*http.Request] via the underlying [RequestDoer]. Safe for concurrent execution.
 func (a *RequestDoerAdapter) Do(req *http.Request) (*http.Response, error) {
 	if a == nil || a.doer == nil {
 		return nil, ErrNilRequest

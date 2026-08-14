@@ -108,6 +108,8 @@ func (a *Arena) Release() {
 	}
 }
 
+// fallbackAllocStruct allocates T on Go runtime heap when off-heap arena memory is exhausted.
+//
 //go:noinline
 func fallbackAllocStruct[T any]() *T {
 	return new(T)
@@ -136,7 +138,14 @@ func AllocStruct[T any](a *Arena) *T {
 	if align > 1 {
 		rem := int(a.offset) % align
 		if rem != 0 {
-			a.offset += int32(align - rem)
+			padding := int32(align - rem)
+			// Validate that alignment padding itself fits before modifying the offset.
+			// Without this check, a near-full arena would silently set a.offset > a.size.
+			if a.offset+padding > a.size {
+				return fallbackAllocStruct[T]()
+			}
+
+			a.offset += padding
 		}
 	}
 

@@ -13,6 +13,7 @@ import (
 	"github.com/lemon4ksan/aoni/internal/clock"
 )
 
+// duplicateEntry stores a timestamped CRC64 request signature in the ring buffer.
 type duplicateEntry struct {
 	timestamp time.Time
 	hash      uint64
@@ -77,6 +78,7 @@ func (g *DuplicateRequestGuard) CheckAndRecord(method, rawURL string) {
 	g.cursor = (g.cursor + 1) % g.capacity
 }
 
+// findDuplicate scans the ring buffer for a matching request hash within the active time window.
 func (g *DuplicateRequestGuard) findDuplicate(hash uint64, now time.Time) (time.Duration, bool) {
 	for i := 0; i < g.capacity; i++ {
 		entry := g.entries[i]
@@ -91,6 +93,8 @@ func (g *DuplicateRequestGuard) findDuplicate(hash uint64, now time.Time) (time.
 	return 0, false
 }
 
+// computeRequestHash produces a 64-bit combined CRC32 fingerprint from method and rawURL.
+//
 //go:inline
 func computeRequestHash(method, rawURL string) uint64 {
 	h1 := uint64(crc32.ChecksumIEEE(bytesconv.S2B(method)))

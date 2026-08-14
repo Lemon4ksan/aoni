@@ -204,15 +204,21 @@ func (p *ProxyIsolatedJar) StartJanitor(ctx context.Context, interval time.Durat
 	}()
 }
 
-// PurgeExpired removes all expired cookies across all active proxy jars.
+// PurgeExpired removes all expired cookies across all active proxy jars without holding global locks during backend I/O.
 func (p *ProxyIsolatedJar) PurgeExpired() {
-	p.mu.Lock()
-	defer p.mu.Unlock()
+	p.mu.RLock()
 
+	persistentJars := make([]*PersistentJar, 0, len(p.jars))
 	for _, jar := range p.jars {
 		if pJar, ok := jar.(*PersistentJar); ok {
-			pJar.purgeExpired()
+			persistentJars = append(persistentJars, pJar)
 		}
+	}
+
+	p.mu.RUnlock()
+
+	for _, pJar := range persistentJars {
+		pJar.purgeExpired()
 	}
 }
 
@@ -296,24 +302,25 @@ func (pj *PersistentJar) Cookies(u *url.URL) []*http.Cookie {
 		validCookies = append(validCookies, c)
 	}
 
+	var list []Cookie
 	if hasExpired && pj.backend != nil {
-		list := make([]Cookie, 0, len(pj.cookiesMap))
+		list = make([]Cookie, 0, len(pj.cookiesMap))
 		for _, c := range pj.cookiesMap {
 			list = append(list, c)
 		}
-
-		_ = pj.backend.Save(pj.proxyURL, list)
 	}
 
 	pj.mu.Unlock()
+
+	if hasExpired && pj.backend != nil {
+		_ = pj.backend.Save(pj.proxyURL, list)
+	}
 
 	return validCookies
 }
 
 func (pj *PersistentJar) purgeExpired() {
 	pj.mu.Lock()
-	defer pj.mu.Unlock()
-
 	now := clock.CoarseTime()
 	changed := false
 
@@ -325,12 +332,17 @@ func (pj *PersistentJar) purgeExpired() {
 		}
 	}
 
+	var list []Cookie
 	if changed && pj.backend != nil {
-		list := make([]Cookie, 0, len(pj.cookiesMap))
+		list = make([]Cookie, 0, len(pj.cookiesMap))
 		for _, c := range pj.cookiesMap {
 			list = append(list, c)
 		}
+	}
 
+	pj.mu.Unlock()
+
+	if changed && pj.backend != nil {
 		_ = pj.backend.Save(pj.proxyURL, list)
 	}
 }

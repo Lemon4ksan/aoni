@@ -78,6 +78,7 @@ func Ping(ctx context.Context, target string, timeout time.Duration) (*PingResul
 	return readEchoReply(ctx, pconn, isV6, id, seq, sendTime, target, ipAddr.IP)
 }
 
+// listenICMP attempts to bind unprivileged datagram ICMP socket first, falling back to raw ICMP.
 func listenICMP(isV6 bool) (*icmp.PacketConn, bool, error) {
 	network := "udp4"
 
@@ -105,6 +106,7 @@ func listenICMP(isV6 bool) (*icmp.PacketConn, bool, error) {
 	return pconn, false, nil
 }
 
+// buildEchoMessage constructs an ICMP Echo Request message with timestamp payload.
 func buildEchoMessage(isV6 bool, id, seq int, payload []byte) ([]byte, error) {
 	var msgType icmp.Type = ipv4.ICMPTypeEcho
 	if isV6 {
@@ -124,6 +126,7 @@ func buildEchoMessage(isV6 bool, id, seq int, payload []byte) ([]byte, error) {
 	return msg.Marshal(nil)
 }
 
+// readEchoReply loops on the ICMP packet connection until matching Echo Reply is received or deadline expires.
 func readEchoReply(
 	ctx context.Context,
 	pconn *icmp.PacketConn,
@@ -174,10 +177,12 @@ func readEchoReply(
 	}
 }
 
+// isEchoReply checks whether message type corresponds to an IPv4 or IPv6 Echo Reply.
 func isEchoReply(typ icmp.Type) bool {
 	return typ == ipv4.ICMPTypeEchoReply || typ == ipv6.ICMPTypeEchoReply
 }
 
+// generateRandomSeq produces a random 16-bit sequence integer for ICMP matching.
 func generateRandomSeq() int {
 	var b [2]byte
 

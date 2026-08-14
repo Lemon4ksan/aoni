@@ -12,7 +12,6 @@ import (
 	"encoding/base64"
 	"net/http"
 	"net/url"
-	"strings"
 
 	"github.com/valyala/fasthttp"
 
@@ -24,6 +23,7 @@ import (
 	"github.com/lemon4ksan/aoni/netutil"
 )
 
+// applyCookies populates outbound fasthttp request headers with matching cookies from the active jar.
 func (c *Client) applyCookies(ctx context.Context, req *fasthttp.Request) {
 	jar := c.config.Engine.CookieJar
 	if jar == nil {
@@ -48,24 +48,19 @@ func (c *Client) applyCookies(ctx context.Context, req *fasthttp.Request) {
 		return
 	}
 
-	var cookieHeader strings.Builder
-	for i, c := range cookies {
-		if i > 0 {
-			cookieHeader.WriteString("; ")
-		}
-
-		cookieHeader.WriteString(c.Name)
-		cookieHeader.WriteByte('=')
-		cookieHeader.WriteString(c.Value)
+	cookieHeader := internalCookie.BuildCookieHeader(cookies)
+	if cookieHeader == "" {
+		return
 	}
 
 	if existing := req.Header.Peek("Cookie"); len(existing) > 0 {
-		req.Header.Set("Cookie", string(existing)+"; "+cookieHeader.String())
+		req.Header.Set("Cookie", bytesconv.B2S(existing)+"; "+cookieHeader)
 	} else {
-		req.Header.Set("Cookie", cookieHeader.String())
+		req.Header.Set("Cookie", cookieHeader)
 	}
 }
 
+// captureCookies extracts response Set-Cookie headers and saves valid cookies to the active jar.
 func (c *Client) captureCookies(ctx context.Context, req *fasthttp.Request, resp *fasthttp.Response) {
 	jar := c.config.Engine.CookieJar
 	if jar == nil {
@@ -99,10 +94,42 @@ func (c *Client) captureCookies(ctx context.Context, req *fasthttp.Request, resp
 	}
 }
 
-func parseCookie(key, value []byte) *http.Cookie {
-	return internalCookie.ParseSingleCookie(key, value)
+// parseCookie parses Set-Cookie header value bytes into an *http.Cookie without synthetic HTTP response allocations.
+func parseCookie(_, value []byte) *http.Cookie {
+	if len(value) == 0 {
+		return nil
+	}
+
+	dto := internalCookie.ParseSetCookieHeader(bytesconv.B2S(value), "", "")
+	if dto.Name == "" {
+		return nil
+	}
+
+	var sameSite http.SameSite
+	switch dto.SameSite {
+	case "Lax":
+		sameSite = http.SameSiteLaxMode
+	case "Strict":
+		sameSite = http.SameSiteStrictMode
+	case "None":
+		sameSite = http.SameSiteNoneMode
+	}
+
+	return &http.Cookie{ //nolint:gosec
+		Name:        dto.Name,
+		Value:       dto.Value,
+		Domain:      dto.Domain,
+		Path:        dto.Path,
+		Expires:     dto.Expires,
+		HttpOnly:    dto.HTTPOnly,
+		Secure:      dto.Secure,
+		SameSite:    sameSite,
+		Partitioned: dto.Partitioned,
+		MaxAge:      dto.MaxAge,
+	}
 }
 
+// extractUserInfoAndSetAuth inspects URI credentials and constructs HTTP Basic Authorization headers if missing.
 func extractUserInfoAndSetAuth(req *fasthttp.Request) {
 	if len(req.Header.Peek("Authorization")) > 0 {
 		return
@@ -130,6 +157,7 @@ func extractUserInfoAndSetAuth(req *fasthttp.Request) {
 	req.URI().SetPassword("")
 }
 
+// scrubSensitiveHeaders strips sensitive credentials and cookie headers upon cross-domain redirects per RFC 9110 §15.4.
 func scrubSensitiveHeaders(req *fasthttp.Request, currentURI, nextURI *fasthttp.URI) {
 	for _, h := range aoni.DefaultSensitiveHeaders {
 		req.Header.Del(h)
@@ -147,6 +175,7 @@ func scrubSensitiveHeaders(req *fasthttp.Request, currentURI, nextURI *fasthttp.
 	}
 }
 
+// isSameDomainOrSubdomain reports whether h1 and h2 belong to the same domain or subdomain hierarchy.
 func isSameDomainOrSubdomain(h1, h2 string) bool {
 	clean1 := netutil.CleanHost(h1)
 	clean2 := netutil.CleanHost(h2)

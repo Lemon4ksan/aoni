@@ -16,7 +16,6 @@ import (
 	"net/http/httputil"
 	"os"
 	"strings"
-	"sync"
 
 	"github.com/lemon4ksan/aoni"
 	"github.com/lemon4ksan/aoni/codec/decode"
@@ -27,19 +26,16 @@ import (
 	"github.com/lemon4ksan/aoni/telemetry"
 )
 
-var bytePool = sync.Pool{
-	New: func() any {
-		b := make([]byte, 32*1024)
-		return &b
-	},
-}
+var nullJSONBytes = []byte("null")
 
 func redactHeaders(raw []byte) []byte {
 	return requestutil.RedactHeaders(raw)
 }
 
+// responseDecoder orchestrates response decoding, diagnostic dumps, and validation.
 type responseDecoder struct{}
 
+// ValidateState checks that non-2xx responses or unexpected HTML payloads conform to decoder requirements.
 func (d responseDecoder) ValidateState(resp *http.Response, decoder decode.Decoder) error {
 	if resp == nil || resp.Body == nil || decode.IsRawDecoder(decoder) {
 		return nil
@@ -61,6 +57,7 @@ func (d responseDecoder) ValidateState(resp *http.Response, decoder decode.Decod
 	return d.checkMIMEType(resp)
 }
 
+// isStructuredDataMIME reports whether contentType matches common structured payload MIME types (JSON, Protobuf, gRPC-Web).
 func isStructuredDataMIME(contentType string) bool {
 	if len(contentType) >= 16 && bytesconv.EqualFoldASCII(contentType[:16], "application/json") {
 		return true
@@ -111,6 +108,7 @@ func ResolvePeekableReader(resp *http.Response) *bufio.Reader {
 	return peekable
 }
 
+// DumpDiagnostics prints HTTP request and response diagnostic payloads to stderr or configured logger when debug mode is enabled.
 func (d responseDecoder) DumpDiagnostics(resp *http.Response, requester Requester) {
 	if resp.Request == nil {
 		return
@@ -154,6 +152,7 @@ func (d responseDecoder) DumpDiagnostics(resp *http.Response, requester Requeste
 	)
 }
 
+// SetCapturer inspects if a response capturer pointer was configured, preserving the response object from auto-closure.
 func (responseDecoder) SetCapturer(resp *http.Response) bool {
 	if resp.Request == nil {
 		return false
@@ -170,6 +169,7 @@ func (responseDecoder) SetCapturer(resp *http.Response) bool {
 	return false
 }
 
+// DecodeAPIError converts non-2xx HTTP responses into structured [*aoni.APIError] instances.
 func (responseDecoder) DecodeAPIError(resp *http.Response) error {
 	bodyBytes, _ := stdio.ReadAll(stdio.LimitReader(resp.Body, 1024*1024))
 	apiErr := &aoni.APIError{StatusCode: resp.StatusCode, Body: bodyBytes}
@@ -186,6 +186,7 @@ func (responseDecoder) DecodeAPIError(resp *http.Response) error {
 	return apiErr
 }
 
+// DecodeSuccess unmarshals successful response payloads into target or configured BaseResponse wrappers.
 func (responseDecoder) DecodeSuccess(
 	resp *http.Response,
 	target any,
@@ -214,6 +215,7 @@ func (responseDecoder) DecodeSuccess(
 	return err
 }
 
+// extractBaseResponse retrieves configured [aoni.BaseResponse] models from request context or client defaults.
 func extractBaseResponse(requester Requester, resp *http.Response) aoni.BaseResponse {
 	if resp != nil && resp.Request != nil {
 		if cfg := aoni.GetRequestConfig(resp.Request.Context()); cfg != nil {
@@ -238,6 +240,7 @@ func extractBaseResponse(requester Requester, resp *http.Response) aoni.BaseResp
 	return nil
 }
 
+// dumpMultipart generates a summarized diagnostic dump for multipart/form-data requests.
 func (responseDecoder) dumpMultipart(req *http.Request) []byte {
 	contentType := req.Header.Get("Content-Type")
 	if !bytesconv.EqualFoldASCII(contentType[:min(len(contentType), 19)], "multipart/form-data") || req.GetBody == nil {
@@ -254,10 +257,11 @@ func (responseDecoder) dumpMultipart(req *http.Request) []byte {
 
 	return []byte(
 		req.Method + " " + req.URL.RequestURI() + " HTTP/1.1\r\nContent-Type: " + contentType + "\r\n\r\n" +
-			telemetry.SummarizeMultipartBody(bodyBytes, contentType),
+			requestutil.SummarizeMultipartBody(bodyBytes, contentType),
 	)
 }
 
+// checkMIMEType rejects responses whose Content-Type explicitly indicates HTML where structured data was expected.
 func (responseDecoder) checkMIMEType(resp *http.Response) error {
 	contentType := resp.Header.Get("Content-Type")
 	if contentType == "" {
@@ -277,6 +281,7 @@ func (responseDecoder) checkMIMEType(resp *http.Response) error {
 	return nil
 }
 
+// checkHTML peeks into the response body stream to detect HTML error or Cloudflare challenge pages.
 func (responseDecoder) checkHTML(buf *bufio.Reader) error {
 	peekBytes, err := buf.Peek(128)
 	if (err != nil && err != stdio.EOF) || len(peekBytes) == 0 {
@@ -333,17 +338,14 @@ func HandleResponse(resp *http.Response, target any, requester Requester) error 
 	}
 
 	if target == nil || resp.StatusCode == http.StatusNoContent {
-		bufPtr := bytePool.Get().(*[]byte)
 		_, _ = io.CopyZeroAlloc(stdio.Discard, resp.Body)
-
-		bytePool.Put(bufPtr)
-
 		return nil
 	}
 
 	return dec.DecodeSuccess(resp, target, requester, decoder)
 }
 
+// resolveDecoder selects the appropriate [decode.Decoder] for the given response Content-Type.
 func resolveDecoder(resp *http.Response) decode.Decoder {
 	if resp != nil && resp.Request != nil {
 		cfg := aoni.GetRequestConfig(resp.Request.Context())
@@ -414,6 +416,7 @@ func resolveDecoder(resp *http.Response) decode.Decoder {
 	return decode.JSONDecoder
 }
 
+// validateAndMarshal validates that payload is not a modifier and encodes it to JSON if required.
 func validateAndMarshal(payload any) (stdio.Reader, error) {
 	if _, ok := payload.(aoni.RequestModifier); ok {
 		return nil, ErrModifierAsBody
@@ -432,7 +435,7 @@ func validateAndMarshal(payload any) (stdio.Reader, error) {
 		return nil, fmt.Errorf("aoni: failed to marshal payload: %w", err)
 	}
 
-	if bytes.Equal(bodyBytes, []byte("null")) {
+	if bytes.Equal(bodyBytes, nullJSONBytes) {
 		bodyBytes = nil
 	}
 

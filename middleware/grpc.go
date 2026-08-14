@@ -5,10 +5,10 @@
 package middleware
 
 import (
-	"strconv"
 	"time"
 
 	"github.com/lemon4ksan/aoni"
+	"github.com/lemon4ksan/aoni/internal/requestutil"
 )
 
 // GRPCWebTimeout constructs an [aoni.Middleware] setting standard gRPC-Web timeout headers ("grpc-timeout").
@@ -34,27 +34,7 @@ func GRPCMetadata(md map[string]string) aoni.Middleware {
 	}
 }
 
+// formatGRPCTimeout formats d into a gRPC-compliant timeout header.
 func formatGRPCTimeout(d time.Duration) string {
-	if d <= 0 {
-		return "0m"
-	}
-
-	if d >= time.Hour && d%time.Hour == 0 {
-		return strconv.FormatInt(int64(d/time.Hour), 10) + "H"
-	}
-
-	if d >= time.Minute && d%time.Minute == 0 {
-		return strconv.FormatInt(int64(d/time.Minute), 10) + "M"
-	}
-
-	if d >= time.Second && d%time.Second == 0 {
-		return strconv.FormatInt(int64(d/time.Second), 10) + "S"
-	}
-
-	ms := d.Milliseconds()
-	if ms == 0 {
-		ms = 1
-	}
-
-	return strconv.FormatInt(ms, 10) + "m"
+	return requestutil.FormatGRPCTimeout(d)
 }

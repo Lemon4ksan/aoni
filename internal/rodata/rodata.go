@@ -217,6 +217,7 @@ func InternValueBytes(val []byte) []byte {
 	}
 }
 
+// equalsIgnoreCase reports whether ASCII byte slices a and b are equal ignoring case.
 func equalsIgnoreCase(a, b []byte) bool {
 	if len(a) != len(b) {
 		return false

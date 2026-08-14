@@ -26,6 +26,7 @@ func CountLeadingZeros(x uint64) int {
 	return bits.LeadingZeros64(x)
 }
 
+// extractBitsSWAR emulates BMI2 PEXT in software using SIMD-Within-A-Register bit operations.
 func extractBitsSWAR(val, mask uint64) uint64 {
 	res := uint64(0)
 	outBit := uint64(0)
@@ -43,6 +44,7 @@ func extractBitsSWAR(val, mask uint64) uint64 {
 	return res
 }
 
+// depositBitsSWAR emulates BMI2 PDEP in software using SIMD-Within-A-Register bit operations.
 func depositBitsSWAR(val, mask uint64) uint64 {
 	res := uint64(0)
 	inBit := uint64(0)

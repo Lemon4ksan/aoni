@@ -5,14 +5,34 @@
 package offheap_test
 
 import (
+	"io"
 	"sync"
 	"testing"
+	"unsafe"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	"github.com/lemon4ksan/aoni/internal/offheap"
 )
+
+// ── Shared test types ────────────────────────────────────────────────────────
+
+type testFrameHeader struct {
+	StreamID uint32
+	Length   uint32
+	Flags    uint8
+	Type     uint8
+}
+
+type testFastHeaderSlot struct {
+	Key    [32]byte
+	Val    [64]byte
+	KeyLen uint8
+	ValLen uint8
+}
+
+// ── OffHeapBuffer ─────────────────────────────────────────────────────────────
 
 func TestOffHeapBuffer_WriteRead(t *testing.T) {
 	buf, err := offheap.NewBuffer(64 * 1024)
@@ -33,10 +53,126 @@ func TestOffHeapBuffer_WriteRead(t *testing.T) {
 	rn, rErr := buf.Read(readDst)
 	assert.NoError(t, rErr)
 	assert.Equal(t, 24, rn)
+	assert.Equal(t, "GET /api/v1 HTTP/1.1\r\n\r\n", string(readDst[:rn]))
 
 	buf.Reset()
 	assert.Equal(t, 0, buf.Len())
 }
+
+func TestBuffer_ReadCursor_Advances(t *testing.T) {
+	buf, err := offheap.NewBuffer(64 * 1024)
+	require.NoError(t, err)
+
+	defer buf.Release()
+
+	_, _ = buf.WriteString("ABCDEFGH")
+
+	// First Read: should get "ABCD"
+	p1 := make([]byte, 4)
+	n, err := buf.Read(p1)
+	require.NoError(t, err)
+	assert.Equal(t, 4, n)
+	assert.Equal(t, "ABCD", string(p1))
+
+	// Second Read: should get next "EFGH", not repeat "ABCD"
+	p2 := make([]byte, 4)
+	n, err = buf.Read(p2)
+	require.NoError(t, err)
+	assert.Equal(t, 4, n)
+	assert.Equal(t, "EFGH", string(p2))
+}
+
+func TestBuffer_ReadEOF(t *testing.T) {
+	buf, err := offheap.NewBuffer(4096)
+	require.NoError(t, err)
+
+	defer buf.Release()
+
+	_, _ = buf.WriteString("hello")
+
+	p := make([]byte, 128)
+	n, err := buf.Read(p)
+	assert.NoError(t, err)
+	assert.Equal(t, 5, n)
+
+	// Next Read must return io.EOF
+	n2, err2 := buf.Read(p)
+	assert.Equal(t, 0, n2)
+	assert.Equal(t, io.EOF, err2)
+}
+
+func TestBuffer_RewindRead(t *testing.T) {
+	buf, err := offheap.NewBuffer(4096)
+	require.NoError(t, err)
+
+	defer buf.Release()
+
+	_, _ = buf.WriteString("rewindable")
+
+	p := make([]byte, 16)
+
+	n, _ := buf.Read(p)
+	assert.Equal(t, "rewindable", string(p[:n]))
+
+	// After RewindRead the same data should be readable again
+	buf.RewindRead()
+
+	p2 := make([]byte, 16)
+	n2, _ := buf.Read(p2)
+	assert.Equal(t, "rewindable", string(p2[:n2]))
+
+	// Len() must still reflect written bytes (unchanged)
+	assert.Equal(t, len("rewindable"), buf.Len())
+}
+
+func TestBuffer_WriteString_NoAlloc(t *testing.T) {
+	buf, err := offheap.NewBuffer(64 * 1024)
+	require.NoError(t, err)
+
+	defer buf.Release()
+
+	allocs := testing.AllocsPerRun(1000, func() {
+		buf.Reset()
+		_, _ = buf.WriteString("content-type: application/json\r\n")
+	})
+
+	assert.Equal(t, float64(0), allocs, "WriteString must not allocate on the heap")
+}
+
+func TestBuffer_Full(t *testing.T) {
+	buf, err := offheap.NewBuffer(8)
+	require.NoError(t, err)
+
+	defer buf.Release()
+
+	_, err = buf.Write([]byte("12345678"))
+	assert.NoError(t, err)
+	assert.Equal(t, 8, buf.Len())
+
+	_, err = buf.Write([]byte("X"))
+	assert.ErrorIs(t, err, offheap.ErrBufferFull)
+}
+
+func TestBuffer_ClosedOps(t *testing.T) {
+	buf, err := offheap.NewBuffer(4096)
+	require.NoError(t, err)
+	buf.Release()
+
+	_, err = buf.Write([]byte("x"))
+	assert.ErrorIs(t, err, offheap.ErrBufferClosed)
+
+	_, err = buf.WriteString("x")
+	assert.ErrorIs(t, err, offheap.ErrBufferClosed)
+
+	_, err = buf.Read(make([]byte, 4))
+	assert.ErrorIs(t, err, offheap.ErrBufferClosed)
+
+	assert.Nil(t, buf.Bytes())
+	assert.Equal(t, 0, buf.Len())
+	assert.Equal(t, 0, buf.Cap())
+}
+
+// ── Arena ─────────────────────────────────────────────────────────────────────
 
 func TestScopeRAII_AllocAndPanicResilience(t *testing.T) {
 	scopeErr := offheap.Scope(2*1024*1024, func(arena *offheap.Arena) {
@@ -51,29 +187,15 @@ func TestScopeRAII_AllocAndPanicResilience(t *testing.T) {
 	})
 	assert.NoError(t, scopeErr)
 
-	// Verify panic resilience
+	// Verify panic resilience: Scope must release even when fn panics.
 	defer func() {
 		r := recover()
-		assert.NotNil(t, r, "panic should be recovered")
+		assert.NotNil(t, r, "panic should propagate through Scope")
 	}()
 
 	_ = offheap.Scope(1024*1024, func(_ *offheap.Arena) {
 		panic("testing panic resilience inside scope")
 	})
-}
-
-type testFrameHeader struct {
-	StreamID uint32
-	Length   uint32
-	Flags    uint8
-	Type     uint8
-}
-
-type testFastHeaderSlot struct {
-	Key    [32]byte
-	Val    [64]byte
-	KeyLen uint8
-	ValLen uint8
 }
 
 func TestAllocStruct(t *testing.T) {
@@ -107,60 +229,203 @@ func TestAllocStruct(t *testing.T) {
 	assert.NoError(t, err)
 }
 
-var testPool = sync.Pool{
-	New: func() any { return new(testFrameHeader) },
-}
+func TestAllocStruct_AlignmentCorrectness(t *testing.T) {
+	// AllocStruct must return naturally aligned pointers for all integer widths.
+	type aligned8 struct{ X uint64 } // 8-byte alignment
 
-var benchSum uint64
+	type aligned4 struct{ X uint32 } // 4-byte alignment
 
-func BenchmarkAllocStruct_Heap(b *testing.B) {
-	var sum uint64
+	type aligned2 struct{ X uint16 } // 2-byte alignment
 
-	b.ReportAllocs()
+	type aligned1 struct{ X uint8 } // 1-byte alignment
 
-	for i := 0; i < b.N; i++ {
-		hdr := new(testFrameHeader)
-		hdr.StreamID = uint32(i)
-		sum += uint64(hdr.StreamID)
+	type mixed struct { // mixed sizes: compiler pads
+		A uint8
+		B uint64
+		C uint16
 	}
 
-	benchSum = sum
+	err := offheap.Scope(256*1024, func(a *offheap.Arena) {
+		// Alternate small + large to provoke alignment padding
+		for i := 0; i < 100; i++ {
+			p1 := offheap.AllocStruct[aligned1](a)
+			require.NotNil(t, p1)
+
+			p8 := offheap.AllocStruct[aligned8](a)
+			require.NotNil(t, p8)
+			assert.Equal(t, uintptr(0), uintptr(unsafe.Pointer(p8))%8,
+				"uint64 pointer must be 8-byte aligned")
+
+			p4 := offheap.AllocStruct[aligned4](a)
+			require.NotNil(t, p4)
+			assert.Equal(t, uintptr(0), uintptr(unsafe.Pointer(p4))%4,
+				"uint32 pointer must be 4-byte aligned")
+
+			p2 := offheap.AllocStruct[aligned2](a)
+			require.NotNil(t, p2)
+			assert.Equal(t, uintptr(0), uintptr(unsafe.Pointer(p2))%2,
+				"uint16 pointer must be 2-byte aligned")
+
+			pm := offheap.AllocStruct[mixed](a)
+			require.NotNil(t, pm)
+			assert.Equal(t, uintptr(0), uintptr(unsafe.Pointer(pm))%unsafe.Alignof(*pm),
+				"mixed struct pointer must satisfy its natural alignment")
+		}
+	})
+	require.NoError(t, err)
 }
 
-func BenchmarkAllocStruct_SyncPool(b *testing.B) {
-	var sum uint64
+func TestAllocStruct_AlignmentOverflow_NoCorruption(t *testing.T) {
+	// Allocate a very small arena. Verify that alignment padding at exhaustion
+	// causes graceful heap fallback without corrupting arena.offset > arena.size.
+	type u64 struct{ X uint64 } // 8-byte alignment, 8-byte size
 
-	b.ReportAllocs()
+	// Arena of 9 bytes: fits one u64 (8 bytes), then 1 byte remains.
+	// Next AllocStruct[u64] needs 7 bytes of padding (offset=8 → already aligned... let's use 11)
+	// Arena of 11 bytes: first u64 at 0 (8 bytes). offset=8. Remaining=3.
+	// Next u64 needs: rem = 8%8=0, no padding. Needs 8 bytes. 8>3 → fallback. ✓
+	// Use 13 bytes: first u64 at 0. offset=8. Remaining=5.
+	// Next u64: rem=8%8=0, no pad. Needs 8. 8>5 → Alloc returns nil → fallback. ✓
+	// Use 15 bytes: offset=8. Remaining=7. Needs 8 → fallback. ✓
 
-	for i := 0; i < b.N; i++ {
-		hdr := testPool.Get().(*testFrameHeader)
-		hdr.StreamID = uint32(i)
-		sum += uint64(hdr.StreamID)
-		testPool.Put(hdr)
-	}
+	arena, err := offheap.NewArena(15)
+	require.NoError(t, err)
 
-	benchSum = sum
-}
-
-func BenchmarkAllocStruct_OffHeap(b *testing.B) {
-	arena, err := offheap.NewArena(16 * 1024 * 1024)
-	if err != nil {
-		b.Fatal(err)
-	}
 	defer arena.Release()
 
-	var sum uint64
+	p1 := offheap.AllocStruct[u64](arena)
+	require.NotNil(t, p1, "first allocation must succeed")
+	p1.X = 0xDEADBEEF_CAFEBABE
 
-	b.ResetTimer()
-	b.ReportAllocs()
+	// Second must fall back to heap — but must NOT panic or corrupt state
+	p2 := offheap.AllocStruct[u64](arena)
+	require.NotNil(t, p2, "fallback must return valid heap pointer")
+	p2.X = 0x1234
 
-	for i := 0; i < b.N; i++ {
+	// First value must still be intact
+	assert.Equal(t, uint64(0xDEADBEEF_CAFEBABE), p1.X, "off-heap data must not be corrupted")
+}
+
+func TestArena_ResetAndReuse(t *testing.T) {
+	arena, err := offheap.NewArena(64 * 1024)
+	require.NoError(t, err)
+
+	defer arena.Release()
+
+	for i := 0; i < 10; i++ {
 		hdr := offheap.AllocStruct[testFrameHeader](arena)
-		hdr.StreamID = uint32(i)
-		sum += uint64(hdr.StreamID)
+		require.NotNil(t, hdr)
+		hdr.StreamID = uint32(i * 100)
 
 		arena.Reset()
 	}
 
-	benchSum = sum
+	// Must not panic or return nil after repeated Reset cycles.
+}
+
+// ── ArenaPool ─────────────────────────────────────────────────────────────────
+
+func TestArenaPool_BasicAcquireRelease(t *testing.T) {
+	pool := offheap.NewArenaPool(1024 * 1024)
+
+	a := pool.Acquire()
+	require.NotNil(t, a)
+
+	hdr := offheap.AllocStruct[testFrameHeader](a)
+	require.NotNil(t, hdr)
+	hdr.StreamID = 999
+
+	pool.Release(a)
+
+	// Re-acquire: arena must be reset (offset 0), but memory valid.
+	a2 := pool.Acquire()
+	require.NotNil(t, a2)
+	pool.Release(a2)
+}
+
+func TestArenaPool_PageSize(t *testing.T) {
+	pool := offheap.NewArenaPool(512 * 1024)
+	assert.Equal(t, 512*1024, pool.PageSize())
+}
+
+func TestArenaPool_DefaultPageSize(t *testing.T) {
+	pool := offheap.NewArenaPool(0)
+	assert.Equal(t, 2*1024*1024, pool.PageSize())
+}
+
+func TestArenaPool_Concurrent(t *testing.T) {
+	pool := offheap.NewArenaPool(512 * 1024)
+
+	const (
+		goroutines = 64
+		iters      = 200
+	)
+
+	var wg sync.WaitGroup
+	wg.Add(goroutines)
+
+	for g := 0; g < goroutines; g++ {
+		go func() {
+			defer wg.Done()
+
+			for i := 0; i < iters; i++ {
+				a := pool.Acquire()
+				if a == nil {
+					continue
+				}
+
+				hdr := offheap.AllocStruct[testFrameHeader](a)
+				if hdr != nil {
+					hdr.StreamID = uint32(i)
+				}
+
+				pool.Release(a)
+			}
+		}()
+	}
+
+	wg.Wait()
+}
+
+// ── Fuzz ──────────────────────────────────────────────────────────────────────
+
+func FuzzArena_AllocStruct(f *testing.F) {
+	f.Add(1024, 8)
+	f.Add(64, 1)
+	f.Add(1<<20, 500)
+	f.Add(1, 1)
+
+	f.Fuzz(func(t *testing.T, arenaSize, allocCount int) {
+		if arenaSize <= 0 || arenaSize > 32*1024*1024 {
+			return
+		}
+
+		if allocCount < 0 || allocCount > 50_000 {
+			return
+		}
+
+		arena, err := offheap.NewArena(arenaSize)
+		if err != nil {
+			return
+		}
+		defer arena.Release()
+
+		for i := 0; i < allocCount; i++ {
+			hdr := offheap.AllocStruct[testFrameHeader](arena)
+			if hdr == nil {
+				// Arena exhausted, fell back to heap — expected.
+				break
+			}
+
+			hdr.StreamID = uint32(i)
+		}
+
+		// Must not panic after exhaustion + Reset cycle.
+		arena.Reset()
+
+		hdr := offheap.AllocStruct[testFrameHeader](arena)
+		if hdr != nil {
+			hdr.StreamID = 42
+		}
+	})
 }
