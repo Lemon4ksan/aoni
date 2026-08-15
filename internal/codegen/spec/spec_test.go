@@ -42,7 +42,7 @@ func TestSpecRegistry(t *testing.T) {
 
 	// Verify scopes
 	scopes := spec.Scopes()
-	require.Len(t, scopes, 5)
+	require.Len(t, scopes, 6)
 
 	for _, s := range scopes {
 		list := spec.ByScope(s)

@@ -3,7 +3,7 @@
 // license that can be found in the LICENSE file.
 
 // Package spec provides the definitive, self-documenting registry of all DSL directives,
-// arguments, scopes, and validation rules for aoni-gen.
+// arguments, scopes, pipeline stages, and validation rules for aoni-gen.
 package spec
 
 import (
@@ -12,7 +12,7 @@ import (
 	"strings"
 )
 
-// Scope categorizes the declaration level where a directive is valid.
+// Scope categorizes the declaration level where a directive or stage is valid.
 type Scope string
 
 const (
@@ -30,9 +30,12 @@ const (
 
 	// ScopeStruct applies to DTO structs, tuples, and unions.
 	ScopeStruct Scope = "struct"
+
+	// ScopePipeline applies to Wire-Transform pipeline stages in @return / @body expressions.
+	ScopePipeline Scope = "pipeline"
 )
 
-// ArgDef describes an argument or flag accepted by a directive.
+// ArgDef describes an argument or flag accepted by a directive or pipeline stage.
 type ArgDef struct {
 	Name          string   `json:"name"`
 	Placeholder   string   `json:"placeholder,omitempty"`
@@ -42,7 +45,7 @@ type ArgDef struct {
 	AllowedValues []string `json:"allowed_values,omitempty"`
 }
 
-// DirectiveDef defines the specification, syntax, arguments, and documentation for a DSL directive.
+// DirectiveDef defines the specification, syntax, arguments, and documentation for a DSL directive or pipeline stage.
 type DirectiveDef struct {
 	Name        string   `json:"name"`
 	Scopes      []Scope  `json:"scopes"`
@@ -64,7 +67,7 @@ func (d *DirectiveDef) HasScope(s Scope) bool {
 	return false
 }
 
-// Registry is the canonical list of all directives supported by aoni-gen.
+// Registry is the canonical list of all directives and pipeline stages supported by aoni-gen.
 var Registry = []*DirectiveDef{
 	// ==========================================
 	// 1. SERVICE SCOPE DIRECTIVES
@@ -417,13 +420,13 @@ var Registry = []*DirectiveDef{
 	},
 	{
 		Name:        "json",
-		Scopes:      []Scope{ScopeMethod},
-		Description: "Serializes request body as JSON.",
+		Scopes:      []Scope{ScopeMethod, ScopePipeline},
+		Description: "Serializes request body or decodes response payload as JSON.",
 		Example:     "// @json",
 	},
 	{
 		Name:        "proto",
-		Scopes:      []Scope{ScopeMethod},
+		Scopes:      []Scope{ScopeMethod, ScopePipeline},
 		Description: "Serializes request body and deserializes response via Protocol Buffers.",
 		Example:     "// @proto",
 	},
@@ -447,18 +450,12 @@ var Registry = []*DirectiveDef{
 		Example:     "// @stream sse",
 	},
 	{
-		Name:        "return",
+		Name:        "pipeline",
 		Scopes:      []Scope{ScopeMethod},
-		ValueHint:   "<pipeline expression>",
-		Description: "Configures a Wire-Transform pipeline chain for scraping, decoding, or transforming responses.",
-		Example:     "// @return body | attr(css=\"#cfg\", name=\"data\") | html_unescape | json",
-	},
-	{
-		Name:        "body",
-		Scopes:      []Scope{ScopeMethod},
-		ValueHint:   "<pipeline expression>",
-		Description: "Configures a Wire-Transform pipeline chain for outbound request body payload serialization.",
-		Example:     "// @body json | gzip | base64",
+		Aliases:     []string{"return", "body"},
+		ValueHint:   "<source> | <stage1> | <stage2> ...",
+		Description: "Configures a zero-alloc Wire-Transform pipeline chain for scraping, decompressing, and decoding data.",
+		Example:     "// @return body | gzip | json\n// @body json | gzip | base64_url",
 	},
 	{
 		Name:        "extract",
@@ -742,6 +739,139 @@ var Registry = []*DirectiveDef{
 		Description: "Generates discriminator-based polymorphism and JSON unmarshaling for tagged unions.",
 		Example:     "// @aoni:union\ntype EventVariant struct { ... }",
 	},
+
+	// ==========================================
+	// 6. PIPELINE STAGE SCOPE DIRECTIVES
+	// ==========================================
+	{
+		Name:        "gzip",
+		Scopes:      []Scope{ScopePipeline},
+		Description: "Gzip compression / decompression stage in pipeline expressions.",
+		Example:     "// @return body | gzip | json\n// @body json | gzip",
+	},
+	{
+		Name:        "gunzip",
+		Scopes:      []Scope{ScopePipeline},
+		Description: "Decompresses gzip-encoded binary stream into raw bytes.",
+		Example:     "// @return body | gunzip | json",
+	},
+	{
+		Name:        "zstd",
+		Scopes:      []Scope{ScopePipeline},
+		Aliases:     []string{"zstd_decompress"},
+		Description: "High-throughput Zstandard compression / decompression stage.",
+		Example:     "// @return body | zstd | json",
+	},
+	{
+		Name:        "deflate",
+		Scopes:      []Scope{ScopePipeline},
+		Aliases:     []string{"flate", "inflate"},
+		Description: "Raw Deflate compression / decompression stage.",
+		Example:     "// @return body | inflate | json",
+	},
+	{
+		Name:        "snappy",
+		Scopes:      []Scope{ScopePipeline},
+		Description: "Snappy block compression / decompression stage.",
+		Example:     "// @return body | snappy | proto",
+	},
+	{
+		Name:        "base64",
+		Scopes:      []Scope{ScopePipeline},
+		Aliases:     []string{"base64_decode"},
+		Description: "Standard Base64 encoding / decoding stage.",
+		Example:     "// @return body | base64_decode | json",
+	},
+	{
+		Name:        "base64_url",
+		Scopes:      []Scope{ScopePipeline},
+		Aliases:     []string{"base64_url_decode"},
+		Description: "URL-safe Base64 encoding / decoding stage (without padding).",
+		Example:     "// @body json | gzip | base64_url",
+	},
+	{
+		Name:        "hex",
+		Scopes:      []Scope{ScopePipeline},
+		Aliases:     []string{"hex_decode"},
+		Description: "Hexadecimal byte encoding / decoding stage.",
+		Example:     "// @return body | hex_decode | proto",
+	},
+	{
+		Name:        "html_unescape",
+		Scopes:      []Scope{ScopePipeline},
+		Aliases:     []string{"html_escape"},
+		Description: "Unescapes or escapes HTML entities (&quot;, &#39;, &amp;, &lt;, &gt;).",
+		Example:     "// @return body | attr(css=\"#cfg\", name=\"data\") | html_unescape | json",
+	},
+	{
+		Name:        "url_unescape",
+		Scopes:      []Scope{ScopePipeline},
+		Aliases:     []string{"url_escape"},
+		Description: "Decodes or encodes URL percent-encoded characters.",
+		Example:     "// @return body | query_param(\"token\") | url_unescape",
+	},
+	{
+		Name:        "attr",
+		Scopes:      []Scope{ScopePipeline},
+		ValueHint:   "attr(css=\"<selector>\", name=\"<attribute>\")",
+		Description: "Extracts an HTML attribute value from DOM element matching CSS selector.",
+		Args: []ArgDef{
+			{
+				Name:        "css",
+				Placeholder: "\"<selector>\"",
+				Description: "CSS selector of the target DOM element",
+				Required:    true,
+			},
+			{
+				Name:        "name",
+				Placeholder: "\"<attribute>\"",
+				Description: "Attribute name to extract (e.g. data-user, value, href)",
+				Required:    true,
+			},
+		},
+		Example: "// @return body | attr(css=\"#profile_config\", name=\"data-profile\") | html_unescape | json",
+	},
+	{
+		Name:        "between",
+		Scopes:      []Scope{ScopePipeline},
+		ValueHint:   "between(prefix=\"<prefix>\", suffix=\"<suffix>\")",
+		Description: "Zero-allocation string boundary extraction between prefix and suffix markers.",
+		Args: []ArgDef{
+			{Name: "prefix", Placeholder: "\"<prefix>\"", Description: "Left boundary marker string", Required: true},
+			{Name: "suffix", Placeholder: "\"<suffix>\"", Description: "Right boundary marker string", Required: true},
+		},
+		Example: "// @return body | between(prefix=\"var g_rgAppContextData = \", suffix=\";\") | json",
+	},
+	{
+		Name:        "regex",
+		Scopes:      []Scope{ScopePipeline},
+		ValueHint:   "regex(\"<pattern>\")",
+		Description: "Extracts matched capturing group via precompiled regular expression.",
+		Args: []ArgDef{
+			{
+				Name:        "pattern",
+				Placeholder: "\"<regex>\"",
+				Description: "Regular expression pattern containing capture group",
+				Required:    true,
+			},
+		},
+		Example: "// @return body | regex(`\"sessionid\":\"([^\"]+)\"`) | json",
+	},
+	{
+		Name:        "css",
+		Scopes:      []Scope{ScopePipeline},
+		ValueHint:   "css(\"<selector>\")",
+		Description: "Extracts inner text content of DOM element matching CSS selector.",
+		Example:     "// @return body | css(\".error_box\")",
+	},
+	{
+		Name:        "custom",
+		Scopes:      []Scope{ScopePipeline},
+		Aliases:     []string{"fn"},
+		ValueHint:   "custom=\"<pkg.Func>\"",
+		Description: "Executes custom transform function with signature func([]byte) ([]byte, error).",
+		Example:     "// @return body | custom=\"steam.DecryptPayload\" | json",
+	},
 }
 
 // lookupMap stores normalized lowercase directive name/alias to definition mapping.
@@ -787,6 +917,7 @@ func Scopes() []Scope {
 		ScopeMethod,
 		ScopeParam,
 		ScopeStruct,
+		ScopePipeline,
 	}
 }
 

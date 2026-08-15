@@ -33,9 +33,13 @@ func main() {
 		checkFlag   = flag.Bool("check", false, "Validate @aoni contracts and syntax without generating code")
 		watchFlag   = flag.Bool("watch", false, "Watch source directories and rebuild on file modification")
 		verboseFlag = flag.Bool("v", false, "Enable verbose compilation logging")
-		scopeFlag   = flag.String("scope", "", "Filter directives by scope (service, socket, method, param, struct)")
-		jsonFlag    = flag.Bool("json", false, "Output list of directives as JSON")
-		mdFlag      = flag.Bool("markdown", false, "Output list of directives as Markdown")
+		scopeFlag   = flag.String(
+			"scope",
+			"",
+			"Filter directives by scope (service, socket, method, param, struct, pipeline)",
+		)
+		jsonFlag = flag.Bool("json", false, "Output list of directives as JSON")
+		mdFlag   = flag.Bool("markdown", false, "Output list of directives as Markdown")
 	)
 
 	flag.Usage = func() {
@@ -43,10 +47,15 @@ func main() {
 		fmt.Fprintf(os.Stderr, "Usage:\n")
 		fmt.Fprintf(os.Stderr, "  aoni-gen [flags] [packages/files...]\n")
 		fmt.Fprintf(os.Stderr, "  aoni-gen list [flags]\n")
+		fmt.Fprintf(os.Stderr, "  aoni-gen pipelines\n")
 		fmt.Fprintf(os.Stderr, "  aoni-gen explain <directive>\n")
 		fmt.Fprintf(os.Stderr, "  aoni-gen check [packages/files...]\n\n")
 		fmt.Fprintf(os.Stderr, "Commands:\n")
 		fmt.Fprintf(os.Stderr, "  list       List all available @aoni DSL directives and syntax (like golangci-lint)\n")
+		fmt.Fprintf(
+			os.Stderr,
+			"  pipelines  List all Wire-Transform pipeline stages (gzip, json, attr, between, etc.)\n",
+		)
 		fmt.Fprintf(
 			os.Stderr,
 			"  explain    Show detailed documentation, syntax, arguments, and example for a directive\n",
@@ -56,9 +65,11 @@ func main() {
 		flag.PrintDefaults()
 		fmt.Fprintf(os.Stderr, "\nExamples:\n")
 		fmt.Fprintf(os.Stderr, "  aoni-gen list\n")
-		fmt.Fprintf(os.Stderr, "  aoni-gen list -scope=method\n")
-		fmt.Fprintf(os.Stderr, "  aoni-gen explain referer\n")
-		fmt.Fprintf(os.Stderr, "  aoni-gen explain form\n")
+		fmt.Fprintf(os.Stderr, "  aoni-gen list -scope=pipeline\n")
+		fmt.Fprintf(os.Stderr, "  aoni-gen pipelines\n")
+		fmt.Fprintf(os.Stderr, "  aoni-gen explain pipeline\n")
+		fmt.Fprintf(os.Stderr, "  aoni-gen explain gzip\n")
+		fmt.Fprintf(os.Stderr, "  aoni-gen explain attr\n")
 		fmt.Fprintf(os.Stderr, "  aoni-gen ./...\n")
 		fmt.Fprintf(os.Stderr, "  aoni-gen check ./...\n")
 		fmt.Fprintf(os.Stderr, "  aoni-gen -file=market.go\n")
@@ -77,13 +88,18 @@ func main() {
 			lScope := listCmd.String(
 				"scope",
 				*scopeFlag,
-				"Filter directives by scope (service, socket, method, param, struct)",
+				"Filter directives by scope (service, socket, method, param, struct, pipeline)",
 			)
 			lJSON := listCmd.Bool("json", *jsonFlag, "Output list of directives as JSON")
 			lMD := listCmd.Bool("markdown", *mdFlag, "Output list of directives as Markdown")
 			_ = listCmd.Parse(args[1:])
 
 			runList(*lScope, *lJSON, *lMD)
+
+			return
+
+		case "pipelines", "pipeline", "stages":
+			runList("pipeline", *jsonFlag, *mdFlag)
 
 			return
 
