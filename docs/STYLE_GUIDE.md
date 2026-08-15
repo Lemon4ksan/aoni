@@ -33,7 +33,7 @@ Performance optimizations must never degrade code legibility. Avoid cryptic micr
 All protocol implementations, HPACK/QPACK framing, HTTP status fallbacks (421 Misdirected Request, 408 Request Timeout, 425 Too Early), cookie path sorting (RFC 6265), and ECH (RFC 9460) must rigorously follow IETF RFC and W3C specifications while matching Chromium's network stack resilience.
 
 ### 1.5 Decade-Proof Pluggable Pipeline Architecture
-Inspired by legendary systems software like 7-Zip, whose modular stream-and-codec pipeline has remained untouched and forward-compatible across decades of new compression algorithms, `aoni` strictly decouples request decoration (`mod`), execution middleware (`middleware`), transport framing (`transport`/`fingerprint`), and response unmarshaling (`codec`). Any future network protocol (HTTP/4, Post-Quantum TLS 1.4, novel binary RPC encodings, or custom obfuscation layers) must be able to mount into `aoni` as a pluggable pipeline stage without breaking a single line of existing public API contracts.
+Built on a pure-Go zero-allocation stream-and-codec pipeline architecture, `aoni` strictly decouples request decoration (`mod`), execution middleware (`middleware`), transport framing (`transport`/`fingerprint`), and response unmarshaling (`codec`). Any future network protocol (HTTP/4, Post-Quantum TLS 1.4, novel binary RPC encodings, or custom obfuscation layers) can mount seamlessly into `aoni` as a pluggable pipeline stage without breaking existing public API contracts.
 
 ## 2. Initialization & Memory Allocation Style
 

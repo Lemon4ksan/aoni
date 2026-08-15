@@ -11,6 +11,7 @@ import (
 	"go/parser"
 	"go/token"
 	"os"
+	"path/filepath"
 	"reflect"
 	"strings"
 	"unicode"
@@ -38,6 +39,67 @@ func (p *Parser) ParseFile(filePath string) (*ir.RootIR, error) {
 	}
 
 	return p.ParseSource(filePath, data)
+}
+
+// ParsePackage parses all Go source files in the specified directory into a unified RootIR.
+func (p *Parser) ParsePackage(dirPath string) (*ir.RootIR, error) {
+	entries, err := os.ReadDir(dirPath)
+	if err != nil {
+		return nil, fmt.Errorf("aoni/codegen/parser: failed to read dir %q: %w", dirPath, err)
+	}
+
+	root := &ir.RootIR{
+		Imports:  make([]ir.ImportIR, 0),
+		Services: make([]*ir.ServiceIR, 0),
+		Structs:  make([]*ir.StructIR, 0),
+		Tuples:   make([]*ir.TupleIR, 0),
+	}
+
+	seenStructs := make(map[string]bool)
+	seenServices := make(map[string]bool)
+
+	for _, entry := range entries {
+		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".go") ||
+			strings.HasSuffix(entry.Name(), "_test.go") || strings.HasSuffix(entry.Name(), ".gen.go") {
+			continue
+		}
+
+		fullPath := filepath.Join(dirPath, entry.Name())
+
+		data, err := os.ReadFile(fullPath)
+		if err != nil {
+			continue
+		}
+
+		subRoot, err := p.ParseSource(fullPath, data)
+		if err != nil {
+			continue
+		}
+
+		if root.PackageName == "" {
+			root.PackageName = subRoot.PackageName
+		}
+
+		root.Imports = append(root.Imports, subRoot.Imports...)
+
+		for _, s := range subRoot.Services {
+			if !seenServices[s.Name] {
+				seenServices[s.Name] = true
+				root.Services = append(root.Services, s)
+			}
+		}
+
+		for _, st := range subRoot.Structs {
+			if !seenStructs[st.Name] {
+				seenStructs[st.Name] = true
+				root.Structs = append(root.Structs, st)
+			}
+		}
+
+		root.Tuples = append(root.Tuples, subRoot.Tuples...)
+	}
+
+	return root, nil
 }
 
 // ParseSource parses Go source code from bytes.
@@ -160,6 +222,12 @@ func (p *Parser) parseInterface(
 			ApplyMethodDirective(m, d)
 		}
 
+		if m.UnwrapField == "" && svc.DefaultUnwrapField != "" {
+			m.UnwrapField = svc.DefaultUnwrapField
+		} else if m.UnwrapField == "none" || m.UnwrapField == `""` {
+			m.UnwrapField = ""
+		}
+
 		// Parse Method Parameters
 		p.parseMethodParams(root, fileComments, svc, m, methodDirectives, funcType.Params)
 
@@ -184,22 +252,15 @@ func (p *Parser) parseMethodParams(
 		return
 	}
 
-	pathVars := make(map[string]bool)
+	pathVars := make(map[string]string)
 	if m.Path != nil {
 		for _, seg := range m.Path.Segments {
 			if seg.IsVariable {
-				pathVars[seg.VarName] = true
-			}
-		}
-	}
-
-	// Check dynamic headers for variables
-	for _, h := range m.Headers {
-		if h.DynamicTemplate != nil {
-			for _, seg := range h.DynamicTemplate.Segments {
-				if seg.IsVariable {
-					pathVars[seg.VarName] = true
-				}
+				actual := seg.VarName
+				pathVars[actual] = actual
+				pathVars[strings.ToLower(actual)] = actual
+				pathVars[toCasing(actual, ir.CasingSnakeCase)] = actual
+				pathVars[toCasing(actual, ir.CasingFlatCase)] = actual
 			}
 		}
 	}
@@ -383,11 +444,19 @@ func (p *Parser) parseMethodParams(
 			case goType.IsVariadic && strings.Contains(goType.Name, "RequestModifier"):
 				param.Location = ir.LocModifiers
 			default:
+				matchedMethodDirective := false
 				// Check if matching directive was declared on method level
 				if len(paramDirectives) == 0 {
+					snakeParam := toCasing(paramName, ir.CasingSnakeCase)
+
+					flatParam := toCasing(paramName, ir.CasingFlatCase)
 					for _, md := range methodDirectives {
 						if (md.Name == "field" || md.Name == "query" || md.Name == "param" || md.Name == "header") &&
-							(strings.EqualFold(md.Value, paramName) || md.Args["param"] == paramName) {
+							(strings.EqualFold(md.Value, paramName) || strings.EqualFold(md.Value, snakeParam) ||
+								strings.EqualFold(md.Value, flatParam) || md.Args["param"] == paramName ||
+								strings.EqualFold(md.Args["param"], snakeParam)) {
+							matchedMethodDirective = true
+
 							if md.Pipeline != nil {
 								param.Pipeline = md.Pipeline
 							}
@@ -416,7 +485,7 @@ func (p *Parser) parseMethodParams(
 				}
 
 				// Implicit inference if location not explicitly set by directive
-				if len(paramDirectives) == 0 && param.Pipeline == nil {
+				if len(paramDirectives) == 0 && param.Pipeline == nil && !matchedMethodDirective {
 					effectiveCasing := m.FormCasing
 					if effectiveCasing == "" || effectiveCasing == ir.CasingNone {
 						effectiveCasing = svc.DefaultCasing
@@ -425,21 +494,22 @@ func (p *Parser) parseMethodParams(
 					snakeName := toCasing(paramName, ir.CasingSnakeCase)
 					flatName := toCasing(paramName, ir.CasingFlatCase)
 
+					var matchedVar string
+					if v, ok := pathVars[paramName]; ok {
+						matchedVar = v
+					} else if v, ok := pathVars[snakeName]; ok {
+						matchedVar = v
+					} else if v, ok := pathVars[flatName]; ok {
+						matchedVar = v
+					} else if v, ok := pathVars[strings.ToLower(paramName)]; ok {
+						matchedVar = v
+					}
+
 					switch {
-					case pathVars[paramName] || pathVars[strings.ToLower(paramName)] ||
-						pathVars[snakeName] || pathVars[flatName]:
+					case matchedVar != "":
 						// Automatically binds to path template / dynamic header variable!
 						param.Location = ir.LocPath
-						switch {
-						case pathVars[paramName]:
-							param.WireKey = paramName
-						case pathVars[snakeName]:
-							param.WireKey = snakeName
-						case pathVars[flatName]:
-							param.WireKey = flatName
-						case pathVars[strings.ToLower(paramName)]:
-							param.WireKey = strings.ToLower(paramName)
-						}
+						param.WireKey = matchedVar
 
 					case (m.HTTPMethod == "GET" || m.HTTPMethod == "DELETE" || m.HTTPMethod == "HEAD") && isDTOQueryStruct(goType.Name):
 						param.Location = ir.LocQueryStruct
@@ -449,6 +519,14 @@ func (p *Parser) parseMethodParams(
 						param.Formatter = ir.FormatCompiledEncode
 					case m.HTTPMethod == "POST" || m.HTTPMethod == "PUT" || m.HTTPMethod == "PATCH":
 						switch {
+						case m.QueryCasing != "":
+							param.Location = ir.LocQuery
+							if effectiveCasing != "" && effectiveCasing != ir.CasingNone {
+								param.WireKey = toCasing(paramName, effectiveCasing)
+							} else {
+								param.WireKey = toCasing(paramName, ir.CasingSnakeCase)
+							}
+
 						case m.PayloadKind == ir.PayloadForm:
 							param.Location = ir.LocFormFields
 							if effectiveCasing != "" && effectiveCasing != ir.CasingNone {
@@ -475,17 +553,21 @@ func (p *Parser) parseMethodParams(
 					}
 				}
 
-				if param.Location == ir.LocFormFields && param.WireKey == "" &&
-					param.Formatter != ir.FormatCompiledEncode {
-					effectiveCasing := m.FormCasing
+				if (param.Location == ir.LocQuery || param.Location == ir.LocFormFields) &&
+					param.Formatter != ir.FormatCompiledEncode && len(paramDirectives) == 0 {
+					var effectiveCasing ir.CasingStrategy
+					if param.Location == ir.LocQuery {
+						effectiveCasing = m.QueryCasing
+					} else {
+						effectiveCasing = m.FormCasing
+					}
+
 					if effectiveCasing == "" || effectiveCasing == ir.CasingNone {
 						effectiveCasing = svc.DefaultCasing
 					}
 
 					if effectiveCasing != "" && effectiveCasing != ir.CasingNone {
 						param.WireKey = toCasing(paramName, effectiveCasing)
-					} else {
-						param.WireKey = toCasing(paramName, ir.CasingSnakeCase)
 					}
 				}
 			}
@@ -552,10 +634,15 @@ func (p *Parser) parseMethodReturns(m *ir.MethodIR, fields *ast.FieldList) {
 func (p *Parser) parseStruct(root *ir.RootIR, name string, docLines []string, strct *ast.StructType) *ir.StructIR {
 	directives := p.extractDirectives(root, name, docLines)
 	isDTO := false
+	isTuple := false
 	casing := ir.CasingSnakeCase
 	omitEmpty := true
 
 	for _, d := range directives {
+		if d.Name == "aoni:tuple" || d.Name == "tuple" {
+			isTuple = true
+		}
+
 		if d.Name == "aoni:dto" || d.Name == "dto" {
 			isDTO = true
 
@@ -578,7 +665,7 @@ func (p *Parser) parseStruct(root *ir.RootIR, name string, docLines []string, st
 		}
 	}
 
-	if !isDTO {
+	if isTuple {
 		return nil
 	}
 
@@ -588,7 +675,7 @@ func (p *Parser) parseStruct(root *ir.RootIR, name string, docLines []string, st
 		Casing:          casing,
 		OmitEmpty:       omitEmpty,
 		Fields:          make([]*ir.FieldIR, 0, len(strct.Fields.List)),
-		GenValueEncoder: true,
+		GenValueEncoder: isDTO,
 	}
 
 	for _, field := range strct.Fields.List {
@@ -846,6 +933,12 @@ func selectFormatStrategy(t ir.GoTypeIR) ir.FormatStrategy {
 	case "bool":
 		return ir.FormatBoolAppend
 	default:
+		if strings.HasSuffix(name, "ID") || strings.HasSuffix(name, "Code") || strings.HasSuffix(name, "Type") ||
+			strings.HasSuffix(name, "State") || strings.HasSuffix(name, "Status") || strings.HasSuffix(name, "Kind") ||
+			strings.HasSuffix(name, "Mode") || strings.HasSuffix(name, "Flag") || strings.HasSuffix(name, "Flags") {
+			return ir.FormatDirectString
+		}
+
 		if t.IsCustomType {
 			return ir.FormatCustomStringer
 		}
@@ -878,6 +971,13 @@ func isDTOQueryStruct(name string) bool {
 	}
 
 	if strings.HasPrefix(name, "[]") || strings.HasPrefix(name, "map[") {
+		return false
+	}
+
+	if strings.HasSuffix(name, "ID") || strings.HasSuffix(name, "Code") || strings.HasSuffix(name, "Type") ||
+		strings.HasSuffix(name, "State") || strings.HasSuffix(name, "Status") || strings.HasSuffix(name, "Kind") ||
+		strings.HasSuffix(name, "Mode") || strings.HasSuffix(name, "Flag") || strings.HasSuffix(name, "Flags") ||
+		strings.HasSuffix(name, "Action") || strings.HasSuffix(name, "Level") || strings.HasSuffix(name, "Platform") {
 		return false
 	}
 

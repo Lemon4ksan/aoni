@@ -128,9 +128,7 @@ func (s *StdRequest) SetPath(path string) {
 	}
 
 	s.req.URL.Path = path
-	if s.req.URL.RawPath != "" {
-		s.req.URL.RawPath = path
-	}
+	s.req.URL.RawPath = ""
 }
 
 // RawQuery returns the unescaped raw URL query string.

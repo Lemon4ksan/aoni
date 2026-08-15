@@ -197,6 +197,10 @@ func (responseDecoder) DecodeSuccess(
 		br.SetData(target)
 
 		if err := decoder.Decode(resp.Body, br); err != nil {
+			if errors.Is(err, stdio.EOF) {
+				return nil
+			}
+
 			return err
 		}
 

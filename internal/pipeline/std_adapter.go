@@ -71,6 +71,7 @@ func (s *stdRequestAdapter) Path() string {
 func (s *stdRequestAdapter) SetPath(path string) {
 	if s.req.URL != nil {
 		s.req.URL.Path = path
+		s.req.URL.RawPath = ""
 	}
 }
 

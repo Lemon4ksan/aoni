@@ -48,15 +48,12 @@ func validatePathVariables(target string, m *ir.MethodIR, paramNames map[string]
 	var diags []Diagnostic
 
 	for _, seg := range m.Path.Segments {
-		if seg.IsVariable {
-			varName := seg.VarName
-			if !paramNames[varName] && !paramNames[strings.ToLower(varName)] {
-				diags = append(diags, Diagnostic{
-					Severity: SeverityError,
-					Target:   target,
-					Message:  fmt.Sprintf("path variable {%s} does not match any method parameter", varName),
-				})
-			}
+		if seg.IsVariable && !paramNames[seg.VarName] && !paramNames[strings.ToLower(seg.VarName)] {
+			diags = append(diags, Diagnostic{
+				Severity: SeverityError,
+				Target:   target,
+				Message:  fmt.Sprintf("path variable {%s} does not match any method parameter", seg.VarName),
+			})
 		}
 	}
 
@@ -76,10 +73,8 @@ func validateDynamicHeaders(target string, m *ir.MethodIR, paramNames map[string
 				continue
 			}
 
-			varName := seg.VarName
-
-			rootVar := strings.Split(varName, ".")[0]
-			if paramNames[varName] || paramNames[strings.ToLower(varName)] ||
+			rootVar := strings.Split(seg.VarName, ".")[0]
+			if paramNames[seg.VarName] || paramNames[strings.ToLower(seg.VarName)] ||
 				paramNames[rootVar] || paramNames[strings.ToLower(rootVar)] {
 				continue
 			}
@@ -89,7 +84,7 @@ func validateDynamicHeaders(target string, m *ir.MethodIR, paramNames map[string
 				Target:   target,
 				Message: fmt.Sprintf(
 					"dynamic header {%s} variable does not match any method parameter",
-					varName,
+					seg.VarName,
 				),
 			})
 		}
@@ -174,6 +169,7 @@ func validateTupleFields(t *ir.TupleIR) []Diagnostic {
 	return nil
 }
 
+// AllKnownDirectives holds a flattened list of all registered DSL directive names and aliases.
 var AllKnownDirectives = func() []string {
 	var list []string
 	for _, d := range spec.Registry {
@@ -217,16 +213,7 @@ func levenshteinDistance(s1, s2 string) int {
 			ins := d[i][j-1] + 1
 			sub := d[i-1][j-1] + cost
 
-			minVal := del
-			if ins < minVal {
-				minVal = ins
-			}
-
-			if sub < minVal {
-				minVal = sub
-			}
-
-			d[i][j] = minVal
+			d[i][j] = min(sub, min(ins, del))
 		}
 	}
 

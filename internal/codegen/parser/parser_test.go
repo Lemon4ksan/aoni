@@ -217,3 +217,46 @@ type AcceptResponse struct {
 	require.Equal(t, ir.LocFormFields, m2.Params[3].Location)
 	require.Equal(t, "sessionid", m2.Params[3].WireKey)
 }
+
+func TestParser_ServiceLevelUnwrapInheritance(t *testing.T) {
+	src := `
+package test
+
+import (
+	"context"
+	"github.com/lemon4ksan/aoni"
+)
+
+// @aoni:service
+// @unwrap "content"
+type StoreAPI interface {
+	// @get "items"
+	GetItems(ctx context.Context) ([]string, error)
+
+	// @get "raw"
+	// @unwrap none
+	GetRaw(ctx context.Context) (string, error)
+
+	// @get "custom"
+	// @unwrap "result"
+	GetCustom(ctx context.Context) (int, error)
+}
+`
+
+	p := parser.NewParser()
+	root, err := p.ParseSource("storeapi.go", []byte(src))
+	require.NoError(t, err)
+	require.NotNil(t, root)
+
+	require.Len(t, root.Services, 1)
+	svc := root.Services[0]
+	require.Equal(t, "content", svc.DefaultUnwrapField)
+	require.Len(t, svc.Methods, 3)
+
+	// Inherited from service
+	require.Equal(t, "content", svc.Methods[0].UnwrapField)
+	// Explicitly disabled with 'none'
+	require.Equal(t, "", svc.Methods[1].UnwrapField)
+	// Overridden with 'result'
+	require.Equal(t, "result", svc.Methods[2].UnwrapField)
+}

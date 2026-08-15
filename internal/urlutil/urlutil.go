@@ -49,7 +49,7 @@ func init() {
 	}
 }
 
-// Parse parses rawURL string or returns a cached [*url.URL] pointer with zero heap allocations.
+// Parse parses rawURL string or returns a cached [*url.URL] pointer.
 func Parse(rawURL string) (*url.URL, error) {
 	if rawURL == "" {
 		return &url.URL{}, nil
@@ -63,7 +63,8 @@ func Parse(rawURL string) (*url.URL, error) {
 	sh.mu.RUnlock()
 
 	if ok {
-		return u, nil
+		clone := *u
+		return &clone, nil
 	}
 
 	parsed, err := url.Parse(rawURL)
@@ -71,12 +72,14 @@ func Parse(rawURL string) (*url.URL, error) {
 		return nil, err
 	}
 
+	cached := *parsed
+
 	sh.mu.Lock()
 	if len(sh.m) > 512 {
 		clear(sh.m)
 	}
 
-	sh.m[rawURL] = parsed
+	sh.m[rawURL] = &cached
 	sh.mu.Unlock()
 
 	return parsed, nil

@@ -2,8 +2,6 @@
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
-// Command aoni-bench runs an interactive 7-Zip-grade hardware inspection
-// and microsecond performance benchmark of the aoni network engine.
 package main
 
 import (
@@ -34,28 +32,50 @@ import (
 	"github.com/lemon4ksan/aoni/option"
 )
 
-// JSONReport represents structured benchmark results for CI/CD automation.
-type JSONReport struct {
+// BenchmarkReport represents structured benchmark results for CI/CD automation.
+type BenchmarkReport struct {
 	OS                     string  `json:"os"`
 	Arch                   string  `json:"arch"`
 	CPUThreads             int     `json:"cpu_threads"`
 	AVX2Supported          bool    `json:"avx2_supported"`
 	AVX512Supported        bool    `json:"avx512_supported"`
 	WindowsRIOSupported    bool    `json:"windows_rio_supported"`
+	LinuxIOUringSupported  bool    `json:"linux_iouring_supported"`
 	RequestPoolOpsSec      float64 `json:"request_pool_ops_sec"`
 	URLTemplateOpsSec      float64 `json:"url_template_ops_sec"`
 	FastEnginePipelinedRPS float64 `json:"fast_engine_pipelined_rps"`
 	AVX2MemoryMaskMBSec    float64 `json:"avx2_memory_mask_mb_sec"`
 	TLSImpersonateOpsSec   float64 `json:"tls_impersonate_ops_sec"`
 	WSFrameMaskMBSec       float64 `json:"ws_frame_mask_mb_sec"`
-	OSNetworkNetHTTPRPS    float64 `json:"os_network_nethttp_rps"`
+	OSNetworkLoopbackRPS   float64 `json:"os_network_loopback_rps"`
+	SiliconScore           int     `json:"silicon_score"`
 }
 
-func main() {
-	jsonFlag := flag.Bool("json", false, "Output benchmark results in JSON format for CI/CD automation")
-	pprofFlag := flag.Bool("pprof", false, "Generate cpu.pprof and mem.pprof profiling files")
+func runBench(args []string) {
+	fs := flag.NewFlagSet("vortex bench", flag.ExitOnError)
 
-	flag.Parse()
+	var (
+		jsonFlag  = fs.Bool("json", false, "Output benchmark results in JSON format for CI/CD automation")
+		pprofFlag = fs.Bool("pprof", false, "Generate cpu.pprof and mem.pprof profiling files")
+		quickFlag = fs.Bool("quick", false, "Run quick express benchmark")
+		threads   = fs.Int("threads", runtime.NumCPU(), "Number of parallel benchmark workers")
+	)
+
+	fs.Usage = func() {
+		fmt.Fprintf(os.Stderr, "vortex bench — High-Performance Silicon Hardware Inspection & Network Benchmark\n\n")
+		fmt.Fprintf(os.Stderr, "Usage:\n")
+		fmt.Fprintf(os.Stderr, "  vortex bench [flags]\n\n")
+		fmt.Fprintf(os.Stderr, "Flags:\n")
+		fs.PrintDefaults()
+		fmt.Fprintf(os.Stderr, "\nExamples:\n")
+		fmt.Fprintf(os.Stderr, "  vortex bench\n")
+		fmt.Fprintf(os.Stderr, "  vortex bench -quick\n")
+		fmt.Fprintf(os.Stderr, "  vortex bench -json > bench_report.json\n")
+	}
+
+	if err := fs.Parse(args); err != nil {
+		os.Exit(1)
+	}
 
 	if *pprofFlag {
 		cpuFile, err := os.Create("cpu.pprof")
@@ -80,7 +100,7 @@ func main() {
 
 	if !*jsonFlag {
 		fmt.Println("==========================================================================")
-		fmt.Println("                   aoni Hardware Inspection & Benchmark                   ")
+		fmt.Println("             aoni Silicon Hardware Inspection & Benchmark                 ")
 		fmt.Println("==========================================================================")
 		fmt.Printf("OS / Arch            : %s / %s (%d CPU threads)\n", runtime.GOOS, runtime.GOARCH, runtime.NumCPU())
 		fmt.Printf("AVX2 SIMD Hardware   : %t\n", feats.HasAVX2)
@@ -88,11 +108,21 @@ func main() {
 		fmt.Printf("Windows RIO (mswsock): %t\n", sysnet.IsRIOSupported())
 		fmt.Printf("Linux io_uring       : %t\n", runtime.GOOS == "linux")
 		fmt.Println("--------------------------------------------------------------------------")
-		fmt.Println("Running 7-Module Benchmark Suite (Hardware -> Memory -> TLS -> Sockets)")
+		fmt.Println("Running 7-Module Benchmark Suite (Memory -> SIMD -> TLS -> Network Core)")
 		fmt.Println("--------------------------------------------------------------------------")
 	}
 
-	numWorkers := runtime.NumCPU()
+	numWorkers := *threads
+	if numWorkers <= 0 {
+		numWorkers = runtime.NumCPU()
+	}
+
+	scale := 1.0
+	if *quickFlag {
+		scale = 0.2
+	}
+
+	var wg sync.WaitGroup
 
 	// 1. Request Object Pool Lifecycle
 	client := fast.NewClient(
@@ -101,10 +131,12 @@ func main() {
 	)
 	defer client.Close()
 
-	parOps := 10000000
-	opsPerWorker := parOps / numWorkers
+	parOps := int(10000000 * scale)
+	if parOps < 10000 {
+		parOps = 10000
+	}
 
-	var wg sync.WaitGroup
+	opsPerWorker := parOps / numWorkers
 
 	start := time.Now()
 
@@ -122,14 +154,18 @@ func main() {
 	wg.Wait()
 
 	elapsed := time.Since(start)
-
 	poolOpsPerSec := float64(parOps) / elapsed.Seconds()
+
 	if !*jsonFlag {
 		fmt.Printf("[1/7] Request Pool Lifecycle       : %12.0f Ops/sec  (0 B/op, 0 allocs)\n", poolOpsPerSec)
 	}
 
-	// 2. URL Template & Cache Resolution
-	urlOps := 5000000
+	// 2. URL Template & LRU Cache Resolution
+	urlOps := int(5000000 * scale)
+	if urlOps < 10000 {
+		urlOps = 10000
+	}
+
 	start = time.Now()
 
 	for i := 0; i < urlOps; i++ {
@@ -138,13 +174,13 @@ func main() {
 	}
 
 	elapsed = time.Since(start)
-
 	urlOpsPerSec := float64(urlOps) / elapsed.Seconds()
+
 	if !*jsonFlag {
 		fmt.Printf("[2/7] URL Template & LRU Cache     : %12.0f Ops/sec  (Atomic Cache)\n", urlOpsPerSec)
 	}
 
-	// 3. Fast Engine Pipelined Core (In-Memory Engine)
+	// 3. Fast Engine Pipelined In-Memory Core
 	ln := fasthttputil.NewInmemoryListener()
 
 	srv := &fasthttp.Server{
@@ -171,7 +207,11 @@ func main() {
 		return ln.Dial()
 	}
 
-	fastOps := 1000000
+	fastOps := int(1000000 * scale)
+	if fastOps < 10000 {
+		fastOps = 10000
+	}
+
 	fastOpsPerWorker := fastOps / numWorkers
 	ctx := context.Background()
 
@@ -191,16 +231,20 @@ func main() {
 	wg.Wait()
 
 	elapsed = time.Since(start)
-
 	fastEngineRPS := float64(fastOps) / elapsed.Seconds()
+
 	if !*jsonFlag {
-		fmt.Printf("[3/7] Fast Engine Core (Pipelined) : %12.0f RPS      (1.69M+ In-Memory)\n", fastEngineRPS)
+		fmt.Printf("[3/7] Fast Engine Core (Pipelined) : %12.0f RPS      (In-Memory Engine)\n", fastEngineRPS)
 	}
 
-	// 4. AVX2 SIMD Memory Speed
+	// 4. AVX2 SIMD Memory Vector Masking
 	simdPayload := make([]byte, 64*1024)
 	maskKey := uint32(0x12345678)
-	simdIterations := 100000
+
+	simdIterations := int(100000 * scale)
+	if simdIterations < 1000 {
+		simdIterations = 1000
+	}
 
 	simdStart := time.Now()
 
@@ -209,14 +253,18 @@ func main() {
 	}
 
 	simdElapsed := time.Since(simdStart)
-
 	simdMbPerSec := (float64(len(simdPayload)*simdIterations) / (1024 * 1024)) / simdElapsed.Seconds()
+
 	if !*jsonFlag {
-		fmt.Printf("[4/7] AVX2 VPXOR Memory Masker     : %12.2f MB/sec   (256-bit Vector)\n", simdMbPerSec)
+		fmt.Printf("[4/7] SIMD Vector Memory Masker     : %12.2f MB/sec   (256-bit Vector)\n", simdMbPerSec)
 	}
 
 	// 5. TLS Impersonation & Fingerprint Synthesis
-	fpOps := 100000000
+	fpOps := int(50000000 * scale)
+	if fpOps < 10000 {
+		fpOps = 10000
+	}
+
 	start = time.Now()
 
 	for i := 0; i < fpOps; i++ {
@@ -225,15 +273,20 @@ func main() {
 	}
 
 	elapsed = time.Since(start)
-
 	fpOpsPerSec := float64(fpOps) / elapsed.Seconds()
+
 	if !*jsonFlag {
-		fmt.Printf("[5/7] TLS Chrome Stealth Profile   : %12.0f Ops/sec  (uTLS / ECH)\n", fpOpsPerSec)
+		fmt.Printf("[5/7] TLS Stealth Persona Profile  : %12.0f Ops/sec  (uTLS / ECH)\n", fpOpsPerSec)
 	}
 
-	// 6. WebSocket Payload Framing Speed
+	// 6. WebSocket Frame Masking Speed
 	wsPayload := make([]byte, 1024)
-	wsOps := 2000000
+
+	wsOps := int(2000000 * scale)
+	if wsOps < 10000 {
+		wsOps = 10000
+	}
+
 	start = time.Now()
 
 	for i := 0; i < wsOps; i++ {
@@ -241,8 +294,8 @@ func main() {
 	}
 
 	elapsed = time.Since(start)
-
 	wsMbPerSec := (float64(len(wsPayload)*wsOps) / (1024 * 1024)) / elapsed.Seconds()
+
 	if !*jsonFlag {
 		fmt.Printf("[6/7] WebSocket Frame Masking 1KB   : %12.2f MB/sec   (Fast Masking)\n", wsMbPerSec)
 	}
@@ -260,7 +313,10 @@ func main() {
 	)
 	defer osClient.Close()
 
-	netOps := 10000
+	netOps := int(10000 * scale)
+	if netOps < 1000 {
+		netOps = 1000
+	}
 
 	var atomicNetOps atomic.Uint64
 
@@ -290,26 +346,33 @@ func main() {
 	wg.Wait()
 
 	elapsed = time.Since(start)
-
 	osNetRPS := float64(netOps) / elapsed.Seconds()
+
+	// Calculate Silicon Score
+	score := int((poolOpsPerSec/1000000)*100 + (fastEngineRPS/10000)*150 + (simdMbPerSec/1000)*80 + (osNetRPS/1000)*50)
+
 	if !*jsonFlag {
-		fmt.Printf("[7/7] OS Network (net/http.Server) : %12.0f RPS      (127.0.0.1 Loopback)\n", osNetRPS)
+		fmt.Printf("[7/7] OS Network (TCP Loopback)     : %12.0f RPS      (127.0.0.1 Socket)\n", osNetRPS)
+		fmt.Println("==========================================================================")
+		fmt.Printf("⚡ Silicon Score: %d pts\n", score)
 		fmt.Println("==========================================================================")
 	} else {
-		report := JSONReport{
+		report := BenchmarkReport{
 			OS:                     runtime.GOOS,
 			Arch:                   runtime.GOARCH,
 			CPUThreads:             runtime.NumCPU(),
 			AVX2Supported:          cpu.X86.HasAVX2,
 			AVX512Supported:        cpu.X86.HasAVX512F,
 			WindowsRIOSupported:    sysnet.IsRIOSupported(),
+			LinuxIOUringSupported:  runtime.GOOS == "linux",
 			RequestPoolOpsSec:      poolOpsPerSec,
 			URLTemplateOpsSec:      urlOpsPerSec,
 			FastEnginePipelinedRPS: fastEngineRPS,
 			AVX2MemoryMaskMBSec:    simdMbPerSec,
 			TLSImpersonateOpsSec:   fpOpsPerSec,
 			WSFrameMaskMBSec:       wsMbPerSec,
-			OSNetworkNetHTTPRPS:    osNetRPS,
+			OSNetworkLoopbackRPS:   osNetRPS,
+			SiliconScore:           score,
 		}
 		data, _ := json.MarshalIndent(report, "", "  ")
 		fmt.Println(string(data))

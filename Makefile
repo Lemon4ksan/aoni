@@ -17,15 +17,19 @@ race: ## Run unit tests with race detector enabled
 	@printf "$(CYAN)Running tests with race detector...$(RESET)\n"
 	go test -v -race -timeout 60s $(PKG)
 
+bench: ## Run silicon hardware inspection and microsecond benchmark suite
+	@printf "$(CYAN)Running aoni silicon benchmark...$(RESET)\n"
+	go run ./cmd/vortex bench
+
 cover: ## Calculate and print exact core library coverage report
 	@printf "$(CYAN)Generating exact coverage report...$(RESET)\n"
 	go test -coverpkg=$(COVER_PKG) -coverprofile=$(COVER_OUT) ./...
-	go run ./cmd/coverage -file=$(COVER_OUT)
+	go run ./cmd/vortex cover -file=$(COVER_OUT)
 
 cover-clean: ## Generate clean coverage report and run deduplicated coverage analysis tool
 	@printf "$(CYAN)Generating clean coverage report...$(RESET)\n"
 	go test -coverpkg=$(COVER_PKG) -coverprofile=$(COVER_OUT) ./...
-	go run ./cmd/coverage -file=$(COVER_OUT)
+	go run ./cmd/vortex cover -file=$(COVER_OUT)
 
 cover-html: cover ## Generate coverage report and open interactive HTML in browser
 	@printf "$(CYAN)Opening coverage report in browser...$(RESET)\n"

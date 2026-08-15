@@ -20,7 +20,7 @@ func TestParse(t *testing.T) {
 
 	u2, err := urlutil.Parse("https://api.example.com/v1/resource?query=1")
 	require.NoError(t, err)
-	assert.Same(t, u1, u2)
+	assert.Equal(t, u1, u2)
 }
 
 func TestReplaceVar(t *testing.T) {

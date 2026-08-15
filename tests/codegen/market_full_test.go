@@ -406,7 +406,7 @@ type GiftDetailsResponse struct {
 		"func (t *GraphPoint) UnmarshalJSON(data []byte) error",
 		"func (t *PriceHistoryPoint) UnmarshalJSON(data []byte) error",
 		"allMods := stackMods[:0]",
-		"formBytes := opts.AppendFormData(formBuf[:0])",
+		"formBytes = opts.AppendFormData(formBytes)",
 		"qBytes = opts.AppendQuery(qBytes)",
 		"allMods = append(allMods, mod.WithBodyBytes(formBytes))",
 	}

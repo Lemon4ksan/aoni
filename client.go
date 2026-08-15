@@ -584,7 +584,8 @@ func (c *Client) ensureUserAgent() {
 // resolveURL resolves relative path against client BaseURL or parses absolute URL strings.
 func (c *Client) resolveURL(path string) (*url.URL, error) {
 	if (path == "" || path == "/") && c.prepared.BaseURL != nil {
-		return c.prepared.BaseURL, nil
+		clone := *c.prepared.BaseURL
+		return &clone, nil
 	}
 
 	if len(path) > 0 && path[0] == '/' && c.prepared.BaseURL != nil {

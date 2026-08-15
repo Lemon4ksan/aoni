@@ -142,6 +142,8 @@ func ApplyServiceDirective(s *ir.ServiceIR, d *Directive) {
 
 	case "envelope":
 		s.Envelope = parseEnvelopeDirective(d)
+	case "unwrap":
+		s.DefaultUnwrapField = d.Value
 	case "auth":
 		s.AuthStrategy = parseAuthDirective(d)
 	case "ssh":
@@ -339,17 +341,25 @@ func ApplyMethodDirective(m *ir.MethodIR, d *Directive) {
 		m.SignHMAC = parseSignDirective(d)
 	case "multipart":
 		m.PayloadKind = ir.PayloadMultipart
+	case "query":
+		if c, ok := d.Args["casing"]; ok {
+			m.QueryCasing = parseCasingStrategy(c)
+		}
 	case "form":
 		m.PayloadKind = ir.PayloadForm
 		if c, ok := d.Args["casing"]; ok {
 			m.FormCasing = parseCasingStrategy(c)
 		}
 	case "casing":
-		if d.Value != "" {
-			m.FormCasing = parseCasingStrategy(d.Value)
-		} else if c, ok := d.Args["style"]; ok {
-			m.FormCasing = parseCasingStrategy(c)
+		strategy := parseCasingStrategy(d.Value)
+		if strategy == "" {
+			if c, ok := d.Args["style"]; ok {
+				strategy = parseCasingStrategy(c)
+			}
 		}
+
+		m.FormCasing = strategy
+		m.QueryCasing = strategy
 
 	case "json":
 		m.PayloadKind = ir.PayloadJSON

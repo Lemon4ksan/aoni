@@ -63,6 +63,7 @@ func ParseDirective(line string) *Directive {
 
 	// Check if param directive contains '=' for pipeline expression: e.g. @field "Privacy" = json | url_escape
 	if (d.Name == "field" || d.Name == "query" || d.Name == "param" || d.Name == "header" || d.Name == "part") &&
+		(strings.HasPrefix(rest, "\"") || strings.HasPrefix(rest, "'") || strings.HasPrefix(rest, "`")) &&
 		strings.Contains(rest, "=") {
 		eqIdx := strings.Index(rest, "=")
 		left := strings.TrimSpace(rest[:eqIdx])

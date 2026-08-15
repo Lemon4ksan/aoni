@@ -9,6 +9,7 @@ package coalesce
 import (
 	"bytes"
 	"context"
+	"errors"
 	"io"
 	"net/http"
 	"sync"
@@ -67,6 +68,10 @@ func (g *Group) Do(ctx context.Context, key string, fn func() (*http.Response, e
 				return nil, c.err
 			}
 
+			if c.val == nil {
+				return nil, errors.New("aoni/coalesce: nil response from coalesced call")
+			}
+
 			return c.val.toHTTPResponse(), nil
 		}
 	}
@@ -76,15 +81,16 @@ func (g *Group) Do(ctx context.Context, key string, fn func() (*http.Response, e
 	g.m[key] = c
 	g.mu.Unlock()
 
-	resp, err := fn()
-	if err != nil {
-		c.err = err
-
+	defer func() {
 		g.mu.Lock()
 		delete(g.m, key)
 		g.mu.Unlock()
 		c.wg.Done()
+	}()
 
+	resp, err := fn()
+	if err != nil {
+		c.err = err
 		return nil, err
 	}
 
@@ -94,12 +100,6 @@ func (g *Group) Do(ctx context.Context, key string, fn func() (*http.Response, e
 
 	if readErr != nil {
 		c.err = readErr
-
-		g.mu.Lock()
-		delete(g.m, key)
-		g.mu.Unlock()
-		c.wg.Done()
-
 		return nil, readErr
 	}
 
@@ -111,15 +111,14 @@ func (g *Group) Do(ctx context.Context, key string, fn func() (*http.Response, e
 		body:       bodyBytes,
 	}
 
-	g.mu.Lock()
-	delete(g.m, key)
-	g.mu.Unlock()
-	c.wg.Done()
-
 	return c.val.toHTTPResponse(), nil
 }
 
 func (cr *cachedResponse) toHTTPResponse() *http.Response {
+	if cr == nil {
+		return nil
+	}
+
 	return &http.Response{
 		StatusCode:    cr.statusCode,
 		Status:        cr.status,

@@ -74,7 +74,7 @@ func (e *Emitter) Emit(root *ir.RootIR) ([]byte, error) {
 func (e *Emitter) emitImports(buf *bytes.Buffer, root *ir.RootIR, bodyCode string) {
 	buf.WriteString("import (\n")
 
-	stdList := collectStdImports(root)
+	stdList := collectStdImports(root, bodyCode)
 	for _, pkg := range stdList {
 		fmt.Fprintf(buf, "\t\"%s\"\n", pkg)
 	}
@@ -254,7 +254,7 @@ func (e *Emitter) emitImports(buf *bytes.Buffer, root *ir.RootIR, bodyCode strin
 	buf.WriteString(")\n\n")
 }
 
-func collectStdImports(root *ir.RootIR) []string {
+func collectStdImports(root *ir.RootIR, bodyCode string) []string {
 	needed := make(map[string]bool)
 
 	hasContext := false
@@ -461,6 +461,31 @@ func collectStdImports(root *ir.RootIR) []string {
 		}
 	}
 
+	qualifiers := map[string]string{
+		"bytes":          "bytes.",
+		"context":        "context.",
+		"encoding/json":  "json.",
+		"errors":         "errors.",
+		"fmt":            "fmt.",
+		"io":             "io.",
+		"mime/multipart": "multipart.",
+		"net/http":       "http.",
+		"net/textproto":  "textproto.",
+		"net/url":        "url.",
+		"os":             "os.",
+		"regexp":         "regexp.",
+		"strconv":        "strconv.",
+		"sync":           "sync.",
+		"sync/atomic":    "atomic.",
+		"time":           "time.",
+	}
+
+	for pkg, qual := range qualifiers {
+		if strings.Contains(bodyCode, qual) {
+			needed[pkg] = true
+		}
+	}
+
 	order := []string{
 		"bytes", "context", "encoding/json", "errors", "fmt", "io",
 		"mime/multipart", "net/http", "net/textproto", "net/url", "os", "regexp",
@@ -470,11 +495,37 @@ func collectStdImports(root *ir.RootIR) []string {
 	var res []string
 	for _, pkg := range order {
 		if needed[pkg] {
+			if q, ok := qualifiers[pkg]; ok && !strings.Contains(bodyCode, q) {
+				continue
+			}
+
 			res = append(res, pkg)
 		}
 	}
 
 	return res
+}
+
+func zeroValueOf(ret *ir.ReturnIR) string {
+	if ret == nil || ret.IsVoid {
+		return ""
+	}
+
+	t := ret.SuccessType.Name
+	switch {
+	case strings.HasPrefix(t, "*") || strings.HasPrefix(t, "[]") || strings.HasPrefix(t, "map[") || t == "any" || t == "interface{}":
+		return "nil"
+	case t == "string":
+		return `""`
+	case t == "bool":
+		return "false"
+	case t == "int", t == "int8", t == "int16", t == "int32", t == "int64",
+		t == "uint", t == "uint8", t == "uint16", t == "uint32", t == "uint64", t == "uintptr",
+		t == "float32", t == "float64", t == "byte", t == "rune":
+		return "0"
+	default:
+		return t + "{}"
+	}
 }
 
 func isCompiledDTO(root *ir.RootIR, typeName string) bool {
@@ -598,11 +649,7 @@ func (e *Emitter) emitService(buf *bytes.Buffer, root *ir.RootIR, svc *ir.Servic
 	buf.WriteString("}\n\n")
 
 	// 2. Factory Constructor
-	constructorName := "New"
-	if svc.Name != "Client" && svc.Name != "API" {
-		constructorName = "New" + svc.Name
-	}
-
+	constructorName := "New" + svc.Name
 	mustConstructorName := "Must" + constructorName
 
 	isStrict := svc.Engine == ir.EngineRequired || svc.RequesterType != ""
@@ -716,6 +763,10 @@ func (e *Emitter) emitService(buf *bytes.Buffer, root *ir.RootIR, svc *ir.Servic
 		buf.WriteString("\tif err != nil {\n\t\tpanic(err)\n\t}\n")
 		buf.WriteString("\treturn api\n}\n\n")
 
+		// Underlying requester getter
+		fmt.Fprintf(buf, "// R returns the underlying request.Requester used by the client.\n")
+		fmt.Fprintf(buf, "func (c *%s) R() request.Requester {\n\treturn c.r\n}\n\n", clientStructName)
+
 		// Methods
 		for _, m := range svc.Methods {
 			e.emitMethod(buf, root, svc, clientStructName, m)
@@ -724,13 +775,9 @@ func (e *Emitter) emitService(buf *bytes.Buffer, root *ir.RootIR, svc *ir.Servic
 		return
 	}
 
-	fmt.Fprintf(
-		buf,
-		"// %s creates a new %s client instance with preconfigured execution pipelines.\n",
-		constructorName,
-		svc.Name,
-	)
-	fmt.Fprintf(buf, "func %s(doer any, opts ...aoni.ClientOption) %s {\n", constructorName, svc.Name)
+	internalConstructorName := "new" + svc.Name
+
+	fmt.Fprintf(buf, "func %s(doer any, opts ...aoni.ClientOption) *%s {\n", internalConstructorName, clientStructName)
 	buf.WriteString("\tif doer == nil {\n")
 
 	switch svc.Engine {
@@ -743,16 +790,6 @@ func (e *Emitter) emitService(buf *bytes.Buffer, root *ir.RootIR, svc *ir.Servic
 	}
 
 	buf.WriteString("\t}\n\n")
-
-	// If preconfigured requester is passed without new options, reuse directly
-	buf.WriteString("\tif req, ok := doer.(request.Requester); ok && len(opts) == 0 {\n")
-	fmt.Fprintf(buf, "\t\treturn &%s{\n", clientStructName)
-
-	for _, sub := range svc.SubRequesters {
-		fmt.Fprintf(buf, "\t\t\t%s: req,\n", sub.FieldName)
-	}
-
-	buf.WriteString("\t\t}\n\t}\n\n")
 
 	// Base options
 	buf.WriteString("\tvar baseOpts []aoni.ClientOption\n")
@@ -786,7 +823,17 @@ func (e *Emitter) emitService(buf *bytes.Buffer, root *ir.RootIR, svc *ir.Servic
 		svc.BaseURL,
 	)
 	buf.WriteString("\t} else if req, ok := doer.(request.Requester); ok {\n")
-	buf.WriteString("\t\ttargetReq = req\n")
+	fmt.Fprintf(
+		buf,
+		"\t\ttargetReq = request.AsRequester(aoni.Configure(req, append([]aoni.ClientOption{option.WithBaseURL(%q)}, baseOpts...)...))\n",
+		svc.BaseURL,
+	)
+	buf.WriteString("\t} else if rd, ok := doer.(interface{ Rest() request.Requester }); ok && rd.Rest() != nil {\n")
+	buf.WriteString("\t\ttargetReq = rd.Rest()\n")
+	buf.WriteString(
+		"\t} else if rd, ok := doer.(interface{ Requester() request.Requester }); ok && rd.Requester() != nil {\n",
+	)
+	buf.WriteString("\t\ttargetReq = rd.Requester()\n")
 	buf.WriteString("\t} else {\n")
 	fmt.Fprintf(
 		buf,
@@ -817,6 +864,33 @@ func (e *Emitter) emitService(buf *bytes.Buffer, root *ir.RootIR, svc *ir.Servic
 	}
 
 	buf.WriteString("\t}\n}\n\n")
+
+	// Public constructor
+	fmt.Fprintf(
+		buf,
+		"// %s creates a new %s client instance with preconfigured execution pipelines.\n",
+		constructorName,
+		svc.Name,
+	)
+	fmt.Fprintf(buf, "func %s(doer any, opts ...aoni.ClientOption) %s {\n", constructorName, svc.Name)
+	fmt.Fprintf(buf, "\treturn %s(doer, opts...)\n}\n\n", internalConstructorName)
+
+	if svc.Name == "API" || svc.Name == "Client" {
+		aliasName := "New"
+		fmt.Fprintf(
+			buf,
+			"// %s creates a new %s client instance (alias for %s).\n",
+			aliasName,
+			svc.Name,
+			constructorName,
+		)
+		fmt.Fprintf(buf, "func %s(doer any, opts ...aoni.ClientOption) %s {\n", aliasName, svc.Name)
+		fmt.Fprintf(buf, "\treturn %s(doer, opts...)\n}\n\n", internalConstructorName)
+	}
+
+	// Underlying requester getter
+	fmt.Fprintf(buf, "// R returns the underlying request.Requester used by the client.\n")
+	fmt.Fprintf(buf, "func (c *%s) R() request.Requester {\n\treturn c.r\n}\n\n", clientStructName)
 
 	// 3. Methods
 	for _, m := range svc.Methods {
@@ -1331,6 +1405,11 @@ func (e *Emitter) emitFormBuffer(buf *bytes.Buffer, m *ir.MethodIR, params []*ir
 	buf.WriteString("\tformBytes := formBuf[:0]\n")
 
 	for i, p := range params {
+		if p.Formatter == ir.FormatCompiledEncode && p.Pipeline == nil {
+			fmt.Fprintf(buf, "\tformBytes = %s.AppendFormData(formBytes)\n", p.GoName)
+			continue
+		}
+
 		prefix := p.WireKey + "="
 		if i > 0 {
 			prefix = fmt.Sprintf("&%s=", p.WireKey)
@@ -1495,6 +1574,8 @@ func (e *Emitter) emitExecution(buf *bytes.Buffer, m *ir.MethodIR, targetReq, ra
 			callArgs = fmt.Sprintf("ctx, %s, %q, %s", targetReq, rawPath, bodyArg)
 		}
 
+		isPointer := strings.HasPrefix(m.Return.SuccessType.Name, "*")
+
 		switch {
 		case m.Return.IsVoid:
 			fmt.Fprintf(buf, "\t_, err := %s[%s](%s, allMods...)\n", m.CallFunc, genericType, callArgs)
@@ -1508,7 +1589,7 @@ func (e *Emitter) emitExecution(buf *bytes.Buffer, m *ir.MethodIR, targetReq, ra
 			buf.WriteString("\tif err != nil {\n\t\treturn nil, err\n\t}\n")
 			e.emitChecks(buf, m)
 
-			if m.Return.SuccessType.IsPointer {
+			if isPointer {
 				buf.WriteString("\treturn resp, nil\n")
 			} else {
 				buf.WriteString("\treturn *resp, nil\n")
@@ -1517,6 +1598,9 @@ func (e *Emitter) emitExecution(buf *bytes.Buffer, m *ir.MethodIR, targetReq, ra
 
 		return
 	}
+
+	isPointer := strings.HasPrefix(m.Return.SuccessType.Name, "*")
+	zeroVal := zeroValueOf(m.Return)
 
 	switch methodVerb {
 	case "GET":
@@ -1549,10 +1633,10 @@ func (e *Emitter) emitExecution(buf *bytes.Buffer, m *ir.MethodIR, targetReq, ra
 				targetReq,
 				rawPath,
 			)
-			buf.WriteString("\tif err != nil {\n\t\treturn nil, err\n\t}\n")
+			fmt.Fprintf(buf, "\tif err != nil {\n\t\treturn %s, err\n\t}\n", zeroVal)
 			e.emitChecks(buf, m)
 
-			if m.Return.SuccessType.IsPointer {
+			if isPointer {
 				buf.WriteString("\treturn resp, nil\n")
 			} else {
 				buf.WriteString("\treturn *resp, nil\n")
@@ -1579,10 +1663,10 @@ func (e *Emitter) emitExecution(buf *bytes.Buffer, m *ir.MethodIR, targetReq, ra
 				rawPath,
 				bodyArg,
 			)
-			buf.WriteString("\tif err != nil {\n\t\treturn nil, err\n\t}\n")
+			fmt.Fprintf(buf, "\tif err != nil {\n\t\treturn %s, err\n\t}\n", zeroVal)
 			e.emitChecks(buf, m)
 
-			if m.Return.SuccessType.IsPointer {
+			if isPointer {
 				buf.WriteString("\treturn resp, nil\n")
 			} else {
 				buf.WriteString("\treturn *resp, nil\n")
@@ -1590,56 +1674,93 @@ func (e *Emitter) emitExecution(buf *bytes.Buffer, m *ir.MethodIR, targetReq, ra
 		}
 
 	case "PUT":
-		fmt.Fprintf(
-			buf,
-			"\tresp, err := request.PutTo[%s](ctx, %s, %q, %s, allMods...)\n",
-			genericType,
-			targetReq,
-			rawPath,
-			bodyArg,
-		)
-
 		if m.Return.IsVoid {
+			fmt.Fprintf(
+				buf,
+				"\t_, err := request.PutTo[%s](ctx, %s, %q, %s, allMods...)\n",
+				genericType,
+				targetReq,
+				rawPath,
+				bodyArg,
+			)
 			buf.WriteString("\treturn err\n")
 		} else {
-			buf.WriteString("\tif err != nil {\n\t\treturn nil, err\n\t}\n")
+			fmt.Fprintf(
+				buf,
+				"\tresp, err := request.PutTo[%s](ctx, %s, %q, %s, allMods...)\n",
+				genericType,
+				targetReq,
+				rawPath,
+				bodyArg,
+			)
+			fmt.Fprintf(buf, "\tif err != nil {\n\t\treturn %s, err\n\t}\n", zeroVal)
 			e.emitChecks(buf, m)
-			buf.WriteString("\treturn resp, nil\n")
+
+			if isPointer {
+				buf.WriteString("\treturn resp, nil\n")
+			} else {
+				buf.WriteString("\treturn *resp, nil\n")
+			}
 		}
 
 	case "DELETE":
-		fmt.Fprintf(
-			buf,
-			"\tresp, err := request.DeleteTo[%s](ctx, %s, %q, allMods...)\n",
-			genericType,
-			targetReq,
-			rawPath,
-		)
-
 		if m.Return.IsVoid {
+			fmt.Fprintf(
+				buf,
+				"\t_, err := request.DeleteTo[%s](ctx, %s, %q, %s, allMods...)\n",
+				genericType,
+				targetReq,
+				rawPath,
+				bodyArg,
+			)
 			buf.WriteString("\treturn err\n")
 		} else {
-			buf.WriteString("\tif err != nil {\n\t\treturn nil, err\n\t}\n")
+			fmt.Fprintf(
+				buf,
+				"\tresp, err := request.DeleteTo[%s](ctx, %s, %q, %s, allMods...)\n",
+				genericType,
+				targetReq,
+				rawPath,
+				bodyArg,
+			)
+			fmt.Fprintf(buf, "\tif err != nil {\n\t\treturn %s, err\n\t}\n", zeroVal)
 			e.emitChecks(buf, m)
-			buf.WriteString("\treturn resp, nil\n")
+
+			if isPointer {
+				buf.WriteString("\treturn resp, nil\n")
+			} else {
+				buf.WriteString("\treturn *resp, nil\n")
+			}
 		}
 
 	case "PATCH":
-		fmt.Fprintf(
-			buf,
-			"\tresp, err := request.PatchTo[%s](ctx, %s, %q, %s, allMods...)\n",
-			genericType,
-			targetReq,
-			rawPath,
-			bodyArg,
-		)
-
 		if m.Return.IsVoid {
+			fmt.Fprintf(
+				buf,
+				"\t_, err := request.PatchTo[%s](ctx, %s, %q, %s, allMods...)\n",
+				genericType,
+				targetReq,
+				rawPath,
+				bodyArg,
+			)
 			buf.WriteString("\treturn err\n")
 		} else {
-			buf.WriteString("\tif err != nil {\n\t\treturn nil, err\n\t}\n")
+			fmt.Fprintf(
+				buf,
+				"\tresp, err := request.PatchTo[%s](ctx, %s, %q, %s, allMods...)\n",
+				genericType,
+				targetReq,
+				rawPath,
+				bodyArg,
+			)
+			fmt.Fprintf(buf, "\tif err != nil {\n\t\treturn %s, err\n\t}\n", zeroVal)
 			e.emitChecks(buf, m)
-			buf.WriteString("\treturn resp, nil\n")
+
+			if isPointer {
+				buf.WriteString("\treturn resp, nil\n")
+			} else {
+				buf.WriteString("\treturn *resp, nil\n")
+			}
 		}
 	}
 }
@@ -1822,12 +1943,19 @@ func (e *Emitter) emitEnvelopeUnwrap(
 		fmt.Fprintf(buf, "\tresp, err := request.GetTo[envelope](ctx, %s, %q, allMods...)\n", targetReq, rawPath)
 	}
 
-	buf.WriteString("\tif err != nil {\n\t\treturn nil, err\n\t}\n")
-	buf.WriteString("\tif !resp.Success && resp.ErrorMsg != \"\" {\n\t\treturn nil, errors.New(resp.ErrorMsg)\n\t}\n")
+	zeroVal := zeroValueOf(m.Return)
+	fmt.Fprintf(buf, "\tif err != nil {\n\t\treturn %s, err\n\t}\n", zeroVal)
+	fmt.Fprintf(
+		buf,
+		"\tif !resp.Success && resp.ErrorMsg != \"\" {\n\t\treturn %s, errors.New(resp.ErrorMsg)\n\t}\n",
+		zeroVal,
+	)
 	fmt.Fprintf(buf, "\treturn resp.%s, nil\n", fieldName)
 }
 
 func (e *Emitter) emitChecks(buf *bytes.Buffer, m *ir.MethodIR) {
+	zeroVal := zeroValueOf(m.Return)
+
 	for _, chk := range m.Checks {
 		fieldGoName := toPascalCase(chk.Field)
 
@@ -1844,7 +1972,7 @@ func (e *Emitter) emitChecks(buf *bytes.Buffer, m *ir.MethodIR) {
 		}
 
 		fmt.Fprintf(buf, "\tif %s {\n", cond)
-		fmt.Fprintf(buf, "\t\treturn nil, errors.New(%q)\n", chk.ErrorMsg)
+		fmt.Fprintf(buf, "\t\treturn %s, errors.New(%q)\n", zeroVal, chk.ErrorMsg)
 		buf.WriteString("\t}\n")
 	}
 }
@@ -1930,6 +2058,13 @@ func (e *Emitter) emitStruct(buf *bytes.Buffer, s *ir.StructIR) {
 				fmt.Fprintf(buf, "\t\tdst = append(dst, fmt.Sprint(r.%s)...)\n", f.GoName)
 				buf.WriteString("\t}\n")
 
+			case "float32", "float64":
+				fmt.Fprintf(buf, "\tif r.%s != 0 {\n", f.GoName)
+				buf.WriteString("\t\tif len(dst) > 0 { dst = append(dst, '&') }\n")
+				fmt.Fprintf(buf, "\t\tdst = append(dst, %q...)\n", f.WireName+"=")
+				fmt.Fprintf(buf, "\t\tdst = strconv.AppendFloat(dst, float64(r.%s), 'f', -1, 64)\n", f.GoName)
+				buf.WriteString("\t}\n")
+
 			case "values.Int64String", "values.Uint64String", "values.Float64String", "values.BoolInt":
 				fmt.Fprintf(buf, "\tif r.%s != 0 {\n", f.GoName)
 				buf.WriteString("\t\tif len(dst) > 0 { dst = append(dst, '&') }\n")
@@ -1942,11 +2077,19 @@ func (e *Emitter) emitStruct(buf *bytes.Buffer, s *ir.StructIR) {
 					continue
 				}
 
-				fmt.Fprintf(buf, "\tif r.%s != 0 {\n", f.GoName)
-				buf.WriteString("\t\tif len(dst) > 0 { dst = append(dst, '&') }\n")
-				fmt.Fprintf(buf, "\t\tdst = append(dst, %q...)\n", f.WireName+"=")
-				fmt.Fprintf(buf, "\t\tdst = strconv.AppendInt(dst, int64(r.%s), 10)\n", f.GoName)
-				buf.WriteString("\t}\n")
+				if f.Type.IsPointer || strings.HasPrefix(f.Type.Name, "*") {
+					fmt.Fprintf(buf, "\tif r.%s != nil {\n", f.GoName)
+					buf.WriteString("\t\tif len(dst) > 0 { dst = append(dst, '&') }\n")
+					fmt.Fprintf(buf, "\t\tdst = append(dst, %q...)\n", f.WireName+"=")
+					fmt.Fprintf(buf, "\t\tdst = append(dst, fmt.Sprint(r.%s)...)\n", f.GoName)
+					buf.WriteString("\t}\n")
+				} else {
+					fmt.Fprintf(buf, "\tif strVal := fmt.Sprint(r.%s); strVal != \"\" && strVal != \"0\" {\n", f.GoName)
+					buf.WriteString("\t\tif len(dst) > 0 { dst = append(dst, '&') }\n")
+					fmt.Fprintf(buf, "\t\tdst = append(dst, %q...)\n", f.WireName+"=")
+					fmt.Fprintf(buf, "\t\tdst = append(dst, url.QueryEscape(strVal)...)\n")
+					buf.WriteString("\t}\n")
+				}
 			}
 		}
 
@@ -1975,6 +2118,16 @@ func (e *Emitter) emitStruct(buf *bytes.Buffer, s *ir.StructIR) {
 				fmt.Fprintf(buf, "\tif r.%s != 0 {\n", f.GoName)
 				fmt.Fprintf(buf, "\t\tvals.Set(%q, strconv.FormatUint(uint64(r.%s), 10))\n", f.WireName, f.GoName)
 				buf.WriteString("\t}\n")
+			case "float32", "float64":
+				fmt.Fprintf(buf, "\tif r.%s != 0 {\n", f.GoName)
+				fmt.Fprintf(
+					buf,
+					"\t\tvals.Set(%q, strconv.FormatFloat(float64(r.%s), 'f', -1, 64))\n",
+					f.WireName,
+					f.GoName,
+				)
+				buf.WriteString("\t}\n")
+
 			case "bool":
 				fmt.Fprintf(buf, "\tif r.%s {\n", f.GoName)
 				fmt.Fprintf(buf, "\t\tvals.Set(%q, \"true\")\n", f.WireName)
@@ -2000,9 +2153,15 @@ func (e *Emitter) emitStruct(buf *bytes.Buffer, s *ir.StructIR) {
 					continue
 				}
 
-				fmt.Fprintf(buf, "\tif r.%s != 0 {\n", f.GoName)
-				fmt.Fprintf(buf, "\t\tvals.Set(%q, strconv.FormatInt(int64(r.%s), 10))\n", f.WireName, f.GoName)
-				buf.WriteString("\t}\n")
+				if f.Type.IsPointer || strings.HasPrefix(f.Type.Name, "*") {
+					fmt.Fprintf(buf, "\tif r.%s != nil {\n", f.GoName)
+					fmt.Fprintf(buf, "\t\tvals.Set(%q, fmt.Sprint(r.%s))\n", f.WireName, f.GoName)
+					buf.WriteString("\t}\n")
+				} else {
+					fmt.Fprintf(buf, "\tif strVal := fmt.Sprint(r.%s); strVal != \"\" && strVal != \"0\" {\n", f.GoName)
+					fmt.Fprintf(buf, "\t\tvals.Set(%q, strVal)\n", f.WireName)
+					buf.WriteString("\t}\n")
+				}
 			}
 		}
 

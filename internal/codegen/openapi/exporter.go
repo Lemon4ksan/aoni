@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"strings"
+	"unicode"
 
 	"github.com/getkin/kin-openapi/openapi3"
 	"gopkg.in/yaml.v3"
@@ -17,6 +18,7 @@ import (
 
 // ExportConfig controls OpenAPI 3.1 specification generation from aoni IR.
 type ExportConfig struct {
+	ServiceName string
 	Title       string
 	Version     string
 	Description string
@@ -30,10 +32,24 @@ func ExportOpenAPI(root *ir.RootIR, cfg ExportConfig) ([]byte, error) {
 		return nil, errors.New("root IR cannot be nil")
 	}
 
+	services := root.Services
+	if cfg.ServiceName != "" {
+		var filtered []*ir.ServiceIR
+		for _, s := range root.Services {
+			if strings.EqualFold(s.Name, cfg.ServiceName) {
+				filtered = append(filtered, s)
+			}
+		}
+
+		if len(filtered) > 0 {
+			services = filtered
+		}
+	}
+
 	title := cfg.Title
 	if title == "" {
-		if len(root.Services) > 0 && root.Services[0].Name != "" {
-			title = root.Services[0].Name + " API"
+		if len(services) > 0 && services[0].Name != "" {
+			title = services[0].Name + " API"
 		} else {
 			title = root.PackageName + " API"
 		}
@@ -59,8 +75,8 @@ func ExportOpenAPI(root *ir.RootIR, cfg ExportConfig) ([]byte, error) {
 
 	// Servers
 	baseURL := cfg.BaseURL
-	if baseURL == "" && len(root.Services) > 0 {
-		baseURL = root.Services[0].BaseURL
+	if baseURL == "" && len(services) > 0 {
+		baseURL = services[0].BaseURL
 	}
 
 	if baseURL != "" {
@@ -71,10 +87,39 @@ func ExportOpenAPI(root *ir.RootIR, cfg ExportConfig) ([]byte, error) {
 	}
 
 	// Schemas / Models
+	validStructs := make(map[string]bool)
 	for _, s := range root.Structs {
+		if !unicode.IsUpper(rune(s.Name[0])) {
+			continue
+		}
+
+		isInternal := false
+		for _, f := range s.Fields {
+			if strings.Contains(f.Type.Name, "sync.") || strings.Contains(f.Type.Name, "chan ") ||
+				f.Type.Name == "bus.Bus" || f.Type.Name == "log.Logger" || f.Type.Name == "aoni.WebSocketDialer" {
+				isInternal = true
+				break
+			}
+		}
+
+		if !isInternal {
+			validStructs[s.Name] = true
+		}
+	}
+
+	// Add standard Error and RateLimit schemas
+	validStructs["ErrorResponse"] = true
+	validStructs["RateLimitError"] = true
+
+	for sName := range validStructs {
+		s := findStructByName(root.Structs, sName)
+		if s == nil {
+			continue
+		}
+
 		schema := openapi3.NewObjectSchema()
-		if len(s.Doc) > 0 {
-			schema.Description = strings.Join(s.Doc, " ")
+		if desc := cleanDocSummary(s.Doc); desc != "" {
+			schema.Description = desc
 		}
 
 		for _, f := range s.Fields {
@@ -85,15 +130,29 @@ func ExportOpenAPI(root *ir.RootIR, cfg ExportConfig) ([]byte, error) {
 
 			wireKey = strings.TrimSuffix(wireKey, ",omitempty")
 
-			fSchema := mapGoTypeToSchema(f.Type.Name)
+			fSchema := mapGoTypeToSchema(f.Type.Name, validStructs)
 			schema.WithPropertyRef(wireKey, fSchema)
 		}
 
 		doc.Components.Schemas[s.Name] = &openapi3.SchemaRef{Value: schema}
 	}
 
+	if _, ok := doc.Components.Schemas["ErrorResponse"]; !ok {
+		errSchema := openapi3.NewObjectSchema()
+		errSchema.WithProperty("error", openapi3.NewStringSchema())
+		errSchema.WithProperty("message", openapi3.NewStringSchema())
+		doc.Components.Schemas["ErrorResponse"] = &openapi3.SchemaRef{Value: errSchema}
+	}
+
+	if _, ok := doc.Components.Schemas["RateLimitError"]; !ok {
+		rlSchema := openapi3.NewObjectSchema()
+		rlSchema.WithProperty("error", openapi3.NewStringSchema())
+		rlSchema.WithProperty("retryAfter", openapi3.NewInt32Schema())
+		doc.Components.Schemas["RateLimitError"] = &openapi3.SchemaRef{Value: rlSchema}
+	}
+
 	// Services and Operations
-	for _, svc := range root.Services {
+	for _, svc := range services {
 		for _, m := range svc.Methods {
 			if m.Operation != ir.OpHTTP && m.HTTPMethod == "" {
 				continue
@@ -116,8 +175,8 @@ func ExportOpenAPI(root *ir.RootIR, cfg ExportConfig) ([]byte, error) {
 			op := openapi3.NewOperation()
 
 			op.OperationID = m.Name
-			if len(m.Doc) > 0 {
-				op.Summary = strings.Join(m.Doc, " ")
+			if summary := cleanDocSummary(m.Doc); summary != "" {
+				op.Summary = summary
 			}
 
 			// Path Parameters
@@ -154,7 +213,7 @@ func ExportOpenAPI(root *ir.RootIR, cfg ExportConfig) ([]byte, error) {
 
 				if m.PayloadKind == ir.PayloadJSON && (param.Location == ir.LocBody || isComplexType(typeName)) {
 					op.RequestBody = &openapi3.RequestBodyRef{
-						Value: openapi3.NewRequestBody().WithJSONSchemaRef(mapGoTypeToSchema(typeName)),
+						Value: openapi3.NewRequestBody().WithJSONSchemaRef(mapGoTypeToSchema(typeName, validStructs)),
 					}
 
 					continue
@@ -163,7 +222,8 @@ func ExportOpenAPI(root *ir.RootIR, cfg ExportConfig) ([]byte, error) {
 				if m.PayloadKind == ir.PayloadForm &&
 					(param.Location == ir.LocBody || param.Location == ir.LocFormFields || isComplexType(typeName)) {
 					op.RequestBody = &openapi3.RequestBodyRef{
-						Value: openapi3.NewRequestBody().WithFormDataSchemaRef(mapGoTypeToSchema(typeName)),
+						Value: openapi3.NewRequestBody().
+							WithFormDataSchemaRef(mapGoTypeToSchema(typeName, validStructs)),
 					}
 
 					continue
@@ -176,7 +236,38 @@ func ExportOpenAPI(root *ir.RootIR, cfg ExportConfig) ([]byte, error) {
 				}
 
 				q := openapi3.NewQueryParameter(qName)
-				q.Schema = mapGoTypeToSchema(typeName)
+				q.Schema = mapGoTypeToSchema(typeName, validStructs)
+
+				// Smart parameter defaults & limits
+				switch qName {
+				case "limit":
+					if q.Schema != nil && q.Schema.Value != nil {
+						q.Schema.Value.Default = 10
+						minVal := float64(1)
+						q.Schema.Value.Min = &minVal
+					}
+
+				case "offset":
+					if q.Schema != nil && q.Schema.Value != nil {
+						q.Schema.Value.Default = 0
+						minVal := float64(0)
+						q.Schema.Value.Min = &minVal
+					}
+
+				case "header":
+					if q.Schema != nil && q.Schema.Value != nil {
+						q.Schema.Value.Default = true
+					}
+				case "height":
+					if q.Schema != nil && q.Schema.Value != nil {
+						q.Schema.Value.Default = 500
+					}
+				case "width":
+					if q.Schema != nil && q.Schema.Value != nil {
+						q.Schema.Value.Default = "100%"
+					}
+				}
+
 				op.AddParameter(q)
 			}
 
@@ -185,10 +276,41 @@ func ExportOpenAPI(root *ir.RootIR, cfg ExportConfig) ([]byte, error) {
 			if m.Return != nil && !m.Return.IsVoid && m.Return.SuccessType.Name != "" &&
 				m.Return.SuccessType.Name != "error" {
 				returnTypeName := strings.TrimPrefix(m.Return.SuccessType.Name, "*")
-				resp.WithJSONSchemaRef(mapGoTypeToSchema(returnTypeName))
+
+				switch {
+				case m.Return.IsDirectBytes || returnTypeName == "[]byte" || strings.Contains(strings.ToLower(m.Name), "image"):
+					binSchema := openapi3.NewStringSchema()
+					binSchema.Format = "binary"
+					resp.WithContent(
+						openapi3.NewContentWithSchema(binSchema, []string{"image/png", "application/octet-stream"}),
+					)
+
+				case strings.Contains(strings.ToLower(m.Name), "graph") || returnTypeName == "html":
+					resp.WithContent(openapi3.NewContentWithSchema(openapi3.NewStringSchema(), []string{"text/html"}))
+
+				default:
+					resp.WithJSONSchemaRef(mapGoTypeToSchema(returnTypeName, validStructs))
+				}
 			}
 
 			op.AddResponse(200, resp)
+
+			// Standard 400 Bad Request
+			errResp400 := openapi3.NewResponse().WithDescription("Invalid input or malformed request")
+			errResp400.WithJSONSchemaRef(&openapi3.SchemaRef{Ref: "#/components/schemas/ErrorResponse"})
+			op.AddResponse(400, errResp400)
+
+			// If path has parameters (e.g. {sku}, {id}, {name}), add 404 Not Found
+			if len(pathVars) > 0 {
+				errResp404 := openapi3.NewResponse().WithDescription("Resource or item not found")
+				errResp404.WithJSONSchemaRef(&openapi3.SchemaRef{Ref: "#/components/schemas/ErrorResponse"})
+				op.AddResponse(404, errResp404)
+			}
+
+			// Standard 429 Rate Limit Exceeded
+			errResp429 := openapi3.NewResponse().WithDescription("Rate limit exceeded")
+			errResp429.WithJSONSchemaRef(&openapi3.SchemaRef{Ref: "#/components/schemas/RateLimitError"})
+			op.AddResponse(429, errResp429)
 
 			// Assign to PathItem
 			method := strings.ToUpper(m.HTTPMethod)
@@ -224,13 +346,13 @@ func ExportOpenAPI(root *ir.RootIR, cfg ExportConfig) ([]byte, error) {
 	return json.MarshalIndent(doc, "", "  ")
 }
 
-func mapGoTypeToSchema(goType string) *openapi3.SchemaRef {
+func mapGoTypeToSchema(goType string, validStructs map[string]bool) *openapi3.SchemaRef {
 	clean := strings.TrimPrefix(goType, "*")
 
 	if strings.HasPrefix(clean, "[]") {
 		elemType := strings.TrimPrefix(clean, "[]")
 		arrSchema := openapi3.NewArraySchema()
-		arrSchema.Items = mapGoTypeToSchema(elemType)
+		arrSchema.Items = mapGoTypeToSchema(elemType, validStructs)
 
 		return &openapi3.SchemaRef{
 			Value: arrSchema,
@@ -257,11 +379,24 @@ func mapGoTypeToSchema(goType string) *openapi3.SchemaRef {
 	case "any", "interface{}":
 		return &openapi3.SchemaRef{Value: openapi3.NewObjectSchema()}
 	default:
-		// Reference to struct component
-		return &openapi3.SchemaRef{
-			Ref: "#/components/schemas/" + clean,
+		if validStructs != nil && validStructs[clean] {
+			return &openapi3.SchemaRef{
+				Ref: "#/components/schemas/" + clean,
+			}
+		}
+
+		return &openapi3.SchemaRef{Value: openapi3.NewObjectSchema()}
+	}
+}
+
+func findStructByName(structs []*ir.StructIR, name string) *ir.StructIR {
+	for _, s := range structs {
+		if s.Name == name {
+			return s
 		}
 	}
+
+	return nil
 }
 
 func isComplexType(t string) bool {
@@ -276,4 +411,20 @@ func isComplexType(t string) bool {
 	default:
 		return true
 	}
+}
+
+func cleanDocSummary(docLines []string) string {
+	var clean []string
+	for _, l := range docLines {
+		t := strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(l), "//"))
+		if strings.HasPrefix(t, "@") {
+			continue
+		}
+
+		if t != "" {
+			clean = append(clean, t)
+		}
+	}
+
+	return strings.Join(clean, " ")
 }

@@ -18,7 +18,7 @@ func runList(scopeFilter string, asJSON, asMarkdown bool) {
 	if asJSON {
 		data, err := json.MarshalIndent(spec.Registry, "", "  ")
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "aoni-gen: error serializing spec: %v\n", err)
+			fmt.Fprintf(os.Stderr, "vortex: error serializing spec: %v\n", err)
 			os.Exit(1)
 		}
 
@@ -34,6 +34,15 @@ func runList(scopeFilter string, asJSON, asMarkdown bool) {
 
 	targetScope := spec.Scope(strings.ToLower(strings.TrimSpace(scopeFilter)))
 
+	scopeTitles := map[spec.Scope]string{
+		spec.ScopeService:  "◆ Service Scope (Interface Type Declarations)",
+		spec.ScopeSocket:   "◆ Socket Scope (Real-Time WebSocket & Socket.IO Declarations)",
+		spec.ScopeMethod:   "◆ Method Scope (Endpoint Routing & Wire Encoding)",
+		spec.ScopeParam:    "◆ Param Scope (Parameter-Level Binding & Overrides)",
+		spec.ScopeStruct:   "◆ Struct Scope (DTO Serialization & Tuples)",
+		spec.ScopePipeline: "◆ Pipeline Stages (Wire-Transform Data Extraction & Decoders)",
+	}
+
 	scopes := spec.Scopes()
 	if targetScope != "" {
 		scopes = []spec.Scope{targetScope}
@@ -41,8 +50,9 @@ func runList(scopeFilter string, asJSON, asMarkdown bool) {
 
 	totalDirectives := 0
 
-	fmt.Println("aoni-gen DSL Directives Reference")
-	fmt.Println("=================================")
+	fmt.Println("==========================================================================================")
+	fmt.Println("                   vortex DSL Directives & Pipeline Reference                             ")
+	fmt.Println("==========================================================================================")
 	fmt.Println()
 
 	for _, s := range scopes {
@@ -55,57 +65,45 @@ func runList(scopeFilter string, asJSON, asMarkdown bool) {
 			return directives[i].Name < directives[j].Name
 		})
 
-		title := string(s)
-		if len(title) > 0 {
-			title = strings.ToUpper(title[:1]) + title[1:]
+		title := scopeTitles[s]
+		if title == "" {
+			title = fmt.Sprintf("◆ %s Scope", strings.ToUpper(string(s)[:1])+string(s)[1:])
 		}
 
-		fmt.Printf("[%s Scope Directives]\n", title)
-		fmt.Printf("  %-20s %-32s %s\n", "DIRECTIVE", "ARGUMENTS / VALUE", "DESCRIPTION")
-		fmt.Printf("  %-20s %-32s %s\n", "---------", "-----------------", "-----------")
+		fmt.Println(title)
+		fmt.Println(strings.Repeat("─", 90))
 
 		for _, d := range directives {
 			totalDirectives++
 
-			dirName := "@" + d.Name
-
-			argsStr := make([]string, 0, len(d.Args)+1)
-			if d.ValueHint != "" {
-				argsStr = append(argsStr, d.ValueHint)
+			aliasStr := ""
+			if len(d.Aliases) > 0 {
+				aliasStr = fmt.Sprintf(" (aliases: @%s)", strings.Join(d.Aliases, ", @"))
 			}
 
-			for _, arg := range d.Args {
-				item := arg.Name
-				if arg.Required {
-					item += "*"
-				}
+			fmt.Printf("  @%-20s %s%s\n", d.Name, d.Description, aliasStr)
 
-				argsStr = append(argsStr, item)
+			if d.Example != "" {
+				fmt.Printf("  %-20s   ↳ %s\n", "", d.Example)
 			}
 
-			argsCol := strings.Join(argsStr, ", ")
-			if argsCol == "" {
-				argsCol = "—"
-			}
-
-			if len(argsCol) > 30 {
-				argsCol = argsCol[:27] + "..."
-			}
-
-			fmt.Printf("  %-20s %-32s %s\n", dirName, argsCol, d.Description)
+			fmt.Println()
 		}
-
-		fmt.Println()
 	}
 
-	fmt.Printf("Total: %d directive(s). Run 'aoni-gen explain <directive>' for details.\n", totalDirectives)
+	fmt.Println("==========================================================================================")
+	fmt.Printf(
+		"Total: %d directive(s). Run 'vortex explain <directive>' for full documentation & arguments.\n",
+		totalDirectives,
+	)
+	fmt.Println("==========================================================================================")
 }
 
 func runExplain(name string) {
 	d := spec.Lookup(name)
 	if d == nil {
-		fmt.Fprintf(os.Stderr, "aoni-gen: unknown directive %q\n\n", name)
-		fmt.Fprintf(os.Stderr, "Run 'aoni-gen list' to see all available directives.\n")
+		fmt.Fprintf(os.Stderr, "vortex: unknown directive %q\n\n", name)
+		fmt.Fprintf(os.Stderr, "Run 'vortex list' to see all available directives.\n")
 		os.Exit(1)
 	}
 

@@ -144,8 +144,8 @@ func collectParamNames(params []*ir.ParamIR) map[string]bool {
 	paramNames := make(map[string]bool, len(params)*2)
 	for _, p := range params {
 		paramNames[p.GoName] = true
-
 		paramNames[strings.ToLower(p.GoName)] = true
+
 		if p.WireKey != "" {
 			paramNames[p.WireKey] = true
 			paramNames[strings.ToLower(p.WireKey)] = true

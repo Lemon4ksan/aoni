@@ -10,6 +10,8 @@ import (
 	"fmt"
 	"html"
 	"regexp"
+
+	"github.com/lemon4ksan/aoni/internal/bytesconv"
 )
 
 var (
@@ -127,8 +129,8 @@ func ExtractRegex(src []byte, pattern string) ([]byte, error) {
 	return matches[1], nil
 }
 
-// HTMLUnescape appends HTML-unescaped src to dst.
+// HTMLUnescape converts HTML entities within src into their unescaped UTF-8 byte representation.
 func HTMLUnescape(src []byte) []byte {
-	unescaped := html.UnescapeString(string(src))
+	unescaped := html.UnescapeString(bytesconv.B2S(src))
 	return []byte(unescaped)
 }

@@ -7,6 +7,7 @@ package emitter
 import (
 	"fmt"
 	"strings"
+	"unicode"
 
 	"github.com/lemon4ksan/aoni/internal/codegen/ir"
 )
@@ -60,7 +61,34 @@ func lowerFirst(s string) string {
 		return ""
 	}
 
-	return strings.ToLower(s[:1]) + s[1:]
+	runes := []rune(s)
+
+	allUpper := true
+	for _, r := range runes {
+		if !unicode.IsUpper(r) {
+			allUpper = false
+			break
+		}
+	}
+
+	if allUpper {
+		return strings.ToLower(s)
+	}
+
+	i := 0
+	for i < len(runes) && unicode.IsUpper(runes[i]) {
+		i++
+	}
+
+	if i > 1 {
+		if i == len(runes) {
+			return strings.ToLower(s)
+		}
+
+		return strings.ToLower(string(runes[:i-1])) + string(runes[i-1:])
+	}
+
+	return strings.ToLower(string(runes[:1])) + string(runes[1:])
 }
 
 // toPascalCase converts snake_case or lowercase identifier to PascalCase (e.g. "purchase_eresult" -> "PurchaseEResult", "success" -> "Success").

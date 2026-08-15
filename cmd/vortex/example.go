@@ -19,14 +19,14 @@ func runExample(kind, outFile string) {
 
 	ex := spec.LookupExample(kind)
 	if ex == nil {
-		fmt.Fprintf(os.Stderr, "aoni-gen: unknown template kind %q\n\n", kind)
+		fmt.Fprintf(os.Stderr, "vortex: unknown template kind %q\n\n", kind)
 		fmt.Print(spec.PrintExampleHelp())
 		os.Exit(1)
 	}
 
 	if outFile != "" {
 		if err := os.WriteFile(outFile, []byte(ex.SourceCode), 0o600); err != nil {
-			fmt.Fprintf(os.Stderr, "aoni-gen: failed writing %s: %v\n", outFile, err)
+			fmt.Fprintf(os.Stderr, "vortex: failed writing %s: %v\n", outFile, err)
 			os.Exit(1)
 		}
 

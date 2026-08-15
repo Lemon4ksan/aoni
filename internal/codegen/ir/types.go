@@ -29,28 +29,29 @@ type ImportIR struct {
 
 // ServiceIR represents an API service interface definition and its global client configurations.
 type ServiceIR struct {
-	Name          string
-	Doc           []string
-	Protocol      ProtocolKind
-	Engine        EngineKind
-	CustomEngine  string
-	RequesterType string
-	BaseURL       string
-	SubRequesters []SubRequesterIR
-	Persona       string
-	TLSSpec       string
-	P0fOS         string
-	Timeout       string
-	Retry         *RetryIR
-	Circuit       *CircuitBreakerIR
-	AuthStrategy  *AuthStrategyIR
-	SSHConfig     *SSHConfigIR
-	SocketConfig  *SocketConfigIR
-	Headers       []HeaderIR
-	Envelope      *EnvelopeIR
-	TypeMaps      map[string]FormatStrategy
-	DefaultCasing CasingStrategy
-	Methods       []*MethodIR
+	Name               string
+	Doc                []string
+	Protocol           ProtocolKind
+	Engine             EngineKind
+	CustomEngine       string
+	RequesterType      string
+	BaseURL            string
+	SubRequesters      []SubRequesterIR
+	Persona            string
+	TLSSpec            string
+	P0fOS              string
+	Timeout            string
+	Retry              *RetryIR
+	Circuit            *CircuitBreakerIR
+	AuthStrategy       *AuthStrategyIR
+	SSHConfig          *SSHConfigIR
+	SocketConfig       *SocketConfigIR
+	Headers            []HeaderIR
+	Envelope           *EnvelopeIR
+	TypeMaps           map[string]FormatStrategy
+	DefaultCasing      CasingStrategy
+	DefaultUnwrapField string
+	Methods            []*MethodIR
 }
 
 // SocketConfigIR holds configuration parameters for generated generic socket facades.
@@ -205,6 +206,7 @@ type MethodIR struct {
 	IsNotify        bool
 	IsEvent         bool
 	FormCasing      CasingStrategy
+	QueryCasing     CasingStrategy
 	StackModsSize   int
 	StackBufSize    int
 }

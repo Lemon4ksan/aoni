@@ -30,8 +30,10 @@ type ImportConfig struct {
 	PackageName    string
 	ServiceName    string
 	OutputFile     string
+	ModelsFile     string
 	BaseURL        string
 	SkipDeprecated bool
+	SplitModels    bool
 	IncludePaths   []string
 	ExcludePaths   []string
 	TypeMap        map[string]string
@@ -64,40 +66,145 @@ func LoadSpec(filename string, data []byte) (*openapi3.T, error) {
 		}
 	}
 
+	data = sanitizeSpecData(data)
+
 	var versionDetector struct {
 		Swagger string `json:"swagger" yaml:"swagger"`
 		OpenAPI string `json:"openapi" yaml:"openapi"`
 	}
 
-	if err := json.Unmarshal(data, &versionDetector); err != nil {
-		_ = yaml.Unmarshal(data, &versionDetector)
+	if err := yaml.Unmarshal(data, &versionDetector); err == nil {
+		if strings.HasPrefix(versionDetector.Swagger, "2.") || versionDetector.Swagger == "2.0" {
+			var doc2 openapi2.T
+			if err := json.Unmarshal(data, &doc2); err != nil {
+				if errYaml := yaml.Unmarshal(data, &doc2); errYaml != nil {
+					return nil, fmt.Errorf("failed parsing Swagger 2.0 spec: %w", err)
+				}
+			}
+
+			doc3, err := openapi2conv.ToV3(&doc2)
+			if err != nil {
+				return nil, fmt.Errorf("failed converting Swagger 2.0 to OpenAPI 3.0: %w", err)
+			}
+
+			return doc3, nil
+		}
 	}
 
 	loader := openapi3.NewLoader()
 	loader.IsExternalRefsAllowed = true
 
-	if versionDetector.Swagger == "2.0" || strings.HasPrefix(versionDetector.OpenAPI, "2.") {
-		var doc2 openapi2.T
-		if err := json.Unmarshal(data, &doc2); err != nil {
-			if errYaml := yaml.Unmarshal(data, &doc2); errYaml != nil {
-				return nil, fmt.Errorf("failed to parse Swagger 2.0 spec: %w", err)
-			}
-		}
-
-		doc3, err := openapi2conv.ToV3(&doc2)
-		if err != nil {
-			return nil, fmt.Errorf("failed to convert Swagger 2.0 to OpenAPI 3.0: %w", err)
-		}
-
-		return doc3, nil
-	}
-
 	doc3, err := loader.LoadFromData(data)
 	if err != nil {
-		return nil, fmt.Errorf("failed to load OpenAPI 3.x document: %w", err)
+		return nil, fmt.Errorf("failed parsing OpenAPI 3.x spec: %w", err)
 	}
 
 	return doc3, nil
+}
+
+func sanitizeSpecData(data []byte) []byte {
+	var rawNode any
+	if err := yaml.Unmarshal(data, &rawNode); err != nil {
+		return data
+	}
+
+	sanitizeMapNode(rawNode)
+
+	cleaned, err := json.Marshal(rawNode)
+	if err != nil {
+		return data
+	}
+
+	return cleaned
+}
+
+func sanitizeMapNode(node any) {
+	switch v := node.(type) {
+	case map[string]any:
+		for key, val := range v {
+			if key == "type" {
+				if arr, ok := val.([]any); ok && len(arr) > 0 {
+					var nonNull []any
+					for _, item := range arr {
+						if s, ok := item.(string); ok && s != "null" {
+							nonNull = append(nonNull, s)
+						}
+					}
+
+					if len(nonNull) > 0 {
+						v["type"] = nonNull[0]
+					} else {
+						v["type"] = "string"
+					}
+				}
+			}
+
+			if key == "$ref" {
+				if strVal, ok := val.(string); ok {
+					if strings.HasPrefix(strVal, "#") && !strings.HasPrefix(strVal, "#/") {
+						v[key] = "#/" + strVal[1:]
+					}
+				}
+			} else {
+				switch key {
+				case "nullable", "deprecated", "readOnly", "writeOnly", "exclusiveMinimum", "exclusiveMaximum":
+					if strVal, ok := val.(string); ok {
+						if strings.EqualFold(strVal, "true") {
+							v[key] = true
+						} else if strings.EqualFold(strVal, "false") {
+							v[key] = false
+						}
+					}
+
+				case "type":
+					if strVal, ok := val.(string); ok {
+						if strings.EqualFold(strVal, "string|number") || strings.EqualFold(strVal, "number|string") {
+							v[key] = "string"
+						}
+					}
+				}
+			}
+
+			sanitizeMapNode(val)
+		}
+
+	case map[any]any:
+		for k, val := range v {
+			keyStr := fmt.Sprintf("%v", k)
+			if keyStr == "$ref" {
+				if strVal, ok := val.(string); ok {
+					if strings.HasPrefix(strVal, "#") && !strings.HasPrefix(strVal, "#/") {
+						v[k] = "#/" + strVal[1:]
+					}
+				}
+			} else {
+				switch keyStr {
+				case "nullable", "deprecated", "readOnly", "writeOnly", "exclusiveMinimum", "exclusiveMaximum":
+					if strVal, ok := val.(string); ok {
+						if strings.EqualFold(strVal, "true") {
+							v[k] = true
+						} else if strings.EqualFold(strVal, "false") {
+							v[k] = false
+						}
+					}
+
+				case "type":
+					if strVal, ok := val.(string); ok {
+						if strings.EqualFold(strVal, "string|number") || strings.EqualFold(strVal, "number|string") {
+							v[k] = "string"
+						}
+					}
+				}
+			}
+
+			sanitizeMapNode(val)
+		}
+
+	case []any:
+		for _, item := range v {
+			sanitizeMapNode(item)
+		}
+	}
 }
 
 // GenerateContract translates an OpenAPI document into a clean, declarative aoni Go contract.
@@ -107,34 +214,65 @@ func GenerateContract(spec *openapi3.T, cfg ImportConfig) ([]byte, error) {
 		pkgName = "api"
 	}
 
-	var buf bytes.Buffer
+	var bodyBuf bytes.Buffer
 
+	// 1. Base URL
+	baseURL := resolveBaseURL(spec, cfg)
+	if baseURL != "" {
+		fmt.Fprintf(&bodyBuf, "// BaseURL is the default API base endpoint.\nconst BaseURL = %q\n\n", baseURL)
+	}
+
+	// 2. Generate Service Interface (API) at the TOP
+	if spec.Paths != nil && len(spec.Paths.Map()) > 0 {
+		if err := writeServiceInterface(&bodyBuf, spec, cfg, baseURL); err != nil {
+			return nil, err
+		}
+	}
+
+	// 3. Generate Schemas / Models (DTOs) BELOW the interface
+	if spec.Components != nil && len(spec.Components.Schemas) > 0 {
+		writeSchemas(&bodyBuf, spec.Components.Schemas, cfg)
+	}
+
+	var buf bytes.Buffer
 	buf.WriteString("// Code generated by oapi-gen-aoni. DO NOT EDIT.\n\n")
 	fmt.Fprintf(&buf, "package %s\n\n", pkgName)
 
 	buf.WriteString("import (\n")
 	buf.WriteString("\t\"context\"\n")
-	buf.WriteString("\t\"time\"\n\n")
-	buf.WriteString("\t\"github.com/lemon4ksan/aoni\"\n")
-	buf.WriteString(")\n\n")
 
-	// Base URL
-	baseURL := resolveBaseURL(spec, cfg)
-	if baseURL != "" {
-		fmt.Fprintf(&buf, "// BaseURL is the default API base endpoint.\nconst BaseURL = %q\n\n", baseURL)
+	if bytes.Contains(bodyBuf.Bytes(), []byte("time.Time")) {
+		buf.WriteString("\t\"time\"\n")
 	}
 
-	// Generate Schemas / Models
-	if spec.Components != nil && len(spec.Components.Schemas) > 0 {
-		writeSchemas(&buf, spec.Components.Schemas, cfg)
-	}
+	var customImports []string
 
-	// Generate Service Interface
-	if spec.Paths != nil && len(spec.Paths.Map()) > 0 {
-		if err := writeServiceInterface(&buf, spec, cfg, baseURL); err != nil {
-			return nil, err
+	for _, rawType := range cfg.TypeMap {
+		if idx := strings.LastIndex(rawType, "/"); idx != -1 {
+			dotIdx := strings.LastIndex(rawType, ".")
+			if dotIdx > idx {
+				pkgPath := rawType[:dotIdx]
+				short := path.Base(pkgPath) + "." + rawType[dotIdx+1:]
+
+				if bytes.Contains(bodyBuf.Bytes(), []byte(short)) {
+					if !slices.Contains(customImports, pkgPath) {
+						customImports = append(customImports, pkgPath)
+					}
+				}
+			}
 		}
 	}
+
+	sort.Strings(customImports)
+
+	for _, imp := range customImports {
+		fmt.Fprintf(&buf, "\t%q\n", imp)
+	}
+
+	buf.WriteString("\n\t\"github.com/lemon4ksan/aoni\"\n")
+	buf.WriteString(")\n\n")
+
+	buf.Write(bodyBuf.Bytes())
 
 	// Format output with standard go/format
 	formatted, err := format.Source(buf.Bytes())
@@ -143,6 +281,124 @@ func GenerateContract(spec *openapi3.T, cfg ImportConfig) ([]byte, error) {
 	}
 
 	return formatted, nil
+}
+
+// GenerateSplitContract generates separate api.go (interface) and models.go (DTOs) files.
+func GenerateSplitContract(spec *openapi3.T, cfg ImportConfig) (apiSource, modelsSource []byte, err error) {
+	pkgName := cfg.PackageName
+	if pkgName == "" {
+		pkgName = "api"
+	}
+
+	// --- 1. API Contract (api.go) ---
+	var apiBody bytes.Buffer
+
+	baseURL := resolveBaseURL(spec, cfg)
+	if baseURL != "" {
+		fmt.Fprintf(&apiBody, "// BaseURL is the default API base endpoint.\nconst BaseURL = %q\n\n", baseURL)
+	}
+
+	if spec.Paths != nil && len(spec.Paths.Map()) > 0 {
+		if err := writeServiceInterface(&apiBody, spec, cfg, baseURL); err != nil {
+			return nil, nil, err
+		}
+	}
+
+	var apiBuf bytes.Buffer
+	apiBuf.WriteString("// Code generated by oapi-gen-aoni. DO NOT EDIT.\n\n")
+	fmt.Fprintf(&apiBuf, "package %s\n\n", pkgName)
+	apiBuf.WriteString("import (\n")
+	apiBuf.WriteString("\t\"context\"\n")
+
+	if bytes.Contains(apiBody.Bytes(), []byte("time.Time")) {
+		apiBuf.WriteString("\t\"time\"\n")
+	}
+
+	var customImports []string
+	for _, rawType := range cfg.TypeMap {
+		if idx := strings.LastIndex(rawType, "/"); idx != -1 {
+			dotIdx := strings.LastIndex(rawType, ".")
+			if dotIdx > idx {
+				pkgPath := rawType[:dotIdx]
+
+				short := path.Base(pkgPath) + "." + rawType[dotIdx+1:]
+				if bytes.Contains(apiBody.Bytes(), []byte(short)) {
+					if !slices.Contains(customImports, pkgPath) {
+						customImports = append(customImports, pkgPath)
+					}
+				}
+			}
+		}
+	}
+
+	sort.Strings(customImports)
+
+	for _, imp := range customImports {
+		fmt.Fprintf(&apiBuf, "\t%q\n", imp)
+	}
+
+	apiBuf.WriteString("\n\t\"github.com/lemon4ksan/aoni\"\n")
+	apiBuf.WriteString(")\n\n")
+	apiBuf.Write(apiBody.Bytes())
+
+	apiSource, err = format.Source(apiBuf.Bytes())
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed formatting api.go: %w\nSource:\n%s", err, apiBuf.String())
+	}
+
+	// --- 2. Models (models.go) ---
+	if spec.Components != nil && len(spec.Components.Schemas) > 0 {
+		var modelsBody bytes.Buffer
+		writeSchemas(&modelsBody, spec.Components.Schemas, cfg)
+
+		var modelsBuf bytes.Buffer
+		modelsBuf.WriteString("// Code generated by oapi-gen-aoni. DO NOT EDIT.\n\n")
+		fmt.Fprintf(&modelsBuf, "package %s\n\n", pkgName)
+
+		hasTime := bytes.Contains(modelsBody.Bytes(), []byte("time.Time"))
+
+		var modelCustomImports []string
+		for _, rawType := range cfg.TypeMap {
+			if idx := strings.LastIndex(rawType, "/"); idx != -1 {
+				dotIdx := strings.LastIndex(rawType, ".")
+				if dotIdx > idx {
+					pkgPath := rawType[:dotIdx]
+
+					short := path.Base(pkgPath) + "." + rawType[dotIdx+1:]
+					if bytes.Contains(modelsBody.Bytes(), []byte(short)) {
+						if !slices.Contains(modelCustomImports, pkgPath) {
+							modelCustomImports = append(modelCustomImports, pkgPath)
+						}
+					}
+				}
+			}
+		}
+
+		sort.Strings(modelCustomImports)
+
+		if hasTime || len(modelCustomImports) > 0 {
+			modelsBuf.WriteString("import (\n")
+
+			if hasTime {
+				modelsBuf.WriteString("\t\"time\"\n")
+			}
+
+			for _, imp := range modelCustomImports {
+				fmt.Fprintf(&modelsBuf, "\t%q\n", imp)
+			}
+
+			modelsBuf.WriteString(")\n\n")
+		}
+
+		modelsBuf.Write(modelsBody.Bytes())
+
+		modelsSource, err = format.Source(modelsBuf.Bytes())
+		if err != nil {
+			return nil, nil, fmt.Errorf("failed formatting models.go: %w\nSource:\n%s", err, modelsBuf.String())
+		}
+	}
+
+	return apiSource, modelsSource, nil
 }
 
 func resolveBaseURL(spec *openapi3.T, cfg ImportConfig) string {
@@ -270,9 +526,26 @@ func writeSchemaModel(buf *bytes.Buffer, rawName string, s *openapi3.Schema, cfg
 	fmt.Fprintf(buf, "}\n\n")
 }
 
+func shortTypeName(raw string) string {
+	if idx := strings.LastIndex(raw, "/"); idx != -1 {
+		dotIdx := strings.LastIndex(raw, ".")
+		if dotIdx > idx {
+			return path.Base(raw[:dotIdx]) + "." + raw[dotIdx+1:]
+		}
+	}
+
+	return raw
+}
+
 func mapSchemaType(s *openapi3.Schema, cfg ImportConfig) string {
 	if s == nil {
 		return "any"
+	}
+
+	if cfg.TypeMap != nil && s.Title != "" {
+		if mapped, ok := cfg.TypeMap[s.Title]; ok {
+			return shortTypeName(mapped)
+		}
 	}
 
 	if s.Type == nil {
@@ -285,8 +558,10 @@ func mapSchemaType(s *openapi3.Schema, cfg ImportConfig) string {
 
 	if s.Type.Is("string") {
 		switch s.Format {
-		case "date-time", "date":
+		case "date-time":
 			return "time.Time"
+		case "date":
+			return "string"
 		case "binary", "byte":
 			return "[]byte"
 		default:
@@ -348,7 +623,7 @@ func mapSchemaType(s *openapi3.Schema, cfg ImportConfig) string {
 func writeServiceInterface(buf *bytes.Buffer, spec *openapi3.T, cfg ImportConfig, baseURL string) error {
 	serviceName := cfg.ServiceName
 	if serviceName == "" {
-		serviceName = "Client"
+		serviceName = "API"
 	}
 
 	fmt.Fprintf(buf, "// @aoni:service casing=snake_case\n")
@@ -452,7 +727,7 @@ func writeOperationMethod(
 	}
 
 	if summary != "" {
-		fmt.Fprintf(buf, "\t// %s — %s\n", methodName, strings.ReplaceAll(summary, "\n", " "))
+		fmt.Fprintf(buf, "\t// %s — %s\n\t//\n", methodName, strings.ReplaceAll(summary, "\n", " "))
 	}
 
 	// Route directive: // @get "path", // @post "path"
@@ -473,7 +748,12 @@ func writeOperationMethod(
 	}
 
 	// Collect parameters
-	params := extractOperationParameters(pathItem, op)
+	params := extractOperationParameters(pathStr, pathItem, op)
+
+	// Emit @query casing=snake_case for non-GET methods with query parameters
+	if httpMethod != "GET" && !isForm && len(params.query) > 0 {
+		fmt.Fprintf(buf, "\t// @query casing=snake_case\n")
+	}
 
 	var paramSig []string
 
@@ -483,7 +763,15 @@ func writeOperationMethod(
 		pName := toCamelCase(p.Name)
 
 		pType := "string"
-		if p.Schema != nil && p.Schema.Value != nil {
+		if cfg.TypeMap != nil {
+			if mapped, ok := cfg.TypeMap[p.Name]; ok {
+				pType = shortTypeName(mapped)
+			} else if mapped, ok := cfg.TypeMap[strings.ToLower(p.Name)]; ok {
+				pType = shortTypeName(mapped)
+			}
+		}
+
+		if pType == "string" && p.Schema != nil && p.Schema.Value != nil {
 			pType = mapSchemaType(p.Schema.Value, cfg)
 		}
 
@@ -494,11 +782,26 @@ func writeOperationMethod(
 		pName := toCamelCase(p.Name)
 
 		pType := "string"
-		if p.Schema != nil && p.Schema.Value != nil {
+		if cfg.TypeMap != nil {
+			if mapped, ok := cfg.TypeMap[p.Name]; ok {
+				pType = shortTypeName(mapped)
+			} else if mapped, ok := cfg.TypeMap[strings.ToLower(p.Name)]; ok {
+				pType = shortTypeName(mapped)
+			}
+		}
+
+		if pType == "string" && p.Schema != nil && p.Schema.Value != nil {
 			pType = mapSchemaType(p.Schema.Value, cfg)
 		}
 
-		paramSig = append(paramSig, fmt.Sprintf("%s %s", pName, pType))
+		sig := fmt.Sprintf("%s %s", pName, pType)
+
+		expectedSnake := toSnakeCase(pName)
+		if p.Name != "" && p.Name != expectedSnake && p.Name != pName {
+			sig += fmt.Sprintf(" // @query %q", p.Name)
+		}
+
+		paramSig = append(paramSig, sig)
 	}
 
 	// Request Body parameter if JSON
@@ -521,10 +824,38 @@ func writeOperationMethod(
 	// Determine return type
 	returnType := determineReturnType(op, cfg)
 
-	if returnType == "" {
-		fmt.Fprintf(buf, "\t%s(%s) error\n\n", methodName, strings.Join(paramSig, ", "))
+	hasComments := false
+	for _, p := range paramSig {
+		if strings.Contains(p, "//") {
+			hasComments = true
+			break
+		}
+	}
+
+	if len(paramSig) > 4 || hasComments {
+		if returnType == "" {
+			fmt.Fprintf(buf, "\t%s(\n", methodName)
+
+			for _, p := range paramSig {
+				fmt.Fprintf(buf, "\t\t%s,\n", p)
+			}
+
+			fmt.Fprintf(buf, "\t) error\n\n")
+		} else {
+			fmt.Fprintf(buf, "\t%s(\n", methodName)
+
+			for _, p := range paramSig {
+				fmt.Fprintf(buf, "\t\t%s,\n", p)
+			}
+
+			fmt.Fprintf(buf, "\t) (%s, error)\n\n", returnType)
+		}
 	} else {
-		fmt.Fprintf(buf, "\t%s(%s) (%s, error)\n\n", methodName, strings.Join(paramSig, ", "), returnType)
+		if returnType == "" {
+			fmt.Fprintf(buf, "\t%s(%s) error\n\n", methodName, strings.Join(paramSig, ", "))
+		} else {
+			fmt.Fprintf(buf, "\t%s(%s) (%s, error)\n\n", methodName, strings.Join(paramSig, ", "), returnType)
+		}
 	}
 }
 
@@ -586,7 +917,11 @@ type operationParameters struct {
 	header []*openapi3.Parameter
 }
 
-func extractOperationParameters(pathItem *openapi3.PathItem, op *openapi3.Operation) operationParameters {
+func extractOperationParameters(
+	pathStr string,
+	pathItem *openapi3.PathItem,
+	op *openapi3.Operation,
+) operationParameters {
 	var res operationParameters
 
 	combined := append(slices.Clone(pathItem.Parameters), op.Parameters...)
@@ -616,18 +951,62 @@ func extractOperationParameters(pathItem *openapi3.PathItem, op *openapi3.Operat
 		}
 	}
 
+	// Ensure all {var} path segments from pathStr are represented in res.path
+	rem := pathStr
+	for {
+		start := strings.Index(rem, "{")
+		if start == -1 {
+			break
+		}
+
+		end := strings.Index(rem[start:], "}")
+		if end == -1 {
+			break
+		}
+
+		varName := rem[start+1 : start+end]
+		rem = rem[start+end+1:]
+
+		key := "path:" + varName
+		if !seen[key] && !seen["path:"+strings.ToLower(varName)] {
+			seen[key] = true
+
+			res.path = append(res.path, &openapi3.Parameter{
+				Name:     varName,
+				In:       openapi3.ParameterInPath,
+				Required: true,
+				Schema:   openapi3.NewStringSchema().NewRef(),
+			})
+		}
+	}
+
 	return res
+}
+
+func isHexHash(s string) bool {
+	if len(s) < 16 {
+		return false
+	}
+
+	for _, c := range s {
+		if (c < '0' || c > '9') && (c < 'a' || c > 'f') && (c < 'A' || c > 'F') {
+			return false
+		}
+	}
+
+	return true
 }
 
 func buildMethodName(pathStr, httpMethod string, op *openapi3.Operation, used map[string]int) string {
 	var base string
-	if op.OperationID != "" {
+	if op.OperationID != "" && !isHexHash(op.OperationID) {
 		base = toPascalCase(op.OperationID)
 	} else {
-		// e.g. GET /users/{id} -> GetUsersByID
+		// e.g. GET /classifieds/alerts/{id} -> GetClassifiedsAlertsByID
 		clean := strings.ReplaceAll(pathStr, "{", "by_")
 		clean = strings.ReplaceAll(clean, "}", "")
 		clean = strings.ReplaceAll(clean, "/", "_")
+		clean = strings.TrimPrefix(clean, "_")
 		base = toPascalCase(strings.ToLower(httpMethod) + "_" + clean)
 	}
 
@@ -705,4 +1084,13 @@ func splitWords(s string) []string {
 	}
 
 	return words
+}
+
+func toSnakeCase(s string) string {
+	words := splitWords(s)
+	for i, w := range words {
+		words[i] = strings.ToLower(w)
+	}
+
+	return strings.Join(words, "_")
 }

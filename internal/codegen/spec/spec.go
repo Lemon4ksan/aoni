@@ -230,6 +230,17 @@ var Registry = []*DirectiveDef{
 		Example:     "// @envelope \"data\"",
 	},
 	{
+		Name:        "requester",
+		Scopes:      []Scope{ScopeService},
+		ValueHint:   "\"<type>\"",
+		Description: "Specifies required requester interface or underlying execution transport.",
+		Args: []ArgDef{
+			{Name: "type", Placeholder: "\"<type>\"", Description: "Go type of custom requester interface"},
+			{Name: "required", Placeholder: "<bool>", Description: "Require non-nil instance in constructor"},
+		},
+		Example: "// @requester \"request.Requester\"",
+	},
+	{
 		Name:        "type_map",
 		Scopes:      []Scope{ScopeService},
 		ValueHint:   "<Type> -> <Strategy>",
@@ -525,7 +536,7 @@ var Registry = []*DirectiveDef{
 	},
 	{
 		Name:        "unwrap",
-		Scopes:      []Scope{ScopeMethod},
+		Scopes:      []Scope{ScopeService, ScopeMethod},
 		ValueHint:   "<fieldName>",
 		Description: "Unwraps specific field from JSON response envelope before returning.",
 		Example:     "// @unwrap data",
@@ -624,14 +635,22 @@ var Registry = []*DirectiveDef{
 	// ==========================================
 	{
 		Name:        "query",
-		Scopes:      []Scope{ScopeParam},
+		Scopes:      []Scope{ScopeMethod, ScopeParam},
 		ValueHint:   "<wire_name>",
-		Description: "Binds function parameter to URL query parameter with zero-alloc string formatting.",
-		Example:     "// @query \"page_size\"",
+		Description: "Binds function parameter to URL query parameter or sets method-level query casing.",
+		Args: []ArgDef{
+			{
+				Name:        "casing",
+				Placeholder: "\"<casing>\"",
+				Description: "Method query casing strategy (snake_case, flatcase, camelCase)",
+			},
+		},
+		Example: "// @query casing=flatcase",
 	},
 	{
 		Name:        "field",
 		Scopes:      []Scope{ScopeParam},
+		Aliases:     []string{"form_field"},
 		ValueHint:   "<wire_name>",
 		Description: "Binds function parameter to application/x-www-form-urlencoded or multipart form field.",
 		Example:     "// @field \"tradeofferid\"",
@@ -672,7 +691,7 @@ var Registry = []*DirectiveDef{
 	{
 		Name:        "path",
 		Scopes:      []Scope{ScopeParam},
-		Aliases:     []string{"param"},
+		Aliases:     []string{"param", "var"},
 		ValueHint:   "<var_name>",
 		Description: "Binds function parameter to URL path template variable.",
 		Example:     "// @path \"id\"",
