@@ -48,6 +48,7 @@ func main() {
 		fmt.Fprintf(os.Stderr, "  aoni-gen [flags] [packages/files...]\n")
 		fmt.Fprintf(os.Stderr, "  aoni-gen list [flags]\n")
 		fmt.Fprintf(os.Stderr, "  aoni-gen pipelines\n")
+		fmt.Fprintf(os.Stderr, "  aoni-gen example [http|ws|socket|pipeline] [-out=<file>]\n")
 		fmt.Fprintf(os.Stderr, "  aoni-gen explain <directive>\n")
 		fmt.Fprintf(os.Stderr, "  aoni-gen check [packages/files...]\n\n")
 		fmt.Fprintf(os.Stderr, "Commands:\n")
@@ -58,6 +59,10 @@ func main() {
 		)
 		fmt.Fprintf(
 			os.Stderr,
+			"  example    Output or scaffold ready-made contract templates (http, ws, socket, pipeline)\n",
+		)
+		fmt.Fprintf(
+			os.Stderr,
 			"  explain    Show detailed documentation, syntax, arguments, and example for a directive\n",
 		)
 		fmt.Fprintf(os.Stderr, "  check      Validate @aoni contracts and syntax without generating code\n\n")
@@ -65,11 +70,11 @@ func main() {
 		flag.PrintDefaults()
 		fmt.Fprintf(os.Stderr, "\nExamples:\n")
 		fmt.Fprintf(os.Stderr, "  aoni-gen list\n")
-		fmt.Fprintf(os.Stderr, "  aoni-gen list -scope=pipeline\n")
 		fmt.Fprintf(os.Stderr, "  aoni-gen pipelines\n")
-		fmt.Fprintf(os.Stderr, "  aoni-gen explain pipeline\n")
-		fmt.Fprintf(os.Stderr, "  aoni-gen explain gzip\n")
-		fmt.Fprintf(os.Stderr, "  aoni-gen explain attr\n")
+		fmt.Fprintf(os.Stderr, "  aoni-gen example http > api.go\n")
+		fmt.Fprintf(os.Stderr, "  aoni-gen example ws -out=chat.go\n")
+		fmt.Fprintf(os.Stderr, "  aoni-gen example socket -out=socket.go\n")
+		fmt.Fprintf(os.Stderr, "  aoni-gen explain referer\n")
 		fmt.Fprintf(os.Stderr, "  aoni-gen ./...\n")
 		fmt.Fprintf(os.Stderr, "  aoni-gen check ./...\n")
 		fmt.Fprintf(os.Stderr, "  aoni-gen -file=market.go\n")
@@ -100,6 +105,20 @@ func main() {
 
 		case "pipelines", "pipeline", "stages":
 			runList("pipeline", *jsonFlag, *mdFlag)
+
+			return
+
+		case "example", "examples", "template", "templates", "init":
+			exCmd := flag.NewFlagSet("example", flag.ExitOnError)
+			exOut := exCmd.String("out", *outFlag, "Write template source code to file")
+			_ = exCmd.Parse(args[1:])
+
+			kind := ""
+			if len(exCmd.Args()) > 0 {
+				kind = exCmd.Args()[0]
+			}
+
+			runExample(kind, *exOut)
 
 			return
 

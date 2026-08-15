@@ -62,3 +62,21 @@ func TestSpecRegistry(t *testing.T) {
 	require.Contains(t, md, "@form")
 	require.Contains(t, md, "@referer")
 }
+
+func TestExamples(t *testing.T) {
+	require.NotEmpty(t, spec.Examples)
+	require.NotEmpty(t, spec.PrintExampleHelp())
+
+	kinds := []string{"http", "ws", "socket", "pipeline"}
+	for _, k := range kinds {
+		ex := spec.LookupExample(k)
+		require.NotNil(t, ex, "example %s not found", k)
+		require.NotEmpty(t, ex.Title)
+		require.NotEmpty(t, ex.Description)
+		require.NotEmpty(t, ex.SourceCode)
+
+		for _, alias := range ex.Aliases {
+			require.Equal(t, ex, spec.LookupExample(alias))
+		}
+	}
+}
