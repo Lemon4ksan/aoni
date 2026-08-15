@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/lemon4ksan/aoni/internal/codegen/ir"
+	"github.com/lemon4ksan/aoni/internal/codegen/spec"
 )
 
 func validateHTTPMethod(target string, m *ir.MethodIR) *Diagnostic {
@@ -173,37 +174,15 @@ func validateTupleFields(t *ir.TupleIR) []Diagnostic {
 	return nil
 }
 
-var AllKnownDirectives = []string{
-	"aoni:service", "service",
-	"aoni:dto", "dto",
-	"aoni:tuple", "tuple",
-	"aoni:union", "union",
-	"aoni:socket", "socket",
+var AllKnownDirectives = func() []string {
+	var list []string
+	for _, d := range spec.Registry {
+		list = append(list, d.Name)
+		list = append(list, d.Aliases...)
+	}
 
-	"base_url", "engine", "protocol",
-	"requester", "persona", "tls_spec",
-	"p0f", "timeout", "retry",
-	"circuit", "envelope", "auth",
-	"ssh", "ws", "websocket",
-	"type_map", "grpc", "op",
-	"operation", "notify", "event",
-	"call", "get", "post",
-	"put", "delete", "patch",
-	"head", "options", "return",
-	"body", "extract", "codec",
-	"header", "form", "multipart",
-	"preset", "inject", "referer",
-	"unwrap", "query", "field",
-	"param", "cookie", "path",
-	"part", "file", "check",
-	"casing", "format", "idempotent",
-	"sign", "coalesce", "etag",
-	"cache", "probe", "ratelimit",
-	"metric", "stream", "batch",
-	"cast", "packet", "opcode",
-	"job_id", "endpoint",
-	"heartbeat",
-}
+	return list
+}()
 
 func levenshteinDistance(s1, s2 string) int {
 	r1, r2 := []rune(s1), []rune(s2)

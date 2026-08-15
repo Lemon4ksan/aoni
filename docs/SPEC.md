@@ -30,10 +30,10 @@ WS                ::= ' ' | '\t'
 
 ```text
 ┌────────────────────────────────────────────────────────────────────────┐
-│ SERVICE SCOPE (@aoni:service, @base_url, @engine, @type_map)           │
+│ SERVICE / SOCKET SCOPE (@aoni:service, @aoni:socket, @base_url)        │
 │                                                                        │
 │   ┌──────────────────────────────────────────────────────────────────┐ │
-│   │ METHOD SCOPE (@get, @post, @sign, @idempotent, @coalesce)        │ │
+│   │ METHOD SCOPE (@get, @post, @form, @referer, @inject, @check)     │ │
 │   │                                                                  │ │
 │   │   ┌────────────────────────────────────────────────────────────┐ │ │
 │   │   │ PARAMETER SCOPE (@query, @header, @format, @file, @part)   │ │ │
@@ -42,235 +42,153 @@ WS                ::= ' ' | '\t'
 └────────────────────────────────────────────────────────────────────────┘
 
 ┌────────────────────────────────────────────────────────────────────────┐
-│ DTO & STRUCT SCOPE (@aoni:dto, @tuple)                                 │
+│ DTO & STRUCT SCOPE (@aoni:dto, @tuple, @union)                         │
 └────────────────────────────────────────────────────────────────────────┘
 ```
 
 ## 4. Directive Reference
 
-### 4.1. Service-Level Directives
+### Service Scope Directives
 
-Applied to interface type declarations:
-
-| Directive | Arguments | Description |
+| Directive | Arguments / Value | Description |
 | :--- | :--- | :--- |
-| `@aoni:service` | `name="ClientName"` | Marks interface for client code generation. |
-| `@base_url` | `"https://api.domain.com/v1"` | Sets the service default base URL. |
-| `@engine` | `fast` \| `std` \| `custom type="pkg.Requester" required` | Selects underlying engine (`fast.NewClient()`, standard client, or strictly required custom requester interface). |
-| `@timeout` | `"5s"`, `"500ms"` | Sets service-wide default request timeout. |
-| `@type_map` | `<GoType> -> <FormatStrategy>` | Sets package-wide formatting strategy for custom types (e.g. `time.Time -> unix_s`). |
+| `@aoni:service (or @service)` | `name`, `casing`, `prefix` | Marks an interface as a declarative API contract for client code generation. |
+| `@auth` | `type`, `header`, `prefix`, `provider` | Configures automated authentication header or OAuth2 token exchange. |
+| `@base_url` | `"https://api.example.com/v1"` | Sets the service-wide base URL endpoint. |
+| `@casing` | `snake_case \| flatcase \| camelCase \| kebab-case \| PascalCase \| none` | Sets default wire parameter casing style for service or form payload. |
+| `@circuit` | `threshold`, `cooldown` | Configures automated circuit breaking against upstream outages. |
+| `@engine` | `fast \| std \| custom \| required`, `type`, `required` | Selects underlying execution engine (fast.Client, net/http, or strictly required custom requester). |
+| `@envelope` | `"data" \| "result"` | Sets default JSON envelope field to unwrap across all response models. |
+| `@header` | `"Key: Value"` | Adds a static/dynamic default HTTP header to requests or binds parameter to a header. |
+| `@p0f` | `"windows" \| "linux" \| "macos" \| "ios" \| "android"` | Spoofs TCP/IP SYN packet fingerprint (p0f) for OS stack evasion. |
+| `@persona` | `"chrome_133" \| "firefox_135" \| "safari_18"` | Configures Chromium / Firefox / Safari browser impersonation profile. |
+| `@protocol` | `http \| rpc \| socket \| channel \| grpc \| ws \| ssh` | Selects underlying communication protocol. |
+| `@retry` | `attempts`, `backoff`, `max_backoff`, `on_status` | Configures automated retry policy with exponential backoff and jitter. |
+| `@ssh` | `host`, `user`, `key`, `pass_env`, `agent` | Configures SSH connection parameters or command execution. |
+| `@timeout` | `"5s" \| "500ms"` | Sets execution timeout for the service or individual method. |
+| `@tls_spec` | `"chrome_auto"` | Configures TLS ClientHello fingerprint emulation specification. |
+| `@type_map` | `<Type> -> <Strategy>` | Configures package-wide serialization strategy for specific Go types. |
 
-### 4.2. Method-Level Directives
+### Socket Scope Directives
 
-Applied to interface method signatures:
-
-#### HTTP Method & Route
-| Directive | Value / Path | Description |
+| Directive | Arguments / Value | Description |
 | :--- | :--- | :--- |
-| `@get` | `"/path/{param}"` | HTTP GET request. |
-| `@post` | `"/path"` | HTTP POST request. |
-| `@put` | `"/path/{id}"` | HTTP PUT request. |
-| `@delete` | `"/path/{id}"` | HTTP DELETE request. |
-| `@patch` | `"/path/{id}"` | HTTP PATCH request. |
-| `@head` | `"/path"` | HTTP HEAD request. |
+| `@aoni:socket (or @socket)` | — | Marks an interface for persistent multi-core socket facade code generation. |
+| `@endpoint` | `<EndpointType>` | Defines the target connection endpoint struct type for connector dialing. |
+| `@heartbeat` | `interval` *(required)*, `opcode`, `msg` | Configures background ping/heartbeat loop parameters. |
+| `@job_id` | `<JobIDType>` | Defines the integer job ID type used for RPC request/response correlation. |
+| `@opcode` | `<OpCodeType>` | Defines the opcode enum type used for message dispatching. |
+| `@packet` | `<PacketType>` | Defines the decoded packet structure passed through processor and dispatcher. |
 
-#### Browser Emulation, Headers & Injection
-| Directive | Syntax / Arguments | Description |
+### Method Scope Directives
+
+| Directive | Arguments / Value | Description |
 | :--- | :--- | :--- |
-| `@referer` | Template: `"path/{param:escape}"`<br>Keyword: `:origin` \| `:page` \| `:parent` \| `:self` | Formats dynamic `Referer` header directly on a `[128]byte` stack buffer (`0 B/op`). Automatically prepends base URL and supports string transforms (`:escape`, `:query`, `:lower`, `:upper`). |
-| `@preset` | `:xhr` \| `:cors` \| `:navigate` | Injects standard Chromium / browser header presets (`X-Requested-With`, `Sec-Fetch-*`, `Accept`). |
-| `@inject` | `field="sessionid" from="SessionID"`<br>`header="X-CSRF-Token" from="CSRF"`<br>`query="api_key" from="APIKey"` | Zero-cost interface assertion on requester to inject dynamic session tokens, CSRF keys, or secrets into form bodies, headers, or query strings without domain coupling. |
+| `@body` | `<pipeline expression>` | Configures a Wire-Transform pipeline chain for outbound request body payload serialization. |
+| `@cache` | `"1m" \| "30s"` | Enables method-level in-memory response caching TTL. |
+| `@call` | `<pkg.Func>` | Escape hatch: delegates request execution to custom generic dispatcher function. |
+| `@casing` | `snake_case \| flatcase \| camelCase \| kebab-case \| PascalCase \| none` | Sets default wire parameter casing style for service or form payload. |
+| `@check` | `<field> <op> <expected> "<error_message>"` | Emits post-execution assertion check validating response status or payload properties. |
+| `@coalesce` | — | Deduplicates concurrent in-flight requests with identical arguments via SingleFlight. |
+| `@codec` | `<codecFunc>` | Specifies custom combined encoder/decoder codec. |
+| `@decoder` | `<decoderFunc>` | Specifies custom response body decoder function. |
+| `@delete` | `"/path/{var}"` | Defines an HTTP DELETE endpoint route. |
+| `@encoder` | `<encoderFunc>` | Specifies custom request body encoder function. |
+| `@etag` | — | Enables automatic HTTP 304 conditional ETag caching and If-None-Match headers. |
+| `@event` | `<eventName>` | Subscribes to an inbound push event with a typed handler callback. |
+| `@expect_status` | `<status_code>...` | Declares expected success HTTP status codes (returns error if mismatch). |
+| `@extract` | `between`, `regex`, `attr`, `css` | Extracts response payload via regular expressions, boundary slicing, or DOM attribute tokens. |
+| `@form` | `casing` | Encodes request body as application/x-www-form-urlencoded on stack buffer (0 B/op). |
+| `@get` | `"/path/{var}"` | Defines an HTTP GET endpoint route with optional path template variables. |
+| `@grpc` | `"/package.Service/Method"` | Configures gRPC procedure call. |
+| `@grpc-web` | — | Encodes request as 5-byte framed gRPC-Web protocol with trailer validation. |
+| `@head` | `"/path/{var}"` | Defines an HTTP HEAD endpoint route. |
+| `@idempotent (or @idempotency_key)` | — | Injects time-ordered UUIDv7 into Idempotency-Key header on stack buffer (0 B/op). |
+| `@inject` | `field`, `query`, `header`, `from` *(required)* | Performs zero-cost interface assertion on requester to inject dynamic session/CSRF tokens. |
+| `@json` | — | Serializes request body as JSON. |
+| `@multipart` | — | Encodes request body as multipart/form-data with zero-alloc boundary streaming. |
+| `@notify` | `<operationName>` | Defines a one-way fire-and-forget asynchronous notification. |
+| `@op (or @operation)` | `<operationName>` | Defines a generic RPC request-response operation. |
+| `@options` | `"/path/{var}"` | Defines an HTTP OPTIONS endpoint route. |
+| `@patch` | `"/path/{var}"` | Defines an HTTP PATCH endpoint route. |
+| `@post` | `"/path/{var}"` | Defines an HTTP POST endpoint route with optional path template variables. |
+| `@preset` | `:xhr \| :cors \| :navigate` | Injects browser header presets (X-Requested-With, Sec-Fetch-*, Accept). |
+| `@proto` | — | Serializes request body and deserializes response via Protocol Buffers. |
+| `@put` | `"/path/{var}"` | Defines an HTTP PUT endpoint route. |
+| `@raw` | — | Sends raw binary byte slice or io.Reader stream directly. |
+| `@referer` | `<path_template> \| :origin \| :page \| :parent \| :self` | Generates dynamic Referer header directly on a 128-byte stack buffer (0 B/op). |
+| `@return` | `<pipeline expression>` | Configures a Wire-Transform pipeline chain for scraping, decoding, or transforming responses. |
+| `@sign` | `secret`, `key_env`, `algo`, `header` | Calculates cryptographic HMAC request signature and attaches auth headers. |
+| `@ssh` | `host`, `user`, `key`, `pass_env`, `agent` | Configures SSH connection parameters or command execution. |
+| `@stream` | `sse \| ndjson \| raw` | Enables response streaming mode via Server-Sent Events, NDJSON, or raw chunked channel. |
+| `@timeout` | `"5s" \| "500ms"` | Sets execution timeout for the service or individual method. |
+| `@unwrap` | `<fieldName>` | Unwraps specific field from JSON response envelope before returning. |
+| `@ws (or @websocket)` | `<event_name>` | Configures WebSocket / Socket.IO event emission or subscription. |
 
-#### Payload & Serialization Mode
-| Directive | Arguments | Description |
+### Param Scope Directives
+
+| Directive | Arguments / Value | Description |
 | :--- | :--- | :--- |
-| `@json` | — | Request body is serialized as JSON (default for POST/PUT). |
-| `@form` | — | Request parameters are encoded as `application/x-www-form-urlencoded`. |
-| `@multipart` | — | Request is encoded as `multipart/form-data`. |
-| `@proto` | — | Request/response are serialized via Google Protocol Buffers. |
-| `@grpc-web` | — | gRPC-Web protocol with 5-byte framing and trailer validation. |
-| `@raw` | — | Raw binary stream payload (`io.Reader` / `[]byte`). |
-| `@decoder` | `customDecoderFunc` | Custom response body decoder function. |
-| `@encoder` | `customEncoderFunc` | Custom request body encoder function. |
-| `@call` | `customPkg.Func` | Escape hatch: invokes user-defined generic dispatcher function `func[T](ctx, requester, path, ...mods) (*T, error)`. |
+| `@cast` | `<GoType>` | Applies explicit type casting before serialization. |
+| `@cookie` | `<cookie_name>` | Binds function parameter to Cookie header. |
+| `@field` | `<wire_name>` | Binds function parameter to application/x-www-form-urlencoded or multipart form field. |
+| `@file` | `name`, `filename`, `content_type` | Binds byte slice, string, or io.Reader to multipart file upload part. |
+| `@format` | `unix_s \| unix_ms \| rfc3339 \| bool_int \| flag \| json \| comma \| pipe \| space \| bracket`, `layout` | Specifies serialization format strategy for parameter value. |
+| `@header` | `"Key: Value"` | Adds a static/dynamic default HTTP header to requests or binds parameter to a header. |
+| `@part` | `<part_name>` | Binds function parameter to multipart form part. |
+| `@path (or @param)` | `<var_name>` | Binds function parameter to URL path template variable. |
+| `@query` | `<wire_name>` | Binds function parameter to URL query parameter with zero-alloc string formatting. |
 
-#### Enterprise & Network Reliability
-| Directive | Arguments | Description |
+### Struct Scope Directives
+
+| Directive | Arguments / Value | Description |
 | :--- | :--- | :--- |
-| `@idempotent` | — | Injects time-ordered UUIDv7 into `Idempotency-Key` header (0 B/op). |
-| `@sign` | `algo="hmac_sha256"` `key_env="SECRET"` `header="X-Signature"` | Injects cryptographic HMAC signature and timestamp header. |
-| `@coalesce` | — | In-flight request deduplication (Singleflight) across concurrent goroutines. |
-| `@etag` | — | RFC 9111 conditional caching (`If-None-Match` + 304 body reconstruction). |
-| `@timeout` | `"2s"` | Overrides request timeout for this method. |
-| `@cache_ttl` | `"30s"` | Configures in-memory response cache TTL. |
-| `@expect` | `status=200,201` | Validates HTTP response status codes, returning error on mismatch. |
-| `@unwrap` | `"data"` | Unwraps single JSON field from response envelope. |
+| `@aoni:dto (or @dto)` | `casing`, `omitempty` | Generates compiled AppendFormData and AppendQuery zero-allocation serialization methods. |
+| `@aoni:tuple (or @tuple)` | — | Generates zero-alloc custom UnmarshalJSON decoder for positional JSON arrays (e.g. [12.5, 100, "ok"]). |
+| `@aoni:union (or @union)` | — | Generates discriminator-based polymorphism and JSON unmarshaling for tagged unions. |
 
-#### Web Scraping (`@extract`)
-| Strategy | Syntax | Description |
-| :--- | :--- | :--- |
-| **Regex** | `@extract regex="<div id='val'>(.*?)</div>"` | Extracts regex capture group directly into JSON unmarshaler. |
-| **Between** | `@extract between="data-config=\"" and="\""` | Zero-allocation byte scan (`bytes.Index`) for substring extraction. |
-| **Prefix/Suffix** | `@extract prefix="var conf = " suffix=";"` | Alias for between/and extraction. |
-| **HTML Token** | `@extract css="#profile_config" attr="data-json"` | Fast streaming HTML tokenizer attribute extractor. |
-| **Custom** | `@extract custom=MyExtractorFunc` | Calls user-defined extractor `func([]byte) (T, error)`. |
+---
 
-### 4.3. Parameter-Level Directives
+## 5. End-to-End Real World Recipes
 
-Applied directly above or trailing parameter definitions:
-
-| Directive | Arguments | Description |
-| :--- | :--- | :--- |
-| `@query` | `"wire_name"` | Binds parameter to URL query parameter. |
-| `@header` | `"X-Custom-Header"` | Binds parameter to HTTP request header. |
-| `@cookie` | `"session_id"` | Injects parameter into HTTP `Cookie` header. |
-| `@field` | `"form_field_name"` | Binds parameter to Form URL-Encoded field. |
-| `@part` | `"part_name"` | Binds parameter to Multipart form field. |
-| `@file` | `name="avatar" filename="{fn}" content_type="{ct}"` | Binds `io.Reader` / `[]byte` as a multipart file upload. |
-| `@format` | Strategy (see §5) | Formatting rules for dates, slices, booleans, and nested JSON. |
-
-### 4.4. DTO & Struct-Level Directives
-
-Applied to request/response struct declarations:
-
-| Directive | Arguments | Description |
-| :--- | :--- | :--- |
-| `@aoni:dto` | `casing=snake_case` \| `camelCase` \| `kebab-case` | Generates 0-alloc `AppendFormData`, `AppendQuery`, `EncodeValues` methods. |
-| `@tuple` | — | Models fixed-length JSON arrays (e.g. `[timestamp, open, high, low, close]`). |
-
-## 5. Formatting Strategies (`@format`)
-
-### Date & Time (`time.Time`)
-- `@format unix_s`: Unix timestamp in seconds (`strconv.AppendInt(buf, t.Unix(), 10)`).
-- `@format unix_ms`: Unix timestamp in milliseconds (`strconv.AppendInt(buf, t.UnixMilli(), 10)`).
-- `@format rfc3339`: RFC 3339 timestamp string (`2026-08-14T21:00:00Z`).
-- `@format layout="2006-01-02"`: Custom date layout format.
-
-### Slices & Collections (`[]T`)
-- `@format comma`: Comma-separated list (`tag1,tag2,tag3`).
-- `@format pipe`: Pipe-separated list (`1|2|3`).
-- `@format space`: Space-separated list (`read write admin`).
-- `@format bracket`: PHP/Rails array format (`tags[]=a&tags[]=b`).
-
-### Booleans (`bool`)
-- `@format bool_int`: Emits 1 (true) or 0 (false).
-- `@format flag`: Emits key only if true (`compact` without `=true`).
-
-### JSON-in-Form (`struct`)
-- `@format json_string`: Marshals struct to JSON and URL-escapes into form field.
-
-## 6. Copy-Paste Real-World Recipes
-
-### Recipe 1: Standard CRUD REST Service
+### Recipe 1: Modern REST Client with Smart Casing & Referer Stack Buffer
 ```go
-// @aoni:service
-// @base_url "https://api.github.com"
-type GitHubAPI interface {
-    // @get "users/{username}"
-    GetUser(ctx context.Context, username string, mods ...aoni.RequestModifier) (*User, error)
+// @aoni:service casing=snake_case
+// @base_url "https://steamcommunity.com/"
+// @header "Origin: https://steamcommunity.com"
+type TradeCommunityAPI interface {
+    // @post "tradeoffer/new/send"
+    // @form casing=flatcase
+    // @header "Referer: https://steamcommunity.com/tradeoffer/new/?partner={partnerID}"
+    SendOffer(ctx context.Context, partnerID uint32, req SendNewTradeOfferRequest, mods ...aoni.RequestModifier) (*SendNewTradeOfferResponse, error)
 
-    // @get "users/{username}/repos"
-    ListRepos(
-        ctx context.Context,
-        username string,
-        // @query "sort"
-        sort string,
-        // @query "per_page"
-        perPage int,
-        mods ...aoni.RequestModifier,
-    ) ([]Repo, error)
-
-    // @post "user/repos"
-    CreateRepo(ctx context.Context, req *CreateRepoRequest, mods ...aoni.RequestModifier) (*Repo, error)
-
-    // @delete "repos/{owner}/{repo}"
-    // @expect status=204
-    DeleteRepo(ctx context.Context, owner string, repo string, mods ...aoni.RequestModifier) error
-}
-
-// @aoni:dto casing=snake_case
-type CreateRepoRequest struct {
-    Name        string
-    Description string
-    Private     bool
+    // @post "tradeoffer/{offerID}/accept"
+    // @form casing=flatcase
+    // @header "Referer: https://steamcommunity.com/tradeoffer/{offerID}/"
+    AcceptOffer(ctx context.Context, offerID uint64, req AcceptTradeOfferRequest, mods ...aoni.RequestModifier) (*AcceptTradeOfferResponse, error)
 }
 ```
 
-### Recipe 2: Crypto Exchange API (HMAC Signature + Idempotency + Singleflight)
+### Recipe 2: Zero-Alloc HTML Scraping & Pipeline Transformation
 ```go
 // @aoni:service
-// @base_url "https://api.binance.com"
-// @engine fast
-type BinanceAPI interface {
-    // 1. High-throughput market data with Singleflight request coalescing
-    // @get "api/v3/ticker/price"
-    // @coalesce
-    GetPrice(ctx context.Context, symbol string, mods ...aoni.RequestModifier) (*PriceTicker, error)
-
-    // 2. Financial transaction with zero-alloc Idempotency Key & HMAC signing
-    // @post "api/v3/order"
-    // @idempotent
-    // @sign hmac_sha256 key_env="BINANCE_SECRET"
-    CreateOrder(ctx context.Context, req *NewOrderRequest, mods ...aoni.RequestModifier) (*OrderResult, error)
-}
-
-// @aoni:dto casing=snake_case
-type NewOrderRequest struct {
-    Symbol   string
-    Side     string
-    Type     string
-    Quantity float64
-    Price    float64
-}
-
-// @aoni:dto casing=snake_case
-type OrderResult struct {
-    OrderID uint64
-    Status  string
-}
-```
-
-### Recipe 3: Browser Emulation & Web Scraping (Steam Community Market)
-```go
-// @aoni:service
-// @engine custom type="community.Requester" required
 // @base_url "https://steamcommunity.com"
-type SteamMarketAPI interface {
-    // 1. Authenticated JSON form submission with XHR preset & dynamic Referer template
-    // @post "market/createbuyorder"
-    // @form
-    // @preset :xhr
-    // @inject field="sessionid" from="SessionID"
-    // @referer "market/listings/{appID}/{marketHashName:escape}"
-    CreateBuyOrder(
-        ctx context.Context,
-        // @field "appid"
-        appID uint32,
-        // @field "market_hash_name"
-        marketHashName string,
-        // @field "price_total"
-        priceTotal string,
-        // @field "quantity"
-        quantity int,
-        mods ...aoni.RequestModifier,
-    ) (*CreateBuyOrderResponse, error)
-
-    // 2. Scrape dynamic configuration from HTML DOM with canonical page referer
+type SteamProfileAPI interface {
     // @get "profiles/{steamID}/edit/info"
-    // @preset :navigate
-    // @referer :origin
-    // @extract css="#profile_edit_config" attr="data-profile-edit"
-    GetEditConfig(ctx context.Context, steamID string, mods ...aoni.RequestModifier) (*ProfileConfig, error)
+    // @return body | attr(css="#profile_edit_config", name="data-profile-edit") | html_unescape | json
+    GetEditConfig(ctx context.Context, steamID uint64, mods ...aoni.RequestModifier) (*ProfileEditConfig, error)
+}
+```
 
-    // 3. Multipart Avatar Upload with Dynamic File Metadata & Injected Session ID
+### Recipe 3: Multipart File Upload
+```go
+// @aoni:service
+// @base_url "https://steamcommunity.com"
+type FileUploaderAPI interface {
     // @post "actions/FileUploader"
     // @multipart
-    // @inject field="sessionid" from="SessionID"
-    // @referer "profiles/{steamID}/edit"
     UploadAvatar(
         ctx context.Context,
-        steamID string,
-        // @part "type"
         uploadType string,
         // @file name="avatar" filename="{filename}" content_type="{contentType}"
         file []byte,
@@ -281,31 +199,42 @@ type SteamMarketAPI interface {
 }
 ```
 
-### Recipe 4: Tuple Data Serialization (Candlestick / OHLCV Data)
-```go
-// @tuple
-type Candlestick struct {
-    OpenTime  int64   // index 0
-    Open      string  // index 1
-    High      string  // index 2
-    Low       string  // index 3
-    Close     string  // index 4
-    Volume    string  // index 5
-    CloseTime int64   // index 6
-}
-```
+---
 
-## 7. CLI & DX Reference (`cmd/aoni-gen`)
+## 6. CLI & DX Reference (`cmd/aoni-gen`)
 
 ### Installation
 ```bash
 go install github.com/lemon4ksan/aoni/cmd/aoni-gen@latest
 ```
 
-### Usage
+### Interactive Directives Reference (like `golangci-lint linters`)
+```bash
+# List all directives grouped by scope with arguments and descriptions
+aoni-gen list
+
+# Filter directives by scope
+aoni-gen list -scope=method
+aoni-gen list -scope=service
+aoni-gen list -scope=socket
+
+# Output specification as Markdown or JSON
+aoni-gen list -markdown
+aoni-gen list -json
+
+# Explain specific directive with syntax and examples
+aoni-gen explain referer
+aoni-gen explain form
+aoni-gen explain inject
+```
+
+### Code Generation & Continuous Watching
 ```bash
 # Scan and compile all packages recursively
 aoni-gen ./...
+
+# Validate contracts without generating code
+aoni-gen check ./...
 
 # Watch mode for instantaneous recompilation on save in IDE
 aoni-gen -watch ./...

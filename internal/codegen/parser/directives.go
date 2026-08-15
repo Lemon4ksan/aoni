@@ -9,28 +9,12 @@ import (
 	"strings"
 
 	"github.com/lemon4ksan/aoni/internal/codegen/ir"
+	"github.com/lemon4ksan/aoni/internal/codegen/spec"
 )
 
 // IsKnownDirective reports whether a directive name is recognized by aoni-gen.
 func IsKnownDirective(name string) bool {
-	switch strings.ToLower(name) {
-	case "aoni:service", "service",
-		"aoni:dto", "dto",
-		"aoni:tuple", "tuple",
-		"aoni:union", "union",
-		"base_url", "engine", "protocol", "requester", "persona", "tls_spec", "p0f",
-		"timeout", "retry", "circuit", "envelope", "auth", "ssh", "ws", "websocket",
-		"type_map", "grpc", "op", "operation", "notify", "event", "call",
-		"get", "post", "put", "delete", "patch", "head", "options",
-		"return", "body", "extract", "codec", "header", "form", "multipart",
-		"preset", "inject", "referer", "unwrap", "query", "field", "param",
-		"cookie", "path", "part", "file", "check", "casing",
-		"format", "idempotent", "sign", "coalesce", "etag", "cache", "probe", "ratelimit", "metric", "stream", "batch", "cast",
-		"aoni:socket", "socket", "packet", "opcode", "job_id", "endpoint", "heartbeat":
-		return true
-	default:
-		return false
-	}
+	return spec.IsKnownDirective(name)
 }
 
 // ApplyServiceDirective updates ServiceIR according to a parsed directive.
