@@ -780,7 +780,8 @@ func (p *Parser) extractDirectives(root *ir.RootIR, target string, lines []strin
 
 func hasServiceDirective(directives []*Directive) bool {
 	for _, d := range directives {
-		if d.Name == "aoni:service" || d.Name == "service" || d.Name == "base_url" {
+		if d.Name == "aoni:service" || d.Name == "service" || d.Name == "base_url" ||
+			d.Name == "aoni:socket" || d.Name == "socket" {
 			return true
 		}
 	}

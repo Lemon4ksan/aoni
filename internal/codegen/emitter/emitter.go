@@ -78,7 +78,8 @@ func (e *Emitter) emitImports(buf *bytes.Buffer, root *ir.RootIR) {
 	hasFastClient := false
 	if root != nil {
 		for _, svc := range root.Services {
-			if svc.Protocol != ir.ProtocolRPC && svc.Protocol != ir.ProtocolChannel {
+			if svc.Protocol != ir.ProtocolRPC && svc.Protocol != ir.ProtocolChannel &&
+				svc.Protocol != ir.ProtocolSocket {
 				hasHTTP = true
 
 				isStrict := svc.Engine == ir.EngineRequired || svc.RequesterType != ""
@@ -141,9 +142,11 @@ func (e *Emitter) emitImports(buf *bytes.Buffer, root *ir.RootIR) {
 	hasRequest := false
 	if root != nil {
 		for _, svc := range root.Services {
-			if svc.Protocol != ir.ProtocolRPC && svc.Protocol != ir.ProtocolChannel {
+			if svc.Protocol != ir.ProtocolRPC && svc.Protocol != ir.ProtocolChannel &&
+				svc.Protocol != ir.ProtocolSocket {
 				hasRequest = true
-			} else if svc.RequesterType == "" || strings.Contains(svc.RequesterType, "request.") {
+			} else if svc.Protocol != ir.ProtocolSocket &&
+				(svc.RequesterType == "" || strings.Contains(svc.RequesterType, "request.")) {
 				hasRequest = true
 			}
 		}
@@ -195,12 +198,28 @@ func (e *Emitter) emitImports(buf *bytes.Buffer, root *ir.RootIR) {
 		buf.WriteString("\t\"google.golang.org/protobuf/proto\"\n")
 	}
 
+	hasSocket := false
+	if root != nil {
+		for _, svc := range root.Services {
+			if svc.Protocol == ir.ProtocolSocket {
+				hasSocket = true
+			}
+		}
+	}
+
+	if hasSocket {
+		buf.WriteString("\t\"github.com/lemon4ksan/aoni/realtime/socket\"\n")
+		buf.WriteString("\t\"github.com/lemon4ksan/aoni/realtime/socket/connector\"\n")
+		buf.WriteString("\t\"github.com/lemon4ksan/aoni/realtime/socket/dispatcher\"\n")
+		buf.WriteString("\t\"github.com/lemon4ksan/aoni/realtime/socket/processor\"\n")
+	}
+
 	// User custom imports (exclude standard imports already emitted)
 	stdImports := map[string]bool{
 		"bytes": true, "context": true, "encoding/json": true, "errors": true,
 		"fmt": true, "io": true, "mime/multipart": true, "net/http": true,
 		"net/textproto": true, "net/url": true, "os": true, "regexp": true,
-		"strconv": true, "strings": true, "sync": true, "time": true,
+		"strconv": true, "strings": true, "sync": true, "sync/atomic": true, "time": true,
 	}
 
 	for _, imp := range root.Imports {
@@ -229,6 +248,14 @@ func collectStdImports(root *ir.RootIR) []string {
 		for _, svc := range root.Services {
 			if svc.Engine == ir.EngineNetHTTP {
 				needed["net/http"] = true
+			}
+
+			if svc.Protocol == ir.ProtocolSocket {
+				needed["context"] = true
+				needed["errors"] = true
+				needed["sync"] = true
+				needed["sync/atomic"] = true
+				needed["time"] = true
 			}
 
 			if svc.Protocol == ir.ProtocolRPC || svc.Protocol == ir.ProtocolChannel {
@@ -280,6 +307,10 @@ func collectStdImports(root *ir.RootIR) []string {
 	}
 
 	for _, svc := range root.Services {
+		if svc.Protocol == ir.ProtocolSocket {
+			continue
+		}
+
 		if svc.Engine == ir.EngineRequired ||
 			(svc.Protocol != ir.ProtocolRPC && svc.Protocol != ir.ProtocolChannel && svc.RequesterType != "") {
 			needed["errors"] = true
@@ -380,29 +411,38 @@ func collectStdImports(root *ir.RootIR) []string {
 		}
 	}
 
-	for _, s := range root.Structs {
-		for _, f := range s.Fields {
-			if f.Type.Name == "time.Time" {
-				needed["time"] = true
-			}
-
-			if strings.HasPrefix(f.Type.Name, "int") || strings.HasPrefix(f.Type.Name, "uint") {
-				needed["strconv"] = true
-			}
-
-			needed["net/url"] = true
+	hasSocketOnly := len(root.Services) > 0
+	for _, svc := range root.Services {
+		if svc.Protocol != ir.ProtocolSocket {
+			hasSocketOnly = false
 		}
 	}
 
-	for range root.Tuples {
-		needed["encoding/json"] = true
-		needed["fmt"] = true
+	if !hasSocketOnly {
+		for _, s := range root.Structs {
+			for _, f := range s.Fields {
+				if f.Type.Name == "time.Time" {
+					needed["time"] = true
+				}
+
+				if strings.HasPrefix(f.Type.Name, "int") || strings.HasPrefix(f.Type.Name, "uint") {
+					needed["strconv"] = true
+				}
+
+				needed["net/url"] = true
+			}
+		}
+
+		for range root.Tuples {
+			needed["encoding/json"] = true
+			needed["fmt"] = true
+		}
 	}
 
 	order := []string{
 		"bytes", "context", "encoding/json", "errors", "fmt", "io",
 		"mime/multipart", "net/http", "net/textproto", "net/url", "os", "regexp",
-		"strconv", "sync", "time",
+		"strconv", "sync", "sync/atomic", "time",
 	}
 
 	var res []string
@@ -431,6 +471,11 @@ func isCompiledDTO(root *ir.RootIR, typeName string) bool {
 }
 
 func (e *Emitter) emitService(buf *bytes.Buffer, root *ir.RootIR, svc *ir.ServiceIR) {
+	if svc.Protocol == ir.ProtocolSocket {
+		e.emitSocketService(buf, root, svc)
+		return
+	}
+
 	clientStructName := lowerFirst(svc.Name) + "Client"
 
 	if svc.Protocol == ir.ProtocolRPC || svc.Protocol == ir.ProtocolChannel {
@@ -2255,4 +2300,226 @@ func formatOpID(opID string, isQuoted bool) string {
 	}
 
 	return opID
+}
+
+func (e *Emitter) emitSocketService(buf *bytes.Buffer, root *ir.RootIR, svc *ir.ServiceIR) {
+	clientStructName := lowerFirst(svc.Name) + "Impl"
+
+	endpointType := "string"
+	packetType := "any"
+	opCodeType := "int"
+	jobIDType := "uint64"
+
+	if svc.SocketConfig != nil {
+		if svc.SocketConfig.EndpointType != "" {
+			endpointType = svc.SocketConfig.EndpointType
+		}
+
+		if svc.SocketConfig.PacketType != "" {
+			packetType = svc.SocketConfig.PacketType
+		}
+
+		if svc.SocketConfig.OpCodeType != "" {
+			opCodeType = svc.SocketConfig.OpCodeType
+		}
+
+		if svc.SocketConfig.JobIDType != "" {
+			jobIDType = svc.SocketConfig.JobIDType
+		}
+	}
+
+	configTypeName := svc.Name + "Config"
+	if svc.Name == "Socket" || svc.Name == "Client" {
+		configTypeName = "Config"
+	}
+
+	fmt.Fprintf(buf, "// %s configures the %s socket subsystem.\n", configTypeName, svc.Name)
+	fmt.Fprintf(buf, "type %s struct {\n", configTypeName)
+	fmt.Fprintf(buf, "\tConnector connector.Config[%s]\n", endpointType)
+	fmt.Fprintf(buf, "\tProcessor processor.Config\n")
+	fmt.Fprintf(buf, "\tDispatcher dispatcher.Config\n")
+	fmt.Fprintf(buf, "\tFramer socket.Framer\n")
+	fmt.Fprintf(buf, "\tCipher socket.Cipher\n")
+	fmt.Fprintf(buf, "\tDecode processor.DecodeFunc[%s]\n", packetType)
+	fmt.Fprintf(buf, "\tExtractor dispatcher.Extractor[%s, %s, %s]\n", opCodeType, jobIDType, packetType)
+	fmt.Fprintf(buf, "}\n\n")
+
+	fmt.Fprintf(buf, "type %s struct {\n", clientStructName)
+	fmt.Fprintf(buf, "\tcfg %s\n", configTypeName)
+	fmt.Fprintf(buf, "\tconn *connector.Connector[%s]\n", endpointType)
+	fmt.Fprintf(buf, "\tproc *processor.Processor[%s]\n", packetType)
+	fmt.Fprintf(buf, "\tdispatch *dispatcher.Dispatcher[%s, %s, %s]\n", opCodeType, jobIDType, packetType)
+	fmt.Fprintf(buf, "\tclosed atomic.Bool\n")
+	fmt.Fprintf(buf, "\tmu sync.RWMutex\n")
+	fmt.Fprintf(buf, "\theartbeatCancel context.CancelFunc\n")
+	fmt.Fprintf(buf, "}\n\n")
+
+	constructorName := "New" + svc.Name
+	if svc.Name == "Socket" || svc.Name == "Client" {
+		constructorName = "New"
+	}
+
+	fmt.Fprintf(buf, "// %s initializes a new %s socket instance.\n", constructorName, svc.Name)
+	fmt.Fprintf(buf, "func %s(cfg %s) %s {\n", constructorName, configTypeName, svc.Name)
+	fmt.Fprintf(buf, "\ts := &%s{cfg: cfg}\n", clientStructName)
+	fmt.Fprintf(buf, "\tif cfg.Framer != nil {\n\t\ts.cfg.Connector.Framer = cfg.Framer\n\t}\n")
+	fmt.Fprintf(buf, "\tif cfg.Cipher != nil {\n\t\ts.cfg.Connector.Cipher = cfg.Cipher\n\t}\n")
+	fmt.Fprintf(buf, "\ts.conn = connector.New[%s](s.cfg.Connector)\n", endpointType)
+	fmt.Fprintf(
+		buf,
+		"\ts.dispatch = dispatcher.New[%s, %s, %s](s.cfg.Dispatcher, s.conn, s.cfg.Extractor)\n",
+		opCodeType,
+		jobIDType,
+		packetType,
+	)
+	fmt.Fprintf(
+		buf,
+		"\ts.proc = processor.New[%s](s.cfg.Processor, s.conn.C(), s.dispatch, s.cfg.Decode)\n",
+		packetType,
+	)
+	fmt.Fprintf(buf, "\treturn s\n}\n\n")
+
+	for _, m := range svc.Methods {
+		switch m.Name {
+		case "Connect":
+			fmt.Fprintf(
+				buf,
+				"func (s *%s) Connect(ctx context.Context, endpoint %s) error {\n",
+				clientStructName,
+				endpointType,
+			)
+			buf.WriteString("\tif s.closed.Load() {\n\t\treturn errors.New(\"socket: closed\")\n\t}\n")
+			buf.WriteString("\ts.proc.Start()\n")
+			buf.WriteString("\treturn s.conn.Connect(ctx, endpoint)\n}\n\n")
+
+		case "Disconnect":
+			fmt.Fprintf(buf, "func (s *%s) Disconnect() error {\n", clientStructName)
+			buf.WriteString("\treturn s.conn.Disconnect()\n}\n\n")
+
+		case "Close":
+			fmt.Fprintf(buf, "func (s *%s) Close() error {\n", clientStructName)
+			buf.WriteString("\tif s.closed.Swap(true) {\n\t\treturn nil\n\t}\n")
+			buf.WriteString("\ts.mu.Lock()\n")
+			buf.WriteString(
+				"\tif s.heartbeatCancel != nil {\n\t\ts.heartbeatCancel()\n\t\ts.heartbeatCancel = nil\n\t}\n",
+			)
+			buf.WriteString("\ts.mu.Unlock()\n")
+			buf.WriteString("\tvar errs []error\n")
+			buf.WriteString("\terrs = append(errs, s.conn.Close())\n")
+			buf.WriteString("\ts.proc.Stop()\n")
+			buf.WriteString("\terrs = append(errs, s.dispatch.Close())\n")
+			buf.WriteString("\treturn errors.Join(errs...)\n}\n\n")
+
+		case "IsConnected":
+			fmt.Fprintf(buf, "func (s *%s) IsConnected() bool {\n", clientStructName)
+			buf.WriteString("\treturn s.conn.IsConnected() && !s.closed.Load()\n}\n\n")
+
+		case "Connector":
+			fmt.Fprintf(
+				buf,
+				"func (s *%s) Connector() *connector.Connector[%s] {\n\treturn s.conn\n}\n\n",
+				clientStructName,
+				endpointType,
+			)
+
+		case "Dispatcher":
+			fmt.Fprintf(
+				buf,
+				"func (s *%s) Dispatcher() *dispatcher.Dispatcher[%s, %s, %s] {\n\treturn s.dispatch\n}\n\n",
+				clientStructName,
+				opCodeType,
+				jobIDType,
+				packetType,
+			)
+
+		default:
+			switch {
+			case m.IsEvent || m.Operation == ir.OpEvent || strings.HasPrefix(m.Name, "Register"):
+				if len(m.Params) >= 2 {
+					p0Type := formatType(m.Params[0].GoType)
+
+					p1Type := formatType(m.Params[1].GoType)
+					if strings.Contains(strings.ToLower(m.Name), "service") || p0Type == "string" {
+						fmt.Fprintf(
+							buf,
+							"func (s *%s) %s(%s string, %s %s) {\n",
+							clientStructName,
+							m.Name,
+							m.Params[0].GoName,
+							m.Params[1].GoName,
+							p1Type,
+						)
+						fmt.Fprintf(
+							buf,
+							"\ts.dispatch.RegisterMethodHandler(%s, %s)\n}\n\n",
+							m.Params[0].GoName,
+							m.Params[1].GoName,
+						)
+					} else {
+						fmt.Fprintf(
+							buf,
+							"func (s *%s) %s(%s %s, %s %s) {\n",
+							clientStructName,
+							m.Name,
+							m.Params[0].GoName,
+							p0Type,
+							m.Params[1].GoName,
+							p1Type,
+						)
+						fmt.Fprintf(
+							buf,
+							"\ts.dispatch.RegisterHandler(%s, %s)\n}\n\n",
+							m.Params[0].GoName,
+							m.Params[1].GoName,
+						)
+					}
+				}
+
+			case m.Operation == ir.OpRPC || strings.HasSuffix(m.Name, "Sync"):
+				retType := formatMethodReturns(m.Return)
+				paramsStr := formatMethodParams(m.Params)
+				fmt.Fprintf(buf, "func (s *%s) %s(%s) %s {\n", clientStructName, m.Name, paramsStr, retType)
+				buf.WriteString("\tif s.closed.Load() {\n")
+
+				if m.Return != nil && !m.Return.IsVoid {
+					tName := formatType(m.Return.SuccessType)
+					fmt.Fprintf(buf, "\t\tvar zero %s\n\t\treturn zero, errors.New(\"socket: closed\")\n", tName)
+				} else {
+					buf.WriteString("\t\treturn errors.New(\"socket: closed\")\n")
+				}
+
+				buf.WriteString("\t}\n")
+				buf.WriteString("\tjobID := s.dispatch.NextJobID()\n")
+				buf.WriteString("\treturn s.dispatch.SendSync(ctx, jobID, req)\n}\n\n")
+
+			default:
+				paramsStr := formatMethodParams(m.Params)
+				retType := formatMethodReturns(m.Return)
+				fmt.Fprintf(buf, "func (s *%s) %s(%s) %s {\n", clientStructName, m.Name, paramsStr, retType)
+				buf.WriteString("\tif s.closed.Load() {\n\t\treturn errors.New(\"socket: closed\")\n\t}\n")
+				buf.WriteString("\treturn s.conn.Send(ctx, req)\n}\n\n")
+			}
+		}
+	}
+
+	if svc.SocketConfig != nil && svc.SocketConfig.Heartbeat != nil {
+		fmt.Fprintf(buf, "// StartHeartbeat initiates a background heartbeat loop.\n")
+		fmt.Fprintf(buf, "func (s *%s) StartHeartbeat(interval time.Duration) error {\n", clientStructName)
+		buf.WriteString("\tif s.closed.Load() {\n\t\treturn errors.New(\"socket: closed\")\n\t}\n")
+		buf.WriteString("\ts.mu.Lock()\n")
+		buf.WriteString("\tif s.heartbeatCancel != nil {\n\t\ts.heartbeatCancel()\n\t}\n")
+		buf.WriteString("\tctx, cancel := context.WithCancel(context.Background())\n")
+		buf.WriteString("\ts.heartbeatCancel = cancel\n")
+		buf.WriteString("\ts.mu.Unlock()\n\n")
+		buf.WriteString("\tgo func() {\n")
+		buf.WriteString("\t\tticker := time.NewTicker(interval)\n")
+		buf.WriteString("\t\tdefer ticker.Stop()\n")
+		buf.WriteString("\t\tfor {\n")
+		buf.WriteString("\t\t\tselect {\n")
+		buf.WriteString("\t\t\tcase <-ticker.C:\n")
+		buf.WriteString("\t\t\t\tif !s.IsConnected() {\n\t\t\t\t\tcontinue\n\t\t\t\t}\n")
+		buf.WriteString("\t\t\tcase <-ctx.Done():\n\t\t\t\treturn\n")
+		buf.WriteString("\t\t\t}\n\t\t}\n\t}()\n")
+		buf.WriteString("\treturn nil\n}\n\n")
+	}
 }

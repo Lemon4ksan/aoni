@@ -25,7 +25,8 @@ func IsKnownDirective(name string) bool {
 		"return", "body", "extract", "codec", "header", "form", "multipart",
 		"preset", "inject", "referer", "unwrap", "query", "field", "param",
 		"cookie", "path", "part", "file", "check", "casing",
-		"format", "idempotent", "sign", "coalesce", "etag", "cache", "probe", "ratelimit", "metric", "stream", "batch", "cast":
+		"format", "idempotent", "sign", "coalesce", "etag", "cache", "probe", "ratelimit", "metric", "stream", "batch", "cast",
+		"aoni:socket", "socket", "packet", "opcode", "job_id", "endpoint", "heartbeat":
 		return true
 	default:
 		return false
@@ -173,6 +174,56 @@ func ApplyServiceDirective(s *ir.ServiceIR, d *Directive) {
 		}
 
 		s.Protocol = ir.ProtocolGRPC
+
+	case "aoni:socket", "socket":
+		s.Protocol = ir.ProtocolSocket
+		if s.SocketConfig == nil {
+			s.SocketConfig = &ir.SocketConfigIR{}
+		}
+
+	case "packet":
+		if s.SocketConfig == nil {
+			s.SocketConfig = &ir.SocketConfigIR{}
+		}
+
+		s.SocketConfig.PacketType = d.Value
+
+	case "opcode":
+		if s.SocketConfig == nil {
+			s.SocketConfig = &ir.SocketConfigIR{}
+		}
+
+		s.SocketConfig.OpCodeType = d.Value
+
+	case "job_id":
+		if s.SocketConfig == nil {
+			s.SocketConfig = &ir.SocketConfigIR{}
+		}
+
+		s.SocketConfig.JobIDType = d.Value
+
+	case "endpoint":
+		if s.SocketConfig == nil {
+			s.SocketConfig = &ir.SocketConfigIR{}
+		}
+
+		s.SocketConfig.EndpointType = d.Value
+
+	case "heartbeat":
+		if s.SocketConfig == nil {
+			s.SocketConfig = &ir.SocketConfigIR{}
+		}
+
+		hb := &ir.HeartbeatIR{
+			Interval: d.Args["interval"],
+			OpCode:   d.Args["op"],
+			MsgType:  d.Args["msg"],
+		}
+		if hb.Interval == "" {
+			hb.Interval = d.Value
+		}
+
+		s.SocketConfig.Heartbeat = hb
 	}
 }
 

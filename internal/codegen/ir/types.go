@@ -45,10 +45,27 @@ type ServiceIR struct {
 	Circuit       *CircuitBreakerIR
 	AuthStrategy  *AuthStrategyIR
 	SSHConfig     *SSHConfigIR
+	SocketConfig  *SocketConfigIR
 	Headers       []HeaderIR
 	Envelope      *EnvelopeIR
 	TypeMaps      map[string]FormatStrategy
 	Methods       []*MethodIR
+}
+
+// SocketConfigIR holds configuration parameters for generated generic socket facades.
+type SocketConfigIR struct {
+	PacketType   string
+	OpCodeType   string
+	JobIDType    string
+	EndpointType string
+	Heartbeat    *HeartbeatIR
+}
+
+// HeartbeatIR configures background ping/heartbeat loop parameters.
+type HeartbeatIR struct {
+	Interval string
+	OpCode   string
+	MsgType  string
 }
 
 // ProtocolKind identifies the underlying transport protocol.
@@ -60,6 +77,9 @@ const (
 
 	// ProtocolRPC represents a universal RPC / binary socket / broker protocol.
 	ProtocolRPC ProtocolKind = "rpc"
+
+	// ProtocolSocket represents a persistent multi-core socket engine.
+	ProtocolSocket ProtocolKind = "socket"
 
 	// ProtocolChannel represents channel / event streaming transport.
 	ProtocolChannel ProtocolKind = "channel"

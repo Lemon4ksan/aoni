@@ -101,6 +101,10 @@ func (a *Analyzer) analyzeService(svc *ir.ServiceIR) []Diagnostic {
 		})
 	}
 
+	if svc.Protocol == ir.ProtocolSocket {
+		return diags
+	}
+
 	for _, m := range svc.Methods {
 		diags = append(diags, a.analyzeMethod(svc.Name, m)...)
 	}
