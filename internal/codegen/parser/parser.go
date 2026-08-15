@@ -111,6 +111,7 @@ func (p *Parser) ParseSource(filename string, src []byte) (*ir.RootIR, error) {
 
 	root := &ir.RootIR{
 		PackageName: file.Name.Name,
+		SourceFile:  filepath.ToSlash(filename),
 		Imports:     make([]ir.ImportIR, 0, len(file.Imports)),
 		Services:    make([]*ir.ServiceIR, 0),
 		Structs:     make([]*ir.StructIR, 0),

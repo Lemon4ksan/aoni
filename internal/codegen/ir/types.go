@@ -7,6 +7,7 @@ package ir
 // RootIR represents the parsed root AST containing API services, DTOs, tuples, and unions.
 type RootIR struct {
 	PackageName            string
+	SourceFile             string
 	Imports                []ImportIR
 	Services               []*ServiceIR
 	Structs                []*StructIR

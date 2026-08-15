@@ -145,7 +145,7 @@ func main() {
 			return
 
 		case "version", "--version":
-			fmt.Printf("vortex v0.6.0 — Zero-Allocation AST Toolchain & Engine Suite for Aoni\n")
+			fmt.Printf("vortex v0.6.0 — Unified Zero-Allocation AST Toolchain and Engine Suite for projects using aoni\n")
 			return
 
 		case "bench", "benchmark":
