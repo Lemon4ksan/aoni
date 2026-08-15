@@ -38,23 +38,29 @@ func (e *Emitter) Emit(root *ir.RootIR) ([]byte, error) {
 	buf.WriteString(root.PackageName)
 	buf.WriteString("\n\n")
 
-	// 2. Imports block
-	e.emitImports(&buf, root)
+	var bodyBuf bytes.Buffer
 
 	// 3. Services (Client struct, Constructor, Methods)
 	for _, svc := range root.Services {
-		e.emitService(&buf, root, svc)
+		e.emitService(&bodyBuf, root, svc)
 	}
 
 	// 4. DTO Structs & Encoders
 	for _, strct := range root.Structs {
-		e.emitStruct(&buf, strct)
+		e.emitStruct(&bodyBuf, strct)
 	}
 
 	// 5. Tuples UnmarshalJSON
 	for _, tuple := range root.Tuples {
-		e.emitTuple(&buf, tuple)
+		e.emitTuple(&bodyBuf, tuple)
 	}
+
+	bodyCode := bodyBuf.String()
+
+	// 2. Imports block
+	e.emitImports(&buf, root, bodyCode)
+
+	buf.WriteString(bodyCode)
 
 	// Format generated Go source
 	formatted, err := format.Source(buf.Bytes())
@@ -65,7 +71,7 @@ func (e *Emitter) Emit(root *ir.RootIR) ([]byte, error) {
 	return formatted, nil
 }
 
-func (e *Emitter) emitImports(buf *bytes.Buffer, root *ir.RootIR) {
+func (e *Emitter) emitImports(buf *bytes.Buffer, root *ir.RootIR, bodyCode string) {
 	buf.WriteString("import (\n")
 
 	stdList := collectStdImports(root)
@@ -203,6 +209,7 @@ func (e *Emitter) emitImports(buf *bytes.Buffer, root *ir.RootIR) {
 		for _, svc := range root.Services {
 			if svc.Protocol == ir.ProtocolSocket {
 				hasSocket = true
+				break
 			}
 		}
 	}
@@ -224,6 +231,16 @@ func (e *Emitter) emitImports(buf *bytes.Buffer, root *ir.RootIR) {
 
 	for _, imp := range root.Imports {
 		if stdImports[imp.Path] || strings.Contains(imp.Path, "github.com/lemon4ksan/aoni") {
+			continue
+		}
+
+		ref := imp.Alias
+		if ref == "" {
+			parts := strings.Split(imp.Path, "/")
+			ref = parts[len(parts)-1]
+		}
+
+		if !strings.Contains(bodyCode, ref+".") {
 			continue
 		}
 
@@ -273,6 +290,11 @@ func collectStdImports(root *ir.RootIR) []string {
 			for _, m := range svc.Methods {
 				if m.Return != nil && m.Return.HasRawResponse {
 					needed["net/http"] = true
+				}
+
+				if m.Return != nil && (m.Return.IsDirectBytes || m.Return.SuccessType.Name == "[]byte") {
+					needed["net/http"] = true
+					needed["io"] = true
 				}
 
 				if m.Return != nil &&
@@ -1510,9 +1532,10 @@ func (e *Emitter) emitExecution(buf *bytes.Buffer, m *ir.MethodIR, targetReq, ra
 			buf.WriteString("\treturn err\n")
 
 		case m.Return.IsDirectBytes:
-			fmt.Fprintf(buf, "\tresp, err := request.GetTo[[]byte](ctx, %s, %q, allMods...)\n", targetReq, rawPath)
+			fmt.Fprintf(buf, "\tresp, err := %s.Request(ctx, http.MethodGet, %q, allMods...)\n", targetReq, rawPath)
 			buf.WriteString("\tif err != nil {\n\t\treturn nil, err\n\t}\n")
-			buf.WriteString("\treturn *resp, nil\n")
+			buf.WriteString("\tdefer aoni.CloseResponse(resp)\n")
+			buf.WriteString("\treturn io.ReadAll(resp.Body)\n")
 
 		case m.Return.SuccessType.Name == "io.ReadCloser" || m.Return.SuccessType.Name == "io.Reader":
 			fmt.Fprintf(buf, "\tresp, err := %s.Request(ctx, http.MethodGet, %q, allMods...)\n", targetReq, rawPath)
