@@ -41,7 +41,16 @@ func ApplyServiceDirective(s *ir.ServiceIR, d *Directive) {
 
 	switch d.Name {
 	case "aoni:service", "service":
-		// Marker directive
+		if c, ok := d.Args["casing"]; ok {
+			s.DefaultCasing = parseCasingStrategy(c)
+		}
+	case "casing":
+		if d.Value != "" {
+			s.DefaultCasing = parseCasingStrategy(d.Value)
+		} else if c, ok := d.Args["style"]; ok {
+			s.DefaultCasing = parseCasingStrategy(c)
+		}
+
 	case "base_url":
 		if d.Value != "" {
 			s.BaseURL = d.Value
@@ -348,6 +357,16 @@ func ApplyMethodDirective(m *ir.MethodIR, d *Directive) {
 		m.PayloadKind = ir.PayloadMultipart
 	case "form":
 		m.PayloadKind = ir.PayloadForm
+		if c, ok := d.Args["casing"]; ok {
+			m.FormCasing = parseCasingStrategy(c)
+		}
+	case "casing":
+		if d.Value != "" {
+			m.FormCasing = parseCasingStrategy(d.Value)
+		} else if c, ok := d.Args["style"]; ok {
+			m.FormCasing = parseCasingStrategy(c)
+		}
+
 	case "json":
 		m.PayloadKind = ir.PayloadJSON
 	case "proto":
@@ -896,5 +915,24 @@ func matchPipelineStageType(name string) ir.PipelineStageType {
 		return ir.StageHMACSHA256
 	default:
 		return ir.StageCustom
+	}
+}
+
+func parseCasingStrategy(c string) ir.CasingStrategy {
+	switch strings.ToLower(strings.TrimSpace(c)) {
+	case "camel_case", "camelcase":
+		return ir.CasingCamelCase
+	case "pascal_case", "pascalcase":
+		return ir.CasingPascalCase
+	case "kebab_case", "kebabcase", "kebab":
+		return ir.CasingKebabCase
+	case "flat_case", "flatcase", "lower", "lowercase":
+		return ir.CasingFlatCase
+	case "none", "raw":
+		return ir.CasingNone
+	case "snake_case", "snakecase", "snake":
+		return ir.CasingSnakeCase
+	default:
+		return ir.CasingSnakeCase
 	}
 }

@@ -49,6 +49,7 @@ type ServiceIR struct {
 	Headers       []HeaderIR
 	Envelope      *EnvelopeIR
 	TypeMaps      map[string]FormatStrategy
+	DefaultCasing CasingStrategy
 	Methods       []*MethodIR
 }
 
@@ -203,6 +204,7 @@ type MethodIR struct {
 	OpIDIsQuoted    bool
 	IsNotify        bool
 	IsEvent         bool
+	FormCasing      CasingStrategy
 	StackModsSize   int
 	StackBufSize    int
 }
@@ -711,4 +713,10 @@ const (
 
 	// CasingKebabCase converts Go PascalCase to kebab-case.
 	CasingKebabCase CasingStrategy = "kebab-case"
+
+	// CasingFlatCase converts Go PascalCase to flatcase (all lowercase without separators).
+	CasingFlatCase CasingStrategy = "flatcase"
+
+	// CasingNone retains original parameter name without alteration.
+	CasingNone CasingStrategy = "none"
 )

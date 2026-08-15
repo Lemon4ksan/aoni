@@ -158,3 +158,62 @@ type GraphPoint struct {
 	require.Equal(t, 2, tuple.Fields[2].Index)
 	require.Equal(t, "Description", tuple.Fields[2].GoName)
 }
+
+func TestParser_FormCasingAndImplicitBinding(t *testing.T) {
+	src := `package testapi
+
+import "context"
+
+// @aoni:service casing=snake_case
+type TradeAPI interface {
+	// @post "/tradeoffer/{offer_id}/accept"
+	// @form
+	Accept(ctx context.Context, offerID uint64, serverID int, sessionID string) (*AcceptResponse, error)
+
+	// @post "/tradeoffer/{offer_id}/cancel"
+	// @form casing=flatcase
+	Cancel(ctx context.Context, offerID uint64, serverID int, sessionID string) error
+}
+
+type AcceptResponse struct {
+	TradeError string ` + "`json:\"trade_error\"`" + `
+}
+`
+
+	p := parser.NewParser()
+	root, err := p.ParseSource("tradeapi.go", []byte(src))
+	require.NoError(t, err)
+	require.NotNil(t, root)
+
+	require.Len(t, root.Services, 1)
+	svc := root.Services[0]
+	require.Equal(t, ir.CasingSnakeCase, svc.DefaultCasing)
+
+	// Method 1: Accept (snake_case)
+	m1 := svc.Methods[0]
+	require.Equal(t, "Accept", m1.Name)
+	require.Equal(t, ir.PayloadForm, m1.PayloadKind)
+	// offerID -> binds to {offer_id} path var
+	require.Equal(t, ir.LocPath, m1.Params[1].Location)
+	require.Equal(t, "offer_id", m1.Params[1].WireKey)
+	// serverID -> binds to server_id form field
+	require.Equal(t, ir.LocFormFields, m1.Params[2].Location)
+	require.Equal(t, "server_id", m1.Params[2].WireKey)
+	// sessionID -> binds to session_id form field
+	require.Equal(t, ir.LocFormFields, m1.Params[3].Location)
+	require.Equal(t, "session_id", m1.Params[3].WireKey)
+
+	// Method 2: Cancel (flatcase)
+	m2 := svc.Methods[1]
+	require.Equal(t, "Cancel", m2.Name)
+	require.Equal(t, ir.CasingFlatCase, m2.FormCasing)
+	// offerID -> binds to {offer_id} path var
+	require.Equal(t, ir.LocPath, m2.Params[1].Location)
+	require.Equal(t, "offer_id", m2.Params[1].WireKey)
+	// serverID -> binds to serverid
+	require.Equal(t, ir.LocFormFields, m2.Params[2].Location)
+	require.Equal(t, "serverid", m2.Params[2].WireKey)
+	// sessionID -> binds to sessionid
+	require.Equal(t, ir.LocFormFields, m2.Params[3].Location)
+	require.Equal(t, "sessionid", m2.Params[3].WireKey)
+}

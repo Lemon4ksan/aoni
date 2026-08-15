@@ -417,13 +417,30 @@ func (p *Parser) parseMethodParams(
 
 				// Implicit inference if location not explicitly set by directive
 				if len(paramDirectives) == 0 && param.Pipeline == nil {
+					effectiveCasing := m.FormCasing
+					if effectiveCasing == "" || effectiveCasing == ir.CasingNone {
+						effectiveCasing = svc.DefaultCasing
+					}
+
+					snakeName := toCasing(paramName, ir.CasingSnakeCase)
+					flatName := toCasing(paramName, ir.CasingFlatCase)
+
 					switch {
-					case pathVars[paramName] || pathVars[strings.ToLower(paramName)]:
+					case pathVars[paramName] || pathVars[strings.ToLower(paramName)] ||
+						pathVars[snakeName] || pathVars[flatName]:
 						// Automatically binds to path template / dynamic header variable!
 						param.Location = ir.LocPath
-						if pathVars[strings.ToLower(paramName)] {
+						switch {
+						case pathVars[paramName]:
+							param.WireKey = paramName
+						case pathVars[snakeName]:
+							param.WireKey = snakeName
+						case pathVars[flatName]:
+							param.WireKey = flatName
+						case pathVars[strings.ToLower(paramName)]:
 							param.WireKey = strings.ToLower(paramName)
 						}
+
 					case (m.HTTPMethod == "GET" || m.HTTPMethod == "DELETE" || m.HTTPMethod == "HEAD") && isDTOQueryStruct(goType.Name):
 						param.Location = ir.LocQueryStruct
 						param.Formatter = ir.FormatCompiledEncode
@@ -434,8 +451,20 @@ func (p *Parser) parseMethodParams(
 						switch {
 						case m.PayloadKind == ir.PayloadForm:
 							param.Location = ir.LocFormFields
+							if effectiveCasing != "" && effectiveCasing != ir.CasingNone {
+								param.WireKey = toCasing(paramName, effectiveCasing)
+							} else {
+								param.WireKey = toCasing(paramName, ir.CasingSnakeCase)
+							}
+
 						case m.PayloadKind == ir.PayloadMultipart:
 							param.Location = ir.LocMultipartField
+							if effectiveCasing != "" && effectiveCasing != ir.CasingNone {
+								param.WireKey = toCasing(paramName, effectiveCasing)
+							} else {
+								param.WireKey = toCasing(paramName, ir.CasingSnakeCase)
+							}
+
 						case param.Location != ir.LocContext && param.Location != ir.LocModifiers:
 							if m.PayloadKind == ir.PayloadNone {
 								m.PayloadKind = ir.PayloadJSON
@@ -443,6 +472,20 @@ func (p *Parser) parseMethodParams(
 
 							param.Location = ir.LocBody
 						}
+					}
+				}
+
+				if param.Location == ir.LocFormFields && param.WireKey == "" &&
+					param.Formatter != ir.FormatCompiledEncode {
+					effectiveCasing := m.FormCasing
+					if effectiveCasing == "" || effectiveCasing == ir.CasingNone {
+						effectiveCasing = svc.DefaultCasing
+					}
+
+					if effectiveCasing != "" && effectiveCasing != ir.CasingNone {
+						param.WireKey = toCasing(paramName, effectiveCasing)
+					} else {
+						param.WireKey = toCasing(paramName, ir.CasingSnakeCase)
 					}
 				}
 			}
@@ -853,6 +896,10 @@ func toCasing(s string, strategy ir.CasingStrategy) string {
 		return strings.ToLower(s[:1]) + s[1:]
 	case ir.CasingKebabCase:
 		return toDelimited(s, '-')
+	case ir.CasingFlatCase:
+		return strings.ToLower(s)
+	case ir.CasingNone:
+		return s
 	case ir.CasingSnakeCase:
 		fallthrough
 	default:
