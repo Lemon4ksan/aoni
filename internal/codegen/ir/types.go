@@ -162,8 +162,31 @@ type MethodIR struct {
 	Coalesce        bool
 	ETag            bool
 	SignHMAC        *SignHMACIR
+	Injects         []InjectIR
+	Presets         []string
 	StackModsSize   int
 	StackBufSize    int
+}
+
+// InjectTarget specifies where an injected variable is placed in the network transaction.
+type InjectTarget string
+
+const (
+	// InjectField injects a parameter into application/x-www-form-urlencoded body.
+	InjectField InjectTarget = "field"
+
+	// InjectQuery injects a parameter into the URL query string.
+	InjectQuery InjectTarget = "query"
+
+	// InjectHeader injects a header value.
+	InjectHeader InjectTarget = "header"
+)
+
+// InjectIR defines dynamic injection of session tokens, CSRF keys, or credentials from the requester.
+type InjectIR struct {
+	Target     InjectTarget
+	WireKey    string
+	ProviderFn string
 }
 
 // SignHMACIR models cryptographic HMAC request signing settings.
@@ -507,6 +530,12 @@ const (
 
 	// TransformQueryEscape percent-encodes variable bytes for query components.
 	TransformQueryEscape VarTransform = "query_escape"
+
+	// TransformLower converts string to lowercase.
+	TransformLower VarTransform = "lower"
+
+	// TransformUpper converts string to uppercase.
+	TransformUpper VarTransform = "upper"
 )
 
 // HeaderIR represents a static or dynamically templated HTTP header.

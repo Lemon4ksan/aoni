@@ -41,7 +41,7 @@ func (e *Emitter) Emit(root *ir.RootIR) ([]byte, error) {
 
 	// 3. Services (Client struct, Constructor, Methods)
 	for _, svc := range root.Services {
-		e.emitService(&buf, svc)
+		e.emitService(&buf, root, svc)
 	}
 
 	// 4. DTO Structs & Encoders
@@ -126,6 +126,10 @@ func collectStdImports(root *ir.RootIR) []string {
 		}
 
 		for _, m := range svc.Methods {
+			if m.Return != nil && (strings.Contains(m.Return.SuccessType.Name, "io.") || m.Return.IsStreamChan) {
+				needed["io"] = true
+			}
+
 			if m.Extract != nil {
 				needed["bytes"] = true
 				needed["errors"] = true
@@ -148,8 +152,32 @@ func collectStdImports(root *ir.RootIR) []string {
 				needed["fmt"] = true
 			}
 
-			if m.PayloadKind == ir.PayloadForm {
+			hasFieldInject := false
+			for _, inj := range m.Injects {
+				if inj.Target == ir.InjectField {
+					hasFieldInject = true
+				}
+
 				needed["net/url"] = true
+			}
+
+			if m.PayloadKind == ir.PayloadForm || hasFieldInject {
+				needed["net/url"] = true
+			}
+
+			for _, h := range m.Headers {
+				if h.DynamicTemplate != nil {
+					needed["net/url"] = true
+
+					needed["strconv"] = true
+					for _, seg := range h.DynamicTemplate.Segments {
+						if seg.IsVariable {
+							if seg.Transform == ir.TransformLower || seg.Transform == ir.TransformUpper {
+								needed["strings"] = true
+							}
+						}
+					}
+				}
 			}
 
 			if m.SignHMAC != nil && m.SignHMAC.KeyEnv != "" {
@@ -171,6 +199,10 @@ func collectStdImports(root *ir.RootIR) []string {
 					if p.Formatter == ir.FormatIntAppend || p.Formatter == ir.FormatUintAppend ||
 						p.Formatter == ir.FormatBoolAppend {
 						needed["strconv"] = true
+					}
+
+					if p.GoType.Name != "string" && !p.GoType.IsSlice && p.GoType.Name != "" {
+						needed["fmt"] = true
 					}
 
 					if p.Formatter == ir.FormatTimeRFC3339 || p.Formatter == ir.FormatTimeUnixS ||
@@ -219,7 +251,22 @@ func collectStdImports(root *ir.RootIR) []string {
 	return res
 }
 
-func (e *Emitter) emitService(buf *bytes.Buffer, svc *ir.ServiceIR) {
+func isCompiledDTO(root *ir.RootIR, typeName string) bool {
+	if root == nil {
+		return false
+	}
+
+	typeName = strings.TrimPrefix(typeName, "*")
+	for _, s := range root.Structs {
+		if s.Name == typeName {
+			return true
+		}
+	}
+
+	return false
+}
+
+func (e *Emitter) emitService(buf *bytes.Buffer, root *ir.RootIR, svc *ir.ServiceIR) {
 	clientStructName := lowerFirst(svc.Name) + "Client"
 
 	// 1. Client Struct
@@ -344,7 +391,7 @@ func (e *Emitter) emitService(buf *bytes.Buffer, svc *ir.ServiceIR) {
 
 		// Methods
 		for _, m := range svc.Methods {
-			e.emitMethod(buf, clientStructName, m)
+			e.emitMethod(buf, root, svc, clientStructName, m)
 		}
 
 		return
@@ -446,11 +493,17 @@ func (e *Emitter) emitService(buf *bytes.Buffer, svc *ir.ServiceIR) {
 
 	// 3. Methods
 	for _, m := range svc.Methods {
-		e.emitMethod(buf, clientStructName, m)
+		e.emitMethod(buf, root, svc, clientStructName, m)
 	}
 }
 
-func (e *Emitter) emitMethod(buf *bytes.Buffer, clientStructName string, m *ir.MethodIR) {
+func (e *Emitter) emitMethod(
+	buf *bytes.Buffer,
+	root *ir.RootIR,
+	svc *ir.ServiceIR,
+	clientStructName string,
+	m *ir.MethodIR,
+) {
 	paramsStr := formatMethodParams(m.Params)
 	returnsStr := formatMethodReturns(m.Return)
 
@@ -467,9 +520,12 @@ func (e *Emitter) emitMethod(buf *bytes.Buffer, clientStructName string, m *ir.M
 
 	// Build dynamic headers (e.g. Referer)
 	for _, h := range m.Headers {
-		if h.DynamicTemplate != nil {
-			e.emitDynamicHeader(buf, &h)
-		} else if h.StaticValue != "" {
+		switch {
+		case h.DynamicTemplate != nil:
+			e.emitDynamicHeader(buf, svc, m, &h)
+		case strings.HasPrefix(h.StaticValue, ":"):
+			e.emitKeywordHeader(buf, svc, m, &h)
+		case h.StaticValue != "":
 			fmt.Fprintf(buf, "\tallMods = append(allMods, mod.WithHeader(%q, %q))\n", h.Key, h.StaticValue)
 		}
 	}
@@ -523,12 +579,38 @@ func (e *Emitter) emitMethod(buf *bytes.Buffer, clientStructName string, m *ir.M
 	}
 
 	// Query buffer serialization
-	if len(queryParams) > 0 {
-		e.emitQueryBuffer(buf, queryParams, m.StackBufSize)
+	var (
+		stackQueryParams  []*ir.ParamIR
+		structQueryParams []*ir.ParamIR
+	)
+
+	for _, p := range queryParams {
+		if (p.Location == ir.LocQueryStruct || p.Formatter == ir.FormatCompiledEncode) &&
+			!isCompiledDTO(root, p.GoType.Name) {
+			structQueryParams = append(structQueryParams, p)
+		} else {
+			stackQueryParams = append(stackQueryParams, p)
+		}
+	}
+
+	if len(stackQueryParams) > 0 {
+		e.emitQueryBuffer(buf, stackQueryParams, m.StackBufSize)
+	}
+
+	for _, p := range structQueryParams {
+		fmt.Fprintf(buf, "\tallMods = append(allMods, mod.WithQuery(%s))\n\n", p.GoName)
 	}
 
 	// Form body serialization
-	if m.PayloadKind == ir.PayloadForm && len(formParams) > 0 {
+	hasFieldInject := false
+	for _, inj := range m.Injects {
+		if inj.Target == ir.InjectField {
+			hasFieldInject = true
+			break
+		}
+	}
+
+	if m.PayloadKind == ir.PayloadForm && (len(formParams) > 0 || hasFieldInject) {
 		e.emitFormBuffer(buf, m, formParams, m.StackBufSize)
 	}
 
@@ -602,18 +684,149 @@ func (e *Emitter) emitMethod(buf *bytes.Buffer, clientStructName string, m *ir.M
 	buf.WriteString("}\n\n")
 }
 
-func (e *Emitter) emitDynamicHeader(buf *bytes.Buffer, h *ir.HeaderIR) {
+func (e *Emitter) emitKeywordHeader(buf *bytes.Buffer, svc *ir.ServiceIR, m *ir.MethodIR, h *ir.HeaderIR) {
+	kw := strings.ToLower(strings.TrimPrefix(h.StaticValue, ":"))
+
+	baseURL := ""
+	if svc != nil {
+		baseURL = strings.TrimRight(svc.BaseURL, "/")
+	}
+
+	switch kw {
+	case "origin", "base":
+		if baseURL != "" {
+			fmt.Fprintf(buf, "\tallMods = append(allMods, mod.WithHeader(%q, %q))\n", h.Key, baseURL+"/")
+		} else {
+			buf.WriteString("\tif buGetter, ok := any(c.r).(interface{ BaseURL() string }); ok {\n")
+			fmt.Fprintf(buf, "\t\tallMods = append(allMods, mod.WithHeader(%q, buGetter.BaseURL()))\n", h.Key)
+			buf.WriteString("\t}\n")
+		}
+
+	case "self":
+		if m.Path != nil {
+			targetURL := m.Path.RawTemplate
+			if baseURL != "" && !strings.HasPrefix(targetURL, "http://") && !strings.HasPrefix(targetURL, "https://") {
+				targetURL = baseURL + "/" + targetURL
+			}
+
+			fmt.Fprintf(buf, "\tallMods = append(allMods, mod.WithHeader(%q, %q))\n", h.Key, targetURL)
+		}
+
+	case "page":
+		if m.Path != nil {
+			pagePath := cleanPagePath(m.Path.RawTemplate)
+			if baseURL != "" && !strings.HasPrefix(pagePath, "http://") && !strings.HasPrefix(pagePath, "https://") {
+				pagePath = baseURL + "/" + pagePath
+			}
+
+			fmt.Fprintf(buf, "\tallMods = append(allMods, mod.WithHeader(%q, %q))\n", h.Key, pagePath)
+		}
+
+	case "parent":
+		if m.Path != nil {
+			parentPath := cleanParentPath(m.Path.RawTemplate)
+			if baseURL != "" && !strings.HasPrefix(parentPath, "http://") &&
+				!strings.HasPrefix(parentPath, "https://") {
+				parentPath = baseURL + "/" + parentPath
+			}
+
+			fmt.Fprintf(buf, "\tallMods = append(allMods, mod.WithHeader(%q, %q))\n", h.Key, parentPath)
+		}
+	}
+}
+
+func cleanPagePath(raw string) string {
+	raw = strings.TrimSuffix(raw, "/render")
+
+	raw = strings.TrimSuffix(raw, "/json")
+	if idx := strings.Index(raw, "?"); idx != -1 {
+		raw = raw[:idx]
+	}
+
+	return raw
+}
+
+func cleanParentPath(raw string) string {
+	if idx := strings.LastIndex(raw, "/"); idx != -1 {
+		return raw[:idx]
+	}
+
+	return raw
+}
+
+func (e *Emitter) emitDynamicHeader(buf *bytes.Buffer, svc *ir.ServiceIR, m *ir.MethodIR, h *ir.HeaderIR) {
 	buf.WriteString("\tvar refBuf [128]byte\n")
 	buf.WriteString("\tref := refBuf[:0]\n")
 
-	for _, seg := range h.DynamicTemplate.Segments {
+	baseURL := ""
+	if svc != nil {
+		baseURL = strings.TrimRight(svc.BaseURL, "/")
+	}
+
+	for i, seg := range h.DynamicTemplate.Segments {
 		if !seg.IsVariable {
-			fmt.Fprintf(buf, "\tref = append(ref, %q...)\n", seg.Literal)
+			lit := seg.Literal
+			if i == 0 && baseURL != "" && !strings.HasPrefix(lit, "http://") && !strings.HasPrefix(lit, "https://") {
+				lit = baseURL + "/" + lit
+			}
+
+			fmt.Fprintf(buf, "\tref = append(ref, %q...)\n", lit)
+
+			continue
+		}
+
+		// Find matching parameter
+		var matchedParam *ir.ParamIR
+		for _, p := range m.Params {
+			if p.GoName == seg.VarName || strings.EqualFold(p.GoName, seg.VarName) {
+				matchedParam = p
+				break
+			}
+		}
+
+		if matchedParam != nil {
+			typeName := matchedParam.GoType.Name
+			switch typeName {
+			case "int", "int8", "int16", "int32", "int64":
+				fmt.Fprintf(buf, "\tref = strconv.AppendInt(ref, int64(%s), 10)\n", matchedParam.GoName)
+			case "uint", "uint8", "uint16", "uint32", "uint64", "uintptr":
+				fmt.Fprintf(buf, "\tref = strconv.AppendUint(ref, uint64(%s), 10)\n", matchedParam.GoName)
+			case "bool":
+				fmt.Fprintf(buf, "\tref = strconv.AppendBool(ref, %s)\n", matchedParam.GoName)
+			case "string":
+				switch seg.Transform {
+				case ir.TransformQueryEscape:
+					fmt.Fprintf(buf, "\tref = append(ref, url.QueryEscape(%s)...)\n", matchedParam.GoName)
+				case ir.TransformLower:
+					fmt.Fprintf(buf, "\tref = append(ref, strings.ToLower(%s)...)\n", matchedParam.GoName)
+				case ir.TransformUpper:
+					fmt.Fprintf(buf, "\tref = append(ref, strings.ToUpper(%s)...)\n", matchedParam.GoName)
+				default:
+					fmt.Fprintf(buf, "\tref = append(ref, url.PathEscape(%s)...)\n", matchedParam.GoName)
+				}
+
+			default:
+				// Custom type, enum, or id.ID
+				switch {
+				case strings.HasSuffix(typeName, "ID") || strings.HasSuffix(typeName, "Code") || strings.Contains(typeName, "uint"):
+					fmt.Fprintf(buf, "\tref = strconv.AppendUint(ref, uint64(%s), 10)\n", matchedParam.GoName)
+				case strings.Contains(typeName, "int"):
+					fmt.Fprintf(buf, "\tref = strconv.AppendInt(ref, int64(%s), 10)\n", matchedParam.GoName)
+				default:
+					fmt.Fprintf(buf, "\tref = append(ref, url.PathEscape(fmt.Sprint(%s))...)\n", matchedParam.GoName)
+				}
+			}
 		} else {
-			if seg.Transform == ir.TransformPathEscape {
-				fmt.Fprintf(buf, "\tref = append(ref, url.PathEscape(%s)...)\n", seg.VarName)
-			} else {
-				fmt.Fprintf(buf, "\tref = strconv.AppendUint(ref, uint64(%s), 10)\n", seg.VarName)
+			// Variable is struct field or expression
+			switch seg.Transform {
+			case ir.TransformQueryEscape:
+				fmt.Fprintf(buf, "\tref = append(ref, url.QueryEscape(fmt.Sprint(%s))...)\n", seg.VarName)
+			case ir.TransformLower:
+				fmt.Fprintf(buf, "\tref = append(ref, strings.ToLower(fmt.Sprint(%s))...)\n", seg.VarName)
+			case ir.TransformUpper:
+				fmt.Fprintf(buf, "\tref = append(ref, strings.ToUpper(fmt.Sprint(%s))...)\n", seg.VarName)
+			default:
+				fmt.Fprintf(buf, "\tref = append(ref, url.PathEscape(fmt.Sprint(%s))...)\n", seg.VarName)
 			}
 		}
 	}
@@ -700,11 +913,15 @@ func (e *Emitter) emitQueryBuffer(buf *bytes.Buffer, params []*ir.ParamIR, bufSi
 		case ir.FormatQueryEscaped, ir.FormatDirectString:
 			fallthrough
 		default:
-			fmt.Fprintf(buf, "\tqBytes = append(qBytes, url.QueryEscape(%s)...)\n", p.GoName)
+			if p.GoType.Name == "string" {
+				fmt.Fprintf(buf, "\tqBytes = append(qBytes, url.QueryEscape(%s)...)\n", p.GoName)
+			} else {
+				fmt.Fprintf(buf, "\tqBytes = append(qBytes, url.QueryEscape(fmt.Sprint(%s))...)\n", p.GoName)
+			}
 		}
 	}
 
-	buf.WriteString("\tallMods = append(allMods, mod.WithRawQuery(string(qBytes)))\n\n")
+	buf.WriteString("\tallMods = append(allMods, mod.WithQuery(string(qBytes)))\n\n")
 }
 
 func (e *Emitter) emitFormBuffer(buf *bytes.Buffer, m *ir.MethodIR, params []*ir.ParamIR, bufSize int) {
@@ -722,6 +939,38 @@ func (e *Emitter) emitFormBuffer(buf *bytes.Buffer, m *ir.MethodIR, params []*ir
 
 		fmt.Fprintf(buf, "\tvar formBuf [%d]byte\n", bufSize)
 		fmt.Fprintf(buf, "\tformBytes := %s.AppendFormData(formBuf[:0])\n", p.GoName)
+
+		if m != nil {
+			for _, inj := range m.Injects {
+				if inj.Target == ir.InjectField {
+					fnName := inj.ProviderFn
+					if fnName == "" {
+						fnName = "SessionID"
+					}
+
+					fmt.Fprintf(buf, "\tif getter, ok := any(c.r).(interface{ %s(string) string }); ok {\n", fnName)
+					fmt.Fprintf(buf, "\t\tif val := getter.%s(\"\"); val != \"\" {\n", fnName)
+					buf.WriteString("\t\t\tif len(formBytes) > 0 {\n")
+					fmt.Fprintf(buf, "\t\t\t\tformBytes = append(formBytes, \"&%s=\"...)\n", inj.WireKey)
+					buf.WriteString("\t\t\t} else {\n")
+					fmt.Fprintf(buf, "\t\t\t\tformBytes = append(formBytes, \"%s=\"...)\n", inj.WireKey)
+					buf.WriteString("\t\t\t}\n")
+					buf.WriteString("\t\t\tformBytes = append(formBytes, url.QueryEscape(val)...)\n")
+					buf.WriteString("\t\t}\n")
+					fmt.Fprintf(buf, "\t} else if getter, ok := any(c.r).(interface{ %s() string }); ok {\n", fnName)
+					fmt.Fprintf(buf, "\t\tif val := getter.%s(); val != \"\" {\n", fnName)
+					buf.WriteString("\t\t\tif len(formBytes) > 0 {\n")
+					fmt.Fprintf(buf, "\t\t\t\tformBytes = append(formBytes, \"&%s=\"...)\n", inj.WireKey)
+					buf.WriteString("\t\t\t} else {\n")
+					fmt.Fprintf(buf, "\t\t\t\tformBytes = append(formBytes, \"%s=\"...)\n", inj.WireKey)
+					buf.WriteString("\t\t\t}\n")
+					buf.WriteString("\t\t\tformBytes = append(formBytes, url.QueryEscape(val)...)\n")
+					buf.WriteString("\t\t}\n")
+					buf.WriteString("\t}\n")
+				}
+			}
+		}
+
 		buf.WriteString("\tallMods = append(allMods, mod.WithBodyBytes(formBytes))\n\n")
 
 		return
@@ -757,7 +1006,42 @@ func (e *Emitter) emitFormBuffer(buf *bytes.Buffer, m *ir.MethodIR, params []*ir
 		case ir.FormatBoolAppend:
 			fmt.Fprintf(buf, "\tformBytes = strconv.AppendBool(formBytes, %s)\n", p.GoName)
 		default:
-			fmt.Fprintf(buf, "\tformBytes = append(formBytes, url.QueryEscape(%s)...)\n", p.GoName)
+			if p.GoType.Name == "string" {
+				fmt.Fprintf(buf, "\tformBytes = append(formBytes, url.QueryEscape(%s)...)\n", p.GoName)
+			} else {
+				fmt.Fprintf(buf, "\tformBytes = append(formBytes, url.QueryEscape(fmt.Sprint(%s))...)\n", p.GoName)
+			}
+		}
+	}
+
+	if m != nil {
+		for _, inj := range m.Injects {
+			if inj.Target == ir.InjectField {
+				fnName := inj.ProviderFn
+				if fnName == "" {
+					fnName = "SessionID"
+				}
+
+				fmt.Fprintf(buf, "\tif getter, ok := any(c.r).(interface{ %s(string) string }); ok {\n", fnName)
+				fmt.Fprintf(buf, "\t\tif val := getter.%s(\"\"); val != \"\" {\n", fnName)
+				buf.WriteString("\t\t\tif len(formBytes) > 0 {\n")
+				fmt.Fprintf(buf, "\t\t\t\tformBytes = append(formBytes, \"&%s=\"...)\n", inj.WireKey)
+				buf.WriteString("\t\t\t} else {\n")
+				fmt.Fprintf(buf, "\t\t\t\tformBytes = append(formBytes, \"%s=\"...)\n", inj.WireKey)
+				buf.WriteString("\t\t\t}\n")
+				buf.WriteString("\t\t\tformBytes = append(formBytes, url.QueryEscape(val)...)\n")
+				buf.WriteString("\t\t}\n")
+				fmt.Fprintf(buf, "\t} else if getter, ok := any(c.r).(interface{ %s() string }); ok {\n", fnName)
+				fmt.Fprintf(buf, "\t\tif val := getter.%s(); val != \"\" {\n", fnName)
+				buf.WriteString("\t\t\tif len(formBytes) > 0 {\n")
+				fmt.Fprintf(buf, "\t\t\t\tformBytes = append(formBytes, \"&%s=\"...)\n", inj.WireKey)
+				buf.WriteString("\t\t\t} else {\n")
+				fmt.Fprintf(buf, "\t\t\t\tformBytes = append(formBytes, \"%s=\"...)\n", inj.WireKey)
+				buf.WriteString("\t\t\t}\n")
+				buf.WriteString("\t\t\tformBytes = append(formBytes, url.QueryEscape(val)...)\n")
+				buf.WriteString("\t\t}\n")
+				buf.WriteString("\t}\n")
+			}
 		}
 	}
 

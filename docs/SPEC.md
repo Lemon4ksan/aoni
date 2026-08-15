@@ -56,7 +56,7 @@ Applied to interface type declarations:
 | :--- | :--- | :--- |
 | `@aoni:service` | `name="ClientName"` | Marks interface for client code generation. |
 | `@base_url` | `"https://api.domain.com/v1"` | Sets the service default base URL. |
-| `@engine` | `fast` \| `std` | Selects underlying engine (`fast.NewClient()` or standard client). |
+| `@engine` | `fast` \| `std` \| `custom type="pkg.Requester" required` | Selects underlying engine (`fast.NewClient()`, standard client, or strictly required custom requester interface). |
 | `@timeout` | `"5s"`, `"500ms"` | Sets service-wide default request timeout. |
 | `@type_map` | `<GoType> -> <FormatStrategy>` | Sets package-wide formatting strategy for custom types (e.g. `time.Time -> unix_s`). |
 
@@ -73,6 +73,13 @@ Applied to interface method signatures:
 | `@delete` | `"/path/{id}"` | HTTP DELETE request. |
 | `@patch` | `"/path/{id}"` | HTTP PATCH request. |
 | `@head` | `"/path"` | HTTP HEAD request. |
+
+#### Browser Emulation, Headers & Injection
+| Directive | Syntax / Arguments | Description |
+| :--- | :--- | :--- |
+| `@referer` | Template: `"path/{param:escape}"`<br>Keyword: `:origin` \| `:page` \| `:parent` \| `:self` | Formats dynamic `Referer` header directly on a `[128]byte` stack buffer (`0 B/op`). Automatically prepends base URL and supports string transforms (`:escape`, `:query`, `:lower`, `:upper`). |
+| `@preset` | `:xhr` \| `:cors` \| `:navigate` | Injects standard Chromium / browser header presets (`X-Requested-With`, `Sec-Fetch-*`, `Accept`). |
+| `@inject` | `field="sessionid" from="SessionID"`<br>`header="X-CSRF-Token" from="CSRF"`<br>`query="api_key" from="APIKey"` | Zero-cost interface assertion on requester to inject dynamic session tokens, CSRF keys, or secrets into form bodies, headers, or query strings without domain coupling. |
 
 #### Payload & Serialization Mode
 | Directive | Arguments | Description |
@@ -223,41 +230,48 @@ type OrderResult struct {
 }
 ```
 
-### Recipe 3: Web Scraping & Complex Multipart (Steam Community)
+### Recipe 3: Browser Emulation & Web Scraping (Steam Community Market)
 ```go
 // @aoni:service
+// @engine custom type="community.Requester" required
 // @base_url "https://steamcommunity.com"
-type SteamProfileAPI interface {
-    // 1. Scrape dynamic configuration from HTML DOM
-    // @get "profiles/{steam_id}/edit/info"
-    // @extract css="#profile_edit_config" attr="data-profile-edit"
-    GetEditConfig(ctx context.Context, steam_id string, mods ...aoni.RequestModifier) (*ProfileConfig, error)
-
-    // 2. Save Privacy Settings with JSON-in-Form field
-    // @post "profiles/{steam_id}/ajaxsetprivacy"
+type SteamMarketAPI interface {
+    // 1. Authenticated JSON form submission with XHR preset & dynamic Referer template
+    // @post "market/createbuyorder"
     // @form
-    SavePrivacy(
+    // @preset :xhr
+    // @inject field="sessionid" from="SessionID"
+    // @referer "market/listings/{appID}/{marketHashName:escape}"
+    CreateBuyOrder(
         ctx context.Context,
-        steam_id string,
-        // @field "sessionid"
-        sessionID string,
-        // @field "Privacy"
-        // @format json_string
-        privacy PrivacySettings,
+        // @field "appid"
+        appID uint32,
+        // @field "market_hash_name"
+        marketHashName string,
+        // @field "price_total"
+        priceTotal string,
+        // @field "quantity"
+        quantity int,
         mods ...aoni.RequestModifier,
-    ) (*AjaxResponse, error)
+    ) (*CreateBuyOrderResponse, error)
 
-    // 3. Multipart Avatar Upload with Dynamic File Metadata
+    // 2. Scrape dynamic configuration from HTML DOM with canonical page referer
+    // @get "profiles/{steamID}/edit/info"
+    // @preset :navigate
+    // @referer :origin
+    // @extract css="#profile_edit_config" attr="data-profile-edit"
+    GetEditConfig(ctx context.Context, steamID string, mods ...aoni.RequestModifier) (*ProfileConfig, error)
+
+    // 3. Multipart Avatar Upload with Dynamic File Metadata & Injected Session ID
     // @post "actions/FileUploader"
     // @multipart
+    // @inject field="sessionid" from="SessionID"
+    // @referer "profiles/{steamID}/edit"
     UploadAvatar(
         ctx context.Context,
+        steamID string,
         // @part "type"
         uploadType string,
-        // @part "sId"
-        steamID string,
-        // @part "sessionid"
-        sessionID string,
         // @file name="avatar" filename="{filename}" content_type="{contentType}"
         file []byte,
         filename string,

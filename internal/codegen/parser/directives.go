@@ -242,6 +242,68 @@ func ApplyMethodDirective(m *ir.MethodIR, d *Directive) {
 		m.Operation = ir.OpSSHShell
 	case "header":
 		m.Headers = append(m.Headers, ParseHeaderDirective(d.Value))
+	case "referer":
+		val := strings.TrimSpace(d.Value)
+		if strings.HasPrefix(val, ":") {
+			m.Headers = append(m.Headers, ir.HeaderIR{
+				Key:         "Referer",
+				StaticValue: val,
+			})
+		} else {
+			m.Headers = append(m.Headers, ParseHeaderDirective("Referer: "+val))
+		}
+
+	case "preset":
+		presetName := strings.ToLower(strings.TrimPrefix(d.Value, ":"))
+
+		m.Presets = append(m.Presets, presetName)
+		switch presetName {
+		case "xhr", "ajax":
+			m.Headers = append(m.Headers, ir.HeaderIR{Key: "X-Requested-With", StaticValue: "XMLHttpRequest"})
+			m.Headers = append(
+				m.Headers,
+				ir.HeaderIR{Key: "Accept", StaticValue: "application/json, text/javascript, */*; q=0.01"},
+			)
+
+		case "cors":
+			m.Headers = append(m.Headers, ir.HeaderIR{Key: "Sec-Fetch-Dest", StaticValue: "empty"})
+			m.Headers = append(m.Headers, ir.HeaderIR{Key: "Sec-Fetch-Mode", StaticValue: "cors"})
+			m.Headers = append(m.Headers, ir.HeaderIR{Key: "Sec-Fetch-Site", StaticValue: "same-origin"})
+		case "navigate":
+			m.Headers = append(m.Headers, ir.HeaderIR{Key: "Sec-Fetch-Dest", StaticValue: "document"})
+			m.Headers = append(m.Headers, ir.HeaderIR{Key: "Sec-Fetch-Mode", StaticValue: "navigate"})
+			m.Headers = append(m.Headers, ir.HeaderIR{Key: "Sec-Fetch-Site", StaticValue: "none"})
+			m.Headers = append(m.Headers, ir.HeaderIR{Key: "Sec-Fetch-User", StaticValue: "?1"})
+		}
+
+	case "inject":
+		inj := ir.InjectIR{
+			Target: ir.InjectField,
+		}
+
+		if f, ok := d.Args["field"]; ok {
+			inj.Target = ir.InjectField
+			inj.WireKey = f
+		} else if q, ok := d.Args["query"]; ok {
+			inj.Target = ir.InjectQuery
+			inj.WireKey = q
+		} else if h, ok := d.Args["header"]; ok {
+			inj.Target = ir.InjectHeader
+			inj.WireKey = h
+		} else if d.Value != "" {
+			inj.WireKey = d.Value
+		}
+
+		if from, ok := d.Args["from"]; ok {
+			inj.ProviderFn = from
+		} else if inj.WireKey != "" {
+			inj.ProviderFn = toPascalCase(inj.WireKey)
+		}
+
+		if inj.WireKey != "" {
+			m.Injects = append(m.Injects, inj)
+		}
+
 	case "check":
 		if chk := ParseCheckDirective(d.Value); chk != nil {
 			m.Checks = append(m.Checks, *chk)
@@ -518,4 +580,19 @@ func parseSignDirective(d *Directive) *ir.SignHMACIR {
 	}
 
 	return sig
+}
+
+func toPascalCase(s string) string {
+	parts := strings.FieldsFunc(s, func(r rune) bool {
+		return r == '_' || r == '-' || r == '.'
+	})
+
+	var res strings.Builder
+	for _, p := range parts {
+		if len(p) > 0 {
+			res.WriteString(strings.ToUpper(p[:1]) + p[1:])
+		}
+	}
+
+	return res.String()
 }

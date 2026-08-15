@@ -202,6 +202,10 @@ func ParsePathTemplate(tmpl string) *ir.PathIR {
 						transform = ir.TransformPathEscape
 					case "query_escape":
 						transform = ir.TransformQueryEscape
+					case "lower", "tolower":
+						transform = ir.TransformLower
+					case "upper", "toupper":
+						transform = ir.TransformUpper
 					}
 				}
 

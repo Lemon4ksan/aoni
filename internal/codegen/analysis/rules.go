@@ -76,7 +76,10 @@ func validateDynamicHeaders(target string, m *ir.MethodIR, paramNames map[string
 			}
 
 			varName := seg.VarName
-			if paramNames[varName] || paramNames[strings.ToLower(varName)] {
+
+			rootVar := strings.Split(varName, ".")[0]
+			if paramNames[varName] || paramNames[strings.ToLower(varName)] ||
+				paramNames[rootVar] || paramNames[strings.ToLower(rootVar)] {
 				continue
 			}
 
