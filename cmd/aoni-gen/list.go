@@ -69,7 +69,7 @@ func runList(scopeFilter string, asJSON, asMarkdown bool) {
 
 			dirName := "@" + d.Name
 
-			var argsStr []string
+			argsStr := make([]string, 0, len(d.Args)+1)
 			if d.ValueHint != "" {
 				argsStr = append(argsStr, d.ValueHint)
 			}
@@ -110,11 +110,13 @@ func runExplain(name string) {
 	}
 
 	fmt.Println("================================================================================")
-	fmt.Printf("  Directive: @%s\n", d.Name)
 
+	aliasStr := ""
 	if len(d.Aliases) > 0 {
-		fmt.Printf("  Aliases:   @%s\n", strings.Join(d.Aliases, ", @"))
+		aliasStr = fmt.Sprintf(" (alias: @%s)", strings.Join(d.Aliases, ", @"))
 	}
+
+	fmt.Printf("  Directive: @%s%s\n", d.Name, aliasStr)
 
 	scopes := make([]string, 0, len(d.Scopes))
 	for _, s := range d.Scopes {
@@ -128,33 +130,46 @@ func runExplain(name string) {
 	fmt.Println("DESCRIPTION:")
 	fmt.Printf("  %s\n\n", d.Description)
 
-	if d.ValueHint != "" || len(d.Args) > 0 {
-		fmt.Println("SYNTAX & ARGUMENTS:")
+	if d.ValueHint != "" && len(d.Args) == 0 {
+		fmt.Println("SYNTAX / VALUE:")
+		fmt.Printf("  %s\n\n", d.ValueHint)
+	} else if len(d.Args) > 0 {
+		fmt.Println("ARGUMENTS:")
 
 		if d.ValueHint != "" {
-			fmt.Printf("  Value: %s\n", d.ValueHint)
+			fmt.Printf("  Value: %s\n\n", d.ValueHint)
 		}
 
 		for _, a := range d.Args {
-			reqStr := "optional"
+			meta := make([]string, 0, 2)
 			if a.Required {
-				reqStr = "required"
+				meta = append(meta, "required")
+			} else {
+				meta = append(meta, "optional")
 			}
 
-			defStr := ""
 			if a.Default != "" {
-				defStr = fmt.Sprintf(" (default: %s)", a.Default)
+				meta = append(meta, fmt.Sprintf("default: %q", a.Default))
 			}
 
-			allowedStr := ""
+			placeholder := a.Placeholder
+			if placeholder == "" {
+				if len(a.AllowedValues) > 0 {
+					placeholder = "<value>"
+				} else {
+					placeholder = "\"<value>\""
+				}
+			}
+
+			fmt.Printf("  • %s=%s  [%s]\n", a.Name, placeholder, strings.Join(meta, ", "))
+			fmt.Printf("    %s\n", a.Description)
+
 			if len(a.AllowedValues) > 0 {
-				allowedStr = fmt.Sprintf(" [allowed: %s]", strings.Join(a.AllowedValues, ", "))
+				fmt.Printf("    Allowed: %s\n", strings.Join(a.AllowedValues, " | "))
 			}
 
-			fmt.Printf("  • %-16s [%s] %s%s%s\n", a.Name, reqStr, a.Description, defStr, allowedStr)
+			fmt.Println()
 		}
-
-		fmt.Println()
 	}
 
 	fmt.Println("EXAMPLE:")

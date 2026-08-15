@@ -35,6 +35,7 @@ const (
 // ArgDef describes an argument or flag accepted by a directive.
 type ArgDef struct {
 	Name          string   `json:"name"`
+	Placeholder   string   `json:"placeholder,omitempty"`
 	Required      bool     `json:"required"`
 	Description   string   `json:"description"`
 	Default       string   `json:"default,omitempty"`
@@ -74,13 +75,18 @@ var Registry = []*DirectiveDef{
 		Aliases:     []string{"service"},
 		Description: "Marks an interface as a declarative API contract for client code generation.",
 		Args: []ArgDef{
-			{Name: "name", Description: "Custom generated client struct name (defaults to unexported camelCase)"},
+			{
+				Name:        "name",
+				Placeholder: "\"<name>\"",
+				Description: "Custom generated client struct name (defaults to unexported camelCase)",
+			},
 			{
 				Name:          "casing",
-				Description:   "Default wire casing style (snake_case, flatcase, camelCase, kebab-case, PascalCase, none)",
+				Placeholder:   "<style>",
+				Description:   "Default wire parameter casing style",
 				AllowedValues: []string{"snake_case", "flatcase", "camelcase", "kebab-case", "pascalcase", "none"},
 			},
-			{Name: "prefix", Description: "Path prefix prepended to all method routes"},
+			{Name: "prefix", Placeholder: "\"<path>\"", Description: "Path prefix prepended to all method routes"},
 		},
 		Example: "// @aoni:service casing=snake_case\ntype GitHubAPI interface { ... }",
 	},
@@ -97,8 +103,17 @@ var Registry = []*DirectiveDef{
 		ValueHint:   "fast | std | custom | required",
 		Description: "Selects underlying execution engine (fast.Client, net/http, or strictly required custom requester).",
 		Args: []ArgDef{
-			{Name: "type", Description: "Go interface type for custom requester (e.g. type=\"community.Requester\")"},
-			{Name: "required", Description: "Enforces non-nil requester argument in New constructor"},
+			{
+				Name:        "type",
+				Placeholder: "\"<pkg.Type>\"",
+				Description: "Go interface type for custom requester (e.g. type=\"community.Requester\")",
+			},
+			{
+				Name:          "required",
+				Placeholder:   "<bool>",
+				Description:   "Enforces non-nil requester argument in New constructor",
+				AllowedValues: []string{"true", "false"},
+			},
 		},
 		Example: "// @engine custom type=\"community.Requester\" required",
 	},
@@ -142,11 +157,12 @@ var Registry = []*DirectiveDef{
 		Scopes:      []Scope{ScopeService},
 		Description: "Configures automated retry policy with exponential backoff and jitter.",
 		Args: []ArgDef{
-			{Name: "attempts", Description: "Maximum number of retry attempts", Default: "3"},
-			{Name: "backoff", Description: "Initial backoff duration", Default: "100ms"},
-			{Name: "max_backoff", Description: "Maximum backoff cap", Default: "2s"},
+			{Name: "attempts", Placeholder: "<count>", Description: "Maximum number of retry attempts", Default: "3"},
+			{Name: "backoff", Placeholder: "\"<duration>\"", Description: "Initial backoff duration", Default: "100ms"},
+			{Name: "max_backoff", Placeholder: "\"<duration>\"", Description: "Maximum backoff cap", Default: "2s"},
 			{
 				Name:        "on_status",
+				Placeholder: "\"<codes>\"",
 				Description: "Comma-separated HTTP status codes triggering retry (e.g. \"429,502,503\")",
 			},
 		},
@@ -157,8 +173,18 @@ var Registry = []*DirectiveDef{
 		Scopes:      []Scope{ScopeService},
 		Description: "Configures automated circuit breaking against upstream outages.",
 		Args: []ArgDef{
-			{Name: "threshold", Description: "Consecutive failure threshold before opening circuit", Default: "5"},
-			{Name: "cooldown", Description: "Cool-down duration before half-open state", Default: "30s"},
+			{
+				Name:        "threshold",
+				Placeholder: "<failures>",
+				Description: "Consecutive failure threshold before opening circuit",
+				Default:     "5",
+			},
+			{
+				Name:        "cooldown",
+				Placeholder: "\"<duration>\"",
+				Description: "Cool-down duration before half-open state",
+				Default:     "30s",
+			},
 		},
 		Example: "// @circuit threshold=5 cooldown=\"30s\"",
 	},
@@ -169,12 +195,13 @@ var Registry = []*DirectiveDef{
 		Args: []ArgDef{
 			{
 				Name:          "type",
-				Description:   "Auth mechanism (bearer, static, oauth2, custom_provider)",
+				Placeholder:   "<mode>",
+				Description:   "Authentication mechanism",
 				AllowedValues: []string{"bearer", "static", "oauth2", "custom_provider"},
 			},
-			{Name: "header", Description: "Custom header name (default: Authorization)"},
-			{Name: "prefix", Description: "Token prefix (e.g. \"Bearer \", \"Token \")"},
-			{Name: "provider", Description: "Custom session provider interface type"},
+			{Name: "header", Placeholder: "\"<name>\"", Description: "Custom header name", Default: "Authorization"},
+			{Name: "prefix", Placeholder: "\"<prefix>\"", Description: "Token prefix", Default: "Bearer "},
+			{Name: "provider", Placeholder: "\"<provider>\"", Description: "Custom session provider interface type"},
 		},
 		Example: "// @auth type=bearer header=\"Authorization\" prefix=\"Bearer \"",
 	},
@@ -211,11 +238,20 @@ var Registry = []*DirectiveDef{
 		Scopes:      []Scope{ScopeService, ScopeMethod},
 		Description: "Configures SSH connection parameters or command execution.",
 		Args: []ArgDef{
-			{Name: "host", Description: "Remote host address"},
-			{Name: "user", Description: "Remote SSH user"},
-			{Name: "key", Description: "Path to private key file"},
-			{Name: "pass_env", Description: "Environment variable with password or passphrase"},
-			{Name: "agent", Description: "Use SSH agent for authentication"},
+			{Name: "host", Placeholder: "\"<host>\"", Description: "Remote host address"},
+			{Name: "user", Placeholder: "\"<user>\"", Description: "Remote SSH user"},
+			{Name: "key", Placeholder: "\"<path>\"", Description: "Path to private key file"},
+			{
+				Name:        "pass_env",
+				Placeholder: "\"<var>\"",
+				Description: "Environment variable with password or passphrase",
+			},
+			{
+				Name:          "agent",
+				Placeholder:   "<bool>",
+				Description:   "Use SSH agent for authentication",
+				AllowedValues: []string{"true", "false"},
+			},
 		},
 		Example: "// @ssh host=\"prod.server.com\" user=\"deploy\" key=\"~/.ssh/id_ed25519\"",
 	},
@@ -263,9 +299,9 @@ var Registry = []*DirectiveDef{
 		Scopes:      []Scope{ScopeSocket},
 		Description: "Configures background ping/heartbeat loop parameters.",
 		Args: []ArgDef{
-			{Name: "interval", Description: "Heartbeat timer interval (e.g. \"10s\")", Required: true},
-			{Name: "opcode", Description: "Heartbeat message opcode"},
-			{Name: "msg", Description: "Heartbeat payload struct constructor"},
+			{Name: "interval", Placeholder: "\"<duration>\"", Description: "Heartbeat timer interval", Required: true},
+			{Name: "opcode", Placeholder: "<opcode>", Description: "Heartbeat message opcode"},
+			{Name: "msg", Placeholder: "<constructor>", Description: "Heartbeat payload struct constructor"},
 		},
 		Example: "// @heartbeat interval=\"10s\"",
 	},
@@ -366,7 +402,8 @@ var Registry = []*DirectiveDef{
 		Args: []ArgDef{
 			{
 				Name:          "casing",
-				Description:   "Wire casing for form fields (snake_case, flatcase, camelCase, kebab-case, none)",
+				Placeholder:   "<style>",
+				Description:   "Wire casing for form fields",
 				AllowedValues: []string{"snake_case", "flatcase", "camelcase", "kebab-case", "pascalcase", "none"},
 			},
 		},
@@ -430,11 +467,12 @@ var Registry = []*DirectiveDef{
 		Args: []ArgDef{
 			{
 				Name:        "between",
-				Description: "Zero-alloc prefix and suffix boundary extraction (e.g. between=\"var g_rgAppContextData = ;\")",
+				Placeholder: "\"<prefix> ; <suffix>\"",
+				Description: "Zero-alloc prefix and suffix boundary extraction",
 			},
-			{Name: "regex", Description: "Compiled regular expression pattern"},
-			{Name: "attr", Description: "HTML attribute token extraction"},
-			{Name: "css", Description: "CSS selector for DOM extraction"},
+			{Name: "regex", Placeholder: "\"<pattern>\"", Description: "Compiled regular expression pattern"},
+			{Name: "attr", Placeholder: "\"<attribute>\"", Description: "HTML attribute token extraction"},
+			{Name: "css", Placeholder: "\"<selector>\"", Description: "CSS selector for DOM extraction"},
 		},
 		Example: "// @extract between=\"var config = \";\"\"",
 	},
@@ -457,10 +495,27 @@ var Registry = []*DirectiveDef{
 		Scopes:      []Scope{ScopeMethod},
 		Description: "Performs zero-cost interface assertion on requester to inject dynamic session/CSRF tokens.",
 		Args: []ArgDef{
-			{Name: "field", Description: "Target form body field name (e.g. field=\"sessionid\")"},
-			{Name: "query", Description: "Target URL query parameter name (e.g. query=\"api_key\")"},
-			{Name: "header", Description: "Target HTTP header name (e.g. header=\"X-CSRF-Token\")"},
-			{Name: "from", Description: "Getter method on requester (e.g. from=\"SessionID\")", Required: true},
+			{
+				Name:        "field",
+				Placeholder: "\"<field>\"",
+				Description: "Target form body field name (e.g. field=\"sessionid\")",
+			},
+			{
+				Name:        "query",
+				Placeholder: "\"<param>\"",
+				Description: "Target URL query parameter name (e.g. query=\"api_key\")",
+			},
+			{
+				Name:        "header",
+				Placeholder: "\"<header>\"",
+				Description: "Target HTTP header name (e.g. header=\"X-CSRF-Token\")",
+			},
+			{
+				Name:        "from",
+				Placeholder: "\"<getter>\"",
+				Description: "Getter method on requester (e.g. from=\"SessionID\")",
+				Required:    true,
+			},
 		},
 		Example: "// @inject field=\"sessionid\" from=\"SessionID\"",
 	},
@@ -502,10 +557,25 @@ var Registry = []*DirectiveDef{
 		Scopes:      []Scope{ScopeMethod},
 		Description: "Calculates cryptographic HMAC request signature and attaches auth headers.",
 		Args: []ArgDef{
-			{Name: "secret", Description: "Raw HMAC secret key literal"},
-			{Name: "key_env", Description: "Environment variable name containing HMAC secret key"},
-			{Name: "algo", Description: "Hash algorithm (sha256, sha512, sha1)", Default: "sha256"},
-			{Name: "header", Description: "Target signature header name", Default: "X-Signature"},
+			{Name: "secret", Placeholder: "\"<secret>\"", Description: "Raw HMAC secret key literal"},
+			{
+				Name:        "key_env",
+				Placeholder: "\"<env_var>\"",
+				Description: "Environment variable name containing HMAC secret key",
+			},
+			{
+				Name:          "algo",
+				Placeholder:   "<algo>",
+				Description:   "Hash algorithm",
+				Default:       "sha256",
+				AllowedValues: []string{"sha256", "sha512", "sha1"},
+			},
+			{
+				Name:        "header",
+				Placeholder: "\"<header>\"",
+				Description: "Target signature header name",
+				Default:     "X-Signature",
+			},
 		},
 		Example: "// @sign key_env=\"API_SECRET\" algo=\"sha256\" header=\"X-Signature\"",
 	},
@@ -581,9 +651,17 @@ var Registry = []*DirectiveDef{
 		Scopes:      []Scope{ScopeParam},
 		Description: "Binds byte slice, string, or io.Reader to multipart file upload part.",
 		Args: []ArgDef{
-			{Name: "name", Description: "Multipart field name (default: file)", Default: "file"},
-			{Name: "filename", Description: "File name literal or dynamic template (e.g. \"{filename}\")"},
-			{Name: "content_type", Description: "MIME content type literal or dynamic template"},
+			{Name: "name", Placeholder: "\"<field>\"", Description: "Multipart field name", Default: "file"},
+			{
+				Name:        "filename",
+				Placeholder: "\"<template>\"",
+				Description: "File name literal or dynamic template (e.g. \"{filename}\")",
+			},
+			{
+				Name:        "content_type",
+				Placeholder: "\"<mime>\"",
+				Description: "MIME content type literal or dynamic template",
+			},
 		},
 		Example: "// @file name=\"avatar\" filename=\"{filename}\" content_type=\"{contentType}\"",
 	},
@@ -608,7 +686,11 @@ var Registry = []*DirectiveDef{
 		ValueHint:   "unix_s | unix_ms | rfc3339 | bool_int | flag | json | comma | pipe | space | bracket",
 		Description: "Specifies serialization format strategy for parameter value.",
 		Args: []ArgDef{
-			{Name: "layout", Description: "Custom time layout string (e.g. layout=\"2006-01-02\")"},
+			{
+				Name:        "layout",
+				Placeholder: "\"<layout>\"",
+				Description: "Custom time layout string (e.g. layout=\"2006-01-02\")",
+			},
 		},
 		Example: "// @format unix_s",
 	},
@@ -631,14 +713,17 @@ var Registry = []*DirectiveDef{
 		Args: []ArgDef{
 			{
 				Name:          "casing",
-				Description:   "Wire casing convention (snake_case, flatcase, camelCase, kebab-case, PascalCase, none)",
+				Placeholder:   "<style>",
+				Description:   "Wire naming convention",
 				Default:       "snake_case",
 				AllowedValues: []string{"snake_case", "flatcase", "camelcase", "kebab-case", "pascalcase", "none"},
 			},
 			{
-				Name:        "omitempty",
-				Description: "Omit zero/empty values during serialization (true | false)",
-				Default:     "true",
+				Name:          "omitempty",
+				Placeholder:   "<bool>",
+				Description:   "Omit zero or empty fields during serialization",
+				Default:       "true",
+				AllowedValues: []string{"true", "false"},
 			},
 		},
 		Example: "// @aoni:dto casing=snake_case omitempty=true\ntype CreateUserRequest struct { ... }",
