@@ -47,7 +47,7 @@ type BillingAPI interface {
 	) (*TransactionList, error)
 
 	// @post "config/import"
-	// @decoder custom=yamlDecoder
+	// @return body | custom=yamlDecoder
 	ImportConfig(ctx context.Context, req *ImportRequest, mods ...aoni.RequestModifier) (*ImportResponse, error)
 }
 
@@ -108,6 +108,6 @@ type ImportResponse struct {
 	// 6. Verify bool_int formatting
 	require.Contains(t, codeStr, "qBytes = append(qBytes, '1')")
 
-	// 7. Verify custom decoder attachment
-	require.Contains(t, codeStr, "allMods = append(allMods, mod.WithDecoder(yamlDecoder))")
+	// 7. Verify custom pipeline stage
+	require.Contains(t, codeStr, "return yamlDecoder(stageIn)")
 }

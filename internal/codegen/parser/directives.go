@@ -161,6 +161,56 @@ func ApplyMethodDirective(m *ir.MethodIR, d *Directive) {
 		if d.Value != "" {
 			m.TargetRequester = d.Value
 		}
+	case "return":
+		if d.Pipeline != nil {
+			m.ReturnPipeline = d.Pipeline
+		} else if d.Value != "" {
+			m.ReturnPipeline = ParsePipeline(d.Value)
+		}
+
+	case "body":
+		if d.Pipeline != nil {
+			m.BodyPipeline = d.Pipeline
+		} else if d.Value != "" {
+			m.BodyPipeline = ParsePipeline(d.Value)
+		}
+
+		if m.BodyPipeline != nil && len(m.BodyPipeline.Stages) > 0 {
+			switch m.BodyPipeline.Stages[0].Type {
+			case ir.StageJSON:
+				m.PayloadKind = ir.PayloadJSON
+			case ir.StageForm:
+				m.PayloadKind = ir.PayloadForm
+			case ir.StageProto:
+				m.PayloadKind = ir.PayloadProto
+			default:
+				m.PayloadKind = ir.PayloadRaw
+			}
+		}
+
+	case "extract":
+		if d.Value != "" {
+			m.ReturnPipeline = ParsePipeline("body | " + d.Value)
+		} else if rx, ok := d.Args["regex"]; ok {
+			m.ReturnPipeline = ParsePipeline("body | regex(" + strconv.Quote(rx) + ") | json")
+		} else if bet, ok := d.Args["between"]; ok {
+			suff := d.Args["and"]
+			if suff == "" {
+				suff = d.Args["suffix"]
+			}
+
+			m.ReturnPipeline = ParsePipeline(
+				"body | between(prefix=" + strconv.Quote(bet) + ", suffix=" + strconv.Quote(suff) + ") | json",
+			)
+		} else if css, ok := d.Args["css"]; ok {
+			attr := d.Args["attr"]
+			m.ReturnPipeline = ParsePipeline(
+				"body | attr(css=" + strconv.Quote(css) + ", name=" + strconv.Quote(attr) + ") | html_unescape | json",
+			)
+		} else if custom, ok := d.Args["custom"]; ok {
+			m.ReturnPipeline = ParsePipeline("body | " + custom)
+		}
+
 	case "codec":
 		m.Codec = d.Value
 		switch strings.ToLower(d.Value) {
@@ -180,22 +230,6 @@ func ApplyMethodDirective(m *ir.MethodIR, d *Directive) {
 			m.PayloadKind = ir.PayloadProto
 		}
 
-	case "decoder":
-		if d.Value != "" {
-			m.Decoder = d.Value
-		} else if custom, ok := d.Args["custom"]; ok {
-			m.Decoder = custom
-		}
-
-	case "encoder":
-		if d.Value != "" {
-			m.Encoder = d.Value
-		} else if custom, ok := d.Args["custom"]; ok {
-			m.Encoder = custom
-		}
-
-	case "extract":
-		m.Extract = parseExtractDirective(d)
 	case "idempotent", "idempotency_key":
 		m.Idempotent = true
 	case "coalesce":
@@ -471,78 +505,6 @@ func parseTypeMapDirective(tm map[string]ir.FormatStrategy, d *Directive) {
 	}
 }
 
-func parseExtractDirective(d *Directive) *ir.ExtractIR {
-	if d == nil {
-		return nil
-	}
-
-	ext := &ir.ExtractIR{}
-	if rx, ok := d.Args["regex"]; ok {
-		ext.Kind = ir.ExtractRegex
-		ext.RegexPattern = rx
-		return ext
-	}
-
-	if bet, ok := d.Args["between"]; ok {
-		ext.Kind = ir.ExtractBetween
-
-		ext.Prefix = bet
-		if and, ok := d.Args["and"]; ok {
-			ext.Suffix = and
-		}
-
-		return ext
-	}
-
-	if pref, ok := d.Args["prefix"]; ok {
-		ext.Kind = ir.ExtractBetween
-
-		ext.Prefix = pref
-		if suff, ok := d.Args["suffix"]; ok {
-			ext.Suffix = suff
-		}
-
-		return ext
-	}
-
-	if tag, ok := d.Args["tag"]; ok {
-		ext.Kind = ir.ExtractHTMLToken
-		ext.Tag = tag
-		ext.ID = d.Args["id"]
-		ext.Attr = d.Args["attr"]
-
-		return ext
-	}
-
-	if css, ok := d.Args["css"]; ok {
-		ext.Kind = ir.ExtractHTMLToken
-		if strings.HasPrefix(css, "#") {
-			ext.ID = strings.TrimPrefix(css, "#")
-			ext.Tag = "div"
-		} else {
-			ext.Tag = css
-		}
-
-		ext.Attr = d.Args["attr"]
-
-		return ext
-	}
-
-	if custom, ok := d.Args["custom"]; ok {
-		ext.Kind = ir.ExtractCustom
-		ext.CustomFunc = custom
-		return ext
-	}
-
-	if d.Value != "" {
-		ext.Kind = ir.ExtractCustom
-		ext.CustomFunc = d.Value
-		return ext
-	}
-
-	return nil
-}
-
 func parseSignDirective(d *Directive) *ir.SignHMACIR {
 	if d == nil {
 		return nil
@@ -595,4 +557,238 @@ func toPascalCase(s string) string {
 	}
 
 	return res.String()
+}
+
+// ParsePipeline parses a Wire-Transform pipeline expression like:
+//
+//	"body | regex(`...`) | json"
+//	"body | attr(css=\"#id\", name=\"data-attr\") | html_unescape | json"
+//	"json | gzip | base64_url"
+//	"proto | FrameVT01 | EncryptSteam(c.sessionKey)"
+func ParsePipeline(raw string) *ir.PipelineIR {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return nil
+	}
+
+	segments := splitPipelineSegments(raw)
+	if len(segments) == 0 {
+		return nil
+	}
+
+	pipeline := &ir.PipelineIR{}
+
+	startIdx := 0
+	first := strings.TrimSpace(segments[0])
+
+	if first == "body" {
+		pipeline.Source = "body"
+		startIdx = 1
+	} else if strings.HasPrefix(first, "header(") && strings.HasSuffix(first, ")") {
+		pipeline.Source = "header"
+		pipeline.SourceArg = strings.Trim(first[7:len(first)-1], "\"'` ")
+		startIdx = 1
+	}
+
+	for i := startIdx; i < len(segments); i++ {
+		seg := strings.TrimSpace(segments[i])
+		if seg == "" {
+			continue
+		}
+
+		stage := parsePipelineStage(seg)
+		pipeline.Stages = append(pipeline.Stages, stage)
+	}
+
+	if len(pipeline.Stages) == 0 && pipeline.Source != "" {
+		pipeline.Stages = append(pipeline.Stages, ir.PipelineStageIR{
+			Type:    ir.StageJSON,
+			RawName: "json",
+		})
+	}
+
+	return pipeline
+}
+
+func splitPipelineSegments(s string) []string {
+	var (
+		segments  []string
+		cur       strings.Builder
+		inQuote   bool
+		quoteChar byte
+		parenNest int
+	)
+
+	for i := 0; i < len(s); i++ {
+		b := s[i]
+
+		if inQuote {
+			cur.WriteByte(b)
+
+			if b == quoteChar {
+				inQuote = false
+			} else if b == '\\' && i+1 < len(s) {
+				cur.WriteByte(s[i+1])
+				i++
+			}
+
+			continue
+		}
+
+		if b == '"' || b == '\'' || b == '`' {
+			inQuote = true
+			quoteChar = b
+			cur.WriteByte(b)
+
+			continue
+		}
+
+		if b == '(' {
+			parenNest++
+
+			cur.WriteByte(b)
+
+			continue
+		}
+
+		if b == ')' {
+			if parenNest > 0 {
+				parenNest--
+			}
+
+			cur.WriteByte(b)
+
+			continue
+		}
+
+		if b == '|' && parenNest == 0 {
+			segments = append(segments, cur.String())
+			cur.Reset()
+			continue
+		}
+
+		cur.WriteByte(b)
+	}
+
+	if cur.Len() > 0 {
+		segments = append(segments, cur.String())
+	}
+
+	return segments
+}
+
+func parsePipelineStage(seg string) ir.PipelineStageIR {
+	seg = strings.TrimSpace(seg)
+	stage := ir.PipelineStageIR{
+		RawName:   seg,
+		NamedArgs: make(map[string]string),
+	}
+
+	if strings.HasPrefix(seg, "custom=") || strings.HasPrefix(seg, "fn=") {
+		parts := strings.SplitN(seg, "=", 2)
+		stage.Type = ir.StageCustom
+		stage.FuncExpr = unquote(strings.TrimSpace(parts[1]))
+		stage.RawName = stage.FuncExpr
+
+		return stage
+	}
+
+	idx := strings.IndexByte(seg, '(')
+	if idx == -1 {
+		stage.RawName = seg
+		stage.FuncExpr = seg
+		stage.Type = matchPipelineStageType(seg)
+
+		return stage
+	}
+
+	name := strings.TrimSpace(seg[:idx])
+	stage.RawName = name
+	stage.FuncExpr = name
+	stage.Type = matchPipelineStageType(name)
+
+	argsStr := strings.TrimSuffix(strings.TrimSpace(seg[idx+1:]), ")")
+	args := tokenizeArgs(argsStr)
+
+	for _, arg := range args {
+		arg = strings.TrimSpace(arg)
+		if arg == "" {
+			continue
+		}
+
+		if !strings.HasPrefix(arg, "\"") && !strings.HasPrefix(arg, "'") && !strings.HasPrefix(arg, "`") &&
+			strings.Contains(arg, "=") {
+			parts := strings.SplitN(arg, "=", 2)
+			k := strings.ToLower(strings.TrimSpace(parts[0]))
+			v := unquote(strings.TrimSpace(parts[1]))
+			stage.NamedArgs[k] = v
+		} else {
+			stage.Args = append(stage.Args, unquote(arg))
+		}
+	}
+
+	return stage
+}
+
+func matchPipelineStageType(name string) ir.PipelineStageType {
+	switch strings.ToLower(name) {
+	case "json":
+		return ir.StageJSON
+	case "proto":
+		return ir.StageProto
+	case "form":
+		return ir.StageForm
+	case "xml":
+		return ir.StageXML
+	case "cbor":
+		return ir.StageCBOR
+	case "msgpack":
+		return ir.StageMsgPack
+	case "tuple":
+		return ir.StageTuple
+	case "gzip":
+		return ir.StageGzip
+	case "gunzip":
+		return ir.StageGunzip
+	case "zstd":
+		return ir.StageZstd
+	case "zstd_decompress":
+		return ir.StageZstdDecompress
+	case "deflate", "flate":
+		return ir.StageDeflate
+	case "inflate":
+		return ir.StageInflate
+	case "snappy":
+		return ir.StageSnappy
+	case "base64":
+		return ir.StageBase64
+	case "base64_decode":
+		return ir.StageBase64Decode
+	case "base64_url":
+		return ir.StageBase64URL
+	case "base64_url_decode":
+		return ir.StageBase64URLDecode
+	case "hex":
+		return ir.StageHex
+	case "hex_decode":
+		return ir.StageHexDecode
+	case "url_escape", "escape":
+		return ir.StageURLEscape
+	case "url_unescape", "unescape":
+		return ir.StageURLUnescape
+	case "html_escape":
+		return ir.StageHTMLEscape
+	case "html_unescape":
+		return ir.StageHTMLUnescape
+	case "regex":
+		return ir.StageRegex
+	case "between":
+		return ir.StageBetween
+	case "attr":
+		return ir.StageAttr
+	case "hmac_sha256":
+		return ir.StageHMACSHA256
+	default:
+		return ir.StageCustom
+	}
 }

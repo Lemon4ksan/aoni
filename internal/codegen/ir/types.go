@@ -157,6 +157,8 @@ type MethodIR struct {
 	Encoder         string
 	Codec           string
 	Extract         *ExtractIR
+	ReturnPipeline  *PipelineIR
+	BodyPipeline    *PipelineIR
 	CallFunc        string
 	Idempotent      bool
 	Coalesce        bool
@@ -312,6 +314,68 @@ const (
 	StreamKindRawBytes StreamKind = "raw_bytes"
 )
 
+// PipelineStageType categorizes serialization, compression, encoding, scraping, or custom transforms.
+type PipelineStageType string
+
+const (
+	// Serialization stages
+	StageJSON    PipelineStageType = "json"
+	StageProto   PipelineStageType = "proto"
+	StageForm    PipelineStageType = "form"
+	StageXML     PipelineStageType = "xml"
+	StageCBOR    PipelineStageType = "cbor"
+	StageMsgPack PipelineStageType = "msgpack"
+	StageTuple   PipelineStageType = "tuple"
+
+	// Compression stages
+	StageGzip           PipelineStageType = "gzip"
+	StageGunzip         PipelineStageType = "gunzip"
+	StageZstd           PipelineStageType = "zstd"
+	StageZstdDecompress PipelineStageType = "zstd_decompress"
+	StageDeflate        PipelineStageType = "deflate"
+	StageInflate        PipelineStageType = "inflate"
+	StageSnappy         PipelineStageType = "snappy"
+
+	// Encoding stages
+	StageBase64          PipelineStageType = "base64"
+	StageBase64Decode    PipelineStageType = "base64_decode"
+	StageBase64URL       PipelineStageType = "base64_url"
+	StageBase64URLDecode PipelineStageType = "base64_url_decode"
+	StageHex             PipelineStageType = "hex"
+	StageHexDecode       PipelineStageType = "hex_decode"
+	StageURLEscape       PipelineStageType = "url_escape"
+	StageURLUnescape     PipelineStageType = "url_unescape"
+	StageHTMLEscape      PipelineStageType = "html_escape"
+	StageHTMLUnescape    PipelineStageType = "html_unescape"
+
+	// Extraction / Scraping stages
+	StageRegex   PipelineStageType = "regex"
+	StageBetween PipelineStageType = "between"
+	StageAttr    PipelineStageType = "attr"
+
+	// Cryptographic / Security stages
+	StageHMACSHA256 PipelineStageType = "hmac_sha256"
+
+	// Custom functions
+	StageCustom PipelineStageType = "custom"
+)
+
+// PipelineStageIR represents a single step in a Wire-Transform pipeline.
+type PipelineStageIR struct {
+	Type      PipelineStageType
+	RawName   string
+	FuncExpr  string
+	Args      []string
+	NamedArgs map[string]string
+}
+
+// PipelineIR defines a composite data transformation chain.
+type PipelineIR struct {
+	Source    string // "body", "header", etc.
+	SourceArg string // Header name if Source == "header"
+	Stages    []PipelineStageIR
+}
+
 // ParamIR models an individual function parameter and its HTTP/RPC binding.
 type ParamIR struct {
 	GoName      string
@@ -322,6 +386,7 @@ type ParamIR struct {
 	TimeLayout  string
 	FileName    string
 	ContentType string
+	Pipeline    *PipelineIR
 }
 
 // ParamLocation specifies where a parameter is mapped in the network transaction.

@@ -155,7 +155,7 @@ func (p *Parser) parseInterface(
 		}
 
 		// Parse Method Parameters
-		p.parseMethodParams(fileComments, svc, m, funcType.Params)
+		p.parseMethodParams(fileComments, svc, m, methodDirectives, funcType.Params)
 
 		// Parse Method Return Values
 		p.parseMethodReturns(m, funcType.Results)
@@ -170,6 +170,7 @@ func (p *Parser) parseMethodParams(
 	fileComments []*ast.CommentGroup,
 	svc *ir.ServiceIR,
 	m *ir.MethodIR,
+	methodDirectives []*Directive,
 	fields *ast.FieldList,
 ) {
 	if fields == nil {
@@ -295,6 +296,10 @@ func (p *Parser) parseMethodParams(
 						param.WireKey = d.Value
 					}
 
+					if d.Pipeline != nil {
+						param.Pipeline = d.Pipeline
+					}
+
 					if m.PayloadKind == ir.PayloadMultipart {
 						param.Location = ir.LocMultipartField
 					} else {
@@ -305,6 +310,10 @@ func (p *Parser) parseMethodParams(
 					param.Location = ir.LocMultipartField
 					if d.Value != "" {
 						param.WireKey = d.Value
+					}
+
+					if d.Pipeline != nil {
+						param.Pipeline = d.Pipeline
 					}
 
 				case "file":
@@ -328,6 +337,11 @@ func (p *Parser) parseMethodParams(
 					if d.Value != "" {
 						param.WireKey = d.Value
 					}
+
+					if d.Pipeline != nil {
+						param.Pipeline = d.Pipeline
+					}
+
 				case "query_struct":
 					param.Location = ir.LocQueryStruct
 				case "header":
@@ -335,6 +349,11 @@ func (p *Parser) parseMethodParams(
 					if d.Value != "" {
 						param.WireKey = d.Value
 					}
+
+					if d.Pipeline != nil {
+						param.Pipeline = d.Pipeline
+					}
+
 				case "cookie":
 					param.Location = ir.LocCookie
 					if d.Value != "" {
@@ -350,8 +369,40 @@ func (p *Parser) parseMethodParams(
 			case goType.IsVariadic && strings.Contains(goType.Name, "RequestModifier"):
 				param.Location = ir.LocModifiers
 			default:
-				// Implicit inference if location not explicitly set by directive
+				// Check if matching directive was declared on method level
 				if len(paramDirectives) == 0 {
+					for _, md := range methodDirectives {
+						if (md.Name == "field" || md.Name == "query" || md.Name == "param" || md.Name == "header") &&
+							(strings.EqualFold(md.Value, paramName) || md.Args["param"] == paramName) {
+							if md.Pipeline != nil {
+								param.Pipeline = md.Pipeline
+							}
+
+							if md.Value != "" {
+								param.WireKey = md.Value
+							}
+
+							switch md.Name {
+							case "field":
+								if m.PayloadKind == ir.PayloadMultipart {
+									param.Location = ir.LocMultipartField
+								} else {
+									param.Location = ir.LocFormFields
+								}
+
+							case "query":
+								param.Location = ir.LocQuery
+							case "header":
+								param.Location = ir.LocHeader
+							}
+
+							break
+						}
+					}
+				}
+
+				// Implicit inference if location not explicitly set by directive
+				if len(paramDirectives) == 0 && param.Pipeline == nil {
 					switch {
 					case pathVars[paramName] || pathVars[strings.ToLower(paramName)]:
 						// Automatically binds to path template / dynamic header variable!

@@ -87,6 +87,31 @@ func (e *Emitter) emitImports(buf *bytes.Buffer, root *ir.RootIR) {
 		buf.WriteString("\t\"github.com/lemon4ksan/aoni/fast\"\n")
 	}
 
+	hasDecode := false
+
+	hasCodec := false
+	if root != nil {
+		for _, svc := range root.Services {
+			for _, m := range svc.Methods {
+				if m.ReturnPipeline != nil || m.Decoder != "" {
+					hasDecode = true
+				}
+
+				if m.Codec != "" {
+					hasCodec = true
+				}
+			}
+		}
+	}
+
+	if hasCodec {
+		buf.WriteString("\t\"github.com/lemon4ksan/aoni/codec\"\n")
+	}
+
+	if hasDecode {
+		buf.WriteString("\t\"github.com/lemon4ksan/aoni/codec/decode\"\n")
+	}
+
 	buf.WriteString("\t\"github.com/lemon4ksan/aoni/mod\"\n")
 	buf.WriteString("\t\"github.com/lemon4ksan/aoni/option\"\n")
 	buf.WriteString("\t\"github.com/lemon4ksan/aoni/request\"\n")
@@ -130,18 +155,15 @@ func collectStdImports(root *ir.RootIR) []string {
 				needed["io"] = true
 			}
 
-			if m.Extract != nil {
-				needed["bytes"] = true
-				needed["errors"] = true
+			if m.ReturnPipeline != nil {
 				needed["io"] = true
+				needed["fmt"] = true
+				needed["errors"] = true
+			}
 
-				needed["encoding/json"] = true
-				if m.Extract.Kind == ir.ExtractRegex {
-					needed["regexp"] = true
-				}
-
-				if m.Extract.Kind == ir.ExtractHTMLToken {
-					needed["fmt"] = true
+			for _, p := range m.Params {
+				if p.Pipeline != nil || p.Formatter == ir.FormatJSONString {
+					needed["encoding/json"] = true
 				}
 			}
 
@@ -594,7 +616,7 @@ func (e *Emitter) emitMethod(
 	}
 
 	if len(stackQueryParams) > 0 {
-		e.emitQueryBuffer(buf, stackQueryParams, m.StackBufSize)
+		e.emitQueryBuffer(buf, m, stackQueryParams, m.StackBufSize)
 	}
 
 	for _, p := range structQueryParams {
@@ -834,7 +856,7 @@ func (e *Emitter) emitDynamicHeader(buf *bytes.Buffer, svc *ir.ServiceIR, m *ir.
 	fmt.Fprintf(buf, "\tallMods = append(allMods, mod.WithHeader(%q, string(ref)))\n\n", h.Key)
 }
 
-func (e *Emitter) emitQueryBuffer(buf *bytes.Buffer, params []*ir.ParamIR, bufSize int) {
+func (e *Emitter) emitQueryBuffer(buf *bytes.Buffer, m *ir.MethodIR, params []*ir.ParamIR, bufSize int) {
 	if bufSize <= 0 {
 		bufSize = 256
 	}
@@ -858,6 +880,20 @@ func (e *Emitter) emitQueryBuffer(buf *bytes.Buffer, params []*ir.ParamIR, bufSi
 		elemType := p.GoType.ElemType
 		if elemType == "" {
 			elemType = strings.TrimPrefix(p.GoType.Name, "[]")
+		}
+
+		if p.Pipeline != nil {
+			fmt.Fprintf(buf, "\t%sBytes, err := json.Marshal(%s)\n", p.GoName, p.GoName)
+
+			errRet := "\tif err != nil {\n\t\treturn err\n\t}\n"
+			if m != nil && m.Return != nil && !m.Return.IsVoid {
+				errRet = "\tif err != nil {\n\t\treturn nil, err\n\t}\n"
+			}
+
+			buf.WriteString(errRet)
+			fmt.Fprintf(buf, "\tqBytes = append(qBytes, url.QueryEscape(string(%sBytes))...)\n", p.GoName)
+
+			continue
 		}
 
 		switch p.Formatter {
@@ -933,8 +969,8 @@ func (e *Emitter) emitFormBuffer(buf *bytes.Buffer, m *ir.MethodIR, params []*ir
 		"\tallMods = append(allMods, mod.WithHeader(\"Content-Type\", \"application/x-www-form-urlencoded\"))\n",
 	)
 
-	// If single struct argument with compiled encoder
-	if len(params) == 1 && params[0].Formatter == ir.FormatCompiledEncode {
+	// If single struct argument with compiled encoder without explicit field pipeline
+	if len(params) == 1 && params[0].Formatter == ir.FormatCompiledEncode && params[0].Pipeline == nil {
 		p := params[0]
 
 		fmt.Fprintf(buf, "\tvar formBuf [%d]byte\n", bufSize)
@@ -986,6 +1022,20 @@ func (e *Emitter) emitFormBuffer(buf *bytes.Buffer, m *ir.MethodIR, params []*ir
 		}
 
 		fmt.Fprintf(buf, "\tformBytes = append(formBytes, %q...)\n", prefix)
+
+		if p.Pipeline != nil {
+			fmt.Fprintf(buf, "\t%sBytes, err := json.Marshal(%s)\n", p.GoName, p.GoName)
+
+			errRet := "\tif err != nil {\n\t\treturn err\n\t}\n"
+			if m != nil && m.Return != nil && !m.Return.IsVoid {
+				errRet = "\tif err != nil {\n\t\treturn nil, err\n\t}\n"
+			}
+
+			buf.WriteString(errRet)
+			fmt.Fprintf(buf, "\tformBytes = append(formBytes, url.QueryEscape(string(%sBytes))...)\n", p.GoName)
+
+			continue
+		}
 
 		switch p.Formatter {
 		case ir.FormatJSONString:
@@ -1097,8 +1147,8 @@ func (e *Emitter) emitMultipartBuffer(buf *bytes.Buffer, params []*ir.ParamIR) {
 }
 
 func (e *Emitter) emitExecution(buf *bytes.Buffer, m *ir.MethodIR, targetReq, rawPath string, bodyParam *ir.ParamIR) {
-	if m.Extract != nil {
-		e.emitExtractExecution(buf, m, targetReq, rawPath)
+	if m.ReturnPipeline != nil {
+		e.emitReturnPipeline(buf, m, targetReq, rawPath)
 		return
 	}
 
@@ -1257,137 +1307,169 @@ func (e *Emitter) emitExecution(buf *bytes.Buffer, m *ir.MethodIR, targetReq, ra
 			e.emitChecks(buf, m)
 			buf.WriteString("\treturn resp, nil\n")
 		}
+
+	case "PATCH":
+		fmt.Fprintf(
+			buf,
+			"\tresp, err := request.PatchTo[%s](ctx, %s, %q, %s, allMods...)\n",
+			genericType,
+			targetReq,
+			rawPath,
+			bodyArg,
+		)
+
+		if m.Return.IsVoid {
+			buf.WriteString("\treturn err\n")
+		} else {
+			buf.WriteString("\tif err != nil {\n\t\treturn nil, err\n\t}\n")
+			e.emitChecks(buf, m)
+			buf.WriteString("\treturn resp, nil\n")
+		}
 	}
 }
 
-func (e *Emitter) emitExtractExecution(buf *bytes.Buffer, m *ir.MethodIR, targetReq, rawPath string) {
+func (e *Emitter) emitReturnPipeline(buf *bytes.Buffer, m *ir.MethodIR, targetReq, rawPath string) {
 	methodVerb := m.HTTPMethod
 	if methodVerb == "" {
 		methodVerb = "GET"
 	}
 
 	resultType := "any"
-	if m.Return != nil && m.Return.SuccessType.Name != "" {
+
+	isPointer := true
+	if m.Return != nil && !m.Return.IsVoid && m.Return.SuccessType.Name != "" {
 		resultType = strings.TrimPrefix(m.Return.SuccessType.Name, "*")
+		isPointer = m.Return.SuccessType.IsPointer
 	}
 
-	httpVerb := "MethodGet"
-	switch methodVerb {
+	p := m.ReturnPipeline
+
+	httpMethod := "http.MethodGet"
+	switch strings.ToUpper(methodVerb) {
 	case "POST":
-		httpVerb = "MethodPost"
+		httpMethod = "http.MethodPost"
 	case "PUT":
-		httpVerb = "MethodPut"
+		httpMethod = "http.MethodPut"
 	case "DELETE":
-		httpVerb = "MethodDelete"
+		httpMethod = "http.MethodDelete"
+	case "PATCH":
+		httpMethod = "http.MethodPatch"
 	}
 
-	fmt.Fprintf(buf, "\tresp, err := %s.Request(ctx, http.%s, %q, allMods...)\n", targetReq, httpVerb, rawPath)
+	fmt.Fprintf(buf, "\tresp, err := %s.Request(ctx, %s, %q, allMods...)\n", targetReq, httpMethod, rawPath)
 	buf.WriteString("\tif err != nil {\n\t\treturn nil, err\n\t}\n")
 	buf.WriteString("\tdefer resp.Body.Close()\n\n")
 
-	ext := m.Extract
-	switch ext.Kind {
-	case ir.ExtractCustom:
-		fmt.Fprintf(buf, "\treturn %s(resp.Body)\n", ext.CustomFunc)
-
-	case ir.ExtractRegex:
+	if p.Source == "header" {
+		fmt.Fprintf(buf, "\tstageIn := []byte(resp.Header.Get(%q))\n\n", p.SourceArg)
+	} else {
 		buf.WriteString("\tbodyBytes, err := io.ReadAll(resp.Body)\n")
 		buf.WriteString("\tif err != nil {\n\t\treturn nil, err\n\t}\n\n")
-		fmt.Fprintf(buf, "\trx := regexp.MustCompile(`%s`)\n", ext.RegexPattern)
-		buf.WriteString("\tmatches := rx.FindSubmatch(bodyBytes)\n")
-		buf.WriteString(
-			"\tif len(matches) < 2 {\n\t\treturn nil, errors.New(\"extract: regex pattern not matched\")\n\t}\n\n",
-		)
-		fmt.Fprintf(buf, "\tvar result %s\n", resultType)
-		buf.WriteString(
-			"\tif err := json.Unmarshal(matches[1], &result); err != nil {\n\t\treturn nil, fmt.Errorf(\"extract: failed to unmarshal payload: %w\", err)\n\t}\n\n",
-		)
-		buf.WriteString("\treturn &result, nil\n")
+		buf.WriteString("\tstageIn := bodyBytes\n")
+	}
 
-	case ir.ExtractBetween:
-		buf.WriteString("\tbodyBytes, err := io.ReadAll(resp.Body)\n")
-		buf.WriteString("\tif err != nil {\n\t\treturn nil, err\n\t}\n\n")
-		fmt.Fprintf(buf, "\tprefix := []byte(%q)\n", ext.Prefix)
-		buf.WriteString("\tstart := bytes.Index(bodyBytes, prefix)\n")
-		buf.WriteString("\tif start == -1 {\n\t\treturn nil, errors.New(\"extract: prefix not found\")\n\t}\n")
-		buf.WriteString("\tstart += len(prefix)\n\n")
+	for i, stage := range p.Stages {
+		isLast := (i == len(p.Stages)-1)
 
-		if ext.Suffix != "" {
-			fmt.Fprintf(buf, "\tsuffix := []byte(%q)\n", ext.Suffix)
-			buf.WriteString("\tvar end int\n")
-			buf.WriteString(
-				"\tif len(suffix) == 1 {\n\t\tend = bytes.IndexByte(bodyBytes[start:], suffix[0])\n\t} else {\n\t\tend = bytes.Index(bodyBytes[start:], suffix)\n\t}\n",
-			)
-			buf.WriteString("\tif end == -1 {\n\t\treturn nil, errors.New(\"extract: suffix not found\")\n\t}\n\n")
-			fmt.Fprintf(buf, "\tvar result %s\n", resultType)
-			buf.WriteString(
-				"\tif err := json.Unmarshal(bodyBytes[start:start+end], &result); err != nil {\n\t\treturn nil, fmt.Errorf(\"extract: failed to unmarshal payload: %w\", err)\n\t}\n\n",
-			)
-		} else {
-			fmt.Fprintf(buf, "\tvar result %s\n", resultType)
-			buf.WriteString(
-				"\tif err := json.Unmarshal(bodyBytes[start:], &result); err != nil {\n\t\treturn nil, fmt.Errorf(\"extract: failed to unmarshal payload: %w\", err)\n\t}\n\n",
-			)
-		}
-
-		buf.WriteString("\treturn &result, nil\n")
-
-	case ir.ExtractHTMLToken:
-		buf.WriteString("\tbodyBytes, err := io.ReadAll(resp.Body)\n")
-		buf.WriteString("\tif err != nil {\n\t\treturn nil, err\n\t}\n\n")
-
-		if ext.ID != "" {
-			fmt.Fprintf(buf, "\tstart := bytes.Index(bodyBytes, []byte(%q))\n", ext.ID)
-			buf.WriteString(
-				"\tif start == -1 {\n\t\treturn nil, errors.New(\"extract: target element not found\")\n\t}\n",
-			)
-
-			if ext.Attr != "" {
-				fmt.Fprintf(buf, "\tattrIdx := bytes.Index(bodyBytes[start:], []byte(%q))\n", ext.Attr+"=")
-				buf.WriteString(
-					"\tif attrIdx == -1 {\n\t\treturn nil, errors.New(\"extract: attribute not found\")\n\t}\n",
-				)
-				fmt.Fprintf(buf, "\tstart = start + attrIdx + len(%q)\n", ext.Attr+"=")
-				buf.WriteString(
-					"\tif start >= len(bodyBytes) {\n\t\treturn nil, errors.New(\"extract: unexpected EOF\")\n\t}\n",
-				)
-				buf.WriteString("\tquote := bodyBytes[start]\n")
-				buf.WriteString("\tstart++\n")
-				buf.WriteString("\tend := bytes.IndexByte(bodyBytes[start:], quote)\n")
-				buf.WriteString(
-					"\tif end == -1 {\n\t\treturn nil, errors.New(\"extract: attribute boundary not found\")\n\t}\n\n",
-				)
-			} else {
-				fmt.Fprintf(buf, "\tstart += len(%q)\n", ext.ID)
-				buf.WriteString("\tend := bytes.IndexByte(bodyBytes[start:], '\"')\n")
-				buf.WriteString("\tif end == -1 { end = bytes.IndexByte(bodyBytes[start:], 0x27) }\n")
-				buf.WriteString(
-					"\tif end == -1 {\n\t\treturn nil, errors.New(\"extract: attribute boundary not found\")\n\t}\n\n",
-				)
+		switch stage.Type {
+		case ir.StageRegex:
+			pattern := ""
+			if len(stage.Args) > 0 {
+				pattern = stage.Args[0]
+			} else if pat, ok := stage.NamedArgs["pattern"]; ok {
+				pattern = pat
 			}
-		} else if ext.Attr != "" {
-			fmt.Fprintf(buf, "\tstart := bytes.Index(bodyBytes, []byte(%q))\n", ext.Attr+"=")
-			buf.WriteString("\tif start == -1 {\n\t\treturn nil, errors.New(\"extract: attribute not found\")\n\t}\n")
-			fmt.Fprintf(buf, "\tstart += len(%q)\n", ext.Attr+"=")
-			buf.WriteString(
-				"\tif start >= len(bodyBytes) {\n\t\treturn nil, errors.New(\"extract: unexpected EOF\")\n\t}\n",
-			)
-			buf.WriteString("\tquote := bodyBytes[start]\n")
-			buf.WriteString("\tstart++\n")
-			buf.WriteString("\tend := bytes.IndexByte(bodyBytes[start:], quote)\n")
-			buf.WriteString(
-				"\tif end == -1 {\n\t\treturn nil, errors.New(\"extract: attribute boundary not found\")\n\t}\n\n",
-			)
-		}
 
+			fmt.Fprintf(buf, "\tstageOut%d, err := decode.ExtractRegex(stageIn, %q)\n", i, pattern)
+			buf.WriteString("\tif err != nil {\n\t\treturn nil, err\n\t}\n")
+			fmt.Fprintf(buf, "\tstageIn = stageOut%d\n\n", i)
+
+		case ir.StageBetween:
+			prefix := stage.NamedArgs["prefix"]
+
+			suffix := stage.NamedArgs["suffix"]
+			if suffix == "" {
+				suffix = stage.NamedArgs["and"]
+			}
+
+			if len(stage.Args) >= 1 && prefix == "" {
+				prefix = stage.Args[0]
+			}
+
+			if len(stage.Args) >= 2 && suffix == "" {
+				suffix = stage.Args[1]
+			}
+
+			fmt.Fprintf(buf, "\tstageOut%d, err := decode.ExtractBetween(stageIn, %q, %q)\n", i, prefix, suffix)
+			buf.WriteString("\tif err != nil {\n\t\treturn nil, err\n\t}\n")
+			fmt.Fprintf(buf, "\tstageIn = stageOut%d\n\n", i)
+
+		case ir.StageAttr:
+			css := stage.NamedArgs["css"]
+
+			attr := stage.NamedArgs["name"]
+			if attr == "" {
+				attr = stage.NamedArgs["attr"]
+			}
+
+			if len(stage.Args) >= 1 && css == "" {
+				css = stage.Args[0]
+			}
+
+			if len(stage.Args) >= 2 && attr == "" {
+				attr = stage.Args[1]
+			}
+
+			fmt.Fprintf(buf, "\tstageOut%d, err := decode.ExtractAttr(stageIn, %q, %q)\n", i, css, attr)
+			buf.WriteString("\tif err != nil {\n\t\treturn nil, err\n\t}\n")
+			fmt.Fprintf(buf, "\tstageIn = stageOut%d\n\n", i)
+
+		case ir.StageHTMLUnescape:
+			fmt.Fprintf(buf, "\tstageIn = decode.HTMLUnescape(stageIn)\n\n")
+
+		case ir.StageCustom:
+			if isLast {
+				fmt.Fprintf(buf, "\treturn %s(stageIn)\n", stage.FuncExpr)
+				return
+			}
+
+			fmt.Fprintf(buf, "\tstageOut%d, err := %s(stageIn)\n", i, stage.FuncExpr)
+			buf.WriteString("\tif err != nil {\n\t\treturn nil, err\n\t}\n")
+			fmt.Fprintf(buf, "\tstageIn = stageOut%d\n\n", i)
+
+		case ir.StageJSON:
+			fmt.Fprintf(buf, "\tvar result %s\n", resultType)
+			buf.WriteString("\tif err := decode.UnmarshalJSON(stageIn, &result); err != nil {\n")
+			buf.WriteString("\t\treturn nil, fmt.Errorf(\"pipeline json unmarshal: %w\", err)\n")
+			buf.WriteString("\t}\n")
+			e.emitChecks(buf, m)
+
+			if isPointer {
+				buf.WriteString("\treturn &result, nil\n")
+			} else {
+				buf.WriteString("\treturn result, nil\n")
+			}
+
+			return
+		}
+	}
+
+	switch resultType {
+	case "[]byte":
+		buf.WriteString("\treturn stageIn, nil\n")
+	case "string":
+		buf.WriteString("\treturn string(stageIn), nil\n")
+	default:
 		fmt.Fprintf(buf, "\tvar result %s\n", resultType)
-		buf.WriteString(
-			"\tunescaped := bytes.ReplaceAll(bodyBytes[start:start+end], []byte(\"&quot;\"), []byte(\"\\\"\"))\n",
-		)
-		buf.WriteString(
-			"\tif err := json.Unmarshal(unescaped, &result); err != nil {\n\t\treturn nil, fmt.Errorf(\"extract: failed to unmarshal payload: %w\", err)\n\t}\n\n",
-		)
-		buf.WriteString("\treturn &result, nil\n")
+		buf.WriteString("\tif err := decode.UnmarshalJSON(stageIn, &result); err != nil {\n")
+		buf.WriteString("\t\treturn nil, err\n")
+		buf.WriteString("\t}\n")
+
+		if isPointer {
+			buf.WriteString("\treturn &result, nil\n")
+		} else {
+			buf.WriteString("\treturn result, nil\n")
+		}
 	}
 }
 

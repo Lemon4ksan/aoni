@@ -32,30 +32,29 @@ import (
 // @engine fast
 // @header "X-Requested-With: XMLHttpRequest"
 type SteamProfile interface {
-	// 1. Extract JSON from HTML attribute (Strategy 3: HTML token / CSS)
+	// 1. Extract JSON from HTML attribute (Pipeline)
 	// @get "profiles/{steam_id}/edit/info"
-	// @extract css="#profile_edit_config" attr="data-profile-edit"
+	// @return body | attr(css="#profile_edit_config", name="data-profile-edit") | html_unescape | json
 	GetEditConfig(ctx context.Context, steam_id uint64, mods ...aoni.RequestModifier) (*RawProfileEditConfig, error)
 
-	// 2. Extract JSON from Script tag via Regex (Strategy 1: Regex)
+	// 2. Extract JSON from Script tag via Regex (Pipeline)
 	// @get "tradingcards/boostercreator"
-	// @extract regex="CBoosterCreatorPage\\.Init\\(\\s*([\\{\\[].*?[\\}\\]])"
+	// @return body | regex("CBoosterCreatorPage\\.Init\\(\\s*([\\{\\[].*?[\\}\\]])") | json
 	GetBoosterCatalog(ctx context.Context, mods ...aoni.RequestModifier) (*BoosterCatalog, error)
 
-	// 3. Extract JSON between prefix and suffix (Strategy 2: Zero-Alloc Between)
+	// 3. Extract JSON between prefix and suffix (Pipeline)
 	// @get "profiles/{steam_id}/edit/settings"
-	// @extract prefix="data-profile-edit=\"" suffix="\""
+	// @return body | between(prefix="data-profile-edit=\"", suffix="\"") | json
 	GetPrivacyConfig(ctx context.Context, steam_id uint64, mods ...aoni.RequestModifier) (*RawPrivacyConfig, error)
 
-	// 4. Form POST with JSON-in-Form (@format json_string)
+	// 4. Form POST with JSON-in-Form pipeline
 	// @post "profiles/{steam_id}/ajaxsetprivacy"
 	// @form
 	// @check "success == 1"
 	SavePrivacy(
 		ctx context.Context,
 		steam_id uint64,
-		// @field "Privacy"
-		// @format json_string
+		// @field "Privacy" = json | url_escape
 		privacy RawPrivacySettings,
 		// @field "eCommentPermission"
 		commentPermission int,
@@ -147,20 +146,18 @@ type UploadAvatarResponse struct {
 	codeStr := string(code)
 
 	// 1. Verify HTML Token/CSS extraction
-	require.Contains(t, codeStr, `start := bytes.Index(bodyBytes, []byte("profile_edit_config"))`)
-	require.Contains(t, codeStr, `attrIdx := bytes.Index(bodyBytes[start:], []byte("data-profile-edit="))`)
+	require.Contains(t, codeStr, `decode.ExtractAttr(stageIn, "#profile_edit_config", "data-profile-edit")`)
+	require.Contains(t, codeStr, `decode.HTMLUnescape(stageIn)`)
 
 	// 2. Verify Regex extraction
-	require.Contains(t, codeStr, "rx := regexp.MustCompile(`CBoosterCreatorPage")
-	require.Contains(t, codeStr, "matches := rx.FindSubmatch(bodyBytes)")
+	require.Contains(t, codeStr, `decode.ExtractRegex(stageIn, "CBoosterCreatorPage\\.Init\\(\\s*([\\{\\[].*?[\\}\\]])")`)
 
 	// 3. Verify Between extraction (0 alloc bytes.Index)
-	require.Contains(t, codeStr, `prefix := []byte("data-profile-edit=\"")`)
-	require.Contains(t, codeStr, `suffix := []byte("\"")`)
+	require.Contains(t, codeStr, `decode.ExtractBetween(stageIn, "data-profile-edit=\"", "\"")`)
 
 	// 4. Verify JSON-in-Form serialization
-	require.Contains(t, codeStr, "privacyJSON, err := json.Marshal(privacy)")
-	require.Contains(t, codeStr, "formBytes = append(formBytes, url.QueryEscape(string(privacyJSON))...)")
+	require.Contains(t, codeStr, "privacyBytes, err := json.Marshal(privacy)")
+	require.Contains(t, codeStr, "formBytes = append(formBytes, url.QueryEscape(string(privacyBytes))...)")
 
 	// 5. Verify Multipart writer code
 	require.Contains(t, codeStr, "mw := multipart.NewWriter(&bodyBuf)")

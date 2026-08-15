@@ -130,10 +130,6 @@ func GetDecoder(contentType string) Decoder {
 // then standard MIME types (JSON, Proto, gRPC-Web, XML), falling back to RawDecoder.
 // Thread-safe for concurrent invocation.
 func LookupDecoder(contentType string) Decoder {
-	if contentType == "application/json" || contentType == "application/json; charset=utf-8" {
-		return JSONDecoder
-	}
-
 	if hasCustomDecoders.Load() {
 		norm := normalizeContentType(contentType)
 		if norm != "" {
@@ -267,4 +263,15 @@ func DecodePayload(contentType string, rawBody []byte, target any) error {
 	decoder := LookupDecoder(contentType)
 
 	return decoder.Decode(bytes.NewReader(rawBody), target)
+}
+
+// UnmarshalJSON parses JSON bytes into target using the registered custom JSON decoder or standard JSONDecoder.
+func UnmarshalJSON(data []byte, target any) error {
+	if hasCustomDecoders.Load() {
+		if d := GetDecoder("application/json"); d != nil {
+			return d.Decode(bytes.NewReader(data), target)
+		}
+	}
+
+	return JSONDecoder.Decode(bytes.NewReader(data), target)
 }

@@ -14,10 +14,11 @@ import (
 
 // Directive represents a single parsed doc comment directive starting with '@'.
 type Directive struct {
-	Name  string            // e.g. "aoni:service", "get", "retry", "header", "check", "field"
-	Value string            // First positional argument if present (unquoted)
-	Args  map[string]string // Key-value arguments (e.g. attempts="3", casing="snake_case")
-	Raw   string            // Raw directive text without leading "@"
+	Name     string            // e.g. "aoni:service", "get", "retry", "header", "check", "field"
+	Value    string            // First positional argument if present (unquoted)
+	Args     map[string]string // Key-value arguments (e.g. attempts="3", casing="snake_case")
+	Pipeline *ir.PipelineIR    // Parsed Wire-Transform pipeline if applicable
+	Raw      string            // Raw directive text without leading "@"
 }
 
 // ParseDirective extracts a structured [Directive] from a single comment line.
@@ -52,6 +53,27 @@ func ParseDirective(line string) *Directive {
 
 	d.Name = strings.ToLower(content[:idx])
 	rest := strings.TrimSpace(content[idx:])
+
+	if d.Name == "return" || d.Name == "body" {
+		d.Pipeline = ParsePipeline(rest)
+		d.Value = rest
+		return d
+	}
+
+	// Check if param directive contains '=' for pipeline expression: e.g. @field "Privacy" = json | url_escape
+	if (d.Name == "field" || d.Name == "query" || d.Name == "param" || d.Name == "header" || d.Name == "part") &&
+		strings.Contains(rest, "=") {
+		eqIdx := strings.Index(rest, "=")
+		left := strings.TrimSpace(rest[:eqIdx])
+		right := strings.TrimSpace(rest[eqIdx+1:])
+
+		d.Value = unquote(left)
+		if right != "" {
+			d.Pipeline = ParsePipeline(right)
+		}
+
+		return d
+	}
 
 	parseDirectiveArgs(rest, d)
 
@@ -237,16 +259,19 @@ func ParsePathTemplate(tmpl string) *ir.PathIR {
 
 // ParseHeaderDirective parses a "@header" directive value which may be static or templated.
 func ParseHeaderDirective(val string) ir.HeaderIR {
+	val = strings.TrimSpace(val)
+	val = strings.Trim(val, "\"")
+
 	colonIdx := strings.IndexByte(val, ':')
 	if colonIdx == -1 {
 		return ir.HeaderIR{
-			Key:         strings.TrimSpace(val),
+			Key:         strings.Trim(strings.TrimSpace(val), "\""),
 			StaticValue: "",
 		}
 	}
 
-	key := strings.TrimSpace(val[:colonIdx])
-	valueStr := strings.TrimSpace(val[colonIdx+1:])
+	key := strings.Trim(strings.TrimSpace(val[:colonIdx]), "\"")
+	valueStr := strings.Trim(strings.TrimSpace(val[colonIdx+1:]), "\"")
 
 	if strings.Contains(valueStr, "{") && strings.Contains(valueStr, "}") {
 		return ir.HeaderIR{
