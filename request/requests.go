@@ -65,6 +65,23 @@ type Requester interface {
 	) (*http.Response, error)
 }
 
+// Subscriber defines the universal contract for subscribing to inbound binary events.
+type Subscriber interface {
+	// Subscribe binds an event receiver for the specified event ID and returns an unsubscribe cleanup func.
+	Subscribe(eventID any, handler func(raw []byte)) (unsubscribe func())
+}
+
+// Transport defines the universal low-level wire contract for RPC, notifications, and event streams.
+type Transport interface {
+	Subscriber
+
+	// Invoke executes a request-response RPC over the wire.
+	Invoke(ctx context.Context, op any, payload []byte) (response []byte, err error)
+
+	// Notify sends a one-way message without waiting for a reply.
+	Notify(ctx context.Context, op any, payload []byte) error
+}
+
 // AsRequester adapts any execution engine, client, or [aoni.RequestDoer] into a [Requester].
 func AsRequester(doer any) Requester {
 	if doer == nil {

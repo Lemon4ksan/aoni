@@ -6,12 +6,19 @@ package ir
 
 // RootIR represents the parsed root AST containing API services, DTOs, tuples, and unions.
 type RootIR struct {
-	PackageName string
-	Imports     []ImportIR
-	Services    []*ServiceIR
-	Structs     []*StructIR
-	Tuples      []*TupleIR
-	Unions      []*UnionIR
+	PackageName            string
+	Imports                []ImportIR
+	Services               []*ServiceIR
+	Structs                []*StructIR
+	Tuples                 []*TupleIR
+	Unions                 []*UnionIR
+	UnrecognizedDirectives []UnrecognizedDirectiveIR
+}
+
+// UnrecognizedDirectiveIR records unrecognized @directives encountered during parsing for static diagnostic checks.
+type UnrecognizedDirectiveIR struct {
+	Target string
+	Name   string
 }
 
 // ImportIR holds a single Go package import dependency.
@@ -50,6 +57,12 @@ type ProtocolKind string
 const (
 	// ProtocolHTTP represents standard HTTP/1.1, HTTP/2, and HTTP/3 transport.
 	ProtocolHTTP ProtocolKind = "http"
+
+	// ProtocolRPC represents a universal RPC / binary socket / broker protocol.
+	ProtocolRPC ProtocolKind = "rpc"
+
+	// ProtocolChannel represents channel / event streaming transport.
+	ProtocolChannel ProtocolKind = "channel"
 
 	// ProtocolGRPC represents native gRPC framing and streaming.
 	ProtocolGRPC ProtocolKind = "grpc"
@@ -166,6 +179,10 @@ type MethodIR struct {
 	SignHMAC        *SignHMACIR
 	Injects         []InjectIR
 	Presets         []string
+	OpID            string
+	OpIDIsQuoted    bool
+	IsNotify        bool
+	IsEvent         bool
 	StackModsSize   int
 	StackBufSize    int
 }
@@ -206,6 +223,15 @@ const (
 	// OpHTTP represents standard HTTP request-response.
 	OpHTTP OperationKind = "http"
 
+	// OpRPC represents a universal request-response RPC.
+	OpRPC OperationKind = "rpc"
+
+	// OpNotify represents a one-way fire-and-forget message.
+	OpNotify OperationKind = "notify"
+
+	// OpEvent represents an inbound event subscription with a typed handler.
+	OpEvent OperationKind = "event"
+
 	// OpGRPC represents a gRPC RPC invocation.
 	OpGRPC OperationKind = "grpc"
 
@@ -223,6 +249,9 @@ const (
 
 	// OpSSHShell represents starting an interactive remote SSH shell session.
 	OpSSHShell OperationKind = "ssh_shell"
+
+	// OpClose represents closing and unregistering all active subscriptions.
+	OpClose OperationKind = "close"
 )
 
 // StreamDirection specifies data streaming direction for gRPC or WebSocket.
@@ -434,6 +463,9 @@ const (
 
 	// LocArenaScope maps memory allocation to an off-heap Arena.
 	LocArenaScope ParamLocation = "arena_scope"
+
+	// LocHandler maps an event subscription callback handler.
+	LocHandler ParamLocation = "handler"
 
 	// LocStreamInput maps an incoming <-chan T for client-streaming.
 	LocStreamInput ParamLocation = "stream_in"

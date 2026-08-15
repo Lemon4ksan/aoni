@@ -9,7 +9,9 @@ import (
 	"errors"
 	"fmt"
 	"go/format"
+	"strconv"
 	"strings"
+	"unicode"
 
 	"github.com/lemon4ksan/aoni/internal/codegen/ir"
 )
@@ -71,20 +73,30 @@ func (e *Emitter) emitImports(buf *bytes.Buffer, root *ir.RootIR) {
 		fmt.Fprintf(buf, "\t\"%s\"\n", pkg)
 	}
 
+	hasHTTP := false
+
 	hasFastClient := false
 	if root != nil {
 		for _, svc := range root.Services {
-			isStrict := svc.Engine == ir.EngineRequired || svc.RequesterType != ""
-			if !isStrict && svc.Engine != ir.EngineNetHTTP && svc.Engine != ir.EngineCustom {
-				hasFastClient = true
+			if svc.Protocol != ir.ProtocolRPC && svc.Protocol != ir.ProtocolChannel {
+				hasHTTP = true
+
+				isStrict := svc.Engine == ir.EngineRequired || svc.RequesterType != ""
+				if !isStrict && svc.Engine != ir.EngineNetHTTP && svc.Engine != ir.EngineCustom {
+					hasFastClient = true
+				}
 			}
 		}
 	}
 
-	buf.WriteString("\n\t\"github.com/lemon4ksan/aoni\"\n")
+	if hasHTTP {
+		buf.WriteString("\n\t\"github.com/lemon4ksan/aoni\"\n")
 
-	if hasFastClient {
-		buf.WriteString("\t\"github.com/lemon4ksan/aoni/fast\"\n")
+		if hasFastClient {
+			buf.WriteString("\t\"github.com/lemon4ksan/aoni/fast\"\n")
+		}
+	} else {
+		buf.WriteString("\n")
 	}
 
 	hasDecode := false
@@ -93,8 +105,17 @@ func (e *Emitter) emitImports(buf *bytes.Buffer, root *ir.RootIR) {
 	if root != nil {
 		for _, svc := range root.Services {
 			for _, m := range svc.Methods {
-				if m.ReturnPipeline != nil || m.Decoder != "" {
+				if m.Decoder != "" {
 					hasDecode = true
+				}
+
+				if m.ReturnPipeline != nil {
+					for _, st := range m.ReturnPipeline.Stages {
+						if st.Type == ir.StageJSON || st.Type == ir.StageAttr || st.Type == ir.StageBetween ||
+							st.Type == ir.StageHTMLUnescape {
+							hasDecode = true
+						}
+					}
 				}
 
 				if m.Codec != "" {
@@ -112,16 +133,74 @@ func (e *Emitter) emitImports(buf *bytes.Buffer, root *ir.RootIR) {
 		buf.WriteString("\t\"github.com/lemon4ksan/aoni/codec/decode\"\n")
 	}
 
-	buf.WriteString("\t\"github.com/lemon4ksan/aoni/mod\"\n")
-	buf.WriteString("\t\"github.com/lemon4ksan/aoni/option\"\n")
-	buf.WriteString("\t\"github.com/lemon4ksan/aoni/request\"\n")
+	if hasHTTP {
+		buf.WriteString("\t\"github.com/lemon4ksan/aoni/mod\"\n")
+		buf.WriteString("\t\"github.com/lemon4ksan/aoni/option\"\n")
+	}
+
+	hasRequest := false
+	if root != nil {
+		for _, svc := range root.Services {
+			if svc.Protocol != ir.ProtocolRPC && svc.Protocol != ir.ProtocolChannel {
+				hasRequest = true
+			} else if svc.RequesterType == "" || strings.Contains(svc.RequesterType, "request.") {
+				hasRequest = true
+			}
+		}
+	}
+
+	if hasRequest {
+		buf.WriteString("\t\"github.com/lemon4ksan/aoni/request\"\n")
+	}
+
+	hasProto := false
+	if root != nil {
+		for _, svc := range root.Services {
+			for _, m := range svc.Methods {
+				for _, p := range m.Params {
+					if strings.Contains(p.GoType.ElemType, "pb.") || strings.Contains(p.GoType.ElemType, "CMsg") ||
+						strings.Contains(p.GoType.ElemType, "proto.") ||
+						strings.Contains(p.GoType.Name, "pb.") ||
+						strings.Contains(p.GoType.Name, "CMsg") ||
+						strings.Contains(p.GoType.Name, "proto.") {
+						hasProto = true
+					}
+				}
+
+				if m.Return != nil &&
+					(strings.Contains(m.Return.SuccessType.Name, "pb.") || strings.Contains(m.Return.SuccessType.Name, "CMsg")) {
+					hasProto = true
+				}
+
+				if m.ReturnPipeline != nil {
+					for _, st := range m.ReturnPipeline.Stages {
+						if st.Type == ir.StageProto {
+							hasProto = true
+						}
+					}
+				}
+
+				if m.BodyPipeline != nil {
+					for _, st := range m.BodyPipeline.Stages {
+						if st.Type == ir.StageProto {
+							hasProto = true
+						}
+					}
+				}
+			}
+		}
+	}
+
+	if hasProto {
+		buf.WriteString("\t\"google.golang.org/protobuf/proto\"\n")
+	}
 
 	// User custom imports (exclude standard imports already emitted)
 	stdImports := map[string]bool{
 		"bytes": true, "context": true, "encoding/json": true, "errors": true,
 		"fmt": true, "io": true, "mime/multipart": true, "net/http": true,
 		"net/textproto": true, "net/url": true, "os": true, "regexp": true,
-		"strconv": true, "strings": true, "time": true,
+		"strconv": true, "strings": true, "sync": true, "time": true,
 	}
 
 	for _, imp := range root.Imports {
@@ -140,29 +219,92 @@ func (e *Emitter) emitImports(buf *bytes.Buffer, root *ir.RootIR) {
 }
 
 func collectStdImports(root *ir.RootIR) []string {
-	needed := map[string]bool{
-		"context":  true,
-		"net/http": true,
+	needed := make(map[string]bool)
+
+	hasContext := false
+	hasEvents := false
+	hasExplicitClose := false
+
+	if root != nil {
+		for _, svc := range root.Services {
+			if svc.Engine == ir.EngineNetHTTP {
+				needed["net/http"] = true
+			}
+
+			if svc.Protocol == ir.ProtocolRPC || svc.Protocol == ir.ProtocolChannel {
+				for _, m := range svc.Methods {
+					if m.IsEvent || m.Operation == ir.OpEvent {
+						hasEvents = true
+					}
+
+					if m.Name == "Close" {
+						hasExplicitClose = true
+					}
+				}
+			}
+
+			for _, m := range svc.Methods {
+				if m.Return != nil && m.Return.HasRawResponse {
+					needed["net/http"] = true
+				}
+
+				if m.Return != nil &&
+					(m.Return.SuccessType.Name == "io.ReadCloser" || m.Return.SuccessType.Name == "io.Reader") {
+					needed["net/http"] = true
+				}
+
+				if m.ReturnPipeline != nil && m.Operation != ir.OpRPC && m.Operation != ir.OpEvent &&
+					m.Operation != ir.OpNotify {
+					needed["net/http"] = true
+				}
+
+				for _, p := range m.Params {
+					if p.Location == ir.LocContext || p.GoType.Name == "context.Context" {
+						hasContext = true
+					}
+
+					if strings.Contains(p.GoType.Name, "http.") {
+						needed["net/http"] = true
+					}
+				}
+			}
+		}
+	}
+
+	if hasEvents || hasExplicitClose {
+		needed["sync"] = true
+	}
+
+	if hasContext {
+		needed["context"] = true
 	}
 
 	for _, svc := range root.Services {
-		if svc.Engine == ir.EngineRequired || svc.RequesterType != "" {
+		if svc.Engine == ir.EngineRequired ||
+			(svc.Protocol != ir.ProtocolRPC && svc.Protocol != ir.ProtocolChannel && svc.RequesterType != "") {
 			needed["errors"] = true
 		}
 
 		for _, m := range svc.Methods {
-			if m.Return != nil && (strings.Contains(m.Return.SuccessType.Name, "io.") || m.Return.IsStreamChan) {
-				needed["io"] = true
+			if m.Return != nil {
+				if strings.Contains(m.Return.SuccessType.Name, "io.") || m.Return.IsStreamChan {
+					needed["io"] = true
+				}
+
+				if strings.Contains(m.Return.SuccessType.Name, "json.") {
+					needed["encoding/json"] = true
+				}
 			}
 
-			if m.ReturnPipeline != nil {
+			if m.ReturnPipeline != nil && m.Operation != ir.OpRPC && m.Operation != ir.OpEvent &&
+				m.Operation != ir.OpNotify {
 				needed["io"] = true
 				needed["fmt"] = true
 				needed["errors"] = true
 			}
 
 			for _, p := range m.Params {
-				if p.Pipeline != nil || p.Formatter == ir.FormatJSONString {
+				if p.Pipeline != nil || p.Formatter == ir.FormatJSONString || strings.Contains(p.GoType.Name, "json.") {
 					needed["encoding/json"] = true
 				}
 			}
@@ -207,7 +349,6 @@ func collectStdImports(root *ir.RootIR) []string {
 			}
 
 			if m.UnwrapField != "" {
-				needed["encoding/json"] = true
 				needed["errors"] = true
 			}
 
@@ -223,7 +364,8 @@ func collectStdImports(root *ir.RootIR) []string {
 						needed["strconv"] = true
 					}
 
-					if p.GoType.Name != "string" && !p.GoType.IsSlice && p.GoType.Name != "" {
+					if p.Formatter != ir.FormatCompiledEncode && p.GoType.Name != "string" && !p.GoType.IsSlice &&
+						p.GoType.Name != "" {
 						needed["fmt"] = true
 					}
 
@@ -260,7 +402,7 @@ func collectStdImports(root *ir.RootIR) []string {
 	order := []string{
 		"bytes", "context", "encoding/json", "errors", "fmt", "io",
 		"mime/multipart", "net/http", "net/textproto", "net/url", "os", "regexp",
-		"strconv", "time",
+		"strconv", "sync", "time",
 	}
 
 	var res []string
@@ -290,6 +432,94 @@ func isCompiledDTO(root *ir.RootIR, typeName string) bool {
 
 func (e *Emitter) emitService(buf *bytes.Buffer, root *ir.RootIR, svc *ir.ServiceIR) {
 	clientStructName := lowerFirst(svc.Name) + "Client"
+
+	if svc.Protocol == ir.ProtocolRPC || svc.Protocol == ir.ProtocolChannel {
+		reqArgType := "request.Transport"
+		if svc.RequesterType != "" {
+			reqArgType = svc.RequesterType
+		}
+
+		hasEvents := false
+
+		hasExplicitClose := false
+		for _, m := range svc.Methods {
+			if m.IsEvent || m.Operation == ir.OpEvent {
+				hasEvents = true
+			}
+
+			if m.Name == "Close" {
+				hasExplicitClose = true
+			}
+		}
+
+		fmt.Fprintf(buf, "type %s struct {\n", clientStructName)
+		fmt.Fprintf(buf, "\ttransport %s\n", reqArgType)
+
+		if hasEvents || hasExplicitClose {
+			buf.WriteString("\tmu        sync.Mutex\n")
+			buf.WriteString("\tunregs    []func()\n")
+		}
+
+		buf.WriteString("}\n\n")
+
+		constructorName := "New" + svc.Name
+		if svc.Name == "Client" || svc.Name == "API" {
+			constructorName = "New"
+		}
+
+		mustConstructorName := "Must" + constructorName
+
+		fmt.Fprintf(
+			buf,
+			"// %s creates a new %s client instance backed by a transport.\n",
+			constructorName,
+			svc.Name,
+		)
+		fmt.Fprintf(
+			buf,
+			"func %s(transport %s) %s {\n",
+			constructorName,
+			reqArgType,
+			svc.Name,
+		)
+		fmt.Fprintf(buf, "\treturn &%s{\n\t\ttransport: transport,\n\t}\n}\n\n", clientStructName)
+
+		fmt.Fprintf(
+			buf,
+			"// %s initializes %s.\n",
+			mustConstructorName,
+			svc.Name,
+		)
+		fmt.Fprintf(
+			buf,
+			"func %s(transport %s) %s {\n",
+			mustConstructorName,
+			reqArgType,
+			svc.Name,
+		)
+		fmt.Fprintf(buf, "\treturn %s(transport)\n}\n\n", constructorName)
+
+		for _, m := range svc.Methods {
+			if m.Name != "Close" {
+				e.emitMethod(buf, root, svc, clientStructName, m)
+			}
+		}
+
+		if hasEvents || hasExplicitClose {
+			fmt.Fprintf(buf, "// Close unsubscribes all active event listeners.\n")
+			fmt.Fprintf(buf, "func (c *%s) Close() error {\n", clientStructName)
+			buf.WriteString("\tc.mu.Lock()\n")
+			buf.WriteString("\tfor _, unreg := range c.unregs {\n")
+			buf.WriteString("\t\tunreg()\n")
+			buf.WriteString("\t}\n")
+			buf.WriteString("\tc.unregs = nil\n")
+			buf.WriteString("\tc.mu.Unlock()\n")
+			buf.WriteString("\treturn nil\n")
+			buf.WriteString("}\n\n")
+		}
+
+		return
+	}
 
 	// 1. Client Struct
 	fmt.Fprintf(buf, "type %s struct {\n", clientStructName)
@@ -380,6 +610,14 @@ func (e *Emitter) emitService(buf *bytes.Buffer, root *ir.RootIR, svc *ir.Servic
 		)
 		buf.WriteString("\t} else if req, ok := any(client).(request.Requester); ok {\n")
 		buf.WriteString("\t\ttargetReq = req\n")
+		buf.WriteString(
+			"\t} else if rd, ok := any(client).(interface{ Rest() request.Requester }); ok && rd.Rest() != nil {\n",
+		)
+		buf.WriteString("\t\ttargetReq = rd.Rest()\n")
+		buf.WriteString(
+			"\t} else if rd, ok := any(client).(interface{ Requester() request.Requester }); ok && rd.Requester() != nil {\n",
+		)
+		buf.WriteString("\t\ttargetReq = rd.Requester()\n")
 		buf.WriteString("\t} else {\n")
 		buf.WriteString("\t\treturn nil, errors.New(\"aoni: unsupported requester interface\")\n")
 		buf.WriteString("\t}\n\n")
@@ -526,6 +764,16 @@ func (e *Emitter) emitMethod(
 	clientStructName string,
 	m *ir.MethodIR,
 ) {
+	if m.Operation == ir.OpEvent || m.IsEvent {
+		e.emitEventMethod(buf, root, svc, clientStructName, m)
+		return
+	}
+
+	if m.Operation == ir.OpRPC || m.Operation == ir.OpNotify || m.OpID != "" {
+		e.emitRPCMethod(buf, root, svc, clientStructName, m)
+		return
+	}
+
 	paramsStr := formatMethodParams(m.Params)
 	returnsStr := formatMethodReturns(m.Return)
 
@@ -1723,4 +1971,288 @@ func emitSliceElementFormat(buf *bytes.Buffer, elemType, targetBuf, valVar strin
 	default:
 		fmt.Fprintf(buf, "\t\t%s = append(%s, url.QueryEscape(fmt.Sprint(%s))...)\n", targetBuf, targetBuf, valVar)
 	}
+}
+
+func (e *Emitter) emitEventMethod(
+	buf *bytes.Buffer,
+	root *ir.RootIR,
+	svc *ir.ServiceIR,
+	clientStructName string,
+	m *ir.MethodIR,
+) {
+	paramsStr := formatMethodParams(m.Params)
+	returnsStr := formatMethodReturns(m.Return)
+
+	fmt.Fprintf(buf, "func (c *%s) %s(%s) %s {\n", clientStructName, m.Name, paramsStr, returnsStr)
+
+	handlerParamName := "handler"
+
+	handlerElemType := ""
+	for _, p := range m.Params {
+		if strings.HasPrefix(p.GoType.Name, "func(") {
+			handlerParamName = p.GoName
+			handlerElemType = p.GoType.ElemType
+			break
+		}
+	}
+
+	opIDExpr := formatOpID(m.OpID, m.OpIDIsQuoted)
+
+	fmt.Fprintf(buf, "\tunsub := c.transport.Subscribe(%s, func(raw []byte) {\n", opIDExpr)
+
+	switch {
+	case m.ReturnPipeline != nil && len(m.ReturnPipeline.Stages) > 0:
+		buf.WriteString("\t\tstageIn := raw\n")
+
+		for i, stage := range m.ReturnPipeline.Stages {
+			switch stage.Type {
+			case ir.StageProto:
+				isPtr := strings.HasPrefix(handlerElemType, "*")
+				baseType := strings.TrimPrefix(handlerElemType, "*")
+				fmt.Fprintf(buf, "\t\tvar msg %s\n", baseType)
+				buf.WriteString("\t\tif err := proto.Unmarshal(stageIn, &msg); err != nil {\n\t\t\treturn\n\t\t}\n")
+
+				if isPtr {
+					fmt.Fprintf(buf, "\t\t%s(&msg)\n", handlerParamName)
+				} else {
+					fmt.Fprintf(buf, "\t\t%s(msg)\n", handlerParamName)
+				}
+
+				buf.WriteString("\t})\n\n")
+				buf.WriteString("\tc.mu.Lock()\n\tc.unregs = append(c.unregs, unsub)\n\tc.mu.Unlock()\n\n")
+				buf.WriteString("\treturn unsub\n}\n\n")
+
+				return
+
+			case ir.StageJSON:
+				isPtr := strings.HasPrefix(handlerElemType, "*")
+				baseType := strings.TrimPrefix(handlerElemType, "*")
+				fmt.Fprintf(buf, "\t\tvar msg %s\n", baseType)
+				buf.WriteString(
+					"\t\tif err := decode.UnmarshalJSON(stageIn, &msg); err != nil {\n\t\t\treturn\n\t\t}\n",
+				)
+
+				if isPtr {
+					fmt.Fprintf(buf, "\t\t%s(&msg)\n", handlerParamName)
+				} else {
+					fmt.Fprintf(buf, "\t\t%s(msg)\n", handlerParamName)
+				}
+
+				buf.WriteString("\t})\n\n")
+				buf.WriteString("\tc.mu.Lock()\n\tc.unregs = append(c.unregs, unsub)\n\tc.mu.Unlock()\n\n")
+				buf.WriteString("\treturn unsub\n}\n\n")
+
+				return
+
+			case ir.StageCustom:
+				fmt.Fprintf(buf, "\t\tres, err := %s(stageIn)\n", stage.FuncExpr)
+				buf.WriteString("\t\tif err != nil {\n\t\t\treturn\n\t\t}\n")
+				fmt.Fprintf(buf, "\t\t%s(res)\n", handlerParamName)
+				buf.WriteString("\t})\n\n")
+				buf.WriteString("\tc.mu.Lock()\n\tc.unregs = append(c.unregs, unsub)\n\tc.mu.Unlock()\n\n")
+				buf.WriteString("\treturn unsub\n}\n\n")
+
+				return
+
+			default:
+				fmt.Fprintf(
+					buf,
+					"\t\tstageOut%d, err := decode.ExtractAttr(stageIn, %q, %q)\n",
+					i,
+					stage.NamedArgs["css"],
+					stage.NamedArgs["name"],
+				)
+				buf.WriteString("\t\tif err != nil {\n\t\t\treturn\n\t\t}\n")
+				fmt.Fprintf(buf, "\t\tstageIn = stageOut%d\n", i)
+			}
+		}
+
+	case strings.Contains(handlerElemType, "pb.") || strings.Contains(handlerElemType, "CMsg") || strings.Contains(handlerElemType, "proto."):
+		isPtr := strings.HasPrefix(handlerElemType, "*")
+		baseType := strings.TrimPrefix(handlerElemType, "*")
+		fmt.Fprintf(buf, "\t\tvar msg %s\n", baseType)
+		buf.WriteString("\t\tif err := proto.Unmarshal(raw, &msg); err != nil {\n\t\t\treturn\n\t\t}\n")
+
+		if isPtr {
+			fmt.Fprintf(buf, "\t\t%s(&msg)\n", handlerParamName)
+		} else {
+			fmt.Fprintf(buf, "\t\t%s(msg)\n", handlerParamName)
+		}
+
+	default:
+		fmt.Fprintf(buf, "\t\t%s(raw)\n", handlerParamName)
+	}
+
+	buf.WriteString("\t})\n\n")
+	buf.WriteString("\tc.mu.Lock()\n\tc.unregs = append(c.unregs, unsub)\n\tc.mu.Unlock()\n\n")
+	buf.WriteString("\treturn unsub\n}\n\n")
+}
+
+func (e *Emitter) emitRPCMethod(
+	buf *bytes.Buffer,
+	root *ir.RootIR,
+	svc *ir.ServiceIR,
+	clientStructName string,
+	m *ir.MethodIR,
+) {
+	paramsStr := formatMethodParams(m.Params)
+	returnsStr := formatMethodReturns(m.Return)
+
+	fmt.Fprintf(buf, "func (c *%s) %s(%s) %s {\n", clientStructName, m.Name, paramsStr, returnsStr)
+
+	reqParamName := ""
+
+	reqParamType := ""
+	for _, p := range m.Params {
+		if p.GoType.Name != "context.Context" && !p.GoType.IsVariadic {
+			reqParamName = p.GoName
+			reqParamType = p.GoType.Name
+			break
+		}
+	}
+
+	opIDExpr := formatOpID(m.OpID, m.OpIDIsQuoted)
+
+	if reqParamName != "" {
+		switch {
+		case m.BodyPipeline != nil && len(m.BodyPipeline.Stages) > 0:
+			switch m.BodyPipeline.Stages[0].Type {
+			case ir.StageProto:
+				fmt.Fprintf(buf, "\tpayloadBytes, err := proto.Marshal(%s)\n", reqParamName)
+			case ir.StageJSON:
+				fmt.Fprintf(buf, "\tpayloadBytes, err := json.Marshal(%s)\n", reqParamName)
+			case ir.StageCustom:
+				fmt.Fprintf(buf, "\tpayloadBytes, err := %s(%s)\n", m.BodyPipeline.Stages[0].FuncExpr, reqParamName)
+			default:
+				fmt.Fprintf(buf, "\tpayloadBytes, err := json.Marshal(%s)\n", reqParamName)
+			}
+
+		case strings.Contains(reqParamType, "pb.") || strings.Contains(reqParamType, "proto.") || strings.Contains(reqParamType, "CMsg"):
+			fmt.Fprintf(buf, "\tpayloadBytes, err := proto.Marshal(%s)\n", reqParamName)
+		case reqParamType == "[]byte":
+			fmt.Fprintf(buf, "\tpayloadBytes := %s\n", reqParamName)
+		default:
+			fmt.Fprintf(buf, "\tpayloadBytes, err := json.Marshal(%s)\n", reqParamName)
+		}
+
+		if reqParamType != "[]byte" {
+			if m.IsNotify || m.Operation == ir.OpNotify {
+				buf.WriteString("\tif err != nil {\n\t\treturn err\n\t}\n\n")
+			} else {
+				buf.WriteString("\tif err != nil {\n\t\treturn nil, err\n\t}\n\n")
+			}
+		}
+	} else {
+		buf.WriteString("\tvar payloadBytes []byte\n\n")
+	}
+
+	if m.IsNotify || m.Operation == ir.OpNotify {
+		fmt.Fprintf(buf, "\treturn c.transport.Notify(ctx, %s, payloadBytes)\n}\n\n", opIDExpr)
+		return
+	}
+
+	fmt.Fprintf(buf, "\trawResp, err := c.transport.Invoke(ctx, %s, payloadBytes)\n", opIDExpr)
+	buf.WriteString("\tif err != nil {\n\t\treturn nil, err\n\t}\n\n")
+
+	// Decode response
+	resultType := ""
+	if m.Return != nil && m.Return.SuccessType.Name != "" {
+		resultType = m.Return.SuccessType.Name
+	}
+
+	if resultType == "" || resultType == "error" || m.Return.IsVoid {
+		buf.WriteString("\treturn nil\n}\n\n")
+		return
+	}
+
+	switch {
+	case m.ReturnPipeline != nil && len(m.ReturnPipeline.Stages) > 0:
+		stage := m.ReturnPipeline.Stages[len(m.ReturnPipeline.Stages)-1]
+		switch stage.Type {
+		case ir.StageProto:
+			isPtr := strings.HasPrefix(resultType, "*")
+			baseType := strings.TrimPrefix(resultType, "*")
+			fmt.Fprintf(buf, "\tvar result %s\n", baseType)
+			buf.WriteString("\tif err := proto.Unmarshal(rawResp, &result); err != nil {\n\t\treturn nil, err\n\t}\n")
+
+			if isPtr {
+				buf.WriteString("\treturn &result, nil\n")
+			} else {
+				buf.WriteString("\treturn result, nil\n")
+			}
+
+		case ir.StageJSON:
+			isPtr := strings.HasPrefix(resultType, "*")
+			baseType := strings.TrimPrefix(resultType, "*")
+			fmt.Fprintf(buf, "\tvar result %s\n", baseType)
+			buf.WriteString(
+				"\tif err := decode.UnmarshalJSON(rawResp, &result); err != nil {\n\t\treturn nil, err\n\t}\n",
+			)
+
+			if isPtr {
+				buf.WriteString("\treturn &result, nil\n")
+			} else {
+				buf.WriteString("\treturn result, nil\n")
+			}
+
+		case ir.StageCustom:
+			fmt.Fprintf(buf, "\treturn %s(rawResp)\n", stage.FuncExpr)
+		default:
+			buf.WriteString("\treturn rawResp, nil\n")
+		}
+
+	case strings.Contains(resultType, "pb.") || strings.Contains(resultType, "CMsg"):
+		isPtr := strings.HasPrefix(resultType, "*")
+		baseType := strings.TrimPrefix(resultType, "*")
+		fmt.Fprintf(buf, "\tvar result %s\n", baseType)
+		buf.WriteString("\tif err := proto.Unmarshal(rawResp, &result); err != nil {\n\t\treturn nil, err\n\t}\n")
+
+		if isPtr {
+			buf.WriteString("\treturn &result, nil\n")
+		} else {
+			buf.WriteString("\treturn result, nil\n")
+		}
+
+	case resultType == "[]byte":
+		buf.WriteString("\treturn rawResp, nil\n")
+	default:
+		isPtr := strings.HasPrefix(resultType, "*")
+		baseType := strings.TrimPrefix(resultType, "*")
+		fmt.Fprintf(buf, "\tvar result %s\n", baseType)
+		buf.WriteString("\tif err := decode.UnmarshalJSON(rawResp, &result); err != nil {\n\t\treturn nil, err\n\t}\n")
+
+		if isPtr {
+			buf.WriteString("\treturn &result, nil\n")
+		} else {
+			buf.WriteString("\treturn result, nil\n")
+		}
+	}
+
+	buf.WriteString("}\n\n")
+}
+
+func isNumeric(s string) bool {
+	if s == "" {
+		return false
+	}
+
+	for _, r := range s {
+		if !unicode.IsDigit(r) && r != '-' && r != '+' {
+			return false
+		}
+	}
+
+	return true
+}
+
+func formatOpID(opID string, isQuoted bool) string {
+	if isQuoted {
+		return strconv.Quote(opID)
+	}
+
+	if isNumeric(opID) {
+		return opID
+	}
+
+	return opID
 }

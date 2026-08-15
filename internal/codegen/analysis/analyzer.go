@@ -64,6 +64,10 @@ func (a *Analyzer) Analyze(root *ir.RootIR) []Diagnostic {
 		diags = append(diags, validateTupleFields(tuple)...)
 	}
 
+	if len(root.UnrecognizedDirectives) > 0 {
+		diags = append(diags, validateUnrecognizedDirectives(root.UnrecognizedDirectives)...)
+	}
+
 	return diags
 }
 

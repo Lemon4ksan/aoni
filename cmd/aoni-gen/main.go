@@ -30,6 +30,7 @@ func main() {
 		)
 		outFlag     = flag.String("out", "", "Path to output generated .gen.go file (default: <filename>.gen.go)")
 		pkgFlag     = flag.String("pkg", "", "Override package name in generated code")
+		checkFlag   = flag.Bool("check", false, "Validate @aoni contracts and syntax without generating code")
 		watchFlag   = flag.Bool("watch", false, "Watch source directories and rebuild on file modification")
 		verboseFlag = flag.Bool("v", false, "Enable verbose compilation logging")
 	)
@@ -37,11 +38,13 @@ func main() {
 	flag.Usage = func() {
 		fmt.Fprintf(os.Stderr, "aoni-gen — Ultra-high-performance RPC/HTTP client code generator for Go\n\n")
 		fmt.Fprintf(os.Stderr, "Usage:\n")
-		fmt.Fprintf(os.Stderr, "  aoni-gen [flags] [packages/files...]\n\n")
+		fmt.Fprintf(os.Stderr, "  aoni-gen [flags] [packages/files...]\n")
+		fmt.Fprintf(os.Stderr, "  aoni-gen check [packages/files...]\n\n")
 		fmt.Fprintf(os.Stderr, "Flags:\n")
 		flag.PrintDefaults()
 		fmt.Fprintf(os.Stderr, "\nExamples:\n")
 		fmt.Fprintf(os.Stderr, "  aoni-gen ./...\n")
+		fmt.Fprintf(os.Stderr, "  aoni-gen check ./...\n")
 		fmt.Fprintf(os.Stderr, "  aoni-gen -file=market.go\n")
 		fmt.Fprintf(os.Stderr, "  aoni-gen -watch ./pkg/...\n")
 		fmt.Fprintf(os.Stderr, "  //go:generate go run github.com/lemon4ksan/aoni/cmd/aoni-gen -file=$GOFILE\n")
@@ -49,11 +52,24 @@ func main() {
 
 	flag.Parse()
 
-	files := collectInputFiles(*fileFlag, flag.Args())
+	args := flag.Args()
+
+	isCheck := *checkFlag
+	if len(args) > 0 && args[0] == "check" {
+		isCheck = true
+		args = args[1:]
+	}
+
+	files := collectInputFiles(*fileFlag, args)
 	if len(files) == 0 {
 		fmt.Fprintf(os.Stderr, "aoni-gen: no input files found. Specify package paths (e.g. ./...) or -file=$GOFILE\n")
 		flag.Usage()
 		os.Exit(1)
+	}
+
+	if isCheck {
+		checkAll(files, *verboseFlag)
+		return
 	}
 
 	// 1. Initial build
@@ -64,6 +80,56 @@ func main() {
 		fmt.Printf("\n[aoni-gen] Watching for file changes across %d files... (Press Ctrl+C to stop)\n", len(files))
 		watchLoop(files, *outFlag, *pkgFlag, *verboseFlag)
 	}
+}
+
+func checkAll(files []string, verbose bool) {
+	totalServices := 0
+	totalDTOs := 0
+	errorCount := 0
+	p := parser.NewParser()
+	analyzer := analysis.NewAnalyzer()
+
+	for _, file := range files {
+		root, err := p.ParseFile(file)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "aoni-gen: [ERROR] %s: %v\n", file, err)
+
+			errorCount++
+
+			continue
+		}
+
+		if len(root.Services) == 0 && len(root.Structs) == 0 && len(root.Tuples) == 0 &&
+			len(root.UnrecognizedDirectives) == 0 {
+			if verbose {
+				fmt.Printf("aoni-gen: skipping %s (no @aoni directives)\n", file)
+			}
+
+			continue
+		}
+
+		diags := analyzer.Analyze(root)
+		for _, d := range diags {
+			if d.Severity == analysis.SeverityError {
+				errorCount++
+
+				fmt.Fprintf(os.Stderr, "aoni-gen: [ERROR] %s (%s): %s\n", file, d.Target, d.Message)
+			} else if verbose {
+				fmt.Printf("aoni-gen: [WARN] %s (%s): %s\n", file, d.Target, d.Message)
+			}
+		}
+
+		totalServices += len(root.Services)
+		totalDTOs += len(root.Structs)
+	}
+
+	if errorCount > 0 {
+		fmt.Fprintf(os.Stderr, "\n✖ Found %d error(s) across %d file(s)\n", errorCount, len(files))
+		os.Exit(1)
+	}
+
+	fmt.Printf("✔ All aoni contracts are valid (%d service(s), %d dto(s) checked across %d files)\n",
+		totalServices, totalDTOs, len(files))
 }
 
 func collectInputFiles(fileFlag string, args []string) []string {

@@ -87,15 +87,15 @@ func (p *Parser) ParseSource(filename string, src []byte) (*ir.RootIR, error) {
 
 			switch t := typeSpec.Type.(type) {
 			case *ast.InterfaceType:
-				if svc := p.parseInterface(file.Comments, typeSpec.Name.Name, docLines, t); svc != nil {
+				if svc := p.parseInterface(root, file.Comments, typeSpec.Name.Name, docLines, t); svc != nil {
 					root.Services = append(root.Services, svc)
 				}
 			case *ast.StructType:
-				if strct := p.parseStruct(typeSpec.Name.Name, docLines, t); strct != nil {
+				if strct := p.parseStruct(root, typeSpec.Name.Name, docLines, t); strct != nil {
 					root.Structs = append(root.Structs, strct)
 				}
 
-				if tuple := p.parseTuple(typeSpec.Name.Name, docLines, t); tuple != nil {
+				if tuple := p.parseTuple(root, typeSpec.Name.Name, docLines, t); tuple != nil {
 					root.Tuples = append(root.Tuples, tuple)
 				}
 			}
@@ -106,12 +106,13 @@ func (p *Parser) ParseSource(filename string, src []byte) (*ir.RootIR, error) {
 }
 
 func (p *Parser) parseInterface(
+	root *ir.RootIR,
 	fileComments []*ast.CommentGroup,
 	name string,
 	docLines []string,
 	iface *ast.InterfaceType,
 ) *ir.ServiceIR {
-	directives := extractDirectives(docLines)
+	directives := p.extractDirectives(root, name, docLines)
 	if !hasServiceDirective(directives) {
 		return nil
 	}
@@ -136,12 +137,17 @@ func (p *Parser) parseInterface(
 
 		methodName := field.Names[0].Name
 		methodDoc := extractDocLines(field.Doc, field.Comment)
-		methodDirectives := extractDirectives(methodDoc)
+		methodDirectives := p.extractDirectives(root, name+"."+methodName, methodDoc)
+
+		op := ir.OpHTTP
+		if methodName == "Close" {
+			op = ir.OpClose
+		}
 
 		m := &ir.MethodIR{
 			Name:            methodName,
 			Doc:             methodDoc,
-			Operation:       ir.OpHTTP,
+			Operation:       op,
 			StreamDirection: ir.StreamNone,
 			PayloadKind:     ir.PayloadNone,
 			StreamKind:      ir.StreamKindNone,
@@ -155,7 +161,7 @@ func (p *Parser) parseInterface(
 		}
 
 		// Parse Method Parameters
-		p.parseMethodParams(fileComments, svc, m, methodDirectives, funcType.Params)
+		p.parseMethodParams(root, fileComments, svc, m, methodDirectives, funcType.Params)
 
 		// Parse Method Return Values
 		p.parseMethodReturns(m, funcType.Results)
@@ -167,6 +173,7 @@ func (p *Parser) parseInterface(
 }
 
 func (p *Parser) parseMethodParams(
+	root *ir.RootIR,
 	fileComments []*ast.CommentGroup,
 	svc *ir.ServiceIR,
 	m *ir.MethodIR,
@@ -206,7 +213,7 @@ func (p *Parser) parseMethodParams(
 
 		prevLine = p.fset.Position(field.End()).Line
 
-		paramDirectives := extractDirectives(paramDoc)
+		paramDirectives := p.extractDirectives(root, svc.Name+"."+m.Name+"(param)", paramDoc)
 		goType := p.extractGoType(field.Type)
 
 		names := field.Names
@@ -224,11 +231,18 @@ func (p *Parser) parseMethodParams(
 			}
 
 			loc := ir.LocQuery
-			switch m.PayloadKind {
-			case ir.PayloadForm:
-				loc = ir.LocFormFields
-			case ir.PayloadMultipart:
-				loc = ir.LocMultipartField
+			switch {
+			case m.IsEvent || m.Operation == ir.OpEvent:
+				loc = ir.LocHandler
+			case m.Operation == ir.OpRPC || m.Operation == ir.OpNotify:
+				loc = ir.LocBody
+			default:
+				switch m.PayloadKind {
+				case ir.PayloadForm:
+					loc = ir.LocFormFields
+				case ir.PayloadMultipart:
+					loc = ir.LocMultipartField
+				}
 			}
 
 			paramName := ident.Name
@@ -454,7 +468,14 @@ func (p *Parser) parseMethodReturns(m *ir.MethodIR, fields *ast.FieldList) {
 	// 4. (<-chan T, <-chan error, error)
 	switch len(results) {
 	case 1:
-		ret.IsVoid = true
+		t := p.extractGoType(results[0].Type)
+		if m.IsEvent || m.Operation == ir.OpEvent || strings.HasPrefix(t.Name, "func(") {
+			ret.SuccessType = t
+			ret.IsVoid = false
+		} else {
+			ret.IsVoid = true
+		}
+
 	case 2:
 		t := p.extractGoType(results[0].Type)
 		if t.IsChannel {
@@ -485,8 +506,8 @@ func (p *Parser) parseMethodReturns(m *ir.MethodIR, fields *ast.FieldList) {
 	m.Return = ret
 }
 
-func (p *Parser) parseStruct(name string, docLines []string, strct *ast.StructType) *ir.StructIR {
-	directives := extractDirectives(docLines)
+func (p *Parser) parseStruct(root *ir.RootIR, name string, docLines []string, strct *ast.StructType) *ir.StructIR {
+	directives := p.extractDirectives(root, name, docLines)
 	isDTO := false
 	casing := ir.CasingSnakeCase
 	omitEmpty := true
@@ -529,7 +550,7 @@ func (p *Parser) parseStruct(name string, docLines []string, strct *ast.StructTy
 
 	for _, field := range strct.Fields.List {
 		fieldDoc := extractDocLines(field.Doc, field.Comment)
-		fieldDirectives := extractDirectives(fieldDoc)
+		fieldDirectives := p.extractDirectives(root, name+"(field)", fieldDoc)
 		goType := p.extractGoType(field.Type)
 
 		for _, ident := range field.Names {
@@ -598,8 +619,8 @@ func (p *Parser) parseStruct(name string, docLines []string, strct *ast.StructTy
 	return s
 }
 
-func (p *Parser) parseTuple(name string, docLines []string, strct *ast.StructType) *ir.TupleIR {
-	directives := extractDirectives(docLines)
+func (p *Parser) parseTuple(root *ir.RootIR, name string, docLines []string, strct *ast.StructType) *ir.TupleIR {
+	directives := p.extractDirectives(root, name, docLines)
 	isTuple := false
 
 	for _, d := range directives {
@@ -681,6 +702,42 @@ func (p *Parser) extractGoType(expr ast.Expr) ir.GoTypeIR {
 		goType = elem
 		goType.IsVariadic = true
 		goType.Name = "..." + elem.Name
+	case *ast.FuncType:
+		var params []string
+		if t.Params != nil {
+			for _, f := range t.Params.List {
+				pt := p.extractGoType(f.Type)
+				if goType.ElemType == "" {
+					goType.ElemType = pt.Name
+				}
+
+				if len(f.Names) > 0 {
+					for _, n := range f.Names {
+						params = append(params, fmt.Sprintf("%s %s", n.Name, pt.Name))
+					}
+				} else {
+					params = append(params, pt.Name)
+				}
+			}
+		}
+
+		var results []string
+		if t.Results != nil {
+			for _, f := range t.Results.List {
+				rt := p.extractGoType(f.Type)
+				results = append(results, rt.Name)
+			}
+		}
+
+		resStr := ""
+		if len(results) == 1 {
+			resStr = " " + results[0]
+		} else if len(results) > 1 {
+			resStr = " (" + strings.Join(results, ", ") + ")"
+		}
+
+		goType.Name = fmt.Sprintf("func(%s)%s", strings.Join(params, ", "), resStr)
+
 	default:
 		_ = buf
 		goType.Name = "any"
@@ -704,11 +761,17 @@ func extractDocLines(docs ...*ast.CommentGroup) []string {
 	return lines
 }
 
-func extractDirectives(lines []string) []*Directive {
+func (p *Parser) extractDirectives(root *ir.RootIR, target string, lines []string) []*Directive {
 	var list []*Directive
 	for _, l := range lines {
 		if d := ParseDirective(l); d != nil {
 			list = append(list, d)
+			if root != nil && !IsKnownDirective(d.Name) {
+				root.UnrecognizedDirectives = append(root.UnrecognizedDirectives, ir.UnrecognizedDirectiveIR{
+					Target: target,
+					Name:   d.Name,
+				})
+			}
 		}
 	}
 

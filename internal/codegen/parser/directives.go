@@ -11,6 +11,27 @@ import (
 	"github.com/lemon4ksan/aoni/internal/codegen/ir"
 )
 
+// IsKnownDirective reports whether a directive name is recognized by aoni-gen.
+func IsKnownDirective(name string) bool {
+	switch strings.ToLower(name) {
+	case "aoni:service", "service",
+		"aoni:dto", "dto",
+		"aoni:tuple", "tuple",
+		"aoni:union", "union",
+		"base_url", "engine", "protocol", "requester", "persona", "tls_spec", "p0f",
+		"timeout", "retry", "circuit", "envelope", "auth", "ssh", "ws", "websocket",
+		"type_map", "grpc", "op", "operation", "notify", "event", "call",
+		"get", "post", "put", "delete", "patch", "head", "options",
+		"return", "body", "extract", "codec", "header", "form", "multipart",
+		"preset", "inject", "referer", "unwrap", "query", "field", "param",
+		"cookie", "path", "part", "file", "check", "casing",
+		"format", "idempotent", "sign", "coalesce", "etag", "cache", "probe", "ratelimit", "metric", "stream", "batch", "cast":
+		return true
+	default:
+		return false
+	}
+}
+
 // ApplyServiceDirective updates ServiceIR according to a parsed directive.
 func ApplyServiceDirective(s *ir.ServiceIR, d *Directive) {
 	if d == nil || s == nil {
@@ -47,6 +68,22 @@ func ApplyServiceDirective(s *ir.ServiceIR, d *Directive) {
 			s.Engine = ir.EngineCustom
 			s.CustomEngine = d.Value
 			s.RequesterType = d.Value
+		}
+
+	case "protocol":
+		switch strings.ToLower(d.Value) {
+		case "rpc":
+			s.Protocol = ir.ProtocolRPC
+		case "channel":
+			s.Protocol = ir.ProtocolChannel
+		case "grpc":
+			s.Protocol = ir.ProtocolGRPC
+		case "ws", "websocket":
+			s.Protocol = ir.ProtocolWS
+		case "ssh":
+			s.Protocol = ir.ProtocolSSH
+		default:
+			s.Protocol = ir.ProtocolHTTP
 		}
 
 	case "requester":
@@ -146,6 +183,24 @@ func ApplyMethodDirective(m *ir.MethodIR, d *Directive) {
 	}
 
 	switch d.Name {
+	case "op":
+		m.OpID = d.Value
+
+		m.OpIDIsQuoted = d.IsQuoted
+		if m.IsNotify {
+			m.Operation = ir.OpNotify
+		} else {
+			m.Operation = ir.OpRPC
+		}
+
+	case "notify":
+		m.IsNotify = true
+		m.Operation = ir.OpNotify
+	case "event":
+		m.OpID = d.Value
+		m.OpIDIsQuoted = d.IsQuoted
+		m.IsEvent = true
+		m.Operation = ir.OpEvent
 	case "call":
 		m.CallFunc = d.Value
 	case "get", "post", "put", "delete", "patch", "head", "options":

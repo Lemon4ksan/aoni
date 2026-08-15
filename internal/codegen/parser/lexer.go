@@ -16,6 +16,7 @@ import (
 type Directive struct {
 	Name     string            // e.g. "aoni:service", "get", "retry", "header", "check", "field"
 	Value    string            // First positional argument if present (unquoted)
+	IsQuoted bool              // True if the value was originally enclosed in quotes
 	Args     map[string]string // Key-value arguments (e.g. attempts="3", casing="snake_case")
 	Pipeline *ir.PipelineIR    // Parsed Wire-Transform pipeline if applicable
 	Raw      string            // Raw directive text without leading "@"
@@ -105,6 +106,8 @@ func parseDirectiveArgs(rest string, d *Directive) {
 			val := unquote(strings.TrimSpace(parts[1]))
 			d.Args[key] = val
 		case first:
+			d.IsQuoted = strings.HasPrefix(trimmed, "\"") || strings.HasPrefix(trimmed, "'") ||
+				strings.HasPrefix(trimmed, "`")
 			d.Value = unquote(trimmed)
 			first = false
 		default:

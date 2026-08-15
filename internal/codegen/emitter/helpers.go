@@ -39,6 +39,10 @@ func formatMethodReturns(ret *ir.ReturnIR) string {
 
 	tName := formatType(ret.SuccessType)
 
+	if strings.HasPrefix(tName, "func(") {
+		return tName
+	}
+
 	if ret.HasRawResponse {
 		return fmt.Sprintf("(%s, *http.Response, error)", tName)
 	}
