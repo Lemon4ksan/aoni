@@ -122,6 +122,23 @@ func main() {
 
 			return
 
+		case "openapi", "export":
+			oCmd := flag.NewFlagSet("openapi", flag.ExitOnError)
+			oFile := oCmd.String("file", *fileFlag, "Path to Go contract file")
+			oOut := oCmd.String("out", *outFlag, "Output OpenAPI specification file")
+			oTitle := oCmd.String("title", "", "API title")
+			oYAML := oCmd.Bool("yaml", false, "Output as YAML")
+			_ = oCmd.Parse(args[1:])
+
+			filePath := *oFile
+			if filePath == "" && len(oCmd.Args()) > 0 {
+				filePath = oCmd.Args()[0]
+			}
+
+			runOpenAPIExport(filePath, *oOut, *oTitle, *oYAML)
+
+			return
+
 		case "explain", "doc", "help-directive":
 			if len(args) < 2 {
 				fmt.Fprintf(os.Stderr, "aoni-gen explain: directive name required (e.g. 'aoni-gen explain form')\n")
