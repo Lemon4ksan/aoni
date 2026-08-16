@@ -47,14 +47,21 @@ func (c *CmdInit) Run(ctx context.Context, args []string, stdout, stderr io.Writ
 	)
 
 	fs.Usage = func() {
-		fmt.Fprintf(stderr, "vortex init — Initialize .vortex.yml Workspace Configuration\n\n")
+		fmt.Fprintf(stderr, "vortex init — Initialize .vortex.yml Workspace or Scaffold from Specs\n\n")
 		fmt.Fprintf(stderr, "Usage:\n")
-		fmt.Fprintf(
-			stderr,
-			"  vortex init [-force] [-dir=.] [-from-har=traffic.har] [-from-openapi=spec.json]\n\n",
-		)
+		fmt.Fprintf(stderr, "  vortex init [flags]\n\n")
 		fmt.Fprintf(stderr, "Flags:\n")
 		fs.PrintDefaults()
+		fmt.Fprintf(stderr, "\nExamples:\n")
+		fmt.Fprintf(
+			stderr,
+			"  vortex init                                     # Discover repository & create .vortex.yml\n",
+		)
+		fmt.Fprintf(stderr, "  vortex init -from-openapi=swagger.json          # Scaffold contract from OpenAPI\n")
+		fmt.Fprintf(
+			stderr,
+			"  vortex init -from-har=traffic.har -pkg=api      # Ingest recorded traffic into Go contract\n",
+		)
 	}
 
 	if err := fs.Parse(args); err != nil {

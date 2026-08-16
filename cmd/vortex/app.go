@@ -6,6 +6,8 @@ package main
 
 import (
 	"context"
+	"errors"
+	"flag"
 	"fmt"
 	"io"
 	"os"
@@ -23,6 +25,39 @@ type App struct {
 	defaultCmd  Command
 	Stdout      io.Writer
 	Stderr      io.Writer
+}
+
+type commandGroup struct {
+	Title    string
+	Commands []string
+}
+
+var commandGroups = []commandGroup{
+	{
+		Title: "🚀 Core Workflow & Generation",
+		Commands: []string{
+			"autopilot", "gen", "mock", "init", "status", "config", "work", "clean",
+		},
+	},
+	{
+		Title: "🔍 Quality, Testing & Drift",
+		Commands: []string{
+			"check", "diff", "review", "accept", "cherrypick", "harness", "bench", "cover",
+		},
+	},
+	{
+		Title: "🌐 Traffic & Protocols",
+		Commands: []string{
+			"record", "oapi", "proto",
+		},
+	},
+	{
+		Title: "🛠️ Refactoring & Tooling",
+		Commands: []string{
+			"refactor", "history", "undo", "source", "log", "tag",
+			"blame", "prof", "pgo", "explain", "example", "list", "completion",
+		},
+	},
 }
 
 // NewApp constructs a new CLI application instance.
@@ -84,7 +119,22 @@ func (a *App) Run(ctx context.Context, args []string) error {
 
 	switch first {
 	case "help", "--help", "-h", "-help":
+		if len(args) > 1 {
+			subName := args[1]
+			if cmd, ok := a.cmdMap[subName]; ok {
+				err := cmd.Run(ctx, []string{"-h"}, stdout, stderr)
+				if errors.Is(err, flag.ErrHelp) {
+					return nil
+				}
+
+				return err
+			}
+
+			return fmt.Errorf("unknown command %q for help. Run '%s help' for available commands", subName, a.Name)
+		}
+
 		a.PrintUsage(stdout)
+
 		return nil
 
 	case "version", "--version", "-v":
@@ -94,14 +144,24 @@ func (a *App) Run(ctx context.Context, args []string) error {
 
 	// Direct match against registered command or alias
 	if cmd, ok := a.cmdMap[first]; ok {
-		return cmd.Run(ctx, args[1:], stdout, stderr)
+		err := cmd.Run(ctx, args[1:], stdout, stderr)
+		if errors.Is(err, flag.ErrHelp) {
+			return nil
+		}
+
+		return err
 	}
 
-	// If argument looks like a flag or file path, route to default "gen" command
+	// If argument looks like a flag or file path, route to default "autopilot" command
 	if strings.HasPrefix(first, "-") || strings.HasSuffix(first, ".go") || strings.Contains(first, "/") ||
 		strings.Contains(first, `\`) || first == "." || first == "..." {
 		if a.defaultCmd != nil {
-			return a.defaultCmd.Run(ctx, args, stdout, stderr)
+			err := a.defaultCmd.Run(ctx, args, stdout, stderr)
+			if errors.Is(err, flag.ErrHelp) {
+				return nil
+			}
+
+			return err
 		}
 	}
 
@@ -112,12 +172,37 @@ func (a *App) Run(ctx context.Context, args []string) error {
 func (a *App) PrintUsage(w io.Writer) {
 	fmt.Fprintf(w, "%s %s — %s\n\n", a.Name, a.Version, a.Description)
 	fmt.Fprintf(w, "Usage:\n")
-	fmt.Fprintf(w, "  %s [command] [flags] [arguments...]\n\n", a.Name)
-	fmt.Fprintf(w, "Available Commands:\n")
+	fmt.Fprintf(w, "  %s <command> [flags] [arguments...]\n\n", a.Name)
 
+	cmdByName := make(map[string]Command, len(a.Commands))
 	for _, c := range a.Commands {
-		fmt.Fprintf(w, "  %-12s %s\n", c.Name(), c.Synopsis())
+		cmdByName[c.Name()] = c
 	}
 
-	fmt.Fprintf(w, "\nRun '%s <command> -h' for command-specific flags and examples.\n", a.Name)
+	for _, group := range commandGroups {
+		fmt.Fprintf(w, "%s:\n", group.Title)
+
+		for _, name := range group.Commands {
+			if c, ok := cmdByName[name]; ok {
+				fmt.Fprintf(w, "  %-12s %s\n", c.Name(), c.Synopsis())
+			}
+		}
+
+		fmt.Fprintln(w)
+	}
+
+	fmt.Fprintf(w, "Global Flags:\n")
+	fmt.Fprintf(w, "  -h, --help    Show help for any command or vortex itself\n")
+	fmt.Fprintf(w, "  -v, --version Show vortex version and build information\n\n")
+
+	fmt.Fprintf(w, "Quick Start Examples:\n")
+	fmt.Fprintf(w, "  vortex                                 # Auto-detect, validate, and compile all contracts\n")
+	fmt.Fprintf(w, "  vortex gen ./pkg/api/api.go            # Compile zero-alloc client for specific file\n")
+	fmt.Fprintf(w, "  vortex mock ./pkg/api/api.go           # Generate in-memory mock server for tests\n")
+	fmt.Fprintf(w, "  vortex check ./...                     # Lint and typecheck all contracts\n")
+	fmt.Fprintf(w, "  vortex diff ./openapi.json             # Detect breaking drift against OpenAPI spec\n")
+	fmt.Fprintf(w, "  vortex record -out=app.har -- ./mycli  # Capture process-isolated live traffic\n")
+	fmt.Fprintf(w, "  vortex oapi import -spec=app.har -add  # Ingest HAR into Go contract with 3-way merge\n\n")
+
+	fmt.Fprintf(w, "Run '%s help <command>' or '%s <command> --help' for detailed documentation.\n", a.Name, a.Name)
 }

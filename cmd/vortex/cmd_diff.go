@@ -63,18 +63,23 @@ func (c *CmdDiff) Run(ctx context.Context, args []string, stdout, stderr io.Writ
 	)
 
 	fs.Usage = func() {
-		fmt.Fprintf(stderr, "vortex diff — Contract Drift Inspector\n\n")
+		fmt.Fprintf(stderr, "vortex diff — Contract Drift & Breaking Change Inspector\n\n")
 		fmt.Fprintf(stderr, "Usage:\n")
-		fmt.Fprintf(
-			stderr,
-			"  vortex diff [-fail-on-drift] [-strict] [-json] [-service=name] <spec.json|yaml> [paths...]\n",
-		)
-		fmt.Fprintf(
-			stderr,
-			"  vortex diff --against=<branch|tag|commit> [paths...]\n\n",
-		)
+		fmt.Fprintf(stderr, "  vortex diff [flags] <spec.json|yaml|har> [paths...]\n")
+		fmt.Fprintf(stderr, "  vortex diff --against=<branch|tag|commit> [paths...]\n\n")
 		fmt.Fprintf(stderr, "Flags:\n")
 		fs.PrintDefaults()
+		fmt.Fprintf(stderr, "\nExamples:\n")
+		fmt.Fprintf(
+			stderr,
+			"  vortex diff ./openapi.json                      # Compare against OpenAPI specification\n",
+		)
+		fmt.Fprintf(stderr, "  vortex diff ./traffic.har ./pkg/api/api.go       # Check drift against captured HAR\n")
+		fmt.Fprintf(
+			stderr,
+			"  vortex diff --against=main ./pkg/api             # Detect breaking changes against Git branch\n",
+		)
+		fmt.Fprintf(stderr, "  vortex diff --fail-on-drift ./openapi.json       # CI check (fails on breaking drift)\n")
 	}
 
 	if err := fs.Parse(args); err != nil {

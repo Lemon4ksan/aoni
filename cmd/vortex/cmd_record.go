@@ -139,13 +139,16 @@ func (c *CmdRecord) Run(ctx context.Context, args []string, stdout, stderr io.Wr
 	fs.Usage = func() {
 		fmt.Fprintf(stderr, "vortex record — Live Network Traffic Recorder & Process Runner\n\n")
 		fmt.Fprintf(stderr, "Usage:\n")
-		fmt.Fprintf(stderr, "  vortex record [-port=9090] [-out=traffic.har] [-- <command> [args...]]\n\n")
-		fmt.Fprintf(stderr, "Examples:\n")
-		fmt.Fprintf(stderr, "  vortex record -out=app.har -- ./mycli fetch-data\n")
-		fmt.Fprintf(stderr, "  vortex record -out=api.har curl https://example.com/api\n")
-		fmt.Fprintf(stderr, "  vortex record -port=9090 -out=traffic.har (standing server mode)\n\n")
+		fmt.Fprintf(stderr, "  vortex record [flags] [-- <command> [args...]]\n\n")
 		fmt.Fprintf(stderr, "Flags:\n")
 		fs.PrintDefaults()
+		fmt.Fprintf(stderr, "\nExamples:\n")
+		fmt.Fprintf(stderr, "  vortex record -out=app.har -- ./mycli fetch-data          # Isolated process capture\n")
+		fmt.Fprintf(
+			stderr,
+			"  vortex record -out=api.har -- python script.py           # Capture Python script traffic\n",
+		)
+		fmt.Fprintf(stderr, "  vortex record -port=9090 -out=traffic.har                # Standing proxy server mode\n")
 	}
 
 	var (
@@ -444,14 +447,6 @@ func (c *CmdRecord) Run(ctx context.Context, args []string, stdout, stderr io.Wr
 	sigChan := make(chan os.Signal, 1)
 	signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM)
 
-	go func() {
-		<-sigChan
-		fmt.Fprintf(stdout, "\n⚡ Stopping traffic recorder and flushing %s...\n", *outFlag)
-
-		_ = recorder.save()
-		_ = server.Shutdown(ctx)
-	}()
-
 	fmt.Fprintf(stdout, "⚡ Vortex Traffic Recorder active on http://127.0.0.1:%d\n", actualPort)
 	fmt.Fprintf(stdout, "⚡ Capturing live transactions to %s (Press Ctrl+C to stop)\n\n", *outFlag)
 	fmt.Fprintf(stdout, "Usage in another terminal:\n")
@@ -466,9 +461,16 @@ func (c *CmdRecord) Run(ctx context.Context, args []string, stdout, stderr io.Wr
 	select {
 	case sErr := <-serverErrChan:
 		return fmt.Errorf("proxy listener error: %w", sErr)
+	case <-sigChan:
+		fmt.Fprintf(stdout, "\n⚡ Stopping traffic recorder and flushing %s...\n", *outFlag)
 	case <-ctx.Done():
-		_ = server.Shutdown(context.Background())
 	}
+
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	_ = server.Shutdown(shutdownCtx)
+	_ = recorder.save()
 
 	fmt.Fprintf(stdout, "✔ Saved %d transaction(s) to %s\n\n", len(recorder.entries), *outFlag)
 	fmt.Fprintf(stdout, "👉 Next step: Generate Go client contract and Mock Server:\n")

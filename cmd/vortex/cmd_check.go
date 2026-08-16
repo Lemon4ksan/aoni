@@ -56,12 +56,20 @@ func (c *CmdCheck) Run(ctx context.Context, args []string, stdout, stderr io.Wri
 	fs.Usage = func() {
 		fmt.Fprintf(stderr, "vortex check — Static Contract Linter & Diagnostic Inspector\n\n")
 		fmt.Fprintf(stderr, "Usage:\n")
-		fmt.Fprintf(
-			stderr,
-			"  vortex check [-fix] [-format=terminal|json|github|sarif] [-max-depth=6] [-disable=rules] [-enable=rules] [-strict] [paths...]\n\n",
-		)
+		fmt.Fprintf(stderr, "  vortex check [flags] [packages/files...]\n\n")
 		fmt.Fprintf(stderr, "Flags:\n")
 		fs.PrintDefaults()
+		fmt.Fprintf(stderr, "\nExamples:\n")
+		fmt.Fprintf(stderr, "  vortex check ./...                              # Validate all contracts in workspace\n")
+		fmt.Fprintf(
+			stderr,
+			"  vortex check --fix ./pkg/api/api.go             # Auto-fix missing imports and directives\n",
+		)
+		fmt.Fprintf(
+			stderr,
+			"  vortex check --strict --format=github ./...     # CI linting with GitHub Actions annotations\n",
+		)
+		fmt.Fprintf(stderr, "  vortex check --format=json ./pkg/api            # Output machine-readable diagnostics\n")
 	}
 
 	var flags, nonFlags []string

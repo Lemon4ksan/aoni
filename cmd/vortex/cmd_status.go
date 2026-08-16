@@ -41,11 +41,18 @@ func (c *CmdStatus) Run(ctx context.Context, args []string, stdout, stderr io.Wr
 	)
 
 	fs.Usage = func() {
-		fmt.Fprintf(stderr, "vortex status — API Guardian Workspace Health Dashboard\n\n")
+		fmt.Fprintf(stderr, "vortex status — 360° Workspace Contract Health Dashboard\n\n")
 		fmt.Fprintf(stderr, "Usage:\n")
-		fmt.Fprintf(stderr, "  vortex status [-all] [-check] [-json] [targets...]\n\n")
+		fmt.Fprintf(stderr, "  vortex status [flags] [targets...]\n\n")
 		fmt.Fprintf(stderr, "Flags:\n")
 		fs.PrintDefaults()
+		fmt.Fprintf(stderr, "\nExamples:\n")
+		fmt.Fprintf(stderr, "  vortex status                                   # Inspect contract sync health\n")
+		fmt.Fprintf(
+			stderr,
+			"  vortex status --check                           # CI validation (fails if stale code exists)\n",
+		)
+		fmt.Fprintf(stderr, "  vortex status --json                            # Machine-readable health telemetry\n")
 	}
 
 	if err := fs.Parse(args); err != nil {

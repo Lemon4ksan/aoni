@@ -40,14 +40,19 @@ func (c *CmdGen) Run(ctx context.Context, args []string, stdout, stderr io.Write
 	)
 
 	fs.Usage = func() {
-		fmt.Fprintf(stderr, "vortex gen — Zero-Allocation AST Code Generator\n\n")
+		fmt.Fprintf(stderr, "vortex gen — Compile Zero-Allocation Go Clients from AST Contracts\n\n")
 		fmt.Fprintf(stderr, "Usage:\n")
-		fmt.Fprintf(
-			stderr,
-			"  vortex [gen] [-file=api.go] [-out=api.gen.go] [-pkg=pkgname] [-max-depth=6] [-harness] [-fuzz] [-watch] [-v] [paths...]\n\n",
-		)
+		fmt.Fprintf(stderr, "  vortex gen [flags] [packages/files...]\n\n")
 		fmt.Fprintf(stderr, "Flags:\n")
 		fs.PrintDefaults()
+		fmt.Fprintf(stderr, "\nExamples:\n")
+		fmt.Fprintf(stderr, "  vortex gen ./pkg/api/api.go                     # Compile specific contract file\n")
+		fmt.Fprintf(
+			stderr,
+			"  vortex gen ./...                                # Compile all contracts across workspace\n",
+		)
+		fmt.Fprintf(stderr, "  vortex gen --watch ./pkg/api                    # Watch for edits and auto-recompile\n")
+		fmt.Fprintf(stderr, "  vortex gen -harness -fuzz ./pkg/api/api.go      # Generate test harness & fuzzers\n")
 	}
 
 	if err := fs.Parse(args); err != nil {

@@ -65,14 +65,14 @@ func (c *CmdOAPI) runExport(_ context.Context, args []string, stdout, stderr io.
 	)
 
 	fs.Usage = func() {
-		fmt.Fprintf(stderr, "vortex oapi export — Export Aoni Contract to OpenAPI 3.1 Spec\n\n")
+		fmt.Fprintf(stderr, "vortex oapi export — Export Aoni Contract to OpenAPI 3.1 Specification\n\n")
 		fmt.Fprintf(stderr, "Usage:\n")
-		fmt.Fprintf(
-			stderr,
-			"  vortex oapi export -file=<api.go> [-service=Client] [-out=openapi.json] [-yaml] [-vortex]\n\n",
-		)
+		fmt.Fprintf(stderr, "  vortex oapi export [flags]\n\n")
 		fmt.Fprintf(stderr, "Flags:\n")
 		fs.PrintDefaults()
+		fmt.Fprintf(stderr, "\nExamples:\n")
+		fmt.Fprintf(stderr, "  vortex oapi export -file=./pkg/api/api.go -out=openapi.json\n")
+		fmt.Fprintf(stderr, "  vortex oapi export -file=./pkg/api/api.go -yaml -out=openapi.yaml\n")
 	}
 
 	if err := fs.Parse(args); err != nil {
@@ -173,14 +173,21 @@ func (c *CmdOAPI) runImport(_ context.Context, args []string, stdout, stderr io.
 	fs.Var(&typeMaps, "type-map", "Custom type mappings (e.g. -type-map=steam_id=id.ID)")
 
 	fs.Usage = func() {
-		fmt.Fprintf(stderr, "vortex oapi import — Import OpenAPI 3.1/Swagger into Aoni Declarative Contract DSL\n\n")
+		fmt.Fprintf(stderr, "vortex oapi import — Import OpenAPI/Swagger or HAR Traffic with 3-Way AST Merge\n\n")
 		fmt.Fprintf(stderr, "Usage:\n")
-		fmt.Fprintf(
-			stderr,
-			"  vortex oapi import -spec=<swagger.json> [-out=api.go] [-split] [-pkg=api] [-prune] [-overwrite] [-dry-run]\n\n",
-		)
+		fmt.Fprintf(stderr, "  vortex oapi import [flags]\n\n")
 		fmt.Fprintf(stderr, "Flags:\n")
 		fs.PrintDefaults()
+		fmt.Fprintf(stderr, "\nExamples:\n")
+		fmt.Fprintf(
+			stderr,
+			"  vortex oapi import -spec=openapi.json -out=./pkg/api/api.go         # Fresh import or sync\n",
+		)
+		fmt.Fprintf(
+			stderr,
+			"  vortex oapi import -spec=session.har -out=./pkg/api/api.go -dry-run # Preview HAR diff\n",
+		)
+		fmt.Fprintf(stderr, "  vortex oapi import -spec=session.har -out=./pkg/api/api.go -add     # Additive merge\n")
 	}
 
 	if err := fs.Parse(args); err != nil {

@@ -36,11 +36,14 @@ func (c *CmdMock) Run(ctx context.Context, args []string, stdout, stderr io.Writ
 	)
 
 	fs.Usage = func() {
-		fmt.Fprintf(stderr, "vortex mock — Virtual Test Server Generator\n\n")
+		fmt.Fprintf(stderr, "vortex mock — Generate In-Memory Virtual Test Servers for Contracts\n\n")
 		fmt.Fprintf(stderr, "Usage:\n")
-		fmt.Fprintf(stderr, "  vortex mock [-out=api_mock.gen.go] [-pkg=name] [paths...]\n\n")
+		fmt.Fprintf(stderr, "  vortex mock [flags] [packages/files...]\n\n")
 		fmt.Fprintf(stderr, "Flags:\n")
 		fs.PrintDefaults()
+		fmt.Fprintf(stderr, "\nExamples:\n")
+		fmt.Fprintf(stderr, "  vortex mock ./pkg/api/api.go                    # Generate in-memory mock server\n")
+		fmt.Fprintf(stderr, "  vortex mock -out=./pkg/api/mock.gen.go ./pkg/api/api.go\n")
 	}
 
 	if err := fs.Parse(args); err != nil {
