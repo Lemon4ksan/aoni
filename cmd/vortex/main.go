@@ -30,6 +30,7 @@ func main() {
 		&CmdAccept{},
 		&CmdSource{},
 		&CmdLog{},
+		&CmdTag{},
 		&CmdBlame{},
 		&CmdOAPI{},
 		&CmdProto{},

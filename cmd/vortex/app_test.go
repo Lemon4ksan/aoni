@@ -33,6 +33,7 @@ func newTestApp(stdout, stderr *bytes.Buffer) *App {
 		&CmdAccept{},
 		&CmdSource{},
 		&CmdLog{},
+		&CmdTag{},
 		&CmdBlame{},
 		&CmdOAPI{},
 		&CmdProto{},
@@ -1044,4 +1045,66 @@ type UserAPI interface {
 	require.NoError(t, err)
 	require.Contains(t, stdout.String(), `"name": "GetUser"`)
 	require.Contains(t, stdout.String(), `"name": "UserDTO"`)
+}
+
+func TestApp_Tag(t *testing.T) {
+	tempDir := t.TempDir()
+
+	serviceDir := filepath.Join(tempDir, "pkg", "market")
+	require.NoError(t, os.MkdirAll(serviceDir, 0o750))
+	apiFile := filepath.Join(serviceDir, "api.go")
+	require.NoError(t, os.WriteFile(apiFile, []byte(`package market
+
+import (
+	"context"
+	"github.com/lemon4ksan/aoni"
+)
+
+// @aoni:service
+type MarketAPI interface {
+	// @get "items"
+	ListItems(ctx context.Context, mods ...aoni.RequestModifier) (map[string]any, error)
+}
+`), 0o600))
+
+	var stdout, stderr bytes.Buffer
+
+	app := newTestApp(&stdout, &stderr)
+
+	// 1. Init workspace
+	err := app.Run(context.Background(), []string{"init", "-dir=" + tempDir})
+	require.NoError(t, err)
+
+	// 2. Add tag
+	stdout.Reset()
+
+	err = app.Run(
+		context.Background(),
+		[]string{"tag", "add", "v1.0.0", "Market", "-m", "Initial market API release", "-git=false", "-dir=" + tempDir},
+	)
+	require.NoError(t, err)
+	require.Contains(t, stdout.String(), "Created API release tag v1.0.0")
+
+	// 3. List tags
+	stdout.Reset()
+
+	err = app.Run(context.Background(), []string{"tag", "list", "-dir=" + tempDir})
+	require.NoError(t, err)
+	require.Contains(t, stdout.String(), "v1.0.0")
+	require.Contains(t, stdout.String(), "Initial market API release")
+
+	// 4. Show tag
+	stdout.Reset()
+
+	err = app.Run(context.Background(), []string{"tag", "show", "v1.0.0", "-dir=" + tempDir})
+	require.NoError(t, err)
+	require.Contains(t, stdout.String(), "API Release Snapshot: v1.0.0")
+	require.Contains(t, stdout.String(), "ListItems")
+
+	// 5. Remove tag
+	stdout.Reset()
+
+	err = app.Run(context.Background(), []string{"tag", "rm", "v1.0.0", "-dir=" + tempDir})
+	require.NoError(t, err)
+	require.Contains(t, stdout.String(), "Removed API release tag v1.0.0")
 }
