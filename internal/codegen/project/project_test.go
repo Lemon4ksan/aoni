@@ -276,3 +276,39 @@ type API interface {
 	require.Len(t, cfg.Contracts, 1)
 	require.Equal(t, "pkg/api/api.go", cfg.Contracts[0].File)
 }
+
+func TestProject_EnsureGitattributes(t *testing.T) {
+	tempDir := t.TempDir()
+
+	// 1. First run creates .gitattributes
+	updated, err := project.EnsureGitattributes(tempDir)
+	require.NoError(t, err)
+	require.True(t, updated)
+
+	gaFile := filepath.Join(tempDir, ".gitattributes")
+	content, err := os.ReadFile(gaFile)
+	require.NoError(t, err)
+	require.Contains(t, string(content), "linguist-generated=true")
+	require.Contains(t, string(content), "*.gen.go")
+	require.Contains(t, string(content), "eol=lf")
+
+	// 2. Second run is a no-op
+	updated2, err := project.EnsureGitattributes(tempDir)
+	require.NoError(t, err)
+	require.False(t, updated2)
+
+	// 3. Existing .gitattributes with custom rules gets appended
+	tempDir2 := t.TempDir()
+	gaFile2 := filepath.Join(tempDir2, ".gitattributes")
+	err = os.WriteFile(gaFile2, []byte("*.md text\n*.png binary\n"), 0o600)
+	require.NoError(t, err)
+
+	updated3, err := project.EnsureGitattributes(tempDir2)
+	require.NoError(t, err)
+	require.True(t, updated3)
+
+	content2, err := os.ReadFile(gaFile2)
+	require.NoError(t, err)
+	require.Contains(t, string(content2), "*.png binary")
+	require.Contains(t, string(content2), "linguist-generated=true")
+}

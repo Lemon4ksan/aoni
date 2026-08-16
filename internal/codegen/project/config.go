@@ -504,6 +504,7 @@ func Init(rootDir string, force bool, opts ...AutoDiscoverOptions) (*Config, err
 	cfg.ConfigPath = configPath
 
 	_, _ = EnsureGitignore(rootDir)
+	_, _ = EnsureGitattributes(rootDir)
 
 	return cfg, nil
 }
@@ -517,6 +518,21 @@ const GitignoreVortexBlock = `
 *.prof
 *.sarif
 .vortex/
+`
+
+// GitattributesVortexBlock contains standard attributes for Go line endings and GitHub PR diff collapsing.
+const GitattributesVortexBlock = `
+# Go & Protocol Buffers LF Normalization
+* text=auto eol=lf
+*.go text eol=lf
+*.proto text eol=lf
+
+# GitHub Linguist — Collapse generated code in PR diffs and exclude from stats
+*.gen.go linguist-generated=true
+*_mock.gen.go linguist-generated=true
+*_harness.gen.go linguist-generated=true
+*.pb.go linguist-generated=true
+*_aoni.pb.go linguist-generated=true
 `
 
 // EnsureGitignore ensures that .gitignore in rootDir includes Vortex ignore patterns.
@@ -551,6 +567,43 @@ func EnsureGitignore(rootDir string) (bool, error) {
 
 	if writeErr := os.WriteFile(giPath, newContent.Bytes(), 0o600); writeErr != nil {
 		return false, fmt.Errorf("updating .gitignore: %w", writeErr)
+	}
+
+	return true, nil
+}
+
+// EnsureGitattributes ensures that .gitattributes in rootDir configures LF endings and PR diff collapsing.
+func EnsureGitattributes(rootDir string) (bool, error) {
+	gaPath := filepath.Join(rootDir, ".gitattributes")
+
+	data, err := os.ReadFile(gaPath)
+	if os.IsNotExist(err) {
+		content := strings.TrimPrefix(GitattributesVortexBlock, "\n")
+		if writeErr := os.WriteFile(gaPath, []byte(content), 0o600); writeErr != nil {
+			return false, fmt.Errorf("creating .gitattributes: %w", writeErr)
+		}
+
+		return true, nil
+	} else if err != nil {
+		return false, fmt.Errorf("reading .gitattributes: %w", err)
+	}
+
+	content := string(data)
+	if strings.Contains(content, "linguist-generated=true") || strings.Contains(content, "*.gen.go") {
+		return false, nil
+	}
+
+	var newContent bytes.Buffer
+	newContent.Write(data)
+
+	if len(data) > 0 && !strings.HasSuffix(content, "\n") {
+		newContent.WriteString("\n")
+	}
+
+	newContent.WriteString(GitattributesVortexBlock)
+
+	if writeErr := os.WriteFile(gaPath, newContent.Bytes(), 0o600); writeErr != nil {
+		return false, fmt.Errorf("updating .gitattributes: %w", writeErr)
 	}
 
 	return true, nil
