@@ -20,6 +20,8 @@ func main() {
 		&CmdGen{},
 		&CmdCheck{},
 		&CmdDiff{},
+		&CmdReview{},
+		&CmdAccept{},
 		&CmdLog{},
 		&CmdOAPI{},
 		&CmdProto{},

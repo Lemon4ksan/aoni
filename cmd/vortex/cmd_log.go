@@ -11,23 +11,26 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"os"
+	"path/filepath"
 	"sort"
 	"strings"
 
 	"github.com/lemon4ksan/aoni/internal/codegen/builder"
+	"github.com/lemon4ksan/aoni/internal/codegen/git"
 	"github.com/lemon4ksan/aoni/internal/codegen/ir"
 	codeparser "github.com/lemon4ksan/aoni/internal/codegen/parser"
 )
 
-// CmdLog renders an in-source API evolution timeline from @version, @since, and @deprecated tags.
+// CmdLog renders an in-source API evolution timeline from @version, @since, and @deprecated tags, or real Git history.
 type CmdLog struct{}
 
 func (c *CmdLog) Name() string      { return "log" }
 func (c *CmdLog) Aliases() []string { return []string{"timeline", "history"} }
 func (c *CmdLog) Synopsis() string {
-	return "Display contract evolution timeline from in-source @version, @since, and @deprecated tags"
+	return "Display contract evolution timeline from in-source tags or Git history"
 }
-func (c *CmdLog) Usage() string { return "vortex log [flags] [files...]" }
+func (c *CmdLog) Usage() string { return "vortex log [flags] [--git] [-n=10] [files...]" }
 
 type timelineVersion struct {
 	Version    string   `json:"version"`
@@ -46,12 +49,17 @@ func (c *CmdLog) Run(ctx context.Context, args []string, stdout, stderr io.Write
 	fs := flag.NewFlagSet("log", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 
-	jsonFlag := fs.Bool("json", false, "Output timeline in JSON format")
+	var (
+		jsonFlag  = fs.Bool("json", false, "Output timeline in JSON format")
+		gitFlag   = fs.Bool("git", false, "Show actual Git commit history for contracts")
+		limitFlag = fs.Int("n", 10, "Maximum number of Git commits to display")
+	)
 
 	fs.Usage = func() {
 		fmt.Fprintf(stderr, "vortex log — Contract Evolution Timeline Explorer\n\n")
 		fmt.Fprintf(stderr, "Usage:\n")
-		fmt.Fprintf(stderr, "  vortex log [-json] [paths...]\n\n")
+		fmt.Fprintf(stderr, "  vortex log [-json] [paths...]\n")
+		fmt.Fprintf(stderr, "  vortex log --git [-n=10] [paths...]\n\n")
 		fmt.Fprintf(stderr, "Flags:\n")
 		fs.PrintDefaults()
 	}
@@ -63,6 +71,10 @@ func (c *CmdLog) Run(ctx context.Context, args []string, stdout, stderr io.Write
 	files := builder.CollectInputFiles("", fs.Args())
 	if len(files) == 0 {
 		return errors.New("no Go source files found to inspect for timeline")
+	}
+
+	if *gitFlag {
+		return c.runGitLog(ctx, files, *limitFlag, *jsonFlag, stdout)
 	}
 
 	p := codeparser.NewParser()
@@ -98,7 +110,7 @@ func (c *CmdLog) Run(ctx context.Context, args []string, stdout, stderr io.Write
 	if *jsonFlag {
 		jsonBytes, err := json.MarshalIndent(allTimelines, "", "  ")
 		if err != nil {
-			return fmt.Errorf("formatting JSON timeline: %w", err)
+			return fmt.Errorf("failed formatting JSON: %w", err)
 		}
 
 		fmt.Fprintln(stdout, string(jsonBytes))
@@ -110,34 +122,74 @@ func (c *CmdLog) Run(ctx context.Context, args []string, stdout, stderr io.Write
 		fmt.Fprintf(stdout, "⚡ Vortex API Contract Timeline: %s (%s)\n\n", tl.FilePath, tl.Service)
 
 		for _, v := range tl.Versions {
-			versionTitle := v.Version
-			if versionTitle == "" {
-				versionTitle = "Unversioned / Initial Contract"
+			sourceSuffix := ""
+			if v.Source != "" {
+				sourceSuffix = fmt.Sprintf(" (source: %s)", v.Source)
 			}
 
-			if v.Source != "" {
-				fmt.Fprintf(stdout, "● %s (source: %s)\n", versionTitle, v.Source)
-			} else {
-				fmt.Fprintf(stdout, "● %s\n", versionTitle)
-			}
+			fmt.Fprintf(stdout, "● %s%s\n", v.Version, sourceSuffix)
 
 			if len(v.Added) > 0 {
 				fmt.Fprintf(stdout, "  [+] %d endpoint(s) introduced:\n", len(v.Added))
 
-				for _, a := range v.Added {
-					fmt.Fprintf(stdout, "      • %s\n", a)
+				for _, ep := range v.Added {
+					fmt.Fprintf(stdout, "      • %s\n", ep)
 				}
 			}
 
 			if len(v.Deprecated) > 0 {
-				fmt.Fprintf(stdout, "  [!] %d endpoint(s) deprecated:\n", len(v.Deprecated))
+				fmt.Fprintf(stdout, "  [-] %d endpoint(s) deprecated:\n", len(v.Deprecated))
 
-				for _, d := range v.Deprecated {
-					fmt.Fprintf(stdout, "      • %s\n", d)
+				for _, ep := range v.Deprecated {
+					fmt.Fprintf(stdout, "      • %s\n", ep)
 				}
 			}
 
-			fmt.Fprintln(stdout)
+			fmt.Fprintf(stdout, "\n")
+		}
+	}
+
+	return nil
+}
+
+func (c *CmdLog) runGitLog(ctx context.Context, files []string, limit int, jsonOut bool, stdout io.Writer) error {
+	cwd, err := os.Getwd()
+	if err != nil {
+		return err
+	}
+
+	rootDir, err := git.RootDir(ctx, cwd)
+	if err != nil {
+		return err
+	}
+
+	for _, file := range files {
+		relPath, relErr := filepath.Rel(rootDir, file)
+		if relErr != nil {
+			relPath = file
+		}
+
+		commits, logErr := git.LogCommits(ctx, rootDir, relPath, limit)
+		if logErr != nil {
+			continue
+		}
+
+		if jsonOut {
+			jsonBytes, _ := json.MarshalIndent(commits, "", "  ")
+			fmt.Fprintln(stdout, string(jsonBytes))
+			continue
+		}
+
+		fmt.Fprintf(stdout, "⚡ Vortex API Git History: %s\n\n", relPath)
+
+		for _, commit := range commits {
+			shortHash := commit.Hash
+			if len(shortHash) > 7 {
+				shortHash = shortHash[:7]
+			}
+
+			fmt.Fprintf(stdout, "● commit %s (%s) by @%s\n", shortHash, commit.Date, commit.Author)
+			fmt.Fprintf(stdout, "  %s\n\n", commit.Subject)
 		}
 	}
 
@@ -145,77 +197,66 @@ func (c *CmdLog) Run(ctx context.Context, args []string, stdout, stderr io.Write
 }
 
 func (c *CmdLog) buildServiceTimeline(filePath string, svc *ir.ServiceIR) fileTimeline {
-	tl := fileTimeline{
+	timeline := fileTimeline{
 		FilePath: filePath,
 		Service:  svc.Name,
+		Versions: make([]timelineVersion, 0),
 	}
 
 	versionMap := make(map[string]*timelineVersion)
-	ensureVersion := func(ver string) *timelineVersion {
-		if v, ok := versionMap[ver]; ok {
-			return v
-		}
 
-		v := &timelineVersion{
-			Version:    ver,
-			Added:      make([]string, 0),
-			Deprecated: make([]string, 0),
-		}
-		versionMap[ver] = v
-
-		return v
-	}
-
-	// Service base version
-	if svc.Version != "" {
-		v := ensureVersion(svc.Version)
-		if svc.Source != "" {
-			v.Source = svc.Source
-		}
+	serviceVersion := svc.Version
+	if serviceVersion == "" {
+		serviceVersion = "v1.0.0"
 	}
 
 	for _, m := range svc.Methods {
-		routeDesc := m.Name
-		if m.HTTPMethod != "" && m.Path != nil {
-			routeDesc = fmt.Sprintf("%s %s (%s)", strings.ToUpper(m.HTTPMethod), m.Path.RawTemplate, m.Name)
+		v := m.Since
+		if v == "" {
+			v = m.Version
 		}
+
+		if v == "" {
+			v = serviceVersion
+		}
+
+		tv, exists := versionMap[v]
+		if !exists {
+			tv = &timelineVersion{
+				Version:    v,
+				Source:     svc.Source,
+				Added:      make([]string, 0),
+				Deprecated: make([]string, 0),
+			}
+			versionMap[v] = tv
+		}
+
+		rawPath := ""
+		if m.Path != nil {
+			rawPath = m.Path.RawTemplate
+		}
+
+		endpointStr := fmt.Sprintf("%s %s (%s)", strings.ToUpper(m.HTTPMethod), rawPath, m.Name)
 
 		if m.Deprecation != nil {
-			depVer := m.Deprecation.Since
-			if depVer == "" {
-				depVer = svc.Version
-			}
-
-			v := ensureVersion(depVer)
-
-			msg := routeDesc
+			reason := ""
 			if m.Deprecation.Reason != "" {
-				msg += " — " + m.Deprecation.Reason
+				reason = " — " + m.Deprecation.Reason
 			}
 
-			v.Deprecated = append(v.Deprecated, msg)
+			tv.Deprecated = append(tv.Deprecated, endpointStr+reason)
+		} else {
+			tv.Added = append(tv.Added, endpointStr)
 		}
-
-		sinceVer := m.Since
-		if sinceVer == "" {
-			sinceVer = svc.Version
-		}
-
-		v := ensureVersion(sinceVer)
-		v.Added = append(v.Added, routeDesc)
 	}
 
-	// Sort versions descending
-	sortedVersions := make([]timelineVersion, 0, len(versionMap))
-	for _, v := range versionMap {
-		sortedVersions = append(sortedVersions, *v)
+	for _, tv := range versionMap {
+		timeline.Versions = append(timeline.Versions, *tv)
 	}
 
-	sort.Slice(sortedVersions, func(i, j int) bool {
-		return sortedVersions[i].Version > sortedVersions[j].Version
+	sort.Slice(timeline.Versions, func(i, j int) bool {
+		return timeline.Versions[i].Version > timeline.Versions[j].Version
 	})
 
-	tl.Versions = sortedVersions
-
-	return tl
+	return timeline
 }

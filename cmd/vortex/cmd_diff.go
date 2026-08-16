@@ -10,27 +10,31 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"os"
 	"path/filepath"
 	"strings"
 
 	"github.com/lemon4ksan/aoni/internal/codegen/builder"
 	"github.com/lemon4ksan/aoni/internal/codegen/diff"
+	"github.com/lemon4ksan/aoni/internal/codegen/git"
 	"github.com/lemon4ksan/aoni/internal/codegen/ir"
+	"github.com/lemon4ksan/aoni/internal/codegen/merge"
 	"github.com/lemon4ksan/aoni/internal/codegen/openapi"
 	codeparser "github.com/lemon4ksan/aoni/internal/codegen/parser"
+	"github.com/lemon4ksan/aoni/internal/codegen/project"
 )
 
-// CmdDiff compares local Go interface contracts against an external OpenAPI specification.
+// CmdDiff compares local Go interface contracts against an external OpenAPI specification or Git ref.
 type CmdDiff struct{}
 
 func (c *CmdDiff) Name() string      { return "diff" }
 func (c *CmdDiff) Aliases() []string { return []string{"drift", "compare"} }
 func (c *CmdDiff) Synopsis() string {
-	return "Detect contract drift between local Go interfaces and OpenAPI specifications"
+	return "Detect contract drift between local Go interfaces and OpenAPI specifications or Git refs"
 }
 
 func (c *CmdDiff) Usage() string {
-	return "vortex diff [flags] <remote-spec.json|yaml> [local-files...]"
+	return "vortex diff [flags] [--against=<ref>] [<remote-spec.json|yaml>] [local-files...]"
 }
 
 func (c *CmdDiff) Run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
@@ -51,6 +55,11 @@ func (c *CmdDiff) Run(ctx context.Context, args []string, stdout, stderr io.Writ
 		jsonFlag    = fs.Bool("json", false, "Output report in JSON format")
 		serviceFlag = fs.String("service", "", "Filter comparison to a specific service interface name")
 		specFlag    = fs.String("spec", "", "Path to remote OpenAPI/Swagger JSON or YAML specification")
+		againstFlag = fs.String(
+			"against",
+			"",
+			"Compare local Go contracts against a Git branch, tag, or commit in-memory (e.g. --against=origin/main)",
+		)
 	)
 
 	fs.Usage = func() {
@@ -58,7 +67,11 @@ func (c *CmdDiff) Run(ctx context.Context, args []string, stdout, stderr io.Writ
 		fmt.Fprintf(stderr, "Usage:\n")
 		fmt.Fprintf(
 			stderr,
-			"  vortex diff [-fail-on-drift] [-strict] [-json] [-service=name] <spec.json|yaml> [paths...]\n\n",
+			"  vortex diff [-fail-on-drift] [-strict] [-json] [-service=name] <spec.json|yaml> [paths...]\n",
+		)
+		fmt.Fprintf(
+			stderr,
+			"  vortex diff --against=<branch|tag|commit> [paths...]\n\n",
 		)
 		fmt.Fprintf(stderr, "Flags:\n")
 		fs.PrintDefaults()
@@ -69,13 +82,22 @@ func (c *CmdDiff) Run(ctx context.Context, args []string, stdout, stderr io.Writ
 	}
 
 	positional := fs.Args()
+
+	// Branch 1: Git-based comparison
+	if *againstFlag != "" {
+		return c.runGitDiff(ctx, *againstFlag, positional, *jsonFlag, stdout)
+	}
+
+	// Branch 2: OpenAPI-based comparison
 	specFile := *specFlag
 
 	var localPaths []string
 
 	if specFile == "" {
 		if len(positional) == 0 {
-			return errors.New("missing OpenAPI specification file argument (e.g. `vortex diff swagger.json`)")
+			return errors.New(
+				"missing OpenAPI specification or --against flag (e.g. `vortex diff swagger.json` or `vortex diff --against=origin/main`)",
+			)
 		}
 
 		specFile = positional[0]
@@ -114,8 +136,8 @@ func (c *CmdDiff) Run(ctx context.Context, args []string, stdout, stderr io.Writ
 			continue
 		}
 
-		root, err := p.ParseFile(file)
-		if err != nil {
+		root, parseErr := p.ParseFile(file)
+		if parseErr != nil {
 			continue
 		}
 
@@ -150,9 +172,9 @@ func (c *CmdDiff) Run(ctx context.Context, args []string, stdout, stderr io.Writ
 
 	// 4. Render output
 	if *jsonFlag {
-		jsonBytes, err := report.RenderJSON()
-		if err != nil {
-			return fmt.Errorf("failed formatting JSON report: %w", err)
+		jsonBytes, renderErr := report.RenderJSON()
+		if renderErr != nil {
+			return fmt.Errorf("failed formatting JSON report: %w", renderErr)
 		}
 
 		fmt.Fprintln(stdout, string(jsonBytes))
@@ -167,6 +189,95 @@ func (c *CmdDiff) Run(ctx context.Context, args []string, stdout, stderr io.Writ
 
 	if *failOnDriftFlag && report.HasBreaking() {
 		return fmt.Errorf("breaking contract drift detected (%d breaking issue(s))", report.BreakingCount())
+	}
+
+	return nil
+}
+
+func (c *CmdDiff) runGitDiff(
+	ctx context.Context,
+	targetRef string,
+	paths []string,
+	jsonOut bool,
+	stdout io.Writer,
+) error {
+	cwd, err := os.Getwd()
+	if err != nil {
+		return err
+	}
+
+	rootDir, err := git.RootDir(ctx, cwd)
+	if err != nil {
+		return err
+	}
+
+	files := builder.CollectInputFiles("", paths)
+	if len(files) == 0 {
+		if cfg, _ := project.Load(rootDir); cfg != nil && len(cfg.Contracts) > 0 {
+			for _, ct := range cfg.Contracts {
+				files = append(files, filepath.Join(rootDir, ct.File))
+			}
+		}
+	}
+
+	if len(files) == 0 {
+		return errors.New("no Go contract files found to compare")
+	}
+
+	p := codeparser.NewParser()
+	reconciler := merge.NewReconciler()
+
+	fmt.Fprintf(stdout, "⚡ [vortex diff] Comparing working tree against '%s':\n\n", targetRef)
+
+	totalDeltas := 0
+
+	for _, file := range files {
+		relPath, relErr := filepath.Rel(rootDir, file)
+		if relErr != nil {
+			relPath = file
+		}
+
+		diskIR, parseErr := p.ParseFile(file)
+		if parseErr != nil {
+			continue
+		}
+
+		remoteBytes, showErr := git.ShowFile(ctx, rootDir, targetRef, relPath)
+		if showErr != nil {
+			continue
+		}
+
+		remoteIR, remoteErr := p.ParseSource(relPath, remoteBytes)
+		if remoteErr != nil {
+			continue
+		}
+
+		res, recErr := reconciler.Reconcile(nil, diskIR, remoteIR)
+		if recErr != nil || len(res.Deltas) == 0 {
+			continue
+		}
+
+		fmt.Fprintf(stdout, "● %s:\n", relPath)
+
+		for _, d := range res.Deltas {
+			totalDeltas++
+
+			prefix := "[+]"
+			switch d.Kind {
+			case merge.DeltaModifyMethod, merge.DeltaModifyStruct:
+				prefix = "[~]"
+			case merge.DeltaDeprecate:
+				prefix = "[-]"
+			}
+
+			fmt.Fprintf(stdout, "  %s %s: %s\n", prefix, d.EntityName, d.Description)
+		}
+
+		fmt.Fprintf(stdout, "\n")
+	}
+
+	if totalDeltas == 0 {
+		fmt.Fprintf(stdout, "✔ Working tree is in sync with '%s' (0 drift).\n", targetRef)
 	}
 
 	return nil

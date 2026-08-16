@@ -5,6 +5,7 @@
 package project
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -12,6 +13,7 @@ import (
 	"strings"
 
 	"github.com/lemon4ksan/aoni/internal/codegen/diff"
+	"github.com/lemon4ksan/aoni/internal/codegen/git"
 	"github.com/lemon4ksan/aoni/internal/codegen/ingest"
 	"github.com/lemon4ksan/aoni/internal/codegen/openapi"
 	"github.com/lemon4ksan/aoni/internal/codegen/parser"
@@ -25,7 +27,7 @@ type PluginStatus struct {
 	Message string `json:"message,omitempty"`
 }
 
-// ContractStatus represents the comprehensive health of a single service interface.
+// ContractStatus captures the integrity and freshness state of an individual contract.
 type ContractStatus struct {
 	Name                  string         `json:"name"`
 	Package               string         `json:"package"`
@@ -38,20 +40,21 @@ type ContractStatus struct {
 	Source                string         `json:"source,omitempty"`
 	IsGenStale            bool           `json:"is_gen_stale"`
 	GenStaleReason        string         `json:"gen_stale_reason,omitempty"`
-	UpstreamDriftCount    int            `json:"upstream_drift_count"`
 	UpstreamBreakingCount int            `json:"upstream_breaking_count"`
+	UpstreamDriftCount    int            `json:"upstream_drift_count"`
 	UpstreamGhostCount    int            `json:"upstream_ghost_count"`
 	Plugins               []PluginStatus `json:"plugins,omitempty"`
 }
 
 // StatusReport summarizes the health of all monitored contracts across the workspace.
 type StatusReport struct {
-	WorkspaceRoot string           `json:"workspace_root"`
-	ConfigPath    string           `json:"config_path,omitempty"`
-	Contracts     []ContractStatus `json:"contracts"`
-	TotalMethods  int              `json:"total_methods"`
-	TotalDTOs     int              `json:"total_dtos"`
-	NextActions   []string         `json:"next_actions,omitempty"`
+	WorkspaceRoot string               `json:"workspace_root"`
+	ConfigPath    string               `json:"config_path,omitempty"`
+	Contracts     []ContractStatus     `json:"contracts"`
+	Proposals     []git.BranchProposal `json:"proposals,omitempty"`
+	TotalMethods  int                  `json:"total_methods"`
+	TotalDTOs     int                  `json:"total_dtos"`
+	NextActions   []string             `json:"next_actions,omitempty"`
 }
 
 // StaleCount returns the number of contracts requiring code generation.
@@ -193,6 +196,21 @@ func (r *StatusReport) Render(color bool) string {
 
 				fmt.Fprintf(&sb, "  %s %s SDK (%s) ... %s\n", icon, strings.ToUpper(p.Name), p.Out, status)
 			}
+		}
+
+		sb.WriteString("\n")
+	}
+
+	if len(r.Proposals) > 0 {
+		sb.WriteString("● Incoming Consumer Proposals (Git Branches):\n")
+
+		for _, prop := range r.Proposals {
+			remoteTag := ""
+			if prop.IsRemote {
+				remoteTag = " [remote]"
+			}
+
+			fmt.Fprintf(&sb, "  🔵 %-28s by @%-14s (%s)%s\n", prop.Name, prop.Author, prop.Date, remoteTag)
 		}
 
 		sb.WriteString("\n")
@@ -401,6 +419,26 @@ func (e *StatusEngine) Inspect(cfg *Config, contracts []ContractConfig) *StatusR
 				strings.Join(driftServiceNames, ", "),
 			),
 		)
+	}
+
+	// 4. Discover incoming proposals from Git branches
+	if proposals, pErr := git.ListProposalBranches(
+		context.Background(),
+		cfg.RootDir,
+		nil,
+	); pErr == nil &&
+		len(proposals) > 0 {
+		report.Proposals = proposals
+		for _, prop := range proposals {
+			report.NextActions = append(
+				report.NextActions,
+				fmt.Sprintf(
+					"Run `vortex review %s` or `vortex accept %s` to inspect/merge proposal",
+					prop.Name,
+					prop.Name,
+				),
+			)
+		}
 	}
 
 	return report
