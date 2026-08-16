@@ -12,7 +12,6 @@ import (
 	"flag"
 	"fmt"
 	"io"
-	"math"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -24,6 +23,7 @@ import (
 	"time"
 
 	"github.com/lemon4ksan/aoni/internal/codegen/project"
+	"github.com/lemon4ksan/aoni/internal/tui"
 )
 
 // EndpointPerfRecord represents performance metrics for a single API endpoint.
@@ -350,25 +350,12 @@ func formatLatency(ns float64) string {
 	}
 }
 
-func renderBar(ratio float64, width int) string {
-	filled := int(math.Round(ratio * float64(width)))
-	if filled > width {
-		filled = width
-	}
-
-	if filled < 0 {
-		filled = 0
-	}
-
-	return strings.Repeat("█", filled) + strings.Repeat("░", width-filled)
-}
-
 func renderTerminalReport(w io.Writer, r *ProfileReport) error {
 	fmt.Fprintf(w, "\n⚡ Vortex Silicon & API Performance Profiler\n")
 	fmt.Fprintf(w, "Workspace: %s (%d endpoints)\n", r.Workspace, r.EndpointsCount)
 	fmt.Fprintf(w, "Platform:  %s/%s (%d CPU threads) | Engine: aoni/fast\n\n", r.OS, r.Arch, r.CPUCores)
 
-	fmt.Fprintf(w, "─────────────────────────────────────────────────────────────────────────────\n")
+	fmt.Fprintf(w, "%s\n", tui.RenderDivider(77))
 	fmt.Fprintf(w, "📊 EXECUTIVE PERFORMANCE SUMMARY:\n")
 	fmt.Fprintf(
 		w,
@@ -385,20 +372,18 @@ func renderTerminalReport(w io.Writer, r *ProfileReport) error {
 	)
 	fmt.Fprintf(w, "  • Median Client Overhead:  %s (pure CPU register compute)\n", formatLatency(r.AvgNsPerOp))
 	fmt.Fprintf(w, "  • GC Memory Pressure:      0.00 MB / 0 GC cycles under parallel load\n")
-	fmt.Fprintf(w, "─────────────────────────────────────────────────────────────────────────────\n\n")
+	fmt.Fprintf(w, "%s\n\n", tui.RenderDivider(77))
 
 	fmt.Fprintf(w, "🔬 ENDPOINT LATENCY & ALLOCATION LEDGER:\n")
-	fmt.Fprintf(
-		w,
-		"  %-20s %-36s %-16s %-12s %-12s %-8s\n",
-		"SERVICE",
-		"METHOD",
-		"THROUGHPUT",
-		"LATENCY",
-		"ALLOCS",
-		"STATUS",
-	)
-	fmt.Fprintf(w, "  %s\n", strings.Repeat("─", 108))
+
+	tbl := tui.NewTable("SERVICE", "METHOD", "THROUGHPUT", "LATENCY", "ALLOCS", "STATUS")
+	tbl.SetMinWidth(0, 20)
+	tbl.SetMinWidth(1, 36)
+	tbl.SetMinWidth(2, 16)
+	tbl.SetMinWidth(3, 12)
+	tbl.SetMinWidth(4, 12)
+	tbl.SetMinWidth(5, 8)
+	tbl.SetIndent(2)
 
 	for _, rec := range r.Records {
 		allocStr := fmt.Sprintf("%d B/op (%d)", rec.BytesPerOp, rec.AllocsPerOp)
@@ -406,7 +391,7 @@ func renderTerminalReport(w io.Writer, r *ProfileReport) error {
 			allocStr = "0 B/op"
 		}
 
-		fmt.Fprintf(w, "  %-20s %-36s %-16s %-12s %-12s %-8s\n",
+		tbl.AddRow(
 			rec.Service,
 			rec.Method,
 			formatThroughput(rec.ThroughputOpsS),
@@ -416,30 +401,20 @@ func renderTerminalReport(w io.Writer, r *ProfileReport) error {
 		)
 	}
 
-	fmt.Fprintf(w, "\n─────────────────────────────────────────────────────────────────────────────\n")
+	_ = tbl.Render(w)
+
+	fmt.Fprintf(w, "\n%s\n", tui.RenderDivider(77))
 	fmt.Fprintf(w, "⏱️ LATENCY TAX DECOMPOSITION (Where does time go per network roundtrip?):\n")
-	fmt.Fprintf(w, "  ┌%s┐\n", strings.Repeat("─", 75))
-	fmt.Fprintf(w, "  │ %-16s %-14s %-10s %-30s │\n", "Stage", "Duration", "Share", "Proportional Breakdown")
-	fmt.Fprintf(w, "  ├%s┤\n", strings.Repeat("─", 75))
-	fmt.Fprintf(
-		w,
-		"  │ %-16s %-14s %-10s %s │\n",
-		"Client Encode",
-		formatLatency(r.LatencyEncodeNs),
-		"< 0.001%",
-		renderBar(0.0001, 30),
-	)
-	fmt.Fprintf(w, "  │ %-16s %-14s %-10s %s │\n", "Wire Transit", "12.40 ms", "27.500%", renderBar(0.275, 30))
-	fmt.Fprintf(w, "  │ %-16s %-14s %-10s %s │\n", "Remote Server", "32.60 ms", "72.499%", renderBar(0.725, 30))
-	fmt.Fprintf(
-		w,
-		"  │ %-16s %-14s %-10s %s │\n",
-		"Client Decode",
-		formatLatency(r.LatencyDecodeNs),
-		"< 0.001%",
-		renderBar(0.0001, 30),
-	)
-	fmt.Fprintf(w, "  └%s┘\n\n", strings.Repeat("─", 75))
+
+	stages := []tui.TaxStage{
+		{Name: "Client Encode", Duration: formatLatency(r.LatencyEncodeNs), Share: "< 0.001%", Ratio: 0.0001},
+		{Name: "Wire Transit", Duration: "12.40 ms", Share: "27.500%", Ratio: 0.275},
+		{Name: "Remote Server", Duration: "32.60 ms", Share: "72.499%", Ratio: 0.725},
+		{Name: "Client Decode", Duration: formatLatency(r.LatencyDecodeNs), Share: "< 0.001%", Ratio: 0.0001},
+	}
+
+	fmt.Fprint(w, tui.RenderTaxDecomposition(stages, 30))
+	fmt.Fprintln(w)
 
 	if r.ZeroAllocRate >= 99.0 {
 		fmt.Fprintf(w, "✨ Verdict: Client networking layer operates at silicon line speed with ZERO heap churn.\n\n")

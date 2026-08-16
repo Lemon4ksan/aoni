@@ -12,10 +12,12 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
 	"github.com/lemon4ksan/aoni/internal/codegen/project"
+	"github.com/lemon4ksan/aoni/internal/tui"
 )
 
 // CmdWork orchestrates multi-repo workspace operations (.vortex.work).
@@ -132,15 +134,19 @@ func (c *CmdWork) runStatus(_ context.Context, stdout, _ io.Writer) error {
 	fmt.Fprintf(stdout, "⚡ Vortex Workspace Orchestrator\n")
 	fmt.Fprintf(stdout, "Work File: %s (%d workspaces linked)\n\n", wc.WorkPath, len(wc.Workspaces))
 
-	fmt.Fprintf(stdout, "  %-24s %-12s %-16s %-20s\n", "WORKSPACE", "CONTRACTS", "SERVICES", "STATUS")
-	fmt.Fprintf(stdout, "  %s\n", strings.Repeat("─", 80))
+	tbl := tui.NewTable("WORKSPACE", "CONTRACTS", "SERVICES", "STATUS")
+	tbl.SetMinWidth(0, 24)
+	tbl.SetMinWidth(1, 12)
+	tbl.SetMinWidth(2, 16)
+	tbl.SetMinWidth(3, 20)
+	tbl.SetIndent(2)
 
 	for _, ws := range wc.Workspaces {
 		wsPath := filepath.Join(wc.WorkDir, filepath.FromSlash(ws))
 
 		cfg, lErr := project.Load(wsPath)
 		if lErr != nil || cfg == nil {
-			fmt.Fprintf(stdout, "  %-24s %-12s %-16s %-20s\n", ws, "-", "-", "⚠️ Missing config")
+			tbl.AddRow(ws, "-", "-", tui.BadgeWarn()+" Missing config")
 			continue
 		}
 
@@ -153,9 +159,15 @@ func (c *CmdWork) runStatus(_ context.Context, stdout, _ io.Writer) error {
 			}
 		}
 
-		fmt.Fprintf(stdout, "  %-24s %-12d %-16d %-20s\n", ws, contractsCount, servicesCount, "✔ Synchronized")
+		tbl.AddRow(
+			ws,
+			strconv.Itoa(contractsCount),
+			strconv.Itoa(servicesCount),
+			tui.BadgeSync(),
+		)
 	}
 
+	_ = tbl.Render(stdout)
 	fmt.Fprintln(stdout)
 
 	return nil

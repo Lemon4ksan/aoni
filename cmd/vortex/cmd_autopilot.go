@@ -23,6 +23,7 @@ import (
 	codeparser "github.com/lemon4ksan/aoni/internal/codegen/parser"
 	"github.com/lemon4ksan/aoni/internal/codegen/project"
 	"github.com/lemon4ksan/aoni/internal/codegen/spec"
+	"github.com/lemon4ksan/aoni/internal/tui"
 )
 
 // CmdAutoPilot is the ultimate zero-argument intelligent runner.
@@ -311,15 +312,12 @@ func (c *CmdAutoPilot) runWorld2Pipeline(
 		return errors.New("contract compilation aborted due to critical lint errors (fix errors above to proceed)")
 	}
 
+	auditStatus := tui.BadgePassed() + " (100% clean)"
 	if autoFixCount > 0 {
-		fmt.Fprintf(
-			stdout,
-			"[1/3] Pre-flight Contract Audit ........... ✔ PASSED (%d safe warnings auto-fixed)\n",
-			autoFixCount,
-		)
-	} else {
-		fmt.Fprintf(stdout, "[1/3] Pre-flight Contract Audit ........... ✔ PASSED (100%% clean)\n")
+		auditStatus = fmt.Sprintf("%s (%d safe warnings auto-fixed)", tui.BadgePassed(), autoFixCount)
 	}
+
+	fmt.Fprintln(stdout, tui.RenderStep(1, 3, "Pre-flight Contract Audit", auditStatus, 44))
 
 	// STAGE 2: Upstream DAG Sync
 	upstreamSyncCount := 0
@@ -328,12 +326,10 @@ func (c *CmdAutoPilot) runWorld2Pipeline(
 			if ct.Upstream != nil && ct.Upstream.Source != "" {
 				upstreamPath := filepath.Join(rootDir, ct.Upstream.Source)
 				srcPath := filepath.Join(rootDir, ct.File)
-
 				upInfo, upErr := os.Stat(upstreamPath)
 				srcInfo, srcErr := os.Stat(srcPath)
 
 				if upErr == nil && srcErr == nil {
-					// If upstream dump was updated and generate hook is configured, run it
 					if upInfo.ModTime().After(srcInfo.ModTime()) && ct.Upstream.Generate != "" {
 						hookParts := strings.Fields(ct.Upstream.Generate)
 						if len(hookParts) > 0 {
@@ -352,13 +348,11 @@ func (c *CmdAutoPilot) runWorld2Pipeline(
 	}
 
 	if upstreamSyncCount > 0 {
-		fmt.Fprintf(
-			stdout,
-			"[2/3] Upstream Specifications ............. ✔ %d upstream sources synchronized\n",
-			upstreamSyncCount,
-		)
+		upStatus := fmt.Sprintf("%s (%d spec(s) updated)", tui.Green("✔ Synchronized"), upstreamSyncCount)
+		fmt.Fprintln(stdout, tui.RenderStep(2, 3, "Upstream Specifications", upStatus, 44))
 	} else {
-		fmt.Fprintf(stdout, "[2/3] Upstream Specifications ............. ✔ Up-to-date (0 drift)\n")
+		upStatus := tui.Green("✔ Up-to-date (0 drift)")
+		fmt.Fprintln(stdout, tui.RenderStep(2, 3, "Upstream Specifications", upStatus, 44))
 	}
 
 	// STAGE 3: Multi-Compilation (AOT Generation & Polyglot Plugins)
@@ -425,13 +419,18 @@ func (c *CmdAutoPilot) runWorld2Pipeline(
 		totalMethods = totalServices * 2
 	}
 
-	fmt.Fprintf(stdout, "[3/3] Code Generation & Polyglot Targets .. ✔ %s emitted (%d services, %d methods)\n",
-		formatByteSize(totalBytes), totalServices, totalMethods)
+	genStatus := fmt.Sprintf("%s %s emitted (%d services, %d methods)",
+		tui.Green("✔"),
+		formatByteSize(totalBytes),
+		totalServices,
+		totalMethods,
+	)
+	fmt.Fprintln(stdout, tui.RenderStep(3, 3, "Code Generation & Polyglot Targets", genStatus, 44))
 
 	elapsed := time.Since(start)
 
 	// STAGE 4: Final Consolidated Dashboard
-	fmt.Fprintf(stdout, "\n─────────────────────────────────────────────────────────────────────────────\n")
+	fmt.Fprintf(stdout, "\n%s\n", tui.RenderDivider(77))
 	fmt.Fprintf(stdout, "Summary:\n")
 	fmt.Fprintf(
 		stdout,
