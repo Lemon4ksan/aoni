@@ -6,7 +6,6 @@ package main
 
 import (
 	"context"
-	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -30,13 +29,14 @@ func (c *CmdGen) Run(ctx context.Context, args []string, stdout, stderr io.Write
 	fs.SetOutput(stderr)
 
 	var (
-		fileFlag    = fs.String("file", "", "Path to source file containing @aoni contracts (or set via $GOFILE)")
-		outFlag     = fs.String("out", "", "Path to output generated .gen.go file (default: <filename>.gen.go)")
-		pkgFlag     = fs.String("pkg", "", "Override package name in generated code")
-		watch       = fs.Bool("watch", false, "Watch source tree and auto-generate on change")
-		verbose     = fs.Bool("v", false, "Enable verbose compilation logging")
-		harnessFlag = fs.Bool("harness", false, "Generate test, load, and benchmark harness (api_harness.gen.go)")
-		fuzzFlag    = fs.Bool("fuzz", false, "Generate on-demand compact panic-free wire fuzzer (api_fuzz_test.go)")
+		fileFlag     = fs.String("file", "", "Path to source file containing @aoni contracts (or set via $GOFILE)")
+		outFlag      = fs.String("out", "", "Path to output generated .gen.go file (default: <filename>.gen.go)")
+		pkgFlag      = fs.String("pkg", "", "Override package name in generated code")
+		watch        = fs.Bool("watch", false, "Watch source tree and auto-generate on change")
+		verbose      = fs.Bool("v", false, "Enable verbose compilation logging")
+		harnessFlag  = fs.Bool("harness", false, "Generate test, load, and benchmark harness (api_harness.gen.go)")
+		fuzzFlag     = fs.Bool("fuzz", false, "Generate on-demand compact panic-free wire fuzzer (api_fuzz_test.go)")
+		maxDepthFlag = fs.Int("max-depth", 6, "Maximum directory search depth (0 for unlimited)")
 	)
 
 	fs.Usage = func() {
@@ -44,7 +44,7 @@ func (c *CmdGen) Run(ctx context.Context, args []string, stdout, stderr io.Write
 		fmt.Fprintf(stderr, "Usage:\n")
 		fmt.Fprintf(
 			stderr,
-			"  vortex [gen] [-file=api.go] [-out=api.gen.go] [-pkg=pkgname] [-harness] [-fuzz] [-watch] [-v] [paths...]\n\n",
+			"  vortex [gen] [-file=api.go] [-out=api.gen.go] [-pkg=pkgname] [-max-depth=6] [-harness] [-fuzz] [-watch] [-v] [paths...]\n\n",
 		)
 		fmt.Fprintf(stderr, "Flags:\n")
 		fs.PrintDefaults()
@@ -54,9 +54,14 @@ func (c *CmdGen) Run(ctx context.Context, args []string, stdout, stderr io.Write
 		return err
 	}
 
-	files := builder.CollectInputFiles(*fileFlag, fs.Args())
+	files := builder.CollectInputFiles(*fileFlag, fs.Args(), builder.CollectOptions{
+		MaxDepth: *maxDepthFlag,
+	})
 	if len(files) == 0 {
-		return errors.New("no Go source files found in the specified path(s)")
+		return fmt.Errorf(
+			"no Go source files found (searched up to depth %d). Use -max-depth=10 or pass specific files",
+			*maxDepthFlag,
+		)
 	}
 
 	b := builder.New(builder.Config{
@@ -71,6 +76,7 @@ func (c *CmdGen) Run(ctx context.Context, args []string, stdout, stderr io.Write
 		return err
 	}
 
+	generatedCount := 0
 	for _, res := range results {
 		if res.Skipped {
 			if *verbose {
@@ -79,6 +85,8 @@ func (c *CmdGen) Run(ctx context.Context, args []string, stdout, stderr io.Write
 
 			continue
 		}
+
+		generatedCount++
 
 		fmt.Fprintf(
 			stdout,
@@ -100,6 +108,15 @@ func (c *CmdGen) Run(ctx context.Context, args []string, stdout, stderr io.Write
 				)
 			}
 		}
+	}
+
+	if generatedCount == 0 && !*watch {
+		fmt.Fprintf(
+			stdout,
+			"⚡ Scanned %d Go file(s) (searched up to depth %d, 0 contracts with @aoni:service found)\n",
+			len(files),
+			*maxDepthFlag,
+		)
 	}
 
 	if *watch {

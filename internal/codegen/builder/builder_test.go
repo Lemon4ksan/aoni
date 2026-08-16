@@ -79,3 +79,52 @@ func TestBuilder_CollectInputFiles(t *testing.T) {
 	require.Len(t, files, 1)
 	require.Equal(t, f1, files[0])
 }
+
+func TestBuilder_CollectInputFiles_DepthLimit(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	// Level 1
+	l1File := filepath.Join(tmpDir, "level1.go")
+	require.NoError(t, os.WriteFile(l1File, []byte("package l1"), 0o600))
+
+	// Level 3: a/b/c/level3.go
+	l3Dir := filepath.Join(tmpDir, "a", "b", "c")
+	require.NoError(t, os.MkdirAll(l3Dir, 0o750))
+	l3File := filepath.Join(l3Dir, "level3.go")
+	require.NoError(t, os.WriteFile(l3File, []byte("package l3"), 0o600))
+
+	// Collect with MaxDepth = 1 (should only find level1.go)
+	files := builder.CollectInputFiles("", []string{tmpDir + "/..."}, builder.CollectOptions{
+		MaxDepth: 1,
+	})
+	require.Len(t, files, 1)
+	require.Equal(t, l1File, files[0])
+
+	// Collect with MaxDepth = 5 (should find both)
+	filesAll := builder.CollectInputFiles("", []string{tmpDir + "/..."}, builder.CollectOptions{
+		MaxDepth: 5,
+	})
+	require.Len(t, filesAll, 2)
+}
+
+func TestBuilder_QuickCheckCandidate(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	plainFile := filepath.Join(tmpDir, "plain.go")
+	require.NoError(t, os.WriteFile(plainFile, []byte("package test\ntype User struct{}\n"), 0o600))
+	require.False(t, builder.QuickCheckCandidate(plainFile))
+
+	serviceFile := filepath.Join(tmpDir, "svc.go")
+	require.NoError(
+		t,
+		os.WriteFile(serviceFile, []byte("package test\n// @aoni:service\ntype Svc interface{}\n"), 0o600),
+	)
+	require.True(t, builder.QuickCheckCandidate(serviceFile))
+
+	mirrorFile := filepath.Join(tmpDir, "mirror.go")
+	require.NoError(
+		t,
+		os.WriteFile(mirrorFile, []byte("package test\n// @mirror \"api.go\"\ntype Svc interface{}\n"), 0o600),
+	)
+	require.True(t, builder.QuickCheckCandidate(mirrorFile))
+}

@@ -7,7 +7,6 @@ package main
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"flag"
 	"fmt"
 	"go/parser"
@@ -46,11 +45,12 @@ func (c *CmdCheck) Run(ctx context.Context, args []string, stdout, stderr io.Wri
 			"terminal",
 			"Output format: terminal, json, github (GitHub Actions annotations), sarif",
 		)
-		disableFlag = fs.String("disable", "", "Comma-separated list of rule IDs/names to disable")
-		enableFlag  = fs.String("enable", "", "Comma-separated list of rule IDs/names to enable")
-		strictFlag  = fs.Bool("strict", false, "Treat warnings as errors")
-		noCacheFlag = fs.Bool("no-cache", false, "Disable incremental validation cache")
-		dirFlag     = fs.String("dir", "", "Target workspace directory (default: current root)")
+		disableFlag  = fs.String("disable", "", "Comma-separated list of rule IDs/names to disable")
+		enableFlag   = fs.String("enable", "", "Comma-separated list of rule IDs/names to enable")
+		strictFlag   = fs.Bool("strict", false, "Treat warnings as errors")
+		noCacheFlag  = fs.Bool("no-cache", false, "Disable incremental validation cache")
+		dirFlag      = fs.String("dir", "", "Target workspace directory (default: current root)")
+		maxDepthFlag = fs.Int("max-depth", 6, "Maximum directory search depth (0 for unlimited)")
 	)
 
 	fs.Usage = func() {
@@ -58,7 +58,7 @@ func (c *CmdCheck) Run(ctx context.Context, args []string, stdout, stderr io.Wri
 		fmt.Fprintf(stderr, "Usage:\n")
 		fmt.Fprintf(
 			stderr,
-			"  vortex check [-fix] [-format=terminal|json|github|sarif] [-disable=rules] [-enable=rules] [-strict] [paths...]\n\n",
+			"  vortex check [-fix] [-format=terminal|json|github|sarif] [-max-depth=6] [-disable=rules] [-enable=rules] [-strict] [paths...]\n\n",
 		)
 		fmt.Fprintf(stderr, "Flags:\n")
 		fs.PrintDefaults()
@@ -69,7 +69,7 @@ func (c *CmdCheck) Run(ctx context.Context, args []string, stdout, stderr io.Wri
 		arg := args[i]
 		if strings.HasPrefix(arg, "-") {
 			flags = append(flags, arg)
-			if (arg == "-dir" || arg == "-format" || arg == "-disable" || arg == "-enable") &&
+			if (arg == "-dir" || arg == "-format" || arg == "-disable" || arg == "-enable" || arg == "-max-depth") &&
 				i+1 < len(args) && !strings.HasPrefix(args[i+1], "-") {
 				flags = append(flags, args[i+1])
 				i++
@@ -83,9 +83,14 @@ func (c *CmdCheck) Run(ctx context.Context, args []string, stdout, stderr io.Wri
 		return err
 	}
 
-	files := builder.CollectInputFiles("", fs.Args())
+	files := builder.CollectInputFiles("", fs.Args(), builder.CollectOptions{
+		MaxDepth: *maxDepthFlag,
+	})
 	if len(files) == 0 {
-		return errors.New("no Go source files found to inspect")
+		return fmt.Errorf(
+			"no Go source files found to inspect (searched up to depth %d). Use -max-depth=10 or specify file paths",
+			*maxDepthFlag,
+		)
 	}
 
 	reg := lint.DefaultRegistry()

@@ -310,8 +310,10 @@ func Load(startDir string) (*Config, error) {
 
 // AutoDiscoverOptions configures path filtering for workspace contract auto-discovery.
 type AutoDiscoverOptions struct {
-	Exclude []string
-	Match   string
+	Exclude  []string
+	Match    string
+	MaxDepth int // Max folder recursion depth (default: 6, -1 for unlimited)
+	MaxFiles int // Max files to inspect (default: 5000)
 }
 
 // AutoDiscover scans the workspace directory tree and builds a virtual Config.
@@ -331,7 +333,26 @@ func AutoDiscover(rootDir string, opts ...AutoDiscoverOptions) (*Config, error) 
 		},
 	}
 
+	// Refuse unbounded recursive scan on bare filesystem/drive root
+	if isSystemRoot(rootDir) {
+		return cfg, nil
+	}
+
+	maxDepth := 6
+	maxFiles := 5000
+
+	if opt.MaxDepth > 0 {
+		maxDepth = opt.MaxDepth
+	} else if opt.MaxDepth == -1 {
+		maxDepth = 999999
+	}
+
+	if opt.MaxFiles > 0 {
+		maxFiles = opt.MaxFiles
+	}
+
 	p := parser.NewParser()
+	scannedCount := 0
 
 	_ = filepath.WalkDir(rootDir, func(path string, d os.DirEntry, walkErr error) error {
 		if walkErr != nil || d == nil {
@@ -345,10 +366,18 @@ func AutoDiscover(rootDir string, opts ...AutoDiscoverOptions) (*Config, error) 
 
 		relSlash := filepath.ToSlash(relPath)
 
+		// Guard: Depth Limit
+		if strings.Count(relSlash, "/") > maxDepth {
+			if d.IsDir() {
+				return filepath.SkipDir
+			}
+
+			return nil
+		}
+
 		if d.IsDir() {
 			name := d.Name()
-			if name == ".git" || name == "vendor" || name == "node_modules" || name == ".system_generated" ||
-				name == "testdata" {
+			if isIgnoredDirectory(name) || name == "testdata" {
 				return filepath.SkipDir
 			}
 
@@ -359,6 +388,11 @@ func AutoDiscover(rootDir string, opts ...AutoDiscoverOptions) (*Config, error) 
 			}
 
 			return nil
+		}
+
+		scannedCount++
+		if scannedCount > maxFiles {
+			return filepath.SkipAll
 		}
 
 		for _, ex := range opt.Exclude {
@@ -373,6 +407,11 @@ func AutoDiscover(rootDir string, opts ...AutoDiscoverOptions) (*Config, error) 
 
 		if !strings.HasSuffix(d.Name(), ".go") || strings.HasSuffix(d.Name(), ".gen.go") ||
 			strings.HasSuffix(d.Name(), "_test.go") {
+			return nil
+		}
+
+		// Fast byte search pre-filter: skip heavy AST parsing if file has no directives
+		if !quickCheckCandidate(path) {
 			return nil
 		}
 
@@ -798,4 +837,61 @@ func AutoDiscoverWorkspaces(parentDir string) ([]string, error) {
 	}
 
 	return discovered, nil
+}
+
+func isSystemRoot(path string) bool {
+	abs, err := filepath.Abs(path)
+	if err != nil {
+		abs = path
+	}
+
+	clean := filepath.Clean(abs)
+
+	// Unix root "/" or empty
+	if clean == "/" || clean == "\\" || clean == "." {
+		return clean == "/" || clean == "\\"
+	}
+
+	// Windows volume root: "C:\", "D:\", "C:", etc.
+	vol := filepath.VolumeName(clean)
+	if vol != "" && (clean == vol || clean == vol+`\` || clean == vol+`/`) {
+		return true
+	}
+
+	return false
+}
+
+func isIgnoredDirectory(name string) bool {
+	switch strings.ToLower(name) {
+	case ".git", "vendor", "node_modules", ".system_generated", ".vortex",
+		".idea", ".vscode", "appdata", "windows", "program files", "program files (x86)",
+		"$recycle.bin", "system volume information", "tmp", "temp", ".cache", ".npm",
+		".cargo", ".rustup", ".docker", ".gradle", ".m2", ".local", "dist", "build", "out", "testdata":
+		return true
+	default:
+		return false
+	}
+}
+
+func quickCheckCandidate(path string) bool {
+	f, err := os.Open(path)
+	if err != nil {
+		return false
+	}
+	defer f.Close()
+
+	buf := make([]byte, 65536)
+
+	n, err := f.Read(buf)
+	if err != nil && n == 0 {
+		return false
+	}
+
+	content := buf[:n]
+
+	return bytes.Contains(content, []byte("@aoni:service")) ||
+		bytes.Contains(content, []byte("@service")) ||
+		bytes.Contains(content, []byte("@aoni:endpoint")) ||
+		bytes.Contains(content, []byte("@aoni:mirror")) ||
+		bytes.Contains(content, []byte("@mirror"))
 }

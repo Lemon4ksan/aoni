@@ -6,6 +6,7 @@
 package builder
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"io/fs"
@@ -400,8 +401,14 @@ func (b *Builder) Watch(ctx context.Context, files []string, onChange func(file 
 	}
 }
 
+// CollectOptions configures recursive file discovery.
+type CollectOptions struct {
+	MaxDepth int // Max folder recursion depth (default: 6, -1 for unlimited)
+	MaxFiles int // Max files to collect (default: 5000)
+}
+
 // CollectInputFiles resolves input file paths from flags, environment variables, or path patterns (e.g. ./...).
-func CollectInputFiles(fileFlag string, args []string) []string {
+func CollectInputFiles(fileFlag string, args []string, opts ...CollectOptions) []string {
 	if fileFlag != "" {
 		return []string{fileFlag}
 	}
@@ -412,6 +419,21 @@ func CollectInputFiles(fileFlag string, args []string) []string {
 
 	if len(args) == 0 {
 		args = []string{"./..."}
+	}
+
+	maxDepth := 6
+	maxFiles := 5000
+
+	if len(opts) > 0 {
+		if opts[0].MaxDepth > 0 {
+			maxDepth = opts[0].MaxDepth
+		} else if opts[0].MaxDepth == -1 {
+			maxDepth = 999999
+		}
+
+		if opts[0].MaxFiles > 0 {
+			maxFiles = opts[0].MaxFiles
+		}
 	}
 
 	var matched []string
@@ -432,14 +454,27 @@ func CollectInputFiles(fileFlag string, args []string) []string {
 				baseDir = "."
 			}
 
+			// Guard: refuse unbounded scan on raw system root directory
+			if isSystemRoot(baseDir) {
+				continue
+			}
+
 			_ = filepath.WalkDir(baseDir, func(path string, d fs.DirEntry, err error) error {
 				if err != nil || d == nil {
 					return err
 				}
 
+				rel, rErr := filepath.Rel(baseDir, path)
+				if rErr == nil && strings.Count(filepath.ToSlash(rel), "/") > maxDepth {
+					if d.IsDir() {
+						return filepath.SkipDir
+					}
+
+					return nil
+				}
+
 				if d.IsDir() {
-					name := d.Name()
-					if name == ".git" || name == "vendor" || name == "node_modules" || name == ".system_generated" {
+					if isIgnoredDirectory(d.Name()) {
 						return filepath.SkipDir
 					}
 
@@ -448,7 +483,11 @@ func CollectInputFiles(fileFlag string, args []string) []string {
 
 				if IsEligibleGoFile(path) && !seen[path] {
 					seen[path] = true
+
 					matched = append(matched, path)
+					if len(matched) >= maxFiles {
+						return filepath.SkipAll
+					}
 				}
 
 				return nil
@@ -463,14 +502,26 @@ func CollectInputFiles(fileFlag string, args []string) []string {
 		}
 
 		if fi.IsDir() {
+			if isSystemRoot(target) {
+				continue
+			}
+
 			_ = filepath.WalkDir(target, func(path string, d fs.DirEntry, err error) error {
 				if err != nil || d == nil {
 					return err
 				}
 
+				rel, rErr := filepath.Rel(target, path)
+				if rErr == nil && strings.Count(filepath.ToSlash(rel), "/") > maxDepth {
+					if d.IsDir() {
+						return filepath.SkipDir
+					}
+
+					return nil
+				}
+
 				if d.IsDir() {
-					name := d.Name()
-					if name == ".git" || name == "vendor" || name == "node_modules" || name == ".system_generated" {
+					if isIgnoredDirectory(d.Name()) {
 						return filepath.SkipDir
 					}
 
@@ -479,7 +530,11 @@ func CollectInputFiles(fileFlag string, args []string) []string {
 
 				if IsEligibleGoFile(path) && !seen[path] {
 					seen[path] = true
+
 					matched = append(matched, path)
+					if len(matched) >= maxFiles {
+						return filepath.SkipAll
+					}
 				}
 
 				return nil
@@ -497,6 +552,30 @@ func CollectInputFiles(fileFlag string, args []string) []string {
 	return matched
 }
 
+// QuickCheckCandidate checks if a Go file contains @aoni or @service directives.
+func QuickCheckCandidate(path string) bool {
+	f, err := os.Open(path)
+	if err != nil {
+		return false
+	}
+	defer f.Close()
+
+	buf := make([]byte, 65536)
+
+	n, err := f.Read(buf)
+	if err != nil && n == 0 {
+		return false
+	}
+
+	content := buf[:n]
+
+	return bytes.Contains(content, []byte("@aoni:service")) ||
+		bytes.Contains(content, []byte("@service")) ||
+		bytes.Contains(content, []byte("@aoni:endpoint")) ||
+		bytes.Contains(content, []byte("@aoni:mirror")) ||
+		bytes.Contains(content, []byte("@mirror"))
+}
+
 // IsEligibleGoFile checks whether a file path is a candidate for code generation (non-test, non-generated .go file).
 func IsEligibleGoFile(path string) bool {
 	if !strings.HasSuffix(path, ".go") {
@@ -508,4 +587,36 @@ func IsEligibleGoFile(path string) bool {
 	}
 
 	return true
+}
+
+func isSystemRoot(path string) bool {
+	abs, err := filepath.Abs(path)
+	if err != nil {
+		abs = path
+	}
+
+	clean := filepath.Clean(abs)
+
+	if clean == "/" || clean == "\\" || clean == "." {
+		return clean == "/" || clean == "\\"
+	}
+
+	vol := filepath.VolumeName(clean)
+	if vol != "" && (clean == vol || clean == vol+`\` || clean == vol+`/`) {
+		return true
+	}
+
+	return false
+}
+
+func isIgnoredDirectory(name string) bool {
+	switch strings.ToLower(name) {
+	case ".git", "vendor", "node_modules", ".system_generated", ".vortex",
+		".idea", ".vscode", "appdata", "windows", "program files", "program files (x86)",
+		"$recycle.bin", "system volume information", "tmp", "temp", ".cache", ".npm",
+		".cargo", ".rustup", ".docker", ".gradle", ".m2", ".local", "dist", "build", "out", "testdata":
+		return true
+	default:
+		return false
+	}
 }
