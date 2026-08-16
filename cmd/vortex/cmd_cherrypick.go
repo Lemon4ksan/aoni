@@ -20,6 +20,7 @@ import (
 	"strings"
 
 	"github.com/lemon4ksan/aoni/internal/codegen/builder"
+	"github.com/lemon4ksan/aoni/internal/codegen/history"
 	"github.com/lemon4ksan/aoni/internal/codegen/project"
 )
 
@@ -293,6 +294,12 @@ func (c *CmdCherryPick) Run(ctx context.Context, args []string, stdout, stderr i
 
 		return nil
 	}
+
+	_, _ = history.Record(
+		targetDir,
+		fmt.Sprintf("vortex cherry-pick %s:%s --to=%s", srcFileOrContract, targetSymbol, destFileOrContract),
+		[]string{destFile},
+	)
 
 	if err := os.WriteFile(destFile, buf.Bytes(), 0o600); err != nil {
 		return fmt.Errorf("writing modified target file %s: %w", destFile, err)

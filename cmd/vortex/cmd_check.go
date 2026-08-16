@@ -18,6 +18,7 @@ import (
 	"strings"
 
 	"github.com/lemon4ksan/aoni/internal/codegen/builder"
+	"github.com/lemon4ksan/aoni/internal/codegen/cache"
 	"github.com/lemon4ksan/aoni/internal/codegen/lint"
 	codeparser "github.com/lemon4ksan/aoni/internal/codegen/parser"
 	"github.com/lemon4ksan/aoni/internal/codegen/project"
@@ -48,6 +49,7 @@ func (c *CmdCheck) Run(ctx context.Context, args []string, stdout, stderr io.Wri
 		disableFlag = fs.String("disable", "", "Comma-separated list of rule IDs/names to disable")
 		enableFlag  = fs.String("enable", "", "Comma-separated list of rule IDs/names to enable")
 		strictFlag  = fs.Bool("strict", false, "Treat warnings as errors")
+		noCacheFlag = fs.Bool("no-cache", false, "Disable incremental validation cache")
 	)
 
 	fs.Usage = func() {
@@ -90,6 +92,8 @@ func (c *CmdCheck) Run(ctx context.Context, args []string, stdout, stderr io.Wri
 	p := codeparser.NewParser()
 	fset := token.NewFileSet()
 
+	lintCache, _ := cache.LoadLintCache(rootDir)
+
 	var reports []*lint.Report
 
 	for _, file := range files {
@@ -105,6 +109,13 @@ func (c *CmdCheck) Run(ctx context.Context, args []string, stdout, stderr io.Wri
 
 		srcBytes, err := os.ReadFile(file)
 		if err != nil {
+			continue
+		}
+
+		relFile, _ := filepath.Rel(rootDir, file)
+
+		// Fast cache check
+		if !*noCacheFlag && !*fixFlag && lintCache.IsFresh(relFile, srcBytes) {
 			continue
 		}
 
@@ -149,7 +160,15 @@ func (c *CmdCheck) Run(ctx context.Context, args []string, stdout, stderr io.Wri
 			continue
 		}
 
+		if !*noCacheFlag {
+			lintCache.Put(relFile, srcBytes, len(report.Diagnostics))
+		}
+
 		reports = append(reports, report)
+	}
+
+	if !*noCacheFlag && !*fixFlag {
+		_ = lintCache.Save(rootDir)
 	}
 
 	merged := lint.MergeReports(reports...)

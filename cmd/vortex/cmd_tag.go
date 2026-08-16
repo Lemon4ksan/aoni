@@ -356,7 +356,7 @@ func (c *CmdTag) runAdd(
 	}
 
 	if message == "" {
-		message = fmt.Sprintf("API release %s", version)
+		message = "API release " + version
 	}
 
 	entry := TagEntry{
@@ -474,18 +474,21 @@ func (c *CmdTag) runShow(
 		// #nosec G204,G702
 		cmd := exec.CommandContext(ctx, "git", "log", "-1", "--format=%ai|%s", version)
 		cmd.Dir = rootDir
+
 		out, err := cmd.Output()
 		if err != nil {
 			return fmt.Errorf("release tag %q not found in Git history or local snapshots", version)
 		}
 
 		parts := strings.SplitN(strings.TrimSpace(string(out)), "|", 2)
+
 		date := time.Now()
 		if len(parts) >= 1 {
 			if t, pErr := time.Parse("2006-01-02 15:04:05 -0700", parts[0]); pErr == nil {
 				date = t
 			}
 		}
+
 		msg := "Git release tag"
 		if len(parts) >= 2 {
 			msg = parts[1]
@@ -493,12 +496,19 @@ func (c *CmdTag) runShow(
 
 		// Reconstruct methods from contracts in git at that ref
 		var methods []string
+
 		p := parser.NewParser()
 		if cfg != nil && len(cfg.Contracts) > 0 {
 			for _, ct := range cfg.Contracts {
 				// Read file bytes from Git at the tag ref
 				// #nosec G204,G702
-				showCmd := exec.CommandContext(ctx, "git", "show", fmt.Sprintf("%s:%s", version, filepath.ToSlash(ct.File)))
+				showCmd := exec.CommandContext(
+					ctx,
+					"git",
+					"show",
+					fmt.Sprintf("%s:%s", version, filepath.ToSlash(ct.File)),
+				)
+
 				showCmd.Dir = rootDir
 				if fileBytes, showErr := showCmd.Output(); showErr == nil {
 					if root, parseErr := p.ParseSource(ct.File, fileBytes); parseErr == nil {
@@ -529,9 +539,11 @@ func (c *CmdTag) runShow(
 
 	fmt.Fprintf(stdout, "⚡ API Release Snapshot: %s\n\n", found.Version)
 	fmt.Fprintf(stdout, "  • Contract:   %s\n", found.Contract)
+
 	if found.File != "" {
 		fmt.Fprintf(stdout, "  • File:       %s\n", found.File)
 	}
+
 	fmt.Fprintf(stdout, "  • Date:       %s\n", found.CreatedAt.Format("2006-01-02 15:04:05"))
 	fmt.Fprintf(stdout, "  • Message:    %s\n", found.Message)
 	fmt.Fprintf(stdout, "  • Endpoints:  %d methods\n\n", len(found.Methods))

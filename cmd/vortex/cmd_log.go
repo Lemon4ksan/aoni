@@ -26,7 +26,7 @@ import (
 type CmdLog struct{}
 
 func (c *CmdLog) Name() string      { return "log" }
-func (c *CmdLog) Aliases() []string { return []string{"timeline", "history"} }
+func (c *CmdLog) Aliases() []string { return []string{"timeline"} }
 func (c *CmdLog) Synopsis() string {
 	return "Display contract evolution timeline from in-source tags or Git history"
 }

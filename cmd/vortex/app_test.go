@@ -33,6 +33,8 @@ func newTestApp(stdout, stderr *bytes.Buffer) *App {
 		&CmdAccept{},
 		&CmdCherryPick{},
 		&CmdRefactor{},
+		&CmdHistory{},
+		&CmdUndo{},
 		&CmdSource{},
 		&CmdLog{},
 		&CmdTag{},
@@ -1258,4 +1260,104 @@ type MarketAPI interface {
 	require.Contains(t, string(content2), "type MarketReaderAPI interface")
 	require.Contains(t, string(content2), "type MarketAPI interface")
 	require.Contains(t, string(content2), "CreateListing")
+}
+
+func TestApp_HistoryAndUndo(t *testing.T) {
+	tempDir := t.TempDir()
+
+	serviceDir := filepath.Join(tempDir, "pkg", "market")
+	require.NoError(t, os.MkdirAll(serviceDir, 0o750))
+	apiFile := filepath.Join(serviceDir, "api.go")
+	initialContent := `package market
+
+import (
+	"context"
+	"github.com/lemon4ksan/aoni"
+)
+
+// @aoni:service
+type MarketAPI interface {
+	// @get "items"
+	FetchItems(ctx context.Context, mods ...aoni.RequestModifier) (map[string]any, error)
+}
+`
+	require.NoError(t, os.WriteFile(apiFile, []byte(initialContent), 0o600))
+
+	var stdout, stderr bytes.Buffer
+
+	app := newTestApp(&stdout, &stderr)
+
+	// 1. Perform rename (FetchItems -> GetItems)
+	err := app.Run(
+		context.Background(),
+		[]string{"refactor", "rename", "--match=Fetch(.*)", "--replace=Get$1", apiFile, "-dir=" + tempDir},
+	)
+	require.NoError(t, err)
+
+	renamedContent, err := os.ReadFile(apiFile)
+	require.NoError(t, err)
+	require.Contains(t, string(renamedContent), "GetItems")
+
+	// 2. View History
+	stdout.Reset()
+
+	err = app.Run(context.Background(), []string{"history", "-dir=" + tempDir})
+	require.NoError(t, err)
+	require.Contains(t, stdout.String(), "vortex refactor rename")
+	require.Contains(t, stdout.String(), "api.go")
+
+	// 3. Undo Operation (Ctrl+Z)
+	stdout.Reset()
+
+	err = app.Run(context.Background(), []string{"undo", "-dir=" + tempDir})
+	require.NoError(t, err)
+	require.Contains(t, stdout.String(), "Successfully reverted")
+
+	// 4. Verify file restored to FetchItems
+	restoredContent, err := os.ReadFile(apiFile)
+	require.NoError(t, err)
+	require.Contains(t, string(restoredContent), "FetchItems")
+	require.NotContains(t, string(restoredContent), "GetItems")
+}
+
+func TestApp_CheckIncrementalCache(t *testing.T) {
+	tempDir := t.TempDir()
+
+	serviceDir := filepath.Join(tempDir, "pkg", "market")
+	require.NoError(t, os.MkdirAll(serviceDir, 0o750))
+	apiFile := filepath.Join(serviceDir, "api.go")
+	initialContent := `package market
+
+import (
+	"context"
+	"github.com/lemon4ksan/aoni"
+)
+
+// @aoni:service
+type MarketAPI interface {
+	// @get "items"
+	GetItems(ctx context.Context, mods ...aoni.RequestModifier) (map[string]any, error)
+}
+`
+	require.NoError(t, os.WriteFile(apiFile, []byte(initialContent), 0o600))
+
+	var stdout, stderr bytes.Buffer
+
+	app := newTestApp(&stdout, &stderr)
+
+	// 1. Generate client first so stale-codegen passes
+	err := app.Run(context.Background(), []string{"gen", apiFile})
+	require.NoError(t, err)
+
+	// 2. Initial check (populates cache)
+	stdout.Reset()
+
+	err = app.Run(context.Background(), []string{"check", apiFile})
+	require.NoError(t, err)
+
+	// 3. Second check (hits cache)
+	stdout.Reset()
+
+	err = app.Run(context.Background(), []string{"check", apiFile})
+	require.NoError(t, err)
 }

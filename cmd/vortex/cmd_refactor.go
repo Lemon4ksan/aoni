@@ -21,6 +21,7 @@ import (
 	"strings"
 
 	"github.com/lemon4ksan/aoni/internal/codegen/builder"
+	"github.com/lemon4ksan/aoni/internal/codegen/history"
 	"github.com/lemon4ksan/aoni/internal/codegen/project"
 )
 
@@ -123,12 +124,14 @@ func (c *CmdRefactor) Run(ctx context.Context, args []string, stdout, stderr io.
 			if len(posArgs) > 1 {
 				targetArg = posArgs[1]
 			}
+
 		case "rename":
 			action = "rename"
 
 			if len(posArgs) > 1 {
 				targetArg = posArgs[1]
 			}
+
 		default:
 			if *matchFlag != "" {
 				action = "rename"
@@ -280,6 +283,12 @@ func (c *CmdRefactor) runSplit(
 			return nil
 		}
 
+		_, _ = history.Record(
+			rootDir,
+			fmt.Sprintf("vortex refactor split --from=%s --to=%s", fromContract, toInterface),
+			[]string{srcFile},
+		)
+
 		if err := os.WriteFile(srcFile, buf.Bytes(), 0o600); err != nil {
 			return fmt.Errorf("writing %s: %w", srcFile, err)
 		}
@@ -430,8 +439,15 @@ func (c *CmdRefactor) runRename(
 			filepath.ToSlash(relPath),
 			renamedCount,
 		)
+
 		return nil
 	}
+
+	_, _ = history.Record(
+		rootDir,
+		fmt.Sprintf("vortex refactor rename --match=%q --replace=%q", matchPattern, replacePattern),
+		[]string{targetFile},
+	)
 
 	if err := os.WriteFile(targetFile, buf.Bytes(), 0o600); err != nil {
 		return fmt.Errorf("writing %s: %w", targetFile, err)

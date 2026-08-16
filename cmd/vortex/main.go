@@ -30,6 +30,8 @@ func main() {
 		&CmdAccept{},
 		&CmdCherryPick{},
 		&CmdRefactor{},
+		&CmdHistory{},
+		&CmdUndo{},
 		&CmdSource{},
 		&CmdLog{},
 		&CmdTag{},

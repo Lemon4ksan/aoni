@@ -367,6 +367,23 @@ vortex refactor split --from=PriceDB --methods="Predict*" --to=PredictAPI --out=
 
 # Batch rename method names via regular expressions
 vortex refactor rename --match="Fetch(.*)" --replace="Get$1" pkg/services/bptf/api.go
+#### `vortex history` (Aliases: `ops`, `operations`, `journal`)
+Inspects the mutation journal of past AST refactors, cherry-picks, and workspace changes:
+
+```bash
+vortex history
+vortex history --json
+```
+
+#### `vortex undo` (Aliases: `revert`, `rollback`, `pop`)
+Reverts the last modifying AST operation (or a specific `op-id`) and automatically restores code and regenerates clients:
+
+```bash
+# Revert the latest operation (Ctrl+Z for AST refactors & cherry-picks)
+vortex undo
+
+# Revert a specific operation by ID
+vortex undo op-a1b2c3
 ```
 
 ---
@@ -374,11 +391,13 @@ vortex refactor rename --match="Fetch(.*)" --replace="Get$1" pkg/services/bptf/a
 ### Validation, Diffing & Auditing
 
 #### `vortex check`
-Performs static analysis, linting, and security audits across Go contracts.
+Performs static analysis, linting, and security audits across Go contracts with **incremental SHA-256 caching (`0.1ms`)**:
 
 ```bash
-vortex check
-vortex check -strict
+vortex check                        # Fast incremental check (hits cache for unchanged contracts)
+vortex check --no-cache             # Clean audit ignoring local cache
+vortex check -strict                # Treat warnings as errors
+vortex check --fix                  # Automatically apply safe code fixes
 vortex check -sarif=security.sarif  # Export findings for GitHub Security Code Scanning
 ```
 
