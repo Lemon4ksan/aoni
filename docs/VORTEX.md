@@ -267,6 +267,33 @@ vortex mock -strict            # Enforces strict parameter validation
 
 ### Specification Ingestion & Export
 
+#### `vortex source` (Aliases: `src`, `upstream`, `remote`)
+Manages, fetches, diffs, and synchronizes upstream OpenAPI/Swagger/AsyncAPI specifications with zero manual path passing.
+
+```bash
+# List all upstream sources and their status across the workspace
+vortex source list
+
+# Bind an upstream remote URL or local file to a contract
+vortex source set PriceDB https://api.pricedb.net/openapi.json --fetch
+vortex source set Bptf api/specs/bptf.yaml
+
+# Unbind upstream source from a contract
+vortex source rm PriceDB
+
+# Fetch remote specs locally into api/specs/
+vortex source fetch [contract]
+
+# Verify reachability of remote endpoints
+vortex source ping [contract]
+
+# Semantic diff against configured upstream schema without specifying file paths
+vortex source diff PriceDB
+
+# One-step pipeline: fetch remote spec, check diff, and regenerate client
+vortex source sync PriceDB
+```
+
 #### `vortex oapi`
 Exports declarative Go contracts to OpenAPI 3.1.0 JSON or YAML schemas.
 

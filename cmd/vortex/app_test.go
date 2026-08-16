@@ -30,6 +30,7 @@ func newTestApp(stdout, stderr *bytes.Buffer) *App {
 		&CmdDiff{},
 		&CmdReview{},
 		&CmdAccept{},
+		&CmdSource{},
 		&CmdLog{},
 		&CmdOAPI{},
 		&CmdProto{},
@@ -831,4 +832,100 @@ func TestApp_Clean(t *testing.T) {
 	err = app.Run(context.Background(), []string{"clean", "--all", "-dir=" + tempDir})
 	require.NoError(t, err)
 	require.NoFileExists(t, genFile)
+}
+
+func TestApp_Source(t *testing.T) {
+	tempDir := t.TempDir()
+	serviceDir := filepath.Join(tempDir, "pkg", "pricedb")
+	require.NoError(t, os.MkdirAll(serviceDir, 0o750))
+
+	apiFile := filepath.Join(serviceDir, "api.go")
+	apiSrc := `package pricedb
+
+import (
+	"context"
+	"github.com/lemon4ksan/aoni"
+)
+
+// @aoni:service
+type PriceDBAPI interface {
+	// @get "prices/{sku}"
+	GetPrice(ctx context.Context, sku string, mods ...aoni.RequestModifier) (map[string]any, error)
+}
+`
+	require.NoError(t, os.WriteFile(apiFile, []byte(apiSrc), 0o600))
+
+	specFile := filepath.Join(tempDir, "pricedb.json")
+	specContent := `{
+  "openapi": "3.1.0",
+  "info": {"title": "PriceDB", "version": "1.0.0"},
+  "paths": {
+    "/prices/{sku}": {
+      "get": {
+        "operationId": "GetPrice",
+        "parameters": [{"name": "sku", "in": "path", "required": true, "schema": {"type": "string"}}],
+        "responses": {"200": {"description": "OK"}}
+      }
+    }
+  }
+}`
+	require.NoError(t, os.WriteFile(specFile, []byte(specContent), 0o600))
+
+	var stdout, stderr bytes.Buffer
+
+	app := newTestApp(&stdout, &stderr)
+
+	// 1. Initialize workspace
+	err := app.Run(context.Background(), []string{"init", "-dir=" + tempDir})
+	require.NoError(t, err)
+
+	// 2. Test source list (initially none)
+	stdout.Reset()
+
+	err = app.Run(context.Background(), []string{"source", "list", "-dir=" + tempDir})
+	require.NoError(t, err)
+	require.Contains(t, stdout.String(), "(none)")
+
+	// 3. Test source set
+	stdout.Reset()
+
+	err = app.Run(context.Background(), []string{"source", "set", "PriceDBAPI", specFile, "-dir=" + tempDir})
+	require.NoError(t, err)
+	require.Contains(t, stdout.String(), "Successfully bound upstream source")
+
+	// 4. Test source list (now bound)
+	stdout.Reset()
+
+	err = app.Run(context.Background(), []string{"source", "list", "-dir=" + tempDir})
+	require.NoError(t, err)
+	require.Contains(t, stdout.String(), "PriceDBAPI")
+	require.Contains(t, stdout.String(), "openapi")
+
+	// 5. Test source ping (local file check)
+	stdout.Reset()
+
+	err = app.Run(context.Background(), []string{"source", "ping", "PriceDBAPI", "-dir=" + tempDir})
+	require.NoError(t, err)
+	require.Contains(t, stdout.String(), "[LOCAL]")
+
+	// 6. Test source diff
+	stdout.Reset()
+
+	err = app.Run(context.Background(), []string{"source", "diff", "PriceDBAPI", "-dir=" + tempDir})
+	require.NoError(t, err)
+	require.Contains(t, stdout.String(), "100% in sync")
+
+	// 7. Test source rm
+	stdout.Reset()
+
+	err = app.Run(context.Background(), []string{"source", "rm", "PriceDBAPI", "-dir=" + tempDir})
+	require.NoError(t, err)
+	require.Contains(t, stdout.String(), "Removed upstream source binding")
+
+	// 8. Verify list is back to none
+	stdout.Reset()
+
+	err = app.Run(context.Background(), []string{"source", "list", "-dir=" + tempDir})
+	require.NoError(t, err)
+	require.Contains(t, stdout.String(), "(none)")
 }

@@ -471,21 +471,53 @@ func Init(rootDir string, force bool, opts ...AutoDiscoverOptions) (*Config, err
 		return nil, fmt.Errorf("auto-discovering services: %w", err)
 	}
 
-	// Compact serialization for clean .vortex.yml
-	compactCfg := *cfg
+	if err := os.MkdirAll(rootDir, 0o750); err != nil {
+		return nil, fmt.Errorf("creating directory %s: %w", rootDir, err)
+	}
 
+	cfg.ConfigPath = configPath
+	if err := cfg.SaveTo(configPath); err != nil {
+		return nil, err
+	}
+
+	_, _ = EnsureGitignore(rootDir)
+	_, _ = EnsureGitattributes(rootDir)
+
+	return cfg, nil
+}
+
+// Save serializes the configuration back to disk at cfg.ConfigPath.
+func (cfg *Config) Save() error {
+	if cfg.ConfigPath == "" {
+		if cfg.RootDir == "" {
+			return errors.New("cannot save config: empty RootDir and ConfigPath")
+		}
+
+		cfg.ConfigPath = filepath.Join(cfg.RootDir, ConfigFileName)
+	}
+
+	return cfg.SaveTo(cfg.ConfigPath)
+}
+
+// SaveTo writes the compact configuration to a specific file path.
+func (cfg *Config) SaveTo(filePath string) error {
+	compactCfg := *cfg
 	compactCfg.Contracts = make([]ContractConfig, len(cfg.Contracts))
+
 	for i, c := range cfg.Contracts {
 		compactCfg.Contracts[i] = ContractConfig{
 			Name:     c.Name,
 			File:     c.File,
 			Upstream: c.Upstream,
+			Plugins:  c.Plugins,
+			Ignore:   c.Ignore,
+			Disable:  c.Disable,
 		}
 	}
 
 	data, err := yaml.Marshal(&compactCfg)
 	if err != nil {
-		return nil, fmt.Errorf("marshaling configuration: %w", err)
+		return fmt.Errorf("marshaling configuration: %w", err)
 	}
 
 	header := []byte(
@@ -493,20 +525,11 @@ func Init(rootDir string, force bool, opts ...AutoDiscoverOptions) (*Config, err
 	)
 	header = append(header, data...)
 
-	if err := os.MkdirAll(rootDir, 0o750); err != nil {
-		return nil, fmt.Errorf("creating directory %s: %w", rootDir, err)
+	if err := os.WriteFile(filePath, header, 0o600); err != nil {
+		return fmt.Errorf("writing %s: %w", filePath, err)
 	}
 
-	if err := os.WriteFile(configPath, header, 0o600); err != nil {
-		return nil, fmt.Errorf("writing %s: %w", configPath, err)
-	}
-
-	cfg.ConfigPath = configPath
-
-	_, _ = EnsureGitignore(rootDir)
-	_, _ = EnsureGitattributes(rootDir)
-
-	return cfg, nil
+	return nil
 }
 
 // GitignoreVortexBlock contains standard ignore patterns for Vortex test harnesses, mocks, and diagnostics.

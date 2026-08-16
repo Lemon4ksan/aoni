@@ -27,6 +27,7 @@ func main() {
 		&CmdDiff{},
 		&CmdReview{},
 		&CmdAccept{},
+		&CmdSource{},
 		&CmdLog{},
 		&CmdOAPI{},
 		&CmdProto{},
