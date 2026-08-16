@@ -21,6 +21,7 @@ func newTestApp(stdout, stderr *bytes.Buffer) *App {
 		&CmdAutoPilot{},
 		&CmdStatus{},
 		&CmdInit{},
+		&CmdConfig{},
 		&CmdWork{},
 		&CmdGen{},
 		&CmdHarness{},
@@ -928,4 +929,71 @@ type PriceDBAPI interface {
 	err = app.Run(context.Background(), []string{"source", "list", "-dir=" + tempDir})
 	require.NoError(t, err)
 	require.Contains(t, stdout.String(), "(none)")
+}
+
+func TestApp_Config(t *testing.T) {
+	tempDir := t.TempDir()
+
+	serviceDir := filepath.Join(tempDir, "pkg", "user")
+	require.NoError(t, os.MkdirAll(serviceDir, 0o750))
+	require.NoError(t, os.WriteFile(filepath.Join(serviceDir, "api.go"), []byte(`package user
+import (
+	"context"
+	"github.com/lemon4ksan/aoni"
+)
+// @aoni:service
+type UserAPI interface {
+	// @get "users/{id}"
+	GetUser(ctx context.Context, id string, mods ...aoni.RequestModifier) (map[string]any, error)
+}
+`), 0o600))
+
+	var stdout, stderr bytes.Buffer
+
+	app := newTestApp(&stdout, &stderr)
+
+	// 1. Init workspace
+	err := app.Run(context.Background(), []string{"init", "-dir=" + tempDir})
+	require.NoError(t, err)
+
+	// 2. Config list
+	stdout.Reset()
+
+	err = app.Run(context.Background(), []string{"config", "list", "-dir=" + tempDir})
+	require.NoError(t, err)
+	require.Contains(t, stdout.String(), "Vortex Workspace Configuration")
+
+	// 3. Config set defaults
+	stdout.Reset()
+
+	err = app.Run(context.Background(), []string{"config", "set", "defaults.casing", "kebab-case", "-dir=" + tempDir})
+	require.NoError(t, err)
+	require.Contains(t, stdout.String(), "Set defaults.casing = kebab-case")
+
+	// 4. Config get
+	stdout.Reset()
+
+	err = app.Run(context.Background(), []string{"config", "get", "defaults.casing", "-dir=" + tempDir})
+	require.NoError(t, err)
+	require.Equal(t, "kebab-case\n", stdout.String())
+
+	// 5. Config lint disable & enable
+	stdout.Reset()
+
+	err = app.Run(context.Background(), []string{"config", "lint", "disable", "S001", "W002", "-dir=" + tempDir})
+	require.NoError(t, err)
+	require.Contains(t, stdout.String(), "Disabled lint rules: S001, W002")
+
+	stdout.Reset()
+
+	err = app.Run(context.Background(), []string{"config", "lint", "enable", "S001", "-dir=" + tempDir})
+	require.NoError(t, err)
+	require.Contains(t, stdout.String(), "Enabled lint rules: S001")
+
+	// 6. Config unset
+	stdout.Reset()
+
+	err = app.Run(context.Background(), []string{"config", "unset", "defaults.casing", "-dir=" + tempDir})
+	require.NoError(t, err)
+	require.Contains(t, stdout.String(), "Unset defaults.casing")
 }

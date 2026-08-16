@@ -50,6 +50,8 @@ type DefaultsConfig struct {
 	Engine  string `yaml:"engine,omitempty"`
 	Persona string `yaml:"persona,omitempty"`
 	TLSSpec string `yaml:"tlsspec,omitempty"`
+	Retry   int    `yaml:"retry,omitempty"`
+	Timeout string `yaml:"timeout,omitempty"`
 	Harness bool   `yaml:"harness,omitempty"`
 	Mock    bool   `yaml:"mock,omitempty"`
 }
