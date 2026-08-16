@@ -34,6 +34,8 @@ func main() {
 		&CmdList{},
 		&CmdExplain{},
 		&CmdExample{},
+		&CmdPGO{},
+		&CmdCompletion{},
 	}
 
 	app := NewApp(

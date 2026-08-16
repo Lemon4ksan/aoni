@@ -38,8 +38,13 @@ func (c *CmdCheck) Run(ctx context.Context, args []string, stdout, stderr io.Wri
 	fs.SetOutput(stderr)
 
 	var (
-		fixFlag     = fs.Bool("fix", false, "Automatically apply safe, non-destructive fixes")
-		jsonFlag    = fs.Bool("json", false, "Output diagnostics as JSON")
+		fixFlag    = fs.Bool("fix", false, "Automatically apply safe, non-destructive fixes")
+		jsonFlag   = fs.Bool("json", false, "Output diagnostics as JSON (shorthand for -format=json)")
+		formatFlag = fs.String(
+			"format",
+			"terminal",
+			"Output format: terminal, json, github (GitHub Actions annotations), sarif",
+		)
 		disableFlag = fs.String("disable", "", "Comma-separated list of rule IDs/names to disable")
 		enableFlag  = fs.String("enable", "", "Comma-separated list of rule IDs/names to enable")
 		strictFlag  = fs.Bool("strict", false, "Treat warnings as errors")
@@ -48,7 +53,10 @@ func (c *CmdCheck) Run(ctx context.Context, args []string, stdout, stderr io.Wri
 	fs.Usage = func() {
 		fmt.Fprintf(stderr, "vortex check — Static Contract Linter & Diagnostic Inspector\n\n")
 		fmt.Fprintf(stderr, "Usage:\n")
-		fmt.Fprintf(stderr, "  vortex check [-fix] [-json] [-disable=rules] [-enable=rules] [-strict] [paths...]\n\n")
+		fmt.Fprintf(
+			stderr,
+			"  vortex check [-fix] [-format=terminal|json|github|sarif] [-disable=rules] [-enable=rules] [-strict] [paths...]\n\n",
+		)
 		fmt.Fprintf(stderr, "Flags:\n")
 		fs.PrintDefaults()
 	}
@@ -164,17 +172,28 @@ func (c *CmdCheck) Run(ctx context.Context, args []string, stdout, stderr io.Wri
 		merged.Diagnostics = remaining
 	}
 
-	if *jsonFlag {
+	switch strings.ToLower(*formatFlag) {
+	case "json":
 		enc := json.NewEncoder(stdout)
 		enc.SetIndent("", "  ")
 		_ = enc.Encode(merged)
-	} else {
-		targetSummary := "./..."
-		if len(files) == 1 {
-			targetSummary = files[0]
-		}
+	case "github", "github-actions", "gha":
+		lint.FormatGitHubActions(stdout, merged)
+	case "sarif":
+		_ = lint.FormatSARIF(stdout, merged)
+	default:
+		if *jsonFlag {
+			enc := json.NewEncoder(stdout)
+			enc.SetIndent("", "  ")
+			_ = enc.Encode(merged)
+		} else {
+			targetSummary := "./..."
+			if len(files) == 1 {
+				targetSummary = files[0]
+			}
 
-		lint.FormatReport(stdout, targetSummary, merged)
+			lint.FormatReport(stdout, targetSummary, merged)
+		}
 	}
 
 	if merged.Errors() > 0 || (*strictFlag && merged.Warnings() > 0) {

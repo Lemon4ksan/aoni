@@ -5,6 +5,7 @@
 package lint
 
 import (
+	"encoding/json"
 	"fmt"
 	"io"
 	"path/filepath"
@@ -207,4 +208,167 @@ func printDiagnostic(w io.Writer, d Diagnostic, color string) {
 
 func (d Diagnostic) Fixable() bool {
 	return d.Fix != nil
+}
+
+// FormatGitHubActions outputs diagnostics as GitHub Actions Workflow Command annotations.
+// Format: ::error file={name},line={line},title={title}::{message}
+func FormatGitHubActions(w io.Writer, report *Report) {
+	if report == nil {
+		return
+	}
+
+	for _, d := range report.Diagnostics {
+		level := "warning"
+		switch d.Severity {
+		case SeverityError:
+			level = "error"
+		case SeverityInfo:
+			level = "notice"
+		}
+
+		filePath := filepath.ToSlash(d.FilePath)
+
+		line := d.Line
+		if line <= 0 {
+			line = 1
+		}
+
+		fmt.Fprintf(w, "::%s file=%s,line=%d,title=%s::[%s] %s\n",
+			level, filePath, line, d.RuleID, d.RuleName, d.Message)
+	}
+}
+
+type sarifLog struct {
+	Version string     `json:"version"`
+	Schema  string     `json:"$schema"`
+	Runs    []sarifRun `json:"runs"`
+}
+
+type sarifRun struct {
+	Tool    sarifTool     `json:"tool"`
+	Results []sarifResult `json:"results"`
+}
+
+type sarifTool struct {
+	Driver sarifDriver `json:"driver"`
+}
+
+type sarifDriver struct {
+	Name           string      `json:"name"`
+	Version        string      `json:"version"`
+	InformationURI string      `json:"informationUri"`
+	Rules          []sarifRule `json:"rules"`
+}
+
+type sarifRule struct {
+	ID          string          `json:"id"`
+	Name        string          `json:"name"`
+	Description sarifMsgWrapper `json:"shortDescription"`
+}
+
+type sarifResult struct {
+	RuleID    string             `json:"ruleId"`
+	Level     string             `json:"level"`
+	Message   sarifMsgWrapper    `json:"message"`
+	Locations []sarifLocationObj `json:"locations"`
+}
+
+type sarifMsgWrapper struct {
+	Text string `json:"text"`
+}
+
+type sarifLocationObj struct {
+	PhysicalLocation sarifPhysicalLocation `json:"physicalLocation"`
+}
+
+type sarifPhysicalLocation struct {
+	ArtifactLocation sarifArtifact `json:"artifactLocation"`
+	Region           sarifRegion   `json:"region"`
+}
+
+type sarifArtifact struct {
+	URI string `json:"uri"`
+}
+
+type sarifRegion struct {
+	StartLine int `json:"startLine"`
+}
+
+// FormatSARIF outputs diagnostics adhering to OASIS SARIF v2.1.0 JSON format.
+func FormatSARIF(w io.Writer, report *Report) error {
+	if report == nil {
+		return nil
+	}
+
+	ruleMap := make(map[string]bool)
+
+	var (
+		rules   []sarifRule
+		results []sarifResult
+	)
+
+	for _, d := range report.Diagnostics {
+		if !ruleMap[d.RuleID] {
+			ruleMap[d.RuleID] = true
+			rules = append(rules, sarifRule{
+				ID:          d.RuleID,
+				Name:        d.RuleName,
+				Description: sarifMsgWrapper{Text: d.RuleName},
+			})
+		}
+
+		level := "warning"
+		switch d.Severity {
+		case SeverityError:
+			level = "error"
+		case SeverityInfo:
+			level = "note"
+		}
+
+		line := d.Line
+		if line <= 0 {
+			line = 1
+		}
+
+		results = append(results, sarifResult{
+			RuleID:  d.RuleID,
+			Level:   level,
+			Message: sarifMsgWrapper{Text: d.Message},
+			Locations: []sarifLocationObj{
+				{
+					PhysicalLocation: sarifPhysicalLocation{
+						ArtifactLocation: sarifArtifact{
+							URI: filepath.ToSlash(d.FilePath),
+						},
+						Region: sarifRegion{
+							StartLine: line,
+						},
+					},
+				},
+			},
+		})
+	}
+
+	log := sarifLog{
+		Version: "2.1.0",
+		Schema:  "https://raw.githubusercontent.com/oasis-tcs/sarif-spec/master/Schemata/sarif-schema-2.1.0.json",
+		Runs: []sarifRun{
+			{
+				Tool: sarifTool{
+					Driver: sarifDriver{
+						Name:           "vortex",
+						Version:        "0.6.0",
+						InformationURI: "https://github.com/lemon4ksan/aoni",
+						Rules:          rules,
+					},
+				},
+				Results: results,
+			},
+		},
+	}
+
+	encoder := json.NewEncoder(w)
+	encoder.SetIndent("", "  ")
+
+	return encoder.Encode(log)
 }

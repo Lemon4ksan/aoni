@@ -50,6 +50,20 @@ type API interface {
 	require.True(t, ignores.IsIgnored("W003", "http-verb-mismatch", "API.GetItems", 6))
 	require.True(t, ignores.IsIgnored("E004", "missing-context", "API.GetItems", 6))
 	require.False(t, ignores.IsIgnored("E001", "stale-codegen", "API.GetItems", 6))
+
+	// Test standard //nolint
+	srcNoLint := `package test
+type API interface {
+	// @get /item
+	//nolint:sensitive-query-param
+	GetItem()
+}
+`
+	file2, err2 := parser.ParseFile(fset, "test2.go", srcNoLint, parser.ParseComments)
+	require.NoError(t, err2)
+
+	ignores2 := lint.ParseIgnores(fset, file2)
+	require.True(t, ignores2.IsIgnored("S001", "sensitive-query-param", "API.GetItem", 4))
 }
 
 func TestRules_UnmatchedPath_DetectsMissingParameter(t *testing.T) {

@@ -415,9 +415,6 @@ func (c *CmdAutoPilot) runWorld2Pipeline(
 	statusRep := statusEngine.Inspect(&project.Config{RootDir: rootDir}, contractsList)
 
 	totalMethods = statusRep.TotalMethods
-	if totalMethods == 0 {
-		totalMethods = totalServices * 2
-	}
 
 	genStatus := fmt.Sprintf("%s %s emitted (%d services, %d methods)",
 		tui.Green("✔"),

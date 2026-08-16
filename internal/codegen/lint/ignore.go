@@ -17,6 +17,9 @@ var (
 
 	// Matches //vortex:ignore-service <rules> [-- reason]
 	rxVortexIgnoreService = regexp.MustCompile(`(?i)//\s*vortex:ignore-service\s+(.*)`)
+
+	// Matches //nolint[:rules] [-- reason]
+	rxNoLint = regexp.MustCompile(`(?i)//\s*nolint(?::([^\s]+))?`)
 )
 
 // IgnoreMap stores rule suppressions mapped by target scope or line number.
@@ -76,6 +79,34 @@ func ParseIgnores(fset *token.FileSet, file *ast.File) *IgnoreMap {
 				}
 
 				// Also suppress next line (for doc comment immediately preceding declaration)
+				if ignores.LineIgnores[pos.Line+1] == nil {
+					ignores.LineIgnores[pos.Line+1] = make(map[string]bool)
+				}
+
+				if ignores.LineIgnores[pos.Line+2] == nil {
+					ignores.LineIgnores[pos.Line+2] = make(map[string]bool)
+				}
+
+				for _, r := range rules {
+					ignores.LineIgnores[pos.Line][r] = true
+					ignores.LineIgnores[pos.Line+1][r] = true
+					ignores.LineIgnores[pos.Line+2][r] = true
+				}
+			}
+
+			// 3. Check standard Go //nolint or //nolint:rule1,rule2
+			if m := rxNoLint.FindStringSubmatch(text); len(m) > 0 {
+				var rules []string
+				if len(m) > 1 && m[1] != "" {
+					rules = parseRuleList(m[1])
+				} else {
+					rules = []string{"all"}
+				}
+
+				if ignores.LineIgnores[pos.Line] == nil {
+					ignores.LineIgnores[pos.Line] = make(map[string]bool)
+				}
+
 				if ignores.LineIgnores[pos.Line+1] == nil {
 					ignores.LineIgnores[pos.Line+1] = make(map[string]bool)
 				}

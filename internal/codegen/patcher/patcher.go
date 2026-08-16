@@ -272,25 +272,9 @@ func (p *Patcher) parseTypeExpr(typeName string) ast.Expr {
 		return ast.NewIdent("string")
 	}
 
-	if strings.HasPrefix(typeName, "*") {
-		return &ast.StarExpr{
-			X: p.parseTypeExpr(typeName[1:]),
-		}
-	}
-
-	if strings.HasPrefix(typeName, "[]") {
-		return &ast.ArrayType{
-			Elt: p.parseTypeExpr(typeName[2:]),
-		}
-	}
-
-	if strings.Contains(typeName, ".") {
-		parts := strings.SplitN(typeName, ".", 2)
-
-		return &ast.SelectorExpr{
-			X:   ast.NewIdent(parts[0]),
-			Sel: ast.NewIdent(parts[1]),
-		}
+	expr, err := parser.ParseExpr(typeName)
+	if err == nil && expr != nil {
+		return expr
 	}
 
 	return ast.NewIdent(typeName)

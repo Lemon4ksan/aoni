@@ -37,6 +37,8 @@ func newTestApp(stdout, stderr *bytes.Buffer) *App {
 		&CmdList{},
 		&CmdExplain{},
 		&CmdExample{},
+		&CmdPGO{},
+		&CmdCompletion{},
 	}
 
 	app := NewApp("vortex", version.Current, "Unified Toolchain", commands...)
@@ -522,4 +524,57 @@ type UserAPI interface {
 	require.Contains(t, stdout.String(), "✔ Generated")
 	require.FileExists(t, filepath.Join(pkgDir, "api.gen.go"))
 	require.FileExists(t, filepath.Join(pkgDir, "api_harness.gen.go"))
+}
+
+func TestApp_Completion(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+
+	app := newTestApp(&stdout, &stderr)
+
+	err := app.Run(context.Background(), []string{"completion", "bash"})
+	require.NoError(t, err)
+	require.Contains(t, stdout.String(), "complete -F _vortex_completions vortex")
+
+	stdout.Reset()
+
+	err = app.Run(context.Background(), []string{"completion", "zsh"})
+	require.NoError(t, err)
+	require.Contains(t, stdout.String(), "#compdef vortex")
+
+	stdout.Reset()
+
+	err = app.Run(context.Background(), []string{"completion", "powershell"})
+	require.NoError(t, err)
+	require.Contains(t, stdout.String(), "Register-ArgumentCompleter")
+}
+
+func TestApp_CheckFormats(t *testing.T) {
+	tempDir := t.TempDir()
+	apiFile := filepath.Join(tempDir, "api.go")
+	apiSrc := `package test
+// @aoni:service
+type API interface {
+	// @get "/item"
+	GetItem()
+}
+`
+	require.NoError(t, os.WriteFile(apiFile, []byte(apiSrc), 0o600))
+
+	var stdout, stderr bytes.Buffer
+
+	app := newTestApp(&stdout, &stderr)
+
+	// 1. GitHub format
+	err := app.Run(context.Background(), []string{"check", "-format=github", apiFile})
+	require.Error(t, err)
+	require.Contains(t, stdout.String(), "::error")
+	require.Contains(t, stdout.String(), "missing-context")
+
+	// 2. SARIF format
+	stdout.Reset()
+	err = app.Run(context.Background(), []string{"check", "-format=sarif", apiFile})
+	require.Error(t, err)
+	require.Contains(t, stdout.String(), "\"$schema\"")
+	require.Contains(t, stdout.String(), "sarif-spec")
+	require.Contains(t, stdout.String(), "\"missing-context\"")
 }
