@@ -40,7 +40,6 @@ func main() {
 		)
 		outFlag     = flag.String("out", "", "Path to output generated .gen.go file (default: <filename>.gen.go)")
 		pkgFlag     = flag.String("pkg", "", "Override package name in generated code")
-		checkFlag   = flag.Bool("check", false, "Validate @aoni contracts and syntax without generating code")
 		watchFlag   = flag.Bool("watch", false, "Watch source directories and rebuild on file modification")
 		verboseFlag = flag.Bool("v", false, "Enable verbose compilation logging")
 		scopeFlag   = flag.String(
@@ -53,19 +52,22 @@ func main() {
 	)
 
 	flag.Usage = func() {
-		fmt.Fprintf(os.Stderr, "vortex is a Unified Zero-Allocation AST Toolchain and Engine Suite for projects using aoni\n\n")
+		fmt.Fprintf(
+			os.Stderr,
+			"vortex is a Unified Zero-Allocation AST Toolchain and Engine Suite for projects using aoni\n\n",
+		)
 		fmt.Fprintf(os.Stderr, "Usage:\n")
 		fmt.Fprintf(
 			os.Stderr,
-			"  vortex [flags] [packages/files...]               # Generate zero-allocation Go client (default: ./...)\n",
+			"  vortex [flags] [packages/files...]               # Compile and generate zero-allocation Go client (default: ./...)\n",
+		)
+		fmt.Fprintf(
+			os.Stderr,
+			"  vortex check [flags] [packages/files...]         # Static contract linter & diagnostic inspector (supports --fix)\n",
 		)
 		fmt.Fprintf(
 			os.Stderr,
 			"  vortex watch [packages/files...]                 # Watch source tree and auto-generate on change\n",
-		)
-		fmt.Fprintf(
-			os.Stderr,
-			"  vortex check [packages/files...]                 # Static contract validation and diagnostics\n",
 		)
 		fmt.Fprintf(
 			os.Stderr,
@@ -145,7 +147,10 @@ func main() {
 			return
 
 		case "version", "--version":
-			fmt.Printf("vortex v0.6.0 — Unified Zero-Allocation AST Toolchain and Engine Suite for projects using aoni\n")
+			fmt.Println(
+				"vortex v0.6.0 — Unified Zero-Allocation AST Toolchain and Engine Suite for projects using aoni",
+			)
+
 			return
 
 		case "bench", "benchmark":
@@ -242,28 +247,13 @@ func main() {
 
 			return
 
-		case "check":
-			checkArgs := args[1:]
-
-			files := collectInputFiles(*fileFlag, checkArgs)
-			if len(files) == 0 {
-				fmt.Fprintf(os.Stderr, "vortex check: no Go source files found to check\n")
-				os.Exit(1)
-			}
-
-			checkAll(files, *verboseFlag)
-
+		case "check", "lint", "inspect":
+			runCheck(args[1:])
 			return
 
 		case "gen", "generate":
 			args = args[1:]
 		}
-	}
-
-	isCheck := *checkFlag
-	if len(args) > 0 && args[0] == "check" {
-		isCheck = true
-		args = args[1:]
 	}
 
 	files := collectInputFiles(*fileFlag, args)
@@ -272,76 +262,12 @@ func main() {
 		os.Exit(1)
 	}
 
-	if isCheck {
-		checkAll(files, *verboseFlag)
-		return
-	}
-
 	buildAll(files, *outFlag, *pkgFlag, *verboseFlag)
 
 	if *watchFlag {
 		fmt.Printf("\n[vortex] Watching for file changes across %d files... (Press Ctrl+C to stop)\n", len(files))
 		watchLoop(files, *outFlag, *pkgFlag, *verboseFlag)
 	}
-}
-
-func checkAll(files []string, verbose bool) {
-	totalServices := 0
-	totalDTOs := 0
-	errorCount := 0
-	p := parser.NewParser()
-	analyzer := analysis.NewAnalyzer()
-
-	for _, file := range files {
-		root, err := p.ParseFile(file)
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "vortex: [ERROR] %s: %v\n", file, err)
-
-			errorCount++
-
-			continue
-		}
-
-		hasTargets := len(root.Services) > 0 || len(root.Tuples) > 0
-		if !hasTargets {
-			for _, st := range root.Structs {
-				if st.GenValueEncoder {
-					hasTargets = true
-					break
-				}
-			}
-		}
-
-		if !hasTargets && len(root.UnrecognizedDirectives) == 0 {
-			if verbose {
-				fmt.Printf("vortex: skipping %s (no @aoni directives)\n", file)
-			}
-
-			continue
-		}
-
-		diags := analyzer.Analyze(root)
-		for _, d := range diags {
-			if d.Severity == analysis.SeverityError {
-				errorCount++
-
-				fmt.Fprintf(os.Stderr, "vortex: [ERROR] %s (%s): %s\n", file, d.Target, d.Message)
-			} else if verbose {
-				fmt.Printf("vortex: [WARN] %s (%s): %s\n", file, d.Target, d.Message)
-			}
-		}
-
-		totalServices += len(root.Services)
-		totalDTOs += len(root.Structs)
-	}
-
-	if errorCount > 0 {
-		fmt.Fprintf(os.Stderr, "\n✖ Found %d error(s) across %d file(s)\n", errorCount, len(files))
-		os.Exit(1)
-	}
-
-	fmt.Printf("✔ All aoni contracts are valid (%d service(s), %d dto(s) checked across %d files)\n",
-		totalServices, totalDTOs, len(files))
 }
 
 func collectInputFiles(fileFlag string, args []string) []string {
@@ -455,6 +381,8 @@ func isEligibleGoFile(path string) bool {
 }
 
 func buildAll(files []string, outFlag, pkgFlag string, verbose bool) {
+	var errCount int
+
 	for _, file := range files {
 		out := outFlag
 		if out == "" {
@@ -464,17 +392,23 @@ func buildAll(files []string, outFlag, pkgFlag string, verbose bool) {
 			out = filepath.Join(dir, strings.TrimSuffix(base, ext)+".gen.go")
 		}
 
-		compileFile(file, out, pkgFlag, verbose)
+		if err := compileFile(file, out, pkgFlag, verbose); err != nil {
+			errCount++
+		}
+	}
+
+	if errCount > 0 {
+		os.Exit(1)
 	}
 }
 
-func compileFile(inputFile, outputFile, pkgFlag string, verbose bool) {
+func compileFile(inputFile, outputFile, pkgFlag string, verbose bool) error {
 	p := parser.NewParser()
 
 	root, err := p.ParseFile(inputFile)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "vortex: error parsing %s: %v\n", inputFile, err)
-		return
+		return err
 	}
 
 	if pkgFlag != "" {
@@ -496,7 +430,7 @@ func compileFile(inputFile, outputFile, pkgFlag string, verbose bool) {
 			fmt.Printf("vortex: skipping %s (no @aoni directives found)\n", inputFile)
 		}
 
-		return
+		return nil
 	}
 
 	analyzer := analysis.NewAnalyzer()
@@ -515,7 +449,7 @@ func compileFile(inputFile, outputFile, pkgFlag string, verbose bool) {
 
 	if hasErrors {
 		fmt.Fprintf(os.Stderr, "vortex: compilation aborted for %s\n", inputFile)
-		return
+		return fmt.Errorf("compilation error in %s", inputFile)
 	}
 
 	opt := optimizer.NewOptimizer()
@@ -526,16 +460,18 @@ func compileFile(inputFile, outputFile, pkgFlag string, verbose bool) {
 	code, err := em.Emit(root)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "vortex: emission error for %s: %v\n", inputFile, err)
-		return
+		return err
 	}
 
 	if err := os.WriteFile(outputFile, code, 0o600); err != nil {
 		fmt.Fprintf(os.Stderr, "vortex: failed writing %s: %v\n", outputFile, err)
-		return
+		return err
 	}
 
 	fmt.Printf("✔ Generated %s (%d bytes, %d service(s), %d dto(s))\n",
 		outputFile, len(code), len(root.Services), len(root.Structs))
+
+	return nil
 }
 
 func watchLoop(files []string, outFlag, pkgFlag string, verbose bool) {
@@ -569,7 +505,9 @@ func watchLoop(files []string, outFlag, pkgFlag string, verbose bool) {
 					out = filepath.Join(dir, strings.TrimSuffix(base, ext)+".gen.go")
 				}
 
-				compileFile(f, out, pkgFlag, verbose)
+				if err := compileFile(f, out, pkgFlag, verbose); err != nil {
+					fmt.Fprintf(os.Stderr, "vortex: compilation error: %v\n", err)
+				}
 			}
 		}
 	}

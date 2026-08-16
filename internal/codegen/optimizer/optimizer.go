@@ -56,7 +56,7 @@ func (opt *Optimizer) clusterSubRequesters(svc *ir.ServiceIR) {
 
 	for _, m := range svc.Methods {
 		methodURL := m.TargetRequester
-		if methodURL == "" || methodURL == mainURL {
+		if methodURL == "" || methodURL == mainURL || methodURL == "c.r" {
 			m.TargetRequester = "c.r"
 			continue
 		}

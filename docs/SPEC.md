@@ -1,6 +1,6 @@
-# Specification: DSL & Architecture Standard
+# Specification: Vortex DSL, Architecture Standard & Contract Inspector
 
-`aoni-gen` is an AST-driven code generation engine for Go that compiles declarative API contracts into zero-allocation (`0 B/op`), type-safe, Chromium-resilient HTTP/RPC network clients powered by the `aoni` networking engine.
+`vortex` is the official AST-driven toolchain, code generation engine, and static contract inspector for Go that compiles declarative API contracts into zero-allocation (`0 B/op`), type-safe, Chromium-resilient HTTP/RPC network clients powered by the `aoni` networking engine.
 
 ## 1. Core Architectural Pillars
 
@@ -12,6 +12,8 @@
    - Compiles static routes, stack buffers (`[256]byte`), and direct type encoders (`strconv.AppendInt`, `urlutil.AppendQueryEscapeString`) without interface boxing or reflection.
 3. **Standard-Library & Tooling Compliance**:
    - Directives are written as standard Go doc comments. All interface definitions compile as valid Go without pre-processing.
+4. **Contract Integrity & Static Linting**:
+   - Built-in pluggable contract linter (`vortex check`) that guarantees drift prevention between interfaces and generated code, verifies type safety, and provides safe automated fixes (`--fix`).
 
 ## 2. Formal Grammar (EBNF)
 
@@ -24,6 +26,11 @@ DirectiveArg      ::= Identifier "=" ( StringLiteral | Identifier | Number )
 StringLiteral     ::= '"' ( [^"\\] | '\\' . )* '"'
 Identifier        ::= [a-zA-Z_][a-zA-Z0-9_]*
 WS                ::= ' ' | '\t'
+
+SuppressionComment ::= "//" WS* "vortex:ignore" [ "-service" ] WS+ RuleList [ WS+ "--" WS* Reason ]
+RuleList          ::= RuleIdentifier ( WS* "," WS* RuleIdentifier )*
+RuleIdentifier    ::= [a-zA-Z0-9_-]+
+Reason            ::= [^\r\n]*
 ```
 
 ## 3. Scope Hierarchy
@@ -98,157 +105,157 @@ WS                ::= ' ' | '\t'
 | `@event` | `<eventName>` | Subscribes to an inbound push event with a typed handler callback. |
 | `@expect_status` | `<status_code>...` | Declares expected success HTTP status codes (returns error if mismatch). |
 | `@extract` | `between`, `regex`, `attr`, `css` | Extracts response payload via regular expressions, boundary slicing, or DOM attribute tokens. |
-| `@form` | `casing` | Encodes request body as application/x-www-form-urlencoded on stack buffer (0 B/op). |
-| `@get` | `"/path/{var}"` | Defines an HTTP GET endpoint route with optional path template variables. |
-| `@grpc` | `"/package.Service/Method"` | Configures gRPC procedure call. |
-| `@grpc-web` | — | Encodes request as 5-byte framed gRPC-Web protocol with trailer validation. |
+| `@form` | — | Configures application/x-www-form-urlencoded request payload encoding. |
+| `@get` | `"/path/{var}"` | Defines an HTTP GET endpoint route. |
+| `@grpc` | `"/pkg.Service/Method"` | Defines a gRPC / gRPC-Web unary or streaming remote procedure call. |
 | `@head` | `"/path/{var}"` | Defines an HTTP HEAD endpoint route. |
-| `@idempotent (or @idempotency_key)` | — | Injects time-ordered UUIDv7 into Idempotency-Key header on stack buffer (0 B/op). |
-| `@inject` | `field`, `query`, `header`, `from` *(required)* | Performs zero-cost interface assertion on requester to inject dynamic session/CSRF tokens. |
-| `@json` | — | Serializes request body as JSON. |
-| `@multipart` | — | Encodes request body as multipart/form-data with zero-alloc boundary streaming. |
-| `@notify` | `<operationName>` | Defines a one-way fire-and-forget asynchronous notification. |
-| `@op (or @operation)` | `<operationName>` | Defines a generic RPC request-response operation. |
+| `@idempotent` | — | Declares request as strictly idempotent for aggressive safe retry policies. |
+| `@inject` | `target="field\|query\|header"`, `provider` | Injects session cookies, CSRF tokens, or secrets dynamically from requester context. |
+| `@multipart` | — | Configures multipart/form-data request payload encoding with streaming boundaries. |
+| `@notify` | `opcode` *(required)*, `msg` | Defines a one-way fire-and-forget persistent socket RPC notification. |
+| `@op_id` | `<id>` | Sets numeric or string opcode ID for universal RPC dispatching. |
 | `@options` | `"/path/{var}"` | Defines an HTTP OPTIONS endpoint route. |
 | `@patch` | `"/path/{var}"` | Defines an HTTP PATCH endpoint route. |
-| `@post` | `"/path/{var}"` | Defines an HTTP POST endpoint route with optional path template variables. |
-| `@preset` | `:xhr \| :cors \| :navigate` | Injects browser header presets (X-Requested-With, Sec-Fetch-*, Accept). |
-| `@proto` | — | Serializes request body and deserializes response via Protocol Buffers. |
+| `@pipeline` | `<pipeline expression>` | Configures a Wire-Transform pipeline chain on outbound payload or inbound response. |
+| `@post` | `"/path/{var}"` | Defines an HTTP POST endpoint route. |
+| `@preset` | `"steam_webapi" \| "json_api"` | Applies predefined suite of headers, casings, and serialization formats. |
 | `@put` | `"/path/{var}"` | Defines an HTTP PUT endpoint route. |
-| `@raw` | — | Sends raw binary byte slice or io.Reader stream directly. |
-| `@referer` | `<path_template> \| :origin \| :page \| :parent \| :self` | Generates dynamic Referer header directly on a 128-byte stack buffer (0 B/op). |
-| `@return` | `<pipeline expression>` | Configures a Wire-Transform pipeline chain for scraping, decoding, or transforming responses. |
-| `@sign` | `secret`, `key_env`, `algo`, `header` | Calculates cryptographic HMAC request signature and attaches auth headers. |
-| `@ssh` | `host`, `user`, `key`, `pass_env`, `agent` | Configures SSH connection parameters or command execution. |
-| `@stream` | `sse \| ndjson \| raw` | Enables response streaming mode via Server-Sent Events, NDJSON, or raw chunked channel. |
+| `@referer` | `"https://..." \| "{var}"` | Sets static or dynamic Referer header for anti-scraping and CDN bypass. |
+| `@req` | `baseURL` | Directs execution to an isolated SubRequester instance clustered by base URL. |
+| `@return` | `<pipeline expression>` | Configures response transformation pipeline applied prior to decoding. |
+| `@rpc` | `opcode` *(required)*, `job_id`, `reply_opcode` | Defines a bidirectional request-response persistent socket RPC call. |
+| `@sign_hmac` | `key`, `env`, `algo`, `header` | Configures cryptographic HMAC request signing over headers, URI, or payload body. |
+| `@ssh_exec` | `"command {var}"` | Executes remote SSH command and captures typed output. |
+| `@ssh_shell` | — | Spawns interactive remote SSH PTY session. |
+| `@status` | `<Code> -> <Type>` | Maps non-200 HTTP status codes directly to discriminated variant response models. |
+| `@stream` | `client \| server \| bidi \| sse \| ndjson` | Configures client/server streaming for gRPC, SSE, or NDJSON. |
 | `@timeout` | `"5s" \| "500ms"` | Sets execution timeout for the service or individual method. |
-| `@unwrap` | `<fieldName>` | Unwraps specific field from JSON response envelope before returning. |
-| `@ws (or @websocket)` | `<event_name>` | Configures WebSocket / Socket.IO event emission or subscription. |
+| `@unwrap` | `"data" \| "result"` | Automatically unwraps nested envelope object into target return type. |
+| `@ws_on` | `<eventName>` | Subscribes to real-time WebSocket / Socket.IO event with typed message handler. |
 
-### Param Scope Directives
+### Parameter Scope Directives
 
 | Directive | Arguments / Value | Description |
 | :--- | :--- | :--- |
-| `@cast` | `<GoType>` | Applies explicit type casting before serialization. |
-| `@cookie` | `<cookie_name>` | Binds function parameter to Cookie header. |
-| `@field` | `<wire_name>` | Binds function parameter to application/x-www-form-urlencoded or multipart form field. |
-| `@file` | `name`, `filename`, `content_type` | Binds byte slice, string, or io.Reader to multipart file upload part. |
-| `@format` | `unix_s \| unix_ms \| rfc3339 \| bool_int \| flag \| json \| comma \| pipe \| space \| bracket`, `layout` | Specifies serialization format strategy for parameter value. |
+| `@arena` | — | Binds parameter memory allocation to an off-heap Arena allocator. |
+| `@buf` | — | Binds a caller-supplied byte slice for zero-allocation response body copying. |
+| `@cookie` | `"Name"` | Binds parameter value to an HTTP Cookie header. |
+| `@file` | `"fieldName" [filename="name.ext"]` | Binds parameter as a streaming multipart file upload payload. |
+| `@format` | `unix_sec \| unix_milli \| unix_nano \| rfc3339 \| hex \| base64 \| direct` | Configures compile-time formatting strategy for parameter serialization. |
 | `@header` | `"Key: Value"` | Adds a static/dynamic default HTTP header to requests or binds parameter to a header. |
-| `@part` | `<part_name>` | Binds function parameter to multipart form part. |
-| `@path (or @param)` | `<var_name>` | Binds function parameter to URL path template variable. |
-| `@query` | `<wire_name>` | Binds function parameter to URL query parameter with zero-alloc string formatting. |
-
-### Struct Scope Directives
-
-| Directive | Arguments / Value | Description |
-| :--- | :--- | :--- |
-| `@aoni:dto (or @dto)` | `casing`, `omitempty` | Generates compiled AppendFormData and AppendQuery zero-allocation serialization methods. |
-| `@aoni:tuple (or @tuple)` | — | Generates zero-alloc custom UnmarshalJSON decoder for positional JSON arrays (e.g. [12.5, 100, "ok"]). |
-| `@aoni:union (or @union)` | — | Generates discriminator-based polymorphism and JSON unmarshaling for tagged unions. |
+| `@part` | `"fieldName" [content_type="..."]` | Binds parameter as a multipart form field part. |
+| `@pipeline` | `<pipeline expression>` | Configures parameter transformation pipeline prior to network serialization. |
+| `@query` | `"key" \| "key=val"` | Binds parameter to an HTTP URL query string parameter. |
+| `@time_layout` | `"2006-01-02"` | Custom `time.Time` formatting layout string. |
 
 ---
 
-## 5. End-to-End Real World Recipes
+## 5. Compile-Time Optimization Pipeline
 
-### Recipe 1: Modern REST Client with Smart Casing & Referer Stack Buffer
-```go
-// @aoni:service casing=snake_case
-// @base_url "https://steamcommunity.com/"
-// @header "Origin: https://steamcommunity.com"
-type TradeCommunityAPI interface {
-    // @post "tradeoffer/new/send"
-    // @form casing=flatcase
-    // @header "Referer: https://steamcommunity.com/tradeoffer/new/?partner={partnerID}"
-    SendOffer(ctx context.Context, partnerID uint32, req SendNewTradeOfferRequest, mods ...aoni.RequestModifier) (*SendNewTradeOfferResponse, error)
+Vortex includes an AST optimization pass (`internal/codegen/optimizer`) executed before code emission:
 
-    // @post "tradeoffer/{offerID}/accept"
-    // @form casing=flatcase
-    // @header "Referer: https://steamcommunity.com/tradeoffer/{offerID}/"
-    AcceptOffer(ctx context.Context, offerID uint64, req AcceptTradeOfferRequest, mods ...aoni.RequestModifier) (*AcceptTradeOfferResponse, error)
-}
+```
+Parsed AST / IR
+      │
+      ▼
+┌────────────────────────────────────────────────────────┐
+│              Optimizer Pipeline Passes                 │
+├────────────────────────────────────────────────────────┤
+│ 1. SubRequester Clustering                             │
+│    • Partitions methods by target BaseURL domain       │
+│    • Shares connection pools across identical origins  │
+│                                                        │
+│ 2. Stack Sizing & Preallocation Calculation            │
+│    • Precalculates StackModsSize for 0-alloc arrays   │
+│    • Precalculates StackBufSize for URI & query buffer │
+│                                                        │
+│ 3. Zero-Reflect Codec Specialization                   │
+│    • Generates direct type-safe unmarshaling calls     │
+│    • Employs strconv & SIMD byte formatting primitives │
+└────────────────────────────────────────────────────────┘
+      │
+      ▼
+Optimized Emitter (`api.gen.go`)
 ```
 
-### Recipe 2: Zero-Alloc HTML Scraping & Pipeline Transformation
-```go
-// @aoni:service
-// @base_url "https://steamcommunity.com"
-type SteamProfileAPI interface {
-    // @get "profiles/{steamID}/edit/info"
-    // @return body | attr(css="#profile_edit_config", name="data-profile-edit") | html_unescape | json
-    GetEditConfig(ctx context.Context, steamID uint64, mods ...aoni.RequestModifier) (*ProfileEditConfig, error)
-}
-```
-
-### Recipe 3: Multipart File Upload
-```go
-// @aoni:service
-// @base_url "https://steamcommunity.com"
-type FileUploaderAPI interface {
-    // @post "actions/FileUploader"
-    // @multipart
-    UploadAvatar(
-        ctx context.Context,
-        uploadType string,
-        // @file name="avatar" filename="{filename}" content_type="{contentType}"
-        file []byte,
-        filename string,
-        contentType string,
-        mods ...aoni.RequestModifier,
-    ) (*UploadResponse, error)
-}
-```
+### Key Optimization Guarantees:
+1. **Zero Heap Allocations on Hot Paths**: Method calls with stack-sized arguments allocate `0 B/op`.
+2. **Deterministic Connection Sharing**: Subrequesters prevent redundant TCP handshakes and TLS negotiations.
+3. **Idempotent AST Transformations**: Passes run deterministically without state corruption.
 
 ---
 
-## 6. CLI & DX Reference (`cmd/aoni-gen`)
+## 6. Contract Inspector & Linter (`vortex check`)
+
+Vortex includes a static analysis and diagnostic framework (`internal/codegen/lint`) with strict safety tiers and inline suppression directives.
+
+### Safety Tiers
+
+| Tier | Behavior with `--fix` | Description |
+| :--- | :---: | :--- |
+| **Safe Automated Fixes** | ✅ Applied Automatically | 100% deterministic artifact synchronization and canonical replacements (`stale-codegen`, `deprecated-alias`). |
+| **Heuristic Warnings & Suggestions** | ❌ Report Only | Code smell and architectural suggestions that never mutate developer intent (`param-lifting`, `http-verb-mismatch`). |
+
+### Standard Rule Suite
+
+| Rule ID | Rule Name | Category | Severity | Fixable? | Description |
+| :--- | :--- | :--- | :--- | :---: | :--- |
+| `E001` | `stale-codegen` | `Codegen` | `ERROR` | ✅ Yes | Target `*.gen.go` is missing or out-of-sync with interface AST |
+| `E002` | `unmatched-path` | `Correctness` | `ERROR` | ❌ No | URL path `{variable}` has no matching parameter in method signature |
+| `E003` | `missing-http-method` | `Correctness` | `ERROR` | ❌ No | Method is missing `@get`, `@post`, etc. directive |
+| `E004` | `missing-context` | `Correctness` | `ERROR` | ❌ No | First method parameter is not `context.Context` |
+| `E005` | `unrecognized-directive` | `Correctness` | `ERROR` | ❌ No | Unknown or misspelled `@aoni` directive |
+| `W001` | `param-lifting` | `Style` | `WARN` | ❌ No | Parameter repeated across $\ge 4$ methods (suggests lifting to service scope) |
+| `W002` | `deprecated-alias` | `Style` | `WARN` | ✅ Yes | Deprecated directive alias used (e.g., `@zstd_decompress` $\to$ `@zstd`) |
+| `W003` | `http-verb-mismatch` | `Style` | `WARN` | ❌ No | Read-only prefix (`Get...`, `List...`) annotated with `@post` |
+
+### Inline Suppression Directives
+
+Developers can suppress warnings on method or service scopes using standard Go comments:
+
+```go
+// @post /GetMarketHistory
+//vortex:ignore http-verb-mismatch, param-lifting -- Required by Steam WebAPI POST protocol
+GetMarketHistory(ctx context.Context, sessionID string) (*MarketHistory, error)
+```
+
+For service-wide suppressions:
+
+```go
+// @aoni:service
+//vortex:ignore-service param-lifting
+type LegacyAPI interface { ... }
+```
+
+## 7. CLI Reference (`cmd/vortex`)
 
 ### Installation
 ```bash
-go install github.com/lemon4ksan/aoni/cmd/aoni-gen@latest
+go install github.com/lemon4ksan/aoni/cmd/vortex@latest
 ```
 
-### Interactive Directives Reference (like `golangci-lint linters`)
-```bash
-# List all directives grouped by scope with arguments and descriptions
-aoni-gen list
+### Commands
 
-# Filter directives by scope
-aoni-gen list -scope=method
-aoni-gen list -scope=service
-aoni-gen list -scope=socket
-
-# Output specification as Markdown or JSON
-aoni-gen list -markdown
-aoni-gen list -json
-
-# Explain specific directive with syntax and examples
-aoni-gen explain referer
-aoni-gen explain form
-aoni-gen explain inject
-```
-
-### Code Generation & Continuous Watching
-```bash
-# Scan and compile all packages recursively
-aoni-gen ./...
-
-# Validate contracts without generating code
-aoni-gen check ./...
-
-# Watch mode for instantaneous recompilation on save in IDE
-aoni-gen -watch ./...
-
-# Compile a specific file
-aoni-gen -file=pkg/market/market.go
-```
+| Command | Usage | Description |
+| :--- | :--- | :--- |
+| `vortex [flags] [paths...]` | `vortex ./...` | Generates zero-allocation Go client implementation (`.gen.go`). |
+| `vortex check [flags] [paths...]` | `vortex check ./...` | Inspects contracts and reports AST diagnostics. |
+| `vortex check --fix [paths...]` | `vortex check --fix ./...` | Automatically synchronizes and fixes all safe issues. |
+| `vortex check --json [paths...]` | `vortex check --json ./...` | Outputs structured JSON diagnostics for CI/CD pipelines. |
+| `vortex watch [paths...]` | `vortex watch ./...` | Watches source directories and auto-compiles on save. |
+| `vortex bench` | `vortex bench -h2 -h3` | Silicon hardware benchmark & throughput inspector. |
+| `vortex cover` | `vortex cover -file=coverage.out` | Deduplicated test coverage analyzer. |
+| `vortex oapi import` | `vortex oapi import -spec=spec.json` | Imports OpenAPI 3.1 schema into declarative Go interface contracts. |
+| `vortex oapi export` | `vortex oapi export -out=spec.json` | Exports Go interface contracts into OpenAPI 3.1 specification. |
+| `vortex list` | `vortex list -scope=method` | Lists all supported directives and documentation. |
+| `vortex explain <dir>` | `vortex explain form` | Displays syntax documentation and runnable example for a directive. |
 
 ### Go Generate Integration
-Include this comment in any file defining `@aoni:service` interfaces:
+Add this directive at the top of contract files:
 ```go
-//go:generate go run github.com/lemon4ksan/aoni/cmd/aoni-gen -file=$GOFILE
+//go:generate go run github.com/lemon4ksan/aoni/cmd/vortex -file=$GOFILE
 ```
-Then run:
+Then execute:
 ```bash
 go generate ./...
 ```

@@ -985,7 +985,8 @@ func isDTOQueryStruct(name string) bool {
 	return true
 }
 
-func toCasing(s string, strategy ir.CasingStrategy) string {
+// ToCasing transforms an identifier according to the provided casing strategy.
+func ToCasing(s string, strategy ir.CasingStrategy) string {
 	if s == "" {
 		return ""
 	}
@@ -1006,6 +1007,10 @@ func toCasing(s string, strategy ir.CasingStrategy) string {
 	default:
 		return toDelimited(s, '_')
 	}
+}
+
+func toCasing(s string, strategy ir.CasingStrategy) string {
+	return ToCasing(s, strategy)
 }
 
 func toDelimited(s string, delimiter byte) string {
