@@ -127,12 +127,31 @@ func (c *CmdOAPI) runExport(_ context.Context, args []string, stdout, stderr io.
 	}
 
 	targetFile := *file
+	targetName := ""
+
 	if len(fs.Args()) > 0 {
 		targetFile = fs.Args()[0]
 	}
 
-	if resolved := project.ResolveTargetToPath(targetFile); resolved != "" {
-		targetFile = resolved
+	// Try finding contract in .vortex.yml to extract canonical name and file path
+	cwd, _ := os.Getwd()
+	if cfg, err := project.Load(cwd); err == nil && cfg != nil {
+		if c := cfg.FindContract(targetFile); c != nil {
+			if c.File != "" {
+				targetFile = c.File
+				if !filepath.IsAbs(targetFile) && cfg.RootDir != "" {
+					targetFile = filepath.Join(cfg.RootDir, targetFile)
+				}
+			}
+
+			targetName = c.Name
+		}
+	}
+
+	if targetName == "" {
+		if resolved := project.ResolveTargetToPath(targetFile); resolved != "" {
+			targetFile = resolved
+		}
 	}
 
 	if targetFile == "" {
@@ -169,9 +188,14 @@ func (c *CmdOAPI) runExport(_ context.Context, args []string, stdout, stderr io.
 		}
 	}
 
+	exportTitle := *title
+	if exportTitle == "" && targetName != "" {
+		exportTitle = targetName
+	}
+
 	exportCfg := openapi.ExportConfig{
 		ServiceName: *serviceName,
-		Title:       *title,
+		Title:       exportTitle,
 		Version:     *version,
 		BaseURL:     *baseURL,
 		AsYAML:      *asYAML,
