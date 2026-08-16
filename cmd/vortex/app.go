@@ -42,8 +42,11 @@ func NewApp(name, version, description string, commands ...Command) *App {
 			app.cmdMap[alias] = c
 		}
 
-		if c.Name() == "gen" {
+		if c.Name() == "autopilot" {
 			app.defaultCmd = c
+			if ap, ok := c.(*CmdAutoPilot); ok {
+				ap.app = app
+			}
 		}
 	}
 

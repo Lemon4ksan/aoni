@@ -15,6 +15,7 @@ import (
 
 func main() {
 	commands := []Command{
+		&CmdAutoPilot{},
 		&CmdStatus{},
 		&CmdInit{},
 		&CmdGen{},

@@ -18,6 +18,7 @@ import (
 
 func newTestApp(stdout, stderr *bytes.Buffer) *App {
 	commands := []Command{
+		&CmdAutoPilot{},
 		&CmdStatus{},
 		&CmdInit{},
 		&CmdGen{},
@@ -412,4 +413,63 @@ func TestApp_Diff_Against_HEAD(t *testing.T) {
 	err := app.Run(context.Background(), []string{"diff", "--against=HEAD", "main.go"})
 	require.NoError(t, err)
 	require.Contains(t, stdout.String(), "⚡ [vortex diff]")
+}
+
+func TestApp_AutoPilot_EmptyWorkspace(t *testing.T) {
+	tempDir := t.TempDir()
+	cwd, err := os.Getwd()
+	require.NoError(t, err)
+
+	defer func() { _ = os.Chdir(cwd) }()
+
+	require.NoError(t, os.Chdir(tempDir))
+
+	var stdout, stderr bytes.Buffer
+
+	app := newTestApp(&stdout, &stderr)
+
+	// Run with no args (default auto-pilot) in empty dir
+	err = app.Run(context.Background(), nil)
+	require.NoError(t, err)
+	require.Contains(t, stdout.String(), "No @aoni contracts or .vortex.yml found")
+}
+
+func TestApp_AutoPilot_ActiveWorkspace(t *testing.T) {
+	tempDir := t.TempDir()
+	cwd, err := os.Getwd()
+	require.NoError(t, err)
+
+	defer func() { _ = os.Chdir(cwd) }()
+
+	// Create contract file
+	pkgDir := filepath.Join(tempDir, "pkg", "autopilotdemo")
+	require.NoError(t, os.MkdirAll(pkgDir, 0o750))
+
+	apiSrc := `package autopilotdemo
+
+import (
+	"context"
+	"github.com/lemon4ksan/aoni"
+)
+
+// @aoni:service
+type DemoAPI interface {
+	// @get "/hello"
+	Hello(ctx context.Context, mods ...aoni.RequestModifier) (map[string]any, error)
+}
+`
+	require.NoError(t, os.WriteFile(filepath.Join(pkgDir, "api.go"), []byte(apiSrc), 0o600))
+	require.NoError(t, os.Chdir(tempDir))
+
+	var stdout, stderr bytes.Buffer
+
+	app := newTestApp(&stdout, &stderr)
+
+	// Run with no args (default auto-pilot) in active workspace
+	err = app.Run(context.Background(), nil)
+	require.NoError(t, err)
+	require.Contains(t, stdout.String(), "⚡ Vortex Auto-Pilot: Audit & Build Pipeline")
+	require.Contains(t, stdout.String(), "Pre-flight Contract Audit")
+	require.Contains(t, stdout.String(), "Code Generation & Polyglot Targets")
+	require.FileExists(t, filepath.Join(pkgDir, "api.gen.go"))
 }
