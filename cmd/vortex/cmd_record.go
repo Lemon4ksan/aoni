@@ -272,6 +272,14 @@ func (c *CmdRecord) Run(ctx context.Context, args []string, stdout, stderr io.Wr
 		outFlag    = fs.String("out", "traffic.har", "Output W3C HAR file path")
 		targetFlag = fs.String("target", "", "Optional upstream target URL for reverse proxy mode")
 		execFlag   = fs.String("exec", "", "Execute specified command string directly")
+		quietFlag  = fs.Bool(
+			"q",
+			false,
+			"Quiet mode: suppress live transaction logs (recommended for interactive TUIs)",
+		)
+		quietLong   = fs.Bool("quiet", false, "Alias for -q")
+		silentFlag  = fs.Bool("silent", false, "Alias for -q")
+		verboseFlag = fs.Bool("v", false, "Verbose mode: print live request lines during subprocess run")
 	)
 
 	fs.Usage = func() {
@@ -281,11 +289,11 @@ func (c *CmdRecord) Run(ctx context.Context, args []string, stdout, stderr io.Wr
 		fmt.Fprintf(stderr, "Flags:\n")
 		fs.PrintDefaults()
 		fmt.Fprintf(stderr, "\nExamples:\n")
-		fmt.Fprintf(stderr, "  vortex record -out=app.har -- ./mycli fetch-data          # Isolated process capture\n")
 		fmt.Fprintf(
 			stderr,
-			"  vortex record -out=api.har -- python script.py           # Capture Python script traffic\n",
+			"  vortex record -out=app.har -- ./mycli fetch-data          # Isolated process capture (silent TUI safe)\n",
 		)
+		fmt.Fprintf(stderr, "  vortex record -out=api.har -v -- python script.py        # Verbose process capture\n")
 		fmt.Fprintf(stderr, "  vortex record -port=9090 -out=traffic.har                # Standing proxy server mode\n")
 	}
 
@@ -315,6 +323,20 @@ func (c *CmdRecord) Run(ctx context.Context, args []string, stdout, stderr io.Wr
 			cmdToRun = strings.Fields(*execFlag)
 		} else if len(fs.Args()) > 0 {
 			cmdToRun = fs.Args()
+		}
+	}
+
+	isQuiet := *quietFlag || *quietLong || *silentFlag
+	if len(cmdToRun) > 0 && !*verboseFlag {
+		isQuiet = true
+	}
+
+	var logWriter io.Writer
+	if !isQuiet {
+		if len(cmdToRun) > 0 {
+			logWriter = stderr
+		} else {
+			logWriter = stdout
 		}
 	}
 
@@ -380,7 +402,7 @@ func (c *CmdRecord) Run(ctx context.Context, args []string, stdout, stderr io.Wr
 
 			tlsConn := tls.Server(clientConn, tlsConfig)
 
-			go handleDecryptedHTTPS(tlsConn, r.Host, recorder, stdout)
+			go handleDecryptedHTTPS(tlsConn, r.Host, recorder, logWriter)
 
 			return
 		}
@@ -501,8 +523,10 @@ func (c *CmdRecord) Run(ctx context.Context, args []string, stdout, stderr io.Wr
 		recorder.record(entry)
 		_ = recorder.save()
 
-		fmt.Fprintf(stdout, "✔ [%s] %s %s -> HTTP %d (%d ms, %d bytes)\n",
-			start.Format("15:04:05"), r.Method, r.URL.Path, status, duration, rec.body.Len())
+		if logWriter != nil {
+			fmt.Fprintf(logWriter, "✔ [%s] %s %s -> HTTP %d (%d ms, %d bytes)\n",
+				start.Format("15:04:05"), r.Method, r.URL.Path, status, duration, rec.body.Len())
+		}
 	})
 
 	ln, err := (&net.ListenConfig{}).Listen(ctx, "tcp", fmt.Sprintf("127.0.0.1:%d", *portFlag))
@@ -528,10 +552,12 @@ func (c *CmdRecord) Run(ctx context.Context, args []string, stdout, stderr io.Wr
 	if len(cmdToRun) > 0 {
 		proxyURL := fmt.Sprintf("http://127.0.0.1:%d", actualPort)
 
-		fmt.Fprintf(stdout, "⚡ Vortex Process Traffic Sniffer active (proxy: %s)\n", proxyURL)
-		fmt.Fprintf(stdout, "⚡ Spawning isolated subprocess: %s\n", strings.Join(cmdToRun, " "))
-		fmt.Fprintf(stdout, "⚡ Recording output to: %s\n", *outFlag)
-		fmt.Fprintln(stdout, "────────────────────────────────────────────────────────────────────────")
+		if !isQuiet {
+			fmt.Fprintf(stderr, "⚡ Vortex Process Traffic Sniffer active (proxy: %s)\n", proxyURL)
+			fmt.Fprintf(stderr, "⚡ Spawning isolated subprocess: %s\n", strings.Join(cmdToRun, " "))
+			fmt.Fprintf(stderr, "⚡ Recording output to: %s\n", *outFlag)
+			fmt.Fprintln(stderr, "────────────────────────────────────────────────────────────────────────")
+		}
 
 		subCmd := exec.CommandContext(ctx, cmdToRun[0], cmdToRun[1:]...) //nolint:gosec
 		subCmd.Stdin = os.Stdin
@@ -563,10 +589,13 @@ func (c *CmdRecord) Run(ctx context.Context, args []string, stdout, stderr io.Wr
 		_ = server.Shutdown(ctx)
 		_ = recorder.save()
 
-		fmt.Fprintln(stdout, "────────────────────────────────────────────────────────────────────────")
+		if !isQuiet {
+			fmt.Fprintln(stderr, "────────────────────────────────────────────────────────────────────────")
+		}
+
 		fmt.Fprintf(
 			stdout,
-			"✔ Subprocess finished. Captured %d transaction(s) to %s\n\n",
+			"\n✔ Subprocess finished. Captured %d transaction(s) to %s\n\n",
 			len(recorder.entries),
 			*outFlag,
 		)
@@ -630,7 +659,7 @@ func handleDecryptedHTTPS(
 	tlsConn net.Conn,
 	targetHost string,
 	recorder *sessionRecorder,
-	stdout io.Writer,
+	logWriter io.Writer,
 ) {
 	defer tlsConn.Close()
 
@@ -753,8 +782,10 @@ func handleDecryptedHTTPS(
 		recorder.record(entry)
 		_ = recorder.save()
 
-		fmt.Fprintf(stdout, "✔ [%s] %s %s -> HTTP %d (%d ms, %d bytes)\n",
-			start.Format("15:04:05"), req.Method, req.URL.Path, fwdResp.StatusCode, duration, len(respBodyBytes))
+		if logWriter != nil {
+			fmt.Fprintf(logWriter, "✔ [%s] %s %s -> HTTP %d (%d ms, %d bytes)\n",
+				start.Format("15:04:05"), req.Method, req.URL.Path, fwdResp.StatusCode, duration, len(respBodyBytes))
+		}
 
 		// Write response back to client
 		fwdResp.Body = io.NopCloser(bytes.NewBuffer(respBodyBytes))
