@@ -758,6 +758,22 @@ var Registry = []*DirectiveDef{
 		Description: "Generates discriminator-based polymorphism and JSON unmarshaling for tagged unions.",
 		Example:     "// @aoni:union\ntype EventVariant struct { ... }",
 	},
+	{
+		Name:        "aoni:bitpack",
+		Scopes:      []Scope{ScopeStruct},
+		Aliases:     []string{"bitpack"},
+		Description: "Generates ultra-high-throughput SIMD/register bit-packed binary serialization (Pack/Unpack/MarshalBinary).",
+		Args: []ArgDef{
+			{
+				Name:          "endian",
+				Placeholder:   "<style>",
+				Description:   "Byte order for integer encoding",
+				Default:       "little",
+				AllowedValues: []string{"little", "big"},
+			},
+		},
+		Example: "// @aoni:bitpack endian=little\ntype PacketHeader struct {\n\tOpCode uint8  `bits:\"3\"`\n\tIsAck  bool   `bits:\"1\"`\n\tLength uint32 `bits:\"28\"`\n\tJobID  uint32 `bits:\"32\"`\n}",
+	},
 
 	// ==========================================
 	// 6. PIPELINE STAGE SCOPE DIRECTIVES

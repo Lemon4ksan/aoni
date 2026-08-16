@@ -148,6 +148,15 @@ Reason            ::= [^\r\n]*
 | `@query` | `"key" \| "key=val"` | Binds parameter to an HTTP URL query string parameter. |
 | `@time_layout` | `"2006-01-02"` | Custom `time.Time` formatting layout string. |
 
+### Struct & Bitpack Scope Directives
+
+| Directive | Arguments / Value | Description |
+| :--- | :--- | :--- |
+| `@aoni:dto (or @dto)` | `casing`, `omitempty` | Generates compiled AppendFormData and AppendQuery zero-allocation serialization methods. |
+| `@aoni:tuple (or @tuple)` | — | Generates zero-alloc custom UnmarshalJSON decoder for positional JSON arrays. |
+| `@aoni:union (or @union)` | — | Generates discriminator-based polymorphism and JSON unmarshaling for tagged unions. |
+| `@aoni:bitpack (or @bitpack)` | `endian="little\|big"` | Generates SIMD-accelerated zero-allocation binary bitfield packing (Pack/Unpack/PackUint64/UnpackUint64). |
+
 ---
 
 ## 5. Compile-Time Optimization Pipeline
@@ -193,7 +202,7 @@ Vortex includes a static analysis and diagnostic framework (`internal/codegen/li
 
 | Tier | Behavior with `--fix` | Description |
 | :--- | :---: | :--- |
-| **Safe Automated Fixes** | ✅ Applied Automatically | 100% deterministic artifact synchronization and canonical replacements (`stale-codegen`, `deprecated-alias`). |
+| **Safe Automated Fixes** | ✅ Applied Automatically | 100% deterministic artifact synchronization and canonical replacements (`stale-codegen`, `deprecated-alias`, `redundant-tag`, `canonical-format`). |
 | **Heuristic Warnings & Suggestions** | ❌ Report Only | Code smell and architectural suggestions that never mutate developer intent (`param-lifting`, `http-verb-mismatch`). |
 
 ### Standard Rule Suite
@@ -205,9 +214,12 @@ Vortex includes a static analysis and diagnostic framework (`internal/codegen/li
 | `E003` | `missing-http-method` | `Correctness` | `ERROR` | ❌ No | Method is missing `@get`, `@post`, etc. directive |
 | `E004` | `missing-context` | `Correctness` | `ERROR` | ❌ No | First method parameter is not `context.Context` |
 | `E005` | `unrecognized-directive` | `Correctness` | `ERROR` | ❌ No | Unknown or misspelled `@aoni` directive |
+| `E006` | `invalid-bitpack` | `Correctness` | `ERROR` | ❌ No | Bitpack struct has invalid bit widths or type overflows |
 | `W001` | `param-lifting` | `Style` | `WARN` | ❌ No | Parameter repeated across $\ge 4$ methods (suggests lifting to service scope) |
 | `W002` | `deprecated-alias` | `Style` | `WARN` | ✅ Yes | Deprecated directive alias used (e.g., `@zstd_decompress` $\to$ `@zstd`) |
 | `W003` | `http-verb-mismatch` | `Style` | `WARN` | ❌ No | Read-only prefix (`Get...`, `List...`) annotated with `@post` |
+| `W004` | `redundant-tag` | `Style` | `WARN` | ✅ Yes | Redundant `@query` or `@field` tag matching default casing inference |
+| `W005` | `canonical-format` | `Style` | `WARN` | ✅ Yes | Directives in doc comments not following canonical ordering |
 
 ### Inline Suppression Directives
 

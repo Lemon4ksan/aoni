@@ -69,7 +69,8 @@ func runCheck(args []string) {
 			continue
 		}
 
-		hasTargets := len(root.Services) > 0 || len(root.Tuples) > 0 || len(root.UnrecognizedDirectives) > 0
+		hasTargets := len(root.Services) > 0 || len(root.Tuples) > 0 || len(root.Bitpacks) > 0 ||
+			len(root.UnrecognizedDirectives) > 0
 		if !hasTargets {
 			for _, st := range root.Structs {
 				if st.GenValueEncoder {

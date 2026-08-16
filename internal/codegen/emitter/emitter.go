@@ -63,6 +63,11 @@ func (e *Emitter) Emit(root *ir.RootIR) ([]byte, error) {
 		e.emitTuple(&bodyBuf, tuple)
 	}
 
+	// 6. Bitpack Binary Codecs
+	for _, bp := range root.Bitpacks {
+		e.emitBitpack(&bodyBuf, bp)
+	}
+
 	bodyCode := bodyBuf.String()
 
 	// 2. Imports block
@@ -467,25 +472,32 @@ func collectStdImports(root *ir.RootIR, bodyCode string) []string {
 			needed["encoding/json"] = true
 			needed["fmt"] = true
 		}
+
+		for range root.Bitpacks {
+			needed["encoding/binary"] = true
+			needed["errors"] = true
+			needed["fmt"] = true
+		}
 	}
 
 	qualifiers := map[string]string{
-		"bytes":          "bytes.",
-		"context":        "context.",
-		"encoding/json":  "json.",
-		"errors":         "errors.",
-		"fmt":            "fmt.",
-		"io":             "io.",
-		"mime/multipart": "multipart.",
-		"net/http":       "http.",
-		"net/textproto":  "textproto.",
-		"net/url":        "url.",
-		"os":             "os.",
-		"regexp":         "regexp.",
-		"strconv":        "strconv.",
-		"sync":           "sync.",
-		"sync/atomic":    "atomic.",
-		"time":           "time.",
+		"bytes":           "bytes.",
+		"context":         "context.",
+		"encoding/binary": "binary.",
+		"encoding/json":   "json.",
+		"errors":          "errors.",
+		"fmt":             "fmt.",
+		"io":              "io.",
+		"mime/multipart":  "multipart.",
+		"net/http":        "http.",
+		"net/textproto":   "textproto.",
+		"net/url":         "url.",
+		"os":              "os.",
+		"regexp":          "regexp.",
+		"strconv":         "strconv.",
+		"sync":            "sync.",
+		"sync/atomic":     "atomic.",
+		"time":            "time.",
 	}
 
 	for pkg, qual := range qualifiers {
@@ -495,7 +507,7 @@ func collectStdImports(root *ir.RootIR, bodyCode string) []string {
 	}
 
 	order := []string{
-		"bytes", "context", "encoding/json", "errors", "fmt", "io",
+		"bytes", "context", "encoding/binary", "encoding/json", "errors", "fmt", "io",
 		"mime/multipart", "net/http", "net/textproto", "net/url", "os", "regexp",
 		"strconv", "sync", "sync/atomic", "time",
 	}

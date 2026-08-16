@@ -38,6 +38,7 @@ func DefaultRegistry() *Registry {
 		&RuleMissingHTTPMethod{},
 		&RuleMissingContext{},
 		&RuleUnrecognizedDirective{},
+		&RuleInvalidBitpack{},
 
 		// Warning & suggestion rules
 		&RuleParamLifting{},

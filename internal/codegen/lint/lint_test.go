@@ -394,3 +394,42 @@ type ProfileAPI interface {
 
 	require.Contains(t, string(reordered), expectedBlock)
 }
+
+func TestRules_InvalidBitpack_DetectsErrors(t *testing.T) {
+	rootIR := &ir.RootIR{
+		Bitpacks: []*ir.BitpackIR{
+			{
+				Name: "BadHeader",
+				Fields: []*ir.BitpackFieldIR{
+					{
+						GoName:   "Flag",
+						Type:     ir.GoTypeIR{Name: "bool"},
+						BitWidth: 2, // Error: bool must be 1 bit
+						IsBool:   true,
+					},
+					{
+						GoName:   "SmallInt",
+						Type:     ir.GoTypeIR{Name: "uint8"},
+						BitWidth: 10, // Error: uint8 exceeds 8 bits
+					},
+				},
+				TotalBits:  12,
+				TotalBytes: 2,
+			},
+		},
+	}
+
+	pass := &lint.Pass{
+		RootIR:   rootIR,
+		FilePath: "bad.go",
+	}
+
+	rule := &lint.RuleInvalidBitpack{}
+	diags := rule.Run(pass)
+
+	require.Len(t, diags, 2)
+	require.Equal(t, "E006", diags[0].RuleID)
+	require.Contains(t, diags[0].Message, "Bool field Flag must have bit width 1")
+	require.Equal(t, "E006", diags[1].RuleID)
+	require.Contains(t, diags[1].Message, "exceeds maximum type bit width 8")
+}

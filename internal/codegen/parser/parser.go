@@ -13,6 +13,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"strconv"
 	"strings"
 	"unicode"
 
@@ -160,6 +161,10 @@ func (p *Parser) ParseSource(filename string, src []byte) (*ir.RootIR, error) {
 
 				if tuple := p.parseTuple(root, typeSpec.Name.Name, docLines, t); tuple != nil {
 					root.Tuples = append(root.Tuples, tuple)
+				}
+
+				if bitpack := p.parseBitpack(root, typeSpec.Name.Name, docLines, t); bitpack != nil {
+					root.Bitpacks = append(root.Bitpacks, bitpack)
 				}
 			}
 		}
@@ -636,12 +641,17 @@ func (p *Parser) parseStruct(root *ir.RootIR, name string, docLines []string, st
 	directives := p.extractDirectives(root, name, docLines)
 	isDTO := false
 	isTuple := false
+	isBitpack := false
 	casing := ir.CasingSnakeCase
 	omitEmpty := true
 
 	for _, d := range directives {
 		if d.Name == "aoni:tuple" || d.Name == "tuple" {
 			isTuple = true
+		}
+
+		if d.Name == "aoni:bitpack" || d.Name == "bitpack" {
+			isBitpack = true
 		}
 
 		if d.Name == "aoni:dto" || d.Name == "dto" {
@@ -666,7 +676,7 @@ func (p *Parser) parseStruct(root *ir.RootIR, name string, docLines []string, st
 		}
 	}
 
-	if isTuple {
+	if isTuple || isBitpack {
 		return nil
 	}
 
@@ -784,6 +794,115 @@ func (p *Parser) parseTuple(root *ir.RootIR, name string, docLines []string, str
 	}
 
 	return tuple
+}
+
+func (p *Parser) parseBitpack(root *ir.RootIR, name string, docLines []string, strct *ast.StructType) *ir.BitpackIR {
+	directives := p.extractDirectives(root, name, docLines)
+	isBitpack := false
+	endianness := ir.EndianLittle
+
+	for _, d := range directives {
+		if d.Name == "aoni:bitpack" || d.Name == "bitpack" {
+			isBitpack = true
+
+			if end, ok := d.Args["endian"]; ok {
+				if strings.ToLower(end) == "big" {
+					endianness = ir.EndianBig
+				}
+			}
+		}
+	}
+
+	if !isBitpack {
+		return nil
+	}
+
+	bp := &ir.BitpackIR{
+		Name:       name,
+		Doc:        docLines,
+		Endianness: endianness,
+		Fields:     make([]*ir.BitpackFieldIR, 0, len(strct.Fields.List)),
+	}
+
+	currentOffset := 0
+
+	for _, field := range strct.Fields.List {
+		goType := p.extractGoType(field.Type)
+		bitWidth := 0
+
+		if field.Tag != nil {
+			tagVal := strings.Trim(field.Tag.Value, "`")
+
+			st := reflect.StructTag(tagVal)
+			if bitsStr := st.Get("bits"); bitsStr != "" {
+				if bw, err := strconv.Atoi(bitsStr); err == nil && bw > 0 {
+					bitWidth = bw
+				}
+			}
+		}
+
+		if bitWidth == 0 {
+			bitWidth = defaultTypeBitWidth(goType.Name)
+		}
+
+		isBool := (goType.Name == "bool")
+		if isBool && bitWidth == 0 {
+			bitWidth = 1
+		}
+
+		isSigned := isSignedIntType(goType.Name)
+
+		var mask uint64
+		if bitWidth >= 64 {
+			mask = ^uint64(0)
+		} else if bitWidth > 0 {
+			mask = (uint64(1) << bitWidth) - 1
+		}
+
+		for _, ident := range field.Names {
+			bp.Fields = append(bp.Fields, &ir.BitpackFieldIR{
+				GoName:    ident.Name,
+				Type:      goType,
+				BitWidth:  bitWidth,
+				BitOffset: currentOffset,
+				Mask:      mask,
+				IsSigned:  isSigned,
+				IsBool:    isBool,
+			})
+			currentOffset += bitWidth
+		}
+	}
+
+	bp.TotalBits = currentOffset
+	bp.TotalBytes = (currentOffset + 7) / 8
+
+	return bp
+}
+
+func defaultTypeBitWidth(typeName string) int {
+	switch typeName {
+	case "bool":
+		return 1
+	case "uint8", "byte", "int8":
+		return 8
+	case "uint16", "int16":
+		return 16
+	case "uint32", "int32":
+		return 32
+	case "uint64", "int64", "uint", "int", "uintptr":
+		return 64
+	default:
+		return 8
+	}
+}
+
+func isSignedIntType(typeName string) bool {
+	switch typeName {
+	case "int8", "int16", "int32", "int64", "int":
+		return true
+	default:
+		return false
+	}
 }
 
 func (p *Parser) extractGoType(expr ast.Expr) ir.GoTypeIR {

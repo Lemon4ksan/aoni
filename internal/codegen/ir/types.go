@@ -13,6 +13,7 @@ type RootIR struct {
 	Structs                []*StructIR
 	Tuples                 []*TupleIR
 	Unions                 []*UnionIR
+	Bitpacks               []*BitpackIR
 	UnrecognizedDirectives []UnrecognizedDirectiveIR
 }
 
@@ -723,3 +724,35 @@ const (
 	// CasingNone retains original parameter name without alteration.
 	CasingNone CasingStrategy = "none"
 )
+
+// Endianness defines byte order for binary encoding.
+type Endianness string
+
+const (
+	// EndianLittle encodes integers in little-endian byte order.
+	EndianLittle Endianness = "little"
+
+	// EndianBig encodes integers in big-endian (network) byte order.
+	EndianBig Endianness = "big"
+)
+
+// BitpackIR represents a compact bit-packed struct definition.
+type BitpackIR struct {
+	Name       string
+	Doc        []string
+	Endianness Endianness
+	Fields     []*BitpackFieldIR
+	TotalBits  int
+	TotalBytes int
+}
+
+// BitpackFieldIR represents a single bit-packed field with custom bit-width.
+type BitpackFieldIR struct {
+	GoName    string
+	Type      GoTypeIR
+	BitWidth  int
+	BitOffset int // Offset in bits from start of packed struct
+	Mask      uint64
+	IsSigned  bool
+	IsBool    bool
+}

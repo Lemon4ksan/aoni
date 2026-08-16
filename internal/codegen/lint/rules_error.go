@@ -312,3 +312,119 @@ func (r *RuleUnrecognizedDirective) Run(pass *Pass) []Diagnostic {
 
 	return diags
 }
+
+// RuleInvalidBitpack checks that @aoni:bitpack struct fields have valid bit widths and don't overflow their underlying types.
+type RuleInvalidBitpack struct{}
+
+func (r *RuleInvalidBitpack) ID() string   { return "E006" }
+func (r *RuleInvalidBitpack) Name() string { return "invalid-bitpack" }
+func (r *RuleInvalidBitpack) Description() string {
+	return "Validates @aoni:bitpack field bit widths and type safety"
+}
+func (r *RuleInvalidBitpack) Category() Category        { return CategoryCorrectness }
+func (r *RuleInvalidBitpack) DefaultSeverity() Severity { return SeverityError }
+func (r *RuleInvalidBitpack) IsFixable() bool           { return false }
+
+func (r *RuleInvalidBitpack) Run(pass *Pass) []Diagnostic {
+	if pass == nil || pass.RootIR == nil {
+		return nil
+	}
+
+	var diags []Diagnostic
+	for _, bp := range pass.RootIR.Bitpacks {
+		line, col := pass.FindNodePosition(bp.Name, "")
+
+		if len(bp.Fields) == 0 || bp.TotalBits == 0 {
+			diags = append(diags, Diagnostic{
+				RuleID:     r.ID(),
+				RuleName:   r.Name(),
+				Severity:   r.DefaultSeverity(),
+				Category:   r.Category(),
+				Target:     bp.Name,
+				FilePath:   pass.FilePath,
+				Line:       line,
+				Column:     col,
+				Message:    fmt.Sprintf("Bitpack struct %s has 0 bitfields", bp.Name),
+				Suggestion: "Declare struct fields with `bits:\"<N>\"` tags",
+			})
+
+			continue
+		}
+
+		for _, f := range bp.Fields {
+			target := fmt.Sprintf("%s.%s", bp.Name, f.GoName)
+
+			switch {
+			case f.BitWidth <= 0:
+				diags = append(diags, Diagnostic{
+					RuleID:     r.ID(),
+					RuleName:   r.Name(),
+					Severity:   r.DefaultSeverity(),
+					Category:   r.Category(),
+					Target:     target,
+					FilePath:   pass.FilePath,
+					Line:       line,
+					Column:     col,
+					Message:    fmt.Sprintf("Field %s has invalid bit width %d (must be > 0)", f.GoName, f.BitWidth),
+					Suggestion: "Specify positive bit width, e.g. `bits:\"8\"`",
+				})
+
+			case f.IsBool && f.BitWidth != 1:
+				diags = append(diags, Diagnostic{
+					RuleID:     r.ID(),
+					RuleName:   r.Name(),
+					Severity:   r.DefaultSeverity(),
+					Category:   r.Category(),
+					Target:     target,
+					FilePath:   pass.FilePath,
+					Line:       line,
+					Column:     col,
+					Message:    fmt.Sprintf("Bool field %s must have bit width 1 (got %d)", f.GoName, f.BitWidth),
+					Suggestion: "Use `bits:\"1\"` for boolean fields",
+				})
+
+			case !f.IsBool:
+				maxBits := defaultBitWidth(f.Type.Name)
+				if f.BitWidth > maxBits {
+					diags = append(diags, Diagnostic{
+						RuleID:   r.ID(),
+						RuleName: r.Name(),
+						Severity: r.DefaultSeverity(),
+						Category: r.Category(),
+						Target:   target,
+						FilePath: pass.FilePath,
+						Line:     line,
+						Column:   col,
+						Message: fmt.Sprintf(
+							"Field %s with type %s exceeds maximum type bit width %d (got %d bits)",
+							f.GoName,
+							f.Type.Name,
+							maxBits,
+							f.BitWidth,
+						),
+						Suggestion: fmt.Sprintf("Widen underlying Go type or reduce bit width to <= %d", maxBits),
+					})
+				}
+			}
+		}
+	}
+
+	return diags
+}
+
+func defaultBitWidth(typeName string) int {
+	switch typeName {
+	case "bool":
+		return 1
+	case "uint8", "byte", "int8":
+		return 8
+	case "uint16", "int16":
+		return 16
+	case "uint32", "int32":
+		return 32
+	case "uint64", "int64", "uint", "int", "uintptr":
+		return 64
+	default:
+		return 64
+	}
+}
