@@ -5,13 +5,23 @@
 package main
 
 import (
+	"bufio"
 	"bytes"
 	"context"
+	"crypto"
+	"crypto/ecdsa"
+	"crypto/elliptic"
+	"crypto/rand"
+	"crypto/tls"
+	"crypto/x509"
+	"crypto/x509/pkix"
 	"encoding/json"
+	"encoding/pem"
 	"errors"
 	"flag"
 	"fmt"
 	"io"
+	"math/big"
 	"net"
 	"net/http"
 	"net/http/httputil"
@@ -125,6 +135,134 @@ func (sr *sessionRecorder) save() error {
 	return os.WriteFile(sr.outFile, data, 0o600)
 }
 
+// mitmCA dynamically generates TLS certificates for HTTPS MITM inspection.
+type mitmCA struct {
+	caCert *x509.Certificate
+	caKey  crypto.PrivateKey
+	caPEM  []byte
+	mu     sync.RWMutex
+	cache  map[string]*tls.Certificate
+}
+
+func newMitmCA() (*mitmCA, error) {
+	priv, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		return nil, fmt.Errorf("generating CA private key: %w", err)
+	}
+
+	serialNumber, err := rand.Int(rand.Reader, new(big.Int).Lsh(big.NewInt(1), 128))
+	if err != nil {
+		return nil, fmt.Errorf("generating CA serial number: %w", err)
+	}
+
+	template := &x509.Certificate{
+		SerialNumber: serialNumber,
+		Subject: pkix.Name{
+			Organization: []string{"Vortex Traffic Recorder Dynamic CA"},
+			CommonName:   "Vortex Ephemeral Root CA",
+		},
+		NotBefore:             time.Now().Add(-1 * time.Hour),
+		NotAfter:              time.Now().Add(365 * 24 * time.Hour),
+		KeyUsage:              x509.KeyUsageCertSign | x509.KeyUsageCRLSign | x509.KeyUsageDigitalSignature,
+		BasicConstraintsValid: true,
+		IsCA:                  true,
+		MaxPathLen:            2,
+	}
+
+	derBytes, err := x509.CreateCertificate(rand.Reader, template, template, &priv.PublicKey, priv)
+	if err != nil {
+		return nil, fmt.Errorf("creating CA certificate: %w", err)
+	}
+
+	caCert, err := x509.ParseCertificate(derBytes)
+	if err != nil {
+		return nil, fmt.Errorf("parsing CA certificate: %w", err)
+	}
+
+	caPEM := pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: derBytes})
+
+	return &mitmCA{
+		caCert: caCert,
+		caKey:  priv,
+		caPEM:  caPEM,
+		cache:  make(map[string]*tls.Certificate),
+	}, nil
+}
+
+func (m *mitmCA) getCertificate(rawHost string) (*tls.Certificate, error) {
+	host := rawHost
+	if h, _, err := net.SplitHostPort(rawHost); err == nil {
+		host = h
+	}
+
+	m.mu.RLock()
+
+	if cert, ok := m.cache[host]; ok {
+		m.mu.RUnlock()
+		return cert, nil
+	}
+
+	m.mu.RUnlock()
+
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	if cert, ok := m.cache[host]; ok {
+		return cert, nil
+	}
+
+	priv, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		return nil, fmt.Errorf("generating leaf key for %s: %w", host, err)
+	}
+
+	serialNumber, err := rand.Int(rand.Reader, new(big.Int).Lsh(big.NewInt(1), 128))
+	if err != nil {
+		return nil, fmt.Errorf("generating leaf serial: %w", err)
+	}
+
+	template := &x509.Certificate{
+		SerialNumber: serialNumber,
+		Subject: pkix.Name{
+			CommonName:   host,
+			Organization: []string{"Vortex Traffic Recorder"},
+		},
+		NotBefore:   time.Now().Add(-1 * time.Hour),
+		NotAfter:    time.Now().Add(24 * time.Hour),
+		KeyUsage:    x509.KeyUsageDigitalSignature | x509.KeyUsageKeyEncipherment,
+		ExtKeyUsage: []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
+	}
+
+	if ip := net.ParseIP(host); ip != nil {
+		template.IPAddresses = []net.IP{ip}
+	} else {
+		template.DNSNames = []string{host}
+	}
+
+	derBytes, err := x509.CreateCertificate(rand.Reader, template, m.caCert, &priv.PublicKey, m.caKey)
+	if err != nil {
+		return nil, fmt.Errorf("signing leaf certificate for %s: %w", host, err)
+	}
+
+	certPEM := pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: derBytes})
+
+	keyBytes, err := x509.MarshalECPrivateKey(priv)
+	if err != nil {
+		return nil, fmt.Errorf("marshaling leaf private key: %w", err)
+	}
+
+	keyPEM := pem.EncodeToMemory(&pem.Block{Type: "EC PRIVATE KEY", Bytes: keyBytes})
+
+	tlsCert, err := tls.X509KeyPair(certPEM, keyPEM)
+	if err != nil {
+		return nil, fmt.Errorf("creating TLS keypair for %s: %w", host, err)
+	}
+
+	m.cache[host] = &tlsCert
+
+	return &tlsCert, nil
+}
+
 func (c *CmdRecord) Run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	fs := flag.NewFlagSet("record", flag.ContinueOnError)
 	fs.SetOutput(stderr)
@@ -180,6 +318,16 @@ func (c *CmdRecord) Run(ctx context.Context, args []string, stdout, stderr io.Wr
 		}
 	}
 
+	ca, err := newMitmCA()
+	if err != nil {
+		return fmt.Errorf("initializing ephemeral TLS MITM CA: %w", err)
+	}
+
+	caFilePath := filepath.Join(os.TempDir(), "vortex_ca.pem")
+	if err := os.WriteFile(caFilePath, ca.caPEM, 0o600); err != nil {
+		return fmt.Errorf("writing dynamic CA file: %w", err)
+	}
+
 	recorder := &sessionRecorder{
 		entries: make([]harEntry, 0),
 		outFile: *outFlag,
@@ -202,48 +350,37 @@ func (c *CmdRecord) Run(ctx context.Context, args []string, stdout, stderr io.Wr
 	}
 
 	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// Handle HTTPS CONNECT tunnel
+		// Handle HTTPS CONNECT tunnel with TLS MITM Decryption
 		if r.Method == http.MethodConnect {
-			destConn, err := (&net.Dialer{Timeout: 10 * time.Second}).DialContext(
-				r.Context(),
-				"tcp",
-				r.Host,
-			) //nolint:gosec
-			if err != nil {
-				http.Error(w, err.Error(), http.StatusServiceUnavailable)
-				return
-			}
-
-			w.WriteHeader(http.StatusOK)
-
 			hijacker, ok := w.(http.Hijacker)
 			if !ok {
 				http.Error(w, "hijacking not supported", http.StatusInternalServerError)
-
-				_ = destConn.Close()
-
 				return
 			}
 
-			clientConn, _, err := hijacker.Hijack()
-			if err != nil {
-				_ = destConn.Close()
+			clientConn, _, hErr := hijacker.Hijack()
+			if hErr != nil {
 				return
 			}
 
-			go func() {
-				defer destConn.Close()
-				defer clientConn.Close()
+			// Acknowledge CONNECT tunnel establishment
+			_, _ = clientConn.Write([]byte("HTTP/1.1 200 Connection Established\r\n\r\n"))
 
-				_, _ = io.Copy(destConn, clientConn)
-			}()
+			// Generate on-the-fly certificate for the target host
+			leafCert, cErr := ca.getCertificate(r.Host)
+			if cErr != nil {
+				_ = clientConn.Close()
+				return
+			}
 
-			go func() {
-				defer destConn.Close()
-				defer clientConn.Close()
+			tlsConfig := &tls.Config{
+				Certificates: []tls.Certificate{*leafCert},
+				MinVersion:   tls.VersionTLS12,
+			}
 
-				_, _ = io.Copy(clientConn, destConn)
-			}()
+			tlsConn := tls.Server(clientConn, tlsConfig)
+
+			go handleDecryptedHTTPS(tlsConn, r.Host, recorder, stdout)
 
 			return
 		}
@@ -401,7 +538,7 @@ func (c *CmdRecord) Run(ctx context.Context, args []string, stdout, stderr io.Wr
 		subCmd.Stdout = stdout
 		subCmd.Stderr = stderr
 
-		// Inject process-isolated proxy environment variables
+		// Inject process-isolated proxy and root CA environment variables
 		subCmd.Env = append(os.Environ(),
 			"HTTP_PROXY="+proxyURL,
 			"HTTPS_PROXY="+proxyURL,
@@ -409,12 +546,19 @@ func (c *CmdRecord) Run(ctx context.Context, args []string, stdout, stderr io.Wr
 			"https_proxy="+proxyURL,
 			"ALL_PROXY="+proxyURL,
 			"all_proxy="+proxyURL,
+			"SSL_CERT_FILE="+caFilePath,
+			"CURL_CA_BUNDLE="+caFilePath,
+			"REQUESTS_CA_BUNDLE="+caFilePath,
+			"NODE_EXTRA_CA_CERTS="+caFilePath,
+			"NODE_TLS_REJECT_UNAUTHORIZED=0",
+			"GIT_SSL_CAINFO="+caFilePath,
+			"PYTHONHTTPSVERIFY=0",
 		)
 
 		runErr := subCmd.Run()
 
 		// Brief flush window for trailing keep-alive requests
-		time.Sleep(100 * time.Millisecond)
+		time.Sleep(150 * time.Millisecond)
 
 		_ = server.Shutdown(ctx)
 		_ = recorder.save()
@@ -456,6 +600,7 @@ func (c *CmdRecord) Run(ctx context.Context, args []string, stdout, stderr io.Wr
 		actualPort,
 		actualPort,
 	)
+	fmt.Fprintf(stdout, "  $env:SSL_CERT_FILE=\"%s\"; $env:NODE_EXTRA_CA_CERTS=\"%s\"\n", caFilePath, caFilePath)
 	fmt.Fprintf(stdout, "  ./mycli run\n\n")
 
 	select {
@@ -479,6 +624,150 @@ func (c *CmdRecord) Run(ctx context.Context, args []string, stdout, stderr io.Wr
 	fmt.Fprintf(stdout, "   vortex mock api.go\n")
 
 	return nil
+}
+
+func handleDecryptedHTTPS(
+	tlsConn net.Conn,
+	targetHost string,
+	recorder *sessionRecorder,
+	stdout io.Writer,
+) {
+	defer tlsConn.Close()
+
+	reader := bufio.NewReader(tlsConn)
+	client := &http.Client{
+		Transport: &http.Transport{
+			TLSClientConfig: &tls.Config{InsecureSkipVerify: true}, //nolint:gosec
+		},
+		Timeout: 60 * time.Second,
+	}
+
+	for {
+		req, err := http.ReadRequest(reader)
+		if err != nil {
+			return
+		}
+
+		start := time.Now()
+
+		var reqBodyBytes []byte
+		if req.Body != nil {
+			reqBodyBytes, _ = io.ReadAll(req.Body)
+			_ = req.Body.Close()
+		}
+
+		var reqHeaders []harNV
+		for k, v := range req.Header {
+			for _, val := range v {
+				reqHeaders = append(reqHeaders, harNV{Name: k, Value: val})
+			}
+		}
+
+		var reqQueries []harNV
+		for k, v := range req.URL.Query() {
+			for _, val := range v {
+				reqQueries = append(reqQueries, harNV{Name: k, Value: val})
+			}
+		}
+
+		targetURI := fmt.Sprintf("https://%s%s", targetHost, req.URL.RequestURI())
+
+		fwdReq, err := http.NewRequestWithContext( //nolint:gosec
+			req.Context(),
+			req.Method,
+			targetURI,
+			bytes.NewBuffer(reqBodyBytes),
+		)
+		if err != nil {
+			_ = (&http.Response{
+				StatusCode: http.StatusBadGateway,
+				ProtoMajor: 1,
+				ProtoMinor: 1,
+				Body:       io.NopCloser(strings.NewReader(err.Error())),
+			}).Write(tlsConn)
+
+			return
+		}
+
+		fwdReq.Header = req.Header.Clone()
+		fwdReq.Header.Del("Proxy-Connection")
+
+		fwdResp, fErr := client.Do(fwdReq) //nolint:gosec
+		if fErr != nil {
+			_ = (&http.Response{
+				StatusCode: http.StatusBadGateway,
+				ProtoMajor: 1,
+				ProtoMinor: 1,
+				Body:       io.NopCloser(strings.NewReader(fErr.Error())),
+			}).Write(tlsConn)
+
+			return
+		}
+
+		respBodyBytes, _ := io.ReadAll(fwdResp.Body)
+		_ = fwdResp.Body.Close()
+
+		var respHeaders []harNV
+		for k, v := range fwdResp.Header {
+			for _, val := range v {
+				respHeaders = append(respHeaders, harNV{Name: k, Value: val})
+			}
+		}
+
+		duration := time.Since(start).Milliseconds()
+
+		var postData *harPost
+		if len(reqBodyBytes) > 0 {
+			postData = &harPost{
+				MimeType: req.Header.Get("Content-Type"),
+				Text:     string(reqBodyBytes),
+			}
+		}
+
+		var respContent *harContent
+		if len(respBodyBytes) > 0 {
+			respContent = &harContent{
+				Size:     int64(len(respBodyBytes)),
+				MimeType: fwdResp.Header.Get("Content-Type"),
+				Text:     string(respBodyBytes),
+			}
+		}
+
+		entry := harEntry{
+			StartedDateTime: start.Format(time.RFC3339),
+			Time:            duration,
+			Request: harReq{
+				Method:      req.Method,
+				URL:         targetURI,
+				Headers:     reqHeaders,
+				QueryString: reqQueries,
+				PostData:    postData,
+			},
+			Response: harResp{
+				Status:  fwdResp.StatusCode,
+				Headers: respHeaders,
+				Content: respContent,
+			},
+		}
+
+		recorder.record(entry)
+		_ = recorder.save()
+
+		fmt.Fprintf(stdout, "✔ [%s] %s %s -> HTTP %d (%d ms, %d bytes)\n",
+			start.Format("15:04:05"), req.Method, req.URL.Path, fwdResp.StatusCode, duration, len(respBodyBytes))
+
+		// Write response back to client
+		fwdResp.Body = io.NopCloser(bytes.NewBuffer(respBodyBytes))
+		fwdResp.ContentLength = int64(len(respBodyBytes))
+
+		if err := fwdResp.Write(tlsConn); err != nil {
+			return
+		}
+
+		if req.Close || fwdResp.Close {
+			return
+		}
+	}
 }
 
 type recordResponseWriter struct {
