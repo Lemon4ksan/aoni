@@ -2,6 +2,9 @@
 
 `vortex` is the official AST-driven toolchain, code generation engine, and static contract inspector for Go that compiles declarative API contracts into zero-allocation (`0 B/op`), type-safe, Chromium-resilient HTTP/RPC network clients powered by the `aoni` networking engine.
 
+> **Engineering Manifesto**:
+> _«Как только байты должны покинуть одну машину и попасть на другую — это произойдет с 0 аллокаций, на максимальной скорости кремния, без рассинхрона типов и без шанса быть заблокированным WAF»._
+
 ## 1. Core Architectural Pillars
 
 1. **Strict Separation of Concerns**:

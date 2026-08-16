@@ -6,6 +6,10 @@ This document outlines the architecture, coding standards, build/test commands, 
 
 **`aoni`** is a unified, ultra-high-performance Internet Protocol engine for Go. It consolidates modern IETF RFC standards, W3C specifications, and Chromium-grade network resilience mechanisms into a single, profile-driven zero-allocation architecture.
 
+> **Core Engineering Manifesto**:
+> _«Как только байты должны покинуть одну машину и попасть на другую — это произойдет с 0 аллокаций, на максимальной скорости кремния, без рассинхрона типов и без шанса быть заблокированным WAF»._
+> _(«The moment bytes leave one machine to reach another — it happens with 0 allocations, at silicon line speed, with zero type drift, and zero chance of WAF interception.»)_
+
 ### Key Capabilities & Architectural Pillars
 - **Dual Engines under a Single Interface**:
   - `aoni.Client` — 100% `net/http` compatibility, full middleware chain support, seamless standard ecosystem integration.

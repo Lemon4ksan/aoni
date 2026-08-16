@@ -9,6 +9,8 @@
 ![Resilience](https://img.shields.io/badge/stability-Chromium--Grade-blue?style=flat-square)
 
 > _"In networks, chaos is the default. Let aoni be your ice-cold anchor."_
+> 
+> **Manifesto**: _«The moment bytes leave one machine to reach another — it happens with 0 allocations, at silicon line speed, with zero type drift, and zero chance of WAF interception.»_
 
 #### English • [Русский](README_RU.md)
 
