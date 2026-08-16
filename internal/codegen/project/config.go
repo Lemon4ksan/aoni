@@ -62,11 +62,12 @@ type ContractConfig struct {
 	Plugins  []PluginConfig  `yaml:"plugins,omitempty"`
 }
 
-// UpstreamConfig links a Go contract to an external OpenAPI/Swagger schema source.
+// UpstreamConfig links a Go contract to an external OpenAPI/Swagger schema source or proprietary dump.
 type UpstreamConfig struct {
-	Source  string `yaml:"source"`
-	Format  string `yaml:"format,omitempty"` // "openapi", "swagger", "har"
-	Refresh string `yaml:"refresh,omitempty"`
+	Source   string `yaml:"source"`
+	Format   string `yaml:"format,omitempty"`   // "openapi", "swagger", "json", "raw"
+	Generate string `yaml:"generate,omitempty"` // Hook command to generate api.go from source dump
+	Refresh  string `yaml:"refresh,omitempty"`  // Hook command to fetch latest source dump
 }
 
 // PluginConfig specifies code generation targets for polyglot platforms (e.g. TypeScript, C, Swift).

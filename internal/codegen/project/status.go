@@ -12,6 +12,7 @@ import (
 	"strings"
 
 	"github.com/lemon4ksan/aoni/internal/codegen/diff"
+	"github.com/lemon4ksan/aoni/internal/codegen/ingest"
 	"github.com/lemon4ksan/aoni/internal/codegen/openapi"
 	"github.com/lemon4ksan/aoni/internal/codegen/parser"
 )
@@ -325,14 +326,42 @@ func (e *StatusEngine) Inspect(cfg *Config, contracts []ContractConfig) *StatusR
 				upstreamPath = filepath.Join(cfg.RootDir, upstreamPath)
 			}
 
-			if doc, docErr := openapi.LoadSpec(upstreamPath, nil); docErr == nil {
-				diffReport := diffEngine.Compare(root, doc, ct.File, status.Source)
-				status.UpstreamBreakingCount = diffReport.BreakingCount()
-				status.UpstreamDriftCount = diffReport.NonBreakingCount()
-				status.UpstreamGhostCount = diffReport.GhostCount()
+			rawSpecBytes, readErr := os.ReadFile(upstreamPath)
+			specFormat, _ := ingest.DetectFormat(rawSpecBytes)
 
-				if status.UpstreamBreakingCount > 0 || status.UpstreamDriftCount > 0 {
-					driftServiceNames = append(driftServiceNames, fmt.Sprintf("%s (%s)", status.Name, status.Source))
+			if readErr == nil && (specFormat == ingest.FormatOpenAPI3 || specFormat == ingest.FormatSwagger2) {
+				if doc, docErr := openapi.LoadSpec(upstreamPath, nil); docErr == nil {
+					diffReport := diffEngine.Compare(root, doc, ct.File, status.Source)
+					status.UpstreamBreakingCount = diffReport.BreakingCount()
+					status.UpstreamDriftCount = diffReport.NonBreakingCount()
+					status.UpstreamGhostCount = diffReport.GhostCount()
+
+					if status.UpstreamBreakingCount > 0 || status.UpstreamDriftCount > 0 {
+						driftServiceNames = append(
+							driftServiceNames,
+							fmt.Sprintf("%s (%s)", status.Name, status.Source),
+						)
+					}
+				}
+			} else if upInfo, upErr := os.Stat(upstreamPath); upErr == nil {
+				// If not standard OpenAPI (e.g. proprietary JSON/YAML dump), check file modification timestamp
+				if upInfo.ModTime().After(srcInfo.ModTime()) {
+					status.UpstreamDriftCount = 1
+					if ct.Upstream != nil && ct.Upstream.Generate != "" {
+						report.NextActions = append(
+							report.NextActions,
+							fmt.Sprintf(
+								"Run `%s` to rebuild contract from updated upstream dump (%s)",
+								ct.Upstream.Generate,
+								status.Source,
+							),
+						)
+					} else {
+						driftServiceNames = append(
+							driftServiceNames,
+							fmt.Sprintf("%s (%s)", status.Name, status.Source),
+						)
+					}
 				}
 			}
 		}
