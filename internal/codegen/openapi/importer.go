@@ -41,6 +41,42 @@ type ImportConfig struct {
 	TypeMap        map[string]string
 }
 
+// ImportResult captures the outcome of an OpenAPI contract generation pass.
+type ImportResult struct {
+	ContractCode  []byte
+	ModelsCode    []byte
+	ServicesCount int
+	MethodsCount  int
+	StructsCount  int
+}
+
+// Import loads an OpenAPI specification and translates it into declarative aoni Go contracts.
+func Import(cfg ImportConfig) (*ImportResult, error) {
+	spec, err := LoadSpec(cfg.SpecFile, cfg.SpecData)
+	if err != nil {
+		return nil, fmt.Errorf("loading spec: %w", err)
+	}
+
+	code, err := GenerateContract(spec, cfg)
+	if err != nil {
+		return nil, fmt.Errorf("generating contract: %w", err)
+	}
+
+	res := &ImportResult{
+		ContractCode:  code,
+		ServicesCount: 1,
+	}
+
+	if spec.Paths != nil {
+		res.MethodsCount = len(spec.Paths.Map())
+	}
+	if spec.Components != nil {
+		res.StructsCount = len(spec.Components.Schemas)
+	}
+
+	return res, nil
+}
+
 var initialisms = map[string]bool{
 	"ACL": true, "API": true, "ASCII": true,
 	"CPU": true, "CSS": true, "DNS": true,

@@ -616,3 +616,47 @@ type API interface {
 	require.Contains(t, string(content), "NewAPIMockServer(t testing.TB)")
 	require.Contains(t, string(content), "OnGetItem")
 }
+
+func TestApp_Init_FromOpenAPI(t *testing.T) {
+	tempDir := t.TempDir()
+	specFile := filepath.Join(tempDir, "swagger.json")
+	swaggerJSON := `{
+  "swagger": "2.0",
+  "info": { "title": "Petstore", "version": "1.0.0" },
+  "paths": {
+    "/pets/{id}": {
+      "get": {
+        "operationId": "getPet",
+        "parameters": [{ "name": "id", "in": "path", "required": true, "type": "string" }],
+        "responses": { "200": { "description": "OK" } }
+      }
+    }
+  }
+}`
+	require.NoError(t, os.WriteFile(specFile, []byte(swaggerJSON), 0o600))
+
+	var stdout, stderr bytes.Buffer
+	app := newTestApp(&stdout, &stderr)
+
+	err := app.Run(context.Background(), []string{
+		"init",
+		"-dir=" + tempDir,
+		"-from-openapi=" + specFile,
+		"-pkg=petstore",
+		"-service=PetStoreAPI",
+	})
+	require.NoError(t, err)
+	require.Contains(t, stdout.String(), "Successfully imported OpenAPI contract")
+
+	contractFile := filepath.Join(tempDir, "api.go")
+	require.FileExists(t, contractFile)
+
+	content, err := os.ReadFile(contractFile)
+	require.NoError(t, err)
+	require.Contains(t, string(content), "package petstore")
+	require.Contains(t, string(content), "type PetStoreAPI interface")
+	require.Contains(t, string(content), "GetPet")
+
+	vortexYml := filepath.Join(tempDir, ".vortex.yml")
+	require.FileExists(t, vortexYml)
+}
