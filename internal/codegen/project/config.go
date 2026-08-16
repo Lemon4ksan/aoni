@@ -417,3 +417,124 @@ func (c *Config) FilterContext(targetDir string, targetNames ...string) []Contra
 
 	return matched
 }
+
+// WorkConfigFileName is the primary multi-repo workspace configuration file.
+const (
+	WorkConfigFileName     = ".vortex.work"
+	AltWorkConfigFileName  = "vortex.work"
+	YamlWorkConfigFileName = ".vortex.work.yml"
+)
+
+// WorkConfig represents a multi-repo workspace orchestrator (.vortex.work).
+type WorkConfig struct {
+	Version    int      `yaml:"version"`
+	Workspaces []string `yaml:"workspaces"`
+
+	// Runtime metadata
+	WorkDir  string    `yaml:"-"`
+	WorkPath string    `yaml:"-"`
+	Projects []*Config `yaml:"-"`
+}
+
+// FindWorkRoot traverses upward looking for .vortex.work or vortex.work.
+func FindWorkRoot(startDir string) (workDir, workPath string, err error) {
+	curr, err := filepath.Abs(startDir)
+	if err != nil {
+		curr = startDir
+	}
+
+	for {
+		for _, name := range []string{WorkConfigFileName, AltWorkConfigFileName, YamlWorkConfigFileName} {
+			filePath := filepath.Join(curr, name)
+			if info, err := os.Stat(filePath); err == nil && !info.IsDir() {
+				return curr, filePath, nil
+			}
+		}
+
+		parent := filepath.Dir(curr)
+		if parent == curr {
+			break
+		}
+
+		curr = parent
+	}
+
+	return "", "", errors.New("no .vortex.work workspace file found in hierarchy")
+}
+
+// LoadWork loads the .vortex.work configuration and resolves all child workspace configs.
+func LoadWork(workDir string) (*WorkConfig, error) {
+	_, workPath, err := FindWorkRoot(workDir)
+	if err != nil {
+		// Try direct path in workDir
+		for _, name := range []string{WorkConfigFileName, AltWorkConfigFileName, YamlWorkConfigFileName} {
+			fp := filepath.Join(workDir, name)
+			if info, statErr := os.Stat(fp); statErr == nil && !info.IsDir() {
+				workPath = fp
+				break
+			}
+		}
+
+		if workPath == "" {
+			return nil, err
+		}
+	}
+
+	data, err := os.ReadFile(workPath)
+	if err != nil {
+		return nil, fmt.Errorf("read %s: %w", workPath, err)
+	}
+
+	var wc WorkConfig
+	if err := yaml.Unmarshal(data, &wc); err != nil {
+		return nil, fmt.Errorf("parse %s: %w", workPath, err)
+	}
+
+	wc.WorkDir = filepath.Dir(workPath)
+	wc.WorkPath = workPath
+
+	for _, ws := range wc.Workspaces {
+		wsPath := filepath.Join(wc.WorkDir, filepath.FromSlash(ws))
+		if cfg, lErr := Load(wsPath); lErr == nil && cfg != nil {
+			wc.Projects = append(wc.Projects, cfg)
+		}
+	}
+
+	return &wc, nil
+}
+
+// SaveWork writes a WorkConfig to disk.
+func SaveWork(filePath string, wc *WorkConfig) error {
+	data, err := yaml.Marshal(wc)
+	if err != nil {
+		return fmt.Errorf("marshal work config: %w", err)
+	}
+
+	return os.WriteFile(filePath, data, 0o600)
+}
+
+// AutoDiscoverWorkspaces scans subdirectories of parentDir to find directories containing .vortex.yml.
+func AutoDiscoverWorkspaces(parentDir string) ([]string, error) {
+	entries, err := os.ReadDir(parentDir)
+	if err != nil {
+		return nil, err
+	}
+
+	var discovered []string
+
+	for _, entry := range entries {
+		if !entry.IsDir() || strings.HasPrefix(entry.Name(), ".") {
+			continue
+		}
+
+		subDir := filepath.Join(parentDir, entry.Name())
+		for _, cfgName := range []string{ConfigFileName, "vortex.yaml", ".vortex.yaml"} {
+			if _, err := os.Stat(filepath.Join(subDir, cfgName)); err == nil {
+				discovered = append(discovered, "./"+entry.Name())
+				break
+			}
+		}
+	}
+
+	return discovered, nil
+}

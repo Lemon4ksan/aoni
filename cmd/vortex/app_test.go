@@ -21,6 +21,7 @@ func newTestApp(stdout, stderr *bytes.Buffer) *App {
 		&CmdAutoPilot{},
 		&CmdStatus{},
 		&CmdInit{},
+		&CmdWork{},
 		&CmdGen{},
 		&CmdHarness{},
 		&CmdCheck{},

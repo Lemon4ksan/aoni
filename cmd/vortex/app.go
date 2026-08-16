@@ -49,6 +49,10 @@ func NewApp(name, version, description string, commands ...Command) *App {
 				ap.app = app
 			}
 		}
+
+		if cw, ok := c.(*CmdWork); ok {
+			cw.app = app
+		}
 	}
 
 	return app

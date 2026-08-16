@@ -45,6 +45,12 @@ func (c *CmdAutoPilot) Run(ctx context.Context, _ []string, stdout, stderr io.Wr
 		return err
 	}
 
+	// Check if current directory is a multi-repo workspace (.vortex.work)
+	if wc, wErr := project.LoadWork(cwd); wErr == nil && wc != nil && len(wc.Workspaces) > 0 && wc.WorkDir == cwd {
+		workCmd := &CmdWork{app: c.app}
+		return workCmd.runForward(ctx, "autopilot", nil, stdout, stderr)
+	}
+
 	rootDir, _, _ := project.FindRoot(cwd)
 	cfg, _ := project.Load(rootDir)
 
