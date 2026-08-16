@@ -31,6 +31,7 @@ func newTestApp(stdout, stderr *bytes.Buffer) *App {
 		&CmdDiff{},
 		&CmdReview{},
 		&CmdAccept{},
+		&CmdCherryPick{},
 		&CmdSource{},
 		&CmdLog{},
 		&CmdTag{},
@@ -1107,4 +1108,84 @@ type MarketAPI interface {
 	err = app.Run(context.Background(), []string{"tag", "rm", "v1.0.0", "-dir=" + tempDir})
 	require.NoError(t, err)
 	require.Contains(t, stdout.String(), "Removed API release tag v1.0.0")
+}
+
+func TestApp_CherryPick(t *testing.T) {
+	tempDir := t.TempDir()
+
+	// 1. Source Service (Mannco)
+	srcDir := filepath.Join(tempDir, "pkg", "mannco")
+	require.NoError(t, os.MkdirAll(srcDir, 0o750))
+	srcFile := filepath.Join(srcDir, "api.go")
+	require.NoError(t, os.WriteFile(srcFile, []byte(`package mannco
+
+import (
+	"context"
+	"github.com/lemon4ksan/aoni"
+)
+
+type ItemDetails struct {
+	Name string
+	SKU  string
+}
+
+type ItemPriceResponse struct {
+	Price float64
+	Item  *ItemDetails
+}
+
+// @aoni:service
+type ManncoAPI interface {
+	// @get "items/{sku}/price"
+	GetItemPrice(ctx context.Context, sku string, mods ...aoni.RequestModifier) (*ItemPriceResponse, error)
+}
+`), 0o600))
+
+	// 2. Dest Service (Bptf)
+	destDir := filepath.Join(tempDir, "pkg", "bptf")
+	require.NoError(t, os.MkdirAll(destDir, 0o750))
+	destFile := filepath.Join(destDir, "api.go")
+	require.NoError(t, os.WriteFile(destFile, []byte(`package bptf
+
+import (
+	"context"
+	"github.com/lemon4ksan/aoni"
+)
+
+// @aoni:service
+type BptfAPI interface {
+	// @get "heartbeat"
+	Ping(ctx context.Context, mods ...aoni.RequestModifier) (map[string]any, error)
+}
+`), 0o600))
+
+	var stdout, stderr bytes.Buffer
+
+	app := newTestApp(&stdout, &stderr)
+
+	// Dry run first
+	err := app.Run(
+		context.Background(),
+		[]string{"cherry-pick", srcFile + ":GetItemPrice", "--to=" + destFile, "-dry-run", "-dir=" + tempDir},
+	)
+	require.NoError(t, err)
+	require.Contains(t, stdout.String(), "Dry-Run AST Transplant")
+
+	// Real cherry-pick
+	stdout.Reset()
+
+	err = app.Run(
+		context.Background(),
+		[]string{"cherry-pick", srcFile + ":GetItemPrice", "--to=" + destFile, "-dir=" + tempDir},
+	)
+	require.NoError(t, err)
+	require.Contains(t, stdout.String(), "Successfully cherry-picked GetItemPrice")
+	require.Contains(t, stdout.String(), "2 dependent DTO struct(s) copied")
+
+	// Verify dest file now contains GetItemPrice, ItemPriceResponse, and nested ItemDetails
+	content, err := os.ReadFile(destFile)
+	require.NoError(t, err)
+	require.Contains(t, string(content), "GetItemPrice(ctx context.Context")
+	require.Contains(t, string(content), "type ItemPriceResponse struct")
+	require.Contains(t, string(content), "type ItemDetails struct")
 }
