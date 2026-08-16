@@ -209,3 +209,69 @@ func TestProject_EnsureGitignore(t *testing.T) {
 	require.Contains(t, string(content2), "node_modules/")
 	require.Contains(t, string(content2), "*_mock.gen.go")
 }
+
+func TestProject_MultiServiceConsolidation(t *testing.T) {
+	tempDir := t.TempDir()
+	serviceDir := filepath.Join(tempDir, "pkg", "steam", "webapi")
+	require.NoError(t, os.MkdirAll(serviceDir, 0o750))
+
+	apiFile := filepath.Join(serviceDir, "api.go")
+	apiSrc := `package webapi
+
+import (
+	"context"
+	"github.com/lemon4ksan/aoni"
+)
+
+// @aoni:service
+type CSGOPlayers730 interface {
+	// @get "IGetCommunityBadgeProgress/v1"
+	GetProgress(ctx context.Context, mods ...aoni.RequestModifier) (map[string]any, error)
+}
+
+// @aoni:service
+type DOTA2Match570 interface {
+	// @get "GetMatchHistory/v1"
+	GetMatch(ctx context.Context, mods ...aoni.RequestModifier) (map[string]any, error)
+}
+`
+	require.NoError(t, os.WriteFile(apiFile, []byte(apiSrc), 0o600))
+
+	cfg, err := project.AutoDiscover(tempDir)
+	require.NoError(t, err)
+	// Must consolidate into exactly 1 contract entry
+	require.Len(t, cfg.Contracts, 1)
+	require.Equal(t, "WebapiAPI", cfg.Contracts[0].Name)
+	require.Equal(t, "webapi", cfg.Contracts[0].Package)
+}
+
+func TestProject_AutoDiscover_Exclude(t *testing.T) {
+	tempDir := t.TempDir()
+
+	p1 := filepath.Join(tempDir, "pkg", "api")
+	p2 := filepath.Join(tempDir, "internal", "legacy")
+
+	require.NoError(t, os.MkdirAll(p1, 0o750))
+	require.NoError(t, os.MkdirAll(p2, 0o750))
+
+	src := `package testpkg
+import (
+	"context"
+	"github.com/lemon4ksan/aoni"
+)
+// @aoni:service
+type API interface {
+	// @get "test"
+	Get(ctx context.Context, mods ...aoni.RequestModifier) (map[string]any, error)
+}
+`
+	require.NoError(t, os.WriteFile(filepath.Join(p1, "api.go"), []byte(src), 0o600))
+	require.NoError(t, os.WriteFile(filepath.Join(p2, "api.go"), []byte(src), 0o600))
+
+	cfg, err := project.AutoDiscover(tempDir, project.AutoDiscoverOptions{
+		Exclude: []string{"internal/**"},
+	})
+	require.NoError(t, err)
+	require.Len(t, cfg.Contracts, 1)
+	require.Equal(t, "pkg/api/api.go", cfg.Contracts[0].File)
+}

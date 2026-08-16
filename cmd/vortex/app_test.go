@@ -25,6 +25,7 @@ func newTestApp(stdout, stderr *bytes.Buffer) *App {
 		&CmdGen{},
 		&CmdHarness{},
 		&CmdMock{},
+		&CmdClean{},
 		&CmdCheck{},
 		&CmdDiff{},
 		&CmdReview{},
@@ -722,4 +723,112 @@ components:
 
 	vortexYml := filepath.Join(tempDir, ".vortex.yml")
 	require.FileExists(t, vortexYml)
+}
+
+func TestApp_Init_Filters(t *testing.T) {
+	tempDir := t.TempDir()
+
+	// pkg1 (to include)
+	pkg1Dir := filepath.Join(tempDir, "pkg", "steam", "market")
+	require.NoError(t, os.MkdirAll(pkg1Dir, 0o750))
+
+	src1 := `package market
+import (
+	"context"
+	"github.com/lemon4ksan/aoni"
+)
+// @aoni:service
+type MarketAPI interface {
+	// @get "price"
+	GetPrice(ctx context.Context, mods ...aoni.RequestModifier) (map[string]any, error)
+}
+`
+	require.NoError(t, os.WriteFile(filepath.Join(pkg1Dir, "api.go"), []byte(src1), 0o600))
+
+	// pkg2 (to exclude)
+	pkg2Dir := filepath.Join(tempDir, "pkg", "legacy", "oldapi")
+	require.NoError(t, os.MkdirAll(pkg2Dir, 0o750))
+
+	src2 := `package oldapi
+import (
+	"context"
+	"github.com/lemon4ksan/aoni"
+)
+// @aoni:service
+type OldAPI interface {
+	// @get "old"
+	GetOld(ctx context.Context, mods ...aoni.RequestModifier) (map[string]any, error)
+}
+`
+	require.NoError(t, os.WriteFile(filepath.Join(pkg2Dir, "api.go"), []byte(src2), 0o600))
+
+	var stdout, stderr bytes.Buffer
+
+	app := newTestApp(&stdout, &stderr)
+
+	err := app.Run(context.Background(), []string{
+		"init",
+		"-dir=" + tempDir,
+		"-exclude=pkg/legacy/**",
+	})
+	require.NoError(t, err)
+
+	vortexYml := filepath.Join(tempDir, ".vortex.yml")
+	require.FileExists(t, vortexYml)
+	content, err := os.ReadFile(vortexYml)
+	require.NoError(t, err)
+	require.Contains(t, string(content), "MarketAPI")
+	require.NotContains(t, string(content), "OldAPI")
+}
+
+func TestApp_Clean(t *testing.T) {
+	tempDir := t.TempDir()
+
+	// Create test artifacts
+	mockFile := filepath.Join(tempDir, "api_mock.gen.go")
+	harnessFile := filepath.Join(tempDir, "api_harness.gen.go")
+	profFile := filepath.Join(tempDir, "cpu.prof")
+	covFile := filepath.Join(tempDir, "coverage.out")
+	genFile := filepath.Join(tempDir, "api.gen.go")
+	cacheDir := filepath.Join(tempDir, ".vortex")
+	require.NoError(t, os.MkdirAll(cacheDir, 0o750))
+	require.NoError(t, os.WriteFile(filepath.Join(cacheDir, "cache.db"), []byte("cache data"), 0o600))
+
+	require.NoError(t, os.WriteFile(mockFile, []byte("// mock"), 0o600))
+	require.NoError(t, os.WriteFile(harnessFile, []byte("// harness"), 0o600))
+	require.NoError(t, os.WriteFile(profFile, []byte("prof data"), 0o600))
+	require.NoError(t, os.WriteFile(covFile, []byte("cov data"), 0o600))
+	require.NoError(t, os.WriteFile(genFile, []byte("// gen client"), 0o600))
+
+	var stdout, stderr bytes.Buffer
+
+	app := newTestApp(&stdout, &stderr)
+
+	// Dry run first
+	err := app.Run(context.Background(), []string{"clean", "-dry-run", "-dir=" + tempDir})
+	require.NoError(t, err)
+	require.Contains(t, stdout.String(), "Dry-run")
+	require.FileExists(t, mockFile) // Should not be deleted yet
+
+	// Real clean
+	stdout.Reset()
+
+	err = app.Run(context.Background(), []string{"clean", "-dir=" + tempDir})
+	require.NoError(t, err)
+	require.Contains(t, stdout.String(), "Successfully removed")
+
+	require.NoFileExists(t, mockFile)
+	require.NoFileExists(t, harnessFile)
+	require.NoFileExists(t, profFile)
+	require.NoFileExists(t, covFile)
+	require.NoDirExists(t, cacheDir)
+	// Normal clean preserves api.gen.go
+	require.FileExists(t, genFile)
+
+	// Clean --all removes api.gen.go as well
+	stdout.Reset()
+
+	err = app.Run(context.Background(), []string{"clean", "--all", "-dir=" + tempDir})
+	require.NoError(t, err)
+	require.NoFileExists(t, genFile)
 }

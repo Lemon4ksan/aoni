@@ -299,8 +299,19 @@ func Load(startDir string) (*Config, error) {
 	return AutoDiscover(rootDir)
 }
 
+// AutoDiscoverOptions configures path filtering for workspace contract auto-discovery.
+type AutoDiscoverOptions struct {
+	Exclude []string
+	Match   string
+}
+
 // AutoDiscover scans the workspace directory tree and builds a virtual Config.
-func AutoDiscover(rootDir string) (*Config, error) {
+func AutoDiscover(rootDir string, opts ...AutoDiscoverOptions) (*Config, error) {
+	var opt AutoDiscoverOptions
+	if len(opts) > 0 {
+		opt = opts[0]
+	}
+
 	cfg := &Config{
 		Version:   1,
 		RootDir:   rootDir,
@@ -318,6 +329,13 @@ func AutoDiscover(rootDir string) (*Config, error) {
 			return filepath.SkipDir
 		}
 
+		relPath, relErr := filepath.Rel(rootDir, path)
+		if relErr != nil {
+			relPath = path
+		}
+
+		relSlash := filepath.ToSlash(relPath)
+
 		if d.IsDir() {
 			name := d.Name()
 			if name == ".git" || name == "vendor" || name == "node_modules" || name == ".system_generated" ||
@@ -325,6 +343,22 @@ func AutoDiscover(rootDir string) (*Config, error) {
 				return filepath.SkipDir
 			}
 
+			for _, ex := range opt.Exclude {
+				if ex != "" && (matchGlob(ex, relSlash) || matchGlob(ex, name)) {
+					return filepath.SkipDir
+				}
+			}
+
+			return nil
+		}
+
+		for _, ex := range opt.Exclude {
+			if ex != "" && (matchGlob(ex, relSlash) || matchGlob(ex, d.Name())) {
+				return nil
+			}
+		}
+
+		if opt.Match != "" && !matchGlob(opt.Match, relSlash) {
 			return nil
 		}
 
@@ -338,13 +372,8 @@ func AutoDiscover(rootDir string) (*Config, error) {
 			return nil
 		}
 
-		relFile, relErr := filepath.Rel(rootDir, path)
-		if relErr != nil {
-			relFile = path
-		}
-
-		dir := filepath.Dir(relFile)
-		baseName := filepath.Base(relFile)
+		dir := filepath.Dir(relPath)
+		baseName := filepath.Base(relPath)
 		genName := strings.TrimSuffix(baseName, ".go") + ".gen.go"
 		genPath := filepath.Join(dir, genName)
 
@@ -353,24 +382,47 @@ func AutoDiscover(rootDir string) (*Config, error) {
 			modelsPath = filepath.Join(dir, "models.gen.go")
 		}
 
-		for _, s := range root.Services {
-			var upstream *UpstreamConfig
-			if s.Source != "" {
+		// Consolidate multiple services in the same file into a single contract entry
+		contractName := ""
+
+		var upstream *UpstreamConfig
+
+		if len(root.Services) == 1 {
+			contractName = root.Services[0].Name
+			if root.Services[0].Source != "" {
 				upstream = &UpstreamConfig{
-					Source: s.Source,
+					Source: root.Services[0].Source,
 					Format: "openapi",
 				}
 			}
+		} else {
+			// Multiple services in 1 file (e.g. Steam WebAPI sub-interfaces)
+			for _, s := range root.Services {
+				if s.Source != "" && upstream == nil {
+					upstream = &UpstreamConfig{
+						Source: s.Source,
+						Format: "openapi",
+					}
+				}
 
-			cfg.Contracts = append(cfg.Contracts, ContractConfig{
-				Name:     s.Name,
-				Package:  root.PackageName,
-				File:     filepath.ToSlash(relFile),
-				Gen:      filepath.ToSlash(genPath),
-				Models:   filepath.ToSlash(modelsPath),
-				Upstream: upstream,
-			})
+				if strings.EqualFold(s.Name, root.PackageName+"API") || strings.HasSuffix(s.Name, "API") {
+					contractName = s.Name
+				}
+			}
+
+			if contractName == "" || contractName == "API" {
+				contractName = strings.ToUpper(root.PackageName[:1]) + root.PackageName[1:] + "API"
+			}
 		}
+
+		cfg.Contracts = append(cfg.Contracts, ContractConfig{
+			Name:     contractName,
+			Package:  root.PackageName,
+			File:     filepath.ToSlash(relPath),
+			Gen:      filepath.ToSlash(genPath),
+			Models:   filepath.ToSlash(modelsPath),
+			Upstream: upstream,
+		})
 
 		return nil
 	})
@@ -378,8 +430,33 @@ func AutoDiscover(rootDir string) (*Config, error) {
 	return cfg, nil
 }
 
+func matchGlob(pattern, target string) bool {
+	pattern = filepath.ToSlash(pattern)
+	target = filepath.ToSlash(target)
+
+	if pattern == target || pattern == "*" {
+		return true
+	}
+
+	if strings.HasSuffix(pattern, "/**") {
+		prefix := strings.TrimSuffix(pattern, "/**")
+		return target == prefix || strings.HasPrefix(target, prefix+"/")
+	}
+
+	if strings.HasPrefix(pattern, "**/") {
+		suffix := strings.TrimPrefix(pattern, "**/")
+		return target == suffix || strings.HasSuffix(target, "/"+suffix)
+	}
+
+	if matched, err := filepath.Match(pattern, target); err == nil && matched {
+		return true
+	}
+
+	return strings.Contains(target, strings.Trim(pattern, "*"))
+}
+
 // Init creates a fresh .vortex.yml file in rootDir based on auto-discovered workspace contracts.
-func Init(rootDir string, force bool) (*Config, error) {
+func Init(rootDir string, force bool, opts ...AutoDiscoverOptions) (*Config, error) {
 	configPath := filepath.Join(rootDir, ConfigFileName)
 	if !force {
 		if _, err := os.Stat(configPath); err == nil {
@@ -387,7 +464,7 @@ func Init(rootDir string, force bool) (*Config, error) {
 		}
 	}
 
-	cfg, err := AutoDiscover(rootDir)
+	cfg, err := AutoDiscover(rootDir, opts...)
 	if err != nil {
 		return nil, fmt.Errorf("auto-discovering services: %w", err)
 	}

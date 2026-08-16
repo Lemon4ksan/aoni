@@ -11,6 +11,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/lemon4ksan/aoni/internal/codegen/asyncapi"
 	"github.com/lemon4ksan/aoni/internal/codegen/openapi"
@@ -40,6 +41,8 @@ func (c *CmdInit) Run(ctx context.Context, args []string, stdout, stderr io.Writ
 		pkgFlag          = fs.String("pkg", "", "Go package name when importing from specifications")
 		serviceFlag      = fs.String("service", "", "Service interface name when importing from specifications")
 		outFlag          = fs.String("out", "", "Destination file for imported contract (default: api.go)")
+		excludeFlag      = fs.String("exclude", "", "Comma-separated path patterns or globs to ignore during discovery")
+		matchFlag        = fs.String("match", "", "Path pattern or glob to restrict contract discovery")
 	)
 
 	fs.Usage = func() {
@@ -47,7 +50,7 @@ func (c *CmdInit) Run(ctx context.Context, args []string, stdout, stderr io.Writ
 		fmt.Fprintf(stderr, "Usage:\n")
 		fmt.Fprintf(
 			stderr,
-			"  vortex init [-force] [-dir=.] [-from-openapi=spec.json] [-from-asyncapi=spec.yml] [-pkg=name] [-service=API]\n\n",
+			"  vortex init [-force] [-dir=.] [-exclude=patterns] [-match=pattern] [-from-openapi=spec.json]\n\n",
 		)
 		fmt.Fprintf(stderr, "Flags:\n")
 		fs.PrintDefaults()
@@ -158,7 +161,14 @@ func (c *CmdInit) Run(ctx context.Context, args []string, stdout, stderr io.Writ
 		fmt.Fprintf(stdout, "  • Structs:  %d\n\n", res.StructsCount)
 	}
 
-	cfg, err := project.Init(targetDir, force)
+	var discOpts project.AutoDiscoverOptions
+	if *excludeFlag != "" {
+		discOpts.Exclude = strings.Split(*excludeFlag, ",")
+	}
+
+	discOpts.Match = *matchFlag
+
+	cfg, err := project.Init(targetDir, force, discOpts)
 	if err != nil {
 		return fmt.Errorf("initializing workspace: %w", err)
 	}
