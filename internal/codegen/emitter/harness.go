@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"go/format"
+	"path/filepath"
 	"strings"
 
 	"github.com/lemon4ksan/aoni/internal/codegen/ir"
@@ -20,6 +21,16 @@ func (e *Emitter) EmitHarness(root *ir.RootIR) ([]byte, error) {
 	if root == nil || len(root.Services) == 0 {
 		return nil, errors.New("harness emitter: no services found in IR")
 	}
+
+	var bodyBuf bytes.Buffer
+
+	for _, svc := range root.Services {
+		if err := e.emitServiceHarness(&bodyBuf, root, svc); err != nil {
+			return nil, err
+		}
+	}
+
+	bodyCode := bodyBuf.String()
 
 	var buf bytes.Buffer
 
@@ -44,10 +55,17 @@ func (e *Emitter) EmitHarness(root *ir.RootIR) ([]byte, error) {
 			continue
 		}
 
-		if imp.Alias != "" {
-			fmt.Fprintf(&buf, "\t%s %q\n", imp.Alias, imp.Path)
-		} else {
-			fmt.Fprintf(&buf, "\t%q\n", imp.Path)
+		pkgName := imp.Alias
+		if pkgName == "" {
+			pkgName = filepath.Base(imp.Path)
+		}
+
+		if isPkgUsedInCode(bodyCode, pkgName) {
+			if imp.Alias != "" {
+				fmt.Fprintf(&buf, "\t%s %q\n", imp.Alias, imp.Path)
+			} else {
+				fmt.Fprintf(&buf, "\t%q\n", imp.Path)
+			}
 		}
 	}
 
@@ -73,11 +91,7 @@ type AttributionResult struct {
 
 `)
 
-	for _, svc := range root.Services {
-		if err := e.emitServiceHarness(&buf, root, svc); err != nil {
-			return nil, err
-		}
-	}
+	buf.WriteString(bodyCode)
 
 	// Format output with standard gofmt
 	formatted, err := format.Source(buf.Bytes())
@@ -442,5 +456,32 @@ func (e *Emitter) emitParamFeeder(buf *bytes.Buffer, p *ir.ParamIR, knownStructs
 		default:
 			fmt.Fprintf(buf, "\tvar %s %s\n", paramName, goType)
 		}
+	}
+}
+
+func isPkgUsedInCode(code, pkgName string) bool {
+	target := pkgName + "."
+	idx := 0
+
+	for {
+		pos := strings.Index(code[idx:], target)
+		if pos == -1 {
+			return false
+		}
+
+		absPos := idx + pos
+		if absPos == 0 {
+			return true
+		}
+
+		prev := rune(code[absPos-1])
+
+		isWordChar := (prev >= 'a' && prev <= 'z') || (prev >= 'A' && prev <= 'Z') || (prev >= '0' && prev <= '9') ||
+			prev == '_'
+		if !isWordChar {
+			return true
+		}
+
+		idx = absPos + len(target)
 	}
 }
