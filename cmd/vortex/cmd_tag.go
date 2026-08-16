@@ -236,15 +236,15 @@ func (c *CmdTag) runList(
 			if len(parts) >= 1 && strings.HasPrefix(parts[0], "v") {
 				vName := parts[0]
 				// Check if already in db
-				alreadyInDb := false
+				alreadyInDB := false
 				for _, t := range tags {
 					if t.Version == vName {
-						alreadyInDb = true
+						alreadyInDB = true
 						break
 					}
 				}
 
-				if !alreadyInDb {
+				if !alreadyInDB {
 					date := time.Now()
 					if len(parts) >= 2 {
 						if t, pErr := time.Parse("2006-01-02 15:04:05 -0700", parts[1]); pErr == nil {

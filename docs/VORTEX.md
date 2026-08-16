@@ -217,6 +217,34 @@ vortex init -from-openapi=https://api.example.com/openapi.json -pkg=petstore -se
 vortex init -from-asyncapi=./specs/market_stream.yaml -pkg=market -service=MarketStreamAPI -out=pkg/market/api.go
 ```
 
+#### `vortex config` (Aliases: `cfg`, `conf`)
+Views, queries, and modifies workspace settings, code generation defaults, and lint rules without manual YAML editing.
+
+```bash
+# List all workspace configurations
+vortex config list
+vortex config list --json
+
+# Query specific properties
+vortex config get defaults.casing
+vortex config get defaults.engine
+
+# Modify settings with type validation
+vortex config set defaults.casing snake_case
+vortex config set defaults.engine fast
+vortex config set defaults.retry 3
+vortex config set defaults.timeout 15s
+
+# Manage lint rules and strict mode
+vortex config lint disable S001 W002
+vortex config lint enable S001
+vortex config lint strict true
+
+# Manage polyglot export plugins
+vortex config plugin add ts --out=src/api.ts --contract=Market
+vortex config plugin rm ts --contract=Market
+```
+
 #### `vortex status`
 Performs a health check across all registered contracts in the workspace.
 
@@ -311,6 +339,38 @@ vortex proto -src=./proto -out=./pkg/pb -import=github.com/my/project/pkg/pb
 
 ---
 
+### AST Manipulation & Refactoring
+
+#### `vortex cherry-pick` (Aliases: `cp`, `transplant`, `pick`)
+Transplants a method or DTO struct from a source contract to a target contract AST, **automatically copying all dependent nested DTO structs** (transitive closure):
+
+```bash
+# Cherry-pick method and all its transitive parameter/return DTO structs
+vortex cherry-pick pkg/services/mannco/api.go:GetItemPrices --to=pkg/services/bptf/api.go
+
+# Cherry-pick a specific DTO struct and its nested types
+vortex cherry-pick Mannco:ItemDTO --to=Bptf
+
+# Preview transplantation without modifying files on disk
+vortex cherry-pick pkg/services/pricedb/api.go:PredictSpell --to=pkg/services/crit/api.go --dry-run
+```
+
+#### `vortex refactor` (Aliases: `rebase`, `rf`, `reorganize`)
+Provides interactive AST-level contract restructuring, interface splitting, and batch renaming:
+
+```bash
+# Split monolithic interface into separate focused interface (ISP principle)
+vortex refactor split --from=MarketAPI --methods="Get*,List*" --to=MarketReaderAPI
+
+# Split into a separate new file
+vortex refactor split --from=PriceDB --methods="Predict*" --to=PredictAPI --out=pkg/services/pricedb/predict.go
+
+# Batch rename method names via regular expressions
+vortex refactor rename --match="Fetch(.*)" --replace="Get$1" pkg/services/bptf/api.go
+```
+
+---
+
 ### Validation, Diffing & Auditing
 
 #### `vortex check`
@@ -335,6 +395,32 @@ Interactive review tool for inspecting and accepting upstream schema changes.
 ```bash
 vortex review openapi.json pkg/user/api.go
 vortex accept openapi.json pkg/user/api.go
+```
+
+#### `vortex blame` (Aliases: `pvn`, `provenance`, `origin`)
+Inspects contract lineage, directive origin, and Git author metadata for every method and DTO struct:
+
+```bash
+vortex blame pkg/services/bptf/api.go
+vortex blame Market
+vortex blame pkg/services/pricedb/api.go --method=GetPrice
+vortex blame pkg/services/pricedb/api.go --json
+```
+
+#### `vortex tag` (Aliases: `release`, `semver`)
+Manages contract SemVer release snapshots, changelogs, and Git release tags:
+
+```bash
+# Record a contract release snapshot
+vortex tag add v1.2.0 -m "Release with inventory filters"
+vortex tag add v1.3.0 Market -m "Add instant buy order endpoints"
+
+# List all release tags and historical snapshots
+vortex tag list
+
+# Inspect detailed snapshot (endpoint list, author, timestamp)
+vortex tag show v1.2.0
+vortex tag rm v1.2.0
 ```
 
 #### `vortex log`

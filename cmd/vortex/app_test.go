@@ -32,6 +32,7 @@ func newTestApp(stdout, stderr *bytes.Buffer) *App {
 		&CmdReview{},
 		&CmdAccept{},
 		&CmdCherryPick{},
+		&CmdRefactor{},
 		&CmdSource{},
 		&CmdLog{},
 		&CmdTag{},
@@ -1188,4 +1189,73 @@ type BptfAPI interface {
 	require.Contains(t, string(content), "GetItemPrice(ctx context.Context")
 	require.Contains(t, string(content), "type ItemPriceResponse struct")
 	require.Contains(t, string(content), "type ItemDetails struct")
+}
+
+func TestApp_Refactor(t *testing.T) {
+	tempDir := t.TempDir()
+
+	serviceDir := filepath.Join(tempDir, "pkg", "market")
+	require.NoError(t, os.MkdirAll(serviceDir, 0o750))
+	apiFile := filepath.Join(serviceDir, "api.go")
+	require.NoError(t, os.WriteFile(apiFile, []byte(`package market
+
+import (
+	"context"
+	"github.com/lemon4ksan/aoni"
+)
+
+// @aoni:service
+type MarketAPI interface {
+	// @get "items"
+	FetchItems(ctx context.Context, mods ...aoni.RequestModifier) (map[string]any, error)
+
+	// @get "items/{id}"
+	FetchItemByID(ctx context.Context, id string, mods ...aoni.RequestModifier) (map[string]any, error)
+
+	// @post "items"
+	CreateListing(ctx context.Context, mods ...aoni.RequestModifier) (map[string]any, error)
+}
+`), 0o600))
+
+	var stdout, stderr bytes.Buffer
+
+	app := newTestApp(&stdout, &stderr)
+
+	// 1. Test Refactor Rename (Fetch* -> Get*)
+	err := app.Run(
+		context.Background(),
+		[]string{"refactor", "rename", "--match=Fetch(.*)", "--replace=Get$1", apiFile, "-dir=" + tempDir},
+	)
+	require.NoError(t, err)
+	require.Contains(t, stdout.String(), "Successfully renamed 2 method(s)")
+
+	content, err := os.ReadFile(apiFile)
+	require.NoError(t, err)
+	require.Contains(t, string(content), "GetItems(ctx context.Context")
+	require.Contains(t, string(content), "GetItemByID(ctx context.Context")
+	require.NotContains(t, string(content), "FetchItems")
+
+	// 2. Test Refactor Split (Get* -> MarketReaderAPI in same file)
+	stdout.Reset()
+
+	err = app.Run(
+		context.Background(),
+		[]string{
+			"refactor",
+			"split",
+			"--from=MarketAPI",
+			"--methods=Get*",
+			"--to=MarketReaderAPI",
+			apiFile,
+			"-dir=" + tempDir,
+		},
+	)
+	require.NoError(t, err)
+	require.Contains(t, stdout.String(), "Successfully split")
+
+	content2, err := os.ReadFile(apiFile)
+	require.NoError(t, err)
+	require.Contains(t, string(content2), "type MarketReaderAPI interface")
+	require.Contains(t, string(content2), "type MarketAPI interface")
+	require.Contains(t, string(content2), "CreateListing")
 }

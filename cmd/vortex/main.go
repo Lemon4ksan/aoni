@@ -29,6 +29,7 @@ func main() {
 		&CmdReview{},
 		&CmdAccept{},
 		&CmdCherryPick{},
+		&CmdRefactor{},
 		&CmdSource{},
 		&CmdLog{},
 		&CmdTag{},

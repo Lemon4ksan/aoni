@@ -117,6 +117,7 @@ func (c *CmdConfig) Run(ctx context.Context, args []string, stdout, stderr io.Wr
 			if len(posArgs) > 1 {
 				keyArg = posArgs[1]
 			}
+
 		case "set":
 			action = "set"
 
@@ -134,6 +135,7 @@ func (c *CmdConfig) Run(ctx context.Context, args []string, stdout, stderr io.Wr
 			if len(posArgs) > 1 {
 				keyArg = posArgs[1]
 			}
+
 		case "lint":
 			action = "lint"
 
