@@ -48,18 +48,71 @@ type DefaultsConfig struct {
 	Engine  string `yaml:"engine,omitempty"`
 	Persona string `yaml:"persona,omitempty"`
 	TLSSpec string `yaml:"tlsspec,omitempty"`
+	Harness bool   `yaml:"harness,omitempty"`
 }
 
 // ContractConfig describes a single service contract definition within the workspace.
 type ContractConfig struct {
-	Name     string          `yaml:"name"`
+	Name     string          `yaml:"name,omitempty"`
 	Package  string          `yaml:"package,omitempty"`
-	File     string          `yaml:"file"`
+	Dir      string          `yaml:"dir,omitempty"`
+	File     string          `yaml:"file,omitempty"`
 	Gen      string          `yaml:"gen,omitempty"`
 	Models   string          `yaml:"models,omitempty"`
 	Harness  string          `yaml:"harness,omitempty"`
 	Upstream *UpstreamConfig `yaml:"upstream,omitempty"`
 	Plugins  []PluginConfig  `yaml:"plugins,omitempty"`
+}
+
+// UnmarshalYAML supports string scalars ("swagger.json") and explicit mapping objects.
+func (u *UpstreamConfig) UnmarshalYAML(value *yaml.Node) error {
+	if value.Kind == yaml.ScalarNode {
+		u.Source = value.Value
+		if strings.HasSuffix(u.Source, ".json") || strings.HasSuffix(u.Source, ".yaml") ||
+			strings.HasSuffix(u.Source, ".yml") {
+			u.Format = "openapi"
+		}
+
+		return nil
+	}
+
+	type rawUpstream UpstreamConfig
+
+	var raw rawUpstream
+	if err := value.Decode(&raw); err != nil {
+		return err
+	}
+
+	*u = UpstreamConfig(raw)
+
+	return nil
+}
+
+// UnmarshalYAML supports string scalars ("pkg/services/crit"), compact mappings, and rich configs.
+func (c *ContractConfig) UnmarshalYAML(value *yaml.Node) error {
+	if value.Kind == yaml.ScalarNode {
+		val := value.Value
+		if strings.HasSuffix(val, ".go") {
+			c.File = val
+			c.Dir = filepath.ToSlash(filepath.Dir(val))
+		} else {
+			c.Dir = val
+			c.File = filepath.ToSlash(filepath.Join(val, "api.go"))
+		}
+
+		return nil
+	}
+
+	type rawContract ContractConfig
+
+	var raw rawContract
+	if err := value.Decode(&raw); err != nil {
+		return err
+	}
+
+	*c = ContractConfig(raw)
+
+	return nil
 }
 
 // UpstreamConfig links a Go contract to an external OpenAPI/Swagger schema source or proprietary dump.
@@ -95,6 +148,36 @@ type ExportConfig struct {
 		Out     string `yaml:"out,omitempty"`
 		Version string `yaml:"version,omitempty"`
 	} `yaml:"openapi,omitempty"`
+}
+
+// Normalize fills in implicit defaults for contracts based on folder conventions.
+func (cfg *Config) Normalize() {
+	for i := range cfg.Contracts {
+		ct := &cfg.Contracts[i]
+		if ct.File == "" && ct.Dir != "" {
+			ct.File = filepath.ToSlash(filepath.Join(ct.Dir, "api.go"))
+		}
+
+		if ct.File != "" && ct.Dir == "" {
+			ct.Dir = filepath.ToSlash(filepath.Dir(ct.File))
+		}
+
+		if ct.Package == "" && ct.Dir != "" {
+			ct.Package = filepath.Base(ct.Dir)
+		}
+
+		if ct.Name == "" && ct.Package != "" {
+			ct.Name = strings.ToUpper(ct.Package[:1]) + ct.Package[1:] + "API"
+		}
+
+		if ct.Gen == "" && ct.File != "" {
+			ct.Gen = strings.TrimSuffix(ct.File, ".go") + ".gen.go"
+		}
+
+		if ct.Harness == "" && cfg.Defaults.Harness && ct.File != "" {
+			ct.Harness = strings.TrimSuffix(ct.File, ".go") + "_harness.gen.go"
+		}
+	}
 }
 
 // FindRoot traverses upward from startDir to discover the repository root.
@@ -168,6 +251,8 @@ func Load(startDir string) (*Config, error) {
 		if cfg.Version == 0 {
 			cfg.Version = 1
 		}
+
+		cfg.Normalize()
 
 		return &cfg, nil
 	}

@@ -377,7 +377,11 @@ func (c *CmdAutoPilot) runWorld2Pipeline(
 						}
 
 						hRes, hErr := b.BuildHarness(ctx, file, harnessOut)
-						if hErr == nil && hRes != nil {
+						if hErr != nil {
+							return fmt.Errorf("harness compilation failed on %s: %w", file, hErr)
+						}
+
+						if hRes != nil {
 							totalBytes += hRes.BytesCount
 						}
 					}

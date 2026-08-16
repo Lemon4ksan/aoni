@@ -36,6 +36,21 @@ func (e *Emitter) EmitHarness(root *ir.RootIR) ([]byte, error) {
 	buf.WriteString("\t\"runtime/pprof\"\n")
 	buf.WriteString("\t\"testing\"\n")
 	buf.WriteString("\t\"time\"\n")
+
+	for _, imp := range root.Imports {
+		if imp.Path == "context" || imp.Path == "encoding/json" || imp.Path == "fmt" ||
+			imp.Path == "math/rand" || imp.Path == "runtime/pprof" || imp.Path == "testing" ||
+			imp.Path == "time" || imp.Path == "github.com/lemon4ksan/aoni" {
+			continue
+		}
+
+		if imp.Alias != "" {
+			fmt.Fprintf(&buf, "\t%s %q\n", imp.Alias, imp.Path)
+		} else {
+			fmt.Fprintf(&buf, "\t%q\n", imp.Path)
+		}
+	}
+
 	buf.WriteString(")\n\n")
 
 	// Global Scenario & Attribution Definitions
@@ -99,13 +114,18 @@ func (e *Emitter) emitServiceHarness(buf *bytes.Buffer, root *ir.RootIR, svc *ir
 
 `, feederName)
 
+	knownStructs := make(map[string]bool)
+	for _, st := range root.Structs {
+		knownStructs[st.Name] = true
+	}
+
 	// Feed methods for DTO structs
 	for _, st := range root.Structs {
 		fmt.Fprintf(buf, "func (f *%s) Feed%s(dst *%s) {\n", feederName, st.Name, st.Name)
 		fmt.Fprintf(buf, "\tif dst == nil { return }\n")
 
 		for _, fl := range st.Fields {
-			e.emitFieldFeeder(buf, fl)
+			e.emitFieldFeeder(buf, fl, knownStructs)
 		}
 
 		buf.WriteString("}\n\n")
@@ -135,7 +155,7 @@ func (e *Emitter) emitServiceHarness(buf *bytes.Buffer, root *ir.RootIR, svc *ir
 					continue
 				}
 
-				e.emitParamFeeder(buf, p)
+				e.emitParamFeeder(buf, p, knownStructs)
 			}
 
 			fmt.Fprintf(buf, "\treturn %s\n}\n\n", strings.Join(paramNames, ", "))
@@ -184,31 +204,35 @@ func (e *Emitter) emitServiceHarness(buf *bytes.Buffer, root *ir.RootIR, svc *ir
 			svc.Name,
 		)
 
-		var callArgs []string
+		var (
+			callArgs       []string
+			dataParamNames []string
+		)
 
-		callArgs = append(callArgs, "ctx")
 		for _, p := range m.Params {
-			if p.Location == ir.LocContext || p.Location == ir.LocModifiers {
+			if p.Location == ir.LocModifiers {
+				continue
+			}
+
+			if p.Location == ir.LocContext {
+				callArgs = append(callArgs, "ctx")
 				continue
 			}
 
 			callArgs = append(callArgs, p.GoName)
+			dataParamNames = append(dataParamNames, p.GoName)
 		}
 
-		if len(callArgs) > 1 {
-			var paramNames []string
-			for _, p := range m.Params {
-				if p.Location == ir.LocContext || p.Location == ir.LocModifiers {
-					continue
-				}
-
-				paramNames = append(paramNames, p.GoName)
-			}
-
-			fmt.Fprintf(buf, "\t%s := a.feeder.Feed%sParams()\n", strings.Join(paramNames, ", "), m.Name)
+		if len(dataParamNames) > 0 {
+			fmt.Fprintf(buf, "\t%s := a.feeder.Feed%sParams()\n", strings.Join(dataParamNames, ", "), m.Name)
 		}
 
-		fmt.Fprintf(buf, "\t_, err := c.%s(%s)\n", m.Name, strings.Join(callArgs, ", "))
+		if m.Return != nil && m.Return.IsVoid {
+			fmt.Fprintf(buf, "\terr := c.%s(%s)\n", m.Name, strings.Join(callArgs, ", "))
+		} else {
+			fmt.Fprintf(buf, "\t_, err := c.%s(%s)\n", m.Name, strings.Join(callArgs, ", "))
+		}
+
 		buf.WriteString("\treturn err\n}\n\n")
 
 		// 3. RunAttributed(ctx, client) with pprof labeling
@@ -342,54 +366,81 @@ func (e *Emitter) emitServiceHarness(buf *bytes.Buffer, root *ir.RootIR, svc *ir
 	return nil
 }
 
-func (e *Emitter) emitFieldFeeder(buf *bytes.Buffer, fl *ir.FieldIR) {
+func (e *Emitter) emitFieldFeeder(buf *bytes.Buffer, fl *ir.FieldIR, knownStructs map[string]bool) {
 	goType := fl.Type.Name
 	fieldName := fl.GoName
 
 	switch goType {
 	case "string":
 		fmt.Fprintf(buf, "\tdst.%s = \"val_\" + f.randomString(6)\n", fieldName)
-	case "int", "int64", "int32":
+	case "int", "int64", "int32", "int16", "int8":
 		fmt.Fprintf(buf, "\tdst.%s = %s(rand.Intn(1000) + 1)\n", fieldName, goType)
-	case "uint", "uint64", "uint32":
+	case "uint", "uint64", "uint32", "uint16", "uint8", "byte":
 		fmt.Fprintf(buf, "\tdst.%s = %s(rand.Uint32())\n", fieldName, goType)
 	case "bool":
 		fmt.Fprintf(buf, "\tdst.%s = true\n", fieldName)
 	case "float64", "float32":
 		fmt.Fprintf(buf, "\tdst.%s = %s(12.34)\n", fieldName, goType)
+	case "[]byte":
+		fmt.Fprintf(buf, "\tdst.%s = []byte(\"val_\" + f.randomString(6))\n", fieldName)
+	case "[]string":
+		fmt.Fprintf(buf, "\tdst.%s = []string{\"val_\" + f.randomString(6)}\n", fieldName)
 	default:
-		if strings.HasPrefix(goType, "*") {
+		switch {
+		case strings.HasPrefix(goType, "[]") || strings.HasPrefix(goType, "map[") || goType == "any" || goType == "interface{}":
+			fmt.Fprintf(buf, "\tdst.%s = nil\n", fieldName)
+		case strings.HasPrefix(goType, "*"):
 			base := strings.TrimPrefix(goType, "*")
-			fmt.Fprintf(buf, "\tvar tmp%s %s\n", fieldName, base)
-			fmt.Fprintf(buf, "\tf.Feed%s(&tmp%s)\n", base, fieldName)
-			fmt.Fprintf(buf, "\tdst.%s = &tmp%s\n", fieldName, fieldName)
+			if knownStructs[base] {
+				fmt.Fprintf(buf, "\tvar tmp%s %s\n", fieldName, base)
+				fmt.Fprintf(buf, "\tf.Feed%s(&tmp%s)\n", base, fieldName)
+				fmt.Fprintf(buf, "\tdst.%s = &tmp%s\n", fieldName, fieldName)
+			}
+
+		case knownStructs[goType]:
+			fmt.Fprintf(buf, "\tf.Feed%s(&dst.%s)\n", goType, fieldName)
 		}
 	}
 }
 
-func (e *Emitter) emitParamFeeder(buf *bytes.Buffer, p *ir.ParamIR) {
+func (e *Emitter) emitParamFeeder(buf *bytes.Buffer, p *ir.ParamIR, knownStructs map[string]bool) {
 	goType := p.GoType.Name
 	paramName := p.GoName
 
 	switch goType {
 	case "string":
 		fmt.Fprintf(buf, "\t%s := \"param_\" + f.randomString(6)\n", paramName)
-	case "int", "int64", "int32":
+	case "int", "int64", "int32", "int16", "int8":
 		fmt.Fprintf(buf, "\t%s := %s(rand.Intn(1000) + 1)\n", paramName, goType)
-	case "uint", "uint64", "uint32":
+	case "uint", "uint64", "uint32", "uint16", "uint8", "byte":
 		fmt.Fprintf(buf, "\t%s := %s(rand.Uint32())\n", paramName, goType)
 	case "bool":
 		fmt.Fprintf(buf, "\t%s := true\n", paramName)
 	case "float64", "float32":
 		fmt.Fprintf(buf, "\t%s := %s(12.34)\n", paramName, goType)
+	case "[]byte":
+		fmt.Fprintf(buf, "\t%s := []byte(\"param_\" + f.randomString(6))\n", paramName)
+	case "[]string":
+		fmt.Fprintf(buf, "\t%s := []string{\"param_\" + f.randomString(6)}\n", paramName)
 	default:
-		if strings.HasPrefix(goType, "*") {
+		switch {
+		case strings.HasPrefix(goType, "[]") || strings.HasPrefix(goType, "map[") || goType == "any" || goType == "interface{}":
+			fmt.Fprintf(buf, "\tvar %s %s\n", paramName, goType)
+		case strings.HasPrefix(goType, "*"):
 			base := strings.TrimPrefix(goType, "*")
-			fmt.Fprintf(buf, "\tvar %s %s\n", paramName, base)
-			fmt.Fprintf(buf, "\tf.Feed%s(&%s)\n", base, paramName)
-		} else {
+			if knownStructs[base] {
+				fmt.Fprintf(buf, "\tvar tmp%s %s\n", paramName, base)
+				fmt.Fprintf(buf, "\tf.Feed%s(&tmp%s)\n", base, paramName)
+				fmt.Fprintf(buf, "\t%s := &tmp%s\n", paramName, paramName)
+			} else {
+				fmt.Fprintf(buf, "\tvar %s %s\n", paramName, goType)
+			}
+
+		case knownStructs[goType]:
 			fmt.Fprintf(buf, "\tvar %s %s\n", paramName, goType)
 			fmt.Fprintf(buf, "\tf.Feed%s(&%s)\n", goType, paramName)
+		default:
+			fmt.Fprintf(buf, "\tvar %s %s\n", paramName, goType)
 		}
 	}
 }
