@@ -38,6 +38,8 @@ func main() {
 		&CmdTag{},
 		&CmdBlame{},
 		&CmdOAPI{},
+		&CmdImport{},
+		&CmdExport{},
 		&CmdProto{},
 		&CmdBench{},
 		&CmdProf{},

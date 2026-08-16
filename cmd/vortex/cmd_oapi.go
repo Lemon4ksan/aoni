@@ -23,15 +23,30 @@ import (
 type CmdOAPI struct{}
 
 func (c *CmdOAPI) Name() string      { return "oapi" }
-func (c *CmdOAPI) Aliases() []string { return []string{"openapi", "export", "import"} }
+func (c *CmdOAPI) Aliases() []string { return []string{"openapi"} }
 func (c *CmdOAPI) Synopsis() string {
 	return "OpenAPI 3.1 bidirectional schema toolchain (import/export)"
 }
-func (c *CmdOAPI) Usage() string { return "vortex oapi [import|export] [flags]" }
+func (c *CmdOAPI) Usage() string { return "vortex oapi <import|export> [flags]" }
+
+func (c *CmdOAPI) printUsage(w io.Writer) {
+	fmt.Fprintf(w, "vortex oapi — OpenAPI 3.1 & Swagger Bidirectional Schema Toolchain\n\n")
+	fmt.Fprintf(w, "Usage:\n")
+	fmt.Fprintf(w, "  vortex oapi <import|export> [flags]\n\n")
+	fmt.Fprintf(w, "Subcommands:\n")
+	fmt.Fprintf(w, "  import    Import OpenAPI/Swagger or HAR traffic into Go contract with 3-way AST merge\n")
+	fmt.Fprintf(w, "  export    Export @aoni:service Go contracts into OpenAPI 3.1 specifications\n\n")
+	fmt.Fprintf(w, "Examples:\n")
+	fmt.Fprintf(w, "  vortex oapi import -spec=openapi.json -out=./pkg/api/api.go\n")
+	fmt.Fprintf(w, "  vortex oapi import -spec=session.har -out=./pkg/api/api.go -add\n")
+	fmt.Fprintf(w, "  vortex oapi export -file=./pkg/api/api.go -out=openapi.json\n\n")
+	fmt.Fprintf(w, "Run 'vortex oapi import -h' or 'vortex oapi export -h' for subcommand options.\n")
+}
 
 func (c *CmdOAPI) Run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	if len(args) == 0 {
-		return c.runExport(ctx, nil, stdout, stderr)
+		c.printUsage(stderr)
+		return nil
 	}
 
 	mode := args[0]
@@ -40,13 +55,43 @@ func (c *CmdOAPI) Run(ctx context.Context, args []string, stdout, stderr io.Writ
 		return c.runExport(ctx, args[1:], stdout, stderr)
 	case "import":
 		return c.runImport(ctx, args[1:], stdout, stderr)
+	case "-h", "--help", "help":
+		c.printUsage(stdout)
+		return nil
 	default:
-		if strings.HasPrefix(mode, "-") {
-			return c.runExport(ctx, args, stdout, stderr)
-		}
-
-		return fmt.Errorf("unknown oapi command %q. Valid modes: 'import', 'export'", mode)
+		c.printUsage(stderr)
+		return fmt.Errorf("unknown oapi subcommand %q. Valid modes: 'import', 'export'", mode)
 	}
+}
+
+// CmdImport imports OpenAPI, Swagger, or HAR traffic archives directly into Go declarative contracts.
+type CmdImport struct {
+	oapi CmdOAPI
+}
+
+func (c *CmdImport) Name() string      { return "import" }
+func (c *CmdImport) Aliases() []string { return []string{"ingest"} }
+func (c *CmdImport) Synopsis() string {
+	return "Import OpenAPI, Swagger, or HAR traffic into Go declarative contract DSL"
+}
+func (c *CmdImport) Usage() string { return "vortex import -spec=<file> [flags]" }
+func (c *CmdImport) Run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
+	return c.oapi.runImport(ctx, args, stdout, stderr)
+}
+
+// CmdExport exports @aoni:service Go contracts into standard OpenAPI 3.1 specifications.
+type CmdExport struct {
+	oapi CmdOAPI
+}
+
+func (c *CmdExport) Name() string      { return "export" }
+func (c *CmdExport) Aliases() []string { return nil }
+func (c *CmdExport) Synopsis() string {
+	return "Export Aoni Go contracts into OpenAPI 3.1 JSON/YAML specifications"
+}
+func (c *CmdExport) Usage() string { return "vortex export -file=<api.go> [flags]" }
+func (c *CmdExport) Run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
+	return c.oapi.runExport(ctx, args, stdout, stderr)
 }
 
 func (c *CmdOAPI) runExport(_ context.Context, args []string, stdout, stderr io.Writer) error {
@@ -65,14 +110,15 @@ func (c *CmdOAPI) runExport(_ context.Context, args []string, stdout, stderr io.
 	)
 
 	fs.Usage = func() {
-		fmt.Fprintf(stderr, "vortex oapi export — Export Aoni Contract to OpenAPI 3.1 Specification\n\n")
+		fmt.Fprintf(stderr, "vortex export — Export Aoni Contract to OpenAPI 3.1 Specification\n\n")
 		fmt.Fprintf(stderr, "Usage:\n")
+		fmt.Fprintf(stderr, "  vortex export [flags]\n")
 		fmt.Fprintf(stderr, "  vortex oapi export [flags]\n\n")
 		fmt.Fprintf(stderr, "Flags:\n")
 		fs.PrintDefaults()
 		fmt.Fprintf(stderr, "\nExamples:\n")
-		fmt.Fprintf(stderr, "  vortex oapi export -file=./pkg/api/api.go -out=openapi.json\n")
-		fmt.Fprintf(stderr, "  vortex oapi export -file=./pkg/api/api.go -yaml -out=openapi.yaml\n")
+		fmt.Fprintf(stderr, "  vortex export -file=./pkg/api/api.go -out=openapi.json\n")
+		fmt.Fprintf(stderr, "  vortex export -file=./pkg/api/api.go -yaml -out=openapi.yaml\n")
 	}
 
 	if err := fs.Parse(args); err != nil {
@@ -80,7 +126,7 @@ func (c *CmdOAPI) runExport(_ context.Context, args []string, stdout, stderr io.
 	}
 
 	if *file == "" {
-		return errors.New("vortex oapi export: -file flag is required (e.g. -file=api.go)")
+		return errors.New("vortex export: -file flag is required (e.g. -file=api.go)")
 	}
 
 	p := parser.NewParser()
@@ -173,21 +219,22 @@ func (c *CmdOAPI) runImport(_ context.Context, args []string, stdout, stderr io.
 	fs.Var(&typeMaps, "type-map", "Custom type mappings (e.g. -type-map=steam_id=id.ID)")
 
 	fs.Usage = func() {
-		fmt.Fprintf(stderr, "vortex oapi import — Import OpenAPI/Swagger or HAR Traffic with 3-Way AST Merge\n\n")
+		fmt.Fprintf(stderr, "vortex import — Import OpenAPI/Swagger or HAR Traffic with 3-Way AST Merge\n\n")
 		fmt.Fprintf(stderr, "Usage:\n")
+		fmt.Fprintf(stderr, "  vortex import [flags]\n")
 		fmt.Fprintf(stderr, "  vortex oapi import [flags]\n\n")
 		fmt.Fprintf(stderr, "Flags:\n")
 		fs.PrintDefaults()
 		fmt.Fprintf(stderr, "\nExamples:\n")
 		fmt.Fprintf(
 			stderr,
-			"  vortex oapi import -spec=openapi.json -out=./pkg/api/api.go         # Fresh import or sync\n",
+			"  vortex import -spec=openapi.json -out=./pkg/api/api.go         # Fresh import or sync\n",
 		)
 		fmt.Fprintf(
 			stderr,
-			"  vortex oapi import -spec=session.har -out=./pkg/api/api.go -dry-run # Preview HAR diff\n",
+			"  vortex import -spec=session.har -out=./pkg/api/api.go -dry-run # Preview HAR diff\n",
 		)
-		fmt.Fprintf(stderr, "  vortex oapi import -spec=session.har -out=./pkg/api/api.go -add     # Additive merge\n")
+		fmt.Fprintf(stderr, "  vortex import -spec=session.har -out=./pkg/api/api.go -add     # Additive merge\n")
 	}
 
 	if err := fs.Parse(args); err != nil {
