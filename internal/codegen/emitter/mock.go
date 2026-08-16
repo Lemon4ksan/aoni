@@ -29,6 +29,8 @@ func (e *Emitter) EmitMock(root *ir.RootIR) ([]byte, error) {
 		}
 	}
 
+	bodyCode := bodyBuf.String()
+
 	var buf bytes.Buffer
 
 	// File header
@@ -47,20 +49,29 @@ func (e *Emitter) EmitMock(root *ir.RootIR) ([]byte, error) {
 	buf.WriteString("\t\"sync\"\n")
 	buf.WriteString("\t\"testing\"\n\n")
 	buf.WriteString("\t\"github.com/lemon4ksan/aoni\"\n")
+	buf.WriteString("\t\"github.com/lemon4ksan/aoni/fast\"\n")
 	buf.WriteString("\t\"github.com/lemon4ksan/aoni/option\"\n")
+	buf.WriteString("\t\"github.com/lemon4ksan/aoni/request\"\n")
 
 	for _, imp := range root.Imports {
 		if imp.Path == "context" || imp.Path == "fmt" ||
 			imp.Path == "encoding/json" || imp.Path == "net/http" ||
 			imp.Path == "net/http/httptest" || imp.Path == "strings" ||
 			imp.Path == "strconv" || imp.Path == "sync" || imp.Path == "testing" ||
-			imp.Path == "github.com/lemon4ksan/aoni" || imp.Path == "github.com/lemon4ksan/aoni/option" {
+			imp.Path == "github.com/lemon4ksan/aoni" || imp.Path == "github.com/lemon4ksan/aoni/option" ||
+			imp.Path == "github.com/lemon4ksan/aoni/fast" ||
+			imp.Path == "github.com/lemon4ksan/aoni/request" {
 			continue
 		}
 
 		pkgName := imp.Alias
 		if pkgName == "" {
 			pkgName = filepath.Base(imp.Path)
+		}
+
+		// Only include if referenced in generated mock code
+		if !strings.Contains(bodyCode, pkgName+".") {
+			continue
 		}
 
 		if pkgName != "" && pkgName != filepath.Base(imp.Path) {
@@ -83,7 +94,7 @@ func (e *Emitter) EmitMock(root *ir.RootIR) ([]byte, error) {
 
 func (e *Emitter) emitServiceMock(buf *bytes.Buffer, root *ir.RootIR, svc *ir.ServiceIR) error {
 	mockServerName := svc.Name + "MockServer"
-	constructorName := "New" + svc.Name
+	clientStructName := lowerFirst(svc.Name) + "Client"
 
 	// 1. Struct Definition
 	fmt.Fprintf(buf, "// %s is a virtual in-memory HTTP server for unit testing %s.\n", mockServerName, svc.Name)
@@ -141,7 +152,10 @@ func (e *Emitter) emitServiceMock(buf *bytes.Buffer, root *ir.RootIR, svc *ir.Se
 	)
 	fmt.Fprintf(buf, "func (m *%s) Client(opts ...aoni.ClientOption) %s {\n", mockServerName, svc.Name)
 	buf.WriteString("\tallOpts := append([]aoni.ClientOption{option.WithBaseURL(m.URL())}, opts...)\n")
-	fmt.Fprintf(buf, "\treturn %s(nil, allOpts...)\n", constructorName)
+	buf.WriteString("\tc := aoni.Configure(fast.NewClient(), allOpts...)\n")
+	fmt.Fprintf(buf, "\treturn &%s{\n", clientStructName)
+	buf.WriteString("\t\tr: request.AsRequester(c),\n")
+	buf.WriteString("\t}\n")
 	buf.WriteString("}\n\n")
 
 	// 6. On<Method> Handlers and Call Counters
@@ -256,7 +270,11 @@ func (e *Emitter) emitMethodRouteMatch(buf *bytes.Buffer, svc *ir.ServiceIR, m *
 
 		varName := "arg_" + p.GoName
 
-		if p.Location == ir.LocBody || p.Location == ir.LocQueryStruct || p.GoType.IsCustomType {
+		if p.Location == ir.LocBody || p.Location == ir.LocQueryStruct || p.Location == ir.LocFormFields ||
+			strings.HasSuffix(
+				p.GoType.Name,
+				"Request",
+			) || strings.HasSuffix(p.GoType.Name, "Req") || strings.HasSuffix(p.GoType.Name, "Query") {
 			fmt.Fprintf(buf, "\t\tvar %s %s\n", varName, p.GoType.Name)
 			fmt.Fprintf(buf, "\t\t_ = json.NewDecoder(r.Body).Decode(&%s)\n", varName)
 			callArgs = append(callArgs, varName)
@@ -276,7 +294,8 @@ func (e *Emitter) emitMethodRouteMatch(buf *bytes.Buffer, svc *ir.ServiceIR, m *
 			buf.WriteString("\t\t\t}\n")
 			buf.WriteString("\t\t}\n")
 
-			if p.GoType.IsSlice {
+			switch {
+			case p.GoType.IsSlice:
 				switch {
 				case p.Location == ir.LocBody:
 					fmt.Fprintf(buf, "\t\tvar %s %s\n", varName, p.GoType.Name)
@@ -294,25 +313,50 @@ func (e *Emitter) emitMethodRouteMatch(buf *bytes.Buffer, svc *ir.ServiceIR, m *
 					fmt.Fprintf(buf, "\t\tvar %s %s\n", varName, p.GoType.Name)
 					callArgs = append(callArgs, varName)
 				}
-			} else {
+
+			case p.GoType.IsCustomType:
+				fmt.Fprintf(buf, "\t\tvar %s %s\n", varName, p.GoType.Name)
+				fmt.Fprintf(
+					buf,
+					"\t\tif _n_%s, _err_%s := strconv.ParseUint(%s, 10, 64); _err_%s == nil {\n",
+					p.GoName,
+					p.GoName,
+					rawValName,
+					p.GoName,
+				)
+				fmt.Fprintf(buf, "\t\t\t%s = %s(_n_%s)\n", varName, p.GoType.Name, p.GoName)
+				fmt.Fprintf(
+					buf,
+					"\t\t} else if _n_%s, _err_%s := strconv.Atoi(%s); _err_%s == nil {\n",
+					p.GoName,
+					p.GoName,
+					rawValName,
+					p.GoName,
+				)
+				fmt.Fprintf(buf, "\t\t\t%s = %s(_n_%s)\n", varName, p.GoType.Name, p.GoName)
+				fmt.Fprintf(buf, "\t\t}\n")
+
+				callArgs = append(callArgs, varName)
+
+			default:
 				switch p.GoType.Name {
 				case "int":
 					fmt.Fprintf(buf, "\t\t%s, _ := strconv.Atoi(%s)\n", varName, rawValName)
 					callArgs = append(callArgs, varName)
 				case "int32":
-					fmt.Fprintf(buf, "\t\tv32, _ := strconv.ParseInt(%s, 10, 32)\n", rawValName)
-					fmt.Fprintf(buf, "\t\t%s := int32(v32)\n", varName)
+					fmt.Fprintf(buf, "\t\tv32_%s, _ := strconv.ParseInt(%s, 10, 32)\n", p.GoName, rawValName)
+					fmt.Fprintf(buf, "\t\t%s := int32(v32_%s)\n", varName, p.GoName)
 					callArgs = append(callArgs, varName)
 				case "int64":
 					fmt.Fprintf(buf, "\t\t%s, _ := strconv.ParseInt(%s, 10, 64)\n", varName, rawValName)
 					callArgs = append(callArgs, varName)
 				case "uint":
-					fmt.Fprintf(buf, "\t\tvu, _ := strconv.ParseUint(%s, 10, 64)\n", rawValName)
-					fmt.Fprintf(buf, "\t\t%s := uint(vu)\n", varName)
+					fmt.Fprintf(buf, "\t\tvu_%s, _ := strconv.ParseUint(%s, 10, 64)\n", p.GoName, rawValName)
+					fmt.Fprintf(buf, "\t\t%s := uint(vu_%s)\n", varName, p.GoName)
 					callArgs = append(callArgs, varName)
 				case "uint32":
-					fmt.Fprintf(buf, "\t\tvu32, _ := strconv.ParseUint(%s, 10, 32)\n", rawValName)
-					fmt.Fprintf(buf, "\t\t%s := uint32(vu32)\n", varName)
+					fmt.Fprintf(buf, "\t\tvu32_%s, _ := strconv.ParseUint(%s, 10, 32)\n", p.GoName, rawValName)
+					fmt.Fprintf(buf, "\t\t%s := uint32(vu32_%s)\n", varName, p.GoName)
 					callArgs = append(callArgs, varName)
 				case "uint64":
 					fmt.Fprintf(buf, "\t\t%s, _ := strconv.ParseUint(%s, 10, 64)\n", varName, rawValName)
@@ -321,8 +365,8 @@ func (e *Emitter) emitMethodRouteMatch(buf *bytes.Buffer, svc *ir.ServiceIR, m *
 					fmt.Fprintf(buf, "\t\t%s, _ := strconv.ParseFloat(%s, 64)\n", varName, rawValName)
 					callArgs = append(callArgs, varName)
 				case "float32":
-					fmt.Fprintf(buf, "\t\tvf32, _ := strconv.ParseFloat(%s, 32)\n", rawValName)
-					fmt.Fprintf(buf, "\t\t%s := float32(vf32)\n", varName)
+					fmt.Fprintf(buf, "\t\tvf32_%s, _ := strconv.ParseFloat(%s, 32)\n", p.GoName, rawValName)
+					fmt.Fprintf(buf, "\t\t%s := float32(vf32_%s)\n", varName, p.GoName)
 					callArgs = append(callArgs, varName)
 				case "bool":
 					fmt.Fprintf(buf, "\t\t%s, _ := strconv.ParseBool(%s)\n", varName, rawValName)

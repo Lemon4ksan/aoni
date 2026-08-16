@@ -882,7 +882,10 @@ func (p *Parser) extractGoType(expr ast.Expr) ir.GoTypeIR {
 		goType.Name = t.Name
 		if isPrimitive(t.Name) {
 			goType.Underlying = t.Name
+		} else {
+			goType.IsCustomType = true
 		}
+
 	case *ast.StarExpr:
 		elem := p.extractGoType(t.X)
 		goType = elem
