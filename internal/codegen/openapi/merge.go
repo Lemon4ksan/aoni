@@ -24,6 +24,7 @@ type MergeConfig struct {
 	PackageName    string            // Target Go package name
 	ServiceName    string            // Target service interface name
 	Prune          bool              // If true, delete missing endpoints instead of soft deprecating
+	Additive       bool              // If true, preserve existing endpoints as active without marking @deprecated
 	Overwrite      bool              // If true, discard existing file and perform fresh generation
 	DryRun         bool              // If true, calculate diff and summary without disk changes
 	Interactive    bool              // If true, prompt for ambiguous renames/deletions
@@ -304,6 +305,16 @@ func (e *MergeEngine) ReconcileService(
 				continue
 			}
 
+			if cfg.Additive {
+				rendered := e.renderPreservedMethod(m)
+				outputMethods = append(outputMethods, mergedMethodEntry{
+					goName:   m.Name,
+					rendered: rendered,
+				})
+
+				continue
+			}
+
 			// Soft Deprecation: keep method, mark @deprecated
 			rendered := e.renderSoftDeprecatedMethod(m, summary.SpecVersion)
 			outputMethods = append(outputMethods, mergedMethodEntry{
@@ -435,9 +446,13 @@ func (e *MergeEngine) renderMergedMethod(
 ) string {
 	var buf bytes.Buffer
 
-	// 1. Doc comments: retain existing or update with summary
+	// 1. Doc comments & custom directives: retain existing (skipping duplicated route verbs)
 	if len(existing.Doc) > 0 {
 		for _, l := range existing.Doc {
+			if isRouteDirective(l) {
+				continue
+			}
+
 			if !strings.HasPrefix(l, "//") {
 				l = "// " + l
 			}
@@ -644,6 +659,60 @@ func (e *MergeEngine) renderSoftDeprecatedMethod(m *ir.MethodIR, currentVersion 
 	return buf.String()
 }
 
+func (e *MergeEngine) renderPreservedMethod(m *ir.MethodIR) string {
+	var buf bytes.Buffer
+
+	// 1. Doc comments & custom directives: retain original comments (skipping duplicated route verbs)
+	if len(m.Doc) > 0 {
+		for _, l := range m.Doc {
+			if isRouteDirective(l) {
+				continue
+			}
+
+			if !strings.HasPrefix(l, "//") {
+				l = "// " + l
+			}
+
+			fmt.Fprintf(&buf, "\t%s\n", l)
+		}
+	} else if m.Summary != "" {
+		fmt.Fprintf(&buf, "\t// %s — %s\n\t//\n", m.Name, m.Summary)
+	}
+
+	// 2. Route directive
+	if m.HTTPMethod != "" && m.Path != nil {
+		fmt.Fprintf(&buf, "\t// @%s %q\n", strings.ToLower(m.HTTPMethod), strings.TrimPrefix(m.Path.RawTemplate, "/"))
+	}
+
+	// 3. Bind / Alias
+	if m.OperationID != "" && m.OperationID != m.Name {
+		fmt.Fprintf(&buf, "\t// @bind %q\n", m.OperationID)
+	}
+
+	paramList := make([]string, 0)
+	for _, p := range m.Params {
+		if p.Location == ir.LocContext || p.Location == ir.LocModifiers {
+			continue
+		}
+
+		paramList = append(paramList, fmt.Sprintf("%s %s", p.GoName, p.GoType.Name))
+	}
+
+	paramSig := ""
+	if len(paramList) > 0 {
+		paramSig = ", " + strings.Join(paramList, ", ")
+	}
+
+	returnSig := "(map[string]any, error)"
+	if m.Return != nil && !m.Return.IsVoid && m.Return.SuccessType.Name != "" {
+		returnSig = fmt.Sprintf("(%s, error)", m.Return.SuccessType.Name)
+	}
+
+	fmt.Fprintf(&buf, "\t%s(ctx context.Context%s, mods ...aoni.RequestModifier) %s\n", m.Name, paramSig, returnSig)
+
+	return buf.String()
+}
+
 func (e *MergeEngine) buildReconciledParams(
 	existing *ir.MethodIR,
 	iop *incomingOperation,
@@ -712,4 +781,27 @@ func normalizeRoutePath(p string) string {
 	}
 
 	return "/" + strings.Join(parts, "/")
+}
+
+func isRouteDirective(line string) bool {
+	trimmed := strings.TrimSpace(line)
+	trimmed = strings.TrimPrefix(trimmed, "//")
+
+	trimmed = strings.TrimSpace(trimmed)
+	if !strings.HasPrefix(trimmed, "@") {
+		return false
+	}
+
+	fields := strings.Fields(trimmed)
+	if len(fields) == 0 {
+		return false
+	}
+
+	verb := strings.ToLower(fields[0])
+	switch verb {
+	case "@get", "@post", "@put", "@delete", "@patch", "@head", "@options", "@connect", "@trace", "@source", "@version":
+		return true
+	default:
+		return false
+	}
 }

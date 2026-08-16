@@ -154,11 +154,17 @@ func (c *CmdOAPI) runImport(_ context.Context, args []string, stdout, stderr io.
 		skipDeprecated = fs.Bool("skip-deprecated", false, "Skip deprecated OpenAPI operations")
 		overwrite      = fs.Bool("overwrite", false, "Discard existing file and generate contract fresh from scratch")
 		prune          = fs.Bool("prune", false, "Prune deleted endpoints instead of adding @deprecated")
-		dryRun         = fs.Bool("dry-run", false, "Preview merge changes without modifying files on disk")
-		interactive    = fs.Bool("interactive", false, "Prompt for merge decisions")
-		includePaths   StringSliceFlag
-		excludePaths   StringSliceFlag
-		typeMaps       StringSliceFlag
+		additive       = fs.Bool(
+			"additive",
+			false,
+			"Preserve missing existing endpoints as active instead of marking @deprecated",
+		)
+		add          = fs.Bool("add", false, "Alias for --additive")
+		dryRun       = fs.Bool("dry-run", false, "Preview merge changes without modifying files on disk")
+		interactive  = fs.Bool("interactive", false, "Prompt for merge decisions")
+		includePaths StringSliceFlag
+		excludePaths StringSliceFlag
+		typeMaps     StringSliceFlag
 	)
 
 	fs.BoolVar(interactive, "i", false, "Prompt for merge decisions (shorthand)")
@@ -224,6 +230,7 @@ func (c *CmdOAPI) runImport(_ context.Context, args []string, stdout, stderr io.
 			PackageName:    *pkgName,
 			ServiceName:    *serviceName,
 			Prune:          *prune,
+			Additive:       *additive || *add,
 			Overwrite:      *overwrite,
 			DryRun:         *dryRun,
 			Interactive:    *interactive,

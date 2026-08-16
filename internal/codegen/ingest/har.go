@@ -57,7 +57,8 @@ type HARContent struct {
 	Text     string `json:"text"`
 }
 
-// HARToOpenAPI transforms a recorded W3C HAR 1.2 log into an OpenAPI 3.0 specification.
+// HARToOpenAPI transforms one or more recorded W3C HAR 1.2 logs into an OpenAPI 3.0 specification,
+// automatically unifying query parameters, status codes, and schema object properties.
 func HARToOpenAPI(data []byte) (*openapi3.T, error) {
 	var har HARLog
 	if err := json.Unmarshal(data, &har); err != nil {
@@ -77,14 +78,6 @@ func HARToOpenAPI(data []byte) (*openapi3.T, error) {
 		},
 	}
 
-	// Group and deduplicate operations by (Method, PathPattern)
-	type opKey struct {
-		method string
-		path   string
-	}
-
-	processed := make(map[opKey]bool)
-
 	for _, entry := range har.Log.Entries {
 		rawURL := entry.Request.URL
 
@@ -100,13 +93,6 @@ func HARToOpenAPI(data []byte) (*openapi3.T, error) {
 
 		method := strings.ToUpper(entry.Request.Method)
 
-		key := opKey{method: method, path: cleanPath}
-		if processed[key] {
-			continue
-		}
-
-		processed[key] = true
-
 		// Extract or create PathItem
 		pathItem := doc.Paths.Value(cleanPath)
 		if pathItem == nil {
@@ -114,65 +100,136 @@ func HARToOpenAPI(data []byte) (*openapi3.T, error) {
 			doc.Paths.Set(cleanPath, pathItem)
 		}
 
-		op := openapi3.NewOperation()
-		op.OperationID = DeriveMethodNameFromRoute(method, cleanPath)
-		op.Summary = fmt.Sprintf("%s %s", method, cleanPath)
+		var op *openapi3.Operation
+		switch method {
+		case "GET":
+			op = pathItem.Get
+		case "POST":
+			op = pathItem.Post
+		case "PUT":
+			op = pathItem.Put
+		case "DELETE":
+			op = pathItem.Delete
+		case "PATCH":
+			op = pathItem.Patch
+		}
 
-		// 1. Ingest Query Parameters
+		if op == nil {
+			op = openapi3.NewOperation()
+			op.OperationID = DeriveMethodNameFromRoute(method, cleanPath)
+
+			op.Summary = fmt.Sprintf("%s %s", method, cleanPath)
+			switch method {
+			case "GET":
+				pathItem.Get = op
+			case "POST":
+				pathItem.Post = op
+			case "PUT":
+				pathItem.Put = op
+			case "DELETE":
+				pathItem.Delete = op
+			case "PATCH":
+				pathItem.Patch = op
+			}
+		}
+
+		// 1. Ingest & Union Query Parameters
 		for _, q := range entry.Request.QueryString {
 			if q.Name == "" {
 				continue
 			}
 
-			param := openapi3.NewQueryParameter(q.Name).WithSchema(openapi3.NewStringSchema())
-			op.AddParameter(param)
-		}
-
-		// 2. Ingest Request Body
-		if entry.Request.PostData != nil && len(entry.Request.PostData.Text) > 0 {
-			schema := inferSchemaFromJSON([]byte(entry.Request.PostData.Text))
-			if schema != nil {
-				reqBody := openapi3.NewRequestBody().WithContent(openapi3.NewContentWithJSONSchema(schema))
-				op.RequestBody = &openapi3.RequestBodyRef{Value: reqBody}
+			param := op.Parameters.GetByInAndName(openapi3.ParameterInQuery, q.Name)
+			if param == nil {
+				param = openapi3.NewQueryParameter(q.Name).WithSchema(openapi3.NewStringSchema())
+				op.AddParameter(param)
 			}
 		}
 
-		// 3. Ingest Response Body
+		// 2. Ingest & Union Request Body
+		if entry.Request.PostData != nil && len(entry.Request.PostData.Text) > 0 {
+			schema := inferSchemaFromJSON([]byte(entry.Request.PostData.Text))
+			if schema != nil {
+				if op.RequestBody == nil || op.RequestBody.Value == nil {
+					reqBody := openapi3.NewRequestBody().WithContent(openapi3.NewContentWithJSONSchema(schema))
+					op.RequestBody = &openapi3.RequestBodyRef{Value: reqBody}
+				} else {
+					existingContent := op.RequestBody.Value.Content.Get("application/json")
+					if existingContent != nil && existingContent.Schema != nil && existingContent.Schema.Value != nil {
+						existingContent.Schema.Value = mergeSchemas(existingContent.Schema.Value, schema)
+					}
+				}
+			}
+		}
+
+		// 3. Ingest & Union Response Body & Status Codes
 		statusStr := strconv.Itoa(entry.Response.Status)
 		if entry.Response.Status == 0 {
 			statusStr = "200"
 		}
 
-		resp := openapi3.NewResponse().WithDescription("Successful response")
-		if entry.Response.Content != nil && len(entry.Response.Content.Text) > 0 {
+		statusInt, _ := strconv.Atoi(statusStr)
+
+		respRef := op.Responses.Value(statusStr)
+		if respRef == nil {
+			resp := openapi3.NewResponse().WithDescription("Response " + statusStr)
+			if entry.Response.Content != nil && len(entry.Response.Content.Text) > 0 {
+				schema := inferSchemaFromJSON([]byte(entry.Response.Content.Text))
+				if schema != nil {
+					resp.WithContent(openapi3.NewContentWithJSONSchema(schema))
+				}
+			}
+
+			op.AddResponse(statusInt, resp)
+		} else if respRef.Value != nil && entry.Response.Content != nil && len(entry.Response.Content.Text) > 0 {
 			schema := inferSchemaFromJSON([]byte(entry.Response.Content.Text))
 			if schema != nil {
-				resp.WithContent(openapi3.NewContentWithJSONSchema(schema))
+				existingContent := respRef.Value.Content.Get("application/json")
+				if existingContent != nil && existingContent.Schema != nil && existingContent.Schema.Value != nil {
+					existingContent.Schema.Value = mergeSchemas(existingContent.Schema.Value, schema)
+				}
 			}
-		}
-
-		op.AddResponse(200, resp)
-
-		if statusStr != "200" && entry.Response.Status > 0 {
-			op.AddResponse(entry.Response.Status, resp)
-		}
-
-		// Assign operation to HTTP verb on PathItem
-		switch method {
-		case "GET":
-			pathItem.Get = op
-		case "POST":
-			pathItem.Post = op
-		case "PUT":
-			pathItem.Put = op
-		case "DELETE":
-			pathItem.Delete = op
-		case "PATCH":
-			pathItem.Patch = op
 		}
 	}
 
 	return doc, nil
+}
+
+func mergeSchemas(s1, s2 *openapi3.Schema) *openapi3.Schema {
+	if s1 == nil {
+		return s2
+	}
+
+	if s2 == nil {
+		return s1
+	}
+
+	if s1.Type != nil && s2.Type != nil {
+		if s1.Type.Includes("object") && s2.Type.Includes("object") {
+			if s1.Properties == nil {
+				s1.Properties = make(openapi3.Schemas)
+			}
+
+			for k, v := range s2.Properties {
+				if existingProp, exists := s1.Properties[k]; exists && existingProp.Value != nil && v.Value != nil {
+					existingProp.Value = mergeSchemas(existingProp.Value, v.Value)
+				} else {
+					s1.Properties[k] = v
+				}
+			}
+
+			return s1
+		}
+
+		if s1.Type.Includes("array") && s2.Type.Includes("array") && s1.Items != nil && s2.Items != nil &&
+			s1.Items.Value != nil &&
+			s2.Items.Value != nil {
+			s1.Items.Value = mergeSchemas(s1.Items.Value, s2.Items.Value)
+			return s1
+		}
+	}
+
+	return s1
 }
 
 func inferSchemaFromJSON(data []byte) *openapi3.Schema {
