@@ -178,6 +178,12 @@ func ApplyServiceDirective(s *ir.ServiceIR, d *Directive) {
 			s.SocketConfig = &ir.SocketConfigIR{}
 		}
 
+	case "telemetry":
+		s.Telemetry = d.Value
+		if s.Telemetry == "" {
+			s.Telemetry = "all"
+		}
+
 	case "packet":
 		if s.SocketConfig == nil {
 			s.SocketConfig = &ir.SocketConfigIR{}
@@ -354,6 +360,13 @@ func ApplyMethodDirective(m *ir.MethodIR, d *Directive) {
 		m.Coalesce = true
 	case "etag":
 		m.ETag = true
+	case "telemetry":
+		m.Telemetry = d.Value
+		if m.Telemetry == "" {
+			m.Telemetry = "all"
+		}
+	case "label":
+		m.Label = d.Value
 	case "sign":
 		m.SignHMAC = parseSignDirective(d)
 	case "multipart":

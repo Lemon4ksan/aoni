@@ -60,6 +60,7 @@ type ServiceIR struct {
 	Tags               []string
 	Version            string
 	Source             string
+	Telemetry          string
 	Methods            []*MethodIR
 }
 
@@ -236,6 +237,8 @@ type MethodIR struct {
 	BenchWeight         int
 	BudgetClientAllocs  *int
 	BudgetMaxClientTime string
+	Telemetry           string
+	Label               string
 }
 
 // InjectTarget specifies where an injected variable is placed in the network transaction.

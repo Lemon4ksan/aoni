@@ -636,6 +636,7 @@ func TestApp_Init_FromOpenAPI(t *testing.T) {
 	require.NoError(t, os.WriteFile(specFile, []byte(swaggerJSON), 0o600))
 
 	var stdout, stderr bytes.Buffer
+
 	app := newTestApp(&stdout, &stderr)
 
 	err := app.Run(context.Background(), []string{

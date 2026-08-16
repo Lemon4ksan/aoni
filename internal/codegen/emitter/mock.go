@@ -277,17 +277,20 @@ func (e *Emitter) emitMethodRouteMatch(buf *bytes.Buffer, svc *ir.ServiceIR, m *
 			buf.WriteString("\t\t}\n")
 
 			if p.GoType.IsSlice {
-				if p.Location == ir.LocBody {
+				switch {
+				case p.Location == ir.LocBody:
 					fmt.Fprintf(buf, "\t\tvar %s %s\n", varName, p.GoType.Name)
 					fmt.Fprintf(buf, "\t\t_ = json.NewDecoder(r.Body).Decode(&%s)\n", varName)
 					callArgs = append(callArgs, varName)
-				} else if p.GoType.Name == "[]string" {
+				case p.GoType.Name == "[]string":
 					fmt.Fprintf(buf, "\t\tvar %s []string\n", varName)
 					fmt.Fprintf(buf, "\t\tif %s != \"\" {\n", rawValName)
 					fmt.Fprintf(buf, "\t\t\t%s = strings.Split(%s, \",\")\n", varName, rawValName)
 					buf.WriteString("\t\t}\n")
+
 					callArgs = append(callArgs, varName)
-				} else {
+
+				default:
 					fmt.Fprintf(buf, "\t\tvar %s %s\n", varName, p.GoType.Name)
 					callArgs = append(callArgs, varName)
 				}

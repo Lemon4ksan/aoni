@@ -46,6 +46,16 @@ func emitHTTPMethod(
 	fmt.Fprintf(buf, "\tvar stackMods [%d]aoni.RequestModifier\n", stackSize)
 	buf.WriteString("\tallMods := stackMods[:0]\n\n")
 
+	// Telemetry & Distributed Tracing
+	if svc.Telemetry != "" || m.Telemetry != "" || m.Label != "" {
+		labelVal := m.Label
+		if labelVal == "" {
+			labelVal = svc.Name + "." + m.Name
+		}
+
+		fmt.Fprintf(buf, "\tallMods = append(allMods, mod.WithCorrelationID(\"\"), mod.WithLabel(%q))\n\n", labelVal)
+	}
+
 	// Build dynamic headers (e.g. Referer)
 	for _, h := range m.Headers {
 		switch {
