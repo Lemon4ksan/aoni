@@ -173,6 +173,93 @@ func (cfg *Config) AllIgnoredRules() []string {
 	return result
 }
 
+// FindContract locates a contract by name (e.g. "AntigravityAPI", "antigravityapi"), package, or file path.
+func (cfg *Config) FindContract(nameOrPath string) *ContractConfig {
+	if cfg == nil || len(cfg.Contracts) == 0 {
+		return nil
+	}
+
+	cleanTarget := filepath.Clean(nameOrPath)
+	targetLower := strings.ToLower(nameOrPath)
+
+	// 1. Direct name match (exact or case-insensitive)
+	for i := range cfg.Contracts {
+		c := &cfg.Contracts[i]
+		if c.Name == nameOrPath || strings.ToLower(c.Name) == targetLower {
+			return c
+		}
+	}
+
+	// 2. Direct file, dir, or package match
+	for i := range cfg.Contracts {
+		c := &cfg.Contracts[i]
+		if c.File != "" && (filepath.Clean(c.File) == cleanTarget || strings.EqualFold(c.File, nameOrPath)) {
+			return c
+		}
+
+		if c.Dir != "" && (filepath.Clean(c.Dir) == cleanTarget || strings.EqualFold(c.Dir, nameOrPath)) {
+			return c
+		}
+
+		if c.Package != "" && (c.Package == nameOrPath || strings.EqualFold(c.Package, nameOrPath)) {
+			return c
+		}
+	}
+
+	// 3. Match against basename or relative path from RootDir
+	for i := range cfg.Contracts {
+		c := &cfg.Contracts[i]
+		if c.File != "" {
+			fullPath := filepath.Join(cfg.RootDir, c.File)
+			if filepath.Clean(fullPath) == cleanTarget {
+				return c
+			}
+
+			if filepath.Base(c.File) == nameOrPath || strings.TrimSuffix(filepath.Base(c.File), ".go") == nameOrPath {
+				return c
+			}
+		}
+	}
+
+	return nil
+}
+
+// ResolveTargetToPath attempts to resolve a contract name, service name, or file path to an actual file on disk.
+func ResolveTargetToPath(target string) string {
+	target = strings.TrimSpace(target)
+	if target == "" {
+		return ""
+	}
+
+	// If file exists directly
+	if fi, err := os.Stat(target); err == nil && !fi.IsDir() {
+		return filepath.Clean(target)
+	}
+
+	// Attempt resolving via .vortex.yml config
+	cwd, err := os.Getwd()
+	if err != nil {
+		cwd = "."
+	}
+
+	if cfg, err := Load(cwd); err == nil && cfg != nil {
+		if c := cfg.FindContract(target); c != nil && c.File != "" {
+			candidate := c.File
+			if !filepath.IsAbs(candidate) && cfg.RootDir != "" {
+				candidate = filepath.Join(cfg.RootDir, candidate)
+			}
+
+			if _, sErr := os.Stat(candidate); sErr == nil {
+				return filepath.Clean(candidate)
+			}
+
+			return c.File
+		}
+	}
+
+	return ""
+}
+
 // RuleOpts defines per-rule configuration overrides.
 type RuleOpts struct {
 	MaxBytes int `yaml:"max_bytes,omitempty"`

@@ -19,6 +19,7 @@ import (
 	"github.com/lemon4ksan/aoni/internal/codegen/emitter"
 	"github.com/lemon4ksan/aoni/internal/codegen/optimizer"
 	"github.com/lemon4ksan/aoni/internal/codegen/parser"
+	"github.com/lemon4ksan/aoni/internal/codegen/project"
 )
 
 // Config configures the compilation and output generation behavior of [Builder].
@@ -498,6 +499,18 @@ func CollectInputFiles(fileFlag string, args []string, opts ...CollectOptions) [
 
 		fi, err := os.Stat(target)
 		if err != nil {
+			// Try resolving as a symbolic contract name from .vortex.yml (e.g. "AntigravityAPI")
+			if resolved := project.ResolveTargetToPath(target); resolved != "" {
+				if rfi, rErr := os.Stat(resolved); rErr == nil && !rfi.IsDir() {
+					if !seen[resolved] {
+						seen[resolved] = true
+						matched = append(matched, resolved)
+					}
+
+					continue
+				}
+			}
+
 			continue
 		}
 

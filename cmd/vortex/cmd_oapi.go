@@ -17,6 +17,7 @@ import (
 	"github.com/lemon4ksan/aoni/internal/codegen/ir"
 	"github.com/lemon4ksan/aoni/internal/codegen/openapi"
 	"github.com/lemon4ksan/aoni/internal/codegen/parser"
+	"github.com/lemon4ksan/aoni/internal/codegen/project"
 )
 
 // CmdOAPI provides bidirectional OpenAPI 3.1 and Swagger schema import/export capabilities.
@@ -125,15 +126,26 @@ func (c *CmdOAPI) runExport(_ context.Context, args []string, stdout, stderr io.
 		return err
 	}
 
-	if *file == "" {
-		return errors.New("vortex export: -file flag is required (e.g. -file=api.go)")
+	targetFile := *file
+	if len(fs.Args()) > 0 {
+		targetFile = fs.Args()[0]
+	}
+
+	if resolved := project.ResolveTargetToPath(targetFile); resolved != "" {
+		targetFile = resolved
+	}
+
+	if targetFile == "" {
+		return errors.New(
+			"vortex export: target contract name or -file flag is required (e.g. `vortex export AntigravityAPI` or `-file=api.go`)",
+		)
 	}
 
 	p := parser.NewParser()
 
 	var root *ir.RootIR
 
-	if *file == "-" {
+	if targetFile == "-" {
 		src, err := io.ReadAll(os.Stdin)
 		if err != nil {
 			return fmt.Errorf("reading stdin: %w", err)
@@ -144,15 +156,15 @@ func (c *CmdOAPI) runExport(_ context.Context, args []string, stdout, stderr io.
 			return fmt.Errorf("parsing stdin: %w", err)
 		}
 	} else {
-		dir := filepath.Dir(*file)
+		dir := filepath.Dir(targetFile)
 
 		pkgRoot, err := p.ParsePackage(dir)
 		if err == nil && len(pkgRoot.Services) > 0 {
 			root = pkgRoot
 		} else {
-			root, err = p.ParseFile(*file)
+			root, err = p.ParseFile(targetFile)
 			if err != nil {
-				return fmt.Errorf("parsing %s: %w", *file, err)
+				return fmt.Errorf("parsing %s: %w", targetFile, err)
 			}
 		}
 	}
