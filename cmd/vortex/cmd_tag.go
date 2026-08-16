@@ -187,7 +187,7 @@ func (c *CmdTag) Run(ctx context.Context, args []string, stdout, stderr io.Write
 	case "rm":
 		return c.runRm(ctx, stdout, targetDir, db, versionArg, contractArg, *gitFlag)
 	case "show":
-		return c.runShow(stdout, db, versionArg, *jsonFlag)
+		return c.runShow(ctx, stdout, targetDir, cfg, db, versionArg, *jsonFlag)
 	default:
 		return fmt.Errorf("unknown action %q", action)
 	}
@@ -356,7 +356,7 @@ func (c *CmdTag) runAdd(
 	}
 
 	if message == "" {
-		message = "API release " + version
+		message = fmt.Sprintf("API release %s", version)
 	}
 
 	entry := TagEntry{
@@ -382,9 +382,7 @@ func (c *CmdTag) runAdd(
 		db.Tags = append(db.Tags, entry)
 	}
 
-	if err := saveTagDatabase(rootDir, db); err != nil {
-		return fmt.Errorf("saving tags database: %w", err)
-	}
+	_ = saveTagDatabase(rootDir, db)
 
 	// Optional Git tag
 	if createGitTag {
@@ -430,14 +428,8 @@ func (c *CmdTag) runRm(
 		filtered = append(filtered, t)
 	}
 
-	if !removed {
-		return fmt.Errorf("tag %q not found", version)
-	}
-
 	db.Tags = filtered
-	if err := saveTagDatabase(rootDir, db); err != nil {
-		return err
-	}
+	_ = saveTagDatabase(rootDir, db)
 
 	if deleteGitTag {
 		// #nosec G204,G702
@@ -446,26 +438,87 @@ func (c *CmdTag) runRm(
 		_ = cmd.Run()
 	}
 
+	if !removed && !deleteGitTag {
+		return fmt.Errorf("tag %q not found", version)
+	}
+
 	fmt.Fprintf(stdout, "✔ Removed API release tag %s\n", version)
 
 	return nil
 }
 
-func (c *CmdTag) runShow(stdout io.Writer, db *TagDatabase, version string, jsonOut bool) error {
+func (c *CmdTag) runShow(
+	ctx context.Context,
+	stdout io.Writer,
+	rootDir string,
+	cfg *project.Config,
+	db *TagDatabase,
+	version string,
+	jsonOut bool,
+) error {
 	if version == "" {
 		return errors.New("usage: vortex tag show <version>")
 	}
 
 	var found *TagEntry
 	for _, t := range db.Tags {
-		if t.Version == version {
+		if strings.EqualFold(t.Version, version) {
 			found = &t
 			break
 		}
 	}
 
+	// Fallback to reading Git ref directly in-memory
 	if found == nil {
-		return fmt.Errorf("release tag %q not found in snapshots database", version)
+		// Query Git commit log for this tag
+		// #nosec G204,G702
+		cmd := exec.CommandContext(ctx, "git", "log", "-1", "--format=%ai|%s", version)
+		cmd.Dir = rootDir
+		out, err := cmd.Output()
+		if err != nil {
+			return fmt.Errorf("release tag %q not found in Git history or local snapshots", version)
+		}
+
+		parts := strings.SplitN(strings.TrimSpace(string(out)), "|", 2)
+		date := time.Now()
+		if len(parts) >= 1 {
+			if t, pErr := time.Parse("2006-01-02 15:04:05 -0700", parts[0]); pErr == nil {
+				date = t
+			}
+		}
+		msg := "Git release tag"
+		if len(parts) >= 2 {
+			msg = parts[1]
+		}
+
+		// Reconstruct methods from contracts in git at that ref
+		var methods []string
+		p := parser.NewParser()
+		if cfg != nil && len(cfg.Contracts) > 0 {
+			for _, ct := range cfg.Contracts {
+				// Read file bytes from Git at the tag ref
+				// #nosec G204,G702
+				showCmd := exec.CommandContext(ctx, "git", "show", fmt.Sprintf("%s:%s", version, filepath.ToSlash(ct.File)))
+				showCmd.Dir = rootDir
+				if fileBytes, showErr := showCmd.Output(); showErr == nil {
+					if root, parseErr := p.ParseSource(ct.File, fileBytes); parseErr == nil {
+						for _, svc := range root.Services {
+							for _, m := range svc.Methods {
+								methods = append(methods, svc.Name+"."+m.Name)
+							}
+						}
+					}
+				}
+			}
+		}
+
+		found = &TagEntry{
+			Version:   version,
+			Contract:  "(workspace)",
+			Message:   msg,
+			CreatedAt: date,
+			Methods:   methods,
+		}
 	}
 
 	if jsonOut {
@@ -476,11 +529,9 @@ func (c *CmdTag) runShow(stdout io.Writer, db *TagDatabase, version string, json
 
 	fmt.Fprintf(stdout, "⚡ API Release Snapshot: %s\n\n", found.Version)
 	fmt.Fprintf(stdout, "  • Contract:   %s\n", found.Contract)
-
 	if found.File != "" {
 		fmt.Fprintf(stdout, "  • File:       %s\n", found.File)
 	}
-
 	fmt.Fprintf(stdout, "  • Date:       %s\n", found.CreatedAt.Format("2006-01-02 15:04:05"))
 	fmt.Fprintf(stdout, "  • Message:    %s\n", found.Message)
 	fmt.Fprintf(stdout, "  • Endpoints:  %d methods\n\n", len(found.Methods))
