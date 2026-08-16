@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"runtime"
 	"strings"
 )
 
@@ -82,8 +83,8 @@ func (a *App) Run(ctx context.Context, args []string) error {
 		a.PrintUsage(stdout)
 		return nil
 
-	case "version", "--version":
-		fmt.Fprintf(stdout, "%s %s — %s\n", a.Name, a.Version, a.Description)
+	case "version", "--version", "-v":
+		fmt.Fprintf(stdout, "%s version %s %s/%s\n", a.Name, a.Version, runtime.GOOS, runtime.GOARCH)
 		return nil
 	}
 

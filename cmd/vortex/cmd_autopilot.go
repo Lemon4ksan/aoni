@@ -23,7 +23,6 @@ import (
 	codeparser "github.com/lemon4ksan/aoni/internal/codegen/parser"
 	"github.com/lemon4ksan/aoni/internal/codegen/project"
 	"github.com/lemon4ksan/aoni/internal/codegen/spec"
-	"github.com/lemon4ksan/aoni/internal/version"
 )
 
 // CmdAutoPilot is the ultimate zero-argument intelligent runner.
@@ -83,7 +82,8 @@ func (c *CmdAutoPilot) Run(ctx context.Context, _ []string, stdout, stderr io.Wr
 
 // WORLD 1: Interactive Onboarding & Guided Scaffolding
 func (c *CmdAutoPilot) runWorld1Onboarding(ctx context.Context, cwd string, stdout, stderr io.Writer) error {
-	fmt.Fprintf(stdout, "⚡ Vortex v%s — Unified Zero-Allocation AST Toolchain\n\n", version.Current)
+	fmt.Fprintln(stdout, "⚡ Vortex — Unified Zero-Allocation AST Toolchain")
+	fmt.Fprintln(stdout)
 	fmt.Fprintln(stdout, "No @aoni contracts or .vortex.yml found in this workspace.")
 	fmt.Fprintln(stdout)
 

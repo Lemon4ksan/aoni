@@ -56,7 +56,7 @@ func TestApp_HelpAndVersion(t *testing.T) {
 
 	err = app.Run(context.Background(), []string{"--version"})
 	require.NoError(t, err)
-	require.Contains(t, stdout.String(), "vortex "+version.Current)
+	require.Contains(t, stdout.String(), "vortex version "+version.Current)
 }
 
 func TestApp_ListAndExplain(t *testing.T) {
