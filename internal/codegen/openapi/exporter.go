@@ -49,11 +49,12 @@ func ExportOpenAPI(root *ir.RootIR, cfg ExportConfig) ([]byte, error) {
 
 	title := cfg.Title
 	if title == "" {
-		if len(services) > 0 && services[0].Name != "" {
-			title = services[0].Name + " API"
-		} else {
-			title = root.PackageName + " API"
+		serviceName := ""
+		if len(services) > 0 {
+			serviceName = services[0].Name
 		}
+
+		title = cleanAPITitle(serviceName, root.PackageName)
 	}
 
 	version := cfg.Version
@@ -543,4 +544,27 @@ func setExtension(extMap map[string]any, key string, val any) map[string]any {
 	extMap[key] = val
 
 	return extMap
+}
+
+func cleanAPITitle(name, pkgName string) string {
+	name = strings.TrimSpace(name)
+	pkgName = strings.TrimSpace(pkgName)
+
+	if name == "" || strings.EqualFold(name, "api") {
+		if pkgName != "" && !strings.EqualFold(pkgName, "api") && !strings.EqualFold(pkgName, "main") {
+			return strings.ToUpper(pkgName[:1]) + pkgName[1:] + " API"
+		}
+
+		return "API Specification"
+	}
+
+	if strings.HasSuffix(strings.ToUpper(name), "API") {
+		if strings.HasSuffix(name, "API") && len(name) > 3 && !strings.HasSuffix(name, " API") {
+			return name[:len(name)-3] + " API"
+		}
+
+		return name
+	}
+
+	return name + " API"
 }
