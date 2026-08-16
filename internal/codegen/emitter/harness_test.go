@@ -102,7 +102,7 @@ func TestEmitter_Harness_Generation(t *testing.T) {
 	_, parseErr := parser.ParseFile(fset, "api_harness.gen.go", code, parser.AllErrors)
 	require.NoError(t, parseErr, "Generated harness must be 100% syntactically valid Go code")
 
-	// Block 5: Native Benchmark & Fuzzing Targets in companion test file
+	// Block 5: Native Benchmark Targets in companion test file
 	testCode, tErr := emit.EmitHarnessTests(root)
 	require.NoError(t, tErr)
 	assert.NotEmpty(t, testCode)
@@ -110,9 +110,21 @@ func TestEmitter_Harness_Generation(t *testing.T) {
 	testCodeStr := string(testCode)
 	assert.Contains(t, testCodeStr, "func Benchmark_ItemService_GetItem(b *testing.B)")
 	assert.Contains(t, testCodeStr, "func Benchmark_ItemService_CreateItem(b *testing.B)")
-	assert.Contains(t, testCodeStr, "func Fuzz_ItemService_GetItem_Response(f *testing.F)")
-	assert.Contains(t, testCodeStr, "func Fuzz_ItemService_CreateItem_Response(f *testing.F)")
 
 	_, parseTestErr := parser.ParseFile(fset, "api_harness_test.go", testCode, parser.AllErrors)
 	require.NoError(t, parseTestErr, "Generated harness test must be 100% syntactically valid Go code")
+
+	// Block 6: On-Demand Table Fuzzing Targets
+	fuzzCode, fErr := emit.EmitFuzz(root)
+	require.NoError(t, fErr)
+	assert.NotEmpty(t, fuzzCode)
+
+	fuzzCodeStr := string(fuzzCode)
+	assert.Contains(t, fuzzCodeStr, "//go:build gofuzz")
+	assert.Contains(t, fuzzCodeStr, "func FuzzAllModels(f *testing.F)")
+	assert.Contains(t, fuzzCodeStr, "var createItemRequest CreateItemRequest")
+	assert.Contains(t, fuzzCodeStr, "var itemResponse ItemResponse")
+
+	_, parseFuzzErr := parser.ParseFile(fset, "api_fuzz_test.go", fuzzCode, parser.AllErrors)
+	require.NoError(t, parseFuzzErr, "Generated fuzz test must be 100% syntactically valid Go code")
 }

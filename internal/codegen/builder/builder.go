@@ -218,6 +218,54 @@ func (b *Builder) BuildHarness(ctx context.Context, srcFile, outFile string) (*R
 	}, nil
 }
 
+// BuildFuzz compiles an on-demand compact single-table fuzz suite for the contract.
+func (b *Builder) BuildFuzz(ctx context.Context, srcFile, outFile string) (*Result, error) {
+	select {
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	default:
+	}
+
+	root, err := b.parser.ParseFile(srcFile)
+	if err != nil {
+		return nil, fmt.Errorf("parse %s: %w", srcFile, err)
+	}
+
+	if len(root.Structs) == 0 {
+		return &Result{
+			SourceFile: srcFile,
+			Skipped:    true,
+		}, nil
+	}
+
+	code, err := b.emitter.EmitFuzz(root)
+	if err != nil {
+		return nil, fmt.Errorf("emit fuzz for %s: %w", srcFile, err)
+	}
+
+	targetOut := outFile
+	if targetOut == "" {
+		dir := filepath.Dir(srcFile)
+		base := filepath.Base(srcFile)
+		ext := filepath.Ext(base)
+		targetOut = filepath.Join(dir, strings.TrimSuffix(base, ext)+"_fuzz_test.go")
+	}
+
+	if !b.cfg.DryRun {
+		if err := os.WriteFile(targetOut, code, 0o600); err != nil {
+			return nil, fmt.Errorf("write fuzz %s: %w", targetOut, err)
+		}
+	}
+
+	return &Result{
+		SourceFile:    srcFile,
+		OutputFile:    targetOut,
+		ServicesCount: len(root.Services),
+		BytesCount:    len(code),
+		Code:          code,
+	}, nil
+}
+
 // BuildFiles compiles a slice of Go source files in sequence.
 func (b *Builder) BuildFiles(ctx context.Context, files []string) ([]*Result, error) {
 	var (

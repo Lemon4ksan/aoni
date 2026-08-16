@@ -33,12 +33,13 @@ func (c *CmdHarness) Run(ctx context.Context, args []string, stdout, stderr io.W
 	var (
 		fileFlag = fs.String("file", "", "Path to source file containing @aoni contracts")
 		outFlag  = fs.String("out", "", "Path to output generated harness file (default: <filename>_harness.gen.go)")
+		fuzzFlag = fs.Bool("fuzz", false, "Also generate on-demand compact panic-free wire fuzzer (api_fuzz_test.go)")
 	)
 
 	fs.Usage = func() {
 		fmt.Fprintf(stderr, "vortex harness — Unified Test & Bench Harness Generator\n\n")
 		fmt.Fprintf(stderr, "Usage:\n")
-		fmt.Fprintf(stderr, "  vortex harness [-file=api.go] [-out=api_harness.gen.go] [paths...]\n\n")
+		fmt.Fprintf(stderr, "  vortex harness [-file=api.go] [-out=api_harness.gen.go] [-fuzz] [paths...]\n\n")
 		fmt.Fprintf(stderr, "Flags:\n")
 		fs.PrintDefaults()
 	}
@@ -95,6 +96,18 @@ func (c *CmdHarness) Run(ctx context.Context, args []string, stdout, stderr io.W
 			res.BytesCount,
 			res.ServicesCount,
 		)
+
+		if *fuzzFlag {
+			fuzzRes, fErr := b.BuildFuzz(ctx, file, "")
+			if fErr == nil && fuzzRes != nil && !fuzzRes.Skipped {
+				fmt.Fprintf(
+					stdout,
+					"✔ Generated Fuzzer: %s (%d bytes)\n",
+					fuzzRes.OutputFile,
+					fuzzRes.BytesCount,
+				)
+			}
+		}
 	}
 
 	if harnessCount == 0 {

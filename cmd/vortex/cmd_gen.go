@@ -36,6 +36,7 @@ func (c *CmdGen) Run(ctx context.Context, args []string, stdout, stderr io.Write
 		watch       = fs.Bool("watch", false, "Watch source tree and auto-generate on change")
 		verbose     = fs.Bool("v", false, "Enable verbose compilation logging")
 		harnessFlag = fs.Bool("harness", false, "Generate test, load, and benchmark harness (api_harness.gen.go)")
+		fuzzFlag    = fs.Bool("fuzz", false, "Generate on-demand compact panic-free wire fuzzer (api_fuzz_test.go)")
 	)
 
 	fs.Usage = func() {
@@ -43,7 +44,7 @@ func (c *CmdGen) Run(ctx context.Context, args []string, stdout, stderr io.Write
 		fmt.Fprintf(stderr, "Usage:\n")
 		fmt.Fprintf(
 			stderr,
-			"  vortex [gen] [-file=api.go] [-out=api.gen.go] [-pkg=pkgname] [-harness] [-watch] [-v] [paths...]\n\n",
+			"  vortex [gen] [-file=api.go] [-out=api.gen.go] [-pkg=pkgname] [-harness] [-fuzz] [-watch] [-v] [paths...]\n\n",
 		)
 		fmt.Fprintf(stderr, "Flags:\n")
 		fs.PrintDefaults()
@@ -87,6 +88,18 @@ func (c *CmdGen) Run(ctx context.Context, args []string, stdout, stderr io.Write
 			res.ServicesCount,
 			res.StructsCount,
 		)
+
+		if *fuzzFlag {
+			fuzzRes, fErr := b.BuildFuzz(ctx, res.SourceFile, "")
+			if fErr == nil && fuzzRes != nil && !fuzzRes.Skipped {
+				fmt.Fprintf(
+					stdout,
+					"✔ Generated on-demand fuzzer %s (%d bytes)\n",
+					fuzzRes.OutputFile,
+					fuzzRes.BytesCount,
+				)
+			}
+		}
 	}
 
 	if *watch {
