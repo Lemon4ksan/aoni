@@ -390,7 +390,7 @@ func renderTerminalReport(w io.Writer, r *ProfileReport) error {
 	fmt.Fprintf(w, "🔬 ENDPOINT LATENCY & ALLOCATION LEDGER:\n")
 	fmt.Fprintf(
 		w,
-		"  %-14s %-28s %-16s %-12s %-10s %-8s\n",
+		"  %-20s %-36s %-16s %-12s %-12s %-8s\n",
 		"SERVICE",
 		"METHOD",
 		"THROUGHPUT",
@@ -398,7 +398,7 @@ func renderTerminalReport(w io.Writer, r *ProfileReport) error {
 		"ALLOCS",
 		"STATUS",
 	)
-	fmt.Fprintf(w, "  ──────────────────────────────────────────────────────────────────────────────────────────\n")
+	fmt.Fprintf(w, "  %s\n", strings.Repeat("─", 108))
 
 	for _, rec := range r.Records {
 		allocStr := fmt.Sprintf("%d B/op (%d)", rec.BytesPerOp, rec.AllocsPerOp)
@@ -406,7 +406,7 @@ func renderTerminalReport(w io.Writer, r *ProfileReport) error {
 			allocStr = "0 B/op"
 		}
 
-		fmt.Fprintf(w, "  %-14s %-28s %-16s %-12s %-10s %-8s\n",
+		fmt.Fprintf(w, "  %-20s %-36s %-16s %-12s %-12s %-8s\n",
 			rec.Service,
 			rec.Method,
 			formatThroughput(rec.ThroughputOpsS),
@@ -418,24 +418,28 @@ func renderTerminalReport(w io.Writer, r *ProfileReport) error {
 
 	fmt.Fprintf(w, "\n─────────────────────────────────────────────────────────────────────────────\n")
 	fmt.Fprintf(w, "⏱️ LATENCY TAX DECOMPOSITION (Where does time go per network roundtrip?):\n")
-	fmt.Fprintf(w, "  ┌─────────────────────────────────────────────────────────────────────────────┐\n")
-	fmt.Fprintf(w, "  │ Stage            Duration        Share     Proportional Breakdown           │\n")
-	fmt.Fprintf(w, "  ├─────────────────────────────────────────────────────────────────────────────┤\n")
+	fmt.Fprintf(w, "  ┌%s┐\n", strings.Repeat("─", 75))
+	fmt.Fprintf(w, "  │ %-16s %-14s %-10s %-30s │\n", "Stage", "Duration", "Share", "Proportional Breakdown")
+	fmt.Fprintf(w, "  ├%s┤\n", strings.Repeat("─", 75))
 	fmt.Fprintf(
 		w,
-		"  │ Client Encode    %-12s   < 0.001%%   %s │\n",
+		"  │ %-16s %-14s %-10s %s │\n",
+		"Client Encode",
 		formatLatency(r.LatencyEncodeNs),
+		"< 0.001%",
 		renderBar(0.0001, 30),
 	)
-	fmt.Fprintf(w, "  │ Wire Transit      12.40 ms     27.500%%   %s │\n", renderBar(0.275, 30))
-	fmt.Fprintf(w, "  │ Remote Server     32.60 ms     72.499%%   %s │\n", renderBar(0.725, 30))
+	fmt.Fprintf(w, "  │ %-16s %-14s %-10s %s │\n", "Wire Transit", "12.40 ms", "27.500%", renderBar(0.275, 30))
+	fmt.Fprintf(w, "  │ %-16s %-14s %-10s %s │\n", "Remote Server", "32.60 ms", "72.499%", renderBar(0.725, 30))
 	fmt.Fprintf(
 		w,
-		"  │ Client Decode    %-12s   < 0.001%%   %s │\n",
+		"  │ %-16s %-14s %-10s %s │\n",
+		"Client Decode",
 		formatLatency(r.LatencyDecodeNs),
+		"< 0.001%",
 		renderBar(0.0001, 30),
 	)
-	fmt.Fprintf(w, "  └─────────────────────────────────────────────────────────────────────────────┘\n\n")
+	fmt.Fprintf(w, "  └%s┘\n\n", strings.Repeat("─", 75))
 
 	if r.ZeroAllocRate >= 99.0 {
 		fmt.Fprintf(w, "✨ Verdict: Client networking layer operates at silicon line speed with ZERO heap churn.\n\n")
