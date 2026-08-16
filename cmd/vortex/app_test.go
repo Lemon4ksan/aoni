@@ -33,6 +33,7 @@ func newTestApp(stdout, stderr *bytes.Buffer) *App {
 		&CmdAccept{},
 		&CmdSource{},
 		&CmdLog{},
+		&CmdBlame{},
 		&CmdOAPI{},
 		&CmdProto{},
 		&CmdBench{},
@@ -996,4 +997,51 @@ type UserAPI interface {
 	err = app.Run(context.Background(), []string{"config", "unset", "defaults.casing", "-dir=" + tempDir})
 	require.NoError(t, err)
 	require.Contains(t, stdout.String(), "Unset defaults.casing")
+}
+
+func TestApp_Blame(t *testing.T) {
+	tempDir := t.TempDir()
+
+	serviceDir := filepath.Join(tempDir, "pkg", "user")
+	require.NoError(t, os.MkdirAll(serviceDir, 0o750))
+	apiFile := filepath.Join(serviceDir, "api.go")
+	require.NoError(t, os.WriteFile(apiFile, []byte(`package user
+
+import (
+	"context"
+	"github.com/lemon4ksan/aoni"
+)
+
+// UserDTO represents a user object
+type UserDTO struct {
+	ID string
+	Name string
+}
+
+// @aoni:service
+type UserAPI interface {
+	// @get "users/{id}"
+	// @retry 2
+	GetUser(ctx context.Context, id string, mods ...aoni.RequestModifier) (*UserDTO, error)
+}
+`), 0o600))
+
+	var stdout, stderr bytes.Buffer
+
+	app := newTestApp(&stdout, &stderr)
+
+	// 1. Run blame on file
+	err := app.Run(context.Background(), []string{"blame", apiFile, "-dir=" + tempDir})
+	require.NoError(t, err)
+	require.Contains(t, stdout.String(), "GetUser")
+	require.Contains(t, stdout.String(), "UserDTO")
+	require.Contains(t, stdout.String(), "Vortex Contract Provenance")
+
+	// 2. Run blame JSON
+	stdout.Reset()
+
+	err = app.Run(context.Background(), []string{"blame", apiFile, "-json", "-dir=" + tempDir})
+	require.NoError(t, err)
+	require.Contains(t, stdout.String(), `"name": "GetUser"`)
+	require.Contains(t, stdout.String(), `"name": "UserDTO"`)
 }

@@ -326,3 +326,118 @@ func RootDir(ctx context.Context, startDir string) (string, error) {
 
 	return filepath.Clean(strings.TrimSpace(stdout.String())), nil
 }
+
+// BlameLine holds blame information for a single source line.
+type BlameLine struct {
+	LineNumber int    `json:"line_number"`
+	Commit     string `json:"commit"`
+	Author     string `json:"author"`
+	AuthorMail string `json:"author_mail"`
+	Date       string `json:"date"`
+	Summary    string `json:"summary"`
+}
+
+// BlameFile runs git blame in porcelain mode and returns line-by-line provenance.
+func BlameFile(ctx context.Context, rootDir, relPath string) (map[int]BlameLine, error) {
+	if ctx == nil {
+		var cancel context.CancelFunc
+
+		ctx, cancel = context.WithTimeout(context.Background(), DefaultTimeout)
+		defer cancel()
+	}
+
+	cleanRelPath := filepath.ToSlash(filepath.Clean(relPath))
+	cmd := exec.CommandContext(ctx, "git", "blame", "--line-porcelain", cleanRelPath)
+	cmd.Dir = rootDir
+
+	var stdout, stderr bytes.Buffer
+
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+
+	if err := cmd.Run(); err != nil {
+		// Not tracked in git or working tree dirty
+		return map[int]BlameLine{}, nil
+	}
+
+	result := make(map[int]BlameLine)
+	lines := strings.Split(stdout.String(), "\n")
+
+	var (
+		currentHash, author, mail, dateStr, summary string
+		finalLine                                   int
+	)
+
+	for _, line := range lines {
+		if len(line) == 0 {
+			continue
+		}
+
+		if strings.HasPrefix(line, "\t") {
+			// Tab prefix indicates the actual source line content.
+			// This concludes the current porcelain entry.
+			if finalLine > 0 {
+				shortHash := currentHash
+				if len(shortHash) > 7 {
+					shortHash = shortHash[:7]
+				}
+
+				result[finalLine] = BlameLine{
+					LineNumber: finalLine,
+					Commit:     shortHash,
+					Author:     author,
+					AuthorMail: mail,
+					Date:       dateStr,
+					Summary:    summary,
+				}
+			}
+
+			finalLine = 0
+
+			continue
+		}
+
+		parts := strings.SplitN(line, " ", 2)
+		if len(parts) == 0 {
+			continue
+		}
+
+		// First line of header is: <40-char-hash> <origLine> <finalLine> [<groupLines>]
+		if len(parts[0]) == 40 && len(parts) >= 2 {
+			currentHash = parts[0]
+
+			fields := strings.Fields(parts[1])
+			if len(fields) >= 2 {
+				if l, err := strconv.Atoi(fields[1]); err == nil {
+					finalLine = l
+				}
+			}
+
+			continue
+		}
+
+		switch parts[0] {
+		case "author":
+			if len(parts) > 1 {
+				author = parts[1]
+			}
+		case "author-mail":
+			if len(parts) > 1 {
+				mail = strings.Trim(parts[1], "<>")
+			}
+		case "author-time":
+			if len(parts) > 1 {
+				if sec, err := strconv.ParseInt(parts[1], 10, 64); err == nil {
+					dateStr = time.Unix(sec, 0).Format("2006-01-02")
+				}
+			}
+
+		case "summary":
+			if len(parts) > 1 {
+				summary = parts[1]
+			}
+		}
+	}
+
+	return result, nil
+}
