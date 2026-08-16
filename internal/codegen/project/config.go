@@ -26,6 +26,7 @@ type Config struct {
 	Defaults  DefaultsConfig   `yaml:"defaults,omitempty"`
 	Contracts []ContractConfig `yaml:"contracts"`
 	Lint      LintConfig       `yaml:"lint,omitempty"`
+	Ignore    []string         `yaml:"ignore,omitempty"`
 	Export    ExportConfig     `yaml:"export,omitempty"`
 	Coverage  CoverageConfig   `yaml:"coverage,omitempty"`
 
@@ -60,6 +61,8 @@ type ContractConfig struct {
 	Gen      string          `yaml:"gen,omitempty"`
 	Models   string          `yaml:"models,omitempty"`
 	Harness  string          `yaml:"harness,omitempty"`
+	Ignore   []string        `yaml:"ignore,omitempty"`
+	Disable  []string        `yaml:"disable,omitempty"`
 	Upstream *UpstreamConfig `yaml:"upstream,omitempty"`
 	Plugins  []PluginConfig  `yaml:"plugins,omitempty"`
 }
@@ -133,8 +136,36 @@ type PluginConfig struct {
 type LintConfig struct {
 	Strict  bool                `yaml:"strict,omitempty"`
 	Disable []string            `yaml:"disable,omitempty"`
+	Ignore  []string            `yaml:"ignore,omitempty"`
 	Enable  []string            `yaml:"enable,omitempty"`
 	Rules   map[string]RuleOpts `yaml:"rules,omitempty"`
+}
+
+// AllIgnoredRules returns a deduplicated list of all globally ignored lint rules.
+func (cfg *Config) AllIgnoredRules() []string {
+	if cfg == nil {
+		return nil
+	}
+
+	set := make(map[string]bool)
+
+	var result []string
+
+	add := func(rules []string) {
+		for _, r := range rules {
+			r = strings.TrimSpace(r)
+			if r != "" && !set[r] {
+				set[r] = true
+				result = append(result, r)
+			}
+		}
+	}
+
+	add(cfg.Ignore)
+	add(cfg.Lint.Ignore)
+	add(cfg.Lint.Disable)
+
+	return result
 }
 
 // RuleOpts defines per-rule configuration overrides.

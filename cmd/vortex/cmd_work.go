@@ -58,6 +58,7 @@ func (c *CmdWork) Run(ctx context.Context, args []string, stdout, stderr io.Writ
 		}
 
 		return c.runForward(ctx, subArgs[0], subArgs[1:], stdout, stderr)
+
 	default:
 		return fmt.Errorf("unknown work subcommand %q. Available: init, gen, check, prof, status, run", sub)
 	}

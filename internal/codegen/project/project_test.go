@@ -156,3 +156,20 @@ type API interface {
 	require.NoError(t, err)
 	require.Contains(t, string(jsonData), "\"total_methods\": 1")
 }
+
+func TestProject_IgnoreRules(t *testing.T) {
+	cfg := &project.Config{
+		Ignore: []string{"sensitive-query-param", "param-lifting"},
+		Lint: project.LintConfig{
+			Ignore:  []string{"missing-context"},
+			Disable: []string{"S001"},
+		},
+	}
+
+	rules := cfg.AllIgnoredRules()
+	require.Contains(t, rules, "sensitive-query-param")
+	require.Contains(t, rules, "param-lifting")
+	require.Contains(t, rules, "missing-context")
+	require.Contains(t, rules, "S001")
+	require.Len(t, rules, 4)
+}

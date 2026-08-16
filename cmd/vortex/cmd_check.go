@@ -20,6 +20,7 @@ import (
 	"github.com/lemon4ksan/aoni/internal/codegen/builder"
 	"github.com/lemon4ksan/aoni/internal/codegen/lint"
 	codeparser "github.com/lemon4ksan/aoni/internal/codegen/parser"
+	"github.com/lemon4ksan/aoni/internal/codegen/project"
 )
 
 // CmdCheck performs static contract validation and applies automated fixes.
@@ -62,6 +63,13 @@ func (c *CmdCheck) Run(ctx context.Context, args []string, stdout, stderr io.Wri
 	}
 
 	reg := lint.DefaultRegistry()
+	cwd, _ := os.Getwd()
+
+	rootDir, _, _ := project.FindRoot(cwd)
+	if cfg, _ := project.Load(rootDir); cfg != nil {
+		reg.Disable(cfg.AllIgnoredRules()...)
+	}
+
 	if *disableFlag != "" {
 		reg.Disable(strings.Split(*disableFlag, ",")...)
 	}

@@ -249,6 +249,10 @@ func (c *CmdAutoPilot) runWorld2Pipeline(
 	reg := lint.DefaultRegistry()
 	reg.Disable("E001", "stale-codegen")
 
+	if cfg != nil {
+		reg.Disable(cfg.AllIgnoredRules()...)
+	}
+
 	engine := lint.NewEngine(reg)
 	p := codeparser.NewParser()
 	fset := token.NewFileSet()
