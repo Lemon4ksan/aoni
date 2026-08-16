@@ -266,6 +266,54 @@ func (b *Builder) BuildFuzz(ctx context.Context, srcFile, outFile string) (*Resu
 	}, nil
 }
 
+// BuildMock compiles an in-memory virtual test server (_mock.gen.go) for integration testing.
+func (b *Builder) BuildMock(ctx context.Context, srcFile, outFile string) (*Result, error) {
+	select {
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	default:
+	}
+
+	root, err := b.parser.ParseFile(srcFile)
+	if err != nil {
+		return nil, fmt.Errorf("parse %s: %w", srcFile, err)
+	}
+
+	if len(root.Services) == 0 {
+		return &Result{
+			SourceFile: srcFile,
+			Skipped:    true,
+		}, nil
+	}
+
+	code, err := b.emitter.EmitMock(root)
+	if err != nil {
+		return nil, fmt.Errorf("emit mock for %s: %w", srcFile, err)
+	}
+
+	targetOut := outFile
+	if targetOut == "" {
+		dir := filepath.Dir(srcFile)
+		base := filepath.Base(srcFile)
+		ext := filepath.Ext(base)
+		targetOut = filepath.Join(dir, strings.TrimSuffix(base, ext)+"_mock.gen.go")
+	}
+
+	if !b.cfg.DryRun {
+		if err := os.WriteFile(targetOut, code, 0o600); err != nil {
+			return nil, fmt.Errorf("write mock %s: %w", targetOut, err)
+		}
+	}
+
+	return &Result{
+		SourceFile:    srcFile,
+		OutputFile:    targetOut,
+		ServicesCount: len(root.Services),
+		BytesCount:    len(code),
+		Code:          code,
+	}, nil
+}
+
 // BuildFiles compiles a slice of Go source files in sequence.
 func (b *Builder) BuildFiles(ctx context.Context, files []string) ([]*Result, error) {
 	var (

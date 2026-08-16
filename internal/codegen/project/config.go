@@ -50,6 +50,7 @@ type DefaultsConfig struct {
 	Persona string `yaml:"persona,omitempty"`
 	TLSSpec string `yaml:"tlsspec,omitempty"`
 	Harness bool   `yaml:"harness,omitempty"`
+	Mock    bool   `yaml:"mock,omitempty"`
 }
 
 // ContractConfig describes a single service contract definition within the workspace.
@@ -61,6 +62,7 @@ type ContractConfig struct {
 	Gen      string          `yaml:"gen,omitempty"`
 	Models   string          `yaml:"models,omitempty"`
 	Harness  string          `yaml:"harness,omitempty"`
+	Mock     string          `yaml:"mock,omitempty"`
 	Ignore   []string        `yaml:"ignore,omitempty"`
 	Disable  []string        `yaml:"disable,omitempty"`
 	Upstream *UpstreamConfig `yaml:"upstream,omitempty"`
@@ -207,6 +209,10 @@ func (cfg *Config) Normalize() {
 
 		if ct.Harness == "" && cfg.Defaults.Harness && ct.File != "" {
 			ct.Harness = strings.TrimSuffix(ct.File, ".go") + "_harness.gen.go"
+		}
+
+		if ct.Mock == "" && cfg.Defaults.Mock && ct.File != "" {
+			ct.Mock = strings.TrimSuffix(ct.File, ".go") + "_mock.gen.go"
 		}
 	}
 }

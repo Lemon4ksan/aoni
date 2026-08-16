@@ -24,6 +24,7 @@ func newTestApp(stdout, stderr *bytes.Buffer) *App {
 		&CmdWork{},
 		&CmdGen{},
 		&CmdHarness{},
+		&CmdMock{},
 		&CmdCheck{},
 		&CmdDiff{},
 		&CmdReview{},
@@ -572,9 +573,46 @@ type API interface {
 
 	// 2. SARIF format
 	stdout.Reset()
+
 	err = app.Run(context.Background(), []string{"check", "-format=sarif", apiFile})
 	require.Error(t, err)
 	require.Contains(t, stdout.String(), "\"$schema\"")
 	require.Contains(t, stdout.String(), "sarif-spec")
 	require.Contains(t, stdout.String(), "\"missing-context\"")
+}
+
+func TestApp_Mock(t *testing.T) {
+	tempDir := t.TempDir()
+	apiFile := filepath.Join(tempDir, "api.go")
+	apiSrc := `package test
+
+import (
+	"context"
+	"github.com/lemon4ksan/aoni"
+)
+
+// @aoni:service
+type API interface {
+	// @get "/item"
+	GetItem(ctx context.Context, id string, mods ...aoni.RequestModifier) (map[string]any, error)
+}
+`
+	require.NoError(t, os.WriteFile(apiFile, []byte(apiSrc), 0o600))
+
+	var stdout, stderr bytes.Buffer
+
+	app := newTestApp(&stdout, &stderr)
+
+	err := app.Run(context.Background(), []string{"mock", apiFile})
+	require.NoError(t, err)
+	require.Contains(t, stdout.String(), "✔ Generated Mock Server")
+
+	mockFile := filepath.Join(tempDir, "api_mock.gen.go")
+	require.FileExists(t, mockFile)
+
+	content, err := os.ReadFile(mockFile)
+	require.NoError(t, err)
+	require.Contains(t, string(content), "type APIMockServer struct")
+	require.Contains(t, string(content), "NewAPIMockServer(t testing.TB)")
+	require.Contains(t, string(content), "OnGetItem")
 }

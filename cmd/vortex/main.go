@@ -21,6 +21,7 @@ func main() {
 		&CmdWork{},
 		&CmdGen{},
 		&CmdHarness{},
+		&CmdMock{},
 		&CmdCheck{},
 		&CmdDiff{},
 		&CmdReview{},

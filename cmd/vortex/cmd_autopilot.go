@@ -390,6 +390,24 @@ func (c *CmdAutoPilot) runWorld2Pipeline(
 						}
 					}
 
+					if ct.Mock != "" {
+						mockOut := ct.Mock
+						if mockOut == "true" {
+							mockOut = filepath.Join(rootDir, strings.TrimSuffix(ct.File, ".go")+"_mock.gen.go")
+						} else {
+							mockOut = filepath.Join(rootDir, ct.Mock)
+						}
+
+						mRes, mErr := b.BuildMock(ctx, file, mockOut)
+						if mErr != nil {
+							return fmt.Errorf("mock compilation failed on %s: %w", file, mErr)
+						}
+
+						if mRes != nil {
+							totalBytes += mRes.BytesCount
+						}
+					}
+
 					break
 				}
 			}
