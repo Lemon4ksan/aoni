@@ -254,17 +254,29 @@ func (e *StatusEngine) Inspect(cfg *Config, contracts []ContractConfig) *StatusR
 			continue
 		}
 
-		svc := root.Services[0]
+		totalMethods := 0
+		for _, s := range root.Services {
+			totalMethods += len(s.Methods)
+		}
+
+		svcName := ct.Name
+		if svcName == "" {
+			svcName = root.Services[0].Name
+			if len(root.Services) > 1 {
+				svcName = fmt.Sprintf("%s (+%d)", root.Services[0].Name, len(root.Services)-1)
+			}
+		}
+
 		status := ContractStatus{
-			Name:         svc.Name,
+			Name:         svcName,
 			Package:      root.PackageName,
 			File:         ct.File,
 			GenFile:      ct.Gen,
 			ModelsFile:   ct.Models,
-			MethodsCount: len(svc.Methods),
+			MethodsCount: totalMethods,
 			DTOsCount:    len(root.Structs),
-			Version:      svc.Version,
-			Source:       svc.Source,
+			Version:      root.Services[0].Version,
+			Source:       root.Services[0].Source,
 		}
 
 		if ct.Upstream != nil && ct.Upstream.Source != "" && status.Source == "" {
@@ -302,7 +314,7 @@ func (e *StatusEngine) Inspect(cfg *Config, contracts []ContractConfig) *StatusR
 		}
 
 		if status.IsGenStale {
-			staleServiceNames = append(staleServiceNames, svc.Name)
+			staleServiceNames = append(staleServiceNames, status.Name)
 		}
 
 		// 2. Check upstream drift if source is available
@@ -320,7 +332,7 @@ func (e *StatusEngine) Inspect(cfg *Config, contracts []ContractConfig) *StatusR
 				status.UpstreamGhostCount = diffReport.GhostCount()
 
 				if status.UpstreamBreakingCount > 0 || status.UpstreamDriftCount > 0 {
-					driftServiceNames = append(driftServiceNames, fmt.Sprintf("%s (%s)", svc.Name, status.Source))
+					driftServiceNames = append(driftServiceNames, fmt.Sprintf("%s (%s)", status.Name, status.Source))
 				}
 			}
 		}
