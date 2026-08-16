@@ -1361,3 +1361,68 @@ type MarketAPI interface {
 	err = app.Run(context.Background(), []string{"check", apiFile})
 	require.NoError(t, err)
 }
+
+func TestApp_CheckMirrorRules(t *testing.T) {
+	tempDir := t.TempDir()
+
+	// 1. Create legacy backend root source (Untagged pure Go)
+	legacyDir := filepath.Join(tempDir, "internal", "legacy", "steam")
+	require.NoError(t, os.MkdirAll(legacyDir, 0o750))
+	legacyFile := filepath.Join(legacyDir, "inventory.go")
+	require.NoError(t, os.WriteFile(legacyFile, []byte(`package steam
+
+import "context"
+
+type LegacyItem struct {
+	AssetID uint64
+}
+
+type LegacyInventoryService interface {
+	GetInventory(ctx context.Context, steamID uint64) ([]*LegacyItem, error)
+	BatchTransfer(ctx context.Context, assetIDs []uint64) error
+}
+`), 0o600))
+
+	// 2. Create Aoni wrapper with intentional signature drift (steamID string instead of uint64) and missing BatchTransfer
+	wrapperDir := filepath.Join(tempDir, "pkg", "steam", "inventory")
+	require.NoError(t, os.MkdirAll(wrapperDir, 0o750))
+	wrapperFile := filepath.Join(wrapperDir, "api.go")
+	require.NoError(t, os.WriteFile(wrapperFile, []byte(`package inventory
+
+import (
+	"context"
+	"github.com/lemon4ksan/aoni"
+)
+
+type Item struct {
+	AssetID uint64
+}
+
+// @aoni:service
+// @aoni:mirror "internal/legacy/steam/inventory.go:LegacyInventoryService"
+type InventoryWrapperAPI interface {
+	// @get "inventory"
+	GetInventory(ctx context.Context, steamID string, mods ...aoni.RequestModifier) ([]*Item, error)
+}
+`), 0o600))
+
+	var stdout, stderr bytes.Buffer
+
+	app := newTestApp(&stdout, &stderr)
+
+	// Run gen so stale-codegen doesn't fire
+	_ = app.Run(context.Background(), []string{"gen", wrapperFile})
+
+	// Run check
+	stdout.Reset()
+
+	_ = app.Run(context.Background(), []string{"check", wrapperFile, "-dir=" + tempDir})
+
+	outStr := stdout.String()
+	// E016: mirror-signature-drift should be reported
+	require.Contains(t, outStr, "E016")
+	require.Contains(t, outStr, "mirror-signature-drift")
+	// W012: mirror-ghost-method should be reported for BatchTransfer
+	require.Contains(t, outStr, "W012")
+	require.Contains(t, outStr, "mirror-ghost-method")
+}

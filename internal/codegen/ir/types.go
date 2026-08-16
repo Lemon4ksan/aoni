@@ -61,7 +61,15 @@ type ServiceIR struct {
 	Version            string
 	Source             string
 	Telemetry          string
+	Mirror             *MirrorIR
 	Methods            []*MethodIR
+}
+
+// MirrorIR represents an AST shadow mirror configuration pointing to an untagged root source of truth.
+type MirrorIR struct {
+	Source     string // path to legacy Go file (e.g. "internal/legacy/backend/inventory.go")
+	TargetType string // target interface or struct name (e.g. "LegacyInventoryService")
+	Strict     bool   // enforce strict type matching
 }
 
 // DeprecationIR captures lifecycle deprecation metadata for services, methods, parameters, and fields.

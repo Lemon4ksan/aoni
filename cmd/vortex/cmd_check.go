@@ -50,6 +50,7 @@ func (c *CmdCheck) Run(ctx context.Context, args []string, stdout, stderr io.Wri
 		enableFlag  = fs.String("enable", "", "Comma-separated list of rule IDs/names to enable")
 		strictFlag  = fs.Bool("strict", false, "Treat warnings as errors")
 		noCacheFlag = fs.Bool("no-cache", false, "Disable incremental validation cache")
+		dirFlag     = fs.String("dir", "", "Target workspace directory (default: current root)")
 	)
 
 	fs.Usage = func() {
@@ -63,7 +64,22 @@ func (c *CmdCheck) Run(ctx context.Context, args []string, stdout, stderr io.Wri
 		fs.PrintDefaults()
 	}
 
-	if err := fs.Parse(args); err != nil {
+	var flags, nonFlags []string
+	for i := 0; i < len(args); i++ {
+		arg := args[i]
+		if strings.HasPrefix(arg, "-") {
+			flags = append(flags, arg)
+			if (arg == "-dir" || arg == "-format" || arg == "-disable" || arg == "-enable") &&
+				i+1 < len(args) && !strings.HasPrefix(args[i+1], "-") {
+				flags = append(flags, args[i+1])
+				i++
+			}
+		} else {
+			nonFlags = append(nonFlags, arg)
+		}
+	}
+
+	if err := fs.Parse(append(flags, nonFlags...)); err != nil {
 		return err
 	}
 
@@ -73,9 +89,13 @@ func (c *CmdCheck) Run(ctx context.Context, args []string, stdout, stderr io.Wri
 	}
 
 	reg := lint.DefaultRegistry()
-	cwd, _ := os.Getwd()
 
-	rootDir, _, _ := project.FindRoot(cwd)
+	rootDir := *dirFlag
+	if rootDir == "" {
+		cwd, _ := os.Getwd()
+		rootDir, _, _ = project.FindRoot(cwd)
+	}
+
 	if cfg, _ := project.Load(rootDir); cfg != nil {
 		reg.Disable(cfg.AllIgnoredRules()...)
 	}
@@ -151,6 +171,7 @@ func (c *CmdCheck) Run(ctx context.Context, args []string, stdout, stderr io.Wri
 			ASTFile:     astFile,
 			SourceBytes: srcBytes,
 			FilePath:    file,
+			RootDir:     rootDir,
 			Ignores:     lint.ParseIgnores(fset, astFile),
 		}
 

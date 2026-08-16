@@ -85,6 +85,7 @@ type Pass struct {
 	ASTFile     *ast.File
 	SourceBytes []byte
 	FilePath    string
+	RootDir     string
 	Ignores     *IgnoreMap
 }
 

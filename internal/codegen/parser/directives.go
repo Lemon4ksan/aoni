@@ -158,6 +158,40 @@ func ApplyServiceDirective(s *ir.ServiceIR, d *Directive) {
 
 		s.Protocol = ir.ProtocolWS
 
+	case "aoni:mirror", "mirror":
+		mirror := &ir.MirrorIR{}
+
+		val := d.Value
+		if val == "" {
+			if src, ok := d.Args["source"]; ok {
+				val = src
+			}
+		}
+
+		if val != "" {
+			lastColon := strings.LastIndex(val, ":")
+			if lastColon != -1 && !strings.Contains(val[lastColon:], "/") && !strings.Contains(val[lastColon:], `\`) {
+				mirror.Source = val[:lastColon]
+				mirror.TargetType = val[lastColon+1:]
+			} else {
+				mirror.Source = val
+			}
+		}
+
+		if target, ok := d.Args["target"]; ok {
+			mirror.TargetType = target
+		}
+
+		if targetType, ok := d.Args["type"]; ok && mirror.TargetType == "" {
+			mirror.TargetType = targetType
+		}
+
+		if strictStr, ok := d.Args["strict"]; ok {
+			mirror.Strict = (strictStr == "true" || strictStr == "1")
+		}
+
+		s.Mirror = mirror
+
 	case "type_map":
 		if s.TypeMaps == nil {
 			s.TypeMaps = make(map[string]ir.FormatStrategy)

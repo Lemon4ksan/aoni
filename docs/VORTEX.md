@@ -695,6 +695,45 @@ resp, err := request.PostProtoTo[pb.QueryResponse](ctx, client, "https://grpc.ex
 
 ---
 
+### Shadow Root Source Mirroring (`@aoni:mirror`)
+
+When building high-speed `aoni` wrappers over tightly-coupled or private legacy Go backends (which cannot be annotated with `@aoni:service` or regenerated), use `@aoni:mirror` to treat the legacy Go code as an **immutable, read-only Root of Truth**:
+
+```go
+package inventory
+
+import (
+    "context"
+    "github.com/lemon4ksan/aoni"
+)
+
+type Item struct {
+    AssetID uint64
+    Name    string
+}
+
+// @aoni:service
+// @aoni:mirror "internal/legacy/steam/inventory.go:LegacyInventoryService"
+type InventoryWrapperAPI interface {
+    // @get "inventory"
+    GetInventory(ctx context.Context, steamID uint64, mods ...aoni.RequestModifier) ([]*Item, error)
+}
+```
+
+#### Specialized Mirror Linter Rules:
+| Rule ID | Name | Severity | Purpose |
+| :--- | :--- | :--- | :--- |
+| **`E015`** | `mirror-source-not-found` | **Error** | Target Go file or interface specified in `@mirror` does not exist on disk/AST. |
+| **`E016`** | `mirror-signature-drift` | **Error** | Divergence in method signatures, parameter types, or DTO struct field types. |
+| **`W012`** | `mirror-ghost-method` | **Warning** | New public method appeared in root legacy interface not yet exposed in wrapper. |
+
+```bash
+# Verify synchronization with legacy backend without touching any legacy files:
+vortex check pkg/steam/inventory/api.go
+```
+
+---
+
 ## 6. CI/CD Integration & SARIF Reporting
 
 Integrate Vortex validation into GitHub Actions workflow (`.github/workflows/contracts.yml`):

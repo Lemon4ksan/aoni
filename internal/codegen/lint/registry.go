@@ -47,6 +47,8 @@ func DefaultRegistry() *Registry {
 		&RuleInvalidBitpack{},
 		&RuleShadowedWireName{},
 		&RuleInvalidUnionStatus{},
+		&RuleMirrorSourceNotFound{},
+		&RuleMirrorSignatureDrift{},
 
 		// 2. Performance (P) - Zero-alloc & stack safety
 		&RuleMissingDTOEncoder{},
@@ -72,6 +74,7 @@ func DefaultRegistry() *Registry {
 		&RuleInvalidStatusCodeRange{},
 		&RuleDuplicateOperationID{},
 		&RuleDeprecatedTargetValidation{},
+		&RuleMirrorGhostMethod{},
 	)
 
 	return reg

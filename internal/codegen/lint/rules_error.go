@@ -12,6 +12,7 @@ import (
 
 	"github.com/lemon4ksan/aoni/internal/codegen/emitter"
 	"github.com/lemon4ksan/aoni/internal/codegen/ir"
+	"github.com/lemon4ksan/aoni/internal/codegen/mirror"
 	"github.com/lemon4ksan/aoni/internal/codegen/optimizer"
 	"github.com/lemon4ksan/aoni/internal/codegen/parser"
 )
@@ -963,4 +964,124 @@ func defaultBitWidth(typeName string) int {
 	default:
 		return 64
 	}
+}
+
+// RuleMirrorSourceNotFound checks if the @mirror root source file or target interface exists.
+type RuleMirrorSourceNotFound struct{}
+
+func (r *RuleMirrorSourceNotFound) ID() string   { return "E015" }
+func (r *RuleMirrorSourceNotFound) Name() string { return "mirror-source-not-found" }
+func (r *RuleMirrorSourceNotFound) Description() string {
+	return "Checks if target Go source file or interface specified in @mirror exists on disk"
+}
+func (r *RuleMirrorSourceNotFound) Category() Category        { return CategoryCorrectness }
+func (r *RuleMirrorSourceNotFound) DefaultSeverity() Severity { return SeverityError }
+func (r *RuleMirrorSourceNotFound) IsFixable() bool           { return false }
+
+func (r *RuleMirrorSourceNotFound) Run(pass *Pass) []Diagnostic {
+	if pass == nil || pass.RootIR == nil || pass.FilePath == "" {
+		return nil
+	}
+
+	var diags []Diagnostic
+	for _, svc := range pass.RootIR.Services {
+		if svc.Mirror == nil || svc.Mirror.Source == "" {
+			continue
+		}
+
+		line, col := pass.FindNodePosition(svc.Name, "")
+
+		driftDiags, err := mirror.CheckService(pass.RootDir, pass.FilePath, svc, pass.RootIR.Structs)
+		if err != nil {
+			diags = append(diags, Diagnostic{
+				RuleID:     r.ID(),
+				RuleName:   r.Name(),
+				Severity:   r.DefaultSeverity(),
+				Category:   r.Category(),
+				Target:     svc.Name,
+				FilePath:   pass.FilePath,
+				Line:       line,
+				Column:     col,
+				Message:    err.Error(),
+				Suggestion: "Ensure the path in @mirror points to an existing Go source file and valid interface",
+			})
+
+			continue
+		}
+
+		for _, d := range driftDiags {
+			if d.Kind == mirror.DriftSourceNotFound || d.Kind == mirror.DriftTargetNotFound {
+				diags = append(diags, Diagnostic{
+					RuleID:     r.ID(),
+					RuleName:   r.Name(),
+					Severity:   r.DefaultSeverity(),
+					Category:   r.Category(),
+					Target:     svc.Name,
+					FilePath:   pass.FilePath,
+					Line:       line,
+					Column:     col,
+					Message:    d.Message,
+					Suggestion: "Ensure the path in @mirror points to an existing Go source file and valid interface",
+				})
+			}
+		}
+	}
+
+	return diags
+}
+
+// RuleMirrorSignatureDrift checks if @mirror wrapper has drifted from root Go source signatures.
+type RuleMirrorSignatureDrift struct{}
+
+func (r *RuleMirrorSignatureDrift) ID() string   { return "E016" }
+func (r *RuleMirrorSignatureDrift) Name() string { return "mirror-signature-drift" }
+func (r *RuleMirrorSignatureDrift) Description() string {
+	return "Enforces synchronization between @mirror wrapper signatures and root Go source"
+}
+func (r *RuleMirrorSignatureDrift) Category() Category        { return CategoryCorrectness }
+func (r *RuleMirrorSignatureDrift) DefaultSeverity() Severity { return SeverityError }
+func (r *RuleMirrorSignatureDrift) IsFixable() bool           { return false }
+
+func (r *RuleMirrorSignatureDrift) Run(pass *Pass) []Diagnostic {
+	if pass == nil || pass.RootIR == nil || pass.FilePath == "" {
+		return nil
+	}
+
+	var diags []Diagnostic
+	for _, svc := range pass.RootIR.Services {
+		if svc.Mirror == nil || svc.Mirror.Source == "" {
+			continue
+		}
+
+		driftDiags, err := mirror.CheckService(pass.RootDir, pass.FilePath, svc, pass.RootIR.Structs)
+		if err != nil {
+			continue
+		}
+
+		line, col := pass.FindNodePosition(svc.Name, "")
+		for _, d := range driftDiags {
+			if d.Kind == mirror.DriftParamMismatch || d.Kind == mirror.DriftReturnMismatch ||
+				d.Kind == mirror.DriftFieldMismatch || d.Kind == mirror.DriftMethodMissing {
+				target := svc.Name
+				if d.Method != "" {
+					target = fmt.Sprintf("%s.%s", svc.Name, d.Method)
+				}
+
+				diags = append(diags, Diagnostic{
+					RuleID:     r.ID(),
+					RuleName:   r.Name(),
+					Severity:   r.DefaultSeverity(),
+					Category:   r.Category(),
+					Target:     target,
+					FilePath:   pass.FilePath,
+					Line:       line,
+					Column:     col,
+					Message:    d.Message,
+					Suggestion: "Update wrapper method parameter or DTO field to match the root Go source signature",
+				})
+			}
+		}
+	}
+
+	return diags
 }

@@ -216,6 +216,32 @@ var Registry = []*DirectiveDef{
 		Example:     "// @casing snake_case",
 	},
 	{
+		Name:        "mirror",
+		Scopes:      []Scope{ScopeService},
+		Aliases:     []string{"aoni:mirror"},
+		ValueHint:   "\"<path/to/legacy.go>[:<InterfaceName>]\"",
+		Description: "Binds contract to an untagged, read-only Go root source of truth for AST drift detection.",
+		Args: []ArgDef{
+			{
+				Name:        "source",
+				Placeholder: "\"path/to/file.go\"",
+				Description: "Path to legacy Go source file (relative to workspace root)",
+			},
+			{
+				Name:        "target",
+				Placeholder: "\"<InterfaceName>\"",
+				Description: "Target interface or struct name within the legacy file",
+			},
+			{
+				Name:          "strict",
+				Placeholder:   "<bool>",
+				Description:   "Enforce strict matching of parameter and DTO struct field types",
+				AllowedValues: []string{"true", "false"},
+			},
+		},
+		Example: "// @mirror \"internal/legacy/steam/inventory.go:LegacyInventoryService\"",
+	},
+	{
 		Name:        "header",
 		Scopes:      []Scope{ScopeService, ScopeParam},
 		ValueHint:   "\"Key: Value\"",

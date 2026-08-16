@@ -13,6 +13,7 @@ import (
 	"strings"
 
 	"github.com/lemon4ksan/aoni/internal/codegen/ir"
+	"github.com/lemon4ksan/aoni/internal/codegen/mirror"
 	"github.com/lemon4ksan/aoni/internal/codegen/parser"
 )
 
@@ -999,4 +1000,59 @@ func removeLineContaining(filePath, methodScope, pattern string) error {
 	}
 
 	return nil
+}
+
+// RuleMirrorGhostMethod checks if new public methods appeared in root Go source that are not exposed in wrapper.
+type RuleMirrorGhostMethod struct{}
+
+func (r *RuleMirrorGhostMethod) ID() string   { return "W012" }
+func (r *RuleMirrorGhostMethod) Name() string { return "mirror-ghost-method" }
+func (r *RuleMirrorGhostMethod) Description() string {
+	return "Detects public methods present in root Go source but not yet exposed in @mirror wrapper"
+}
+func (r *RuleMirrorGhostMethod) Category() Category        { return CategoryCorrectness }
+func (r *RuleMirrorGhostMethod) DefaultSeverity() Severity { return SeverityWarning }
+func (r *RuleMirrorGhostMethod) IsFixable() bool           { return false }
+
+func (r *RuleMirrorGhostMethod) Run(pass *Pass) []Diagnostic {
+	if pass == nil || pass.RootIR == nil || pass.FilePath == "" {
+		return nil
+	}
+
+	var diags []Diagnostic
+	for _, svc := range pass.RootIR.Services {
+		if svc.Mirror == nil || svc.Mirror.Source == "" {
+			continue
+		}
+
+		driftDiags, err := mirror.CheckService(pass.RootDir, pass.FilePath, svc, pass.RootIR.Structs)
+		if err != nil {
+			continue
+		}
+
+		line, col := pass.FindNodePosition(svc.Name, "")
+		for _, d := range driftDiags {
+			if d.Kind == mirror.DriftGhostMethod {
+				target := svc.Name
+				if d.Method != "" {
+					target = fmt.Sprintf("%s.%s", svc.Name, d.Method)
+				}
+
+				diags = append(diags, Diagnostic{
+					RuleID:     r.ID(),
+					RuleName:   r.Name(),
+					Severity:   r.DefaultSeverity(),
+					Category:   r.Category(),
+					Target:     target,
+					FilePath:   pass.FilePath,
+					Line:       line,
+					Column:     col,
+					Message:    d.Message,
+					Suggestion: "Add the method to the Aoni wrapper interface to expose the underlying capability",
+				})
+			}
+		}
+	}
+
+	return diags
 }
