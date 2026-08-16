@@ -173,3 +173,39 @@ func TestProject_IgnoreRules(t *testing.T) {
 	require.Contains(t, rules, "S001")
 	require.Len(t, rules, 4)
 }
+
+func TestProject_EnsureGitignore(t *testing.T) {
+	tempDir := t.TempDir()
+
+	// 1. First run creates .gitignore
+	updated, err := project.EnsureGitignore(tempDir)
+	require.NoError(t, err)
+	require.True(t, updated)
+
+	giFile := filepath.Join(tempDir, ".gitignore")
+	content, err := os.ReadFile(giFile)
+	require.NoError(t, err)
+	require.Contains(t, string(content), "*_mock.gen.go")
+	require.Contains(t, string(content), "*_harness.gen.go")
+	require.Contains(t, string(content), ".vortex/")
+
+	// 2. Second run is a no-op
+	updated2, err := project.EnsureGitignore(tempDir)
+	require.NoError(t, err)
+	require.False(t, updated2)
+
+	// 3. Existing .gitignore with other contents gets appended
+	tempDir2 := t.TempDir()
+	giFile2 := filepath.Join(tempDir2, ".gitignore")
+	err = os.WriteFile(giFile2, []byte("node_modules/\n*.log\n"), 0o600)
+	require.NoError(t, err)
+
+	updated3, err := project.EnsureGitignore(tempDir2)
+	require.NoError(t, err)
+	require.True(t, updated3)
+
+	content2, err := os.ReadFile(giFile2)
+	require.NoError(t, err)
+	require.Contains(t, string(content2), "node_modules/")
+	require.Contains(t, string(content2), "*_mock.gen.go")
+}

@@ -6,6 +6,7 @@
 package project
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
 	"os"
@@ -401,13 +402,67 @@ func Init(rootDir string, force bool) (*Config, error) {
 	)
 	header = append(header, data...)
 
+	if err := os.MkdirAll(rootDir, 0o750); err != nil {
+		return nil, fmt.Errorf("creating directory %s: %w", rootDir, err)
+	}
+
 	if err := os.WriteFile(configPath, header, 0o600); err != nil {
 		return nil, fmt.Errorf("writing %s: %w", configPath, err)
 	}
 
 	cfg.ConfigPath = configPath
 
+	_, _ = EnsureGitignore(rootDir)
+
 	return cfg, nil
+}
+
+// GitignoreVortexBlock contains standard ignore patterns for Vortex test harnesses, mocks, and diagnostics.
+const GitignoreVortexBlock = `
+# Vortex Test Artifacts & Diagnostics
+*_mock.gen.go
+*_harness.gen.go
+*_harness_test.go
+*.prof
+*.sarif
+.vortex/
+`
+
+// EnsureGitignore ensures that .gitignore in rootDir includes Vortex ignore patterns.
+func EnsureGitignore(rootDir string) (bool, error) {
+	giPath := filepath.Join(rootDir, ".gitignore")
+
+	data, err := os.ReadFile(giPath)
+	if os.IsNotExist(err) {
+		content := strings.TrimPrefix(GitignoreVortexBlock, "\n")
+		if writeErr := os.WriteFile(giPath, []byte(content), 0o600); writeErr != nil {
+			return false, fmt.Errorf("creating .gitignore: %w", writeErr)
+		}
+
+		return true, nil
+	} else if err != nil {
+		return false, fmt.Errorf("reading .gitignore: %w", err)
+	}
+
+	content := string(data)
+	if strings.Contains(content, "*_mock.gen.go") || strings.Contains(content, "*_harness.gen.go") {
+		return false, nil
+	}
+
+	var newContent bytes.Buffer
+	newContent.Write(data)
+
+	if len(data) > 0 && !strings.HasSuffix(content, "\n") {
+		newContent.WriteString("\n")
+	}
+
+	newContent.WriteString(GitignoreVortexBlock)
+
+	if writeErr := os.WriteFile(giPath, newContent.Bytes(), 0o600); writeErr != nil {
+		return false, fmt.Errorf("updating .gitignore: %w", writeErr)
+	}
+
+	return true, nil
 }
 
 // FilterContext filters contracts relevant to targetDir.
