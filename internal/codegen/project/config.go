@@ -201,11 +201,18 @@ func (cfg *Config) Normalize() {
 		}
 
 		if ct.Name == "" && ct.Package != "" {
-			ct.Name = strings.ToUpper(ct.Package[:1]) + ct.Package[1:] + "API"
+			ct.Name = strings.ToUpper(ct.Package[:1]) + ct.Package[1:]
 		}
 
 		if ct.Gen == "" && ct.File != "" {
 			ct.Gen = strings.TrimSuffix(ct.File, ".go") + ".gen.go"
+		}
+
+		if ct.Models == "" && ct.Dir != "" {
+			modelsPath := filepath.Join(ct.Dir, "models.gen.go")
+			if _, err := os.Stat(filepath.Join(cfg.RootDir, modelsPath)); err == nil {
+				ct.Models = filepath.ToSlash(modelsPath)
+			}
 		}
 
 		if ct.Harness == "" && cfg.Defaults.Harness && ct.File != "" {
@@ -372,28 +379,24 @@ func AutoDiscover(rootDir string, opts ...AutoDiscoverOptions) (*Config, error) 
 			return nil
 		}
 
-		dir := filepath.Dir(relPath)
-		baseName := filepath.Base(relPath)
-		genName := strings.TrimSuffix(baseName, ".go") + ".gen.go"
-		genPath := filepath.Join(dir, genName)
-
-		modelsPath := ""
-		if _, statErr := os.Stat(filepath.Join(rootDir, dir, "models.gen.go")); statErr == nil {
-			modelsPath = filepath.Join(dir, "models.gen.go")
-		}
-
 		// Consolidate multiple services in the same file into a single contract entry
 		contractName := ""
 
 		var upstream *UpstreamConfig
 
 		if len(root.Services) == 1 {
-			contractName = root.Services[0].Name
-			if root.Services[0].Source != "" {
+			s := root.Services[0]
+			if s.Source != "" {
 				upstream = &UpstreamConfig{
-					Source: root.Services[0].Source,
+					Source: s.Source,
 					Format: "openapi",
 				}
+			}
+
+			if s.Name == "API" || s.Name == "Events" || s.Name == "Client" || s.Name == "Service" {
+				contractName = strings.ToUpper(root.PackageName[:1]) + root.PackageName[1:]
+			} else {
+				contractName = s.Name
 			}
 		} else {
 			// Multiple services in 1 file (e.g. Steam WebAPI sub-interfaces)
@@ -411,21 +414,20 @@ func AutoDiscover(rootDir string, opts ...AutoDiscoverOptions) (*Config, error) 
 			}
 
 			if contractName == "" || contractName == "API" {
-				contractName = strings.ToUpper(root.PackageName[:1]) + root.PackageName[1:] + "API"
+				contractName = strings.ToUpper(root.PackageName[:1]) + root.PackageName[1:]
 			}
 		}
 
 		cfg.Contracts = append(cfg.Contracts, ContractConfig{
 			Name:     contractName,
-			Package:  root.PackageName,
 			File:     filepath.ToSlash(relPath),
-			Gen:      filepath.ToSlash(genPath),
-			Models:   filepath.ToSlash(modelsPath),
 			Upstream: upstream,
 		})
 
 		return nil
 	})
+
+	cfg.Normalize()
 
 	return cfg, nil
 }
@@ -469,7 +471,19 @@ func Init(rootDir string, force bool, opts ...AutoDiscoverOptions) (*Config, err
 		return nil, fmt.Errorf("auto-discovering services: %w", err)
 	}
 
-	data, err := yaml.Marshal(cfg)
+	// Compact serialization for clean .vortex.yml
+	compactCfg := *cfg
+
+	compactCfg.Contracts = make([]ContractConfig, len(cfg.Contracts))
+	for i, c := range cfg.Contracts {
+		compactCfg.Contracts[i] = ContractConfig{
+			Name:     c.Name,
+			File:     c.File,
+			Upstream: c.Upstream,
+		}
+	}
+
+	data, err := yaml.Marshal(&compactCfg)
 	if err != nil {
 		return nil, fmt.Errorf("marshaling configuration: %w", err)
 	}

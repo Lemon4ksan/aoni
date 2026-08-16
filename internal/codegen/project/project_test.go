@@ -241,7 +241,8 @@ type DOTA2Match570 interface {
 	require.NoError(t, err)
 	// Must consolidate into exactly 1 contract entry
 	require.Len(t, cfg.Contracts, 1)
-	require.Equal(t, "WebapiAPI", cfg.Contracts[0].Name)
+	require.Equal(t, "Webapi", cfg.Contracts[0].Name)
+	cfg.Normalize()
 	require.Equal(t, "webapi", cfg.Contracts[0].Package)
 }
 
