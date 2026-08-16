@@ -31,6 +31,7 @@ func newTestApp(stdout, stderr *bytes.Buffer) *App {
 		&CmdOAPI{},
 		&CmdProto{},
 		&CmdBench{},
+		&CmdProf{},
 		&CmdCover{},
 		&CmdList{},
 		&CmdExplain{},

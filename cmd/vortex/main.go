@@ -28,6 +28,7 @@ func main() {
 		&CmdOAPI{},
 		&CmdProto{},
 		&CmdBench{},
+		&CmdProf{},
 		&CmdCover{},
 		&CmdList{},
 		&CmdExplain{},

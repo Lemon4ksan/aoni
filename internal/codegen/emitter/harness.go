@@ -204,7 +204,15 @@ func (e *Emitter) emitServiceHarness(buf *bytes.Buffer, root *ir.RootIR, svc *ir
 		fmt.Fprintf(buf, "\tif weight <= 0 { weight = %d }\n", weight)
 		fmt.Fprintf(buf, "\treturn &%s{feeder: feeder, weight: weight}\n}\n\n", actionName)
 
-		fmt.Fprintf(buf, "func (a *%s) Name() string { return \"%s.%s\" }\n", actionName, svc.Name, m.Name)
+		scenarioName := svc.Name + "." + m.Name
+
+		svcTag := svc.Name
+		if svc.Name == "API" || svc.Name == "Client" || svc.Name == "Service" {
+			scenarioName = root.PackageName + "." + m.Name
+			svcTag = root.PackageName
+		}
+
+		fmt.Fprintf(buf, "func (a *%s) Name() string { return %q }\n", actionName, scenarioName)
 		fmt.Fprintf(buf, "func (a *%s) Weight() int { return a.weight }\n\n", actionName)
 
 		// Run(ctx, client)
@@ -254,8 +262,8 @@ func (e *Emitter) emitServiceHarness(buf *bytes.Buffer, root *ir.RootIR, svc *ir
 			actionName,
 		)
 		fmt.Fprintf(buf, "\tctx = pprof.WithLabels(ctx, pprof.Labels(\n")
-		fmt.Fprintf(buf, "\t\t\"vortex_service\", \"%s\",\n", svc.Name)
-		fmt.Fprintf(buf, "\t\t\"vortex_method\", \"%s\",\n", m.Name)
+		fmt.Fprintf(buf, "\t\t\"vortex_service\", %q,\n", svcTag)
+		fmt.Fprintf(buf, "\t\t\"vortex_method\", %q,\n", m.Name)
 		fmt.Fprintf(buf, "\t))\n\n")
 
 		buf.WriteString("\tstart := time.Now()\n")
@@ -376,6 +384,13 @@ func (e *Emitter) EmitHarnessTests(root *ir.RootIR) ([]byte, error) {
 	for _, svc := range root.Services {
 		feederName := svc.Name + "DataFeeder"
 
+		svcIdentifier := svc.Name
+		if svcIdentifier == "API" || svcIdentifier == "Client" || svcIdentifier == "Service" {
+			svcIdentifier = toPascalCase(root.PackageName)
+		} else if !strings.HasPrefix(strings.ToLower(svcIdentifier), strings.ToLower(root.PackageName)) {
+			svcIdentifier = toPascalCase(root.PackageName) + "_" + svc.Name
+		}
+
 		for _, m := range svc.Methods {
 			var paramNames []string
 
@@ -391,10 +406,10 @@ func (e *Emitter) EmitHarnessTests(root *ir.RootIR) ([]byte, error) {
 			fmt.Fprintf(
 				&buf,
 				"// Benchmark_%s_%s benchmarks zero-allocation parameter feeder and execution.\n",
-				svc.Name,
+				svcIdentifier,
 				m.Name,
 			)
-			fmt.Fprintf(&buf, "func Benchmark_%s_%s(b *testing.B) {\n", svc.Name, m.Name)
+			fmt.Fprintf(&buf, "func Benchmark_%s_%s(b *testing.B) {\n", svcIdentifier, m.Name)
 
 			if len(paramNames) > 0 {
 				blanks := make([]string, len(paramNames))
@@ -419,10 +434,10 @@ func (e *Emitter) EmitHarnessTests(root *ir.RootIR) ([]byte, error) {
 			fmt.Fprintf(
 				&buf,
 				"// Fuzz_%s_%s_Response verifies that corrupted network payloads do not trigger panics.\n",
-				svc.Name,
+				svcIdentifier,
 				m.Name,
 			)
-			fmt.Fprintf(&buf, "func Fuzz_%s_%s_Response(f *testing.F) {\n", svc.Name, m.Name)
+			fmt.Fprintf(&buf, "func Fuzz_%s_%s_Response(f *testing.F) {\n", svcIdentifier, m.Name)
 			buf.WriteString("\tf.Add([]byte(`{\"success\":true,\"data\":{\"id\":100}}`))\n")
 			buf.WriteString("\tf.Add([]byte(`{\"error\":\"not_found\",\"code\":404}`))\n")
 			buf.WriteString("\tf.Add([]byte(`{}`))\n")
@@ -448,7 +463,7 @@ func (e *Emitter) emitFieldFeeder(buf *bytes.Buffer, fl *ir.FieldIR, knownStruct
 
 	switch goType {
 	case "string":
-		fmt.Fprintf(buf, "\tdst.%s = \"val_\" + f.randomString(6)\n", fieldName)
+		fmt.Fprintf(buf, "\tdst.%s = \"val_sample\"\n", fieldName)
 	case "int", "int64", "int32", "int16", "int8":
 		fmt.Fprintf(buf, "\tdst.%s = %s(rand.Intn(1000) + 1)\n", fieldName, goType)
 	case "uint", "uint64", "uint32", "uint16", "uint8", "byte":
@@ -458,9 +473,9 @@ func (e *Emitter) emitFieldFeeder(buf *bytes.Buffer, fl *ir.FieldIR, knownStruct
 	case "float64", "float32":
 		fmt.Fprintf(buf, "\tdst.%s = %s(12.34)\n", fieldName, goType)
 	case "[]byte":
-		fmt.Fprintf(buf, "\tdst.%s = []byte(\"val_\" + f.randomString(6))\n", fieldName)
+		fmt.Fprintf(buf, "\tdst.%s = nil\n", fieldName)
 	case "[]string":
-		fmt.Fprintf(buf, "\tdst.%s = []string{\"val_\" + f.randomString(6)}\n", fieldName)
+		fmt.Fprintf(buf, "\tdst.%s = nil\n", fieldName)
 	default:
 		switch {
 		case strings.HasPrefix(goType, "[]") || strings.HasPrefix(goType, "map[") || goType == "any" || goType == "interface{}":
@@ -485,7 +500,7 @@ func (e *Emitter) emitParamFeeder(buf *bytes.Buffer, p *ir.ParamIR, knownStructs
 
 	switch goType {
 	case "string":
-		fmt.Fprintf(buf, "\t%s := \"param_\" + f.randomString(6)\n", paramName)
+		fmt.Fprintf(buf, "\t%s := \"param_sample\"\n", paramName)
 	case "int", "int64", "int32", "int16", "int8":
 		fmt.Fprintf(buf, "\t%s := %s(rand.Intn(1000) + 1)\n", paramName, goType)
 	case "uint", "uint64", "uint32", "uint16", "uint8", "byte":
@@ -495,9 +510,9 @@ func (e *Emitter) emitParamFeeder(buf *bytes.Buffer, p *ir.ParamIR, knownStructs
 	case "float64", "float32":
 		fmt.Fprintf(buf, "\t%s := %s(12.34)\n", paramName, goType)
 	case "[]byte":
-		fmt.Fprintf(buf, "\t%s := []byte(\"param_\" + f.randomString(6))\n", paramName)
+		fmt.Fprintf(buf, "\tvar %s []byte\n", paramName)
 	case "[]string":
-		fmt.Fprintf(buf, "\t%s := []string{\"param_\" + f.randomString(6)}\n", paramName)
+		fmt.Fprintf(buf, "\tvar %s []string\n", paramName)
 	default:
 		switch {
 		case strings.HasPrefix(goType, "[]") || strings.HasPrefix(goType, "map[") || goType == "any" || goType == "interface{}":
