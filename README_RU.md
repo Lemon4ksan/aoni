@@ -181,11 +181,36 @@ aoni/
 - **[discordgo-aoni](https://github.com/lemon4ksan/discordgo-aoni)**: Высокопроизводительный форк официального `discordgo` с нулевыми аллокациями на базе движков `aoni` и `aoni/realtime/ws`.
   - Обеспечивает **рост пропускной способности REST API в 6.8 раз (203 000+ RPS)** и **ускорение WebSocket в 3.1 раза** при **0 B/op** аллокациях памяти на фреймах.
 
+## Декларативный AST-тулчейн Vortex
+
+В состав `aoni` входит **`vortex`** — компилятор контрактов с нулевыми аллокациями и экосистема для работы с OpenAPI 3.1, AsyncAPI 2.x/3.x и Protobuf:
+
+```bash
+# Установка тулчейна
+go install github.com/lemon4ksan/aoni/cmd/vortex@latest
+
+# Инициализация воркспейса из найденных Go контрактов или OpenAPI спецификаций
+vortex init
+
+# Компиляция API клиентов с нулевыми аллокациями
+vortex gen
+
+# Генерация in-memory мок-серверов для тестов (0 накладных расходов на сетевые порты)
+vortex mock
+
+# Очистка тестовых артефактов и кэша
+vortex clean
+```
+
+Полный справочник синтаксиса аннотаций, опций CLI и готовые сценарии см. в [**Руководстве по Vortex**](docs/VORTEX.md).
+
 ## Техническая Спецификация и Документация
 
+- [**Руководство по тулчейну Vortex**](docs/VORTEX.md): Полный синтаксис декларативных аннотаций, документация CLI, импорт OpenAPI/AsyncAPI, in-memory моки и CI/CD интеграция.
 - [**Network Stack Specification**](docs/NETWORK_STACK.md): Детальный обзор механик Happy Eyeballs v3, авто-восстановления HTTP 421/408/425, ECH и работы с пулами.
 - [**CPU & Silicon Sympathy Specification**](docs/CPU_STACK.md): Архитектура нативного PLAN9 AVX2 SIMD ассемблера (`simd_amd64.s`), арены памяти 2MB LargePages и наносекундный бюджет инструкций CPU.
 - [**Demystifying the Voodoo**](docs/VOODOO.md): Разбор манипуляций состояниями HPACK, тюнинга окон TCP через сисколлы и джиттера сетевых пакетов.
+- [**Кулинарная книга рецептов**](docs/COOKBOOK.md): Практические рецепты для REST, WebSockets, gRPC-Web и стриминга.
 - [**Примеры кода**](examples): Исполняемые примеры использования REST, WebSockets, gRPC-Web и обхода блокировок.
 
 ## Лицензия

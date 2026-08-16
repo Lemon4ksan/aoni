@@ -185,11 +185,36 @@ aoni/
 - [discordgo-aoni](https://github.com/lemon4ksan/discordgo-aoni): High-throughput, zero-allocation fork of official `discordgo` powered by `aoni` & `aoni/realtime/ws`.
   - Delivers 6.8x higher REST throughput (203,000+ RPS) and 3.1x faster WebSocket operations with 0 B/op memory allocations on frame framing.
 
+## Vortex Declarative AST Toolchain
+
+`aoni` includes **`vortex`**, a zero-allocation declarative contract compiler and OpenAPI 3.1 / AsyncAPI 2.x/3.x / Protobuf toolchain:
+
+```bash
+# Install the toolchain
+go install github.com/lemon4ksan/aoni/cmd/vortex@latest
+
+# Initialize workspace from discovered Go contracts or OpenAPI specs
+vortex init
+
+# Compile zero-allocation API clients
+vortex gen
+
+# Generate in-memory mock servers for test suites (0 port overhead)
+vortex mock
+
+# Clean test artifacts and cache
+vortex clean
+```
+
+For complete syntax reference, CLI options, and end-to-end workflows, see the [**Vortex Toolchain Guide**](docs/VORTEX.md).
+
 ## Technical Specifications & Documentation
 
+- [**Vortex Contract Toolchain Guide**](docs/VORTEX.md): Complete AST declarative syntax, CLI manual, OpenAPI/AsyncAPI ingestion, in-memory mocks, and CI/CD integration.
 - [**Network Stack Specification**](docs/NETWORK_STACK.md): Detailed overview of Happy Eyeballs v3, HTTP 421/408/425 auto-recovery, ECH, and pool lifetime mechanics.
 - [**CPU & Silicon Sympathy Specification**](docs/CPU_STACK.md): Architecture details on native PLAN9 AVX2 SIMD assembly (`simd_amd64.s`), 2MB LargePages slab arenas, and instruction execution budgets.
 - [**Demystifying the Voodoo**](docs/VOODOO.md): Deep dive into HPACK state manipulation, TCP window tuning via syscalls, and packet jitter framing.
+- [**Cookbook & Practical Recipes**](docs/COOKBOOK.md): Practical recipes for REST, WebSockets, gRPC-Web, and streaming workflows.
 - [**Code Examples**](examples): Runnable code snippets for REST, WebSockets, gRPC-Web, and browser evasion integrations.
 
 ## License

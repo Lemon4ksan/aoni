@@ -209,3 +209,53 @@ client := aoni.NewClient(nil,
 	}),
 )
 ```
+
+### 10. In-Memory Unit Testing with Vortex Mocks (0 Port Overhead)
+* **The Problem:** Spinning up real `httptest.Server` instances in parallel unit test suites leads to port exhaustion, slow execution, and flaky network socket timeouts.
+* **The Ice-Cold Solution:** Generate in-memory mock servers with `vortex mock`. The mock routes requests directly through `fasthttputil.InmemoryListener` without opening OS network ports.
+
+```bash
+# Generate the mock server implementation
+vortex mock pkg/services/user/api.go
+```
+
+```go
+func TestUserAPI(t *testing.T) {
+	ctx := context.Background()
+
+	// 1. Create in-memory mock
+	mockServer := user.NewUserAPIMockServer()
+
+	// 2. Define custom response
+	mockServer.OnGetUser = func(ctx context.Context, id string) (*user.UserDTO, error) {
+		return &user.UserDTO{ID: id, Name: "G-Man"}, nil
+	}
+
+	// 3. Obtain client routed directly into in-memory transport
+	client := mockServer.Client()
+
+	// 4. Test service
+	res, err := client.GetUser(ctx, "76561198000000000")
+	require.NoError(t, err)
+	require.Equal(t, "G-Man", res.Name)
+}
+```
+
+### 11. Zero-Allocation Protobuf Services with `vtprotobuf`
+* **The Problem:** Standard `protoc-gen-go` generates reflection-heavy serialization routines that allocate heap memory on every message encode/decode.
+* **The Ice-Cold Solution:** Compile `.proto` schemas with `vortex proto` to generate high-speed `vtprotobuf` zero-allocation codecs and use generic `request.PostProtoTo[T]`.
+
+```bash
+vortex proto -src=./proto -out=./pkg/pb -import=github.com/my/project/pkg/pb
+```
+
+```go
+import (
+	"github.com/lemon4ksan/aoni/request"
+	pb "github.com/my/project/pkg/pb"
+)
+
+// Zero-allocation binary protobuf request and response decoding
+resp, err := request.PostProtoTo[pb.TradeResponse](ctx, client, "https://api.steam.com/trade", reqProto)
+```
+
