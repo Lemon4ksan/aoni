@@ -259,3 +259,97 @@ import (
 resp, err := request.PostProtoTo[pb.TradeResponse](ctx, client, "https://api.steam.com/trade", reqProto)
 ```
 
+### 12. Streaming Server-Sent Events (SSE) & NDJSON Processing
+* **The Problem:** Parsing large streaming datasets (AI token streams, orderbook updates) line-by-line using standard scanners causes memory bloat and allocation churn.
+* **The Ice-Cold Solution:** Use `realtime/stream.StreamNDJSON` or `realtime/stream.StreamSSE` with pooled decoders and cancellation contexts.
+
+```go
+import "github.com/lemon4ksan/aoni/realtime/stream"
+
+type OrderbookUpdate struct {
+	SeqID uint64    `json:"seq_id"`
+	Bids  [][]float64 `json:"bids"`
+	Asks  [][]float64 `json:"asks"`
+}
+
+// Stream NDJSON objects with zero memory growth
+err := stream.StreamNDJSON(ctx, client, "GET", "https://stream.example.com/orderbook", nil,
+	func(update *OrderbookUpdate) error {
+		fmt.Printf("Seq %d: Top Bid: %.2f\n", update.SeqID, update.Bids[0][0])
+		return nil // return non-nil error to gracefully terminate stream
+	},
+)
+```
+
+### 13. TLS 1.3 Encrypted Client Hello (ECH) & DNS-over-HTTPS (DoH)
+* **The Problem:** Intermediate middleboxes and ISPs inspect unencrypted SNI (Server Name Indication) in TLS handshakes to block access or enforce geo-censorship.
+* **The Ice-Cold Solution:** Enable ECH (RFC 9460) via secure DoH/DoQ DNS resolvers. `aoni` queries SVCB/HTTPS DNS records and encrypts the SNI inside the outer ClientHello.
+
+```go
+import (
+	"github.com/lemon4ksan/aoni/netutil/dns"
+	"github.com/lemon4ksan/aoni/option"
+)
+
+// Configure pure-Go DoH resolver with TLS 1.3 ECH auto-negotiation
+client := aoni.NewClient(nil,
+	option.WithDoHResolver(dns.CloudflareDoH),
+	option.WithECH(aoni.ECHConfig{
+		Enabled:    true,
+		FallbackToPlainTLS: false, // Strict privacy
+	}),
+	option.WithChrome(),
+)
+
+resp, err := request.GetTo[map[string]any](ctx, client, "https://crypto.cloudflare.com/cdn-cgi/trace")
+```
+
+### 14. High-Throughput IPv6 Subnet Rotation (/64 Prefix Pool)
+* **The Problem:** Aggressive REST scraping against heavily rate-limited target endpoints exhausts IPv4 addresses quickly.
+* **The Ice-Cold Solution:** Bind a dedicated `/64` IPv6 prefix to your server and rotate source IP addresses dynamically per request with zero OS socket configuration.
+
+```go
+import (
+	"github.com/lemon4ksan/aoni/netutil/ip"
+	"github.com/lemon4ksan/aoni/option"
+)
+
+// Generate random source IPs within 2001:db8:1234:5678::/64 subnet
+rotator, err := ip.NewIPv6SubnetRotator("2001:db8:1234:5678::/64")
+if err != nil {
+	log.Fatal(err)
+}
+
+client := aoni.NewClient(nil, option.WithDialer(rotator.Dialer()))
+
+// Every request originates from a completely unique IPv6 address
+user, err := request.GetTo[User](ctx, client, "https://ipv6.api.example.com/profile")
+```
+
+### 15. Chromium-Grade Network Resilience (421 Auto-Recovery & Happy Eyeballs v3)
+* **The Problem:** Modern HTTP/2 server connection reuse triggers HTTP 421 (Misdirected Request) on certificate changes, while broken HTTP/3 endpoints cause connection timeouts.
+* **The Ice-Cold Solution:** `aoni` natively incorporates Chromium Happy Eyeballs v3 to race H3/QUIC against H2/TCP, and automatically re-routes rejected 421/408/425 requests onto fresh sockets.
+
+```go
+import "github.com/lemon4ksan/aoni/option"
+
+client := aoni.NewClient(nil,
+	option.WithHTTP3(),              // Enables QUIC/H3 protocol racing
+	option.WithHappyEyeballs(true),  // Chromium Happy Eyeballs v3 algorithm
+	option.WithAutoRecovery(true),   // Transparent re-dial on HTTP 421, 408, 425
+)
+```
+
+### 16. Continuous Contract Drift Detection in CI/CD
+* **The Problem:** Upstream API providers update their OpenAPI specifications, causing silent breaking changes in production.
+* **The Ice-Cold Solution:** Add `vortex diff` and `vortex status -strict` to your CI pipeline to catch schema breaking changes before code merge.
+
+```bash
+# In CI: fails if upstream schema drifted from local declarative Go contract
+vortex diff https://api.example.com/openapi.json pkg/services/user/api.go --fail-on-breaking
+
+# Health check all workspace services
+vortex status -strict
+```
+
+
