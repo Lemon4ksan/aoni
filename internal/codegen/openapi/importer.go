@@ -21,6 +21,8 @@ import (
 	"github.com/getkin/kin-openapi/openapi2conv"
 	"github.com/getkin/kin-openapi/openapi3"
 	"gopkg.in/yaml.v3"
+
+	"github.com/lemon4ksan/aoni/internal/codegen/ingest"
 )
 
 // ImportConfig controls how OpenAPI specifications are imported into aoni declarative contracts.
@@ -1080,16 +1082,9 @@ func isHexHash(s string) bool {
 }
 
 func buildMethodName(pathStr, httpMethod string, op *openapi3.Operation, used map[string]int) string {
-	var base string
-	if op.OperationID != "" && !isHexHash(op.OperationID) {
-		base = toPascalCase(op.OperationID)
-	} else {
-		// e.g. GET /classifieds/alerts/{id} -> GetClassifiedsAlertsByID
-		clean := strings.ReplaceAll(pathStr, "{", "by_")
-		clean = strings.ReplaceAll(clean, "}", "")
-		clean = strings.ReplaceAll(clean, "/", "_")
-		clean = strings.TrimPrefix(clean, "_")
-		base = toPascalCase(strings.ToLower(httpMethod) + "_" + clean)
+	base := ingest.SanitizeMethodName(op.OperationID, httpMethod, pathStr, "")
+	if base == "" || isHexHash(base) {
+		base = ingest.DeriveMethodNameFromRoute(httpMethod, pathStr)
 	}
 
 	if count, ok := used[base]; ok {
