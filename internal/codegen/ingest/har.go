@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"net/url"
 	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/getkin/kin-openapi/openapi3"
@@ -66,7 +67,7 @@ func HARToOpenAPI(data []byte) (*openapi3.T, error) {
 	doc := &openapi3.T{
 		OpenAPI: "3.0.3",
 		Info: &openapi3.Info{
-			Title:       "Antigravity API Replica (Captured from Traffic)",
+			Title:       "API Specification (Captured from Traffic)",
 			Version:     "1.0.0",
 			Description: "Synthesized automatically by Vortex HAR Traffic Ingestion Engine",
 		},
@@ -86,6 +87,7 @@ func HARToOpenAPI(data []byte) (*openapi3.T, error) {
 
 	for _, entry := range har.Log.Entries {
 		rawURL := entry.Request.URL
+
 		u, err := url.Parse(rawURL)
 		if err != nil {
 			continue
@@ -97,10 +99,12 @@ func HARToOpenAPI(data []byte) (*openapi3.T, error) {
 		}
 
 		method := strings.ToUpper(entry.Request.Method)
+
 		key := opKey{method: method, path: cleanPath}
 		if processed[key] {
 			continue
 		}
+
 		processed[key] = true
 
 		// Extract or create PathItem
@@ -119,19 +123,13 @@ func HARToOpenAPI(data []byte) (*openapi3.T, error) {
 			if q.Name == "" {
 				continue
 			}
+
 			param := openapi3.NewQueryParameter(q.Name).WithSchema(openapi3.NewStringSchema())
 			op.AddParameter(param)
 		}
 
 		// 2. Ingest Request Body
 		if entry.Request.PostData != nil && len(entry.Request.PostData.Text) > 0 {
-			mime := entry.Request.PostData.MimeType
-			if mime == "" {
-				mime = "application/json"
-			} else {
-				mime = strings.Split(mime, ";")[0]
-			}
-
 			schema := inferSchemaFromJSON([]byte(entry.Request.PostData.Text))
 			if schema != nil {
 				reqBody := openapi3.NewRequestBody().WithContent(openapi3.NewContentWithJSONSchema(schema))
@@ -140,20 +138,13 @@ func HARToOpenAPI(data []byte) (*openapi3.T, error) {
 		}
 
 		// 3. Ingest Response Body
-		statusStr := fmt.Sprintf("%d", entry.Response.Status)
+		statusStr := strconv.Itoa(entry.Response.Status)
 		if entry.Response.Status == 0 {
 			statusStr = "200"
 		}
 
 		resp := openapi3.NewResponse().WithDescription("Successful response")
 		if entry.Response.Content != nil && len(entry.Response.Content.Text) > 0 {
-			mime := entry.Response.Content.MimeType
-			if mime == "" {
-				mime = "application/json"
-			} else {
-				mime = strings.Split(mime, ";")[0]
-			}
-
 			schema := inferSchemaFromJSON([]byte(entry.Response.Content.Text))
 			if schema != nil {
 				resp.WithContent(openapi3.NewContentWithJSONSchema(schema))
@@ -161,6 +152,7 @@ func HARToOpenAPI(data []byte) (*openapi3.T, error) {
 		}
 
 		op.AddResponse(200, resp)
+
 		if statusStr != "200" && entry.Response.Status > 0 {
 			op.AddResponse(entry.Response.Status, resp)
 		}
@@ -204,7 +196,9 @@ func valueToSchema(v any) *openapi3.Schema {
 		if val == float64(int64(val)) {
 			return openapi3.NewInt64Schema()
 		}
+
 		return openapi3.NewFloat64Schema()
+
 	case string:
 		return openapi3.NewStringSchema()
 	case []any:
@@ -214,19 +208,25 @@ func valueToSchema(v any) *openapi3.Schema {
 		} else {
 			arr.Items = &openapi3.SchemaRef{Value: openapi3.NewStringSchema()}
 		}
+
 		return arr
+
 	case map[string]any:
 		obj := openapi3.NewObjectSchema()
+
 		keys := make([]string, 0, len(val))
 		for k := range val {
 			keys = append(keys, k)
 		}
+
 		sort.Strings(keys)
 
 		for _, k := range keys {
 			obj.Properties[k] = &openapi3.SchemaRef{Value: valueToSchema(val[k])}
 		}
+
 		return obj
+
 	default:
 		return openapi3.NewStringSchema()
 	}

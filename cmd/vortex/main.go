@@ -18,6 +18,7 @@ func main() {
 		&CmdAutoPilot{},
 		&CmdStatus{},
 		&CmdInit{},
+		&CmdRecord{},
 		&CmdConfig{},
 		&CmdWork{},
 		&CmdGen{},

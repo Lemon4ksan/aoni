@@ -44,20 +44,27 @@ func (e *Emitter) EmitMock(root *ir.RootIR) ([]byte, error) {
 	buf.WriteString("\t\"fmt\"\n")
 	buf.WriteString("\t\"net/http\"\n")
 	buf.WriteString("\t\"net/http/httptest\"\n")
+
 	if strings.Contains(bodyCode, "strconv.") {
 		buf.WriteString("\t\"strconv\"\n")
 	}
+
 	buf.WriteString("\t\"strings\"\n")
 	buf.WriteString("\t\"sync\"\n")
+
 	if strings.Contains(bodyCode, "testing.") {
 		buf.WriteString("\t\"testing\"\n")
 	}
+
 	buf.WriteString("\n")
 	buf.WriteString("\t\"github.com/lemon4ksan/aoni\"\n")
+
 	if strings.Contains(bodyCode, "fast.") {
 		buf.WriteString("\t\"github.com/lemon4ksan/aoni/fast\"\n")
 	}
+
 	buf.WriteString("\t\"github.com/lemon4ksan/aoni/option\"\n")
+
 	if strings.Contains(bodyCode, "request.") {
 		buf.WriteString("\t\"github.com/lemon4ksan/aoni/request\"\n")
 	}
