@@ -37,6 +37,7 @@ func (c *CmdInit) Run(ctx context.Context, args []string, stdout, stderr io.Writ
 		forceF           = fs.Bool("f", false, "Alias for --force")
 		dirFlag          = fs.String("dir", "", "Target workspace directory (default: current repository root)")
 		fromOpenAPIFlag  = fs.String("from-openapi", "", "Path or URL to OpenAPI/Swagger specification to import")
+		fromHARFlag      = fs.String("from-har", "", "Path to W3C HAR 1.2 network traffic recording to import")
 		fromAsyncAPIFlag = fs.String("from-asyncapi", "", "Path or URL to AsyncAPI 2.x/3.x specification to import")
 		pkgFlag          = fs.String("pkg", "", "Go package name when importing from specifications")
 		serviceFlag      = fs.String("service", "", "Service interface name when importing from specifications")
@@ -50,7 +51,7 @@ func (c *CmdInit) Run(ctx context.Context, args []string, stdout, stderr io.Writ
 		fmt.Fprintf(stderr, "Usage:\n")
 		fmt.Fprintf(
 			stderr,
-			"  vortex init [-force] [-dir=.] [-exclude=patterns] [-match=pattern] [-from-openapi=spec.json]\n\n",
+			"  vortex init [-force] [-dir=.] [-from-har=traffic.har] [-from-openapi=spec.json]\n\n",
 		)
 		fmt.Fprintf(stderr, "Flags:\n")
 		fs.PrintDefaults()
@@ -58,6 +59,10 @@ func (c *CmdInit) Run(ctx context.Context, args []string, stdout, stderr io.Writ
 
 	if err := fs.Parse(args); err != nil {
 		return err
+	}
+
+	if *fromHARFlag != "" && *fromOpenAPIFlag == "" {
+		*fromOpenAPIFlag = *fromHARFlag
 	}
 
 	targetDir := *dirFlag
@@ -93,8 +98,18 @@ func (c *CmdInit) Run(ctx context.Context, args []string, stdout, stderr io.Writ
 			outPath = filepath.Join(targetDir, outPath)
 		}
 
+		specPath := *fromOpenAPIFlag
+		if !filepath.IsAbs(specPath) {
+			if _, err := os.Stat(specPath); err != nil {
+				cand := filepath.Join(targetDir, specPath)
+				if _, sErr := os.Stat(cand); sErr == nil {
+					specPath = cand
+				}
+			}
+		}
+
 		importCfg := openapi.ImportConfig{
-			SpecFile:    *fromOpenAPIFlag,
+			SpecFile:    specPath,
 			PackageName: pkgName,
 			ServiceName: *serviceFlag,
 			OutputFile:  outPath,

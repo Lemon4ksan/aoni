@@ -107,6 +107,11 @@ func LoadSpec(filename string, data []byte) (*openapi3.T, error) {
 
 	data = sanitizeSpecData(data)
 
+	format, _ := ingest.DetectFormat(data)
+	if format == ingest.FormatHAR {
+		return ingest.HARToOpenAPI(data)
+	}
+
 	var versionDetector struct {
 		Swagger string `json:"swagger" yaml:"swagger"`
 		OpenAPI string `json:"openapi" yaml:"openapi"`

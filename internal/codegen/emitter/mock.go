@@ -44,14 +44,23 @@ func (e *Emitter) EmitMock(root *ir.RootIR) ([]byte, error) {
 	buf.WriteString("\t\"fmt\"\n")
 	buf.WriteString("\t\"net/http\"\n")
 	buf.WriteString("\t\"net/http/httptest\"\n")
-	buf.WriteString("\t\"strconv\"\n")
+	if strings.Contains(bodyCode, "strconv.") {
+		buf.WriteString("\t\"strconv\"\n")
+	}
 	buf.WriteString("\t\"strings\"\n")
 	buf.WriteString("\t\"sync\"\n")
-	buf.WriteString("\t\"testing\"\n\n")
+	if strings.Contains(bodyCode, "testing.") {
+		buf.WriteString("\t\"testing\"\n")
+	}
+	buf.WriteString("\n")
 	buf.WriteString("\t\"github.com/lemon4ksan/aoni\"\n")
-	buf.WriteString("\t\"github.com/lemon4ksan/aoni/fast\"\n")
+	if strings.Contains(bodyCode, "fast.") {
+		buf.WriteString("\t\"github.com/lemon4ksan/aoni/fast\"\n")
+	}
 	buf.WriteString("\t\"github.com/lemon4ksan/aoni/option\"\n")
-	buf.WriteString("\t\"github.com/lemon4ksan/aoni/request\"\n")
+	if strings.Contains(bodyCode, "request.") {
+		buf.WriteString("\t\"github.com/lemon4ksan/aoni/request\"\n")
+	}
 
 	for _, imp := range root.Imports {
 		if imp.Path == "context" || imp.Path == "fmt" ||
