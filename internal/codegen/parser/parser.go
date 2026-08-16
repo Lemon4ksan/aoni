@@ -32,7 +32,7 @@ func NewParser() *Parser {
 func (p *Parser) ParseFile(filePath string) (*ir.RootIR, error) {
 	data, err := os.ReadFile(filePath)
 	if err != nil {
-		return nil, fmt.Errorf("aoni/codegen/parser: failed to read file %q: %w", filePath, err)
+		return nil, fmt.Errorf("read file %s: %w", filePath, err)
 	}
 
 	return p.ParseSource(filePath, data)
@@ -42,7 +42,7 @@ func (p *Parser) ParseFile(filePath string) (*ir.RootIR, error) {
 func (p *Parser) ParsePackage(dirPath string) (*ir.RootIR, error) {
 	entries, err := os.ReadDir(dirPath)
 	if err != nil {
-		return nil, fmt.Errorf("aoni/codegen/parser: failed to read dir %q: %w", dirPath, err)
+		return nil, fmt.Errorf("read dir %s: %w", dirPath, err)
 	}
 
 	root := &ir.RootIR{

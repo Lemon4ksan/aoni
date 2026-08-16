@@ -55,10 +55,28 @@ func (c *CmdAutoPilot) Run(ctx context.Context, _ []string, stdout, stderr io.Wr
 	rootDir, configPath, _ := project.FindRoot(cwd)
 	cfg, _ := project.Load(rootDir)
 
-	var activeContracts []string
+	var (
+		activeContracts  []string
+		missingContracts []string
+	)
+
 	if cfg != nil && len(cfg.Contracts) > 0 {
 		for _, ct := range cfg.Contracts {
-			activeContracts = append(activeContracts, filepath.Join(rootDir, ct.File))
+			targetPath := ct.File
+			if !filepath.IsAbs(targetPath) {
+				targetPath = filepath.Join(rootDir, targetPath)
+			}
+
+			if _, sErr := os.Stat(targetPath); sErr != nil {
+				name := ct.Name
+				if name == "" {
+					name = ct.File
+				}
+
+				missingContracts = append(missingContracts, fmt.Sprintf("%s (%s)", name, ct.File))
+			} else {
+				activeContracts = append(activeContracts, targetPath)
+			}
 		}
 	} else if configPath != "" {
 		// If explicit .vortex.yml existed, check candidate files in workspace
@@ -74,9 +92,34 @@ func (c *CmdAutoPilot) Run(ctx context.Context, _ []string, stdout, stderr io.Wr
 		}
 	}
 
-	// WORLD 1: No contracts found -> Interactive Onboarding
+	// If all contracts are missing or no contracts exist
 	if len(activeContracts) == 0 {
+		if len(missingContracts) > 0 {
+			fmt.Fprintf(stderr, "❌ [Vortex Auto-Pilot] Configured contract file(s) not found on disk:\n")
+
+			for _, m := range missingContracts {
+				fmt.Fprintf(stderr, "  • %s\n", m)
+			}
+
+			fmt.Fprintf(
+				stderr,
+				"\n👉 Tip: Run 'vortex import -spec=<file> -out=<target>' or check contract paths in .vortex.yml\n",
+			)
+
+			return errors.New("configured contracts missing from disk")
+		}
+
 		return c.runWorld1Onboarding(ctx, cwd, stdout, stderr)
+	}
+
+	if len(missingContracts) > 0 {
+		fmt.Fprintf(stderr, "⚠️  [Warning] Skipping missing contract(s) declared in .vortex.yml:\n")
+
+		for _, m := range missingContracts {
+			fmt.Fprintf(stderr, "  • %s\n", m)
+		}
+
+		fmt.Fprintln(stderr)
 	}
 
 	// WORLD 2: Contracts found -> 4-Stage Auto-Pilot Run
@@ -260,12 +303,14 @@ func (c *CmdAutoPilot) runWorld2Pipeline(
 	for _, file := range contractFiles {
 		srcBytes, readErr := os.ReadFile(file)
 		if readErr != nil {
-			continue
+			fmt.Fprintf(stderr, "\n❌ [Pre-flight Check] Failed to read contract file %s: %v\n", file, readErr)
+			return fmt.Errorf("reading contract %s: %w", file, readErr)
 		}
 
 		astFile, parseErr := goastparser.ParseFile(fset, file, srcBytes, goastparser.ParseComments)
 		if parseErr != nil {
-			continue
+			fmt.Fprintf(stderr, "\n❌ [Pre-flight Check] Syntax error in contract file %s: %v\n", file, parseErr)
+			return fmt.Errorf("parsing Go AST for %s: %w", file, parseErr)
 		}
 
 		rootIR, _ := p.ParseFile(file)
