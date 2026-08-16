@@ -661,3 +661,65 @@ func TestApp_Init_FromOpenAPI(t *testing.T) {
 	vortexYml := filepath.Join(tempDir, ".vortex.yml")
 	require.FileExists(t, vortexYml)
 }
+
+func TestApp_Init_FromAsyncAPI(t *testing.T) {
+	tempDir := t.TempDir()
+	specFile := filepath.Join(tempDir, "asyncapi.yaml")
+	asyncapiYAML := `
+asyncapi: 3.1.0
+info:
+  title: Market Data
+  version: 1.0.0
+channels:
+  marketStream:
+    address: market/stream
+    messages:
+      Ticker:
+        $ref: '#/components/messages/Ticker'
+operations:
+  onTicker:
+    action: send
+    channel:
+      $ref: '#/channels/marketStream'
+    messages:
+      - $ref: '#/channels/marketStream/messages/Ticker'
+components:
+  messages:
+    Ticker:
+      payload:
+        type: object
+        properties:
+          symbol:
+            type: string
+          price:
+            type: number
+`
+	require.NoError(t, os.WriteFile(specFile, []byte(asyncapiYAML), 0o600))
+
+	var stdout, stderr bytes.Buffer
+
+	app := newTestApp(&stdout, &stderr)
+
+	err := app.Run(context.Background(), []string{
+		"init",
+		"-dir=" + tempDir,
+		"-from-asyncapi=" + specFile,
+		"-pkg=market",
+		"-service=MarketStreamAPI",
+	})
+	require.NoError(t, err)
+	require.Contains(t, stdout.String(), "Successfully imported AsyncAPI contract")
+
+	contractFile := filepath.Join(tempDir, "api.go")
+	require.FileExists(t, contractFile)
+
+	content, err := os.ReadFile(contractFile)
+	require.NoError(t, err)
+	require.Contains(t, string(content), "package market")
+	require.Contains(t, string(content), "type MarketStreamAPI interface")
+	require.Contains(t, string(content), "OnTicker")
+	require.Contains(t, string(content), `// @event "onTicker"`)
+
+	vortexYml := filepath.Join(tempDir, ".vortex.yml")
+	require.FileExists(t, vortexYml)
+}
