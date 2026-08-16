@@ -197,6 +197,16 @@ func (b *Builder) BuildHarness(ctx context.Context, srcFile, outFile string) (*R
 		if err := os.WriteFile(targetOut, code, 0o600); err != nil {
 			return nil, fmt.Errorf("write harness %s: %w", targetOut, err)
 		}
+
+		testCode, tErr := b.emitter.EmitHarnessTests(root)
+		if tErr == nil && len(testCode) > 0 {
+			testOut := strings.TrimSuffix(targetOut, ".gen.go") + "_test.go"
+			if strings.HasSuffix(targetOut, ".go") && !strings.HasSuffix(targetOut, ".gen.go") {
+				testOut = strings.TrimSuffix(targetOut, ".go") + "_test.go"
+			}
+
+			_ = os.WriteFile(testOut, testCode, 0o600)
+		}
 	}
 
 	return &Result{

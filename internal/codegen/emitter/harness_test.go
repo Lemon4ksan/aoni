@@ -97,12 +97,22 @@ func TestEmitter_Harness_Generation(t *testing.T) {
 	assert.Contains(t, codeStr, "func (h *ItemServiceHarness) VerifyBudget(ctx context.Context) error")
 	assert.Contains(t, codeStr, "budget violation in ItemService.GetItem")
 
-	// Block 5: Fuzzing Targets
-	assert.Contains(t, codeStr, "func Fuzz_ItemService_GetItem_Response(f *testing.F)")
-	assert.Contains(t, codeStr, "func Fuzz_ItemService_CreateItem_Response(f *testing.F)")
-
-	// Validate valid Go syntax
+	// Validate valid Go syntax for harness
 	fset := token.NewFileSet()
 	_, parseErr := parser.ParseFile(fset, "api_harness.gen.go", code, parser.AllErrors)
 	require.NoError(t, parseErr, "Generated harness must be 100% syntactically valid Go code")
+
+	// Block 5: Native Benchmark & Fuzzing Targets in companion test file
+	testCode, tErr := emit.EmitHarnessTests(root)
+	require.NoError(t, tErr)
+	assert.NotEmpty(t, testCode)
+
+	testCodeStr := string(testCode)
+	assert.Contains(t, testCodeStr, "func Benchmark_ItemService_GetItem(b *testing.B)")
+	assert.Contains(t, testCodeStr, "func Benchmark_ItemService_CreateItem(b *testing.B)")
+	assert.Contains(t, testCodeStr, "func Fuzz_ItemService_GetItem_Response(f *testing.F)")
+	assert.Contains(t, testCodeStr, "func Fuzz_ItemService_CreateItem_Response(f *testing.F)")
+
+	_, parseTestErr := parser.ParseFile(fset, "api_harness_test.go", testCode, parser.AllErrors)
+	require.NoError(t, parseTestErr, "Generated harness test must be 100% syntactically valid Go code")
 }
