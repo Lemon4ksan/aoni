@@ -53,6 +53,7 @@ type ServiceIR struct {
 	TypeMaps           map[string]FormatStrategy
 	DefaultCasing      CasingStrategy
 	DefaultUnwrapField string
+	DefaultErrorModel  string
 	Methods            []*MethodIR
 }
 
@@ -598,7 +599,16 @@ type ReturnIR struct {
 // UnionIR represents a discriminated union type generated for multi-status responses.
 type UnionIR struct {
 	Name     string
+	Doc      []string
+	Fields   []*UnionFieldIR
 	Variants map[int]GoTypeIR
+}
+
+// UnionFieldIR represents an individual variant field on a multi-status union struct.
+type UnionFieldIR struct {
+	GoName      string
+	Type        GoTypeIR
+	StatusCodes []int
 }
 
 // EnvelopeIR defines the standard response wrapper schema for unmarshaling and validation.

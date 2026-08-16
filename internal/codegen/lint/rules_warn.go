@@ -112,14 +112,16 @@ type RuleDeprecatedAlias struct{}
 func (r *RuleDeprecatedAlias) ID() string   { return "W002" }
 func (r *RuleDeprecatedAlias) Name() string { return "deprecated-alias" }
 func (r *RuleDeprecatedAlias) Description() string {
-	return "Checks for deprecated directive aliases (e.g., @zstd_decompress -> @zstd)"
+	return "Checks for deprecated directive aliases (e.g., @zstd_decompress -> @zstd, @aoni:dto -> @dto)"
 }
 func (r *RuleDeprecatedAlias) Category() Category        { return CategoryStyle }
 func (r *RuleDeprecatedAlias) DefaultSeverity() Severity { return SeverityWarning }
 func (r *RuleDeprecatedAlias) IsFixable() bool           { return true }
 
 var deprecatedAliases = map[string]string{
-	"@zstd_decompress": "@zstd",
+	"@zstd_decompress":   "@zstd",
+	"@brotli_decompress": "@brotli",
+	"@gzip_decompress":   "@gzip",
 }
 
 func (r *RuleDeprecatedAlias) Run(pass *Pass) []Diagnostic {
@@ -135,17 +137,35 @@ func (r *RuleDeprecatedAlias) Run(pass *Pass) []Diagnostic {
 	for deprecated, canonical := range deprecatedAliases {
 		for i, l := range lines {
 			if strings.Contains(l, deprecated) {
+				dep := deprecated
+				canon := canonical
+				targetFile := pass.FilePath
+
 				diags = append(diags, Diagnostic{
 					RuleID:     r.ID(),
 					RuleName:   r.Name(),
 					Severity:   r.DefaultSeverity(),
 					Category:   r.Category(),
 					Target:     pass.FilePath,
-					FilePath:   pass.FilePath,
+					FilePath:   targetFile,
 					Line:       i + 1,
 					Column:     strings.Index(l, deprecated) + 1,
-					Message:    fmt.Sprintf("Deprecated directive alias %q used", deprecated),
+					Message:    fmt.Sprintf("Verbose or deprecated directive alias %q used", deprecated),
 					Suggestion: fmt.Sprintf("Use canonical directive %q instead", canonical),
+					Fix: &Fix{
+						Description: fmt.Sprintf("Replace %s with %s", dep, canon),
+						Apply: func() error {
+							content, err := os.ReadFile(targetFile)
+							if err != nil {
+								return err
+							}
+
+							updated := strings.ReplaceAll(string(content), dep, canon)
+
+							// #nosec G703 -- Safe automated rewrite of verified source file
+							return os.WriteFile(targetFile, []byte(updated), 0o600)
+						},
+					},
 				})
 			}
 		}
@@ -416,97 +436,102 @@ func (r *RuleCanonicalFormat) Run(pass *Pass) []Diagnostic {
 
 	filePath := filepath.Clean(pass.FilePath)
 
+	checkDocGroup := func(target string, doc *ast.CommentGroup) {
+		if doc == nil || len(doc.List) <= 1 {
+			return
+		}
+
+		startLine := pass.FileSet.Position(doc.Pos()).Line
+		endLine := pass.FileSet.Position(doc.End()).Line
+
+		var lines []string
+
+		hasDirectives := false
+
+		for _, c := range doc.List {
+			text := c.Text
+			lines = append(lines, text)
+
+			trimmed := strings.TrimSpace(text)
+			if strings.HasPrefix(trimmed, "// @") || strings.HasPrefix(trimmed, "//@") ||
+				strings.HasPrefix(trimmed, "//vortex:ignore") {
+				hasDirectives = true
+			}
+		}
+
+		if !hasDirectives {
+			return
+		}
+
+		isSorted := sort.SliceIsSorted(lines, func(i, j int) bool {
+			return directiveRank(lines[i]) < directiveRank(lines[j])
+		})
+
+		if !isSorted {
+			diags = append(diags, Diagnostic{
+				RuleID:     r.ID(),
+				RuleName:   r.Name(),
+				Severity:   r.DefaultSeverity(),
+				Category:   r.Category(),
+				Target:     target,
+				FilePath:   filePath,
+				Line:       startLine,
+				Column:     1,
+				Message:    fmt.Sprintf("Directives in %s doc comment are not in canonical sequence", target),
+				Suggestion: "Reorder directives to follow canonical hierarchy (Scope -> Routing -> Payload -> Headers -> Response -> Resiliency)",
+				Fix: &Fix{
+					Description: "Reorder directives in " + target,
+					Apply: func() error {
+						latest, err := os.ReadFile(filePath)
+						if err != nil {
+							return err
+						}
+
+						srcLines := strings.Split(string(latest), "\n")
+						if startLine-1 < 0 || endLine > len(srcLines) {
+							return nil
+						}
+
+						var docLines []string
+						for i := startLine - 1; i < endLine; i++ {
+							docLines = append(docLines, srcLines[i])
+						}
+
+						origBlock := strings.Join(docLines, "\n")
+						sort.SliceStable(docLines, func(i, j int) bool {
+							return directiveRank(docLines[i]) < directiveRank(docLines[j])
+						})
+						sortedBlock := strings.Join(docLines, "\n")
+
+						updated := strings.Replace(string(latest), origBlock, sortedBlock, 1)
+
+						// #nosec G703 -- Safe automated rewrite of verified source file
+						return os.WriteFile(filePath, []byte(updated), 0o600)
+					},
+				},
+			})
+		}
+	}
+
 	ast.Inspect(pass.ASTFile, func(n ast.Node) bool {
 		ts, ok := n.(*ast.TypeSpec)
 		if !ok {
 			return true
 		}
 
-		iface, ok := ts.Type.(*ast.InterfaceType)
-		if !ok || iface.Methods == nil {
-			return true
+		// Check type-level doc
+		if ts.Doc != nil {
+			checkDocGroup(ts.Name.Name, ts.Doc)
 		}
 
-		for _, m := range iface.Methods.List {
-			if m.Doc == nil || len(m.Doc.List) <= 1 {
-				continue
-			}
-
-			startLine := pass.FileSet.Position(m.Doc.Pos()).Line
-			endLine := pass.FileSet.Position(m.Doc.End()).Line
-
-			methodName := ""
-			if len(m.Names) > 0 {
-				methodName = m.Names[0].Name
-			}
-
-			var lines []string
-
-			hasDirectives := false
-
-			for _, c := range m.Doc.List {
-				text := c.Text
-				lines = append(lines, text)
-
-				trimmed := strings.TrimSpace(text)
-				if strings.HasPrefix(trimmed, "// @") || strings.HasPrefix(trimmed, "//@") ||
-					strings.HasPrefix(trimmed, "//vortex:ignore") {
-					hasDirectives = true
+		if iface, ok := ts.Type.(*ast.InterfaceType); ok && iface.Methods != nil {
+			for _, m := range iface.Methods.List {
+				methodName := ""
+				if len(m.Names) > 0 {
+					methodName = m.Names[0].Name
 				}
-			}
 
-			if !hasDirectives {
-				continue
-			}
-
-			isSorted := sort.SliceIsSorted(lines, func(i, j int) bool {
-				return directiveRank(lines[i]) < directiveRank(lines[j])
-			})
-
-			if !isSorted {
-				diags = append(diags, Diagnostic{
-					RuleID:   r.ID(),
-					RuleName: r.Name(),
-					Severity: r.DefaultSeverity(),
-					Category: r.Category(),
-					Target:   fmt.Sprintf("%s.%s", ts.Name.Name, methodName),
-					FilePath: filePath,
-					Line:     startLine,
-					Column:   1,
-					Message: fmt.Sprintf(
-						"Directives in method %s doc comment are not in canonical sequence",
-						methodName,
-					),
-					Fix: &Fix{
-						Description: "Reorder directives in " + methodName,
-						Apply: func() error {
-							latest, err := os.ReadFile(filePath)
-							if err != nil {
-								return err
-							}
-
-							srcLines := strings.Split(string(latest), "\n")
-							if startLine-1 < 0 || endLine > len(srcLines) {
-								return nil
-							}
-
-							var docLines []string
-							for i := startLine - 1; i < endLine; i++ {
-								docLines = append(docLines, srcLines[i])
-							}
-
-							origBlock := strings.Join(docLines, "\n")
-							sort.SliceStable(docLines, func(i, j int) bool {
-								return directiveRank(docLines[i]) < directiveRank(docLines[j])
-							})
-							sortedBlock := strings.Join(docLines, "\n")
-
-							updated := strings.Replace(string(latest), origBlock, sortedBlock, 1)
-							// #nosec G703 -- Safe automated rewrite of verified source file
-							return os.WriteFile(filePath, []byte(updated), 0o600)
-						},
-					},
-				})
+				checkDocGroup(fmt.Sprintf("%s.%s", ts.Name.Name, methodName), m.Doc)
 			}
 		}
 
@@ -519,7 +544,7 @@ func (r *RuleCanonicalFormat) Run(pass *Pass) []Diagnostic {
 func directiveRank(line string) int {
 	line = strings.TrimSpace(line)
 	if strings.HasPrefix(line, "//vortex:ignore") {
-		return 100
+		return 999
 	}
 
 	if !strings.HasPrefix(line, "// @") && !strings.HasPrefix(line, "//@") {
@@ -528,61 +553,336 @@ func directiveRank(line string) int {
 
 	parts := strings.Fields(line)
 	if len(parts) < 2 {
-		return 50
+		return 500
 	}
 
 	dir := strings.TrimPrefix(parts[1], "@")
-	dir, _, _ = strings.Cut(dir, ":")
+	if idx := strings.Index(dir, ":"); idx != -1 {
+		dir = dir[idx+1:]
+	}
 
 	switch dir {
-	case "get",
-		"post",
-		"put",
-		"delete",
-		"patch",
-		"head",
-		"options",
-		"rpc",
-		"notify",
-		"grpc",
-		"event",
-		"ws_on",
-		"ssh_exec",
-		"ssh_shell":
+	// Service scope
+	case "service", "socket":
 		return 10
-	case "service",
-		"socket",
-		"base_url",
-		"req",
-		"protocol",
-		"engine",
-		"endpoint",
-		"packet",
-		"opcode",
-		"job_id",
-		"heartbeat":
+	case "base_url", "endpoint":
 		return 20
-	case "form", "multipart", "body", "pipeline", "encoder", "decoder", "codec", "casing", "type_map", "query":
+	case "casing", "type_map":
 		return 30
-	case "preset", "inject", "auth", "referer", "header", "sign_hmac", "cookie", "p0f", "persona", "tls_spec", "ssh":
+	case "engine", "protocol":
 		return 40
+	case "persona", "tls_spec", "p0f":
+		return 50
+	case "auth", "header", "cookie":
+		return 60
+	case "timeout", "retry", "circuit":
+		return 70
+
+	// Method scope
+	case "get", "post", "put", "delete", "patch", "head", "options",
+		"rpc", "notify", "grpc", "event", "ws_on", "ssh_exec", "ssh_shell":
+		return 110
+	case "preset", "route_group":
+		return 120
+	case "form", "multipart", "body", "pipeline", "encoder", "decoder", "codec":
+		return 130
+	case "query", "referer", "inject", "sign_hmac":
+		return 140
 	case "unwrap",
+		"envelope",
 		"expect_status",
-		"cache",
-		"timeout",
-		"retry",
-		"circuit",
-		"etag",
-		"coalesce",
-		"idempotent",
+		"status_check",
 		"check",
 		"return",
 		"status",
 		"stream",
 		"extract",
-		"envelope":
-		return 50
+		"error_model":
+		return 150
+	case "cache", "etag", "coalesce", "idempotent":
+		return 160
+
+	// Struct scope
+	case "dto", "bitpack", "tuple", "union":
+		return 210
+
 	default:
-		return 60
+		return 300
 	}
+}
+
+// RuleDeadDirective detects ineffective, orphaned, or contradictory directives on methods.
+type RuleDeadDirective struct{}
+
+func (r *RuleDeadDirective) ID() string   { return "W006" }
+func (r *RuleDeadDirective) Name() string { return "dead-directive" }
+func (r *RuleDeadDirective) Description() string {
+	return "Detects dead or ineffective directives (@unwrap on void return, @cache on mutation methods)"
+}
+func (r *RuleDeadDirective) Category() Category        { return CategoryStyle }
+func (r *RuleDeadDirective) DefaultSeverity() Severity { return SeverityWarning }
+func (r *RuleDeadDirective) IsFixable() bool           { return true }
+
+func (r *RuleDeadDirective) Run(pass *Pass) []Diagnostic {
+	if pass == nil || pass.RootIR == nil {
+		return nil
+	}
+
+	var diags []Diagnostic
+
+	targetFile := pass.FilePath
+
+	for _, svc := range pass.RootIR.Services {
+		for _, m := range svc.Methods {
+			// 1. Dead @unwrap on void return
+			if m.UnwrapField != "" && m.Return != nil && m.Return.IsVoid {
+				line, col := pass.FindNodePosition(svc.Name, m.Name)
+				unwrapPattern := "@unwrap"
+
+				diags = append(diags, Diagnostic{
+					RuleID:   r.ID(),
+					RuleName: r.Name(),
+					Severity: r.DefaultSeverity(),
+					Category: r.Category(),
+					Target:   fmt.Sprintf("%s.%s", svc.Name, m.Name),
+					FilePath: targetFile,
+					Line:     line,
+					Column:   col,
+					Message: fmt.Sprintf(
+						"Dead directive '@unwrap %s' on method %s returning no payload (void/error only)",
+						m.UnwrapField,
+						m.Name,
+					),
+					Suggestion: "Remove @unwrap directive or update return type to struct model",
+					Fix: &Fix{
+						Description: "Remove dead @unwrap on " + m.Name,
+						Apply: func() error {
+							return removeLineContaining(targetFile, m.Name, unwrapPattern)
+						},
+					},
+				})
+			}
+
+			// 2. Dead @cache on mutation verbs
+			isMutation := strings.EqualFold(m.HTTPMethod, "POST") || strings.EqualFold(m.HTTPMethod, "PUT") ||
+				strings.EqualFold(m.HTTPMethod, "DELETE") || strings.EqualFold(m.HTTPMethod, "PATCH")
+
+			if isMutation && m.LocalCacheTTL != "" {
+				line, col := pass.FindNodePosition(svc.Name, m.Name)
+				cachePattern := "@cache"
+
+				diags = append(diags, Diagnostic{
+					RuleID:   r.ID(),
+					RuleName: r.Name(),
+					Severity: r.DefaultSeverity(),
+					Category: r.Category(),
+					Target:   fmt.Sprintf("%s.%s", svc.Name, m.Name),
+					FilePath: targetFile,
+					Line:     line,
+					Column:   col,
+					Message: fmt.Sprintf(
+						"Dead directive '@cache' on state-mutating HTTP %s method %s",
+						m.HTTPMethod,
+						m.Name,
+					),
+					Suggestion: "Remove @cache directive from mutation methods",
+					Fix: &Fix{
+						Description: "Remove dead @cache on " + m.Name,
+						Apply: func() error {
+							return removeLineContaining(targetFile, m.Name, cachePattern)
+						},
+					},
+				})
+			}
+		}
+	}
+
+	return diags
+}
+
+// RuleUnusedParam detects method parameters that are never mapped to path, query, header, cookie, or body.
+type RuleUnusedParam struct{}
+
+func (r *RuleUnusedParam) ID() string   { return "W007" }
+func (r *RuleUnusedParam) Name() string { return "unused-param" }
+func (r *RuleUnusedParam) Description() string {
+	return "Detects parameters declared in method signatures that are not bound to wire elements"
+}
+func (r *RuleUnusedParam) Category() Category        { return CategoryStyle }
+func (r *RuleUnusedParam) DefaultSeverity() Severity { return SeverityWarning }
+func (r *RuleUnusedParam) IsFixable() bool           { return false }
+
+func (r *RuleUnusedParam) Run(pass *Pass) []Diagnostic {
+	if pass == nil || pass.RootIR == nil {
+		return nil
+	}
+
+	var diags []Diagnostic
+
+	for _, svc := range pass.RootIR.Services {
+		for _, m := range svc.Methods {
+			for _, p := range m.Params {
+				if p.Location == ir.LocContext || p.Location == ir.LocModifiers || p.Location == ir.LocHandler ||
+					p.Location == ir.LocEventHandler {
+					continue
+				}
+
+				if p.Location == "" {
+					line, col := pass.FindNodePosition(svc.Name, m.Name)
+					diags = append(diags, Diagnostic{
+						RuleID:   r.ID(),
+						RuleName: r.Name(),
+						Severity: r.DefaultSeverity(),
+						Category: r.Category(),
+						Target:   fmt.Sprintf("%s.%s(%s)", svc.Name, m.Name, p.GoName),
+						FilePath: pass.FilePath,
+						Line:     line,
+						Column:   col,
+						Message: fmt.Sprintf(
+							"Parameter '%s' in method %s is not bound to any path, query, header, or body location",
+							p.GoName,
+							m.Name,
+						),
+						Suggestion: "Annotate parameter with @query, @header, or remove if unused",
+					})
+				}
+			}
+		}
+	}
+
+	return diags
+}
+
+// RuleInvalidStatusCodeRange validates that status codes in @expect_status and @status are between 100 and 599.
+type RuleInvalidStatusCodeRange struct{}
+
+func (r *RuleInvalidStatusCodeRange) ID() string   { return "W008" }
+func (r *RuleInvalidStatusCodeRange) Name() string { return "invalid-status-code-range" }
+func (r *RuleInvalidStatusCodeRange) Description() string {
+	return "Validates that HTTP status codes in contract directives are within standard RFC range 100-599"
+}
+func (r *RuleInvalidStatusCodeRange) Category() Category        { return CategoryStyle }
+func (r *RuleInvalidStatusCodeRange) DefaultSeverity() Severity { return SeverityWarning }
+func (r *RuleInvalidStatusCodeRange) IsFixable() bool           { return false }
+
+func (r *RuleInvalidStatusCodeRange) Run(pass *Pass) []Diagnostic {
+	if pass == nil || pass.RootIR == nil {
+		return nil
+	}
+
+	var diags []Diagnostic
+
+	for _, svc := range pass.RootIR.Services {
+		for _, m := range svc.Methods {
+			for _, code := range m.ExpectStatus {
+				if code < 100 || code > 599 {
+					line, col := pass.FindNodePosition(svc.Name, m.Name)
+					diags = append(diags, Diagnostic{
+						RuleID:   r.ID(),
+						RuleName: r.Name(),
+						Severity: r.DefaultSeverity(),
+						Category: r.Category(),
+						Target:   fmt.Sprintf("%s.%s", svc.Name, m.Name),
+						FilePath: pass.FilePath,
+						Line:     line,
+						Column:   col,
+						Message: fmt.Sprintf(
+							"Status code %d in @expect_status is outside valid RFC range 100-599",
+							code,
+						),
+						Suggestion: "Use a valid HTTP status code (e.g. 200, 201, 204, 404, 500)",
+					})
+				}
+			}
+
+			if m.Return != nil {
+				for code := range m.Return.StatusMap {
+					if code < 100 || code > 599 {
+						line, col := pass.FindNodePosition(svc.Name, m.Name)
+						diags = append(diags, Diagnostic{
+							RuleID:   r.ID(),
+							RuleName: r.Name(),
+							Severity: r.DefaultSeverity(),
+							Category: r.Category(),
+							Target:   fmt.Sprintf("%s.%s", svc.Name, m.Name),
+							FilePath: pass.FilePath,
+							Line:     line,
+							Column:   col,
+							Message: fmt.Sprintf(
+								"Status code %d in @status is outside valid RFC range 100-599",
+								code,
+							),
+							Suggestion: "Use a valid HTTP status code (e.g. 200, 201, 204, 404, 500)",
+						})
+					}
+				}
+			}
+		}
+	}
+
+	for _, u := range pass.RootIR.Unions {
+		for code := range u.Variants {
+			if code < 100 || code > 599 {
+				line, col := pass.FindNodePosition(u.Name, "")
+				diags = append(diags, Diagnostic{
+					RuleID:   r.ID(),
+					RuleName: r.Name(),
+					Severity: r.DefaultSeverity(),
+					Category: r.Category(),
+					Target:   u.Name,
+					FilePath: pass.FilePath,
+					Line:     line,
+					Column:   col,
+					Message: fmt.Sprintf(
+						"Status code %d in union %s is outside valid RFC range 100-599",
+						code,
+						u.Name,
+					),
+					Suggestion: "Use a valid HTTP status code (e.g. 200, 201, 204, 404, 500)",
+				})
+			}
+		}
+	}
+
+	return diags
+}
+
+func removeLineContaining(filePath, methodScope, pattern string) error {
+	content, err := os.ReadFile(filePath)
+	if err != nil {
+		return err
+	}
+
+	lines := strings.Split(string(content), "\n")
+	scopeIdx := -1
+
+	for i, l := range lines {
+		if strings.Contains(l, methodScope) {
+			scopeIdx = i
+			break
+		}
+	}
+
+	if scopeIdx == -1 {
+		return nil
+	}
+
+	// Look upwards for comment block
+	for i := scopeIdx - 1; i >= 0; i-- {
+		l := lines[i]
+		if !strings.HasPrefix(strings.TrimSpace(l), "//") {
+			break
+		}
+
+		if strings.Contains(l, pattern) {
+			newLines := make([]string, 0, len(lines)-1)
+			newLines = append(newLines, lines[:i]...)
+			newLines = append(newLines, lines[i+1:]...)
+
+			// #nosec G703 -- Safe automated rewrite of verified source file
+			return os.WriteFile(filePath, []byte(strings.Join(newLines, "\n")), 0o600)
+		}
+	}
+
+	return nil
 }

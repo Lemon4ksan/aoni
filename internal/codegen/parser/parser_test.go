@@ -260,3 +260,78 @@ type StoreAPI interface {
 	// Overridden with 'result'
 	require.Equal(t, "result", svc.Methods[2].UnwrapField)
 }
+
+func TestParser_MultiStatusUnionsAndStatusRouting(t *testing.T) {
+	src := `package testapi
+
+// @aoni:union
+type CreateOrderResult struct {
+	StatusCode int
+	Order      *Order      ` + "`status:\"200,201\"`" + `
+	Queued     *QueuedTask ` + "`status:\"202\"`" + `
+}
+
+type Order struct {
+	ID string
+}
+
+type QueuedTask struct {
+	TaskID string
+}
+
+type ApiError struct {
+	Code    int
+	Message string
+}
+
+// @aoni:service
+// @error_model ApiError
+type OrderService interface {
+	// @post /orders
+	// @status 200, 201 => Order
+	// @status 202 => Queued
+	CreateOrder(ctx context.Context, req *Order) (*CreateOrderResult, error)
+
+	// @post /transfers
+	// @status 200 => *Order
+	// @status 402 => *ApiError
+	Transfer(ctx context.Context, id string) (*Order, error)
+}
+`
+
+	p := parser.NewParser()
+	root, err := p.ParseSource("orderapi.go", []byte(src))
+	require.NoError(t, err)
+	require.NotNil(t, root)
+
+	// Verify Union parsing
+	require.Len(t, root.Unions, 1)
+	u := root.Unions[0]
+	require.Equal(t, "CreateOrderResult", u.Name)
+	require.Len(t, u.Fields, 2)
+	require.Equal(t, "Order", u.Fields[0].GoName)
+	require.Equal(t, []int{200, 201}, u.Fields[0].StatusCodes)
+	require.Equal(t, "Queued", u.Fields[1].GoName)
+	require.Equal(t, []int{202}, u.Fields[1].StatusCodes)
+
+	// Verify Service and Method status routing
+	require.Len(t, root.Services, 1)
+	svc := root.Services[0]
+	require.Equal(t, "ApiError", svc.DefaultErrorModel)
+	require.Len(t, svc.Methods, 2)
+
+	m0 := svc.Methods[0]
+	require.Equal(t, "CreateOrder", m0.Name)
+	require.NotNil(t, m0.Return)
+	require.NotNil(t, m0.Return.UnionType)
+	require.Equal(t, "CreateOrderResult", m0.Return.UnionType.Name)
+	require.Equal(t, "ApiError", m0.Return.ErrorModelType)
+
+	m1 := svc.Methods[1]
+	require.Equal(t, "Transfer", m1.Name)
+	require.NotNil(t, m1.Return)
+	require.Len(t, m1.Return.StatusMap, 2)
+	require.Equal(t, "*Order", m1.Return.StatusMap[200].Name)
+	require.Equal(t, "*ApiError", m1.Return.StatusMap[402].Name)
+	require.Equal(t, "ApiError", m1.Return.ErrorModelType)
+}

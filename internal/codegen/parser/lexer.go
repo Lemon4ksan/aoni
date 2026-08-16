@@ -55,9 +55,12 @@ func ParseDirective(line string) *Directive {
 	d.Name = strings.ToLower(content[:idx])
 	rest := strings.TrimSpace(content[idx:])
 
-	if d.Name == "return" || d.Name == "body" {
-		d.Pipeline = ParsePipeline(rest)
+	if d.Name == "return" || d.Name == "body" || d.Name == "status" || d.Name == "check" {
 		d.Value = rest
+		if d.Name == "return" || d.Name == "body" {
+			d.Pipeline = ParsePipeline(rest)
+		}
+
 		return d
 	}
 
@@ -292,7 +295,7 @@ func ParseHeaderDirective(val string) ir.HeaderIR {
 
 // ParseCheckDirective parses a "@check" expression like "success == true" or "purchase_eresult == 1".
 func ParseCheckDirective(val string) *ir.CheckIR {
-	val = strings.TrimSpace(val)
+	val = unquote(strings.TrimSpace(val))
 	if val == "" {
 		return nil
 	}

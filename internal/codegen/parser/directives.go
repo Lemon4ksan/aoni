@@ -144,6 +144,8 @@ func ApplyServiceDirective(s *ir.ServiceIR, d *Directive) {
 		s.Envelope = parseEnvelopeDirective(d)
 	case "unwrap":
 		s.DefaultUnwrapField = d.Value
+	case "error_model":
+		s.DefaultErrorModel = d.Value
 	case "auth":
 		s.AuthStrategy = parseAuthDirective(d)
 	case "ssh":
@@ -471,8 +473,30 @@ func ApplyMethodDirective(m *ir.MethodIR, d *Directive) {
 		}
 	case "expect_status":
 		for _, st := range strings.Split(d.Value, ",") {
-			if code, err := strconv.Atoi(strings.TrimSpace(st)); err == nil {
-				m.ExpectStatus = append(m.ExpectStatus, code)
+			for _, part := range strings.Fields(st) {
+				if code, err := strconv.Atoi(strings.TrimSpace(part)); err == nil {
+					m.ExpectStatus = append(m.ExpectStatus, code)
+				}
+			}
+		}
+
+	case "status":
+		m.Return = ensureReturnIR(m)
+		if m.Return.StatusMap == nil {
+			m.Return.StatusMap = make(map[int]ir.GoTypeIR)
+		}
+
+		parts := strings.Split(d.Value, "=>")
+		if len(parts) == 2 {
+			codesStr := strings.TrimSpace(parts[0])
+
+			targetType := strings.TrimSpace(parts[1])
+			for _, cStr := range strings.Split(codesStr, ",") {
+				for _, part := range strings.Fields(cStr) {
+					if code, err := strconv.Atoi(strings.TrimSpace(part)); err == nil {
+						m.Return.StatusMap[code] = ir.GoTypeIR{Name: targetType, IsCustomType: true}
+					}
+				}
 			}
 		}
 

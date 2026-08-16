@@ -595,6 +595,20 @@ var Registry = []*DirectiveDef{
 		Example:     "// @expect_status 200 201 204",
 	},
 	{
+		Name:        "status",
+		Scopes:      []Scope{ScopeMethod},
+		ValueHint:   "<status_code> => <FieldOrType>",
+		Description: "Maps specific HTTP status codes to response union fields or error models.",
+		Example:     "// @status 200, 201 => Order\n// @status 202 => Queued\n// @status 402 => *InsufficientFundsError",
+	},
+	{
+		Name:        "error_model",
+		Scopes:      []Scope{ScopeService, ScopeMethod},
+		ValueHint:   "<ErrorStructName>",
+		Description: "Specifies a custom error model struct for non-2xx responses (compatible with errors.As).",
+		Example:     "// @error_model ApiError",
+	},
+	{
 		Name:        "cache",
 		Scopes:      []Scope{ScopeMethod},
 		ValueHint:   "\"1m\" | \"30s\"",

@@ -137,3 +137,118 @@ func TestEmitter(t *testing.T) {
 	require.Contains(t, codeStr, "func (r *User) EncodeValues(vals url.Values)")
 	require.Contains(t, codeStr, "func (t *Point) UnmarshalJSON(data []byte) error")
 }
+
+func TestEmitter_MultiStatusUnionsAndStatusRouting(t *testing.T) {
+	union := &ir.UnionIR{
+		Name: "CreateOrderResult",
+		Fields: []*ir.UnionFieldIR{
+			{
+				GoName:      "Order",
+				Type:        ir.GoTypeIR{Name: "*Order", IsPointer: true, IsCustomType: true},
+				StatusCodes: []int{200, 201},
+			},
+			{
+				GoName:      "Queued",
+				Type:        ir.GoTypeIR{Name: "*QueuedTask", IsPointer: true, IsCustomType: true},
+				StatusCodes: []int{202},
+			},
+		},
+		Variants: map[int]ir.GoTypeIR{
+			200: {Name: "*Order", IsPointer: true, IsCustomType: true},
+			201: {Name: "*Order", IsPointer: true, IsCustomType: true},
+			202: {Name: "*QueuedTask", IsPointer: true, IsCustomType: true},
+		},
+	}
+
+	root := &ir.RootIR{
+		PackageName: "orderapi",
+		Unions:      []*ir.UnionIR{union},
+		Services: []*ir.ServiceIR{
+			{
+				Name:    "OrderService",
+				BaseURL: "https://api.orders.internal",
+				Engine:  ir.EngineFast,
+				SubRequesters: []ir.SubRequesterIR{
+					{FieldName: "r", BaseURL: "https://api.orders.internal"},
+				},
+				Methods: []*ir.MethodIR{
+					{
+						Name:            "CreateOrder",
+						HTTPMethod:      "POST",
+						TargetRequester: "c.r",
+						Path:            &ir.PathIR{RawTemplate: "orders"},
+						Params: []*ir.ParamIR{
+							{GoName: "ctx", Location: ir.LocContext, GoType: ir.GoTypeIR{Name: "context.Context"}},
+							{
+								GoName:   "req",
+								Location: ir.LocBody,
+								GoType:   ir.GoTypeIR{Name: "*OrderReq", IsPointer: true},
+							},
+						},
+						Return: &ir.ReturnIR{
+							SuccessType:    ir.GoTypeIR{Name: "*CreateOrderResult", IsPointer: true},
+							UnionType:      union,
+							ErrorModelType: "ApiError",
+						},
+					},
+					{
+						Name:            "TransferFunds",
+						HTTPMethod:      "POST",
+						TargetRequester: "c.r",
+						Path:            &ir.PathIR{RawTemplate: "transfers"},
+						Params: []*ir.ParamIR{
+							{GoName: "ctx", Location: ir.LocContext, GoType: ir.GoTypeIR{Name: "context.Context"}},
+						},
+						Return: &ir.ReturnIR{
+							SuccessType: ir.GoTypeIR{Name: "*TransferReceipt", IsPointer: true},
+							StatusMap: map[int]ir.GoTypeIR{
+								200: {Name: "*TransferReceipt", IsPointer: true},
+								402: {Name: "*InsufficientFundsError", IsPointer: true},
+							},
+							ErrorModelType: "ApiError",
+						},
+					},
+				},
+			},
+		},
+		Structs: []*ir.StructIR{
+			{
+				Name: "OrderReq",
+				Fields: []*ir.FieldIR{
+					{GoName: "Amount", WireName: "amount", Type: ir.GoTypeIR{Name: "int64"}},
+				},
+			},
+		},
+	}
+
+	em := emitter.NewEmitter()
+	code, err := em.Emit(root)
+	require.NoError(t, err)
+	require.NotEmpty(t, code)
+
+	codeStr := string(code)
+
+	// Verify Union helper methods
+	require.Contains(t, codeStr, "func (u *CreateOrderResult) IsSuccess() bool")
+	require.Contains(t, codeStr, "func (u *CreateOrderResult) Status() int")
+	require.Contains(t, codeStr, "func (u *CreateOrderResult) Match(")
+	require.Contains(t, codeStr, "onOrder func(*Order)")
+	require.Contains(t, codeStr, "onQueued func(*QueuedTask)")
+
+	// Verify Status switch in CreateOrder
+	require.Contains(t, codeStr, "switch resp.StatusCode {")
+	require.Contains(t, codeStr, "case 200, 201:")
+	require.Contains(t, codeStr, "decode.JSON[Order](resp.Body)")
+	require.Contains(t, codeStr, "return &CreateOrderResult{StatusCode: resp.StatusCode, Order: &res}, nil")
+	require.Contains(t, codeStr, "case 202:")
+	require.Contains(t, codeStr, "decode.JSON[QueuedTask](resp.Body)")
+	require.Contains(t, codeStr, "return &CreateOrderResult{StatusCode: resp.StatusCode, Queued: &res}, nil")
+
+	// Verify TransferFunds status mapping
+	require.Contains(t, codeStr, "case 402:")
+	require.Contains(t, codeStr, "decode.JSON[InsufficientFundsError](resp.Body)")
+	require.Contains(t, codeStr, "return nil, &errModel")
+
+	// Verify Error fallback
+	require.Contains(t, codeStr, "decode.JSON[ApiError](resp.Body)")
+}

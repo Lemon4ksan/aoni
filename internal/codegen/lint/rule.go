@@ -27,6 +27,9 @@ const (
 	// CategoryPerformance flags potential allocation or design inefficiencies.
 	CategoryPerformance Category = "Performance"
 
+	// CategorySecurity flags sensitive token leaks, injection risks, and unmasked scraping.
+	CategorySecurity Category = "Security"
+
 	// CategoryCodegen flags stale or missing generated files.
 	CategoryCodegen Category = "Codegen"
 )

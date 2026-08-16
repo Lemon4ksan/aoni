@@ -6,12 +6,14 @@ package lint
 
 import (
 	"fmt"
+	"net/http"
 	"os"
 	"strings"
 
 	"github.com/lemon4ksan/aoni/internal/codegen/emitter"
 	"github.com/lemon4ksan/aoni/internal/codegen/ir"
 	"github.com/lemon4ksan/aoni/internal/codegen/optimizer"
+	"github.com/lemon4ksan/aoni/internal/codegen/parser"
 )
 
 // RuleStaleCodegen checks if generated *.gen.go files are missing or out of sync.
@@ -120,10 +122,14 @@ func (r *RuleUnmatchedPath) Run(pass *Pass) []Diagnostic {
 				continue
 			}
 
-			paramNames := make(map[string]bool, len(m.Params))
+			paramNames := make(map[string]bool, len(m.Params)*4)
 			for _, p := range m.Params {
 				paramNames[p.GoName] = true
 				paramNames[strings.ToLower(p.GoName)] = true
+				paramNames[p.WireKey] = true
+				paramNames[strings.ToLower(p.WireKey)] = true
+				paramNames[parser.ToCasing(p.GoName, ir.CasingSnakeCase)] = true
+				paramNames[parser.ToCasing(p.GoName, ir.CasingFlatCase)] = true
 			}
 
 			target := fmt.Sprintf("%s.%s", svc.Name, m.Name)
@@ -313,10 +319,395 @@ func (r *RuleUnrecognizedDirective) Run(pass *Pass) []Diagnostic {
 	return diags
 }
 
+// RuleConflictingPayload checks if a method specifies mutually exclusive payload encodings.
+type RuleConflictingPayload struct{}
+
+func (r *RuleConflictingPayload) ID() string   { return "E006" }
+func (r *RuleConflictingPayload) Name() string { return "conflicting-payload" }
+func (r *RuleConflictingPayload) Description() string {
+	return "Detects conflicting or mutually exclusive request payload directives"
+}
+func (r *RuleConflictingPayload) Category() Category        { return CategoryCorrectness }
+func (r *RuleConflictingPayload) DefaultSeverity() Severity { return SeverityError }
+func (r *RuleConflictingPayload) IsFixable() bool           { return false }
+
+func (r *RuleConflictingPayload) Run(pass *Pass) []Diagnostic {
+	if pass == nil || pass.RootIR == nil {
+		return nil
+	}
+
+	var diags []Diagnostic
+
+	for _, svc := range pass.RootIR.Services {
+		for _, m := range svc.Methods {
+			bodyLocations := make(map[ir.ParamLocation]bool)
+			for _, p := range m.Params {
+				switch p.Location {
+				case ir.LocBody, ir.LocFormFields, ir.LocMultipartField, ir.LocMultipartFile:
+					bodyLocations[p.Location] = true
+				}
+			}
+
+			if (bodyLocations[ir.LocBody] && (bodyLocations[ir.LocFormFields] || bodyLocations[ir.LocMultipartField])) ||
+				(bodyLocations[ir.LocFormFields] && bodyLocations[ir.LocMultipartField]) {
+				line, col := pass.FindNodePosition(svc.Name, m.Name)
+				diags = append(diags, Diagnostic{
+					RuleID:     r.ID(),
+					RuleName:   r.Name(),
+					Severity:   r.DefaultSeverity(),
+					Category:   r.Category(),
+					Target:     fmt.Sprintf("%s.%s", svc.Name, m.Name),
+					FilePath:   pass.FilePath,
+					Line:       line,
+					Column:     col,
+					Message:    fmt.Sprintf("Method %s has conflicting body payload encodings", m.Name),
+					Suggestion: "Choose exactly one body payload format (@body, @form, or @multipart)",
+				})
+			}
+		}
+	}
+
+	return diags
+}
+
+// RuleIllegalBodyMethod checks that GET and HEAD methods do not have request bodies.
+type RuleIllegalBodyMethod struct{}
+
+func (r *RuleIllegalBodyMethod) ID() string   { return "E007" }
+func (r *RuleIllegalBodyMethod) Name() string { return "illegal-body-method" }
+func (r *RuleIllegalBodyMethod) Description() string {
+	return "Enforces RFC 9110 prohibition of request bodies on GET and HEAD methods"
+}
+func (r *RuleIllegalBodyMethod) Category() Category        { return CategoryCorrectness }
+func (r *RuleIllegalBodyMethod) DefaultSeverity() Severity { return SeverityError }
+func (r *RuleIllegalBodyMethod) IsFixable() bool           { return false }
+
+func (r *RuleIllegalBodyMethod) Run(pass *Pass) []Diagnostic {
+	if pass == nil || pass.RootIR == nil {
+		return nil
+	}
+
+	var diags []Diagnostic
+
+	for _, svc := range pass.RootIR.Services {
+		for _, m := range svc.Methods {
+			isGetOrHead := strings.EqualFold(m.HTTPMethod, http.MethodGet) ||
+				strings.EqualFold(m.HTTPMethod, http.MethodHead)
+			if !isGetOrHead {
+				continue
+			}
+
+			hasBody := false
+			for _, p := range m.Params {
+				switch p.Location {
+				case ir.LocBody, ir.LocFormFields, ir.LocMultipartField, ir.LocMultipartFile:
+					hasBody = true
+				}
+			}
+
+			if hasBody {
+				line, col := pass.FindNodePosition(svc.Name, m.Name)
+				diags = append(diags, Diagnostic{
+					RuleID:   r.ID(),
+					RuleName: r.Name(),
+					Severity: r.DefaultSeverity(),
+					Category: r.Category(),
+					Target:   fmt.Sprintf("%s.%s", svc.Name, m.Name),
+					FilePath: pass.FilePath,
+					Line:     line,
+					Column:   col,
+					Message: fmt.Sprintf(
+						"HTTP %s method %s cannot have a request body payload (RFC 9110 violation)",
+						m.HTTPMethod,
+						m.Name,
+					),
+					Suggestion: "Change HTTP verb to @post/@put or send parameters as @query",
+				})
+			}
+		}
+	}
+
+	return diags
+}
+
+// RuleMissingErrorReturn enforces that all network interface methods return error.
+type RuleMissingErrorReturn struct{}
+
+func (r *RuleMissingErrorReturn) ID() string   { return "E008" }
+func (r *RuleMissingErrorReturn) Name() string { return "missing-error-return" }
+func (r *RuleMissingErrorReturn) Description() string {
+	return "Enforces that all network methods return error as their final return value"
+}
+func (r *RuleMissingErrorReturn) Category() Category        { return CategoryCorrectness }
+func (r *RuleMissingErrorReturn) DefaultSeverity() Severity { return SeverityError }
+func (r *RuleMissingErrorReturn) IsFixable() bool           { return false }
+
+func (r *RuleMissingErrorReturn) Run(pass *Pass) []Diagnostic {
+	if pass == nil || pass.RootIR == nil {
+		return nil
+	}
+
+	var diags []Diagnostic
+	for _, svc := range pass.RootIR.Services {
+		for _, m := range svc.Methods {
+			if m.IsEvent || m.Operation == ir.OpEvent || m.IsNotify || m.Operation == ir.OpNotify {
+				continue
+			}
+
+			if svc.Protocol == ir.ProtocolSocket {
+				if m.Name == "IsConnected" || strings.HasPrefix(m.Name, "Register") ||
+					m.Name == "Connector" || m.Name == "Dispatcher" {
+					continue
+				}
+			}
+
+			if (svc.Protocol == ir.ProtocolRPC || svc.Protocol == ir.ProtocolChannel) && m.Name == "Close" {
+				continue
+			}
+
+			hasErrorReturn := false
+			if m.Return != nil && m.Return.SuccessType.Name != "" {
+				hasErrorReturn = true
+			}
+
+			if !hasErrorReturn {
+				line, col := pass.FindNodePosition(svc.Name, m.Name)
+				diags = append(diags, Diagnostic{
+					RuleID:     r.ID(),
+					RuleName:   r.Name(),
+					Severity:   r.DefaultSeverity(),
+					Category:   r.Category(),
+					Target:     fmt.Sprintf("%s.%s", svc.Name, m.Name),
+					FilePath:   pass.FilePath,
+					Line:       line,
+					Column:     col,
+					Message:    fmt.Sprintf("Method %s must return 'error' as its final return value", m.Name),
+					Suggestion: "Update signature to return (*Response, error) or error",
+				})
+			}
+		}
+	}
+
+	return diags
+}
+
+// RuleUnboundHeaderVariable checks if a templated header contains variables not found in parameters or injections.
+type RuleUnboundHeaderVariable struct{}
+
+func (r *RuleUnboundHeaderVariable) ID() string   { return "E009" }
+func (r *RuleUnboundHeaderVariable) Name() string { return "unbound-header-variable" }
+func (r *RuleUnboundHeaderVariable) Description() string {
+	return "Detects unbound template variables in request headers"
+}
+func (r *RuleUnboundHeaderVariable) Category() Category        { return CategoryCorrectness }
+func (r *RuleUnboundHeaderVariable) DefaultSeverity() Severity { return SeverityError }
+func (r *RuleUnboundHeaderVariable) IsFixable() bool           { return false }
+
+func (r *RuleUnboundHeaderVariable) Run(pass *Pass) []Diagnostic {
+	if pass == nil || pass.RootIR == nil {
+		return nil
+	}
+
+	var diags []Diagnostic
+
+	for _, svc := range pass.RootIR.Services {
+		for _, m := range svc.Methods {
+			paramSet := make(map[string]bool)
+			for _, p := range m.Params {
+				paramSet[p.GoName] = true
+				paramSet[p.WireKey] = true
+			}
+
+			for _, inj := range m.Injects {
+				paramSet[inj.WireKey] = true
+			}
+
+			for _, h := range m.Headers {
+				val := h.StaticValue
+				if h.DynamicTemplate != nil {
+					val = h.DynamicTemplate.RawTemplate
+				}
+
+				start := 0
+				for {
+					openIdx := strings.Index(val[start:], "{")
+					if openIdx == -1 {
+						break
+					}
+
+					openIdx += start
+
+					closeIdx := strings.Index(val[openIdx:], "}")
+					if closeIdx == -1 {
+						break
+					}
+
+					closeIdx += openIdx
+
+					varName := val[openIdx+1 : closeIdx]
+					varName, _, _ = strings.Cut(varName, ":") // strip filters like {id:path_escape}
+
+					if !paramSet[varName] {
+						line, col := pass.FindNodePosition(svc.Name, m.Name)
+						diags = append(diags, Diagnostic{
+							RuleID:   r.ID(),
+							RuleName: r.Name(),
+							Severity: r.DefaultSeverity(),
+							Category: r.Category(),
+							Target:   fmt.Sprintf("%s.%s", svc.Name, m.Name),
+							FilePath: pass.FilePath,
+							Line:     line,
+							Column:   col,
+							Message: fmt.Sprintf(
+								"Header '%s' contains unbound template variable '{%s}'",
+								h.Key,
+								varName,
+							),
+							Suggestion: fmt.Sprintf(
+								"Add parameter '%s' to method %s signature or bind via @inject",
+								varName,
+								m.Name,
+							),
+						})
+					}
+
+					start = closeIdx + 1
+				}
+			}
+		}
+	}
+
+	return diags
+}
+
+// RuleDuplicateRouteCollision detects two methods in the same service with identical HTTP verb and path route.
+type RuleDuplicateRouteCollision struct{}
+
+func (r *RuleDuplicateRouteCollision) ID() string   { return "E010" }
+func (r *RuleDuplicateRouteCollision) Name() string { return "duplicate-route-collision" }
+func (r *RuleDuplicateRouteCollision) Description() string {
+	return "Detects duplicate route collisions in service contracts"
+}
+func (r *RuleDuplicateRouteCollision) Category() Category        { return CategoryCorrectness }
+func (r *RuleDuplicateRouteCollision) DefaultSeverity() Severity { return SeverityError }
+func (r *RuleDuplicateRouteCollision) IsFixable() bool           { return false }
+
+func (r *RuleDuplicateRouteCollision) Run(pass *Pass) []Diagnostic {
+	if pass == nil || pass.RootIR == nil {
+		return nil
+	}
+
+	var diags []Diagnostic
+
+	for _, svc := range pass.RootIR.Services {
+		seen := make(map[string]string) // "GET /path" -> methodName
+
+		for _, m := range svc.Methods {
+			if m.Path == nil || m.HTTPMethod == "" {
+				continue
+			}
+
+			key := fmt.Sprintf("%s %s", m.HTTPMethod, m.Path.RawTemplate)
+			if prevMethod, ok := seen[key]; ok {
+				line, col := pass.FindNodePosition(svc.Name, m.Name)
+				diags = append(diags, Diagnostic{
+					RuleID:   r.ID(),
+					RuleName: r.Name(),
+					Severity: r.DefaultSeverity(),
+					Category: r.Category(),
+					Target:   fmt.Sprintf("%s.%s", svc.Name, m.Name),
+					FilePath: pass.FilePath,
+					Line:     line,
+					Column:   col,
+					Message: fmt.Sprintf(
+						"Duplicate route collision: '%s' is already defined by method %s",
+						key,
+						prevMethod,
+					),
+					Suggestion: "Differentiate path routes or combine methods",
+				})
+			} else {
+				seen[key] = m.Name
+			}
+		}
+	}
+
+	return diags
+}
+
+// RuleInvalidCheckField checks if @check directive targets a nonexistent field on the response struct.
+type RuleInvalidCheckField struct{}
+
+func (r *RuleInvalidCheckField) ID() string   { return "E011" }
+func (r *RuleInvalidCheckField) Name() string { return "invalid-check-field" }
+func (r *RuleInvalidCheckField) Description() string {
+	return "Validates that @check field assertions match fields on the response model"
+}
+func (r *RuleInvalidCheckField) Category() Category        { return CategoryCorrectness }
+func (r *RuleInvalidCheckField) DefaultSeverity() Severity { return SeverityError }
+func (r *RuleInvalidCheckField) IsFixable() bool           { return false }
+
+func (r *RuleInvalidCheckField) Run(pass *Pass) []Diagnostic {
+	if pass == nil || pass.RootIR == nil {
+		return nil
+	}
+
+	structMap := make(map[string]*ir.StructIR)
+	for _, s := range pass.RootIR.Structs {
+		structMap[s.Name] = s
+	}
+
+	var diags []Diagnostic
+
+	for _, svc := range pass.RootIR.Services {
+		for _, m := range svc.Methods {
+			if len(m.Checks) == 0 || m.Return == nil || m.Return.SuccessType.Name == "" {
+				continue
+			}
+
+			typeName := m.Return.SuccessType.Name
+
+			strct, ok := structMap[typeName]
+			if !ok {
+				continue
+			}
+
+			fieldSet := make(map[string]bool)
+			for _, f := range strct.Fields {
+				fieldSet[f.GoName] = true
+			}
+
+			for _, chk := range m.Checks {
+				if !fieldSet[chk.Field] {
+					line, col := pass.FindNodePosition(svc.Name, m.Name)
+					diags = append(diags, Diagnostic{
+						RuleID:   r.ID(),
+						RuleName: r.Name(),
+						Severity: r.DefaultSeverity(),
+						Category: r.Category(),
+						Target:   fmt.Sprintf("%s.%s", svc.Name, m.Name),
+						FilePath: pass.FilePath,
+						Line:     line,
+						Column:   col,
+						Message: fmt.Sprintf(
+							"Field '%s' in @check directive does not exist on response struct %s",
+							chk.Field,
+							typeName,
+						),
+						Suggestion: "Verify field name spelling in struct " + typeName,
+					})
+				}
+			}
+		}
+	}
+
+	return diags
+}
+
 // RuleInvalidBitpack checks that @aoni:bitpack struct fields have valid bit widths and don't overflow their underlying types.
 type RuleInvalidBitpack struct{}
 
-func (r *RuleInvalidBitpack) ID() string   { return "E006" }
+func (r *RuleInvalidBitpack) ID() string   { return "E012" }
 func (r *RuleInvalidBitpack) Name() string { return "invalid-bitpack" }
 func (r *RuleInvalidBitpack) Description() string {
 	return "Validates @aoni:bitpack field bit widths and type safety"
@@ -405,6 +796,151 @@ func (r *RuleInvalidBitpack) Run(pass *Pass) []Diagnostic {
 						Suggestion: fmt.Sprintf("Widen underlying Go type or reduce bit width to <= %d", maxBits),
 					})
 				}
+			}
+		}
+	}
+
+	return diags
+}
+
+// RuleShadowedWireName detects two parameters in the same method that serialize to the same wire key.
+type RuleShadowedWireName struct{}
+
+func (r *RuleShadowedWireName) ID() string   { return "E013" }
+func (r *RuleShadowedWireName) Name() string { return "shadowed-wire-name" }
+func (r *RuleShadowedWireName) Description() string {
+	return "Detects parameter wire key collisions in query and form payloads"
+}
+func (r *RuleShadowedWireName) Category() Category        { return CategoryCorrectness }
+func (r *RuleShadowedWireName) DefaultSeverity() Severity { return SeverityError }
+func (r *RuleShadowedWireName) IsFixable() bool           { return false }
+
+func (r *RuleShadowedWireName) Run(pass *Pass) []Diagnostic {
+	if pass == nil || pass.RootIR == nil {
+		return nil
+	}
+
+	var diags []Diagnostic
+
+	for _, svc := range pass.RootIR.Services {
+		for _, m := range svc.Methods {
+			seenQuery := make(map[string]string)
+			seenForm := make(map[string]string)
+
+			for _, p := range m.Params {
+				if p.WireKey == "" {
+					continue
+				}
+
+				switch p.Location {
+				case ir.LocQuery:
+					if prev, ok := seenQuery[p.WireKey]; ok {
+						line, col := pass.FindNodePosition(svc.Name, m.Name)
+						diags = append(diags, Diagnostic{
+							RuleID:   r.ID(),
+							RuleName: r.Name(),
+							Severity: r.DefaultSeverity(),
+							Category: r.Category(),
+							Target:   fmt.Sprintf("%s.%s", svc.Name, m.Name),
+							FilePath: pass.FilePath,
+							Line:     line,
+							Column:   col,
+							Message: fmt.Sprintf(
+								"Wire key collision: query parameters '%s' and '%s' both serialize to '%s'",
+								prev,
+								p.GoName,
+								p.WireKey,
+							),
+							Suggestion: "Rename one of the parameters or specify explicit @query tags",
+						})
+					} else {
+						seenQuery[p.WireKey] = p.GoName
+					}
+
+				case ir.LocFormFields:
+					if prev, ok := seenForm[p.WireKey]; ok {
+						line, col := pass.FindNodePosition(svc.Name, m.Name)
+						diags = append(diags, Diagnostic{
+							RuleID:   r.ID(),
+							RuleName: r.Name(),
+							Severity: r.DefaultSeverity(),
+							Category: r.Category(),
+							Target:   fmt.Sprintf("%s.%s", svc.Name, m.Name),
+							FilePath: pass.FilePath,
+							Line:     line,
+							Column:   col,
+							Message: fmt.Sprintf(
+								"Wire key collision: form parameters '%s' and '%s' both serialize to '%s'",
+								prev,
+								p.GoName,
+								p.WireKey,
+							),
+							Suggestion: "Rename one of the parameters or specify explicit @form tags",
+						})
+					} else {
+						seenForm[p.WireKey] = p.GoName
+					}
+				}
+			}
+		}
+	}
+
+	return diags
+}
+
+// RuleInvalidUnionStatus validates that @aoni:union structs define valid variant fields and status tags.
+type RuleInvalidUnionStatus struct{}
+
+func (r *RuleInvalidUnionStatus) ID() string   { return "E014" }
+func (r *RuleInvalidUnionStatus) Name() string { return "invalid-union-status" }
+func (r *RuleInvalidUnionStatus) Description() string {
+	return "Validates @aoni:union struct definitions and status code mappings"
+}
+func (r *RuleInvalidUnionStatus) Category() Category        { return CategoryCorrectness }
+func (r *RuleInvalidUnionStatus) DefaultSeverity() Severity { return SeverityError }
+func (r *RuleInvalidUnionStatus) IsFixable() bool           { return false }
+
+func (r *RuleInvalidUnionStatus) Run(pass *Pass) []Diagnostic {
+	if pass == nil || pass.RootIR == nil {
+		return nil
+	}
+
+	var diags []Diagnostic
+
+	for _, u := range pass.RootIR.Unions {
+		line, col := pass.FindNodePosition(u.Name, "")
+
+		if len(u.Fields) == 0 {
+			diags = append(diags, Diagnostic{
+				RuleID:     r.ID(),
+				RuleName:   r.Name(),
+				Severity:   r.DefaultSeverity(),
+				Category:   r.Category(),
+				Target:     u.Name,
+				FilePath:   pass.FilePath,
+				Line:       line,
+				Column:     col,
+				Message:    fmt.Sprintf("Union struct %s has no variant fields", u.Name),
+				Suggestion: "Declare variant fields with `status:\"200,201\"` struct tags",
+			})
+
+			continue
+		}
+
+		for _, f := range u.Fields {
+			if len(f.StatusCodes) == 0 {
+				diags = append(diags, Diagnostic{
+					RuleID:     r.ID(),
+					RuleName:   r.Name(),
+					Severity:   r.DefaultSeverity(),
+					Category:   r.Category(),
+					Target:     fmt.Sprintf("%s.%s", u.Name, f.GoName),
+					FilePath:   pass.FilePath,
+					Line:       line,
+					Column:     col,
+					Message:    fmt.Sprintf("Variant field %s.%s is missing `status:\"...\"` tag", u.Name, f.GoName),
+					Suggestion: "Add `status:\"200\"` (or matching HTTP codes) to the field tag",
+				})
 			}
 		}
 	}

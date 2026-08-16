@@ -6,14 +6,17 @@ package main
 
 import (
 	"bufio"
+	"context"
 	"flag"
 	"fmt"
+	"io"
 	"os"
 	"sort"
 	"strconv"
 	"strings"
 )
 
+// CoverageStats records statement coverage counts and percentage metrics.
 type CoverageStats struct {
 	TotalStatements   int
 	CoveredStatements int
@@ -27,7 +30,7 @@ func (s *CoverageStats) Percent() float64 {
 	return float64(s.CoveredStatements) / float64(s.TotalStatements) * 100
 }
 
-type BlockInfo struct {
+type blockInfo struct {
 	Statements int
 	Hits       int
 }
@@ -37,8 +40,17 @@ type pkgRow struct {
 	Stats *CoverageStats
 }
 
-func runCover(args []string) {
-	fs := flag.NewFlagSet("vortex cover", flag.ExitOnError)
+// CmdCover analyzes Go coverage profiles and reports deduplicated core statistics.
+type CmdCover struct{}
+
+func (c *CmdCover) Name() string      { return "cover" }
+func (c *CmdCover) Aliases() []string { return []string{"coverage"} }
+func (c *CmdCover) Synopsis() string  { return "Deduplicated core test coverage analyzer" }
+func (c *CmdCover) Usage() string     { return "vortex cover [flags]" }
+
+func (c *CmdCover) Run(_ context.Context, args []string, stdout, stderr io.Writer) error {
+	fs := flag.NewFlagSet("cover", flag.ContinueOnError)
+	fs.SetOutput(stderr)
 
 	var (
 		coverageFilePath = fs.String("file", "./coverage.out", "Path to Go coverage profile file")
@@ -47,28 +59,21 @@ func runCover(args []string) {
 	)
 
 	fs.Usage = func() {
-		fmt.Fprintf(os.Stderr, "vortex cover — Deduplicated Core Code Coverage Profile Analyzer\n\n")
-		fmt.Fprintf(os.Stderr, "Usage:\n")
-		fmt.Fprintf(os.Stderr, "  vortex cover [-file=coverage.out] [-sort=percent|name] [-min=80.0]\n\n")
-		fmt.Fprintf(os.Stderr, "Flags:\n")
+		fmt.Fprintf(stderr, "vortex cover — Deduplicated Core Code Coverage Profile Analyzer\n\n")
+		fmt.Fprintf(stderr, "Usage:\n")
+		fmt.Fprintf(stderr, "  vortex cover [-file=coverage.out] [-sort=percent|name] [-min=80.0]\n\n")
+		fmt.Fprintf(stderr, "Flags:\n")
 		fs.PrintDefaults()
-		fmt.Fprintf(os.Stderr, "\nExamples:\n")
-		fmt.Fprintf(os.Stderr, "  go test -coverprofile=coverage.out ./...\n")
-		fmt.Fprintf(os.Stderr, "  vortex cover\n")
-		fmt.Fprintf(os.Stderr, "  vortex cover -sort=percent -min=85.0\n")
 	}
 
 	if err := fs.Parse(args); err != nil {
-		os.Exit(1)
+		return err
 	}
 
-	if err := analyzeCoverageProfile(*coverageFilePath, *sortBy, *minPercent); err != nil {
-		fmt.Fprintf(os.Stderr, "vortex cover: %v\n", err)
-		os.Exit(1)
-	}
+	return c.analyzeCoverageProfile(stdout, *coverageFilePath, *sortBy, *minPercent)
 }
 
-func analyzeCoverageProfile(coverageFilePath, sortBy string, minPercent float64) error {
+func (c *CmdCover) analyzeCoverageProfile(stdout io.Writer, coverageFilePath, sortBy string, minPercent float64) error {
 	file, err := os.Open(coverageFilePath)
 	if err != nil {
 		return fmt.Errorf(
@@ -87,7 +92,7 @@ func analyzeCoverageProfile(coverageFilePath, sortBy string, minPercent float64)
 		_ = scanner.Text()
 	}
 
-	mergedBlocks := make(map[string]*BlockInfo)
+	mergedBlocks := make(map[string]*blockInfo)
 
 	for scanner.Scan() {
 		line := scanner.Text()
@@ -99,20 +104,20 @@ func analyzeCoverageProfile(coverageFilePath, sortBy string, minPercent float64)
 
 		filePathAndRange := parts[0]
 
-		statements, err := strconv.Atoi(parts[1])
-		if err != nil {
+		statements, sErr := strconv.Atoi(parts[1])
+		if sErr != nil {
 			continue
 		}
 
-		hits, err := strconv.Atoi(parts[2])
-		if err != nil {
+		hits, hErr := strconv.Atoi(parts[2])
+		if hErr != nil {
 			continue
 		}
 
 		if block, exists := mergedBlocks[filePathAndRange]; exists {
 			block.Hits += hits
 		} else {
-			mergedBlocks[filePathAndRange] = &BlockInfo{
+			mergedBlocks[filePathAndRange] = &blockInfo{
 				Statements: statements,
 				Hits:       hits,
 			}
@@ -176,24 +181,24 @@ func analyzeCoverageProfile(coverageFilePath, sortBy string, minPercent float64)
 		}
 	}
 
-	fmt.Println("==========================================================================")
-	fmt.Println("           aoni Deduplicated Coverage Profile Analysis                    ")
-	fmt.Println("==========================================================================")
+	fmt.Fprintln(stdout, "==========================================================================")
+	fmt.Fprintln(stdout, "           aoni Deduplicated Coverage Profile Analysis                    ")
+	fmt.Fprintln(stdout, "==========================================================================")
 
 	totalStats := &CoverageStats{
 		TotalStatements:   generated.TotalStatements + examplesCmdTest.TotalStatements + coreHandwritten.TotalStatements,
 		CoveredStatements: generated.CoveredStatements + examplesCmdTest.CoveredStatements + coreHandwritten.CoveredStatements,
 	}
 
-	fmt.Printf("Total Codebase     : %6d / %6d statements (%6.2f%%)\n",
+	fmt.Fprintf(stdout, "Total Codebase     : %6d / %6d statements (%6.2f%%)\n",
 		totalStats.CoveredStatements, totalStats.TotalStatements, totalStats.Percent())
-	fmt.Printf("Generated Code     : %6d / %6d statements (%6.2f%%)\n",
+	fmt.Fprintf(stdout, "Generated Code     : %6d / %6d statements (%6.2f%%)\n",
 		generated.CoveredStatements, generated.TotalStatements, generated.Percent())
-	fmt.Printf("Examples/Cmd/Tests : %6d / %6d statements (%6.2f%%)\n",
+	fmt.Fprintf(stdout, "Examples/Cmd/Tests : %6d / %6d statements (%6.2f%%)\n",
 		examplesCmdTest.CoveredStatements, examplesCmdTest.TotalStatements, examplesCmdTest.Percent())
-	fmt.Printf("Core Library       : %6d / %6d statements (%6.2f%%)\n",
+	fmt.Fprintf(stdout, "Core Library       : %6d / %6d statements (%6.2f%%)\n",
 		coreHandwritten.CoveredStatements, coreHandwritten.TotalStatements, coreHandwritten.Percent())
-	fmt.Println("--------------------------------------------------------------------------")
+	fmt.Fprintln(stdout, "--------------------------------------------------------------------------")
 
 	rows := make([]pkgRow, 0, len(packageStats))
 	for name, stats := range packageStats {
@@ -214,15 +219,15 @@ func analyzeCoverageProfile(coverageFilePath, sortBy string, minPercent float64)
 		})
 	}
 
-	fmt.Printf("%-52s %10s %10s\n", "Package (Core Handwritten)", "Coverage", "Statements")
-	fmt.Println(strings.Repeat("-", 74))
+	fmt.Fprintf(stdout, "%-52s %10s %10s\n", "Package (Core Handwritten)", "Coverage", "Statements")
+	fmt.Fprintln(stdout, strings.Repeat("-", 74))
 
 	for _, r := range rows {
-		fmt.Printf("%-52s %9.2f%% (%d/%d)\n",
+		fmt.Fprintf(stdout, "%-52s %9.2f%% (%d/%d)\n",
 			r.Name, r.Stats.Percent(), r.Stats.CoveredStatements, r.Stats.TotalStatements)
 	}
 
-	fmt.Println("==========================================================================")
+	fmt.Fprintln(stdout, "==========================================================================")
 
 	if minPercent > 0 && coreHandwritten.Percent() < minPercent {
 		return fmt.Errorf("core coverage (%.2f%%) is below required threshold (%.2f%%)",

@@ -5,33 +5,60 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"go/parser"
 	"go/token"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
 
+	"github.com/lemon4ksan/aoni/internal/codegen/builder"
 	"github.com/lemon4ksan/aoni/internal/codegen/lint"
 	codeparser "github.com/lemon4ksan/aoni/internal/codegen/parser"
 )
 
-func runCheck(args []string) {
-	checkCmd := flag.NewFlagSet("check", flag.ExitOnError)
-	fixFlag := checkCmd.Bool("fix", false, "Automatically apply safe, non-destructive fixes")
-	jsonFlag := checkCmd.Bool("json", false, "Output diagnostics as JSON")
-	disableFlag := checkCmd.String("disable", "", "Comma-separated list of rule IDs/names to disable")
-	enableFlag := checkCmd.String("enable", "", "Comma-separated list of rule IDs/names to enable")
-	strictFlag := checkCmd.Bool("strict", false, "Treat warnings as errors (exit 1)")
+// CmdCheck performs static contract validation and applies automated fixes.
+type CmdCheck struct{}
 
-	_ = checkCmd.Parse(args)
-	files := collectInputFiles("", checkCmd.Args())
+func (c *CmdCheck) Name() string      { return "check" }
+func (c *CmdCheck) Aliases() []string { return []string{"lint", "inspect"} }
+func (c *CmdCheck) Synopsis() string {
+	return "Static contract linter and diagnostic inspector (supports --fix)"
+}
+func (c *CmdCheck) Usage() string { return "vortex check [flags] [packages/files...]" }
 
+func (c *CmdCheck) Run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
+	fs := flag.NewFlagSet("check", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+
+	var (
+		fixFlag     = fs.Bool("fix", false, "Automatically apply safe, non-destructive fixes")
+		jsonFlag    = fs.Bool("json", false, "Output diagnostics as JSON")
+		disableFlag = fs.String("disable", "", "Comma-separated list of rule IDs/names to disable")
+		enableFlag  = fs.String("enable", "", "Comma-separated list of rule IDs/names to enable")
+		strictFlag  = fs.Bool("strict", false, "Treat warnings as errors")
+	)
+
+	fs.Usage = func() {
+		fmt.Fprintf(stderr, "vortex check — Static Contract Linter & Diagnostic Inspector\n\n")
+		fmt.Fprintf(stderr, "Usage:\n")
+		fmt.Fprintf(stderr, "  vortex check [-fix] [-json] [-disable=rules] [-enable=rules] [-strict] [paths...]\n\n")
+		fmt.Fprintf(stderr, "Flags:\n")
+		fs.PrintDefaults()
+	}
+
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+
+	files := builder.CollectInputFiles("", fs.Args())
 	if len(files) == 0 {
-		fmt.Fprintf(os.Stderr, "vortex check: no Go source files found to inspect\n")
-		os.Exit(1)
+		return errors.New("no Go source files found to inspect")
 	}
 
 	reg := lint.DefaultRegistry()
@@ -50,6 +77,12 @@ func runCheck(args []string) {
 	var reports []*lint.Report
 
 	for _, file := range files {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		default:
+		}
+
 		if abs, err := filepath.Abs(file); err == nil {
 			file = abs
 		}
@@ -70,7 +103,8 @@ func runCheck(args []string) {
 		}
 
 		hasTargets := len(root.Services) > 0 || len(root.Tuples) > 0 || len(root.Bitpacks) > 0 ||
-			len(root.UnrecognizedDirectives) > 0
+			len(root.UnrecognizedDirectives) > 0 || len(root.Unions) > 0
+
 		if !hasTargets {
 			for _, st := range root.Structs {
 				if st.GenValueEncoder {
@@ -95,7 +129,7 @@ func runCheck(args []string) {
 
 		report, err := engine.Run(pass)
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "vortex check: error checking %s: %v\n", file, err)
+			fmt.Fprintf(stderr, "vortex check: error checking %s: %v\n", file, err)
 			continue
 		}
 
@@ -104,13 +138,12 @@ func runCheck(args []string) {
 
 	merged := lint.MergeReports(reports...)
 
-	// Auto-fix execution if requested
 	if *fixFlag && merged.FixableCount() > 0 {
 		applied, err := merged.ApplyFixes()
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "vortex check: error applying fixes: %v\n", err)
+			fmt.Fprintf(stderr, "vortex check: error applying fixes: %v\n", err)
 		} else {
-			fmt.Fprintf(os.Stderr, "✔ Successfully applied %d safe automated fix(es)\n\n", applied)
+			fmt.Fprintf(stdout, "✔ Successfully applied %d safe automated fix(es)\n\n", applied)
 		}
 
 		var remaining []lint.Diagnostic
@@ -123,9 +156,8 @@ func runCheck(args []string) {
 		merged.Diagnostics = remaining
 	}
 
-	// Output
 	if *jsonFlag {
-		enc := json.NewEncoder(os.Stdout)
+		enc := json.NewEncoder(stdout)
 		enc.SetIndent("", "  ")
 		_ = enc.Encode(merged)
 	} else {
@@ -134,10 +166,12 @@ func runCheck(args []string) {
 			targetSummary = files[0]
 		}
 
-		lint.FormatReport(os.Stdout, targetSummary, merged)
+		lint.FormatReport(stdout, targetSummary, merged)
 	}
 
 	if merged.Errors() > 0 || (*strictFlag && merged.Warnings() > 0) {
-		os.Exit(1)
+		return fmt.Errorf("contract check failed with %d error(s), %d warning(s)", merged.Errors(), merged.Warnings())
 	}
+
+	return nil
 }

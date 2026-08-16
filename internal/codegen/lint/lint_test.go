@@ -243,7 +243,7 @@ func TestRules_StaleCodegen_AppliesFix(t *testing.T) {
 						Params: []*ir.ParamIR{
 							{GoName: "ctx", Location: ir.LocContext},
 						},
-						Return: &ir.ReturnIR{IsVoid: true},
+						Return: &ir.ReturnIR{SuccessType: ir.GoTypeIR{Name: "error"}},
 					},
 				},
 			},
@@ -428,8 +428,168 @@ func TestRules_InvalidBitpack_DetectsErrors(t *testing.T) {
 	diags := rule.Run(pass)
 
 	require.Len(t, diags, 2)
-	require.Equal(t, "E006", diags[0].RuleID)
+	require.Equal(t, "E012", diags[0].RuleID)
 	require.Contains(t, diags[0].Message, "Bool field Flag must have bit width 1")
-	require.Equal(t, "E006", diags[1].RuleID)
+	require.Equal(t, "E012", diags[1].RuleID)
 	require.Contains(t, diags[1].Message, "exceeds maximum type bit width 8")
+}
+
+func TestRules_ProtocolErrors_Detection(t *testing.T) {
+	// E007: illegal body on GET
+	rootIR := &ir.RootIR{
+		Services: []*ir.ServiceIR{
+			{
+				Name: "TestService",
+				Methods: []*ir.MethodIR{
+					{
+						Name:       "GetWithBody",
+						HTTPMethod: "GET",
+						Params: []*ir.ParamIR{
+							{GoName: "Payload", Location: ir.LocBody},
+						},
+					},
+					{
+						Name:       "RouteA",
+						HTTPMethod: "POST",
+						Path:       &ir.PathIR{RawTemplate: "/orders"},
+					},
+					{
+						Name:       "RouteB",
+						HTTPMethod: "POST",
+						Path:       &ir.PathIR{RawTemplate: "/orders"},
+					},
+				},
+			},
+		},
+	}
+
+	pass := &lint.Pass{RootIR: rootIR, FilePath: "api.go"}
+
+	// Test E007
+	r7 := &lint.RuleIllegalBodyMethod{}
+	d7 := r7.Run(pass)
+	require.Len(t, d7, 1)
+	require.Equal(t, "E007", d7[0].RuleID)
+	require.Contains(t, d7[0].Message, "cannot have a request body")
+
+	// Test E010
+	r10 := &lint.RuleDuplicateRouteCollision{}
+	d10 := r10.Run(pass)
+	require.Len(t, d10, 1)
+	require.Equal(t, "E010", d10[0].RuleID)
+	require.Contains(t, d10[0].Message, "Duplicate route collision")
+}
+
+func TestRules_SecurityAndPerf_Detection(t *testing.T) {
+	rootIR := &ir.RootIR{
+		Services: []*ir.ServiceIR{
+			{
+				Name: "AuthService",
+				Methods: []*ir.MethodIR{
+					{
+						Name:       "Login",
+						HTTPMethod: "GET",
+						Params: []*ir.ParamIR{
+							{GoName: "Password", Location: ir.LocQuery, WireKey: "password"},
+							{
+								GoName:   "Tags",
+								Location: ir.LocQuery,
+								WireKey:  "tags",
+								GoType:   ir.GoTypeIR{IsSlice: true},
+							},
+						},
+					},
+					{
+						Name:       "Scrape",
+						HTTPMethod: "GET",
+						Extract:    &ir.ExtractIR{Kind: ir.ExtractBetween},
+					},
+				},
+			},
+		},
+	}
+
+	pass := &lint.Pass{RootIR: rootIR, FilePath: "auth.go"}
+
+	// S001: Sensitive query param
+	rS1 := &lint.RuleSensitiveQueryParam{}
+	dS1 := rS1.Run(pass)
+	require.Len(t, dS1, 1)
+	require.Equal(t, "S001", dS1[0].RuleID)
+	require.Contains(t, dS1[0].Message, "Sensitive credential")
+
+	// S004: Naked scraper
+	rS4 := &lint.RuleNakedScraperContract{}
+	dS4 := rS4.Run(pass)
+	require.Len(t, dS4, 1)
+	require.Equal(t, "S004", dS4[0].RuleID)
+	require.Contains(t, dS4[0].Message, "without service-level @persona")
+
+	// P003: Unformatted slice strategy
+	rP3 := &lint.RuleUnformattedSliceStrategy{}
+	dP3 := rP3.Run(pass)
+	require.Len(t, dP3, 1)
+	require.Equal(t, "P003", dP3[0].RuleID)
+}
+
+func TestRules_StyleAndHygiene_Detection(t *testing.T) {
+	rootIR := &ir.RootIR{
+		Services: []*ir.ServiceIR{
+			{
+				Name: "OrderService",
+				Methods: []*ir.MethodIR{
+					{
+						Name:          "DeleteOrder",
+						HTTPMethod:    "DELETE",
+						LocalCacheTTL: "5m", // Dead @cache on DELETE
+						UnwrapField:   "data",
+						Return:        &ir.ReturnIR{IsVoid: true}, // Dead @unwrap on void
+						ExpectStatus:  []int{999},                 // Invalid status code
+					},
+				},
+			},
+		},
+	}
+
+	pass := &lint.Pass{RootIR: rootIR, FilePath: "order.go"}
+
+	// W006: Dead directive
+	rW6 := &lint.RuleDeadDirective{}
+	dW6 := rW6.Run(pass)
+	require.Len(t, dW6, 2)
+	require.Equal(t, "W006", dW6[0].RuleID)
+	require.Equal(t, "W006", dW6[1].RuleID)
+
+	// W008: Invalid status code range
+	rW8 := &lint.RuleInvalidStatusCodeRange{}
+	dW8 := rW8.Run(pass)
+	require.Len(t, dW8, 1)
+	require.Equal(t, "W008", dW8[0].RuleID)
+	require.Contains(t, dW8[0].Message, "outside valid RFC range")
+}
+
+func TestRules_InvalidUnionStatus(t *testing.T) {
+	rootIR := &ir.RootIR{
+		PackageName: "orderapi",
+		Unions: []*ir.UnionIR{
+			{
+				Name: "EmptyUnion",
+			},
+			{
+				Name: "MissingTagsUnion",
+				Fields: []*ir.UnionFieldIR{
+					{GoName: "Order", Type: ir.GoTypeIR{Name: "*Order"}},
+				},
+			},
+		},
+	}
+
+	pass := &lint.Pass{RootIR: rootIR, FilePath: "order.go"}
+	rE14 := &lint.RuleInvalidUnionStatus{}
+	diags := rE14.Run(pass)
+	require.Len(t, diags, 2)
+	require.Equal(t, "E014", diags[0].RuleID)
+	require.Equal(t, "E014", diags[1].RuleID)
+	require.Contains(t, diags[0].Message, "has no variant fields")
+	require.Contains(t, diags[1].Message, "missing `status:\"...\"` tag")
 }

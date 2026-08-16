@@ -5,6 +5,8 @@
 package main
 
 import (
+	"context"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -17,8 +19,39 @@ import (
 	"github.com/lemon4ksan/aoni/internal/codegen/parser"
 )
 
-func runExport(args []string) {
-	fs := flag.NewFlagSet("vortex export", flag.ExitOnError)
+// CmdOAPI provides bidirectional OpenAPI 3.1 and Swagger schema import/export capabilities.
+type CmdOAPI struct{}
+
+func (c *CmdOAPI) Name() string      { return "oapi" }
+func (c *CmdOAPI) Aliases() []string { return []string{"openapi", "export", "import"} }
+func (c *CmdOAPI) Synopsis() string {
+	return "OpenAPI 3.1 bidirectional schema toolchain (import/export)"
+}
+func (c *CmdOAPI) Usage() string { return "vortex oapi [import|export] [flags]" }
+
+func (c *CmdOAPI) Run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
+	if len(args) == 0 {
+		return c.runExport(ctx, nil, stdout, stderr)
+	}
+
+	mode := args[0]
+	switch mode {
+	case "export":
+		return c.runExport(ctx, args[1:], stdout, stderr)
+	case "import":
+		return c.runImport(ctx, args[1:], stdout, stderr)
+	default:
+		if strings.HasPrefix(mode, "-") {
+			return c.runExport(ctx, args, stdout, stderr)
+		}
+
+		return fmt.Errorf("unknown oapi command %q. Valid modes: 'import', 'export'", mode)
+	}
+}
+
+func (c *CmdOAPI) runExport(_ context.Context, args []string, stdout, stderr io.Writer) error {
+	fs := flag.NewFlagSet("oapi export", flag.ContinueOnError)
+	fs.SetOutput(stderr)
 
 	var (
 		file        = fs.String("file", "api.go", "Path to Go source file containing @aoni:service contract")
@@ -31,40 +64,34 @@ func runExport(args []string) {
 	)
 
 	fs.Usage = func() {
-		fmt.Fprintf(os.Stderr, "vortex export — Export Aoni Declarative Contract into OpenAPI 3.1 Spec\n\n")
-		fmt.Fprintf(os.Stderr, "Usage:\n")
-		fmt.Fprintf(os.Stderr, "  vortex export -file=<api.go> [-service=Client] [-out=openapi.json] [-yaml]\n\n")
-		fmt.Fprintf(os.Stderr, "Flags:\n")
+		fmt.Fprintf(stderr, "vortex oapi export — Export Aoni Contract to OpenAPI 3.1 Spec\n\n")
+		fmt.Fprintf(stderr, "Usage:\n")
+		fmt.Fprintf(stderr, "  vortex oapi export -file=<api.go> [-service=Client] [-out=openapi.json] [-yaml]\n\n")
+		fmt.Fprintf(stderr, "Flags:\n")
 		fs.PrintDefaults()
-		fmt.Fprintf(os.Stderr, "\nExamples:\n")
-		fmt.Fprintf(os.Stderr, "  vortex export -file=pkg/services/mannco/api.go -out=openapi.json\n")
-		fmt.Fprintf(os.Stderr, "  vortex export -file=pkg/api/api.go -service=Client -out=openapi.yaml -yaml\n")
 	}
 
 	if err := fs.Parse(args); err != nil {
-		os.Exit(1)
+		return err
 	}
 
 	if *file == "" {
-		fmt.Fprintf(os.Stderr, "vortex export: -file flag is required (e.g. -file=api.go)\n")
-		os.Exit(1)
+		return errors.New("vortex oapi export: -file flag is required (e.g. -file=api.go)")
 	}
 
 	p := parser.NewParser()
 
 	var root *ir.RootIR
 
-	if *file == "-" || *file == "" {
+	if *file == "-" {
 		src, err := io.ReadAll(os.Stdin)
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "vortex export: %v\n", err)
-			os.Exit(1)
+			return fmt.Errorf("reading stdin: %w", err)
 		}
 
 		root, err = p.ParseSource("contract.go", src)
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "vortex export: failed parsing stdin: %v\n", err)
-			os.Exit(1)
+			return fmt.Errorf("parsing stdin: %w", err)
 		}
 	} else {
 		dir := filepath.Dir(*file)
@@ -75,8 +102,7 @@ func runExport(args []string) {
 		} else {
 			root, err = p.ParseFile(*file)
 			if err != nil {
-				fmt.Fprintf(os.Stderr, "vortex export: failed parsing %s: %v\n", *file, err)
-				os.Exit(1)
+				return fmt.Errorf("parsing %s: %w", *file, err)
 			}
 		}
 	}
@@ -91,38 +117,39 @@ func runExport(args []string) {
 
 	out, err := openapi.ExportOpenAPI(root, exportCfg)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "vortex export: failed exporting OpenAPI spec: %v\n", err)
-		os.Exit(1)
+		return fmt.Errorf("exporting OpenAPI spec: %w", err)
 	}
 
 	if *outFile != "" && *outFile != "-" {
 		if err := os.WriteFile(*outFile, out, 0o600); err != nil {
-			fmt.Fprintf(os.Stderr, "vortex export: failed writing %s: %v\n", *outFile, err)
-			os.Exit(1)
+			return fmt.Errorf("writing %s: %w", *outFile, err)
 		}
 
-		fmt.Printf("✔ Exported OpenAPI 3.1 specification to %s (%d bytes)\n", *outFile, len(out))
+		fmt.Fprintf(stdout, "✔ Exported OpenAPI 3.1 specification to %s (%d bytes)\n", *outFile, len(out))
 
-		return
+		return nil
 	}
 
-	fmt.Print(string(out))
+	fmt.Fprint(stdout, string(out))
+
+	return nil
 }
 
-func runImport(args []string) {
-	fs := flag.NewFlagSet("vortex import", flag.ExitOnError)
+func (c *CmdOAPI) runImport(_ context.Context, args []string, stdout, stderr io.Writer) error {
+	fs := flag.NewFlagSet("oapi import", flag.ContinueOnError)
+	fs.SetOutput(stderr)
 
 	var (
-		specFile       = fs.String("spec", "", "Path to OpenAPI specification file (YAML or JSON, or - for stdin)")
+		specFile       = fs.String("spec", "", "Path to OpenAPI specification file (YAML/JSON, or - for stdin)")
 		outFile        = fs.String("out", "api.go", "Output Go contract file path")
-		splitModels    = fs.Bool("split", false, "Split generated code into api.go (interface) and models.go (DTOs)")
+		splitModels    = fs.Bool("split", false, "Split generated code into api.go and models.go")
 		pkgName        = fs.String("pkg", "api", "Target Go package name")
 		serviceName    = fs.String("service", "API", "Target service interface name")
 		baseURL        = fs.String("base-url", "", "Override API BaseURL")
 		skipDeprecated = fs.Bool("skip-deprecated", false, "Skip deprecated OpenAPI operations")
-		includePaths   stringSliceFlag
-		excludePaths   stringSliceFlag
-		typeMaps       stringSliceFlag
+		includePaths   StringSliceFlag
+		excludePaths   StringSliceFlag
+		typeMaps       StringSliceFlag
 	)
 
 	fs.Var(&includePaths, "include-path", "Regex pattern to filter included endpoint paths (repeatable)")
@@ -130,23 +157,19 @@ func runImport(args []string) {
 	fs.Var(&typeMaps, "type-map", "Custom type mappings (e.g. -type-map=steam_id=id.ID)")
 
 	fs.Usage = func() {
-		fmt.Fprintf(os.Stderr, "vortex import — Import OpenAPI 3.1/Swagger into Aoni Declarative Contract DSL\n\n")
-		fmt.Fprintf(os.Stderr, "Usage:\n")
-		fmt.Fprintf(os.Stderr, "  vortex import -spec=<swagger.json> [-out=api.go] [-split] [-pkg=api]\n\n")
-		fmt.Fprintf(os.Stderr, "Flags:\n")
+		fmt.Fprintf(stderr, "vortex oapi import — Import OpenAPI 3.1/Swagger into Aoni Declarative Contract DSL\n\n")
+		fmt.Fprintf(stderr, "Usage:\n")
+		fmt.Fprintf(stderr, "  vortex oapi import -spec=<swagger.json> [-out=api.go] [-split] [-pkg=api]\n\n")
+		fmt.Fprintf(stderr, "Flags:\n")
 		fs.PrintDefaults()
-		fmt.Fprintf(os.Stderr, "\nExamples:\n")
-		fmt.Fprintf(os.Stderr, "  vortex import -spec=swagger.json -pkg=bptf -out=pkg/services/bptf/api.go -split\n")
 	}
 
 	if err := fs.Parse(args); err != nil {
-		os.Exit(1)
+		return err
 	}
 
 	if *specFile == "" {
-		fmt.Fprintf(os.Stderr, "vortex import: -spec flag is required (e.g. -spec=swagger.json)\n\n")
-		fs.Usage()
-		os.Exit(1)
+		return errors.New("vortex oapi import: -spec flag is required (e.g. -spec=swagger.json)")
 	}
 
 	var specData []byte
@@ -155,15 +178,13 @@ func runImport(args []string) {
 
 		specData, err = io.ReadAll(os.Stdin)
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "vortex import: failed reading stdin: %v\n", err)
-			os.Exit(1)
+			return fmt.Errorf("reading stdin: %w", err)
 		}
 	}
 
 	doc, err := openapi.LoadSpec(*specFile, specData)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "vortex import: %v\n", err)
-		os.Exit(1)
+		return fmt.Errorf("loading spec: %w", err)
 	}
 
 	tm := make(map[string]string)
@@ -190,8 +211,7 @@ func runImport(args []string) {
 	if *splitModels {
 		apiSrc, modelsSrc, err := openapi.GenerateSplitContract(doc, cfg)
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "vortex import: failed generating contract: %v\n", err)
-			os.Exit(1)
+			return fmt.Errorf("generating split contract: %w", err)
 		}
 
 		outDir := filepath.Dir(*outFile)
@@ -203,40 +223,38 @@ func runImport(args []string) {
 		modelsPath := filepath.Join(outDir, "models.go")
 
 		if err := os.WriteFile(apiPath, apiSrc, 0o600); err != nil {
-			fmt.Fprintf(os.Stderr, "vortex import: failed writing %s: %v\n", apiPath, err)
-			os.Exit(1)
+			return fmt.Errorf("writing %s: %w", apiPath, err)
 		}
 
-		fmt.Printf("✔ Generated Aoni API contract in %s (%d bytes)\n", apiPath, len(apiSrc))
+		fmt.Fprintf(stdout, "✔ Generated Aoni API contract in %s (%d bytes)\n", apiPath, len(apiSrc))
 
 		if len(modelsSrc) > 0 {
 			if err := os.WriteFile(modelsPath, modelsSrc, 0o600); err != nil {
-				fmt.Fprintf(os.Stderr, "vortex import: failed writing %s: %v\n", modelsPath, err)
-				os.Exit(1)
+				return fmt.Errorf("writing %s: %w", modelsPath, err)
 			}
 
-			fmt.Printf("✔ Generated Aoni models in %s (%d bytes)\n", modelsPath, len(modelsSrc))
+			fmt.Fprintf(stdout, "✔ Generated Aoni models in %s (%d bytes)\n", modelsPath, len(modelsSrc))
 		}
 
-		return
+		return nil
 	}
 
 	src, err := openapi.GenerateContract(doc, cfg)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "vortex import: failed generating contract: %v\n", err)
-		os.Exit(1)
+		return fmt.Errorf("generating contract: %w", err)
 	}
 
 	if *outFile != "" && *outFile != "-" {
 		if err := os.WriteFile(*outFile, src, 0o600); err != nil {
-			fmt.Fprintf(os.Stderr, "vortex import: failed writing output file %s: %v\n", *outFile, err)
-			os.Exit(1)
+			return fmt.Errorf("writing output file %s: %w", *outFile, err)
 		}
 
-		fmt.Printf("✔ Generated Aoni contract in %s (%d bytes)\n", *outFile, len(src))
+		fmt.Fprintf(stdout, "✔ Generated Aoni contract in %s (%d bytes)\n", *outFile, len(src))
 
-		return
+		return nil
 	}
 
-	fmt.Print(string(src))
+	fmt.Fprint(stdout, string(src))
+
+	return nil
 }

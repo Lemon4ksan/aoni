@@ -3,19 +3,27 @@
 `vortex` is the official AST-driven toolchain, code generation engine, and static contract inspector for Go that compiles declarative API contracts into zero-allocation (`0 B/op`), type-safe, Chromium-resilient HTTP/RPC network clients powered by the `aoni` networking engine.
 
 > **Engineering Manifesto**:
-> _«Как только байты должны покинуть одну машину и попасть на другую — это произойдет с 0 аллокаций, на максимальной скорости кремния, без рассинхрона типов и без шанса быть заблокированным WAF»._
+> _«As soon as bytes need to leave one machine and get to another, this will happen with 0 allocations, at maximum silicon speed, without type desync and without the chance of being blocked by a WAF»._
 
 ## 1. Core Architectural Pillars
 
-1. **Strict Separation of Concerns**:
+1. **The Iron Invariant (1 Method = Exactly 1 Network Operation)**:
+   - **No Hidden Business Logic**: Each interface method maps deterministically to **exactly 1 network request or 1 persistent session**. Vortex handles strictly transport, serialization, wire protocol framing, and response decoding.
+   - **Pure Transport Scope**:
+     1. **Dynamic Host Authority (RFC 3986)**: `https://{tenant}.slack.com/api` or `https://{bucket}.s3.amazonaws.com` zero-alloc URL synthesis.
+     2. **Multi-Status Wire Unions**: Strict typed decoding of status-dependent bodies (e.g. `200 OK -> *Order`, `202 Accepted -> *QueuedTask`) without `any` boxing.
+     3. **Deep Query & Matrix Serialization (RFC 6570 / OpenAPI 3.1)**: Stack-allocated `deepObject` (`filter[id]=1`), `pipe`/`space`/`bracket`, and `matrix` parameter packing.
+     4. **Pre-Flight Wire Signatures**: Deterministic HMAC / SigV4 header canonicalization before wire transmission without extraneous network calls.
+     5. **RFC 9110 Byte Ranges**: Declarative single-request chunk fetching (`Range: bytes=0-1048576`).
+2. **Strict Separation of Concerns**:
    - **Contract (DSL Directives)**: Defines the remote server's interface (method, path, headers, payloads, signatures).
    - **Infrastructure (`aoni.ClientOption`)**: Configures connection pools, TLS fingerprints, DNS resolvers, and proxy rotators.
    - **Dynamic Context (`aoni.RequestModifier`)**: Injects per-call parameters, runtime cancellation, and trace spans.
-2. **Zero-Allocation Execution Path**:
+3. **Zero-Allocation Execution Path**:
    - Compiles static routes, stack buffers (`[256]byte`), and direct type encoders (`strconv.AppendInt`, `urlutil.AppendQueryEscapeString`) without interface boxing or reflection.
-3. **Standard-Library & Tooling Compliance**:
+4. **Standard-Library & Tooling Compliance**:
    - Directives are written as standard Go doc comments. All interface definitions compile as valid Go without pre-processing.
-4. **Contract Integrity & Static Linting**:
+5. **Contract Integrity & Static Linting**:
    - Built-in pluggable contract linter (`vortex check`) that guarantees drift prevention between interfaces and generated code, verifies type safety, and provides safe automated fixes (`--fix`).
 
 ## 2. Formal Grammar (EBNF)
@@ -210,19 +218,51 @@ Vortex includes a static analysis and diagnostic framework (`internal/codegen/li
 
 ### Standard Rule Suite
 
+#### 1. Errors (`E`) — Compiler Invariants & RFC Standards
 | Rule ID | Rule Name | Category | Severity | Fixable? | Description |
 | :--- | :--- | :--- | :--- | :---: | :--- |
 | `E001` | `stale-codegen` | `Codegen` | `ERROR` | ✅ Yes | Target `*.gen.go` is missing or out-of-sync with interface AST |
 | `E002` | `unmatched-path` | `Correctness` | `ERROR` | ❌ No | URL path `{variable}` has no matching parameter in method signature |
 | `E003` | `missing-http-method` | `Correctness` | `ERROR` | ❌ No | Method is missing `@get`, `@post`, etc. directive |
 | `E004` | `missing-context` | `Correctness` | `ERROR` | ❌ No | First method parameter is not `context.Context` |
-| `E005` | `unrecognized-directive` | `Correctness` | `ERROR` | ❌ No | Unknown or misspelled `@aoni` directive |
-| `E006` | `invalid-bitpack` | `Correctness` | `ERROR` | ❌ No | Bitpack struct has invalid bit widths or type overflows |
-| `W001` | `param-lifting` | `Style` | `WARN` | ❌ No | Parameter repeated across $\ge 4$ methods (suggests lifting to service scope) |
-| `W002` | `deprecated-alias` | `Style` | `WARN` | ✅ Yes | Deprecated directive alias used (e.g., `@zstd_decompress` $\to$ `@zstd`) |
+| `E005` | `unrecognized-directive` | `Correctness` | `ERROR` | ❌ No | Unknown or misspelled directive |
+| `E006` | `conflicting-payload` | `Correctness` | `ERROR` | ❌ No | Mutually exclusive body payload formats specified |
+| `E007` | `illegal-body-method` | `Correctness` | `ERROR` | ❌ No | Body payload specified on GET/HEAD method (RFC 9110 violation) |
+| `E008` | `missing-error-return` | `Correctness` | `ERROR` | ❌ No | Method signature does not return `error` |
+| `E009` | `unbound-header-variable` | `Correctness` | `ERROR` | ❌ No | Dynamic header template `{var}` not found in parameters or injections |
+| `E010` | `duplicate-route-collision` | `Correctness` | `ERROR` | ❌ No | Two methods in the same service share identical HTTP verb and path |
+| `E011` | `invalid-check-field` | `Correctness` | `ERROR` | ❌ No | Field in `@check` assertion does not exist on response model |
+| `E012` | `invalid-bitpack` | `Correctness` | `ERROR` | ❌ No | Bitpack struct has invalid bit widths or type overflows |
+| `E013` | `shadowed-wire-name` | `Correctness` | `ERROR` | ❌ No | Parameter wire keys collide under active casing strategy |
+
+#### 2. Performance (`P`) — Zero-Alloc & Memory Safety
+| Rule ID | Rule Name | Category | Severity | Fixable? | Description |
+| :--- | :--- | :--- | :--- | :---: | :--- |
+| `P001` | `missing-dto-encoder` | `Performance` | `WARN` | ✅ Yes | Struct payload lacks compile-time `@aoni:dto` encoder (auto-inserts `// @aoni:dto`) |
+| `P002` | `any-param-boxing` | `Performance` | `WARN` | ❌ No | Parameter typed as `any` causing heap boxing allocation |
+| `P003` | `unformatted-slice-strategy` | `Performance` | `WARN` | ✅ Yes | Slice query parameter lacks `@format` (auto-inserts `// @format comma`) |
+| `P004` | `oversized-stack-frame` | `Performance` | `WARN` | ❌ No | Static buffer size > 2KB stack threshold |
+| `P005` | `missing-coalesce-on-heavy-get` | `Performance` | `WARN` | ❌ No | Heavy GET read model without `@coalesce` deduplication |
+
+#### 3. Security (`S`) — Credentials & Stealth Protection
+| Rule ID | Rule Name | Category | Severity | Fixable? | Description |
+| :--- | :--- | :--- | :--- | :---: | :--- |
+| `S001` | `sensitive-query-param` | `Security` | `WARN` | ❌ No | Sensitive credential passed in URL query string (leaks in logs/proxies) |
+| `S002` | `hardcoded-signing-secret` | `Security` | `WARN` | ✅ Yes | Plaintext signing secret hardcoded in directive (auto-replaces with `key_env`) |
+| `S003` | `header-crlf-injection-risk` | `Security` | `WARN` | ❌ No | Dynamic header template variable without escaping filter |
+| `S004` | `naked-scraper-contract` | `Security` | `WARN` | ❌ No | Web scraping `@extract` used without browser persona stealth profile |
+
+#### 4. Style & Hygiene (`W`) — Contract Clarity & Format
+| Rule ID | Rule Name | Category | Severity | Fixable? | Description |
+| :--- | :--- | :--- | :--- | :---: | :--- |
+| `W001` | `param-lifting` | `Style` | `WARN` | ❌ No | Parameter repeated across $\ge 4$ methods (suggests service-level parameter) |
+| `W002` | `deprecated-alias` | `Style` | `WARN` | ✅ Yes | Deprecated directive or alias used (auto-normalizes to canonical form) |
 | `W003` | `http-verb-mismatch` | `Style` | `WARN` | ❌ No | Read-only prefix (`Get...`, `List...`) annotated with `@post` |
 | `W004` | `redundant-tag` | `Style` | `WARN` | ✅ Yes | Redundant `@query` or `@field` tag matching default casing inference |
-| `W005` | `canonical-format` | `Style` | `WARN` | ✅ Yes | Directives in doc comments not following canonical ordering |
+| `W005` | `canonical-format` | `Style` | `WARN` | ✅ Yes | Directives not in canonical hierarchy (auto-reorders doc comments) |
+| `W006` | `dead-directive` | `Style` | `WARN` | ✅ Yes | Ineffective or orphaned directive (e.g. `@unwrap` on void, `@cache` on mutation) |
+| `W007` | `unused-param` | `Style` | `WARN` | ❌ No | Method parameter not bound to any wire element |
+| `W008` | `invalid-status-code-range` | `Style` | `WARN` | ❌ No | HTTP status code outside standard RFC range 100–599 |
 
 ### Inline Suppression Directives
 

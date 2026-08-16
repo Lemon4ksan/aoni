@@ -11,11 +11,15 @@ import (
 	"github.com/lemon4ksan/aoni/internal/codegen/ir"
 )
 
-// emitBitpack generates zero-allocation, register-optimized binary bitfield packing methods.
-func (e *Emitter) emitBitpack(buf *bytes.Buffer, bp *ir.BitpackIR) {
+// // emitBitpack generates zero-allocation, register-optimized binary bitfield packing methods.
+func emitBitpack(buf *bytes.Buffer, tracker *ImportTracker, bp *ir.BitpackIR) {
 	if bp == nil {
 		return
 	}
+
+	tracker.Add("encoding/binary")
+	tracker.Add("errors")
+	tracker.Add("fmt")
 
 	name := bp.Name
 	totalBits := bp.TotalBits
@@ -42,9 +46,9 @@ func (e *Emitter) emitBitpack(buf *bytes.Buffer, bp *ir.BitpackIR) {
 	}
 
 	if totalBits <= 64 {
-		e.emitBitpackSingleWord(buf, bp, endianOrder, hasBools)
+		emitBitpackSingleWord(buf, bp, endianOrder, hasBools)
 	} else {
-		e.emitBitpackMultiWord(buf, bp, endianOrder, hasBools)
+		emitBitpackMultiWord(buf, bp, endianOrder, hasBools)
 	}
 
 	// Pack(dst []byte) ([]byte, error)
@@ -94,10 +98,10 @@ func (e *Emitter) emitBitpack(buf *bytes.Buffer, bp *ir.BitpackIR) {
 	fmt.Fprintf(buf, "}\n\n")
 
 	// Batch Slice Pack and Unpack
-	e.emitBitpackBatchSlice(buf, bp)
+	emitBitpackBatchSlice(buf, bp)
 }
 
-func (e *Emitter) emitBitpackSingleWord(buf *bytes.Buffer, bp *ir.BitpackIR, endianOrder string, hasBools bool) {
+func emitBitpackSingleWord(buf *bytes.Buffer, bp *ir.BitpackIR, endianOrder string, hasBools bool) {
 	name := bp.Name
 	totalBytes := bp.TotalBytes
 
@@ -245,7 +249,7 @@ func (e *Emitter) emitBitpackSingleWord(buf *bytes.Buffer, bp *ir.BitpackIR, end
 	fmt.Fprintf(buf, "}\n\n")
 }
 
-func (e *Emitter) emitBitpackMultiWord(buf *bytes.Buffer, bp *ir.BitpackIR, endianOrder string, hasBools bool) {
+func emitBitpackMultiWord(buf *bytes.Buffer, bp *ir.BitpackIR, endianOrder string, hasBools bool) {
 	name := bp.Name
 	totalBytes := bp.TotalBytes
 	numWords := (bp.TotalBits + 63) / 64
@@ -422,7 +426,7 @@ func (e *Emitter) emitBitpackMultiWord(buf *bytes.Buffer, bp *ir.BitpackIR, endi
 	fmt.Fprintf(buf, "}\n\n")
 }
 
-func (e *Emitter) emitBitpackBatchSlice(buf *bytes.Buffer, bp *ir.BitpackIR) {
+func emitBitpackBatchSlice(buf *bytes.Buffer, bp *ir.BitpackIR) {
 	name := bp.Name
 
 	// Pack<Name>Slice

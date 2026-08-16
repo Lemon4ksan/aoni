@@ -32,20 +32,44 @@ func NewRegistry() *Registry {
 func DefaultRegistry() *Registry {
 	reg := NewRegistry()
 	reg.Register(
-		// Error rules
+		// 1. Errors (E) - Compiler invariants & RFC standards
 		&RuleStaleCodegen{},
 		&RuleUnmatchedPath{},
 		&RuleMissingHTTPMethod{},
 		&RuleMissingContext{},
 		&RuleUnrecognizedDirective{},
+		&RuleConflictingPayload{},
+		&RuleIllegalBodyMethod{},
+		&RuleMissingErrorReturn{},
+		&RuleUnboundHeaderVariable{},
+		&RuleDuplicateRouteCollision{},
+		&RuleInvalidCheckField{},
 		&RuleInvalidBitpack{},
+		&RuleShadowedWireName{},
+		&RuleInvalidUnionStatus{},
 
-		// Warning & suggestion rules
+		// 2. Performance (P) - Zero-alloc & stack safety
+		&RuleMissingDTOEncoder{},
+		&RuleAnyParamBoxing{},
+		&RuleUnformattedSliceStrategy{},
+		&RuleOversizedStackFrame{},
+		&RuleMissingCoalesceOnHeavyGet{},
+
+		// 3. Security (S) - Secrets & stealth protection
+		&RuleSensitiveQueryParam{},
+		&RuleHardcodedSigningSecret{},
+		&RuleHeaderCRLFInjectionRisk{},
+		&RuleNakedScraperContract{},
+
+		// 4. Style / Hygiene (W) - Contract clarity & format
 		&RuleParamLifting{},
 		&RuleDeprecatedAlias{},
 		&RuleHTTPVerbMismatch{},
 		&RuleRedundantTag{},
 		&RuleCanonicalFormat{},
+		&RuleDeadDirective{},
+		&RuleUnusedParam{},
+		&RuleInvalidStatusCodeRange{},
 	)
 
 	return reg
