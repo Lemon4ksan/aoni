@@ -454,8 +454,8 @@ func CollectInputFiles(fileFlag string, args []string, opts ...CollectOptions) [
 				baseDir = "."
 			}
 
-			// Guard: refuse unbounded scan on raw system root directory
-			if isSystemRoot(baseDir) {
+			// Guard: refuse unbounded scan on raw system root directory or user home directory
+			if isUserHomeOrSystemDir(baseDir) {
 				continue
 			}
 
@@ -502,7 +502,7 @@ func CollectInputFiles(fileFlag string, args []string, opts ...CollectOptions) [
 		}
 
 		if fi.IsDir() {
-			if isSystemRoot(target) {
+			if isUserHomeOrSystemDir(target) {
 				continue
 			}
 
@@ -610,13 +610,32 @@ func isSystemRoot(path string) bool {
 }
 
 func isIgnoredDirectory(name string) bool {
+	if strings.HasPrefix(name, ".") && name != "." && name != ".." {
+		return true
+	}
+
 	switch strings.ToLower(name) {
-	case ".git", "vendor", "node_modules", ".system_generated", ".vortex",
-		".idea", ".vscode", "appdata", "windows", "program files", "program files (x86)",
-		"$recycle.bin", "system volume information", "tmp", "temp", ".cache", ".npm",
-		".cargo", ".rustup", ".docker", ".gradle", ".m2", ".local", "dist", "build", "out", "testdata":
+	case "vendor", "node_modules", "testdata", "appdata", "windows",
+		"program files", "program files (x86)", "$recycle.bin", "system volume information",
+		"tmp", "temp", "dist", "build", "out", "bin", "obj", "desktop", "documents",
+		"downloads", "pictures", "videos", "music", "onedrive", "virtualbox vms", "scoop":
 		return true
 	default:
 		return false
 	}
+}
+
+func isUserHomeOrSystemDir(path string) bool {
+	if isSystemRoot(path) {
+		return true
+	}
+
+	clean := filepath.Clean(path)
+
+	home, err := os.UserHomeDir()
+	if err == nil && home != "" && clean == filepath.Clean(home) {
+		return true
+	}
+
+	return false
 }

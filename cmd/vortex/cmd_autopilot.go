@@ -52,29 +52,25 @@ func (c *CmdAutoPilot) Run(ctx context.Context, _ []string, stdout, stderr io.Wr
 		return workCmd.runForward(ctx, "autopilot", nil, stdout, stderr)
 	}
 
-	rootDir, _, _ := project.FindRoot(cwd)
+	rootDir, configPath, _ := project.FindRoot(cwd)
 	cfg, _ := project.Load(rootDir)
 
-	var contractFiles []string
+	var activeContracts []string
 	if cfg != nil && len(cfg.Contracts) > 0 {
 		for _, ct := range cfg.Contracts {
-			contractFiles = append(contractFiles, filepath.Join(rootDir, ct.File))
+			activeContracts = append(activeContracts, filepath.Join(rootDir, ct.File))
 		}
-	} else {
-		// Scan for any Go files containing @aoni:service
-		contractFiles = builder.CollectInputFiles("", []string{rootDir})
-	}
+	} else if configPath != "" {
+		// If explicit .vortex.yml existed, check candidate files in workspace
+		contractFiles := builder.CollectInputFiles("", []string{rootDir})
+		for _, f := range contractFiles {
+			if strings.HasSuffix(f, ".gen.go") || strings.HasSuffix(f, "_test.go") {
+				continue
+			}
 
-	// Filter out non-contract or generated files
-	var activeContracts []string
-	for _, f := range contractFiles {
-		if strings.HasSuffix(f, ".gen.go") || strings.HasSuffix(f, "_test.go") {
-			continue
-		}
-
-		data, readErr := os.ReadFile(f)
-		if readErr == nil && strings.Contains(string(data), "@aoni:service") {
-			activeContracts = append(activeContracts, f)
+			if builder.QuickCheckCandidate(f) {
+				activeContracts = append(activeContracts, f)
+			}
 		}
 	}
 

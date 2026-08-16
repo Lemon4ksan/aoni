@@ -276,6 +276,18 @@ func FindRoot(startDir string) (rootDir, configPath string, err error) {
 
 // Load loads and parses .vortex.yml from the workspace root or performs auto-discovery.
 func Load(startDir string) (*Config, error) {
+	if isUserHomeOrSystemDir(startDir) {
+		return &Config{
+			Version:   1,
+			RootDir:   startDir,
+			Contracts: make([]ContractConfig, 0),
+			Defaults: DefaultsConfig{
+				Casing: "snake_case",
+				Engine: "fast",
+			},
+		}, nil
+	}
+
 	rootDir, configPath, err := FindRoot(startDir)
 	if err != nil {
 		return nil, fmt.Errorf("discovering workspace root: %w", err)
@@ -333,8 +345,8 @@ func AutoDiscover(rootDir string, opts ...AutoDiscoverOptions) (*Config, error) 
 		},
 	}
 
-	// Refuse unbounded recursive scan on bare filesystem/drive root
-	if isSystemRoot(rootDir) {
+	// Refuse unbounded recursive scan on bare filesystem root or user home directory without project config
+	if isUserHomeOrSystemDir(rootDir) {
 		return cfg, nil
 	}
 
@@ -862,15 +874,34 @@ func isSystemRoot(path string) bool {
 }
 
 func isIgnoredDirectory(name string) bool {
+	if strings.HasPrefix(name, ".") && name != "." && name != ".." {
+		return true
+	}
+
 	switch strings.ToLower(name) {
-	case ".git", "vendor", "node_modules", ".system_generated", ".vortex",
-		".idea", ".vscode", "appdata", "windows", "program files", "program files (x86)",
-		"$recycle.bin", "system volume information", "tmp", "temp", ".cache", ".npm",
-		".cargo", ".rustup", ".docker", ".gradle", ".m2", ".local", "dist", "build", "out", "testdata":
+	case "vendor", "node_modules", "testdata", "appdata", "windows",
+		"program files", "program files (x86)", "$recycle.bin", "system volume information",
+		"tmp", "temp", "dist", "build", "out", "bin", "obj", "desktop", "documents",
+		"downloads", "pictures", "videos", "music", "onedrive", "virtualbox vms", "scoop":
 		return true
 	default:
 		return false
 	}
+}
+
+func isUserHomeOrSystemDir(path string) bool {
+	if isSystemRoot(path) {
+		return true
+	}
+
+	clean := filepath.Clean(path)
+
+	home, err := os.UserHomeDir()
+	if err == nil && home != "" && clean == filepath.Clean(home) {
+		return true
+	}
+
+	return false
 }
 
 func quickCheckCandidate(path string) bool {
