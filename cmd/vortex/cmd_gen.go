@@ -30,11 +30,12 @@ func (c *CmdGen) Run(ctx context.Context, args []string, stdout, stderr io.Write
 	fs.SetOutput(stderr)
 
 	var (
-		fileFlag = fs.String("file", "", "Path to source file containing @aoni contracts (or set via $GOFILE)")
-		outFlag  = fs.String("out", "", "Path to output generated .gen.go file (default: <filename>.gen.go)")
-		pkgFlag  = fs.String("pkg", "", "Override package name in generated code")
-		watch    = fs.Bool("watch", false, "Watch source tree and auto-generate on change")
-		verbose  = fs.Bool("v", false, "Enable verbose compilation logging")
+		fileFlag    = fs.String("file", "", "Path to source file containing @aoni contracts (or set via $GOFILE)")
+		outFlag     = fs.String("out", "", "Path to output generated .gen.go file (default: <filename>.gen.go)")
+		pkgFlag     = fs.String("pkg", "", "Override package name in generated code")
+		watch       = fs.Bool("watch", false, "Watch source tree and auto-generate on change")
+		verbose     = fs.Bool("v", false, "Enable verbose compilation logging")
+		harnessFlag = fs.Bool("harness", false, "Generate test, load, and benchmark harness (api_harness.gen.go)")
 	)
 
 	fs.Usage = func() {
@@ -42,7 +43,7 @@ func (c *CmdGen) Run(ctx context.Context, args []string, stdout, stderr io.Write
 		fmt.Fprintf(stderr, "Usage:\n")
 		fmt.Fprintf(
 			stderr,
-			"  vortex [gen] [-file=api.go] [-out=api.gen.go] [-pkg=pkgname] [-watch] [-v] [paths...]\n\n",
+			"  vortex [gen] [-file=api.go] [-out=api.gen.go] [-pkg=pkgname] [-harness] [-watch] [-v] [paths...]\n\n",
 		)
 		fmt.Fprintf(stderr, "Flags:\n")
 		fs.PrintDefaults()
@@ -58,9 +59,10 @@ func (c *CmdGen) Run(ctx context.Context, args []string, stdout, stderr io.Write
 	}
 
 	b := builder.New(builder.Config{
-		OutFlag: *outFlag,
-		PkgFlag: *pkgFlag,
-		Verbose: *verbose,
+		OutFlag:     *outFlag,
+		PkgFlag:     *pkgFlag,
+		Verbose:     *verbose,
+		HarnessFlag: *harnessFlag,
 	})
 
 	results, err := b.BuildFiles(ctx, files)

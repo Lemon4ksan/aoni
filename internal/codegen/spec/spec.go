@@ -794,6 +794,38 @@ var Registry = []*DirectiveDef{
 		Description: "Specifies the upstream OpenAPI specification filename or URL.",
 		Example:     "// @source \"mannco_openapi.json\"",
 	},
+	{
+		Name:        "bench",
+		Scopes:      []Scope{ScopeMethod},
+		Aliases:     []string{"benchmark"},
+		Description: "Configures test, load, and benchmark harness scenario distribution weights.",
+		Args: []ArgDef{
+			{
+				Name:        "weight",
+				Placeholder: "<N>",
+				Description: "Traffic distribution weight percentage (e.g. weight=80)",
+			},
+		},
+		Example: "// @bench weight=80",
+	},
+	{
+		Name:        "budget",
+		Scopes:      []Scope{ScopeMethod},
+		Description: "Establishes strict zero-allocation and latency SLA thresholds for client execution.",
+		Args: []ArgDef{
+			{
+				Name:        "client_allocs",
+				Placeholder: "<N>",
+				Description: "Maximum allowed heap allocations on the client side (typically 0)",
+			},
+			{
+				Name:        "max_client_time",
+				Placeholder: "\"<dur>\"",
+				Description: "Maximum allowed client serialization time (e.g. \"300ns\")",
+			},
+		},
+		Example: "// @budget client_allocs=0 max_client_time=\"300ns\"",
+	},
 
 	// ==========================================
 	// 5. DTO STRUCT SCOPE DIRECTIVES

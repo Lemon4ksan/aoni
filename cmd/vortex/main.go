@@ -19,6 +19,7 @@ func main() {
 		&CmdStatus{},
 		&CmdInit{},
 		&CmdGen{},
+		&CmdHarness{},
 		&CmdCheck{},
 		&CmdDiff{},
 		&CmdReview{},

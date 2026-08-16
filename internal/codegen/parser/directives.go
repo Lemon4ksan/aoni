@@ -535,6 +535,27 @@ func ApplyMethodDirective(m *ir.MethodIR, d *Directive) {
 		m.Version = d.Value
 	case "since":
 		m.Since = d.Value
+	case "bench":
+		if wStr, ok := d.Args["weight"]; ok {
+			if w, err := strconv.Atoi(wStr); err == nil {
+				m.BenchWeight = w
+			}
+		} else if d.Value != "" {
+			if w, err := strconv.Atoi(d.Value); err == nil {
+				m.BenchWeight = w
+			}
+		}
+
+	case "budget":
+		if allocStr, ok := d.Args["client_allocs"]; ok {
+			if allocs, err := strconv.Atoi(allocStr); err == nil {
+				m.BudgetClientAllocs = &allocs
+			}
+		}
+
+		if maxTime, ok := d.Args["max_client_time"]; ok {
+			m.BudgetMaxClientTime = strings.Trim(maxTime, "\"")
+		}
 	}
 }
 

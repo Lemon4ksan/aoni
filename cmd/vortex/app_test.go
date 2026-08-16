@@ -22,6 +22,7 @@ func newTestApp(stdout, stderr *bytes.Buffer) *App {
 		&CmdStatus{},
 		&CmdInit{},
 		&CmdGen{},
+		&CmdHarness{},
 		&CmdCheck{},
 		&CmdDiff{},
 		&CmdReview{},
@@ -472,4 +473,51 @@ type DemoAPI interface {
 	require.Contains(t, stdout.String(), "Pre-flight Contract Audit")
 	require.Contains(t, stdout.String(), "Code Generation & Polyglot Targets")
 	require.FileExists(t, filepath.Join(pkgDir, "api.gen.go"))
+}
+
+func TestApp_Harness_Command(t *testing.T) {
+	tempDir := t.TempDir()
+	pkgDir := filepath.Join(tempDir, "pkg", "harnessdemo")
+	require.NoError(t, os.MkdirAll(pkgDir, 0o750))
+
+	apiSrc := `package harnessdemo
+
+import (
+	"context"
+	"github.com/lemon4ksan/aoni"
+)
+
+// @aoni:dto casing=snake_case
+type UserRequest struct {
+	Name string ` + "`" + `json:"name"` + "`" + `
+}
+
+// @aoni:service
+type UserAPI interface {
+	// @post "/v1/users"
+	// @bench weight=70
+	// @budget client_allocs=0 max_client_time="200ns"
+	ListUsers(ctx context.Context, req UserRequest, mods ...aoni.RequestModifier) (map[string]any, error)
+}
+`
+	apiFile := filepath.Join(pkgDir, "api.go")
+	require.NoError(t, os.WriteFile(apiFile, []byte(apiSrc), 0o600))
+
+	var stdout, stderr bytes.Buffer
+
+	app := newTestApp(&stdout, &stderr)
+
+	err := app.Run(context.Background(), []string{"harness", apiFile})
+	require.NoError(t, err)
+	require.Contains(t, stdout.String(), "✔ Generated Harness")
+	require.FileExists(t, filepath.Join(pkgDir, "api_harness.gen.go"))
+
+	// Test gen --harness flag
+	stdout.Reset()
+
+	err = app.Run(context.Background(), []string{"gen", "-harness", apiFile})
+	require.NoError(t, err)
+	require.Contains(t, stdout.String(), "✔ Generated")
+	require.FileExists(t, filepath.Join(pkgDir, "api.gen.go"))
+	require.FileExists(t, filepath.Join(pkgDir, "api_harness.gen.go"))
 }

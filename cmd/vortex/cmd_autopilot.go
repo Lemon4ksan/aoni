@@ -215,10 +215,10 @@ contracts:
 		return genErr
 	}
 
-	relApi, _ := filepath.Rel(cwd, apiFile)
+	relAPI, _ := filepath.Rel(cwd, apiFile)
 	relGen, _ := filepath.Rel(cwd, filepath.Join(targetDir, "api.gen.go"))
 
-	fmt.Fprintf(stdout, "\n✔ Created %s (Declarative %s template)\n", relApi, strings.ToUpper(tplKind))
+	fmt.Fprintf(stdout, "\n✔ Created %s (Declarative %s template)\n", relAPI, strings.ToUpper(tplKind))
 	fmt.Fprintln(stdout, "✔ Created .vortex.yml (Workspace configuration)")
 	fmt.Fprintf(stdout, "✔ Compiled %s (%d bytes)\n", relGen, len(res.Code))
 	fmt.Fprintln(stdout, "\n✨ Workspace initialized! Run `vortex` anytime to audit, synchronize & rebuild.")
@@ -363,8 +363,25 @@ func (c *CmdAutoPilot) runWorld2Pipeline(
 
 		if cfg != nil {
 			for _, ct := range cfg.Contracts {
-				if filepath.Clean(ct.File) == filepath.Clean(relFile) && ct.Gen != "" {
-					outGen = filepath.Join(rootDir, ct.Gen)
+				if filepath.Clean(ct.File) == filepath.Clean(relFile) {
+					if ct.Gen != "" {
+						outGen = filepath.Join(rootDir, ct.Gen)
+					}
+
+					if ct.Harness != "" {
+						harnessOut := ct.Harness
+						if harnessOut == "true" {
+							harnessOut = filepath.Join(rootDir, strings.TrimSuffix(ct.File, ".go")+"_harness.gen.go")
+						} else {
+							harnessOut = filepath.Join(rootDir, ct.Harness)
+						}
+
+						hRes, hErr := b.BuildHarness(ctx, file, harnessOut)
+						if hErr == nil && hRes != nil {
+							totalBytes += hRes.BytesCount
+						}
+					}
+
 					break
 				}
 			}

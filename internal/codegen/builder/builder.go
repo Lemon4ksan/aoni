@@ -30,6 +30,8 @@ type Config struct {
 	Verbose bool
 	// DryRun generates code in memory without writing to disk.
 	DryRun bool
+	// HarnessFlag enables emission of load and benchmark harness (api_harness.gen.go).
+	HarnessFlag bool
 }
 
 // Result captures the outcome of a single source file compilation.
@@ -137,6 +139,14 @@ func (b *Builder) BuildFile(ctx context.Context, srcFile, outFile string) (*Resu
 		}
 	}
 
+	if b.cfg.HarnessFlag && len(root.Services) > 0 {
+		harnessDir := filepath.Dir(srcFile)
+		harnessBase := filepath.Base(srcFile)
+		harnessExt := filepath.Ext(harnessBase)
+		harnessTarget := filepath.Join(harnessDir, strings.TrimSuffix(harnessBase, harnessExt)+"_harness.gen.go")
+		_, _ = b.BuildHarness(ctx, srcFile, harnessTarget)
+	}
+
 	return &Result{
 		SourceFile:    srcFile,
 		OutputFile:    targetOut,
@@ -145,6 +155,54 @@ func (b *Builder) BuildFile(ctx context.Context, srcFile, outFile string) (*Resu
 		TuplesCount:   len(root.Tuples),
 		BitpacksCount: len(root.Bitpacks),
 		UnionsCount:   len(root.Unions),
+		BytesCount:    len(code),
+		Code:          code,
+	}, nil
+}
+
+// BuildHarness parses, analyzes, optimizes, and compiles a test/bench harness for a Go source file.
+func (b *Builder) BuildHarness(ctx context.Context, srcFile, outFile string) (*Result, error) {
+	select {
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	default:
+	}
+
+	root, err := b.parser.ParseFile(srcFile)
+	if err != nil {
+		return nil, fmt.Errorf("parse %s: %w", srcFile, err)
+	}
+
+	if len(root.Services) == 0 {
+		return &Result{
+			SourceFile: srcFile,
+			Skipped:    true,
+		}, nil
+	}
+
+	code, err := b.emitter.EmitHarness(root)
+	if err != nil {
+		return nil, fmt.Errorf("emit harness for %s: %w", srcFile, err)
+	}
+
+	targetOut := outFile
+	if targetOut == "" {
+		dir := filepath.Dir(srcFile)
+		base := filepath.Base(srcFile)
+		ext := filepath.Ext(base)
+		targetOut = filepath.Join(dir, strings.TrimSuffix(base, ext)+"_harness.gen.go")
+	}
+
+	if !b.cfg.DryRun {
+		if err := os.WriteFile(targetOut, code, 0o600); err != nil {
+			return nil, fmt.Errorf("write harness %s: %w", targetOut, err)
+		}
+	}
+
+	return &Result{
+		SourceFile:    srcFile,
+		OutputFile:    targetOut,
+		ServicesCount: len(root.Services),
 		BytesCount:    len(code),
 		Code:          code,
 	}, nil
