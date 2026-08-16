@@ -19,7 +19,7 @@ type CmdExample struct{}
 
 func (c *CmdExample) Name() string { return "example" }
 func (c *CmdExample) Aliases() []string {
-	return []string{"examples", "template", "templates", "init"}
+	return []string{"examples", "template", "templates", "tpl"}
 }
 func (c *CmdExample) Synopsis() string { return "Scaffold ready-made declarative contract templates" }
 func (c *CmdExample) Usage() string    { return "vortex example [http|ws|socket|pipeline] [flags]" }

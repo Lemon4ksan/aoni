@@ -86,7 +86,13 @@ func isStructuredDataMIME(contentType string) bool {
 		bytesconv.EqualFoldASCII(mediaType, "text/json") ||
 		bytesconv.EqualFoldASCII(mediaType, "application/x-protobuf") ||
 		bytesconv.EqualFoldASCII(mediaType, "application/protobuf") ||
-		bytesconv.EqualFoldASCII(mediaType, "application/grpc-web+proto")
+		bytesconv.EqualFoldASCII(mediaType, "application/grpc-web+proto") ||
+		bytesconv.EqualFoldASCII(mediaType, "application/xml") ||
+		bytesconv.EqualFoldASCII(mediaType, "text/xml") ||
+		bytesconv.EqualFoldASCII(mediaType, "application/x-yaml") ||
+		bytesconv.EqualFoldASCII(mediaType, "application/yaml") ||
+		bytesconv.EqualFoldASCII(mediaType, "text/x-yaml") ||
+		bytesconv.EqualFoldASCII(mediaType, "text/yaml")
 }
 
 // ResolvePeekableReader returns a peekable reader for the response body.

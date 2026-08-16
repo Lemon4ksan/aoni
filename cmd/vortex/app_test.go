@@ -18,6 +18,8 @@ import (
 
 func newTestApp(stdout, stderr *bytes.Buffer) *App {
 	commands := []Command{
+		&CmdStatus{},
+		&CmdInit{},
 		&CmdGen{},
 		&CmdCheck{},
 		&CmdDiff{},
@@ -299,6 +301,69 @@ type API interface {
 	require.Contains(t, contentStr, "CreateSomething")
 	// No DO NOT EDIT
 	require.NotContains(t, contentStr, "DO NOT EDIT")
+}
+
+func TestApp_Status(t *testing.T) {
+	tempDir := t.TempDir()
+
+	serviceDir := filepath.Join(tempDir, "pkg", "statusdemo")
+	require.NoError(t, os.MkdirAll(serviceDir, 0o750))
+
+	apiSrc := `package statusdemo
+
+import (
+	"context"
+	"github.com/lemon4ksan/aoni"
+)
+
+// @aoni:service
+type StatusDemoAPI interface {
+	// @get "ping"
+	Ping(ctx context.Context, mods ...aoni.RequestModifier) (map[string]any, error)
+}
+`
+	require.NoError(t, os.WriteFile(filepath.Join(serviceDir, "api.go"), []byte(apiSrc), 0o600))
+	require.NoError(t, os.WriteFile(filepath.Join(serviceDir, "api.gen.go"), []byte("package statusdemo\n"), 0o600))
+
+	var stdout, stderr bytes.Buffer
+
+	app := newTestApp(&stdout, &stderr)
+
+	// Run status with JSON
+	err := app.Run(context.Background(), []string{"status", "-json", "-all"})
+	require.NoError(t, err)
+	require.Contains(t, stdout.String(), `"total_methods"`)
+}
+
+func TestApp_Init(t *testing.T) {
+	tempDir := t.TempDir()
+
+	serviceDir := filepath.Join(tempDir, "pkg", "initdemo")
+	require.NoError(t, os.MkdirAll(serviceDir, 0o750))
+
+	apiSrc := `package initdemo
+
+import (
+	"context"
+	"github.com/lemon4ksan/aoni"
+)
+
+// @aoni:service
+type InitDemoAPI interface {
+	// @get "hello"
+	Hello(ctx context.Context, mods ...aoni.RequestModifier) (map[string]any, error)
+}
+`
+	require.NoError(t, os.WriteFile(filepath.Join(serviceDir, "api.go"), []byte(apiSrc), 0o600))
+
+	var stdout, stderr bytes.Buffer
+
+	app := newTestApp(&stdout, &stderr)
+
+	err := app.Run(context.Background(), []string{"init", tempDir})
+	require.NoError(t, err)
+	require.Contains(t, stdout.String(), "Created")
+	require.FileExists(t, filepath.Join(tempDir, ".vortex.yml"))
 }
 
 func TestApp_UnknownCommand(t *testing.T) {

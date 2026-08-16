@@ -34,6 +34,9 @@ var (
 	// XMLDecoder parses response payload streams as XML.
 	XMLDecoder Decoder = xmlDecoder{}
 
+	// YAMLDecoder parses response payload streams as YAML.
+	YAMLDecoder Decoder = yamlDecoder{}
+
 	// ProtoJSONDecoder parses JSON response streams into Protobuf messages via protojson.
 	ProtoJSONDecoder Decoder = protoJSONDecoder{}
 )
@@ -159,6 +162,11 @@ func LookupDecoder(contentType string) Decoder {
 		return GRPCWebDecoder
 	case bytesconv.EqualFoldASCII(norm, "application/xml"), bytesconv.EqualFoldASCII(norm, "text/xml"):
 		return XMLDecoder
+	case bytesconv.EqualFoldASCII(norm, "application/x-yaml"),
+		bytesconv.EqualFoldASCII(norm, "application/yaml"),
+		bytesconv.EqualFoldASCII(norm, "text/x-yaml"),
+		bytesconv.EqualFoldASCII(norm, "text/yaml"):
+		return YAMLDecoder
 	default:
 		return RawDecoder
 	}
@@ -219,6 +227,11 @@ func XML[T any](reader stdio.Reader) (T, error) {
 	return To[T](reader, XMLDecoder)
 }
 
+// YAML reads from reader and unmarshals YAML data into a newly allocated T.
+func YAML[T any](reader stdio.Reader) (T, error) {
+	return To[T](reader, YAMLDecoder)
+}
+
 // Proto reads from reader and unmarshals binary Protocol Buffer data into a newly allocated T.
 func Proto[T any](reader stdio.Reader) (T, error) {
 	return To[T](reader, ProtoDecoder)
@@ -237,6 +250,9 @@ func WithJSON() aoni.RequestModifier { return mod.WithDecoder(JSONDecoder) }
 
 // WithXML creates an [aoni.RequestModifier] that assigns [XMLDecoder] for response parsing.
 func WithXML() aoni.RequestModifier { return mod.WithDecoder(XMLDecoder) }
+
+// WithYAML creates an [aoni.RequestModifier] that assigns [YAMLDecoder] for response parsing.
+func WithYAML() aoni.RequestModifier { return mod.WithDecoder(YAMLDecoder) }
 
 // WithProto creates an [aoni.RequestModifier] that assigns [ProtoDecoder] for response parsing.
 func WithProto() aoni.RequestModifier { return mod.WithDecoder(ProtoDecoder) }
@@ -274,4 +290,15 @@ func UnmarshalJSON(data []byte, target any) error {
 	}
 
 	return JSONDecoder.Decode(bytes.NewReader(data), target)
+}
+
+// UnmarshalYAML parses YAML bytes into target using the registered custom YAML decoder or standard YAMLDecoder.
+func UnmarshalYAML(data []byte, target any) error {
+	if hasCustomDecoders.Load() {
+		if d := GetDecoder("application/yaml"); d != nil {
+			return d.Decode(bytes.NewReader(data), target)
+		}
+	}
+
+	return YAMLDecoder.Decode(bytes.NewReader(data), target)
 }
