@@ -175,9 +175,9 @@ Reason            ::= [^\r\n]*
 Vortex includes an AST optimization pass (`internal/codegen/optimizer`) executed before code emission:
 
 ```
-Parsed AST / IR
-      │
-      ▼
+                    Parsed AST / IR
+                            │
+                            ▼
 ┌────────────────────────────────────────────────────────┐
 │              Optimizer Pipeline Passes                 │
 ├────────────────────────────────────────────────────────┤
@@ -186,16 +186,16 @@ Parsed AST / IR
 │    • Shares connection pools across identical origins  │
 │                                                        │
 │ 2. Stack Sizing & Preallocation Calculation            │
-│    • Precalculates StackModsSize for 0-alloc arrays   │
+│    • Precalculates StackModsSize for 0-alloc arrays    │
 │    • Precalculates StackBufSize for URI & query buffer │
 │                                                        │
 │ 3. Zero-Reflect Codec Specialization                   │
 │    • Generates direct type-safe unmarshaling calls     │
 │    • Employs strconv & SIMD byte formatting primitives │
 └────────────────────────────────────────────────────────┘
-      │
-      ▼
-Optimized Emitter (`api.gen.go`)
+                            │
+                            ▼
+                Optimized Emitter (`api.gen.go`)
 ```
 
 ### Key Optimization Guarantees:

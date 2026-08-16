@@ -81,9 +81,11 @@ func (c *CmdCover) Run(_ context.Context, args []string, stdout, stderr io.Write
 			if *coverageFilePath == "./coverage.out" && cfg.Coverage.File != "" {
 				filePath = cfg.Coverage.File
 			}
+
 			if *sortBy == "percent" && cfg.Coverage.Sort != "" {
 				sortVal = cfg.Coverage.Sort
 			}
+
 			if *minPercent == 0.0 && cfg.Coverage.Min > 0 {
 				minVal = cfg.Coverage.Min
 			}
