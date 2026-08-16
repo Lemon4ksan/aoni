@@ -27,10 +27,19 @@ type Config struct {
 	Contracts []ContractConfig `yaml:"contracts"`
 	Lint      LintConfig       `yaml:"lint,omitempty"`
 	Export    ExportConfig     `yaml:"export,omitempty"`
+	Coverage  CoverageConfig   `yaml:"coverage,omitempty"`
 
 	// Runtime metadata
 	RootDir    string `yaml:"-"`
 	ConfigPath string `yaml:"-"`
+}
+
+// CoverageConfig controls test coverage profile analysis rules in vortex cover.
+type CoverageConfig struct {
+	File    string   `yaml:"file,omitempty"`
+	Min     float64  `yaml:"min,omitempty"`
+	Sort    string   `yaml:"sort,omitempty"` // "percent" or "name"
+	Exclude []string `yaml:"exclude,omitempty"`
 }
 
 // DefaultsConfig defines global defaults for code generation.

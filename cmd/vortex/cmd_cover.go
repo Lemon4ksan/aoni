@@ -14,6 +14,8 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+
+	"github.com/lemon4ksan/aoni/internal/codegen/project"
 )
 
 // CoverageStats records statement coverage counts and percentage metrics.
@@ -70,7 +72,25 @@ func (c *CmdCover) Run(_ context.Context, args []string, stdout, stderr io.Write
 		return err
 	}
 
-	return c.analyzeCoverageProfile(stdout, *coverageFilePath, *sortBy, *minPercent)
+	filePath := *coverageFilePath
+	sortVal := *sortBy
+	minVal := *minPercent
+
+	if cwd, err := os.Getwd(); err == nil {
+		if cfg, _ := project.Load(cwd); cfg != nil {
+			if *coverageFilePath == "./coverage.out" && cfg.Coverage.File != "" {
+				filePath = cfg.Coverage.File
+			}
+			if *sortBy == "percent" && cfg.Coverage.Sort != "" {
+				sortVal = cfg.Coverage.Sort
+			}
+			if *minPercent == 0.0 && cfg.Coverage.Min > 0 {
+				minVal = cfg.Coverage.Min
+			}
+		}
+	}
+
+	return c.analyzeCoverageProfile(stdout, filePath, sortVal, minVal)
 }
 
 func (c *CmdCover) analyzeCoverageProfile(stdout io.Writer, coverageFilePath, sortBy string, minPercent float64) error {
