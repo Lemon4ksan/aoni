@@ -98,3 +98,90 @@ func TestReconciler_AdditiveNewMethod_And_Field(t *testing.T) {
 	assert.Len(t, res.MethodPlans, 2)
 	assert.Len(t, res.StructPlans, 2)
 }
+
+func TestReconciler_NewService_And_EmptyReconcile(t *testing.T) {
+	t.Parallel()
+
+	ours := &ir.RootIR{
+		PackageName: "testapi",
+		Services: []*ir.ServiceIR{
+			{
+				Name: "ServiceA",
+			},
+		},
+	}
+
+	theirs := &ir.RootIR{
+		PackageName: "testapi",
+		Services: []*ir.ServiceIR{
+			{
+				Name: "ServiceB",
+				Methods: []*ir.MethodIR{
+					{
+						Name:       "DoAction",
+						HTTPMethod: "POST",
+						Path:       &ir.PathIR{RawTemplate: "/v1/action"},
+					},
+				},
+			},
+		},
+	}
+
+	rec := merge.NewReconciler()
+	res, err := rec.Reconcile(nil, ours, theirs)
+	require.NoError(t, err)
+
+	assert.Equal(t, 1, res.AdditiveCount)
+	assert.Len(t, res.MethodPlans, 1)
+	assert.Equal(t, "ServiceB", res.MethodPlans[0].Service)
+}
+
+func TestReconciler_NilIR_Error(t *testing.T) {
+	t.Parallel()
+
+	rec := merge.NewReconciler()
+	_, err := rec.Reconcile(nil, nil, &ir.RootIR{})
+	assert.Error(t, err)
+
+	_, err = rec.Reconcile(nil, &ir.RootIR{}, nil)
+	assert.Error(t, err)
+}
+
+func TestReconciler_NoDiff_Identical(t *testing.T) {
+	t.Parallel()
+
+	root := &ir.RootIR{
+		PackageName: "testapi",
+		Services: []*ir.ServiceIR{
+			{
+				Name: "ServiceA",
+				Methods: []*ir.MethodIR{
+					{
+						Name:       "GetData",
+						HTTPMethod: "GET",
+						Path:       &ir.PathIR{RawTemplate: "/v1/data"},
+						Params: []*ir.ParamIR{
+							{GoName: "filter", GoType: ir.GoTypeIR{Name: "string"}},
+						},
+					},
+				},
+			},
+		},
+		Structs: []*ir.StructIR{
+			{
+				Name: "DataDTO",
+				Fields: []*ir.FieldIR{
+					{GoName: "Value", WireName: "value", Type: ir.GoTypeIR{Name: "int"}},
+				},
+			},
+		},
+	}
+
+	rec := merge.NewReconciler()
+	res, err := rec.Reconcile(nil, root, root)
+	require.NoError(t, err)
+
+	assert.Equal(t, 0, res.AdditiveCount)
+	assert.Equal(t, 0, res.BreakingCount)
+	assert.Empty(t, res.Deltas)
+}

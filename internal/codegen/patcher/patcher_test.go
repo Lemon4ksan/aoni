@@ -5,6 +5,8 @@
 package patcher_test
 
 import (
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -86,4 +88,88 @@ type UserAPI interface {
 	// Verify new struct inserted
 	assert.Contains(t, patchedStr, "type ListUsersRequest struct")
 	assert.Contains(t, patchedStr, "Limit int")
+}
+
+func TestPatcher_PatchExistingStruct_AddField(t *testing.T) {
+	t.Parallel()
+
+	originalSource := `package api
+
+type UserDTO struct {
+	ID string ` + "`" + `url:"id"` + "`" + `
+}
+`
+
+	plan := &merge.ReconcileResult{
+		StructPlans: []merge.StructMergePlan{
+			{
+				StructName: "UserDTO",
+				IsNew:      false,
+				NewFields: []*ir.FieldIR{
+					{GoName: "Avatar", WireName: "avatar_url", Type: ir.GoTypeIR{Name: "string"}},
+				},
+			},
+		},
+	}
+
+	p := patcher.NewPatcher()
+	patched, err := p.PatchBytes([]byte(originalSource), plan)
+	require.NoError(t, err)
+
+	patchedStr := string(patched)
+	assert.Contains(t, patchedStr, "ID")
+	assert.Contains(t, patchedStr, "`url:\"id\"`")
+	assert.Contains(t, patchedStr, "Avatar")
+	assert.Contains(t, patchedStr, "`url:\"avatar_url,omitempty\"`")
+}
+
+func TestPatcher_PatchFile_OnDisk(t *testing.T) {
+	t.Parallel()
+
+	tempDir := t.TempDir()
+	filePath := filepath.Join(tempDir, "api.go")
+
+	originalSource := `package testapi
+
+type Service interface {
+	Do() error
+}
+`
+	require.NoError(t, os.WriteFile(filePath, []byte(originalSource), 0o600))
+
+	plan := &merge.ReconcileResult{
+		MethodPlans: []merge.MethodMergePlan{
+			{
+				Service: "Service",
+				IsNew:   true,
+				TargetMethod: &ir.MethodIR{
+					Name:       "Action",
+					HTTPMethod: "POST",
+					Path:       &ir.PathIR{RawTemplate: "/action"},
+				},
+			},
+		},
+	}
+
+	p := patcher.NewPatcher()
+	err := p.PatchFile(filePath, plan)
+	require.NoError(t, err)
+
+	data, err := os.ReadFile(filePath)
+	require.NoError(t, err)
+	assert.Contains(
+		t,
+		string(data),
+		"Action(ctx context.Context, mods ...aoni.RequestModifier) (*json.RawMessage, error)",
+	)
+}
+
+func TestPatcher_InvalidGoSyntax_Error(t *testing.T) {
+	t.Parallel()
+
+	invalidSource := `package api ??? invalid go syntax`
+
+	p := patcher.NewPatcher()
+	_, err := p.PatchBytes([]byte(invalidSource), &merge.ReconcileResult{})
+	assert.Error(t, err)
 }

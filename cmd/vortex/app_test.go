@@ -23,6 +23,8 @@ func newTestApp(stdout, stderr *bytes.Buffer) *App {
 		&CmdGen{},
 		&CmdCheck{},
 		&CmdDiff{},
+		&CmdReview{},
+		&CmdAccept{},
 		&CmdLog{},
 		&CmdOAPI{},
 		&CmdProto{},
@@ -374,4 +376,40 @@ func TestApp_UnknownCommand(t *testing.T) {
 	err := app.Run(context.Background(), []string{"some_bogus_command"})
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "unknown command")
+}
+
+func TestApp_Review_And_Accept_MissingArgs(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+
+	app := newTestApp(&stdout, &stderr)
+
+	// Review missing arg
+	err := app.Run(context.Background(), []string{"review"})
+	require.Error(t, err)
+
+	// Accept missing arg
+	err = app.Run(context.Background(), []string{"accept"})
+	require.Error(t, err)
+}
+
+func TestApp_Log_Git_Flag(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+
+	app := newTestApp(&stdout, &stderr)
+
+	// Log with --git flag on local file
+	err := app.Run(context.Background(), []string{"log", "--git", "-n=3", "main.go"})
+	require.NoError(t, err)
+	require.Contains(t, stdout.String(), "⚡ Vortex API Git History")
+}
+
+func TestApp_Diff_Against_HEAD(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+
+	app := newTestApp(&stdout, &stderr)
+
+	// Diff with --against=HEAD on local file
+	err := app.Run(context.Background(), []string{"diff", "--against=HEAD", "main.go"})
+	require.NoError(t, err)
+	require.Contains(t, stdout.String(), "⚡ [vortex diff]")
 }
