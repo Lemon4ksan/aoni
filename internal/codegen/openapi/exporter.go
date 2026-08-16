@@ -24,6 +24,7 @@ type ExportConfig struct {
 	Description string
 	BaseURL     string
 	AsYAML      bool
+	Vortex      bool // If true, include x-vortex vendor extensions for lossless aoni round-tripping
 }
 
 // ExportOpenAPI generates a standard OpenAPI 3.1 JSON or YAML document from aoni RootIR.
@@ -57,7 +58,16 @@ func ExportOpenAPI(root *ir.RootIR, cfg ExportConfig) ([]byte, error) {
 
 	version := cfg.Version
 	if version == "" {
-		version = "1.0.0"
+		if len(services) > 0 && services[0].Version != "" {
+			version = services[0].Version
+		} else {
+			version = "1.0.0"
+		}
+	}
+
+	description := cfg.Description
+	if description == "" && len(services) > 0 && services[0].Description != "" {
+		description = services[0].Description
 	}
 
 	doc := &openapi3.T{
@@ -65,12 +75,16 @@ func ExportOpenAPI(root *ir.RootIR, cfg ExportConfig) ([]byte, error) {
 		Info: &openapi3.Info{
 			Title:       title,
 			Version:     version,
-			Description: cfg.Description,
+			Description: description,
 		},
 		Paths: openapi3.NewPaths(),
 		Components: &openapi3.Components{
 			Schemas: make(openapi3.Schemas),
 		},
+	}
+
+	if len(services) > 0 && services[0].Summary != "" {
+		doc.Info.Summary = services[0].Summary
 	}
 
 	// Servers
@@ -84,6 +98,30 @@ func ExportOpenAPI(root *ir.RootIR, cfg ExportConfig) ([]byte, error) {
 			URL:         baseURL,
 			Description: "Default API server",
 		})
+	}
+
+	// Vendor extensions are only emitted if explicitly enabled (--vortex / cfg.Vortex)
+	if cfg.Vortex && len(services) > 0 {
+		firstSvc := services[0]
+		if firstSvc.Persona != "" {
+			doc.Info.Extensions = setExtension(doc.Info.Extensions, "x-vortex-persona", firstSvc.Persona)
+		}
+
+		if firstSvc.TLSSpec != "" {
+			doc.Info.Extensions = setExtension(doc.Info.Extensions, "x-vortex-tlsspec", firstSvc.TLSSpec)
+		}
+
+		if firstSvc.DefaultCasing != "" {
+			doc.Info.Extensions = setExtension(doc.Info.Extensions, "x-vortex-casing", string(firstSvc.DefaultCasing))
+		}
+
+		if firstSvc.Engine != "" {
+			doc.Info.Extensions = setExtension(doc.Info.Extensions, "x-vortex-engine", string(firstSvc.Engine))
+		}
+
+		if firstSvc.Source != "" {
+			doc.Info.Extensions = setExtension(doc.Info.Extensions, "x-vortex-source", firstSvc.Source)
+		}
 	}
 
 	// Schemas / Models
@@ -118,8 +156,14 @@ func ExportOpenAPI(root *ir.RootIR, cfg ExportConfig) ([]byte, error) {
 		}
 
 		schema := openapi3.NewObjectSchema()
-		if desc := cleanDocSummary(s.Doc); desc != "" {
+		if s.Description != "" {
+			schema.Description = s.Description
+		} else if desc := cleanDocSummary(s.Doc); desc != "" {
 			schema.Description = desc
+		}
+
+		if s.Deprecation != nil {
+			schema.Deprecated = true
 		}
 
 		for _, f := range s.Fields {
@@ -174,9 +218,71 @@ func ExportOpenAPI(root *ir.RootIR, cfg ExportConfig) ([]byte, error) {
 
 			op := openapi3.NewOperation()
 
-			op.OperationID = m.Name
-			if summary := cleanDocSummary(m.Doc); summary != "" {
+			if m.OperationID != "" {
+				op.OperationID = m.OperationID
+			} else {
+				op.OperationID = m.Name
+			}
+
+			if m.Summary != "" {
+				op.Summary = m.Summary
+			} else if summary := cleanDocSummary(m.Doc); summary != "" {
 				op.Summary = summary
+			}
+
+			if m.Description != "" {
+				op.Description = m.Description
+			}
+
+			switch {
+			case len(m.Tags) > 0:
+				op.Tags = m.Tags
+			case len(svc.Tags) > 0:
+				op.Tags = svc.Tags
+			default:
+				op.Tags = []string{svc.Name}
+			}
+
+			if m.Deprecation != nil {
+				op.Deprecated = true
+				if m.Deprecation.Reason != "" && op.Description == "" {
+					op.Description = "Deprecated: " + m.Deprecation.Reason
+				}
+			}
+
+			// Vendor extensions are only emitted when --vortex is requested
+			if cfg.Vortex {
+				if m.UnwrapField != "" {
+					op.Extensions = setExtension(op.Extensions, "x-vortex-unwrap", m.UnwrapField)
+				}
+
+				if m.CallFunc != "" {
+					op.Extensions = setExtension(op.Extensions, "x-vortex-call", m.CallFunc)
+				}
+
+				if m.Idempotent {
+					op.Extensions = setExtension(op.Extensions, "x-vortex-idempotent", true)
+				}
+
+				if m.Coalesce {
+					op.Extensions = setExtension(op.Extensions, "x-vortex-coalesce", true)
+				}
+
+				if m.ETag {
+					op.Extensions = setExtension(op.Extensions, "x-vortex-etag", true)
+				}
+
+				if m.FormCasing != "" {
+					op.Extensions = setExtension(op.Extensions, "x-vortex-form-casing", string(m.FormCasing))
+				}
+
+				if m.QueryCasing != "" {
+					op.Extensions = setExtension(op.Extensions, "x-vortex-query-casing", string(m.QueryCasing))
+				}
+
+				if m.Since != "" {
+					op.Extensions = setExtension(op.Extensions, "x-vortex-since", m.Since)
+				}
 			}
 
 			// Path Parameters
@@ -427,4 +533,14 @@ func cleanDocSummary(docLines []string) string {
 	}
 
 	return strings.Join(clean, " ")
+}
+
+func setExtension(extMap map[string]any, key string, val any) map[string]any {
+	if extMap == nil {
+		extMap = make(map[string]any)
+	}
+
+	extMap[key] = val
+
+	return extMap
 }

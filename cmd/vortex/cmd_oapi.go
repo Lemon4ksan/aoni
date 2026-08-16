@@ -61,12 +61,16 @@ func (c *CmdOAPI) runExport(_ context.Context, args []string, stdout, stderr io.
 		version     = fs.String("version", "1.0.0", "API version for OpenAPI spec")
 		baseURL     = fs.String("base-url", "", "API base URL")
 		asYAML      = fs.Bool("yaml", false, "Output spec as YAML instead of JSON")
+		vortexFlag  = fs.Bool("vortex", false, "Include Vortex/Aoni vendor extensions (x-vortex) for lossless profiles")
 	)
 
 	fs.Usage = func() {
 		fmt.Fprintf(stderr, "vortex oapi export — Export Aoni Contract to OpenAPI 3.1 Spec\n\n")
 		fmt.Fprintf(stderr, "Usage:\n")
-		fmt.Fprintf(stderr, "  vortex oapi export -file=<api.go> [-service=Client] [-out=openapi.json] [-yaml]\n\n")
+		fmt.Fprintf(
+			stderr,
+			"  vortex oapi export -file=<api.go> [-service=Client] [-out=openapi.json] [-yaml] [-vortex]\n\n",
+		)
 		fmt.Fprintf(stderr, "Flags:\n")
 		fs.PrintDefaults()
 	}
@@ -113,6 +117,7 @@ func (c *CmdOAPI) runExport(_ context.Context, args []string, stdout, stderr io.
 		Version:     *version,
 		BaseURL:     *baseURL,
 		AsYAML:      *asYAML,
+		Vortex:      *vortexFlag,
 	}
 
 	out, err := openapi.ExportOpenAPI(root, exportCfg)
@@ -147,11 +152,16 @@ func (c *CmdOAPI) runImport(_ context.Context, args []string, stdout, stderr io.
 		serviceName    = fs.String("service", "API", "Target service interface name")
 		baseURL        = fs.String("base-url", "", "Override API BaseURL")
 		skipDeprecated = fs.Bool("skip-deprecated", false, "Skip deprecated OpenAPI operations")
+		overwrite      = fs.Bool("overwrite", false, "Discard existing file and generate contract fresh from scratch")
+		prune          = fs.Bool("prune", false, "Prune deleted endpoints instead of adding @deprecated")
+		dryRun         = fs.Bool("dry-run", false, "Preview merge changes without modifying files on disk")
+		interactive    = fs.Bool("interactive", false, "Prompt for merge decisions")
 		includePaths   StringSliceFlag
 		excludePaths   StringSliceFlag
 		typeMaps       StringSliceFlag
 	)
 
+	fs.BoolVar(interactive, "i", false, "Prompt for merge decisions (shorthand)")
 	fs.Var(&includePaths, "include-path", "Regex pattern to filter included endpoint paths (repeatable)")
 	fs.Var(&excludePaths, "exclude-path", "Regex pattern to filter excluded endpoint paths (repeatable)")
 	fs.Var(&typeMaps, "type-map", "Custom type mappings (e.g. -type-map=steam_id=id.ID)")
@@ -159,7 +169,10 @@ func (c *CmdOAPI) runImport(_ context.Context, args []string, stdout, stderr io.
 	fs.Usage = func() {
 		fmt.Fprintf(stderr, "vortex oapi import — Import OpenAPI 3.1/Swagger into Aoni Declarative Contract DSL\n\n")
 		fmt.Fprintf(stderr, "Usage:\n")
-		fmt.Fprintf(stderr, "  vortex oapi import -spec=<swagger.json> [-out=api.go] [-split] [-pkg=api]\n\n")
+		fmt.Fprintf(
+			stderr,
+			"  vortex oapi import -spec=<swagger.json> [-out=api.go] [-split] [-pkg=api] [-prune] [-overwrite] [-dry-run]\n\n",
+		)
 		fmt.Fprintf(stderr, "Flags:\n")
 		fs.PrintDefaults()
 	}
@@ -195,6 +208,45 @@ func (c *CmdOAPI) runImport(_ context.Context, args []string, stdout, stderr io.
 		}
 	}
 
+	// Check if existing file is present for semantic reconciliation (Git-merge for APIs)
+	var existingSrc []byte
+	if *outFile != "" && *outFile != "-" && !*overwrite {
+		if data, readErr := os.ReadFile(*outFile); readErr == nil && len(data) > 0 {
+			existingSrc = data
+		}
+	}
+
+	if len(existingSrc) > 0 {
+		// Run Semantic AST Merge Engine
+		mergeEngine := openapi.NewMergeEngine()
+		mCfg := openapi.MergeConfig{
+			SpecFile:       *specFile,
+			PackageName:    *pkgName,
+			ServiceName:    *serviceName,
+			Prune:          *prune,
+			Overwrite:      *overwrite,
+			DryRun:         *dryRun,
+			Interactive:    *interactive,
+			SkipDeprecated: *skipDeprecated,
+			TypeMap:        tm,
+		}
+
+		reconciledSrc, summary, mergeErr := mergeEngine.ReconcileService(existingSrc, doc, mCfg)
+		if mergeErr != nil {
+			return fmt.Errorf("reconciling contract %s: %w", *outFile, mergeErr)
+		}
+
+		fmt.Fprint(stdout, summary.Render(*outFile))
+
+		if !*dryRun {
+			if err := os.WriteFile(*outFile, reconciledSrc, 0o600); err != nil {
+				return fmt.Errorf("writing %s: %w", *outFile, err)
+			}
+		}
+
+		return nil
+	}
+
 	cfg := openapi.ImportConfig{
 		SpecFile:       *specFile,
 		PackageName:    *pkgName,
@@ -222,18 +274,29 @@ func (c *CmdOAPI) runImport(_ context.Context, args []string, stdout, stderr io.
 		apiPath := *outFile
 		modelsPath := filepath.Join(outDir, "models.go")
 
-		if err := os.WriteFile(apiPath, apiSrc, 0o600); err != nil {
-			return fmt.Errorf("writing %s: %w", apiPath, err)
-		}
-
-		fmt.Fprintf(stdout, "✔ Generated Aoni API contract in %s (%d bytes)\n", apiPath, len(apiSrc))
-
-		if len(modelsSrc) > 0 {
-			if err := os.WriteFile(modelsPath, modelsSrc, 0o600); err != nil {
-				return fmt.Errorf("writing %s: %w", modelsPath, err)
+		if !*dryRun {
+			if err := os.WriteFile(apiPath, apiSrc, 0o600); err != nil {
+				return fmt.Errorf("writing %s: %w", apiPath, err)
 			}
 
-			fmt.Fprintf(stdout, "✔ Generated Aoni models in %s (%d bytes)\n", modelsPath, len(modelsSrc))
+			fmt.Fprintf(stdout, "✔ Generated Aoni API contract in %s (%d bytes)\n", apiPath, len(apiSrc))
+
+			if len(modelsSrc) > 0 {
+				if err := os.WriteFile(modelsPath, modelsSrc, 0o600); err != nil {
+					return fmt.Errorf("writing %s: %w", modelsPath, err)
+				}
+
+				fmt.Fprintf(stdout, "✔ Generated Aoni models in %s (%d bytes)\n", modelsPath, len(modelsSrc))
+			}
+		} else {
+			fmt.Fprintf(
+				stdout,
+				"[dry-run] Would generate %s (%d bytes) and %s (%d bytes)\n",
+				apiPath,
+				len(apiSrc),
+				modelsPath,
+				len(modelsSrc),
+			)
 		}
 
 		return nil
@@ -245,11 +308,15 @@ func (c *CmdOAPI) runImport(_ context.Context, args []string, stdout, stderr io.
 	}
 
 	if *outFile != "" && *outFile != "-" {
-		if err := os.WriteFile(*outFile, src, 0o600); err != nil {
-			return fmt.Errorf("writing output file %s: %w", *outFile, err)
-		}
+		if !*dryRun {
+			if err := os.WriteFile(*outFile, src, 0o600); err != nil {
+				return fmt.Errorf("writing output file %s: %w", *outFile, err)
+			}
 
-		fmt.Fprintf(stdout, "✔ Generated Aoni contract in %s (%d bytes)\n", *outFile, len(src))
+			fmt.Fprintf(stdout, "✔ Generated Aoni contract in %s (%d bytes)\n", *outFile, len(src))
+		} else {
+			fmt.Fprintf(stdout, "[dry-run] Would generate %s (%d bytes)\n", *outFile, len(src))
+		}
 
 		return nil
 	}

@@ -221,6 +221,21 @@ func ApplyServiceDirective(s *ir.ServiceIR, d *Directive) {
 		}
 
 		s.SocketConfig.Heartbeat = hb
+
+	case "deprecated":
+		s.Deprecation = parseDeprecationDirective(d)
+	case "summary":
+		s.Summary = d.Value
+	case "description":
+		s.Description = d.Value
+	case "tag", "tags":
+		if d.Value != "" {
+			s.Tags = append(s.Tags, d.Value)
+		}
+	case "version":
+		s.Version = d.Value
+	case "source":
+		s.Source = d.Value
 	}
 }
 
@@ -503,6 +518,23 @@ func ApplyMethodDirective(m *ir.MethodIR, d *Directive) {
 	case "error_model":
 		m.Return = ensureReturnIR(m)
 		m.Return.ErrorModelType = d.Value
+
+	case "deprecated":
+		m.Deprecation = parseDeprecationDirective(d)
+	case "bind", "op_id", "operation_id":
+		m.OperationID = d.Value
+	case "summary":
+		m.Summary = d.Value
+	case "description":
+		m.Description = d.Value
+	case "tag", "tags":
+		if d.Value != "" {
+			m.Tags = append(m.Tags, d.Value)
+		}
+	case "version":
+		m.Version = d.Value
+	case "since":
+		m.Since = d.Value
 	}
 }
 
@@ -953,4 +985,26 @@ func parseCasingStrategy(c string) ir.CasingStrategy {
 	default:
 		return ir.CasingSnakeCase
 	}
+}
+
+func parseDeprecationDirective(d *Directive) *ir.DeprecationIR {
+	if d == nil {
+		return nil
+	}
+
+	dep := &ir.DeprecationIR{
+		Reason:      d.Value,
+		Replacement: d.Args["replace"],
+		Since:       d.Args["since"],
+		Deadline:    d.Args["deadline"],
+	}
+	if r, ok := d.Args["reason"]; ok && r != "" {
+		dep.Reason = r
+	}
+
+	if dep.Replacement == "" {
+		dep.Replacement = d.Args["with"]
+	}
+
+	return dep
 }

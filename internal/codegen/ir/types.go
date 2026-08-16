@@ -54,7 +54,21 @@ type ServiceIR struct {
 	DefaultCasing      CasingStrategy
 	DefaultUnwrapField string
 	DefaultErrorModel  string
+	Deprecation        *DeprecationIR
+	Summary            string
+	Description        string
+	Tags               []string
+	Version            string
+	Source             string
 	Methods            []*MethodIR
+}
+
+// DeprecationIR captures lifecycle deprecation metadata for services, methods, parameters, and fields.
+type DeprecationIR struct {
+	Reason      string
+	Replacement string
+	Since       string
+	Deadline    string
 }
 
 // SocketConfigIR holds configuration parameters for generated generic socket facades.
@@ -206,6 +220,13 @@ type MethodIR struct {
 	Presets         []string
 	OpID            string
 	OpIDIsQuoted    bool
+	OperationID     string
+	Deprecation     *DeprecationIR
+	Summary         string
+	Description     string
+	Tags            []string
+	Version         string
+	Since           string
 	IsNotify        bool
 	IsEvent         bool
 	FormCasing      CasingStrategy
@@ -443,6 +464,9 @@ type ParamIR struct {
 	FileName    string
 	ContentType string
 	Pipeline    *PipelineIR
+	Deprecation *DeprecationIR
+	Description string
+	Since       string
 }
 
 // ParamLocation specifies where a parameter is mapped in the network transaction.
@@ -505,6 +529,9 @@ const (
 type FormatStrategy string
 
 const (
+	// FormatDefault applies standard default formatting.
+	FormatDefault FormatStrategy = ""
+
 	// FormatDirectString appends string bytes directly.
 	FormatDirectString FormatStrategy = "direct_string"
 
@@ -686,6 +713,10 @@ type StructIR struct {
 	OmitEmpty       bool
 	Fields          []*FieldIR
 	GenValueEncoder bool
+	Deprecation     *DeprecationIR
+	Description     string
+	Version         string
+	Since           string
 }
 
 // FieldIR describes an individual struct field and its wire mapping.
@@ -697,6 +728,9 @@ type FieldIR struct {
 	CustomTag   string
 	Formatter   FormatStrategy
 	TimeLayout  string
+	Deprecation *DeprecationIR
+	Description string
+	Since       string
 }
 
 // TupleIR defines a heterogeneous JSON tuple array mapping to struct fields by index.

@@ -70,6 +70,8 @@ func DefaultRegistry() *Registry {
 		&RuleDeadDirective{},
 		&RuleUnusedParam{},
 		&RuleInvalidStatusCodeRange{},
+		&RuleDuplicateOperationID{},
+		&RuleDeprecatedTargetValidation{},
 	)
 
 	return reg

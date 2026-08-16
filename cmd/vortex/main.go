@@ -9,12 +9,16 @@ import (
 	"context"
 	"fmt"
 	"os"
+
+	"github.com/lemon4ksan/aoni/internal/version"
 )
 
 func main() {
 	commands := []Command{
 		&CmdGen{},
 		&CmdCheck{},
+		&CmdDiff{},
+		&CmdLog{},
 		&CmdOAPI{},
 		&CmdProto{},
 		&CmdBench{},
@@ -26,7 +30,7 @@ func main() {
 
 	app := NewApp(
 		"vortex",
-		"v0.6.0",
+		version.Current,
 		"Unified Zero-Allocation AST Toolchain and Engine Suite for projects using aoni",
 		commands...,
 	)

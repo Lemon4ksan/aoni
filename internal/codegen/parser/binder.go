@@ -282,6 +282,15 @@ func (p *Parser) parseMethodParams(
 					if d.Value != "" {
 						param.WireKey = d.Value
 					}
+
+				case "deprecated":
+					param.Deprecation = parseDeprecationDirective(d)
+
+				case "description":
+					param.Description = d.Value
+
+				case "since":
+					param.Since = d.Value
 				}
 			}
 
@@ -493,6 +502,13 @@ func (p *Parser) parseStruct(root *ir.RootIR, name string, docLines []string, st
 	casing := ir.CasingSnakeCase
 	omitEmpty := true
 
+	var (
+		sDep     *ir.DeprecationIR
+		sDesc    string
+		sVersion string
+		sSince   string
+	)
+
 	for _, d := range directives {
 		if d.Name == "aoni:tuple" || d.Name == "tuple" {
 			isTuple = true
@@ -504,6 +520,22 @@ func (p *Parser) parseStruct(root *ir.RootIR, name string, docLines []string, st
 
 		if d.Name == "aoni:union" || d.Name == "union" {
 			isUnion = true
+		}
+
+		if d.Name == "deprecated" {
+			sDep = parseDeprecationDirective(d)
+		}
+
+		if d.Name == "description" {
+			sDesc = d.Value
+		}
+
+		if d.Name == "version" {
+			sVersion = d.Value
+		}
+
+		if d.Name == "since" {
+			sSince = d.Value
 		}
 
 		if d.Name == "aoni:dto" || d.Name == "dto" {
@@ -539,6 +571,10 @@ func (p *Parser) parseStruct(root *ir.RootIR, name string, docLines []string, st
 		OmitEmpty:       omitEmpty,
 		Fields:          make([]*ir.FieldIR, 0, len(strct.Fields.List)),
 		GenValueEncoder: isDTO,
+		Deprecation:     sDep,
+		Description:     sDesc,
+		Version:         sVersion,
+		Since:           sSince,
 	}
 
 	for _, field := range strct.Fields.List {
@@ -551,6 +587,12 @@ func (p *Parser) parseStruct(root *ir.RootIR, name string, docLines []string, st
 			wireName := toCasing(fieldName, casing)
 			customTag := ""
 			formatter := selectFormatStrategy(goType)
+
+			var (
+				fieldDep   *ir.DeprecationIR
+				fieldDesc  string
+				fieldSince string
+			)
 
 			if field.Tag != nil {
 				customTag = strings.Trim(field.Tag.Value, "`")
@@ -569,6 +611,12 @@ func (p *Parser) parseStruct(root *ir.RootIR, name string, docLines []string, st
 					if d.Value != "" {
 						wireName = d.Value
 					}
+				case "deprecated":
+					fieldDep = parseDeprecationDirective(d)
+				case "description":
+					fieldDesc = d.Value
+				case "since":
+					fieldSince = d.Value
 				case "format":
 					if layout, ok := d.Args["layout"]; ok {
 						formatter = ir.FormatTimeLayout
@@ -605,6 +653,9 @@ func (p *Parser) parseStruct(root *ir.RootIR, name string, docLines []string, st
 				IsOmitEmpty: omitEmpty,
 				CustomTag:   customTag,
 				Formatter:   formatter,
+				Deprecation: fieldDep,
+				Description: fieldDesc,
+				Since:       fieldSince,
 			})
 		}
 	}

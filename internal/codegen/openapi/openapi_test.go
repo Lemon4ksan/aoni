@@ -203,3 +203,113 @@ func TestOpenAPI_ImportAndExport(t *testing.T) {
 	require.Contains(t, exportedStr, "GetUserProfile")
 	require.Contains(t, exportedStr, "AlertsResponse")
 }
+
+func TestOpenAPI_LosslessRoundtrip(t *testing.T) {
+	src := `package testapi
+
+import (
+	"context"
+	"github.com/lemon4ksan/aoni"
+)
+
+// @aoni:service casing=snake_case
+// @base_url "https://api.example.com/v1"
+// @persona "chrome_133"
+// @tls_spec "chrome_133"
+type API interface {
+	// GetItem fetches item by id
+	// @get "items/{id}"
+	// @bind "api_v1_get_item_external"
+	// @unwrap "item"
+	// @idempotent
+	// @etag
+	// @deprecated reason="Use GetItemV2 instead" replace="GetItemV2"
+	GetItem(ctx context.Context, id string, mods ...aoni.RequestModifier) (*Item, error)
+}
+
+// @aoni:dto casing=snake_case omitempty=true
+type Item struct {
+	ID string ` + "`" + `json:"id"` + "`" + `
+	Name string ` + "`" + `json:"name"` + "`" + `
+}
+`
+
+	p := parser.NewParser()
+	root, err := p.ParseSource("api.go", []byte(src))
+	require.NoError(t, err)
+	require.NotNil(t, root)
+
+	// 1. Export to OpenAPI 3.1 with Vortex extensions
+	exportCfg := openapi.ExportConfig{
+		Title:   "Test API",
+		Version: "1.0.0",
+		Vortex:  true,
+	}
+	specData, err := openapi.ExportOpenAPI(root, exportCfg)
+	require.NoError(t, err)
+
+	specStr := string(specData)
+	require.Contains(t, specStr, "\"x-vortex-persona\": \"chrome_133\"")
+	require.Contains(t, specStr, "\"x-vortex-tlsspec\": \"chrome_133\"")
+	require.Contains(t, specStr, "\"x-vortex-unwrap\": \"item\"")
+	require.Contains(t, specStr, "\"x-vortex-idempotent\": true")
+	require.Contains(t, specStr, "\"x-vortex-etag\": true")
+	require.Contains(t, specStr, "\"deprecated\": true")
+	require.Contains(t, specStr, "api_v1_get_item_external")
+
+	// 2. Import back from OpenAPI to Go Contract
+	doc, err := openapi.LoadSpec("spec.json", specData)
+	require.NoError(t, err)
+
+	importCfg := openapi.ImportConfig{
+		PackageName: "testapi",
+		ServiceName: "API",
+	}
+	reimportedSrc, err := openapi.GenerateContract(doc, importCfg)
+	require.NoError(t, err)
+
+	reimportedStr := string(reimportedSrc)
+	require.Contains(t, reimportedStr, "// @persona \"chrome_133\"")
+	require.Contains(t, reimportedStr, "// @tls_spec \"chrome_133\"")
+	require.Contains(t, reimportedStr, "// @unwrap \"item\"")
+	require.Contains(t, reimportedStr, "// @idempotent")
+	require.Contains(t, reimportedStr, "// @etag")
+	require.Contains(t, reimportedStr, "// @deprecated")
+	require.Contains(t, reimportedStr, "// @bind \"api_v1_get_item_external\"")
+}
+
+func TestOpenAPI_CleanExportByDefault(t *testing.T) {
+	src := `package testapi
+
+import (
+	"context"
+	"github.com/lemon4ksan/aoni"
+)
+
+// @aoni:service
+// @persona "chrome_133"
+// @tls_spec "chrome_133"
+type API interface {
+	// @get "items/{id}"
+	// @unwrap "data"
+	GetItem(ctx context.Context, id string, mods ...aoni.RequestModifier) (map[string]any, error)
+}
+`
+
+	p := parser.NewParser()
+	root, err := p.ParseSource("api.go", []byte(src))
+	require.NoError(t, err)
+
+	// Export without Vortex flag (clean by default)
+	specData, err := openapi.ExportOpenAPI(root, openapi.ExportConfig{
+		Title:   "Clean API",
+		Version: "1.0.0",
+		Vortex:  false,
+	})
+	require.NoError(t, err)
+
+	specStr := string(specData)
+	require.NotContains(t, specStr, "x-vortex")
+	require.Contains(t, specStr, "\"openapi\": \"3.1.0\"")
+	require.Contains(t, specStr, "GetItem")
+}

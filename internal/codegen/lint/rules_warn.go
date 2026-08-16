@@ -847,6 +847,120 @@ func (r *RuleInvalidStatusCodeRange) Run(pass *Pass) []Diagnostic {
 	return diags
 }
 
+// RuleDuplicateOperationID detects multiple methods bound to the identical operationId or @bind tag.
+type RuleDuplicateOperationID struct{}
+
+func (r *RuleDuplicateOperationID) ID() string   { return "W009" }
+func (r *RuleDuplicateOperationID) Name() string { return "duplicate-operation-id" }
+func (r *RuleDuplicateOperationID) Description() string {
+	return "Detects multiple methods bound to identical operationId or @bind tag within the same service"
+}
+func (r *RuleDuplicateOperationID) Category() Category        { return CategoryStyle }
+func (r *RuleDuplicateOperationID) DefaultSeverity() Severity { return SeverityWarning }
+func (r *RuleDuplicateOperationID) IsFixable() bool           { return false }
+
+func (r *RuleDuplicateOperationID) Run(pass *Pass) []Diagnostic {
+	if pass == nil || pass.RootIR == nil {
+		return nil
+	}
+
+	var diags []Diagnostic
+	for _, svc := range pass.RootIR.Services {
+		seenOpIDs := make(map[string]string)
+		for _, m := range svc.Methods {
+			opID := m.OperationID
+			if opID == "" {
+				continue
+			}
+
+			if prevMethod, exists := seenOpIDs[opID]; exists {
+				line, col := pass.FindNodePosition(svc.Name, m.Name)
+				diags = append(diags, Diagnostic{
+					RuleID:   r.ID(),
+					RuleName: r.Name(),
+					Severity: r.DefaultSeverity(),
+					Category: r.Category(),
+					Target:   m.Name,
+					FilePath: pass.FilePath,
+					Line:     line,
+					Column:   col,
+					Message: fmt.Sprintf(
+						"Method %s has duplicate operation ID %q already bound to method %s",
+						m.Name,
+						opID,
+						prevMethod,
+					),
+					Suggestion: "Assign a unique `@bind` identifier to method " + m.Name,
+				})
+			} else {
+				seenOpIDs[opID] = m.Name
+			}
+		}
+	}
+
+	return diags
+}
+
+// RuleDeprecatedTargetValidation validates that replacement methods specified in @deprecated exist in the service.
+type RuleDeprecatedTargetValidation struct{}
+
+func (r *RuleDeprecatedTargetValidation) ID() string   { return "W010" }
+func (r *RuleDeprecatedTargetValidation) Name() string { return "deprecated-target-validation" }
+func (r *RuleDeprecatedTargetValidation) Description() string {
+	return "Validates that replacement method specified in @deprecated directive exists in the contract"
+}
+func (r *RuleDeprecatedTargetValidation) Category() Category        { return CategoryStyle }
+func (r *RuleDeprecatedTargetValidation) DefaultSeverity() Severity { return SeverityWarning }
+func (r *RuleDeprecatedTargetValidation) IsFixable() bool           { return false }
+
+func (r *RuleDeprecatedTargetValidation) Run(pass *Pass) []Diagnostic {
+	if pass == nil || pass.RootIR == nil {
+		return nil
+	}
+
+	var diags []Diagnostic
+	for _, svc := range pass.RootIR.Services {
+		methodNames := make(map[string]bool)
+		for _, m := range svc.Methods {
+			methodNames[m.Name] = true
+			if m.OperationID != "" {
+				methodNames[m.OperationID] = true
+			}
+		}
+
+		for _, m := range svc.Methods {
+			if m.Deprecation == nil || m.Deprecation.Replacement == "" {
+				continue
+			}
+
+			target := m.Deprecation.Replacement
+			if !methodNames[target] {
+				line, col := pass.FindNodePosition(svc.Name, m.Name)
+				diags = append(diags, Diagnostic{
+					RuleID:   r.ID(),
+					RuleName: r.Name(),
+					Severity: r.DefaultSeverity(),
+					Category: r.Category(),
+					Target:   m.Name,
+					FilePath: pass.FilePath,
+					Line:     line,
+					Column:   col,
+					Message: fmt.Sprintf(
+						"Method %s is deprecated with replacement %q, but %q does not exist in %s",
+						m.Name,
+						target,
+						target,
+						svc.Name,
+					),
+					Suggestion: "Update `replace=\"...\"` in `@deprecated` to refer to an existing method",
+				})
+			}
+		}
+	}
+
+	return diags
+}
+
 func removeLineContaining(filePath, methodScope, pattern string) error {
 	content, err := os.ReadFile(filePath)
 	if err != nil {

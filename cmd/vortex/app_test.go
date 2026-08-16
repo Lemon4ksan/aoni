@@ -12,12 +12,16 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/require"
+
+	"github.com/lemon4ksan/aoni/internal/version"
 )
 
 func newTestApp(stdout, stderr *bytes.Buffer) *App {
 	commands := []Command{
 		&CmdGen{},
 		&CmdCheck{},
+		&CmdDiff{},
+		&CmdLog{},
 		&CmdOAPI{},
 		&CmdProto{},
 		&CmdBench{},
@@ -27,7 +31,7 @@ func newTestApp(stdout, stderr *bytes.Buffer) *App {
 		&CmdExample{},
 	}
 
-	app := NewApp("vortex", "v0.6.0", "Unified Toolchain", commands...)
+	app := NewApp("vortex", version.Current, "Unified Toolchain", commands...)
 	app.Stdout = stdout
 	app.Stderr = stderr
 
@@ -47,7 +51,7 @@ func TestApp_HelpAndVersion(t *testing.T) {
 
 	err = app.Run(context.Background(), []string{"--version"})
 	require.NoError(t, err)
-	require.Contains(t, stdout.String(), "vortex v0.6.0")
+	require.Contains(t, stdout.String(), "vortex "+version.Current)
 }
 
 func TestApp_ListAndExplain(t *testing.T) {
@@ -143,6 +147,158 @@ type ValidAPI interface {
 
 	err := app.Run(context.Background(), []string{"check", "-disable=E001,W001", srcFile})
 	require.NoError(t, err)
+}
+
+func TestApp_Diff(t *testing.T) {
+	tmpDir := t.TempDir()
+	srcFile := filepath.Join(tmpDir, "api.go")
+	specFile := filepath.Join(tmpDir, "spec.json")
+
+	src := `package testapi
+
+import (
+	"context"
+	"github.com/lemon4ksan/aoni"
+)
+
+// @aoni:service
+type API interface {
+	// @get "items/{id}"
+	GetItem(ctx context.Context, id string, mods ...aoni.RequestModifier) (map[string]any, error)
+}
+`
+	require.NoError(t, os.WriteFile(srcFile, []byte(src), 0o600))
+
+	spec := `{
+  "openapi": "3.1.0",
+  "info": {"title": "Test", "version": "1.0.0"},
+  "paths": {
+    "/items/{id}": {
+      "get": {
+        "operationId": "GetItem",
+        "parameters": [{"name": "id", "in": "path", "required": true, "schema": {"type": "string"}}],
+        "responses": {"200": {"description": "OK"}}
+      }
+    }
+  }
+}`
+	require.NoError(t, os.WriteFile(specFile, []byte(spec), 0o600))
+
+	var stdout, stderr bytes.Buffer
+
+	app := newTestApp(&stdout, &stderr)
+
+	err := app.Run(context.Background(), []string{"diff", specFile, srcFile})
+	require.NoError(t, err)
+	require.Contains(t, stdout.String(), "100% in sync")
+}
+
+func TestApp_Log(t *testing.T) {
+	tmpDir := t.TempDir()
+	srcFile := filepath.Join(tmpDir, "api.go")
+
+	src := `package testapi
+
+import (
+	"context"
+	"github.com/lemon4ksan/aoni"
+)
+
+// @aoni:service
+// @version "v1.4.0"
+// @source "test_openapi.json"
+type API interface {
+	// @since "v1.0.0"
+	// @get "items/{id}"
+	GetItem(ctx context.Context, id string, mods ...aoni.RequestModifier) (map[string]any, error)
+
+	// @since "v1.4.0"
+	// @get "orders"
+	GetOrders(ctx context.Context, mods ...aoni.RequestModifier) (map[string]any, error)
+}
+`
+	require.NoError(t, os.WriteFile(srcFile, []byte(src), 0o600))
+
+	var stdout, stderr bytes.Buffer
+
+	app := newTestApp(&stdout, &stderr)
+
+	err := app.Run(context.Background(), []string{"log", srcFile})
+	require.NoError(t, err)
+	require.Contains(t, stdout.String(), "Vortex API Contract Timeline")
+	require.Contains(t, stdout.String(), "v1.4.0")
+	require.Contains(t, stdout.String(), "test_openapi.json")
+
+	// JSON format
+	stdout.Reset()
+
+	err = app.Run(context.Background(), []string{"log", "-json", srcFile})
+	require.NoError(t, err)
+	require.Contains(t, stdout.String(), `"version": "v1.4.0"`)
+}
+
+func TestApp_OAPI_Merge(t *testing.T) {
+	tmpDir := t.TempDir()
+	srcFile := filepath.Join(tmpDir, "api.go")
+	specFile := filepath.Join(tmpDir, "spec.json")
+
+	src := `package testapi
+
+import (
+	"context"
+	"github.com/lemon4ksan/aoni"
+)
+
+// @aoni:service
+type API interface {
+	// @get "items/{id}"
+	// @unwrap "data"
+	GetItem(ctx context.Context, id string, mods ...aoni.RequestModifier) (map[string]any, error)
+}
+`
+	require.NoError(t, os.WriteFile(srcFile, []byte(src), 0o600))
+
+	spec := `{
+  "openapi": "3.1.0",
+  "info": {"title": "Test", "version": "v1.5.0"},
+  "paths": {
+    "/items/{id}": {
+      "get": {
+        "operationId": "api_v1_items_id_get",
+        "parameters": [{"name": "id", "in": "path", "required": true, "schema": {"type": "string"}}],
+        "responses": {"200": {"description": "OK"}}
+      }
+    },
+    "/new/route": {
+      "post": {
+        "operationId": "CreateSomething",
+        "responses": {"200": {"description": "OK"}}
+      }
+    }
+  }
+}`
+	require.NoError(t, os.WriteFile(specFile, []byte(spec), 0o600))
+
+	var stdout, stderr bytes.Buffer
+
+	app := newTestApp(&stdout, &stderr)
+
+	err := app.Run(context.Background(), []string{"oapi", "import", "-spec=" + specFile, "-out=" + srcFile})
+	require.NoError(t, err)
+	require.Contains(t, stdout.String(), "vortex merge")
+
+	// Read merged file
+	content, err := os.ReadFile(srcFile)
+	require.NoError(t, err)
+
+	contentStr := string(content)
+
+	// Directives preserved
+	require.Contains(t, contentStr, `// @unwrap "data"`)
+	// New endpoint added
+	require.Contains(t, contentStr, "CreateSomething")
+	// No DO NOT EDIT
+	require.NotContains(t, contentStr, "DO NOT EDIT")
 }
 
 func TestApp_UnknownCommand(t *testing.T) {

@@ -23,6 +23,19 @@ func emitHTTPMethod(
 	paramsStr := formatMethodParams(m.Params)
 	returnsStr := formatMethodReturns(m.Return)
 
+	if m.Deprecation != nil {
+		depMsg := m.Deprecation.Reason
+		if depMsg == "" {
+			depMsg = "This method is deprecated."
+		}
+
+		if m.Deprecation.Replacement != "" {
+			depMsg = fmt.Sprintf("%s Use %s instead.", depMsg, m.Deprecation.Replacement)
+		}
+
+		fmt.Fprintf(buf, "// Deprecated: %s\n", depMsg)
+	}
+
 	fmt.Fprintf(buf, "func (c *%s) %s(%s) %s {\n", clientStructName, m.Name, paramsStr, returnsStr)
 
 	// Stack modifiers buffer

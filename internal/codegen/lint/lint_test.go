@@ -593,3 +593,46 @@ func TestRules_InvalidUnionStatus(t *testing.T) {
 	require.Contains(t, diags[0].Message, "has no variant fields")
 	require.Contains(t, diags[1].Message, "missing `status:\"...\"` tag")
 }
+
+func TestRules_DuplicateOpID_And_DeprecatedTarget(t *testing.T) {
+	rootIR := &ir.RootIR{
+		PackageName: "testapi",
+		Services: []*ir.ServiceIR{
+			{
+				Name: "TestAPI",
+				Methods: []*ir.MethodIR{
+					{
+						Name:        "GetItem",
+						OperationID: "api_get_item",
+					},
+					{
+						Name:        "FetchItem",
+						OperationID: "api_get_item", // Duplicate opID
+					},
+					{
+						Name: "OldMethod",
+						Deprecation: &ir.DeprecationIR{
+							Replacement: "NonExistentMethod",
+						},
+					},
+				},
+			},
+		},
+	}
+
+	pass := &lint.Pass{RootIR: rootIR, FilePath: "api.go"}
+
+	// W009
+	rW9 := &lint.RuleDuplicateOperationID{}
+	dW9 := rW9.Run(pass)
+	require.Len(t, dW9, 1)
+	require.Equal(t, "W009", dW9[0].RuleID)
+	require.Contains(t, dW9[0].Message, "duplicate operation ID")
+
+	// W010
+	rW10 := &lint.RuleDeprecatedTargetValidation{}
+	dW10 := rW10.Run(pass)
+	require.Len(t, dW10, 1)
+	require.Equal(t, "W010", dW10[0].RuleID)
+	require.Contains(t, dW10[0].Message, "does not exist")
+}
