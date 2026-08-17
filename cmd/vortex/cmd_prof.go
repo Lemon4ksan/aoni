@@ -59,38 +59,64 @@ type ProfileReport struct {
 // CmdProf translates low-level benchmarks and pprof traces into an executive-ready performance dashboard.
 type CmdProf struct{}
 
-func (c *CmdProf) Name() string      { return "prof" }
-func (c *CmdProf) Aliases() []string { return []string{"profile", "perf", "report"} }
+func (c *CmdProf) Name() string      { return "perf" }
+func (c *CmdProf) Aliases() []string { return []string{"prof", "profile"} }
 func (c *CmdProf) Synopsis() string {
-	return "Inspect and present endpoint throughput, allocations, and pprof metrics in human-readable form"
+	return "Inspect endpoint throughput, allocations, harness benchmarks, and pprof profiles"
 }
 
 func (c *CmdProf) Usage() string {
-	return "vortex prof [-benchtime 50ms] [-json] [-md] [-top N] [packages...]"
+	return "vortex perf [prof|bench|harness|cover|pgo] [flags]"
 }
 
 func (c *CmdProf) Run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
-	fs := flag.NewFlagSet("prof", flag.ContinueOnError)
+	if len(args) > 0 {
+		switch strings.ToLower(args[0]) {
+		case "bench", "benchmark":
+			return (&CmdBench{}).Run(ctx, args[1:], stdout, stderr)
+		case "cover", "coverage":
+			return (&CmdCover{}).Run(ctx, args[1:], stdout, stderr)
+		case "harness", "test-harness":
+			return (&CmdHarness{}).Run(ctx, args[1:], stdout, stderr)
+		case "pgo":
+			return (&CmdPGO{}).Run(ctx, args[1:], stdout, stderr)
+		case "prof", "report":
+			args = args[1:]
+		}
+	}
+
+	fs := flag.NewFlagSet("perf", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 
 	var (
-		benchtime = fs.String("benchtime", "50ms", "Duration for each benchmark scenario run")
-		jsonFlag  = fs.Bool("json", false, "Output report in structured JSON format")
-		mdFlag    = fs.Bool("md", false, "Output report in Markdown format")
-		topFlag   = fs.Int("top", 0, "Limit table to top N endpoints (0 = all)")
-		sortFlag  = fs.String("sort", "throughput", "Sort records by: throughput | latency | allocs | name")
+		benchtime    = fs.String("bench-time", "50ms", "Duration for each benchmark scenario run")
+		benchtimeOld = fs.String("benchtime", "", "Legacy duration flag (use --bench-time)")
+		jsonFlag     = fs.Bool("json", false, "Output report in structured JSON format")
+		mdFlag       = fs.Bool("md", false, "Output report in Markdown format")
+		topFlag      = fs.Int("top", 0, "Limit table to top N endpoints (0 = all)")
+		sortFlag     = fs.String("sort", "throughput", "Sort records by: throughput | latency | allocs | name")
 	)
 
 	fs.Usage = func() {
-		fmt.Fprintf(stderr, "vortex prof — Human-Readable Performance & pprof Profile Inspector\n\n")
+		fmt.Fprintf(stderr, "vortex perf — Performance Dashboard & Profiler Toolchain Hub\n\n")
 		fmt.Fprintf(stderr, "Usage:\n")
-		fmt.Fprintf(stderr, "  vortex prof [flags] [packages...]\n\n")
+		fmt.Fprintf(stderr, "  vortex perf [prof|bench|cover|harness|pgo] [flags] [packages...]\n\n")
+		fmt.Fprintf(stderr, "Subcommands:\n")
+		fmt.Fprintf(stderr, "  prof       Inspect endpoint throughput, allocations, and pprof metrics (default)\n")
+		fmt.Fprintf(stderr, "  bench      Silicon hardware inspection & network engine micro-benchmarks\n")
+		fmt.Fprintf(stderr, "  cover      Deduplicated test coverage analyzer and HTML visualizer\n")
+		fmt.Fprintf(stderr, "  harness    Generate zero-allocation integration test and benchmark harness\n")
+		fmt.Fprintf(stderr, "  pgo        Generate and manage Profile-Guided Optimization profiles\n\n")
 		fmt.Fprintf(stderr, "Flags:\n")
 		fs.PrintDefaults()
 	}
 
 	if err := fs.Parse(args); err != nil {
 		return err
+	}
+
+	if *benchtimeOld != "" && *benchtime == "50ms" {
+		*benchtime = *benchtimeOld
 	}
 
 	cwd, err := os.Getwd()

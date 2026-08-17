@@ -23,23 +23,45 @@ import (
 	"github.com/lemon4ksan/aoni/internal/codegen/builder"
 	"github.com/lemon4ksan/aoni/internal/codegen/history"
 	"github.com/lemon4ksan/aoni/internal/codegen/project"
+	"github.com/lemon4ksan/aoni/internal/codegen/tuple"
 )
 
 // CmdRefactor provides AST-level contract restructuring and renaming.
 type CmdRefactor struct{}
 
-func (c *CmdRefactor) Name() string      { return "refactor" }
-func (c *CmdRefactor) Aliases() []string { return []string{"rebase", "rf", "reorganize"} }
+func (c *CmdRefactor) Name() string      { return "ast" }
+func (c *CmdRefactor) Aliases() []string { return []string{"refactor"} }
 func (c *CmdRefactor) Synopsis() string {
-	return "Refactor contracts via AST: split monolithic interfaces and batch rename methods"
+	return "Refactor contracts via AST: tuple deobfuscation, split interfaces, and batch rename"
 }
 
 func (c *CmdRefactor) Usage() string {
-	return "vortex refactor [split|rename] [contract] [flags]"
+	return "vortex ast [tuple|split|rename] [contract] [flags]"
 }
 
 func (c *CmdRefactor) Run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
-	fs := flag.NewFlagSet("refactor", flag.ContinueOnError)
+	if len(args) > 0 {
+		switch strings.ToLower(args[0]) {
+		case "review", "audit":
+			return (&CmdReview{}).Run(ctx, args[1:], stdout, stderr)
+		case "accept", "merge":
+			return (&CmdAccept{}).Run(ctx, args[1:], stdout, stderr)
+		case "undo", "revert":
+			return (&CmdUndo{}).Run(ctx, args[1:], stdout, stderr)
+		case "blame", "provenance":
+			return (&CmdBlame{}).Run(ctx, args[1:], stdout, stderr)
+		case "history", "journal":
+			return (&CmdHistory{}).Run(ctx, args[1:], stdout, stderr)
+		case "pick", "cherry-pick", "cp", "transplant":
+			return (&CmdCherryPick{}).Run(ctx, args[1:], stdout, stderr)
+		case "log", "timeline":
+			return (&CmdLog{}).Run(ctx, args[1:], stdout, stderr)
+		case "tag", "release":
+			return (&CmdTag{}).Run(ctx, args[1:], stdout, stderr)
+		}
+	}
+
+	fs := flag.NewFlagSet("ast", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 
 	var (
@@ -59,19 +81,17 @@ func (c *CmdRefactor) Run(ctx context.Context, args []string, stdout, stderr io.
 	)
 
 	fs.Usage = func() {
-		fmt.Fprintf(stderr, "vortex refactor — AST Contract Refactoring & Reorganizer\n\n")
+		fmt.Fprintf(stderr, "vortex ast — AST Contract Refactoring & Tuple Deobfuscation\n\n")
 		fmt.Fprintf(stderr, "Usage:\n")
-		fmt.Fprintf(stderr, "  vortex refactor split --from=<Interface> --methods=\"Get*,List*\" --to=<NewInterface>\n")
-		fmt.Fprintf(stderr, "  vortex refactor rename --match=\"Fetch(.*)\" --replace=\"Get$1\" [file.go|contract]\n\n")
+		fmt.Fprintf(stderr, "  vortex ast tuple [file.go|contract] [--dry-run]\n")
+		fmt.Fprintf(stderr, "  vortex ast split --from=<Interface> --methods=\"Get*,List*\" --to=<NewInterface> [--out=path.go]\n")
+		fmt.Fprintf(stderr, "  vortex ast rename --match=\"Fetch(.*)\" --replace=\"Get$1\" [file.go|contract]\n\n")
 		fmt.Fprintf(stderr, "Examples:\n")
-		fmt.Fprintf(stderr, "  vortex refactor split --from=MarketAPI --methods=\"Get*,List*\" --to=MarketReaderAPI\n")
+		fmt.Fprintf(stderr, "  vortex ast tuple pkg/agy/makersuite.go\n")
+		fmt.Fprintf(stderr, "  vortex ast split --from=MarketAPI --methods=\"Get*,List*\" --to=MarketReaderAPI\n")
 		fmt.Fprintf(
 			stderr,
-			"  vortex refactor rename --match=\"Fetch(.*)\" --replace=\"Get$1\" pkg/services/bptf/api.go\n",
-		)
-		fmt.Fprintf(
-			stderr,
-			"  vortex refactor split --from=PriceDB --methods=\"Predict*\" --to=PredictAPI --out=pkg/services/pricedb/predict.go\n\n",
+			"  vortex ast rename --match=\"Fetch(.*)\" --replace=\"Get$1\" pkg/services/bptf/api.go\n\n",
 		)
 		fmt.Fprintf(stderr, "Flags:\n")
 		fs.PrintDefaults()
@@ -118,6 +138,11 @@ func (c *CmdRefactor) Run(ctx context.Context, args []string, stdout, stderr io.
 	if len(posArgs) > 0 {
 		first := strings.ToLower(posArgs[0])
 		switch first {
+		case "tuple", "tuples":
+			action = "tuple"
+			if len(posArgs) > 1 {
+				targetArg = posArgs[1]
+			}
 		case "split":
 			action = "split"
 
@@ -142,6 +167,13 @@ func (c *CmdRefactor) Run(ctx context.Context, args []string, stdout, stderr io.
 	}
 
 	switch action {
+	case "tuple":
+		target := targetArg
+		if target == "" {
+			target = *fromFlag
+		}
+		return c.runTuple(ctx, stdout, targetDir, cfg, target, *dryRunFlag, *genFlag)
+
 	case "split":
 		from := *fromFlag
 		if from == "" {
@@ -161,6 +193,53 @@ func (c *CmdRefactor) Run(ctx context.Context, args []string, stdout, stderr io.
 	default:
 		return fmt.Errorf("unknown refactor action %q", action)
 	}
+}
+
+func (c *CmdRefactor) runTuple(
+	ctx context.Context,
+	stdout io.Writer,
+	rootDir string,
+	cfg *project.Config,
+	target string,
+	dryRun, autoGen bool,
+) error {
+	if target == "" {
+		return errors.New("usage: vortex ast tuple <file.go|contract>")
+	}
+
+	srcFile := resolveFilePath(rootDir, cfg, target)
+	if srcFile == "" {
+		return fmt.Errorf("could not resolve contract %q", target)
+	}
+
+	res, err := tuple.DeobfuscateFile(rootDir, srcFile, dryRun)
+	if err != nil {
+		return err
+	}
+
+	relPath, _ := filepath.Rel(rootDir, srcFile)
+	if len(res.TuplesGenerated) == 0 {
+		fmt.Fprintf(stdout, "No positional arrays or nested slices found requiring tuple deobfuscation in %s\n", filepath.ToSlash(relPath))
+		return nil
+	}
+
+	modeStr := ""
+	if dryRun {
+		modeStr = " (Dry-Run)"
+	}
+
+	fmt.Fprintf(stdout, "Successfully deobfuscated %d tuple(s) in %s%s:\n",
+		len(res.TuplesGenerated), filepath.ToSlash(relPath), modeStr)
+	for i, tName := range res.TuplesGenerated {
+		fmt.Fprintf(stdout, "  * %s -> generated @aoni:tuple for %s\n", tName, res.MethodsUpdated[i])
+	}
+
+	if autoGen && !dryRun {
+		b := builder.New(builder.Config{})
+		_, _ = b.BuildFiles(ctx, []string{srcFile})
+	}
+
+	return nil
 }
 
 func (c *CmdRefactor) runSplit(

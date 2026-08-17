@@ -8,6 +8,7 @@ import (
 	"bytes"
 	"compress/gzip"
 	"crypto/sha256"
+	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
@@ -403,6 +404,22 @@ func SanitizeHAR(data []byte, configs ...*SecretsConfig) ([]byte, map[string]Sec
 
 		if resp, ok := entry["response"].(map[string]any); ok {
 			resp["cookies"] = []any{}
+
+			// Auto-decompress gzipped response content
+			decompressed := false
+			if content, ok := resp["content"].(map[string]any); ok {
+				if text, ok := content["text"].(string); ok && text != "" {
+					enc, _ := content["encoding"].(string)
+					decomp := tryDecompressHARText(text, enc)
+					if decomp != "" && decomp != text {
+						content["text"] = decomp
+						content["size"] = len(decomp)
+						delete(content, "encoding")
+						decompressed = true
+					}
+				}
+			}
+
 			if respHeaders, ok := resp["headers"].([]any); ok {
 				var safeRespHeaders []any
 				for _, h := range respHeaders {
@@ -413,6 +430,9 @@ func SanitizeHAR(data []byte, configs ...*SecretsConfig) ([]byte, map[string]Sec
 
 					name, _ := hMap["name"].(string)
 					if strings.EqualFold(name, "set-cookie") {
+						continue
+					}
+					if decompressed && strings.EqualFold(name, "content-encoding") {
 						continue
 					}
 
@@ -515,4 +535,53 @@ func isIgnoredEndpointURL(rawURL string) bool {
 	}
 
 	return false
+}
+
+func tryDecompressHARText(bodyText, encoding string) string {
+	if bodyText == "" {
+		return ""
+	}
+
+	// 1. Try base64
+	if strings.EqualFold(encoding, "base64") {
+		if dec, err := base64.StdEncoding.DecodeString(bodyText); err == nil {
+			if decomp := tryGunzip(dec); decomp != "" {
+				return decomp
+			}
+			return string(dec)
+		}
+	}
+
+	// 2. Try raw UTF-8 bytes gunzip
+	if decomp := tryGunzip([]byte(bodyText)); decomp != "" {
+		return decomp
+	}
+
+	// 3. Try latin-1 / binary string rune-to-byte gunzip
+	runes := []rune(bodyText)
+	if len(runes) >= 2 && runes[0] == 0x1f && (runes[1] == 0x8b || runes[1] == '\b' || runes[1] == 0xef) {
+		bin := make([]byte, len(runes))
+		for i, r := range runes {
+			bin[i] = byte(r)
+		}
+		if decomp := tryGunzip(bin); decomp != "" {
+			return decomp
+		}
+	}
+
+	return bodyText
+}
+
+func tryGunzip(data []byte) string {
+	if len(data) >= 2 && data[0] == 0x1f && data[1] == 0x8b {
+		gzReader, err := gzip.NewReader(bytes.NewReader(data))
+		if err == nil {
+			decompressed, err := io.ReadAll(gzReader)
+			_ = gzReader.Close()
+			if err == nil {
+				return string(decompressed)
+			}
+		}
+	}
+	return ""
 }

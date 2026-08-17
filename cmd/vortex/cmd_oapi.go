@@ -25,25 +25,26 @@ import (
 // CmdOAPI provides bidirectional OpenAPI 3.1 and Swagger schema import/export capabilities.
 type CmdOAPI struct{}
 
-func (c *CmdOAPI) Name() string      { return "oapi" }
-func (c *CmdOAPI) Aliases() []string { return []string{"openapi"} }
+func (c *CmdOAPI) Name() string      { return "spec" }
+func (c *CmdOAPI) Aliases() []string { return []string{"oapi"} }
 func (c *CmdOAPI) Synopsis() string {
-	return "OpenAPI 3.1 bidirectional schema toolchain (import/export)"
+	return "OpenAPI 3.1 & HAR schema toolchain (import/export/diff)"
 }
-func (c *CmdOAPI) Usage() string { return "vortex oapi <import|export> [flags]" }
+func (c *CmdOAPI) Usage() string { return "vortex spec <import|export|diff> [flags]" }
 
 func (c *CmdOAPI) printUsage(w io.Writer) {
-	fmt.Fprintf(w, "vortex oapi — OpenAPI 3.1 & Swagger Bidirectional Schema Toolchain\n\n")
+	fmt.Fprintf(w, "vortex spec — OpenAPI 3.1 & HAR Schema Toolchain Hub\n\n")
 	fmt.Fprintf(w, "Usage:\n")
-	fmt.Fprintf(w, "  vortex oapi <import|export> [flags]\n\n")
+	fmt.Fprintf(w, "  vortex spec <import|export|diff> [flags]\n\n")
 	fmt.Fprintf(w, "Subcommands:\n")
 	fmt.Fprintf(w, "  import    Import OpenAPI/Swagger or HAR traffic into Go contract with 3-way AST merge\n")
-	fmt.Fprintf(w, "  export    Export @aoni:service Go contracts into OpenAPI 3.1 specifications\n\n")
+	fmt.Fprintf(w, "  export    Export @aoni:service Go contracts into OpenAPI 3.1 specifications\n")
+	fmt.Fprintf(w, "  diff      Compare schema contracts against remote or reference specifications\n\n")
 	fmt.Fprintf(w, "Examples:\n")
-	fmt.Fprintf(w, "  vortex oapi import -spec=openapi.json -out=./pkg/api/api.go\n")
-	fmt.Fprintf(w, "  vortex oapi import -spec=session.har -out=./pkg/api/api.go -add\n")
-	fmt.Fprintf(w, "  vortex oapi export -file=./pkg/api/api.go -out=openapi.json\n\n")
-	fmt.Fprintf(w, "Run 'vortex oapi import -h' or 'vortex oapi export -h' for subcommand options.\n")
+	fmt.Fprintf(w, "  vortex spec import -spec=openapi.json -out=./pkg/api/api.go\n")
+	fmt.Fprintf(w, "  vortex spec import -spec=session.har -out=./pkg/api/api.go -add\n")
+	fmt.Fprintf(w, "  vortex spec export -file=./pkg/api/api.go -out=openapi.json\n\n")
+	fmt.Fprintf(w, "Run 'vortex spec import -h' or 'vortex spec export -h' for subcommand options.\n")
 }
 
 func (c *CmdOAPI) Run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
@@ -52,18 +53,22 @@ func (c *CmdOAPI) Run(ctx context.Context, args []string, stdout, stderr io.Writ
 		return nil
 	}
 
-	mode := args[0]
+	mode := strings.ToLower(args[0])
 	switch mode {
 	case "export":
 		return c.runExport(ctx, args[1:], stdout, stderr)
 	case "import":
 		return c.runImport(ctx, args[1:], stdout, stderr)
+	case "diff", "compare":
+		return (&CmdDiff{}).Run(ctx, args[1:], stdout, stderr)
+	case "proto", "protobuf":
+		return (&CmdProto{}).Run(ctx, args[1:], stdout, stderr)
 	case "-h", "--help", "help":
 		c.printUsage(stdout)
 		return nil
 	default:
 		c.printUsage(stderr)
-		return fmt.Errorf("unknown oapi subcommand %q. Valid modes: 'import', 'export'", mode)
+		return fmt.Errorf("unknown spec subcommand %q. Valid modes: 'import', 'export', 'diff', 'proto'", mode)
 	}
 }
 

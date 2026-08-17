@@ -762,11 +762,14 @@ type TupleIR struct {
 	Fields []TupleFieldIR
 }
 
-// TupleFieldIR maps a specific array index to a struct field.
+// TupleFieldIR maps a specific array index or nested path (e.g. "2.0.1") to a struct field.
 type TupleFieldIR struct {
-	Index  int
-	GoName string
-	Type   GoTypeIR
+	Index     int
+	IndexPath []int
+	PathStr   string
+	IsNested  bool
+	GoName    string
+	Type      GoTypeIR
 }
 
 // CasingStrategy defines field naming transformation conventions.

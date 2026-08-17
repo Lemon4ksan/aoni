@@ -13,14 +13,12 @@
    - [Parameter Binding Annotations](#parameter-binding-annotations)
    - [Resilience & Caching Annotations](#resilience--caching-annotations)
    - [Data Transfer Object (DTO) Annotations](#data-transfer-object-dto-annotations)
+   - [Heterogeneous Tuple & JSPB Annotations (`@aoni:tuple`)](#heterogeneous-tuple--jspb-annotations-aonituple)
    - [Two-Tier Header Architecture](#two-tier-header-architecture)
 3. [CLI Reference & Subcommands](#3-cli-reference--subcommands)
+   - [Daily Core Commands (`vortex autopilot`, `vortex gen`, `vortex check`, `vortex mock`, `vortex env`, `vortex smoke`)](#daily-core-commands)
+   - [Toolchain Hubs (`vortex spec`, `vortex traffic`, `vortex ast`, `vortex perf`)](#toolchain-hubs)
    - [Workspace Management (`vortex init`, `vortex config`, `vortex status`, `vortex clean`)](#workspace-management)
-   - [Code Generation & Mocks (`vortex gen`, `vortex mock`)](#code-generation--mocks)
-   - [Specification Ingestion & Export (`vortex source`, `vortex import`, `vortex export`, `vortex proto`)](#specification-ingestion--export)
-   - [AST Manipulation & Refactoring (`vortex cherry-pick`, `vortex refactor`, `vortex undo`)](#ast-manipulation--refactoring)
-   - [Validation, Diffing & Auditing (`vortex check`, `vortex diff`, `vortex blame`, `vortex tag`)](#validation-diffing--auditing)
-   - [Performance & Benchmarking (`vortex bench`, `vortex prof`, `vortex pgo`)](#performance--benchmarking)
 4. [Configuration Schema (`.vortex.yml`)](#4-configuration-schema-vortexyml)
 5. [End-to-End Workflows](#5-end-to-end-workflows)
    - [Authoring a Service Contract](#authoring-a-service-contract)
@@ -206,6 +204,32 @@ type CreateClientRegisterRequest struct {
 
 ---
 
+### Heterogeneous Tuple & JSPB Annotations (`@aoni:tuple`)
+
+For RPC frameworks that return positional arrays or hierarchical JSPB trees (e.g. Google Internal RPC, Steam, Discord), Vortex provides `@aoni:tuple`:
+
+```go
+// @aoni:tuple
+type ListModelsTuple struct {
+    ID           string       `aoni:"0"`
+    Name         string       `aoni:"1"`
+    Description  string       `aoni:"2"`
+    Capabilities [][][]string `aoni:"13"`
+    TraceContext string       `aoni:"42.0.1"`
+}
+```
+
+| Tag | Parameter | Description |
+| :--- | :--- | :--- |
+| `// @aoni:tuple` | — | Marks struct as a positional/heterogeneous array tuple. |
+| `` `aoni:"<path>"` `` | Index path (e.g. `"0"`, `"13.0.1"`) | Maps the struct field to a specific array index or nested slice path. |
+
+* **Zero-Allocation Decoding**: Emits high-speed `UnmarshalJSON` that performs zero heap allocations and directly extracts positional fields.
+* **Bounds-Safe & Sparse Protection**: Automatically skips `null` elements or truncated arrays without panics.
+* **Scalar & Array Compatibility**: Seamlessly handles both arrays of objects/arrays and single scalar responses.
+
+---
+
 ### Two-Tier Header Architecture
 
 Vortex provides declarative header inheritance across two layers:
@@ -237,89 +261,17 @@ go install github.com/lemon4ksan/aoni/cmd/vortex@latest
 Usage: vortex <command> [flags] [arguments]
 ```
 
-### Workspace Management
-
-#### `vortex init`
-Scaffolds a `.vortex.yml` workspace configuration from auto-discovered Go interfaces, OpenAPI, or AsyncAPI specifications.
-
-```bash
-# Auto-discover existing Go interfaces in workspace
-vortex init
-
-# Force overwrite existing configuration
-vortex init -force
-
-# Scaffold from starter templates (rest, stream, ws, auth, stealth, grpc, socket, list)
-vortex init billing -tpl=rest       # REST CRUD API with DTOs, pagination, and filters
-vortex init chat -tpl=ws           # WebSocket Bi-Directional Event Client
-vortex init ai -tpl=sse            # Real-Time Server-Sent Events (SSE) & NDJSON Client
-vortex init auth -tpl=auth         # OAuth2 Token Auto-Rotation & HMAC Signing
-vortex init market -tpl=stealth    # Anti-Bot Browser Impersonator with JA4 & p0f Spoofing
-vortex init rpc -tpl=grpc          # Framed gRPC-Web & Protobuf Client
-vortex init raw -tpl=socket        # Persistent High-Throughput Binary Socket Facade
-vortex init -tpl=list              # View full interactive template catalog
-
-# Ingest OpenAPI / HAR traffic captures directly into new package
-vortex init agy -from=traffic.har -service=AntigravityAPI
-vortex init agy -from=traffic1.har,traffic2.har -mode=intersect # Multi-HAR baseline extraction
-vortex init petstore -from=openapi.json -pkg=petstore -out=pkg/petstore/api.go
-vortex init market -from-asyncapi=./specs/market_stream.yaml -out=pkg/market/api.go
-```
-
-#### `vortex config` (Aliases: `cfg`, `conf`)
-Views, queries, and modifies workspace settings, code generation defaults, and lint rules without manual YAML editing.
-
-```bash
-# List all workspace configurations
-vortex config list
-vortex config list --json
-
-# Query specific properties
-vortex config get defaults.casing
-vortex config get defaults.engine
-
-# Modify settings with type validation
-vortex config set defaults.casing snake_case
-vortex config set defaults.engine fast
-vortex config set defaults.retry 3
-vortex config set defaults.timeout 15s
-
-# Manage lint rules and strict mode
-vortex config lint disable S001 W002
-vortex config lint enable S001
-vortex config lint strict true
-
-# Manage polyglot export plugins
-vortex config plugin add ts --out=src/api.ts --contract=Market
-vortex config plugin rm ts --contract=Market
-```
-
-#### `vortex status`
-Performs a health check across all registered contracts in the workspace.
-
-```bash
-vortex status
-vortex status -strict  # Exits with code 1 if out-of-sync contracts exist
-vortex status -json    # Machine-readable output for CI/CD
-```
-
-#### `vortex clean`
-Removes generated test mocks, benchmark harnesses, CPU/memory profiles, test binaries, and cache directories.
-
-```bash
-# Preview artifacts to delete without disk modifications
-vortex clean -dry-run
-
-# Clean mocks, harnesses, coverage dumps, and .vortex/ cache
-vortex clean
-
-# Also remove primary generated API clients (*.gen.go)
-vortex clean --all
-```
-
 ---
 
-### Code Generation & Mocks
+### Daily Core Commands
+
+#### `vortex autopilot`
+The zero-configuration primary command: audits workspace health, synchronizes upstream schemas, and compiles all clients in under 50ms.
+
+```bash
+vortex                  # Runs autopilot by default
+vortex autopilot -watch # Continuous watch and auto-compile mode
+```
 
 #### `vortex gen`
 Compiles declarative Go interfaces into zero-allocation API client implementations.
@@ -331,233 +283,176 @@ vortex gen -watch              # Continuous compilation on file save
 vortex gen -dry-run            # Preview generated Go source code in stdout
 ```
 
-#### `vortex mock`
-Generates fully functional in-memory HTTP/WebSocket mock servers for contract testing.
-
-```bash
-vortex mock                    # Generate mock servers for all contracts
-vortex mock pkg/user/api.go    # Generate mock server for a specific contract
-vortex mock -strict            # Enforces strict parameter validation
-```
-
----
-
-### Specification Ingestion & Export
-
-#### `vortex source` (Aliases: `src`, `upstream`, `remote`)
-Manages, fetches, diffs, and synchronizes upstream OpenAPI/Swagger/AsyncAPI specifications with zero manual path passing.
-
-```bash
-# List all upstream sources and their status across the workspace
-vortex source list
-
-# Bind an upstream remote URL or local file to a contract
-vortex source set PriceDB https://api.pricedb.net/openapi.json --fetch
-vortex source set Bptf api/specs/bptf.yaml
-
-# Unbind upstream source from a contract
-vortex source rm PriceDB
-
-# Fetch remote specs locally into api/specs/
-vortex source fetch [contract]
-
-# Verify reachability of remote endpoints
-vortex source ping [contract]
-
-# Semantic diff against configured upstream schema without specifying file paths
-vortex source diff PriceDB
-
-# One-step pipeline: fetch remote spec, check diff, and regenerate client
-vortex source sync PriceDB
-```
-
-#### `vortex import` (Aliases: `oapi import`)
-Imports OpenAPI 3.x, Swagger 2.0, or HAR Traffic Captures into declarative Go contracts with **3-Way AST Semantic Reconciliation** (`Git-merge for APIs`).
-
-```bash
-# Ingest single OpenAPI spec or HAR capture
-vortex import -spec=openapi.json -out=./pkg/api/api.go
-vortex import session.har -service=MyAPI -out=pkg/myapi/api.go
-
-# Multi-spec composition (comma-separated or globs)
-vortex import traffic1.har,traffic2.har -service=API -out=pkg/api/api.go
-vortex import "specs/*.json" -out=pkg/api/api.go
-
-# Set-Operation Merge Modes:
-vortex import a.har,b.har -mode=union      # (Default) Union all endpoints (A ∪ B)
-vortex import a.har,b.har -mode=intersect  # Baseline extraction: only endpoints in BOTH (A ∩ B)
-vortex import a.har,b.har -mode=diff       # Delta extraction: only endpoints in A missing in B (A \ B)
-
-# 3-Way AST Reconciliation Options:
-vortex import session.har -out=pkg/api/api.go -add      # Preserve unmentioned endpoints as active
-vortex import session.har -out=pkg/api/api.go -prune    # Prune unmentioned endpoints
-vortex import session.har -out=pkg/api/api.go -f        # Discard existing and regenerate fresh
-vortex import session.har -out=pkg/api/api.go -dry-run  # Preview changes without modifying disk
-vortex import session.har -out=pkg/api/api.go -split    # Split into api.go and models.go
-vortex import session.har -type-map=steam_id=id.ID      # Custom domain type mapping
-```
-
-**Reconciliation Engine Guarantees:**
-* **Rule A (Type Fidelity)**: Custom Go domain types (`steam.ID`, `time.Time`, custom DTOs) are preserved and never degraded to generic `any`.
-* **Rule B (Non-Destructive Addition)**: New endpoints in the upstream schema are appended with synthetic method signatures and DTO structs.
-* **Rule C (Conservative Deprecation)**: Endpoints removed upstream are marked with `// @deprecated` rather than silently deleted (unless `-prune` is passed).
-
-#### `vortex export` (Aliases: `oapi export`, `oapi`)
-Exports declarative Go contracts to clean standard OpenAPI 3.1.0 JSON or YAML schemas.
-
-```bash
-# Standard clean OpenAPI 3.1.0 export (Default — no vendor extensions)
-vortex export pkg/user/api.go -out=openapi.json
-vortex export pkg/user/api.go -yaml -out=openapi.yaml
-
-# Full fidelity export with vendor extensions (x-vortex-*)
-vortex export pkg/user/api.go --vortex -out=openapi.json
-```
-
-#### `vortex proto`
-Compiles Protocol Buffer definitions with zero-allocation `vtprotobuf` codecs.
-
-```bash
-vortex proto -src=./proto -out=./pkg/pb -import=github.com/my/project/pkg/pb
-```
-
----
-
-### AST Manipulation & Refactoring
-
-#### `vortex cherry-pick` (Aliases: `cp`, `transplant`, `pick`)
-Transplants a method or DTO struct from a source contract to a target contract AST, **automatically copying all dependent nested DTO structs** (transitive closure):
-
-```bash
-# Cherry-pick method and all its transitive parameter/return DTO structs
-vortex cherry-pick pkg/services/mannco/api.go:GetItemPrices --to=pkg/services/bptf/api.go
-
-# Cherry-pick a specific DTO struct and its nested types
-vortex cherry-pick Mannco:ItemDTO --to=Bptf
-
-# Preview transplantation without modifying files on disk
-vortex cherry-pick pkg/services/pricedb/api.go:PredictSpell --to=pkg/services/crit/api.go --dry-run
-```
-
-#### `vortex refactor` (Aliases: `rebase`, `rf`, `reorganize`)
-Provides interactive AST-level contract restructuring, interface splitting, and batch renaming:
-
-```bash
-# Split monolithic interface into separate focused interface (ISP principle)
-vortex refactor split --from=MarketAPI --methods="Get*,List*" --to=MarketReaderAPI
-
-# Split into a separate new file
-vortex refactor split --from=PriceDB --methods="Predict*" --to=PredictAPI --out=pkg/services/pricedb/predict.go
-
-# Batch rename method names via regular expressions
-vortex refactor rename --match="Fetch(.*)" --replace="Get$1" pkg/services/bptf/api.go
-#### `vortex history` (Aliases: `ops`, `operations`, `journal`)
-Inspects the mutation journal of past AST refactors, cherry-picks, and workspace changes:
-
-```bash
-vortex history
-vortex history --json
-```
-
-#### `vortex undo` (Aliases: `revert`, `rollback`, `pop`)
-Reverts the last modifying AST operation (or a specific `op-id`) and automatically restores code and regenerates clients:
-
-```bash
-# Revert the latest operation (Ctrl+Z for AST refactors & cherry-picks)
-vortex undo
-
-# Revert a specific operation by ID
-vortex undo op-a1b2c3
-```
-
----
-
-### Validation, Diffing & Auditing
-
 #### `vortex check`
-Performs static analysis, linting, and security audits across Go contracts with **incremental SHA-256 caching (`0.1ms`)**:
+Performs static contract validation, rule enforcement, and pre-commit checks.
 
 ```bash
 vortex check                        # Fast incremental check (hits cache for unchanged contracts)
-vortex check --no-cache             # Clean audit ignoring local cache
-vortex check -strict                # Treat warnings as errors
+vortex check --breaking-only        # Fast pre-commit hook mode (<25ms) for Git hooks and CI
 vortex check --fix                  # Automatically apply safe code fixes
+vortex check -strict                # Treat warnings as errors
 vortex check -sarif=security.sarif  # Export findings for GitHub Security Code Scanning
 ```
 
-#### `vortex diff`
-Performs semantic schema comparison between a Go contract and an upstream OpenAPI specification, or directly **compares two external specs / HAR captures (Spec-to-Spec)**.
+#### `vortex mock`
+Generates fully functional in-memory HTTP/WebSocket mock servers for integration testing.
 
 ```bash
-# Contract-to-Spec comparison:
-vortex diff openapi.json pkg/user/api.go
-vortex diff session.har MarketAPI
-
-# Direct Spec-to-Spec comparison (No Go contract required):
-vortex diff spec_v1.json spec_v2.json
-vortex diff session_staging.har session_prod.har
-vortex diff "specs_old/*.json" "specs_new/*.json"
+vortex mock                          # Generate mock servers for all contracts
+vortex mock -fixtures                # Auto-populate zero-code mock responses from recorded traffic
+vortex mock pkg/user/api.go          # Generate mock server for a specific contract
+vortex mock -strict                  # Enforces strict parameter validation
 ```
 
-#### `vortex review` & `vortex accept`
-Interactive review tool for inspecting and accepting upstream schema changes.
+#### `vortex env`
+Scans contracts for `${VAR_NAME}` references and generates `.env.example` templates.
 
 ```bash
-vortex review openapi.json pkg/user/api.go
-vortex accept openapi.json pkg/user/api.go
+vortex env                           # Scan all contracts and output .env.example
+vortex env --fill --out=.env.local   # Pre-fill values from local .vortex/cache/secrets.json
+vortex env pkg/agy/unleash.go --out=-# Print required variables to stdout
 ```
 
-#### `vortex blame` (Aliases: `pvn`, `provenance`, `origin`)
-Inspects contract lineage, directive origin, and Git author metadata for every method and DTO struct:
+#### `vortex smoke`
+Rapidly probes live contract endpoints using stored secrets and renders a latency and TLS summary table.
 
 ```bash
-vortex blame pkg/services/bptf/api.go
-vortex blame Market
-vortex blame pkg/services/pricedb/api.go --method=GetPrice
-vortex blame pkg/services/pricedb/api.go --json
-```
-
-#### `vortex tag` (Aliases: `release`, `semver`)
-Manages contract SemVer release snapshots, changelogs, and Git release tags:
-
-```bash
-# Record a contract release snapshot
-vortex tag add v1.2.0 -m "Release with inventory filters"
-vortex tag add v1.3.0 Market -m "Add instant buy order endpoints"
-
-# List all release tags and historical snapshots
-vortex tag list
-
-# Inspect detailed snapshot (endpoint list, author, timestamp)
-vortex tag show v1.2.0
-vortex tag rm v1.2.0
-```
-
-#### `vortex log`
-Displays the version timeline and evolution of a service contract.
-
-```bash
-vortex log pkg/user/api.go
-vortex log -json pkg/user/api.go
+vortex smoke                         # Probe safe GET/HEAD endpoints across workspace
+vortex smoke pkg/agy/unleash.go      # Probe specific contract endpoints
+vortex smoke --all --timeout=10s     # Probe all endpoints including POST/PUT
 ```
 
 ---
 
-### Performance & Benchmarking
+### Toolchain Hubs
 
-#### `vortex harness` & `vortex bench`
-Generates and executes zero-regression benchmark suites.
+#### `vortex spec` (OpenAPI 3.1, HAR & Proto Hub)
+Bidirectional schema toolchain for importing, exporting, and diffing OpenAPI and HAR specifications.
 
 ```bash
-vortex harness pkg/user/api.go
-vortex bench -benchtime=3s -cpu=1,4,8
+# Ingest OpenAPI / HAR traffic captures into declarative Go contracts (3-Way AST Merge):
+vortex spec import -spec=openapi.json -out=./pkg/api/api.go
+vortex spec import -spec=session.har -out=./pkg/api/api.go -add
+vortex spec import traffic1.har,traffic2.har -mode=intersect # Baseline extraction
+
+# Export @aoni:service contracts to OpenAPI 3.1:
+vortex spec export -file=./pkg/api/api.go -out=openapi.json
+vortex spec export -file=./pkg/api/api.go -yaml -out=openapi.yaml
+
+# Semantic diff against OpenAPI specifications:
+vortex spec diff openapi.json pkg/user/api.go
+vortex spec diff spec_v1.json spec_v2.json
+
+# Compile Protocol Buffer definitions:
+vortex spec proto -src=./proto -out=./pkg/pb
 ```
 
-#### `vortex pgo`
-Collects and merges runtime profiles for Go Profile-Guided Optimization (`default.pgo`).
+#### `vortex traffic` (Network Sniffer, Cache & Secrets Hub)
+Manages local traffic captures, live process sniffing, and the encrypted secrets vault.
 
 ```bash
-vortex pgo -record=60s -out=default.pgo
+# Capture live process network traffic into a HAR archive:
+vortex traffic record -out=session.har -- ./mycli
+
+# Manage local traffic cache (.vortex/cache/traffic):
+vortex traffic list                  # List cached traffic sessions
+vortex traffic show <id|hash>        # Inspect metadata of a cached session
+vortex traffic store session.har     # Store session in local cache with auto-gunzip
+vortex traffic export <id> -out=.    # Export clean, uncompressed HAR with gunzip
+vortex traffic secrets               # Manage captured header/query secrets vault
+vortex traffic prune                 # Clean old traffic snapshots
+```
+
+#### `vortex ast` (Tuple Deobfuscation, Refactoring & VCS Hub)
+AST-level refactoring, tuple deobfuscation, interface splitting, and contract version control.
+
+```bash
+# Deobfuscate positional arrays / JSPB into typed @aoni:tuple structs:
+vortex ast tuple pkg/agy/makersuite.go
+vortex ast tuple pkg/agy/makersuite.go --dry-run
+
+# Split monolithic interface into separate focused interfaces (ISP principle):
+vortex ast split --from=MarketAPI --methods="Get*,List*" --to=MarketReaderAPI
+vortex ast split --from=PriceDB --methods="Predict*" --to=PredictAPI --out=pkg/services/pricedb/predict.go
+
+# Batch rename method names via regular expressions:
+vortex ast rename --match="Fetch(.*)" --replace="Get$1" pkg/services/bptf/api.go
+
+# Cherry-pick methods and DTO structs across contracts (transitive closure):
+vortex ast pick pkg/services/mannco/api.go:GetItemPrices --to=pkg/services/bptf/api.go
+
+# Audit and merge consumer Git proposal branches:
+vortex ast review openapi.json pkg/user/api.go
+vortex ast accept openapi.json pkg/user/api.go
+
+# Contract provenance, history journal, and rollback:
+vortex ast history                   # Inspect past mutation journal
+vortex ast undo                      # Revert the latest modifying AST operation
+vortex ast blame pkg/user/api.go     # Line-by-line contract provenance
+vortex ast log pkg/user/api.go       # Contract revision timeline
+vortex ast tag add v1.2.0            # Tag contract release snapshot
+```
+
+#### `vortex perf` (Throughput, Profiler, Benchmarks & PGO Hub)
+High-performance benchmarking, allocation tracking, and runtime optimization.
+
+```bash
+# Executive performance dashboard and pprof inspector:
+vortex perf                          # Profile all workspace contracts
+vortex perf prof --bench-time=100ms  # Custom benchmark duration
+
+# Silicon hardware inspection and engine benchmarks:
+vortex perf bench                    # Hardware CPU flags, AVX2/AVX-512, RPS scoring
+vortex perf bench -quick             # Quick express benchmark
+
+# Test coverage analyzer:
+vortex perf cover                    # Deduplicated core test coverage analyzer
+
+# Standalone test and benchmark harness generation:
+vortex perf harness pkg/user/api.go  # Generate zero-allocation benchmark harness
+
+# Profile-Guided Optimization (PGO):
+vortex perf pgo -record=60s          # Collect runtime profile for default.pgo
+```
+
+---
+
+### Workspace Management
+
+#### `vortex init`
+Scaffolds a `.vortex.yml` workspace configuration or new API package templates.
+
+```bash
+vortex init                          # Auto-discover existing Go interfaces
+vortex init billing -tpl=rest        # REST CRUD API template
+vortex init chat -tpl=ws            # WebSocket Bi-Directional Event Client
+vortex init ai -tpl=sse             # Real-Time SSE & NDJSON Client
+```
+
+#### `vortex config`
+Views, queries, and modifies workspace settings, code generation defaults, and lint rules.
+
+```bash
+vortex config list
+vortex config get defaults.engine
+vortex config set defaults.engine fast
+vortex config lint disable S001 W002
+```
+
+#### `vortex status`
+Performs a 360° health check across all registered contracts in the workspace.
+
+```bash
+vortex status
+vortex status -strict  # Exits with code 1 if out-of-sync contracts exist
+```
+
+#### `vortex clean`
+Removes generated test mocks, benchmark harnesses, CPU/memory profiles, and cache directories.
+
+```bash
+vortex clean           # Clean mocks, harnesses, coverage dumps, and cache
+vortex clean --all     # Also remove primary generated API clients (*.gen.go)
 ```
 
 ---

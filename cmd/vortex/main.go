@@ -50,6 +50,8 @@ func main() {
 		&CmdExample{},
 		&CmdPGO{},
 		&CmdCompletion{},
+		&CmdEnv{},
+		&CmdSmoke{},
 	}
 
 	app := NewApp(

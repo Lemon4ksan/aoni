@@ -18,17 +18,17 @@ import (
 	"github.com/lemon4ksan/aoni/internal/codegen/project"
 )
 
-// CmdCache implements the `vortex cache` command suite for managing traffic captures and secret vaults.
+// CmdCache manages local traffic captures and secret credentials vault.
 type CmdCache struct{}
 
-func (c *CmdCache) Name() string      { return "cache" }
-func (c *CmdCache) Aliases() []string { return []string{"traffic"} }
+func (c *CmdCache) Name() string      { return "traffic" }
+func (c *CmdCache) Aliases() []string { return []string{"cache"} }
 func (c *CmdCache) Synopsis() string {
 	return "Manage local traffic captures and secret credentials vault"
 }
 
 func (c *CmdCache) Usage() string {
-	return "vortex cache [list|show|store|sanitize|export|secrets|prune] [flags]"
+	return "vortex traffic [list|show|store|sanitize|export|secrets|prune] [flags]"
 }
 
 func (c *CmdCache) Run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
@@ -42,6 +42,8 @@ func (c *CmdCache) Run(ctx context.Context, args []string, stdout, stderr io.Wri
 	subArgs := args[1:]
 
 	switch sub {
+	case "record", "sniff":
+		return (&CmdRecord{}).Run(ctx, subArgs, stdout, stderr)
 	case "list", "ls":
 		return c.runList(ctx, subArgs, stdout, stderr)
 	case "show", "inspect":

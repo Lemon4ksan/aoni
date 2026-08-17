@@ -38,9 +38,10 @@ func (c *CmdCheck) Run(ctx context.Context, args []string, stdout, stderr io.Wri
 	fs.SetOutput(stderr)
 
 	var (
-		fixFlag    = fs.Bool("fix", false, "Automatically apply safe, non-destructive fixes")
-		jsonFlag   = fs.Bool("json", false, "Output diagnostics as JSON (shorthand for -format=json)")
-		formatFlag = fs.String(
+		fixFlag          = fs.Bool("fix", false, "Automatically apply safe, non-destructive fixes")
+		breakingOnlyFlag = fs.Bool("breaking-only", false, "Fast pre-commit mode: check only stale codegen (E001) and breaking changes")
+		jsonFlag         = fs.Bool("json", false, "Output diagnostics as JSON (shorthand for -format=json)")
+		formatFlag       = fs.String(
 			"format",
 			"terminal",
 			"Output format: terminal, json, github (GitHub Actions annotations), sarif",
@@ -61,6 +62,7 @@ func (c *CmdCheck) Run(ctx context.Context, args []string, stdout, stderr io.Wri
 		fs.PrintDefaults()
 		fmt.Fprintf(stderr, "\nExamples:\n")
 		fmt.Fprintf(stderr, "  vortex check ./...                              # Validate all contracts in workspace\n")
+		fmt.Fprintf(stderr, "  vortex check --breaking-only                    # Fast pre-commit hook validation (<25ms)\n")
 		fmt.Fprintf(
 			stderr,
 			"  vortex check --fix ./pkg/api/api.go             # Auto-fix missing imports and directives\n",
@@ -199,6 +201,26 @@ func (c *CmdCheck) Run(ctx context.Context, args []string, stdout, stderr io.Wri
 		}
 
 		reports = append(reports, report)
+	}
+
+	if *breakingOnlyFlag {
+		var breakingReports []*lint.Report
+		for _, r := range reports {
+			var breakingDiags []lint.Diagnostic
+			for _, d := range r.Diagnostics {
+				if d.Severity == lint.SeverityError || d.RuleID == "E001" || strings.HasPrefix(d.RuleID, "E") {
+					breakingDiags = append(breakingDiags, d)
+				}
+			}
+			breakingReports = append(breakingReports, &lint.Report{
+				Diagnostics:     breakingDiags,
+				SuppressedCount: r.SuppressedCount,
+				ServicesChecked: r.ServicesChecked,
+				MethodsChecked:  r.MethodsChecked,
+				FilesChecked:    r.FilesChecked,
+			})
+		}
+		reports = breakingReports
 	}
 
 	if !*noCacheFlag && !*fixFlag {

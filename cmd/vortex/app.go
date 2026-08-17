@@ -34,28 +34,21 @@ type commandGroup struct {
 
 var commandGroups = []commandGroup{
 	{
-		Title: "🚀 Core Workflow & Generation",
+		Title: "Core Commands",
 		Commands: []string{
-			"autopilot", "gen", "mock", "init", "status", "config", "work", "clean",
+			"autopilot", "gen", "check", "mock", "env", "smoke",
 		},
 	},
 	{
-		Title: "🔍 Quality, Testing & Drift",
+		Title: "Hubs",
 		Commands: []string{
-			"check", "diff", "review", "accept", "cherrypick", "harness", "bench", "cover",
+			"spec", "traffic", "ast", "perf",
 		},
 	},
 	{
-		Title: "🌐 Traffic & Protocols",
+		Title: "Workspace",
 		Commands: []string{
-			"record", "import", "export", "cache", "oapi", "proto",
-		},
-	},
-	{
-		Title: "🛠️ Refactoring & Tooling",
-		Commands: []string{
-			"refactor", "history", "undo", "source", "log", "tag",
-			"blame", "prof", "pgo", "explain", "example", "list", "completion",
+			"init", "status", "config", "work", "clean", "explain", "completion",
 		},
 	},
 }

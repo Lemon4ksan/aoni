@@ -53,6 +53,8 @@ func newTestApp(stdout, stderr *bytes.Buffer) *App {
 		&CmdExample{},
 		&CmdPGO{},
 		&CmdCompletion{},
+		&CmdEnv{},
+		&CmdSmoke{},
 	}
 
 	app := NewApp("vortex", version.Current, "Unified Toolchain", commands...)

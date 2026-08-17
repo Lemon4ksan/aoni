@@ -705,11 +705,52 @@ func (p *Parser) parseTuple(root *ir.RootIR, name string, docLines []string, str
 	idx := 0
 	for _, field := range strct.Fields.List {
 		goType := p.extractGoType(field.Type)
+
+		tagPathStr := ""
+		if field.Tag != nil {
+			tagVal := reflect.StructTag(strings.Trim(field.Tag.Value, "`"))
+			if v := tagVal.Get("aoni"); v != "" {
+				tagPathStr = v
+			} else if v := tagVal.Get("tuple"); v != "" {
+				tagPathStr = v
+			}
+		}
+
 		for _, ident := range field.Names {
+			fieldPathStr := tagPathStr
+			var indexPath []int
+			fieldIdx := idx
+
+			if fieldPathStr != "" {
+				parts := strings.Split(fieldPathStr, ".")
+				valid := true
+				for _, part := range parts {
+					val, err := strconv.Atoi(strings.TrimSpace(part))
+					if err != nil {
+						valid = false
+						break
+					}
+					indexPath = append(indexPath, val)
+				}
+
+				if valid && len(indexPath) > 0 {
+					fieldIdx = indexPath[0]
+				} else {
+					indexPath = []int{idx}
+					fieldPathStr = strconv.Itoa(idx)
+				}
+			} else {
+				fieldPathStr = strconv.Itoa(idx)
+				indexPath = []int{idx}
+			}
+
 			tuple.Fields = append(tuple.Fields, ir.TupleFieldIR{
-				Index:  idx,
-				GoName: ident.Name,
-				Type:   goType,
+				Index:     fieldIdx,
+				IndexPath: indexPath,
+				PathStr:   fieldPathStr,
+				IsNested:  len(indexPath) > 1,
+				GoName:    ident.Name,
+				Type:      goType,
 			})
 			idx++
 		}
