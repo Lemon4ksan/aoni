@@ -1658,3 +1658,135 @@ func TestApp_Config_Secrets(t *testing.T) {
 	require.NoError(t, err)
 	require.NotContains(t, stdout.String(), "x-custom-key")
 }
+
+func TestApp_HARDifferential_Diff(t *testing.T) {
+	tempDir := t.TempDir()
+	cwd, err := os.Getwd()
+	require.NoError(t, err)
+
+	defer func() { _ = os.Chdir(cwd) }()
+	require.NoError(t, os.Chdir(tempDir))
+
+	var stdout, stderr bytes.Buffer
+	app := newTestApp(&stdout, &stderr)
+
+	// Create sample contract
+	contractGo := `package testapi
+
+// TestAPI provides contract definition.
+//
+// @aoni:service
+// @base_url "https://api.test.com"
+type TestAPI interface {
+	// @post "/$rpc/google.test.Service/GenerateContent"
+	GenerateContent(req GenerateContentRequest) (any, error)
+}
+
+// @aoni:tuple
+type GenerateContentRequest struct {
+	Field0 string ` + "`" + `aoni:"0"` + "`" + `
+	Field4 int    ` + "`" + `aoni:"4"` + "`" + `
+	Field5 float64 ` + "`" + `aoni:"5"` + "`" + `
+}
+`
+	require.NoError(t, os.WriteFile(filepath.Join(tempDir, "api.go"), []byte(contractGo), 0o600))
+
+	// HAR 1: output length 65536
+	harA := `{
+  "log": {
+    "entries": [
+      {
+        "request": {
+          "method": "POST",
+          "url": "https://api.test.com/$rpc/google.test.Service/GenerateContent",
+          "postData": {
+            "text": "[\"gemini-1.5\", 0, 0, 0, 65536, 0.7]"
+          }
+        },
+        "response": {
+          "status": 200,
+          "content": {
+            "text": "[\"result\"]"
+          }
+        }
+      }
+    ]
+  }
+}`
+
+	// HAR 2: output length 8192 and temp 1.0
+	harB := `{
+  "log": {
+    "entries": [
+      {
+        "request": {
+          "method": "POST",
+          "url": "https://api.test.com/$rpc/google.test.Service/GenerateContent",
+          "postData": {
+            "text": "[\"gemini-1.5\", 0, 0, 0, 8192, 1.0]"
+          }
+        },
+        "response": {
+          "status": 200,
+          "content": {
+            "text": "[\"result\"]"
+          }
+        }
+      }
+    ]
+  }
+}`
+
+	fileA := filepath.Join(tempDir, "session_a.har")
+	fileB := filepath.Join(tempDir, "session_b.har")
+	require.NoError(t, os.WriteFile(fileA, []byte(harA), 0o600))
+	require.NoError(t, os.WriteFile(fileB, []byte(harB), 0o600))
+
+	// Run vortex diff session_a.har session_b.har
+	stdout.Reset()
+	err = app.Run(context.Background(), []string{"diff", fileA, fileB})
+	require.NoError(t, err)
+
+	out := stdout.String()
+	require.Contains(t, out, "Traffic Diff")
+	require.Contains(t, out, "GenerateContentRequest")
+	require.Contains(t, out, "Field4")
+	require.Contains(t, out, "65536 ➔ 8192")
+	require.Contains(t, out, "vortex ast rename --type=GenerateContentRequest --field=Field4 --to=<NAME>")
+	require.Contains(t, out, "Field5")
+	require.Contains(t, out, "0.7 ➔ 1")
+}
+
+func TestApp_AST_FieldRename(t *testing.T) {
+	tempDir := t.TempDir()
+	cwd, err := os.Getwd()
+	require.NoError(t, err)
+
+	defer func() { _ = os.Chdir(cwd) }()
+	require.NoError(t, os.Chdir(tempDir))
+
+	var stdout, stderr bytes.Buffer
+	app := newTestApp(&stdout, &stderr)
+
+	contractGo := `package testapi
+
+// @aoni:tuple
+type GenerateContentRequest struct {
+	Field0 string ` + "`" + `aoni:"0"` + "`" + `
+	Field4 int    ` + "`" + `aoni:"4"` + "`" + `
+}
+`
+	apiPath := filepath.Join(tempDir, "api.go")
+	require.NoError(t, os.WriteFile(apiPath, []byte(contractGo), 0o600))
+
+	// Run vortex ast rename --type=GenerateContentRequest --field=Field4 --to=MaxOutputTokens
+	err = app.Run(context.Background(), []string{"ast", "rename", "--type=GenerateContentRequest", "--field=Field4", "--to=MaxOutputTokens", "-gen=false"})
+	require.NoError(t, err)
+
+	data, err := os.ReadFile(apiPath)
+	require.NoError(t, err)
+	content := string(data)
+	require.Contains(t, content, "MaxOutputTokens int")
+	require.Contains(t, content, "`aoni:\"4\"`")
+	require.NotContains(t, content, "Field4")
+}

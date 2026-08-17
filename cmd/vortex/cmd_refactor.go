@@ -17,6 +17,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"reflect"
 	"regexp"
 	"strings"
 
@@ -74,6 +75,9 @@ func (c *CmdRefactor) Run(ctx context.Context, args []string, stdout, stderr io.
 		)
 		matchFlag   = fs.String("match", "", "Regex match pattern for renaming (e.g. 'Fetch(.*)')")
 		replaceFlag = fs.String("replace", "", "Replacement pattern for renaming (e.g. 'Get$1')")
+		typeFlag    = fs.String("type", "", "Target struct/tuple type name to rename field in (e.g. 'GenerateContentRequest')")
+		structFlag  = fs.String("struct", "", "Alias for -type")
+		fieldFlag   = fs.String("field", "", "Target field name or positional tag index (e.g. 'Field4' or '4')")
 		outFlag     = fs.String("out", "", "Output file for split interface (default: same file)")
 		dryRunFlag  = fs.Bool("dry-run", false, "Preview AST refactor without writing changes to disk")
 		genFlag     = fs.Bool("gen", true, "Automatically re-generate API clients after refactoring")
@@ -86,13 +90,18 @@ func (c *CmdRefactor) Run(ctx context.Context, args []string, stdout, stderr io.
 		fmt.Fprintf(stderr, "Usage:\n")
 		fmt.Fprintf(stderr, "  vortex ast tuple [file.go|contract] [--js=\"*.js\"] [--dry-run]\n")
 		fmt.Fprintf(stderr, "  vortex ast split --from=<Interface> --methods=\"Get*,List*\" --to=<NewInterface> [--out=path.go]\n")
-		fmt.Fprintf(stderr, "  vortex ast rename --match=\"Fetch(.*)\" --replace=\"Get$1\" [file.go|contract]\n\n")
+		fmt.Fprintf(stderr, "  vortex ast rename --match=\"Fetch(.*)\" --replace=\"Get$1\" [file.go|contract]\n")
+		fmt.Fprintf(stderr, "  vortex ast rename --type=<Struct> --field=<FieldOrTag> --to=<NewName> [file.go]\n\n")
 		fmt.Fprintf(stderr, "Examples:\n")
 		fmt.Fprintf(stderr, "  vortex ast tuple pkg/agy/makersuite.go --js=\"*.js\"\n")
 		fmt.Fprintf(stderr, "  vortex ast split --from=MarketAPI --methods=\"Get*,List*\" --to=MarketReaderAPI\n")
 		fmt.Fprintf(
 			stderr,
-			"  vortex ast rename --match=\"Fetch(.*)\" --replace=\"Get$1\" pkg/services/bptf/api.go\n\n",
+			"  vortex ast rename --match=\"Fetch(.*)\" --replace=\"Get$1\" pkg/services/bptf/api.go\n",
+		)
+		fmt.Fprintf(
+			stderr,
+			"  vortex ast rename --type=GenerateContentRequest --field=Field4 --to=MaxOutputTokens\n\n",
 		)
 		fmt.Fprintf(stderr, "Flags:\n")
 		fs.PrintDefaults()
@@ -104,7 +113,8 @@ func (c *CmdRefactor) Run(ctx context.Context, args []string, stdout, stderr io.
 		if strings.HasPrefix(arg, "-") {
 			flags = append(flags, arg)
 			if (arg == "-from" || arg == "-to" || arg == "-methods" || arg == "-match" ||
-				arg == "-replace" || arg == "-out" || arg == "-dir" || arg == "-js") &&
+				arg == "-replace" || arg == "-type" || arg == "-struct" || arg == "-field" ||
+				arg == "-out" || arg == "-dir" || arg == "-js") &&
 				i+1 < len(args) && !strings.HasPrefix(args[i+1], "-") {
 				flags = append(flags, args[i+1])
 				i++
@@ -187,6 +197,19 @@ func (c *CmdRefactor) Run(ctx context.Context, args []string, stdout, stderr io.
 		target := targetArg
 		if target == "" {
 			target = *fromFlag
+		}
+
+		targetType := *typeFlag
+		if targetType == "" {
+			targetType = *structFlag
+		}
+
+		if targetType != "" && (*fieldFlag != "" || *toFlag != "" || *replaceFlag != "") {
+			toName := *toFlag
+			if toName == "" {
+				toName = *replaceFlag
+			}
+			return c.runFieldRename(ctx, stdout, targetDir, cfg, target, targetType, *fieldFlag, toName, *dryRunFlag, *genFlag)
 		}
 
 		return c.runRename(ctx, stdout, targetDir, cfg, target, *matchFlag, *replaceFlag, *dryRunFlag, *genFlag)
@@ -571,4 +594,122 @@ func matchesAnyPattern(name string, patterns []string) bool {
 	}
 
 	return false
+}
+
+func (c *CmdRefactor) runFieldRename(
+	ctx context.Context,
+	stdout io.Writer,
+	rootDir string,
+	cfg *project.Config,
+	target, targetStruct, targetField, newFieldName string,
+	dryRun, autoGen bool,
+) error {
+	if targetStruct == "" || (targetField == "" && newFieldName == "") {
+		return errors.New("usage: vortex ast rename --type=<StructName> --field=<FieldOrTag> --to=<NewName> [file.go]")
+	}
+
+	var targetFiles []string
+	if target != "" {
+		resolved := resolveFilePath(rootDir, cfg, target)
+		if resolved != "" {
+			targetFiles = []string{resolved}
+		}
+	}
+
+	if len(targetFiles) == 0 {
+		targetFiles = builder.CollectInputFiles(rootDir, nil)
+	}
+
+	fset := token.NewFileSet()
+	renamed := false
+	var modifiedFile string
+
+	for _, file := range targetFiles {
+		if strings.HasSuffix(file, ".gen.go") || strings.HasSuffix(file, "_test.go") {
+			continue
+		}
+
+		fileAst, err := parser.ParseFile(fset, file, nil, parser.ParseComments)
+		if err != nil {
+			continue
+		}
+
+		fileModified := false
+		ast.Inspect(fileAst, func(n ast.Node) bool {
+			typeSpec, ok := n.(*ast.TypeSpec)
+			if !ok || !strings.EqualFold(typeSpec.Name.Name, targetStruct) {
+				return true
+			}
+
+			st, ok := typeSpec.Type.(*ast.StructType)
+			if !ok || st.Fields == nil {
+				return true
+			}
+
+			for _, f := range st.Fields.List {
+				tagMatch := false
+				if f.Tag != nil {
+					tagVal := reflect.StructTag(strings.Trim(f.Tag.Value, "`"))
+					tagNum := strings.TrimPrefix(strings.TrimPrefix(targetField, "Field"), "field")
+					if aVal := tagVal.Get("aoni"); aVal == targetField || aVal == tagNum {
+						tagMatch = true
+					} else if tVal := tagVal.Get("tuple"); tVal == targetField || tVal == tagNum {
+						tagMatch = true
+					}
+				}
+
+				for _, id := range f.Names {
+					if strings.EqualFold(id.Name, targetField) || tagMatch {
+						old := id.Name
+						id.Name = newFieldName
+						fileModified = true
+						renamed = true
+						fmt.Fprintf(stdout, "  ↳ %s.%s -> %s.%s\n", typeSpec.Name.Name, old, typeSpec.Name.Name, newFieldName)
+						return false
+					}
+				}
+			}
+			return true
+		})
+
+		if fileModified {
+			modifiedFile = file
+			var buf bytes.Buffer
+			if err := format.Node(&buf, fset, fileAst); err != nil {
+				return fmt.Errorf("formatting renamed AST in %s: %w", file, err)
+			}
+
+			relPath, _ := filepath.Rel(rootDir, file)
+			if dryRun {
+				fmt.Fprintf(stdout, "\n⚡ [vortex ast rename] Dry-Run (%s: field %s.%s -> %s)\n\n",
+					filepath.ToSlash(relPath), targetStruct, targetField, newFieldName)
+				return nil
+			}
+
+			_, _ = history.Record(
+				rootDir,
+				fmt.Sprintf("vortex ast rename --type=%s --field=%s --to=%s", targetStruct, targetField, newFieldName),
+				[]string{file},
+			)
+
+			if err := os.WriteFile(file, buf.Bytes(), 0o600); err != nil {
+				return fmt.Errorf("writing %s: %w", file, err)
+			}
+
+			fmt.Fprintf(stdout, "✔ Successfully renamed %s.%s -> %s in %s\n",
+				targetStruct, targetField, newFieldName, filepath.ToSlash(relPath))
+			break
+		}
+	}
+
+	if !renamed {
+		return fmt.Errorf("field %q (or tag) not found in struct %q", targetField, targetStruct)
+	}
+
+	if autoGen && modifiedFile != "" {
+		b := builder.New(builder.Config{})
+		_, _ = b.BuildFiles(ctx, []string{modifiedFile})
+	}
+
+	return nil
 }

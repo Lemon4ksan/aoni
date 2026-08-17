@@ -6,12 +6,15 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
 	"io"
+	"net/url"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 
 	"github.com/lemon4ksan/aoni/internal/codegen/builder"
@@ -110,8 +113,19 @@ func (c *CmdDiff) Run(ctx context.Context, args []string, stdout, stderr io.Writ
 		return c.runGitDiff(ctx, *againstFlag, positional, *jsonFlag, stdout)
 	}
 
-	// Branch 2: Spec-to-Spec direct comparison (e.g. `vortex diff v1.json v2.json` or `vortex diff a.har b.har`)
+	// Branch 2: Spec-to-Spec direct comparison or HAR-to-HAR differential
+	if len(positional) >= 2 && strings.HasSuffix(positional[0], ".har") && strings.HasSuffix(positional[1], ".har") {
+		cwd, _ := os.Getwd()
+		rootDir, _, _ := project.FindRoot(cwd)
+		return c.runHARDifferential(ctx, rootDir, positional[0], positional[1], stdout)
+	}
+
 	if *specFlag != "" && len(positional) > 0 && isSpecFile(positional[0]) {
+		if strings.HasSuffix(*specFlag, ".har") && strings.HasSuffix(positional[0], ".har") {
+			cwd, _ := os.Getwd()
+			rootDir, _, _ := project.FindRoot(cwd)
+			return c.runHARDifferential(ctx, rootDir, *specFlag, positional[0], stdout)
+		}
 		return c.runSpecDiff(ctx, *specFlag, positional[0], *failOnDriftFlag, *strictFlag, *jsonFlag, stdout)
 	}
 
@@ -365,4 +379,346 @@ func isSpecFile(p string) bool {
 	}
 
 	return false
+}
+
+type harEntryDiff struct {
+	Endpoint string
+	Struct   string
+	Field    string
+	Tag      string
+	OldVal   string
+	NewVal   string
+}
+
+func (c *CmdDiff) runHARDifferential(
+	_ context.Context,
+	rootDir, fileA, fileB string,
+	stdout io.Writer,
+) error {
+	dataA, err := os.ReadFile(fileA)
+	if err != nil {
+		return fmt.Errorf("reading base HAR %s: %w", fileA, err)
+	}
+
+	dataB, err := os.ReadFile(fileB)
+	if err != nil {
+		return fmt.Errorf("reading target HAR %s: %w", fileB, err)
+	}
+
+	type harSimpleEntry struct {
+		Request struct {
+			Method   string `json:"method"`
+			URL      string `json:"url"`
+			PostData *struct {
+				Text string `json:"text"`
+			} `json:"postData"`
+		} `json:"request"`
+		Response struct {
+			Status  int `json:"status"`
+			Content struct {
+				Text string `json:"text"`
+			} `json:"content"`
+		} `json:"response"`
+	}
+
+	type harSimpleDoc struct {
+		Log struct {
+			Entries []harSimpleEntry `json:"entries"`
+		} `json:"log"`
+	}
+
+	var docA, docB harSimpleDoc
+	if err := json.Unmarshal(dataA, &docA); err != nil {
+		return fmt.Errorf("parsing base HAR JSON %s: %w", fileA, err)
+	}
+	if err := json.Unmarshal(dataB, &docB); err != nil {
+		return fmt.Errorf("parsing target HAR JSON %s: %w", fileB, err)
+	}
+
+	entriesB := make(map[string]harSimpleEntry)
+	for _, eb := range docB.Log.Entries {
+		key := normalizeRouteKey(eb.Request.Method, eb.Request.URL)
+		entriesB[key] = eb
+	}
+
+	p := codeparser.NewParser()
+	var allServices []*ir.ServiceIR
+	var allStructs []*ir.StructIR
+	var allTuples []*ir.TupleIR
+	if rootDir != "" {
+		for _, f := range builder.CollectInputFiles(rootDir, nil) {
+			if strings.HasSuffix(f, ".gen.go") || strings.HasSuffix(f, "_test.go") {
+				continue
+			}
+			if root, err := p.ParseFile(f); err == nil {
+				allServices = append(allServices, root.Services...)
+				allStructs = append(allStructs, root.Structs...)
+				allTuples = append(allTuples, root.Tuples...)
+			}
+		}
+	}
+
+	var deltas []harEntryDiff
+
+	for _, ea := range docA.Log.Entries {
+		key := normalizeRouteKey(ea.Request.Method, ea.Request.URL)
+		eb, found := entriesB[key]
+		if !found {
+			continue
+		}
+
+		// 1. Compare Request Payloads
+		if ea.Request.PostData != nil && eb.Request.PostData != nil &&
+			ea.Request.PostData.Text != "" && eb.Request.PostData.Text != "" {
+			var bodyA, bodyB any
+			if errA := json.Unmarshal([]byte(ea.Request.PostData.Text), &bodyA); errA == nil {
+				if errB := json.Unmarshal([]byte(eb.Request.PostData.Text), &bodyB); errB == nil {
+					structName, fieldMap := resolveStructForRoute(key, true, allServices, allStructs, allTuples)
+					compareJSONNodes("", bodyA, bodyB, func(path string, valA, valB any) {
+						fieldName, tag := resolveFieldFromPath(path, fieldMap)
+						deltas = append(deltas, harEntryDiff{
+							Endpoint: key,
+							Struct:   structName,
+							Field:    fieldName,
+							Tag:      tag,
+							OldVal:   formatDeltaValue(valA),
+							NewVal:   formatDeltaValue(valB),
+						})
+					})
+				}
+			}
+		}
+
+		// 2. Compare Response Payloads
+		if ea.Response.Content.Text != "" && eb.Response.Content.Text != "" {
+			var bodyA, bodyB any
+			if errA := json.Unmarshal([]byte(ea.Response.Content.Text), &bodyA); errA == nil {
+				if errB := json.Unmarshal([]byte(eb.Response.Content.Text), &bodyB); errB == nil {
+					structName, fieldMap := resolveStructForRoute(key, false, allServices, allStructs, allTuples)
+					compareJSONNodes("", bodyA, bodyB, func(path string, valA, valB any) {
+						fieldName, tag := resolveFieldFromPath(path, fieldMap)
+						deltas = append(deltas, harEntryDiff{
+							Endpoint: key,
+							Struct:   structName,
+							Field:    fieldName,
+							Tag:      tag,
+							OldVal:   formatDeltaValue(valA),
+							NewVal:   formatDeltaValue(valB),
+						})
+					})
+				}
+			}
+		}
+	}
+
+	if len(deltas) == 0 {
+		fmt.Fprintf(stdout, "✔ Traffic comparison: 0 parameter delta(s) between %s and %s\n", filepath.Base(fileA), filepath.Base(fileB))
+		return nil
+	}
+
+	fmt.Fprintf(stdout, "🔍 Traffic Diff (%s ↔ %s): %d parameter delta(s)\n\n",
+		filepath.Base(fileA), filepath.Base(fileB), len(deltas))
+
+	grouped := make(map[string][]harEntryDiff)
+	var groupOrder []string
+	for _, d := range deltas {
+		groupKey := d.Struct + " (" + d.Endpoint + ")"
+		if len(grouped[groupKey]) == 0 {
+			groupOrder = append(groupOrder, groupKey)
+		}
+		grouped[groupKey] = append(grouped[groupKey], d)
+	}
+
+	for _, gKey := range groupOrder {
+		items := grouped[gKey]
+		fmt.Fprintf(stdout, "📍 %s\n", gKey)
+		for _, it := range items {
+			tagInfo := ""
+			if it.Tag != "" {
+				tagInfo = fmt.Sprintf(" (tag %s)", it.Tag)
+			}
+			fmt.Fprintf(stdout, "  • %s%s: %s ➔ %s      ➜ vortex ast rename --type=%s --field=%s --to=<NAME>\n",
+				it.Field, tagInfo, it.OldVal, it.NewVal, it.Struct, it.Field)
+		}
+		fmt.Fprintf(stdout, "\n")
+	}
+
+	return nil
+}
+
+func normalizeRouteKey(method, rawURL string) string {
+	m := strings.ToUpper(strings.TrimSpace(method))
+	if m == "" {
+		m = "POST"
+	}
+	path := rawURL
+	if u, err := url.Parse(rawURL); err == nil && u.Path != "" {
+		path = u.Path
+	}
+	return m + " " + path
+}
+
+func compareJSONNodes(prefix string, a, b any, onDelta func(path string, oldVal, newVal any)) {
+	if a == nil && b == nil {
+		return
+	}
+	if a == nil || b == nil {
+		onDelta(prefix, a, b)
+		return
+	}
+
+	switch valA := a.(type) {
+	case []any:
+		if valB, ok := b.([]any); ok {
+			maxLen := len(valA)
+			if len(valB) > maxLen {
+				maxLen = len(valB)
+			}
+			for i := 0; i < maxLen; i++ {
+				indexPath := fmt.Sprintf("%d", i)
+				if prefix != "" {
+					indexPath = prefix + "." + indexPath
+				}
+				var itemA, itemB any
+				if i < len(valA) {
+					itemA = valA[i]
+				}
+				if i < len(valB) {
+					itemB = valB[i]
+				}
+				compareJSONNodes(indexPath, itemA, itemB, onDelta)
+			}
+			return
+		}
+		onDelta(prefix, a, b)
+	case map[string]any:
+		if valB, ok := b.(map[string]any); ok {
+			allKeys := make(map[string]bool)
+			for k := range valA {
+				allKeys[k] = true
+			}
+			for k := range valB {
+				allKeys[k] = true
+			}
+			for k := range allKeys {
+				keyPath := k
+				if prefix != "" {
+					keyPath = prefix + "." + k
+				}
+				compareJSONNodes(keyPath, valA[k], valB[k], onDelta)
+			}
+			return
+		}
+		onDelta(prefix, a, b)
+	default:
+		if fmt.Sprintf("%v", a) != fmt.Sprintf("%v", b) {
+			onDelta(prefix, a, b)
+		}
+	}
+}
+
+func resolveStructForRoute(
+	routeKey string,
+	isRequest bool,
+	services []*ir.ServiceIR,
+	structs []*ir.StructIR,
+	tuples []*ir.TupleIR,
+) (string, map[string]string) {
+	parts := strings.SplitN(routeKey, " ", 2)
+	path := routeKey
+	if len(parts) == 2 {
+		path = parts[1]
+	}
+
+	var matchedMethod *ir.MethodIR
+	for _, s := range services {
+		for _, m := range s.Methods {
+			if m.Path != nil && (strings.EqualFold(m.Path.RawTemplate, path) ||
+				strings.HasSuffix(path, m.Path.RawTemplate)) {
+				matchedMethod = m
+				break
+			}
+		}
+		if matchedMethod != nil {
+			break
+		}
+	}
+
+	structName := ""
+	if matchedMethod != nil {
+		if isRequest && len(matchedMethod.Params) > 0 {
+			structName = matchedMethod.Params[0].GoType.Name
+		} else if !isRequest && matchedMethod.Return != nil {
+			structName = matchedMethod.Return.SuccessType.Name
+		}
+	}
+
+	if structName == "" || structName == "any" {
+		methodTerminal := deriveTerminalName(path)
+		if isRequest {
+			structName = methodTerminal + "Request"
+		} else {
+			structName = methodTerminal + "Response"
+		}
+	}
+
+	fieldMap := make(map[string]string)
+	for _, st := range structs {
+		if strings.EqualFold(st.Name, structName) {
+			for _, f := range st.Fields {
+				if f.CustomTag != "" {
+					tagVal := reflect.StructTag(strings.Trim(f.CustomTag, "`"))
+					if aVal := tagVal.Get("aoni"); aVal != "" {
+						fieldMap[aVal] = f.GoName
+					}
+				}
+			}
+			break
+		}
+	}
+
+	for _, tup := range tuples {
+		if strings.EqualFold(tup.Name, structName) {
+			for _, f := range tup.Fields {
+				if f.PathStr != "" {
+					fieldMap[f.PathStr] = f.GoName
+				} else if f.Index >= 0 {
+					fieldMap[fmt.Sprintf("%d", f.Index)] = f.GoName
+				}
+			}
+			break
+		}
+	}
+
+	return structName, fieldMap
+}
+
+func deriveTerminalName(path string) string {
+	trimmed := strings.TrimPrefix(strings.TrimPrefix(path, "/$rpc/"), "/")
+	segments := strings.Split(trimmed, "/")
+	last := segments[len(segments)-1]
+	parts := strings.Split(last, ".")
+	return parts[len(parts)-1]
+}
+
+func resolveFieldFromPath(path string, fieldMap map[string]string) (string, string) {
+	tag := path
+	if name, ok := fieldMap[path]; ok {
+		return name, tag
+	}
+	return "Field" + strings.ReplaceAll(path, ".", "_"), tag
+}
+
+func formatDeltaValue(val any) string {
+	if val == nil {
+		return "null"
+	}
+	s := fmt.Sprintf("%v", val)
+	if str, ok := val.(string); ok {
+		s = fmt.Sprintf("%q", str)
+	}
+	if len(s) > 35 {
+		s = s[:32] + "..."
+	}
+	return s
 }
