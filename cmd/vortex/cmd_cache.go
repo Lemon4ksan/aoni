@@ -11,11 +11,13 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 
 	"github.com/lemon4ksan/aoni/internal/codegen/cache"
 	"github.com/lemon4ksan/aoni/internal/codegen/project"
+	"github.com/lemon4ksan/aoni/internal/tui"
 )
 
 // CmdCache manages local traffic captures and secret credentials vault.
@@ -120,19 +122,19 @@ func (c *CmdCache) runList(_ context.Context, _ []string, stdout, stderr io.Writ
 	}
 
 	fmt.Fprintf(stdout, "⚡ Vortex Traffic Cache (.vortex/cache/traffic)\n\n")
-	fmt.Fprintf(stdout, "%-14s %-24s %-28s %-10s %-16s %-10s %s\n",
-		"ID", "ORIGINAL FILE", "DOMAINS", "ENDPOINTS", "RAW -> GZ", "SANITIZED", "DATE")
-	fmt.Fprintf(stdout, "%s\n", strings.Repeat("─", 115))
+
+	tbl := tui.NewTable("ID", "ORIGINAL FILE", "DOMAINS", "ENDPOINTS", "RAW -> GZ", "SANITIZED", "DATE")
+	tbl.SetIndent(0)
 
 	for _, e := range list {
 		originsStr := strings.Join(e.Origins, ", ")
-		if len(originsStr) > 26 {
-			originsStr = originsStr[:23] + "..."
+		if len(originsStr) > 28 {
+			originsStr = originsStr[:25] + "..."
 		}
 
 		origFile := e.OriginalFile
-		if len(origFile) > 22 {
-			origFile = origFile[:19] + "..."
+		if len(origFile) > 28 {
+			origFile = origFile[:25] + "..."
 		}
 
 		sizeRatio := fmt.Sprintf("%s -> %s", formatBytes(e.SizeBytes), formatBytes(e.CompressedBytes))
@@ -142,10 +144,18 @@ func (c *CmdCache) runList(_ context.Context, _ []string, stdout, stderr io.Writ
 			sanStr = "raw"
 		}
 
-		fmt.Fprintf(stdout, "%-14s %-24s %-28s %-10d %-16s %-10s %s\n",
-			e.ID, origFile, originsStr, e.EndpointCount, sizeRatio, sanStr, e.StoredAt.Format("2006-01-02 15:04"))
+		tbl.AddRow(
+			e.ID,
+			origFile,
+			originsStr,
+			strconv.Itoa(e.EndpointCount),
+			sizeRatio,
+			sanStr,
+			e.StoredAt.Format("2006-01-02 15:04"),
+		)
 	}
 
+	_ = tbl.Render(stdout)
 	fmt.Fprintf(stdout, "\nTotal: %d session(s)\n", len(list))
 
 	return nil
@@ -374,8 +384,9 @@ func (c *CmdCache) runSecrets(_ context.Context, args []string, stdout, stderr i
 		}
 
 		fmt.Fprintf(stdout, "🔑 Vortex Local Credentials Vault (.vortex/cache/secrets.json)\n\n")
-		fmt.Fprintf(stdout, "%-24s %-32s %-20s %s\n", "KEY", "MASKED VALUE", "ORIGIN", "UPDATED")
-		fmt.Fprintf(stdout, "%s\n", strings.Repeat("─", 90))
+
+		tbl := tui.NewTable("KEY", "MASKED VALUE", "ORIGIN", "UPDATED")
+		tbl.SetIndent(0)
 
 		for _, s := range secrets {
 			origin := s.Origin
@@ -383,10 +394,10 @@ func (c *CmdCache) runSecrets(_ context.Context, args []string, stdout, stderr i
 				origin = "manual"
 			}
 
-			fmt.Fprintf(stdout, "%-24s %-32s %-20s %s\n",
-				s.Key, s.Masked, origin, s.UpdatedAt.Format("2006-01-02 15:04"))
+			tbl.AddRow(s.Key, s.Masked, origin, s.UpdatedAt.Format("2006-01-02 15:04"))
 		}
 
+		_ = tbl.Render(stdout)
 		fmt.Fprintf(stdout, "\nUse 'option.FromVortexCache()' in client to auto-inject credentials at runtime.\n")
 
 		return nil
