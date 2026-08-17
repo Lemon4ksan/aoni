@@ -42,7 +42,6 @@ func emitHTTPMethod(
 	stackSize := max(m.StackModsSize, 4)
 
 	tracker.Add("github.com/lemon4ksan/aoni")
-	tracker.Add("github.com/lemon4ksan/aoni/mod")
 	fmt.Fprintf(buf, "\tvar stackMods [%d]aoni.RequestModifier\n", stackSize)
 	buf.WriteString("\tallMods := stackMods[:0]\n\n")
 
@@ -53,6 +52,7 @@ func emitHTTPMethod(
 			labelVal = svc.Name + "." + m.Name
 		}
 
+		tracker.Add("github.com/lemon4ksan/aoni/mod")
 		fmt.Fprintf(buf, "\tallMods = append(allMods, mod.WithCorrelationID(\"\"), mod.WithLabel(%q))\n\n", labelVal)
 	}
 
@@ -64,6 +64,7 @@ func emitHTTPMethod(
 		case strings.HasPrefix(h.StaticValue, ":"):
 			emitKeywordHeader(buf, tracker, svc, m, &h)
 		case h.StaticValue != "":
+			tracker.Add("github.com/lemon4ksan/aoni/mod")
 			fmt.Fprintf(buf, "\tallMods = append(allMods, mod.WithHeader(%q, %q))\n", h.Key, h.StaticValue)
 		}
 	}
@@ -135,6 +136,7 @@ func emitHTTPMethod(
 	}
 
 	for _, p := range structQueryParams {
+		tracker.Add("github.com/lemon4ksan/aoni/mod")
 		fmt.Fprintf(buf, "\tallMods = append(allMods, mod.WithQuery(%s))\n\n", p.GoName)
 	}
 
@@ -158,6 +160,7 @@ func emitHTTPMethod(
 
 	// Path variables
 	for _, p := range pathParams {
+		tracker.Add("github.com/lemon4ksan/aoni/mod")
 		fmt.Fprintf(buf, "\tallMods = append(allMods, mod.WithVar(%q, %s))\n", p.WireKey, p.GoName)
 	}
 
@@ -176,27 +179,33 @@ func emitHTTPMethod(
 		case "json", "xml", "proto", "grpc-web":
 			// Handled natively by aoni codecs
 		default:
+			tracker.Add("github.com/lemon4ksan/aoni/mod")
 			fmt.Fprintf(buf, "\tallMods = append(allMods, mod.WithDecoder(%s))\n", m.Decoder)
 		}
 	}
 
 	if m.Encoder != "" {
+		tracker.Add("github.com/lemon4ksan/aoni/mod")
 		fmt.Fprintf(buf, "\tallMods = append(allMods, mod.WithEncoder(%s))\n", m.Encoder)
 	}
 
 	if m.Idempotent {
+		tracker.Add("github.com/lemon4ksan/aoni/mod")
 		buf.WriteString("\tallMods = append(allMods, mod.WithIdempotencyKey())\n")
 	}
 
 	if m.Coalesce {
+		tracker.Add("github.com/lemon4ksan/aoni/mod")
 		buf.WriteString("\tallMods = append(allMods, mod.WithCoalesce())\n")
 	}
 
 	if m.ETag {
+		tracker.Add("github.com/lemon4ksan/aoni/mod")
 		buf.WriteString("\tallMods = append(allMods, mod.WithETag())\n")
 	}
 
 	if m.SignHMAC != nil {
+		tracker.Add("github.com/lemon4ksan/aoni/mod")
 		if m.SignHMAC.KeyEnv != "" {
 			tracker.Add("os")
 			fmt.Fprintf(buf, "\tallMods = append(allMods, mod.WithSignHMAC(os.Getenv(%q)))\n", m.SignHMAC.KeyEnv)
@@ -222,7 +231,8 @@ func emitHTTPMethod(
 	buf.WriteString("}\n\n")
 }
 
-func emitKeywordHeader(buf *bytes.Buffer, _ *ImportTracker, svc *ir.ServiceIR, m *ir.MethodIR, h *ir.HeaderIR) {
+func emitKeywordHeader(buf *bytes.Buffer, tracker *ImportTracker, svc *ir.ServiceIR, m *ir.MethodIR, h *ir.HeaderIR) {
+	tracker.Add("github.com/lemon4ksan/aoni/mod")
 	kw := strings.ToLower(strings.TrimPrefix(h.StaticValue, ":"))
 
 	baseURL := ""

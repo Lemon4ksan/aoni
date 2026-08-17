@@ -15,8 +15,12 @@ import (
 func emitTuple(buf *bytes.Buffer, tracker *ImportTracker, t *ir.TupleIR) {
 	tracker.Add("encoding/json")
 
-	fmt.Fprintf(buf, "// UnmarshalJSON decodes a heterogeneous JSON array tuple or scalar into %s.\n", t.Name)
+	fmt.Fprintf(buf, "// UnmarshalJSON decodes a heterogeneous JSON array tuple or standard JSON object into %s.\n", t.Name)
 	fmt.Fprintf(buf, "func (t *%s) UnmarshalJSON(data []byte) error {\n", t.Name)
+	buf.WriteString("\tif len(data) > 0 && data[0] == '{' {\n")
+	fmt.Fprintf(buf, "\t\ttype alias %s\n", t.Name)
+	buf.WriteString("\t\treturn json.Unmarshal(data, (*alias)(t))\n")
+	buf.WriteString("\t}\n\n")
 	buf.WriteString("\tvar raw []json.RawMessage\n")
 	buf.WriteString("\tif err := json.Unmarshal(data, &raw); err != nil {\n")
 	if len(t.Fields) > 0 {

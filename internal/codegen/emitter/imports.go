@@ -194,8 +194,14 @@ func (t *ImportTracker) RegisterRootImports(root *ir.RootIR, bodyCode string) {
 		}
 
 		t.Add("github.com/lemon4ksan/aoni")
-		t.Add("github.com/lemon4ksan/aoni/mod")
-		t.Add("github.com/lemon4ksan/aoni/option")
+
+		if strings.Contains(bodyCode, "mod.") {
+			t.Add("github.com/lemon4ksan/aoni/mod")
+		}
+
+		if strings.Contains(bodyCode, "option.") {
+			t.Add("github.com/lemon4ksan/aoni/option")
+		}
 
 		if hasFastClient {
 			t.Add("github.com/lemon4ksan/aoni/fast")
