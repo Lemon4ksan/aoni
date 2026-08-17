@@ -540,8 +540,8 @@ func DeobfuscateFileWithJS(rootDir, contractFile string, jsGlobs []string, dryRu
 		retField := funcType.Results.List[0]
 		typeStr := typeToString(retField.Type)
 
-		// Check if return type is a nested slice (e.g. [][][]string, [][]string, []any)
-		if strings.HasPrefix(typeStr, "[][][]") || strings.HasPrefix(typeStr, "[][]") || typeStr == "[]any" || typeStr == "[]int64" {
+		// Check if return type is candidate for tuple deobfuscation
+		if strings.HasPrefix(typeStr, "[][][]") || strings.HasPrefix(typeStr, "[][]") || typeStr == "[]any" || typeStr == "any" || typeStr == "[]int64" {
 			methodName := m.Names[0].Name
 			tupleName := methodName + "Tuple"
 
@@ -562,19 +562,25 @@ func DeobfuscateFileWithJS(rootDir, contractFile string, jsGlobs []string, dryRu
 			var inf *InferredTuple
 			if len(payload) > 0 {
 				inf, _ = InferTupleFromJSONWithJS(tupleName, payload, jsScan)
+			} else if jsScan != nil {
+				if msg, ok := jsScan.Messages[methodName]; ok && len(msg.Fields) > 0 {
+					inf = &InferredTuple{
+						StructName: tupleName,
+						DocComment: "// @aoni:tuple",
+					}
+					for idx, f := range msg.Fields {
+						inf.Fields = append(inf.Fields, InferredField{
+							Name:    f.Name,
+							GoType:  f.GoType,
+							TagPath: fmt.Sprintf("%d", idx),
+						})
+					}
+				}
 			}
 
+			// If no data to infer from, keep original type
 			if inf == nil {
-				// Default triplet tuple
-				inf = &InferredTuple{
-					StructName: tupleName,
-					DocComment: "// @aoni:tuple",
-					Fields: []InferredField{
-						{Name: "ID", GoType: "string", TagPath: "0"},
-						{Name: "DisplayName", GoType: "string", TagPath: "1"},
-						{Name: "Vendor", GoType: "string", TagPath: "2"},
-					},
-				}
+				continue
 			}
 
 			// Generate struct AST
@@ -582,12 +588,23 @@ func DeobfuscateFileWithJS(rootDir, contractFile string, jsGlobs []string, dryRu
 			newDecls = append(newDecls, structDecl)
 
 			// Replace return type in interface method
-			if strings.HasPrefix(typeStr, "[]") {
-				retField.Type = &ast.ArrayType{
-					Elt: ast.NewIdent(tupleName),
+			if len(payload) > 0 {
+				var testArr []any
+				if json.Unmarshal(payload, &testArr) == nil && len(testArr) > 0 {
+					if _, isSubArr := testArr[0].([]any); isSubArr {
+						retField.Type = &ast.ArrayType{Elt: ast.NewIdent(tupleName)}
+					} else {
+						retField.Type = &ast.StarExpr{X: ast.NewIdent(tupleName)}
+					}
+				} else if strings.HasPrefix(typeStr, "[]") {
+					retField.Type = &ast.ArrayType{Elt: ast.NewIdent(tupleName)}
+				} else {
+					retField.Type = &ast.StarExpr{X: ast.NewIdent(tupleName)}
 				}
+			} else if strings.HasPrefix(typeStr, "[]") {
+				retField.Type = &ast.ArrayType{Elt: ast.NewIdent(tupleName)}
 			} else {
-				retField.Type = ast.NewIdent(tupleName)
+				retField.Type = &ast.StarExpr{X: ast.NewIdent(tupleName)}
 			}
 
 			result.TuplesGenerated = append(result.TuplesGenerated, tupleName)

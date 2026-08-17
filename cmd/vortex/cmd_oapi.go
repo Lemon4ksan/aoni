@@ -381,8 +381,8 @@ func (c *CmdOAPI) runImport(_ context.Context, args []string, stdout, stderr io.
 
 	inputSpec := strings.Join(specList, ",")
 
-	// Auto-discovery if spec is not explicitly specified
-	if inputSpec == "" {
+	// Auto-discovery if spec is not explicitly specified and JS bundle is not provided
+	if inputSpec == "" && *jsFlag == "" {
 		candidates, _ := filepath.Glob("*.har")
 		if len(candidates) == 0 {
 			candidates, _ = filepath.Glob("*.json")
@@ -412,9 +412,9 @@ func (c *CmdOAPI) runImport(_ context.Context, args []string, stdout, stderr io.
 		}
 	}
 
-	if inputSpec == "" {
+	if inputSpec == "" && *jsFlag == "" {
 		return errors.New(
-			"vortex import: spec file is required (e.g. `vortex import session.har` or `-spec=swagger.json`)",
+			"vortex import: spec file or -js flag is required (e.g. `vortex import session.har` or `vortex import -js=\"*.js\"`)",
 		)
 	}
 
@@ -464,6 +464,51 @@ func (c *CmdOAPI) runImport(_ context.Context, args []string, stdout, stderr io.
 				targetPkg = baseDir
 			}
 		}
+	}
+
+	// If input is purely JavaScript bundles
+	if inputSpec == "" && *jsFlag != "" {
+		var jsGlobs []string
+		for _, p := range strings.Split(*jsFlag, ",") {
+			p = strings.TrimSpace(p)
+			if p != "" {
+				jsGlobs = append(jsGlobs, p)
+			}
+		}
+
+		scan, sErr := jsbundle.ScanFiles(jsGlobs)
+		if sErr != nil {
+			return fmt.Errorf("scanning js bundles: %w", sErr)
+		}
+
+		if len(scan.Endpoints) == 0 {
+			return fmt.Errorf("no endpoints discovered in javascript bundles matching %s", *jsFlag)
+		}
+
+		fmt.Fprintf(stdout, "Discovered %d RPC endpoints & %d messages from JS bundles\n", len(scan.Endpoints), len(scan.Messages))
+
+		contractBytes, gErr := jsbundle.GenerateContract(scan, jsbundle.ContractOptions{
+			PackageName: targetPkg,
+			ServiceName: targetService,
+			BaseURL:     *baseURL,
+			Engine:      "fast",
+		})
+		if gErr != nil {
+			return fmt.Errorf("generating contract from js: %w", gErr)
+		}
+
+		if *dryRun {
+			fmt.Fprintf(stdout, "%s\n", string(contractBytes))
+			return nil
+		}
+
+		_ = os.MkdirAll(filepath.Dir(targetOut), 0o755)
+		if err := os.WriteFile(targetOut, contractBytes, 0o600); err != nil {
+			return fmt.Errorf("writing contract %s: %w", targetOut, err)
+		}
+
+		fmt.Fprintf(stdout, "✔ Generated Aoni contract in %s (%d bytes)\n", targetOut, len(contractBytes))
+		return nil
 	}
 
 	var specData []byte
