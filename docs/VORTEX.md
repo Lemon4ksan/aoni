@@ -50,10 +50,16 @@ With Vortex:
    - [Performance & Profiling Hub (`vortex perf`)](#performance--profiling-hub)
    - [Workspace Management (`vortex init`, `vortex config`, `vortex status`, `vortex clean`)](#workspace-management)
 4. [Configuration Schema (`.vortex.yml`)](#4-configuration-schema-vortexyml)
-5. [Real-World Case Studies](#5-real-world-case-studies)
+5. [End-to-End Workflows & Tutorials](#5-end-to-end-workflows--tutorials)
+   - [Authoring a Service Contract](#authoring-a-service-contract)
+   - [In-Memory Mock Testing](#in-memory-mock-testing)
+   - [OpenAPI 3.1 Roundtrip Synchronization](#openapi-31-roundtrip-synchronization)
+   - [AsyncAPI Event Streaming](#asyncapi-event-streaming)
+   - [Protocol Buffers & vtprotobuf](#protocol-buffers--vtprotobuf)
+6. [Real-World Case Studies](#6-real-world-case-studies)
    - [Case Study 1: Google AI Studio / Gemini 3.7 Reverse Engineering](#case-study-1-google-ai-studio--gemini-37-reverse-engineering)
    - [Case Study 2: Telegram Bot & MTProto API](#case-study-2-telegram-bot--mtproto-api)
-6. [CI/CD Integration & SARIF Reporting](#6-cicd-integration--sarif-reporting)
+7. [CI/CD Integration & SARIF Reporting](#7-cicd-integration--sarif-reporting)
 
 ---
 
@@ -262,17 +268,60 @@ type ContentPartTuple struct {
 
 ---
 
+### Two-Tier Header Architecture
+
+Vortex provides declarative header inheritance across two layers:
+1. **Global Service Headers**: Inherited across all client methods (e.g. shared `User-Agent` or default `Authorization`).
+2. **Per-Method Specific Headers**: Bound directly to an individual RPC endpoint (e.g. specific `Unleash-*` tokens or custom telemetry).
+
+```go
+// @aoni:service
+// @header "User-Agent" "my-client/1.0.0"
+type GatewayAPI interface {
+    // @post "api/client/register"
+    // @header "X-App-Name" "payment-worker"
+    // @header "X-Poll-Interval" "60000"
+    CreateClientRegister(ctx context.Context, req CreateClientRegisterRequest, mods ...aoni.RequestModifier) error
+}
+```
+
+---
+
 ### Shadow Root Source Mirroring (`@aoni:mirror`)
 
 When building high-speed `aoni` wrappers over tightly-coupled or private legacy Go backends (which cannot be annotated with `@aoni:service` or regenerated), use `@aoni:mirror` to treat the legacy Go code as an **immutable, read-only Root of Truth**:
 
 ```go
+package inventory
+
+import (
+    "context"
+    "github.com/lemon4ksan/aoni"
+)
+
+type Item struct {
+    AssetID uint64
+    Name    string
+}
+
 // @aoni:service
 // @aoni:mirror "internal/legacy/steam/inventory.go:LegacyInventoryService"
 type InventoryWrapperAPI interface {
     // @get "inventory"
     GetInventory(ctx context.Context, steamID uint64, mods ...aoni.RequestModifier) ([]*Item, error)
 }
+```
+
+#### Specialized Mirror Linter Rules:
+| Rule ID | Name | Severity | Purpose |
+| :--- | :--- | :--- | :--- |
+| **`E015`** | `mirror-source-not-found` | **Error** | Target Go file or interface specified in `@mirror` does not exist on disk/AST. |
+| **`E016`** | `mirror-signature-drift` | **Error** | Divergence in method signatures, parameter types, or DTO struct field types. |
+| **`W012`** | `mirror-ghost-method` | **Warning** | New public method appeared in root legacy interface not yet exposed in wrapper. |
+
+```bash
+# Verify synchronization with legacy backend without touching any legacy files:
+vortex check pkg/steam/inventory/api.go
 ```
 
 ---
@@ -360,9 +409,13 @@ vortex ast tuple pkg/api/client.go
 
 # Split monolithic interface into separate focused interfaces (ISP principle):
 vortex ast split --from=MarketAPI --methods="Get*,List*" --to=MarketReaderAPI
+vortex ast split --from=PriceDB --methods="Predict*" --to=PredictAPI --out=pkg/services/pricedb/predict.go
 
 # Batch rename method names via regular expressions:
 vortex ast rename --match="Fetch(.*)" --replace="Get$1" pkg/services/items/api.go
+
+# Cherry-pick methods and DTO structs across contracts (transitive closure):
+vortex ast pick pkg/services/inventory/api.go:GetItemPrices --to=pkg/services/items/api.go
 
 # Audit and merge consumer Git proposal branches:
 vortex ast review openapi.json pkg/user/api.go
@@ -452,7 +505,190 @@ formatting:
 
 ---
 
-## 5. Real-World Case Studies
+## 5. End-to-End Workflows & Tutorials
+
+### Authoring a Service Contract
+
+#### Step 1: Declare the Interface (`pkg/billing/api.go`)
+
+```go
+package billing
+
+import (
+    "context"
+    "github.com/lemon4ksan/aoni"
+)
+
+// @aoni:service
+// @version "v1.0.0"
+type BillingAPI interface {
+    // @get "invoices/{id}"
+    GetInvoice(ctx context.Context, id string, mods ...aoni.RequestModifier) (*InvoiceDTO, error)
+
+    // @post "invoices"
+    CreateInvoice(ctx context.Context, req *CreateInvoiceRequest, mods ...aoni.RequestModifier) (*InvoiceDTO, error)
+}
+
+type InvoiceDTO struct {
+    ID     string  `json:"id"`
+    Amount float64 `json:"amount"`
+    Paid   bool    `json:"paid"`
+}
+
+type CreateInvoiceRequest struct {
+    Amount   float64 `json:"amount"`
+    Currency string  `json:"currency"`
+}
+```
+
+#### Step 2: Generate the Client
+
+```bash
+vortex gen pkg/billing/api.go
+```
+
+#### Step 3: Use the Generated Client
+
+```go
+package main
+
+import (
+    "context"
+    "fmt"
+    "github.com/lemon4ksan/aoni"
+    "github.com/lemon4ksan/aoni/option"
+    "github.com/my/project/pkg/billing"
+)
+
+func main() {
+    baseClient := aoni.NewClient(nil,
+        option.WithBaseURL("https://api.billing.com"),
+        option.WithChrome(),
+    )
+
+    client := billing.NewBillingAPI(baseClient)
+
+    invoice, err := client.GetInvoice(context.Background(), "inv_10293")
+    if err != nil {
+        panic(err)
+    }
+
+    fmt.Printf("Invoice amount: $%.2f (Paid: %v)\n", invoice.Amount, invoice.Paid)
+}
+```
+
+---
+
+### In-Memory Mock Testing
+
+Vortex generates in-memory mock servers that plug directly into `aoni.Client` without listening on network sockets or opening OS ports.
+
+#### 1. Generate the Mock Server
+```bash
+vortex mock pkg/billing/api.go
+```
+
+#### 2. Execute Unit Tests Against the Mock
+```go
+package billing_test
+
+import (
+    "context"
+    "testing"
+    "github.com/stretchr/testify/require"
+    "github.com/my/project/pkg/billing"
+)
+
+func TestBillingService(t *testing.T) {
+    ctx := context.Background()
+
+    // 1. Instantiate in-memory mock server
+    mockServer := billing.NewBillingAPIMockServer()
+
+    // 2. Define handler behaviors
+    mockServer.OnGetInvoice = func(ctx context.Context, id string) (*billing.InvoiceDTO, error) {
+        return &billing.InvoiceDTO{
+            ID:     id,
+            Amount: 149.99,
+            Paid:   true,
+        }, nil
+    }
+
+    // 3. Obtain preconfigured client routed directly to in-memory transport
+    client := mockServer.Client()
+
+    // 4. Test business logic
+    inv, err := client.GetInvoice(ctx, "inv_test_123")
+    require.NoError(t, err)
+    require.Equal(t, "inv_test_123", inv.ID)
+    require.Equal(t, 149.99, inv.Amount)
+    require.True(t, inv.Paid)
+}
+```
+
+---
+
+### OpenAPI 3.1 Roundtrip Synchronization
+
+1. **Importing an existing specification**:
+   ```bash
+   vortex init -from-openapi=./swagger.json -pkg=stripe -service=StripeAPI -out=pkg/stripe/api.go
+   ```
+2. **Checking for upstream breaking changes in CI**:
+   ```bash
+   vortex diff ./swagger.json pkg/stripe/api.go
+   ```
+3. **Exporting updated Go contracts back to OpenAPI 3.1**:
+   ```bash
+   vortex oapi pkg/stripe/api.go -out=./swagger.json
+   ```
+
+---
+
+### AsyncAPI Event Streaming
+
+```go
+package telemetry
+
+import (
+    "context"
+    "github.com/lemon4ksan/aoni"
+)
+
+// @aoni:service
+type TelemetryStreamAPI interface {
+    // @event "sensorReading"
+    OnSensorReading(ctx context.Context, handler func(msg *ReadingDTO)) (aoni.Subscription, error)
+
+    // @ws:emit "deviceCommand"
+    SendCommand(ctx context.Context, cmd *CommandDTO, mods ...aoni.RequestModifier) error
+}
+```
+
+---
+
+### Protocol Buffers & vtprotobuf
+
+Compile `.proto` schemas with zero-allocation `vtprotobuf` marshaling routines:
+
+```bash
+vortex proto -src=./proto -out=./pkg/proto -import=github.com/my/project/pkg/proto
+```
+
+Execute binary protobuf requests using generic helpers:
+
+```go
+import (
+    "github.com/lemon4ksan/aoni/request"
+    pb "github.com/my/project/pkg/proto"
+)
+
+resp, err := request.PostProtoTo[pb.QueryResponse](ctx, client, "https://grpc.example.com/query", reqMsg)
+```
+
+---
+
+## 6. Real-World Case Studies
 
 ### Case Study 1: Google AI Studio / Gemini 3.7 Reverse Engineering
 
@@ -490,7 +726,7 @@ Using Vortex's traffic hub, we completely reversed Google AI Studio's private `M
 
 ---
 
-## 6. CI/CD Integration & SARIF Reporting
+## 7. CI/CD Integration & SARIF Reporting
 
 Integrate Vortex validation into GitHub Actions workflow (`.github/workflows/contracts.yml`):
 
