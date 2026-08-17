@@ -58,6 +58,7 @@ func GenerateContract(scan *ScanResult, opts ContractOptions) ([]byte, error) {
 	b.WriteString(fmt.Sprintf("const %sBaseURL = %q\n\n", svcName, baseURL))
 
 	// Service Interface Doc & Directives
+	b.WriteString(fmt.Sprintf("// %s provides client operations for the service.\n//\n", svcName))
 	b.WriteString("// @aoni:service casing=snake_case\n")
 	b.WriteString("// @version \"1.0.0\"\n")
 	if opts.SourceSpec != "" {

@@ -400,6 +400,7 @@ func (e *MergeEngine) ReconcileService(
 	}
 
 	// Service interface
+	fmt.Fprintf(&buf, "// %s provides the API client contract.\n//\n", serviceName)
 	fmt.Fprintf(&buf, "// @aoni:service casing=%s\n", casing)
 
 	if summary.SpecVersion != "" {

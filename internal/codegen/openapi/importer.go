@@ -1251,6 +1251,7 @@ func writeServiceInterface(buf *bytes.Buffer, spec *openapi3.T, cfg ImportConfig
 		}
 	}
 
+	fmt.Fprintf(buf, "// %s provides the API client contract.\n//\n", serviceName)
 	fmt.Fprintf(buf, "// @aoni:service casing=%s\n", casing)
 
 	if spec.Info != nil {
