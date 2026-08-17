@@ -1,75 +1,113 @@
-# Vortex — Zero-Allocation AST Toolchain & Contract Engine
+# Vortex — Zero-Allocation AST Toolchain & Sovereign Contract Engine
 
-`vortex` is the unified declarative contract toolchain and code generator for `aoni`. It operates directly on Go Abstract Syntax Trees (AST), treating idiomatic Go interface declarations as the single source of truth for REST, WebSocket, SSE, OpenAPI 3.1, AsyncAPI 2.x/3.x, and Protocol Buffer communications.
+`vortex` is the unified declarative contract toolchain, code generator, and traffic-driven reverse engineering suite for `aoni`. It operates directly on Go Abstract Syntax Trees (AST), treating idiomatic Go interface declarations as the single source of truth for REST, WebSocket, SSE, OpenAPI 3.1, AsyncAPI 2.x/3.x, and Protocol Buffer communications.
+
+---
+
+## 📖 The Vortex Manifesto: The Era of Sovereign API Clients
+
+> *"A little copying is better than a little dependency."* — Go Proverb
+
+For decades, developers have built and maintained third-party API wrapper SDKs (in Python, Node.js, and Go), believing that writing a client library is the pinnacle of API integration. In reality, **nobody should ever write or depend on third-party API client wrappers as external libraries.**
+
+### Why Traditional API SDKs Fail:
+1. **Supply Chain Bloat & Version Lock-in**: Importing an external SDK brings hundreds of transitive dependencies, reflection overhead, and breaking upgrade cycles.
+2. **Missing & Outdated Endpoints**: When an upstream service releases a new feature or model (like Gemini 3.7 Thinking or Function Calling), developers are blocked waiting for third-party maintainers to update their SDK.
+3. **Excessive Heap Allocations**: Traditional SDKs generate intermediate `map[string]any`, heavy reflection structs, and unbuffered string concatenations on every request.
+4. **Guesswork in Undocumented APIs**: Reverse-engineering private/internal APIs by manual guesswork leads to fragile, unmaintainable code.
+
+### The Sovereign Model with Vortex:
+**Every project must own its sovereign, zero-allocation API client generated directly into `pkg/` from AST, OpenAPI specifications, or captured network traffic.** 
+
+With Vortex:
+* **Sniffing beats guessing**: Capture real network traffic (`.har`) with `vortex traffic record` or `vortex traffic store`.
+* **Zero-allocation code generation**: Compiles declarative Go interfaces into pure, machine-optimized Go (`*.gen.go`) without reflection or heap allocations.
+* **100% Browser Fidelity**: Integrates L3 (TCP SYN spoofing), L4 (uTLS Chrome 120+), and L7 (HTTP/2 SETTINGS & High-Entropy Client Hints) to match real browser behavior byte-for-byte.
 
 ---
 
 ## Table of Contents
 
-1. [Architecture & Design Principles](#1-architecture--design-principles)
-2. [Declarative Contract Syntax](#2-declarative-contract-syntax)
+1. [Architecture & The 4 Pillars of Vortex](#1-architecture--the-4-pillars-of-vortex)
+   - [Pillar 1: Declarative Go-First AST Contracts](#pillar-1-declarative-go-first-ast-contracts)
+   - [Pillar 2: Traffic-Driven Reverse Engineering & Persistent Cache](#pillar-2-traffic-driven-reverse-engineering--persistent-cache)
+   - [Pillar 3: Positional Tuples & JSPB Deobfuscation (`@aoni:tuple`)](#pillar-3-positional-tuples--jspb-deobfuscation-aonituple)
+   - [Pillar 4: L3/L4/L7 Network & Browser Fidelity](#pillar-4-l3l4l7-network--browser-fidelity)
+2. [Declarative Contract Syntax Reference](#2-declarative-contract-syntax-reference)
    - [Service Interface Annotations](#service-interface-annotations)
    - [Method Route & Protocol Annotations](#method-route--protocol-annotations)
    - [Parameter Binding Annotations](#parameter-binding-annotations)
-   - [Resilience & Caching Annotations](#resilience--caching-annotations)
+   - [Resilience, Timeouts & Caching Annotations](#resilience-timeouts--caching-annotations)
    - [Data Transfer Object (DTO) Annotations](#data-transfer-object-dto-annotations)
-   - [Heterogeneous Tuple & JSPB Annotations (`@aoni:tuple`)](#heterogeneous-tuple--jspb-annotations-aonituple)
+   - [Heterogeneous Tuple & JSPB Annotations (`@aoni:tuple`)](#heterogeneous-tuple--jspb-annotations-aonituple-1)
    - [Two-Tier Header Architecture](#two-tier-header-architecture)
-3. [CLI Reference & Subcommands](#3-cli-reference--subcommands)
+   - [Shadow Root Source Mirroring (`@aoni:mirror`)](#shadow-root-source-mirroring-aonimirror)
+3. [Complete CLI Reference](#3-complete-cli-reference)
    - [Daily Core Commands (`vortex autopilot`, `vortex gen`, `vortex check`, `vortex mock`, `vortex env`, `vortex smoke`)](#daily-core-commands)
-   - [Toolchain Hubs (`vortex spec`, `vortex traffic`, `vortex ast`, `vortex perf`)](#toolchain-hubs)
+   - [Traffic Hub (`vortex traffic`, `vortex inspect`, `vortex diff`)](#traffic-hub)
+   - [Specification Hub (`vortex spec`, `vortex import`, `vortex export`, `vortex proto`)](#specification-hub)
+   - [AST Refactoring & VCS Hub (`vortex ast`)](#ast-refactoring--vcs-hub)
+   - [Performance & Profiling Hub (`vortex perf`)](#performance--profiling-hub)
    - [Workspace Management (`vortex init`, `vortex config`, `vortex status`, `vortex clean`)](#workspace-management)
 4. [Configuration Schema (`.vortex.yml`)](#4-configuration-schema-vortexyml)
-5. [End-to-End Workflows](#5-end-to-end-workflows)
-   - [Authoring a Service Contract](#authoring-a-service-contract)
-   - [In-Memory Mock Testing](#in-memory-mock-testing)
-   - [OpenAPI 3.1 Roundtrip Synchronization](#openapi-31-roundtrip-synchronization)
-   - [AsyncAPI Event Streaming](#asyncapi-event-streaming)
-   - [Protocol Buffers & vtprotobuf](#protocol-buffers--vtprotobuf)
+5. [Real-World Case Studies](#5-real-world-case-studies)
+   - [Case Study 1: Google AI Studio / Gemini 3.7 Reverse Engineering](#case-study-1-google-ai-studio--gemini-37-reverse-engineering)
+   - [Case Study 2: Telegram Bot & MTProto API](#case-study-2-telegram-bot--mtproto-api)
 6. [CI/CD Integration & SARIF Reporting](#6-cicd-integration--sarif-reporting)
 
 ---
 
-## 1. Architecture & Design Principles
-
-Traditional code generators frequently suffer from three structural defects:
-1. **Excessive Heap Allocations**: Generating intermediate maps, reflection wrappers, and unbuffered string concatenations on every request.
-2. **Type Drift & Schema Fragmentation**: Manually synchronizing YAML/JSON specs with Go structs leads to divergence over time.
-3. **Heavy External Dependencies**: Reliance on heavy runtime reflection libraries and unversioned third-party parsers.
-
-### The Vortex Pipeline
+## 1. Architecture & The 4 Pillars of Vortex
 
 ```text
-┌──────────────────────────────────────────────────────────────────────────┐
-│                             SOURCE OF TRUTH                              │
-│   Declarative Go Interface  •  OpenAPI 3.1 Schema  •  AsyncAPI 2.x/3.x   │
-└──────────────────────────────────────────────────────────────────────────┘
-                                      │
-                                      ▼
-                        ┌───────────────────────────┐
-                        │ Go AST Parser & Type Link │
-                        └───────────────────────────┘
-                                      │
-                                      ▼
-                        ┌───────────────────────────┐
-                        │ Vortex Intermediate (IR)  │
-                        └───────────────────────────┘
-                                      │
-         ┌────────────────────────────┼────────────────────────────┐
-         ▼                            ▼                            ▼
-┌───────────────────┐        ┌───────────────────┐        ┌───────────────────┐
-│ Zero-Alloc Client │        │  In-Memory Mock   │        │ Benchmark Harness │
-│   (*.gen.go)      │        │  (*_mock.gen.go)  │        │ (*_harness.gen.go)│
-└───────────────────┘        └───────────────────┘        └───────────────────┘
+┌────────────────────────────────────────────────────────────────────────────────────────┐
+│                                   SOURCES OF TRUTH                                     │
+│  Declarative Go Interface  •  Traffic Captures (.har)  •  OpenAPI 3.1  •  AsyncAPI 2/3  │
+└────────────────────────────────────────────────────────────────────────────────────────┘
+                                            │
+                                            ▼
+                              ┌───────────────────────────┐
+                              │ Go AST Parser & Type Link │
+                              └───────────────────────────┘
+                                            │
+                                            ▼
+                              ┌───────────────────────────┐
+                              │ Vortex Intermediate (IR)  │
+                              └───────────────────────────┘
+                                            │
+               ┌────────────────────────────┼────────────────────────────┐
+               ▼                            ▼                            ▼
+     ┌───────────────────┐        ┌───────────────────┐        ┌───────────────────┐
+     │ Zero-Alloc Client │        │  In-Memory Mock   │        │ Benchmark Harness │
+     │   (*.gen.go)      │        │  (*_mock.gen.go)  │        │ (*_harness.gen.go)│
+     └───────────────────┘        └───────────────────┘        └───────────────────┘
 ```
 
-* **Pure Standard Library**: All AST parsing, schema emission, and mock servers rely exclusively on the Go standard library (`go/ast`, `go/parser`, `go/token`).
-* **Zero Allocations on Hot Paths**: Generated client methods reuse pre-allocated buffer pools (`sync.Pool`), intern static headers in `.rodata`, and perform zero heap allocations during parameter serialization.
-* **Dual-Engine Dispatch**: Generated clients automatically support both standard `net/http` (`aoni.Client`) and ultra-high-performance `fasthttp` (`fast.Client`) engines through a single interface.
+### Pillar 1: Declarative Go-First AST Contracts
+* **Go interfaces as the contract**: You write clean, standard Go interfaces. Godoc annotations (`// @post`, `// @query`, `// @header`) define protocol semantics.
+* **Dual-Engine Dispatch**: Generated clients automatically support both standard `net/http` (`aoni.Client`) and ultra-high-performance `fasthttp` (`fast.Client`) without breaking signatures.
+* **Zero Allocations on Hot Paths**: Codecs avoid reflection by compiling optimized serializer/deserializer routines directly into Go bytecode.
+
+### Pillar 2: Traffic-Driven Reverse Engineering & Persistent Cache
+* **Persistent Session Cache (`.vortex/cache/traffic`)**: Raw `.har` archives are automatically compressed with gzip (compressing 20MB dumps down to 1MB), SHA256-deduplicated, and stored locally.
+* **Credential Vaulting**: Sensitive tokens (`Bearer`, `SAPISID`, API keys) are stripped from captured traffic and isolated in `.vortex/cache/secrets.json`.
+* **Interactive Terminal Inspector (`vortex inspect <target>`)**: Inspect captured requests and responses in rich TUI tables, or dump deep JSON payloads with `vortex inspect <target> --entry=N`.
+* **Additive Drift Detection (`vortex diff --add`)**: Compares incoming traffic against existing Go contracts, highlighting newly discovered endpoints while suppressing ghost endpoints.
+* **3-Way AST Merge (`vortex import -add`)**: Automatically reconciles existing Go code with new traffic schemas without overwriting custom edits.
+
+### Pillar 3: Positional Tuples & JSPB Deobfuscation (`@aoni:tuple`)
+* **Google RPC / Discord / Steam Protocol Support**: Reverse engineers array-based protocols where fields are indexed by position (`[0, "hello", null, [1, 2]]`).
+* **Nested Path Mapping**: Map deep hierarchical indices like `aoni:"14.0.1"` directly to struct fields.
+* **Bounds-Safe & Sparse Protection**: Automatically skips `null` elements or truncated arrays without panicking.
+
+### Pillar 4: L3/L4/L7 Network & Browser Fidelity
+* **L3 (p0f OS Emulation)**: Emulates real Windows/macOS/Linux TCP/IP SYN packets, Window Scale, MSS, and TTL.
+* **L4 (uTLS Browser Profiles)**: Matches Chrome 120+ / Firefox ClientHello, ALPN, cipher suites, ECH, 0-RTT, and Brotli/Zstd certificate compression.
+* **L7 (HTTP/2 SETTINGS & Client Hints)**: Emulates exact HTTP/2 SETTINGS frames, pseudo-header ordering (`:method`, `:authority`, `:scheme`, `:path`), High-Entropy Client Hints (`sec-ch-ua`), natural header casing, and background activity heartbeats (`waa-pa`).
 
 ---
 
-## 2. Declarative Contract Syntax
+## 2. Declarative Contract Syntax Reference
 
 Vortex parses standard Go interface declarations decorated with structured Godoc comments.
 
@@ -83,6 +121,7 @@ Service annotations are placed directly above the interface definition.
 // @source "https://api.example.com/openapi.json"
 // @casing "snake_case"
 // @engine "fast"
+// @header "User-Agent" "my-app/1.0.0"
 type UserAPI interface {
     // Methods...
 }
@@ -95,6 +134,7 @@ type UserAPI interface {
 | `// @source "<path/url>"` | File path or URL | Links the contract to an upstream OpenAPI or AsyncAPI schema. |
 | `// @casing "<style>"` | `snake_case`, `camelCase`, `kebab-case` | Sets default query/header/form parameter serialization casing. |
 | `// @engine "<engine>"` | `fast`, `standard` | Specifies default client runtime engine. |
+| `// @header "<key>" "<val>"` | Key & Value | Defines global service-wide inherited headers. |
 
 ---
 
@@ -134,7 +174,7 @@ OnUserCreated(ctx context.Context, handler func(msg *UserDTO)) (aoni.Subscriptio
 
 ### Parameter Binding Annotations
 
-Vortex automatically maps method parameters based on name and Go types. When fine-grained control is required, parameter-level tags can be applied.
+Vortex automatically maps method parameters based on name and Go types:
 
 ```go
 type OrderAPI interface {
@@ -158,7 +198,7 @@ type OrderAPI interface {
 
 ---
 
-### Resilience & Caching Annotations
+### Resilience, Timeouts & Caching Annotations
 
 ```go
 type MarketAPI interface {
@@ -183,46 +223,38 @@ type MarketAPI interface {
 
 ### Data Transfer Object (DTO) Annotations
 
-Vortex allows annotating struct models for zero-allocation JSON, Form, and Proto serialization:
-
 ```go
 // @aoni:dto casing=snake_case omitempty=true
 type CreateClientRegisterRequest struct {
-    AppName          string    `json:"appName,omitempty"`
-    ConnectionID     string    `json:"connectionId,omitempty"`
-    InstanceID       string    `json:"instanceId,omitempty"`
-    Interval         int64     `json:"interval,omitempty"`
-    Started          time.Time `json:"started,omitempty"`
-    Strategies       []string  `json:"strategies,omitempty"`
+    AppName      string    `json:"appName,omitempty"`
+    ConnectionID string    `json:"connectionId,omitempty"`
+    InstanceID   string    `json:"instanceId,omitempty"`
+    Interval     int64     `json:"interval,omitempty"`
+    Started      time.Time `json:"started,omitempty"`
+    Strategies   []string  `json:"strategies,omitempty"`
 }
 ```
-
-| Tag | Parameter | Description |
-| :--- | :--- | :--- |
-| `// @aoni:dto` | `casing=<style>`, `omitempty=true` | Marks struct as a managed DTO with global JSON key casing and omitempty policy. |
-| `time.Time` | RFC3339 | Automatically inferred and formatted from ISO8601/RFC3339 timestamp payloads in HAR/OpenAPI. |
 
 ---
 
 ### Heterogeneous Tuple & JSPB Annotations (`@aoni:tuple`)
 
-For RPC frameworks that return positional arrays or hierarchical JSPB trees (e.g. Google Internal RPC, Steam, Discord), Vortex provides `@aoni:tuple`:
+For RPC frameworks that return positional arrays or hierarchical JSPB trees:
 
 ```go
 // @aoni:tuple
-type ListModelsTuple struct {
-    ID           string       `aoni:"0"`
-    Name         string       `aoni:"1"`
-    Description  string       `aoni:"2"`
-    Capabilities [][][]string `aoni:"13"`
-    TraceContext string       `aoni:"42.0.1"`
+type ContentPartTuple struct {
+    InlineData          *BlobTuple                `aoni:"0"`
+    Text                string                    `aoni:"1"`
+    FunctionCall        *FunctionCallTuple        `aoni:"2"`
+    FunctionResponse    *FunctionRespTuple        `aoni:"3"`
+    FileData            *FileDataTuple            `aoni:"4"`
+    DriveFile           *DriveFileRefTuple        `aoni:"5"`
+    ExecutableCode      *ExecutableCodeTuple      `aoni:"7"`
+    CodeExecutionResult *CodeExecutionResultTuple `aoni:"8"`
+    ThoughtSignature    string                    `aoni:"14"`
 }
 ```
-
-| Tag | Parameter | Description |
-| :--- | :--- | :--- |
-| `// @aoni:tuple` | — | Marks struct as a positional/heterogeneous array tuple. |
-| `` `aoni:"<path>"` `` | Index path (e.g. `"0"`, `"13.0.1"`) | Maps the struct field to a specific array index or nested slice path. |
 
 * **Zero-Allocation Decoding**: Emits high-speed `UnmarshalJSON` that performs zero heap allocations and directly extracts positional fields.
 * **Bounds-Safe & Sparse Protection**: Automatically skips `null` elements or truncated arrays without panics.
@@ -230,26 +262,22 @@ type ListModelsTuple struct {
 
 ---
 
-### Two-Tier Header Architecture
+### Shadow Root Source Mirroring (`@aoni:mirror`)
 
-Vortex provides declarative header inheritance across two layers:
-1. **Global Service Headers**: Inherited across all client methods (e.g. shared `User-Agent` or default `Authorization`).
-2. **Per-Method Specific Headers**: Bound directly to an individual RPC endpoint (e.g. specific `Unleash-*` tokens or custom telemetry).
+When building high-speed `aoni` wrappers over tightly-coupled or private legacy Go backends (which cannot be annotated with `@aoni:service` or regenerated), use `@aoni:mirror` to treat the legacy Go code as an **immutable, read-only Root of Truth**:
 
 ```go
 // @aoni:service
-// @header "User-Agent" "my-client/1.0.0"
-type GatewayAPI interface {
-    // @post "api/client/register"
-    // @header "X-App-Name" "payment-worker"
-    // @header "X-Poll-Interval" "60000"
-    CreateClientRegister(ctx context.Context, req CreateClientRegisterRequest, mods ...aoni.RequestModifier) error
+// @aoni:mirror "internal/legacy/steam/inventory.go:LegacyInventoryService"
+type InventoryWrapperAPI interface {
+    // @get "inventory"
+    GetInventory(ctx context.Context, steamID uint64, mods ...aoni.RequestModifier) ([]*Item, error)
 }
 ```
 
 ---
 
-## 3. CLI Reference & Subcommands
+## 3. Complete CLI Reference
 
 Install or update the `vortex` CLI:
 
@@ -257,129 +285,84 @@ Install or update the `vortex` CLI:
 go install github.com/lemon4ksan/aoni/cmd/vortex@latest
 ```
 
-```text
-Usage: vortex <command> [flags] [arguments]
-```
-
 ---
 
 ### Daily Core Commands
 
-#### `vortex autopilot`
-The zero-configuration primary command: audits workspace health, synchronizes upstream schemas, and compiles all clients in under 50ms.
+| Command | Usage | Description |
+| :--- | :--- | :--- |
+| **`vortex autopilot`** | `vortex` or `vortex autopilot -watch` | Zero-configuration health audit, schema sync, and compilation in <50ms. |
+| **`vortex gen`** | `vortex gen [path.go]` | Compiles declarative Go interfaces into zero-allocation API clients. |
+| **`vortex check`** | `vortex check [--breaking-only] [--fix]` | Static contract validation, rule enforcement, and pre-commit checks. |
+| **`vortex mock`** | `vortex mock [-fixtures]` | Generates in-memory HTTP/WebSocket mock servers for integration testing. |
+| **`vortex env`** | `vortex env [--fill --out=.env.local]` | Scans contracts for `${VAR}` references and generates environment templates. |
+| **`vortex smoke`** | `vortex smoke [--all --timeout=10s]` | Rapidly probes live contract endpoints and renders latency/TLS tables. |
+
+---
+
+### Traffic Hub
+
+Manages local traffic captures, live process sniffing, interactive HTTP/JSON inspection, and the encrypted secrets vault.
 
 ```bash
-vortex                  # Runs autopilot by default
-vortex autopilot -watch # Continuous watch and auto-compile mode
-```
+# 1. Capture live process network traffic into a HAR archive:
+vortex traffic record -out=session.har -- ./mycli
 
-#### `vortex gen`
-Compiles declarative Go interfaces into zero-allocation API client implementations.
+# 2. Inspect captured traffic (Table view of HTTP requests with previews):
+vortex traffic inspect session.har
+vortex inspect attach_local_image             # Short alias for cached sessions
 
-```bash
-vortex gen                     # Compile all contracts in .vortex.yml
-vortex gen pkg/user/api.go     # Compile a single contract file
-vortex gen -watch              # Continuous compilation on file save
-vortex gen -dry-run            # Preview generated Go source code in stdout
-```
+# 3. Deep payload dumper (Pretty-printed JSON / tuple request & response bodies):
+vortex traffic inspect attach_local_image --entry=2
+vortex traffic inspect session.har --filter=GenerateContent
 
-#### `vortex check`
-Performs static contract validation, rule enforcement, and pre-commit checks.
-
-```bash
-vortex check                        # Fast incremental check (hits cache for unchanged contracts)
-vortex check --breaking-only        # Fast pre-commit hook mode (<25ms) for Git hooks and CI
-vortex check --fix                  # Automatically apply safe code fixes
-vortex check -strict                # Treat warnings as errors
-vortex check -sarif=security.sarif  # Export findings for GitHub Security Code Scanning
-```
-
-#### `vortex mock`
-Generates fully functional in-memory HTTP/WebSocket mock servers for integration testing.
-
-```bash
-vortex mock                          # Generate mock servers for all contracts
-vortex mock -fixtures                # Auto-populate zero-code mock responses from recorded traffic
-vortex mock pkg/user/api.go          # Generate mock server for a specific contract
-vortex mock -strict                  # Enforces strict parameter validation
-```
-
-#### `vortex env`
-Scans contracts for `${VAR_NAME}` references and generates `.env.example` templates.
-
-```bash
-vortex env                           # Scan all contracts and output .env.example
-vortex env --fill --out=.env.local   # Pre-fill values from local .vortex/cache/secrets.json
-vortex env pkg/api/api.go --out=-    # Print required variables to stdout
-```
-
-#### `vortex smoke`
-Rapidly probes live contract endpoints using stored secrets and renders a latency and TLS summary table.
-
-```bash
-vortex smoke                         # Probe safe GET/HEAD endpoints across workspace
-vortex smoke pkg/api/api.go          # Probe specific contract endpoints
-vortex smoke --all --timeout=10s     # Probe all endpoints including POST/PUT
+# 4. Ingest and manage local traffic cache (.vortex/cache/traffic):
+vortex traffic list                           # Dynamic TUI table of cached sessions
+vortex traffic store session.har              # Archive session into cache (keeps original)
+vortex traffic move session.har               # Ingest session into cache and delete original
+vortex traffic export <id> -out=clean.har     # Export clean, uncompressed HAR with gunzip
+vortex traffic secrets                        # Dynamic TUI table of captured credentials vault
+vortex traffic sanitize dirty.har -out=clean.har # Scrub tokens for Git commit safety
+vortex traffic prune                          # Clean old traffic snapshots
 ```
 
 ---
 
-### Toolchain Hubs
+### Specification Hub
 
-#### `vortex spec` (OpenAPI 3.1, HAR & Proto Hub)
 Bidirectional schema toolchain for importing, exporting, and diffing OpenAPI and HAR specifications.
 
 ```bash
-# Ingest OpenAPI / HAR traffic captures into declarative Go contracts (3-Way AST Merge):
+# 1. Ingest OpenAPI / HAR traffic captures into declarative Go contracts (3-Way AST Merge):
 vortex spec import -spec=openapi.json -out=./pkg/api/api.go
 vortex spec import -spec=session.har -out=./pkg/api/api.go -add
-vortex spec import traffic1.har,traffic2.har -mode=intersect # Baseline extraction
+vortex spec import traffic1.har,traffic2.har -mode=intersect
 
-# Export @aoni:service contracts to OpenAPI 3.1:
+# 2. Export @aoni:service contracts to OpenAPI 3.1:
 vortex spec export -file=./pkg/api/api.go -out=openapi.json
 vortex spec export -file=./pkg/api/api.go -yaml -out=openapi.yaml
 
-# Semantic diff against OpenAPI specifications:
-vortex spec diff openapi.json pkg/user/api.go
-vortex spec diff spec_v1.json spec_v2.json
+# 3. Additive drift detection against captured HAR / OpenAPI:
+vortex diff --add ./traffic.har ./pkg/api/api.go
+vortex diff --against=main ./pkg/api
 
-# Compile Protocol Buffer definitions:
+# 4. Compile Protocol Buffer definitions:
 vortex spec proto -src=./proto -out=./pkg/pb
 ```
 
-#### `vortex traffic` (Network Sniffer, Cache & Secrets Hub)
-Manages local traffic captures, live process sniffing, and the encrypted secrets vault.
+---
 
-```bash
-# Capture live process network traffic into a HAR archive:
-vortex traffic record -out=session.har -- ./mycli
-
-# Manage local traffic cache (.vortex/cache/traffic):
-vortex traffic list                  # List cached traffic sessions
-vortex traffic show <id|hash>        # Inspect metadata of a cached session
-vortex traffic store session.har     # Store session in local cache with auto-gunzip
-vortex traffic export <id> -out=.    # Export clean, uncompressed HAR with gunzip
-vortex traffic secrets               # Manage captured header/query secrets vault
-vortex traffic prune                 # Clean old traffic snapshots
-```
-
-#### `vortex ast` (Tuple Deobfuscation, Refactoring & VCS Hub)
-AST-level refactoring, tuple deobfuscation, interface splitting, and contract version control.
+### AST Refactoring & VCS Hub
 
 ```bash
 # Deobfuscate positional arrays / JSPB into typed @aoni:tuple structs:
 vortex ast tuple pkg/api/client.go
-vortex ast tuple pkg/api/client.go --dry-run
 
 # Split monolithic interface into separate focused interfaces (ISP principle):
 vortex ast split --from=MarketAPI --methods="Get*,List*" --to=MarketReaderAPI
-vortex ast split --from=PriceDB --methods="Predict*" --to=PredictAPI --out=pkg/services/pricedb/predict.go
 
 # Batch rename method names via regular expressions:
 vortex ast rename --match="Fetch(.*)" --replace="Get$1" pkg/services/items/api.go
-
-# Cherry-pick methods and DTO structs across contracts (transitive closure):
-vortex ast pick pkg/services/inventory/api.go:GetItemPrices --to=pkg/services/items/api.go
 
 # Audit and merge consumer Git proposal branches:
 vortex ast review openapi.json pkg/user/api.go
@@ -393,8 +376,9 @@ vortex ast log pkg/user/api.go       # Contract revision timeline
 vortex ast tag add v1.2.0            # Tag contract release snapshot
 ```
 
-#### `vortex perf` (Throughput, Profiler, Benchmarks & PGO Hub)
-High-performance benchmarking, allocation tracking, and runtime optimization.
+---
+
+### Performance & Profiling Hub
 
 ```bash
 # Executive performance dashboard and pprof inspector:
@@ -403,15 +387,8 @@ vortex perf prof --bench-time=100ms  # Custom benchmark duration
 
 # Silicon hardware inspection and engine benchmarks:
 vortex perf bench                    # Hardware CPU flags, AVX2/AVX-512, RPS scoring
-vortex perf bench -quick             # Quick express benchmark
-
-# Test coverage analyzer:
 vortex perf cover                    # Deduplicated core test coverage analyzer
-
-# Standalone test and benchmark harness generation:
 vortex perf harness pkg/user/api.go  # Generate zero-allocation benchmark harness
-
-# Profile-Guided Optimization (PGO):
 vortex perf pgo -record=60s          # Collect runtime profile for default.pgo
 ```
 
@@ -419,320 +396,97 @@ vortex perf pgo -record=60s          # Collect runtime profile for default.pgo
 
 ### Workspace Management
 
-#### `vortex init`
-Scaffolds a `.vortex.yml` workspace configuration or new API package templates.
-
 ```bash
 vortex init                          # Auto-discover existing Go interfaces
 vortex init billing -tpl=rest        # REST CRUD API template
 vortex init chat -tpl=ws            # WebSocket Bi-Directional Event Client
 vortex init ai -tpl=sse             # Real-Time SSE & NDJSON Client
-```
 
-#### `vortex config`
-Views, queries, and modifies workspace settings, code generation defaults, and lint rules.
-
-```bash
 vortex config list
 vortex config get defaults.engine
 vortex config set defaults.engine fast
 vortex config lint disable S001 W002
-```
 
-#### `vortex status`
-Performs a 360° health check across all registered contracts in the workspace.
-
-```bash
-vortex status
-vortex status -strict  # Exits with code 1 if out-of-sync contracts exist
-```
-
-#### `vortex clean`
-Removes generated test mocks, benchmark harnesses, CPU/memory profiles, and cache directories.
-
-```bash
-vortex clean           # Clean mocks, harnesses, coverage dumps, and cache
-vortex clean --all     # Also remove primary generated API clients (*.gen.go)
+vortex status -strict                # 360° workspace health check
+vortex clean                         # Remove generated files and stale build cache
 ```
 
 ---
 
 ## 4. Configuration Schema (`.vortex.yml`)
 
-The `.vortex.yml` file defines workspace-wide defaults, contract registry paths, and lint rules.
+The `.vortex.yml` file in your repository root defines workspace configuration and contract bindings:
 
 ```yaml
-version: 1
-
-defaults:
-  casing: snake_case       # snake_case | camelCase | kebab-case
-  engine: fast             # fast (fasthttp + H2/H3) | standard (net/http)
-  retry: 2
-  timeout: 10s
+version: "1"
 
 contracts:
-  - name: UserAPI
-    package: user
-    file: pkg/user/api.go
-    gen: pkg/user/api.gen.go
-    models: pkg/user/models.gen.go
-    upstream:
-      source: https://api.example.com/openapi.json
-      format: openapi
-      poll_interval: 24h
+  - name: makersuite
+    file: pkg/agy/makersuite.go
+    service: MakerSuiteAPI
+    package: agy
+    source: .vortex/cache/traffic/step5_function_calling.har.gz
+    engine: fast
 
-  - name: MarketStreamAPI
-    package: market
-    file: pkg/market/api.go
-    gen: pkg/market/api.gen.go
+  - name: unleash
+    file: pkg/agy/unleash.go
+    service: UnleashAPI
+    package: agy
+    engine: fast
 
-ignore:
-  - "missing-response-schema"
+  - name: telegram
+    file: pkg/telegram/telegram.go
+    service: TelegramAPI
+    package: telegram
+    engine: fast
 
-secrets:
-  headers:
-    authorization: AUTH_TOKEN
-    x-goog-api-key: GOOGLE_API_KEY
-    unleash-instanceid: INSTANCE_ID
-  query:
-    key: GOOGLE_API_KEY
-    api_key: API_KEY
-  cookies:
-    session_id: SESSION_ID
-  patterns:
-    - regex: "ya29\\.[a-zA-Z0-9_-]+"
-      var: AUTH_TOKEN
-    - regex: "AIzaSy[a-zA-Z0-9_-]{33}"
-      var: GOOGLE_API_KEY
+rules:
+  S001: error   # Prohibit untyped any payloads in public interfaces
+  W001: warn    # Require @version annotations on public services
+  W002: ignore  # Suppress strict query parameter naming rules
 
-lint:
-  ignore:
-    - "query-param-casing"
-  disable:
-    - "S001"
+formatting:
+  casing: snake_case
+  omitempty: true
 ```
 
 ---
 
-## 5. End-to-End Workflows
+## 5. Real-World Case Studies
 
-### Authoring a Service Contract
+### Case Study 1: Google AI Studio / Gemini 3.7 Reverse Engineering
 
-#### Step 1: Declare the Interface (`pkg/billing/api.go`)
+Using Vortex's traffic hub, we completely reversed Google AI Studio's private `MakerSuiteService` protocol from 11 captured sessions into a 92KB zero-allocation sovereign client (`pkg/agy`):
 
-```go
-package billing
-
-import (
-    "context"
-    "github.com/lemon4ksan/aoni"
-)
-
-// @aoni:service
-// @version "v1.0.0"
-type BillingAPI interface {
-    // @get "invoices/{id}"
-    GetInvoice(ctx context.Context, id string, mods ...aoni.RequestModifier) (*InvoiceDTO, error)
-
-    // @post "invoices"
-    CreateInvoice(ctx context.Context, req *CreateInvoiceRequest, mods ...aoni.RequestModifier) (*InvoiceDTO, error)
-}
-
-type InvoiceDTO struct {
-    ID     string  `json:"id"`
-    Amount float64 `json:"amount"`
-    Paid   bool    `json:"paid"`
-}
-
-type CreateInvoiceRequest struct {
-    Amount   float64 `json:"amount"`
-    Currency string  `json:"currency"`
-}
-```
-
-#### Step 2: Generate the Client
-
-```bash
-vortex gen pkg/billing/api.go
-```
-
-#### Step 3: Use the Generated Client
-
-```go
-package main
-
-import (
-    "context"
-    "fmt"
-    "github.com/lemon4ksan/aoni"
-    "github.com/lemon4ksan/aoni/option"
-    "github.com/my/project/pkg/billing"
-)
-
-func main() {
-    baseClient := aoni.NewClient(nil,
-        option.WithBaseURL("https://api.billing.com"),
-        option.WithChrome(),
-    )
-
-    client := billing.NewBillingAPI(baseClient)
-
-    invoice, err := client.GetInvoice(context.Background(), "inv_10293")
-    if err != nil {
-        panic(err)
-    }
-
-    fmt.Printf("Invoice amount: $%.2f (Paid: %v)\n", invoice.Amount, invoice.Paid)
-}
-```
-
----
-
-### In-Memory Mock Testing
-
-Vortex generates in-memory mock servers that plug directly into `aoni.Client` without listening on network sockets or opening OS ports.
-
-#### 1. Generate the Mock Server
-```bash
-vortex mock pkg/billing/api.go
-```
-
-#### 2. Execute Unit Tests Against the Mock
-```go
-package billing_test
-
-import (
-    "context"
-    "testing"
-    "github.com/stretchr/testify/require"
-    "github.com/my/project/pkg/billing"
-)
-
-func TestBillingService(t *testing.T) {
-    ctx := context.Background()
-
-    // 1. Instantiate in-memory mock server
-    mockServer := billing.NewBillingAPIMockServer()
-
-    // 2. Define handler behaviors
-    mockServer.OnGetInvoice = func(ctx context.Context, id string) (*billing.InvoiceDTO, error) {
-        return &billing.InvoiceDTO{
-            ID:     id,
-            Amount: 149.99,
-            Paid:   true,
-        }, nil
-    }
-
-    // 3. Obtain preconfigured client routed directly to in-memory transport
-    client := mockServer.Client()
-
-    // 4. Test business logic
-    inv, err := client.GetInvoice(ctx, "inv_test_123")
-    require.NoError(t, err)
-    require.Equal(t, "inv_test_123", inv.ID)
-    require.Equal(t, 149.99, inv.Amount)
-    require.True(t, inv.Paid)
-}
-```
-
----
-
-### OpenAPI 3.1 Roundtrip Synchronization
-
-1. **Importing an existing specification**:
+1. **Traffic Capture & Caching**:
    ```bash
-   vortex init -from-openapi=./swagger.json -pkg=stripe -service=StripeAPI -out=pkg/stripe/api.go
+   vortex traffic store step1_sampling.har
+   vortex traffic store step2_thinking.har
+   vortex traffic store step3_tools.har
+   vortex traffic store attach_drive_file.har
+   vortex traffic store attach_local_image.har
    ```
-2. **Checking for upstream breaking changes in CI**:
+2. **Terminal Inspection**:
    ```bash
-   vortex diff ./swagger.json pkg/stripe/api.go
+   vortex inspect step3_tools --entry=0 # Reveals ExecutableCodeTuple & CodeExecutionResult
+   vortex inspect attach_local_image    # Reveals CheckImage and background Drive backup
    ```
-3. **Exporting updated Go contracts back to OpenAPI 3.1**:
+3. **Synthesis & AST Merge**:
    ```bash
-   vortex oapi pkg/stripe/api.go -out=./swagger.json
+   vortex spec import -spec=.vortex/cache/traffic/step3_tools.har.gz -out=pkg/agy/makersuite.go -add
+   vortex build # Compiles makersuite.gen.go with zero allocations
    ```
-
----
-
-### AsyncAPI Event Streaming
-
-```go
-package telemetry
-
-import (
-    "context"
-    "github.com/lemon4ksan/aoni"
-)
-
-// @aoni:service
-type TelemetryStreamAPI interface {
-    // @event "sensorReading"
-    OnSensorReading(ctx context.Context, handler func(msg *ReadingDTO)) (aoni.Subscription, error)
-
-    // @ws:emit "deviceCommand"
-    SendCommand(ctx context.Context, cmd *CommandDTO, mods ...aoni.RequestModifier) error
-}
-```
-
----
-
-### Protocol Buffers & vtprotobuf
-
-Compile `.proto` schemas with zero-allocation `vtprotobuf` marshaling routines:
-
-```bash
-vortex proto -src=./proto -out=./pkg/proto -import=github.com/my/project/pkg/proto
-```
-
-Execute binary protobuf requests using `aoni/request` generic helpers:
-
-```go
-import (
-    "github.com/lemon4ksan/aoni/request"
-    pb "github.com/my/project/pkg/proto"
-)
-
-resp, err := request.PostProtoTo[pb.QueryResponse](ctx, client, "https://grpc.example.com/query", reqMsg)
-```
-
----
-
-### Shadow Root Source Mirroring (`@aoni:mirror`)
-
-When building high-speed `aoni` wrappers over tightly-coupled or private legacy Go backends (which cannot be annotated with `@aoni:service` or regenerated), use `@aoni:mirror` to treat the legacy Go code as an **immutable, read-only Root of Truth**:
-
-```go
-package inventory
-
-import (
-    "context"
-    "github.com/lemon4ksan/aoni"
-)
-
-type Item struct {
-    AssetID uint64
-    Name    string
-}
-
-// @aoni:service
-// @aoni:mirror "internal/legacy/steam/inventory.go:LegacyInventoryService"
-type InventoryWrapperAPI interface {
-    // @get "inventory"
-    GetInventory(ctx context.Context, steamID uint64, mods ...aoni.RequestModifier) ([]*Item, error)
-}
-```
-
-#### Specialized Mirror Linter Rules:
-| Rule ID | Name | Severity | Purpose |
-| :--- | :--- | :--- | :--- |
-| **`E015`** | `mirror-source-not-found` | **Error** | Target Go file or interface specified in `@mirror` does not exist on disk/AST. |
-| **`E016`** | `mirror-signature-drift` | **Error** | Divergence in method signatures, parameter types, or DTO struct field types. |
-| **`W012`** | `mirror-ghost-method` | **Warning** | New public method appeared in root legacy interface not yet exposed in wrapper. |
-
-```bash
-# Verify synchronization with legacy backend without touching any legacy files:
-vortex check pkg/steam/inventory/api.go
-```
+4. **100% Chrome Browser Fidelity**:
+   ```go
+   sess, err := agy.NewSession(agy.SessionConfig{
+       Cookies:         "SAPISID=...; HSID=...",
+       EnableHeartbeat: true, // Waa-pa activity telemetry
+   })
+   resp, err := sess.API.GenerateContent(ctx, &agy.GenerateContentRequest{
+       Model: "models/gemini-3.7-flash",
+       Contents: []agy.ContentTuple{...},
+   })
+   ```
 
 ---
 
@@ -759,7 +513,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
-          go-version: '1.25.x'
+          go-version: '1.26.x'
 
       - name: Install Vortex
         run: go install github.com/lemon4ksan/aoni/cmd/vortex@latest
