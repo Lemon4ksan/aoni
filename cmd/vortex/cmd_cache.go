@@ -319,11 +319,16 @@ func (c *CmdCache) runExport(_ context.Context, args []string, stdout, stderr io
 		return err
 	}
 
+	// Auto-decompress any compressed/encoded entries on export for clean human readability
+	if cleaned, _, err := cache.SanitizeHAR(data); err == nil && len(cleaned) > 0 {
+		data = cleaned
+	}
+
 	if err := os.WriteFile(*outFile, data, 0o600); err != nil {
 		return fmt.Errorf("writing restored HAR: %w", err)
 	}
 
-	fmt.Fprintf(stdout, "✔ Restored %s to %s (%s uncompressed)\n", entry.ID, *outFile, formatBytes(entry.SizeBytes))
+	fmt.Fprintf(stdout, "✔ Restored %s to %s (%s uncompressed)\n", entry.ID, *outFile, formatBytes(int64(len(data))))
 
 	return nil
 }

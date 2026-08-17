@@ -7,6 +7,8 @@ package main
 import (
 	"bufio"
 	"bytes"
+	"compress/gzip"
+	"compress/zlib"
 	"context"
 	"crypto"
 	"crypto/ecdsa"
@@ -15,6 +17,7 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"crypto/x509/pkix"
+	"encoding/base64"
 	"encoding/json"
 	"encoding/pem"
 	"errors"
@@ -35,6 +38,9 @@ import (
 	"sync"
 	"syscall"
 	"time"
+	"unicode/utf8"
+
+	"github.com/andybalholm/brotli"
 )
 
 // CmdRecord captures live HTTP/HTTPS traffic from applications into standard W3C HAR 1.2 files.
@@ -79,12 +85,14 @@ type harNV struct {
 type harPost struct {
 	MimeType string `json:"mimeType"`
 	Text     string `json:"text"`
+	Encoding string `json:"encoding,omitempty"`
 }
 
 type harContent struct {
 	Size     int64  `json:"size"`
 	MimeType string `json:"mimeType"`
 	Text     string `json:"text"`
+	Encoding string `json:"encoding,omitempty"`
 }
 
 type harLogContainer struct {
@@ -795,10 +803,26 @@ func handleDecryptedHTTPS(
 
 		var respContent *harContent
 		if len(respBodyBytes) > 0 {
+			bodyText, encoding, decompressed := decodePayloadForHAR(
+				respBodyBytes,
+				fwdResp.Header.Get("Content-Encoding"),
+				fwdResp.Header.Get("Content-Type"),
+			)
+			if decompressed {
+				var filtered []harNV
+				for _, h := range respHeaders {
+					if !strings.EqualFold(h.Name, "Content-Encoding") {
+						filtered = append(filtered, h)
+					}
+				}
+				respHeaders = filtered
+			}
+
 			respContent = &harContent{
-				Size:     int64(len(respBodyBytes)),
+				Size:     int64(len(bodyText)),
 				MimeType: fwdResp.Header.Get("Content-Type"),
-				Text:     string(respBodyBytes),
+				Text:     bodyText,
+				Encoding: encoding,
 			}
 		}
 
@@ -862,4 +886,43 @@ func installSystemRootCA(caFilePath string) func() {
 	}
 
 	return func() {}
+}
+
+func decodePayloadForHAR(data []byte, contentEncoding, contentType string) (string, string, bool) {
+	if len(data) == 0 {
+		return "", "", false
+	}
+
+	enc := strings.ToLower(strings.TrimSpace(contentEncoding))
+	decompressed := false
+
+	if enc == "gzip" || (len(data) >= 2 && data[0] == 0x1f && data[1] == 0x8b) {
+		if gzReader, err := gzip.NewReader(bytes.NewReader(data)); err == nil {
+			if dec, err := io.ReadAll(gzReader); err == nil {
+				_ = gzReader.Close()
+				data = dec
+				decompressed = true
+			}
+		}
+	} else if enc == "br" {
+		brReader := brotli.NewReader(bytes.NewReader(data))
+		if dec, err := io.ReadAll(brReader); err == nil {
+			data = dec
+			decompressed = true
+		}
+	} else if enc == "deflate" {
+		if zr, err := zlib.NewReader(bytes.NewReader(data)); err == nil {
+			if dec, err := io.ReadAll(zr); err == nil {
+				_ = zr.Close()
+				data = dec
+				decompressed = true
+			}
+		}
+	}
+
+	if utf8.Valid(data) {
+		return string(data), "", decompressed
+	}
+
+	return base64.StdEncoding.EncodeToString(data), "base64", decompressed
 }
