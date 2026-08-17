@@ -6,11 +6,13 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -24,13 +26,13 @@ import (
 type CmdCache struct{}
 
 func (c *CmdCache) Name() string      { return "traffic" }
-func (c *CmdCache) Aliases() []string { return []string{"cache"} }
+func (c *CmdCache) Aliases() []string { return []string{"cache", "inspect"} }
 func (c *CmdCache) Synopsis() string {
-	return "Manage local traffic captures and secret credentials vault"
+	return "Manage and inspect local traffic captures and secret credentials vault"
 }
 
 func (c *CmdCache) Usage() string {
-	return "vortex traffic [list|show|store|sanitize|export|secrets|prune] [flags]"
+	return "vortex traffic [list|inspect|store|sanitize|export|secrets|prune] [flags]"
 }
 
 func (c *CmdCache) Run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
@@ -46,51 +48,66 @@ func (c *CmdCache) Run(ctx context.Context, args []string, stdout, stderr io.Wri
 	switch sub {
 	case "record", "sniff":
 		return (&CmdRecord{}).Run(ctx, subArgs, stdout, stderr)
+
 	case "list", "ls":
 		return c.runList(ctx, subArgs, stdout, stderr)
-	case "show", "inspect":
+
+	case "show", "inspect", "view", "dump":
 		return c.runShow(ctx, subArgs, stdout, stderr)
+
 	case "store", "add", "put", "save":
 		return c.runStore(ctx, subArgs, stdout, stderr)
+
 	case "move", "mv", "ingest", "absorb":
 		return c.runMove(ctx, subArgs, stdout, stderr)
+
 	case "sanitize", "clean-har":
 		return c.runSanitize(ctx, subArgs, stdout, stderr)
+
 	case "export", "restore":
 		return c.runExport(ctx, subArgs, stdout, stderr)
+
 	case "secrets", "vault", "secret":
 		return c.runSecrets(ctx, subArgs, stdout, stderr)
+
 	case "delete", "rm", "remove":
 		return c.runDelete(ctx, subArgs, stdout, stderr)
+
 	case "prune", "clean":
 		return c.runPrune(ctx, subArgs, stdout, stderr)
+
 	case "help", "-h", "--help":
 		return c.printHelp(stderr)
-	default:
-		// Default to store if args look like files
-		if strings.HasSuffix(sub, ".har") || strings.HasSuffix(sub, ".json") {
-			return c.runStore(ctx, args, stdout, stderr)
-		}
 
-		return fmt.Errorf("unknown cache subcommand %q (run 'vortex cache help' for usage)", sub)
+	default:
+		// Default to inspect if args look like a session ID, hash, or HAR file
+		return c.runShow(ctx, args, stdout, stderr)
 	}
 }
 
 func (c *CmdCache) printHelp(stderr io.Writer) error {
-	fmt.Fprintf(stderr, "vortex cache — Manage Local Traffic Captures & Secrets Vault\n\n")
+	fmt.Fprintf(stderr, "vortex traffic / inspect — Manage & Inspect HTTP Traffic Captures\n\n")
 	fmt.Fprintf(stderr, "Usage:\n")
-	fmt.Fprintf(stderr, "  vortex cache list                          List cached traffic sessions\n")
-	fmt.Fprintf(stderr, "  vortex cache show <id|hash>                Show metadata of a cached session\n")
-	fmt.Fprintf(stderr, "  vortex cache store <files...>              Archive HAR files into cache (keeps originals)\n")
+	fmt.Fprintf(stderr, "  vortex traffic list                              List all cached traffic sessions\n")
+	fmt.Fprintf(stderr, "  vortex traffic inspect <session|file.har>        Inspect HTTP requests in table view\n")
 	fmt.Fprintf(
 		stderr,
-		"  vortex cache move <files...>               Ingest HAR files into cache and delete originals\n",
+		"  vortex traffic inspect <session> --entry=<N>     Dump full JSON request & response payloads\n",
 	)
-	fmt.Fprintf(stderr, "  vortex cache delete <id|hash...>           Delete specific cached sessions\n")
-	fmt.Fprintf(stderr, "  vortex cache sanitize <file> -out=<clean>  Export scrubbed, Git-safe HAR\n")
-	fmt.Fprintf(stderr, "  vortex cache export <id|hash> -out=<file>  Restore uncompressed HAR from cache\n")
-	fmt.Fprintf(stderr, "  vortex cache secrets [list|get|set|clear]  Manage local credentials vault\n")
-	fmt.Fprintf(stderr, "  vortex cache prune [--all]                 Clean up expired/unused traffic\n\n")
+	fmt.Fprintf(stderr, "  vortex traffic inspect <session> --filter=<str>  Filter entries by endpoint pattern\n")
+	fmt.Fprintf(
+		stderr,
+		"  vortex traffic store <files...>                  Archive HAR files into cache (keeps originals)\n",
+	)
+	fmt.Fprintf(
+		stderr,
+		"  vortex traffic move <files...>                   Ingest HAR files into cache and delete originals\n",
+	)
+	fmt.Fprintf(stderr, "  vortex traffic delete <id|hash...>               Delete specific cached sessions\n")
+	fmt.Fprintf(stderr, "  vortex traffic sanitize <file> -out=<clean>      Export scrubbed, Git-safe HAR\n")
+	fmt.Fprintf(stderr, "  vortex traffic export <id|hash> -out=<file>      Restore uncompressed HAR from cache\n")
+	fmt.Fprintf(stderr, "  vortex traffic secrets [list|get|set|clear]      Manage local credentials vault\n")
+	fmt.Fprintf(stderr, "  vortex traffic prune [--all]                     Clean up expired/unused traffic\n\n")
 
 	return nil
 }
@@ -161,28 +178,246 @@ func (c *CmdCache) runList(_ context.Context, _ []string, stdout, stderr io.Writ
 	return nil
 }
 
-func (c *CmdCache) runShow(_ context.Context, args []string, stdout, _ io.Writer) error {
-	if len(args) == 0 {
-		return errors.New("missing session ID or hash prefix (e.g. 'vortex cache show session_name')")
+type rawHARLog struct {
+	Log struct {
+		Entries []struct {
+			Request struct {
+				Method  string `json:"method"`
+				URL     string `json:"url"`
+				Headers []struct {
+					Name  string `json:"name"`
+					Value string `json:"value"`
+				} `json:"headers"`
+				PostData struct {
+					MimeType string `json:"mimeType"`
+					Text     string `json:"text"`
+				} `json:"postData"`
+			} `json:"request"`
+			Response struct {
+				Status     int    `json:"status"`
+				StatusText string `json:"statusText"`
+				Headers    []struct {
+					Name  string `json:"name"`
+					Value string `json:"value"`
+				} `json:"headers"`
+				Content struct {
+					MimeType string `json:"mimeType"`
+					Text     string `json:"text"`
+				} `json:"content"`
+			} `json:"response"`
+			Time float64 `json:"time"`
+		} `json:"entries"`
+	} `json:"log"`
+}
+
+func (c *CmdCache) runShow(_ context.Context, args []string, stdout, stderr io.Writer) error {
+	fs := flag.NewFlagSet("traffic inspect", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+
+	var (
+		entryIdx = fs.Int("entry", -1, "Inspect specific entry index (0-based) in full detail")
+		filter   = fs.String("filter", "", "Filter entries by endpoint or URL substring")
+		allFlag  = fs.Bool("all", false, "Include static assets (scripts, styles, images)")
+	)
+
+	if err := parseFlagsPreserveOrder(fs, args); err != nil {
+		return err
+	}
+
+	posArgs := fs.Args()
+	if len(posArgs) == 0 {
+		return errors.New("missing session ID or HAR file (e.g. 'vortex traffic inspect <session_name|file.har>')")
+	}
+
+	target := posArgs[0]
+	if *entryIdx == -1 && len(posArgs) > 1 {
+		if idx, err := strconv.Atoi(posArgs[1]); err == nil {
+			*entryIdx = idx
+		}
 	}
 
 	rootDir := c.getRootDir()
 
-	data, entry, err := cache.GetTraffic(rootDir, args[0])
-	if err != nil {
-		return err
+	var (
+		data      []byte
+		sessionID string
+	)
+
+	// Check if target is a local file on disk
+	cleanTarget := filepath.Clean(target)
+	if _, err := os.Stat(cleanTarget); err == nil {
+		content, readErr := os.ReadFile(cleanTarget) //nolint:gosec
+		if readErr != nil {
+			return fmt.Errorf("reading %s: %w", target, readErr)
+		}
+
+		data = content
+		sessionID = filepath.Base(target)
+	} else {
+		trafficData, entry, getErr := cache.GetTraffic(rootDir, target)
+		if getErr != nil {
+			return getErr
+		}
+
+		data = trafficData
+		sessionID = entry.ID
 	}
 
-	fmt.Fprintf(stdout, "⚡ Traffic Session: %s\n", entry.ID)
-	fmt.Fprintf(stdout, "  Hash:            %s\n", entry.Hash)
-	fmt.Fprintf(stdout, "  Original File:   %s\n", entry.OriginalFile)
-	fmt.Fprintf(stdout, "  Captured Hosts:  %s\n", strings.Join(entry.Origins, ", "))
-	fmt.Fprintf(stdout, "  Endpoints:       %d\n", entry.EndpointCount)
-	fmt.Fprintf(stdout, "  Uncompressed:    %s (%d bytes)\n", formatBytes(entry.SizeBytes), entry.SizeBytes)
-	fmt.Fprintf(stdout, "  Compressed:      %s (%d bytes)\n", formatBytes(entry.CompressedBytes), entry.CompressedBytes)
-	fmt.Fprintf(stdout, "  Sanitized:       %t\n", entry.Sanitized)
-	fmt.Fprintf(stdout, "  Stored At:       %s\n", entry.StoredAt.Format(time.RFC3339))
-	fmt.Fprintf(stdout, "  Decompressed:    %d bytes verified\n", len(data))
+	var har rawHARLog
+	if err := json.Unmarshal(data, &har); err != nil {
+		return fmt.Errorf("parsing HAR payload: %w", err)
+	}
+
+	entries := har.Log.Entries
+	if len(entries) == 0 {
+		fmt.Fprintf(stdout, "⚡ Traffic Session %s: 0 captured requests found\n", sessionID)
+
+		return nil
+	}
+
+	// Mode 1: Single entry detail inspection
+	if *entryIdx >= 0 {
+		if *entryIdx >= len(entries) {
+			return fmt.Errorf("entry index #%d out of range (total entries: %d)", *entryIdx, len(entries))
+		}
+
+		e := entries[*entryIdx]
+		fmt.Fprintf(stdout, "⚡ Traffic Entry #%d in %s\n", *entryIdx, sessionID)
+		fmt.Fprintf(stdout, "  Method:       %s\n", e.Request.Method)
+		fmt.Fprintf(stdout, "  URL:          %s\n", e.Request.URL)
+		fmt.Fprintf(stdout, "  Status:       %d %s\n", e.Response.Status, e.Response.StatusText)
+
+		if e.Time > 0 {
+			fmt.Fprintf(stdout, "  Duration:     %.0f ms\n", e.Time)
+		}
+
+		if e.Request.PostData.MimeType != "" {
+			fmt.Fprintf(stdout, "  Req MIME:     %s\n", e.Request.PostData.MimeType)
+		}
+
+		if e.Response.Content.MimeType != "" {
+			fmt.Fprintf(stdout, "  Resp MIME:    %s\n", e.Response.Content.MimeType)
+		}
+
+		// Request Body
+		fmt.Fprintf(stdout, "\n▶ Request Body:\n")
+
+		reqText := e.Request.PostData.Text
+		if reqText == "" {
+			fmt.Fprintf(stdout, "  (empty)\n")
+		} else {
+			cleanReq := strings.TrimPrefix(reqText, ")]}'\n")
+
+			var parsedReq any
+			if err := json.Unmarshal([]byte(cleanReq), &parsedReq); err == nil {
+				pretty, _ := json.MarshalIndent(parsedReq, "  ", "  ")
+				fmt.Fprintf(stdout, "  %s\n", string(pretty))
+			} else {
+				lines := strings.Split(reqText, "\n")
+				if len(lines) > 50 {
+					lines = append(lines[:50], fmt.Sprintf("... (%d lines truncated)", len(lines)-50))
+				}
+
+				for _, line := range lines {
+					fmt.Fprintf(stdout, "  %s\n", line)
+				}
+			}
+		}
+
+		// Response Body
+		fmt.Fprintf(stdout, "\n◀ Response Body:\n")
+
+		respText := e.Response.Content.Text
+		if respText == "" {
+			fmt.Fprintf(stdout, "  (empty)\n")
+		} else {
+			cleanResp := strings.TrimPrefix(respText, ")]}'\n")
+
+			var parsedResp any
+			if err := json.Unmarshal([]byte(cleanResp), &parsedResp); err == nil {
+				pretty, _ := json.MarshalIndent(parsedResp, "  ", "  ")
+				fmt.Fprintf(stdout, "  %s\n", string(pretty))
+			} else {
+				lines := strings.Split(respText, "\n")
+				if len(lines) > 50 {
+					lines = append(lines[:50], fmt.Sprintf("... (%d lines truncated)", len(lines)-50))
+				}
+
+				for _, line := range lines {
+					fmt.Fprintf(stdout, "  %s\n", line)
+				}
+			}
+		}
+
+		return nil
+	}
+
+	// Mode 2: Summary table of entries
+	fmt.Fprintf(stdout, "⚡ Traffic Session: %s (%d total entries)\n\n", sessionID, len(entries))
+
+	tbl := tui.NewTable("ENTRY", "METHOD", "ENDPOINT / URL", "STATUS", "REQ PREVIEW", "RESP PREVIEW")
+	tbl.SetIndent(0)
+
+	displayed := 0
+	for i, e := range entries {
+		url := e.Request.URL
+		if !*allFlag {
+			low := strings.ToLower(url)
+			if strings.Contains(low, ".js") || strings.Contains(low, ".css") || strings.Contains(low, ".png") ||
+				strings.Contains(low, ".svg") || strings.Contains(low, ".woff") || strings.Contains(low, ".ico") {
+				continue
+			}
+		}
+
+		if *filter != "" && !strings.Contains(strings.ToLower(url), strings.ToLower(*filter)) {
+			continue
+		}
+
+		displayed++
+
+		reqSnippet := strings.ReplaceAll(e.Request.PostData.Text, "\n", " ")
+		if len(reqSnippet) > 35 {
+			reqSnippet = reqSnippet[:32] + "..."
+		}
+
+		if reqSnippet == "" {
+			reqSnippet = "-"
+		}
+
+		respSnippet := strings.TrimPrefix(e.Response.Content.Text, ")]}'\n")
+
+		respSnippet = strings.ReplaceAll(respSnippet, "\n", " ")
+		if len(respSnippet) > 35 {
+			respSnippet = respSnippet[:32] + "..."
+		}
+
+		if respSnippet == "" {
+			respSnippet = "-"
+		}
+
+		dispURL := url
+		if len(dispURL) > 55 {
+			dispURL = dispURL[:52] + "..."
+		}
+
+		statusStr := strconv.Itoa(e.Response.Status)
+		if e.Response.Status == 200 {
+			statusStr = "200 OK"
+		}
+
+		tbl.AddRow(
+			fmt.Sprintf("#%d", i),
+			e.Request.Method,
+			dispURL,
+			statusStr,
+			reqSnippet,
+			respSnippet,
+		)
+	}
+
+	_ = tbl.Render(stdout)
+	fmt.Fprintf(stdout, "\nShowing %d of %d request(s)\n", displayed, len(entries))
+	fmt.Fprintf(stdout, "Tip: Run 'vortex traffic inspect %s --entry=<N>' to view full JSON payload\n", sessionID)
 
 	return nil
 }
