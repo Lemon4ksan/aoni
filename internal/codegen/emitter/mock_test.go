@@ -66,3 +66,46 @@ func TestEmitter_EmitMock(t *testing.T) {
 	require.Contains(t, src, "Client(opts ...aoni.ClientOption)")
 	require.Contains(t, src, "Calls(method string)")
 }
+
+func TestEmitter_EmitMock_WithFixtures(t *testing.T) {
+	root := &ir.RootIR{
+		PackageName: "market",
+		Services: []*ir.ServiceIR{
+			{
+				Name: "MarketAPI",
+				Methods: []*ir.MethodIR{
+					{
+						Name:       "GetPrice",
+						HTTPMethod: "GET",
+						Path:       &ir.PathIR{RawTemplate: "/market/price"},
+						Params: []*ir.ParamIR{
+							{GoName: "ctx", Location: ir.LocContext},
+						},
+						Return: &ir.ReturnIR{
+							SuccessType: ir.GoTypeIR{Name: "map[string]any"},
+						},
+						MockFixture: &ir.MockFixtureIR{
+							StatusCode:  200,
+							ContentType: "application/json",
+							Headers: map[string]string{
+								"x-custom-source": "vortex-traffic",
+							},
+							Body: `{"price": 42.50, "currency": "USD"}`,
+						},
+					},
+				},
+			},
+		},
+	}
+
+	em := &emitter.Emitter{}
+	code, err := em.EmitMock(root)
+	require.NoError(t, err)
+	require.NotEmpty(t, code)
+
+	src := string(code)
+	require.Contains(t, src, `w.Header().Set("Content-Type", "application/json")`)
+	require.Contains(t, src, `w.WriteHeader(200)`)
+	require.Contains(t, src, `42.50`)
+	require.Contains(t, src, `USD`)
+}

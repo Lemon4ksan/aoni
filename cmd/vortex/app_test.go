@@ -21,6 +21,7 @@ func newTestApp(stdout, stderr *bytes.Buffer) *App {
 		&CmdAutoPilot{},
 		&CmdStatus{},
 		&CmdInit{},
+		&CmdRecord{},
 		&CmdConfig{},
 		&CmdWork{},
 		&CmdGen{},
@@ -40,6 +41,9 @@ func newTestApp(stdout, stderr *bytes.Buffer) *App {
 		&CmdTag{},
 		&CmdBlame{},
 		&CmdOAPI{},
+		&CmdImport{},
+		&CmdExport{},
+		&CmdCache{},
 		&CmdProto{},
 		&CmdBench{},
 		&CmdProf{},
@@ -65,13 +69,13 @@ func TestApp_HelpAndVersion(t *testing.T) {
 
 	err := app.Run(context.Background(), []string{"--help"})
 	require.NoError(t, err)
-	require.Contains(t, stdout.String(), "Available Commands:")
+	require.Contains(t, stdout.String(), "Usage:")
 
 	stdout.Reset()
 
 	err = app.Run(context.Background(), []string{"--version"})
 	require.NoError(t, err)
-	require.Contains(t, stdout.String(), "vortex version "+version.Current)
+	require.Contains(t, stdout.String(), version.Current)
 }
 
 func TestApp_ListAndExplain(t *testing.T) {
@@ -1425,4 +1429,230 @@ type InventoryWrapperAPI interface {
 	// W012: mirror-ghost-method should be reported for BatchTransfer
 	require.Contains(t, outStr, "W012")
 	require.Contains(t, outStr, "mirror-ghost-method")
+}
+
+func TestApp_Init_PackageScaffolding(t *testing.T) {
+	tempDir := t.TempDir()
+
+	var stdout, stderr bytes.Buffer
+
+	app := newTestApp(&stdout, &stderr)
+
+	// 1. Test init package with default REST template
+	err := app.Run(context.Background(), []string{"init", "billing", "-dir=" + tempDir})
+	require.NoError(t, err)
+	require.Contains(t, stdout.String(), "Successfully initialized package billing")
+
+	billingFile := filepath.Join(tempDir, "pkg", "billing", "api.go")
+	require.FileExists(t, billingFile)
+
+	content, err := os.ReadFile(billingFile)
+	require.NoError(t, err)
+	require.Contains(t, string(content), "package billing")
+	require.Contains(t, string(content), "type BillingAPI interface")
+	require.Contains(t, string(content), "ListItems")
+
+	// Verify .vortex.yml auto-registration
+	vortexYml := filepath.Join(tempDir, ".vortex.yml")
+	require.FileExists(t, vortexYml)
+	ymlBytes, err := os.ReadFile(vortexYml)
+	require.NoError(t, err)
+	require.Contains(t, string(ymlBytes), "BillingAPI")
+	require.Contains(t, string(ymlBytes), "pkg/billing/api.go")
+
+	// 2. Test init package with WebSocket template
+	stdout.Reset()
+
+	err = app.Run(context.Background(), []string{"init", "chat", "-tpl=ws", "-dir=" + tempDir})
+	require.NoError(t, err)
+	require.Contains(t, stdout.String(), "Successfully initialized package chat")
+
+	chatFile := filepath.Join(tempDir, "pkg", "chat", "api.go")
+	require.FileExists(t, chatFile)
+	chatContent, err := os.ReadFile(chatFile)
+	require.NoError(t, err)
+	require.Contains(t, string(chatContent), "package chat")
+	require.Contains(t, string(chatContent), "type ChatAPI interface")
+	require.Contains(t, string(chatContent), `// @aoni:service protocol=ws`)
+
+	// 3. Test init with list templates
+	stdout.Reset()
+
+	err = app.Run(context.Background(), []string{"init", "-tpl=list"})
+	require.NoError(t, err)
+	require.Contains(t, stdout.String(), "Vortex Ready-Made Contract Templates")
+}
+
+func TestApp_Diff_SpecToSpec(t *testing.T) {
+	tempDir := t.TempDir()
+
+	specA := filepath.Join(tempDir, "specA.json")
+	specB := filepath.Join(tempDir, "specB.json")
+
+	specAContent := `{"openapi": "3.0.0", "info": {"title": "A", "version": "1.0"}, "paths": {"/orders": {"get": {"responses": {"200": {"description": "OK"}}}}}}`
+	specBContent := `{"openapi": "3.0.0", "info": {"title": "B", "version": "2.0"}, "paths": {"/orders": {"get": {"parameters": [{"name": "key", "in": "query", "required": true, "schema": {"type": "string"}}], "responses": {"200": {"description": "OK"}}}}, "/invoices": {"get": {"responses": {"200": {"description": "OK"}}}}}}`
+
+	require.NoError(t, os.WriteFile(specA, []byte(specAContent), 0o600))
+	require.NoError(t, os.WriteFile(specB, []byte(specBContent), 0o600))
+
+	var stdout, stderr bytes.Buffer
+
+	app := newTestApp(&stdout, &stderr)
+
+	err := app.Run(context.Background(), []string{"diff", specA, specB})
+	require.NoError(t, err)
+
+	outStr := stdout.String()
+	require.Contains(t, outStr, "Vortex Schema Drift Inspector")
+	require.Contains(t, outStr, "added required query parameter \"key\"")
+	require.Contains(t, outStr, "Endpoint GET /invoices was added")
+}
+
+func TestApp_Cache_Workflow(t *testing.T) {
+	tempDir := t.TempDir()
+	cwd, err := os.Getwd()
+	require.NoError(t, err)
+
+	defer func() { _ = os.Chdir(cwd) }()
+
+	require.NoError(t, os.Chdir(tempDir))
+
+	harData := []byte(`{
+		"log": {
+			"version": "1.2",
+			"entries": [
+				{
+					"request": {
+						"method": "GET",
+						"url": "https://api.example.com/v1/users",
+						"headers": [
+							{"name": "Authorization", "value": "Bearer sample_secret_token_123"},
+							{"name": "x-goog-api-key", "value": "AIzaSySecretApiKey"}
+						]
+					},
+					"response": {
+						"status": 200,
+						"headers": [{"name": "Content-Type", "value": "application/json"}]
+					}
+				}
+			]
+		}
+	}`)
+
+	harFile := filepath.Join(tempDir, "traffic.har")
+	require.NoError(t, os.WriteFile(harFile, harData, 0o600))
+
+	var stdout, stderr bytes.Buffer
+
+	app := newTestApp(&stdout, &stderr)
+
+	// 1. vortex cache store --move
+	err = app.Run(context.Background(), []string{"cache", "store", "--move", harFile})
+	require.NoError(t, err)
+	require.Contains(t, stdout.String(), "Moved")
+	require.NoFileExists(t, harFile)
+
+	// 2. vortex cache list
+	stdout.Reset()
+
+	err = app.Run(context.Background(), []string{"cache", "list"})
+	require.NoError(t, err)
+	require.Contains(t, stdout.String(), "traffic")
+	require.Contains(t, stdout.String(), "api.example.com")
+
+	// 3. vortex cache show
+	stdout.Reset()
+
+	err = app.Run(context.Background(), []string{"cache", "show", "traffic"})
+	require.NoError(t, err)
+	require.Contains(t, stdout.String(), "traffic")
+	require.Contains(t, stdout.String(), "Endpoints:       1")
+
+	// 4. vortex cache secrets list & get
+	stdout.Reset()
+
+	err = app.Run(context.Background(), []string{"cache", "secrets", "list"})
+	require.NoError(t, err)
+	require.Contains(t, stdout.String(), "AUTH_TOKEN")
+	require.Contains(t, stdout.String(), "GOOGLE_API_KEY")
+
+	stdout.Reset()
+
+	err = app.Run(context.Background(), []string{"cache", "secrets", "get", "AUTH_TOKEN"})
+	require.NoError(t, err)
+	require.Contains(t, stdout.String(), "sample_secret_token_123")
+
+	// 5. vortex cache export
+	stdout.Reset()
+
+	restoredFile := filepath.Join(tempDir, "restored.har")
+	err = app.Run(context.Background(), []string{"cache", "export", "traffic", "-out=" + restoredFile})
+	require.NoError(t, err)
+	require.FileExists(t, restoredFile)
+
+	// 6. vortex cache prune
+	stdout.Reset()
+
+	err = app.Run(context.Background(), []string{"cache", "prune", "--all"})
+	require.NoError(t, err)
+	require.Contains(t, stdout.String(), "Removed 1 cached traffic session(s)")
+}
+
+func TestApp_Config_Secrets(t *testing.T) {
+	tempDir := t.TempDir()
+	cwd, err := os.Getwd()
+	require.NoError(t, err)
+
+	defer func() { _ = os.Chdir(cwd) }()
+
+	require.NoError(t, os.Chdir(tempDir))
+
+	var stdout, stderr bytes.Buffer
+
+	app := newTestApp(&stdout, &stderr)
+
+	// 1. vortex init
+	err = app.Run(context.Background(), []string{"init", "-f"})
+	require.NoError(t, err)
+
+	// 2. vortex config secret add
+	stdout.Reset()
+
+	err = app.Run(context.Background(), []string{"config", "secret", "header", "x-custom-key", "CUSTOM_KEY"})
+	require.NoError(t, err)
+	require.Contains(t, stdout.String(), "x-custom-key -> ${CUSTOM_KEY}")
+
+	stdout.Reset()
+
+	err = app.Run(context.Background(), []string{"config", "secret", "query", "api_key", "API_KEY"})
+	require.NoError(t, err)
+	require.Contains(t, stdout.String(), "?api_key -> ${API_KEY}")
+
+	stdout.Reset()
+
+	err = app.Run(context.Background(), []string{"config", "secret", "cookie", "session_id", "SESSION_ID"})
+	require.NoError(t, err)
+	require.Contains(t, stdout.String(), "session_id -> ${SESSION_ID}")
+
+	// 3. vortex config secret list
+	stdout.Reset()
+
+	err = app.Run(context.Background(), []string{"config", "secret", "list"})
+	require.NoError(t, err)
+	require.Contains(t, stdout.String(), "x-custom-key")
+	require.Contains(t, stdout.String(), "api_key")
+	require.Contains(t, stdout.String(), "session_id")
+
+	// 4. vortex config secret rm
+	stdout.Reset()
+
+	err = app.Run(context.Background(), []string{"config", "secret", "rm", "header", "x-custom-key"})
+	require.NoError(t, err)
+	require.Contains(t, stdout.String(), "Removed secret header rule")
+
+	stdout.Reset()
+
+	err = app.Run(context.Background(), []string{"config", "secret", "list"})
+	require.NoError(t, err)
+	require.NotContains(t, stdout.String(), "x-custom-key")
 }

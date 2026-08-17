@@ -397,6 +397,41 @@ func (c *CmdTag) runAdd(
 		_ = cmd.Run()
 	}
 
+	// Update @version directive in target contract file if present
+	if contractFile != "" {
+		filePath := filepath.Join(rootDir, contractFile)
+		if src, rErr := os.ReadFile(filePath); rErr == nil {
+			lines := strings.Split(string(src), "\n")
+
+			hasVersion := false
+			for i, line := range lines {
+				trimmed := strings.TrimSpace(line)
+				if strings.HasPrefix(trimmed, "// @version") {
+					lines[i] = fmt.Sprintf("// @version %q", version)
+					hasVersion = true
+					break
+				}
+			}
+
+			if !hasVersion {
+				for i, line := range lines {
+					if strings.HasPrefix(strings.TrimSpace(line), "// @aoni:service") {
+						lines = append(
+							lines[:i+1],
+							append([]string{fmt.Sprintf("// @version %q", version)}, lines[i+1:]...)...)
+						hasVersion = true
+
+						break
+					}
+				}
+			}
+
+			if hasVersion {
+				_ = os.WriteFile(filePath, []byte(strings.Join(lines, "\n")), 0o600)
+			}
+		}
+	}
+
 	fmt.Fprintf(stdout, "✔ Created API release tag %s [%s]\n", version, contractScope)
 	fmt.Fprintf(stdout, "  • Message:  %s\n", message)
 	fmt.Fprintf(stdout, "  • Methods:  %d endpoints snapshotted\n", len(methods))

@@ -11,6 +11,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/getkin/kin-openapi/openapi3"
 )
@@ -55,6 +56,7 @@ type HARContent struct {
 	Size     int64  `json:"size"`
 	MimeType string `json:"mimeType"`
 	Text     string `json:"text"`
+	Encoding string `json:"encoding,omitempty"`
 }
 
 // HARToOpenAPI transforms one or more recorded W3C HAR 1.2 logs into an OpenAPI 3.0 specification,
@@ -92,6 +94,9 @@ func HARToOpenAPI(data []byte) (*openapi3.T, error) {
 		}
 
 		method := strings.ToUpper(entry.Request.Method)
+		if method == "OPTIONS" || method == "HEAD" || isIgnoredHAREndpoint(cleanPath, rawURL) {
+			continue
+		}
 
 		// Extract or create PathItem
 		pathItem := doc.Paths.Value(cleanPath)
@@ -146,23 +151,38 @@ func HARToOpenAPI(data []byte) (*openapi3.T, error) {
 			}
 		}
 
-		// 2. Ingest & Union Request Body
+		// 2. Ingest & Union Request Body (and register DTO struct in Components)
 		if entry.Request.PostData != nil && len(entry.Request.PostData.Text) > 0 {
 			schema := inferSchemaFromJSON([]byte(entry.Request.PostData.Text))
 			if schema != nil {
+				var schemaRef *openapi3.SchemaRef
+				if (schema.Type != nil && schema.Type.Includes("object")) || len(schema.Properties) > 0 {
+					dtoName := op.OperationID + "Request"
+					if existing, exists := doc.Components.Schemas[dtoName]; exists && existing.Value != nil {
+						existing.Value = MergeSchemas(existing.Value, schema)
+						schema = existing.Value
+					} else {
+						doc.Components.Schemas[dtoName] = &openapi3.SchemaRef{Value: schema}
+					}
+
+					schemaRef = &openapi3.SchemaRef{
+						Ref:   "#/components/schemas/" + dtoName,
+						Value: schema,
+					}
+				} else {
+					schemaRef = &openapi3.SchemaRef{Value: schema}
+				}
+
 				if op.RequestBody == nil || op.RequestBody.Value == nil {
-					reqBody := openapi3.NewRequestBody().WithContent(openapi3.NewContentWithJSONSchema(schema))
+					reqBody := openapi3.NewRequestBody().WithContent(openapi3.NewContentWithJSONSchemaRef(schemaRef))
 					op.RequestBody = &openapi3.RequestBodyRef{Value: reqBody}
 				} else {
-					existingContent := op.RequestBody.Value.Content.Get("application/json")
-					if existingContent != nil && existingContent.Schema != nil && existingContent.Schema.Value != nil {
-						existingContent.Schema.Value = mergeSchemas(existingContent.Schema.Value, schema)
-					}
+					op.RequestBody.Value.Content["application/json"] = openapi3.NewMediaType().WithSchemaRef(schemaRef)
 				}
 			}
 		}
 
-		// 3. Ingest & Union Response Body & Status Codes
+		// 3. Ingest & Union Response Body & Status Codes (and register DTO struct in Components)
 		statusStr := strconv.Itoa(entry.Response.Status)
 		if entry.Response.Status == 0 {
 			statusStr = "200"
@@ -170,32 +190,291 @@ func HARToOpenAPI(data []byte) (*openapi3.T, error) {
 
 		statusInt, _ := strconv.Atoi(statusStr)
 
+		var respSchema *openapi3.Schema
+		if entry.Response.Content != nil && len(entry.Response.Content.Text) > 0 {
+			respSchema = inferSchemaFromJSON([]byte(entry.Response.Content.Text))
+		}
+
+		var respSchemaRef *openapi3.SchemaRef
+		if respSchema != nil {
+			switch {
+			case (respSchema.Type != nil && respSchema.Type.Includes("object")) || len(respSchema.Properties) > 0:
+				dtoName := op.OperationID + "Response"
+				if existing, exists := doc.Components.Schemas[dtoName]; exists && existing.Value != nil {
+					existing.Value = MergeSchemas(existing.Value, respSchema)
+					respSchema = existing.Value
+				} else {
+					doc.Components.Schemas[dtoName] = &openapi3.SchemaRef{Value: respSchema}
+				}
+
+				respSchemaRef = &openapi3.SchemaRef{
+					Ref:   "#/components/schemas/" + dtoName,
+					Value: respSchema,
+				}
+
+			case respSchema.Type != nil && respSchema.Type.Includes("array") && respSchema.Items != nil &&
+				respSchema.Items.Value != nil && len(respSchema.Items.Value.Properties) > 0:
+				itemDtoName := op.OperationID + "Item"
+				if existing, exists := doc.Components.Schemas[itemDtoName]; exists && existing.Value != nil {
+					existing.Value = MergeSchemas(existing.Value, respSchema.Items.Value)
+					respSchema.Items.Value = existing.Value
+				} else {
+					doc.Components.Schemas[itemDtoName] = &openapi3.SchemaRef{Value: respSchema.Items.Value}
+				}
+
+				respSchema.Items = &openapi3.SchemaRef{
+					Ref:   "#/components/schemas/" + itemDtoName,
+					Value: respSchema.Items.Value,
+				}
+				respSchemaRef = &openapi3.SchemaRef{Value: respSchema}
+
+			default:
+				respSchemaRef = &openapi3.SchemaRef{Value: respSchema}
+			}
+		}
+
 		respRef := op.Responses.Value(statusStr)
 		if respRef == nil {
 			resp := openapi3.NewResponse().WithDescription("Response " + statusStr)
-			if entry.Response.Content != nil && len(entry.Response.Content.Text) > 0 {
-				schema := inferSchemaFromJSON([]byte(entry.Response.Content.Text))
-				if schema != nil {
-					resp.WithContent(openapi3.NewContentWithJSONSchema(schema))
-				}
+			if respSchemaRef != nil {
+				resp.WithContent(openapi3.NewContentWithJSONSchemaRef(respSchemaRef))
 			}
 
 			op.AddResponse(statusInt, resp)
-		} else if respRef.Value != nil && entry.Response.Content != nil && len(entry.Response.Content.Text) > 0 {
-			schema := inferSchemaFromJSON([]byte(entry.Response.Content.Text))
-			if schema != nil {
-				existingContent := respRef.Value.Content.Get("application/json")
-				if existingContent != nil && existingContent.Schema != nil && existingContent.Schema.Value != nil {
-					existingContent.Schema.Value = mergeSchemas(existingContent.Schema.Value, schema)
+		} else if respRef.Value != nil && respSchemaRef != nil {
+			respRef.Value.Content["application/json"] = openapi3.NewMediaType().WithSchemaRef(respSchemaRef)
+		}
+
+		// 4. Ingest operation-specific request headers
+		var opHeaders []map[string]string
+		if op.Extensions != nil {
+			if raw, ok := op.Extensions["x-vortex-headers"].([]map[string]string); ok {
+				opHeaders = raw
+			}
+		}
+
+		opHeaderMap := make(map[string]string)
+		for _, h := range opHeaders {
+			opHeaderMap[h["name"]] = h["value"]
+		}
+
+		for _, h := range entry.Request.Headers {
+			name := strings.TrimSpace(h.Name)
+			val := strings.TrimSpace(h.Value)
+
+			if isMeaningfulClientHeader(name) && val != "" {
+				val = sanitizeHeaderValue(name, val)
+				if _, exists := opHeaderMap[name]; !exists {
+					opHeaderMap[name] = val
+					opHeaders = append(opHeaders, map[string]string{
+						"name":  name,
+						"value": val,
+					})
 				}
 			}
 		}
+
+		if len(opHeaders) > 0 {
+			if op.Extensions == nil {
+				op.Extensions = make(map[string]any)
+			}
+
+			op.Extensions["x-vortex-headers"] = opHeaders
+		}
+
+		var requiredCredentials []string
+		if op.Extensions != nil {
+			if raw, ok := op.Extensions["x-required-credentials"].([]string); ok {
+				requiredCredentials = raw
+			}
+		}
+
+		credSet := make(map[string]bool)
+		for _, c := range requiredCredentials {
+			credSet[c] = true
+		}
+
+		for _, h := range entry.Request.Headers {
+			name := strings.TrimSpace(h.Name)
+			val := strings.TrimSpace(h.Value)
+			lower := strings.ToLower(name)
+
+			if isCredentialHeader(lower) && val != "" {
+				sanVal := sanitizeHeaderValue(name, val)
+
+				label := fmt.Sprintf("%s: %s", name, sanVal)
+				if !credSet[label] {
+					credSet[label] = true
+					requiredCredentials = append(requiredCredentials, label)
+				}
+			}
+		}
+
+		if len(requiredCredentials) > 0 {
+			if op.Extensions == nil {
+				op.Extensions = make(map[string]any)
+			}
+
+			op.Extensions["x-required-credentials"] = requiredCredentials
+		}
+	}
+
+	// 4. Extract BaseURL and common client headers across transactions
+	headerCounts := make(map[string]map[string]int)
+	totalEntries := len(har.Log.Entries)
+
+	var detectedHost string
+
+	for _, entry := range har.Log.Entries {
+		if u, err := url.Parse(entry.Request.URL); err == nil && u.Host != "" && detectedHost == "" {
+			detectedHost = u.Scheme + "://" + u.Host
+		}
+
+		for _, h := range entry.Request.Headers {
+			name := strings.TrimSpace(h.Name)
+
+			val := strings.TrimSpace(h.Value)
+			if isMeaningfulClientHeader(name) && val != "" {
+				val = sanitizeHeaderValue(name, val)
+				if headerCounts[name] == nil {
+					headerCounts[name] = make(map[string]int)
+				}
+
+				headerCounts[name][val]++
+			}
+		}
+	}
+
+	if detectedHost != "" {
+		doc.Servers = append(doc.Servers, &openapi3.Server{
+			URL:         detectedHost,
+			Description: "API Server (inferred from captured traffic)",
+		})
+	}
+
+	var commonHeaders []map[string]string
+	for name, valMap := range headerCounts {
+		for val, count := range valMap {
+			if count >= 1 && (totalEntries <= 2 || count*2 >= totalEntries) {
+				commonHeaders = append(commonHeaders, map[string]string{
+					"name":  name,
+					"value": val,
+				})
+			}
+		}
+	}
+
+	if len(commonHeaders) > 0 {
+		sort.Slice(commonHeaders, func(i, j int) bool {
+			return commonHeaders[i]["name"] < commonHeaders[j]["name"]
+		})
+
+		if doc.Info.Extensions == nil {
+			doc.Info.Extensions = make(map[string]any)
+		}
+
+		doc.Info.Extensions["x-vortex-headers"] = commonHeaders
 	}
 
 	return doc, nil
 }
 
-func mergeSchemas(s1, s2 *openapi3.Schema) *openapi3.Schema {
+func isIgnoredHAREndpoint(cleanPath, rawURL string) bool {
+	lowerPath := strings.ToLower(cleanPath)
+	lowerURL := strings.ToLower(rawURL)
+
+	// 1. Static file extensions
+	for _, ext := range []string{".js", ".css", ".png", ".jpg", ".jpeg", ".gif", ".svg", ".ico", ".woff", ".woff2", ".ttf", ".webp", ".mp4", ".map"} {
+		if strings.HasSuffix(lowerPath, ext) {
+			return true
+		}
+	}
+
+	// 2. Telemetry, analytics, and noise tracking endpoints
+	noisePatterns := []string{
+		"/gen_204", "/csi", "/log", "/batch", "/survey/", "/cookienotificationbar",
+		"/static/proxy.html", "/pagead/", "google-analytics.com", "doubleclick.net",
+		"/a/acg8", // Google user profile photos
+	}
+	for _, p := range noisePatterns {
+		if strings.Contains(lowerPath, p) || strings.Contains(lowerURL, p) {
+			return true
+		}
+	}
+
+	return false
+}
+
+func isCredentialHeader(name string) bool {
+	lower := strings.ToLower(name)
+	if lower == "authorization" || lower == "proxy-authorization" {
+		return true
+	}
+
+	return strings.Contains(lower, "api-key") || strings.Contains(lower, "apikey") ||
+		strings.Contains(lower, "token") || strings.Contains(lower, "secret") ||
+		strings.Contains(lower, "auth") || strings.Contains(lower, "signature") ||
+		strings.Contains(lower, "session-id") || strings.Contains(lower, "visit-id") ||
+		strings.Contains(lower, "instanceid") || strings.Contains(lower, "connection-id")
+}
+
+func isMeaningfulClientHeader(name string) bool {
+	if strings.HasPrefix(name, ":") {
+		return false
+	}
+
+	lower := strings.ToLower(name)
+	if strings.HasPrefix(lower, "sec-") {
+		return false
+	}
+
+	if isCredentialHeader(name) {
+		return false
+	}
+
+	switch lower {
+	case "host", "content-length", "content-type", "connection", "proxy-connection",
+		"accept-encoding", "transfer-encoding", "cookie", "accept-language", "priority",
+		"cache-control", "pragma", "referer", "origin", "x-clientdetails",
+		"x-javascript-user-agent", "x-requested-with", "x-referer", "x-origin",
+		"x-goog-encode-response-if-executable", "if-none-match":
+		return false
+	default:
+		return true
+	}
+}
+
+func sanitizeHeaderValue(name, val string) string {
+	lowerName := strings.ToLower(name)
+
+	// Authorization tokens
+	if lowerName == "authorization" {
+		if strings.HasPrefix(val, "Bearer ") || strings.HasPrefix(val, "bearer ") {
+			return "Bearer ${AUTH_TOKEN}"
+		}
+
+		if strings.HasPrefix(val, "*:") {
+			return "*:${PRODUCTION_TOKEN}"
+		}
+
+		return "${AUTH_TOKEN}"
+	}
+
+	if isCredentialHeader(name) {
+		clean := strings.ToLower(name)
+		clean = strings.TrimPrefix(clean, "x-")
+		clean = strings.TrimPrefix(clean, "x_")
+		clean = strings.ReplaceAll(clean, "-", "_")
+		clean = strings.ReplaceAll(clean, ".", "_")
+
+		return "${" + strings.ToUpper(clean) + "}"
+	}
+
+	return val
+}
+
+// MergeSchemas recursively unions properties and items of two OpenAPI schemas.
+func MergeSchemas(s1, s2 *openapi3.Schema) *openapi3.Schema {
 	if s1 == nil {
 		return s2
 	}
@@ -212,7 +491,7 @@ func mergeSchemas(s1, s2 *openapi3.Schema) *openapi3.Schema {
 
 			for k, v := range s2.Properties {
 				if existingProp, exists := s1.Properties[k]; exists && existingProp.Value != nil && v.Value != nil {
-					existingProp.Value = mergeSchemas(existingProp.Value, v.Value)
+					existingProp.Value = MergeSchemas(existingProp.Value, v.Value)
 				} else {
 					s1.Properties[k] = v
 				}
@@ -224,7 +503,7 @@ func mergeSchemas(s1, s2 *openapi3.Schema) *openapi3.Schema {
 		if s1.Type.Includes("array") && s2.Type.Includes("array") && s1.Items != nil && s2.Items != nil &&
 			s1.Items.Value != nil &&
 			s2.Items.Value != nil {
-			s1.Items.Value = mergeSchemas(s1.Items.Value, s2.Items.Value)
+			s1.Items.Value = MergeSchemas(s1.Items.Value, s2.Items.Value)
 			return s1
 		}
 	}
@@ -257,7 +536,12 @@ func valueToSchema(v any) *openapi3.Schema {
 		return openapi3.NewFloat64Schema()
 
 	case string:
+		if _, err := time.Parse(time.RFC3339, val); err == nil && len(val) >= 19 {
+			return openapi3.NewDateTimeSchema()
+		}
+
 		return openapi3.NewStringSchema()
+
 	case []any:
 		arr := openapi3.NewArraySchema()
 		if len(val) > 0 {

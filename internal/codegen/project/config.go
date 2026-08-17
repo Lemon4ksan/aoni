@@ -15,6 +15,7 @@ import (
 
 	"gopkg.in/yaml.v3"
 
+	"github.com/lemon4ksan/aoni/internal/codegen/cache"
 	"github.com/lemon4ksan/aoni/internal/codegen/parser"
 )
 
@@ -26,6 +27,7 @@ type Config struct {
 	Version   int              `yaml:"version"`
 	Defaults  DefaultsConfig   `yaml:"defaults,omitempty"`
 	Contracts []ContractConfig `yaml:"contracts"`
+	Secrets   SecretsConfig    `yaml:"secrets,omitempty"`
 	Lint      LintConfig       `yaml:"lint,omitempty"`
 	Ignore    []string         `yaml:"ignore,omitempty"`
 	Export    ExportConfig     `yaml:"export,omitempty"`
@@ -55,6 +57,18 @@ type DefaultsConfig struct {
 	Harness bool   `yaml:"harness,omitempty"`
 	Mock    bool   `yaml:"mock,omitempty"`
 }
+
+// SecretsConfig specifies secret detection, header/query/cookie masking, and environment mappings.
+type SecretsConfig = cache.SecretsConfig
+
+// SecretPathRule associates a URL path segment pattern with a secret variable name.
+type SecretPathRule = cache.SecretPathRule
+
+// SecretPattern associates a regular expression pattern with a secret variable name.
+type SecretPattern = cache.SecretPattern
+
+// NormalizeHeaderToEnv converts header names into clean uppercase environment variable names.
+var NormalizeHeaderToEnv = cache.NormalizeHeaderToEnv
 
 // ContractConfig describes a single service contract definition within the workspace.
 type ContractConfig struct {
@@ -624,6 +638,54 @@ func Init(rootDir string, force bool, opts ...AutoDiscoverOptions) (*Config, err
 	_, _ = EnsureGitattributes(rootDir)
 
 	return cfg, nil
+}
+
+// RegisterContract adds or updates a contract entry in .vortex.yml within rootDir.
+func RegisterContract(rootDir string, ct ContractConfig) error {
+	cfg, err := Load(rootDir)
+	if err != nil {
+		cfg = &Config{
+			Version: 1,
+			RootDir: rootDir,
+			Defaults: DefaultsConfig{
+				Casing: "snake_case",
+				Engine: "fast",
+			},
+			Contracts: []ContractConfig{ct},
+		}
+
+		return cfg.Save()
+	}
+
+	ct.File = filepath.ToSlash(ct.File)
+	found := false
+
+	for i := range cfg.Contracts {
+		existing := &cfg.Contracts[i]
+		if existing.File == ct.File || (ct.Name != "" && strings.EqualFold(existing.Name, ct.Name)) {
+			if ct.Name != "" {
+				existing.Name = ct.Name
+			}
+
+			if ct.Package != "" {
+				existing.Package = ct.Package
+			}
+
+			if ct.Upstream != nil {
+				existing.Upstream = ct.Upstream
+			}
+
+			found = true
+
+			break
+		}
+	}
+
+	if !found {
+		cfg.Contracts = append(cfg.Contracts, ct)
+	}
+
+	return cfg.Save()
 }
 
 // Save serializes the configuration back to disk at cfg.ConfigPath.

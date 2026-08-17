@@ -54,13 +54,17 @@ func (c *CmdConfig) Run(ctx context.Context, args []string, stdout, stderr io.Wr
 		fmt.Fprintf(stderr, "  vortex config set <key> <value>                       Set configuration property\n")
 		fmt.Fprintf(stderr, "  vortex config unset <key>                             Reset configuration property\n")
 		fmt.Fprintf(stderr, "  vortex config lint <disable|enable|ignore|strict>     Configure lint rules\n")
+		fmt.Fprintf(
+			stderr,
+			"  vortex config secret [list|add|rm] [type] [key] [ENV] Configure secret & credential rules\n",
+		)
 		fmt.Fprintf(stderr, "  vortex config plugin <add|rm|list> [target]           Manage polyglot plugins\n\n")
 		fmt.Fprintf(stderr, "Examples:\n")
 		fmt.Fprintf(stderr, "  vortex config set defaults.casing snake_case\n")
 		fmt.Fprintf(stderr, "  vortex config set defaults.engine fast\n")
-		fmt.Fprintf(stderr, "  vortex config set defaults.retry 3\n")
-		fmt.Fprintf(stderr, "  vortex config set defaults.timeout 15s\n")
-		fmt.Fprintf(stderr, "  vortex config lint disable S001 W002\n")
+		fmt.Fprintf(stderr, "  vortex config secret header x-auth-token AUTH_TOKEN\n")
+		fmt.Fprintf(stderr, "  vortex config secret query api_key API_KEY\n")
+		fmt.Fprintf(stderr, "  vortex config secret cookie session_id SESSION_ID\n")
 		fmt.Fprintf(stderr, "  vortex config plugin add ts --out=src/api.ts --contract=Market\n\n")
 		fmt.Fprintf(stderr, "Flags:\n")
 		fs.PrintDefaults()
@@ -157,6 +161,9 @@ func (c *CmdConfig) Run(ctx context.Context, args []string, stdout, stderr io.Wr
 			if len(posArgs) > 2 {
 				valArg = posArgs[2]
 			}
+
+		case "secret", "secrets":
+			return c.runSecret(stdout, stderr, cfg, posArgs[1:])
 
 		default:
 			// If contains dot, e.g. "defaults.casing snake_case", treat as get/set
@@ -679,4 +686,280 @@ func removeString(slice []string, val string) []string {
 	}
 
 	return res
+}
+
+func (c *CmdConfig) runSecret(stdout, _ io.Writer, cfg *project.Config, args []string) error {
+	if len(args) == 0 || args[0] == "list" || args[0] == "ls" {
+		return printSecretsConfig(stdout, cfg)
+	}
+
+	sub := strings.ToLower(args[0])
+	subArgs := args[1:]
+
+	switch sub {
+	case "list", "ls":
+		return printSecretsConfig(stdout, cfg)
+
+	case "add":
+		if len(subArgs) < 3 {
+			return errors.New(
+				"usage: vortex config secret add <header|query|cookie|body|path|pattern> <name> <ENV_VAR>",
+			)
+		}
+
+		return addSecretRule(stdout, cfg, subArgs[0], subArgs[1], subArgs[2])
+
+	case "rm", "remove", "del", "delete":
+		if len(subArgs) < 2 {
+			return errors.New("usage: vortex config secret rm <header|query|cookie|body|path|pattern> <name>")
+		}
+
+		return removeSecretRule(stdout, cfg, subArgs[0], subArgs[1])
+
+	case "clear", "purge":
+		cfg.Secrets = project.SecretsConfig{}
+		if err := cfg.Save(); err != nil {
+			return fmt.Errorf("saving configuration: %w", err)
+		}
+
+		fmt.Fprintf(stdout, "✔ Cleared all secret rules from .vortex.yml\n")
+
+		return nil
+
+	// Direct shortcuts: vortex config secret header x-auth AUTH_TOKEN
+	case "header", "headers", "query", "cookie", "cookies", "body", "path", "paths", "pattern", "patterns":
+		if len(subArgs) >= 2 {
+			return addSecretRule(stdout, cfg, sub, subArgs[0], subArgs[1])
+		}
+
+		return fmt.Errorf("usage: vortex config secret %s <name> <ENV_VAR>", sub)
+
+	default:
+		return fmt.Errorf(
+			"unknown secret subcommand %q (use list, add, rm, header, query, cookie, body, path, pattern)",
+			sub,
+		)
+	}
+}
+
+func addSecretRule(stdout io.Writer, cfg *project.Config, targetType, key, envVar string) error {
+	targetType = strings.ToLower(targetType)
+	envVar = strings.ToUpper(strings.TrimSpace(envVar))
+
+	switch targetType {
+	case "header", "headers":
+		if cfg.Secrets.Headers == nil {
+			cfg.Secrets.Headers = make(map[string]string)
+		}
+
+		cfg.Secrets.Headers[key] = envVar
+		if err := cfg.Save(); err != nil {
+			return err
+		}
+
+		fmt.Fprintf(stdout, "✔ Added secret header mapping: %s -> ${%s}\n", key, envVar)
+
+		return nil
+
+	case "query", "queries":
+		if cfg.Secrets.Query == nil {
+			cfg.Secrets.Query = make(map[string]string)
+		}
+
+		cfg.Secrets.Query[key] = envVar
+		if err := cfg.Save(); err != nil {
+			return err
+		}
+
+		fmt.Fprintf(stdout, "✔ Added secret query mapping: ?%s -> ${%s}\n", key, envVar)
+
+		return nil
+
+	case "cookie", "cookies":
+		if cfg.Secrets.Cookies == nil {
+			cfg.Secrets.Cookies = make(map[string]string)
+		}
+
+		cfg.Secrets.Cookies[key] = envVar
+		if err := cfg.Save(); err != nil {
+			return err
+		}
+
+		fmt.Fprintf(stdout, "✔ Added secret cookie mapping: %s -> ${%s}\n", key, envVar)
+
+		return nil
+
+	case "body":
+		if cfg.Secrets.Body == nil {
+			cfg.Secrets.Body = make(map[string]string)
+		}
+
+		cfg.Secrets.Body[key] = envVar
+		if err := cfg.Save(); err != nil {
+			return err
+		}
+
+		fmt.Fprintf(stdout, "✔ Added secret body mapping: %s -> ${%s}\n", key, envVar)
+
+		return nil
+
+	case "path", "paths":
+		cfg.Secrets.Paths = append(cfg.Secrets.Paths, project.SecretPathRule{
+			Pattern: key,
+			Var:     envVar,
+		})
+		if err := cfg.Save(); err != nil {
+			return err
+		}
+
+		fmt.Fprintf(stdout, "✔ Added secret path rule: %s -> ${%s}\n", key, envVar)
+
+		return nil
+
+	case "pattern", "patterns", "regex":
+		cfg.Secrets.Patterns = append(cfg.Secrets.Patterns, project.SecretPattern{
+			Regex: key,
+			Var:   envVar,
+		})
+		if err := cfg.Save(); err != nil {
+			return err
+		}
+
+		fmt.Fprintf(stdout, "✔ Added secret regex pattern: %s -> ${%s}\n", key, envVar)
+
+		return nil
+
+	default:
+		return fmt.Errorf("unknown secret type %q (must be header, query, cookie, body, path, pattern)", targetType)
+	}
+}
+
+func removeSecretRule(stdout io.Writer, cfg *project.Config, targetType, key string) error {
+	targetType = strings.ToLower(targetType)
+
+	switch targetType {
+	case "header", "headers":
+		if cfg.Secrets.Headers != nil {
+			delete(cfg.Secrets.Headers, key)
+		}
+	case "query", "queries":
+		if cfg.Secrets.Query != nil {
+			delete(cfg.Secrets.Query, key)
+		}
+	case "cookie", "cookies":
+		if cfg.Secrets.Cookies != nil {
+			delete(cfg.Secrets.Cookies, key)
+		}
+	case "body":
+		if cfg.Secrets.Body != nil {
+			delete(cfg.Secrets.Body, key)
+		}
+	case "path", "paths":
+		var newPaths []project.SecretPathRule
+		for _, p := range cfg.Secrets.Paths {
+			if p.Pattern != key && p.Var != key {
+				newPaths = append(newPaths, p)
+			}
+		}
+
+		cfg.Secrets.Paths = newPaths
+
+	case "pattern", "patterns", "regex":
+		var newPatterns []project.SecretPattern
+		for _, p := range cfg.Secrets.Patterns {
+			if p.Regex != key && p.Var != key {
+				newPatterns = append(newPatterns, p)
+			}
+		}
+
+		cfg.Secrets.Patterns = newPatterns
+
+	default:
+		return fmt.Errorf("unknown secret type %q", targetType)
+	}
+
+	if err := cfg.Save(); err != nil {
+		return err
+	}
+
+	fmt.Fprintf(stdout, "✔ Removed secret %s rule %q from .vortex.yml\n", targetType, key)
+
+	return nil
+}
+
+func printSecretsConfig(stdout io.Writer, cfg *project.Config) error {
+	fmt.Fprintf(stdout, "⚡ Vortex Secret & Credential Rules (.vortex.yml)\n\n")
+
+	hasRules := false
+
+	if len(cfg.Secrets.Headers) > 0 {
+		hasRules = true
+
+		fmt.Fprintf(stdout, "● HTTP Headers (secrets.headers):\n")
+
+		for k, v := range cfg.Secrets.Headers {
+			fmt.Fprintf(stdout, "  • %-24s -> ${%s}\n", k, v)
+		}
+	}
+
+	if len(cfg.Secrets.Query) > 0 {
+		hasRules = true
+
+		fmt.Fprintf(stdout, "\n● URL Query Parameters (secrets.query):\n")
+
+		for k, v := range cfg.Secrets.Query {
+			fmt.Fprintf(stdout, "  • ?%-23s -> ${%s}\n", k, v)
+		}
+	}
+
+	if len(cfg.Secrets.Cookies) > 0 {
+		hasRules = true
+
+		fmt.Fprintf(stdout, "\n● Cookies (secrets.cookies):\n")
+
+		for k, v := range cfg.Secrets.Cookies {
+			fmt.Fprintf(stdout, "  • %-24s -> ${%s}\n", k, v)
+		}
+	}
+
+	if len(cfg.Secrets.Body) > 0 {
+		hasRules = true
+
+		fmt.Fprintf(stdout, "\n● Request Body Fields (secrets.body):\n")
+
+		for k, v := range cfg.Secrets.Body {
+			fmt.Fprintf(stdout, "  • %-24s -> ${%s}\n", k, v)
+		}
+	}
+
+	if len(cfg.Secrets.Paths) > 0 {
+		hasRules = true
+
+		fmt.Fprintf(stdout, "\n● URL Path Rules (secrets.paths):\n")
+
+		for _, p := range cfg.Secrets.Paths {
+			fmt.Fprintf(stdout, "  • %-24s -> ${%s}\n", p.Pattern, p.Var)
+		}
+	}
+
+	if len(cfg.Secrets.Patterns) > 0 {
+		hasRules = true
+
+		fmt.Fprintf(stdout, "\n● Regex Token Patterns (secrets.patterns):\n")
+
+		for _, p := range cfg.Secrets.Patterns {
+			fmt.Fprintf(stdout, "  • %-24s -> ${%s}\n", p.Regex, p.Var)
+		}
+	}
+
+	if !hasRules {
+		fmt.Fprintf(stdout, "No custom secret rules configured. Using automatic universal heuristics.\n")
+		fmt.Fprintf(stdout, "\nCommands to add rules:\n")
+		fmt.Fprintf(stdout, "  vortex config secret header <name> <ENV_VAR>\n")
+		fmt.Fprintf(stdout, "  vortex config secret query <name> <ENV_VAR>\n")
+		fmt.Fprintf(stdout, "  vortex config secret cookie <name> <ENV_VAR>\n")
+		fmt.Fprintf(stdout, "  vortex config secret pattern <regex> <ENV_VAR>\n")
+	}
+
+	return nil
 }

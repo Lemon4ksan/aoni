@@ -12,6 +12,7 @@ import (
 	"net/url"
 	"os"
 	"path"
+	"path/filepath"
 	"regexp"
 	"slices"
 	"sort"
@@ -22,6 +23,7 @@ import (
 	"github.com/getkin/kin-openapi/openapi3"
 	"gopkg.in/yaml.v3"
 
+	"github.com/lemon4ksan/aoni/internal/codegen/cache"
 	"github.com/lemon4ksan/aoni/internal/codegen/ingest"
 )
 
@@ -39,6 +41,7 @@ type ImportConfig struct {
 	IncludePaths   []string
 	ExcludePaths   []string
 	TypeMap        map[string]string
+	MergeMode      MergeMode // "union", "intersect", "diff"
 }
 
 // ImportResult captures the outcome of an OpenAPI contract generation pass.
@@ -52,7 +55,12 @@ type ImportResult struct {
 
 // Import loads an OpenAPI specification and translates it into declarative aoni Go contracts.
 func Import(cfg ImportConfig) (*ImportResult, error) {
-	spec, err := LoadSpec(cfg.SpecFile, cfg.SpecData)
+	mode := cfg.MergeMode
+	if mode == "" {
+		mode = MergeModeUnion
+	}
+
+	spec, err := LoadSpecWithMode(cfg.SpecFile, cfg.SpecData, mode)
 	if err != nil {
 		return nil, fmt.Errorf("loading spec: %w", err)
 	}
@@ -94,14 +102,109 @@ var initialisms = map[string]bool{
 	"XSS": true,
 }
 
-// LoadSpec loads and normalizes an OpenAPI 2.0, 3.0, or 3.1 specification.
+// MergeMode defines the set operation used when merging multiple OpenAPI / HAR specifications.
+type MergeMode string
+
+const (
+	// MergeModeUnion includes all endpoints from all specs (A ∪ B), unioning schemas and parameters. (Default)
+	MergeModeUnion MergeMode = "union"
+
+	// MergeModeIntersection includes only endpoints present in all input specifications (A ∩ B).
+	MergeModeIntersection MergeMode = "intersect"
+
+	// MergeModeDifference includes only endpoints present in the first specification and missing in others (A \ B).
+	MergeModeDifference MergeMode = "diff"
+)
+
+// LoadSpec loads an OpenAPI, Swagger, or HAR specification with default Union merge mode.
 func LoadSpec(filename string, data []byte) (*openapi3.T, error) {
+	return LoadSpecWithMode(filename, data, MergeModeUnion)
+}
+
+// LoadSpecWithMode loads and combines multiple specifications using the specified MergeMode (union, intersect, diff).
+func LoadSpecWithMode(filename string, data []byte, mode MergeMode) (*openapi3.T, error) {
+	if len(data) > 0 {
+		return loadSingleSpec(filename, data)
+	}
+
+	if strings.Contains(filename, ",") {
+		parts := strings.Split(filename, ",")
+
+		var allSpecs []*openapi3.T
+
+		for _, part := range parts {
+			part = strings.TrimSpace(part)
+			if part == "" {
+				continue
+			}
+
+			if strings.ContainsAny(part, "*?[]") {
+				matches, err := filepath.Glob(part)
+				if err != nil {
+					return nil, fmt.Errorf("invalid glob pattern %q: %w", part, err)
+				}
+
+				for _, match := range matches {
+					doc, lErr := loadSingleSpec(match, nil)
+					if lErr != nil {
+						return nil, fmt.Errorf("failed reading spec file %s: %w", match, lErr)
+					}
+
+					allSpecs = append(allSpecs, doc)
+				}
+			} else {
+				doc, lErr := loadSingleSpec(part, nil)
+				if lErr != nil {
+					return nil, fmt.Errorf("failed reading spec file %s: %w", part, lErr)
+				}
+
+				allSpecs = append(allSpecs, doc)
+			}
+		}
+
+		if len(allSpecs) == 0 {
+			return nil, fmt.Errorf("no valid specification files found in %q", filename)
+		}
+
+		return MergeOpenAPISpecsWithMode(mode, allSpecs...), nil
+	}
+
+	if strings.ContainsAny(filename, "*?[]") {
+		matches, err := filepath.Glob(filename)
+		if err == nil && len(matches) > 0 {
+			var allSpecs []*openapi3.T
+			for _, match := range matches {
+				doc, lErr := loadSingleSpec(match, nil)
+				if lErr != nil {
+					return nil, fmt.Errorf("failed reading spec file %s: %w", match, lErr)
+				}
+
+				allSpecs = append(allSpecs, doc)
+			}
+
+			return MergeOpenAPISpecsWithMode(mode, allSpecs...), nil
+		}
+	}
+
+	return loadSingleSpec(filename, nil)
+}
+
+func loadSingleSpec(filename string, data []byte) (*openapi3.T, error) {
 	if len(data) == 0 {
 		var err error
 
-		data, err = os.ReadFile(filename)
-		if err != nil {
-			return nil, fmt.Errorf("failed reading spec file %s: %w", filename, err)
+		if strings.HasPrefix(filename, "cache:") {
+			cacheID := strings.TrimPrefix(filename, "cache:")
+
+			data, _, err = cache.GetTraffic(".", cacheID)
+			if err != nil {
+				return nil, fmt.Errorf("loading cached traffic %q: %w", cacheID, err)
+			}
+		} else {
+			data, err = os.ReadFile(filename)
+			if err != nil {
+				return nil, fmt.Errorf("failed reading spec file %s: %w", filename, err)
+			}
 		}
 	}
 
@@ -144,6 +247,456 @@ func LoadSpec(filename string, data []byte) (*openapi3.T, error) {
 	}
 
 	return doc3, nil
+}
+
+// MergeOpenAPISpecs combines multiple OpenAPI 3.x specifications into a unified specification using Union mode.
+func MergeOpenAPISpecs(specs ...*openapi3.T) *openapi3.T {
+	return MergeOpenAPISpecsWithMode(MergeModeUnion, specs...)
+}
+
+// MergeOpenAPISpecsWithMode combines multiple specifications using the chosen set operation (union, intersect, diff).
+func MergeOpenAPISpecsWithMode(mode MergeMode, specs ...*openapi3.T) *openapi3.T {
+	if len(specs) == 0 {
+		return nil
+	}
+
+	if len(specs) == 1 {
+		return specs[0]
+	}
+
+	switch mode {
+	case MergeModeIntersection:
+		return mergeIntersection(specs...)
+	case MergeModeDifference:
+		return mergeDifference(specs...)
+	default:
+		return mergeUnion(specs...)
+	}
+}
+
+func mergeUnion(specs ...*openapi3.T) *openapi3.T {
+	root := specs[0]
+	if root.Paths == nil {
+		root.Paths = openapi3.NewPaths()
+	}
+
+	if root.Components == nil {
+		root.Components = &openapi3.Components{
+			Schemas: make(openapi3.Schemas),
+		}
+	} else if root.Components.Schemas == nil {
+		root.Components.Schemas = make(openapi3.Schemas)
+	}
+
+	for _, s := range specs[1:] {
+		if s == nil {
+			continue
+		}
+
+		// 1. Merge Servers
+		for _, srv := range s.Servers {
+			hasServer := false
+
+			for _, existing := range root.Servers {
+				if existing != nil && srv != nil && existing.URL == srv.URL {
+					hasServer = true
+					break
+				}
+			}
+
+			if !hasServer && srv != nil {
+				root.Servers = append(root.Servers, srv)
+			}
+		}
+
+		// 2. Merge Schemas
+		if s.Components != nil {
+			for name, schemaRef := range s.Components.Schemas {
+				if existingSchema, exists := root.Components.Schemas[name]; exists && existingSchema.Value != nil &&
+					schemaRef.Value != nil {
+					existingSchema.Value = ingest.MergeSchemas(existingSchema.Value, schemaRef.Value)
+				} else {
+					root.Components.Schemas[name] = schemaRef
+				}
+			}
+		}
+
+		// 3. Merge Headers in Info.Extensions["x-vortex-headers"]
+		if s.Info != nil && s.Info.Extensions != nil {
+			if hRaw, ok := s.Info.Extensions["x-vortex-headers"]; ok {
+				if root.Info == nil {
+					root.Info = &openapi3.Info{
+						Title:   "Combined API Specification",
+						Version: "1.0.0",
+					}
+				}
+
+				if root.Info.Extensions == nil {
+					root.Info.Extensions = make(map[string]any)
+				}
+
+				existingHeaders, _ := root.Info.Extensions["x-vortex-headers"].([]map[string]string)
+				headerMap := make(map[string]string)
+
+				for _, h := range existingHeaders {
+					headerMap[h["name"]] = h["value"]
+				}
+
+				if incomingList, ok := hRaw.([]map[string]string); ok {
+					for _, h := range incomingList {
+						if _, exists := headerMap[h["name"]]; !exists {
+							headerMap[h["name"]] = h["value"]
+							existingHeaders = append(existingHeaders, h)
+						}
+					}
+				} else if incomingSlice, ok := hRaw.([]any); ok {
+					for _, item := range incomingSlice {
+						if hMap, isMap := item.(map[string]any); isMap {
+							name, _ := hMap["name"].(string)
+							val, _ := hMap["value"].(string)
+
+							if name != "" && val != "" {
+								if _, exists := headerMap[name]; !exists {
+									headerMap[name] = val
+									existingHeaders = append(existingHeaders, map[string]string{
+										"name":  name,
+										"value": val,
+									})
+								}
+							}
+						}
+					}
+				}
+
+				root.Info.Extensions["x-vortex-headers"] = existingHeaders
+			}
+		}
+
+		// 4. Merge Paths and Operations
+		if s.Paths != nil {
+			for pathStr, pathItem := range s.Paths.Map() {
+				if pathItem == nil {
+					continue
+				}
+
+				existingItem := root.Paths.Value(pathStr)
+				if existingItem == nil {
+					root.Paths.Set(pathStr, pathItem)
+				} else {
+					mergePathItem(existingItem, pathItem)
+				}
+			}
+		}
+	}
+
+	return root
+}
+
+func mergeIntersection(specs ...*openapi3.T) *openapi3.T {
+	root := specs[0]
+	if root == nil || root.Paths == nil {
+		return root
+	}
+
+	methods := []string{"GET", "POST", "PUT", "DELETE", "PATCH", "HEAD", "OPTIONS"}
+
+	for pathStr, pathItem := range root.Paths.Map() {
+		if pathItem == nil {
+			continue
+		}
+
+		for _, m := range methods {
+			op := getPathItemOperation(pathItem, m)
+			if op == nil {
+				continue
+			}
+
+			// Check if this operation exists in ALL other specs
+			inAll := true
+			for _, otherSpec := range specs[1:] {
+				if otherSpec == nil || otherSpec.Paths == nil {
+					inAll = false
+					break
+				}
+
+				otherItem := otherSpec.Paths.Value(pathStr)
+				if otherItem == nil || getPathItemOperation(otherItem, m) == nil {
+					inAll = false
+					break
+				}
+			}
+
+			if inAll {
+				// Merge operation metadata from other specs
+				for _, otherSpec := range specs[1:] {
+					otherItem := otherSpec.Paths.Value(pathStr)
+					if otherItem != nil {
+						if otherOp := getPathItemOperation(otherItem, m); otherOp != nil {
+							mergeOperation(op, otherOp)
+						}
+					}
+
+					// Merge schemas
+					if otherSpec.Components != nil {
+						for name, sRef := range otherSpec.Components.Schemas {
+							if existing, ok := root.Components.Schemas[name]; ok && existing.Value != nil &&
+								sRef.Value != nil {
+								existing.Value = ingest.MergeSchemas(existing.Value, sRef.Value)
+							} else {
+								root.Components.Schemas[name] = sRef
+							}
+						}
+					}
+				}
+			} else {
+				setPathItemOperation(pathItem, m, nil)
+			}
+		}
+
+		if countPathItemOperations(pathItem) == 0 {
+			root.Paths.Delete(pathStr)
+		}
+	}
+
+	return root
+}
+
+func mergeDifference(specs ...*openapi3.T) *openapi3.T {
+	root := specs[0]
+	if root == nil || root.Paths == nil {
+		return root
+	}
+
+	methods := []string{"GET", "POST", "PUT", "DELETE", "PATCH", "HEAD", "OPTIONS"}
+
+	for _, otherSpec := range specs[1:] {
+		if otherSpec == nil || otherSpec.Paths == nil {
+			continue
+		}
+
+		for pathStr, otherItem := range otherSpec.Paths.Map() {
+			if otherItem == nil {
+				continue
+			}
+
+			rootItem := root.Paths.Value(pathStr)
+			if rootItem == nil {
+				continue
+			}
+
+			for _, m := range methods {
+				if getPathItemOperation(otherItem, m) != nil {
+					setPathItemOperation(rootItem, m, nil)
+				}
+			}
+
+			if countPathItemOperations(rootItem) == 0 {
+				root.Paths.Delete(pathStr)
+			}
+		}
+	}
+
+	return root
+}
+
+func getPathItemOperation(p *openapi3.PathItem, method string) *openapi3.Operation {
+	if p == nil {
+		return nil
+	}
+
+	switch strings.ToUpper(method) {
+	case "GET":
+		return p.Get
+	case "POST":
+		return p.Post
+	case "PUT":
+		return p.Put
+	case "DELETE":
+		return p.Delete
+	case "PATCH":
+		return p.Patch
+	case "HEAD":
+		return p.Head
+	case "OPTIONS":
+		return p.Options
+	default:
+		return nil
+	}
+}
+
+func setPathItemOperation(p *openapi3.PathItem, method string, op *openapi3.Operation) {
+	if p == nil {
+		return
+	}
+
+	switch strings.ToUpper(method) {
+	case "GET":
+		p.Get = op
+	case "POST":
+		p.Post = op
+	case "PUT":
+		p.Put = op
+	case "DELETE":
+		p.Delete = op
+	case "PATCH":
+		p.Patch = op
+	case "HEAD":
+		p.Head = op
+	case "OPTIONS":
+		p.Options = op
+	}
+}
+
+func countPathItemOperations(p *openapi3.PathItem) int {
+	if p == nil {
+		return 0
+	}
+
+	count := 0
+	for _, m := range []string{"GET", "POST", "PUT", "DELETE", "PATCH", "HEAD", "OPTIONS"} {
+		if getPathItemOperation(p, m) != nil {
+			count++
+		}
+	}
+
+	return count
+}
+
+func mergePathItem(existing, incoming *openapi3.PathItem) {
+	if incoming.Get != nil {
+		if existing.Get == nil {
+			existing.Get = incoming.Get
+		} else {
+			mergeOperation(existing.Get, incoming.Get)
+		}
+	}
+
+	if incoming.Post != nil {
+		if existing.Post == nil {
+			existing.Post = incoming.Post
+		} else {
+			mergeOperation(existing.Post, incoming.Post)
+		}
+	}
+
+	if incoming.Put != nil {
+		if existing.Put == nil {
+			existing.Put = incoming.Put
+		} else {
+			mergeOperation(existing.Put, incoming.Put)
+		}
+	}
+
+	if incoming.Delete != nil {
+		if existing.Delete == nil {
+			existing.Delete = incoming.Delete
+		} else {
+			mergeOperation(existing.Delete, incoming.Delete)
+		}
+	}
+
+	if incoming.Patch != nil {
+		if existing.Patch == nil {
+			existing.Patch = incoming.Patch
+		} else {
+			mergeOperation(existing.Patch, incoming.Patch)
+		}
+	}
+
+	if incoming.Head != nil {
+		if existing.Head == nil {
+			existing.Head = incoming.Head
+		} else {
+			mergeOperation(existing.Head, incoming.Head)
+		}
+	}
+
+	if incoming.Options != nil {
+		if existing.Options == nil {
+			existing.Options = incoming.Options
+		} else {
+			mergeOperation(existing.Options, incoming.Options)
+		}
+	}
+}
+
+func mergeOperation(existing, incoming *openapi3.Operation) {
+	for _, p := range incoming.Parameters {
+		if p != nil && p.Value != nil {
+			if existingParam := existing.Parameters.GetByInAndName(p.Value.In, p.Value.Name); existingParam == nil {
+				existing.AddParameter(p.Value)
+			}
+		}
+	}
+
+	if incoming.RequestBody != nil && incoming.RequestBody.Value != nil {
+		if existing.RequestBody == nil || existing.RequestBody.Value == nil {
+			existing.RequestBody = incoming.RequestBody
+		} else {
+			for mt, content := range incoming.RequestBody.Value.Content {
+				existingContent := existing.RequestBody.Value.Content.Get(mt)
+				if existingContent == nil {
+					existing.RequestBody.Value.Content[mt] = content
+				} else if existingContent.Schema != nil && content.Schema != nil && existingContent.Schema.Value != nil && content.Schema.Value != nil {
+					existingContent.Schema.Value = ingest.MergeSchemas(
+						existingContent.Schema.Value,
+						content.Schema.Value,
+					)
+				}
+			}
+		}
+	}
+
+	if incoming.Responses != nil {
+		if existing.Responses == nil {
+			existing.Responses = openapi3.NewResponses()
+		}
+
+		for statusStr, respRef := range incoming.Responses.Map() {
+			existingResp := existing.Responses.Value(statusStr)
+			if existingResp == nil {
+				existing.Responses.Set(statusStr, respRef)
+			} else if existingResp.Value != nil && respRef.Value != nil {
+				for mt, content := range respRef.Value.Content {
+					existingContent := existingResp.Value.Content.Get(mt)
+					if existingContent == nil {
+						existingResp.Value.Content[mt] = content
+					} else if existingContent.Schema != nil && content.Schema != nil && existingContent.Schema.Value != nil && content.Schema.Value != nil {
+						existingContent.Schema.Value = ingest.MergeSchemas(
+							existingContent.Schema.Value,
+							content.Schema.Value,
+						)
+					}
+				}
+			}
+		}
+	}
+
+	if incoming.Extensions != nil {
+		if inHeadersRaw, ok := incoming.Extensions["x-vortex-headers"]; ok {
+			if existing.Extensions == nil {
+				existing.Extensions = make(map[string]any)
+			}
+
+			existingHeaders, _ := existing.Extensions["x-vortex-headers"].([]map[string]string)
+			headerMap := make(map[string]string)
+
+			for _, h := range existingHeaders {
+				headerMap[h["name"]] = h["value"]
+			}
+
+			if inList, ok := inHeadersRaw.([]map[string]string); ok {
+				for _, h := range inList {
+					if _, exists := headerMap[h["name"]]; !exists {
+						headerMap[h["name"]] = h["value"]
+						existingHeaders = append(existingHeaders, h)
+					}
+				}
+			}
+
+			existing.Extensions["x-vortex-headers"] = existingHeaders
+		}
+	}
 }
 
 func sanitizeSpecData(data []byte) []byte {
@@ -263,7 +816,18 @@ func GenerateContract(spec *openapi3.T, cfg ImportConfig) ([]byte, error) {
 	// 1. Base URL
 	baseURL := resolveBaseURL(spec, cfg)
 	if baseURL != "" {
-		fmt.Fprintf(&bodyBuf, "// BaseURL is the default API base endpoint.\nconst BaseURL = %q\n\n", baseURL)
+		constName := "BaseURL"
+		if cfg.ServiceName != "" && cfg.ServiceName != "API" {
+			constName = cfg.ServiceName + "BaseURL"
+		}
+
+		fmt.Fprintf(
+			&bodyBuf,
+			"// %s is the default API base endpoint.\nconst %s = %q\n\n",
+			constName,
+			constName,
+			baseURL,
+		)
 	}
 
 	// 2. Generate Service Interface (API) at the TOP
@@ -338,7 +902,18 @@ func GenerateSplitContract(spec *openapi3.T, cfg ImportConfig) (apiSource, model
 
 	baseURL := resolveBaseURL(spec, cfg)
 	if baseURL != "" {
-		fmt.Fprintf(&apiBody, "// BaseURL is the default API base endpoint.\nconst BaseURL = %q\n\n", baseURL)
+		constName := "BaseURL"
+		if cfg.ServiceName != "" && cfg.ServiceName != "API" {
+			constName = cfg.ServiceName + "BaseURL"
+		}
+
+		fmt.Fprintf(
+			&apiBody,
+			"// %s is the default API base endpoint.\nconst %s = %q\n\n",
+			constName,
+			constName,
+			baseURL,
+		)
 	}
 
 	if spec.Paths != nil && len(spec.Paths.Map()) > 0 {
@@ -706,6 +1281,27 @@ func writeServiceInterface(buf *bytes.Buffer, spec *openapi3.T, cfg ImportConfig
 				fmt.Fprintf(buf, "// @engine %s\n", eStr)
 			}
 		}
+
+		if headersRaw, ok := spec.Info.Extensions["x-vortex-headers"]; ok {
+			if hList, ok := headersRaw.([]map[string]string); ok {
+				for _, h := range hList {
+					if h["name"] != "" && h["value"] != "" {
+						fmt.Fprintf(buf, "// @header %q %q\n", h["name"], h["value"])
+					}
+				}
+			} else if hListAny, ok := headersRaw.([]any); ok {
+				for _, item := range hListAny {
+					if hMap, ok := item.(map[string]any); ok {
+						name, _ := hMap["name"].(string)
+
+						val, _ := hMap["value"].(string)
+						if name != "" && val != "" {
+							fmt.Fprintf(buf, "// @header %q %q\n", name, val)
+						}
+					}
+				}
+			}
+		}
 	}
 
 	if baseURL != "" {
@@ -754,7 +1350,7 @@ func writeServiceInterface(buf *bytes.Buffer, spec *openapi3.T, cfg ImportConfig
 				continue
 			}
 
-			writeOperationMethod(buf, pathStr, httpMethod, pathItem, op, cfg, usedMethodNames)
+			writeOperationMethod(buf, spec, pathStr, httpMethod, pathItem, op, cfg, usedMethodNames)
 		}
 	}
 
@@ -791,6 +1387,7 @@ func isPathAllowed(pathStr string, cfg ImportConfig) bool {
 
 func writeOperationMethod(
 	buf *bytes.Buffer,
+	spec *openapi3.T,
 	pathStr string,
 	httpMethod string,
 	pathItem *openapi3.PathItem,
@@ -808,6 +1405,31 @@ func writeOperationMethod(
 
 	if summary != "" {
 		fmt.Fprintf(buf, "\t// %s — %s\n\t//\n", methodName, strings.ReplaceAll(summary, "\n", " "))
+	}
+
+	if op.Extensions != nil {
+		if credsRaw, ok := op.Extensions["x-required-credentials"]; ok {
+			var credsList []string
+			if listStr, ok := credsRaw.([]string); ok {
+				credsList = listStr
+			} else if listAny, ok := credsRaw.([]any); ok {
+				for _, item := range listAny {
+					if s, ok := item.(string); ok {
+						credsList = append(credsList, s)
+					}
+				}
+			}
+
+			if len(credsList) > 0 {
+				fmt.Fprintf(buf, "\t// Security & Session Requirements (captured from traffic):\n")
+
+				for _, cred := range credsList {
+					fmt.Fprintf(buf, "\t//   - %s\n", cred)
+				}
+
+				fmt.Fprintf(buf, "\t//\n")
+			}
+		}
 	}
 
 	// Route directive: // @get "path", // @post "path"
@@ -858,6 +1480,38 @@ func writeOperationMethod(
 				fmt.Fprintf(buf, "\t// @since %q\n", sStr)
 			}
 		}
+
+		if headersRaw, ok := op.Extensions["x-vortex-headers"]; ok {
+			seenMethodHeaders := make(map[string]bool)
+			if hList, ok := headersRaw.([]map[string]string); ok {
+				for _, h := range hList {
+					if h["name"] != "" && h["value"] != "" && !isGlobalHeader(spec, h["name"], h["value"]) {
+						headerKey := strings.ToLower(h["name"])
+						if !seenMethodHeaders[headerKey] {
+							seenMethodHeaders[headerKey] = true
+
+							fmt.Fprintf(buf, "\t// @header %q %q\n", h["name"], h["value"])
+						}
+					}
+				}
+			} else if hListAny, ok := headersRaw.([]any); ok {
+				for _, item := range hListAny {
+					if hMap, ok := item.(map[string]any); ok {
+						name, _ := hMap["name"].(string)
+
+						val, _ := hMap["value"].(string)
+						if name != "" && val != "" && !isGlobalHeader(spec, name, val) {
+							headerKey := strings.ToLower(name)
+							if !seenMethodHeaders[headerKey] {
+								seenMethodHeaders[headerKey] = true
+
+								fmt.Fprintf(buf, "\t// @header %q %q\n", name, val)
+							}
+						}
+					}
+				}
+			}
+		}
 	}
 
 	// Payload directive
@@ -868,8 +1522,6 @@ func writeOperationMethod(
 			isForm = true
 
 			fmt.Fprintf(buf, "\t// @form casing=snake_case\n")
-		} else if content.Get("application/json") != nil {
-			fmt.Fprintf(buf, "\t// @json\n")
 		}
 	}
 
@@ -923,7 +1575,7 @@ func writeOperationMethod(
 		sig := fmt.Sprintf("%s %s", pName, pType)
 
 		expectedSnake := toSnakeCase(pName)
-		if p.Name != "" && p.Name != expectedSnake && p.Name != pName {
+		if p.Name != "" && (httpMethod != "GET" || (p.Name != expectedSnake && p.Name != pName)) {
 			sig += fmt.Sprintf(" // @query %q", p.Name)
 		}
 
@@ -963,7 +1615,13 @@ func writeOperationMethod(
 			fmt.Fprintf(buf, "\t%s(\n", methodName)
 
 			for _, p := range paramSig {
-				fmt.Fprintf(buf, "\t\t%s,\n", p)
+				if idx := strings.Index(p, "//"); idx != -1 {
+					codePart := strings.TrimSpace(p[:idx])
+					commentPart := p[idx:]
+					fmt.Fprintf(buf, "\t\t%s, %s\n", codePart, commentPart)
+				} else {
+					fmt.Fprintf(buf, "\t\t%s,\n", p)
+				}
 			}
 
 			fmt.Fprintf(buf, "\t) error\n\n")
@@ -971,7 +1629,13 @@ func writeOperationMethod(
 			fmt.Fprintf(buf, "\t%s(\n", methodName)
 
 			for _, p := range paramSig {
-				fmt.Fprintf(buf, "\t\t%s,\n", p)
+				if idx := strings.Index(p, "//"); idx != -1 {
+					codePart := strings.TrimSpace(p[:idx])
+					commentPart := p[idx:]
+					fmt.Fprintf(buf, "\t\t%s, %s\n", codePart, commentPart)
+				} else {
+					fmt.Fprintf(buf, "\t\t%s,\n", p)
+				}
 			}
 
 			fmt.Fprintf(buf, "\t) (%s, error)\n\n", returnType)
@@ -1035,6 +1699,38 @@ func determineReturnType(op *openapi3.Operation, cfg ImportConfig) string {
 	}
 
 	return "map[string]any"
+}
+
+func isGlobalHeader(spec *openapi3.T, name, val string) bool {
+	if spec == nil || spec.Info == nil || spec.Info.Extensions == nil {
+		return false
+	}
+
+	headersRaw, ok := spec.Info.Extensions["x-vortex-headers"]
+	if !ok {
+		return false
+	}
+
+	if hList, ok := headersRaw.([]map[string]string); ok {
+		for _, h := range hList {
+			if strings.EqualFold(h["name"], name) && h["value"] == val {
+				return true
+			}
+		}
+	} else if hListAny, ok := headersRaw.([]any); ok {
+		for _, item := range hListAny {
+			if hMap, ok := item.(map[string]any); ok {
+				n, _ := hMap["name"].(string)
+				v, _ := hMap["value"].(string)
+
+				if strings.EqualFold(n, name) && v == val {
+					return true
+				}
+			}
+		}
+	}
+
+	return false
 }
 
 type operationParameters struct {

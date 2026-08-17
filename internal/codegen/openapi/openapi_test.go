@@ -313,3 +313,63 @@ type API interface {
 	require.Contains(t, specStr, "\"openapi\": \"3.1.0\"")
 	require.Contains(t, specStr, "GetItem")
 }
+
+func TestOpenAPI_MergeModes(t *testing.T) {
+	specA := `{
+		"openapi": "3.0.0",
+		"info": {"title": "Spec A", "version": "1.0"},
+		"paths": {
+			"/users": {
+				"get": {"operationId": "ListUsers", "responses": {"200": {"description": "ok"}}},
+				"post": {"operationId": "CreateUser", "responses": {"201": {"description": "created"}}}
+			},
+			"/only-a": {
+				"get": {"operationId": "GetOnlyA", "responses": {"200": {"description": "ok"}}}
+			}
+		}
+	}`
+
+	specB := `{
+		"openapi": "3.0.0",
+		"info": {"title": "Spec B", "version": "1.0"},
+		"paths": {
+			"/users": {
+				"get": {"operationId": "ListUsers", "responses": {"200": {"description": "ok"}}}
+			},
+			"/only-b": {
+				"get": {"operationId": "GetOnlyB", "responses": {"200": {"description": "ok"}}}
+			}
+		}
+	}`
+
+	docA, err := openapi.LoadSpec("specA.json", []byte(specA))
+	require.NoError(t, err)
+
+	docB, err := openapi.LoadSpec("specB.json", []byte(specB))
+	require.NoError(t, err)
+
+	// 1. Union Mode (A ∪ B): /users (get, post), /only-a (get), /only-b (get)
+	docUnion := openapi.MergeOpenAPISpecsWithMode(openapi.MergeModeUnion, docA, docB)
+	require.NotNil(t, docUnion.Paths.Value("/users").Get)
+	require.NotNil(t, docUnion.Paths.Value("/users").Post)
+	require.NotNil(t, docUnion.Paths.Value("/only-a"))
+	require.NotNil(t, docUnion.Paths.Value("/only-b"))
+
+	// 2. Intersect Mode (A ∩ B): only /users (get)
+	docA2, _ := openapi.LoadSpec("specA.json", []byte(specA))
+	docB2, _ := openapi.LoadSpec("specB.json", []byte(specB))
+	docIntersect := openapi.MergeOpenAPISpecsWithMode(openapi.MergeModeIntersection, docA2, docB2)
+	require.NotNil(t, docIntersect.Paths.Value("/users").Get)
+	require.Nil(t, docIntersect.Paths.Value("/users").Post)
+	require.Nil(t, docIntersect.Paths.Value("/only-a"))
+	require.Nil(t, docIntersect.Paths.Value("/only-b"))
+
+	// 3. Diff Mode (A \ B): /users (post), /only-a (get)
+	docA3, _ := openapi.LoadSpec("specA.json", []byte(specA))
+	docB3, _ := openapi.LoadSpec("specB.json", []byte(specB))
+	docDiff := openapi.MergeOpenAPISpecsWithMode(openapi.MergeModeDifference, docA3, docB3)
+	require.Nil(t, docDiff.Paths.Value("/users").Get)
+	require.NotNil(t, docDiff.Paths.Value("/users").Post)
+	require.NotNil(t, docDiff.Paths.Value("/only-a"))
+	require.Nil(t, docDiff.Paths.Value("/only-b"))
+}

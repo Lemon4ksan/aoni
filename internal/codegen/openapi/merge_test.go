@@ -165,3 +165,69 @@ type MarketAPI interface {
 	require.Len(t, summary.PrunedMethods, 1)
 	require.Equal(t, "OldOrders", summary.PrunedMethods[0])
 }
+
+func TestMergeOpenAPISpecs_MultiSpecComposition(t *testing.T) {
+	spec1JSON := `{
+		"openapi": "3.0.3",
+		"info": {"title": "Auth API", "version": "1.0.0"},
+		"paths": {
+			"/auth/login": {
+				"post": {
+					"operationId": "Login",
+					"summary": "Authenticate user",
+					"responses": {"200": {"description": "OK"}}
+				}
+			}
+		}
+	}`
+
+	spec2JSON := `{
+		"openapi": "3.0.3",
+		"info": {
+			"title": "Billing API", 
+			"version": "1.0.0",
+			"x-vortex-headers": [
+				{"name": "X-Client-Version", "value": "2.4.0"}
+			]
+		},
+		"paths": {
+			"/billing/invoices": {
+				"get": {
+					"operationId": "ListInvoices",
+					"summary": "List customer invoices",
+					"responses": {"200": {"description": "OK"}}
+				}
+			}
+		}
+	}`
+
+	doc1, err := openapi.LoadSpec("auth.json", []byte(spec1JSON))
+	require.NoError(t, err)
+
+	doc2, err := openapi.LoadSpec("billing.json", []byte(spec2JSON))
+	require.NoError(t, err)
+
+	combined := openapi.MergeOpenAPISpecs(doc1, doc2)
+	require.NotNil(t, combined)
+
+	// Both paths must be present
+	require.NotNil(t, combined.Paths.Value("/auth/login"))
+	require.NotNil(t, combined.Paths.Value("/billing/invoices"))
+
+	// Headers extension must be merged
+	require.NotNil(t, combined.Info.Extensions["x-vortex-headers"])
+
+	// Generate contract from combined specs
+	cfg := openapi.ImportConfig{
+		ServiceName: "UnifiedAPI",
+		PackageName: "api",
+	}
+
+	contractBytes, err := openapi.GenerateContract(combined, cfg)
+	require.NoError(t, err)
+
+	contractStr := string(contractBytes)
+	require.Contains(t, contractStr, "Login")
+	require.Contains(t, contractStr, "ListInvoices")
+	require.Contains(t, contractStr, `// @header "X-Client-Version" "2.4.0"`)
+}

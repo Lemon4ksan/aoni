@@ -49,7 +49,10 @@ func (e *Emitter) EmitMock(root *ir.RootIR) ([]byte, error) {
 		buf.WriteString("\t\"strconv\"\n")
 	}
 
-	buf.WriteString("\t\"strings\"\n")
+	if strings.Contains(bodyCode, "strings.") {
+		buf.WriteString("\t\"strings\"\n")
+	}
+
 	buf.WriteString("\t\"sync\"\n")
 
 	if strings.Contains(bodyCode, "testing.") {
@@ -268,10 +271,44 @@ func (e *Emitter) emitMethodRouteMatch(buf *bytes.Buffer, svc *ir.ServiceIR, m *
 
 	fmt.Fprintf(buf, "\t\tm.recordCall(%q)\n", m.Name)
 	fmt.Fprintf(buf, "\t\tif m.on%s == nil {\n", m.Name)
-	buf.WriteString("\t\t\tw.Header().Set(\"Content-Type\", \"application/json\")\n")
-	buf.WriteString("\t\t\tw.WriteHeader(http.StatusOK)\n")
-	buf.WriteString("\t\t\t_, _ = w.Write([]byte(\"{}\"))\n")
-	buf.WriteString("\t\t\treturn\n")
+
+	if m.MockFixture != nil && (m.MockFixture.Body != "" || m.MockFixture.StatusCode != 0) {
+		ct := m.MockFixture.ContentType
+		if ct == "" {
+			ct = "application/json"
+		}
+
+		fmt.Fprintf(buf, "\t\t\tw.Header().Set(\"Content-Type\", %q)\n", ct)
+
+		for k, v := range m.MockFixture.Headers {
+			if strings.EqualFold(k, "content-type") || strings.EqualFold(k, "content-length") {
+				continue
+			}
+
+			fmt.Fprintf(buf, "\t\t\tw.Header().Set(%q, %q)\n", k, v)
+		}
+
+		status := m.MockFixture.StatusCode
+		if status == 0 {
+			status = 200
+		}
+
+		fmt.Fprintf(buf, "\t\t\tw.WriteHeader(%d)\n", status)
+
+		if m.MockFixture.Body != "" {
+			fmt.Fprintf(buf, "\t\t\t_, _ = w.Write([]byte(%q))\n", m.MockFixture.Body)
+		} else {
+			buf.WriteString("\t\t\t_, _ = w.Write([]byte(\"{}\"))\n")
+		}
+
+		buf.WriteString("\t\t\treturn\n")
+	} else {
+		buf.WriteString("\t\t\tw.Header().Set(\"Content-Type\", \"application/json\")\n")
+		buf.WriteString("\t\t\tw.WriteHeader(http.StatusOK)\n")
+		buf.WriteString("\t\t\t_, _ = w.Write([]byte(\"{}\"))\n")
+		buf.WriteString("\t\t\treturn\n")
+	}
+
 	buf.WriteString("\t\t}\n\n")
 
 	// Prepare call parameters

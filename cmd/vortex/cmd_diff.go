@@ -82,7 +82,24 @@ func (c *CmdDiff) Run(ctx context.Context, args []string, stdout, stderr io.Writ
 		fmt.Fprintf(stderr, "  vortex diff --fail-on-drift ./openapi.json       # CI check (fails on breaking drift)\n")
 	}
 
-	if err := fs.Parse(args); err != nil {
+	var flags, nonFlags []string
+	for i := 0; i < len(args); i++ {
+		arg := args[i]
+		if strings.HasPrefix(arg, "-") {
+			flags = append(flags, arg)
+
+			if (arg == "-spec" || arg == "-service" || arg == "-against" ||
+				arg == "--spec" || arg == "--service" || arg == "--against") &&
+				i+1 < len(args) && !strings.HasPrefix(args[i+1], "-") {
+				flags = append(flags, args[i+1])
+				i++
+			}
+		} else {
+			nonFlags = append(nonFlags, arg)
+		}
+	}
+
+	if err := fs.Parse(append(flags, nonFlags...)); err != nil {
 		return err
 	}
 
@@ -93,7 +110,16 @@ func (c *CmdDiff) Run(ctx context.Context, args []string, stdout, stderr io.Writ
 		return c.runGitDiff(ctx, *againstFlag, positional, *jsonFlag, stdout)
 	}
 
-	// Branch 2: OpenAPI-based comparison
+	// Branch 2: Spec-to-Spec direct comparison (e.g. `vortex diff v1.json v2.json` or `vortex diff a.har b.har`)
+	if *specFlag != "" && len(positional) > 0 && isSpecFile(positional[0]) {
+		return c.runSpecDiff(ctx, *specFlag, positional[0], *failOnDriftFlag, *strictFlag, *jsonFlag, stdout)
+	}
+
+	if len(positional) >= 2 && isSpecFile(positional[0]) && isSpecFile(positional[1]) {
+		return c.runSpecDiff(ctx, positional[0], positional[1], *failOnDriftFlag, *strictFlag, *jsonFlag, stdout)
+	}
+
+	// Branch 3: Spec vs Local Go Contracts
 	specFile := *specFlag
 
 	var localPaths []string
@@ -286,4 +312,57 @@ func (c *CmdDiff) runGitDiff(
 	}
 
 	return nil
+}
+
+func (c *CmdDiff) runSpecDiff(
+	_ context.Context,
+	baseSpec, headSpec string,
+	failOnDrift, strict, jsonOutput bool,
+	stdout io.Writer,
+) error {
+	baseDoc, err := openapi.LoadSpec(baseSpec, nil)
+	if err != nil {
+		return fmt.Errorf("failed loading base spec %q: %w", baseSpec, err)
+	}
+
+	headDoc, err := openapi.LoadSpec(headSpec, nil)
+	if err != nil {
+		return fmt.Errorf("failed loading target spec %q: %w", headSpec, err)
+	}
+
+	engine := diff.NewEngine()
+	report := engine.CompareSpecs(baseDoc, headDoc, baseSpec, headSpec)
+
+	if jsonOutput {
+		data, jErr := report.RenderJSON()
+		if jErr != nil {
+			return jErr
+		}
+
+		fmt.Fprintln(stdout, string(data))
+	} else {
+		fmt.Fprint(stdout, report.Render(true))
+	}
+
+	if failOnDrift && report.HasBreaking() {
+		return fmt.Errorf("diff detected %d breaking contract change(s)", report.BreakingCount())
+	}
+
+	if strict && report.HasDrift() {
+		return fmt.Errorf("diff detected %d contract drift(s)", len(report.Drifts))
+	}
+
+	return nil
+}
+
+func isSpecFile(p string) bool {
+	for _, token := range strings.Split(p, ",") {
+		token = strings.TrimSpace(token)
+		if strings.HasSuffix(token, ".har") || strings.HasSuffix(token, ".json") ||
+			strings.HasSuffix(token, ".yaml") || strings.HasSuffix(token, ".yml") {
+			return true
+		}
+	}
+
+	return false
 }

@@ -48,7 +48,7 @@ var commandGroups = []commandGroup{
 	{
 		Title: "🌐 Traffic & Protocols",
 		Commands: []string{
-			"record", "import", "export", "oapi", "proto",
+			"record", "import", "export", "cache", "oapi", "proto",
 		},
 	},
 	{

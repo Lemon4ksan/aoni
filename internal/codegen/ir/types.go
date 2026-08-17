@@ -247,6 +247,15 @@ type MethodIR struct {
 	BudgetMaxClientTime string
 	Telemetry           string
 	Label               string
+	MockFixture         *MockFixtureIR
+}
+
+// MockFixtureIR represents a recorded or synthesized response fixture for virtual mock servers.
+type MockFixtureIR struct {
+	StatusCode  int
+	ContentType string
+	Headers     map[string]string
+	Body        string
 }
 
 // InjectTarget specifies where an injected variable is placed in the network transaction.

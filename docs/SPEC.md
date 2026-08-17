@@ -120,6 +120,7 @@ Reason            ::= [^\r\n]*
 | `@get` | `"/path/{var}"` | Defines an HTTP GET endpoint route. |
 | `@grpc` | `"/pkg.Service/Method"` | Defines a gRPC / gRPC-Web unary or streaming remote procedure call. |
 | `@head` | `"/path/{var}"` | Defines an HTTP HEAD endpoint route. |
+| `@header` | `"Key" "Value" \| "Key: Value"` | Adds a static or dynamic per-method HTTP header to the request. |
 | `@idempotent` | — | Declares request as strictly idempotent for aggressive safe retry policies. |
 | `@inject` | `target="field\|query\|header"`, `provider` | Injects session cookies, CSRF tokens, or secrets dynamically from requester context. |
 | `@multipart` | — | Configures multipart/form-data request payload encoding with streaming boundaries. |

@@ -31,8 +31,9 @@ func (c *CmdMock) Run(ctx context.Context, args []string, stdout, stderr io.Writ
 	fs.SetOutput(stderr)
 
 	var (
-		outFlag = fs.String("out", "", "Destination file for generated mock server (default: <file>_mock.gen.go)")
-		pkgFlag = fs.String("pkg", "", "Override package name for emitted mock")
+		outFlag      = fs.String("out", "", "Destination file for generated mock server (default: <file>_mock.gen.go)")
+		pkgFlag      = fs.String("pkg", "", "Override package name for emitted mock")
+		fixturesFlag = fs.Bool("fixtures", false, "Populate default mock responses from @source traffic cache")
 	)
 
 	fs.Usage = func() {
@@ -43,6 +44,10 @@ func (c *CmdMock) Run(ctx context.Context, args []string, stdout, stderr io.Writ
 		fs.PrintDefaults()
 		fmt.Fprintf(stderr, "\nExamples:\n")
 		fmt.Fprintf(stderr, "  vortex mock ./pkg/api/api.go                    # Generate in-memory mock server\n")
+		fmt.Fprintf(
+			stderr,
+			"  vortex mock -fixtures ./pkg/api/api.go          # Pre-populate with traffic cache fixtures\n",
+		)
 		fmt.Fprintf(stderr, "  vortex mock -out=./pkg/api/mock.gen.go ./pkg/api/api.go\n")
 	}
 
@@ -58,8 +63,9 @@ func (c *CmdMock) Run(ctx context.Context, args []string, stdout, stderr io.Writ
 	}
 
 	b := builder.New(builder.Config{
-		OutFlag: *outFlag,
-		PkgFlag: *pkgFlag,
+		OutFlag:      *outFlag,
+		PkgFlag:      *pkgFlag,
+		FixturesFlag: *fixturesFlag,
 	})
 
 	generatedCount := 0

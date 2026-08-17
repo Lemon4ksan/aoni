@@ -375,7 +375,18 @@ func (p *Parser) parseMethodParams(
 						param.Location = ir.LocFormFields
 						param.Formatter = ir.FormatCompiledEncode
 					case m.HTTPMethod == "POST" || m.HTTPMethod == "PUT" || m.HTTPMethod == "PATCH":
+						isBodyCandidate := goType.IsCustomType || goType.IsPointer || goType.IsMap || goType.IsSlice ||
+							strings.HasSuffix(goType.Name, "Request") ||
+							paramName == "req" || paramName == "request" || paramName == "body"
+
 						switch {
+						case isBodyCandidate && m.PayloadKind != ir.PayloadForm && m.PayloadKind != ir.PayloadMultipart:
+							if m.PayloadKind == ir.PayloadNone {
+								m.PayloadKind = ir.PayloadJSON
+							}
+
+							param.Location = ir.LocBody
+
 						case m.QueryCasing != "":
 							param.Location = ir.LocQuery
 							if effectiveCasing != "" && effectiveCasing != ir.CasingNone {
@@ -394,6 +405,14 @@ func (p *Parser) parseMethodParams(
 
 						case m.PayloadKind == ir.PayloadMultipart:
 							param.Location = ir.LocMultipartField
+							if effectiveCasing != "" && effectiveCasing != ir.CasingNone {
+								param.WireKey = toCasing(paramName, effectiveCasing)
+							} else {
+								param.WireKey = toCasing(paramName, ir.CasingSnakeCase)
+							}
+
+						case !isBodyCandidate:
+							param.Location = ir.LocQuery
 							if effectiveCasing != "" && effectiveCasing != ir.CasingNone {
 								param.WireKey = toCasing(paramName, effectiveCasing)
 							} else {

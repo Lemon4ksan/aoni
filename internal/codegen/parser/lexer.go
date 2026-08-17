@@ -55,7 +55,7 @@ func ParseDirective(line string) *Directive {
 	d.Name = strings.ToLower(content[:idx])
 	rest := strings.TrimSpace(content[idx:])
 
-	if d.Name == "return" || d.Name == "body" || d.Name == "status" || d.Name == "check" {
+	if d.Name == "return" || d.Name == "body" || d.Name == "status" || d.Name == "check" || d.Name == "header" {
 		d.Value = rest
 		if d.Name == "return" || d.Name == "body" {
 			d.Pipeline = ParsePipeline(rest)
@@ -264,9 +264,28 @@ func ParsePathTemplate(tmpl string) *ir.PathIR {
 	return pathIR
 }
 
-// ParseHeaderDirective parses a "@header" directive value which may be static or templated.
+// ParseHeaderDirective parses "@header" expressions into HeaderIR.
 func ParseHeaderDirective(val string) ir.HeaderIR {
 	val = strings.TrimSpace(val)
+
+	tokens := tokenizeArgs(val)
+	if len(tokens) >= 2 {
+		key := strings.TrimSuffix(strings.Trim(tokens[0], "\"'`"), ":")
+		valueStr := strings.Trim(tokens[1], "\"'`")
+
+		if strings.Contains(valueStr, "{") && strings.Contains(valueStr, "}") {
+			return ir.HeaderIR{
+				Key:             key,
+				DynamicTemplate: ParsePathTemplate(valueStr),
+			}
+		}
+
+		return ir.HeaderIR{
+			Key:         key,
+			StaticValue: valueStr,
+		}
+	}
+
 	val = strings.Trim(val, "\"")
 
 	colonIdx := strings.IndexByte(val, ':')

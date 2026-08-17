@@ -34,6 +34,10 @@ type Config struct {
 	DryRun bool
 	// HarnessFlag enables emission of load and benchmark harness (api_harness.gen.go).
 	HarnessFlag bool
+	// FixturesFlag enables loading realistic response fixtures from traffic cache into mock servers.
+	FixturesFlag bool
+	// RootDir specifies project root directory (defaults to current working directory or Git root).
+	RootDir string
 }
 
 // Result captures the outcome of a single source file compilation.
@@ -107,17 +111,16 @@ func (b *Builder) BuildFile(ctx context.Context, srcFile, outFile string) (*Resu
 	}
 
 	diags := b.analyzer.Analyze(root)
-	hasErrors := false
 
+	var errMsgs []string
 	for _, d := range diags {
 		if d.Severity == analysis.SeverityError {
-			hasErrors = true
-			break
+			errMsgs = append(errMsgs, d.String())
 		}
 	}
 
-	if hasErrors {
-		return nil, fmt.Errorf("analysis error in %s", srcFile)
+	if len(errMsgs) > 0 {
+		return nil, fmt.Errorf("analysis error in %s: %s", srcFile, strings.Join(errMsgs, "; "))
 	}
 
 	b.optimizer.Optimize(root)
@@ -288,6 +291,17 @@ func (b *Builder) BuildMock(ctx context.Context, srcFile, outFile string) (*Resu
 		}, nil
 	}
 
+	if b.cfg.FixturesFlag {
+		rootDir := b.cfg.RootDir
+		if rootDir == "" {
+			rootDir = "."
+		}
+
+		for _, svc := range root.Services {
+			_ = PopulateMockFixtures(rootDir, svc)
+		}
+	}
+
 	code, err := b.emitter.EmitMock(root)
 	if err != nil {
 		return nil, fmt.Errorf("emit mock for %s: %w", srcFile, err)
@@ -410,16 +424,26 @@ type CollectOptions struct {
 
 // CollectInputFiles resolves input file paths from flags, environment variables, or path patterns (e.g. ./...).
 func CollectInputFiles(fileFlag string, args []string, opts ...CollectOptions) []string {
+	var rawTargets []string
+
 	if fileFlag != "" {
-		return []string{fileFlag}
-	}
-
-	if gofile := os.Getenv("GOFILE"); gofile != "" && len(args) == 0 {
-		return []string{gofile}
-	}
-
-	if len(args) == 0 {
-		args = []string{"./..."}
+		for _, f := range strings.Split(fileFlag, ",") {
+			if strings.TrimSpace(f) != "" {
+				rawTargets = append(rawTargets, strings.TrimSpace(f))
+			}
+		}
+	} else if gofile := os.Getenv("GOFILE"); gofile != "" && len(args) == 0 {
+		rawTargets = []string{gofile}
+	} else if len(args) == 0 {
+		rawTargets = []string{"./..."}
+	} else {
+		for _, a := range args {
+			for _, item := range strings.Split(a, ",") {
+				if strings.TrimSpace(item) != "" {
+					rawTargets = append(rawTargets, strings.TrimSpace(item))
+				}
+			}
+		}
 	}
 
 	maxDepth := 6
@@ -441,7 +465,7 @@ func CollectInputFiles(fileFlag string, args []string, opts ...CollectOptions) [
 
 	seen := make(map[string]bool)
 
-	for _, target := range args {
+	for _, target := range rawTargets {
 		target = filepath.Clean(target)
 
 		if strings.HasSuffix(target, "/...") || target == "./..." || strings.HasSuffix(target, `\...`) ||
@@ -460,6 +484,7 @@ func CollectInputFiles(fileFlag string, args []string, opts ...CollectOptions) [
 				continue
 			}
 
+			// #nosec G703,G304
 			_ = filepath.WalkDir(baseDir, func(path string, d fs.DirEntry, err error) error {
 				if err != nil || d == nil {
 					return err
@@ -497,10 +522,12 @@ func CollectInputFiles(fileFlag string, args []string, opts ...CollectOptions) [
 			continue
 		}
 
+		// #nosec G703,G304
 		fi, err := os.Stat(target)
 		if err != nil {
 			// Try resolving as a symbolic contract name from .vortex.yml (e.g. "AntigravityAPI")
 			if resolved := project.ResolveTargetToPath(target); resolved != "" {
+				// #nosec G703,G304
 				if rfi, rErr := os.Stat(resolved); rErr == nil && !rfi.IsDir() {
 					if !seen[resolved] {
 						seen[resolved] = true
@@ -519,6 +546,7 @@ func CollectInputFiles(fileFlag string, args []string, opts ...CollectOptions) [
 				continue
 			}
 
+			// #nosec G703,G304
 			_ = filepath.WalkDir(target, func(path string, d fs.DirEntry, err error) error {
 				if err != nil || d == nil {
 					return err

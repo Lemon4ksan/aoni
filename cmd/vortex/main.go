@@ -40,6 +40,7 @@ func main() {
 		&CmdOAPI{},
 		&CmdImport{},
 		&CmdExport{},
+		&CmdCache{},
 		&CmdProto{},
 		&CmdBench{},
 		&CmdProf{},

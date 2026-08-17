@@ -1,0 +1,10 @@
+# .vortex.yml — Vortex API Guardian Workspace Configuration
+# Documentation: https://github.com/lemon4ksan/aoni
+
+version: 1
+defaults:
+    casing: snake_case
+    engine: fast
+contracts:
+    - name: 001API
+      file: internal/001/api.go

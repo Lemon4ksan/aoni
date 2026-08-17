@@ -176,3 +176,73 @@ type StoreAPI interface {
 	require.Contains(t, string(jsonBytes), "\"severity\": \"BREAKING\"")
 	require.Contains(t, string(jsonBytes), "\"severity\": \"GHOST\"")
 }
+
+func TestDiff_SpecToSpecComparison(t *testing.T) {
+	baseSpecJSON := `{
+		"openapi": "3.0.3",
+		"info": {"title": "Base Spec", "version": "1.0.0"},
+		"paths": {
+			"/users/{id}": {
+				"get": {
+					"parameters": [{"name": "id", "in": "path", "required": true, "schema": {"type": "string"}}],
+					"responses": {"200": {"description": "OK"}}
+				}
+			},
+			"/old/route": {
+				"get": {
+					"responses": {"200": {"description": "OK"}}
+				}
+			}
+		}
+	}`
+
+	headSpecJSON := `{
+		"openapi": "3.0.3",
+		"info": {"title": "Head Spec", "version": "2.0.0"},
+		"paths": {
+			"/users/{id}": {
+				"get": {
+					"parameters": [
+						{"name": "id", "in": "path", "required": true, "schema": {"type": "string"}},
+						{"name": "filter", "in": "query", "required": false, "schema": {"type": "string"}},
+						{"name": "auth_token", "in": "query", "required": true, "schema": {"type": "string"}}
+					],
+					"responses": {"200": {"description": "OK"}}
+				}
+			},
+			"/new/route": {
+				"post": {
+					"responses": {"200": {"description": "OK"}}
+				}
+			}
+		}
+	}`
+
+	baseDoc, err := openapi.LoadSpec("base.json", []byte(baseSpecJSON))
+	require.NoError(t, err)
+
+	headDoc, err := openapi.LoadSpec("head.json", []byte(headSpecJSON))
+	require.NoError(t, err)
+
+	engine := diff.NewEngine()
+	report := engine.CompareSpecs(baseDoc, headDoc, "base.json", "head.json")
+
+	require.NotNil(t, report)
+	require.True(t, report.HasBreaking())
+	require.True(t, report.HasDrift())
+
+	// 1. /old/route was removed -> Breaking
+	// 2. /users/{id} added required query param 'auth_token' -> Breaking
+	require.Equal(t, 2, report.BreakingCount())
+
+	// 3. /new/route was added -> Ghost (Addition)
+	require.Equal(t, 1, report.GhostCount())
+
+	// 4. /users/{id} added optional query param 'filter' -> Non-Breaking
+	require.Equal(t, 1, report.NonBreakingCount())
+
+	rendered := report.Render(false)
+	require.Contains(t, rendered, "Endpoint GET /old/route was removed")
+	require.Contains(t, rendered, "added required query parameter \"auth_token\"")
+	require.Contains(t, rendered, "Endpoint POST /new/route was added")
+}

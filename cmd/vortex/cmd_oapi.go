@@ -13,7 +13,9 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
+	"github.com/lemon4ksan/aoni/internal/codegen/cache"
 	"github.com/lemon4ksan/aoni/internal/codegen/ir"
 	"github.com/lemon4ksan/aoni/internal/codegen/openapi"
 	"github.com/lemon4ksan/aoni/internal/codegen/parser"
@@ -96,6 +98,7 @@ func (c *CmdExport) Run(ctx context.Context, args []string, stdout, stderr io.Wr
 }
 
 func (c *CmdOAPI) runExport(_ context.Context, args []string, stdout, stderr io.Writer) error {
+	args = NormalizeArgs(args)
 	fs := flag.NewFlagSet("oapi export", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 
@@ -223,6 +226,7 @@ func (c *CmdOAPI) runExport(_ context.Context, args []string, stdout, stderr io.
 }
 
 func (c *CmdOAPI) runImport(_ context.Context, args []string, stdout, stderr io.Writer) error {
+	args = NormalizeArgs(args)
 	fs := flag.NewFlagSet("oapi import", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 
@@ -235,13 +239,23 @@ func (c *CmdOAPI) runImport(_ context.Context, args []string, stdout, stderr io.
 		baseURL        = fs.String("base-url", "", "Override API BaseURL")
 		skipDeprecated = fs.Bool("skip-deprecated", false, "Skip deprecated OpenAPI operations")
 		overwrite      = fs.Bool("overwrite", false, "Discard existing file and generate contract fresh from scratch")
+		force          = fs.Bool("force", false, "Alias for --overwrite")
+		fFlag          = fs.Bool("f", false, "Alias for --overwrite")
 		prune          = fs.Bool("prune", false, "Prune deleted endpoints instead of adding @deprecated")
-		additive       = fs.Bool(
+		mergeMode      = fs.String(
+			"mode",
+			"union",
+			"Merge strategy when combining multiple specs: union (all endpoints), intersect (only matching/common endpoints), diff (only endpoints in first spec)",
+		)
+		modeFlag = fs.String("merge-mode", "union", "Alias for --mode")
+		additive = fs.Bool(
 			"additive",
 			false,
 			"Preserve missing existing endpoints as active instead of marking @deprecated",
 		)
 		add          = fs.Bool("add", false, "Alias for --additive")
+		cacheFlag    = fs.Bool("cache", false, "Archive HAR files into .vortex/cache and store credentials in vault")
+		moveFlag     = fs.Bool("move", false, "Move original HAR files into cache (deletes source file on success)")
 		dryRun       = fs.Bool("dry-run", false, "Preview merge changes without modifying files on disk")
 		interactive  = fs.Bool("interactive", false, "Prompt for merge decisions")
 		includePaths StringSliceFlag
@@ -273,16 +287,179 @@ func (c *CmdOAPI) runImport(_ context.Context, args []string, stdout, stderr io.
 		fmt.Fprintf(stderr, "  vortex import -spec=session.har -out=./pkg/api/api.go -add     # Additive merge\n")
 	}
 
-	if err := fs.Parse(args); err != nil {
+	var flags, nonFlags []string
+	for i := 0; i < len(args); i++ {
+		arg := args[i]
+		if strings.HasPrefix(arg, "-") {
+			flags = append(flags, arg)
+
+			if (arg == "-spec" || arg == "-out" || arg == "-pkg" || arg == "-service" ||
+				arg == "-base-url" || arg == "-include-path" || arg == "-exclude-path" ||
+				arg == "-type-map" || arg == "-mode" || arg == "-merge-mode") && i+1 < len(args) && !strings.HasPrefix(args[i+1], "-") {
+				flags = append(flags, args[i+1])
+				i++
+			}
+		} else {
+			nonFlags = append(nonFlags, arg)
+		}
+	}
+
+	if err := fs.Parse(append(flags, nonFlags...)); err != nil {
 		return err
 	}
 
-	if *specFile == "" {
-		return errors.New("vortex oapi import: -spec flag is required (e.g. -spec=swagger.json)")
+	var resolvedMode openapi.MergeMode
+
+	modeVal := strings.ToLower(strings.TrimSpace(*mergeMode))
+	if modeVal == "union" && *modeFlag != "union" {
+		modeVal = strings.ToLower(strings.TrimSpace(*modeFlag))
+	}
+
+	switch modeVal {
+	case "intersect", "intersection":
+		resolvedMode = openapi.MergeModeIntersection
+	case "diff", "difference":
+		resolvedMode = openapi.MergeModeDifference
+	default:
+		resolvedMode = openapi.MergeModeUnion
+	}
+
+	targetOut := *outFile
+	targetPkg := *pkgName
+	targetService := *serviceName
+
+	var specList []string
+	if *specFile != "" {
+		for _, s := range strings.Split(*specFile, ",") {
+			if strings.TrimSpace(s) != "" {
+				specList = append(specList, strings.TrimSpace(s))
+			}
+		}
+	}
+
+	posArgs := fs.Args()
+	for len(posArgs) > 0 {
+		arg := posArgs[0]
+		isSpec := false
+
+		for _, item := range strings.Split(arg, ",") {
+			item = strings.TrimSpace(item)
+			if strings.HasSuffix(item, ".har") || strings.HasSuffix(item, ".json") ||
+				strings.HasSuffix(item, ".yaml") || strings.HasSuffix(item, ".yml") ||
+				strings.HasPrefix(item, "cache:") || strings.ContainsAny(item, "*?[]") {
+				isSpec = true
+
+				specList = append(specList, item)
+			}
+		}
+
+		if isSpec {
+			posArgs = posArgs[1:]
+			continue
+		}
+
+		if arg != ".go" && arg != "." && arg != "" {
+			targetOut = arg
+		}
+
+		break
+	}
+
+	if targetOut == ".go" || targetOut == "" || targetOut == "." {
+		targetOut = "api.go"
+	} else if targetOut != "-" && filepath.Ext(targetOut) == "" {
+		targetOut += ".go"
+	}
+
+	inputSpec := strings.Join(specList, ",")
+
+	// Auto-discovery if spec is not explicitly specified
+	if inputSpec == "" {
+		candidates, _ := filepath.Glob("*.har")
+		if len(candidates) == 0 {
+			candidates, _ = filepath.Glob("*.json")
+		}
+
+		if len(candidates) > 0 {
+			var (
+				latestFile string
+				latestTime time.Time
+			)
+
+			for _, c := range candidates {
+				if strings.HasSuffix(c, ".gen.go") || strings.HasSuffix(c, ".yml") || strings.HasSuffix(c, ".yaml") {
+					continue
+				}
+
+				if fi, err := os.Stat(c); err == nil && fi.ModTime().After(latestTime) {
+					latestTime = fi.ModTime()
+					latestFile = c
+				}
+			}
+
+			if latestFile != "" {
+				inputSpec = latestFile
+				fmt.Fprintf(stdout, "💡 Auto-detected upstream spec: %s\n", latestFile)
+			}
+		}
+	}
+
+	if inputSpec == "" {
+		return errors.New(
+			"vortex import: spec file is required (e.g. `vortex import session.har` or `-spec=swagger.json`)",
+		)
+	}
+
+	// Try resolving targetOut from .vortex.yml (e.g. if targetOut is "AntigravityAPI" or default "api.go")
+	cwd, _ := os.Getwd()
+	if cfg, err := project.Load(cwd); err == nil && cfg != nil {
+		if c := cfg.FindContract(targetOut); c != nil {
+			if c.File != "" {
+				targetOut = c.File
+				if !filepath.IsAbs(targetOut) && cfg.RootDir != "" {
+					targetOut = filepath.Join(cfg.RootDir, targetOut)
+				}
+			}
+
+			if c.Package != "" && targetPkg == "api" {
+				targetPkg = c.Package
+			}
+
+			if c.Name != "" && targetService == "API" {
+				targetService = c.Name
+			}
+		} else if len(cfg.Contracts) == 1 && targetOut == "api.go" {
+			c := &cfg.Contracts[0]
+			if c.File != "" {
+				targetOut = c.File
+				if !filepath.IsAbs(targetOut) && cfg.RootDir != "" {
+					targetOut = filepath.Join(cfg.RootDir, targetOut)
+				}
+			}
+
+			if c.Package != "" && targetPkg == "api" {
+				targetPkg = c.Package
+			}
+
+			if c.Name != "" && targetService == "API" {
+				targetService = c.Name
+			}
+		}
+	}
+
+	if targetPkg == "api" && targetOut != "" {
+		dir := filepath.Dir(targetOut)
+		if dir != "" && dir != "." {
+			baseDir := filepath.Base(dir)
+			if baseDir != "" && baseDir != "." && baseDir != "pkg" &&
+				baseDir != "internal" && isValidGoPackageName(baseDir) {
+				targetPkg = baseDir
+			}
+		}
 	}
 
 	var specData []byte
-	if *specFile == "-" {
+	if inputSpec == "-" {
 		var err error
 
 		specData, err = io.ReadAll(os.Stdin)
@@ -291,7 +468,34 @@ func (c *CmdOAPI) runImport(_ context.Context, args []string, stdout, stderr io.
 		}
 	}
 
-	doc, err := openapi.LoadSpec(*specFile, specData)
+	// Cache and sanitize raw HAR captures and extract credentials into vault
+	if *cacheFlag || *moveFlag {
+		rootDir := cwd
+		if pCfg, pErr := project.Load(cwd); pErr == nil && pCfg != nil && pCfg.RootDir != "" {
+			rootDir = pCfg.RootDir
+		}
+
+		vault, vaultPath, _ := cache.LoadSecrets(rootDir)
+
+		for _, sPath := range specList {
+			if strings.HasSuffix(sPath, ".har") {
+				if hData, readErr := os.ReadFile(sPath); readErr == nil {
+					entry, secrets, storeErr := cache.StoreTraffic(rootDir, sPath, hData, *moveFlag, true)
+					if storeErr == nil && entry != nil {
+						for k, s := range secrets {
+							vault.SetWithTarget(k, s.Value, entry.ID, s.Header, s.Query, s.Cookie)
+						}
+					}
+				}
+			}
+		}
+
+		if len(vault.Secrets) > 0 {
+			_ = vault.Save(vaultPath)
+		}
+	}
+
+	doc, err := openapi.LoadSpecWithMode(inputSpec, specData, resolvedMode)
 	if err != nil {
 		return fmt.Errorf("loading spec: %w", err)
 	}
@@ -306,8 +510,8 @@ func (c *CmdOAPI) runImport(_ context.Context, args []string, stdout, stderr io.
 
 	// Check if existing file is present for semantic reconciliation (Git-merge for APIs)
 	var existingSrc []byte
-	if *outFile != "" && *outFile != "-" && !*overwrite {
-		if data, readErr := os.ReadFile(*outFile); readErr == nil && len(data) > 0 {
+	if targetOut != "" && targetOut != "-" && (!*overwrite && !*force && !*fFlag) {
+		if data, readErr := os.ReadFile(targetOut); readErr == nil && len(data) > 0 {
 			existingSrc = data
 		}
 	}
@@ -316,9 +520,9 @@ func (c *CmdOAPI) runImport(_ context.Context, args []string, stdout, stderr io.
 		// Run Semantic AST Merge Engine
 		mergeEngine := openapi.NewMergeEngine()
 		mCfg := openapi.MergeConfig{
-			SpecFile:       *specFile,
-			PackageName:    *pkgName,
-			ServiceName:    *serviceName,
+			SpecFile:       inputSpec,
+			PackageName:    targetPkg,
+			ServiceName:    targetService,
 			Prune:          *prune,
 			Additive:       *additive || *add,
 			Overwrite:      *overwrite,
@@ -330,14 +534,14 @@ func (c *CmdOAPI) runImport(_ context.Context, args []string, stdout, stderr io.
 
 		reconciledSrc, summary, mergeErr := mergeEngine.ReconcileService(existingSrc, doc, mCfg)
 		if mergeErr != nil {
-			return fmt.Errorf("reconciling contract %s: %w", *outFile, mergeErr)
+			return fmt.Errorf("reconciling contract %s: %w", targetOut, mergeErr)
 		}
 
-		fmt.Fprint(stdout, summary.Render(*outFile))
+		fmt.Fprint(stdout, summary.Render(targetOut))
 
 		if !*dryRun {
-			if err := os.WriteFile(*outFile, reconciledSrc, 0o600); err != nil {
-				return fmt.Errorf("writing %s: %w", *outFile, err)
+			if err := os.WriteFile(targetOut, reconciledSrc, 0o600); err != nil {
+				return fmt.Errorf("writing %s: %w", targetOut, err)
 			}
 		}
 
@@ -345,16 +549,17 @@ func (c *CmdOAPI) runImport(_ context.Context, args []string, stdout, stderr io.
 	}
 
 	cfg := openapi.ImportConfig{
-		SpecFile:       *specFile,
-		PackageName:    *pkgName,
-		ServiceName:    *serviceName,
-		OutputFile:     *outFile,
+		SpecFile:       inputSpec,
+		PackageName:    targetPkg,
+		ServiceName:    targetService,
+		OutputFile:     targetOut,
 		BaseURL:        *baseURL,
 		SkipDeprecated: *skipDeprecated,
 		SplitModels:    *splitModels,
 		IncludePaths:   includePaths,
 		ExcludePaths:   excludePaths,
 		TypeMap:        tm,
+		MergeMode:      resolvedMode,
 	}
 
 	if *splitModels {
@@ -363,12 +568,12 @@ func (c *CmdOAPI) runImport(_ context.Context, args []string, stdout, stderr io.
 			return fmt.Errorf("generating split contract: %w", err)
 		}
 
-		outDir := filepath.Dir(*outFile)
+		outDir := filepath.Dir(targetOut)
 		if outDir == "" {
 			outDir = "."
 		}
 
-		apiPath := *outFile
+		apiPath := targetOut
 		modelsPath := filepath.Join(outDir, "models.go")
 
 		if !*dryRun {
@@ -404,15 +609,20 @@ func (c *CmdOAPI) runImport(_ context.Context, args []string, stdout, stderr io.
 		return fmt.Errorf("generating contract: %w", err)
 	}
 
-	if *outFile != "" && *outFile != "-" {
+	if targetOut != "" && targetOut != "-" {
 		if !*dryRun {
-			if err := os.WriteFile(*outFile, src, 0o600); err != nil {
-				return fmt.Errorf("writing output file %s: %w", *outFile, err)
+			dir := filepath.Dir(targetOut)
+			if dir != "" && dir != "." {
+				_ = os.MkdirAll(dir, 0o755)
 			}
 
-			fmt.Fprintf(stdout, "✔ Generated Aoni contract in %s (%d bytes)\n", *outFile, len(src))
+			if err := os.WriteFile(targetOut, src, 0o600); err != nil {
+				return fmt.Errorf("writing output file %s: %w", targetOut, err)
+			}
+
+			fmt.Fprintf(stdout, "✔ Generated Aoni contract in %s (%d bytes)\n", targetOut, len(src))
 		} else {
-			fmt.Fprintf(stdout, "[dry-run] Would generate %s (%d bytes)\n", *outFile, len(src))
+			fmt.Fprintf(stdout, "[dry-run] Would generate %s (%d bytes)\n", targetOut, len(src))
 		}
 
 		return nil
@@ -421,4 +631,22 @@ func (c *CmdOAPI) runImport(_ context.Context, args []string, stdout, stderr io.
 	fmt.Fprint(stdout, string(src))
 
 	return nil
+}
+
+func isValidGoPackageName(name string) bool {
+	if len(name) == 0 {
+		return false
+	}
+
+	for i, r := range name {
+		if i == 0 && (r >= '0' && r <= '9') {
+			return false
+		}
+
+		if (r < 'a' || r > 'z') && (r < 'A' || r > 'Z') && (r < '0' || r > '9') && r != '_' {
+			return false
+		}
+	}
+
+	return true
 }

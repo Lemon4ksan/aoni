@@ -12,12 +12,15 @@
    - [Method Route & Protocol Annotations](#method-route--protocol-annotations)
    - [Parameter Binding Annotations](#parameter-binding-annotations)
    - [Resilience & Caching Annotations](#resilience--caching-annotations)
+   - [Data Transfer Object (DTO) Annotations](#data-transfer-object-dto-annotations)
+   - [Two-Tier Header Architecture](#two-tier-header-architecture)
 3. [CLI Reference & Subcommands](#3-cli-reference--subcommands)
-   - [Workspace Management](#workspace-management)
-   - [Code Generation & Mocks](#code-generation--mocks)
-   - [Specification Ingestion & Export](#specification-ingestion--export)
-   - [Validation, Diffing & Auditing](#validation-diffing--auditing)
-   - [Performance & Benchmarking](#performance--benchmarking)
+   - [Workspace Management (`vortex init`, `vortex config`, `vortex status`, `vortex clean`)](#workspace-management)
+   - [Code Generation & Mocks (`vortex gen`, `vortex mock`)](#code-generation--mocks)
+   - [Specification Ingestion & Export (`vortex source`, `vortex import`, `vortex export`, `vortex proto`)](#specification-ingestion--export)
+   - [AST Manipulation & Refactoring (`vortex cherry-pick`, `vortex refactor`, `vortex undo`)](#ast-manipulation--refactoring)
+   - [Validation, Diffing & Auditing (`vortex check`, `vortex diff`, `vortex blame`, `vortex tag`)](#validation-diffing--auditing)
+   - [Performance & Benchmarking (`vortex bench`, `vortex prof`, `vortex pgo`)](#performance--benchmarking)
 4. [Configuration Schema (`.vortex.yml`)](#4-configuration-schema-vortexyml)
 5. [End-to-End Workflows](#5-end-to-end-workflows)
    - [Authoring a Service Contract](#authoring-a-service-contract)
@@ -180,6 +183,48 @@ type MarketAPI interface {
 
 ---
 
+### Data Transfer Object (DTO) Annotations
+
+Vortex allows annotating struct models for zero-allocation JSON, Form, and Proto serialization:
+
+```go
+// @aoni:dto casing=snake_case omitempty=true
+type CreateClientRegisterRequest struct {
+    AppName          string    `json:"appName,omitempty"`
+    ConnectionID     string    `json:"connectionId,omitempty"`
+    InstanceID       string    `json:"instanceId,omitempty"`
+    Interval         int64     `json:"interval,omitempty"`
+    Started          time.Time `json:"started,omitempty"`
+    Strategies       []string  `json:"strategies,omitempty"`
+}
+```
+
+| Tag | Parameter | Description |
+| :--- | :--- | :--- |
+| `// @aoni:dto` | `casing=<style>`, `omitempty=true` | Marks struct as a managed DTO with global JSON key casing and omitempty policy. |
+| `time.Time` | RFC3339 | Automatically inferred and formatted from ISO8601/RFC3339 timestamp payloads in HAR/OpenAPI. |
+
+---
+
+### Two-Tier Header Architecture
+
+Vortex provides declarative header inheritance across two layers:
+1. **Global Service Headers**: Inherited across all client methods (e.g. shared `User-Agent` or default `Authorization`).
+2. **Per-Method Specific Headers**: Bound directly to an individual RPC endpoint (e.g. specific `Unleash-*` tokens or custom telemetry).
+
+```go
+// @aoni:service
+// @header "User-Agent" "antigravity/cli/1.1.13"
+type AntigravityAPI interface {
+    // @post "api/client/register"
+    // @header "Unleash-Appname" "codeium-language-server"
+    // @header "Unleash-Interval" "60000"
+    CreateClientRegister(ctx context.Context, req CreateClientRegisterRequest, mods ...aoni.RequestModifier) error
+}
+```
+
+---
+
 ## 3. CLI Reference & Subcommands
 
 Install or update the `vortex` CLI:
@@ -204,17 +249,21 @@ vortex init
 # Force overwrite existing configuration
 vortex init -force
 
-# Exclude legacy folders from discovery
-vortex init -exclude="pkg/legacy/**,internal/deprecated/**"
+# Scaffold from starter templates (rest, stream, ws, auth, stealth, grpc, socket, list)
+vortex init billing -tpl=rest       # REST CRUD API with DTOs, pagination, and filters
+vortex init chat -tpl=ws           # WebSocket Bi-Directional Event Client
+vortex init ai -tpl=sse            # Real-Time Server-Sent Events (SSE) & NDJSON Client
+vortex init auth -tpl=auth         # OAuth2 Token Auto-Rotation & HMAC Signing
+vortex init market -tpl=stealth    # Anti-Bot Browser Impersonator with JA4 & p0f Spoofing
+vortex init rpc -tpl=grpc          # Framed gRPC-Web & Protobuf Client
+vortex init raw -tpl=socket        # Persistent High-Throughput Binary Socket Facade
+vortex init -tpl=list              # View full interactive template catalog
 
-# Restrict discovery to a specific module
-vortex init -match="pkg/steam/**"
-
-# Ingest an OpenAPI 3.1 specification directly
-vortex init -from-openapi=https://api.example.com/openapi.json -pkg=petstore -service=PetstoreAPI -out=pkg/petstore/api.go
-
-# Ingest an AsyncAPI specification
-vortex init -from-asyncapi=./specs/market_stream.yaml -pkg=market -service=MarketStreamAPI -out=pkg/market/api.go
+# Ingest OpenAPI / HAR traffic captures directly into new package
+vortex init agy -from=traffic.har -service=AntigravityAPI
+vortex init agy -from=traffic1.har,traffic2.har -mode=intersect # Multi-HAR baseline extraction
+vortex init petstore -from=openapi.json -pkg=petstore -out=pkg/petstore/api.go
+vortex init market -from-asyncapi=./specs/market_stream.yaml -out=pkg/market/api.go
 ```
 
 #### `vortex config` (Aliases: `cfg`, `conf`)
@@ -322,12 +371,47 @@ vortex source diff PriceDB
 vortex source sync PriceDB
 ```
 
-#### `vortex oapi`
-Exports declarative Go contracts to OpenAPI 3.1.0 JSON or YAML schemas.
+#### `vortex import` (Aliases: `oapi import`)
+Imports OpenAPI 3.x, Swagger 2.0, or HAR Traffic Captures into declarative Go contracts with **3-Way AST Semantic Reconciliation** (`Git-merge for APIs`).
 
 ```bash
-vortex oapi pkg/user/api.go -out=openapi.json
-vortex oapi pkg/user/api.go -yaml -out=openapi.yaml
+# Ingest single OpenAPI spec or HAR capture
+vortex import -spec=openapi.json -out=./pkg/api/api.go
+vortex import session.har -service=MyAPI -out=pkg/myapi/api.go
+
+# Multi-spec composition (comma-separated or globs)
+vortex import traffic1.har,traffic2.har -service=API -out=pkg/api/api.go
+vortex import "specs/*.json" -out=pkg/api/api.go
+
+# Set-Operation Merge Modes:
+vortex import a.har,b.har -mode=union      # (Default) Union all endpoints (A ∪ B)
+vortex import a.har,b.har -mode=intersect  # Baseline extraction: only endpoints in BOTH (A ∩ B)
+vortex import a.har,b.har -mode=diff       # Delta extraction: only endpoints in A missing in B (A \ B)
+
+# 3-Way AST Reconciliation Options:
+vortex import session.har -out=pkg/api/api.go -add      # Preserve unmentioned endpoints as active
+vortex import session.har -out=pkg/api/api.go -prune    # Prune unmentioned endpoints
+vortex import session.har -out=pkg/api/api.go -f        # Discard existing and regenerate fresh
+vortex import session.har -out=pkg/api/api.go -dry-run  # Preview changes without modifying disk
+vortex import session.har -out=pkg/api/api.go -split    # Split into api.go and models.go
+vortex import session.har -type-map=steam_id=id.ID      # Custom domain type mapping
+```
+
+**Reconciliation Engine Guarantees:**
+* **Rule A (Type Fidelity)**: Custom Go domain types (`steam.ID`, `time.Time`, custom DTOs) are preserved and never degraded to generic `any`.
+* **Rule B (Non-Destructive Addition)**: New endpoints in the upstream schema are appended with synthetic method signatures and DTO structs.
+* **Rule C (Conservative Deprecation)**: Endpoints removed upstream are marked with `// @deprecated` rather than silently deleted (unless `-prune` is passed).
+
+#### `vortex export` (Aliases: `oapi export`, `oapi`)
+Exports declarative Go contracts to clean standard OpenAPI 3.1.0 JSON or YAML schemas.
+
+```bash
+# Standard clean OpenAPI 3.1.0 export (Default — no vendor extensions)
+vortex export pkg/user/api.go -out=openapi.json
+vortex export pkg/user/api.go -yaml -out=openapi.yaml
+
+# Full fidelity export with vendor extensions (x-vortex-*)
+vortex export pkg/user/api.go --vortex -out=openapi.json
 ```
 
 #### `vortex proto`
@@ -402,10 +486,17 @@ vortex check -sarif=security.sarif  # Export findings for GitHub Security Code S
 ```
 
 #### `vortex diff`
-Performs semantic schema comparison between a Go contract and an upstream OpenAPI specification.
+Performs semantic schema comparison between a Go contract and an upstream OpenAPI specification, or directly **compares two external specs / HAR captures (Spec-to-Spec)**.
 
 ```bash
+# Contract-to-Spec comparison:
 vortex diff openapi.json pkg/user/api.go
+vortex diff session.har MarketAPI
+
+# Direct Spec-to-Spec comparison (No Go contract required):
+vortex diff spec_v1.json spec_v2.json
+vortex diff session_staging.har session_prod.har
+vortex diff "specs_old/*.json" "specs_new/*.json"
 ```
 
 #### `vortex review` & `vortex accept`
@@ -502,6 +593,22 @@ contracts:
 
 ignore:
   - "missing-response-schema"
+
+secrets:
+  headers:
+    authorization: AUTH_TOKEN
+    x-goog-api-key: GOOGLE_API_KEY
+    unleash-instanceid: INSTANCE_ID
+  query:
+    key: GOOGLE_API_KEY
+    api_key: API_KEY
+  cookies:
+    session_id: SESSION_ID
+  patterns:
+    - regex: "ya29\\.[a-zA-Z0-9_-]+"
+      var: AUTH_TOKEN
+    - regex: "AIzaSy[a-zA-Z0-9_-]{33}"
+      var: GOOGLE_API_KEY
 
 lint:
   ignore:

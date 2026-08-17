@@ -43,82 +43,7 @@ func (e *DiffEngine) Compare(
 		return report
 	}
 
-	// 1. Index remote operations
-	remoteOps := make([]*remoteOp, 0)
-	remoteKeyMap := make(map[string]*remoteOp)
-	remoteOpIDMap := make(map[string]*remoteOp)
-
-	if remoteDoc.Paths != nil {
-		for pathStr, pathItem := range remoteDoc.Paths.Map() {
-			if pathItem == nil {
-				continue
-			}
-
-			ops := map[string]*openapi3.Operation{
-				"GET":     pathItem.Get,
-				"POST":    pathItem.Post,
-				"PUT":     pathItem.Put,
-				"DELETE":  pathItem.Delete,
-				"PATCH":   pathItem.Patch,
-				"HEAD":    pathItem.Head,
-				"OPTIONS": pathItem.Options,
-			}
-
-			for httpMethod, op := range ops {
-				if op == nil {
-					continue
-				}
-
-				rop := &remoteOp{
-					httpMethod:   httpMethod,
-					rawPath:      pathStr,
-					normPath:     normalizePath(pathStr),
-					operationID:  op.OperationID,
-					summary:      op.Summary,
-					deprecated:   op.Deprecated,
-					pathParams:   make(map[string]*openapi3.Parameter),
-					queryParams:  make(map[string]*openapi3.Parameter),
-					headerParams: make(map[string]*openapi3.Parameter),
-					requestBody:  nil,
-					responses:    op.Responses,
-				}
-
-				if op.RequestBody != nil && op.RequestBody.Value != nil {
-					rop.requestBody = op.RequestBody.Value
-				}
-
-				// Collect path item and operation parameters
-				allParams := make([]*openapi3.ParameterRef, 0, len(pathItem.Parameters)+len(op.Parameters))
-				allParams = append(allParams, pathItem.Parameters...)
-				allParams = append(allParams, op.Parameters...)
-
-				for _, pRef := range allParams {
-					if pRef == nil || pRef.Value == nil {
-						continue
-					}
-
-					p := pRef.Value
-					switch p.In {
-					case "path":
-						rop.pathParams[strings.ToLower(p.Name)] = p
-					case "query":
-						rop.queryParams[strings.ToLower(p.Name)] = p
-					case "header":
-						rop.headerParams[strings.ToLower(p.Name)] = p
-					}
-				}
-
-				routeKey := httpMethod + " " + rop.normPath
-				remoteOps = append(remoteOps, rop)
-
-				remoteKeyMap[routeKey] = rop
-				if rop.operationID != "" {
-					remoteOpIDMap[rop.operationID] = rop
-				}
-			}
-		}
-	}
-
+	remoteOps, remoteKeyMap, remoteOpIDMap := indexRemoteOps(remoteDoc)
 	report.TotalEndpointsChecked = len(remoteOps)
 
 	// 2. Track matched remote operations
@@ -421,4 +346,265 @@ func isPrimitiveType(t string) bool {
 	default:
 		return false
 	}
+}
+
+func indexRemoteOps(remoteDoc *openapi3.T) ([]*remoteOp, map[string]*remoteOp, map[string]*remoteOp) {
+	remoteOps := make([]*remoteOp, 0)
+	remoteKeyMap := make(map[string]*remoteOp)
+	remoteOpIDMap := make(map[string]*remoteOp)
+
+	if remoteDoc == nil || remoteDoc.Paths == nil {
+		return remoteOps, remoteKeyMap, remoteOpIDMap
+	}
+
+	for pathStr, pathItem := range remoteDoc.Paths.Map() {
+		if pathItem == nil {
+			continue
+		}
+
+		ops := map[string]*openapi3.Operation{
+			"GET":     pathItem.Get,
+			"POST":    pathItem.Post,
+			"PUT":     pathItem.Put,
+			"DELETE":  pathItem.Delete,
+			"PATCH":   pathItem.Patch,
+			"HEAD":    pathItem.Head,
+			"OPTIONS": pathItem.Options,
+		}
+
+		for httpMethod, op := range ops {
+			if op == nil {
+				continue
+			}
+
+			rop := &remoteOp{
+				httpMethod:   httpMethod,
+				rawPath:      pathStr,
+				normPath:     normalizePath(pathStr),
+				operationID:  op.OperationID,
+				summary:      op.Summary,
+				deprecated:   op.Deprecated,
+				pathParams:   make(map[string]*openapi3.Parameter),
+				queryParams:  make(map[string]*openapi3.Parameter),
+				headerParams: make(map[string]*openapi3.Parameter),
+				requestBody:  nil,
+				responses:    op.Responses,
+			}
+
+			if op.RequestBody != nil && op.RequestBody.Value != nil {
+				rop.requestBody = op.RequestBody.Value
+			}
+
+			allParams := make([]*openapi3.ParameterRef, 0, len(pathItem.Parameters)+len(op.Parameters))
+			allParams = append(allParams, pathItem.Parameters...)
+			allParams = append(allParams, op.Parameters...)
+
+			for _, pRef := range allParams {
+				if pRef == nil || pRef.Value == nil {
+					continue
+				}
+
+				p := pRef.Value
+				switch p.In {
+				case "path":
+					rop.pathParams[strings.ToLower(p.Name)] = p
+				case "query":
+					rop.queryParams[strings.ToLower(p.Name)] = p
+				case "header":
+					rop.headerParams[strings.ToLower(p.Name)] = p
+				}
+			}
+
+			routeKey := httpMethod + " " + rop.normPath
+			remoteOps = append(remoteOps, rop)
+
+			remoteKeyMap[routeKey] = rop
+			if rop.operationID != "" {
+				remoteOpIDMap[rop.operationID] = rop
+			}
+		}
+	}
+
+	return remoteOps, remoteKeyMap, remoteOpIDMap
+}
+
+// CompareSpecs compares two OpenAPI/HAR/Swagger specification documents directly without requiring Go contract files.
+func (e *DiffEngine) CompareSpecs(
+	baseDoc *openapi3.T,
+	headDoc *openapi3.T,
+	baseTarget string,
+	headTarget string,
+) *DiffReport {
+	report := &DiffReport{
+		LocalTarget:  baseTarget,
+		RemoteTarget: headTarget,
+	}
+
+	if baseDoc == nil || headDoc == nil {
+		return report
+	}
+
+	baseOps, baseKeyMap, _ := indexRemoteOps(baseDoc)
+	headOps, headKeyMap, _ := indexRemoteOps(headDoc)
+
+	report.TotalEndpointsChecked = len(baseOps)
+
+	// 1. Detect removed endpoints in Head (BREAKING)
+	for _, bOp := range baseOps {
+		routeKey := bOp.httpMethod + " " + bOp.normPath
+		hOp := headKeyMap[routeKey]
+
+		if hOp == nil {
+			report.Drifts = append(report.Drifts, DriftItem{
+				Severity:   SeverityBreaking,
+				Kind:       DriftMissingEndpoint,
+				Endpoint:   bOp.httpMethod + " " + bOp.rawPath,
+				Expected:   "endpoint present in base specification",
+				Actual:     "endpoint removed in target specification",
+				Message:    fmt.Sprintf("Endpoint %s %s was removed in %s", bOp.httpMethod, bOp.rawPath, headTarget),
+				Suggestion: "Ensure dependent consumer clients are migrated before dropping route",
+			})
+
+			continue
+		}
+
+		// Compare parameters across matching operations
+		e.compareSpecOperations(bOp, hOp, headTarget, report)
+	}
+
+	// 2. Detect added endpoints in Head (GHOST / New routes)
+	for _, hOp := range headOps {
+		routeKey := hOp.httpMethod + " " + hOp.normPath
+		if baseKeyMap[routeKey] == nil {
+			report.TotalEndpointsChecked++
+			report.Drifts = append(report.Drifts, DriftItem{
+				Severity:   SeverityGhost,
+				Kind:       DriftMissingEndpoint,
+				Endpoint:   hOp.httpMethod + " " + hOp.rawPath,
+				Expected:   "endpoint present in target specification",
+				Actual:     "not present in base specification",
+				Message:    fmt.Sprintf("Endpoint %s %s was added in %s", hOp.httpMethod, hOp.rawPath, headTarget),
+				Suggestion: "New endpoint available in upstream specification",
+			})
+		}
+	}
+
+	return report
+}
+
+func (e *DiffEngine) compareSpecOperations(bOp, hOp *remoteOp, headTarget string, report *DiffReport) {
+	endpointDesc := bOp.httpMethod + " " + bOp.rawPath
+
+	// 1. Check Query Parameters
+	for qName, hParam := range hOp.queryParams {
+		bParam := bOp.queryParams[qName]
+		if bParam == nil {
+			if hParam.Required {
+				report.Drifts = append(report.Drifts, DriftItem{
+					Severity: SeverityBreaking,
+					Kind:     DriftMissingParam,
+					Endpoint: endpointDesc,
+					Param:    hParam.Name,
+					Expected: fmt.Sprintf("required parameter %q in %s", hParam.Name, headTarget),
+					Actual:   "missing in base specification",
+					Message: fmt.Sprintf(
+						"Target specification %s added required query parameter %q",
+						headTarget,
+						hParam.Name,
+					),
+					Suggestion: "Add parameter handling in consumer clients",
+				})
+			} else {
+				report.Drifts = append(report.Drifts, DriftItem{
+					Severity: SeverityNonBreaking,
+					Kind:     DriftMissingParam,
+					Endpoint: endpointDesc,
+					Param:    hParam.Name,
+					Expected: fmt.Sprintf("optional parameter %q in %s", hParam.Name, headTarget),
+					Actual:   "not present in base specification",
+					Message: fmt.Sprintf(
+						"Target specification %s added optional query parameter %q",
+						headTarget,
+						hParam.Name,
+					),
+					Suggestion: "Optional parameter available in upstream",
+				})
+			}
+
+			continue
+		}
+
+		bType := getParamType(bParam)
+		hType := getParamType(hParam)
+
+		if bType != "" && hType != "" && bType != hType {
+			report.Drifts = append(report.Drifts, DriftItem{
+				Severity: SeverityBreaking,
+				Kind:     DriftTypeMismatch,
+				Endpoint: endpointDesc,
+				Param:    hParam.Name,
+				Expected: bType,
+				Actual:   hType,
+				Message: fmt.Sprintf(
+					"Parameter %q type changed from %s to %s in %s",
+					hParam.Name,
+					bType,
+					hType,
+					headTarget,
+				),
+				Suggestion: "Update consumer type mappings",
+			})
+		}
+	}
+
+	// 2. Check Dropped Query Parameters in Head
+	for qName, bParam := range bOp.queryParams {
+		if hOp.queryParams[qName] == nil {
+			report.Drifts = append(report.Drifts, DriftItem{
+				Severity:   SeverityNonBreaking,
+				Kind:       DriftExtraParam,
+				Endpoint:   endpointDesc,
+				Param:      bParam.Name,
+				Expected:   fmt.Sprintf("parameter %q in base specification", bParam.Name),
+				Actual:     "removed in " + headTarget,
+				Message:    fmt.Sprintf("Query parameter %q was dropped in %s", bParam.Name, headTarget),
+				Suggestion: "Verify if parameter is obsolete",
+			})
+		}
+	}
+
+	// 3. Request Body requirement changes
+	if hOp.requestBody != nil && hOp.requestBody.Required && (bOp.requestBody == nil || !bOp.requestBody.Required) {
+		report.Drifts = append(report.Drifts, DriftItem{
+			Severity:   SeverityBreaking,
+			Kind:       DriftMissingParam,
+			Endpoint:   endpointDesc,
+			Expected:   "required request body in target specification",
+			Actual:     "optional or missing in base specification",
+			Message:    fmt.Sprintf("Endpoint %s now requires a request body in %s", endpointDesc, headTarget),
+			Suggestion: "Ensure request payload is provided",
+		})
+	}
+
+	// 4. Deprecations
+	if hOp.deprecated && !bOp.deprecated {
+		report.Drifts = append(report.Drifts, DriftItem{
+			Severity:   SeverityNonBreaking,
+			Kind:       DriftDeprecationMismatch,
+			Endpoint:   endpointDesc,
+			Expected:   "active route in base specification",
+			Actual:     "deprecated in " + headTarget,
+			Message:    fmt.Sprintf("Endpoint %s was marked as deprecated in %s", endpointDesc, headTarget),
+			Suggestion: "Plan migration to newer endpoint alternative",
+		})
+	}
+}
+
+func getParamType(p *openapi3.Parameter) string {
+	if p == nil || p.Schema == nil || p.Schema.Value == nil || p.Schema.Value.Type == nil ||
+		len(*p.Schema.Value.Type) == 0 {
+		return ""
+	}
+
+	return (*p.Schema.Value.Type)[0]
 }

@@ -593,6 +593,30 @@ func ApplyMethodDirective(m *ir.MethodIR, d *Directive) {
 			}
 		}
 
+	case "mock:fixture", "fixture":
+		fixture := &ir.MockFixtureIR{
+			StatusCode:  200,
+			ContentType: "application/json",
+			Headers:     make(map[string]string),
+		}
+		if stStr, ok := d.Args["status"]; ok {
+			if st, err := strconv.Atoi(stStr); err == nil {
+				fixture.StatusCode = st
+			}
+		}
+
+		if ct, ok := d.Args["type"]; ok {
+			fixture.ContentType = ct
+		}
+
+		if body, ok := d.Args["body"]; ok {
+			fixture.Body = body
+		} else if d.Value != "" {
+			fixture.Body = d.Value
+		}
+
+		m.MockFixture = fixture
+
 	case "budget":
 		if allocStr, ok := d.Args["client_allocs"]; ok {
 			if allocs, err := strconv.Atoi(allocStr); err == nil {
