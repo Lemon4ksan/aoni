@@ -49,6 +49,7 @@ type HARNV struct {
 type HARPostData struct {
 	MimeType string `json:"mimeType"`
 	Text     string `json:"text"`
+	Encoding string `json:"encoding,omitempty"`
 }
 
 // HARContent models the received response payload.
@@ -376,6 +377,30 @@ func HARToOpenAPI(data []byte) (*openapi3.T, error) {
 		doc.Info.Extensions["x-vortex-headers"] = commonHeaders
 	}
 
+	var allCredHeaders []string
+
+	allCredSet := make(map[string]bool)
+	for _, entry := range har.Log.Entries {
+		for _, h := range entry.Request.Headers {
+			name := strings.TrimSpace(h.Name)
+
+			lower := strings.ToLower(name)
+			if isCredentialHeader(lower) && h.Value != "" && !allCredSet[lower] {
+				allCredSet[lower] = true
+
+				allCredHeaders = append(allCredHeaders, name)
+			}
+		}
+	}
+
+	if len(allCredHeaders) > 0 {
+		if doc.Info.Extensions == nil {
+			doc.Info.Extensions = make(map[string]any)
+		}
+
+		doc.Info.Extensions["x-required-credentials"] = allCredHeaders
+	}
+
 	UnifyComponentsSchemas(doc)
 
 	return doc, nil
@@ -594,6 +619,7 @@ func UnifyComponentsSchemas(doc *openapi3.T) {
 	for name := range doc.Components.Schemas {
 		names = append(names, name)
 	}
+
 	sort.Strings(names)
 
 	for _, name := range names {
@@ -636,15 +662,18 @@ func UnifyComponentsSchemas(doc *openapi3.T) {
 			if pathItem == nil {
 				continue
 			}
+
 			for _, op := range pathItem.Operations() {
 				if op == nil {
 					continue
 				}
+
 				if op.RequestBody != nil && op.RequestBody.Value != nil {
 					for _, media := range op.RequestBody.Value.Content {
 						rewriteSchemaRef(media.Schema, replacements)
 					}
 				}
+
 				if op.Responses != nil {
 					for _, respRef := range op.Responses.Map() {
 						if respRef != nil && respRef.Value != nil {
@@ -663,24 +692,29 @@ func computeSchemaFingerprint(s *openapi3.Schema) string {
 	if s == nil || len(s.Properties) == 0 {
 		return ""
 	}
+
 	keys := make([]string, 0, len(s.Properties))
 	for k := range s.Properties {
 		keys = append(keys, k)
 	}
+
 	sort.Strings(keys)
 
 	var sb strings.Builder
 	for _, k := range keys {
 		prop := s.Properties[k]
+
 		typeStr := "unknown"
 		if prop != nil && prop.Value != nil && prop.Value.Type != nil && len(*prop.Value.Type) > 0 {
 			typeStr = (*prop.Value.Type)[0]
 		}
+
 		sb.WriteString(k)
 		sb.WriteString(":")
 		sb.WriteString(typeStr)
 		sb.WriteString(";")
 	}
+
 	return sb.String()
 }
 
@@ -688,6 +722,7 @@ func rewriteSchemaRef(ref *openapi3.SchemaRef, replacements map[string]string) {
 	if ref == nil {
 		return
 	}
+
 	if ref.Ref != "" {
 		const prefix = "#/components/schemas/"
 		if strings.HasPrefix(ref.Ref, prefix) {
@@ -697,10 +732,12 @@ func rewriteSchemaRef(ref *openapi3.SchemaRef, replacements map[string]string) {
 			}
 		}
 	}
+
 	if ref.Value != nil {
 		if ref.Value.Items != nil {
 			rewriteSchemaRef(ref.Value.Items, replacements)
 		}
+
 		for _, p := range ref.Value.Properties {
 			rewriteSchemaRef(p, replacements)
 		}

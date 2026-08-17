@@ -6,10 +6,13 @@ package jsbundle
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"go/format"
 	"strings"
 	"unicode"
+
+	"github.com/getkin/kin-openapi/openapi3"
 )
 
 // ContractOptions configures the generation of a Go @aoni:service contract from JS scan results.
@@ -24,7 +27,7 @@ type ContractOptions struct {
 // GenerateContract compiles discovered endpoints and message schemas into formatted Go source code.
 func GenerateContract(scan *ScanResult, opts ContractOptions) ([]byte, error) {
 	if scan == nil {
-		return nil, fmt.Errorf("scan result is nil")
+		return nil, errors.New("scan result is nil")
 	}
 
 	pkgName := opts.PackageName
@@ -50,24 +53,26 @@ func GenerateContract(scan *ScanResult, opts ContractOptions) ([]byte, error) {
 	var b bytes.Buffer
 
 	// Package header & imports
-	b.WriteString(fmt.Sprintf("package %s\n\n", pkgName))
+	fmt.Fprintf(&b, "package %s\n\n", pkgName)
 	b.WriteString("import (\n\t\"context\"\n\n\t\"github.com/lemon4ksan/aoni\"\n)\n\n")
 
 	// Service base URL constant
-	b.WriteString(fmt.Sprintf("// %sBaseURL is the default API base endpoint.\n", svcName))
-	b.WriteString(fmt.Sprintf("const %sBaseURL = %q\n\n", svcName, baseURL))
+	fmt.Fprintf(&b, "// %sBaseURL is the default API base endpoint.\n", svcName)
+	fmt.Fprintf(&b, "const %sBaseURL = %q\n\n", svcName, baseURL)
 
 	// Service Interface Doc & Directives
-	b.WriteString(fmt.Sprintf("// %s provides client operations for the service.\n//\n", svcName))
+	fmt.Fprintf(&b, "// %s provides client operations for the service.\n//\n", svcName)
 	b.WriteString("// @aoni:service casing=snake_case\n")
 	b.WriteString("// @version \"1.0.0\"\n")
+
 	if opts.SourceSpec != "" {
-		b.WriteString(fmt.Sprintf("// @source %q\n", opts.SourceSpec))
+		fmt.Fprintf(&b, "// @source %q\n", opts.SourceSpec)
 	}
-	b.WriteString(fmt.Sprintf("// @engine %s\n", engine))
+
+	fmt.Fprintf(&b, "// @engine %s\n", engine)
 	b.WriteString("// @header \"accept\" \"*/*\"\n")
-	b.WriteString(fmt.Sprintf("// @base_url %q\n", baseURL))
-	b.WriteString(fmt.Sprintf("type %s interface {\n", svcName))
+	fmt.Fprintf(&b, "// @base_url %q\n", baseURL)
+	fmt.Fprintf(&b, "type %s interface {\n", svcName)
 
 	seenMethods := make(map[string]bool)
 
@@ -76,24 +81,35 @@ func GenerateContract(scan *ScanResult, opts ContractOptions) ([]byte, error) {
 		if seenMethods[methodName] {
 			continue
 		}
+
 		seenMethods[methodName] = true
 
 		cleanPath := strings.TrimPrefix(ep.Path, "/")
+
 		httpVerb := strings.ToLower(ep.HTTPMethod)
 		if httpVerb == "" {
 			httpVerb = "post"
 		}
 
-		b.WriteString(fmt.Sprintf("\t// %s — %s %s\n", methodName, ep.HTTPMethod, ep.Path))
+		fmt.Fprintf(&b, "\t// %s — %s %s\n", methodName, ep.HTTPMethod, ep.Path)
 		b.WriteString("\t//\n")
-		b.WriteString(fmt.Sprintf("\t// @%s %q\n", httpVerb, cleanPath))
+		fmt.Fprintf(&b, "\t// @%s %q\n", httpVerb, cleanPath)
 
 		// Check if we have a typed tuple return or request
 		tupleName := methodName + "Tuple"
 		if msg, ok := scan.Messages[methodName]; ok && len(msg.Fields) > 0 {
-			b.WriteString(fmt.Sprintf("\t%s(ctx context.Context, req any, mods ...aoni.RequestModifier) (*%s, error)\n\n", methodName, tupleName))
+			fmt.Fprintf(
+				&b,
+				"\t%s(ctx context.Context, req any, mods ...aoni.RequestModifier) (*%s, error)\n\n",
+				methodName,
+				tupleName,
+			)
 		} else {
-			b.WriteString(fmt.Sprintf("\t%s(ctx context.Context, req any, mods ...aoni.RequestModifier) (any, error)\n\n", methodName))
+			fmt.Fprintf(
+				&b,
+				"\t%s(ctx context.Context, req any, mods ...aoni.RequestModifier) (any, error)\n\n",
+				methodName,
+			)
 		}
 	}
 
@@ -104,10 +120,12 @@ func GenerateContract(scan *ScanResult, opts ContractOptions) ([]byte, error) {
 		if len(msg.Fields) == 0 {
 			continue
 		}
+
 		structName := SanitizeIdentifier(id)
 		if !strings.HasSuffix(structName, "Tuple") {
 			structName += "Tuple"
 		}
+
 		definedStructs[structName] = true
 	}
 
@@ -118,18 +136,21 @@ func GenerateContract(scan *ScanResult, opts ContractOptions) ([]byte, error) {
 		if len(msg.Fields) == 0 {
 			continue
 		}
+
 		structName := SanitizeIdentifier(id)
 		if !strings.HasSuffix(structName, "Tuple") {
 			structName += "Tuple"
 		}
 
 		b.WriteString("// @aoni:tuple\n")
-		b.WriteString(fmt.Sprintf("type %s struct {\n", structName))
+		fmt.Fprintf(&b, "type %s struct {\n", structName)
+
 		for idx, f := range msg.Fields {
 			fieldName := f.Name
 			if fieldName == "" || strings.HasPrefix(fieldName, "Field") {
 				fieldName = fmt.Sprintf("Field%d", idx)
 			}
+
 			goType := f.GoType
 			if goType == "" {
 				goType = "string"
@@ -138,11 +159,14 @@ func GenerateContract(scan *ScanResult, opts ContractOptions) ([]byte, error) {
 				if !strings.HasSuffix(subName, "Tuple") {
 					subName += "Tuple"
 				}
+
 				goType = subName
 				referencedStructs[subName] = true
 			}
-			b.WriteString(fmt.Sprintf("\t%s %s `aoni:\"%d\"`\n", SanitizeIdentifier(fieldName), goType, idx))
+
+			fmt.Fprintf(&b, "\t%s %s `aoni:\"%d\"`\n", SanitizeIdentifier(fieldName), goType, idx)
 		}
+
 		b.WriteString("}\n\n")
 	}
 
@@ -150,7 +174,7 @@ func GenerateContract(scan *ScanResult, opts ContractOptions) ([]byte, error) {
 	for subName := range referencedStructs {
 		if !definedStructs[subName] {
 			b.WriteString("// @aoni:tuple\n")
-			b.WriteString(fmt.Sprintf("type %s struct {\n\tField0 any `aoni:\"0\"`\n}\n\n", subName))
+			fmt.Fprintf(&b, "type %s struct {\n\tField0 any `aoni:\"0\"`\n}\n\n", subName)
 			definedStructs[subName] = true
 		}
 	}
@@ -158,7 +182,7 @@ func GenerateContract(scan *ScanResult, opts ContractOptions) ([]byte, error) {
 	formatted, err := format.Source(b.Bytes())
 	if err != nil {
 		// Fallback to unformatted if syntax error
-		return b.Bytes(), nil
+		return b.Bytes(), nil //nolint:nilerr
 	}
 
 	return formatted, nil
@@ -195,6 +219,7 @@ func SanitizeIdentifier(s string) string {
 	}
 
 	var b strings.Builder
+
 	capitalize := true
 
 	for _, r := range s {
@@ -206,6 +231,7 @@ func SanitizeIdentifier(s string) string {
 		if unicode.IsLetter(r) || unicode.IsDigit(r) {
 			if capitalize {
 				b.WriteRune(unicode.ToUpper(r))
+
 				capitalize = false
 			} else {
 				b.WriteRune(r)
@@ -219,4 +245,110 @@ func SanitizeIdentifier(s string) string {
 	}
 
 	return res
+}
+
+// ScanToOpenAPI converts a JavaScript ScanResult into a normalized OpenAPI 3.1 document.
+func ScanToOpenAPI(scan *ScanResult, baseURL string) *openapi3.T {
+	doc := &openapi3.T{
+		OpenAPI: "3.1.0",
+		Info: &openapi3.Info{
+			Title:   "Discovered API",
+			Version: "1.0.0",
+		},
+		Paths: openapi3.NewPaths(),
+		Components: &openapi3.Components{
+			Schemas: make(openapi3.Schemas),
+		},
+	}
+
+	if baseURL != "" {
+		doc.Servers = []*openapi3.Server{
+			{URL: baseURL},
+		}
+	}
+
+	if scan == nil {
+		return doc
+	}
+
+	// Register message schemas
+	for id, msg := range scan.Messages {
+		if len(msg.Fields) == 0 {
+			continue
+		}
+
+		structName := SanitizeIdentifier(id)
+		schema := &openapi3.Schema{
+			Type:       &openapi3.Types{"object"},
+			Properties: make(openapi3.Schemas),
+		}
+
+		for idx, f := range msg.Fields {
+			fName := f.Name
+			if fName == "" {
+				fName = fmt.Sprintf("Field%d", idx)
+			}
+
+			fSchema := &openapi3.Schema{
+				Type: &openapi3.Types{"string"},
+			}
+			switch f.GoType {
+			case "int", "int64", "uint64":
+				fSchema.Type = &openapi3.Types{"integer"}
+			case "float64", "float32":
+				fSchema.Type = &openapi3.Types{"number"}
+			case "bool":
+				fSchema.Type = &openapi3.Types{"boolean"}
+			}
+
+			schema.Properties[fName] = &openapi3.SchemaRef{Value: fSchema}
+		}
+
+		doc.Components.Schemas[structName] = &openapi3.SchemaRef{Value: schema}
+	}
+
+	// Register endpoints
+	for _, ep := range scan.Endpoints {
+		methodName := DeriveMethodName(ep.Path)
+
+		pItem := doc.Paths.Find(ep.Path)
+		if pItem == nil {
+			pItem = &openapi3.PathItem{}
+			doc.Paths.Set(ep.Path, pItem)
+		}
+
+		op := &openapi3.Operation{
+			OperationID: methodName,
+			Summary:     fmt.Sprintf("%s %s", ep.HTTPMethod, ep.Path),
+			Responses:   openapi3.NewResponses(),
+		}
+
+		op.Responses.Set("200", &openapi3.ResponseRef{
+			Value: &openapi3.Response{
+				Description: openapi3.Ptr("Success response"),
+			},
+		})
+
+		httpVerb := strings.ToUpper(ep.HTTPMethod)
+		if httpVerb == "" {
+			httpVerb = "POST"
+		}
+
+		switch httpVerb {
+		case "GET":
+			pItem.Get = op
+		case "POST":
+			pItem.Post = op
+		case "PUT":
+			pItem.Put = op
+		case "DELETE":
+			pItem.Delete = op
+		case "PATCH":
+			pItem.Patch = op
+		default:
+			pItem.Post = op
+		}
+	}
+
+	return doc
 }

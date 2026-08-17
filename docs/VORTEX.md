@@ -238,11 +238,11 @@ Vortex provides declarative header inheritance across two layers:
 
 ```go
 // @aoni:service
-// @header "User-Agent" "antigravity/cli/1.1.13"
-type AntigravityAPI interface {
+// @header "User-Agent" "my-client/1.0.0"
+type GatewayAPI interface {
     // @post "api/client/register"
-    // @header "Unleash-Appname" "codeium-language-server"
-    // @header "Unleash-Interval" "60000"
+    // @header "X-App-Name" "payment-worker"
+    // @header "X-Poll-Interval" "60000"
     CreateClientRegister(ctx context.Context, req CreateClientRegisterRequest, mods ...aoni.RequestModifier) error
 }
 ```
@@ -310,7 +310,7 @@ Scans contracts for `${VAR_NAME}` references and generates `.env.example` templa
 ```bash
 vortex env                           # Scan all contracts and output .env.example
 vortex env --fill --out=.env.local   # Pre-fill values from local .vortex/cache/secrets.json
-vortex env pkg/agy/unleash.go --out=-# Print required variables to stdout
+vortex env pkg/api/api.go --out=-    # Print required variables to stdout
 ```
 
 #### `vortex smoke`
@@ -318,7 +318,7 @@ Rapidly probes live contract endpoints using stored secrets and renders a latenc
 
 ```bash
 vortex smoke                         # Probe safe GET/HEAD endpoints across workspace
-vortex smoke pkg/agy/unleash.go      # Probe specific contract endpoints
+vortex smoke pkg/api/api.go          # Probe specific contract endpoints
 vortex smoke --all --timeout=10s     # Probe all endpoints including POST/PUT
 ```
 
@@ -368,18 +368,18 @@ AST-level refactoring, tuple deobfuscation, interface splitting, and contract ve
 
 ```bash
 # Deobfuscate positional arrays / JSPB into typed @aoni:tuple structs:
-vortex ast tuple pkg/agy/makersuite.go
-vortex ast tuple pkg/agy/makersuite.go --dry-run
+vortex ast tuple pkg/api/client.go
+vortex ast tuple pkg/api/client.go --dry-run
 
 # Split monolithic interface into separate focused interfaces (ISP principle):
 vortex ast split --from=MarketAPI --methods="Get*,List*" --to=MarketReaderAPI
 vortex ast split --from=PriceDB --methods="Predict*" --to=PredictAPI --out=pkg/services/pricedb/predict.go
 
 # Batch rename method names via regular expressions:
-vortex ast rename --match="Fetch(.*)" --replace="Get$1" pkg/services/bptf/api.go
+vortex ast rename --match="Fetch(.*)" --replace="Get$1" pkg/services/items/api.go
 
 # Cherry-pick methods and DTO structs across contracts (transitive closure):
-vortex ast pick pkg/services/mannco/api.go:GetItemPrices --to=pkg/services/bptf/api.go
+vortex ast pick pkg/services/inventory/api.go:GetItemPrices --to=pkg/services/items/api.go
 
 # Audit and merge consumer Git proposal branches:
 vortex ast review openapi.json pkg/user/api.go

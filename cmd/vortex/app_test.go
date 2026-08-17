@@ -30,6 +30,7 @@ func newTestApp(stdout, stderr *bytes.Buffer) *App {
 		&CmdClean{},
 		&CmdCheck{},
 		&CmdDiff{},
+		&CmdStack{},
 		&CmdReview{},
 		&CmdAccept{},
 		&CmdCherryPick{},
@@ -1665,9 +1666,11 @@ func TestApp_HARDifferential_Diff(t *testing.T) {
 	require.NoError(t, err)
 
 	defer func() { _ = os.Chdir(cwd) }()
+
 	require.NoError(t, os.Chdir(tempDir))
 
 	var stdout, stderr bytes.Buffer
+
 	app := newTestApp(&stdout, &stderr)
 
 	// Create sample contract
@@ -1739,11 +1742,13 @@ type GenerateContentRequest struct {
 
 	fileA := filepath.Join(tempDir, "session_a.har")
 	fileB := filepath.Join(tempDir, "session_b.har")
+
 	require.NoError(t, os.WriteFile(fileA, []byte(harA), 0o600))
 	require.NoError(t, os.WriteFile(fileB, []byte(harB), 0o600))
 
 	// Run vortex diff session_a.har session_b.har
 	stdout.Reset()
+
 	err = app.Run(context.Background(), []string{"diff", fileA, fileB})
 	require.NoError(t, err)
 
@@ -1763,9 +1768,11 @@ func TestApp_AST_FieldRename(t *testing.T) {
 	require.NoError(t, err)
 
 	defer func() { _ = os.Chdir(cwd) }()
+
 	require.NoError(t, os.Chdir(tempDir))
 
 	var stdout, stderr bytes.Buffer
+
 	app := newTestApp(&stdout, &stderr)
 
 	contractGo := `package testapi
@@ -1780,13 +1787,233 @@ type GenerateContentRequest struct {
 	require.NoError(t, os.WriteFile(apiPath, []byte(contractGo), 0o600))
 
 	// Run vortex ast rename --type=GenerateContentRequest --field=Field4 --to=MaxOutputTokens
-	err = app.Run(context.Background(), []string{"ast", "rename", "--type=GenerateContentRequest", "--field=Field4", "--to=MaxOutputTokens", "-gen=false"})
+	err = app.Run(
+		context.Background(),
+		[]string{
+			"ast",
+			"rename",
+			"--type=GenerateContentRequest",
+			"--field=Field4",
+			"--to=MaxOutputTokens",
+			"-gen=false",
+		},
+	)
 	require.NoError(t, err)
 
 	data, err := os.ReadFile(apiPath)
 	require.NoError(t, err)
+
 	content := string(data)
 	require.Contains(t, content, "MaxOutputTokens int")
 	require.Contains(t, content, "`aoni:\"4\"`")
 	require.NotContains(t, content, "Field4")
+}
+
+func TestApp_JSImport_PreservesExistingTypes(t *testing.T) {
+	tempDir := t.TempDir()
+	cwd, err := os.Getwd()
+	require.NoError(t, err)
+
+	defer func() { _ = os.Chdir(cwd) }()
+
+	require.NoError(t, os.Chdir(tempDir))
+
+	var stdout, stderr bytes.Buffer
+
+	app := newTestApp(&stdout, &stderr)
+
+	contractGo := `package testapi
+
+import (
+	"context"
+
+	"github.com/lemon4ksan/aoni"
+)
+
+// API provides client operations.
+//
+// @aoni:service casing=snake_case
+// @base_url "https://api.example.com"
+type API interface {
+	// @post "rpc/GenerateContent"
+	GenerateContent(ctx context.Context, req *GenerateContentRequest, mods ...aoni.RequestModifier) (*GenerateContentResponse, error)
+}
+
+// @aoni:tuple
+type GenerateContentRequest struct {
+	Model  string ` + "`" + `aoni:"0"` + "`" + `
+	Prompt string ` + "`" + `aoni:"1"` + "`" + `
+}
+
+// @aoni:tuple
+type GenerateContentResponse struct {
+	Text string ` + "`" + `aoni:"0"` + "`" + `
+}
+`
+	apiPath := filepath.Join(tempDir, "api.go")
+	require.NoError(t, os.WriteFile(apiPath, []byte(contractGo), 0o600))
+
+	jsBundle := `
+const ep1 = "/rpc/GenerateContent";
+const ep2 = "/$rpc/google.internal/ListModels";
+`
+	jsPath := filepath.Join(tempDir, "bundle.js")
+	require.NoError(t, os.WriteFile(jsPath, []byte(jsBundle), 0o600))
+
+	// Run vortex spec import -js=bundle.js -out=api.go -pkg=testapi -service=API
+	err = app.Run(
+		context.Background(),
+		[]string{"spec", "import", "-js=" + jsPath, "-out=" + apiPath, "-pkg=testapi", "-service=API"},
+	)
+	require.NoError(t, err)
+
+	data, err := os.ReadFile(apiPath)
+	require.NoError(t, err)
+
+	content := string(data)
+
+	// 1. Existing typed request & response must NOT be downgraded to any
+	require.Contains(
+		t,
+		content,
+		"GenerateContent(ctx context.Context, req *GenerateContentRequest, mods ...aoni.RequestModifier) (*GenerateContentResponse, error)",
+	)
+	require.NotContains(t, content, "GenerateContent(ctx context.Context, req any")
+
+	// 2. Existing custom struct declarations must be preserved
+	require.Contains(t, content, "type GenerateContentRequest struct")
+	require.Contains(t, content, "Model")
+	require.Contains(t, content, "`aoni:\"0\"`")
+	require.Contains(t, content, "Prompt")
+	require.Contains(t, content, "`aoni:\"1\"`")
+	require.Contains(t, content, "type GenerateContentResponse struct")
+	require.Contains(t, content, "Text")
+
+	// 3. New endpoint from JS bundle must be added
+	require.Contains(t, content, "ListModels")
+}
+
+func TestApp_Stack_LifecycleAndDiff(t *testing.T) {
+	tempDir := t.TempDir()
+	origDir, err := os.Getwd()
+	require.NoError(t, err)
+
+	defer func() { _ = os.Chdir(origDir) }()
+
+	require.NoError(t, os.Chdir(tempDir))
+
+	var stdout, stderr bytes.Buffer
+
+	app := newTestApp(&stdout, &stderr)
+
+	apiPath := filepath.Join(tempDir, "api.go")
+
+	// 1. Initial Frame #0
+	v0 := `package testapi
+// @aoni:service
+type API interface {
+	// @post "rpc/Generate"
+	RPCMethod1(ctx context.Context, req *Req) (*Resp, error)
+}
+// @aoni:tuple
+type Req struct {
+	Field0 string ` + "`" + `aoni:"0"` + "`" + `
+	Field4 int    ` + "`" + `aoni:"4"` + "`" + `
+}
+`
+	require.NoError(t, os.WriteFile(apiPath, []byte(v0), 0o600))
+
+	// stack push -label="base-scan"
+	err = app.Run(context.Background(), []string{"stack", "push", "-label=base-scan", apiPath})
+	require.NoError(t, err)
+	require.Contains(t, stdout.String(), "Captured stack snapshot frame #0 [base-scan]")
+
+	// 2. Frame #1: rename Field0 -> ModelName
+	v1 := `package testapi
+// @aoni:service
+type API interface {
+	// @post "rpc/Generate"
+	RPCMethod1(ctx context.Context, req *Req) (*Resp, error)
+}
+// @aoni:tuple
+type Req struct {
+	ModelName string ` + "`" + `aoni:"0"` + "`" + `
+	Field4    int    ` + "`" + `aoni:"4"` + "`" + `
+}
+`
+	require.NoError(t, os.WriteFile(apiPath, []byte(v1), 0o600))
+	stdout.Reset()
+
+	err = app.Run(context.Background(), []string{"stack", "push", "-label=deobf-model", apiPath})
+	require.NoError(t, err)
+	require.Contains(t, stdout.String(), "Captured stack snapshot frame #1 [deobf-model]")
+
+	// 3. Frame #2: rename Field4 -> MaxTokens, RPCMethod1 -> GenerateContent
+	v2 := `package testapi
+// @aoni:service
+type API interface {
+	// @post "rpc/Generate"
+	GenerateContent(ctx context.Context, req *Req) (*Resp, error)
+}
+// @aoni:tuple
+type Req struct {
+	ModelName string ` + "`" + `aoni:"0"` + "`" + `
+	MaxTokens int    ` + "`" + `aoni:"4"` + "`" + `
+}
+`
+	require.NoError(t, os.WriteFile(apiPath, []byte(v2), 0o600))
+	stdout.Reset()
+
+	err = app.Run(context.Background(), []string{"stack", "push", "-label=full-polish", apiPath})
+	require.NoError(t, err)
+	require.Contains(t, stdout.String(), "Captured stack snapshot frame #2 [full-polish]")
+
+	// 4. Test stack list
+	stdout.Reset()
+
+	err = app.Run(context.Background(), []string{"stack", "list"})
+	require.NoError(t, err)
+
+	outList := stdout.String()
+	require.Contains(t, outList, "[#2] full-polish")
+	require.Contains(t, outList, "[#1] deobf-model")
+	require.Contains(t, outList, "[#0] base-scan")
+	require.Contains(t, outList, "[CURRENT HEAD]")
+	require.Contains(t, outList, "[BASE]")
+
+	// 5. Test stack diff (Adjacent Frame 2 vs Frame 1)
+	stdout.Reset()
+
+	err = app.Run(context.Background(), []string{"stack", "diff"})
+	require.NoError(t, err)
+
+	adjDiff := stdout.String()
+	require.Contains(t, adjDiff, "Field4 ➔ MaxTokens")
+	require.Contains(t, adjDiff, "RPCMethod1 ➔ GenerateContent")
+	require.NotContains(t, adjDiff, "Field0 ➔ ModelName") // Happened in Frame 1, not Frame 2
+
+	// 6. Test stack diff --cumulative (Frame 2 vs Frame 0)
+	stdout.Reset()
+
+	err = app.Run(context.Background(), []string{"stack", "diff", "--cumulative"})
+	require.NoError(t, err)
+
+	cumDiff := stdout.String()
+	require.Contains(t, cumDiff, "Field0 ➔ ModelName")
+	require.Contains(t, cumDiff, "Field4 ➔ MaxTokens")
+	require.Contains(t, cumDiff, "RPCMethod1 ➔ GenerateContent")
+
+	// 7. Test stack restore base
+	stdout.Reset()
+
+	err = app.Run(context.Background(), []string{"stack", "restore", "base"})
+	require.NoError(t, err)
+	require.Contains(t, stdout.String(), "Restored workspace state to frame \"base\"")
+
+	// Verify file content on disk rolled back to v0
+	restored, err := os.ReadFile(apiPath)
+	require.NoError(t, err)
+	require.Contains(t, string(restored), "Field0 string")
+	require.Contains(t, string(restored), "Field4 int")
+	require.Contains(t, string(restored), "RPCMethod1")
 }

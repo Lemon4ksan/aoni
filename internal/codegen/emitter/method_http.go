@@ -206,6 +206,7 @@ func emitHTTPMethod(
 
 	if m.SignHMAC != nil {
 		tracker.Add("github.com/lemon4ksan/aoni/mod")
+
 		if m.SignHMAC.KeyEnv != "" {
 			tracker.Add("os")
 			fmt.Fprintf(buf, "\tallMods = append(allMods, mod.WithSignHMAC(os.Getenv(%q)))\n", m.SignHMAC.KeyEnv)
@@ -233,6 +234,7 @@ func emitHTTPMethod(
 
 func emitKeywordHeader(buf *bytes.Buffer, tracker *ImportTracker, svc *ir.ServiceIR, m *ir.MethodIR, h *ir.HeaderIR) {
 	tracker.Add("github.com/lemon4ksan/aoni/mod")
+
 	kw := strings.ToLower(strings.TrimPrefix(h.StaticValue, ":"))
 
 	baseURL := ""

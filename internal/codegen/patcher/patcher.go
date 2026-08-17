@@ -197,6 +197,7 @@ func (p *Patcher) renderMethodField(m *ir.MethodIR) *ast.Field {
 		if retTypeName == "" {
 			retTypeName = "*json.RawMessage"
 		}
+
 		returns = append(returns, &ast.Field{
 			Type: p.parseTypeExpr(retTypeName),
 		})
@@ -205,6 +206,7 @@ func (p *Patcher) renderMethodField(m *ir.MethodIR) *ast.Field {
 			Type: p.parseTypeExpr("*json.RawMessage"),
 		})
 	}
+
 	returns = append(returns, &ast.Field{
 		Type: ast.NewIdent("error"),
 	})

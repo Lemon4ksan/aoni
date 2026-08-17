@@ -203,7 +203,14 @@ func loadSingleSpec(filename string, data []byte) (*openapi3.T, error) {
 		} else {
 			data, err = os.ReadFile(filename)
 			if err != nil {
-				return nil, fmt.Errorf("failed reading spec file %s: %w", filename, err)
+				// Fallback: check traffic cache by ID or hash
+				if cData, _, cErr := cache.GetTraffic(".", filename); cErr == nil && len(cData) > 0 {
+					data = cData
+				} else if cData, _, cErr := cache.GetTraffic(".", strings.TrimSuffix(filename, ".har")); cErr == nil && len(cData) > 0 {
+					data = cData
+				} else {
+					return nil, fmt.Errorf("failed reading spec file %s: %w", filename, err)
+				}
 			}
 		}
 	}

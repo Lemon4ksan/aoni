@@ -281,7 +281,12 @@ func (c *CmdRecord) Run(ctx context.Context, args []string, stdout, stderr io.Wr
 		outFlag    = fs.String("out", "traffic.har", "Output W3C HAR file path")
 		targetFlag = fs.String("target", "", "Optional upstream target URL for reverse proxy mode")
 		execFlag   = fs.String("exec", "", "Execute specified command string directly")
-		quietFlag  = fs.Bool(
+		waitFlag   = fs.Bool(
+			"wait",
+			false,
+			"Keep proxy listening until Enter or Ctrl+C is pressed (ideal for GUI launchers)",
+		)
+		quietFlag = fs.Bool(
 			"q",
 			false,
 			"Quiet mode: suppress live transaction logs (recommended for interactive TUIs)",
@@ -569,7 +574,17 @@ func (c *CmdRecord) Run(ctx context.Context, args []string, stdout, stderr io.Wr
 			fmt.Fprintln(stderr, "────────────────────────────────────────────────────────────────────────")
 		}
 
-		subCmd := exec.CommandContext(ctx, cmdToRun[0], cmdToRun[1:]...) //nolint:gosec
+		cmdArgs := cmdToRun[1:]
+
+		ext := strings.ToLower(filepath.Ext(cmdToRun[0]))
+		if ext == ".exe" || ext == "" {
+			cmdArgs = append(cmdArgs,
+				"--proxy-server="+proxyURL,
+				"--ignore-certificate-errors",
+			)
+		}
+
+		subCmd := exec.CommandContext(ctx, cmdToRun[0], cmdArgs...) //nolint:gosec
 		subCmd.Stdin = os.Stdin
 		subCmd.Stdout = stdout
 		subCmd.Stderr = stderr
@@ -594,10 +609,44 @@ func (c *CmdRecord) Run(ctx context.Context, args []string, stdout, stderr io.Wr
 		cleanupCA := installSystemRootCA(caFilePath)
 		defer cleanupCA()
 
+		runStart := time.Now()
 		runErr := subCmd.Run()
+		runDuration := time.Since(runStart)
+
+		// If the process exited quickly (launcher/updater) or -wait flag is set, keep the proxy open until user confirms
+		if *waitFlag || (runDuration < 4*time.Second && len(recorder.entries) == 0) {
+			fmt.Fprintf(
+				stdout,
+				"\n⚡ Launcher process completed in %v (background app is likely running).\n",
+				runDuration.Round(time.Millisecond),
+			)
+			fmt.Fprintf(stdout, "⚡ Recorder proxy is ACTIVE on %s (isolated to this process tree)\n", proxyURL)
+			fmt.Fprintf(
+				stdout,
+				"👉 Use your application normally. When finished, press [ENTER] here to save %s...\n",
+				*outFlag,
+			)
+
+			waitChan := make(chan struct{})
+			go func() {
+				reader := bufio.NewReader(os.Stdin)
+				_, _ = reader.ReadString('\n')
+
+				close(waitChan)
+			}()
+
+			sigChan := make(chan os.Signal, 1)
+			signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM)
+
+			select {
+			case <-waitChan:
+			case <-sigChan:
+			case <-ctx.Done():
+			}
+		}
 
 		// Brief flush window for trailing keep-alive requests
-		time.Sleep(150 * time.Millisecond)
+		time.Sleep(200 * time.Millisecond)
 
 		_ = server.Shutdown(ctx)
 		_ = recorder.save()
@@ -747,15 +796,18 @@ func handleDecryptedHTTPS(
 		}
 
 		// Check for WebSocket upgrade
-		if fwdResp.StatusCode == http.StatusSwitchingProtocols || strings.EqualFold(req.Header.Get("Upgrade"), "websocket") {
+		if fwdResp.StatusCode == http.StatusSwitchingProtocols ||
+			strings.EqualFold(req.Header.Get("Upgrade"), "websocket") {
 			_ = fwdResp.Write(tlsConn)
 			if serverConn, ok := fwdResp.Body.(io.ReadWriteCloser); ok {
 				go func() {
 					_, _ = io.Copy(serverConn, tlsConn)
 					_ = serverConn.Close()
 				}()
+
 				_, _ = io.Copy(tlsConn, serverConn)
 			}
+
 			return
 		}
 
@@ -767,6 +819,7 @@ func handleDecryptedHTTPS(
 		var respBodyBytes []byte
 		if isStreaming {
 			var captured bytes.Buffer
+
 			tee := io.TeeReader(fwdResp.Body, io.MultiWriter(tlsConn, &captured))
 			fwdResp.Body = io.NopCloser(tee)
 			_ = fwdResp.Write(tlsConn)
@@ -815,6 +868,7 @@ func handleDecryptedHTTPS(
 						filtered = append(filtered, h)
 					}
 				}
+
 				respHeaders = filtered
 			}
 
@@ -875,12 +929,18 @@ func (r *recordResponseWriter) Write(b []byte) (int, error) {
 
 func installSystemRootCA(caFilePath string) func() {
 	if runtime.GOOS == "windows" {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+
 		// Temporary add to current user Root store
-		addCmd := exec.Command("certutil", "-addstore", "-user", "Root", caFilePath)
+		addCmd := exec.CommandContext(ctx, "certutil", "-addstore", "-user", "Root", caFilePath)
 		_ = addCmd.Run()
 
 		return func() {
-			delCmd := exec.Command("certutil", "-delstore", "-user", "Root", "Vortex MITM Root CA")
+			cleanCtx, cleanCancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cleanCancel()
+
+			delCmd := exec.CommandContext(cleanCtx, "certutil", "-delstore", "-user", "Root", "Vortex MITM Root CA")
 			_ = delCmd.Run()
 		}
 	}
@@ -896,7 +956,8 @@ func decodePayloadForHAR(data []byte, contentEncoding, contentType string) (stri
 	enc := strings.ToLower(strings.TrimSpace(contentEncoding))
 	decompressed := false
 
-	if enc == "gzip" || (len(data) >= 2 && data[0] == 0x1f && data[1] == 0x8b) {
+	switch {
+	case enc == "gzip" || (len(data) >= 2 && data[0] == 0x1f && data[1] == 0x8b):
 		if gzReader, err := gzip.NewReader(bytes.NewReader(data)); err == nil {
 			if dec, err := io.ReadAll(gzReader); err == nil {
 				_ = gzReader.Close()
@@ -904,13 +965,15 @@ func decodePayloadForHAR(data []byte, contentEncoding, contentType string) (stri
 				decompressed = true
 			}
 		}
-	} else if enc == "br" {
+
+	case enc == "br":
 		brReader := brotli.NewReader(bytes.NewReader(data))
 		if dec, err := io.ReadAll(brReader); err == nil {
 			data = dec
 			decompressed = true
 		}
-	} else if enc == "deflate" {
+
+	case enc == "deflate":
 		if zr, err := zlib.NewReader(bytes.NewReader(data)); err == nil {
 			if dec, err := io.ReadAll(zr); err == nil {
 				_ = zr.Close()

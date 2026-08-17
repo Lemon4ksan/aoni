@@ -24,18 +24,48 @@ const ConfigFileName = ".vortex.yml"
 
 // Config represents the complete .vortex.yml configuration schema.
 type Config struct {
-	Version   int              `yaml:"version"`
-	Defaults  DefaultsConfig   `yaml:"defaults,omitempty"`
-	Contracts []ContractConfig `yaml:"contracts"`
-	Secrets   SecretsConfig    `yaml:"secrets,omitempty"`
-	Lint      LintConfig       `yaml:"lint,omitempty"`
-	Ignore    []string         `yaml:"ignore,omitempty"`
-	Export    ExportConfig     `yaml:"export,omitempty"`
-	Coverage  CoverageConfig   `yaml:"coverage,omitempty"`
+	Version    int              `yaml:"version"`
+	Defaults   DefaultsConfig   `yaml:"defaults,omitempty"`
+	Contracts  []ContractConfig `yaml:"contracts"`
+	Secrets    SecretsConfig    `yaml:"secrets,omitempty"`
+	Lint       LintConfig       `yaml:"lint,omitempty"`
+	Formatting FormattingConfig `yaml:"formatting,omitempty"`
+	Ignore     []string         `yaml:"ignore,omitempty"`
+	Export     ExportConfig     `yaml:"export,omitempty"`
+	Coverage   CoverageConfig   `yaml:"coverage,omitempty"`
 
 	// Runtime metadata
 	RootDir    string `yaml:"-"`
 	ConfigPath string `yaml:"-"`
+}
+
+// FormattingConfig controls automated code wrapping and formatting limits.
+type FormattingConfig struct {
+	MaxLen int `yaml:"max_len,omitempty"` // max line length threshold (default 120)
+}
+
+// UnmarshalYAML supports max_len and max-len keys with default 120.
+func (f *FormattingConfig) UnmarshalYAML(value *yaml.Node) error {
+	type rawFormatting struct {
+		MaxLen  int `yaml:"max_len"`
+		MaxLenK int `yaml:"max-len"`
+	}
+
+	var raw rawFormatting
+	if err := value.Decode(&raw); err != nil {
+		return err
+	}
+
+	switch {
+	case raw.MaxLen > 0:
+		f.MaxLen = raw.MaxLen
+	case raw.MaxLenK > 0:
+		f.MaxLen = raw.MaxLenK
+	default:
+		f.MaxLen = 120
+	}
+
+	return nil
 }
 
 // CoverageConfig controls test coverage profile analysis rules in vortex cover.
@@ -187,7 +217,7 @@ func (cfg *Config) AllIgnoredRules() []string {
 	return result
 }
 
-// FindContract locates a contract by name (e.g. "AntigravityAPI", "antigravityapi"), package, or file path.
+// FindContract locates a contract by name (e.g. "AntigravityAPI", "antigravityapi", "MakerSuiteAPI.go"), package, or file path.
 func (cfg *Config) FindContract(nameOrPath string) *ContractConfig {
 	if cfg == nil || len(cfg.Contracts) == 0 {
 		return nil
@@ -195,11 +225,14 @@ func (cfg *Config) FindContract(nameOrPath string) *ContractConfig {
 
 	cleanTarget := filepath.Clean(nameOrPath)
 	targetLower := strings.ToLower(nameOrPath)
+	trimmedName := strings.TrimSuffix(nameOrPath, ".go")
+	trimmedLower := strings.ToLower(trimmedName)
 
-	// 1. Direct name match (exact or case-insensitive)
+	// 1. Direct name match (exact or case-insensitive, with or without .go)
 	for i := range cfg.Contracts {
 		c := &cfg.Contracts[i]
-		if c.Name == nameOrPath || strings.ToLower(c.Name) == targetLower {
+		if c.Name == nameOrPath || strings.ToLower(c.Name) == targetLower ||
+			c.Name == trimmedName || strings.ToLower(c.Name) == trimmedLower {
 			return c
 		}
 	}
@@ -207,7 +240,8 @@ func (cfg *Config) FindContract(nameOrPath string) *ContractConfig {
 	// 2. Direct file, dir, or package match
 	for i := range cfg.Contracts {
 		c := &cfg.Contracts[i]
-		if c.File != "" && (filepath.Clean(c.File) == cleanTarget || strings.EqualFold(c.File, nameOrPath)) {
+		if c.File != "" && (filepath.Clean(c.File) == cleanTarget || strings.EqualFold(c.File, nameOrPath) ||
+			filepath.Clean(c.File) == cleanTarget+".go" || strings.EqualFold(c.File, trimmedName+".go")) {
 			return c
 		}
 
@@ -215,7 +249,8 @@ func (cfg *Config) FindContract(nameOrPath string) *ContractConfig {
 			return c
 		}
 
-		if c.Package != "" && (c.Package == nameOrPath || strings.EqualFold(c.Package, nameOrPath)) {
+		if c.Package != "" && (c.Package == nameOrPath || strings.EqualFold(c.Package, nameOrPath) ||
+			c.Package == trimmedName || strings.EqualFold(c.Package, trimmedName)) {
 			return c
 		}
 	}
@@ -225,11 +260,12 @@ func (cfg *Config) FindContract(nameOrPath string) *ContractConfig {
 		c := &cfg.Contracts[i]
 		if c.File != "" {
 			fullPath := filepath.Join(cfg.RootDir, c.File)
-			if filepath.Clean(fullPath) == cleanTarget {
+			if filepath.Clean(fullPath) == cleanTarget || filepath.Clean(fullPath) == cleanTarget+".go" {
 				return c
 			}
 
-			if filepath.Base(c.File) == nameOrPath || strings.TrimSuffix(filepath.Base(c.File), ".go") == nameOrPath {
+			if filepath.Base(c.File) == nameOrPath || strings.TrimSuffix(filepath.Base(c.File), ".go") == nameOrPath ||
+				strings.TrimSuffix(filepath.Base(c.File), ".go") == trimmedName {
 				return c
 			}
 		}

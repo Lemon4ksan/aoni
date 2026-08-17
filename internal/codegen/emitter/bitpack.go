@@ -494,9 +494,11 @@ func bitMaskHex(bitWidth int) string {
 	if bitWidth >= 64 {
 		return "0xffffffffffffffff"
 	}
+
 	if bitWidth <= 0 {
 		return "0x0"
 	}
+
 	return fmt.Sprintf("0x%x", (uint64(1)<<bitWidth)-1)
 }
 

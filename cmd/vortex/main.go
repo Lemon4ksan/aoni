@@ -27,6 +27,7 @@ func main() {
 		&CmdClean{},
 		&CmdCheck{},
 		&CmdDiff{},
+		&CmdStack{},
 		&CmdReview{},
 		&CmdAccept{},
 		&CmdCherryPick{},

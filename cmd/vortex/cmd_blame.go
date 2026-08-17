@@ -7,7 +7,6 @@ package main
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"flag"
 	"fmt"
 	"go/ast"
@@ -20,7 +19,6 @@ import (
 
 	"github.com/lemon4ksan/aoni/internal/codegen/git"
 	codeparser "github.com/lemon4ksan/aoni/internal/codegen/parser"
-	"github.com/lemon4ksan/aoni/internal/codegen/project"
 )
 
 // CmdBlame inspects and displays contract and method provenance.
@@ -69,66 +67,31 @@ func (c *CmdBlame) Run(ctx context.Context, args []string, stdout, stderr io.Wri
 		fs.PrintDefaults()
 	}
 
-	var flags, nonFlags []string
-	for i := 0; i < len(args); i++ {
-		arg := args[i]
-		if strings.HasPrefix(arg, "-") {
-			flags = append(flags, arg)
-			if (arg == "-dir" || arg == "-method") &&
-				i+1 < len(args) && !strings.HasPrefix(args[i+1], "-") {
-				flags = append(flags, args[i+1])
-				i++
-			}
-		} else {
-			nonFlags = append(nonFlags, arg)
-		}
-	}
-
-	if err := fs.Parse(append(flags, nonFlags...)); err != nil {
+	posArgs, err := ParseInterspersedFlags(fs, args)
+	if err != nil {
 		return err
 	}
 
-	targetDir := *dirFlag
-	if targetDir == "" {
-		cwd, err := os.Getwd()
-		if err != nil {
-			cwd = "."
-		}
-
-		rootDir, _, _ := project.FindRoot(cwd)
-		targetDir = rootDir
+	rt, err := NewRuntime(*dirFlag)
+	if err != nil {
+		return err
 	}
 
-	cfg, _ := project.Load(targetDir)
-
-	posArgs := fs.Args()
-	if len(posArgs) == 0 {
-		if cfg != nil && len(cfg.Contracts) > 0 {
-			// Blame first contract
-			posArgs = []string{cfg.Contracts[0].File}
-		} else {
-			return errors.New("usage: vortex blame <file.go|contract>")
-		}
+	targetArg := ""
+	if len(posArgs) > 0 {
+		targetArg = posArgs[0]
 	}
 
-	targetFile := posArgs[0]
-
-	var matchedContract *project.ContractConfig
-
-	if cfg != nil {
-		for _, ct := range cfg.Contracts {
-			if strings.EqualFold(ct.Name, targetFile) || strings.EqualFold(ct.Package, targetFile) ||
-				strings.EqualFold(ct.File, targetFile) || strings.HasSuffix(ct.File, "/"+targetFile) ||
-				strings.HasSuffix(ct.File, "\\"+targetFile) {
-				matchedContract = &ct
-				targetFile = filepath.Join(cfg.RootDir, ct.File)
-				break
-			}
-		}
+	ct, err := rt.ResolveContract(targetArg)
+	if err != nil {
+		return err
 	}
 
-	if !filepath.IsAbs(targetFile) {
-		targetFile = filepath.Join(targetDir, targetFile)
+	targetFile := ct.AbsPath
+	matchedContract := ct.ConfigEntry
+
+	if !filepath.IsAbs(targetFile) && rt.RootDir != "" {
+		targetFile = filepath.Join(rt.RootDir, targetFile)
 	}
 
 	if _, err := os.Stat(targetFile); err != nil {
@@ -148,7 +111,7 @@ func (c *CmdBlame) Run(ctx context.Context, args []string, stdout, stderr io.Wri
 	irRoot, _ := vortexParser.ParseFile(targetFile)
 
 	// 3. Git Blame Resolution
-	gitBlames, _ := git.BlameFile(ctx, targetDir, targetFile)
+	gitBlames, _ := git.BlameFile(ctx, rt.RootDir, targetFile)
 
 	// Upstream origin string
 	upstreamOrigin := "[human] manual source"
@@ -262,7 +225,7 @@ func (c *CmdBlame) Run(ctx context.Context, args []string, stdout, stderr io.Wri
 		return nil
 	}
 
-	relFile, _ := filepath.Rel(targetDir, targetFile)
+	relFile, _ := filepath.Rel(rt.RootDir, targetFile)
 
 	contractTitle := filepath.Base(targetFile)
 	if irRoot != nil && len(irRoot.Services) > 0 {

@@ -277,6 +277,52 @@ func PruneTraffic(rootDir string, olderThan time.Duration, all bool) (int, error
 	return removedCount, nil
 }
 
+// DeleteTrafficSession removes a single traffic session by ID, filename, or hash.
+func DeleteTrafficSession(rootDir, idOrHash string) (bool, error) {
+	idx, indexPath, err := LoadTrafficIndex(rootDir)
+	if err != nil {
+		return false, err
+	}
+
+	var (
+		matchedKey  string
+		matchedHash string
+	)
+
+	for k, e := range idx.Entries {
+		if k == idOrHash || e.Hash == idOrHash ||
+			strings.EqualFold(e.ID, idOrHash) ||
+			strings.EqualFold(e.OriginalFile, idOrHash) ||
+			strings.HasPrefix(k, idOrHash) || strings.HasPrefix(e.Hash, idOrHash) {
+			matchedKey = k
+			matchedHash = e.Hash
+			break
+		}
+	}
+
+	if matchedKey == "" {
+		return false, nil
+	}
+
+	delete(idx.Entries, matchedKey)
+	_ = idx.Save(indexPath)
+
+	hashInUse := false
+	for _, e := range idx.Entries {
+		if e.Hash == matchedHash {
+			hashInUse = true
+			break
+		}
+	}
+
+	if !hashInUse {
+		blobPath := filepath.Join(rootDir, ".vortex", "cache", "traffic", matchedHash+".har.gz")
+		_ = os.Remove(blobPath)
+	}
+
+	return true, nil
+}
+
 // SanitizeHAR masks sensitive credentials and scrubs static assets from HAR JSON bytes.
 func SanitizeHAR(data []byte, configs ...*SecretsConfig) ([]byte, map[string]SecretEntry, error) {
 	var sc *SecretsConfig
@@ -410,11 +456,13 @@ func SanitizeHAR(data []byte, configs ...*SecretsConfig) ([]byte, map[string]Sec
 			if content, ok := resp["content"].(map[string]any); ok {
 				if text, ok := content["text"].(string); ok && text != "" {
 					enc, _ := content["encoding"].(string)
+
 					decomp := tryDecompressHARText(text, enc)
 					if decomp != "" && decomp != text {
 						content["text"] = decomp
 						content["size"] = len(decomp)
 						delete(content, "encoding")
+
 						decompressed = true
 					}
 				}
@@ -432,6 +480,7 @@ func SanitizeHAR(data []byte, configs ...*SecretsConfig) ([]byte, map[string]Sec
 					if strings.EqualFold(name, "set-cookie") {
 						continue
 					}
+
 					if decompressed && strings.EqualFold(name, "content-encoding") {
 						continue
 					}
@@ -548,6 +597,7 @@ func tryDecompressHARText(bodyText, encoding string) string {
 			if decomp := tryGunzip(dec); decomp != "" {
 				return decomp
 			}
+
 			return string(dec)
 		}
 	}
@@ -564,6 +614,7 @@ func tryDecompressHARText(bodyText, encoding string) string {
 		for i, r := range runes {
 			bin[i] = byte(r)
 		}
+
 		if decomp := tryGunzip(bin); decomp != "" {
 			return decomp
 		}
@@ -578,10 +629,12 @@ func tryGunzip(data []byte) string {
 		if err == nil {
 			decompressed, err := io.ReadAll(gzReader)
 			_ = gzReader.Close()
+
 			if err == nil {
 				return string(decompressed)
 			}
 		}
 	}
+
 	return ""
 }

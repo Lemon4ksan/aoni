@@ -27,16 +27,28 @@ type remoteOp struct {
 	responses    *openapi3.Responses
 }
 
-// Compare compares local RootIR against a loaded remote OpenAPI 3.x document.
+// Compare compares local RootIR against a loaded remote OpenAPI 3.x document with default options.
 func (e *DiffEngine) Compare(
 	local *ir.RootIR,
 	remoteDoc *openapi3.T,
 	localTarget string,
 	remoteTarget string,
 ) *DiffReport {
+	return e.CompareWithOptions(local, remoteDoc, localTarget, remoteTarget, DiffOptions{})
+}
+
+// CompareWithOptions compares local RootIR against a loaded remote OpenAPI 3.x document with custom options.
+func (e *DiffEngine) CompareWithOptions(
+	local *ir.RootIR,
+	remoteDoc *openapi3.T,
+	localTarget string,
+	remoteTarget string,
+	opts DiffOptions,
+) *DiffReport {
 	report := &DiffReport{
 		LocalTarget:  localTarget,
 		RemoteTarget: remoteTarget,
+		Additive:     opts.Additive,
 	}
 
 	if local == nil || remoteDoc == nil {
@@ -87,19 +99,21 @@ func (e *DiffEngine) Compare(
 			endpointDesc := fmt.Sprintf("%s %s (%s.%s)", localHTTPMethod, localRawPath, svc.Name, m.Name)
 
 			if rop == nil {
-				// Local endpoint missing in remote OpenAPI spec
-				report.Drifts = append(report.Drifts, DriftItem{
-					Severity: SeverityGhost,
-					Kind:     DriftMissingEndpoint,
-					Service:  svc.Name,
-					Method:   m.Name,
-					Endpoint: endpointDesc,
-					Message: fmt.Sprintf(
-						"Method %s exists in Go contract but is absent from remote OpenAPI specification",
-						m.Name,
-					),
-					Suggestion: "Export local contract via `vortex oapi` or check if route URL changed",
-				})
+				if !opts.Additive {
+					// Local endpoint missing in remote OpenAPI spec
+					report.Drifts = append(report.Drifts, DriftItem{
+						Severity: SeverityGhost,
+						Kind:     DriftMissingEndpoint,
+						Service:  svc.Name,
+						Method:   m.Name,
+						Endpoint: endpointDesc,
+						Message: fmt.Sprintf(
+							"Method %s exists in Go contract but is absent from remote OpenAPI specification",
+							m.Name,
+						),
+						Suggestion: "Export local contract via `vortex oapi` or check if route URL changed",
+					})
+				}
 
 				continue
 			}
@@ -119,15 +133,28 @@ func (e *DiffEngine) Compare(
 				remoteDesc += fmt.Sprintf(" [%s]", rop.operationID)
 			}
 
-			report.Drifts = append(report.Drifts, DriftItem{
-				Severity: SeverityGhost,
-				Kind:     DriftMissingEndpoint,
-				Endpoint: remoteDesc,
-				Message: fmt.Sprintf(
-					"Endpoint %s is declared in remote OpenAPI specification but not implemented in Go contracts",
+			severity := SeverityGhost
+			msg := fmt.Sprintf(
+				"Endpoint %s is declared in remote OpenAPI specification but not implemented in Go contracts",
+				remoteDesc,
+			)
+			sugg := fmt.Sprintf("Add method to Go interface or run `vortex oapi --import=%s`", remoteTarget)
+
+			if opts.Additive {
+				severity = SeverityNonBreaking
+				msg = fmt.Sprintf(
+					"Endpoint %s was captured in traffic/spec but is not yet implemented in Go contracts",
 					remoteDesc,
-				),
-				Suggestion: fmt.Sprintf("Add method to Go interface or run `vortex oapi --import=%s`", remoteTarget),
+				)
+				sugg = fmt.Sprintf("Add method to Go interface or run `vortex spec import -add -spec=%s`", remoteTarget)
+			}
+
+			report.Drifts = append(report.Drifts, DriftItem{
+				Severity:   severity,
+				Kind:       DriftMissingEndpoint,
+				Endpoint:   remoteDesc,
+				Message:    msg,
+				Suggestion: sugg,
 			})
 		}
 	}

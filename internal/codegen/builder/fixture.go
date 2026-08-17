@@ -206,11 +206,17 @@ func LoadFixturesFromSource(rootDir, sourceSpec string) (map[string]*ir.MockFixt
 				bodyText = tryDecompressPayload(entry.Response.Content.Text, entry.Response.Content.Encoding)
 			}
 
+			reqBodyText := ""
+			if entry.Request.PostData != nil && entry.Request.PostData.Text != "" {
+				reqBodyText = tryDecompressPayload(entry.Request.PostData.Text, entry.Request.PostData.Encoding)
+			}
+
 			fixture := &ir.MockFixtureIR{
 				StatusCode:  statusCode,
 				ContentType: contentType,
 				Headers:     headers,
 				Body:        bodyText,
+				RequestBody: reqBodyText,
 			}
 
 			// Store both exact and normalized paths

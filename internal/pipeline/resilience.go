@@ -346,6 +346,7 @@ func (p *Pipeline[Req, Resp]) dispatchHedgingAttempts(
 		if remaining <= 0 {
 			return
 		}
+
 		go func(count int) {
 			for i := 0; i < count; i++ {
 				r := <-resultsCh

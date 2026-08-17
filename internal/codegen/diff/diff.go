@@ -54,6 +54,12 @@ const (
 	DriftDeprecationMismatch DriftKind = "deprecation-mismatch"
 )
 
+// DiffOptions configures semantic contract comparison behavior.
+type DiffOptions struct {
+	// Additive mode ignores local Go methods absent from remote specification/HAR (suppresses ghost noise).
+	Additive bool
+}
+
 // DriftItem represents a single detected discrepancy between contracts.
 type DriftItem struct {
 	Severity   DriftSeverity `json:"severity"`
@@ -73,6 +79,7 @@ type DiffReport struct {
 	LocalTarget           string      `json:"local_target"`
 	RemoteTarget          string      `json:"remote_target"`
 	TotalEndpointsChecked int         `json:"total_endpoints_checked"`
+	Additive              bool        `json:"additive,omitempty"`
 	Drifts                []DriftItem `json:"drifts"`
 }
 
@@ -125,14 +132,28 @@ func (r *DiffReport) HasDrift() bool {
 // Render formats the report as human-readable terminal output.
 func (r *DiffReport) Render(color bool) string {
 	if len(r.Drifts) == 0 {
+		if r.Additive {
+			return "✔ All incoming captured endpoints and schemas are 100% satisfied by local contract! (0 new drifts)\n"
+		}
+
 		return "✔ All contracts are 100% in sync with OpenAPI specification! (0 drifts detected)\n"
 	}
 
 	var sb strings.Builder
-	sb.WriteString("⚡ Vortex Schema Drift Inspector\n")
+	if r.Additive {
+		sb.WriteString("⚡ Vortex Schema Drift Inspector (Additive Mode: Ghost Endpoints Suppressed)\n")
+	} else {
+		sb.WriteString("⚡ Vortex Schema Drift Inspector\n")
+	}
+
 	fmt.Fprintf(&sb, "Local:  %s\n", r.LocalTarget)
 	fmt.Fprintf(&sb, "Remote: %s\n", r.RemoteTarget)
-	fmt.Fprintf(&sb, "Checked %d endpoint(s)\n\n", r.TotalEndpointsChecked)
+
+	if r.Additive {
+		fmt.Fprintf(&sb, "Checked %d incoming endpoint(s) against local contract\n\n", r.TotalEndpointsChecked)
+	} else {
+		fmt.Fprintf(&sb, "Checked %d endpoint(s)\n\n", r.TotalEndpointsChecked)
+	}
 
 	var (
 		breaking    []DriftItem
@@ -196,10 +217,16 @@ func (r *DiffReport) Render(color bool) string {
 		sb.WriteString("\n")
 	}
 
-	fmt.Fprintf(&sb, "Summary: %d breaking, %d non-breaking, %d ghost(s)\n",
-		len(breaking),
-		len(nonBreaking),
-		len(ghosts))
+	if r.Additive {
+		fmt.Fprintf(&sb, "Summary: %d breaking, %d non-breaking (ghost endpoints ignored in additive mode)\n",
+			len(breaking),
+			len(nonBreaking))
+	} else {
+		fmt.Fprintf(&sb, "Summary: %d breaking, %d non-breaking, %d ghost(s)\n",
+			len(breaking),
+			len(nonBreaking),
+			len(ghosts))
+	}
 
 	return sb.String()
 }

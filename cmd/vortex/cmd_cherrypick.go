@@ -66,22 +66,8 @@ func (c *CmdCherryPick) Run(ctx context.Context, args []string, stdout, stderr i
 		fs.PrintDefaults()
 	}
 
-	var flags, nonFlags []string
-	for i := 0; i < len(args); i++ {
-		arg := args[i]
-		if strings.HasPrefix(arg, "-") {
-			flags = append(flags, arg)
-			if (arg == "-to" || arg == "-dir") &&
-				i+1 < len(args) && !strings.HasPrefix(args[i+1], "-") {
-				flags = append(flags, args[i+1])
-				i++
-			}
-		} else {
-			nonFlags = append(nonFlags, arg)
-		}
-	}
-
-	if err := fs.Parse(append(flags, nonFlags...)); err != nil {
+	posArgs, err := ParseInterspersedFlags(fs, args)
+	if err != nil {
 		return err
 	}
 
@@ -98,7 +84,6 @@ func (c *CmdCherryPick) Run(ctx context.Context, args []string, stdout, stderr i
 
 	cfg, _ := project.Load(targetDir)
 
-	posArgs := fs.Args()
 	if len(posArgs) == 0 || *toFlag == "" {
 		return errors.New("usage: vortex cherry-pick <source_file:MethodOrDTO> --to=<target_file>")
 	}

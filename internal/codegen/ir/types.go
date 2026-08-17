@@ -256,6 +256,7 @@ type MockFixtureIR struct {
 	ContentType string
 	Headers     map[string]string
 	Body        string
+	RequestBody string
 }
 
 // InjectTarget specifies where an injected variable is placed in the network transaction.

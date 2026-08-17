@@ -18,13 +18,7 @@ func emitStructDTO(buf *bytes.Buffer, tracker *ImportTracker, s *ir.StructIR) {
 	}
 
 	tracker.Add("net/url")
-	tracker.Add("strconv")
 
-	fmt.Fprintf(
-		buf,
-		"// AppendFormData serializes %s into url-encoded form bytes on dst buffer (0 B/op).\n",
-		s.Name,
-	)
 	fmt.Fprintf(buf, "func (r *%s) AppendFormData(dst []byte) []byte {\n", s.Name)
 	buf.WriteString("\tif r == nil {\n\t\treturn dst\n\t}\n\n")
 
@@ -34,12 +28,10 @@ func emitStructDTO(buf *bytes.Buffer, tracker *ImportTracker, s *ir.StructIR) {
 
 	buf.WriteString("\n\treturn dst\n}\n\n")
 
-	fmt.Fprintf(buf, "// AppendQuery serializes %s into query string bytes on dst buffer (0 B/op).\n", s.Name)
 	fmt.Fprintf(buf, "func (r *%s) AppendQuery(dst []byte) []byte {\n", s.Name)
 	buf.WriteString("\treturn r.AppendFormData(dst)\n}\n\n")
 
 	// Also emit EncodeValues for url.Values interoperability
-	fmt.Fprintf(buf, "// EncodeValues serializes %s into url.Values without reflection.\n", s.Name)
 	fmt.Fprintf(buf, "func (r *%s) EncodeValues(vals url.Values) {\n", s.Name)
 	buf.WriteString("\tif r == nil {\n\t\treturn\n\t}\n")
 
@@ -60,6 +52,7 @@ func emitFieldFormData(buf *bytes.Buffer, tracker *ImportTracker, f *ir.FieldIR)
 		buf.WriteString("\t}\n")
 
 	case "int", "int64":
+		tracker.Add("strconv")
 		fmt.Fprintf(buf, "\tif r.%s != 0 {\n", f.GoName)
 		buf.WriteString("\t\tif len(dst) > 0 { dst = append(dst, '&') }\n")
 		fmt.Fprintf(buf, "\t\tdst = append(dst, %q...)\n", f.WireName+"=")
@@ -67,6 +60,7 @@ func emitFieldFormData(buf *bytes.Buffer, tracker *ImportTracker, f *ir.FieldIR)
 		buf.WriteString("\t}\n")
 
 	case "uint", "uint32", "uint64":
+		tracker.Add("strconv")
 		fmt.Fprintf(buf, "\tif r.%s != 0 {\n", f.GoName)
 		buf.WriteString("\t\tif len(dst) > 0 { dst = append(dst, '&') }\n")
 		fmt.Fprintf(buf, "\t\tdst = append(dst, %q...)\n", f.WireName+"=")
@@ -101,6 +95,7 @@ func emitFieldFormData(buf *bytes.Buffer, tracker *ImportTracker, f *ir.FieldIR)
 		buf.WriteString("\t}\n")
 
 	case "[]int", "[]int64":
+		tracker.Add("strconv")
 		fmt.Fprintf(buf, "\tfor _, v := range r.%s {\n", f.GoName)
 		buf.WriteString("\t\tif len(dst) > 0 { dst = append(dst, '&') }\n")
 		fmt.Fprintf(buf, "\t\tdst = append(dst, %q...)\n", f.WireName+"=")
@@ -119,10 +114,11 @@ func emitFieldFormData(buf *bytes.Buffer, tracker *ImportTracker, f *ir.FieldIR)
 		fmt.Fprintf(buf, "\tif r.%s != nil {\n", f.GoName)
 		buf.WriteString("\t\tif len(dst) > 0 { dst = append(dst, '&') }\n")
 		fmt.Fprintf(buf, "\t\tdst = append(dst, %q...)\n", f.WireName+"=")
-		fmt.Fprintf(buf, "\t\tdst = append(dst, fmt.Sprint(r.%s)...)\n", f.GoName)
+		fmt.Fprintf(buf, "\t\tdst = append(dst, url.QueryEscape(fmt.Sprint(r.%s))...)\n", f.GoName)
 		buf.WriteString("\t}\n")
 
 	case "float32", "float64":
+		tracker.Add("strconv")
 		fmt.Fprintf(buf, "\tif r.%s != 0 {\n", f.GoName)
 		buf.WriteString("\t\tif len(dst) > 0 { dst = append(dst, '&') }\n")
 		fmt.Fprintf(buf, "\t\tdst = append(dst, %q...)\n", f.WireName+"=")
@@ -130,6 +126,7 @@ func emitFieldFormData(buf *bytes.Buffer, tracker *ImportTracker, f *ir.FieldIR)
 		buf.WriteString("\t}\n")
 
 	case "values.Int64String", "values.Uint64String", "values.Float64String", "values.BoolInt":
+		tracker.Add("strconv")
 		fmt.Fprintf(buf, "\tif r.%s != 0 {\n", f.GoName)
 		buf.WriteString("\t\tif len(dst) > 0 { dst = append(dst, '&') }\n")
 		fmt.Fprintf(buf, "\t\tdst = append(dst, %q...)\n", f.WireName+"=")
@@ -146,7 +143,7 @@ func emitFieldFormData(buf *bytes.Buffer, tracker *ImportTracker, f *ir.FieldIR)
 			fmt.Fprintf(buf, "\tif r.%s != nil {\n", f.GoName)
 			buf.WriteString("\t\tif len(dst) > 0 { dst = append(dst, '&') }\n")
 			fmt.Fprintf(buf, "\t\tdst = append(dst, %q...)\n", f.WireName+"=")
-			fmt.Fprintf(buf, "\t\tdst = append(dst, fmt.Sprint(r.%s)...)\n", f.GoName)
+			fmt.Fprintf(buf, "\t\tdst = append(dst, url.QueryEscape(fmt.Sprint(r.%s))...)\n", f.GoName)
 			buf.WriteString("\t}\n")
 		} else {
 			tracker.Add("fmt")
@@ -166,14 +163,17 @@ func emitFieldEncodeValues(buf *bytes.Buffer, tracker *ImportTracker, f *ir.Fiel
 		fmt.Fprintf(buf, "\t\tvals.Set(%q, r.%s)\n", f.WireName, f.GoName)
 		buf.WriteString("\t}\n")
 	case "int", "int64":
+		tracker.Add("strconv")
 		fmt.Fprintf(buf, "\tif r.%s != 0 {\n", f.GoName)
 		fmt.Fprintf(buf, "\t\tvals.Set(%q, strconv.FormatInt(int64(r.%s), 10))\n", f.WireName, f.GoName)
 		buf.WriteString("\t}\n")
 	case "uint", "uint32", "uint64":
+		tracker.Add("strconv")
 		fmt.Fprintf(buf, "\tif r.%s != 0 {\n", f.GoName)
 		fmt.Fprintf(buf, "\t\tvals.Set(%q, strconv.FormatUint(uint64(r.%s), 10))\n", f.WireName, f.GoName)
 		buf.WriteString("\t}\n")
 	case "float32", "float64":
+		tracker.Add("strconv")
 		fmt.Fprintf(buf, "\tif r.%s != 0 {\n", f.GoName)
 		fmt.Fprintf(
 			buf,
@@ -188,6 +188,7 @@ func emitFieldEncodeValues(buf *bytes.Buffer, tracker *ImportTracker, f *ir.Fiel
 		fmt.Fprintf(buf, "\t\tvals.Set(%q, \"true\")\n", f.WireName)
 		buf.WriteString("\t}\n")
 	case "[]int", "[]int64":
+		tracker.Add("strconv")
 		fmt.Fprintf(buf, "\tfor _, v := range r.%s {\n", f.GoName)
 		fmt.Fprintf(buf, "\t\tvals.Add(%q, strconv.FormatInt(int64(v), 10))\n", f.WireName)
 		buf.WriteString("\t}\n")
@@ -201,6 +202,7 @@ func emitFieldEncodeValues(buf *bytes.Buffer, tracker *ImportTracker, f *ir.Fiel
 		fmt.Fprintf(buf, "\t\tvals.Set(%q, fmt.Sprint(r.%s))\n", f.WireName, f.GoName)
 		buf.WriteString("\t}\n")
 	case "values.Int64String", "values.Uint64String", "values.Float64String", "values.BoolInt":
+		tracker.Add("strconv")
 		fmt.Fprintf(buf, "\tif r.%s != 0 {\n", f.GoName)
 		fmt.Fprintf(buf, "\t\tvals.Set(%q, strconv.FormatInt(int64(r.%s), 10))\n", f.WireName, f.GoName)
 		buf.WriteString("\t}\n")

@@ -16,11 +16,9 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/lemon4ksan/aoni/internal/codegen/builder"
 	"github.com/lemon4ksan/aoni/internal/codegen/cache"
 	"github.com/lemon4ksan/aoni/internal/codegen/lint"
 	codeparser "github.com/lemon4ksan/aoni/internal/codegen/parser"
-	"github.com/lemon4ksan/aoni/internal/codegen/project"
 )
 
 // CmdCheck performs static contract validation and applies automated fixes.
@@ -39,9 +37,13 @@ func (c *CmdCheck) Run(ctx context.Context, args []string, stdout, stderr io.Wri
 
 	var (
 		fixFlag          = fs.Bool("fix", false, "Automatically apply safe, non-destructive fixes")
-		breakingOnlyFlag = fs.Bool("breaking-only", false, "Fast pre-commit mode: check only stale codegen (E001) and breaking changes")
-		jsonFlag         = fs.Bool("json", false, "Output diagnostics as JSON (shorthand for -format=json)")
-		formatFlag       = fs.String(
+		breakingOnlyFlag = fs.Bool(
+			"breaking-only",
+			false,
+			"Fast pre-commit mode: check only stale codegen (E001) and breaking changes",
+		)
+		jsonFlag   = fs.Bool("json", false, "Output diagnostics as JSON (shorthand for -format=json)")
+		formatFlag = fs.String(
 			"format",
 			"terminal",
 			"Output format: terminal, json, github (GitHub Actions annotations), sarif",
@@ -62,7 +64,10 @@ func (c *CmdCheck) Run(ctx context.Context, args []string, stdout, stderr io.Wri
 		fs.PrintDefaults()
 		fmt.Fprintf(stderr, "\nExamples:\n")
 		fmt.Fprintf(stderr, "  vortex check ./...                              # Validate all contracts in workspace\n")
-		fmt.Fprintf(stderr, "  vortex check --breaking-only                    # Fast pre-commit hook validation (<25ms)\n")
+		fmt.Fprintf(
+			stderr,
+			"  vortex check --breaking-only                    # Fast pre-commit hook validation (<25ms)\n",
+		)
 		fmt.Fprintf(
 			stderr,
 			"  vortex check --fix ./pkg/api/api.go             # Auto-fix missing imports and directives\n",
@@ -74,28 +79,14 @@ func (c *CmdCheck) Run(ctx context.Context, args []string, stdout, stderr io.Wri
 		fmt.Fprintf(stderr, "  vortex check --format=json ./pkg/api            # Output machine-readable diagnostics\n")
 	}
 
-	var flags, nonFlags []string
-	for i := 0; i < len(args); i++ {
-		arg := args[i]
-		if strings.HasPrefix(arg, "-") {
-			flags = append(flags, arg)
-			if (arg == "-dir" || arg == "-format" || arg == "-disable" || arg == "-enable" || arg == "-max-depth") &&
-				i+1 < len(args) && !strings.HasPrefix(args[i+1], "-") {
-				flags = append(flags, args[i+1])
-				i++
-			}
-		} else {
-			nonFlags = append(nonFlags, arg)
-		}
-	}
-
-	if err := fs.Parse(append(flags, nonFlags...)); err != nil {
+	nonFlags, err := ParseInterspersedFlags(fs, args)
+	if err != nil {
 		return err
 	}
 
-	files := builder.CollectInputFiles("", fs.Args(), builder.CollectOptions{
-		MaxDepth: *maxDepthFlag,
-	})
+	rt, _ := NewRuntime(*dirFlag)
+
+	files := rt.CollectFiles(nonFlags)
 	if len(files) == 0 {
 		return fmt.Errorf(
 			"no Go source files found to inspect (searched up to depth %d). Use -max-depth=10 or specify file paths",
@@ -104,15 +95,10 @@ func (c *CmdCheck) Run(ctx context.Context, args []string, stdout, stderr io.Wri
 	}
 
 	reg := lint.DefaultRegistry()
+	rootDir := rt.RootDir
 
-	rootDir := *dirFlag
-	if rootDir == "" {
-		cwd, _ := os.Getwd()
-		rootDir, _, _ = project.FindRoot(cwd)
-	}
-
-	if cfg, _ := project.Load(rootDir); cfg != nil {
-		reg.Disable(cfg.AllIgnoredRules()...)
+	if rt.Config != nil {
+		reg.Disable(rt.Config.AllIgnoredRules()...)
 	}
 
 	if *disableFlag != "" {
@@ -212,6 +198,7 @@ func (c *CmdCheck) Run(ctx context.Context, args []string, stdout, stderr io.Wri
 					breakingDiags = append(breakingDiags, d)
 				}
 			}
+
 			breakingReports = append(breakingReports, &lint.Report{
 				Diagnostics:     breakingDiags,
 				SuppressedCount: r.SuppressedCount,
@@ -220,6 +207,7 @@ func (c *CmdCheck) Run(ctx context.Context, args []string, stdout, stderr io.Wri
 				FilesChecked:    r.FilesChecked,
 			})
 		}
+
 		reports = breakingReports
 	}
 

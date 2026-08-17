@@ -14,9 +14,11 @@ import (
 
 // Universal regular expressions for discovering RPC endpoints across standard frameworks.
 var (
-	reGRPCEndpoint    = regexp.MustCompile(`["'](/\$rpc/[a-zA-Z0-9_.]+(?:/[a-zA-Z0-9_]+)?)["']`)
-	reTwirpEndpoint   = regexp.MustCompile(`["'](/twirp/[a-zA-Z0-9_.]+(?:/[a-zA-Z0-9_]+)?)["']`)
-	reRESTEndpoint    = regexp.MustCompile(`["'](/(?:api/v[0-9]|v[0-9](?:alpha|beta|internal)?(?::[a-zA-Z0-9_]+)?)/[a-zA-Z0-9_./-]+)["']`)
+	reGRPCEndpoint  = regexp.MustCompile(`["'](/\$rpc/[a-zA-Z0-9_.]+(?:/[a-zA-Z0-9_]+)?)["']`)
+	reTwirpEndpoint = regexp.MustCompile(`["'](/twirp/[a-zA-Z0-9_.]+(?:/[a-zA-Z0-9_]+)?)["']`)
+	reRESTEndpoint  = regexp.MustCompile(
+		`["'](/(?:api/v[0-9]|v[0-9](?:alpha|beta|internal)?(?::[a-zA-Z0-9_]+)?)/[a-zA-Z0-9_./-]+)["']`,
+	)
 	reTRPCEndpoint    = regexp.MustCompile(`["'](/trpc/[a-zA-Z0-9_.]+)["']`)
 	reGraphQLEndpoint = regexp.MustCompile(`["'](/graphql(?:/[a-zA-Z0-9_]+)?)["']`)
 )
@@ -24,14 +26,20 @@ var (
 // Universal regular expressions for discovering Protobuf / JSPB field accessors.
 var (
 	// Standard JSPB getters: MyClass.prototype.getName = function() { return jspb.Message.getField(this, 1) }
-	reStandardGetter = regexp.MustCompile(`([a-zA-Z0-9_$.]+)\.prototype\.(?:get|is|has)?([a-zA-Z0-9_$]+)\s*=\s*function\s*\(\)\s*\{\s*return\s*jspb\.Message\.getField(?:Wrapper)?\(\s*this,\s*(?:[a-zA-Z0-9_$.]+,\s*)?(\d+)\s*\)`)
+	reStandardGetter = regexp.MustCompile(
+		`([a-zA-Z0-9_$.]+)\.prototype\.(?:get|is|has)?([a-zA-Z0-9_$]+)\s*=\s*function\s*\(\)\s*\{\s*return\s*jspb\.Message\.getField(?:Wrapper)?\(\s*this,\s*(?:[a-zA-Z0-9_$.]+,\s*)?(\d+)\s*\)`,
+	)
 
 	// Standard JSPB setters: MyClass.prototype.setName = function(a) { return jspb.Message.setField(this, 1, a) }
-	reStandardSetter = regexp.MustCompile(`([a-zA-Z0-9_$.]+)\.prototype\.(?:set)?([a-zA-Z0-9_$]+)\s*=\s*function\s*\([a-zA-Z0-9_$]*\)\s*\{\s*return\s*jspb\.Message\.set(?:Wrapper)?Field\(\s*this,\s*(\d+)`)
+	reStandardSetter = regexp.MustCompile(
+		`([a-zA-Z0-9_$.]+)\.prototype\.(?:set)?([a-zA-Z0-9_$]+)\s*=\s*function\s*\([a-zA-Z0-9_$]*\)\s*\{\s*return\s*jspb\.Message\.set(?:Wrapper)?Field\(\s*this,\s*(\d+)`,
+	)
 
 	// Minified Closure / JSPB accessors: _.Kw.prototype.yj = _.da(54, function() { return _.Il(this, _.aq, 3) })
 	// or _.ry.prototype.yj = _.da(52, function() { return _.Ql(this, 7) })
-	reMinifiedClosureGetter = regexp.MustCompile(`(?:_\.)?([a-zA-Z0-9_$]+)\.prototype\.([a-zA-Z0-9_$]+)\s*=\s*(?:[a-zA-Z0-9_$.]+\(\d+,\s*)?function\s*\(\)\s*\{\s*return\s*([a-zA-Z0-9_$.]+)\(\s*this,\s*(?:([a-zA-Z0-9_$.]+),\s*)?(\d+)\s*\)`)
+	reMinifiedClosureGetter = regexp.MustCompile(
+		`(?:_\.)?([a-zA-Z0-9_$]+)\.prototype\.([a-zA-Z0-9_$]+)\s*=\s*(?:[a-zA-Z0-9_$.]+\(\d+,\s*)?function\s*\(\)\s*\{\s*return\s*([a-zA-Z0-9_$.]+)\(\s*this,\s*(?:([a-zA-Z0-9_$.]+),\s*)?(\d+)\s*\)`,
+	)
 
 	// Protobuf Binary Reader switch cases: case 1: reader.readString()
 	reBinaryReaderCase = regexp.MustCompile(`case\s+(\d+):\s*[^;]*?reader\.read([a-zA-Z0-9]+)\(\)`)
@@ -178,6 +186,7 @@ func scanProtobufAccessors(data []byte, filename string, res *ScanResult) {
 			if dotIdx := strings.LastIndex(className, "."); dotIdx >= 0 {
 				className = className[dotIdx+1:]
 			}
+
 			fieldName := string(m[2])
 			for _, pfx := range []string{"get", "Get", "is", "Is", "has", "Has"} {
 				if strings.HasPrefix(fieldName, pfx) && len(fieldName) > len(pfx) {
@@ -185,6 +194,7 @@ func scanProtobufAccessors(data []byte, filename string, res *ScanResult) {
 					break
 				}
 			}
+
 			idx, err := strconv.Atoi(string(m[3]))
 			if err == nil {
 				msg := getOrCreateMessage(res, className, filename)
@@ -204,6 +214,7 @@ func scanProtobufAccessors(data []byte, filename string, res *ScanResult) {
 			if dotIdx := strings.LastIndex(className, "."); dotIdx >= 0 {
 				className = className[dotIdx+1:]
 			}
+
 			fieldName := string(m[2])
 			for _, pfx := range []string{"set", "Set"} {
 				if strings.HasPrefix(fieldName, pfx) && len(fieldName) > len(pfx) {
@@ -211,6 +222,7 @@ func scanProtobufAccessors(data []byte, filename string, res *ScanResult) {
 					break
 				}
 			}
+
 			idx, err := strconv.Atoi(string(m[3]))
 			if err == nil {
 				msg := getOrCreateMessage(res, className, filename)
@@ -237,6 +249,7 @@ func scanProtobufAccessors(data []byte, filename string, res *ScanResult) {
 			if dotIdx := strings.LastIndex(className, "."); dotIdx >= 0 {
 				className = className[dotIdx+1:]
 			}
+
 			methodName := string(m[2])
 			for _, pfx := range []string{"get", "Get", "set", "Set", "is", "Is", "has", "Has"} {
 				if strings.HasPrefix(methodName, pfx) && len(methodName) > len(pfx) {
@@ -244,6 +257,7 @@ func scanProtobufAccessors(data []byte, filename string, res *ScanResult) {
 					break
 				}
 			}
+
 			subType := strings.TrimPrefix(string(m[4]), "_.")
 			idxStr := string(m[5])
 
@@ -252,6 +266,7 @@ func scanProtobufAccessors(data []byte, filename string, res *ScanResult) {
 				msg := getOrCreateMessage(res, className, filename)
 
 				isNested := subType != ""
+
 				goType := "string"
 				if isNested {
 					goType = subType + "Tuple"
@@ -292,6 +307,7 @@ func scanEnums(data []byte, res *ScanResult) {
 	for _, m := range reTSEnumBabel.FindAllSubmatch(data, -1) {
 		if len(m) > 2 {
 			valName := string(m[1])
+
 			valNum, err := strconv.Atoi(string(m[2]))
 			if err == nil {
 				enum := getOrCreateEnum(res, "GlobalEnum")
@@ -303,6 +319,7 @@ func scanEnums(data []byte, res *ScanResult) {
 	for _, m := range reTSEnumShort.FindAllSubmatch(data, -1) {
 		if len(m) > 2 {
 			valName := string(m[1])
+
 			valNum, err := strconv.Atoi(string(m[2]))
 			if err == nil {
 				enum := getOrCreateEnum(res, "GlobalEnum")
@@ -317,7 +334,10 @@ func mapBinaryReaderType(readMethod string) string {
 	switch {
 	case strings.Contains(lower, "string"):
 		return "string"
-	case strings.Contains(lower, "int64"), strings.Contains(lower, "uint64"), strings.Contains(lower, "int32"), strings.Contains(lower, "uint32"):
+	case strings.Contains(lower, "int64"),
+		strings.Contains(lower, "uint64"),
+		strings.Contains(lower, "int32"),
+		strings.Contains(lower, "uint32"):
 		return "int64"
 	case strings.Contains(lower, "bool"):
 		return "bool"
@@ -342,6 +362,7 @@ func getOrCreateMessage(res *ScanResult, id, filename string) *MessageDescriptor
 		SourceRef: filename,
 	}
 	res.Messages[id] = msg
+
 	return msg
 }
 
@@ -355,5 +376,6 @@ func getOrCreateEnum(res *ScanResult, name string) *EnumDescriptor {
 		Values: make(map[int]string),
 	}
 	res.Enums[name] = enum
+
 	return enum
 }

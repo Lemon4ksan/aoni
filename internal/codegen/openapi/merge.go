@@ -7,7 +7,10 @@ package openapi
 import (
 	"bytes"
 	"fmt"
+	"go/ast"
 	"go/format"
+	goparser "go/parser"
+	"go/token"
 	"path"
 	"slices"
 	"sort"
@@ -424,17 +427,72 @@ func (e *MergeEngine) ReconcileService(
 			fmt.Fprintf(&buf, "// @engine %s\n", string(existingSvc.Engine))
 		}
 
+		seenHeaders := make(map[string]bool)
 		for _, h := range existingSvc.Headers {
 			if h.Key != "" && h.StaticValue != "" {
 				fmt.Fprintf(&buf, "// @header %q %q\n", h.Key, h.StaticValue)
+				seenHeaders[strings.ToLower(h.Key)] = true
+			}
+		}
+
+		if doc.Info != nil && doc.Info.Extensions != nil {
+			if headersRaw, ok := doc.Info.Extensions["x-vortex-headers"]; ok {
+				if hList, ok := headersRaw.([]map[string]string); ok {
+					for _, h := range hList {
+						k := strings.ToLower(h["name"])
+						if h["name"] != "" && h["value"] != "" && !seenHeaders[k] {
+							fmt.Fprintf(&buf, "// @header %q %q\n", h["name"], h["value"])
+
+							seenHeaders[k] = true
+						}
+					}
+				}
+			}
+
+			if credsRaw, ok := doc.Info.Extensions["x-required-credentials"]; ok {
+				if cList, ok := credsRaw.([]string); ok {
+					for _, c := range cList {
+						parts := strings.SplitN(c, ":", 2)
+						headerName := strings.TrimSpace(parts[0])
+
+						k := strings.ToLower(headerName)
+						if headerName != "" && !seenHeaders[k] {
+							envVar := normalizeHeaderToEnv(headerName)
+							fmt.Fprintf(&buf, "// @header %q \"${%s}\"\n", headerName, envVar)
+
+							seenHeaders[k] = true
+						}
+					}
+				}
 			}
 		}
 	} else if doc.Info != nil && doc.Info.Extensions != nil {
+		seenHeaders := make(map[string]bool)
 		if headersRaw, ok := doc.Info.Extensions["x-vortex-headers"]; ok {
 			if hList, ok := headersRaw.([]map[string]string); ok {
 				for _, h := range hList {
-					if h["name"] != "" && h["value"] != "" {
+					k := strings.ToLower(h["name"])
+					if h["name"] != "" && h["value"] != "" && !seenHeaders[k] {
 						fmt.Fprintf(&buf, "// @header %q %q\n", h["name"], h["value"])
+
+						seenHeaders[k] = true
+					}
+				}
+			}
+		}
+
+		if credsRaw, ok := doc.Info.Extensions["x-required-credentials"]; ok {
+			if cList, ok := credsRaw.([]string); ok {
+				for _, c := range cList {
+					parts := strings.SplitN(c, ":", 2)
+					headerName := strings.TrimSpace(parts[0])
+
+					k := strings.ToLower(headerName)
+					if headerName != "" && !seenHeaders[k] {
+						envVar := normalizeHeaderToEnv(headerName)
+						fmt.Fprintf(&buf, "// @header %q \"${%s}\"\n", headerName, envVar)
+
+						seenHeaders[k] = true
 					}
 				}
 			}
@@ -458,6 +516,13 @@ func (e *MergeEngine) ReconcileService(
 	if doc.Components != nil && len(doc.Components.Schemas) > 0 {
 		writeSchemas(&buf, doc.Components.Schemas, ImportConfig{PackageName: pkgName, TypeMap: cfg.TypeMap})
 	}
+
+	var incomingSchemas openapi3.Schemas
+	if doc.Components != nil {
+		incomingSchemas = doc.Components.Schemas
+	}
+
+	preserveExistingTypes(&buf, existingAPISrc, incomingSchemas)
 
 	formatted, err := format.Source(buf.Bytes())
 	if err != nil {
@@ -618,14 +683,19 @@ func (e *MergeEngine) renderMergedMethod(
 	// 6. Parameter signature (Type Fidelity)
 	paramList := e.buildReconciledParams(existing, iop, cfg)
 
-	// 7. Return signature
+	// 7. Return signature (Non-Downgrade Invariant)
 	var returnSig string
-	if existing.Return != nil && !existing.Return.IsVoid && existing.Return.SuccessType.Name != "" {
+	if existing.Return != nil && !existing.Return.IsVoid && existing.Return.SuccessType.Name != "" &&
+		existing.Return.SuccessType.Name != "any" {
 		returnSig = fmt.Sprintf("(%s, error)", existing.Return.SuccessType.Name)
 	} else {
 		ret := determineReturnType(iop.op, ImportConfig{TypeMap: cfg.TypeMap})
-		if ret == "" {
-			returnSig = "error"
+		if ret == "" || ret == "any" {
+			if existing.Return != nil && !existing.Return.IsVoid && existing.Return.SuccessType.Name != "" {
+				returnSig = fmt.Sprintf("(%s, error)", existing.Return.SuccessType.Name)
+			} else {
+				returnSig = "error"
+			}
 		} else {
 			returnSig = fmt.Sprintf("(%s, error)", ret)
 		}
@@ -957,7 +1027,7 @@ func (e *MergeEngine) buildReconciledParams(
 		paramList = append(paramList, sig)
 	}
 
-	// Request Body parameter if JSON
+	// Request Body parameter if JSON or custom struct
 	if iop.op != nil && iop.op.RequestBody != nil && iop.op.RequestBody.Value != nil {
 		jsonContent := iop.op.RequestBody.Value.Content.Get("application/json")
 		if jsonContent != nil && jsonContent.Schema != nil {
@@ -968,16 +1038,72 @@ func (e *MergeEngine) buildReconciledParams(
 				bodyType = mapSchemaType(jsonContent.Schema.Value, ImportConfig{TypeMap: cfg.TypeMap})
 			}
 
-			if existReq, ok := existingParamMap["req"]; ok && existReq.GoType.Name != "any" &&
-				existReq.GoType.Name != "map[string]any" {
+			if existReq, ok := existingParamMap["req"]; ok && existReq.GoType.Name != "" &&
+				existReq.GoType.Name != "any" && existReq.GoType.Name != "map[string]any" {
 				paramList = append(paramList, fmt.Sprintf("%s %s", existReq.GoName, existReq.GoType.Name))
 			} else {
 				paramList = append(paramList, "req "+bodyType)
 			}
 		}
+	} else if existReq, ok := existingParamMap["req"]; ok && existReq.GoType.Name != "" &&
+		existReq.GoType.Name != "any" {
+		paramList = append(paramList, fmt.Sprintf("%s %s", existReq.GoName, existReq.GoType.Name))
 	}
 
 	return paramList
+}
+
+func preserveExistingTypes(buf *bytes.Buffer, existingAPISrc []byte, incomingSchemas openapi3.Schemas) {
+	if len(existingAPISrc) == 0 {
+		return
+	}
+
+	fset := token.NewFileSet()
+
+	fileAst, err := goparser.ParseFile(fset, "api.go", existingAPISrc, goparser.ParseComments)
+	if err != nil {
+		return
+	}
+
+	for _, decl := range fileAst.Decls {
+		genDecl, ok := decl.(*ast.GenDecl)
+		if !ok || genDecl.Tok != token.TYPE {
+			continue
+		}
+
+		for _, spec := range genDecl.Specs {
+			typeSpec, ok := spec.(*ast.TypeSpec)
+			if !ok {
+				continue
+			}
+
+			// Skip the service interface itself
+			if _, isInterface := typeSpec.Type.(*ast.InterfaceType); isInterface {
+				continue
+			}
+
+			typeName := typeSpec.Name.Name
+			// If incoming OpenAPI schemas already defines this type, let writeSchemas handle it
+			if incomingSchemas != nil {
+				if _, exists := incomingSchemas[typeName]; exists {
+					continue
+				}
+
+				if _, exists := incomingSchemas[strings.ToLower(typeName)]; exists {
+					continue
+				}
+			}
+
+			// Preserve existing struct/tuple/enum in full
+			var declBuf bytes.Buffer
+			if err := format.Node(&declBuf, fset, genDecl); err == nil {
+				buf.WriteString(declBuf.String())
+				buf.WriteString("\n\n")
+			}
+
+			break
+		}
+	}
 }
 
 func mapMergeParamType(p *openapi3.Parameter, cfg ImportConfig) string {
@@ -1034,4 +1160,33 @@ func isManagedDirective(line string) bool {
 	default:
 		return false
 	}
+}
+
+func normalizeHeaderToEnv(name string) string {
+	lower := strings.ToLower(strings.TrimSpace(name))
+	switch lower {
+	case "x-goog-api-key", "goog-api-key":
+		return "GOOGLE_API_KEY"
+	case "x-aistudio-visit-id":
+		return "AISTUDIO_VISIT_ID"
+	case "x-goog-authuser":
+		return "GOOG_AUTHUSER"
+	case "authorization":
+		return "AUTH_TOKEN"
+	case "proxy-authorization":
+		return "PROXY_AUTH_TOKEN"
+	}
+
+	clean := strings.ToUpper(strings.TrimSpace(name))
+
+	var sb strings.Builder
+	for _, r := range clean {
+		if (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') {
+			sb.WriteRune(r)
+		} else {
+			sb.WriteRune('_')
+		}
+	}
+
+	return strings.Trim(sb.String(), "_")
 }

@@ -63,6 +63,7 @@ func ReconcileTupleFields(tupleName string, fields []ir.TupleFieldIR, scan *Scan
 			if desc.Name != "" && !strings.HasPrefix(desc.Name, "Field") {
 				fields[i].GoName = desc.Name
 			}
+
 			if desc.IsNested && desc.SubMsgType != "" {
 				fields[i].IsNested = true
 			}

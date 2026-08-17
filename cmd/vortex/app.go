@@ -40,15 +40,21 @@ var commandGroups = []commandGroup{
 		},
 	},
 	{
-		Title: "Hubs",
+		Title: "Traffic, Reverse Engineering & Drift",
 		Commands: []string{
-			"spec", "traffic", "ast", "perf",
+			"diff", "record", "review", "stack", "accept", "cherry-pick", "refactor",
 		},
 	},
 	{
-		Title: "Workspace",
+		Title: "Specification & Schema Hubs",
 		Commands: []string{
-			"init", "status", "config", "work", "clean", "explain", "completion",
+			"spec", "traffic", "ast", "perf", "proto",
+		},
+	},
+	{
+		Title: "Workspace & Diagnostics",
+		Commands: []string{
+			"init", "status", "config", "work", "history", "undo", "source", "clean", "explain", "completion",
 		},
 	},
 }

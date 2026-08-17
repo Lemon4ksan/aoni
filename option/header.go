@@ -263,21 +263,15 @@ func FromVortexCache(startDirs ...string) aoni.ClientOption {
 			}
 
 			switch strings.ToUpper(key) {
-			case "AUTH_TOKEN":
+			case "AUTH_TOKEN", "BEARER_TOKEN", "API_TOKEN", "ACCESS_TOKEN":
 				if !strings.HasPrefix(val, "Bearer ") {
 					cfg.Defaults.Headers.Set("Authorization", "Bearer "+val)
 				} else {
 					cfg.Defaults.Headers.Set("Authorization", val)
 				}
 
-			case "GOOGLE_API_KEY":
-				cfg.Defaults.Headers.Set("x-goog-api-key", val)
-			case "INSTANCE_ID":
-				cfg.Defaults.Headers.Set("Unleash-Instanceid", val)
-			case "CONNECTION_ID":
-				cfg.Defaults.Headers.Set("Unleash-Connection-Id", val)
-			case "VISIT_ID":
-				cfg.Defaults.Headers.Set("x-aistudio-visit-id", val)
+			case "API_KEY", "APIKEY", "X_API_KEY":
+				cfg.Defaults.Headers.Set("X-API-Key", val)
 			default:
 				cfg.Defaults.Headers.Set(key, val)
 			}

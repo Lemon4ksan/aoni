@@ -26,7 +26,11 @@ func TestScanBytes_RPCEndpoints(t *testing.T) {
 	require.NotNil(t, res)
 	require.Len(t, res.Endpoints, 6)
 
-	require.Equal(t, "/$rpc/google.internal.alkali.applications.makersuite.v1.MakerSuiteService/ListModels", res.Endpoints[0].Path)
+	require.Equal(
+		t,
+		"/$rpc/google.internal.alkali.applications.makersuite.v1.MakerSuiteService/ListModels",
+		res.Endpoints[0].Path,
+	)
 	require.Equal(t, "grpc-web", res.Endpoints[0].Protocol)
 	require.Equal(t, "POST", res.Endpoints[0].HTTPMethod)
 

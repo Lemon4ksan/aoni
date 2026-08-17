@@ -111,7 +111,6 @@ func (c *billingAPIClient) GetTransactions(ctx context.Context, from time.Time, 
 	return resp, nil
 }
 
-// AppendFormData serializes TransactionList into url-encoded form bytes on dst buffer (0 B/op).
 func (r *TransactionList) AppendFormData(dst []byte) []byte {
 	if r == nil {
 		return dst
@@ -128,12 +127,10 @@ func (r *TransactionList) AppendFormData(dst []byte) []byte {
 	return dst
 }
 
-// AppendQuery serializes TransactionList into query string bytes on dst buffer (0 B/op).
 func (r *TransactionList) AppendQuery(dst []byte) []byte {
 	return r.AppendFormData(dst)
 }
 
-// EncodeValues serializes TransactionList into url.Values without reflection.
 func (r *TransactionList) EncodeValues(vals url.Values) {
 	if r == nil {
 		return

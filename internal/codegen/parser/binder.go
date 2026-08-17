@@ -718,11 +718,14 @@ func (p *Parser) parseTuple(root *ir.RootIR, name string, docLines []string, str
 
 		for _, ident := range field.Names {
 			fieldPathStr := tagPathStr
+
 			var indexPath []int
+
 			fieldIdx := idx
 
 			if fieldPathStr != "" {
 				parts := strings.Split(fieldPathStr, ".")
+
 				valid := true
 				for _, part := range parts {
 					val, err := strconv.Atoi(strings.TrimSpace(part))
@@ -730,6 +733,7 @@ func (p *Parser) parseTuple(root *ir.RootIR, name string, docLines []string, str
 						valid = false
 						break
 					}
+
 					indexPath = append(indexPath, val)
 				}
 

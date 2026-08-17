@@ -7,6 +7,7 @@ package tuple
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"go/ast"
 	"go/format"
@@ -55,7 +56,7 @@ func InferTupleFromJSON(structName string, jsonPayload []byte) (*InferredTuple, 
 
 	arr, ok := raw.([]any)
 	if !ok {
-		return nil, fmt.Errorf("payload root is not a json array")
+		return nil, errors.New("payload root is not a json array")
 	}
 
 	// Unwrap single-element container arrays (e.g. [[[item, item]]])
@@ -73,6 +74,7 @@ func InferTupleFromJSON(structName string, jsonPayload []byte) (*InferredTuple, 
 		if firstItem, isItem := unwrapped[0].([]any); isItem && len(firstItem) > 0 {
 			return inferFromFlatArray(structName, firstItem), nil
 		}
+
 		// If elements are primitive values, unwrapped itself is the tuple
 		return inferFromFlatArray(structName, unwrapped), nil
 	}
@@ -119,7 +121,7 @@ func inferFromJSPBArray(structName string, arr []any) *InferredTuple {
 	return tuple
 }
 
-func extractJSPBFields(arr []any, prefix string, methodContext string, usedNames map[string]bool, fields *[]InferredField) {
+func extractJSPBFields(arr []any, prefix, methodContext string, usedNames map[string]bool, fields *[]InferredField) {
 	for i, item := range arr {
 		curPath := strconv.Itoa(i)
 		if prefix != "" {
@@ -142,16 +144,18 @@ func extractJSPBFields(arr []any, prefix string, methodContext string, usedNames
 	}
 }
 
-func inferHeuristicField(val any, index int, path string, methodContext string, usedNames map[string]bool) InferredField {
+func inferHeuristicField(val any, index int, path, methodContext string, usedNames map[string]bool) InferredField {
 	name, goType := inferRawHeuristicName(val, index, path, methodContext, usedNames)
 
 	// Deduplicate name
 	finalName := name
+
 	counter := 2
 	for usedNames[finalName] {
 		finalName = fmt.Sprintf("%s_%d", name, counter)
 		counter++
 	}
+
 	usedNames[finalName] = true
 
 	tagPath := strconv.Itoa(index)
@@ -166,12 +170,13 @@ func inferHeuristicField(val any, index int, path string, methodContext string, 
 	}
 }
 
-func inferRawHeuristicName(val any, index int, path string, methodContext string, usedNames map[string]bool) (string, string) {
+func inferRawHeuristicName(val any, index int, path, methodContext string, usedNames map[string]bool) (string, string) {
 	goType := inferGoType(val)
 	if val == nil {
 		if path != "" {
 			return pathToFieldName(path, "Val"), "any"
 		}
+
 		return fmt.Sprintf("Field%d", index), "any"
 	}
 
@@ -180,15 +185,19 @@ func inferRawHeuristicName(val any, index int, path string, methodContext string
 		if path != "" {
 			return pathToFieldName(path, "IsFlag"), "bool"
 		}
+
 		if !usedNames["IsEnabled"] {
 			return "IsEnabled", "bool"
 		}
+
 		if !usedNames["IsActive"] {
 			return "IsActive", "bool"
 		}
+
 		if !usedNames["IsArchived"] {
 			return "IsArchived", "bool"
 		}
+
 		return fmt.Sprintf("IsFlag_%d", index), "bool"
 
 	case string:
@@ -203,12 +212,15 @@ func inferRawHeuristicName(val any, index int, path string, methodContext string
 					return "ImageURL", "string"
 				}
 			}
+
 			if !usedNames["URL"] {
 				return "URL", "string"
 			}
+
 			if !usedNames["EndpointURL"] {
 				return "EndpointURL", "string"
 			}
+
 			return "URL", "string"
 		}
 
@@ -217,6 +229,7 @@ func inferRawHeuristicName(val any, index int, path string, methodContext string
 			if !usedNames["UUID"] {
 				return "UUID", "string"
 			}
+
 			return "ID", "string"
 		}
 
@@ -225,6 +238,7 @@ func inferRawHeuristicName(val any, index int, path string, methodContext string
 			if !usedNames["Token"] {
 				return "Token", "string"
 			}
+
 			return "AuthToken", "string"
 		}
 
@@ -233,9 +247,11 @@ func inferRawHeuristicName(val any, index int, path string, methodContext string
 			if !usedNames["CreatedAt"] {
 				return "CreatedAt", "string"
 			}
+
 			if !usedNames["UpdatedAt"] {
 				return "UpdatedAt", "string"
 			}
+
 			return "Timestamp", "string"
 		}
 
@@ -268,6 +284,7 @@ func inferRawHeuristicName(val any, index int, path string, methodContext string
 		if path != "" {
 			return pathToFieldName(path, "Str"), "string"
 		}
+
 		switch index {
 		case 0:
 			return "ID", "string"
@@ -285,33 +302,41 @@ func inferRawHeuristicName(val any, index int, path string, methodContext string
 				if !usedNames["TimestampMs"] {
 					return "TimestampMs", "int64"
 				}
+
 				return "CreatedAtMs", "int64"
 			}
+
 			// Unix Timestamp in sec (2001–2065)
 			if v >= 1.0e9 && v <= 3.0e9 {
 				if !usedNames["TimestampSec"] {
 					return "TimestampSec", "int64"
 				}
+
 				return "CreatedAtSec", "int64"
 			}
+
 			// RFC 9110 HTTP status codes
 			if isHTTPStatusCode(int(v)) {
 				if !usedNames["StatusCode"] {
 					return "StatusCode", "int64"
 				}
 			}
+
 			// IANA standard network ports
 			if isCommonPort(int(v)) {
 				if !usedNames["Port"] {
 					return "Port", "int64"
 				}
 			}
+
 			if path != "" {
 				return pathToFieldName(path, "Int"), "int64"
 			}
+
 			if index == 0 {
 				return "Value", "int64"
 			}
+
 			return fmt.Sprintf("Field%d", index), "int64"
 		}
 
@@ -320,6 +345,7 @@ func inferRawHeuristicName(val any, index int, path string, methodContext string
 			if !usedNames["Ratio"] {
 				return "Ratio", "float64"
 			}
+
 			return "Score", "float64"
 		}
 
@@ -327,6 +353,7 @@ func inferRawHeuristicName(val any, index int, path string, methodContext string
 		if path != "" {
 			return pathToFieldName(path, "List"), goType
 		}
+
 		if len(v) > 0 {
 			if firstStr, ok := v[0].(string); ok {
 				if strings.HasPrefix(strings.ToLower(firstStr), "http") {
@@ -336,6 +363,7 @@ func inferRawHeuristicName(val any, index int, path string, methodContext string
 				}
 			}
 		}
+
 		switch index {
 		case 0:
 			return "Items", goType
@@ -347,6 +375,7 @@ func inferRawHeuristicName(val any, index int, path string, methodContext string
 	if path != "" {
 		return pathToFieldName(path, "Val"), goType
 	}
+
 	return fmt.Sprintf("Field%d", index), goType
 }
 
@@ -383,12 +412,15 @@ func isCommonLocale(loc string) bool {
 
 func pathToFieldName(path, suffix string) string {
 	parts := strings.Split(path, ".")
+
 	var b strings.Builder
 	b.WriteString("Val")
+
 	for _, p := range parts {
 		b.WriteString("_")
 		b.WriteString(p)
 	}
+
 	return b.String()
 }
 
@@ -396,47 +428,92 @@ func inferGoType(val any) string {
 	if val == nil {
 		return "any"
 	}
+
 	switch v := val.(type) {
 	case bool:
 		return "bool"
+
 	case float64:
 		if v == float64(int64(v)) {
 			return "int64"
 		}
+
 		return "float64"
+
 	case string:
 		return "string"
+
 	case []any:
 		if len(v) > 0 {
 			return "[]" + inferGoType(v[0])
 		}
+
 		return "[]any"
+
 	default:
 		return "any"
 	}
 }
 
-// InferTupleFromJSONWithJS parses a raw JSON sample payload and enriches the inferred fields
-// with exact names and nested types discovered from JavaScript bundles.
-func InferTupleFromJSONWithJS(structName string, jsonPayload []byte, jsScan *jsbundle.ScanResult) (*InferredTuple, error) {
+func sanitizeExportedFieldName(name string) string {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return "Field"
+	}
+
+	parts := strings.FieldsFunc(name, func(r rune) bool {
+		return r == '_' || r == '-' || r == '.' || r == '$'
+	})
+	if len(parts) == 0 {
+		return "Field"
+	}
+
+	var sb strings.Builder
+	for _, p := range parts {
+		if len(p) > 0 {
+			sb.WriteString(strings.ToUpper(p[:1]) + p[1:])
+		}
+	}
+
+	res := sb.String()
+	if len(res) == 0 || (res[0] >= '0' && res[0] <= '9') {
+		res = "Field" + res
+	}
+
+	return res
+}
+
+// InferTupleFromJSONWithJS parses a raw JSON sample payload and enriches the inferred fields.
+// It avoids overwriting clean fields with minified/obfuscated JavaScript variable names.
+func InferTupleFromJSONWithJS(
+	structName string,
+	jsonPayload []byte,
+	jsScan *jsbundle.ScanResult,
+) (*InferredTuple, error) {
 	inf, err := InferTupleFromJSON(structName, jsonPayload)
 	if err != nil {
 		return nil, err
 	}
 
-	if jsScan != nil && inf != nil {
+	// Deduplicate all field names to ensure valid, exported Go struct members
+	if inf != nil {
+		usedNames := make(map[string]bool)
 		for i, f := range inf.Fields {
-			idx, pErr := strconv.Atoi(f.TagPath)
-			if pErr == nil {
-				if desc, ok := jsScan.FindFieldDescriptor(structName, idx); ok {
-					if desc.Name != "" && !strings.HasPrefix(desc.Name, "Field") {
-						inf.Fields[i].Name = desc.Name
-					}
-					if desc.IsNested && desc.SubMsgType != "" {
-						inf.Fields[i].GoType = desc.SubMsgType + "Tuple"
-					}
-				}
+			cleanName := sanitizeExportedFieldName(f.Name)
+			if cleanName == "" {
+				cleanName = "Field" + f.TagPath
 			}
+
+			finalName := cleanName
+
+			counter := 2
+			for usedNames[finalName] {
+				finalName = fmt.Sprintf("%s_%d", cleanName, counter)
+				counter++
+			}
+
+			usedNames[finalName] = true
+			inf.Fields[i].Name = finalName
 		}
 	}
 
@@ -457,6 +534,7 @@ func DeobfuscateFileWithJS(rootDir, contractFile string, jsGlobs []string, dryRu
 	}
 
 	fset := token.NewFileSet()
+
 	fileAst, err := parser.ParseFile(fset, absPath, nil, parser.ParseComments)
 	if err != nil {
 		return nil, fmt.Errorf("parsing %s: %w", absPath, err)
@@ -473,6 +551,7 @@ func DeobfuscateFileWithJS(rootDir, contractFile string, jsGlobs []string, dryRu
 				resolvedGlobs = append(resolvedGlobs, g)
 			}
 		}
+
 		jsScan, _ = jsbundle.ScanFiles(resolvedGlobs)
 	} else if rootDir != "" {
 		// Auto-discover local .js files
@@ -494,6 +573,7 @@ func DeobfuscateFileWithJS(rootDir, contractFile string, jsGlobs []string, dryRu
 				if typeSpec, isType := spec.(*ast.TypeSpec); isType {
 					if iface, isIface := typeSpec.Type.(*ast.InterfaceType); isIface {
 						targetIface = iface
+
 						if genDecl.Doc != nil {
 							for _, comment := range genDecl.Doc.List {
 								text := strings.TrimSpace(strings.TrimPrefix(comment.Text, "//"))
@@ -509,6 +589,7 @@ func DeobfuscateFileWithJS(rootDir, contractFile string, jsGlobs []string, dryRu
 				}
 			}
 		}
+
 		return true
 	})
 
@@ -533,7 +614,49 @@ func DeobfuscateFileWithJS(rootDir, contractFile string, jsGlobs []string, dryRu
 		}
 
 		funcType, isFunc := m.Type.(*ast.FuncType)
-		if !isFunc || funcType.Results == nil || len(funcType.Results.List) == 0 {
+		if !isFunc {
+			continue
+		}
+
+		methodName := m.Names[0].Name
+
+		// 1. Check Request parameter (Param 1)
+		if len(funcType.Params.List) >= 2 {
+			reqParam := funcType.Params.List[1]
+			reqTypeStr := typeToString(reqParam.Type)
+
+			if strings.HasPrefix(reqTypeStr, "[]") || reqTypeStr == "any" {
+				reqTupleName := methodName + "Request"
+
+				var reqPayload []byte
+				if f, ok := fixtures[methodName]; ok && f.RequestBody != "" {
+					reqPayload = []byte(f.RequestBody)
+				} else {
+					for k, f := range fixtures {
+						if (strings.Contains(strings.ToLower(k), strings.ToLower(methodName)) ||
+							strings.Contains(strings.ToLower(methodName), strings.ToLower(k))) && f.RequestBody != "" {
+							reqPayload = []byte(f.RequestBody)
+							break
+						}
+					}
+				}
+
+				if len(reqPayload) > 0 {
+					inf, rErr := InferTupleFromJSONWithJS(reqTupleName, reqPayload, jsScan)
+					if rErr == nil && inf != nil && len(inf.Fields) > 0 {
+						structDecl := buildTupleStructDecl(inf)
+						newDecls = append(newDecls, structDecl)
+
+						reqParam.Type = &ast.StarExpr{X: ast.NewIdent(reqTupleName)}
+						result.TuplesGenerated = append(result.TuplesGenerated, reqTupleName)
+						result.MethodsUpdated = append(result.MethodsUpdated, methodName)
+					}
+				}
+			}
+		}
+
+		// 2. Check Response return type
+		if funcType.Results == nil || len(funcType.Results.List) == 0 {
 			continue
 		}
 
@@ -541,8 +664,10 @@ func DeobfuscateFileWithJS(rootDir, contractFile string, jsGlobs []string, dryRu
 		typeStr := typeToString(retField.Type)
 
 		// Check if return type is candidate for tuple deobfuscation
-		if strings.HasPrefix(typeStr, "[][][]") || strings.HasPrefix(typeStr, "[][]") || typeStr == "[]any" || typeStr == "any" || typeStr == "[]int64" {
-			methodName := m.Names[0].Name
+		if strings.HasPrefix(typeStr, "[][][]") || strings.HasPrefix(typeStr, "[][]") || typeStr == "[]any" ||
+			typeStr == "any" ||
+			typeStr == "[]int64" ||
+			typeStr == "[]string" {
 			tupleName := methodName + "Tuple"
 
 			// Check for fixture payload
@@ -570,9 +695,9 @@ func DeobfuscateFileWithJS(rootDir, contractFile string, jsGlobs []string, dryRu
 					}
 					for idx, f := range msg.Fields {
 						inf.Fields = append(inf.Fields, InferredField{
-							Name:    f.Name,
+							Name:    sanitizeExportedFieldName(f.Name),
 							GoType:  f.GoType,
-							TagPath: fmt.Sprintf("%d", idx),
+							TagPath: strconv.Itoa(idx),
 						})
 					}
 				}
@@ -588,20 +713,17 @@ func DeobfuscateFileWithJS(rootDir, contractFile string, jsGlobs []string, dryRu
 			newDecls = append(newDecls, structDecl)
 
 			// Replace return type in interface method
+			isSlice := strings.HasPrefix(typeStr, "[]")
 			if len(payload) > 0 {
 				var testArr []any
 				if json.Unmarshal(payload, &testArr) == nil && len(testArr) > 0 {
 					if _, isSubArr := testArr[0].([]any); isSubArr {
-						retField.Type = &ast.ArrayType{Elt: ast.NewIdent(tupleName)}
-					} else {
-						retField.Type = &ast.StarExpr{X: ast.NewIdent(tupleName)}
+						isSlice = true
 					}
-				} else if strings.HasPrefix(typeStr, "[]") {
-					retField.Type = &ast.ArrayType{Elt: ast.NewIdent(tupleName)}
-				} else {
-					retField.Type = &ast.StarExpr{X: ast.NewIdent(tupleName)}
 				}
-			} else if strings.HasPrefix(typeStr, "[]") {
+			}
+
+			if isSlice {
 				retField.Type = &ast.ArrayType{Elt: ast.NewIdent(tupleName)}
 			} else {
 				retField.Type = &ast.StarExpr{X: ast.NewIdent(tupleName)}
@@ -626,7 +748,7 @@ func DeobfuscateFileWithJS(rootDir, contractFile string, jsGlobs []string, dryRu
 	if !dryRun {
 		_, _ = history.Record(
 			rootDir,
-			fmt.Sprintf("vortex ast tuple %s", contractFile),
+			"vortex ast tuple "+contractFile,
 			[]string{absPath},
 		)
 
@@ -639,7 +761,7 @@ func DeobfuscateFileWithJS(rootDir, contractFile string, jsGlobs []string, dryRu
 }
 
 func buildTupleStructDecl(t *InferredTuple) *ast.GenDecl {
-	var fieldList []*ast.Field
+	fieldList := make([]*ast.Field, 0, len(t.Fields))
 	for _, f := range t.Fields {
 		fieldList = append(fieldList, &ast.Field{
 			Names: []*ast.Ident{ast.NewIdent(f.Name)},

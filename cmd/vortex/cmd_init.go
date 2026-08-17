@@ -101,7 +101,7 @@ func (c *CmdInit) Run(ctx context.Context, args []string, stdout, stderr io.Writ
 			stderr,
 			"  vortex init market -tpl=stealth                 # Create pkg/market/api.go (Anti-Bot Scraper)\n",
 		)
-		fmt.Fprintf(stderr, "  vortex init agy -from=traffic.har               # Ingest HAR into pkg/agy/api.go\n")
+		fmt.Fprintf(stderr, "  vortex init client -from=traffic.har            # Ingest HAR into pkg/client/api.go\n")
 		fmt.Fprintf(stderr, "  vortex init auth -from=auth.json -pkg=auth      # Ingest OpenAPI into pkg/auth/api.go\n")
 		fmt.Fprintf(stderr, "  vortex init -tpl=list                           # View full template documentation\n")
 	}

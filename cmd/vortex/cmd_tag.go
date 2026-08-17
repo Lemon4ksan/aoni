@@ -81,22 +81,8 @@ func (c *CmdTag) Run(ctx context.Context, args []string, stdout, stderr io.Write
 		fs.PrintDefaults()
 	}
 
-	var flags, nonFlags []string
-	for i := 0; i < len(args); i++ {
-		arg := args[i]
-		if strings.HasPrefix(arg, "-") {
-			flags = append(flags, arg)
-			if (arg == "-dir" || arg == "-m") &&
-				i+1 < len(args) && !strings.HasPrefix(args[i+1], "-") {
-				flags = append(flags, args[i+1])
-				i++
-			}
-		} else {
-			nonFlags = append(nonFlags, arg)
-		}
-	}
-
-	if err := fs.Parse(append(flags, nonFlags...)); err != nil {
+	posArgs, err := ParseInterspersedFlags(fs, args)
+	if err != nil {
 		return err
 	}
 
@@ -117,7 +103,6 @@ func (c *CmdTag) Run(ctx context.Context, args []string, stdout, stderr io.Write
 
 	var versionArg, contractArg string
 
-	posArgs := fs.Args()
 	if len(posArgs) > 0 {
 		first := strings.ToLower(posArgs[0])
 		switch first {

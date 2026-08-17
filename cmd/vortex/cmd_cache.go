@@ -48,14 +48,18 @@ func (c *CmdCache) Run(ctx context.Context, args []string, stdout, stderr io.Wri
 		return c.runList(ctx, subArgs, stdout, stderr)
 	case "show", "inspect":
 		return c.runShow(ctx, subArgs, stdout, stderr)
-	case "store", "add", "put":
+	case "store", "add", "put", "save":
 		return c.runStore(ctx, subArgs, stdout, stderr)
+	case "move", "mv", "ingest", "absorb":
+		return c.runMove(ctx, subArgs, stdout, stderr)
 	case "sanitize", "clean-har":
 		return c.runSanitize(ctx, subArgs, stdout, stderr)
 	case "export", "restore":
 		return c.runExport(ctx, subArgs, stdout, stderr)
 	case "secrets", "vault", "secret":
 		return c.runSecrets(ctx, subArgs, stdout, stderr)
+	case "delete", "rm", "remove":
+		return c.runDelete(ctx, subArgs, stdout, stderr)
 	case "prune", "clean":
 		return c.runPrune(ctx, subArgs, stdout, stderr)
 	case "help", "-h", "--help":
@@ -75,7 +79,12 @@ func (c *CmdCache) printHelp(stderr io.Writer) error {
 	fmt.Fprintf(stderr, "Usage:\n")
 	fmt.Fprintf(stderr, "  vortex cache list                          List cached traffic sessions\n")
 	fmt.Fprintf(stderr, "  vortex cache show <id|hash>                Show metadata of a cached session\n")
-	fmt.Fprintf(stderr, "  vortex cache store [--move] <files...>     Archive HAR files into cache\n")
+	fmt.Fprintf(stderr, "  vortex cache store <files...>              Archive HAR files into cache (keeps originals)\n")
+	fmt.Fprintf(
+		stderr,
+		"  vortex cache move <files...>               Ingest HAR files into cache and delete originals\n",
+	)
+	fmt.Fprintf(stderr, "  vortex cache delete <id|hash...>           Delete specific cached sessions\n")
 	fmt.Fprintf(stderr, "  vortex cache sanitize <file> -out=<clean>  Export scrubbed, Git-safe HAR\n")
 	fmt.Fprintf(stderr, "  vortex cache export <id|hash> -out=<file>  Restore uncompressed HAR from cache\n")
 	fmt.Fprintf(stderr, "  vortex cache secrets [list|get|set|clear]  Manage local credentials vault\n")
@@ -144,7 +153,7 @@ func (c *CmdCache) runList(_ context.Context, _ []string, stdout, stderr io.Writ
 
 func (c *CmdCache) runShow(_ context.Context, args []string, stdout, _ io.Writer) error {
 	if len(args) == 0 {
-		return errors.New("missing session ID or hash prefix (e.g. 'vortex cache show aistudio')")
+		return errors.New("missing session ID or hash prefix (e.g. 'vortex cache show session_name')")
 	}
 
 	rootDir := c.getRootDir()
@@ -187,12 +196,26 @@ func parseFlagsPreserveOrder(fs *flag.FlagSet, args []string) error {
 	return fs.Parse(append(flags, nonFlags...))
 }
 
-func (c *CmdCache) runStore(_ context.Context, args []string, stdout, stderr io.Writer) error {
-	fs := flag.NewFlagSet("cache store", flag.ContinueOnError)
+func (c *CmdCache) runMove(ctx context.Context, args []string, stdout, stderr io.Writer) error {
+	return c.executeStore(ctx, "cache move", args, true, stdout, stderr)
+}
+
+func (c *CmdCache) runStore(ctx context.Context, args []string, stdout, stderr io.Writer) error {
+	return c.executeStore(ctx, "cache store", args, false, stdout, stderr)
+}
+
+func (c *CmdCache) executeStore(
+	_ context.Context,
+	cmdName string,
+	args []string,
+	defaultMove bool,
+	stdout, stderr io.Writer,
+) error {
+	fs := flag.NewFlagSet(cmdName, flag.ContinueOnError)
 	fs.SetOutput(stderr)
 
 	var (
-		moveFlag     = fs.Bool("move", false, "Move original file into cache (deletes source file on success)")
+		moveFlag     = fs.Bool("move", defaultMove, "Move original file into cache (deletes source file on success)")
 		sanitizeFlag = fs.Bool("sanitize", true, "Sanitize tokens and credentials before storing")
 	)
 
@@ -202,7 +225,7 @@ func (c *CmdCache) runStore(_ context.Context, args []string, stdout, stderr io.
 
 	files := fs.Args()
 	if len(files) == 0 {
-		return errors.New("no HAR files specified to store (e.g. 'vortex cache store session.har')")
+		return fmt.Errorf("no HAR files specified (e.g. 'vortex %s session.har')", cmdName)
 	}
 
 	rootDir := c.getRootDir()
@@ -309,7 +332,9 @@ func (c *CmdCache) runExport(_ context.Context, args []string, stdout, stderr io
 	}
 
 	if len(fs.Args()) == 0 {
-		return errors.New("missing session ID or hash prefix (e.g. 'vortex cache export aistudio -out=restored.har')")
+		return errors.New(
+			"missing session ID or hash prefix (e.g. 'vortex cache export session_name -out=restored.har')",
+		)
 	}
 
 	rootDir := c.getRootDir()
@@ -412,6 +437,28 @@ func (c *CmdCache) runSecrets(_ context.Context, args []string, stdout, stderr i
 	default:
 		return fmt.Errorf("unknown secrets action %q (use list, get, set, clear)", sub)
 	}
+}
+
+func (c *CmdCache) runDelete(_ context.Context, args []string, stdout, _ io.Writer) error {
+	if len(args) == 0 {
+		return errors.New("missing session ID or hash to delete (e.g. `vortex cache rm aistudio.chat_with_settings`)")
+	}
+
+	rootDir := c.getRootDir()
+	for _, id := range args {
+		deleted, err := cache.DeleteTrafficSession(rootDir, id)
+		if err != nil {
+			return fmt.Errorf("deleting session %q: %w", id, err)
+		}
+
+		if deleted {
+			fmt.Fprintf(stdout, "✔ Deleted cached traffic session %q\n", id)
+		} else {
+			fmt.Fprintf(stdout, "⚠️ Session %q not found in cache\n", id)
+		}
+	}
+
+	return nil
 }
 
 func (c *CmdCache) runPrune(_ context.Context, args []string, stdout, stderr io.Writer) error {
