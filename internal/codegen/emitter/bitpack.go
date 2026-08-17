@@ -292,8 +292,8 @@ func emitBitpackMultiWord(buf *bytes.Buffer, bp *ir.BitpackIR, endianOrder strin
 			// Field crosses 64-bit word boundary
 			bitsInFirst := 64 - bitInWord
 			bitsInSecond := f.BitWidth - bitsInFirst
-			mask1Hex := fmt.Sprintf("0x%x", (uint64(1)<<bitsInFirst)-1)
-			mask2Hex := fmt.Sprintf("0x%x", (uint64(1)<<bitsInSecond)-1)
+			mask1Hex := bitMaskHex(bitsInFirst)
+			mask2Hex := bitMaskHex(bitsInSecond)
 			valExpr := fmt.Sprintf("uint64(s.%s)", f.GoName)
 
 			fmt.Fprintf(buf, "\tw%d |= (%s & %s) << %d\n", wordIdx, valExpr, mask1Hex, bitInWord)
@@ -404,8 +404,8 @@ func emitBitpackMultiWord(buf *bytes.Buffer, bp *ir.BitpackIR, endianOrder strin
 			// Field crosses 64-bit word boundary
 			bitsInFirst := 64 - bitInWord
 			bitsInSecond := f.BitWidth - bitsInFirst
-			mask1Hex := fmt.Sprintf("0x%x", (uint64(1)<<bitsInFirst)-1)
-			mask2Hex := fmt.Sprintf("0x%x", (uint64(1)<<bitsInSecond)-1)
+			mask1Hex := bitMaskHex(bitsInFirst)
+			mask2Hex := bitMaskHex(bitsInSecond)
 
 			fmt.Fprintf(
 				buf,
@@ -488,6 +488,16 @@ func emitBitpackBatchSlice(buf *bytes.Buffer, bp *ir.BitpackIR) {
 	fmt.Fprintf(buf, "\t}\n\n")
 	fmt.Fprintf(buf, "\treturn dst, nil\n")
 	fmt.Fprintf(buf, "}\n\n")
+}
+
+func bitMaskHex(bitWidth int) string {
+	if bitWidth >= 64 {
+		return "0xffffffffffffffff"
+	}
+	if bitWidth <= 0 {
+		return "0x0"
+	}
+	return fmt.Sprintf("0x%x", (uint64(1)<<bitWidth)-1)
 }
 
 func defaultTypeBitWidth(typeName string) int {

@@ -342,11 +342,26 @@ func (p *Pipeline[Req, Resp]) dispatchHedgingAttempts(
 		firstErr    error
 	)
 
+	drainRemainder := func(remaining int) {
+		if remaining <= 0 {
+			return
+		}
+		go func(count int) {
+			for i := 0; i < count; i++ {
+				r := <-resultsCh
+				if r.resp != nil && r.resp.Body != nil {
+					_ = r.resp.Body.Close()
+				}
+			}
+		}(remaining)
+	}
+
 	activeCount := 1
 
 	for activeCount > 0 {
 		select {
 		case <-req.Context().Done():
+			drainRemainder(activeCount)
 			return nil, req.Context().Err()
 
 		case <-timer.C:
@@ -361,6 +376,7 @@ func (p *Pipeline[Req, Resp]) dispatchHedgingAttempts(
 			activeCount--
 
 			if res.err == nil {
+				drainRemainder(activeCount)
 				return p.handleHedgeWinner(res, ctx2, cancel1, cancel2, cleanup), nil
 			}
 

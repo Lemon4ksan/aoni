@@ -30,6 +30,7 @@ import (
 	"os/exec"
 	"os/signal"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"syscall"
@@ -398,6 +399,7 @@ func (c *CmdRecord) Run(ctx context.Context, args []string, stdout, stderr io.Wr
 			tlsConfig := &tls.Config{
 				Certificates: []tls.Certificate{*leafCert},
 				MinVersion:   tls.VersionTLS12,
+				NextProtos:   []string{"http/1.1"},
 			}
 
 			tlsConn := tls.Server(clientConn, tlsConfig)
@@ -581,6 +583,9 @@ func (c *CmdRecord) Run(ctx context.Context, args []string, stdout, stderr io.Wr
 			"PYTHONHTTPSVERIFY=0",
 		)
 
+		cleanupCA := installSystemRootCA(caFilePath)
+		defer cleanupCA()
+
 		runErr := subCmd.Run()
 
 		// Brief flush window for trailing keep-alive requests
@@ -733,8 +738,43 @@ func handleDecryptedHTTPS(
 			return
 		}
 
-		respBodyBytes, _ := io.ReadAll(fwdResp.Body)
-		_ = fwdResp.Body.Close()
+		// Check for WebSocket upgrade
+		if fwdResp.StatusCode == http.StatusSwitchingProtocols || strings.EqualFold(req.Header.Get("Upgrade"), "websocket") {
+			_ = fwdResp.Write(tlsConn)
+			if serverConn, ok := fwdResp.Body.(io.ReadWriteCloser); ok {
+				go func() {
+					_, _ = io.Copy(serverConn, tlsConn)
+					_ = serverConn.Close()
+				}()
+				_, _ = io.Copy(tlsConn, serverConn)
+			}
+			return
+		}
+
+		isStreaming := strings.Contains(fwdResp.Header.Get("Content-Type"), "text/event-stream") ||
+			strings.Contains(fwdResp.Header.Get("Content-Type"), "ndjson") ||
+			strings.Contains(fwdResp.Header.Get("Content-Type"), "grpc") ||
+			(fwdResp.ContentLength < 0 && len(fwdResp.TransferEncoding) > 0)
+
+		var respBodyBytes []byte
+		if isStreaming {
+			var captured bytes.Buffer
+			tee := io.TeeReader(fwdResp.Body, io.MultiWriter(tlsConn, &captured))
+			fwdResp.Body = io.NopCloser(tee)
+			_ = fwdResp.Write(tlsConn)
+			_ = fwdResp.Body.Close()
+			respBodyBytes = captured.Bytes()
+		} else {
+			respBodyBytes, _ = io.ReadAll(fwdResp.Body)
+			_ = fwdResp.Body.Close()
+
+			fwdResp.Body = io.NopCloser(bytes.NewBuffer(respBodyBytes))
+			fwdResp.ContentLength = int64(len(respBodyBytes))
+
+			if err := fwdResp.Write(tlsConn); err != nil {
+				return
+			}
+		}
 
 		var respHeaders []harNV
 		for k, v := range fwdResp.Header {
@@ -787,14 +827,6 @@ func handleDecryptedHTTPS(
 				start.Format("15:04:05"), req.Method, req.URL.Path, fwdResp.StatusCode, duration, len(respBodyBytes))
 		}
 
-		// Write response back to client
-		fwdResp.Body = io.NopCloser(bytes.NewBuffer(respBodyBytes))
-		fwdResp.ContentLength = int64(len(respBodyBytes))
-
-		if err := fwdResp.Write(tlsConn); err != nil {
-			return
-		}
-
 		if req.Close || fwdResp.Close {
 			return
 		}
@@ -815,4 +847,19 @@ func (r *recordResponseWriter) WriteHeader(status int) {
 func (r *recordResponseWriter) Write(b []byte) (int, error) {
 	r.body.Write(b)
 	return r.ResponseWriter.Write(b)
+}
+
+func installSystemRootCA(caFilePath string) func() {
+	if runtime.GOOS == "windows" {
+		// Temporary add to current user Root store
+		addCmd := exec.Command("certutil", "-addstore", "-user", "Root", caFilePath)
+		_ = addCmd.Run()
+
+		return func() {
+			delCmd := exec.Command("certutil", "-delstore", "-user", "Root", "Vortex MITM Root CA")
+			_ = delCmd.Run()
+		}
+	}
+
+	return func() {}
 }

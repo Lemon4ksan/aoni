@@ -376,6 +376,8 @@ func HARToOpenAPI(data []byte) (*openapi3.T, error) {
 		doc.Info.Extensions["x-vortex-headers"] = commonHeaders
 	}
 
+	UnifyComponentsSchemas(doc)
+
 	return doc, nil
 }
 
@@ -570,5 +572,137 @@ func valueToSchema(v any) *openapi3.Schema {
 
 	default:
 		return openapi3.NewStringSchema()
+	}
+}
+
+// UnifyComponentsSchemas deduplicates identical schemas in Components.Schemas
+// by mapping structurally equivalent models to a single unified canonical DTO.
+func UnifyComponentsSchemas(doc *openapi3.T) {
+	if doc == nil || doc.Components == nil || len(doc.Components.Schemas) <= 1 {
+		return
+	}
+
+	type schemaGroup struct {
+		canonicalName string
+		aliases       []string
+	}
+
+	sigToGroup := make(map[string]*schemaGroup)
+
+	// Collect schema names deterministically
+	names := make([]string, 0, len(doc.Components.Schemas))
+	for name := range doc.Components.Schemas {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+
+	for _, name := range names {
+		ref := doc.Components.Schemas[name]
+		if ref == nil || ref.Value == nil || len(ref.Value.Properties) < 2 {
+			continue
+		}
+
+		sig := computeSchemaFingerprint(ref.Value)
+		if sig == "" {
+			continue
+		}
+
+		if grp, exists := sigToGroup[sig]; exists {
+			grp.aliases = append(grp.aliases, name)
+		} else {
+			sigToGroup[sig] = &schemaGroup{
+				canonicalName: name,
+				aliases:       nil,
+			}
+		}
+	}
+
+	// Build rename map: oldName -> canonicalName
+	replacements := make(map[string]string)
+	for _, grp := range sigToGroup {
+		for _, alias := range grp.aliases {
+			replacements[alias] = grp.canonicalName
+			delete(doc.Components.Schemas, alias)
+		}
+	}
+
+	if len(replacements) == 0 {
+		return
+	}
+
+	// Re-point all references in paths
+	if doc.Paths != nil {
+		for _, pathItem := range doc.Paths.Map() {
+			if pathItem == nil {
+				continue
+			}
+			for _, op := range pathItem.Operations() {
+				if op == nil {
+					continue
+				}
+				if op.RequestBody != nil && op.RequestBody.Value != nil {
+					for _, media := range op.RequestBody.Value.Content {
+						rewriteSchemaRef(media.Schema, replacements)
+					}
+				}
+				if op.Responses != nil {
+					for _, respRef := range op.Responses.Map() {
+						if respRef != nil && respRef.Value != nil {
+							for _, media := range respRef.Value.Content {
+								rewriteSchemaRef(media.Schema, replacements)
+							}
+						}
+					}
+				}
+			}
+		}
+	}
+}
+
+func computeSchemaFingerprint(s *openapi3.Schema) string {
+	if s == nil || len(s.Properties) == 0 {
+		return ""
+	}
+	keys := make([]string, 0, len(s.Properties))
+	for k := range s.Properties {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+
+	var sb strings.Builder
+	for _, k := range keys {
+		prop := s.Properties[k]
+		typeStr := "unknown"
+		if prop != nil && prop.Value != nil && prop.Value.Type != nil && len(*prop.Value.Type) > 0 {
+			typeStr = (*prop.Value.Type)[0]
+		}
+		sb.WriteString(k)
+		sb.WriteString(":")
+		sb.WriteString(typeStr)
+		sb.WriteString(";")
+	}
+	return sb.String()
+}
+
+func rewriteSchemaRef(ref *openapi3.SchemaRef, replacements map[string]string) {
+	if ref == nil {
+		return
+	}
+	if ref.Ref != "" {
+		const prefix = "#/components/schemas/"
+		if strings.HasPrefix(ref.Ref, prefix) {
+			oldName := strings.TrimPrefix(ref.Ref, prefix)
+			if canonical, ok := replacements[oldName]; ok {
+				ref.Ref = prefix + canonical
+			}
+		}
+	}
+	if ref.Value != nil {
+		if ref.Value.Items != nil {
+			rewriteSchemaRef(ref.Value.Items, replacements)
+		}
+		for _, p := range ref.Value.Properties {
+			rewriteSchemaRef(p, replacements)
+		}
 	}
 }

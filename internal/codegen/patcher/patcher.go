@@ -190,16 +190,21 @@ func (p *Patcher) renderMethodField(m *ir.MethodIR) *ast.Field {
 		},
 	})
 
-	// Returns: (*json.RawMessage, error)
+	// Returns
 	returns := make([]*ast.Field, 0, 2)
-	returns = append(returns, &ast.Field{
-		Type: &ast.StarExpr{
-			X: &ast.SelectorExpr{
-				X:   ast.NewIdent("json"),
-				Sel: ast.NewIdent("RawMessage"),
-			},
-		},
-	})
+	if m.Return != nil && !m.Return.IsVoid {
+		retTypeName := m.Return.SuccessType.Name
+		if retTypeName == "" {
+			retTypeName = "*json.RawMessage"
+		}
+		returns = append(returns, &ast.Field{
+			Type: p.parseTypeExpr(retTypeName),
+		})
+	} else if m.Return == nil {
+		returns = append(returns, &ast.Field{
+			Type: p.parseTypeExpr("*json.RawMessage"),
+		})
+	}
 	returns = append(returns, &ast.Field{
 		Type: ast.NewIdent("error"),
 	})
