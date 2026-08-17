@@ -432,9 +432,13 @@ func (r *Rotator) Do(req *http.Request) (*http.Response, error) {
 	clients := r.clients
 	r.mu.RUnlock()
 
+	n := uint32(len(clients)) //nolint:gosec
+	if n == 0 {
+		return nil, ErrNoProxyClients
+	}
+
 	var (
 		lastErr       error
-		n             = uint32(len(clients)) //nolint:gosec
 		sessionID     string
 		stickyIdx     = -1
 		hasCooledDown = false

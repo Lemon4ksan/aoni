@@ -164,17 +164,19 @@ type SSEEvent struct {
 }
 
 func parseSSELine(line string, currentEvent *SSEEvent) {
-	line = strings.TrimSpace(line)
+	// Strip trailing CRLF
+	line = strings.TrimRight(line, "\r\n")
 	if line == "" || strings.HasPrefix(line, ":") {
 		return
 	}
 
-	parts := strings.SplitN(line, ":", 2)
-	key := parts[0]
-
-	var value string
-	if len(parts) > 1 {
-		value = strings.TrimSpace(parts[1])
+	var key, value string
+	if idx := strings.IndexByte(line, ':'); idx != -1 {
+		key = line[:idx]
+		value = strings.TrimPrefix(line[idx+1:], " ")
+	} else {
+		key = line
+		value = ""
 	}
 
 	switch key {
@@ -191,7 +193,7 @@ func parseSSELine(line string, currentEvent *SSEEvent) {
 	case "id":
 		currentEvent.ID = value
 	case "retry":
-		if r, err := strconv.Atoi(value); err == nil {
+		if r, err := strconv.Atoi(strings.TrimSpace(value)); err == nil {
 			currentEvent.Retry = r
 		}
 	}
@@ -199,6 +201,11 @@ func parseSSELine(line string, currentEvent *SSEEvent) {
 
 func dispatchSSEEvent[T any](ctx context.Context, currentEvent SSEEvent, out chan<- T) error {
 	if currentEvent.Data == "" && currentEvent.Event == "" {
+		return nil
+	}
+
+	// Gracefully handle LLM stream completion signals (e.g. OpenAI / Gemini data: [DONE])
+	if strings.EqualFold(strings.TrimSpace(currentEvent.Data), "[DONE]") {
 		return nil
 	}
 
