@@ -78,16 +78,17 @@ func (c *CmdRefactor) Run(ctx context.Context, args []string, stdout, stderr io.
 		dryRunFlag  = fs.Bool("dry-run", false, "Preview AST refactor without writing changes to disk")
 		genFlag     = fs.Bool("gen", true, "Automatically re-generate API clients after refactoring")
 		dirFlag     = fs.String("dir", "", "Target workspace directory (default: current root)")
+		jsFlag      = fs.String("js", "", "JavaScript bundle files or glob patterns for schema extraction (e.g. '*.js')")
 	)
 
 	fs.Usage = func() {
 		fmt.Fprintf(stderr, "vortex ast — AST Contract Refactoring & Tuple Deobfuscation\n\n")
 		fmt.Fprintf(stderr, "Usage:\n")
-		fmt.Fprintf(stderr, "  vortex ast tuple [file.go|contract] [--dry-run]\n")
+		fmt.Fprintf(stderr, "  vortex ast tuple [file.go|contract] [--js=\"*.js\"] [--dry-run]\n")
 		fmt.Fprintf(stderr, "  vortex ast split --from=<Interface> --methods=\"Get*,List*\" --to=<NewInterface> [--out=path.go]\n")
 		fmt.Fprintf(stderr, "  vortex ast rename --match=\"Fetch(.*)\" --replace=\"Get$1\" [file.go|contract]\n\n")
 		fmt.Fprintf(stderr, "Examples:\n")
-		fmt.Fprintf(stderr, "  vortex ast tuple pkg/agy/makersuite.go\n")
+		fmt.Fprintf(stderr, "  vortex ast tuple pkg/agy/makersuite.go --js=\"*.js\"\n")
 		fmt.Fprintf(stderr, "  vortex ast split --from=MarketAPI --methods=\"Get*,List*\" --to=MarketReaderAPI\n")
 		fmt.Fprintf(
 			stderr,
@@ -103,7 +104,7 @@ func (c *CmdRefactor) Run(ctx context.Context, args []string, stdout, stderr io.
 		if strings.HasPrefix(arg, "-") {
 			flags = append(flags, arg)
 			if (arg == "-from" || arg == "-to" || arg == "-methods" || arg == "-match" ||
-				arg == "-replace" || arg == "-out" || arg == "-dir") &&
+				arg == "-replace" || arg == "-out" || arg == "-dir" || arg == "-js") &&
 				i+1 < len(args) && !strings.HasPrefix(args[i+1], "-") {
 				flags = append(flags, args[i+1])
 				i++
@@ -172,7 +173,7 @@ func (c *CmdRefactor) Run(ctx context.Context, args []string, stdout, stderr io.
 		if target == "" {
 			target = *fromFlag
 		}
-		return c.runTuple(ctx, stdout, targetDir, cfg, target, *dryRunFlag, *genFlag)
+		return c.runTuple(ctx, stdout, targetDir, cfg, target, *jsFlag, *dryRunFlag, *genFlag)
 
 	case "split":
 		from := *fromFlag
@@ -201,10 +202,11 @@ func (c *CmdRefactor) runTuple(
 	rootDir string,
 	cfg *project.Config,
 	target string,
+	jsPattern string,
 	dryRun, autoGen bool,
 ) error {
 	if target == "" {
-		return errors.New("usage: vortex ast tuple <file.go|contract>")
+		return errors.New("usage: vortex ast tuple <file.go|contract> [--js=\"*.js\"]")
 	}
 
 	srcFile := resolveFilePath(rootDir, cfg, target)
@@ -212,7 +214,17 @@ func (c *CmdRefactor) runTuple(
 		return fmt.Errorf("could not resolve contract %q", target)
 	}
 
-	res, err := tuple.DeobfuscateFile(rootDir, srcFile, dryRun)
+	var jsGlobs []string
+	if jsPattern != "" {
+		for _, p := range strings.Split(jsPattern, ",") {
+			p = strings.TrimSpace(p)
+			if p != "" {
+				jsGlobs = append(jsGlobs, p)
+			}
+		}
+	}
+
+	res, err := tuple.DeobfuscateFileWithJS(rootDir, srcFile, jsGlobs, dryRun)
 	if err != nil {
 		return err
 	}

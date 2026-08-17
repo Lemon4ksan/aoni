@@ -21,6 +21,7 @@ import (
 	"github.com/lemon4ksan/aoni/internal/codegen/builder"
 	"github.com/lemon4ksan/aoni/internal/codegen/history"
 	"github.com/lemon4ksan/aoni/internal/codegen/ir"
+	"github.com/lemon4ksan/aoni/internal/codegen/jsbundle"
 )
 
 // InferredTuple represents a generated or refactored tuple struct definition.
@@ -415,9 +416,41 @@ func inferGoType(val any) string {
 	}
 }
 
+// InferTupleFromJSONWithJS parses a raw JSON sample payload and enriches the inferred fields
+// with exact names and nested types discovered from JavaScript bundles.
+func InferTupleFromJSONWithJS(structName string, jsonPayload []byte, jsScan *jsbundle.ScanResult) (*InferredTuple, error) {
+	inf, err := InferTupleFromJSON(structName, jsonPayload)
+	if err != nil {
+		return nil, err
+	}
+
+	if jsScan != nil && inf != nil {
+		for i, f := range inf.Fields {
+			idx, pErr := strconv.Atoi(f.TagPath)
+			if pErr == nil {
+				if desc, ok := jsScan.FindFieldDescriptor(structName, idx); ok {
+					if desc.Name != "" && !strings.HasPrefix(desc.Name, "Field") {
+						inf.Fields[i].Name = desc.Name
+					}
+					if desc.IsNested && desc.SubMsgType != "" {
+						inf.Fields[i].GoType = desc.SubMsgType + "Tuple"
+					}
+				}
+			}
+		}
+	}
+
+	return inf, nil
+}
+
 // DeobfuscateFile scans contract file methods with nested slice signatures, loads recorded
 // fixtures from @source, infers @aoni:tuple struct definitions, and refactors the AST.
 func DeobfuscateFile(rootDir, contractFile string, dryRun bool) (*DeobfuscateResult, error) {
+	return DeobfuscateFileWithJS(rootDir, contractFile, nil, dryRun)
+}
+
+// DeobfuscateFileWithJS performs tuple deobfuscation cross-referencing JavaScript bundles.
+func DeobfuscateFileWithJS(rootDir, contractFile string, jsGlobs []string, dryRun bool) (*DeobfuscateResult, error) {
 	absPath := contractFile
 	if !filepath.IsAbs(absPath) && rootDir != "" {
 		absPath = filepath.Join(rootDir, absPath)
@@ -427,6 +460,25 @@ func DeobfuscateFile(rootDir, contractFile string, dryRun bool) (*DeobfuscateRes
 	fileAst, err := parser.ParseFile(fset, absPath, nil, parser.ParseComments)
 	if err != nil {
 		return nil, fmt.Errorf("parsing %s: %w", absPath, err)
+	}
+
+	// Scan JavaScript bundles if provided or auto-discover in root directory
+	var jsScan *jsbundle.ScanResult
+	if len(jsGlobs) > 0 {
+		var resolvedGlobs []string
+		for _, g := range jsGlobs {
+			if !filepath.IsAbs(g) && rootDir != "" {
+				resolvedGlobs = append(resolvedGlobs, filepath.Join(rootDir, g))
+			} else {
+				resolvedGlobs = append(resolvedGlobs, g)
+			}
+		}
+		jsScan, _ = jsbundle.ScanFiles(resolvedGlobs)
+	} else if rootDir != "" {
+		// Auto-discover local .js files
+		if autoMatches, aErr := filepath.Glob(filepath.Join(rootDir, "*.js")); aErr == nil && len(autoMatches) > 0 {
+			jsScan, _ = jsbundle.ScanFiles(autoMatches)
+		}
 	}
 
 	// 1. Extract @source from service interface
@@ -509,7 +561,7 @@ func DeobfuscateFile(rootDir, contractFile string, dryRun bool) (*DeobfuscateRes
 
 			var inf *InferredTuple
 			if len(payload) > 0 {
-				inf, _ = InferTupleFromJSON(tupleName, payload)
+				inf, _ = InferTupleFromJSONWithJS(tupleName, payload, jsScan)
 			}
 
 			if inf == nil {

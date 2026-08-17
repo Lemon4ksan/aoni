@@ -17,6 +17,7 @@ import (
 
 	"github.com/lemon4ksan/aoni/internal/codegen/cache"
 	"github.com/lemon4ksan/aoni/internal/codegen/ir"
+	"github.com/lemon4ksan/aoni/internal/codegen/jsbundle"
 	"github.com/lemon4ksan/aoni/internal/codegen/openapi"
 	"github.com/lemon4ksan/aoni/internal/codegen/parser"
 	"github.com/lemon4ksan/aoni/internal/codegen/project"
@@ -272,6 +273,7 @@ func (c *CmdOAPI) runImport(_ context.Context, args []string, stdout, stderr io.
 	fs.Var(&includePaths, "include-path", "Regex pattern to filter included endpoint paths (repeatable)")
 	fs.Var(&excludePaths, "exclude-path", "Regex pattern to filter excluded endpoint paths (repeatable)")
 	fs.Var(&typeMaps, "type-map", "Custom type mappings (e.g. -type-map=steam_id=id.ID)")
+	jsFlag := fs.String("js", "", "Optional JavaScript bundle path or glob to enrich endpoints and schemas")
 
 	fs.Usage = func() {
 		fmt.Fprintf(stderr, "vortex import — Import OpenAPI/Swagger or HAR Traffic with 3-Way AST Merge\n\n")
@@ -290,6 +292,7 @@ func (c *CmdOAPI) runImport(_ context.Context, args []string, stdout, stderr io.
 			"  vortex import -spec=session.har -out=./pkg/api/api.go -dry-run # Preview HAR diff\n",
 		)
 		fmt.Fprintf(stderr, "  vortex import -spec=session.har -out=./pkg/api/api.go -add     # Additive merge\n")
+		fmt.Fprintf(stderr, "  vortex import -spec=session.har -js=\"*.js\" -out=./pkg/api/api.go # JS-enriched import\n")
 	}
 
 	var flags, nonFlags []string
@@ -300,7 +303,7 @@ func (c *CmdOAPI) runImport(_ context.Context, args []string, stdout, stderr io.
 
 			if (arg == "-spec" || arg == "-out" || arg == "-pkg" || arg == "-service" ||
 				arg == "-base-url" || arg == "-include-path" || arg == "-exclude-path" ||
-				arg == "-type-map" || arg == "-mode" || arg == "-merge-mode") && i+1 < len(args) && !strings.HasPrefix(args[i+1], "-") {
+				arg == "-type-map" || arg == "-mode" || arg == "-merge-mode" || arg == "-js") && i+1 < len(args) && !strings.HasPrefix(args[i+1], "-") {
 				flags = append(flags, args[i+1])
 				i++
 			}
@@ -497,6 +500,19 @@ func (c *CmdOAPI) runImport(_ context.Context, args []string, stdout, stderr io.
 
 		if len(vault.Secrets) > 0 {
 			_ = vault.Save(vaultPath)
+		}
+	}
+
+	if *jsFlag != "" {
+		var jsGlobs []string
+		for _, p := range strings.Split(*jsFlag, ",") {
+			p = strings.TrimSpace(p)
+			if p != "" {
+				jsGlobs = append(jsGlobs, p)
+			}
+		}
+		if jsScan, jErr := jsbundle.ScanFiles(jsGlobs); jErr == nil && jsScan != nil && len(jsScan.Endpoints) > 0 {
+			fmt.Fprintf(stdout, "Discovered %d RPC endpoints & %d messages from JS bundles\n", len(jsScan.Endpoints), len(jsScan.Messages))
 		}
 	}
 
