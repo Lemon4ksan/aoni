@@ -2,7 +2,7 @@
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
-package generator
+package gen
 
 import (
 	"errors"
@@ -11,7 +11,7 @@ import (
 	"strings"
 
 	"github.com/lemon4ksan/aoni/ast"
-	"github.com/lemon4ksan/aoni/oracle/spec"
+	"github.com/lemon4ksan/aoni/internal/codegen/oracle/spec"
 )
 
 // GenerateGo compiles an OracleSpec AST into strongly-typed Go declarative contracts using aoni/ast.

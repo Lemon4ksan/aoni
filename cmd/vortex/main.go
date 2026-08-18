@@ -54,6 +54,7 @@ func main() {
 		&CmdCompletion{},
 		&CmdEnv{},
 		&CmdSmoke{},
+		&CmdOracle{},
 	}
 
 	app := NewApp(

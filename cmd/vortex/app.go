@@ -42,7 +42,7 @@ var commandGroups = []commandGroup{
 	{
 		Title: "Traffic, Reverse Engineering & Drift",
 		Commands: []string{
-			"diff", "record", "review", "stack", "accept", "cherry-pick", "refactor", "upstream",
+			"diff", "record", "review", "stack", "accept", "cherry-pick", "refactor", "upstream", "oracle",
 		},
 	},
 	{

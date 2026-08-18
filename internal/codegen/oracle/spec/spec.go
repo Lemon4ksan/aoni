@@ -3,7 +3,7 @@
 // license that can be found in the LICENSE file.
 
 // Package spec provides the programmatic Abstract Syntax Tree (AST)
-// and schema definitions for declaring Browser Attestation Oracles.
+// and schema definitions for declaring Vortex Browser Attestation Oracles.
 package spec
 
 // OracleSpec defines the full specification of a browser attestation oracle sidecar.
