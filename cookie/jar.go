@@ -16,8 +16,8 @@ import (
 	asyncctx "github.com/lemon4ksan/foundation/async/context"
 	"github.com/lemon4ksan/foundation/async/sync/keylock"
 	"github.com/lemon4ksan/foundation/generic"
+	"github.com/lemon4ksan/foundation/net/psl"
 	"github.com/lemon4ksan/foundation/silicon/clock"
-	"golang.org/x/net/publicsuffix"
 )
 
 type (
@@ -124,7 +124,7 @@ func (p *ProxyIsolatedJar) GetJarForProxy(proxyURL string) http.CookieJar {
 	}
 
 	baseJar, err := cookiejar.New(&cookiejar.Options{
-		PublicSuffixList: publicsuffix.List,
+		PublicSuffixList: psl.List,
 	})
 	if err != nil {
 		return nil
