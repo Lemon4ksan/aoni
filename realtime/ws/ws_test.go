@@ -1758,3 +1758,25 @@ func TestIsForbiddenH2ConnectHeader(t *testing.T) {
 		assert.False(t, isForbiddenH2ConnectHeader(h), "header %s should be allowed", h)
 	}
 }
+
+func TestDialResult_And_ReadMessageResult(t *testing.T) {
+	t.Parallel()
+
+	s, c := tcpPipe(t)
+	t.Cleanup(func() {
+		_ = s.Close()
+		_ = c.Close()
+	})
+
+	raw := WrapRawConn(c, true)
+	t.Cleanup(func() { _ = raw.Close() })
+
+	msg := Message{Type: FrameText, Payload: []byte("hello ws")}
+	assert.True(t, msg.IsText())
+	assert.False(t, msg.IsBinary())
+	assert.Equal(t, "hello ws", msg.Text())
+
+	// Read on nil
+	res := ReadMessageResult(nil)
+	assert.False(t, res.IsSuccess())
+}

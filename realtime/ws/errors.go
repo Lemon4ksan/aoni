@@ -11,6 +11,9 @@ var (
 	// or returned invalid upgrade response headers.
 	ErrBadHandshake = errors.New("aoni/ws: bad handshake")
 
+	// ErrNilConnection indicates the connection is nil.
+	ErrNilConnection = errors.New("aoni/ws: nil connection")
+
 	// ErrUnsupportedWSScheme indicates an invalid URI scheme was provided (expected ws:// or wss://).
 	ErrUnsupportedWSScheme = errors.New("aoni/ws: unsupported scheme (expected ws or wss)")
 

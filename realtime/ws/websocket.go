@@ -417,7 +417,7 @@ func (m Message) Text() string { return bytesconv.B2S(m.Payload) }
 // ReadMessageResult reads the next message from conn and wraps the outcome in a [generic.Result].
 func ReadMessageResult(conn Conn) generic.Result[Message] {
 	if conn == nil {
-		return generic.Failure[Message](errors.New("aoni/ws: nil connection"))
+		return generic.Failure[Message](ErrNilConnection)
 	}
 
 	msgType, payload, err := conn.ReadMessage()
@@ -442,4 +442,3 @@ func DialResult(
 
 	return generic.Success(conn), resp
 }
-

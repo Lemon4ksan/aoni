@@ -668,6 +668,15 @@ func resolveProtoTargetInstance(targetPtr any) (proto.Message, error) {
 			return msg, nil
 		}
 
+		if elem.Kind() == reflect.Pointer && elem.IsNil() && elem.CanSet() {
+			elem.Set(reflect.New(elem.Type().Elem()))
+
+			if msg, ok := elem.Interface().(proto.Message); ok {
+				return msg, nil
+			}
+		}
+	}
+
 	return nil, ErrTargetNotProtoMessage
 }
 
@@ -700,6 +709,15 @@ func NewNDJSONReader[T any](r io.ReadCloser) *NDJSONReader[T] {
 	}
 }
 
+// StreamNDJSON creates an [NDJSONReader] over the stream.
+func StreamNDJSON[T any](s *Stream) *NDJSONReader[T] {
+	if s == nil || s.resp == nil {
+		return nil
+	}
+
+	return NewNDJSONReader[T](s.resp.Body)
+}
+
 // Next decodes the next JSON record in the stream as a [generic.Result].
 // When the stream finishes normally, it returns a Failure wrapping [io.EOF].
 func (r *NDJSONReader[T]) Next() generic.Result[T] {
@@ -723,13 +741,3 @@ func (r *NDJSONReader[T]) Close() error {
 
 	return r.closer.Close()
 }
-
-// NDJSON creates an [NDJSONReader] over the stream.
-func (s *Stream) NDJSON[T any]() *NDJSONReader[T] {
-	if s == nil || s.resp == nil {
-		return nil
-	}
-
-	return NewNDJSONReader[T](s.resp.Body)
-}
-

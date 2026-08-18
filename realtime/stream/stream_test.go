@@ -485,4 +485,31 @@ func TestStreamSSE_DoneAndIndentation(t *testing.T) {
 		require.Len(t, events, 1)
 		assert.Equal(t, "  def foo():\n      return 42", events[0].Data)
 	})
+
+	t.Run("NDJSONReader_Sequential", func(t *testing.T) {
+		t.Parallel()
+
+		type Msg struct {
+			Text string `json:"text"`
+		}
+
+		r := io.NopCloser(strings.NewReader("{\"text\":\"first\"}\n{\"text\":\"second\"}\n"))
+		ndjson := stream.NewNDJSONReader[Msg](r)
+		t.Cleanup(func() { _ = ndjson.Close() })
+
+		res1 := ndjson.Next()
+		require.True(t, res1.IsSuccess())
+		val1, err := res1.Unwrap()
+		require.NoError(t, err)
+		assert.Equal(t, "first", val1.Text)
+
+		res2 := ndjson.Next()
+		require.True(t, res2.IsSuccess())
+		val2, err := res2.Unwrap()
+		require.NoError(t, err)
+		assert.Equal(t, "second", val2.Text)
+
+		res3 := ndjson.Next()
+		assert.False(t, res3.IsSuccess())
+	})
 }
