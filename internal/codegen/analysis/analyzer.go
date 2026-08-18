@@ -8,6 +8,8 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/lemon4ksan/foundation/generic"
+
 	"github.com/lemon4ksan/aoni/internal/codegen/ir"
 )
 
@@ -73,13 +75,23 @@ func (a *Analyzer) Analyze(root *ir.RootIR) []Diagnostic {
 
 // HasErrors returns true if the diagnostics list contains at least one SeverityError.
 func HasErrors(diags []Diagnostic) bool {
-	for _, d := range diags {
-		if d.Severity == SeverityError {
-			return true
-		}
-	}
+	return generic.Any(diags, func(d Diagnostic) bool {
+		return d.Severity == SeverityError
+	})
+}
 
-	return false
+// Errors returns only the diagnostics with SeverityError.
+func Errors(diags []Diagnostic) []Diagnostic {
+	return generic.Filter(diags, func(d Diagnostic) bool {
+		return d.Severity == SeverityError
+	})
+}
+
+// Warnings returns only the diagnostics with SeverityWarning.
+func Warnings(diags []Diagnostic) []Diagnostic {
+	return generic.Filter(diags, func(d Diagnostic) bool {
+		return d.Severity == SeverityWarning
+	})
 }
 
 func (a *Analyzer) analyzeService(svc *ir.ServiceIR) []Diagnostic {

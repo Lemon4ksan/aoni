@@ -101,5 +101,11 @@ func TestAnalyzer(t *testing.T) {
 		diags := a.Analyze(root)
 		require.True(t, analysis.HasErrors(diags))
 		require.Contains(t, diags[0].Message, "path variable {user_id} does not match any method parameter")
+
+		errs := analysis.Errors(diags)
+		require.NotEmpty(t, errs)
+
+		warns := analysis.Warnings(diags)
+		require.Empty(t, warns)
 	})
 }

@@ -180,3 +180,34 @@ func TestExportNetscape(t *testing.T) {
 	assert.Contains(t, netscapeText, "# Netscape HTTP Cookie File")
 	assert.Contains(t, netscapeText, "example.com\tFALSE\t/\tFALSE\t0\tsession\tabc123")
 }
+
+func TestProxyIsolatedJar_FindCookie_And_GetCookieValue(t *testing.T) {
+	t.Parallel()
+
+	jar := cookie.NewProxyIsolatedJar()
+	u, _ := url.Parse("https://example.com/login")
+
+	jar.SetCookies(u, []*http.Cookie{
+		{Name: "auth_token", Value: "secret-token-123"},
+		{Name: "theme", Value: "dark"},
+	})
+
+	// FindCookie
+	cOpt := jar.FindCookie(u, "auth_token")
+	require.True(t, cOpt.IsPresent())
+	c, ok := cOpt.Value()
+	require.True(t, ok)
+	assert.Equal(t, "secret-token-123", c.Value)
+
+	// Missing cookie
+	missingOpt := jar.FindCookie(u, "non_existent")
+	assert.False(t, missingOpt.IsPresent())
+
+	// GetCookieValue
+	valOpt := jar.GetCookieValue(u, "theme")
+	require.True(t, valOpt.IsPresent())
+	assert.Equal(t, "dark", valOpt.ValueOr("light"))
+
+	missingValOpt := jar.GetCookieValue(u, "missing_setting")
+	assert.Equal(t, "default_setting", missingValOpt.ValueOr("default_setting"))
+}
