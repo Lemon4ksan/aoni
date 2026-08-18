@@ -109,7 +109,7 @@ const (
 type RequestModifier = pipeline.RequestModifier
 
 // ClientOption represents a functional option configuring immutable [Client] initialization.
-type ClientOption generic.Option[*Config]
+type ClientOption = generic.Option[*Config]
 
 // Middleware decorates a [RequestDoer] with request/response interception logic
 // (e.g. Rate Limiting, Retries, Circuit Breaking, Logging, Chaos Engineering).

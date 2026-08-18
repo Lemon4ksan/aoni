@@ -11,6 +11,7 @@ import (
 	"unicode"
 
 	"github.com/getkin/kin-openapi/openapi3"
+	"github.com/lemon4ksan/foundation/generic"
 	"gopkg.in/yaml.v3"
 
 	"github.com/lemon4ksan/aoni/internal/codegen/ir"
@@ -35,41 +36,35 @@ func ExportOpenAPI(root *ir.RootIR, cfg ExportConfig) ([]byte, error) {
 
 	services := root.Services
 	if cfg.ServiceName != "" {
-		var filtered []*ir.ServiceIR
-		for _, s := range root.Services {
-			if strings.EqualFold(s.Name, cfg.ServiceName) {
-				filtered = append(filtered, s)
-			}
-		}
+		filtered := generic.Filter(root.Services, func(s *ir.ServiceIR) bool {
+			return strings.EqualFold(s.Name, cfg.ServiceName)
+		})
 
 		if len(filtered) > 0 {
 			services = filtered
 		}
 	}
 
-	title := cfg.Title
-	if title == "" {
-		serviceName := ""
-		if len(services) > 0 {
-			serviceName = services[0].Name
-		}
-
-		title = cleanAPITitle(serviceName, root.PackageName)
+	serviceName := ""
+	if len(services) > 0 {
+		serviceName = services[0].Name
 	}
 
-	version := cfg.Version
-	if version == "" {
-		if len(services) > 0 && services[0].Version != "" {
-			version = services[0].Version
-		} else {
-			version = "1.0.0"
-		}
+	title := generic.Coalesce(cfg.Title, cleanAPITitle(serviceName, root.PackageName))
+
+	defaultVersion := "1.0.0"
+	if len(services) > 0 && services[0].Version != "" {
+		defaultVersion = services[0].Version
 	}
 
-	description := cfg.Description
-	if description == "" && len(services) > 0 && services[0].Description != "" {
-		description = services[0].Description
+	version := generic.Coalesce(cfg.Version, defaultVersion)
+
+	defaultDesc := ""
+	if len(services) > 0 && services[0].Description != "" {
+		defaultDesc = services[0].Description
 	}
+
+	description := generic.Coalesce(cfg.Description, defaultDesc)
 
 	doc := &openapi3.T{
 		OpenAPI: "3.1.0",

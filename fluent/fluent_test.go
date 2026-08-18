@@ -775,6 +775,56 @@ func TestFluent_AdditionalMethods(t *testing.T) {
 	})
 }
 
+func TestFluent_ResultMonadicAPI(t *testing.T) {
+	t.Parallel()
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/error" {
+			w.WriteHeader(http.StatusInternalServerError)
+			return
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_ = json.NewEncoder(w).Encode(userPayload{
+			ID:   100,
+			Name: "MonadicAlex",
+		})
+	}))
+	t.Cleanup(server.Close)
+
+	client := aoni.NewClient(server.Client(), option.WithBaseURL(server.URL))
+
+	t.Run("GetResult_Success", func(t *testing.T) {
+		res, resp := fluent.GetResult[userPayload](t.Context(), client, "/")
+		require.NotNil(t, resp)
+		assert.True(t, res.IsSuccess())
+		user, err := res.Unwrap()
+		require.NoError(t, err)
+		assert.Equal(t, 100, user.ID)
+		assert.Equal(t, "MonadicAlex", user.Name)
+	})
+
+	t.Run("PostResult_Success", func(t *testing.T) {
+		res, resp := fluent.PostResult[userPayload](t.Context(), client, "/", userPayload{ID: 100})
+		require.NotNil(t, resp)
+		assert.True(t, res.IsSuccess())
+		user, err := res.Unwrap()
+		require.NoError(t, err)
+		assert.Equal(t, "MonadicAlex", user.Name)
+	})
+
+	t.Run("FetchResult_ErrorRecover", func(t *testing.T) {
+		res, _ := fluent.FetchResult[userPayload](t.Context(), client, http.MethodGet, "/error")
+		assert.False(t, res.IsSuccess())
+		recovered := res.Recover(func(err error) userPayload {
+			return userPayload{ID: 999, Name: "RecoveredUser"}
+		})
+		assert.Equal(t, 999, recovered.ID)
+		assert.Equal(t, "RecoveredUser", recovered.Name)
+	})
+}
+
 func BenchmarkFluent_RequestCreation(b *testing.B) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusOK)

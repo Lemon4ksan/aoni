@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/lemon4ksan/foundation/async/log"
+	"github.com/lemon4ksan/foundation/generic"
 	"github.com/lemon4ksan/foundation/silicon/bytesconv"
 	"github.com/quic-go/quic-go"
 	"github.com/quic-go/quic-go/http3"
@@ -85,11 +86,7 @@ func NewClient(doer any, opts ...ClientOption) *Client {
 	}
 
 	cfg := client.snapshotConfig()
-	for _, opt := range opts {
-		if opt != nil {
-			opt(&cfg)
-		}
-	}
+	generic.ApplyOptions(&cfg, opts...)
 
 	client.applyConfig(cfg)
 	client.ensureUserAgent()
@@ -115,11 +112,7 @@ func (c *Client) With(opts ...ClientOption) *Client {
 	}
 
 	cfg := c.snapshotConfig()
-	for _, opt := range opts {
-		if opt != nil {
-			opt(&cfg)
-		}
-	}
+	generic.ApplyOptions(&cfg, opts...)
 
 	cloned := &Client{
 		engine:  c.engine,

@@ -603,3 +603,17 @@ func (b *Balancer) Prewarm(ctx context.Context) {
 
 	wg.Wait()
 }
+
+// FindBackend searches for a registered backend matching the predicate using [generic.Find]
+// and returns a Swift-inspired [generic.Optional].
+func (b *Balancer) FindBackend(predicate func(*Backend) bool) generic.Optional[*Backend] {
+	b.mu.RLock()
+	defer b.mu.RUnlock()
+
+	backend, ok := generic.Find(b.backends, predicate)
+	if !ok {
+		return generic.None[*Backend]()
+	}
+
+	return generic.Some(backend)
+}

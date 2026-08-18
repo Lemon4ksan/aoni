@@ -12,6 +12,8 @@ import (
 	"net/http"
 	"reflect"
 
+	"github.com/lemon4ksan/foundation/generic"
+
 	"github.com/lemon4ksan/aoni"
 	"github.com/lemon4ksan/aoni/mod"
 )
@@ -768,4 +770,83 @@ func withCaptureMod(
 	copy(res[1:], mods)
 
 	return res
+}
+
+// GetResult dispatches a GET request and returns a Swift-inspired [generic.Result] wrapping the response.
+func GetResult[Resp any](
+	ctx context.Context,
+	c Requester,
+	path string,
+	mods ...aoni.RequestModifier,
+) (generic.Result[*Resp], *http.Response) {
+	val, resp, err := GetToEx[Resp](ctx, c, path, mods...)
+	if err != nil {
+		return generic.Failure[*Resp](err), resp
+	}
+
+	return generic.Success(val), resp
+}
+
+// PostResult dispatches a JSON POST request and returns a Swift-inspired [generic.Result].
+func PostResult[Resp any](
+	ctx context.Context,
+	c Requester,
+	path string,
+	body any,
+	mods ...aoni.RequestModifier,
+) (generic.Result[*Resp], *http.Response) {
+	val, resp, err := PostToEx[Resp](ctx, c, path, body, mods...)
+	if err != nil {
+		return generic.Failure[*Resp](err), resp
+	}
+
+	return generic.Success(val), resp
+}
+
+// PutResult dispatches a JSON PUT request and returns a Swift-inspired [generic.Result].
+func PutResult[Resp any](
+	ctx context.Context,
+	c Requester,
+	path string,
+	body any,
+	mods ...aoni.RequestModifier,
+) (generic.Result[*Resp], *http.Response) {
+	val, resp, err := PutToEx[Resp](ctx, c, path, body, mods...)
+	if err != nil {
+		return generic.Failure[*Resp](err), resp
+	}
+
+	return generic.Success(val), resp
+}
+
+// DeleteResult dispatches a DELETE request and returns a Swift-inspired [generic.Result].
+func DeleteResult[Resp any](
+	ctx context.Context,
+	c Requester,
+	path string,
+	body any,
+	mods ...aoni.RequestModifier,
+) (generic.Result[*Resp], *http.Response) {
+	val, resp, err := DeleteToEx[Resp](ctx, c, path, body, mods...)
+	if err != nil {
+		return generic.Failure[*Resp](err), resp
+	}
+
+	return generic.Success(val), resp
+}
+
+// PatchResult dispatches a JSON PATCH request and returns a Swift-inspired [generic.Result].
+func PatchResult[Resp any](
+	ctx context.Context,
+	c Requester,
+	path string,
+	body any,
+	mods ...aoni.RequestModifier,
+) (generic.Result[*Resp], *http.Response) {
+	val, resp, err := PatchToEx[Resp](ctx, c, path, body, mods...)
+	if err != nil {
+		return generic.Failure[*Resp](err), resp
+	}
+
+	return generic.Success(val), resp
 }

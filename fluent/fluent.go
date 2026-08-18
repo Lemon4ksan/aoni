@@ -9,6 +9,7 @@ import (
 	"context"
 	"net/http"
 
+	"github.com/lemon4ksan/foundation/generic"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/lemon4ksan/aoni"
@@ -92,4 +93,102 @@ func GetGRPCWebTo[T any](ctx context.Context, c any, path string) (T, *http.Resp
 	resp, err := R(c).SetContext(ctx).SetGRPCWebResult(&target).Get(path)
 
 	return target, resp, err
+}
+
+// FetchResult executes a request and returns a Swift-inspired [generic.Result] wrapping the unmarshaled response or error.
+func FetchResult[T any](
+	ctx context.Context,
+	c any,
+	method, path string,
+	mods ...aoni.RequestModifier,
+) (generic.Result[T], *http.Response) {
+	val, resp, err := FetchTo[T](ctx, c, method, path, mods...)
+	if err != nil {
+		return generic.Failure[T](err), resp
+	}
+
+	return generic.Success(val), resp
+}
+
+// GetResult dispatches a GET request and returns a Swift-inspired [generic.Result] wrapping the unmarshaled response.
+func GetResult[T any](
+	ctx context.Context,
+	c any,
+	path string,
+	mods ...aoni.RequestModifier,
+) (generic.Result[T], *http.Response) {
+	return FetchResult[T](ctx, c, http.MethodGet, path, mods...)
+}
+
+// PostResult dispatches a POST request with body and returns a Swift-inspired [generic.Result].
+func PostResult[T any](
+	ctx context.Context,
+	c any,
+	path string,
+	body any,
+	mods ...aoni.RequestModifier,
+) (generic.Result[T], *http.Response) {
+	var target T
+
+	resp, err := R(c).
+		SetContext(ctx).
+		SetBody(body).
+		SetResult(&target).
+		Apply(mods...).
+		Post(path)
+	if err != nil {
+		return generic.Failure[T](err), resp
+	}
+
+	return generic.Success(target), resp
+}
+
+// PostProtoResult dispatches a Protobuf POST request and returns a [generic.Result].
+func PostProtoResult[T any](
+	ctx context.Context,
+	c any,
+	path string,
+	reqMsg proto.Message,
+) (generic.Result[T], *http.Response) {
+	val, resp, err := PostProtoTo[T](ctx, c, path, reqMsg)
+	if err != nil {
+		return generic.Failure[T](err), resp
+	}
+
+	return generic.Success(val), resp
+}
+
+// GetProtoResult dispatches a Protobuf GET request and returns a [generic.Result].
+func GetProtoResult[T any](ctx context.Context, c any, path string) (generic.Result[T], *http.Response) {
+	val, resp, err := GetProtoTo[T](ctx, c, path)
+	if err != nil {
+		return generic.Failure[T](err), resp
+	}
+
+	return generic.Success(val), resp
+}
+
+// PostGRPCWebResult dispatches a gRPC-Web POST request and returns a [generic.Result].
+func PostGRPCWebResult[T any](
+	ctx context.Context,
+	c any,
+	path string,
+	reqMsg proto.Message,
+) (generic.Result[T], *http.Response) {
+	val, resp, err := PostGRPCWebTo[T](ctx, c, path, reqMsg)
+	if err != nil {
+		return generic.Failure[T](err), resp
+	}
+
+	return generic.Success(val), resp
+}
+
+// GetGRPCWebResult dispatches a gRPC-Web GET request and returns a [generic.Result].
+func GetGRPCWebResult[T any](ctx context.Context, c any, path string) (generic.Result[T], *http.Response) {
+	val, resp, err := GetGRPCWebTo[T](ctx, c, path)
+	if err != nil {
+		return generic.Failure[T](err), resp
+	}
+
+	return generic.Success(val), resp
 }

@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"net/http"
 
+	"github.com/lemon4ksan/foundation/generic"
 	"github.com/lemon4ksan/foundation/silicon/bytesconv"
 	"google.golang.org/protobuf/proto"
 
@@ -329,4 +330,62 @@ func applyFastBody(req aoni.Request, body any) error {
 	}
 
 	return nil
+}
+
+// DoResultFast executes a fast HTTP request and returns a Swift-inspired [generic.Result] wrapping the unmarshaled response.
+func DoResultFast[Resp any](
+	ctx context.Context,
+	doer aoni.RequestDoer,
+	method, path string,
+	body any,
+	mods ...aoni.RequestModifier,
+) generic.Result[*Resp] {
+	val, err := DoToFast[Resp](ctx, doer, method, path, body, mods...)
+	if err != nil {
+		return generic.Failure[*Resp](err)
+	}
+
+	return generic.Success(val)
+}
+
+// GetResultFast dispatches a GET fast HTTP request and returns a Swift-inspired [generic.Result].
+func GetResultFast[Resp any](
+	ctx context.Context,
+	doer aoni.RequestDoer,
+	path string,
+	mods ...aoni.RequestModifier,
+) generic.Result[*Resp] {
+	return DoResultFast[Resp](ctx, doer, http.MethodGet, path, nil, mods...)
+}
+
+// PostResultFast dispatches a POST fast HTTP request and returns a Swift-inspired [generic.Result].
+func PostResultFast[Resp any](
+	ctx context.Context,
+	doer aoni.RequestDoer,
+	path string,
+	body any,
+	mods ...aoni.RequestModifier,
+) generic.Result[*Resp] {
+	return DoResultFast[Resp](ctx, doer, http.MethodPost, path, body, mods...)
+}
+
+// PutResultFast dispatches a PUT fast HTTP request and returns a Swift-inspired [generic.Result].
+func PutResultFast[Resp any](
+	ctx context.Context,
+	doer aoni.RequestDoer,
+	path string,
+	body any,
+	mods ...aoni.RequestModifier,
+) generic.Result[*Resp] {
+	return DoResultFast[Resp](ctx, doer, http.MethodPut, path, body, mods...)
+}
+
+// DeleteResultFast dispatches a DELETE fast HTTP request and returns a Swift-inspired [generic.Result].
+func DeleteResultFast[Resp any](
+	ctx context.Context,
+	doer aoni.RequestDoer,
+	path string,
+	mods ...aoni.RequestModifier,
+) generic.Result[*Resp] {
+	return DoResultFast[Resp](ctx, doer, http.MethodDelete, path, nil, mods...)
 }

@@ -181,3 +181,21 @@ func WithPartitionKey(key string) aoni.RequestModifier {
 		},
 	}
 }
+
+// WithHeaderIf conditionally constructs an [aoni.RequestModifier] if condition is true.
+func WithHeaderIf(condition bool, key, value string) aoni.RequestModifier {
+	if !condition {
+		return aoni.RequestModifier{}
+	}
+
+	return WithHeader(key, value)
+}
+
+// WithHeadersIf conditionally constructs an [aoni.RequestModifier] if condition is true.
+func WithHeadersIf(condition bool, headers map[string]string) aoni.RequestModifier {
+	if !condition || len(headers) == 0 {
+		return aoni.RequestModifier{}
+	}
+
+	return WithHeaders(headers)
+}
