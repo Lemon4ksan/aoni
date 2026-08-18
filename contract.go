@@ -15,8 +15,8 @@ import (
 	utls "github.com/refraction-networking/utls"
 	"golang.org/x/net/http2"
 
+	"github.com/lemon4ksan/aoni/foundation/pipeline"
 	"github.com/lemon4ksan/aoni/internal/io"
-	"github.com/lemon4ksan/aoni/internal/pipeline"
 	"github.com/lemon4ksan/aoni/telemetry"
 )
 

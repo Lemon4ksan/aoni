@@ -13,7 +13,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/lemon4ksan/aoni/internal/clock"
+	"github.com/lemon4ksan/aoni/foundation/clock"
 )
 
 // ErrCacheMiss is returned when a requested HTTP response is not found in the cache or has expired per RFC 9111 §3.

@@ -9,7 +9,7 @@ import (
 	"net"
 	"testing"
 
-	"github.com/lemon4ksan/aoni/internal/offheap"
+	"github.com/lemon4ksan/aoni/foundation/offheap"
 )
 
 func buildBenchPayload() []byte {

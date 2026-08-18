@@ -12,7 +12,7 @@ import (
 
 	"github.com/lemon4ksan/miyako/batto"
 
-	"github.com/lemon4ksan/aoni/internal/clock"
+	"github.com/lemon4ksan/aoni/foundation/clock"
 	"github.com/lemon4ksan/aoni/netutil/dns/wire"
 )
 

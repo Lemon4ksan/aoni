@@ -6,7 +6,7 @@ package transport
 
 import (
 	"github.com/lemon4ksan/aoni/fingerprint/ja4"
-	"github.com/lemon4ksan/aoni/internal/pipeline"
+	"github.com/lemon4ksan/aoni/foundation/pipeline"
 )
 
 // ApplyRequestOverrides merges request-scoped pipeline overrides ([pipeline.RequestConfig])

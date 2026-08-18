@@ -9,7 +9,7 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/lemon4ksan/aoni/internal/bytesconv"
+	"github.com/lemon4ksan/aoni/foundation/bytesconv"
 )
 
 // CurlOptions controls header redaction and secrets masking for cURL command generation.

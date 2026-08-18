@@ -9,8 +9,8 @@ import (
 	"fmt"
 	"sync"
 
-	"github.com/lemon4ksan/aoni/internal/pool"
-	"github.com/lemon4ksan/aoni/internal/rodata"
+	"github.com/lemon4ksan/aoni/foundation/pool"
+	"github.com/lemon4ksan/aoni/foundation/rodata"
 )
 
 const (

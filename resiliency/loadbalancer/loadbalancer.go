@@ -23,8 +23,8 @@ import (
 	"github.com/lemon4ksan/miyako/generic"
 
 	"github.com/lemon4ksan/aoni"
+	"github.com/lemon4ksan/aoni/foundation/rand"
 	"github.com/lemon4ksan/aoni/internal/health"
-	"github.com/lemon4ksan/aoni/internal/rand"
 )
 
 var (

@@ -9,7 +9,7 @@ import (
 	"time"
 
 	"github.com/lemon4ksan/aoni"
-	"github.com/lemon4ksan/aoni/internal/pipeline"
+	"github.com/lemon4ksan/aoni/foundation/pipeline"
 )
 
 // WithContext constructs an [aoni.RequestModifier] updating the execution context associated with the request.

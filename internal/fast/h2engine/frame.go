@@ -8,7 +8,7 @@ import (
 	"strconv"
 	"sync"
 
-	"github.com/lemon4ksan/aoni/internal/offheap"
+	"github.com/lemon4ksan/aoni/foundation/offheap"
 )
 
 // FrameType identifies the protocol function of an HTTP/2 frame (RFC 7540 Section 6).

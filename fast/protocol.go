@@ -21,10 +21,10 @@ import (
 	"golang.org/x/sys/cpu"
 
 	"github.com/lemon4ksan/aoni"
-	"github.com/lemon4ksan/aoni/internal/clock"
+	"github.com/lemon4ksan/aoni/foundation/clock"
+	"github.com/lemon4ksan/aoni/foundation/pipeline"
 	"github.com/lemon4ksan/aoni/internal/fast/h2engine"
 	"github.com/lemon4ksan/aoni/internal/fast/h3engine"
-	"github.com/lemon4ksan/aoni/internal/pipeline"
 	"github.com/lemon4ksan/aoni/netutil"
 )
 

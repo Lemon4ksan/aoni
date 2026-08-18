@@ -9,8 +9,8 @@ import (
 	"errors"
 	"net"
 
-	"github.com/lemon4ksan/aoni/internal/bytesconv"
-	"github.com/lemon4ksan/aoni/internal/simd"
+	"github.com/lemon4ksan/aoni/foundation/bytesconv"
+	"github.com/lemon4ksan/aoni/foundation/simd"
 )
 
 // ErrInvalidHeaderTerminator is returned when HTTP/1.1 header section terminators (\r\n\r\n) are missing or corrupted.

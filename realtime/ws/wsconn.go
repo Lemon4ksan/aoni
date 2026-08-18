@@ -24,9 +24,9 @@ import (
 	"golang.org/x/net/http2"
 	"golang.org/x/net/http2/hpack"
 
-	"github.com/lemon4ksan/aoni/internal/offheap"
+	"github.com/lemon4ksan/aoni/foundation/offheap"
+	"github.com/lemon4ksan/aoni/foundation/simd"
 	"github.com/lemon4ksan/aoni/internal/realtime/ws"
-	"github.com/lemon4ksan/aoni/internal/simd"
 )
 
 const (

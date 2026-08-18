@@ -23,9 +23,9 @@ import (
 	"github.com/valyala/fasthttp"
 
 	"github.com/lemon4ksan/aoni"
-	"github.com/lemon4ksan/aoni/internal/bytesconv"
+	"github.com/lemon4ksan/aoni/foundation/bytesconv"
+	"github.com/lemon4ksan/aoni/foundation/pipeline"
 	"github.com/lemon4ksan/aoni/internal/experimental"
-	"github.com/lemon4ksan/aoni/internal/pipeline"
 	"github.com/lemon4ksan/aoni/netutil/power"
 )
 

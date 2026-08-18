@@ -27,7 +27,7 @@ import (
 
 	"github.com/lemon4ksan/aoni"
 	"github.com/lemon4ksan/aoni/codec/decode"
-	"github.com/lemon4ksan/aoni/internal/offheap"
+	"github.com/lemon4ksan/aoni/foundation/offheap"
 	"github.com/lemon4ksan/aoni/mod"
 	"github.com/lemon4ksan/aoni/request"
 )

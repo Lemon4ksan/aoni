@@ -5,8 +5,8 @@
 // Package version defines the unified single source of truth for Aoni release versions.
 package version
 
-// Current is the complete semantic release version string with 'v' prefix (e.g. "v0.6.0").
-const Current = "v0.6.0"
+// Current is the complete semantic release version string with 'v' prefix.
+const Current = "v" + Number
 
-// Number is the raw semantic release version without 'v' prefix (e.g. "0.6.0").
+// Number is the raw semantic release version without 'v' prefix.
 const Number = "0.6.0"

@@ -14,7 +14,7 @@ import (
 	"github.com/quic-go/qpack"
 	"github.com/valyala/fasthttp"
 
-	"github.com/lemon4ksan/aoni/internal/bytesconv"
+	"github.com/lemon4ksan/aoni/foundation/bytesconv"
 )
 
 var bufferPool = sync.Pool{

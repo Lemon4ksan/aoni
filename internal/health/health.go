@@ -11,7 +11,7 @@ import (
 
 	"golang.org/x/sys/cpu"
 
-	"github.com/lemon4ksan/aoni/internal/clock"
+	"github.com/lemon4ksan/aoni/foundation/clock"
 )
 
 // Status represents the operational health state of a tracked network endpoint.

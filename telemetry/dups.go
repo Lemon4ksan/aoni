@@ -9,8 +9,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/lemon4ksan/aoni/internal/bytesconv"
-	"github.com/lemon4ksan/aoni/internal/clock"
+	"github.com/lemon4ksan/aoni/foundation/bytesconv"
+	"github.com/lemon4ksan/aoni/foundation/clock"
 )
 
 // duplicateEntry stores a timestamped CRC64 request signature in the ring buffer.

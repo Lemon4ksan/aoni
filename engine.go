@@ -10,7 +10,7 @@ import (
 
 	"github.com/lemon4ksan/aoni/cookie"
 	"github.com/lemon4ksan/aoni/fingerprint/h2"
-	"github.com/lemon4ksan/aoni/internal/pipeline"
+	"github.com/lemon4ksan/aoni/foundation/pipeline"
 )
 
 // HTTPDoer specifies the minimal execution contract for processing standard *http.Request transactions.

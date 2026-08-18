@@ -15,7 +15,7 @@ import (
 	"google.golang.org/protobuf/encoding/protojson"
 	"google.golang.org/protobuf/proto"
 
-	"github.com/lemon4ksan/aoni/internal/bytesconv"
+	"github.com/lemon4ksan/aoni/foundation/bytesconv"
 	"github.com/lemon4ksan/aoni/internal/mapper"
 	"github.com/lemon4ksan/aoni/internal/urlutil"
 )

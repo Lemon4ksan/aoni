@@ -13,7 +13,7 @@ import (
 	"net/http"
 
 	"github.com/lemon4ksan/aoni"
-	"github.com/lemon4ksan/aoni/internal/bytesconv"
+	"github.com/lemon4ksan/aoni/foundation/bytesconv"
 )
 
 // prefixProvider allows inspecting the pre-buffered byte prefix of a response body

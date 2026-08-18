@@ -27,8 +27,8 @@ import (
 	"github.com/lemon4ksan/aoni/fast"
 	"github.com/lemon4ksan/aoni/fingerprint/profiles"
 	"github.com/lemon4ksan/aoni/fingerprint/profiles/chrome"
+	"github.com/lemon4ksan/aoni/foundation/simd"
 	"github.com/lemon4ksan/aoni/internal/experimental"
-	"github.com/lemon4ksan/aoni/internal/simd"
 	"github.com/lemon4ksan/aoni/internal/sysnet"
 	"github.com/lemon4ksan/aoni/internal/urlutil"
 )

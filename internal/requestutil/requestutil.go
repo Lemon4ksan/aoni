@@ -15,7 +15,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/lemon4ksan/aoni/internal/bytesconv"
+	"github.com/lemon4ksan/aoni/foundation/bytesconv"
 )
 
 var sensitiveHeaderStrings = [...]string{

@@ -25,9 +25,9 @@ import (
 
 	"github.com/lemon4ksan/aoni"
 	"github.com/lemon4ksan/aoni/cookie"
-	"github.com/lemon4ksan/aoni/internal/clock"
+	"github.com/lemon4ksan/aoni/foundation/clock"
+	"github.com/lemon4ksan/aoni/foundation/trie"
 	"github.com/lemon4ksan/aoni/internal/health"
-	"github.com/lemon4ksan/aoni/internal/trie"
 )
 
 var (

@@ -17,7 +17,7 @@ import (
 	"github.com/lemon4ksan/miyako/sync/keylock"
 	"golang.org/x/net/publicsuffix"
 
-	"github.com/lemon4ksan/aoni/internal/clock"
+	"github.com/lemon4ksan/aoni/foundation/clock"
 )
 
 type (

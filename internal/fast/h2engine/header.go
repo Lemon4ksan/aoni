@@ -9,7 +9,7 @@ import (
 	"io"
 	"sync"
 
-	"github.com/lemon4ksan/aoni/internal/offheap"
+	"github.com/lemon4ksan/aoni/foundation/offheap"
 )
 
 const (

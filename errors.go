@@ -10,9 +10,9 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/lemon4ksan/aoni/internal/bytesconv"
+	"github.com/lemon4ksan/aoni/foundation/bytesconv"
+	"github.com/lemon4ksan/aoni/foundation/pipeline"
 	"github.com/lemon4ksan/aoni/internal/io"
-	"github.com/lemon4ksan/aoni/internal/pipeline"
 )
 
 var (

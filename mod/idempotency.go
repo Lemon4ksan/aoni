@@ -8,8 +8,8 @@ import (
 	"time"
 
 	"github.com/lemon4ksan/aoni"
-	"github.com/lemon4ksan/aoni/internal/bytesconv"
-	"github.com/lemon4ksan/aoni/internal/rand"
+	"github.com/lemon4ksan/aoni/foundation/bytesconv"
+	"github.com/lemon4ksan/aoni/foundation/rand"
 )
 
 // HeaderIdempotencyKey is the standard HTTP header for idempotency control (IETF Draft).

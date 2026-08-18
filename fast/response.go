@@ -18,9 +18,9 @@ import (
 	"golang.org/x/sys/cpu"
 
 	"github.com/lemon4ksan/aoni"
-	"github.com/lemon4ksan/aoni/internal/bytesconv"
-	"github.com/lemon4ksan/aoni/internal/offheap"
-	"github.com/lemon4ksan/aoni/internal/pool"
+	"github.com/lemon4ksan/aoni/foundation/bytesconv"
+	"github.com/lemon4ksan/aoni/foundation/offheap"
+	"github.com/lemon4ksan/aoni/foundation/pool"
 )
 
 var (
