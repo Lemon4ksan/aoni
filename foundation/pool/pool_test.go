@@ -13,23 +13,6 @@ import (
 	"github.com/lemon4ksan/aoni/foundation/pool"
 )
 
-func TestHeaderPool(t *testing.T) {
-	t.Parallel()
-
-	h := pool.AcquireHeader()
-	assert.NotNil(t, h)
-
-	h.Set("X-Test", "value")
-	assert.Equal(t, "value", h.Get("X-Test"))
-
-	pool.ReleaseHeader(h)
-
-	h2 := pool.AcquireHeader()
-	assert.Empty(t, h2.Get("X-Test"))
-
-	pool.ReleaseHeader(h2)
-}
-
 func TestTimerPool(t *testing.T) {
 	t.Parallel()
 

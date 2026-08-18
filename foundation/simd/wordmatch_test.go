@@ -13,12 +13,19 @@ import (
 )
 
 func TestMatchWord64(t *testing.T) {
-	buf := []byte("Content-Type: application/json")
-	assert.True(t, simd.MatchWord64(buf, simd.Word64ContentType))
+	buf := []byte("PREFIX_ABC_DATA_TEST")
+	targetWord := simd.PackWord64("PREFIX_A")
 
-	buf2 := []byte("Transfer-Encoding: chunked")
-	assert.True(t, simd.MatchWord64(buf2, simd.Word64TransferEnc))
+	assert.True(t, simd.MatchWord64(buf, targetWord))
+	assert.True(t, simd.MatchWord64Str(buf, "PREFIX_ABC"))
+	assert.False(t, simd.MatchWord64Str(buf, "DIFFERENT_DATA"))
+}
 
-	assert.True(t, simd.MatchWord64Str(buf, "Content-Type"))
-	assert.False(t, simd.MatchWord64Str(buf, "Invalid-Header"))
+func TestMatchWord32(t *testing.T) {
+	buf := []byte("ABCD_DATA")
+	targetWord := simd.PackWord32("ABCD")
+
+	assert.True(t, simd.MatchWord32(buf, targetWord))
+	assert.True(t, simd.MatchWord32Str(buf, "ABCD"))
+	assert.False(t, simd.MatchWord32Str(buf, "WXYZ"))
 }

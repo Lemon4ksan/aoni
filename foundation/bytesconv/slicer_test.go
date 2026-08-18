@@ -15,26 +15,27 @@ import (
 func TestPatternSlicer_Slice(t *testing.T) {
 	t.Parallel()
 
-	slicer := bytesconv.NewPatternSlicer([]byte("Host:"), 5)
+	slicer := bytesconv.NewPatternSlicer([]byte("KEY:"), 4)
+	assert.NotNil(t, slicer)
 
 	t.Run("pattern_found", func(t *testing.T) {
 		t.Parallel()
 
-		data := []byte("GET / HTTP/1.1\r\nHost: example.com\r\n\r\n")
+		data := []byte("PREFIX_SECTION\r\nKEY: TARGET_PAYLOAD\r\n\r\n")
 		chunks, matched := slicer.Slice(data)
 
 		assert.True(t, matched)
 
 		requireLen := 2
 		assert.Len(t, chunks, requireLen)
-		assert.Equal(t, "GET / HTTP/1.1\r\nHost:", string(chunks[0]))
-		assert.Equal(t, " example.com\r\n\r\n", string(chunks[1]))
+		assert.Equal(t, "PREFIX_SECTION\r\nKEY:", string(chunks[0]))
+		assert.Equal(t, " TARGET_PAYLOAD\r\n\r\n", string(chunks[1]))
 	})
 
 	t.Run("pattern_not_found", func(t *testing.T) {
 		t.Parallel()
 
-		data := []byte("GET / HTTP/1.1\r\nUser-Agent: test\r\n\r\n")
+		data := []byte("PREFIX_SECTION\r\nOTHER_FIELD: test\r\n\r\n")
 		chunks, matched := slicer.Slice(data)
 
 		assert.False(t, matched)

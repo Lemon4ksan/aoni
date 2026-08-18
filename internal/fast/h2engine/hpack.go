@@ -10,7 +10,7 @@ import (
 	"sync"
 
 	"github.com/lemon4ksan/aoni/foundation/pool"
-	"github.com/lemon4ksan/aoni/foundation/rodata"
+	"github.com/lemon4ksan/aoni/internal/rodata"
 )
 
 const (

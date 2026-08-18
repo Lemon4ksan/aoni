@@ -72,6 +72,6 @@
 //	if err != nil { ... }
 //	defer buf.Release()
 //
-//	buf.WriteString("HTTP/1.1 200 OK\r\n")
+//	buf.WriteString("SAMPLE PAYLOAD\n")
 //	// buf.Bytes() → zero-alloc slice view
 package offheap

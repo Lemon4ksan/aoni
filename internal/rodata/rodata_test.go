@@ -8,7 +8,7 @@ import (
 	"bytes"
 	"testing"
 
-	"github.com/lemon4ksan/aoni/foundation/rodata"
+	"github.com/lemon4ksan/aoni/internal/rodata"
 )
 
 func TestInternKey(t *testing.T) {

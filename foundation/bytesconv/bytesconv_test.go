@@ -147,26 +147,6 @@ func TestParseUintFast(t *testing.T) {
 	}
 }
 
-func TestCanonicalHeaderKey(t *testing.T) {
-	t.Parallel()
-
-	tests := []struct {
-		in   string
-		want string
-	}{
-		{"user-agent", "User-Agent"},
-		{"content-type", "Content-Type"},
-		{"x-custom-trace-id", "X-Custom-Trace-Id"},
-		{"ACCEPT", "Accept"},
-		{"", ""},
-	}
-
-	for _, tt := range tests {
-		assert.Equal(t, tt.want, CanonicalHeaderKey(tt.in))
-		assert.Equal(t, tt.want, string(CanonicalHeaderKeyBytes([]byte(tt.in))))
-	}
-}
-
 func TestFastHash64(t *testing.T) {
 	t.Parallel()
 

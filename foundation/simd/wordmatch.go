@@ -9,18 +9,37 @@ import (
 	"unsafe"
 )
 
-const (
-	// Word64ContentType is the Little-Endian uint64 representation of "Content-".
-	Word64ContentType uint64 = 0x2d746e65746e6f43
-	// Word64TransferEnc is the Little-Endian uint64 representation of "Transfer".
-	Word64TransferEnc uint64 = 0x726566736e617254
-	// Word64UserAgent is the Little-Endian uint64 representation of "User-Age".
-	Word64UserAgent uint64 = 0x6567412d72657355
-	// Word64HostHeader is the Little-Endian uint64 representation of "Host:   ".
-	Word64HostHeader uint64 = 0x2020203a74736f48
-)
+// PackWord64 converts the first 8 bytes of string s into a Little-Endian uint64.
+//
+//go:inline
+func PackWord64(s string) uint64 {
+	if len(s) < 8 {
+		var buf [8]byte
+		copy(buf[:], s)
+
+		return binary.LittleEndian.Uint64(buf[:])
+	}
+
+	return binary.LittleEndian.Uint64([]byte(s[:8]))
+}
+
+// PackWord32 converts the first 4 bytes of string s into a Little-Endian uint32.
+//
+//go:inline
+func PackWord32(s string) uint32 {
+	if len(s) < 4 {
+		var buf [4]byte
+		copy(buf[:], s)
+
+		return binary.LittleEndian.Uint32(buf[:])
+	}
+
+	return binary.LittleEndian.Uint32([]byte(s[:4]))
+}
 
 // MatchWord64 compares the first 8 bytes of buf against a target uint64 word in a single CPU instruction.
+//
+//go:inline
 func MatchWord64(buf []byte, target uint64) bool {
 	if len(buf) < 8 {
 		return false
@@ -29,13 +48,39 @@ func MatchWord64(buf []byte, target uint64) bool {
 	return *(*uint64)(unsafe.Pointer(&buf[0])) == target
 }
 
-// MatchWord64Str converts an 8-byte string into uint64 and compares it against buf in 1 cycle.
+// MatchWord64Str converts an 8-byte string prefix into uint64 and compares it against buf in 1 CPU cycle.
+//
+//go:inline
 func MatchWord64Str(buf []byte, target string) bool {
 	if len(buf) < 8 || len(target) < 8 {
 		return false
 	}
 
-	targetWord := binary.LittleEndian.Uint64([]byte(target[:8]))
+	targetWord := PackWord64(target)
 
 	return MatchWord64(buf, targetWord)
+}
+
+// MatchWord32 compares the first 4 bytes of buf against a target uint32 word in a single CPU instruction.
+//
+//go:inline
+func MatchWord32(buf []byte, target uint32) bool {
+	if len(buf) < 4 {
+		return false
+	}
+
+	return *(*uint32)(unsafe.Pointer(&buf[0])) == target
+}
+
+// MatchWord32Str converts a 4-byte string prefix into uint32 and compares it against buf in 1 CPU cycle.
+//
+//go:inline
+func MatchWord32Str(buf []byte, target string) bool {
+	if len(buf) < 4 || len(target) < 4 {
+		return false
+	}
+
+	targetWord := PackWord32(target)
+
+	return MatchWord32(buf, targetWord)
 }

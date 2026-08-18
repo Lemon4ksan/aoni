@@ -21,6 +21,7 @@ import (
 	"github.com/lemon4ksan/aoni/foundation/bytesconv"
 	"github.com/lemon4ksan/aoni/foundation/offheap"
 	"github.com/lemon4ksan/aoni/foundation/pool"
+	"github.com/lemon4ksan/aoni/internal/requestutil"
 )
 
 var (
@@ -97,7 +98,7 @@ func (f *Response) StatusBytes() []byte {
 func (f *Response) Header(key string) string {
 	val := f.resp.Header.Peek(key)
 	if len(val) == 0 {
-		val = f.resp.Header.Peek(bytesconv.CanonicalHeaderKey(key))
+		val = f.resp.Header.Peek(requestutil.CanonicalHeaderKey(key))
 	}
 
 	if len(val) == 0 {
@@ -121,7 +122,7 @@ func (f *Response) Header(key string) string {
 func (f *Response) HeaderBytes(key []byte) []byte {
 	val := f.resp.Header.PeekBytes(key)
 	if len(val) == 0 {
-		val = f.resp.Header.PeekBytes(bytesconv.CanonicalHeaderKeyBytes(key))
+		val = f.resp.Header.PeekBytes(requestutil.CanonicalHeaderKeyBytes(key))
 	}
 
 	return val
@@ -131,7 +132,7 @@ func (f *Response) HeaderBytes(key []byte) []byte {
 func (f *Response) Headers() map[string][]string {
 	m := make(map[string][]string)
 	f.resp.Header.All()(func(k, v []byte) bool {
-		sk := bytesconv.CanonicalHeaderKey(bytesconv.B2S(k))
+		sk := requestutil.CanonicalHeaderKey(bytesconv.B2S(k))
 		m[sk] = append(m[sk], string(v))
 		return true
 	})
