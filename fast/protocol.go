@@ -16,12 +16,12 @@ import (
 	"sync"
 	"time"
 
+	"github.com/lemon4ksan/foundation/silicon/clock"
 	"github.com/quic-go/quic-go"
 	"github.com/valyala/fasthttp"
 	"golang.org/x/sys/cpu"
 
 	"github.com/lemon4ksan/aoni"
-	"github.com/lemon4ksan/aoni/foundation/clock"
 	"github.com/lemon4ksan/aoni/internal/fast/h2engine"
 	"github.com/lemon4ksan/aoni/internal/fast/h3engine"
 	"github.com/lemon4ksan/aoni/internal/pipeline"

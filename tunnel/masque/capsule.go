@@ -8,7 +8,8 @@ import (
 	"fmt"
 	"net/netip"
 
-	"github.com/lemon4ksan/aoni/foundation/offheap"
+	"github.com/lemon4ksan/foundation/silicon/offheap"
+
 	internalMasque "github.com/lemon4ksan/aoni/internal/masque"
 )
 

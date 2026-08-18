@@ -15,11 +15,11 @@ import (
 	"sync"
 	"time"
 
+	"github.com/lemon4ksan/foundation/silicon/bytesconv"
 	utls "github.com/refraction-networking/utls"
 
 	"github.com/lemon4ksan/aoni/fingerprint"
 	"github.com/lemon4ksan/aoni/fingerprint/ja4"
-	"github.com/lemon4ksan/aoni/foundation/bytesconv"
 	"github.com/lemon4ksan/aoni/telemetry"
 )
 

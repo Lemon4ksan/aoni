@@ -14,8 +14,9 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/lemon4ksan/foundation/silicon/bytesconv"
+
 	"github.com/lemon4ksan/aoni"
-	"github.com/lemon4ksan/aoni/foundation/bytesconv"
 )
 
 // SignHMACConfig specifies configuration parameters for cryptographic HMAC request signing.

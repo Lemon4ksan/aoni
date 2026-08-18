@@ -20,10 +20,10 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/lemon4ksan/miyako/generic"
+	"github.com/lemon4ksan/foundation/generic"
+	"github.com/lemon4ksan/foundation/silicon/rand"
 
 	"github.com/lemon4ksan/aoni"
-	"github.com/lemon4ksan/aoni/foundation/rand"
 	"github.com/lemon4ksan/aoni/internal/health"
 )
 

@@ -12,11 +12,11 @@ import (
 	"net/url"
 	"strings"
 
+	"github.com/lemon4ksan/foundation/silicon/bytesconv"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/lemon4ksan/aoni"
 	"github.com/lemon4ksan/aoni/codec/values"
-	"github.com/lemon4ksan/aoni/foundation/bytesconv"
 )
 
 // WithBody constructs an [aoni.RequestModifier] replacing the request body with the provided stream reader.

@@ -12,7 +12,7 @@ import (
 	"io"
 	"path/filepath"
 
-	"github.com/lemon4ksan/aoni/foundation/text"
+	"github.com/lemon4ksan/aoni/cmd/vortex/internal/text"
 	"github.com/lemon4ksan/aoni/internal/codegen/builder"
 )
 

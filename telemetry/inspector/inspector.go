@@ -19,8 +19,9 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"github.com/lemon4ksan/foundation/silicon/offheap"
+
 	"github.com/lemon4ksan/aoni"
-	"github.com/lemon4ksan/aoni/foundation/offheap"
 	"github.com/lemon4ksan/aoni/option"
 	"github.com/lemon4ksan/aoni/telemetry"
 )

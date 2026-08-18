@@ -14,13 +14,13 @@ import (
 	"sync/atomic"
 	"unsafe"
 
+	"github.com/lemon4ksan/foundation/silicon/bytesconv"
+	"github.com/lemon4ksan/foundation/silicon/offheap"
+	"github.com/lemon4ksan/foundation/silicon/pool"
 	"github.com/valyala/fasthttp"
 	"golang.org/x/sys/cpu"
 
 	"github.com/lemon4ksan/aoni"
-	"github.com/lemon4ksan/aoni/foundation/bytesconv"
-	"github.com/lemon4ksan/aoni/foundation/offheap"
-	"github.com/lemon4ksan/aoni/foundation/pool"
 	"github.com/lemon4ksan/aoni/internal/requestutil"
 )
 

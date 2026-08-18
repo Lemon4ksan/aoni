@@ -21,9 +21,10 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/lemon4ksan/foundation/silicon/bytesconv"
+	fastrand "github.com/lemon4ksan/foundation/silicon/rand"
+
 	"github.com/lemon4ksan/aoni/fingerprint/ja4"
-	"github.com/lemon4ksan/aoni/foundation/bytesconv"
-	fastrand "github.com/lemon4ksan/aoni/foundation/rand"
 	"github.com/lemon4ksan/aoni/internal/requestutil"
 	"github.com/lemon4ksan/aoni/netutil/probe"
 )

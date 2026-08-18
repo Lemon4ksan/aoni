@@ -135,7 +135,7 @@ func ExportOpenAPI(root *ir.RootIR, cfg ExportConfig) ([]byte, error) {
 		isInternal := false
 		for _, f := range s.Fields {
 			if strings.Contains(f.Type.Name, "sync.") || strings.Contains(f.Type.Name, "chan ") ||
-				f.Type.Name == "bus.Bus" || f.Type.Name == "log.Logger" || f.Type.Name == "aoni.WebSocketDialer" {
+				f.Type.Name == "event.Bus" || f.Type.Name == "bus.Bus" || f.Type.Name == "log.Logger" || f.Type.Name == "aoni.WebSocketDialer" {
 				isInternal = true
 				break
 			}

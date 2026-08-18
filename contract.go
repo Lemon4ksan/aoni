@@ -11,7 +11,7 @@ import (
 	"net/url"
 	"time"
 
-	"github.com/lemon4ksan/miyako/generic"
+	"github.com/lemon4ksan/foundation/generic"
 	utls "github.com/refraction-networking/utls"
 	"golang.org/x/net/http2"
 

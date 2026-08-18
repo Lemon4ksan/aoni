@@ -22,7 +22,7 @@ require (
 require (
 	github.com/andybalholm/brotli v1.2.2 // indirect
 	github.com/klauspost/compress v1.19.0 // indirect
-	github.com/lemon4ksan/miyako v0.2.1-0.20260718175055-4d923876d502 // indirect
+	github.com/lemon4ksan/foundation v0.2.1-0.20260718175055-4d923876d502 // indirect
 	github.com/miekg/dns v1.1.72 // indirect
 	github.com/quic-go/qpack v0.6.0 // indirect
 	github.com/quic-go/quic-go v0.60.0 // indirect

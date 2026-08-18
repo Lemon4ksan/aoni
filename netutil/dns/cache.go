@@ -10,9 +10,9 @@ import (
 	"sync"
 	"time"
 
-	"github.com/lemon4ksan/miyako/batto"
+	"github.com/lemon4ksan/foundation/async/dedup"
+	"github.com/lemon4ksan/foundation/silicon/clock"
 
-	"github.com/lemon4ksan/aoni/foundation/clock"
 	"github.com/lemon4ksan/aoni/netutil/dns/wire"
 )
 
@@ -30,7 +30,7 @@ type InMemoryDNSCache struct {
 	cache    map[string]dnsCacheEntry
 	ttl      time.Duration
 	resolver Resolver
-	sflight  batto.Group[string, []net.IPAddr]
+	sflight  dedup.Group[string, []net.IPAddr]
 	cancel   context.CancelFunc
 }
 

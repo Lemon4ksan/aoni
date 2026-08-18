@@ -8,8 +8,9 @@ import (
 	"slices"
 	"time"
 
+	"github.com/lemon4ksan/foundation/async/sync/backoff"
+
 	"github.com/lemon4ksan/aoni"
-	"github.com/lemon4ksan/aoni/foundation/backoff"
 	"github.com/lemon4ksan/aoni/middleware"
 )
 

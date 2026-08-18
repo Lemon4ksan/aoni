@@ -11,8 +11,8 @@ import (
 	"sync"
 	"sync/atomic"
 
-	"github.com/lemon4ksan/miyako/jobs"
-	"github.com/lemon4ksan/miyako/log"
+	"github.com/lemon4ksan/foundation/async/log"
+	"github.com/lemon4ksan/foundation/async/task"
 )
 
 var (
@@ -51,12 +51,12 @@ func DefaultConfig() Config {
 	}
 }
 
-// Dispatcher manages numerical and method-based packet routing and correlates synchronous request-response jobs.
+// Dispatcher manages numerical and method-based packet routing and correlates synchronous request-response task.
 type Dispatcher[OpCode comparable, JobID comparable, Packet any] struct {
 	cfg       Config
 	writer    Writer
 	extractor Extractor[OpCode, JobID, Packet]
-	jobs      *jobs.Manager[JobID, Packet]
+	tasks     *task.Manager[JobID, Packet]
 	logger    log.Logger
 
 	mu             sync.RWMutex
@@ -87,7 +87,7 @@ func New[OpCode, JobID comparable, Packet any](
 		cfg:            cfg,
 		writer:         writer,
 		extractor:      extractor,
-		jobs:           jobs.NewManager[JobID, Packet](maxJ),
+		tasks:          task.NewManager[JobID, Packet](maxJ),
 		logger:         l.With(log.Component("dispatcher")),
 		opcodeHandlers: make(map[OpCode]Handler[Packet]),
 		methodHandlers: make(map[string]Handler[Packet]),
@@ -155,11 +155,11 @@ func (d *Dispatcher[OpCode, JobID, Packet]) SendSync(
 		resCh <- result{pkt: pkt, err: err}
 	}
 
-	// Register job in jobs.Manager
-	_ = d.jobs.Add(jobID, cb, jobs.WithContext[Packet](ctx))
+	// Register job in task.Manager
+	_ = d.tasks.Add(jobID, cb, task.WithContext[Packet](ctx))
 
 	var zero Packet
-	defer d.jobs.Resolve(jobID, zero, jobs.ErrJobCancelled)
+	defer d.tasks.Resolve(jobID, zero, task.ErrJobCancelled)
 
 	if err := d.writer.Send(ctx, payload); err != nil {
 		return zero, err
@@ -170,12 +170,12 @@ func (d *Dispatcher[OpCode, JobID, Packet]) SendSync(
 		return zero, ctx.Err()
 
 	case res := <-resCh:
-		if errors.Is(res.err, jobs.ErrJobCancelled) {
+		if errors.Is(res.err, task.ErrJobCancelled) {
 			if ctx.Err() != nil {
 				return zero, ctx.Err()
 			}
 
-			return zero, jobs.ErrJobCancelled
+			return zero, task.ErrJobCancelled
 		}
 
 		return res.pkt, res.err
@@ -187,7 +187,7 @@ func (d *Dispatcher[OpCode, JobID, Packet]) Dispatch(packet Packet) bool {
 	// 1. Check Job Correlation
 	if d.extractor.GetJobID != nil {
 		if jobID, ok := d.extractor.GetJobID(packet); ok {
-			if d.jobs.Resolve(jobID, packet, nil) {
+			if d.tasks.Resolve(jobID, packet, nil) {
 				return true
 			}
 		}
@@ -229,7 +229,7 @@ func (d *Dispatcher[OpCode, JobID, Packet]) Close() error {
 		return nil
 	}
 
-	d.jobs.CancelAll(jobs.ErrJobCancelled)
+	d.tasks.CancelAll(task.ErrJobCancelled)
 
 	return nil
 }

@@ -13,7 +13,8 @@ import (
 	"time"
 	"unsafe"
 
-	"github.com/lemon4ksan/aoni/foundation/offheap"
+	"github.com/lemon4ksan/foundation/silicon/offheap"
+
 	"github.com/lemon4ksan/aoni/tunnel/tun"
 )
 

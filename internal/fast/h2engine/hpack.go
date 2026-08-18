@@ -9,7 +9,8 @@ import (
 	"fmt"
 	"sync"
 
-	"github.com/lemon4ksan/aoni/foundation/pool"
+	"github.com/lemon4ksan/foundation/silicon/pool"
+
 	"github.com/lemon4ksan/aoni/internal/rodata"
 )
 

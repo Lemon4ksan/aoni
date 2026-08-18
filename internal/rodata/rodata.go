@@ -6,7 +6,7 @@
 // for zero-allocation HTTP header framing and parsing.
 package rodata
 
-import "github.com/lemon4ksan/aoni/foundation/bytesconv"
+import "github.com/lemon4ksan/foundation/silicon/bytesconv"
 
 // Precompiled HTTP/1.1 and HTTP/2 static pseudo-header keys.
 var (

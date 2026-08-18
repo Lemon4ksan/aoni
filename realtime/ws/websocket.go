@@ -18,11 +18,11 @@ import (
 	"strings"
 	"time"
 
-	"github.com/lemon4ksan/miyako/generic"
+	"github.com/lemon4ksan/foundation/generic"
+	"github.com/lemon4ksan/foundation/silicon/bytesconv"
 	utls "github.com/refraction-networking/utls"
 
 	"github.com/lemon4ksan/aoni"
-	"github.com/lemon4ksan/aoni/foundation/bytesconv"
 	"github.com/lemon4ksan/aoni/internal/io"
 	"github.com/lemon4ksan/aoni/internal/requestutil"
 )

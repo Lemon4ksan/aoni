@@ -9,7 +9,7 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/lemon4ksan/aoni/foundation/bytesconv"
+	"github.com/lemon4ksan/foundation/silicon/bytesconv"
 )
 
 // node represents an internal radix tree node keyed by domain label.

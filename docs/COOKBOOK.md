@@ -1,19 +1,22 @@
 ## 🍳 Cookbook: Common Resiliency Recipes
 
-Here is how you solve frustrating networking challenges with `aoni`.
+This cookbook provides battle-tested recipes for solving complex networking, proxy routing, WAF evasion, and high-concurrency challenges using `aoni`.
 
-### 1. Transparent Proxy Rotation with Sticky Sessions
-* **The Problem:** You need to rotate proxies across a pool to distribute load, but requests belonging to the same user session must land on the exact same proxy exit node.
-* **The Ice-Cold Solution:** Use `netutil/proxy.Rotator` with a custom sticky session key extractor based on cookies, headers, or user IDs.
+## 1. Transparent Proxy Rotation with Sticky Sessions
+
+When rotating outbound requests across a large proxy pool to distribute load, requests belonging to the same logical user session must consistently route through the exact same proxy exit node to prevent session invalidation. `netutil/proxy.Rotator` provides session affinity via custom sticky key extractors based on cookies, headers, or user identifiers.
 
 ```go
 import (
+	"log"
+	"time"
+
 	"github.com/lemon4ksan/aoni"
 	"github.com/lemon4ksan/aoni/netutil/proxy"
 	"github.com/lemon4ksan/aoni/request"
 )
 
-// Instantiate a resilient, health-checked proxy pool
+// Instantiate a health-checked proxy pool with automatic failover
 rotator, err := proxy.NewRotatorFromStrings(proxy.RotatorConfig{
 	MaxFails:   3,
 	RetryAfter: 30 * time.Second,
@@ -28,16 +31,19 @@ stickyRotator := rotator.WithStickySessions(proxy.StickyKeyFromCookie("sessionid
 // Wrap the rotator into an immutable aoni Client
 client := aoni.NewClient(stickyRotator)
 
-// Requests carrying the same 'sessionid' will consistently route to the same proxy
+// Requests carrying the same 'sessionid' will consistently route to the same proxy exit node
 user, err := request.GetTo[User](ctx, client, "/profile")
 ```
 
-### 2. Fine-Tuning Transport Per-Request (The Overrides Pattern)
-* **The Problem:** You have a globally configured client, but one specific target requires bypassing TLS verification, routing through a dedicated premium proxy, and introducing random TCP dial delay to evade rate limiters.
-* **The Ice-Cold Solution:** Pass per-request modifiers (`mod.With...`). The client's global state remains untouched and secure for all other goroutines.
+## 2. Per-Request Transport Overrides
+
+In multi-tenant systems, an application may share a global client instance while specific sensitive endpoints require bypassing TLS verification, routing through a dedicated premium proxy, or introducing randomized TCP dial delays to avoid rate limiter detection. Passing per-request modifiers (`mod.With...`) overrides behavior for that specific execution without mutating the client's global immutable configuration.
 
 ```go
 import (
+	"net/http"
+	"time"
+
 	"github.com/lemon4ksan/aoni/mod"
 	"github.com/lemon4ksan/aoni/request"
 )
@@ -49,25 +55,31 @@ resp, err := client.Request(ctx, http.MethodGet, "/vip-endpoint",
 )
 ```
 
-### 3. Mitigating Long-Tail Latency via Request Hedging
-* **The Problem:** Unstable proxies or overloaded servers occasionally stall, introducing high latency spikes that block your execution queue.
-* **The Ice-Cold Solution:** Enable hedging. If the primary request stalls and fails to return response headers within a specific delay, `aoni` dispatches a parallel secondary attempt and yields whichever completes first.
+## 3. Mitigating Long-Tail Latency via Request Hedging
+
+Unstable proxy exit nodes or congested upstream servers occasionally stall, causing severe tail-latency spikes (P99/P99.9) that block worker threads. Enabling request hedging instructs `aoni` to monitor response header latency: if the primary attempt does not yield headers within a specified duration, a parallel secondary attempt is dispatched, and whichever finishes first is returned while cancelling the other.
 
 ```go
-import "github.com/lemon4ksan/aoni/option"
+import (
+	"time"
+
+	"github.com/lemon4ksan/aoni"
+	"github.com/lemon4ksan/aoni/option"
+	"github.com/lemon4ksan/aoni/request"
+)
 
 // Static 150ms hedging delay
 client := aoni.NewClient(nil, option.WithHedging(150*time.Millisecond))
 
-// Or Dynamic Hedging: automatically calculates delay based on observed p95 RTT
+// Dynamic Hedging: automatically calculates delay threshold based on EWMA P95 RTT
 clientDynamic := aoni.NewClient(nil, option.WithDynamicHedging(nil))
 
 user, err := request.GetTo[User](ctx, client, "/fast-path")
 ```
 
-### 4. Automatic Legacy Charset Translation
-* **The Problem:** Legacy APIs or regional websites return responses encoded in non-UTF-8 formats (e.g. Windows-1251, Shift-JIS, ISO-8859-1), resulting in garbled text during JSON/XML decoding.
-* **The Ice-Cold Solution:** `aoni` inspects incoming `Content-Type` headers on the fly and transparently transcodes the stream into standard UTF-8 before decoding.
+## 4. Automatic Legacy Charset Transcoding
+
+Legacy APIs and regional services frequently return responses in non-UTF-8 character sets (such as Windows-1251, Shift-JIS, or ISO-8859-1), resulting in corrupt Unicode strings during JSON or XML unmarshaling. `aoni` inspects incoming `Content-Type` charset parameters on the fly and transparently transcodes the payload into valid UTF-8 before decoding.
 
 ```go
 manifest, err := request.GetTo[Manifest](ctx, client, "/legacy-manifest",
@@ -77,14 +89,18 @@ manifest, err := request.GetTo[Manifest](ctx, client, "/legacy-manifest",
 )
 ```
 
-### 5. WAF Evasion & Pure-Go JA4/JA4H Fingerprinting
-* **The Problem:** Web Application Firewalls (Cloudflare, Akamai, Imperva) block automated requests based on TLS ClientHello fingerprints (JA3/JA4) and HTTP header ordering (JA4H).
-* **The Ice-Cold Solution:** `aoni` emulates modern browser TLS handshakes via `uTLS` and aligns header sequences. Use `TraceJA4` to inspect wire signatures in real time.
+## 5. WAF Evasion with JA4 & JA4H Fingerprinting
+
+Web Application Firewalls (such as Cloudflare, Akamai, and Imperva) evaluate TLS ClientHello fingerprints (JA3/JA4) and HTTP header ordering (JA4H) to detect automated HTTP clients. `aoni` emulates browser TLS handshakes via `uTLS` profiles and matches exact browser header capitalization and ordering.
 
 ```go
 import (
+	"fmt"
+
+	"github.com/lemon4ksan/aoni"
 	"github.com/lemon4ksan/aoni/fingerprint/ja4"
 	"github.com/lemon4ksan/aoni/option"
+	"github.com/lemon4ksan/aoni/request"
 	"github.com/lemon4ksan/aoni/telemetry"
 )
 
@@ -106,12 +122,18 @@ fmt.Println("TLS Fingerprint (JA4): ", info.JA4.JA4)  // "t13d1516h2_8daaf615277
 fmt.Println("HTTP Fingerprint (JA4H):", info.JA4.JA4H) // "ge11nn03enus_9ed1ff1f7b03_cd8dafe26982"
 ```
 
-### 6. Stealth Real-Time Socket.IO v5 / Engine.IO v4 Streaming
-* **The Problem:** Real-time WebSockets on protected servers get blocked during handshake due to standard Go TLS signatures, or drop silently without heartbeat detection.
-* **The Ice-Cold Solution:** `aoni` establishes Socket.IO v5 sessions over WebSockets or HTTP/2 Extended CONNECT tunnels while inheriting the parent client's uTLS profile, proxy rotation, and ping-timeout heartbeats.
+## 6. Real-Time Socket.IO v5 / Engine.IO v4 Streaming
+
+Connecting to WebSocket and Socket.IO endpoints on protected servers often fails during the initial HTTP handshake due to missing browser TLS signatures or drops silently without ping-timeout detection. `aoni` establishes Socket.IO v5 sessions over WebSockets or HTTP/2 Extended CONNECT tunnels while inheriting the parent client's uTLS profile, proxy rotation, and ping-timeout heartbeats.
 
 ```go
-import "github.com/lemon4ksan/aoni/realtime/socketio"
+import (
+	"encoding/json"
+	"fmt"
+	"log"
+
+	"github.com/lemon4ksan/aoni/realtime/socketio"
+)
 
 cfg := socketio.Config{
 	Reconnection: true,
@@ -119,7 +141,6 @@ cfg := socketio.Config{
 	Auth:         map[string]string{"token": "secure-session-token"},
 }
 
-// Automatically inherits proxy rotators, uTLS browser signatures, and DNS settings
 sio, err := socketio.DialSocketIO(ctx, client, "wss://api.example.com/socket.io/", cfg)
 if err != nil {
 	log.Fatal(err)
@@ -131,25 +152,25 @@ sio.On("price_update", func(args []json.RawMessage) {
 })
 ```
 
-### 7. Diagnostic Tracing & Terminal Shell cURL Generation
-* **The Problem:** Debugging network bottlenecks across multiple proxies is tedious, and manually reproducing failing requests in terminal takes time.
-* **The Ice-Cold Solution:** Attach connection tracers and print cURL commands on demand.
+## 7. Diagnostic Tracing & Shell cURL Generation
+
+Diagnosing connection bottlenecks across complex proxy chains requires detailed latency breakdowns across DNS, TCP, TLS, and TTFB phases. Attaching connection tracers allows inspecting wire metrics in real time and dumping executable cURL commands for reproduction.
 
 ```go
 var trace telemetry.TraceInfo
 
 user, err := request.GetTo[User](ctx, client, "/debug",
-	aoni.Trace(&trace),    // Detailed DNS, TCP, TLS, and TTFB metrics
-	mod.WithCurlDump(),    // Prints ready-to-run 'curl -X GET ...' to stderr
+	aoni.Trace(&trace),    // Detailed DNS, TCP, TLS, and TTFB latency metrics
+	mod.WithCurlDump(),    // Prints executable 'curl -X GET ...' command to stderr
 )
 
 fmt.Printf("DNS: %s | TCP: %s | TLS: %s | TTFB: %s\n",
 	trace.DNSLookup, trace.TCPConn, trace.TLSHandshake, trace.ServerProcessing)
 ```
 
-### 8. Structured API Response Unwrapping with `WithBaseResponse`
-* **The Problem:** APIs wrap responses in envelope structures like `{"success":true,"data":{...}}` or `{"status":"ok","result":{...}}`. Manually unwrapping them and checking error fields adds repetitive boilerplate.
-* **The Ice-Cold Solution:** Implement the `aoni.BaseResponse` interface. `aoni` decodes into your envelope wrapper, validates status flags, and extracts the target payload in a single pass.
+## 8. Structured API Response Unwrapping
+
+Many JSON APIs wrap payload objects inside standard envelope structures (such as `{"status":"success","data":{...}}`). Implementing the `aoni.BaseResponse` interface allows `aoni` to validate status codes, inspect envelope errors, and extract inner data models into destination structs in a single pass without intermediate allocations.
 
 ```go
 type APIEnvelope struct {
@@ -184,24 +205,30 @@ client := aoni.NewClient(nil,
 	option.WithBaseResponse(func() aoni.BaseResponse { return &APIEnvelope{} }),
 )
 
-// Automatically unwraps 'data' directly into User struct
+// Unmarshals inner 'data' directly into User struct
 user, err := request.GetTo[User](ctx, client, "/users/1")
 ```
 
-### 9. Socket-Level DPI Evasion (Packet Fragmentation & CDN Padding)
-* **The Problem:** Deep-packet inspection (DPI) firewalls inspect TCP segment boundaries and ClientHello sizes to block unauthorized scrapers.
-* **The Ice-Cold Solution:** Split payloads into TCP chunks with micro-delays and inject randomized CDN tracing headers.
+## 9. Socket-Level DPI Evasion (Fragmentation & CDN Padding)
+
+Deep Packet Inspection (DPI) firewalls inspect initial TCP segment boundaries and ClientHello byte lengths to detect automated scraping clients. `aoni` mitigates statistical packet length analysis by segmenting ClientHello payloads into micro-chunks and injecting randomized CDN tracing headers.
 
 ```go
-import "github.com/lemon4ksan/aoni/fingerprint"
+import (
+	"time"
+
+	"github.com/lemon4ksan/aoni"
+	"github.com/lemon4ksan/aoni/fingerprint"
+	"github.com/lemon4ksan/aoni/option"
+)
 
 client := aoni.NewClient(nil,
-	// Split TLS ClientHello into small 2-byte TCP segments with jitter
+	// Split TLS ClientHello across 2-byte TCP segments with jitter
 	option.WithFragmentation(aoni.FragmentConfig{
 		ChunkSize: 2,
 		MaxDelay:  10 * time.Millisecond,
 	}),
-	// Inject randomized CDN padding headers (e.g. AWS CloudFront / Cloudflare trace IDs)
+	// Inject randomized CDN padding headers to flatten packet length histograms
 	option.WithPacketPadding(fingerprint.PaddingConfig{
 		MinPaddingBytes: 16,
 		MaxPaddingBytes: 64,
@@ -210,12 +237,11 @@ client := aoni.NewClient(nil,
 )
 ```
 
-### 10. In-Memory Unit Testing with Vortex Mocks (0 Port Overhead)
-* **The Problem:** Spinning up real `httptest.Server` instances in parallel unit test suites leads to port exhaustion, slow execution, and flaky network socket timeouts.
-* **The Ice-Cold Solution:** Generate in-memory mock servers with `vortex mock`. The mock routes requests directly through `fasthttputil.InmemoryListener` without opening OS network ports.
+## 10. In-Memory Unit Testing with Vortex Mocks
+
+Running integration tests against real `httptest.Server` instances in parallel test suites causes TCP port exhaustion, slow execution, and OS socket contention. Generating in-memory mock servers with `vortex mock` allows routing HTTP traffic directly through `fasthttputil.InmemoryListener` without opening OS network ports.
 
 ```bash
-# Generate the mock server implementation
 vortex mock pkg/services/user/api.go
 ```
 
@@ -223,27 +249,22 @@ vortex mock pkg/services/user/api.go
 func TestUserAPI(t *testing.T) {
 	ctx := context.Background()
 
-	// 1. Create in-memory mock
 	mockServer := user.NewUserAPIMockServer()
-
-	// 2. Define custom response
 	mockServer.OnGetUser = func(ctx context.Context, id string) (*user.UserDTO, error) {
-		return &user.UserDTO{ID: id, Name: "G-Man"}, nil
+		return &user.UserDTO{ID: id, Name: "Alice"}, nil
 	}
 
-	// 3. Obtain client routed directly into in-memory transport
 	client := mockServer.Client()
 
-	// 4. Test service
-	res, err := client.GetUser(ctx, "76561198000000000")
+	res, err := client.GetUser(ctx, "usr_100")
 	require.NoError(t, err)
-	require.Equal(t, "G-Man", res.Name)
+	require.Equal(t, "Alice", res.Name)
 }
 ```
 
-### 11. Zero-Allocation Protobuf Services with `vtprotobuf`
-* **The Problem:** Standard `protoc-gen-go` generates reflection-heavy serialization routines that allocate heap memory on every message encode/decode.
-* **The Ice-Cold Solution:** Compile `.proto` schemas with `vortex proto` to generate high-speed `vtprotobuf` zero-allocation codecs and use generic `request.PostProtoTo[T]`.
+## 11. Zero-Allocation Protobuf Services with `vtprotobuf`
+
+Standard `protoc-gen-go` generates reflection-based serialization routines that allocate heap memory on every message encode and decode. Compiling `.proto` schemas with `vortex proto` generates optimized `vtprotobuf` zero-allocation codecs that integrate with `request.PostProtoTo[T]`.
 
 ```bash
 vortex proto -src=./proto -out=./pkg/pb -import=github.com/my/project/pkg/pb
@@ -259,44 +280,44 @@ import (
 resp, err := request.PostProtoTo[pb.TradeResponse](ctx, client, "https://api.steam.com/trade", reqProto)
 ```
 
-### 12. Streaming Server-Sent Events (SSE) & NDJSON Processing
-* **The Problem:** Parsing large streaming datasets (AI token streams, orderbook updates) line-by-line using standard scanners causes memory bloat and allocation churn.
-* **The Ice-Cold Solution:** Use `realtime/stream.StreamNDJSON` or `realtime/stream.StreamSSE` with pooled decoders and cancellation contexts.
+## 12. Streaming Server-Sent Events (SSE) & NDJSON Processing
+
+Consuming high-throughput event streams (such as AI token streams or exchange order books) line by line using standard scanners creates memory bloat and allocation churn. `realtime/stream.StreamNDJSON` and `realtime/stream.StreamSSE` process incoming records sequentially with pooled decoders and context-aware cancellation.
 
 ```go
 import "github.com/lemon4ksan/aoni/realtime/stream"
 
 type OrderbookUpdate struct {
-	SeqID uint64    `json:"seq_id"`
+	SeqID uint64      `json:"seq_id"`
 	Bids  [][]float64 `json:"bids"`
 	Asks  [][]float64 `json:"asks"`
 }
 
-// Stream NDJSON objects with zero memory growth
 err := stream.StreamNDJSON(ctx, client, "GET", "https://stream.example.com/orderbook", nil,
 	func(update *OrderbookUpdate) error {
 		fmt.Printf("Seq %d: Top Bid: %.2f\n", update.SeqID, update.Bids[0][0])
-		return nil // return non-nil error to gracefully terminate stream
+		return nil // Return non-nil error to gracefully stop stream
 	},
 )
 ```
 
-### 13. TLS 1.3 Encrypted Client Hello (ECH) & DNS-over-HTTPS (DoH)
-* **The Problem:** Intermediate middleboxes and ISPs inspect unencrypted SNI (Server Name Indication) in TLS handshakes to block access or enforce geo-censorship.
-* **The Ice-Cold Solution:** Enable ECH (RFC 9460) via secure DoH/DoQ DNS resolvers. `aoni` queries SVCB/HTTPS DNS records and encrypts the SNI inside the outer ClientHello.
+## 13. TLS 1.3 Encrypted Client Hello (ECH) & DNS-over-HTTPS
+
+Intermediate middleboxes and ISPs inspect unencrypted Server Name Indication (SNI) headers in TLS handshakes to enforce domain-based filtering and censorship. Enabling ECH (RFC 9460) via secure DoH or DoQ resolvers allows `aoni` to resolve SVCB/HTTPS records and encrypt the inner SNI inside outer TLS frames.
 
 ```go
 import (
+	"github.com/lemon4ksan/aoni"
 	"github.com/lemon4ksan/aoni/netutil/dns"
 	"github.com/lemon4ksan/aoni/option"
+	"github.com/lemon4ksan/aoni/request"
 )
 
-// Configure pure-Go DoH resolver with TLS 1.3 ECH auto-negotiation
 client := aoni.NewClient(nil,
 	option.WithDoHResolver(dns.CloudflareDoH),
 	option.WithECH(aoni.ECHConfig{
-		Enabled:    true,
-		FallbackToPlainTLS: false, // Strict privacy
+		Enabled:            true,
+		FallbackToPlainTLS: false, // Enforce strict privacy
 	}),
 	option.WithChrome(),
 )
@@ -304,17 +325,20 @@ client := aoni.NewClient(nil,
 resp, err := request.GetTo[map[string]any](ctx, client, "https://crypto.cloudflare.com/cdn-cgi/trace")
 ```
 
-### 14. High-Throughput IPv6 Subnet Rotation (/64 Prefix Pool)
-* **The Problem:** Aggressive REST scraping against heavily rate-limited target endpoints exhausts IPv4 addresses quickly.
-* **The Ice-Cold Solution:** Bind a dedicated `/64` IPv6 prefix to your server and rotate source IP addresses dynamically per request with zero OS socket configuration.
+## 14. IPv6 Subnet Rotation (/64 Prefix Pool)
+
+High-throughput scraping against aggressive rate limiters exhausts IPv4 pools rapidly. Binding a `/64` IPv6 prefix to the server allows dynamically generating and rotating random source IPv6 addresses on each outbound dial with zero OS network configuration.
 
 ```go
 import (
+	"log"
+
+	"github.com/lemon4ksan/aoni"
 	"github.com/lemon4ksan/aoni/netutil/ip"
 	"github.com/lemon4ksan/aoni/option"
+	"github.com/lemon4ksan/aoni/request"
 )
 
-// Generate random source IPs within 2001:db8:1234:5678::/64 subnet
 rotator, err := ip.NewIPv6SubnetRotator("2001:db8:1234:5678::/64")
 if err != nil {
 	log.Fatal(err)
@@ -322,34 +346,35 @@ if err != nil {
 
 client := aoni.NewClient(nil, option.WithDialer(rotator.Dialer()))
 
-// Every request originates from a completely unique IPv6 address
+// Every request originates from a unique randomized IPv6 address
 user, err := request.GetTo[User](ctx, client, "https://ipv6.api.example.com/profile")
 ```
 
-### 15. Chromium-Grade Network Resilience (421 Auto-Recovery & Happy Eyeballs v3)
-* **The Problem:** Modern HTTP/2 server connection reuse triggers HTTP 421 (Misdirected Request) on certificate changes, while broken HTTP/3 endpoints cause connection timeouts.
-* **The Ice-Cold Solution:** `aoni` natively incorporates Chromium Happy Eyeballs v3 to race H3/QUIC against H2/TCP, and automatically re-routes rejected 421/408/425 requests onto fresh sockets.
+## 15. Chromium-Grade Network Resilience (421 Recovery & Happy Eyeballs v3)
+
+HTTP/2 connection coalescing triggers HTTP 421 (Misdirected Request) when host certificate scopes mismatch, while broken HTTP/3 endpoints cause silent connection hangs. `aoni` implements Chromium Happy Eyeballs v3 to race HTTP/3 against HTTP/2/1.1 and automatically re-routes rejected 421, 408, and 425 requests onto clean transport connections.
 
 ```go
-import "github.com/lemon4ksan/aoni/option"
+import (
+	"github.com/lemon4ksan/aoni"
+	"github.com/lemon4ksan/aoni/option"
+)
 
 client := aoni.NewClient(nil,
-	option.WithHTTP3(),              // Enables QUIC/H3 protocol racing
-	option.WithHappyEyeballs(true),  // Chromium Happy Eyeballs v3 algorithm
-	option.WithAutoRecovery(true),   // Transparent re-dial on HTTP 421, 408, 425
+	option.WithHTTP3(),             // Enables QUIC/H3 protocol racing
+	option.WithHappyEyeballs(true), // Chromium Happy Eyeballs v3 racing
+	option.WithAutoRecovery(true),  // Transparent re-dial on HTTP 421, 408, 425
 )
 ```
 
-### 16. Continuous Contract Drift Detection in CI/CD
-* **The Problem:** Upstream API providers update their OpenAPI specifications, causing silent breaking changes in production.
-* **The Ice-Cold Solution:** Add `vortex diff` and `vortex status -strict` to your CI pipeline to catch schema breaking changes before code merge.
+## 16. Continuous Contract Drift Detection in CI/CD
+
+Upstream API changes can introduce breaking schema modifications without warning. Integrating `vortex diff` into CI pipelines validates that local Go AST interface contracts remain fully synchronized with remote OpenAPI specifications.
 
 ```bash
 # In CI: fails if upstream schema drifted from local declarative Go contract
 vortex diff https://api.example.com/openapi.json pkg/services/user/api.go --fail-on-breaking
 
-# Health check all workspace services
+# Health check all workspace contracts
 vortex status -strict
 ```
-
-

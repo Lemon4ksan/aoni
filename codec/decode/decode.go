@@ -13,8 +13,9 @@ import (
 	"sync"
 	"sync/atomic"
 
+	"github.com/lemon4ksan/foundation/silicon/bytesconv"
+
 	"github.com/lemon4ksan/aoni"
-	"github.com/lemon4ksan/aoni/foundation/bytesconv"
 	"github.com/lemon4ksan/aoni/mod"
 )
 

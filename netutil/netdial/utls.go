@@ -18,7 +18,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/lemon4ksan/miyako/generic"
+	"github.com/lemon4ksan/foundation/generic"
 	utls "github.com/refraction-networking/utls"
 
 	"github.com/lemon4ksan/aoni/fingerprint/ja4"

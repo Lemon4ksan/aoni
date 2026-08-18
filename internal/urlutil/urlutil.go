@@ -12,8 +12,8 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/lemon4ksan/aoni/foundation/bytesconv"
-	"github.com/lemon4ksan/aoni/foundation/simd"
+	"github.com/lemon4ksan/foundation/silicon/bytesconv"
+	"github.com/lemon4ksan/foundation/silicon/simd"
 )
 
 // fastHash computes a hardware CRC32 hash of string s to select a cache shard index.

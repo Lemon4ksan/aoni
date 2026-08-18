@@ -8,7 +8,7 @@ import (
 	"io"
 	"testing"
 
-	"github.com/lemon4ksan/aoni/foundation/text"
+	"github.com/lemon4ksan/aoni/cmd/vortex/internal/text"
 )
 
 func BenchmarkDocumentBuilder_Build(b *testing.B) {

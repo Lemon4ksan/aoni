@@ -9,7 +9,7 @@ import (
 	"fmt"
 	"io"
 
-	"github.com/lemon4ksan/aoni/foundation/text"
+	"github.com/lemon4ksan/aoni/cmd/vortex/internal/text"
 	"github.com/lemon4ksan/aoni/internal/codegen/diff"
 	"github.com/lemon4ksan/aoni/internal/codegen/lint"
 )

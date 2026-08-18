@@ -10,7 +10,7 @@ import (
 	"runtime"
 	"sync"
 
-	"github.com/lemon4ksan/miyako/log"
+	"github.com/lemon4ksan/foundation/async/log"
 
 	"github.com/lemon4ksan/aoni/realtime/socket"
 )

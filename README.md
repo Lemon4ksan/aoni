@@ -22,7 +22,7 @@ Building production Go applications often requires integrating multiple independ
 
 Whether executing standard REST microservice queries, high-throughput API gateway routing, real-time WebSocket streams, or stealthy network analysis, `aoni` provides zero-allocation hot paths and predictable execution budgets.
 
-### 💡 Why Zero-Allocation Speed Matters (Even for Millisecond CRUD Services)
+### Why Zero-Allocation Speed Matters (Even for Millisecond CRUD Services)
 
 `aoni` is engineered to render the network transport layer completely invisible to the CPU, ensuring zero infrastructure overhead interferes with your core business logic:
 

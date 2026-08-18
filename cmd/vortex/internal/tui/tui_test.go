@@ -12,7 +12,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/lemon4ksan/aoni/foundation/tui"
+	"github.com/lemon4ksan/aoni/cmd/vortex/internal/tui"
 )
 
 func TestTUI_VisibleWidthAndStripANSI(t *testing.T) {

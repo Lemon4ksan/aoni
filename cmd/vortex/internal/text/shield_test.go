@@ -11,7 +11,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/lemon4ksan/aoni/foundation/text"
+	"github.com/lemon4ksan/aoni/cmd/vortex/internal/text"
 )
 
 func TestShield_StandardCodeBlocks(t *testing.T) {

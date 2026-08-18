@@ -9,7 +9,7 @@ import (
 	"io"
 	"strings"
 
-	"github.com/lemon4ksan/aoni/foundation/bytesconv"
+	"github.com/lemon4ksan/foundation/silicon/bytesconv"
 )
 
 // PlainRenderer converts a [Document] into unadorned plaintext.

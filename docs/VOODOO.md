@@ -5,9 +5,9 @@
 
 To an outside observer, bypassing modern Deep Packet Inspection (DPI) firewalls and Web Application Firewalls (WAFs) looks like network necromancy. Developers often paste magic strings of cipher suites and network parameters into their code, hoping the remote gatekeepers will let their requests pass.
 
-`aoni` rejects blind faith. This document demystifies the "voodoo" behind TLS, HTTP/2, and TCP/IP evasion, explaining the exact physical and protocol-level rules we manipulate to achieve browser-grade stealth.
+`aoni` rejects blind faith. This document demystifies the mechanics behind TLS, HTTP/2, and TCP/IP evasion, explaining the exact physical and protocol-level rules we manipulate to achieve browser-grade stealth.
 
-## 🔬 Deep Dive: The Physics of Fingerprint Detection vs. Evasion
+## Deep Dive: Fingerprint Detection vs. Evasion Mechanics
 
 To understand why `aoni` is engineered this way, we must look at how modern security middleboxes dissect network connections in real time.
 

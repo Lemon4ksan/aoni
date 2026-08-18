@@ -11,12 +11,12 @@ import (
 	"net/http"
 	"slices"
 
+	"github.com/lemon4ksan/foundation/silicon/bytesconv"
+	"github.com/lemon4ksan/foundation/silicon/pool"
 	"github.com/valyala/fasthttp"
 	"golang.org/x/sys/cpu"
 
 	"github.com/lemon4ksan/aoni"
-	"github.com/lemon4ksan/aoni/foundation/bytesconv"
-	"github.com/lemon4ksan/aoni/foundation/pool"
 )
 
 var requestAdapterStorage = pool.NewPerPStorage(func() *Request {

@@ -13,9 +13,9 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/lemon4ksan/miyako/generic"
-	"github.com/lemon4ksan/miyako/jobs"
-	"github.com/lemon4ksan/miyako/kata"
+	"github.com/lemon4ksan/foundation/async/fsm"
+	"github.com/lemon4ksan/foundation/async/task"
+	"github.com/lemon4ksan/foundation/generic"
 
 	"github.com/lemon4ksan/aoni"
 	"github.com/lemon4ksan/aoni/realtime/ws"
@@ -104,11 +104,11 @@ type Conn struct {
 	onReconnected     func()
 	onReconnectFailed func()
 
-	ackMgr *jobs.Manager[int64, []json.RawMessage]
+	ackMgr *task.Manager[int64, []json.RawMessage]
 
 	state   sioConnState
 	stateMu sync.RWMutex
-	fsm     *kata.FSM[sioConnState, sioEventType]
+	fsm     *fsm.FSM[sioConnState, sioEventType]
 
 	backoff       *generic.Backoff
 	attemptCount  int
@@ -136,7 +136,7 @@ func NewSocketIOConn(ctx context.Context, conn ws.Conn, config Config) (*Conn, e
 		config:        config,
 		namespace:     config.Namespace,
 		nsEvents:      make(map[string]map[string]func(args []json.RawMessage)),
-		ackMgr:        jobs.NewManager[int64, []json.RawMessage](0),
+		ackMgr:        task.NewManager[int64, []json.RawMessage](0),
 		closed:        make(chan struct{}),
 		reconnectStop: make(chan struct{}),
 		backoff:       newBackoff(config),
@@ -371,7 +371,7 @@ func (s *Conn) registerAckJob(ackFn func([]json.RawMessage)) *int64 {
 		if err == nil {
 			ackFn(response)
 		}
-	}, jobs.WithTimeout[[]json.RawMessage](30*time.Second))
+	}, task.WithTimeout[[]json.RawMessage](30*time.Second))
 
 	return &id
 }
@@ -398,7 +398,7 @@ func (s *Conn) emitBinaryNS(nsp string, data any, ackFn func(args []json.RawMess
 			if err == nil {
 				ackFn(response)
 			}
-		}, jobs.WithTimeout[[]json.RawMessage](30*time.Second))
+		}, task.WithTimeout[[]json.RawMessage](30*time.Second))
 	}
 
 	encoded := encodeSIOPacket(pkt)

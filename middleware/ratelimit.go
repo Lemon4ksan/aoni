@@ -10,7 +10,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/lemon4ksan/miyako/sync/limiter"
+	"github.com/lemon4ksan/foundation/async/sync/limiter"
 	"golang.org/x/time/rate"
 
 	"github.com/lemon4ksan/aoni"

@@ -8,7 +8,7 @@ import (
 	"fmt"
 	"io"
 
-	"github.com/lemon4ksan/aoni/foundation/bytesconv"
+	"github.com/lemon4ksan/foundation/silicon/bytesconv"
 )
 
 // TerminalRenderer converts a [Document] into ANSI colorized terminal output.

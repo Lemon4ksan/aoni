@@ -22,8 +22,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/lemon4ksan/miyako/sync/breaker"
-	"github.com/lemon4ksan/miyako/sync/keylock"
+	"github.com/lemon4ksan/foundation/async/sync/breaker"
+	"github.com/lemon4ksan/foundation/async/sync/keylock"
 
 	"github.com/lemon4ksan/aoni"
 	"github.com/lemon4ksan/aoni/netutil/netdial"

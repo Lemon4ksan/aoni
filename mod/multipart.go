@@ -15,8 +15,9 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/lemon4ksan/foundation/silicon/offheap"
+
 	"github.com/lemon4ksan/aoni"
-	"github.com/lemon4ksan/aoni/foundation/offheap"
 	"github.com/lemon4ksan/aoni/internal/io"
 )
 

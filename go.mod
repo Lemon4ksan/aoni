@@ -6,7 +6,7 @@ require (
 	github.com/andybalholm/brotli v1.2.2
 	github.com/getkin/kin-openapi v0.146.0
 	github.com/klauspost/compress v1.19.1
-	github.com/lemon4ksan/miyako v0.3.0
+	github.com/lemon4ksan/foundation v0.1.0
 	github.com/quic-go/qpack v0.6.0
 	github.com/quic-go/quic-go v0.61.0
 	github.com/stretchr/testify v1.11.1
@@ -37,3 +37,5 @@ require (
 	github.com/pmezard/go-difflib v1.0.0 // indirect
 	github.com/refraction-networking/utls v1.8.2
 )
+
+replace github.com/lemon4ksan/foundation => ../foundation

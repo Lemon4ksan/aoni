@@ -13,11 +13,10 @@ import (
 	"sync"
 	"time"
 
-	"github.com/lemon4ksan/miyako/generic"
-	"github.com/lemon4ksan/miyako/sync/keylock"
+	"github.com/lemon4ksan/foundation/async/sync/keylock"
+	"github.com/lemon4ksan/foundation/generic"
+	"github.com/lemon4ksan/foundation/silicon/clock"
 	"golang.org/x/net/publicsuffix"
-
-	"github.com/lemon4ksan/aoni/foundation/clock"
 )
 
 type (

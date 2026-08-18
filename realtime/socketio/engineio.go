@@ -11,7 +11,7 @@ import (
 	"maps"
 	"time"
 
-	"github.com/lemon4ksan/miyako/kata"
+	"github.com/lemon4ksan/foundation/async/fsm"
 
 	"github.com/lemon4ksan/aoni/realtime/ws"
 )
@@ -33,42 +33,42 @@ const (
 	sioEventTypeReconnect
 )
 
-func initFSM() *kata.FSM[sioConnState, sioEventType] {
-	fsm := kata.NewFSM[sioConnState, sioEventType](sioStateClosed)
-	fsm.AddRules(
-		kata.TransitionRule[sioConnState, sioEventType]{
+func initFSM() *fsm.FSM[sioConnState, sioEventType] {
+	sm := fsm.NewFSM[sioConnState, sioEventType](sioStateClosed)
+	sm.AddRules(
+		fsm.TransitionRule[sioConnState, sioEventType]{
 			From:  sioStateClosed,
 			Event: sioEventTypeOpen,
 			To:    sioStateOpen,
 		},
-		kata.TransitionRule[sioConnState, sioEventType]{
+		fsm.TransitionRule[sioConnState, sioEventType]{
 			From:  sioStateOpen,
 			Event: sioEventTypeClose,
 			To:    sioStateClosing,
 		},
-		kata.TransitionRule[sioConnState, sioEventType]{
+		fsm.TransitionRule[sioConnState, sioEventType]{
 			From:  sioStateClosed,
 			Event: sioEventTypeReconnect,
 			To:    sioStateOpen,
 		},
-		kata.TransitionRule[sioConnState, sioEventType]{
+		fsm.TransitionRule[sioConnState, sioEventType]{
 			From:  sioStateOpening,
 			Event: sioEventTypeOpen,
 			To:    sioStateOpen,
 		},
-		kata.TransitionRule[sioConnState, sioEventType]{
+		fsm.TransitionRule[sioConnState, sioEventType]{
 			From:  sioStateOpening,
 			Event: sioEventTypeClose,
 			To:    sioStateClosed,
 		},
-		kata.TransitionRule[sioConnState, sioEventType]{
+		fsm.TransitionRule[sioConnState, sioEventType]{
 			From:  sioStateClosing,
 			Event: sioEventTypeClose,
 			To:    sioStateClosed,
 		},
 	)
 
-	return fsm
+	return sm
 }
 
 func (s *Conn) doHandshake(ctx context.Context) error {
