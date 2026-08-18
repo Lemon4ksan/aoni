@@ -18,7 +18,7 @@ import (
 	"time"
 
 	"github.com/lemon4ksan/foundation/net/ip"
-	"golang.org/x/net/proxy"
+	"github.com/lemon4ksan/foundation/net/proxy"
 
 	"github.com/lemon4ksan/aoni/fingerprint/p0f"
 	"github.com/lemon4ksan/aoni/internal/io"
