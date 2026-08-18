@@ -240,7 +240,7 @@ func buildHeadersDesktop(os profiles.OSKey) []profiles.HeaderEntry {
 		{Name: ":method", Value: ""},
 		{Name: ":path", Value: ""},
 		{Name: ":scheme", Value: ""},
-		{Name: profiles.ACCEPT_ENCODING, Value: "gzip, deflate, br, zstd"},
+		{Name: profiles.ACCEPT_ENCODING, Value: "gzip, deflate, br"},
 		{Name: profiles.ACCEPT_LANGUAGE, Value: "en-US,en;q=0.9"},
 		{Name: profiles.AUTHORIZATION, Value: ""},
 		{Name: profiles.COOKIE, Value: ""},

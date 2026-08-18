@@ -34,9 +34,18 @@ func emitTuple(buf *bytes.Buffer, tracker *ImportTracker, t *ir.TupleIR) {
 		fmt.Fprintf(buf, "\tarr := make([]any, %d)\n", maxIdx+1)
 		for _, f := range t.Fields {
 			if !f.IsNested {
-				fmt.Fprintf(buf, "\tarr[%d] = t.%s\n", f.Index, f.GoName)
+				if f.Type.IsPointer {
+					fmt.Fprintf(buf, "\tif t.%s != nil {\n\t\tarr[%d] = t.%s\n\t}\n", f.GoName, f.Index, f.GoName)
+				} else if f.Type.Name == "string" {
+					fmt.Fprintf(buf, "\tif t.%s != \"\" {\n\t\tarr[%d] = t.%s\n\t}\n", f.GoName, f.Index, f.GoName)
+				} else {
+					fmt.Fprintf(buf, "\tarr[%d] = t.%s\n", f.Index, f.GoName)
+				}
 			}
 		}
+		buf.WriteString("\tfor len(arr) > 0 && arr[len(arr)-1] == nil {\n")
+		buf.WriteString("\t\tarr = arr[:len(arr)-1]\n")
+		buf.WriteString("\t}\n")
 		buf.WriteString("\treturn json.Marshal(arr)\n")
 	}
 	buf.WriteString("}\n\n")

@@ -56,6 +56,14 @@ func emitHTTPMethod(
 		fmt.Fprintf(buf, "\tallMods = append(allMods, mod.WithCorrelationID(\"\"), mod.WithLabel(%q))\n\n", labelVal)
 	}
 
+	// Service-level content type override
+	for _, h := range svc.Headers {
+		if strings.EqualFold(h.Key, "content-type") && h.StaticValue != "" {
+			tracker.Add("github.com/lemon4ksan/aoni/mod")
+			fmt.Fprintf(buf, "\tallMods = append(allMods, mod.WithContentType(%q))\n", h.StaticValue)
+		}
+	}
+
 	// Build dynamic headers (e.g. Referer)
 	for _, h := range m.Headers {
 		switch {
