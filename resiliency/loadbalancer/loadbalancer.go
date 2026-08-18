@@ -469,10 +469,10 @@ func (b *Balancer) SelectHealthy() generic.Optional[*Backend] {
 func (b *Balancer) DoResult(req *http.Request) generic.Result[*http.Response] {
 	resp, err := b.Do(req) //nolint:bodyclose
 	if err != nil {
-		return generic.Failure[*http.Response](err)
+		return generic.Failure[*http.Response](err) //nolint:bodyclose
 	}
 
-	return generic.Success(resp)
+	return generic.Success(resp) //nolint:bodyclose
 }
 
 // SetWeight updates the selection weight of a target backend URL.

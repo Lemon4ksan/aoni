@@ -8,8 +8,11 @@ package dns
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net"
 	"strings"
+
+	"github.com/lemon4ksan/foundation/generic"
 )
 
 // ErrNoResolversConfigured is returned when a fallback or race resolver is instantiated without active resolvers.
@@ -166,59 +169,60 @@ func NewFastRaceResolver(resolvers ...Resolver) *FastRaceResolver {
 
 // LookupIPAddr races all configured resolvers concurrently, yielding the fastest response.
 func (r *FastRaceResolver) LookupIPAddr(ctx context.Context, host string) ([]net.IPAddr, error) {
-	var activeResolvers []Resolver
-	for _, res := range r.resolvers {
-		if res != nil {
-			activeResolvers = append(activeResolvers, res)
-		}
-	}
-
+	activeResolvers := generic.Filter(r.resolvers, func(res Resolver) bool { return res != nil })
 	if len(activeResolvers) == 0 {
 		return nil, ErrNoResolversConfigured
 	}
 
-	type result struct {
-		ips []net.IPAddr
-		err error
-	}
-
-	resCh := make(chan result, len(activeResolvers))
-
-	raceCtx, cancelAll := context.WithCancel(ctx)
-	defer cancelAll()
-
-	for _, res := range activeResolvers {
-		go func(resolver Resolver) {
-			ips, err := resolver.LookupIPAddr(raceCtx, host)
-			select {
-			case <-raceCtx.Done():
-			case resCh <- result{ips: ips, err: err}:
-			}
-		}(res)
-	}
-
-	var lastErr error
-
-	failedCount := 0
-	activeCount := len(activeResolvers)
-
-	for range activeCount {
-		select {
-		case <-ctx.Done():
-			return nil, ctx.Err()
-		case res := <-resCh:
-			if res.err == nil {
-				return res.ips, nil
+	tasks := make([]func(context.Context) generic.Result[[]net.IPAddr], len(activeResolvers))
+	for i, res := range activeResolvers {
+		resolver := res
+		tasks[i] = func(reqCtx context.Context) generic.Result[[]net.IPAddr] {
+			ips, err := resolver.LookupIPAddr(reqCtx, host)
+			if err != nil {
+				return generic.Failure[[]net.IPAddr](err)
 			}
 
-			lastErr = res.err
-			failedCount++
-
-			if failedCount == activeCount {
-				return nil, errors.New("aoni/dns: all concurrent resolutions failed: " + lastErr.Error())
-			}
+			return generic.Success(ips)
 		}
 	}
 
-	return nil, errors.New("aoni/dns: race resolver: no responses received")
+	res := generic.RaceFirstSuccess(ctx, tasks...)
+	if !res.IsSuccess() {
+		_, err := res.Unwrap()
+		return nil, fmt.Errorf("aoni/dns: all concurrent resolutions failed: %w", err)
+	}
+
+	ips, _ := res.Unwrap()
+
+	return ips, nil
+}
+
+// LookupIPAddrResult executes a hostname lookup and returns a Swift-inspired [generic.Result].
+func LookupIPAddrResult(ctx context.Context, r Resolver, host string) generic.Result[[]net.IPAddr] {
+	if r == nil {
+		return generic.Failure[[]net.IPAddr](ErrNoResolversConfigured)
+	}
+
+	ips, err := r.LookupIPAddr(ctx, host)
+	if err != nil {
+		return generic.Failure[[]net.IPAddr](err)
+	}
+
+	return generic.Success(ips)
+}
+
+// LookupFirstIP returns the first resolved IP wrapped in a [generic.Optional].
+func LookupFirstIP(ctx context.Context, r Resolver, host string) generic.Optional[net.IP] {
+	res := LookupIPAddrResult(ctx, r, host)
+	if !res.IsSuccess() {
+		return generic.None[net.IP]()
+	}
+
+	ips, _ := res.Unwrap()
+	if len(ips) == 0 || ips[0].IP == nil {
+		return generic.None[net.IP]()
+	}
+
+	return generic.Some(ips[0].IP)
 }
