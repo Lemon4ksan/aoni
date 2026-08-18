@@ -41,7 +41,7 @@ func (e *Emitter) Emit(root *ir.RootIR) ([]byte, error) {
 
 	// 2. Multi-Status Unions
 	for _, u := range root.Unions {
-		emitUnion(&bodyBuf, u)
+		emitUnion(&bodyBuf, tracker, u)
 	}
 
 	// 3. Bitpack Structs

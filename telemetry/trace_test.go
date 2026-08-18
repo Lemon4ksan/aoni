@@ -294,3 +294,24 @@ func TestExtractRedirectHistory(t *testing.T) {
 	assert.Equal(t, "https://example.com/step2", hops[1].URL)
 	assert.Equal(t, 302, hops[1].StatusCode)
 }
+
+func TestTraceInfo_OptionalHelpers(t *testing.T) {
+	t.Parallel()
+
+	info := &telemetry.TraceInfo{
+		DNSLookup:    12 * time.Millisecond,
+		TLSHandshake: 0, // Not performed (e.g. plain HTTP)
+	}
+
+	dnsOpt := info.DNSDuration()
+	assert.True(t, dnsOpt.IsPresent())
+	dnsVal, ok := dnsOpt.Value()
+	assert.True(t, ok)
+	assert.Equal(t, 12*time.Millisecond, dnsVal)
+
+	tlsOpt := info.TLSDuration()
+	assert.False(t, tlsOpt.IsPresent())
+
+	ja4Opt := info.JA4Report()
+	assert.False(t, ja4Opt.IsPresent())
+}

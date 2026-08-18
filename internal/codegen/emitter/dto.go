@@ -134,6 +134,17 @@ func emitFieldFormData(buf *bytes.Buffer, tracker *ImportTracker, f *ir.FieldIR)
 		buf.WriteString("\t}\n")
 
 	default:
+		if strings.HasPrefix(f.Type.Name, "generic.Optional[") || strings.HasPrefix(f.Type.Name, "Optional[") {
+			tracker.Add("fmt")
+			fmt.Fprintf(buf, "\tif optVal, ok := r.%s.Value(); ok {\n", f.GoName)
+			buf.WriteString("\t\tif len(dst) > 0 { dst = append(dst, '&') }\n")
+			fmt.Fprintf(buf, "\t\tdst = append(dst, %q...)\n", f.WireName+"=")
+			fmt.Fprintf(buf, "\t\tdst = append(dst, url.QueryEscape(fmt.Sprint(optVal))...)\n")
+			buf.WriteString("\t}\n")
+
+			return
+		}
+
 		if strings.HasPrefix(f.Type.Name, "[]") || strings.HasPrefix(f.Type.Name, "map[") {
 			return
 		}
@@ -207,6 +218,15 @@ func emitFieldEncodeValues(buf *bytes.Buffer, tracker *ImportTracker, f *ir.Fiel
 		fmt.Fprintf(buf, "\t\tvals.Set(%q, strconv.FormatInt(int64(r.%s), 10))\n", f.WireName, f.GoName)
 		buf.WriteString("\t}\n")
 	default:
+		if strings.HasPrefix(f.Type.Name, "generic.Optional[") || strings.HasPrefix(f.Type.Name, "Optional[") {
+			tracker.Add("fmt")
+			fmt.Fprintf(buf, "\tif optVal, ok := r.%s.Value(); ok {\n", f.GoName)
+			fmt.Fprintf(buf, "\t\tvals.Set(%q, fmt.Sprint(optVal))\n", f.WireName)
+			buf.WriteString("\t}\n")
+
+			return
+		}
+
 		if strings.HasPrefix(f.Type.Name, "[]") || strings.HasPrefix(f.Type.Name, "map[") {
 			return
 		}

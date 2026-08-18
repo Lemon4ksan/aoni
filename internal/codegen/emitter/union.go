@@ -9,11 +9,13 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/lemon4ksan/foundation/generic"
+
 	"github.com/lemon4ksan/aoni/internal/codegen/ir"
 )
 
 // emitUnion generates discriminator helpers and Match callbacks for @aoni:union structs.
-func emitUnion(buf *bytes.Buffer, u *ir.UnionIR) {
+func emitUnion(buf *bytes.Buffer, tracker *ImportTracker, u *ir.UnionIR) {
 	if u == nil || len(u.Fields) == 0 {
 		return
 	}
@@ -34,7 +36,33 @@ func emitUnion(buf *bytes.Buffer, u *ir.UnionIR) {
 	buf.WriteString("\treturn u.StatusCode\n")
 	buf.WriteString("}\n\n")
 
-	// 3. Typed Match method
+	// 3. Primary Value helper returning generic.Optional
+	for _, f := range u.Fields {
+		is2xx := generic.Any(f.StatusCodes, func(sc int) bool {
+			return sc >= 200 && sc <= 299
+		})
+
+		if is2xx {
+			tracker.Add("github.com/lemon4ksan/foundation/generic")
+
+			cleanType := f.Type.Name
+			if !strings.HasPrefix(cleanType, "*") && f.Type.IsCustomType {
+				cleanType = "*" + cleanType
+			}
+
+			fmt.Fprintf(buf, "// Value returns the successful payload wrapped in a generic.Optional.\n")
+			fmt.Fprintf(buf, "func (u *%s) Value() generic.Optional[%s] {\n", unionName, cleanType)
+			fmt.Fprintf(buf, "\tif u != nil && u.%s != nil {\n", f.GoName)
+			fmt.Fprintf(buf, "\t\treturn generic.Some(u.%s)\n", f.GoName)
+			buf.WriteString("\t}\n")
+			fmt.Fprintf(buf, "\treturn generic.None[%s]()\n", cleanType)
+			buf.WriteString("}\n\n")
+
+			break
+		}
+	}
+
+	// 4. Typed Match method
 	var matchParams []string
 	for _, f := range u.Fields {
 		paramName := "on" + f.GoName
