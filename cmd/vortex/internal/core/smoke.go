@@ -17,9 +17,9 @@ import (
 	"time"
 
 	"github.com/lemon4ksan/aoni/cmd/vortex/internal/base"
+	"github.com/lemon4ksan/aoni/foundation/text"
 	"github.com/lemon4ksan/aoni/internal/codegen/cache"
 	codeparser "github.com/lemon4ksan/aoni/internal/codegen/parser"
-	"github.com/lemon4ksan/aoni/internal/tui"
 )
 
 // CmdSmoke performs rapid live connectivity and schema smoke checks on API contracts.
@@ -241,10 +241,16 @@ func (c *CmdSmoke) Run(ctx context.Context, args []string, stdout, stderr io.Wri
 		return nil
 	}
 
-	// Render TUI Table
-	tbl := tui.NewTable("SERVICE", "VERB", "ENDPOINT", "STATUS", "LATENCY", "TLS")
+	doc := text.NewDocument().
+		Title("⚡", "Live Endpoint Smoke Probe")
+	defer doc.Release()
+
+	headers := []string{"SERVICE", "VERB", "ENDPOINT", "STATUS", "LATENCY", "TLS"}
+	rows := make([][]string, 0, len(results))
+
 	for _, r := range results {
 		var statusStr string
+
 		switch {
 		case r.Err != nil:
 			statusStr = "ERR: " + r.Err.Error()
@@ -263,10 +269,10 @@ func (c *CmdSmoke) Run(ctx context.Context, args []string, stdout, stderr io.Wri
 		}
 
 		latStr := fmt.Sprintf("%d ms", r.Latency.Milliseconds())
-		tbl.AddRow(r.Service, r.HTTPVerb, r.Endpoint, statusStr, latStr, r.TLSVersion)
+		rows = append(rows, []string{r.Service, r.HTTPVerb, r.Endpoint, statusStr, latStr, r.TLSVersion})
 	}
 
-	_ = tbl.Render(stdout)
+	doc.Table(headers, rows...)
 
-	return nil
+	return doc.RenderTo(stdout, text.DefaultTerminalRenderer)
 }

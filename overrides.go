@@ -17,10 +17,10 @@ import (
 
 	"github.com/lemon4ksan/miyako/generic"
 
-	"github.com/lemon4ksan/aoni/foundation/pipeline"
 	"github.com/lemon4ksan/aoni/foundation/pool"
 	fastrand "github.com/lemon4ksan/aoni/foundation/rand"
 	"github.com/lemon4ksan/aoni/internal/io"
+	"github.com/lemon4ksan/aoni/internal/pipeline"
 	"github.com/lemon4ksan/aoni/netutil/netdial"
 	"github.com/lemon4ksan/aoni/telemetry"
 )

@@ -580,7 +580,7 @@ type API interface {
 
 	err := app.Run(context.Background(), []string{"mock", apiFile})
 	require.NoError(t, err)
-	require.Contains(t, stdout.String(), "✔ Generated Mock Server")
+	require.Contains(t, stdout.String(), "Mock Server: api_mock.gen.go")
 
 	mockFile := filepath.Join(tempDir, "api_mock.gen.go")
 	require.FileExists(t, mockFile)

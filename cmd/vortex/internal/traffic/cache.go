@@ -18,9 +18,9 @@ import (
 	"time"
 
 	"github.com/lemon4ksan/aoni/cmd/vortex/internal/base"
+	"github.com/lemon4ksan/aoni/foundation/text"
 	"github.com/lemon4ksan/aoni/internal/codegen/cache"
 	"github.com/lemon4ksan/aoni/internal/codegen/project"
-	"github.com/lemon4ksan/aoni/internal/tui"
 )
 
 func (c *Cmd) getRootDir() string {
@@ -61,10 +61,12 @@ func (c *Cmd) runList(_ context.Context, _ []string, stdout, _ io.Writer) error 
 		return nil
 	}
 
-	fmt.Fprintf(stdout, "⚡ Vortex Traffic Cache (.vortex/cache/traffic)\n\n")
+	doc := text.NewDocument().
+		Title("⚡", "Vortex Traffic Cache (.vortex/cache/traffic)")
+	defer doc.Release()
 
-	tbl := tui.NewTable("ID", "ORIGINAL FILE", "DOMAINS", "ENDPOINTS", "RAW -> GZ", "SANITIZED", "DATE")
-	tbl.SetIndent(0)
+	headers := []string{"ID", "ORIGINAL FILE", "DOMAINS", "ENDPOINTS", "RAW -> GZ", "SANITIZED", "DATE"}
+	rows := make([][]string, 0, len(list))
 
 	for _, e := range list {
 		originsStr := strings.Join(e.Origins, ", ")
@@ -84,7 +86,7 @@ func (c *Cmd) runList(_ context.Context, _ []string, stdout, _ io.Writer) error 
 			sanStr = "raw"
 		}
 
-		tbl.AddRow(
+		rows = append(rows, []string{
 			e.ID,
 			origFile,
 			originsStr,
@@ -92,13 +94,13 @@ func (c *Cmd) runList(_ context.Context, _ []string, stdout, _ io.Writer) error 
 			sizeRatio,
 			sanStr,
 			e.StoredAt.Format("2006-01-02 15:04"),
-		)
+		})
 	}
 
-	_ = tbl.Render(stdout)
-	fmt.Fprintf(stdout, "\nTotal: %d session(s)\n", len(list))
+	doc.Table(headers, rows...)
+	doc.Field("Total Sessions", strconv.Itoa(len(list)))
 
-	return nil
+	return doc.RenderTo(stdout, text.DefaultTerminalRenderer)
 }
 
 type rawHARLog struct {
@@ -280,10 +282,12 @@ func (c *Cmd) runShow(_ context.Context, args []string, stdout, stderr io.Writer
 	}
 
 	// Mode 2: Summary table of entries
-	fmt.Fprintf(stdout, "⚡ Traffic Session: %s (%d total entries)\n\n", sessionID, len(entries))
+	doc := text.NewDocument().
+		Title("⚡", fmt.Sprintf("Traffic Session: %s (%d total entries)", sessionID, len(entries)))
+	defer doc.Release()
 
-	tbl := tui.NewTable("ENTRY", "METHOD", "ENDPOINT / URL", "STATUS", "REQ PREVIEW", "RESP PREVIEW")
-	tbl.SetIndent(0)
+	headers := []string{"ENTRY", "METHOD", "ENDPOINT / URL", "STATUS", "REQ PREVIEW", "RESP PREVIEW"}
+	rows := make([][]string, 0, len(entries))
 
 	displayed := 0
 	for i, e := range entries {
@@ -332,21 +336,21 @@ func (c *Cmd) runShow(_ context.Context, args []string, stdout, stderr io.Writer
 			statusStr = "200 OK"
 		}
 
-		tbl.AddRow(
+		rows = append(rows, []string{
 			fmt.Sprintf("#%d", i),
 			e.Request.Method,
 			dispURL,
 			statusStr,
 			reqSnippet,
 			respSnippet,
-		)
+		})
 	}
 
-	_ = tbl.Render(stdout)
-	fmt.Fprintf(stdout, "\nShowing %d of %d request(s)\n", displayed, len(entries))
-	fmt.Fprintf(stdout, "Tip: Run 'vortex traffic inspect %s --entry=<N>' to view full JSON payload\n", sessionID)
+	doc.Table(headers, rows...)
+	doc.Field("Displayed", fmt.Sprintf("%d of %d request(s)", displayed, len(entries)))
+	doc.Info("Tip", fmt.Sprintf("Run 'vortex traffic inspect %s --entry=<N>' to view full JSON payload", sessionID))
 
-	return nil
+	return doc.RenderTo(stdout, text.DefaultTerminalRenderer)
 }
 
 func (c *Cmd) runMove(ctx context.Context, args []string, stdout, stderr io.Writer) error {
@@ -540,10 +544,12 @@ func (c *Cmd) runSecrets(_ context.Context, args []string, stdout, stderr io.Wri
 			return nil
 		}
 
-		fmt.Fprintf(stdout, "🔑 Vortex Local Credentials Vault (.vortex/cache/secrets.json)\n\n")
+		doc := text.NewDocument().
+			Title("🔑", "Vortex Local Credentials Vault (.vortex/cache/secrets.json)")
+		defer doc.Release()
 
-		tbl := tui.NewTable("KEY", "MASKED VALUE", "ORIGIN", "UPDATED")
-		tbl.SetIndent(0)
+		headers := []string{"KEY", "MASKED VALUE", "ORIGIN", "UPDATED"}
+		rows := make([][]string, 0, len(secrets))
 
 		for _, s := range secrets {
 			origin := s.Origin
@@ -551,13 +557,18 @@ func (c *Cmd) runSecrets(_ context.Context, args []string, stdout, stderr io.Wri
 				origin = "manual"
 			}
 
-			tbl.AddRow(s.Key, s.Masked, origin, s.UpdatedAt.Format("2006-01-02 15:04"))
+			rows = append(rows, []string{
+				s.Key,
+				s.Masked,
+				origin,
+				s.UpdatedAt.Format("2006-01-02 15:04"),
+			})
 		}
 
-		_ = tbl.Render(stdout)
-		fmt.Fprintf(stdout, "\nUse 'option.FromVortexCache()' in client to auto-inject credentials at runtime.\n")
+		doc.Table(headers, rows...)
+		doc.Info("Auto-injection", "Use 'option.FromVortexCache()' in client to auto-inject credentials at runtime.")
 
-		return nil
+		return doc.RenderTo(stdout, text.DefaultTerminalRenderer)
 	}
 
 	sub := strings.ToLower(args[0])

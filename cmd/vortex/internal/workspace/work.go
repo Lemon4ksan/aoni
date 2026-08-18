@@ -17,8 +17,8 @@ import (
 	"time"
 
 	"github.com/lemon4ksan/aoni/cmd/vortex/internal/base"
+	"github.com/lemon4ksan/aoni/foundation/text"
 	"github.com/lemon4ksan/aoni/internal/codegen/project"
-	"github.com/lemon4ksan/aoni/internal/tui"
 )
 
 // CmdWork orchestrates multi-repo workspace operations (.vortex.work).
@@ -132,22 +132,20 @@ func (c *CmdWork) runStatus(_ context.Context, stdout, _ io.Writer) error {
 		return fmt.Errorf("no .vortex.work file found (run 'vortex work init' to create one): %w", err)
 	}
 
-	fmt.Fprintf(stdout, "⚡ Vortex Workspace Orchestrator\n")
-	fmt.Fprintf(stdout, "Work File: %s (%d workspaces linked)\n\n", wc.WorkPath, len(wc.Workspaces))
+	doc := text.NewDocument().
+		Title("⚡", "Vortex Workspace Orchestrator").
+		Field("Work File", fmt.Sprintf("%s (%d workspaces linked)", wc.WorkPath, len(wc.Workspaces)))
+	defer doc.Release()
 
-	tbl := tui.NewTable("WORKSPACE", "CONTRACTS", "SERVICES", "STATUS")
-	tbl.SetMinWidth(0, 24)
-	tbl.SetMinWidth(1, 12)
-	tbl.SetMinWidth(2, 16)
-	tbl.SetMinWidth(3, 20)
-	tbl.SetIndent(2)
+	headers := []string{"WORKSPACE", "CONTRACTS", "SERVICES", "STATUS"}
+	rows := make([][]string, 0, len(wc.Workspaces))
 
 	for _, ws := range wc.Workspaces {
 		wsPath := filepath.Join(wc.WorkDir, filepath.FromSlash(ws))
 
 		cfg, lErr := project.Load(wsPath)
 		if lErr != nil || cfg == nil {
-			tbl.AddRow(ws, "-", "-", tui.BadgeWarn()+" Missing config")
+			rows = append(rows, []string{ws, "-", "-", "⚠️ Missing config"})
 			continue
 		}
 
@@ -160,18 +158,17 @@ func (c *CmdWork) runStatus(_ context.Context, stdout, _ io.Writer) error {
 			}
 		}
 
-		tbl.AddRow(
+		rows = append(rows, []string{
 			ws,
 			strconv.Itoa(contractsCount),
 			strconv.Itoa(servicesCount),
-			tui.BadgeSync(),
-		)
+			"✔ in sync",
+		})
 	}
 
-	_ = tbl.Render(stdout)
-	fmt.Fprintln(stdout)
+	doc.Table(headers, rows...)
 
-	return nil
+	return doc.RenderTo(stdout, text.DefaultTerminalRenderer)
 }
 
 func (c *CmdWork) runForward(ctx context.Context, targetCmd string, args []string, stdout, stderr io.Writer) error {

@@ -19,10 +19,7 @@ func RenderStep(current, total int, label, status string, totalLabelWidth int) s
 		totalLabelWidth = 44
 	}
 
-	dots := totalLabelWidth - vis
-	if dots < 3 {
-		dots = 3
-	}
+	dots := max(totalLabelWidth-vis, 3)
 
 	return prefix + Gray(strings.Repeat(".", dots)) + " " + status
 }

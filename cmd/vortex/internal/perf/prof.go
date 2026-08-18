@@ -23,8 +23,8 @@ import (
 	"time"
 
 	"github.com/lemon4ksan/aoni/cmd/vortex/internal/base"
+	"github.com/lemon4ksan/aoni/foundation/text"
 	"github.com/lemon4ksan/aoni/internal/codegen/project"
-	"github.com/lemon4ksan/aoni/internal/tui"
 )
 
 // EndpointPerfRecord represents performance metrics for a single API endpoint.
@@ -349,39 +349,22 @@ func formatLatency(ns float64) string {
 }
 
 func renderTerminalReport(w io.Writer, r *ProfileReport) error {
-	fmt.Fprintf(w, "\n⚡ Vortex Silicon & API Performance Profiler\n")
-	fmt.Fprintf(w, "Workspace: %s (%d endpoints)\n", r.Workspace, r.EndpointsCount)
-	fmt.Fprintf(w, "Platform:  %s/%s (%d CPU threads) | Engine: aoni/fast\n\n", r.OS, r.Arch, r.CPUCores)
+	doc := text.NewDocument().
+		Title("⚡", "Vortex Silicon & API Performance Profiler").
+		Field("Workspace", fmt.Sprintf("%s (%d endpoints)", r.Workspace, r.EndpointsCount)).
+		Field("Platform", fmt.Sprintf("%s/%s (%d CPU threads) | Engine: aoni/fast", r.OS, r.Arch, r.CPUCores)).
+		Divider().
+		Section("📊", "EXECUTIVE PERFORMANCE SUMMARY").
+		Field("Zero-Alloc Invariant", fmt.Sprintf("%.1f%% (%d/%d endpoints 0 B/op)", r.ZeroAllocRate, int(r.ZeroAllocRate*float64(r.EndpointsCount)/100.0), r.EndpointsCount)).
+		Field("Peak Feeder Speed", fmt.Sprintf("%s (%s)", formatThroughput(r.PeakThroughputOpsS), r.PeakThroughputName)).
+		Field("Median Client Overhead", formatLatency(r.AvgNsPerOp)+" (pure CPU register compute)").
+		Field("GC Memory Pressure", "0.00 MB / 0 GC cycles under parallel load").
+		Divider().
+		Section("🔬", "ENDPOINT LATENCY & ALLOCATION LEDGER")
+	defer doc.Release()
 
-	fmt.Fprintf(w, "%s\n", tui.RenderDivider(77))
-	fmt.Fprintf(w, "📊 EXECUTIVE PERFORMANCE SUMMARY:\n")
-	fmt.Fprintf(
-		w,
-		"  • Zero-Alloc Invariant:    %.1f%% (%d/%d endpoints 0 B/op)\n",
-		r.ZeroAllocRate,
-		int(r.ZeroAllocRate*float64(r.EndpointsCount)/100.0),
-		r.EndpointsCount,
-	)
-	fmt.Fprintf(
-		w,
-		"  • Peak Feeder Speed:       %s (%s)\n",
-		formatThroughput(r.PeakThroughputOpsS),
-		r.PeakThroughputName,
-	)
-	fmt.Fprintf(w, "  • Median Client Overhead:  %s (pure CPU register compute)\n", formatLatency(r.AvgNsPerOp))
-	fmt.Fprintf(w, "  • GC Memory Pressure:      0.00 MB / 0 GC cycles under parallel load\n")
-	fmt.Fprintf(w, "%s\n\n", tui.RenderDivider(77))
-
-	fmt.Fprintf(w, "🔬 ENDPOINT LATENCY & ALLOCATION LEDGER:\n")
-
-	tbl := tui.NewTable("SERVICE", "METHOD", "THROUGHPUT", "LATENCY", "ALLOCS", "STATUS")
-	tbl.SetMinWidth(0, 20)
-	tbl.SetMinWidth(1, 36)
-	tbl.SetMinWidth(2, 16)
-	tbl.SetMinWidth(3, 12)
-	tbl.SetMinWidth(4, 12)
-	tbl.SetMinWidth(5, 8)
-	tbl.SetIndent(2)
+	headers := []string{"SERVICE", "METHOD", "THROUGHPUT", "LATENCY", "ALLOCS", "STATUS"}
+	rows := make([][]string, 0, len(r.Records))
 
 	for _, rec := range r.Records {
 		allocStr := fmt.Sprintf("%d B/op (%d)", rec.BytesPerOp, rec.AllocsPerOp)
@@ -389,38 +372,43 @@ func renderTerminalReport(w io.Writer, r *ProfileReport) error {
 			allocStr = "0 B/op"
 		}
 
-		tbl.AddRow(
+		rows = append(rows, []string{
 			rec.Service,
 			rec.Method,
 			formatThroughput(rec.ThroughputOpsS),
 			formatLatency(rec.NsPerOp),
 			allocStr,
 			rec.Status,
+		})
+	}
+
+	doc.Table(headers, rows...)
+	doc.Divider()
+
+	doc.Section("⏱️", "LATENCY TAX DECOMPOSITION (Where does time go per network roundtrip?)")
+
+	taxHeaders := []string{"STAGE", "DURATION", "SHARE", "BREAKDOWN"}
+	doc.Table(taxHeaders,
+		[]string{"Client Encode", formatLatency(r.LatencyEncodeNs), "< 0.001%", "▏"},
+		[]string{"Wire Transit", "12.40 ms", "27.500%", "████████▎"},
+		[]string{"Remote Server", "32.60 ms", "72.499%", "█████████████████████▋"},
+		[]string{"Client Decode", formatLatency(r.LatencyDecodeNs), "< 0.001%", "▏"},
+	)
+	doc.Divider()
+
+	if r.ZeroAllocRate >= 99.0 {
+		doc.Success(
+			"Silicon Line Speed",
+			"Client networking layer operates at silicon line speed with ZERO heap churn.",
+		)
+	} else {
+		doc.Warning(
+			"Heap Allocation Notice",
+			"Detected heap allocations on hot paths. Inspect non-zero endpoints above.",
 		)
 	}
 
-	_ = tbl.Render(w)
-
-	fmt.Fprintf(w, "\n%s\n", tui.RenderDivider(77))
-	fmt.Fprintf(w, "⏱️ LATENCY TAX DECOMPOSITION (Where does time go per network roundtrip?):\n")
-
-	stages := []tui.TaxStage{
-		{Name: "Client Encode", Duration: formatLatency(r.LatencyEncodeNs), Share: "< 0.001%", Ratio: 0.0001},
-		{Name: "Wire Transit", Duration: "12.40 ms", Share: "27.500%", Ratio: 0.275},
-		{Name: "Remote Server", Duration: "32.60 ms", Share: "72.499%", Ratio: 0.725},
-		{Name: "Client Decode", Duration: formatLatency(r.LatencyDecodeNs), Share: "< 0.001%", Ratio: 0.0001},
-	}
-
-	fmt.Fprint(w, tui.RenderTaxDecomposition(stages, 30))
-	fmt.Fprintln(w)
-
-	if r.ZeroAllocRate >= 99.0 {
-		fmt.Fprintf(w, "✨ Verdict: Client networking layer operates at silicon line speed with ZERO heap churn.\n\n")
-	} else {
-		fmt.Fprintf(w, "⚠️ Verdict: Detected heap allocations on hot paths. Inspect non-zero endpoints above.\n\n")
-	}
-
-	return nil
+	return doc.RenderTo(w, text.DefaultTerminalRenderer)
 }
 
 func renderMarkdownReport(w io.Writer, r *ProfileReport) error {

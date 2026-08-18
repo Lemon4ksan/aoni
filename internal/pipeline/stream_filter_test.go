@@ -14,7 +14,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/lemon4ksan/aoni/foundation/pipeline"
+	"github.com/lemon4ksan/aoni/internal/pipeline"
 )
 
 func TestStreamPipeline_Execution(t *testing.T) {

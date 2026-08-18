@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io"
 
+	"github.com/lemon4ksan/aoni/foundation/text"
 	"github.com/lemon4ksan/aoni/internal/codegen/diff"
 	"github.com/lemon4ksan/aoni/internal/codegen/lint"
 )
@@ -61,7 +62,7 @@ func (r *Reporter) RenderDiff(report *diff.DiffReport, asJSON bool) error {
 	return nil
 }
 
-// RenderDiagnostics renders linter issues across supported formats (terminal, json, github, sarif).
+// RenderDiagnostics renders linter issues across supported formats (terminal, json, github, markdown, plain).
 func (r *Reporter) RenderDiagnostics(diags []lint.Diagnostic, format string) error {
 	switch format {
 	case "json":
@@ -79,29 +80,49 @@ func (r *Reporter) RenderDiagnostics(diags []lint.Diagnostic, format string) err
 		return nil
 
 	default:
-		// Terminal rendering
 		if len(diags) == 0 {
-			fmt.Fprintln(r.Stdout, "✔ All contracts passed static validation with 0 issues.")
-			return nil
+			doc := text.NewDocument().
+				Success("Validation Passed", "All contracts passed static validation with 0 issues.")
+			defer doc.Release()
+
+			return r.RenderDocument(doc, format)
 		}
 
+		doc := text.NewDocument().
+			Heading(2, "🔍", fmt.Sprintf("Contract Diagnostics (%d issues)", len(diags)))
+		defer doc.Release()
+
 		for _, d := range diags {
-			fmt.Fprintf(
-				r.Stdout,
-				"  ↳ [%s:%s] %s:%d:%d\n    %s\n",
-				d.RuleID,
-				d.RuleName,
-				d.FilePath,
-				d.Line,
-				d.Column,
-				d.Message,
-			)
+			title := fmt.Sprintf("[%s:%s] %s:%d:%d", d.RuleID, d.RuleName, d.FilePath, d.Line, d.Column)
+			body := d.Message
 
 			if d.Suggestion != "" {
-				fmt.Fprintf(r.Stdout, "    ↳ Suggestion: %s\n", d.Suggestion)
+				body += "\n↳ Suggestion: " + d.Suggestion
+			}
+
+			if d.Severity == lint.SeverityError {
+				doc.Danger(title, body)
+			} else {
+				doc.Warning(title, body)
 			}
 		}
 
+		return r.RenderDocument(doc, format)
+	}
+}
+
+// RenderDocument formats and emits a semantic [text.DocumentBuilder] to stdout.
+func (r *Reporter) RenderDocument(doc *text.DocumentBuilder, format string) error {
+	if doc == nil {
 		return nil
+	}
+
+	switch format {
+	case "md", "markdown":
+		return doc.RenderTo(r.Stdout, text.DefaultMarkdownRenderer)
+	case "plain", "raw":
+		return doc.RenderTo(r.Stdout, text.DefaultPlainRenderer)
+	default:
+		return doc.RenderTo(r.Stdout, text.DefaultTerminalRenderer)
 	}
 }

@@ -21,7 +21,7 @@ import (
 	"github.com/lemon4ksan/aoni/fingerprint/h3"
 	"github.com/lemon4ksan/aoni/fingerprint/ja4"
 	"github.com/lemon4ksan/aoni/fingerprint/p0f"
-	"github.com/lemon4ksan/aoni/foundation/pipeline"
+	"github.com/lemon4ksan/aoni/internal/pipeline"
 	"github.com/lemon4ksan/aoni/internal/transport"
 	"github.com/lemon4ksan/aoni/internal/urlutil"
 	"github.com/lemon4ksan/aoni/netutil/cert"

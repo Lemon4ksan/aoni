@@ -12,8 +12,8 @@ import (
 	"google.golang.org/protobuf/encoding/protojson"
 	"google.golang.org/protobuf/proto"
 
-	"github.com/lemon4ksan/aoni/foundation/pipeline"
 	"github.com/lemon4ksan/aoni/internal/io"
+	"github.com/lemon4ksan/aoni/internal/pipeline"
 )
 
 // protoDecoder unmarshals binary Protocol Buffer response streams into [proto.Message] targets.

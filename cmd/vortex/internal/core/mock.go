@@ -12,8 +12,8 @@ import (
 	"io"
 	"path/filepath"
 
+	"github.com/lemon4ksan/aoni/foundation/text"
 	"github.com/lemon4ksan/aoni/internal/codegen/builder"
-	"github.com/lemon4ksan/aoni/internal/tui"
 )
 
 // CmdMock generates zero-dependency in-memory mock test servers for API contracts.
@@ -68,6 +68,9 @@ func (c *CmdMock) Run(ctx context.Context, args []string, stdout, stderr io.Writ
 		FixturesFlag: *fixturesFlag,
 	})
 
+	doc := text.NewDocument()
+	defer doc.Release()
+
 	generatedCount := 0
 
 	for _, file := range files {
@@ -82,17 +85,21 @@ func (c *CmdMock) Run(ctx context.Context, args []string, stdout, stderr io.Writ
 
 		generatedCount++
 
-		fmt.Fprintf(stdout, "✔ Generated Mock Server: %s -> %s (%s, %d services)\n",
-			filepath.Base(file),
-			filepath.Base(res.OutputFile),
-			tui.Cyan(fmt.Sprintf("%d bytes", res.BytesCount)),
-			res.ServicesCount,
+		doc.Success(
+			"Mock Server: "+filepath.Base(res.OutputFile),
+			fmt.Sprintf(
+				"Source: %s | Size: %d bytes | Services: %d",
+				filepath.Base(file),
+				res.BytesCount,
+				res.ServicesCount,
+			),
 		)
 	}
 
 	if generatedCount == 0 {
 		fmt.Fprintln(stdout, "No services found to generate mocks for.")
+		return nil
 	}
 
-	return nil
+	return doc.RenderTo(stdout, text.DefaultTerminalRenderer)
 }

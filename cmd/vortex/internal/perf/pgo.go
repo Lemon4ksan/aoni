@@ -16,8 +16,8 @@ import (
 	"path/filepath"
 	"time"
 
+	"github.com/lemon4ksan/aoni/foundation/text"
 	"github.com/lemon4ksan/aoni/internal/codegen/project"
-	"github.com/lemon4ksan/aoni/internal/tui"
 )
 
 // CmdPGO orchestrates automated Profile-Guided Optimization (PGO) profile generation.
@@ -107,17 +107,17 @@ func (c *CmdPGO) Run(ctx context.Context, args []string, stdout, stderr io.Write
 
 	elapsed := time.Since(start).Round(time.Millisecond)
 
-	fmt.Fprintf(stdout, "─────────────────────────────────────────────────────────────────────────────\n")
-	fmt.Fprintf(stdout, "✔ Successfully captured PGO CPU profile: %s (%d bytes, %s)\n\n",
-		filepath.Base(outPath), info.Size(), elapsed)
+	doc := text.NewDocument().
+		Divider().
+		Success(
+			"PGO Profile Captured",
+			fmt.Sprintf("Successfully captured CPU profile: %s (%d bytes, %s)", filepath.Base(outPath), info.Size(), elapsed),
+		).
+		Info(
+			"Compiler Integration",
+			"Go 1.20+ automatically detects `default.pgo` during 'go build' or 'go install'.\nHot client encode/decode loops will achieve 7–15% higher silicon throughput.",
+		)
+	defer doc.Release()
 
-	fmt.Fprintf(stdout, "💡 %s:\n", tui.Bold("Compiler Integration"))
-	fmt.Fprintf(
-		stdout,
-		"  Go 1.20+ automatically detects %s during 'go build' or 'go install'.\n",
-		tui.Cyan("default.pgo"),
-	)
-	fmt.Fprintf(stdout, "  Hot client encode/decode loops will achieve 7–15%% higher silicon throughput.\n\n")
-
-	return nil
+	return doc.RenderTo(stdout, text.DefaultTerminalRenderer)
 }

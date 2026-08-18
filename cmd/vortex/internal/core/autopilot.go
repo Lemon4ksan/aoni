@@ -19,6 +19,7 @@ import (
 	"time"
 
 	"github.com/lemon4ksan/aoni/cmd/vortex/internal/base"
+	"github.com/lemon4ksan/aoni/foundation/text"
 	"github.com/lemon4ksan/aoni/internal/codegen/builder"
 	"github.com/lemon4ksan/aoni/internal/codegen/lint"
 	codeparser "github.com/lemon4ksan/aoni/internal/codegen/parser"
@@ -494,32 +495,26 @@ func (c *CmdAutoPilot) runWorld2Pipeline(
 	elapsed := time.Since(start)
 
 	// STAGE 4: Final Consolidated Dashboard
-	fmt.Fprintf(stdout, "\n%s\n", tui.RenderDivider(77))
-	fmt.Fprintf(stdout, "Summary:\n")
-	fmt.Fprintf(
-		stdout,
-		"  • Go Clients:        %d services, %d methods compiled (100%% Zero-Alloc)\n",
-		totalServices,
-		totalMethods,
-	)
+	doc := text.NewDocument().
+		Divider().
+		Section("📊", "Autopilot Summary").
+		Field("Go Clients", fmt.Sprintf("%d services, %d methods compiled (100%% Zero-Alloc)", totalServices, totalMethods)).
+		Field("Linter Score", "100% Clean (All invariants respected)")
 
 	if len(statusRep.Proposals) > 0 {
-		fmt.Fprintf(
-			stdout,
-			"  • Active Proposals:  %d incoming consumer branches pending review\n",
-			len(statusRep.Proposals),
+		doc.Field(
+			"Active Proposals",
+			fmt.Sprintf("%d incoming consumer branches pending review", len(statusRep.Proposals)),
 		)
 	}
 
-	fmt.Fprintf(stdout, "  • Linter Score:      100%% Clean (All invariants respected)\n\n")
-
-	fmt.Fprintf(
-		stdout,
-		"✨ Workspace is 100%% healthy, synchronized, and compiled in %v!\n",
-		elapsed.Round(time.Millisecond),
+	doc.Success(
+		"Workspace Synchronized",
+		fmt.Sprintf("Workspace is 100%% healthy, synchronized, and compiled in %v!", elapsed.Round(time.Millisecond)),
 	)
+	defer doc.Release()
 
-	return nil
+	return doc.RenderTo(stdout, text.DefaultTerminalRenderer)
 }
 
 func formatByteSize(b int) string {
