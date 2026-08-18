@@ -668,14 +668,68 @@ func resolveProtoTargetInstance(targetPtr any) (proto.Message, error) {
 			return msg, nil
 		}
 
-		if elem.Kind() == reflect.Pointer && elem.IsNil() && elem.CanSet() {
-			elem.Set(reflect.New(elem.Type().Elem()))
-
-			if msg, ok := elem.Interface().(proto.Message); ok {
-				return msg, nil
-			}
-		}
-	}
-
 	return nil, ErrTargetNotProtoMessage
 }
+
+// GetResult performs a GET request through r and yields the live response stream as a [generic.Result].
+func GetResult(
+	ctx context.Context,
+	r request.Requester,
+	path string,
+	mods ...aoni.RequestModifier,
+) generic.Result[*Stream] {
+	st, err := Get(ctx, r, path, mods...)
+	if err != nil {
+		return generic.Failure[*Stream](err)
+	}
+
+	return generic.Success(st)
+}
+
+// NDJSONReader provides sequential decoded access to newline-delimited JSON streams.
+type NDJSONReader[T any] struct {
+	dec    *json.Decoder
+	closer io.Closer
+}
+
+// NewNDJSONReader wraps reader with a typed [NDJSONReader].
+func NewNDJSONReader[T any](r io.ReadCloser) *NDJSONReader[T] {
+	return &NDJSONReader[T]{
+		dec:    json.NewDecoder(r),
+		closer: r,
+	}
+}
+
+// Next decodes the next JSON record in the stream as a [generic.Result].
+// When the stream finishes normally, it returns a Failure wrapping [io.EOF].
+func (r *NDJSONReader[T]) Next() generic.Result[T] {
+	if r == nil || r.dec == nil {
+		return generic.Failure[T](io.EOF)
+	}
+
+	var val T
+	if err := r.dec.Decode(&val); err != nil {
+		return generic.Failure[T](err)
+	}
+
+	return generic.Success(val)
+}
+
+// Close closes the underlying stream reader.
+func (r *NDJSONReader[T]) Close() error {
+	if r == nil || r.closer == nil {
+		return nil
+	}
+
+	return r.closer.Close()
+}
+
+// NDJSON creates an [NDJSONReader] over the stream.
+func (s *Stream) NDJSON[T any]() *NDJSONReader[T] {
+	if s == nil || s.resp == nil {
+		return nil
+	}
+
+	return NewNDJSONReader[T](s.resp.Body)
+}
+

@@ -143,7 +143,7 @@ func ApplyTCPDelay(ctx context.Context) error {
 
 	delay := r.Min
 	if window > 0 {
-		delay += fastrand.FastJitter(window)
+		delay += fastrand.Jitter(window)
 	}
 
 	if delay <= 0 {

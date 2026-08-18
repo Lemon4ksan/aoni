@@ -18,7 +18,7 @@ import (
 
 	"github.com/lemon4ksan/aoni"
 	"github.com/lemon4ksan/aoni/cookie"
-	internalCookie "github.com/lemon4ksan/aoni/internal/cookie"
+	impl "github.com/lemon4ksan/aoni/internal/cookie"
 	"github.com/lemon4ksan/aoni/internal/urlutil"
 	"github.com/lemon4ksan/aoni/netutil"
 )
@@ -48,7 +48,7 @@ func (c *Client) applyCookies(ctx context.Context, req *fasthttp.Request) {
 		return
 	}
 
-	cookieHeader := internalCookie.BuildCookieHeader(cookies)
+	cookieHeader := impl.BuildCookieHeader(cookies)
 	if cookieHeader == "" {
 		return
 	}
@@ -100,7 +100,7 @@ func parseCookie(_, value []byte) *http.Cookie {
 		return nil
 	}
 
-	dto := internalCookie.ParseSetCookieHeader(bytesconv.B2S(value), "", "")
+	dto := impl.ParseSetCookieHeader(bytesconv.B2S(value), "", "")
 	if dto.Name == "" {
 		return nil
 	}

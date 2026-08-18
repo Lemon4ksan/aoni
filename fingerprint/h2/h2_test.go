@@ -15,7 +15,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/lemon4ksan/aoni/fingerprint/profiles"
-	internalH2 "github.com/lemon4ksan/aoni/internal/fingerprint/h2"
+	impl "github.com/lemon4ksan/aoni/internal/fingerprint/h2"
 )
 
 func TestH2SettingsFromProfile(t *testing.T) {
@@ -111,7 +111,7 @@ func TestH2FramedConn_PrefaceChecks(t *testing.T) {
 			_ = client.Close()
 		})
 
-		conn := &internalH2.FramedConn{
+		conn := &impl.FramedConn{
 			Conn: client,
 		}
 
@@ -138,7 +138,7 @@ func TestH2FramedConn_PrefaceChecks(t *testing.T) {
 			_ = client.Close()
 		})
 
-		conn := &internalH2.FramedConn{
+		conn := &impl.FramedConn{
 			Conn: client,
 		}
 
@@ -166,7 +166,7 @@ func TestH2FramedConn_PrefaceChecks(t *testing.T) {
 			_ = client.Close()
 		})
 
-		conn := &internalH2.FramedConn{
+		conn := &impl.FramedConn{
 			Conn: client,
 		}
 
@@ -196,7 +196,7 @@ func TestH2FramedConn_PrefaceChecks(t *testing.T) {
 			_ = client.Close()
 		})
 
-		conn := internalH2.WrapConn(client, internalH2.SettingsDTO{}, nil)
+		conn := impl.WrapConn(client, impl.SettingsDTO{}, nil)
 
 		done := make(chan struct{})
 		go func() {
@@ -222,9 +222,9 @@ func TestH2FramedConn_WithPriorityFrame(t *testing.T) {
 		_ = client.Close()
 	})
 
-	conn := &internalH2.FramedConn{
+	conn := &impl.FramedConn{
 		Conn: client,
-		Settings: internalH2.SettingsDTO{
+		Settings: impl.SettingsDTO{
 			HeaderTableSize:   65536,
 			PriorityStreamDep: 13,
 			PriorityExclusive: true,
@@ -271,9 +271,9 @@ func TestH2FramedConn_WithWindowUpdate(t *testing.T) {
 		_ = client.Close()
 	})
 
-	conn := &internalH2.FramedConn{
+	conn := &impl.FramedConn{
 		Conn: client,
-		Settings: internalH2.SettingsDTO{
+		Settings: impl.SettingsDTO{
 			HeaderTableSize: 65536,
 			ConnectionFlow:  15663105, // > 65535, triggers WINDOW_UPDATE frame (0x8)
 		},
@@ -308,7 +308,7 @@ func TestH2FramedConn_WithWindowUpdate(t *testing.T) {
 func TestH2FramedConn_BuildPriorityFrame_TooShort(t *testing.T) {
 	t.Parallel()
 
-	conn := &internalH2.FramedConn{}
+	conn := &impl.FramedConn{}
 	res := conn.BuildPriorityFrame([]byte{0x00, 0x01})
 	assert.Nil(t, res)
 }
