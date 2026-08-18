@@ -176,6 +176,23 @@ func (c *Client) Request(
 	fastReq, fastResp := acquireFastPair()
 	fastReq.Header.SetMethodBytes(getMethodBytes(method))
 
+	if len(mods) == 0 && c.prepared.FastPathCapable && (ctx == nil || ctx.Done() == nil) {
+		if err := c.resolveTargetFastURI(fastReq, path); err != nil {
+			releaseFastPair(fastReq, fastResp)
+
+			return nil, err
+		}
+
+		for i := range c.prepared.PrecomputedDefaultHeaders {
+			h := &c.prepared.PrecomputedDefaultHeaders[i]
+			if len(fastReq.Header.PeekBytes(h.KeyBytes)) == 0 {
+				fastReq.Header.SetBytesKV(h.KeyBytes, h.ValBytes)
+			}
+		}
+
+		return c.executeFastPath(fastReq, fastResp)
+	}
+
 	reqAdapter := NewRequest(fastReq)
 	reqAdapter.SetContext(ctx)
 
@@ -192,12 +209,6 @@ func (c *Client) Request(
 		c.applyModifiers(reqAdapter, mods)
 	}
 
-	if c.isFastPathEligible(ctx, mods) {
-		reqAdapter.Release()
-
-		return c.executeFastPath(fastReq, fastResp)
-	}
-
 	defer reqAdapter.Release()
 
 	reqCtx := reqAdapter.Context()
@@ -211,13 +222,7 @@ func (c *Client) Request(
 }
 
 func acquireFastPair() (*fasthttp.Request, *fasthttp.Response) {
-	req := fasthttp.AcquireRequest()
-	req.Reset()
-
-	resp := fasthttp.AcquireResponse()
-	resp.Reset()
-
-	return req, resp
+	return fasthttp.AcquireRequest(), fasthttp.AcquireResponse()
 }
 
 func releaseFastPair(req *fasthttp.Request, resp *fasthttp.Response) {
@@ -486,6 +491,74 @@ func (c *Client) resolveProtocolHandler(rawURL string) http.RoundTripper {
 	}
 
 	return c.config.Engine.Protocols[normScheme]
+}
+
+func (c *Client) resolveTargetFastURI(fastReq *fasthttp.Request, path string) error {
+	if len(c.prepared.BaseURLHostBytes) > 0 && len(path) > 0 && path[0] == '/' && (len(path) < 2 || path[1] != '/') {
+		fastReq.URI().SetSchemeBytes(c.prepared.BaseURLSchemeBytes)
+		fastReq.URI().SetHostBytes(c.prepared.BaseURLHostBytes)
+
+		if len(c.prepared.BaseURLCleanPathBytes) > 0 {
+			var stackBuf [256]byte
+
+			needed := len(c.prepared.BaseURLCleanPathBytes) + len(path)
+
+			var pathBuf []byte
+			if needed <= len(stackBuf) {
+				pathBuf = stackBuf[:0]
+			} else {
+				pathBuf = make([]byte, 0, needed)
+			}
+
+			pathBuf = append(pathBuf, c.prepared.BaseURLCleanPathBytes...)
+			pathBuf = append(pathBuf, path...)
+			fastReq.URI().SetPathBytes(pathBuf)
+		} else {
+			fastReq.URI().SetPathBytes(bytesconv.S2B(path))
+		}
+
+		return nil
+	}
+
+	return c.resolveTargetURLFastFallback(fastReq, path)
+}
+
+func (c *Client) resolveTargetURLFastFallback(fastReq *fasthttp.Request, path string) error {
+	var targetURL string
+
+	switch {
+	case len(path) >= 7 && (strings.HasPrefix(path, "http://") || strings.HasPrefix(path, "https://")):
+		targetURL = path
+	case c.prepared.BaseURLTrimmedString != "":
+		switch path == "" || path == "/" {
+		case true:
+			targetURL = c.prepared.BaseURLString
+		case false:
+			if path[0] == '/' {
+				targetURL = c.prepared.BaseURLTrimmedString + path
+			} else {
+				targetURL = c.prepared.BaseURLTrimmedString + "/" + path
+			}
+		}
+	case c.config.Defaults.BaseURL != nil && c.config.Defaults.BaseURL.Host != "":
+		base := c.config.Defaults.BaseURL
+		basePath := strings.TrimSuffix(base.Path, "/")
+
+		cleanPath := path
+		if cleanPath != "" && cleanPath[0] != '/' {
+			cleanPath = "/" + cleanPath
+		}
+
+		targetURL = base.Scheme + "://" + base.Host + basePath + cleanPath
+	case path == "":
+		return ErrTargetURLEmpty
+	default:
+		targetURL = path
+	}
+
+	fastReq.SetRequestURI(targetURL)
+
+	return nil
 }
 
 func (c *Client) resolveTargetURL(req aoni.Request, path string) error {
@@ -905,13 +978,8 @@ func enforceContentLengthTruncation(resp *fasthttp.Response) {
 		return
 	}
 
-	clBytes := resp.Header.Peek("Content-Length")
-	if len(clBytes) == 0 {
-		return
-	}
-
-	cl, ok := bytesconv.ParseUintFast(clBytes)
-	if !ok || cl < 0 {
+	cl := int64(resp.Header.ContentLength())
+	if cl < 0 {
 		return
 	}
 

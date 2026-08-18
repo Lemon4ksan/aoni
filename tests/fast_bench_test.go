@@ -34,6 +34,7 @@ type fastBenchUser struct {
 func setupFastBenchServer() (*fasthttputil.InmemoryListener, *fasthttp.Server) {
 	ln := fasthttputil.NewInmemoryListener()
 	srv := &fasthttp.Server{
+		DisableHeaderNamesNormalizing: true,
 		Handler: func(ctx *fasthttp.RequestCtx) {
 			ctx.SetContentType("application/json")
 			ctx.SetStatusCode(fasthttp.StatusOK)
