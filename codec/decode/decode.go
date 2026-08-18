@@ -13,6 +13,7 @@ import (
 	"sync"
 	"sync/atomic"
 
+	"github.com/lemon4ksan/foundation/generic"
 	"github.com/lemon4ksan/foundation/silicon/bytesconv"
 
 	"github.com/lemon4ksan/aoni"
@@ -45,6 +46,25 @@ var (
 // Decoder defines the contract for unmarshaling response payload streams into Go structures.
 type Decoder interface {
 	Decode(reader stdio.Reader, target any) error
+}
+
+// DecodeTo decodes the payload from reader into a newly allocated instance of Target.
+func DecodeTo[Target any](d Decoder, reader stdio.Reader) (Target, error) {
+	var target Target
+
+	err := d.Decode(reader, &target)
+
+	return target, err
+}
+
+// DecodeResult decodes the payload from reader into a Swift-inspired [generic.Result].
+func DecodeResult[Target any](d Decoder, reader stdio.Reader) generic.Result[Target] {
+	var target Target
+	if err := d.Decode(reader, &target); err != nil {
+		return generic.Failure[Target](err)
+	}
+
+	return generic.Success(target)
 }
 
 // DecoderFunc adapts a plain function signature to satisfy the [Decoder] interface.

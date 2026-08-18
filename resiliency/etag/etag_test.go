@@ -46,4 +46,20 @@ func TestETagAutomaton(t *testing.T) {
 	body, err := io.ReadAll(reconstructed.Body)
 	require.NoError(t, err)
 	require.Equal(t, `{"version":"1.0.0"}`, string(body))
+
+	// 4. Verify Optional helpers
+	etagOpt := auto.GetETagOptional(key)
+	require.True(t, etagOpt.IsPresent())
+	val, ok := etagOpt.Value()
+	require.True(t, ok)
+	require.Equal(t, `"v1.0.0"`, val)
+
+	reconstructedOpt := auto.Reconstruct304Optional(key)
+	require.True(t, reconstructedOpt.IsPresent())
+	resp, ok := reconstructedOpt.Value()
+	require.True(t, ok)
+	require.Equal(t, http.StatusOK, resp.StatusCode)
+
+	missingOpt := auto.GetETagOptional("missing")
+	require.False(t, missingOpt.IsPresent())
 }
