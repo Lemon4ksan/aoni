@@ -20,12 +20,12 @@ import (
 
 	"github.com/lemon4ksan/aoni/cmd/vortex/internal/base"
 	"github.com/lemon4ksan/aoni/foundation/text"
+	"github.com/lemon4ksan/aoni/foundation/tui"
 	"github.com/lemon4ksan/aoni/internal/codegen/builder"
 	"github.com/lemon4ksan/aoni/internal/codegen/lint"
 	codeparser "github.com/lemon4ksan/aoni/internal/codegen/parser"
 	"github.com/lemon4ksan/aoni/internal/codegen/project"
 	"github.com/lemon4ksan/aoni/internal/codegen/spec"
-	"github.com/lemon4ksan/aoni/internal/tui"
 )
 
 // CmdAutoPilot is the ultimate zero-argument intelligent runner.
