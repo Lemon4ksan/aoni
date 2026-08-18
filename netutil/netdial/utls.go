@@ -157,6 +157,16 @@ func HandshakeUTLS(
 
 	uConn.Extensions = removeECHExtensions(uConn.Extensions, len(echConfig) > 0)
 
+	if len(opts.ALPNOverride) > 0 {
+		for i, ext := range uConn.Extensions {
+			if alpnExt, ok := ext.(*utls.ALPNExtension); ok {
+				alpnExt.AlpnProtocols = opts.ALPNOverride
+				uConn.Extensions[i] = alpnExt
+				break
+			}
+		}
+	}
+
 	uConn.ClientHelloID = utls.HelloCustom
 	if err := uConn.BuildHandshakeState(); err != nil {
 		_ = conn.Close()

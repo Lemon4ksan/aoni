@@ -1569,7 +1569,7 @@ func TestApp_Cache_Workflow(t *testing.T) {
 	err = app.Run(context.Background(), []string{"cache", "show", "traffic"})
 	require.NoError(t, err)
 	require.Contains(t, stdout.String(), "traffic")
-	require.Contains(t, stdout.String(), "Endpoints:       1")
+	require.Contains(t, stdout.String(), "1 total entries")
 
 	// 4. vortex cache secrets list & get
 	stdout.Reset()

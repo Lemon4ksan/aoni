@@ -10,6 +10,7 @@ import (
 	"encoding/json"
 	stdio "io"
 	"net/url"
+	"strings"
 
 	"google.golang.org/protobuf/proto"
 
@@ -28,6 +29,26 @@ func WithBody(r stdio.Reader) aoni.RequestModifier {
 		return aoni.RequestModifier{
 			Kind:  aoni.ModBodyBytes,
 			Bytes: b.Bytes(),
+		}
+	}
+
+	if br, ok := r.(*bytes.Reader); ok {
+		buf := make([]byte, br.Len())
+		_, _ = br.ReadAt(buf, 0)
+
+		return aoni.RequestModifier{
+			Kind:  aoni.ModBodyBytes,
+			Bytes: buf,
+		}
+	}
+
+	if sr, ok := r.(*strings.Reader); ok {
+		buf := make([]byte, sr.Len())
+		_, _ = sr.ReadAt(buf, 0)
+
+		return aoni.RequestModifier{
+			Kind:  aoni.ModBodyBytes,
+			Bytes: buf,
 		}
 	}
 

@@ -246,6 +246,15 @@ type fastNativeDoer struct {
 func (f *fastNativeDoer) Do(req pipeline.Request) (pipeline.Response, error) {
 	fastReq, ok := req.EngineRequest().(*fasthttp.Request)
 	if !ok || fastReq == nil {
+		if stdReqObj := req.HTTPRequest(); stdReqObj != nil {
+			stdResp, err := f.client.HTTP().Do(stdReqObj) //nolint:bodyclose
+			if err != nil {
+				return nil, err
+			}
+
+			return aoni.NewStdResponse(stdResp), nil //nolint:bodyclose
+		}
+
 		stdReq, err := http.NewRequestWithContext(
 			req.Context(),
 			req.Method(),
@@ -361,6 +370,10 @@ func (c *Client) HTTP() aoni.HTTPDoer {
 			}
 
 			pipeline.GlobalBufferPool.Put(buf)
+		}
+
+		if ct := req.Header.Get("Content-Type"); ct != "" {
+			fastReq.Header.SetContentType(ct)
 		}
 
 		ctx := req.Context()

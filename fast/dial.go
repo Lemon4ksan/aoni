@@ -66,6 +66,9 @@ func (c *Client) isTLSEnabled() bool {
 func (c *Client) DialTLS(ctx context.Context, network, addr string) (net.Conn, error) {
 	dialer := transport.NewUniversalDialer()
 	dialCfg := c.buildDialConfig(ctx)
+	if len(dialCfg.ALPNOverride) == 0 {
+		dialCfg.ALPNOverride = []string{"http/1.1"}
+	}
 
 	return dialer.DialTLSContext(ctx, network, addr, dialCfg)
 }
@@ -79,6 +82,7 @@ func (c *Client) DialTLSContext(ctx context.Context, network, addr string) (net.
 func (c *Client) DialH2(ctx context.Context, addr string) (net.Conn, error) {
 	dialer := transport.NewUniversalDialer()
 	dialCfg := c.buildDialConfig(ctx)
+	dialCfg.ALPNOverride = []string{"h2", "http/1.1"}
 
 	return dialer.DialH2(ctx, addr, dialCfg)
 }
@@ -145,6 +149,10 @@ func (c *Client) buildDialConfig(ctx context.Context) transport.DialConfig {
 	cfg.SocketMark = c.config.Network.SocketMark
 
 	cfg.ApplyRequestOverrides(reqCfg)
+
+	if len(cfg.ALPNOverride) == 0 {
+		cfg.ALPNOverride = []string{"http/1.1"}
+	}
 
 	return cfg
 }

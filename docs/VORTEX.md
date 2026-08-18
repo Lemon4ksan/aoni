@@ -2,8 +2,6 @@
 
 `vortex` is the unified declarative contract toolchain, code generator, and traffic-driven reverse engineering suite for `aoni`. It operates directly on Go Abstract Syntax Trees (AST), treating idiomatic Go interface declarations as the single source of truth for REST, WebSocket, SSE, OpenAPI 3.1, AsyncAPI 2.x/3.x, and Protocol Buffer communications.
 
----
-
 ## 📖 The Vortex Manifesto: The Era of Sovereign API Clients
 
 > *"A little copying is better than a little dependency."* — Go Proverb
@@ -23,8 +21,6 @@ With Vortex:
 * **Sniffing beats guessing**: Capture real network traffic (`.har`) with `vortex traffic record` or `vortex traffic store`.
 * **Zero-allocation code generation**: Compiles declarative Go interfaces into pure, machine-optimized Go (`*.gen.go`) without reflection or heap allocations.
 * **100% Browser Fidelity**: Integrates L3 (TCP SYN spoofing), L4 (uTLS Chrome 120+), and L7 (HTTP/2 SETTINGS & High-Entropy Client Hints) to match real browser behavior byte-for-byte.
-
----
 
 ## Table of Contents
 
@@ -61,14 +57,12 @@ With Vortex:
    - [Case Study 2: Telegram Bot & MTProto API](#case-study-2-telegram-bot--mtproto-api)
 7. [CI/CD Integration & SARIF Reporting](#7-cicd-integration--sarif-reporting)
 
----
-
 ## 1. Architecture & The 4 Pillars of Vortex
 
 ```text
 ┌────────────────────────────────────────────────────────────────────────────────────────┐
 │                                   SOURCES OF TRUTH                                     │
-│  Declarative Go Interface  •  Traffic Captures (.har)  •  OpenAPI 3.1  •  AsyncAPI 2/3  │
+│  Declarative Go Interface  •  Traffic Captures (.har)  •  OpenAPI 3.1  •  AsyncAPI 2/3 │
 └────────────────────────────────────────────────────────────────────────────────────────┘
                                             │
                                             ▼
@@ -111,8 +105,6 @@ With Vortex:
 * **L4 (uTLS Browser Profiles)**: Matches Chrome 120+ / Firefox ClientHello, ALPN, cipher suites, ECH, 0-RTT, and Brotli/Zstd certificate compression.
 * **L7 (HTTP/2 SETTINGS & Client Hints)**: Emulates exact HTTP/2 SETTINGS frames, pseudo-header ordering (`:method`, `:authority`, `:scheme`, `:path`), High-Entropy Client Hints (`sec-ch-ua`), natural header casing, and background activity heartbeats (`waa-pa`).
 
----
-
 ## 2. Declarative Contract Syntax Reference
 
 Vortex parses standard Go interface declarations decorated with structured Godoc comments.
@@ -141,8 +133,6 @@ type UserAPI interface {
 | `// @casing "<style>"` | `snake_case`, `camelCase`, `kebab-case` | Sets default query/header/form parameter serialization casing. |
 | `// @engine "<engine>"` | `fast`, `standard` | Specifies default client runtime engine. |
 | `// @header "<key>" "<val>"` | Key & Value | Defines global service-wide inherited headers. |
-
----
 
 ### Method Route & Protocol Annotations
 
@@ -176,8 +166,6 @@ OnUserCreated(ctx context.Context, handler func(msg *UserDTO)) (aoni.Subscriptio
 | `// @event "<name>"` | Event name | Inbound AsyncAPI / SSE message handler. |
 | `// @ws:emit "<name>"` | Event name | Outbound AsyncAPI WebSocket message sender. |
 
----
-
 ### Parameter Binding Annotations
 
 Vortex automatically maps method parameters based on name and Go types:
@@ -202,8 +190,6 @@ type OrderAPI interface {
 * **Body Parameters**: Pointers to structs or slices default to JSON/Protobuf request bodies.
 * **Request Modifiers**: Variadic `mods ...aoni.RequestModifier` allows runtime per-request overrides (custom headers, timeouts, proxy rotation).
 
----
-
 ### Resilience, Timeouts & Caching Annotations
 
 ```go
@@ -225,8 +211,6 @@ type MarketAPI interface {
 | `// @since "<ver>"` | SemVer string | Tags the version when this endpoint was introduced. |
 | `// @deprecated` | Optional reason | Marks method as deprecated in generated Go code and OpenAPI schema. |
 
----
-
 ### Data Transfer Object (DTO) Annotations
 
 ```go
@@ -240,8 +224,6 @@ type CreateClientRegisterRequest struct {
     Strategies   []string  `json:"strategies,omitempty"`
 }
 ```
-
----
 
 ### Heterogeneous Tuple & JSPB Annotations (`@aoni:tuple`)
 
@@ -266,8 +248,6 @@ type ContentPartTuple struct {
 * **Bounds-Safe & Sparse Protection**: Automatically skips `null` elements or truncated arrays without panics.
 * **Scalar & Array Compatibility**: Seamlessly handles both arrays of objects/arrays and single scalar responses.
 
----
-
 ### Two-Tier Header Architecture
 
 Vortex provides declarative header inheritance across two layers:
@@ -284,8 +264,6 @@ type GatewayAPI interface {
     CreateClientRegister(ctx context.Context, req CreateClientRegisterRequest, mods ...aoni.RequestModifier) error
 }
 ```
-
----
 
 ### Shadow Root Source Mirroring (`@aoni:mirror`)
 
@@ -324,8 +302,6 @@ type InventoryWrapperAPI interface {
 vortex check pkg/steam/inventory/api.go
 ```
 
----
-
 ## 3. Complete CLI Reference
 
 Install or update the `vortex` CLI:
@@ -333,8 +309,6 @@ Install or update the `vortex` CLI:
 ```bash
 go install github.com/lemon4ksan/aoni/cmd/vortex@latest
 ```
-
----
 
 ### Daily Core Commands
 
@@ -346,8 +320,6 @@ go install github.com/lemon4ksan/aoni/cmd/vortex@latest
 | **`vortex mock`** | `vortex mock [-fixtures]` | Generates in-memory HTTP/WebSocket mock servers for integration testing. |
 | **`vortex env`** | `vortex env [--fill --out=.env.local]` | Scans contracts for `${VAR}` references and generates environment templates. |
 | **`vortex smoke`** | `vortex smoke [--all --timeout=10s]` | Rapidly probes live contract endpoints and renders latency/TLS tables. |
-
----
 
 ### Traffic Hub
 
@@ -375,8 +347,6 @@ vortex traffic sanitize dirty.har -out=clean.har # Scrub tokens for Git commit s
 vortex traffic prune                          # Clean old traffic snapshots
 ```
 
----
-
 ### Specification Hub
 
 Bidirectional schema toolchain for importing, exporting, and diffing OpenAPI and HAR specifications.
@@ -398,8 +368,6 @@ vortex diff --against=main ./pkg/api
 # 4. Compile Protocol Buffer definitions:
 vortex spec proto -src=./proto -out=./pkg/pb
 ```
-
----
 
 ### AST Refactoring & VCS Hub
 
@@ -429,8 +397,6 @@ vortex ast log pkg/user/api.go       # Contract revision timeline
 vortex ast tag add v1.2.0            # Tag contract release snapshot
 ```
 
----
-
 ### Performance & Profiling Hub
 
 ```bash
@@ -444,8 +410,6 @@ vortex perf cover                    # Deduplicated core test coverage analyzer
 vortex perf harness pkg/user/api.go  # Generate zero-allocation benchmark harness
 vortex perf pgo -record=60s          # Collect runtime profile for default.pgo
 ```
-
----
 
 ### Workspace Management
 
@@ -463,8 +427,6 @@ vortex config lint disable S001 W002
 vortex status -strict                # 360° workspace health check
 vortex clean                         # Remove generated files and stale build cache
 ```
-
----
 
 ## 4. Configuration Schema (`.vortex.yml`)
 
@@ -502,8 +464,6 @@ formatting:
   casing: snake_case
   omitempty: true
 ```
-
----
 
 ## 5. End-to-End Workflows & Tutorials
 
@@ -577,8 +537,6 @@ func main() {
 }
 ```
 
----
-
 ### In-Memory Mock Testing
 
 Vortex generates in-memory mock servers that plug directly into `aoni.Client` without listening on network sockets or opening OS ports.
@@ -626,8 +584,6 @@ func TestBillingService(t *testing.T) {
 }
 ```
 
----
-
 ### OpenAPI 3.1 Roundtrip Synchronization
 
 1. **Importing an existing specification**:
@@ -642,8 +598,6 @@ func TestBillingService(t *testing.T) {
    ```bash
    vortex oapi pkg/stripe/api.go -out=./swagger.json
    ```
-
----
 
 ### AsyncAPI Event Streaming
 
@@ -665,8 +619,6 @@ type TelemetryStreamAPI interface {
 }
 ```
 
----
-
 ### Protocol Buffers & vtprotobuf
 
 Compile `.proto` schemas with zero-allocation `vtprotobuf` marshaling routines:
@@ -685,8 +637,6 @@ import (
 
 resp, err := request.PostProtoTo[pb.QueryResponse](ctx, client, "https://grpc.example.com/query", reqMsg)
 ```
-
----
 
 ## 6. Real-World Case Studies
 
@@ -723,8 +673,6 @@ Using Vortex's traffic hub, we completely reversed Google AI Studio's private `M
        Contents: []agy.ContentTuple{...},
    })
    ```
-
----
 
 ## 7. CI/CD Integration & SARIF Reporting
 

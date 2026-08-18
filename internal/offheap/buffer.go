@@ -138,6 +138,19 @@ func (b *OffHeapBuffer) Bytes() []byte {
 	return unsafe.Slice((*byte)(b.ptr), b.len)
 }
 
+// RawBytes returns a slice view of the designated length backed by the off-heap allocation.
+//
+//go:nosplit
+//go:inline
+func (b *OffHeapBuffer) RawBytes(length int) []byte {
+	if b == nil || b.ptr == nil || length <= 0 || int32(length) > b.cap {
+		return nil
+	}
+
+	b.len = int32(length)
+	return unsafe.Slice((*byte)(b.ptr), length)
+}
+
 // Len returns the number of bytes written to the buffer.
 //
 //go:nosplit

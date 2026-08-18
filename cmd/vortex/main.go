@@ -41,6 +41,7 @@ func main() {
 		&CmdOAPI{},
 		&CmdImport{},
 		&CmdExport{},
+		&CmdUpstream{},
 		&CmdCache{},
 		&CmdProto{},
 		&CmdBench{},

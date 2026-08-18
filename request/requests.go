@@ -733,18 +733,18 @@ func withJSONBodyMods(
 ) []aoni.RequestModifier {
 	total := 3 + len(mods)
 	if total <= stackModCapacity {
-		stackBuf[0] = mod.WithContentType("application/json")
-		stackBuf[1] = mod.WithAccept("application/json")
-		stackBuf[2] = mod.WithBody(bodyReader)
+		stackBuf[0] = mod.WithBody(bodyReader)
+		stackBuf[1] = mod.WithContentType("application/json")
+		stackBuf[2] = mod.WithAccept("application/json")
 		copy(stackBuf[3:], mods)
 
 		return stackBuf[:total]
 	}
 
 	res := make([]aoni.RequestModifier, total)
-	res[0] = mod.WithContentType("application/json")
-	res[1] = mod.WithAccept("application/json")
-	res[2] = mod.WithBody(bodyReader)
+	res[0] = mod.WithBody(bodyReader)
+	res[1] = mod.WithContentType("application/json")
+	res[2] = mod.WithAccept("application/json")
 	copy(res[3:], mods)
 
 	return res

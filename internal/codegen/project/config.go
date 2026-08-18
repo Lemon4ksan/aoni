@@ -770,30 +770,57 @@ func (cfg *Config) SaveTo(filePath string) error {
 	return nil
 }
 
-// GitignoreVortexBlock contains standard ignore patterns for Vortex test harnesses, mocks, and diagnostics.
+// GitignoreVortexBlock contains standard ignore patterns for Vortex test harnesses, secrets, and diagnostics.
 const GitignoreVortexBlock = `
-# Vortex Test Artifacts & Diagnostics
-*_mock.gen.go
-*_harness.gen.go
-*_harness_test.go
+# Environment & secrets
+.env
+.env.local
+.vortex/cache/secrets.json
+.vortex/cache/linter.json
+
+# Binaries
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+
+# Test & profiling artifacts
+*.out
 *.prof
 *.sarif
+coverage.*
+
+# Vortex generated mocks & harnesses
+*_mock.gen.go
+*_harness.gen.go
 .vortex/
 `
 
-// GitattributesVortexBlock contains standard attributes for Go line endings and GitHub PR diff collapsing.
+// GitattributesVortexBlock contains standard attributes for Go line endings, diff normalization, and PR review diff collapsing.
 const GitattributesVortexBlock = `
 # Go & Protocol Buffers LF Normalization
 * text=auto eol=lf
 *.go text eol=lf
 *.proto text eol=lf
 
-# GitHub Linguist — Collapse generated code in PR diffs and exclude from stats
+# Compressed archives & binary blobs
+*.har.gz binary linguist-generated=true
+
+# GitHub & GitLab Linguist — Collapse generated code in PR reviews and exclude from stats
 *.gen.go linguist-generated=true
 *_mock.gen.go linguist-generated=true
 *_harness.gen.go linguist-generated=true
 *.pb.go linguist-generated=true
 *_aoni.pb.go linguist-generated=true
+
+# Vortex System State, History Journal, Traffic Cache & Upstream Bundles
+.vortex/** linguist-generated=true
+.vortex/history/** linguist-generated=true
+.vortex/cache/** linguist-generated=true
+.vortex/upstream/** linguist-generated=true linguist-vendored=true
+.vortex/upstream/js/** linguist-generated=true linguist-vendored=true
+.vortex/tags.json linguist-generated=true
 `
 
 // EnsureGitignore ensures that .gitignore in rootDir includes Vortex ignore patterns.

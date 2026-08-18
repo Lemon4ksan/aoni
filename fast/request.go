@@ -222,7 +222,13 @@ func (f *Request) ResetHeaders() {
 
 // SetBodyBytes sets request body to a raw byte slice.
 func (f *Request) SetBodyBytes(body []byte) {
+	existingCT := f.req.Header.ContentType()
 	f.req.SetBody(body)
+
+	if len(existingCT) > 0 {
+		f.req.Header.SetContentTypeBytes(existingCT)
+	}
+
 	f.getBody = nil
 }
 
@@ -233,7 +239,12 @@ func (f *Request) BodyBytes() []byte {
 
 // SetBodyStream assigns a streaming reader as request body and sets up rewind capabilities if supported.
 func (f *Request) SetBodyStream(r io.Reader, contentLength int64) {
+	existingCT := f.req.Header.ContentType()
 	f.req.SetBodyStream(r, int(contentLength))
+
+	if len(existingCT) > 0 {
+		f.req.Header.SetContentTypeBytes(existingCT)
+	}
 
 	if rc, ok := r.(io.ReadCloser); ok {
 		f.getBody = func() (io.ReadCloser, error) {
