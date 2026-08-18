@@ -13,6 +13,8 @@ import (
 	"os"
 	"runtime"
 	"strings"
+
+	"github.com/lemon4ksan/aoni/cmd/vortex/internal/base"
 )
 
 // App manages the lifecycle, subcommand routing, and usage formatting of the Vortex CLI.
@@ -20,9 +22,9 @@ type App struct {
 	Name        string
 	Version     string
 	Description string
-	Commands    []Command
-	cmdMap      map[string]Command
-	defaultCmd  Command
+	Commands    []base.Command
+	cmdMap      map[string]base.Command
+	defaultCmd  base.Command
 	Stdout      io.Writer
 	Stderr      io.Writer
 }
@@ -34,43 +36,41 @@ type commandGroup struct {
 
 var commandGroups = []commandGroup{
 	{
-		Title: "Core Commands",
+		Title: "Daily Core Commands",
 		Commands: []string{
-			"autopilot", "gen", "check", "mock", "env", "smoke",
+			"autopilot", "gen", "check", "mock", "smoke", "env",
 		},
 	},
 	{
-		Title: "Traffic, Reverse Engineering & Drift",
+		Title: "Domain Hubs",
 		Commands: []string{
-			"diff", "record", "review", "stack", "accept", "cherry-pick", "refactor", "upstream", "oracle",
+			"traffic", "oracle", "spec", "ast", "perf",
 		},
 	},
 	{
-		Title: "Specification & Schema Hubs",
+		Title: "Workspace Management",
 		Commands: []string{
-			"spec", "traffic", "ast", "perf", "proto",
-		},
-	},
-	{
-		Title: "Workspace & Diagnostics",
-		Commands: []string{
-			"init", "status", "config", "work", "history", "undo", "source", "clean", "explain", "completion",
+			"init", "status", "config", "clean", "completion", "explain", "example", "list", "work",
 		},
 	},
 }
 
 // NewApp constructs a new CLI application instance.
-func NewApp(name, version, description string, commands ...Command) *App {
+func NewApp(name, version, description string, commands ...base.Command) *App {
 	app := &App{
 		Name:        name,
 		Version:     version,
 		Description: description,
-		Commands:    commands,
-		cmdMap:      make(map[string]Command),
+		cmdMap:      make(map[string]base.Command),
 		Stdout:      os.Stdout,
 		Stderr:      os.Stderr,
 	}
 
+	if len(commands) == 0 {
+		commands = DefaultCommands(app)
+	}
+
+	app.Commands = commands
 	for _, c := range commands {
 		app.cmdMap[c.Name()] = c
 		for _, alias := range c.Aliases() {
@@ -79,17 +79,20 @@ func NewApp(name, version, description string, commands ...Command) *App {
 
 		if c.Name() == "autopilot" {
 			app.defaultCmd = c
-			if ap, ok := c.(*CmdAutoPilot); ok {
-				ap.app = app
-			}
-		}
-
-		if cw, ok := c.(*CmdWork); ok {
-			cw.app = app
 		}
 	}
 
 	return app
+}
+
+// RunCommand runs a specific registered command or alias by name.
+func (a *App) RunCommand(ctx context.Context, name string, args []string, stdout, stderr io.Writer) error {
+	cmd, ok := a.cmdMap[name]
+	if !ok {
+		return fmt.Errorf("unknown command %q", name)
+	}
+
+	return cmd.Run(ctx, args, stdout, stderr)
 }
 
 // Run parses command arguments and dispatches execution to the appropriate subcommand.
@@ -173,7 +176,7 @@ func (a *App) PrintUsage(w io.Writer) {
 	fmt.Fprintf(w, "Usage:\n")
 	fmt.Fprintf(w, "  %s <command> [flags] [arguments...]\n\n", a.Name)
 
-	cmdByName := make(map[string]Command, len(a.Commands))
+	cmdByName := make(map[string]base.Command, len(a.Commands))
 	for _, c := range a.Commands {
 		cmdByName[c.Name()] = c
 	}
@@ -199,9 +202,9 @@ func (a *App) PrintUsage(w io.Writer) {
 	fmt.Fprintf(w, "  vortex gen ./pkg/api/api.go            # Compile zero-alloc client for specific file\n")
 	fmt.Fprintf(w, "  vortex mock ./pkg/api/api.go           # Generate in-memory mock server for tests\n")
 	fmt.Fprintf(w, "  vortex check ./...                     # Lint and typecheck all contracts\n")
-	fmt.Fprintf(w, "  vortex diff ./openapi.json             # Detect breaking drift against OpenAPI spec\n")
-	fmt.Fprintf(w, "  vortex record -out=app.har -- ./mycli  # Capture process-isolated live traffic\n")
-	fmt.Fprintf(w, "  vortex oapi import -spec=app.har -add  # Ingest HAR into Go contract with 3-way merge\n\n")
+	fmt.Fprintf(w, "  vortex traffic record -out=app.har     # Capture live process network traffic\n")
+	fmt.Fprintf(w, "  vortex spec import -spec=app.har -add  # Ingest HAR into Go contract with 3-way merge\n")
+	fmt.Fprintf(w, "  vortex oracle -name=chat https://...   # Compile browser attestation sidecar\n\n")
 
 	fmt.Fprintf(w, "Run '%s help <command>' or '%s <command> --help' for detailed documentation.\n", a.Name, a.Name)
 }

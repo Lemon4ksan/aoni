@@ -17,48 +17,7 @@ import (
 )
 
 func newTestApp(stdout, stderr *bytes.Buffer) *App {
-	commands := []Command{
-		&CmdAutoPilot{},
-		&CmdStatus{},
-		&CmdInit{},
-		&CmdRecord{},
-		&CmdConfig{},
-		&CmdWork{},
-		&CmdGen{},
-		&CmdHarness{},
-		&CmdMock{},
-		&CmdClean{},
-		&CmdCheck{},
-		&CmdDiff{},
-		&CmdStack{},
-		&CmdReview{},
-		&CmdAccept{},
-		&CmdCherryPick{},
-		&CmdRefactor{},
-		&CmdHistory{},
-		&CmdUndo{},
-		&CmdSource{},
-		&CmdLog{},
-		&CmdTag{},
-		&CmdBlame{},
-		&CmdOAPI{},
-		&CmdImport{},
-		&CmdExport{},
-		&CmdCache{},
-		&CmdProto{},
-		&CmdBench{},
-		&CmdProf{},
-		&CmdCover{},
-		&CmdList{},
-		&CmdExplain{},
-		&CmdExample{},
-		&CmdPGO{},
-		&CmdCompletion{},
-		&CmdEnv{},
-		&CmdSmoke{},
-	}
-
-	app := NewApp("vortex", version.Current, "Unified Toolchain", commands...)
+	app := NewApp("vortex", version.Current, "Unified Toolchain")
 	app.Stdout = stdout
 	app.Stderr = stderr
 
@@ -215,7 +174,7 @@ type API interface {
 
 	app := newTestApp(&stdout, &stderr)
 
-	err := app.Run(context.Background(), []string{"diff", specFile, srcFile})
+	err := app.Run(context.Background(), []string{"spec", "diff", specFile, srcFile})
 	require.NoError(t, err)
 	require.Contains(t, stdout.String(), "100% in sync")
 }
@@ -250,7 +209,7 @@ type API interface {
 
 	app := newTestApp(&stdout, &stderr)
 
-	err := app.Run(context.Background(), []string{"log", srcFile})
+	err := app.Run(context.Background(), []string{"ast", "log", srcFile})
 	require.NoError(t, err)
 	require.Contains(t, stdout.String(), "Vortex API Contract Timeline")
 	require.Contains(t, stdout.String(), "v1.4.0")
@@ -259,7 +218,7 @@ type API interface {
 	// JSON format
 	stdout.Reset()
 
-	err = app.Run(context.Background(), []string{"log", "-json", srcFile})
+	err = app.Run(context.Background(), []string{"ast", "log", "-json", srcFile})
 	require.NoError(t, err)
 	require.Contains(t, stdout.String(), `"version": "v1.4.0"`)
 }
@@ -310,7 +269,7 @@ type API interface {
 
 	app := newTestApp(&stdout, &stderr)
 
-	err := app.Run(context.Background(), []string{"oapi", "import", "-spec=" + specFile, "-out=" + srcFile})
+	err := app.Run(context.Background(), []string{"spec", "import", "-spec=" + specFile, "-out=" + srcFile})
 	require.NoError(t, err)
 	require.Contains(t, stdout.String(), "vortex merge")
 
@@ -407,11 +366,11 @@ func TestApp_Review_And_Accept_MissingArgs(t *testing.T) {
 	app := newTestApp(&stdout, &stderr)
 
 	// Review missing arg
-	err := app.Run(context.Background(), []string{"review"})
+	err := app.Run(context.Background(), []string{"ast", "review"})
 	require.Error(t, err)
 
 	// Accept missing arg
-	err = app.Run(context.Background(), []string{"accept"})
+	err = app.Run(context.Background(), []string{"ast", "accept"})
 	require.Error(t, err)
 }
 
@@ -421,7 +380,7 @@ func TestApp_Log_Git_Flag(t *testing.T) {
 	app := newTestApp(&stdout, &stderr)
 
 	// Log with --git flag on local file
-	err := app.Run(context.Background(), []string{"log", "--git", "-n=3", "main.go"})
+	err := app.Run(context.Background(), []string{"ast", "log", "--git", "-n=3", "main.go"})
 	require.NoError(t, err)
 	require.Contains(t, stdout.String(), "⚡ Vortex API Git History")
 }
@@ -432,7 +391,7 @@ func TestApp_Diff_Against_HEAD(t *testing.T) {
 	app := newTestApp(&stdout, &stderr)
 
 	// Diff with --against=HEAD on local file
-	err := app.Run(context.Background(), []string{"diff", "--against=HEAD", "main.go"})
+	err := app.Run(context.Background(), []string{"traffic", "diff", "--against=HEAD", "main.go"})
 	require.NoError(t, err)
 	require.Contains(t, stdout.String(), "⚡ [vortex diff]")
 }
@@ -528,7 +487,7 @@ type UserAPI interface {
 
 	app := newTestApp(&stdout, &stderr)
 
-	err := app.Run(context.Background(), []string{"harness", apiFile})
+	err := app.Run(context.Background(), []string{"perf", "harness", apiFile})
 	require.NoError(t, err)
 	require.Contains(t, stdout.String(), "✔ Generated Harness")
 	require.FileExists(t, filepath.Join(pkgDir, "api_harness.gen.go"))
@@ -896,21 +855,21 @@ type PriceDBAPI interface {
 	// 2. Test source list (initially none)
 	stdout.Reset()
 
-	err = app.Run(context.Background(), []string{"source", "list", "-dir=" + tempDir})
+	err = app.Run(context.Background(), []string{"spec", "source", "list", "-dir=" + tempDir})
 	require.NoError(t, err)
 	require.Contains(t, stdout.String(), "(none)")
 
 	// 3. Test source set
 	stdout.Reset()
 
-	err = app.Run(context.Background(), []string{"source", "set", "PriceDBAPI", specFile, "-dir=" + tempDir})
+	err = app.Run(context.Background(), []string{"spec", "source", "set", "PriceDBAPI", specFile, "-dir=" + tempDir})
 	require.NoError(t, err)
 	require.Contains(t, stdout.String(), "Successfully bound upstream source")
 
 	// 4. Test source list (now bound)
 	stdout.Reset()
 
-	err = app.Run(context.Background(), []string{"source", "list", "-dir=" + tempDir})
+	err = app.Run(context.Background(), []string{"spec", "source", "list", "-dir=" + tempDir})
 	require.NoError(t, err)
 	require.Contains(t, stdout.String(), "PriceDBAPI")
 	require.Contains(t, stdout.String(), "openapi")
@@ -918,28 +877,28 @@ type PriceDBAPI interface {
 	// 5. Test source ping (local file check)
 	stdout.Reset()
 
-	err = app.Run(context.Background(), []string{"source", "ping", "PriceDBAPI", "-dir=" + tempDir})
+	err = app.Run(context.Background(), []string{"spec", "source", "ping", "PriceDBAPI", "-dir=" + tempDir})
 	require.NoError(t, err)
 	require.Contains(t, stdout.String(), "[LOCAL]")
 
 	// 6. Test source diff
 	stdout.Reset()
 
-	err = app.Run(context.Background(), []string{"source", "diff", "PriceDBAPI", "-dir=" + tempDir})
+	err = app.Run(context.Background(), []string{"spec", "source", "diff", "PriceDBAPI", "-dir=" + tempDir})
 	require.NoError(t, err)
 	require.Contains(t, stdout.String(), "100% in sync")
 
 	// 7. Test source rm
 	stdout.Reset()
 
-	err = app.Run(context.Background(), []string{"source", "rm", "PriceDBAPI", "-dir=" + tempDir})
+	err = app.Run(context.Background(), []string{"spec", "source", "rm", "PriceDBAPI", "-dir=" + tempDir})
 	require.NoError(t, err)
 	require.Contains(t, stdout.String(), "Removed upstream source binding")
 
 	// 8. Verify list is back to none
 	stdout.Reset()
 
-	err = app.Run(context.Background(), []string{"source", "list", "-dir=" + tempDir})
+	err = app.Run(context.Background(), []string{"spec", "source", "list", "-dir=" + tempDir})
 	require.NoError(t, err)
 	require.Contains(t, stdout.String(), "(none)")
 }
@@ -1043,7 +1002,7 @@ type UserAPI interface {
 	app := newTestApp(&stdout, &stderr)
 
 	// 1. Run blame on file
-	err := app.Run(context.Background(), []string{"blame", apiFile, "-dir=" + tempDir})
+	err := app.Run(context.Background(), []string{"ast", "blame", apiFile, "-dir=" + tempDir})
 	require.NoError(t, err)
 	require.Contains(t, stdout.String(), "GetUser")
 	require.Contains(t, stdout.String(), "UserDTO")
@@ -1052,7 +1011,7 @@ type UserAPI interface {
 	// 2. Run blame JSON
 	stdout.Reset()
 
-	err = app.Run(context.Background(), []string{"blame", apiFile, "-json", "-dir=" + tempDir})
+	err = app.Run(context.Background(), []string{"ast", "blame", apiFile, "-json", "-dir=" + tempDir})
 	require.NoError(t, err)
 	require.Contains(t, stdout.String(), `"name": "GetUser"`)
 	require.Contains(t, stdout.String(), `"name": "UserDTO"`)
@@ -1091,7 +1050,17 @@ type MarketAPI interface {
 
 	err = app.Run(
 		context.Background(),
-		[]string{"tag", "add", "v1.0.0", "Market", "-m", "Initial market API release", "-git=false", "-dir=" + tempDir},
+		[]string{
+			"ast",
+			"tag",
+			"add",
+			"v1.0.0",
+			"Market",
+			"-m",
+			"Initial market API release",
+			"-git=false",
+			"-dir=" + tempDir,
+		},
 	)
 	require.NoError(t, err)
 	require.Contains(t, stdout.String(), "Created API release tag v1.0.0")
@@ -1099,7 +1068,7 @@ type MarketAPI interface {
 	// 3. List tags
 	stdout.Reset()
 
-	err = app.Run(context.Background(), []string{"tag", "list", "-dir=" + tempDir})
+	err = app.Run(context.Background(), []string{"ast", "tag", "list", "-dir=" + tempDir})
 	require.NoError(t, err)
 	require.Contains(t, stdout.String(), "v1.0.0")
 	require.Contains(t, stdout.String(), "Initial market API release")
@@ -1107,7 +1076,7 @@ type MarketAPI interface {
 	// 4. Show tag
 	stdout.Reset()
 
-	err = app.Run(context.Background(), []string{"tag", "show", "v1.0.0", "-dir=" + tempDir})
+	err = app.Run(context.Background(), []string{"ast", "tag", "show", "v1.0.0", "-dir=" + tempDir})
 	require.NoError(t, err)
 	require.Contains(t, stdout.String(), "API Release Snapshot: v1.0.0")
 	require.Contains(t, stdout.String(), "ListItems")
@@ -1115,7 +1084,7 @@ type MarketAPI interface {
 	// 5. Remove tag
 	stdout.Reset()
 
-	err = app.Run(context.Background(), []string{"tag", "rm", "v1.0.0", "-dir=" + tempDir})
+	err = app.Run(context.Background(), []string{"ast", "tag", "rm", "v1.0.0", "-dir=" + tempDir})
 	require.NoError(t, err)
 	require.Contains(t, stdout.String(), "Removed API release tag v1.0.0")
 }
@@ -1176,7 +1145,7 @@ type BptfAPI interface {
 	// Dry run first
 	err := app.Run(
 		context.Background(),
-		[]string{"cherry-pick", srcFile + ":GetItemPrice", "--to=" + destFile, "-dry-run", "-dir=" + tempDir},
+		[]string{"ast", "pick", srcFile + ":GetItemPrice", "--to=" + destFile, "-dry-run", "-dir=" + tempDir},
 	)
 	require.NoError(t, err)
 	require.Contains(t, stdout.String(), "Dry-Run AST Transplant")
@@ -1186,7 +1155,7 @@ type BptfAPI interface {
 
 	err = app.Run(
 		context.Background(),
-		[]string{"cherry-pick", srcFile + ":GetItemPrice", "--to=" + destFile, "-dir=" + tempDir},
+		[]string{"ast", "pick", srcFile + ":GetItemPrice", "--to=" + destFile, "-dir=" + tempDir},
 	)
 	require.NoError(t, err)
 	require.Contains(t, stdout.String(), "Successfully cherry-picked GetItemPrice")
@@ -1297,7 +1266,7 @@ type MarketAPI interface {
 	// 1. Perform rename (FetchItems -> GetItems)
 	err := app.Run(
 		context.Background(),
-		[]string{"refactor", "rename", "--match=Fetch(.*)", "--replace=Get$1", apiFile, "-dir=" + tempDir},
+		[]string{"ast", "rename", "--match=Fetch(.*)", "--replace=Get$1", apiFile, "-dir=" + tempDir},
 	)
 	require.NoError(t, err)
 
@@ -1308,7 +1277,7 @@ type MarketAPI interface {
 	// 2. View History
 	stdout.Reset()
 
-	err = app.Run(context.Background(), []string{"history", "-dir=" + tempDir})
+	err = app.Run(context.Background(), []string{"ast", "history", "-dir=" + tempDir})
 	require.NoError(t, err)
 	require.Contains(t, stdout.String(), "vortex refactor rename")
 	require.Contains(t, stdout.String(), "api.go")
@@ -1316,7 +1285,7 @@ type MarketAPI interface {
 	// 3. Undo Operation (Ctrl+Z)
 	stdout.Reset()
 
-	err = app.Run(context.Background(), []string{"undo", "-dir=" + tempDir})
+	err = app.Run(context.Background(), []string{"ast", "undo", "-dir=" + tempDir})
 	require.NoError(t, err)
 	require.Contains(t, stdout.String(), "Successfully reverted")
 
@@ -1502,7 +1471,7 @@ func TestApp_Diff_SpecToSpec(t *testing.T) {
 
 	app := newTestApp(&stdout, &stderr)
 
-	err := app.Run(context.Background(), []string{"diff", specA, specB})
+	err := app.Run(context.Background(), []string{"spec", "diff", specA, specB})
 	require.NoError(t, err)
 
 	outStr := stdout.String()
@@ -1549,54 +1518,54 @@ func TestApp_Cache_Workflow(t *testing.T) {
 
 	app := newTestApp(&stdout, &stderr)
 
-	// 1. vortex cache store --move
-	err = app.Run(context.Background(), []string{"cache", "store", "--move", harFile})
+	// 1. vortex traffic cache store --move
+	err = app.Run(context.Background(), []string{"traffic", "cache", "store", "--move", harFile})
 	require.NoError(t, err)
 	require.Contains(t, stdout.String(), "Moved")
 	require.NoFileExists(t, harFile)
 
-	// 2. vortex cache list
+	// 2. vortex traffic cache list
 	stdout.Reset()
 
-	err = app.Run(context.Background(), []string{"cache", "list"})
+	err = app.Run(context.Background(), []string{"traffic", "cache", "list"})
 	require.NoError(t, err)
 	require.Contains(t, stdout.String(), "traffic")
 	require.Contains(t, stdout.String(), "api.example.com")
 
-	// 3. vortex cache show
+	// 3. vortex traffic cache show
 	stdout.Reset()
 
-	err = app.Run(context.Background(), []string{"cache", "show", "traffic"})
+	err = app.Run(context.Background(), []string{"traffic", "cache", "show", "traffic"})
 	require.NoError(t, err)
 	require.Contains(t, stdout.String(), "traffic")
 	require.Contains(t, stdout.String(), "1 total entries")
 
-	// 4. vortex cache secrets list & get
+	// 4. vortex traffic cache secrets list & get
 	stdout.Reset()
 
-	err = app.Run(context.Background(), []string{"cache", "secrets", "list"})
+	err = app.Run(context.Background(), []string{"traffic", "cache", "secrets", "list"})
 	require.NoError(t, err)
 	require.Contains(t, stdout.String(), "AUTH_TOKEN")
 	require.Contains(t, stdout.String(), "GOOGLE_API_KEY")
 
 	stdout.Reset()
 
-	err = app.Run(context.Background(), []string{"cache", "secrets", "get", "AUTH_TOKEN"})
+	err = app.Run(context.Background(), []string{"traffic", "cache", "secrets", "get", "AUTH_TOKEN"})
 	require.NoError(t, err)
 	require.Contains(t, stdout.String(), "sample_secret_token_123")
 
-	// 5. vortex cache export
+	// 5. vortex traffic cache export
 	stdout.Reset()
 
 	restoredFile := filepath.Join(tempDir, "restored.har")
-	err = app.Run(context.Background(), []string{"cache", "export", "traffic", "-out=" + restoredFile})
+	err = app.Run(context.Background(), []string{"traffic", "cache", "export", "traffic", "-out=" + restoredFile})
 	require.NoError(t, err)
 	require.FileExists(t, restoredFile)
 
-	// 6. vortex cache prune
+	// 6. vortex traffic cache prune
 	stdout.Reset()
 
-	err = app.Run(context.Background(), []string{"cache", "prune", "--all"})
+	err = app.Run(context.Background(), []string{"traffic", "cache", "prune", "--all"})
 	require.NoError(t, err)
 	require.Contains(t, stdout.String(), "Removed 1 cached traffic session(s)")
 }
@@ -1746,10 +1715,10 @@ type GenerateContentRequest struct {
 	require.NoError(t, os.WriteFile(fileA, []byte(harA), 0o600))
 	require.NoError(t, os.WriteFile(fileB, []byte(harB), 0o600))
 
-	// Run vortex diff session_a.har session_b.har
+	// Run vortex traffic diff session_a.har session_b.har
 	stdout.Reset()
 
-	err = app.Run(context.Background(), []string{"diff", fileA, fileB})
+	err = app.Run(context.Background(), []string{"traffic", "diff", fileA, fileB})
 	require.NoError(t, err)
 
 	out := stdout.String()
@@ -1923,8 +1892,8 @@ type Req struct {
 `
 	require.NoError(t, os.WriteFile(apiPath, []byte(v0), 0o600))
 
-	// stack push -label="base-scan"
-	err = app.Run(context.Background(), []string{"stack", "push", "-label=base-scan", apiPath})
+	// ast stack push -label="base-scan"
+	err = app.Run(context.Background(), []string{"ast", "stack", "push", "-label=base-scan", apiPath})
 	require.NoError(t, err)
 	require.Contains(t, stdout.String(), "Captured stack snapshot frame #0 [base-scan]")
 
@@ -1944,7 +1913,7 @@ type Req struct {
 	require.NoError(t, os.WriteFile(apiPath, []byte(v1), 0o600))
 	stdout.Reset()
 
-	err = app.Run(context.Background(), []string{"stack", "push", "-label=deobf-model", apiPath})
+	err = app.Run(context.Background(), []string{"ast", "stack", "push", "-label=deobf-model", apiPath})
 	require.NoError(t, err)
 	require.Contains(t, stdout.String(), "Captured stack snapshot frame #1 [deobf-model]")
 
@@ -1964,14 +1933,14 @@ type Req struct {
 	require.NoError(t, os.WriteFile(apiPath, []byte(v2), 0o600))
 	stdout.Reset()
 
-	err = app.Run(context.Background(), []string{"stack", "push", "-label=full-polish", apiPath})
+	err = app.Run(context.Background(), []string{"ast", "stack", "push", "-label=full-polish", apiPath})
 	require.NoError(t, err)
 	require.Contains(t, stdout.String(), "Captured stack snapshot frame #2 [full-polish]")
 
 	// 4. Test stack list
 	stdout.Reset()
 
-	err = app.Run(context.Background(), []string{"stack", "list"})
+	err = app.Run(context.Background(), []string{"ast", "stack", "list"})
 	require.NoError(t, err)
 
 	outList := stdout.String()
@@ -1984,7 +1953,7 @@ type Req struct {
 	// 5. Test stack diff (Adjacent Frame 2 vs Frame 1)
 	stdout.Reset()
 
-	err = app.Run(context.Background(), []string{"stack", "diff"})
+	err = app.Run(context.Background(), []string{"ast", "stack", "diff"})
 	require.NoError(t, err)
 
 	adjDiff := stdout.String()
@@ -1995,7 +1964,7 @@ type Req struct {
 	// 6. Test stack diff --cumulative (Frame 2 vs Frame 0)
 	stdout.Reset()
 
-	err = app.Run(context.Background(), []string{"stack", "diff", "--cumulative"})
+	err = app.Run(context.Background(), []string{"ast", "stack", "diff", "--cumulative"})
 	require.NoError(t, err)
 
 	cumDiff := stdout.String()
@@ -2006,7 +1975,7 @@ type Req struct {
 	// 7. Test stack restore base
 	stdout.Reset()
 
-	err = app.Run(context.Background(), []string{"stack", "restore", "base"})
+	err = app.Run(context.Background(), []string{"ast", "stack", "restore", "base"})
 	require.NoError(t, err)
 	require.Contains(t, stdout.String(), "Restored workspace state to frame \"base\"")
 

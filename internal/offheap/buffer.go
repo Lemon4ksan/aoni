@@ -148,6 +148,7 @@ func (b *OffHeapBuffer) RawBytes(length int) []byte {
 	}
 
 	b.len = int32(length)
+
 	return unsafe.Slice((*byte)(b.ptr), length)
 }
 

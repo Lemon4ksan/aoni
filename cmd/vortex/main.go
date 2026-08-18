@@ -10,58 +10,42 @@ import (
 	"fmt"
 	"os"
 
+	"github.com/lemon4ksan/aoni/cmd/vortex/internal/ast"
+	"github.com/lemon4ksan/aoni/cmd/vortex/internal/base"
+	"github.com/lemon4ksan/aoni/cmd/vortex/internal/core"
+	"github.com/lemon4ksan/aoni/cmd/vortex/internal/oracle"
+	"github.com/lemon4ksan/aoni/cmd/vortex/internal/perf"
+	"github.com/lemon4ksan/aoni/cmd/vortex/internal/spec"
+	"github.com/lemon4ksan/aoni/cmd/vortex/internal/traffic"
+	"github.com/lemon4ksan/aoni/cmd/vortex/internal/workspace"
 	"github.com/lemon4ksan/aoni/internal/version"
 )
 
-func main() {
-	commands := []Command{
-		&CmdAutoPilot{},
-		&CmdStatus{},
-		&CmdInit{},
-		&CmdRecord{},
-		&CmdConfig{},
-		&CmdWork{},
-		&CmdGen{},
-		&CmdHarness{},
-		&CmdMock{},
-		&CmdClean{},
-		&CmdCheck{},
-		&CmdDiff{},
-		&CmdStack{},
-		&CmdReview{},
-		&CmdAccept{},
-		&CmdCherryPick{},
-		&CmdRefactor{},
-		&CmdHistory{},
-		&CmdUndo{},
-		&CmdSource{},
-		&CmdLog{},
-		&CmdTag{},
-		&CmdBlame{},
-		&CmdOAPI{},
-		&CmdImport{},
-		&CmdExport{},
-		&CmdUpstream{},
-		&CmdCache{},
-		&CmdProto{},
-		&CmdBench{},
-		&CmdProf{},
-		&CmdCover{},
-		&CmdList{},
-		&CmdExplain{},
-		&CmdExample{},
-		&CmdPGO{},
-		&CmdCompletion{},
-		&CmdEnv{},
-		&CmdSmoke{},
-		&CmdOracle{},
-	}
+// DefaultCommands returns the isolated canonical command set for the Vortex CLI.
+func DefaultCommands(runner base.AppRunner) []base.Command {
+	cmds := make([]base.Command, 0, 25)
 
+	// Daily Core Commands
+	cmds = append(cmds, core.Commands(runner)...)
+
+	// Domain Hubs
+	cmds = append(cmds, traffic.NewCommand())
+	cmds = append(cmds, oracle.NewCommand())
+	cmds = append(cmds, spec.NewCommand())
+	cmds = append(cmds, ast.NewCommand())
+	cmds = append(cmds, perf.NewCommand())
+
+	// Workspace Management
+	cmds = append(cmds, workspace.Commands(runner)...)
+
+	return cmds
+}
+
+func main() {
 	app := NewApp(
 		"vortex",
 		version.Current,
 		"Unified Zero-Allocation AST Toolchain and Engine Suite for projects using aoni",
-		commands...,
 	)
 
 	if err := app.Run(context.Background(), os.Args[1:]); err != nil {

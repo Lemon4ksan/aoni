@@ -28,26 +28,31 @@ func emitTuple(buf *bytes.Buffer, tracker *ImportTracker, t *ir.TupleIR) {
 		t.Name,
 	)
 	fmt.Fprintf(buf, "func (t %s) MarshalJSON() ([]byte, error) {\n", t.Name)
+
 	if maxIdx < 0 {
 		buf.WriteString("\treturn []byte(\"[]\"), nil\n")
 	} else {
 		fmt.Fprintf(buf, "\tarr := make([]any, %d)\n", maxIdx+1)
+
 		for _, f := range t.Fields {
 			if !f.IsNested {
-				if f.Type.IsPointer {
+				switch {
+				case f.Type.IsPointer:
 					fmt.Fprintf(buf, "\tif t.%s != nil {\n\t\tarr[%d] = t.%s\n\t}\n", f.GoName, f.Index, f.GoName)
-				} else if f.Type.Name == "string" {
+				case f.Type.Name == "string":
 					fmt.Fprintf(buf, "\tif t.%s != \"\" {\n\t\tarr[%d] = t.%s\n\t}\n", f.GoName, f.Index, f.GoName)
-				} else {
+				default:
 					fmt.Fprintf(buf, "\tarr[%d] = t.%s\n", f.Index, f.GoName)
 				}
 			}
 		}
+
 		buf.WriteString("\tfor len(arr) > 0 && arr[len(arr)-1] == nil {\n")
 		buf.WriteString("\t\tarr = arr[:len(arr)-1]\n")
 		buf.WriteString("\t}\n")
 		buf.WriteString("\treturn json.Marshal(arr)\n")
 	}
+
 	buf.WriteString("}\n\n")
 
 	fmt.Fprintf(
