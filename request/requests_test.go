@@ -756,3 +756,23 @@ func TestRequests_MonadicResult(t *testing.T) {
 		assert.True(t, res.IsSuccess())
 	})
 }
+
+func TestRequests_RaceGet(t *testing.T) {
+	t.Parallel()
+
+	s1 := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_ = json.NewEncoder(w).Encode(testPayload{Message: "fast-endpoint"})
+	}))
+	t.Cleanup(s1.Close)
+
+	client := aoni.NewClient(s1.Client())
+
+	res, resp := RaceGet[testPayload](t.Context(), client, s1.URL, "http://127.0.0.1:59999/unreachable")
+	require.NotNil(t, resp)
+	assert.True(t, res.IsSuccess())
+	val, err := res.Unwrap()
+	require.NoError(t, err)
+	assert.Equal(t, "fast-endpoint", val.Message)
+}

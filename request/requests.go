@@ -850,3 +850,45 @@ func PatchResult[Resp any](
 
 	return generic.Success(val), resp
 }
+
+type raceResult[Resp any] struct {
+	val  *Resp
+	resp *http.Response
+}
+
+// RaceGet concurrently dispatches GET requests to multiple target paths/URLs through c,
+// returning the result of the first endpoint that succeeds.
+//
+// All other competing requests are immediately cancelled via context.
+func RaceGet[Resp any](
+	ctx context.Context,
+	c Requester,
+	paths ...string,
+) (generic.Result[*Resp], *http.Response) {
+	if len(paths) == 0 {
+		return generic.Failure[*Resp](errors.New("aoni: no paths provided for RaceGet")), nil
+	}
+
+	tasks := make([]func(context.Context) generic.Result[raceResult[Resp]], len(paths))
+	for i, p := range paths {
+		targetPath := p
+		tasks[i] = func(reqCtx context.Context) generic.Result[raceResult[Resp]] {
+			val, resp, err := GetToEx[Resp](reqCtx, c, targetPath) //nolint:bodyclose
+			if err != nil {
+				return generic.Failure[raceResult[Resp]](err)
+			}
+
+			return generic.Success(raceResult[Resp]{val: val, resp: resp})
+		}
+	}
+
+	res := generic.RaceFirstSuccess(ctx, tasks...)
+	if !res.IsSuccess() {
+		_, err := res.Unwrap()
+		return generic.Failure[*Resp](err), nil
+	}
+
+	rr, _ := res.Unwrap()
+
+	return generic.Success(rr.val), rr.resp
+}
