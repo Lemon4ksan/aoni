@@ -6,6 +6,7 @@ package option
 
 import (
 	"slices"
+	"strings"
 
 	"github.com/lemon4ksan/miyako/generic"
 
@@ -247,5 +248,21 @@ func WithPacketPadding(padding fingerprint.PaddingConfig) aoni.ClientOption {
 func WithJA4Callback(fn func(ja4.Report)) aoni.ClientOption {
 	return func(cfg *aoni.Config) {
 		cfg.Fingerprint.JA4Callback = fn
+	}
+}
+
+// WithPersona configures a browser persona by name (e.g. "chrome", "firefox", "safari", "chrome_mobile").
+func WithPersona(name string) aoni.ClientOption {
+	switch strings.ToLower(name) {
+	case "chrome", "google-chrome", "chromium":
+		return WithChrome()
+	case "firefox", "ff", "mozilla":
+		return WithFirefox()
+	case "safari", "apple":
+		return WithSafari()
+	case "chrome_mobile", "mobile", "android":
+		return WithChromeMobile()
+	default:
+		return WithChrome()
 	}
 }
