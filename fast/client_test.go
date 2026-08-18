@@ -7,6 +7,7 @@ package fast_test
 import (
 	"context"
 	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -124,6 +125,7 @@ func TestFastClient_ContentLengthTruncation(t *testing.T) {
 
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	require.NoError(t, err)
+
 	defer ln.Close()
 
 	go func() {
@@ -132,8 +134,10 @@ func TestFastClient_ContentLengthTruncation(t *testing.T) {
 			if acceptErr != nil {
 				return
 			}
+
 			go func(c net.Conn) {
 				defer c.Close()
+
 				buf := make([]byte, 1024)
 				_, _ = c.Read(buf)
 				_, _ = c.Write([]byte("HTTP/1.1 200 OK\r\nContent-Length: 5\r\nConnection: close\r\n\r\n1234567890"))
@@ -146,6 +150,7 @@ func TestFastClient_ContentLengthTruncation(t *testing.T) {
 
 	resp, err := client.Request(context.Background(), "GET", "/")
 	require.NoError(t, err)
+
 	defer resp.Close()
 
 	assert.Equal(t, "12345", string(resp.BodyBytes()))
