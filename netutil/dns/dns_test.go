@@ -25,8 +25,9 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/lemon4ksan/foundation/net/dns/wire"
+
 	"github.com/lemon4ksan/aoni"
-	"github.com/lemon4ksan/aoni/netutil/dns/wire"
 )
 
 type failingResolver struct{}

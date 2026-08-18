@@ -13,7 +13,7 @@ import (
 	"github.com/lemon4ksan/foundation/async/dedup"
 	"github.com/lemon4ksan/foundation/silicon/clock"
 
-	"github.com/lemon4ksan/aoni/netutil/dns/wire"
+	"github.com/lemon4ksan/foundation/net/dns/wire"
 )
 
 var evictInterval = time.Minute

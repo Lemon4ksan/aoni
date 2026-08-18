@@ -24,7 +24,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/lemon4ksan/aoni/netutil/dns/wire"
+	"github.com/lemon4ksan/foundation/net/dns/wire"
 )
 
 func generateDoQTLSConfig(t *testing.T) *tls.Config {

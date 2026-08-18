@@ -21,10 +21,11 @@ import (
 	"github.com/lemon4ksan/foundation/generic"
 	utls "github.com/refraction-networking/utls"
 
+	"github.com/lemon4ksan/foundation/net/dns/wire"
+
 	"github.com/lemon4ksan/aoni/fingerprint/ja4"
 	"github.com/lemon4ksan/aoni/netutil"
 	"github.com/lemon4ksan/aoni/netutil/cert"
-	"github.com/lemon4ksan/aoni/netutil/dns/wire"
 )
 
 var (
