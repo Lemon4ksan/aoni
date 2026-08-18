@@ -66,8 +66,8 @@ func TestOracleASTCompilation(t *testing.T) {
 	}
 
 	goStr := string(goBytes)
-	if !strings.Contains(goStr, "AistudioOracle") {
-		t.Errorf("expected generated Go client 'AistudioOracle', got:\n%s", goStr)
+	if !strings.Contains(goStr, "AistudioAPI") {
+		t.Errorf("expected generated Go service interface 'AistudioAPI', got:\n%s", goStr)
 	}
 
 	if !strings.Contains(goStr, "Generate_token") && !strings.Contains(goStr, "GenerateToken") {
