@@ -177,21 +177,28 @@ func (c *Client) Request(
 	fastReq.Header.SetMethodBytes(getMethodBytes(method))
 
 	reqAdapter := NewRequest(fastReq)
-	defer reqAdapter.Release()
-
 	reqAdapter.SetContext(ctx)
 
 	if err := c.resolveTargetURL(reqAdapter, path); err != nil {
+		reqAdapter.Release()
 		releaseFastPair(fastReq, fastResp)
+
 		return nil, err
 	}
 
 	c.applyDefaultHeaders(reqAdapter)
-	c.applyModifiers(reqAdapter, mods)
+
+	if len(mods) > 0 {
+		c.applyModifiers(reqAdapter, mods)
+	}
 
 	if c.isFastPathEligible(ctx, mods) {
+		reqAdapter.Release()
+
 		return c.executeFastPath(fastReq, fastResp)
 	}
+
+	defer reqAdapter.Release()
 
 	reqCtx := reqAdapter.Context()
 
@@ -484,7 +491,7 @@ func (c *Client) resolveProtocolHandler(rawURL string) http.RoundTripper {
 func (c *Client) resolveTargetURL(req aoni.Request, path string) error {
 	if fastReqAdapter, ok := req.(*Request); ok && len(c.prepared.BaseURLHostBytes) > 0 && len(path) > 0 &&
 		path[0] == '/' &&
-		!strings.Contains(path, "://") {
+		(len(path) < 2 || path[1] != '/') {
 		fastReq := fastReqAdapter.req
 		fastReq.URI().SetSchemeBytes(c.prepared.BaseURLSchemeBytes)
 		fastReq.URI().SetHostBytes(c.prepared.BaseURLHostBytes)

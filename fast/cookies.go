@@ -141,16 +141,21 @@ func extractUserInfoAndSetAuth(req *fasthttp.Request) {
 		pass := bytesconv.B2S(req.URI().Password())
 		encoded := base64.StdEncoding.EncodeToString(bytesconv.S2B(user + ":" + pass))
 		req.Header.Set("Authorization", "Basic "+encoded)
-	} else {
-		rawURI := req.URI().FullURI()
-		if bytes.IndexByte(rawURI, '@') >= 0 {
-			if parsed, err := url.Parse(bytesconv.B2S(rawURI)); err == nil && parsed.User != nil {
-				user := parsed.User.Username()
-				pass, _ := parsed.User.Password()
-				encoded := base64.StdEncoding.EncodeToString(bytesconv.S2B(user + ":" + pass))
-				req.Header.Set("Authorization", "Basic "+encoded)
-			}
-		}
+
+		return
+	}
+
+	host := req.URI().Host()
+	if bytes.IndexByte(host, '@') < 0 {
+		return
+	}
+
+	rawURI := req.URI().FullURI()
+	if parsed, err := url.Parse(bytesconv.B2S(rawURI)); err == nil && parsed.User != nil {
+		user := parsed.User.Username()
+		pass, _ := parsed.User.Password()
+		encoded := base64.StdEncoding.EncodeToString(bytesconv.S2B(user + ":" + pass))
+		req.Header.Set("Authorization", "Basic "+encoded)
 	}
 
 	req.URI().SetUsername("")
