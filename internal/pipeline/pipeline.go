@@ -13,10 +13,10 @@ import (
 	"time"
 
 	asyncctx "github.com/lemon4ksan/foundation/async/context"
+	"github.com/lemon4ksan/foundation/silicon/sysnet"
 	"golang.org/x/sys/cpu"
 
 	"github.com/lemon4ksan/aoni/internal/experimental"
-	"github.com/lemon4ksan/aoni/internal/sysnet"
 	"github.com/lemon4ksan/aoni/netutil/fragment"
 )
 

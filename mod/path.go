@@ -8,7 +8,7 @@ import (
 	"fmt"
 	"net/url"
 
-	"github.com/lemon4ksan/foundation/net/url"
+	foundationurl "github.com/lemon4ksan/foundation/net/url"
 
 	"github.com/lemon4ksan/aoni"
 	"github.com/lemon4ksan/aoni/codec/values"
@@ -22,7 +22,7 @@ func WithVar(key string, value any) aoni.RequestModifier {
 		Fn: func(req aoni.Request) {
 			escapedValue := url.PathEscape(fmt.Sprint(value))
 			path := req.Path()
-			req.SetPath(urlutil.ReplaceVar(path, key, escapedValue))
+			req.SetPath(foundationurl.ReplaceVar(path, key, escapedValue))
 		},
 	}
 }

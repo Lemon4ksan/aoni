@@ -20,9 +20,10 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/lemon4ksan/foundation/silicon/simd"
-	"github.com/valyala/fasthttp"
 	"github.com/lemon4ksan/foundation/net/url"
+	"github.com/lemon4ksan/foundation/silicon/simd"
+	"github.com/lemon4ksan/foundation/silicon/sysnet"
+	"github.com/valyala/fasthttp"
 	"github.com/valyala/fasthttp/fasthttputil"
 	"golang.org/x/sys/cpu"
 
@@ -30,7 +31,6 @@ import (
 	"github.com/lemon4ksan/aoni/fingerprint/profiles"
 	"github.com/lemon4ksan/aoni/fingerprint/profiles/chrome"
 	"github.com/lemon4ksan/aoni/internal/experimental"
-	"github.com/lemon4ksan/aoni/internal/sysnet"
 )
 
 // BenchmarkReport represents structured benchmark results for CI/CD automation.
@@ -195,8 +195,8 @@ func (c *CmdBench) Run(ctx context.Context, args []string, stdout, stderr io.Wri
 
 			var local int64
 			for j := 0; j < chunkURL; j++ {
-				p1 := urlutil.ReplaceVar(pathTemplate, "app_id", "730")
-				_ = urlutil.ReplaceVar(p1, "market_hash_name", "AK-47 | Redline (Field-Tested)")
+				p1 := url.ReplaceVar(pathTemplate, "app_id", "730")
+				_ = url.ReplaceVar(p1, "market_hash_name", "AK-47 | Redline (Field-Tested)")
 				local++
 			}
 

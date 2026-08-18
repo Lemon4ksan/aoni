@@ -19,7 +19,7 @@ import (
 	asyncctx "github.com/lemon4ksan/foundation/async/context"
 	"github.com/lemon4ksan/foundation/async/log"
 	"github.com/lemon4ksan/foundation/generic"
-	"github.com/lemon4ksan/foundation/net/url"
+	foundationurl "github.com/lemon4ksan/foundation/net/url"
 	"github.com/lemon4ksan/foundation/silicon/bytesconv"
 	"github.com/quic-go/quic-go"
 	"github.com/quic-go/quic-go/http3"
@@ -600,7 +600,7 @@ func (c *Client) resolveURL(path string) (*url.URL, error) {
 		return nil, resolveErr
 	}
 
-	u, parseErr := urlutil.Parse(targetURLStr)
+	u, parseErr := foundationurl.Parse(targetURLStr)
 	if parseErr != nil {
 		return nil, &Error{Op: "failed to parse URL", Err: parseErr}
 	}
@@ -631,7 +631,7 @@ func (c *Client) resolveTargetURL(path string) (string, error) {
 		return c.prepared.BaseURLTrimmedString + path, nil
 	}
 
-	rel, err := urlutil.Parse(strings.TrimLeft(path, "/"))
+	rel, err := foundationurl.Parse(strings.TrimLeft(path, "/"))
 	if err != nil {
 		return "", &Error{Op: "invalid path", Err: ErrInvalidPath}
 	}

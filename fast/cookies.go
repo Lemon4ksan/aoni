@@ -13,7 +13,7 @@ import (
 	"net/http"
 	"net/url"
 
-	"github.com/lemon4ksan/foundation/net/url"
+	foundation "github.com/lemon4ksan/foundation/net/url"
 	"github.com/lemon4ksan/foundation/silicon/bytesconv"
 	"github.com/valyala/fasthttp"
 
@@ -38,7 +38,7 @@ func (c *Client) applyCookies(ctx context.Context, req *fasthttp.Request) {
 		return
 	}
 
-	u, err := urlutil.Parse(bytesconv.B2S(req.URI().FullURI()))
+	u, err := foundation.Parse(bytesconv.B2S(req.URI().FullURI()))
 	if err != nil {
 		return
 	}
@@ -75,7 +75,7 @@ func (c *Client) captureCookies(ctx context.Context, req *fasthttp.Request, resp
 		return
 	}
 
-	u, err := urlutil.Parse(bytesconv.B2S(req.URI().FullURI()))
+	u, err := foundation.Parse(bytesconv.B2S(req.URI().FullURI()))
 	if err != nil {
 		return
 	}
@@ -185,5 +185,5 @@ func isSameDomainOrSubdomain(h1, h2 string) bool {
 	clean1 := netutil.CleanHost(h1)
 	clean2 := netutil.CleanHost(h2)
 
-	return urlutil.IsSameDomainOrSubdomain(clean1, clean2)
+	return foundation.IsSameDomainOrSubdomain(clean1, clean2)
 }

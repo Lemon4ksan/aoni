@@ -12,9 +12,8 @@ import (
 	"net"
 	"os"
 
+	"github.com/lemon4ksan/foundation/silicon/sysnet"
 	"golang.org/x/sys/windows"
-
-	"github.com/lemon4ksan/aoni/internal/sysnet"
 )
 
 const wsaFlagRegisteredIO = 0x100

@@ -12,7 +12,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/lemon4ksan/foundation/net/url"
+	foundation "github.com/lemon4ksan/foundation/net/url"
 	"github.com/lemon4ksan/foundation/silicon/bytesconv"
 	"google.golang.org/protobuf/encoding/protojson"
 	"google.golang.org/protobuf/proto"
@@ -204,9 +204,9 @@ func writeQueryKeyValuePair(sb *strings.Builder, key, value string, first *bool)
 
 	var tmpBuf [64]byte
 
-	buf := urlutil.AppendQueryEscapeString(tmpBuf[:0], key)
+	buf := foundation.AppendQueryEscapeString(tmpBuf[:0], key)
 	buf = append(buf, '=')
-	buf = urlutil.AppendQueryEscapeString(buf, value)
+	buf = foundation.AppendQueryEscapeString(buf, value)
 
 	sb.Write(buf)
 

@@ -19,12 +19,11 @@ import (
 	"testing"
 	"time"
 
+	"github.com/lemon4ksan/foundation/net/hpack"
 	utls "github.com/refraction-networking/utls"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"golang.org/x/net/http2"
-
-	"github.com/lemon4ksan/foundation/net/hpack"
 
 	"github.com/lemon4ksan/aoni"
 	"github.com/lemon4ksan/aoni/mod"

@@ -19,9 +19,8 @@ import (
 	"time"
 
 	"github.com/lemon4ksan/foundation/generic"
-	utls "github.com/refraction-networking/utls"
-
 	"github.com/lemon4ksan/foundation/net/dns/wire"
+	utls "github.com/refraction-networking/utls"
 
 	"github.com/lemon4ksan/aoni/fingerprint/ja4"
 	"github.com/lemon4ksan/aoni/netutil"

@@ -12,7 +12,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/lemon4ksan/foundation/net/url"
+	foundation "github.com/lemon4ksan/foundation/net/url"
 	"github.com/lemon4ksan/foundation/silicon/bytesconv"
 	"github.com/lemon4ksan/foundation/silicon/pool"
 	"github.com/valyala/fasthttp"
@@ -499,7 +499,7 @@ func (c *Client) configureFastHTTPProxy(ctx context.Context, req *fasthttp.Reque
 	}
 
 	if rawProxy, ok := aoni.GetProxyOverride(ctx).Value(); ok && rawProxy != "" {
-		if parsed, parseErr := urlutil.Parse(rawProxy); parseErr == nil {
+		if parsed, parseErr := foundation.Parse(rawProxy); parseErr == nil {
 			proxyURL = parsed
 		}
 	}
