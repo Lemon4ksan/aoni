@@ -374,7 +374,7 @@ func (r *PooledResponse) HTTPResponse() *http.Response {
 
 // Close releases underlying fasthttp objects and returns PooledResponse to memory pool.
 func (r *PooledResponse) Close() error {
-	if r.closed.CompareAndSwap(false, true) {
+	if !r.closed.Swap(true) {
 		if r.fastReq != nil {
 			fasthttp.ReleaseRequest(r.fastReq)
 			r.fastReq = nil

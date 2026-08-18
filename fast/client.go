@@ -236,11 +236,10 @@ func releaseFastPair(req *fasthttp.Request, resp *fasthttp.Response) {
 }
 
 func (c *Client) executeFastPath(fastReq *fasthttp.Request, fastResp *fasthttp.Response) (aoni.Response, error) {
-	extractUserInfoAndSetAuth(fastReq)
-
 	err := c.engine.Do(fastReq, fastResp)
 	if err != nil {
 		releaseFastPair(fastReq, fastResp)
+
 		return nil, err
 	}
 
@@ -462,19 +461,6 @@ func (c *Client) Engine() *fasthttp.Client {
 	return c.engine
 }
 
-func (c *Client) isFastPathEligible(ctx context.Context, mods []aoni.RequestModifier) bool {
-	if len(mods) > 0 || !c.prepared.FastPathCapable || c.config.Defaults.Inspector != nil ||
-		c.config.Engine.CookieJar != nil {
-		return false
-	}
-
-	if ctx != nil && ctx.Done() != nil {
-		return false
-	}
-
-	return true
-}
-
 func (c *Client) resolveProtocolHandler(rawURL string) http.RoundTripper {
 	if len(c.config.Engine.Protocols) == 0 {
 		return nil
@@ -540,6 +526,7 @@ func (c *Client) resolveTargetURLFastFallback(fastReq *fasthttp.Request, path st
 				targetURL = c.prepared.BaseURLTrimmedString + "/" + path
 			}
 		}
+
 	case c.config.Defaults.BaseURL != nil && c.config.Defaults.BaseURL.Host != "":
 		base := c.config.Defaults.BaseURL
 		basePath := strings.TrimSuffix(base.Path, "/")
@@ -550,6 +537,7 @@ func (c *Client) resolveTargetURLFastFallback(fastReq *fasthttp.Request, path st
 		}
 
 		targetURL = base.Scheme + "://" + base.Host + basePath + cleanPath
+
 	case path == "":
 		return ErrTargetURLEmpty
 	default:
@@ -928,7 +916,7 @@ func applyRedirectMethodAndBody(statusCode int, req *fasthttp.Request) {
 func decompressFastResponse(resp *fasthttp.Response) bool {
 	enforceContentLengthTruncation(resp)
 
-	encodingBytes := resp.Header.Peek("Content-Encoding")
+	encodingBytes := resp.Header.ContentEncoding()
 	if len(encodingBytes) == 0 {
 		return false
 	}
@@ -978,14 +966,14 @@ func enforceContentLengthTruncation(resp *fasthttp.Response) {
 		return
 	}
 
-	cl := int64(resp.Header.ContentLength())
+	cl := resp.Header.ContentLength()
 	if cl < 0 {
 		return
 	}
 
 	if !resp.IsBodyStream() {
 		body := resp.Body()
-		if int64(len(body)) > cl {
+		if len(body) > cl {
 			resp.SetBody(body[:cl])
 		}
 
@@ -993,7 +981,7 @@ func enforceContentLengthTruncation(resp *fasthttp.Response) {
 	}
 
 	if stream := resp.BodyStream(); stream != nil {
-		resp.SetBodyStream(io.LimitReader(stream, cl), int(cl))
+		resp.SetBodyStream(io.LimitReader(stream, int64(cl)), cl)
 	}
 }
 

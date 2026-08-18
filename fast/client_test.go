@@ -118,3 +118,35 @@ func TestFastClient_TimeoutHandling(t *testing.T) {
 	_, err := client.Do(req)
 	assert.Error(t, err)
 }
+
+func TestFastClient_ContentLengthTruncation(t *testing.T) {
+	t.Parallel()
+
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	require.NoError(t, err)
+	defer ln.Close()
+
+	go func() {
+		for {
+			conn, acceptErr := ln.Accept()
+			if acceptErr != nil {
+				return
+			}
+			go func(c net.Conn) {
+				defer c.Close()
+				buf := make([]byte, 1024)
+				_, _ = c.Read(buf)
+				_, _ = c.Write([]byte("HTTP/1.1 200 OK\r\nContent-Length: 5\r\nConnection: close\r\n\r\n1234567890"))
+			}(conn)
+		}
+	}()
+
+	client := fast.NewClient(option.WithBaseURL("http://" + ln.Addr().String()))
+	defer client.CloseIdleConnections()
+
+	resp, err := client.Request(context.Background(), "GET", "/")
+	require.NoError(t, err)
+	defer resp.Close()
+
+	assert.Equal(t, "12345", string(resp.BodyBytes()))
+}
