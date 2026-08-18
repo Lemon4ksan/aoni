@@ -16,6 +16,7 @@ import (
 	"strings"
 	"time"
 
+	asyncctx "github.com/lemon4ksan/foundation/async/context"
 	"github.com/lemon4ksan/foundation/async/log"
 	"github.com/lemon4ksan/foundation/generic"
 	"github.com/lemon4ksan/foundation/silicon/bytesconv"
@@ -291,7 +292,12 @@ func (c *Client) HTTP() HTTPDoer {
 }
 
 func (c *Client) execute(req *http.Request, pipe PipelineConfig) (*http.Response, error) {
-	return c.pipeline.Execute(req.Context(), req, c.engine, pipe.toInternal())
+	fastCtx := asyncctx.Wrap(req.Context())
+	if req.Context() != fastCtx {
+		req = req.WithContext(fastCtx)
+	}
+
+	return c.pipeline.Execute(fastCtx, req, c.engine, pipe.toInternal())
 }
 
 // WithPersona configures TLS ClientHello ID, HTTP/2 SETTINGS frames, header order,

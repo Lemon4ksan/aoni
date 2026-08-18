@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"time"
 
+	asyncctx "github.com/lemon4ksan/foundation/async/context"
 	"golang.org/x/sys/cpu"
 
 	"github.com/lemon4ksan/aoni/internal/experimental"
@@ -55,7 +56,9 @@ func (p *Pipeline[Req, Resp]) Execute(
 	doer GenericDoer[Req, Resp],
 	pipe PipelineConfig,
 ) (Resp, error) {
-	tx := AcquireTx(ctx)
+	fastCtx := asyncctx.Wrap(ctx)
+
+	tx := AcquireTx(fastCtx)
 	defer ReleaseTx(tx)
 
 	p.initTx(tx, pipe)
