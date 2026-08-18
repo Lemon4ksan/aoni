@@ -9,6 +9,8 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/lemon4ksan/foundation/generic"
+
 	"github.com/lemon4ksan/aoni/internal/codegen/ir"
 )
 
@@ -334,13 +336,9 @@ func emitDynamicHeader(buf *bytes.Buffer, tracker *ImportTracker, svc *ir.Servic
 		}
 
 		// Find matching parameter
-		var matchedParam *ir.ParamIR
-		for _, p := range m.Params {
-			if p.GoName == seg.VarName || strings.EqualFold(p.GoName, seg.VarName) {
-				matchedParam = p
-				break
-			}
-		}
+		matchedParam, _ := generic.Find(m.Params, func(p *ir.ParamIR) bool {
+			return p.GoName == seg.VarName || strings.EqualFold(p.GoName, seg.VarName)
+		})
 
 		if matchedParam != nil {
 			typeName := matchedParam.GoType.Name

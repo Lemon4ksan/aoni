@@ -15,8 +15,11 @@ import (
 	"strings"
 	"time"
 
+	"github.com/lemon4ksan/foundation/generic"
+
 	"github.com/lemon4ksan/aoni/internal/codegen/analysis"
 	"github.com/lemon4ksan/aoni/internal/codegen/emitter"
+	"github.com/lemon4ksan/aoni/internal/codegen/ir"
 	"github.com/lemon4ksan/aoni/internal/codegen/optimizer"
 	"github.com/lemon4ksan/aoni/internal/codegen/parser"
 	"github.com/lemon4ksan/aoni/internal/codegen/project"
@@ -92,16 +95,8 @@ func (b *Builder) BuildFile(ctx context.Context, srcFile, outFile string) (*Resu
 	}
 
 	hasTargets := len(root.Services) > 0 || len(root.Tuples) > 0 ||
-		len(root.Bitpacks) > 0 || len(root.Unions) > 0
-
-	if !hasTargets {
-		for _, st := range root.Structs {
-			if st.GenValueEncoder {
-				hasTargets = true
-				break
-			}
-		}
-	}
+		len(root.Bitpacks) > 0 || len(root.Unions) > 0 ||
+		generic.Any(root.Structs, func(st *ir.StructIR) bool { return st.GenValueEncoder })
 
 	if !hasTargets {
 		return &Result{
@@ -112,12 +107,14 @@ func (b *Builder) BuildFile(ctx context.Context, srcFile, outFile string) (*Resu
 
 	diags := b.analyzer.Analyze(root)
 
-	var errMsgs []string
-	for _, d := range diags {
-		if d.Severity == analysis.SeverityError {
-			errMsgs = append(errMsgs, d.String())
-		}
-	}
+	errMsgs := generic.Map(
+		generic.Filter(diags, func(d analysis.Diagnostic) bool {
+			return d.Severity == analysis.SeverityError
+		}),
+		func(d analysis.Diagnostic) string {
+			return d.String()
+		},
+	)
 
 	if len(errMsgs) > 0 {
 		return nil, fmt.Errorf("analysis error in %s: %s", srcFile, strings.Join(errMsgs, "; "))

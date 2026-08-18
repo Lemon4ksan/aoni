@@ -14,6 +14,8 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/lemon4ksan/foundation/generic"
+
 	"github.com/lemon4ksan/aoni/cookie"
 	"github.com/lemon4ksan/aoni/internal/io"
 	"github.com/lemon4ksan/aoni/telemetry"
@@ -158,10 +160,7 @@ func (p *Pipeline[Req, Resp]) executeWithProxyFailover(
 		return p.dispatchProxyAttempt(req, doer, hedging)
 	}
 
-	retryLimit := failover.RetryLimit
-	if retryLimit <= 0 {
-		retryLimit = len(proxies)
-	}
+	retryLimit := generic.Coalesce(failover.RetryLimit, len(proxies))
 
 	var lastErr error
 	for attempt := 0; attempt <= retryLimit; attempt++ {
