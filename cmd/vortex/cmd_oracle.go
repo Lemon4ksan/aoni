@@ -31,26 +31,39 @@ func (c *CmdOracle) Run(_ context.Context, args []string, stdout, stderr io.Writ
 	fs.SetOutput(stderr)
 
 	var (
-		jsOut    string
-		goOut    string
-		pkgName  string
-		nameFlag string
+		jsOut      string
+		goOut      string
+		pkgName    string
+		nameFlag   string
+		proxyFlag  string
+		poolFlag   int
+		sourceFlag string
 	)
 
 	StringVar(fs, &jsOut, "js", "j", "sidecar/server.js", "Path to output generated JavaScript sidecar")
 	StringVar(fs, &goOut, "go", "g", "pkg/oracle/oracle.gen.go", "Path to output generated Go contract")
 	StringVar(fs, &pkgName, "pkg", "p", "oracle", "Go package name for generated contract")
 	StringVar(fs, &nameFlag, "name", "n", "oracle", "Name of the oracle service")
+	StringVar(fs, &proxyFlag, "proxy", "", "", "Outbound proxy for browser context (e.g. socks5://127.0.0.1:1080)")
+	IntVar(fs, &poolFlag, "pool", "", 3, "Number of concurrent isolated browser tabs in page pool")
+	StringVar(
+		fs,
+		&sourceFlag,
+		"source",
+		"s",
+		"request_body",
+		"Token extraction source (request_body, response_body, local_storage, global_js, dom_attr)",
+	)
 
 	fs.Usage = func() {
-		fmt.Fprintf(stderr, "vortex oracle — Compile Browser Attestation Oracle Sidecars & Go Contracts\n\n")
+		fmt.Fprintf(stderr, "vortex oracle — Compile Universal Browser Attestation Sidecars & Go Contracts\n\n")
 		fmt.Fprintf(stderr, "Usage:\n")
 		fmt.Fprintf(stderr, "  vortex oracle [flags] [target-url]\n\n")
 		fmt.Fprintf(stderr, "Flags:\n")
 		fs.PrintDefaults()
 		fmt.Fprintf(stderr, "\nExamples:\n")
 		fmt.Fprintf(stderr, "  vortex oracle -name aistudio https://aistudio.google.com/prompts/new_chat\n")
-		fmt.Fprintf(stderr, "  vortex oracle -js sidecar/server.js -go pkg/oracle/oracle.gen.go\n")
+		fmt.Fprintf(stderr, "  vortex oracle -proxy socks5://127.0.0.1:1080 -pool 4 -source request_body\n")
 	}
 
 	if err := fs.Parse(args); err != nil {
@@ -69,6 +82,8 @@ func (c *CmdOracle) Run(_ context.Context, args []string, stdout, stderr io.Writ
 		Browser: spec.BrowserConfig{
 			Headless:   true,
 			AutoDetect: true,
+			Proxy:      proxyFlag,
+			PoolSize:   poolFlag,
 			DismissSelectors: []string{
 				"button:has-text('Get started')",
 				"button:has-text('Accept')",
@@ -77,12 +92,31 @@ func (c *CmdOracle) Run(_ context.Context, args []string, stdout, stderr io.Writ
 		},
 		Flows: []spec.FlowSpec{
 			{
-				Name:             "generate_token",
+				Name: "generate_token",
+				Steps: []spec.FlowStep{
+					{
+						Action:   spec.ActionClick,
+						Selector: "textarea, [contenteditable='true']",
+						Kinetics: true,
+					},
+					{
+						Action:   spec.ActionType,
+						Selector: "textarea, [contenteditable='true']",
+						Value:    "{content}",
+						Kinetics: true,
+					},
+					{
+						Action:   spec.ActionClick,
+						Selector: "button:has-text('Run'), button[type='submit']",
+						Kinetics: true,
+					},
+				},
 				InputSelector:    "textarea, [contenteditable='true']",
 				SubmitSelector:   "button:has-text('Run'), button[type='submit']",
 				FallbackShortcut: "Control+Enter",
 				HumanKinetics:    true,
 				Intercept: spec.InterceptRule{
+					Source:         spec.InterceptSource(sourceFlag),
 					URLPattern:     "/GenerateContent",
 					TokenIndex:     4,
 					CaptureCookies: true,

@@ -45,15 +45,19 @@ type TokenResponse struct {
 	Token   string            `json:"token,omitempty"`
 	Cookies string            `json:"cookies,omitempty"`
 	Headers map[string]string `json:"headers,omitempty"`
+	Source  string            `json:"source,omitempty"`
 	Error   string            `json:"error,omitempty"`
 }
 
 // StatusResponse contains sidecar health status.
 type StatusResponse struct {
-	Status  string `json:"status,omitempty"`
-	Ready   bool   `json:"ready,omitempty"`
-	PageURL string `json:"pageUrl,omitempty"`
-	Error   string `json:"error,omitempty"`
+	Status       string `json:"status,omitempty"`
+	Ready        bool   `json:"ready,omitempty"`
+	PageURL      string `json:"pageUrl,omitempty"`
+	PoolSize     int    `json:"poolSize,omitempty"`
+	IdleTabs     int    `json:"idleTabs,omitempty"`
+	WaitingQueue int    `json:"waitingQueue,omitempty"`
+	Error        string `json:"error,omitempty"`
 }
 
 // Client provides HTTP communication with the browser oracle sidecar.
