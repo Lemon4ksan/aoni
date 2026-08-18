@@ -12,8 +12,42 @@ import (
 
 	"github.com/lemon4ksan/aoni"
 	"github.com/lemon4ksan/aoni/cookie"
+	"github.com/lemon4ksan/aoni/middleware"
+	"github.com/lemon4ksan/aoni/resiliency"
 	"github.com/lemon4ksan/aoni/telemetry"
 )
+
+// WithRetry attaches an automated retry and backoff policy constructed via [resiliency.RetryBuilder].
+func WithRetry(builder *resiliency.RetryBuilder) aoni.ClientOption {
+	return func(cfg *aoni.Config) {
+		if builder != nil {
+			var base any = cfg.Engine.CustomEngine
+			if base == nil {
+				base = http.DefaultClient
+			}
+
+			chained := middleware.Chain(base, builder.Build())
+			cfg.Engine.CustomEngine = aoni.NewRequestDoerAdapter(chained)
+		}
+	}
+}
+
+// WithMiddleware registers one or more [aoni.Middleware] decorators wrapping the client execution engine.
+func WithMiddleware(middlewares ...aoni.Middleware) aoni.ClientOption {
+	return func(cfg *aoni.Config) {
+		if len(middlewares) == 0 {
+			return
+		}
+
+		var base any = cfg.Engine.CustomEngine
+		if base == nil {
+			base = http.DefaultClient
+		}
+
+		chained := middleware.Chain(base, middlewares...)
+		cfg.Engine.CustomEngine = aoni.NewRequestDoerAdapter(chained)
+	}
+}
 
 // WithPipeline returns an [aoni.ClientOption] setting default pipeline configurations.
 func WithPipeline(pipe aoni.PipelineConfig) aoni.ClientOption {

@@ -27,6 +27,7 @@ import (
 
 	"github.com/lemon4ksan/aoni"
 	"github.com/lemon4ksan/aoni/codec/decode"
+	"github.com/lemon4ksan/aoni/foundation/bytesconv"
 	"github.com/lemon4ksan/aoni/foundation/offheap"
 	"github.com/lemon4ksan/aoni/mod"
 	"github.com/lemon4ksan/aoni/request"
@@ -170,10 +171,9 @@ func parseSSELine(line string, currentEvent *SSEEvent) {
 		return
 	}
 
-	var key, value string
-	if idx := strings.IndexByte(line, ':'); idx != -1 {
-		key = line[:idx]
-		value = strings.TrimPrefix(line[idx+1:], " ")
+	key, value, found := bytesconv.CutByte(line, ':')
+	if found {
+		value = strings.TrimPrefix(value, " ")
 	} else {
 		key = line
 		value = ""
@@ -193,7 +193,7 @@ func parseSSELine(line string, currentEvent *SSEEvent) {
 	case "id":
 		currentEvent.ID = value
 	case "retry":
-		if r, err := strconv.Atoi(strings.TrimSpace(value)); err == nil {
+		if r, err := strconv.Atoi(bytesconv.TrimSpaceASCII(value)); err == nil {
 			currentEvent.Retry = r
 		}
 	}

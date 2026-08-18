@@ -30,6 +30,7 @@ import (
 	"github.com/lemon4ksan/aoni/netutil/digest"
 	"github.com/lemon4ksan/aoni/option"
 	"github.com/lemon4ksan/aoni/request"
+	"github.com/lemon4ksan/aoni/resiliency"
 	"github.com/lemon4ksan/aoni/telemetry"
 )
 
@@ -299,6 +300,16 @@ func (r *Request) SetFormFile(fieldname string, reader stdio.Reader) *Request {
 // SetProxy routes this request through a target proxy URL.
 func (r *Request) SetProxy(proxyURL string) *Request {
 	r.proxyOverride = proxyURL
+	return r
+}
+
+// Retry sets the request retry policy via [resiliency.RetryBuilder].
+func (r *Request) Retry(builder *resiliency.RetryBuilder) *Request {
+	if builder != nil {
+		override := builder.ToOverride()
+		r.retryOverride = &override
+	}
+
 	return r
 }
 

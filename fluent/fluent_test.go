@@ -26,6 +26,7 @@ import (
 	"github.com/lemon4ksan/aoni/codec"
 	"github.com/lemon4ksan/aoni/fluent"
 	"github.com/lemon4ksan/aoni/option"
+	"github.com/lemon4ksan/aoni/resiliency"
 	"github.com/lemon4ksan/aoni/telemetry"
 )
 
@@ -408,6 +409,27 @@ func TestFluent_SetProxy_And_SetRetry(t *testing.T) {
 	resp, err := fluent.R(client).
 		SetProxy("http://127.0.0.1:8080").
 		SetRetry(2, 100*time.Millisecond).
+		Get("/")
+
+	require.NoError(t, err)
+
+	defer resp.Body.Close()
+
+	assert.Equal(t, http.StatusOK, resp.StatusCode)
+}
+
+func TestFluent_RetryBuilder(t *testing.T) {
+	t.Parallel()
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	t.Cleanup(server.Close)
+
+	client := aoni.NewClient(server.Client(), option.WithBaseURL(server.URL))
+
+	resp, err := fluent.R(client).
+		Retry(resiliency.NewRetry().MaxAttempts(3).OnTransientErrors()).
 		Get("/")
 
 	require.NoError(t, err)
