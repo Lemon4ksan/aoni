@@ -8,6 +8,8 @@ import (
 	"fmt"
 	"io"
 	"strings"
+
+	"github.com/lemon4ksan/aoni/foundation/bytesconv"
 )
 
 // PlainRenderer converts a [Document] into unadorned plaintext.
@@ -66,7 +68,9 @@ func (r *PlainRenderer) Render(w io.Writer, doc *Document) error {
 			}
 
 			if n.Body != "" {
-				fmt.Fprintf(w, "  %s\n", n.Body)
+				for line := range bytesconv.ScanTokens(n.Body, '\n') {
+					fmt.Fprintf(w, "  %s\n", line)
+				}
 			}
 
 			fmt.Fprintln(w)
@@ -75,8 +79,7 @@ func (r *PlainRenderer) Render(w io.Writer, doc *Document) error {
 			fmt.Fprintf(w, "---\n%s\n---\n\n", n.Code)
 
 		case QuoteNode:
-			lines := strings.Split(n.Text, "\n")
-			for _, line := range lines {
+			for line := range bytesconv.ScanTokens(n.Text, '\n') {
 				fmt.Fprintf(w, "  | %s\n", line)
 			}
 

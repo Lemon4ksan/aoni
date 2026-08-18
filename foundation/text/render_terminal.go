@@ -7,7 +7,8 @@ package text
 import (
 	"fmt"
 	"io"
-	"strings"
+
+	"github.com/lemon4ksan/aoni/foundation/bytesconv"
 )
 
 // TerminalRenderer converts a [Document] into ANSI colorized terminal output.
@@ -108,14 +109,14 @@ func (r *TerminalRenderer) Render(w io.Writer, doc *Document) error {
 		case CodeBlockNode:
 			fmt.Fprintf(w, "  %s\n", r.style(ansiDim, "┌── "+n.Language))
 
-			for _, line := range strings.Split(n.Code, "\n") {
+			for line := range bytesconv.ScanTokens(n.Code, '\n') {
 				fmt.Fprintf(w, "  %s %s\n", r.style(ansiDim, "│"), r.style(ansiCyan, line))
 			}
 
 			fmt.Fprintf(w, "  %s\n\n", r.style(ansiDim, "└──"))
 
 		case QuoteNode:
-			for _, line := range strings.Split(n.Text, "\n") {
+			for line := range bytesconv.ScanTokens(n.Text, '\n') {
 				fmt.Fprintf(w, "  %s %s\n", r.style(ansiDim, "▎"), r.style(ansiDim, line))
 			}
 
@@ -164,7 +165,7 @@ func (r *TerminalRenderer) renderCallout(w io.Writer, n CalloutNode) {
 	fmt.Fprintf(w, "%s %s\n", r.style(ansiBold+color, "▍"), r.style(ansiBold+color, title))
 
 	if n.Body != "" {
-		for _, line := range strings.Split(n.Body, "\n") {
+		for line := range bytesconv.ScanTokens(n.Body, '\n') {
 			fmt.Fprintf(w, "%s   %s\n", r.style(color, "▍"), line)
 		}
 	}

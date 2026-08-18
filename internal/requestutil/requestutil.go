@@ -226,8 +226,8 @@ func SummarizeMultipartBody(body []byte, contentType string) string {
 // HeaderContainsToken reports whether any header value for name matches target token (comma-separated, case-insensitive).
 func HeaderContainsToken(header http.Header, name, target string) bool {
 	for _, s := range header[name] {
-		for token := range strings.SplitSeq(s, ",") {
-			if bytesconv.EqualFoldASCII(strings.TrimSpace(token), target) {
+		for token := range bytesconv.ScanTokens(s, ',') {
+			if bytesconv.EqualFoldASCII(token, target) {
 				return true
 			}
 		}

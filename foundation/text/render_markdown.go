@@ -8,6 +8,8 @@ import (
 	"fmt"
 	"io"
 	"strings"
+
+	"github.com/lemon4ksan/aoni/foundation/bytesconv"
 )
 
 // MarkdownRenderer converts a [Document] into GitHub-compatible CommonMark markdown.
@@ -21,7 +23,7 @@ func NewMarkdownRenderer() *MarkdownRenderer {
 	return &MarkdownRenderer{CalloutStyle: "github"}
 }
 
-// Render writes the Markdown formatted document to w.
+// Render writes CommonMark markdown formatting to w.
 func (r *MarkdownRenderer) Render(w io.Writer, doc *Document) error {
 	if doc == nil || len(doc.Nodes) == 0 {
 		return nil
@@ -75,8 +77,7 @@ func (r *MarkdownRenderer) Render(w io.Writer, doc *Document) error {
 			fmt.Fprintf(w, "```%s\n%s\n```\n\n", n.Language, n.Code)
 
 		case QuoteNode:
-			lines := strings.Split(n.Text, "\n")
-			for _, line := range lines {
+			for line := range bytesconv.ScanTokens(n.Text, '\n') {
 				fmt.Fprintf(w, "> %s\n", line)
 			}
 
@@ -127,7 +128,7 @@ func (r *MarkdownRenderer) renderCallout(w io.Writer, n CalloutNode) {
 		}
 
 		if n.Body != "" {
-			for _, line := range strings.Split(n.Body, "\n") {
+			for line := range bytesconv.ScanTokens(n.Body, '\n') {
 				fmt.Fprintf(w, "> %s\n", line)
 			}
 		}
