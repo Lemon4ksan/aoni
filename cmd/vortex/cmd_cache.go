@@ -295,15 +295,8 @@ func (c *CmdCache) runShow(_ context.Context, args []string, stdout, stderr io.W
 			fmt.Fprintf(stdout, "  Req MIME:     %s\n", e.Request.PostData.MimeType)
 		}
 
-		if len(e.Request.Headers) > 0 {
-			fmt.Fprintf(stdout, "\n📋 Request Headers:\n")
-			for _, h := range e.Request.Headers {
-				fmt.Fprintf(stdout, "  %s: %s\n", h.Name, h.Value)
-			}
-		}
-
 		if e.Response.Content.MimeType != "" {
-			fmt.Fprintf(stdout, "\n  Resp MIME:    %s\n", e.Response.Content.MimeType)
+			fmt.Fprintf(stdout, "  Resp MIME:    %s\n", e.Response.Content.MimeType)
 		}
 
 		// Request Body

@@ -73,7 +73,7 @@ var defaultHelloQUICSpec = utls.ClientHelloSpec{
 }
 
 // SecCHUA is the Chrome user agent string.
-const SecCHUA = `"Not=A?Brand";v="99", "Google Chrome";v="151", "Chromium";v="151"`
+const SecCHUA = `"Google Chrome";v="151", "Chromium";v="151", "Not_A Brand";v="24"`
 
 // Various user agent strings for different platforms.
 const (
