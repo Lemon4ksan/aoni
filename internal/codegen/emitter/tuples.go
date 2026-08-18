@@ -15,6 +15,32 @@ import (
 func emitTuple(buf *bytes.Buffer, tracker *ImportTracker, t *ir.TupleIR) {
 	tracker.Add("encoding/json")
 
+	maxIdx := -1
+	for _, f := range t.Fields {
+		if !f.IsNested && f.Index > maxIdx {
+			maxIdx = f.Index
+		}
+	}
+
+	fmt.Fprintf(
+		buf,
+		"// MarshalJSON encodes %s as a heterogeneous JSON array tuple.\n",
+		t.Name,
+	)
+	fmt.Fprintf(buf, "func (t %s) MarshalJSON() ([]byte, error) {\n", t.Name)
+	if maxIdx < 0 {
+		buf.WriteString("\treturn []byte(\"[]\"), nil\n")
+	} else {
+		fmt.Fprintf(buf, "\tarr := make([]any, %d)\n", maxIdx+1)
+		for _, f := range t.Fields {
+			if !f.IsNested {
+				fmt.Fprintf(buf, "\tarr[%d] = t.%s\n", f.Index, f.GoName)
+			}
+		}
+		buf.WriteString("\treturn json.Marshal(arr)\n")
+	}
+	buf.WriteString("}\n\n")
+
 	fmt.Fprintf(
 		buf,
 		"// UnmarshalJSON decodes a heterogeneous JSON array tuple or standard JSON object into %s.\n",
