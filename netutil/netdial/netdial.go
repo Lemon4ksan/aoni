@@ -17,12 +17,12 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/lemon4ksan/foundation/net/ip"
 	"golang.org/x/net/proxy"
 
 	"github.com/lemon4ksan/aoni/fingerprint/p0f"
 	"github.com/lemon4ksan/aoni/internal/io"
 	"github.com/lemon4ksan/aoni/netutil/fragment"
-	"github.com/lemon4ksan/aoni/netutil/ip"
 )
 
 var (

@@ -333,8 +333,9 @@ High-throughput scraping against aggressive rate limiters exhausts IPv4 pools ra
 import (
 	"log"
 
+	"github.com/lemon4ksan/foundation/net/ip"
+
 	"github.com/lemon4ksan/aoni"
-	"github.com/lemon4ksan/aoni/netutil/ip"
 	"github.com/lemon4ksan/aoni/option"
 	"github.com/lemon4ksan/aoni/request"
 )
