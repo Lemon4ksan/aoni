@@ -39,7 +39,6 @@ package ` + pkgName + `
 
 import (
 	"context"
-	"fmt"
 
 	"github.com/lemon4ksan/aoni/oracle"
 )
