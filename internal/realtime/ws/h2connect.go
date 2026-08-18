@@ -10,7 +10,7 @@ import (
 	"net/http"
 	"strings"
 
-	"golang.org/x/net/http2/hpack"
+	"github.com/lemon4ksan/foundation/net/hpack"
 )
 
 // EncodeConnectHeaders encodes HTTP/2 Extended CONNECT pseudo-headers and request headers into HPACK block bytes.

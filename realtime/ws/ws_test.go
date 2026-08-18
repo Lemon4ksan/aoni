@@ -23,7 +23,8 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"golang.org/x/net/http2"
-	"golang.org/x/net/http2/hpack"
+
+	"github.com/lemon4ksan/foundation/net/hpack"
 
 	"github.com/lemon4ksan/aoni"
 	"github.com/lemon4ksan/aoni/mod"
