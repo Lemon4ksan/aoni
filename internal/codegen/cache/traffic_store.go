@@ -182,12 +182,23 @@ func GetTraffic(rootDir, idOrHash string) ([]byte, *TrafficEntry, error) {
 	}
 
 	var matchedEntry *TrafficEntry
+	// 1. Exact ID or hash match first
 	for k, e := range idx.Entries {
-		if k == idOrHash || strings.HasPrefix(e.Hash, idOrHash) ||
-			strings.EqualFold(e.ID, idOrHash) ||
-			strings.Contains(strings.ToLower(e.ID), strings.ToLower(idOrHash)) {
-			matchedEntry = &e
+		if k == idOrHash || strings.EqualFold(e.ID, idOrHash) || strings.HasPrefix(e.Hash, idOrHash) {
+			entryCopy := e
+			matchedEntry = &entryCopy
 			break
+		}
+	}
+
+	// 2. Substring match fallback
+	if matchedEntry == nil {
+		for _, e := range idx.Entries {
+			if strings.Contains(strings.ToLower(e.ID), strings.ToLower(idOrHash)) {
+				entryCopy := e
+				matchedEntry = &entryCopy
+				break
+			}
 		}
 	}
 

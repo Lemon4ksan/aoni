@@ -220,7 +220,7 @@ func (r *RuleHTTPVerbMismatch) Run(pass *Pass) []Diagnostic {
 						"Method %q has read-only naming prefix but is annotated with @post without body",
 						name,
 					),
-					Suggestion: "If this is intentional (e.g. Steam WebAPI requirement), suppress with `//vortex:ignore http-verb-mismatch`",
+					Suggestion: "If this is intentional, suppress with `//vortex:ignore http-verb-mismatch`",
 				})
 			}
 		}
