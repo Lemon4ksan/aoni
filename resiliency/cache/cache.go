@@ -13,6 +13,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/lemon4ksan/foundation/generic"
 	"github.com/lemon4ksan/foundation/silicon/clock"
 )
 
@@ -59,6 +60,16 @@ func (s *InMemoryStore) Get(_ context.Context, key any) ([]byte, error) {
 	}
 
 	return slices.Clone(entry.value), nil
+}
+
+// GetOptional retrieves cached payload bytes for key as a [generic.Optional].
+func (s *InMemoryStore) GetOptional(ctx context.Context, key any) generic.Optional[[]byte] {
+	val, err := s.Get(ctx, key)
+	if err != nil {
+		return generic.None[[]byte]()
+	}
+
+	return generic.Some(val)
 }
 
 // Set stores value in memory with the specified ttl duration.

@@ -391,3 +391,34 @@ func TestLoadBalancer_SRVError(t *testing.T) {
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "srv loadbalancer")
 }
+
+func TestLoadBalancer_SelectHealthy_And_DoResult(t *testing.T) {
+	t.Parallel()
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	t.Cleanup(server.Close)
+
+	lb, err := New(Config{}, server.URL)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = lb.Close() })
+
+	opt := lb.SelectHealthy()
+	require.True(t, opt.IsPresent())
+	be, ok := opt.Value()
+	require.True(t, ok)
+	assert.Equal(t, server.URL, be.URL)
+
+	req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, "http://test", nil)
+	require.NoError(t, err)
+
+	res := lb.DoResult(req)
+	require.True(t, res.IsSuccess())
+	resp, err := res.Unwrap()
+	require.NoError(t, err)
+
+	defer resp.Body.Close()
+
+	assert.Equal(t, http.StatusOK, resp.StatusCode)
+}

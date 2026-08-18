@@ -33,10 +33,16 @@ func TestInMemoryStore_SetGetEviction(t *testing.T) {
 	err = store.Set(ctx, key, val, 80*time.Millisecond)
 	require.NoError(t, err)
 
-	// 3. Hit
+	// 3. Hit via Get and GetOptional
 	got, err := store.Get(ctx, key)
 	require.NoError(t, err)
 	assert.Equal(t, string(val), string(got))
+
+	optVal := store.GetOptional(ctx, key)
+	assert.True(t, optVal.IsPresent())
+	unwrapped, ok := optVal.Value()
+	assert.True(t, ok)
+	assert.Equal(t, string(val), string(unwrapped))
 
 	// 4. Expiration
 	time.Sleep(120 * time.Millisecond)
@@ -44,6 +50,7 @@ func TestInMemoryStore_SetGetEviction(t *testing.T) {
 	// 5. Miss after expiration
 	_, err = store.Get(ctx, key)
 	assert.ErrorIs(t, err, cache.ErrCacheMiss)
+	assert.False(t, store.GetOptional(ctx, key).IsPresent())
 }
 
 func TestInMemoryStore_Overwrite(t *testing.T) {

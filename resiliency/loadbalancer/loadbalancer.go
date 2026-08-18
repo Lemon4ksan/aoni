@@ -449,6 +449,32 @@ func (b *Balancer) Stats() Stats {
 	return stats
 }
 
+// SelectHealthy selects a healthy backend according to the configured strategy, wrapped in a [generic.Optional].
+func (b *Balancer) SelectHealthy() generic.Optional[*Backend] {
+	b.mu.RLock()
+	defer b.mu.RUnlock()
+
+	for _, be := range b.backends {
+		if be.tracker.IsAvailable() {
+			return generic.Some(be)
+		}
+	}
+
+	return generic.None[*Backend]()
+}
+
+// DoResult executes req against a healthy backend and yields a Swift-inspired [generic.Result].
+//
+// Caller is responsible for closing the returned response body.
+func (b *Balancer) DoResult(req *http.Request) generic.Result[*http.Response] {
+	resp, err := b.Do(req) //nolint:bodyclose
+	if err != nil {
+		return generic.Failure[*http.Response](err)
+	}
+
+	return generic.Success(resp)
+}
+
 // SetWeight updates the selection weight of a target backend URL.
 func (b *Balancer) SetWeight(backendURL string, weight int) bool {
 	b.mu.Lock()
