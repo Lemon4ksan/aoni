@@ -15,6 +15,8 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/lemon4ksan/aoni"
 )
 
 type mockDoer struct {
@@ -708,4 +710,45 @@ func TestDomainProxyRouter(t *testing.T) {
 
 	_, found3 := router.RouteForDomain("unknown.domain.com")
 	assert.False(t, found3)
+
+	// Monadic Optional tests
+	optMatched := router.RouteForDomainOptional("mail.google.com")
+	assert.True(t, optMatched.IsPresent())
+	u, ok := optMatched.Value()
+	assert.True(t, ok)
+	assert.Equal(t, p1, u)
+
+	optUnknown := router.RouteForDomainOptional("unknown.com")
+	assert.False(t, optUnknown.IsPresent())
+}
+
+func TestRotator_FindClient(t *testing.T) {
+	t.Parallel()
+
+	c1 := &mockDoer{id: 1}
+	c2 := &mockDoer{id: 2}
+
+	rotator, err := NewRotator(RotatorConfig{}, WithClient{Client: c1}, WithClient{Client: c2})
+	require.NoError(t, err)
+
+	clientOpt := rotator.FindClient(func(doer aoni.HTTPDoer) bool {
+		if md, ok := doer.(*mockDoer); ok {
+			return md.id == 1
+		}
+
+		return false
+	})
+	assert.True(t, clientOpt.IsPresent())
+	foundDoer, ok := clientOpt.Value()
+	assert.True(t, ok)
+	assert.Equal(t, c1, foundDoer)
+
+	missingOpt := rotator.FindClient(func(doer aoni.HTTPDoer) bool {
+		if md, ok := doer.(*mockDoer); ok {
+			return md.id == 999
+		}
+
+		return false
+	})
+	assert.False(t, missingOpt.IsPresent())
 }

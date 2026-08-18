@@ -711,3 +711,28 @@ func (r *DomainProxyRouter) RouteForDomain(targetDomain string) (*url.URL, bool)
 
 	return r.rt.Match(targetDomain)
 }
+
+// RouteForDomainOptional matches targetDomain and returns a Swift-inspired [generic.Optional].
+func (r *DomainProxyRouter) RouteForDomainOptional(targetDomain string) generic.Optional[*url.URL] {
+	u, ok := r.RouteForDomain(targetDomain)
+	if !ok {
+		return generic.None[*url.URL]()
+	}
+
+	return generic.Some(u)
+}
+
+// FindClient searches for a proxy client matching the predicate
+// and returns a Swift-inspired [generic.Optional].
+func (r *Rotator) FindClient(predicate func(aoni.HTTPDoer) bool) generic.Optional[aoni.HTTPDoer] {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	for _, tc := range r.clients {
+		if predicate(tc.client) {
+			return generic.Some(tc.client)
+		}
+	}
+
+	return generic.None[aoni.HTTPDoer]()
+}

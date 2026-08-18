@@ -303,10 +303,7 @@ func (pj *PersistentJar) Cookies(u *url.URL) []*http.Cookie {
 
 	var list []Cookie
 	if hasExpired && pj.backend != nil {
-		list = make([]Cookie, 0, len(pj.cookiesMap))
-		for _, c := range pj.cookiesMap {
-			list = append(list, c)
-		}
+		list = generic.Values(pj.cookiesMap)
 	}
 
 	pj.mu.Unlock()
@@ -333,10 +330,7 @@ func (pj *PersistentJar) purgeExpired() {
 
 	var list []Cookie
 	if changed && pj.backend != nil {
-		list = make([]Cookie, 0, len(pj.cookiesMap))
-		for _, c := range pj.cookiesMap {
-			list = append(list, c)
-		}
+		list = generic.Values(pj.cookiesMap)
 	}
 
 	pj.mu.Unlock()
@@ -395,10 +389,7 @@ func (pj *PersistentJar) SetCookies(u *url.URL, cookies []*http.Cookie) {
 
 	var list []Cookie
 	if changed {
-		list = make([]Cookie, 0, len(pj.cookiesMap))
-		for _, c := range pj.cookiesMap {
-			list = append(list, c)
-		}
+		list = generic.Values(pj.cookiesMap)
 	}
 
 	pj.mu.Unlock()
