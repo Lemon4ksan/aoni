@@ -19,6 +19,7 @@ import (
 	asyncctx "github.com/lemon4ksan/foundation/async/context"
 	"github.com/lemon4ksan/foundation/async/log"
 	"github.com/lemon4ksan/foundation/generic"
+	"github.com/lemon4ksan/foundation/net/url"
 	"github.com/lemon4ksan/foundation/silicon/bytesconv"
 	"github.com/quic-go/quic-go"
 	"github.com/quic-go/quic-go/http3"
@@ -30,7 +31,6 @@ import (
 	"github.com/lemon4ksan/aoni/fingerprint/h2"
 	"github.com/lemon4ksan/aoni/internal/experimental"
 	"github.com/lemon4ksan/aoni/internal/pipeline"
-	"github.com/lemon4ksan/aoni/internal/urlutil"
 	"github.com/lemon4ksan/aoni/netutil"
 	"github.com/lemon4ksan/aoni/netutil/power"
 )

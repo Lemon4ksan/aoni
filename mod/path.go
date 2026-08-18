@@ -8,9 +8,10 @@ import (
 	"fmt"
 	"net/url"
 
+	"github.com/lemon4ksan/foundation/net/url"
+
 	"github.com/lemon4ksan/aoni"
 	"github.com/lemon4ksan/aoni/codec/values"
-	"github.com/lemon4ksan/aoni/internal/urlutil"
 )
 
 // WithVar constructs an [aoni.RequestModifier] that interpolates a single URI template placeholder

@@ -12,12 +12,12 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/lemon4ksan/foundation/net/url"
 	"github.com/lemon4ksan/foundation/silicon/bytesconv"
 	"google.golang.org/protobuf/encoding/protojson"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/lemon4ksan/aoni/internal/mapper"
-	"github.com/lemon4ksan/aoni/internal/urlutil"
 )
 
 // getStructSchema resolves cached struct field metadata schema for type t.

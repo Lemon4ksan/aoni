@@ -22,6 +22,7 @@ import (
 
 	"github.com/lemon4ksan/foundation/silicon/simd"
 	"github.com/valyala/fasthttp"
+	"github.com/lemon4ksan/foundation/net/url"
 	"github.com/valyala/fasthttp/fasthttputil"
 	"golang.org/x/sys/cpu"
 
@@ -30,7 +31,6 @@ import (
 	"github.com/lemon4ksan/aoni/fingerprint/profiles/chrome"
 	"github.com/lemon4ksan/aoni/internal/experimental"
 	"github.com/lemon4ksan/aoni/internal/sysnet"
-	"github.com/lemon4ksan/aoni/internal/urlutil"
 )
 
 // BenchmarkReport represents structured benchmark results for CI/CD automation.

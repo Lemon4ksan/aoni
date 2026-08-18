@@ -12,12 +12,12 @@ import (
 	"strings"
 	"time"
 
+	"github.com/lemon4ksan/foundation/net/url"
 	"github.com/lemon4ksan/foundation/silicon/bytesconv"
 	"github.com/lemon4ksan/foundation/silicon/pool"
 	"github.com/valyala/fasthttp"
 
 	"github.com/lemon4ksan/aoni"
-	"github.com/lemon4ksan/aoni/internal/urlutil"
 )
 
 // dispatchSingleRequest routes an HTTP request through Happy Eyeballs v3 (Protocol Racing),

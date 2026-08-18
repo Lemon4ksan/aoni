@@ -13,13 +13,13 @@ import (
 	"net/http"
 	"net/url"
 
+	"github.com/lemon4ksan/foundation/net/url"
 	"github.com/lemon4ksan/foundation/silicon/bytesconv"
 	"github.com/valyala/fasthttp"
 
 	"github.com/lemon4ksan/aoni"
 	"github.com/lemon4ksan/aoni/cookie"
 	impl "github.com/lemon4ksan/aoni/internal/cookie"
-	"github.com/lemon4ksan/aoni/internal/urlutil"
 	"github.com/lemon4ksan/aoni/netutil"
 )
 
