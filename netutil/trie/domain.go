@@ -8,6 +8,8 @@ package trie
 import (
 	"strings"
 	"sync"
+
+	"github.com/lemon4ksan/aoni/foundation/bytesconv"
 )
 
 // node represents an internal radix tree node keyed by domain label.
@@ -137,7 +139,12 @@ func matchNode[V any](curr *node[V], labels []string, idx int) (V, bool) {
 
 // splitDomainLabels splits a domain string into individual dot-separated label strings.
 func splitDomainLabels(domain string) []string {
-	return strings.Split(domain, ".")
+	var labels []string
+	for tok := range bytesconv.ScanTokens(domain, '.') {
+		labels = append(labels, tok)
+	}
+
+	return labels
 }
 
 // reverseLabels reverses a slice of domain label strings in-place.
