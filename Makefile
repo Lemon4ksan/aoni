@@ -1,7 +1,9 @@
 # Discover library packages, excluding examples, scripts, cmd, and vendor
 PKG       := $(shell go list ./... | grep -v /examples | grep -v /scripts | grep -v /cmd/ | grep -v /vendor/)
 COVER_PKG := $(shell go list ./... | grep -v /examples | grep -v /scripts | grep -v /vendor/)
-COVER_OUT ?= coverage.out
+BIN_DIR   ?= bin
+TMP_DIR   ?= .tmp
+COVER_OUT ?= $(TMP_DIR)/coverage.out
 
 # Colors for console output
 CYAN  := \033[0;36m
@@ -34,14 +36,15 @@ fuzz: ## Run continuous automated fuzz testing across all wire parsers
 	go test -fuzz=^FuzzHPACKDecode$$ -fuzztime=2s ./internal/fast/h2engine
 	go test -fuzz=^FuzzQPACKDecode$$ -fuzztime=2s ./internal/fast/h3engine
 
-
 cover: ## Calculate and print exact core library coverage report
 	@printf "$(CYAN)Generating exact coverage report...$(RESET)\n"
+	@mkdir -p $(TMP_DIR)
 	go test -coverpkg=$(COVER_PKG) -coverprofile=$(COVER_OUT) ./...
 	go run ./cmd/vortex cover -file=$(COVER_OUT)
 
 cover-clean: ## Generate clean coverage report and run deduplicated coverage analysis tool
 	@printf "$(CYAN)Generating clean coverage report...$(RESET)\n"
+	@mkdir -p $(TMP_DIR)
 	go test -coverpkg=$(COVER_PKG) -coverprofile=$(COVER_OUT) ./...
 	go run ./cmd/vortex cover -file=$(COVER_OUT)
 
@@ -61,8 +64,8 @@ format: ## Format code and auto-fix linter suggestions
 
 clean: ## Delete temporary files, binaries, and coverage profiles
 	@printf "$(CYAN)Cleaning up temporary artifacts...$(RESET)\n"
-	rm -rf bin/
-	rm -f $(COVER_OUT)
+	rm -rf $(BIN_DIR)/ $(TMP_DIR)/
+	rm -f $(COVER_OUT) coverage.out profile.cov *.out *.test *.exe
 
 check-tls-spec: ## Compare project TLS specs against utls.HelloChrome_Auto / HelloFirefox_Auto
 	@printf "$(CYAN)Comparing TLS ClientHello specs...$(RESET)\n"

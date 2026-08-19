@@ -13,6 +13,7 @@ import (
 
 	"github.com/lemon4ksan/aoni"
 	"github.com/lemon4ksan/aoni/mod"
+	"github.com/lemon4ksan/aoni/netutil"
 	"github.com/lemon4ksan/aoni/netutil/fragment"
 	"github.com/lemon4ksan/aoni/netutil/ipc"
 	"github.com/lemon4ksan/aoni/netutil/netdial"
@@ -122,8 +123,8 @@ func WithAdaptiveProxyTimeout(cfg ...proxy.AdaptiveTimeoutConfig) aoni.ClientOpt
 	}
 }
 
-// WithDNSResolver returns an [aoni.ClientOption] replacing the default system DNS resolver with an [aoni.DNSResolver].
-func WithDNSResolver(resolver aoni.DNSResolver) aoni.ClientOption {
+// WithDNSResolver returns an [aoni.ClientOption] replacing the default system DNS resolver with a [netutil.DNSResolver].
+func WithDNSResolver(resolver netutil.DNSResolver) aoni.ClientOption {
 	return func(cfg *aoni.Config) {
 		cfg.Network.DNSResolver = resolver
 	}
@@ -132,7 +133,7 @@ func WithDNSResolver(resolver aoni.DNSResolver) aoni.ClientOption {
 // WithHostRewrite returns an [aoni.ClientOption] configuring DNS hostname-to-IP remapping rules.
 func WithHostRewrite(rules map[string]string) aoni.ClientOption {
 	return func(cfg *aoni.Config) {
-		cfg.Network.HostRewrite = &aoni.HostRewriteConfig{Rules: rules}
+		cfg.Network.HostRewrite = &netutil.HostRewriteConfig{Rules: rules}
 	}
 }
 
@@ -170,7 +171,7 @@ func WithFragmentation(frag fragment.Config) aoni.ClientOption {
 }
 
 // WithSocketController returns an [aoni.ClientOption] registering an [aoni.SocketController] socket control hook.
-func WithSocketController(controller aoni.SocketController) aoni.ClientOption {
+func WithSocketController(controller netutil.SocketController) aoni.ClientOption {
 	return func(cfg *aoni.Config) {
 		cfg.Network.SocketController = controller
 	}
@@ -231,7 +232,7 @@ func WithNamedPipe(pipePath string) aoni.ClientOption {
 
 // WithCoreAffinity returns an [aoni.ClientOption] locking calling threads to target physical CPU cores.
 func WithCoreAffinity(cores ...int) aoni.ClientOption {
-	return func(_ *aoni.Config) {
-		aoni.ApplyCPUAffinity(cores)
+	return func(cfg *aoni.Config) {
+		cfg.Network.CPUAffinityCores = cores
 	}
 }

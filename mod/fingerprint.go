@@ -19,8 +19,8 @@ func WithP0fSignature(sig *p0f.Signature) aoni.RequestModifier {
 	})
 }
 
-// WithSessionCache constructs an [aoni.RequestModifier] assigning an isolated proxy-aware TLS [aoni.SessionCache].
-func WithSessionCache(cache aoni.SessionCache) aoni.RequestModifier {
+// WithSessionCache constructs an [aoni.RequestModifier] assigning an isolated proxy-aware TLS [fingerprint.SessionCache].
+func WithSessionCache(cache fingerprint.SessionCache) aoni.RequestModifier {
 	return Custom(func(req aoni.Request) {
 		aoni.GetOrInitRequestConfig(req).SessionCache = cache
 	})
@@ -49,7 +49,7 @@ func WithPadding(cfg fingerprint.PaddingConfig) aoni.RequestModifier {
 }
 
 // WithClientHelloSpecProvider constructs an [aoni.RequestModifier] assigning a dynamic uTLS spec provider.
-func WithClientHelloSpecProvider(provider aoni.ClientHelloSpecProvider) aoni.RequestModifier {
+func WithClientHelloSpecProvider(provider fingerprint.ClientHelloSpecProvider) aoni.RequestModifier {
 	return Custom(func(req aoni.Request) {
 		aoni.GetOrInitRequestConfig(req).ClientHelloSpecProvider = provider
 	})

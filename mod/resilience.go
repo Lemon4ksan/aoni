@@ -9,10 +9,11 @@ import (
 	"time"
 
 	"github.com/lemon4ksan/aoni"
+	"github.com/lemon4ksan/aoni/internal/core"
 )
 
 // WithRetryPolicy constructs an [aoni.RequestModifier] assigning custom retry parameters to the request.
-func WithRetryPolicy(override aoni.RetryOverride) aoni.RequestModifier {
+func WithRetryPolicy(override core.RetryOverride) aoni.RequestModifier {
 	policy := override
 	if policy.MaxAttempts < 1 {
 		policy.MaxAttempts = 1
@@ -31,7 +32,7 @@ func WithAllowNonReadOnlyHedging(allow bool) aoni.RequestModifier {
 }
 
 // WithFallback constructs an [aoni.RequestModifier] registering an alternative response fallback generator.
-func WithFallback(f aoni.FallbackFunc) aoni.RequestModifier {
+func WithFallback(f core.FallbackFunc) aoni.RequestModifier {
 	return Custom(func(req aoni.Request) {
 		aoni.GetOrInitRequestConfig(req).Fallback = f
 	})

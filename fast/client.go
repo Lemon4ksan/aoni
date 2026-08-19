@@ -254,7 +254,7 @@ type fastNativeDoer struct {
 	client *Client
 }
 
-func (f *fastNativeDoer) Do(req pipeline.Request) (pipeline.Response, error) {
+func (f *fastNativeDoer) Do(req aoni.Request) (aoni.Response, error) {
 	fastReq, ok := req.EngineRequest().(*fasthttp.Request)
 	if !ok || fastReq == nil {
 		if stdReqObj := req.HTTPRequest(); stdReqObj != nil {

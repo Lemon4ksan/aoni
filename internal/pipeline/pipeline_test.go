@@ -26,6 +26,7 @@ import (
 	"github.com/lemon4ksan/aoni/cookie"
 	"github.com/lemon4ksan/aoni/fingerprint"
 	"github.com/lemon4ksan/aoni/fingerprint/ja4"
+	"github.com/lemon4ksan/aoni/internal/core"
 	"github.com/lemon4ksan/aoni/internal/io"
 	"github.com/lemon4ksan/aoni/telemetry"
 )
@@ -127,7 +128,7 @@ func (r *mockRequest) HTTPRequest() *http.Request {
 }
 func (r *mockRequest) EngineRequest() any { return nil }
 
-var _ Request = (*mockRequest)(nil)
+var _ core.Request = (*mockRequest)(nil)
 
 type mockCacheStore struct {
 	data map[string][]byte
@@ -701,8 +702,8 @@ func TestRequestConfig_Lifecycle(t *testing.T) {
 	cfg4 := GetOrInitRequestConfig("invalid_type")
 	require.NotNil(t, cfg4)
 
-	cfg.Decoders = map[string]ResponseDecoder{
-		"application/json": ResponseDecoder(nil),
+	cfg.Decoders = map[string]core.ResponseDecoder{
+		"application/json": core.ResponseDecoder(nil),
 	}
 	assert.Nil(t, cfg.LookupDecoder("unknown/type"))
 

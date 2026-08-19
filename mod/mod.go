@@ -9,6 +9,7 @@ import (
 	"errors"
 
 	"github.com/lemon4ksan/aoni"
+	"github.com/lemon4ksan/aoni/internal/core"
 )
 
 // ErrInvalidPairCount is returned when WithVars receives an odd number of key-value arguments.
@@ -24,7 +25,7 @@ func Apply(req aoni.Request, mods ...aoni.RequestModifier) {
 // WithAutoDecode constructs an [aoni.RequestModifier] enabling content-type header detection for response parsing.
 func WithAutoDecode() aoni.RequestModifier {
 	return aoni.RequestModifier{
-		Kind: aoni.ModCustom,
+		Kind: core.ModCustom,
 		Fn: func(req aoni.Request) {
 			aoni.GetOrInitRequestConfig(req).AutoDecode = true
 		},
@@ -34,7 +35,7 @@ func WithAutoDecode() aoni.RequestModifier {
 // Custom constructs a custom [aoni.RequestModifier] wrapping an arbitrary closure function.
 func Custom(fn func(aoni.Request)) aoni.RequestModifier {
 	return aoni.RequestModifier{
-		Kind: aoni.ModCustom,
+		Kind: core.ModCustom,
 		Fn:   fn,
 	}
 }

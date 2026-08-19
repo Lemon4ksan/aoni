@@ -1,3 +1,12 @@
+# Build & Test Artifacts
+bin/
+.tmp/
+*.out
+coverage.*
+*.coverprofile
+profile.cov
+*.pprof
+
 # Binaries for programs and plugins
 *.exe
 *.exe~

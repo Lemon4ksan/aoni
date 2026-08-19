@@ -20,6 +20,7 @@ import (
 
 	"github.com/lemon4ksan/aoni"
 	"github.com/lemon4ksan/aoni/codec/decode"
+	"github.com/lemon4ksan/aoni/internal/core"
 	"github.com/lemon4ksan/aoni/internal/requestutil"
 	"github.com/lemon4ksan/aoni/netutil/proxy"
 )
@@ -64,14 +65,14 @@ type RetryOptions struct {
 }
 
 // RetryOnErr returns a [aoni.RetryCondition] that triggers a retry on any non-nil error.
-func RetryOnErr() aoni.RetryCondition {
+func RetryOnErr() core.RetryCondition {
 	return func(resp aoni.Response, err error) bool {
 		return err != nil
 	}
 }
 
 // RetryOnTransientErrors returns a [aoni.RetryCondition] triggering retries on network timeouts or 5xx server errors.
-func RetryOnTransientErrors() aoni.RetryCondition {
+func RetryOnTransientErrors() core.RetryCondition {
 	return func(resp aoni.Response, err error) bool {
 		if err != nil {
 			var netErr net.Error
@@ -100,14 +101,14 @@ func RetryOnTransientErrors() aoni.RetryCondition {
 }
 
 // RetryOnRateLimit returns a [aoni.RetryCondition] triggering retries on HTTP 429 Too Many Requests.
-func RetryOnRateLimit() aoni.RetryCondition {
+func RetryOnRateLimit() core.RetryCondition {
 	return func(resp aoni.Response, err error) bool {
 		return resp != nil && resp.StatusCode() == http.StatusTooManyRequests
 	}
 }
 
 // RetryOnGatewayErrors returns a [aoni.RetryCondition] triggering retries on HTTP 502, 503, and 504.
-func RetryOnGatewayErrors() aoni.RetryCondition {
+func RetryOnGatewayErrors() core.RetryCondition {
 	return func(resp aoni.Response, err error) bool {
 		if resp == nil {
 			return false
@@ -121,7 +122,7 @@ func RetryOnGatewayErrors() aoni.RetryCondition {
 }
 
 // RetryOnGRPCStatus returns a [aoni.RetryCondition] triggering retries when gRPC trailer status matches codes.
-func RetryOnGRPCStatus(statusCodes ...string) aoni.RetryCondition {
+func RetryOnGRPCStatus(statusCodes ...string) core.RetryCondition {
 	return func(resp aoni.Response, err error) bool {
 		var (
 			codeStr string
@@ -149,7 +150,7 @@ func RetryOnGRPCStatus(statusCodes ...string) aoni.RetryCondition {
 }
 
 // Retry constructs an [aoni.Middleware] executing automated retries with exponential backoff.
-func Retry(opts RetryOptions, condition aoni.RetryCondition) aoni.Middleware {
+func Retry(opts RetryOptions, condition core.RetryCondition) aoni.Middleware {
 	if opts.MaxAttempts == 0 && opts.MaxRetries > 0 {
 		opts.MaxAttempts = opts.MaxRetries + 1
 	}
@@ -314,8 +315,8 @@ func waitAsync(ctx context.Context, delay time.Duration) error {
 func resolveRetryOverrides(
 	req aoni.Request,
 	baseOpts RetryOptions,
-	baseCond aoni.RetryCondition,
-) (RetryOptions, aoni.RetryCondition) {
+	baseCond core.RetryCondition,
+) (RetryOptions, core.RetryCondition) {
 	cfg := aoni.GetRequestConfig(req.Context())
 	if cfg == nil || cfg.RetryPolicy == nil {
 		return baseOpts, baseCond

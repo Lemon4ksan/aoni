@@ -7,26 +7,25 @@ package inspector
 import (
 	"net/http"
 
-	"github.com/lemon4ksan/aoni"
 	"github.com/lemon4ksan/aoni/telemetry"
 )
 
-// MultiInspector wraps multiple [aoni.TrafficInspector] instances into a multi-broadcaster.
+// MultiInspector wraps multiple [telemetry.TrafficInspector] instances into a multi-broadcaster.
 // Every call to Capture is fan-out dispatched to all registered inspectors simultaneously.
 type MultiInspector struct {
-	inspectors []aoni.TrafficInspector
+	inspectors []telemetry.TrafficInspector
 }
 
 // NewMultiInspector constructs a [MultiInspector] broadcasting to inspectors.
-func NewMultiInspector(inspectors ...aoni.TrafficInspector) *MultiInspector {
+func NewMultiInspector(inspectors ...telemetry.TrafficInspector) *MultiInspector {
 	m := &MultiInspector{}
 	m.Add(inspectors...)
 
 	return m
 }
 
-// Add registers additional [aoni.TrafficInspector] targets into the broadcaster.
-func (m *MultiInspector) Add(inspectors ...aoni.TrafficInspector) *MultiInspector {
+// Add registers additional [telemetry.TrafficInspector] targets into the broadcaster.
+func (m *MultiInspector) Add(inspectors ...telemetry.TrafficInspector) *MultiInspector {
 	for _, insp := range inspectors {
 		if insp != nil {
 			m.inspectors = append(m.inspectors, insp)

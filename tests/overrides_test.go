@@ -23,10 +23,12 @@ import (
 
 	"github.com/lemon4ksan/aoni"
 	"github.com/lemon4ksan/aoni/codec/decode"
+	"github.com/lemon4ksan/aoni/internal/core"
 	"github.com/lemon4ksan/aoni/middleware"
 	"github.com/lemon4ksan/aoni/mod"
 	"github.com/lemon4ksan/aoni/option"
 	"github.com/lemon4ksan/aoni/request"
+	"github.com/lemon4ksan/aoni/resiliency"
 )
 
 func TestGetProxyOverride(t *testing.T) {
@@ -440,21 +442,21 @@ func TestRetryPolicyAndConditions(t *testing.T) {
 
 		tests := []struct {
 			name        string
-			override    aoni.RetryOverride
+			override    core.RetryOverride
 			applyMod    bool
 			expectSet   bool
 			expectedMax int
 		}{
 			{
 				name:        "valid_retry_policy",
-				override:    aoni.RetryOverride{MaxAttempts: 5, Backoff: 200 * time.Millisecond},
+				override:    core.RetryOverride{MaxAttempts: 5, Backoff: 200 * time.Millisecond},
 				applyMod:    true,
 				expectSet:   true,
 				expectedMax: 5,
 			},
 			{
 				name:        "clamped_zero_max_attempts",
-				override:    aoni.RetryOverride{MaxAttempts: 0},
+				override:    core.RetryOverride{MaxAttempts: 0},
 				applyMod:    true,
 				expectSet:   true,
 				expectedMax: 1,
@@ -496,7 +498,7 @@ func TestRetryPolicyAndConditions(t *testing.T) {
 
 		tests := []struct {
 			name        string
-			cond        aoni.RetryCondition
+			cond        core.RetryCondition
 			resp        aoni.Response
 			err         error
 			expectRetry bool
@@ -560,11 +562,11 @@ func TestRetryPolicyAndConditions(t *testing.T) {
 		condTrue := func(_ aoni.Response, _ error) bool { return true }
 		condFalse := func(_ aoni.Response, _ error) bool { return false }
 
-		assert.True(t, aoni.Or(condTrue, condFalse)(nil, nil))
-		assert.False(t, aoni.Or(condFalse, condFalse)(nil, nil))
+		assert.True(t, resiliency.Or(condTrue, condFalse)(nil, nil))
+		assert.False(t, resiliency.Or(condFalse, condFalse)(nil, nil))
 
-		assert.True(t, aoni.And(condTrue, condTrue)(nil, nil))
-		assert.False(t, aoni.And(condTrue, condFalse)(nil, nil))
+		assert.True(t, resiliency.And(condTrue, condTrue)(nil, nil))
+		assert.False(t, resiliency.And(condTrue, condFalse)(nil, nil))
 	})
 }
 
@@ -592,7 +594,7 @@ func TestFallbackFunctions(t *testing.T) {
 	t.Run("fallback_string", func(t *testing.T) {
 		t.Parallel()
 
-		fallback := aoni.FallbackString(http.StatusInternalServerError, "error fallback")
+		fallback := resiliency.FallbackString(http.StatusInternalServerError, "error fallback")
 		resp, err := fallback(req, errors.New("original error"))
 		require.NoError(t, err)
 		require.NotNil(t, resp)
@@ -606,7 +608,7 @@ func TestFallbackFunctions(t *testing.T) {
 		t.Parallel()
 
 		payload := map[string]string{"error": "service unavailable"}
-		fallback := aoni.FallbackJSON(http.StatusServiceUnavailable, payload)
+		fallback := resiliency.FallbackJSON(http.StatusServiceUnavailable, payload)
 		resp, err := fallback(req, errors.New("original error"))
 		require.NoError(t, err)
 		require.NotNil(t, resp)

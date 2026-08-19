@@ -14,6 +14,7 @@ import (
 	"github.com/lemon4ksan/aoni"
 	"github.com/lemon4ksan/aoni/fingerprint/ja4"
 	"github.com/lemon4ksan/aoni/internal/io"
+	"github.com/lemon4ksan/aoni/internal/pipeline"
 	"github.com/lemon4ksan/aoni/telemetry"
 )
 
@@ -106,7 +107,7 @@ func WithTraceJA4(target *telemetry.TraceInfo) aoni.RequestModifier {
 			target.JA4 = &ja4.Report{}
 		}
 
-		store := &aoni.JA4ReportStore{Report: target.JA4, Target: target}
+		store := &pipeline.JA4ReportStore{Report: target.JA4, Target: target}
 		aoni.GetOrInitRequestConfig(req).JA4ReportStore = store
 
 		if stdReq := req.HTTPRequest(); stdReq != nil {

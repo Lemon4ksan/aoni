@@ -30,6 +30,17 @@ import (
 	"github.com/lemon4ksan/aoni/netutil/probe"
 )
 
+// TrafficInspector captures and records fine-grained request traces, headers, and JA4 signatures
+// for real-time diagnostic web dashboard inspection.
+type TrafficInspector interface {
+	Capture(req *http.Request, resp *http.Response, err error, traceInfo *TraceInfo)
+}
+
+// HARTracker records HTTP transaction details into HAR 1.2 JSON format logs.
+type HARTracker interface {
+	Record(req *http.Request, resp *http.Response, startTime time.Time, duration int64)
+}
+
 var correlationCounter uint64
 
 // GenerateCorrelationID generates a fast, monotonic Base36 correlation ID string.

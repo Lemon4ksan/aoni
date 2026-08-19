@@ -10,7 +10,7 @@ import (
 	"time"
 
 	"github.com/lemon4ksan/aoni"
-	"github.com/lemon4ksan/aoni/internal/pipeline"
+	"github.com/lemon4ksan/aoni/netutil"
 	"github.com/lemon4ksan/aoni/netutil/fragment"
 	"github.com/lemon4ksan/aoni/netutil/netdial"
 )
@@ -130,7 +130,7 @@ func WithFragment(cfg fragment.Config) aoni.RequestModifier {
 // WithHostRewrite constructs an [aoni.RequestModifier] replacing host DNS remapping rules for the request.
 func WithHostRewrite(rules map[string]string) aoni.RequestModifier {
 	return Custom(func(req aoni.Request) {
-		aoni.GetOrInitRequestConfig(req).HostRewrite = &pipeline.HostRewriteConfig{Rules: rules}
+		aoni.GetOrInitRequestConfig(req).HostRewrite = &netutil.HostRewriteConfig{Rules: rules}
 	})
 }
 
@@ -145,12 +145,12 @@ func WithAppendHostRewrite(rules map[string]string) aoni.RequestModifier {
 		}
 
 		maps.Copy(newRules, rules)
-		cfg.HostRewrite = &pipeline.HostRewriteConfig{Rules: newRules}
+		cfg.HostRewrite = &netutil.HostRewriteConfig{Rules: newRules}
 	})
 }
 
 // WithSocketController constructs an [aoni.RequestModifier] assigning a low-level socket controller callback.
-func WithSocketController(controller aoni.SocketController) aoni.RequestModifier {
+func WithSocketController(controller netutil.SocketController) aoni.RequestModifier {
 	return Custom(func(req aoni.Request) {
 		aoni.GetOrInitRequestConfig(req).SocketController = controller
 	})

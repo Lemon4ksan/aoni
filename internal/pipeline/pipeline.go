@@ -16,6 +16,7 @@ import (
 	"github.com/lemon4ksan/foundation/silicon/sysnet"
 	"golang.org/x/sys/cpu"
 
+	"github.com/lemon4ksan/aoni/internal/core"
 	"github.com/lemon4ksan/aoni/internal/experimental"
 	"github.com/lemon4ksan/aoni/netutil/fragment"
 )
@@ -53,7 +54,7 @@ func NewGeneric[Req, Resp any](
 func (p *Pipeline[Req, Resp]) Execute(
 	ctx context.Context,
 	req Req,
-	doer GenericDoer[Req, Resp],
+	doer core.GenericDoer[Req, Resp],
 	pipe PipelineConfig,
 ) (Resp, error) {
 	fastCtx := asyncctx.Wrap(ctx)
@@ -88,7 +89,7 @@ func (p *Pipeline[Req, Resp]) Execute(
 	for _, hook := range p.defaults.AfterResponse {
 		if stdResp, ok := any(resp).(*http.Response); ok {
 			hook(stdResp, err)
-		} else if aoniResp, ok := any(resp).(Response); ok {
+		} else if aoniResp, ok := any(resp).(core.Response); ok {
 			hook(aoniResp.HTTPResponse(), err) //nolint:bodyclose
 		} else {
 			hook(nil, err)
@@ -99,7 +100,7 @@ func (p *Pipeline[Req, Resp]) Execute(
 		var stdReq *http.Request
 		if r, ok := any(req).(*http.Request); ok {
 			stdReq = r
-		} else if rAdapter, okAdapter := any(req).(Request); okAdapter {
+		} else if rAdapter, okAdapter := any(req).(core.Request); okAdapter {
 			stdReq = rAdapter.HTTPRequest()
 			if stdReq == nil {
 				stdReq, _ = http.NewRequestWithContext( //nolint:gosec
@@ -114,7 +115,7 @@ func (p *Pipeline[Req, Resp]) Execute(
 		var stdResp *http.Response
 		if r, ok := any(resp).(*http.Response); ok {
 			stdResp = r
-		} else if rAdapter, okAdapter := any(resp).(Response); okAdapter {
+		} else if rAdapter, okAdapter := any(resp).(core.Response); okAdapter {
 			stdResp = rAdapter.HTTPResponse() //nolint:bodyclose
 		}
 
@@ -188,7 +189,7 @@ func (p *Pipeline[Req, Resp]) executeStandardFastPath(
 func (p *Pipeline[Req, Resp]) executeCustomPhaseOrder(
 	tx *Tx,
 	req Req,
-	doer GenericDoer[Req, Resp],
+	doer core.GenericDoer[Req, Resp],
 	phases []PhaseID,
 ) (Resp, error) {
 	var (

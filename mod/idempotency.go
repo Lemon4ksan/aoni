@@ -11,6 +11,7 @@ import (
 	"github.com/lemon4ksan/foundation/silicon/rand"
 
 	"github.com/lemon4ksan/aoni"
+	"github.com/lemon4ksan/aoni/internal/core"
 )
 
 // HeaderIdempotencyKey is the standard HTTP header for idempotency control (IETF Draft).
@@ -34,7 +35,7 @@ func WithIdempotencyKeyHeader(headerName string) aoni.RequestModifier {
 	}
 
 	return aoni.RequestModifier{
-		Kind: aoni.ModCustom,
+		Kind: core.ModCustom,
 		Fn: func(req aoni.Request) {
 			if req.Header(headerName) == "" {
 				var buf [36]byte
@@ -60,7 +61,7 @@ func WithRequestIDHeader(headerName string) aoni.RequestModifier {
 	}
 
 	return aoni.RequestModifier{
-		Kind: aoni.ModCustom,
+		Kind: core.ModCustom,
 		Fn: func(req aoni.Request) {
 			if req.Header(headerName) == "" {
 				var buf [36]byte

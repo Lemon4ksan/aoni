@@ -7,15 +7,23 @@ package challenge
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"io"
 	"mime"
 	"net/http"
 
 	"github.com/lemon4ksan/foundation/silicon/bytesconv"
-
-	"github.com/lemon4ksan/aoni"
 )
+
+// Detector determines whether an incoming HTTP response represents a WAF/DDoS challenge page.
+type Detector func(resp *http.Response) (bool, error)
+
+// Solver delegates WAF/DDoS challenge page resolution to automated headless or external solver drivers.
+type Solver interface {
+	// Solve resolves a WAF challenge response and retries the request.
+	Solve(ctx context.Context, err error, req *http.Request) (*http.Response, error)
+}
 
 // prefixProvider allows inspecting the pre-buffered byte prefix of a response body
 // without consuming the remaining underlying reader stream.
@@ -28,7 +36,7 @@ type prefixProvider interface {
 var ErrCloudflareDetected = errors.New("aoni: cloudflare challenge detected")
 
 // DefaultDetector serves as the standard detector used across the pipeline.
-var DefaultDetector aoni.ChallengeDetector = DetectCloudflareChallenge
+var DefaultDetector Detector = DetectCloudflareChallenge
 
 // DetectCloudflareChallenge inspects response status codes, headers, and buffered HTML body prefixes
 // to determine whether a Cloudflare JavaScript or CAPTCHA challenge page was returned.

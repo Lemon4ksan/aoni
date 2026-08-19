@@ -24,6 +24,7 @@ import (
 	"github.com/lemon4ksan/aoni/cookie"
 	"github.com/lemon4ksan/aoni/fingerprint"
 	"github.com/lemon4ksan/aoni/fingerprint/ja4"
+	"github.com/lemon4ksan/aoni/internal/core"
 	"github.com/lemon4ksan/aoni/internal/io"
 	"github.com/lemon4ksan/aoni/netutil/netdial"
 	"github.com/lemon4ksan/aoni/telemetry"
@@ -35,7 +36,7 @@ func (p *Pipeline[Req, Resp]) prepareRequest(req any, tx *Tx) *http.Request {
 	switch r := req.(type) {
 	case *http.Request:
 		stdReq = r
-	case Request:
+	case core.Request:
 		stdReq = convertRequestToStd(r)
 	default:
 		return &http.Request{}
@@ -113,7 +114,7 @@ func (p *Pipeline[Req, Resp]) prepareRequestContext(req any, stdReq *http.Reques
 	}
 
 	if len(cfg.Modifiers) > 0 {
-		if r, ok := req.(Request); ok {
+		if r, ok := req.(core.Request); ok {
 			for _, mod := range cfg.Modifiers {
 				mod.Apply(r)
 			}
@@ -360,7 +361,7 @@ func (p *Pipeline[Req, Resp]) applyRefererHeader(req *http.Request) {
 	}
 }
 
-func convertRequestToStd(r Request) *http.Request {
+func convertRequestToStd(r core.Request) *http.Request {
 	if stdReq := r.HTTPRequest(); stdReq != nil {
 		return stdReq
 	}

@@ -22,6 +22,7 @@ import (
 	"github.com/lemon4ksan/foundation/silicon/offheap"
 
 	"github.com/lemon4ksan/aoni"
+	"github.com/lemon4ksan/aoni/internal/pipeline"
 	"github.com/lemon4ksan/aoni/option"
 	"github.com/lemon4ksan/aoni/telemetry"
 )
@@ -460,7 +461,7 @@ func getRedactMap(req *http.Request) map[string]struct{} {
 		return cfg.Redact.Headers
 	}
 
-	if cfg, ok := req.Context().Value(aoni.RedactConfigCtxKey{}).(*aoni.RedactConfig); ok && cfg != nil {
+	if cfg, ok := req.Context().Value(pipeline.RedactConfigCtxKey{}).(*pipeline.RedactConfig); ok && cfg != nil {
 		return cfg.Headers
 	}
 

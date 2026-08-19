@@ -23,6 +23,7 @@ import (
 	"github.com/lemon4ksan/aoni"
 	"github.com/lemon4ksan/aoni/codec"
 	"github.com/lemon4ksan/aoni/codec/decode"
+	"github.com/lemon4ksan/aoni/internal/core"
 	"github.com/lemon4ksan/aoni/internal/io"
 	"github.com/lemon4ksan/aoni/middleware"
 	"github.com/lemon4ksan/aoni/mod"
@@ -114,7 +115,7 @@ type Request struct {
 	traceInfo        *telemetry.TraceInfo
 	appliedMods      []aoni.RequestModifier
 	timeout          time.Duration
-	retryOverride    *aoni.RetryOverride
+	retryOverride    *core.RetryOverride
 
 	useProtoDecoder   bool
 	useGRPCWebDecoder bool
@@ -315,7 +316,7 @@ func (r *Request) Retry(builder *resiliency.RetryBuilder) *Request {
 
 // SetRetry configures custom retry parameters for this request attempt.
 func (r *Request) SetRetry(maxAttempts int, backoff time.Duration) *Request {
-	r.retryOverride = &aoni.RetryOverride{
+	r.retryOverride = &core.RetryOverride{
 		MaxAttempts: maxAttempts,
 		Backoff:     backoff,
 		Condition:   middleware.RetryOnTransientErrors(),
@@ -330,11 +331,11 @@ func (r *Request) WithCodec(c codec.Codec, body any) *Request {
 		return r
 	}
 
-	if encMod := c.Encode(body); encMod.Kind != aoni.ModNone {
+	if encMod := c.Encode(body); !encMod.IsZero() {
 		r.appliedMods = append(r.appliedMods, encMod)
 	}
 
-	if decMod := c.Decode(); decMod.Kind != aoni.ModNone {
+	if decMod := c.Decode(); !decMod.IsZero() {
 		r.appliedMods = append(r.appliedMods, decMod)
 	}
 

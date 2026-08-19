@@ -18,13 +18,14 @@ import (
 	"github.com/lemon4ksan/foundation/silicon/offheap"
 
 	"github.com/lemon4ksan/aoni"
+	"github.com/lemon4ksan/aoni/internal/core"
 	"github.com/lemon4ksan/aoni/internal/io"
 )
 
 // WithMultipart constructs an [aoni.RequestModifier] building an in-memory multipart/form-data request body.
 func WithMultipart(fields map[string]string, files map[string]stdio.Reader) aoni.RequestModifier {
 	return aoni.RequestModifier{
-		Kind: aoni.ModCustom,
+		Kind: core.ModCustom,
 		Fn: func(req aoni.Request) {
 			offBuf, err := offheap.NewBuffer(64 * 1024)
 
@@ -90,7 +91,7 @@ type MultipartField struct {
 // WithMultipartFields accepts an ordered slice of form fields with support for duplicate names (RFC 7578 Section 5.2)
 func WithMultipartFields(fields []MultipartField) aoni.RequestModifier {
 	return aoni.RequestModifier{
-		Kind: aoni.ModCustom,
+		Kind: core.ModCustom,
 		Fn: func(req aoni.Request) {
 			offBuf, err := offheap.NewBuffer(64 * 1024)
 
@@ -155,7 +156,7 @@ func WithMultipartFields(fields []MultipartField) aoni.RequestModifier {
 // WithStreamingMultipart constructs an [aoni.RequestModifier] streaming multipart/form-data via an asynchronous pipe without in-memory buffering.
 func WithStreamingMultipart(fields map[string]string, files map[string]stdio.Reader) aoni.RequestModifier {
 	return aoni.RequestModifier{
-		Kind: aoni.ModCustom,
+		Kind: core.ModCustom,
 		Fn: func(req aoni.Request) {
 			pr, pw := stdio.Pipe()
 

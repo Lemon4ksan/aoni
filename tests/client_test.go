@@ -494,7 +494,7 @@ func TestClient_ContentTypeGuard(t *testing.T) {
 				_, _ = w.Write([]byte(tt.body))
 			})
 
-			if tt.mod.Kind != aoni.ModNone {
+			if !tt.mod.IsZero() {
 				var output []byte
 
 				resp, err := client.Request(t.Context(), http.MethodGet, "/", tt.mod)
@@ -1851,13 +1851,13 @@ func TestClient_GettersAndUnwrap(t *testing.T) {
 	assert.Same(t, client, unwrapped)
 
 	// Test WithTLSClientHelloID & WithPersona & WithHTTP3
-	c2 := client.WithTLSClientHelloID(utls.HelloChrome_120)
+	c2 := client.With(option.WithTLSClientHelloID(utls.HelloChrome_120))
 	assert.NotNil(t, c2)
 
-	c3 := client.WithPersona(fingerprint.PersonaChrome120Windows)
+	c3 := client.With(option.WithPersonaStruct(fingerprint.PersonaChrome120Windows))
 	assert.NotNil(t, c3)
 
-	c4 := client.WithHTTP3()
+	c4 := client.With(option.WithHTTP3())
 	assert.NotNil(t, c4)
 }
 

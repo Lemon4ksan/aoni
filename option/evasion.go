@@ -5,10 +5,12 @@
 package option
 
 import (
+	"net/http"
 	"slices"
 	"strings"
 
 	"github.com/lemon4ksan/foundation/generic"
+	utls "github.com/refraction-networking/utls"
 
 	"github.com/lemon4ksan/aoni"
 	"github.com/lemon4ksan/aoni/cookie"
@@ -19,6 +21,7 @@ import (
 	"github.com/lemon4ksan/aoni/fingerprint/profiles/chrome"
 	"github.com/lemon4ksan/aoni/fingerprint/profiles/firefox"
 	"github.com/lemon4ksan/aoni/fingerprint/profiles/safari"
+	"github.com/lemon4ksan/aoni/internal/profile"
 	"github.com/lemon4ksan/aoni/mod"
 	"github.com/lemon4ksan/aoni/netutil/cert"
 	"github.com/lemon4ksan/aoni/netutil/proxy"
@@ -107,8 +110,35 @@ func WithTLSFingerprint(browser aoni.BrowserID) aoni.ClientOption {
 	}
 }
 
+// WithTLSClientHelloID returns an [aoni.ClientOption] setting a specific uTLS ClientHelloID preset.
+func WithTLSClientHelloID(id utls.ClientHelloID) aoni.ClientOption {
+	return func(cfg *aoni.Config) {
+		cfg.Fingerprint.TLSClientHelloID = &id
+	}
+}
+
+// WithPersonaStruct configures TLS ClientHello ID, HTTP/2 settings, and header order from a [fingerprint.Persona].
+func WithPersonaStruct(p fingerprint.Persona) aoni.ClientOption {
+	return func(cfg *aoni.Config) {
+		cfg.Fingerprint.TLSClientHelloID = &p.TLSID
+		cfg.Fingerprint.H2Settings = &p.H2Settings
+		cfg.Fingerprint.HeaderOrder = p.HeaderOrder
+		cfg.Fingerprint.P0fSignature = p.P0fSignature
+
+		if cfg.Defaults.Headers == nil {
+			cfg.Defaults.Headers = make(http.Header)
+		}
+
+		cfg.Defaults.Headers.Set("User-Agent", p.UserAgent)
+
+		if len(p.HeaderOrder) > 0 {
+			cfg.Defaults.DefaultMods = append(cfg.Defaults.DefaultMods, mod.WithOrderedHeaders(p.HeaderOrder))
+		}
+	}
+}
+
 // WithTLSClientHelloSpecProvider returns an [aoni.ClientOption] setting a dynamic uTLS spec provider.
-func WithTLSClientHelloSpecProvider(provider aoni.ClientHelloSpecProvider) aoni.ClientOption {
+func WithTLSClientHelloSpecProvider(provider fingerprint.ClientHelloSpecProvider) aoni.ClientOption {
 	return func(cfg *aoni.Config) {
 		cfg.Fingerprint.TLSClientHelloSpecProvider = provider
 	}
@@ -121,11 +151,11 @@ func WithProfileVariant(variant *profiles.Variant, os profiles.OSKey) aoni.Clien
 			return
 		}
 
-		aoni.ApplyTLSVariantToConfig(cfg, variant)
-		aoni.ApplyHTTPVariantToConfig(cfg, variant, os)
+		profile.ApplyTLSVariantToConfig(cfg, variant)
+		profile.ApplyHTTPVariantToConfig(cfg, variant, os)
 
 		cfg.Defaults.DefaultMods = append(cfg.Defaults.DefaultMods, mod.Custom(func(req aoni.Request) {
-			aoni.ApplyProfileHeaders(req, variant, os)
+			profile.ApplyProfileHeaders(req, variant, os)
 		}))
 	}
 }
@@ -151,8 +181,8 @@ func WithP0fSignature(sig *p0f.Signature) aoni.ClientOption {
 	}
 }
 
-// WithSessionCache returns an [aoni.ClientOption] assigning an isolated proxy-aware TLS [aoni.SessionCache].
-func WithSessionCache(cache aoni.SessionCache) aoni.ClientOption {
+// WithSessionCache returns an [aoni.ClientOption] assigning an isolated proxy-aware TLS [fingerprint.SessionCache].
+func WithSessionCache(cache fingerprint.SessionCache) aoni.ClientOption {
 	return func(cfg *aoni.Config) {
 		cfg.Fingerprint.SessionCache = cache
 	}

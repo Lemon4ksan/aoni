@@ -17,7 +17,9 @@ import (
 	"github.com/lemon4ksan/aoni/fingerprint"
 	"github.com/lemon4ksan/aoni/fingerprint/ja4"
 	"github.com/lemon4ksan/aoni/fingerprint/p0f"
+	"github.com/lemon4ksan/aoni/internal/core"
 	"github.com/lemon4ksan/aoni/internal/io"
+	"github.com/lemon4ksan/aoni/netutil"
 	"github.com/lemon4ksan/aoni/netutil/fragment"
 	"github.com/lemon4ksan/aoni/netutil/netdial"
 	"github.com/lemon4ksan/aoni/telemetry"
@@ -42,6 +44,7 @@ func AllocRequestConfig(ctx context.Context) (context.Context, *RequestConfig) {
 
 	cfg := requestConfigStorage.Get()
 	*cfg = RequestConfig{}
+
 	ctx = context.WithValue(ctx, requestConfigKey{}, cfg)
 
 	return ctx, cfg
@@ -52,7 +55,7 @@ type RedactConfigCtxKey struct{}
 
 // RequestConfig aggregates request-scoped options and transport overrides.
 type RequestConfig struct {
-	Decoder                 ResponseDecoder
+	Decoder                 core.ResponseDecoder
 	ErrorModel              any
 	TargetHost              string
 	ForceContentType        string
@@ -66,29 +69,29 @@ type RequestConfig struct {
 	OrderedHeaders          []string
 	ALPNOverride            []string
 	JA4ReportStore          *JA4ReportStore
-	Fallback                FallbackFunc
+	Fallback                core.FallbackFunc
 	RequestTimeoutCancel    context.CancelFunc
 	HedgingDelayOverride    *time.Duration
 	ProxyAddr               *url.URL
 	DNSResolver             netdial.DNSResolver
 	ResponseValidator       func(resp *http.Response) error
-	RetryPolicy             *RetryOverride
+	RetryPolicy             *core.RetryOverride
 	P0fSignature            *p0f.Signature
-	SessionCache            SessionCache
+	SessionCache            fingerprint.SessionCache
 	PacketPadding           *fingerprint.PaddingConfig
-	SocketController        SocketController
-	ClientHelloSpecProvider ClientHelloSpecProvider
+	SocketController        netutil.SocketController
+	ClientHelloSpecProvider fingerprint.ClientHelloSpecProvider
 	JA4Callback             func(ja4.Report)
 	Metadata                map[string]any
 	TraceInfo               *telemetry.TraceInfo
-	HostRewrite             *HostRewriteConfig
+	HostRewrite             *netutil.HostRewriteConfig
 	Pipeline                *PipelineConfig
 	Fragment                *fragment.Config
 	Redact                  *RedactConfig
 	CertificatePins         map[string][]string
-	Modifiers               []RequestModifier
-	QueryEncoder            QueryEncoder
-	Decoders                map[string]ResponseDecoder
+	Modifiers               []core.RequestModifier
+	QueryEncoder            core.QueryEncoder
+	Decoders                map[string]core.ResponseDecoder
 
 	DisabledFlags    uint32
 	UnsafePhaseOrder []PhaseID
@@ -98,7 +101,7 @@ type RequestConfig struct {
 	TimeoutOverride    time.Duration
 	CacheTTL           time.Duration
 	HappyEyeballsDelay time.Duration
-	TCPDelay           TCPDelayRange
+	TCPDelay           netutil.TCPDelayRange
 
 	DisableAltSvc             bool
 	Disable0RTT               bool
@@ -113,7 +116,7 @@ type RequestConfig struct {
 	ETagAutomaton             bool
 	AutoDecode                bool
 	DisableBaseResponse       bool
-	BaseResponseOverride      func() BaseResponse
+	BaseResponseOverride      func() core.BaseResponse
 }
 
 // GetPipeline retrieves the request-specific PipelineConfig from context.
@@ -126,8 +129,8 @@ func GetPipeline(ctx context.Context) (PipelineConfig, bool) {
 	return PipelineConfig{}, false
 }
 
-// LookupDecoder resolves a registered [ResponseDecoder] for contentType using request-level decoders or client defaults.
-func (cfg *RequestConfig) LookupDecoder(contentType string) ResponseDecoder {
+// LookupDecoder resolves a registered [core.ResponseDecoder] for contentType using request-level decoders or client defaults.
+func (cfg *RequestConfig) LookupDecoder(contentType string) core.ResponseDecoder {
 	mediaType, _, _ := strings.Cut(contentType, ";")
 
 	norm := strings.ToLower(strings.TrimSpace(mediaType))
@@ -149,7 +152,7 @@ func GetRequestConfig(ctx context.Context) *RequestConfig {
 // GetOrInitRequestConfig retrieves or allocates a [RequestConfig] associated with the provided target.
 func GetOrInitRequestConfig(v any) *RequestConfig {
 	switch req := v.(type) {
-	case Request:
+	case core.Request:
 		if req == nil {
 			return &RequestConfig{}
 		}

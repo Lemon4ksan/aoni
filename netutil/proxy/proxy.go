@@ -26,6 +26,7 @@ import (
 
 	"github.com/lemon4ksan/aoni"
 	"github.com/lemon4ksan/aoni/cookie"
+	"github.com/lemon4ksan/aoni/internal/core"
 	"github.com/lemon4ksan/aoni/internal/health"
 	"github.com/lemon4ksan/aoni/netutil/trie"
 )
@@ -171,7 +172,7 @@ type RotatorConfig struct {
 	RetryAfter          time.Duration
 	HealthCheckURL      string
 	HealthCheckInterval time.Duration
-	Logger              aoni.Logger
+	Logger              core.Logger
 }
 
 // StickyKeyFunc extracts a sticky session identifier string from an incoming request.

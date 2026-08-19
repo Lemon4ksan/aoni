@@ -20,6 +20,14 @@ import (
 // ErrCacheMiss is returned when a requested HTTP response is not found in the cache or has expired per RFC 9111 §3.
 var ErrCacheMiss = errors.New("aoni/cache: miss")
 
+// Store defines the persistence contract for HTTP response caching backends (e.g. Memory, Redis).
+type Store interface {
+	// Get retrieves cached payload by key.
+	Get(ctx context.Context, key any) ([]byte, error)
+	// Set stores cached payload by key with ttl expiration.
+	Set(ctx context.Context, key any, val []byte, ttl time.Duration) error
+}
+
 // InMemoryStore provides a thread-safe, in-memory cache backend with background janitor cleanup conforming to RFC 9111.
 // All methods are safe for concurrent access across multiple goroutines.
 type InMemoryStore struct {

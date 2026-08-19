@@ -21,6 +21,8 @@ import (
 	"github.com/klauspost/compress/gzip"
 	"github.com/lemon4ksan/foundation/generic"
 	"github.com/lemon4ksan/foundation/silicon/offheap"
+
+	"github.com/lemon4ksan/aoni/internal/core"
 )
 
 var (
@@ -32,7 +34,7 @@ var (
 )
 
 // ProgressFunc represents a callback triggered periodically to monitor stream transfer progress.
-type ProgressFunc func(current, total int64)
+type ProgressFunc = core.ProgressFunc
 
 const maxPoolBufferSize = 64 * 1024
 

@@ -10,6 +10,9 @@ import (
 
 	"github.com/lemon4ksan/aoni"
 	"github.com/lemon4ksan/aoni/codec/decode"
+	"github.com/lemon4ksan/aoni/internal/core"
+	"github.com/lemon4ksan/aoni/resiliency"
+	"github.com/lemon4ksan/aoni/telemetry"
 )
 
 // WithBeforeRequest returns an [aoni.ClientOption] registering a hook function executed before dispatching outgoing requests.
@@ -33,8 +36,8 @@ func WithModifiers(mods ...aoni.RequestModifier) aoni.ClientOption {
 	}
 }
 
-// WithLogger returns an [aoni.ClientOption] assigning a diagnostic [aoni.Logger].
-func WithLogger(l aoni.Logger) aoni.ClientOption {
+// WithLogger returns an [aoni.ClientOption] assigning a diagnostic [telemetry.Logger].
+func WithLogger(l core.Logger) aoni.ClientOption {
 	return func(cfg *aoni.Config) {
 		cfg.Defaults.Logger = l
 	}
@@ -54,22 +57,22 @@ func WithBaseResponse(provider func() aoni.BaseResponse) aoni.ClientOption {
 	}
 }
 
-// WithInspector returns an [aoni.ClientOption] assigning an [aoni.TrafficInspector] diagnostic capturer.
-func WithInspector(inspector aoni.TrafficInspector) aoni.ClientOption {
+// WithInspector returns an [aoni.ClientOption] assigning a [telemetry.TrafficInspector] diagnostic capturer.
+func WithInspector(inspector telemetry.TrafficInspector) aoni.ClientOption {
 	return func(cfg *aoni.Config) {
 		cfg.Defaults.Inspector = inspector
 	}
 }
 
-// WithChallengeDetector returns an [aoni.ClientOption] registering an [aoni.ChallengeDetector] WAF challenge detector.
-func WithChallengeDetector(detector aoni.ChallengeDetector) aoni.ClientOption {
+// WithChallengeDetector returns an [aoni.ClientOption] registering a [resiliency.ChallengeDetector] WAF challenge detector.
+func WithChallengeDetector(detector resiliency.ChallengeDetector) aoni.ClientOption {
 	return func(cfg *aoni.Config) {
 		cfg.Defaults.ChallengeDetector = detector
 	}
 }
 
-// WithChallengeSolver returns an [aoni.ClientOption] registering an [aoni.ChallengeSolver] WAF challenge solver.
-func WithChallengeSolver(solver aoni.ChallengeSolver) aoni.ClientOption {
+// WithChallengeSolver returns an [aoni.ClientOption] registering a [resiliency.ChallengeSolver] WAF challenge solver.
+func WithChallengeSolver(solver resiliency.ChallengeSolver) aoni.ClientOption {
 	return func(cfg *aoni.Config) {
 		cfg.Defaults.ChallengeSolver = solver
 	}

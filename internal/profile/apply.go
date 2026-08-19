@@ -2,35 +2,34 @@
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
-package aoni
+package profile
 
 import (
 	utls "github.com/refraction-networking/utls"
 
+	"github.com/lemon4ksan/aoni"
 	"github.com/lemon4ksan/aoni/fingerprint/profiles"
-	impl "github.com/lemon4ksan/aoni/internal/profile"
 )
 
 // ApplyTLSVariantToConfig maps uTLS ClientHello specifications, presets, and QUIC TLS parameters
 // from a browser profile variant ([profiles.Variant]) into the target client configuration.
-// If variant is nil, this function is a no-op.
-func ApplyTLSVariantToConfig(cfg *Config, variant *profiles.Variant) {
+func ApplyTLSVariantToConfig(cfg *aoni.Config, variant *profiles.Variant) {
 	if variant == nil {
 		return
 	}
 
-	if cfg.Fingerprint.BrowserID == BrowserNone {
+	if cfg.Fingerprint.BrowserID == aoni.BrowserNone {
 		if variant.HelloID.Client == "Firefox" {
-			cfg.Fingerprint.BrowserID = BrowserFirefox
+			cfg.Fingerprint.BrowserID = aoni.BrowserFirefox
 		} else {
-			cfg.Fingerprint.BrowserID = BrowserChrome
+			cfg.Fingerprint.BrowserID = aoni.BrowserChrome
 		}
 
 		cfg.Fingerprint.TLSClientHelloID = nil
 	}
 
 	if variant.HelloSpec != nil {
-		cfg.Fingerprint.TLSClientHelloSpecProvider = impl.StaticSpecProvider{Spec: variant.HelloSpec}
+		cfg.Fingerprint.TLSClientHelloSpecProvider = StaticSpecProvider{Spec: variant.HelloSpec}
 		cfg.Fingerprint.TLSClientHelloID = nil
 	} else if variant.HelloID != (utls.ClientHelloID{}) {
 		helloID := variant.HelloID
@@ -45,26 +44,24 @@ func ApplyTLSVariantToConfig(cfg *Config, variant *profiles.Variant) {
 
 // ApplyHTTPVariantToConfig translates HTTP/2 SETTINGS frames, HTTP/3 QUIC transport limits,
 // default browser request headers, and method-specific header ordering rules into the client configuration.
-// If variant is nil, this function is a no-op.
-func ApplyHTTPVariantToConfig(cfg *Config, variant *profiles.Variant, os profiles.OSKey) {
+func ApplyHTTPVariantToConfig(cfg *aoni.Config, variant *profiles.Variant, os profiles.OSKey) {
 	if variant == nil {
 		return
 	}
 
-	h2Settings, h3Settings := impl.ApplyHTTPSettings(variant)
+	h2Settings, h3Settings := ApplyHTTPSettings(variant)
 	if h2Settings != nil {
 		cfg.Fingerprint.H2Settings = h2Settings
 	}
 
 	cfg.Fingerprint.H3Settings = &h3Settings
-	cfg.Defaults.Headers = impl.PopulateHeaders(cfg.Defaults.Headers, variant, os)
-	cfg.Fingerprint.HeaderOrder = impl.BuildHeaderOrder(variant, os, "GET")
+	cfg.Defaults.Headers = PopulateHeaders(cfg.Defaults.Headers, variant, os)
+	cfg.Fingerprint.HeaderOrder = BuildHeaderOrder(variant, os, "GET")
 }
 
 // ApplyProfileHeaders injects method-specific browser headers, WebKit/Gecko multipart boundary lines,
 // and method-tailored header serialization sequences into the outgoing request contract.
-// Safe for concurrent use across multiple goroutines.
-func ApplyProfileHeaders(req Request, variant *profiles.Variant, os profiles.OSKey) {
+func ApplyProfileHeaders(req aoni.Request, variant *profiles.Variant, os profiles.OSKey) {
 	if variant == nil {
 		return
 	}
@@ -100,7 +97,7 @@ func ApplyProfileHeaders(req Request, variant *profiles.Variant, os profiles.OSK
 	}
 
 	if variant.BoundaryFunc != nil {
-		cfg := GetOrInitRequestConfig(req)
+		cfg := aoni.GetOrInitRequestConfig(req)
 		cfg.MultipartBoundary = variant.BoundaryFunc()
 	}
 
@@ -110,7 +107,7 @@ func ApplyProfileHeaders(req Request, variant *profiles.Variant, os profiles.OSK
 }
 
 // setOrderedHeaders calculates and attaches method-specific ordered header keys to the request config.
-func setOrderedHeaders(req Request, variant *profiles.Variant, os profiles.OSKey) {
-	cfg := GetOrInitRequestConfig(req)
-	cfg.OrderedHeaders = impl.BuildHeaderOrder(variant, os, req.Method())
+func setOrderedHeaders(req aoni.Request, variant *profiles.Variant, os profiles.OSKey) {
+	cfg := aoni.GetOrInitRequestConfig(req)
+	cfg.OrderedHeaders = BuildHeaderOrder(variant, os, req.Method())
 }
