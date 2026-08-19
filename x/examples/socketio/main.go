@@ -14,10 +14,9 @@ import (
 	"log"
 	"time"
 
-	"github.com/lemon4ksan/aoni/option"
-
 	"github.com/lemon4ksan/aoni"
-	"github.com/lemon4ksan/aoni/realtime/socketio"
+	"github.com/lemon4ksan/aoni/option"
+	"github.com/lemon4ksan/aoni/x/socketio"
 )
 
 type PriceUpdate struct {

@@ -173,7 +173,7 @@ The underlying network plumbing in `aoni` is powered by pure-Go, zero-dependency
 | **TLS Evasion (JA3/JA4)** | ✗ | ✗ | **✓ (via uTLS & Handshake)** |
 | **JA4+ Fingerprinting** | ✗ | ✗ | **✓ (TLS & HTTP, pure Go)** |
 | **Unix Domain Socket Support** | ⚠️ (Manual) | ✗ | **✓ (Native `unix://`)** |
-| **Socket.IO / Engine.IO v4 Client** | ✗ | ✗ | **✓ (Complete v5 Spec)** |
+| **Socket.IO / Engine.IO v4 Client** | ✗ | ✗ | **✓ (`github.com/lemon4ksan/aoni/x/socketio`)** |
 | **Proxy & Session Isolation** | ✗ | ✗ | **✓ (`ProxyIsolatedJar`)** |
 | **Per-Request Overrides** | ✗ (Manual transport) | ✗ (Requires client clone) | **✓ (Context Accessors)** |
 
@@ -190,9 +190,10 @@ aoni/
 ├── fingerprint/  // TLS/JA4/p0f evasion, HTTP/2 framing, CDN padding
 ├── netutil/      // Proxy rotators, DoH/DoT DNS resolvers, IPv6 subnet rotators
 ├── codec/        // Response decoders (JSON, Proto, gRPC-Web, XML) and url.Values encoders
-├── realtime/     // WebSocket over H2 CONNECT, Socket.IO v5, SSE & NDJSON streams
+├── realtime/     // WebSocket over H2 CONNECT (RFC 8441), SSE & NDJSON streams
 ├── resiliency/   // Local HTTP response caching, WAF challenge detectors & solvers, load balancers
-└── telemetry/    // HAR generators, EWMA latency trackers, embedded web inspector dashboard
+├── telemetry/    // HAR generators, EWMA latency trackers, embedded web inspector dashboard
+└── x/            // Extensions & supplementary protocols (x/socketio, x/geoip)
 ```
 
 ## Real-World Case Studies & Integrations

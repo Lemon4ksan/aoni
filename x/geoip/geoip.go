@@ -2,6 +2,7 @@
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
+// Package geoip provides fast, zero-dependency lookup for MMDB GeoIP2 and GeoLite2 databases.
 package geoip
 
 import (
@@ -18,7 +19,7 @@ type Metadata struct {
 	UsageType string // "DataCenter", "Residential", "Mobile"
 }
 
-// DB provides fast, zero-dependency lookup for MMDB GeoIP2 and GeoLite2 databases.
+// DB provides fast lookup for MMDB GeoIP2 and GeoLite2 databases.
 type DB struct {
 	reader *maxminddb.Reader
 }

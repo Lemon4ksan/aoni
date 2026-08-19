@@ -10,6 +10,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"io"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -22,7 +23,6 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/lemon4ksan/aoni"
-	"github.com/lemon4ksan/aoni/internal/io"
 	"github.com/lemon4ksan/aoni/realtime/ws"
 )
 
@@ -65,10 +65,19 @@ func upgradeTestWS(w http.ResponseWriter, r *http.Request) (ws.Conn, error) {
 
 	netConn := conn
 	if bufrw.Reader.Buffered() > 0 {
-		netConn = &io.BufferedConn{Conn: conn, R: bufrw.Reader}
+		netConn = &bufferedConn{Conn: conn, r: bufrw.Reader}
 	}
 
 	return ws.WrapRawConn(netConn, false), nil
+}
+
+type bufferedConn struct {
+	net.Conn
+	r io.Reader
+}
+
+func (b *bufferedConn) Read(p []byte) (int, error) {
+	return b.r.Read(p)
 }
 
 type mockSIOServer struct {

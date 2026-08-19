@@ -10,7 +10,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 
-	"github.com/lemon4ksan/aoni/telemetry/geoip"
+	"github.com/lemon4ksan/aoni/x/geoip"
 )
 
 func TestDB_NilSafety(t *testing.T) {
