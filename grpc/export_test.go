@@ -5,27 +5,9 @@
 package grpc
 
 import (
-	"io"
 	"net/http"
 	"time"
-
-	"google.golang.org/protobuf/proto"
 )
-
-// MarshalFrame is exported strictly for package unit tests.
-func MarshalFrame(msg proto.Message, compressed bool) ([]byte, error) {
-	return marshalFrame(msg, compressed)
-}
-
-// UnmarshalFrame is exported strictly for package unit tests.
-func UnmarshalFrame(r io.Reader, target proto.Message) (bool, error) {
-	return unmarshalFrame(r, target)
-}
-
-// MarshalFrameCompressed is exported strictly for package unit tests.
-func MarshalFrameCompressed(msg proto.Message, compress bool) ([]byte, error) {
-	return marshalFrame(msg, compress)
-}
 
 // FormatTimeout is exported strictly for package unit tests.
 func FormatTimeout(d time.Duration) string {

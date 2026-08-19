@@ -47,7 +47,7 @@ func TestMarshalAndUnmarshalFrame(t *testing.T) {
 		t.Parallel()
 
 		msg := wrapperspb.String("compressed grpc message payload")
-		frame, err := grpc.MarshalFrameCompressed(msg, true)
+		frame, err := grpc.MarshalFrame(msg, true)
 		require.NoError(t, err)
 
 		assert.Equal(t, byte(0x01), frame[0])

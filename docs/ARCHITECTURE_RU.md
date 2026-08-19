@@ -47,6 +47,9 @@
   - Pure-Go эмуляция отпечатков JA3, JA4 и JA4H.
   - Подмена сигнатур TCP/IP стека на уровне SYN/ACK пакетов (p0f).
   - TLS 1.3 Encrypted Client Hello (ECH по стандарту RFC 9460 через DoH/DoQ).
+- **Протоколы реального времени и gRPC-стриминг**:
+  - Чистый Go gRPC-клиент (`grpc/`): Unary, Server-Streaming, Client-Streaming и полнодуплексный Bidirectional Streaming фрейминг поверх HTTP/2 с маскировкой uTLS и валидацией трейлеров.
+  - WebSockets поверх HTTP/2 Extended CONNECT (RFC 8441), SSE и NDJSON потоки событий.
 - **L3/L4 шифрованное туннелирование и периметр сети (`tunnel/`)**:
   - `tunnel/ssh` (RFC 4251–4254): Multi-hop SSH бастионы (Jump Hosts), динамический SOCKS5 форвардинг, обратный SSH шлюз с маршрутизацией по TLS SNI, а также встраиваемые PTY и SFTP серверы.
   - `tunnel/masque` (RFC 9298): Инкапсуляция CONNECT-UDP и CONNECT-IP поверх HTTP/3.

@@ -442,3 +442,49 @@ if err != nil {
 gateway := reverse.NewGateway(router)
 http.ListenAndServe(":443", gateway)
 ```
+
+## 19. Full-Duplex Bidirectional and Client Streaming gRPC
+
+Beyond standard unary RPCs, `aoni/grpc` supports full-duplex HTTP/2 streaming protocols directly over custom stealth personas with zero heavyweight `google.golang.org/grpc` dependencies.
+
+```go
+import (
+	"context"
+	"errors"
+	"io"
+	"log"
+
+	"github.com/lemon4ksan/aoni"
+	"github.com/lemon4ksan/aoni/grpc"
+	"github.com/lemon4ksan/aoni/option"
+)
+
+client := aoni.NewClient(nil, option.WithChrome())
+
+// 1. Full-Duplex Bidirectional Stream (Bidi)
+stream, err := grpc.BidiStream[*ChatMessage, ChatMessage](ctx, client, "/ChatService/BiDiChat")
+if err != nil {
+	log.Fatal(err)
+}
+defer stream.Close()
+
+// Concurrent send pipeline
+go func() {
+	for _, msg := range outboundQueue {
+		_ = stream.Send(msg)
+	}
+	_ = stream.CloseSend() // Sends HTTP/2 END_STREAM on request channel
+}()
+
+// Stream reading loop with trailer validation
+for {
+	msg, err := stream.Recv()
+	if errors.Is(err, io.EOF) {
+		break
+	}
+	if err != nil {
+		log.Fatal(err)
+	}
+	log.Printf("Received: %s", msg.Text)
+}
+```

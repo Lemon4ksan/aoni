@@ -64,7 +64,7 @@ func (d *DynamicInvoker) InvokeJSON(
 		}
 	}
 
-	frameBytes, err := marshalFrame(reqMsg, false)
+	frameBytes, err := MarshalFrame(reqMsg, false)
 	if err != nil {
 		return "", err
 	}
@@ -100,7 +100,7 @@ func (d *DynamicInvoker) InvokeJSON(
 	}
 
 	respMsg := dynamicpb.NewMessage(outputDesc)
-	if _, err := unmarshalFrame(resp.Body, respMsg); err != nil {
+	if _, err := UnmarshalFrame(resp.Body, respMsg); err != nil {
 		return "", err
 	}
 

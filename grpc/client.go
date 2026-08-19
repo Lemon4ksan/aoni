@@ -45,7 +45,7 @@ func Invoke[Resp any](
 	reqMsg proto.Message,
 	mods ...aoni.RequestModifier,
 ) (*Resp, error) {
-	frameBytes, err := marshalFrame(reqMsg, false)
+	frameBytes, err := MarshalFrame(reqMsg, false)
 	if err != nil {
 		return nil, err
 	}
@@ -72,7 +72,7 @@ func Invoke[Resp any](
 		return nil, fmt.Errorf("aoni/grpc: response type %T does not implement proto.Message", result)
 	}
 
-	if _, err := unmarshalFrame(resp.Body, msg); err != nil {
+	if _, err := UnmarshalFrame(resp.Body, msg); err != nil {
 		return nil, err
 	}
 
@@ -94,7 +94,7 @@ func InvokeFast[Resp any](
 	reqMsg proto.Message,
 	mods ...aoni.RequestModifier,
 ) (*Resp, error) {
-	frameBytes, err := marshalFrame(reqMsg, false)
+	frameBytes, err := MarshalFrame(reqMsg, false)
 	if err != nil {
 		return nil, err
 	}
@@ -180,11 +180,11 @@ func prepareGRPCModifiers(
 // unmarshalFastGRPCFrame decodes Protobuf payload bytes from a fast client response.
 func unmarshalFastGRPCFrame(resp aoni.Response, msg proto.Message) error {
 	if stream := resp.BodyStream(); stream != nil && resp.HTTPResponse() == nil { //nolint:bodyclose
-		_, err := unmarshalFrame(stream, msg)
+		_, err := UnmarshalFrame(stream, msg)
 		return err
 	}
 
-	_, err := unmarshalFrame(bytes.NewReader(resp.UnsafeBodyBytes()), msg)
+	_, err := UnmarshalFrame(bytes.NewReader(resp.UnsafeBodyBytes()), msg)
 
 	return err
 }
@@ -311,7 +311,7 @@ func (s *StreamResponse[Resp]) Recv() (*Resp, error) {
 		return nil, fmt.Errorf("aoni/grpc: response type %T does not implement proto.Message", result)
 	}
 
-	_, err := unmarshalFrame(s.stream, msg)
+	_, err := UnmarshalFrame(s.stream, msg)
 	if err != nil {
 		if errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF) {
 			if validateErr := validateResponseTrailers(s.resp); validateErr != nil {
@@ -345,7 +345,7 @@ func ServerStream[Resp any](
 	reqMsg proto.Message,
 	mods ...aoni.RequestModifier,
 ) (*StreamResponse[Resp], error) {
-	frameBytes, err := marshalFrame(reqMsg, false)
+	frameBytes, err := MarshalFrame(reqMsg, false)
 	if err != nil {
 		return nil, err
 	}
@@ -427,7 +427,7 @@ func (s *BidiStreamClient[Req, Resp]) Send(msg Req) error {
 		return errors.New("aoni/grpc: send stream is closed")
 	}
 
-	frameBytes, err := marshalFrame(msg, false)
+	frameBytes, err := MarshalFrame(msg, false)
 	if err != nil {
 		return err
 	}
@@ -479,7 +479,7 @@ func (s *BidiStreamClient[Req, Resp]) Recv() (*Resp, error) {
 		return nil, fmt.Errorf("aoni/grpc: response type %T does not implement proto.Message", result)
 	}
 
-	_, err := unmarshalFrame(s.stream, msg)
+	_, err := UnmarshalFrame(s.stream, msg)
 	if err != nil {
 		if errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF) {
 			if validateErr := validateResponseTrailers(s.resp); validateErr != nil {

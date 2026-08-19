@@ -21,8 +21,8 @@ var (
 	emptyGRPCFrame = []byte{0, 0, 0, 0, 0}
 )
 
-// marshalFrame encodes a Protobuf message into a 5-byte Length-Prefixed-Message per PROTOCOL-HTTP2.md.
-func marshalFrame(msg proto.Message, compressed bool) ([]byte, error) {
+// MarshalFrame encodes a Protobuf message into a 5-byte Length-Prefixed-Message per PROTOCOL-HTTP2.md.
+func MarshalFrame(msg proto.Message, compressed bool) ([]byte, error) {
 	if msg == nil {
 		return emptyGRPCFrame, nil
 	}
@@ -56,8 +56,8 @@ func marshalFrame(msg proto.Message, compressed bool) ([]byte, error) {
 	return buf.Bytes(), nil
 }
 
-// unmarshalFrame decodes a 5-byte Length-Prefixed-Message into a Protobuf target message.
-func unmarshalFrame(r io.Reader, target proto.Message) (bool, error) {
+// UnmarshalFrame decodes a 5-byte Length-Prefixed-Message into a Protobuf target message.
+func UnmarshalFrame(r io.Reader, target proto.Message) (bool, error) {
 	flags, payload, err := defaultFramer.ReadFrame(r)
 	if err != nil {
 		if errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF) {
