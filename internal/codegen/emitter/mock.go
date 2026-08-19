@@ -260,20 +260,24 @@ func (e *Emitter) emitMethodRouteMatch(buf *bytes.Buffer, svc *ir.ServiceIR, m *
 		rawPath = m.Path.RawTemplate
 	}
 
-	cleanPath := strings.TrimPrefix(rawPath, "/")
+	cleanPath := strings.Trim(rawPath, "/")
 	if cleanPath == "" {
 		cleanPath = strings.ToLower(m.Name)
 	}
 
-	// Check if path has parameterized segments like {id}
-	hasParams := strings.Contains(cleanPath, "{")
-
-	if !hasParams {
-		fmt.Fprintf(buf, "\tif method == %q && (path == %q || path == %q) {\n", httpVerb, "/"+cleanPath, cleanPath)
+	slashParts := strings.Split(cleanPath, "/")
+	if len(slashParts) == 1 && slashParts[0] == "" {
+		fmt.Fprintf(buf, "\tif method == %q && (path == %q || path == \"\" || path == \"/\") {\n", httpVerb, rawPath)
 	} else {
-		prefix, _, _ := strings.Cut(cleanPath, "{")
-		prefix = "/" + strings.TrimPrefix(prefix, "/")
-		fmt.Fprintf(buf, "\tif method == %q && strings.HasPrefix(path, %q) {\n", httpVerb, prefix)
+		var conds []string
+		conds = append(conds, fmt.Sprintf("method == %q", httpVerb))
+		conds = append(conds, fmt.Sprintf("len(parts) == %d", len(slashParts)))
+		for i, sp := range slashParts {
+			if !strings.Contains(sp, "{") {
+				conds = append(conds, fmt.Sprintf("parts[%d] == %q", i, sp))
+			}
+		}
+		fmt.Fprintf(buf, "\tif %s {\n", strings.Join(conds, " && "))
 	}
 
 	fmt.Fprintf(buf, "\t\tm.recordCall(%q)\n", m.Name)
@@ -346,13 +350,26 @@ func (e *Emitter) emitMethodRouteMatch(buf *bytes.Buffer, svc *ir.ServiceIR, m *
 			}
 
 			rawValName := "raw_" + p.GoName
-			fmt.Fprintf(buf, "\t\t%s := r.URL.Query().Get(%q)\n", rawValName, wireKey)
-			fmt.Fprintf(buf, "\t\tif %s == \"\" {\n", rawValName)
-			buf.WriteString("\t\t\tparts := strings.Split(strings.Trim(path, \"/\"), \"/\")\n")
-			buf.WriteString("\t\t\tif len(parts) > 0 {\n")
-			fmt.Fprintf(buf, "\t\t\t\t%s = parts[len(parts)-1]\n", rawValName)
-			buf.WriteString("\t\t\t}\n")
-			buf.WriteString("\t\t}\n")
+			pathIdx := -1
+			if p.Location == ir.LocPath {
+				for idx, sp := range slashParts {
+					if strings.Contains(sp, p.WireKey) ||
+						strings.EqualFold(cleanIdentifier(sp), cleanIdentifier(p.GoName)) ||
+						strings.EqualFold(cleanIdentifier(sp), cleanIdentifier(p.WireKey)) {
+						pathIdx = idx
+						break
+					}
+				}
+			}
+
+			if pathIdx != -1 {
+				fmt.Fprintf(buf, "\t\t%s := parts[%d]\n", rawValName, pathIdx)
+			} else {
+				fmt.Fprintf(buf, "\t\t%s := r.URL.Query().Get(%q)\n", rawValName, wireKey)
+				fmt.Fprintf(buf, "\t\tif %s == \"\" {\n", rawValName)
+				fmt.Fprintf(buf, "\t\t\tif len(parts) > 0 {\n\t\t\t\t%s = parts[len(parts)-1]\n\t\t\t}\n", rawValName)
+				fmt.Fprintf(buf, "\t\t}\n")
+			}
 
 			switch {
 			case p.GoType.IsSlice:
