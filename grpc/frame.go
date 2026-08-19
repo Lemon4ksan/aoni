@@ -6,9 +6,11 @@ package grpc
 
 import (
 	"bytes"
+	"encoding/binary"
 	"errors"
 	"fmt"
 	"io"
+	"sync"
 
 	"github.com/klauspost/compress/gzip"
 	"google.golang.org/protobuf/proto"
@@ -19,6 +21,12 @@ import (
 var (
 	defaultFramer  = transport.NewLengthPrefixedFramer(0)
 	emptyGRPCFrame = []byte{0, 0, 0, 0, 0}
+	gzipWriterPool = sync.Pool{
+		New: func() any {
+			return gzip.NewWriter(io.Discard)
+		},
+	}
+	gzipReaderPool = sync.Pool{}
 )
 
 // MarshalFrame encodes a Protobuf message into a 5-byte Length-Prefixed-Message per PROTOCOL-HTTP2.md.
@@ -27,33 +35,54 @@ func MarshalFrame(msg proto.Message, compressed bool) ([]byte, error) {
 		return emptyGRPCFrame, nil
 	}
 
+	if !compressed {
+		size := proto.Size(msg)
+		frame := make([]byte, 5, 5+size)
+		frame[0] = 0 // uncompressed flag
+
+		binary.BigEndian.PutUint32(frame[1:5], uint32(size)) //nolint:gosec
+
+		out, err := proto.MarshalOptions{}.MarshalAppend(frame, msg)
+		if err != nil {
+			return nil, fmt.Errorf("aoni/grpc: failed to marshal message: %w", err)
+		}
+
+		return out, nil
+	}
+
 	rawBytes, err := proto.Marshal(msg)
 	if err != nil {
 		return nil, fmt.Errorf("aoni/grpc: failed to marshal message: %w", err)
 	}
 
-	var flags byte
-	if compressed {
-		flags = 1
-
-		var buf bytes.Buffer
-
-		gzWriter := gzip.NewWriter(&buf)
-
-		if _, err := gzWriter.Write(rawBytes); err != nil {
-			return nil, err
-		}
-
-		_ = gzWriter.Close()
-		rawBytes = buf.Bytes()
-	}
-
 	var buf bytes.Buffer
-	if _, err := defaultFramer.WriteFrame(&buf, flags, rawBytes); err != nil {
+	gzWriter, _ := gzipWriterPool.Get().(*gzip.Writer)
+	gzWriter.Reset(&buf)
+
+	if _, err := gzWriter.Write(rawBytes); err != nil {
+		gzWriter.Reset(io.Discard)
+		gzipWriterPool.Put(gzWriter)
+
 		return nil, err
 	}
 
-	return buf.Bytes(), nil
+	if err := gzWriter.Close(); err != nil {
+		gzWriter.Reset(io.Discard)
+		gzipWriterPool.Put(gzWriter)
+
+		return nil, err
+	}
+
+	gzWriter.Reset(io.Discard)
+	gzipWriterPool.Put(gzWriter)
+
+	gzPayload := buf.Bytes()
+	frame := make([]byte, 5+len(gzPayload))
+	frame[0] = 1 // compressed flag
+	binary.BigEndian.PutUint32(frame[1:5], uint32(len(gzPayload))) //nolint:gosec
+	copy(frame[5:], gzPayload)
+
+	return frame, nil
 }
 
 // UnmarshalFrame decodes a 5-byte Length-Prefixed-Message into a Protobuf target message.
@@ -69,17 +98,31 @@ func UnmarshalFrame(r io.Reader, target proto.Message) (bool, error) {
 
 	compressed := flags&1 != 0
 	if compressed {
-		gzReader, err := gzip.NewReader(bytes.NewReader(payload))
-		if err != nil {
-			return true, fmt.Errorf("aoni/grpc: failed to decompress payload: %w", err)
+		var (
+			gzReader *gzip.Reader
+			gzErr    error
+		)
+
+		if v := gzipReaderPool.Get(); v != nil {
+			gzReader, _ = v.(*gzip.Reader)
+			gzErr = gzReader.Reset(bytes.NewReader(payload))
+		} else {
+			gzReader, gzErr = gzip.NewReader(bytes.NewReader(payload))
 		}
 
-		payload, err = io.ReadAll(gzReader)
+		if gzErr != nil {
+			return true, fmt.Errorf("aoni/grpc: failed to decompress payload: %w", gzErr)
+		}
+
+		decompressed, readErr := io.ReadAll(gzReader)
 		_ = gzReader.Close()
+		gzipReaderPool.Put(gzReader)
 
-		if err != nil {
-			return true, fmt.Errorf("aoni/grpc: failed to read decompressed payload: %w", err)
+		if readErr != nil {
+			return true, fmt.Errorf("aoni/grpc: failed to read decompressed payload: %w", readErr)
 		}
+
+		payload = decompressed
 	}
 
 	if err := proto.Unmarshal(payload, target); err != nil {
