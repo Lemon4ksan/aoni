@@ -42,7 +42,7 @@ type mockSSHServer struct {
 	wg       sync.WaitGroup
 }
 
-func startMockServer(t *testing.T) *mockSSHServer {
+func startMockServer(t testing.TB) *mockSSHServer {
 	t.Helper()
 
 	pub, priv, err := ed25519.GenerateKey(rand.Reader)

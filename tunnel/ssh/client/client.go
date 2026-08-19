@@ -197,6 +197,10 @@ func (c *Client) Run(ctx context.Context, cmdStr string) ([]byte, error) {
 
 // Command instantiates a new Cmd targeting name with optional arguments.
 func (c *Client) Command(ctx context.Context, name string, args ...string) (*Cmd, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+
 	if c.closed.Load() || c.Client == nil {
 		return nil, ErrSSHClosed
 	}
@@ -681,7 +685,7 @@ func (c *Cmd) runInContext(fn func() ([]byte, error)) ([]byte, error) {
 		return nil, err
 	}
 
-	if c.ctx == context.Background() || c.ctx == context.TODO() || c.ctx.Done() == nil {
+	if c.ctx == nil || c.ctx == context.Background() || c.ctx == context.TODO() || c.ctx.Done() == nil {
 		return fn()
 	}
 

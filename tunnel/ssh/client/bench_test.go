@@ -5,7 +5,6 @@
 package client_test
 
 import (
-	"context"
 	"crypto/ed25519"
 	"crypto/rand"
 	"encoding/pem"
@@ -98,9 +97,8 @@ func BenchmarkKnownHosts(b *testing.B) {
 }
 
 func BenchmarkClientOperations(b *testing.B) {
-	t := &testing.T{}
-	srv := startMockServer(t)
-	ctx := context.Background()
+	srv := startMockServer(b)
+	ctx := b.Context()
 
 	c, err := client.New(
 		ctx,
@@ -120,7 +118,7 @@ func BenchmarkClientOperations(b *testing.B) {
 		b.ResetTimer()
 
 		for b.Loop() {
-			_, _ = c.Run(t.Context(), "echo hello")
+			_, _ = c.Run(b.Context(), "echo hello")
 		}
 	})
 

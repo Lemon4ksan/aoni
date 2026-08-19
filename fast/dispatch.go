@@ -407,7 +407,7 @@ func (c *Client) executeFastHTTP(
 		}
 	}
 
-	if ctx == context.Background() || ctx == context.TODO() || ctx.Done() == nil {
+	if ctx == nil || ctx == context.Background() || ctx == context.TODO() || ctx.Done() == nil {
 		exec := func() error { return c.doFastHTTPEngine(ctx, req, resp) }
 		err = c.executeFastHTTPWithStaleRetry(req, resp, exec, restoreOriginalTarget)
 
