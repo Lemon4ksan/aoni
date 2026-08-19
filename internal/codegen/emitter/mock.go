@@ -211,7 +211,9 @@ func (e *Emitter) emitServiceMock(buf *bytes.Buffer, root *ir.RootIR, svc *ir.Se
 	// 8. Internal Router Dispatcher
 	fmt.Fprintf(buf, "func (m *%s) routeRequest(w http.ResponseWriter, r *http.Request) {\n", mockServerName)
 	buf.WriteString("\tpath := r.URL.Path\n")
-	buf.WriteString("\tmethod := r.Method\n\n")
+	buf.WriteString("\tmethod := r.Method\n")
+	buf.WriteString("\tparts := strings.Split(strings.Trim(path, \"/\"), \"/\")\n")
+	buf.WriteString("\t_ = parts\n\n")
 
 	for _, m := range svc.Methods {
 		e.emitMethodRouteMatch(buf, svc, m)
