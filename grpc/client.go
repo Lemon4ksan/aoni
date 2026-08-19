@@ -14,6 +14,8 @@ import (
 	"io"
 	"net/http"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"time"
 
 	"google.golang.org/protobuf/proto"
@@ -243,10 +245,60 @@ func DecodeBinaryHeader(val string) ([]byte, error) {
 	return base64.StdEncoding.DecodeString(val)
 }
 
+// prepareGRPCStreamModifiers builds standard gRPC request headers with a streaming body reader.
+func prepareGRPCStreamModifiers(
+	ctx context.Context,
+	bodyReader io.Reader,
+	mods []aoni.RequestModifier,
+) []aoni.RequestModifier {
+	grpcMods := make([]aoni.RequestModifier, 0, len(mods)+5)
+	grpcMods = append(grpcMods,
+		mod.WithContentType("application/grpc"),
+		mod.WithHeader("te", "trailers"),
+		mod.WithHeader("user-agent", "grpc-aoni/1.0"),
+		mod.WithHeader("grpc-accept-encoding", "gzip, identity"),
+		mod.WithBody(bodyReader),
+	)
+
+	if deadline, ok := ctx.Deadline(); ok {
+		grpcMods = append(grpcMods, mod.WithHeader("grpc-timeout", formatTimeout(time.Until(deadline))))
+	}
+
+	if md, ok := FromContext(ctx); ok && len(md) > 0 {
+		grpcMods = append(grpcMods, WithMetadata(md))
+	}
+
+	grpcMods = append(grpcMods, mods...)
+
+	return grpcMods
+}
+
 // StreamResponse represents an active Server-Streaming gRPC session.
 type StreamResponse[Resp any] struct {
 	stream io.ReadCloser
 	resp   *http.Response
+}
+
+// Header returns the initial response headers received from the gRPC server.
+func (s *StreamResponse[Resp]) Header() http.Header {
+	if s.resp != nil {
+		return s.resp.Header
+	}
+
+	return nil
+}
+
+// Trailer returns the response trailers received from the gRPC server once the stream finishes.
+func (s *StreamResponse[Resp]) Trailer() http.Header {
+	if s.resp != nil {
+		if len(s.resp.Trailer) > 0 {
+			return s.resp.Trailer
+		}
+
+		return s.resp.Header
+	}
+
+	return nil
 }
 
 // Recv reads and decodes the next Protobuf message frame from the streaming response.
@@ -317,4 +369,251 @@ func ServerStream[Resp any](
 		stream: resp.Body,
 		resp:   resp,
 	}, nil
+}
+
+type connectResult struct {
+	resp *http.Response
+	err  error
+}
+
+// BidiStreamClient represents an active full-duplex bidirectional gRPC streaming session.
+type BidiStreamClient[Req proto.Message, Resp any] struct {
+	pipeWriter *io.PipeWriter
+	stream     io.ReadCloser
+	resp       *http.Response
+
+	ctx    context.Context
+	cancel context.CancelFunc
+
+	connectedOnce sync.Once
+	connectResCh  chan connectResult
+	connectErr    error
+
+	sendMu sync.Mutex
+	recvMu sync.Mutex
+
+	closedSend atomic.Bool
+	closed     atomic.Bool
+}
+
+func (s *BidiStreamClient[Req, Resp]) ensureConnected() error {
+	s.connectedOnce.Do(func() {
+		res := <-s.connectResCh
+		if res.err != nil {
+			s.connectErr = res.err
+			return
+		}
+
+		if err := validateInitialHeaders(res.resp); err != nil {
+			_ = res.resp.Body.Close()
+			s.connectErr = err
+			return
+		}
+
+		s.resp = res.resp
+		s.stream = res.resp.Body
+	})
+
+	return s.connectErr
+}
+
+// Send marshals and transmits a Protobuf message frame to the remote gRPC server.
+func (s *BidiStreamClient[Req, Resp]) Send(msg Req) error {
+	if s.closed.Load() {
+		return errors.New("aoni/grpc: stream is closed")
+	}
+
+	if s.closedSend.Load() {
+		return errors.New("aoni/grpc: send stream is closed")
+	}
+
+	frameBytes, err := marshalFrame(msg, false)
+	if err != nil {
+		return err
+	}
+
+	s.sendMu.Lock()
+	defer s.sendMu.Unlock()
+
+	_, err = s.pipeWriter.Write(frameBytes)
+	if err != nil {
+		if errors.Is(err, io.ErrClosedPipe) {
+			if connErr := s.ensureConnected(); connErr != nil {
+				return connErr
+			}
+		}
+
+		return err
+	}
+
+	return nil
+}
+
+// CloseSend signals to the server that the client has finished transmitting messages.
+func (s *BidiStreamClient[Req, Resp]) CloseSend() error {
+	if s.closedSend.CompareAndSwap(false, true) {
+		return s.pipeWriter.Close()
+	}
+
+	return nil
+}
+
+// Recv reads and decodes the next Protobuf message frame from the gRPC response stream.
+// Returns io.EOF when the server finishes transmitting messages.
+func (s *BidiStreamClient[Req, Resp]) Recv() (*Resp, error) {
+	if s.closed.Load() {
+		return nil, errors.New("aoni/grpc: stream is closed")
+	}
+
+	if err := s.ensureConnected(); err != nil {
+		return nil, err
+	}
+
+	s.recvMu.Lock()
+	defer s.recvMu.Unlock()
+
+	result := new(Resp)
+
+	msg, ok := any(result).(proto.Message)
+	if !ok {
+		return nil, fmt.Errorf("aoni/grpc: response type %T does not implement proto.Message", result)
+	}
+
+	_, err := unmarshalFrame(s.stream, msg)
+	if err != nil {
+		if errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF) {
+			if validateErr := validateResponseTrailers(s.resp); validateErr != nil {
+				return nil, validateErr
+			}
+
+			return nil, io.EOF
+		}
+
+		return nil, err
+	}
+
+	return result, nil
+}
+
+// Header returns the response headers from the gRPC server.
+func (s *BidiStreamClient[Req, Resp]) Header() (http.Header, error) {
+	if err := s.ensureConnected(); err != nil {
+		return nil, err
+	}
+
+	return s.resp.Header, nil
+}
+
+// Trailer returns the response trailers once the stream concludes.
+func (s *BidiStreamClient[Req, Resp]) Trailer() http.Header {
+	if s.resp != nil {
+		if len(s.resp.Trailer) > 0 {
+			return s.resp.Trailer
+		}
+
+		return s.resp.Header
+	}
+
+	return nil
+}
+
+// Close terminates both send and receive directions of the gRPC stream.
+func (s *BidiStreamClient[Req, Resp]) Close() error {
+	if s == nil {
+		return nil
+	}
+
+	if s.closed.CompareAndSwap(false, true) {
+		s.closedSend.Store(true)
+
+		if s.pipeWriter != nil {
+			_ = s.pipeWriter.CloseWithError(io.EOF)
+		}
+
+		if s.cancel != nil {
+			s.cancel()
+		}
+
+		if s.stream != nil {
+			return s.stream.Close()
+		}
+	}
+
+	return nil
+}
+
+// BidiStream initiates a full-duplex bidirectional gRPC streaming session.
+func BidiStream[Req proto.Message, Resp any](
+	ctx context.Context,
+	doer aoni.RequestDoer,
+	fullMethod string,
+	mods ...aoni.RequestModifier,
+) (*BidiStreamClient[Req, Resp], error) {
+	streamCtx, cancel := context.WithCancel(ctx)
+	pipeReader, pipeWriter := io.Pipe()
+
+	path := normalizeMethodPath(fullMethod)
+	grpcMods := prepareGRPCStreamModifiers(streamCtx, pipeReader, mods)
+
+	requester := request.AsRequester(doer)
+
+	connectResCh := make(chan connectResult, 1)
+	go func() {
+		resp, err := requester.Request(streamCtx, http.MethodPost, path, grpcMods...)
+		connectResCh <- connectResult{resp: resp, err: err}
+	}()
+
+	client := &BidiStreamClient[Req, Resp]{
+		pipeWriter:   pipeWriter,
+		ctx:          streamCtx,
+		cancel:       cancel,
+		connectResCh: connectResCh,
+	}
+
+	return client, nil
+}
+
+// ClientStreamClient represents a client-streaming gRPC session where the client transmits multiple messages
+// and receives a single final response.
+type ClientStreamClient[Req proto.Message, Resp any] struct {
+	bidi *BidiStreamClient[Req, Resp]
+}
+
+// Send transmits a Protobuf message frame to the remote gRPC server.
+func (s *ClientStreamClient[Req, Resp]) Send(msg Req) error {
+	return s.bidi.Send(msg)
+}
+
+// CloseAndRecv concludes client transmission and reads the server's single response message.
+func (s *ClientStreamClient[Req, Resp]) CloseAndRecv() (*Resp, error) {
+	if err := s.bidi.CloseSend(); err != nil {
+		return nil, err
+	}
+	defer s.bidi.Close()
+
+	return s.bidi.Recv()
+}
+
+// Close terminates the client-streaming session.
+func (s *ClientStreamClient[Req, Resp]) Close() error {
+	if s == nil || s.bidi == nil {
+		return nil
+	}
+
+	return s.bidi.Close()
+}
+
+// ClientStream initiates a client-streaming gRPC call.
+func ClientStream[Req proto.Message, Resp any](
+	ctx context.Context,
+	doer aoni.RequestDoer,
+	fullMethod string,
+	mods ...aoni.RequestModifier,
+) (*ClientStreamClient[Req, Resp], error) {
+	bidi, err := BidiStream[Req, Resp](ctx, doer, fullMethod, mods...)
+	if err != nil {
+		return nil, err
+	}
+
+	return &ClientStreamClient[Req, Resp]{bidi: bidi}, nil
 }

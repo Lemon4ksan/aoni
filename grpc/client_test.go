@@ -6,9 +6,11 @@ package grpc_test
 
 import (
 	"bytes"
+	"context"
 	"encoding/base64"
 	"io"
 	"net/http"
+	"net/http/httptest"
 	"testing"
 	"time"
 
@@ -16,6 +18,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"google.golang.org/protobuf/types/known/wrapperspb"
 
+	"github.com/lemon4ksan/aoni"
 	"github.com/lemon4ksan/aoni/grpc"
 )
 
@@ -135,8 +138,195 @@ func TestStatusErrorFormatting(t *testing.T) {
 func TestStreamResponse_Close(t *testing.T) {
 	t.Parallel()
 
-	nopCloser := io.NopCloser(bytes.NewReader(nil))
-	_ = nopCloser
 	streamResp := &grpc.StreamResponse[wrapperspb.StringValue]{}
 	assert.NoError(t, streamResp.Close())
+}
+
+func TestBidiStream_Lifecycle(t *testing.T) {
+	t.Parallel()
+
+	bidi := &grpc.BidiStreamClient[*wrapperspb.StringValue, wrapperspb.StringValue]{}
+	assert.NoError(t, bidi.Close())
+}
+
+func TestClientStream_Lifecycle(t *testing.T) {
+	t.Parallel()
+
+	clientStream := &grpc.ClientStreamClient[*wrapperspb.StringValue, wrapperspb.StringValue]{}
+	assert.NoError(t, clientStream.Close())
+}
+
+func TestServerStream_FunctionalRoundtrip(t *testing.T) {
+	t.Parallel()
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/grpc")
+		w.Header().Set("Trailer", "grpc-status, grpc-message")
+		w.WriteHeader(http.StatusOK)
+
+		flusher, _ := w.(http.Flusher)
+
+		// Send 3 streaming frames
+		for i := 1; i <= 3; i++ {
+			msg := wrapperspb.Int32(int32(i * 10))
+			frame, err := grpc.MarshalFrame(msg, false)
+			if err != nil {
+				return
+			}
+			_, _ = w.Write(frame)
+			if flusher != nil {
+				flusher.Flush()
+			}
+		}
+
+		w.Header().Set("grpc-status", "0")
+		w.Header().Set("grpc-message", "OK")
+	}))
+	defer server.Close()
+
+	ctx := context.Background()
+	client := aoni.NewClient(nil)
+
+	stream, err := grpc.ServerStream[wrapperspb.Int32Value](
+		ctx,
+		client,
+		server.URL+"/TestService/StreamInts",
+		wrapperspb.String("start"),
+	)
+	require.NoError(t, err)
+	defer stream.Close()
+
+	assert.NotNil(t, stream.Header())
+
+	var values []int32
+	for {
+		msg, err := stream.Recv()
+		if err == io.EOF {
+			break
+		}
+		require.NoError(t, err)
+		values = append(values, msg.GetValue())
+	}
+
+	assert.Equal(t, []int32{10, 20, 30}, values)
+	assert.NotNil(t, stream.Trailer())
+}
+
+func TestBidiStream_FunctionalRoundtrip(t *testing.T) {
+	t.Parallel()
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		rc := http.NewResponseController(w)
+		_ = rc.EnableFullDuplex()
+
+		w.Header().Set("Content-Type", "application/grpc")
+		w.Header().Set("Trailer", "grpc-status, grpc-message")
+		w.WriteHeader(http.StatusOK)
+
+		flusher, _ := w.(http.Flusher)
+
+		// Read incoming frames and echo back multiplied by 2
+		for {
+			var incoming wrapperspb.Int32Value
+			_, err := grpc.UnmarshalFrame(r.Body, &incoming)
+			if err != nil {
+				break
+			}
+
+			outgoing := wrapperspb.Int32(incoming.GetValue() * 2)
+			frame, err := grpc.MarshalFrame(outgoing, false)
+			if err != nil {
+				break
+			}
+			_, _ = w.Write(frame)
+			if flusher != nil {
+				flusher.Flush()
+			}
+		}
+
+		w.Header().Set("grpc-status", "0")
+		w.Header().Set("grpc-message", "OK")
+	}))
+	defer server.Close()
+
+	ctx := context.Background()
+	client := aoni.NewClient(nil)
+
+	bidi, err := grpc.BidiStream[*wrapperspb.Int32Value, wrapperspb.Int32Value](
+		ctx,
+		client,
+		server.URL+"/TestService/EchoMultiplied",
+	)
+	require.NoError(t, err)
+	defer bidi.Close()
+
+	var results []int32
+	go func() {
+		for i := int32(1); i <= 3; i++ {
+			if err := bidi.Send(wrapperspb.Int32(i)); err != nil {
+				t.Logf("client send error at %d: %v", i, err)
+			}
+		}
+		_ = bidi.CloseSend()
+	}()
+
+	for {
+		msg, err := bidi.Recv()
+		if err == io.EOF {
+			break
+		}
+		require.NoError(t, err)
+		results = append(results, msg.GetValue())
+	}
+
+	assert.Equal(t, []int32{2, 4, 6}, results)
+	assert.NotNil(t, bidi.Trailer())
+}
+
+func TestClientStream_FunctionalRoundtrip(t *testing.T) {
+	t.Parallel()
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/grpc")
+		w.Header().Set("Trailer", "grpc-status, grpc-message")
+		w.WriteHeader(http.StatusOK)
+
+		var total int32
+		for {
+			var incoming wrapperspb.Int32Value
+			_, err := grpc.UnmarshalFrame(r.Body, &incoming)
+			if err != nil {
+				break
+			}
+			total += incoming.GetValue()
+		}
+
+		outgoing := wrapperspb.Int32(total)
+		frame, _ := grpc.MarshalFrame(outgoing, false)
+		_, _ = w.Write(frame)
+
+		w.Header().Set("grpc-status", "0")
+		w.Header().Set("grpc-message", "OK")
+	}))
+	defer server.Close()
+
+	ctx := context.Background()
+	client := aoni.NewClient(nil)
+
+	clientStream, err := grpc.ClientStream[*wrapperspb.Int32Value, wrapperspb.Int32Value](
+		ctx,
+		client,
+		server.URL+"/TestService/SumAll",
+	)
+	require.NoError(t, err)
+	defer clientStream.Close()
+
+	// Send 5, 10, 15
+	require.NoError(t, clientStream.Send(wrapperspb.Int32(5)))
+	require.NoError(t, clientStream.Send(wrapperspb.Int32(10)))
+	require.NoError(t, clientStream.Send(wrapperspb.Int32(15)))
+
+	resp, err := clientStream.CloseAndRecv()
+	require.NoError(t, err)
+	assert.Equal(t, int32(30), resp.GetValue())
 }

@@ -467,6 +467,7 @@ func (m RequestModifier) ApplyStd(req *http.Request) {
 			req.Body = stdio.NopCloser(m.Stream)
 		}
 
+		req.ContentLength = -1
 		if b, ok := m.Stream.(interface{ Len() int }); ok {
 			req.ContentLength = int64(b.Len())
 		} else if s, ok := m.Stream.(interface{ Len() int64 }); ok {
