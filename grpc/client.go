@@ -18,9 +18,8 @@ import (
 	"sync/atomic"
 	"time"
 
-	"google.golang.org/protobuf/proto"
-
 	asyncctx "github.com/lemon4ksan/foundation/async/context"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/lemon4ksan/aoni"
 	"github.com/lemon4ksan/aoni/fast"
@@ -558,7 +557,7 @@ func BidiStream[Req proto.Message, Resp any](
 	mods ...aoni.RequestModifier,
 ) (*BidiStreamClient[Req, Resp], error) {
 	ctx = asyncctx.Wrap(ctx)
-	streamCtx, cancel := context.WithCancel(ctx)
+	streamCtx, cancel := context.WithCancel(ctx) //nolint:gosec
 	pipeReader, pipeWriter := io.Pipe()
 
 	path := normalizeMethodPath(fullMethod)
@@ -568,7 +567,7 @@ func BidiStream[Req proto.Message, Resp any](
 
 	connectResCh := make(chan connectResult, 1)
 	go func() {
-		resp, err := requester.Request(streamCtx, http.MethodPost, path, grpcMods...)
+		resp, err := requester.Request(streamCtx, http.MethodPost, path, grpcMods...) //nolint:bodyclose
 		connectResCh <- connectResult{resp: resp, err: err}
 	}()
 
@@ -598,6 +597,7 @@ func (s *ClientStreamClient[Req, Resp]) CloseAndRecv() (*Resp, error) {
 	if err := s.bidi.CloseSend(); err != nil {
 		return nil, err
 	}
+
 	defer s.bidi.Close()
 
 	return s.bidi.Recv()

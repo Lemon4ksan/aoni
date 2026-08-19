@@ -15,8 +15,8 @@ import (
 	"log"
 	"time"
 
-	"github.com/lemon4ksan/aoni/dns"
 	"github.com/lemon4ksan/aoni/mod"
+	"github.com/lemon4ksan/aoni/netutil/dns"
 	"github.com/lemon4ksan/aoni/option"
 	"github.com/lemon4ksan/aoni/request"
 

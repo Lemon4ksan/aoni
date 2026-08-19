@@ -26,9 +26,10 @@ import (
 	"sync"
 	"time"
 
+	"github.com/lemon4ksan/foundation/silicon/bytesconv"
+
 	"github.com/lemon4ksan/aoni"
 	"github.com/lemon4ksan/aoni/netutil/netdial"
-	"github.com/lemon4ksan/foundation/silicon/bytesconv"
 )
 
 func handleHTTPProxyConn(ctx context.Context, srv *Server, conn net.Conn, br *bufio.Reader) error {

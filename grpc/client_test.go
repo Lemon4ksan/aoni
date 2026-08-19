@@ -8,6 +8,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/base64"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -169,11 +170,14 @@ func TestServerStream_FunctionalRoundtrip(t *testing.T) {
 		// Send 3 streaming frames
 		for i := 1; i <= 3; i++ {
 			msg := wrapperspb.Int32(int32(i * 10))
+
 			frame, err := grpc.MarshalFrame(msg, false)
 			if err != nil {
 				return
 			}
+
 			_, _ = w.Write(frame)
+
 			if flusher != nil {
 				flusher.Flush()
 			}
@@ -194,6 +198,7 @@ func TestServerStream_FunctionalRoundtrip(t *testing.T) {
 		wrapperspb.String("start"),
 	)
 	require.NoError(t, err)
+
 	defer stream.Close()
 
 	assert.NotNil(t, stream.Header())
@@ -201,10 +206,12 @@ func TestServerStream_FunctionalRoundtrip(t *testing.T) {
 	var values []int32
 	for {
 		msg, err := stream.Recv()
-		if err == io.EOF {
+		if errors.Is(err, io.EOF) {
 			break
 		}
+
 		require.NoError(t, err)
+
 		values = append(values, msg.GetValue())
 	}
 
@@ -228,17 +235,21 @@ func TestBidiStream_FunctionalRoundtrip(t *testing.T) {
 		// Read incoming frames and echo back multiplied by 2
 		for {
 			var incoming wrapperspb.Int32Value
+
 			_, err := grpc.UnmarshalFrame(r.Body, &incoming)
 			if err != nil {
 				break
 			}
 
 			outgoing := wrapperspb.Int32(incoming.GetValue() * 2)
+
 			frame, err := grpc.MarshalFrame(outgoing, false)
 			if err != nil {
 				break
 			}
+
 			_, _ = w.Write(frame)
+
 			if flusher != nil {
 				flusher.Flush()
 			}
@@ -258,24 +269,29 @@ func TestBidiStream_FunctionalRoundtrip(t *testing.T) {
 		server.URL+"/TestService/EchoMultiplied",
 	)
 	require.NoError(t, err)
+
 	defer bidi.Close()
 
 	var results []int32
+
 	go func() {
 		for i := int32(1); i <= 3; i++ {
 			if err := bidi.Send(wrapperspb.Int32(i)); err != nil {
 				t.Logf("client send error at %d: %v", i, err)
 			}
 		}
+
 		_ = bidi.CloseSend()
 	}()
 
 	for {
 		msg, err := bidi.Recv()
-		if err == io.EOF {
+		if errors.Is(err, io.EOF) {
 			break
 		}
+
 		require.NoError(t, err)
+
 		results = append(results, msg.GetValue())
 	}
 
@@ -294,10 +310,12 @@ func TestClientStream_FunctionalRoundtrip(t *testing.T) {
 		var total int32
 		for {
 			var incoming wrapperspb.Int32Value
+
 			_, err := grpc.UnmarshalFrame(r.Body, &incoming)
 			if err != nil {
 				break
 			}
+
 			total += incoming.GetValue()
 		}
 
@@ -319,6 +337,7 @@ func TestClientStream_FunctionalRoundtrip(t *testing.T) {
 		server.URL+"/TestService/SumAll",
 	)
 	require.NoError(t, err)
+
 	defer clientStream.Close()
 
 	// Send 5, 10, 15

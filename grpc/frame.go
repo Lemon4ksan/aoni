@@ -56,6 +56,7 @@ func MarshalFrame(msg proto.Message, compressed bool) ([]byte, error) {
 	}
 
 	var buf bytes.Buffer
+
 	gzWriter, _ := gzipWriterPool.Get().(*gzip.Writer)
 	gzWriter.Reset(&buf)
 
@@ -78,7 +79,7 @@ func MarshalFrame(msg proto.Message, compressed bool) ([]byte, error) {
 
 	gzPayload := buf.Bytes()
 	frame := make([]byte, 5+len(gzPayload))
-	frame[0] = 1 // compressed flag
+	frame[0] = 1
 	binary.BigEndian.PutUint32(frame[1:5], uint32(len(gzPayload))) //nolint:gosec
 	copy(frame[5:], gzPayload)
 

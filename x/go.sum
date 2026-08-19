@@ -1,8 +1,8 @@
 github.com/andybalholm/brotli v1.2.2 h1:HzTuoo2ErYQqf5qvcJInB8uvqSVxRttzkFexPWtnceM=
 github.com/andybalholm/brotli v1.2.2/go.mod h1:rzTDkvFWvIrjDXZHkuS16NPggd91W3kUSvPlQ1pLaKY=
 github.com/creack/pty v1.1.9/go.mod h1:oKZEueFk5CKHvIhNR5MUki03XCEU+Q6VDXinZuGJ33E=
-github.com/davecgh/go-spew v1.1.1 h1:vj9j/u1bqnvCEfJOwUhtlOARqs3+rkHYY13jYWTU97c=
-github.com/davecgh/go-spew v1.1.1/go.mod h1:J7Y8YcW2NihsgmVo/mv3lAwl/skON4iLHjSsI+c5H38=
+github.com/davecgh/go-spew v1.1.2-0.20180830191138-d8f796af33cc h1:U9qPSI2PIWSS1VwoXQT9A3Wy9MM3WgvqSxFWenqJduM=
+github.com/davecgh/go-spew v1.1.2-0.20180830191138-d8f796af33cc/go.mod h1:J7Y8YcW2NihsgmVo/mv3lAwl/skON4iLHjSsI+c5H38=
 github.com/google/go-cmp v0.7.0 h1:wk8382ETsv4JYUZwIsn6YpYiWiBsYLSJiTsyBybVuN8=
 github.com/google/go-cmp v0.7.0/go.mod h1:pXiqmnSA92OHEEa9HXL2W4E7lf9JzCmGVUdgjX3N/iU=
 github.com/klauspost/compress v1.19.1 h1:VsB4HPswih7mmZ8WleSFQ75c/Ui1M4trX5oAsJnhSlk=
@@ -15,10 +15,12 @@ github.com/lemon4ksan/aoni v0.6.2-0.20260819102008-70f4d6102d54 h1:PnepgKnQ/PDfG
 github.com/lemon4ksan/aoni v0.6.2-0.20260819102008-70f4d6102d54/go.mod h1:3/r6LWKgMc4UG1Gv5wUaW2Fuv6m7UDVWgeuiqqCqpEI=
 github.com/lemon4ksan/foundation v0.0.0-20260819121941-73a6d5232732 h1:VfokEit97IiZiejpufb+bii+i9D7pJaLxaQgtV/nCTA=
 github.com/lemon4ksan/foundation v0.0.0-20260819121941-73a6d5232732/go.mod h1:xP69J8+H9P94wRq34ROibsAevP1ru0aJOV/Tsp4oSOE=
+github.com/lemon4ksan/foundation v0.0.0-20260819123331-bdbbfc0d11de h1:pNUu288ids81m1Ns+BGNpG+yLYJL3i4NHPXJIQoWTdQ=
+github.com/lemon4ksan/foundation v0.0.0-20260819123331-bdbbfc0d11de/go.mod h1:KQ3uSVM7PtQL02x+mY6+wXzutFcTYYbgv+WfElKvZXc=
 github.com/oschwald/maxminddb-golang/v2 v2.4.1 h1:OffzqSABE3Sw354GdBThqDsKfpA4GWBqOY2P91V8tjI=
 github.com/oschwald/maxminddb-golang/v2 v2.4.1/go.mod h1:CZK8iQQMKfy6mKOifoyUmrj4vTHnMiGVaS7hDaZZxQ0=
-github.com/pmezard/go-difflib v1.0.0 h1:4DBwDE0NGyQoBHbLQYPwSUPoCMWR5BEzIk/f1lZbAQM=
-github.com/pmezard/go-difflib v1.0.0/go.mod h1:iKH77koFhYxTK1pcRnkKkqfTogsbg7gZNVY4sRDYZ/4=
+github.com/pmezard/go-difflib v1.0.1-0.20181226105442-5d4384ee4fb2 h1:Jamvg5psRIccs7FGNTlIRMkT8wgtp5eCXdBlqhYGL6U=
+github.com/pmezard/go-difflib v1.0.1-0.20181226105442-5d4384ee4fb2/go.mod h1:iKH77koFhYxTK1pcRnkKkqfTogsbg7gZNVY4sRDYZ/4=
 github.com/quic-go/go-ossfuzz-seeds v0.1.0 h1:APacT+iIaNF6fd8AGEiN3bT/Jtkd2jz4v4TzM7MFjy0=
 github.com/quic-go/go-ossfuzz-seeds v0.1.0/go.mod h1:3IOHRbJIc+L6YKMwfDtJAM9Vj9k0YY4muhuyUYk5tbk=
 github.com/quic-go/qpack v0.6.0 h1:g7W+BMYynC1LbYLSqRt8PBg5Tgwxn214ZZR34VIOjz8=

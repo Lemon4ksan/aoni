@@ -6,7 +6,7 @@ require (
 	github.com/andybalholm/brotli v1.2.2
 	github.com/getkin/kin-openapi v0.146.0
 	github.com/klauspost/compress v1.19.1
-	github.com/lemon4ksan/foundation v0.0.0-20260819121941-73a6d5232732
+	github.com/lemon4ksan/foundation v0.0.0-20260819123331-bdbbfc0d11de
 	github.com/pkg/sftp v1.13.11
 	github.com/quic-go/qpack v0.6.0
 	github.com/quic-go/quic-go v0.61.0
@@ -30,10 +30,11 @@ require (
 	github.com/santhosh-tekuri/jsonschema/v6 v6.0.2 // indirect
 	github.com/valyala/bytebufferpool v1.0.0 // indirect
 	golang.org/x/text v0.41.0 // indirect
+	golang.org/x/time v0.15.0 // indirect
 )
 
 require (
-	github.com/davecgh/go-spew v1.1.1 // indirect
-	github.com/pmezard/go-difflib v1.0.0 // indirect
+	github.com/davecgh/go-spew v1.1.2-0.20180830191138-d8f796af33cc // indirect
+	github.com/pmezard/go-difflib v1.0.1-0.20181226105442-5d4384ee4fb2 // indirect
 	github.com/refraction-networking/utls v1.8.2
 )
