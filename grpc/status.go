@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/url"
 	"strconv"
+	"strings"
 )
 
 // StatusCode represents official gRPC status codes (0-16) specified in PROTOCOL-HTTP2.md.
@@ -118,9 +119,11 @@ func parseGRPCStatus(trailers http.Header) *StatusError {
 		code = uint64(StatusUnknown)
 	}
 
-	decodedMsg, err := url.QueryUnescape(msgStr)
-	if err != nil {
-		decodedMsg = msgStr
+	decodedMsg := msgStr
+	if strings.ContainsAny(msgStr, "%+") {
+		if unescaped, err := url.QueryUnescape(msgStr); err == nil {
+			decodedMsg = unescaped
+		}
 	}
 
 	var rawDetails []byte

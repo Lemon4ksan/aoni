@@ -9,6 +9,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/lemon4ksan/foundation/silicon/bytesconv"
+
 	"github.com/lemon4ksan/aoni"
 	"github.com/lemon4ksan/aoni/mod"
 )
@@ -22,7 +24,7 @@ func WithMetadata(md Metadata) aoni.RequestModifier {
 	return mod.Custom(func(req aoni.Request) {
 		for k, v := range md {
 			if strings.HasSuffix(strings.ToLower(k), "-bin") {
-				req.SetHeader(k, EncodeBinaryHeader([]byte(v)))
+				req.SetHeader(k, EncodeBinaryHeader(bytesconv.S2B(v)))
 			} else {
 				req.SetHeader(k, v)
 			}

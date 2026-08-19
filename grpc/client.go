@@ -20,6 +20,8 @@ import (
 
 	"google.golang.org/protobuf/proto"
 
+	asyncctx "github.com/lemon4ksan/foundation/async/context"
+
 	"github.com/lemon4ksan/aoni"
 	"github.com/lemon4ksan/aoni/fast"
 	"github.com/lemon4ksan/aoni/mod"
@@ -45,6 +47,8 @@ func Invoke[Resp any](
 	reqMsg proto.Message,
 	mods ...aoni.RequestModifier,
 ) (*Resp, error) {
+	ctx = asyncctx.Wrap(ctx)
+
 	frameBytes, err := MarshalFrame(reqMsg, false)
 	if err != nil {
 		return nil, err
@@ -94,6 +98,8 @@ func InvokeFast[Resp any](
 	reqMsg proto.Message,
 	mods ...aoni.RequestModifier,
 ) (*Resp, error) {
+	ctx = asyncctx.Wrap(ctx)
+
 	frameBytes, err := MarshalFrame(reqMsg, false)
 	if err != nil {
 		return nil, err
@@ -345,6 +351,8 @@ func ServerStream[Resp any](
 	reqMsg proto.Message,
 	mods ...aoni.RequestModifier,
 ) (*StreamResponse[Resp], error) {
+	ctx = asyncctx.Wrap(ctx)
+
 	frameBytes, err := MarshalFrame(reqMsg, false)
 	if err != nil {
 		return nil, err
@@ -549,6 +557,7 @@ func BidiStream[Req proto.Message, Resp any](
 	fullMethod string,
 	mods ...aoni.RequestModifier,
 ) (*BidiStreamClient[Req, Resp], error) {
+	ctx = asyncctx.Wrap(ctx)
 	streamCtx, cancel := context.WithCancel(ctx)
 	pipeReader, pipeWriter := io.Pipe()
 
