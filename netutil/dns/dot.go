@@ -44,22 +44,8 @@ func NewDoTResolver(endpoint, host string) *DoTResolver {
 	}
 }
 
-// LookupIPAddr queries both A and AAAA records over TLS.
+// LookupIPAddr queries both A and AAAA records over a single TLS connection.
 func (d *DoTResolver) LookupIPAddr(ctx context.Context, host string) ([]net.IPAddr, error) {
-	aIPs, err := d.lookup(ctx, host, typeA)
-	if err != nil {
-		return nil, wrapDNSError(host, "DoT", d.Endpoint, err)
-	}
-
-	aaaaIPs, err := d.lookup(ctx, host, typeAAAA)
-	if err != nil {
-		return aIPs, nil //nolint:nilerr
-	}
-
-	return append(aIPs, aaaaIPs...), nil
-}
-
-func (d *DoTResolver) lookup(ctx context.Context, host string, qtype uint16) ([]net.IPAddr, error) {
 	if d.Timeout > 0 {
 		var cancel context.CancelFunc
 
@@ -67,14 +53,23 @@ func (d *DoTResolver) lookup(ctx context.Context, host string, qtype uint16) ([]
 		defer cancel()
 	}
 
-	id := uint16(dotSeqID.Add(1)) //nolint:gosec
-
-	packed, err := packDNSQuery(id, host, qtype)
+	conn, err := d.dialTLS(ctx)
 	if err != nil {
-		return nil, fmt.Errorf("aoni: dot: pack query: %w", err)
+		return nil, wrapDNSError(host, "DoT", d.Endpoint, err)
+	}
+	defer conn.Close()
+
+	aIPs, errA := d.queryConn(conn, host, typeA)
+	aaaaIPs, errAAAA := d.queryConn(conn, host, typeAAAA)
+
+	if errA != nil && errAAAA != nil {
+		return nil, wrapDNSError(host, "DoT", d.Endpoint, errA)
 	}
 
-	// TLS dial
+	return append(aIPs, aaaaIPs...), nil
+}
+
+func (d *DoTResolver) dialTLS(ctx context.Context) (net.Conn, error) {
 	var dialer tls.Dialer
 	if d.TLSConfig != nil {
 		dialer.Config = d.TLSConfig
@@ -89,29 +84,40 @@ func (d *DoTResolver) lookup(ctx context.Context, host string, qtype uint16) ([]
 	if err != nil {
 		return nil, fmt.Errorf("aoni: dot: tls dial %s: %w", d.Endpoint, err)
 	}
-	defer conn.Close()
 
 	if d.Timeout > 0 {
 		if err := conn.SetDeadline(time.Now().Add(d.Timeout)); err != nil {
+			_ = conn.Close()
+
 			return nil, fmt.Errorf("aoni: dot: set deadline: %w", err)
 		}
 	}
 
-	// DNS over TLS uses 2-byte length prefix (RFC 7858)
-	lengthBuf := make([]byte, 2)
-	lengthBuf[0] = byte(len(packed) >> 8) //nolint:gosec
-	lengthBuf[1] = byte(len(packed))      //nolint:gosec
+	return conn, nil
+}
 
-	if _, err := conn.Write(append(lengthBuf, packed...)); err != nil {
+func (d *DoTResolver) queryConn(conn net.Conn, host string, qtype uint16) ([]net.IPAddr, error) {
+	id := uint16(dotSeqID.Add(1))
+
+	packed, err := packDNSQuery(id, host, qtype)
+	if err != nil {
+		return nil, fmt.Errorf("aoni: dot: pack query: %w", err)
+	}
+
+	// DNS over TLS uses 2-byte length prefix (RFC 7858)
+	var lengthBuf [2]byte
+	binary.BigEndian.PutUint16(lengthBuf[:], uint16(len(packed))) //nolint:gosec
+
+	if _, err := conn.Write(append(lengthBuf[:], packed...)); err != nil {
 		return nil, fmt.Errorf("aoni: dot: write query: %w", err)
 	}
 
 	// Read 2-byte length prefix
-	if _, err := io.ReadFull(conn, lengthBuf); err != nil {
+	if _, err := io.ReadFull(conn, lengthBuf[:]); err != nil {
 		return nil, fmt.Errorf("aoni: dot: read response length: %w", err)
 	}
 
-	respLen := int(lengthBuf[0])<<8 | int(lengthBuf[1])
+	respLen := int(binary.BigEndian.Uint16(lengthBuf[:]))
 
 	respBuf := make([]byte, respLen)
 	if _, err := io.ReadFull(conn, respBuf); err != nil {

@@ -5,7 +5,7 @@
 package fingerprint
 
 import (
-	"math/rand/v2"
+	"github.com/lemon4ksan/foundation/silicon/rand"
 )
 
 // Predefined realistic header pools to mimic popular Cloud/CDN networks.
@@ -74,7 +74,7 @@ func GeneratePadding(cfg PaddingConfig) []byte {
 		maxLen = minLen
 	}
 
-	n := minLen + rand.IntN(maxLen-minLen+1)
+	n := minLen + rand.Intn(maxLen-minLen+1)
 	padding := make([]byte, n)
 
 	for i := range padding {
@@ -88,7 +88,7 @@ func GeneratePadding(cfg PaddingConfig) []byte {
 // Selects a random entry from HeaderPool if configured, falling back to PaddingHeader or "X-Padding".
 func PaddingHeaderName(cfg PaddingConfig) string {
 	if len(cfg.HeaderPool) > 0 {
-		return cfg.HeaderPool[rand.IntN(len(cfg.HeaderPool))]
+		return cfg.HeaderPool[rand.Intn(len(cfg.HeaderPool))]
 	}
 
 	if cfg.PaddingHeader != "" {

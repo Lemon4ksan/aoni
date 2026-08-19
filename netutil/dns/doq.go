@@ -62,16 +62,38 @@ func (r *DoQResolver) LookupIPAddr(ctx context.Context, host string) ([]net.IPAd
 	return addrs, nil
 }
 
-// LookupDNSRecords queries A and AAAA records over DoQ, returning DNS records with authoritative TTLs.
+// LookupDNSRecords queries A and AAAA records concurrently over DoQ, returning DNS records with authoritative TTLs.
 func (r *DoQResolver) LookupDNSRecords(ctx context.Context, host string) ([]wire.DNSRecord, error) {
-	v4Records, err4 := r.queryStreamRecords(ctx, host, wire.TypeA)
-	v6Records, err6 := r.queryStreamRecords(ctx, host, wire.TypeAAAA)
+	var (
+		v4Records, v6Records []wire.DNSRecord
+		err4, err6           error
+		wg                   sync.WaitGroup
+	)
+
+	wg.Add(2)
+
+	go func() {
+		defer wg.Done()
+
+		v4Records, err4 = r.queryStreamRecords(ctx, host, wire.TypeA)
+	}()
+	go func() {
+		defer wg.Done()
+
+		v6Records, err6 = r.queryStreamRecords(ctx, host, wire.TypeAAAA)
+	}()
+
+	wg.Wait()
 
 	if err4 != nil && err6 != nil {
 		return nil, err4
 	}
 
-	return append(v4Records, v6Records...), nil
+	records := make([]wire.DNSRecord, 0, len(v4Records)+len(v6Records))
+	records = append(records, v4Records...)
+	records = append(records, v6Records...)
+
+	return records, nil
 }
 
 // LookupWireRecord queries a raw DNS wire format response over DoQ for a specific query type.
