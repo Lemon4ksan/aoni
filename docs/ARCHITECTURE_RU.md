@@ -47,6 +47,11 @@
   - Pure-Go эмуляция отпечатков JA3, JA4 и JA4H.
   - Подмена сигнатур TCP/IP стека на уровне SYN/ACK пакетов (p0f).
   - TLS 1.3 Encrypted Client Hello (ECH по стандарту RFC 9460 через DoH/DoQ).
+- **L3/L4 шифрованное туннелирование и периметр сети (`tunnel/`)**:
+  - `tunnel/ssh` (RFC 4251–4254): Multi-hop SSH бастионы (Jump Hosts), динамический SOCKS5 форвардинг, обратный SSH шлюз с маршрутизацией по TLS SNI, а также встраиваемые PTY и SFTP серверы.
+  - `tunnel/masque` (RFC 9298): Инкапсуляция CONNECT-UDP и CONNECT-IP поверх HTTP/3.
+  - `tunnel/tun`: Высокопроизводительный L3 сетевой адаптер (Wintun/TUN).
+  - `tunnel/inbound`: Двойной гибридный HTTP/SOCKS5 прокси-сервер с авто-определением протокола.
 
 ### Уровень 3: `vortex` (Инструментарий разработчика и Observability)
 Платформа статического анализа и генерации:

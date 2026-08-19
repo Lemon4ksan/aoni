@@ -174,6 +174,7 @@ option / mod ──┼
 | **Обход TLS-анализа (JA3/JA4)** | ✗ | ✗ | **✓ (Через `uTLS` и Handshake)** |
 | **Снятие отпечатков JA4+** | ✗ | ✗ | **✓ (TLS и HTTP, на чистом Go)** |
 | **Поддержка Unix Domain Sockets** | ⚠️ (Вручную) | ✗ | **✓ (Нативная схема `unix://`)** |
+| **L4/L7 SSH и MASQUE Туннели** | ✗ | ✗ | **✓ (SSH Jump Hosts, SOCKS5, MASQUE RFC 9298, Wintun)** |
 | **Клиент Socket.IO / Engine.IO v4** | ✗ | ✗ | **✓ (`github.com/lemon4ksan/aoni/x/socketio`)** |
 | **Изоляция сессий и кук по прокси** | ✗ | ✗ | **✓ (`ProxyIsolatedJar`)** |
 | **Переопределения на уровне запроса** | ✗ (Ручной транспорт) | ✗ (Требует клонирования клиента) | **✓ (Контекстные аксессоры)** |
@@ -187,6 +188,7 @@ aoni/
 ├── request/      // Generic-хелперы (request.GetTo[T], PostTo, PostProtoTo)
 ├── fast/         // Движок высокой производительности на базе fasthttp
 ├── fluent/       // Цепочный Builder API (fluent.R, FetchTo[T], Codec)
+├── tunnel/       // L3/L4 туннелирование: SSH Jump Hosts & Reverse Gateway, MASQUE (RFC 9298), Wintun L3
 ├── cookie/       // Прокси-изолированные куки, формат Netscape, сортировка по RFC 6265
 ├── fingerprint/  // Обход TLS/JA4/p0f отпечатков, кадры HTTP/2, CDN-паддинг
 ├── netutil/      // Ротатор прокси, DoH/DoT DNS резолверы, ротатор IPv6 подсетей

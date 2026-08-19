@@ -379,3 +379,66 @@ vortex diff https://api.example.com/openapi.json pkg/services/user/api.go --fail
 # Health check all workspace contracts
 vortex status -strict
 ```
+
+## 17. Outbound HTTP Routing via Multi-Hop SSH Jump Hosts
+
+When backend microservices reside behind secure bastion hosts or private VPC boundaries, outbound HTTP requests can be tunneled directly through an SSH client pipeline without running a local SOCKS proxy daemon.
+
+```go
+import (
+	"context"
+
+	"github.com/lemon4ksan/aoni"
+	"github.com/lemon4ksan/aoni/option"
+	"github.com/lemon4ksan/aoni/request"
+	"github.com/lemon4ksan/aoni/tunnel/ssh"
+)
+
+// 1. Establish bastion jump host session
+bastion, err := ssh.NewClient(ctx, "bastion.corp.local",
+	ssh.WithKeyFile("~/.ssh/id_ed25519"),
+)
+if err != nil {
+	panic(err)
+}
+
+// 2. Connect to internal target through the bastion
+internalSSH, err := ssh.NewClient(ctx, "10.0.1.50:22",
+	ssh.WithJump(bastion),
+	ssh.WithKeyFile("~/.ssh/id_ed25519"),
+)
+if err != nil {
+	panic(err)
+}
+
+// 3. Bind SSH dialer to an aoni HTTP Client
+client := aoni.NewClient(nil, option.WithDialer(internalSSH))
+
+// Outbound request executes through the SSH encrypted tunnel
+resp, err := request.GetTo[User](ctx, client, "http://internal-api.service.local/v1/data")
+```
+
+## 18. Reverse SSH Tunnel Gateway with TLS SNI Routing
+
+To expose local HTTP services behind NAT or firewalls without third-party services like ngrok, `aoni` provides an embedded reverse SSH tunnel router that routes incoming TLS connections based on their SNI hostname.
+
+```go
+import (
+	"context"
+	"net/http"
+
+	"github.com/lemon4ksan/aoni/tunnel/ssh/reverse"
+)
+
+router := reverse.NewRouter()
+
+// Register custom subdomain route
+subdomain, err := router.Register(ctx, "api.tunnel.example.com", remoteSSHConn)
+if err != nil {
+	panic(err)
+}
+
+// Gateway inspects SNI in ClientHello and forwards raw traffic to the appropriate SSH channel
+gateway := reverse.NewGateway(router)
+http.ListenAndServe(":443", gateway)
+```

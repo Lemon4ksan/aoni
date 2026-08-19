@@ -178,6 +178,7 @@ The underlying network plumbing in `aoni` is powered by pure-Go, zero-dependency
 | **TLS Evasion (JA3/JA4)** | ✗ | ✗ | **✓ (via uTLS & Handshake)** |
 | **JA4+ Fingerprinting** | ✗ | ✗ | **✓ (TLS & HTTP, pure Go)** |
 | **Unix Domain Socket Support** | ⚠️ (Manual) | ✗ | **✓ (Native `unix://`)** |
+| **L4/L7 SSH & MASQUE Tunnels** | ✗ | ✗ | **✓ (SSH Jump Hosts, SOCKS5, MASQUE RFC 9298, Wintun)** |
 | **Socket.IO / Engine.IO v4 Client** | ✗ | ✗ | **✓ (`github.com/lemon4ksan/aoni/x/socketio`)** |
 | **Proxy & Session Isolation** | ✗ | ✗ | **✓ (`ProxyIsolatedJar`)** |
 | **Per-Request Overrides** | ✗ (Manual transport) | ✗ (Requires client clone) | **✓ (Context Accessors)** |
@@ -191,6 +192,7 @@ aoni/
 ├── request/      // Generic request helpers (request.GetTo[T], PostTo, PostProtoTo)
 ├── fast/         // High-performance fasthttp engine adapters
 ├── fluent/       // Chainable Request Builder API (fluent.R, FetchTo[T], Codec)
+├── tunnel/       // L3/L4 tunneling: SSH Jump Hosts & Reverse Gateway, MASQUE (RFC 9298), Wintun L3
 ├── cookie/       // Proxy-isolated cookie jars, Netscape format, RFC 6265 path sorting
 ├── fingerprint/  // TLS/JA4/p0f evasion, HTTP/2 framing, CDN padding
 ├── netutil/      // Proxy rotators, DoH/DoT DNS resolvers, IPv6 subnet rotators
