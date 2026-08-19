@@ -269,7 +269,5 @@ func (t *targetTracker) IsTracked(addr string) bool {
 		return false
 	}
 
-	_, ok := t.targets[addr]
-
-	return ok
+	return t.targets[addr] > 0
 }

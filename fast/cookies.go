@@ -34,14 +34,7 @@ func (c *Client) applyCookies(ctx context.Context, req *fasthttp.Request) {
 		jar = pJar.GetJar(ctx)
 	}
 
-	if jar == nil {
-		return
-	}
-
-	u, err := foundation.Parse(bytesconv.B2S(req.URI().FullURI()))
-	if err != nil {
-		return
-	}
+	u := uriToURL(req.URI())
 
 	cookies := jar.Cookies(u)
 	if len(cookies) == 0 {
@@ -89,10 +82,7 @@ func (c *Client) captureCookies(ctx context.Context, req *fasthttp.Request, resp
 		return
 	}
 
-	u, err := foundation.Parse(bytesconv.B2S(req.URI().FullURI()))
-	if err != nil {
-		return
-	}
+	u := uriToURL(req.URI())
 
 	var cookies []*http.Cookie
 	resp.Header.Cookies()(func(key, value []byte) bool {
@@ -200,4 +190,13 @@ func isSameDomainOrSubdomain(h1, h2 string) bool {
 	clean2 := netutil.CleanHost(h2)
 
 	return foundation.IsSameDomainOrSubdomain(clean1, clean2)
+}
+
+func uriToURL(uri *fasthttp.URI) *url.URL {
+	return &url.URL{
+		Scheme:   bytesconv.B2S(uri.Scheme()),
+		Host:     bytesconv.B2S(uri.Host()),
+		Path:     bytesconv.B2S(uri.Path()),
+		RawQuery: bytesconv.B2S(uri.QueryArgs().QueryString()),
+	}
 }
