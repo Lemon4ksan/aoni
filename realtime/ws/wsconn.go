@@ -457,7 +457,7 @@ func applyFastMask(payload []byte, mask [4]byte) {
 	}
 
 	maskKey := binary.LittleEndian.Uint32(mask[:])
-	simd.ApplyFastMaskVector(payload, maskKey)
+	simd.XORMask32(payload, maskKey)
 }
 
 func dialH3ExtendedConnect(

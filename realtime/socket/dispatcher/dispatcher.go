@@ -159,7 +159,7 @@ func (d *Dispatcher[OpCode, JobID, Packet]) SendSync(
 	_ = d.tasks.Add(jobID, cb, task.WithContext[Packet](ctx))
 
 	var zero Packet
-	defer d.tasks.Resolve(jobID, zero, task.ErrJobCancelled)
+	defer d.tasks.Resolve(jobID, zero, task.ErrTaskCancelled)
 
 	if err := d.writer.Send(ctx, payload); err != nil {
 		return zero, err
@@ -170,12 +170,12 @@ func (d *Dispatcher[OpCode, JobID, Packet]) SendSync(
 		return zero, ctx.Err()
 
 	case res := <-resCh:
-		if errors.Is(res.err, task.ErrJobCancelled) {
+		if errors.Is(res.err, task.ErrTaskCancelled) {
 			if ctx.Err() != nil {
 				return zero, ctx.Err()
 			}
 
-			return zero, task.ErrJobCancelled
+			return zero, task.ErrTaskCancelled
 		}
 
 		return res.pkt, res.err
@@ -229,7 +229,7 @@ func (d *Dispatcher[OpCode, JobID, Packet]) Close() error {
 		return nil
 	}
 
-	d.tasks.CancelAll(task.ErrJobCancelled)
+	d.tasks.CancelAll(task.ErrTaskCancelled)
 
 	return nil
 }

@@ -288,7 +288,7 @@ func (c *CmdBench) Run(ctx context.Context, args []string, stdout, stderr io.Wri
 	start = time.Now()
 
 	for i := 0; i < iterationsSIMD; i++ {
-		simd.ApplyFastMaskVector(dataBlock, maskVal)
+		simd.XORMask32(dataBlock, maskVal)
 	}
 
 	elapsed = time.Since(start)
@@ -346,7 +346,7 @@ func (c *CmdBench) Run(ctx context.Context, args []string, stdout, stderr io.Wri
 	start = time.Now()
 
 	for i := 0; i < iterationsWS; i++ {
-		simd.ApplyFastMaskVector(wsPayload, maskVal)
+		simd.XORMask32(wsPayload, maskVal)
 	}
 
 	elapsed = time.Since(start)

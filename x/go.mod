@@ -4,7 +4,7 @@ go 1.25.4
 
 require (
 	github.com/lemon4ksan/aoni v0.6.2-0.20260819102008-70f4d6102d54
-	github.com/lemon4ksan/foundation v0.0.0-20260819093454-ae2473f665c8
+	github.com/lemon4ksan/foundation v0.0.0-20260819121941-73a6d5232732
 	github.com/oschwald/maxminddb-golang/v2 v2.4.1
 	github.com/stretchr/testify v1.11.1
 )
