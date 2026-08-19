@@ -90,57 +90,13 @@ func AcquireTx(ctx context.Context) *Tx {
 	return tx
 }
 
-// ReleaseTx zeroes fields and returns tx back to pool.
+// ReleaseTx zeroes all fields and returns tx back to the pool.
 func ReleaseTx(tx *Tx) {
 	if tx == nil {
 		return
 	}
 
-	tx.Ctx = nil
-	tx.Flags = 0
-	tx.TargetURL = ""
-	tx.TargetHost = ""
-	tx.ProxyURL = nil
-	tx.TimeoutOverride = 0
-	tx.MultiReadThreshold = 0
-	tx.SizeLimit = 0
-	tx.MultiReadDisableDisk = false
-
-	tx.DPIJitter = nil
-	tx.ProxyFailover = nil
-	tx.Hedging = nil
-	tx.Cache = nil
-	tx.HAR = nil
-	tx.Redact = nil
-
-	tx.Decoder = nil
-	tx.ErrorModel = nil
-	tx.ForceContentType = ""
-	tx.Label = ""
-	tx.MultipartBoundary = ""
-	tx.OrderedHeaders = nil
-	tx.ALPNOverride = nil
-	tx.JA4ReportStore = nil
-	tx.Fallback = nil
-	tx.ResponseValidator = nil
-	tx.RetryPolicy = nil
-	tx.P0fSignature = nil
-	tx.SessionCache = nil
-	tx.PacketPadding = nil
-	tx.SocketController = nil
-	tx.ClientHelloSpecProvider = nil
-	tx.JA4Callback = nil
-	tx.Metadata = nil
-	tx.TraceInfo = nil
-	tx.HostRewrite = nil
-	tx.Fragment = nil
-	tx.CertificatePins = nil
-	tx.Modifiers = nil
-	tx.QueryEncoder = nil
-	tx.Decoders = nil
-	tx.UnsafePhaseOrder = nil
-	tx.UnsafeHooks = nil
-
+	*tx = Tx{}
 	txStorage.Put(tx)
 }
 

@@ -7,6 +7,10 @@ package transport
 import (
 	"context"
 	"net"
+
+	"github.com/lemon4ksan/foundation/silicon/sysnet"
+
+	"github.com/lemon4ksan/aoni/netutil/fragment"
 )
 
 // ConnFilter defines the zero-allocation stream transformation contract.
@@ -51,4 +55,33 @@ func ExecutePipeline(
 	}
 
 	return currConn, nil
+}
+
+// ApplyMSSLimit applies TCP MSS limits via OS socket options.
+func ApplyMSSLimit(conn net.Conn, mss int) net.Conn {
+	if mss <= 0 {
+		return conn
+	}
+
+	if tc, ok := conn.(*net.TCPConn); ok {
+		raw, err := tc.SyscallConn()
+		if err != nil {
+			return conn
+		}
+
+		_ = raw.Control(func(fd uintptr) {
+			sysnet.SetTCPMaxSeg(fd, mss)
+		})
+	}
+
+	return conn
+}
+
+// ApplyFragmentation wraps conn with packet chunk fragmentation settings.
+func ApplyFragmentation(conn net.Conn, cfg fragment.Config) net.Conn {
+	return &fragment.FragmentedConn{
+		Conn:      conn,
+		ChunkSize: cfg.ChunkSize,
+		MaxDelay:  cfg.MaxDelay,
+	}
 }

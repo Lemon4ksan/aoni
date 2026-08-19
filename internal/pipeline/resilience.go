@@ -59,10 +59,11 @@ func (p *Pipeline[Req, Resp]) dispatchRequest(req *http.Request, doer Doer, tx *
 	return resp, err
 }
 
-func (p *Pipeline[Req, Resp]) handle425Recovery(
+func (p *Pipeline[Req, Resp]) retryWithMutation(
 	req *http.Request,
 	doer Doer,
 	origResp *http.Response,
+	mutate func(r *http.Request, cfg *RequestConfig),
 ) (*http.Response, error) {
 	if origResp != nil && origResp.Body != nil {
 		_ = origResp.Body.Close()
@@ -72,15 +73,15 @@ func (p *Pipeline[Req, Resp]) handle425Recovery(
 		httpClient.CloseIdleConnections()
 	}
 
-	reqCfg := GetOrInitRequestConfig(req.Context())
-	reqCfg.Disable0RTT = true
-
 	clonedReq, err := p.cloneRequest(req, req.Context())
 	if err != nil {
 		return nil, err
 	}
 
-	clonedReq.Header.Del("Early-Data")
+	reqCfg := GetOrInitRequestConfig(clonedReq.Context())
+	if mutate != nil {
+		mutate(clonedReq, reqCfg)
+	}
 
 	retryResp, retryErr := doer.Do(clonedReq)
 	if retryResp != nil && retryResp.Request == nil {
@@ -88,6 +89,18 @@ func (p *Pipeline[Req, Resp]) handle425Recovery(
 	}
 
 	return retryResp, retryErr
+}
+
+func (p *Pipeline[Req, Resp]) handle425Recovery(
+	req *http.Request,
+	doer Doer,
+	origResp *http.Response,
+) (*http.Response, error) {
+	return p.retryWithMutation(req, doer, origResp, func(r *http.Request, cfg *RequestConfig) {
+		cfg.Disable0RTT = true
+
+		r.Header.Del("Early-Data")
+	})
 }
 
 func (p *Pipeline[Req, Resp]) handle408Recovery(
@@ -95,27 +108,9 @@ func (p *Pipeline[Req, Resp]) handle408Recovery(
 	doer Doer,
 	origResp *http.Response,
 ) (*http.Response, error) {
-	if origResp != nil && origResp.Body != nil {
-		_ = origResp.Body.Close()
-	}
-
-	if httpClient, ok := doer.(*http.Client); ok {
-		httpClient.CloseIdleConnections()
-	}
-
-	clonedReq, err := p.cloneRequest(req, req.Context())
-	if err != nil {
-		return nil, err
-	}
-
-	clonedReq.Close = true
-
-	retryResp, retryErr := doer.Do(clonedReq)
-	if retryResp != nil && retryResp.Request == nil {
-		retryResp.Request = clonedReq
-	}
-
-	return retryResp, retryErr
+	return p.retryWithMutation(req, doer, origResp, func(r *http.Request, _ *RequestConfig) {
+		r.Close = true
+	})
 }
 
 func (p *Pipeline[Req, Resp]) handle421Recovery(
@@ -123,30 +118,11 @@ func (p *Pipeline[Req, Resp]) handle421Recovery(
 	doer Doer,
 	origResp *http.Response,
 ) (*http.Response, error) {
-	if origResp != nil && origResp.Body != nil {
-		_ = origResp.Body.Close()
-	}
+	return p.retryWithMutation(req, doer, origResp, func(r *http.Request, cfg *RequestConfig) {
+		cfg.DisableAltSvc = true
 
-	reqCfg := GetOrInitRequestConfig(req.Context())
-	reqCfg.DisableAltSvc = true
-
-	if httpClient, ok := doer.(*http.Client); ok {
-		httpClient.CloseIdleConnections()
-	}
-
-	clonedReq, err := p.cloneRequest(req, req.Context())
-	if err != nil {
-		return nil, err
-	}
-
-	clonedReq.Header.Del("Alt-Svc")
-
-	retryResp, retryErr := doer.Do(clonedReq)
-	if retryResp != nil && retryResp.Request == nil {
-		retryResp.Request = clonedReq
-	}
-
-	return retryResp, retryErr
+		r.Header.Del("Alt-Svc")
+	})
 }
 
 func (p *Pipeline[Req, Resp]) executeWithProxyFailover(

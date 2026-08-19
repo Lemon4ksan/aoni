@@ -1164,12 +1164,12 @@ func applyRedirectPolicy(httpClient *http.Client, eng EngineConfig) {
 
 // applyMSSLimit applies maximum segment size boundaries to TCP socket streams.
 func applyMSSLimit(conn net.Conn, mss int) net.Conn {
-	return pipeline.ApplyMSSLimit(conn, mss)
+	return transport.ApplyMSSLimit(conn, mss)
 }
 
 // applyFragmentation applies TCP write payload fragmentation to socket streams.
 func applyFragmentation(conn net.Conn, cfg fragment.Config) net.Conn {
-	return pipeline.ApplyFragmentation(conn, cfg)
+	return transport.ApplyFragmentation(conn, cfg)
 }
 
 // BuildDialConfig converts the [Config] into a self-contained [transport.DialConfig] DTO for socket dialing.
