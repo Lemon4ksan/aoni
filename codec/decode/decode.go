@@ -210,6 +210,7 @@ func Raw(reader stdio.Reader) ([]byte, error) {
 	var target []byte
 
 	err := RawDecoder.Decode(reader, &target)
+
 	return target, err
 }
 

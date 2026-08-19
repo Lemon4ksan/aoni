@@ -19,14 +19,14 @@ import (
 //
 // The returned [Request] is borrowed from a global object pool and is not thread-safe.
 // Callers must finalize the request by invoking one of its execution methods (such as [Request.Execute],
-// [Request.Get], [Request.Post]), or explicitly release it back to the pool using [Request.Discard].
+// [Request.Get], [Request.Post]), or explicitly release it back to the pool using [Request.Release].
 func New(doer any) *Request {
 	return acquireRequest(doer)
 }
 
 // R is a convenient shorthand alias for [New].
 //
-// Callers must finalize the borrowed request with an execution method or [Request.Discard].
+// Callers must finalize the borrowed request with an execution method or [Request.Release].
 func R(doer any) *Request {
 	return acquireRequest(doer)
 }
@@ -45,52 +45,6 @@ func FetchTo[T any](
 		SetResult(&target).
 		Apply(mods...).
 		Execute(method, path)
-
-	return target, resp, err
-}
-
-// PostProtoTo dispatches a POST request carrying a binary [proto.Message] payload and unmarshals the response into T.
-func PostProtoTo[T any](
-	ctx context.Context,
-	c any,
-	path string,
-	reqMsg proto.Message,
-) (T, *http.Response, error) {
-	var target T
-
-	resp, err := R(c).SetContext(ctx).SetProtoBody(reqMsg).SetProtoResult(&target).Post(path)
-
-	return target, resp, err
-}
-
-// PostGRPCWebTo dispatches a POST request carrying a gRPC-Web framed payload and unmarshals the response frame into T.
-func PostGRPCWebTo[T any](
-	ctx context.Context,
-	c any,
-	path string,
-	reqMsg proto.Message,
-) (T, *http.Response, error) {
-	var target T
-
-	resp, err := R(c).SetContext(ctx).SetGRPCWebBody(reqMsg).SetGRPCWebResult(&target).Post(path)
-
-	return target, resp, err
-}
-
-// GetProtoTo dispatches a GET request expecting a binary Protocol Buffer response stream decoded into T.
-func GetProtoTo[T any](ctx context.Context, c any, path string) (T, *http.Response, error) {
-	var target T
-
-	resp, err := R(c).SetContext(ctx).SetProtoResult(&target).Get(path)
-
-	return target, resp, err
-}
-
-// GetGRPCWebTo dispatches a GET request expecting a gRPC-Web framed response stream decoded into T.
-func GetGRPCWebTo[T any](ctx context.Context, c any, path string) (T, *http.Response, error) {
-	var target T
-
-	resp, err := R(c).SetContext(ctx).SetGRPCWebResult(&target).Get(path)
 
 	return target, resp, err
 }
@@ -143,29 +97,104 @@ func PostResult[T any](
 	return generic.Success(target), resp
 }
 
+// PutResult dispatches a PUT request with body and returns a Swift-inspired [generic.Result].
+func PutResult[T any](
+	ctx context.Context,
+	c any,
+	path string,
+	body any,
+	mods ...aoni.RequestModifier,
+) (generic.Result[T], *http.Response) {
+	var target T
+
+	resp, err := R(c).
+		SetContext(ctx).
+		SetBody(body).
+		SetResult(&target).
+		Apply(mods...).
+		Put(path)
+	if err != nil {
+		return generic.Failure[T](err), resp
+	}
+
+	return generic.Success(target), resp
+}
+
+// DeleteResult dispatches a DELETE request and returns a Swift-inspired [generic.Result].
+func DeleteResult[T any](
+	ctx context.Context,
+	c any,
+	path string,
+	mods ...aoni.RequestModifier,
+) (generic.Result[T], *http.Response) {
+	return FetchResult[T](ctx, c, http.MethodDelete, path, mods...)
+}
+
+// PatchResult dispatches a PATCH request with body and returns a Swift-inspired [generic.Result].
+func PatchResult[T any](
+	ctx context.Context,
+	c any,
+	path string,
+	body any,
+	mods ...aoni.RequestModifier,
+) (generic.Result[T], *http.Response) {
+	var target T
+
+	resp, err := R(c).
+		SetContext(ctx).
+		SetBody(body).
+		SetResult(&target).
+		Apply(mods...).
+		Patch(path)
+	if err != nil {
+		return generic.Failure[T](err), resp
+	}
+
+	return generic.Success(target), resp
+}
+
 // PostProtoResult dispatches a Protobuf POST request and returns a [generic.Result].
 func PostProtoResult[T any](
 	ctx context.Context,
 	c any,
 	path string,
 	reqMsg proto.Message,
+	mods ...aoni.RequestModifier,
 ) (generic.Result[T], *http.Response) {
-	val, resp, err := PostProtoTo[T](ctx, c, path, reqMsg)
+	var target T
+
+	resp, err := R(c).
+		SetContext(ctx).
+		SetProtoBody(reqMsg).
+		SetProtoResult(&target).
+		Apply(mods...).
+		Post(path)
 	if err != nil {
 		return generic.Failure[T](err), resp
 	}
 
-	return generic.Success(val), resp
+	return generic.Success(target), resp
 }
 
 // GetProtoResult dispatches a Protobuf GET request and returns a [generic.Result].
-func GetProtoResult[T any](ctx context.Context, c any, path string) (generic.Result[T], *http.Response) {
-	val, resp, err := GetProtoTo[T](ctx, c, path)
+func GetProtoResult[T any](
+	ctx context.Context,
+	c any,
+	path string,
+	mods ...aoni.RequestModifier,
+) (generic.Result[T], *http.Response) {
+	var target T
+
+	resp, err := R(c).
+		SetContext(ctx).
+		SetProtoResult(&target).
+		Apply(mods...).
+		Get(path)
 	if err != nil {
 		return generic.Failure[T](err), resp
 	}
 
-	return generic.Success(val), resp
+	return generic.Success(target), resp
 }
 
 // PostGRPCWebResult dispatches a gRPC-Web POST request and returns a [generic.Result].
@@ -174,21 +203,128 @@ func PostGRPCWebResult[T any](
 	c any,
 	path string,
 	reqMsg proto.Message,
+	mods ...aoni.RequestModifier,
 ) (generic.Result[T], *http.Response) {
-	val, resp, err := PostGRPCWebTo[T](ctx, c, path, reqMsg)
+	var target T
+
+	resp, err := R(c).
+		SetContext(ctx).
+		SetGRPCWebBody(reqMsg).
+		SetGRPCWebResult(&target).
+		Apply(mods...).
+		Post(path)
 	if err != nil {
 		return generic.Failure[T](err), resp
 	}
 
-	return generic.Success(val), resp
+	return generic.Success(target), resp
 }
 
 // GetGRPCWebResult dispatches a gRPC-Web GET request and returns a [generic.Result].
-func GetGRPCWebResult[T any](ctx context.Context, c any, path string) (generic.Result[T], *http.Response) {
-	val, resp, err := GetGRPCWebTo[T](ctx, c, path)
+func GetGRPCWebResult[T any](
+	ctx context.Context,
+	c any,
+	path string,
+	mods ...aoni.RequestModifier,
+) (generic.Result[T], *http.Response) {
+	var target T
+
+	resp, err := R(c).
+		SetContext(ctx).
+		SetGRPCWebResult(&target).
+		Apply(mods...).
+		Get(path)
 	if err != nil {
 		return generic.Failure[T](err), resp
 	}
 
-	return generic.Success(val), resp
+	return generic.Success(target), resp
+}
+
+// PostXMLResult dispatches an XML POST request and returns a [generic.Result].
+func PostXMLResult[T any](
+	ctx context.Context,
+	c any,
+	path string,
+	body any,
+	mods ...aoni.RequestModifier,
+) (generic.Result[T], *http.Response) {
+	var target T
+
+	resp, err := R(c).
+		SetContext(ctx).
+		SetXMLBody(body).
+		SetXMLResult(&target).
+		Apply(mods...).
+		Post(path)
+	if err != nil {
+		return generic.Failure[T](err), resp
+	}
+
+	return generic.Success(target), resp
+}
+
+// GetXMLResult dispatches an XML GET request and returns a [generic.Result].
+func GetXMLResult[T any](
+	ctx context.Context,
+	c any,
+	path string,
+	mods ...aoni.RequestModifier,
+) (generic.Result[T], *http.Response) {
+	var target T
+
+	resp, err := R(c).
+		SetContext(ctx).
+		SetXMLResult(&target).
+		Apply(mods...).
+		Get(path)
+	if err != nil {
+		return generic.Failure[T](err), resp
+	}
+
+	return generic.Success(target), resp
+}
+
+// PostYAMLResult dispatches a YAML POST request and returns a [generic.Result].
+func PostYAMLResult[T any](
+	ctx context.Context,
+	c any,
+	path string,
+	body any,
+	mods ...aoni.RequestModifier,
+) (generic.Result[T], *http.Response) {
+	var target T
+
+	resp, err := R(c).
+		SetContext(ctx).
+		SetYAMLBody(body).
+		SetYAMLResult(&target).
+		Apply(mods...).
+		Post(path)
+	if err != nil {
+		return generic.Failure[T](err), resp
+	}
+
+	return generic.Success(target), resp
+}
+
+// GetYAMLResult dispatches a YAML GET request and returns a [generic.Result].
+func GetYAMLResult[T any](
+	ctx context.Context,
+	c any,
+	path string,
+	mods ...aoni.RequestModifier,
+) (generic.Result[T], *http.Response) {
+	var target T
+
+	resp, err := R(c).
+		SetContext(ctx).
+		SetYAMLResult(&target).
+		Apply(mods...).
+		Get(path)
+	if err != nil {
+		return generic.Failure[T](err), resp
+	}
+
+	return generic.Success(target), resp
 }

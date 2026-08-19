@@ -295,40 +295,52 @@ func TestFluent_ProtoAndGRPCWebShortcuts(t *testing.T) {
 
 	client := aoni.NewClient(server.Client(), option.WithBaseURL(server.URL))
 
-	t.Run("PostProtoTo", func(t *testing.T) {
-		res, resp, err := fluent.PostProtoTo[wrapperspb.StringValue](t.Context(), client, "/proto-post", input)
-		require.NoError(t, err)
+	t.Run("PostProtoResult", func(t *testing.T) {
+		res, resp := fluent.PostProtoResult[wrapperspb.StringValue](t.Context(), client, "/proto-post", input)
 
+		require.NotNil(t, resp)
 		defer resp.Body.Close()
 
-		assert.Equal(t, "proto_fluent_response", res.GetValue())
+		require.True(t, res.IsSuccess())
+		val, err := res.Unwrap()
+		require.NoError(t, err)
+		assert.Equal(t, "proto_fluent_response", val.GetValue())
 	})
 
-	t.Run("GetProtoTo", func(t *testing.T) {
-		res, resp, err := fluent.GetProtoTo[wrapperspb.StringValue](t.Context(), client, "/proto-get")
-		require.NoError(t, err)
+	t.Run("GetProtoResult", func(t *testing.T) {
+		res, resp := fluent.GetProtoResult[wrapperspb.StringValue](t.Context(), client, "/proto-get")
 
+		require.NotNil(t, resp)
 		defer resp.Body.Close()
 
-		assert.Equal(t, "proto_fluent_response", res.GetValue())
+		require.True(t, res.IsSuccess())
+		val, err := res.Unwrap()
+		require.NoError(t, err)
+		assert.Equal(t, "proto_fluent_response", val.GetValue())
 	})
 
-	t.Run("PostGRPCWebTo", func(t *testing.T) {
-		res, resp, err := fluent.PostGRPCWebTo[wrapperspb.StringValue](t.Context(), client, "/grpc-post", input)
-		require.NoError(t, err)
+	t.Run("PostGRPCWebResult", func(t *testing.T) {
+		res, resp := fluent.PostGRPCWebResult[wrapperspb.StringValue](t.Context(), client, "/grpc-post", input)
 
+		require.NotNil(t, resp)
 		defer resp.Body.Close()
 
-		assert.Equal(t, "proto_fluent_response", res.GetValue())
+		require.True(t, res.IsSuccess())
+		val, err := res.Unwrap()
+		require.NoError(t, err)
+		assert.Equal(t, "proto_fluent_response", val.GetValue())
 	})
 
-	t.Run("GetGRPCWebTo", func(t *testing.T) {
-		res, resp, err := fluent.GetGRPCWebTo[wrapperspb.StringValue](t.Context(), client, "/grpc-get")
-		require.NoError(t, err)
+	t.Run("GetGRPCWebResult", func(t *testing.T) {
+		res, resp := fluent.GetGRPCWebResult[wrapperspb.StringValue](t.Context(), client, "/grpc-get")
 
+		require.NotNil(t, resp)
 		defer resp.Body.Close()
 
-		assert.Equal(t, "proto_fluent_response", res.GetValue())
+		require.True(t, res.IsSuccess())
+		val, err := res.Unwrap()
+		require.NoError(t, err)
+		assert.Equal(t, "proto_fluent_response", val.GetValue())
 	})
 }
 
@@ -713,12 +725,12 @@ func TestFluent_AdditionalMethods(t *testing.T) {
 		assert.Equal(t, http.StatusOK, resp.StatusCode)
 	})
 
-	t.Run("SetSaveFileName_and_SetDownloadProgress", func(t *testing.T) {
+	t.Run("SetOutput_and_SetDownloadProgress", func(t *testing.T) {
 		var downloadProgressCalled bool
 
 		targetFile := filepath.Join(t.TempDir(), "save_filename.bin")
 		resp, err := fluent.R(client).
-			SetSaveFileName(targetFile).
+			SetOutput(targetFile).
 			SetDownloadProgress(func(_, _ int64) {
 				downloadProgressCalled = true
 			}).
@@ -750,7 +762,7 @@ func TestFluent_AdditionalMethods(t *testing.T) {
 		assert.Equal(t, "route_label", traceInfo.Label)
 	})
 
-	t.Run("Trace_Connect_Do", func(t *testing.T) {
+	t.Run("Trace_Connect_Execute", func(t *testing.T) {
 		resp, err := fluent.R(client).Trace("/")
 		require.NoError(t, err)
 
@@ -765,7 +777,7 @@ func TestFluent_AdditionalMethods(t *testing.T) {
 
 		assert.Equal(t, http.MethodConnect, capturedMethod)
 
-		resp, err = fluent.R(client).Do(http.MethodPost, "/")
+		resp, err = fluent.R(client).Execute(http.MethodPost, "/")
 		require.NoError(t, err)
 
 		_ = resp.Body.Close()
@@ -814,6 +826,27 @@ func TestFluent_ResultMonadicAPI(t *testing.T) {
 		assert.Equal(t, "MonadicAlex", user.Name)
 	})
 
+	t.Run("PutResult_Success", func(t *testing.T) {
+		res, resp := fluent.PutResult[userPayload](t.Context(), client, "/", userPayload{ID: 200})
+		require.NotNil(t, resp)
+		assert.True(t, res.IsSuccess())
+		user, err := res.Unwrap()
+		require.NoError(t, err)
+		assert.Equal(t, "MonadicAlex", user.Name)
+	})
+
+	t.Run("DeleteResult_Success", func(t *testing.T) {
+		res, resp := fluent.DeleteResult[userPayload](t.Context(), client, "/")
+		require.NotNil(t, resp)
+		assert.True(t, res.IsSuccess())
+	})
+
+	t.Run("PatchResult_Success", func(t *testing.T) {
+		res, resp := fluent.PatchResult[userPayload](t.Context(), client, "/", userPayload{ID: 300})
+		require.NotNil(t, resp)
+		assert.True(t, res.IsSuccess())
+	})
+
 	t.Run("FetchResult_ErrorRecover", func(t *testing.T) {
 		res, _ := fluent.FetchResult[userPayload](t.Context(), client, http.MethodGet, "/error")
 		assert.False(t, res.IsSuccess())
@@ -822,6 +855,118 @@ func TestFluent_ResultMonadicAPI(t *testing.T) {
 		})
 		assert.Equal(t, 999, recovered.ID)
 		assert.Equal(t, "RecoveredUser", recovered.Name)
+	})
+}
+
+type xmlPayload struct {
+	XMLName string `xml:"User"`
+	ID      int    `xml:"id"`
+	Name    string `xml:"name"`
+}
+
+type yamlPayload struct {
+	ID   int    `yaml:"id"`
+	Name string `yaml:"name"`
+}
+
+func TestFluent_XML_And_YAML_Symmetry(t *testing.T) {
+	t.Parallel()
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.Contains(r.Header.Get("Content-Type"), "xml") || strings.Contains(r.URL.Path, "xml") {
+			w.Header().Set("Content-Type", "application/xml")
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(`<User><id>42</id><name>XMLUser</name></User>`))
+
+			return
+		}
+
+		if strings.Contains(r.Header.Get("Content-Type"), "yaml") || strings.Contains(r.URL.Path, "yaml") {
+			w.Header().Set("Content-Type", "application/yaml")
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte("id: 43\nname: YAMLUser\n"))
+
+			return
+		}
+
+		w.WriteHeader(http.StatusOK)
+	}))
+	t.Cleanup(server.Close)
+
+	client := aoni.NewClient(server.Client(), option.WithBaseURL(server.URL))
+
+	t.Run("XML_Builder", func(t *testing.T) {
+		var res xmlPayload
+
+		resp, err := fluent.R(client).
+			SetXMLBody(xmlPayload{ID: 1, Name: "Out"}).
+			SetXMLResult(&res).
+			Post("/xml")
+		require.NoError(t, err)
+
+		defer resp.Body.Close()
+
+		assert.Equal(t, 42, res.ID)
+		assert.Equal(t, "XMLUser", res.Name)
+	})
+
+	t.Run("YAML_Builder", func(t *testing.T) {
+		var res yamlPayload
+
+		resp, err := fluent.R(client).
+			SetYAMLBody(yamlPayload{ID: 2, Name: "Out"}).
+			SetYAMLResult(&res).
+			Post("/yaml")
+		require.NoError(t, err)
+
+		defer resp.Body.Close()
+
+		assert.Equal(t, 43, res.ID)
+		assert.Equal(t, "YAMLUser", res.Name)
+	})
+
+	t.Run("PostXMLResult_And_GetXMLResult", func(t *testing.T) {
+		resPost, respPost := fluent.PostXMLResult[xmlPayload](t.Context(), client, "/xml", xmlPayload{ID: 10})
+
+		require.NotNil(t, respPost)
+		defer respPost.Body.Close()
+
+		require.True(t, resPost.IsSuccess())
+		valPost, err := resPost.Unwrap()
+		require.NoError(t, err)
+		assert.Equal(t, 42, valPost.ID)
+
+		resGet, respGet := fluent.GetXMLResult[xmlPayload](t.Context(), client, "/xml")
+
+		require.NotNil(t, respGet)
+		defer respGet.Body.Close()
+
+		require.True(t, resGet.IsSuccess())
+		valGet, err := resGet.Unwrap()
+		require.NoError(t, err)
+		assert.Equal(t, "XMLUser", valGet.Name)
+	})
+
+	t.Run("PostYAMLResult_And_GetYAMLResult", func(t *testing.T) {
+		resPost, respPost := fluent.PostYAMLResult[yamlPayload](t.Context(), client, "/yaml", yamlPayload{ID: 20})
+
+		require.NotNil(t, respPost)
+		defer respPost.Body.Close()
+
+		require.True(t, resPost.IsSuccess())
+		valPost, err := resPost.Unwrap()
+		require.NoError(t, err)
+		assert.Equal(t, 43, valPost.ID)
+
+		resGet, respGet := fluent.GetYAMLResult[yamlPayload](t.Context(), client, "/yaml")
+
+		require.NotNil(t, respGet)
+		defer respGet.Body.Close()
+
+		require.True(t, resGet.IsSuccess())
+		valGet, err := resGet.Unwrap()
+		require.NoError(t, err)
+		assert.Equal(t, "YAMLUser", valGet.Name)
 	})
 }
 
