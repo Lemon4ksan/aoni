@@ -37,9 +37,16 @@
 //   - [github.com/lemon4ksan/aoni/codec] - Unified response body decoders and struct-to-values encoders.
 //   - [github.com/lemon4ksan/aoni/fingerprint] - TLS/JA4/p0f evasion, browser profiles, and personas.
 //   - [github.com/lemon4ksan/aoni/resiliency] - Response caching, load balancing, circuit breakers, WAF challenge solvers.
-//   - [github.com/lemon4ksan/aoni/realtime] - WebSockets over H2 Extended CONNECT, Socket.IO v5, SSE, and NDJSON streams.
-//   - [github.com/lemon4ksan/aoni/telemetry] - HAR generators, EWMA latency trackers, embedded web inspector, GeoIP.
+//   - [github.com/lemon4ksan/aoni/realtime] - WebSockets over H2 Extended CONNECT (RFC 8441), SSE, and NDJSON streams.
+//   - [github.com/lemon4ksan/aoni/telemetry] - HAR generators, EWMA latency trackers, embedded web inspector dashboard.
 //   - [github.com/lemon4ksan/aoni/tunnel] - MASQUE HTTP CONNECT-UDP tunnels and TUN adapter bindings.
+//   - [github.com/lemon4ksan/aoni/x] - Supplementary protocols and vendor database connectors (Socket.IO, GeoIP).
+//
+// # The "aoni v1" Compatibility & Forever-Frozen Core Manifesto
+//
+// "Code written against aoni v1.0.0 is guaranteed to compile and execute without modifications
+// on any v1.x version 5, 10, and 20 years from now. The entire core is permanently frozen.
+// All experiments, proprietary protocols, and shifting vendor specifications live strictly in aoni/x/... packages."
 //
 // # Three Tiers of Usage (Zero-Friction DX)
 //

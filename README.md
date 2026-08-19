@@ -14,6 +14,13 @@
 
 </div>
 
+> ### The "aoni v1" Compatibility & Forever-Frozen Core Manifesto
+> _«Code written against **aoni v1.0.0** is guaranteed to compile and execute without modifications on any **v1.x** version 5, 10, and 20 years from now. The entire core protocol engine is permanently frozen around immutable IETF RFCs and W3C/Chromium standards. All experiments, shifting vendor specifications, and third-party protocol adapters live strictly in **aoni/x/...** sub-modules.»_
+
+```shell
+go get github.com/lemon4ksan/aoni
+```
+
 ## Why Aoni?
 
 Building production Go applications often requires integrating multiple independent networking packages - separately managing HTTP/3, uTLS, DoH/DoQ resolvers, WebSockets, gRPC-Web, and connection resilience. Handling disconnected memory pools and context models across these layers introduces unnecessary heap allocations, GC pause spikes, and redundant abstraction overhead.
@@ -30,10 +37,6 @@ Whether executing standard REST microservice queries, high-throughput API gatewa
 2. **Zero GC Mark-Assist Contention**: The transport layer performs zero heap allocations (`mheap`), freeing 100% of CPU capacity for database querying, JSON decoding, and business rules rather than garbage collection.
 3. **Tail Latency SLA Stability (P99.9 Under Peak Load)**: Prevents GC pause spikes and latency degradation during Black Friday traffic spikes or DDoS events.
 4. **Cloud Infrastructure Cost Reduction (TCO)**: Consumes up to 2–19x less RAM, enabling 3–5x more concurrent WebSocket/HTTP connections per server instance.
-
-```shell
-go get github.com/lemon4ksan/aoni
-```
 
 ## Quick Start
 
