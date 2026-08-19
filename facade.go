@@ -258,6 +258,27 @@ func WithClientUserAgent(ua string) ClientOption {
 	}
 }
 
+// WithChrome returns an [aoni.ClientOption] setting the browser profile to Google Chrome.
+func WithChrome() ClientOption {
+	return func(cfg *Config) {
+		cfg.Fingerprint.BrowserID = BrowserChrome
+	}
+}
+
+// WithFirefox returns an [aoni.ClientOption] setting the browser profile to Mozilla Firefox.
+func WithFirefox() ClientOption {
+	return func(cfg *Config) {
+		cfg.Fingerprint.BrowserID = BrowserFirefox
+	}
+}
+
+// WithSafari returns an [aoni.ClientOption] setting the browser profile to Apple Safari.
+func WithSafari() ClientOption {
+	return func(cfg *Config) {
+		cfg.Fingerprint.BrowserID = BrowserSafari
+	}
+}
+
 // WithSmartBody constructs an [aoni.RequestModifier] that automatically detects the payload type:
 //   - proto.Message -> Protobuf payload with application/x-protobuf
 //   - url.Values -> URL-encoded form payload with application/x-www-form-urlencoded

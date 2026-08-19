@@ -2551,4 +2551,19 @@ func TestClient_AuditFeatures(t *testing.T) {
 		require.NoError(t, err)
 		assert.Equal(t, "Steve", fetched.Name)
 	})
+
+	t.Run("slog_log_valuer_observability", func(t *testing.T) {
+		t.Parallel()
+
+		apiErr := &aoni.APIError{
+			StatusCode: http.StatusForbidden,
+			Body:       []byte("access denied"),
+		}
+		val := apiErr.LogValue()
+		assert.NotEmpty(t, val.Group())
+
+		client := aoni.New(aoni.WithBaseURL("https://api.apple.com"), aoni.WithChrome())
+		cVal := client.LogValue()
+		assert.NotEmpty(t, cVal.Group())
+	})
 }

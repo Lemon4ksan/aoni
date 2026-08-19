@@ -147,6 +147,30 @@ func (s *Response) UnsafeBodyBytes() []byte {
 	return s.BodyBytes()
 }
 
+// UnsafeAccess provides explicit, zero-allocation access to volatile response buffers.
+type UnsafeAccess struct {
+	resp *Response
+}
+
+// Bytes returns a direct slice of cached response body memory.
+func (u UnsafeAccess) Bytes() []byte {
+	if u.resp == nil {
+		return nil
+	}
+
+	return u.resp.UnsafeBodyBytes()
+}
+
+// String returns a string view over cached response body memory.
+func (u UnsafeAccess) String() string {
+	return string(u.Bytes())
+}
+
+// Unsafe returns an [UnsafeAccess] accessor for zero-copy operations.
+func (s *Response) Unsafe() UnsafeAccess {
+	return UnsafeAccess{resp: s}
+}
+
 // BodyStream yields response body stream [stdio.ReadCloser].
 func (s *Response) BodyStream() stdio.ReadCloser {
 	if s.resp == nil {

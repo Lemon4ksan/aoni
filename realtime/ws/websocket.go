@@ -435,3 +435,35 @@ func DialResult(
 
 	return generic.Success(conn), resp
 }
+
+// Connect establishes an upgraded, cascading WebSocket connection across HTTP/3, HTTP/2 Extended CONNECT, and HTTP/1.1.
+// Canonical entrypoint for persistent WebSocket connections.
+func Connect(
+	ctx context.Context,
+	dialer aoni.WebSocketDialer,
+	targetURL string,
+	mods ...aoni.RequestModifier,
+) (Conn, *http.Response, error) {
+	return DialWebSocket(ctx, dialer, targetURL, mods...)
+}
+
+// ConnectWithConfig establishes a WebSocket connection with explicit buffer and subprotocol configuration.
+func ConnectWithConfig(
+	ctx context.Context,
+	dialer aoni.WebSocketDialer,
+	targetURL string,
+	config DialWebSocketConfig,
+	mods ...aoni.RequestModifier,
+) (Conn, *http.Response, error) {
+	return DialWebSocketWithConfig(ctx, dialer, targetURL, config, mods...)
+}
+
+// ConnectResult establishes a WebSocket connection and yields a Swift-inspired [generic.Result].
+func ConnectResult(
+	ctx context.Context,
+	dialer aoni.WebSocketDialer,
+	targetURL string,
+	mods ...aoni.RequestModifier,
+) (generic.Result[Conn], *http.Response) {
+	return DialResult(ctx, dialer, targetURL, mods...)
+}

@@ -9,6 +9,7 @@ import (
 	"context"
 	"crypto/tls"
 	stdio "io"
+	"log/slog"
 	"net"
 	"net/http"
 	"net/url"
@@ -384,6 +385,28 @@ func (c *Client) Logger() core.Logger {
 	}
 
 	return c.defaults.Logger
+}
+
+// LogValue implements [slog.LogValuer] for structured logging of client state without allocations.
+func (c *Client) LogValue() slog.Value {
+	if c == nil {
+		return slog.GroupValue()
+	}
+
+	attrs := make([]slog.Attr, 0, 4)
+	if c.prepared.BaseURL != nil {
+		attrs = append(attrs, slog.String("base_url", c.prepared.BaseURL.String()))
+	}
+
+	if c.fingerprint.BrowserID != BrowserNone {
+		attrs = append(attrs, slog.String("browser", c.fingerprint.BrowserID.String()))
+	}
+
+	if c.engineConfig.Timeout > 0 {
+		attrs = append(attrs, slog.Duration("timeout", c.engineConfig.Timeout))
+	}
+
+	return slog.GroupValue(attrs...)
 }
 
 // Transport retrieves the underlying [*http.Transport] from the engine.

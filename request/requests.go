@@ -106,6 +106,16 @@ func Configure(doer any, opts ...aoni.ClientOption) Requester {
 	return AsRequester(aoni.Configure(doer, opts...))
 }
 
+// BindRequester adapts any doer into a [Requester] and applies initial [aoni.ClientOption] layers.
+func BindRequester(doer any, opts ...aoni.ClientOption) Requester {
+	r := AsRequester(doer)
+	if len(opts) > 0 {
+		return Configure(r, opts...)
+	}
+
+	return r
+}
+
 // Get performs a GET request through c and returns the raw [*http.Response].
 func Get(ctx context.Context, c Requester, path string, mods ...aoni.RequestModifier) (*http.Response, error) {
 	if c == nil {

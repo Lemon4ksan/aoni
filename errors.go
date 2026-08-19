@@ -7,6 +7,7 @@ package aoni
 import (
 	"bytes"
 	"errors"
+	"log/slog"
 	"net/http"
 	"strconv"
 	"strings"
@@ -93,6 +94,32 @@ func (e *Error) Error() string {
 }
 
 func (e *Error) Unwrap() error { return e.Err }
+
+// LogValue implements [slog.LogValuer] for structured, zero-allocation logging.
+func (e *Error) LogValue() slog.Value {
+	if e == nil {
+		return slog.GroupValue()
+	}
+
+	attrs := make([]slog.Attr, 0, 4)
+	if e.Op != "" {
+		attrs = append(attrs, slog.String("op", e.Op))
+	}
+
+	if e.Target != "" {
+		attrs = append(attrs, slog.String("target", e.Target))
+	}
+
+	if e.Path != "" {
+		attrs = append(attrs, slog.String("path", e.Path))
+	}
+
+	if e.Err != nil {
+		attrs = append(attrs, slog.String("cause", e.Err.Error()))
+	}
+
+	return slog.GroupValue(attrs...)
+}
 
 // APIError describes an HTTP response status failure (>= 400).
 type APIError struct {
@@ -182,6 +209,27 @@ func (e *APIError) BodyString() string {
 	}
 
 	return bytesconv.B2S(e.Body)
+}
+
+// LogValue implements [slog.LogValuer] for structured, zero-allocation logging.
+func (e *APIError) LogValue() slog.Value {
+	if e == nil {
+		return slog.GroupValue()
+	}
+
+	attrs := make([]slog.Attr, 0, 3)
+	attrs = append(attrs, slog.Int("status", e.StatusCode))
+
+	if text := http.StatusText(e.StatusCode); text != "" {
+		attrs = append(attrs, slog.String("error", text))
+	}
+
+	if len(e.Body) > 0 {
+		limit := min(len(e.Body), 128)
+		attrs = append(attrs, slog.String("body", bytesconv.B2S(e.Body[:limit])))
+	}
+
+	return slog.GroupValue(attrs...)
 }
 
 // BridgeError describes an execution failure during stdlib [http.Client] bridging.

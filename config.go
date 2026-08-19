@@ -366,6 +366,20 @@ const (
 	BrowserSafari
 )
 
+// String returns the human-readable identifier of BrowserID.
+func (b BrowserID) String() string {
+	switch b {
+	case BrowserChrome:
+		return "Chrome"
+	case BrowserFirefox:
+		return "Firefox"
+	case BrowserSafari:
+		return "Safari"
+	default:
+		return "None"
+	}
+}
+
 // BrowserProfile holds user-agent strings and Client Hints headers for profile rotation.
 type BrowserProfile struct {
 	UserAgent   string
