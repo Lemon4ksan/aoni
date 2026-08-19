@@ -273,6 +273,14 @@ func (i *TrafficInspector) captureBody(req *http.Request) string {
 	return bodyStr
 }
 
+// AddCapturedRequest manually inserts a pre-captured request into history and broadcasts it to web clients.
+func (i *TrafficInspector) AddCapturedRequest(req CapturedRequest) {
+	if i == nil {
+		return
+	}
+	i.saveAndBroadcast(req)
+}
+
 // saveAndBroadcast appends req to ring history and pushes updates to active SSE clients.
 func (i *TrafficInspector) saveAndBroadcast(req CapturedRequest) {
 	i.mu.Lock()

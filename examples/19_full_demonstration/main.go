@@ -28,7 +28,6 @@ import (
 	"github.com/lemon4ksan/aoni/cookie"
 	"github.com/lemon4ksan/aoni/fingerprint/p0f"
 	"github.com/lemon4ksan/aoni/netutil/dns"
-	"github.com/lemon4ksan/aoni/telemetry/inspector"
 )
 
 // ProtectedUserData describes the target data structure using custom aoni values.
@@ -106,13 +105,6 @@ func main() {
 		}),
 		option.WithChallengeSolver(&HeadlessWAFSolver{}),
 	)
-
-	// Start traffic inspector dashboard.
-	client, inspector, err := inspector.Enable(client, "127.0.0.1:8080")
-	if err != nil {
-		panic(err)
-	}
-	defer inspector.Close()
 
 	// ==========================================
 	// PHASE 3: Custom Pipeline Configuration

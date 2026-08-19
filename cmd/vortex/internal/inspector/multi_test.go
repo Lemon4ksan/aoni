@@ -10,7 +10,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 
-	"github.com/lemon4ksan/aoni/telemetry/inspector"
+	"github.com/lemon4ksan/aoni/cmd/vortex/internal/inspector"
 )
 
 func TestMultiInspector_IsolatedBroadcasting(t *testing.T) {

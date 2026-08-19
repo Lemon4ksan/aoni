@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"github.com/lemon4ksan/aoni/cmd/vortex/internal/base"
+	"github.com/lemon4ksan/aoni/cmd/vortex/internal/inspector"
 	"github.com/lemon4ksan/aoni/cmd/vortex/internal/text"
 	"github.com/lemon4ksan/aoni/internal/codegen/cache"
 	"github.com/lemon4ksan/aoni/internal/codegen/project"
@@ -103,39 +104,42 @@ func (c *Cmd) runList(_ context.Context, _ []string, stdout, _ io.Writer) error 
 	return doc.RenderTo(stdout, text.DefaultTerminalRenderer)
 }
 
+type rawHAREntry struct {
+	StartedDateTime string `json:"startedDateTime"`
+	Request         struct {
+		Method  string `json:"method"`
+		URL     string `json:"url"`
+		Headers []struct {
+			Name  string `json:"name"`
+			Value string `json:"value"`
+		} `json:"headers"`
+		PostData struct {
+			MimeType string `json:"mimeType"`
+			Text     string `json:"text"`
+		} `json:"postData"`
+	} `json:"request"`
+	Response struct {
+		Status     int    `json:"status"`
+		StatusText string `json:"statusText"`
+		Headers    []struct {
+			Name  string `json:"name"`
+			Value string `json:"value"`
+		} `json:"headers"`
+		Content struct {
+			MimeType string `json:"mimeType"`
+			Text     string `json:"text"`
+		} `json:"content"`
+	} `json:"response"`
+	Time float64 `json:"time"`
+}
+
 type rawHARLog struct {
 	Log struct {
-		Entries []struct {
-			Request struct {
-				Method  string `json:"method"`
-				URL     string `json:"url"`
-				Headers []struct {
-					Name  string `json:"name"`
-					Value string `json:"value"`
-				} `json:"headers"`
-				PostData struct {
-					MimeType string `json:"mimeType"`
-					Text     string `json:"text"`
-				} `json:"postData"`
-			} `json:"request"`
-			Response struct {
-				Status     int    `json:"status"`
-				StatusText string `json:"statusText"`
-				Headers    []struct {
-					Name  string `json:"name"`
-					Value string `json:"value"`
-				} `json:"headers"`
-				Content struct {
-					MimeType string `json:"mimeType"`
-					Text     string `json:"text"`
-				} `json:"content"`
-			} `json:"response"`
-			Time float64 `json:"time"`
-		} `json:"entries"`
+		Entries []rawHAREntry `json:"entries"`
 	} `json:"log"`
 }
 
-func (c *Cmd) runShow(_ context.Context, args []string, stdout, stderr io.Writer) error {
+func (c *Cmd) runShow(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	fs := flag.NewFlagSet("traffic inspect", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 
@@ -143,11 +147,15 @@ func (c *Cmd) runShow(_ context.Context, args []string, stdout, stderr io.Writer
 		entryIdx int
 		filter   string
 		allFlag  bool
+		uiFlag   bool
+		port     int
 	)
 
 	base.IntVar(fs, &entryIdx, "entry", "", -1, "Inspect specific entry index (0-based) in full detail")
 	base.StringVar(fs, &filter, "filter", "", "", "Filter entries by endpoint or URL substring")
 	base.BoolVar(fs, &allFlag, "all", "", false, "Include static assets (scripts, styles, images)")
+	base.BoolVar(fs, &uiFlag, "ui", "", false, "Launch interactive web inspector dashboard")
+	base.IntVar(fs, &port, "port", "", 8999, "Port for web dashboard (used with -ui)")
 
 	posArgs, err := base.ParseInterspersedFlags(fs, args)
 	if err != nil {
@@ -202,6 +210,10 @@ func (c *Cmd) runShow(_ context.Context, args []string, stdout, stderr io.Writer
 		fmt.Fprintf(stdout, "⚡ Traffic Session %s: 0 captured requests found\n", sessionID)
 
 		return nil
+	}
+
+	if uiFlag {
+		return c.runWebUI(ctx, sessionID, entries, port, stdout)
 	}
 
 	// Mode 1: Single entry detail inspection
@@ -684,6 +696,65 @@ func (c *Cmd) runPrune(_ context.Context, args []string, stdout, stderr io.Write
 	}
 
 	fmt.Fprintf(stdout, "✔ Removed %d cached traffic session(s)\n", removed)
+
+	return nil
+}
+
+func (c *Cmd) runWebUI(ctx context.Context, sessionID string, entries []rawHAREntry, port int, stdout io.Writer) error {
+	addr := fmt.Sprintf("127.0.0.1:%d", port)
+	ti := inspector.NewTrafficInspector(addr)
+	if err := ti.Serve(); err != nil {
+		return fmt.Errorf("starting web inspector: %w", err)
+	}
+	defer ti.Close()
+
+	for idx, e := range entries {
+		startedTime, _ := time.Parse(time.RFC3339Nano, e.StartedDateTime)
+		if startedTime.IsZero() {
+			startedTime, _ = time.Parse(time.RFC3339, e.StartedDateTime)
+		}
+		if startedTime.IsZero() {
+			startedTime = time.Now()
+		}
+
+		headersMap := make(map[string]string, len(e.Request.Headers))
+		for _, h := range e.Request.Headers {
+			headersMap[h.Name] = h.Value
+		}
+
+		respHeadersMap := make(map[string]string, len(e.Response.Headers))
+		for _, h := range e.Response.Headers {
+			respHeadersMap[h.Name] = h.Value
+		}
+
+		duration := time.Duration(e.Time * float64(time.Millisecond))
+
+		capReq := inspector.CapturedRequest{
+			ID:              int64(idx + 1),
+			Timestamp:       startedTime,
+			Method:          e.Request.Method,
+			URL:             e.Request.URL,
+			Status:          e.Response.Status,
+			StatusText:      e.Response.StatusText,
+			Duration:        duration,
+			DurationStr:     fmt.Sprintf("%.1fms", e.Time),
+			RequestHeaders:  headersMap,
+			ResponseHeaders: respHeadersMap,
+			RequestBody:     e.Request.PostData.Text,
+			ResponseBody:    e.Response.Content.Text,
+		}
+		ti.AddCapturedRequest(capReq)
+	}
+
+	dashboardURL := fmt.Sprintf("http://127.0.0.1:%d", port)
+
+	fmt.Fprintf(stdout, "\n⚡ Vortex Web Inspector active for session: %s (%d requests)\n", sessionID, len(entries))
+	fmt.Fprintf(stdout, "   Dashboard: %s\n", dashboardURL)
+	fmt.Fprintf(stdout, "   Press Ctrl+C to stop.\n\n")
+
+	if ctx != nil {
+		<-ctx.Done()
+	}
 
 	return nil
 }

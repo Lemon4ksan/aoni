@@ -195,7 +195,7 @@ aoni/
 ├── codec/        // Response decoders (JSON, Proto, gRPC-Web, XML) and url.Values encoders
 ├── realtime/     // WebSocket over H2 CONNECT (RFC 8441), SSE & NDJSON streams
 ├── resiliency/   // Local HTTP response caching, WAF challenge detectors & solvers, load balancers
-├── telemetry/    // HAR generators, EWMA latency trackers, embedded web inspector dashboard
+├── telemetry/    // HAR generators, EWMA latency trackers, tracing hooks & cURL exporters
 └── x/            // Extensions & supplementary protocols (x/socketio, x/geoip)
 ```
 

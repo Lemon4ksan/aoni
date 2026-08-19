@@ -16,10 +16,10 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/lemon4ksan/aoni"
+	"github.com/lemon4ksan/aoni/cmd/vortex/internal/inspector"
 	"github.com/lemon4ksan/aoni/fingerprint/ja4"
 	"github.com/lemon4ksan/aoni/mod"
 	"github.com/lemon4ksan/aoni/telemetry"
-	"github.com/lemon4ksan/aoni/telemetry/inspector"
 )
 
 func TestTrafficInspector_CaptureAndHistory(t *testing.T) {
