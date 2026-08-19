@@ -6,8 +6,11 @@ package resiliency
 
 import (
 	"github.com/lemon4ksan/aoni/internal/core"
+	"github.com/lemon4ksan/aoni/middleware"
 	"github.com/lemon4ksan/aoni/resiliency/cache"
 	"github.com/lemon4ksan/aoni/resiliency/challenge"
+	"github.com/lemon4ksan/aoni/resiliency/coalesce"
+	"github.com/lemon4ksan/aoni/resiliency/etag"
 )
 
 type (
@@ -29,4 +32,33 @@ type (
 
 	// ChallengeDetector determines whether an incoming HTTP response represents a WAF/DDoS challenge page.
 	ChallengeDetector = challenge.Detector
+
+	// CircuitBreaker manages host-isolated circuit breakers using thread-safe key locks.
+	CircuitBreaker = middleware.CircuitBreaker
+
+	// CircuitBreakerConfig configures failure thresholds, reset timeouts, and key locking for host circuit breakers.
+	CircuitBreakerConfig = middleware.CircuitBreakerConfig
+
+	// CoalesceGroup manages concurrent in-flight request deduplication.
+	CoalesceGroup = coalesce.Group
+
+	// ETagAutomaton manages RFC 9111 ETag recording and 304 Not Modified reconstruction.
+	ETagAutomaton = etag.Automaton
+)
+
+var (
+	// NewCircuitBreaker initializes a new host-isolated circuit breaker registry.
+	NewCircuitBreaker = middleware.NewCircuitBreaker
+
+	// ErrCircuitOpen is returned when a circuit breaker blocks requests to an unhealthy host.
+	ErrCircuitOpen = middleware.ErrCircuitOpen
+
+	// DefaultCircuitBreakerCondition flags 5xx server errors or connection failures as circuit breaker triggers.
+	DefaultCircuitBreakerCondition = middleware.DefaultCircuitBreakerCondition
+
+	// NewCoalesceGroup creates a new request deduplication [CoalesceGroup].
+	NewCoalesceGroup = coalesce.NewGroup
+
+	// NewETagAutomaton creates a new RFC 9111 ETag automaton instance.
+	NewETagAutomaton = etag.NewAutomaton
 )

@@ -22,16 +22,29 @@ type cachedETagEntry struct {
 	body   []byte
 }
 
+const DefaultMaxEntries = 1024
+
 // Automaton manages ETag recording, If-None-Match header injection, and 304 body reconstruction.
 type Automaton struct {
-	mu      sync.RWMutex
-	entries map[string]cachedETagEntry
+	mu         sync.RWMutex
+	maxEntries int
+	entries    map[string]cachedETagEntry
 }
 
-// NewAutomaton creates a new RFC 9111 [Automaton] instance.
+// NewAutomaton creates a new RFC 9111 [Automaton] instance with default capacity (1024).
 func NewAutomaton() *Automaton {
+	return NewAutomatonWithCapacity(DefaultMaxEntries)
+}
+
+// NewAutomatonWithCapacity creates a new RFC 9111 [Automaton] with the specified capacity limit.
+func NewAutomatonWithCapacity(maxEntries int) *Automaton {
+	if maxEntries <= 0 {
+		maxEntries = DefaultMaxEntries
+	}
+
 	return &Automaton{
-		entries: make(map[string]cachedETagEntry),
+		maxEntries: maxEntries,
+		entries:    make(map[string]cachedETagEntry, maxEntries),
 	}
 }
 
@@ -46,6 +59,14 @@ func (a *Automaton) Record(key, etagVal string, resp *http.Response, bodyBytes [
 
 	a.mu.Lock()
 	defer a.mu.Unlock()
+
+	// Bound memory: evict an entry if capacity reached
+	if len(a.entries) >= a.maxEntries {
+		for k := range a.entries {
+			delete(a.entries, k)
+			break
+		}
+	}
 
 	a.entries[key] = cachedETagEntry{
 		etag:   etagVal,

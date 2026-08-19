@@ -17,9 +17,9 @@ import (
 
 // call represents an active or completed in-flight request.
 type call struct {
-	wg  sync.WaitGroup
-	val *cachedResponse
-	err error
+	done chan struct{}
+	val  *cachedResponse
+	err  error
 }
 
 type cachedResponse struct {
@@ -53,17 +53,10 @@ func (g *Group) Do(ctx context.Context, key string, fn func() (*http.Response, e
 	if c, ok := g.m[key]; ok {
 		g.mu.Unlock()
 
-		// Wait for in-flight call to finish or context cancellation
-		waitCh := make(chan struct{})
-		go func() {
-			c.wg.Wait()
-			close(waitCh)
-		}()
-
 		select {
 		case <-ctx.Done():
 			return nil, ctx.Err()
-		case <-waitCh:
+		case <-c.done:
 			if c.err != nil {
 				return nil, c.err
 			}
@@ -76,8 +69,9 @@ func (g *Group) Do(ctx context.Context, key string, fn func() (*http.Response, e
 		}
 	}
 
-	c := new(call)
-	c.wg.Add(1)
+	c := &call{
+		done: make(chan struct{}),
+	}
 	g.m[key] = c
 	g.mu.Unlock()
 
@@ -85,7 +79,7 @@ func (g *Group) Do(ctx context.Context, key string, fn func() (*http.Response, e
 		g.mu.Lock()
 		delete(g.m, key)
 		g.mu.Unlock()
-		c.wg.Done()
+		close(c.done)
 	}()
 
 	resp, err := fn()
