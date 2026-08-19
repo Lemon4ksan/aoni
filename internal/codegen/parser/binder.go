@@ -110,6 +110,7 @@ func (p *Parser) parseMethodParams(
 				pathVars[strings.ToLower(actual)] = actual
 				pathVars[toCasing(actual, ir.CasingSnakeCase)] = actual
 				pathVars[toCasing(actual, ir.CasingFlatCase)] = actual
+				pathVars[cleanIdentifier(actual)] = actual
 			}
 		}
 	}
@@ -359,6 +360,8 @@ func (p *Parser) parseMethodParams(
 					} else if v, ok := pathVars[flatName]; ok {
 						matchedVar = v
 					} else if v, ok := pathVars[strings.ToLower(paramName)]; ok {
+						matchedVar = v
+					} else if v, ok := pathVars[cleanIdentifier(paramName)]; ok {
 						matchedVar = v
 					}
 
@@ -1176,4 +1179,15 @@ func (p *Parser) findCommentsForParam(fileComments []*ast.CommentGroup, prevLine
 	}
 
 	return lines
+}
+
+func cleanIdentifier(s string) string {
+	var b strings.Builder
+	for _, r := range s {
+		if (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') {
+			b.WriteRune(unicode.ToLower(r))
+		}
+	}
+
+	return b.String()
 }

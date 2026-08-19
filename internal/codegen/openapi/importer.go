@@ -1857,19 +1857,62 @@ func toPascalCase(s string) string {
 	return strings.Join(parts, "")
 }
 
+var goKeywords = map[string]bool{
+	"break": true, "case": true, "chan": true, "const": true, "continue": true,
+	"default": true, "defer": true, "else": true, "fallthrough": true, "for": true,
+	"func": true, "go": true, "goto": true, "if": true, "import": true,
+	"interface": true, "map": true, "package": true, "range": true, "return": true,
+	"select": true, "struct": true, "switch": true, "type": true, "var": true,
+}
+
 func toCamelCase(s string) string {
 	pascal := toPascalCase(s)
 	if pascal == "" {
 		return ""
 	}
 
+	var res string
 	for init := range initialisms {
 		if strings.HasPrefix(pascal, init) && len(pascal) > len(init) {
-			return strings.ToLower(init) + pascal[len(init):]
+			res = strings.ToLower(init) + pascal[len(init):]
+			break
 		}
 	}
 
-	return strings.ToLower(pascal[:1]) + pascal[1:]
+	if res == "" {
+		res = strings.ToLower(pascal[:1]) + pascal[1:]
+	}
+
+	if goKeywords[res] {
+		switch res {
+		case "type":
+			return "typ"
+		case "select":
+			return "selected"
+		case "range":
+			return "rng"
+		case "map":
+			return "mapping"
+		case "func":
+			return "fn"
+		case "var":
+			return "variable"
+		case "const":
+			return "constant"
+		case "interface":
+			return "iface"
+		case "package":
+			return "pkg"
+		case "import":
+			return "imp"
+		case "default":
+			return "def"
+		default:
+			return res + "Param"
+		}
+	}
+
+	return res
 }
 
 func splitWords(s string) []string {

@@ -153,16 +153,29 @@ func (a *Analyzer) analyzeMethod(svcName string, m *ir.MethodIR) []Diagnostic {
 }
 
 func collectParamNames(params []*ir.ParamIR) map[string]bool {
-	paramNames := make(map[string]bool, len(params)*2)
+	paramNames := make(map[string]bool, len(params)*4)
 	for _, p := range params {
 		paramNames[p.GoName] = true
 		paramNames[strings.ToLower(p.GoName)] = true
+		paramNames[cleanIdentifier(p.GoName)] = true
 
 		if p.WireKey != "" {
 			paramNames[p.WireKey] = true
 			paramNames[strings.ToLower(p.WireKey)] = true
+			paramNames[cleanIdentifier(p.WireKey)] = true
 		}
 	}
 
 	return paramNames
+}
+
+func cleanIdentifier(s string) string {
+	var b strings.Builder
+	for _, r := range s {
+		if (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') {
+			b.WriteRune(r)
+		}
+	}
+
+	return strings.ToLower(b.String())
 }

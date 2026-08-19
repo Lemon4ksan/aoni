@@ -21,6 +21,20 @@ bench: ## Run silicon hardware inspection and microsecond benchmark suite
 	@printf "$(CYAN)Running aoni silicon benchmark...$(RESET)\n"
 	go run ./cmd/vortex bench
 
+fuzz: ## Run continuous automated fuzz testing across all wire parsers
+	@printf "$(CYAN)Running security fuzzing suite across all wire parsers...$(RESET)\n"
+	go test -fuzz=^FuzzSSEStream$$ -fuzztime=2s ./realtime/stream
+	go test -fuzz=^FuzzNDJSONStream$$ -fuzztime=2s ./realtime/stream
+	go test -fuzz=^FuzzParseSetCookieHeader$$ -fuzztime=2s ./cookie
+	go test -fuzz=^FuzzNetscapeCookieExport$$ -fuzztime=2s ./cookie
+	go test -fuzz=^FuzzMASQUEVarint$$ -fuzztime=2s ./tunnel/masque
+	go test -fuzz=^FuzzIPPacketExtract$$ -fuzztime=2s ./tunnel/masque
+	go test -fuzz=^FuzzGRPCWebFraming$$ -fuzztime=2s ./grpc
+	go test -fuzz=^FuzzComputeJA4$$ -fuzztime=2s ./fingerprint/ja4
+	go test -fuzz=^FuzzHPACKDecode$$ -fuzztime=2s ./internal/fast/h2engine
+	go test -fuzz=^FuzzQPACKDecode$$ -fuzztime=2s ./internal/fast/h3engine
+
+
 cover: ## Calculate and print exact core library coverage report
 	@printf "$(CYAN)Generating exact coverage report...$(RESET)\n"
 	go test -coverpkg=$(COVER_PKG) -coverprofile=$(COVER_OUT) ./...

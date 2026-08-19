@@ -7,10 +7,12 @@
 [![Go Reference](https://img.shields.io/badge/go-reference-007d9c?logo=go&logoColor=white&style=flat-square)](https://pkg.go.dev/github.com/lemon4ksan/aoni)
 [![License](https://img.shields.io/github/license/lemon4ksan/aoni?style=flat-square)](LICENSE)
 ![Resilience](https://img.shields.io/badge/stability-Chromium--Grade-blue?style=flat-square)
+[![Fuzzing](https://img.shields.io/badge/security-Fuzz%20Verified-brightgreen?style=flat-square)](docs/ARCHITECTURE_RU.md#4-броня-безопасности-непрерывный-фаззинг-fuzzing)
+[![Архитектура](https://img.shields.io/badge/docs-Спецификация%20Архитектуры-blueviolet?style=flat-square)](docs/ARCHITECTURE_RU.md)
 
 > _"В сетях хаос — это данность. Пусть aoni станет вашим ледяным якорем."_
 
-#### [English](README.md) • Русский
+#### [English](README.md) • Русский • [Спецификация архитектуры](docs/ARCHITECTURE_RU.md)
 
 </div>
 

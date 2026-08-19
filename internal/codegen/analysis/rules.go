@@ -48,7 +48,8 @@ func validatePathVariables(target string, m *ir.MethodIR, paramNames map[string]
 	var diags []Diagnostic
 
 	for _, seg := range m.Path.Segments {
-		if seg.IsVariable && !paramNames[seg.VarName] && !paramNames[strings.ToLower(seg.VarName)] {
+		cleanSeg := cleanIdentifier(seg.VarName)
+		if seg.IsVariable && !paramNames[seg.VarName] && !paramNames[strings.ToLower(seg.VarName)] && !paramNames[cleanSeg] {
 			diags = append(diags, Diagnostic{
 				Severity: SeverityError,
 				Target:   target,

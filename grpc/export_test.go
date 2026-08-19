@@ -6,6 +6,7 @@ package grpc
 
 import (
 	"io"
+	"net/http"
 	"time"
 
 	"google.golang.org/protobuf/proto"
@@ -29,4 +30,9 @@ func MarshalFrameCompressed(msg proto.Message, compress bool) ([]byte, error) {
 // FormatTimeout is exported strictly for package unit tests.
 func FormatTimeout(d time.Duration) string {
 	return formatTimeout(d)
+}
+
+// ParseGRPCStatus is exported strictly for package unit tests.
+func ParseGRPCStatus(trailers http.Header) *StatusError {
+	return parseGRPCStatus(trailers)
 }

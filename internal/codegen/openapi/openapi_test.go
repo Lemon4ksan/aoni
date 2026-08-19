@@ -5,11 +5,15 @@
 package openapi_test
 
 import (
+	"os"
+	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
 
 	"github.com/lemon4ksan/aoni/internal/codegen/analysis"
+	"github.com/lemon4ksan/aoni/internal/codegen/builder"
 	"github.com/lemon4ksan/aoni/internal/codegen/openapi"
 	"github.com/lemon4ksan/aoni/internal/codegen/parser"
 )
@@ -372,4 +376,38 @@ func TestOpenAPI_MergeModes(t *testing.T) {
 	require.NotNil(t, docDiff.Paths.Value("/users").Post)
 	require.NotNil(t, docDiff.Paths.Value("/only-a"))
 	require.Nil(t, docDiff.Paths.Value("/only-b"))
+}
+
+func TestDiscordImport(t *testing.T) {
+	data, err := os.ReadFile(`C:\Users\senya\.gemini\antigravity\brain\38a522d0-96a7-4c36-af14-1e0509265cb3\scratch\discord_openapi.json`)
+	if err != nil {
+		t.Skip("discord spec not found")
+	}
+
+	doc, err := openapi.LoadSpec("discord.json", data)
+	require.NoError(t, err)
+
+	code, err := openapi.GenerateContract(doc, openapi.ImportConfig{
+		PackageName: "discord",
+		ServiceName: "DiscordAPI",
+	})
+	require.NoError(t, err)
+	require.NotEmpty(t, code)
+
+	for _, line := range strings.Split(string(code), "\n") {
+		if strings.Contains(line, "UpdateUserMessage") || strings.Contains(line, "user_id_") {
+			t.Logf("MATCH: %s", line)
+		}
+	}
+
+	tmpContract := filepath.Join(t.TempDir(), "discord_api.go")
+	err = os.WriteFile(tmpContract, code, 0o600)
+	require.NoError(t, err)
+
+	b := builder.New(builder.Config{})
+	res, err := b.BuildFile(t.Context(), tmpContract, "")
+	require.NoError(t, err)
+	require.False(t, res.Skipped)
+	require.Greater(t, res.BytesCount, 0)
+	t.Logf("Generated client: %d bytes, %d services, %d structs", res.BytesCount, res.ServicesCount, res.StructsCount)
 }

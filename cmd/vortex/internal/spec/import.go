@@ -466,6 +466,10 @@ func (c *Cmd) runImport(_ context.Context, args []string, stdout, stderr io.Writ
 		modelsPath := filepath.Join(outDir, "models.go")
 
 		if !dryRun {
+			if outDir != "." {
+				_ = os.MkdirAll(outDir, 0o755)
+			}
+
 			if err := os.WriteFile(apiPath, apiSrc, 0o600); err != nil {
 				return fmt.Errorf("writing %s: %w", apiPath, err)
 			}

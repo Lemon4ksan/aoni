@@ -7,10 +7,12 @@
 [![Go Reference](https://img.shields.io/badge/go-reference-007d9c?logo=go&logoColor=white&style=flat-square)](https://pkg.go.dev/github.com/lemon4ksan/aoni)
 [![License](https://img.shields.io/github/license/lemon4ksan/aoni?style=flat-square)](LICENSE)
 ![Resilience](https://img.shields.io/badge/stability-Chromium--Grade-blue?style=flat-square)
+[![Fuzzing](https://img.shields.io/badge/security-Fuzz%20Verified-brightgreen?style=flat-square)](docs/ARCHITECTURE.md#4-fuzzing--security-armor)
+[![Architecture](https://img.shields.io/badge/docs-Architecture%20Spec-blueviolet?style=flat-square)](docs/ARCHITECTURE.md)
 
 > _"In networks, chaos is the default. Let aoni be your ice-cold anchor."_
 
-#### English • [Русский](README_RU.md)
+#### English • [Русский](README_RU.md) • [Architecture Specification](docs/ARCHITECTURE.md)
 
 </div>
 
