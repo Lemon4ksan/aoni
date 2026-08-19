@@ -59,7 +59,7 @@ func (s *JSONFileStorage) Save(key string, cookies []Cookie) error {
 	s.mu.Lock()
 	s.data[key] = cookies
 
-	fileBytes, err := json.MarshalIndent(s.data, "", "  ")
+	fileBytes, err := json.Marshal(s.data)
 	s.mu.Unlock()
 
 	if err != nil {

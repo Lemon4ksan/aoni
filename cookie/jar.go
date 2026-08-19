@@ -281,10 +281,14 @@ func (pj *PersistentJar) Cookies(u *url.URL) []*http.Cookie {
 	pj.mu.Lock()
 	for _, c := range cookies {
 		if (!c.Expires.IsZero() && c.Expires.Before(now)) || c.MaxAge < 0 {
-			key := cookieKey{domain: c.Domain, path: c.Path, name: c.Name}
-			delete(pj.cookiesMap, key)
+			for k := range pj.cookiesMap {
+				if k.name == c.Name &&
+					(k.domain == c.Domain || strings.TrimPrefix(k.domain, ".") == strings.TrimPrefix(c.Domain, ".")) {
+					delete(pj.cookiesMap, k)
 
-			hasExpired = true
+					hasExpired = true
+				}
+			}
 
 			continue
 		}
@@ -348,10 +352,13 @@ func (pj *PersistentJar) SetCookies(u *url.URL, cookies []*http.Cookie) {
 
 		isExpired := (!c.Expires.IsZero() && c.Expires.Before(now)) || c.MaxAge < 0
 		if isExpired {
-			if _, exists := pj.cookiesMap[key]; exists {
-				delete(pj.cookiesMap, key)
+			for k := range pj.cookiesMap {
+				if k.name == c.Name &&
+					(k.domain == domain || strings.TrimPrefix(k.domain, ".") == strings.TrimPrefix(domain, ".")) {
+					delete(pj.cookiesMap, k)
 
-				changed = true
+					changed = true
+				}
 			}
 
 			continue

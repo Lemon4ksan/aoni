@@ -41,21 +41,7 @@ type Cookie struct {
 
 // ParseSetCookieHeader parses a raw 'Set-Cookie' header line into a structured [Cookie].
 func ParseSetCookieHeader(headerVal, defaultDomain, defaultPath string) Cookie {
-	dto := impl.ParseSetCookieHeader(headerVal, defaultDomain, defaultPath)
-
-	return Cookie{
-		Expires:      dto.Expires,
-		Name:         dto.Name,
-		Value:        dto.Value,
-		Domain:       dto.Domain,
-		Path:         dto.Path,
-		SameSite:     dto.SameSite,
-		PartitionKey: dto.PartitionKey,
-		HTTPOnly:     dto.HTTPOnly,
-		Secure:       dto.Secure,
-		Partitioned:  dto.Partitioned,
-		MaxAge:       dto.MaxAge,
-	}
+	return Cookie(impl.ParseSetCookieHeader(headerVal, defaultDomain, defaultPath))
 }
 
 // PathMatch reports whether reqPath matches cookiePath according to RFC 6265 §5.1.4.
