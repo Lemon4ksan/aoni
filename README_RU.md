@@ -199,7 +199,7 @@ aoni/
 
 ## Примеры использования в реальном мире
 
-- **[discordgo-aoni](https://github.com/lemon4ksan/discordgo-aoni)**: Высокопроизводительный форк официального `discordgo` с нулевыми аллокациями на базе движков `aoni` и `aoni/realtime/ws`.
+- **[discordgo-aoni](https://github.com/lemon4ksan/discordgo-aoni)**: Высокопроизводительный форк официального `discordgo` с нулевыми аллокациями на базе движков `aoni` и `aoni/realtime/ws`, обновленный для поддержки последних изменений Discord API с использованием `vortex`.
   - Обеспечивает **рост пропускной способности REST API в 6.8 раз (203 000+ RPS)** и **ускорение WebSocket в 3.1 раза** при **0 B/op** аллокациях памяти на фреймах.
 
 ## Декларативный AST-тулчейн Vortex
