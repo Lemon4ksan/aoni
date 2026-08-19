@@ -16,7 +16,11 @@ import (
 	"strings"
 	"time"
 
-	"github.com/lemon4ksan/miyako/log"
+	asyncctx "github.com/lemon4ksan/foundation/async/context"
+	"github.com/lemon4ksan/foundation/async/log"
+	"github.com/lemon4ksan/foundation/generic"
+	foundationurl "github.com/lemon4ksan/foundation/net/url"
+	"github.com/lemon4ksan/foundation/silicon/bytesconv"
 	"github.com/quic-go/quic-go"
 	"github.com/quic-go/quic-go/http3"
 	utls "github.com/refraction-networking/utls"
@@ -25,10 +29,8 @@ import (
 	"github.com/lemon4ksan/aoni/cookie"
 	"github.com/lemon4ksan/aoni/fingerprint"
 	"github.com/lemon4ksan/aoni/fingerprint/h2"
-	"github.com/lemon4ksan/aoni/internal/bytesconv"
 	"github.com/lemon4ksan/aoni/internal/experimental"
 	"github.com/lemon4ksan/aoni/internal/pipeline"
-	"github.com/lemon4ksan/aoni/internal/urlutil"
 	"github.com/lemon4ksan/aoni/netutil"
 	"github.com/lemon4ksan/aoni/netutil/power"
 )
@@ -85,11 +87,7 @@ func NewClient(doer any, opts ...ClientOption) *Client {
 	}
 
 	cfg := client.snapshotConfig()
-	for _, opt := range opts {
-		if opt != nil {
-			opt(&cfg)
-		}
-	}
+	generic.ApplyOptions(&cfg, opts...)
 
 	client.applyConfig(cfg)
 	client.ensureUserAgent()
@@ -115,11 +113,7 @@ func (c *Client) With(opts ...ClientOption) *Client {
 	}
 
 	cfg := c.snapshotConfig()
-	for _, opt := range opts {
-		if opt != nil {
-			opt(&cfg)
-		}
-	}
+	generic.ApplyOptions(&cfg, opts...)
 
 	cloned := &Client{
 		engine:  c.engine,
@@ -298,7 +292,12 @@ func (c *Client) HTTP() HTTPDoer {
 }
 
 func (c *Client) execute(req *http.Request, pipe PipelineConfig) (*http.Response, error) {
-	return c.pipeline.Execute(req.Context(), req, c.engine, pipe.toInternal())
+	fastCtx := asyncctx.Wrap(req.Context())
+	if req.Context() != fastCtx {
+		req = req.WithContext(fastCtx)
+	}
+
+	return c.pipeline.Execute(fastCtx, req, c.engine, pipe.toInternal())
 }
 
 // WithPersona configures TLS ClientHello ID, HTTP/2 SETTINGS frames, header order,
@@ -584,7 +583,8 @@ func (c *Client) ensureUserAgent() {
 // resolveURL resolves relative path against client BaseURL or parses absolute URL strings.
 func (c *Client) resolveURL(path string) (*url.URL, error) {
 	if (path == "" || path == "/") && c.prepared.BaseURL != nil {
-		return c.prepared.BaseURL, nil
+		clone := *c.prepared.BaseURL
+		return &clone, nil
 	}
 
 	if len(path) > 0 && path[0] == '/' && c.prepared.BaseURL != nil {
@@ -600,7 +600,7 @@ func (c *Client) resolveURL(path string) (*url.URL, error) {
 		return nil, resolveErr
 	}
 
-	u, parseErr := urlutil.Parse(targetURLStr)
+	u, parseErr := foundationurl.Parse(targetURLStr)
 	if parseErr != nil {
 		return nil, &Error{Op: "failed to parse URL", Err: parseErr}
 	}
@@ -631,7 +631,7 @@ func (c *Client) resolveTargetURL(path string) (string, error) {
 		return c.prepared.BaseURLTrimmedString + path, nil
 	}
 
-	rel, err := urlutil.Parse(strings.TrimLeft(path, "/"))
+	rel, err := foundationurl.Parse(strings.TrimLeft(path, "/"))
 	if err != nil {
 		return "", &Error{Op: "invalid path", Err: ErrInvalidPath}
 	}

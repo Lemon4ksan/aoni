@@ -15,9 +15,10 @@ import (
 	"net/netip"
 	"time"
 
+	"github.com/lemon4ksan/foundation/net/dns/wire"
+
 	"github.com/lemon4ksan/aoni"
 	"github.com/lemon4ksan/aoni/fast"
-	"github.com/lemon4ksan/aoni/netutil/dns/wire"
 	"github.com/lemon4ksan/aoni/option"
 )
 

@@ -21,9 +21,11 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/lemon4ksan/foundation/generic"
+	"github.com/lemon4ksan/foundation/silicon/bytesconv"
+	fastrand "github.com/lemon4ksan/foundation/silicon/rand"
+
 	"github.com/lemon4ksan/aoni/fingerprint/ja4"
-	"github.com/lemon4ksan/aoni/internal/bytesconv"
-	fastrand "github.com/lemon4ksan/aoni/internal/rand"
 	"github.com/lemon4ksan/aoni/internal/requestutil"
 	"github.com/lemon4ksan/aoni/netutil/probe"
 )
@@ -334,4 +336,31 @@ func IsStreamingResponse(resp *http.Response) bool {
 // SummarizeMultipartBody extracts form field names and file metadata from a multipart payload.
 func SummarizeMultipartBody(body []byte, contentType string) string {
 	return requestutil.SummarizeMultipartBody(body, contentType)
+}
+
+// DNSDuration returns the DNS lookup duration as an Optional if it was performed.
+func (t *TraceInfo) DNSDuration() generic.Optional[time.Duration] {
+	if t == nil || t.DNSLookup <= 0 {
+		return generic.None[time.Duration]()
+	}
+
+	return generic.Some(t.DNSLookup)
+}
+
+// TLSDuration returns the TLS handshake duration as an Optional if a handshake occurred.
+func (t *TraceInfo) TLSDuration() generic.Optional[time.Duration] {
+	if t == nil || t.TLSHandshake <= 0 {
+		return generic.None[time.Duration]()
+	}
+
+	return generic.Some(t.TLSHandshake)
+}
+
+// JA4Report returns the JA4 report as an Optional.
+func (t *TraceInfo) JA4Report() generic.Optional[*ja4.Report] {
+	if t == nil || t.JA4 == nil {
+		return generic.None[*ja4.Report]()
+	}
+
+	return generic.Some(t.JA4)
 }

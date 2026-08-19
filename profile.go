@@ -8,7 +8,7 @@ import (
 	utls "github.com/refraction-networking/utls"
 
 	"github.com/lemon4ksan/aoni/fingerprint/profiles"
-	internalProfile "github.com/lemon4ksan/aoni/internal/profile"
+	impl "github.com/lemon4ksan/aoni/internal/profile"
 )
 
 // ApplyTLSVariantToConfig maps uTLS ClientHello specifications, presets, and QUIC TLS parameters
@@ -30,7 +30,7 @@ func ApplyTLSVariantToConfig(cfg *Config, variant *profiles.Variant) {
 	}
 
 	if variant.HelloSpec != nil {
-		cfg.Fingerprint.TLSClientHelloSpecProvider = internalProfile.StaticSpecProvider{Spec: variant.HelloSpec}
+		cfg.Fingerprint.TLSClientHelloSpecProvider = impl.StaticSpecProvider{Spec: variant.HelloSpec}
 		cfg.Fingerprint.TLSClientHelloID = nil
 	} else if variant.HelloID != (utls.ClientHelloID{}) {
 		helloID := variant.HelloID
@@ -51,14 +51,14 @@ func ApplyHTTPVariantToConfig(cfg *Config, variant *profiles.Variant, os profile
 		return
 	}
 
-	h2Settings, h3Settings := internalProfile.ApplyHTTPSettings(variant)
+	h2Settings, h3Settings := impl.ApplyHTTPSettings(variant)
 	if h2Settings != nil {
 		cfg.Fingerprint.H2Settings = h2Settings
 	}
 
 	cfg.Fingerprint.H3Settings = &h3Settings
-	cfg.Defaults.Headers = internalProfile.PopulateHeaders(cfg.Defaults.Headers, variant, os)
-	cfg.Fingerprint.HeaderOrder = internalProfile.BuildHeaderOrder(variant, os, "GET")
+	cfg.Defaults.Headers = impl.PopulateHeaders(cfg.Defaults.Headers, variant, os)
+	cfg.Fingerprint.HeaderOrder = impl.BuildHeaderOrder(variant, os, "GET")
 }
 
 // ApplyProfileHeaders injects method-specific browser headers, WebKit/Gecko multipart boundary lines,
@@ -112,5 +112,5 @@ func ApplyProfileHeaders(req Request, variant *profiles.Variant, os profiles.OSK
 // setOrderedHeaders calculates and attaches method-specific ordered header keys to the request config.
 func setOrderedHeaders(req Request, variant *profiles.Variant, os profiles.OSKey) {
 	cfg := GetOrInitRequestConfig(req)
-	cfg.OrderedHeaders = internalProfile.BuildHeaderOrder(variant, os, req.Method())
+	cfg.OrderedHeaders = impl.BuildHeaderOrder(variant, os, req.Method())
 }

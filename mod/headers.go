@@ -8,9 +8,10 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/lemon4ksan/foundation/silicon/bytesconv"
+
 	"github.com/lemon4ksan/aoni"
 	"github.com/lemon4ksan/aoni/cookie"
-	"github.com/lemon4ksan/aoni/internal/bytesconv"
 	"github.com/lemon4ksan/aoni/internal/requestutil"
 )
 
@@ -179,4 +180,22 @@ func WithPartitionKey(key string) aoni.RequestModifier {
 			req.SetContext(cookie.WithPartitionKey(req.Context(), key))
 		},
 	}
+}
+
+// WithHeaderIf conditionally constructs an [aoni.RequestModifier] if condition is true.
+func WithHeaderIf(condition bool, key, value string) aoni.RequestModifier {
+	if !condition {
+		return aoni.RequestModifier{}
+	}
+
+	return WithHeader(key, value)
+}
+
+// WithHeadersIf conditionally constructs an [aoni.RequestModifier] if condition is true.
+func WithHeadersIf(condition bool, headers map[string]string) aoni.RequestModifier {
+	if !condition || len(headers) == 0 {
+		return aoni.RequestModifier{}
+	}
+
+	return WithHeaders(headers)
 }

@@ -5,9 +5,9 @@
 
 To an outside observer, bypassing modern Deep Packet Inspection (DPI) firewalls and Web Application Firewalls (WAFs) looks like network necromancy. Developers often paste magic strings of cipher suites and network parameters into their code, hoping the remote gatekeepers will let their requests pass.
 
-`aoni` rejects blind faith. This document demystifies the "voodoo" behind TLS, HTTP/2, and TCP/IP evasion, explaining the exact physical and protocol-level rules we manipulate to achieve browser-grade stealth.
+`aoni` rejects blind faith. This document demystifies the mechanics behind TLS, HTTP/2, and TCP/IP evasion, explaining the exact physical and protocol-level rules we manipulate to achieve browser-grade stealth.
 
-## 🔬 Deep Dive: The Physics of Fingerprint Detection vs. Evasion
+## Deep Dive: Fingerprint Detection vs. Evasion Mechanics
 
 To understand why `aoni` is engineered this way, we must look at how modern security middleboxes dissect network connections in real time.
 
@@ -172,15 +172,15 @@ Here is how `aoni` aligns all layers.
   * For HTTP/2 Extended CONNECT ([RFC 8441]), instead of opening a raw TCP connection, it sends a single HTTP/2 `CONNECT` request with the `:protocol` pseudo-header set to `websocket`. This multiplexes the WebSocket connection as a single stream inside an existing HTTP/2 connection, completely avoiding extra TCP handshakes and bypassing firewalls.
 
 ### 2. `realtime/socketio` (Socket.IO v5 Client)
-* **The Physics:** Establishes Engine.IO (v4) / Socket.IO (v5) client connections with automatic upgrading and state synchronization (`realtime/socketio/socketio.go`).
+* **The Physics:** Establishes Engine.IO (v4) / Socket.IO (v5) client connections with automatic upgrading and state synchronization (`x/socketio/client.go`).
 * **Under the Hood:**
   1. **Handshake:** Performs an HTTP handshake via the parent client to negotiate protocol version, obtain a Session ID (`sid`), and determine transport upgrades.
   2. **Upgrading:** Initiates a parallel WebSocket connection. Once a WebSocket handshake completes successfully, it immediately transitions the active stream from HTTP long polling to WebSocket frames.
   3. **Liveness:** Spawns a background goroutine coordinating the ping-pong heartbeat cycle. If a ping response is not received within the `pingTimeout` window, the connection triggers automatic reconnection.
   4. **Reconnection:** Employs an exponential backoff algorithm with randomized jitter to prevent the "thundering herd" problem on target servers.
 
-### 3. `telemetry/inspector` (Auditing & Live Traffic Replay)
-* **The Physics:** Intercepts and replicates HTTP request/response payloads without modifying or locking active connections (`telemetry/inspector/inspector.go`).
+### 3. `vortex traffic inspect -ui` (Auditing & Live Traffic Dashboard)
+* **The Physics:** Intercepts and replicates HTTP request/response payloads without modifying or locking active connections (`cmd/vortex/internal/inspector/inspector.go`).
 * **Under the Hood:**
   1. Captures outgoing request metadata, headers, and redacted sensitive fields.
   2. Wraps `resp.Body` in a high-performance multi-read buffer (`internal/io/io.go`). As the caller reads the stream, the data is concurrently mirrored to an in-memory buffer.

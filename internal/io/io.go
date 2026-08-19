@@ -19,9 +19,8 @@ import (
 	"time"
 
 	"github.com/klauspost/compress/gzip"
-	"github.com/lemon4ksan/miyako/generic"
-
-	"github.com/lemon4ksan/aoni/internal/offheap"
+	"github.com/lemon4ksan/foundation/generic"
+	"github.com/lemon4ksan/foundation/silicon/offheap"
 )
 
 var (

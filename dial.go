@@ -11,9 +11,9 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/lemon4ksan/foundation/silicon/sysnet"
 	utls "github.com/refraction-networking/utls"
 
-	"github.com/lemon4ksan/aoni/internal/sysnet"
 	"github.com/lemon4ksan/aoni/internal/transport"
 )
 

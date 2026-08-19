@@ -14,6 +14,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/lemon4ksan/foundation/net/ip"
 	utls "github.com/refraction-networking/utls"
 
 	"github.com/lemon4ksan/aoni/fingerprint/ja4"
@@ -21,7 +22,6 @@ import (
 	"github.com/lemon4ksan/aoni/netutil"
 	"github.com/lemon4ksan/aoni/netutil/cert"
 	"github.com/lemon4ksan/aoni/netutil/fragment"
-	"github.com/lemon4ksan/aoni/netutil/ip"
 	"github.com/lemon4ksan/aoni/netutil/netdial"
 )
 

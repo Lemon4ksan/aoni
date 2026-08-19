@@ -12,12 +12,12 @@ import (
 	"strings"
 	"time"
 
+	foundation "github.com/lemon4ksan/foundation/net/url"
+	"github.com/lemon4ksan/foundation/silicon/bytesconv"
+	"github.com/lemon4ksan/foundation/silicon/pool"
 	"github.com/valyala/fasthttp"
 
 	"github.com/lemon4ksan/aoni"
-	"github.com/lemon4ksan/aoni/internal/bytesconv"
-	"github.com/lemon4ksan/aoni/internal/pool"
-	"github.com/lemon4ksan/aoni/internal/urlutil"
 )
 
 // dispatchSingleRequest routes an HTTP request through Happy Eyeballs v3 (Protocol Racing),
@@ -499,7 +499,7 @@ func (c *Client) configureFastHTTPProxy(ctx context.Context, req *fasthttp.Reque
 	}
 
 	if rawProxy, ok := aoni.GetProxyOverride(ctx).Value(); ok && rawProxy != "" {
-		if parsed, parseErr := urlutil.Parse(rawProxy); parseErr == nil {
+		if parsed, parseErr := foundation.Parse(rawProxy); parseErr == nil {
 			proxyURL = parsed
 		}
 	}

@@ -19,11 +19,11 @@ import (
 	"testing"
 	"time"
 
+	"github.com/lemon4ksan/foundation/net/hpack"
 	utls "github.com/refraction-networking/utls"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"golang.org/x/net/http2"
-	"golang.org/x/net/http2/hpack"
 
 	"github.com/lemon4ksan/aoni"
 	"github.com/lemon4ksan/aoni/mod"
@@ -1757,4 +1757,26 @@ func TestIsForbiddenH2ConnectHeader(t *testing.T) {
 	for _, h := range allowed {
 		assert.False(t, isForbiddenH2ConnectHeader(h), "header %s should be allowed", h)
 	}
+}
+
+func TestDialResult_And_ReadMessageResult(t *testing.T) {
+	t.Parallel()
+
+	s, c := tcpPipe(t)
+	t.Cleanup(func() {
+		_ = s.Close()
+		_ = c.Close()
+	})
+
+	raw := WrapRawConn(c, true)
+	t.Cleanup(func() { _ = raw.Close() })
+
+	msg := Message{Type: FrameText, Payload: []byte("hello ws")}
+	assert.True(t, msg.IsText())
+	assert.False(t, msg.IsBinary())
+	assert.Equal(t, "hello ws", msg.Text())
+
+	// Read on nil
+	res := ReadMessageResult(nil)
+	assert.False(t, res.IsSuccess())
 }

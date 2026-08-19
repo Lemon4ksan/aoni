@@ -214,6 +214,11 @@ func NewFramedTransport(base *http.Transport, settings Settings, orderedKeys ...
 		orderedKeys: orderedKeys,
 	}
 
+	ft.h2Transport.MaxDecoderHeaderTableSize = settings.HeaderTableSize
+	ft.h2Transport.MaxEncoderHeaderTableSize = settings.HeaderTableSize
+	ft.h2Transport.MaxHeaderListSize = settings.MaxHeaderListSize
+	ft.h2Transport.MaxReadFrameSize = settings.MaxFrameSize
+
 	if base == nil {
 		return ft
 	}

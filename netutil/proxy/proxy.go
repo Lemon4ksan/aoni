@@ -19,15 +19,15 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/lemon4ksan/miyako/generic"
-	"github.com/lemon4ksan/miyako/log"
+	"github.com/lemon4ksan/foundation/async/log"
+	"github.com/lemon4ksan/foundation/generic"
+	"github.com/lemon4ksan/foundation/silicon/clock"
 	"golang.org/x/sys/cpu"
 
 	"github.com/lemon4ksan/aoni"
 	"github.com/lemon4ksan/aoni/cookie"
-	"github.com/lemon4ksan/aoni/internal/clock"
 	"github.com/lemon4ksan/aoni/internal/health"
-	"github.com/lemon4ksan/aoni/internal/trie"
+	"github.com/lemon4ksan/aoni/netutil/trie"
 )
 
 var (
@@ -432,9 +432,13 @@ func (r *Rotator) Do(req *http.Request) (*http.Response, error) {
 	clients := r.clients
 	r.mu.RUnlock()
 
+	n := uint32(len(clients)) //nolint:gosec
+	if n == 0 {
+		return nil, ErrNoProxyClients
+	}
+
 	var (
 		lastErr       error
-		n             = uint32(len(clients)) //nolint:gosec
 		sessionID     string
 		stickyIdx     = -1
 		hasCooledDown = false
@@ -706,4 +710,29 @@ func (r *DomainProxyRouter) RouteForDomain(targetDomain string) (*url.URL, bool)
 	}
 
 	return r.rt.Match(targetDomain)
+}
+
+// RouteForDomainOptional matches targetDomain and returns a Swift-inspired [generic.Optional].
+func (r *DomainProxyRouter) RouteForDomainOptional(targetDomain string) generic.Optional[*url.URL] {
+	u, ok := r.RouteForDomain(targetDomain)
+	if !ok {
+		return generic.None[*url.URL]()
+	}
+
+	return generic.Some(u)
+}
+
+// FindClient searches for a proxy client matching the predicate
+// and returns a Swift-inspired [generic.Optional].
+func (r *Rotator) FindClient(predicate func(aoni.HTTPDoer) bool) generic.Optional[aoni.HTTPDoer] {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	for _, tc := range r.clients {
+		if predicate(tc.client) {
+			return generic.Some(tc.client)
+		}
+	}
+
+	return generic.None[aoni.HTTPDoer]()
 }

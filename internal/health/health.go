@@ -9,9 +9,8 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/lemon4ksan/foundation/silicon/clock"
 	"golang.org/x/sys/cpu"
-
-	"github.com/lemon4ksan/aoni/internal/clock"
 )
 
 // Status represents the operational health state of a tracked network endpoint.

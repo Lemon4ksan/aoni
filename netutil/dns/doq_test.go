@@ -20,11 +20,10 @@ import (
 	"testing"
 	"time"
 
+	"github.com/lemon4ksan/foundation/net/dns/wire"
 	"github.com/quic-go/quic-go"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-
-	"github.com/lemon4ksan/aoni/netutil/dns/wire"
 )
 
 func generateDoQTLSConfig(t *testing.T) *tls.Config {

@@ -11,10 +11,9 @@ import (
 	"strconv"
 	"sync"
 
+	"github.com/lemon4ksan/foundation/silicon/bytesconv"
 	"github.com/quic-go/qpack"
 	"github.com/valyala/fasthttp"
-
-	"github.com/lemon4ksan/aoni/internal/bytesconv"
 )
 
 var bufferPool = sync.Pool{

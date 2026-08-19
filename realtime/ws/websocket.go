@@ -18,11 +18,11 @@ import (
 	"strings"
 	"time"
 
-	"github.com/lemon4ksan/miyako/generic"
+	"github.com/lemon4ksan/foundation/generic"
+	"github.com/lemon4ksan/foundation/silicon/bytesconv"
 	utls "github.com/refraction-networking/utls"
 
 	"github.com/lemon4ksan/aoni"
-	"github.com/lemon4ksan/aoni/internal/bytesconv"
 	"github.com/lemon4ksan/aoni/internal/io"
 	"github.com/lemon4ksan/aoni/internal/requestutil"
 )
@@ -397,4 +397,48 @@ func computeAcceptKey(challengeKey string) string {
 	_, _ = h.Write(bytesconv.S2B(websocketMagicGUID))
 
 	return base64.StdEncoding.EncodeToString(h.Sum(nil))
+}
+
+// Message represents a received WebSocket message frame.
+type Message struct {
+	Type    int
+	Payload []byte
+}
+
+// IsText reports whether the frame is a text frame.
+func (m Message) IsText() bool { return m.Type == FrameText }
+
+// IsBinary reports whether the frame is a binary frame.
+func (m Message) IsBinary() bool { return m.Type == FrameBinary }
+
+// Text returns the payload as a zero-allocation string.
+func (m Message) Text() string { return bytesconv.B2S(m.Payload) }
+
+// ReadMessageResult reads the next message from conn and wraps the outcome in a [generic.Result].
+func ReadMessageResult(conn Conn) generic.Result[Message] {
+	if conn == nil {
+		return generic.Failure[Message](ErrNilConnection)
+	}
+
+	msgType, payload, err := conn.ReadMessage()
+	if err != nil {
+		return generic.Failure[Message](err)
+	}
+
+	return generic.Success(Message{Type: msgType, Payload: payload})
+}
+
+// DialResult establishes a WebSocket connection and yields a Swift-inspired [generic.Result].
+func DialResult(
+	ctx context.Context,
+	dialer aoni.WebSocketDialer,
+	targetURL string,
+	mods ...aoni.RequestModifier,
+) (generic.Result[Conn], *http.Response) {
+	conn, resp, err := DialWebSocket(ctx, dialer, targetURL, mods...)
+	if err != nil {
+		return generic.Failure[Conn](err), resp
+	}
+
+	return generic.Success(conn), resp
 }

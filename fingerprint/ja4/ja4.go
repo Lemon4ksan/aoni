@@ -14,7 +14,7 @@ import (
 	"slices"
 	"sync"
 
-	"github.com/lemon4ksan/aoni/internal/bytesconv"
+	"github.com/lemon4ksan/foundation/silicon/bytesconv"
 )
 
 // ErrInvalidJA4Input indicates corrupted or truncated ClientHello byte payloads.

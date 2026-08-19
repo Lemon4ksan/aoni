@@ -79,3 +79,19 @@ func WithCacheTTL(ttl time.Duration) aoni.RequestModifier {
 		aoni.GetOrInitRequestConfig(req).CacheTTL = ttl
 	})
 }
+
+// WithCoalesce constructs an [aoni.RequestModifier] enabling Singleflight Request Coalescing
+// for concurrent identical in-flight operations to prevent upstream thundering herd load.
+func WithCoalesce() aoni.RequestModifier {
+	return Custom(func(req aoni.Request) {
+		aoni.GetOrInitRequestConfig(req).Coalesce = true
+	})
+}
+
+// WithETag constructs an [aoni.RequestModifier] enabling automated RFC 9111 conditional caching
+// and 304 Not Modified body reconstruction.
+func WithETag() aoni.RequestModifier {
+	return Custom(func(req aoni.Request) {
+		aoni.GetOrInitRequestConfig(req).ETagAutomaton = true
+	})
+}

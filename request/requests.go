@@ -12,6 +12,8 @@ import (
 	"net/http"
 	"reflect"
 
+	"github.com/lemon4ksan/foundation/generic"
+
 	"github.com/lemon4ksan/aoni"
 	"github.com/lemon4ksan/aoni/mod"
 )
@@ -63,6 +65,23 @@ type Requester interface {
 		method, path string,
 		mods ...aoni.RequestModifier,
 	) (*http.Response, error)
+}
+
+// Subscriber defines the universal contract for subscribing to inbound binary events.
+type Subscriber interface {
+	// Subscribe binds an event receiver for the specified event ID and returns an unsubscribe cleanup func.
+	Subscribe(eventID any, handler func(raw []byte)) (unsubscribe func())
+}
+
+// Transport defines the universal low-level wire contract for RPC, notifications, and event streams.
+type Transport interface {
+	Subscriber
+
+	// Invoke executes a request-response RPC over the wire.
+	Invoke(ctx context.Context, op any, payload []byte) (response []byte, err error)
+
+	// Notify sends a one-way message without waiting for a reply.
+	Notify(ctx context.Context, op any, payload []byte) error
 }
 
 // AsRequester adapts any execution engine, client, or [aoni.RequestDoer] into a [Requester].
@@ -716,18 +735,18 @@ func withJSONBodyMods(
 ) []aoni.RequestModifier {
 	total := 3 + len(mods)
 	if total <= stackModCapacity {
-		stackBuf[0] = mod.WithContentType("application/json")
-		stackBuf[1] = mod.WithAccept("application/json")
-		stackBuf[2] = mod.WithBody(bodyReader)
+		stackBuf[0] = mod.WithBody(bodyReader)
+		stackBuf[1] = mod.WithContentType("application/json")
+		stackBuf[2] = mod.WithAccept("application/json")
 		copy(stackBuf[3:], mods)
 
 		return stackBuf[:total]
 	}
 
 	res := make([]aoni.RequestModifier, total)
-	res[0] = mod.WithContentType("application/json")
-	res[1] = mod.WithAccept("application/json")
-	res[2] = mod.WithBody(bodyReader)
+	res[0] = mod.WithBody(bodyReader)
+	res[1] = mod.WithContentType("application/json")
+	res[2] = mod.WithAccept("application/json")
 	copy(res[3:], mods)
 
 	return res
@@ -751,4 +770,125 @@ func withCaptureMod(
 	copy(res[1:], mods)
 
 	return res
+}
+
+// GetResult dispatches a GET request and returns a Swift-inspired [generic.Result] wrapping the response.
+func GetResult[Resp any](
+	ctx context.Context,
+	c Requester,
+	path string,
+	mods ...aoni.RequestModifier,
+) (generic.Result[*Resp], *http.Response) {
+	val, resp, err := GetToEx[Resp](ctx, c, path, mods...)
+	if err != nil {
+		return generic.Failure[*Resp](err), resp
+	}
+
+	return generic.Success(val), resp
+}
+
+// PostResult dispatches a JSON POST request and returns a Swift-inspired [generic.Result].
+func PostResult[Resp any](
+	ctx context.Context,
+	c Requester,
+	path string,
+	body any,
+	mods ...aoni.RequestModifier,
+) (generic.Result[*Resp], *http.Response) {
+	val, resp, err := PostToEx[Resp](ctx, c, path, body, mods...)
+	if err != nil {
+		return generic.Failure[*Resp](err), resp
+	}
+
+	return generic.Success(val), resp
+}
+
+// PutResult dispatches a JSON PUT request and returns a Swift-inspired [generic.Result].
+func PutResult[Resp any](
+	ctx context.Context,
+	c Requester,
+	path string,
+	body any,
+	mods ...aoni.RequestModifier,
+) (generic.Result[*Resp], *http.Response) {
+	val, resp, err := PutToEx[Resp](ctx, c, path, body, mods...)
+	if err != nil {
+		return generic.Failure[*Resp](err), resp
+	}
+
+	return generic.Success(val), resp
+}
+
+// DeleteResult dispatches a DELETE request and returns a Swift-inspired [generic.Result].
+func DeleteResult[Resp any](
+	ctx context.Context,
+	c Requester,
+	path string,
+	body any,
+	mods ...aoni.RequestModifier,
+) (generic.Result[*Resp], *http.Response) {
+	val, resp, err := DeleteToEx[Resp](ctx, c, path, body, mods...)
+	if err != nil {
+		return generic.Failure[*Resp](err), resp
+	}
+
+	return generic.Success(val), resp
+}
+
+// PatchResult dispatches a JSON PATCH request and returns a Swift-inspired [generic.Result].
+func PatchResult[Resp any](
+	ctx context.Context,
+	c Requester,
+	path string,
+	body any,
+	mods ...aoni.RequestModifier,
+) (generic.Result[*Resp], *http.Response) {
+	val, resp, err := PatchToEx[Resp](ctx, c, path, body, mods...)
+	if err != nil {
+		return generic.Failure[*Resp](err), resp
+	}
+
+	return generic.Success(val), resp
+}
+
+type raceResult[Resp any] struct {
+	val  *Resp
+	resp *http.Response
+}
+
+// RaceGet concurrently dispatches GET requests to multiple target paths/URLs through c,
+// returning the result of the first endpoint that succeeds.
+//
+// All other competing requests are immediately cancelled via context.
+func RaceGet[Resp any](
+	ctx context.Context,
+	c Requester,
+	paths ...string,
+) (generic.Result[*Resp], *http.Response) {
+	if len(paths) == 0 {
+		return generic.Failure[*Resp](errors.New("aoni: no paths provided for RaceGet")), nil
+	}
+
+	tasks := make([]func(context.Context) generic.Result[raceResult[Resp]], len(paths))
+	for i, p := range paths {
+		targetPath := p
+		tasks[i] = func(reqCtx context.Context) generic.Result[raceResult[Resp]] {
+			val, resp, err := GetToEx[Resp](reqCtx, c, targetPath) //nolint:bodyclose
+			if err != nil {
+				return generic.Failure[raceResult[Resp]](err)
+			}
+
+			return generic.Success(raceResult[Resp]{val: val, resp: resp})
+		}
+	}
+
+	res := generic.RaceFirstSuccess(ctx, tasks...)
+	if !res.IsSuccess() {
+		_, err := res.Unwrap()
+		return generic.Failure[*Resp](err), nil
+	}
+
+	rr, _ := res.Unwrap()
+
+	return generic.Success(rr.val), rr.resp
 }

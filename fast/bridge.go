@@ -88,6 +88,10 @@ func (t *Transport) RoundTrip(req *http.Request) (*http.Response, error) {
 		}
 	}
 
+	if ct := req.Header.Get("Content-Type"); ct != "" {
+		fastReq.SetHeader("Content-Type", ct)
+	}
+
 	resp, err := t.noRedirectClient.Do(fastReq)
 	if err != nil {
 		return nil, err

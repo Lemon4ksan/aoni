@@ -12,7 +12,7 @@ import (
 	"strings"
 	"unicode/utf8"
 
-	"golang.org/x/text/encoding/htmlindex"
+	"github.com/lemon4ksan/foundation/text/encoding/htmlindex"
 )
 
 // SanitizeFileName cleans a string by stripping path traversal sequences, null bytes,

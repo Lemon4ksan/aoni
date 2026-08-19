@@ -14,8 +14,8 @@ import (
 
 	"github.com/andybalholm/brotli"
 	"github.com/klauspost/compress/zstd"
-	"golang.org/x/text/encoding/htmlindex"
-	"golang.org/x/text/transform"
+	"github.com/lemon4ksan/foundation/text/encoding/htmlindex"
+	"github.com/lemon4ksan/foundation/text/transform"
 
 	"github.com/lemon4ksan/aoni/internal/io"
 )

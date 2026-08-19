@@ -8,8 +8,9 @@ import (
 	"fmt"
 	"net/netip"
 
-	internalMasque "github.com/lemon4ksan/aoni/internal/masque"
-	"github.com/lemon4ksan/aoni/internal/offheap"
+	"github.com/lemon4ksan/foundation/silicon/offheap"
+
+	impl "github.com/lemon4ksan/aoni/internal/masque"
 )
 
 const (
@@ -207,12 +208,12 @@ type IPAddressRange struct {
 
 // EncodeVarint encodes v into b using QUIC variable-length integer encoding (RFC 9000).
 func EncodeVarint(v uint64, b []byte) int {
-	return internalMasque.EncodeVarintSlice(v, b)
+	return impl.EncodeVarintSlice(v, b)
 }
 
 // DecodeVarint decodes a QUIC variable-length integer from b, returning value and byte length.
 func DecodeVarint(b []byte) (uint64, int, error) {
-	v, n, err := internalMasque.DecodeVarint(b)
+	v, n, err := impl.DecodeVarint(b)
 	if err != nil {
 		return 0, 0, ErrInvalidCapsule
 	}

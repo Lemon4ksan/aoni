@@ -20,13 +20,13 @@ import (
 	"time"
 	"unicode/utf8"
 
-	"github.com/lemon4ksan/miyako/generic"
+	"github.com/lemon4ksan/foundation/generic"
+	"github.com/lemon4ksan/foundation/net/hpack"
+	"github.com/lemon4ksan/foundation/silicon/offheap"
+	"github.com/lemon4ksan/foundation/silicon/simd"
 	"golang.org/x/net/http2"
-	"golang.org/x/net/http2/hpack"
 
-	"github.com/lemon4ksan/aoni/internal/offheap"
 	"github.com/lemon4ksan/aoni/internal/realtime/ws"
-	"github.com/lemon4ksan/aoni/internal/simd"
 )
 
 const (

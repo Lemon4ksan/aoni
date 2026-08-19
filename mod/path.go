@@ -8,9 +8,10 @@ import (
 	"fmt"
 	"net/url"
 
+	foundationurl "github.com/lemon4ksan/foundation/net/url"
+
 	"github.com/lemon4ksan/aoni"
 	"github.com/lemon4ksan/aoni/codec/values"
-	"github.com/lemon4ksan/aoni/internal/urlutil"
 )
 
 // WithVar constructs an [aoni.RequestModifier] that interpolates a single URI template placeholder
@@ -21,7 +22,7 @@ func WithVar(key string, value any) aoni.RequestModifier {
 		Fn: func(req aoni.Request) {
 			escapedValue := url.PathEscape(fmt.Sprint(value))
 			path := req.Path()
-			req.SetPath(urlutil.ReplaceVar(path, key, escapedValue))
+			req.SetPath(foundationurl.ReplaceVar(path, key, escapedValue))
 		},
 	}
 }
@@ -121,6 +122,14 @@ func WithQueryParams(query any) aoni.RequestModifier {
 
 // resolveQueryString encodes query into URL query parameters using configured query encoder or default codec.
 func resolveQueryString(req aoni.Request, query any) (string, error) {
+	if s, ok := query.(string); ok {
+		return s, nil
+	}
+
+	if b, ok := query.([]byte); ok {
+		return string(b), nil
+	}
+
 	cfg := aoni.GetRequestConfig(req.Context())
 	if cfg != nil && cfg.QueryEncoder != nil {
 		qVals, err := cfg.QueryEncoder(query)

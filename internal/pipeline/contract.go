@@ -15,11 +15,11 @@ import (
 	"sync"
 	"time"
 
+	"github.com/lemon4ksan/foundation/silicon/bytesconv"
 	utls "github.com/refraction-networking/utls"
 
 	"github.com/lemon4ksan/aoni/fingerprint"
 	"github.com/lemon4ksan/aoni/fingerprint/ja4"
-	"github.com/lemon4ksan/aoni/internal/bytesconv"
 	"github.com/lemon4ksan/aoni/telemetry"
 )
 
@@ -465,6 +465,12 @@ func (m RequestModifier) ApplyStd(req *http.Request) {
 			req.Body = r
 		} else if m.Stream != nil {
 			req.Body = stdio.NopCloser(m.Stream)
+		}
+
+		if b, ok := m.Stream.(interface{ Len() int }); ok {
+			req.ContentLength = int64(b.Len())
+		} else if s, ok := m.Stream.(interface{ Len() int64 }); ok {
+			req.ContentLength = s.Len()
 		}
 
 		if m.ContentType != "" {

@@ -33,7 +33,7 @@ import (
 	"github.com/lemon4ksan/aoni/middleware"
 	"github.com/lemon4ksan/aoni/mod"
 	"github.com/lemon4ksan/aoni/option"
-	"github.com/lemon4ksan/aoni/telemetry/inspector"
+	"github.com/lemon4ksan/aoni/telemetry"
 )
 
 // TestFastClient_BasicGet tests GET request execution and body reading.
@@ -1115,6 +1115,16 @@ func TestFastClient_HTTPDoerAdapter(t *testing.T) {
 	assert.Equal(t, "adapter-payload", string(body))
 }
 
+type mockFastInspector struct {
+	capturedReq  *http.Request
+	capturedResp *http.Response
+}
+
+func (m *mockFastInspector) Capture(req *http.Request, resp *http.Response, _ error, _ *telemetry.TraceInfo) {
+	m.capturedReq = req
+	m.capturedResp = resp
+}
+
 func TestFast_Integration_Telemetry(t *testing.T) {
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("X-Server-Telemetry", "active")
@@ -1123,7 +1133,7 @@ func TestFast_Integration_Telemetry(t *testing.T) {
 	}))
 	defer ts.Close()
 
-	trafficInspector := inspector.NewTrafficInspector(":0")
+	trafficInspector := &mockFastInspector{}
 	c := fast.NewClient(option.WithInspector(trafficInspector))
 
 	resp, err := c.Request(context.Background(), "GET", ts.URL)
@@ -1131,11 +1141,10 @@ func TestFast_Integration_Telemetry(t *testing.T) {
 	defer resp.Close()
 
 	assert.Equal(t, http.StatusOK, resp.StatusCode())
-
-	records := trafficInspector.GetRequests()
-	require.NotEmpty(t, records)
-	assert.Equal(t, "GET", records[0].Method)
-	assert.Equal(t, http.StatusOK, records[0].Status)
+	require.NotNil(t, trafficInspector.capturedReq)
+	require.NotNil(t, trafficInspector.capturedResp)
+	assert.Equal(t, "GET", trafficInspector.capturedReq.Method)
+	assert.Equal(t, http.StatusOK, trafficInspector.capturedResp.StatusCode)
 }
 
 func TestFast_Integration_AntiDPIAndHeaderOrdering(t *testing.T) {

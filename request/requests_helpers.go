@@ -17,9 +17,10 @@ import (
 	"os"
 	"strings"
 
+	"github.com/lemon4ksan/foundation/silicon/bytesconv"
+
 	"github.com/lemon4ksan/aoni"
 	"github.com/lemon4ksan/aoni/codec/decode"
-	"github.com/lemon4ksan/aoni/internal/bytesconv"
 	"github.com/lemon4ksan/aoni/internal/io"
 	"github.com/lemon4ksan/aoni/internal/requestutil"
 	"github.com/lemon4ksan/aoni/resiliency/challenge"
@@ -86,7 +87,13 @@ func isStructuredDataMIME(contentType string) bool {
 		bytesconv.EqualFoldASCII(mediaType, "text/json") ||
 		bytesconv.EqualFoldASCII(mediaType, "application/x-protobuf") ||
 		bytesconv.EqualFoldASCII(mediaType, "application/protobuf") ||
-		bytesconv.EqualFoldASCII(mediaType, "application/grpc-web+proto")
+		bytesconv.EqualFoldASCII(mediaType, "application/grpc-web+proto") ||
+		bytesconv.EqualFoldASCII(mediaType, "application/xml") ||
+		bytesconv.EqualFoldASCII(mediaType, "text/xml") ||
+		bytesconv.EqualFoldASCII(mediaType, "application/x-yaml") ||
+		bytesconv.EqualFoldASCII(mediaType, "application/yaml") ||
+		bytesconv.EqualFoldASCII(mediaType, "text/x-yaml") ||
+		bytesconv.EqualFoldASCII(mediaType, "text/yaml")
 }
 
 // ResolvePeekableReader returns a peekable reader for the response body.
@@ -197,6 +204,10 @@ func (responseDecoder) DecodeSuccess(
 		br.SetData(target)
 
 		if err := decoder.Decode(resp.Body, br); err != nil {
+			if errors.Is(err, stdio.EOF) {
+				return nil
+			}
+
 			return err
 		}
 

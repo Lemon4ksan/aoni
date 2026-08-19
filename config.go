@@ -14,6 +14,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/lemon4ksan/foundation/net/ip"
+	foundationurl "github.com/lemon4ksan/foundation/net/url"
 	utls "github.com/refraction-networking/utls"
 
 	"github.com/lemon4ksan/aoni/fingerprint"
@@ -23,10 +25,8 @@ import (
 	"github.com/lemon4ksan/aoni/fingerprint/p0f"
 	"github.com/lemon4ksan/aoni/internal/pipeline"
 	"github.com/lemon4ksan/aoni/internal/transport"
-	"github.com/lemon4ksan/aoni/internal/urlutil"
 	"github.com/lemon4ksan/aoni/netutil/cert"
 	"github.com/lemon4ksan/aoni/netutil/fragment"
-	"github.com/lemon4ksan/aoni/netutil/ip"
 	"github.com/lemon4ksan/aoni/netutil/netdial"
 	"github.com/lemon4ksan/aoni/telemetry"
 )
@@ -728,7 +728,7 @@ type NoVarySearchConfig struct {
 }
 
 func cloneURL(u *url.URL) *url.URL {
-	return urlutil.CloneURL(u)
+	return foundationurl.CloneURL(u)
 }
 
 func clonePtr[T any](p *T) *T {
@@ -1104,7 +1104,7 @@ func AllowedDomainsRedirectPolicy(allowedDomains ...string) func(req *http.Reque
 
 		host := strings.ToLower(strings.TrimSuffix(req.URL.Hostname(), "."))
 		for _, domainPattern := range allowedDomains {
-			if urlutil.MatchDomainPattern(host, domainPattern) {
+			if foundationurl.MatchDomainPattern(host, domainPattern) {
 				return nil
 			}
 		}
@@ -1136,7 +1136,7 @@ func DefaultRedirectPolicy(
 			headersToScrub = DefaultSensitiveHeaders
 		}
 
-		if urlutil.IsCrossOrigin(req.URL, via[0].URL) {
+		if foundationurl.IsCrossOrigin(req.URL, via[0].URL) {
 			for _, h := range headersToScrub {
 				req.Header.Del(h)
 			}

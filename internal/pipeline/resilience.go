@@ -14,6 +14,8 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/lemon4ksan/foundation/generic"
+
 	"github.com/lemon4ksan/aoni/cookie"
 	"github.com/lemon4ksan/aoni/internal/io"
 	"github.com/lemon4ksan/aoni/telemetry"
@@ -158,10 +160,7 @@ func (p *Pipeline[Req, Resp]) executeWithProxyFailover(
 		return p.dispatchProxyAttempt(req, doer, hedging)
 	}
 
-	retryLimit := failover.RetryLimit
-	if retryLimit <= 0 {
-		retryLimit = len(proxies)
-	}
+	retryLimit := generic.Coalesce(failover.RetryLimit, len(proxies))
 
 	var lastErr error
 	for attempt := 0; attempt <= retryLimit; attempt++ {
@@ -342,11 +341,27 @@ func (p *Pipeline[Req, Resp]) dispatchHedgingAttempts(
 		firstErr    error
 	)
 
+	drainRemainder := func(remaining int) {
+		if remaining <= 0 {
+			return
+		}
+
+		go func(count int) {
+			for i := 0; i < count; i++ {
+				r := <-resultsCh
+				if r.resp != nil && r.resp.Body != nil {
+					_ = r.resp.Body.Close()
+				}
+			}
+		}(remaining)
+	}
+
 	activeCount := 1
 
 	for activeCount > 0 {
 		select {
 		case <-req.Context().Done():
+			drainRemainder(activeCount)
 			return nil, req.Context().Err()
 
 		case <-timer.C:
@@ -361,6 +376,7 @@ func (p *Pipeline[Req, Resp]) dispatchHedgingAttempts(
 			activeCount--
 
 			if res.err == nil {
+				drainRemainder(activeCount)
 				return p.handleHedgeWinner(res, ctx2, cancel1, cancel2, cleanup), nil
 			}
 

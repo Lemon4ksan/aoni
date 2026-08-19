@@ -12,11 +12,12 @@ import (
 	"strings"
 	"time"
 
+	"github.com/lemon4ksan/foundation/silicon/pool"
+
 	"github.com/lemon4ksan/aoni/fingerprint"
 	"github.com/lemon4ksan/aoni/fingerprint/ja4"
 	"github.com/lemon4ksan/aoni/fingerprint/p0f"
 	"github.com/lemon4ksan/aoni/internal/io"
-	"github.com/lemon4ksan/aoni/internal/pool"
 	"github.com/lemon4ksan/aoni/netutil/fragment"
 	"github.com/lemon4ksan/aoni/netutil/netdial"
 	"github.com/lemon4ksan/aoni/telemetry"
@@ -108,6 +109,8 @@ type RequestConfig struct {
 	InsecureSkipVerify        bool
 	SSRFGuard                 bool
 	ProxyDNS                  bool
+	Coalesce                  bool
+	ETagAutomaton             bool
 	AutoDecode                bool
 	DisableBaseResponse       bool
 	BaseResponseOverride      func() BaseResponse

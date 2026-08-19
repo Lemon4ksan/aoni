@@ -20,11 +20,11 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/lemon4ksan/miyako/generic"
+	"github.com/lemon4ksan/foundation/generic"
+	"github.com/lemon4ksan/foundation/silicon/rand"
 
 	"github.com/lemon4ksan/aoni"
 	"github.com/lemon4ksan/aoni/internal/health"
-	"github.com/lemon4ksan/aoni/internal/rand"
 )
 
 var (
@@ -449,6 +449,32 @@ func (b *Balancer) Stats() Stats {
 	return stats
 }
 
+// SelectHealthy selects a healthy backend according to the configured strategy, wrapped in a [generic.Optional].
+func (b *Balancer) SelectHealthy() generic.Optional[*Backend] {
+	b.mu.RLock()
+	defer b.mu.RUnlock()
+
+	for _, be := range b.backends {
+		if be.tracker.IsAvailable() {
+			return generic.Some(be)
+		}
+	}
+
+	return generic.None[*Backend]()
+}
+
+// DoResult executes req against a healthy backend and yields a Swift-inspired [generic.Result].
+//
+// Caller is responsible for closing the returned response body.
+func (b *Balancer) DoResult(req *http.Request) generic.Result[*http.Response] {
+	resp, err := b.Do(req) //nolint:bodyclose
+	if err != nil {
+		return generic.Failure[*http.Response](err) //nolint:bodyclose
+	}
+
+	return generic.Success(resp) //nolint:bodyclose
+}
+
 // SetWeight updates the selection weight of a target backend URL.
 func (b *Balancer) SetWeight(backendURL string, weight int) bool {
 	b.mu.Lock()
@@ -602,4 +628,18 @@ func (b *Balancer) Prewarm(ctx context.Context) {
 	}
 
 	wg.Wait()
+}
+
+// FindBackend searches for a registered backend matching the predicate using [generic.Find]
+// and returns a Swift-inspired [generic.Optional].
+func (b *Balancer) FindBackend(predicate func(*Backend) bool) generic.Optional[*Backend] {
+	b.mu.RLock()
+	defer b.mu.RUnlock()
+
+	backend, ok := generic.Find(b.backends, predicate)
+	if !ok {
+		return generic.None[*Backend]()
+	}
+
+	return generic.Some(backend)
 }

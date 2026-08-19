@@ -26,6 +26,7 @@ import (
 	"github.com/lemon4ksan/aoni/codec"
 	"github.com/lemon4ksan/aoni/fluent"
 	"github.com/lemon4ksan/aoni/option"
+	"github.com/lemon4ksan/aoni/resiliency"
 	"github.com/lemon4ksan/aoni/telemetry"
 )
 
@@ -417,6 +418,27 @@ func TestFluent_SetProxy_And_SetRetry(t *testing.T) {
 	assert.Equal(t, http.StatusOK, resp.StatusCode)
 }
 
+func TestFluent_RetryBuilder(t *testing.T) {
+	t.Parallel()
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	t.Cleanup(server.Close)
+
+	client := aoni.NewClient(server.Client(), option.WithBaseURL(server.URL))
+
+	resp, err := fluent.R(client).
+		Retry(resiliency.NewRetry().MaxAttempts(3).OnTransientErrors()).
+		Get("/")
+
+	require.NoError(t, err)
+
+	defer resp.Body.Close()
+
+	assert.Equal(t, http.StatusOK, resp.StatusCode)
+}
+
 func TestFluent_SetOutputFromHeader(t *testing.T) {
 	t.Parallel()
 
@@ -750,6 +772,56 @@ func TestFluent_AdditionalMethods(t *testing.T) {
 
 		assert.Equal(t, http.MethodPost, capturedMethod)
 		assert.Equal(t, "", capturedContentType)
+	})
+}
+
+func TestFluent_ResultMonadicAPI(t *testing.T) {
+	t.Parallel()
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/error" {
+			w.WriteHeader(http.StatusInternalServerError)
+			return
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_ = json.NewEncoder(w).Encode(userPayload{
+			ID:   100,
+			Name: "MonadicAlex",
+		})
+	}))
+	t.Cleanup(server.Close)
+
+	client := aoni.NewClient(server.Client(), option.WithBaseURL(server.URL))
+
+	t.Run("GetResult_Success", func(t *testing.T) {
+		res, resp := fluent.GetResult[userPayload](t.Context(), client, "/")
+		require.NotNil(t, resp)
+		assert.True(t, res.IsSuccess())
+		user, err := res.Unwrap()
+		require.NoError(t, err)
+		assert.Equal(t, 100, user.ID)
+		assert.Equal(t, "MonadicAlex", user.Name)
+	})
+
+	t.Run("PostResult_Success", func(t *testing.T) {
+		res, resp := fluent.PostResult[userPayload](t.Context(), client, "/", userPayload{ID: 100})
+		require.NotNil(t, resp)
+		assert.True(t, res.IsSuccess())
+		user, err := res.Unwrap()
+		require.NoError(t, err)
+		assert.Equal(t, "MonadicAlex", user.Name)
+	})
+
+	t.Run("FetchResult_ErrorRecover", func(t *testing.T) {
+		res, _ := fluent.FetchResult[userPayload](t.Context(), client, http.MethodGet, "/error")
+		assert.False(t, res.IsSuccess())
+		recovered := res.Recover(func(err error) userPayload {
+			return userPayload{ID: 999, Name: "RecoveredUser"}
+		})
+		assert.Equal(t, 999, recovered.ID)
+		assert.Equal(t, "RecoveredUser", recovered.Name)
 	})
 }
 

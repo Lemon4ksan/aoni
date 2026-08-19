@@ -12,7 +12,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/lemon4ksan/aoni/internal/bytesconv"
+	"github.com/lemon4ksan/foundation/silicon/bytesconv"
 )
 
 // CookieDTO is the internal lightweight data transfer representation of an HTTP cookie,
@@ -31,48 +31,40 @@ type CookieDTO struct {
 	MaxAge       int
 }
 
-// ParseSetCookieHeader parses a raw Set-Cookie header line.
+// ParseSetCookieHeader parses a raw Set-Cookie header line with zero heap allocations.
 func ParseSetCookieHeader(headerVal, defaultDomain, defaultPath string) CookieDTO {
 	if headerVal == "" {
 		return CookieDTO{}
 	}
 
-	parts := strings.Split(headerVal, ";")
-	if len(parts) == 0 {
-		return CookieDTO{}
-	}
-
-	nameVal := strings.TrimSpace(parts[0])
-
-	eqIdx := strings.IndexByte(nameVal, '=')
-	if eqIdx <= 0 {
-		return CookieDTO{}
-	}
-
 	c := CookieDTO{
-		Name:   strings.TrimSpace(nameVal[:eqIdx]),
-		Value:  strings.TrimSpace(nameVal[eqIdx+1:]),
 		Domain: defaultDomain,
 		Path:   defaultPath,
 	}
 
-	for _, attr := range parts[1:] {
-		ParseCookieAttribute(strings.TrimSpace(attr), &c)
+	isFirst := true
+	for key, val := range bytesconv.ScanPairs(headerVal, ';', '=') {
+		if isFirst {
+			c.Name = key
+			c.Value = val
+			isFirst = false
+
+			continue
+		}
+
+		ParseCookieAttribute(key, val, &c)
+	}
+
+	if c.Name == "" {
+		return CookieDTO{}
 	}
 
 	return c
 }
 
-// ParseCookieAttribute parses a single name=value or boolean directive (e.g., "Secure", "HttpOnly", "SameSite=Lax")
-// and sets the corresponding field on [CookieDTO] with zero heap allocations using case-insensitive ASCII comparison.
-func ParseCookieAttribute(attr string, c *CookieDTO) {
-	if attr == "" {
-		return
-	}
-
-	key, val, hasVal := strings.Cut(attr, "=")
-	key = strings.TrimSpace(key)
-	val = strings.TrimSpace(val)
+// ParseCookieAttribute sets the corresponding field on [CookieDTO] with zero heap allocations using case-insensitive ASCII comparison.
+func ParseCookieAttribute(key, val string, c *CookieDTO) {
+	hasVal := len(val) > 0
 
 	switch {
 	case bytesconv.EqualFoldASCII(key, "httponly"):

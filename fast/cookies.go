@@ -13,13 +13,13 @@ import (
 	"net/http"
 	"net/url"
 
+	foundation "github.com/lemon4ksan/foundation/net/url"
+	"github.com/lemon4ksan/foundation/silicon/bytesconv"
 	"github.com/valyala/fasthttp"
 
 	"github.com/lemon4ksan/aoni"
 	"github.com/lemon4ksan/aoni/cookie"
-	"github.com/lemon4ksan/aoni/internal/bytesconv"
-	internalCookie "github.com/lemon4ksan/aoni/internal/cookie"
-	"github.com/lemon4ksan/aoni/internal/urlutil"
+	impl "github.com/lemon4ksan/aoni/internal/cookie"
 	"github.com/lemon4ksan/aoni/netutil"
 )
 
@@ -38,7 +38,7 @@ func (c *Client) applyCookies(ctx context.Context, req *fasthttp.Request) {
 		return
 	}
 
-	u, err := urlutil.Parse(bytesconv.B2S(req.URI().FullURI()))
+	u, err := foundation.Parse(bytesconv.B2S(req.URI().FullURI()))
 	if err != nil {
 		return
 	}
@@ -48,7 +48,7 @@ func (c *Client) applyCookies(ctx context.Context, req *fasthttp.Request) {
 		return
 	}
 
-	cookieHeader := internalCookie.BuildCookieHeader(cookies)
+	cookieHeader := impl.BuildCookieHeader(cookies)
 	if cookieHeader == "" {
 		return
 	}
@@ -75,7 +75,7 @@ func (c *Client) captureCookies(ctx context.Context, req *fasthttp.Request, resp
 		return
 	}
 
-	u, err := urlutil.Parse(bytesconv.B2S(req.URI().FullURI()))
+	u, err := foundation.Parse(bytesconv.B2S(req.URI().FullURI()))
 	if err != nil {
 		return
 	}
@@ -100,7 +100,7 @@ func parseCookie(_, value []byte) *http.Cookie {
 		return nil
 	}
 
-	dto := internalCookie.ParseSetCookieHeader(bytesconv.B2S(value), "", "")
+	dto := impl.ParseSetCookieHeader(bytesconv.B2S(value), "", "")
 	if dto.Name == "" {
 		return nil
 	}
@@ -141,16 +141,21 @@ func extractUserInfoAndSetAuth(req *fasthttp.Request) {
 		pass := bytesconv.B2S(req.URI().Password())
 		encoded := base64.StdEncoding.EncodeToString(bytesconv.S2B(user + ":" + pass))
 		req.Header.Set("Authorization", "Basic "+encoded)
-	} else {
-		rawURI := req.URI().FullURI()
-		if bytes.IndexByte(rawURI, '@') >= 0 {
-			if parsed, err := url.Parse(bytesconv.B2S(rawURI)); err == nil && parsed.User != nil {
-				user := parsed.User.Username()
-				pass, _ := parsed.User.Password()
-				encoded := base64.StdEncoding.EncodeToString(bytesconv.S2B(user + ":" + pass))
-				req.Header.Set("Authorization", "Basic "+encoded)
-			}
-		}
+
+		return
+	}
+
+	host := req.URI().Host()
+	if bytes.IndexByte(host, '@') < 0 {
+		return
+	}
+
+	rawURI := req.URI().FullURI()
+	if parsed, err := url.Parse(bytesconv.B2S(rawURI)); err == nil && parsed.User != nil {
+		user := parsed.User.Username()
+		pass, _ := parsed.User.Password()
+		encoded := base64.StdEncoding.EncodeToString(bytesconv.S2B(user + ":" + pass))
+		req.Header.Set("Authorization", "Basic "+encoded)
 	}
 
 	req.URI().SetUsername("")
@@ -180,5 +185,5 @@ func isSameDomainOrSubdomain(h1, h2 string) bool {
 	clean1 := netutil.CleanHost(h1)
 	clean2 := netutil.CleanHost(h2)
 
-	return urlutil.IsSameDomainOrSubdomain(clean1, clean2)
+	return foundation.IsSameDomainOrSubdomain(clean1, clean2)
 }

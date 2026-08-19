@@ -640,3 +640,34 @@ func TestRegisterDecoder_Global(t *testing.T) {
 	UnregisterDecoder(mime)
 	assert.Nil(t, GetDecoder(mime))
 }
+
+func TestDecodeTo_And_DecodeResult(t *testing.T) {
+	t.Parallel()
+
+	type Item struct {
+		Name  string `json:"name"`
+		Price int    `json:"price"`
+	}
+
+	payload := `{"name":"Coffee","price":5}`
+
+	t.Run("DecodeTo_Success", func(t *testing.T) {
+		item, err := DecodeTo[Item](JSONDecoder, strings.NewReader(payload))
+		require.NoError(t, err)
+		assert.Equal(t, "Coffee", item.Name)
+		assert.Equal(t, 5, item.Price)
+	})
+
+	t.Run("DecodeResult_Success", func(t *testing.T) {
+		res := DecodeResult[Item](JSONDecoder, strings.NewReader(payload))
+		assert.True(t, res.IsSuccess())
+		item, err := res.Unwrap()
+		require.NoError(t, err)
+		assert.Equal(t, "Coffee", item.Name)
+	})
+
+	t.Run("DecodeResult_Failure", func(t *testing.T) {
+		res := DecodeResult[Item](JSONDecoder, strings.NewReader(`{invalid_json`))
+		assert.False(t, res.IsSuccess())
+	})
+}

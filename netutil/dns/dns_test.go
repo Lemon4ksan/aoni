@@ -22,11 +22,11 @@ import (
 	"testing"
 	"time"
 
+	"github.com/lemon4ksan/foundation/net/dns/wire"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	"github.com/lemon4ksan/aoni"
-	"github.com/lemon4ksan/aoni/netutil/dns/wire"
 )
 
 type failingResolver struct{}
@@ -981,4 +981,28 @@ func TestInMemoryDNSCache_ExtendedDNSRecordsStorage(t *testing.T) {
 
 	assert.True(t, ok)
 	assert.True(t, entry.expiry.After(time.Now().Add(55*time.Second)))
+}
+
+func TestLookupIPAddrResult_And_LookupFirstIP(t *testing.T) {
+	t.Parallel()
+
+	staticRes := NewStaticResolver(map[string][]string{
+		"example.com": {"1.2.3.4"},
+	}, nil)
+
+	res := LookupIPAddrResult(t.Context(), staticRes, "example.com")
+	require.True(t, res.IsSuccess())
+	ips, err := res.Unwrap()
+	require.NoError(t, err)
+	require.Len(t, ips, 1)
+	assert.Equal(t, "1.2.3.4", ips[0].IP.String())
+
+	firstIP := LookupFirstIP(t.Context(), staticRes, "example.com")
+	require.True(t, firstIP.IsPresent())
+	ip, ok := firstIP.Value()
+	require.True(t, ok)
+	assert.Equal(t, "1.2.3.4", ip.String())
+
+	nilLookup := LookupFirstIP(t.Context(), nil, "example.com")
+	assert.False(t, nilLookup.IsPresent())
 }

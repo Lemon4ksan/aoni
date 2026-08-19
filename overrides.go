@@ -15,12 +15,12 @@ import (
 	"strings"
 	"time"
 
-	"github.com/lemon4ksan/miyako/generic"
+	"github.com/lemon4ksan/foundation/generic"
+	"github.com/lemon4ksan/foundation/silicon/pool"
+	fastrand "github.com/lemon4ksan/foundation/silicon/rand"
 
 	"github.com/lemon4ksan/aoni/internal/io"
 	"github.com/lemon4ksan/aoni/internal/pipeline"
-	"github.com/lemon4ksan/aoni/internal/pool"
-	fastrand "github.com/lemon4ksan/aoni/internal/rand"
 	"github.com/lemon4ksan/aoni/netutil/netdial"
 	"github.com/lemon4ksan/aoni/telemetry"
 )
@@ -143,7 +143,7 @@ func ApplyTCPDelay(ctx context.Context) error {
 
 	delay := r.Min
 	if window > 0 {
-		delay += fastrand.FastJitter(window)
+		delay += fastrand.Jitter(window)
 	}
 
 	if delay <= 0 {

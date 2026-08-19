@@ -15,7 +15,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/lemon4ksan/miyako/log"
+	"github.com/lemon4ksan/foundation/async/log"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -712,4 +712,67 @@ func TestRedactHeaders(t *testing.T) {
 	assert.Contains(t, result, "Content-Type: text/plain")
 	assert.NotContains(t, result, "secret-token")
 	assert.NotContains(t, result, "session=abc123")
+}
+
+func TestRequests_MonadicResult(t *testing.T) {
+	t.Parallel()
+
+	server, client := setupTestReqServer(t, func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_ = json.NewEncoder(w).Encode(testPayload{
+			Message: "monadic-success",
+			Status:  200,
+		})
+	})
+
+	t.Run("GetResult", func(t *testing.T) {
+		res, resp := GetResult[testPayload](t.Context(), client, server.URL)
+		require.NotNil(t, resp)
+		assert.True(t, res.IsSuccess())
+		val, err := res.Unwrap()
+		require.NoError(t, err)
+		assert.Equal(t, "monadic-success", val.Message)
+	})
+
+	t.Run("PostResult", func(t *testing.T) {
+		res, resp := PostResult[testPayload](t.Context(), client, server.URL, testPayload{Status: 1})
+		require.NotNil(t, resp)
+		assert.True(t, res.IsSuccess())
+		val, err := res.Unwrap()
+		require.NoError(t, err)
+		assert.Equal(t, "monadic-success", val.Message)
+	})
+
+	t.Run("PutResult", func(t *testing.T) {
+		res, resp := PutResult[testPayload](t.Context(), client, server.URL, testPayload{Status: 1})
+		require.NotNil(t, resp)
+		assert.True(t, res.IsSuccess())
+	})
+
+	t.Run("DeleteResult", func(t *testing.T) {
+		res, resp := DeleteResult[testPayload](t.Context(), client, server.URL, nil)
+		require.NotNil(t, resp)
+		assert.True(t, res.IsSuccess())
+	})
+}
+
+func TestRequests_RaceGet(t *testing.T) {
+	t.Parallel()
+
+	s1 := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_ = json.NewEncoder(w).Encode(testPayload{Message: "fast-endpoint"})
+	}))
+	t.Cleanup(s1.Close)
+
+	client := aoni.NewClient(s1.Client())
+
+	res, resp := RaceGet[testPayload](t.Context(), client, s1.URL, "http://127.0.0.1:59999/unreachable")
+	require.NotNil(t, resp)
+	assert.True(t, res.IsSuccess())
+	val, err := res.Unwrap()
+	require.NoError(t, err)
+	assert.Equal(t, "fast-endpoint", val.Message)
 }

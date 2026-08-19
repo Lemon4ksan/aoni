@@ -5,7 +5,7 @@
 package h2engine
 
 import (
-	"github.com/lemon4ksan/aoni/internal/offheap"
+	"github.com/lemon4ksan/foundation/silicon/offheap"
 )
 
 const defaultConnPoolCapacity = 256

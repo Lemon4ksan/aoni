@@ -9,7 +9,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/lemon4ksan/aoni/internal/clock"
+	"github.com/lemon4ksan/foundation/silicon/clock"
 )
 
 type altSvcEntry struct {

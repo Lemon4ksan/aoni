@@ -6,10 +6,16 @@ This document outlines the architecture, coding standards, build/test commands, 
 
 **`aoni`** is a unified, ultra-high-performance Internet Protocol engine for Go. It consolidates modern IETF RFC standards, W3C specifications, and Chromium-grade network resilience mechanisms into a single, profile-driven zero-allocation architecture.
 
+> **Core Engineering Manifesto**:
+> _«The moment bytes leave one machine to reach another — it happens with 0 allocations, at silicon line speed, with zero type drift, and zero chance of WAF interception.»_
+
+> **The "aoni v1" Compatibility & Forever-Frozen Core Manifesto**:
+> _"Code written for **aoni v1.0.0** is guaranteed to compile and run unchanged on any **v1.x** version 5, 10, and 20 years from now. The entire core is permanently locked to the immutable IETF RFC and W3C/Chromium standards. All experiments, protocol shifts, and third-party adapters live exclusively in the **aoni/x/...** packages."_
+
 ### Key Capabilities & Architectural Pillars
 - **Dual Engines under a Single Interface**:
   - `aoni.Client` — 100% `net/http` compatibility, full middleware chain support, seamless standard ecosystem integration.
-  - `aoni/fast` (`fast.Client`) — Native engine built on top of `fasthttp` + H2/H3 for extreme silicon throughput (1.5M+ RPS, absolute zero allocations under parallel I/O).
+  - `aoni/fast` (`fast.Client`) — Native engine built on top of `fasthttp` + H2/H3 for extreme silicon throughput (1.87M+ RPS, absolute zero allocations under parallel I/O).
 - **Chromium-Grade Resilience & RFC Compliance**:
   - **Happy Eyeballs v3**: Protocol racing across H3/H2/H1.
   - **Auto-Recovery**: Automatic connection re-routing on HTTP 421 (Misdirected Request), HTTP 408 (Request Timeout), HTTP 425 (Too Early / 0-RTT rejection).
@@ -22,7 +28,7 @@ This document outlines the architecture, coding standards, build/test commands, 
 - **Generics-First Ergonomics & Codecs**:
   - Type-safe single-line calls via `fluent.FetchTo[T]` and `request.GetTo[T]`.
   - Native decoders for JSON, XML, Protobuf, and gRPC-Web (5-byte framing & trailer validation).
-- **Real-Time Protocols**: WebSockets over H2 Extended CONNECT (RFC 8441), Socket.IO v5 / Engine.IO v4, SSE, and NDJSON streaming.
+- **Real-Time Protocols**: WebSockets over H2 Extended CONNECT (RFC 8441), SSE, and NDJSON streaming (Socket.IO v5 / Engine.IO v4 in `aoni/x/socketio`).
 - **Proxy Isolation & Utilities**: Proxy-isolated Cookie Jars (`ProxyIsolatedCookieJar`), proxy rotators, IPv6 subnet rotators, and DoH/DoT/DoQ DNS resolvers.
 
 ## 2. Repository Layout

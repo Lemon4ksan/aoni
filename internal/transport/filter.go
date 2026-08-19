@@ -9,7 +9,7 @@ import (
 	"net"
 )
 
-// ConnFilter defines the 7-Zip-inspired stream transformation contract.
+// ConnFilter defines the zero-allocation stream transformation contract.
 // It receives an active [net.Conn], target host, and [DialConfig], applies an isolated network modification
 // or protocol layer, and returns a transformed net.Conn stream wrapper.
 type ConnFilter func(ctx context.Context, conn net.Conn, targetHost string, cfg *DialConfig) (net.Conn, error)

@@ -11,7 +11,7 @@ import (
 	"reflect"
 	"testing"
 
-	"github.com/lemon4ksan/aoni/internal/offheap"
+	"github.com/lemon4ksan/foundation/silicon/offheap"
 )
 
 func TestFrameHeaderFlags(t *testing.T) {

@@ -10,12 +10,13 @@ import (
 	"encoding/json"
 	stdio "io"
 	"net/url"
+	"strings"
 
+	"github.com/lemon4ksan/foundation/silicon/bytesconv"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/lemon4ksan/aoni"
 	"github.com/lemon4ksan/aoni/codec/values"
-	"github.com/lemon4ksan/aoni/internal/bytesconv"
 )
 
 // WithBody constructs an [aoni.RequestModifier] replacing the request body with the provided stream reader.
@@ -28,6 +29,26 @@ func WithBody(r stdio.Reader) aoni.RequestModifier {
 		return aoni.RequestModifier{
 			Kind:  aoni.ModBodyBytes,
 			Bytes: b.Bytes(),
+		}
+	}
+
+	if br, ok := r.(*bytes.Reader); ok {
+		buf := make([]byte, br.Len())
+		_, _ = br.ReadAt(buf, 0)
+
+		return aoni.RequestModifier{
+			Kind:  aoni.ModBodyBytes,
+			Bytes: buf,
+		}
+	}
+
+	if sr, ok := r.(*strings.Reader); ok {
+		buf := make([]byte, sr.Len())
+		_, _ = sr.ReadAt(buf, 0)
+
+		return aoni.RequestModifier{
+			Kind:  aoni.ModBodyBytes,
+			Bytes: buf,
 		}
 	}
 

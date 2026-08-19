@@ -9,7 +9,7 @@ package p0f
 import (
 	"syscall"
 
-	"github.com/lemon4ksan/aoni/internal/sysnet"
+	"github.com/lemon4ksan/foundation/silicon/sysnet"
 )
 
 func applySignature(raw syscall.RawConn, sig *Signature) {

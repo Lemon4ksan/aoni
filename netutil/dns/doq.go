@@ -14,9 +14,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/lemon4ksan/foundation/net/dns/wire"
 	"github.com/quic-go/quic-go"
-
-	"github.com/lemon4ksan/aoni/netutil/dns/wire"
 )
 
 const (

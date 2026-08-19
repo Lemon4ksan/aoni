@@ -7,7 +7,7 @@ package pipeline
 import (
 	"net/url"
 
-	"github.com/lemon4ksan/aoni/internal/ringbuf"
+	"github.com/lemon4ksan/foundation/silicon/ringbuf"
 )
 
 // Protocol represents the underlying L7 transport protocol version.

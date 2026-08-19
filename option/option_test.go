@@ -7,6 +7,8 @@ package option_test
 import (
 	"net/http"
 	"net/url"
+	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -201,4 +203,39 @@ func TestOption_Baremetal_And_BlockOverrides(t *testing.T) {
 		assert.False(t, cfg.Network.HasExperimental(option.ExpZeroCopy))
 		assert.Equal(t, []int{0, 2}, cfg.Network.CPUAffinityCores)
 	})
+}
+
+func TestOption_FromVortexCache_And_Env(t *testing.T) {
+	tempDir := t.TempDir()
+	vaultDir := filepath.Join(tempDir, ".vortex", "cache")
+	require.NoError(t, os.MkdirAll(vaultDir, 0o750))
+
+	vaultJSON := `{
+		"secrets": {
+			"AUTH_TOKEN": {"key": "AUTH_TOKEN", "value": "ya29.sample_test_token"},
+			"API_KEY": {"key": "API_KEY", "value": "test-api-key-value"},
+			"CUSTOM_HEADER": {"key": "CUSTOM_HEADER", "header": "X-Custom-Header", "value": "TEST-INSTANCE-123"}
+		}
+	}`
+	require.NoError(t, os.WriteFile(filepath.Join(vaultDir, "secrets.json"), []byte(vaultJSON), 0o600))
+
+	// 1. FromVortexCache
+	cfg := &aoni.Config{}
+	option.FromVortexCache(tempDir)(cfg)
+
+	require.NotNil(t, cfg.Defaults.Headers)
+	assert.Equal(t, "Bearer ya29.sample_test_token", cfg.Defaults.Headers.Get("Authorization"))
+	assert.Equal(t, "test-api-key-value", cfg.Defaults.Headers.Get("X-Api-Key"))
+	assert.Equal(t, "TEST-INSTANCE-123", cfg.Defaults.Headers.Get("X-Custom-Header"))
+
+	// 2. WithEnvBearer & WithEnvHeader
+	t.Setenv("TEST_APP_TOKEN", "env_secret_token_abc")
+	t.Setenv("TEST_CUSTOM_HEADER", "my-custom-value")
+
+	cfg2 := &aoni.Config{}
+	option.WithEnvBearer("TEST_APP_TOKEN")(cfg2)
+	option.WithEnvHeader("X-Custom", "TEST_CUSTOM_HEADER")(cfg2)
+
+	assert.Equal(t, "Bearer env_secret_token_abc", cfg2.Defaults.Headers.Get("Authorization"))
+	assert.Equal(t, "my-custom-value", cfg2.Defaults.Headers.Get("X-Custom"))
 }

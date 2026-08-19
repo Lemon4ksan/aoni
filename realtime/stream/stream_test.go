@@ -430,3 +430,86 @@ func TestParseGRPCWebStream(t *testing.T) {
 
 	assert.Equal(t, []string{"grpc_msg_1", "grpc_msg_2"}, msgs)
 }
+
+func TestStreamSSE_DoneAndIndentation(t *testing.T) {
+	t.Parallel()
+
+	t.Run("llm_done_signal", func(t *testing.T) {
+		t.Parallel()
+
+		_, client := setupTestServer(t, func(w http.ResponseWriter, _ *http.Request) {
+			w.Header().Set("Content-Type", "text/event-stream")
+			_, _ = w.Write([]byte("data: {\"text\": \"hello\"}\n\ndata: [DONE]\n\n"))
+		})
+
+		type Chunk struct {
+			Text string `json:"text"`
+		}
+
+		out, errs, err := stream.SSE[Chunk](t.Context(), client, "/")
+		require.NoError(t, err)
+
+		var chunks []Chunk
+		for c := range out {
+			chunks = append(chunks, c)
+		}
+
+		for err := range errs {
+			require.NoError(t, err)
+		}
+
+		require.Len(t, chunks, 1)
+		assert.Equal(t, "hello", chunks[0].Text)
+	})
+
+	t.Run("indentation_preservation", func(t *testing.T) {
+		t.Parallel()
+
+		_, client := setupTestServer(t, func(w http.ResponseWriter, _ *http.Request) {
+			w.Header().Set("Content-Type", "text/event-stream")
+			_, _ = w.Write([]byte("data:   def foo():\ndata:       return 42\n\n"))
+		})
+
+		out, errs, err := stream.SSE[stream.SSEEvent](t.Context(), client, "/")
+		require.NoError(t, err)
+
+		var events []stream.SSEEvent
+		for ev := range out {
+			events = append(events, ev)
+		}
+
+		for err := range errs {
+			require.NoError(t, err)
+		}
+
+		require.Len(t, events, 1)
+		assert.Equal(t, "  def foo():\n      return 42", events[0].Data)
+	})
+
+	t.Run("NDJSONReader_Sequential", func(t *testing.T) {
+		t.Parallel()
+
+		type Msg struct {
+			Text string `json:"text"`
+		}
+
+		r := io.NopCloser(strings.NewReader("{\"text\":\"first\"}\n{\"text\":\"second\"}\n"))
+		ndjson := stream.NewNDJSONReader[Msg](r)
+		t.Cleanup(func() { _ = ndjson.Close() })
+
+		res1 := ndjson.Next()
+		require.True(t, res1.IsSuccess())
+		val1, err := res1.Unwrap()
+		require.NoError(t, err)
+		assert.Equal(t, "first", val1.Text)
+
+		res2 := ndjson.Next()
+		require.True(t, res2.IsSuccess())
+		val2, err := res2.Unwrap()
+		require.NoError(t, err)
+		assert.Equal(t, "second", val2.Text)
+
+		res3 := ndjson.Next()
+		assert.False(t, res3.IsSuccess())
+	})
+}

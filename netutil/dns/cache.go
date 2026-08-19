@@ -10,10 +10,9 @@ import (
 	"sync"
 	"time"
 
-	"github.com/lemon4ksan/miyako/batto"
-
-	"github.com/lemon4ksan/aoni/internal/clock"
-	"github.com/lemon4ksan/aoni/netutil/dns/wire"
+	"github.com/lemon4ksan/foundation/async/dedup"
+	"github.com/lemon4ksan/foundation/net/dns/wire"
+	"github.com/lemon4ksan/foundation/silicon/clock"
 )
 
 var evictInterval = time.Minute
@@ -30,7 +29,7 @@ type InMemoryDNSCache struct {
 	cache    map[string]dnsCacheEntry
 	ttl      time.Duration
 	resolver Resolver
-	sflight  batto.Group[string, []net.IPAddr]
+	sflight  dedup.Group[string, []net.IPAddr]
 	cancel   context.CancelFunc
 }
 

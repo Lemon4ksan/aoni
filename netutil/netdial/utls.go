@@ -18,13 +18,13 @@ import (
 	"strings"
 	"time"
 
-	"github.com/lemon4ksan/miyako/generic"
+	"github.com/lemon4ksan/foundation/generic"
+	"github.com/lemon4ksan/foundation/net/dns/wire"
 	utls "github.com/refraction-networking/utls"
 
 	"github.com/lemon4ksan/aoni/fingerprint/ja4"
 	"github.com/lemon4ksan/aoni/netutil"
 	"github.com/lemon4ksan/aoni/netutil/cert"
-	"github.com/lemon4ksan/aoni/netutil/dns/wire"
 )
 
 var (
@@ -156,6 +156,16 @@ func HandshakeUTLS(
 	}
 
 	uConn.Extensions = removeECHExtensions(uConn.Extensions, len(echConfig) > 0)
+
+	if len(opts.ALPNOverride) > 0 {
+		for i, ext := range uConn.Extensions {
+			if alpnExt, ok := ext.(*utls.ALPNExtension); ok {
+				alpnExt.AlpnProtocols = opts.ALPNOverride
+				uConn.Extensions[i] = alpnExt
+				break
+			}
+		}
+	}
 
 	uConn.ClientHelloID = utls.HelloCustom
 	if err := uConn.BuildHandshakeState(); err != nil {

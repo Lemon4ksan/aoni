@@ -15,9 +15,10 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/lemon4ksan/foundation/silicon/offheap"
+
 	"github.com/lemon4ksan/aoni"
 	"github.com/lemon4ksan/aoni/internal/io"
-	"github.com/lemon4ksan/aoni/internal/offheap"
 )
 
 // WithMultipart constructs an [aoni.RequestModifier] building an in-memory multipart/form-data request body.

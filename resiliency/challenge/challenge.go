@@ -12,8 +12,9 @@ import (
 	"mime"
 	"net/http"
 
+	"github.com/lemon4ksan/foundation/silicon/bytesconv"
+
 	"github.com/lemon4ksan/aoni"
-	"github.com/lemon4ksan/aoni/internal/bytesconv"
 )
 
 // prefixProvider allows inspecting the pre-buffered byte prefix of a response body

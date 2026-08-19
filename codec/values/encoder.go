@@ -12,12 +12,12 @@ import (
 	"strconv"
 	"strings"
 
+	foundation "github.com/lemon4ksan/foundation/net/url"
+	"github.com/lemon4ksan/foundation/silicon/bytesconv"
 	"google.golang.org/protobuf/encoding/protojson"
 	"google.golang.org/protobuf/proto"
 
-	"github.com/lemon4ksan/aoni/internal/bytesconv"
 	"github.com/lemon4ksan/aoni/internal/mapper"
-	"github.com/lemon4ksan/aoni/internal/urlutil"
 )
 
 // getStructSchema resolves cached struct field metadata schema for type t.
@@ -204,9 +204,9 @@ func writeQueryKeyValuePair(sb *strings.Builder, key, value string, first *bool)
 
 	var tmpBuf [64]byte
 
-	buf := urlutil.AppendQueryEscapeString(tmpBuf[:0], key)
+	buf := foundation.AppendQueryEscapeString(tmpBuf[:0], key)
 	buf = append(buf, '=')
-	buf = urlutil.AppendQueryEscapeString(buf, value)
+	buf = foundation.AppendQueryEscapeString(buf, value)
 
 	sb.Write(buf)
 

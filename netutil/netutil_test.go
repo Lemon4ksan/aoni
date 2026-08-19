@@ -10,12 +10,12 @@ import (
 	"testing"
 	"time"
 
+	"github.com/lemon4ksan/foundation/net/ip"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	"github.com/lemon4ksan/aoni/netutil"
 	"github.com/lemon4ksan/aoni/netutil/fragment"
-	"github.com/lemon4ksan/aoni/netutil/ip"
 )
 
 func TestCleanHost(t *testing.T) {

@@ -12,6 +12,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/lemon4ksan/aoni/internal/version"
 )
 
 // HARGenerator captures and aggregates HTTP request-response sessions into HAR 1.2 JSON format.
@@ -195,7 +197,7 @@ func (g *HARGenerator) Export() ([]byte, error) {
 			Version: "1.2",
 			Creator: HARCreator{
 				Name:    "aoni",
-				Version: "0.5.0",
+				Version: version.Number,
 			},
 			Entries: entries,
 		},

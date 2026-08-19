@@ -16,7 +16,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/lemon4ksan/miyako/generic"
+	"github.com/lemon4ksan/foundation/generic"
 
 	"github.com/lemon4ksan/aoni"
 	"github.com/lemon4ksan/aoni/codec/decode"
@@ -245,7 +245,7 @@ func allowRetryForMethod(req aoni.Request, opts RetryOptions, resp aoni.Response
 		return false
 	}
 
-	if isIdempotentMethod(method) {
+	if isIdempotentMethod(method) || req.Header("Idempotency-Key") != "" || req.Header("X-Request-ID") != "" {
 		return true
 	}
 
