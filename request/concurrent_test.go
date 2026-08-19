@@ -241,3 +241,53 @@ func TestUnwrapClient(t *testing.T) {
 	unwrapped := UnwrapClient(reqr)
 	assert.Same(t, client, unwrapped)
 }
+
+func TestConcurrentWithLimit_And_IterConcurrent(t *testing.T) {
+	t.Parallel()
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = fmt.Fprintf(w, `{"message":"%s","status":200}`, r.URL.Path[1:])
+	}))
+	t.Cleanup(server.Close)
+
+	client := aoni.NewClient(nil, option.WithBaseURL(server.URL))
+	paths := []string{"item0", "item1", "item2", "item3", "item4"}
+
+	t.Run("ConcurrentWithLimit", func(t *testing.T) {
+		t.Parallel()
+
+		results := ConcurrentWithLimit(t.Context(), client, paths, 2,
+			func(ctx context.Context, c Requester, path string) (*reqTestPayload, error) {
+				return GetTo[reqTestPayload](ctx, c, "/"+path)
+			})
+
+		require.Len(t, results, len(paths))
+
+		for i, r := range results {
+			require.NoError(t, r.Err)
+			assert.Equal(t, i, r.Index)
+			assert.Equal(t, paths[i], r.Value.Message)
+		}
+	})
+
+	t.Run("IterConcurrent_Streaming", func(t *testing.T) {
+		t.Parallel()
+
+		received := make(map[int]string)
+		for idx, r := range IterConcurrent(t.Context(), client, paths, 2,
+			func(ctx context.Context, c Requester, path string) (*reqTestPayload, error) {
+				return GetTo[reqTestPayload](ctx, c, "/"+path)
+			}) {
+			require.NoError(t, r.Err)
+			received[idx] = r.Value.Message
+		}
+
+		assert.Len(t, received, len(paths))
+
+		for i, p := range paths {
+			assert.Equal(t, p, received[i])
+		}
+	})
+}

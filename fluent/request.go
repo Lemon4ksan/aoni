@@ -35,13 +35,12 @@ import (
 	"github.com/lemon4ksan/aoni/telemetry"
 )
 
-// TypedRequestPool provides a zero-boxing pool for [Request] instances backed by [sync.Pool].
-type TypedRequestPool struct {
+type typedRequestPool struct {
 	pool sync.Pool
 }
 
-func newTypedRequestPool() *TypedRequestPool {
-	return &TypedRequestPool{
+func newTypedRequestPool() *typedRequestPool {
+	return &typedRequestPool{
 		pool: sync.Pool{
 			New: func() any {
 				return &Request{}
@@ -51,7 +50,7 @@ func newTypedRequestPool() *TypedRequestPool {
 }
 
 // Get retrieves a pooled [Request] instance bound to any engine or client.
-func (p *TypedRequestPool) Get(doer any) *Request {
+func (p *typedRequestPool) Get(doer any) *Request {
 	reqClient := request.AsRequester(doer)
 
 	r, ok := p.pool.Get().(*Request)
@@ -65,7 +64,7 @@ func (p *TypedRequestPool) Get(doer any) *Request {
 }
 
 // Put recycles a [Request] instance back to the free-list pool after resetting fields.
-func (p *TypedRequestPool) Put(r *Request) {
+func (p *typedRequestPool) Put(r *Request) {
 	if r == nil {
 		return
 	}

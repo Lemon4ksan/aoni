@@ -560,18 +560,114 @@ func SSE[T any](
 	return out, errs, nil
 }
 
-// Chunks reads raw data from resp in 32KB chunks and pushes strings to a channel.
-func Chunks(ctx context.Context, resp *Stream) (<-chan string, <-chan error) {
+// ChunkReader provides sequential chunked read access to an underlying stream.
+type ChunkReader struct {
+	reader    io.Reader
+	closer    io.Closer
+	chunkSize int
+	buf       []byte
+	done      bool
+}
+
+// NewChunkReader wraps r with a [ChunkReader] reading blocks of chunkSize bytes.
+// If chunkSize <= 0, a default 32KB buffer size is used.
+func NewChunkReader(r io.ReadCloser, chunkSize int) *ChunkReader {
+	if chunkSize <= 0 {
+		chunkSize = 32 * 1024
+	}
+
+	return &ChunkReader{
+		reader:    r,
+		closer:    r,
+		chunkSize: chunkSize,
+		buf:       make([]byte, chunkSize),
+	}
+}
+
+// StreamChunks instantiates a [ChunkReader] reading from the provided [Stream].
+func StreamChunks(resp *Stream, chunkSize ...int) *ChunkReader {
+	size := 32 * 1024
+	if len(chunkSize) > 0 && chunkSize[0] > 0 {
+		size = chunkSize[0]
+	}
+
+	return NewChunkReader(resp, size)
+}
+
+// Next reads the next chunk of raw bytes from the stream.
+// Returns an error with io.EOF on end of stream.
+// The returned byte slice is valid until the next call to Next.
+func (r *ChunkReader) Next() generic.Result[[]byte] {
+	if r.done {
+		return generic.Failure[[]byte](io.EOF)
+	}
+
+	n, err := r.reader.Read(r.buf)
+	if n > 0 {
+		if err != nil && errors.Is(err, io.EOF) {
+			r.done = true
+		}
+
+		return generic.Success(r.buf[:n])
+	}
+
+	if err != nil {
+		r.done = true
+		return generic.Failure[[]byte](err)
+	}
+
+	r.done = true
+
+	return generic.Failure[[]byte](io.EOF)
+}
+
+// Close closes the underlying stream source.
+func (r *ChunkReader) Close() error {
+	if r.closer != nil {
+		return r.closer.Close()
+	}
+
+	return nil
+}
+
+// All yields an [iter.Seq2] sequence compatible with Go 1.23+ range-over-func loops.
+func (r *ChunkReader) All() iter.Seq2[[]byte, error] {
+	return func(yield func([]byte, error) bool) {
+		defer r.Close()
+
+		for {
+			chunk, err := r.Next().Unwrap()
+			if err != nil {
+				if errors.Is(err, io.EOF) {
+					return
+				}
+
+				yield(nil, err)
+
+				return
+			}
+
+			if !yield(chunk, nil) {
+				return
+			}
+		}
+	}
+}
+
+// IterChunks returns a Go 1.23+ range-over-func iterator yielding byte chunks directly from resp.
+func IterChunks(resp *Stream, chunkSize ...int) iter.Seq2[[]byte, error] {
+	return StreamChunks(resp, chunkSize...).All()
+}
+
+// Channel adapts the ChunkReader to push chunks to asynchronous Go channels.
+func (r *ChunkReader) Channel(ctx context.Context) (<-chan string, <-chan error) {
 	out := make(chan string, 100)
 	errs := make(chan error, 1)
 
 	go func() {
 		defer close(out)
 		defer close(errs)
-		defer resp.Close()
-
-		reader := bufio.NewReaderSize(resp, 1024*1024)
-		buf := make([]byte, 32*1024)
+		defer r.Close()
 
 		for {
 			select {
@@ -579,16 +675,7 @@ func Chunks(ctx context.Context, resp *Stream) (<-chan string, <-chan error) {
 				errs <- ctx.Err()
 				return
 			default:
-				n, err := reader.Read(buf)
-				if n > 0 {
-					select {
-					case <-ctx.Done():
-						errs <- ctx.Err()
-						return
-					case out <- string(buf[:n]):
-					}
-				}
-
+				chunk, err := r.Next().Unwrap()
 				if err != nil {
 					if errors.Is(err, io.EOF) {
 						return
@@ -598,11 +685,23 @@ func Chunks(ctx context.Context, resp *Stream) (<-chan string, <-chan error) {
 
 					return
 				}
+
+				select {
+				case <-ctx.Done():
+					errs <- ctx.Err()
+					return
+				case out <- string(chunk):
+				}
 			}
 		}
 	}()
 
 	return out, errs
+}
+
+// Chunks reads raw data from resp in 32KB chunks and pushes strings to a channel.
+func Chunks(ctx context.Context, resp *Stream) (<-chan string, <-chan error) {
+	return StreamChunks(resp).Channel(ctx)
 }
 
 // ParseGRPCWebStream reads a gRPC-Web response stream and pushes decoded [proto.Message] instances to channels.

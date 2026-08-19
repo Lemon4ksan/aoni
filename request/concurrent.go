@@ -6,10 +6,15 @@ package request
 
 import (
 	"context"
+	"iter"
 	"sync"
+	"sync/atomic"
 
 	"github.com/lemon4ksan/aoni"
 )
+
+// DefaultConcurrencyLimit is the default worker pool size for large concurrent batch operations.
+const DefaultConcurrencyLimit = 32
 
 // ConcurrentResult encapsulates the execution outcome of a single request within a concurrent fan-out operation.
 type ConcurrentResult[Resp any] struct {
@@ -35,11 +40,23 @@ func Concurrent[Resp any](
 	paths []string,
 	fn func(ctx context.Context, c Requester, path string) (*Resp, error),
 ) []ConcurrentResult[Resp] {
-	return ConcurrentWithMods(
+	return ConcurrentWithLimit(ctx, c, paths, DefaultConcurrencyLimit, fn)
+}
+
+// ConcurrentWithLimit is like [Concurrent], but allows specifying an explicit maximum worker concurrency limit.
+func ConcurrentWithLimit[Resp any](
+	ctx context.Context,
+	c Requester,
+	paths []string,
+	limit int,
+	fn func(ctx context.Context, c Requester, path string) (*Resp, error),
+) []ConcurrentResult[Resp] {
+	return ConcurrentWithModsAndLimit(
 		ctx,
 		c,
 		paths,
 		nil,
+		limit,
 		func(ctx context.Context, c Requester, path string, _ ...aoni.RequestModifier) (*Resp, error) {
 			return fn(ctx, c, path)
 		},
@@ -57,26 +74,132 @@ func ConcurrentWithMods[Resp any](
 	mods [][]aoni.RequestModifier,
 	fn func(ctx context.Context, c Requester, path string, mods ...aoni.RequestModifier) (*Resp, error),
 ) []ConcurrentResult[Resp] {
-	results := make([]ConcurrentResult[Resp], len(paths))
+	return ConcurrentWithModsAndLimit(ctx, c, paths, mods, DefaultConcurrencyLimit, fn)
+}
 
-	var wg sync.WaitGroup
-	wg.Add(len(paths))
+// ConcurrentWithModsAndLimit executes fn concurrently across paths with an explicit worker concurrency limit
+// and per-request modifiers, preserving original slice ordering in the returned results.
+func ConcurrentWithModsAndLimit[Resp any](
+	ctx context.Context,
+	c Requester,
+	paths []string,
+	mods [][]aoni.RequestModifier,
+	limit int,
+	fn func(ctx context.Context, c Requester, path string, mods ...aoni.RequestModifier) (*Resp, error),
+) []ConcurrentResult[Resp] {
+	n := len(paths)
+	if n == 0 {
+		return nil
+	}
 
-	for i, path := range paths {
-		var reqMods []aoni.RequestModifier
-		if i < len(mods) {
-			reqMods = mods[i]
-		}
+	results := make([]ConcurrentResult[Resp], n)
 
-		go func(idx int, targetPath string, targetMods []aoni.RequestModifier) {
+	workerCount := limit
+	if workerCount <= 0 || workerCount > n {
+		workerCount = n
+	}
+
+	var (
+		nextIdx atomic.Int64
+		wg      sync.WaitGroup
+	)
+
+	wg.Add(workerCount)
+
+	for range workerCount {
+		go func() {
 			defer wg.Done()
 
-			val, err := fn(ctx, c, targetPath, targetMods...)
-			results[idx] = ConcurrentResult[Resp]{Index: idx, Value: val, Err: err}
-		}(i, path, reqMods)
+			for {
+				idx := int(nextIdx.Add(1) - 1)
+				if idx >= n {
+					return
+				}
+
+				var reqMods []aoni.RequestModifier
+				if idx < len(mods) {
+					reqMods = mods[idx]
+				}
+
+				val, err := fn(ctx, c, paths[idx], reqMods...)
+				results[idx] = ConcurrentResult[Resp]{Index: idx, Value: val, Err: err}
+			}
+		}()
 	}
 
 	wg.Wait()
 
 	return results
+}
+
+// IterConcurrent executes fn concurrently across paths using a bounded worker pool and streams
+// results over a Go 1.23+ range-over-func iterator as soon as each request completes.
+// If the consumer breaks early from the loop, pending background requests are cancelled cleanly.
+func IterConcurrent[Resp any](
+	ctx context.Context,
+	c Requester,
+	paths []string,
+	limit int,
+	fn func(ctx context.Context, c Requester, path string) (*Resp, error),
+) iter.Seq2[int, ConcurrentResult[Resp]] {
+	return func(yield func(int, ConcurrentResult[Resp]) bool) {
+		n := len(paths)
+		if n == 0 {
+			return
+		}
+
+		workerCount := limit
+		if workerCount <= 0 || workerCount > n {
+			workerCount = n
+		}
+
+		ctxIter, cancel := context.WithCancel(ctx)
+		defer cancel()
+
+		resCh := make(chan ConcurrentResult[Resp], workerCount)
+
+		var (
+			nextIdx atomic.Int64
+			wg      sync.WaitGroup
+		)
+
+		wg.Add(workerCount)
+
+		for range workerCount {
+			go func() {
+				defer wg.Done()
+
+				for {
+					if ctxIter.Err() != nil {
+						return
+					}
+
+					idx := int(nextIdx.Add(1) - 1)
+					if idx >= n {
+						return
+					}
+
+					val, err := fn(ctxIter, c, paths[idx])
+					res := ConcurrentResult[Resp]{Index: idx, Value: val, Err: err}
+
+					select {
+					case <-ctxIter.Done():
+						return
+					case resCh <- res:
+					}
+				}
+			}()
+		}
+
+		go func() {
+			wg.Wait()
+			close(resCh)
+		}()
+
+		for res := range resCh {
+			if !yield(res.Index, res) {
+				return
+			}
+		}
+	}
 }

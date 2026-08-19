@@ -742,19 +742,24 @@ func TestDoHResolver_EDNS0_And_GetMethod(t *testing.T) {
 		t.Parallel()
 
 		var (
+			mu             sync.Mutex
 			capturedMethod string
 			capturedQuery  string
 		)
 
 		ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			query := r.URL.Query().Get("dns")
+
+			mu.Lock()
 			capturedMethod = r.Method
-			capturedQuery = r.URL.Query().Get("dns")
+			capturedQuery = query
+			mu.Unlock()
 
 			w.Header().Set("Content-Type", DoHMediaType)
 			w.WriteHeader(http.StatusOK)
 
-			if capturedQuery != "" {
-				wireQuery, err := base64.RawURLEncoding.DecodeString(capturedQuery)
+			if query != "" {
+				wireQuery, err := base64.RawURLEncoding.DecodeString(query)
 				if err == nil && len(wireQuery) >= 2 {
 					queryID := binary.BigEndian.Uint16(wireQuery[0:2])
 					respWire := buildMockDoQDNSResponse(queryID, netip.MustParseAddr("1.1.1.1"))
@@ -775,29 +780,39 @@ func TestDoHResolver_EDNS0_And_GetMethod(t *testing.T) {
 		_, err := resolver.LookupNetIP(t.Context(), "example.com")
 		require.NoError(t, err)
 
-		assert.Equal(t, http.MethodGet, capturedMethod)
-		assert.NotEmpty(t, capturedQuery)
+		mu.Lock()
+		m := capturedMethod
+		q := capturedQuery
+		mu.Unlock()
+
+		assert.Equal(t, http.MethodGet, m)
+		assert.NotEmpty(t, q)
 	})
 
 	t.Run("doh_post_method_wire_payload", func(t *testing.T) {
 		t.Parallel()
 
 		var (
+			mu                  sync.Mutex
 			capturedMethod      string
 			capturedContentType string
 			capturedBody        []byte
 		)
 
 		ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			b, _ := io.ReadAll(r.Body)
+
+			mu.Lock()
 			capturedMethod = r.Method
 			capturedContentType = r.Header.Get("Content-Type")
-			capturedBody, _ = io.ReadAll(r.Body)
+			capturedBody = b
+			mu.Unlock()
 
 			w.Header().Set("Content-Type", DoHMediaType)
 			w.WriteHeader(http.StatusOK)
 
-			if len(capturedBody) >= 2 {
-				queryID := binary.BigEndian.Uint16(capturedBody[0:2])
+			if len(b) >= 2 {
+				queryID := binary.BigEndian.Uint16(b[0:2])
 				respWire := buildMockDoQDNSResponse(queryID, netip.MustParseAddr("1.1.1.1"))
 				_, _ = w.Write(respWire)
 			}
@@ -814,9 +829,15 @@ func TestDoHResolver_EDNS0_And_GetMethod(t *testing.T) {
 		_, err := resolver.LookupNetIP(t.Context(), "example.com")
 		require.NoError(t, err)
 
-		assert.Equal(t, http.MethodPost, capturedMethod)
-		assert.Equal(t, DoHMediaType, capturedContentType)
-		assert.NotEmpty(t, capturedBody)
+		mu.Lock()
+		m := capturedMethod
+		ct := capturedContentType
+		body := capturedBody
+		mu.Unlock()
+
+		assert.Equal(t, http.MethodPost, m)
+		assert.Equal(t, DoHMediaType, ct)
+		assert.NotEmpty(t, body)
 	})
 
 	t.Run("doh_non_200_http_status_error", func(t *testing.T) {

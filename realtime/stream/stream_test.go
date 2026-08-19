@@ -553,4 +553,21 @@ func TestStreamSSE_DoneAndIndentation(t *testing.T) {
 
 		assert.Equal(t, []string{"item1", "item2"}, results)
 	})
+
+	t.Run("ChunkReader_Iterator_And_All", func(t *testing.T) {
+		t.Parallel()
+
+		r := io.NopCloser(strings.NewReader("hello world from aoni chunk reader"))
+		chunkReader := stream.NewChunkReader(r, 8)
+		t.Cleanup(func() { _ = chunkReader.Close() })
+
+		var chunks []string
+		for chunk, err := range chunkReader.All() {
+			require.NoError(t, err)
+
+			chunks = append(chunks, string(chunk))
+		}
+
+		assert.Equal(t, "hello world from aoni chunk reader", strings.Join(chunks, ""))
+	})
 }
