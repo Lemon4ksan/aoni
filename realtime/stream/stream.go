@@ -23,7 +23,6 @@ import (
 
 	"github.com/klauspost/compress/gzip"
 	"github.com/lemon4ksan/foundation/generic"
-	"github.com/lemon4ksan/foundation/silicon/bytesconv"
 	"github.com/lemon4ksan/foundation/silicon/offheap"
 	"google.golang.org/protobuf/proto"
 
@@ -164,36 +163,41 @@ type SSEEvent struct {
 	Retry int
 }
 
-func parseSSELine(line string, currentEvent *SSEEvent) {
-	// Strip trailing CRLF
-	line = strings.TrimRight(line, "\r\n")
-	if line == "" || strings.HasPrefix(line, ":") {
+func parseSSELineBytes(line []byte, currentEvent *SSEEvent) {
+	line = bytes.TrimRight(line, "\r\n")
+	if len(line) == 0 || line[0] == ':' {
 		return
 	}
 
-	key, value, found := bytesconv.CutByte(line, ':')
-	if found {
-		value = strings.TrimPrefix(value, " ")
+	colonIdx := bytes.IndexByte(line, ':')
+
+	var key, value []byte
+	if colonIdx >= 0 {
+		key = line[:colonIdx]
+
+		value = line[colonIdx+1:]
+		if len(value) > 0 && value[0] == ' ' {
+			value = value[1:]
+		}
 	} else {
 		key = line
-		value = ""
 	}
 
-	switch key {
+	switch string(key) {
 	case "event":
-		currentEvent.Event = value
+		currentEvent.Event = string(value)
 	case "data":
 		if currentEvent.Data != "" {
-			currentEvent.Data += "\n" + value
+			currentEvent.Data += "\n" + string(value)
 			return
 		}
 
-		currentEvent.Data = value
+		currentEvent.Data = string(value)
 
 	case "id":
-		currentEvent.ID = value
+		currentEvent.ID = string(value)
 	case "retry":
-		if r, err := strconv.Atoi(bytesconv.TrimSpaceASCII(value)); err == nil {
+		if r, err := strconv.Atoi(string(bytes.TrimSpace(value))); err == nil {
 			currentEvent.Retry = r
 		}
 	}
@@ -248,9 +252,14 @@ func ParseSSE[T any](ctx context.Context, resp *Stream) (<-chan T, <-chan error)
 				errs <- ctx.Err()
 				return
 			default:
-				line, err := reader.ReadString('\n')
+				lineBytes, err := reader.ReadSlice('\n')
 				if err != nil {
 					if errors.Is(err, io.EOF) {
+						if len(lineBytes) > 0 {
+							parseSSELineBytes(lineBytes, &currentEvent)
+							_ = dispatchSSEEvent(ctx, currentEvent, out)
+						}
+
 						return
 					}
 
@@ -259,7 +268,7 @@ func ParseSSE[T any](ctx context.Context, resp *Stream) (<-chan T, <-chan error)
 					return
 				}
 
-				if strings.TrimSpace(line) == "" {
+				if len(bytes.TrimRight(lineBytes, "\r\n")) == 0 {
 					if err := dispatchSSEEvent(ctx, currentEvent, out); err != nil {
 						errs <- err
 						return
@@ -270,7 +279,7 @@ func ParseSSE[T any](ctx context.Context, resp *Stream) (<-chan T, <-chan error)
 					continue
 				}
 
-				parseSSELine(line, &currentEvent)
+				parseSSELineBytes(lineBytes, &currentEvent)
 			}
 		}
 	}()
@@ -414,12 +423,17 @@ func consumeSSEResponse[T any](
 		default:
 		}
 
-		line, err := reader.ReadString('\n')
+		lineBytes, err := reader.ReadSlice('\n')
 		if err != nil {
+			if len(lineBytes) > 0 {
+				parseSSELineBytes(lineBytes, &currentEvent)
+				_ = dispatchSSEEvent(ctx, currentEvent, out)
+			}
+
 			return nil
 		}
 
-		if strings.TrimSpace(line) == "" {
+		if len(bytes.TrimRight(lineBytes, "\r\n")) == 0 {
 			if currentEvent.ID != "" {
 				*lastEventID = currentEvent.ID
 			}
@@ -437,7 +451,7 @@ func consumeSSEResponse[T any](
 			continue
 		}
 
-		parseSSELine(line, &currentEvent)
+		parseSSELineBytes(lineBytes, &currentEvent)
 	}
 }
 

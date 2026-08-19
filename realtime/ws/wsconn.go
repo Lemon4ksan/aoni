@@ -8,7 +8,6 @@ import (
 	"bufio"
 	"bytes"
 	"context"
-	"crypto/rand"
 	"encoding/binary"
 	"errors"
 	"fmt"
@@ -23,6 +22,7 @@ import (
 	"github.com/lemon4ksan/foundation/generic"
 	"github.com/lemon4ksan/foundation/net/hpack"
 	"github.com/lemon4ksan/foundation/silicon/offheap"
+	"github.com/lemon4ksan/foundation/silicon/rand"
 	"github.com/lemon4ksan/foundation/silicon/simd"
 	"golang.org/x/net/http2"
 
@@ -78,6 +78,30 @@ func WrapRawConn(conn net.Conn, isClient bool) Conn {
 	return WrapRawConnConfig(conn, isClient, 4096, 4096)
 }
 
+// WrapRawConnWithReader wraps a net.Conn with an existing *bufio.Reader, eliminating double buffering.
+func WrapRawConnWithReader(conn net.Conn, br *bufio.Reader, isClient bool, writeBufSize int) *wsRawConn {
+	if writeBufSize <= 0 {
+		writeBufSize = 4096
+	}
+
+	if br == nil {
+		br = bufio.NewReaderSize(conn, 4096)
+	}
+
+	c := &wsRawConn{
+		base:       conn,
+		br:         br,
+		isClient:   isClient,
+		payloadBuf: make([]byte, 0, 4096),
+		writeBuf:   make([]byte, 0, writeBufSize),
+		closed:     make(chan struct{}),
+		writeMu:    make(chan struct{}, 1),
+	}
+	c.writeMu <- struct{}{}
+
+	return c
+}
+
 func WrapRawConnConfig(conn net.Conn, isClient bool, readBufSize, writeBufSize int) *wsRawConn {
 	if readBufSize <= 0 {
 		readBufSize = 4096
@@ -87,18 +111,7 @@ func WrapRawConnConfig(conn net.Conn, isClient bool, readBufSize, writeBufSize i
 		writeBufSize = 4096
 	}
 
-	c := &wsRawConn{
-		base:       conn,
-		br:         bufio.NewReaderSize(conn, readBufSize),
-		isClient:   isClient,
-		payloadBuf: make([]byte, 0, readBufSize),
-		writeBuf:   make([]byte, 0, writeBufSize),
-		closed:     make(chan struct{}),
-		writeMu:    make(chan struct{}, 1),
-	}
-	c.writeMu <- struct{}{}
-
-	return c
+	return WrapRawConnWithReader(conn, bufio.NewReaderSize(conn, readBufSize), isClient, writeBufSize)
 }
 
 func (c *wsRawConn) Subprotocol() string {
@@ -398,9 +411,7 @@ func (c *wsRawConn) writeFrame(opcode byte, payload []byte) error {
 }
 
 func (c *wsRawConn) writeMaskedFrameZeroAlloc(header, payload []byte) error {
-	if _, err := rand.Read(c.writeMask[:]); err != nil {
-		return err
-	}
+	binary.LittleEndian.PutUint32(c.writeMask[:], rand.Uint32())
 
 	neededLen := len(header) + 4 + len(payload)
 	if cap(c.writeBuf) < neededLen {
