@@ -15,6 +15,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"iter"
 	"net/http"
 	"reflect"
 	"strconv"
@@ -114,30 +115,240 @@ func (s *Stream) Response() *http.Response {
 	return s.resp
 }
 
-// GetNDJSON reads a newline-delimited JSON stream from resp, pushing decoded values to the returned channel.
+// IterSSE returns an iter.Seq2 range-over-func iterator over Server-Sent Events in s (Go 1.23+).
+func IterSSE[T any](s *Stream) iter.Seq2[T, error] {
+	return StreamSSE[T](s).All()
+}
+
+// IterNDJSON returns an iter.Seq2 range-over-func iterator over newline-delimited JSON items in s (Go 1.23+).
+func IterNDJSON[T any](s *Stream) iter.Seq2[T, error] {
+	return StreamNDJSON[T](s).All()
+}
+
+// IterGRPCWeb returns an iter.Seq2 range-over-func iterator over gRPC-Web messages in s (Go 1.23+).
+func IterGRPCWeb[T any](s *Stream) iter.Seq2[T, error] {
+	return StreamGRPCWeb[T](s).All()
+}
+
+// GetNDJSON reads a newline-delimited JSON stream from resp, pushing decoded values to channels.
 func GetNDJSON[T any](ctx context.Context, resp *Stream) (<-chan T, <-chan error) {
-	out := make(chan T)
+	return StreamNDJSON[T](resp).Channel(ctx)
+}
+
+// ParseSSE parses an incoming Server-Sent Event stream from resp, pushing decoded events to channels.
+func ParseSSE[T any](ctx context.Context, resp *Stream) (<-chan T, <-chan error) {
+	return StreamSSE[T](resp).Channel(ctx)
+}
+
+// SSEEvent represents parsed fields of a Server-Sent Event frame.
+type SSEEvent struct {
+	Event string
+	Data  string
+	ID    string
+	Retry int
+}
+
+func parseSSELineBytes(line []byte, ev *SSEEvent) {
+	line = bytes.TrimRight(line, "\r\n")
+	if len(line) == 0 || line[0] == ':' {
+		return
+	}
+
+	key, value, ok := bytes.Cut(line, []byte{':'})
+	if ok {
+		if len(value) > 0 && value[0] == ' ' {
+			value = value[1:]
+		}
+	} else {
+		key = line
+	}
+
+	switch string(key) {
+	case "event":
+		ev.Event = string(value)
+	case "data":
+		if ev.Data != "" {
+			ev.Data += "\n" + string(value)
+			return
+		}
+
+		ev.Data = string(value)
+
+	case "id":
+		ev.ID = string(value)
+	case "retry":
+		if r, err := strconv.Atoi(string(bytes.TrimSpace(value))); err == nil {
+			ev.Retry = r
+		}
+	}
+}
+
+func dispatchSSEEvent[T any](ctx context.Context, ev SSEEvent, out chan<- T) error {
+	if ev.Data == "" && ev.Event == "" {
+		return nil
+	}
+
+	// Gracefully handle LLM stream completion signals (e.g. OpenAI / Gemini data: [DONE])
+	if strings.EqualFold(strings.TrimSpace(ev.Data), "[DONE]") {
+		return nil
+	}
+
+	var val T
+	if sse, ok := any(ev).(T); ok {
+		val = sse
+	} else if s, ok := any(ev.Data).(T); ok {
+		val = s
+	} else {
+		if err := json.Unmarshal([]byte(ev.Data), &val); err != nil {
+			return fmt.Errorf("aoni/stream: unmarshal sse failed: %w", err)
+		}
+	}
+
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case out <- val:
+		return nil
+	}
+}
+
+// SSEReader provides sequential decoded access to W3C Server-Sent Event streams.
+type SSEReader[T any] struct {
+	br     *bufio.Reader
+	closer io.Closer
+}
+
+// NewSSEReader wraps r into an [SSEReader] for sequential SSE event streaming.
+func NewSSEReader[T any](r io.ReadCloser) *SSEReader[T] {
+	return &SSEReader[T]{
+		br:     bufio.NewReader(r),
+		closer: r,
+	}
+}
+
+// StreamSSE creates an [SSEReader] over stream s.
+func StreamSSE[T any](s *Stream) *SSEReader[T] {
+	if s == nil || s.resp == nil {
+		return nil
+	}
+
+	return NewSSEReader[T](s.resp.Body)
+}
+
+// Next reads and decodes the next Server-Sent Event payload into T as a [generic.Result].
+// Returns a Failure wrapping [io.EOF] when the stream terminates normally.
+func (r *SSEReader[T]) Next() generic.Result[T] {
+	if r == nil || r.br == nil {
+		return generic.Failure[T](io.EOF)
+	}
+
+	event, err := r.NextEvent()
+	if err != nil {
+		return generic.Failure[T](err)
+	}
+
+	var val T
+
+	if sse, ok := any(event).(T); ok {
+		return generic.Success(sse)
+	} else if s, ok := any(event.Data).(T); ok {
+		return generic.Success(s)
+	}
+
+	if err := json.Unmarshal([]byte(event.Data), &val); err != nil {
+		return generic.Failure[T](fmt.Errorf("aoni/stream: unmarshal sse failed: %w", err))
+	}
+
+	return generic.Success(val)
+}
+
+// NextEvent reads the next raw [SSEEvent] according to the W3C Server-Sent Events specification.
+func (r *SSEReader[T]) NextEvent() (SSEEvent, error) {
+	if r == nil || r.br == nil {
+		return SSEEvent{}, io.EOF
+	}
+
+	var currentEvent SSEEvent
+
+	for {
+		lineBytes, err := r.br.ReadSlice('\n')
+		if err != nil {
+			if errors.Is(err, io.EOF) {
+				if len(lineBytes) > 0 {
+					parseSSELineBytes(lineBytes, &currentEvent)
+
+					if currentEvent.Data != "" || currentEvent.Event != "" {
+						if strings.EqualFold(strings.TrimSpace(currentEvent.Data), "[DONE]") {
+							return SSEEvent{}, io.EOF
+						}
+
+						return currentEvent, nil
+					}
+				}
+
+				return SSEEvent{}, io.EOF
+			}
+
+			return SSEEvent{}, err
+		}
+
+		if len(bytes.TrimRight(lineBytes, "\r\n")) == 0 {
+			if currentEvent.Data != "" || currentEvent.Event != "" {
+				if strings.EqualFold(strings.TrimSpace(currentEvent.Data), "[DONE]") {
+					return SSEEvent{}, io.EOF
+				}
+
+				return currentEvent, nil
+			}
+
+			continue
+		}
+
+		parseSSELineBytes(lineBytes, &currentEvent)
+	}
+}
+
+// All returns a Go 1.23+ range-over-func iterator over all decoded items in the SSE stream.
+func (r *SSEReader[T]) All() iter.Seq2[T, error] {
+	return func(yield func(T, error) bool) {
+		for {
+			val, err := r.Next().Unwrap()
+			if err != nil {
+				if !errors.Is(err, io.EOF) {
+					yield(generic.Zero[T](), err)
+				}
+
+				return
+			}
+
+			if !yield(val, nil) {
+				return
+			}
+		}
+	}
+}
+
+// Channel yields items over channels for asynchronous consumption.
+func (r *SSEReader[T]) Channel(ctx context.Context) (<-chan T, <-chan error) {
+	out := make(chan T, 100)
 	errs := make(chan error, 1)
 
 	go func() {
 		defer close(out)
 		defer close(errs)
-		defer resp.Close()
+		defer r.Close()
 
-		dec := json.NewDecoder(resp)
 		for {
 			select {
 			case <-ctx.Done():
 				errs <- ctx.Err()
 				return
 			default:
-				var val T
-				if err := dec.Decode(&val); err != nil {
-					if errors.Is(err, io.EOF) {
-						return
+				val, err := r.Next().Unwrap()
+				if err != nil {
+					if !errors.Is(err, io.EOF) {
+						errs <- err
 					}
-
-					errs <- err
 
 					return
 				}
@@ -155,136 +366,13 @@ func GetNDJSON[T any](ctx context.Context, resp *Stream) (<-chan T, <-chan error
 	return out, errs
 }
 
-// SSEEvent represents parsed fields of a Server-Sent Event frame.
-type SSEEvent struct {
-	Event string
-	Data  string
-	ID    string
-	Retry int
-}
-
-func parseSSELineBytes(line []byte, currentEvent *SSEEvent) {
-	line = bytes.TrimRight(line, "\r\n")
-	if len(line) == 0 || line[0] == ':' {
-		return
-	}
-
-	colonIdx := bytes.IndexByte(line, ':')
-
-	var key, value []byte
-	if colonIdx >= 0 {
-		key = line[:colonIdx]
-
-		value = line[colonIdx+1:]
-		if len(value) > 0 && value[0] == ' ' {
-			value = value[1:]
-		}
-	} else {
-		key = line
-	}
-
-	switch string(key) {
-	case "event":
-		currentEvent.Event = string(value)
-	case "data":
-		if currentEvent.Data != "" {
-			currentEvent.Data += "\n" + string(value)
-			return
-		}
-
-		currentEvent.Data = string(value)
-
-	case "id":
-		currentEvent.ID = string(value)
-	case "retry":
-		if r, err := strconv.Atoi(string(bytes.TrimSpace(value))); err == nil {
-			currentEvent.Retry = r
-		}
-	}
-}
-
-func dispatchSSEEvent[T any](ctx context.Context, currentEvent SSEEvent, out chan<- T) error {
-	if currentEvent.Data == "" && currentEvent.Event == "" {
+// Close closes the underlying connection reader.
+func (r *SSEReader[T]) Close() error {
+	if r == nil || r.closer == nil {
 		return nil
 	}
 
-	// Gracefully handle LLM stream completion signals (e.g. OpenAI / Gemini data: [DONE])
-	if strings.EqualFold(strings.TrimSpace(currentEvent.Data), "[DONE]") {
-		return nil
-	}
-
-	var val T
-	if sse, ok := any(currentEvent).(T); ok {
-		val = sse
-	} else if s, ok := any(currentEvent.Data).(T); ok {
-		val = s
-	} else {
-		if err := json.Unmarshal([]byte(currentEvent.Data), &val); err != nil {
-			return fmt.Errorf("aoni/stream: unmarshal sse failed: %w", err)
-		}
-	}
-
-	select {
-	case <-ctx.Done():
-		return ctx.Err()
-	case out <- val:
-		return nil
-	}
-}
-
-// ParseSSE parses an incoming Server-Sent Event stream from resp.
-func ParseSSE[T any](ctx context.Context, resp *Stream) (<-chan T, <-chan error) {
-	out := make(chan T, 100)
-	errs := make(chan error, 1)
-
-	go func() {
-		defer close(out)
-		defer close(errs)
-		defer resp.Close()
-
-		reader := bufio.NewReader(resp)
-
-		var currentEvent SSEEvent
-
-		for {
-			select {
-			case <-ctx.Done():
-				errs <- ctx.Err()
-				return
-			default:
-				lineBytes, err := reader.ReadSlice('\n')
-				if err != nil {
-					if errors.Is(err, io.EOF) {
-						if len(lineBytes) > 0 {
-							parseSSELineBytes(lineBytes, &currentEvent)
-							_ = dispatchSSEEvent(ctx, currentEvent, out)
-						}
-
-						return
-					}
-
-					errs <- err
-
-					return
-				}
-
-				if len(bytes.TrimRight(lineBytes, "\r\n")) == 0 {
-					if err := dispatchSSEEvent(ctx, currentEvent, out); err != nil {
-						errs <- err
-						return
-					}
-
-					currentEvent = SSEEvent{}
-
-					continue
-				}
-
-				parseSSELineBytes(lineBytes, &currentEvent)
-			}
-		}
-	}()
-
-	return out, errs
+	return r.closer.Close()
 }
 
 // SSEReconnectOptions configures automatic stream reconnection parameters for Server-Sent Events.
@@ -304,15 +392,13 @@ func ResumableSSE[T any](
 	out := make(chan T, 100)
 	errs := make(chan error, 1)
 
-	defaultRetry := generic.Coalesce(opts.DefaultRetry, 3*time.Second)
-
 	go func() {
 		defer close(out)
 		defer close(errs)
 
 		var lastEventID string
 
-		reconnectDelay := defaultRetry
+		retryDelay := generic.Coalesce(opts.DefaultRetry, 3*time.Second)
 		attempts := 0
 
 		for {
@@ -335,7 +421,7 @@ func ResumableSSE[T any](
 					return
 				}
 
-				if !sleepOrCancel(ctx, reconnectDelay, errs) {
+				if !sleepOrCancel(ctx, retryDelay, errs) {
 					return
 				}
 
@@ -344,7 +430,7 @@ func ResumableSSE[T any](
 
 			attempts = 0
 
-			if err := consumeSSEResponse(ctx, resp, out, &lastEventID, &reconnectDelay); err != nil {
+			if err := consumeSSEResponse(ctx, resp, out, &lastEventID, &retryDelay); err != nil {
 				errs <- err
 				return
 			}
@@ -353,7 +439,7 @@ func ResumableSSE[T any](
 				return
 			}
 
-			if !sleepOrCancel(ctx, reconnectDelay, errs) {
+			if !sleepOrCancel(ctx, retryDelay, errs) {
 				return
 			}
 		}
@@ -369,10 +455,7 @@ func buildSSERequestModifiers(
 	lastEventID string,
 	stackBuf *[stackModCapacity]aoni.RequestModifier,
 ) []aoni.RequestModifier {
-	baseCount := 3
-	if lastEventID != "" {
-		baseCount = 4
-	}
+	baseCount := generic.Ternary(lastEventID != "", 4, 3)
 
 	total := baseCount + len(mods)
 	if total <= stackModCapacity {
@@ -408,13 +491,10 @@ func consumeSSEResponse[T any](
 	resp *Stream,
 	out chan<- T,
 	lastEventID *string,
-	reconnectDelay *time.Duration,
+	retryDelay *time.Duration,
 ) error {
-	defer resp.Close()
-
-	reader := bufio.NewReader(resp)
-
-	var currentEvent SSEEvent
+	reader := StreamSSE[T](resp)
+	defer reader.Close()
 
 	for {
 		select {
@@ -423,35 +503,26 @@ func consumeSSEResponse[T any](
 		default:
 		}
 
-		lineBytes, err := reader.ReadSlice('\n')
+		event, err := reader.NextEvent()
 		if err != nil {
-			if len(lineBytes) > 0 {
-				parseSSELineBytes(lineBytes, &currentEvent)
-				_ = dispatchSSEEvent(ctx, currentEvent, out)
+			if errors.Is(err, io.EOF) {
+				return nil
 			}
 
-			return nil
+			return err
 		}
 
-		if len(bytes.TrimRight(lineBytes, "\r\n")) == 0 {
-			if currentEvent.ID != "" {
-				*lastEventID = currentEvent.ID
-			}
-
-			if currentEvent.Retry > 0 {
-				*reconnectDelay = time.Duration(currentEvent.Retry) * time.Millisecond
-			}
-
-			if err := dispatchSSEEvent(ctx, currentEvent, out); err != nil {
-				return err
-			}
-
-			currentEvent = SSEEvent{}
-
-			continue
+		if event.ID != "" {
+			*lastEventID = event.ID
 		}
 
-		parseSSELineBytes(lineBytes, &currentEvent)
+		if event.Retry > 0 {
+			*retryDelay = time.Duration(event.Retry) * time.Millisecond
+		}
+
+		if err := dispatchSSEEvent(ctx, event, out); err != nil {
+			return err
+		}
 	}
 }
 
@@ -534,23 +605,89 @@ func Chunks(ctx context.Context, resp *Stream) (<-chan string, <-chan error) {
 	return out, errs
 }
 
-// ParseGRPCWebStream reads a gRPC-Web response stream and pushes decoded [proto.Message] instances to a channel.
+// ParseGRPCWebStream reads a gRPC-Web response stream and pushes decoded [proto.Message] instances to channels.
 func ParseGRPCWebStream[T any](ctx context.Context, resp *Stream) (<-chan T, <-chan error) {
+	return StreamGRPCWeb[T](resp).Channel(ctx)
+}
+
+// GRPCWebReader provides sequential decoded access to gRPC-Web 5-byte framed Protobuf streams.
+type GRPCWebReader[T any] struct {
+	reader io.Reader
+	closer io.Closer
+}
+
+// NewGRPCWebReader wraps r with a typed [GRPCWebReader].
+func NewGRPCWebReader[T any](r io.ReadCloser) *GRPCWebReader[T] {
+	br := bufio.NewReader(r)
+
+	var reader io.Reader = br
+	if peek, err := br.Peek(5); err == nil && decode.IsBase64Header(peek) {
+		reader = base64.NewDecoder(base64.StdEncoding, br)
+	}
+
+	return &GRPCWebReader[T]{
+		reader: reader,
+		closer: r,
+	}
+}
+
+// StreamGRPCWeb creates a [GRPCWebReader] over stream s.
+func StreamGRPCWeb[T any](s *Stream) *GRPCWebReader[T] {
+	if s == nil || s.resp == nil {
+		return nil
+	}
+
+	return NewGRPCWebReader[T](s.resp.Body)
+}
+
+// Next decodes the next gRPC-Web Protobuf message in the stream as a [generic.Result].
+// Returns a Failure wrapping [io.EOF] when the stream finishes or reaches trailers.
+func (r *GRPCWebReader[T]) Next() generic.Result[T] {
+	if r == nil || r.reader == nil {
+		return generic.Failure[T](io.EOF)
+	}
+
+	val, done, err := readNextGRPCWebFrame[T](r.reader)
+	if err != nil {
+		return generic.Failure[T](err)
+	}
+
+	if done {
+		return generic.Failure[T](io.EOF)
+	}
+
+	return generic.Success(val)
+}
+
+// All returns a Go 1.23+ range-over-func iterator over all decoded Protobuf messages in the stream.
+func (r *GRPCWebReader[T]) All() iter.Seq2[T, error] {
+	return func(yield func(T, error) bool) {
+		for {
+			val, err := r.Next().Unwrap()
+			if err != nil {
+				if !errors.Is(err, io.EOF) {
+					yield(generic.Zero[T](), err)
+				}
+
+				return
+			}
+
+			if !yield(val, nil) {
+				return
+			}
+		}
+	}
+}
+
+// Channel yields items over channels for asynchronous consumption.
+func (r *GRPCWebReader[T]) Channel(ctx context.Context) (<-chan T, <-chan error) {
 	out := make(chan T, 100)
 	errs := make(chan error, 1)
 
 	go func() {
 		defer close(out)
 		defer close(errs)
-		defer resp.Close()
-
-		br := bufio.NewReader(resp.resp.Body)
-
-		var reader io.Reader = br
-
-		if peek, err := br.Peek(5); err == nil && decode.IsBase64Header(peek) {
-			reader = base64.NewDecoder(base64.StdEncoding, br)
-		}
+		defer r.Close()
 
 		for {
 			select {
@@ -558,13 +695,12 @@ func ParseGRPCWebStream[T any](ctx context.Context, resp *Stream) (<-chan T, <-c
 				errs <- ctx.Err()
 				return
 			default:
-				val, done, err := readNextGRPCWebFrame[T](reader)
+				val, err := r.Next().Unwrap()
 				if err != nil {
-					errs <- err
-					return
-				}
+					if !errors.Is(err, io.EOF) {
+						errs <- err
+					}
 
-				if done {
 					return
 				}
 
@@ -579,6 +715,15 @@ func ParseGRPCWebStream[T any](ctx context.Context, resp *Stream) (<-chan T, <-c
 	}()
 
 	return out, errs
+}
+
+// Close closes the underlying stream reader.
+func (r *GRPCWebReader[T]) Close() error {
+	if r == nil || r.closer == nil {
+		return nil
+	}
+
+	return r.closer.Close()
 }
 
 func readNextGRPCWebFrame[T any](reader io.Reader) (val T, done bool, err error) {
@@ -745,6 +890,64 @@ func (r *NDJSONReader[T]) Next() generic.Result[T] {
 	}
 
 	return generic.Success(val)
+}
+
+// All returns a Go 1.23+ range-over-func iterator over all decoded records in the NDJSON stream.
+func (r *NDJSONReader[T]) All() iter.Seq2[T, error] {
+	return func(yield func(T, error) bool) {
+		for {
+			val, err := r.Next().Unwrap()
+			if err != nil {
+				if !errors.Is(err, io.EOF) {
+					yield(generic.Zero[T](), err)
+				}
+
+				return
+			}
+
+			if !yield(val, nil) {
+				return
+			}
+		}
+	}
+}
+
+// Channel yields items over channels for asynchronous consumption.
+func (r *NDJSONReader[T]) Channel(ctx context.Context) (<-chan T, <-chan error) {
+	out := make(chan T)
+	errs := make(chan error, 1)
+
+	go func() {
+		defer close(out)
+		defer close(errs)
+		defer r.Close()
+
+		for {
+			select {
+			case <-ctx.Done():
+				errs <- ctx.Err()
+				return
+			default:
+				val, err := r.Next().Unwrap()
+				if err != nil {
+					if !errors.Is(err, io.EOF) {
+						errs <- err
+					}
+
+					return
+				}
+
+				select {
+				case <-ctx.Done():
+					errs <- ctx.Err()
+					return
+				case out <- val:
+				}
+			}
+		}
+	}()
+
+	return out, errs
 }
 
 // Close closes the underlying stream reader.
