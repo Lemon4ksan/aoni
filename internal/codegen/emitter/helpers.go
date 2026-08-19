@@ -134,4 +134,3 @@ func cleanIdentifier(s string) string {
 
 	return b.String()
 }
-

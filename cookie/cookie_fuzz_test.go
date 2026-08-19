@@ -56,6 +56,7 @@ func FuzzNetscapeCookieExport(f *testing.F) {
 		jar.SetCookies(u, cookies)
 		_ = cookie.ExportNetscape(jar, u)
 		_ = cookie.Export(jar, u)
+
 		cookie.SortForBrowser(cookies)
 		_ = cookie.BuildCookieHeader(cookies)
 	})

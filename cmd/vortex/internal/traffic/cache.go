@@ -702,10 +702,12 @@ func (c *Cmd) runPrune(_ context.Context, args []string, stdout, stderr io.Write
 
 func (c *Cmd) runWebUI(ctx context.Context, sessionID string, entries []rawHAREntry, port int, stdout io.Writer) error {
 	addr := fmt.Sprintf("127.0.0.1:%d", port)
+
 	ti := inspector.NewTrafficInspector(addr)
 	if err := ti.Serve(); err != nil {
 		return fmt.Errorf("starting web inspector: %w", err)
 	}
+
 	defer ti.Close()
 
 	for idx, e := range entries {
@@ -713,6 +715,7 @@ func (c *Cmd) runWebUI(ctx context.Context, sessionID string, entries []rawHAREn
 		if startedTime.IsZero() {
 			startedTime, _ = time.Parse(time.RFC3339, e.StartedDateTime)
 		}
+
 		if startedTime.IsZero() {
 			startedTime = time.Now()
 		}

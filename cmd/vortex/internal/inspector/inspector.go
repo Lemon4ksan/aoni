@@ -278,6 +278,7 @@ func (i *TrafficInspector) AddCapturedRequest(req CapturedRequest) {
 	if i == nil {
 		return
 	}
+
 	i.saveAndBroadcast(req)
 }
 

@@ -53,14 +53,16 @@ func FuzzComputeJA4H(f *testing.F) {
 	f.Add("POST", "HTTP/1.1", "Content-Type", false, false, "ru-RU", "", "")
 	f.Add("", "", "", false, false, "", "", "")
 
-	f.Fuzz(func(t *testing.T, method, proto, header string, hasCookie, hasReferer bool, lang, cookieName, cookieVal string) {
-		headers := []string{header}
-		cookieNames := []string{cookieName}
-		cookieVals := []string{cookieVal}
+	f.Fuzz(
+		func(t *testing.T, method, proto, header string, hasCookie, hasReferer bool, lang, cookieName, cookieVal string) {
+			headers := []string{header}
+			cookieNames := []string{cookieName}
+			cookieVals := []string{cookieVal}
 
-		res := ja4.ComputeJA4H(method, proto, headers, hasCookie, hasReferer, lang, cookieNames, cookieVals)
-		if len(res) < 10 {
-			t.Fatalf("unexpected short JA4H fingerprint: %s", res)
-		}
-	})
+			res := ja4.ComputeJA4H(method, proto, headers, hasCookie, hasReferer, lang, cookieNames, cookieVals)
+			if len(res) < 10 {
+				t.Fatalf("unexpected short JA4H fingerprint: %s", res)
+			}
+		},
+	)
 }

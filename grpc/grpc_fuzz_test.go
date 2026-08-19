@@ -17,9 +17,9 @@ import (
 
 // FuzzGRPCWebFraming tests 5-byte Length-Prefixed-Message unmarshaling against arbitrary byte streams.
 func FuzzGRPCWebFraming(f *testing.F) {
-	f.Add([]byte{0x00, 0x00, 0x00, 0x00, 0x00})             // Empty uncompressed frame
+	f.Add([]byte{0x00, 0x00, 0x00, 0x00, 0x00})                         // Empty uncompressed frame
 	f.Add([]byte{0x01, 0x00, 0x00, 0x00, 0x04, 0x01, 0x02, 0x03, 0x04}) // Compressed frame
-	f.Add([]byte{0x80, 0x00, 0x00, 0x00, 0x02, 0x30, 0x31}) // Trailer frame (bit 7 set)
+	f.Add([]byte{0x80, 0x00, 0x00, 0x00, 0x02, 0x30, 0x31})             // Trailer frame (bit 7 set)
 	f.Add([]byte{})
 	f.Add([]byte{0x00, 0x00, 0x00, 0x00}) // Truncated header
 
@@ -46,6 +46,7 @@ func FuzzGRPCStatusParsing(f *testing.F) {
 		if statusCodeStr != "" {
 			header.Set("grpc-status", statusCodeStr)
 		}
+
 		if statusMsg != "" {
 			header.Set("grpc-message", statusMsg)
 		}
@@ -68,6 +69,7 @@ func FuzzGRPCTimeoutFormat(f *testing.F) {
 
 	f.Fuzz(func(t *testing.T, dNs int64) {
 		d := time.Duration(dNs)
+
 		formatted := grpc.FormatTimeout(d)
 		if d > 0 && len(formatted) == 0 {
 			t.Fatalf("expected non-empty formatted timeout for %v", d)

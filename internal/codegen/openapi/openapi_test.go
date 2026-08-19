@@ -379,7 +379,9 @@ func TestOpenAPI_MergeModes(t *testing.T) {
 }
 
 func TestDiscordImport(t *testing.T) {
-	data, err := os.ReadFile(`C:\Users\senya\.gemini\antigravity\brain\38a522d0-96a7-4c36-af14-1e0509265cb3\scratch\discord_openapi.json`)
+	data, err := os.ReadFile(
+		`C:\Users\senya\.gemini\antigravity\brain\38a522d0-96a7-4c36-af14-1e0509265cb3\scratch\discord_openapi.json`,
+	)
 	if err != nil {
 		t.Skip("discord spec not found")
 	}

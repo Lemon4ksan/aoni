@@ -270,13 +270,16 @@ func (e *Emitter) emitMethodRouteMatch(buf *bytes.Buffer, svc *ir.ServiceIR, m *
 		fmt.Fprintf(buf, "\tif method == %q && (path == %q || path == \"\" || path == \"/\") {\n", httpVerb, rawPath)
 	} else {
 		var conds []string
+
 		conds = append(conds, fmt.Sprintf("method == %q", httpVerb))
+
 		conds = append(conds, fmt.Sprintf("len(parts) == %d", len(slashParts)))
 		for i, sp := range slashParts {
 			if !strings.Contains(sp, "{") {
 				conds = append(conds, fmt.Sprintf("parts[%d] == %q", i, sp))
 			}
 		}
+
 		fmt.Fprintf(buf, "\tif %s {\n", strings.Join(conds, " && "))
 	}
 
@@ -350,6 +353,7 @@ func (e *Emitter) emitMethodRouteMatch(buf *bytes.Buffer, svc *ir.ServiceIR, m *
 			}
 
 			rawValName := "raw_" + p.GoName
+
 			pathIdx := -1
 			if p.Location == ir.LocPath {
 				for idx, sp := range slashParts {
@@ -396,6 +400,7 @@ func (e *Emitter) emitMethodRouteMatch(buf *bytes.Buffer, svc *ir.ServiceIR, m *
 				fmt.Fprintf(buf, "\t\tif tVal, tErr := time.Parse(time.RFC3339, %s); tErr == nil {\n", rawValName)
 				fmt.Fprintf(buf, "\t\t\t%s = tVal\n", varName)
 				fmt.Fprintf(buf, "\t\t}\n")
+
 				callArgs = append(callArgs, varName)
 
 			case p.GoType.IsCustomType:
