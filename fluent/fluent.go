@@ -16,19 +16,29 @@ import (
 )
 
 // New acquires a pooled [Request] builder bound to the provided client engine or [aoni.Client].
+// If no doer argument is provided, the shared default client is used.
 //
 // The returned [Request] is borrowed from a global object pool and is not thread-safe.
 // Callers must finalize the request by invoking one of its execution methods (such as [Request.Execute],
 // [Request.Get], [Request.Post]), or explicitly release it back to the pool using [Request.Release].
-func New(doer any) *Request {
-	return acquireRequest(doer)
+func New(doer ...any) *Request {
+	if len(doer) == 0 {
+		return acquireRequest(nil)
+	}
+
+	return acquireRequest(doer[0])
 }
 
 // R is a convenient shorthand alias for [New].
+// If no doer argument is provided, the shared default client is used.
 //
 // Callers must finalize the borrowed request with an execution method or [Request.Release].
-func R(doer any) *Request {
-	return acquireRequest(doer)
+func R(doer ...any) *Request {
+	if len(doer) == 0 {
+		return acquireRequest(nil)
+	}
+
+	return acquireRequest(doer[0])
 }
 
 // FetchTo executes a request with method, path, and optional [aoni.RequestModifier] options, unmarshaling the 2xx response into T.
@@ -47,6 +57,15 @@ func FetchTo[T any](
 		Execute(method, path)
 
 	return target, resp, err
+}
+
+// Fetch executes a GET request using the shared default client and returns a Swift-inspired [generic.Result].
+func Fetch[T any](
+	ctx context.Context,
+	path string,
+	mods ...aoni.RequestModifier,
+) (generic.Result[T], *http.Response) {
+	return FetchResult[T](ctx, nil, http.MethodGet, path, mods...)
 }
 
 // FetchResult executes a request and returns a Swift-inspired [generic.Result] wrapping the unmarshaled response or error.

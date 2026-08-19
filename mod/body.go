@@ -92,6 +92,54 @@ func WithJSONBody(payload any) aoni.RequestModifier {
 	}
 }
 
+// WithJSON is a convenient alias for [WithJSONBody].
+func WithJSON(payload any) aoni.RequestModifier {
+	return WithJSONBody(payload)
+}
+
+// WithSmartBody constructs an [aoni.RequestModifier] that automatically detects the payload type:
+//   - proto.Message -> Protobuf payload with application/x-protobuf
+//   - url.Values -> URL-encoded form payload with application/x-www-form-urlencoded
+//   - stdio.Reader -> Streamed request body
+//   - []byte -> Raw byte slice payload
+//   - string -> UTF-8 text payload with text/plain; charset=utf-8
+//   - Struct / Map / Slice -> JSON-marshaled payload with application/json
+func WithSmartBody(body any) aoni.RequestModifier {
+	if body == nil {
+		return aoni.RequestModifier{}
+	}
+
+	if mod, ok := body.(aoni.RequestModifier); ok {
+		return mod
+	}
+
+	if msg, ok := body.(proto.Message); ok {
+		return WithProtoBody(msg)
+	}
+
+	if uv, ok := body.(url.Values); ok {
+		return WithFormValues(uv)
+	}
+
+	if r, ok := body.(stdio.Reader); ok {
+		return WithBody(r)
+	}
+
+	if b, ok := body.([]byte); ok {
+		return WithBodyBytes(b)
+	}
+
+	if s, ok := body.(string); ok {
+		return aoni.RequestModifier{
+			Kind:        core.ModBodyBytes,
+			ContentType: "text/plain; charset=utf-8",
+			Bytes:       []byte(s),
+		}
+	}
+
+	return WithJSONBody(body)
+}
+
 // WithXMLBody constructs an [aoni.RequestModifier] marshaling payload to XML and setting Content-Type to application/xml.
 func WithXMLBody(payload any) aoni.RequestModifier {
 	if payload == nil {

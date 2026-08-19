@@ -189,6 +189,36 @@ func (c *Client) Request(
 	return resp, nil
 }
 
+// Get executes a GET request against path.
+func (c *Client) Get(ctx context.Context, path string, mods ...RequestModifier) (*http.Response, error) {
+	return c.Request(ctx, http.MethodGet, path, mods...)
+}
+
+// Post executes a POST request against path.
+func (c *Client) Post(ctx context.Context, path string, mods ...RequestModifier) (*http.Response, error) {
+	return c.Request(ctx, http.MethodPost, path, mods...)
+}
+
+// Put executes a PUT request against path.
+func (c *Client) Put(ctx context.Context, path string, mods ...RequestModifier) (*http.Response, error) {
+	return c.Request(ctx, http.MethodPut, path, mods...)
+}
+
+// Patch executes a PATCH request against path.
+func (c *Client) Patch(ctx context.Context, path string, mods ...RequestModifier) (*http.Response, error) {
+	return c.Request(ctx, http.MethodPatch, path, mods...)
+}
+
+// Delete executes a DELETE request against path.
+func (c *Client) Delete(ctx context.Context, path string, mods ...RequestModifier) (*http.Response, error) {
+	return c.Request(ctx, http.MethodDelete, path, mods...)
+}
+
+// Head executes a HEAD request against path.
+func (c *Client) Head(ctx context.Context, path string, mods ...RequestModifier) (*http.Response, error) {
+	return c.Request(ctx, http.MethodHead, path, mods...)
+}
+
 // doBaremetal executes a request on the minimal allocation path - bypassing AcquireTx,
 // NewStdRequest, and the full pipeline. Called only when isBaremetalStaticEligible is true
 // and no per-request mods or config are present.

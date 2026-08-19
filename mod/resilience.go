@@ -24,6 +24,11 @@ func WithRetryPolicy(override core.RetryOverride) aoni.RequestModifier {
 	})
 }
 
+// WithRetry constructs an [aoni.RequestModifier] that sets the maximum retry attempts for the request.
+func WithRetry(attempts int) aoni.RequestModifier {
+	return WithRetryPolicy(core.RetryOverride{MaxAttempts: attempts})
+}
+
 // WithAllowNonReadOnlyHedging constructs an [aoni.RequestModifier] permitting request hedging for non-idempotent HTTP methods.
 func WithAllowNonReadOnlyHedging(allow bool) aoni.RequestModifier {
 	return Custom(func(req aoni.Request) {

@@ -968,6 +968,39 @@ func TestFluent_XML_And_YAML_Symmetry(t *testing.T) {
 		require.NoError(t, err)
 		assert.Equal(t, "YAMLUser", valGet.Name)
 	})
+
+	t.Run("zero_arg_R_and_Fetch", func(t *testing.T) {
+		t.Parallel()
+
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(`{"id":42,"name":"Apple","email":"steve@apple.com"}`))
+		}))
+		t.Cleanup(server.Close)
+
+		// 1. fluent.R() with zero arguments
+		var user userPayload
+
+		resp, err := fluent.R().
+			SetContext(t.Context()).
+			SetResult(&user).
+			Get(server.URL)
+
+		require.NoError(t, err)
+		t.Cleanup(func() { resp.Body.Close() })
+		assert.Equal(t, 42, user.ID)
+		assert.Equal(t, "Apple", user.Name)
+
+		// 2. fluent.Fetch[T]
+		res, respFetch := fluent.Fetch[userPayload](t.Context(), server.URL)
+		require.NotNil(t, respFetch)
+		t.Cleanup(func() { respFetch.Body.Close() })
+		require.True(t, res.IsSuccess())
+		fetched, err := res.Unwrap()
+		require.NoError(t, err)
+		assert.Equal(t, "Apple", fetched.Name)
+	})
 }
 
 func BenchmarkFluent_RequestCreation(b *testing.B) {

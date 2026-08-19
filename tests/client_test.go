@@ -2464,4 +2464,46 @@ func TestClient_AuditFeatures(t *testing.T) {
 		mod.WithDNSResolver(nil).ApplyStd(req)
 		assert.Nil(t, aoni.GetDNSResolverOverride(req.Context()))
 	})
+
+	t.Run("aoni_root_facade_and_modifiers", func(t *testing.T) {
+		t.Parallel()
+
+		var receivedAuth string
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			receivedAuth = r.Header.Get("Authorization")
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(`{"status":"ok"}`))
+		}))
+		t.Cleanup(server.Close)
+
+		client := aoni.New(aoni.WithBaseURL(server.URL), aoni.WithClientTimeout(5*time.Second))
+		resp, err := client.Get(t.Context(), "/", aoni.WithBearer("secret_token_123"))
+		require.NoError(t, err)
+		t.Cleanup(func() { aoni.DrainAndClose(resp) })
+
+		assert.Equal(t, "Bearer secret_token_123", receivedAuth)
+	})
+
+	t.Run("api_error_human_formatting_and_helpers", func(t *testing.T) {
+		t.Parallel()
+
+		err404 := &aoni.APIError{
+			StatusCode: http.StatusNotFound,
+			Body:       []byte("resource not found"),
+		}
+		assert.True(t, err404.IsNotFound())
+		assert.False(t, err404.IsUnauthorized())
+		assert.True(t, err404.IsClientError())
+		assert.False(t, err404.IsServerError())
+		assert.Equal(t, "resource not found", err404.BodyString())
+		assert.Contains(t, err404.Error(), "HTTP 404 Not Found")
+
+		err401 := &aoni.APIError{
+			StatusCode: http.StatusUnauthorized,
+			Body:       []byte("invalid credentials"),
+		}
+		assert.True(t, err401.IsUnauthorized())
+		assert.False(t, err401.IsNotFound())
+		assert.Contains(t, err401.Error(), "HTTP 401 Unauthorized")
+	})
 }
