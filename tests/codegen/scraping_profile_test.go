@@ -146,14 +146,14 @@ type UploadAvatarResponse struct {
 	codeStr := string(code)
 
 	// 1. Verify HTML Token/CSS extraction
-	require.Contains(t, codeStr, `decode.ExtractAttr(stageIn, "#profile_edit_config", "data-profile-edit")`)
-	require.Contains(t, codeStr, `decode.HTMLUnescape(stageIn)`)
+	require.Contains(t, codeStr, `extract.Attr(stageIn, "#profile_edit_config", "data-profile-edit")`)
+	require.Contains(t, codeStr, `extract.HTMLUnescape(stageIn)`)
 
 	// 2. Verify Regex extraction
-	require.Contains(t, codeStr, `decode.ExtractRegex(stageIn, "CBoosterCreatorPage\\.Init\\(\\s*([\\{\\[].*?[\\}\\]])")`)
+	require.Contains(t, codeStr, `extract.Regex(stageIn, "CBoosterCreatorPage\\.Init\\(\\s*([\\{\\[].*?[\\}\\]])")`)
 
 	// 3. Verify Between extraction (0 alloc bytes.Index)
-	require.Contains(t, codeStr, `decode.ExtractBetween(stageIn, "data-profile-edit=\"", "\"")`)
+	require.Contains(t, codeStr, `extract.Between(stageIn, "data-profile-edit=\"", "\"")`)
 
 	// 4. Verify JSON-in-Form serialization
 	require.Contains(t, codeStr, "privacyBytes, err := json.Marshal(privacy)")

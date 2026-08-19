@@ -2,31 +2,29 @@
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
-package decode
+// Package extract provides zero-allocation byte slice scraping and boundary extraction utilities.
+package extract
 
 import (
 	"bytes"
 	"errors"
 	"fmt"
-	"html"
 	"regexp"
-
-	"github.com/lemon4ksan/foundation/silicon/bytesconv"
 )
 
 var (
 	// ErrElementNotFound is returned when target HTML element (by id/tag) is missing.
-	ErrElementNotFound = errors.New("aoni/decode: target HTML element not found")
+	ErrElementNotFound = errors.New("aoni/extract: target HTML element not found")
 	// ErrBetweenNotFound is returned when prefix or suffix boundary is missing during between extraction.
-	ErrBetweenNotFound = errors.New("aoni/decode: boundary not found during between extraction")
+	ErrBetweenNotFound = errors.New("aoni/extract: boundary not found during between extraction")
 	// ErrAttrNotFound is returned when HTML attribute is missing.
-	ErrAttrNotFound = errors.New("aoni/decode: HTML attribute not found")
+	ErrAttrNotFound = errors.New("aoni/extract: HTML attribute not found")
 	// ErrRegexMismatch is returned when regex pattern fails to match data.
-	ErrRegexMismatch = errors.New("aoni/decode: regular expression did not match")
+	ErrRegexMismatch = errors.New("aoni/extract: regular expression did not match")
 )
 
-// ExtractBetween slices a byte buffer between prefix and suffix boundaries with zero allocations.
-func ExtractBetween(src []byte, prefix, suffix string) ([]byte, error) {
+// Between slices a byte buffer between prefix and suffix boundaries with zero allocations.
+func Between(src []byte, prefix, suffix string) ([]byte, error) {
 	startIdx := 0
 	if prefix != "" {
 		pIdx := bytes.Index(src, []byte(prefix))
@@ -50,8 +48,8 @@ func ExtractBetween(src []byte, prefix, suffix string) ([]byte, error) {
 	return remaining, nil
 }
 
-// ExtractAttr parses an HTML element attribute value with zero-alloc tokenization.
-func ExtractAttr(src []byte, css, attrName string) ([]byte, error) {
+// Attr parses an HTML element attribute value with zero-alloc tokenization.
+func Attr(src []byte, css, attrName string) ([]byte, error) {
 	idTarget := ""
 	if len(css) > 0 && css[0] == '#' {
 		idTarget = css[1:]
@@ -110,11 +108,11 @@ func extractAttributeValue(data []byte, attrName string) ([]byte, error) {
 	return data[start : start+end], nil
 }
 
-// ExtractRegex searches for pattern in src and returns capture group 1 (or match 0).
-func ExtractRegex(src []byte, pattern string) ([]byte, error) {
+// Regex searches for pattern in src and returns capture group 1 (or match 0).
+func Regex(src []byte, pattern string) ([]byte, error) {
 	rx, err := regexp.Compile(pattern)
 	if err != nil {
-		return nil, fmt.Errorf("aoni/decode: compile regex %q: %w", pattern, err)
+		return nil, fmt.Errorf("aoni/extract: compile regex %q: %w", pattern, err)
 	}
 
 	matches := rx.FindSubmatch(src)
@@ -127,10 +125,4 @@ func ExtractRegex(src []byte, pattern string) ([]byte, error) {
 	}
 
 	return matches[1], nil
-}
-
-// HTMLUnescape converts HTML entities within src into their unescaped UTF-8 byte representation.
-func HTMLUnescape(src []byte) []byte {
-	unescaped := html.UnescapeString(bytesconv.B2S(src))
-	return []byte(unescaped)
 }

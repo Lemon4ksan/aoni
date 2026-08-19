@@ -2,12 +2,14 @@
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
-// Package codec defines high-level request body encoding and response body decoding contracts.
+// Package codec defines high-level request body encoding, response body decoding, and generic unmarshaling facades.
 package codec
 
 import (
 	"errors"
+	stdio "io"
 
+	"github.com/lemon4ksan/foundation/generic"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/lemon4ksan/aoni"
@@ -21,7 +23,7 @@ var errNotProtoMessage = errors.New("aoni/codec: body does not implement proto.M
 // Codec defines a unified strategy for marshaling outbound request payloads and unmarshaling incoming response streams.
 //
 // Implementations construct [aoni.RequestModifier] instances that bind specific content-type encoders
-// (JSON, Protobuf, gRPC-Web) and assign matched stream decoders.
+// (JSON, XML, YAML, Protobuf, gRPC-Web) and assign matched stream decoders.
 type Codec interface {
 	// Encode constructs an [aoni.RequestModifier] that serializes body into the outgoing request payload.
 	Encode(body any) aoni.RequestModifier
@@ -38,6 +40,24 @@ func (jsonCodec) Decode() aoni.RequestModifier         { return decode.WithJSON(
 // JSONCodec provides standard JSON request payload encoding and response stream decoding strategies.
 // Outbound requests set 'Content-Type: application/json' and 'Accept: application/json'.
 var JSONCodec Codec = jsonCodec{}
+
+type xmlCodec struct{}
+
+func (xmlCodec) Encode(body any) aoni.RequestModifier { return mod.WithXMLBody(body) }
+func (xmlCodec) Decode() aoni.RequestModifier         { return decode.WithXML() }
+
+// XMLCodec provides standard XML request payload encoding and response stream decoding strategies.
+// Outbound requests set 'Content-Type: application/xml' and 'Accept: application/xml'.
+var XMLCodec Codec = xmlCodec{}
+
+type yamlCodec struct{}
+
+func (yamlCodec) Encode(body any) aoni.RequestModifier { return mod.WithYAMLBody(body) }
+func (yamlCodec) Decode() aoni.RequestModifier         { return decode.WithYAML() }
+
+// YAMLCodec provides YAML request payload encoding and response stream decoding strategies.
+// Outbound requests set 'Content-Type: application/yaml' and 'Accept: application/yaml'.
+var YAMLCodec Codec = yamlCodec{}
 
 type protoCodec struct{}
 
@@ -81,6 +101,77 @@ var GRPCWebCodec Codec = grpcWebCodec{}
 
 // Decoder re-exports [decode.Decoder] for response body decoding.
 type Decoder = decode.Decoder
+
+// DecoderFunc adapts a plain function signature to satisfy the [Decoder] interface.
+type DecoderFunc = decode.DecoderFunc
+
+var (
+	// JSONDecoder parses response payload streams as standard JSON.
+	JSONDecoder = decode.JSONDecoder
+
+	// XMLDecoder parses response payload streams as XML.
+	XMLDecoder = decode.XMLDecoder
+
+	// YAMLDecoder parses response payload streams as YAML.
+	YAMLDecoder = decode.YAMLDecoder
+
+	// ProtoDecoder reads binary Protocol Buffer payloads into [proto.Message] targets.
+	ProtoDecoder = decode.ProtoDecoder
+
+	// GRPCWebDecoder extracts Protobuf payloads from 5-byte gRPC-Web frames and validates trailers.
+	GRPCWebDecoder = decode.GRPCWebDecoder
+
+	// ProtoJSONDecoder parses JSON response streams into Protobuf messages via protojson.
+	ProtoJSONDecoder = decode.ProtoJSONDecoder
+
+	// RawDecoder reads the entire response payload stream directly into a byte slice pointer (*[]byte).
+	RawDecoder = decode.RawDecoder
+)
+
+// To unmarshals the response payload stream from reader into a newly allocated instance of T using decoder.
+func To[T any](reader stdio.Reader, decoder Decoder) (T, error) {
+	return decode.To[T](reader, decoder)
+}
+
+// Result unmarshals the response stream from reader into a Swift-inspired [generic.Result].
+func Result[T any](reader stdio.Reader, decoder Decoder) generic.Result[T] {
+	return decode.Result[T](reader, decoder)
+}
+
+// JSON parses response stream bytes into a typed instance of T.
+func JSON[T any](reader stdio.Reader) (T, error) {
+	return decode.JSON[T](reader)
+}
+
+// XML parses XML response stream bytes into a typed instance of T.
+func XML[T any](reader stdio.Reader) (T, error) {
+	return decode.XML[T](reader)
+}
+
+// YAML parses YAML response stream bytes into a typed instance of T.
+func YAML[T any](reader stdio.Reader) (T, error) {
+	return decode.YAML[T](reader)
+}
+
+// Proto parses binary Protocol Buffer stream bytes into a typed [proto.Message] instance.
+func Proto[T any](reader stdio.Reader) (T, error) {
+	return decode.Proto[T](reader)
+}
+
+// GRPCWeb extracts and parses Protobuf payloads from 5-byte gRPC-Web framed streams.
+func GRPCWeb[T any](reader stdio.Reader) (T, error) {
+	return decode.GRPCWeb[T](reader)
+}
+
+// ProtoJSON parses JSON response streams into typed Protobuf messages via protojson.
+func ProtoJSON[T any](reader stdio.Reader) (T, error) {
+	return decode.ProtoJSON[T](reader)
+}
+
+// Raw reads the entire response stream into a raw byte slice.
+func Raw(reader stdio.Reader) ([]byte, error) {
+	return decode.Raw(reader)
+}
 
 // StructToValues encodes a struct into [url.Values] using `url` struct tags.
 var StructToValues = values.StructToValues

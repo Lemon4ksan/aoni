@@ -100,10 +100,10 @@ func emitEventMethod(
 				return
 
 			default:
-				tracker.Add("github.com/lemon4ksan/aoni/codec/decode")
+				tracker.Add("github.com/lemon4ksan/aoni/codec/extract")
 				fmt.Fprintf(
 					buf,
-					"\t\tstageOut%d, err := decode.ExtractAttr(stageIn, %q, %q)\n",
+					"\t\tstageOut%d, err := extract.Attr(stageIn, %q, %q)\n",
 					i,
 					stage.NamedArgs["css"],
 					stage.NamedArgs["name"],

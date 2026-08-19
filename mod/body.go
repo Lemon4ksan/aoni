@@ -8,12 +8,14 @@ import (
 	"bytes"
 	"encoding/binary"
 	"encoding/json"
+	"encoding/xml"
 	stdio "io"
 	"net/url"
 	"strings"
 
 	"github.com/lemon4ksan/foundation/silicon/bytesconv"
 	"google.golang.org/protobuf/proto"
+	"gopkg.in/yaml.v3"
 
 	"github.com/lemon4ksan/aoni"
 	"github.com/lemon4ksan/aoni/codec/values"
@@ -86,6 +88,52 @@ func WithJSONBody(payload any) aoni.RequestModifier {
 	return aoni.RequestModifier{
 		Kind:        core.ModBodyBytes,
 		ContentType: "application/json",
+		Bytes:       bodyBytes,
+	}
+}
+
+// WithXMLBody constructs an [aoni.RequestModifier] marshaling payload to XML and setting Content-Type to application/xml.
+func WithXMLBody(payload any) aoni.RequestModifier {
+	if payload == nil {
+		return aoni.RequestModifier{}
+	}
+
+	bodyBytes, err := xml.Marshal(payload)
+	if err != nil {
+		return aoni.RequestModifier{
+			Kind: core.ModCustom,
+			Fn: func(req aoni.Request) {
+				aoni.GetOrInitRequestConfig(req).BodyError = err
+			},
+		}
+	}
+
+	return aoni.RequestModifier{
+		Kind:        core.ModBodyBytes,
+		ContentType: "application/xml",
+		Bytes:       bodyBytes,
+	}
+}
+
+// WithYAMLBody constructs an [aoni.RequestModifier] marshaling payload to YAML and setting Content-Type to application/yaml.
+func WithYAMLBody(payload any) aoni.RequestModifier {
+	if payload == nil {
+		return aoni.RequestModifier{}
+	}
+
+	bodyBytes, err := yaml.Marshal(payload)
+	if err != nil {
+		return aoni.RequestModifier{
+			Kind: core.ModCustom,
+			Fn: func(req aoni.Request) {
+				aoni.GetOrInitRequestConfig(req).BodyError = err
+			},
+		}
+	}
+
+	return aoni.RequestModifier{
+		Kind:        core.ModBodyBytes,
+		ContentType: "application/yaml",
 		Bytes:       bodyBytes,
 	}
 }
