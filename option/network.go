@@ -12,6 +12,7 @@ import (
 	"github.com/lemon4ksan/foundation/net/ip"
 
 	"github.com/lemon4ksan/aoni"
+	"github.com/lemon4ksan/aoni/internal/pipeline"
 	"github.com/lemon4ksan/aoni/mod"
 	"github.com/lemon4ksan/aoni/netutil"
 	"github.com/lemon4ksan/aoni/netutil/fragment"
@@ -118,7 +119,7 @@ func WithAdaptiveProxyTimeout(cfg ...proxy.AdaptiveTimeoutConfig) aoni.ClientOpt
 		tracker := c.Network.DynamicHedging.Tracker
 		c.Defaults.DefaultMods = append(c.Defaults.DefaultMods, mod.Custom(func(req aoni.Request) {
 			adaptiveTimeout := proxy.ComputeProxyTimeout(tracker, activeCfg)
-			aoni.GetOrInitRequestConfig(req).TimeoutOverride = adaptiveTimeout
+			pipeline.GetOrInitRequestConfig(req).TimeoutOverride = adaptiveTimeout
 		}))
 	}
 }

@@ -66,7 +66,7 @@ func WithContextModifier(ctx context.Context, mods ...RequestModifier) context.C
 
 	cfg := GetRequestConfig(ctx)
 	if cfg == nil {
-		ctx, cfg = AllocRequestConfig(ctx)
+		ctx, cfg = pipeline.AllocRequestConfig(ctx)
 	}
 
 	modsCopy := make([]RequestModifier, 0, len(cfg.Modifiers)+len(mods))
@@ -94,7 +94,7 @@ func MarkModifierError(req any, err error) {
 		return
 	}
 
-	GetOrInitRequestConfig(req).BodyError = err
+	pipeline.GetOrInitRequestConfig(req).BodyError = err
 }
 
 // GetProxyOverride retrieves the per-request proxy server URL stored in the context.

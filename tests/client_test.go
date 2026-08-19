@@ -2458,10 +2458,10 @@ func TestClient_AuditFeatures(t *testing.T) {
 	t.Run("dns_resolver_override_helper", func(t *testing.T) {
 		t.Parallel()
 
-		ctx, cfg := aoni.AllocRequestConfig(t.Context())
-		assert.Nil(t, aoni.GetDNSResolverOverride(ctx))
+		req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, "/", nil)
+		require.NoError(t, err)
 
-		mod.WithDNSResolver(nil).ApplyStd(&http.Request{})
-		_ = cfg
+		mod.WithDNSResolver(nil).ApplyStd(req)
+		assert.Nil(t, aoni.GetDNSResolverOverride(req.Context()))
 	})
 }

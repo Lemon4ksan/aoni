@@ -45,13 +45,13 @@ func WithMultipart(fields map[string]string, files map[string]stdio.Reader) aoni
 
 			writer := multipart.NewWriter(body)
 
-			if cfg := aoni.GetOrInitRequestConfig(req); cfg.MultipartBoundary != "" {
+			if cfg := getOrInitRequestConfig(req); cfg.MultipartBoundary != "" {
 				_ = writer.SetBoundary(cfg.MultipartBoundary)
 			}
 
 			for k, v := range fields {
 				if err := writer.WriteField(k, v); err != nil {
-					aoni.GetOrInitRequestConfig(req).BodyError = err
+					getOrInitRequestConfig(req).BodyError = err
 					return
 				}
 			}
@@ -59,18 +59,18 @@ func WithMultipart(fields map[string]string, files map[string]stdio.Reader) aoni
 			for key, r := range files {
 				part, err := writer.CreateFormFile(key, key)
 				if err != nil {
-					aoni.GetOrInitRequestConfig(req).BodyError = err
+					getOrInitRequestConfig(req).BodyError = err
 					return
 				}
 
 				if _, err = io.CopyZeroAlloc(part, r); err != nil {
-					aoni.GetOrInitRequestConfig(req).BodyError = err
+					getOrInitRequestConfig(req).BodyError = err
 					return
 				}
 			}
 
 			if err := writer.Close(); err != nil {
-				aoni.GetOrInitRequestConfig(req).BodyError = err
+				getOrInitRequestConfig(req).BodyError = err
 				return
 			}
 
@@ -111,7 +111,7 @@ func WithMultipartFields(fields []MultipartField) aoni.RequestModifier {
 
 			writer := multipart.NewWriter(body)
 
-			if cfg := aoni.GetOrInitRequestConfig(req); cfg.MultipartBoundary != "" {
+			if cfg := getOrInitRequestConfig(req); cfg.MultipartBoundary != "" {
 				_ = writer.SetBoundary(cfg.MultipartBoundary)
 			}
 
@@ -124,26 +124,26 @@ func WithMultipartFields(fields []MultipartField) aoni.RequestModifier {
 
 					part, err := createFormFileHeader(writer, f.Name, f.Filename, ct)
 					if err != nil {
-						aoni.GetOrInitRequestConfig(req).BodyError = err
+						getOrInitRequestConfig(req).BodyError = err
 						return
 					}
 
 					if f.Reader != nil {
 						if _, err = io.CopyZeroAlloc(part, f.Reader); err != nil {
-							aoni.GetOrInitRequestConfig(req).BodyError = err
+							getOrInitRequestConfig(req).BodyError = err
 							return
 						}
 					}
 				} else {
 					if err := writer.WriteField(f.Name, f.Value); err != nil {
-						aoni.GetOrInitRequestConfig(req).BodyError = err
+						getOrInitRequestConfig(req).BodyError = err
 						return
 					}
 				}
 			}
 
 			if err := writer.Close(); err != nil {
-				aoni.GetOrInitRequestConfig(req).BodyError = err
+				getOrInitRequestConfig(req).BodyError = err
 				return
 			}
 
@@ -161,7 +161,7 @@ func WithStreamingMultipart(fields map[string]string, files map[string]stdio.Rea
 			pr, pw := stdio.Pipe()
 
 			writer := multipart.NewWriter(pw)
-			if cfg := aoni.GetOrInitRequestConfig(req); cfg.MultipartBoundary != "" {
+			if cfg := getOrInitRequestConfig(req); cfg.MultipartBoundary != "" {
 				_ = writer.SetBoundary(cfg.MultipartBoundary)
 			}
 

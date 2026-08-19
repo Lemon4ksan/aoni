@@ -10,7 +10,10 @@ import (
 
 	"github.com/lemon4ksan/aoni"
 	"github.com/lemon4ksan/aoni/internal/core"
+	"github.com/lemon4ksan/aoni/internal/pipeline"
 )
+
+var getOrInitRequestConfig = pipeline.GetOrInitRequestConfig
 
 // ErrInvalidPairCount is returned when WithVars receives an odd number of key-value arguments.
 var ErrInvalidPairCount = errors.New("aoni/mod: WithVars requires an even number of key-value pairs")
@@ -27,7 +30,7 @@ func WithAutoDecode() aoni.RequestModifier {
 	return aoni.RequestModifier{
 		Kind: core.ModCustom,
 		Fn: func(req aoni.Request) {
-			aoni.GetOrInitRequestConfig(req).AutoDecode = true
+			getOrInitRequestConfig(req).AutoDecode = true
 		},
 	}
 }

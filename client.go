@@ -141,38 +141,21 @@ func (c *Client) Request(
 	// Checked BEFORE any allocation. When the client has no pipeline rules, hooks,
 	// modifiers, or per-request config we bypass AcquireTx, NewStdRequest and the
 	// full pipeline.Execute and route directly to the underlying engine.
-	if len(mods) == 0 && c.isBaremetalStaticEligible() && GetRequestConfig(ctx) == nil {
+	if len(mods) == 0 && c.isBaremetalStaticEligible() && pipeline.GetRequestConfig(ctx) == nil {
 		return c.doBaremetal(ctx, method, path)
 	}
 
-	cfg := GetRequestConfig(ctx)
+	cfg := pipeline.GetRequestConfig(ctx)
 	if cfg != nil {
-		ApplyRequestConfigDefaults(cfg, c)
+		c.applyRequestConfigDefaults(cfg)
 	} else if len(mods) > 0 || len(c.defaults.DefaultMods) > 0 || c.needsRequestConfig() {
-		ctx, cfg = AllocRequestConfig(ctx)
-		ApplyRequestConfigDefaults(cfg, c)
+		ctx, cfg = pipeline.AllocRequestConfig(ctx)
+		c.applyRequestConfigDefaults(cfg)
 	}
 
 	url, err := c.resolveURL(path)
 	if err != nil {
 		return nil, err
-	}
-
-	var reqHeader http.Header
-
-	headerCap := len(c.prepared.PrecomputedDefaultHeaders) + len(c.defaults.Headers)
-	if headerCap > 0 {
-		reqHeader = make(http.Header, headerCap)
-		if len(c.prepared.PrecomputedDefaultHeaders) > 0 {
-			for i := range c.prepared.PrecomputedDefaultHeaders {
-				h := &c.prepared.PrecomputedDefaultHeaders[i]
-				reqHeader[h.Key] = h.Slice
-			}
-		} else if len(c.defaults.Headers) > 0 {
-			for k, v := range c.defaults.Headers {
-				reqHeader[k] = slices.Clone(v)
-			}
-		}
 	}
 
 	req := &http.Request{
@@ -181,7 +164,7 @@ func (c *Client) Request(
 		Proto:      "HTTP/1.1",
 		ProtoMajor: 1,
 		ProtoMinor: 1,
-		Header:     reqHeader,
+		Header:     c.applyDefaultHTTPHeader(),
 		Body:       http.NoBody,
 		Host:       url.Host,
 	}
@@ -255,7 +238,7 @@ func (c *Client) Do(req Request) (Response, error) {
 	}
 
 	if httpReq != nil && httpReq.URL != nil {
-		cfg := GetOrInitRequestConfig(httpReq.Context())
+		cfg := pipeline.GetOrInitRequestConfig(httpReq.Context())
 		if cfg.TargetHost == "" && httpReq.URL.Hostname() != "" {
 			cfg.TargetHost = httpReq.URL.Hostname()
 		}
@@ -412,15 +395,15 @@ func (c *Client) Transport() *http.Transport {
 
 // InitRequestConfig attaches or retrieves a pooled [RequestConfig] on the request context.
 func (c *Client) InitRequestConfig(req *http.Request) *http.Request {
-	cfg := GetRequestConfig(req.Context())
+	cfg := pipeline.GetRequestConfig(req.Context())
 	if cfg == nil {
 		var ctx context.Context
 
-		ctx, cfg = AllocRequestConfig(req.Context())
+		ctx, cfg = pipeline.AllocRequestConfig(req.Context())
 		req = req.WithContext(ctx)
 	}
 
-	ApplyRequestConfigDefaults(cfg, c)
+	c.applyRequestConfigDefaults(cfg)
 
 	return req
 }
@@ -642,6 +625,30 @@ func (c *Client) applyPowerManagement(enable bool) {
 
 		c.powerWatcher = watcher
 	}
+}
+
+// applyDefaultHTTPHeader applies the default and precomputed HTTP headers to the request.
+func (c *Client) applyDefaultHTTPHeader() http.Header {
+	headerCap := len(c.prepared.PrecomputedDefaultHeaders) + len(c.defaults.Headers)
+	if headerCap == 0 {
+		return nil
+	}
+
+	reqHeader := make(http.Header, headerCap)
+	if len(c.prepared.PrecomputedDefaultHeaders) > 0 {
+		for i := range c.prepared.PrecomputedDefaultHeaders {
+			h := &c.prepared.PrecomputedDefaultHeaders[i]
+			reqHeader[h.Key] = h.Slice
+		}
+	}
+
+	if len(c.defaults.Headers) > 0 {
+		for k, v := range c.defaults.Headers {
+			reqHeader[k] = slices.Clone(v)
+		}
+	}
+
+	return reqHeader
 }
 
 var _ RequestDoer = (*Client)(nil)

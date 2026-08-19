@@ -752,29 +752,20 @@ type RequestConfig = pipeline.RequestConfig
 // GetRequestConfig retrieves the RequestConfig instance attached to the context.
 var GetRequestConfig = pipeline.GetRequestConfig
 
-// GetOrInitRequestConfig retrieves or allocates a [RequestConfig] associated with the provided target.
-var GetOrInitRequestConfig = pipeline.GetOrInitRequestConfig
-
-// AllocRequestConfig allocates a pooled [RequestConfig] and stores it in ctx, returning the
-// enriched context and the config pointer.
-var AllocRequestConfig = pipeline.AllocRequestConfig
-
-// CloseResponse drains up to 2KB of unread body payload to preserve Keep-Alive sockets,
-// closes the response body stream, and recycles request context resources.
-var CloseResponse = pipeline.CloseResponse
-
-// GetPipeline retrieves the request-specific PipelineConfig from context.
-func GetPipeline(ctx context.Context) (PipelineConfig, bool) {
-	if p, ok := pipeline.GetPipeline(ctx); ok {
-		return pipelineToAoniConfig(p), true
-	}
-
-	return PipelineConfig{}, false
+// DrainAndClose drains unread response body payload to preserve Keep-Alive connections,
+// closes the response body, and recycles request context resources.
+func DrainAndClose(resp *http.Response) {
+	pipeline.CloseResponse(resp)
 }
 
-// ApplyRequestConfigDefaults merges client-level defaults into uninitialized fields of [RequestConfig].
-// It is not safe for concurrent mutation on the same RequestConfig instance.
-func ApplyRequestConfigDefaults(cfg *RequestConfig, c *Client) {
+// CloseResponse drains unread response body payload to preserve Keep-Alive connections,
+// closes the response body stream, and recycles request context resources.
+// It is an alias for [DrainAndClose].
+func CloseResponse(resp *http.Response) {
+	DrainAndClose(resp)
+}
+
+func (c *Client) applyRequestConfigDefaults(cfg *RequestConfig) {
 	if !cfg.SSRFGuard {
 		cfg.SSRFGuard = c.network.SSRFGuard
 	}
@@ -873,8 +864,8 @@ func (c *Client) mergeCertificatePins(cfg *RequestConfig) {
 
 // resolvePipeline computes the active PipelineConfig for an outgoing HTTP request context.
 func (c *Client) resolvePipeline(req *http.Request) PipelineConfig {
-	if reqPipe, ok := GetPipeline(req.Context()); ok {
-		return reqPipe
+	if p, ok := pipeline.GetPipeline(req.Context()); ok {
+		return pipelineToAoniConfig(p)
 	}
 
 	pipe := c.defaults.Pipeline

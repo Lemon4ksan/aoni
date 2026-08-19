@@ -18,6 +18,7 @@ import (
 	"github.com/valyala/fasthttp"
 
 	"github.com/lemon4ksan/aoni"
+	"github.com/lemon4ksan/aoni/internal/pipeline"
 )
 
 // dispatchSingleRequest routes an HTTP request through Happy Eyeballs v3 (Protocol Racing),
@@ -346,7 +347,7 @@ func (c *Client) retry425TooEarly(
 	fastReq *fasthttp.Request,
 	fastResp *fasthttp.Response,
 ) (trailers map[string][]string, err error, autoReleased bool) {
-	reqCfg := aoni.GetOrInitRequestConfig(ctx)
+	reqCfg := pipeline.GetOrInitRequestConfig(ctx)
 	reqCfg.Disable0RTT = true
 
 	host := string(fastReq.URI().Host())
@@ -362,7 +363,7 @@ func (c *Client) retry421Misdirected(
 	fastReq *fasthttp.Request,
 	fastResp *fasthttp.Response,
 ) (trailers map[string][]string, err error, autoReleased bool) {
-	reqCfg := aoni.GetOrInitRequestConfig(ctx)
+	reqCfg := pipeline.GetOrInitRequestConfig(ctx)
 	reqCfg.DisableAltSvc = true
 
 	host := string(fastReq.URI().Host())

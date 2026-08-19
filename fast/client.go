@@ -796,8 +796,8 @@ func (c *Client) applyPowerManagement(enable bool) {
 }
 
 func (c *Client) resolvePipeline(ctx context.Context) pipeline.PipelineConfig {
-	if reqPipe, ok := aoni.GetPipeline(ctx); ok {
-		return toInternalPipelineConfig(reqPipe)
+	if reqPipe, ok := pipeline.GetPipeline(ctx); ok {
+		return reqPipe
 	}
 
 	pipe := c.config.Defaults.Pipeline

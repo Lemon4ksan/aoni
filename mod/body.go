@@ -80,7 +80,7 @@ func WithJSONBody(payload any) aoni.RequestModifier {
 		return aoni.RequestModifier{
 			Kind: core.ModCustom,
 			Fn: func(req aoni.Request) {
-				aoni.GetOrInitRequestConfig(req).BodyError = err
+				getOrInitRequestConfig(req).BodyError = err
 			},
 		}
 	}
@@ -103,7 +103,7 @@ func WithXMLBody(payload any) aoni.RequestModifier {
 		return aoni.RequestModifier{
 			Kind: core.ModCustom,
 			Fn: func(req aoni.Request) {
-				aoni.GetOrInitRequestConfig(req).BodyError = err
+				getOrInitRequestConfig(req).BodyError = err
 			},
 		}
 	}
@@ -126,7 +126,7 @@ func WithYAMLBody(payload any) aoni.RequestModifier {
 		return aoni.RequestModifier{
 			Kind: core.ModCustom,
 			Fn: func(req aoni.Request) {
-				aoni.GetOrInitRequestConfig(req).BodyError = err
+				getOrInitRequestConfig(req).BodyError = err
 			},
 		}
 	}
@@ -149,7 +149,7 @@ func WithProtoBody(msg proto.Message) aoni.RequestModifier {
 		return aoni.RequestModifier{
 			Kind: core.ModCustom,
 			Fn: func(req aoni.Request) {
-				aoni.GetOrInitRequestConfig(req).BodyError = err
+				getOrInitRequestConfig(req).BodyError = err
 			},
 		}
 	}
@@ -172,7 +172,7 @@ func WithGRPCWebBody(msg proto.Message) aoni.RequestModifier {
 		return aoni.RequestModifier{
 			Kind: core.ModCustom,
 			Fn: func(req aoni.Request) {
-				aoni.GetOrInitRequestConfig(req).BodyError = err
+				getOrInitRequestConfig(req).BodyError = err
 			},
 		}
 	}
@@ -227,7 +227,7 @@ func WithFormBody(payload any) aoni.RequestModifier {
 
 			vals, err := encoder(payload)
 			if err != nil {
-				aoni.GetOrInitRequestConfig(req).BodyError = err
+				getOrInitRequestConfig(req).BodyError = err
 				return
 			}
 

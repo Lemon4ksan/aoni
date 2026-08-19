@@ -15,21 +15,21 @@ import (
 // WithP0fSignature constructs an [aoni.RequestModifier] setting p0f TCP stack signature parameters.
 func WithP0fSignature(sig *p0f.Signature) aoni.RequestModifier {
 	return Custom(func(req aoni.Request) {
-		aoni.GetOrInitRequestConfig(req).P0fSignature = sig
+		getOrInitRequestConfig(req).P0fSignature = sig
 	})
 }
 
 // WithSessionCache constructs an [aoni.RequestModifier] assigning an isolated proxy-aware TLS [fingerprint.SessionCache].
 func WithSessionCache(cache fingerprint.SessionCache) aoni.RequestModifier {
 	return Custom(func(req aoni.Request) {
-		aoni.GetOrInitRequestConfig(req).SessionCache = cache
+		getOrInitRequestConfig(req).SessionCache = cache
 	})
 }
 
 // WithCertificatePin constructs an [aoni.RequestModifier] pinning SHA-256 public key hashes for target domains.
 func WithCertificatePin(domain, hash string) aoni.RequestModifier {
 	return Custom(func(req aoni.Request) {
-		cfg := aoni.GetOrInitRequestConfig(req)
+		cfg := getOrInitRequestConfig(req)
 		if cfg.CertificatePins == nil {
 			cfg.CertificatePins = make(map[string][]string)
 		}
@@ -51,6 +51,6 @@ func WithPadding(cfg fingerprint.PaddingConfig) aoni.RequestModifier {
 // WithClientHelloSpecProvider constructs an [aoni.RequestModifier] assigning a dynamic uTLS spec provider.
 func WithClientHelloSpecProvider(provider fingerprint.ClientHelloSpecProvider) aoni.RequestModifier {
 	return Custom(func(req aoni.Request) {
-		aoni.GetOrInitRequestConfig(req).ClientHelloSpecProvider = provider
+		getOrInitRequestConfig(req).ClientHelloSpecProvider = provider
 	})
 }

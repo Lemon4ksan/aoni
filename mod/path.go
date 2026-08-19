@@ -35,7 +35,7 @@ func WithVars(pairs ...any) aoni.RequestModifier {
 		return aoni.RequestModifier{
 			Kind: core.ModCustom,
 			Fn: func(req aoni.Request) {
-				aoni.GetOrInitRequestConfig(req).BodyError = ErrInvalidPairCount
+				getOrInitRequestConfig(req).BodyError = ErrInvalidPairCount
 			},
 		}
 	}
@@ -104,7 +104,7 @@ func WithQueryParams(query any) aoni.RequestModifier {
 
 			encodedQuery, err := resolveQueryString(req, query)
 			if err != nil {
-				aoni.GetOrInitRequestConfig(req).BodyError = err
+				getOrInitRequestConfig(req).BodyError = err
 				return
 			}
 

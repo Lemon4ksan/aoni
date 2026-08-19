@@ -9,6 +9,7 @@ import (
 
 	"github.com/lemon4ksan/aoni"
 	"github.com/lemon4ksan/aoni/fingerprint/profiles"
+	"github.com/lemon4ksan/aoni/internal/pipeline"
 )
 
 // ApplyTLSVariantToConfig maps uTLS ClientHello specifications, presets, and QUIC TLS parameters
@@ -97,7 +98,7 @@ func ApplyProfileHeaders(req aoni.Request, variant *profiles.Variant, os profile
 	}
 
 	if variant.BoundaryFunc != nil {
-		cfg := aoni.GetOrInitRequestConfig(req)
+		cfg := pipeline.GetOrInitRequestConfig(req)
 		cfg.MultipartBoundary = variant.BoundaryFunc()
 	}
 
@@ -108,6 +109,6 @@ func ApplyProfileHeaders(req aoni.Request, variant *profiles.Variant, os profile
 
 // setOrderedHeaders calculates and attaches method-specific ordered header keys to the request config.
 func setOrderedHeaders(req aoni.Request, variant *profiles.Variant, os profiles.OSKey) {
-	cfg := aoni.GetOrInitRequestConfig(req)
+	cfg := pipeline.GetOrInitRequestConfig(req)
 	cfg.OrderedHeaders = BuildHeaderOrder(variant, os, req.Method())
 }
