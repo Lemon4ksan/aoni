@@ -42,7 +42,7 @@ func WithChrome() aoni.ClientOption {
 			cfg.Engine.CookieJar = cookie.NewProxyIsolatedJar()
 		}
 
-		hints := fingerprint.BuildClientHintsForOS(fingerprint.DefaultUserAgent, profiles.Windows)
+		hints := fingerprint.BuildClientHintsForOS(chrome.UserAgentWindows, profiles.Windows)
 
 		cfg.Defaults.DefaultMods = append(cfg.Defaults.DefaultMods, mod.Custom(func(req aoni.Request) {
 			hints.ApplyHeaders(req.SetHeader)
