@@ -14,8 +14,8 @@ import (
 	"github.com/lemon4ksan/foundation/generic"
 	"github.com/lemon4ksan/foundation/silicon/bytesconv"
 
-	"github.com/lemon4ksan/aoni"
-	"github.com/lemon4ksan/aoni/mod"
+	"github.com/lemon4ksan/aoni/internal/core"
+	"github.com/lemon4ksan/aoni/internal/pipeline"
 )
 
 var (
@@ -214,23 +214,65 @@ func Raw(reader stdio.Reader) ([]byte, error) {
 	return target, err
 }
 
-// WithRaw creates an [aoni.RequestModifier] that assigns [RawDecoder] for response parsing.
-func WithRaw() aoni.RequestModifier { return mod.WithDecoder(RawDecoder) }
+// WithRaw creates an [core.RequestModifier] that assigns [RawDecoder] for response parsing.
+func WithRaw() core.RequestModifier {
+	return core.RequestModifier{
+		Kind: core.ModCustom,
+		Fn: func(req core.Request) {
+			pipeline.GetOrInitRequestConfig(req).Decoder = RawDecoder
+		},
+	}
+}
 
-// WithJSON creates an [aoni.RequestModifier] that assigns [JSONDecoder] for response parsing.
-func WithJSON() aoni.RequestModifier { return mod.WithDecoder(JSONDecoder) }
+// WithJSON creates an [core.RequestModifier] that assigns [JSONDecoder] for response parsing.
+func WithJSON() core.RequestModifier {
+	return core.RequestModifier{
+		Kind: core.ModCustom,
+		Fn: func(req core.Request) {
+			pipeline.GetOrInitRequestConfig(req).Decoder = JSONDecoder
+		},
+	}
+}
 
-// WithXML creates an [aoni.RequestModifier] that assigns [XMLDecoder] for response parsing.
-func WithXML() aoni.RequestModifier { return mod.WithDecoder(XMLDecoder) }
+// WithXML creates an [core.RequestModifier] that assigns [XMLDecoder] for response parsing.
+func WithXML() core.RequestModifier {
+	return core.RequestModifier{
+		Kind: core.ModCustom,
+		Fn: func(req core.Request) {
+			pipeline.GetOrInitRequestConfig(req).Decoder = XMLDecoder
+		},
+	}
+}
 
-// WithYAML creates an [aoni.RequestModifier] that assigns [YAMLDecoder] for response parsing.
-func WithYAML() aoni.RequestModifier { return mod.WithDecoder(YAMLDecoder) }
+// WithYAML creates an [core.RequestModifier] that assigns [YAMLDecoder] for response parsing.
+func WithYAML() core.RequestModifier {
+	return core.RequestModifier{
+		Kind: core.ModCustom,
+		Fn: func(req core.Request) {
+			pipeline.GetOrInitRequestConfig(req).Decoder = YAMLDecoder
+		},
+	}
+}
 
-// WithProto creates an [aoni.RequestModifier] that assigns [ProtoDecoder] for response parsing.
-func WithProto() aoni.RequestModifier { return mod.WithDecoder(ProtoDecoder) }
+// WithProto creates an [core.RequestModifier] that assigns [ProtoDecoder] for response parsing.
+func WithProto() core.RequestModifier {
+	return core.RequestModifier{
+		Kind: core.ModCustom,
+		Fn: func(req core.Request) {
+			pipeline.GetOrInitRequestConfig(req).Decoder = ProtoDecoder
+		},
+	}
+}
 
-// WithGRPCWeb creates an [aoni.RequestModifier] that assigns [GRPCWebDecoder] for response parsing.
-func WithGRPCWeb() aoni.RequestModifier { return mod.WithDecoder(GRPCWebDecoder) }
+// WithGRPCWeb creates an [core.RequestModifier] that assigns [GRPCWebDecoder] for response parsing.
+func WithGRPCWeb() core.RequestModifier {
+	return core.RequestModifier{
+		Kind: core.ModCustom,
+		Fn: func(req core.Request) {
+			pipeline.GetOrInitRequestConfig(req).Decoder = GRPCWebDecoder
+		},
+	}
+}
 
 // typeName extracts a string representation of target's concrete type for error reporting.
 func typeName(target any) string {

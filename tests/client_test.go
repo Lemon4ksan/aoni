@@ -2506,4 +2506,49 @@ func TestClient_AuditFeatures(t *testing.T) {
 		assert.False(t, err401.IsNotFound())
 		assert.Contains(t, err401.Error(), "HTTP 401 Unauthorized")
 	})
+
+	t.Run("aoni_root_generics_GetTo_PostTo_Fetch", func(t *testing.T) {
+		t.Parallel()
+
+		type sampleUser struct {
+			Name  string `json:"name"`
+			Role  string `json:"role"`
+			Admin bool   `json:"admin"`
+		}
+
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			if r.Method == http.MethodPost {
+				var u sampleUser
+				_ = json.NewDecoder(r.Body).Decode(&u)
+				u.Admin = true
+				_ = json.NewEncoder(w).Encode(u)
+				return
+			}
+
+			_ = json.NewEncoder(w).Encode(sampleUser{Name: "Steve", Role: "Visionary"})
+		}))
+		t.Cleanup(server.Close)
+
+		// 1. aoni.GetTo
+		user, err := aoni.GetTo[sampleUser](t.Context(), server.URL)
+		require.NoError(t, err)
+		require.NotNil(t, user)
+		assert.Equal(t, "Steve", user.Name)
+
+		// 2. aoni.PostTo with smart body
+		created, err := aoni.PostTo[sampleUser](t.Context(), server.URL, sampleUser{Name: "Woz", Role: "Engineer"})
+		require.NoError(t, err)
+		require.NotNil(t, created)
+		assert.Equal(t, "Woz", created.Name)
+		assert.True(t, created.Admin)
+
+		// 3. aoni.Fetch returning Result[T]
+		res, resp := aoni.Fetch[sampleUser](t.Context(), server.URL)
+		require.NotNil(t, resp)
+		assert.True(t, res.IsSuccess())
+		fetched, err := res.Unwrap()
+		require.NoError(t, err)
+		assert.Equal(t, "Steve", fetched.Name)
+	})
 }

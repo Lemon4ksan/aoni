@@ -6,11 +6,17 @@ package aoni
 
 import (
 	"context"
+	"encoding/json"
+	stdio "io"
 	"net/http"
 	"net/url"
 	"strings"
 	"time"
 
+	"github.com/lemon4ksan/foundation/generic"
+	"google.golang.org/protobuf/proto"
+
+	"github.com/lemon4ksan/aoni/codec/decode"
 	"github.com/lemon4ksan/aoni/internal/core"
 	"github.com/lemon4ksan/aoni/internal/pipeline"
 )
@@ -51,6 +57,85 @@ func Delete(ctx context.Context, path string, mods ...RequestModifier) (*http.Re
 // Head executes a HEAD request using the shared default client.
 func Head(ctx context.Context, path string, mods ...RequestModifier) (*http.Response, error) {
 	return DefaultClient.Head(ctx, path, mods...)
+}
+
+// decodeResponseTo decodes the response body into target using registered content-type decoders.
+func decodeResponseTo[T any](resp *http.Response) (*T, error) {
+	if resp == nil {
+		return nil, ErrNilRequest
+	}
+
+	defer DrainAndClose(resp)
+
+	if resp.StatusCode >= http.StatusBadRequest {
+		bodySnippet, _ := stdio.ReadAll(stdio.LimitReader(resp.Body, 1024))
+
+		return nil, &APIError{
+			StatusCode: resp.StatusCode,
+			Body:       bodySnippet,
+		}
+	}
+
+	var target T
+
+	contentType := resp.Header.Get("Content-Type")
+
+	bodyBytes, err := stdio.ReadAll(resp.Body)
+	if err != nil {
+		return nil, err
+	}
+
+	if err := decode.DecodePayload(contentType, bodyBytes, &target); err != nil {
+		return nil, err
+	}
+
+	return &target, nil
+}
+
+// GetTo executes a GET request using the shared default client and decodes the response payload into T.
+func GetTo[T any](ctx context.Context, path string, mods ...RequestModifier) (*T, error) {
+	resp, err := DefaultClient.Get(ctx, path, mods...) //nolint:bodyclose
+	if err != nil {
+		return nil, err
+	}
+
+	return decodeResponseTo[T](resp)
+}
+
+// PostTo executes a POST request with payload using the shared default client and decodes the response into T.
+func PostTo[T any](ctx context.Context, path string, body any, mods ...RequestModifier) (*T, error) {
+	var bodyMod RequestModifier
+	if body != nil {
+		bodyMod = WithSmartBody(body)
+	}
+
+	allMods := mods
+	if bodyMod.Kind != 0 || bodyMod.Fn != nil {
+		allMods = append(make([]RequestModifier, 0, len(mods)+1), bodyMod)
+		allMods = append(allMods, mods...)
+	}
+
+	resp, err := DefaultClient.Post(ctx, path, allMods...) //nolint:bodyclose
+	if err != nil {
+		return nil, err
+	}
+
+	return decodeResponseTo[T](resp)
+}
+
+// Fetch executes a GET request using the shared default client and returns a [generic.Result] wrapping the unmarshaled response.
+func Fetch[T any](ctx context.Context, path string, mods ...RequestModifier) (generic.Result[T], *http.Response) {
+	resp, err := DefaultClient.Get(ctx, path, mods...) //nolint:bodyclose
+	if err != nil {
+		return generic.Failure[T](err), resp
+	}
+
+	target, decodeErr := decodeResponseTo[T](resp)
+	if decodeErr != nil {
+		return generic.Failure[T](decodeErr), resp
+	}
+
+	return generic.Success(*target), resp
 }
 
 // WithHeader constructs an [aoni.RequestModifier] setting a single request header key to value.
@@ -171,4 +256,90 @@ func WithClientUserAgent(ua string) ClientOption {
 
 		cfg.Defaults.Headers.Set("User-Agent", ua)
 	}
+}
+
+// WithSmartBody constructs an [aoni.RequestModifier] that automatically detects the payload type:
+//   - proto.Message -> Protobuf payload with application/x-protobuf
+//   - url.Values -> URL-encoded form payload with application/x-www-form-urlencoded
+//   - io.Reader -> Streamed request body
+//   - []byte -> Raw byte slice payload
+//   - string -> UTF-8 text payload with text/plain; charset=utf-8
+//   - Struct / Map / Slice -> JSON-marshaled payload with application/json
+func WithSmartBody(body any) RequestModifier {
+	if body == nil {
+		return RequestModifier{}
+	}
+
+	if mod, ok := body.(RequestModifier); ok {
+		return mod
+	}
+
+	if msg, ok := body.(proto.Message); ok {
+		bodyBytes, err := proto.Marshal(msg)
+		if err != nil {
+			return RequestModifier{
+				Kind: core.ModCustom,
+				Fn: func(req Request) {
+					pipeline.GetOrInitRequestConfig(req).BodyError = err
+				},
+			}
+		}
+
+		return RequestModifier{
+			Kind:        core.ModBodyBytes,
+			ContentType: "application/x-protobuf",
+			Bytes:       bodyBytes,
+		}
+	}
+
+	if uv, ok := body.(url.Values); ok {
+		return RequestModifier{
+			Kind:        core.ModBodyBytes,
+			ContentType: "application/x-www-form-urlencoded",
+			Bytes:       []byte(uv.Encode()),
+		}
+	}
+
+	if r, ok := body.(stdio.Reader); ok {
+		return RequestModifier{
+			Kind:   core.ModBodyStream,
+			Stream: r,
+		}
+	}
+
+	if b, ok := body.([]byte); ok {
+		return RequestModifier{
+			Kind:  core.ModBodyBytes,
+			Bytes: b,
+		}
+	}
+
+	if s, ok := body.(string); ok {
+		return RequestModifier{
+			Kind:        core.ModBodyBytes,
+			ContentType: "text/plain; charset=utf-8",
+			Bytes:       []byte(s),
+		}
+	}
+
+	bodyBytes, err := json.Marshal(body)
+	if err != nil {
+		return RequestModifier{
+			Kind: core.ModCustom,
+			Fn: func(req Request) {
+				pipeline.GetOrInitRequestConfig(req).BodyError = err
+			},
+		}
+	}
+
+	return RequestModifier{
+		Kind:        core.ModBodyBytes,
+		ContentType: "application/json",
+		Bytes:       bodyBytes,
+	}
+}
+
+// WithJSON constructs an [aoni.RequestModifier] marshaling payload to JSON with application/json.
+func WithJSON(payload any) RequestModifier {
+	return WithSmartBody(payload)
 }

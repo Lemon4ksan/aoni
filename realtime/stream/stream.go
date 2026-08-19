@@ -328,42 +328,56 @@ func (r *SSEReader[T]) All() iter.Seq2[T, error] {
 	}
 }
 
-// Channel yields items over channels for asynchronous consumption.
-func (r *SSEReader[T]) Channel(ctx context.Context) (<-chan T, <-chan error) {
-	out := make(chan T, 100)
+// SeqToChan converts any iter.Seq2[T, error] range-over-func iterator into asynchronous channels with clean lifecycle management.
+func SeqToChan[T any](ctx context.Context, seq iter.Seq2[T, error], closer io.Closer) (<-chan T, <-chan error) {
+	out := make(chan T)
 	errs := make(chan error, 1)
 
 	go func() {
 		defer close(out)
 		defer close(errs)
-		defer r.Close()
 
-		for {
+		if closer != nil {
+			defer closer.Close()
+		}
+
+		for val, err := range seq {
+			if ctx.Err() != nil {
+				errs <- ctx.Err()
+				return
+			}
+
+			if err != nil {
+				if !errors.Is(err, io.EOF) {
+					if ctx.Err() != nil {
+						errs <- ctx.Err()
+					} else {
+						errs <- err
+					}
+				}
+
+				return
+			}
+
 			select {
 			case <-ctx.Done():
 				errs <- ctx.Err()
 				return
-			default:
-				val, err := r.Next().Unwrap()
-				if err != nil {
-					if !errors.Is(err, io.EOF) {
-						errs <- err
-					}
-
-					return
-				}
-
-				select {
-				case <-ctx.Done():
-					errs <- ctx.Err()
-					return
-				case out <- val:
-				}
+			case out <- val:
 			}
+		}
+
+		if ctx.Err() != nil {
+			errs <- ctx.Err()
 		}
 	}()
 
 	return out, errs
+}
+
+// Channel yields items over channels for asynchronous consumption.
+func (r *SSEReader[T]) Channel(ctx context.Context) (<-chan T, <-chan error) {
+	return SeqToChan(ctx, r.All(), r)
 }
 
 // Close closes the underlying connection reader.
@@ -661,42 +675,20 @@ func IterChunks(resp *Stream, chunkSize ...int) iter.Seq2[[]byte, error] {
 
 // Channel adapts the ChunkReader to push chunks to asynchronous Go channels.
 func (r *ChunkReader) Channel(ctx context.Context) (<-chan string, <-chan error) {
-	out := make(chan string, 100)
-	errs := make(chan error, 1)
-
-	go func() {
-		defer close(out)
-		defer close(errs)
-		defer r.Close()
-
-		for {
-			select {
-			case <-ctx.Done():
-				errs <- ctx.Err()
+	stringSeq := func(yield func(string, error) bool) {
+		for chunk, err := range r.All() {
+			if err != nil {
+				yield("", err)
 				return
-			default:
-				chunk, err := r.Next().Unwrap()
-				if err != nil {
-					if errors.Is(err, io.EOF) {
-						return
-					}
+			}
 
-					errs <- err
-
-					return
-				}
-
-				select {
-				case <-ctx.Done():
-					errs <- ctx.Err()
-					return
-				case out <- string(chunk):
-				}
+			if !yield(string(chunk), nil) {
+				return
 			}
 		}
-	}()
+	}
 
-	return out, errs
+	return SeqToChan(ctx, stringSeq, r)
 }
 
 // Chunks reads raw data from resp in 32KB chunks and pushes strings to a channel.
@@ -780,40 +772,7 @@ func (r *GRPCWebReader[T]) All() iter.Seq2[T, error] {
 
 // Channel yields items over channels for asynchronous consumption.
 func (r *GRPCWebReader[T]) Channel(ctx context.Context) (<-chan T, <-chan error) {
-	out := make(chan T, 100)
-	errs := make(chan error, 1)
-
-	go func() {
-		defer close(out)
-		defer close(errs)
-		defer r.Close()
-
-		for {
-			select {
-			case <-ctx.Done():
-				errs <- ctx.Err()
-				return
-			default:
-				val, err := r.Next().Unwrap()
-				if err != nil {
-					if !errors.Is(err, io.EOF) {
-						errs <- err
-					}
-
-					return
-				}
-
-				select {
-				case <-ctx.Done():
-					errs <- ctx.Err()
-					return
-				case out <- val:
-				}
-			}
-		}
-	}()
-
-	return out, errs
+	return SeqToChan(ctx, r.All(), r)
 }
 
 // Close closes the underlying stream reader.
@@ -1013,40 +972,7 @@ func (r *NDJSONReader[T]) All() iter.Seq2[T, error] {
 
 // Channel yields items over channels for asynchronous consumption.
 func (r *NDJSONReader[T]) Channel(ctx context.Context) (<-chan T, <-chan error) {
-	out := make(chan T)
-	errs := make(chan error, 1)
-
-	go func() {
-		defer close(out)
-		defer close(errs)
-		defer r.Close()
-
-		for {
-			select {
-			case <-ctx.Done():
-				errs <- ctx.Err()
-				return
-			default:
-				val, err := r.Next().Unwrap()
-				if err != nil {
-					if !errors.Is(err, io.EOF) {
-						errs <- err
-					}
-
-					return
-				}
-
-				select {
-				case <-ctx.Done():
-					errs <- ctx.Err()
-					return
-				case out <- val:
-				}
-			}
-		}
-	}()
-
-	return out, errs
+	return SeqToChan(ctx, r.All(), r)
 }
 
 // Close closes the underlying stream reader.
