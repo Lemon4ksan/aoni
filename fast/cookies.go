@@ -54,7 +54,21 @@ func (c *Client) applyCookies(ctx context.Context, req *fasthttp.Request) {
 	}
 
 	if existing := req.Header.Peek("Cookie"); len(existing) > 0 {
-		req.Header.Set("Cookie", bytesconv.B2S(existing)+"; "+cookieHeader)
+		var stackBuf [512]byte
+
+		needed := len(existing) + 2 + len(cookieHeader)
+
+		var buf []byte
+		if needed <= len(stackBuf) {
+			buf = stackBuf[:0]
+		} else {
+			buf = make([]byte, 0, needed)
+		}
+
+		buf = append(buf, existing...)
+		buf = append(buf, ';', ' ')
+		buf = append(buf, cookieHeader...)
+		req.Header.SetBytesKV(bytesconv.S2B("Cookie"), buf)
 	} else {
 		req.Header.Set("Cookie", cookieHeader)
 	}

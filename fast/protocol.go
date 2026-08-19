@@ -41,8 +41,23 @@ type brokenH3Entry struct {
 type protocolState struct {
 	h2Clients map[string]*h2engine.Client
 	h3Client  *h3engine.Client
+	altSvc    *altSvcCache
 	h2Mutex   sync.Mutex
 	h3Once    sync.Once
+}
+
+func newProtocolState() protocolState {
+	return protocolState{
+		h2Clients: make(map[string]*h2engine.Client),
+		altSvc:    newAltSvcCache(),
+	}
+}
+
+func (s *protocolState) Clone() protocolState {
+	return protocolState{
+		h2Clients: make(map[string]*h2engine.Client),
+		altSvc:    s.altSvc.Clone(),
+	}
 }
 
 type altSvcCache struct {
@@ -56,9 +71,31 @@ type altSvcCache struct {
 	_ cpu.CacheLinePad
 }
 
-var globalAltSvcCache = &altSvcCache{
-	hosts:  make(map[string]time.Time),
-	broken: make(map[string]brokenH3Entry),
+func newAltSvcCache() *altSvcCache {
+	return &altSvcCache{
+		hosts:  make(map[string]time.Time),
+		broken: make(map[string]brokenH3Entry),
+	}
+}
+
+func (c *altSvcCache) Clone() *altSvcCache {
+	if c == nil {
+		return newAltSvcCache()
+	}
+
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+
+	cloned := newAltSvcCache()
+	for k, v := range c.hosts {
+		cloned.hosts[k] = v
+	}
+
+	for k, v := range c.broken {
+		cloned.broken[k] = v
+	}
+
+	return cloned
 }
 
 // MarkH3Failed records a failed HTTP/3 connection attempt, applying exponential backoff from 5m up to 48h.
@@ -168,7 +205,11 @@ func parseMaxAge(headerVal string) time.Duration {
 	return maxAge
 }
 
-func resolveALPNMode(ctx context.Context, cfg *aoni.Config, fastReq *fasthttp.Request) string {
+func (c *Client) resolveALPNMode(ctx context.Context, fastReq *fasthttp.Request) string {
+	return resolveALPNMode(ctx, &c.config, fastReq, c.protocolState.altSvc)
+}
+
+func resolveALPNMode(ctx context.Context, cfg *aoni.Config, fastReq *fasthttp.Request, altSvc *altSvcCache) string {
 	reqCfg := aoni.GetRequestConfig(ctx)
 	if reqCfg != nil {
 		if len(reqCfg.Modifiers) > 0 && len(reqCfg.ALPNOverride) == 0 {
@@ -192,7 +233,7 @@ func resolveALPNMode(ctx context.Context, cfg *aoni.Config, fastReq *fasthttp.Re
 
 	if bytes.EqualFold(fastReq.URI().Scheme(), []byte("https")) {
 		host := string(fastReq.URI().Host())
-		if host != "" && !disableAltSvc && globalAltSvcCache.IsH3Supported(host) {
+		if host != "" && !disableAltSvc && altSvc != nil && altSvc.IsH3Supported(host) {
 			return aoni.AlpnH3
 		}
 

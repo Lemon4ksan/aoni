@@ -17,8 +17,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/andybalholm/brotli"
-	"github.com/klauspost/compress/gzip"
 	"github.com/klauspost/compress/zstd"
 	"github.com/lemon4ksan/foundation/silicon/bytesconv"
 	"github.com/valyala/fasthttp"
@@ -45,7 +43,7 @@ type Client struct {
 	config        aoni.Config
 	powerWatcher  *power.Watcher
 	referer       *pipeline.RefererState
-	activeTargets sync.Map
+	activeTargets targetTracker
 
 	protocolState protocolState
 	coreEngine    *pipeline.Engine
@@ -65,7 +63,8 @@ func NewClient(opts ...aoni.ClientOption) *Client {
 				Headers: make(http.Header),
 			},
 		},
-		referer: &pipeline.RefererState{},
+		referer:       &pipeline.RefererState{},
+		protocolState: newProtocolState(),
 	}
 
 	for _, opt := range opts {
@@ -108,10 +107,11 @@ func (c *Client) With(opts ...aoni.ClientOption) *Client {
 	}
 
 	cloned := &Client{
-		engine:      clonedEngine,
-		defaultDial: c.defaultDial,
-		config:      c.config.Clone(),
-		referer:     clonedReferer,
+		engine:        clonedEngine,
+		defaultDial:   c.defaultDial,
+		config:        c.config.Clone(),
+		referer:       clonedReferer,
+		protocolState: c.protocolState.Clone(),
 	}
 
 	cloned.nativeDoer.client = cloned
@@ -913,6 +913,13 @@ func applyRedirectMethodAndBody(statusCode int, req *fasthttp.Request) {
 	}
 }
 
+var zstdDecoderPool = sync.Pool{
+	New: func() any {
+		dec, _ := zstd.NewReader(nil)
+		return dec
+	},
+}
+
 func decompressFastResponse(resp *fasthttp.Response) bool {
 	enforceContentLengthTruncation(resp)
 
@@ -933,20 +940,15 @@ func decompressFastResponse(resp *fasthttp.Response) bool {
 
 	switch {
 	case bytesconv.ContainsFoldASCII(encodingBytes, "gzip"):
-		gzReader, gzErr := gzip.NewReader(bytes.NewReader(body))
-		if gzErr == nil {
-			decompressed, err = io.ReadAll(gzReader)
-			_ = gzReader.Close()
-		}
+		decompressed, err = resp.BodyGunzip()
 
 	case bytesconv.ContainsFoldASCII(encodingBytes, "br"):
-		brReader := brotli.NewReader(bytes.NewReader(body))
-		decompressed, err = io.ReadAll(brReader)
+		decompressed, err = resp.BodyUnbrotli()
 
 	case bytesconv.ContainsFoldASCII(encodingBytes, "zstd"):
-		if zDec, zErr := zstd.NewReader(bytes.NewReader(body)); zErr == nil {
-			decompressed, err = io.ReadAll(zDec)
-			zDec.Close()
+		if dec, ok := zstdDecoderPool.Get().(*zstd.Decoder); ok && dec != nil {
+			decompressed, err = dec.DecodeAll(body, nil)
+			zstdDecoderPool.Put(dec)
 		}
 	}
 
