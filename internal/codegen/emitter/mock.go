@@ -59,6 +59,10 @@ func (e *Emitter) EmitMock(root *ir.RootIR) ([]byte, error) {
 		buf.WriteString("\t\"testing\"\n")
 	}
 
+	if strings.Contains(bodyCode, "time.") {
+		buf.WriteString("\t\"time\"\n")
+	}
+
 	buf.WriteString("\n")
 	buf.WriteString("\t\"github.com/lemon4ksan/aoni\"\n")
 
@@ -77,6 +81,7 @@ func (e *Emitter) EmitMock(root *ir.RootIR) ([]byte, error) {
 			imp.Path == "encoding/json" || imp.Path == "net/http" ||
 			imp.Path == "net/http/httptest" || imp.Path == "strings" ||
 			imp.Path == "strconv" || imp.Path == "sync" || imp.Path == "testing" ||
+			imp.Path == "time" ||
 			imp.Path == "github.com/lemon4ksan/aoni" || imp.Path == "github.com/lemon4ksan/aoni/option" ||
 			imp.Path == "github.com/lemon4ksan/aoni/fast" ||
 			imp.Path == "github.com/lemon4ksan/aoni/request" {
@@ -366,6 +371,13 @@ func (e *Emitter) emitMethodRouteMatch(buf *bytes.Buffer, svc *ir.ServiceIR, m *
 					fmt.Fprintf(buf, "\t\tvar %s %s\n", varName, p.GoType.Name)
 					callArgs = append(callArgs, varName)
 				}
+
+			case p.GoType.Name == "time.Time" || p.GoType.Name == "Time":
+				fmt.Fprintf(buf, "\t\tvar %s time.Time\n", varName)
+				fmt.Fprintf(buf, "\t\tif tVal, tErr := time.Parse(time.RFC3339, %s); tErr == nil {\n", rawValName)
+				fmt.Fprintf(buf, "\t\t\t%s = tVal\n", varName)
+				fmt.Fprintf(buf, "\t\t}\n")
+				callArgs = append(callArgs, varName)
 
 			case p.GoType.IsCustomType:
 				fmt.Fprintf(buf, "\t\tvar %s %s\n", varName, p.GoType.Name)

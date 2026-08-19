@@ -1033,6 +1033,10 @@ func (p *Parser) extractGoType(expr ast.Expr) ir.GoTypeIR {
 }
 
 func selectFormatStrategy(t ir.GoTypeIR) ir.FormatStrategy {
+	if t.IsSlice {
+		return ir.FormatSliceComma
+	}
+
 	name := strings.TrimPrefix(t.Name, "*")
 	switch name {
 	case "string":
