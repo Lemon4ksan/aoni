@@ -1,9 +1,3 @@
-<!--
-Copyright (c) 2026 Lemon4ksan All rights reserved.
-Use of this source code is governed by a BSD-style
-license that can be found in the LICENSE file.
--->
-
 # Architecture & Silicon Engine Specification
 
 ```text
@@ -29,8 +23,6 @@ license that can be found in the LICENSE file.
 
 > **The Core Engineering Axiom**:
 > *"Networking is not an abstract I/O stream; it is the structured serialization and transfer of hardware cache lines over silicon. Every byte allocated in the application layer is a CPU cycle stolen from wire throughput."*
-
----
 
 ## 1. The Three-Layer Architecture
 
@@ -62,8 +54,6 @@ The developer platform and static analysis engine:
 - **Interactive Live Web Inspector (`vortex traffic inspect -ui`)**: Real-time diagnostic web dashboard streaming live HTTP/H2/H3 transaction frames and JA4 hashes via SSE.
 - **In-Memory Mock Engine**: Sub-microsecond HTTP simulation engine for deterministic unit tests with 0 socket overhead.
 - **Automated CI Contract Drift Detector**: Compares local codebases against remote OpenAPI specs to block breaking API changes.
-
----
 
 ## 2. Safe by Default vs Power-User Fast Path
 
@@ -113,8 +103,6 @@ if res.IsErr() {
 user := res.Value()
 ```
 
----
-
 ## 3. Mathematical Proof of Zero-Allocation Pipeline
 
 In standard Go networking, a single HTTP transaction allocates memory in multiple disjoint layers:
@@ -126,8 +114,6 @@ In standard Go networking, a single HTTP transaction allocates memory in multipl
 | **Buffer Management** | `~4,096 B` (dynamic read/write slices) | **`0 B`** | Tiered `sync.Pool` & Off-Heap Buffer Slabs |
 | **JSON/DTO Decoding** | `~512 B` (interface reflection + copies) | **`0 B`** | Buffer-backed Generic Zero-Copy Decoders |
 | **Total Heap Impact** | **`~5,258 B / req`** | **`0 B / req`** | **Complete GC Elimination** |
-
----
 
 ## 4. Fuzzing & Security Armor
 
@@ -147,8 +133,6 @@ To run the automated security fuzzing suite locally:
 ```bash
 make fuzz
 ```
-
----
 
 ## 5. Ecosystem Partitioning & The "aoni v1" Manifesto
 
