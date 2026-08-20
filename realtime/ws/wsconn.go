@@ -154,7 +154,18 @@ func (c *wsRawConn) processNextFrame() error {
 			c.reader = bytes.NewReader(payload)
 			return nil
 		case FrameClose:
+			// RFC 6455 §5.5.1: Close frame echo protocol.
+			// An endpoint MUST send a Close frame in response if it hasn't sent one yet.
+			closeCode := []byte{0x03, 0xe8}
+			if len(payload) >= 2 {
+				closeCode = payload[:2]
+			}
+
+			_ = c.writeFrame(FrameClose, closeCode)
+			_ = c.Close()
+
 			return io.EOF
+
 		case FramePing:
 			_ = c.writeFrame(FramePong, payload)
 		case FramePong:

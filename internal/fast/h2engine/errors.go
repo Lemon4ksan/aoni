@@ -32,7 +32,7 @@ const (
 
 var (
 	ErrServerSupport          = errors.New("h2engine: server does not support HTTP/2")
-	ErrNotAvailableStreams    = errors.New("h2engine: ran out of available streams")
+	ErrNoAvailableStreams     = errors.New("h2engine: ran out of available streams")
 	ErrTimeout                = errors.New("h2engine: server is not replying to pings")
 	ErrUnexpectedSize         = errors.New("h2engine: unexpected header size")
 	ErrWriterClosed           = errors.New("h2engine: stream writer closed")

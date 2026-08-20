@@ -11,12 +11,18 @@ import (
 	"io"
 	"sync"
 
+	"github.com/lemon4ksan/foundation/generic"
 	"github.com/quic-go/quic-go"
 	"github.com/quic-go/quic-go/quicvarint"
 	"github.com/valyala/fasthttp"
 )
 
 const errCodeH3RequestCancelled = 0x10c
+
+var dataBufPool = generic.NewPool(func() *[]byte {
+	b := make([]byte, 32768)
+	return &b
+})
 
 // ClientConn manages HTTP/3 frame exchanges over a quic.Conn session.
 type ClientConn struct {
@@ -300,7 +306,8 @@ func (cc *ClientConn) readResponse(
 			}
 
 			lr := io.LimitReader(r, int64(payloadLen)) //nolint:gosec
-			buf := make([]byte, min(payloadLen, 32768))
+			bufPtr := dataBufPool.Get()
+			buf := *bufPtr
 
 			for {
 				n, rErr := lr.Read(buf)
@@ -313,9 +320,12 @@ func (cc *ClientConn) readResponse(
 				}
 
 				if rErr != nil {
+					dataBufPool.Put(bufPtr)
 					return nil, rErr
 				}
 			}
+
+			dataBufPool.Put(bufPtr)
 
 		default:
 			if _, err := io.CopyN(io.Discard, r, int64(payloadLen)); err != nil { //nolint:gosec

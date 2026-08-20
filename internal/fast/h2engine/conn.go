@@ -369,6 +369,10 @@ func (c *Conn) sendSettingsAck() {
 
 // CanOpenStream reports whether the client can open new concurrent streams.
 func (c *Conn) CanOpenStream() bool {
+	if atomic.LoadUint32(&c.nextID) >= (1<<31 - 1) {
+		return false
+	}
+
 	return atomic.LoadInt32(&c.openStreams) < int32(c.serverS.maxStreams) //nolint:gosec
 }
 
@@ -390,7 +394,7 @@ func (c *Conn) Write(r *Context) error {
 	case c.in <- r:
 		return nil
 	default:
-		return ErrNotAvailableStreams
+		return ErrNoAvailableStreams
 	}
 }
 
@@ -487,7 +491,7 @@ func (c *Conn) selectWriteEvent(pingChan <-chan time.Time) (bool, error) {
 		if err := c.writeRequest(ctx); err != nil {
 			ctx.Err <- err
 
-			if errors.Is(err, ErrNotAvailableStreams) {
+			if errors.Is(err, ErrNoAvailableStreams) {
 				return false, nil
 			}
 
@@ -609,7 +613,14 @@ func (c *Conn) waitExpectContinue(ctx *Context) {
 
 func (c *Conn) writeRequest(ctx *Context) error {
 	if !c.CanOpenStream() {
-		return ErrNotAvailableStreams
+		return ErrNoAvailableStreams
+	}
+
+	if c.nextID >= (1<<31 - 1) {
+		// RFC 7540 §5.1.1: Stream identifiers must be 31-bit unsigned integers.
+		// When reaching 2^31-1, stream identifiers cannot be reused.
+		_ = c.Close()
+		return ErrStreamClosed
 	}
 
 	req := ctx.Request

@@ -14,6 +14,7 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
@@ -217,13 +218,25 @@ func DialDirectTCP(ctx context.Context, network, host, port string, opts DialOpt
 		return nil, fmt.Errorf("aoni/netdial: no IP addresses found for host %s", host)
 	}
 
+	orderedAddrs := orderHappyEyeballsAddrs(addrs)
+	if len(orderedAddrs) > 1 {
+		conn, err := dialHappyEyeballs(ctx, network, host, port, orderedAddrs, opts)
+		if err == nil {
+			if opts.FragmentConfig != nil {
+				return fragment.NewFragmentedConn(conn, opts.FragmentConfig), nil
+			}
+
+			return conn, nil
+		}
+	}
+
 	ipTimeout := 3 * time.Second
 	if opts.HappyEyeballs > 0 {
 		ipTimeout = opts.HappyEyeballs
 	}
 
 	var lastErr error
-	for _, address := range addrs {
+	for _, address := range orderedAddrs {
 		if opts.SSRFGuard && ip.IsPrivateIP(address.IP) {
 			lastErr = fmt.Errorf("%w: %s", ErrSSRFBlocked, address.IP.String())
 			continue
@@ -258,6 +271,152 @@ func DialDirectTCP(ctx context.Context, network, host, port string, opts DialOpt
 	}
 
 	return nil, fmt.Errorf("aoni/netdial: all IP connections failed for %s: %w", host, lastErr)
+}
+
+// orderHappyEyeballsAddrs sorts IP addresses per RFC 8305 §4: interleaving IPv6 and IPv4 families.
+func orderHappyEyeballsAddrs(addrs []net.IPAddr) []net.IPAddr {
+	if len(addrs) <= 1 {
+		return addrs
+	}
+
+	var v6, v4 []net.IPAddr
+	for _, a := range addrs {
+		if a.IP.To4() != nil {
+			v4 = append(v4, a)
+		} else {
+			v6 = append(v6, a)
+		}
+	}
+
+	if len(v6) == 0 {
+		return v4
+	}
+
+	if len(v4) == 0 {
+		return v6
+	}
+
+	interleaved := make([]net.IPAddr, 0, len(addrs))
+
+	maxLen := max(len(v6), len(v4))
+	for i := range maxLen {
+		if i < len(v6) {
+			interleaved = append(interleaved, v6[i])
+		}
+
+		if i < len(v4) {
+			interleaved = append(interleaved, v4[i])
+		}
+	}
+
+	return interleaved
+}
+
+// dialHappyEyeballs performs staggered RFC 8305 connection racing across candidate IP addresses.
+func dialHappyEyeballs(
+	ctx context.Context,
+	network, host, port string,
+	addrs []net.IPAddr,
+	opts DialOptions,
+) (net.Conn, error) {
+	staggerDelay := opts.HappyEyeballs
+	if staggerDelay <= 0 {
+		staggerDelay = 300 * time.Millisecond
+	}
+
+	type dialResult struct {
+		conn net.Conn
+		err  error
+	}
+
+	raceCtx, raceCancel := context.WithCancel(ctx)
+	defer raceCancel()
+
+	results := make(chan dialResult, len(addrs))
+
+	var wg sync.WaitGroup
+
+	for i, address := range addrs {
+		if opts.SSRFGuard && ip.IsPrivateIP(address.IP) {
+			continue
+		}
+
+		if i > 0 {
+			timer := time.NewTimer(staggerDelay)
+			select {
+			case <-raceCtx.Done():
+				timer.Stop()
+				return nil, raceCtx.Err()
+			case <-timer.C:
+			case res := <-results:
+				timer.Stop()
+
+				if res.conn != nil {
+					return res.conn, nil
+				}
+			}
+		}
+
+		target := net.JoinHostPort(address.IP.String(), port)
+
+		wg.Add(1)
+
+		go func(targetAddr string) {
+			defer wg.Done()
+
+			dialer := &net.Dialer{
+				Timeout: 10 * time.Second,
+			}
+			if opts.SourceRotator != nil {
+				dialer.LocalAddr = &net.TCPAddr{IP: opts.SourceRotator.Next()}
+			}
+
+			dialer.Control = buildSocketControl(opts)
+
+			conn, err := dialer.DialContext(raceCtx, network, targetAddr)
+			if err != nil {
+				results <- dialResult{err: err}
+				return
+			}
+
+			if raceCtx.Err() != nil {
+				_ = conn.Close()
+				return
+			}
+
+			results <- dialResult{conn: conn}
+		}(target)
+	}
+
+	var lastErr error
+	for range addrs {
+		select {
+		case res := <-results:
+			if res.conn != nil {
+				raceCancel()
+
+				go func() {
+					wg.Wait()
+					close(results)
+
+					for r := range results {
+						if r.conn != nil {
+							_ = r.conn.Close()
+						}
+					}
+				}()
+
+				return res.conn, nil
+			}
+
+			lastErr = res.err
+
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		}
+	}
+
+	return nil, lastErr
 }
 
 // DialProxy establishes a network socket connection through a SOCKS5 or HTTP CONNECT proxy.
