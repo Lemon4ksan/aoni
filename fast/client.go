@@ -38,18 +38,38 @@ import (
 // Achieves zero heap allocations on hot execution paths by recycling internal request/response buffers
 // via sync.Pool. Callers MUST NOT retain or mutate byte slices obtained from unsafe body accessors beyond request lifecycle.
 type Client struct {
-	engine        *fasthttp.Client
-	pipeline      *pipeline.Pipeline[aoni.Request, aoni.Response]
-	defaultDial   func(string) (net.Conn, error)
-	cfg           aoni.Config
-	powerWatcher  *power.Watcher
-	referer       *pipeline.RefererState
+	// engine encapsulates the underlying fasthttp.Client providing extreme-throughput HTTP/1.1 socket pooling.
+	engine *fasthttp.Client
+
+	// pipeline coordinates the 5-stage middleware, retry, hedging, and telemetry execution chain.
+	pipeline *pipeline.Pipeline[aoni.Request, aoni.Response]
+
+	// defaultDial holds the default network dialing function.
+	defaultDial func(string) (net.Conn, error)
+
+	// cfg is the immutable configuration snapshot for this client instance.
+	cfg aoni.Config
+
+	// powerWatcher listens for OS sleep/wake transitions to purge stale socket connections.
+	powerWatcher *power.Watcher
+
+	// referer tracks session navigation history to generate realistic Referer headers.
+	referer *pipeline.RefererState
+
+	// activeTargets tracks live in-flight hosts for connection throttling.
 	activeTargets targetTracker
 
+	// protocolState manages Alt-Svc cache, HTTP/2/3 availability, and protocol racing states.
 	protocolState protocolState
-	coreEngine    *pipeline.Engine
-	prepared      pipeline.PreparedConfig
-	nativeDoer    fastNativeDoer
+
+	// coreEngine holds precomputed URL prefixes and immutable header byte representations.
+	coreEngine *pipeline.Engine
+
+	// prepared caches zero-allocation byte slices for fast-path URI matching.
+	prepared pipeline.PreparedConfig
+
+	// nativeDoer adapts fasthttp request execution into the generic pipeline.
+	nativeDoer fastNativeDoer
 }
 
 // NewClient instantiates a multi-protocol ultra-high-throughput [Client] wrapping fasthttp, uTLS,
