@@ -17,6 +17,15 @@ import (
 	"github.com/lemon4ksan/aoni/internal/transport"
 )
 
+// resolveNetwork returns the configured network protocol string or falls back to "tcp".
+func (c *Client) resolveNetwork() string {
+	if c.cfg.Network.Network != "" {
+		return c.cfg.Network.Network.String()
+	}
+
+	return NetworkTCP.String()
+}
+
 // Dial establishes an unencrypted L4 TCP socket connection to addr using a default 15-second timeout.
 // It acts as a convenience wrapper around DialContext using context.Background.
 // Safe for concurrent use across multiple goroutines.
@@ -24,12 +33,7 @@ func (c *Client) Dial(addr string) (net.Conn, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
 
-	network := NetworkTCP.String()
-	if c.cfg.Network.Network != "" {
-		network = c.cfg.Network.Network.String()
-	}
-
-	return c.DialContext(ctx, network, addr)
+	return c.DialContext(ctx, c.resolveNetwork(), addr)
 }
 
 // DialContext establishes a raw L4 TCP socket connection applying active proxy tunneling,
@@ -101,21 +105,20 @@ func (c *Client) DialTLSForWS(ctx context.Context, addr string) (net.Conn, error
 // function before applying WebSocket payload fragmentation wrappers.
 // Safe for concurrent use across multiple goroutines.
 func (c *Client) DialPlainForWS(ctx context.Context, addr string) (net.Conn, error) {
-	if tr := c.Transport(); tr != nil && tr.DialContext != nil {
-		conn, err := tr.DialContext(ctx, NetworkTCP.String(), addr)
-		if err != nil {
-			return nil, err
-		}
-
-		return c.applyWSFragmentation(ctx, conn), nil
-	}
-
-	conn, err := c.DialContext(ctx, NetworkTCP.String(), addr)
+	conn, err := c.dialPlainWSBase(ctx, addr)
 	if err != nil {
 		return nil, err
 	}
 
 	return c.applyWSFragmentation(ctx, conn), nil
+}
+
+func (c *Client) dialPlainWSBase(ctx context.Context, addr string) (net.Conn, error) {
+	if tr := c.Transport(); tr != nil && tr.DialContext != nil {
+		return tr.DialContext(ctx, NetworkTCP.String(), addr)
+	}
+
+	return c.DialContext(ctx, NetworkTCP.String(), addr)
 }
 
 // applyWSFragmentation decorates a raw socket with TCP payload write-chunking if configured.

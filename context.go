@@ -37,8 +37,7 @@ func ResponseTrace(resp *http.Response) *telemetry.TraceInfo {
 		return nil
 	}
 
-	cfg := GetRequestConfig(resp.Request.Context())
-	if cfg != nil {
+	if cfg := GetRequestConfig(resp.Request.Context()); cfg != nil {
 		return cfg.TraceInfo
 	}
 
@@ -48,8 +47,7 @@ func ResponseTrace(resp *http.Response) *telemetry.TraceInfo {
 // HostRewriteRules extracts per-request hostname-to-IP/host remapping rules from the context.
 // Returns nil if no host rewrite rules are attached to the request context.
 func HostRewriteRules(ctx context.Context) map[string]string {
-	cfg := GetRequestConfig(ctx)
-	if cfg != nil && cfg.HostRewrite != nil {
+	if cfg := GetRequestConfig(ctx); cfg != nil && cfg.HostRewrite != nil {
 		return cfg.HostRewrite.Rules
 	}
 
@@ -80,8 +78,7 @@ func WithContextModifier(ctx context.Context, mods ...RequestModifier) context.C
 
 // ContextModifiers retrieves all per-request [RequestModifier] closures stored in the context.
 func ContextModifiers(ctx context.Context) []RequestModifier {
-	cfg := GetRequestConfig(ctx)
-	if cfg != nil {
+	if cfg := GetRequestConfig(ctx); cfg != nil {
 		return cfg.Modifiers
 	}
 
@@ -177,12 +174,11 @@ func GetConnMetadata(ctx context.Context, key string) generic.Optional[any] {
 
 // GetResponseValidator retrieves the per-request response validation callback from context.
 func GetResponseValidator(ctx context.Context) func(resp *http.Response) error {
-	cfg := GetRequestConfig(ctx)
-	if cfg == nil {
-		return nil
+	if cfg := GetRequestConfig(ctx); cfg != nil {
+		return cfg.ResponseValidator
 	}
 
-	return cfg.ResponseValidator
+	return nil
 }
 
 // GetCacheTTL retrieves the per-request HTTP response caching TTL duration from context.
@@ -207,8 +203,7 @@ func GetTimeoutOverride(ctx context.Context) generic.Optional[time.Duration] {
 
 // GetDNSResolverOverride retrieves the per-request DNS resolver override from context.
 func GetDNSResolverOverride(ctx context.Context) netdial.DNSResolver {
-	cfg := GetRequestConfig(ctx)
-	if cfg != nil {
+	if cfg := GetRequestConfig(ctx); cfg != nil {
 		return cfg.DNSResolver
 	}
 

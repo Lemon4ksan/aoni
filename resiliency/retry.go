@@ -68,12 +68,13 @@ func (b *RetryBuilder) ConstantBackoff(delay time.Duration) *RetryBuilder {
 
 // WithFullJitter enables Full Jitter on the current backoff strategy if supported.
 func (b *RetryBuilder) WithFullJitter() *RetryBuilder {
-	if eb, ok := b.backoffStrategy.(*backoff.ExponentialBackoff); ok {
-		eb.WithFullJitter()
-	} else if lb, ok := b.backoffStrategy.(*backoff.LinearBackoff); ok {
-		lb.WithFullJitter()
-	} else if cb, ok := b.backoffStrategy.(*backoff.ConstantBackoff); ok {
-		cb.WithFullJitter()
+	switch s := b.backoffStrategy.(type) {
+	case *backoff.ExponentialBackoff:
+		s.WithFullJitter()
+	case *backoff.LinearBackoff:
+		s.WithFullJitter()
+	case *backoff.ConstantBackoff:
+		s.WithFullJitter()
 	}
 
 	return b
@@ -195,12 +196,13 @@ func (b *RetryBuilder) ToOptions() (middleware.RetryOptions, core.RetryCondition
 	jitter := true
 	jitterStrat := middleware.JitterFull
 
-	if eb, ok := b.backoffStrategy.(*backoff.ExponentialBackoff); ok {
-		initialBackoff = eb.Initial
-		maxBackoff = eb.Max
-		factor = eb.Factor
+	switch s := b.backoffStrategy.(type) {
+	case *backoff.ExponentialBackoff:
+		initialBackoff = s.Initial
+		maxBackoff = s.Max
+		factor = s.Factor
 
-		switch eb.Jitter {
+		switch s.Jitter {
 		case backoff.JitterNone:
 			jitter = false
 			jitterStrat = middleware.JitterNone
@@ -211,11 +213,11 @@ func (b *RetryBuilder) ToOptions() (middleware.RetryOptions, core.RetryCondition
 			jitter = true
 			jitterStrat = middleware.JitterFull
 		}
-	} else if cb, ok := b.backoffStrategy.(*backoff.ConstantBackoff); ok {
-		initialBackoff = cb.Delay
-		maxBackoff = cb.Delay
+	case *backoff.ConstantBackoff:
+		initialBackoff = s.Delay
+		maxBackoff = s.Delay
 		factor = 1.0
-		jitter = (cb.Jitter != backoff.JitterNone)
+		jitter = (s.Jitter != backoff.JitterNone)
 	}
 
 	opts := middleware.RetryOptions{
