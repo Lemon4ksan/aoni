@@ -22,8 +22,28 @@ func TestBetween(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, "hello world", string(res))
 
+	resResult := extract.BetweenResult(src, "prefix:", ":suffix")
+	require.True(t, resResult.IsSuccess())
+	val, err := resResult.Unwrap()
+	require.NoError(t, err)
+	assert.Equal(t, "hello world", string(val))
+
+	resStr := extract.BetweenString(src, "prefix:", ":suffix")
+	require.True(t, resStr.IsSuccess())
+	strVal, err := resStr.Unwrap()
+	require.NoError(t, err)
+	assert.Equal(t, "hello world", strVal)
+
+	resOpt := extract.BetweenOptional(src, "prefix:", ":suffix")
+	require.True(t, resOpt.IsPresent())
+	optVal, ok := resOpt.Value()
+	assert.True(t, ok)
+	assert.Equal(t, "hello world", optVal)
+
 	_, err = extract.Between(src, "missing:", ":suffix")
 	assert.ErrorIs(t, err, extract.ErrBetweenNotFound)
+
+	assert.False(t, extract.BetweenOptional(src, "missing:", ":suffix").IsPresent())
 
 	_, err = extract.Between(src, "prefix:", ":missing")
 	assert.ErrorIs(t, err, extract.ErrBetweenNotFound)
@@ -37,6 +57,24 @@ func TestAttr(t *testing.T) {
 	val, err := extract.Attr(src, "#test-id", "data-token")
 	require.NoError(t, err)
 	assert.Equal(t, "secret-123", string(val))
+
+	attrRes := extract.AttrResult(src, "#test-id", "data-token")
+	require.True(t, attrRes.IsSuccess())
+	attrBytes, err := attrRes.Unwrap()
+	require.NoError(t, err)
+	assert.Equal(t, "secret-123", string(attrBytes))
+
+	attrStr := extract.AttrString(src, "#test-id", "data-token")
+	require.True(t, attrStr.IsSuccess())
+	strVal, err := attrStr.Unwrap()
+	require.NoError(t, err)
+	assert.Equal(t, "secret-123", strVal)
+
+	attrOpt := extract.AttrOptional(src, "#test-id", "data-token")
+	require.True(t, attrOpt.IsPresent())
+	valOpt, ok := attrOpt.Value()
+	assert.True(t, ok)
+	assert.Equal(t, "secret-123", valOpt)
 
 	_, err = extract.Attr(src, "#missing-id", "data-token")
 	assert.ErrorIs(t, err, extract.ErrElementNotFound)
@@ -53,6 +91,24 @@ func TestRegex(t *testing.T) {
 	val, err := extract.Regex(src, `SessionToken:\s*([0-9a-z-]+)`)
 	require.NoError(t, err)
 	assert.Equal(t, "98765-abcd", string(val))
+
+	rxRes := extract.RegexResult(src, `SessionToken:\s*([0-9a-z-]+)`)
+	require.True(t, rxRes.IsSuccess())
+	rxBytes, err := rxRes.Unwrap()
+	require.NoError(t, err)
+	assert.Equal(t, "98765-abcd", string(rxBytes))
+
+	rxStr := extract.RegexString(src, `SessionToken:\s*([0-9a-z-]+)`)
+	require.True(t, rxStr.IsSuccess())
+	strVal, err := rxStr.Unwrap()
+	require.NoError(t, err)
+	assert.Equal(t, "98765-abcd", strVal)
+
+	rxOpt := extract.RegexOptional(src, `SessionToken:\s*([0-9a-z-]+)`)
+	require.True(t, rxOpt.IsPresent())
+	optVal, ok := rxOpt.Value()
+	assert.True(t, ok)
+	assert.Equal(t, "98765-abcd", optVal)
 
 	_, err = extract.Regex(src, `NonMatching:\s*(\d+)`)
 	assert.ErrorIs(t, err, extract.ErrRegexMismatch)

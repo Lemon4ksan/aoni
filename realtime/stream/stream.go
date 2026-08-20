@@ -198,15 +198,9 @@ func dispatchSSEEvent[T any](ctx context.Context, ev SSEEvent, out chan<- T) err
 		return nil
 	}
 
-	var val T
-	if sse, ok := any(ev).(T); ok {
-		val = sse
-	} else if s, ok := any(ev.Data).(T); ok {
-		val = s
-	} else {
-		if err := json.Unmarshal([]byte(ev.Data), &val); err != nil {
-			return fmt.Errorf("aoni/stream: unmarshal sse failed: %w", err)
-		}
+	val, err := decodeSSEPayload[T](ev)
+	if err != nil {
+		return err
 	}
 
 	select {
@@ -215,6 +209,23 @@ func dispatchSSEEvent[T any](ctx context.Context, ev SSEEvent, out chan<- T) err
 	case out <- val:
 		return nil
 	}
+}
+
+func decodeSSEPayload[T any](ev SSEEvent) (T, error) {
+	if sse, ok := any(ev).(T); ok {
+		return sse, nil
+	}
+
+	if s, ok := any(ev.Data).(T); ok {
+		return s, nil
+	}
+
+	var val T
+	if err := json.Unmarshal([]byte(ev.Data), &val); err != nil {
+		return val, fmt.Errorf("aoni/stream: unmarshal sse failed: %w", err)
+	}
+
+	return val, nil
 }
 
 // SSEReader provides sequential decoded access to W3C Server-Sent Event streams.
@@ -252,16 +263,9 @@ func (r *SSEReader[T]) Next() generic.Result[T] {
 		return generic.Failure[T](err)
 	}
 
-	var val T
-
-	if sse, ok := any(event).(T); ok {
-		return generic.Success(sse)
-	} else if s, ok := any(event.Data).(T); ok {
-		return generic.Success(s)
-	}
-
-	if err := json.Unmarshal([]byte(event.Data), &val); err != nil {
-		return generic.Failure[T](fmt.Errorf("aoni/stream: unmarshal sse failed: %w", err))
+	val, err := decodeSSEPayload[T](event)
+	if err != nil {
+		return generic.Failure[T](err)
 	}
 
 	return generic.Success(val)

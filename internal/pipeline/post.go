@@ -59,14 +59,16 @@ func stageValidateSmuggling[Req, Resp any](
 	resp *http.Response,
 	tx *Tx,
 ) (*http.Response, error) {
-	if tx.Flags&FlagValidate != 0 {
-		if err := validateResponseSmugglingGuards(resp); err != nil {
-			if resp != nil && resp.Body != nil {
-				_ = resp.Body.Close()
-			}
+	if tx.Flags&FlagValidate == 0 {
+		return resp, nil
+	}
 
-			return nil, err
+	if err := validateResponseSmugglingGuards(resp); err != nil {
+		if resp != nil && resp.Body != nil {
+			_ = resp.Body.Close()
 		}
+
+		return nil, err
 	}
 
 	return resp, nil
@@ -79,8 +81,10 @@ func stageDecompressAndTranscode[Req, Resp any](
 	tx *Tx,
 ) (*http.Response, error) {
 	if tx.Flags&FlagDecompress != 0 {
-		resp = p.handleDecompressionAndTranscoding(stdReq, resp)
-	} else if resp != nil && resp.Body != nil {
+		return p.handleDecompressionAndTranscoding(stdReq, resp), nil
+	}
+
+	if resp != nil && resp.Body != nil {
 		resp.Body = applyCharsetTranscoding(resp, resp.Body)
 	}
 
@@ -93,12 +97,14 @@ func stageCacheStorage[Req, Resp any](
 	resp *http.Response,
 	tx *Tx,
 ) (*http.Response, error) {
-	if tx.Flags&FlagCache != 0 && tx.Cache != nil {
-		if stdReq.Method == http.MethodGet {
-			p.saveToCache(stdReq, resp, tx.Cache)
-		} else {
-			p.invalidateCache(stdReq, resp, tx.Cache)
-		}
+	if tx.Flags&FlagCache == 0 || tx.Cache == nil {
+		return resp, nil
+	}
+
+	if stdReq.Method == http.MethodGet {
+		p.saveToCache(stdReq, resp, tx.Cache)
+	} else {
+		p.invalidateCache(stdReq, resp, tx.Cache)
 	}
 
 	return resp, nil
@@ -110,10 +116,12 @@ func stageSizeLimit[Req, Resp any](
 	resp *http.Response,
 	tx *Tx,
 ) (*http.Response, error) {
-	if tx.SizeLimit > 0 {
-		if limitErr := p.limitResponseSize(resp, tx.SizeLimit); limitErr != nil {
-			return nil, limitErr
-		}
+	if tx.SizeLimit <= 0 {
+		return resp, nil
+	}
+
+	if limitErr := p.limitResponseSize(resp, tx.SizeLimit); limitErr != nil {
+		return nil, limitErr
 	}
 
 	return resp, nil
@@ -125,11 +133,11 @@ func stageWAFChallenge[Req, Resp any](
 	resp *http.Response,
 	tx *Tx,
 ) (*http.Response, error) {
-	if tx.Flags&FlagChallenge != 0 {
-		return p.handleWAFChallenge(stdReq, resp)
+	if tx.Flags&FlagChallenge == 0 {
+		return resp, nil
 	}
 
-	return resp, nil
+	return p.handleWAFChallenge(stdReq, resp)
 }
 
 func stageValidateResponse[Req, Resp any](
@@ -138,10 +146,12 @@ func stageValidateResponse[Req, Resp any](
 	resp *http.Response,
 	tx *Tx,
 ) (*http.Response, error) {
-	if tx.Flags&FlagValidate != 0 {
-		if valErr := p.validateResponse(resp, tx); valErr != nil {
-			return nil, valErr
-		}
+	if tx.Flags&FlagValidate == 0 {
+		return resp, nil
+	}
+
+	if valErr := p.validateResponse(resp, tx); valErr != nil {
+		return nil, valErr
 	}
 
 	return resp, nil
@@ -166,10 +176,12 @@ func stageMultiReadBuffering[Req, Resp any](
 	resp *http.Response,
 	tx *Tx,
 ) (*http.Response, error) {
-	if resp != nil && resp.Body != nil {
-		if bufErr := p.applyMultiReadBuffering(resp, tx); bufErr != nil {
-			return nil, bufErr
-		}
+	if resp == nil || resp.Body == nil {
+		return resp, nil
+	}
+
+	if bufErr := p.applyMultiReadBuffering(resp, tx); bufErr != nil {
+		return nil, bufErr
 	}
 
 	return resp, nil

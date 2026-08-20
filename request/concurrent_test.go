@@ -269,6 +269,16 @@ func TestConcurrentWithLimit_And_IterConcurrent(t *testing.T) {
 			require.NoError(t, r.Err)
 			assert.Equal(t, i, r.Index)
 			assert.Equal(t, paths[i], r.Value.Message)
+
+			// Test Swift-style Result, Optional, Unwrap
+			require.True(t, r.Result().IsSuccess())
+			val, unwrapErr := r.Unwrap()
+			require.NoError(t, unwrapErr)
+			assert.Equal(t, paths[i], val.Message)
+			assert.True(t, r.Optional().IsPresent())
+			optVal, optOk := r.Optional().Value()
+			assert.True(t, optOk)
+			assert.Equal(t, paths[i], optVal.Message)
 		}
 	})
 

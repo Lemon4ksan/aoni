@@ -10,6 +10,9 @@ import (
 	"errors"
 	"fmt"
 	"regexp"
+
+	"github.com/lemon4ksan/foundation/generic"
+	"github.com/lemon4ksan/foundation/silicon/bytesconv"
 )
 
 var (
@@ -48,39 +51,98 @@ func Between(src []byte, prefix, suffix string) ([]byte, error) {
 	return remaining, nil
 }
 
-// Attr parses an HTML element attribute value with zero-alloc tokenization.
-func Attr(src []byte, css, attrName string) ([]byte, error) {
-	idTarget := ""
-	if len(css) > 0 && css[0] == '#' {
-		idTarget = css[1:]
+// BetweenResult slices byte buffer between boundaries and returns a Swift-inspired [generic.Result].
+func BetweenResult(src []byte, prefix, suffix string) generic.Result[[]byte] {
+	b, err := Between(src, prefix, suffix)
+	if err != nil {
+		return generic.Failure[[]byte](err)
 	}
 
-	if idTarget != "" {
-		idKey := "id=\"" + idTarget + "\""
+	return generic.Success(b)
+}
 
-		pos := bytes.Index(src, []byte(idKey))
-		if pos == -1 {
-			idKey = "id='" + idTarget + "'"
-			pos = bytes.Index(src, []byte(idKey))
-		}
+// BetweenString extracts string content between prefix and suffix boundaries as a [generic.Result].
+func BetweenString(src []byte, prefix, suffix string) generic.Result[string] {
+	b, err := Between(src, prefix, suffix)
+	if err != nil {
+		return generic.Failure[string](err)
+	}
 
-		if pos == -1 {
-			return nil, ErrElementNotFound
-		}
+	return generic.Success(bytesconv.B2S(b))
+}
 
-		tagStart := bytes.LastIndexByte(src[:pos], '<')
-		if tagStart != -1 {
-			tagEnd := bytes.IndexByte(src[pos:], '>')
-			if tagEnd != -1 {
-				tagSlice := src[tagStart : pos+tagEnd+1]
-				return extractAttributeValue(tagSlice, attrName)
-			}
-		}
+// BetweenOptional extracts content between boundaries and returns an [generic.Optional].
+func BetweenOptional(src []byte, prefix, suffix string) generic.Optional[string] {
+	b, err := Between(src, prefix, suffix)
+	if err != nil {
+		return generic.None[string]()
+	}
 
+	return generic.Some(bytesconv.B2S(b))
+}
+
+// Attr parses an HTML element attribute value with zero-alloc tokenization.
+func Attr(src []byte, css, attrName string) ([]byte, error) {
+	if len(css) == 0 || css[0] != '#' {
+		return extractAttributeValue(src, attrName)
+	}
+
+	idTarget := css[1:]
+	idKey := "id=\"" + idTarget + "\""
+
+	pos := bytes.Index(src, []byte(idKey))
+	if pos == -1 {
+		idKey = "id='" + idTarget + "'"
+		pos = bytes.Index(src, []byte(idKey))
+	}
+
+	if pos == -1 {
+		return nil, ErrElementNotFound
+	}
+
+	tagStart := bytes.LastIndexByte(src[:pos], '<')
+	if tagStart == -1 {
 		return nil, ErrAttrNotFound
 	}
 
-	return extractAttributeValue(src, attrName)
+	tagEnd := bytes.IndexByte(src[pos:], '>')
+	if tagEnd == -1 {
+		return nil, ErrAttrNotFound
+	}
+
+	tagSlice := src[tagStart : pos+tagEnd+1]
+
+	return extractAttributeValue(tagSlice, attrName)
+}
+
+// AttrResult extracts an HTML attribute value as a Swift-inspired [generic.Result].
+func AttrResult(src []byte, css, attrName string) generic.Result[[]byte] {
+	b, err := Attr(src, css, attrName)
+	if err != nil {
+		return generic.Failure[[]byte](err)
+	}
+
+	return generic.Success(b)
+}
+
+// AttrString extracts an HTML attribute string value as a [generic.Result].
+func AttrString(src []byte, css, attrName string) generic.Result[string] {
+	b, err := Attr(src, css, attrName)
+	if err != nil {
+		return generic.Failure[string](err)
+	}
+
+	return generic.Success(bytesconv.B2S(b))
+}
+
+// AttrOptional extracts an HTML attribute string value as a [generic.Optional].
+func AttrOptional(src []byte, css, attrName string) generic.Optional[string] {
+	b, err := Attr(src, css, attrName)
+	if err != nil {
+		return generic.None[string]()
+	}
+
+	return generic.Some(bytesconv.B2S(b))
 }
 
 func extractAttributeValue(data []byte, attrName string) ([]byte, error) {
@@ -125,4 +187,34 @@ func Regex(src []byte, pattern string) ([]byte, error) {
 	}
 
 	return matches[1], nil
+}
+
+// RegexResult searches pattern in src and returns capture group 1 as a [generic.Result].
+func RegexResult(src []byte, pattern string) generic.Result[[]byte] {
+	b, err := Regex(src, pattern)
+	if err != nil {
+		return generic.Failure[[]byte](err)
+	}
+
+	return generic.Success(b)
+}
+
+// RegexString searches pattern in src and returns capture group 1 as a [generic.Result] string.
+func RegexString(src []byte, pattern string) generic.Result[string] {
+	b, err := Regex(src, pattern)
+	if err != nil {
+		return generic.Failure[string](err)
+	}
+
+	return generic.Success(bytesconv.B2S(b))
+}
+
+// RegexOptional searches pattern in src and returns capture group 1 as a [generic.Optional].
+func RegexOptional(src []byte, pattern string) generic.Optional[string] {
+	b, err := Regex(src, pattern)
+	if err != nil {
+		return generic.None[string]()
+	}
+
+	return generic.Some(bytesconv.B2S(b))
 }

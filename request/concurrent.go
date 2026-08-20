@@ -6,9 +6,12 @@ package request
 
 import (
 	"context"
+	"errors"
 	"iter"
 	"sync"
 	"sync/atomic"
+
+	"github.com/lemon4ksan/foundation/generic"
 
 	"github.com/lemon4ksan/aoni"
 )
@@ -24,6 +27,43 @@ type ConcurrentResult[Resp any] struct {
 	Value *Resp
 	// Err holds any execution error encountered. It is nil on success.
 	Err error
+}
+
+// Result converts the execution outcome into a Swift-inspired [generic.Result].
+func (r ConcurrentResult[Resp]) Result() generic.Result[Resp] {
+	if r.Err != nil {
+		return generic.Failure[Resp](r.Err)
+	}
+
+	if r.Value == nil {
+		return generic.Failure[Resp](errors.New("aoni/request: empty response value"))
+	}
+
+	return generic.Success(*r.Value)
+}
+
+// Optional converts the response value into a [generic.Optional].
+func (r ConcurrentResult[Resp]) Optional() generic.Optional[Resp] {
+	if r.Err == nil && r.Value != nil {
+		return generic.Some(*r.Value)
+	}
+
+	return generic.None[Resp]()
+}
+
+// Unwrap returns the unpacked value and execution error.
+func (r ConcurrentResult[Resp]) Unwrap() (Resp, error) {
+	if r.Err != nil {
+		var zero Resp
+		return zero, r.Err
+	}
+
+	if r.Value == nil {
+		var zero Resp
+		return zero, errors.New("aoni/request: empty response value")
+	}
+
+	return *r.Value, nil
 }
 
 // Concurrent executes fn concurrently across paths using the provided [Requester], preserving original slice order.

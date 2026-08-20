@@ -12,6 +12,9 @@ import (
 )
 
 var (
+	// ErrNilRequest is returned when attempting to execute on a nil [Request] pointer.
+	ErrNilRequest = errors.New("aoni/fluent: nil request builder")
+
 	// ErrDownloadFailed is returned when a stream download request yields an HTTP status code >= 400.
 	ErrDownloadFailed = errors.New("aoni/fluent: download HTTP status error")
 

@@ -595,23 +595,23 @@ func (r *Rotator) executeWithProxy(req *http.Request, tc *trackedClient) (*http.
 }
 
 func (r *Rotator) handleProxyResult(tc *trackedClient, resp *http.Response, err error, domain string) bool {
-	if !r.isProxyFault(resp, err) {
-		tc.tracker.MarkSuccess()
+	if r.isProxyFault(resp, err) {
+		tc.tracker.MarkFailed()
 
-		if err == nil && resp != nil && resp.StatusCode == http.StatusForbidden {
-			tc.PutDomainInCooldown(domain, 10*time.Minute)
+		if resp != nil {
+			_ = resp.Body.Close()
 		}
 
-		return true
+		return false
 	}
 
-	tc.tracker.MarkFailed()
+	tc.tracker.MarkSuccess()
 
-	if resp != nil {
-		_ = resp.Body.Close()
+	if err == nil && resp != nil && resp.StatusCode == http.StatusForbidden {
+		tc.PutDomainInCooldown(domain, 10*time.Minute)
 	}
 
-	return false
+	return true
 }
 
 func (r *Rotator) saveSession(sessionID string, idx int) {

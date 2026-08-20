@@ -72,15 +72,15 @@ func (d *DoTResolver) LookupIPAddr(ctx context.Context, host string) ([]net.IPAd
 }
 
 func (d *DoTResolver) dialTLS(ctx context.Context) (net.Conn, error) {
-	var dialer tls.Dialer
-	if d.TLSConfig != nil {
-		dialer.Config = d.TLSConfig
-	} else {
-		dialer.Config = &tls.Config{
+	tlsCfg := d.TLSConfig
+	if tlsCfg == nil {
+		tlsCfg = &tls.Config{
 			ServerName: d.Host,
 			MinVersion: tls.VersionTLS12,
 		}
 	}
+
+	dialer := tls.Dialer{Config: tlsCfg}
 
 	conn, err := dialer.DialContext(ctx, netdial.NetworkTCP.String(), d.Endpoint)
 	if err != nil {

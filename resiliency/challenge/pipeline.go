@@ -55,37 +55,39 @@ func (p *ChallengePipeline) SolveCascading(req *http.Request, resp *http.Respons
 		matched := false
 		for _, pair := range p.pairs {
 			detected, err := pair.Detector(currentResp)
-			if detected {
-				ctx := req.Context()
-				oldBody := currentResp.Body
+			if !detected {
+				continue
+			}
 
-				newResp, solveErr := pair.Solver.Solve(ctx, err, req)
-				if solveErr != nil {
-					if oldBody != nil {
-						_ = oldBody.Close()
-					}
+			ctx := req.Context()
+			oldBody := currentResp.Body
 
-					return true, nil, solveErr
+			newResp, solveErr := pair.Solver.Solve(ctx, err, req)
+			if solveErr != nil {
+				if oldBody != nil {
+					_ = oldBody.Close()
 				}
 
-				if newResp != nil {
-					if oldBody != nil && oldBody != newResp.Body {
-						_ = oldBody.Close()
-					}
+				return true, nil, solveErr
+			}
 
-					currentResp = newResp
-					wasSolved = true
-					matched = true
-
-					break
-				}
-
+			if newResp == nil {
 				if oldBody != nil {
 					_ = oldBody.Close()
 				}
 
 				return true, nil, errors.New("aoni: challenge detected but solver returned nil response")
 			}
+
+			if oldBody != nil && oldBody != newResp.Body {
+				_ = oldBody.Close()
+			}
+
+			currentResp = newResp
+			wasSolved = true
+			matched = true
+
+			break
 		}
 
 		if !matched {

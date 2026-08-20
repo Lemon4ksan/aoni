@@ -59,6 +59,108 @@ func FetchTo[T any](
 	return target, resp, err
 }
 
+// GetTo dispatches a GET request and unmarshals the 2xx response payload directly into T.
+func GetTo[T any](
+	ctx context.Context,
+	c any,
+	path string,
+	mods ...aoni.RequestModifier,
+) (T, *http.Response, error) {
+	return FetchTo[T](ctx, c, http.MethodGet, path, mods...)
+}
+
+// PostTo dispatches a POST request with payload body and unmarshals the 2xx response into T.
+func PostTo[T any](
+	ctx context.Context,
+	c any,
+	path string,
+	body any,
+	mods ...aoni.RequestModifier,
+) (T, *http.Response, error) {
+	var target T
+
+	resp, err := R(c).
+		SetContext(ctx).
+		SetBody(body).
+		SetResult(&target).
+		Apply(mods...).
+		Post(path)
+
+	return target, resp, err
+}
+
+// PutTo dispatches a PUT request with payload body and unmarshals the 2xx response into T.
+func PutTo[T any](
+	ctx context.Context,
+	c any,
+	path string,
+	body any,
+	mods ...aoni.RequestModifier,
+) (T, *http.Response, error) {
+	var target T
+
+	resp, err := R(c).
+		SetContext(ctx).
+		SetBody(body).
+		SetResult(&target).
+		Apply(mods...).
+		Put(path)
+
+	return target, resp, err
+}
+
+// DeleteTo dispatches a DELETE request and unmarshals the 2xx response into T.
+func DeleteTo[T any](
+	ctx context.Context,
+	c any,
+	path string,
+	mods ...aoni.RequestModifier,
+) (T, *http.Response, error) {
+	return FetchTo[T](ctx, c, http.MethodDelete, path, mods...)
+}
+
+// PatchTo dispatches a PATCH request with payload body and unmarshals the 2xx response into T.
+func PatchTo[T any](
+	ctx context.Context,
+	c any,
+	path string,
+	body any,
+	mods ...aoni.RequestModifier,
+) (T, *http.Response, error) {
+	var target T
+
+	resp, err := R(c).
+		SetContext(ctx).
+		SetBody(body).
+		SetResult(&target).
+		Apply(mods...).
+		Patch(path)
+
+	return target, resp, err
+}
+
+// ExecuteTo executes the borrowed Request with method and path, unmarshaling the response into T.
+func ExecuteTo[T any](r *Request, method, path string) (T, *http.Response, error) {
+	var target T
+	if r == nil {
+		return target, nil, ErrNilRequest
+	}
+
+	resp, err := r.SetResult(&target).Execute(method, path)
+
+	return target, resp, err
+}
+
+// ExecuteResult executes the borrowed Request and returns a Swift-inspired [generic.Result].
+func ExecuteResult[T any](r *Request, method, path string) (generic.Result[T], *http.Response) {
+	val, resp, err := ExecuteTo[T](r, method, path)
+	if err != nil {
+		return generic.Failure[T](err), resp
+	}
+
+	return generic.Success(val), resp
+}
+
 // Fetch executes a GET request using the shared default client and returns a Swift-inspired [generic.Result].
 func Fetch[T any](
 	ctx context.Context,

@@ -166,9 +166,10 @@ func serializeSlice(f *mapper.FieldSchema, fieldValue reflect.Value, values url.
 // serializeDelimitedSlice joins slice element values with a configured delimiter (comma, space, or pipe).
 func serializeDelimitedSlice(f *mapper.FieldSchema, fieldValue reflect.Value, values url.Values) error {
 	sep := ","
-	if f.HasSpace {
+	switch {
+	case f.HasSpace:
 		sep = " "
-	} else if f.HasPipe {
+	case f.HasPipe:
 		sep = "|"
 	}
 

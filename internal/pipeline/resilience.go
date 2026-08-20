@@ -38,22 +38,21 @@ func (p *Pipeline[Req, Resp]) dispatchRequest(req *http.Request, doer Doer, tx *
 		resp, err = doer.Do(req)
 	}
 
-	if resp != nil {
-		if resp.StatusCode == http.StatusMisdirectedRequest {
-			return p.handle421Recovery(req, doer, resp)
-		}
+	if resp == nil {
+		return nil, err
+	}
 
-		if resp.StatusCode == http.StatusRequestTimeout {
-			return p.handle408Recovery(req, doer, resp)
-		}
+	switch resp.StatusCode {
+	case http.StatusMisdirectedRequest:
+		return p.handle421Recovery(req, doer, resp)
+	case http.StatusRequestTimeout:
+		return p.handle408Recovery(req, doer, resp)
+	case http.StatusTooEarly:
+		return p.handle425Recovery(req, doer, resp)
+	}
 
-		if resp.StatusCode == http.StatusTooEarly {
-			return p.handle425Recovery(req, doer, resp)
-		}
-
-		if resp.Request == nil {
-			resp.Request = req
-		}
+	if resp.Request == nil {
+		resp.Request = req
 	}
 
 	return resp, err
@@ -149,23 +148,22 @@ func (p *Pipeline[Req, Resp]) executeWithProxyFailover(
 		}
 
 		resp, err := p.dispatchProxyAttempt(proxyReq, doer, hedging)
-		if err == nil && resp != nil {
-			if resp.StatusCode != http.StatusBadGateway && resp.StatusCode != http.StatusServiceUnavailable {
-				return resp, nil
-			}
-
-			_ = resp.Body.Close()
-		}
-
 		if err != nil {
 			lastErr = err
-		} else {
-			lastErr = fmt.Errorf(
-				"aoni: proxy failover received HTTP status %d from %s",
-				resp.StatusCode,
-				proxyURL.String(),
-			)
+			continue
 		}
+
+		if resp == nil {
+			lastErr = errors.New("aoni: proxy failover received nil response")
+			continue
+		}
+
+		if resp.StatusCode != http.StatusBadGateway && resp.StatusCode != http.StatusServiceUnavailable {
+			return resp, nil
+		}
+
+		_ = resp.Body.Close()
+		lastErr = fmt.Errorf("aoni: proxy failover received HTTP status %d from %s", resp.StatusCode, proxyURL.String())
 	}
 
 	return nil, lastErr

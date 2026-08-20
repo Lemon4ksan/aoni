@@ -1000,6 +1000,28 @@ func TestFluent_XML_And_YAML_Symmetry(t *testing.T) {
 		fetched, err := res.Unwrap()
 		require.NoError(t, err)
 		assert.Equal(t, "Apple", fetched.Name)
+
+		// 3. fluent.GetTo[T]
+		userGet, respGet, err := fluent.GetTo[userPayload](t.Context(), client, server.URL)
+		require.NoError(t, err)
+		t.Cleanup(func() { respGet.Body.Close() })
+		assert.Equal(t, 42, userGet.ID)
+
+		// 4. fluent.ExecuteTo[T]
+		reqExec := fluent.R(client).SetContext(t.Context())
+		userExec, respExec, err := fluent.ExecuteTo[userPayload](reqExec, http.MethodGet, server.URL)
+		require.NoError(t, err)
+		t.Cleanup(func() { respExec.Body.Close() })
+		assert.Equal(t, "Apple", userExec.Name)
+
+		// 5. fluent.ExecuteResult[T]
+		reqRes := fluent.R(client).SetContext(t.Context())
+		resExec, respExecRes := fluent.ExecuteResult[userPayload](reqRes, http.MethodGet, server.URL)
+		require.True(t, resExec.IsSuccess())
+		userVal, err := resExec.Unwrap()
+		require.NoError(t, err)
+		t.Cleanup(func() { respExecRes.Body.Close() })
+		assert.Equal(t, "Apple", userVal.Name)
 	})
 }
 
