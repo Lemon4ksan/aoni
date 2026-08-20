@@ -116,7 +116,7 @@ func (c *Client) DialPlainForWS(ctx context.Context, addr string) (net.Conn, err
 // applyWSFragmentation decorates a raw socket with TCP payload write-chunking if configured.
 func (c *Client) applyWSFragmentation(ctx context.Context, conn net.Conn) net.Conn {
 	if cfg := GetRequestConfig(ctx); cfg != nil && cfg.Fragment != nil {
-		return applyFragmentation(conn, *cfg.Fragment)
+		return transport.ApplyFragmentation(conn, *cfg.Fragment)
 	}
 
 	return conn

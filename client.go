@@ -8,7 +8,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/tls"
-	stdio "io"
+	"io"
 	"log/slog"
 	"net"
 	"net/http"
@@ -17,10 +17,10 @@ import (
 	"strings"
 	"time"
 
-	asyncctx "github.com/lemon4ksan/foundation/async/context"
-	"github.com/lemon4ksan/foundation/async/log"
+	fctx "github.com/lemon4ksan/foundation/async/context"
+	flog "github.com/lemon4ksan/foundation/async/log"
 	"github.com/lemon4ksan/foundation/generic"
-	foundationurl "github.com/lemon4ksan/foundation/net/url"
+	furl "github.com/lemon4ksan/foundation/net/url"
 	"github.com/lemon4ksan/foundation/silicon/bytesconv"
 	"github.com/valyala/fasthttp"
 
@@ -303,7 +303,7 @@ func (c *Client) HTTP() HTTPDoer {
 }
 
 func (c *Client) execute(req *http.Request, pipe PipelineConfig) (*http.Response, error) {
-	fastCtx := asyncctx.Wrap(req.Context())
+	fastCtx := fctx.Wrap(req.Context())
 	if req.Context() != fastCtx {
 		req = req.WithContext(fastCtx)
 	}
@@ -381,7 +381,7 @@ func (c *Client) BrowserID() BrowserID {
 // Logger returns the configured diagnostic [core.Logger], or a no-op discard fallback.
 func (c *Client) Logger() core.Logger {
 	if c.defaults.Logger == nil {
-		return log.Discard
+		return flog.Discard
 	}
 
 	return c.defaults.Logger
@@ -542,7 +542,7 @@ func (c *Client) resolveURL(path string) (*url.URL, error) {
 		return nil, resolveErr
 	}
 
-	u, parseErr := foundationurl.Parse(targetURLStr)
+	u, parseErr := furl.Parse(targetURLStr)
 	if parseErr != nil {
 		return nil, &Error{Op: "failed to parse URL", Err: parseErr}
 	}
@@ -573,7 +573,7 @@ func (c *Client) resolveTargetURL(path string) (string, error) {
 		return c.prepared.BaseURLTrimmedString + path, nil
 	}
 
-	rel, err := foundationurl.Parse(strings.TrimLeft(path, "/"))
+	rel, err := furl.Parse(strings.TrimLeft(path, "/"))
 	if err != nil {
 		return "", &Error{Op: "invalid path", Err: ErrInvalidPath}
 	}
@@ -593,7 +593,7 @@ func (c *Client) resolveHTTPRequest(req Request) (*http.Request, error) {
 		ctx = context.Background()
 	}
 
-	var bodyReader stdio.Reader
+	var bodyReader io.Reader
 	if bs := req.BodyStream(); bs != nil {
 		bodyReader = bs
 	} else if bb := req.BodyBytes(); len(bb) > 0 {
@@ -704,4 +704,7 @@ func (c *Client) applyDefaultHTTPHeader() http.Header {
 	return reqHeader
 }
 
-var _ RequestDoer = (*Client)(nil)
+var (
+	_ RequestDoer           = (*Client)(nil)
+	_ Configurable[*Client] = (*Client)(nil)
+)

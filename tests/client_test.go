@@ -2518,15 +2518,31 @@ func TestClient_AuditFeatures(t *testing.T) {
 
 		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			w.Header().Set("Content-Type", "application/json")
-			if r.Method == http.MethodPost {
+			switch r.Method {
+			case http.MethodPost:
 				var u sampleUser
 				_ = json.NewDecoder(r.Body).Decode(&u)
 				u.Admin = true
 				_ = json.NewEncoder(w).Encode(u)
 				return
+			case http.MethodPut:
+				var u sampleUser
+				_ = json.NewDecoder(r.Body).Decode(&u)
+				u.Role = "Updated " + u.Role
+				_ = json.NewEncoder(w).Encode(u)
+				return
+			case http.MethodPatch:
+				var u sampleUser
+				_ = json.NewDecoder(r.Body).Decode(&u)
+				u.Name = "Patched " + u.Name
+				_ = json.NewEncoder(w).Encode(u)
+				return
+			case http.MethodDelete:
+				_ = json.NewEncoder(w).Encode(sampleUser{Name: "Deleted", Role: "None"})
+				return
+			default:
+				_ = json.NewEncoder(w).Encode(sampleUser{Name: "Steve", Role: "Visionary"})
 			}
-
-			_ = json.NewEncoder(w).Encode(sampleUser{Name: "Steve", Role: "Visionary"})
 		}))
 		t.Cleanup(server.Close)
 
@@ -2543,7 +2559,25 @@ func TestClient_AuditFeatures(t *testing.T) {
 		assert.Equal(t, "Woz", created.Name)
 		assert.True(t, created.Admin)
 
-		// 3. aoni.Fetch returning Result[T]
+		// 3. aoni.PutTo with smart body
+		updated, err := aoni.PutTo[sampleUser](t.Context(), server.URL, sampleUser{Name: "Woz", Role: "Architect"})
+		require.NoError(t, err)
+		require.NotNil(t, updated)
+		assert.Equal(t, "Updated Architect", updated.Role)
+
+		// 4. aoni.PatchTo with smart body
+		patched, err := aoni.PatchTo[sampleUser](t.Context(), server.URL, sampleUser{Name: "Woz", Role: "Fellow"})
+		require.NoError(t, err)
+		require.NotNil(t, patched)
+		assert.Equal(t, "Patched Woz", patched.Name)
+
+		// 5. aoni.DeleteTo
+		deleted, err := aoni.DeleteTo[sampleUser](t.Context(), server.URL)
+		require.NoError(t, err)
+		require.NotNil(t, deleted)
+		assert.Equal(t, "Deleted", deleted.Name)
+
+		// 6. aoni.Fetch returning Result[T]
 		res, resp := aoni.Fetch[sampleUser](t.Context(), server.URL)
 		require.NotNil(t, resp)
 		assert.True(t, res.IsSuccess())
@@ -2565,5 +2599,58 @@ func TestClient_AuditFeatures(t *testing.T) {
 		client := aoni.New(aoni.WithBaseURL("https://api.apple.com"), aoni.WithChrome())
 		cVal := client.LogValue()
 		assert.NotEmpty(t, cVal.Group())
+	})
+
+	t.Run("http_status_predicates_and_errors_is", func(t *testing.T) {
+		t.Parallel()
+
+		err404 := &aoni.APIError{StatusCode: http.StatusNotFound}
+		assert.True(t, err404.IsNotFound())
+		assert.True(t, aoni.IsNotFound(err404))
+		assert.True(t, errors.Is(err404, aoni.ErrNotFound))
+		assert.False(t, aoni.IsUnauthorized(err404))
+
+		err401 := &aoni.APIError{StatusCode: http.StatusUnauthorized}
+		assert.True(t, err401.IsUnauthorized())
+		assert.True(t, aoni.IsUnauthorized(err401))
+		assert.True(t, errors.Is(err401, aoni.ErrUnauthorized))
+
+		err403 := &aoni.APIError{StatusCode: http.StatusForbidden}
+		assert.True(t, err403.IsForbidden())
+		assert.True(t, aoni.IsForbidden(err403))
+		assert.True(t, errors.Is(err403, aoni.ErrForbidden))
+
+		err429 := &aoni.APIError{StatusCode: http.StatusTooManyRequests}
+		assert.True(t, err429.IsTooManyRequests())
+		assert.True(t, err429.IsRateLimited())
+		assert.True(t, aoni.IsRateLimited(err429))
+		assert.True(t, aoni.IsTooManyRequests(err429))
+		assert.True(t, errors.Is(err429, aoni.ErrRateLimited))
+
+		err409 := &aoni.APIError{StatusCode: http.StatusConflict}
+		assert.True(t, err409.IsConflict())
+		assert.True(t, aoni.IsConflict(err409))
+		assert.True(t, errors.Is(err409, aoni.ErrConflict))
+
+		err400 := &aoni.APIError{StatusCode: http.StatusBadRequest}
+		assert.True(t, err400.IsBadRequest())
+		assert.True(t, aoni.IsBadRequest(err400))
+		assert.True(t, errors.Is(err400, aoni.ErrBadRequest))
+
+		err408 := &aoni.APIError{StatusCode: http.StatusRequestTimeout}
+		assert.True(t, err408.IsTimeout())
+		assert.True(t, aoni.IsTimeout(err408))
+		assert.True(t, aoni.IsTimeout(context.DeadlineExceeded))
+		assert.True(t, errors.Is(err408, aoni.ErrTimeout))
+
+		err500 := &aoni.APIError{StatusCode: http.StatusInternalServerError}
+		assert.True(t, err500.IsServerError())
+		assert.True(t, aoni.IsServerError(err500))
+		assert.True(t, errors.Is(err500, aoni.ErrServerError))
+
+		err422 := &aoni.APIError{StatusCode: http.StatusUnprocessableEntity}
+		assert.True(t, err422.IsClientError())
+		assert.True(t, aoni.IsClientError(err422))
+		assert.True(t, errors.Is(err422, aoni.ErrClientError))
 	})
 }

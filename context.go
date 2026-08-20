@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/lemon4ksan/foundation/generic"
+	furl "github.com/lemon4ksan/foundation/net/url"
 	"github.com/lemon4ksan/foundation/silicon/pool"
 	fastrand "github.com/lemon4ksan/foundation/silicon/rand"
 
@@ -229,7 +230,7 @@ func GetRetryOverride(ctx context.Context) generic.Optional[core.RetryOverride] 
 func ProxyFuncWithOverride(base func(*http.Request) (*url.URL, error)) func(*http.Request) (*url.URL, error) {
 	return func(req *http.Request) (*url.URL, error) {
 		if raw, ok := GetProxyOverride(req.Context()).Value(); ok && raw != "" {
-			return url.Parse(raw)
+			return furl.Parse(raw)
 		}
 
 		if base != nil {

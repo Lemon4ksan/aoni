@@ -6,12 +6,14 @@ package aoni
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"log/slog"
 	"net/http"
 	"strconv"
 	"strings"
 
+	"github.com/lemon4ksan/foundation/generic"
 	"github.com/lemon4ksan/foundation/silicon/bytesconv"
 
 	"github.com/lemon4ksan/aoni/internal/io"
@@ -48,6 +50,33 @@ var (
 
 	// ErrHeaderInjectionDetected is returned when a response header contains CRLF control characters.
 	ErrHeaderInjectionDetected = pipeline.ErrHeaderInjectionDetected
+
+	// ErrNotFound matches any HTTP 404 Not Found response when checked via [errors.Is].
+	ErrNotFound = errors.New("aoni: HTTP 404 Not Found")
+
+	// ErrUnauthorized matches any HTTP 401 Unauthorized response when checked via [errors.Is].
+	ErrUnauthorized = errors.New("aoni: HTTP 401 Unauthorized")
+
+	// ErrForbidden matches any HTTP 403 Forbidden response when checked via [errors.Is].
+	ErrForbidden = errors.New("aoni: HTTP 403 Forbidden")
+
+	// ErrRateLimited matches any HTTP 429 Too Many Requests response when checked via [errors.Is].
+	ErrRateLimited = errors.New("aoni: HTTP 429 Too Many Requests")
+
+	// ErrConflict matches any HTTP 409 Conflict response when checked via [errors.Is].
+	ErrConflict = errors.New("aoni: HTTP 409 Conflict")
+
+	// ErrBadRequest matches any HTTP 400 Bad Request response when checked via [errors.Is].
+	ErrBadRequest = errors.New("aoni: HTTP 400 Bad Request")
+
+	// ErrTimeout matches any HTTP 408 / 504 Timeout response when checked via [errors.Is].
+	ErrTimeout = errors.New("aoni: HTTP Timeout")
+
+	// ErrServerError matches any HTTP 5xx Server Error response when checked via [errors.Is].
+	ErrServerError = errors.New("aoni: HTTP 5xx Server Error")
+
+	// ErrClientError matches any HTTP 4xx Client Error response when checked via [errors.Is].
+	ErrClientError = errors.New("aoni: HTTP 4xx Client Error")
 )
 
 // Error describes a structured operational failure in the aoni package.
@@ -177,6 +206,36 @@ func (e *APIError) Error() string {
 	return sb.String()
 }
 
+// Is reports whether this APIError matches target error for [errors.Is] compatibility.
+func (e *APIError) Is(target error) bool {
+	if e == nil {
+		return false
+	}
+
+	switch target {
+	case ErrNotFound:
+		return e.IsNotFound()
+	case ErrUnauthorized:
+		return e.IsUnauthorized()
+	case ErrForbidden:
+		return e.IsForbidden()
+	case ErrRateLimited:
+		return e.IsRateLimited()
+	case ErrConflict:
+		return e.IsConflict()
+	case ErrBadRequest:
+		return e.IsBadRequest()
+	case ErrTimeout:
+		return e.IsTimeout()
+	case ErrServerError:
+		return e.IsServerError()
+	case ErrClientError:
+		return e.IsClientError()
+	default:
+		return false
+	}
+}
+
 // IsNotFound reports whether the error represents an HTTP 404 Not Found response.
 func (e *APIError) IsNotFound() bool {
 	return e != nil && e.StatusCode == http.StatusNotFound
@@ -192,6 +251,31 @@ func (e *APIError) IsForbidden() bool {
 	return e != nil && e.StatusCode == http.StatusForbidden
 }
 
+// IsTooManyRequests reports whether the error represents an HTTP 429 Too Many Requests response.
+func (e *APIError) IsTooManyRequests() bool {
+	return e != nil && e.StatusCode == http.StatusTooManyRequests
+}
+
+// IsRateLimited is a convenience alias for [IsTooManyRequests].
+func (e *APIError) IsRateLimited() bool {
+	return e.IsTooManyRequests()
+}
+
+// IsConflict reports whether the error represents an HTTP 409 Conflict response.
+func (e *APIError) IsConflict() bool {
+	return e != nil && e.StatusCode == http.StatusConflict
+}
+
+// IsBadRequest reports whether the error represents an HTTP 400 Bad Request response.
+func (e *APIError) IsBadRequest() bool {
+	return e != nil && e.StatusCode == http.StatusBadRequest
+}
+
+// IsTimeout reports whether the error represents an HTTP 408 Request Timeout or 504 Gateway Timeout response.
+func (e *APIError) IsTimeout() bool {
+	return e != nil && (e.StatusCode == http.StatusRequestTimeout || e.StatusCode == http.StatusGatewayTimeout)
+}
+
 // IsServerError reports whether the error represents an HTTP 5xx server-side response.
 func (e *APIError) IsServerError() bool {
 	return e != nil && e.StatusCode >= http.StatusInternalServerError && e.StatusCode <= 599
@@ -200,6 +284,133 @@ func (e *APIError) IsServerError() bool {
 // IsClientError reports whether the error represents an HTTP 4xx client-side response.
 func (e *APIError) IsClientError() bool {
 	return e != nil && e.StatusCode >= http.StatusBadRequest && e.StatusCode <= 499
+}
+
+// HTTPStatusCategory classifies HTTP status codes into their RFC 9110 standard families.
+type HTTPStatusCategory uint8
+
+const (
+	// CategoryUnknown represents an unclassified or invalid HTTP status code.
+	CategoryUnknown HTTPStatusCategory = iota
+	// CategoryInformational represents 1xx Informational response status codes.
+	CategoryInformational
+	// CategorySuccess represents 2xx Successful response status codes.
+	CategorySuccess
+	// CategoryRedirection represents 3xx Redirection response status codes.
+	CategoryRedirection
+	// CategoryClientError represents 4xx Client Error response status codes.
+	CategoryClientError
+	// CategoryServerError represents 5xx Server Error response status codes.
+	CategoryServerError
+)
+
+// String returns the human-readable description of the HTTP status category.
+func (c HTTPStatusCategory) String() string {
+	switch c {
+	case CategoryInformational:
+		return "1xx Informational"
+	case CategorySuccess:
+		return "2xx Success"
+	case CategoryRedirection:
+		return "3xx Redirection"
+	case CategoryClientError:
+		return "4xx Client Error"
+	case CategoryServerError:
+		return "5xx Server Error"
+	default:
+		return "Unknown"
+	}
+}
+
+// Category returns the RFC 9110 status code category family for this APIError.
+func (e *APIError) Category() HTTPStatusCategory {
+	if e == nil || e.StatusCode < 100 || e.StatusCode > 599 {
+		return CategoryUnknown
+	}
+
+	return HTTPStatusCategory(e.StatusCode / 100)
+}
+
+// AsTypedResult bridges a value-error tuple into a strongly typed [generic.TypedResult]
+// wrapping [*APIError], conforming to Swift-like Typed Throws error models.
+func AsTypedResult[T any](val T, err error) generic.TypedResult[T, *APIError] {
+	if err == nil {
+		return generic.SuccessTyped[T, *APIError](val)
+	}
+
+	var apiErr *APIError
+	if errors.As(err, &apiErr) {
+		return generic.FailureTyped[T, *APIError](apiErr)
+	}
+
+	return generic.FailureTyped[T, *APIError](&APIError{
+		StatusCode: http.StatusInternalServerError,
+		Body:       bytesconv.S2B(err.Error()),
+	})
+}
+
+// IsNotFound reports whether err represents an HTTP 404 Not Found response.
+func IsNotFound(err error) bool {
+	var apiErr *APIError
+	return errors.As(err, &apiErr) && apiErr.IsNotFound()
+}
+
+// IsUnauthorized reports whether err represents an HTTP 401 Unauthorized response.
+func IsUnauthorized(err error) bool {
+	var apiErr *APIError
+	return errors.As(err, &apiErr) && apiErr.IsUnauthorized()
+}
+
+// IsForbidden reports whether err represents an HTTP 403 Forbidden response.
+func IsForbidden(err error) bool {
+	var apiErr *APIError
+	return errors.As(err, &apiErr) && apiErr.IsForbidden()
+}
+
+// IsRateLimited reports whether err represents an HTTP 429 Too Many Requests response.
+func IsRateLimited(err error) bool {
+	var apiErr *APIError
+	return errors.As(err, &apiErr) && apiErr.IsRateLimited()
+}
+
+// IsTooManyRequests is an alias for [IsRateLimited].
+func IsTooManyRequests(err error) bool {
+	return IsRateLimited(err)
+}
+
+// IsConflict reports whether err represents an HTTP 409 Conflict response.
+func IsConflict(err error) bool {
+	var apiErr *APIError
+	return errors.As(err, &apiErr) && apiErr.IsConflict()
+}
+
+// IsBadRequest reports whether err represents an HTTP 400 Bad Request response.
+func IsBadRequest(err error) bool {
+	var apiErr *APIError
+	return errors.As(err, &apiErr) && apiErr.IsBadRequest()
+}
+
+// IsTimeout reports whether err represents an HTTP 408/504 Timeout or context deadline exceeded.
+func IsTimeout(err error) bool {
+	if errors.Is(err, context.DeadlineExceeded) {
+		return true
+	}
+
+	var apiErr *APIError
+
+	return errors.As(err, &apiErr) && apiErr.IsTimeout()
+}
+
+// IsServerError reports whether err represents an HTTP 5xx server-side response.
+func IsServerError(err error) bool {
+	var apiErr *APIError
+	return errors.As(err, &apiErr) && apiErr.IsServerError()
+}
+
+// IsClientError reports whether err represents an HTTP 4xx client-side response.
+func IsClientError(err error) bool {
+	var apiErr *APIError
+	return errors.As(err, &apiErr) && apiErr.IsClientError()
 }
 
 // BodyString returns the error response payload as a string.

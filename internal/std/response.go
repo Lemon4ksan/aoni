@@ -206,15 +206,16 @@ func (s *Response) SetUncompressed(v bool) {
 	}
 }
 
-// Close closes response body stream.
+// Close closes the response body stream and releases the response adapter to the pool.
 func (s *Response) Close() error {
+	var err error
 	if s.resp != nil && s.resp.Body != nil {
-		return s.resp.Body.Close()
+		err = s.resp.Body.Close()
 	}
 
 	ReleaseResponse(s)
 
-	return nil
+	return err
 }
 
 // Ensure Response implements core.Response.

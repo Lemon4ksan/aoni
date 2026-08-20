@@ -14,8 +14,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/lemon4ksan/foundation/net/ip"
-	foundationurl "github.com/lemon4ksan/foundation/net/url"
+	"github.com/lemon4ksan/foundation/generic"
+	fip "github.com/lemon4ksan/foundation/net/ip"
+	furl "github.com/lemon4ksan/foundation/net/url"
 	utls "github.com/refraction-networking/utls"
 
 	"github.com/lemon4ksan/aoni/fingerprint"
@@ -275,7 +276,7 @@ type NetworkConfig struct {
 	L2Device netdial.L2Device
 
 	// SourceRotator manages round-robin rotation across multiple local egress IP addresses.
-	SourceRotator *ip.SourceIPRotator
+	SourceRotator *fip.SourceIPRotator
 
 	// DynamicHedging configures RTT percentile-based speculative request hedging to eliminate tail latency.
 	DynamicHedging *telemetry.DynamicHedgingConfig
@@ -384,6 +385,17 @@ func (b BrowserID) String() string {
 type BrowserProfile struct {
 	UserAgent   string
 	ClientHints map[string]string
+}
+
+// Clone creates a deep copy of BrowserProfile and its ClientHints map.
+func (b BrowserProfile) Clone() BrowserProfile {
+	cloned := b
+	if len(b.ClientHints) > 0 {
+		cloned.ClientHints = make(map[string]string, len(b.ClientHints))
+		maps.Copy(cloned.ClientHints, b.ClientHints)
+	}
+
+	return cloned
 }
 
 // FingerprintConfig controls TLS ClientHello emulation, HTTP/2 SETTINGS frames,
@@ -560,7 +572,7 @@ func (d ClientDefaults) Clone() ClientDefaults {
 	cloned := d
 
 	if d.BaseURL != nil {
-		cloned.BaseURL = cloneURL(d.BaseURL)
+		cloned.BaseURL = furl.CloneURL(d.BaseURL)
 	}
 
 	if d.Headers != nil {
@@ -585,7 +597,10 @@ func (d ClientDefaults) Clone() ClientDefaults {
 	}
 
 	if len(d.UARotationProfiles) > 0 {
-		cloned.UARotationProfiles = slices.Clone(d.UARotationProfiles)
+		cloned.UARotationProfiles = make([]BrowserProfile, len(d.UARotationProfiles))
+		for i, p := range d.UARotationProfiles {
+			cloned.UARotationProfiles[i] = p.Clone()
+		}
 	}
 
 	cloned.Pipeline = d.Pipeline.Clone()
@@ -652,7 +667,11 @@ func (p PipelineConfig) Clone() PipelineConfig {
 		cloned.Hedging = &h
 	}
 
-	cloned.Cache = clonePtr(p.Cache)
+	if p.Cache != nil {
+		c := p.Cache.Clone()
+		cloned.Cache = &c
+	}
+
 	cloned.HAR = clonePtr(p.HAR)
 
 	if p.Redact != nil {
@@ -736,6 +755,21 @@ type CacheConfig struct {
 	CookieIndices []string
 }
 
+// Clone creates a deep copy of CacheConfig and its nested structures.
+func (c CacheConfig) Clone() CacheConfig {
+	cloned := c
+	if c.NoVarySearch != nil {
+		nv := c.NoVarySearch.Clone()
+		cloned.NoVarySearch = &nv
+	}
+
+	if len(c.CookieIndices) > 0 {
+		cloned.CookieIndices = slices.Clone(c.CookieIndices)
+	}
+
+	return cloned
+}
+
 // NoVarySearchConfig configures RFC 9211 No-Vary-Search URL query parameter normalization.
 // Normalization strips marketing/tracking parameters (e.g. utm_source, gclid) to maximize cache hit rates.
 type NoVarySearchConfig struct {
@@ -745,8 +779,22 @@ type NoVarySearchConfig struct {
 	IgnoreAllParams bool
 }
 
-func cloneURL(u *url.URL) *url.URL {
-	return foundationurl.CloneURL(u)
+// Clone creates a deep copy of NoVarySearchConfig and its header/param slices.
+func (n NoVarySearchConfig) Clone() NoVarySearchConfig {
+	cloned := n
+	if len(n.VaryByHeaders) > 0 {
+		cloned.VaryByHeaders = slices.Clone(n.VaryByHeaders)
+	}
+
+	if len(n.IgnoreParams) > 0 {
+		cloned.IgnoreParams = slices.Clone(n.IgnoreParams)
+	}
+
+	if len(n.ExceptParams) > 0 {
+		cloned.ExceptParams = slices.Clone(n.ExceptParams)
+	}
+
+	return cloned
 }
 
 func clonePtr[T any](p *T) *T {
@@ -754,9 +802,7 @@ func clonePtr[T any](p *T) *T {
 		return nil
 	}
 
-	val := *p
-
-	return &val
+	return generic.Ptr(*p)
 }
 
 // RequestConfig aggregates request-scoped execution options, transport overrides,
@@ -1101,7 +1147,7 @@ func AllowedDomainsRedirectPolicy(allowedDomains ...string) func(req *http.Reque
 
 		host := strings.ToLower(strings.TrimSuffix(req.URL.Hostname(), "."))
 		for _, domainPattern := range allowedDomains {
-			if foundationurl.MatchDomainPattern(host, domainPattern) {
+			if furl.MatchDomainPattern(host, domainPattern) {
 				return nil
 			}
 		}
@@ -1133,7 +1179,7 @@ func DefaultRedirectPolicy(
 			headersToScrub = DefaultSensitiveHeaders
 		}
 
-		if foundationurl.IsCrossOrigin(req.URL, via[0].URL) {
+		if furl.IsCrossOrigin(req.URL, via[0].URL) {
 			for _, h := range headersToScrub {
 				req.Header.Del(h)
 			}
@@ -1150,31 +1196,23 @@ func applyRedirectPolicy(httpClient *http.Client, eng EngineConfig) {
 		return
 	}
 
-	limit := eng.RedirectLimit
-	if limit == RedirectLimitUnset {
-		return
-	}
-
-	switch {
-	case limit == 0:
+	switch eng.RedirectLimit {
+	case 0:
 		httpClient.CheckRedirect = func(req *http.Request, via []*http.Request) error {
 			return http.ErrUseLastResponse
 		}
-	case limit > 0:
-		httpClient.CheckRedirect = DefaultRedirectPolicy(limit)
-	default:
+	case -1:
 		httpClient.CheckRedirect = DefaultRedirectPolicy(10)
+	case RedirectLimitUnset:
+		return
+	default:
+		httpClient.CheckRedirect = DefaultRedirectPolicy(eng.RedirectLimit)
 	}
 }
 
 // applyMSSLimit applies maximum segment size boundaries to TCP socket streams.
 func applyMSSLimit(conn net.Conn, mss int) net.Conn {
 	return transport.ApplyMSSLimit(conn, mss)
-}
-
-// applyFragmentation applies TCP write payload fragmentation to socket streams.
-func applyFragmentation(conn net.Conn, cfg fragment.Config) net.Conn {
-	return transport.ApplyFragmentation(conn, cfg)
 }
 
 // BuildDialConfig converts the [Config] into a self-contained [transport.DialConfig] DTO for socket dialing.

@@ -26,33 +26,13 @@ type StdRequest = std.Request
 // StdResponse adapts a standard net/http [*http.Response] to the unified [Response] contract.
 type StdResponse = std.Response
 
-// NewStdRequest wraps req into a unified [Request] adapter.
+// NewStdRequest wraps a standard *http.Request into a unified [Request] adapter.
 func NewStdRequest(req *http.Request) *StdRequest {
 	return std.NewRequest(req)
 }
 
-// ReleaseStdRequest returns the request to the pool after execution.
-func ReleaseStdRequest(r *StdRequest) {
-	std.ReleaseRequest(r)
-}
-
-// NewStdResponse wraps resp into a unified [Response] adapter.
+// NewStdResponse wraps a standard *http.Response into a unified [Response] adapter.
 func NewStdResponse(resp *http.Response) *StdResponse {
-	return std.NewResponse(resp)
-}
-
-// ReleaseStdResponse returns the response to the pool after execution.
-func ReleaseStdResponse(r *StdResponse) {
-	std.ReleaseResponse(r)
-}
-
-// WrapHTTPRequest wraps a standard *http.Request into a unified [Request] interface.
-func WrapHTTPRequest(req *http.Request) Request {
-	return std.NewRequest(req)
-}
-
-// WrapHTTPResponse wraps a standard *http.Response into a unified [Response] interface.
-func WrapHTTPResponse(resp *http.Response) Response {
 	return std.NewResponse(resp)
 }
 
@@ -76,17 +56,18 @@ func NewRequestDoerAdapter(doer RequestDoer) HTTPDoer {
 // DefaultEngine normalizes arbitrary execution targets (RequestDoer, *http.Client, HTTPDoer, or nil)
 // into a standardized, production-ready [HTTPDoer] instance.
 func DefaultEngine(doer any) HTTPDoer {
-	if doer != nil {
-		if rd, ok := doer.(RequestDoer); ok {
-			return NewRequestDoerAdapter(rd)
+	switch doer := doer.(type) {
+	case RequestDoer:
+		if doer != nil {
+			return NewRequestDoerAdapter(doer)
 		}
-
-		if httpClient, ok := doer.(*http.Client); ok {
-			return CloneHTTPClient(httpClient)
+	case *http.Client:
+		if doer != nil {
+			return CloneHTTPClient(doer)
 		}
-
-		if hd, ok := doer.(HTTPDoer); ok {
-			return hd
+	case HTTPDoer:
+		if doer != nil {
+			return doer
 		}
 	}
 
@@ -175,14 +156,13 @@ func (t *Transport) RoundTrip(req *http.Request) (*http.Response, error) {
 	if req == nil || req.URL == nil {
 		closeReqBody(req)
 
-		op := ""
+		var op string
 		if req != nil {
 			op = req.Method
 		}
 
 		return nil, &url.Error{
 			Op:  op,
-			URL: "",
 			Err: ErrNilURL,
 		}
 	}
@@ -208,22 +188,22 @@ func (t *Transport) RoundTrip(req *http.Request) (*http.Response, error) {
 	return resp, nil
 }
 
-func (t *Transport) wrapError(origReq *http.Request, err error) error {
-	closeReqBody(origReq)
+func (t *Transport) wrapError(req *http.Request, err error) error {
+	closeReqBody(req)
 
-	reqURL := origReq.URL.String()
+	reqURL := req.URL.String()
 	bridgeErr := &BridgeError{
-		Op:  origReq.Method,
+		Op:  req.Method,
 		URL: reqURL,
 		Err: err,
 		Metadata: map[string]any{
-			"host":   origReq.URL.Host,
-			"scheme": origReq.URL.Scheme,
+			"host":   req.URL.Host,
+			"scheme": req.URL.Scheme,
 		},
 	}
 
 	return &url.Error{
-		Op:  origReq.Method,
+		Op:  req.Method,
 		URL: reqURL,
 		Err: bridgeErr,
 	}
@@ -242,24 +222,25 @@ func (c *Client) reapplyH2Settings(tr *http.Transport) {
 		return
 	}
 
-	if c.fingerprint.H2Configurer != nil || c.fingerprint.H2Settings != nil {
-		settings := h2.Settings{}
-		if c.fingerprint.H2Settings != nil {
-			settings = *c.fingerprint.H2Settings
-		}
+	if c.fingerprint.H2Configurer == nil && c.fingerprint.H2Settings == nil {
+		return
+	}
 
-		framed := h2.NewFramedTransport(tr, settings)
-		if c.fingerprint.H2Configurer != nil && framed.H2Transport() != nil {
-			_ = c.fingerprint.H2Configurer.ConfigureHTTP2(framed.H2Transport())
-		}
+	settings := h2.Settings{}
+	if c.fingerprint.H2Settings != nil {
+		settings = *c.fingerprint.H2Settings
+	}
 
-		httpClient, ok := c.engine.(*http.Client)
-		if ok {
-			if cjTrans, ok := httpClient.Transport.(*cookie.Transport); ok {
-				cjTrans.Next = framed
-			} else {
-				httpClient.Transport = framed
-			}
+	framed := h2.NewFramedTransport(tr, settings)
+	if c.fingerprint.H2Configurer != nil && framed.H2Transport() != nil {
+		_ = c.fingerprint.H2Configurer.ConfigureHTTP2(framed.H2Transport())
+	}
+
+	if httpClient, ok := c.engine.(*http.Client); ok {
+		if cjTrans, ok := httpClient.Transport.(*cookie.Transport); ok {
+			cjTrans.Next = framed
+		} else {
+			httpClient.Transport = framed
 		}
 	}
 }

@@ -61,11 +61,16 @@ type (
 	// WebSocketDialer establishes RFC 6455 / RFC 8441 WebSocket connections over TCP, TLS, or HTTP/2 Extended CONNECT.
 	WebSocketDialer = core.WebSocketDialer
 
-	// Configurable represents any execution client capable of immutably applying [ClientOption] layers.
-	Configurable interface {
-		With(opts ...ClientOption) RequestDoer
+	// Configurable is a protocol representing any entity capable of immutably applying [ClientOption] layers.
+	Configurable[T any] interface {
+		With(opts ...ClientOption) T
 	}
 )
+
+// ConfigureAs applies [ClientOption] layers to any target conforming to the [Configurable[T]] protocol.
+func ConfigureAs[T any](target Configurable[T], opts ...ClientOption) T {
+	return target.With(opts...)
+}
 
 // Configure applies [ClientOption] layers to any execution engine.
 func Configure(doer any, opts ...ClientOption) RequestDoer {
@@ -89,6 +94,10 @@ func Configure(doer any, opts ...ClientOption) RequestDoer {
 		return c.With(opts...)
 	}
 
+	if conf, ok := doer.(Configurable[RequestDoer]); ok {
+		return conf.With(opts...)
+	}
+
 	type optionApplier interface {
 		ApplyOptions(opts ...ClientOption) RequestDoer
 	}
@@ -96,11 +105,13 @@ func Configure(doer any, opts ...ClientOption) RequestDoer {
 		return a.ApplyOptions(opts...)
 	}
 
-	type withRequestDoer interface {
-		With(opts ...ClientOption) RequestDoer
+	type withAny interface {
+		With(opts ...ClientOption) any
 	}
-	if w, ok := doer.(withRequestDoer); ok {
-		return w.With(opts...)
+	if w, ok := doer.(withAny); ok {
+		if res, ok := w.With(opts...).(RequestDoer); ok {
+			return res
+		}
 	}
 
 	return NewClient(doer, opts...)
@@ -116,7 +127,5 @@ func AcquireRequest(doer any) (Request, func()) {
 		return r, func() { factory.ReleaseRequest(r) }
 	}
 
-	stdReq := NewStdRequest(nil)
-
-	return stdReq, noopReleaseFunc
+	return NewStdRequest(nil), noopReleaseFunc
 }
