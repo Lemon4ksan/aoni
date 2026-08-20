@@ -13,7 +13,7 @@ import (
 	"net/http"
 	"net/url"
 
-	foundation "github.com/lemon4ksan/foundation/net/url"
+	furl "github.com/lemon4ksan/foundation/net/url"
 	"github.com/lemon4ksan/foundation/silicon/bytesconv"
 	"github.com/valyala/fasthttp"
 
@@ -25,7 +25,7 @@ import (
 
 // applyCookies populates outbound fasthttp request headers with matching cookies from the active jar.
 func (c *Client) applyCookies(ctx context.Context, req *fasthttp.Request) {
-	jar := c.config.Engine.CookieJar
+	jar := c.cfg.Engine.CookieJar
 	if jar == nil {
 		return
 	}
@@ -69,7 +69,7 @@ func (c *Client) applyCookies(ctx context.Context, req *fasthttp.Request) {
 
 // captureCookies extracts response Set-Cookie headers and saves valid cookies to the active jar.
 func (c *Client) captureCookies(ctx context.Context, req *fasthttp.Request, resp *fasthttp.Response) {
-	jar := c.config.Engine.CookieJar
+	jar := c.cfg.Engine.CookieJar
 	if jar == nil {
 		return
 	}
@@ -189,7 +189,7 @@ func isSameDomainOrSubdomain(h1, h2 string) bool {
 	clean1 := netutil.CleanHost(h1)
 	clean2 := netutil.CleanHost(h2)
 
-	return foundation.IsSameDomainOrSubdomain(clean1, clean2)
+	return furl.IsSameDomainOrSubdomain(clean1, clean2)
 }
 
 func uriToURL(uri *fasthttp.URI) *url.URL {

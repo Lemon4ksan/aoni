@@ -25,6 +25,7 @@ import (
 	"github.com/lemon4ksan/aoni/internal/experimental"
 	"github.com/lemon4ksan/aoni/internal/pipeline"
 	"github.com/lemon4ksan/aoni/netutil/power"
+	"github.com/lemon4ksan/aoni/telemetry"
 )
 
 // Client encapsulates an ultra-high-performance multi-protocol client
@@ -40,7 +41,7 @@ type Client struct {
 	engine        *fasthttp.Client
 	pipeline      *pipeline.Pipeline[aoni.Request, aoni.Response]
 	defaultDial   func(string) (net.Conn, error)
-	config        aoni.Config
+	cfg           aoni.Config
 	powerWatcher  *power.Watcher
 	referer       *pipeline.RefererState
 	activeTargets targetTracker
@@ -58,7 +59,7 @@ type Client struct {
 func NewClient(opts ...aoni.ClientOption) *Client {
 	c := &Client{
 		engine: defaultFasthttpClient(),
-		config: aoni.Config{
+		cfg: aoni.Config{
 			Defaults: aoni.ClientDefaults{
 				Headers: make(http.Header),
 			},
@@ -69,25 +70,25 @@ func NewClient(opts ...aoni.ClientOption) *Client {
 
 	for _, opt := range opts {
 		if opt != nil {
-			opt(&c.config)
+			opt(&c.cfg)
 		}
 	}
 
 	c.applyEngineConfig()
 	c.applyCustomDialer()
-	c.applyPowerManagement(c.config.Network.EnablePowerManagement)
+	c.applyPowerManagement(c.cfg.Network.EnablePowerManagement)
 
-	c.coreEngine = pipeline.NewEngine(c.config.Defaults.BaseURL, c.config.Defaults.Headers)
+	c.coreEngine = pipeline.NewEngine(c.cfg.Defaults.BaseURL, c.cfg.Defaults.Headers)
 	c.prepared = c.coreEngine.Prepared
-	c.prepared.FastPathCapable = (c.config.Engine.CookieJar == nil && c.config.Defaults.Inspector == nil)
+	c.prepared.FastPathCapable = (c.cfg.Engine.CookieJar == nil && c.cfg.Defaults.Inspector == nil)
 
 	c.pipeline = pipeline.NewGeneric[aoni.Request, aoni.Response](
-		toPipelineDefaults(c.config.Defaults, c.referer),
-		c.config.Fingerprint.ToPipelineFingerprint(),
+		toPipelineDefaults(c.cfg.Defaults, c.referer),
+		c.cfg.Fingerprint.ToPipelineFingerprint(),
 	)
 
-	if len(c.config.Network.CPUAffinityCores) > 0 {
-		experimental.ApplyCPUAffinity(c.config.Network.CPUAffinityCores)
+	if len(c.cfg.Network.CPUAffinityCores) > 0 {
+		experimental.ApplyCPUAffinity(c.cfg.Network.CPUAffinityCores)
 	}
 
 	c.nativeDoer.client = c
@@ -107,7 +108,7 @@ func (c *Client) With(opts ...aoni.ClientOption) *Client {
 	cloned := &Client{
 		engine:        clonedEngine,
 		defaultDial:   c.defaultDial,
-		config:        c.config.Clone(),
+		cfg:           c.cfg.Clone(),
 		referer:       clonedReferer,
 		protocolState: c.protocolState.Clone(),
 	}
@@ -116,7 +117,7 @@ func (c *Client) With(opts ...aoni.ClientOption) *Client {
 
 	for _, opt := range opts {
 		if opt != nil {
-			opt(&cloned.config)
+			opt(&cloned.cfg)
 		}
 	}
 
@@ -126,15 +127,15 @@ func (c *Client) With(opts ...aoni.ClientOption) *Client {
 		cloned.applyCustomDialer()
 	}
 
-	cloned.applyPowerManagement(cloned.config.Network.EnablePowerManagement)
+	cloned.applyPowerManagement(cloned.cfg.Network.EnablePowerManagement)
 
-	cloned.coreEngine = pipeline.NewEngine(cloned.config.Defaults.BaseURL, cloned.config.Defaults.Headers)
+	cloned.coreEngine = pipeline.NewEngine(cloned.cfg.Defaults.BaseURL, cloned.cfg.Defaults.Headers)
 	cloned.prepared = cloned.coreEngine.Prepared
-	cloned.prepared.FastPathCapable = (cloned.config.Engine.CookieJar == nil && cloned.config.Defaults.Inspector == nil)
+	cloned.prepared.FastPathCapable = (cloned.cfg.Engine.CookieJar == nil && cloned.cfg.Defaults.Inspector == nil)
 
 	cloned.pipeline = pipeline.NewGeneric[aoni.Request, aoni.Response](
-		toPipelineDefaults(cloned.config.Defaults, cloned.referer),
-		cloned.config.Fingerprint.ToPipelineFingerprint(),
+		toPipelineDefaults(cloned.cfg.Defaults, cloned.referer),
+		cloned.cfg.Fingerprint.ToPipelineFingerprint(),
 	)
 
 	return cloned
@@ -449,9 +450,49 @@ func (c *Client) ReleaseRequest(req aoni.Request) {
 	}
 }
 
+// Unwrap returns the underlying [*fasthttp.Client] engine instance.
+func (c *Client) Unwrap() any {
+	return c.engine
+}
+
 // Config returns a copy of active client configurations.
 func (c *Client) Config() aoni.Config {
-	return c.config
+	return c.cfg.Clone()
+}
+
+// Defaults returns a copy of the default client configuration block.
+func (c *Client) Defaults() aoni.ClientDefaults {
+	return c.cfg.Defaults.Clone()
+}
+
+// Network returns a copy of the active network configuration block.
+func (c *Client) Network() aoni.NetworkConfig {
+	return c.cfg.Network.Clone()
+}
+
+// Fingerprint returns a copy of the TLS/HTTP fingerprint configuration block.
+func (c *Client) Fingerprint() aoni.FingerprintConfig {
+	return c.cfg.Fingerprint.Clone()
+}
+
+// EngineConfig returns the underlying transport engine configuration parameters.
+func (c *Client) EngineConfig() aoni.EngineConfig {
+	return c.cfg.Engine
+}
+
+// BaseURL returns the configured base target URL, or nil if unset.
+func (c *Client) BaseURL() *url.URL {
+	return c.cfg.Defaults.BaseURL
+}
+
+// BrowserID returns the active browser impersonation identity profile.
+func (c *Client) BrowserID() aoni.BrowserID {
+	return c.cfg.Fingerprint.BrowserID
+}
+
+// Inspector returns the configured network traffic inspector, or nil if unset.
+func (c *Client) Inspector() telemetry.TrafficInspector {
+	return c.cfg.Defaults.Inspector
 }
 
 // Engine returns the underlying [*fasthttp.Client] engine instance.
@@ -460,7 +501,7 @@ func (c *Client) Engine() *fasthttp.Client {
 }
 
 func (c *Client) resolveProtocolHandler(rawURL string) http.RoundTripper {
-	if len(c.config.Engine.Protocols) == 0 {
+	if len(c.cfg.Engine.Protocols) == 0 {
 		return nil
 	}
 
@@ -474,7 +515,7 @@ func (c *Client) resolveProtocolHandler(rawURL string) http.RoundTripper {
 		return nil
 	}
 
-	return c.config.Engine.Protocols[normScheme]
+	return c.cfg.Engine.Protocols[normScheme]
 }
 
 func (c *Client) resolveTargetFastURI(fastReq *fasthttp.Request, path string) error {
@@ -525,8 +566,8 @@ func (c *Client) resolveTargetURLFastFallback(fastReq *fasthttp.Request, path st
 			}
 		}
 
-	case c.config.Defaults.BaseURL != nil && c.config.Defaults.BaseURL.Host != "":
-		base := c.config.Defaults.BaseURL
+	case c.cfg.Defaults.BaseURL != nil && c.cfg.Defaults.BaseURL.Host != "":
+		base := c.cfg.Defaults.BaseURL
 		basePath := strings.TrimSuffix(base.Path, "/")
 
 		cleanPath := path
@@ -594,8 +635,8 @@ func (c *Client) resolveTargetURL(req aoni.Request, path string) error {
 			}
 		}
 
-	case c.config.Defaults.BaseURL != nil && c.config.Defaults.BaseURL.Host != "":
-		base := c.config.Defaults.BaseURL
+	case c.cfg.Defaults.BaseURL != nil && c.cfg.Defaults.BaseURL.Host != "":
+		base := c.cfg.Defaults.BaseURL
 		basePath := strings.TrimSuffix(base.Path, "/")
 
 		cleanPath := path
@@ -634,7 +675,7 @@ func (c *Client) executeWithRedirects(
 	fastReq *fasthttp.Request,
 	fastResp *fasthttp.Response,
 ) (trailers map[string][]string, err error, autoReleased bool) {
-	redirectLimit := c.config.Engine.RedirectLimit
+	redirectLimit := c.cfg.Engine.RedirectLimit
 	if redirectLimit < 0 {
 		redirectLimit = 10
 	}
@@ -719,18 +760,22 @@ func (c *Client) executeWithRedirects(
 			fastReq.Header.SetBytesK(bytesconv.S2B("Referer"), string(currentURI.FullURI()))
 		}
 
+		if c.referer != nil {
+			c.referer.LastURL.Set(string(currentURI.FullURI()))
+		}
+
 		fasthttp.ReleaseURI(nextURI)
 		fastResp.Reset()
 	}
 }
 
 func (c *Client) applyEngineConfig() {
-	if c.config.Engine.Timeout > 0 {
-		c.engine.ReadTimeout = c.config.Engine.Timeout
-		c.engine.WriteTimeout = c.config.Engine.Timeout
+	if c.cfg.Engine.Timeout > 0 {
+		c.engine.ReadTimeout = c.cfg.Engine.Timeout
+		c.engine.WriteTimeout = c.cfg.Engine.Timeout
 	}
 
-	if c.config.Engine.InsecureSkipVerify {
+	if c.cfg.Engine.InsecureSkipVerify {
 		c.engine.TLSConfig = nil
 	}
 
@@ -798,23 +843,23 @@ func (c *Client) resolvePipeline(ctx context.Context) pipeline.PipelineConfig {
 		return reqPipe
 	}
 
-	pipe := c.config.Defaults.Pipeline
-	if !pipe.RotateUA && len(c.config.Defaults.UARotationProfiles) > 0 {
+	pipe := c.cfg.Defaults.Pipeline
+	if !pipe.RotateUA && len(c.cfg.Defaults.UARotationProfiles) > 0 {
 		pipe.RotateUA = true
 	}
 
 	if pipe.SizeLimit == 0 {
-		pipe.SizeLimit = c.config.Defaults.MaxResponseSize
+		pipe.SizeLimit = c.cfg.Defaults.MaxResponseSize
 	}
 
-	if !pipe.Inspect && c.config.Defaults.Inspector != nil {
+	if !pipe.Inspect && c.cfg.Defaults.Inspector != nil {
 		pipe.Inspect = true
 	}
 
-	if pipe.Hedging == nil && (c.config.Network.HedgingDelay > 0 || c.config.Network.DynamicHedging != nil) {
+	if pipe.Hedging == nil && (c.cfg.Network.HedgingDelay > 0 || c.cfg.Network.DynamicHedging != nil) {
 		pipe.Hedging = &aoni.HedgingConfig{
-			DefaultDelay:   c.config.Network.HedgingDelay,
-			DynamicHedging: c.config.Network.DynamicHedging,
+			DefaultDelay:   c.cfg.Network.HedgingDelay,
+			DynamicHedging: c.cfg.Network.DynamicHedging,
 		}
 	}
 

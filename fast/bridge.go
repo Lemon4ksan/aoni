@@ -50,6 +50,16 @@ type Transport struct {
 	noRedirectClient *Client
 }
 
+// Unwrap returns the underlying fast [*Client].
+func (t *Transport) Unwrap() any {
+	return t.client
+}
+
+// Client returns the underlying fast [*Client].
+func (t *Transport) Client() *Client {
+	return t.client
+}
+
 // RoundTrip satisfies [http.RoundTripper], executing standard requests over fasthttp.
 func (t *Transport) RoundTrip(req *http.Request) (*http.Response, error) {
 	if req.URL == nil {

@@ -55,7 +55,7 @@ func (c *Client) DialContext(ctx context.Context, network, addr string) (net.Con
 }
 
 func (c *Client) isTLSEnabled() bool {
-	f := c.config.Fingerprint
+	f := c.cfg.Fingerprint
 
 	return f.BrowserID != aoni.BrowserNone ||
 		f.TLSClientHelloID != nil ||
@@ -105,7 +105,7 @@ func (c *Client) IsHTTPSTarget(addr string) bool {
 }
 
 func (c *Client) resolveHelloID() *utls.ClientHelloID {
-	f := c.config.Fingerprint
+	f := c.cfg.Fingerprint
 	if f.TLSClientHelloID != nil {
 		return f.TLSClientHelloID
 	}
@@ -133,10 +133,10 @@ func (c *Client) DialPlainForWS(ctx context.Context, addr string) (net.Conn, err
 func (c *Client) buildDialConfig(ctx context.Context) transport.DialConfig {
 	reqCfg := aoni.GetRequestConfig(ctx)
 
-	cfg := c.config.BuildDialConfig(ctx)
+	cfg := c.cfg.BuildDialConfig(ctx)
 	cfg.HelloID = c.resolveHelloID()
-	cfg.InterfaceName = c.config.Network.InterfaceName
-	cfg.SocketMark = c.config.Network.SocketMark
+	cfg.InterfaceName = c.cfg.Network.InterfaceName
+	cfg.SocketMark = c.cfg.Network.SocketMark
 
 	cfg.ApplyRequestOverrides(reqCfg)
 

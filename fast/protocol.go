@@ -206,7 +206,7 @@ func parseMaxAge(headerVal string) time.Duration {
 }
 
 func (c *Client) resolveALPNMode(ctx context.Context, fastReq *fasthttp.Request) string {
-	return resolveALPNMode(ctx, &c.config, fastReq, c.protocolState.altSvc)
+	return resolveALPNMode(ctx, &c.cfg, fastReq, c.protocolState.altSvc)
 }
 
 func resolveALPNMode(ctx context.Context, cfg *aoni.Config, fastReq *fasthttp.Request, altSvc *altSvcCache) string {
@@ -254,11 +254,11 @@ func resolveALPNMode(ctx context.Context, cfg *aoni.Config, fastReq *fasthttp.Re
 func (c *Client) getH3Client() *h3engine.Client {
 	c.protocolState.h3Once.Do(func() {
 		tlsCfg := &tls.Config{
-			InsecureSkipVerify: c.config.Engine.InsecureSkipVerify, //nolint:gosec
-			ClientSessionCache: netutil.ResolveStdSessionCache(c.config.Fingerprint.SessionCache),
+			InsecureSkipVerify: c.cfg.Engine.InsecureSkipVerify, //nolint:gosec
+			ClientSessionCache: netutil.ResolveStdSessionCache(c.cfg.Fingerprint.SessionCache),
 		}
 
-		if spec := c.config.Fingerprint.TLSQUICClientHelloSpec; spec != nil && len(spec.CipherSuites) > 0 {
+		if spec := c.cfg.Fingerprint.TLSQUICClientHelloSpec; spec != nil && len(spec.CipherSuites) > 0 {
 			tlsCfg.CipherSuites = spec.CipherSuites
 		}
 
@@ -266,7 +266,7 @@ func (c *Client) getH3Client() *h3engine.Client {
 			EnableDatagrams: true,
 		}
 
-		if h3s := c.config.Fingerprint.H3Settings; h3s != nil {
+		if h3s := c.cfg.Fingerprint.H3Settings; h3s != nil {
 			quicCfg.InitialStreamReceiveWindow = h3s.InitialStreamReceiveWindow
 			quicCfg.MaxStreamReceiveWindow = h3s.MaxStreamReceiveWindow
 			quicCfg.InitialConnectionReceiveWindow = h3s.InitialConnectionReceiveWindow
@@ -302,8 +302,8 @@ func (c *Client) getH2Client(host string) *h2engine.Client {
 	}
 
 	var h2s *h2engine.Settings
-	if c.config.Fingerprint.H2Settings != nil {
-		s := c.config.Fingerprint.H2Settings
+	if c.cfg.Fingerprint.H2Settings != nil {
+		s := c.cfg.Fingerprint.H2Settings
 		h2s = &h2engine.Settings{}
 		h2s.SetHeaderTableSize(s.HeaderTableSize)
 		h2s.SetPush(s.EnablePush == 1)
@@ -314,15 +314,15 @@ func (c *Client) getH2Client(host string) *h2engine.Client {
 	}
 
 	var onRTTCallback func(time.Duration)
-	if c.config.Network.DynamicHedging != nil && c.config.Network.DynamicHedging.Tracker != nil {
-		tracker := c.config.Network.DynamicHedging.Tracker
+	if c.cfg.Network.DynamicHedging != nil && c.cfg.Network.DynamicHedging.Tracker != nil {
+		tracker := c.cfg.Network.DynamicHedging.Tracker
 		onRTTCallback = func(rtt time.Duration) {
 			tracker.Record(rtt)
 		}
 	}
 
 	var pushHandler func(pushReq *fasthttp.Request, pushResp *fasthttp.Response)
-	if cacheCfg := c.config.Defaults.Pipeline.Cache; cacheCfg != nil && cacheCfg.Store != nil {
+	if cacheCfg := c.cfg.Defaults.Pipeline.Cache; cacheCfg != nil && cacheCfg.Store != nil {
 		pushHandler = func(pushReq *fasthttp.Request, pushResp *fasthttp.Response) {
 			c.cachePushedResponse(pushReq, pushResp, cacheCfg)
 		}
@@ -335,8 +335,8 @@ func (c *Client) getH2Client(host string) *h2engine.Client {
 		Settings:      h2s,
 	})
 
-	if len(c.config.Fingerprint.HeaderOrder) > 0 {
-		cl.SetOrderedHeaders(c.config.Fingerprint.HeaderOrder)
+	if len(c.cfg.Fingerprint.HeaderOrder) > 0 {
+		cl.SetOrderedHeaders(c.cfg.Fingerprint.HeaderOrder)
 	}
 
 	c.protocolState.h2Clients[host] = cl
