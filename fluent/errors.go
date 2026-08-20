@@ -7,6 +7,8 @@ package fluent
 import (
 	"errors"
 	"strconv"
+
+	"github.com/lemon4ksan/aoni"
 )
 
 var (
@@ -49,3 +51,12 @@ func (e *Error) Error() string {
 }
 
 func (e *Error) Unwrap() error { return e.Err }
+
+// Category categorizes the HTTP status code into RFC 9110 status classes.
+func (e *Error) Category() aoni.HTTPStatusCategory {
+	if e == nil || e.Code < 100 || e.Code > 599 {
+		return aoni.CategoryUnknown
+	}
+
+	return aoni.HTTPStatusCategory(e.Code / 100)
+}

@@ -6,7 +6,7 @@ package fluent
 
 import (
 	"context"
-	stdio "io"
+	"io"
 	"maps"
 	"net/http"
 	"net/url"
@@ -25,7 +25,7 @@ import (
 	"github.com/lemon4ksan/aoni/codec"
 	"github.com/lemon4ksan/aoni/codec/decode"
 	"github.com/lemon4ksan/aoni/internal/core"
-	"github.com/lemon4ksan/aoni/internal/io"
+	aio "github.com/lemon4ksan/aoni/internal/io"
 	"github.com/lemon4ksan/aoni/middleware"
 	"github.com/lemon4ksan/aoni/mod"
 	"github.com/lemon4ksan/aoni/netutil"
@@ -106,7 +106,7 @@ type Request struct {
 	queryParams       url.Values
 	pathParams        map[string]string
 	formFields        map[string]string
-	formFiles         map[string]stdio.Reader
+	formFiles         map[string]io.Reader
 	expectedStatuses  []int
 	downloadProgress  aoni.ProgressFunc
 	uploadProgress    aoni.ProgressFunc
@@ -288,9 +288,9 @@ func (r *Request) SetFormField(key, value string) *Request {
 }
 
 // SetFormFile attaches a stream reader as a file part in multipart/form-data requests.
-func (r *Request) SetFormFile(fieldname string, reader stdio.Reader) *Request {
+func (r *Request) SetFormFile(fieldname string, reader io.Reader) *Request {
 	if r.formFiles == nil {
-		r.formFiles = make(map[string]stdio.Reader, 2)
+		r.formFiles = make(map[string]io.Reader, 2)
 	}
 
 	r.formFiles[fieldname] = reader
@@ -682,7 +682,7 @@ func (r *Request) appendQueryAndBodyModifiers(mods []aoni.RequestModifier) []aon
 	case r.yamlBody != nil:
 		mods = append(mods, mod.WithYAMLBody(r.yamlBody))
 	case r.body != nil:
-		if reader, ok := r.body.(stdio.Reader); ok {
+		if reader, ok := r.body.(io.Reader); ok {
 			mods = append(mods, mod.WithBody(reader))
 		} else {
 			mods = append(mods, mod.WithJSONBody(r.body))
@@ -829,7 +829,7 @@ func writeDownloadedStream(outputFile string, resp *http.Response, previousSize 
 	}
 	defer outFile.Close()
 
-	_, err = io.CopyZeroAlloc(outFile, resp.Body)
+	_, err = aio.CopyZeroAlloc(outFile, resp.Body)
 
 	return err
 }

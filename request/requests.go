@@ -8,7 +8,7 @@ package request
 import (
 	"context"
 	"errors"
-	stdio "io"
+	"io"
 	"net/http"
 	"reflect"
 
@@ -41,18 +41,9 @@ type Unwrapper interface {
 }
 
 // UnwrapClient peels away all [Unwrapper] decorator layers from r and returns the innermost [*aoni.Client].
-func UnwrapClient(r Requester) (c *aoni.Client) {
-	for {
-		if client, ok := r.(*aoni.Client); ok {
-			return client
-		}
-
-		u, ok := r.(Unwrapper)
-		if !ok {
-			break
-		}
-
-		r = u.Unwrap()
+func UnwrapClient(r Requester) *aoni.Client {
+	if client, ok := aoni.UnwrapAs[*aoni.Client](r); ok {
+		return client
 	}
 
 	return nil
@@ -740,7 +731,7 @@ const stackModCapacity = 16
 
 func withJSONBodyMods(
 	stackBuf *[stackModCapacity]aoni.RequestModifier,
-	bodyReader stdio.Reader,
+	bodyReader io.Reader,
 	mods []aoni.RequestModifier,
 ) []aoni.RequestModifier {
 	total := 3 + len(mods)

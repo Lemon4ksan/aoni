@@ -10,7 +10,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	stdio "io"
+	"io"
 	"mime"
 	"net/http"
 	"net/http/httputil"
@@ -22,7 +22,7 @@ import (
 	"github.com/lemon4ksan/aoni"
 	"github.com/lemon4ksan/aoni/codec/decode"
 	"github.com/lemon4ksan/aoni/internal/core"
-	"github.com/lemon4ksan/aoni/internal/io"
+	aio "github.com/lemon4ksan/aoni/internal/io"
 	"github.com/lemon4ksan/aoni/internal/requestutil"
 	"github.com/lemon4ksan/aoni/resiliency/challenge"
 	"github.com/lemon4ksan/aoni/telemetry"
@@ -99,7 +99,7 @@ func isStructuredDataMIME(contentType string) bool {
 
 // ResolvePeekableReader returns a peekable reader for the response body.
 func ResolvePeekableReader(resp *http.Response) *bufio.Reader {
-	if b, ok := resp.Body.(*io.BufioReadCloser); ok {
+	if b, ok := resp.Body.(*aio.BufioReadCloser); ok {
 		return b.Reader
 	}
 
@@ -108,7 +108,7 @@ func ResolvePeekableReader(resp *http.Response) *bufio.Reader {
 	}
 
 	peekable := bufio.NewReader(resp.Body)
-	resp.Body = &io.BufioReadCloser{
+	resp.Body = &aio.BufioReadCloser{
 		Reader: peekable,
 		Closer: resp.Body,
 	}
@@ -179,7 +179,7 @@ func (responseDecoder) SetCapturer(resp *http.Response) bool {
 
 // DecodeAPIError converts non-2xx HTTP responses into structured [*aoni.APIError] instances.
 func (responseDecoder) DecodeAPIError(resp *http.Response) error {
-	bodyBytes, _ := stdio.ReadAll(stdio.LimitReader(resp.Body, 1024*1024))
+	bodyBytes, _ := io.ReadAll(io.LimitReader(resp.Body, 1024*1024))
 	apiErr := &aoni.APIError{StatusCode: resp.StatusCode, Body: bodyBytes}
 
 	if resp.Request != nil {
@@ -205,7 +205,7 @@ func (responseDecoder) DecodeSuccess(
 		br.SetData(target)
 
 		if err := decoder.Decode(resp.Body, br); err != nil {
-			if errors.Is(err, stdio.EOF) {
+			if errors.Is(err, io.EOF) {
 				return nil
 			}
 
@@ -220,7 +220,7 @@ func (responseDecoder) DecodeSuccess(
 	}
 
 	err := decoder.Decode(resp.Body, target)
-	if errors.Is(err, stdio.EOF) {
+	if errors.Is(err, io.EOF) {
 		return nil
 	}
 
@@ -264,7 +264,7 @@ func (responseDecoder) dumpMultipart(req *http.Request) []byte {
 		return nil
 	}
 
-	bodyBytes, _ := stdio.ReadAll(stdio.LimitReader(bodyRc, 256*1024))
+	bodyBytes, _ := io.ReadAll(io.LimitReader(bodyRc, 256*1024))
 	_ = bodyRc.Close()
 
 	return []byte(
@@ -296,7 +296,7 @@ func (responseDecoder) checkMIMEType(resp *http.Response) error {
 // checkHTML peeks into the response body stream to detect HTML error or Cloudflare challenge pages.
 func (responseDecoder) checkHTML(buf *bufio.Reader) error {
 	peekBytes, err := buf.Peek(128)
-	if (err != nil && err != stdio.EOF) || len(peekBytes) == 0 {
+	if (err != nil && err != io.EOF) || len(peekBytes) == 0 {
 		return nil
 	}
 
@@ -350,7 +350,7 @@ func HandleResponse(resp *http.Response, target any, requester Requester) error 
 	}
 
 	if target == nil || resp.StatusCode == http.StatusNoContent {
-		_, _ = io.CopyZeroAlloc(stdio.Discard, resp.Body)
+		_, _ = aio.CopyZeroAlloc(io.Discard, resp.Body)
 		return nil
 	}
 
@@ -425,12 +425,12 @@ func resolveDecoder(resp *http.Response) decode.Decoder {
 }
 
 // validateAndMarshal validates that payload is not a modifier and encodes it to JSON if required.
-func validateAndMarshal(payload any) (stdio.Reader, error) {
+func validateAndMarshal(payload any) (io.Reader, error) {
 	if _, ok := payload.(aoni.RequestModifier); ok {
 		return nil, ErrModifierAsBody
 	}
 
-	if r, ok := payload.(stdio.Reader); ok {
+	if r, ok := payload.(io.Reader); ok {
 		return r, nil
 	}
 
