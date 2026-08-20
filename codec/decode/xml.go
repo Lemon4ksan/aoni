@@ -6,7 +6,7 @@ package decode
 
 import (
 	"encoding/xml"
-	stdio "io"
+	"io"
 )
 
 // bufferedBytesReader is implemented by response body wrappers that expose pre-buffered
@@ -20,14 +20,14 @@ type bufferedBytesReader interface {
 // xmlDecoder unmarshals XML response streams into Go target structs.
 type xmlDecoder struct{}
 
-func (xmlDecoder) Decode(reader stdio.Reader, target any) error {
+func (xmlDecoder) Decode(reader io.Reader, target any) error {
 	return xml.NewDecoder(StripBOM(reader)).Decode(target)
 }
 
 // rawDecoder reads raw response body payload bytes directly into a *[]byte target.
 type rawDecoder struct{}
 
-func (rawDecoder) Decode(r stdio.Reader, target any) error {
+func (rawDecoder) Decode(r io.Reader, target any) error {
 	outPtr, ok := target.(*[]byte)
 	if !ok {
 		return &Error{Format: "raw", Target: typeName(target), Err: ErrInvalidRawTarget}
@@ -51,7 +51,7 @@ func (rawDecoder) Decode(r stdio.Reader, target any) error {
 		}
 	}
 
-	rawBytes, err := stdio.ReadAll(r)
+	rawBytes, err := io.ReadAll(r)
 	if err != nil {
 		return &Error{Format: "raw", Target: typeName(target), Err: err}
 	}

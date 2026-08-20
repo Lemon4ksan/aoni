@@ -9,7 +9,7 @@ import (
 	"bytes"
 	"encoding/base64"
 	"errors"
-	stdio "io"
+	"io"
 
 	"github.com/klauspost/compress/gzip"
 	"github.com/lemon4ksan/foundation/silicon/bytesconv"
@@ -20,7 +20,7 @@ import (
 
 type grpcWebDecoder struct{}
 
-func (grpcWebDecoder) Decode(r stdio.Reader, target any) error {
+func (grpcWebDecoder) Decode(r io.Reader, target any) error {
 	msg, err := castOrResolveProto(target)
 	if err != nil {
 		return err
@@ -28,7 +28,7 @@ func (grpcWebDecoder) Decode(r stdio.Reader, target any) error {
 
 	br := bufio.NewReader(r)
 
-	var reader stdio.Reader = br
+	var reader io.Reader = br
 	if peek, err := br.Peek(5); err == nil && IsBase64Header(peek) {
 		reader = base64.NewDecoder(base64.StdEncoding, br)
 	}
@@ -37,14 +37,14 @@ func (grpcWebDecoder) Decode(r stdio.Reader, target any) error {
 }
 
 // readGRPCWebFrames sequentially reads 5-byte length-prefixed frames from reader and unmarshals payload data into msg.
-func readGRPCWebFrames(reader stdio.Reader, msg proto.Message) error {
+func readGRPCWebFrames(reader io.Reader, msg proto.Message) error {
 	var payloadRead bool
 
 	framer := transport.NewLengthPrefixedFramer(0)
 	for {
 		flags, payload, err := framer.ReadFrame(reader)
 		if err != nil {
-			if errors.Is(err, stdio.EOF) {
+			if errors.Is(err, io.EOF) {
 				return nil
 			}
 
@@ -106,7 +106,7 @@ func decompressProtoPayload(payload []byte) ([]byte, error) {
 		return nil, &GRPCWebError{Op: "decompress", Err: err}
 	}
 
-	decompressed, err := stdio.ReadAll(gzReader)
+	decompressed, err := io.ReadAll(gzReader)
 	_ = gzReader.Close()
 
 	if err != nil {

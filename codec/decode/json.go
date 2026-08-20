@@ -6,7 +6,7 @@ package decode
 
 import (
 	"encoding/json"
-	stdio "io"
+	"io"
 )
 
 // JSONDecoderConfig configures parsing options for JSON response streams.
@@ -22,7 +22,7 @@ type customJSONDecoder struct {
 	cfg JSONDecoderConfig
 }
 
-func (d customJSONDecoder) Decode(reader stdio.Reader, target any) error {
+func (d customJSONDecoder) Decode(reader io.Reader, target any) error {
 	dec := json.NewDecoder(reader)
 	if d.cfg.DisallowUnknownFields {
 		dec.DisallowUnknownFields()
@@ -43,6 +43,6 @@ func NewJSONDecoder(cfg JSONDecoderConfig) Decoder {
 // jsonDecoder parses response payload streams as standard JSON using [json.NewDecoder].
 type jsonDecoder struct{}
 
-func (jsonDecoder) Decode(reader stdio.Reader, target any) error {
+func (jsonDecoder) Decode(reader io.Reader, target any) error {
 	return json.NewDecoder(reader).Decode(target)
 }

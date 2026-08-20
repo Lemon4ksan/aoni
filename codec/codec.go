@@ -7,7 +7,7 @@ package codec
 
 import (
 	"errors"
-	stdio "io"
+	"io"
 
 	"github.com/lemon4ksan/foundation/generic"
 	"google.golang.org/protobuf/proto"
@@ -129,47 +129,47 @@ var (
 )
 
 // To unmarshals the response payload stream from reader into a newly allocated instance of T using decoder.
-func To[T any](reader stdio.Reader, decoder Decoder) (T, error) {
+func To[T any](reader io.Reader, decoder Decoder) (T, error) {
 	return decode.To[T](reader, decoder)
 }
 
 // Result unmarshals the response stream from reader into a Swift-inspired [generic.Result].
-func Result[T any](reader stdio.Reader, decoder Decoder) generic.Result[T] {
+func Result[T any](reader io.Reader, decoder Decoder) generic.Result[T] {
 	return decode.Result[T](reader, decoder)
 }
 
 // JSON parses response stream bytes into a typed instance of T.
-func JSON[T any](reader stdio.Reader) (T, error) {
+func JSON[T any](reader io.Reader) (T, error) {
 	return decode.JSON[T](reader)
 }
 
 // XML parses XML response stream bytes into a typed instance of T.
-func XML[T any](reader stdio.Reader) (T, error) {
+func XML[T any](reader io.Reader) (T, error) {
 	return decode.XML[T](reader)
 }
 
 // YAML parses YAML response stream bytes into a typed instance of T.
-func YAML[T any](reader stdio.Reader) (T, error) {
+func YAML[T any](reader io.Reader) (T, error) {
 	return decode.YAML[T](reader)
 }
 
 // Proto parses binary Protocol Buffer stream bytes into a typed [proto.Message] instance.
-func Proto[T any](reader stdio.Reader) (T, error) {
+func Proto[T any](reader io.Reader) (T, error) {
 	return decode.Proto[T](reader)
 }
 
 // GRPCWeb extracts and parses Protobuf payloads from 5-byte gRPC-Web framed streams.
-func GRPCWeb[T any](reader stdio.Reader) (T, error) {
+func GRPCWeb[T any](reader io.Reader) (T, error) {
 	return decode.GRPCWeb[T](reader)
 }
 
 // ProtoJSON parses JSON response streams into typed Protobuf messages via protojson.
-func ProtoJSON[T any](reader stdio.Reader) (T, error) {
+func ProtoJSON[T any](reader io.Reader) (T, error) {
 	return decode.ProtoJSON[T](reader)
 }
 
 // Raw reads the entire response stream into a raw byte slice.
-func Raw(reader stdio.Reader) ([]byte, error) {
+func Raw(reader io.Reader) ([]byte, error) {
 	return decode.Raw(reader)
 }
 

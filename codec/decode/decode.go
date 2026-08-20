@@ -7,7 +7,7 @@ package decode
 import (
 	"bufio"
 	"bytes"
-	stdio "io"
+	"io"
 	"reflect"
 	"strings"
 
@@ -43,11 +43,11 @@ var (
 
 // Decoder defines the contract for unmarshaling response payload streams into Go structures.
 type Decoder interface {
-	Decode(reader stdio.Reader, target any) error
+	Decode(reader io.Reader, target any) error
 }
 
 // DecodeTo decodes the payload from reader into a newly allocated instance of Target.
-func DecodeTo[Target any](d Decoder, reader stdio.Reader) (Target, error) {
+func DecodeTo[Target any](d Decoder, reader io.Reader) (Target, error) {
 	var target Target
 
 	err := d.Decode(reader, &target)
@@ -56,7 +56,7 @@ func DecodeTo[Target any](d Decoder, reader stdio.Reader) (Target, error) {
 }
 
 // DecodeResult decodes the payload from reader into a Swift-inspired [generic.Result].
-func DecodeResult[Target any](d Decoder, reader stdio.Reader) generic.Result[Target] {
+func DecodeResult[Target any](d Decoder, reader io.Reader) generic.Result[Target] {
 	var target Target
 	if err := d.Decode(reader, &target); err != nil {
 		return generic.Failure[Target](err)
@@ -66,15 +66,15 @@ func DecodeResult[Target any](d Decoder, reader stdio.Reader) generic.Result[Tar
 }
 
 // Result decodes the payload from reader into a Swift-inspired [generic.Result] using d.
-func Result[Target any](reader stdio.Reader, d Decoder) generic.Result[Target] {
+func Result[Target any](reader io.Reader, d Decoder) generic.Result[Target] {
 	return DecodeResult[Target](d, reader)
 }
 
 // DecoderFunc adapts a plain function signature to satisfy the [Decoder] interface.
-type DecoderFunc func(reader stdio.Reader, target any) error
+type DecoderFunc func(reader io.Reader, target any) error
 
 // Decode executes the underlying function to parse reader data into target.
-func (f DecoderFunc) Decode(reader stdio.Reader, target any) error {
+func (f DecoderFunc) Decode(reader io.Reader, target any) error {
 	return f(reader, target)
 }
 
@@ -83,8 +83,8 @@ type limitDecoder struct {
 	maxBytes int64
 }
 
-func (l limitDecoder) Decode(reader stdio.Reader, target any) error {
-	return l.decoder.Decode(stdio.LimitReader(reader, l.maxBytes), target)
+func (l limitDecoder) Decode(reader io.Reader, target any) error {
+	return l.decoder.Decode(io.LimitReader(reader, l.maxBytes), target)
 }
 
 // LimitDecoder caps response payload input stream consumption at maxBytes.
@@ -131,12 +131,12 @@ func LookupDecoder(contentType string) Decoder {
 }
 
 // ByContentType selects a registered decoder matching the MIME type in contentType.
-func ByContentType(reader stdio.Reader, contentType string, target any) error {
+func ByContentType(reader io.Reader, contentType string, target any) error {
 	return LookupDecoder(contentType).Decode(reader, target)
 }
 
 // To allocates a new instance of T and decodes payload data into it.
-func To[T any](reader stdio.Reader, decoder Decoder) (T, error) {
+func To[T any](reader io.Reader, decoder Decoder) (T, error) {
 	var target T
 	if err := decoder.Decode(reader, &target); err != nil {
 		var zero T
@@ -153,7 +153,7 @@ func IsRawDecoder(decoder Decoder) bool {
 }
 
 // StripBOM detects and discards UTF-8, UTF-16LE, and UTF-16BE Byte Order Marks (BOM) from reader.
-func StripBOM(reader stdio.Reader) stdio.Reader {
+func StripBOM(reader io.Reader) io.Reader {
 	br, ok := reader.(*bufio.Reader)
 	if !ok {
 		br = bufio.NewReader(reader)
@@ -176,37 +176,37 @@ func StripBOM(reader stdio.Reader) stdio.Reader {
 }
 
 // JSON reads from reader and unmarshals JSON data into a newly allocated T.
-func JSON[T any](reader stdio.Reader) (T, error) {
+func JSON[T any](reader io.Reader) (T, error) {
 	return To[T](reader, JSONDecoder)
 }
 
 // XML reads from reader and unmarshals XML data into a newly allocated T.
-func XML[T any](reader stdio.Reader) (T, error) {
+func XML[T any](reader io.Reader) (T, error) {
 	return To[T](reader, XMLDecoder)
 }
 
 // YAML reads from reader and unmarshals YAML data into a newly allocated T.
-func YAML[T any](reader stdio.Reader) (T, error) {
+func YAML[T any](reader io.Reader) (T, error) {
 	return To[T](reader, YAMLDecoder)
 }
 
 // Proto reads from reader and unmarshals binary Protocol Buffer data into a newly allocated T.
-func Proto[T any](reader stdio.Reader) (T, error) {
+func Proto[T any](reader io.Reader) (T, error) {
 	return To[T](reader, ProtoDecoder)
 }
 
 // GRPCWeb reads from reader and unmarshals gRPC-Web framed data into a newly allocated T.
-func GRPCWeb[T any](reader stdio.Reader) (T, error) {
+func GRPCWeb[T any](reader io.Reader) (T, error) {
 	return To[T](reader, GRPCWebDecoder)
 }
 
 // ProtoJSON reads from reader and unmarshals JSON data into a newly allocated Protobuf message T.
-func ProtoJSON[T any](reader stdio.Reader) (T, error) {
+func ProtoJSON[T any](reader io.Reader) (T, error) {
 	return To[T](reader, ProtoJSONDecoder)
 }
 
 // Raw reads the entire response stream into a raw byte slice.
-func Raw(reader stdio.Reader) ([]byte, error) {
+func Raw(reader io.Reader) ([]byte, error) {
 	var target []byte
 
 	err := RawDecoder.Decode(reader, &target)

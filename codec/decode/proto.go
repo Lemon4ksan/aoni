@@ -6,20 +6,20 @@ package decode
 
 import (
 	"bytes"
-	stdio "io"
+	"io"
 	"reflect"
 
 	"google.golang.org/protobuf/encoding/protojson"
 	"google.golang.org/protobuf/proto"
 
-	"github.com/lemon4ksan/aoni/internal/io"
+	aio "github.com/lemon4ksan/aoni/internal/io"
 	"github.com/lemon4ksan/aoni/internal/pipeline"
 )
 
 // protoDecoder unmarshals binary Protocol Buffer response streams into [proto.Message] targets.
 type protoDecoder struct{}
 
-func (protoDecoder) Decode(r stdio.Reader, target any) error {
+func (protoDecoder) Decode(r io.Reader, target any) error {
 	msg, err := castOrResolveProto(target)
 	if err != nil {
 		return err
@@ -41,7 +41,7 @@ func (protoDecoder) Decode(r stdio.Reader, target any) error {
 // protoJSONDecoder unmarshals JSON response streams into [proto.Message] targets using protojson options.
 type protoJSONDecoder struct{}
 
-func (protoJSONDecoder) Decode(r stdio.Reader, target any) error {
+func (protoJSONDecoder) Decode(r io.Reader, target any) error {
 	msg, err := castOrResolveProto(target)
 	if err != nil {
 		return err
@@ -63,10 +63,10 @@ func (protoJSONDecoder) Decode(r stdio.Reader, target any) error {
 }
 
 // copyToBuffer streams r contents into a pooled byte buffer using zero-allocation copying.
-func copyToBuffer(r stdio.Reader) (*bytes.Buffer, error) {
+func copyToBuffer(r io.Reader) (*bytes.Buffer, error) {
 	buf := pipeline.GlobalBufferPool.Get()
 
-	if _, err := io.CopyZeroAlloc(buf, r); err != nil {
+	if _, err := aio.CopyZeroAlloc(buf, r); err != nil {
 		pipeline.GlobalBufferPool.Put(buf)
 		return nil, err
 	}

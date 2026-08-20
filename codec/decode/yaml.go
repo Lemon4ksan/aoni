@@ -5,7 +5,7 @@
 package decode
 
 import (
-	stdio "io"
+	"io"
 
 	"gopkg.in/yaml.v3"
 )
@@ -21,7 +21,7 @@ type customYAMLDecoder struct {
 	cfg YAMLDecoderConfig
 }
 
-func (d customYAMLDecoder) Decode(reader stdio.Reader, target any) error {
+func (d customYAMLDecoder) Decode(reader io.Reader, target any) error {
 	dec := yaml.NewDecoder(StripBOM(reader))
 	dec.KnownFields(d.cfg.KnownFields)
 
@@ -36,6 +36,6 @@ func NewYAMLDecoder(cfg YAMLDecoderConfig) Decoder {
 // yamlDecoder unmarshals YAML response streams into Go target structs.
 type yamlDecoder struct{}
 
-func (yamlDecoder) Decode(reader stdio.Reader, target any) error {
+func (yamlDecoder) Decode(reader io.Reader, target any) error {
 	return yaml.NewDecoder(StripBOM(reader)).Decode(target)
 }
