@@ -46,16 +46,17 @@ import (
 // Methods such as With() and Clone() return new Client instances with isolated configuration DTOs
 // and memory structures, ensuring zero shared-state data races between concurrent threads.
 type Client struct {
-	engine       HTTPDoer
-	pipeline     *pipeline.Pipeline[*http.Request, *http.Response]
-	engineConfig EngineConfig
-	defaults     ClientDefaults
-	network      NetworkConfig
-	fingerprint  FingerprintConfig
-	powerWatcher *power.Watcher
-	referer      *pipeline.RefererState
-	prepared     pipeline.PreparedConfig
-	coreEngine   *pipeline.Engine
+	engine            HTTPDoer
+	pipeline          *pipeline.Pipeline[*http.Request, *http.Response]
+	engineConfig      EngineConfig
+	defaults          ClientDefaults
+	network           NetworkConfig
+	fingerprint       FingerprintConfig
+	powerWatcher      *power.Watcher
+	referer           *pipeline.RefererState
+	prepared          pipeline.PreparedConfig
+	coreEngine        *pipeline.Engine
+	baremetalEligible bool
 }
 
 // NewClient instantiates a new thread-safe [Client] wrapping the specified doer engine.
@@ -142,10 +143,18 @@ func (c *Client) Request(
 	// Checked BEFORE any allocation. When the client has no pipeline rules, hooks,
 	// modifiers, or per-request config we bypass AcquireTx, NewStdRequest and the
 	// full pipeline.Execute and route directly to the underlying engine.
-	if len(mods) == 0 && c.isBaremetalStaticEligible() && pipeline.GetRequestConfig(ctx) == nil {
+	if c.baremetalEligible && len(mods) == 0 && pipeline.GetRequestConfig(ctx) == nil {
 		return c.doBaremetal(ctx, method, path)
 	}
 
+	return c.doPipeline(ctx, method, path, mods)
+}
+
+func (c *Client) doPipeline(
+	ctx context.Context,
+	method, path string,
+	mods []RequestModifier,
+) (*http.Response, error) {
 	cfg := pipeline.GetRequestConfig(ctx)
 	if cfg != nil {
 		c.applyRequestConfigDefaults(cfg)
@@ -482,8 +491,8 @@ func (c *Client) needsRequestConfig() bool {
 		c.network.ProxyAddr != nil
 }
 
-// isBaremetalStaticEligible determines if the client configuration permits fast 0-alloc baremetal execution.
-func (c *Client) isBaremetalStaticEligible() bool {
+// computeBaremetalEligible determines if the client configuration permits fast 0-alloc baremetal execution.
+func (c *Client) computeBaremetalEligible() bool {
 	if len(c.defaults.DefaultMods) > 0 {
 		return false
 	}
@@ -529,11 +538,14 @@ func (c *Client) resolveURL(path string) (*url.URL, error) {
 		return &clone, nil
 	}
 
-	if len(path) > 0 && path[0] == '/' && c.prepared.BaseURL != nil {
+	if len(path) > 0 && path[0] == '/' && c.prepared.BaseURL != nil &&
+		(c.prepared.BaseURL.Path == "" || c.prepared.BaseURL.Path == "/") {
 		return &url.URL{
-			Scheme: c.prepared.BaseURL.Scheme,
-			Host:   c.prepared.BaseURL.Host,
-			Path:   path,
+			Scheme:   c.prepared.BaseURL.Scheme,
+			Host:     c.prepared.BaseURL.Host,
+			Path:     path,
+			User:     c.prepared.BaseURL.User,
+			RawQuery: c.prepared.BaseURL.RawQuery,
 		}, nil
 	}
 
@@ -643,6 +655,7 @@ func (c *Client) applyConfig(cfg Config) {
 	c.engineConfig = cfg.Engine
 	c.coreEngine = pipeline.NewEngine(cfg.Defaults.BaseURL, cfg.Defaults.Headers)
 	c.prepared = c.coreEngine.Prepared
+	c.baremetalEligible = c.computeBaremetalEligible()
 
 	applyEngineConfig(c, cfg.Engine)
 	c.applyDialers(c.Transport())
