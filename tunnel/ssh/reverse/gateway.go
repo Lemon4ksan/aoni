@@ -55,11 +55,15 @@ func (g *Gateway) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 
-	resp, err := http.ReadResponse(bufioReaderFromConn(targetConn), req)
+	br := acquireBufioReader(targetConn)
+	resp, err := http.ReadResponse(br, req)
+	releaseBufioReader(br)
+
 	if err != nil {
 		http.Error(w, "aoni reverse tunnel: 502 Bad Gateway (Response Read Failed)", http.StatusBadGateway)
 		return
 	}
+
 	defer resp.Body.Close()
 
 	copyHeader(w.Header(), resp.Header)
@@ -121,6 +125,24 @@ func copyHeader(dst, src http.Header) {
 	}
 }
 
-func bufioReaderFromConn(conn net.Conn) *bufio.Reader {
-	return bufio.NewReaderSize(conn, 32*1024)
+var bufioReaderPool = generic.NewPool(func() *bufio.Reader {
+	return bufio.NewReaderSize(nil, 32*1024)
+})
+
+func acquireBufioReader(conn net.Conn) *bufio.Reader {
+	br := bufioReaderPool.Get()
+	if br == nil {
+		return bufio.NewReaderSize(conn, 32*1024)
+	}
+
+	br.Reset(conn)
+
+	return br
+}
+
+func releaseBufioReader(br *bufio.Reader) {
+	if br != nil {
+		br.Reset(nil)
+		bufioReaderPool.Put(br)
+	}
 }

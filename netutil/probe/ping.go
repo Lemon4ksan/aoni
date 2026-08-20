@@ -6,13 +6,13 @@ package probe
 
 import (
 	"context"
-	"crypto/rand"
 	"encoding/binary"
 	"fmt"
 	"net"
 	"os"
 	"time"
 
+	"github.com/lemon4ksan/foundation/silicon/rand"
 	"golang.org/x/net/icmp"
 	"golang.org/x/net/ipv4"
 	"golang.org/x/net/ipv6"
@@ -184,9 +184,5 @@ func isEchoReply(typ icmp.Type) bool {
 
 // generateRandomSeq produces a random 16-bit sequence integer for ICMP matching.
 func generateRandomSeq() int {
-	var b [2]byte
-
-	_, _ = rand.Read(b[:])
-
-	return int(binary.BigEndian.Uint16(b[:]))
+	return int(rand.Uint32() & 0xFFFF)
 }

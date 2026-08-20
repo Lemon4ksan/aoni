@@ -11,6 +11,8 @@ import (
 	"strings"
 )
 
+const maxEarlyHintsPreconnect = 4
+
 // ProcessEarlyHints inspects HTTP 103 Early Hints response headers and prewarms connections
 // for target origins declared in 'Link: <url>; rel=preconnect' headers.
 func ProcessEarlyHints(
@@ -30,6 +32,10 @@ func ProcessEarlyHints(
 	}
 
 	targets := extractPreconnectOrigins(linkHeaders)
+	if len(targets) > maxEarlyHintsPreconnect {
+		targets = targets[:maxEarlyHintsPreconnect]
+	}
+
 	for _, target := range targets {
 		go prewarmFn(ctx, target)
 	}

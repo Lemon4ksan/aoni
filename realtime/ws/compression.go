@@ -25,23 +25,37 @@ var (
 		w, _ := flate.NewWriter(nil, flate.DefaultCompression)
 		return w
 	})
+
+	compressBufferPool = generic.NewPool(func() *bytes.Buffer {
+		return bytes.NewBuffer(make([]byte, 0, 4096))
+	})
 )
 
 // compressNoContextTakeover compresses payload bytes per RFC 7692 Section 7.2.1,
 // stripping trailing 0x00 0x00 0xFF 0xFF bytes after flushing.
 func compressNoContextTakeover(src []byte) ([]byte, error) {
-	var buf bytes.Buffer
+	buf := compressBufferPool.Get()
+	if buf == nil {
+		buf = bytes.NewBuffer(make([]byte, 0, max(len(src), 1024)))
+	} else {
+		buf.Reset()
+	}
+
+	defer func() {
+		buf.Reset()
+		compressBufferPool.Put(buf)
+	}()
 
 	fw := flateWriterPool.Get()
 	if fw == nil {
 		var err error
 
-		fw, err = flate.NewWriter(&buf, flate.DefaultCompression)
+		fw, err = flate.NewWriter(buf, flate.DefaultCompression)
 		if err != nil {
 			return nil, fmt.Errorf("%w: %w", ErrFlateCompressFailed, err)
 		}
 	} else {
-		fw.Reset(&buf)
+		fw.Reset(buf)
 	}
 
 	defer flateWriterPool.Put(fw)
@@ -54,12 +68,15 @@ func compressNoContextTakeover(src []byte) ([]byte, error) {
 		return nil, fmt.Errorf("%w: %w", ErrFlateCompressFailed, err)
 	}
 
-	compressed := buf.Bytes()
-	if len(compressed) >= 4 {
-		compressed = compressed[:len(compressed)-4]
+	raw := buf.Bytes()
+	if len(raw) >= 4 {
+		raw = raw[:len(raw)-4]
 	}
 
-	return compressed, nil
+	out := make([]byte, len(raw))
+	copy(out, raw)
+
+	return out, nil
 }
 
 // decompressNoContextTakeover decompresses payload bytes per RFC 7692 Section 7.2.2,

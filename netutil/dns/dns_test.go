@@ -248,12 +248,10 @@ func TestInMemoryDNSCache_ExpiredLookup(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, "10.0.0.1", ips1[0].IP.String())
 
-	cache.mu.Lock()
-	cache.cache["expired.test"] = dnsCacheEntry{
+	cache.cache.Store("expired.test", dnsCacheEntry{
 		ips:    ips1,
 		expiry: time.Now().Add(-10 * time.Minute),
-	}
-	cache.mu.Unlock()
+	})
 
 	ips2, err := cache.LookupIPAddr(t.Context(), "expired.test")
 	require.NoError(t, err)
@@ -274,22 +272,14 @@ func TestInMemoryDNSCache_EvictionLoop(t *testing.T) {
 	_, err := cache.LookupIPAddr(t.Context(), "evict.test")
 	require.NoError(t, err)
 
-	cache.mu.Lock()
-	cache.cache["evict.test"] = dnsCacheEntry{
+	cache.cache.Store("evict.test", dnsCacheEntry{
 		ips:    []net.IPAddr{{IP: net.ParseIP("192.168.1.1")}},
 		expiry: time.Now().Add(-10 * time.Minute),
-	}
+	})
 
-	now := time.Now()
-	for k, v := range cache.cache {
-		if now.After(v.expiry) {
-			delete(cache.cache, k)
-		}
-	}
+	cache.purgeExpired()
 
-	_, exists := cache.cache["evict.test"]
-	cache.mu.Unlock()
-
+	_, exists := cache.cache.Load("evict.test")
 	assert.False(t, exists, "expired entry should be evicted")
 }
 
@@ -683,29 +673,19 @@ func TestInMemoryDNSCache_Eviction(t *testing.T) {
 	cache := NewInMemoryDNSCache(time.Millisecond, &net.Resolver{})
 	t.Cleanup(func() { cache.Close() })
 
-	cache.mu.Lock()
-	cache.cache["expired.test"] = dnsCacheEntry{
+	cache.cache.Store("expired.test", dnsCacheEntry{
 		ips:    []net.IPAddr{{IP: net.ParseIP("1.2.3.4")}},
 		expiry: time.Now().Add(-time.Hour),
-	}
-	cache.cache["valid.test"] = dnsCacheEntry{
+	})
+	cache.cache.Store("valid.test", dnsCacheEntry{
 		ips:    []net.IPAddr{{IP: net.ParseIP("5.6.7.8")}},
 		expiry: time.Now().Add(time.Hour),
-	}
-	cache.mu.Unlock()
+	})
 
-	cache.mu.Lock()
+	cache.purgeExpired()
 
-	now := time.Now()
-	for k, v := range cache.cache {
-		if now.After(v.expiry) {
-			delete(cache.cache, k)
-		}
-	}
-
-	_, expiredExists := cache.cache["expired.test"]
-	_, validExists := cache.cache["valid.test"]
-	cache.mu.Unlock()
+	_, expiredExists := cache.cache.Load("expired.test")
+	_, validExists := cache.cache.Load("valid.test")
 
 	assert.False(t, expiredExists, "expired entry should be removed")
 	assert.True(t, validExists, "valid entry should remain")
@@ -996,9 +976,7 @@ func TestInMemoryDNSCache_ExtendedDNSRecordsStorage(t *testing.T) {
 	assert.Equal(t, "10.20.30.40", ips[0].IP.String())
 
 	// Verify cached entry effective TTL equals minimum record TTL (60s)
-	cache.mu.RLock()
-	entry, ok := cache.cache["ext.test"]
-	cache.mu.RUnlock()
+	entry, ok := cache.cache.Load("ext.test")
 
 	assert.True(t, ok)
 	assert.True(t, entry.expiry.After(time.Now().Add(55*time.Second)))
