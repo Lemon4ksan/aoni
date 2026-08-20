@@ -19,7 +19,7 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/lemon4ksan/foundation/async/log"
+	flog "github.com/lemon4ksan/foundation/async/log"
 	"github.com/lemon4ksan/foundation/generic"
 	"github.com/lemon4ksan/foundation/silicon/clock"
 	"golang.org/x/sys/cpu"
@@ -272,7 +272,7 @@ func NewRotator(cfg RotatorConfig, clients ...WithClient) (*Rotator, error) {
 	cfg.RetryAfter = generic.Coalesce(cfg.RetryAfter, 30*time.Second)
 
 	if cfg.Logger == nil {
-		cfg.Logger = log.Discard
+		cfg.Logger = flog.Discard
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())

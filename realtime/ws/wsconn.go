@@ -214,6 +214,7 @@ func (c *wsRawConn) unlockWrite() {
 	c.writeMu <- struct{}{}
 }
 
+func (c *wsRawConn) Unwrap() any                        { return c.base }
 func (c *wsRawConn) UnderlyingConn() any                { return c.base }
 func (c *wsRawConn) LocalAddr() net.Addr                { return c.base.LocalAddr() }
 func (c *wsRawConn) RemoteAddr() net.Addr               { return c.base.RemoteAddr() }
@@ -655,6 +656,7 @@ func (c *wsH2Conn) WriteMessage(messageType int, data []byte) error {
 	return err
 }
 
+func (c *wsH2Conn) Unwrap() any                        { return c.base }
 func (c *wsH2Conn) UnderlyingConn() any                { return c.base }
 func (c *wsH2Conn) LocalAddr() net.Addr                { return c.base.LocalAddr() }
 func (c *wsH2Conn) RemoteAddr() net.Addr               { return c.base.RemoteAddr() }

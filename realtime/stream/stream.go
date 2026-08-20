@@ -115,6 +115,11 @@ func (s *Stream) Response() *http.Response {
 	return s.resp
 }
 
+// Unwrap returns the underlying raw [*http.Response].
+func (s *Stream) Unwrap() any {
+	return s.resp
+}
+
 // IterSSE returns an iter.Seq2 range-over-func iterator over Server-Sent Events in s (Go 1.23+).
 func IterSSE[T any](s *Stream) iter.Seq2[T, error] {
 	return StreamSSE[T](s).All()
