@@ -401,7 +401,8 @@ func (c *CmdTag) runAdd(
 					if strings.HasPrefix(strings.TrimSpace(line), "// @aoni:service") {
 						lines = append(
 							lines[:i+1],
-							append([]string{fmt.Sprintf("// @version %q", version)}, lines[i+1:]...)...)
+							append([]string{fmt.Sprintf("// @version %q", version)}, lines[i+1:]...)...,
+						)
 						hasVersion = true
 
 						break
