@@ -22,45 +22,78 @@ import (
 	"github.com/lemon4ksan/aoni/internal/pipeline"
 )
 
-// DefaultClient is the shared default [Client] used for package-level direct request execution.
+// DefaultClient is the shared, package-level [Client] instance used for direct single-line calls.
+// It is initialized with production-hardened defaults (15s timeout, automatic gzip/brotli/zstd decompression,
+// 10-hop redirect bounds, and a 10MB response size guard).
+//
+// Thread-Safety: Safe for concurrent invocation across arbitrary goroutines.
 var DefaultClient = NewClient(nil)
 
-// New instantiates a new [*Client] configured with the provided functional options.
+// New instantiates a new [*Client] contract configured with the provided functional options.
+// It acts as the canonical entry point for constructing custom-configured client instances.
 func New(opts ...ClientOption) *Client {
 	return NewClient(nil, opts...)
 }
 
-// Get executes a GET request against path using the shared default client.
+// Get executes an HTTP GET request against path using the shared [DefaultClient].
+//
+// Invariants:
+//   - Relative paths are resolved against DefaultClient's BaseURL.
+//   - Caller MUST close resp.Body to prevent TCP socket descriptor leaks.
 func Get(ctx context.Context, path string, mods ...RequestModifier) (*http.Response, error) {
 	return DefaultClient.Get(ctx, path, mods...)
 }
 
-// Post executes a POST request against path using the shared default client.
+// Post executes an HTTP POST request against path using the shared [DefaultClient].
+//
+// Invariants:
+//   - Caller MUST close resp.Body.
 func Post(ctx context.Context, path string, mods ...RequestModifier) (*http.Response, error) {
 	return DefaultClient.Post(ctx, path, mods...)
 }
 
-// Put executes a PUT request against path using the shared default client.
+// Put executes an HTTP PUT request against path using the shared [DefaultClient].
+//
+// Invariants:
+//   - Caller MUST close resp.Body.
 func Put(ctx context.Context, path string, mods ...RequestModifier) (*http.Response, error) {
 	return DefaultClient.Put(ctx, path, mods...)
 }
 
-// Patch executes a PATCH request against path using the shared default client.
+// Patch executes an HTTP PATCH request against path using the shared [DefaultClient].
+//
+// Invariants:
+//   - Caller MUST close resp.Body.
 func Patch(ctx context.Context, path string, mods ...RequestModifier) (*http.Response, error) {
 	return DefaultClient.Patch(ctx, path, mods...)
 }
 
-// Delete executes a DELETE request using the shared default client.
+// Delete executes an HTTP DELETE request against path using the shared [DefaultClient].
+//
+// Invariants:
+//   - Caller MUST close resp.Body.
 func Delete(ctx context.Context, path string, mods ...RequestModifier) (*http.Response, error) {
 	return DefaultClient.Delete(ctx, path, mods...)
 }
 
-// Head executes a HEAD request using the shared default client.
+// Head executes an HTTP HEAD request against path using the shared [DefaultClient] to inspect headers.
+//
+// Invariants:
+//   - Caller MUST close resp.Body.
 func Head(ctx context.Context, path string, mods ...RequestModifier) (*http.Response, error) {
 	return DefaultClient.Head(ctx, path, mods...)
 }
 
-// decodeResponseTo decodes the response body into target using registered content-type decoders.
+// decodeResponseTo drains, decodes, and releases an HTTP response stream into a newly allocated target of type T.
+//
+// Resource Management Invariant:
+// decodeResponseTo GUARANTEES that resp.Body is fully drained and closed ([DrainAndClose])
+// before returning, ensuring zero TCP socket leaks under both success and error conditions.
+//
+// Error Semantics:
+//   - If the HTTP status code is >= 400, returns an [*APIError] containing the status code
+//     and a bounded preview snippet (up to 1KB) of the error response body.
+//   - If body decoding fails, returns the underlying parser error.
 func decodeResponseTo[T any](resp *http.Response) (*T, error) {
 	if resp == nil {
 		return nil, ErrNilRequest
@@ -110,7 +143,14 @@ func injectBodyMod(body any, mods []RequestModifier) []RequestModifier {
 	return allMods
 }
 
-// GetTo executes a GET request using the shared default client and decodes the response payload into T.
+// GetTo executes a GET request using [DefaultClient] and decodes the response payload into a new instance of T.
+//
+// Resource Management:
+// The response body is automatically drained and closed. Callers do NOT need to call resp.Body.Close().
+//
+// Error Handling:
+// Returns an [*APIError] on non-2xx status codes (4xx/5xx). Use [IsNotFound], [IsRateLimited],
+// or standard [errors.Is] to inspect the returned error.
 func GetTo[T any](ctx context.Context, path string, mods ...RequestModifier) (*T, error) {
 	resp, err := DefaultClient.Get(ctx, path, mods...) //nolint:bodyclose
 	if err != nil {
@@ -120,7 +160,14 @@ func GetTo[T any](ctx context.Context, path string, mods ...RequestModifier) (*T
 	return decodeResponseTo[T](resp)
 }
 
-// PostTo executes a POST request with payload using the shared default client and decodes the response into T.
+// PostTo executes a POST request with payload using [DefaultClient] and decodes the response payload into T.
+//
+// Smart Body Handling:
+// The body argument is automatically detected and serialized via [WithSmartBody] (struct/map to JSON,
+// proto.Message to protobuf, url.Values to form-urlencoded, string/bytes as raw payload).
+//
+// Resource Management:
+// The response body is automatically drained and closed. Callers do NOT need to call resp.Body.Close().
 func PostTo[T any](ctx context.Context, path string, body any, mods ...RequestModifier) (*T, error) {
 	resp, err := DefaultClient.Post(ctx, path, injectBodyMod(body, mods)...) //nolint:bodyclose
 	if err != nil {
@@ -130,7 +177,10 @@ func PostTo[T any](ctx context.Context, path string, body any, mods ...RequestMo
 	return decodeResponseTo[T](resp)
 }
 
-// PutTo executes a PUT request with payload using the shared default client and decodes the response into T.
+// PutTo executes a PUT request with payload using [DefaultClient] and decodes the response payload into T.
+//
+// Resource Management:
+// The response body is automatically drained and closed. Callers do NOT need to call resp.Body.Close().
 func PutTo[T any](ctx context.Context, path string, body any, mods ...RequestModifier) (*T, error) {
 	resp, err := DefaultClient.Put(ctx, path, injectBodyMod(body, mods)...) //nolint:bodyclose
 	if err != nil {
@@ -140,7 +190,10 @@ func PutTo[T any](ctx context.Context, path string, body any, mods ...RequestMod
 	return decodeResponseTo[T](resp)
 }
 
-// PatchTo executes a PATCH request with payload using the shared default client and decodes the response into T.
+// PatchTo executes a PATCH request with payload using [DefaultClient] and decodes the response payload into T.
+//
+// Resource Management:
+// The response body is automatically drained and closed. Callers do NOT need to call resp.Body.Close().
 func PatchTo[T any](ctx context.Context, path string, body any, mods ...RequestModifier) (*T, error) {
 	resp, err := DefaultClient.Patch(ctx, path, injectBodyMod(body, mods)...) //nolint:bodyclose
 	if err != nil {
@@ -150,7 +203,10 @@ func PatchTo[T any](ctx context.Context, path string, body any, mods ...RequestM
 	return decodeResponseTo[T](resp)
 }
 
-// DeleteTo executes a DELETE request using the shared default client and decodes the response into T.
+// DeleteTo executes a DELETE request using [DefaultClient] and decodes any returned response payload into T.
+//
+// Resource Management:
+// The response body is automatically drained and closed. Callers do NOT need to call resp.Body.Close().
 func DeleteTo[T any](ctx context.Context, path string, mods ...RequestModifier) (*T, error) {
 	resp, err := DefaultClient.Delete(ctx, path, mods...) //nolint:bodyclose
 	if err != nil {
@@ -160,7 +216,10 @@ func DeleteTo[T any](ctx context.Context, path string, mods ...RequestModifier) 
 	return decodeResponseTo[T](resp)
 }
 
-// Fetch executes a GET request using the shared default client and returns a [generic.Result] wrapping the unmarshaled response.
+// Fetch executes a GET request using [DefaultClient] and returns a functional [generic.Result] containing the parsed T.
+//
+// This is particularly useful in functional error-handling pipelines (e.g. railway-oriented programming)
+// where callers want to inspect Success/Failure states without multiple if-err guards.
 func Fetch[T any](ctx context.Context, path string, mods ...RequestModifier) (generic.Result[T], *http.Response) {
 	resp, err := DefaultClient.Get(ctx, path, mods...) //nolint:bodyclose
 	if err != nil {
@@ -372,13 +431,25 @@ func WithBlockRedirectTo(patterns ...string) ClientOption {
 	}
 }
 
-// WithSmartBody constructs an [aoni.RequestModifier] that automatically detects the payload type:
-//   - proto.Message -> Protobuf payload with application/x-protobuf
-//   - url.Values -> URL-encoded form payload with application/x-www-form-urlencoded
-//   - io.Reader -> Streamed request body
-//   - []byte -> Raw byte slice payload
-//   - string -> UTF-8 text payload with text/plain; charset=utf-8
-//   - Struct / Map / Slice -> JSON-marshaled payload with application/json
+// WithSmartBody constructs an [aoni.RequestModifier] that dynamically inspects and serializes arbitrary payloads.
+//
+// # Serialization Matrix & Content-Type Resolution
+//
+// WithSmartBody eliminates the need for manual marshaling or header declaration by applying
+// the following zero-reflection type-switch matrix:
+//   - [RequestModifier]: Passed through directly as an existing modifier atom.
+//   - [proto.Message]: Serialized via [proto.Marshal] with Content-Type "application/x-protobuf".
+//   - [url.Values]: URL-encoded form data with Content-Type "application/x-www-form-urlencoded".
+//   - [io.Reader]: Configured as a direct streaming body ([core.ModBodyStream]).
+//   - []byte: Transmitted as raw binary bytes ([core.ModBodyBytes]).
+//   - string: Transmitted as UTF-8 plaintext with Content-Type "text/plain; charset=utf-8".
+//   - Struct / Map / Slice / any other: Serialized via [json.Marshal] with Content-Type "application/json".
+//
+// # Error Handling & Pipeline Interception
+//
+// If serialization fails (e.g. JSON marshaling encountering unsupported channels/functions),
+// WithSmartBody does NOT panic. Instead, it embeds the serialization error into a deferred modifier
+// ([pipeline.RequestConfig.BodyError]), aborting execution cleanly before any data is sent over the network.
 func WithSmartBody(body any) RequestModifier {
 	if body == nil {
 		return RequestModifier{}

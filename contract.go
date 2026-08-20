@@ -14,26 +14,31 @@ import (
 )
 
 // Universal Protocol Atoms.
+//
+// These core contracts bridge disparate networking paradigms (net/http, fasthttp, and gRPC)
+// into a unified, type-safe, profile-driven architecture conforming strictly to RFC 9110.
 type (
 	// Request represents a unified, zero-allocation HTTP request abstraction conforming to RFC 9110.
-	// It unifies net/http, fasthttp, and gRPC-Web request payloads under a single thread-safe interface.
+	// It homogenizes standard net/http, fasthttp, and gRPC-Web request representations under a single,
+	// high-throughput contract with zero heap allocations on hot paths.
 	Request = core.Request
 
 	// Response represents a unified, high-performance HTTP response abstraction conforming to RFC 9110.
-	// Provides zero-copy byte access, pooled memory recycling, and structured decoding facilities.
+	// Provides zero-copy byte access, pooled memory recycling ([Response.Close]), and structured decoding facilities.
 	Response = core.Response
 
 	// RequestDoer is the universal execution contract for processing unified [Request] transactions.
-	// Implemented by [Client], [fast.Client], middlewares, load balancers, and transport adapters.
+	// It is implemented by [*Client], [*fast.Client], middleware decorators, load balancers, and transport bridges.
 	RequestDoer = core.RequestDoer
 
-	// DoerFunc is an adapter allowing the use of ordinary functions as [RequestDoer] execution handlers.
+	// DoerFunc is an adapter allowing ordinary functions to satisfy the [RequestDoer] execution contract.
 	DoerFunc = core.DoerFunc
 
-	// ResponseDecoder deserializes an HTTP response body stream into a target Go data structure.
+	// ResponseDecoder deserializes an HTTP response body stream into a target Go data structure
+	// based on the response Content-Type (e.g. JSON, XML, Protobuf, gRPC-Web).
 	ResponseDecoder = core.ResponseDecoder
 
-	// BaseResponse defines the envelope contract for structured API responses (e.g. status code, error message).
+	// BaseResponse defines the envelope contract for structured API responses (e.g. status code, business errors).
 	BaseResponse = core.BaseResponse
 
 	// BaseResponseProvider yields an envelope instance used for structured response unwrapping.
@@ -52,8 +57,11 @@ type (
 	RequestModifier = core.RequestModifier
 
 	// SoftErrorDetector inspects the response status, headers, and initial peeked body bytes
-	// for application-layer soft errors (e.g. 200 OK containing an HTML login or error message).
-	// If a non-nil error is returned, request execution is aborted with that error without draining the body.
+	// for application-layer soft errors (e.g. HTTP 200 OK containing an HTML login or error message).
+	//
+	// Non-Destructive Invariant:
+	// The peek buffer is captured non-destructively. If detector returns a non-nil error,
+	// request execution is aborted with that error without draining the body stream.
 	SoftErrorDetector func(resp *http.Response, peek []byte) error
 )
 
@@ -80,7 +88,12 @@ type (
 	}
 )
 
-// UnwrapAs traverses nested [Unwrapper] layers until an instance of target type T is found.
+// UnwrapAs traverses nested [Unwrapper] decorator chains until an instance of target type T is discovered.
+//
+// Onion-Peeling Mechanics:
+// In deeply layered architectures (e.g. RoundTripper -> Telemetry -> Retry -> CookieJar -> Transport),
+// UnwrapAs unwinds layers recursively via type assertions and reflect-based Unwrap methods,
+// returning the inner instance and true if found, or the zero value of T and false.
 func UnwrapAs[T any](target any) (T, bool) {
 	curr := target
 	for curr != nil {

@@ -7,17 +7,17 @@
 // It consolidates IETF RFC standards, W3C specifications, and Chromium-grade network resilience
 // mechanisms into a single, profile-driven zero-allocation architecture.
 //
-// # Dual Engines
+// # Dual Engines under a Single Architecture
 //
 // aoni provides two execution engines under a unified conceptual framework:
 //   - [Client] - 100% net/http compatibility, full middleware chain support, and seamless ecosystem integration.
 //   - [github.com/lemon4ksan/aoni/fast.Client] - Native fasthttp + H2/H3 engine built for extreme throughput
-//     and zero heap allocations under parallel I/O.
+//     (1.86M+ RPS) and zero heap allocations under parallel I/O.
 //
 // # Request Pipeline
 //
 // Every outgoing request passes through five stages:
-//  1. RequestModifiers ([mod]) - declarative header, query, context, and body setup.
+//  1. RequestModifiers ([mod]) - declarative header, query, context, and smart body setup.
 //  2. Middleware chain ([middleware]) - rate limiting, retries, circuit breaking, speculative hedging.
 //  3. Execution Engine ([aoni.Client] or [fast.Client]) - protocol dispatch, pool janitors, Alt-Svc cache.
 //  4. Transport layer ([internal/transport]) - uTLS browser fingerprinting, HTTP/3 QUIC, proxy rotation,
@@ -53,33 +53,38 @@
 // aoni is designed for maximum simplicity for newcomers while supporting extreme customization for high-load systems:
 //
 //  1. Single-Line Zero Config (Complete Beginner):
-//     Fetch and decode JSON/XML payloads into a typed struct with zero boilerplate or client setup:
+//     Fetch and decode JSON/XML/Protobuf payloads into a typed struct with zero boilerplate or client setup:
 //
-//     user, err := request.GetTo[User](ctx, nil, "https://api.github.com/users/octocat")
+//     user, err := aoni.GetTo[User](ctx, "https://api.github.com/users/octocat")
 //
 //  2. Production-Grade Stealth Client (Standard App):
 //     Configure TLS browser impersonation, base URLs, timeouts, and proxy rotators:
 //
-//     client := aoni.NewClient(option.WithChrome(), option.WithTimeout(10*time.Second))
+//     client := aoni.New(option.WithChrome(), option.WithTimeout(10*time.Second), option.WithBaseURL("https://api.github.com"))
 //     user, err := request.GetTo[User](ctx, client, "/users/123")
 //
-//  3. Extreme RPS Engine (High-Throughput 1.5M RPS):
+//  3. Extreme RPS Engine (High-Throughput 1.86M+ RPS):
 //     Use [github.com/lemon4ksan/aoni/fast.Client] for zero-allocation performance:
 //
 //     fastClient := fast.NewClient()
 //     resp, err := fastClient.Get(ctx, "/users/123")
 //     defer resp.Close()
 //
-// # Memory Management & Error Handling
+// # Error Inspection Suite
 //
-//   - **Fast Engine Memory**: Calls via [github.com/lemon4ksan/aoni/fast] return pooled responses. Callers MUST invoke `resp.Close()` to release pooled memory.
+// Non-2xx HTTP responses return an [*APIError] containing the status code and raw response body.
+// Error handling is fully integrated with standard Go [errors.Is] and single-line predicate helpers:
 //
-//   - **Error Handling**: Non-2xx HTTP responses return an [*APIError] containing the status code and raw response body:
-//
-//     var apiErr *aoni.APIError
-//     if errors.As(err, &apiErr) {
-//     log.Printf("HTTP Error %d: %s", apiErr.StatusCode, string(apiErr.Body))
-//     }
+//	user, err := aoni.GetTo[User](ctx, "/users/123")
+//	if aoni.IsNotFound(err) {
+//	    // Resource does not exist (HTTP 404)
+//	}
+//	if aoni.IsRateLimited(err) {
+//	    // Rate limited by remote API (HTTP 429)
+//	}
+//	if errors.Is(err, aoni.ErrUnauthorized) {
+//	    // Authentication failure (HTTP 401)
+//	}
 //
 // # Basic Usage
 //
@@ -89,11 +94,8 @@
 //		"context"
 //		"fmt"
 //		"log"
-//		"time"
 //
 //		"github.com/lemon4ksan/aoni"
-//		"github.com/lemon4ksan/aoni/option"
-//		"github.com/lemon4ksan/aoni/request"
 //	)
 //
 //	type User struct {
@@ -102,9 +104,14 @@
 //	}
 //
 //	func main() {
-//		// Zero-config 1-line GET request
-//		user, err := request.GetTo[User](context.Background(), nil, "https://api.github.com/users/octocat")
+//		ctx := context.Background()
+//
+//		// Zero-config 1-line typed GET request
+//		user, err := aoni.GetTo[User](ctx, "https://api.github.com/users/octocat")
 //		if err != nil {
+//			if aoni.IsNotFound(err) {
+//				log.Fatal("User not found")
+//			}
 //			log.Fatal(err)
 //		}
 //

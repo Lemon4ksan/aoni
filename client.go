@@ -31,35 +31,69 @@ import (
 )
 
 // Client is an immutable, thread-safe, multi-protocol HTTP, WebSockets, and gRPC client facade.
-// It acts as a high-level public interface hiding low-level protocol orchestration
-// (uTLS fingerprints, HTTP/2-3 framing, proxy rotation, anti-DPI packet fragmentation, and p0f OS spoofing).
+// It acts as the primary architectural entry point for high-performance network communications,
+// encapsulating complex transport orchestration—including uTLS fingerprinting, HTTP/2-3 framing,
+// dynamic proxy rotation, anti-DPI packet fragmentation, and OS-level p0f stack spoofing.
 //
-// Designed around Progressive Disclosure of Complexity: simple REST API calls execute
-// with 0-alloc fast-path performance, while advanced enterprise features (speculative hedging,
-// WAF challenge solvers, uTLS browser profiles, SSH/MASQUE tunneling) are available via options
-// without breaking application code contracts or requiring service rewrites.
+// # Architectural Philosophy: Progressive Disclosure of Complexity
 //
-// Client instances are 100% thread-safe and safe for concurrent invocation across goroutines.
-// Methods such as With() and Clone() return new Client instances with isolated configuration DTOs
-// and memory structures, ensuring zero shared-state data races between concurrent threads.
+// The client is designed so that basic HTTP operations require zero cognitive overhead and
+// execute along a zero-allocation fast path ("baremetal"). As requirements grow in complexity,
+// enterprise-grade capabilities (such as speculative request hedging, automatic WAF challenge solving,
+// browser TLS impersonation, and MASQUE/SSH tunneling) can be enabled declaratively via functional
+// options without rewriting application logic or breaking existing interfaces.
+//
+// # Concurrency & Thread-Safety Invariants
+//
+// Client instances are strictly immutable once initialized and 100% safe for concurrent access
+// across arbitrary goroutines. Mutation methods such as [Client.With] and [Client.Clone] return newly
+// allocated Client instances with fully isolated configuration DTOs, header maps, and internal state,
+// guaranteeing that concurrent operations never suffer from shared-memory data races.
 type Client struct {
-	cfg               Config
-	engine            HTTPDoer
-	pipeline          *pipeline.Pipeline[*http.Request, *http.Response]
-	coreEngine        *pipeline.Engine
-	prepared          pipeline.PreparedConfig
-	powerWatcher      *power.Watcher
-	referer           *pipeline.RefererState
+	// cfg holds the immutable snapshot of all client configuration DTOs (defaults, network, fingerprint, engine).
+	cfg Config
+
+	// engine represents the underlying execution target (typically an isolated [*http.Client] or custom [HTTPDoer]).
+	engine HTTPDoer
+
+	// pipeline orchestrates the 5-stage middleware chain, interceptors, compression, and WAF challenge solvers.
+	pipeline *pipeline.Pipeline[*http.Request, *http.Response]
+
+	// coreEngine maintains shared low-level buffers, header caches, and string builders across requests.
+	coreEngine *pipeline.Engine
+
+	// prepared caches precomputed URL prefixes and default header slices to achieve zero-allocation path resolution.
+	prepared pipeline.PreparedConfig
+
+	// powerWatcher monitors OS sleep/wake cycles to proactively flush stale TCP keep-alive sockets upon wake-up.
+	powerWatcher *power.Watcher
+
+	// referer maintains an atomic navigation state for realistic browser Referer header automation.
+	referer *pipeline.RefererState
+
+	// baremetalEligible is a precomputed flag indicating if requests can bypass the pipeline entirely for zero allocations.
 	baremetalEligible bool
 }
 
-// NewClient instantiates a new thread-safe [Client] wrapping the specified doer engine.
-// If doer is nil, defaults to standard HTTP execution normalized via [DefaultEngine].
+// NewClient instantiates a new thread-safe [Client] wrapping the specified execution target.
 //
-// Applies functional [ClientOption] layers, precomputes BaseURL string representations
-// into [pipeline.PreparedConfig] for zero-alloc relative path resolutions, and ensures a default User-Agent.
+// Parameters & Defaults:
+//   - doer: The underlying execution engine. If nil, defaults to a production-hardened [*http.Client]
+//     with a 15-second timeout and 10-hop redirect policy normalized via [DefaultEngine].
+//   - opts: Composable functional [ClientOption] layers applied sequentially to configure network,
+//     TLS fingerprints, proxy rotators, and pipeline behaviors.
 //
-// Client instances are safe for concurrent use by multiple goroutines.
+// Built-in Defaults:
+//   - Response Decompression: Enabled for gzip, brotli, and zstd.
+//   - Max Response Body: 10 MB threshold to safeguard against out-of-memory DoS attacks.
+//   - Happy Eyeballs v2/v3: 300 ms dual-stack IPv4/IPv6 racing delay (RFC 8305).
+//   - User-Agent: Fallback Chrome/Windows User-Agent ensured if none is declared.
+//
+// Concurrency & Lifecycle:
+//
+// The returned [Client] is safe for concurrent use across multiple goroutines.
+// Background resources (such as power watchers or custom engines) should
+// be released via [Client.Close] when the client lifecycle terminates.
 func NewClient(doer any, opts ...ClientOption) *Client {
 	cfg := Config{
 		Defaults: ClientDefaults{
@@ -89,15 +123,32 @@ func NewClient(doer any, opts ...ClientOption) *Client {
 	return client
 }
 
-// Clone creates a deep, memory-isolated copy of the [Client].
-// All configuration DTOs, default header maps, modifier slices, cookie jars, and referer states
-// are independently copied, guaranteeing zero data races when mutating cloned instances across goroutines.
+// Clone creates an exact, memory-isolated duplicate of the current [Client] contract.
+//
+// It is an alias for c.With(), guaranteeing that the returned client is an independent
+// contract with zero shared mutable state, preventing cross-goroutine interference.
 func (c *Client) Clone() *Client {
 	return c.With()
 }
 
-// With produces a deep-copied [Client] with the provided functional options applied,
-// preserving original client immutability and thread safety.
+// With derives a brand new, fully autonomous [Client] contract with the provided functional options applied.
+//
+// # Architectural Philosophy: Clients as Immutable Contracts (Not Shared Mutable State)
+//
+// In traditional net/http ecosystems, [*http.Client] is a mutable container where mutating fields (such as
+// Jar, Timeout, or Transport) introduces insidious cross-goroutine data races and temporal coupling.
+//
+// In aoni, a [Client] is an immutable, value-oriented Execution Contract.
+// Invoking With does NOT perform a shallow struct copy and never mutates the receiver. Instead, it:
+//  1. Snapshots & Isolates Specification: Deep-copies the configuration DTO ([Config.Clone]).
+//  2. Decouples Network Transports: Clones underlying HTTP engines ([CloneHTTPClient]) to isolate socket pools.
+//  3. Decouples Stateful Automata: Fork-isolates navigation state ([pipeline.RefererState]) to prevent history leaks.
+//  4. Recompiles the Pipeline: Rebuilds precomputed routing tables ([pipeline.PreparedConfig]) and middleware stages.
+//
+// Invariants & Concurrency Guarantees:
+//   - The parent client remains 100% untouched and safe for concurrent execution across other goroutines.
+//   - The derived client is a standalone, first-class contract with zero shared mutable references to the parent.
+//   - Ideal for deriving tenant-isolated, route-scoped, or authenticated client variations at runtime.
 func (c *Client) With(opts ...ClientOption) *Client {
 	cfg := c.cfg.Clone()
 	generic.ApplyOptions(&cfg, opts...)
@@ -121,14 +172,24 @@ func (c *Client) With(opts ...ClientOption) *Client {
 	return cloned
 }
 
-// Request executes an HTTP transaction using method, path, and optional modifiers,
-// yielding the [*http.Response] stream.
+// Request executes an HTTP transaction using the given method, path, and optional modifiers,
+// returning the raw [*http.Response] stream.
 //
-// Path Resolution (RFC 3986):
-// Relative paths are resolved against BaseURL using precomputed zero-allocation string buffers.
-// Absolute HTTP/HTTPS URLs override BaseURL directly.
+// # Path Resolution Rules (RFC 3986)
+//   - Relative paths (e.g. "/users", "items/1"): Resolved against the configured BaseURL using
+//     precomputed zero-allocation string buffers ([pipeline.PreparedConfig]).
+//   - Absolute URLs (e.g. "https://api.example.com/v1"): Executed directly, completely overriding BaseURL.
 //
-// The caller MUST close the returned response body stream when finished.
+// # Execution Paths: Baremetal vs Pipeline
+//   - Baremetal Fast Path: When the client has no active pipeline stages (no interceptors, no hooks,
+//     no modifiers, no compression rules), Request executes directly through the engine with 0 heap allocations.
+//   - Full Pipeline Path: When modifiers, telemetry, or hooks are present, Request allocates a pooled
+//     transaction context and runs through the complete 5-stage middleware pipeline.
+//
+// # Resource Management Invariant
+//
+// The caller MUST close the returned response body stream ([http.Response.Body.Close]) when finished
+// to prevent socket leaks and allow connection reuse in the keep-alive pool.
 func (c *Client) Request(
 	ctx context.Context,
 	method, path string,
@@ -144,38 +205,61 @@ func (c *Client) Request(
 	return c.doPipeline(ctx, method, path, mods)
 }
 
+// ensureRequestConfig resolves or lazily allocates the per-request transaction container ([pipeline.RequestConfig]).
+//
+// Lifecycle & Zero-Alloc Invariants:
+//  1. Re-entrant Contexts: If ctx already carries a RequestConfig (e.g. from an outer retry loop,
+//     middleware, or SDK bridge), it enriches the existing container with client defaults without allocating memory.
+//  2. On-Demand Allocation: If the request carries modifiers, default client headers, or advanced network options
+//     (proxy, cert pinning, JA4), it acquires a pooled container from sync.Pool ([pipeline.AllocRequestConfig]).
+//  3. Minimalist Pass-Through: If no request-level configuration is required, ctx is returned untouched with 0 allocations.
+func (c *Client) ensureRequestConfig(ctx context.Context, hasMods bool) context.Context {
+	if cfg := pipeline.GetRequestConfig(ctx); cfg != nil {
+		c.applyRequestConfigDefaults(cfg)
+		return ctx
+	}
+
+	if hasMods || len(c.cfg.Defaults.DefaultMods) > 0 || c.needsRequestConfig() {
+		var cfg *pipeline.RequestConfig
+
+		ctx, cfg = pipeline.AllocRequestConfig(ctx)
+		c.applyRequestConfigDefaults(cfg)
+	}
+
+	return ctx
+}
+
 func (c *Client) doPipeline(
 	ctx context.Context,
 	method, path string,
 	mods []RequestModifier,
 ) (*http.Response, error) {
-	if cfg := pipeline.GetRequestConfig(ctx); cfg != nil {
-		c.applyRequestConfigDefaults(cfg)
-	} else if len(mods) > 0 || len(c.cfg.Defaults.DefaultMods) > 0 || c.needsRequestConfig() {
-		ctx, cfg = pipeline.AllocRequestConfig(ctx)
-		c.applyRequestConfigDefaults(cfg)
-	}
+	// Initialize or enrich the per-request transaction context from sync.Pool on demand
+	ctx = c.ensureRequestConfig(ctx, len(mods) > 0)
 
-	u, err := c.resolveURL(path)
+	targetURL, err := c.resolveURL(path)
 	if err != nil {
 		return nil, err
 	}
 
+	// Explicitly initialize HTTP/1.1 protocol constants and default host headers
+	// to prevent net/http from performing duplicate string parsing during RoundTrip.
 	req := &http.Request{
 		Method:     method,
-		URL:        u,
+		URL:        targetURL,
 		Proto:      "HTTP/1.1",
 		ProtoMajor: 1,
 		ProtoMinor: 1,
 		Header:     c.applyDefaultHTTPHeader(),
 		Body:       http.NoBody,
-		Host:       u.Host,
+		Host:       targetURL.Host,
 	}
 
 	if ctx != nil {
 		req = req.WithContext(ctx)
 	}
 
+	// Apply default client-level modifiers first, then per-request modifiers (allowing overrides)
 	for _, m := range c.cfg.Defaults.DefaultMods {
 		m.ApplyStd(req)
 	}
@@ -192,32 +276,40 @@ func (c *Client) doPipeline(
 	return resp, nil
 }
 
-// Get executes a GET request against path.
+// Get executes an HTTP GET request against path with optional per-request modifiers.
+// Resolves path against BaseURL and returns the raw [*http.Response].
+// Caller MUST close resp.Body.
 func (c *Client) Get(ctx context.Context, path string, mods ...RequestModifier) (*http.Response, error) {
 	return c.Request(ctx, http.MethodGet, path, mods...)
 }
 
-// Post executes a POST request against path.
+// Post executes an HTTP POST request against path with optional per-request modifiers.
+// Modifiers can provide payload bodies via [mod.WithJSONBody], [mod.WithBody], etc.
+// Caller MUST close resp.Body.
 func (c *Client) Post(ctx context.Context, path string, mods ...RequestModifier) (*http.Response, error) {
 	return c.Request(ctx, http.MethodPost, path, mods...)
 }
 
-// Put executes a PUT request against path.
+// Put executes an HTTP PUT request against path with optional per-request modifiers.
+// Caller MUST close resp.Body.
 func (c *Client) Put(ctx context.Context, path string, mods ...RequestModifier) (*http.Response, error) {
 	return c.Request(ctx, http.MethodPut, path, mods...)
 }
 
-// Patch executes a PATCH request against path.
+// Patch executes an HTTP PATCH request against path with optional per-request modifiers.
+// Caller MUST close resp.Body.
 func (c *Client) Patch(ctx context.Context, path string, mods ...RequestModifier) (*http.Response, error) {
 	return c.Request(ctx, http.MethodPatch, path, mods...)
 }
 
-// Delete executes a DELETE request against path.
+// Delete executes an HTTP DELETE request against path with optional per-request modifiers.
+// Caller MUST close resp.Body.
 func (c *Client) Delete(ctx context.Context, path string, mods ...RequestModifier) (*http.Response, error) {
 	return c.Request(ctx, http.MethodDelete, path, mods...)
 }
 
-// Head executes a HEAD request against path.
+// Head executes an HTTP HEAD request against path to inspect headers without fetching the body.
+// Caller MUST close resp.Body.
 func (c *Client) Head(ctx context.Context, path string, mods ...RequestModifier) (*http.Response, error) {
 	return c.Request(ctx, http.MethodHead, path, mods...)
 }
@@ -297,7 +389,7 @@ func (c *Client) Close() {
 	}
 }
 
-// HTTP returns an [HTTPDoer] adapter executing standard *http.Request objects through the pipeline.
+// HTTP returns an [HTTPDoer] adapter executing standard [*http.Request] objects through the pipeline.
 func (c *Client) HTTP() HTTPDoer {
 	return HTTPDoerFunc(func(req *http.Request) (*http.Response, error) {
 		return c.execute(req, c.resolvePipeline(req))
@@ -492,7 +584,7 @@ func (c *Client) computeBaremetalEligible() bool {
 // ensureUserAgent guarantees a default User-Agent header is set on client request defaults.
 func (c *Client) ensureUserAgent() {
 	if c.cfg.Defaults.Headers == nil {
-		return
+		c.cfg.Defaults.Headers = make(http.Header)
 	}
 
 	if c.cfg.Defaults.Headers.Get("User-Agent") == "" {
@@ -531,17 +623,25 @@ func (c *Client) resolveURL(path string) (*url.URL, error) {
 	return u, nil
 }
 
+func () {
+	len(path) > 0 && path[0] == '/' && c.prepared.BaseURL != nil &&
+		(c.prepared.BaseURL.Path == "" || c.prepared.BaseURL.Path == "/")
+}
+
 // resolveTargetURL resolves path against BaseURL using precomputed zero-allocation string buffers (engine.PreparedConfig).
 // Eliminates url.Parse and string formatting allocations for relative path resolutions on the hot path.
 func (c *Client) resolveTargetURL(path string) (string, error) {
+	// 1. Fast Path: Absolute HTTP/HTTPS URLs bypass BaseURL resolution entirely with zero allocations
 	if len(path) >= 7 && (strings.HasPrefix(path, "http://") || strings.HasPrefix(path, "https://")) {
 		return path, nil
 	}
 
+	// 2. If no BaseURL is configured, return the path as-is
 	if c.cfg.Defaults.BaseURL == nil || c.cfg.Defaults.BaseURL.Host == "" {
 		return path, nil
 	}
 
+	// 3. Fast Path: Root or empty path returns the precomputed BaseURL string directly (0 allocs)
 	if path == "" || path == "/" {
 		if c.prepared.BaseURLString != "" {
 			return c.prepared.BaseURLString, nil
@@ -550,10 +650,12 @@ func (c *Client) resolveTargetURL(path string) (string, error) {
 		return c.cfg.Defaults.BaseURL.String(), nil
 	}
 
+	// 4. Hot Path Optimization: Splicing path onto pre-trimmed BaseURL string avoids url.Parse & URL.ResolveReference
 	if path[0] == '/' && c.prepared.BaseURLTrimmedString != "" {
 		return c.prepared.BaseURLTrimmedString + path, nil
 	}
 
+	// 5. Fallback Path: Non-standard or relative subpaths with dot-segments (e.g. "../api") resolve via RFC 3986 reference
 	rel, err := furl.Parse(strings.TrimLeft(path, "/"))
 	if err != nil {
 		return "", &Error{Op: "invalid path", Err: ErrInvalidPath}
@@ -586,6 +688,8 @@ func (c *Client) resolveHTTPRequest(req Request) (*http.Request, error) {
 		return nil, &Error{Op: "failed to create http request", Err: err}
 	}
 
+	// Zero-copy bridge: If the request originates from fasthttp engine, extract headers
+	// using unsafe byte-to-string conversions (bytesconv.B2S) without string heap allocations
 	fastAdapter, ok := req.(interface{ FastHTTPRequest() *fasthttp.Request })
 	if !ok {
 		return httpReq, nil
@@ -629,6 +733,8 @@ func (c *Client) applyConfig(cfg Config) {
 }
 
 // applyPowerManagement manages the lifecycle of OS power suspend/resume watchers.
+// When laptops sleep and wake, existing TCP keep-alives silently rot. Flushing the pool
+// on wake-up prevents insidious "connection reset by peer" or 15s write timeout stalls.
 func (c *Client) applyPowerManagement(enable bool) {
 	if !enable {
 		if c.powerWatcher != nil {
@@ -650,6 +756,7 @@ func (c *Client) applyPowerManagement(enable bool) {
 }
 
 // applyDefaultHTTPHeader applies the default and precomputed HTTP headers to the request.
+// Allocates the header map with precise exact capacity upfront to prevent intermediate bucket rehashing.
 func (c *Client) applyDefaultHTTPHeader() http.Header {
 	headerCap := len(c.prepared.PrecomputedDefaultHeaders) + len(c.cfg.Defaults.Headers)
 	if headerCap == 0 {

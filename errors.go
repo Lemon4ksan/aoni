@@ -153,13 +153,41 @@ func (e *Error) LogValue() slog.Value {
 	return slog.GroupValue(attrs...)
 }
 
-// APIError describes an HTTP response status failure (>= 400).
+// APIError represents an HTTP protocol failure returned by the remote server (status code >= 400).
+//
+// # Architectural Rationale: Observability & Log-Injection Safety
+//
+// When APIs return errors, servers often respond with massive HTML error pages (e.g. Cloudflare 502s,
+// Nginx 404s, or AWS XML errors). Printing raw error bodies into structured logs can cause log flooding,
+// high ingestion costs, or CRLF log injection vulnerabilities.
+//
+// To prevent this:
+//   - [APIError.Error] truncates body output to a bounded 128-byte preview snippet.
+//   - Control characters ('\r', '\n') are sanitized into spaces to neutralize log injection.
+//   - The full, unmodified payload remains accessible via [APIError.Body] and [APIError.BodyString].
+//
+// # Structured Error Extraction
+//
+// If a custom response decoder or middleware parses a structured error DTO (e.g. `{"code": "token_expired"}`),
+// the unmarshaled struct is preserved in the [APIError.Model] field.
+//
+// # Standard Errors Interoperability
+//
+// APIError implements the standard Go [errors.Is] protocol ([APIError.Is]), allowing callers to check
+// status categories idiomatically:
+//
+//	if errors.Is(err, aoni.ErrNotFound) { ... }
+//	if errors.Is(err, aoni.ErrRateLimited) { ... }
+//	// Or via single-line package predicates:
+//	if aoni.IsRateLimited(err) { ... }
 type APIError struct {
-	// Model holds an unmarshaled error envelope structure if parsed by a decoder.
+	// Model holds the typed error envelope structure if unmarshaled by a registered decoder or middleware.
 	Model any
-	// Body contains a snippet or full payload of the HTTP response error body.
+
+	// Body contains the raw byte slice of the HTTP error response body.
 	Body []byte
-	// StatusCode records the non-2xx HTTP response status code (e.g., 400, 404, 500).
+
+	// StatusCode records the non-2xx HTTP status code (e.g. 400, 401, 403, 404, 429, 500, 503).
 	StatusCode int
 }
 
