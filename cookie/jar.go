@@ -14,7 +14,7 @@ import (
 	"time"
 
 	asyncctx "github.com/lemon4ksan/foundation/async/context"
-	"github.com/lemon4ksan/foundation/async/sync/keylock"
+	"github.com/lemon4ksan/foundation/sync/keylock"
 	"github.com/lemon4ksan/foundation/generic"
 	"github.com/lemon4ksan/foundation/net/psl"
 	"github.com/lemon4ksan/foundation/silicon/clock"
