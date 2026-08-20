@@ -181,7 +181,8 @@ func TestH2FramedConn_PrefaceChecks(t *testing.T) {
 
 		preface := append(
 			[]byte("PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n"),
-			[]byte{0x00, 0x00, 0x0a, 0x04, 0x00, 0x00, 0x00}...)
+			[]byte{0x00, 0x00, 0x0a, 0x04, 0x00, 0x00, 0x00}...,
+		)
 		_, err := conn.Write(preface)
 		require.NoError(t, err)
 		<-done
