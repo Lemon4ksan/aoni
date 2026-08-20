@@ -827,83 +827,83 @@ func CloseResponse(resp *http.Response) {
 
 func (c *Client) applyRequestConfigDefaults(cfg *RequestConfig) {
 	if !cfg.SSRFGuard {
-		cfg.SSRFGuard = c.network.SSRFGuard
+		cfg.SSRFGuard = c.cfg.Network.SSRFGuard
 	}
 
 	if !cfg.ProxyDNS {
-		cfg.ProxyDNS = c.network.ProxyDNS
+		cfg.ProxyDNS = c.cfg.Network.ProxyDNS
 	}
 
 	if !cfg.MultiReadDisableDisk {
-		cfg.MultiReadDisableDisk = c.defaults.MultiReadDisableDisk
+		cfg.MultiReadDisableDisk = c.cfg.Defaults.MultiReadDisableDisk
 	}
 
 	if cfg.HappyEyeballsDelay == 0 {
-		cfg.HappyEyeballsDelay = c.network.HappyEyeballsDelay
+		cfg.HappyEyeballsDelay = c.cfg.Network.HappyEyeballsDelay
 	}
 
 	if cfg.MultiReadThreshold == 0 {
-		cfg.MultiReadThreshold = c.defaults.MultiReadThreshold
+		cfg.MultiReadThreshold = c.cfg.Defaults.MultiReadThreshold
 	}
 
 	if cfg.ProxyAddr == nil {
-		cfg.ProxyAddr = c.network.ProxyAddr
+		cfg.ProxyAddr = c.cfg.Network.ProxyAddr
 	}
 
 	if cfg.P0fSignature == nil {
-		cfg.P0fSignature = c.fingerprint.P0fSignature
+		cfg.P0fSignature = c.cfg.Fingerprint.P0fSignature
 	}
 
 	if cfg.SessionCache == nil {
-		cfg.SessionCache = c.fingerprint.SessionCache
+		cfg.SessionCache = c.cfg.Fingerprint.SessionCache
 	}
 
 	if cfg.PacketPadding == nil {
-		cfg.PacketPadding = c.fingerprint.PacketPadding
+		cfg.PacketPadding = c.cfg.Fingerprint.PacketPadding
 	}
 
 	if cfg.SocketController == nil {
-		cfg.SocketController = c.network.SocketController
+		cfg.SocketController = c.cfg.Network.SocketController
 	}
 
 	if cfg.ClientHelloSpecProvider == nil {
-		cfg.ClientHelloSpecProvider = c.fingerprint.TLSClientHelloSpecProvider
+		cfg.ClientHelloSpecProvider = c.cfg.Fingerprint.TLSClientHelloSpecProvider
 	}
 
 	if cfg.JA4Callback == nil {
-		cfg.JA4Callback = c.fingerprint.JA4Callback
+		cfg.JA4Callback = c.cfg.Fingerprint.JA4Callback
 	}
 
-	if cfg.QueryEncoder == nil && c.defaults.QueryEncoder != nil {
-		cfg.QueryEncoder = c.defaults.QueryEncoder
+	if cfg.QueryEncoder == nil && c.cfg.Defaults.QueryEncoder != nil {
+		cfg.QueryEncoder = c.cfg.Defaults.QueryEncoder
 	}
 
-	if len(c.defaults.Decoders) > 0 {
+	if len(c.cfg.Defaults.Decoders) > 0 {
 		if cfg.Decoders == nil {
-			cfg.Decoders = make(map[string]core.ResponseDecoder, len(c.defaults.Decoders))
+			cfg.Decoders = make(map[string]core.ResponseDecoder, len(c.cfg.Defaults.Decoders))
 		}
 
-		for k, v := range c.defaults.Decoders {
+		for k, v := range c.cfg.Defaults.Decoders {
 			if _, ok := cfg.Decoders[k]; !ok {
 				cfg.Decoders[k] = v
 			}
 		}
 	}
 
-	if len(c.fingerprint.CertificatePins) > 0 {
+	if len(c.cfg.Fingerprint.CertificatePins) > 0 {
 		c.mergeCertificatePins(cfg)
 	}
 }
 
 // mergeCertificatePins merges client-level SHA-256 certificate pins into a per-request config.
 func (c *Client) mergeCertificatePins(cfg *RequestConfig) {
-	for domain, hashes := range c.fingerprint.CertificatePins {
+	for domain, hashes := range c.cfg.Fingerprint.CertificatePins {
 		if len(hashes) == 0 {
 			continue
 		}
 
 		if cfg.CertificatePins == nil {
-			cfg.CertificatePins = make(map[string][]string, len(c.fingerprint.CertificatePins))
+			cfg.CertificatePins = make(map[string][]string, len(c.cfg.Fingerprint.CertificatePins))
 		}
 
 		existing := cfg.CertificatePins[domain]
@@ -928,23 +928,23 @@ func (c *Client) resolvePipeline(req *http.Request) PipelineConfig {
 		return pipelineToAoniConfig(p)
 	}
 
-	pipe := c.defaults.Pipeline
-	if !pipe.RotateUA && len(c.defaults.UARotationProfiles) > 0 {
+	pipe := c.cfg.Defaults.Pipeline
+	if !pipe.RotateUA && len(c.cfg.Defaults.UARotationProfiles) > 0 {
 		pipe.RotateUA = true
 	}
 
 	if pipe.SizeLimit == 0 {
-		pipe.SizeLimit = c.defaults.MaxResponseSize
+		pipe.SizeLimit = c.cfg.Defaults.MaxResponseSize
 	}
 
-	if !pipe.Inspect && c.defaults.Inspector != nil {
+	if !pipe.Inspect && c.cfg.Defaults.Inspector != nil {
 		pipe.Inspect = true
 	}
 
-	if pipe.Hedging == nil && (c.network.HedgingDelay > 0 || c.network.DynamicHedging != nil) {
+	if pipe.Hedging == nil && (c.cfg.Network.HedgingDelay > 0 || c.cfg.Network.DynamicHedging != nil) {
 		pipe.Hedging = &HedgingConfig{
-			DefaultDelay:   c.network.HedgingDelay,
-			DynamicHedging: c.network.DynamicHedging,
+			DefaultDelay:   c.cfg.Network.HedgingDelay,
+			DynamicHedging: c.cfg.Network.DynamicHedging,
 		}
 	}
 
@@ -954,19 +954,19 @@ func (c *Client) resolvePipeline(req *http.Request) PipelineConfig {
 // toPipelineDefaults maps ClientDefaults into internal pipeline.ClientDefaults DTOs.
 func (c *Client) toPipelineDefaults() pipeline.ClientDefaults {
 	return pipeline.ClientDefaults{
-		Headers:              c.defaults.Headers,
-		BeforeRequest:        c.defaults.BeforeRequest,
-		AfterResponse:        c.defaults.AfterResponse,
-		Inspector:            c.defaults.Inspector,
-		ResponseValidator:    c.defaults.ResponseValidator,
-		ChallengeDetector:    c.defaults.ChallengeDetector,
-		ChallengeSolver:      c.defaults.ChallengeSolver,
-		UARotationProfiles:   c.defaults.toInternalProfiles(),
+		Headers:              c.cfg.Defaults.Headers,
+		BeforeRequest:        c.cfg.Defaults.BeforeRequest,
+		AfterResponse:        c.cfg.Defaults.AfterResponse,
+		Inspector:            c.cfg.Defaults.Inspector,
+		ResponseValidator:    c.cfg.Defaults.ResponseValidator,
+		ChallengeDetector:    c.cfg.Defaults.ChallengeDetector,
+		ChallengeSolver:      c.cfg.Defaults.ChallengeSolver,
+		UARotationProfiles:   c.cfg.Defaults.toInternalProfiles(),
 		RefererState:         c.referer,
-		MaxResponseSize:      c.defaults.MaxResponseSize,
-		MultiReadThreshold:   c.defaults.MultiReadThreshold,
-		MultiReadDisableDisk: c.defaults.MultiReadDisableDisk,
-		RefererAutomaton:     c.defaults.RefererAutomaton,
+		MaxResponseSize:      c.cfg.Defaults.MaxResponseSize,
+		MultiReadThreshold:   c.cfg.Defaults.MultiReadThreshold,
+		MultiReadDisableDisk: c.cfg.Defaults.MultiReadDisableDisk,
+		RefererAutomaton:     c.cfg.Defaults.RefererAutomaton,
 	}
 }
 

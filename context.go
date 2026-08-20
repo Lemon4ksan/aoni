@@ -14,7 +14,7 @@ import (
 	"github.com/lemon4ksan/foundation/generic"
 	furl "github.com/lemon4ksan/foundation/net/url"
 	"github.com/lemon4ksan/foundation/silicon/pool"
-	fastrand "github.com/lemon4ksan/foundation/silicon/rand"
+	frand "github.com/lemon4ksan/foundation/silicon/rand"
 
 	"github.com/lemon4ksan/aoni/internal/core"
 	"github.com/lemon4ksan/aoni/internal/io"
@@ -142,7 +142,7 @@ func ApplyTCPDelay(ctx context.Context) error {
 
 	delay := r.Min
 	if window > 0 {
-		delay += fastrand.Jitter(window)
+		delay += frand.Jitter(window)
 	}
 
 	if delay <= 0 {

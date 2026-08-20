@@ -154,9 +154,7 @@ func stageRefererStateUpdate[Req, Resp any](
 	_ *Tx,
 ) (*http.Response, error) {
 	if p.defaults.RefererAutomaton && p.defaults.RefererState != nil && stdReq != nil && stdReq.URL != nil {
-		p.defaults.RefererState.Mu.Lock()
-		p.defaults.RefererState.LastURL = stdReq.URL.String()
-		p.defaults.RefererState.Mu.Unlock()
+		p.defaults.RefererState.LastURL.Set(stdReq.URL.String())
 	}
 
 	return resp, nil

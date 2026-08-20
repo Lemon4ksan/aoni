@@ -47,7 +47,7 @@ func (c *Client) DialContext(ctx context.Context, network, addr string) (net.Con
 
 	conn, err := dialer.DialContext(ctx, network, addr, dialCfg)
 	if err == nil {
-		sysnet.TuneSocketConnWithFlags(conn, uint64(c.network.ExperimentalFlags))
+		sysnet.TuneSocketConnWithFlags(conn, uint64(c.cfg.Network.ExperimentalFlags))
 	}
 
 	return conn, err
@@ -136,10 +136,10 @@ func (c *Client) applyDialers(tr *http.Transport) {
 // buildDialConfig constructs a self-contained transport.DialConfig DTO by merging
 // client-level defaults with per-request context overrides extracted via GetRequestConfig.
 func (c *Client) buildDialConfig(ctx context.Context) transport.DialConfig {
-	cfgDTO := c.snapshotConfig()
+	cfgDTO := c.cfg.Clone()
 	cfg := cfgDTO.BuildDialConfig(ctx)
-	cfg.InterfaceName = c.network.InterfaceName
-	cfg.SocketMark = c.network.SocketMark
+	cfg.InterfaceName = c.cfg.Network.InterfaceName
+	cfg.SocketMark = c.cfg.Network.SocketMark
 	cfg.BaseTLSConfig = c.resolveBaseTLSConfig(ctx)
 	cfg.HelloID = c.resolveHelloID()
 	cfg.ApplyRequestOverrides(GetRequestConfig(ctx))
@@ -161,7 +161,7 @@ func (c *Client) resolveBaseTLSConfig(ctx context.Context) *tls.Config {
 // resolveHelloID maps the active BrowserID preset (Chrome, Firefox, Safari) to its
 // corresponding uTLS HelloID auto-preset, or returns the explicitly set TLSClientHelloID.
 func (c *Client) resolveHelloID() *utls.ClientHelloID {
-	f := c.fingerprint
+	f := c.cfg.Fingerprint
 	if f.TLSClientHelloID != nil {
 		return f.TLSClientHelloID
 	}

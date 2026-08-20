@@ -101,9 +101,7 @@ func (c *Client) With(opts ...aoni.ClientOption) *Client {
 
 	clonedReferer := &pipeline.RefererState{}
 	if c.referer != nil {
-		c.referer.Mu.Lock()
-		clonedReferer.LastURL = c.referer.LastURL
-		c.referer.Mu.Unlock()
+		clonedReferer.LastURL.Set(c.referer.LastURL.Get())
 	}
 
 	cloned := &Client{

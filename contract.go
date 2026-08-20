@@ -5,6 +5,8 @@
 package aoni
 
 import (
+	"net/http"
+
 	"github.com/lemon4ksan/foundation/generic"
 
 	"github.com/lemon4ksan/aoni/internal/core"
@@ -65,7 +67,36 @@ type (
 	Configurable[T any] interface {
 		With(opts ...ClientOption) T
 	}
+
+	// Unwrapper is a protocol representing any wrapper entity capable of revealing its underlying wrapped object.
+	Unwrapper[T any] interface {
+		Unwrap() T
+	}
 )
+
+// UnwrapAs traverses nested [Unwrapper] layers until an instance of target type T is found.
+func UnwrapAs[T any](target any) (T, bool) {
+	curr := target
+	for curr != nil {
+		if typed, ok := curr.(T); ok {
+			return typed, true
+		}
+
+		if u, ok := curr.(interface{ Unwrap() http.RoundTripper }); ok {
+			curr = u.Unwrap()
+			continue
+		}
+
+		if u, ok := curr.(interface{ Unwrap() any }); ok {
+			curr = u.Unwrap()
+			continue
+		}
+
+		break
+	}
+
+	return generic.Zero[T](), false
+}
 
 // ConfigureAs applies [ClientOption] layers to any target conforming to the [Configurable[T]] protocol.
 func ConfigureAs[T any](target Configurable[T], opts ...ClientOption) T {

@@ -6,6 +6,7 @@ package aoni
 
 import (
 	"errors"
+	"net"
 	"net/http"
 	"net/url"
 	"time"
@@ -74,6 +75,22 @@ func DefaultEngine(doer any) HTTPDoer {
 	return &http.Client{
 		Timeout:       15 * time.Second,
 		CheckRedirect: DefaultRedirectPolicy(10),
+		Transport:     newDefaultTransport(),
+	}
+}
+
+func newDefaultTransport() *http.Transport {
+	return &http.Transport{
+		Proxy: http.ProxyFromEnvironment,
+		DialContext: (&net.Dialer{
+			Timeout:   30 * time.Second,
+			KeepAlive: 30 * time.Second,
+		}).DialContext,
+		ForceAttemptHTTP2:     true,
+		MaxIdleConns:          100,
+		IdleConnTimeout:       90 * time.Second,
+		TLSHandshakeTimeout:   10 * time.Second,
+		ExpectContinueTimeout: 1 * time.Second,
 	}
 }
 
@@ -222,18 +239,18 @@ func (c *Client) reapplyH2Settings(tr *http.Transport) {
 		return
 	}
 
-	if c.fingerprint.H2Configurer == nil && c.fingerprint.H2Settings == nil {
+	if c.cfg.Fingerprint.H2Configurer == nil && c.cfg.Fingerprint.H2Settings == nil {
 		return
 	}
 
 	settings := h2.Settings{}
-	if c.fingerprint.H2Settings != nil {
-		settings = *c.fingerprint.H2Settings
+	if c.cfg.Fingerprint.H2Settings != nil {
+		settings = *c.cfg.Fingerprint.H2Settings
 	}
 
 	framed := h2.NewFramedTransport(tr, settings)
-	if c.fingerprint.H2Configurer != nil && framed.H2Transport() != nil {
-		_ = c.fingerprint.H2Configurer.ConfigureHTTP2(framed.H2Transport())
+	if c.cfg.Fingerprint.H2Configurer != nil && framed.H2Transport() != nil {
+		_ = c.cfg.Fingerprint.H2Configurer.ConfigureHTTP2(framed.H2Transport())
 	}
 
 	if httpClient, ok := c.engine.(*http.Client); ok {
@@ -258,6 +275,10 @@ func applyEngineConfig(c *Client, eng EngineConfig) {
 	httpClient, ok := c.engine.(*http.Client)
 	if !ok {
 		return
+	}
+
+	if httpClient.Transport == nil {
+		httpClient.Transport = newDefaultTransport()
 	}
 
 	if eng.Timeout > 0 {

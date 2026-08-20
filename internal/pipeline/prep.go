@@ -400,11 +400,7 @@ func (p *Pipeline[Req, Resp]) applyRefererHeader(req *http.Request) {
 		return
 	}
 
-	p.defaults.RefererState.Mu.Lock()
-	lastURL := p.defaults.RefererState.LastURL
-	p.defaults.RefererState.Mu.Unlock()
-
-	if lastURL != "" {
+	if lastURL := p.defaults.RefererState.LastURL.Get(); lastURL != "" {
 		req.Header.Set("Referer", lastURL)
 	}
 }

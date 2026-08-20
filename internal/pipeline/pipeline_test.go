@@ -20,6 +20,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/lemon4ksan/foundation/generic"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -737,7 +738,7 @@ func TestPipeline_PhasePrep_Full(t *testing.T) {
 			{UserAgent: "RotatedUA/1.0", ClientHints: map[string]string{"Sec-CH-UA": "Profile1"}},
 		},
 		RefererAutomaton: true,
-		RefererState:     &RefererState{LastURL: "http://previous.com"},
+		RefererState:     &RefererState{LastURL: *generic.NewSafe("http://previous.com")},
 	}
 
 	fingerprintConfig := ClientFingerprint{
