@@ -31,6 +31,34 @@ func (p *Pipeline[Req, Resp]) postProcessResponse(
 	resp *http.Response,
 	tx *Tx,
 ) (*http.Response, error) {
+	stages := []PostStage[Req, Resp]{
+		stageValidateSmuggling[Req, Resp],
+		stageDecompressAndTranscode[Req, Resp],
+		stageCacheStorage[Req, Resp],
+		stageSizeLimit[Req, Resp],
+		stageWAFChallenge[Req, Resp],
+		stageValidateResponse[Req, Resp],
+		stageRefererStateUpdate[Req, Resp],
+		stageMultiReadBuffering[Req, Resp],
+	}
+
+	var err error
+	for _, stage := range stages {
+		resp, err = stage(p, stdReq, resp, tx)
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	return resp, nil
+}
+
+func stageValidateSmuggling[Req, Resp any](
+	_ *Pipeline[Req, Resp],
+	_ *http.Request,
+	resp *http.Response,
+	tx *Tx,
+) (*http.Response, error) {
 	if tx.Flags&FlagValidate != 0 {
 		if err := validateResponseSmugglingGuards(resp); err != nil {
 			if resp != nil && resp.Body != nil {
@@ -41,12 +69,30 @@ func (p *Pipeline[Req, Resp]) postProcessResponse(
 		}
 	}
 
+	return resp, nil
+}
+
+func stageDecompressAndTranscode[Req, Resp any](
+	p *Pipeline[Req, Resp],
+	stdReq *http.Request,
+	resp *http.Response,
+	tx *Tx,
+) (*http.Response, error) {
 	if tx.Flags&FlagDecompress != 0 {
 		resp = p.handleDecompressionAndTranscoding(stdReq, resp)
 	} else if resp != nil && resp.Body != nil {
 		resp.Body = applyCharsetTranscoding(resp, resp.Body)
 	}
 
+	return resp, nil
+}
+
+func stageCacheStorage[Req, Resp any](
+	p *Pipeline[Req, Resp],
+	stdReq *http.Request,
+	resp *http.Response,
+	tx *Tx,
+) (*http.Response, error) {
 	if tx.Flags&FlagCache != 0 && tx.Cache != nil {
 		if stdReq.Method == http.MethodGet {
 			p.saveToCache(stdReq, resp, tx.Cache)
@@ -55,33 +101,73 @@ func (p *Pipeline[Req, Resp]) postProcessResponse(
 		}
 	}
 
+	return resp, nil
+}
+
+func stageSizeLimit[Req, Resp any](
+	p *Pipeline[Req, Resp],
+	_ *http.Request,
+	resp *http.Response,
+	tx *Tx,
+) (*http.Response, error) {
 	if tx.SizeLimit > 0 {
 		if limitErr := p.limitResponseSize(resp, tx.SizeLimit); limitErr != nil {
 			return nil, limitErr
 		}
 	}
 
-	if tx.Flags&FlagChallenge != 0 {
-		var err error
+	return resp, nil
+}
 
-		resp, err = p.handleWAFChallenge(stdReq, resp)
-		if err != nil {
-			return nil, err
-		}
+func stageWAFChallenge[Req, Resp any](
+	p *Pipeline[Req, Resp],
+	stdReq *http.Request,
+	resp *http.Response,
+	tx *Tx,
+) (*http.Response, error) {
+	if tx.Flags&FlagChallenge != 0 {
+		return p.handleWAFChallenge(stdReq, resp)
 	}
 
+	return resp, nil
+}
+
+func stageValidateResponse[Req, Resp any](
+	p *Pipeline[Req, Resp],
+	_ *http.Request,
+	resp *http.Response,
+	tx *Tx,
+) (*http.Response, error) {
 	if tx.Flags&FlagValidate != 0 {
 		if valErr := p.validateResponse(resp, tx); valErr != nil {
 			return nil, valErr
 		}
 	}
 
+	return resp, nil
+}
+
+func stageRefererStateUpdate[Req, Resp any](
+	p *Pipeline[Req, Resp],
+	stdReq *http.Request,
+	resp *http.Response,
+	_ *Tx,
+) (*http.Response, error) {
 	if p.defaults.RefererAutomaton && p.defaults.RefererState != nil && stdReq != nil && stdReq.URL != nil {
 		p.defaults.RefererState.Mu.Lock()
 		p.defaults.RefererState.LastURL = stdReq.URL.String()
 		p.defaults.RefererState.Mu.Unlock()
 	}
 
+	return resp, nil
+}
+
+func stageMultiReadBuffering[Req, Resp any](
+	p *Pipeline[Req, Resp],
+	_ *http.Request,
+	resp *http.Response,
+	tx *Tx,
+) (*http.Response, error) {
 	if resp != nil && resp.Body != nil {
 		if bufErr := p.applyMultiReadBuffering(resp, tx); bufErr != nil {
 			return nil, bufErr

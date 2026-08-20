@@ -364,16 +364,7 @@ func (pj *PersistentJar) SetCookies(u *url.URL, cookies []*http.Cookie) {
 			continue
 		}
 
-		pj.cookiesMap[key] = Cookie{
-			Name:     c.Name,
-			Value:    c.Value,
-			Domain:   domain,
-			Path:     path,
-			Expires:  c.Expires,
-			HTTPOnly: c.HttpOnly,
-			Secure:   c.Secure,
-			MaxAge:   c.MaxAge,
-		}
+		pj.cookiesMap[key] = FromStd(c, domain, path)
 		changed = true
 	}
 

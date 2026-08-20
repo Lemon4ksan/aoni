@@ -44,42 +44,85 @@ func (p *Pipeline[Req, Resp]) prepareRequest(req any, tx *Tx) *http.Request {
 
 	stdReq = p.prepareRequestContext(req, stdReq)
 
+	stages := []PrepStage[Req, Resp]{
+		stageBeforeRequestHooks[Req, Resp],
+		stagePacketPadding[Req, Resp],
+		stageRefererHeader[Req, Resp],
+		stageRotateUserAgent[Req, Resp],
+		stageDPIJitter[Req, Resp],
+		stageRedactSensitiveData[Req, Resp],
+		stageUploadProgress[Req, Resp],
+		stageJA4Report[Req, Resp],
+	}
+
+	for _, stage := range stages {
+		stdReq = stage(p, stdReq, tx)
+	}
+
+	return stdReq
+}
+
+func stageBeforeRequestHooks[Req, Resp any](p *Pipeline[Req, Resp], req *http.Request, _ *Tx) *http.Request {
 	for _, hook := range p.defaults.BeforeRequest {
-		hook(stdReq)
+		hook(req)
 	}
 
+	return req
+}
+
+func stagePacketPadding[Req, Resp any](p *Pipeline[Req, Resp], req *http.Request, _ *Tx) *http.Request {
 	if p.fingerprint.PacketPadding != nil {
-		p.applyPacketPadding(stdReq)
+		p.applyPacketPadding(req)
 	}
 
+	return req
+}
+
+func stageRefererHeader[Req, Resp any](p *Pipeline[Req, Resp], req *http.Request, _ *Tx) *http.Request {
 	if p.defaults.RefererAutomaton {
-		p.applyRefererHeader(stdReq)
+		p.applyRefererHeader(req)
 	}
 
+	return req
+}
+
+func stageRotateUserAgent[Req, Resp any](p *Pipeline[Req, Resp], req *http.Request, tx *Tx) *http.Request {
 	if tx.Flags&FlagRotateUA != 0 {
-		p.rotateUserAgentAndHints(stdReq)
+		p.rotateUserAgentAndHints(req)
 	}
 
+	return req
+}
+
+func stageDPIJitter[Req, Resp any](p *Pipeline[Req, Resp], req *http.Request, tx *Tx) *http.Request {
 	if tx.Flags&FlagDPIJitter != 0 && tx.DPIJitter != nil {
-		p.applyDPIJitter(stdReq, tx.DPIJitter)
+		p.applyDPIJitter(req, tx.DPIJitter)
 	}
 
+	return req
+}
+
+func stageRedactSensitiveData[Req, Resp any](p *Pipeline[Req, Resp], req *http.Request, tx *Tx) *http.Request {
 	if tx.Flags&FlagRedact != 0 && tx.Redact != nil {
-		stdReq = p.redactSensitiveData(stdReq, tx.Redact)
+		return p.redactSensitiveData(req, tx.Redact)
 	}
 
-	cfg := GetRequestConfig(stdReq.Context())
-	if cfg != nil && cfg.UploadProgress != nil && stdReq.Body != nil && stdReq.Body != http.NoBody {
+	return req
+}
+
+func stageUploadProgress[Req, Resp any](_ *Pipeline[Req, Resp], req *http.Request, _ *Tx) *http.Request {
+	cfg := GetRequestConfig(req.Context())
+	if cfg != nil && cfg.UploadProgress != nil && req.Body != nil && req.Body != http.NoBody {
 		progressReader := &io.ProgressReader{
-			Reader:     stdReq.Body,
-			Total:      stdReq.ContentLength,
+			Reader:     req.Body,
+			Total:      req.ContentLength,
 			OnProgress: cfg.UploadProgress,
 		}
-		stdReq.Body = progressReader
+		req.Body = progressReader
 
-		if stdReq.GetBody != nil {
-			origGetBody := stdReq.GetBody
-			stdReq.GetBody = func() (stdio.ReadCloser, error) {
+		if req.GetBody != nil {
+			origGetBody := req.GetBody
+			req.GetBody = func() (stdio.ReadCloser, error) {
 				rc, err := origGetBody()
 				if err != nil {
 					return nil, err
@@ -87,22 +130,27 @@ func (p *Pipeline[Req, Resp]) prepareRequest(req any, tx *Tx) *http.Request {
 
 				return &io.ProgressReader{
 					Reader:     rc,
-					Total:      stdReq.ContentLength,
+					Total:      req.ContentLength,
 					OnProgress: cfg.UploadProgress,
 				}, nil
 			}
 		}
 	}
 
+	return req
+}
+
+func stageJA4Report[Req, Resp any](_ *Pipeline[Req, Resp], req *http.Request, _ *Tx) *http.Request {
+	cfg := GetRequestConfig(req.Context())
 	if cfg != nil && cfg.JA4ReportStore != nil && cfg.JA4ReportStore.Target != nil {
 		if cfg.JA4ReportStore.Target.JA4 == nil {
 			cfg.JA4ReportStore.Target.JA4 = &ja4.Report{}
 		}
 
-		cfg.JA4ReportStore.Target.JA4.JA4H = telemetry.ComputeJA4HFromRequest(stdReq)
+		cfg.JA4ReportStore.Target.JA4.JA4H = telemetry.ComputeJA4HFromRequest(req)
 	}
 
-	return stdReq
+	return req
 }
 
 func (p *Pipeline[Req, Resp]) prepareRequestContext(req any, stdReq *http.Request) *http.Request {

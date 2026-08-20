@@ -15,29 +15,32 @@ import (
 	"github.com/lemon4ksan/foundation/silicon/bytesconv"
 )
 
-// CookieDTO is the internal lightweight data transfer representation of an HTTP cookie,
-// capturing attributes from Set-Cookie headers before conversion to [http.Cookie].
-type CookieDTO struct {
-	Expires      time.Time
-	Name         string
-	Value        string
-	Domain       string
-	Path         string
-	SameSite     string
-	PartitionKey string
-	HTTPOnly     bool
-	Secure       bool
-	Partitioned  bool
-	MaxAge       int
+// Cookie represents an HTTP cookie structure, capturing attributes from Set-Cookie headers
+// and formatted for storage and persistence.
+type Cookie struct {
+	Expires      time.Time `json:"expires,omitempty"`
+	Name         string    `json:"name"`
+	Value        string    `json:"value"`
+	Domain       string    `json:"domain"`
+	Path         string    `json:"path"`
+	SameSite     string    `json:"sameSite,omitempty"`
+	PartitionKey string    `json:"partitionKey,omitempty"`
+	HTTPOnly     bool      `json:"httpOnly,omitempty"`
+	Secure       bool      `json:"secure,omitempty"`
+	Partitioned  bool      `json:"partitioned,omitempty"`
+	MaxAge       int       `json:"maxAge,omitempty"`
 }
 
+// CookieDTO is an alias for [Cookie] provided for backwards compatibility.
+type CookieDTO = Cookie
+
 // ParseSetCookieHeader parses a raw Set-Cookie header line with zero heap allocations.
-func ParseSetCookieHeader(headerVal, defaultDomain, defaultPath string) CookieDTO {
+func ParseSetCookieHeader(headerVal, defaultDomain, defaultPath string) Cookie {
 	if headerVal == "" {
-		return CookieDTO{}
+		return Cookie{}
 	}
 
-	c := CookieDTO{
+	c := Cookie{
 		Domain: defaultDomain,
 		Path:   defaultPath,
 	}
@@ -56,7 +59,7 @@ func ParseSetCookieHeader(headerVal, defaultDomain, defaultPath string) CookieDT
 	}
 
 	if c.Name == "" {
-		return CookieDTO{}
+		return Cookie{}
 	}
 
 	return c
