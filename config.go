@@ -197,7 +197,9 @@ type EngineConfig struct {
 	// RedirectLimit sets the maximum number of HTTP redirects followed automatically.
 	//   - Default (> 0): Follows up to N redirects with cross-origin header scrubbing.
 	//   - 0: Disables automatic redirect following (returns 3xx response directly).
-	//   - Negative (-2): Uses default limit (10 redirects).
+	//   - Negative (-1): Uses default limit (10 redirects).
+	//   - [RedirectLimitUnset]: Fully bypasses redirect policy check.
+	//     All redirects will be followed without any header scrubbing or security policy enforcement.
 	RedirectLimit int
 
 	// InsecureSkipVerify bypasses TLS server certificate and hostname verification.
@@ -208,18 +210,29 @@ type EngineConfig struct {
 	// If set, takes precedence over RedirectLimit.
 	CheckRedirect func(req *http.Request, via []*http.Request) error
 
-	// Protocols maps non-HTTP URL schemes (e.g. "file", "ftp", "s3") to custom RoundTrippers.
-	Protocols map[string]http.RoundTripper
+	// Protocols maps non-HTTP URL schemes (e.g. "file", "ftp", "s3", "blob") to custom RoundTrippers.
+	Protocols ProtocolMap
+}
+
+// ProtocolMap maps non-HTTP URL schemes (e.g. "file", "ftp", "s3", "blob") to custom [http.RoundTripper] handlers.
+type ProtocolMap map[string]http.RoundTripper
+
+// Clone creates a memory-isolated copy of the protocol handler map.
+func (p ProtocolMap) Clone() ProtocolMap {
+	if p == nil {
+		return nil
+	}
+
+	cloned := make(ProtocolMap, len(p))
+	maps.Copy(cloned, p)
+
+	return cloned
 }
 
 // Clone creates a deep copy of EngineConfig and its nested maps and pointers.
 func (e EngineConfig) Clone() EngineConfig {
 	cloned := e
-	if e.Protocols != nil {
-		cloned.Protocols = make(map[string]http.RoundTripper, len(e.Protocols))
-		maps.Copy(cloned.Protocols, e.Protocols)
-	}
-
+	cloned.Protocols = e.Protocols.Clone()
 	cloned.ConnectionPool = clonePtr(e.ConnectionPool)
 	cloned.HTTP2Config = clonePtr(e.HTTP2Config)
 
@@ -451,19 +464,63 @@ func (b BrowserID) String() string {
 	}
 }
 
+// ClientHintsMap maps Client Hints header keys (e.g. "Sec-CH-UA-Platform") to string values.
+type ClientHintsMap map[string]string
+
+// Clone creates a memory-isolated copy of the client hints map.
+func (c ClientHintsMap) Clone() ClientHintsMap {
+	if c == nil {
+		return nil
+	}
+
+	cloned := make(ClientHintsMap, len(c))
+	maps.Copy(cloned, c)
+
+	return cloned
+}
+
 // BrowserProfile holds user-agent strings and Client Hints headers for profile rotation.
 type BrowserProfile struct {
 	UserAgent   string
-	ClientHints map[string]string
+	ClientHints ClientHintsMap
 }
 
 // Clone creates a deep copy of BrowserProfile and its ClientHints map.
 func (b BrowserProfile) Clone() BrowserProfile {
-	cloned := b
-	if len(b.ClientHints) > 0 {
-		cloned.ClientHints = make(map[string]string, len(b.ClientHints))
-		maps.Copy(cloned.ClientHints, b.ClientHints)
+	return BrowserProfile{
+		UserAgent:   b.UserAgent,
+		ClientHints: b.ClientHints.Clone(),
 	}
+}
+
+// CertificatePinMap maps domain patterns to expected SHA-256 SPKI fingerprint hashes.
+type CertificatePinMap map[string][]string
+
+// Clone creates a memory-isolated deep copy of the certificate pin map.
+func (c CertificatePinMap) Clone() CertificatePinMap {
+	if c == nil {
+		return nil
+	}
+
+	cloned := make(CertificatePinMap, len(c))
+	for k, v := range c {
+		cloned[k] = slices.Clone(v)
+	}
+
+	return cloned
+}
+
+// DecoderMap maps MIME content types (e.g. "application/json") to response body decoders.
+type DecoderMap map[string]ResponseDecoder
+
+// Clone creates a memory-isolated copy of the decoder map.
+func (d DecoderMap) Clone() DecoderMap {
+	if d == nil {
+		return nil
+	}
+
+	cloned := make(DecoderMap, len(d))
+	maps.Copy(cloned, d)
 
 	return cloned
 }
@@ -506,7 +563,7 @@ type FingerprintConfig struct {
 	PacketPadding *fingerprint.PaddingConfig
 
 	// CertificatePins maps domain patterns to expected SHA-256 SPKI fingerprint hashes.
-	CertificatePins map[string][]string
+	CertificatePins CertificatePinMap
 
 	// CertCompression specifies RFC 8879 certificate compression algorithms (Brotli, Zstd, Zlib).
 	CertCompression []cert.CompressionAlgorithm
@@ -538,6 +595,7 @@ func (f FingerprintConfig) Clone() FingerprintConfig {
 	cloned.H2Settings = clonePtr(f.H2Settings)
 	cloned.H3Settings = clonePtr(f.H3Settings)
 	cloned.PacketPadding = clonePtr(f.PacketPadding)
+	cloned.CertificatePins = f.CertificatePins.Clone()
 
 	if len(f.HeaderOrder) > 0 {
 		cloned.HeaderOrder = slices.Clone(f.HeaderOrder)
@@ -549,15 +607,6 @@ func (f FingerprintConfig) Clone() FingerprintConfig {
 
 	if len(f.ECHConfigList) > 0 {
 		cloned.ECHConfigList = slices.Clone(f.ECHConfigList)
-	}
-
-	if len(f.CertificatePins) > 0 {
-		pinsCopy := make(map[string][]string, len(f.CertificatePins))
-		for k, v := range f.CertificatePins {
-			pinsCopy[k] = slices.Clone(v)
-		}
-
-		cloned.CertificatePins = pinsCopy
 	}
 
 	return cloned
@@ -628,7 +677,7 @@ type ClientDefaults struct {
 	QueryEncoder QueryEncoder
 
 	// Decoders maps MIME content types (e.g. "application/json") to response body decoders.
-	Decoders map[string]ResponseDecoder
+	Decoders DecoderMap
 
 	// Logger receives structured diagnostic log events.
 	Logger core.Logger
@@ -664,10 +713,7 @@ func (d ClientDefaults) Clone() ClientDefaults {
 		cloned.DefaultMods = slices.Clone(d.DefaultMods)
 	}
 
-	if d.Decoders != nil {
-		cloned.Decoders = make(map[string]ResponseDecoder, len(d.Decoders))
-		maps.Copy(cloned.Decoders, d.Decoders)
-	}
+	cloned.Decoders = d.Decoders.Clone()
 
 	if len(d.UARotationProfiles) > 0 {
 		cloned.UARotationProfiles = make([]BrowserProfile, len(d.UARotationProfiles))

@@ -8,7 +8,6 @@ import (
 	"bytes"
 	"context"
 	"crypto/tls"
-	"io"
 	"log/slog"
 	"net/http"
 	"net/url"
@@ -592,6 +591,11 @@ func (c *Client) ensureUserAgent() {
 	}
 }
 
+func (c *Client) isRootPath(path string) bool {
+	return len(path) > 0 && path[0] == '/' && c.prepared.BaseURL != nil &&
+		(c.prepared.BaseURL.Path == "" || c.prepared.BaseURL.Path == "/")
+}
+
 // resolveURL resolves relative path against client BaseURL or parses absolute URL strings.
 func (c *Client) resolveURL(path string) (*url.URL, error) {
 	if (path == "" || path == "/") && c.prepared.BaseURL != nil {
@@ -599,8 +603,7 @@ func (c *Client) resolveURL(path string) (*url.URL, error) {
 		return &clone, nil
 	}
 
-	if len(path) > 0 && path[0] == '/' && c.prepared.BaseURL != nil &&
-		(c.prepared.BaseURL.Path == "" || c.prepared.BaseURL.Path == "/") {
+	if c.isRootPath(path) {
 		return &url.URL{
 			Scheme:   c.prepared.BaseURL.Scheme,
 			Host:     c.prepared.BaseURL.Host,
@@ -623,45 +626,38 @@ func (c *Client) resolveURL(path string) (*url.URL, error) {
 	return u, nil
 }
 
-func () {
-	len(path) > 0 && path[0] == '/' && c.prepared.BaseURL != nil &&
-		(c.prepared.BaseURL.Path == "" || c.prepared.BaseURL.Path == "/")
+func isAbsURL(path string) bool {
+	return len(path) >= 7 && (strings.HasPrefix(path, "http://") || strings.HasPrefix(path, "https://"))
+}
+
+func (c *Client) hasNoBaseURL() bool {
+	return c.cfg.Defaults.BaseURL == nil || c.cfg.Defaults.BaseURL.Host == ""
 }
 
 // resolveTargetURL resolves path against BaseURL using precomputed zero-allocation string buffers (engine.PreparedConfig).
 // Eliminates url.Parse and string formatting allocations for relative path resolutions on the hot path.
 func (c *Client) resolveTargetURL(path string) (string, error) {
-	// 1. Fast Path: Absolute HTTP/HTTPS URLs bypass BaseURL resolution entirely with zero allocations
-	if len(path) >= 7 && (strings.HasPrefix(path, "http://") || strings.HasPrefix(path, "https://")) {
+	switch {
+	case isAbsURL(path) || c.hasNoBaseURL():
 		return path, nil
-	}
-
-	// 2. If no BaseURL is configured, return the path as-is
-	if c.cfg.Defaults.BaseURL == nil || c.cfg.Defaults.BaseURL.Host == "" {
-		return path, nil
-	}
-
-	// 3. Fast Path: Root or empty path returns the precomputed BaseURL string directly (0 allocs)
-	if path == "" || path == "/" {
+	case path == "" || path == "/":
 		if c.prepared.BaseURLString != "" {
 			return c.prepared.BaseURLString, nil
 		}
 
 		return c.cfg.Defaults.BaseURL.String(), nil
-	}
 
-	// 4. Hot Path Optimization: Splicing path onto pre-trimmed BaseURL string avoids url.Parse & URL.ResolveReference
-	if path[0] == '/' && c.prepared.BaseURLTrimmedString != "" {
+	case path[0] == '/' && c.prepared.BaseURLTrimmedString != "":
 		return c.prepared.BaseURLTrimmedString + path, nil
-	}
 
-	// 5. Fallback Path: Non-standard or relative subpaths with dot-segments (e.g. "../api") resolve via RFC 3986 reference
-	rel, err := furl.Parse(strings.TrimLeft(path, "/"))
-	if err != nil {
-		return "", &Error{Op: "invalid path", Err: ErrInvalidPath}
-	}
+	default: // Non-standard or relative subpaths with dot-segments (e.g. "../api") resolve via RFC 3986 reference
+		rel, err := furl.Parse(strings.TrimLeft(path, "/"))
+		if err != nil {
+			return "", &Error{Op: "invalid path", Err: ErrInvalidPath}
+		}
 
-	return c.cfg.Defaults.BaseURL.ResolveReference(rel).String(), nil
+		return c.cfg.Defaults.BaseURL.ResolveReference(rel).String(), nil
+	}
 }
 
 // resolveHTTPRequest converts a generic [Request] interface into a standard [*http.Request].
@@ -676,27 +672,19 @@ func (c *Client) resolveHTTPRequest(req Request) (*http.Request, error) {
 		ctx = context.Background()
 	}
 
-	var bodyReader io.Reader
-	if bs := req.BodyStream(); bs != nil {
-		bodyReader = bs
-	} else if bb := req.BodyBytes(); len(bb) > 0 {
-		bodyReader = bytes.NewReader(bb)
+	body := req.BodyStream()
+	if body == nil {
+		if bb := req.BodyBytes(); len(bb) > 0 {
+			body = bytes.NewReader(bb)
+		}
 	}
 
-	httpReq, err := http.NewRequestWithContext(ctx, req.Method(), req.URL(), bodyReader)
+	httpReq, err := http.NewRequestWithContext(ctx, req.Method(), req.URL(), body)
 	if err != nil {
 		return nil, &Error{Op: "failed to create http request", Err: err}
 	}
 
-	// Zero-copy bridge: If the request originates from fasthttp engine, extract headers
-	// using unsafe byte-to-string conversions (bytesconv.B2S) without string heap allocations
-	fastAdapter, ok := req.(interface{ FastHTTPRequest() *fasthttp.Request })
-	if !ok {
-		return httpReq, nil
-	}
-
-	fastReq := fastAdapter.FastHTTPRequest()
-	if fastReq != nil {
+	if fastReq := c.resolveFastHTTPRequest(req); fastReq != nil {
 		fastReq.Header.All()(func(k, v []byte) bool {
 			httpReq.Header.Add(bytesconv.B2S(k), bytesconv.B2S(v))
 			return true
@@ -708,6 +696,17 @@ func (c *Client) resolveHTTPRequest(req Request) (*http.Request, error) {
 	}
 
 	return httpReq, nil
+}
+
+// resolveFastHTTPRequest returns the [*fasthttp.Request] if the request
+// originates from fasthttp engine, extract headers for zero-allocation path.
+func (c *Client) resolveFastHTTPRequest(req Request) *fasthttp.Request {
+	fastAdapter, ok := req.(interface{ FastHTTPRequest() *fasthttp.Request })
+	if !ok {
+		return nil
+	}
+
+	return fastAdapter.FastHTTPRequest()
 }
 
 // applyConfig applies a Config DTO to the client instance, recreating internal engines and transport dialers.
