@@ -213,6 +213,7 @@ func (b *RetryBuilder) ToOptions() (middleware.RetryOptions, core.RetryCondition
 			jitter = true
 			jitterStrat = middleware.JitterFull
 		}
+
 	case *backoff.ConstantBackoff:
 		initialBackoff = s.Delay
 		maxBackoff = s.Delay

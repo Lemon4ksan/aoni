@@ -59,42 +59,30 @@ func (d responseDecoder) ValidateState(resp *http.Response, decoder decode.Decod
 	return d.checkMIMEType(resp)
 }
 
-// isStructuredDataMIME reports whether contentType matches common structured payload MIME types (JSON, Protobuf, gRPC-Web).
+// isStructuredDataMIME reports whether contentType matches common structured payload MIME types (JSON, Protobuf, gRPC-Web, XML, YAML).
 func isStructuredDataMIME(contentType string) bool {
-	if len(contentType) >= 16 && bytesconv.EqualFoldASCII(contentType[:16], "application/json") {
-		return true
-	}
-
-	if len(contentType) >= 9 && bytesconv.EqualFoldASCII(contentType[:9], "text/json") {
-		return true
-	}
-
-	if len(contentType) >= 20 && bytesconv.EqualFoldASCII(contentType[:20], "application/x-protobuf") {
-		return true
-	}
-
-	if len(contentType) >= 20 && bytesconv.EqualFoldASCII(contentType[:20], "application/protobuf") {
-		return true
-	}
-
-	if len(contentType) >= 24 && bytesconv.EqualFoldASCII(contentType[:24], "application/grpc-web+proto") {
-		return true
-	}
-
 	mediaType, _, _ := strings.Cut(contentType, ";")
 	mediaType = strings.TrimSpace(mediaType)
 
-	return bytesconv.EqualFoldASCII(mediaType, "application/json") ||
-		bytesconv.EqualFoldASCII(mediaType, "text/json") ||
-		bytesconv.EqualFoldASCII(mediaType, "application/x-protobuf") ||
-		bytesconv.EqualFoldASCII(mediaType, "application/protobuf") ||
-		bytesconv.EqualFoldASCII(mediaType, "application/grpc-web+proto") ||
-		bytesconv.EqualFoldASCII(mediaType, "application/xml") ||
-		bytesconv.EqualFoldASCII(mediaType, "text/xml") ||
-		bytesconv.EqualFoldASCII(mediaType, "application/x-yaml") ||
-		bytesconv.EqualFoldASCII(mediaType, "application/yaml") ||
-		bytesconv.EqualFoldASCII(mediaType, "text/x-yaml") ||
-		bytesconv.EqualFoldASCII(mediaType, "text/yaml")
+	switch {
+	case bytesconv.EqualFoldASCII(mediaType, "application/json"),
+		bytesconv.EqualFoldASCII(mediaType, "text/json"):
+		return true
+	case bytesconv.EqualFoldASCII(mediaType, "application/x-protobuf"),
+		bytesconv.EqualFoldASCII(mediaType, "application/protobuf"),
+		bytesconv.EqualFoldASCII(mediaType, "application/grpc-web+proto"):
+		return true
+	case bytesconv.EqualFoldASCII(mediaType, "application/xml"),
+		bytesconv.EqualFoldASCII(mediaType, "text/xml"):
+		return true
+	case bytesconv.EqualFoldASCII(mediaType, "application/x-yaml"),
+		bytesconv.EqualFoldASCII(mediaType, "application/yaml"),
+		bytesconv.EqualFoldASCII(mediaType, "text/x-yaml"),
+		bytesconv.EqualFoldASCII(mediaType, "text/yaml"):
+		return true
+	default:
+		return false
+	}
 }
 
 // ResolvePeekableReader returns a peekable reader for the response body.
@@ -231,25 +219,23 @@ func (responseDecoder) DecodeSuccess(
 func extractBaseResponse(requester Requester, resp *http.Response) aoni.BaseResponse {
 	if resp != nil && resp.Request != nil {
 		if cfg := aoni.GetRequestConfig(resp.Request.Context()); cfg != nil {
-			if cfg.DisableBaseResponse {
+			switch {
+			case cfg.DisableBaseResponse:
 				return nil
-			}
-
-			if cfg.BaseResponseOverride != nil {
+			case cfg.BaseResponseOverride != nil:
 				return cfg.BaseResponseOverride()
 			}
 		}
 	}
 
-	if client, ok := requester.(*aoni.Client); ok {
-		return client.BaseResponse()
+	switch r := requester.(type) {
+	case *aoni.Client:
+		return r.BaseResponse()
+	case aoni.BaseResponseProvider:
+		return r.BaseResponse()
+	default:
+		return nil
 	}
-
-	if provider, ok := requester.(aoni.BaseResponseProvider); ok {
-		return provider.BaseResponse()
-	}
-
-	return nil
 }
 
 // dumpMultipart generates a summarized diagnostic dump for multipart/form-data requests.

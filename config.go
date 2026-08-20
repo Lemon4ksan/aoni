@@ -49,9 +49,12 @@ const (
 
 	// DefaultUserAgent defines the fallback Chrome/Windows User-Agent header used
 	// when no browser persona or custom User-Agent is declared.
-	DefaultUserAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+	DefaultUserAgent = fingerprint.DefaultUserAgent
 
-	// RedirectLimitUnset is a special value that indicates using the default redirect limit.
+	// RedirectLimitDefault is the default redirect limit, which is 10.
+	RedirectLimitDefault = -1
+
+	// RedirectLimitUnset is a special value that indicates bypassing redirect policy check.
 	RedirectLimitUnset = -2
 )
 
@@ -197,7 +200,7 @@ type EngineConfig struct {
 	// RedirectLimit sets the maximum number of HTTP redirects followed automatically.
 	//   - Default (> 0): Follows up to N redirects with cross-origin header scrubbing.
 	//   - 0: Disables automatic redirect following (returns 3xx response directly).
-	//   - Negative (-1): Uses default limit (10 redirects).
+	//   - [RedirectLimitDefault]: Uses default limit (10 redirects).
 	//   - [RedirectLimitUnset]: Fully bypasses redirect policy check.
 	//     All redirects will be followed without any header scrubbing or security policy enforcement.
 	RedirectLimit int
@@ -464,63 +467,19 @@ func (b BrowserID) String() string {
 	}
 }
 
-// ClientHintsMap maps Client Hints header keys (e.g. "Sec-CH-UA-Platform") to string values.
-type ClientHintsMap map[string]string
-
-// Clone creates a memory-isolated copy of the client hints map.
-func (c ClientHintsMap) Clone() ClientHintsMap {
-	if c == nil {
-		return nil
-	}
-
-	cloned := make(ClientHintsMap, len(c))
-	maps.Copy(cloned, c)
-
-	return cloned
-}
-
 // BrowserProfile holds user-agent strings and Client Hints headers for profile rotation.
 type BrowserProfile struct {
 	UserAgent   string
-	ClientHints ClientHintsMap
+	ClientHints map[string]string
 }
 
 // Clone creates a deep copy of BrowserProfile and its ClientHints map.
 func (b BrowserProfile) Clone() BrowserProfile {
-	return BrowserProfile{
-		UserAgent:   b.UserAgent,
-		ClientHints: b.ClientHints.Clone(),
+	cloned := b
+	if len(b.ClientHints) > 0 {
+		cloned.ClientHints = make(map[string]string, len(b.ClientHints))
+		maps.Copy(cloned.ClientHints, b.ClientHints)
 	}
-}
-
-// CertificatePinMap maps domain patterns to expected SHA-256 SPKI fingerprint hashes.
-type CertificatePinMap map[string][]string
-
-// Clone creates a memory-isolated deep copy of the certificate pin map.
-func (c CertificatePinMap) Clone() CertificatePinMap {
-	if c == nil {
-		return nil
-	}
-
-	cloned := make(CertificatePinMap, len(c))
-	for k, v := range c {
-		cloned[k] = slices.Clone(v)
-	}
-
-	return cloned
-}
-
-// DecoderMap maps MIME content types (e.g. "application/json") to response body decoders.
-type DecoderMap map[string]ResponseDecoder
-
-// Clone creates a memory-isolated copy of the decoder map.
-func (d DecoderMap) Clone() DecoderMap {
-	if d == nil {
-		return nil
-	}
-
-	cloned := make(DecoderMap, len(d))
-	maps.Copy(cloned, d)
 
 	return cloned
 }
@@ -563,7 +522,7 @@ type FingerprintConfig struct {
 	PacketPadding *fingerprint.PaddingConfig
 
 	// CertificatePins maps domain patterns to expected SHA-256 SPKI fingerprint hashes.
-	CertificatePins CertificatePinMap
+	CertificatePins map[string][]string
 
 	// CertCompression specifies RFC 8879 certificate compression algorithms (Brotli, Zstd, Zlib).
 	CertCompression []cert.CompressionAlgorithm
@@ -595,7 +554,6 @@ func (f FingerprintConfig) Clone() FingerprintConfig {
 	cloned.H2Settings = clonePtr(f.H2Settings)
 	cloned.H3Settings = clonePtr(f.H3Settings)
 	cloned.PacketPadding = clonePtr(f.PacketPadding)
-	cloned.CertificatePins = f.CertificatePins.Clone()
 
 	if len(f.HeaderOrder) > 0 {
 		cloned.HeaderOrder = slices.Clone(f.HeaderOrder)
@@ -607,6 +565,15 @@ func (f FingerprintConfig) Clone() FingerprintConfig {
 
 	if len(f.ECHConfigList) > 0 {
 		cloned.ECHConfigList = slices.Clone(f.ECHConfigList)
+	}
+
+	if len(f.CertificatePins) > 0 {
+		pinsCopy := make(map[string][]string, len(f.CertificatePins))
+		for k, v := range f.CertificatePins {
+			pinsCopy[k] = slices.Clone(v)
+		}
+
+		cloned.CertificatePins = pinsCopy
 	}
 
 	return cloned
@@ -677,7 +644,7 @@ type ClientDefaults struct {
 	QueryEncoder QueryEncoder
 
 	// Decoders maps MIME content types (e.g. "application/json") to response body decoders.
-	Decoders DecoderMap
+	Decoders map[string]ResponseDecoder
 
 	// Logger receives structured diagnostic log events.
 	Logger core.Logger
@@ -713,7 +680,10 @@ func (d ClientDefaults) Clone() ClientDefaults {
 		cloned.DefaultMods = slices.Clone(d.DefaultMods)
 	}
 
-	cloned.Decoders = d.Decoders.Clone()
+	if d.Decoders != nil {
+		cloned.Decoders = make(map[string]ResponseDecoder, len(d.Decoders))
+		maps.Copy(cloned.Decoders, d.Decoders)
+	}
 
 	if len(d.UARotationProfiles) > 0 {
 		cloned.UARotationProfiles = make([]BrowserProfile, len(d.UARotationProfiles))
