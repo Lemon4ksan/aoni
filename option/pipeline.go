@@ -105,6 +105,15 @@ func WithResponseValidator(fn func(*http.Response) error) aoni.ClientOption {
 	}
 }
 
+// WithSoftErrorDetector returns an [aoni.ClientOption] registering callbacks that sniff initial
+// response body bytes to catch application-level soft errors (e.g. 200 OK containing an HTML error)
+// without draining or consuming the body stream.
+func WithSoftErrorDetector(detectors ...aoni.SoftErrorDetector) aoni.ClientOption {
+	return func(cfg *aoni.Config) {
+		cfg.Defaults.SoftErrorDetectors = append(cfg.Defaults.SoftErrorDetectors, detectors...)
+	}
+}
+
 // WithCookieJar returns an [aoni.ClientOption] overriding default cookie storage.
 func WithCookieJar(jar http.CookieJar) aoni.ClientOption {
 	return func(cfg *aoni.Config) {

@@ -213,6 +213,13 @@ func WithAllowedRedirectDomains(domains ...string) aoni.ClientOption {
 	}
 }
 
+// WithBlockRedirectTo returns an [aoni.ClientOption] that halts redirects to matching URLs (e.g. "/login").
+func WithBlockRedirectTo(patterns ...string) aoni.ClientOption {
+	return func(cfg *aoni.Config) {
+		cfg.Engine.CheckRedirect = aoni.BlockPathRedirectPolicy(patterns...)
+	}
+}
+
 // WithConnectionPool returns an [aoni.ClientOption] configuring keep-alive connection boundaries on the transport.
 func WithConnectionPool(pool aoni.ConnectionPoolConfig) aoni.ClientOption {
 	return func(cfg *aoni.Config) {

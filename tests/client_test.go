@@ -2653,4 +2653,80 @@ func TestClient_AuditFeatures(t *testing.T) {
 		assert.True(t, aoni.IsClientError(err422))
 		assert.True(t, errors.Is(err422, aoni.ErrClientError))
 	})
+
+	t.Run("soft_error_detector_and_peek", func(t *testing.T) {
+		t.Parallel()
+
+		errSessionExpired := errors.New("steam: session expired")
+
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(`<html><body><script>g_steamID = false;</script><h1>Login Required</h1></body></html>`))
+		}))
+		t.Cleanup(server.Close)
+
+		client := aoni.New(
+			aoni.WithBaseURL(server.URL),
+			aoni.WithSoftErrorDetector(func(_ *http.Response, peek []byte) error {
+				if bytes.Contains(peek, []byte("g_steamID = false;")) {
+					return errSessionExpired
+				}
+				return nil
+			}),
+		)
+
+		resp, err := client.Get(t.Context(), "/")
+		require.Error(t, err)
+		assert.ErrorIs(t, err, errSessionExpired)
+		assert.Nil(t, resp)
+	})
+
+	t.Run("block_path_redirect_policy", func(t *testing.T) {
+		t.Parallel()
+
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.URL.Path == "/protected" {
+				http.Redirect(w, r, "/login/home", http.StatusFound)
+				return
+			}
+			w.WriteHeader(http.StatusOK)
+		}))
+		t.Cleanup(server.Close)
+
+		client := aoni.New(
+			aoni.WithBaseURL(server.URL),
+			aoni.WithBlockRedirectTo("/login"),
+		)
+
+		resp, err := client.Get(t.Context(), "/protected")
+		require.Error(t, err)
+		assert.ErrorIs(t, err, aoni.ErrRedirectBlocked)
+		if resp != nil && resp.Body != nil {
+			_ = resp.Body.Close()
+		}
+	})
+
+	t.Run("peek_response_facade", func(t *testing.T) {
+		t.Parallel()
+
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte("Hello, World! Aoni Peek Test"))
+		}))
+		t.Cleanup(server.Close)
+
+		client := aoni.New(aoni.WithBaseURL(server.URL))
+		resp, err := client.Get(t.Context(), "/")
+		require.NoError(t, err)
+		defer resp.Body.Close()
+
+		peekBytes, err := aoni.PeekResponse(resp, 5)
+		require.NoError(t, err)
+		assert.Equal(t, "Hello", string(peekBytes))
+
+		// Ensure body can still be fully read
+		fullBody, err := io.ReadAll(resp.Body)
+		require.NoError(t, err)
+		assert.Equal(t, "Hello, World! Aoni Peek Test", string(fullBody))
+	})
 }

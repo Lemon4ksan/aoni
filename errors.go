@@ -39,6 +39,9 @@ var (
 	// ErrRedirectDomainForbidden is returned when a redirect target hostname is excluded by policy.
 	ErrRedirectDomainForbidden = errors.New("aoni: redirect domain not allowed")
 
+	// ErrRedirectBlocked is returned when a redirect is blocked by path matching policy.
+	ErrRedirectBlocked = errors.New("aoni: redirect blocked by path policy")
+
 	// ErrHedgingBodyNonRepeatable is returned when request hedging attempt cannot duplicate a non-replayable payload stream.
 	ErrHedgingBodyNonRepeatable = errors.New("aoni: request body cannot be duplicated for hedging")
 

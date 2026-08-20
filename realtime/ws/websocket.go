@@ -335,16 +335,21 @@ func performHTTP1Handshake(
 	}
 
 	if resp.StatusCode != http.StatusSwitchingProtocols {
-		return nil, nil, resp, "", false, ErrBadHandshake
+		return nil, nil, resp, "", false, fmt.Errorf("%w: status %d %s", ErrBadHandshake, resp.StatusCode, resp.Status)
 	}
 
 	if !tokenContainsValue(resp.Header, "Upgrade", "websocket") ||
 		!tokenContainsValue(resp.Header, "Connection", "upgrade") {
-		return nil, nil, resp, "", false, ErrBadHandshake
+		return nil, nil, resp, "", false, fmt.Errorf(
+			"%w: missing or invalid Upgrade/Connection headers (Upgrade: %q, Connection: %q)",
+			ErrBadHandshake,
+			resp.Header.Get("Upgrade"),
+			resp.Header.Get("Connection"),
+		)
 	}
 
 	if resp.Header.Get("Sec-WebSocket-Accept") != computeAcceptKey(challengeKey) {
-		return nil, nil, resp, "", false, ErrBadHandshake
+		return nil, nil, resp, "", false, fmt.Errorf("%w: Sec-WebSocket-Accept mismatch", ErrBadHandshake)
 	}
 
 	selectedSubprotocol := strings.TrimSpace(resp.Header.Get("Sec-WebSocket-Protocol"))

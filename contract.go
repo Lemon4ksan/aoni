@@ -50,6 +50,11 @@ type (
 
 	// RequestModifier is a composable, zero-allocation functional modifier applied to outgoing [Request] pipelines.
 	RequestModifier = core.RequestModifier
+
+	// SoftErrorDetector inspects the response status, headers, and initial peeked body bytes
+	// for application-layer soft errors (e.g. 200 OK containing an HTML login or error message).
+	// If a non-nil error is returned, request execution is aborted with that error without draining the body.
+	SoftErrorDetector func(resp *http.Response, peek []byte) error
 )
 
 // Execution & Middleware Contracts.

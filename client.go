@@ -57,7 +57,7 @@ type Client struct {
 // If doer is nil, defaults to standard HTTP execution normalized via [DefaultEngine].
 //
 // Applies functional [ClientOption] layers, precomputes BaseURL string representations
-// into [engine.PreparedConfig] for zero-alloc relative path resolutions, and ensures a default User-Agent.
+// into [pipeline.PreparedConfig] for zero-alloc relative path resolutions, and ensures a default User-Agent.
 //
 // Client instances are safe for concurrent use by multiple goroutines.
 func NewClient(doer any, opts ...ClientOption) *Client {
@@ -671,6 +671,19 @@ func (c *Client) applyDefaultHTTPHeader() http.Header {
 	}
 
 	return reqHeader
+}
+
+// Unwrap returns the underlying execution engine or inner requester.
+func (c *Client) Unwrap() any {
+	if c == nil {
+		return nil
+	}
+
+	if rh, ok := c.engine.(requesterHTTPDoer); ok {
+		return rh.r
+	}
+
+	return c.engine
 }
 
 var (

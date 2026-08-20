@@ -603,6 +603,9 @@ type ClientDefaults struct {
 	// ResponseValidator validates response status codes and headers before body unmarshaling.
 	ResponseValidator func(*http.Response) error
 
+	// SoftErrorDetectors sniffs initial body bytes for application-level soft errors without draining streams.
+	SoftErrorDetectors []SoftErrorDetector
+
 	// OnPanic handles panics occurring inside request execution pipelines.
 	OnPanic func(ctx context.Context, err any, stack []byte)
 
@@ -1022,6 +1025,8 @@ func (c *Client) resolvePipeline(req *http.Request) PipelineConfig {
 }
 
 // toPipelineDefaults maps ClientDefaults into internal pipeline.ClientDefaults DTOs.
+//
+//nolint:bodyclose // SoftErrorDetectors and ResponseValidator inspect responses without taking ownership of response lifecycle.
 func (c *Client) toPipelineDefaults() pipeline.ClientDefaults {
 	return pipeline.ClientDefaults{
 		Headers:              c.cfg.Defaults.Headers,
@@ -1029,6 +1034,7 @@ func (c *Client) toPipelineDefaults() pipeline.ClientDefaults {
 		AfterResponse:        c.cfg.Defaults.AfterResponse,
 		Inspector:            c.cfg.Defaults.Inspector,
 		ResponseValidator:    c.cfg.Defaults.ResponseValidator,
+		SoftErrorDetectors:   c.cfg.Defaults.toInternalSoftErrorDetectors(),
 		ChallengeDetector:    c.cfg.Defaults.ChallengeDetector,
 		ChallengeSolver:      c.cfg.Defaults.ChallengeSolver,
 		UARotationProfiles:   c.cfg.Defaults.toInternalProfiles(),
@@ -1038,6 +1044,20 @@ func (c *Client) toPipelineDefaults() pipeline.ClientDefaults {
 		MultiReadDisableDisk: c.cfg.Defaults.MultiReadDisableDisk,
 		RefererAutomaton:     c.cfg.Defaults.RefererAutomaton,
 	}
+}
+
+//nolint:bodyclose // Soft error detectors inspect responses without taking ownership of response lifecycle.
+func (d ClientDefaults) toInternalSoftErrorDetectors() []func(*http.Response, []byte) error {
+	if len(d.SoftErrorDetectors) == 0 {
+		return nil
+	}
+
+	res := make([]func(*http.Response, []byte) error, len(d.SoftErrorDetectors))
+	for i, det := range d.SoftErrorDetectors {
+		res[i] = det
+	}
+
+	return res
 }
 
 // toInternalProfiles translates public BrowserProfile slices to internal pipeline DTOs.
@@ -1223,6 +1243,29 @@ func AllowedDomainsRedirectPolicy(allowedDomains ...string) func(req *http.Reque
 		}
 
 		return &Error{Op: "redirect", Target: host, Err: ErrRedirectDomainForbidden}
+	}
+}
+
+// BlockPathRedirectPolicy constructs an [http.Client.CheckRedirect] policy function
+// that immediately halts and fails fast if the redirect URL matches any blocked substring or pattern.
+func BlockPathRedirectPolicy(blockedPatterns ...string) func(req *http.Request, via []*http.Request) error {
+	return func(req *http.Request, via []*http.Request) error {
+		if len(via) >= 10 {
+			return &Error{Op: "redirect", Err: ErrMaxRedirectsExceeded}
+		}
+
+		if req.URL == nil {
+			return nil
+		}
+
+		rawURL := req.URL.String()
+		for _, pattern := range blockedPatterns {
+			if strings.Contains(rawURL, pattern) {
+				return &Error{Op: "redirect", Target: rawURL, Err: ErrRedirectBlocked}
+			}
+		}
+
+		return DefaultRedirectPolicy(10)(req, via)
 	}
 }
 

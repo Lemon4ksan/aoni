@@ -76,6 +76,7 @@ type RequestConfig struct {
 	ProxyAddr               *url.URL
 	DNSResolver             netdial.DNSResolver
 	ResponseValidator       func(resp *http.Response) error
+	SoftErrorDetectors      []func(*http.Response, []byte) error
 	RetryPolicy             *core.RetryOverride
 	P0fSignature            *p0f.Signature
 	SessionCache            fingerprint.SessionCache

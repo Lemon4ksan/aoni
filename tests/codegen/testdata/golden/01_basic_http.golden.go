@@ -27,18 +27,7 @@ func newUserAPI(doer any, opts ...aoni.ClientOption) *userAPIClient {
 	var baseOpts []aoni.ClientOption
 	baseOpts = append(baseOpts, opts...)
 
-	var targetReq request.Requester
-	if d, ok := doer.(aoni.RequestDoer); ok {
-		targetReq = request.AsRequester(aoni.Configure(d, append([]aoni.ClientOption{option.WithBaseURL("")}, baseOpts...)...))
-	} else if req, ok := doer.(request.Requester); ok {
-		targetReq = request.AsRequester(aoni.Configure(req, append([]aoni.ClientOption{option.WithBaseURL("")}, baseOpts...)...))
-	} else if rd, ok := doer.(interface{ Rest() request.Requester }); ok && rd.Rest() != nil {
-		targetReq = rd.Rest()
-	} else if rd, ok := doer.(interface{ Requester() request.Requester }); ok && rd.Requester() != nil {
-		targetReq = rd.Requester()
-	} else {
-		targetReq = request.AsRequester(aoni.Configure(fast.NewClient(), append([]aoni.ClientOption{option.WithBaseURL("")}, baseOpts...)...))
-	}
+	targetReq := request.Configure(doer, append([]aoni.ClientOption{option.WithBaseURL("")}, baseOpts...)...)
 
 	return &userAPIClient{
 		r: targetReq,

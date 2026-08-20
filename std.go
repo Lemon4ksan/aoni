@@ -5,6 +5,7 @@
 package aoni
 
 import (
+	"context"
 	"errors"
 	"net"
 	"net/http"
@@ -54,9 +55,70 @@ func NewRequestDoerAdapter(doer RequestDoer) HTTPDoer {
 	return std.NewRequestDoerAdapter(doer)
 }
 
+type requesterLike interface {
+	Request(ctx context.Context, method, path string, mods ...RequestModifier) (*http.Response, error)
+}
+
+type requesterHTTPDoer struct {
+	r requesterLike
+}
+
+func (d requesterHTTPDoer) Do(req *http.Request) (*http.Response, error) {
+	if req == nil || req.URL == nil {
+		return nil, ErrNilURL
+	}
+
+	var mods []RequestModifier
+	for k, vv := range req.Header {
+		for _, v := range vv {
+			mods = append(mods, WithHeader(k, v))
+		}
+	}
+
+	if req.Body != nil && req.Body != http.NoBody {
+		mods = append(mods, WithSmartBody(req.Body))
+	}
+
+	return d.r.Request(req.Context(), req.Method, req.URL.String(), mods...)
+}
+
+func (d requesterHTTPDoer) Unwrap() any {
+	return d.r
+}
+
 // DefaultEngine normalizes arbitrary execution targets (RequestDoer, *http.Client, HTTPDoer, or nil)
 // into a standardized, production-ready [HTTPDoer] instance.
 func DefaultEngine(doer any) HTTPDoer {
+	if doer == nil {
+		return &http.Client{
+			Timeout:       15 * time.Second,
+			CheckRedirect: DefaultRedirectPolicy(10),
+			Transport:     newDefaultTransport(),
+		}
+	}
+
+	if unwrapper, ok := doer.(interface{ Unwrap() any }); ok {
+		if inner := unwrapper.Unwrap(); inner != nil && inner != doer {
+			return DefaultEngine(inner)
+		}
+	}
+
+	if rd, ok := doer.(interface{ Rest() any }); ok {
+		if inner := rd.Rest(); inner != nil && inner != doer {
+			return DefaultEngine(inner)
+		}
+	}
+
+	if rd, ok := doer.(interface{ Requester() any }); ok {
+		if inner := rd.Requester(); inner != nil && inner != doer {
+			return DefaultEngine(inner)
+		}
+	}
+
+	if reqLike, ok := doer.(requesterLike); ok && reqLike != nil {
+		return requesterHTTPDoer{r: reqLike}
+	}
+
 	switch doer := doer.(type) {
 	case RequestDoer:
 		if doer != nil {
@@ -239,16 +301,24 @@ func (c *Client) reapplyH2Settings(tr *http.Transport) {
 		return
 	}
 
-	if c.cfg.Fingerprint.H2Configurer == nil && c.cfg.Fingerprint.H2Settings == nil {
+	needsH2 := c.cfg.Fingerprint.H2Configurer != nil ||
+		c.cfg.Fingerprint.H2Settings != nil ||
+		c.cfg.Fingerprint.BrowserID != BrowserNone ||
+		c.cfg.Fingerprint.TLSClientHelloID != nil ||
+		c.cfg.Fingerprint.TLSClientHelloSpecProvider != nil
+
+	if !needsH2 {
 		return
 	}
 
-	settings := h2.Settings{}
+	settings := h2.ChromeSettings
 	if c.cfg.Fingerprint.H2Settings != nil {
 		settings = *c.cfg.Fingerprint.H2Settings
+	} else if c.cfg.Fingerprint.BrowserID == BrowserFirefox {
+		settings = h2.FirefoxSettings
 	}
 
-	framed := h2.NewFramedTransport(tr, settings)
+	framed := h2.NewFramedTransport(tr, settings, c.cfg.Fingerprint.HeaderOrder...)
 	if c.cfg.Fingerprint.H2Configurer != nil && framed.H2Transport() != nil {
 		_ = c.cfg.Fingerprint.H2Configurer.ConfigureHTTP2(framed.H2Transport())
 	}

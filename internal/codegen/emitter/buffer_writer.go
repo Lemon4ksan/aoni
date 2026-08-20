@@ -128,6 +128,14 @@ func emitFormBuffer(buf *bytes.Buffer, tracker *ImportTracker, m *ir.MethodIR, p
 	}
 
 	tracker.Add("net/url")
+
+	for _, inj := range m.Injects {
+		if inj.Target == ir.InjectField {
+			tracker.Add("github.com/lemon4ksan/aoni")
+			break
+		}
+	}
+
 	buf.WriteString(
 		"\tallMods = append(allMods, mod.WithHeader(\"Content-Type\", \"application/x-www-form-urlencoded\"))\n",
 	)
@@ -227,7 +235,7 @@ func emitInjects(buf *bytes.Buffer, m *ir.MethodIR) {
 			fnName = "SessionID"
 		}
 
-		fmt.Fprintf(buf, "\tif getter, ok := any(c.r).(interface{ %s(string) string }); ok {\n", fnName)
+		fmt.Fprintf(buf, "\tif getter, ok := aoni.UnwrapAs[interface{ %s(string) string }](c.r); ok {\n", fnName)
 		fmt.Fprintf(buf, "\t\tif val := getter.%s(\"\"); val != \"\" {\n", fnName)
 		buf.WriteString("\t\t\tif len(formBytes) > 0 {\n")
 		fmt.Fprintf(buf, "\t\t\t\tformBytes = append(formBytes, \"&%s=\"...)\n", inj.WireKey)
@@ -236,7 +244,7 @@ func emitInjects(buf *bytes.Buffer, m *ir.MethodIR) {
 		buf.WriteString("\t\t\t}\n")
 		buf.WriteString("\t\t\tformBytes = append(formBytes, url.QueryEscape(val)...)\n")
 		buf.WriteString("\t\t}\n")
-		fmt.Fprintf(buf, "\t} else if getter, ok := any(c.r).(interface{ %s() string }); ok {\n", fnName)
+		fmt.Fprintf(buf, "\t} else if getter, ok := aoni.UnwrapAs[interface{ %s() string }](c.r); ok {\n", fnName)
 		fmt.Fprintf(buf, "\t\tif val := getter.%s(); val != \"\" {\n", fnName)
 		buf.WriteString("\t\t\tif len(formBytes) > 0 {\n")
 		fmt.Fprintf(buf, "\t\t\t\tformBytes = append(formBytes, \"&%s=\"...)\n", inj.WireKey)

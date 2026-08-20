@@ -71,7 +71,7 @@ type SteamShopAPI interface {
 	require.Contains(t, code, `ref = strconv.AppendUint(ref, uint64(appID), 10)`)
 	require.Contains(t, code, `ref = append(ref, url.PathEscape(marketHashName)...)`)
 	require.Contains(t, code, `mod.WithHeader("Referer", string(ref))`)
-	require.Contains(t, code, `getter, ok := any(c.r).(interface{ SessionID(string) string })`)
+	require.Contains(t, code, `getter, ok := aoni.UnwrapAs[interface{ SessionID(string) string }](c.r)`)
 	require.Contains(t, code, `formBytes = append(formBytes, "&sessionid="...)`)
 
 	// Verify Search has :page referer ("https://steamcommunity.com/market/search") and :cors headers

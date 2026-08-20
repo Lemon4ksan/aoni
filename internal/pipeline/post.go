@@ -5,6 +5,7 @@
 package pipeline
 
 import (
+	"bufio"
 	"errors"
 	stdio "io"
 	"mime"
@@ -350,7 +351,52 @@ func (p *Pipeline[Req, Resp]) validateResponse(resp *http.Response, tx *Tx) erro
 		}
 	}
 
+	detectors := tx.SoftErrorDetectors
+	if len(detectors) == 0 {
+		detectors = p.defaults.SoftErrorDetectors
+	}
+
+	if len(detectors) > 0 && resp.Body != nil {
+		peekBytes, err := PeekResponseBody(resp, 4096)
+		if err != nil && !errors.Is(err, stdio.EOF) {
+			_ = resp.Body.Close()
+			return err
+		}
+
+		for _, detector := range detectors {
+			if detector != nil {
+				if dErr := detector(resp, peekBytes); dErr != nil {
+					_ = resp.Body.Close()
+					return dErr
+				}
+			}
+		}
+	}
+
 	return nil
+}
+
+// PeekResponseBody reads up to n bytes from resp.Body without consuming or draining the stream.
+func PeekResponseBody(resp *http.Response, n int) ([]byte, error) {
+	if resp == nil || resp.Body == nil || n <= 0 {
+		return nil, nil
+	}
+
+	if b, ok := resp.Body.(*io.BufioReadCloser); ok {
+		return b.Peek(n)
+	}
+
+	if br, ok := resp.Body.(interface{ BufioReader() *bufio.Reader }); ok {
+		return br.BufioReader().Peek(n)
+	}
+
+	peekable := bufio.NewReader(resp.Body)
+	resp.Body = &io.BufioReadCloser{
+		Reader: peekable,
+		Closer: resp.Body,
+	}
+
+	return peekable.Peek(n)
 }
 
 func (p *Pipeline[Req, Resp]) applyMultiReadBuffering(resp *http.Response, tx *Tx) error {

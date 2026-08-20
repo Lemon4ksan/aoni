@@ -214,6 +214,7 @@ type ClientDefaults struct {
 	AfterResponse        []func(resp *http.Response, err error)
 	Inspector            telemetry.TrafficInspector
 	ResponseValidator    func(*http.Response) error
+	SoftErrorDetectors   []func(*http.Response, []byte) error
 	ChallengeDetector    func(*http.Response) (bool, error)
 	ChallengeSolver      challenge.Solver
 	UARotationProfiles   []BrowserProfile

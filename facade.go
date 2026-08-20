@@ -357,6 +357,21 @@ func WithSafari() ClientOption {
 	}
 }
 
+// WithSoftErrorDetector returns an [aoni.ClientOption] registering callbacks that sniff initial
+// response body bytes to catch application-level soft errors without draining or consuming the body stream.
+func WithSoftErrorDetector(detectors ...SoftErrorDetector) ClientOption {
+	return func(cfg *Config) {
+		cfg.Defaults.SoftErrorDetectors = append(cfg.Defaults.SoftErrorDetectors, detectors...)
+	}
+}
+
+// WithBlockRedirectTo returns an [aoni.ClientOption] that halts redirects to matching URLs (e.g. "/login").
+func WithBlockRedirectTo(patterns ...string) ClientOption {
+	return func(cfg *Config) {
+		cfg.Engine.CheckRedirect = BlockPathRedirectPolicy(patterns...)
+	}
+}
+
 // WithSmartBody constructs an [aoni.RequestModifier] that automatically detects the payload type:
 //   - proto.Message -> Protobuf payload with application/x-protobuf
 //   - url.Values -> URL-encoded form payload with application/x-www-form-urlencoded
@@ -433,4 +448,14 @@ func WithSmartBody(body any) RequestModifier {
 			Bytes:       bodyBytes,
 		}
 	}
+}
+
+// PeekResponse peeks up to n bytes from resp.Body without consuming or draining the stream.
+// It wraps resp.Body in a buffered reader if not already peekable, preserving full readability.
+func PeekResponse(resp *http.Response, n int) ([]byte, error) {
+	if resp == nil || resp.Body == nil {
+		return nil, nil
+	}
+
+	return pipeline.PeekResponseBody(resp, n)
 }

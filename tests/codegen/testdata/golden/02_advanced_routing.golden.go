@@ -27,18 +27,7 @@ func newPaymentAPI(doer any, opts ...aoni.ClientOption) *paymentAPIClient {
 	var baseOpts []aoni.ClientOption
 	baseOpts = append(baseOpts, opts...)
 
-	var targetReq request.Requester
-	if d, ok := doer.(aoni.RequestDoer); ok {
-		targetReq = request.AsRequester(aoni.Configure(d, append([]aoni.ClientOption{option.WithBaseURL("https://api.example.com/v1")}, baseOpts...)...))
-	} else if req, ok := doer.(request.Requester); ok {
-		targetReq = request.AsRequester(aoni.Configure(req, append([]aoni.ClientOption{option.WithBaseURL("https://api.example.com/v1")}, baseOpts...)...))
-	} else if rd, ok := doer.(interface{ Rest() request.Requester }); ok && rd.Rest() != nil {
-		targetReq = rd.Rest()
-	} else if rd, ok := doer.(interface{ Requester() request.Requester }); ok && rd.Requester() != nil {
-		targetReq = rd.Requester()
-	} else {
-		targetReq = request.AsRequester(aoni.Configure(fast.NewClient(), append([]aoni.ClientOption{option.WithBaseURL("https://api.example.com/v1")}, baseOpts...)...))
-	}
+	targetReq := request.Configure(doer, append([]aoni.ClientOption{option.WithBaseURL("https://api.example.com/v1")}, baseOpts...)...)
 
 	return &paymentAPIClient{
 		r: targetReq,

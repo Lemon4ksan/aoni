@@ -44,9 +44,10 @@ type Connection interface {
 
 // NetConnWrapper adapts standard net.Conn and socket.Framer into a Connection.
 type NetConnWrapper struct {
-	conn   net.Conn
-	framer socket.Framer
-	cipher socket.Cipher
+	conn     net.Conn
+	framer   socket.Framer
+	cipherMu sync.RWMutex
+	cipher   socket.Cipher
 }
 
 // NewNetConnWrapper constructs a NetConnWrapper.
@@ -58,13 +59,28 @@ func NewNetConnWrapper(conn net.Conn, framer socket.Framer, cipher socket.Cipher
 	}
 }
 
+// SetCipher dynamically sets or updates the encryption cipher.
+func (n *NetConnWrapper) SetCipher(c socket.Cipher) {
+	n.cipherMu.Lock()
+	n.cipher = c
+	n.cipherMu.Unlock()
+}
+
+func (n *NetConnWrapper) getCipher() socket.Cipher {
+	n.cipherMu.RLock()
+	defer n.cipherMu.RUnlock()
+
+	return n.cipher
+}
+
 // Send encrypts (if cipher is present) and writes a framed payload to the connection.
 func (n *NetConnWrapper) Send(_ context.Context, data []byte) error {
-	if n.cipher != nil {
+	cipher := n.getCipher()
+	if cipher != nil {
 		fb := socket.AcquireFrameBuffer(len(data))
 		copy(fb.Bytes(), data)
 
-		enc, err := n.cipher.Encrypt(fb)
+		enc, err := cipher.Encrypt(fb)
 		if err != nil {
 			socket.ReleaseFrameBuffer(fb)
 			return fmt.Errorf("cipher encrypt: %w", err)
@@ -91,8 +107,9 @@ func (n *NetConnWrapper) Receive(_ context.Context) (*socket.FrameBuffer, error)
 		return nil, err
 	}
 
-	if n.cipher != nil {
-		dec, err := n.cipher.Decrypt(fb)
+	cipher := n.getCipher()
+	if cipher != nil {
+		dec, err := cipher.Decrypt(fb)
 		if err != nil {
 			socket.ReleaseFrameBuffer(fb)
 			return nil, fmt.Errorf("cipher decrypt: %w", err)
@@ -225,7 +242,12 @@ func (c *Connector[Endpoint]) IsConnected() bool {
 func (c *Connector[Endpoint]) SetCipher(cipher socket.Cipher) {
 	c.mu.Lock()
 	c.cipher = cipher
+	conn := c.conn
 	c.mu.Unlock()
+
+	if cipherSetter, ok := conn.(interface{ SetCipher(socket.Cipher) }); ok {
+		cipherSetter.SetCipher(cipher)
+	}
 }
 
 // SetOnReconnect registers a callback function executed after a successful reconnect cycle.

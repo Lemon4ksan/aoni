@@ -116,12 +116,14 @@ func (c *Client) resolveHelloID() *utls.ClientHelloID {
 	}
 
 	switch f.BrowserID {
+	case aoni.BrowserChrome:
+		return &utls.HelloChrome_Auto
 	case aoni.BrowserFirefox:
 		return &utls.HelloFirefox_Auto
 	case aoni.BrowserSafari:
 		return &utls.HelloSafari_Auto
 	default:
-		return &utls.HelloChrome_Auto
+		return nil
 	}
 }
 

@@ -180,37 +180,12 @@ func emitStrictService(
 
 	emitBaseOpts(buf, svc)
 
-	// Reusing preconfigured requester
-	buf.WriteString("\tif req, ok := any(client).(request.Requester); ok && len(opts) == 0 {\n")
-	fmt.Fprintf(buf, "\t\treturn &%s{\n", clientStructName)
-
-	for _, sub := range svc.SubRequesters {
-		fmt.Fprintf(buf, "\t\t\t%s: req,\n", sub.FieldName)
-	}
-
-	buf.WriteString("\t\t}, nil\n\t}\n\n")
-
 	// Target requester resolution
-	buf.WriteString("\tvar targetReq request.Requester\n")
-	buf.WriteString("\tif d, ok := any(client).(aoni.RequestDoer); ok {\n")
 	fmt.Fprintf(
 		buf,
-		"\t\ttargetReq = request.AsRequester(aoni.Configure(d, append([]aoni.ClientOption{option.WithBaseURL(%q)}, baseOpts...)...))\n",
+		"\ttargetReq := request.Configure(client, append([]aoni.ClientOption{option.WithBaseURL(%q)}, baseOpts...)...)\n\n",
 		svc.BaseURL,
 	)
-	buf.WriteString("\t} else if req, ok := any(client).(request.Requester); ok {\n")
-	buf.WriteString("\t\ttargetReq = req\n")
-	buf.WriteString(
-		"\t} else if rd, ok := any(client).(interface{ Rest() request.Requester }); ok && rd.Rest() != nil {\n",
-	)
-	buf.WriteString("\t\ttargetReq = rd.Rest()\n")
-	buf.WriteString(
-		"\t} else if rd, ok := any(client).(interface{ Requester() request.Requester }); ok && rd.Requester() != nil {\n",
-	)
-	buf.WriteString("\t\ttargetReq = rd.Requester()\n")
-	buf.WriteString("\t} else {\n")
-	buf.WriteString("\t\treturn nil, errors.New(\"aoni: unsupported requester interface\")\n")
-	buf.WriteString("\t}\n\n")
 
 	// Instantiate SubRequesters
 	fmt.Fprintf(buf, "\treturn &%s{\n", clientStructName)
@@ -291,33 +266,11 @@ func emitStandardService(
 	emitBaseOpts(buf, svc)
 
 	// Target requester resolution
-	buf.WriteString("\tvar targetReq request.Requester\n")
-	buf.WriteString("\tif d, ok := doer.(aoni.RequestDoer); ok {\n")
 	fmt.Fprintf(
 		buf,
-		"\t\ttargetReq = request.AsRequester(aoni.Configure(d, append([]aoni.ClientOption{option.WithBaseURL(%q)}, baseOpts...)...))\n",
+		"\ttargetReq := request.Configure(doer, append([]aoni.ClientOption{option.WithBaseURL(%q)}, baseOpts...)...)\n\n",
 		svc.BaseURL,
 	)
-	buf.WriteString("\t} else if req, ok := doer.(request.Requester); ok {\n")
-	fmt.Fprintf(
-		buf,
-		"\t\ttargetReq = request.AsRequester(aoni.Configure(req, append([]aoni.ClientOption{option.WithBaseURL(%q)}, baseOpts...)...))\n",
-		svc.BaseURL,
-	)
-	buf.WriteString("\t} else if rd, ok := doer.(interface{ Rest() request.Requester }); ok && rd.Rest() != nil {\n")
-	buf.WriteString("\t\ttargetReq = rd.Rest()\n")
-	buf.WriteString(
-		"\t} else if rd, ok := doer.(interface{ Requester() request.Requester }); ok && rd.Requester() != nil {\n",
-	)
-	buf.WriteString("\t\ttargetReq = rd.Requester()\n")
-	buf.WriteString("\t} else {\n")
-	tracker.Add("github.com/lemon4ksan/aoni/fast")
-	fmt.Fprintf(
-		buf,
-		"\t\ttargetReq = request.AsRequester(aoni.Configure(fast.NewClient(), append([]aoni.ClientOption{option.WithBaseURL(%q)}, baseOpts...)...))\n",
-		svc.BaseURL,
-	)
-	buf.WriteString("\t}\n\n")
 
 	// Instantiate SubRequesters
 	fmt.Fprintf(buf, "\treturn &%s{\n", clientStructName)
@@ -334,7 +287,7 @@ func emitStandardService(
 			tracker.Add("github.com/lemon4ksan/aoni/fast")
 			fmt.Fprintf(
 				buf,
-				"\t\t%s: request.AsRequester(aoni.Configure(fast.NewClient(), append([]aoni.ClientOption{option.WithBaseURL(%q)}, baseOpts...)...)),\n",
+				"\t\t%s: request.Configure(fast.NewClient(), append([]aoni.ClientOption{option.WithBaseURL(%q)}, baseOpts...)...),\n",
 				sub.FieldName,
 				baseURL,
 			)
