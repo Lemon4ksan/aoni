@@ -452,11 +452,30 @@ func (b *Balancer) Stats() Stats {
 // SelectHealthy selects a healthy backend according to the configured strategy, wrapped in a [generic.Optional].
 func (b *Balancer) SelectHealthy() generic.Optional[*Backend] {
 	b.mu.RLock()
-	defer b.mu.RUnlock()
+	backends := b.backends
+	b.mu.RUnlock()
 
-	for _, be := range b.backends {
-		if be.tracker.IsAvailable() {
-			return generic.Some(be)
+	n := len(backends)
+	if n == 0 {
+		return generic.None[*Backend]()
+	}
+
+	var (
+		stackIndices [32]int
+		indices      []int
+	)
+
+	if n <= len(stackIndices) {
+		indices = stackIndices[:n]
+	} else {
+		indices = make([]int, n)
+	}
+
+	b.buildBackendIndices(indices, backends)
+
+	for _, idx := range indices {
+		if backends[idx].tracker.IsAvailable() {
+			return generic.Some(backends[idx])
 		}
 	}
 

@@ -13,6 +13,8 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"github.com/lemon4ksan/aoni/netutil/netdial"
 )
 
 // Top20Ports lists the most common TCP service ports for fast, low-overhead probing.
@@ -111,7 +113,7 @@ func probePort(ctx context.Context, ip string, port int, timeout time.Duration) 
 	dialer := &net.Dialer{Timeout: timeout}
 
 	start := time.Now()
-	conn, err := dialer.DialContext(ctx, "tcp", addr)
+	conn, err := dialer.DialContext(ctx, netdial.NetworkTCP.String(), addr)
 	rtt := time.Since(start)
 
 	if err != nil {

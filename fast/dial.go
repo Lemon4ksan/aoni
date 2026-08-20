@@ -26,7 +26,12 @@ func (c *Client) Dial(addr string) (net.Conn, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
 
-	return c.DialContext(ctx, "tcp", addr)
+	network := aoni.NetworkTCP.String()
+	if c.cfg.Network.Network != "" {
+		network = c.cfg.Network.Network.String()
+	}
+
+	return c.DialContext(ctx, network, addr)
 }
 
 // DialContext establishes a raw L4 TCP connection or uTLS socket using the provided request context.
@@ -122,12 +127,12 @@ func (c *Client) resolveHelloID() *utls.ClientHelloID {
 
 // DialTLSForWS establishes an encrypted TLS socket connection for WebSockets using active uTLS profiles.
 func (c *Client) DialTLSForWS(ctx context.Context, addr string) (net.Conn, error) {
-	return c.DialTLSContext(ctx, "tcp", addr)
+	return c.DialTLSContext(ctx, aoni.NetworkTCP.String(), addr)
 }
 
 // DialPlainForWS establishes a raw TCP socket connection applying active proxy and SSRF guards for WebSockets.
 func (c *Client) DialPlainForWS(ctx context.Context, addr string) (net.Conn, error) {
-	return c.DialContext(ctx, "tcp", addr)
+	return c.DialContext(ctx, aoni.NetworkTCP.String(), addr)
 }
 
 func (c *Client) buildDialConfig(ctx context.Context) transport.DialConfig {

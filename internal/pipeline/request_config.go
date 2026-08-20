@@ -55,6 +55,7 @@ type RedactConfigCtxKey struct{}
 
 // RequestConfig aggregates request-scoped options and transport overrides.
 type RequestConfig struct {
+	Network                 string
 	Decoder                 core.ResponseDecoder
 	ErrorModel              any
 	TargetHost              string

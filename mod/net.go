@@ -15,6 +15,20 @@ import (
 	"github.com/lemon4ksan/aoni/netutil/netdial"
 )
 
+// WithNetwork constructs an [aoni.RequestModifier] overriding the network protocol for a request (e.g. aoni.NetworkTCP, aoni.NetworkUnix).
+func WithNetwork(network aoni.Network) aoni.RequestModifier {
+	return Custom(func(req aoni.Request) {
+		getOrInitRequestConfig(req).Network = network.String()
+	})
+}
+
+// WithNetworkString constructs an [aoni.RequestModifier] overriding the network protocol from a string.
+func WithNetworkString(network string) aoni.RequestModifier {
+	return Custom(func(req aoni.Request) {
+		getOrInitRequestConfig(req).Network = network
+	})
+}
+
 // WithOrderedHeaders constructs an [aoni.RequestModifier] setting HTTP/1.1 wire header serialization sequence.
 func WithOrderedHeaders(headers []string) aoni.RequestModifier {
 	return Custom(func(req aoni.Request) {

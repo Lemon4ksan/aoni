@@ -55,6 +55,72 @@ const (
 	RedirectLimitUnset = -2
 )
 
+// Network represents an L4 transport or IPC socket network protocol (e.g. "tcp", "unix").
+type Network string
+
+const (
+	// NetworkTCP represents Transmission Control Protocol over IPv4 or IPv6 ("tcp").
+	NetworkTCP Network = "tcp"
+
+	// NetworkTCP4 represents Transmission Control Protocol restricted to IPv4 ("tcp4").
+	NetworkTCP4 Network = "tcp4"
+
+	// NetworkTCP6 represents Transmission Control Protocol restricted to IPv6 ("tcp6").
+	NetworkTCP6 Network = "tcp6"
+
+	// NetworkUDP represents User Datagram Protocol over IPv4 or IPv6 ("udp").
+	NetworkUDP Network = "udp"
+
+	// NetworkUDP4 represents User Datagram Protocol restricted to IPv4 ("udp4").
+	NetworkUDP4 Network = "udp4"
+
+	// NetworkUDP6 represents User Datagram Protocol restricted to IPv6 ("udp6").
+	NetworkUDP6 Network = "udp6"
+
+	// NetworkIP represents raw IP protocol over IPv4 or IPv6 ("ip").
+	NetworkIP Network = "ip"
+
+	// NetworkIP4 represents raw IP protocol restricted to IPv4 ("ip4").
+	NetworkIP4 Network = "ip4"
+
+	// NetworkIP6 represents raw IP protocol restricted to IPv6 ("ip6").
+	NetworkIP6 Network = "ip6"
+
+	// NetworkUnix represents Unix domain stream socket ("unix").
+	NetworkUnix Network = "unix"
+
+	// NetworkUnixGram represents Unix domain datagram socket ("unixgram").
+	NetworkUnixGram Network = "unixgram"
+
+	// NetworkUnixPacket represents Unix domain sequenced packet socket ("unixpacket").
+	NetworkUnixPacket Network = "unixpacket"
+)
+
+// String returns the network protocol string value.
+func (n Network) String() string {
+	return string(n)
+}
+
+// IsTCP reports whether the network is a TCP variant ("tcp", "tcp4", "tcp6").
+func (n Network) IsTCP() bool {
+	return n == NetworkTCP || n == NetworkTCP4 || n == NetworkTCP6
+}
+
+// IsUDP reports whether the network is a UDP variant ("udp", "udp4", "udp6").
+func (n Network) IsUDP() bool {
+	return n == NetworkUDP || n == NetworkUDP4 || n == NetworkUDP6
+}
+
+// IsUnix reports whether the network is a Unix domain socket variant ("unix", "unixgram", "unixpacket").
+func (n Network) IsUnix() bool {
+	return n == NetworkUnix || n == NetworkUnixGram || n == NetworkUnixPacket
+}
+
+// IsIP reports whether the network is a raw IP socket variant ("ip", "ip4", "ip6").
+func (n Network) IsIP() bool {
+	return n == NetworkIP || n == NetworkIP4 || n == NetworkIP6
+}
+
 // ConnFilter defines a stream transformation codec evaluated during socket dialing.
 // See [transport.ConnFilter].
 type ConnFilter = transport.ConnFilter
@@ -258,6 +324,10 @@ const (
 // NetworkConfig configures L3/L4 transport parameters, proxy routing, DNS resolution,
 // dual-stack IPv4/IPv6 racing, SSRF guards, and socket controllers.
 type NetworkConfig struct {
+	// Network specifies the default network protocol used for dialing (e.g. NetworkTCP, NetworkTCP4, NetworkTCP6, NetworkUnix).
+	// Defaults to NetworkTCP if unset.
+	Network Network
+
 	// ProxyAddr specifies a single static proxy endpoint (HTTP, HTTPS, SOCKS5, SOCKS5h).
 	// Takes precedence if TransportProxy is nil.
 	ProxyAddr *url.URL
@@ -1222,7 +1292,13 @@ func (c *Config) BuildDialConfig(ctx context.Context) transport.DialConfig {
 		return transport.DialConfig{}
 	}
 
+	netProto := c.Network.Network.String()
+	if netProto == "" {
+		netProto = NetworkTCP.String()
+	}
+
 	return transport.DialConfig{
+		Network:            netProto,
 		DNSResolver:        c.Network.DNSResolver,
 		StackDriver:        c.Network.StackDriver,
 		L2Device:           c.Network.L2Device,

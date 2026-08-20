@@ -24,6 +24,7 @@ import (
 
 	"github.com/lemon4ksan/aoni/fingerprint/profiles"
 	impl "github.com/lemon4ksan/aoni/internal/fingerprint/h2"
+	"github.com/lemon4ksan/aoni/netutil/netdial"
 )
 
 var (
@@ -354,7 +355,7 @@ func (ft *FramedTransport) saveH2Conn(addr string, cc *http2.ClientConn) {
 // dialTLS establishes an encrypted TLS socket connection with ALPN support for HTTP/2 and HTTP/1.1.
 func (ft *FramedTransport) dialTLS(ctx context.Context, addr string) (net.Conn, error) {
 	if ft.Transport != nil && ft.DialTLSContext != nil {
-		return ft.DialTLSContext(ctx, "tcp", addr)
+		return ft.DialTLSContext(ctx, netdial.NetworkTCP.String(), addr)
 	}
 
 	tlsCfg := &tls.Config{
@@ -374,7 +375,7 @@ func (ft *FramedTransport) dialTLS(ctx context.Context, addr string) (net.Conn, 
 
 	d := &tls.Dialer{NetDialer: &net.Dialer{}, Config: tlsCfg}
 
-	return d.DialContext(ctx, "tcp", addr)
+	return d.DialContext(ctx, netdial.NetworkTCP.String(), addr)
 }
 
 // getALPN retrieves the negotiated ALPN protocol string from an active TLS connection.

@@ -26,6 +26,7 @@ import (
 	"github.com/valyala/fasthttp"
 	"golang.org/x/sys/cpu"
 
+	"github.com/lemon4ksan/aoni/netutil/netdial"
 	"github.com/lemon4ksan/aoni/telemetry"
 )
 
@@ -1538,7 +1539,7 @@ func (d *Dialer) tryDial(ctx context.Context) (net.Conn, error) {
 	} else {
 		var dialer net.Dialer
 
-		c, err = dialer.DialContext(ctx, "tcp", d.Addr)
+		c, err = dialer.DialContext(ctx, netdial.NetworkTCP.String(), d.Addr)
 	}
 
 	if err != nil {

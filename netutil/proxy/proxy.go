@@ -83,7 +83,7 @@ func Parse(proxyStr string) (*url.URL, error) {
 func ProbeProxy(ctx context.Context, addr string) (string, error) {
 	dialer := net.Dialer{Timeout: 500 * time.Millisecond}
 
-	conn, err := dialer.DialContext(ctx, "tcp", addr)
+	conn, err := dialer.DialContext(ctx, aoni.NetworkTCP.String(), addr)
 	if err != nil {
 		return "", err
 	}

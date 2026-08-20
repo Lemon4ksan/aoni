@@ -7,16 +7,17 @@ package power
 
 import (
 	"context"
-	"sync"
+	"slices"
 	"time"
+
+	"github.com/lemon4ksan/foundation/generic"
 )
 
 // Watcher detects OS sleep and resume events using clock-jump analysis,
 // purging stale zombie sockets and connection pools across system power transitions.
 type Watcher struct {
-	mu            sync.RWMutex
-	onSuspend     []func()
-	onResume      []func()
+	onSuspend     generic.Safe[[]func()]
+	onResume      generic.Safe[[]func()]
 	cancel        context.CancelFunc
 	jumpThreshold time.Duration
 }
@@ -44,9 +45,9 @@ func (w *Watcher) OnSuspend(fn func()) {
 		return
 	}
 
-	w.mu.Lock()
-	w.onSuspend = append(w.onSuspend, fn)
-	w.mu.Unlock()
+	w.onSuspend.Mutate(func(list *[]func()) {
+		*list = append(*list, fn)
+	})
 }
 
 // OnResume registers a callback executed when the system resumes from sleep/suspend state.
@@ -55,9 +56,9 @@ func (w *Watcher) OnResume(fn func()) {
 		return
 	}
 
-	w.mu.Lock()
-	w.onResume = append(w.onResume, fn)
-	w.mu.Unlock()
+	w.onResume.Mutate(func(list *[]func()) {
+		*list = append(*list, fn)
+	})
 }
 
 // Close terminates background power monitoring goroutines.
@@ -87,10 +88,18 @@ func (w *Watcher) monitorClockJumps(ctx context.Context) {
 }
 
 func (w *Watcher) notifySuspendAndResume() {
-	w.mu.RLock()
-	suspendFns := append([]func(){}, w.onSuspend...)
-	resumeFns := append([]func(){}, w.onResume...)
-	w.mu.RUnlock()
+	var (
+		suspendFns []func()
+		resumeFns  []func()
+	)
+
+	w.onSuspend.Read(func(list []func()) {
+		suspendFns = slices.Clone(list)
+	})
+
+	w.onResume.Read(func(list []func()) {
+		resumeFns = slices.Clone(list)
+	})
 
 	for _, fn := range suspendFns {
 		fn()

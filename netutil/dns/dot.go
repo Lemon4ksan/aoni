@@ -15,6 +15,8 @@ import (
 	"strings"
 	"sync/atomic"
 	"time"
+
+	"github.com/lemon4ksan/aoni/netutil/netdial"
 )
 
 const (
@@ -80,7 +82,7 @@ func (d *DoTResolver) dialTLS(ctx context.Context) (net.Conn, error) {
 		}
 	}
 
-	conn, err := dialer.DialContext(ctx, "tcp", d.Endpoint)
+	conn, err := dialer.DialContext(ctx, netdial.NetworkTCP.String(), d.Endpoint)
 	if err != nil {
 		return nil, fmt.Errorf("aoni: dot: tls dial %s: %w", d.Endpoint, err)
 	}

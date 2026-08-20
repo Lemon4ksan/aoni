@@ -59,16 +59,12 @@ func IsValidSubprotocolToken(token string) bool {
 
 	for i := 0; i < len(token); i++ {
 		b := token[i]
-		if b <= 32 || b >= 127 || strings.IndexByte("()<>@,;:\\\"/[]?={} \t", char(b)) >= 0 {
+		if b <= 32 || b >= 127 || strings.IndexByte("()<>@,;:\\\"/[]?={} \t", b) >= 0 {
 			return false
 		}
 	}
 
 	return true
-}
-
-func char(b byte) byte {
-	return b
 }
 
 // BuildWellKnownURI constructs an RFC 8307 compliant well-known WebSocket URI.

@@ -369,6 +369,24 @@ func TestMod_ProtocolAndNetworkModifiers(t *testing.T) {
 		assert.True(t, cfg.InsecureSkipVerify)
 		assert.True(t, cfg.ProxyDNS)
 	})
+
+	t.Run("with_network", func(t *testing.T) {
+		t.Parallel()
+
+		req1 := newDummyRequest()
+		mod.WithNetwork(aoni.NetworkUnix).Apply(req1)
+
+		cfg1 := aoni.GetRequestConfig(req1.Context())
+		require.NotNil(t, cfg1)
+		assert.Equal(t, "unix", cfg1.Network)
+
+		req2 := newDummyRequest()
+		mod.WithNetworkString("tcp4").Apply(req2)
+
+		cfg2 := aoni.GetRequestConfig(req2.Context())
+		require.NotNil(t, cfg2)
+		assert.Equal(t, "tcp4", cfg2.Network)
+	})
 }
 
 func TestMod_TelemetryAndTracingModifiers(t *testing.T) {

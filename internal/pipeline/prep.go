@@ -290,7 +290,7 @@ func (p *Pipeline[Req, Resp]) prewarmTargetOrigin(ctx context.Context, targetURL
 		HappyEyeballs: 250 * time.Millisecond,
 	}
 
-	conn, err := netdial.DialL4(dialCtx, "tcp", targetAddr, dialOpts)
+	conn, err := netdial.DialL4(dialCtx, netdial.NetworkTCP.String(), targetAddr, dialOpts)
 	if err != nil {
 		return
 	}

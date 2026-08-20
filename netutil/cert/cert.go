@@ -10,6 +10,7 @@ import (
 	"crypto/tls"
 	"fmt"
 	"os"
+	"sync/atomic"
 	"time"
 
 	"github.com/lemon4ksan/foundation/generic"
@@ -45,7 +46,7 @@ type Watcher struct {
 	cert        generic.Atomic[tls.Certificate]
 	certPath    string
 	keyPath     string
-	lastModTime time.Time
+	lastModNano atomic.Int64
 	cancel      context.CancelFunc
 }
 
@@ -109,7 +110,7 @@ func (w *Watcher) checkAndReload() {
 		return
 	}
 
-	if info.ModTime().After(w.lastModTime) {
+	if info.ModTime().UnixNano() > w.lastModNano.Load() {
 		_ = w.reload()
 	}
 }
@@ -123,7 +124,7 @@ func (w *Watcher) reload() error {
 
 	info, err := os.Stat(w.certPath)
 	if err == nil {
-		w.lastModTime = info.ModTime()
+		w.lastModNano.Store(info.ModTime().UnixNano())
 	}
 
 	w.cert.Store(cert)

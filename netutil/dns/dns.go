@@ -79,13 +79,7 @@ type FallbackResolver struct {
 
 // NewFallbackResolver creates a [FallbackResolver] with active fallback resolvers.
 func NewFallbackResolver(resolvers ...Resolver) *FallbackResolver {
-	active := make([]Resolver, 0, len(resolvers))
-	for _, r := range resolvers {
-		if r != nil {
-			active = append(active, r)
-		}
-	}
-
+	active := generic.Filter(resolvers, func(r Resolver) bool { return r != nil })
 	return &FallbackResolver{resolvers: active}
 }
 
@@ -105,7 +99,11 @@ func (r *FallbackResolver) LookupIPAddr(ctx context.Context, host string) ([]net
 		lastErr = err
 	}
 
-	return nil, errors.New("aoni: dns: all fallback resolvers failed: " + lastErr.Error())
+	if lastErr != nil {
+		return nil, fmt.Errorf("aoni: dns: all fallback resolvers failed: %w", lastErr)
+	}
+
+	return nil, ErrNoResolversConfigured
 }
 
 // StaticResolver allows overriding DNS resolutions with explicit static IP mappings.

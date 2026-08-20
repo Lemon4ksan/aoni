@@ -16,6 +16,10 @@ func (cfg *DialConfig) ApplyRequestOverrides(reqCfg *pipeline.RequestConfig) {
 		return
 	}
 
+	if reqCfg.Network != "" {
+		cfg.Network = reqCfg.Network
+	}
+
 	if reqCfg.ProxyAddr != nil {
 		cfg.ProxyURL = reqCfg.ProxyAddr
 	}

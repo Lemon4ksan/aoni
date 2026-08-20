@@ -24,7 +24,12 @@ func (c *Client) Dial(addr string) (net.Conn, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
 
-	return c.DialContext(ctx, "tcp", addr)
+	network := NetworkTCP.String()
+	if c.cfg.Network.Network != "" {
+		network = c.cfg.Network.Network.String()
+	}
+
+	return c.DialContext(ctx, network, addr)
 }
 
 // DialContext establishes a raw L4 TCP socket connection applying active proxy tunneling,
@@ -84,10 +89,10 @@ func (c *Client) DialTLS(ctx context.Context, network, addr string) (net.Conn, e
 // Safe for concurrent use across multiple goroutines.
 func (c *Client) DialTLSForWS(ctx context.Context, addr string) (net.Conn, error) {
 	if tr := c.Transport(); tr != nil && tr.DialTLSContext != nil {
-		return tr.DialTLSContext(ctx, "tcp", addr)
+		return tr.DialTLSContext(ctx, NetworkTCP.String(), addr)
 	}
 
-	return c.DialTLS(ctx, "tcp", addr)
+	return c.DialTLS(ctx, NetworkTCP.String(), addr)
 }
 
 // DialPlainForWS establishes an unencrypted raw TCP socket connection for WebSocket upgrades,
@@ -97,7 +102,7 @@ func (c *Client) DialTLSForWS(ctx context.Context, addr string) (net.Conn, error
 // Safe for concurrent use across multiple goroutines.
 func (c *Client) DialPlainForWS(ctx context.Context, addr string) (net.Conn, error) {
 	if tr := c.Transport(); tr != nil && tr.DialContext != nil {
-		conn, err := tr.DialContext(ctx, "tcp", addr)
+		conn, err := tr.DialContext(ctx, NetworkTCP.String(), addr)
 		if err != nil {
 			return nil, err
 		}
@@ -105,7 +110,7 @@ func (c *Client) DialPlainForWS(ctx context.Context, addr string) (net.Conn, err
 		return c.applyWSFragmentation(ctx, conn), nil
 	}
 
-	conn, err := c.DialContext(ctx, "tcp", addr)
+	conn, err := c.DialContext(ctx, NetworkTCP.String(), addr)
 	if err != nil {
 		return nil, err
 	}

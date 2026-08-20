@@ -808,25 +808,20 @@ func readNextGRPCWebFrame[T any](reader io.Reader) (val T, done bool, err error)
 
 	var payload []byte
 	if length >= 16*1024 {
-		offBuf, err := offheap.NewBuffer(int(length))
-		if err == nil {
+		offBuf, bufErr := offheap.NewBuffer(int(length))
+		if bufErr == nil {
 			defer offBuf.Release()
 
 			payload = offBuf.Bytes()[:length]
-			if _, rErr := io.ReadFull(reader, payload); rErr != nil {
-				return zero, false, rErr
-			}
-		} else {
-			payload = make([]byte, length)
-			if _, rErr := io.ReadFull(reader, payload); rErr != nil {
-				return zero, false, rErr
-			}
 		}
-	} else {
+	}
+
+	if payload == nil {
 		payload = make([]byte, length)
-		if _, rErr := io.ReadFull(reader, payload); rErr != nil {
-			return zero, false, rErr
-		}
+	}
+
+	if _, rErr := io.ReadFull(reader, payload); rErr != nil {
+		return zero, false, rErr
 	}
 
 	if flags&0x80 != 0 {

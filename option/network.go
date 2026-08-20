@@ -22,6 +22,20 @@ import (
 	"github.com/lemon4ksan/aoni/telemetry"
 )
 
+// WithNetwork sets the default L4 or IPC network protocol for socket dialing (e.g. aoni.NetworkTCP, aoni.NetworkUnix).
+func WithNetwork(network aoni.Network) aoni.ClientOption {
+	return func(cfg *aoni.Config) {
+		cfg.Network.Network = network
+	}
+}
+
+// WithNetworkString sets the default L4 or IPC network protocol from a raw string (e.g. "tcp", "unix").
+func WithNetworkString(network string) aoni.ClientOption {
+	return func(cfg *aoni.Config) {
+		cfg.Network.Network = aoni.Network(network)
+	}
+}
+
 // WithInterface binds outgoing TCP sockets directly to a specific network interface (e.g. "eth0", "wg0").
 func WithInterface(iface string) aoni.ClientOption {
 	return func(cfg *aoni.Config) {
