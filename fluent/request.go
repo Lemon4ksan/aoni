@@ -18,6 +18,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/lemon4ksan/foundation/generic"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/lemon4ksan/aoni"
@@ -36,16 +37,14 @@ import (
 )
 
 type typedRequestPool struct {
-	pool sync.Pool
+	pool *generic.Pool[Request]
 }
 
 func newTypedRequestPool() *typedRequestPool {
 	return &typedRequestPool{
-		pool: sync.Pool{
-			New: func() any {
-				return &Request{}
-			},
-		},
+		pool: generic.NewPool(func() *Request {
+			return &Request{}
+		}),
 	}
 }
 
@@ -53,8 +52,8 @@ func newTypedRequestPool() *typedRequestPool {
 func (p *typedRequestPool) Get(doer any) *Request {
 	reqClient := request.AsRequester(doer)
 
-	r, ok := p.pool.Get().(*Request)
-	if !ok {
+	r := p.pool.Get()
+	if r == nil {
 		r = &Request{}
 	}
 

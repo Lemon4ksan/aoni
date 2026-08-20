@@ -67,3 +67,33 @@ func TestRequestCoalescing(t *testing.T) {
 		"Singleflight should coalesce 50 parallel requests into 1",
 	)
 }
+
+func TestTypedGroup(t *testing.T) {
+	t.Parallel()
+
+	g := coalesce.NewTypedGroup[string, int]()
+
+	var (
+		callCount atomic.Int64
+		wg        sync.WaitGroup
+	)
+
+	for i := 0; i < 30; i++ {
+		wg.Add(1)
+
+		go func() {
+			defer wg.Done()
+
+			val, err := g.Do("user:42", func() (int, error) {
+				callCount.Add(1)
+				time.Sleep(30 * time.Millisecond)
+				return 42, nil
+			})
+			require.NoError(t, err)
+			require.Equal(t, 42, val)
+		}()
+	}
+
+	wg.Wait()
+	require.Equal(t, int64(1), callCount.Load())
+}

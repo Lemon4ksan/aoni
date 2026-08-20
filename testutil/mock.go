@@ -11,13 +11,13 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"sync"
+
+	"github.com/lemon4ksan/foundation/generic"
 )
 
 // MockEngine is an in-memory, zero-network mock HTTP doer for unit testing aoni applications.
 type MockEngine struct {
-	mu     sync.Mutex
-	routes []*MockRoute
+	routes generic.Safe[[]*MockRoute]
 }
 
 // NewMockEngine creates a new in-memory [MockEngine].
@@ -34,22 +34,28 @@ func (m *MockEngine) On(method, path string) *MockRoute {
 		headers:    make(http.Header),
 	}
 
-	m.mu.Lock()
-	m.routes = append(m.routes, route)
-	m.mu.Unlock()
+	m.routes.Mutate(func(routes *[]*MockRoute) {
+		*routes = append(*routes, route)
+	})
 
 	return route
 }
 
 // Do executes the mock request matching against registered routes.
 func (m *MockEngine) Do(req *http.Request) (*http.Response, error) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
+	var matchedRoute *MockRoute
 
-	for _, route := range m.routes {
-		if route.matches(req) {
-			return route.respond(req)
+	m.routes.Read(func(routes []*MockRoute) {
+		for _, route := range routes {
+			if route.matches(req) {
+				matchedRoute = route
+				break
+			}
 		}
+	})
+
+	if matchedRoute != nil {
+		return matchedRoute.respond(req)
 	}
 
 	return nil, fmt.Errorf("aoni/testutil: unexpected request: %s %s", req.Method, req.URL.String())
