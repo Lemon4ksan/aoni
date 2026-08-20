@@ -11,6 +11,7 @@ import (
 	"sync"
 
 	"github.com/klauspost/compress/flate"
+	"github.com/lemon4ksan/foundation/generic"
 )
 
 var (
@@ -20,12 +21,10 @@ var (
 		},
 	}
 
-	flateWriterPool = sync.Pool{
-		New: func() any {
-			w, _ := flate.NewWriter(nil, flate.DefaultCompression)
-			return w
-		},
-	}
+	flateWriterPool = generic.NewPool(func() *flate.Writer {
+		w, _ := flate.NewWriter(nil, flate.DefaultCompression)
+		return w
+	})
 )
 
 // compressNoContextTakeover compresses payload bytes per RFC 7692 Section 7.2.1,
@@ -33,8 +32,8 @@ var (
 func compressNoContextTakeover(src []byte) ([]byte, error) {
 	var buf bytes.Buffer
 
-	fw, ok := flateWriterPool.Get().(*flate.Writer)
-	if !ok || fw == nil {
+	fw := flateWriterPool.Get()
+	if fw == nil {
 		var err error
 
 		fw, err = flate.NewWriter(&buf, flate.DefaultCompression)

@@ -14,10 +14,10 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/klauspost/compress/zstd"
+	"github.com/lemon4ksan/foundation/generic"
 	"github.com/lemon4ksan/foundation/silicon/bytesconv"
 	"github.com/valyala/fasthttp"
 
@@ -913,12 +913,10 @@ func applyRedirectMethodAndBody(statusCode int, req *fasthttp.Request) {
 	}
 }
 
-var zstdDecoderPool = sync.Pool{
-	New: func() any {
-		dec, _ := zstd.NewReader(nil)
-		return dec
-	},
-}
+var zstdDecoderPool = generic.NewPool(func() *zstd.Decoder {
+	dec, _ := zstd.NewReader(nil)
+	return dec
+})
 
 func decompressFastResponse(resp *fasthttp.Response) bool {
 	enforceContentLengthTruncation(resp)
@@ -946,7 +944,7 @@ func decompressFastResponse(resp *fasthttp.Response) bool {
 		decompressed, err = resp.BodyUnbrotli()
 
 	case bytesconv.ContainsFoldASCII(encodingBytes, "zstd"):
-		if dec, ok := zstdDecoderPool.Get().(*zstd.Decoder); ok && dec != nil {
+		if dec := zstdDecoderPool.Get(); dec != nil {
 			decompressed, err = dec.DecodeAll(body, nil)
 			zstdDecoderPool.Put(dec)
 		}

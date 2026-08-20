@@ -55,7 +55,7 @@ func Upload(sshClient *ssh.Client, localPath, remotePath string, maxPacketSize u
 	}
 	defer remoteFile.Close()
 
-	bufPtr := ioBufferPool.Get().(*[]byte)
+	bufPtr := ioBufferPool.Get()
 	_, err = remoteFile.ReadFrom(localFile)
 
 	ioBufferPool.Put(bufPtr)
@@ -296,7 +296,7 @@ func produceChunks(ctx context.Context, taskCh chan<- transferTask, totalSize, c
 }
 
 func uploadChunk(localFile *os.File, remoteFile *pkgsftp.File, offset, size int64) error {
-	bufPtr := ioBufferPool.Get().(*[]byte)
+	bufPtr := ioBufferPool.Get()
 	defer ioBufferPool.Put(bufPtr)
 
 	buf := *bufPtr
@@ -324,7 +324,7 @@ func uploadChunk(localFile *os.File, remoteFile *pkgsftp.File, offset, size int6
 }
 
 func downloadChunk(remoteFile *pkgsftp.File, localFile *os.File, offset, size int64) error {
-	bufPtr := ioBufferPool.Get().(*[]byte)
+	bufPtr := ioBufferPool.Get()
 	defer ioBufferPool.Put(bufPtr)
 
 	buf := *bufPtr

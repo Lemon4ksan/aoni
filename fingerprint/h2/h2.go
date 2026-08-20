@@ -19,6 +19,7 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/lemon4ksan/foundation/generic"
 	"golang.org/x/net/http2"
 
 	"github.com/lemon4ksan/aoni/fingerprint/profiles"
@@ -200,10 +201,7 @@ type FramedTransport struct {
 
 	h2Transport http2.Transport
 	// h2Conns stores active *http2.ClientConn values keyed by canonical host:port.
-	// sync.Map is chosen because each key is written once (on new connection) and read
-	// on every subsequent request — the ideal write-once-read-many pattern for sync.Map's
-	// lock-free Load path.
-	h2Conns sync.Map
+	h2Conns generic.ConcurrentMap[string, *http2.ClientConn]
 	dialMu  sync.Mutex
 }
 
@@ -331,12 +329,10 @@ func (ft *FramedTransport) getOrDialH2(ctx context.Context, addr string) (*http2
 }
 
 func (ft *FramedTransport) getH2Conn(addr string) *http2.ClientConn {
-	v, ok := ft.h2Conns.Load(addr)
-	if !ok {
+	cc, ok := ft.h2Conns.Load(addr)
+	if !ok || cc == nil {
 		return nil
 	}
-
-	cc := v.(*http2.ClientConn)
 
 	if !cc.CanTakeNewRequest() {
 		// Evict stale connection; subsequent callers will dial a fresh one.

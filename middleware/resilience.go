@@ -21,9 +21,9 @@ import (
 	"strings"
 	"time"
 
+	"github.com/lemon4ksan/foundation/generic"
 	"github.com/lemon4ksan/foundation/sync/breaker"
 	"github.com/lemon4ksan/foundation/sync/keylock"
-	"github.com/lemon4ksan/foundation/generic"
 
 	"github.com/lemon4ksan/aoni"
 	"github.com/lemon4ksan/aoni/netutil/netdial"

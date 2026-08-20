@@ -10,14 +10,14 @@ import (
 	"net"
 	"net/http"
 	"sync"
+
+	"github.com/lemon4ksan/foundation/generic"
 )
 
-var ioBufferPool = sync.Pool{
-	New: func() any {
-		b := make([]byte, 32*1024)
-		return &b
-	},
-}
+var ioBufferPool = generic.NewPool(func() *[]byte {
+	b := make([]byte, 32*1024)
+	return &b
+})
 
 // Gateway acts as a high-performance HTTP reverse proxy gateway, routing public web requests
 // directly through reverse SSH channels to target developer machines.
@@ -65,7 +65,12 @@ func (g *Gateway) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	copyHeader(w.Header(), resp.Header)
 	w.WriteHeader(resp.StatusCode)
 
-	bufPtr := ioBufferPool.Get().(*[]byte)
+	bufPtr := ioBufferPool.Get()
+	if bufPtr == nil {
+		b := make([]byte, 32*1024)
+		bufPtr = &b
+	}
+
 	_, _ = io.CopyBuffer(w, resp.Body, *bufPtr)
 	ioBufferPool.Put(bufPtr)
 }
@@ -98,7 +103,12 @@ func (g *Gateway) proxyHijackedWebSocket(w http.ResponseWriter, req *http.Reques
 }
 
 func proxyPipe(dst, src net.Conn) {
-	bufPtr := ioBufferPool.Get().(*[]byte)
+	bufPtr := ioBufferPool.Get()
+	if bufPtr == nil {
+		b := make([]byte, 32*1024)
+		bufPtr = &b
+	}
+
 	_, _ = io.CopyBuffer(dst, src, *bufPtr)
 	ioBufferPool.Put(bufPtr)
 }

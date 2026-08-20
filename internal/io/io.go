@@ -313,15 +313,17 @@ func (d *DecompressReadCloser) Close() error {
 
 func (d *DecompressReadCloser) Unwrap() io.Closer { return d.Closer }
 
-var gzipReaderPool = sync.Pool{
-	New: func() any {
-		return new(gzip.Reader)
-	},
-}
+var gzipReaderPool = generic.NewPool(func() *gzip.Reader {
+	return new(gzip.Reader)
+})
 
-// NewPooledGzipReader retrieves a reset [*gzip.Reader] from [sync.Pool] without heap allocations.
+// NewPooledGzipReader retrieves a reset [*gzip.Reader] from [generic.Pool] without heap allocations.
 func NewPooledGzipReader(r io.Reader) (io.ReadCloser, error) {
-	gr := gzipReaderPool.Get().(*gzip.Reader)
+	gr := gzipReaderPool.Get()
+	if gr == nil {
+		gr = new(gzip.Reader)
+	}
+
 	if err := gr.Reset(r); err != nil {
 		gzipReaderPool.Put(gr)
 		return nil, err
