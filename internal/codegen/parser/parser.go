@@ -13,6 +13,8 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/lemon4ksan/foundation/generic"
+
 	"github.com/lemon4ksan/aoni/internal/codegen/ir"
 )
 
@@ -52,8 +54,8 @@ func (p *Parser) ParsePackage(dirPath string) (*ir.RootIR, error) {
 		Tuples:   make([]*ir.TupleIR, 0),
 	}
 
-	seenStructs := make(map[string]bool)
-	seenServices := make(map[string]bool)
+	seenStructs := generic.NewSet[string]()
+	seenServices := generic.NewSet[string]()
 
 	for _, entry := range entries {
 		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".go") ||
@@ -80,15 +82,15 @@ func (p *Parser) ParsePackage(dirPath string) (*ir.RootIR, error) {
 		root.Imports = append(root.Imports, subRoot.Imports...)
 
 		for _, s := range subRoot.Services {
-			if !seenServices[s.Name] {
-				seenServices[s.Name] = true
+			if !seenServices.Has(s.Name) {
+				seenServices.Add(s.Name)
 				root.Services = append(root.Services, s)
 			}
 		}
 
 		for _, st := range subRoot.Structs {
-			if !seenStructs[st.Name] {
-				seenStructs[st.Name] = true
+			if !seenStructs.Has(st.Name) {
+				seenStructs.Add(st.Name)
 				root.Structs = append(root.Structs, st)
 			}
 		}

@@ -15,58 +15,97 @@ import (
 	"strings"
 	"time"
 
+	"github.com/getkin/kin-openapi/openapi3"
+
 	"github.com/lemon4ksan/aoni/cmd/vortex/internal/base"
 	"github.com/lemon4ksan/aoni/internal/codegen/jsbundle"
 	"github.com/lemon4ksan/aoni/internal/codegen/openapi"
 	"github.com/lemon4ksan/aoni/internal/codegen/pipeline"
 )
 
-func (c *Cmd) runImport(_ context.Context, args []string, stdout, stderr io.Writer) error {
+type importOptions struct {
+	specFile       string
+	outFile        string
+	pkgName        string
+	serviceName    string
+	baseURL        string
+	mergeMode      string
+	jsFlag         string
+	resolvedMode   openapi.MergeMode
+	targetOut      string
+	targetPkg      string
+	targetService  string
+	inputSpec      string
+	specList       []string
+	includePaths   base.StringSliceFlag
+	excludePaths   base.StringSliceFlag
+	typeMaps       base.StringSliceFlag
+	typeMapParsed  map[string]string
+	splitModels    bool
+	skipDeprecated bool
+	force          bool
+	prune          bool
+	add            bool
+	cacheFlag      bool
+	moveFlag       bool
+	dryRun         bool
+	interactive    bool
+}
+
+func (c *Cmd) runImport(ctx context.Context, args []string, stdout, stderr io.Writer) error {
+	opts, err := parseImportOptions(args, stderr)
+	if err != nil {
+		return err
+	}
+
+	resolveImportTargets(opts, stdout)
+
+	if opts.inputSpec == "" && opts.jsFlag == "" {
+		return errors.New(
+			"vortex spec import: spec file or -js flag is required (e.g. `vortex spec import session.har` or `vortex spec import -js=\"*.js\"`)",
+		)
+	}
+
+	if opts.inputSpec == "" && opts.jsFlag != "" {
+		return runJSBundleImport(opts, stdout)
+	}
+
+	return runOpenAPIImport(ctx, opts, stdout)
+}
+
+func parseImportOptions(args []string, stderr io.Writer) (*importOptions, error) {
 	fs := flag.NewFlagSet("spec import", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 
-	var (
-		specFile       string
-		outFile        string
-		splitModels    bool
-		pkgName        string
-		serviceName    string
-		baseURL        string
-		skipDeprecated bool
-		force          bool
-		prune          bool
-		mergeMode      string
-		add            bool
-		cacheFlag      bool
-		moveFlag       bool
-		dryRun         bool
-		interactive    bool
-		jsFlag         string
-		includePaths   base.StringSliceFlag
-		excludePaths   base.StringSliceFlag
-		typeMaps       base.StringSliceFlag
-	)
+	opts := &importOptions{}
 
-	base.StringVar(fs, &specFile, "spec", "s", "", "Path to OpenAPI specification file (YAML/JSON, or - for stdin)")
-	base.StringVar(fs, &outFile, "out", "o", "api.go", "Output Go contract file path or registered contract name")
-	base.BoolVar(fs, &splitModels, "split", "", false, "Split generated code into api.go and models.go")
-	base.StringVar(fs, &pkgName, "pkg", "p", "api", "Target Go package name")
-	base.StringVar(fs, &serviceName, "service", "", "API", "Target service interface name")
-	base.StringVar(fs, &baseURL, "base-url", "", "", "Override API BaseURL")
-	base.BoolVar(fs, &skipDeprecated, "skip-deprecated", "", false, "Skip deprecated OpenAPI operations")
+	base.StringVar(
+		fs,
+		&opts.specFile,
+		"spec",
+		"s",
+		"",
+		"Path to OpenAPI specification file (YAML/JSON, or - for stdin)",
+	)
+	base.StringVar(fs, &opts.outFile, "out", "o", "api.go", "Output Go contract file path or registered contract name")
+	base.BoolVar(fs, &opts.splitModels, "split", "", false, "Split generated code into api.go and models.go")
+	base.StringVar(fs, &opts.pkgName, "pkg", "p", "api", "Target Go package name")
+	base.StringVar(fs, &opts.serviceName, "service", "", "API", "Target service interface name")
+	base.StringVar(fs, &opts.baseURL, "base-url", "", "", "Override API BaseURL")
+	base.BoolVar(fs, &opts.skipDeprecated, "skip-deprecated", "", false, "Skip deprecated OpenAPI operations")
 	base.BoolVar(
 		fs,
-		&force,
+		&opts.force,
 		"force",
 		"f",
 		false,
 		"Discard existing file and generate contract fresh from scratch (alias: --overwrite)",
 	)
-	fs.BoolVar(&force, "overwrite", false, "Alias for --force")
-	base.BoolVar(fs, &prune, "prune", "", false, "Prune deleted endpoints instead of adding @deprecated")
+	fs.BoolVar(&opts.force, "overwrite", false, "Alias for --force")
+	base.BoolVar(fs, &opts.prune, "prune", "", false, "Prune deleted endpoints instead of adding @deprecated")
 	base.StringVar(
 		fs,
-		&mergeMode,
+		&opts.mergeMode,
 		"mode",
 		"m",
 		"union",
@@ -74,16 +113,16 @@ func (c *Cmd) runImport(_ context.Context, args []string, stdout, stderr io.Writ
 	)
 	base.BoolVar(
 		fs,
-		&add,
+		&opts.add,
 		"add",
 		"a",
 		false,
 		"Preserve missing existing endpoints as active instead of marking @deprecated (alias: --additive)",
 	)
-	fs.BoolVar(&add, "additive", false, "Alias for --add")
+	fs.BoolVar(&opts.add, "additive", false, "Alias for --add")
 	base.BoolVar(
 		fs,
-		&cacheFlag,
+		&opts.cacheFlag,
 		"cache",
 		"",
 		false,
@@ -91,26 +130,26 @@ func (c *Cmd) runImport(_ context.Context, args []string, stdout, stderr io.Writ
 	)
 	base.BoolVar(
 		fs,
-		&moveFlag,
+		&opts.moveFlag,
 		"move",
 		"",
 		false,
 		"Move original HAR files into cache (deletes source file on success)",
 	)
-	base.BoolVar(fs, &dryRun, "dry-run", "", false, "Preview merge changes without modifying files on disk")
-	base.BoolVar(fs, &interactive, "interactive", "i", false, "Prompt for merge decisions")
+	base.BoolVar(fs, &opts.dryRun, "dry-run", "", false, "Preview merge changes without modifying files on disk")
+	base.BoolVar(fs, &opts.interactive, "interactive", "i", false, "Prompt for merge decisions")
 	base.StringVar(
 		fs,
-		&jsFlag,
+		&opts.jsFlag,
 		"js",
 		"",
 		"",
 		"Optional JavaScript bundle path or glob to enrich endpoints and schemas",
 	)
 
-	fs.Var(&includePaths, "include-path", "Regex pattern to filter included endpoint paths (repeatable)")
-	fs.Var(&excludePaths, "exclude-path", "Regex pattern to filter excluded endpoint paths (repeatable)")
-	fs.Var(&typeMaps, "type-map", "Custom type mappings (e.g. -type-map=steam_id=id.ID)")
+	fs.Var(&opts.includePaths, "include-path", "Regex pattern to filter included endpoint paths (repeatable)")
+	fs.Var(&opts.excludePaths, "exclude-path", "Regex pattern to filter excluded endpoint paths (repeatable)")
+	fs.Var(&opts.typeMaps, "type-map", "Custom type mappings (e.g. -type-map=steam_id=id.ID)")
 
 	fs.Usage = func() {
 		fmt.Fprintf(stderr, "vortex spec import — Import OpenAPI/Swagger or HAR Traffic with 3-Way AST Merge\n\n")
@@ -136,31 +175,27 @@ func (c *Cmd) runImport(_ context.Context, args []string, stdout, stderr io.Writ
 
 	posArgs, err := base.ParseInterspersedFlags(fs, args)
 	if err != nil {
-		return err
+		return nil, err
 	}
 
-	var resolvedMode openapi.MergeMode
-
-	modeVal := strings.ToLower(strings.TrimSpace(mergeMode))
-
+	modeVal := strings.ToLower(strings.TrimSpace(opts.mergeMode))
 	switch modeVal {
 	case "intersect", "intersection":
-		resolvedMode = openapi.MergeModeIntersection
+		opts.resolvedMode = openapi.MergeModeIntersection
 	case "diff", "difference":
-		resolvedMode = openapi.MergeModeDifference
+		opts.resolvedMode = openapi.MergeModeDifference
 	default:
-		resolvedMode = openapi.MergeModeUnion
+		opts.resolvedMode = openapi.MergeModeUnion
 	}
 
-	targetOut := outFile
-	targetPkg := pkgName
-	targetService := serviceName
+	opts.targetOut = opts.outFile
+	opts.targetPkg = opts.pkgName
+	opts.targetService = opts.serviceName
 
-	var specList []string
-	if specFile != "" {
-		for _, s := range strings.Split(specFile, ",") {
+	if opts.specFile != "" {
+		for _, s := range strings.Split(opts.specFile, ",") {
 			if strings.TrimSpace(s) != "" {
-				specList = append(specList, strings.TrimSpace(s))
+				opts.specList = append(opts.specList, strings.TrimSpace(s))
 			}
 		}
 	}
@@ -176,7 +211,7 @@ func (c *Cmd) runImport(_ context.Context, args []string, stdout, stderr io.Writ
 				strings.HasPrefix(item, "cache:") || strings.ContainsAny(item, "*?[]") {
 				isSpec = true
 
-				specList = append(specList, item)
+				opts.specList = append(opts.specList, item)
 			}
 		}
 
@@ -186,20 +221,32 @@ func (c *Cmd) runImport(_ context.Context, args []string, stdout, stderr io.Writ
 		}
 
 		if arg != ".go" && arg != "." && arg != "" {
-			targetOut = arg
+			opts.targetOut = arg
 		}
 
 		break
 	}
 
-	if targetOut == ".go" || targetOut == "" || targetOut == "." {
-		targetOut = "api.go"
+	if opts.targetOut == ".go" || opts.targetOut == "" || opts.targetOut == "." {
+		opts.targetOut = "api.go"
 	}
 
-	inputSpec := strings.Join(specList, ",")
+	opts.inputSpec = strings.Join(opts.specList, ",")
 
+	opts.typeMapParsed = make(map[string]string)
+	for _, mapping := range opts.typeMaps {
+		k, v, ok := strings.Cut(mapping, "=")
+		if ok {
+			opts.typeMapParsed[strings.TrimSpace(k)] = strings.TrimSpace(v)
+		}
+	}
+
+	return opts, nil
+}
+
+func resolveImportTargets(opts *importOptions, stdout io.Writer) {
 	// Auto-discovery if spec is not explicitly specified and JS bundle is not provided
-	if inputSpec == "" && jsFlag == "" {
+	if opts.inputSpec == "" && opts.jsFlag == "" {
 		candidates, _ := filepath.Glob("*.har")
 		if len(candidates) == 0 {
 			candidates, _ = filepath.Glob("*.json")
@@ -223,130 +270,125 @@ func (c *Cmd) runImport(_ context.Context, args []string, stdout, stderr io.Writ
 			}
 
 			if latestFile != "" {
-				inputSpec = latestFile
+				opts.inputSpec = latestFile
 				fmt.Fprintf(stdout, "💡 Auto-detected upstream spec: %s\n", latestFile)
 			}
 		}
 	}
 
-	if inputSpec == "" && jsFlag == "" {
-		return errors.New(
-			"vortex spec import: spec file or -js flag is required (e.g. `vortex spec import session.har` or `vortex spec import -js=\"*.js\"`)",
-		)
-	}
-
 	rt, _ := base.NewRuntime("")
-	if ct, err := rt.ResolveContract(targetOut); err == nil && ct != nil {
-		targetOut = ct.AbsPath
-		if targetPkg == "api" && ct.Package != "" {
-			targetPkg = ct.Package
+	if ct, err := rt.ResolveContract(opts.targetOut); err == nil && ct != nil {
+		opts.targetOut = ct.AbsPath
+		if opts.targetPkg == "api" && ct.Package != "" {
+			opts.targetPkg = ct.Package
 		}
 
-		if targetService == "API" && ct.Service != "" {
-			targetService = ct.Service
+		if opts.targetService == "API" && ct.Service != "" {
+			opts.targetService = ct.Service
 		}
 	}
 
-	if targetOut != "-" && filepath.Ext(targetOut) == "" {
-		targetOut += ".go"
+	if opts.targetOut != "-" && filepath.Ext(opts.targetOut) == "" {
+		opts.targetOut += ".go"
 	}
 
-	if targetPkg == "api" && targetOut != "" {
-		dir := filepath.Dir(targetOut)
+	if opts.targetPkg == "api" && opts.targetOut != "" {
+		dir := filepath.Dir(opts.targetOut)
 		if dir != "" && dir != "." {
 			baseDir := filepath.Base(dir)
 			if baseDir != "" && baseDir != "." && baseDir != "pkg" &&
 				baseDir != "internal" && isValidGoPackageName(baseDir) {
-				targetPkg = baseDir
+				opts.targetPkg = baseDir
 			}
 		}
 	}
+}
 
-	// If input is purely JavaScript bundles
-	if inputSpec == "" && jsFlag != "" {
-		var jsGlobs []string
-		for _, p := range strings.Split(jsFlag, ",") {
-			p = strings.TrimSpace(p)
-			if p != "" {
-				jsGlobs = append(jsGlobs, p)
-			}
+func runJSBundleImport(opts *importOptions, stdout io.Writer) error {
+	var jsGlobs []string
+	for _, p := range strings.Split(opts.jsFlag, ",") {
+		p = strings.TrimSpace(p)
+		if p != "" {
+			jsGlobs = append(jsGlobs, p)
+		}
+	}
+
+	scan, sErr := jsbundle.ScanFiles(jsGlobs)
+	if sErr != nil {
+		return fmt.Errorf("scanning js bundles: %w", sErr)
+	}
+
+	if len(scan.Endpoints) == 0 {
+		return fmt.Errorf("no endpoints discovered in javascript bundles matching %s", opts.jsFlag)
+	}
+
+	fmt.Fprintf(
+		stdout,
+		"Discovered %d RPC endpoints & %d messages from JS bundles\n",
+		len(scan.Endpoints),
+		len(scan.Messages),
+	)
+
+	var existingAPISrc []byte
+	if !opts.force {
+		if data, readErr := os.ReadFile(opts.targetOut); readErr == nil && len(data) > 0 {
+			existingAPISrc = data
+		}
+	}
+
+	var contractBytes []byte
+	if len(existingAPISrc) > 0 {
+		doc := jsbundle.ScanToOpenAPI(scan, opts.baseURL)
+		engine := openapi.NewMergeEngine()
+
+		mergedBytes, summary, mErr := engine.ReconcileService(existingAPISrc, doc, openapi.MergeConfig{
+			SpecFile:    "javascript-bundle",
+			PackageName: opts.targetPkg,
+			ServiceName: opts.targetService,
+			Prune:       opts.prune,
+			Additive:    opts.add || !opts.prune,
+		})
+		if mErr != nil {
+			return fmt.Errorf("reconciling contract from js: %w", mErr)
 		}
 
-		scan, sErr := jsbundle.ScanFiles(jsGlobs)
-		if sErr != nil {
-			return fmt.Errorf("scanning js bundles: %w", sErr)
+		contractBytes = mergedBytes
+
+		if summary != nil {
+			fmt.Fprint(stdout, summary.Render(opts.targetOut))
 		}
+	} else {
+		var gErr error
 
-		if len(scan.Endpoints) == 0 {
-			return fmt.Errorf("no endpoints discovered in javascript bundles matching %s", jsFlag)
+		contractBytes, gErr = jsbundle.GenerateContract(scan, jsbundle.ContractOptions{
+			PackageName: opts.targetPkg,
+			ServiceName: opts.targetService,
+			BaseURL:     opts.baseURL,
+			Engine:      "fast",
+		})
+		if gErr != nil {
+			return fmt.Errorf("generating contract from js: %w", gErr)
 		}
+	}
 
-		fmt.Fprintf(
-			stdout,
-			"Discovered %d RPC endpoints & %d messages from JS bundles\n",
-			len(scan.Endpoints),
-			len(scan.Messages),
-		)
-
-		var existingAPISrc []byte
-		if !force {
-			if data, readErr := os.ReadFile(targetOut); readErr == nil && len(data) > 0 {
-				existingAPISrc = data
-			}
-		}
-
-		var contractBytes []byte
-		if len(existingAPISrc) > 0 {
-			doc := jsbundle.ScanToOpenAPI(scan, baseURL)
-			engine := openapi.NewMergeEngine()
-
-			mergedBytes, summary, mErr := engine.ReconcileService(existingAPISrc, doc, openapi.MergeConfig{
-				SpecFile:    "javascript-bundle",
-				PackageName: targetPkg,
-				ServiceName: targetService,
-				Prune:       prune,
-				Additive:    add || !prune,
-			})
-			if mErr != nil {
-				return fmt.Errorf("reconciling contract from js: %w", mErr)
-			}
-
-			contractBytes = mergedBytes
-
-			if summary != nil {
-				fmt.Fprint(stdout, summary.Render(targetOut))
-			}
-		} else {
-			var gErr error
-
-			contractBytes, gErr = jsbundle.GenerateContract(scan, jsbundle.ContractOptions{
-				PackageName: targetPkg,
-				ServiceName: targetService,
-				BaseURL:     baseURL,
-				Engine:      "fast",
-			})
-			if gErr != nil {
-				return fmt.Errorf("generating contract from js: %w", gErr)
-			}
-		}
-
-		if dryRun {
-			fmt.Fprintf(stdout, "%s\n", string(contractBytes))
-			return nil
-		}
-
-		_ = os.MkdirAll(filepath.Dir(targetOut), 0o755)
-		if err := os.WriteFile(targetOut, contractBytes, 0o600); err != nil {
-			return fmt.Errorf("writing contract %s: %w", targetOut, err)
-		}
-
-		fmt.Fprintf(stdout, "✔ Generated/Reconciled Aoni contract in %s (%d bytes)\n", targetOut, len(contractBytes))
-
+	if opts.dryRun {
+		fmt.Fprintf(stdout, "%s\n", string(contractBytes))
 		return nil
 	}
 
+	_ = os.MkdirAll(filepath.Dir(opts.targetOut), 0o755)
+	if err := os.WriteFile(opts.targetOut, contractBytes, 0o600); err != nil {
+		return fmt.Errorf("writing contract %s: %w", opts.targetOut, err)
+	}
+
+	fmt.Fprintf(stdout, "✔ Generated/Reconciled Aoni contract in %s (%d bytes)\n", opts.targetOut, len(contractBytes))
+
+	return nil
+}
+
+func runOpenAPIImport(_ context.Context, opts *importOptions, stdout io.Writer) error {
 	var specData []byte
-	if inputSpec == "-" {
+	if opts.inputSpec == "-" {
 		var err error
 
 		specData, err = io.ReadAll(os.Stdin)
@@ -355,19 +397,21 @@ func (c *Cmd) runImport(_ context.Context, args []string, stdout, stderr io.Writ
 		}
 	}
 
+	rt, _ := base.NewRuntime("")
+
 	// Cache and sanitize raw HAR captures and extract credentials into vault
-	if cacheFlag || moveFlag {
+	if opts.cacheFlag || opts.moveFlag {
 		tp, _ := pipeline.NewTrafficPipeline(rt.RootDir)
-		for _, sPath := range specList {
+		for _, sPath := range opts.specList {
 			if strings.HasSuffix(sPath, ".har") {
-				_, _, _ = tp.IngestHAR(sPath, nil, moveFlag, true)
+				_, _, _ = tp.IngestHAR(sPath, nil, opts.moveFlag, true)
 			}
 		}
 	}
 
-	if jsFlag != "" {
+	if opts.jsFlag != "" {
 		var jsGlobs []string
-		for _, p := range strings.Split(jsFlag, ",") {
+		for _, p := range strings.Split(opts.jsFlag, ",") {
 			p = strings.TrimSpace(p)
 			if p != "" {
 				jsGlobs = append(jsGlobs, p)
@@ -384,88 +428,87 @@ func (c *Cmd) runImport(_ context.Context, args []string, stdout, stderr io.Writ
 		}
 	}
 
-	doc, err := openapi.LoadSpecWithMode(inputSpec, specData, resolvedMode)
+	doc, err := openapi.LoadSpecWithMode(opts.inputSpec, specData, opts.resolvedMode)
 	if err != nil {
 		return fmt.Errorf("loading spec: %w", err)
 	}
 
-	tm := make(map[string]string)
-	for _, mapping := range typeMaps {
-		k, v, ok := strings.Cut(mapping, "=")
-		if ok {
-			tm[strings.TrimSpace(k)] = strings.TrimSpace(v)
-		}
-	}
-
 	// Check if existing file is present for semantic reconciliation (Git-merge for APIs)
 	var existingSrc []byte
-	if targetOut != "" && targetOut != "-" && !force {
-		if data, readErr := os.ReadFile(targetOut); readErr == nil && len(data) > 0 {
+	if opts.targetOut != "" && opts.targetOut != "-" && !opts.force {
+		if data, readErr := os.ReadFile(opts.targetOut); readErr == nil && len(data) > 0 {
 			existingSrc = data
 		}
 	}
 
 	if len(existingSrc) > 0 {
-		// Run Semantic AST Merge Engine
-		mergeEngine := openapi.NewMergeEngine()
-		mCfg := openapi.MergeConfig{
-			SpecFile:       inputSpec,
-			PackageName:    targetPkg,
-			ServiceName:    targetService,
-			Prune:          prune,
-			Additive:       add,
-			Overwrite:      force,
-			DryRun:         dryRun,
-			Interactive:    interactive,
-			SkipDeprecated: skipDeprecated,
-			TypeMap:        tm,
-		}
-
-		reconciledSrc, summary, mergeErr := mergeEngine.ReconcileService(existingSrc, doc, mCfg)
-		if mergeErr != nil {
-			return fmt.Errorf("reconciling contract %s: %w", targetOut, mergeErr)
-		}
-
-		fmt.Fprint(stdout, summary.Render(targetOut))
-
-		if !dryRun {
-			if err := os.WriteFile(targetOut, reconciledSrc, 0o600); err != nil {
-				return fmt.Errorf("writing %s: %w", targetOut, err)
-			}
-		}
-
-		return nil
+		return reconcileExistingContract(existingSrc, doc, opts, stdout)
 	}
 
+	return generateAndWriteContract(doc, opts, stdout)
+}
+
+func reconcileExistingContract(existingSrc []byte, doc *openapi3.T, opts *importOptions, stdout io.Writer) error {
+	mergeEngine := openapi.NewMergeEngine()
+	mCfg := openapi.MergeConfig{
+		SpecFile:       opts.inputSpec,
+		PackageName:    opts.targetPkg,
+		ServiceName:    opts.targetService,
+		Prune:          opts.prune,
+		Additive:       opts.add,
+		Overwrite:      opts.force,
+		DryRun:         opts.dryRun,
+		Interactive:    opts.interactive,
+		SkipDeprecated: opts.skipDeprecated,
+		TypeMap:        opts.typeMapParsed,
+	}
+
+	reconciledSrc, summary, mergeErr := mergeEngine.ReconcileService(existingSrc, doc, mCfg)
+	if mergeErr != nil {
+		return fmt.Errorf("reconciling contract %s: %w", opts.targetOut, mergeErr)
+	}
+
+	fmt.Fprint(stdout, summary.Render(opts.targetOut))
+
+	if !opts.dryRun {
+		if err := os.WriteFile(opts.targetOut, reconciledSrc, 0o600); err != nil {
+			return fmt.Errorf("writing %s: %w", opts.targetOut, err)
+		}
+	}
+
+	return nil
+}
+
+func generateAndWriteContract(doc *openapi3.T, opts *importOptions, stdout io.Writer) error {
 	cfg := openapi.ImportConfig{
-		SpecFile:       inputSpec,
-		PackageName:    targetPkg,
-		ServiceName:    targetService,
-		OutputFile:     targetOut,
-		BaseURL:        baseURL,
-		SkipDeprecated: skipDeprecated,
-		SplitModels:    splitModels,
-		IncludePaths:   includePaths,
-		ExcludePaths:   excludePaths,
-		TypeMap:        tm,
-		MergeMode:      resolvedMode,
+		SpecFile:       opts.inputSpec,
+		PackageName:    opts.targetPkg,
+		ServiceName:    opts.targetService,
+		OutputFile:     opts.targetOut,
+		BaseURL:        opts.baseURL,
+		SkipDeprecated: opts.skipDeprecated,
+		SplitModels:    opts.splitModels,
+		IncludePaths:   opts.includePaths,
+		ExcludePaths:   opts.excludePaths,
+		TypeMap:        opts.typeMapParsed,
+		MergeMode:      opts.resolvedMode,
 	}
 
-	if splitModels {
+	if opts.splitModels {
 		apiSrc, modelsSrc, err := openapi.GenerateSplitContract(doc, cfg)
 		if err != nil {
 			return fmt.Errorf("generating split contract: %w", err)
 		}
 
-		outDir := filepath.Dir(targetOut)
+		outDir := filepath.Dir(opts.targetOut)
 		if outDir == "" {
 			outDir = "."
 		}
 
-		apiPath := targetOut
+		apiPath := opts.targetOut
 		modelsPath := filepath.Join(outDir, "models.go")
 
-		if !dryRun {
+		if !opts.dryRun {
 			if outDir != "." {
 				_ = os.MkdirAll(outDir, 0o755)
 			}
@@ -502,20 +545,20 @@ func (c *Cmd) runImport(_ context.Context, args []string, stdout, stderr io.Writ
 		return fmt.Errorf("generating contract: %w", err)
 	}
 
-	if targetOut != "" && targetOut != "-" {
-		if !dryRun {
-			dir := filepath.Dir(targetOut)
+	if opts.targetOut != "" && opts.targetOut != "-" {
+		if !opts.dryRun {
+			dir := filepath.Dir(opts.targetOut)
 			if dir != "" && dir != "." {
 				_ = os.MkdirAll(dir, 0o755)
 			}
 
-			if err := os.WriteFile(targetOut, src, 0o600); err != nil {
-				return fmt.Errorf("writing output file %s: %w", targetOut, err)
+			if err := os.WriteFile(opts.targetOut, src, 0o600); err != nil {
+				return fmt.Errorf("writing output file %s: %w", opts.targetOut, err)
 			}
 
-			fmt.Fprintf(stdout, "✔ Generated Aoni contract in %s (%d bytes)\n", targetOut, len(src))
+			fmt.Fprintf(stdout, "✔ Generated Aoni contract in %s (%d bytes)\n", opts.targetOut, len(src))
 		} else {
-			fmt.Fprintf(stdout, "[dry-run] Would generate %s (%d bytes)\n", targetOut, len(src))
+			fmt.Fprintf(stdout, "[dry-run] Would generate %s (%d bytes)\n", opts.targetOut, len(src))
 		}
 
 		return nil

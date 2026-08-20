@@ -11,7 +11,10 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sync"
 	"time"
+
+	"github.com/lemon4ksan/foundation/generic"
 )
 
 // LintCacheEntry stores validation state for a single contract file.
@@ -23,6 +26,7 @@ type LintCacheEntry struct {
 
 // LintCache represents the persisted linter cache in .vortex/cache/lint.json.
 type LintCache struct {
+	mu      sync.RWMutex
 	Entries map[string]LintCacheEntry `json:"entries"`
 }
 
@@ -58,7 +62,15 @@ func (lc *LintCache) Save(rootDir string) error {
 		return err
 	}
 
-	data, err := json.MarshalIndent(lc, "", "  ")
+	var (
+		data []byte
+		err  error
+	)
+
+	generic.WithRLock(&lc.mu, func() {
+		data, err = json.MarshalIndent(lc, "", "  ")
+	})
+
 	if err != nil {
 		return err
 	}
@@ -68,23 +80,31 @@ func (lc *LintCache) Save(rootDir string) error {
 
 // IsFresh checks if a file's content hash matches the cached hash with 0 issues.
 func (lc *LintCache) IsFresh(relPath string, content []byte) bool {
-	entry, exists := lc.Entries[filepath.ToSlash(relPath)]
-	if !exists {
-		return false
-	}
+	var isFresh bool
 
-	currentHash := HashBytes(content)
+	generic.WithRLock(&lc.mu, func() {
+		entry, exists := lc.Entries[filepath.ToSlash(relPath)]
+		if !exists {
+			isFresh = false
+			return
+		}
 
-	return entry.Hash == currentHash && entry.IssueCount == 0
+		currentHash := HashBytes(content)
+		isFresh = entry.Hash == currentHash && entry.IssueCount == 0
+	})
+
+	return isFresh
 }
 
 // Put records a validation result in the cache.
 func (lc *LintCache) Put(relPath string, content []byte, issueCount int) {
-	lc.Entries[filepath.ToSlash(relPath)] = LintCacheEntry{
-		Hash:        HashBytes(content),
-		IssueCount:  issueCount,
-		ValidatedAt: time.Now(),
-	}
+	generic.WithLock(&lc.mu, func() {
+		lc.Entries[filepath.ToSlash(relPath)] = LintCacheEntry{
+			Hash:        HashBytes(content),
+			IssueCount:  issueCount,
+			ValidatedAt: time.Now(),
+		}
+	})
 }
 
 // HashBytes computes the SHA256 hex string of content.
