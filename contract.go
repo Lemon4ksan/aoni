@@ -6,6 +6,7 @@ package aoni
 
 import (
 	"net/http"
+	"reflect"
 
 	"github.com/lemon4ksan/foundation/generic"
 
@@ -87,9 +88,24 @@ func UnwrapAs[T any](target any) (T, bool) {
 			continue
 		}
 
-		if u, ok := curr.(interface{ Unwrap() any }); ok {
+		if u, ok := curr.(interface{ Unwrap() error }); ok {
 			curr = u.Unwrap()
 			continue
+		}
+
+		v := reflect.ValueOf(curr)
+		if v.IsValid() && (v.Kind() == reflect.Pointer || v.Kind() == reflect.Interface || v.Kind() == reflect.Struct) {
+			m := v.MethodByName("Unwrap")
+			if m.IsValid() && m.Type().NumIn() == 0 && m.Type().NumOut() == 1 {
+				res := m.Call(nil)[0].Interface()
+				if res == curr {
+					break
+				}
+
+				curr = res
+
+				continue
+			}
 		}
 
 		break

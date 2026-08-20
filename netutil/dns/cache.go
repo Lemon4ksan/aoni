@@ -84,13 +84,13 @@ func (c *InMemoryDNSCache) purgeExpired() {
 // LookupIPAddr resolves host using cached TTL entries or queries the underlying resolver.
 func (c *InMemoryDNSCache) LookupIPAddr(ctx context.Context, host string) ([]net.IPAddr, error) {
 	entry, ok := c.cache.Load(host)
-	if ok && clock.CoarseTime().Before(entry.expiry) {
+	if ok && time.Now().Before(entry.expiry) {
 		return entry.ips, nil
 	}
 
 	ips, err := c.sflight.Do(ctx, host, func(ctx context.Context) ([]net.IPAddr, error) {
 		entry, ok := c.cache.Load(host)
-		if ok && clock.CoarseTime().Before(entry.expiry) {
+		if ok && time.Now().Before(entry.expiry) {
 			return entry.ips, nil
 		}
 

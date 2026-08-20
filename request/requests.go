@@ -42,8 +42,21 @@ type Unwrapper interface {
 
 // UnwrapClient peels away all [Unwrapper] decorator layers from r and returns the innermost [*aoni.Client].
 func UnwrapClient(r Requester) *aoni.Client {
-	if client, ok := aoni.UnwrapAs[*aoni.Client](r); ok {
-		return client
+	for r != nil {
+		if client, ok := r.(*aoni.Client); ok {
+			return client
+		}
+
+		if u, ok := r.(Unwrapper); ok {
+			r = u.Unwrap()
+			continue
+		}
+
+		if client, ok := aoni.UnwrapAs[*aoni.Client](r); ok {
+			return client
+		}
+
+		break
 	}
 
 	return nil
