@@ -19,6 +19,7 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/lemon4ksan/foundation/generic"
 	"golang.org/x/net/http2"
 
 	"github.com/lemon4ksan/aoni/fingerprint/profiles"
@@ -200,10 +201,8 @@ type FramedTransport struct {
 
 	h2Transport http2.Transport
 	// h2Conns stores active *http2.ClientConn values keyed by canonical host:port.
-	// sync.Map is chosen because each key is written once (on new connection) and read
-	// on every subsequent request — the ideal write-once-read-many pattern for sync.Map's
-	// lock-free Load path.
-	h2Conns sync.Map
+	h2Conns generic.ConcurrentMap[string, *http2.ClientConn]
+	dialMu  sync.Mutex
 }
 
 // NewFramedTransport creates a [FramedTransport] wrapping base with custom HTTP/2 settings and header ordering rules.
@@ -263,17 +262,41 @@ func (ft *FramedTransport) RoundTrip(req *http.Request) (*http.Response, error) 
 		return cc.RoundTrip(req)
 	}
 
-	conn, err := ft.dialTLS(req.Context(), addr)
+	cc, fallbackConn, err := ft.getOrDialH2(req.Context(), addr)
 	if err != nil {
 		return nil, err
 	}
 
+	if cc != nil {
+		return cc.RoundTrip(req)
+	}
+
 	if trace := httptrace.ContextClientTrace(req.Context()); trace != nil && trace.GotConn != nil {
+		trace.GotConn(httptrace.GotConnInfo{Conn: fallbackConn})
+	}
+
+	return http1RoundTrip(req, fallbackConn)
+}
+
+func (ft *FramedTransport) getOrDialH2(ctx context.Context, addr string) (*http2.ClientConn, net.Conn, error) {
+	ft.dialMu.Lock()
+	defer ft.dialMu.Unlock()
+
+	// Double check after acquiring lock to prevent thundering herd
+	if cc := ft.getH2Conn(addr); cc != nil {
+		return cc, nil, nil
+	}
+
+	conn, err := ft.dialTLS(ctx, addr)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	if trace := httptrace.ContextClientTrace(ctx); trace != nil && trace.GotConn != nil {
 		trace.GotConn(httptrace.GotConnInfo{Conn: conn})
 	}
 
 	alpn := getALPN(conn)
-
 	if alpn == "h2" {
 		dto := impl.SettingsDTO{
 			HeaderTableSize:      ft.settings.HeaderTableSize,
@@ -294,24 +317,22 @@ func (ft *FramedTransport) RoundTrip(req *http.Request) (*http.Response, error) 
 		cc, err := ft.h2Transport.NewClientConn(framed)
 		if err != nil {
 			_ = conn.Close()
-			return nil, fmt.Errorf("aoni/h2: failed to create h2 client conn: %w", err)
+			return nil, nil, fmt.Errorf("aoni/h2: failed to create h2 client conn: %w", err)
 		}
 
 		ft.saveH2Conn(addr, cc)
 
-		return cc.RoundTrip(req)
+		return cc, nil, nil
 	}
 
-	return http1RoundTrip(req, conn)
+	return nil, conn, nil
 }
 
 func (ft *FramedTransport) getH2Conn(addr string) *http2.ClientConn {
-	v, ok := ft.h2Conns.Load(addr)
-	if !ok {
+	cc, ok := ft.h2Conns.Load(addr)
+	if !ok || cc == nil {
 		return nil
 	}
-
-	cc := v.(*http2.ClientConn)
 
 	if !cc.CanTakeNewRequest() {
 		// Evict stale connection; subsequent callers will dial a fresh one.

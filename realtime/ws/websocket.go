@@ -23,7 +23,6 @@ import (
 	utls "github.com/refraction-networking/utls"
 
 	"github.com/lemon4ksan/aoni"
-	"github.com/lemon4ksan/aoni/internal/io"
 	"github.com/lemon4ksan/aoni/internal/requestutil"
 )
 
@@ -157,7 +156,7 @@ func DialWebSocketWithConfig(
 	}
 
 	// 3. Fallback to HTTP/1.1 Upgrade (RFC 6455)
-	activeConn, resp, selectedSubprotocol, compressed, err := performHTTP1Handshake(
+	activeConn, br, resp, selectedSubprotocol, compressed, err := performHTTP1Handshake(
 		ctx,
 		baseConn,
 		handshakeReq,
@@ -169,7 +168,7 @@ func DialWebSocketWithConfig(
 		return nil, resp, err
 	}
 
-	rawConn := WrapRawConnConfig(activeConn, true, config.ReadBufferSize, config.WriteBufferSize)
+	rawConn := WrapRawConnWithReader(activeConn, br, true, config.WriteBufferSize)
 	rawConn.subprotocol = selectedSubprotocol
 	rawConn.compress = compressed
 
@@ -322,50 +321,44 @@ func performHTTP1Handshake(
 	req *http.Request,
 	challengeKey string,
 	requestedSubprotocols []string,
-) (net.Conn, *http.Response, string, bool, error) {
+) (net.Conn, *bufio.Reader, *http.Response, string, bool, error) {
 	if deadline, ok := ctx.Deadline(); ok {
 		_ = conn.SetDeadline(deadline)
 		defer func() { _ = conn.SetDeadline(time.Time{}) }()
 	}
 
 	if err := req.Write(conn); err != nil {
-		return nil, nil, "", false, fmt.Errorf("aoni/ws: write handshake: %w", err)
+		return nil, nil, nil, "", false, fmt.Errorf("aoni/ws: write handshake: %w", err)
 	}
 
 	br := bufio.NewReader(conn)
 
 	resp, err := http.ReadResponse(br, req)
 	if err != nil {
-		return nil, nil, "", false, fmt.Errorf("aoni/ws: read handshake response: %w", err)
+		return nil, nil, nil, "", false, fmt.Errorf("aoni/ws: read handshake response: %w", err)
 	}
 
 	if resp.StatusCode != http.StatusSwitchingProtocols {
-		return nil, resp, "", false, ErrBadHandshake
+		return nil, nil, resp, "", false, ErrBadHandshake
 	}
 
 	if !tokenContainsValue(resp.Header, "Upgrade", "websocket") ||
 		!tokenContainsValue(resp.Header, "Connection", "upgrade") {
-		return nil, resp, "", false, ErrBadHandshake
+		return nil, nil, resp, "", false, ErrBadHandshake
 	}
 
 	if resp.Header.Get("Sec-WebSocket-Accept") != computeAcceptKey(challengeKey) {
-		return nil, resp, "", false, ErrBadHandshake
+		return nil, nil, resp, "", false, ErrBadHandshake
 	}
 
 	selectedSubprotocol := strings.TrimSpace(resp.Header.Get("Sec-WebSocket-Protocol"))
 	if !ValidateSubprotocol(requestedSubprotocols, selectedSubprotocol) {
-		return nil, resp, "", false, ErrSubprotocolMismatch
+		return nil, nil, resp, "", false, ErrSubprotocolMismatch
 	}
 
 	isCompressed := hasPermessageDeflateExtension(resp.Header)
 
-	// Preserve any unread WebSocket frame bytes buffered in br during HTTP 101 response reading
-	activeConn := conn
-	if br.Buffered() > 0 {
-		activeConn = &io.BufferedConn{Conn: conn, R: br}
-	}
-
-	return activeConn, resp, selectedSubprotocol, isCompressed, nil
+	return conn, br, resp, selectedSubprotocol, isCompressed, nil
 }
 
 func hasPermessageDeflateExtension(header http.Header) bool {
@@ -441,4 +434,36 @@ func DialResult(
 	}
 
 	return generic.Success(conn), resp
+}
+
+// Connect establishes an upgraded, cascading WebSocket connection across HTTP/3, HTTP/2 Extended CONNECT, and HTTP/1.1.
+// Canonical entrypoint for persistent WebSocket connections.
+func Connect(
+	ctx context.Context,
+	dialer aoni.WebSocketDialer,
+	targetURL string,
+	mods ...aoni.RequestModifier,
+) (Conn, *http.Response, error) {
+	return DialWebSocket(ctx, dialer, targetURL, mods...)
+}
+
+// ConnectWithConfig establishes a WebSocket connection with explicit buffer and subprotocol configuration.
+func ConnectWithConfig(
+	ctx context.Context,
+	dialer aoni.WebSocketDialer,
+	targetURL string,
+	config DialWebSocketConfig,
+	mods ...aoni.RequestModifier,
+) (Conn, *http.Response, error) {
+	return DialWebSocketWithConfig(ctx, dialer, targetURL, config, mods...)
+}
+
+// ConnectResult establishes a WebSocket connection and yields a Swift-inspired [generic.Result].
+func ConnectResult(
+	ctx context.Context,
+	dialer aoni.WebSocketDialer,
+	targetURL string,
+	mods ...aoni.RequestModifier,
+) (generic.Result[Conn], *http.Response) {
+	return DialResult(ctx, dialer, targetURL, mods...)
 }

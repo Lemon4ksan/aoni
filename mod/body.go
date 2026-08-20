@@ -8,15 +8,18 @@ import (
 	"bytes"
 	"encoding/binary"
 	"encoding/json"
+	"encoding/xml"
 	stdio "io"
 	"net/url"
 	"strings"
 
 	"github.com/lemon4ksan/foundation/silicon/bytesconv"
 	"google.golang.org/protobuf/proto"
+	"gopkg.in/yaml.v3"
 
 	"github.com/lemon4ksan/aoni"
 	"github.com/lemon4ksan/aoni/codec/values"
+	"github.com/lemon4ksan/aoni/internal/core"
 )
 
 // WithBody constructs an [aoni.RequestModifier] replacing the request body with the provided stream reader.
@@ -27,7 +30,7 @@ func WithBody(r stdio.Reader) aoni.RequestModifier {
 
 	if b, ok := r.(*bytes.Buffer); ok {
 		return aoni.RequestModifier{
-			Kind:  aoni.ModBodyBytes,
+			Kind:  core.ModBodyBytes,
 			Bytes: b.Bytes(),
 		}
 	}
@@ -37,7 +40,7 @@ func WithBody(r stdio.Reader) aoni.RequestModifier {
 		_, _ = br.ReadAt(buf, 0)
 
 		return aoni.RequestModifier{
-			Kind:  aoni.ModBodyBytes,
+			Kind:  core.ModBodyBytes,
 			Bytes: buf,
 		}
 	}
@@ -47,13 +50,13 @@ func WithBody(r stdio.Reader) aoni.RequestModifier {
 		_, _ = sr.ReadAt(buf, 0)
 
 		return aoni.RequestModifier{
-			Kind:  aoni.ModBodyBytes,
+			Kind:  core.ModBodyBytes,
 			Bytes: buf,
 		}
 	}
 
 	return aoni.RequestModifier{
-		Kind:   aoni.ModBodyStream,
+		Kind:   core.ModBodyStream,
 		Stream: r,
 	}
 }
@@ -61,7 +64,7 @@ func WithBody(r stdio.Reader) aoni.RequestModifier {
 // WithBodyBytes constructs an [aoni.RequestModifier] setting raw byte slice payload directly as the request body.
 func WithBodyBytes(b []byte) aoni.RequestModifier {
 	return aoni.RequestModifier{
-		Kind:  aoni.ModBodyBytes,
+		Kind:  core.ModBodyBytes,
 		Bytes: b,
 	}
 }
@@ -75,16 +78,110 @@ func WithJSONBody(payload any) aoni.RequestModifier {
 	bodyBytes, err := json.Marshal(payload)
 	if err != nil {
 		return aoni.RequestModifier{
-			Kind: aoni.ModCustom,
+			Kind: core.ModCustom,
 			Fn: func(req aoni.Request) {
-				aoni.GetOrInitRequestConfig(req).BodyError = err
+				getOrInitRequestConfig(req).BodyError = err
 			},
 		}
 	}
 
 	return aoni.RequestModifier{
-		Kind:        aoni.ModBodyBytes,
+		Kind:        core.ModBodyBytes,
 		ContentType: "application/json",
+		Bytes:       bodyBytes,
+	}
+}
+
+// WithJSON is a convenient alias for [WithJSONBody].
+func WithJSON(payload any) aoni.RequestModifier {
+	return WithJSONBody(payload)
+}
+
+// WithSmartBody constructs an [aoni.RequestModifier] that automatically detects the payload type:
+//   - proto.Message -> Protobuf payload with application/x-protobuf
+//   - url.Values -> URL-encoded form payload with application/x-www-form-urlencoded
+//   - stdio.Reader -> Streamed request body
+//   - []byte -> Raw byte slice payload
+//   - string -> UTF-8 text payload with text/plain; charset=utf-8
+//   - Struct / Map / Slice -> JSON-marshaled payload with application/json
+func WithSmartBody(body any) aoni.RequestModifier {
+	if body == nil {
+		return aoni.RequestModifier{}
+	}
+
+	if mod, ok := body.(aoni.RequestModifier); ok {
+		return mod
+	}
+
+	if msg, ok := body.(proto.Message); ok {
+		return WithProtoBody(msg)
+	}
+
+	if uv, ok := body.(url.Values); ok {
+		return WithFormValues(uv)
+	}
+
+	if r, ok := body.(stdio.Reader); ok {
+		return WithBody(r)
+	}
+
+	if b, ok := body.([]byte); ok {
+		return WithBodyBytes(b)
+	}
+
+	if s, ok := body.(string); ok {
+		return aoni.RequestModifier{
+			Kind:        core.ModBodyBytes,
+			ContentType: "text/plain; charset=utf-8",
+			Bytes:       []byte(s),
+		}
+	}
+
+	return WithJSONBody(body)
+}
+
+// WithXMLBody constructs an [aoni.RequestModifier] marshaling payload to XML and setting Content-Type to application/xml.
+func WithXMLBody(payload any) aoni.RequestModifier {
+	if payload == nil {
+		return aoni.RequestModifier{}
+	}
+
+	bodyBytes, err := xml.Marshal(payload)
+	if err != nil {
+		return aoni.RequestModifier{
+			Kind: core.ModCustom,
+			Fn: func(req aoni.Request) {
+				getOrInitRequestConfig(req).BodyError = err
+			},
+		}
+	}
+
+	return aoni.RequestModifier{
+		Kind:        core.ModBodyBytes,
+		ContentType: "application/xml",
+		Bytes:       bodyBytes,
+	}
+}
+
+// WithYAMLBody constructs an [aoni.RequestModifier] marshaling payload to YAML and setting Content-Type to application/yaml.
+func WithYAMLBody(payload any) aoni.RequestModifier {
+	if payload == nil {
+		return aoni.RequestModifier{}
+	}
+
+	bodyBytes, err := yaml.Marshal(payload)
+	if err != nil {
+		return aoni.RequestModifier{
+			Kind: core.ModCustom,
+			Fn: func(req aoni.Request) {
+				getOrInitRequestConfig(req).BodyError = err
+			},
+		}
+	}
+
+	return aoni.RequestModifier{
+		Kind:        core.ModBodyBytes,
+		ContentType: "application/yaml",
 		Bytes:       bodyBytes,
 	}
 }
@@ -98,15 +195,15 @@ func WithProtoBody(msg proto.Message) aoni.RequestModifier {
 	bodyBytes, err := proto.Marshal(msg)
 	if err != nil {
 		return aoni.RequestModifier{
-			Kind: aoni.ModCustom,
+			Kind: core.ModCustom,
 			Fn: func(req aoni.Request) {
-				aoni.GetOrInitRequestConfig(req).BodyError = err
+				getOrInitRequestConfig(req).BodyError = err
 			},
 		}
 	}
 
 	return aoni.RequestModifier{
-		Kind:        aoni.ModBodyBytes,
+		Kind:        core.ModBodyBytes,
 		ContentType: "application/x-protobuf",
 		Bytes:       bodyBytes,
 	}
@@ -121,9 +218,9 @@ func WithGRPCWebBody(msg proto.Message) aoni.RequestModifier {
 	protoBytes, err := proto.Marshal(msg)
 	if err != nil {
 		return aoni.RequestModifier{
-			Kind: aoni.ModCustom,
+			Kind: core.ModCustom,
 			Fn: func(req aoni.Request) {
-				aoni.GetOrInitRequestConfig(req).BodyError = err
+				getOrInitRequestConfig(req).BodyError = err
 			},
 		}
 	}
@@ -136,7 +233,7 @@ func WithGRPCWebBody(msg proto.Message) aoni.RequestModifier {
 	capturedFrame := frame
 
 	return aoni.RequestModifier{
-		Kind: aoni.ModCustom,
+		Kind: core.ModCustom,
 		Fn: func(req aoni.Request) {
 			req.SetBodyBytes(capturedFrame)
 			req.SetHeader("Content-Type", "application/grpc-web+proto")
@@ -150,7 +247,7 @@ func WithFormValues(values url.Values) aoni.RequestModifier {
 	encoded := values.Encode()
 
 	return aoni.RequestModifier{
-		Kind:        aoni.ModBodyBytes,
+		Kind:        core.ModBodyBytes,
 		ContentType: "application/x-www-form-urlencoded",
 		Bytes:       bytesconv.S2B(encoded),
 	}
@@ -159,7 +256,7 @@ func WithFormValues(values url.Values) aoni.RequestModifier {
 // WithFormBody constructs an [aoni.RequestModifier] encoding a struct or map into URL-encoded form values.
 func WithFormBody(payload any) aoni.RequestModifier {
 	return aoni.RequestModifier{
-		Kind: aoni.ModCustom,
+		Kind: core.ModCustom,
 		Fn: func(req aoni.Request) {
 			if payload == nil {
 				return
@@ -178,7 +275,7 @@ func WithFormBody(payload any) aoni.RequestModifier {
 
 			vals, err := encoder(payload)
 			if err != nil {
-				aoni.GetOrInitRequestConfig(req).BodyError = err
+				getOrInitRequestConfig(req).BodyError = err
 				return
 			}
 

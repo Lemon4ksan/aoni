@@ -11,8 +11,9 @@ import (
 	"net"
 	"net/http"
 	"net/url"
-	"sync"
 	"time"
+
+	"github.com/lemon4ksan/foundation/generic"
 
 	"github.com/lemon4ksan/aoni"
 )
@@ -25,11 +26,9 @@ const (
 	DefaultUDPPathPrefix = "/.well-known/masque/udp/"
 )
 
-var bufioReaderPool = sync.Pool{
-	New: func() any {
-		return bufio.NewReaderSize(nil, 4096)
-	},
-}
+var bufioReaderPool = generic.NewPool(func() *bufio.Reader {
+	return bufio.NewReaderSize(nil, 4096)
+})
 
 // BuildUDPProxyURI constructs an RFC 9298 compliant UDP Proxy URI.
 //
@@ -104,8 +103,8 @@ func performCONNECTUDPHandshake(
 		return nil, fmt.Errorf("aoni/masque: write udp request: %w", err)
 	}
 
-	br, ok := bufioReaderPool.Get().(*bufio.Reader)
-	if !ok || br == nil {
+	br := bufioReaderPool.Get()
+	if br == nil {
 		br = bufio.NewReaderSize(conn, 4096)
 	} else {
 		br.Reset(conn)

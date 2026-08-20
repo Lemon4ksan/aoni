@@ -6,16 +6,16 @@ package dns
 
 import (
 	"context"
-	"crypto/rand"
 	"encoding/base64"
-	"encoding/binary"
 	"fmt"
 	"net"
 	"net/http"
 	"net/netip"
+	"sync"
 	"time"
 
 	"github.com/lemon4ksan/foundation/net/dns/wire"
+	"github.com/lemon4ksan/foundation/silicon/rand"
 
 	"github.com/lemon4ksan/aoni"
 	"github.com/lemon4ksan/aoni/fast"
@@ -102,24 +102,43 @@ func (r *DoHResolver) LookupNetIP(ctx context.Context, host string) ([]netip.Add
 	return addrs, nil
 }
 
-// LookupDNSRecords queries A and AAAA records over DoH, returning DNS records with authoritative TTLs.
+// LookupDNSRecords queries A and AAAA records concurrently over DoH, returning DNS records with authoritative TTLs.
 func (r *DoHResolver) LookupDNSRecords(ctx context.Context, host string) ([]wire.DNSRecord, error) {
-	v4Records, err4 := r.queryWire(ctx, host, wire.TypeA)
-	v6Records, err6 := r.queryWire(ctx, host, wire.TypeAAAA)
+	var (
+		v4Records, v6Records []wire.DNSRecord
+		err4, err6           error
+		wg                   sync.WaitGroup
+	)
+
+	wg.Add(2)
+
+	go func() {
+		defer wg.Done()
+
+		v4Records, err4 = r.queryWire(ctx, host, wire.TypeA)
+	}()
+	go func() {
+		defer wg.Done()
+
+		v6Records, err6 = r.queryWire(ctx, host, wire.TypeAAAA)
+	}()
+
+	wg.Wait()
 
 	if err4 != nil && err6 != nil {
 		return nil, wrapDNSError(host, "DoH", r.Endpoint, err4)
 	}
 
-	return append(v4Records, v6Records...), nil
+	records := make([]wire.DNSRecord, 0, len(v4Records)+len(v6Records))
+	records = append(records, v4Records...)
+	records = append(records, v6Records...)
+
+	return records, nil
 }
 
 // LookupWireRecord queries a raw DNS wire format response over DoH for a specific query type.
 func (r *DoHResolver) LookupWireRecord(ctx context.Context, host string, qtype uint16) ([]byte, error) {
-	var idBuf [2]byte
-
-	_, _ = rand.Read(idBuf[:])
-	queryID := binary.BigEndian.Uint16(idBuf[:])
+	queryID := uint16(rand.Uint32())
 
 	edns := r.EDNS
 	if edns.PadToBlock <= 0 {
@@ -167,10 +186,7 @@ func (r *DoHResolver) LookupWireRecord(ctx context.Context, host string, qtype u
 }
 
 func (r *DoHResolver) queryWire(ctx context.Context, host string, qtype uint16) ([]wire.DNSRecord, error) {
-	var idBuf [2]byte
-
-	_, _ = rand.Read(idBuf[:])
-	queryID := binary.BigEndian.Uint16(idBuf[:])
+	queryID := uint16(rand.Uint32())
 
 	edns := r.EDNS
 	if edns.PadToBlock <= 0 {

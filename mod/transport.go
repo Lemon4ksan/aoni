@@ -24,7 +24,7 @@ func WithTimeout(d time.Duration) aoni.RequestModifier {
 	return Custom(func(req aoni.Request) {
 		ctx, cancel := context.WithTimeout(req.Context(), d) //nolint:gosec
 		req.SetContext(ctx)
-		aoni.GetOrInitRequestConfig(req).RequestTimeoutCancel = cancel
+		getOrInitRequestConfig(req).RequestTimeoutCancel = cancel
 	})
 }
 
@@ -32,7 +32,7 @@ func WithTimeout(d time.Duration) aoni.RequestModifier {
 func WithPipeline(pipe aoni.PipelineConfig) aoni.RequestModifier {
 	return Custom(func(req aoni.Request) {
 		p := pipe.ToInternal()
-		aoni.GetOrInitRequestConfig(req).Pipeline = &p
+		getOrInitRequestConfig(req).Pipeline = &p
 	})
 }
 
@@ -52,7 +52,7 @@ const (
 // WithUnsafePhaseOrder sets a custom phase order for the pipeline.
 func WithUnsafePhaseOrder(phases ...PhaseID) aoni.RequestModifier {
 	return Custom(func(req aoni.Request) {
-		aoni.GetOrInitRequestConfig(req).UnsafePhaseOrder = phases
+		getOrInitRequestConfig(req).UnsafePhaseOrder = phases
 	})
 }
 
@@ -60,7 +60,7 @@ func WithUnsafePhaseOrder(phases ...PhaseID) aoni.RequestModifier {
 // Example: mod.WithUnsafeDisableFlags(pipeline.FlagChallenge | pipeline.FlagCache)
 func WithUnsafeDisableFlags(flags uint32) aoni.RequestModifier {
 	return Custom(func(req aoni.Request) {
-		cfg := aoni.GetOrInitRequestConfig(req)
+		cfg := getOrInitRequestConfig(req)
 		cfg.DisabledFlags |= flags
 	})
 }
@@ -68,7 +68,7 @@ func WithUnsafeDisableFlags(flags uint32) aoni.RequestModifier {
 // WithUnsafeHook inserts a zero-allocation hook before the specified pipeline phase.
 func WithUnsafeHook(phase pipeline.PhaseID, hook pipeline.UnsafeHook) aoni.RequestModifier {
 	return Custom(func(req aoni.Request) {
-		cfg := aoni.GetOrInitRequestConfig(req)
+		cfg := getOrInitRequestConfig(req)
 		if cfg.UnsafeHooks == nil {
 			cfg.UnsafeHooks = make(map[pipeline.PhaseID][]pipeline.UnsafeHook)
 		}
@@ -85,14 +85,14 @@ func WithRedact(cfg aoni.RedactConfig) aoni.RequestModifier {
 			HeadersToRedact:  cfg.HeadersToRedact,
 			JSONKeysToRedact: cfg.JSONKeysToRedact,
 		}
-		aoni.GetOrInitRequestConfig(req).Redact = &r
+		getOrInitRequestConfig(req).Redact = &r
 	})
 }
 
 // WithConnMetadata constructs an [aoni.RequestModifier] associating custom key-value metadata with the request connection.
 func WithConnMetadata(key string, val any) aoni.RequestModifier {
 	return Custom(func(req aoni.Request) {
-		cfg := aoni.GetOrInitRequestConfig(req)
+		cfg := getOrInitRequestConfig(req)
 		if cfg.Metadata == nil {
 			cfg.Metadata = make(map[string]any)
 		}
@@ -104,48 +104,48 @@ func WithConnMetadata(key string, val any) aoni.RequestModifier {
 // WithForceContentType constructs an [aoni.RequestModifier] forcing response decoding via a specific MIME type.
 func WithForceContentType(mime string) aoni.RequestModifier {
 	return Custom(func(req aoni.Request) {
-		aoni.GetOrInitRequestConfig(req).ForceContentType = mime
+		getOrInitRequestConfig(req).ForceContentType = mime
 	})
 }
 
 // WithErrorModel constructs an [aoni.RequestModifier] assigning a target struct pointer for non-2xx API error response unmarshaling.
 func WithErrorModel(model any) aoni.RequestModifier {
 	return Custom(func(req aoni.Request) {
-		aoni.GetOrInitRequestConfig(req).ErrorModel = model
+		getOrInitRequestConfig(req).ErrorModel = model
 	})
 }
 
 // WithDecoder constructs an [aoni.RequestModifier] overriding the response decoder implementation for the request.
 func WithDecoder(d aoni.ResponseDecoder) aoni.RequestModifier {
 	return Custom(func(req aoni.Request) {
-		aoni.GetOrInitRequestConfig(req).Decoder = d
+		getOrInitRequestConfig(req).Decoder = d
 	})
 }
 
 // WithUploadProgress constructs an [aoni.RequestModifier] registering an upload progress tracking callback.
 func WithUploadProgress(progress aoni.ProgressFunc) aoni.RequestModifier {
 	return Custom(func(req aoni.Request) {
-		aoni.GetOrInitRequestConfig(req).UploadProgress = progress
+		getOrInitRequestConfig(req).UploadProgress = progress
 	})
 }
 
 // WithDownloadProgress constructs an [aoni.RequestModifier] registering a download progress tracking callback.
 func WithDownloadProgress(progress aoni.ProgressFunc) aoni.RequestModifier {
 	return Custom(func(req aoni.Request) {
-		aoni.GetOrInitRequestConfig(req).DownloadProgress = progress
+		getOrInitRequestConfig(req).DownloadProgress = progress
 	})
 }
 
 // WithCaptureResponse constructs an [aoni.RequestModifier] capturing a reference pointer to the raw [*http.Response].
 func WithCaptureResponse(target any) aoni.RequestModifier {
 	return Custom(func(req aoni.Request) {
-		aoni.GetOrInitRequestConfig(req).Capturer = target
+		getOrInitRequestConfig(req).Capturer = target
 	})
 }
 
 // WithoutBaseResponse constructs an [aoni.RequestModifier] disabling base response allocation for maximum RPS.
 func WithoutBaseResponse() aoni.RequestModifier {
 	return Custom(func(req aoni.Request) {
-		aoni.GetOrInitRequestConfig(req).DisableBaseResponse = true
+		getOrInitRequestConfig(req).DisableBaseResponse = true
 	})
 }

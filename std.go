@@ -5,41 +5,76 @@
 package aoni
 
 import (
+	"errors"
 	"net/http"
+	"net/url"
 	"time"
 
 	"github.com/lemon4ksan/aoni/cookie"
 	"github.com/lemon4ksan/aoni/fingerprint/h2"
 	"github.com/lemon4ksan/aoni/internal/pipeline"
+	"github.com/lemon4ksan/aoni/internal/std"
 )
+
+// ErrNilURL is returned when attempting to route an outbound HTTP request
+// that does not specify a destination URL.
+var ErrNilURL = errors.New("aoni/bridge: request URL is nil")
+
+// StdRequest adapts a standard net/http [*http.Request] to the unified [Request] contract.
+type StdRequest = std.Request
+
+// StdResponse adapts a standard net/http [*http.Response] to the unified [Response] contract.
+type StdResponse = std.Response
+
+// NewStdRequest wraps req into a unified [Request] adapter.
+func NewStdRequest(req *http.Request) *StdRequest {
+	return std.NewRequest(req)
+}
+
+// ReleaseStdRequest returns the request to the pool after execution.
+func ReleaseStdRequest(r *StdRequest) {
+	std.ReleaseRequest(r)
+}
+
+// NewStdResponse wraps resp into a unified [Response] adapter.
+func NewStdResponse(resp *http.Response) *StdResponse {
+	return std.NewResponse(resp)
+}
+
+// ReleaseStdResponse returns the response to the pool after execution.
+func ReleaseStdResponse(r *StdResponse) {
+	std.ReleaseResponse(r)
+}
+
+// WrapHTTPRequest wraps a standard *http.Request into a unified [Request] interface.
+func WrapHTTPRequest(req *http.Request) Request {
+	return std.NewRequest(req)
+}
+
+// WrapHTTPResponse wraps a standard *http.Response into a unified [Response] interface.
+func WrapHTTPResponse(resp *http.Response) Response {
+	return std.NewResponse(resp)
+}
 
 // HTTPDoer specifies the minimal execution contract for processing standard *http.Request transactions.
 // It matches the exact signature of standard library [*http.Client.Do].
-//
-// Thread Safety:
-// Implementations MUST be fully thread-safe and safe for concurrent invocation across goroutines.
-type HTTPDoer interface {
-	Do(req *http.Request) (*http.Response, error)
-}
+type HTTPDoer = std.HTTPDoer
 
 // HTTPDoerFunc adapts a plain execution closure to the [HTTPDoer] interface.
-type HTTPDoerFunc func(req *http.Request) (*http.Response, error)
+type HTTPDoerFunc = std.HTTPDoerFunc
 
-// Do executes the underlying closure against the provided HTTP request.
-func (f HTTPDoerFunc) Do(req *http.Request) (*http.Response, error) {
-	return f(req)
+// NewHTTPDoerAdapter wraps doer in a [RequestDoer] adapter. Safe for concurrent execution.
+func NewHTTPDoerAdapter(doer HTTPDoer) RequestDoer {
+	return std.NewHTTPDoerAdapter(doer)
+}
+
+// NewRequestDoerAdapter wraps doer in an [HTTPDoer] adapter. Safe for concurrent execution.
+func NewRequestDoerAdapter(doer RequestDoer) HTTPDoer {
+	return std.NewRequestDoerAdapter(doer)
 }
 
 // DefaultEngine normalizes arbitrary execution targets (RequestDoer, *http.Client, HTTPDoer, or nil)
 // into a standardized, production-ready [HTTPDoer] instance.
-//
-// Normalization Semantics:
-//   - nil: Instantiates a default *http.Client with 15s timeout and 10-redirect limit.
-//   - RequestDoer: Adapts via NewRequestDoerAdapter.
-//   - *http.Client: Deep-clones the client and its transport layers via CloneHTTPClient.
-//   - HTTPDoer: Used directly as-is.
-//
-// Safe for concurrent use across multiple goroutines.
 func DefaultEngine(doer any) HTTPDoer {
 	if doer != nil {
 		if rd, ok := doer.(RequestDoer); ok {
@@ -74,16 +109,6 @@ type TransportCloner interface {
 
 // CloneHTTPClient produces a deep, memory-isolated copy of an [*http.Client] and its nested transport layers.
 // If c is nil, returns nil.
-//
-// Copying an *http.Client by value (e.g. *c) performs a shallow copy of its internal pointers.
-// Since http.Client.Transport is a pointer to http.Transport, two shallow-copied clients share the exact same
-// transport instance. Mutating TLSClientConfig, MaxIdleConns, or headers on one client would cause DATA RACES
-// and corrupt the other client's connection state.
-//
-// It uses TransportUnwrapper and TransportCloner interfaces to recursively peel off and deep-clone
-// arbitrarily nested transport decorator chains down to the base *http.Transport.
-//
-// Safe for concurrent use across multiple goroutines.
 func CloneHTTPClient(c *http.Client) *http.Client {
 	if c == nil {
 		return nil
@@ -99,7 +124,6 @@ func CloneHTTPClient(c *http.Client) *http.Client {
 	return &cloned
 }
 
-// cloneRoundTripper recursively clones nested RoundTripper transport decorators down to base *http.Transport.
 func cloneRoundTripper(tr http.RoundTripper) http.RoundTripper {
 	if tr == nil {
 		return nil
@@ -123,7 +147,96 @@ func cloneRoundTripper(tr http.RoundTripper) http.RoundTripper {
 	return tr
 }
 
-// reapplyH2Settings injects or updates HTTP/2 SETTINGS frame parameters and H2 transport configurers.
+// NewStdClient adapts an aoni [Client] into a standard [*http.Client].
+func NewStdClient(c *Client) *http.Client {
+	return &http.Client{
+		Transport: NewTransport(c),
+		Jar:       nil,
+	}
+}
+
+// NewTransport constructs an [http.RoundTripper] (as a [*Transport]) configured
+// to pass all outgoing requests through the provided aoni [Client].
+func NewTransport(c *Client) *Transport {
+	return &Transport{client: c}
+}
+
+// Transport implements the standard [http.RoundTripper] interface, intercepting
+// outbound requests and delegating them to an active aoni [Client] pipeline.
+type Transport struct {
+	client *Client
+
+	// BeforeRoundTrip runs immediately before a request enters the aoni engine.
+	BeforeRoundTrip func(cloned *Client, origReq *http.Request) *Client
+}
+
+// RoundTrip satisfies [http.RoundTripper] by executing requests through the aoni pipeline.
+func (t *Transport) RoundTrip(req *http.Request) (*http.Response, error) {
+	if req == nil || req.URL == nil {
+		closeReqBody(req)
+
+		op := ""
+		if req != nil {
+			op = req.Method
+		}
+
+		return nil, &url.Error{
+			Op:  op,
+			URL: "",
+			Err: ErrNilURL,
+		}
+	}
+
+	if req.URL.Host != "" && req.URL.Scheme == "" {
+		u := *req.URL
+		u.Scheme = "https"
+		reqClone := req.Clone(req.Context())
+		reqClone.URL = &u
+		req = reqClone
+	}
+
+	activeClient := t.client
+	if t.BeforeRoundTrip != nil {
+		activeClient = t.BeforeRoundTrip(t.client.Clone(), req)
+	}
+
+	resp, err := activeClient.HTTP().Do(req)
+	if err != nil {
+		return nil, t.wrapError(req, err)
+	}
+
+	return resp, nil
+}
+
+func (t *Transport) wrapError(origReq *http.Request, err error) error {
+	closeReqBody(origReq)
+
+	reqURL := origReq.URL.String()
+	bridgeErr := &BridgeError{
+		Op:  origReq.Method,
+		URL: reqURL,
+		Err: err,
+		Metadata: map[string]any{
+			"host":   origReq.URL.Host,
+			"scheme": origReq.URL.Scheme,
+		},
+	}
+
+	return &url.Error{
+		Op:  origReq.Method,
+		URL: reqURL,
+		Err: bridgeErr,
+	}
+}
+
+func closeReqBody(req *http.Request) {
+	if req != nil && req.Body != nil {
+		_ = req.Body.Close()
+	}
+}
+
+var _ http.RoundTripper = (*Transport)(nil)
+
 func (c *Client) reapplyH2Settings(tr *http.Transport) {
 	if tr == nil {
 		return
@@ -151,8 +264,6 @@ func (c *Client) reapplyH2Settings(tr *http.Transport) {
 	}
 }
 
-// applyEngineConfig applies timeouts, redirect policies, cookie jars, and transport pool bounds
-// to the client's execution engine.
 func applyEngineConfig(c *Client, eng EngineConfig) {
 	if eng.CustomEngine != nil {
 		if httpClient, ok := eng.CustomEngine.(*http.Client); ok {
@@ -177,8 +288,6 @@ func applyEngineConfig(c *Client, eng EngineConfig) {
 	applyTransportOverrides(c, eng)
 }
 
-// applyCookieJar wraps the engine's transport layer in a Proxy-Isolated Cookie Transport
-// if jar implements cookie.ProxyIsolatedJar.
 func applyCookieJar(httpClient *http.Client, jar http.CookieJar) {
 	if jar == nil {
 		return
@@ -196,7 +305,6 @@ func applyCookieJar(httpClient *http.Client, jar http.CookieJar) {
 		baseTr = http.DefaultTransport
 	}
 
-	// Unwrap existing cookie transport layer if present to avoid double-wrapping
 	if cjTrans, ok := baseTr.(*cookie.Transport); ok {
 		baseTr = cjTrans.Unwrap()
 	}
@@ -204,8 +312,6 @@ func applyCookieJar(httpClient *http.Client, jar http.CookieJar) {
 	httpClient.Transport = &cookie.Transport{Next: baseTr, CookieJar: pJar}
 }
 
-// applyTransportOverrides applies TLS verification flags, connection pool limits,
-// and HTTP/2 protocol parameters directly to the underlying *http.Transport.
 func applyTransportOverrides(c *Client, eng EngineConfig) {
 	tr := c.Transport()
 	if tr == nil {

@@ -133,8 +133,17 @@ func handleForwardedChannel(ctx context.Context, newChan ssh.NewChannel, localAd
 	}
 	defer localConn.Close()
 
-	bufPtr1 := ioBufferPool.Get().(*[]byte)
-	bufPtr2 := ioBufferPool.Get().(*[]byte)
+	bufPtr1 := ioBufferPool.Get()
+	if bufPtr1 == nil {
+		b := make([]byte, 32*1024)
+		bufPtr1 = &b
+	}
+
+	bufPtr2 := ioBufferPool.Get()
+	if bufPtr2 == nil {
+		b := make([]byte, 32*1024)
+		bufPtr2 = &b
+	}
 
 	defer ioBufferPool.Put(bufPtr1)
 	defer ioBufferPool.Put(bufPtr2)

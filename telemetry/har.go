@@ -146,32 +146,54 @@ func (g *HARGenerator) Record(
 	})
 }
 
-// captureHARResponseBody buffers up to 150 KB of textual response body payload for HAR export.
+type multiReadCloser struct {
+	io.Reader
+	io.Closer
+}
+
+// captureHARResponseBody buffers up to 150 KB of textual response body payload for HAR export
+// without mutating or closing the underlying caller response stream.
 func captureHARResponseBody(resp *http.Response) []byte {
-	if resp.Body == nil {
+	if resp == nil || resp.Body == nil || resp.Body == http.NoBody {
 		return nil
 	}
 
 	contentType := resp.Header.Get("Content-Type")
 	isText := strings.Contains(contentType, "json") ||
 		strings.Contains(contentType, "text") ||
-		strings.Contains(contentType, "xml")
+		strings.Contains(contentType, "xml") ||
+		strings.Contains(contentType, "javascript")
 
-	if !isText || (resp.ContentLength != -1 && resp.ContentLength >= 150*1024) {
-		return []byte("[Skipped: Binary or large response body]")
+	if !isText {
+		return []byte("[Skipped: Binary response body]")
 	}
 
-	limitReader := io.LimitReader(resp.Body, 150*1024+1)
-	bodyBytes, _ := io.ReadAll(limitReader)
-	_ = resp.Body.Close()
-
-	if int64(len(bodyBytes)) > 150*1024 {
-		bodyBytes = []byte("[Truncated: Response too large for HAR log]")
+	if resp.ContentLength != -1 && resp.ContentLength > 150*1024 {
+		return []byte("[Skipped: Large response body]")
 	}
 
-	resp.Body = io.NopCloser(bytes.NewReader(bodyBytes))
+	const maxCap = 150 * 1024
 
-	return bodyBytes
+	limitReader := io.LimitReader(resp.Body, maxCap+1)
+	readBytes, _ := io.ReadAll(limitReader)
+
+	isTruncated := len(readBytes) > maxCap
+
+	var logBytes []byte
+
+	if isTruncated {
+		logBytes = []byte("[Truncated: Response too large for HAR log]")
+	} else {
+		logBytes = readBytes
+	}
+
+	// Restore original stream seamlessly so consumer reads full unmodified body
+	resp.Body = &multiReadCloser{
+		Reader: io.MultiReader(bytes.NewReader(readBytes), resp.Body),
+		Closer: resp.Body,
+	}
+
+	return logBytes
 }
 
 // AddEntry adds a single [HAREntry] to the generator thread-safely.

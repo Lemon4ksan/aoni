@@ -18,6 +18,7 @@ import (
 	"github.com/valyala/fasthttp"
 
 	"github.com/lemon4ksan/aoni"
+	"github.com/lemon4ksan/aoni/internal/pipeline"
 )
 
 // dispatchSingleRequest routes an HTTP request through Happy Eyeballs v3 (Protocol Racing),
@@ -30,7 +31,7 @@ func (c *Client) dispatchSingleRequest(
 	sanitizeTraceHeaders(fastReq)
 
 	host := string(fastReq.URI().Host())
-	alpnMode := resolveALPNMode(ctx, &c.config, fastReq)
+	alpnMode := c.resolveALPNMode(ctx, fastReq)
 
 	staggerDelay := c.config.Network.HappyEyeballsDelay
 	if alpnMode == aoni.AlpnH3 && c.shouldRaceProtocols(ctx) {
@@ -42,7 +43,7 @@ func (c *Client) dispatchSingleRequest(
 			return tr, h3Err, false
 		}
 
-		alpnMode = resolveALPNMode(ctx, &c.config, fastReq)
+		alpnMode = c.resolveALPNMode(ctx, fastReq)
 	}
 
 	if alpnMode == aoni.AlpnH2 {
@@ -163,13 +164,16 @@ func (c *Client) raceProtocolHandshakes(
 }
 
 func drainLateRaceResponses(results chan raceResult) {
+	timer := pool.AcquireTimer(2 * time.Second)
+	defer pool.ReleaseTimer(timer)
+
 	for range 2 {
 		select {
 		case res := <-results:
 			if res.resp != nil {
 				fasthttp.ReleaseResponse(res.resp)
 			}
-		case <-time.After(2 * time.Second):
+		case <-timer.C:
 			return
 		}
 	}
@@ -181,7 +185,7 @@ func (c *Client) dispatchH1OrH2(
 	fastReq *fasthttp.Request,
 	fastResp *fasthttp.Response,
 ) (map[string][]string, error, bool) {
-	alpnMode := resolveALPNMode(ctx, &c.config, fastReq)
+	alpnMode := c.resolveALPNMode(ctx, fastReq)
 	if alpnMode == aoni.AlpnH2 {
 		if tr, h2Err, handled := c.tryDispatchH2(ctx, host, fastReq, fastResp); handled {
 			return tr, h2Err, false
@@ -201,7 +205,10 @@ func (c *Client) tryDispatchH3(
 
 	tr, err := h3.Do(ctx, fastReq, fastResp, c.config.Fingerprint.HeaderOrder)
 	if err != nil {
-		globalAltSvcCache.MarkH3Failed(host)
+		if c.protocolState.altSvc != nil {
+			c.protocolState.altSvc.MarkH3Failed(host)
+		}
+
 		fastResp.Reset()
 
 		return nil, err, false
@@ -212,7 +219,9 @@ func (c *Client) tryDispatchH3(
 		return tr, errRec, true
 	}
 
-	globalAltSvcCache.MarkH3Success(host)
+	if c.protocolState.altSvc != nil {
+		c.protocolState.altSvc.MarkH3Success(host)
+	}
 
 	return tr, nil, true
 }
@@ -248,7 +257,7 @@ func (c *Client) tryDispatchH2(
 		return trRec, errRec, true
 	}
 
-	recordAltSvcIfPresent(host, fastResp)
+	c.recordAltSvcIfPresent(host, fastResp)
 
 	return tr, nil, true
 }
@@ -277,7 +286,7 @@ func (c *Client) dispatchH1WithFallbacks(
 		return tr, errRec, released
 	}
 
-	recordAltSvcIfPresent(host, fastResp)
+	c.recordAltSvcIfPresent(host, fastResp)
 
 	return nil, nil, false
 }
@@ -304,7 +313,7 @@ func (c *Client) fallbackH1ToH2(
 		return trRec, errRec, released
 	}
 
-	recordAltSvcIfPresent(host, fastResp)
+	c.recordAltSvcIfPresent(host, fastResp)
 
 	return tr, nil, false
 }
@@ -338,7 +347,7 @@ func (c *Client) retry425TooEarly(
 	fastReq *fasthttp.Request,
 	fastResp *fasthttp.Response,
 ) (trailers map[string][]string, err error, autoReleased bool) {
-	reqCfg := aoni.GetOrInitRequestConfig(ctx)
+	reqCfg := pipeline.GetOrInitRequestConfig(ctx)
 	reqCfg.Disable0RTT = true
 
 	host := string(fastReq.URI().Host())
@@ -354,11 +363,14 @@ func (c *Client) retry421Misdirected(
 	fastReq *fasthttp.Request,
 	fastResp *fasthttp.Response,
 ) (trailers map[string][]string, err error, autoReleased bool) {
-	reqCfg := aoni.GetOrInitRequestConfig(ctx)
+	reqCfg := pipeline.GetOrInitRequestConfig(ctx)
 	reqCfg.DisableAltSvc = true
 
 	host := string(fastReq.URI().Host())
-	globalAltSvcCache.MarkH3Failed(host)
+	if c.protocolState.altSvc != nil {
+		c.protocolState.altSvc.MarkH3Failed(host)
+	}
+
 	c.removeH2Client(host)
 
 	fastReq.Header.Del("Alt-Svc")
@@ -378,9 +390,13 @@ func (c *Client) retry408Timeout(
 	return c.dispatchSingleRequest(ctx, fastReq, fastResp)
 }
 
-func recordAltSvcIfPresent(host string, fastResp *fasthttp.Response) {
+func (c *Client) recordAltSvcIfPresent(host string, fastResp *fasthttp.Response) {
+	if c.protocolState.altSvc == nil {
+		return
+	}
+
 	if altSvc := fastResp.Header.Peek("Alt-Svc"); len(altSvc) > 0 {
-		globalAltSvcCache.Record(host, string(altSvc))
+		c.protocolState.altSvc.Record(host, string(altSvc))
 	}
 }
 

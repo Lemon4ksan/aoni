@@ -5,8 +5,7 @@
 package fingerprint
 
 import (
-	"crypto/rand"
-	"encoding/binary"
+	"github.com/lemon4ksan/foundation/silicon/rand"
 )
 
 // Predefined realistic header pools to mimic popular Cloud/CDN networks.
@@ -75,10 +74,12 @@ func GeneratePadding(cfg PaddingConfig) []byte {
 		maxLen = minLen
 	}
 
-	n := minLen + secureRandomInt(maxLen-minLen+1)
+	n := minLen + rand.Intn(maxLen-minLen+1)
 	padding := make([]byte, n)
 
-	_, _ = rand.Read(padding)
+	for i := range padding {
+		padding[i] = byte(rand.Uint32())
+	}
 
 	return padding
 }
@@ -87,7 +88,7 @@ func GeneratePadding(cfg PaddingConfig) []byte {
 // Selects a random entry from HeaderPool if configured, falling back to PaddingHeader or "X-Padding".
 func PaddingHeaderName(cfg PaddingConfig) string {
 	if len(cfg.HeaderPool) > 0 {
-		return cfg.HeaderPool[secureRandomInt(len(cfg.HeaderPool))]
+		return cfg.HeaderPool[rand.Intn(len(cfg.HeaderPool))]
 	}
 
 	if cfg.PaddingHeader != "" {
@@ -95,18 +96,4 @@ func PaddingHeaderName(cfg PaddingConfig) string {
 	}
 
 	return "X-Padding"
-}
-
-// secureRandomInt generates a cryptographically secure random integer in the range [0, maxVal) using crypto/rand.
-func secureRandomInt(maxVal int) int {
-	if maxVal <= 0 {
-		return 0
-	}
-
-	var buf [8]byte
-
-	_, _ = rand.Read(buf[:])
-	val := binary.BigEndian.Uint64(buf[:])
-
-	return int(val % uint64(maxVal)) //nolint:gosec
 }

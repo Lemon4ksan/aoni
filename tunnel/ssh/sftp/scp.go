@@ -11,17 +11,15 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
-	"sync"
 
+	"github.com/lemon4ksan/foundation/generic"
 	"golang.org/x/crypto/ssh"
 )
 
-var ioBufferPool = sync.Pool{
-	New: func() any {
-		b := make([]byte, 64*1024)
-		return &b
-	},
-}
+var ioBufferPool = generic.NewPool(func() *[]byte {
+	b := make([]byte, 64*1024)
+	return &b
+})
 
 // WriteFile streams size bytes from r into remoteFilePath on the target server using native SCP protocol and zero-alloc buffer pooling.
 func WriteFile(ctx context.Context, sshClient *ssh.Client, r io.Reader, size int64, remoteFilePath string) error {
@@ -63,7 +61,12 @@ func WriteFile(ctx context.Context, sshClient *ssh.Client, r io.Reader, size int
 		}
 
 		if size > 0 {
-			bufPtr := ioBufferPool.Get().(*[]byte)
+			bufPtr := ioBufferPool.Get()
+			if bufPtr == nil {
+				b := make([]byte, 64*1024)
+				bufPtr = &b
+			}
+
 			_, copyErr := io.CopyBuffer(w, r, *bufPtr)
 			ioBufferPool.Put(bufPtr)
 

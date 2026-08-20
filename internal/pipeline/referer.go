@@ -7,7 +7,8 @@ package pipeline
 import (
 	"net/url"
 	"strings"
-	"sync"
+
+	"github.com/lemon4ksan/foundation/generic"
 )
 
 // RefererPolicy defines cross-origin Referer header stripping behavior (RFC 9110 §10.1.3).
@@ -24,16 +25,21 @@ const (
 	PolicyUnsafeURL
 )
 
-// RefererAutomaton tracks and calculates Referer headers across sequential requests.
-type RefererAutomaton struct {
-	mu      sync.RWMutex
+type refererState struct {
 	lastURL *url.URL
 	policy  RefererPolicy
 }
 
+// RefererAutomaton tracks and calculates Referer headers across sequential requests.
+type RefererAutomaton struct {
+	state generic.Safe[refererState]
+}
+
 // NewRefererAutomaton constructs a [RefererAutomaton].
 func NewRefererAutomaton(policy RefererPolicy) *RefererAutomaton {
-	return &RefererAutomaton{policy: policy}
+	return &RefererAutomaton{
+		state: *generic.NewSafe(refererState{policy: policy}),
+	}
 }
 
 // ComputeReferer calculates the appropriate Referer header value for an upcoming request to targetURL.
@@ -42,10 +48,9 @@ func (a *RefererAutomaton) ComputeReferer(targetURL *url.URL) string {
 		return ""
 	}
 
-	a.mu.RLock()
-	last := a.lastURL
-	policy := a.policy
-	a.mu.RUnlock()
+	st := a.state.Get()
+	last := st.lastURL
+	policy := st.policy
 
 	if last == nil {
 		return ""
@@ -97,8 +102,7 @@ func (a *RefererAutomaton) UpdateLastURL(completedURL *url.URL) {
 		return
 	}
 
-	a.mu.Lock()
-	defer a.mu.Unlock()
-
-	a.lastURL = completedURL
+	a.state.Mutate(func(st *refererState) {
+		st.lastURL = completedURL
+	})
 }

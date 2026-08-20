@@ -18,11 +18,13 @@ import (
 	"sync"
 	"time"
 
+	"github.com/lemon4ksan/foundation/generic"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/lemon4ksan/aoni"
 	"github.com/lemon4ksan/aoni/codec"
 	"github.com/lemon4ksan/aoni/codec/decode"
+	"github.com/lemon4ksan/aoni/internal/core"
 	"github.com/lemon4ksan/aoni/internal/io"
 	"github.com/lemon4ksan/aoni/middleware"
 	"github.com/lemon4ksan/aoni/mod"
@@ -34,27 +36,24 @@ import (
 	"github.com/lemon4ksan/aoni/telemetry"
 )
 
-// TypedRequestPool provides a zero-boxing pool for [Request] instances backed by [sync.Pool].
-type TypedRequestPool struct {
-	pool sync.Pool
+type typedRequestPool struct {
+	pool *generic.Pool[Request]
 }
 
-func newTypedRequestPool() *TypedRequestPool {
-	return &TypedRequestPool{
-		pool: sync.Pool{
-			New: func() any {
-				return &Request{}
-			},
-		},
+func newTypedRequestPool() *typedRequestPool {
+	return &typedRequestPool{
+		pool: generic.NewPool(func() *Request {
+			return &Request{}
+		}),
 	}
 }
 
 // Get retrieves a pooled [Request] instance bound to any engine or client.
-func (p *TypedRequestPool) Get(doer any) *Request {
+func (p *typedRequestPool) Get(doer any) *Request {
 	reqClient := request.AsRequester(doer)
 
-	r, ok := p.pool.Get().(*Request)
-	if !ok {
+	r := p.pool.Get()
+	if r == nil {
 		r = &Request{}
 	}
 
@@ -64,7 +63,7 @@ func (p *TypedRequestPool) Get(doer any) *Request {
 }
 
 // Put recycles a [Request] instance back to the free-list pool after resetting fields.
-func (p *TypedRequestPool) Put(r *Request) {
+func (p *typedRequestPool) Put(r *Request) {
 	if r == nil {
 		return
 	}
@@ -100,24 +99,27 @@ type Request struct {
 	label            string
 	proxyOverride    string
 
-	client           request.Requester
-	basicAuth        *basicAuth
-	digestAuth       *digestAuth
-	headers          http.Header
-	queryParams      url.Values
-	pathParams       map[string]string
-	formFields       map[string]string
-	formFiles        map[string]stdio.Reader
-	expectedStatuses []int
-	downloadProgress aoni.ProgressFunc
-	uploadProgress   aoni.ProgressFunc
-	traceInfo        *telemetry.TraceInfo
-	appliedMods      []aoni.RequestModifier
-	timeout          time.Duration
-	retryOverride    *aoni.RetryOverride
-
+	client            request.Requester
+	basicAuth         *basicAuth
+	digestAuth        *digestAuth
+	headers           http.Header
+	queryParams       url.Values
+	pathParams        map[string]string
+	formFields        map[string]string
+	formFiles         map[string]stdio.Reader
+	expectedStatuses  []int
+	downloadProgress  aoni.ProgressFunc
+	uploadProgress    aoni.ProgressFunc
+	traceInfo         *telemetry.TraceInfo
+	appliedMods       []aoni.RequestModifier
+	timeout           time.Duration
+	retryOverride     *core.RetryOverride
+	xmlBody           any
+	yamlBody          any
 	useProtoDecoder   bool
 	useGRPCWebDecoder bool
+	useXMLDecoder     bool
+	useYAMLDecoder    bool
 }
 
 // basicAuth stores HTTP Basic Authentication credentials.
@@ -139,6 +141,8 @@ func (r *Request) Reset() {
 	r.body = nil
 	r.protoBody = nil
 	r.grpcWebBody = nil
+	r.xmlBody = nil
+	r.yamlBody = nil
 	r.result = nil
 	r.resultError = nil
 	r.queryStruct = nil
@@ -160,6 +164,8 @@ func (r *Request) Reset() {
 	r.retryOverride = nil
 	r.useProtoDecoder = false
 	r.useGRPCWebDecoder = false
+	r.useXMLDecoder = false
+	r.useYAMLDecoder = false
 
 	if r.headers != nil {
 		releaseHeader(r.headers)
@@ -199,11 +205,6 @@ func (r *Request) Release() {
 
 	r.Reset()
 	requestPool.Put(r)
-}
-
-// Discard is an alias for [Request.Release].
-func (r *Request) Discard() {
-	r.Release()
 }
 
 // Header returns or acquires the internal [http.Header] map.
@@ -315,7 +316,7 @@ func (r *Request) Retry(builder *resiliency.RetryBuilder) *Request {
 
 // SetRetry configures custom retry parameters for this request attempt.
 func (r *Request) SetRetry(maxAttempts int, backoff time.Duration) *Request {
-	r.retryOverride = &aoni.RetryOverride{
+	r.retryOverride = &core.RetryOverride{
 		MaxAttempts: maxAttempts,
 		Backoff:     backoff,
 		Condition:   middleware.RetryOnTransientErrors(),
@@ -330,11 +331,11 @@ func (r *Request) WithCodec(c codec.Codec, body any) *Request {
 		return r
 	}
 
-	if encMod := c.Encode(body); encMod.Kind != aoni.ModNone {
+	if encMod := c.Encode(body); !encMod.IsZero() {
 		r.appliedMods = append(r.appliedMods, encMod)
 	}
 
-	if decMod := c.Decode(); decMod.Kind != aoni.ModNone {
+	if decMod := c.Decode(); !decMod.IsZero() {
 		r.appliedMods = append(r.appliedMods, decMod)
 	}
 
@@ -399,6 +400,18 @@ func (r *Request) SetBody(body any) *Request {
 	return r
 }
 
+// SetXMLBody serializes payload into XML request bytes and sets 'Content-Type: application/xml'.
+func (r *Request) SetXMLBody(body any) *Request {
+	r.xmlBody = body
+	return r
+}
+
+// SetYAMLBody serializes payload into YAML request bytes and sets 'Content-Type: application/yaml'.
+func (r *Request) SetYAMLBody(body any) *Request {
+	r.yamlBody = body
+	return r
+}
+
 // SetProtoBody serializes a [proto.Message] into binary request bytes.
 func (r *Request) SetProtoBody(msg proto.Message) *Request {
 	r.protoBody = msg
@@ -414,6 +427,22 @@ func (r *Request) SetGRPCWebBody(msg proto.Message) *Request {
 // SetResult sets the target structure pointer for unmarshaling 2xx response bodies.
 func (r *Request) SetResult(result any) *Request {
 	r.result = result
+	return r
+}
+
+// SetXMLResult configures response target unmarshaling via [decode.XMLDecoder].
+func (r *Request) SetXMLResult(result any) *Request {
+	r.result = result
+	r.useXMLDecoder = true
+
+	return r
+}
+
+// SetYAMLResult configures response target unmarshaling via [decode.YAMLDecoder].
+func (r *Request) SetYAMLResult(result any) *Request {
+	r.result = result
+	r.useYAMLDecoder = true
+
 	return r
 }
 
@@ -443,11 +472,6 @@ func (r *Request) SetError(errResult any) *Request {
 func (r *Request) SetOutput(filePath string) *Request {
 	r.outputFile = filePath
 	return r
-}
-
-// SetSaveFileName is an alias for [Request.SetOutput].
-func (r *Request) SetSaveFileName(filePath string) *Request {
-	return r.SetOutput(filePath)
 }
 
 // SetDownloadProgress registers an [aoni.ProgressFunc] callback monitoring response stream reads.
@@ -653,6 +677,10 @@ func (r *Request) appendQueryAndBodyModifiers(mods []aoni.RequestModifier) []aon
 		mods = append(mods, mod.WithProtoBody(r.protoBody))
 	case r.grpcWebBody != nil:
 		mods = append(mods, mod.WithGRPCWebBody(r.grpcWebBody))
+	case r.xmlBody != nil:
+		mods = append(mods, mod.WithXMLBody(r.xmlBody))
+	case r.yamlBody != nil:
+		mods = append(mods, mod.WithYAMLBody(r.yamlBody))
 	case r.body != nil:
 		if reader, ok := r.body.(stdio.Reader); ok {
 			mods = append(mods, mod.WithBody(reader))
@@ -661,10 +689,15 @@ func (r *Request) appendQueryAndBodyModifiers(mods []aoni.RequestModifier) []aon
 		}
 	}
 
-	if r.useProtoDecoder {
+	switch {
+	case r.useProtoDecoder:
 		mods = append(mods, decode.WithProto())
-	} else if r.useGRPCWebDecoder {
+	case r.useGRPCWebDecoder:
 		mods = append(mods, decode.WithGRPCWeb())
+	case r.useXMLDecoder:
+		mods = append(mods, decode.WithXML())
+	case r.useYAMLDecoder:
+		mods = append(mods, decode.WithYAML())
 	}
 
 	return mods
@@ -882,11 +915,6 @@ func (r *Request) Trace(path string) (*http.Response, error) {
 // Connect executes a CONNECT request against path.
 func (r *Request) Connect(path string) (*http.Response, error) {
 	return r.Execute(http.MethodConnect, path)
-}
-
-// Do executes a request with any custom HTTP method against path.
-func (r *Request) Do(method, path string) (*http.Response, error) {
-	return r.Execute(method, path)
 }
 
 // interpolatePathParams replaces {param} placeholders in rawPath with URL-escaped values from params.

@@ -21,6 +21,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/lemon4ksan/foundation/generic"
 	pkgsftp "github.com/pkg/sftp"
 	"golang.org/x/crypto/ssh"
 	"golang.org/x/net/proxy"
@@ -37,18 +38,14 @@ const (
 )
 
 var (
-	ioBufferPool = sync.Pool{
-		New: func() any {
-			b := make([]byte, 64*1024)
-			return &b
-		},
-	}
+	ioBufferPool = generic.NewPool(func() *[]byte {
+		b := make([]byte, 64*1024)
+		return &b
+	})
 
-	bufioReaderPool = sync.Pool{
-		New: func() any {
-			return bufio.NewReaderSize(nil, 64*1024)
-		},
-	}
+	bufioReaderPool = generic.NewPool(func() *bufio.Reader {
+		return bufio.NewReaderSize(nil, 64*1024)
+	})
 )
 
 // Client represents an SSH client session routed through aoni's L4 network transport pipeline.
@@ -340,9 +337,13 @@ func (c *Client) runStreamWorkers(
 func scanLines(ctx context.Context, r io.Reader, ch chan<- string) {
 	defer close(ch)
 
-	reader := bufioReaderPool.Get().(*bufio.Reader)
+	reader := bufioReaderPool.Get()
+	if reader == nil {
+		reader = bufio.NewReaderSize(r, 64*1024)
+	} else {
+		reader.Reset(r)
+	}
 
-	reader.Reset(r)
 	defer func() {
 		reader.Reset(nil)
 		bufioReaderPool.Put(reader)
@@ -420,7 +421,12 @@ func (c *Client) Upload(localPath, remotePath string) error {
 	}
 	defer remoteFile.Close()
 
-	bufPtr := ioBufferPool.Get().(*[]byte)
+	bufPtr := ioBufferPool.Get()
+	if bufPtr == nil {
+		b := make([]byte, 64*1024)
+		bufPtr = &b
+	}
+
 	_, err = io.CopyBuffer(remoteFile, localFile, *bufPtr)
 	ioBufferPool.Put(bufPtr)
 
@@ -450,7 +456,12 @@ func (c *Client) Download(remotePath, localPath string) error {
 	}
 	defer remoteFile.Close()
 
-	bufPtr := ioBufferPool.Get().(*[]byte)
+	bufPtr := ioBufferPool.Get()
+	if bufPtr == nil {
+		b := make([]byte, 64*1024)
+		bufPtr = &b
+	}
+
 	_, err = io.CopyBuffer(localFile, remoteFile, *bufPtr)
 	ioBufferPool.Put(bufPtr)
 

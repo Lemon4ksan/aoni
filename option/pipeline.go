@@ -12,6 +12,7 @@ import (
 
 	"github.com/lemon4ksan/aoni"
 	"github.com/lemon4ksan/aoni/cookie"
+	"github.com/lemon4ksan/aoni/internal/core"
 	"github.com/lemon4ksan/aoni/middleware"
 	"github.com/lemon4ksan/aoni/resiliency"
 	"github.com/lemon4ksan/aoni/telemetry"
@@ -134,7 +135,7 @@ func WithCookieIndices(cookieNames ...string) aoni.ClientOption {
 
 // WithDuplicateRequestGuard enables ring-buffer duplicate request detection,
 // triggering a diagnostic alert if the same URL is fetched within the window (e.g. 10s).
-func WithDuplicateRequestGuard(window time.Duration, logger aoni.Logger) aoni.ClientOption {
+func WithDuplicateRequestGuard(window time.Duration, logger core.Logger) aoni.ClientOption {
 	if window <= 0 {
 		window = 10 * time.Second
 	}

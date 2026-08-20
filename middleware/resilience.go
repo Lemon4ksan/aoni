@@ -19,11 +19,11 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
-	"sync"
 	"time"
 
-	"github.com/lemon4ksan/foundation/async/sync/breaker"
-	"github.com/lemon4ksan/foundation/async/sync/keylock"
+	"github.com/lemon4ksan/foundation/generic"
+	"github.com/lemon4ksan/foundation/sync/breaker"
+	"github.com/lemon4ksan/foundation/sync/keylock"
 
 	"github.com/lemon4ksan/aoni"
 	"github.com/lemon4ksan/aoni/netutil/netdial"
@@ -43,7 +43,7 @@ type CircuitBreakerConfig struct {
 // CircuitBreaker manages host-isolated circuit breakers using thread-safe key locks.
 type CircuitBreaker struct {
 	cfg      CircuitBreakerConfig
-	breakers sync.Map
+	breakers generic.ConcurrentMap[string, *breaker.CircuitBreaker[any]]
 	km       keylock.KeyMutex[string]
 }
 
@@ -73,14 +73,14 @@ func NewCircuitBreaker(cfg CircuitBreakerConfig) *CircuitBreaker {
 // getBreaker retrieves or lazily instantiates a host-isolated [breaker.CircuitBreaker].
 func (cb *CircuitBreaker) getBreaker(host string) *breaker.CircuitBreaker[any] {
 	if val, ok := cb.breakers.Load(host); ok {
-		return val.(*breaker.CircuitBreaker[any])
+		return val
 	}
 
 	cb.km.Lock(host)
 	defer cb.km.Unlock(host)
 
 	if val, ok := cb.breakers.Load(host); ok {
-		return val.(*breaker.CircuitBreaker[any])
+		return val
 	}
 
 	b := breaker.New[any](breaker.Config{

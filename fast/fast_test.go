@@ -56,7 +56,7 @@ func TestH2_ALPNResolutionAndHeaderOrdering(t *testing.T) {
 	fastReq := fasthttp.AcquireRequest()
 	defer fasthttp.ReleaseRequest(fastReq)
 
-	mode := resolveALPNMode(context.Background(), cfg, fastReq)
+	mode := resolveALPNMode(context.Background(), cfg, fastReq, nil)
 	assert.Equal(t, aoni.AlpnH2, mode)
 }
 
@@ -68,7 +68,7 @@ func TestH3_ForceHTTP3ContextModifier(t *testing.T) {
 	defer fasthttp.ReleaseRequest(fastReq)
 
 	cfg := &aoni.Config{}
-	mode := resolveALPNMode(ctxH3, cfg, fastReq)
+	mode := resolveALPNMode(ctxH3, cfg, fastReq, nil)
 	assert.Equal(t, aoni.AlpnH3, mode)
 }
 
@@ -76,7 +76,7 @@ func TestResolveALPNMode(t *testing.T) {
 	ctx := context.Background()
 	cfg := &aoni.Config{}
 
-	if mode := resolveALPNMode(ctx, cfg, &fasthttp.Request{}); mode != aoni.AlpnHTTP {
+	if mode := resolveALPNMode(ctx, cfg, &fasthttp.Request{}, nil); mode != aoni.AlpnHTTP {
 		t.Errorf("got ALPN mode %q, want %q", mode, aoni.AlpnHTTP)
 	}
 
@@ -86,12 +86,12 @@ func TestResolveALPNMode(t *testing.T) {
 		},
 	}
 
-	if mode := resolveALPNMode(ctx, cfgH2, &fasthttp.Request{}); mode != aoni.AlpnH2 {
+	if mode := resolveALPNMode(ctx, cfgH2, &fasthttp.Request{}, nil); mode != aoni.AlpnH2 {
 		t.Errorf("got ALPN mode %q, want %q", mode, aoni.AlpnH2)
 	}
 
 	ctxH3 := aoni.WithContextModifier(ctx, mod.WithForceHTTP3())
-	if mode := resolveALPNMode(ctxH3, cfg, &fasthttp.Request{}); mode != aoni.AlpnH3 {
+	if mode := resolveALPNMode(ctxH3, cfg, &fasthttp.Request{}, nil); mode != aoni.AlpnH3 {
 		t.Errorf("got context ALPN mode %q, want %q", mode, aoni.AlpnH3)
 	}
 }

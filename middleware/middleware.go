@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/lemon4ksan/aoni"
+	"github.com/lemon4ksan/aoni/telemetry"
 )
 
 // Chain composes an execution engine with an ordered sequence of [aoni.Middleware] layers.
@@ -40,13 +41,13 @@ func Chain(doer any, middlewares ...aoni.Middleware) aoni.RequestDoer {
 
 // Log records structured execution telemetry for HTTP transactions using logger.
 // Sensitive query parameters ("key", "token", "access_token") are automatically masked.
-func Log(logger aoni.Logger) aoni.Middleware {
+func Log(logger telemetry.Logger) aoni.Middleware {
 	return func(next aoni.RequestDoer) aoni.RequestDoer {
 		return aoni.DoerFunc(func(req aoni.Request) (aoni.Response, error) {
 			startTime := time.Now()
 			resp, err := next.Do(req)
 
-			logger.Info("http request",
+			logger.Log(req.Context(), telemetry.LevelInfo, "http request",
 				"method", req.Method(),
 				"url", maskURLString(req.URL()),
 				"duration", time.Since(startTime),

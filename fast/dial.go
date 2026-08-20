@@ -9,6 +9,7 @@ import (
 	"net"
 	"reflect"
 	"strings"
+	"sync"
 	"time"
 
 	utls "github.com/refraction-networking/utls"
@@ -90,29 +91,17 @@ func (c *Client) DialH2(ctx context.Context, addr string) (net.Conn, error) {
 
 // TrackHTTPSTarget increments the active HTTPS target reference count for addr.
 func (c *Client) TrackHTTPSTarget(addr string) {
-	if val, ok := c.activeTargets.Load(addr); ok {
-		c.activeTargets.Store(addr, val.(int)+1)
-	} else {
-		c.activeTargets.Store(addr, 1)
-	}
+	c.activeTargets.Track(addr)
 }
 
 // UntrackHTTPSTarget decrements the active HTTPS target reference count for addr.
 func (c *Client) UntrackHTTPSTarget(addr string) {
-	if val, ok := c.activeTargets.Load(addr); ok {
-		count := val.(int) - 1
-		if count <= 0 {
-			c.activeTargets.Delete(addr)
-		} else {
-			c.activeTargets.Store(addr, count)
-		}
-	}
+	c.activeTargets.Untrack(addr)
 }
 
 // IsHTTPSTarget reports whether addr has been tracked as an active HTTPS target.
 func (c *Client) IsHTTPSTarget(addr string) bool {
-	_, ok := c.activeTargets.Load(addr)
-	return ok
+	return c.activeTargets.IsTracked(addr)
 }
 
 func (c *Client) resolveHelloID() *utls.ClientHelloID {
@@ -241,4 +230,44 @@ func applyHostRewriteRules(ctx context.Context, host, port string) (string, stri
 	}
 
 	return host, port
+}
+
+type targetTracker struct {
+	mu      sync.RWMutex
+	targets map[string]int
+}
+
+func (t *targetTracker) Track(addr string) {
+	t.mu.Lock()
+	if t.targets == nil {
+		t.targets = make(map[string]int)
+	}
+
+	t.targets[addr]++
+	t.mu.Unlock()
+}
+
+func (t *targetTracker) Untrack(addr string) {
+	t.mu.Lock()
+	if t.targets != nil {
+		count := t.targets[addr] - 1
+		if count <= 0 {
+			delete(t.targets, addr)
+		} else {
+			t.targets[addr] = count
+		}
+	}
+
+	t.mu.Unlock()
+}
+
+func (t *targetTracker) IsTracked(addr string) bool {
+	t.mu.RLock()
+	defer t.mu.RUnlock()
+
+	if t.targets == nil {
+		return false
+	}
+
+	return t.targets[addr] > 0
 }

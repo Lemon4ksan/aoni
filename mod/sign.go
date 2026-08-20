@@ -17,6 +17,7 @@ import (
 	"github.com/lemon4ksan/foundation/silicon/bytesconv"
 
 	"github.com/lemon4ksan/aoni"
+	"github.com/lemon4ksan/aoni/internal/core"
 )
 
 // SignHMACConfig specifies configuration parameters for cryptographic HMAC request signing.
@@ -60,7 +61,7 @@ func WithSignHMACConfig(cfg SignHMACConfig) aoni.RequestModifier {
 	}
 
 	return aoni.RequestModifier{
-		Kind: aoni.ModCustom,
+		Kind: core.ModCustom,
 		Fn: func(req aoni.Request) {
 			var tsStr string
 			if cfg.TimestampHeader != "" {

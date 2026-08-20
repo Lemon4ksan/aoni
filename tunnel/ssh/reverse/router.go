@@ -5,12 +5,11 @@
 package reverse
 
 import (
-	"crypto/rand"
-	"math/big"
 	"strings"
 	"sync"
 	"time"
 
+	"github.com/lemon4ksan/foundation/silicon/rand"
 	"golang.org/x/crypto/ssh"
 )
 
@@ -156,19 +155,17 @@ func (r *Router) resolveHost(requested string) string {
 const alphaNums = "abcdefghijklmnopqrstuvwxyz0123456789"
 
 func generateRandomSubdomain(length int) string {
-	var sb strings.Builder
-	sb.Grow(length)
-
-	bigMax := big.NewInt(int64(len(alphaNums)))
-	for range length {
-		idx, err := rand.Int(rand.Reader, bigMax)
-		if err != nil {
-			sb.WriteByte('a')
-			continue
-		}
-
-		sb.WriteByte(alphaNums[idx.Int64()])
+	if length <= 0 {
+		return ""
 	}
 
-	return sb.String()
+	var buf [32]byte
+
+	n := min(length, len(buf))
+
+	for i := 0; i < n; i++ {
+		buf[i] = alphaNums[rand.Uint32n(uint32(len(alphaNums)))]
+	}
+
+	return string(buf[:n])
 }

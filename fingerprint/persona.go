@@ -129,4 +129,17 @@ var (
 		},
 		P0fSignature: p0f.IOS,
 	}
+
+	// PersonaChromeWindows aliases the modern Chrome Windows persona.
+	PersonaChromeWindows = PersonaChrome120Windows
+	// PersonaChromeAndroid aliases the modern Chrome Android persona.
+	PersonaChromeAndroid = PersonaChrome120Android
+	// PersonaFirefoxWindows aliases the modern Firefox Windows persona.
+	PersonaFirefoxWindows = PersonaFirefox120Windows
+	// PersonaFirefoxAndroid aliases the modern Firefox Android persona.
+	PersonaFirefoxAndroid = PersonaFirefox120Android
+	// PersonaSafariMacOS aliases the modern Safari macOS persona.
+	PersonaSafariMacOS = PersonaSafari17MacOS
+	// PersonaSafariIOS aliases the modern Safari iOS persona.
+	PersonaSafariIOS = PersonaSafari17IOS
 )

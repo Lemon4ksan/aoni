@@ -248,12 +248,10 @@ func TestInMemoryDNSCache_ExpiredLookup(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, "10.0.0.1", ips1[0].IP.String())
 
-	cache.mu.Lock()
-	cache.cache["expired.test"] = dnsCacheEntry{
+	cache.cache.Store("expired.test", dnsCacheEntry{
 		ips:    ips1,
 		expiry: time.Now().Add(-10 * time.Minute),
-	}
-	cache.mu.Unlock()
+	})
 
 	ips2, err := cache.LookupIPAddr(t.Context(), "expired.test")
 	require.NoError(t, err)
@@ -274,22 +272,14 @@ func TestInMemoryDNSCache_EvictionLoop(t *testing.T) {
 	_, err := cache.LookupIPAddr(t.Context(), "evict.test")
 	require.NoError(t, err)
 
-	cache.mu.Lock()
-	cache.cache["evict.test"] = dnsCacheEntry{
+	cache.cache.Store("evict.test", dnsCacheEntry{
 		ips:    []net.IPAddr{{IP: net.ParseIP("192.168.1.1")}},
 		expiry: time.Now().Add(-10 * time.Minute),
-	}
+	})
 
-	now := time.Now()
-	for k, v := range cache.cache {
-		if now.After(v.expiry) {
-			delete(cache.cache, k)
-		}
-	}
+	cache.purgeExpired()
 
-	_, exists := cache.cache["evict.test"]
-	cache.mu.Unlock()
-
+	_, exists := cache.cache.Load("evict.test")
 	assert.False(t, exists, "expired entry should be evicted")
 }
 
@@ -683,29 +673,19 @@ func TestInMemoryDNSCache_Eviction(t *testing.T) {
 	cache := NewInMemoryDNSCache(time.Millisecond, &net.Resolver{})
 	t.Cleanup(func() { cache.Close() })
 
-	cache.mu.Lock()
-	cache.cache["expired.test"] = dnsCacheEntry{
+	cache.cache.Store("expired.test", dnsCacheEntry{
 		ips:    []net.IPAddr{{IP: net.ParseIP("1.2.3.4")}},
 		expiry: time.Now().Add(-time.Hour),
-	}
-	cache.cache["valid.test"] = dnsCacheEntry{
+	})
+	cache.cache.Store("valid.test", dnsCacheEntry{
 		ips:    []net.IPAddr{{IP: net.ParseIP("5.6.7.8")}},
 		expiry: time.Now().Add(time.Hour),
-	}
-	cache.mu.Unlock()
+	})
 
-	cache.mu.Lock()
+	cache.purgeExpired()
 
-	now := time.Now()
-	for k, v := range cache.cache {
-		if now.After(v.expiry) {
-			delete(cache.cache, k)
-		}
-	}
-
-	_, expiredExists := cache.cache["expired.test"]
-	_, validExists := cache.cache["valid.test"]
-	cache.mu.Unlock()
+	_, expiredExists := cache.cache.Load("expired.test")
+	_, validExists := cache.cache.Load("valid.test")
 
 	assert.False(t, expiredExists, "expired entry should be removed")
 	assert.True(t, validExists, "valid entry should remain")
@@ -742,19 +722,24 @@ func TestDoHResolver_EDNS0_And_GetMethod(t *testing.T) {
 		t.Parallel()
 
 		var (
+			mu             sync.Mutex
 			capturedMethod string
 			capturedQuery  string
 		)
 
 		ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			query := r.URL.Query().Get("dns")
+
+			mu.Lock()
 			capturedMethod = r.Method
-			capturedQuery = r.URL.Query().Get("dns")
+			capturedQuery = query
+			mu.Unlock()
 
 			w.Header().Set("Content-Type", DoHMediaType)
 			w.WriteHeader(http.StatusOK)
 
-			if capturedQuery != "" {
-				wireQuery, err := base64.RawURLEncoding.DecodeString(capturedQuery)
+			if query != "" {
+				wireQuery, err := base64.RawURLEncoding.DecodeString(query)
 				if err == nil && len(wireQuery) >= 2 {
 					queryID := binary.BigEndian.Uint16(wireQuery[0:2])
 					respWire := buildMockDoQDNSResponse(queryID, netip.MustParseAddr("1.1.1.1"))
@@ -775,29 +760,39 @@ func TestDoHResolver_EDNS0_And_GetMethod(t *testing.T) {
 		_, err := resolver.LookupNetIP(t.Context(), "example.com")
 		require.NoError(t, err)
 
-		assert.Equal(t, http.MethodGet, capturedMethod)
-		assert.NotEmpty(t, capturedQuery)
+		mu.Lock()
+		m := capturedMethod
+		q := capturedQuery
+		mu.Unlock()
+
+		assert.Equal(t, http.MethodGet, m)
+		assert.NotEmpty(t, q)
 	})
 
 	t.Run("doh_post_method_wire_payload", func(t *testing.T) {
 		t.Parallel()
 
 		var (
+			mu                  sync.Mutex
 			capturedMethod      string
 			capturedContentType string
 			capturedBody        []byte
 		)
 
 		ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			b, _ := io.ReadAll(r.Body)
+
+			mu.Lock()
 			capturedMethod = r.Method
 			capturedContentType = r.Header.Get("Content-Type")
-			capturedBody, _ = io.ReadAll(r.Body)
+			capturedBody = b
+			mu.Unlock()
 
 			w.Header().Set("Content-Type", DoHMediaType)
 			w.WriteHeader(http.StatusOK)
 
-			if len(capturedBody) >= 2 {
-				queryID := binary.BigEndian.Uint16(capturedBody[0:2])
+			if len(b) >= 2 {
+				queryID := binary.BigEndian.Uint16(b[0:2])
 				respWire := buildMockDoQDNSResponse(queryID, netip.MustParseAddr("1.1.1.1"))
 				_, _ = w.Write(respWire)
 			}
@@ -814,9 +809,15 @@ func TestDoHResolver_EDNS0_And_GetMethod(t *testing.T) {
 		_, err := resolver.LookupNetIP(t.Context(), "example.com")
 		require.NoError(t, err)
 
-		assert.Equal(t, http.MethodPost, capturedMethod)
-		assert.Equal(t, DoHMediaType, capturedContentType)
-		assert.NotEmpty(t, capturedBody)
+		mu.Lock()
+		m := capturedMethod
+		ct := capturedContentType
+		body := capturedBody
+		mu.Unlock()
+
+		assert.Equal(t, http.MethodPost, m)
+		assert.Equal(t, DoHMediaType, ct)
+		assert.NotEmpty(t, body)
 	})
 
 	t.Run("doh_non_200_http_status_error", func(t *testing.T) {
@@ -975,9 +976,7 @@ func TestInMemoryDNSCache_ExtendedDNSRecordsStorage(t *testing.T) {
 	assert.Equal(t, "10.20.30.40", ips[0].IP.String())
 
 	// Verify cached entry effective TTL equals minimum record TTL (60s)
-	cache.mu.RLock()
-	entry, ok := cache.cache["ext.test"]
-	cache.mu.RUnlock()
+	entry, ok := cache.cache.Load("ext.test")
 
 	assert.True(t, ok)
 	assert.True(t, entry.expiry.After(time.Now().Add(55*time.Second)))

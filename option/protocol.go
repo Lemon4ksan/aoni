@@ -6,6 +6,7 @@ package option
 
 import (
 	"github.com/lemon4ksan/aoni"
+	"github.com/lemon4ksan/aoni/fingerprint"
 	"github.com/lemon4ksan/aoni/fingerprint/h2"
 	"github.com/lemon4ksan/aoni/fingerprint/h3"
 	"github.com/lemon4ksan/aoni/fingerprint/profiles"
@@ -64,9 +65,22 @@ func WithHTTP2Config(cfg aoni.HTTP2Config) aoni.ClientOption {
 	}
 }
 
-// WithHTTP2Configurer returns an [aoni.ClientOption] configuring an [aoni.HTTP2Configurer] interface on the transport.
-func WithHTTP2Configurer(configurer aoni.HTTP2Configurer) aoni.ClientOption {
+// WithHTTP2Configurer returns an [aoni.ClientOption] configuring an [fingerprint.HTTP2Configurer] interface on the transport.
+func WithHTTP2Configurer(configurer fingerprint.HTTP2Configurer) aoni.ClientOption {
 	return func(cfg *aoni.Config) {
 		cfg.Fingerprint.H2Configurer = configurer
+	}
+}
+
+// WithHTTP3 returns an [aoni.ClientOption] enabling HTTP/3 over QUIC (RFC 9114).
+func WithHTTP3(settings ...h3.Settings) aoni.ClientOption {
+	return func(cfg *aoni.Config) {
+		if len(settings) > 0 {
+			s := settings[0]
+			cfg.Fingerprint.H3Settings = &s
+		} else {
+			s := h3.ChromeSettings
+			cfg.Fingerprint.H3Settings = &s
+		}
 	}
 }

@@ -14,6 +14,7 @@ import (
 	"github.com/lemon4ksan/aoni"
 	"github.com/lemon4ksan/aoni/fingerprint/ja4"
 	"github.com/lemon4ksan/aoni/internal/io"
+	"github.com/lemon4ksan/aoni/internal/pipeline"
 	"github.com/lemon4ksan/aoni/telemetry"
 )
 
@@ -25,7 +26,7 @@ func WithCorrelationID(id string) aoni.RequestModifier {
 	}
 
 	return Custom(func(req aoni.Request) {
-		cfg := aoni.GetOrInitRequestConfig(req)
+		cfg := getOrInitRequestConfig(req)
 		if cfg.TraceInfo != nil {
 			cfg.TraceInfo.CorrelationID = activeID
 		}
@@ -37,7 +38,7 @@ func WithCorrelationID(id string) aoni.RequestModifier {
 // WithLabel constructs an [aoni.RequestModifier] assigning a route or metric label to the request context.
 func WithLabel(label string) aoni.RequestModifier {
 	return Custom(func(req aoni.Request) {
-		cfg := aoni.GetOrInitRequestConfig(req)
+		cfg := getOrInitRequestConfig(req)
 		cfg.Label = label
 
 		if cfg.TraceInfo != nil {
@@ -49,7 +50,7 @@ func WithLabel(label string) aoni.RequestModifier {
 // WithDebug constructs an [aoni.RequestModifier] marking the request for verbose diagnostic logging.
 func WithDebug() aoni.RequestModifier {
 	return Custom(func(req aoni.Request) {
-		aoni.GetOrInitRequestConfig(req).Debug = true
+		getOrInitRequestConfig(req).Debug = true
 	})
 }
 
@@ -95,7 +96,7 @@ func dumpGenericRequest(req aoni.Request) {
 // WithTrace constructs an [aoni.RequestModifier] assigning a connection tracer container to capture connection metrics.
 func WithTrace(target *telemetry.TraceInfo) aoni.RequestModifier {
 	return Custom(func(req aoni.Request) {
-		aoni.GetOrInitRequestConfig(req).TraceInfo = target
+		getOrInitRequestConfig(req).TraceInfo = target
 	})
 }
 
@@ -106,8 +107,8 @@ func WithTraceJA4(target *telemetry.TraceInfo) aoni.RequestModifier {
 			target.JA4 = &ja4.Report{}
 		}
 
-		store := &aoni.JA4ReportStore{Report: target.JA4, Target: target}
-		aoni.GetOrInitRequestConfig(req).JA4ReportStore = store
+		store := &pipeline.JA4ReportStore{Report: target.JA4, Target: target}
+		getOrInitRequestConfig(req).JA4ReportStore = store
 
 		if stdReq := req.HTTPRequest(); stdReq != nil {
 			target.JA4.JA4H = telemetry.ComputeJA4HFromRequest(stdReq)
@@ -119,7 +120,7 @@ func WithTraceJA4(target *telemetry.TraceInfo) aoni.RequestModifier {
 func WithTraceContext() aoni.RequestModifier {
 	return Custom(func(req aoni.Request) {
 		info := &telemetry.TraceInfo{}
-		aoni.GetOrInitRequestConfig(req).TraceInfo = info
+		getOrInitRequestConfig(req).TraceInfo = info
 		WithTraceJA4(info).Apply(req)
 	})
 }
@@ -127,6 +128,6 @@ func WithTraceContext() aoni.RequestModifier {
 // WithJA4Callback constructs an [aoni.RequestModifier] setting a callback executed with the computed [ja4.Report] after TLS handshakes.
 func WithJA4Callback(fn func(ja4.Report)) aoni.RequestModifier {
 	return Custom(func(req aoni.Request) {
-		aoni.GetOrInitRequestConfig(req).JA4Callback = fn
+		getOrInitRequestConfig(req).JA4Callback = fn
 	})
 }

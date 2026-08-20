@@ -13,13 +13,15 @@ import (
 	"io"
 	"net/http"
 	"sync"
+
+	"github.com/lemon4ksan/foundation/generic"
 )
 
 // call represents an active or completed in-flight request.
 type call struct {
-	wg  sync.WaitGroup
-	val *cachedResponse
-	err error
+	done chan struct{}
+	val  *cachedResponse
+	err  error
 }
 
 type cachedResponse struct {
@@ -53,17 +55,10 @@ func (g *Group) Do(ctx context.Context, key string, fn func() (*http.Response, e
 	if c, ok := g.m[key]; ok {
 		g.mu.Unlock()
 
-		// Wait for in-flight call to finish or context cancellation
-		waitCh := make(chan struct{})
-		go func() {
-			c.wg.Wait()
-			close(waitCh)
-		}()
-
 		select {
 		case <-ctx.Done():
 			return nil, ctx.Err()
-		case <-waitCh:
+		case <-c.done:
 			if c.err != nil {
 				return nil, c.err
 			}
@@ -76,8 +71,9 @@ func (g *Group) Do(ctx context.Context, key string, fn func() (*http.Response, e
 		}
 	}
 
-	c := new(call)
-	c.wg.Add(1)
+	c := &call{
+		done: make(chan struct{}),
+	}
 	g.m[key] = c
 	g.mu.Unlock()
 
@@ -85,7 +81,7 @@ func (g *Group) Do(ctx context.Context, key string, fn func() (*http.Response, e
 		g.mu.Lock()
 		delete(g.m, key)
 		g.mu.Unlock()
-		c.wg.Done()
+		close(c.done)
 	}()
 
 	resp, err := fn()
@@ -127,4 +123,21 @@ func (cr *cachedResponse) toHTTPResponse() *http.Response {
 		Body:          io.NopCloser(bytes.NewReader(cr.body)),
 		ContentLength: int64(len(cr.body)),
 	}
+}
+
+// TypedGroup provides generic singleflight function deduplication for arbitrary keys and return types.
+type TypedGroup[K comparable, V any] struct {
+	sf *generic.Singleflight[K, V]
+}
+
+// NewTypedGroup creates a new generic Singleflight deduplicator.
+func NewTypedGroup[K comparable, V any]() *TypedGroup[K, V] {
+	return &TypedGroup[K, V]{
+		sf: generic.NewSingleflight[K, V](),
+	}
+}
+
+// Do executes and deduplicates fn by key.
+func (g *TypedGroup[K, V]) Do(key K, fn func() (V, error)) (V, error) {
+	return g.sf.Do(key, fn)
 }

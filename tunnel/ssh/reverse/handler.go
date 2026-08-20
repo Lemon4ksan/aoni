@@ -9,9 +9,9 @@ import (
 	"fmt"
 	"net"
 	"strconv"
-	"sync"
 	"time"
 
+	"github.com/lemon4ksan/foundation/generic"
 	"golang.org/x/crypto/ssh"
 )
 
@@ -40,14 +40,11 @@ func HandleGlobalRequests(
 	router *Router,
 	onTunnelCreated func(t *Tunnel),
 ) {
-	var activeTunnels sync.Map
+	var activeTunnels generic.ConcurrentMap[string, *Tunnel]
 
 	defer func() {
-		activeTunnels.Range(func(key, _ any) bool {
-			if host, ok := key.(string); ok {
-				router.Unregister(host)
-			}
-
+		activeTunnels.Range(func(host string, _ *Tunnel) bool {
+			router.Unregister(host)
 			return true
 		})
 	}()
@@ -70,7 +67,7 @@ func dispatchGlobalRequest(
 	req *ssh.Request,
 	sshConn *ssh.ServerConn,
 	router *Router,
-	activeTunnels *sync.Map,
+	activeTunnels *generic.ConcurrentMap[string, *Tunnel],
 	onTunnelCreated func(t *Tunnel),
 ) {
 	switch req.Type {

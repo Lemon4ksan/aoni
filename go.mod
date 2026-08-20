@@ -6,7 +6,7 @@ require (
 	github.com/andybalholm/brotli v1.2.2
 	github.com/getkin/kin-openapi v0.146.0
 	github.com/klauspost/compress v1.19.1
-	github.com/lemon4ksan/foundation v0.0.0-20260819123331-bdbbfc0d11de
+	github.com/lemon4ksan/foundation v0.0.0-20260820045422-43e40082e954
 	github.com/pkg/sftp v1.13.11
 	github.com/quic-go/qpack v0.6.0
 	github.com/quic-go/quic-go v0.61.0

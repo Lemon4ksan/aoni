@@ -12,6 +12,7 @@ import (
 
 	"github.com/lemon4ksan/aoni"
 	"github.com/lemon4ksan/aoni/cookie"
+	"github.com/lemon4ksan/aoni/internal/core"
 	"github.com/lemon4ksan/aoni/internal/requestutil"
 )
 
@@ -33,7 +34,7 @@ func formatGRPCTimeout(d time.Duration) string {
 // WithHeader constructs an [aoni.RequestModifier] setting a single request header key to value.
 func WithHeader(key, value string) aoni.RequestModifier {
 	return aoni.RequestModifier{
-		Kind:  aoni.ModHeader,
+		Kind:  core.ModHeader,
 		Key:   key,
 		Value: value,
 	}
@@ -42,7 +43,7 @@ func WithHeader(key, value string) aoni.RequestModifier {
 // WithHeaderBytes constructs an [aoni.RequestModifier] setting a request header using byte slices for zero-allocation setup.
 func WithHeaderBytes(key, value []byte) aoni.RequestModifier {
 	return aoni.RequestModifier{
-		Kind:  aoni.ModHeader,
+		Kind:  core.ModHeader,
 		Key:   bytesconv.B2S(key),
 		Value: bytesconv.B2S(value),
 	}
@@ -51,7 +52,7 @@ func WithHeaderBytes(key, value []byte) aoni.RequestModifier {
 // WithHeaderFunc constructs an [aoni.RequestModifier] evaluating provider dynamically at request execution time to set key header.
 func WithHeaderFunc(key string, provider func() string) aoni.RequestModifier {
 	return aoni.RequestModifier{
-		Kind: aoni.ModCustom,
+		Kind: core.ModCustom,
 		Fn: func(req aoni.Request) {
 			if provider != nil && key != "" {
 				if val := provider(); val != "" {
@@ -70,7 +71,7 @@ func WithDynamicHeader(key string, provider func() string) aoni.RequestModifier 
 // WithHeaders constructs an [aoni.RequestModifier] bulk-setting multiple HTTP request headers from a map.
 func WithHeaders(headers map[string]string) aoni.RequestModifier {
 	return aoni.RequestModifier{
-		Kind: aoni.ModCustom,
+		Kind: core.ModCustom,
 		Fn: func(req aoni.Request) {
 			for k, v := range headers {
 				req.SetHeader(k, v)
@@ -82,7 +83,7 @@ func WithHeaders(headers map[string]string) aoni.RequestModifier {
 // ResetHeaders constructs an [aoni.RequestModifier] clearing all headers from the request.
 func ResetHeaders() aoni.RequestModifier {
 	return aoni.RequestModifier{
-		Kind: aoni.ModCustom,
+		Kind: core.ModCustom,
 		Fn: func(req aoni.Request) {
 			req.ResetHeaders()
 		},
@@ -93,7 +94,7 @@ func ResetHeaders() aoni.RequestModifier {
 // per RFC 6750 §2.1 (The OAuth 2.0 Authorization Framework: Bearer Token Usage).
 func WithBearer(token string) aoni.RequestModifier {
 	return aoni.RequestModifier{
-		Kind:  aoni.ModBearer,
+		Kind:  core.ModBearer,
 		Value: token,
 	}
 }
@@ -102,7 +103,7 @@ func WithBearer(token string) aoni.RequestModifier {
 // per RFC 7617 (The 'Basic' HTTP Authentication Scheme).
 func WithBasicAuth(username, password string) aoni.RequestModifier {
 	return aoni.RequestModifier{
-		Kind:  aoni.ModBasicAuth,
+		Kind:  core.ModBasicAuth,
 		Key:   username,
 		Value: password,
 	}
@@ -154,7 +155,7 @@ func WithCookie(c *http.Cookie) aoni.RequestModifier {
 	}
 
 	return aoni.RequestModifier{
-		Kind:  aoni.ModHeaderAdd,
+		Kind:  core.ModHeaderAdd,
 		Key:   "Cookie",
 		Value: c.String(),
 	}
@@ -163,7 +164,7 @@ func WithCookie(c *http.Cookie) aoni.RequestModifier {
 // WithCookies constructs an [aoni.RequestModifier] attaching multiple cookie key-value pairs to the request.
 func WithCookies(kv map[string]string) aoni.RequestModifier {
 	return aoni.RequestModifier{
-		Kind: aoni.ModCustom,
+		Kind: core.ModCustom,
 		Fn: func(req aoni.Request) {
 			for k, v := range kv {
 				req.AddHeader("Cookie", k+"="+v)
@@ -175,7 +176,7 @@ func WithCookies(kv map[string]string) aoni.RequestModifier {
 // WithPartitionKey constructs an [aoni.RequestModifier] attaching a CHIPS (RFC 6265bis) partition key for iFrame/widget context.
 func WithPartitionKey(key string) aoni.RequestModifier {
 	return aoni.RequestModifier{
-		Kind: aoni.ModCustom,
+		Kind: core.ModCustom,
 		Fn: func(req aoni.Request) {
 			req.SetContext(cookie.WithPartitionKey(req.Context(), key))
 		},

@@ -53,8 +53,8 @@ type UpdateResponse struct {
 	require.NoError(t, err)
 
 	code := string(codeBytes)
-	require.Contains(t, code, `decode.ExtractAttr(stageIn, "#profile_edit_config", "data-profile-edit")`)
-	require.Contains(t, code, `stageIn = decode.HTMLUnescape(stageIn)`)
+	require.Contains(t, code, `extract.Attr(stageIn, "#profile_edit_config", "data-profile-edit")`)
+	require.Contains(t, code, `stageIn = extract.HTMLUnescape(stageIn)`)
 	require.Contains(t, code, `decode.UnmarshalJSON(stageIn, &result)`)
 	require.Contains(t, code, `privacyBytes, err := json.Marshal(privacy)`)
 	require.Contains(t, code, `url.QueryEscape(string(privacyBytes))`)
@@ -89,7 +89,7 @@ type BoosterData struct {
 	require.NoError(t, err)
 
 	code := string(codeBytes)
-	require.Contains(t, code, `decode.ExtractBetween(stageIn, "CBoosterCreatorPage.Init( ", ", 100,")`)
-	require.Contains(t, code, `decode.ExtractRegex(stageIn, "var g_rgAppContextData = (.*?);")`)
+	require.Contains(t, code, `extract.Between(stageIn, "CBoosterCreatorPage.Init( ", ", 100,")`)
+	require.Contains(t, code, `extract.Regex(stageIn, "var g_rgAppContextData = (.*?);")`)
 	require.Contains(t, code, `decode.UnmarshalJSON(stageIn, &result)`)
 }

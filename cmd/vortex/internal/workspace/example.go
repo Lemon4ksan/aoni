@@ -17,12 +17,21 @@ import (
 // CmdExample scaffolds ready-made contract templates.
 type CmdExample struct{}
 
-func (c *CmdExample) Name() string { return "example" }
+func (c *CmdExample) Name() string {
+	return "example"
+}
+
 func (c *CmdExample) Aliases() []string {
 	return []string{"examples", "template", "templates", "tpl"}
 }
-func (c *CmdExample) Synopsis() string { return "Scaffold ready-made declarative contract templates" }
-func (c *CmdExample) Usage() string    { return "vortex example [http|ws|socket|pipeline] [flags]" }
+
+func (c *CmdExample) Synopsis() string {
+	return "Scaffold ready-made declarative contract templates"
+}
+
+func (c *CmdExample) Usage() string {
+	return "vortex example [http|ws|socket|pipeline] [flags]"
+}
 
 func (c *CmdExample) Run(_ context.Context, args []string, stdout, stderr io.Writer) error {
 	fs := flag.NewFlagSet("example", flag.ContinueOnError)

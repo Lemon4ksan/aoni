@@ -7,6 +7,8 @@ package aoni
 import (
 	"bytes"
 	"errors"
+	"log/slog"
+	"net/http"
 	"strconv"
 	"strings"
 
@@ -93,6 +95,32 @@ func (e *Error) Error() string {
 
 func (e *Error) Unwrap() error { return e.Err }
 
+// LogValue implements [slog.LogValuer] for structured, zero-allocation logging.
+func (e *Error) LogValue() slog.Value {
+	if e == nil {
+		return slog.GroupValue()
+	}
+
+	attrs := make([]slog.Attr, 0, 4)
+	if e.Op != "" {
+		attrs = append(attrs, slog.String("op", e.Op))
+	}
+
+	if e.Target != "" {
+		attrs = append(attrs, slog.String("target", e.Target))
+	}
+
+	if e.Path != "" {
+		attrs = append(attrs, slog.String("path", e.Path))
+	}
+
+	if e.Err != nil {
+		attrs = append(attrs, slog.String("cause", e.Err.Error()))
+	}
+
+	return slog.GroupValue(attrs...)
+}
+
 // APIError describes an HTTP response status failure (>= 400).
 type APIError struct {
 	// Model holds an unmarshaled error envelope structure if parsed by a decoder.
@@ -111,9 +139,14 @@ func (e *APIError) Error() string {
 	var numBuf [10]byte
 
 	statusBytes := strconv.AppendInt(numBuf[:0], int64(e.StatusCode), 10)
+	statusText := http.StatusText(e.StatusCode)
 
 	if len(e.Body) == 0 {
-		return "aoni: status " + bytesconv.B2S(statusBytes)
+		if statusText != "" {
+			return "aoni: HTTP " + bytesconv.B2S(statusBytes) + " " + statusText
+		}
+
+		return "aoni: HTTP " + bytesconv.B2S(statusBytes)
 	}
 
 	limit := min(len(e.Body), 128)
@@ -128,14 +161,75 @@ func (e *APIError) Error() string {
 	}, bodySlice)
 
 	var sb strings.Builder
-	sb.Grow(32 + len(cleanBody))
-	sb.WriteString("aoni: status ")
+	sb.Grow(48 + len(cleanBody))
+	sb.WriteString("aoni: HTTP ")
 	sb.Write(statusBytes)
+
+	if statusText != "" {
+		sb.WriteByte(' ')
+		sb.WriteString(statusText)
+	}
+
 	sb.WriteString(" (body: ")
 	sb.Write(cleanBody)
 	sb.WriteByte(')')
 
 	return sb.String()
+}
+
+// IsNotFound reports whether the error represents an HTTP 404 Not Found response.
+func (e *APIError) IsNotFound() bool {
+	return e != nil && e.StatusCode == http.StatusNotFound
+}
+
+// IsUnauthorized reports whether the error represents an HTTP 401 Unauthorized response.
+func (e *APIError) IsUnauthorized() bool {
+	return e != nil && e.StatusCode == http.StatusUnauthorized
+}
+
+// IsForbidden reports whether the error represents an HTTP 403 Forbidden response.
+func (e *APIError) IsForbidden() bool {
+	return e != nil && e.StatusCode == http.StatusForbidden
+}
+
+// IsServerError reports whether the error represents an HTTP 5xx server-side response.
+func (e *APIError) IsServerError() bool {
+	return e != nil && e.StatusCode >= http.StatusInternalServerError && e.StatusCode <= 599
+}
+
+// IsClientError reports whether the error represents an HTTP 4xx client-side response.
+func (e *APIError) IsClientError() bool {
+	return e != nil && e.StatusCode >= http.StatusBadRequest && e.StatusCode <= 499
+}
+
+// BodyString returns the error response payload as a string.
+func (e *APIError) BodyString() string {
+	if e == nil || len(e.Body) == 0 {
+		return ""
+	}
+
+	return bytesconv.B2S(e.Body)
+}
+
+// LogValue implements [slog.LogValuer] for structured, zero-allocation logging.
+func (e *APIError) LogValue() slog.Value {
+	if e == nil {
+		return slog.GroupValue()
+	}
+
+	attrs := make([]slog.Attr, 0, 3)
+	attrs = append(attrs, slog.Int("status", e.StatusCode))
+
+	if text := http.StatusText(e.StatusCode); text != "" {
+		attrs = append(attrs, slog.String("error", text))
+	}
+
+	if len(e.Body) > 0 {
+		limit := min(len(e.Body), 128)
+		attrs = append(attrs, slog.String("body", bytesconv.B2S(e.Body[:limit])))
+	}
+
+	return slog.GroupValue(attrs...)
 }
 
 // BridgeError describes an execution failure during stdlib [http.Client] bridging.

@@ -11,7 +11,8 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
-	"sync"
+
+	"github.com/lemon4ksan/foundation/generic"
 )
 
 // ErrInvalidCookieData is returned when persisted cookie data cannot be unmarshaled.
@@ -31,9 +32,8 @@ type Storage interface {
 // guaranteeing zero file corruption even in the event of abrupt process termination.
 // Safe for concurrent use across multiple goroutines.
 type JSONFileStorage struct {
-	mu       sync.RWMutex
 	filePath string
-	data     fileStorageData
+	data     generic.Safe[fileStorageData]
 }
 
 type fileStorageData map[string][]Cookie
@@ -41,13 +41,14 @@ type fileStorageData map[string][]Cookie
 // NewJSONFileStorage instantiates a [JSONFileStorage] bound to the specified filePath.
 // Automatically loads cookies into memory if filePath exists and contains valid JSON, or initializes empty storage.
 func NewJSONFileStorage(filePath string) *JSONFileStorage {
-	s := &JSONFileStorage{
-		filePath: filePath,
-		data:     make(fileStorageData),
+	initialData := make(fileStorageData)
+	if fileBytes, err := os.ReadFile(filePath); err == nil {
+		_ = json.Unmarshal(fileBytes, &initialData)
 	}
 
-	if fileBytes, err := os.ReadFile(filePath); err == nil {
-		_ = json.Unmarshal(fileBytes, &s.data)
+	s := &JSONFileStorage{
+		filePath: filePath,
+		data:     *generic.NewSafe(initialData),
 	}
 
 	return s
@@ -56,11 +57,15 @@ func NewJSONFileStorage(filePath string) *JSONFileStorage {
 // Save stores cookie slices under key and flushes the JSON payload to disk via atomic temp file swaps.
 // Creates parent directories if missing and atomically renames the temporary file to target path.
 func (s *JSONFileStorage) Save(key string, cookies []Cookie) error {
-	s.mu.Lock()
-	s.data[key] = cookies
+	var (
+		fileBytes []byte
+		err       error
+	)
 
-	fileBytes, err := json.MarshalIndent(s.data, "", "  ")
-	s.mu.Unlock()
+	s.data.Mutate(func(d *fileStorageData) {
+		(*d)[key] = cookies
+		fileBytes, err = json.Marshal(*d)
+	})
 
 	if err != nil {
 		return err
@@ -71,16 +76,14 @@ func (s *JSONFileStorage) Save(key string, cookies []Cookie) error {
 
 // Load retrieves cookies associated with key from memory. Safe for concurrent execution.
 func (s *JSONFileStorage) Load(key string) ([]Cookie, error) {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
+	var copied []Cookie
 
-	cookies, ok := s.data[key]
-	if !ok {
-		return nil, nil
-	}
-
-	copied := make([]Cookie, len(cookies))
-	copy(copied, cookies)
+	s.data.Read(func(d fileStorageData) {
+		if cookies, ok := d[key]; ok {
+			copied = make([]Cookie, len(cookies))
+			copy(copied, cookies)
+		}
+	})
 
 	return copied, nil
 }

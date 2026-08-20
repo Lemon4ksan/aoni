@@ -456,7 +456,7 @@ func TestFallbackMiddleware(t *testing.T) {
 		t.Parallel()
 
 		m := &mockDoer{id: 1, forceError: true}
-		fallback := aoni.FallbackJSON(http.StatusOK, map[string]string{"message": "fallback-data"})
+		fallback := FallbackJSON(http.StatusOK, map[string]string{"message": "fallback-data"})
 
 		client := Fallback()(m)
 
@@ -481,7 +481,7 @@ func TestFallbackMiddleware(t *testing.T) {
 		t.Parallel()
 
 		m := &mockDoer{id: 1, forceError: true}
-		fallback := aoni.FallbackString(http.StatusGatewayTimeout, "text-fallback")
+		fallback := FallbackString(http.StatusGatewayTimeout, "text-fallback")
 
 		client := Fallback()(m)
 
@@ -507,7 +507,7 @@ func TestFallbackMiddleware(t *testing.T) {
 		t.Parallel()
 
 		m := &mockDoer{id: 1, statusCode: 503}
-		fallback := aoni.FallbackJSON(http.StatusOK, map[string]string{"message": "fallback-5xx"})
+		fallback := FallbackJSON(http.StatusOK, map[string]string{"message": "fallback-5xx"})
 
 		isFailure := func(resp aoni.Response, err error) bool {
 			return err != nil || (resp != nil && resp.StatusCode() >= 500)

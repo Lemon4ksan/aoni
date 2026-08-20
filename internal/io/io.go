@@ -21,6 +21,8 @@ import (
 	"github.com/klauspost/compress/gzip"
 	"github.com/lemon4ksan/foundation/generic"
 	"github.com/lemon4ksan/foundation/silicon/offheap"
+
+	"github.com/lemon4ksan/aoni/internal/core"
 )
 
 var (
@@ -32,7 +34,7 @@ var (
 )
 
 // ProgressFunc represents a callback triggered periodically to monitor stream transfer progress.
-type ProgressFunc func(current, total int64)
+type ProgressFunc = core.ProgressFunc
 
 const maxPoolBufferSize = 64 * 1024
 
@@ -311,15 +313,17 @@ func (d *DecompressReadCloser) Close() error {
 
 func (d *DecompressReadCloser) Unwrap() io.Closer { return d.Closer }
 
-var gzipReaderPool = sync.Pool{
-	New: func() any {
-		return new(gzip.Reader)
-	},
-}
+var gzipReaderPool = generic.NewPool(func() *gzip.Reader {
+	return new(gzip.Reader)
+})
 
-// NewPooledGzipReader retrieves a reset [*gzip.Reader] from [sync.Pool] without heap allocations.
+// NewPooledGzipReader retrieves a reset [*gzip.Reader] from [generic.Pool] without heap allocations.
 func NewPooledGzipReader(r io.Reader) (io.ReadCloser, error) {
-	gr := gzipReaderPool.Get().(*gzip.Reader)
+	gr := gzipReaderPool.Get()
+	if gr == nil {
+		gr = new(gzip.Reader)
+	}
+
 	if err := gr.Reset(r); err != nil {
 		gzipReaderPool.Put(gr)
 		return nil, err

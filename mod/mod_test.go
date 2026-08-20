@@ -403,3 +403,49 @@ func TestMod_TelemetryAndTracingModifiers(t *testing.T) {
 		assert.NotNil(t, cfg.TraceInfo)
 	})
 }
+
+func TestMod_SmartBody_And_Retry(t *testing.T) {
+	t.Parallel()
+
+	t.Run("with_smart_body_types", func(t *testing.T) {
+		t.Parallel()
+
+		// 1. Struct -> JSON
+		req1 := newDummyRequest()
+		mod.WithSmartBody(dummyUser{Name: "Steve"}).Apply(req1)
+		assert.Equal(t, "application/json", req1.Header("Content-Type"))
+		assert.Contains(t, string(req1.body), `"name":"Steve"`)
+
+		// 2. String -> text/plain
+		req2 := newDummyRequest()
+		mod.WithSmartBody("hello world").Apply(req2)
+		assert.Equal(t, "text/plain; charset=utf-8", req2.Header("Content-Type"))
+		assert.Equal(t, "hello world", string(req2.body))
+
+		// 3. Bytes -> raw bytes
+		req3 := newDummyRequest()
+		mod.WithSmartBody([]byte{0x01, 0x02, 0x03}).Apply(req3)
+		assert.Equal(t, []byte{0x01, 0x02, 0x03}, req3.body)
+
+		// 4. url.Values -> form urlencoded
+		req4 := newDummyRequest()
+		vals := url.Values{"query": []string{"apple"}}
+		mod.WithSmartBody(vals).Apply(req4)
+		assert.Equal(t, "application/x-www-form-urlencoded", req4.Header("Content-Type"))
+		assert.Equal(t, "query=apple", string(req4.body))
+	})
+
+	t.Run("with_retry_and_json_alias", func(t *testing.T) {
+		t.Parallel()
+
+		req := newDummyRequest()
+		mod.WithRetry(3).Apply(req)
+		mod.WithJSON(dummyUser{Name: "Woz"}).Apply(req)
+
+		cfg := aoni.GetRequestConfig(req.Context())
+		require.NotNil(t, cfg)
+		require.NotNil(t, cfg.RetryPolicy)
+		assert.Equal(t, 3, cfg.RetryPolicy.MaxAttempts)
+		assert.Contains(t, string(req.body), `"name":"Woz"`)
+	})
+}

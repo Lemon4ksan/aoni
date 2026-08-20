@@ -76,15 +76,13 @@ type DialConfig struct {
 // UniversalDialer is a thread-safe, stateless L4/L7 execution engine.
 // It serves as the single source of truth for all socket connection dialing
 // across standard HTTP, fasthttp, WebSockets, gRPC, and MASQUE tunnels.
-type UniversalDialer struct {
-	activeHTTPS map[string]int
-}
+type UniversalDialer struct{}
 
-// NewUniversalDialer initializes a new UniversalDialer.
+var defaultUniversalDialer = &UniversalDialer{}
+
+// NewUniversalDialer returns a stateless [UniversalDialer] instance with zero allocations.
 func NewUniversalDialer() *UniversalDialer {
-	return &UniversalDialer{
-		activeHTTPS: make(map[string]int),
-	}
+	return defaultUniversalDialer
 }
 
 // buildPipeline constructs the slice of active ConnFilter codecs based on DialConfig.

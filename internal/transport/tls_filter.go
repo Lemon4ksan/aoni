@@ -26,15 +26,14 @@ func (w *uTLSConnWrapper) ConnectionState() tls.ConnectionState {
 	uState := w.UConn.ConnectionState()
 
 	return tls.ConnectionState{
-		Version:                    uState.Version,
-		HandshakeComplete:          true,
-		DidResume:                  uState.DidResume,
-		CipherSuite:                uState.CipherSuite,
-		NegotiatedProtocol:         uState.NegotiatedProtocol,
-		NegotiatedProtocolIsMutual: true,
-		ServerName:                 uState.ServerName,
-		PeerCertificates:           uState.PeerCertificates,
-		VerifiedChains:             uState.VerifiedChains,
+		Version:            uState.Version,
+		HandshakeComplete:  true,
+		DidResume:          uState.DidResume,
+		CipherSuite:        uState.CipherSuite,
+		NegotiatedProtocol: uState.NegotiatedProtocol,
+		ServerName:         uState.ServerName,
+		PeerCertificates:   uState.PeerCertificates,
+		VerifiedChains:     uState.VerifiedChains,
 	}
 }
 

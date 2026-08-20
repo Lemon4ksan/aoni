@@ -11,7 +11,7 @@ import (
 	"time"
 
 	"github.com/lemon4ksan/foundation/async/rate"
-	"github.com/lemon4ksan/foundation/async/sync/limiter"
+	"github.com/lemon4ksan/foundation/sync/limiter"
 
 	"github.com/lemon4ksan/aoni"
 )

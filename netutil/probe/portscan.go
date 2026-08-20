@@ -11,6 +11,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -57,31 +58,38 @@ func ScanPorts(
 		return nil, fmt.Errorf("aoni/probe: resolve ip failed: %w", err)
 	}
 
-	results := make([]OpenPortResult, 0, len(ports))
+	n := len(ports)
 
-	var mu sync.Mutex
-
-	portCh := make(chan int, len(ports))
-	for _, p := range ports {
-		portCh <- p
+	workerCount := workers
+	if workerCount > n {
+		workerCount = n
 	}
 
-	close(portCh)
+	results := make([]OpenPortResult, 0, len(ports))
 
-	var wg sync.WaitGroup
-	for range workers {
-		wg.Add(1)
+	var (
+		nextIdx atomic.Int64
+		mu      sync.Mutex
+		wg      sync.WaitGroup
+	)
 
+	wg.Add(workerCount)
+
+	for range workerCount {
 		go func() {
 			defer wg.Done()
 
-			for p := range portCh {
-				select {
-				case <-ctx.Done():
+			for {
+				if ctx.Err() != nil {
 					return
-				default:
 				}
 
+				idx := int(nextIdx.Add(1) - 1)
+				if idx >= n {
+					return
+				}
+
+				p := ports[idx]
 				if res, open := probePort(ctx, ipAddr.IP.String(), p, timeout); open {
 					mu.Lock()
 

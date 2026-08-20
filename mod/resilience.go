@@ -9,38 +9,44 @@ import (
 	"time"
 
 	"github.com/lemon4ksan/aoni"
+	"github.com/lemon4ksan/aoni/internal/core"
 )
 
 // WithRetryPolicy constructs an [aoni.RequestModifier] assigning custom retry parameters to the request.
-func WithRetryPolicy(override aoni.RetryOverride) aoni.RequestModifier {
+func WithRetryPolicy(override core.RetryOverride) aoni.RequestModifier {
 	policy := override
 	if policy.MaxAttempts < 1 {
 		policy.MaxAttempts = 1
 	}
 
 	return Custom(func(req aoni.Request) {
-		aoni.GetOrInitRequestConfig(req).RetryPolicy = &policy
+		getOrInitRequestConfig(req).RetryPolicy = &policy
 	})
+}
+
+// WithRetry constructs an [aoni.RequestModifier] that sets the maximum retry attempts for the request.
+func WithRetry(attempts int) aoni.RequestModifier {
+	return WithRetryPolicy(core.RetryOverride{MaxAttempts: attempts})
 }
 
 // WithAllowNonReadOnlyHedging constructs an [aoni.RequestModifier] permitting request hedging for non-idempotent HTTP methods.
 func WithAllowNonReadOnlyHedging(allow bool) aoni.RequestModifier {
 	return Custom(func(req aoni.Request) {
-		aoni.GetOrInitRequestConfig(req).AllowNonReadOnlyHedging = allow
+		getOrInitRequestConfig(req).AllowNonReadOnlyHedging = allow
 	})
 }
 
 // WithFallback constructs an [aoni.RequestModifier] registering an alternative response fallback generator.
-func WithFallback(f aoni.FallbackFunc) aoni.RequestModifier {
+func WithFallback(f core.FallbackFunc) aoni.RequestModifier {
 	return Custom(func(req aoni.Request) {
-		aoni.GetOrInitRequestConfig(req).Fallback = f
+		getOrInitRequestConfig(req).Fallback = f
 	})
 }
 
 // WithResponseValidator constructs an [aoni.RequestModifier] attaching custom response validation predicates.
 func WithResponseValidator(fn func(resp *http.Response) error) aoni.RequestModifier {
 	return Custom(func(req aoni.Request) {
-		cfg := aoni.GetOrInitRequestConfig(req)
+		cfg := getOrInitRequestConfig(req)
 
 		existing := cfg.ResponseValidator
 		if existing != nil {
@@ -62,21 +68,21 @@ func WithResponseValidator(fn func(resp *http.Response) error) aoni.RequestModif
 // WithMultiReadThreshold constructs an [aoni.RequestModifier] configuring RAM buffering bounds for replayable reads.
 func WithMultiReadThreshold(threshold int64) aoni.RequestModifier {
 	return Custom(func(req aoni.Request) {
-		aoni.GetOrInitRequestConfig(req).MultiReadThreshold = threshold
+		getOrInitRequestConfig(req).MultiReadThreshold = threshold
 	})
 }
 
 // WithMultiReadDisableDisk constructs an [aoni.RequestModifier] disabling temporary file disk backing on buffer overflows.
 func WithMultiReadDisableDisk(disable bool) aoni.RequestModifier {
 	return Custom(func(req aoni.Request) {
-		aoni.GetOrInitRequestConfig(req).MultiReadDisableDisk = disable
+		getOrInitRequestConfig(req).MultiReadDisableDisk = disable
 	})
 }
 
 // WithCacheTTL constructs an [aoni.RequestModifier] configuring custom response caching TTL for the request.
 func WithCacheTTL(ttl time.Duration) aoni.RequestModifier {
 	return Custom(func(req aoni.Request) {
-		aoni.GetOrInitRequestConfig(req).CacheTTL = ttl
+		getOrInitRequestConfig(req).CacheTTL = ttl
 	})
 }
 
@@ -84,7 +90,7 @@ func WithCacheTTL(ttl time.Duration) aoni.RequestModifier {
 // for concurrent identical in-flight operations to prevent upstream thundering herd load.
 func WithCoalesce() aoni.RequestModifier {
 	return Custom(func(req aoni.Request) {
-		aoni.GetOrInitRequestConfig(req).Coalesce = true
+		getOrInitRequestConfig(req).Coalesce = true
 	})
 }
 
@@ -92,6 +98,6 @@ func WithCoalesce() aoni.RequestModifier {
 // and 304 Not Modified body reconstruction.
 func WithETag() aoni.RequestModifier {
 	return Custom(func(req aoni.Request) {
-		aoni.GetOrInitRequestConfig(req).ETagAutomaton = true
+		getOrInitRequestConfig(req).ETagAutomaton = true
 	})
 }

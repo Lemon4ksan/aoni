@@ -7,10 +7,10 @@ package dns
 import (
 	"context"
 	"net"
-	"sync"
 	"time"
 
 	"github.com/lemon4ksan/foundation/async/dedup"
+	"github.com/lemon4ksan/foundation/generic"
 	"github.com/lemon4ksan/foundation/net/dns/wire"
 	"github.com/lemon4ksan/foundation/silicon/clock"
 )
@@ -25,8 +25,7 @@ type dnsCacheEntry struct {
 // InMemoryDNSCache manages thread-safe, in-memory caching of DNS resolutions,
 // adhering to authoritative TTLs or fallback durations.
 type InMemoryDNSCache struct {
-	mu       sync.RWMutex
-	cache    map[string]dnsCacheEntry
+	cache    generic.ConcurrentMap[string, dnsCacheEntry]
 	ttl      time.Duration
 	resolver Resolver
 	sflight  dedup.Group[string, []net.IPAddr]
@@ -42,7 +41,6 @@ func NewInMemoryDNSCache(ttl time.Duration, r Resolver) *InMemoryDNSCache {
 	ctx, cancel := context.WithCancel(context.Background())
 
 	c := &InMemoryDNSCache{
-		cache:    make(map[string]dnsCacheEntry),
 		ttl:      ttl,
 		resolver: r,
 		cancel:   cancel,
@@ -73,33 +71,25 @@ func (c *InMemoryDNSCache) evictionLoop(ctx context.Context) {
 }
 
 func (c *InMemoryDNSCache) purgeExpired() {
-	c.mu.Lock()
-
 	now := clock.CoarseTime()
-	for k, v := range c.cache {
+	c.cache.Range(func(k string, v dnsCacheEntry) bool {
 		if now.After(v.expiry) {
-			delete(c.cache, k)
+			c.cache.Delete(k)
 		}
-	}
 
-	c.mu.Unlock()
+		return true
+	})
 }
 
 // LookupIPAddr resolves host using cached TTL entries or queries the underlying resolver.
 func (c *InMemoryDNSCache) LookupIPAddr(ctx context.Context, host string) ([]net.IPAddr, error) {
-	c.mu.RLock()
-	entry, ok := c.cache[host]
-	c.mu.RUnlock()
-
+	entry, ok := c.cache.Load(host)
 	if ok && clock.CoarseTime().Before(entry.expiry) {
 		return entry.ips, nil
 	}
 
 	ips, err := c.sflight.Do(ctx, host, func(ctx context.Context) ([]net.IPAddr, error) {
-		c.mu.RLock()
-		entry, ok := c.cache[host]
-		c.mu.RUnlock()
-
+		entry, ok := c.cache.Load(host)
 		if ok && clock.CoarseTime().Before(entry.expiry) {
 			return entry.ips, nil
 		}
@@ -118,12 +108,10 @@ func (c *InMemoryDNSCache) LookupIPAddr(ctx context.Context, host string) ([]net
 			return nil, err
 		}
 
-		c.mu.Lock()
-		c.cache[host] = dnsCacheEntry{
+		c.cache.Store(host, dnsCacheEntry{
 			ips:    resolvedIPs,
 			expiry: time.Now().Add(c.ttl),
-		}
-		c.mu.Unlock()
+		})
 
 		return resolvedIPs, nil
 	})
@@ -148,12 +136,10 @@ func (c *InMemoryDNSCache) storeRecords(host string, records []wire.DNSRecord) (
 
 	effectiveTTL := time.Duration(max(minTTL, 5)) * time.Second
 
-	c.mu.Lock()
-	c.cache[host] = dnsCacheEntry{
+	c.cache.Store(host, dnsCacheEntry{
 		ips:    ips,
 		expiry: time.Now().Add(effectiveTTL),
-	}
-	c.mu.Unlock()
+	})
 
 	return ips, nil
 }

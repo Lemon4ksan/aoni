@@ -23,11 +23,15 @@ import (
 	"github.com/lemon4ksan/aoni/fingerprint/h3"
 	"github.com/lemon4ksan/aoni/fingerprint/ja4"
 	"github.com/lemon4ksan/aoni/fingerprint/p0f"
+	"github.com/lemon4ksan/aoni/internal/core"
 	"github.com/lemon4ksan/aoni/internal/pipeline"
 	"github.com/lemon4ksan/aoni/internal/transport"
+	"github.com/lemon4ksan/aoni/netutil"
 	"github.com/lemon4ksan/aoni/netutil/cert"
 	"github.com/lemon4ksan/aoni/netutil/fragment"
 	"github.com/lemon4ksan/aoni/netutil/netdial"
+	"github.com/lemon4ksan/aoni/resiliency/cache"
+	"github.com/lemon4ksan/aoni/resiliency/challenge"
 	"github.com/lemon4ksan/aoni/telemetry"
 )
 
@@ -262,7 +266,7 @@ type NetworkConfig struct {
 	TransportProxy func(*http.Request) (*url.URL, error)
 
 	// DNSResolver overrides system DNS resolution with custom DoH, DoT, DoQ, or static resolvers.
-	DNSResolver DNSResolver
+	DNSResolver netutil.DNSResolver
 
 	// StackDriver provides an optional custom user-space L3/L4 network stack driver.
 	StackDriver netdial.RawStackDriver
@@ -278,13 +282,13 @@ type NetworkConfig struct {
 
 	// SocketController provides a low-level callback to manipulate socket file descriptors (fd)
 	// before TCP SYN packets are transmitted.
-	SocketController SocketController
+	SocketController netutil.SocketController
 
 	// FragmentConfig configures TCP payload write chunking to evade DPI rate/pattern inspection.
 	FragmentConfig *fragment.Config
 
 	// HostRewrite configures static hostname-to-IP/host remapping rules.
-	HostRewrite *HostRewriteConfig
+	HostRewrite *netutil.HostRewriteConfig
 
 	// ConnFilters registers custom stream codec filters evaluated during socket dialing.
 	ConnFilters []ConnFilter
@@ -336,7 +340,7 @@ func (n NetworkConfig) Clone() NetworkConfig {
 	if n.HostRewrite != nil && n.HostRewrite.Rules != nil {
 		rulesCopy := make(map[string]string, len(n.HostRewrite.Rules))
 		maps.Copy(rulesCopy, n.HostRewrite.Rules)
-		cloned.HostRewrite = &HostRewriteConfig{Rules: rulesCopy}
+		cloned.HostRewrite = &netutil.HostRewriteConfig{Rules: rulesCopy}
 	}
 
 	return cloned
@@ -362,6 +366,20 @@ const (
 	BrowserSafari
 )
 
+// String returns the human-readable identifier of BrowserID.
+func (b BrowserID) String() string {
+	switch b {
+	case BrowserChrome:
+		return "Chrome"
+	case BrowserFirefox:
+		return "Firefox"
+	case BrowserSafari:
+		return "Safari"
+	default:
+		return "None"
+	}
+}
+
 // BrowserProfile holds user-agent strings and Client Hints headers for profile rotation.
 type BrowserProfile struct {
 	UserAgent   string
@@ -385,7 +403,7 @@ type FingerprintConfig struct {
 
 	// TLSClientHelloSpecProvider overrides BrowserID and TLSClientHelloID
 	// with a dynamically generated uTLS ClientHelloSpec.
-	TLSClientHelloSpecProvider ClientHelloSpecProvider
+	TLSClientHelloSpecProvider fingerprint.ClientHelloSpecProvider
 
 	// TLSQUICClientHelloSpec configures cipher suites for HTTP/3 QUIC handshakes.
 	TLSQUICClientHelloSpec *utls.ClientHelloSpec
@@ -415,13 +433,13 @@ type FingerprintConfig struct {
 	ECHConfigList []byte
 
 	// SessionCache handles proxy-isolated TLS session ticket resumption.
-	SessionCache SessionCache
+	SessionCache fingerprint.SessionCache
 
 	// JA4Callback receives calculated JA4 fingerprint reports after TLS handshakes.
 	JA4Callback func(ja4.Report)
 
 	// H2Configurer customizes x/net/http2 transport settings.
-	H2Configurer HTTP2Configurer
+	H2Configurer fingerprint.HTTP2Configurer
 
 	// AutoECH automatically resolves ECH keys via DNS HTTPS (Type 65) records.
 	AutoECH bool
@@ -510,13 +528,13 @@ type ClientDefaults struct {
 	BaseResponse func() BaseResponse
 
 	// ChallengeSolver delegates WAF/DDoS challenge solving (e.g. Cloudflare) to external drivers.
-	ChallengeSolver ChallengeSolver
+	ChallengeSolver challenge.Solver
 
 	// ChallengeDetector determines whether an HTTP response represents a WAF/DDoS challenge.
-	ChallengeDetector ChallengeDetector
+	ChallengeDetector challenge.Detector
 
 	// Inspector captures and records request traces for real-time diagnostic inspection.
-	Inspector TrafficInspector
+	Inspector telemetry.TrafficInspector
 
 	// HeadersCookieJar provides a fallback cookie jar implementation.
 	HeadersCookieJar http.CookieJar
@@ -528,7 +546,7 @@ type ClientDefaults struct {
 	Decoders map[string]ResponseDecoder
 
 	// Logger receives structured diagnostic log events.
-	Logger Logger
+	Logger core.Logger
 
 	// DefaultMods holds default functional request modifiers applied to every request.
 	DefaultMods []RequestModifier
@@ -692,7 +710,7 @@ type HedgingConfig struct {
 
 // HARConfig configures HAR 1.2 transaction recording for session exports.
 type HARConfig struct {
-	Tracker HARTracker
+	Tracker telemetry.HARTracker
 }
 
 // RedactConfig configures sensitive header and JSON payload key sanitization
@@ -706,7 +724,7 @@ type RedactConfig struct {
 // CacheConfig configures HTTP response caching using RFC 9211 No-Vary-Search normalization.
 type CacheConfig struct {
 	// Store provides the persistence backend for cached response payloads.
-	Store CacheStore
+	Store cache.Store
 
 	// DefaultTTL sets the fallback cache expiration duration if no Cache-Control header is present.
 	DefaultTTL time.Duration
@@ -741,48 +759,27 @@ func clonePtr[T any](p *T) *T {
 	return &val
 }
 
-// RequestConfig aggregates request-scoped options and transport overrides.
+// RequestConfig aggregates request-scoped execution options, transport overrides,
+// tracing carriers, and custom metadata attached to an in-flight HTTP transaction.
 type RequestConfig = pipeline.RequestConfig
-
-// RedactConfigCtxKey is the context key used to store RedactConfig in the request context.
-type RedactConfigCtxKey = pipeline.RedactConfigCtxKey
-
-// JA4ReportStore acts as a shared carrier used by low-level TLS dialers to record
-// computed JA4 signatures and propagate them to the active telemetry context.
-type JA4ReportStore = pipeline.JA4ReportStore
-
-// CacheKey uniquely identifies a cached HTTP request without string concatenations.
-type CacheKey = pipeline.CacheKey
-
-// CachedResponse holds a serialized HTTP response stored in cache backends.
-type CachedResponse = pipeline.CachedResponse
 
 // GetRequestConfig retrieves the RequestConfig instance attached to the context.
 var GetRequestConfig = pipeline.GetRequestConfig
 
-// GetOrInitRequestConfig retrieves or allocates a [RequestConfig] associated with the provided target.
-var GetOrInitRequestConfig = pipeline.GetOrInitRequestConfig
-
-// AllocRequestConfig allocates a pooled [RequestConfig] and stores it in ctx, returning the
-// enriched context and the config pointer.
-var AllocRequestConfig = pipeline.AllocRequestConfig
-
-// CloseResponse drains up to 2KB of unread body payload to preserve Keep-Alive sockets,
-// closes the response body stream, and recycles request context resources.
-var CloseResponse = pipeline.CloseResponse
-
-// GetPipeline retrieves the request-specific PipelineConfig from context.
-func GetPipeline(ctx context.Context) (PipelineConfig, bool) {
-	if p, ok := pipeline.GetPipeline(ctx); ok {
-		return pipelineToAoniConfig(p), true
-	}
-
-	return PipelineConfig{}, false
+// DrainAndClose drains unread response body payload to preserve Keep-Alive connections,
+// closes the response body, and recycles request context resources.
+func DrainAndClose(resp *http.Response) {
+	pipeline.CloseResponse(resp)
 }
 
-// ApplyRequestConfigDefaults merges client-level defaults into uninitialized fields of [RequestConfig].
-// It is not safe for concurrent mutation on the same RequestConfig instance.
-func ApplyRequestConfigDefaults(cfg *RequestConfig, c *Client) {
+// CloseResponse drains unread response body payload to preserve Keep-Alive connections,
+// closes the response body stream, and recycles request context resources.
+// It is an alias for [DrainAndClose].
+func CloseResponse(resp *http.Response) {
+	DrainAndClose(resp)
+}
+
+func (c *Client) applyRequestConfigDefaults(cfg *RequestConfig) {
 	if !cfg.SSRFGuard {
 		cfg.SSRFGuard = c.network.SSRFGuard
 	}
@@ -832,12 +829,12 @@ func ApplyRequestConfigDefaults(cfg *RequestConfig, c *Client) {
 	}
 
 	if cfg.QueryEncoder == nil && c.defaults.QueryEncoder != nil {
-		cfg.QueryEncoder = pipeline.QueryEncoder(c.defaults.QueryEncoder)
+		cfg.QueryEncoder = c.defaults.QueryEncoder
 	}
 
 	if len(c.defaults.Decoders) > 0 {
 		if cfg.Decoders == nil {
-			cfg.Decoders = make(map[string]pipeline.ResponseDecoder, len(c.defaults.Decoders))
+			cfg.Decoders = make(map[string]core.ResponseDecoder, len(c.defaults.Decoders))
 		}
 
 		for k, v := range c.defaults.Decoders {
@@ -881,8 +878,8 @@ func (c *Client) mergeCertificatePins(cfg *RequestConfig) {
 
 // resolvePipeline computes the active PipelineConfig for an outgoing HTTP request context.
 func (c *Client) resolvePipeline(req *http.Request) PipelineConfig {
-	if reqPipe, ok := GetPipeline(req.Context()); ok {
-		return reqPipe
+	if p, ok := pipeline.GetPipeline(req.Context()); ok {
+		return pipelineToAoniConfig(p)
 	}
 
 	pipe := c.defaults.Pipeline
@@ -1172,12 +1169,12 @@ func applyRedirectPolicy(httpClient *http.Client, eng EngineConfig) {
 
 // applyMSSLimit applies maximum segment size boundaries to TCP socket streams.
 func applyMSSLimit(conn net.Conn, mss int) net.Conn {
-	return pipeline.ApplyMSSLimit(conn, mss)
+	return transport.ApplyMSSLimit(conn, mss)
 }
 
 // applyFragmentation applies TCP write payload fragmentation to socket streams.
 func applyFragmentation(conn net.Conn, cfg fragment.Config) net.Conn {
-	return pipeline.ApplyFragmentation(conn, cfg)
+	return transport.ApplyFragmentation(conn, cfg)
 }
 
 // BuildDialConfig converts the [Config] into a self-contained [transport.DialConfig] DTO for socket dialing.

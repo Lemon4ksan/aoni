@@ -10,6 +10,7 @@ import (
 	"context"
 	"fmt"
 	"io/fs"
+	"iter"
 	"os"
 	"path/filepath"
 	"strings"
@@ -327,30 +328,43 @@ func (b *Builder) BuildMock(ctx context.Context, srcFile, outFile string) (*Resu
 	}, nil
 }
 
+// BuildFilesSeq compiles files sequentially and yields compilation results lazily as a streaming iterator.
+func (b *Builder) BuildFilesSeq(ctx context.Context, files []string) iter.Seq2[*Result, error] {
+	return func(yield func(*Result, error) bool) {
+		for _, file := range files {
+			select {
+			case <-ctx.Done():
+				yield(nil, ctx.Err())
+				return
+			default:
+			}
+
+			out := b.cfg.OutFlag
+			if out == "" || len(files) > 1 {
+				dir := filepath.Dir(file)
+				base := filepath.Base(file)
+				ext := filepath.Ext(base)
+				out = filepath.Join(dir, strings.TrimSuffix(base, ext)+".gen.go")
+			}
+
+			res, err := b.BuildFile(ctx, file, out)
+			if !yield(res, err) {
+				return
+			}
+		}
+	}
+}
+
 // BuildFiles compiles a slice of Go source files in sequence.
 func (b *Builder) BuildFiles(ctx context.Context, files []string) ([]*Result, error) {
+	results := make([]*Result, 0, len(files))
+
 	var (
-		results  = make([]*Result, 0, len(files))
-		errCount int
 		lastErr  error
+		errCount int
 	)
 
-	for _, file := range files {
-		select {
-		case <-ctx.Done():
-			return results, ctx.Err()
-		default:
-		}
-
-		out := b.cfg.OutFlag
-		if out == "" || len(files) > 1 {
-			dir := filepath.Dir(file)
-			base := filepath.Base(file)
-			ext := filepath.Ext(base)
-			out = filepath.Join(dir, strings.TrimSuffix(base, ext)+".gen.go")
-		}
-
-		res, err := b.BuildFile(ctx, file, out)
+	for res, err := range b.BuildFilesSeq(ctx, files) {
 		if err != nil {
 			errCount++
 			lastErr = err
@@ -358,7 +372,9 @@ func (b *Builder) BuildFiles(ctx context.Context, files []string) ([]*Result, er
 			continue
 		}
 
-		results = append(results, res)
+		if res != nil {
+			results = append(results, res)
+		}
 	}
 
 	if errCount > 0 {
@@ -460,7 +476,7 @@ func CollectInputFiles(fileFlag string, args []string, opts ...CollectOptions) [
 
 	var matched []string
 
-	seen := make(map[string]bool)
+	seen := generic.NewSet[string]()
 
 	for _, target := range rawTargets {
 		target = filepath.Clean(target)
@@ -504,8 +520,8 @@ func CollectInputFiles(fileFlag string, args []string, opts ...CollectOptions) [
 					return nil
 				}
 
-				if IsEligibleGoFile(path) && !seen[path] {
-					seen[path] = true
+				if IsEligibleGoFile(path) && !seen.Has(path) {
+					seen.Add(path)
 
 					matched = append(matched, path)
 					if len(matched) >= maxFiles {
@@ -526,8 +542,8 @@ func CollectInputFiles(fileFlag string, args []string, opts ...CollectOptions) [
 			if resolved := project.ResolveTargetToPath(target); resolved != "" {
 				// #nosec G703,G304
 				if rfi, rErr := os.Stat(resolved); rErr == nil && !rfi.IsDir() {
-					if !seen[resolved] {
-						seen[resolved] = true
+					if !seen.Has(resolved) {
+						seen.Add(resolved)
 						matched = append(matched, resolved)
 					}
 
@@ -566,8 +582,8 @@ func CollectInputFiles(fileFlag string, args []string, opts ...CollectOptions) [
 					return nil
 				}
 
-				if IsEligibleGoFile(path) && !seen[path] {
-					seen[path] = true
+				if IsEligibleGoFile(path) && !seen.Has(path) {
+					seen.Add(path)
 
 					matched = append(matched, path)
 					if len(matched) >= maxFiles {
@@ -581,8 +597,8 @@ func CollectInputFiles(fileFlag string, args []string, opts ...CollectOptions) [
 			continue
 		}
 
-		if IsEligibleGoFile(target) && !seen[target] {
-			seen[target] = true
+		if IsEligibleGoFile(target) && !seen.Has(target) {
+			seen.Add(target)
 			matched = append(matched, target)
 		}
 	}

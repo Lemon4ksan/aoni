@@ -7,14 +7,12 @@ package challenge
 import (
 	"errors"
 	"net/http"
-
-	"github.com/lemon4ksan/aoni"
 )
 
-// ChallengePair associates a [aoni.ChallengeDetector] with its corresponding [aoni.ChallengeSolver].
+// ChallengePair associates a [Detector] with its corresponding [Solver].
 type ChallengePair struct {
-	Detector aoni.ChallengeDetector
-	Solver   aoni.ChallengeSolver
+	Detector Detector
+	Solver   Solver
 }
 
 // ChallengePipeline coordinates a cascade solver pipeline.
@@ -36,7 +34,7 @@ func NewPipeline(pairs ...ChallengePair) *ChallengePipeline {
 }
 
 // Add registers a new [ChallengePair] into the cascade.
-func (p *ChallengePipeline) Add(detector aoni.ChallengeDetector, solver aoni.ChallengeSolver) *ChallengePipeline {
+func (p *ChallengePipeline) Add(detector Detector, solver Solver) *ChallengePipeline {
 	if detector != nil && solver != nil {
 		p.pairs = append(p.pairs, ChallengePair{Detector: detector, Solver: solver})
 	}
@@ -51,28 +49,37 @@ func (p *ChallengePipeline) SolveCascading(req *http.Request, resp *http.Respons
 	}
 
 	currentResp := resp
-	solvedAny := false
+	wasSolved := false
 
-	for _, pair := range p.pairs {
-		detected, err := pair.Detector(currentResp)
-		if err != nil && !errors.Is(err, ErrCloudflareDetected) {
-			return false, currentResp, err
+	// Cascade up to the number of pairs to prevent infinite loops.
+	for round := 0; round < len(p.pairs); round++ {
+		matched := false
+		for _, pair := range p.pairs {
+			detected, err := pair.Detector(currentResp)
+			if detected {
+				ctx := req.Context()
+
+				newResp, solveErr := pair.Solver.Solve(ctx, err, req)
+				if solveErr != nil {
+					return true, nil, solveErr
+				}
+
+				if newResp != nil {
+					currentResp = newResp
+					wasSolved = true
+					matched = true
+
+					break
+				}
+
+				return true, nil, errors.New("aoni: challenge detected but solver returned nil response")
+			}
 		}
 
-		if detected || errors.Is(err, ErrCloudflareDetected) {
-			solvedResp, solveErr := pair.Solver.Solve(req.Context(), err, req)
-			if solveErr != nil {
-				return false, currentResp, solveErr
-			}
-
-			if currentResp != nil && currentResp.Body != nil && currentResp != solvedResp {
-				_ = currentResp.Body.Close()
-			}
-
-			currentResp = solvedResp
-			solvedAny = true
+		if !matched {
+			break
 		}
 	}
 
-	return solvedAny, currentResp, nil
+	return wasSolved, currentResp, nil
 }

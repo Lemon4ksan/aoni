@@ -9,6 +9,7 @@ import (
 	"context"
 	"crypto/tls"
 	stdio "io"
+	"log/slog"
 	"net"
 	"net/http"
 	"net/url"
@@ -21,18 +22,15 @@ import (
 	"github.com/lemon4ksan/foundation/generic"
 	foundationurl "github.com/lemon4ksan/foundation/net/url"
 	"github.com/lemon4ksan/foundation/silicon/bytesconv"
-	"github.com/quic-go/quic-go"
-	"github.com/quic-go/quic-go/http3"
-	utls "github.com/refraction-networking/utls"
 	"github.com/valyala/fasthttp"
 
 	"github.com/lemon4ksan/aoni/cookie"
-	"github.com/lemon4ksan/aoni/fingerprint"
 	"github.com/lemon4ksan/aoni/fingerprint/h2"
+	"github.com/lemon4ksan/aoni/internal/core"
 	"github.com/lemon4ksan/aoni/internal/experimental"
 	"github.com/lemon4ksan/aoni/internal/pipeline"
-	"github.com/lemon4ksan/aoni/netutil"
 	"github.com/lemon4ksan/aoni/netutil/power"
+	"github.com/lemon4ksan/aoni/telemetry"
 )
 
 // Client is an immutable, thread-safe, multi-protocol HTTP, WebSockets, and gRPC client facade.
@@ -144,38 +142,21 @@ func (c *Client) Request(
 	// Checked BEFORE any allocation. When the client has no pipeline rules, hooks,
 	// modifiers, or per-request config we bypass AcquireTx, NewStdRequest and the
 	// full pipeline.Execute and route directly to the underlying engine.
-	if len(mods) == 0 && c.isBaremetalStaticEligible() && GetRequestConfig(ctx) == nil {
+	if len(mods) == 0 && c.isBaremetalStaticEligible() && pipeline.GetRequestConfig(ctx) == nil {
 		return c.doBaremetal(ctx, method, path)
 	}
 
-	cfg := GetRequestConfig(ctx)
+	cfg := pipeline.GetRequestConfig(ctx)
 	if cfg != nil {
-		ApplyRequestConfigDefaults(cfg, c)
+		c.applyRequestConfigDefaults(cfg)
 	} else if len(mods) > 0 || len(c.defaults.DefaultMods) > 0 || c.needsRequestConfig() {
-		ctx, cfg = AllocRequestConfig(ctx)
-		ApplyRequestConfigDefaults(cfg, c)
+		ctx, cfg = pipeline.AllocRequestConfig(ctx)
+		c.applyRequestConfigDefaults(cfg)
 	}
 
 	url, err := c.resolveURL(path)
 	if err != nil {
 		return nil, err
-	}
-
-	var reqHeader http.Header
-
-	headerCap := len(c.prepared.PrecomputedDefaultHeaders) + len(c.defaults.Headers)
-	if headerCap > 0 {
-		reqHeader = make(http.Header, headerCap)
-		if len(c.prepared.PrecomputedDefaultHeaders) > 0 {
-			for i := range c.prepared.PrecomputedDefaultHeaders {
-				h := &c.prepared.PrecomputedDefaultHeaders[i]
-				reqHeader[h.Key] = h.Slice
-			}
-		} else if len(c.defaults.Headers) > 0 {
-			for k, v := range c.defaults.Headers {
-				reqHeader[k] = slices.Clone(v)
-			}
-		}
 	}
 
 	req := &http.Request{
@@ -184,7 +165,7 @@ func (c *Client) Request(
 		Proto:      "HTTP/1.1",
 		ProtoMajor: 1,
 		ProtoMinor: 1,
-		Header:     reqHeader,
+		Header:     c.applyDefaultHTTPHeader(),
 		Body:       http.NoBody,
 		Host:       url.Host,
 	}
@@ -207,6 +188,36 @@ func (c *Client) Request(
 	}
 
 	return resp, nil
+}
+
+// Get executes a GET request against path.
+func (c *Client) Get(ctx context.Context, path string, mods ...RequestModifier) (*http.Response, error) {
+	return c.Request(ctx, http.MethodGet, path, mods...)
+}
+
+// Post executes a POST request against path.
+func (c *Client) Post(ctx context.Context, path string, mods ...RequestModifier) (*http.Response, error) {
+	return c.Request(ctx, http.MethodPost, path, mods...)
+}
+
+// Put executes a PUT request against path.
+func (c *Client) Put(ctx context.Context, path string, mods ...RequestModifier) (*http.Response, error) {
+	return c.Request(ctx, http.MethodPut, path, mods...)
+}
+
+// Patch executes a PATCH request against path.
+func (c *Client) Patch(ctx context.Context, path string, mods ...RequestModifier) (*http.Response, error) {
+	return c.Request(ctx, http.MethodPatch, path, mods...)
+}
+
+// Delete executes a DELETE request against path.
+func (c *Client) Delete(ctx context.Context, path string, mods ...RequestModifier) (*http.Response, error) {
+	return c.Request(ctx, http.MethodDelete, path, mods...)
+}
+
+// Head executes a HEAD request against path.
+func (c *Client) Head(ctx context.Context, path string, mods ...RequestModifier) (*http.Response, error) {
+	return c.Request(ctx, http.MethodHead, path, mods...)
 }
 
 // doBaremetal executes a request on the minimal allocation path - bypassing AcquireTx,
@@ -258,7 +269,7 @@ func (c *Client) Do(req Request) (Response, error) {
 	}
 
 	if httpReq != nil && httpReq.URL != nil {
-		cfg := GetOrInitRequestConfig(httpReq.Context())
+		cfg := pipeline.GetOrInitRequestConfig(httpReq.Context())
 		if cfg.TargetHost == "" && httpReq.URL.Hostname() != "" {
 			cfg.TargetHost = httpReq.URL.Hostname()
 		}
@@ -300,97 +311,6 @@ func (c *Client) execute(req *http.Request, pipe PipelineConfig) (*http.Response
 	return c.pipeline.Execute(fastCtx, req, c.engine, pipe.toInternal())
 }
 
-// WithPersona configures TLS ClientHello ID, HTTP/2 SETTINGS frames, header order,
-// p0f OS stack signatures, and User-Agent headers matching a specific browser persona (e.g. Chrome, Firefox, Safari)
-// in a single atomic clone call to prevent cross-layer fingerprint mismatches.
-func (c *Client) WithPersona(p fingerprint.Persona) *Client {
-	return c.With(func(cfg *Config) {
-		cfg.Fingerprint.TLSClientHelloID = &p.TLSID
-		cfg.Fingerprint.H2Settings = &p.H2Settings
-		cfg.Fingerprint.HeaderOrder = p.HeaderOrder
-		cfg.Fingerprint.P0fSignature = p.P0fSignature
-
-		if cfg.Defaults.Headers == nil {
-			cfg.Defaults.Headers = make(http.Header)
-		}
-
-		cfg.Defaults.Headers.Set("User-Agent", p.UserAgent)
-
-		if len(p.HeaderOrder) > 0 {
-			cfg.Defaults.DefaultMods = append(cfg.Defaults.DefaultMods, RequestModifier{
-				Kind: ModCustom,
-				Fn: func(req Request) {
-					GetOrInitRequestConfig(req).OrderedHeaders = p.HeaderOrder
-				},
-			})
-		}
-	})
-}
-
-// WithTLSClientHelloID returns a cloned [Client] configured with the specified uTLS ClientHello ID preset.
-func (c *Client) WithTLSClientHelloID(id utls.ClientHelloID) *Client {
-	cloned := c.Clone()
-	cloned.fingerprint.TLSClientHelloID = &id
-
-	transport := cloned.Transport()
-	if transport == nil {
-		return cloned
-	}
-
-	transport.DialTLSContext = cloned.DialTLS
-
-	return cloned
-}
-
-// WithHTTP3 creates a clone of the client configured for HTTP/3 over QUIC (RFC 9114) using default migration settings.
-func (c *Client) WithHTTP3() *Client {
-	return c.WithHTTP3Config(nil)
-}
-
-// WithHTTP3Config creates a clone of the client configured for HTTP/3 over QUIC using custom QUIC migration parameters (RFC 9000 §9).
-func (c *Client) WithHTTP3Config(config *QUICMigrationConfig) *Client {
-	cloned := c.Clone()
-
-	if config == nil {
-		cfg := DefaultQUICMigrationConfig()
-		config = &cfg
-	}
-
-	quicCfg := c.buildQUICConfig(config)
-	tlsCfg := c.buildQUICTLSConfig()
-
-	cloned.engine = &http.Client{
-		Transport: &http3.Transport{
-			TLSClientConfig: tlsCfg,
-			QUICConfig:      quicCfg,
-		},
-	}
-
-	return cloned
-}
-
-// WithDecoder returns a cloned [Client] with a registered custom response decoder for the specified MIME content type.
-func (c *Client) WithDecoder(contentType string, decoder ResponseDecoder) *Client {
-	return c.With(func(cfg *Config) {
-		mediaType, _, _ := strings.Cut(contentType, ";")
-
-		norm := strings.ToLower(strings.TrimSpace(mediaType))
-		if norm == "" {
-			return
-		}
-
-		if cfg.Defaults.Decoders == nil {
-			cfg.Defaults.Decoders = make(map[string]ResponseDecoder)
-		}
-
-		if decoder == nil {
-			delete(cfg.Defaults.Decoders, norm)
-		} else {
-			cfg.Defaults.Decoders[norm] = decoder
-		}
-	})
-}
-
 // Config returns a snapshot DTO copy of the active client configuration.
 func (c *Client) Config() Config {
 	return c.snapshotConfig()
@@ -425,8 +345,8 @@ func (c *Client) Fingerprint() FingerprintConfig {
 	return c.fingerprint.Clone()
 }
 
-// Inspector yields the diagnostic [TrafficInspector] if configured.
-func (c *Client) Inspector() TrafficInspector {
+// Inspector yields the diagnostic [telemetry.TrafficInspector] if configured.
+func (c *Client) Inspector() telemetry.TrafficInspector {
 	return c.defaults.Inspector
 }
 
@@ -458,13 +378,35 @@ func (c *Client) BrowserID() BrowserID {
 	return BrowserNone
 }
 
-// Logger returns the configured diagnostic [Logger], or a no-op discard fallback.
-func (c *Client) Logger() Logger {
+// Logger returns the configured diagnostic [core.Logger], or a no-op discard fallback.
+func (c *Client) Logger() core.Logger {
 	if c.defaults.Logger == nil {
 		return log.Discard
 	}
 
 	return c.defaults.Logger
+}
+
+// LogValue implements [slog.LogValuer] for structured logging of client state without allocations.
+func (c *Client) LogValue() slog.Value {
+	if c == nil {
+		return slog.GroupValue()
+	}
+
+	attrs := make([]slog.Attr, 0, 4)
+	if c.prepared.BaseURL != nil {
+		attrs = append(attrs, slog.String("base_url", c.prepared.BaseURL.String()))
+	}
+
+	if c.fingerprint.BrowserID != BrowserNone {
+		attrs = append(attrs, slog.String("browser", c.fingerprint.BrowserID.String()))
+	}
+
+	if c.engineConfig.Timeout > 0 {
+		attrs = append(attrs, slog.Duration("timeout", c.engineConfig.Timeout))
+	}
+
+	return slog.GroupValue(attrs...)
 }
 
 // Transport retrieves the underlying [*http.Transport] from the engine.
@@ -506,15 +448,15 @@ func (c *Client) Transport() *http.Transport {
 
 // InitRequestConfig attaches or retrieves a pooled [RequestConfig] on the request context.
 func (c *Client) InitRequestConfig(req *http.Request) *http.Request {
-	cfg := GetRequestConfig(req.Context())
+	cfg := pipeline.GetRequestConfig(req.Context())
 	if cfg == nil {
 		var ctx context.Context
 
-		ctx, cfg = AllocRequestConfig(req.Context())
+		ctx, cfg = pipeline.AllocRequestConfig(req.Context())
 		req = req.WithContext(ctx)
 	}
 
-	ApplyRequestConfigDefaults(cfg, c)
+	c.applyRequestConfigDefaults(cfg)
 
 	return req
 }
@@ -683,49 +625,6 @@ func (c *Client) resolveHTTPRequest(req Request) (*http.Request, error) {
 	return httpReq, nil
 }
 
-// buildQUICConfig constructs a [quic.Config] from client settings and migration parameters.
-func (c *Client) buildQUICConfig(config *QUICMigrationConfig) *quic.Config {
-	quicCfg := &quic.Config{
-		EnableDatagrams:         true,
-		DisablePathMTUDiscovery: config.DisablePathMTUDiscovery,
-		InitialPacketSize:       config.InitialPacketSize,
-	}
-
-	if config.KeepAlivePeriod > 0 {
-		quicCfg.KeepAlivePeriod = config.KeepAlivePeriod
-	}
-
-	if config.MaxIdleTimeout > 0 {
-		quicCfg.MaxIdleTimeout = config.MaxIdleTimeout
-	}
-
-	if h3s := c.fingerprint.H3Settings; h3s != nil {
-		quicCfg.InitialStreamReceiveWindow = h3s.InitialStreamReceiveWindow
-		quicCfg.MaxStreamReceiveWindow = h3s.MaxStreamReceiveWindow
-		quicCfg.InitialConnectionReceiveWindow = h3s.InitialConnectionReceiveWindow
-		quicCfg.MaxConnectionReceiveWindow = h3s.MaxConnectionReceiveWindow
-		quicCfg.MaxIncomingStreams = h3s.MaxIncomingStreams
-		quicCfg.MaxIncomingUniStreams = h3s.MaxIncomingUniStreams
-		quicCfg.EnableDatagrams = h3s.EnableDatagrams
-	}
-
-	return quicCfg
-}
-
-// buildQUICTLSConfig constructs a tls.Config tailored for QUIC/HTTP/3 ALPN negotiations.
-func (c *Client) buildQUICTLSConfig() *tls.Config {
-	tlsCfg := &tls.Config{
-		NextProtos:         []string{AlpnH3},
-		ClientSessionCache: netutil.ResolveStdSessionCache(c.fingerprint.SessionCache),
-	}
-
-	if spec := c.fingerprint.TLSQUICClientHelloSpec; spec != nil && len(spec.CipherSuites) > 0 {
-		tlsCfg.CipherSuites = spec.CipherSuites
-	}
-
-	return tlsCfg
-}
-
 // snapshotConfig extracts a pure data DTO copy of active client configurations.
 func (c *Client) snapshotConfig() Config {
 	return Config{
@@ -779,6 +678,30 @@ func (c *Client) applyPowerManagement(enable bool) {
 
 		c.powerWatcher = watcher
 	}
+}
+
+// applyDefaultHTTPHeader applies the default and precomputed HTTP headers to the request.
+func (c *Client) applyDefaultHTTPHeader() http.Header {
+	headerCap := len(c.prepared.PrecomputedDefaultHeaders) + len(c.defaults.Headers)
+	if headerCap == 0 {
+		return nil
+	}
+
+	reqHeader := make(http.Header, headerCap)
+	if len(c.prepared.PrecomputedDefaultHeaders) > 0 {
+		for i := range c.prepared.PrecomputedDefaultHeaders {
+			h := &c.prepared.PrecomputedDefaultHeaders[i]
+			reqHeader[h.Key] = h.Slice
+		}
+	}
+
+	if len(c.defaults.Headers) > 0 {
+		for k, v := range c.defaults.Headers {
+			reqHeader[k] = slices.Clone(v)
+		}
+	}
+
+	return reqHeader
 }
 
 var _ RequestDoer = (*Client)(nil)

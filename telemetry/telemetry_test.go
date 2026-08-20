@@ -284,7 +284,7 @@ func TestHARGenerator_Record_And_Export(t *testing.T) {
 		assert.Contains(t, harStr, `"text": "{\"status\":\"ok\"}"`)
 	})
 
-	t.Run("large_body_is_truncated_defensively", func(t *testing.T) {
+	t.Run("large_body_is_truncated_defensively_and_body_preserved", func(t *testing.T) {
 		t.Parallel()
 
 		gen := telemetry.NewHARGenerator()
@@ -304,6 +304,11 @@ func TestHARGenerator_Record_And_Export(t *testing.T) {
 		data, err := gen.Export()
 		require.NoError(t, err)
 		assert.Contains(t, string(data), "Truncated: Response too large for HAR log")
+
+		// Verify user stream was NOT destroyed and caller can read full unmodified body
+		consumed, readErr := io.ReadAll(resp.Body)
+		require.NoError(t, readErr)
+		assert.Equal(t, largePayload, string(consumed))
 	})
 
 	t.Run("binary_body_is_skipped_defensively", func(t *testing.T) {
@@ -313,10 +318,11 @@ func TestHARGenerator_Record_And_Export(t *testing.T) {
 		req, err := http.NewRequestWithContext(context.Background(), http.MethodGet, "http://example.com", nil)
 		require.NoError(t, err)
 
+		binaryData := "\x89PNG\r\n\x1a\n"
 		resp := &http.Response{
 			StatusCode:    http.StatusOK,
 			Header:        http.Header{"Content-Type": []string{"image/png"}},
-			Body:          io.NopCloser(strings.NewReader("\x89PNG\r\n\x1a\n")),
+			Body:          io.NopCloser(strings.NewReader(binaryData)),
 			ContentLength: 8,
 		}
 
@@ -324,6 +330,10 @@ func TestHARGenerator_Record_And_Export(t *testing.T) {
 
 		data, err := gen.Export()
 		require.NoError(t, err)
-		assert.Contains(t, string(data), "Skipped: Binary or large response body")
+		assert.Contains(t, string(data), "Skipped: Binary response body")
+
+		consumed, readErr := io.ReadAll(resp.Body)
+		require.NoError(t, readErr)
+		assert.Equal(t, binaryData, string(consumed))
 	})
 }

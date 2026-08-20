@@ -26,6 +26,7 @@ import (
 
 	"github.com/lemon4ksan/aoni"
 	"github.com/lemon4ksan/aoni/cookie"
+	"github.com/lemon4ksan/aoni/internal/core"
 	"github.com/lemon4ksan/aoni/internal/health"
 	"github.com/lemon4ksan/aoni/netutil/trie"
 )
@@ -45,7 +46,9 @@ func WithAwareSessionCache() aoni.ClientOption {
 	}
 }
 
-// Parse parses a raw proxy string and detects the target transport protocol.
+// Parse parses a raw proxy string into a structured [*url.URL].
+// If no scheme is present, it inspects standard port conventions (1080/9050 -> socks5h)
+// or defaults to "http". It performs zero blocking network I/O.
 func Parse(proxyStr string) (*url.URL, error) {
 	if proxyStr == "" {
 		return nil, errors.New("empty proxy string")
@@ -60,45 +63,47 @@ func Parse(proxyStr string) (*url.URL, error) {
 		return nil, err
 	}
 
-	host, portStr, err := net.SplitHostPort(u.Host)
+	_, portStr, err := net.SplitHostPort(u.Host)
 	if err != nil {
-		host = u.Host
 		portStr = ""
 	}
 
 	scheme := "http"
-
-	addr := net.JoinHostPort(host, portStr)
-	if portStr == "" {
-		addr = host
-	}
-
-	if portStr != "" {
-		dialer := net.Dialer{Timeout: 300 * time.Millisecond}
-
-		conn, err := dialer.DialContext(context.Background(), "tcp", addr)
-		if err == nil {
-			defer conn.Close()
-
-			_ = conn.SetDeadline(time.Now().Add(200 * time.Millisecond))
-
-			_, err = conn.Write([]byte{0x05, 0x01, 0x00})
-			if err == nil {
-				resp := make([]byte, 2)
-
-				n, err := conn.Read(resp)
-				if err == nil && n == 2 && resp[0] == 0x05 {
-					scheme = "socks5h"
-				}
-			}
-		} else if portStr == "1080" || portStr == "1081" || portStr == "9050" || portStr == "9051" || portStr == "10808" {
-			scheme = "socks5h"
-		}
+	switch portStr {
+	case "1080", "1081", "9050", "9051", "10808":
+		scheme = "socks5h"
 	}
 
 	u.Scheme = scheme
 
 	return u, nil
+}
+
+// ProbeProxy actively tests an endpoint to determine if it speaks SOCKS5, HTTP CONNECT, or other protocols.
+func ProbeProxy(ctx context.Context, addr string) (string, error) {
+	dialer := net.Dialer{Timeout: 500 * time.Millisecond}
+
+	conn, err := dialer.DialContext(ctx, "tcp", addr)
+	if err != nil {
+		return "", err
+	}
+	defer conn.Close()
+
+	_ = conn.SetDeadline(time.Now().Add(300 * time.Millisecond))
+
+	_, err = conn.Write([]byte{0x05, 0x01, 0x00})
+	if err != nil {
+		return "http", nil
+	}
+
+	resp := make([]byte, 2)
+
+	n, err := conn.Read(resp)
+	if err == nil && n == 2 && resp[0] == 0x05 {
+		return "socks5h", nil
+	}
+
+	return "http", nil
 }
 
 // WithClient pairs an [aoni.HTTPDoer] client with its associated exit proxy URL.
@@ -171,7 +176,7 @@ type RotatorConfig struct {
 	RetryAfter          time.Duration
 	HealthCheckURL      string
 	HealthCheckInterval time.Duration
-	Logger              aoni.Logger
+	Logger              core.Logger
 }
 
 // StickyKeyFunc extracts a sticky session identifier string from an incoming request.

@@ -9,7 +9,8 @@ import (
 	"reflect"
 	"slices"
 	"strings"
-	"sync"
+
+	"github.com/lemon4ksan/foundation/generic"
 )
 
 // FieldSchema describes a pre-computed struct field index, tag options, and nested sub-schemas.
@@ -33,9 +34,9 @@ type StructSchema struct {
 	Fields []FieldSchema // Ordered slice of pre-computed field reflection descriptors
 }
 
-// SchemaCache caches reflection struct schemas by [reflect.Type] using [sync.Map] to eliminate runtime reflection overhead.
+// SchemaCache caches reflection struct schemas by [reflect.Type] using [generic.ConcurrentMap] to eliminate runtime reflection overhead.
 type SchemaCache struct {
-	cache sync.Map
+	cache generic.ConcurrentMap[reflect.Type, *StructSchema]
 }
 
 // DefaultSchemaCache is the global default schema cache instance.
@@ -52,13 +53,13 @@ func (s *SchemaCache) GetSchema(t reflect.Type) *StructSchema {
 	}
 
 	if cached, ok := s.cache.Load(t); ok {
-		return cached.(*StructSchema)
+		return cached
 	}
 
 	schema := BuildStructSchema(t)
 	cached, _ := s.cache.LoadOrStore(t, schema)
 
-	return cached.(*StructSchema)
+	return cached
 }
 
 // BuildStructSchema parses [reflect.Type] t and constructs a pre-computed [StructSchema].

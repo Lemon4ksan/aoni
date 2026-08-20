@@ -10,9 +10,9 @@ import (
 	"crypto/tls"
 	"fmt"
 	"os"
-	"sync"
 	"time"
 
+	"github.com/lemon4ksan/foundation/generic"
 	utls "github.com/refraction-networking/utls"
 )
 
@@ -20,9 +20,12 @@ import (
 type CompressionAlgorithm uint16
 
 const (
+	// CertCompressionZlib specifies the zlib certificate compression algorithm.
 	CertCompressionZlib CompressionAlgorithm = 1
-	CompressionBrotli   CompressionAlgorithm = 2
-	CompressionZstd     CompressionAlgorithm = 3
+	// CompressionBrotli specifies the Brotli certificate compression algorithm.
+	CompressionBrotli CompressionAlgorithm = 2
+	// CompressionZstd specifies the Zstandard certificate compression algorithm.
+	CompressionZstd CompressionAlgorithm = 3
 )
 
 // ToUTLS maps the compression algorithm to its corresponding uTLS representation.
@@ -39,10 +42,9 @@ func (a CompressionAlgorithm) ToUTLS() utls.CertCompressionAlgo {
 
 // Watcher monitors disk modification timestamps for TLS keypairs, updating certificates dynamically.
 type Watcher struct {
-	mu          sync.RWMutex
+	cert        generic.Atomic[tls.Certificate]
 	certPath    string
 	keyPath     string
-	cert        *tls.Certificate
 	lastModTime time.Time
 	cancel      context.CancelFunc
 }
@@ -70,18 +72,12 @@ func NewWatcher(certPath, keyPath string, interval time.Duration) (*Watcher, err
 
 // GetCertificate returns the active [*tls.Certificate] for server handshake configs.
 func (w *Watcher) GetCertificate(_ *tls.ClientHelloInfo) (*tls.Certificate, error) {
-	w.mu.RLock()
-	defer w.mu.RUnlock()
-
-	return w.cert, nil
+	return w.cert.LoadPtr(), nil
 }
 
 // GetClientCertificate returns the active client [*tls.Certificate] for mTLS handshakes.
 func (w *Watcher) GetClientCertificate(_ *tls.CertificateRequestInfo) (*tls.Certificate, error) {
-	w.mu.RLock()
-	defer w.mu.RUnlock()
-
-	return w.cert, nil
+	return w.cert.LoadPtr(), nil
 }
 
 // Close terminates the background certificate watcher loop.
@@ -130,9 +126,7 @@ func (w *Watcher) reload() error {
 		w.lastModTime = info.ModTime()
 	}
 
-	w.mu.Lock()
-	w.cert = &cert
-	w.mu.Unlock()
+	w.cert.Store(cert)
 
 	return nil
 }

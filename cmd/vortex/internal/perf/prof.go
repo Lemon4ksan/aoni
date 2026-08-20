@@ -140,7 +140,8 @@ func (c *Cmd) runProf(ctx context.Context, args []string, stdout, stderr io.Writ
 	// Execute go test -bench Benchmark -benchmem
 	cmdArgs := append(
 		[]string{"test", "-bench", "Benchmark", "-benchmem", "-benchtime", benchtime, "-run", "^$"},
-		pkgPaths...)
+		pkgPaths...,
+	)
 	// #nosec G204,G702 -- running local go test benchmark command
 	cmd := exec.CommandContext(ctx, "go", cmdArgs...)
 	cmd.Dir = cwd

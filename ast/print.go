@@ -278,15 +278,28 @@ func renderWrappedDoc(w io.Writer, doc []string, defaultName, defaultDesc, inden
 			continue
 		}
 
-		// Wrap long text paragraph across word boundaries
-		words := strings.Fields(rawLine)
-		if len(words) == 0 {
-			continue
-		}
+		// Wrap long text paragraph across word boundaries without slice allocation
+		remaining := rawLine
 
 		var current strings.Builder
 
-		for _, word := range words {
+		for len(remaining) > 0 {
+			remaining = strings.TrimLeft(remaining, " \t")
+			if len(remaining) == 0 {
+				break
+			}
+
+			idx := strings.IndexAny(remaining, " \t")
+
+			var word string
+			if idx == -1 {
+				word = remaining
+				remaining = ""
+			} else {
+				word = remaining[:idx]
+				remaining = remaining[idx:]
+			}
+
 			switch {
 			case current.Len() == 0:
 				current.WriteString(word)
@@ -315,21 +328,21 @@ func printCommentLine(w io.Writer, indent, line string) {
 	}
 }
 
+var aoniDirectivePrefixes = [...]string{
+	"@aoni:", "@get", "@post", "@put", "@delete", "@patch", "@head", "@options",
+	"@ws", "@sse", "@event", "@ws:emit", "@header", "@query", "@form", "@unwrap",
+	"@engine", "@base_url", "@retry", "@cache", "@timeout", "@since", "@deprecated",
+	"@mirror", "@dto", "@service", "@tuple", "@inject", "@referer", "@preset", "@call",
+	"@return", "@body", "@status", "@check", "@field", "@cookie",
+}
+
 func isAoniDirective(s string) bool {
 	s = strings.TrimSpace(s)
 	if !strings.HasPrefix(s, "@") {
 		return false
 	}
 
-	prefixes := []string{
-		"@aoni:", "@get", "@post", "@put", "@delete", "@patch", "@head", "@options",
-		"@ws", "@sse", "@event", "@ws:emit", "@header", "@query", "@form", "@unwrap",
-		"@engine", "@base_url", "@retry", "@cache", "@timeout", "@since", "@deprecated",
-		"@mirror", "@dto", "@service", "@tuple", "@inject", "@referer", "@preset", "@call",
-		"@return", "@body", "@status", "@check", "@field", "@cookie",
-	}
-
-	for _, p := range prefixes {
+	for _, p := range aoniDirectivePrefixes {
 		if strings.HasPrefix(s, p) {
 			return true
 		}

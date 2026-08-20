@@ -10,7 +10,8 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"sync"
+
+	"github.com/lemon4ksan/foundation/generic"
 )
 
 const (
@@ -78,18 +79,16 @@ func (fb *FrameBuffer) Equal(other any) bool {
 	return false
 }
 
-var frameBufferPool = sync.Pool{
-	New: func() any {
-		return &FrameBuffer{
-			B: make([]byte, 0, 64*1024),
-		}
-	},
-}
+var frameBufferPool = generic.NewPool(func() *FrameBuffer {
+	return &FrameBuffer{
+		B: make([]byte, 0, 64*1024),
+	}
+})
 
 // AcquireFrameBuffer fetches a FrameBuffer from the global pool, resizing to length.
 func AcquireFrameBuffer(length int) *FrameBuffer {
-	fb, ok := frameBufferPool.Get().(*FrameBuffer)
-	if !ok || fb == nil {
+	fb := frameBufferPool.Get()
+	if fb == nil {
 		return &FrameBuffer{B: make([]byte, length)}
 	}
 

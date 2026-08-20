@@ -21,6 +21,7 @@ import (
 
 	"github.com/lemon4ksan/aoni"
 	"github.com/lemon4ksan/aoni/codec/decode"
+	"github.com/lemon4ksan/aoni/internal/core"
 	"github.com/lemon4ksan/aoni/internal/io"
 	"github.com/lemon4ksan/aoni/internal/requestutil"
 	"github.com/lemon4ksan/aoni/resiliency/challenge"
@@ -145,7 +146,7 @@ func (d responseDecoder) DumpDiagnostics(resp *http.Response, requester Requeste
 	reqDump = redactHeaders(reqDump)
 	respDump = redactHeaders(respDump)
 
-	if logger, ok := requester.(aoni.LoggerProvider); ok {
+	if logger, ok := requester.(core.LoggerProvider); ok {
 		logger.Logger().
 			Debug("Aoni HTTP Diagnostic", "request", bytesconv.B2S(reqDump), "response", bytesconv.B2S(respDump))
 		return
@@ -385,10 +386,6 @@ func resolveDecoder(resp *http.Response) decode.Decoder {
 			}
 
 			if cfg.AutoDecode && contentType != "" {
-				if customDec := decode.GetDecoder(contentType); customDec != nil {
-					return customDec
-				}
-
 				return decode.LookupDecoder(contentType)
 			}
 		}

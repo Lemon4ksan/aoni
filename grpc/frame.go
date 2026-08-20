@@ -10,9 +10,9 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"sync"
 
 	"github.com/klauspost/compress/gzip"
+	"github.com/lemon4ksan/foundation/generic"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/lemon4ksan/aoni/internal/transport"
@@ -21,12 +21,12 @@ import (
 var (
 	defaultFramer  = transport.NewLengthPrefixedFramer(0)
 	emptyGRPCFrame = []byte{0, 0, 0, 0, 0}
-	gzipWriterPool = sync.Pool{
-		New: func() any {
-			return gzip.NewWriter(io.Discard)
-		},
-	}
-	gzipReaderPool = sync.Pool{}
+	gzipWriterPool = generic.NewPool(func() *gzip.Writer {
+		return gzip.NewWriter(io.Discard)
+	})
+	gzipReaderPool = generic.NewPool(func() *gzip.Reader {
+		return &gzip.Reader{}
+	})
 )
 
 // MarshalFrame encodes a Protobuf message into a 5-byte Length-Prefixed-Message per PROTOCOL-HTTP2.md.
@@ -57,7 +57,11 @@ func MarshalFrame(msg proto.Message, compressed bool) ([]byte, error) {
 
 	var buf bytes.Buffer
 
-	gzWriter, _ := gzipWriterPool.Get().(*gzip.Writer)
+	gzWriter := gzipWriterPool.Get()
+	if gzWriter == nil {
+		gzWriter = gzip.NewWriter(io.Discard)
+	}
+
 	gzWriter.Reset(&buf)
 
 	if _, err := gzWriter.Write(rawBytes); err != nil {
@@ -104,8 +108,7 @@ func UnmarshalFrame(r io.Reader, target proto.Message) (bool, error) {
 			gzErr    error
 		)
 
-		if v := gzipReaderPool.Get(); v != nil {
-			gzReader, _ = v.(*gzip.Reader)
+		if gzReader = gzipReaderPool.Get(); gzReader != nil {
 			gzErr = gzReader.Reset(bytes.NewReader(payload))
 		} else {
 			gzReader, gzErr = gzip.NewReader(bytes.NewReader(payload))

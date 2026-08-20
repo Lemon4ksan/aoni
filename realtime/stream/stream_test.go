@@ -512,4 +512,62 @@ func TestStreamSSE_DoneAndIndentation(t *testing.T) {
 		res3 := ndjson.Next()
 		assert.False(t, res3.IsSuccess())
 	})
+
+	t.Run("SSEReader_Iterator_And_All", func(t *testing.T) {
+		t.Parallel()
+
+		payload := "event: update\ndata: {\"text\":\"chunk1\"}\n\nevent: update\ndata: {\"text\":\"chunk2\"}\n\n"
+		r := io.NopCloser(strings.NewReader(payload))
+		sseReader := stream.NewSSEReader[struct {
+			Text string `json:"text"`
+		}](r)
+		t.Cleanup(func() { _ = sseReader.Close() })
+
+		var results []string
+		for chunk, err := range sseReader.All() {
+			require.NoError(t, err)
+
+			results = append(results, chunk.Text)
+		}
+
+		assert.Equal(t, []string{"chunk1", "chunk2"}, results)
+	})
+
+	t.Run("NDJSONReader_Iterator_And_All", func(t *testing.T) {
+		t.Parallel()
+
+		type Msg struct {
+			Text string `json:"text"`
+		}
+
+		r := io.NopCloser(strings.NewReader("{\"text\":\"item1\"}\n{\"text\":\"item2\"}\n"))
+		ndjson := stream.NewNDJSONReader[Msg](r)
+		t.Cleanup(func() { _ = ndjson.Close() })
+
+		var results []string
+		for msg, err := range ndjson.All() {
+			require.NoError(t, err)
+
+			results = append(results, msg.Text)
+		}
+
+		assert.Equal(t, []string{"item1", "item2"}, results)
+	})
+
+	t.Run("ChunkReader_Iterator_And_All", func(t *testing.T) {
+		t.Parallel()
+
+		r := io.NopCloser(strings.NewReader("hello world from aoni chunk reader"))
+		chunkReader := stream.NewChunkReader(r, 8)
+		t.Cleanup(func() { _ = chunkReader.Close() })
+
+		var chunks []string
+		for chunk, err := range chunkReader.All() {
+			require.NoError(t, err)
+
+			chunks = append(chunks, string(chunk))
+		}
+
+		assert.Equal(t, "hello world from aoni chunk reader", strings.Join(chunks, ""))
+	})
 }

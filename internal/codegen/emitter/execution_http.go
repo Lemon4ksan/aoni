@@ -218,6 +218,7 @@ func emitReturnPipeline(buf *bytes.Buffer, tracker *ImportTracker, m *ir.MethodI
 	tracker.Add("io")
 	tracker.Add("net/http")
 	tracker.Add("github.com/lemon4ksan/aoni/codec/decode")
+	tracker.Add("github.com/lemon4ksan/aoni/codec/extract")
 
 	methodVerb := m.HTTPMethod
 	if methodVerb == "" {
@@ -270,7 +271,7 @@ func emitReturnPipeline(buf *bytes.Buffer, tracker *ImportTracker, m *ir.MethodI
 				pattern = pat
 			}
 
-			fmt.Fprintf(buf, "\tstageOut%d, err := decode.ExtractRegex(stageIn, %q)\n", i, pattern)
+			fmt.Fprintf(buf, "\tstageOut%d, err := extract.Regex(stageIn, %q)\n", i, pattern)
 			buf.WriteString("\tif err != nil {\n\t\treturn nil, err\n\t}\n")
 			fmt.Fprintf(buf, "\tstageIn = stageOut%d\n\n", i)
 
@@ -290,7 +291,7 @@ func emitReturnPipeline(buf *bytes.Buffer, tracker *ImportTracker, m *ir.MethodI
 				suffix = stage.Args[1]
 			}
 
-			fmt.Fprintf(buf, "\tstageOut%d, err := decode.ExtractBetween(stageIn, %q, %q)\n", i, prefix, suffix)
+			fmt.Fprintf(buf, "\tstageOut%d, err := extract.Between(stageIn, %q, %q)\n", i, prefix, suffix)
 			buf.WriteString("\tif err != nil {\n\t\treturn nil, err\n\t}\n")
 			fmt.Fprintf(buf, "\tstageIn = stageOut%d\n\n", i)
 
@@ -310,12 +311,12 @@ func emitReturnPipeline(buf *bytes.Buffer, tracker *ImportTracker, m *ir.MethodI
 				attr = stage.Args[1]
 			}
 
-			fmt.Fprintf(buf, "\tstageOut%d, err := decode.ExtractAttr(stageIn, %q, %q)\n", i, css, attr)
+			fmt.Fprintf(buf, "\tstageOut%d, err := extract.Attr(stageIn, %q, %q)\n", i, css, attr)
 			buf.WriteString("\tif err != nil {\n\t\treturn nil, err\n\t}\n")
 			fmt.Fprintf(buf, "\tstageIn = stageOut%d\n\n", i)
 
 		case ir.StageHTMLUnescape:
-			fmt.Fprintf(buf, "\tstageIn = decode.HTMLUnescape(stageIn)\n\n")
+			fmt.Fprintf(buf, "\tstageIn = extract.HTMLUnescape(stageIn)\n\n")
 
 		case ir.StageCustom:
 			if isLast {

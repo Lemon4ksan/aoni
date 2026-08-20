@@ -5,14 +5,18 @@
 package fast_test
 
 import (
+	"compress/gzip"
 	"context"
 	"io"
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"sync"
 	"testing"
 	"time"
 
+	"github.com/andybalholm/brotli"
+	"github.com/klauspost/compress/zstd"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -154,4 +158,84 @@ func TestFastClient_ContentLengthTruncation(t *testing.T) {
 	defer resp.Close()
 
 	assert.Equal(t, "12345", string(resp.BodyBytes()))
+}
+
+func TestTargetTracker_Concurrent(t *testing.T) {
+	t.Parallel()
+
+	client := fast.NewClient()
+	defer client.CloseIdleConnections()
+
+	const (
+		workers    = 50
+		iterations = 100
+	)
+
+	var wg sync.WaitGroup
+
+	for i := 0; i < workers; i++ {
+		wg.Add(1)
+
+		go func() {
+			defer wg.Done()
+
+			for j := 0; j < iterations; j++ {
+				client.TrackHTTPSTarget("example.com:443")
+				assert.True(t, client.IsHTTPSTarget("example.com:443"))
+				client.UntrackHTTPSTarget("example.com:443")
+			}
+		}()
+	}
+
+	wg.Wait()
+}
+
+func TestFastClient_Decompression_Gzip_Brotli_Zstd(t *testing.T) {
+	t.Parallel()
+
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/gzip":
+			w.Header().Set("Content-Encoding", "gzip")
+			gz := gzip.NewWriter(w)
+			_, _ = gz.Write([]byte("uncompressed-gzip-payload"))
+			_ = gz.Close()
+		case "/br":
+			w.Header().Set("Content-Encoding", "br")
+			br := brotli.NewWriter(w)
+			_, _ = br.Write([]byte("uncompressed-brotli-payload"))
+			_ = br.Close()
+		case "/zstd":
+			w.Header().Set("Content-Encoding", "zstd")
+			zw, _ := zstd.NewWriter(w)
+			_, _ = zw.Write([]byte("uncompressed-zstd-payload"))
+			_ = zw.Close()
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer ts.Close()
+
+	client := fast.NewClient(option.WithBaseURL(ts.URL))
+	defer client.CloseIdleConnections()
+
+	tests := []struct {
+		path     string
+		expected string
+	}{
+		{"/gzip", "uncompressed-gzip-payload"},
+		{"/br", "uncompressed-brotli-payload"},
+		{"/zstd", "uncompressed-zstd-payload"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.path, func(t *testing.T) {
+			resp, err := client.Request(context.Background(), "GET", tt.path)
+			require.NoError(t, err)
+
+			defer resp.Close()
+
+			assert.Equal(t, tt.expected, string(resp.BodyBytes()))
+		})
+	}
 }

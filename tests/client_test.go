@@ -494,7 +494,7 @@ func TestClient_ContentTypeGuard(t *testing.T) {
 				_, _ = w.Write([]byte(tt.body))
 			})
 
-			if tt.mod.Kind != aoni.ModNone {
+			if !tt.mod.IsZero() {
 				var output []byte
 
 				resp, err := client.Request(t.Context(), http.MethodGet, "/", tt.mod)
@@ -1851,13 +1851,13 @@ func TestClient_GettersAndUnwrap(t *testing.T) {
 	assert.Same(t, client, unwrapped)
 
 	// Test WithTLSClientHelloID & WithPersona & WithHTTP3
-	c2 := client.WithTLSClientHelloID(utls.HelloChrome_120)
+	c2 := client.With(option.WithTLSClientHelloID(utls.HelloChrome_120))
 	assert.NotNil(t, c2)
 
-	c3 := client.WithPersona(fingerprint.PersonaChrome120Windows)
+	c3 := client.With(option.WithPersonaStruct(fingerprint.PersonaChrome120Windows))
 	assert.NotNil(t, c3)
 
-	c4 := client.WithHTTP3()
+	c4 := client.With(option.WithHTTP3())
 	assert.NotNil(t, c4)
 }
 
@@ -2458,10 +2458,112 @@ func TestClient_AuditFeatures(t *testing.T) {
 	t.Run("dns_resolver_override_helper", func(t *testing.T) {
 		t.Parallel()
 
-		ctx, cfg := aoni.AllocRequestConfig(t.Context())
-		assert.Nil(t, aoni.GetDNSResolverOverride(ctx))
+		req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, "/", nil)
+		require.NoError(t, err)
 
-		mod.WithDNSResolver(nil).ApplyStd(&http.Request{})
-		_ = cfg
+		mod.WithDNSResolver(nil).ApplyStd(req)
+		assert.Nil(t, aoni.GetDNSResolverOverride(req.Context()))
+	})
+
+	t.Run("aoni_root_facade_and_modifiers", func(t *testing.T) {
+		t.Parallel()
+
+		var receivedAuth string
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			receivedAuth = r.Header.Get("Authorization")
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(`{"status":"ok"}`))
+		}))
+		t.Cleanup(server.Close)
+
+		client := aoni.New(aoni.WithBaseURL(server.URL), aoni.WithClientTimeout(5*time.Second))
+		resp, err := client.Get(t.Context(), "/", aoni.WithBearer("secret_token_123"))
+		require.NoError(t, err)
+		t.Cleanup(func() { aoni.DrainAndClose(resp) })
+
+		assert.Equal(t, "Bearer secret_token_123", receivedAuth)
+	})
+
+	t.Run("api_error_human_formatting_and_helpers", func(t *testing.T) {
+		t.Parallel()
+
+		err404 := &aoni.APIError{
+			StatusCode: http.StatusNotFound,
+			Body:       []byte("resource not found"),
+		}
+		assert.True(t, err404.IsNotFound())
+		assert.False(t, err404.IsUnauthorized())
+		assert.True(t, err404.IsClientError())
+		assert.False(t, err404.IsServerError())
+		assert.Equal(t, "resource not found", err404.BodyString())
+		assert.Contains(t, err404.Error(), "HTTP 404 Not Found")
+
+		err401 := &aoni.APIError{
+			StatusCode: http.StatusUnauthorized,
+			Body:       []byte("invalid credentials"),
+		}
+		assert.True(t, err401.IsUnauthorized())
+		assert.False(t, err401.IsNotFound())
+		assert.Contains(t, err401.Error(), "HTTP 401 Unauthorized")
+	})
+
+	t.Run("aoni_root_generics_GetTo_PostTo_Fetch", func(t *testing.T) {
+		t.Parallel()
+
+		type sampleUser struct {
+			Name  string `json:"name"`
+			Role  string `json:"role"`
+			Admin bool   `json:"admin"`
+		}
+
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			if r.Method == http.MethodPost {
+				var u sampleUser
+				_ = json.NewDecoder(r.Body).Decode(&u)
+				u.Admin = true
+				_ = json.NewEncoder(w).Encode(u)
+				return
+			}
+
+			_ = json.NewEncoder(w).Encode(sampleUser{Name: "Steve", Role: "Visionary"})
+		}))
+		t.Cleanup(server.Close)
+
+		// 1. aoni.GetTo
+		user, err := aoni.GetTo[sampleUser](t.Context(), server.URL)
+		require.NoError(t, err)
+		require.NotNil(t, user)
+		assert.Equal(t, "Steve", user.Name)
+
+		// 2. aoni.PostTo with smart body
+		created, err := aoni.PostTo[sampleUser](t.Context(), server.URL, sampleUser{Name: "Woz", Role: "Engineer"})
+		require.NoError(t, err)
+		require.NotNil(t, created)
+		assert.Equal(t, "Woz", created.Name)
+		assert.True(t, created.Admin)
+
+		// 3. aoni.Fetch returning Result[T]
+		res, resp := aoni.Fetch[sampleUser](t.Context(), server.URL)
+		require.NotNil(t, resp)
+		assert.True(t, res.IsSuccess())
+		fetched, err := res.Unwrap()
+		require.NoError(t, err)
+		assert.Equal(t, "Steve", fetched.Name)
+	})
+
+	t.Run("slog_log_valuer_observability", func(t *testing.T) {
+		t.Parallel()
+
+		apiErr := &aoni.APIError{
+			StatusCode: http.StatusForbidden,
+			Body:       []byte("access denied"),
+		}
+		val := apiErr.LogValue()
+		assert.NotEmpty(t, val.Group())
+
+		client := aoni.New(aoni.WithBaseURL("https://api.apple.com"), aoni.WithChrome())
+		cVal := client.LogValue()
+		assert.NotEmpty(t, cVal.Group())
 	})
 }

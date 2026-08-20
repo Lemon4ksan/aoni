@@ -10,14 +10,14 @@ import (
 	"net"
 	"net/http"
 	"sync"
+
+	"github.com/lemon4ksan/foundation/generic"
 )
 
-var ioBufferPool = sync.Pool{
-	New: func() any {
-		b := make([]byte, 32*1024)
-		return &b
-	},
-}
+var ioBufferPool = generic.NewPool(func() *[]byte {
+	b := make([]byte, 32*1024)
+	return &b
+})
 
 // Gateway acts as a high-performance HTTP reverse proxy gateway, routing public web requests
 // directly through reverse SSH channels to target developer machines.
@@ -55,17 +55,26 @@ func (g *Gateway) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 
-	resp, err := http.ReadResponse(bufioReaderFromConn(targetConn), req)
+	br := acquireBufioReader(targetConn)
+	resp, err := http.ReadResponse(br, req)
+	releaseBufioReader(br)
+
 	if err != nil {
 		http.Error(w, "aoni reverse tunnel: 502 Bad Gateway (Response Read Failed)", http.StatusBadGateway)
 		return
 	}
+
 	defer resp.Body.Close()
 
 	copyHeader(w.Header(), resp.Header)
 	w.WriteHeader(resp.StatusCode)
 
-	bufPtr := ioBufferPool.Get().(*[]byte)
+	bufPtr := ioBufferPool.Get()
+	if bufPtr == nil {
+		b := make([]byte, 32*1024)
+		bufPtr = &b
+	}
+
 	_, _ = io.CopyBuffer(w, resp.Body, *bufPtr)
 	ioBufferPool.Put(bufPtr)
 }
@@ -98,7 +107,12 @@ func (g *Gateway) proxyHijackedWebSocket(w http.ResponseWriter, req *http.Reques
 }
 
 func proxyPipe(dst, src net.Conn) {
-	bufPtr := ioBufferPool.Get().(*[]byte)
+	bufPtr := ioBufferPool.Get()
+	if bufPtr == nil {
+		b := make([]byte, 32*1024)
+		bufPtr = &b
+	}
+
 	_, _ = io.CopyBuffer(dst, src, *bufPtr)
 	ioBufferPool.Put(bufPtr)
 }
@@ -111,6 +125,24 @@ func copyHeader(dst, src http.Header) {
 	}
 }
 
-func bufioReaderFromConn(conn net.Conn) *bufio.Reader {
-	return bufio.NewReaderSize(conn, 32*1024)
+var bufioReaderPool = generic.NewPool(func() *bufio.Reader {
+	return bufio.NewReaderSize(nil, 32*1024)
+})
+
+func acquireBufioReader(conn net.Conn) *bufio.Reader {
+	br := bufioReaderPool.Get()
+	if br == nil {
+		return bufio.NewReaderSize(conn, 32*1024)
+	}
+
+	br.Reset(conn)
+
+	return br
+}
+
+func releaseBufioReader(br *bufio.Reader) {
+	if br != nil {
+		br.Reset(nil)
+		bufioReaderPool.Put(br)
+	}
 }

@@ -18,13 +18,14 @@ import (
 	"github.com/lemon4ksan/foundation/silicon/offheap"
 
 	"github.com/lemon4ksan/aoni"
+	"github.com/lemon4ksan/aoni/internal/core"
 	"github.com/lemon4ksan/aoni/internal/io"
 )
 
 // WithMultipart constructs an [aoni.RequestModifier] building an in-memory multipart/form-data request body.
 func WithMultipart(fields map[string]string, files map[string]stdio.Reader) aoni.RequestModifier {
 	return aoni.RequestModifier{
-		Kind: aoni.ModCustom,
+		Kind: core.ModCustom,
 		Fn: func(req aoni.Request) {
 			offBuf, err := offheap.NewBuffer(64 * 1024)
 
@@ -44,13 +45,13 @@ func WithMultipart(fields map[string]string, files map[string]stdio.Reader) aoni
 
 			writer := multipart.NewWriter(body)
 
-			if cfg := aoni.GetOrInitRequestConfig(req); cfg.MultipartBoundary != "" {
+			if cfg := getOrInitRequestConfig(req); cfg.MultipartBoundary != "" {
 				_ = writer.SetBoundary(cfg.MultipartBoundary)
 			}
 
 			for k, v := range fields {
 				if err := writer.WriteField(k, v); err != nil {
-					aoni.GetOrInitRequestConfig(req).BodyError = err
+					getOrInitRequestConfig(req).BodyError = err
 					return
 				}
 			}
@@ -58,18 +59,18 @@ func WithMultipart(fields map[string]string, files map[string]stdio.Reader) aoni
 			for key, r := range files {
 				part, err := writer.CreateFormFile(key, key)
 				if err != nil {
-					aoni.GetOrInitRequestConfig(req).BodyError = err
+					getOrInitRequestConfig(req).BodyError = err
 					return
 				}
 
 				if _, err = io.CopyZeroAlloc(part, r); err != nil {
-					aoni.GetOrInitRequestConfig(req).BodyError = err
+					getOrInitRequestConfig(req).BodyError = err
 					return
 				}
 			}
 
 			if err := writer.Close(); err != nil {
-				aoni.GetOrInitRequestConfig(req).BodyError = err
+				getOrInitRequestConfig(req).BodyError = err
 				return
 			}
 
@@ -90,7 +91,7 @@ type MultipartField struct {
 // WithMultipartFields accepts an ordered slice of form fields with support for duplicate names (RFC 7578 Section 5.2)
 func WithMultipartFields(fields []MultipartField) aoni.RequestModifier {
 	return aoni.RequestModifier{
-		Kind: aoni.ModCustom,
+		Kind: core.ModCustom,
 		Fn: func(req aoni.Request) {
 			offBuf, err := offheap.NewBuffer(64 * 1024)
 
@@ -110,7 +111,7 @@ func WithMultipartFields(fields []MultipartField) aoni.RequestModifier {
 
 			writer := multipart.NewWriter(body)
 
-			if cfg := aoni.GetOrInitRequestConfig(req); cfg.MultipartBoundary != "" {
+			if cfg := getOrInitRequestConfig(req); cfg.MultipartBoundary != "" {
 				_ = writer.SetBoundary(cfg.MultipartBoundary)
 			}
 
@@ -123,26 +124,26 @@ func WithMultipartFields(fields []MultipartField) aoni.RequestModifier {
 
 					part, err := createFormFileHeader(writer, f.Name, f.Filename, ct)
 					if err != nil {
-						aoni.GetOrInitRequestConfig(req).BodyError = err
+						getOrInitRequestConfig(req).BodyError = err
 						return
 					}
 
 					if f.Reader != nil {
 						if _, err = io.CopyZeroAlloc(part, f.Reader); err != nil {
-							aoni.GetOrInitRequestConfig(req).BodyError = err
+							getOrInitRequestConfig(req).BodyError = err
 							return
 						}
 					}
 				} else {
 					if err := writer.WriteField(f.Name, f.Value); err != nil {
-						aoni.GetOrInitRequestConfig(req).BodyError = err
+						getOrInitRequestConfig(req).BodyError = err
 						return
 					}
 				}
 			}
 
 			if err := writer.Close(); err != nil {
-				aoni.GetOrInitRequestConfig(req).BodyError = err
+				getOrInitRequestConfig(req).BodyError = err
 				return
 			}
 
@@ -155,12 +156,12 @@ func WithMultipartFields(fields []MultipartField) aoni.RequestModifier {
 // WithStreamingMultipart constructs an [aoni.RequestModifier] streaming multipart/form-data via an asynchronous pipe without in-memory buffering.
 func WithStreamingMultipart(fields map[string]string, files map[string]stdio.Reader) aoni.RequestModifier {
 	return aoni.RequestModifier{
-		Kind: aoni.ModCustom,
+		Kind: core.ModCustom,
 		Fn: func(req aoni.Request) {
 			pr, pw := stdio.Pipe()
 
 			writer := multipart.NewWriter(pw)
-			if cfg := aoni.GetOrInitRequestConfig(req); cfg.MultipartBoundary != "" {
+			if cfg := getOrInitRequestConfig(req); cfg.MultipartBoundary != "" {
 				_ = writer.SetBoundary(cfg.MultipartBoundary)
 			}
 

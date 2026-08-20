@@ -9,7 +9,7 @@ import (
 	"net/http"
 	"net/url"
 	"slices"
-	"time"
+	"strings"
 
 	"github.com/lemon4ksan/foundation/silicon/bytesconv"
 
@@ -25,36 +25,38 @@ import (
 //
 // Thread Safety:
 // Struct values are pass-by-value DTOs; concurrent reads are safe after construction.
-type Cookie struct {
-	Expires      time.Time `json:"expires,omitempty"`
-	Name         string    `json:"name"`
-	Value        string    `json:"value"`
-	Domain       string    `json:"domain"`
-	Path         string    `json:"path"`
-	SameSite     string    `json:"sameSite,omitempty"`
-	PartitionKey string    `json:"partitionKey,omitempty"`
-	HTTPOnly     bool      `json:"httpOnly,omitempty"`
-	Secure       bool      `json:"secure,omitempty"`
-	Partitioned  bool      `json:"partitioned,omitempty"`
-	MaxAge       int       `json:"maxAge,omitempty"`
-}
+type Cookie = impl.Cookie
 
 // ParseSetCookieHeader parses a raw 'Set-Cookie' header line into a structured [Cookie].
 func ParseSetCookieHeader(headerVal, defaultDomain, defaultPath string) Cookie {
-	dto := impl.ParseSetCookieHeader(headerVal, defaultDomain, defaultPath)
+	return impl.ParseSetCookieHeader(headerVal, defaultDomain, defaultPath)
+}
+
+// FromStd converts a standard [*http.Cookie] into a structured [Cookie].
+func FromStd(c *http.Cookie, defaultDomain, defaultPath string) Cookie {
+	if c == nil {
+		return Cookie{}
+	}
+
+	domain := c.Domain
+	if domain == "" {
+		domain = defaultDomain
+	}
+
+	path := c.Path
+	if path == "" {
+		path = defaultPath
+	}
 
 	return Cookie{
-		Expires:      dto.Expires,
-		Name:         dto.Name,
-		Value:        dto.Value,
-		Domain:       dto.Domain,
-		Path:         dto.Path,
-		SameSite:     dto.SameSite,
-		PartitionKey: dto.PartitionKey,
-		HTTPOnly:     dto.HTTPOnly,
-		Secure:       dto.Secure,
-		Partitioned:  dto.Partitioned,
-		MaxAge:       dto.MaxAge,
+		Name:     c.Name,
+		Value:    c.Value,
+		Domain:   strings.ToLower(domain),
+		Path:     path,
+		Expires:  c.Expires,
+		HTTPOnly: c.HttpOnly,
+		Secure:   c.Secure,
+		MaxAge:   c.MaxAge,
 	}
 }
 

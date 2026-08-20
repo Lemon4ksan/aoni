@@ -8,19 +8,24 @@ package pipeline
 
 import (
 	"context"
-	"net"
 	"net/http"
 	"time"
 
 	asyncctx "github.com/lemon4ksan/foundation/async/context"
-	"github.com/lemon4ksan/foundation/silicon/sysnet"
 	"golang.org/x/sys/cpu"
 
-	"github.com/lemon4ksan/aoni/internal/experimental"
-	"github.com/lemon4ksan/aoni/netutil/fragment"
+	"github.com/lemon4ksan/aoni/internal/core"
 )
 
-// Pipeline orchestrates zero-allocation transaction execution across generic Request/Response engines.
+// Pipeline orchestrates the complete HTTP transaction lifecycle across generic Request and Response engines.
+//
+// Lifecycle Phases:
+//  1. Initialization: Acquires a pooled [Tx] transaction state and applies pipeline configs.
+//  2. Request Preparation: Applies user modifiers, headers, UA rotation, and packet padding.
+//  3. Dispatch: Dispatches the request via Fast-Path, Dynamic Hedging, or standard Doer.
+//  4. Post-Processing: Handles auto-recovery (421/408/425), response decompression, and charset transcoding.
+//  5. Telemetry & Inspection: Captures network traces, HAR records, and sends data to Inspector.
+//  6. Cleanup: Releases [Tx] memory back to the pool with zero allocations.
 type Pipeline[Req, Resp any] struct {
 	defaults    ClientDefaults
 	fingerprint ClientFingerprint
@@ -30,8 +35,10 @@ type Pipeline[Req, Resp any] struct {
 	_       cpu.CacheLinePad
 }
 
+// StdPipeline is a type alias for a [Pipeline] operating on standard [*http.Request] and [*http.Response].
 type StdPipeline = Pipeline[*http.Request, *http.Response]
 
+// New instantiates a standard [StdPipeline] configured with the provided defaults and browser fingerprint settings.
 func New(defaults ClientDefaults, fingerprint ClientFingerprint) *StdPipeline {
 	return &StdPipeline{
 		defaults:    defaults,
@@ -39,6 +46,7 @@ func New(defaults ClientDefaults, fingerprint ClientFingerprint) *StdPipeline {
 	}
 }
 
+// NewGeneric instantiates a generic [Pipeline] capable of operating on custom request/response models.
 func NewGeneric[Req, Resp any](
 	defaults ClientDefaults,
 	fingerprint ClientFingerprint,
@@ -49,11 +57,12 @@ func NewGeneric[Req, Resp any](
 	}
 }
 
-// Execute runs the pipeline against the provided request using Fast-Path or Unsafe-Path.
+// Execute orchestrates the full transaction pipeline for the given request and doer.
+// Automatically borrows and releases pooled [Tx] transaction state, ensuring zero memory leaks.
 func (p *Pipeline[Req, Resp]) Execute(
 	ctx context.Context,
 	req Req,
-	doer GenericDoer[Req, Resp],
+	doer core.GenericDoer[Req, Resp],
 	pipe PipelineConfig,
 ) (Resp, error) {
 	fastCtx := asyncctx.Wrap(ctx)
@@ -88,7 +97,7 @@ func (p *Pipeline[Req, Resp]) Execute(
 	for _, hook := range p.defaults.AfterResponse {
 		if stdResp, ok := any(resp).(*http.Response); ok {
 			hook(stdResp, err)
-		} else if aoniResp, ok := any(resp).(Response); ok {
+		} else if aoniResp, ok := any(resp).(core.Response); ok {
 			hook(aoniResp.HTTPResponse(), err) //nolint:bodyclose
 		} else {
 			hook(nil, err)
@@ -99,7 +108,7 @@ func (p *Pipeline[Req, Resp]) Execute(
 		var stdReq *http.Request
 		if r, ok := any(req).(*http.Request); ok {
 			stdReq = r
-		} else if rAdapter, okAdapter := any(req).(Request); okAdapter {
+		} else if rAdapter, okAdapter := any(req).(core.Request); okAdapter {
 			stdReq = rAdapter.HTTPRequest()
 			if stdReq == nil {
 				stdReq, _ = http.NewRequestWithContext( //nolint:gosec
@@ -114,7 +123,7 @@ func (p *Pipeline[Req, Resp]) Execute(
 		var stdResp *http.Response
 		if r, ok := any(resp).(*http.Response); ok {
 			stdResp = r
-		} else if rAdapter, okAdapter := any(resp).(Response); okAdapter {
+		} else if rAdapter, okAdapter := any(resp).(core.Response); okAdapter {
 			stdResp = rAdapter.HTTPResponse() //nolint:bodyclose
 		}
 
@@ -188,7 +197,7 @@ func (p *Pipeline[Req, Resp]) executeStandardFastPath(
 func (p *Pipeline[Req, Resp]) executeCustomPhaseOrder(
 	tx *Tx,
 	req Req,
-	doer GenericDoer[Req, Resp],
+	doer core.GenericDoer[Req, Resp],
 	phases []PhaseID,
 ) (Resp, error) {
 	var (
@@ -244,38 +253,4 @@ func (p *Pipeline[Req, Resp]) finalizeJA4Report(tx *Tx) {
 			store.Target.JA4.JA4H = store.Report.JA4H
 		}
 	}
-}
-
-// ApplyMSSLimit applies TCP MSS limits via OS socket options.
-func ApplyMSSLimit(conn net.Conn, mss int) net.Conn {
-	if mss <= 0 {
-		return conn
-	}
-
-	if tc, ok := conn.(*net.TCPConn); ok {
-		raw, err := tc.SyscallConn()
-		if err != nil {
-			return conn
-		}
-
-		_ = raw.Control(func(fd uintptr) {
-			sysnet.SetTCPMaxSeg(fd, mss)
-		})
-	}
-
-	return conn
-}
-
-// ApplyFragmentation wraps conn with packet chunk fragmentation settings.
-func ApplyFragmentation(conn net.Conn, cfg fragment.Config) net.Conn {
-	return &fragment.FragmentedConn{
-		Conn:      conn,
-		ChunkSize: cfg.ChunkSize,
-		MaxDelay:  cfg.MaxDelay,
-	}
-}
-
-// ApplyCPUAffinity delegates core pinning to internal/experimental.
-func ApplyCPUAffinity(cores []int) {
-	experimental.ApplyCPUAffinity(cores)
 }

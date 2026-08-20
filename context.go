@@ -5,22 +5,20 @@
 package aoni
 
 import (
-	"bytes"
 	"context"
 	"crypto/tls"
-	"encoding/json"
-	stdio "io"
 	"net/http"
 	"net/url"
-	"strings"
 	"time"
 
 	"github.com/lemon4ksan/foundation/generic"
 	"github.com/lemon4ksan/foundation/silicon/pool"
 	fastrand "github.com/lemon4ksan/foundation/silicon/rand"
 
+	"github.com/lemon4ksan/aoni/internal/core"
 	"github.com/lemon4ksan/aoni/internal/io"
 	"github.com/lemon4ksan/aoni/internal/pipeline"
+	"github.com/lemon4ksan/aoni/netutil"
 	"github.com/lemon4ksan/aoni/netutil/netdial"
 	"github.com/lemon4ksan/aoni/telemetry"
 )
@@ -68,10 +66,10 @@ func WithContextModifier(ctx context.Context, mods ...RequestModifier) context.C
 
 	cfg := GetRequestConfig(ctx)
 	if cfg == nil {
-		ctx, cfg = AllocRequestConfig(ctx)
+		ctx, cfg = pipeline.AllocRequestConfig(ctx)
 	}
 
-	modsCopy := make([]pipeline.RequestModifier, 0, len(cfg.Modifiers)+len(mods))
+	modsCopy := make([]RequestModifier, 0, len(cfg.Modifiers)+len(mods))
 	modsCopy = append(modsCopy, cfg.Modifiers...)
 	modsCopy = append(modsCopy, mods...)
 	cfg.Modifiers = modsCopy
@@ -80,7 +78,7 @@ func WithContextModifier(ctx context.Context, mods ...RequestModifier) context.C
 }
 
 // ContextModifiers retrieves all per-request [RequestModifier] closures stored in the context.
-func ContextModifiers(ctx context.Context) []pipeline.RequestModifier {
+func ContextModifiers(ctx context.Context) []RequestModifier {
 	cfg := GetRequestConfig(ctx)
 	if cfg != nil {
 		return cfg.Modifiers
@@ -96,7 +94,7 @@ func MarkModifierError(req any, err error) {
 		return
 	}
 
-	GetOrInitRequestConfig(req).BodyError = err
+	pipeline.GetOrInitRequestConfig(req).BodyError = err
 }
 
 // GetProxyOverride retrieves the per-request proxy server URL stored in the context.
@@ -118,7 +116,7 @@ func GetInsecureSkipVerify(ctx context.Context) bool {
 }
 
 // TCPDelayRange defines minimum and maximum bounds for randomized pre-dial TCP delay jitter.
-type TCPDelayRange = pipeline.TCPDelayRange
+type TCPDelayRange = netutil.TCPDelayRange
 
 // GetTCPDelay retrieves the configured pre-dial TCP delay jitter range from context.
 func GetTCPDelay(ctx context.Context) generic.Optional[TCPDelayRange] {
@@ -216,96 +214,11 @@ func GetDNSResolverOverride(ctx context.Context) netdial.DNSResolver {
 	return nil
 }
 
-// Or combines multiple [RetryCondition] predicates, returning true if ANY condition is satisfied.
-func Or(conditions ...RetryCondition) RetryCondition {
-	return func(resp Response, err error) bool {
-		for _, cond := range conditions {
-			if cond != nil && cond(resp, err) {
-				return true
-			}
-		}
-
-		return false
-	}
-}
-
-// And combines multiple [RetryCondition] predicates, returning true if ALL conditions are satisfied.
-func And(conditions ...RetryCondition) RetryCondition {
-	return func(resp Response, err error) bool {
-		for _, cond := range conditions {
-			if cond == nil || !cond(resp, err) {
-				return false
-			}
-		}
-
-		return true
-	}
-}
-
-func newSyntheticResponse(
-	statusCode int,
-	contentType string,
-	bodyReader stdio.Reader,
-	contentLength int64,
-	req Request,
-) Response {
-	header := make(http.Header)
-	header.Set("Content-Type", contentType)
-
-	var httpReq *http.Request
-	if req != nil {
-		httpReq = req.HTTPRequest()
-	}
-
-	return NewStdResponse(&http.Response{
-		StatusCode:    statusCode,
-		Status:        http.StatusText(statusCode),
-		Proto:         "HTTP/1.1",
-		ProtoMajor:    1,
-		ProtoMinor:    1,
-		Header:        header,
-		Body:          stdio.NopCloser(bodyReader),
-		ContentLength: contentLength,
-		Request:       httpReq,
-	})
-}
-
-// FallbackString constructs a synthetic [FallbackFunc] returning plain text with the specified status code.
-func FallbackString(statusCode int, text string) FallbackFunc {
-	return func(req Request, _ error) (Response, error) {
-		return newSyntheticResponse(
-			statusCode,
-			"text/plain; charset=utf-8",
-			strings.NewReader(text),
-			int64(len(text)),
-			req,
-		), nil
-	}
-}
-
-// FallbackJSON constructs a synthetic [FallbackFunc] returning JSON-encoded data with the specified status code.
-func FallbackJSON(statusCode int, data any) FallbackFunc {
-	return func(req Request, _ error) (Response, error) {
-		bodyBytes, err := json.Marshal(data)
-		if err != nil {
-			return nil, err
-		}
-
-		return newSyntheticResponse(
-			statusCode,
-			"application/json; charset=utf-8",
-			bytes.NewReader(bodyBytes),
-			int64(len(bodyBytes)),
-			req,
-		), nil
-	}
-}
-
-// GetRetryOverride retrieves the per-request [RetryOverride] configuration from context.
-func GetRetryOverride(ctx context.Context) generic.Optional[RetryOverride] {
+// GetRetryOverride retrieves the per-request [core.RetryOverride] configuration from context.
+func GetRetryOverride(ctx context.Context) generic.Optional[core.RetryOverride] {
 	cfg := GetRequestConfig(ctx)
 	if cfg == nil || cfg.RetryPolicy == nil {
-		return generic.None[RetryOverride]()
+		return generic.None[core.RetryOverride]()
 	}
 
 	return generic.Some(*cfg.RetryPolicy)
@@ -331,9 +244,4 @@ func ProxyFuncWithOverride(base func(*http.Request) (*url.URL, error)) func(*htt
 // (such as InsecureSkipVerify) extracted from the request context.
 func TLSConfigWithOverride(ctx context.Context, base *tls.Config) *tls.Config {
 	return pipeline.TLSConfigWithOverride(base, GetInsecureSkipVerify(ctx))
-}
-
-// ApplyCPUAffinity locks the calling goroutine's OS thread to designated physical CPU cores.
-func ApplyCPUAffinity(cores []int) {
-	pipeline.ApplyCPUAffinity(cores)
 }

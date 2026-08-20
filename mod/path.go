@@ -12,13 +12,14 @@ import (
 
 	"github.com/lemon4ksan/aoni"
 	"github.com/lemon4ksan/aoni/codec/values"
+	"github.com/lemon4ksan/aoni/internal/core"
 )
 
 // WithVar constructs an [aoni.RequestModifier] that interpolates a single URI template placeholder
 // (e.g. "{key}") with value according to RFC 6570 Level 1 URI Template variable expansion.
 func WithVar(key string, value any) aoni.RequestModifier {
 	return aoni.RequestModifier{
-		Kind: aoni.ModCustom,
+		Kind: core.ModCustom,
 		Fn: func(req aoni.Request) {
 			escapedValue := url.PathEscape(fmt.Sprint(value))
 			path := req.Path()
@@ -32,15 +33,15 @@ func WithVar(key string, value any) aoni.RequestModifier {
 func WithVars(pairs ...any) aoni.RequestModifier {
 	if len(pairs)%2 != 0 {
 		return aoni.RequestModifier{
-			Kind: aoni.ModCustom,
+			Kind: core.ModCustom,
 			Fn: func(req aoni.Request) {
-				aoni.GetOrInitRequestConfig(req).BodyError = ErrInvalidPairCount
+				getOrInitRequestConfig(req).BodyError = ErrInvalidPairCount
 			},
 		}
 	}
 
 	return aoni.RequestModifier{
-		Kind: aoni.ModCustom,
+		Kind: core.ModCustom,
 		Fn: func(req aoni.Request) {
 			for i := 0; i < len(pairs); i += 2 {
 				key := fmt.Sprint(pairs[i])
@@ -54,7 +55,7 @@ func WithVars(pairs ...any) aoni.RequestModifier {
 // WithBaseURL constructs an [aoni.RequestModifier] overriding the target request URL base (RFC 3986 §5).
 func WithBaseURL(baseURL string) aoni.RequestModifier {
 	return aoni.RequestModifier{
-		Kind: aoni.ModCustom,
+		Kind: core.ModCustom,
 		Fn: func(req aoni.Request) {
 			req.SetURL(baseURL)
 		},
@@ -64,7 +65,7 @@ func WithBaseURL(baseURL string) aoni.RequestModifier {
 // WithoutBaseURL constructs an [aoni.RequestModifier] resetting target request URL base to local path.
 func WithoutBaseURL() aoni.RequestModifier {
 	return aoni.RequestModifier{
-		Kind: aoni.ModCustom,
+		Kind: core.ModCustom,
 		Fn: func(req aoni.Request) {
 			req.SetURL(req.Path())
 		},
@@ -83,7 +84,7 @@ func WithQuery(args ...any) aoni.RequestModifier {
 		valStr := fmt.Sprint(args[1])
 
 		return aoni.RequestModifier{
-			Kind:  aoni.ModQueryAdd,
+			Kind:  core.ModQueryAdd,
 			Key:   key,
 			Value: valStr,
 		}
@@ -95,7 +96,7 @@ func WithQuery(args ...any) aoni.RequestModifier {
 // WithQueryParams constructs an [aoni.RequestModifier] encoding structure or map query into URL query parameters.
 func WithQueryParams(query any) aoni.RequestModifier {
 	return aoni.RequestModifier{
-		Kind: aoni.ModCustom,
+		Kind: core.ModCustom,
 		Fn: func(req aoni.Request) {
 			if query == nil {
 				return
@@ -103,7 +104,7 @@ func WithQueryParams(query any) aoni.RequestModifier {
 
 			encodedQuery, err := resolveQueryString(req, query)
 			if err != nil {
-				aoni.GetOrInitRequestConfig(req).BodyError = err
+				getOrInitRequestConfig(req).BodyError = err
 				return
 			}
 

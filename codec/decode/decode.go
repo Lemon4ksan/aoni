@@ -10,14 +10,12 @@ import (
 	stdio "io"
 	"reflect"
 	"strings"
-	"sync"
-	"sync/atomic"
 
 	"github.com/lemon4ksan/foundation/generic"
 	"github.com/lemon4ksan/foundation/silicon/bytesconv"
 
-	"github.com/lemon4ksan/aoni"
-	"github.com/lemon4ksan/aoni/mod"
+	"github.com/lemon4ksan/aoni/internal/core"
+	"github.com/lemon4ksan/aoni/internal/pipeline"
 )
 
 var (
@@ -67,6 +65,11 @@ func DecodeResult[Target any](d Decoder, reader stdio.Reader) generic.Result[Tar
 	return generic.Success(target)
 }
 
+// Result decodes the payload from reader into a Swift-inspired [generic.Result] using d.
+func Result[Target any](reader stdio.Reader, d Decoder) generic.Result[Target] {
+	return DecodeResult[Target](d, reader)
+}
+
 // DecoderFunc adapts a plain function signature to satisfy the [Decoder] interface.
 type DecoderFunc func(reader stdio.Reader, target any) error
 
@@ -92,13 +95,7 @@ func LimitDecoder(decoder Decoder, maxBytes int64) Decoder {
 	}
 }
 
-var (
-	bomUTF8 = []byte{0xEF, 0xBB, 0xBF}
-
-	decodersMu         sync.RWMutex
-	registeredDecoders = make(map[string]Decoder)
-	hasCustomDecoders  atomic.Bool
-)
+var bomUTF8 = []byte{0xEF, 0xBB, 0xBF}
 
 // normalizeContentType extracts the media type from a Content-Type header string (e.g. "application/json; charset=utf-8" -> "application/json").
 func normalizeContentType(contentType string) string {
@@ -106,69 +103,9 @@ func normalizeContentType(contentType string) string {
 	return strings.ToLower(strings.TrimSpace(mediaType))
 }
 
-// RegisterDecoder registers a custom [Decoder] globally for a MIME content type (e.g. "application/x-msgpack").
-// Thread-safe for concurrent invocation across goroutines.
-func RegisterDecoder(contentType string, decoder Decoder) {
-	norm := normalizeContentType(contentType)
-	if norm == "" {
-		return
-	}
-
-	decodersMu.Lock()
-	defer decodersMu.Unlock()
-
-	if decoder == nil {
-		delete(registeredDecoders, norm)
-		hasCustomDecoders.Store(len(registeredDecoders) > 0)
-	} else {
-		registeredDecoders[norm] = decoder
-
-		hasCustomDecoders.Store(true)
-	}
-}
-
-// UnregisterDecoder removes a custom [Decoder] globally registered for a MIME content type.
-func UnregisterDecoder(contentType string) {
-	RegisterDecoder(contentType, nil)
-}
-
-// GetDecoder retrieves the custom [Decoder] globally registered for contentType, or nil if none is registered.
-// Thread-safe for concurrent invocation.
-func GetDecoder(contentType string) Decoder {
-	if !hasCustomDecoders.Load() {
-		return nil
-	}
-
-	norm := normalizeContentType(contentType)
-	if norm == "" {
-		return nil
-	}
-
-	decodersMu.RLock()
-	defer decodersMu.RUnlock()
-
-	return registeredDecoders[norm]
-}
-
-// LookupDecoder resolves a [Decoder] for contentType, checking registered custom decoders first,
-// then standard MIME types (JSON, Proto, gRPC-Web, XML), falling back to RawDecoder.
-// Thread-safe for concurrent invocation.
+// LookupDecoder resolves a standard [Decoder] matching the provided MIME content type,
+// falling back to [RawDecoder] if unsupported.
 func LookupDecoder(contentType string) Decoder {
-	if hasCustomDecoders.Load() {
-		norm := normalizeContentType(contentType)
-		if norm != "" {
-			decodersMu.RLock()
-
-			d, ok := registeredDecoders[norm]
-
-			decodersMu.RUnlock()
-
-			if ok {
-				return d
-			}
-		}
-	}
-
 	norm := normalizeContentType(contentType)
 
 	switch {
@@ -263,23 +200,79 @@ func GRPCWeb[T any](reader stdio.Reader) (T, error) {
 	return To[T](reader, GRPCWebDecoder)
 }
 
-// WithRaw creates an [aoni.RequestModifier] that assigns [RawDecoder] for response parsing.
-func WithRaw() aoni.RequestModifier { return mod.WithDecoder(RawDecoder) }
+// ProtoJSON reads from reader and unmarshals JSON data into a newly allocated Protobuf message T.
+func ProtoJSON[T any](reader stdio.Reader) (T, error) {
+	return To[T](reader, ProtoJSONDecoder)
+}
 
-// WithJSON creates an [aoni.RequestModifier] that assigns [JSONDecoder] for response parsing.
-func WithJSON() aoni.RequestModifier { return mod.WithDecoder(JSONDecoder) }
+// Raw reads the entire response stream into a raw byte slice.
+func Raw(reader stdio.Reader) ([]byte, error) {
+	var target []byte
 
-// WithXML creates an [aoni.RequestModifier] that assigns [XMLDecoder] for response parsing.
-func WithXML() aoni.RequestModifier { return mod.WithDecoder(XMLDecoder) }
+	err := RawDecoder.Decode(reader, &target)
 
-// WithYAML creates an [aoni.RequestModifier] that assigns [YAMLDecoder] for response parsing.
-func WithYAML() aoni.RequestModifier { return mod.WithDecoder(YAMLDecoder) }
+	return target, err
+}
 
-// WithProto creates an [aoni.RequestModifier] that assigns [ProtoDecoder] for response parsing.
-func WithProto() aoni.RequestModifier { return mod.WithDecoder(ProtoDecoder) }
+// WithRaw creates an [core.RequestModifier] that assigns [RawDecoder] for response parsing.
+func WithRaw() core.RequestModifier {
+	return core.RequestModifier{
+		Kind: core.ModCustom,
+		Fn: func(req core.Request) {
+			pipeline.GetOrInitRequestConfig(req).Decoder = RawDecoder
+		},
+	}
+}
 
-// WithGRPCWeb creates an [aoni.RequestModifier] that assigns [GRPCWebDecoder] for response parsing.
-func WithGRPCWeb() aoni.RequestModifier { return mod.WithDecoder(GRPCWebDecoder) }
+// WithJSON creates an [core.RequestModifier] that assigns [JSONDecoder] for response parsing.
+func WithJSON() core.RequestModifier {
+	return core.RequestModifier{
+		Kind: core.ModCustom,
+		Fn: func(req core.Request) {
+			pipeline.GetOrInitRequestConfig(req).Decoder = JSONDecoder
+		},
+	}
+}
+
+// WithXML creates an [core.RequestModifier] that assigns [XMLDecoder] for response parsing.
+func WithXML() core.RequestModifier {
+	return core.RequestModifier{
+		Kind: core.ModCustom,
+		Fn: func(req core.Request) {
+			pipeline.GetOrInitRequestConfig(req).Decoder = XMLDecoder
+		},
+	}
+}
+
+// WithYAML creates an [core.RequestModifier] that assigns [YAMLDecoder] for response parsing.
+func WithYAML() core.RequestModifier {
+	return core.RequestModifier{
+		Kind: core.ModCustom,
+		Fn: func(req core.Request) {
+			pipeline.GetOrInitRequestConfig(req).Decoder = YAMLDecoder
+		},
+	}
+}
+
+// WithProto creates an [core.RequestModifier] that assigns [ProtoDecoder] for response parsing.
+func WithProto() core.RequestModifier {
+	return core.RequestModifier{
+		Kind: core.ModCustom,
+		Fn: func(req core.Request) {
+			pipeline.GetOrInitRequestConfig(req).Decoder = ProtoDecoder
+		},
+	}
+}
+
+// WithGRPCWeb creates an [core.RequestModifier] that assigns [GRPCWebDecoder] for response parsing.
+func WithGRPCWeb() core.RequestModifier {
+	return core.RequestModifier{
+		Kind: core.ModCustom,
+		Fn: func(req core.Request) {
+			pipeline.GetOrInitRequestConfig(req).Decoder = GRPCWebDecoder
+		},
+	}
+}
 
 // typeName extracts a string representation of target's concrete type for error reporting.
 func typeName(target any) string {
@@ -302,24 +295,12 @@ func DecodePayload(contentType string, rawBody []byte, target any) error {
 	return decoder.Decode(bytes.NewReader(rawBody), target)
 }
 
-// UnmarshalJSON parses JSON bytes into target using the registered custom JSON decoder or standard JSONDecoder.
+// UnmarshalJSON parses JSON bytes into target using [JSONDecoder].
 func UnmarshalJSON(data []byte, target any) error {
-	if hasCustomDecoders.Load() {
-		if d := GetDecoder("application/json"); d != nil {
-			return d.Decode(bytes.NewReader(data), target)
-		}
-	}
-
 	return JSONDecoder.Decode(bytes.NewReader(data), target)
 }
 
-// UnmarshalYAML parses YAML bytes into target using the registered custom YAML decoder or standard YAMLDecoder.
+// UnmarshalYAML parses YAML bytes into target using [YAMLDecoder].
 func UnmarshalYAML(data []byte, target any) error {
-	if hasCustomDecoders.Load() {
-		if d := GetDecoder("application/yaml"); d != nil {
-			return d.Decode(bytes.NewReader(data), target)
-		}
-	}
-
 	return YAMLDecoder.Decode(bytes.NewReader(data), target)
 }
