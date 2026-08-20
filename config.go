@@ -754,45 +754,116 @@ func (d ClientDefaults) Clone() ClientDefaults {
 	return cloned
 }
 
-// PipelineConfig configures pipeline execution rules and resilience policies.
+// PipelineConfig coordinates the behavior, resilience policies, and evasion capabilities
+// of the 5-stage transaction execution pipeline.
+//
+// # Architectural Pipeline Stages
+//
+// Every HTTP transaction executed by an aoni client passes through five deterministic stages:
+//  1. Stage 1 (Preparation & Modifiers): Encodes bodies, injects headers, binds context metadata.
+//  2. Stage 2 (Middleware & Telemetry): Enforces circuit breaking, retries, hedging, and HAR logging.
+//  3. Stage 3 (Protocol Engine & Janitors): Dispatches to standard or Fast engine, manages Alt-Svc cache.
+//  4. Stage 4 (L4/L7 Transport): uTLS evasion, Happy Eyeballs v3 racing, proxy failover, socket tuning.
+//  5. Stage 5 (Decoders & Resilience): Decompression, soft-error sniffing, structured unmarshaling.
+//
+// PipelineConfig governs which stages are active and configures their memory bounds and thresholds.
 type PipelineConfig struct {
-	// DPIJitter configures packet write delay jitter to bypass DPI rate inspection.
+	// DPIJitter configures randomized microsecond-scale write delay jitter between TCP segments.
+	//
+	// Deep Packet Inspection (DPI) evasion:
+	// Stateful firewalls and ISP middleboxes classify automated traffic not only by TLS ClientHello
+	// signatures, but also by inter-packet arrival times (IAT) and TCP packet sizing.
+	// DPIJitter disrupts ML-based timing analysis by injecting controlled entropy into socket writes.
+	// If nil, socket writes proceed at full silicon line speed with 0 delay.
 	DPIJitter *DPIJitterConfig
 
-	// ProxyFailover configures proxy rotation and automatic retry targets.
+	// ProxyFailover coordinates automatic proxy endpoint rotation and retry failover.
+	//
+	// Distributed Resiliency:
+	// When active proxies experience silent TCP drops, rate limiting (HTTP 429), or egress bans,
+	// ProxyFailover rotates to the next healthy proxy candidate across retries without failing the parent request.
+	// If nil, proxy failover is disabled.
 	ProxyFailover *ProxyFailoverConfig
 
-	// Hedging configures speculative secondary requests to cut tail latency.
+	// Hedging configures speculative parallel request dispatching to eliminate p99 tail latency.
+	//
+	// The "Tail at Scale" Paradigm:
+	// If an initial request has not returned headers within the configured percentile RTT (e.g. p95),
+	// a secondary speculative request is launched concurrently. The first socket to deliver valid headers
+	// wins the race, and the losing socket is cancelled immediately to preserve bandwidth.
+	// If nil, speculative hedging is disabled.
 	Hedging *HedgingConfig
 
-	// Cache configures HTTP response caching parameters.
+	// Cache configures RFC 9111 HTTP response caching and RFC 9211 No-Vary-Search normalization.
+	//
+	// Zero-Roundtrip Performance:
+	// Evaluates Cache-Control, ETag, and Last-Modified directives against memory, Redis, or disk storage,
+	// serving cached payloads with 0 network latency and transparently issuing 304 conditional validations.
+	// If nil, response caching is bypassed.
 	Cache *CacheConfig
 
-	// HAR configures HAR 1.2 transaction logging.
+	// HAR configures W3C HTTP Archive (HAR 1.2) transaction recording.
+	//
+	// Forensic Diagnostics & Auditing:
+	// Captures nanosecond-accurate connection timings (DNS, TCP, TLS, TTFB), unredacted or sanitized headers,
+	// and request/response sizes for export to Chrome DevTools or corporate compliance archives.
+	// If nil, HAR tracking is disabled.
 	HAR *HARConfig
 
-	// Redact configures sensitive header and payload key sanitization for logging.
+	// Redact configures sensitive authentication header and JSON payload key sanitization.
+	//
+	// Data Loss Prevention (DLP):
+	// Strips bearer tokens, API keys, passwords, and session cookies from telemetry logs, HAR files,
+	// and debug dumps before they leave memory.
+	// If nil, default sensitive headers (Authorization, Cookie, X-Api-Key) are redacted.
 	Redact *RedactConfig
 
-	// SizeLimit sets maximum allowable response body size in bytes.
+	// SizeLimit establishes the maximum permissible response body size in bytes.
+	//
+	// Out-Of-Memory (OOM) Defense:
+	// Protects the runtime from decompression bombs, malicious endless chunked streams, and accidental
+	// gigabyte downloads by bounding body reads with an [io.LimitReader]. Exceeding this boundary
+	// terminates the stream immediately with an error before heap exhaustion occurs.
+	// Set to <= 0 for unlimited body streaming. Default: 10MB (10 * 1024 * 1024 bytes).
 	SizeLimit int64
 
-	// MultiReadThreshold sets RAM buffering threshold for replayable stream reads.
+	// MultiReadThreshold defines the RAM buffering capacity (in bytes) for rewindable response streams.
+	//
+	// Tiered RAM-to-Disk Spilling:
+	// Responses smaller than MultiReadThreshold are buffered completely in pooled memory ([sync.Pool]).
+	// Payloads exceeding this threshold transparently spill over to temporary disk files, enabling unlimited
+	// stream rewindability ([io.Seeker]) without exhausting server memory.
+	// Set to 0 to disable memory caching and force direct streaming.
 	MultiReadThreshold int64
 
-	// RotateUA enables automatic User-Agent and Client Hints rotation.
+	// RotateUA enables automatic User-Agent and Client Hints rotation across sequential transactions.
+	//
+	// Anti-Clustering Evasion:
+	// Prevents edge WAFs from clustering requests from the same client session by rotating browser
+	// personas while maintaining synchronized TLS ClientHello profiles.
 	RotateUA bool
 
-	// Inspect enables real-time traffic inspection and dashboard telemetry.
+	// Inspect enables real-time transaction broadcasting to the embedded Web Inspector telemetry dashboard.
+	// When true, all request/response pairs are mirrored over WebSockets to the diagnostic inspector UI.
 	Inspect bool
 
-	// Decompress enables transparent response body decompression (Gzip, Brotli, Zstd).
+	// Decompress enables transparent RFC 9110 response body decompression.
+	//
+	// Multi-Codec Acceleration:
+	// Automatically negotiates and decompresses "gzip", "deflate", "br" (Brotli), and "zstd" (Zstandard)
+	// payload streams using zero-allocation streaming decoders.
 	Decompress bool
 
-	// Validate enables automatic response validation checking.
+	// Validate enforces application-level status code and header integrity checks before body unmarshaling.
+	// When true, responses with unexpected non-2xx status codes or invalid content types are rejected early.
 	Validate bool
 
-	// Challenge enables automatic WAF/DDoS challenge detection and solving.
+	// Challenge enables autonomous Anti-DDoS and WAF challenge detection and solving.
+	//
+	// Autonomous Bypass:
+	// Detects HTTP 403/503 challenge pages (Cloudflare Turnstile, AWS WAF, Akamai), pauses the execution
+	// pipeline, invokes the registered [challenge.Solver], and automatically retries the original request
+	// with acquired clearance cookies and authorization headers.
 	Challenge bool
 }
 
@@ -842,53 +913,62 @@ func (p PipelineConfig) Clone() PipelineConfig {
 	return cloned
 }
 
-// DPIJitterConfig configures randomized delay bounds applied between socket writes
-// to confuse Deep Packet Inspection (DPI) rate and timing analysis.
+// DPIJitterConfig configures randomized delay bounds applied between socket write operations
+// to evade Deep Packet Inspection (DPI) inter-packet arrival time (IAT) analysis.
 type DPIJitterConfig struct {
+	// MinDelay is the minimum sleep duration injected between socket write operations.
 	MinDelay time.Duration
+
+	// MaxDelay is the maximum sleep duration injected between socket write operations.
 	MaxDelay time.Duration
 }
 
-// ProxyFailoverConfig configures proxy pool rotation and automatic failover
-// when a proxy node fails or returns gateway errors.
+// ProxyFailoverConfig configures proxy pool health monitoring and automatic failover.
 type ProxyFailoverConfig struct {
-	Proxies    []string
+	// Proxies is the ordered list of proxy endpoint candidate URLs.
+	Proxies []string
+
+	// RetryLimit sets the maximum number of alternative proxies tried before failing the transaction.
 	RetryLimit int
 }
 
-// HedgingConfig configures speculative secondary requests dispatched after a delay
-// if the initial request has not completed, drastically reducing p99 tail latency.
+// HedgingConfig configures speculative secondary request dispatching to eliminate tail latency.
 type HedgingConfig struct {
-	// DynamicHedging enables adaptive percentile RTT hedging delay calculation.
+	// DynamicHedging enables adaptive percentile RTT hedging delay calculation based on EWMA metrics.
 	DynamicHedging *telemetry.DynamicHedgingConfig
 
-	// DefaultDelay is the fixed delay before launching a secondary request.
+	// DefaultDelay is the fixed fallback delay before launching a secondary speculative request.
 	DefaultDelay time.Duration
 
-	// MaxRequestsPerSecond caps total hedged requests per second.
+	// MaxRequestsPerSecond caps the total number of speculative requests dispatched per second to prevent self-DDoS.
 	MaxRequestsPerSecond int
 
-	// AllowNonReadOnly permits request hedging for non-idempotent HTTP methods (POST/PUT/DELETE).
-	// WARNING: Enabling this may cause duplicate mutations on the server.
+	// AllowNonReadOnly permits request hedging for non-idempotent HTTP methods (POST/PUT/DELETE/PATCH).
+	// WARNING: Enabling this for non-idempotent operations may result in duplicate database mutations.
 	AllowNonReadOnly bool
 }
 
-// HARConfig configures HAR 1.2 transaction recording for session exports.
+// HARConfig configures W3C HAR 1.2 transaction recording.
 type HARConfig struct {
+	// Tracker manages active transaction recording and HAR export generation.
 	Tracker telemetry.HARTracker
 }
 
-// RedactConfig configures sensitive header and JSON payload key sanitization
-// to prevent credential leakage in log files or traffic dumps.
+// RedactConfig configures sensitive header and JSON payload key sanitization rules.
 type RedactConfig struct {
-	Headers          map[string]struct{}
-	HeadersToRedact  []string
+	// Headers defines exact-match header names to sanitize (stored as a fast lookup set).
+	Headers map[string]struct{}
+
+	// HeadersToRedact defines header names or patterns to redact from logs and HAR traces.
+	HeadersToRedact []string
+
+	// JSONKeysToRedact defines JSON field names to redact from logged request/response payloads.
 	JSONKeysToRedact []string
 }
 
-// CacheConfig configures HTTP response caching using RFC 9211 No-Vary-Search normalization.
+// CacheConfig configures RFC 9111 HTTP response caching and RFC 9211 No-Vary-Search normalization.
 type CacheConfig struct {
-	// Store provides the persistence backend for cached response payloads.
+	// Store provides the persistence backend (in-memory LRU, Redis, or disk) for cached payloads.
 	Store cache.Store
 
 	// DefaultTTL sets the fallback cache expiration duration if no Cache-Control header is present.
