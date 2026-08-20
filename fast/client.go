@@ -510,12 +510,12 @@ func (c *Client) resolveProtocolHandler(rawURL string) http.RoundTripper {
 		return nil
 	}
 
-	normScheme := strings.ToLower(strings.TrimSpace(scheme))
-	if normScheme == "http" || normScheme == "https" || normScheme == "ws" || normScheme == "wss" {
+	proto := aoni.Protocol(strings.ToLower(strings.TrimSpace(scheme)))
+	if proto.IsStandardHTTP() {
 		return nil
 	}
 
-	return c.cfg.Engine.Protocols[normScheme]
+	return c.cfg.Engine.Protocols[proto]
 }
 
 func (c *Client) resolveTargetFastURI(fastReq *fasthttp.Request, path string) error {

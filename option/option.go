@@ -73,16 +73,16 @@ func WithEngine(engine aoni.HTTPDoer) aoni.ClientOption {
 	}
 }
 
-// WithProtocol registers a custom [http.RoundTripper] handler for non-HTTP schemes (e.g., "file", "ftp", "s3").
-func WithProtocol(scheme string, handler http.RoundTripper) aoni.ClientOption {
+// WithProtocol registers a custom [http.RoundTripper] handler for non-HTTP schemes (e.g. aoni.ProtocolFile, aoni.ProtocolS3, or raw string).
+func WithProtocol[T ~string](scheme T, handler http.RoundTripper) aoni.ClientOption {
 	return func(cfg *aoni.Config) {
 		if cfg.Engine.Protocols == nil {
-			cfg.Engine.Protocols = make(map[string]http.RoundTripper)
+			cfg.Engine.Protocols = make(aoni.ProtocolMap)
 		}
 
-		normScheme := strings.ToLower(strings.TrimSpace(scheme))
-		if normScheme != "" && handler != nil {
-			cfg.Engine.Protocols[normScheme] = handler
+		normProto := aoni.Protocol(strings.ToLower(strings.TrimSpace(string(scheme))))
+		if normProto != "" && handler != nil {
+			cfg.Engine.Protocols[normProto] = handler
 		}
 	}
 }

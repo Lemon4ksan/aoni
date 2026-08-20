@@ -124,6 +124,63 @@ func (n Network) IsIP() bool {
 	return n == NetworkIP || n == NetworkIP4 || n == NetworkIP6
 }
 
+// Protocol represents a URL scheme protocol (e.g. ProtocolHTTP, ProtocolHTTPS, ProtocolFile, ProtocolFTP, ProtocolS3, ProtocolWS).
+type Protocol string
+
+const (
+	// ProtocolHTTP represents unencrypted Hypertext Transfer Protocol ("http").
+	ProtocolHTTP Protocol = "http"
+
+	// ProtocolHTTPS represents encrypted Hypertext Transfer Protocol over TLS ("https").
+	ProtocolHTTPS Protocol = "https"
+
+	// ProtocolFile represents local filesystem URI scheme ("file").
+	ProtocolFile Protocol = "file"
+
+	// ProtocolFTP represents File Transfer Protocol ("ftp").
+	ProtocolFTP Protocol = "ftp"
+
+	// ProtocolS3 represents Amazon Simple Storage Service scheme ("s3").
+	ProtocolS3 Protocol = "s3"
+
+	// ProtocolBlob represents Azure Blob or browser Blob scheme ("blob").
+	ProtocolBlob Protocol = "blob"
+
+	// ProtocolIPFS represents InterPlanetary File System scheme ("ipfs").
+	ProtocolIPFS Protocol = "ipfs"
+
+	// ProtocolWS represents RFC 6455 unencrypted WebSocket scheme ("ws").
+	ProtocolWS Protocol = "ws"
+
+	// ProtocolWSS represents RFC 6455 encrypted WebSocket over TLS scheme ("wss").
+	ProtocolWSS Protocol = "wss"
+)
+
+// String returns the string representation of Protocol.
+func (p Protocol) String() string {
+	return string(p)
+}
+
+// IsHTTP reports whether the protocol is standard HTTP ("http") or HTTPS ("https").
+func (p Protocol) IsHTTP() bool {
+	return p == ProtocolHTTP || p == ProtocolHTTPS
+}
+
+// IsSecure reports whether the protocol is an encrypted scheme ("https", "wss").
+func (p Protocol) IsSecure() bool {
+	return p == ProtocolHTTPS || p == ProtocolWSS
+}
+
+// IsWebSocket reports whether the protocol is WebSocket ("ws") or Secure WebSocket ("wss").
+func (p Protocol) IsWebSocket() bool {
+	return p == ProtocolWS || p == ProtocolWSS
+}
+
+// IsStandardHTTP reports whether the protocol belongs to standard Web HTTP/WS traffic.
+func (p Protocol) IsStandardHTTP() bool {
+	return p.IsHTTP() || p.IsWebSocket()
+}
+
 // ConnFilter defines a stream transformation codec evaluated during socket dialing.
 // See [transport.ConnFilter].
 type ConnFilter = transport.ConnFilter
@@ -213,12 +270,12 @@ type EngineConfig struct {
 	// If set, takes precedence over RedirectLimit.
 	CheckRedirect func(req *http.Request, via []*http.Request) error
 
-	// Protocols maps non-HTTP URL schemes (e.g. "file", "ftp", "s3", "blob") to custom RoundTrippers.
+	// Protocols maps non-HTTP URL schemes (e.g. ProtocolFile, ProtocolFTP, ProtocolS3, ProtocolBlob) to custom RoundTrippers.
 	Protocols ProtocolMap
 }
 
-// ProtocolMap maps non-HTTP URL schemes (e.g. "file", "ftp", "s3", "blob") to custom [http.RoundTripper] handlers.
-type ProtocolMap map[string]http.RoundTripper
+// ProtocolMap maps URL protocol schemes to custom [http.RoundTripper] handlers.
+type ProtocolMap map[Protocol]http.RoundTripper
 
 // Clone creates a memory-isolated copy of the protocol handler map.
 func (p ProtocolMap) Clone() ProtocolMap {
