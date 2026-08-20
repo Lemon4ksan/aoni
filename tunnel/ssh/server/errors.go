@@ -8,11 +8,11 @@ import "errors"
 
 var (
 	// ErrServerClosed indicates an operation was attempted on a closed SSH server.
-	ErrServerClosed = errors.New("aoni ssh server: server is closed")
+	ErrServerClosed = errors.New("aoni/ssh/server: server is closed")
 
 	// ErrInvalidPassword indicates authentication failure due to an incorrect password.
-	ErrInvalidPassword = errors.New("aoni ssh server: invalid password")
+	ErrInvalidPassword = errors.New("aoni/ssh/server: invalid password")
 
 	// ErrInvalidPublicKey indicates authentication failure due to an unaccepted public key.
-	ErrInvalidPublicKey = errors.New("aoni ssh server: invalid public key")
+	ErrInvalidPublicKey = errors.New("aoni/ssh/server: invalid public key")
 )

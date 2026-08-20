@@ -16,7 +16,7 @@ import (
 )
 
 // ErrAgentUnavailable is returned when the SSH_AUTH_SOCK environment variable is not configured.
-var ErrAgentUnavailable = errors.New("aoni ssh agent: SSH_AUTH_SOCK environment variable is not set")
+var ErrAgentUnavailable = errors.New("aoni/ssh/agent: SSH_AUTH_SOCK environment variable is not set")
 
 // HasAgent reports whether an SSH agent socket is available in environment variables.
 func HasAgent() bool {
