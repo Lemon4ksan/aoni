@@ -152,6 +152,11 @@ func IsRawDecoder(decoder Decoder) bool {
 	return ok
 }
 
+// IsStructuredMediaType reports whether contentType matches a structured data MIME format (JSON, Proto, XML, YAML, gRPC-Web).
+func IsStructuredMediaType(contentType string) bool {
+	return !IsRawDecoder(LookupDecoder(contentType))
+}
+
 // StripBOM detects and discards UTF-8, UTF-16LE, and UTF-16BE Byte Order Marks (BOM) from reader.
 func StripBOM(reader io.Reader) io.Reader {
 	br, ok := reader.(*bufio.Reader)

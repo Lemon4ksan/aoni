@@ -19,9 +19,16 @@ import (
 
 // WithBaseURL returns an [aoni.ClientOption] setting the default Base URI for resolving relative request paths (RFC 3986 §5.1).
 //
-// In accordance with RFC 3986 §5.2.3 (Merge Paths) and §6.2.3 (Scheme-Based Normalization),
-// a trailing slash is ensured so that relative paths (e.g. "users") are resolved as subpaths
-// within the base directory rather than replacing the final path segment of the Base URI.
+// # RFC 3986 Resolution & Slash Normalization
+//
+// Under RFC 3986 §5.2, a Base URI should ideally include a trailing slash (e.g. "https://api.example.com/v1/")
+// to signify a directory component, ensuring relative paths (e.g. "users") do not displace the final path segment.
+//
+// To prevent common routing errors and 404s, aoni automatically normalizes slashes:
+//   - If raw lacks a trailing slash, aoni appends it for RFC reference resolution.
+//   - If a request specifies a leading slash (e.g. "/users") against a subpath base (e.g. ".../v1/"),
+//     aoni concatenates them safely into ".../v1/users" rather than resetting to domain root.
+//   - Duplicate boundary slashes ("//") are automatically deduplicated with zero heap allocations.
 func WithBaseURL(raw string) aoni.ClientOption {
 	return func(cfg *aoni.Config) {
 		if raw == "" {

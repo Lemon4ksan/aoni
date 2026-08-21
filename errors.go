@@ -24,6 +24,10 @@ var (
 	// ErrNilRequest is returned when an operation is executed on a nil Request contract.
 	ErrNilRequest = errors.New("aoni: request is nil")
 
+	// ErrNilURL is returned when attempting to route an outbound HTTP request
+	// that does not specify a destination URL through [Transport].
+	ErrNilURL = errors.New("aoni: *http.Request URL is nil")
+
 	// ErrInvalidPath indicates that the provided URL path could not be parsed.
 	ErrInvalidPath = errors.New("aoni: invalid path")
 
@@ -371,10 +375,10 @@ func AsTypedResult[T any](val T, err error) generic.TypedResult[T, *APIError] {
 
 	var apiErr *APIError
 	if errors.As(err, &apiErr) {
-		return generic.FailureTyped[T, *APIError](apiErr)
+		return generic.FailureTyped[T](apiErr)
 	}
 
-	return generic.FailureTyped[T, *APIError](&APIError{
+	return generic.FailureTyped[T](&APIError{
 		StatusCode: http.StatusInternalServerError,
 		Body:       bytesconv.S2B(err.Error()),
 	})

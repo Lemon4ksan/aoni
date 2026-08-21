@@ -250,6 +250,22 @@ func (s *StdRequest) ResetHeaders() {
 	s.req.Header = make(http.Header)
 }
 
+// ForEachHeader invokes fn for every header key-value pair in the request.
+func (s *StdRequest) ForEachHeader(fn func(key, value []byte) bool) {
+	if s.req == nil || s.req.Header == nil {
+		return
+	}
+
+	for k, vv := range s.req.Header {
+		kB := bytesconv.S2B(k)
+		for _, v := range vv {
+			if !fn(kB, bytesconv.S2B(v)) {
+				return
+			}
+		}
+	}
+}
+
 // SetBodyBytes sets the request body to body.
 func (s *StdRequest) SetBodyBytes(body []byte) {
 	s.req.Body = stdio.NopCloser(bytes.NewReader(body))

@@ -220,6 +220,13 @@ func (f *Request) ResetHeaders() {
 	f.req.Header.Reset()
 }
 
+// ForEachHeader invokes fn for every header key-value pair in the request.
+func (f *Request) ForEachHeader(fn func(key, value []byte) bool) {
+	if f.req != nil {
+		f.req.Header.All()(fn)
+	}
+}
+
 // SetBodyBytes sets request body to a raw byte slice.
 func (f *Request) SetBodyBytes(body []byte) {
 	existingCT := f.req.Header.ContentType()

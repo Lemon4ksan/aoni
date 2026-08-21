@@ -4,160 +4,155 @@
 
 // Package js provides a lightweight, fluent Abstract Syntax Tree (AST)
 // and code generator for JavaScript/TypeScript.
+// Core implementation is located in [github.com/lemon4ksan/foundation/ast/js].
 package js
 
+import (
+	fjs "github.com/lemon4ksan/foundation/ast/js"
+)
+
 // Node represents any JavaScript AST node.
-type Node interface {
-	isJSNode()
-}
+type Node = fjs.Node
 
 // Stmt represents a JavaScript statement.
-type Stmt interface {
-	Node
-	isJSStmt()
-}
+type Stmt = fjs.Stmt
 
 // Expr represents a JavaScript expression.
-type Expr interface {
-	Node
-	isJSExpr()
-}
+type Expr = fjs.Expr
 
 // Program is the root AST node representing a complete JS file/module.
-type Program struct {
-	Body []Stmt
-}
-
-func (Program) isJSNode() {}
+type Program = fjs.Program
 
 // RawStmt represents a raw JavaScript statement.
-type RawStmt struct {
-	Code string
-}
-
-func (RawStmt) isJSNode() {}
-func (RawStmt) isJSStmt() {}
+type RawStmt = fjs.RawStmt
 
 // RawExpr represents a raw JavaScript expression.
-type RawExpr struct {
-	Code string
-}
+type RawExpr = fjs.RawExpr
 
-func (RawExpr) isJSNode() {}
-func (RawExpr) isJSExpr() {}
-
-// Literal represents a literal primitive value (string, number, boolean, null).
-type Literal struct {
-	Value any
-}
-
-func (Literal) isJSNode() {}
-func (Literal) isJSExpr() {}
+// Literal represents a literal primitive value.
+type Literal = fjs.Literal
 
 // Ident represents an identifier or variable name.
-type Ident struct {
-	Name string
-}
-
-func (Ident) isJSNode() {}
-func (Ident) isJSExpr() {}
+type Ident = fjs.Ident
 
 // VarDecl represents const, let, or var declarations.
-type VarDecl struct {
-	Kind  string // "const", "let", "var"
-	Name  string
-	Value Expr
-}
-
-func (VarDecl) isJSNode() {}
-func (VarDecl) isJSStmt() {}
+type VarDecl = fjs.VarDecl
 
 // CallExpr represents a function or method invocation.
-type CallExpr struct {
-	Callee Expr
-	Args   []Expr
-}
-
-func (CallExpr) isJSNode() {}
-func (CallExpr) isJSExpr() {}
-func (CallExpr) isJSStmt() {}
+type CallExpr = fjs.CallExpr
 
 // AwaitExpr represents an await expression.
-type AwaitExpr struct {
-	Argument Expr
-}
-
-func (AwaitExpr) isJSNode() {}
-func (AwaitExpr) isJSExpr() {}
-func (AwaitExpr) isJSStmt() {}
+type AwaitExpr = fjs.AwaitExpr
 
 // FunctionDecl represents a function declaration.
-type FunctionDecl struct {
-	Name   string
-	Async  bool
-	Params []string
-	Body   []Stmt
-}
-
-func (FunctionDecl) isJSNode() {}
-func (FunctionDecl) isJSStmt() {}
-func (FunctionDecl) isJSExpr() {}
+type FunctionDecl = fjs.FunctionDecl
 
 // IfStmt represents an if/else control flow statement.
-type IfStmt struct {
-	Test       Expr
-	Consequent []Stmt
-	Alternate  []Stmt
-}
-
-func (IfStmt) isJSNode() {}
-func (IfStmt) isJSStmt() {}
+type IfStmt = fjs.IfStmt
 
 // ReturnStmt represents a return statement.
-type ReturnStmt struct {
-	Argument Expr
-}
-
-func (ReturnStmt) isJSNode() {}
-func (ReturnStmt) isJSStmt() {}
+type ReturnStmt = fjs.ReturnStmt
 
 // ThrowStmt represents a throw statement.
-type ThrowStmt struct {
-	Argument Expr
-}
-
-func (ThrowStmt) isJSNode() {}
-func (ThrowStmt) isJSStmt() {}
+type ThrowStmt = fjs.ThrowStmt
 
 // TryCatchStmt represents a try-catch-finally statement.
-type TryCatchStmt struct {
-	Block   []Stmt
-	Handler string
-	Catch   []Stmt
-	Finally []Stmt
-}
+type TryCatchStmt = fjs.TryCatchStmt
 
-func (TryCatchStmt) isJSNode() {}
-func (TryCatchStmt) isJSStmt() {}
-
-// ObjectExpr represents a JavaScript object literal { key: value }.
-type ObjectExpr struct {
-	Properties []Property
-}
+// ObjectExpr represents a JavaScript object literal.
+type ObjectExpr = fjs.ObjectExpr
 
 // Property represents a key-value property in an ObjectExpr.
-type Property struct {
-	Key   string
-	Value Expr
+type Property = fjs.Property
+
+// ArrayExpr represents an array literal.
+type ArrayExpr = fjs.ArrayExpr
+
+// FuncBuilder provides a fluent chain to construct function declarations.
+type FuncBuilder = fjs.FuncBuilder
+
+// IfBuilder provides a fluent chain to construct if/else statements.
+type IfBuilder = fjs.IfBuilder
+
+// TryBuilder provides a fluent chain to construct try/catch blocks.
+type TryBuilder = fjs.TryBuilder
+
+// NewProgram creates a root Program node from a list of statements.
+func NewProgram(stmts ...Stmt) *Program {
+	return fjs.NewProgram(stmts...)
 }
 
-func (ObjectExpr) isJSNode() {}
-func (ObjectExpr) isJSExpr() {}
-
-// ArrayExpr represents an array literal [ a, b, c ].
-type ArrayExpr struct {
-	Elements []Expr
+// Raw creates a raw expression snippet.
+func Raw(code string) RawExpr {
+	return fjs.Raw(code)
 }
 
-func (ArrayExpr) isJSNode() {}
-func (ArrayExpr) isJSExpr() {}
+// StmtRaw creates a raw statement snippet.
+func StmtRaw(code string) RawStmt {
+	return fjs.StmtRaw(code)
+}
+
+// Require generates `const x = require('x');` statements for each module.
+func Require(modules ...string) Stmt {
+	return fjs.Require(modules...)
+}
+
+// RequireFrom generates `const { a, b } = require('pkg');`.
+func RequireFrom(pkg string, imports ...string) Stmt {
+	return fjs.RequireFrom(pkg, imports...)
+}
+
+// Const declares a constant.
+func Const(name string, value any) Stmt {
+	return fjs.Const(name, value)
+}
+
+// Let declares a mutable variable.
+func Let(name string, value any) Stmt {
+	return fjs.Let(name, value)
+}
+
+// Return creates a return statement.
+func Return(value any) Stmt {
+	return fjs.Return(value)
+}
+
+// Throw creates a throw statement.
+func Throw(errType, message string) Stmt {
+	return fjs.Throw(errType, message)
+}
+
+// Call creates a function or method invocation.
+func Call(target string, args ...any) *CallExpr {
+	return fjs.Call(target, args...)
+}
+
+// Await creates an await expression or statement.
+func Await(target string, args ...any) *AwaitExpr {
+	return fjs.Await(target, args...)
+}
+
+// Fn starts building a named function declaration.
+func Fn(name string) *FuncBuilder {
+	return fjs.Fn(name)
+}
+
+// If starts building an if conditional statement.
+func If(cond any) *IfBuilder {
+	return fjs.If(cond)
+}
+
+// Try starts building a try/catch block.
+func Try(stmts ...Stmt) *TryBuilder {
+	return fjs.Try(stmts...)
+}
+
+// ToExpr coerces strings, primitives, and AST nodes into Expr.
+func ToExpr(v any) Expr {
+	return fjs.ToExpr(v)
+}
+
+// Format renders a JS AST Node into a formatted JavaScript code string.
+func Format(node Node) (string, error) {
+	return fjs.Format(node)
+}

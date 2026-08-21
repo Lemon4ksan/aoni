@@ -17,6 +17,7 @@ import (
 
 	"github.com/klauspost/compress/zstd"
 	"github.com/lemon4ksan/foundation/generic"
+	furl "github.com/lemon4ksan/foundation/net/url"
 	"github.com/lemon4ksan/foundation/silicon/bytesconv"
 	"github.com/valyala/fasthttp"
 
@@ -116,20 +117,19 @@ func NewClient(opts ...aoni.ClientOption) *Client {
 	return c
 }
 
-// With produces a deep-copied [Client] with the provided functional options applied.
+// With derives a brand new, fully autonomous [Client] contract with the provided functional options applied.
 func (c *Client) With(opts ...aoni.ClientOption) *Client {
-	clonedEngine := cloneFasthttpClient(c.engine)
-
-	clonedReferer := &pipeline.RefererState{}
-	if c.referer != nil {
-		clonedReferer.LastURL.Set(c.referer.LastURL.Get())
+	if len(opts) == 0 {
+		return c
 	}
+
+	clonedEngine := cloneFasthttpClient(c.engine)
 
 	cloned := &Client{
 		engine:        clonedEngine,
 		defaultDial:   c.defaultDial,
 		cfg:           c.cfg.Clone(),
-		referer:       clonedReferer,
+		referer:       c.referer,
 		protocolState: c.protocolState.Clone(),
 	}
 
@@ -142,7 +142,6 @@ func (c *Client) With(opts ...aoni.ClientOption) *Client {
 	}
 
 	cloned.applyEngineConfig()
-
 	if !isCustomDialerSet(c.engine, c.defaultDial) {
 		cloned.applyCustomDialer()
 	}
@@ -471,7 +470,7 @@ func (c *Client) ReleaseRequest(req aoni.Request) {
 }
 
 // Unwrap returns the underlying [*fasthttp.Client] engine instance.
-func (c *Client) Unwrap() any {
+func (c *Client) Unwrap() *fasthttp.Client {
 	return c.engine
 }
 
@@ -572,37 +571,11 @@ func (c *Client) resolveTargetFastURI(fastReq *fasthttp.Request, path string) er
 
 // formatTargetURL computes the target URL string from path and BaseURL (RFC 3986 §5.2 & §5.3).
 func (c *Client) formatTargetURL(path string) (string, error) {
-	switch {
-	case len(path) >= 7 && (strings.HasPrefix(path, "http://") || strings.HasPrefix(path, "https://")):
-		return path, nil
-	case c.prepared.BaseURLTrimmedString != "":
-		switch path == "" || path == "/" {
-		case true:
-			return c.prepared.BaseURLString, nil
-		case false:
-			if path[0] == '/' {
-				return c.prepared.BaseURLTrimmedString + path, nil
-			}
-
-			return c.prepared.BaseURLTrimmedString + "/" + path, nil
-		}
-
-	case c.cfg.Defaults.BaseURL != nil && c.cfg.Defaults.BaseURL.Host != "":
-		base := c.cfg.Defaults.BaseURL
-		basePath := strings.TrimSuffix(base.Path, "/")
-
-		cleanPath := path
-		if cleanPath != "" && cleanPath[0] != '/' {
-			cleanPath = "/" + cleanPath
-		}
-
-		return base.Scheme + "://" + base.Host + basePath + cleanPath, nil
-
-	case path == "":
+	if path == "" && (c.cfg.Defaults.BaseURL == nil || c.cfg.Defaults.BaseURL.Host == "") {
 		return "", ErrTargetURLEmpty
 	}
 
-	return path, nil
+	return furl.ResolveString(c.cfg.Defaults.BaseURL, path)
 }
 
 // resolveTargetURLFastFallback formats target URL when fast-path byte slices cannot be directly applied (RFC 3986 §5.2 & §5.3).
@@ -769,8 +742,9 @@ func (c *Client) applyEngineConfig() {
 }
 
 func (c *Client) applyCustomDialer() {
-	c.defaultDial = c.Dial
-	c.engine.Dial = c.Dial
+	d := c.Dial
+	c.defaultDial = d
+	c.engine.Dial = d
 	c.engine.DialDualStack = true
 }
 

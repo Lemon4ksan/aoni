@@ -13,14 +13,14 @@ import (
 
 	"github.com/lemon4ksan/foundation/silicon/bytesconv"
 
-	impl "github.com/lemon4ksan/aoni/internal/cookie"
+	fcookie "github.com/lemon4ksan/foundation/net/cookie"
 )
 
 // MaxCookieAgeSeconds defines the maximum recommended cookie lifetime in seconds (400 days / 34,560,000s)
 // as mandated by RFC 6265bis §5.5.
 const (
-	MaxCookieAgeSeconds = impl.MaxCookieAgeSeconds
-	MaxCookieAgeLimit   = impl.MaxCookieAgeLimit
+	MaxCookieAgeSeconds = fcookie.MaxCookieAgeSeconds
+	MaxCookieAgeLimit   = fcookie.MaxCookieAgeLimit
 )
 
 // Cookie represents a browser cookie structure formatted for JSON persistence,
@@ -32,11 +32,11 @@ const (
 //
 // Thread Safety:
 // Struct values are pass-by-value DTOs; concurrent reads are safe after construction.
-type Cookie = impl.Cookie
+type Cookie = fcookie.Cookie
 
 // ParseSetCookieHeader parses a raw 'Set-Cookie' header line into a structured [Cookie] (RFC 6265 §5.2, RFC 6265bis §5.5 & §5.7).
 func ParseSetCookieHeader(headerVal, defaultDomain, defaultPath string) Cookie {
-	return impl.ParseSetCookieHeader(headerVal, defaultDomain, defaultPath)
+	return fcookie.ParseSetCookieHeader(headerVal, defaultDomain, defaultPath)
 }
 
 // ValidateCookiePrefix reports whether a cookie satisfies RFC 6265bis §4.1.3 & §5.4 cookie prefix rules:
@@ -44,7 +44,7 @@ func ParseSetCookieHeader(headerVal, defaultDomain, defaultPath string) Cookie {
 //   - "__Host-": MUST have Secure=true, Path="/", and empty Domain (host-only).
 //   - Nameless cookies whose value begins with "__Secure-" or "__Host-" MUST be rejected (RFC 6265bis §5.7 step 22).
 func ValidateCookiePrefix(c Cookie) bool {
-	return impl.ValidatePrefix(c)
+	return fcookie.ValidatePrefix(c)
 }
 
 // FromStd converts a standard [*http.Cookie] into a structured [Cookie] (RFC 6265 §5.3).
@@ -77,7 +77,7 @@ func FromStd(c *http.Cookie, defaultDomain, defaultPath string) Cookie {
 
 // PathMatch reports whether reqPath matches cookiePath according to RFC 6265 §5.1.4.
 func PathMatch(reqPath, cookiePath string) bool {
-	return impl.PathMatch(reqPath, cookiePath)
+	return fcookie.PathMatch(reqPath, cookiePath)
 }
 
 // FilterForRequest filters a slice of cookies, returning only those matching destination u per RFC 6265 §5.1.4.
@@ -145,12 +145,12 @@ func Mirror(jar http.CookieJar, sourceURL *url.URL, targetURLs []*url.URL, cooki
 
 // SortForBrowser sorts cookies in-place according to RFC 6265 §5.4 (longest path length first).
 func SortForBrowser(cookies []*http.Cookie) {
-	impl.SortForBrowser(cookies)
+	fcookie.SortForBrowser(cookies)
 }
 
 // BuildCookieHeader constructs an RFC 6265 compliant 'Cookie' request header string (RFC 6265 §4.2.1 & §5.4).
 func BuildCookieHeader(cookies []*http.Cookie) string {
-	return impl.BuildCookieHeader(cookies)
+	return fcookie.BuildCookieHeader(cookies)
 }
 
 // ExportNetscape exports cookies formatted as a standard Netscape HTTP Cookie File (cookies.txt).
@@ -159,7 +159,7 @@ func ExportNetscape(jar http.CookieJar, u *url.URL) string {
 		return ""
 	}
 
-	return impl.ExportNetscape(jar.Cookies(u), u.Hostname())
+	return fcookie.ExportNetscape(jar.Cookies(u), u.Hostname())
 }
 
 // Export converts cookies for u from jar into exported [Cookie] structures.

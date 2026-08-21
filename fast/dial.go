@@ -7,10 +7,10 @@ package fast
 import (
 	"context"
 	"net"
-	"reflect"
 	"strings"
 	"sync"
 	"time"
+	"unsafe"
 
 	utls "github.com/refraction-networking/utls"
 	"github.com/valyala/fasthttp"
@@ -206,7 +206,7 @@ func isCustomDialerSet(engine *fasthttp.Client, defaultDial func(string) (net.Co
 		return true
 	}
 
-	return reflect.ValueOf(engine.Dial).Pointer() != reflect.ValueOf(defaultDial).Pointer()
+	return *(*uintptr)(unsafe.Pointer(&engine.Dial)) != *(*uintptr)(unsafe.Pointer(&defaultDial))
 }
 
 func splitHostPortDefault(addr string) (host, port string) {

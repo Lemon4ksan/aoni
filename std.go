@@ -7,7 +7,6 @@ package aoni
 import (
 	"context"
 	"crypto/tls"
-	"errors"
 	"net"
 	"net/http"
 	"net/url"
@@ -19,10 +18,6 @@ import (
 	"github.com/lemon4ksan/aoni/internal/std"
 	"github.com/lemon4ksan/aoni/netutil/digest"
 )
-
-// ErrNilURL is returned when attempting to route an outbound HTTP request
-// that does not specify a destination URL.
-var ErrNilURL = errors.New("aoni/bridge: request URL is nil")
 
 // StdRequest adapts a standard net/http [*http.Request] to the unified [Request] contract.
 type StdRequest = std.Request
@@ -264,6 +259,11 @@ type Transport struct {
 	// BeforeRoundTrip is an optional interceptor hook invoked immediately before a request
 	// enters the aoni pipeline, allowing dynamic per-request client cloning and modifier injection.
 	BeforeRoundTrip func(cloned *Client, origReq *http.Request) *Client
+}
+
+// Unwrap returns the underlying aoni [*Client].
+func (t *Transport) Unwrap() *Client {
+	return t.client
 }
 
 // RoundTrip satisfies [http.RoundTripper] by executing requests through the aoni pipeline.

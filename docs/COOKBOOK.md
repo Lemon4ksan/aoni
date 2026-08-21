@@ -209,6 +209,24 @@ client := aoni.NewClient(nil,
 user, err := request.GetTo[User](ctx, client, "/users/1")
 ```
 
+### 💡 BaseURL & Path Resolution Rules (RFC 3986 vs. Fast Normalization)
+
+Under strict RFC 3986 §5.2 rules:
+- `BaseURL` should include a trailing slash (e.g. `https://api.example.com/v1/`) to signify a directory.
+- `Path` should omit a leading slash (e.g. `users/1`) to signify an intra-directory relative resource.
+
+`aoni` enforces a zero-allocation defense-in-depth normalization layer so that all combinations resolve cleanly without 404s or double-slashes:
+
+| BaseURL Config | Request Path | Resolved Target URL | Notes |
+| :--- | :--- | :--- | :--- |
+| `https://api.com/v1/` | `users/1` | `https://api.com/v1/users/1` | Standard RFC 3986 directory resolution |
+| `https://api.com/v1` | `/users/1` | `https://api.com/v1/users/1` | Server-style route concatenation |
+| `https://api.com/v1/` | `/users/1` | `https://api.com/v1/users/1` | Normalizes slashes (does NOT drop `/v1/` to domain root) |
+| `https://api.com/v1` | `users/1` | `https://api.com/v1/users/1` | Auto-appends boundary slash |
+| `https://api.com/v1/` | `https://other.com/auth` | `https://other.com/auth` | Absolute URL bypasses BaseURL completely |
+
+---
+
 ## 9. Socket-Level DPI Evasion (Fragmentation & CDN Padding)
 
 Deep Packet Inspection (DPI) firewalls inspect initial TCP segment boundaries and ClientHello byte lengths to detect automated scraping clients. `aoni` mitigates statistical packet length analysis by segmenting ClientHello payloads into micro-chunks and injecting randomized CDN tracing headers.

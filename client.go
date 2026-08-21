@@ -12,7 +12,6 @@ import (
 	"net/http"
 	"net/url"
 	"slices"
-	"strings"
 	"time"
 
 	fctx "github.com/lemon4ksan/foundation/async/context"
@@ -20,7 +19,6 @@ import (
 	"github.com/lemon4ksan/foundation/generic"
 	furl "github.com/lemon4ksan/foundation/net/url"
 	"github.com/lemon4ksan/foundation/silicon/bytesconv"
-	"github.com/valyala/fasthttp"
 
 	"github.com/lemon4ksan/aoni/internal/core"
 	"github.com/lemon4ksan/aoni/internal/experimental"
@@ -120,6 +118,15 @@ func NewClient(doer any, opts ...ClientOption) *Client {
 	client.ensureUserAgent()
 
 	return client
+}
+
+// Unwrap returns the underlying execution engine.
+func (c *Client) Unwrap() HTTPDoer {
+	if c == nil {
+		return nil
+	}
+
+	return c.engine
 }
 
 // Clone creates an exact, memory-isolated duplicate of the current [Client] contract.
@@ -591,85 +598,14 @@ func (c *Client) ensureUserAgent() {
 	}
 }
 
-func (c *Client) isRootPath(path string) bool {
-	return len(path) > 0 && path[0] == '/' && c.prepared.BaseURL != nil &&
-		(c.prepared.BaseURL.Path == "" || c.prepared.BaseURL.Path == "/")
-}
-
 // resolveURL resolves relative path against client BaseURL or parses absolute URL strings.
 func (c *Client) resolveURL(path string) (*url.URL, error) {
-	if (path == "" || path == "/") && c.prepared.BaseURL != nil {
-		clone := *c.prepared.BaseURL
-		return &clone, nil
-	}
-
-	if c.isRootPath(path) {
-		return &url.URL{
-			Scheme:   c.prepared.BaseURL.Scheme,
-			Host:     c.prepared.BaseURL.Host,
-			Path:     path,
-			User:     c.prepared.BaseURL.User,
-			RawQuery: c.prepared.BaseURL.RawQuery,
-		}, nil
-	}
-
-	targetURLStr, resolveErr := c.resolveTargetURL(path)
-	if resolveErr != nil {
-		return nil, resolveErr
-	}
-
-	u, parseErr := furl.Parse(targetURLStr)
-	if parseErr != nil {
-		return nil, &Error{Op: "failed to parse URL", Err: parseErr}
+	u, err := furl.Resolve(c.prepared.BaseURL, path)
+	if err != nil {
+		return nil, &Error{Op: "failed to resolve URL", Err: err}
 	}
 
 	return u, nil
-}
-
-// isAbsURL reports whether path begins with an absolute scheme identifier (RFC 3986 §3.1 & §4.3).
-func isAbsURL(path string) bool {
-	return len(path) >= 7 && (strings.HasPrefix(path, "http://") || strings.HasPrefix(path, "https://"))
-}
-
-// hasNoBaseURL reports whether no Base URI has been configured for relative reference resolution (RFC 3986 §5.1.4).
-func (c *Client) hasNoBaseURL() bool {
-	return c.cfg.Defaults.BaseURL == nil || c.cfg.Defaults.BaseURL.Host == ""
-}
-
-// resolveTargetURL transforms a relative reference or absolute path against BaseURL (RFC 3986 §5).
-// It utilizes precomputed zero-allocation string buffers ([pipeline.PreparedConfig]) to eliminate
-// url.Parse and fmt.Sprintf allocations on the hot execution path.
-//
-// Protocol Resolution Rules (RFC 3986):
-//   - §4.3 (Absolute URI): If the path already has an absolute HTTP/HTTPS scheme, it bypasses BaseURL.
-//   - §5.1.4 (Default Base URI): If no BaseURL is configured, the path is passed unchanged.
-//   - §5.4 (Normal Resolution): Empty or root path ("" or "/") resolves to the Base URI.
-//   - §5.2.3 (Merge Paths): Absolute-path references (e.g. "/users") are prefixed with the base authority
-//     and base path prefix using zero-allocation slices.
-//   - §5.2.4 (Remove Dot Segments): Dot-segments and relative hierarchical paths (e.g. "../api")
-//     fallback to standard RFC 3986 reference resolution via [net/url.URL.ResolveReference].
-func (c *Client) resolveTargetURL(path string) (string, error) {
-	switch {
-	case isAbsURL(path) || c.hasNoBaseURL():
-		return path, nil
-	case path == "" || path == "/":
-		if c.prepared.BaseURLString != "" {
-			return c.prepared.BaseURLString, nil
-		}
-
-		return c.cfg.Defaults.BaseURL.String(), nil
-
-	case path[0] == '/' && c.prepared.BaseURLTrimmedString != "":
-		return c.prepared.BaseURLTrimmedString + path, nil
-
-	default: // Relative subpaths with dot-segments (e.g. "../api") resolve via RFC 3986 §5.2 reference resolution
-		rel, err := furl.Parse(strings.TrimLeft(path, "/"))
-		if err != nil {
-			return "", &Error{Op: "invalid path", Err: ErrInvalidPath}
-		}
-
-		return c.cfg.Defaults.BaseURL.ResolveReference(rel).String(), nil
-	}
 }
 
 // resolveHTTPRequest converts a generic [Request] interface into a standard [*http.Request].
@@ -696,29 +632,16 @@ func (c *Client) resolveHTTPRequest(req Request) (*http.Request, error) {
 		return nil, &Error{Op: "failed to create http request", Err: err}
 	}
 
-	if fastReq := c.resolveFastHTTPRequest(req); fastReq != nil {
-		fastReq.Header.All()(func(k, v []byte) bool {
-			httpReq.Header.Add(bytesconv.B2S(k), bytesconv.B2S(v))
-			return true
-		})
+	req.ForEachHeader(func(k, v []byte) bool {
+		httpReq.Header.Add(bytesconv.B2S(k), bytesconv.B2S(v))
+		return true
+	})
 
-		if host := fastReq.Header.Peek("Host"); len(host) > 0 {
-			httpReq.Host = bytesconv.B2S(host)
-		}
+	if host := req.Header("Host"); host != "" {
+		httpReq.Host = host
 	}
 
 	return httpReq, nil
-}
-
-// resolveFastHTTPRequest returns the [*fasthttp.Request] if the request
-// originates from fasthttp engine, extract headers for zero-allocation path.
-func (c *Client) resolveFastHTTPRequest(req Request) *fasthttp.Request {
-	fastAdapter, ok := req.(interface{ FastHTTPRequest() *fasthttp.Request })
-	if !ok {
-		return nil
-	}
-
-	return fastAdapter.FastHTTPRequest()
 }
 
 // applyConfig applies a Config DTO to the client instance, recreating internal engines and transport dialers.
@@ -789,19 +712,6 @@ func (c *Client) applyDefaultHTTPHeader() http.Header {
 	}
 
 	return reqHeader
-}
-
-// Unwrap returns the underlying execution engine or inner requester.
-func (c *Client) Unwrap() any {
-	if c == nil {
-		return nil
-	}
-
-	if rh, ok := c.engine.(requesterHTTPDoer); ok {
-		return rh.r
-	}
-
-	return c.engine
 }
 
 var (

@@ -6,7 +6,6 @@ package aoni_test
 
 import (
 	"context"
-	"github.com/klauspost/compress/gzip"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -16,6 +15,8 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/klauspost/compress/gzip"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"

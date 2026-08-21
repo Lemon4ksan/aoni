@@ -426,7 +426,12 @@ func WithNoStore() RequestModifier {
 }
 
 // WithBaseURL returns an [ClientOption] configuring the default Base URI for relative requests (RFC 3986 §5.1).
+//
+// # RFC 3986 Resolution & Slash Normalization
+//
 // Ensures a trailing slash per RFC 3986 §5.2.3 to preserve hierarchical base path segments during relative path resolution.
+// Safely normalizes both leading and trailing slashes so combinations like BaseURL "https://api.com/v1/" + Path "/users"
+// resolve seamlessly to "https://api.com/v1/users" without resetting to root or creating double slashes.
 func WithBaseURL(raw string) ClientOption {
 	return func(cfg *Config) {
 		if raw == "" {

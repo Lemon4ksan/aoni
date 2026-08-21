@@ -10,17 +10,16 @@ import (
 	"crypto/tls"
 	"errors"
 	"fmt"
-	"net"
 	"net/http"
 	"net/url"
 	"slices"
-	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
 
 	flog "github.com/lemon4ksan/foundation/async/log"
 	"github.com/lemon4ksan/foundation/generic"
+	fproxy "github.com/lemon4ksan/foundation/net/proxy"
 	"github.com/lemon4ksan/foundation/silicon/clock"
 	"github.com/lemon4ksan/foundation/silicon/trie"
 	"golang.org/x/sys/cpu"
@@ -47,64 +46,15 @@ func WithAwareSessionCache() aoni.ClientOption {
 }
 
 // Parse parses a raw proxy string into a structured [*url.URL] (RFC 3986 §3).
-// If no scheme delimiter ("://") is present, it handles it as a suffix reference (RFC 3986 §4.5),
-// inspecting standard port conventions (1080/9050 -> socks5h) or defaulting to "http" (RFC 3986 §3.1).
-// It performs zero blocking network I/O.
+// Core implementation is located in [github.com/lemon4ksan/foundation/net/proxy].
 func Parse(proxyStr string) (*url.URL, error) {
-	if proxyStr == "" {
-		return nil, errors.New("empty proxy string")
-	}
-
-	if strings.Contains(proxyStr, "://") {
-		return url.Parse(proxyStr)
-	}
-
-	u, err := url.Parse("http://" + proxyStr)
-	if err != nil {
-		return nil, err
-	}
-
-	_, portStr, err := net.SplitHostPort(u.Host)
-	if err != nil {
-		portStr = ""
-	}
-
-	scheme := "http"
-	switch portStr {
-	case "1080", "1081", "9050", "9051", "10808":
-		scheme = "socks5h"
-	}
-
-	u.Scheme = scheme
-
-	return u, nil
+	return fproxy.Parse(proxyStr)
 }
 
 // ProbeProxy actively tests an endpoint to determine if it speaks SOCKS5, HTTP CONNECT, or other protocols.
+// Core implementation is located in [github.com/lemon4ksan/foundation/net/proxy].
 func ProbeProxy(ctx context.Context, addr string) (string, error) {
-	dialer := net.Dialer{Timeout: 500 * time.Millisecond}
-
-	conn, err := dialer.DialContext(ctx, aoni.NetworkTCP.String(), addr)
-	if err != nil {
-		return "", err
-	}
-	defer conn.Close()
-
-	_ = conn.SetDeadline(time.Now().Add(300 * time.Millisecond))
-
-	_, err = conn.Write([]byte{0x05, 0x01, 0x00})
-	if err != nil {
-		return "http", nil
-	}
-
-	resp := make([]byte, 2)
-
-	n, err := conn.Read(resp)
-	if err == nil && n == 2 && resp[0] == 0x05 {
-		return "socks5h", nil
-	}
-
-	return "http", nil
+	return fproxy.ProbeProxy(ctx, addr)
 }
 
 // WithClient pairs an [aoni.HTTPDoer] client with its associated exit proxy URL.

@@ -19,7 +19,7 @@ import (
 
 	"github.com/lemon4ksan/aoni"
 	"github.com/lemon4ksan/aoni/cookie"
-	impl "github.com/lemon4ksan/aoni/internal/cookie"
+	impl "github.com/lemon4ksan/foundation/net/cookie"
 	"github.com/lemon4ksan/aoni/netutil"
 )
 

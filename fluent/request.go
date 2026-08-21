@@ -14,11 +14,11 @@ import (
 	"path/filepath"
 	"slices"
 	"strconv"
-	"strings"
 	"sync"
 	"time"
 
 	"github.com/lemon4ksan/foundation/generic"
+	furl "github.com/lemon4ksan/foundation/net/url"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/lemon4ksan/aoni"
@@ -554,7 +554,7 @@ func (r *Request) Execute(method, path string) (*http.Response, error) {
 
 	defer r.Release()
 
-	finalPath := interpolatePathParams(path, r.pathParams)
+	finalPath := furl.BuildPath(path, r.pathParams, nil)
 
 	ctx := r.ctx
 	if ctx == nil {
@@ -922,45 +922,4 @@ func (r *Request) Trace(path string) (*http.Response, error) {
 // Connect executes a CONNECT request against path.
 func (r *Request) Connect(path string) (*http.Response, error) {
 	return r.Execute(http.MethodConnect, path)
-}
-
-// interpolatePathParams replaces {param} placeholders in rawPath with URL-escaped values from params.
-func interpolatePathParams(rawPath string, params map[string]string) string {
-	if len(params) == 0 || strings.IndexByte(rawPath, '{') == -1 {
-		return rawPath
-	}
-
-	var sb strings.Builder
-	sb.Grow(len(rawPath) + 16)
-
-	for {
-		start := strings.IndexByte(rawPath, '{')
-		if start == -1 {
-			sb.WriteString(rawPath)
-			break
-		}
-
-		end := strings.IndexByte(rawPath[start:], '}')
-		if end == -1 {
-			sb.WriteString(rawPath)
-			break
-		}
-
-		end += start
-
-		sb.WriteString(rawPath[:start])
-		paramName := rawPath[start+1 : end]
-
-		if val, ok := params[paramName]; ok {
-			sb.WriteString(url.PathEscape(val))
-		} else {
-			sb.WriteByte('{')
-			sb.WriteString(paramName)
-			sb.WriteByte('}')
-		}
-
-		rawPath = rawPath[end+1:]
-	}
-
-	return sb.String()
 }

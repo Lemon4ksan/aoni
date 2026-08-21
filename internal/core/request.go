@@ -40,6 +40,7 @@ type Request interface {
 	AddHeader(key, value string)
 	DelHeader(key string)
 	ResetHeaders()
+	ForEachHeader(fn func(key, value []byte) bool)
 
 	// Payload Body Operations
 	SetBodyBytes(body []byte)
@@ -50,6 +51,12 @@ type Request interface {
 	// Underlying Engine Requests
 	HTTPRequest() *http.Request
 	EngineRequest() any
+}
+
+// HeaderIterator is implemented by high-performance Request instances to support zero-allocation header traversal.
+type HeaderIterator interface {
+	// ForEachHeader invokes fn for every key-value header pair in the request. Traversal halts early if fn returns false.
+	ForEachHeader(fn func(key, value []byte) bool)
 }
 
 // RequestFactory is implemented by engines capable of pooling their own high-performance Request instances

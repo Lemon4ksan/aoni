@@ -14,7 +14,7 @@ import (
 	"net/http"
 	"sync"
 
-	"github.com/lemon4ksan/foundation/generic"
+	"github.com/lemon4ksan/foundation/async/dedup"
 )
 
 // call represents an active or completed in-flight request.
@@ -127,17 +127,17 @@ func (cr *cachedResponse) toHTTPResponse() *http.Response {
 
 // TypedGroup provides generic singleflight function deduplication for arbitrary keys and return types.
 type TypedGroup[K comparable, V any] struct {
-	sf *generic.Singleflight[K, V]
+	group dedup.Group[K, V]
 }
 
 // NewTypedGroup creates a new generic Singleflight deduplicator.
 func NewTypedGroup[K comparable, V any]() *TypedGroup[K, V] {
-	return &TypedGroup[K, V]{
-		sf: generic.NewSingleflight[K, V](),
-	}
+	return &TypedGroup[K, V]{}
 }
 
 // Do executes and deduplicates fn by key.
 func (g *TypedGroup[K, V]) Do(key K, fn func() (V, error)) (V, error) {
-	return g.sf.Do(key, fn)
+	return g.group.Do(context.Background(), key, func(ctx context.Context) (V, error) {
+		return fn()
+	})
 }

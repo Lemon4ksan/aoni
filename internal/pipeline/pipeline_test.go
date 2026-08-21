@@ -114,6 +114,15 @@ func (r *mockRequest) AddHeaderBytes(k, v []byte)     { r.header.Add(string(k), 
 func (r *mockRequest) DelHeader(key string)           { r.header.Del(key) }
 func (r *mockRequest) DelHeaderBytes(key []byte)      { r.header.Del(string(key)) }
 func (r *mockRequest) ResetHeaders()                  { r.header = make(http.Header) }
+func (r *mockRequest) ForEachHeader(fn func(key, value []byte) bool) {
+	for k, vv := range r.header {
+		for _, v := range vv {
+			if !fn([]byte(k), []byte(v)) {
+				return
+			}
+		}
+	}
+}
 func (r *mockRequest) SetBodyBytes(b []byte)          { r.body = b }
 func (r *mockRequest) BodyBytes() []byte              { return r.body }
 func (r *mockRequest) SetBodyStream(stdio.Reader, int64) {

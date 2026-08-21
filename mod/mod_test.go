@@ -85,6 +85,15 @@ func (r *dummyRequest) AddHeaderBytes(key, val []byte) {
 func (r *dummyRequest) DelHeader(key string)                 { r.httpReq.Header.Del(key) }
 func (r *dummyRequest) DelHeaderBytes(key []byte)            { r.httpReq.Header.Del(string(key)) }
 func (r *dummyRequest) ResetHeaders()                        { r.httpReq.Header = make(http.Header) }
+func (r *dummyRequest) ForEachHeader(fn func(key, value []byte) bool) {
+	for k, vv := range r.httpReq.Header {
+		for _, v := range vv {
+			if !fn([]byte(k), []byte(v)) {
+				return
+			}
+		}
+	}
+}
 func (r *dummyRequest) SetBodyBytes(b []byte)                { r.body = b }
 func (r *dummyRequest) BodyBytes() []byte                    { return r.body }
 func (r *dummyRequest) SetBodyStream(rdr io.Reader, _ int64) { r.bodyRdr = rdr }

@@ -6,7 +6,6 @@ package aoni
 
 import (
 	"net/http"
-	"reflect"
 
 	"github.com/lemon4ksan/foundation/generic"
 
@@ -22,6 +21,9 @@ type (
 	// It homogenizes standard net/http, fasthttp, and gRPC-Web request representations under a single,
 	// high-throughput contract with zero heap allocations on hot paths.
 	Request = core.Request
+
+	// HeaderIterator is implemented by high-performance Request instances to support zero-allocation header traversal.
+	HeaderIterator = core.HeaderIterator
 
 	// Response represents a unified, high-performance HTTP response abstraction conforming to RFC 9110.
 	// Provides zero-copy byte access, pooled memory recycling ([Response.Close]), and structured decoding facilities.
@@ -88,48 +90,44 @@ type (
 	}
 )
 
-// UnwrapAs traverses nested [Unwrapper] decorator chains until an instance of target type T is discovered.
+// UnwrapAs traverses nested decorator chains until an instance of target type T is discovered.
 //
 // Onion-Peeling Mechanics:
 // In deeply layered architectures (e.g. RoundTripper -> Telemetry -> Retry -> CookieJar -> Transport),
-// UnwrapAs unwinds layers recursively via type assertions and reflect-based Unwrap methods,
+// UnwrapAs unwinds layers recursively via zero-allocation type assertions,
 // returning the inner instance and true if found, or the zero value of T and false.
 func UnwrapAs[T any](target any) (T, bool) {
-	curr := target
-	for curr != nil {
+	for curr := target; curr != nil; {
 		if typed, ok := curr.(T); ok {
 			return typed, true
 		}
 
-		if u, ok := curr.(interface{ Unwrap() http.RoundTripper }); ok {
-			curr = u.Unwrap()
-			continue
+		next := unwrapNext(curr)
+		if next == nil || next == curr {
+			break
 		}
 
-		if u, ok := curr.(interface{ Unwrap() error }); ok {
-			curr = u.Unwrap()
-			continue
-		}
-
-		v := reflect.ValueOf(curr)
-		if v.IsValid() && (v.Kind() == reflect.Pointer || v.Kind() == reflect.Interface || v.Kind() == reflect.Struct) {
-			m := v.MethodByName("Unwrap")
-			if m.IsValid() && m.Type().NumIn() == 0 && m.Type().NumOut() == 1 {
-				res := m.Call(nil)[0].Interface()
-				if res == curr {
-					break
-				}
-
-				curr = res
-
-				continue
-			}
-		}
-
-		break
+		curr = next
 	}
 
 	return generic.Zero[T](), false
+}
+
+func unwrapNext(curr any) any {
+	switch u := curr.(type) {
+	case interface{ Unwrap() *Client }:
+		return u.Unwrap()
+	case interface{ Unwrap() HTTPDoer }:
+		return u.Unwrap()
+	case interface{ Unwrap() http.RoundTripper }:
+		return u.Unwrap()
+	case interface{ Unwrap() any }:
+		return u.Unwrap()
+	case interface{ Unwrap() error }:
+		return u.Unwrap()
+	default:
+		return nil
+	}
 }
 
 // ConfigureAs applies [ClientOption] layers to any target conforming to the [Configurable[T]] protocol.

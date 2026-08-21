@@ -10,7 +10,6 @@ import (
 	"errors"
 	"io"
 	"net/http"
-	"reflect"
 
 	"github.com/lemon4ksan/foundation/generic"
 
@@ -702,7 +701,8 @@ func DoToEx[Resp any](
 
 // decodeResponseTo unmarshals resp payload into a newly allocated instance of Resp.
 func decodeResponseTo[Resp any](resp *http.Response, c Requester) (*Resp, error) {
-	if reflect.TypeFor[Resp]() == reflect.TypeFor[NoResponse]() {
+	var zero *Resp
+	if _, ok := any(zero).(*NoResponse); ok {
 		return nil, HandleResponse(resp, nil, c)
 	}
 

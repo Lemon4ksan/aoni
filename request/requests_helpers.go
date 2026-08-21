@@ -45,7 +45,7 @@ func (d responseDecoder) ValidateState(resp *http.Response, decoder decode.Decod
 
 	if resp.StatusCode < http.StatusBadRequest {
 		contentType := resp.Header.Get("Content-Type")
-		if contentType == "" || isStructuredDataMIME(contentType) {
+		if contentType == "" || decode.IsStructuredMediaType(contentType) {
 			return nil
 		}
 	}
@@ -57,32 +57,6 @@ func (d responseDecoder) ValidateState(resp *http.Response, decoder decode.Decod
 	}
 
 	return d.checkMIMEType(resp)
-}
-
-// isStructuredDataMIME reports whether contentType matches common structured payload MIME types (JSON, Protobuf, gRPC-Web, XML, YAML).
-func isStructuredDataMIME(contentType string) bool {
-	mediaType, _, _ := strings.Cut(contentType, ";")
-	mediaType = strings.TrimSpace(mediaType)
-
-	switch {
-	case bytesconv.EqualFoldASCII(mediaType, "application/json"),
-		bytesconv.EqualFoldASCII(mediaType, "text/json"):
-		return true
-	case bytesconv.EqualFoldASCII(mediaType, "application/x-protobuf"),
-		bytesconv.EqualFoldASCII(mediaType, "application/protobuf"),
-		bytesconv.EqualFoldASCII(mediaType, "application/grpc-web+proto"):
-		return true
-	case bytesconv.EqualFoldASCII(mediaType, "application/xml"),
-		bytesconv.EqualFoldASCII(mediaType, "text/xml"):
-		return true
-	case bytesconv.EqualFoldASCII(mediaType, "application/x-yaml"),
-		bytesconv.EqualFoldASCII(mediaType, "application/yaml"),
-		bytesconv.EqualFoldASCII(mediaType, "text/x-yaml"),
-		bytesconv.EqualFoldASCII(mediaType, "text/yaml"):
-		return true
-	default:
-		return false
-	}
 }
 
 // ResolvePeekableReader returns a peekable reader for the response body.

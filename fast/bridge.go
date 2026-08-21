@@ -51,7 +51,7 @@ type Transport struct {
 }
 
 // Unwrap returns the underlying fast [*Client].
-func (t *Transport) Unwrap() any {
+func (t *Transport) Unwrap() *Client {
 	return t.client
 }
 
