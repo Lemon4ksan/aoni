@@ -32,6 +32,8 @@ type ImportResult struct {
 }
 
 // Import loads an AsyncAPI specification and translates it into declarative Go contracts.
+//
+// Reference: AsyncAPI 3.1.0 Specification (https://www.asyncapi.com/docs/reference/specification/v3.1.0)
 func Import(cfg ImportConfig) (*ImportResult, error) {
 	var (
 		doc *Document
@@ -64,6 +66,8 @@ func Import(cfg ImportConfig) (*ImportResult, error) {
 }
 
 // GenerateContract translates an AsyncAPI document into a clean, declarative aoni Go contract.
+//
+// Reference: AsyncAPI 3.1.0 §Operations & §Channels
 func GenerateContract(doc *Document, cfg ImportConfig) ([]byte, error) {
 	pkgName := cfg.PackageName
 	if pkgName == "" {
@@ -180,13 +184,34 @@ func emitOperationMethod(buf *bytes.Buffer, doc *Document, opKey string, op Oper
 	address := resolveChannelAddress(doc, op)
 	cleanAddress := strings.TrimPrefix(address, "/")
 
-	// Extract path parameters (e.g. {symbol})
+	// Extract path parameters (e.g. {streetlightId} or {userId})
 	pathParams := extractPathParams(address)
 
 	// Determine payload DTO type
 	payloadType := resolvePayloadType(doc, opKey, op)
 
-	// Action dispatch
+	// Request/Reply RPC Pattern (AsyncAPI 3.1.0 §Operation Reply Object)
+	if op.Reply != nil {
+		replyPayloadType := resolveReplyPayloadType(doc, opKey, op)
+
+		fmt.Fprintf(buf, "\t// @rpc %q\n", opKey)
+		if cleanAddress != "" {
+			fmt.Fprintf(buf, "\t// @channel %q\n", cleanAddress)
+		}
+
+		params := make([]string, 0, 3+len(pathParams))
+		params = append(params, "ctx context.Context")
+		for _, p := range pathParams {
+			params = append(params, p+" string")
+		}
+		params = append(params, fmt.Sprintf("req *%s", payloadType))
+		params = append(params, "mods ...aoni.RequestModifier")
+
+		fmt.Fprintf(buf, "\t%s(%s) (*%s, error)\n\n", methodName, strings.Join(params, ", "), replyPayloadType)
+		return
+	}
+
+	// Action dispatch (AsyncAPI 3.1.0 §Operation Object - action: send / receive)
 	if op.Action == "send" || op.Action == "publish" {
 		// Server sends -> Client listens: @event
 		fmt.Fprintf(buf, "\t// @event %q\n", opKey)
@@ -196,12 +221,10 @@ func emitOperationMethod(buf *bytes.Buffer, doc *Document, opKey string, op Oper
 		}
 
 		params := make([]string, 0, 2+len(pathParams))
-
 		params = append(params, "ctx context.Context")
 		for _, p := range pathParams {
 			params = append(params, p+" string")
 		}
-
 		params = append(params, fmt.Sprintf("handler func(msg *%s)", payloadType))
 
 		fmt.Fprintf(buf, "\t%s(%s) (Subscription, error)\n\n", methodName, strings.Join(params, ", "))
@@ -214,12 +237,10 @@ func emitOperationMethod(buf *bytes.Buffer, doc *Document, opKey string, op Oper
 		}
 
 		params := make([]string, 0, 3+len(pathParams))
-
 		params = append(params, "ctx context.Context")
 		for _, p := range pathParams {
 			params = append(params, p+" string")
 		}
-
 		params = append(params, "req *"+payloadType)
 		params = append(params, "mods ...aoni.RequestModifier")
 
@@ -255,11 +276,20 @@ func resolveChannelAddress(doc *Document, op Operation) string {
 func extractPathParams(pathStr string) []string {
 	var params []string
 
-	parts := strings.Split(pathStr, "/")
-	for _, p := range parts {
-		if strings.HasPrefix(p, "{") && strings.HasSuffix(p, "}") {
-			params = append(params, strings.Trim(p, "{}"))
+	s := pathStr
+	for {
+		start := strings.Index(s, "{")
+		if start == -1 {
+			break
 		}
+		end := strings.Index(s[start:], "}")
+		if end == -1 {
+			break
+		}
+
+		paramName := s[start+1 : start+end]
+		params = append(params, paramName)
+		s = s[start+end+1:]
 	}
 
 	return params
@@ -270,7 +300,6 @@ func resolvePayloadType(doc *Document, opKey string, op Operation) string {
 	for _, mRef := range op.Messages {
 		if mRef.Ref != "" {
 			refKey := strings.TrimPrefix(mRef.Ref, "#/components/messages/")
-
 			refKey = strings.TrimPrefix(refKey, "#/channels/")
 			if idx := strings.LastIndex(refKey, "/"); idx != -1 {
 				refKey = refKey[idx+1:]
@@ -281,6 +310,24 @@ func resolvePayloadType(doc *Document, opKey string, op Operation) string {
 	}
 
 	return sanitizeIdentifier(opKey) + "PayloadDTO"
+}
+
+func resolveReplyPayloadType(doc *Document, opKey string, op Operation) string {
+	if op.Reply != nil {
+		for _, mRef := range op.Reply.Messages {
+			if mRef.Ref != "" {
+				refKey := strings.TrimPrefix(mRef.Ref, "#/components/messages/")
+				refKey = strings.TrimPrefix(refKey, "#/channels/")
+				if idx := strings.LastIndex(refKey, "/"); idx != -1 {
+					refKey = refKey[idx+1:]
+				}
+
+				return sanitizeIdentifier(refKey) + "DTO"
+			}
+		}
+	}
+
+	return sanitizeIdentifier(opKey) + "ReplyDTO"
 }
 
 func emitSchemas(buf *bytes.Buffer, doc *Document) {
@@ -317,7 +364,8 @@ func emitSchemas(buf *bytes.Buffer, doc *Document) {
 					fieldType := "any"
 					if pObj, ok := propVal.(map[string]any); ok {
 						if tStr, ok := pObj["type"].(string); ok {
-							fieldType = mapScalarType(tStr)
+							fmtStr, _ := pObj["format"].(string)
+							fieldType = mapScalarTypeWithFormat(tStr, fmtStr)
 						}
 					}
 
@@ -342,6 +390,9 @@ func mapJSONSchemaType(s Schema) string {
 		return "int"
 
 	case "number":
+		if s.Format == "float" {
+			return "float32"
+		}
 		return "float64"
 	case "boolean":
 		return "bool"
@@ -359,13 +410,19 @@ func mapJSONSchemaType(s Schema) string {
 	}
 }
 
-func mapScalarType(t string) string {
+func mapScalarTypeWithFormat(t, format string) string {
 	switch t {
 	case "string":
 		return "string"
 	case "integer":
+		if format == "int64" {
+			return "int64"
+		}
 		return "int"
 	case "number":
+		if format == "float" {
+			return "float32"
+		}
 		return "float64"
 	case "boolean":
 		return "bool"

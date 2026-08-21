@@ -72,6 +72,123 @@ components:
 	assert.Contains(t, code, `json:"email,omitempty"`)
 }
 
+func TestAsyncAPI_Import_RequestReply(t *testing.T) {
+	specYaml := `
+asyncapi: 3.1.0
+info:
+  title: Ping Service
+  version: 1.0.0
+channels:
+  pingChannel:
+    address: /ping
+    messages:
+      pingMsg:
+        $ref: '#/components/messages/PingMsg'
+  pongChannel:
+    address: /pong
+    messages:
+      pongMsg:
+        $ref: '#/components/messages/PongMsg'
+operations:
+  pingRequest:
+    action: send
+    channel:
+      $ref: '#/channels/pingChannel'
+    messages:
+      - $ref: '#/channels/pingChannel/messages/pingMsg'
+    reply:
+      channel:
+        $ref: '#/channels/pongChannel'
+      messages:
+        - $ref: '#/channels/pongChannel/messages/pongMsg'
+components:
+  messages:
+    PingMsg:
+      payload:
+        type: object
+        properties:
+          timestamp:
+            type: integer
+            format: int64
+    PongMsg:
+      payload:
+        type: object
+        properties:
+          ack:
+            type: boolean
+`
+
+	res, err := asyncapi.Import(asyncapi.ImportConfig{
+		SpecData:    []byte(specYaml),
+		PackageName: "pingpong",
+		ServiceName: "PingPongAPI",
+	})
+	require.NoError(t, err)
+	require.NotNil(t, res)
+
+	code := string(res.ContractCode)
+	assert.Contains(t, code, "package pingpong")
+	assert.Contains(t, code, "type PingPongAPI interface")
+	assert.Contains(t, code, `// @rpc "pingRequest"`)
+	assert.Contains(t, code, `PingRequest(ctx context.Context, req *PingMsgDTO, mods ...aoni.RequestModifier) (*PongMsgDTO, error)`)
+	assert.Contains(t, code, "type PingMsgDTO struct")
+	assert.Contains(t, code, "Timestamp int64")
+	assert.Contains(t, code, "type PongMsgDTO struct")
+	assert.Contains(t, code, "Ack bool")
+}
+
+func TestAsyncAPI_Import_TraitsAndDynamicAddress(t *testing.T) {
+	specYaml := `
+asyncapi: 3.1.0
+info:
+  title: Streetlights IoT API
+  version: 1.0.0
+channels:
+  lightingMeasured:
+    address: 'smartylighting/streetlights/1/0/event/{streetlightId}/lighting/measured'
+    messages:
+      lightMeasured:
+        $ref: '#/components/messages/lightMeasured'
+operations:
+  onLightingMeasured:
+    action: send
+    channel:
+      $ref: '#/channels/lightingMeasured'
+    messages:
+      - $ref: '#/channels/lightingMeasured/messages/lightMeasured'
+    traits:
+      - $ref: '#/components/operationTraits/iotOpTrait'
+components:
+  operationTraits:
+    iotOpTrait:
+      summary: "Inform about environmental lighting conditions"
+  messages:
+    lightMeasured:
+      payload:
+        type: object
+        properties:
+          lumens:
+            type: integer
+`
+
+	res, err := asyncapi.Import(asyncapi.ImportConfig{
+		SpecData:    []byte(specYaml),
+		PackageName: "streetlights",
+		ServiceName: "StreetlightsAPI",
+	})
+	require.NoError(t, err)
+	require.NotNil(t, res)
+
+	code := string(res.ContractCode)
+	assert.Contains(t, code, "package streetlights")
+	assert.Contains(t, code, "OnLightingMeasured — Inform about environmental lighting conditions")
+	assert.Contains(
+		t,
+		code,
+		"OnLightingMeasured(ctx context.Context, streetlightId string, handler func(msg *LightMeasuredDTO)) (Subscription, error)",
+	)
+}
+
 func TestAsyncAPI_Import_v2(t *testing.T) {
 	specYaml := `
 asyncapi: 2.6.0
