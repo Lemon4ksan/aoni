@@ -18,7 +18,7 @@ import (
 
 // GenerateContract translates an OpenAPI document into a clean, declarative aoni Go contract.
 //
-// References:
+// # References
 //   - OpenAPI 3.1.0 §4.8.1 OpenAPI Object: https://spec.openapis.org/oas/v3.1.0#openapi-object
 //   - OpenAPI 3.1.0 §4.8.9 Path Item Object: https://spec.openapis.org/oas/v3.1.0#path-item-object
 //   - OpenAPI 3.1.0 §4.8.10 Operation Object: https://spec.openapis.org/oas/v3.1.0#operation-object
@@ -31,6 +31,7 @@ func GenerateContract(spec *Document, cfg ImportConfig) ([]byte, error) {
 	if err := writeServiceContract(&body, spec, cfg); err != nil {
 		return nil, err
 	}
+
 	writeModelsContract(&body, spec, cfg)
 
 	return formatSourceFile(pkgName, body.Bytes(), cfg.TypeMap, true)
@@ -38,7 +39,7 @@ func GenerateContract(spec *Document, cfg ImportConfig) ([]byte, error) {
 
 // GenerateSplitContract generates separate api.go (interface) and models.go (DTOs) files.
 //
-// References:
+// # References
 //   - OpenAPI 3.1.0 §4.8.7 Components Object: https://spec.openapis.org/oas/v3.1.0#components-object
 //   - OpenAPI 3.1.0 §4.8.24 Schema Object: https://spec.openapis.org/oas/v3.1.0#schema-object
 func GenerateSplitContract(spec *Document, cfg ImportConfig) (apiSource, modelsSource []byte, err error) {
@@ -51,7 +52,7 @@ func GenerateSplitContract(spec *Document, cfg ImportConfig) (apiSource, modelsS
 
 	apiSource, err = formatSourceFile(pkgName, apiBody.Bytes(), cfg.TypeMap, true)
 	if err != nil {
-		return nil, nil, fmt.Errorf("failed formatting api.go: %w", err)
+		return nil, nil, fmt.Errorf("vortex/openapi: format api.go: %w", err)
 	}
 
 	var modelsBody bytes.Buffer
@@ -60,7 +61,7 @@ func GenerateSplitContract(spec *Document, cfg ImportConfig) (apiSource, modelsS
 	if modelsBody.Len() > 0 {
 		modelsSource, err = formatSourceFile(pkgName, modelsBody.Bytes(), cfg.TypeMap, false)
 		if err != nil {
-			return nil, nil, fmt.Errorf("failed formatting models.go: %w", err)
+			return nil, nil, fmt.Errorf("vortex/openapi: format models.go: %w", err)
 		}
 	}
 
@@ -82,6 +83,7 @@ func writeModelsContract(buf *bytes.Buffer, spec *Document, cfg ImportConfig) {
 	if spec.Components == nil || len(spec.Components.Schemas) == 0 {
 		return
 	}
+
 	writeSchemas(buf, spec.Components.Schemas, cfg)
 }
 
@@ -97,7 +99,7 @@ func formatSourceFile(pkgName string, body []byte, typeMap map[string]string, in
 
 	formatted, err := format.Source(buf.Bytes())
 	if err != nil {
-		return buf.Bytes(), fmt.Errorf("failed formatting Go source: %w\nSource:\n%s", err, buf.String())
+		return buf.Bytes(), fmt.Errorf("vortex/openapi: format Go source: %w\nSource:\n%s", err, buf.String())
 	}
 
 	return formatted, nil
@@ -125,9 +127,11 @@ func writeImports(buf *bytes.Buffer, body []byte, typeMap map[string]string, inc
 	}
 
 	buf.WriteString("import (\n")
+
 	if includeAoni {
 		buf.WriteString("\t\"context\"\n")
 	}
+
 	if hasTime {
 		buf.WriteString("\t\"time\"\n")
 	}
@@ -139,6 +143,7 @@ func writeImports(buf *bytes.Buffer, body []byte, typeMap map[string]string, inc
 	if includeAoni {
 		buf.WriteString("\n\t\"github.com/lemon4ksan/aoni\"\n")
 	}
+
 	buf.WriteString(")\n\n")
 }
 
@@ -149,6 +154,7 @@ func collectCustomImports(body []byte, typeMap map[string]string) []string {
 		if idx == -1 {
 			continue
 		}
+
 		dotIdx := strings.LastIndex(rawType, ".")
 		if dotIdx <= idx {
 			continue
@@ -161,7 +167,9 @@ func collectCustomImports(body []byte, typeMap map[string]string) []string {
 			imports = append(imports, pkgPath)
 		}
 	}
+
 	slices.Sort(imports)
+
 	return imports
 }
 
@@ -169,17 +177,16 @@ func resolveBaseURL(spec *Document, cfg ImportConfig) string {
 	if cfg.BaseURL != "" {
 		return cfg.BaseURL
 	}
+
 	if len(spec.Servers) > 0 && spec.Servers[0].URL != "" {
 		return spec.Servers[0].URL
 	}
+
 	return ""
 }
 
 func writeServiceInterface(buf *bytes.Buffer, spec *Document, cfg ImportConfig, baseURL string) error {
-	serviceName := cfg.ServiceName
-	if serviceName == "" {
-		serviceName = "API"
-	}
+	serviceName := generic.Coalesce(cfg.ServiceName, "API")
 
 	writeServiceHeader(buf, spec, cfg, serviceName, baseURL)
 	fmt.Fprintf(buf, "type %s interface {\n", serviceName)
@@ -202,11 +209,13 @@ func writeServiceInterface(buf *bytes.Buffer, spec *Document, cfg ImportConfig, 
 			if op == nil || (cfg.SkipDeprecated && op.Deprecated) {
 				continue
 			}
+
 			writeOperationMethod(buf, spec, pathStr, httpMethod, pathItem, op, cfg, usedMethodNames)
 		}
 	}
 
 	fmt.Fprintf(buf, "}\n")
+
 	return nil
 }
 
@@ -231,9 +240,11 @@ func writeServiceHeader(buf *bytes.Buffer, spec *Document, cfg ImportConfig, ser
 	if persona := extString(exts, "x-vortex-persona"); persona != "" {
 		fmt.Fprintf(buf, "// @persona %q\n", persona)
 	}
+
 	if tlsSpec := extString(exts, "x-vortex-tlsspec"); tlsSpec != "" {
 		fmt.Fprintf(buf, "// @tls_spec %q\n", tlsSpec)
 	}
+
 	if engine := extString(exts, "x-vortex-engine"); engine != "" {
 		fmt.Fprintf(buf, "// @engine %s\n", engine)
 	}
@@ -253,6 +264,7 @@ func (d *Document) InfoExtensions() map[string]any {
 	if d == nil || d.Info == nil {
 		return nil
 	}
+
 	return d.Info.Extensions
 }
 
@@ -260,9 +272,11 @@ func isPathAllowed(pathStr string, cfg ImportConfig) bool {
 	if len(cfg.IncludePaths) > 0 && !matchesAnyPattern(pathStr, cfg.IncludePaths) {
 		return false
 	}
+
 	if len(cfg.ExcludePaths) > 0 && matchesAnyPattern(pathStr, cfg.ExcludePaths) {
 		return false
 	}
+
 	return true
 }
 
@@ -272,6 +286,7 @@ func matchesAnyPattern(target string, patterns []string) bool {
 			return true
 		}
 	}
+
 	return false
 }
 
@@ -315,14 +330,22 @@ func writeOperationDocumentation(buf *bytes.Buffer, methodName string, op *Opera
 	credsList := extStringList(op.Extensions, "x-required-credentials")
 	if len(credsList) > 0 {
 		fmt.Fprintf(buf, "\t// Security & Session Requirements (captured from traffic):\n")
+
 		for _, cred := range credsList {
 			fmt.Fprintf(buf, "\t//   - %s\n", cred)
 		}
+
 		fmt.Fprintf(buf, "\t//\n")
 	}
 }
 
-func writeOperationDirectives(buf *bytes.Buffer, pathStr, httpMethod string, op *Operation, spec *Document, pathItem *PathItem) {
+func writeOperationDirectives(
+	buf *bytes.Buffer,
+	pathStr, httpMethod string,
+	op *Operation,
+	spec *Document,
+	pathItem *PathItem,
+) {
 	cleanPath := strings.TrimPrefix(pathStr, "/")
 	fmt.Fprintf(buf, "\t// @%s %q\n", strings.ToLower(httpMethod), cleanPath)
 
@@ -350,15 +373,19 @@ func writeMethodExtensionDirectives(buf *bytes.Buffer, exts map[string]any, spec
 	if unwrap := extString(exts, "x-vortex-unwrap"); unwrap != "" {
 		fmt.Fprintf(buf, "\t// @unwrap %q\n", unwrap)
 	}
+
 	if callFn := extString(exts, "x-vortex-call"); callFn != "" {
 		fmt.Fprintf(buf, "\t// @call %q\n", callFn)
 	}
+
 	if extBool(exts, "x-vortex-idempotent") {
 		fmt.Fprintf(buf, "\t// @idempotent\n")
 	}
+
 	if extBool(exts, "x-vortex-coalesce") {
 		fmt.Fprintf(buf, "\t// @coalesce\n")
 	}
+
 	if extBool(exts, "x-vortex-etag") {
 		fmt.Fprintf(buf, "\t// @etag\n")
 	}
@@ -375,9 +402,11 @@ func resolveSinceVersion(exts map[string]any, spec *Document) string {
 	if since := extString(exts, "x-vortex-since"); since != "" {
 		return since
 	}
+
 	if spec != nil && spec.Info != nil && spec.Info.Version != "" {
 		return spec.Info.Version
 	}
+
 	return ""
 }
 
@@ -387,9 +416,11 @@ func writeMethodHeaders(buf *bytes.Buffer, exts map[string]any, spec *Document) 
 		if h.Name == "" || h.Value == "" || isGlobalHeader(spec, h.Name, h.Value) {
 			continue
 		}
+
 		headerKey := strings.ToLower(h.Name)
 		if !seen[headerKey] {
 			seen[headerKey] = true
+
 			fmt.Fprintf(buf, "\t// @header %q %q\n", h.Name, h.Value)
 		}
 	}
@@ -399,7 +430,9 @@ func isFormRequestBody(op *Operation) bool {
 	if op == nil || op.RequestBody == nil {
 		return false
 	}
+
 	c := op.RequestBody.Content
+
 	return c["application/x-www-form-urlencoded"] != nil || c["multipart/form-data"] != nil
 }
 
@@ -411,6 +444,7 @@ func buildParameterSignatures(
 	cfg ImportConfig,
 ) []string {
 	var sigs []string
+
 	sigs = append(sigs, "ctx context.Context")
 
 	for _, p := range params.path {
@@ -428,6 +462,7 @@ func buildParameterSignatures(
 		if p.Name != "" && (httpMethod != "GET" || (p.Name != expectedSnake && p.Name != pName)) {
 			sig += fmt.Sprintf(" // @query %q", p.Name)
 		}
+
 		sigs = append(sigs, sig)
 	}
 
@@ -438,6 +473,7 @@ func buildParameterSignatures(
 	}
 
 	sigs = append(sigs, "mods ...aoni.RequestModifier")
+
 	return sigs
 }
 
@@ -446,6 +482,7 @@ func resolveParamType(p *Parameter, cfg ImportConfig) string {
 		if mapped, ok := cfg.TypeMap[p.Name]; ok {
 			return shortTypeName(mapped)
 		}
+
 		if mapped, ok := cfg.TypeMap[strings.ToLower(p.Name)]; ok {
 			return shortTypeName(mapped)
 		}
@@ -489,13 +526,16 @@ func writeMethodSignature(buf *bytes.Buffer, methodName string, paramSig []strin
 
 func writeMultilineSignature(buf *bytes.Buffer, methodName string, paramSig []string, returnType string) {
 	fmt.Fprintf(buf, "\t%s(\n", methodName)
+
 	for _, p := range paramSig {
 		if idx := strings.Index(p, "//"); idx != -1 {
 			codePart := strings.TrimSpace(p[:idx])
 			commentPart := p[idx:]
 			fmt.Fprintf(buf, "\t\t%s, %s\n", codePart, commentPart)
+
 			continue
 		}
+
 		fmt.Fprintf(buf, "\t\t%s,\n", p)
 	}
 
@@ -513,6 +553,7 @@ func writeSingleLineSignature(buf *bytes.Buffer, methodName string, paramSig []s
 		fmt.Fprintf(buf, "\t%s(%s) error\n\n", methodName, paramsJoined)
 		return
 	}
+
 	fmt.Fprintf(buf, "\t%s(%s) (%s, error)\n\n", methodName, paramsJoined, returnType)
 }
 
@@ -525,9 +566,11 @@ func determineReturnType(op *Operation, cfg ImportConfig) string {
 	if resp == nil {
 		resp = op.Responses["201"]
 	}
+
 	if resp == nil {
 		resp = op.Responses["default"]
 	}
+
 	if resp == nil || resp.Content == nil {
 		return ""
 	}
@@ -546,6 +589,7 @@ func determineReturnType(op *Operation, cfg ImportConfig) string {
 		if s.Items != nil && s.Items.Ref != "" {
 			return "[]*" + toPascalCase(path.Base(s.Items.Ref))
 		}
+
 		return "[]" + mapSchemaType(s.Items, cfg)
 	}
 
@@ -565,7 +609,9 @@ func extString(exts map[string]any, key string) string {
 	if exts == nil {
 		return ""
 	}
+
 	v, _ := exts[key].(string)
+
 	return v
 }
 
@@ -573,7 +619,9 @@ func extBool(exts map[string]any, key string) bool {
 	if exts == nil {
 		return false
 	}
+
 	v, _ := exts[key].(bool)
+
 	return v
 }
 
@@ -581,6 +629,7 @@ func extStringList(exts map[string]any, key string) []string {
 	if exts == nil {
 		return nil
 	}
+
 	switch raw := exts[key].(type) {
 	case []string:
 		return raw
@@ -591,7 +640,9 @@ func extStringList(exts map[string]any, key string) []string {
 				res = append(res, s)
 			}
 		}
+
 		return res
+
 	default:
 		return nil
 	}
@@ -617,6 +668,7 @@ func extHeaders(exts map[string]any, key string) []HeaderEntry {
 			}
 		}
 	}
+
 	return res
 }
 
@@ -626,6 +678,7 @@ func isGlobalHeader(spec *Document, name, val string) bool {
 			return true
 		}
 	}
+
 	return false
 }
 
@@ -646,6 +699,7 @@ func extractOperationParameters(
 	if pathItem != nil {
 		combined = append(combined, pathItem.Parameters...)
 	}
+
 	if op != nil {
 		combined = append(combined, op.Parameters...)
 	}
@@ -674,6 +728,7 @@ func extractOperationParameters(
 	}
 
 	extractPathSegmentParams(pathStr, seen, &res.path)
+
 	return res
 }
 
@@ -696,6 +751,7 @@ func extractPathSegmentParams(pathStr string, seen map[string]bool, pathParams *
 		key := "path:" + varName
 		if !seen[key] && !seen["path:"+strings.ToLower(varName)] {
 			seen[key] = true
+
 			*pathParams = append(*pathParams, &Parameter{
 				Name:     varName,
 				In:       "path",

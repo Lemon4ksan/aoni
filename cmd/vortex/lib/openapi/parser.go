@@ -16,12 +16,12 @@ import (
 
 // ParseSpec parses an OpenAPI 3.1, 3.0, or Swagger 2.0 document from YAML or JSON bytes into a normalized Document AST.
 //
-// References:
+// # References
 //   - OpenAPI 3.1.0 Specification: https://spec.openapis.org/oas/v3.1.0
 //   - Swagger 2.0 Specification: https://swagger.io/specification/v2/
 func ParseSpec(data []byte) (*Document, error) {
 	if len(data) == 0 {
-		return nil, errors.New("empty openapi specification data")
+		return nil, errors.New("vortex/openapi: empty specification data")
 	}
 
 	rawNode, err := parseYAMLOrJSONNode(data)
@@ -31,7 +31,7 @@ func ParseSpec(data []byte) (*Document, error) {
 
 	var doc Document
 	if err := rawNode.Decode(&doc); err != nil {
-		return nil, fmt.Errorf("failed to decode openapi document: %w", err)
+		return nil, fmt.Errorf("vortex/openapi: decode document: %w", err)
 	}
 
 	extractExtensions(rawNode, &doc)
@@ -53,7 +53,7 @@ func parseYAMLOrJSONNode(data []byte) (*yaml.Node, error) {
 	}
 
 	if err := json.Unmarshal(data, &node); err != nil {
-		return nil, fmt.Errorf("failed to parse openapi specification: %w", err)
+		return nil, fmt.Errorf("vortex/openapi: parse specification: %w", err)
 	}
 
 	return &node, nil
@@ -76,7 +76,8 @@ func normalizeSwagger2(doc *Document) {
 
 // normalizeSwaggerServers handles the Swagger 2.0 endpoint fragmentation quirk.
 //
-// Quirk (Swagger 2.0 §5.1): Swagger 2.0 specifies base URLs across three separate root fields:
+// # Quirk
+// Swagger 2.0 §5.1 fragments base URLs across three separate root fields:
 // 'host' ("api.example.com"), 'basePath' ("/v1"), and 'schemes' (["https"]).
 // OpenAPI 3.x consolidates these into the unified 'servers' array (`https://api.example.com/v1`).
 func normalizeSwaggerServers(doc *Document) {
@@ -93,6 +94,7 @@ func normalizeSwaggerServers(doc *Document) {
 	if doc.Host != "" {
 		serverURL = scheme + "://" + doc.Host
 	}
+
 	if doc.BasePath != "" {
 		serverURL = strings.TrimSuffix(serverURL, "/") + "/" + strings.TrimPrefix(doc.BasePath, "/")
 	}
@@ -110,18 +112,22 @@ func ensureComponents(doc *Document) {
 			Parameters:      make(map[string]*Parameter),
 			SecuritySchemes: make(map[string]*SecurityScheme),
 		}
+
 		return
 	}
 
 	if doc.Components.Schemas == nil {
 		doc.Components.Schemas = make(map[string]*Schema)
 	}
+
 	if doc.Components.Responses == nil {
 		doc.Components.Responses = make(map[string]*Response)
 	}
+
 	if doc.Components.Parameters == nil {
 		doc.Components.Parameters = make(map[string]*Parameter)
 	}
+
 	if doc.Components.SecuritySchemes == nil {
 		doc.Components.SecuritySchemes = make(map[string]*SecurityScheme)
 	}
@@ -129,13 +135,15 @@ func ensureComponents(doc *Document) {
 
 // normalizeSwaggerDefinitions relocates models from Swagger 2.0 'definitions' to OpenAPI 3.x 'components.schemas'.
 //
-// Quirk (Swagger 2.0 §5.17 vs OpenAPI 3.1 §4.8.7): Models in 2.0 are stored under root 'definitions'
-// and referenced via '#/definitions/{Model}'. OpenAPI 3.x requires '#/components/schemas/{Model}'.
+// # Quirk
+// Swagger 2.0 §5.17 stores models under root 'definitions' with references '#/definitions/{Model}'.
+// OpenAPI 3.x §4.8.7 requires '#/components/schemas/{Model}'.
 func normalizeSwaggerDefinitions(doc *Document) {
 	for name, schema := range doc.Definitions {
 		if schema == nil {
 			continue
 		}
+
 		normalizeSchemaRefs(schema)
 		doc.Components.Schemas[name] = schema
 	}
@@ -147,6 +155,7 @@ func normalizeSwaggerParameters(doc *Document) {
 		if param == nil {
 			continue
 		}
+
 		normalizeSchemaRefs(param.Schema)
 		doc.Components.Parameters[name] = param
 	}
@@ -154,26 +163,30 @@ func normalizeSwaggerParameters(doc *Document) {
 
 // normalizeSwaggerResponses upgrades legacy 2.0 response schema wrappers into 3.x media type containers.
 //
-// Quirk (Swagger 2.0 §5.12 vs OpenAPI 3.1 §4.8.17): In Swagger 2.0, responses define schemas directly
-// via `response.schema`. In OpenAPI 3.x, responses encapsulate payloads in `response.content["application/json"].schema`.
+// # Quirk
+// In Swagger 2.0 §5.12, responses define schemas directly via `response.schema`.
+// In OpenAPI 3.x §4.8.17, responses encapsulate payloads in `response.content["application/json"].schema`.
 func normalizeSwaggerResponses(doc *Document) {
 	for name, resp := range doc.Responses {
 		if resp == nil {
 			continue
 		}
+
 		if resp.Schema != nil && len(resp.Content) == 0 {
 			normalizeSchemaRefs(resp.Schema)
 			resp.Content = map[string]*MediaType{
 				"application/json": {Schema: resp.Schema},
 			}
 		}
+
 		doc.Components.Responses[name] = resp
 	}
 }
 
 // normalizeSwaggerSecurity maps legacy OAuth2 flow names to OpenAPI 3.x OAuthFlows.
 //
-// Quirk (Swagger 2.0 §5.23 vs OpenAPI 3.1 §4.8.27): OAuth2 flow identifiers were changed:
+// # Quirk
+// Swagger 2.0 §5.23 vs OpenAPI 3.1 §4.8.27 OAuth2 flow identifiers were changed:
 //   - 'accessCode'  -> 'authorizationCode'
 //   - 'application' -> 'clientCredentials'
 func normalizeSwaggerSecurity(doc *Document) {
@@ -181,9 +194,11 @@ func normalizeSwaggerSecurity(doc *Document) {
 		if sec == nil {
 			continue
 		}
+
 		if sec.Type == "oauth2" && sec.Flow != "" && sec.Flows == nil {
 			sec.Flows = mapSwaggerOAuthFlow(sec)
 		}
+
 		doc.Components.SecuritySchemes[name] = sec
 	}
 }
@@ -215,10 +230,12 @@ func normalizeSwaggerOperations(doc *Document) {
 		if pathItem == nil {
 			continue
 		}
+
 		for _, op := range pathItem.OperationsMap() {
 			if op == nil {
 				continue
 			}
+
 			normalizeOperationParameters(op)
 			normalizeOperationResponses(op)
 		}
@@ -227,9 +244,9 @@ func normalizeSwaggerOperations(doc *Document) {
 
 // normalizeOperationParameters converts legacy `in: body` parameters to OpenAPI 3.x `RequestBody`.
 //
-// Quirk (Swagger 2.0 §5.9 vs OpenAPI 3.1 §4.8.13): Swagger 2.0 lacks a dedicated RequestBody entity,
-// placing payload schemas inside the parameter list with `in: "body"`. We synthesize a canonical
-// OpenAPI 3.x RequestBody with `application/json` content type and prune `in: body` from parameter list.
+// # Quirk
+// Swagger 2.0 §5.9 lacks a dedicated RequestBody entity, placing payload schemas inside the parameter list with `in: "body"`.
+// We synthesize a canonical OpenAPI 3.x RequestBody with `application/json` content type and prune `in: body` from the parameter list.
 func normalizeOperationParameters(op *Operation) {
 	for _, p := range op.Parameters {
 		if p == nil {
@@ -247,11 +264,11 @@ func normalizeOperationParameters(op *Operation) {
 					},
 				}
 			}
+
 			continue
 		}
 
-		// Quirk (Swagger 2.0 §5.9): In Swagger 2.0, primitive parameters use 'type' directly on Parameter
-		// rather than nested Schema. In OpenAPI 3, parameters always contain a Schema object.
+		// Swagger 2.0 primitive parameters use 'type' directly on Parameter rather than nested Schema.
 		if p.Schema == nil && p.Type != "" {
 			p.Schema = &Schema{
 				Type:   TypeArray{p.Type},
@@ -259,6 +276,7 @@ func normalizeOperationParameters(op *Operation) {
 				Items:  p.Items,
 			}
 		}
+
 		normalizeSchemaRefs(p.Schema)
 	}
 
@@ -289,29 +307,39 @@ func normalizeOperationResponses(op *Operation) {
 }
 
 // normalizeSchemaRefs recursively rewrites '#/definitions/' references to '#/components/schemas/'.
+// It uses a visited set to safely handle recursive / self-referencing schemas without infinite recursion.
 func normalizeSchemaRefs(s *Schema) {
-	if s == nil {
+	visited := make(map[*Schema]bool)
+	normalizeSchemaRefsSafe(s, visited)
+}
+
+func normalizeSchemaRefsSafe(s *Schema, visited map[*Schema]bool) {
+	if s == nil || visited[s] {
 		return
 	}
+
+	visited[s] = true
 
 	if strings.HasPrefix(s.Ref, "#/definitions/") {
 		s.Ref = "#/components/schemas/" + strings.TrimPrefix(s.Ref, "#/definitions/")
 	}
 
 	for _, prop := range s.Properties {
-		normalizeSchemaRefs(prop)
+		normalizeSchemaRefsSafe(prop, visited)
 	}
 
-	normalizeSchemaRefs(s.Items)
+	normalizeSchemaRefsSafe(s.Items, visited)
 
 	for _, sub := range s.AllOf {
-		normalizeSchemaRefs(sub)
+		normalizeSchemaRefsSafe(sub, visited)
 	}
+
 	for _, sub := range s.OneOf {
-		normalizeSchemaRefs(sub)
+		normalizeSchemaRefsSafe(sub, visited)
 	}
+
 	for _, sub := range s.AnyOf {
-		normalizeSchemaRefs(sub)
+		normalizeSchemaRefsSafe(sub, visited)
 	}
 }
 
@@ -342,12 +370,15 @@ func unwrapMappingNode(node *yaml.Node) *yaml.Node {
 	if node == nil {
 		return nil
 	}
+
 	if node.Kind == yaml.DocumentNode && len(node.Content) > 0 {
 		node = node.Content[0]
 	}
+
 	if node.Kind != yaml.MappingNode {
 		return nil
 	}
+
 	return node
 }
 
@@ -358,11 +389,13 @@ func extractMapExtensions(mapNode *yaml.Node) map[string]any {
 		if !strings.HasPrefix(k, "x-") {
 			continue
 		}
+
 		var val any
 		if err := mapNode.Content[i+1].Decode(&val); err == nil {
 			exts[k] = val
 		}
 	}
+
 	return exts
 }
 
@@ -396,6 +429,7 @@ func getPathItemOp(p *PathItem, method string) *Operation {
 	if p == nil {
 		return nil
 	}
+
 	switch method {
 	case "GET":
 		return p.Get

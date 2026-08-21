@@ -200,6 +200,7 @@ func HARToOpenAPI(data []byte) (*openapi.Document, error) {
 					if op.RequestBody.Content == nil {
 						op.RequestBody.Content = make(map[string]*openapi.MediaType)
 					}
+
 					op.RequestBody.Content["application/json"] = &openapi.MediaType{
 						Schema: schemaRef,
 					}
@@ -268,11 +269,13 @@ func HARToOpenAPI(data []byte) (*openapi.Document, error) {
 					Schema: respSchemaRef,
 				}
 			}
+
 			op.Responses[statusStr] = newResp
 		} else if respSchemaRef != nil {
 			if existingResp.Content == nil {
 				existingResp.Content = make(map[string]*openapi.MediaType)
 			}
+
 			existingResp.Content["application/json"] = &openapi.MediaType{
 				Schema: respSchemaRef,
 			}

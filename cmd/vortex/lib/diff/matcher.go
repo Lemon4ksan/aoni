@@ -101,13 +101,21 @@ func (e *DiffEngine) CompareWithOptions(
 	for _, rop := range remoteOps {
 		if !matchedRemote[rop] {
 			severity := SeverityGhost
-			msg := fmt.Sprintf("Remote specification defines endpoint %s %s not implemented in Go contract", rop.httpMethod, rop.rawPath)
+			msg := fmt.Sprintf(
+				"Remote specification defines endpoint %s %s not implemented in Go contract",
+				rop.httpMethod,
+				rop.rawPath,
+			)
 			sugg := fmt.Sprintf("Run `vortex spec import` to generate method for `%s`", rop.rawPath)
 
 			remoteDesc := fmt.Sprintf("%s %s", rop.httpMethod, rop.rawPath)
 			if rop.deprecated {
 				severity = SeverityNonBreaking
-				msg = fmt.Sprintf("Remote specification contains deprecated endpoint %s %s", rop.httpMethod, rop.rawPath)
+				msg = fmt.Sprintf(
+					"Remote specification contains deprecated endpoint %s %s",
+					rop.httpMethod,
+					rop.rawPath,
+				)
 				sugg = "Ignore or import as deprecated"
 			}
 

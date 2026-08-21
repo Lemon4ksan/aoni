@@ -11,8 +11,9 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/lemon4ksan/aoni/cmd/vortex/lib/oracle/spec"
 	"github.com/lemon4ksan/foundation/ast/js"
+
+	"github.com/lemon4ksan/aoni/cmd/vortex/lib/oracle/spec"
 )
 
 // GenerateJS compiles an OracleSpec AST into a standalone, universal Node.js sidecar script using aoni/ast/js.

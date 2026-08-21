@@ -2,13 +2,6 @@
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
-// Package openapi provides parsing, loading, 3-way specification merging,
-// and declarative Go contract generation for OpenAPI 2.0, 3.0, 3.1 and HAR specifications.
-//
-// References:
-//   - OpenAPI 3.1.0 Specification: https://spec.openapis.org/oas/v3.1.0
-//   - OpenAPI 3.0.3 Specification: https://spec.openapis.org/oas/v3.0.3
-//   - Swagger 2.0 Specification: https://swagger.io/specification/v2/
 package openapi
 
 import (
@@ -20,15 +13,15 @@ import (
 
 // Document represents a complete OpenAPI root document (OpenAPI 3.1/3.0 & normalized Swagger 2.0).
 //
-// References:
-//   - OpenAPI 3.1.0 §4.8.1 OpenAPI Object
-//   - OpenAPI 3.0.3 §4.8.1 OpenAPI Object
-//   - Swagger 2.0 §5.1 Swagger Object
+// # References
+//   - OpenAPI 3.1.0 §4.8.1 OpenAPI Object: https://spec.openapis.org/oas/v3.1.0#openapi-object
+//   - OpenAPI 3.0.3 §4.8.1 OpenAPI Object: https://spec.openapis.org/oas/v3.0.3#openapi-object
+//   - Swagger 2.0 §5.1 Swagger Object: https://swagger.io/specification/v2/#swagger-object
 type Document struct {
 	OpenAPI           string                `json:"openapi,omitempty"           yaml:"openapi,omitempty"`
 	Swagger           string                `json:"swagger,omitempty"           yaml:"swagger,omitempty"`
 	Info              *Info                 `json:"info,omitempty"              yaml:"info,omitempty"`
-	JSONSchemaDialect string                `json:"jsonSchemaDialect,omitempty"  yaml:"jsonSchemaDialect,omitempty"`
+	JSONSchemaDialect string                `json:"jsonSchemaDialect,omitempty" yaml:"jsonSchemaDialect,omitempty"`
 	Servers           []Server              `json:"servers,omitempty"           yaml:"servers,omitempty"`
 	Paths             map[string]*PathItem  `json:"paths,omitempty"             yaml:"paths,omitempty"`
 	Webhooks          map[string]*PathItem  `json:"webhooks,omitempty"          yaml:"webhooks,omitempty"`
@@ -51,61 +44,71 @@ type Document struct {
 
 // Info provides metadata about the API.
 //
-// References:
-//   - OpenAPI 3.1.0 §4.8.2 Info Object
-//   - Swagger 2.0 §5.2 Info Object
+// # References
+//   - OpenAPI 3.1.0 §4.8.2 Info Object: https://spec.openapis.org/oas/v3.1.0#info-object
+//   - Swagger 2.0 §5.2 Info Object: https://swagger.io/specification/v2/#info-object
 type Info struct {
 	Title          string         `json:"title"                    yaml:"title"`
 	Summary        string         `json:"summary,omitempty"        yaml:"summary,omitempty"`
 	Description    string         `json:"description,omitempty"    yaml:"description,omitempty"`
 	TermsOfService string         `json:"termsOfService,omitempty" yaml:"termsOfService,omitempty"`
-	Contact        *Contact       `json:"contact,omitempty"       yaml:"contact,omitempty"`
-	License        *License       `json:"license,omitempty"       yaml:"license,omitempty"`
+	Contact        *Contact       `json:"contact,omitempty"        yaml:"contact,omitempty"`
+	License        *License       `json:"license,omitempty"        yaml:"license,omitempty"`
 	Version        string         `json:"version"                  yaml:"version"`
 	Extensions     map[string]any `json:"-"                        yaml:"-"`
 }
 
 func (i *Info) MarshalJSON() ([]byte, error) {
 	type Alias Info
+
 	m := make(map[string]any)
+
 	b, err := json.Marshal((*Alias)(i))
 	if err != nil {
 		return nil, err
 	}
+
 	if err := json.Unmarshal(b, &m); err != nil {
 		return nil, err
 	}
+
 	for k, v := range i.Extensions {
 		if strings.HasPrefix(k, "x-") {
 			m[k] = v
 		}
 	}
+
 	return json.Marshal(m)
 }
 
 func (i *Info) MarshalYAML() (any, error) {
 	type Alias Info
+
 	m := make(map[string]any)
+
 	b, err := yaml.Marshal((*Alias)(i))
 	if err != nil {
 		return nil, err
 	}
+
 	if err := yaml.Unmarshal(b, &m); err != nil {
 		return nil, err
 	}
+
 	for k, v := range i.Extensions {
 		if strings.HasPrefix(k, "x-") {
 			m[k] = v
 		}
 	}
+
 	return m, nil
 }
 
 // Contact contains contact information for the exposed API.
 //
-// References:
-//   - OpenAPI 3.1.0 §4.8.3 Contact Object
-//   - Swagger 2.0 §5.3 Contact Object
+// # References
+//   - OpenAPI 3.1.0 §4.8.3 Contact Object: https://spec.openapis.org/oas/v3.1.0#contact-object
+//   - Swagger 2.0 §5.3 Contact Object: https://swagger.io/specification/v2/#contact-object
 type Contact struct {
 	Name  string `json:"name,omitempty"  yaml:"name,omitempty"`
 	URL   string `json:"url,omitempty"   yaml:"url,omitempty"`
@@ -114,9 +117,9 @@ type Contact struct {
 
 // License contains license information for the exposed API.
 //
-// References:
-//   - OpenAPI 3.1.0 §4.8.4 License Object
-//   - Swagger 2.0 §5.4 License Object
+// # References
+//   - OpenAPI 3.1.0 §4.8.4 License Object: https://spec.openapis.org/oas/v3.1.0#license-object
+//   - Swagger 2.0 §5.4 License Object: https://swagger.io/specification/v2/#license-object
 type License struct {
 	Name       string `json:"name"                 yaml:"name"`
 	Identifier string `json:"identifier,omitempty" yaml:"identifier,omitempty"`
@@ -125,7 +128,9 @@ type License struct {
 
 // Server represents an API host and connection base path.
 //
-// Reference: OpenAPI 3.1.0 §4.8.5 Server Object
+// # References
+//   - OpenAPI 3.1.0 §4.8.5 Server Object: https://spec.openapis.org/oas/v3.1.0#server-object
+//   - RFC 3986 §URI Generic Syntax: https://datatracker.ietf.org/doc/html/rfc3986
 type Server struct {
 	URL         string                    `json:"url"                   yaml:"url"`
 	Description string                    `json:"description,omitempty" yaml:"description,omitempty"`
@@ -134,7 +139,9 @@ type Server struct {
 
 // ServerVariable describes a variable for server URL template substitution.
 //
-// Reference: OpenAPI 3.1.0 §4.8.6 Server Variable Object
+// # References
+//   - OpenAPI 3.1.0 §4.8.6 Server Variable Object: https://spec.openapis.org/oas/v3.1.0#server-variable-object
+//   - RFC 6570 §URI Template: https://datatracker.ietf.org/doc/html/rfc6570
 type ServerVariable struct {
 	Enum        []string `json:"enum,omitempty"        yaml:"enum,omitempty"`
 	Default     string   `json:"default"               yaml:"default"`
@@ -143,9 +150,9 @@ type ServerVariable struct {
 
 // PathItem describes the operations available on a single path route.
 //
-// References:
-//   - OpenAPI 3.1.0 §4.8.9 Path Item Object
-//   - Swagger 2.0 §5.6 Path Item Object
+// # References
+//   - OpenAPI 3.1.0 §4.8.9 Path Item Object: https://spec.openapis.org/oas/v3.1.0#path-item-object
+//   - Swagger 2.0 §5.6 Path Item Object: https://swagger.io/specification/v2/#path-item-object
 type PathItem struct {
 	Ref         string       `json:"$ref,omitempty"        yaml:"$ref,omitempty"`
 	Summary     string       `json:"summary,omitempty"     yaml:"summary,omitempty"`
@@ -168,35 +175,44 @@ func (p *PathItem) OperationsMap() map[string]*Operation {
 	if p.Get != nil {
 		m["GET"] = p.Get
 	}
+
 	if p.Post != nil {
 		m["POST"] = p.Post
 	}
+
 	if p.Put != nil {
 		m["PUT"] = p.Put
 	}
+
 	if p.Delete != nil {
 		m["DELETE"] = p.Delete
 	}
+
 	if p.Patch != nil {
 		m["PATCH"] = p.Patch
 	}
+
 	if p.Head != nil {
 		m["HEAD"] = p.Head
 	}
+
 	if p.Options != nil {
 		m["OPTIONS"] = p.Options
 	}
+
 	if p.Trace != nil {
 		m["TRACE"] = p.Trace
 	}
+
 	return m
 }
 
 // Operation describes a single API operation on a path.
 //
-// References:
-//   - OpenAPI 3.1.0 §4.8.10 Operation Object
-//   - Swagger 2.0 §5.7 Operation Object
+// # References
+//   - OpenAPI 3.1.0 §4.8.10 Operation Object: https://spec.openapis.org/oas/v3.1.0#operation-object
+//   - Swagger 2.0 §5.7 Operation Object: https://swagger.io/specification/v2/#operation-object
+//   - RFC 9110 §9 HTTP Method Definitions: https://datatracker.ietf.org/doc/html/rfc9110#section-9
 type Operation struct {
 	Tags         []string              `json:"tags,omitempty"         yaml:"tags,omitempty"`
 	Summary      string                `json:"summary,omitempty"      yaml:"summary,omitempty"`
@@ -217,58 +233,70 @@ type Operation struct {
 
 func (op *Operation) MarshalJSON() ([]byte, error) {
 	type Alias Operation
+
 	m := make(map[string]any)
+
 	b, err := json.Marshal((*Alias)(op))
 	if err != nil {
 		return nil, err
 	}
+
 	if err := json.Unmarshal(b, &m); err != nil {
 		return nil, err
 	}
+
 	for k, v := range op.Extensions {
 		if strings.HasPrefix(k, "x-") {
 			m[k] = v
 		}
 	}
+
 	return json.Marshal(m)
 }
 
 func (op *Operation) MarshalYAML() (any, error) {
 	type Alias Operation
+
 	m := make(map[string]any)
+
 	b, err := yaml.Marshal((*Alias)(op))
 	if err != nil {
 		return nil, err
 	}
+
 	if err := yaml.Unmarshal(b, &m); err != nil {
 		return nil, err
 	}
+
 	for k, v := range op.Extensions {
 		if strings.HasPrefix(k, "x-") {
 			m[k] = v
 		}
 	}
+
 	return m, nil
 }
 
 // Parameter describes a single operation parameter (path, query, header, cookie, or formData/body in Swagger 2.0).
 //
-// References:
-//   - OpenAPI 3.1.0 §4.8.12 Parameter Object
-//   - Swagger 2.0 §5.9 Parameter Object
+// # References
+//   - OpenAPI 3.1.0 §4.8.12 Parameter Object: https://spec.openapis.org/oas/v3.1.0#parameter-object
+//   - Swagger 2.0 §5.9 Parameter Object: https://swagger.io/specification/v2/#parameter-object
+//   - RFC 6265 §HTTP State Management Mechanism (Cookies): https://datatracker.ietf.org/doc/html/rfc6265
 type Parameter struct {
-	Name            string         `json:"name"                      yaml:"name"`
-	In              string         `json:"in"                        yaml:"in"` // "path", "query", "header", "cookie", "formData", "body"
-	Description     string         `json:"description,omitempty"     yaml:"description,omitempty"`
-	Required        bool           `json:"required,omitempty"        yaml:"required,omitempty"`
-	Deprecated      bool           `json:"deprecated,omitempty"      yaml:"deprecated,omitempty"`
-	AllowEmptyValue bool           `json:"allowEmptyValue,omitempty" yaml:"allowEmptyValue,omitempty"`
-	Style           string         `json:"style,omitempty"           yaml:"style,omitempty"`
-	Explode         *bool          `json:"explode,omitempty"         yaml:"explode,omitempty"`
-	AllowReserved   bool           `json:"allowReserved,omitempty"   yaml:"allowReserved,omitempty"`
-	Schema          *Schema        `json:"schema,omitempty"          yaml:"schema,omitempty"`
-	Example         any            `json:"example,omitempty"         yaml:"example,omitempty"`
-	Examples        map[string]any `json:"examples,omitempty"        yaml:"examples,omitempty"`
+	Name            string                `json:"name"                      yaml:"name"`
+	In              string                `json:"in"                        yaml:"in"` // "path", "query", "header", "cookie", "formData", "body"
+	Description     string                `json:"description,omitempty"     yaml:"description,omitempty"`
+	Required        bool                  `json:"required,omitempty"        yaml:"required,omitempty"`
+	Deprecated      bool                  `json:"deprecated,omitempty"      yaml:"deprecated,omitempty"`
+	AllowEmptyValue bool                  `json:"allowEmptyValue,omitempty" yaml:"allowEmptyValue,omitempty"`
+	Style           string                `json:"style,omitempty"           yaml:"style,omitempty"`
+	Explode         *bool                 `json:"explode,omitempty"         yaml:"explode,omitempty"`
+	AllowReserved   bool                  `json:"allowReserved,omitempty"   yaml:"allowReserved,omitempty"`
+	Schema          *Schema               `json:"schema,omitempty"          yaml:"schema,omitempty"`
+	Example         any                   `json:"example,omitempty"         yaml:"example,omitempty"`
+	Examples        map[string]*Example   `json:"examples,omitempty"        yaml:"examples,omitempty"`
+	Content         map[string]*MediaType `json:"content,omitempty"         yaml:"content,omitempty"`
 
 	// Swagger 2.0 legacy fields
 	Type             string  `json:"type,omitempty"             yaml:"type,omitempty"`
@@ -281,53 +309,89 @@ type Parameter struct {
 
 // RequestBody describes a single request body.
 //
-// Reference: OpenAPI 3.1.0 §4.8.13 Request Body Object
+// # References
+//   - OpenAPI 3.1.0 §4.8.13 Request Body Object: https://spec.openapis.org/oas/v3.1.0#request-body-object
+//   - RFC 9110 §8.2 Message Body: https://datatracker.ietf.org/doc/html/rfc9110#section-8.2
 type RequestBody struct {
 	Description string                `json:"description,omitempty" yaml:"description,omitempty"`
-	Content     map[string]*MediaType `json:"content"                yaml:"content"`
+	Content     map[string]*MediaType `json:"content"               yaml:"content"`
 	Required    bool                  `json:"required,omitempty"    yaml:"required,omitempty"`
 	Ref         string                `json:"$ref,omitempty"        yaml:"$ref,omitempty"`
 }
 
 // MediaType provides schema and examples for a specific media type (e.g. application/json).
 //
-// Reference: OpenAPI 3.1.0 §4.8.14 Media Type Object
+// # References
+//   - OpenAPI 3.1.0 §4.8.14 Media Type Object: https://spec.openapis.org/oas/v3.1.0#media-type-object
+//   - RFC 6838 §Media Type Specifications: https://datatracker.ietf.org/doc/html/rfc6838
 type MediaType struct {
-	Schema   *Schema        `json:"schema,omitempty"   yaml:"schema,omitempty"`
-	Example  any            `json:"example,omitempty"  yaml:"example,omitempty"`
-	Examples map[string]any `json:"examples,omitempty" yaml:"examples,omitempty"`
-	Encoding map[string]any `json:"encoding,omitempty" yaml:"encoding,omitempty"`
+	Schema   *Schema              `json:"schema,omitempty"   yaml:"schema,omitempty"`
+	Example  any                  `json:"example,omitempty"  yaml:"example,omitempty"`
+	Examples map[string]*Example  `json:"examples,omitempty" yaml:"examples,omitempty"`
+	Encoding map[string]*Encoding `json:"encoding,omitempty" yaml:"encoding,omitempty"`
+}
+
+// Encoding describes a single encoding definition applied to a single schema property for multipart and form-urlencoded bodies.
+//
+// # References
+//   - OpenAPI 3.1.0 §4.8.15 Encoding Object: https://spec.openapis.org/oas/v3.1.0#encoding-object
+//   - RFC 7578 §Returning Values from Forms: multipart/form-data: https://datatracker.ietf.org/doc/html/rfc7578
+type Encoding struct {
+	ContentType   string             `json:"contentType,omitempty"   yaml:"contentType,omitempty"`
+	Headers       map[string]*Header `json:"headers,omitempty"       yaml:"headers,omitempty"`
+	Style         string             `json:"style,omitempty"         yaml:"style,omitempty"`
+	Explode       *bool              `json:"explode,omitempty"       yaml:"explode,omitempty"`
+	AllowReserved bool               `json:"allowReserved,omitempty" yaml:"allowReserved,omitempty"`
 }
 
 // Response describes a single response from an API Operation.
 //
-// References:
-//   - OpenAPI 3.1.0 §4.8.17 Response Object
-//   - Swagger 2.0 §5.12 Response Object
+// # References
+//   - OpenAPI 3.1.0 §4.8.17 Response Object: https://spec.openapis.org/oas/v3.1.0#response-object
+//   - Swagger 2.0 §5.12 Response Object: https://swagger.io/specification/v2/#response-object
+//   - RFC 9110 §15 Status Codes: https://datatracker.ietf.org/doc/html/rfc9110#section-15
 type Response struct {
-	Description string                `json:"description"           yaml:"description"`
-	Headers     map[string]*Header    `json:"headers,omitempty"     yaml:"headers,omitempty"`
-	Content     map[string]*MediaType `json:"content,omitempty"     yaml:"content,omitempty"`
-	Links       map[string]*Link      `json:"links,omitempty"       yaml:"links,omitempty"`
-	Ref         string                `json:"$ref,omitempty"        yaml:"$ref,omitempty"`
+	Description string                `json:"description"       yaml:"description"`
+	Headers     map[string]*Header    `json:"headers,omitempty" yaml:"headers,omitempty"`
+	Content     map[string]*MediaType `json:"content,omitempty" yaml:"content,omitempty"`
+	Links       map[string]*Link      `json:"links,omitempty"   yaml:"links,omitempty"`
+	Ref         string                `json:"$ref,omitempty"    yaml:"$ref,omitempty"`
 
 	// Swagger 2.0 legacy schema field
-	Schema   *Schema        `json:"schema,omitempty"   yaml:"schema,omitempty"`
-	Examples map[string]any `json:"examples,omitempty" yaml:"examples,omitempty"`
+	Schema   *Schema             `json:"schema,omitempty"   yaml:"schema,omitempty"`
+	Examples map[string]*Example `json:"examples,omitempty" yaml:"examples,omitempty"`
+}
+
+// Example represents an example of a parameter, payload, or response.
+//
+// # References
+//   - OpenAPI 3.1.0 §4.8.20 Example Object: https://spec.openapis.org/oas/v3.1.0#example-object
+//   - Swagger 2.0 §5.13 Example Object: https://swagger.io/specification/v2/#example-object
+type Example struct {
+	Summary       string `json:"summary,omitempty"       yaml:"summary,omitempty"`
+	Description   string `json:"description,omitempty"   yaml:"description,omitempty"`
+	Value         any    `json:"value,omitempty"         yaml:"value,omitempty"`
+	ExternalValue string `json:"externalValue,omitempty" yaml:"externalValue,omitempty"`
 }
 
 // Header describes a response or parameter header.
 //
-// References:
-//   - OpenAPI 3.1.0 §4.8.18 Header Object
-//   - Swagger 2.0 §5.14 Header Object
+// # References
+//   - OpenAPI 3.1.0 §4.8.18 Header Object: https://spec.openapis.org/oas/v3.1.0#header-object
+//   - Swagger 2.0 §5.14 Header Object: https://swagger.io/specification/v2/#header-object
+//   - RFC 9110 §6.3 Field Names: https://datatracker.ietf.org/doc/html/rfc9110#section-6.3
 type Header struct {
-	Description string  `json:"description,omitempty" yaml:"description,omitempty"`
-	Required    bool    `json:"required,omitempty"    yaml:"required,omitempty"`
-	Deprecated  bool    `json:"deprecated,omitempty"  yaml:"deprecated,omitempty"`
-	Style       string  `json:"style,omitempty"       yaml:"style,omitempty"`
-	Explode     *bool   `json:"explode,omitempty"     yaml:"explode,omitempty"`
-	Schema      *Schema `json:"schema,omitempty"      yaml:"schema,omitempty"`
+	Description     string                `json:"description,omitempty"     yaml:"description,omitempty"`
+	Required        bool                  `json:"required,omitempty"        yaml:"required,omitempty"`
+	Deprecated      bool                  `json:"deprecated,omitempty"      yaml:"deprecated,omitempty"`
+	AllowEmptyValue bool                  `json:"allowEmptyValue,omitempty" yaml:"allowEmptyValue,omitempty"`
+	Style           string                `json:"style,omitempty"           yaml:"style,omitempty"`
+	Explode         *bool                 `json:"explode,omitempty"         yaml:"explode,omitempty"`
+	AllowReserved   bool                  `json:"allowReserved,omitempty"   yaml:"allowReserved,omitempty"`
+	Schema          *Schema               `json:"schema,omitempty"          yaml:"schema,omitempty"`
+	Example         any                   `json:"example,omitempty"         yaml:"example,omitempty"`
+	Examples        map[string]*Example   `json:"examples,omitempty"        yaml:"examples,omitempty"`
+	Content         map[string]*MediaType `json:"content,omitempty"         yaml:"content,omitempty"`
 
 	// Swagger 2.0 legacy fields
 	Type             string  `json:"type,omitempty"             yaml:"type,omitempty"`
@@ -338,7 +402,8 @@ type Header struct {
 
 // Link represents a design-time link between operations.
 //
-// Reference: OpenAPI 3.1.0 §4.8.21 Link Object
+// # References
+//   - OpenAPI 3.1.0 §4.8.21 Link Object: https://spec.openapis.org/oas/v3.1.0#link-object
 type Link struct {
 	OperationRef string         `json:"operationRef,omitempty" yaml:"operationRef,omitempty"`
 	OperationID  string         `json:"operationId,omitempty"  yaml:"operationId,omitempty"`
@@ -350,11 +415,13 @@ type Link struct {
 
 // Components holds a set of reusable objects for different aspects of the specification.
 //
-// Reference: OpenAPI 3.1.0 §4.8.7 Components Object
+// # References
+//   - OpenAPI 3.1.0 §4.8.7 Components Object: https://spec.openapis.org/oas/v3.1.0#components-object
 type Components struct {
 	Schemas         map[string]*Schema         `json:"schemas,omitempty"         yaml:"schemas,omitempty"`
 	Responses       map[string]*Response       `json:"responses,omitempty"       yaml:"responses,omitempty"`
 	Parameters      map[string]*Parameter      `json:"parameters,omitempty"      yaml:"parameters,omitempty"`
+	Examples        map[string]*Example        `json:"examples,omitempty"        yaml:"examples,omitempty"`
 	RequestBodies   map[string]*RequestBody    `json:"requestBodies,omitempty"   yaml:"requestBodies,omitempty"`
 	Headers         map[string]*Header         `json:"headers,omitempty"         yaml:"headers,omitempty"`
 	SecuritySchemes map[string]*SecurityScheme `json:"securitySchemes,omitempty" yaml:"securitySchemes,omitempty"`
@@ -365,9 +432,10 @@ type Components struct {
 
 // Schema represents a JSON Schema definition (supporting JSON Schema Draft 2020-12 / Draft 04/07).
 //
-// References:
-//   - OpenAPI 3.1.0 §4.8.24 Schema Object
-//   - Swagger 2.0 §5.17 Schema Object
+// # References
+//   - OpenAPI 3.1.0 §4.8.24 Schema Object: https://spec.openapis.org/oas/v3.1.0#schema-object
+//   - Swagger 2.0 §5.17 Schema Object: https://swagger.io/specification/v2/#schema-object
+//   - JSON Schema Draft 2020-12 Core: https://json-schema.org/draft/2020-12/json-schema-core.html
 type Schema struct {
 	Type                 TypeArray          `json:"type,omitempty"                 yaml:"type,omitempty"`
 	Format               string             `json:"format,omitempty"               yaml:"format,omitempty"`
@@ -413,14 +481,15 @@ func (s *Schema) IsType(typeName string) bool {
 	if s == nil {
 		return false
 	}
+
 	return s.Type.Contains(typeName)
 }
 
 // Discriminator adds support for polymorphism.
 //
-// References:
-//   - OpenAPI 3.1.0 §4.8.25 Discriminator Object
-//   - Swagger 2.0 §5.18 Schema Object (string discriminator)
+// # References
+//   - OpenAPI 3.1.0 §4.8.25 Discriminator Object: https://spec.openapis.org/oas/v3.1.0#discriminator-object
+//   - Swagger 2.0 §5.18 Schema Object (string discriminator): https://swagger.io/specification/v2/#schema-object
 type Discriminator struct {
 	PropertyName string            `json:"propertyName"      yaml:"propertyName"`
 	Mapping      map[string]string `json:"mapping,omitempty" yaml:"mapping,omitempty"`
@@ -435,11 +504,14 @@ func (d *Discriminator) UnmarshalJSON(data []byte) error {
 	}
 
 	type Alias Discriminator
+
 	var a Alias
 	if err := json.Unmarshal(data, &a); err != nil {
 		return err
 	}
+
 	*d = Discriminator(a)
+
 	return nil
 }
 
@@ -451,19 +523,22 @@ func (d *Discriminator) UnmarshalYAML(value *yaml.Node) error {
 	}
 
 	type Alias Discriminator
+
 	var a Alias
 	if err := value.Decode(&a); err != nil {
 		return err
 	}
+
 	*d = Discriminator(a)
+
 	return nil
 }
 
 // XML provides metadata for XML representation format.
 //
-// References:
-//   - OpenAPI 3.1.0 §4.8.26 XML Object
-//   - Swagger 2.0 §5.19 XML Object
+// # References
+//   - OpenAPI 3.1.0 §4.8.26 XML Object: https://spec.openapis.org/oas/v3.1.0#xml-object
+//   - Swagger 2.0 §5.19 XML Object: https://swagger.io/specification/v2/#xml-object
 type XML struct {
 	Name      string `json:"name,omitempty"      yaml:"name,omitempty"`
 	Namespace string `json:"namespace,omitempty" yaml:"namespace,omitempty"`
@@ -483,6 +558,7 @@ func (ta TypeArray) Contains(name string) bool {
 			return true
 		}
 	}
+
 	return false
 }
 
@@ -493,9 +569,11 @@ func (ta TypeArray) Primary() string {
 			return t
 		}
 	}
+
 	if len(ta) > 0 {
 		return ta[0]
 	}
+
 	return ""
 }
 
@@ -505,14 +583,18 @@ func (ta *TypeArray) UnmarshalYAML(value *yaml.Node) error {
 		*ta = TypeArray{value.Value}
 		return nil
 	}
+
 	if value.Kind == yaml.SequenceNode {
 		var list []string
 		if err := value.Decode(&list); err != nil {
 			return err
 		}
+
 		*ta = list
+
 		return nil
 	}
+
 	return nil
 }
 
@@ -523,19 +605,23 @@ func (ta *TypeArray) UnmarshalJSON(data []byte) error {
 		*ta = TypeArray{single}
 		return nil
 	}
+
 	var list []string
 	if err := json.Unmarshal(data, &list); err == nil {
 		*ta = list
 		return nil
 	}
+
 	return nil
 }
 
 // SecurityScheme defines a security scheme that can be used by operations.
 //
-// References:
-//   - OpenAPI 3.1.0 §4.8.27 Security Scheme Object
-//   - Swagger 2.0 §5.23 Security Scheme Object
+// # References
+//   - OpenAPI 3.1.0 §4.8.27 Security Scheme Object: https://spec.openapis.org/oas/v3.1.0#security-scheme-object
+//   - Swagger 2.0 §5.23 Security Scheme Object: https://swagger.io/specification/v2/#security-scheme-object
+//   - RFC 6749 §The OAuth 2.0 Authorization Framework: https://datatracker.ietf.org/doc/html/rfc6749
+//   - OpenID Connect Core 1.0: https://openid.net/specs/openid-connect-core-1_0.html
 type SecurityScheme struct {
 	Type             string      `json:"type"                       yaml:"type"` // "apiKey", "http", "oauth2", "openIdConnect", "mutualTLS"
 	Description      string      `json:"description,omitempty"      yaml:"description,omitempty"`
@@ -555,9 +641,9 @@ type SecurityScheme struct {
 
 // OAuthFlows allows configuration of supported OAuth Flows.
 //
-// References:
-//   - OpenAPI 3.1.0 §4.8.28 OAuth Flows Object
-//   - Swagger 2.0 §5.23 Security Scheme Object
+// # References
+//   - OpenAPI 3.1.0 §4.8.28 OAuth Flows Object: https://spec.openapis.org/oas/v3.1.0#oauth-flows-object
+//   - Swagger 2.0 §5.23 Security Scheme Object: https://swagger.io/specification/v2/#security-scheme-object
 type OAuthFlows struct {
 	Implicit          *OAuthFlow `json:"implicit,omitempty"          yaml:"implicit,omitempty"`
 	Password          *OAuthFlow `json:"password,omitempty"          yaml:"password,omitempty"`
@@ -567,9 +653,9 @@ type OAuthFlows struct {
 
 // OAuthFlow configuration details for a supported OAuth Flow.
 //
-// References:
-//   - OpenAPI 3.1.0 §4.8.29 OAuth Flow Object
-//   - Swagger 2.0 §5.23 Security Scheme Object
+// # References
+//   - OpenAPI 3.1.0 §4.8.29 OAuth Flow Object: https://spec.openapis.org/oas/v3.1.0#oauth-flow-object
+//   - Swagger 2.0 §5.23 Security Scheme Object: https://swagger.io/specification/v2/#security-scheme-object
 type OAuthFlow struct {
 	AuthorizationURL string            `json:"authorizationUrl,omitempty" yaml:"authorizationUrl,omitempty"`
 	TokenURL         string            `json:"tokenUrl,omitempty"         yaml:"tokenUrl,omitempty"`
@@ -579,20 +665,20 @@ type OAuthFlow struct {
 
 // Tag represents a categorization label for API operations.
 //
-// References:
-//   - OpenAPI 3.1.0 §4.8.31 Tag Object
-//   - Swagger 2.0 §5.15 Tag Object
+// # References
+//   - OpenAPI 3.1.0 §4.8.31 Tag Object: https://spec.openapis.org/oas/v3.1.0#tag-object
+//   - Swagger 2.0 §5.15 Tag Object: https://swagger.io/specification/v2/#tag-object
 type Tag struct {
 	Name         string        `json:"name"                   yaml:"name"`
-	Description  string        `json:"description,omitempty" yaml:"description,omitempty"`
+	Description  string        `json:"description,omitempty"  yaml:"description,omitempty"`
 	ExternalDocs *ExternalDocs `json:"externalDocs,omitempty" yaml:"externalDocs,omitempty"`
 }
 
 // ExternalDocs provides a reference to external documentation.
 //
-// References:
-//   - OpenAPI 3.1.0 §4.8.32 External Documentation Object
-//   - Swagger 2.0 §5.8 External Documentation Object
+// # References
+//   - OpenAPI 3.1.0 §4.8.32 External Documentation Object: https://spec.openapis.org/oas/v3.1.0#external-documentation-object
+//   - Swagger 2.0 §5.8 External Documentation Object: https://swagger.io/specification/v2/#external-documentation-object
 type ExternalDocs struct {
 	Description string `json:"description,omitempty" yaml:"description,omitempty"`
 	URL         string `json:"url"                   yaml:"url"`

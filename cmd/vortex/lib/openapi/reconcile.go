@@ -237,6 +237,7 @@ func (e *MergeEngine) ReconcileService(
 		if c := cmp.Compare(a.rawPath, b.rawPath); c != 0 {
 			return c
 		}
+
 		return cmp.Compare(a.httpMethod, b.httpMethod)
 	})
 
@@ -297,6 +298,7 @@ func (e *MergeEngine) ReconcileService(
 
 	// Rebuild Method Code Buffer
 	var methodsBuf bytes.Buffer
+
 	usedOutputNames := make(map[string]int)
 
 	// Step A: Reconcile matched and new incoming methods
@@ -329,6 +331,7 @@ func (e *MergeEngine) ReconcileService(
 
 			methodName := buildMethodName(iop.rawPath, iop.httpMethod, iop.op, nil)
 			summary.AddedMethods = append(summary.AddedMethods, methodName)
+
 			methodsBuf.WriteString(singleBuf.String())
 		}
 	}
@@ -337,15 +340,16 @@ func (e *MergeEngine) ReconcileService(
 	if existingSvc != nil {
 		for _, m := range existingSvc.Methods {
 			if matchedExisting[m] == nil {
-				if cfg.Prune {
+				switch {
+				case cfg.Prune:
 					// [-] Pruned
 					summary.PrunedMethods = append(summary.PrunedMethods, m.Name)
-				} else if cfg.Additive {
+				case cfg.Additive:
 					// Preserved Active
 					methodCode := renderExistingMethodVerbatim(m)
 					methodsBuf.WriteString(methodCode)
 					methodsBuf.WriteString("\n")
-				} else {
+				default:
 					// [!] Soft Deprecation
 					summary.DeprecatedMethods = append(summary.DeprecatedMethods, m.Name)
 					methodCode := renderExistingMethodWithDeprecated(m, summary.SpecVersion)
@@ -358,6 +362,7 @@ func (e *MergeEngine) ReconcileService(
 
 	// Step C: Assemble Complete Go Source File
 	var fullBuf bytes.Buffer
+
 	pkgName := cfg.PackageName
 	if pkgName == "" {
 		if existingRoot != nil && existingRoot.PackageName != "" {
@@ -382,6 +387,7 @@ func (e *MergeEngine) ReconcileService(
 			dotIdx := strings.LastIndex(rawType, ".")
 			if dotIdx > idx {
 				pkgPath := rawType[:dotIdx]
+
 				short := path.Base(pkgPath) + "." + rawType[dotIdx+1:]
 				if bytes.Contains(methodsBuf.Bytes(), []byte(short)) {
 					if !slices.Contains(customImports, pkgPath) {
@@ -393,6 +399,7 @@ func (e *MergeEngine) ReconcileService(
 	}
 
 	slices.Sort(customImports)
+
 	for _, imp := range customImports {
 		fmt.Fprintf(&fullBuf, "\t%q\n", imp)
 	}
@@ -415,7 +422,14 @@ func (e *MergeEngine) ReconcileService(
 		if serviceName != "" && serviceName != "API" {
 			constName = serviceName + "BaseURL"
 		}
-		fmt.Fprintf(&fullBuf, "// %s is the default API base endpoint.\nconst %s = %q\n\n", constName, constName, baseURL)
+
+		fmt.Fprintf(
+			&fullBuf,
+			"// %s is the default API base endpoint.\nconst %s = %q\n\n",
+			constName,
+			constName,
+			baseURL,
+		)
 	}
 
 	casing := "snake_case"
@@ -425,9 +439,11 @@ func (e *MergeEngine) ReconcileService(
 
 	fmt.Fprintf(&fullBuf, "// %s provides the API client contract.\n//\n", serviceName)
 	fmt.Fprintf(&fullBuf, "// @aoni:service casing=%s\n", casing)
+
 	if doc.Info != nil && doc.Info.Version != "" {
 		fmt.Fprintf(&fullBuf, "// @version %q\n", doc.Info.Version)
 	}
+
 	if cfg.SpecFile != "" {
 		fmt.Fprintf(&fullBuf, "// @source %q\n", cfg.SpecFile)
 	}
@@ -450,7 +466,11 @@ func (e *MergeEngine) ReconcileService(
 
 	formatted, err := format.Source(fullBuf.Bytes())
 	if err != nil {
-		return fullBuf.Bytes(), summary, fmt.Errorf("formatting reconciled Go contract: %w\nSource:\n%s", err, fullBuf.String())
+		return fullBuf.Bytes(), summary, fmt.Errorf(
+			"formatting reconciled Go contract: %w\nSource:\n%s",
+			err,
+			fullBuf.String(),
+		)
 	}
 
 	return formatted, summary, nil
@@ -463,6 +483,7 @@ func (e *MergeEngine) reconcileMethodNode(
 	usedNames map[string]int,
 ) string {
 	var buf bytes.Buffer
+
 	methodName := existing.Name
 	usedNames[methodName] = 1
 
@@ -472,9 +493,11 @@ func (e *MergeEngine) reconcileMethodNode(
 			if isManagedDirective(l) {
 				continue
 			}
+
 			if !strings.HasPrefix(l, "//") {
 				l = "// " + l
 			}
+
 			fmt.Fprintf(&buf, "\t%s\n", l)
 		}
 	} else if iop.summary != "" {
@@ -494,18 +517,23 @@ func (e *MergeEngine) reconcileMethodNode(
 	if existing.UnwrapField != "" {
 		fmt.Fprintf(&buf, "\t// @unwrap %q\n", existing.UnwrapField)
 	}
+
 	if existing.CallFunc != "" {
 		fmt.Fprintf(&buf, "\t// @call %q\n", existing.CallFunc)
 	}
+
 	if existing.Idempotent {
 		fmt.Fprintf(&buf, "\t// @idempotent\n")
 	}
+
 	if existing.Coalesce {
 		fmt.Fprintf(&buf, "\t// @coalesce\n")
 	}
+
 	if existing.ETag {
 		fmt.Fprintf(&buf, "\t// @etag\n")
 	}
+
 	if existing.Since != "" {
 		fmt.Fprintf(&buf, "\t// @since %q\n", existing.Since)
 	} else if iop.sinceVersion != "" {
@@ -531,6 +559,7 @@ func (e *MergeEngine) reconcileMethodNode(
 		if iop.op.RequestBody.Content["application/x-www-form-urlencoded"] != nil ||
 			iop.op.RequestBody.Content["multipart/form-data"] != nil {
 			isForm = true
+
 			fmt.Fprintf(&buf, "\t// @form casing=snake_case\n")
 		}
 	}
@@ -546,6 +575,7 @@ func (e *MergeEngine) reconcileMethodNode(
 				break
 			}
 		}
+
 		if hasQuery {
 			fmt.Fprintf(&buf, "\t// @query casing=snake_case\n")
 		}
@@ -577,9 +607,11 @@ func renderExistingMethodVerbatim(m *ir.MethodIR) string {
 			if isManagedDirective(l) {
 				continue
 			}
+
 			if !strings.HasPrefix(l, "//") {
 				l = "// " + l
 			}
+
 			fmt.Fprintf(&buf, "\t%s\n", l)
 		}
 	} else if m.Summary != "" {
@@ -589,6 +621,7 @@ func renderExistingMethodVerbatim(m *ir.MethodIR) string {
 	if m.HTTPMethod != "" && m.Path != nil {
 		fmt.Fprintf(&buf, "\t// @%s %q\n", strings.ToLower(m.HTTPMethod), strings.TrimPrefix(m.Path.RawTemplate, "/"))
 	}
+
 	if m.OperationID != "" && m.OperationID != m.Name {
 		fmt.Fprintf(&buf, "\t// @bind %q\n", m.OperationID)
 	}
@@ -598,6 +631,7 @@ func renderExistingMethodVerbatim(m *ir.MethodIR) string {
 		if p.Location == ir.LocContext || p.Location == ir.LocModifiers {
 			continue
 		}
+
 		paramList = append(paramList, fmt.Sprintf("%s %s", p.GoName, p.GoType.Name))
 	}
 
@@ -607,6 +641,7 @@ func renderExistingMethodVerbatim(m *ir.MethodIR) string {
 	}
 
 	renderMethodSignature(&buf, m.Name, paramList, returnSig)
+
 	return buf.String()
 }
 
@@ -614,18 +649,26 @@ func renderExistingMethodWithDeprecated(m *ir.MethodIR, specVersion string) stri
 	var buf bytes.Buffer
 
 	if specVersion != "" {
-		fmt.Fprintf(&buf, "\t// @deprecated reason=%q since=%q\n", "Removed from upstream OpenAPI specification", specVersion)
+		fmt.Fprintf(
+			&buf,
+			"\t// @deprecated reason=%q since=%q\n",
+			"Removed from upstream OpenAPI specification",
+			specVersion,
+		)
 	} else {
 		fmt.Fprintf(&buf, "\t// @deprecated reason=%q\n", "Removed from upstream OpenAPI specification")
 	}
+
 	if len(m.Doc) > 0 {
 		for _, l := range m.Doc {
 			if isManagedDirective(l) {
 				continue
 			}
+
 			if !strings.HasPrefix(l, "//") {
 				l = "// " + l
 			}
+
 			fmt.Fprintf(&buf, "\t%s\n", l)
 		}
 	} else if m.Summary != "" {
@@ -635,6 +678,7 @@ func renderExistingMethodWithDeprecated(m *ir.MethodIR, specVersion string) stri
 	if m.HTTPMethod != "" && m.Path != nil {
 		fmt.Fprintf(&buf, "\t// @%s %q\n", strings.ToLower(m.HTTPMethod), strings.TrimPrefix(m.Path.RawTemplate, "/"))
 	}
+
 	if m.OperationID != "" && m.OperationID != m.Name {
 		fmt.Fprintf(&buf, "\t// @bind %q\n", m.OperationID)
 	}
@@ -644,6 +688,7 @@ func renderExistingMethodWithDeprecated(m *ir.MethodIR, specVersion string) stri
 		if p.Location == ir.LocContext || p.Location == ir.LocModifiers {
 			continue
 		}
+
 		paramList = append(paramList, fmt.Sprintf("%s %s", p.GoName, p.GoType.Name))
 	}
 
@@ -653,6 +698,7 @@ func renderExistingMethodWithDeprecated(m *ir.MethodIR, specVersion string) stri
 	}
 
 	renderMethodSignature(&buf, m.Name, paramList, returnSig)
+
 	return buf.String()
 }
 
@@ -751,7 +797,7 @@ func (e *MergeEngine) buildReconciledParams(
 	if iop.op != nil && iop.op.RequestBody != nil && iop.op.RequestBody.Content != nil {
 		jsonContent := iop.op.RequestBody.Content["application/json"]
 		if jsonContent != nil && jsonContent.Schema != nil {
-			bodyType := "any"
+			var bodyType string
 			if jsonContent.Schema.Ref != "" {
 				bodyType = toPascalCase(path.Base(jsonContent.Schema.Ref))
 			} else {

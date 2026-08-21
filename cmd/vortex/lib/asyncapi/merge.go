@@ -89,12 +89,15 @@ func ensureRootContainers(root *Document) {
 	if root.Servers == nil {
 		root.Servers = make(map[string]Server)
 	}
+
 	if root.Channels == nil {
 		root.Channels = make(map[string]Channel)
 	}
+
 	if root.Operations == nil {
 		root.Operations = make(map[string]Operation)
 	}
+
 	initNilComponents(&root.Components)
 }
 
@@ -114,6 +117,7 @@ func mergeChannels(root *Document, incomingChannels map[string]Channel) {
 			root.Channels[chKey] = existing
 			continue
 		}
+
 		root.Channels[chKey] = ch
 	}
 }
@@ -126,6 +130,7 @@ func mergeOperations(root *Document, incomingOps map[string]Operation) {
 			root.Operations[opKey] = existing
 			continue
 		}
+
 		root.Operations[opKey] = op
 	}
 }
@@ -177,6 +182,7 @@ func mergeDifference(specs ...*Document) *Document {
 		for chKey := range s.Channels {
 			delete(root.Channels, chKey)
 		}
+
 		for opKey := range s.Operations {
 			delete(root.Operations, opKey)
 		}
@@ -189,6 +195,7 @@ func mergeChannel(existing *Channel, incoming Channel) {
 	if existing.Messages == nil && incoming.Messages != nil {
 		existing.Messages = make(map[string]Message)
 	}
+
 	for k, v := range incoming.Messages {
 		if _, ok := existing.Messages[k]; !ok {
 			existing.Messages[k] = v
@@ -198,6 +205,7 @@ func mergeChannel(existing *Channel, incoming Channel) {
 	if existing.Parameters == nil && incoming.Parameters != nil {
 		existing.Parameters = make(map[string]Parameter)
 	}
+
 	for k, v := range incoming.Parameters {
 		if _, ok := existing.Parameters[k]; !ok {
 			existing.Parameters[k] = v
@@ -248,9 +256,11 @@ func mergeGenericMap[K comparable, V any](dst *map[K]V, src map[K]V) {
 	if src == nil {
 		return
 	}
+
 	if *dst == nil {
 		*dst = make(map[K]V)
 	}
+
 	for k, v := range src {
 		if _, exists := (*dst)[k]; !exists {
 			(*dst)[k] = v
@@ -301,30 +311,39 @@ func initNilComponents(c *Components) {
 	if c.Messages == nil {
 		c.Messages = make(map[string]Message)
 	}
+
 	if c.Schemas == nil {
 		c.Schemas = make(map[string]Schema)
 	}
+
 	if c.Parameters == nil {
 		c.Parameters = make(map[string]Parameter)
 	}
+
 	if c.SecuritySchemes == nil {
 		c.SecuritySchemes = make(map[string]SecurityScheme)
 	}
+
 	if c.ServerVariables == nil {
 		c.ServerVariables = make(map[string]ServerVar)
 	}
+
 	if c.CorrelationIDs == nil {
 		c.CorrelationIDs = make(map[string]CorrelationID)
 	}
+
 	if c.Replies == nil {
 		c.Replies = make(map[string]OperationReply)
 	}
+
 	if c.OperationTraits == nil {
 		c.OperationTraits = make(map[string]Operation)
 	}
+
 	if c.MessageTraits == nil {
 		c.MessageTraits = make(map[string]Message)
 	}
+
 	if c.Tags == nil {
 		c.Tags = make(map[string]Tag)
 	}

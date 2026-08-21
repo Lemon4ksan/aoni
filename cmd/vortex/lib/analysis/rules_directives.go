@@ -27,10 +27,11 @@ var AllKnownDirectives = func() []string {
 func RuleUnrecognizedDirectives(ctx *Context, root *ir.RootIR) {
 	for _, ud := range root.UnrecognizedDirectives {
 		msg := fmt.Sprintf("unrecognized directive \"@%s\"", ud.Name)
+
 		suggestion := FindClosestDirective(ud.Name)
 		if suggestion != "" {
 			msg = fmt.Sprintf("unrecognized directive \"@%s\" (did you mean \"@%s\"?)", ud.Name, suggestion)
-			suggestion = fmt.Sprintf("@%s", suggestion)
+			suggestion = "@" + suggestion
 		}
 
 		ctx.ReportWithSuggestion(

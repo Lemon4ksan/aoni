@@ -83,6 +83,7 @@ func SanitizeMethodName(rawOpID, httpMethod, rawPath, serviceName string) string
 	if serviceName != "" {
 		trimmedSvc := strings.TrimSuffix(strings.TrimSuffix(serviceName, "API"), "Service")
 		cleaned = strings.TrimPrefix(cleaned, serviceName+"_")
+
 		cleaned = strings.TrimPrefix(cleaned, serviceName)
 		if trimmedSvc != "" {
 			cleaned = strings.TrimPrefix(cleaned, trimmedSvc+"_")
@@ -166,6 +167,7 @@ func buildMethodName(pathStr, httpMethod string, op *Operation, used map[string]
 	if op != nil {
 		opID = op.OperationID
 	}
+
 	base := SanitizeMethodName(opID, httpMethod, pathStr, "")
 	if base == "" || isHexHash(base) {
 		base = DeriveMethodNameFromRoute(httpMethod, pathStr)
@@ -181,6 +183,7 @@ func buildMethodName(pathStr, httpMethod string, op *Operation, used map[string]
 	}
 
 	used[base] = 1
+
 	return base
 }
 
@@ -264,6 +267,7 @@ func splitWords(s string) []string {
 				words = append(words, cur.String())
 				cur.Reset()
 			}
+
 			continue
 		}
 

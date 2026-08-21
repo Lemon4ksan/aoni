@@ -42,12 +42,12 @@ func Import(cfg ImportConfig) (*ImportResult, error) {
 
 	doc, err := LoadSpecWithMode(cfg.SpecFile, cfg.SpecData, mode)
 	if err != nil {
-		return nil, fmt.Errorf("loading asyncapi spec: %w", err)
+		return nil, fmt.Errorf("vortex/asyncapi: load spec: %w", err)
 	}
 
 	code, err := GenerateContract(doc, cfg)
 	if err != nil {
-		return nil, fmt.Errorf("generating contract: %w", err)
+		return nil, fmt.Errorf("vortex/asyncapi: generate contract: %w", err)
 	}
 
 	return &ImportResult{
@@ -83,9 +83,11 @@ func resolveServiceName(doc *Document, customName string) string {
 	if customName != "" {
 		return customName
 	}
+
 	if doc.Info.Title != "" {
 		return sanitizeIdentifier(doc.Info.Title) + "API"
 	}
+
 	return "AsyncAPI"
 }
 
@@ -96,6 +98,7 @@ func writeServiceContract(buf *bytes.Buffer, doc *Document, serviceName string) 
 	if baseURL != "" {
 		fmt.Fprintf(buf, "// @base_url %q\n", baseURL)
 	}
+
 	if protocol != "" {
 		fmt.Fprintf(buf, "// @protocol %s\n", protocol)
 	}
@@ -134,8 +137,9 @@ func formatSourceFile(pkgName, asyncAPIVersion string, body []byte) ([]byte, err
 
 	formatted, err := format.Source(buf.Bytes())
 	if err != nil {
-		return buf.Bytes(), fmt.Errorf("formatting asyncapi contract: %w", err)
+		return buf.Bytes(), fmt.Errorf("vortex/asyncapi: format contract: %w", err)
 	}
+
 	return formatted, nil
 }
 
@@ -188,7 +192,16 @@ func emitOperationMethod(buf *bytes.Buffer, doc *Document, opKey string, op Oper
 
 	// AsyncAPI 3.1.0 §Operation Reply Object -> @rpc pattern
 	if op.Reply != nil {
-		emitRPCMethod(buf, opKey, methodName, cleanAddress, payloadType, resolveReplyPayloadType(doc, opKey, op), pathParams)
+		emitRPCMethod(
+			buf,
+			opKey,
+			methodName,
+			cleanAddress,
+			payloadType,
+			resolveReplyPayloadType(doc, opKey, op),
+			pathParams,
+		)
+
 		return
 	}
 
@@ -208,6 +221,7 @@ func emitRPCMethod(
 	pathParams []string,
 ) {
 	fmt.Fprintf(buf, "\t// @rpc %q\n", opKey)
+
 	if cleanAddress != "" {
 		fmt.Fprintf(buf, "\t// @channel %q\n", cleanAddress)
 	}
@@ -222,6 +236,7 @@ func emitEventSubscriptionMethod(
 	pathParams []string,
 ) {
 	fmt.Fprintf(buf, "\t// @event %q\n", opKey)
+
 	if cleanAddress != "" {
 		fmt.Fprintf(buf, "\t// @ws %q\n", cleanAddress)
 	}
@@ -237,6 +252,7 @@ func emitWsEmitMethod(
 	pathParams []string,
 ) {
 	fmt.Fprintf(buf, "\t// @ws:emit %q\n", opKey)
+
 	if cleanAddress != "" {
 		fmt.Fprintf(buf, "\t// @ws %q\n", cleanAddress)
 	}
@@ -247,14 +263,17 @@ func emitWsEmitMethod(
 
 func buildMethodParams(payloadParam string, pathParams []string, includeMods bool) []string {
 	params := make([]string, 0, 3+len(pathParams))
+
 	params = append(params, "ctx context.Context")
 	for _, p := range pathParams {
 		params = append(params, p+" string")
 	}
+
 	params = append(params, payloadParam)
 	if includeMods {
 		params = append(params, "mods ...aoni.RequestModifier")
 	}
+
 	return params
 }
 
@@ -263,6 +282,7 @@ func resolveChannelAddress(doc *Document, op Operation) string {
 		if ch, ok := doc.Channels[op.ChannelRef]; ok && ch.Address != "" {
 			return ch.Address
 		}
+
 		return op.ChannelRef
 	}
 
@@ -272,6 +292,7 @@ func resolveChannelAddress(doc *Document, op Operation) string {
 			if ch.Address != "" {
 				return ch.Address
 			}
+
 			return refKey
 		}
 	}
@@ -285,6 +306,7 @@ func resolvePayloadType(doc *Document, opKey string, op Operation) string {
 			return extractTypeNameFromRef(mRef.Ref)
 		}
 	}
+
 	return sanitizeIdentifier(opKey) + "PayloadDTO"
 }
 
@@ -296,15 +318,18 @@ func resolveReplyPayloadType(doc *Document, opKey string, op Operation) string {
 			}
 		}
 	}
+
 	return sanitizeIdentifier(opKey) + "ReplyDTO"
 }
 
 func extractTypeNameFromRef(ref string) string {
 	refKey := strings.TrimPrefix(ref, "#/components/messages/")
+
 	refKey = strings.TrimPrefix(refKey, "#/channels/")
 	if idx := strings.LastIndex(refKey, "/"); idx != -1 {
 		refKey = refKey[idx+1:]
 	}
+
 	return sanitizeIdentifier(refKey) + "DTO"
 }
 
@@ -374,11 +399,14 @@ func resolveMessageFieldType(propVal any) string {
 	if !ok {
 		return "any"
 	}
+
 	tStr, ok := pObj["type"].(string)
 	if !ok {
 		return "any"
 	}
+
 	fmtStr, _ := pObj["format"].(string)
+
 	return mapScalarTypeWithFormat(tStr, fmtStr)
 }
 
@@ -394,19 +422,25 @@ func mapJSONSchemaType(s Schema) string {
 		if s.Format == "int64" {
 			return "int64"
 		}
+
 		return "int"
+
 	case "number":
 		if s.Format == "float" {
 			return "float32"
 		}
+
 		return "float64"
+
 	case "boolean":
 		return "bool"
 	case "array":
 		if s.Items != nil {
 			return "[]" + mapJSONSchemaType(*s.Items)
 		}
+
 		return "[]any"
+
 	case "object":
 		return "map[string]any"
 	default:
@@ -422,12 +456,16 @@ func mapScalarTypeWithFormat(t, format string) string {
 		if format == "int64" {
 			return "int64"
 		}
+
 		return "int"
+
 	case "number":
 		if format == "float" {
 			return "float32"
 		}
+
 		return "float64"
+
 	case "boolean":
 		return "bool"
 	case "array":

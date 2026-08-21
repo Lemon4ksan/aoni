@@ -7,6 +7,7 @@ package openapi_test
 import (
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 
@@ -371,11 +372,13 @@ func TestOpenAPI_MergeModes(t *testing.T) {
 	// 3. Diff Mode (A \ B): /users (post), /only-a (get)
 	docA3, _ := openapi.LoadSpec("specA.json", []byte(specA))
 	docB3, _ := openapi.LoadSpec("specB.json", []byte(specB))
+
 	docDiff := openapi.MergeOpenAPISpecsWithMode(openapi.MergeModeDifference, docA3, docB3)
 	if docDiff.Paths["/users"] != nil {
 		require.Nil(t, docDiff.Paths["/users"].Get)
 		require.NotNil(t, docDiff.Paths["/users"].Post)
 	}
+
 	require.NotNil(t, docDiff.Paths["/only-a"])
 	require.Nil(t, docDiff.Paths["/only-b"])
 }
@@ -570,3 +573,82 @@ definitions:
 	require.Contains(t, string(code), "UpdatePetWithForm(ctx context.Context, petID int64, req Pet")
 }
 
+func TestOpenAPI_PolymorphicAndRecursiveSchemas(t *testing.T) {
+	const specYAML = `openapi: "3.1.0"
+info:
+  title: "Polymorphic & Recursive API"
+  version: "1.0.0"
+paths:
+  /trees:
+    get:
+      summary: "Get tree node"
+      responses:
+        "200":
+          description: "Tree root"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TreeNode"
+components:
+  schemas:
+    TreeNode:
+      type: "object"
+      properties:
+        id:
+          type: "string"
+        parent:
+          $ref: "#/components/schemas/TreeNode"
+        children:
+          type: "array"
+          items:
+            $ref: "#/components/schemas/TreeNode"
+    Pet:
+      type: "object"
+      properties:
+        name:
+          type: "string"
+    Dog:
+      allOf:
+        - $ref: "#/components/schemas/Pet"
+        - type: "object"
+          properties:
+            bark:
+              type: "string"
+    PetUnion:
+      discriminator:
+        propertyName: "petType"
+      oneOf:
+        - $ref: "#/components/schemas/Dog"
+        - $ref: "#/components/schemas/Pet"
+`
+
+	doc, err := openapi.ParseSpec([]byte(specYAML))
+	require.NoError(t, err)
+	require.NotNil(t, doc)
+
+	code, err := openapi.GenerateContract(doc, openapi.ImportConfig{
+		PackageName: "trees",
+		ServiceName: "TreeAPI",
+	})
+	require.NoError(t, err)
+	require.NotEmpty(t, code)
+
+	codeStr := string(code)
+
+	// 1. Check recursive schema pointers
+	require.Contains(t, codeStr, "type TreeNode struct {")
+	require.Regexp(t, regexp.MustCompile(`Parent\s+\*TreeNode\s+`+"`"+`json:"parent,omitempty"`+"`"), codeStr)
+	require.Regexp(t, regexp.MustCompile(`Children\s+\[\]\*TreeNode\s+`+"`"+`json:"children,omitempty"`+"`"), codeStr)
+
+	// 2. Check allOf composition flattening
+	require.Contains(t, codeStr, "type Dog struct {")
+	require.Regexp(t, regexp.MustCompile(`Name\s+string\s+`+"`"+`json:"name,omitempty"`+"`"), codeStr)
+	require.Regexp(t, regexp.MustCompile(`Bark\s+string\s+`+"`"+`json:"bark,omitempty"`+"`"), codeStr)
+
+	// 3. Check oneOf tagged union with discriminator
+	require.Contains(t, codeStr, "// @aoni:union discriminator=petType")
+	require.Contains(t, codeStr, "type PetUnion struct {")
+	require.Regexp(t, regexp.MustCompile(`PetType\s+string\s+`+"`"+`json:"petType"`+"`"), codeStr)
+	require.Regexp(t, regexp.MustCompile(`Dog\s+\*Dog\s+`+"`"+`json:"dog,omitempty"`+"`"), codeStr)
+	require.Regexp(t, regexp.MustCompile(`Pet\s+\*Pet\s+`+"`"+`json:"pet,omitempty"`+"`"), codeStr)
+}

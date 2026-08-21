@@ -217,6 +217,7 @@ func TestEngine_CustomPipeline(t *testing.T) {
 	customRuleCalled := false
 	engine.AddMethodRules(func(ctx *analysis.Context, svc *ir.ServiceIR, m *ir.MethodIR) {
 		customRuleCalled = true
+
 		if m.Name == "ForbiddenName" {
 			ctx.Error("custom/forbidden", ctx.Target(svc.Name, m.Name), "method name is forbidden in target SDK")
 		}

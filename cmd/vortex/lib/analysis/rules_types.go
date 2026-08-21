@@ -27,6 +27,7 @@ func RuleUniqueTypeNames(ctx *Context, root *ir.RootIR) {
 				prevKind,
 			)
 		}
+
 		typeNames[s.Name] = "struct"
 	}
 
@@ -45,6 +46,7 @@ func RuleUniqueTypeNames(ctx *Context, root *ir.RootIR) {
 				prevKind,
 			)
 		}
+
 		typeNames[t.Name] = "tuple"
 	}
 
@@ -63,6 +65,7 @@ func RuleUniqueTypeNames(ctx *Context, root *ir.RootIR) {
 				prevKind,
 			)
 		}
+
 		typeNames[b.Name] = "bitpack"
 	}
 }
@@ -78,6 +81,7 @@ func RuleStructFieldWireNames(ctx *Context, s *ir.StructIR) {
 				ctx.Target(s.Name, f.GoName),
 				"wire field name cannot be empty",
 			)
+
 			continue
 		}
 
@@ -89,6 +93,7 @@ func RuleStructFieldWireNames(ctx *Context, s *ir.StructIR) {
 				f.WireName,
 				prevGoName,
 			)
+
 			continue
 		}
 

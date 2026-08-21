@@ -69,6 +69,7 @@ func filterTargetServices(services []*ir.ServiceIR, targetName string) []*ir.Ser
 	if len(filtered) > 0 {
 		return filtered
 	}
+
 	return services
 }
 
@@ -103,6 +104,7 @@ func resolveServiceVersion(services []*ir.ServiceIR) string {
 	if len(services) > 0 && services[0].Version != "" {
 		return services[0].Version
 	}
+
 	return "1.0.0"
 }
 
@@ -110,6 +112,7 @@ func resolveServiceDescription(services []*ir.ServiceIR) string {
 	if len(services) > 0 && services[0].Description != "" {
 		return services[0].Description
 	}
+
 	return ""
 }
 
@@ -117,15 +120,19 @@ func applyServiceVendorExtensions(info *Info, svc *ir.ServiceIR) {
 	if svc.Persona != "" {
 		info.Extensions = setExtension(info.Extensions, "x-vortex-persona", svc.Persona)
 	}
+
 	if svc.TLSSpec != "" {
 		info.Extensions = setExtension(info.Extensions, "x-vortex-tlsspec", svc.TLSSpec)
 	}
+
 	if svc.DefaultCasing != "" {
 		info.Extensions = setExtension(info.Extensions, "x-vortex-casing", string(svc.DefaultCasing))
 	}
+
 	if svc.Engine != "" {
 		info.Extensions = setExtension(info.Extensions, "x-vortex-engine", string(svc.Engine))
 	}
+
 	if svc.Source != "" {
 		info.Extensions = setExtension(info.Extensions, "x-vortex-source", svc.Source)
 	}
@@ -153,10 +160,13 @@ func collectValidStructs(structs []*ir.StructIR) map[string]bool {
 		if !unicode.IsUpper(rune(s.Name[0])) || isInternalStruct(s) {
 			continue
 		}
+
 		valid[s.Name] = true
 	}
+
 	valid["ErrorResponse"] = true
 	valid["RateLimitError"] = true
+
 	return valid
 }
 
@@ -168,6 +178,7 @@ func isInternalStruct(s *ir.StructIR) bool {
 			return true
 		}
 	}
+
 	return false
 }
 
@@ -181,10 +192,12 @@ func buildDocumentComponents(structs []*ir.StructIR, validStructs map[string]boo
 		if s == nil {
 			continue
 		}
+
 		comp.Schemas[s.Name] = convertStructToSchema(s, validStructs)
 	}
 
 	ensureStandardErrorSchemas(comp.Schemas)
+
 	return comp
 }
 
@@ -242,6 +255,7 @@ func buildDocumentPaths(doc *Document, services []*ir.ServiceIR, cfg ExportConfi
 			}
 
 			rawPath := resolveMethodRoutePath(m)
+
 			pathItem := doc.Paths[rawPath]
 			if pathItem == nil {
 				pathItem = &PathItem{}
@@ -262,6 +276,7 @@ func resolveMethodRoutePath(m *ir.MethodIR) string {
 			rawPath = "/" + rawPath
 		}
 	}
+
 	return rawPath
 }
 
@@ -301,6 +316,7 @@ func resolveMethodSummary(m *ir.MethodIR) string {
 	if m.Summary != "" {
 		return m.Summary
 	}
+
 	return cleanDocSummary(m.Doc)
 }
 
@@ -308,9 +324,11 @@ func resolveMethodTags(m *ir.MethodIR, svc *ir.ServiceIR) []string {
 	if len(m.Tags) > 0 {
 		return m.Tags
 	}
+
 	if len(svc.Tags) > 0 {
 		return svc.Tags
 	}
+
 	return []string{svc.Name}
 }
 
@@ -318,24 +336,31 @@ func applyMethodVendorExtensions(op *Operation, m *ir.MethodIR) {
 	if m.UnwrapField != "" {
 		op.Extensions = setExtension(op.Extensions, "x-vortex-unwrap", m.UnwrapField)
 	}
+
 	if m.CallFunc != "" {
 		op.Extensions = setExtension(op.Extensions, "x-vortex-call", m.CallFunc)
 	}
+
 	if m.Idempotent {
 		op.Extensions = setExtension(op.Extensions, "x-vortex-idempotent", true)
 	}
+
 	if m.Coalesce {
 		op.Extensions = setExtension(op.Extensions, "x-vortex-coalesce", true)
 	}
+
 	if m.ETag {
 		op.Extensions = setExtension(op.Extensions, "x-vortex-etag", true)
 	}
+
 	if m.FormCasing != "" {
 		op.Extensions = setExtension(op.Extensions, "x-vortex-form-casing", string(m.FormCasing))
 	}
+
 	if m.QueryCasing != "" {
 		op.Extensions = setExtension(op.Extensions, "x-vortex-query-casing", string(m.QueryCasing))
 	}
+
 	if m.Since != "" {
 		op.Extensions = setExtension(op.Extensions, "x-vortex-since", m.Since)
 	}
@@ -351,6 +376,7 @@ func buildPathParameters(op *Operation, p *ir.PathIR) map[string]bool {
 		if !seg.IsVariable {
 			continue
 		}
+
 		pathVars[seg.VarName] = true
 		pathVars[strings.ToLower(seg.VarName)] = true
 
@@ -361,6 +387,7 @@ func buildPathParameters(op *Operation, p *ir.PathIR) map[string]bool {
 			Schema:   &Schema{Type: TypeArray{"string"}},
 		})
 	}
+
 	return pathVars
 }
 
@@ -387,10 +414,12 @@ func buildOperationBodyAndQueryParams(
 					},
 				},
 			}
+
 			continue
 		}
 
-		if m.PayloadKind == ir.PayloadForm && (param.Location == ir.LocBody || param.Location == ir.LocFormFields || isComplexType(typeName)) {
+		if m.PayloadKind == ir.PayloadForm &&
+			(param.Location == ir.LocBody || param.Location == ir.LocFormFields || isComplexType(typeName)) {
 			op.RequestBody = &RequestBody{
 				Content: map[string]*MediaType{
 					"application/x-www-form-urlencoded": {
@@ -398,6 +427,7 @@ func buildOperationBodyAndQueryParams(
 					},
 				},
 			}
+
 			continue
 		}
 
@@ -416,6 +446,7 @@ func applySmartQueryDefaults(q *Parameter, qName string) {
 	if q.Schema == nil {
 		return
 	}
+
 	switch qName {
 	case "limit":
 		q.Schema.Default = 10
@@ -491,11 +522,14 @@ func buildOperationResponses(
 func encodeDocument(doc *Document, asYAML bool) ([]byte, error) {
 	if asYAML {
 		var yamlBuf strings.Builder
+
 		enc := yaml.NewEncoder(&yamlBuf)
 		enc.SetIndent(2)
+
 		if err := enc.Encode(doc); err != nil {
 			return nil, err
 		}
+
 		return []byte(yamlBuf.String()), nil
 	}
 
@@ -506,7 +540,9 @@ func setExtension(exts map[string]any, key string, val any) map[string]any {
 	if exts == nil {
 		exts = make(map[string]any)
 	}
+
 	exts[key] = val
+
 	return exts
 }
 
@@ -514,9 +550,11 @@ func cleanAPITitle(serviceName, pkgName string) string {
 	if serviceName != "" && serviceName != "API" {
 		return strings.TrimSuffix(serviceName, "API") + " API"
 	}
+
 	if pkgName != "" {
 		return toPascalCase(pkgName) + " API"
 	}
+
 	return "OpenAPI Specification"
 }
 
@@ -527,6 +565,7 @@ func cleanDocSummary(docLines []string) string {
 			return trimmed
 		}
 	}
+
 	return ""
 }
 
@@ -536,12 +575,25 @@ func findStructByName(structs []*ir.StructIR, name string) *ir.StructIR {
 			return s
 		}
 	}
+
 	return nil
 }
 
 func isComplexType(goType string) bool {
 	switch goType {
-	case "string", "int", "int64", "int32", "uint", "uint64", "uint32", "float64", "float32", "bool", "[]byte", "time.Time", "any":
+	case "string",
+		"int",
+		"int64",
+		"int32",
+		"uint",
+		"uint64",
+		"uint32",
+		"float64",
+		"float32",
+		"bool",
+		"[]byte",
+		"time.Time",
+		"any":
 		return false
 	default:
 		return true
@@ -553,6 +605,7 @@ func mapGoTypeToSchema(goType string, validStructs map[string]bool) *Schema {
 
 	if strings.HasPrefix(cleanType, "[]") {
 		elemType := strings.TrimPrefix(cleanType, "[]")
+
 		return &Schema{
 			Type:  TypeArray{"array"},
 			Items: mapGoTypeToSchema(elemType, validStructs),

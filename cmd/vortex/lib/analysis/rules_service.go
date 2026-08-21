@@ -39,6 +39,7 @@ func RuleServiceUniqueMethodNames(ctx *Context, svc *ir.ServiceIR) {
 				svc.Name,
 			)
 		}
+
 		seen[m.Name] = true
 	}
 }
@@ -53,7 +54,13 @@ func RuleServiceDurations(ctx *Context, svc *ir.ServiceIR) {
 
 	if svc.Circuit != nil && svc.Circuit.Cooldown != "" {
 		if err := validateDuration(svc.Circuit.Cooldown); err != nil {
-			ctx.Errorf("service/invalid-cooldown", svc.Name, "invalid circuit breaker cooldown %q: %v", svc.Circuit.Cooldown, err)
+			ctx.Errorf(
+				"service/invalid-cooldown",
+				svc.Name,
+				"invalid circuit breaker cooldown %q: %v",
+				svc.Circuit.Cooldown,
+				err,
+			)
 		}
 	}
 
@@ -80,7 +87,12 @@ func RuleServiceRetryStatus(ctx *Context, svc *ir.ServiceIR) {
 
 	for _, sc := range svc.Retry.OnStatus {
 		if sc < 100 || sc > 599 {
-			ctx.Errorf("service/invalid-retry-status", svc.Name, "invalid retry onStatus code %d (must be between 100 and 599)", sc)
+			ctx.Errorf(
+				"service/invalid-retry-status",
+				svc.Name,
+				"invalid retry onStatus code %d (must be between 100 and 599)",
+				sc,
+			)
 		}
 	}
 }
@@ -128,6 +140,7 @@ func RuleMethodUniqueParamNames(ctx *Context, svc *ir.ServiceIR, m *ir.MethodIR)
 				p.GoName,
 			)
 		}
+
 		seen[p.GoName] = true
 	}
 }
@@ -245,6 +258,7 @@ func RuleMethodHTTPPayloadSemantics(ctx *Context, svc *ir.ServiceIR, m *ir.Metho
 					"HTTP %s with request body is discouraged (RFC 9110 §9.3.1); intermediate proxies and CDNs may drop the payload",
 					httpMethod,
 				)
+
 				break
 			}
 		}

@@ -130,7 +130,11 @@ components:
 	assert.Contains(t, code, "package pingpong")
 	assert.Contains(t, code, "type PingPongAPI interface")
 	assert.Contains(t, code, `// @rpc "pingRequest"`)
-	assert.Contains(t, code, `PingRequest(ctx context.Context, req *PingMsgDTO, mods ...aoni.RequestModifier) (*PongMsgDTO, error)`)
+	assert.Contains(
+		t,
+		code,
+		`PingRequest(ctx context.Context, req *PingMsgDTO, mods ...aoni.RequestModifier) (*PongMsgDTO, error)`,
+	)
 	assert.Contains(t, code, "type PingMsgDTO struct")
 	assert.Contains(t, code, "Timestamp int64")
 	assert.Contains(t, code, "type PongMsgDTO struct")
@@ -323,4 +327,3 @@ func TestAsyncAPI_Import_RealWorldGeminiWS(t *testing.T) {
 		`SendMarketData(ctx context.Context, symbol string, handler func(msg *MarketDataDTO)) (Subscription, error)`,
 	)
 }
-

@@ -19,19 +19,19 @@ import (
 
 // ParseSpec parses, normalizes, and resolves traits for an AsyncAPI specification conforming to AsyncAPI 2.x and 3.x.
 //
-// References:
+// # References
 //   - AsyncAPI 3.1.0 §AsyncAPI Document Object: https://www.asyncapi.com/docs/reference/specification/v3.1.0#asyncapi-document-object
 //   - AsyncAPI 2.6.0 §AsyncAPI Object: https://v2.asyncapi.com/docs/reference/specification/v2.6.0#asyncapiObject
 //   - JSON Schema draft 2020-12 (AsyncAPI 3.1): https://json-schema.org/draft/2020-12/json-schema-core.html
 func ParseSpec(data []byte) (*Document, error) {
 	if len(data) == 0 {
-		return nil, errors.New("empty asyncapi specification data")
+		return nil, errors.New("vortex/asyncapi: empty specification data")
 	}
 
 	var doc Document
 	if err := yaml.Unmarshal(data, &doc); err != nil {
 		if errJSON := json.Unmarshal(data, &doc); errJSON != nil {
-			return nil, fmt.Errorf("failed to parse asyncapi spec: %w", err)
+			return nil, fmt.Errorf("vortex/asyncapi: parse specification: %w", err)
 		}
 	}
 
@@ -53,10 +53,12 @@ func ParseSpec(data []byte) (*Document, error) {
 
 func detectAsyncAPIVersion(data []byte) string {
 	var raw map[string]any
+
 	_ = yaml.Unmarshal(data, &raw)
 	if v, ok := raw["asyncapi"].(string); ok {
 		return v
 	}
+
 	return "3.0.0"
 }
 
@@ -72,7 +74,7 @@ func LoadSpec(filename string, data []byte) (*Document, error) {
 
 // LoadSpecWithMode loads and combines multiple specifications using the specified MergeMode (union, intersect, diff).
 //
-// References:
+// # References
 //   - AsyncAPI 3.1.0 §Multi-Document Composition: https://www.asyncapi.com/docs/concepts/asyncapi-document
 func LoadSpecWithMode(filename string, data []byte, mode MergeMode) (*Document, error) {
 	if len(data) > 0 {
@@ -92,8 +94,9 @@ func LoadSpecWithMode(filename string, data []byte, mode MergeMode) (*Document, 
 	for _, f := range files {
 		doc, lErr := loadSingleFile(f)
 		if lErr != nil {
-			return nil, fmt.Errorf("failed reading spec file %s: %w", f, lErr)
+			return nil, fmt.Errorf("vortex/asyncapi: read spec file %s: %w", f, lErr)
 		}
+
 		allSpecs = append(allSpecs, doc)
 	}
 
@@ -102,6 +105,7 @@ func LoadSpecWithMode(filename string, data []byte, mode MergeMode) (*Document, 
 
 func resolveSpecFiles(target string) ([]string, error) {
 	parts := strings.Split(target, ",")
+
 	var result []string
 
 	for _, part := range parts {
@@ -113,9 +117,11 @@ func resolveSpecFiles(target string) ([]string, error) {
 		if strings.ContainsAny(clean, "*?[]") {
 			matches, err := filepath.Glob(clean)
 			if err != nil {
-				return nil, fmt.Errorf("invalid glob pattern %q: %w", clean, err)
+				return nil, fmt.Errorf("vortex/asyncapi: invalid glob pattern %q: %w", clean, err)
 			}
+
 			result = append(result, matches...)
+
 			continue
 		}
 
@@ -123,7 +129,7 @@ func resolveSpecFiles(target string) ([]string, error) {
 	}
 
 	if len(result) == 0 {
-		return nil, fmt.Errorf("no valid asyncapi specification files found in %q", target)
+		return nil, fmt.Errorf("vortex/asyncapi: no valid specification files found in %q", target)
 	}
 
 	return result, nil
@@ -132,8 +138,9 @@ func resolveSpecFiles(target string) ([]string, error) {
 func loadSingleFile(filename string) (*Document, error) {
 	data, err := os.ReadFile(filename)
 	if err != nil {
-		return nil, fmt.Errorf("reading asyncapi spec %s: %w", filename, err)
+		return nil, fmt.Errorf("vortex/asyncapi: read spec file %s: %w", filename, err)
 	}
+
 	return ParseSpec(data)
 }
 
@@ -176,11 +183,14 @@ func normalizeServers2(doc *Document) {
 		if idx := strings.Index(u, "://"); idx != -1 {
 			u = u[idx+3:]
 		}
+
 		parts := strings.SplitN(u, "/", 2)
+
 		srv.Host = parts[0]
 		if len(parts) > 1 && parts[1] != "" {
 			srv.Pathname = "/" + parts[1]
 		}
+
 		doc.Servers[sKey] = srv
 	}
 }
@@ -264,6 +274,7 @@ func extractMessagesFrom2(msgAny any) []RefObject {
 			}
 		}
 	}
+
 	return res
 }
 
@@ -287,6 +298,7 @@ func applyOperationTraits(doc *Document) {
 	for opKey, op := range doc.Operations {
 		for _, traitRef := range op.Traits {
 			traitName := extractRefKey(traitRef.Ref)
+
 			trait, ok := doc.Components.OperationTraits[traitName]
 			if !ok {
 				continue
@@ -294,14 +306,17 @@ func applyOperationTraits(doc *Document) {
 
 			op.Summary = generic.Coalesce(op.Summary, trait.Summary)
 			op.Description = generic.Coalesce(op.Description, trait.Description)
+
 			op.Title = generic.Coalesce(op.Title, trait.Title)
 			if len(op.Tags) == 0 {
 				op.Tags = trait.Tags
 			}
+
 			if len(op.Security) == 0 {
 				op.Security = trait.Security
 			}
 		}
+
 		doc.Operations[opKey] = op
 	}
 }
@@ -310,6 +325,7 @@ func applyMessageTraits(doc *Document) {
 	for msgKey, msg := range doc.Components.Messages {
 		for _, traitRef := range msg.Traits {
 			traitName := extractRefKey(traitRef.Ref)
+
 			trait, ok := doc.Components.MessageTraits[traitName]
 			if !ok {
 				continue
@@ -318,15 +334,19 @@ func applyMessageTraits(doc *Document) {
 			msg.Description = generic.Coalesce(msg.Description, trait.Description)
 			msg.Summary = generic.Coalesce(msg.Summary, trait.Summary)
 			msg.Title = generic.Coalesce(msg.Title, trait.Title)
+
 			msg.ContentType = generic.Coalesce(msg.ContentType, trait.ContentType)
 			if msg.CorrelationID == nil {
 				msg.CorrelationID = trait.CorrelationID
 			}
+
 			if len(msg.Tags) == 0 {
 				msg.Tags = trait.Tags
 			}
+
 			mergeTraitHeaders(&msg, trait.Headers)
 		}
+
 		doc.Components.Messages[msgKey] = msg
 	}
 }
@@ -335,10 +355,12 @@ func mergeTraitHeaders(msg *Message, traitHeaders *Schema) {
 	if traitHeaders == nil {
 		return
 	}
+
 	if msg.Headers == nil {
 		msg.Headers = traitHeaders
 		return
 	}
+
 	if traitHeaders.Properties == nil {
 		return
 	}
@@ -346,6 +368,7 @@ func mergeTraitHeaders(msg *Message, traitHeaders *Schema) {
 	if msg.Headers.Properties == nil {
 		msg.Headers.Properties = make(map[string]Schema)
 	}
+
 	for propKey, propVal := range traitHeaders.Properties {
 		if _, exists := msg.Headers.Properties[propKey]; !exists {
 			msg.Headers.Properties[propKey] = propVal
@@ -382,7 +405,7 @@ func extractAddressParameters(doc *Document) {
 			}
 
 			ch.Parameters[paramName] = Parameter{
-				Description: fmt.Sprintf("Channel address parameter %s", paramName),
+				Description: "Channel address parameter " + paramName,
 				Schema:      Schema{Type: "string"},
 			}
 		}
@@ -393,12 +416,14 @@ func extractAddressParameters(doc *Document) {
 
 func extractTemplatePlaceholders(s string) []string {
 	var placeholders []string
+
 	rem := s
 	for {
 		start := strings.Index(rem, "{")
 		if start == -1 {
 			break
 		}
+
 		end := strings.Index(rem[start:], "}")
 		if end == -1 {
 			break
@@ -408,8 +433,10 @@ func extractTemplatePlaceholders(s string) []string {
 		if !slices.Contains(placeholders, name) {
 			placeholders = append(placeholders, name)
 		}
+
 		rem = rem[start+end+1:]
 	}
+
 	return placeholders
 }
 
@@ -418,6 +445,7 @@ func extractRefKey(ref string) string {
 	if len(parts) > 0 {
 		return parts[len(parts)-1]
 	}
+
 	return ref
 }
 
@@ -430,9 +458,11 @@ func sanitizeIdentifier(s string) string {
 	s = strings.Trim(s, "_")
 
 	parts := generic.Filter(strings.Split(s, "_"), func(p string) bool { return p != "" })
+
 	var sb strings.Builder
 	for _, p := range parts {
 		sb.WriteString(strings.ToUpper(p[:1]) + p[1:])
 	}
+
 	return sb.String()
 }

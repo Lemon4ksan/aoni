@@ -73,6 +73,7 @@ func mergeUnion(specs ...*Document) *Document {
 		if s == nil {
 			continue
 		}
+
 		mergeServers(root, s.Servers)
 		mergeSchemas(root, s.Components)
 		mergeInfoHeaders(root, s.Info)
@@ -86,6 +87,7 @@ func ensureRootContainers(root *Document) {
 	if root.Paths == nil {
 		root.Paths = make(map[string]*PathItem)
 	}
+
 	if root.Components == nil {
 		root.Components = &Components{
 			Schemas: make(map[string]*Schema),
@@ -100,6 +102,7 @@ func mergeServers(root *Document, servers []Server) {
 		if srv.URL == "" || hasServerURL(root.Servers, srv.URL) {
 			continue
 		}
+
 		root.Servers = append(root.Servers, srv)
 	}
 }
@@ -121,6 +124,7 @@ func mergeSchemas(root *Document, incomingComp *Components) {
 			mergeSchema(existingSchema, schema)
 			continue
 		}
+
 		root.Components.Schemas[name] = schema
 	}
 }
@@ -148,6 +152,7 @@ func ensureInfoExtensions(root *Document) {
 			Version: "1.0.0",
 		}
 	}
+
 	if root.Info.Extensions == nil {
 		root.Info.Extensions = make(map[string]any)
 	}
@@ -167,13 +172,16 @@ func mergeHeadersList(existing []map[string]string, incoming any) []map[string]s
 				existing = append(existing, h)
 			}
 		}
+
 	case []any:
 		for _, item := range inList {
 			hMap, isMap := item.(map[string]any)
 			if !isMap {
 				continue
 			}
+
 			name, _ := hMap["name"].(string)
+
 			val, _ := hMap["value"].(string)
 			if name != "" && val != "" {
 				if _, exists := headerMap[name]; !exists {
@@ -248,7 +256,9 @@ func isOpInAllSpecs(specs []*Document, pathStr, method string) bool {
 		if other == nil || other.Paths == nil {
 			return false
 		}
+
 		item := other.Paths[pathStr]
+
 		return item != nil && getPathItemOp(item, method) != nil
 	})
 }
@@ -258,12 +268,14 @@ func mergeOpFromAllSpecs(specs []*Document, root *Document, op *Operation, pathS
 		if other == nil || other.Paths == nil {
 			continue
 		}
+
 		otherItem := other.Paths[pathStr]
 		if otherItem != nil {
 			if otherOp := getPathItemOp(otherItem, method); otherOp != nil {
 				mergeOperation(op, otherOp)
 			}
 		}
+
 		mergeSchemas(root, other.Components)
 	}
 }
@@ -308,6 +320,7 @@ func setPathItemOp(p *PathItem, method string, op *Operation) {
 	if p == nil {
 		return
 	}
+
 	switch strings.ToUpper(method) {
 	case "GET":
 		p.Get = op
@@ -339,6 +352,7 @@ func countPathItemOps(p *PathItem) int {
 			count++
 		}
 	}
+
 	return count
 }
 
@@ -357,10 +371,12 @@ func mergeSubOp(dst **Operation, incoming *Operation) {
 	if incoming == nil {
 		return
 	}
+
 	if *dst == nil {
 		*dst = incoming
 		return
 	}
+
 	mergeOperation(*dst, incoming)
 }
 
@@ -376,6 +392,7 @@ func mergeOperationParams(existing *Operation, incomingParams []*Parameter) {
 		if p == nil || hasParam(existing.Parameters, p.In, p.Name) {
 			continue
 		}
+
 		existing.Parameters = append(existing.Parameters, p)
 	}
 }
@@ -390,10 +407,12 @@ func mergeOperationRequestBody(existing *Operation, incomingReqBody *RequestBody
 	if incomingReqBody == nil {
 		return
 	}
+
 	if existing.RequestBody == nil {
 		existing.RequestBody = incomingReqBody
 		return
 	}
+
 	if existing.RequestBody.Content == nil {
 		existing.RequestBody.Content = make(map[string]*MediaType)
 	}
@@ -404,6 +423,7 @@ func mergeOperationRequestBody(existing *Operation, incomingReqBody *RequestBody
 			existing.RequestBody.Content[mt] = content
 			continue
 		}
+
 		if existingContent.Schema != nil && content.Schema != nil {
 			mergeSchema(existingContent.Schema, content.Schema)
 		}
@@ -414,6 +434,7 @@ func mergeOperationResponses(existing *Operation, incomingResponses map[string]*
 	if incomingResponses == nil {
 		return
 	}
+
 	if existing.Responses == nil {
 		existing.Responses = make(map[string]*Response)
 	}
@@ -424,18 +445,22 @@ func mergeOperationResponses(existing *Operation, incomingResponses map[string]*
 			existing.Responses[statusStr] = resp
 			continue
 		}
+
 		if resp == nil {
 			continue
 		}
+
 		if existingResp.Content == nil {
 			existingResp.Content = make(map[string]*MediaType)
 		}
+
 		for mt, content := range resp.Content {
 			existingContent := existingResp.Content[mt]
 			if existingContent == nil {
 				existingResp.Content[mt] = content
 				continue
 			}
+
 			if existingContent.Schema != nil && content.Schema != nil {
 				mergeSchema(existingContent.Schema, content.Schema)
 			}
@@ -480,6 +505,7 @@ func mergeSchema(dst, src *Schema) {
 			mergeSchema(existingProp, v)
 			continue
 		}
+
 		dst.Properties[k] = v
 	}
 }
@@ -498,15 +524,19 @@ func cloneDocument(src *Document) *Document {
 		if src.Components.Schemas != nil {
 			comp.Schemas = maps.Clone(src.Components.Schemas)
 		}
+
 		if src.Components.Responses != nil {
 			comp.Responses = maps.Clone(src.Components.Responses)
 		}
+
 		if src.Components.Parameters != nil {
 			comp.Parameters = maps.Clone(src.Components.Parameters)
 		}
+
 		if src.Components.RequestBodies != nil {
 			comp.RequestBodies = maps.Clone(src.Components.RequestBodies)
 		}
+
 		d.Components = &comp
 	}
 

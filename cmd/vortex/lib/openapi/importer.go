@@ -43,12 +43,12 @@ func Import(cfg ImportConfig) (*ImportResult, error) {
 
 	spec, err := LoadSpecWithMode(cfg.SpecFile, cfg.SpecData, mode)
 	if err != nil {
-		return nil, fmt.Errorf("loading spec: %w", err)
+		return nil, fmt.Errorf("vortex/openapi: load spec: %w", err)
 	}
 
 	code, err := GenerateContract(spec, cfg)
 	if err != nil {
-		return nil, fmt.Errorf("generating contract: %w", err)
+		return nil, fmt.Errorf("vortex/openapi: generate contract: %w", err)
 	}
 
 	res := &ImportResult{
