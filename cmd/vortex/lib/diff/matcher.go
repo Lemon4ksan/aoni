@@ -8,9 +8,8 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/getkin/kin-openapi/openapi3"
-
 	"github.com/lemon4ksan/aoni/cmd/vortex/lib/ir"
+	"github.com/lemon4ksan/aoni/cmd/vortex/lib/openapi"
 )
 
 type remoteOp struct {
@@ -20,27 +19,27 @@ type remoteOp struct {
 	operationID  string
 	summary      string
 	deprecated   bool
-	pathParams   map[string]*openapi3.Parameter
-	queryParams  map[string]*openapi3.Parameter
-	headerParams map[string]*openapi3.Parameter
-	requestBody  *openapi3.RequestBody
-	responses    *openapi3.Responses
+	pathParams   map[string]*openapi.Parameter
+	queryParams  map[string]*openapi.Parameter
+	headerParams map[string]*openapi.Parameter
+	requestBody  *openapi.RequestBody
+	responses    map[string]*openapi.Response
 }
 
-// Compare compares local RootIR against a loaded remote OpenAPI 3.x document with default options.
+// Compare compares local RootIR against a loaded remote OpenAPI document with default options.
 func (e *DiffEngine) Compare(
 	local *ir.RootIR,
-	remoteDoc *openapi3.T,
+	remoteDoc *openapi.Document,
 	localTarget string,
 	remoteTarget string,
 ) *DiffReport {
 	return e.CompareWithOptions(local, remoteDoc, localTarget, remoteTarget, DiffOptions{})
 }
 
-// CompareWithOptions compares local RootIR against a loaded remote OpenAPI 3.x document with custom options.
+// CompareWithOptions compares local RootIR against a loaded remote OpenAPI document with custom options.
 func (e *DiffEngine) CompareWithOptions(
 	local *ir.RootIR,
-	remoteDoc *openapi3.T,
+	remoteDoc *openapi.Document,
 	localTarget string,
 	remoteTarget string,
 	opts DiffOptions,
@@ -58,60 +57,36 @@ func (e *DiffEngine) CompareWithOptions(
 	remoteOps, remoteKeyMap, remoteOpIDMap := indexRemoteOps(remoteDoc)
 	report.TotalEndpointsChecked = len(remoteOps)
 
-	// 2. Track matched remote operations
 	matchedRemote := make(map[*remoteOp]bool)
 
-	// 3. Inspect each local service and method
 	for _, svc := range local.Services {
 		for _, m := range svc.Methods {
 			if m.Operation != ir.OpHTTP && m.HTTPMethod == "" {
 				continue
 			}
 
-			localHTTPMethod := strings.ToUpper(m.HTTPMethod)
-			if localHTTPMethod == "" {
-				localHTTPMethod = "GET"
-			}
-
-			localRawPath := "/"
-			if m.Path != nil && m.Path.RawTemplate != "" {
-				localRawPath = m.Path.RawTemplate
-				if !strings.HasPrefix(localRawPath, "/") {
-					localRawPath = "/" + localRawPath
-				}
-			}
-
-			localNormPath := normalizePath(localRawPath)
-			localKey := localHTTPMethod + " " + localNormPath
-
-			// Match with remote operation
 			var rop *remoteOp
-			if matched, ok := remoteKeyMap[localKey]; ok {
-				rop = matched
-			} else if m.OperationID != "" {
-				if matched, ok := remoteOpIDMap[m.OperationID]; ok {
-					rop = matched
-				}
-			} else if matched, ok := remoteOpIDMap[m.Name]; ok {
-				rop = matched
+			if m.OperationID != "" {
+				rop = remoteOpIDMap[m.OperationID]
 			}
 
-			endpointDesc := fmt.Sprintf("%s %s (%s.%s)", localHTTPMethod, localRawPath, svc.Name, m.Name)
+			if rop == nil && m.Path != nil {
+				routeKey := strings.ToUpper(m.HTTPMethod) + " " + normalizePath(m.Path.RawTemplate)
+				rop = remoteKeyMap[routeKey]
+			}
+
+			endpointDesc := fmt.Sprintf("%s %s", m.HTTPMethod, m.Path.RawTemplate)
 
 			if rop == nil {
 				if !opts.Additive {
-					// Local endpoint missing in remote OpenAPI spec
 					report.Drifts = append(report.Drifts, DriftItem{
-						Severity: SeverityGhost,
-						Kind:     DriftMissingEndpoint,
-						Service:  svc.Name,
-						Method:   m.Name,
-						Endpoint: endpointDesc,
-						Message: fmt.Sprintf(
-							"Method %s exists in Go contract but is absent from remote OpenAPI specification",
-							m.Name,
-						),
-						Suggestion: "Export local contract via `vortex oapi` or check if route URL changed",
+						Severity:   SeverityNonBreaking,
+						Kind:       DriftMissingEndpoint,
+						Service:    svc.Name,
+						Method:     m.Name,
+						Endpoint:   endpointDesc,
+						Message:    "Endpoint exists in Go contract but is absent in remote OpenAPI specification",
+						Suggestion: "Verify if route was deprecated or removed upstream",
 					})
 				}
 
@@ -119,34 +94,21 @@ func (e *DiffEngine) CompareWithOptions(
 			}
 
 			matchedRemote[rop] = true
-
-			// Compare matched method
 			e.compareMethod(report, svc, m, rop, endpointDesc)
 		}
 	}
 
-	// 4. Check for remote operations not implemented in Go
 	for _, rop := range remoteOps {
 		if !matchedRemote[rop] {
-			remoteDesc := fmt.Sprintf("%s %s", rop.httpMethod, rop.rawPath)
-			if rop.operationID != "" {
-				remoteDesc += fmt.Sprintf(" [%s]", rop.operationID)
-			}
-
 			severity := SeverityGhost
-			msg := fmt.Sprintf(
-				"Endpoint %s is declared in remote OpenAPI specification but not implemented in Go contracts",
-				remoteDesc,
-			)
-			sugg := fmt.Sprintf("Add method to Go interface or run `vortex oapi --import=%s`", remoteTarget)
+			msg := fmt.Sprintf("Remote specification defines endpoint %s %s not implemented in Go contract", rop.httpMethod, rop.rawPath)
+			sugg := fmt.Sprintf("Run `vortex spec import` to generate method for `%s`", rop.rawPath)
 
-			if opts.Additive {
+			remoteDesc := fmt.Sprintf("%s %s", rop.httpMethod, rop.rawPath)
+			if rop.deprecated {
 				severity = SeverityNonBreaking
-				msg = fmt.Sprintf(
-					"Endpoint %s was captured in traffic/spec but is not yet implemented in Go contracts",
-					remoteDesc,
-				)
-				sugg = fmt.Sprintf("Add method to Go interface or run `vortex spec import -add -spec=%s`", remoteTarget)
+				msg = fmt.Sprintf("Remote specification contains deprecated endpoint %s %s", rop.httpMethod, rop.rawPath)
+				sugg = "Ignore or import as deprecated"
 			}
 
 			report.Drifts = append(report.Drifts, DriftItem{
@@ -277,11 +239,8 @@ func (e *DiffEngine) compareMethod(
 		}
 
 		// Type compatibility check
-		if qParam.Schema != nil && qParam.Schema.Value != nil {
-			schemaType := ""
-			if qParam.Schema.Value.Type != nil && len(*qParam.Schema.Value.Type) > 0 {
-				schemaType = (*qParam.Schema.Value.Type)[0]
-			}
+		if qParam.Schema != nil && len(qParam.Schema.Type) > 0 {
+			schemaType := qParam.Schema.Type.Primary()
 
 			if schemaType != "" && !isTypeCompatible(localParam.GoType.Name, schemaType) {
 				report.Drifts = append(report.Drifts, DriftItem{
@@ -375,7 +334,7 @@ func isPrimitiveType(t string) bool {
 	}
 }
 
-func indexRemoteOps(remoteDoc *openapi3.T) ([]*remoteOp, map[string]*remoteOp, map[string]*remoteOp) {
+func indexRemoteOps(remoteDoc *openapi.Document) ([]*remoteOp, map[string]*remoteOp, map[string]*remoteOp) {
 	remoteOps := make([]*remoteOp, 0)
 	remoteKeyMap := make(map[string]*remoteOp)
 	remoteOpIDMap := make(map[string]*remoteOp)
@@ -384,22 +343,12 @@ func indexRemoteOps(remoteDoc *openapi3.T) ([]*remoteOp, map[string]*remoteOp, m
 		return remoteOps, remoteKeyMap, remoteOpIDMap
 	}
 
-	for pathStr, pathItem := range remoteDoc.Paths.Map() {
+	for pathStr, pathItem := range remoteDoc.Paths {
 		if pathItem == nil {
 			continue
 		}
 
-		ops := map[string]*openapi3.Operation{
-			"GET":     pathItem.Get,
-			"POST":    pathItem.Post,
-			"PUT":     pathItem.Put,
-			"DELETE":  pathItem.Delete,
-			"PATCH":   pathItem.Patch,
-			"HEAD":    pathItem.Head,
-			"OPTIONS": pathItem.Options,
-		}
-
-		for httpMethod, op := range ops {
+		for httpMethod, op := range pathItem.OperationsMap() {
 			if op == nil {
 				continue
 			}
@@ -411,27 +360,22 @@ func indexRemoteOps(remoteDoc *openapi3.T) ([]*remoteOp, map[string]*remoteOp, m
 				operationID:  op.OperationID,
 				summary:      op.Summary,
 				deprecated:   op.Deprecated,
-				pathParams:   make(map[string]*openapi3.Parameter),
-				queryParams:  make(map[string]*openapi3.Parameter),
-				headerParams: make(map[string]*openapi3.Parameter),
-				requestBody:  nil,
+				pathParams:   make(map[string]*openapi.Parameter),
+				queryParams:  make(map[string]*openapi.Parameter),
+				headerParams: make(map[string]*openapi.Parameter),
+				requestBody:  op.RequestBody,
 				responses:    op.Responses,
 			}
 
-			if op.RequestBody != nil && op.RequestBody.Value != nil {
-				rop.requestBody = op.RequestBody.Value
-			}
-
-			allParams := make([]*openapi3.ParameterRef, 0, len(pathItem.Parameters)+len(op.Parameters))
+			allParams := make([]*openapi.Parameter, 0, len(pathItem.Parameters)+len(op.Parameters))
 			allParams = append(allParams, pathItem.Parameters...)
 			allParams = append(allParams, op.Parameters...)
 
-			for _, pRef := range allParams {
-				if pRef == nil || pRef.Value == nil {
+			for _, p := range allParams {
+				if p == nil {
 					continue
 				}
 
-				p := pRef.Value
 				switch p.In {
 				case "path":
 					rop.pathParams[strings.ToLower(p.Name)] = p
@@ -457,8 +401,8 @@ func indexRemoteOps(remoteDoc *openapi3.T) ([]*remoteOp, map[string]*remoteOp, m
 
 // CompareSpecs compares two OpenAPI/HAR/Swagger specification documents directly without requiring Go contract files.
 func (e *DiffEngine) CompareSpecs(
-	baseDoc *openapi3.T,
-	headDoc *openapi3.T,
+	baseDoc *openapi.Document,
+	headDoc *openapi.Document,
 	baseTarget string,
 	headTarget string,
 ) *DiffReport {
@@ -627,11 +571,10 @@ func (e *DiffEngine) compareSpecOperations(bOp, hOp *remoteOp, headTarget string
 	}
 }
 
-func getParamType(p *openapi3.Parameter) string {
-	if p == nil || p.Schema == nil || p.Schema.Value == nil || p.Schema.Value.Type == nil ||
-		len(*p.Schema.Value.Type) == 0 {
+func getParamType(p *openapi.Parameter) string {
+	if p == nil || p.Schema == nil || len(p.Schema.Type) == 0 {
 		return ""
 	}
 
-	return (*p.Schema.Value.Type)[0]
+	return p.Schema.Type.Primary()
 }

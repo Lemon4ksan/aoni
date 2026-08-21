@@ -5,28 +5,21 @@
 package openapi
 
 import (
-	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 
-	"github.com/getkin/kin-openapi/openapi2"
-	"github.com/getkin/kin-openapi/openapi2conv"
-	"github.com/getkin/kin-openapi/openapi3"
-	"gopkg.in/yaml.v3"
-
 	"github.com/lemon4ksan/aoni/cmd/vortex/lib/cache"
-	"github.com/lemon4ksan/aoni/cmd/vortex/lib/ingest"
 )
 
 // LoadSpec loads an OpenAPI specification using default Union merge mode.
-func LoadSpec(filename string, data []byte) (*openapi3.T, error) {
+func LoadSpec(filename string, data []byte) (*Document, error) {
 	return LoadSpecWithMode(filename, data, MergeModeUnion)
 }
 
 // LoadSpecWithMode loads and combines multiple specifications using the specified MergeMode (union, intersect, diff).
-func LoadSpecWithMode(filename string, data []byte, mode MergeMode) (*openapi3.T, error) {
+func LoadSpecWithMode(filename string, data []byte, mode MergeMode) (*Document, error) {
 	if len(data) > 0 {
 		return loadSingleSpec(filename, data)
 	}
@@ -34,7 +27,7 @@ func LoadSpecWithMode(filename string, data []byte, mode MergeMode) (*openapi3.T
 	if strings.Contains(filename, ",") {
 		parts := strings.Split(filename, ",")
 
-		var allSpecs []*openapi3.T
+		var allSpecs []*Document
 
 		for _, part := range parts {
 			part = strings.TrimSpace(part)
@@ -76,7 +69,7 @@ func LoadSpecWithMode(filename string, data []byte, mode MergeMode) (*openapi3.T
 	if strings.ContainsAny(filename, "*?[]") {
 		matches, err := filepath.Glob(filename)
 		if err == nil && len(matches) > 0 {
-			var allSpecs []*openapi3.T
+			var allSpecs []*Document
 			for _, match := range matches {
 				doc, lErr := loadSingleSpec(match, nil)
 				if lErr != nil {
@@ -93,7 +86,7 @@ func LoadSpecWithMode(filename string, data []byte, mode MergeMode) (*openapi3.T
 	return loadSingleSpec(filename, nil)
 }
 
-func loadSingleSpec(filename string, data []byte) (*openapi3.T, error) {
+func loadSingleSpec(filename string, data []byte) (*Document, error) {
 	if len(data) == 0 {
 		var err error
 
@@ -119,148 +112,5 @@ func loadSingleSpec(filename string, data []byte) (*openapi3.T, error) {
 		}
 	}
 
-	data = sanitizeSpecData(data)
-
-	format, _ := ingest.DetectFormat(data)
-	if format == ingest.FormatHAR {
-		return ingest.HARToOpenAPI(data)
-	}
-
-	var versionDetector struct {
-		Swagger string `json:"swagger" yaml:"swagger"`
-		OpenAPI string `json:"openapi" yaml:"openapi"`
-	}
-
-	if err := yaml.Unmarshal(data, &versionDetector); err == nil {
-		if strings.HasPrefix(versionDetector.Swagger, "2.") || versionDetector.Swagger == "2.0" {
-			var doc2 openapi2.T
-			if err := json.Unmarshal(data, &doc2); err != nil {
-				if errYaml := yaml.Unmarshal(data, &doc2); errYaml != nil {
-					return nil, fmt.Errorf("failed parsing Swagger 2.0 spec: %w", err)
-				}
-			}
-
-			doc3, err := openapi2conv.ToV3(&doc2)
-			if err != nil {
-				return nil, fmt.Errorf("failed converting Swagger 2.0 to OpenAPI 3.0: %w", err)
-			}
-
-			return doc3, nil
-		}
-	}
-
-	loader := openapi3.NewLoader()
-	loader.IsExternalRefsAllowed = true
-
-	doc3, err := loader.LoadFromData(data)
-	if err != nil {
-		return nil, fmt.Errorf("failed parsing OpenAPI 3.x spec: %w", err)
-	}
-
-	return doc3, nil
-}
-
-func sanitizeSpecData(data []byte) []byte {
-	var rawNode any
-	if err := yaml.Unmarshal(data, &rawNode); err != nil {
-		return data
-	}
-
-	sanitizeMapNode(rawNode)
-
-	cleaned, err := json.Marshal(rawNode)
-	if err != nil {
-		return data
-	}
-
-	return cleaned
-}
-
-func sanitizeMapNode(node any) {
-	switch v := node.(type) {
-	case map[string]any:
-		for key, val := range v {
-			if key == "type" {
-				if arr, ok := val.([]any); ok && len(arr) > 0 {
-					var nonNull []any
-					for _, item := range arr {
-						if s, ok := item.(string); ok && s != "null" {
-							nonNull = append(nonNull, s)
-						}
-					}
-
-					if len(nonNull) > 0 {
-						v["type"] = nonNull[0]
-					} else {
-						v["type"] = "string"
-					}
-				}
-			}
-
-			if key == "$ref" {
-				if strVal, ok := val.(string); ok {
-					if strings.HasPrefix(strVal, "#") && !strings.HasPrefix(strVal, "#/") {
-						v[key] = "#/" + strVal[1:]
-					}
-				}
-			} else {
-				switch key {
-				case "nullable", "deprecated", "readOnly", "writeOnly", "exclusiveMinimum", "exclusiveMaximum":
-					if strVal, ok := val.(string); ok {
-						if strings.EqualFold(strVal, "true") {
-							v[key] = true
-						} else if strings.EqualFold(strVal, "false") {
-							v[key] = false
-						}
-					}
-
-				case "type":
-					if strVal, ok := val.(string); ok {
-						if strings.EqualFold(strVal, "string|number") || strings.EqualFold(strVal, "number|string") {
-							v[key] = "string"
-						}
-					}
-				}
-			}
-
-			sanitizeMapNode(val)
-		}
-
-	case map[any]any:
-		for k, val := range v {
-			keyStr := fmt.Sprintf("%v", k)
-			if keyStr == "$ref" {
-				if strVal, ok := val.(string); ok {
-					if strings.HasPrefix(strVal, "#") && !strings.HasPrefix(strVal, "#/") {
-						v[k] = "#/" + strVal[1:]
-					}
-				}
-			} else {
-				switch keyStr {
-				case "nullable", "deprecated", "readOnly", "writeOnly", "exclusiveMinimum", "exclusiveMaximum":
-					if strVal, ok := val.(string); ok {
-						if strings.EqualFold(strVal, "true") {
-							v[k] = true
-						} else if strings.EqualFold(strVal, "false") {
-							v[k] = false
-						}
-					}
-
-				case "type":
-					if strVal, ok := val.(string); ok {
-						if strings.EqualFold(strVal, "string|number") || strings.EqualFold(strVal, "number|string") {
-							v[k] = "string"
-						}
-					}
-				}
-			}
-
-			sanitizeMapNode(val)
-		}
-
-	case []any:
-		for _, item := range v {
-			sanitizeMapNode(item)
-		}
-	}
+	return ParseSpec(data)
 }

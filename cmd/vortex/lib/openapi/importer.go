@@ -57,7 +57,7 @@ func Import(cfg ImportConfig) (*ImportResult, error) {
 	}
 
 	if spec.Paths != nil {
-		res.MethodsCount = len(spec.Paths.Map())
+		res.MethodsCount = len(spec.Paths)
 	}
 
 	if spec.Components != nil {

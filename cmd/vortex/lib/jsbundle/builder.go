@@ -12,7 +12,7 @@ import (
 	"strings"
 	"unicode"
 
-	"github.com/getkin/kin-openapi/openapi3"
+	"github.com/lemon4ksan/aoni/cmd/vortex/lib/openapi"
 )
 
 // ContractOptions configures the generation of a Go @aoni:service contract from JS scan results.
@@ -248,21 +248,21 @@ func SanitizeIdentifier(s string) string {
 }
 
 // ScanToOpenAPI converts a JavaScript ScanResult into a normalized OpenAPI 3.1 document.
-func ScanToOpenAPI(scan *ScanResult, baseURL string) *openapi3.T {
-	doc := &openapi3.T{
+func ScanToOpenAPI(scan *ScanResult, baseURL string) *openapi.Document {
+	doc := &openapi.Document{
 		OpenAPI: "3.1.0",
-		Info: &openapi3.Info{
+		Info: &openapi.Info{
 			Title:   "Discovered API",
 			Version: "1.0.0",
 		},
-		Paths: openapi3.NewPaths(),
-		Components: &openapi3.Components{
-			Schemas: make(openapi3.Schemas),
+		Paths: make(map[string]*openapi.PathItem),
+		Components: &openapi.Components{
+			Schemas: make(map[string]*openapi.Schema),
 		},
 	}
 
 	if baseURL != "" {
-		doc.Servers = []*openapi3.Server{
+		doc.Servers = []openapi.Server{
 			{URL: baseURL},
 		}
 	}
@@ -278,9 +278,9 @@ func ScanToOpenAPI(scan *ScanResult, baseURL string) *openapi3.T {
 		}
 
 		structName := SanitizeIdentifier(id)
-		schema := &openapi3.Schema{
-			Type:       &openapi3.Types{"object"},
-			Properties: make(openapi3.Schemas),
+		schema := &openapi.Schema{
+			Type:       openapi.TypeArray{"object"},
+			Properties: make(map[string]*openapi.Schema),
 		}
 
 		for idx, f := range msg.Fields {
@@ -289,45 +289,43 @@ func ScanToOpenAPI(scan *ScanResult, baseURL string) *openapi3.T {
 				fName = fmt.Sprintf("Field%d", idx)
 			}
 
-			fSchema := &openapi3.Schema{
-				Type: &openapi3.Types{"string"},
+			fSchema := &openapi.Schema{
+				Type: openapi.TypeArray{"string"},
 			}
 			switch f.GoType {
 			case "int", "int64", "uint64":
-				fSchema.Type = &openapi3.Types{"integer"}
+				fSchema.Type = openapi.TypeArray{"integer"}
 			case "float64", "float32":
-				fSchema.Type = &openapi3.Types{"number"}
+				fSchema.Type = openapi.TypeArray{"number"}
 			case "bool":
-				fSchema.Type = &openapi3.Types{"boolean"}
+				fSchema.Type = openapi.TypeArray{"boolean"}
 			}
 
-			schema.Properties[fName] = &openapi3.SchemaRef{Value: fSchema}
+			schema.Properties[fName] = fSchema
 		}
 
-		doc.Components.Schemas[structName] = &openapi3.SchemaRef{Value: schema}
+		doc.Components.Schemas[structName] = schema
 	}
 
 	// Register endpoints
 	for _, ep := range scan.Endpoints {
 		methodName := DeriveMethodName(ep.Path)
 
-		pItem := doc.Paths.Find(ep.Path)
+		pItem := doc.Paths[ep.Path]
 		if pItem == nil {
-			pItem = &openapi3.PathItem{}
-			doc.Paths.Set(ep.Path, pItem)
+			pItem = &openapi.PathItem{}
+			doc.Paths[ep.Path] = pItem
 		}
 
-		op := &openapi3.Operation{
+		op := &openapi.Operation{
 			OperationID: methodName,
 			Summary:     fmt.Sprintf("%s %s", ep.HTTPMethod, ep.Path),
-			Responses:   openapi3.NewResponses(),
+			Responses:   make(map[string]*openapi.Response),
 		}
 
-		op.Responses.Set("200", &openapi3.ResponseRef{
-			Value: &openapi3.Response{
-				Description: openapi3.Ptr("Success response"),
-			},
-		})
+		op.Responses["200"] = &openapi.Response{
+			Description: "Success response",
+		}
 
 		httpVerb := strings.ToUpper(ep.HTTPMethod)
 		if httpVerb == "" {

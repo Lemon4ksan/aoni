@@ -16,8 +16,6 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/getkin/kin-openapi/openapi3"
-
 	"github.com/lemon4ksan/aoni/cmd/vortex/lib/ir"
 	"github.com/lemon4ksan/aoni/cmd/vortex/lib/parser"
 )
@@ -121,15 +119,15 @@ type incomingOperation struct {
 	operationID  string
 	summary      string
 	deprecated   bool
-	pathItem     *openapi3.PathItem
-	op           *openapi3.Operation
+	pathItem     *PathItem
+	op           *Operation
 	sinceVersion string
 }
 
-// ReconcileService merges existing Go AST with incoming OpenAPI 3.x specifications.
+// ReconcileService merges existing Go AST with incoming OpenAPI specifications.
 func (e *MergeEngine) ReconcileService(
 	existingAPISrc []byte,
-	doc *openapi3.T,
+	doc *Document,
 	cfg MergeConfig,
 ) (mergedSrc []byte, summary *MergeSummary, err error) {
 	summary = &MergeSummary{
@@ -188,7 +186,7 @@ func (e *MergeEngine) ReconcileService(
 	// 3. Index incoming OpenAPI operations
 	incomingOps := make([]*incomingOperation, 0)
 	if doc.Paths != nil {
-		for pathStr, pathItem := range doc.Paths.Map() {
+		for pathStr, pathItem := range doc.Paths {
 			if pathItem == nil || !isPathAllowed(pathStr, ImportConfig{
 				IncludePaths: nil,
 				ExcludePaths: nil,
@@ -196,16 +194,7 @@ func (e *MergeEngine) ReconcileService(
 				continue
 			}
 
-			ops := map[string]*openapi3.Operation{
-				"GET":     pathItem.Get,
-				"POST":    pathItem.Post,
-				"PUT":     pathItem.Put,
-				"DELETE":  pathItem.Delete,
-				"PATCH":   pathItem.Patch,
-				"HEAD":    pathItem.Head,
-				"OPTIONS": pathItem.Options,
-			}
-
+			ops := pathItem.OperationsMap()
 			for httpMethod, op := range ops {
 				if op == nil {
 					continue
@@ -215,16 +204,28 @@ func (e *MergeEngine) ReconcileService(
 					continue
 				}
 
+				norm := normalizeRoutePath(pathStr)
 				iop := &incomingOperation{
-					httpMethod:   httpMethod,
-					rawPath:      pathStr,
-					normPath:     normalizeRoutePath(pathStr),
-					operationID:  op.OperationID,
-					summary:      op.Summary,
-					deprecated:   op.Deprecated,
-					pathItem:     pathItem,
-					op:           op,
-					sinceVersion: summary.SpecVersion,
+					httpMethod:  httpMethod,
+					rawPath:     pathStr,
+					normPath:    norm,
+					operationID: op.OperationID,
+					summary:     op.Summary,
+					deprecated:  op.Deprecated,
+					pathItem:    pathItem,
+					op:          op,
+				}
+
+				if op.Summary == "" {
+					iop.summary = op.Description
+				}
+
+				if op.Extensions != nil {
+					if since, ok := op.Extensions["x-vortex-since"]; ok {
+						if sStr, ok := since.(string); ok {
+							iop.sinceVersion = sStr
+						}
+					}
 				}
 
 				incomingOps = append(incomingOps, iop)
@@ -232,119 +233,190 @@ func (e *MergeEngine) ReconcileService(
 		}
 	}
 
-	// Sort incoming operations by route for deterministic output
+	// Stable deterministic ordering
 	slices.SortFunc(incomingOps, func(a, b *incomingOperation) int {
-		return cmp.Or(
-			cmp.Compare(a.rawPath, b.rawPath),
-			cmp.Compare(a.httpMethod, b.httpMethod),
-		)
+		if c := cmp.Compare(a.rawPath, b.rawPath); c != 0 {
+			return c
+		}
+		return cmp.Compare(a.httpMethod, b.httpMethod)
 	})
 
-	// 4. Reconcile methods
-	type mergedMethodEntry struct {
-		goName   string
-		rendered string
-	}
+	matchedIncoming := make(map[*incomingOperation]*ir.MethodIR)
+	matchedExisting := make(map[*ir.MethodIR]*incomingOperation)
 
-	var outputMethods []mergedMethodEntry
-
-	matchedExisting := make(map[*ir.MethodIR]bool)
-	usedNames := make(map[string]int)
-
+	// Pass 1: Match by OperationID (@bind or method name)
 	for _, iop := range incomingOps {
-		// Match against existing method
-		var matched *ir.MethodIR
-		if iop.operationID != "" {
-			if m, ok := existingMethodsByOpID[iop.operationID]; ok {
-				matched = m
-			}
+		if iop.operationID == "" {
+			continue
 		}
 
-		if matched == nil {
-			routeKey := iop.httpMethod + " " + iop.normPath
-			if m, ok := existingMethodsByRoute[routeKey]; ok {
-				matched = m
-			}
+		if existM, ok := existingMethodsByOpID[iop.operationID]; ok {
+			matchedIncoming[iop] = existM
+			matchedExisting[existM] = iop
+			continue
 		}
 
-		if matched != nil {
-			matchedExisting[matched] = true
-			usedNames[matched.Name]++
-
-			// Render merged method: preserve custom name, domain types, and directives
-			rendered := e.renderMergedMethod(matched, iop, existingSvc, cfg)
-			outputMethods = append(outputMethods, mergedMethodEntry{
-				goName:   matched.Name,
-				rendered: rendered,
-			})
-			summary.UpdatedMethods = append(
-				summary.UpdatedMethods,
-				fmt.Sprintf("%s (%s %s)", matched.Name, iop.httpMethod, iop.rawPath),
-			)
-		} else {
-			// New endpoint discovered upstream
-			methodName := buildMethodName(iop.rawPath, iop.httpMethod, iop.op, usedNames)
-			rendered := e.renderNewMethod(methodName, iop, existingSvc, cfg)
-			outputMethods = append(outputMethods, mergedMethodEntry{
-				goName:   methodName,
-				rendered: rendered,
-			})
-			summary.AddedMethods = append(
-				summary.AddedMethods,
-				fmt.Sprintf("%s (%s %s)", methodName, iop.httpMethod, iop.rawPath),
-			)
+		pascalOpID := toPascalCase(iop.operationID)
+		if existM, ok := existingMethodsByName[pascalOpID]; ok {
+			if matchedExisting[existM] == nil {
+				matchedIncoming[iop] = existM
+				matchedExisting[existM] = iop
+			}
 		}
 	}
 
-	// 5. Handle remaining existing methods missing in incoming spec
+	// Pass 2: Match by exact Route (METHOD /path/{var})
+	for _, iop := range incomingOps {
+		if matchedIncoming[iop] != nil {
+			continue
+		}
+
+		routeKey := strings.ToUpper(iop.httpMethod) + " " + iop.normPath
+		if existM, ok := existingMethodsByRoute[routeKey]; ok {
+			if matchedExisting[existM] == nil {
+				matchedIncoming[iop] = existM
+				matchedExisting[existM] = iop
+			}
+		}
+	}
+
+	// Pass 3: Match by normalized Method Name
+	usedMethodNames := make(map[string]int)
+	for _, iop := range incomingOps {
+		if matchedIncoming[iop] != nil {
+			continue
+		}
+
+		candidateName := buildMethodName(iop.rawPath, iop.httpMethod, iop.op, usedMethodNames)
+		if existM, ok := existingMethodsByName[candidateName]; ok {
+			if matchedExisting[existM] == nil {
+				matchedIncoming[iop] = existM
+				matchedExisting[existM] = iop
+			}
+		}
+	}
+
+	// Rebuild Method Code Buffer
+	var methodsBuf bytes.Buffer
+	usedOutputNames := make(map[string]int)
+
+	// Step A: Reconcile matched and new incoming methods
+	for _, iop := range incomingOps {
+		existM := matchedIncoming[iop]
+		if existM != nil {
+			// [~] Existing Method Reconciliation
+			summary.UpdatedMethods = append(summary.UpdatedMethods, existM.Name)
+
+			methodCode := e.reconcileMethodNode(existM, iop, cfg, usedOutputNames)
+			methodsBuf.WriteString(methodCode)
+			methodsBuf.WriteString("\n")
+		} else {
+			// [+] New Method Appended
+			var singleBuf bytes.Buffer
+			writeOperationMethod(
+				&singleBuf,
+				doc,
+				iop.rawPath,
+				iop.httpMethod,
+				iop.pathItem,
+				iop.op,
+				ImportConfig{
+					ServiceName: cfg.ServiceName,
+					PackageName: cfg.PackageName,
+					TypeMap:     cfg.TypeMap,
+				},
+				usedOutputNames,
+			)
+
+			methodName := buildMethodName(iop.rawPath, iop.httpMethod, iop.op, nil)
+			summary.AddedMethods = append(summary.AddedMethods, methodName)
+			methodsBuf.WriteString(singleBuf.String())
+		}
+	}
+
+	// Step B: Handle Missing Existing Endpoints
 	if existingSvc != nil {
 		for _, m := range existingSvc.Methods {
-			if matchedExisting[m] {
-				continue
+			if matchedExisting[m] == nil {
+				if cfg.Prune {
+					// [-] Pruned
+					summary.PrunedMethods = append(summary.PrunedMethods, m.Name)
+				} else if cfg.Additive {
+					// Preserved Active
+					methodCode := renderExistingMethodVerbatim(m)
+					methodsBuf.WriteString(methodCode)
+					methodsBuf.WriteString("\n")
+				} else {
+					// [!] Soft Deprecation
+					summary.DeprecatedMethods = append(summary.DeprecatedMethods, m.Name)
+					methodCode := renderExistingMethodWithDeprecated(m, summary.SpecVersion)
+					methodsBuf.WriteString(methodCode)
+					methodsBuf.WriteString("\n")
+				}
 			}
-
-			if cfg.Prune {
-				summary.PrunedMethods = append(summary.PrunedMethods, m.Name)
-				continue
-			}
-
-			if cfg.Additive {
-				rendered := e.renderPreservedMethod(m)
-				outputMethods = append(outputMethods, mergedMethodEntry{
-					goName:   m.Name,
-					rendered: rendered,
-				})
-
-				continue
-			}
-
-			// Soft Deprecation: keep method, mark @deprecated
-			rendered := e.renderSoftDeprecatedMethod(m, summary.SpecVersion)
-			outputMethods = append(outputMethods, mergedMethodEntry{
-				goName:   m.Name,
-				rendered: rendered,
-			})
-			summary.DeprecatedMethods = append(summary.DeprecatedMethods, m.Name)
 		}
 	}
 
-	// 6. Assemble complete api.go source
+	// Step C: Assemble Complete Go Source File
+	var fullBuf bytes.Buffer
 	pkgName := cfg.PackageName
-	if pkgName == "" && existingRoot != nil && existingRoot.PackageName != "" {
-		pkgName = existingRoot.PackageName
+	if pkgName == "" {
+		if existingRoot != nil && existingRoot.PackageName != "" {
+			pkgName = existingRoot.PackageName
+		} else {
+			pkgName = "api"
+		}
 	}
 
-	if pkgName == "" {
-		pkgName = "api"
+	fmt.Fprintf(&fullBuf, "package %s\n\n", pkgName)
+
+	fullBuf.WriteString("import (\n")
+	fullBuf.WriteString("\t\"context\"\n")
+
+	if bytes.Contains(methodsBuf.Bytes(), []byte("time.Time")) {
+		fullBuf.WriteString("\t\"time\"\n")
 	}
+
+	var customImports []string
+	for _, rawType := range cfg.TypeMap {
+		if idx := strings.LastIndex(rawType, "/"); idx != -1 {
+			dotIdx := strings.LastIndex(rawType, ".")
+			if dotIdx > idx {
+				pkgPath := rawType[:dotIdx]
+				short := path.Base(pkgPath) + "." + rawType[dotIdx+1:]
+				if bytes.Contains(methodsBuf.Bytes(), []byte(short)) {
+					if !slices.Contains(customImports, pkgPath) {
+						customImports = append(customImports, pkgPath)
+					}
+				}
+			}
+		}
+	}
+
+	slices.Sort(customImports)
+	for _, imp := range customImports {
+		fmt.Fprintf(&fullBuf, "\t%q\n", imp)
+	}
+
+	fullBuf.WriteString("\n\t\"github.com/lemon4ksan/aoni\"\n")
+	fullBuf.WriteString(")\n\n")
 
 	serviceName := cfg.ServiceName
-	if serviceName == "" && existingSvc != nil {
-		serviceName = existingSvc.Name
+	if serviceName == "" {
+		if existingSvc != nil && existingSvc.Name != "" {
+			serviceName = existingSvc.Name
+		} else {
+			serviceName = "API"
+		}
 	}
 
-	if serviceName == "" {
-		serviceName = "API"
+	baseURL := resolveBaseURL(doc, ImportConfig{})
+	if baseURL != "" {
+		constName := "BaseURL"
+		if serviceName != "" && serviceName != "API" {
+			constName = serviceName + "BaseURL"
+		}
+		fmt.Fprintf(&fullBuf, "// %s is the default API base endpoint.\nconst %s = %q\n\n", constName, constName, baseURL)
 	}
 
 	casing := "snake_case"
@@ -352,564 +424,172 @@ func (e *MergeEngine) ReconcileService(
 		casing = string(existingSvc.DefaultCasing)
 	}
 
-	var buf bytes.Buffer
-	fmt.Fprintf(&buf, "package %s\n\n", pkgName)
-	buf.WriteString("import (\n")
-	buf.WriteString("\t\"context\"\n")
-
-	// Collect custom imports
-	var customImports []string
-	if existingRoot != nil {
-		for _, imp := range existingRoot.Imports {
-			if imp.Path != "context" && imp.Path != "github.com/lemon4ksan/aoni" {
-				if !slices.Contains(customImports, imp.Path) {
-					customImports = append(customImports, imp.Path)
-				}
-			}
-		}
+	fmt.Fprintf(&fullBuf, "// %s provides the API client contract.\n//\n", serviceName)
+	fmt.Fprintf(&fullBuf, "// @aoni:service casing=%s\n", casing)
+	if doc.Info != nil && doc.Info.Version != "" {
+		fmt.Fprintf(&fullBuf, "// @version %q\n", doc.Info.Version)
 	}
-
-	for _, rawType := range cfg.TypeMap {
-		if idx := strings.LastIndex(rawType, "/"); idx != -1 {
-			dotIdx := strings.LastIndex(rawType, ".")
-			if dotIdx > idx {
-				pkgPath := rawType[:dotIdx]
-				if !slices.Contains(customImports, pkgPath) {
-					customImports = append(customImports, pkgPath)
-				}
-			}
-		}
-	}
-
-	slices.Sort(customImports)
-
-	for _, imp := range customImports {
-		fmt.Fprintf(&buf, "\t%q\n", imp)
-	}
-
-	buf.WriteString("\n\t\"github.com/lemon4ksan/aoni\"\n")
-	buf.WriteString(")\n\n")
-
-	// BaseURL constant
-	baseURL := resolveBaseURL(doc, ImportConfig{BaseURL: ""})
-	if baseURL != "" {
-		constName := "BaseURL"
-		if serviceName != "" && serviceName != "API" {
-			constName = serviceName + "BaseURL"
-		}
-
-		fmt.Fprintf(&buf, "// %s is the default API base endpoint.\nconst %s = %q\n\n", constName, constName, baseURL)
-	}
-
-	// Service interface
-	fmt.Fprintf(&buf, "// %s provides the API client contract.\n//\n", serviceName)
-	fmt.Fprintf(&buf, "// @aoni:service casing=%s\n", casing)
-
-	if summary.SpecVersion != "" {
-		fmt.Fprintf(&buf, "// @version %q\n", summary.SpecVersion)
-	}
-
 	if cfg.SpecFile != "" {
-		fmt.Fprintf(&buf, "// @source %q\n", cfg.SpecFile)
+		fmt.Fprintf(&fullBuf, "// @source %q\n", cfg.SpecFile)
 	}
 
-	if existingSvc != nil {
-		if existingSvc.Persona != "" {
-			fmt.Fprintf(&buf, "// @persona %q\n", existingSvc.Persona)
-		}
+	fmt.Fprintf(&fullBuf, "type %s interface {\n", serviceName)
+	fullBuf.Write(methodsBuf.Bytes())
+	fullBuf.WriteString("}\n\n")
 
-		if existingSvc.TLSSpec != "" {
-			fmt.Fprintf(&buf, "// @tls_spec %q\n", existingSvc.TLSSpec)
-		}
-
-		if existingSvc.Engine != "" {
-			fmt.Fprintf(&buf, "// @engine %s\n", string(existingSvc.Engine))
-		}
-
-		seenHeaders := make(map[string]bool)
-		for _, h := range existingSvc.Headers {
-			if h.Key != "" && h.StaticValue != "" {
-				fmt.Fprintf(&buf, "// @header %q %q\n", h.Key, h.StaticValue)
-				seenHeaders[strings.ToLower(h.Key)] = true
-			}
-		}
-
-		if doc.Info != nil && doc.Info.Extensions != nil {
-			if headersRaw, ok := doc.Info.Extensions["x-vortex-headers"]; ok {
-				if hList, ok := headersRaw.([]map[string]string); ok {
-					for _, h := range hList {
-						k := strings.ToLower(h["name"])
-						if h["name"] != "" && h["value"] != "" && !seenHeaders[k] {
-							fmt.Fprintf(&buf, "// @header %q %q\n", h["name"], h["value"])
-
-							seenHeaders[k] = true
-						}
-					}
-				}
-			}
-
-			if credsRaw, ok := doc.Info.Extensions["x-required-credentials"]; ok {
-				if cList, ok := credsRaw.([]string); ok {
-					for _, c := range cList {
-						parts := strings.SplitN(c, ":", 2)
-						headerName := strings.TrimSpace(parts[0])
-
-						k := strings.ToLower(headerName)
-						if headerName != "" && !seenHeaders[k] {
-							envVar := normalizeHeaderToEnv(headerName)
-							fmt.Fprintf(&buf, "// @header %q \"${%s}\"\n", headerName, envVar)
-
-							seenHeaders[k] = true
-						}
-					}
-				}
-			}
-		}
-	} else if doc.Info != nil && doc.Info.Extensions != nil {
-		seenHeaders := make(map[string]bool)
-		if headersRaw, ok := doc.Info.Extensions["x-vortex-headers"]; ok {
-			if hList, ok := headersRaw.([]map[string]string); ok {
-				for _, h := range hList {
-					k := strings.ToLower(h["name"])
-					if h["name"] != "" && h["value"] != "" && !seenHeaders[k] {
-						fmt.Fprintf(&buf, "// @header %q %q\n", h["name"], h["value"])
-
-						seenHeaders[k] = true
-					}
-				}
-			}
-		}
-
-		if credsRaw, ok := doc.Info.Extensions["x-required-credentials"]; ok {
-			if cList, ok := credsRaw.([]string); ok {
-				for _, c := range cList {
-					parts := strings.SplitN(c, ":", 2)
-					headerName := strings.TrimSpace(parts[0])
-
-					k := strings.ToLower(headerName)
-					if headerName != "" && !seenHeaders[k] {
-						envVar := normalizeHeaderToEnv(headerName)
-						fmt.Fprintf(&buf, "// @header %q \"${%s}\"\n", headerName, envVar)
-
-						seenHeaders[k] = true
-					}
-				}
-			}
-		}
-	}
-
-	if baseURL != "" {
-		fmt.Fprintf(&buf, "// @base_url %q\n", baseURL)
-	}
-
-	fmt.Fprintf(&buf, "type %s interface {\n", serviceName)
-
-	for _, m := range outputMethods {
-		buf.WriteString(m.rendered)
-		buf.WriteString("\n")
-	}
-
-	fmt.Fprintf(&buf, "}\n\n")
-
-	// Append DTO schemas (models)
+	// Step D: Append and preserve Schemas / Models
 	if doc.Components != nil && len(doc.Components.Schemas) > 0 {
-		writeSchemas(&buf, doc.Components.Schemas, ImportConfig{PackageName: pkgName, TypeMap: cfg.TypeMap})
+		var schemasBuf bytes.Buffer
+		writeSchemas(&schemasBuf, doc.Components.Schemas, ImportConfig{TypeMap: cfg.TypeMap})
+		fullBuf.Write(schemasBuf.Bytes())
 	}
 
-	var incomingSchemas openapi3.Schemas
+	// Step E: Preserve any custom hand-written types from existing file
 	if doc.Components != nil {
-		incomingSchemas = doc.Components.Schemas
+		preserveExistingTypes(&fullBuf, existingAPISrc, doc.Components.Schemas)
 	}
 
-	preserveExistingTypes(&buf, existingAPISrc, incomingSchemas)
-
-	formatted, err := format.Source(buf.Bytes())
+	formatted, err := format.Source(fullBuf.Bytes())
 	if err != nil {
-		return nil, nil, fmt.Errorf("formatting reconciled contract: %w\nSource:\n%s", err, buf.String())
+		return fullBuf.Bytes(), summary, fmt.Errorf("formatting reconciled Go contract: %w\nSource:\n%s", err, fullBuf.String())
 	}
 
 	return formatted, summary, nil
 }
 
-func (e *MergeEngine) renderMergedMethod(
+func (e *MergeEngine) reconcileMethodNode(
 	existing *ir.MethodIR,
 	iop *incomingOperation,
-	existingSvc *ir.ServiceIR,
 	cfg MergeConfig,
+	usedNames map[string]int,
 ) string {
 	var buf bytes.Buffer
+	methodName := existing.Name
+	usedNames[methodName] = 1
 
-	// 1. Doc comments & custom directives: retain existing (skipping managed directives that are re-emitted)
+	// 1. Doc comments & custom directives
 	if len(existing.Doc) > 0 {
 		for _, l := range existing.Doc {
 			if isManagedDirective(l) {
 				continue
 			}
-
 			if !strings.HasPrefix(l, "//") {
 				l = "// " + l
 			}
-
 			fmt.Fprintf(&buf, "\t%s\n", l)
 		}
 	} else if iop.summary != "" {
-		fmt.Fprintf(&buf, "\t// %s — %s\n\t//\n", existing.Name, strings.ReplaceAll(iop.summary, "\n", " "))
+		fmt.Fprintf(&buf, "\t// %s — %s\n\t//\n", methodName, strings.ReplaceAll(iop.summary, "\n", " "))
 	}
 
-	// 2. Route directive
+	// 2. Upstream Route directive
 	cleanPath := strings.TrimPrefix(iop.rawPath, "/")
 	fmt.Fprintf(&buf, "\t// @%s %q\n", strings.ToLower(iop.httpMethod), cleanPath)
 
-	// 3. Bind directive
-	if iop.operationID != "" && iop.operationID != existing.Name {
+	// 3. Upstream OperationID binding
+	if iop.operationID != "" && iop.operationID != methodName {
 		fmt.Fprintf(&buf, "\t// @bind %q\n", iop.operationID)
 	}
 
-	// 4. Since directive: preserve existing @since tag if present and non-baseline
-	if existing.Since != "" && existing.Since != "1.0.0" && existing.Since != "v1.0.0" {
-		fmt.Fprintf(&buf, "\t// @since %q\n", existing.Since)
-	}
-
-	// Payload & query directives
-	params := extractOperationParameters(iop.rawPath, iop.pathItem, iop.op)
-
-	isForm := false
-	if iop.op != nil && iop.op.RequestBody != nil && iop.op.RequestBody.Value != nil {
-		content := iop.op.RequestBody.Value.Content
-		if content.Get("application/x-www-form-urlencoded") != nil || content.Get("multipart/form-data") != nil {
-			isForm = true
-
-			fmt.Fprintf(&buf, "\t// @form casing=snake_case\n")
-		}
-	}
-
-	if iop.httpMethod != "GET" && !isForm && len(params.query) > 0 {
-		fmt.Fprintf(&buf, "\t// @query casing=snake_case\n")
-	}
-
-	// 5. Preserved human directives (Directive Union)
+	// 4. Preserved Directives
 	if existing.UnwrapField != "" {
 		fmt.Fprintf(&buf, "\t// @unwrap %q\n", existing.UnwrapField)
 	}
-
 	if existing.CallFunc != "" {
 		fmt.Fprintf(&buf, "\t// @call %q\n", existing.CallFunc)
 	}
-
 	if existing.Idempotent {
 		fmt.Fprintf(&buf, "\t// @idempotent\n")
 	}
-
 	if existing.Coalesce {
 		fmt.Fprintf(&buf, "\t// @coalesce\n")
 	}
-
 	if existing.ETag {
 		fmt.Fprintf(&buf, "\t// @etag\n")
 	}
-
-	if existing.LocalCacheTTL != "" {
-		fmt.Fprintf(&buf, "\t// @cache %q\n", existing.LocalCacheTTL)
-	}
-
-	if existing.SignHMAC != nil {
-		fmt.Fprintf(&buf, "\t// @sign header=%q secret=%q\n", existing.SignHMAC.HeaderName, existing.SignHMAC.SecretKey)
-	}
-
-	// Operation custom headers (deduplicated against service-level headers)
-	serviceHeaderMap := make(map[string]string)
-	if existingSvc != nil {
-		for _, h := range existingSvc.Headers {
-			if h.Key != "" {
-				serviceHeaderMap[strings.ToLower(h.Key)] = h.StaticValue
-			}
-		}
-	}
-
-	seenMethodHeaders := make(map[string]bool)
-	for _, h := range existing.Headers {
-		if h.Key == "" || h.StaticValue == "" {
-			continue
-		}
-
-		headerKey := strings.ToLower(h.Key)
-		if serviceHeaderMap[headerKey] == h.StaticValue || seenMethodHeaders[headerKey] {
-			continue
-		}
-
-		seenMethodHeaders[headerKey] = true
-
-		fmt.Fprintf(&buf, "\t// @header %q %q\n", h.Key, h.StaticValue)
-	}
-
-	if iop.op != nil && iop.op.Extensions != nil {
-		if headersRaw, ok := iop.op.Extensions["x-vortex-headers"]; ok {
-			if hList, ok := headersRaw.([]map[string]string); ok {
-				for _, h := range hList {
-					headerKey := strings.ToLower(h["name"])
-
-					val := h["value"]
-					if headerKey == "" || val == "" || serviceHeaderMap[headerKey] == val ||
-						seenMethodHeaders[headerKey] {
-						continue
-					}
-
-					seenMethodHeaders[headerKey] = true
-
-					fmt.Fprintf(&buf, "\t// @header %q %q\n", h["name"], val)
-				}
-			} else if hListAny, ok := headersRaw.([]any); ok {
-				for _, item := range hListAny {
-					if hMap, ok := item.(map[string]any); ok {
-						name, _ := hMap["name"].(string)
-						val, _ := hMap["value"].(string)
-
-						headerKey := strings.ToLower(name)
-						if headerKey == "" || val == "" || serviceHeaderMap[headerKey] == val ||
-							seenMethodHeaders[headerKey] {
-							continue
-						}
-
-						seenMethodHeaders[headerKey] = true
-
-						fmt.Fprintf(&buf, "\t// @header %q %q\n", name, val)
-					}
-				}
-			}
-		}
-	}
-
-	// 6. Parameter signature (Type Fidelity)
-	paramList := e.buildReconciledParams(existing, iop, cfg)
-
-	// 7. Return signature (Non-Downgrade Invariant)
-	var returnSig string
-	if existing.Return != nil && !existing.Return.IsVoid && existing.Return.SuccessType.Name != "" &&
-		existing.Return.SuccessType.Name != "any" {
-		returnSig = fmt.Sprintf("(%s, error)", existing.Return.SuccessType.Name)
-	} else {
-		ret := determineReturnType(iop.op, ImportConfig{TypeMap: cfg.TypeMap})
-		if ret == "" || ret == "any" {
-			if existing.Return != nil && !existing.Return.IsVoid && existing.Return.SuccessType.Name != "" {
-				returnSig = fmt.Sprintf("(%s, error)", existing.Return.SuccessType.Name)
-			} else {
-				returnSig = "error"
-			}
-		} else {
-			returnSig = fmt.Sprintf("(%s, error)", ret)
-		}
-	}
-
-	renderMethodSignature(&buf, existing.Name, paramList, returnSig)
-
-	return buf.String()
-}
-
-func (e *MergeEngine) renderNewMethod(
-	name string,
-	iop *incomingOperation,
-	existingSvc *ir.ServiceIR,
-	cfg MergeConfig,
-) string {
-	var buf bytes.Buffer
-
-	// Documentation
-	if iop.summary != "" {
-		fmt.Fprintf(&buf, "\t// %s — %s\n\t//\n", name, strings.ReplaceAll(iop.summary, "\n", " "))
-	}
-
-	// Route
-	cleanPath := strings.TrimPrefix(iop.rawPath, "/")
-	fmt.Fprintf(&buf, "\t// @%s %q\n", strings.ToLower(iop.httpMethod), cleanPath)
-
-	// Bind
-	if iop.operationID != "" && iop.operationID != name {
-		fmt.Fprintf(&buf, "\t// @bind %q\n", iop.operationID)
-	}
-
-	// Since: only emit @since if existing contract had an earlier version and incoming spec bumped it!
-	if existingSvc != nil && existingSvc.Version != "" && iop.sinceVersion != "" &&
-		existingSvc.Version != iop.sinceVersion {
+	if existing.Since != "" {
+		fmt.Fprintf(&buf, "\t// @since %q\n", existing.Since)
+	} else if iop.sinceVersion != "" {
 		fmt.Fprintf(&buf, "\t// @since %q\n", iop.sinceVersion)
 	}
 
-	// Operation custom headers (deduplicated against service-level headers)
-	serviceHeaderMap := make(map[string]string)
-	if existingSvc != nil {
-		for _, h := range existingSvc.Headers {
-			if h.Key != "" {
-				serviceHeaderMap[strings.ToLower(h.Key)] = h.StaticValue
-			}
+	if iop.deprecated {
+		fmt.Fprintf(&buf, "\t// @deprecated\n")
+	}
+
+	// Headers preservation
+	seenHeaders := make(map[string]bool)
+	for _, h := range existing.Headers {
+		if h.Key != "" && h.StaticValue != "" {
+			seenHeaders[strings.ToLower(h.Key)] = true
+			fmt.Fprintf(&buf, "\t// @header %q %q\n", h.Key, h.StaticValue)
 		}
 	}
 
-	seenMethodHeaders := make(map[string]bool)
-	if iop.op != nil && iop.op.Extensions != nil {
-		if headersRaw, ok := iop.op.Extensions["x-vortex-headers"]; ok {
-			if hList, ok := headersRaw.([]map[string]string); ok {
-				for _, h := range hList {
-					headerKey := strings.ToLower(h["name"])
-
-					val := h["value"]
-					if headerKey == "" || val == "" || serviceHeaderMap[headerKey] == val ||
-						seenMethodHeaders[headerKey] {
-						continue
-					}
-
-					seenMethodHeaders[headerKey] = true
-
-					fmt.Fprintf(&buf, "\t// @header %q %q\n", h["name"], val)
-				}
-			} else if hListAny, ok := headersRaw.([]any); ok {
-				for _, item := range hListAny {
-					if hMap, ok := item.(map[string]any); ok {
-						name, _ := hMap["name"].(string)
-						val, _ := hMap["value"].(string)
-
-						headerKey := strings.ToLower(name)
-						if headerKey == "" || val == "" || serviceHeaderMap[headerKey] == val ||
-							seenMethodHeaders[headerKey] {
-							continue
-						}
-
-						seenMethodHeaders[headerKey] = true
-
-						fmt.Fprintf(&buf, "\t// @header %q %q\n", name, val)
-					}
-				}
-			}
-		}
-	}
-
-	// Payload
-	params := extractOperationParameters(iop.rawPath, iop.pathItem, iop.op)
-
+	// Payload directive
 	isForm := false
-	if iop.op != nil && iop.op.RequestBody != nil && iop.op.RequestBody.Value != nil {
-		content := iop.op.RequestBody.Value.Content
-		if content.Get("application/x-www-form-urlencoded") != nil || content.Get("multipart/form-data") != nil {
+	if iop.op.RequestBody != nil && iop.op.RequestBody.Content != nil {
+		if iop.op.RequestBody.Content["application/x-www-form-urlencoded"] != nil ||
+			iop.op.RequestBody.Content["multipart/form-data"] != nil {
 			isForm = true
-
 			fmt.Fprintf(&buf, "\t// @form casing=snake_case\n")
 		}
 	}
 
-	if iop.httpMethod != "GET" && !isForm && len(params.query) > 0 {
-		fmt.Fprintf(&buf, "\t// @query casing=snake_case\n")
-	}
+	// Build reconciled parameter signature
+	paramList := e.buildReconciledParams(existing, iop, cfg)
 
-	// Signatures
-	paramList := make([]string, 0, len(params.path)+len(params.query))
-	for _, p := range params.path {
-		pType := mapMergeParamType(p, ImportConfig{TypeMap: cfg.TypeMap})
-		paramList = append(paramList, fmt.Sprintf("%s %s", toCamelCase(p.Name), pType))
-	}
-
-	for _, p := range params.query {
-		pType := mapMergeParamType(p, ImportConfig{TypeMap: cfg.TypeMap})
-		pName := toCamelCase(p.Name)
-		sig := fmt.Sprintf("%s %s", pName, pType)
-
-		expectedSnake := toSnakeCase(pName)
-		if p.Name != "" && (iop.httpMethod != "GET" || (p.Name != expectedSnake && p.Name != pName)) {
-			sig += fmt.Sprintf(" // @query %q", p.Name)
-		}
-
-		paramList = append(paramList, sig)
-	}
-
-	// Request Body parameter if JSON
-	if !isForm && iop.op.RequestBody != nil && iop.op.RequestBody.Value != nil {
-		jsonContent := iop.op.RequestBody.Value.Content.Get("application/json")
-		if jsonContent != nil && jsonContent.Schema != nil {
-			bodyType := "any"
-			if jsonContent.Schema.Ref != "" {
-				bodyType = toPascalCase(path.Base(jsonContent.Schema.Ref))
-			} else if jsonContent.Schema.Value != nil {
-				bodyType = mapSchemaType(jsonContent.Schema.Value, ImportConfig{TypeMap: cfg.TypeMap})
+	if iop.httpMethod != "GET" && !isForm {
+		hasQuery := false
+		for _, p := range paramList {
+			if strings.Contains(p, "@query") {
+				hasQuery = true
+				break
 			}
-
-			paramList = append(paramList, "req "+bodyType)
+		}
+		if hasQuery {
+			fmt.Fprintf(&buf, "\t// @query casing=snake_case\n")
 		}
 	}
 
-	ret := determineReturnType(iop.op, ImportConfig{TypeMap: cfg.TypeMap})
-
-	var returnSig string
-	if ret == "" {
-		returnSig = "error"
-	} else {
-		returnSig = fmt.Sprintf("(%s, error)", ret)
+	// Return type
+	returnType := determineReturnType(iop.op, ImportConfig{TypeMap: cfg.TypeMap})
+	if returnType == "" {
+		if existing.Return != nil && !existing.Return.IsVoid && existing.Return.SuccessType.Name != "" {
+			returnType = existing.Return.SuccessType.Name
+		}
 	}
 
-	renderMethodSignature(&buf, name, paramList, returnSig)
+	returnSig := "error"
+	if returnType != "" {
+		returnSig = fmt.Sprintf("(%s, error)", returnType)
+	}
+
+	renderMethodSignature(&buf, methodName, paramList, returnSig)
 
 	return buf.String()
 }
 
-func (e *MergeEngine) renderSoftDeprecatedMethod(m *ir.MethodIR, currentVersion string) string {
+func renderExistingMethodVerbatim(m *ir.MethodIR) string {
 	var buf bytes.Buffer
 
-	reason := "Removed from upstream OpenAPI specification"
-	if m.Deprecation != nil && m.Deprecation.Reason != "" {
-		reason = m.Deprecation.Reason
-	}
-
-	fmt.Fprintf(&buf, "\t// @deprecated reason=%q since=%q\n", reason, currentVersion)
-
-	if m.HTTPMethod != "" && m.Path != nil {
-		fmt.Fprintf(&buf, "\t// @%s %q\n", strings.ToLower(m.HTTPMethod), strings.TrimPrefix(m.Path.RawTemplate, "/"))
-	}
-
-	if m.OperationID != "" {
-		fmt.Fprintf(&buf, "\t// @bind %q\n", m.OperationID)
-	}
-
-	paramList := make([]string, 0)
-	for _, p := range m.Params {
-		if p.Location == ir.LocContext || p.Location == ir.LocModifiers {
-			continue
-		}
-
-		paramList = append(paramList, fmt.Sprintf("%s %s", p.GoName, p.GoType.Name))
-	}
-
-	returnSig := "(map[string]any, error)"
-	if m.Return != nil && !m.Return.IsVoid && m.Return.SuccessType.Name != "" {
-		returnSig = fmt.Sprintf("(%s, error)", m.Return.SuccessType.Name)
-	}
-
-	renderMethodSignature(&buf, m.Name, paramList, returnSig)
-
-	return buf.String()
-}
-
-func (e *MergeEngine) renderPreservedMethod(m *ir.MethodIR) string {
-	var buf bytes.Buffer
-
-	// 1. Doc comments & custom directives: retain original comments (skipping duplicated route verbs)
 	if len(m.Doc) > 0 {
 		for _, l := range m.Doc {
 			if isManagedDirective(l) {
 				continue
 			}
-
 			if !strings.HasPrefix(l, "//") {
 				l = "// " + l
 			}
-
 			fmt.Fprintf(&buf, "\t%s\n", l)
 		}
 	} else if m.Summary != "" {
 		fmt.Fprintf(&buf, "\t// %s — %s\n\t//\n", m.Name, m.Summary)
 	}
 
-	// 2. Route directive
 	if m.HTTPMethod != "" && m.Path != nil {
 		fmt.Fprintf(&buf, "\t// @%s %q\n", strings.ToLower(m.HTTPMethod), strings.TrimPrefix(m.Path.RawTemplate, "/"))
 	}
-
-	// 3. Bind / Alias
 	if m.OperationID != "" && m.OperationID != m.Name {
 		fmt.Fprintf(&buf, "\t// @bind %q\n", m.OperationID)
 	}
@@ -919,7 +599,6 @@ func (e *MergeEngine) renderPreservedMethod(m *ir.MethodIR) string {
 		if p.Location == ir.LocContext || p.Location == ir.LocModifiers {
 			continue
 		}
-
 		paramList = append(paramList, fmt.Sprintf("%s %s", p.GoName, p.GoType.Name))
 	}
 
@@ -929,7 +608,52 @@ func (e *MergeEngine) renderPreservedMethod(m *ir.MethodIR) string {
 	}
 
 	renderMethodSignature(&buf, m.Name, paramList, returnSig)
+	return buf.String()
+}
 
+func renderExistingMethodWithDeprecated(m *ir.MethodIR, specVersion string) string {
+	var buf bytes.Buffer
+
+	if specVersion != "" {
+		fmt.Fprintf(&buf, "\t// @deprecated reason=%q since=%q\n", "Removed from upstream OpenAPI specification", specVersion)
+	} else {
+		fmt.Fprintf(&buf, "\t// @deprecated reason=%q\n", "Removed from upstream OpenAPI specification")
+	}
+	if len(m.Doc) > 0 {
+		for _, l := range m.Doc {
+			if isManagedDirective(l) {
+				continue
+			}
+			if !strings.HasPrefix(l, "//") {
+				l = "// " + l
+			}
+			fmt.Fprintf(&buf, "\t%s\n", l)
+		}
+	} else if m.Summary != "" {
+		fmt.Fprintf(&buf, "\t// %s — %s\n\t//\n", m.Name, m.Summary)
+	}
+
+	if m.HTTPMethod != "" && m.Path != nil {
+		fmt.Fprintf(&buf, "\t// @%s %q\n", strings.ToLower(m.HTTPMethod), strings.TrimPrefix(m.Path.RawTemplate, "/"))
+	}
+	if m.OperationID != "" && m.OperationID != m.Name {
+		fmt.Fprintf(&buf, "\t// @bind %q\n", m.OperationID)
+	}
+
+	paramList := make([]string, 0)
+	for _, p := range m.Params {
+		if p.Location == ir.LocContext || p.Location == ir.LocModifiers {
+			continue
+		}
+		paramList = append(paramList, fmt.Sprintf("%s %s", p.GoName, p.GoType.Name))
+	}
+
+	returnSig := "(map[string]any, error)"
+	if m.Return != nil && !m.Return.IsVoid && m.Return.SuccessType.Name != "" {
+		returnSig = fmt.Sprintf("(%s, error)", m.Return.SuccessType.Name)
+	}
+
+	renderMethodSignature(&buf, m.Name, paramList, returnSig)
 	return buf.String()
 }
 
@@ -997,10 +721,8 @@ func (e *MergeEngine) buildReconciledParams(
 		goName := toCamelCase(p.Name)
 
 		if existP, ok := existingParamMap[wire]; ok {
-			// Rule A: Type Fidelity — preserve custom domain type
 			paramList = append(paramList, fmt.Sprintf("%s %s", existP.GoName, existP.GoType.Name))
 		} else {
-			// New parameter
 			pType := mapMergeParamType(p, ImportConfig{TypeMap: cfg.TypeMap})
 			paramList = append(paramList, fmt.Sprintf("%s %s", goName, pType))
 		}
@@ -1027,14 +749,14 @@ func (e *MergeEngine) buildReconciledParams(
 	}
 
 	// Request Body parameter if JSON or custom struct
-	if iop.op != nil && iop.op.RequestBody != nil && iop.op.RequestBody.Value != nil {
-		jsonContent := iop.op.RequestBody.Value.Content.Get("application/json")
+	if iop.op != nil && iop.op.RequestBody != nil && iop.op.RequestBody.Content != nil {
+		jsonContent := iop.op.RequestBody.Content["application/json"]
 		if jsonContent != nil && jsonContent.Schema != nil {
 			bodyType := "any"
 			if jsonContent.Schema.Ref != "" {
 				bodyType = toPascalCase(path.Base(jsonContent.Schema.Ref))
-			} else if jsonContent.Schema.Value != nil {
-				bodyType = mapSchemaType(jsonContent.Schema.Value, ImportConfig{TypeMap: cfg.TypeMap})
+			} else {
+				bodyType = mapSchemaType(jsonContent.Schema, ImportConfig{TypeMap: cfg.TypeMap})
 			}
 
 			if existReq, ok := existingParamMap["req"]; ok && existReq.GoType.Name != "" &&
@@ -1052,7 +774,7 @@ func (e *MergeEngine) buildReconciledParams(
 	return paramList
 }
 
-func preserveExistingTypes(buf *bytes.Buffer, existingAPISrc []byte, incomingSchemas openapi3.Schemas) {
+func preserveExistingTypes(buf *bytes.Buffer, existingAPISrc []byte, incomingSchemas map[string]*Schema) {
 	if len(existingAPISrc) == 0 {
 		return
 	}
@@ -1105,7 +827,7 @@ func preserveExistingTypes(buf *bytes.Buffer, existingAPISrc []byte, incomingSch
 	}
 }
 
-func mapMergeParamType(p *openapi3.Parameter, cfg ImportConfig) string {
+func mapMergeParamType(p *Parameter, cfg ImportConfig) string {
 	pType := "string"
 
 	if cfg.TypeMap != nil {
@@ -1116,8 +838,8 @@ func mapMergeParamType(p *openapi3.Parameter, cfg ImportConfig) string {
 		}
 	}
 
-	if p.Schema != nil && p.Schema.Value != nil {
-		pType = mapSchemaType(p.Schema.Value, cfg)
+	if p.Schema != nil {
+		pType = mapSchemaType(p.Schema, cfg)
 	}
 
 	return pType
@@ -1159,33 +881,4 @@ func isManagedDirective(line string) bool {
 	default:
 		return false
 	}
-}
-
-func normalizeHeaderToEnv(name string) string {
-	lower := strings.ToLower(strings.TrimSpace(name))
-	switch lower {
-	case "x-goog-api-key", "goog-api-key":
-		return "GOOGLE_API_KEY"
-	case "x-aistudio-visit-id":
-		return "AISTUDIO_VISIT_ID"
-	case "x-goog-authuser":
-		return "GOOG_AUTHUSER"
-	case "authorization":
-		return "AUTH_TOKEN"
-	case "proxy-authorization":
-		return "PROXY_AUTH_TOKEN"
-	}
-
-	clean := strings.ToUpper(strings.TrimSpace(name))
-
-	var sb strings.Builder
-	for _, r := range clean {
-		if (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') {
-			sb.WriteRune(r)
-		} else {
-			sb.WriteRune('_')
-		}
-	}
-
-	return strings.Trim(sb.String(), "_")
 }

@@ -11,32 +11,31 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/getkin/kin-openapi/openapi3"
 	"github.com/lemon4ksan/foundation/generic"
 )
 
-func writeSchemas(buf *bytes.Buffer, schemas openapi3.Schemas, cfg ImportConfig) {
+func writeSchemas(buf *bytes.Buffer, schemas map[string]*Schema, cfg ImportConfig) {
 	keys := generic.Keys(schemas)
 	slices.Sort(keys)
 
 	for _, k := range keys {
-		ref := schemas[k]
-		if ref == nil || ref.Value == nil {
+		s := schemas[k]
+		if s == nil {
 			continue
 		}
 
-		writeSchemaModel(buf, k, ref.Value, cfg)
+		writeSchemaModel(buf, k, s, cfg)
 	}
 }
 
-func writeSchemaModel(buf *bytes.Buffer, rawName string, s *openapi3.Schema, cfg ImportConfig) {
+func writeSchemaModel(buf *bytes.Buffer, rawName string, s *Schema, cfg ImportConfig) {
 	name := toPascalCase(rawName)
 
 	if s.Description != "" {
 		fmt.Fprintf(buf, "// %s — %s\n", name, strings.ReplaceAll(s.Description, "\n", " "))
 	}
 
-	if len(s.Enum) > 0 && (s.Type == nil || s.Type.Is("string")) {
+	if len(s.Enum) > 0 && (s.Type == nil || s.IsType("string")) {
 		fmt.Fprintf(buf, "type %s string\n\n", name)
 		fmt.Fprintf(buf, "const (\n")
 
@@ -51,7 +50,7 @@ func writeSchemaModel(buf *bytes.Buffer, rawName string, s *openapi3.Schema, cfg
 		return
 	}
 
-	if s.Type != nil && !s.Type.Is("object") && len(s.Properties) == 0 {
+	if s.Type != nil && !s.IsType("object") && len(s.Properties) == 0 {
 		goType := mapSchemaType(s, cfg)
 		fmt.Fprintf(buf, "type %s %s\n\n", name, goType)
 		return
@@ -70,12 +69,10 @@ func writeSchemaModel(buf *bytes.Buffer, rawName string, s *openapi3.Schema, cfg
 	}
 
 	for _, pk := range propKeys {
-		propRef := s.Properties[pk]
-		if propRef == nil || propRef.Value == nil {
+		propSchema := s.Properties[pk]
+		if propSchema == nil {
 			continue
 		}
-
-		propSchema := propRef.Value
 
 		fieldName := toPascalCase(pk)
 		if fieldName == "" {
@@ -87,9 +84,9 @@ func writeSchemaModel(buf *bytes.Buffer, rawName string, s *openapi3.Schema, cfg
 		}
 
 		fieldType := mapSchemaType(propSchema, cfg)
-		if propRef.Ref != "" {
-			refName := toPascalCase(path.Base(propRef.Ref))
-			if propSchema.Type != nil && propSchema.Type.Is("object") {
+		if propSchema.Ref != "" {
+			refName := toPascalCase(path.Base(propSchema.Ref))
+			if propSchema.Type != nil && propSchema.IsType("object") {
 				fieldType = "*" + refName
 			} else {
 				fieldType = refName
@@ -122,7 +119,7 @@ func shortTypeName(raw string) string {
 	return raw
 }
 
-func mapSchemaType(s *openapi3.Schema, cfg ImportConfig) string {
+func mapSchemaType(s *Schema, cfg ImportConfig) string {
 	if s == nil {
 		return "any"
 	}
@@ -133,7 +130,7 @@ func mapSchemaType(s *openapi3.Schema, cfg ImportConfig) string {
 		}
 	}
 
-	if s.Type == nil {
+	if len(s.Type) == 0 {
 		if len(s.Properties) > 0 {
 			return "map[string]any"
 		}
@@ -141,7 +138,10 @@ func mapSchemaType(s *openapi3.Schema, cfg ImportConfig) string {
 		return "any"
 	}
 
-	if s.Type.Is("string") {
+	primaryType := s.Type.Primary()
+
+	switch primaryType {
+	case "string":
 		switch s.Format {
 		case "date-time":
 			return "time.Time"
@@ -152,9 +152,8 @@ func mapSchemaType(s *openapi3.Schema, cfg ImportConfig) string {
 		default:
 			return "string"
 		}
-	}
 
-	if s.Type.Is("integer") {
+	case "integer":
 		switch s.Format {
 		case "int64":
 			return "int64"
@@ -165,42 +164,43 @@ func mapSchemaType(s *openapi3.Schema, cfg ImportConfig) string {
 		default:
 			return "int"
 		}
-	}
 
-	if s.Type.Is("number") {
+	case "number":
+		if s.Format == "float" {
+			return "float32"
+		}
 		return "float64"
-	}
 
-	if s.Type.Is("boolean") {
+	case "boolean":
 		return "bool"
-	}
 
-	if s.Type.Is("array") {
+	case "array":
 		if s.Items != nil {
 			if s.Items.Ref != "" {
 				return "[]" + toPascalCase(path.Base(s.Items.Ref))
 			}
 
-			return "[]" + mapSchemaType(s.Items.Value, cfg)
+			return "[]" + mapSchemaType(s.Items, cfg)
 		}
 
 		return "[]any"
-	}
 
-	if s.Type.Is("object") {
-		if s.AdditionalProperties.Schema != nil {
+	case "object":
+		if s.AdditionalProperties != nil {
 			valType := "any"
-			if s.AdditionalProperties.Schema.Ref != "" {
-				valType = toPascalCase(path.Base(s.AdditionalProperties.Schema.Ref))
-			} else if s.AdditionalProperties.Schema.Value != nil {
-				valType = mapSchemaType(s.AdditionalProperties.Schema.Value, cfg)
+			if apSchema, ok := s.AdditionalProperties.(*Schema); ok && apSchema != nil {
+				if apSchema.Ref != "" {
+					valType = toPascalCase(path.Base(apSchema.Ref))
+				} else {
+					valType = mapSchemaType(apSchema, cfg)
+				}
 			}
-
 			return "map[string]" + valType
 		}
 
 		return "map[string]any"
-	}
 
-	return "any"
+	default:
+		return "any"
+	}
 }

@@ -14,12 +14,11 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/getkin/kin-openapi/openapi3"
 	"github.com/lemon4ksan/foundation/generic"
 )
 
 // GenerateContract translates an OpenAPI document into a clean, declarative aoni Go contract.
-func GenerateContract(spec *openapi3.T, cfg ImportConfig) ([]byte, error) {
+func GenerateContract(spec *Document, cfg ImportConfig) ([]byte, error) {
 	pkgName := cfg.PackageName
 	if pkgName == "" {
 		pkgName = "api"
@@ -45,7 +44,7 @@ func GenerateContract(spec *openapi3.T, cfg ImportConfig) ([]byte, error) {
 	}
 
 	// 2. Generate Service Interface (API) at the TOP
-	if spec.Paths != nil && len(spec.Paths.Map()) > 0 {
+	if len(spec.Paths) > 0 {
 		if err := writeServiceInterface(&bodyBuf, spec, cfg, baseURL); err != nil {
 			return nil, err
 		}
@@ -105,7 +104,7 @@ func GenerateContract(spec *openapi3.T, cfg ImportConfig) ([]byte, error) {
 }
 
 // GenerateSplitContract generates separate api.go (interface) and models.go (DTOs) files.
-func GenerateSplitContract(spec *openapi3.T, cfg ImportConfig) (apiSource, modelsSource []byte, err error) {
+func GenerateSplitContract(spec *Document, cfg ImportConfig) (apiSource, modelsSource []byte, err error) {
 	pkgName := cfg.PackageName
 	if pkgName == "" {
 		pkgName = "api"
@@ -130,7 +129,7 @@ func GenerateSplitContract(spec *openapi3.T, cfg ImportConfig) (apiSource, model
 		)
 	}
 
-	if spec.Paths != nil && len(spec.Paths.Map()) > 0 {
+	if len(spec.Paths) > 0 {
 		if err := writeServiceInterface(&apiBody, spec, cfg, baseURL); err != nil {
 			return nil, nil, err
 		}
@@ -231,7 +230,7 @@ func GenerateSplitContract(spec *openapi3.T, cfg ImportConfig) (apiSource, model
 	return apiSource, modelsSource, nil
 }
 
-func resolveBaseURL(spec *openapi3.T, cfg ImportConfig) string {
+func resolveBaseURL(spec *Document, cfg ImportConfig) string {
 	if cfg.BaseURL != "" {
 		return cfg.BaseURL
 	}
@@ -252,7 +251,7 @@ func resolveBaseURL(spec *openapi3.T, cfg ImportConfig) string {
 	return ""
 }
 
-func writeServiceInterface(buf *bytes.Buffer, spec *openapi3.T, cfg ImportConfig, baseURL string) error {
+func writeServiceInterface(buf *bytes.Buffer, spec *Document, cfg ImportConfig, baseURL string) error {
 	serviceName := cfg.ServiceName
 	if serviceName == "" {
 		serviceName = "API"
@@ -327,13 +326,13 @@ func writeServiceInterface(buf *bytes.Buffer, spec *openapi3.T, cfg ImportConfig
 
 	fmt.Fprintf(buf, "type %s interface {\n", serviceName)
 
-	pathKeys := generic.Keys(spec.Paths.Map())
+	pathKeys := generic.Keys(spec.Paths)
 	slices.Sort(pathKeys)
 
 	usedMethodNames := make(map[string]int)
 
 	for _, pathStr := range pathKeys {
-		pathItem := spec.Paths.Find(pathStr)
+		pathItem := spec.Paths[pathStr]
 		if pathItem == nil {
 			continue
 		}
@@ -342,16 +341,7 @@ func writeServiceInterface(buf *bytes.Buffer, spec *openapi3.T, cfg ImportConfig
 			continue
 		}
 
-		ops := map[string]*openapi3.Operation{
-			"GET":     pathItem.Get,
-			"POST":    pathItem.Post,
-			"PUT":     pathItem.Put,
-			"DELETE":  pathItem.Delete,
-			"PATCH":   pathItem.Patch,
-			"HEAD":    pathItem.Head,
-			"OPTIONS": pathItem.Options,
-		}
-
+		ops := pathItem.OperationsMap()
 		methods := []string{"GET", "POST", "PUT", "DELETE", "PATCH", "HEAD", "OPTIONS"}
 		for _, httpMethod := range methods {
 			op := ops[httpMethod]
@@ -400,11 +390,11 @@ func isPathAllowed(pathStr string, cfg ImportConfig) bool {
 
 func writeOperationMethod(
 	buf *bytes.Buffer,
-	spec *openapi3.T,
+	spec *Document,
 	pathStr string,
 	httpMethod string,
-	pathItem *openapi3.PathItem,
-	op *openapi3.Operation,
+	pathItem *PathItem,
+	op *Operation,
 	cfg ImportConfig,
 	usedNames map[string]int,
 ) {
@@ -488,10 +478,20 @@ func writeOperationMethod(
 			}
 		}
 
-		if since, ok := op.Extensions["x-vortex-since"]; ok {
-			if sStr, ok := since.(string); ok && sStr != "" {
-				fmt.Fprintf(buf, "\t// @since %q\n", sStr)
+		sinceVal := ""
+		if op.Extensions != nil {
+			if since, ok := op.Extensions["x-vortex-since"]; ok {
+				if sStr, ok := since.(string); ok && sStr != "" {
+					sinceVal = sStr
+				}
 			}
+		}
+		if sinceVal == "" && spec != nil && spec.Info != nil && spec.Info.Version != "" {
+			sinceVal = spec.Info.Version
+		}
+
+		if sinceVal != "" {
+			fmt.Fprintf(buf, "\t// @since %q\n", sinceVal)
 		}
 
 		if headersRaw, ok := op.Extensions["x-vortex-headers"]; ok {
@@ -529,9 +529,9 @@ func writeOperationMethod(
 
 	// Payload directive
 	isForm := false
-	if op.RequestBody != nil && op.RequestBody.Value != nil {
-		content := op.RequestBody.Value.Content
-		if content.Get("application/x-www-form-urlencoded") != nil || content.Get("multipart/form-data") != nil {
+	if op.RequestBody != nil {
+		content := op.RequestBody.Content
+		if content["application/x-www-form-urlencoded"] != nil || content["multipart/form-data"] != nil {
 			isForm = true
 
 			fmt.Fprintf(buf, "\t// @form casing=snake_case\n")
@@ -562,8 +562,8 @@ func writeOperationMethod(
 			}
 		}
 
-		if pType == "string" && p.Schema != nil && p.Schema.Value != nil {
-			pType = mapSchemaType(p.Schema.Value, cfg)
+		if pType == "string" && p.Schema != nil {
+			pType = mapSchemaType(p.Schema, cfg)
 		}
 
 		paramSig = append(paramSig, fmt.Sprintf("%s %s", pName, pType))
@@ -581,8 +581,8 @@ func writeOperationMethod(
 			}
 		}
 
-		if pType == "string" && p.Schema != nil && p.Schema.Value != nil {
-			pType = mapSchemaType(p.Schema.Value, cfg)
+		if pType == "string" && p.Schema != nil {
+			pType = mapSchemaType(p.Schema, cfg)
 		}
 
 		sig := fmt.Sprintf("%s %s", pName, pType)
@@ -596,14 +596,14 @@ func writeOperationMethod(
 	}
 
 	// Request Body parameter if JSON
-	if !isForm && op.RequestBody != nil && op.RequestBody.Value != nil {
-		jsonContent := op.RequestBody.Value.Content.Get("application/json")
+	if !isForm && op.RequestBody != nil {
+		jsonContent := op.RequestBody.Content["application/json"]
 		if jsonContent != nil && jsonContent.Schema != nil {
 			bodyType := "any"
 			if jsonContent.Schema.Ref != "" {
 				bodyType = toPascalCase(path.Base(jsonContent.Schema.Ref))
-			} else if jsonContent.Schema.Value != nil {
-				bodyType = mapSchemaType(jsonContent.Schema.Value, cfg)
+			} else {
+				bodyType = mapSchemaType(jsonContent.Schema, cfg)
 			}
 
 			paramSig = append(paramSig, "req "+bodyType)
@@ -662,30 +662,29 @@ func writeOperationMethod(
 	}
 }
 
-func determineReturnType(op *openapi3.Operation, cfg ImportConfig) string {
+func determineReturnType(op *Operation, cfg ImportConfig) string {
 	if op.Responses == nil {
 		return "map[string]any"
 	}
 
-	respRef := op.Responses.Value("200")
-	if respRef == nil {
-		respRef = op.Responses.Value("201")
+	resp := op.Responses["200"]
+	if resp == nil {
+		resp = op.Responses["201"]
+	}
+	if resp == nil {
+		resp = op.Responses["default"]
 	}
 
-	if respRef == nil {
-		respRef = op.Responses.Value("default")
-	}
-
-	if respRef == nil || respRef.Value == nil {
+	if resp == nil {
 		return ""
 	}
 
-	jsonContent := respRef.Value.Content.Get("application/json")
-	if jsonContent == nil {
+	if resp.Content == nil {
 		return "map[string]any"
 	}
 
-	if jsonContent.Schema == nil {
+	jsonContent := resp.Content["application/json"]
+	if jsonContent == nil || jsonContent.Schema == nil {
 		return "map[string]any"
 	}
 
@@ -694,27 +693,23 @@ func determineReturnType(op *openapi3.Operation, cfg ImportConfig) string {
 		return "*" + typeName
 	}
 
-	if jsonContent.Schema.Value != nil {
-		s := jsonContent.Schema.Value
-		if s.Type != nil && s.Type.Is("array") {
-			if s.Items != nil && s.Items.Ref != "" {
-				return "[]*" + toPascalCase(path.Base(s.Items.Ref))
-			}
-
-			return "[]" + mapSchemaType(s.Items.Value, cfg)
+	s := jsonContent.Schema
+	if s.IsType("array") {
+		if s.Items != nil && s.Items.Ref != "" {
+			return "[]*" + toPascalCase(path.Base(s.Items.Ref))
 		}
 
-		if s.Type != nil && s.Type.Is("object") && len(s.Properties) == 0 {
-			return "map[string]any"
-		}
-
-		return mapSchemaType(s, cfg)
+		return "[]" + mapSchemaType(s.Items, cfg)
 	}
 
-	return "map[string]any"
+	if s.IsType("object") && len(s.Properties) == 0 {
+		return "map[string]any"
+	}
+
+	return mapSchemaType(s, cfg)
 }
 
-func isGlobalHeader(spec *openapi3.T, name, val string) bool {
+func isGlobalHeader(spec *Document, name, val string) bool {
 	if spec == nil || spec.Info == nil || spec.Info.Extensions == nil {
 		return false
 	}
@@ -747,27 +742,31 @@ func isGlobalHeader(spec *openapi3.T, name, val string) bool {
 }
 
 type operationParameters struct {
-	path   []*openapi3.Parameter
-	query  []*openapi3.Parameter
-	header []*openapi3.Parameter
+	path   []*Parameter
+	query  []*Parameter
+	header []*Parameter
 }
 
 func extractOperationParameters(
 	pathStr string,
-	pathItem *openapi3.PathItem,
-	op *openapi3.Operation,
+	pathItem *PathItem,
+	op *Operation,
 ) operationParameters {
 	var res operationParameters
 
-	combined := append(slices.Clone(pathItem.Parameters), op.Parameters...)
+	var combined []*Parameter
+	if pathItem != nil {
+		combined = append(combined, pathItem.Parameters...)
+	}
+	if op != nil {
+		combined = append(combined, op.Parameters...)
+	}
 
 	seen := make(map[string]bool)
-	for _, pRef := range combined {
-		if pRef == nil || pRef.Value == nil {
+	for _, p := range combined {
+		if p == nil {
 			continue
 		}
-
-		p := pRef.Value
 
 		key := p.In + ":" + p.Name
 		if seen[key] {
@@ -777,11 +776,11 @@ func extractOperationParameters(
 		seen[key] = true
 
 		switch p.In {
-		case openapi3.ParameterInPath:
+		case "path":
 			res.path = append(res.path, p)
-		case openapi3.ParameterInQuery:
+		case "query":
 			res.query = append(res.query, p)
-		case openapi3.ParameterInHeader:
+		case "header":
 			res.header = append(res.header, p)
 		}
 	}
@@ -806,11 +805,11 @@ func extractOperationParameters(
 		if !seen[key] && !seen["path:"+strings.ToLower(varName)] {
 			seen[key] = true
 
-			res.path = append(res.path, &openapi3.Parameter{
+			res.path = append(res.path, &Parameter{
 				Name:     varName,
-				In:       openapi3.ParameterInPath,
+				In:       "path",
 				Required: true,
-				Schema:   openapi3.NewStringSchema().NewRef(),
+				Schema:   &Schema{Type: TypeArray{"string"}},
 			})
 		}
 	}

@@ -6,11 +6,15 @@ package openapi
 
 import (
 	"fmt"
+	"regexp"
 	"strings"
+)
 
-	"github.com/getkin/kin-openapi/openapi3"
-
-	"github.com/lemon4ksan/aoni/cmd/vortex/lib/ingest"
+var (
+	reUglyVerbPrefix = regexp.MustCompile(`^(?i)(?:get|post|put|delete)?i(?:get|post|put|delete|list)?`)
+	reVersionSuffix  = regexp.MustCompile(`(?i)_?v[0-9]+$`)
+	reVersionPath    = regexp.MustCompile(`(?i)^v[0-9]+$`)
+	reTrailingVerb   = regexp.MustCompile(`(?i)_(get|post|put|delete|patch|options|head)$`)
 )
 
 var initialisms = map[string]bool{
@@ -51,10 +55,103 @@ func isHexHash(s string) bool {
 	return true
 }
 
-func buildMethodName(pathStr, httpMethod string, op *openapi3.Operation, used map[string]int) string {
-	base := ingest.SanitizeMethodName(op.OperationID, httpMethod, pathStr, "")
+// SanitizeMethodName transforms raw operation IDs or URL routes into clean, idiomatic Go method names.
+func SanitizeMethodName(rawOpID, httpMethod, rawPath, serviceName string) string {
+	cleaned := strings.TrimSpace(rawOpID)
+
+	if cleaned != "" {
+		if reUglyVerbPrefix.MatchString(cleaned) && len(cleaned) > 5 {
+			cleaned = reUglyVerbPrefix.ReplaceAllString(cleaned, "Get")
+		}
+
+		if serviceName != "" {
+			trimmedSvc := strings.TrimSuffix(serviceName, "API")
+			trimmedSvc = strings.TrimSuffix(trimmedSvc, "Service")
+			cleaned = strings.TrimPrefix(cleaned, serviceName+"_")
+			cleaned = strings.TrimPrefix(cleaned, serviceName)
+			if trimmedSvc != "" {
+				cleaned = strings.TrimPrefix(cleaned, trimmedSvc+"_")
+				cleaned = strings.TrimPrefix(cleaned, trimmedSvc)
+			}
+		}
+
+		cleaned = reVersionSuffix.ReplaceAllString(cleaned, "")
+		cleaned = reTrailingVerb.ReplaceAllString(cleaned, "")
+
+		name := toPascalCase(cleaned)
+		if len(name) > 0 {
+			return name
+		}
+	}
+
+	return DeriveMethodNameFromRoute(httpMethod, rawPath)
+}
+
+// DeriveMethodNameFromRoute generates an idiomatic method name from HTTP verb and route path.
+func DeriveMethodNameFromRoute(httpMethod, rawPath string) string {
+	cleanPath := strings.Trim(rawPath, "/")
+	parts := strings.Split(cleanPath, "/")
+
+	var significant []string
+	for _, p := range parts {
+		if p == "" || p == "api" || reVersionPath.MatchString(p) {
+			continue
+		}
+
+		if strings.HasPrefix(p, "{") && strings.HasSuffix(p, "}") {
+			varName := strings.Trim(p, "{}")
+			significant = append(significant, "By", varName)
+			continue
+		}
+
+		significant = append(significant, p)
+	}
+
+	verb := strings.ToUpper(httpMethod)
+	prefix := "Get"
+	switch verb {
+	case "POST":
+		prefix = "Create"
+	case "PUT":
+		prefix = "Update"
+	case "PATCH":
+		prefix = "Patch"
+	case "DELETE":
+		prefix = "Delete"
+	case "HEAD":
+		prefix = "Head"
+	case "OPTIONS":
+		prefix = "Options"
+	}
+
+	if len(significant) == 0 {
+		return prefix + "Root"
+	}
+
+	joined := strings.Join(significant, "_")
+	pascal := toPascalCase(joined)
+
+	for _, v := range []string{"Get", "Create", "Update", "Patch", "Delete", "List", "Fetch", "Find", "Head", "Options"} {
+		if strings.HasPrefix(pascal, v) {
+			return pascal
+		}
+	}
+
+	return prefix + pascal
+}
+
+func buildMethodName(pathStr, httpMethod string, op *Operation, used map[string]int) string {
+	opID := ""
+	if op != nil {
+		opID = op.OperationID
+	}
+	base := SanitizeMethodName(opID, httpMethod, pathStr, "")
 	if base == "" || isHexHash(base) {
-		base = ingest.DeriveMethodNameFromRoute(httpMethod, pathStr)
+		base = DeriveMethodNameFromRoute(httpMethod, pathStr)
+	}
+
+	if used == nil {
+		return base
 	}
 
 	if count, ok := used[base]; ok {

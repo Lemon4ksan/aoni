@@ -5,11 +5,11 @@
 package openapi
 
 import (
+	"maps"
+	"slices"
 	"strings"
 
-	"github.com/getkin/kin-openapi/openapi3"
-
-	"github.com/lemon4ksan/aoni/cmd/vortex/lib/ingest"
+	"github.com/lemon4ksan/foundation/generic"
 )
 
 // MergeMode defines the set operation used when merging multiple OpenAPI / HAR specifications.
@@ -26,43 +26,47 @@ const (
 	MergeModeDifference MergeMode = "diff"
 )
 
-// MergeOpenAPISpecs combines multiple OpenAPI 3.x specifications into a unified specification using Union mode.
-func MergeOpenAPISpecs(specs ...*openapi3.T) *openapi3.T {
+// MergeOpenAPISpecs combines multiple OpenAPI specifications into a unified specification using Union mode.
+func MergeOpenAPISpecs(specs ...*Document) *Document {
 	return MergeOpenAPISpecsWithMode(MergeModeUnion, specs...)
 }
 
 // MergeOpenAPISpecsWithMode combines multiple specifications using the chosen set operation (union, intersect, diff).
-func MergeOpenAPISpecsWithMode(mode MergeMode, specs ...*openapi3.T) *openapi3.T {
-	if len(specs) == 0 {
+func MergeOpenAPISpecsWithMode(mode MergeMode, specs ...*Document) *Document {
+	validSpecs := generic.Filter(specs, func(d *Document) bool {
+		return d != nil
+	})
+
+	if len(validSpecs) == 0 {
 		return nil
 	}
 
-	if len(specs) == 1 {
-		return specs[0]
+	if len(validSpecs) == 1 {
+		return cloneDocument(validSpecs[0])
 	}
 
 	switch mode {
 	case MergeModeIntersection:
-		return mergeIntersection(specs...)
+		return mergeIntersection(validSpecs...)
 	case MergeModeDifference:
-		return mergeDifference(specs...)
+		return mergeDifference(validSpecs...)
 	default:
-		return mergeUnion(specs...)
+		return mergeUnion(validSpecs...)
 	}
 }
 
-func mergeUnion(specs ...*openapi3.T) *openapi3.T {
-	root := specs[0]
+func mergeUnion(specs ...*Document) *Document {
+	root := cloneDocument(specs[0])
 	if root.Paths == nil {
-		root.Paths = openapi3.NewPaths()
+		root.Paths = make(map[string]*PathItem)
 	}
 
 	if root.Components == nil {
-		root.Components = &openapi3.Components{
-			Schemas: make(openapi3.Schemas),
+		root.Components = &Components{
+			Schemas: make(map[string]*Schema),
 		}
 	} else if root.Components.Schemas == nil {
-		root.Components.Schemas = make(openapi3.Schemas)
+		root.Components.Schemas = make(map[string]*Schema)
 	}
 
 	for _, s := range specs[1:] {
@@ -73,27 +77,25 @@ func mergeUnion(specs ...*openapi3.T) *openapi3.T {
 		// 1. Merge Servers
 		for _, srv := range s.Servers {
 			hasServer := false
-
 			for _, existing := range root.Servers {
-				if existing != nil && srv != nil && existing.URL == srv.URL {
+				if existing.URL == srv.URL {
 					hasServer = true
 					break
 				}
 			}
 
-			if !hasServer && srv != nil {
+			if !hasServer && srv.URL != "" {
 				root.Servers = append(root.Servers, srv)
 			}
 		}
 
 		// 2. Merge Schemas
-		if s.Components != nil {
-			for name, schemaRef := range s.Components.Schemas {
-				if existingSchema, exists := root.Components.Schemas[name]; exists && existingSchema.Value != nil &&
-					schemaRef.Value != nil {
-					existingSchema.Value = ingest.MergeSchemas(existingSchema.Value, schemaRef.Value)
+		if s.Components != nil && s.Components.Schemas != nil {
+			for name, schema := range s.Components.Schemas {
+				if existingSchema, exists := root.Components.Schemas[name]; exists && existingSchema != nil && schema != nil {
+					mergeSchema(existingSchema, schema)
 				} else {
-					root.Components.Schemas[name] = schemaRef
+					root.Components.Schemas[name] = schema
 				}
 			}
 		}
@@ -102,7 +104,7 @@ func mergeUnion(specs ...*openapi3.T) *openapi3.T {
 		if s.Info != nil && s.Info.Extensions != nil {
 			if hRaw, ok := s.Info.Extensions["x-vortex-headers"]; ok {
 				if root.Info == nil {
-					root.Info = &openapi3.Info{
+					root.Info = &Info{
 						Title:   "Combined API Specification",
 						Version: "1.0.0",
 					}
@@ -151,14 +153,14 @@ func mergeUnion(specs ...*openapi3.T) *openapi3.T {
 
 		// 4. Merge Paths and Operations
 		if s.Paths != nil {
-			for pathStr, pathItem := range s.Paths.Map() {
+			for pathStr, pathItem := range s.Paths {
 				if pathItem == nil {
 					continue
 				}
 
-				existingItem := root.Paths.Value(pathStr)
+				existingItem := root.Paths[pathStr]
 				if existingItem == nil {
-					root.Paths.Set(pathStr, pathItem)
+					root.Paths[pathStr] = pathItem
 				} else {
 					mergePathItem(existingItem, pathItem)
 				}
@@ -169,21 +171,21 @@ func mergeUnion(specs ...*openapi3.T) *openapi3.T {
 	return root
 }
 
-func mergeIntersection(specs ...*openapi3.T) *openapi3.T {
-	root := specs[0]
+func mergeIntersection(specs ...*Document) *Document {
+	root := cloneDocument(specs[0])
 	if root == nil || root.Paths == nil {
 		return root
 	}
 
 	methods := []string{"GET", "POST", "PUT", "DELETE", "PATCH", "HEAD", "OPTIONS"}
 
-	for pathStr, pathItem := range root.Paths.Map() {
+	for pathStr, pathItem := range root.Paths {
 		if pathItem == nil {
 			continue
 		}
 
 		for _, m := range methods {
-			op := getPathItemOperation(pathItem, m)
+			op := getPathItemOp(pathItem, m)
 			if op == nil {
 				continue
 			}
@@ -196,8 +198,8 @@ func mergeIntersection(specs ...*openapi3.T) *openapi3.T {
 					break
 				}
 
-				otherItem := otherSpec.Paths.Value(pathStr)
-				if otherItem == nil || getPathItemOperation(otherItem, m) == nil {
+				otherItem := otherSpec.Paths[pathStr]
+				if otherItem == nil || getPathItemOp(otherItem, m) == nil {
 					inAll = false
 					break
 				}
@@ -206,40 +208,39 @@ func mergeIntersection(specs ...*openapi3.T) *openapi3.T {
 			if inAll {
 				// Merge operation metadata from other specs
 				for _, otherSpec := range specs[1:] {
-					otherItem := otherSpec.Paths.Value(pathStr)
+					otherItem := otherSpec.Paths[pathStr]
 					if otherItem != nil {
-						if otherOp := getPathItemOperation(otherItem, m); otherOp != nil {
+						if otherOp := getPathItemOp(otherItem, m); otherOp != nil {
 							mergeOperation(op, otherOp)
 						}
 					}
 
 					// Merge schemas
-					if otherSpec.Components != nil {
-						for name, sRef := range otherSpec.Components.Schemas {
-							if existing, ok := root.Components.Schemas[name]; ok && existing.Value != nil &&
-								sRef.Value != nil {
-								existing.Value = ingest.MergeSchemas(existing.Value, sRef.Value)
+					if otherSpec.Components != nil && otherSpec.Components.Schemas != nil {
+						for name, s := range otherSpec.Components.Schemas {
+							if existing, ok := root.Components.Schemas[name]; ok && existing != nil && s != nil {
+								mergeSchema(existing, s)
 							} else {
-								root.Components.Schemas[name] = sRef
+								root.Components.Schemas[name] = s
 							}
 						}
 					}
 				}
 			} else {
-				setPathItemOperation(pathItem, m, nil)
+				setPathItemOp(pathItem, m, nil)
 			}
 		}
 
-		if countPathItemOperations(pathItem) == 0 {
-			root.Paths.Delete(pathStr)
+		if countPathItemOps(pathItem) == 0 {
+			delete(root.Paths, pathStr)
 		}
 	}
 
 	return root
 }
 
-func mergeDifference(specs ...*openapi3.T) *openapi3.T {
-	root := specs[0]
+func mergeDifference(specs ...*Document) *Document {
+	root := cloneDocument(specs[0])
 	if root == nil || root.Paths == nil {
 		return root
 	}
@@ -251,24 +252,24 @@ func mergeDifference(specs ...*openapi3.T) *openapi3.T {
 			continue
 		}
 
-		for pathStr, otherItem := range otherSpec.Paths.Map() {
+		for pathStr, otherItem := range otherSpec.Paths {
 			if otherItem == nil {
 				continue
 			}
 
-			rootItem := root.Paths.Value(pathStr)
+			rootItem := root.Paths[pathStr]
 			if rootItem == nil {
 				continue
 			}
 
 			for _, m := range methods {
-				if getPathItemOperation(otherItem, m) != nil {
-					setPathItemOperation(rootItem, m, nil)
+				if getPathItemOp(otherItem, m) != nil {
+					setPathItemOp(rootItem, m, nil)
 				}
 			}
 
-			if countPathItemOperations(rootItem) == 0 {
-				root.Paths.Delete(pathStr)
+			if countPathItemOps(rootItem) == 0 {
+				delete(root.Paths, pathStr)
 			}
 		}
 	}
@@ -276,36 +277,10 @@ func mergeDifference(specs ...*openapi3.T) *openapi3.T {
 	return root
 }
 
-func getPathItemOperation(p *openapi3.PathItem, method string) *openapi3.Operation {
-	if p == nil {
-		return nil
-	}
-
-	switch strings.ToUpper(method) {
-	case "GET":
-		return p.Get
-	case "POST":
-		return p.Post
-	case "PUT":
-		return p.Put
-	case "DELETE":
-		return p.Delete
-	case "PATCH":
-		return p.Patch
-	case "HEAD":
-		return p.Head
-	case "OPTIONS":
-		return p.Options
-	default:
-		return nil
-	}
-}
-
-func setPathItemOperation(p *openapi3.PathItem, method string, op *openapi3.Operation) {
+func setPathItemOp(p *PathItem, method string, op *Operation) {
 	if p == nil {
 		return
 	}
-
 	switch strings.ToUpper(method) {
 	case "GET":
 		p.Get = op
@@ -321,17 +296,19 @@ func setPathItemOperation(p *openapi3.PathItem, method string, op *openapi3.Oper
 		p.Head = op
 	case "OPTIONS":
 		p.Options = op
+	case "TRACE":
+		p.Trace = op
 	}
 }
 
-func countPathItemOperations(p *openapi3.PathItem) int {
+func countPathItemOps(p *PathItem) int {
 	if p == nil {
 		return 0
 	}
 
 	count := 0
-	for _, m := range []string{"GET", "POST", "PUT", "DELETE", "PATCH", "HEAD", "OPTIONS"} {
-		if getPathItemOperation(p, m) != nil {
+	for _, m := range []string{"GET", "POST", "PUT", "DELETE", "PATCH", "HEAD", "OPTIONS", "TRACE"} {
+		if getPathItemOp(p, m) != nil {
 			count++
 		}
 	}
@@ -339,7 +316,7 @@ func countPathItemOperations(p *openapi3.PathItem) int {
 	return count
 }
 
-func mergePathItem(existing, incoming *openapi3.PathItem) {
+func mergePathItem(existing, incoming *PathItem) {
 	if incoming.Get != nil {
 		if existing.Get == nil {
 			existing.Get = incoming.Get
@@ -347,7 +324,6 @@ func mergePathItem(existing, incoming *openapi3.PathItem) {
 			mergeOperation(existing.Get, incoming.Get)
 		}
 	}
-
 	if incoming.Post != nil {
 		if existing.Post == nil {
 			existing.Post = incoming.Post
@@ -355,7 +331,6 @@ func mergePathItem(existing, incoming *openapi3.PathItem) {
 			mergeOperation(existing.Post, incoming.Post)
 		}
 	}
-
 	if incoming.Put != nil {
 		if existing.Put == nil {
 			existing.Put = incoming.Put
@@ -363,7 +338,6 @@ func mergePathItem(existing, incoming *openapi3.PathItem) {
 			mergeOperation(existing.Put, incoming.Put)
 		}
 	}
-
 	if incoming.Delete != nil {
 		if existing.Delete == nil {
 			existing.Delete = incoming.Delete
@@ -371,7 +345,6 @@ func mergePathItem(existing, incoming *openapi3.PathItem) {
 			mergeOperation(existing.Delete, incoming.Delete)
 		}
 	}
-
 	if incoming.Patch != nil {
 		if existing.Patch == nil {
 			existing.Patch = incoming.Patch
@@ -379,7 +352,6 @@ func mergePathItem(existing, incoming *openapi3.PathItem) {
 			mergeOperation(existing.Patch, incoming.Patch)
 		}
 	}
-
 	if incoming.Head != nil {
 		if existing.Head == nil {
 			existing.Head = incoming.Head
@@ -387,7 +359,6 @@ func mergePathItem(existing, incoming *openapi3.PathItem) {
 			mergeOperation(existing.Head, incoming.Head)
 		}
 	}
-
 	if incoming.Options != nil {
 		if existing.Options == nil {
 			existing.Options = incoming.Options
@@ -397,28 +368,35 @@ func mergePathItem(existing, incoming *openapi3.PathItem) {
 	}
 }
 
-func mergeOperation(existing, incoming *openapi3.Operation) {
+func mergeOperation(existing, incoming *Operation) {
 	for _, p := range incoming.Parameters {
-		if p != nil && p.Value != nil {
-			if existingParam := existing.Parameters.GetByInAndName(p.Value.In, p.Value.Name); existingParam == nil {
-				existing.AddParameter(p.Value)
+		if p != nil {
+			hasParam := false
+			for _, ep := range existing.Parameters {
+				if ep != nil && ep.In == p.In && ep.Name == p.Name {
+					hasParam = true
+					break
+				}
+			}
+			if !hasParam {
+				existing.Parameters = append(existing.Parameters, p)
 			}
 		}
 	}
 
-	if incoming.RequestBody != nil && incoming.RequestBody.Value != nil {
-		if existing.RequestBody == nil || existing.RequestBody.Value == nil {
+	if incoming.RequestBody != nil {
+		if existing.RequestBody == nil {
 			existing.RequestBody = incoming.RequestBody
 		} else {
-			for mt, content := range incoming.RequestBody.Value.Content {
-				existingContent := existing.RequestBody.Value.Content.Get(mt)
+			if existing.RequestBody.Content == nil {
+				existing.RequestBody.Content = make(map[string]*MediaType)
+			}
+			for mt, content := range incoming.RequestBody.Content {
+				existingContent := existing.RequestBody.Content[mt]
 				if existingContent == nil {
-					existing.RequestBody.Value.Content[mt] = content
-				} else if existingContent.Schema != nil && content.Schema != nil && existingContent.Schema.Value != nil && content.Schema.Value != nil {
-					existingContent.Schema.Value = ingest.MergeSchemas(
-						existingContent.Schema.Value,
-						content.Schema.Value,
-					)
+					existing.RequestBody.Content[mt] = content
+				} else if existingContent.Schema != nil && content.Schema != nil {
+					mergeSchema(existingContent.Schema, content.Schema)
 				}
 			}
 		}
@@ -426,23 +404,23 @@ func mergeOperation(existing, incoming *openapi3.Operation) {
 
 	if incoming.Responses != nil {
 		if existing.Responses == nil {
-			existing.Responses = openapi3.NewResponses()
+			existing.Responses = make(map[string]*Response)
 		}
 
-		for statusStr, respRef := range incoming.Responses.Map() {
-			existingResp := existing.Responses.Value(statusStr)
+		for statusStr, resp := range incoming.Responses {
+			existingResp := existing.Responses[statusStr]
 			if existingResp == nil {
-				existing.Responses.Set(statusStr, respRef)
-			} else if existingResp.Value != nil && respRef.Value != nil {
-				for mt, content := range respRef.Value.Content {
-					existingContent := existingResp.Value.Content.Get(mt)
+				existing.Responses[statusStr] = resp
+			} else if resp != nil {
+				if existingResp.Content == nil {
+					existingResp.Content = make(map[string]*MediaType)
+				}
+				for mt, content := range resp.Content {
+					existingContent := existingResp.Content[mt]
 					if existingContent == nil {
-						existingResp.Value.Content[mt] = content
-					} else if existingContent.Schema != nil && content.Schema != nil && existingContent.Schema.Value != nil && content.Schema.Value != nil {
-						existingContent.Schema.Value = ingest.MergeSchemas(
-							existingContent.Schema.Value,
-							content.Schema.Value,
-						)
+						existingResp.Content[mt] = content
+					} else if existingContent.Schema != nil && content.Schema != nil {
+						mergeSchema(existingContent.Schema, content.Schema)
 					}
 				}
 			}
@@ -474,4 +452,55 @@ func mergeOperation(existing, incoming *openapi3.Operation) {
 			existing.Extensions["x-vortex-headers"] = existingHeaders
 		}
 	}
+}
+
+func mergeSchema(dst, src *Schema) {
+	if dst == nil || src == nil {
+		return
+	}
+
+	if len(dst.Type) == 0 {
+		dst.Type = src.Type
+	}
+
+	if dst.Properties == nil && src.Properties != nil {
+		dst.Properties = make(map[string]*Schema)
+	}
+
+	for k, v := range src.Properties {
+		if existingProp, ok := dst.Properties[k]; ok {
+			mergeSchema(existingProp, v)
+		} else {
+			dst.Properties[k] = v
+		}
+	}
+}
+
+func cloneDocument(src *Document) *Document {
+	if src == nil {
+		return nil
+	}
+
+	d := *src
+	d.Servers = slices.Clone(src.Servers)
+	d.Paths = maps.Clone(src.Paths)
+
+	if src.Components != nil {
+		comp := *src.Components
+		if src.Components.Schemas != nil {
+			comp.Schemas = maps.Clone(src.Components.Schemas)
+		}
+		if src.Components.Responses != nil {
+			comp.Responses = maps.Clone(src.Components.Responses)
+		}
+		if src.Components.Parameters != nil {
+			comp.Parameters = maps.Clone(src.Components.Parameters)
+		}
+		if src.Components.RequestBodies != nil {
+			comp.RequestBodies = maps.Clone(src.Components.RequestBodies)
+		}
+		d.Components = &comp
+	}
+
+	return &d
 }

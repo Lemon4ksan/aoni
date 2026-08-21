@@ -211,8 +211,8 @@ func TestMergeOpenAPISpecs_MultiSpecComposition(t *testing.T) {
 	require.NotNil(t, combined)
 
 	// Both paths must be present
-	require.NotNil(t, combined.Paths.Value("/auth/login"))
-	require.NotNil(t, combined.Paths.Value("/billing/invoices"))
+	require.NotNil(t, combined.Paths["/auth/login"])
+	require.NotNil(t, combined.Paths["/billing/invoices"])
 
 	// Headers extension must be merged
 	require.NotNil(t, combined.Info.Extensions["x-vortex-headers"])

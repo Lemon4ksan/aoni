@@ -14,8 +14,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/getkin/kin-openapi/openapi3"
 	"github.com/lemon4ksan/foundation/generic"
+
+	"github.com/lemon4ksan/aoni/cmd/vortex/lib/openapi"
 )
 
 // HARLog models the top-level container of a W3C HAR 1.2 archive.
@@ -64,22 +65,22 @@ type HARContent struct {
 
 // HARToOpenAPI transforms one or more recorded W3C HAR 1.2 logs into an OpenAPI 3.0 specification,
 // automatically unifying query parameters, status codes, and schema object properties.
-func HARToOpenAPI(data []byte) (*openapi3.T, error) {
+func HARToOpenAPI(data []byte) (*openapi.Document, error) {
 	var har HARLog
 	if err := json.Unmarshal(data, &har); err != nil {
 		return nil, fmt.Errorf("parsing HAR JSON: %w", err)
 	}
 
-	doc := &openapi3.T{
+	doc := &openapi.Document{
 		OpenAPI: "3.0.3",
-		Info: &openapi3.Info{
+		Info: &openapi.Info{
 			Title:       "API Specification (Captured from Traffic)",
 			Version:     "1.0.0",
 			Description: "Synthesized automatically by Vortex HAR Traffic Ingestion Engine",
 		},
-		Paths: openapi3.NewPaths(),
-		Components: &openapi3.Components{
-			Schemas: make(openapi3.Schemas),
+		Paths: make(map[string]*openapi.PathItem),
+		Components: &openapi.Components{
+			Schemas: make(map[string]*openapi.Schema),
 		},
 	}
 
@@ -102,13 +103,13 @@ func HARToOpenAPI(data []byte) (*openapi3.T, error) {
 		}
 
 		// Extract or create PathItem
-		pathItem := doc.Paths.Value(cleanPath)
+		pathItem := doc.Paths[cleanPath]
 		if pathItem == nil {
-			pathItem = &openapi3.PathItem{}
-			doc.Paths.Set(cleanPath, pathItem)
+			pathItem = &openapi.PathItem{}
+			doc.Paths[cleanPath] = pathItem
 		}
 
-		var op *openapi3.Operation
+		var op *openapi.Operation
 		switch method {
 		case "GET":
 			op = pathItem.Get
@@ -123,10 +124,12 @@ func HARToOpenAPI(data []byte) (*openapi3.T, error) {
 		}
 
 		if op == nil {
-			op = openapi3.NewOperation()
-			op.OperationID = DeriveMethodNameFromRoute(method, cleanPath)
+			op = &openapi.Operation{
+				OperationID: DeriveMethodNameFromRoute(method, cleanPath),
+				Summary:     fmt.Sprintf("%s %s", method, cleanPath),
+				Responses:   make(map[string]*openapi.Response),
+			}
 
-			op.Summary = fmt.Sprintf("%s %s", method, cleanPath)
 			switch method {
 			case "GET":
 				pathItem.Get = op
@@ -147,10 +150,20 @@ func HARToOpenAPI(data []byte) (*openapi3.T, error) {
 				continue
 			}
 
-			param := op.Parameters.GetByInAndName(openapi3.ParameterInQuery, q.Name)
-			if param == nil {
-				param = openapi3.NewQueryParameter(q.Name).WithSchema(openapi3.NewStringSchema())
-				op.AddParameter(param)
+			hasParam := false
+			for _, p := range op.Parameters {
+				if p.In == "query" && p.Name == q.Name {
+					hasParam = true
+					break
+				}
+			}
+
+			if !hasParam {
+				op.Parameters = append(op.Parameters, &openapi.Parameter{
+					Name:   q.Name,
+					In:     "query",
+					Schema: &openapi.Schema{Type: openapi.TypeArray{"string"}},
+				})
 			}
 		}
 
@@ -158,29 +171,38 @@ func HARToOpenAPI(data []byte) (*openapi3.T, error) {
 		if entry.Request.PostData != nil && len(entry.Request.PostData.Text) > 0 {
 			schema := inferSchemaFromJSON([]byte(entry.Request.PostData.Text))
 			if schema != nil {
-				var schemaRef *openapi3.SchemaRef
-				if (schema.Type != nil && schema.Type.Includes("object")) || len(schema.Properties) > 0 {
+				var schemaRef *openapi.Schema
+				if schema.IsType("object") || len(schema.Properties) > 0 {
 					dtoName := op.OperationID + "Request"
-					if existing, exists := doc.Components.Schemas[dtoName]; exists && existing.Value != nil {
-						existing.Value = MergeSchemas(existing.Value, schema)
-						schema = existing.Value
+					if existing, exists := doc.Components.Schemas[dtoName]; exists && existing != nil {
+						schema = MergeSchemas(existing, schema)
+						doc.Components.Schemas[dtoName] = schema
 					} else {
-						doc.Components.Schemas[dtoName] = &openapi3.SchemaRef{Value: schema}
+						doc.Components.Schemas[dtoName] = schema
 					}
 
-					schemaRef = &openapi3.SchemaRef{
-						Ref:   "#/components/schemas/" + dtoName,
-						Value: schema,
+					schemaRef = &openapi.Schema{
+						Ref: "#/components/schemas/" + dtoName,
 					}
 				} else {
-					schemaRef = &openapi3.SchemaRef{Value: schema}
+					schemaRef = schema
 				}
 
-				if op.RequestBody == nil || op.RequestBody.Value == nil {
-					reqBody := openapi3.NewRequestBody().WithContent(openapi3.NewContentWithJSONSchemaRef(schemaRef))
-					op.RequestBody = &openapi3.RequestBodyRef{Value: reqBody}
+				if op.RequestBody == nil {
+					op.RequestBody = &openapi.RequestBody{
+						Content: map[string]*openapi.MediaType{
+							"application/json": {
+								Schema: schemaRef,
+							},
+						},
+					}
 				} else {
-					op.RequestBody.Value.Content["application/json"] = openapi3.NewMediaType().WithSchemaRef(schemaRef)
+					if op.RequestBody.Content == nil {
+						op.RequestBody.Content = make(map[string]*openapi.MediaType)
+					}
+					op.RequestBody.Content["application/json"] = &openapi.MediaType{
+						Schema: schemaRef,
+					}
 				}
 			}
 		}
@@ -191,61 +213,69 @@ func HARToOpenAPI(data []byte) (*openapi3.T, error) {
 			statusStr = "200"
 		}
 
-		statusInt, _ := strconv.Atoi(statusStr)
-
-		var respSchema *openapi3.Schema
+		var respSchema *openapi.Schema
 		if entry.Response.Content != nil && len(entry.Response.Content.Text) > 0 {
 			respSchema = inferSchemaFromJSON([]byte(entry.Response.Content.Text))
 		}
 
-		var respSchemaRef *openapi3.SchemaRef
+		var respSchemaRef *openapi.Schema
 		if respSchema != nil {
 			switch {
-			case (respSchema.Type != nil && respSchema.Type.Includes("object")) || len(respSchema.Properties) > 0:
+			case respSchema.IsType("object") || len(respSchema.Properties) > 0:
 				dtoName := op.OperationID + "Response"
-				if existing, exists := doc.Components.Schemas[dtoName]; exists && existing.Value != nil {
-					existing.Value = MergeSchemas(existing.Value, respSchema)
-					respSchema = existing.Value
+				if existing, exists := doc.Components.Schemas[dtoName]; exists && existing != nil {
+					respSchema = MergeSchemas(existing, respSchema)
+					doc.Components.Schemas[dtoName] = respSchema
 				} else {
-					doc.Components.Schemas[dtoName] = &openapi3.SchemaRef{Value: respSchema}
+					doc.Components.Schemas[dtoName] = respSchema
 				}
 
-				respSchemaRef = &openapi3.SchemaRef{
-					Ref:   "#/components/schemas/" + dtoName,
-					Value: respSchema,
+				respSchemaRef = &openapi.Schema{
+					Ref: "#/components/schemas/" + dtoName,
 				}
 
-			case respSchema.Type != nil && respSchema.Type.Includes("array") && respSchema.Items != nil &&
-				respSchema.Items.Value != nil && len(respSchema.Items.Value.Properties) > 0:
+			case respSchema.IsType("array") && respSchema.Items != nil && len(respSchema.Items.Properties) > 0:
 				itemDtoName := op.OperationID + "Item"
-				if existing, exists := doc.Components.Schemas[itemDtoName]; exists && existing.Value != nil {
-					existing.Value = MergeSchemas(existing.Value, respSchema.Items.Value)
-					respSchema.Items.Value = existing.Value
+				if existing, exists := doc.Components.Schemas[itemDtoName]; exists && existing != nil {
+					respSchema.Items = MergeSchemas(existing, respSchema.Items)
+					doc.Components.Schemas[itemDtoName] = respSchema.Items
 				} else {
-					doc.Components.Schemas[itemDtoName] = &openapi3.SchemaRef{Value: respSchema.Items.Value}
+					doc.Components.Schemas[itemDtoName] = respSchema.Items
 				}
 
-				respSchema.Items = &openapi3.SchemaRef{
-					Ref:   "#/components/schemas/" + itemDtoName,
-					Value: respSchema.Items.Value,
+				respSchema.Items = &openapi.Schema{
+					Ref: "#/components/schemas/" + itemDtoName,
 				}
-				respSchemaRef = &openapi3.SchemaRef{Value: respSchema}
+				respSchemaRef = respSchema
 
 			default:
-				respSchemaRef = &openapi3.SchemaRef{Value: respSchema}
+				respSchemaRef = respSchema
 			}
 		}
 
-		respRef := op.Responses.Value(statusStr)
-		if respRef == nil {
-			resp := openapi3.NewResponse().WithDescription("Response " + statusStr)
-			if respSchemaRef != nil {
-				resp.WithContent(openapi3.NewContentWithJSONSchemaRef(respSchemaRef))
-			}
+		if op.Responses == nil {
+			op.Responses = make(map[string]*openapi.Response)
+		}
 
-			op.AddResponse(statusInt, resp)
-		} else if respRef.Value != nil && respSchemaRef != nil {
-			respRef.Value.Content["application/json"] = openapi3.NewMediaType().WithSchemaRef(respSchemaRef)
+		existingResp := op.Responses[statusStr]
+		if existingResp == nil {
+			newResp := &openapi.Response{
+				Description: "Response " + statusStr,
+				Content:     make(map[string]*openapi.MediaType),
+			}
+			if respSchemaRef != nil {
+				newResp.Content["application/json"] = &openapi.MediaType{
+					Schema: respSchemaRef,
+				}
+			}
+			op.Responses[statusStr] = newResp
+		} else if respSchemaRef != nil {
+			if existingResp.Content == nil {
+				existingResp.Content = make(map[string]*openapi.MediaType)
+			}
+			existingResp.Content["application/json"] = &openapi.MediaType{
+				Schema: respSchemaRef,
+			}
 		}
 
 		// 4. Ingest operation-specific request headers
@@ -349,7 +379,7 @@ func HARToOpenAPI(data []byte) (*openapi3.T, error) {
 	}
 
 	if detectedHost != "" {
-		doc.Servers = append(doc.Servers, &openapi3.Server{
+		doc.Servers = append(doc.Servers, openapi.Server{
 			URL:         detectedHost,
 			Description: "API Server (inferred from captured traffic)",
 		})
@@ -503,7 +533,7 @@ func sanitizeHeaderValue(name, val string) string {
 }
 
 // MergeSchemas recursively unions properties and items of two OpenAPI schemas.
-func MergeSchemas(s1, s2 *openapi3.Schema) *openapi3.Schema {
+func MergeSchemas(s1, s2 *openapi.Schema) *openapi.Schema {
 	if s1 == nil {
 		return s2
 	}
@@ -512,15 +542,15 @@ func MergeSchemas(s1, s2 *openapi3.Schema) *openapi3.Schema {
 		return s1
 	}
 
-	if s1.Type != nil && s2.Type != nil {
-		if s1.Type.Includes("object") && s2.Type.Includes("object") {
+	if len(s1.Type) > 0 && len(s2.Type) > 0 {
+		if s1.IsType("object") && s2.IsType("object") {
 			if s1.Properties == nil {
-				s1.Properties = make(openapi3.Schemas)
+				s1.Properties = make(map[string]*openapi.Schema)
 			}
 
 			for k, v := range s2.Properties {
-				if existingProp, exists := s1.Properties[k]; exists && existingProp.Value != nil && v.Value != nil {
-					existingProp.Value = MergeSchemas(existingProp.Value, v.Value)
+				if existingProp, exists := s1.Properties[k]; exists && existingProp != nil && v != nil {
+					s1.Properties[k] = MergeSchemas(existingProp, v)
 				} else {
 					s1.Properties[k] = v
 				}
@@ -529,10 +559,8 @@ func MergeSchemas(s1, s2 *openapi3.Schema) *openapi3.Schema {
 			return s1
 		}
 
-		if s1.Type.Includes("array") && s2.Type.Includes("array") && s1.Items != nil && s2.Items != nil &&
-			s1.Items.Value != nil &&
-			s2.Items.Value != nil {
-			s1.Items.Value = MergeSchemas(s1.Items.Value, s2.Items.Value)
+		if s1.IsType("array") && s2.IsType("array") && s1.Items != nil && s2.Items != nil {
+			s1.Items = MergeSchemas(s1.Items, s2.Items)
 			return s1
 		}
 	}
@@ -540,67 +568,70 @@ func MergeSchemas(s1, s2 *openapi3.Schema) *openapi3.Schema {
 	return s1
 }
 
-func inferSchemaFromJSON(data []byte) *openapi3.Schema {
+func inferSchemaFromJSON(data []byte) *openapi.Schema {
 	var raw any
 	if err := json.Unmarshal(data, &raw); err != nil {
-		return openapi3.NewStringSchema()
+		return &openapi.Schema{Type: openapi.TypeArray{"string"}}
 	}
 
 	return valueToSchema(raw)
 }
 
-func valueToSchema(v any) *openapi3.Schema {
+func valueToSchema(v any) *openapi.Schema {
 	if v == nil {
-		return openapi3.NewStringSchema()
+		return &openapi.Schema{Type: openapi.TypeArray{"string"}}
 	}
 
 	switch val := v.(type) {
 	case bool:
-		return openapi3.NewBoolSchema()
+		return &openapi.Schema{Type: openapi.TypeArray{"boolean"}}
 	case float64:
 		if val == float64(int64(val)) {
-			return openapi3.NewInt64Schema()
+			return &openapi.Schema{Type: openapi.TypeArray{"integer"}, Format: "int64"}
 		}
 
-		return openapi3.NewFloat64Schema()
+		return &openapi.Schema{Type: openapi.TypeArray{"number"}, Format: "double"}
 
 	case string:
 		if _, err := time.Parse(time.RFC3339, val); err == nil && len(val) >= 19 {
-			return openapi3.NewDateTimeSchema()
+			return &openapi.Schema{Type: openapi.TypeArray{"string"}, Format: "date-time"}
 		}
 
-		return openapi3.NewStringSchema()
+		return &openapi.Schema{Type: openapi.TypeArray{"string"}}
 
 	case []any:
-		arr := openapi3.NewArraySchema()
+		arr := &openapi.Schema{Type: openapi.TypeArray{"array"}}
 		if len(val) > 0 {
-			arr.Items = &openapi3.SchemaRef{Value: valueToSchema(val[0])}
+			arr.Items = valueToSchema(val[0])
 		} else {
-			arr.Items = &openapi3.SchemaRef{Value: openapi3.NewStringSchema()}
+			arr.Items = &openapi.Schema{Type: openapi.TypeArray{"string"}}
 		}
 
 		return arr
 
 	case map[string]any:
-		obj := openapi3.NewObjectSchema()
+		obj := &openapi.Schema{
+			Type:       openapi.TypeArray{"object"},
+			Properties: make(map[string]*openapi.Schema),
+		}
 
 		keys := generic.Keys(val)
 		slices.Sort(keys)
 
 		for _, k := range keys {
-			obj.Properties[k] = &openapi3.SchemaRef{Value: valueToSchema(val[k])}
+			obj.Properties[k] = valueToSchema(val[k])
 		}
 
 		return obj
 
 	default:
-		return openapi3.NewStringSchema()
+		return &openapi.Schema{Type: openapi.TypeArray{"string"}}
 	}
 }
 
 // UnifyComponentsSchemas deduplicates identical schemas in Components.Schemas
 // by mapping structurally equivalent models to a single unified canonical DTO.
-func UnifyComponentsSchemas(doc *openapi3.T) {
+func UnifyComponentsSchemas(doc *openapi.Document) {
 	if doc == nil || doc.Components == nil || len(doc.Components.Schemas) <= 1 {
 		return
 	}
@@ -617,12 +648,12 @@ func UnifyComponentsSchemas(doc *openapi3.T) {
 	slices.Sort(names)
 
 	for _, name := range names {
-		ref := doc.Components.Schemas[name]
-		if ref == nil || ref.Value == nil || len(ref.Value.Properties) < 2 {
+		schema := doc.Components.Schemas[name]
+		if schema == nil || len(schema.Properties) < 2 {
 			continue
 		}
 
-		sig := computeSchemaFingerprint(ref.Value)
+		sig := computeSchemaFingerprint(schema)
 		if sig == "" {
 			continue
 		}
@@ -652,27 +683,31 @@ func UnifyComponentsSchemas(doc *openapi3.T) {
 
 	// Re-point all references in paths
 	if doc.Paths != nil {
-		for _, pathItem := range doc.Paths.Map() {
+		for _, pathItem := range doc.Paths {
 			if pathItem == nil {
 				continue
 			}
 
-			for _, op := range pathItem.Operations() {
+			for _, op := range pathItem.OperationsMap() {
 				if op == nil {
 					continue
 				}
 
-				if op.RequestBody != nil && op.RequestBody.Value != nil {
-					for _, media := range op.RequestBody.Value.Content {
-						rewriteSchemaRef(media.Schema, replacements)
+				if op.RequestBody != nil {
+					for _, media := range op.RequestBody.Content {
+						if media != nil {
+							rewriteSchemaRef(media.Schema, replacements)
+						}
 					}
 				}
 
 				if op.Responses != nil {
-					for _, respRef := range op.Responses.Map() {
-						if respRef != nil && respRef.Value != nil {
-							for _, media := range respRef.Value.Content {
-								rewriteSchemaRef(media.Schema, replacements)
+					for _, resp := range op.Responses {
+						if resp != nil {
+							for _, media := range resp.Content {
+								if media != nil {
+									rewriteSchemaRef(media.Schema, replacements)
+								}
 							}
 						}
 					}
@@ -682,7 +717,7 @@ func UnifyComponentsSchemas(doc *openapi3.T) {
 	}
 }
 
-func computeSchemaFingerprint(s *openapi3.Schema) string {
+func computeSchemaFingerprint(s *openapi.Schema) string {
 	if s == nil || len(s.Properties) == 0 {
 		return ""
 	}
@@ -695,8 +730,8 @@ func computeSchemaFingerprint(s *openapi3.Schema) string {
 		prop := s.Properties[k]
 
 		typeStr := "unknown"
-		if prop != nil && prop.Value != nil && prop.Value.Type != nil && len(*prop.Value.Type) > 0 {
-			typeStr = (*prop.Value.Type)[0]
+		if prop != nil && len(prop.Type) > 0 {
+			typeStr = prop.Type.Primary()
 		}
 
 		sb.WriteString(k)
@@ -708,28 +743,26 @@ func computeSchemaFingerprint(s *openapi3.Schema) string {
 	return sb.String()
 }
 
-func rewriteSchemaRef(ref *openapi3.SchemaRef, replacements map[string]string) {
-	if ref == nil {
+func rewriteSchemaRef(s *openapi.Schema, replacements map[string]string) {
+	if s == nil {
 		return
 	}
 
-	if ref.Ref != "" {
+	if s.Ref != "" {
 		const prefix = "#/components/schemas/"
-		if strings.HasPrefix(ref.Ref, prefix) {
-			oldName := strings.TrimPrefix(ref.Ref, prefix)
+		if strings.HasPrefix(s.Ref, prefix) {
+			oldName := strings.TrimPrefix(s.Ref, prefix)
 			if canonical, ok := replacements[oldName]; ok {
-				ref.Ref = prefix + canonical
+				s.Ref = prefix + canonical
 			}
 		}
 	}
 
-	if ref.Value != nil {
-		if ref.Value.Items != nil {
-			rewriteSchemaRef(ref.Value.Items, replacements)
-		}
+	if s.Items != nil {
+		rewriteSchemaRef(s.Items, replacements)
+	}
 
-		for _, p := range ref.Value.Properties {
-			rewriteSchemaRef(p, replacements)
-		}
+	for _, p := range s.Properties {
+		rewriteSchemaRef(p, replacements)
 	}
 }
