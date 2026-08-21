@@ -58,7 +58,24 @@ func MergeSpecsWithMode(mode MergeMode, specs ...*Document) *Document {
 
 func mergeUnion(specs ...*Document) *Document {
 	root := cloneDocument(specs[0])
+	ensureRootContainers(root)
 
+	for _, s := range specs[1:] {
+		if s == nil {
+			continue
+		}
+
+		mergeServers(root, s.Servers)
+		mergeChannels(root, s.Channels)
+		mergeOperations(root, s.Operations)
+		mergeComponents(&root.Components, s.Components)
+		mergeTags(root, s.Tags)
+	}
+
+	return root
+}
+
+func ensureRootContainers(root *Document) {
 	if root.Servers == nil {
 		root.Servers = make(map[string]Server)
 	}
@@ -68,53 +85,47 @@ func mergeUnion(specs ...*Document) *Document {
 	if root.Operations == nil {
 		root.Operations = make(map[string]Operation)
 	}
-
 	initNilComponents(&root.Components)
+}
 
-	for _, s := range specs[1:] {
-		if s == nil {
-			continue
-		}
-
-		// 1. Merge Servers
-		for srvKey, srv := range s.Servers {
-			if _, exists := root.Servers[srvKey]; !exists {
-				root.Servers[srvKey] = srv
-			}
-		}
-
-		// 2. Merge Channels
-		for chKey, ch := range s.Channels {
-			if existing, exists := root.Channels[chKey]; exists {
-				mergeChannel(&existing, ch)
-				root.Channels[chKey] = existing
-			} else {
-				root.Channels[chKey] = ch
-			}
-		}
-
-		// 3. Merge Operations
-		for opKey, op := range s.Operations {
-			if existing, exists := root.Operations[opKey]; exists {
-				mergeOperation(&existing, op)
-				root.Operations[opKey] = existing
-			} else {
-				root.Operations[opKey] = op
-			}
-		}
-
-		// 4. Merge Components
-		mergeComponents(&root.Components, s.Components)
-
-		// 5. Merge Tags
-		for _, tag := range s.Tags {
-			if !hasTag(root.Tags, tag.Name) {
-				root.Tags = append(root.Tags, tag)
-			}
+func mergeServers(root *Document, incomingServers map[string]Server) {
+	for srvKey, srv := range incomingServers {
+		if _, exists := root.Servers[srvKey]; !exists {
+			root.Servers[srvKey] = srv
 		}
 	}
+}
 
-	return root
+func mergeChannels(root *Document, incomingChannels map[string]Channel) {
+	for chKey, ch := range incomingChannels {
+		existing, exists := root.Channels[chKey]
+		if exists {
+			mergeChannel(&existing, ch)
+			root.Channels[chKey] = existing
+			continue
+		}
+		root.Channels[chKey] = ch
+	}
+}
+
+func mergeOperations(root *Document, incomingOps map[string]Operation) {
+	for opKey, op := range incomingOps {
+		existing, exists := root.Operations[opKey]
+		if exists {
+			mergeOperation(&existing, op)
+			root.Operations[opKey] = existing
+			continue
+		}
+		root.Operations[opKey] = op
+	}
+}
+
+func mergeTags(root *Document, incomingTags []Tag) {
+	for _, tag := range incomingTags {
+		if !hasTag(root.Tags, tag.Name) {
+			root.Tags = append(root.Tags, tag)
+		}
+	}
 }
 
 func mergeIntersection(specs ...*Document) *Document {
@@ -123,22 +134,14 @@ func mergeIntersection(specs ...*Document) *Document {
 	for _, s := range specs[1:] {
 		// Filter channels
 		for chKey := range root.Channels {
-			if s.Channels == nil {
-				delete(root.Channels, chKey)
-				continue
-			}
-			if _, exists := s.Channels[chKey]; !exists {
+			if s.Channels == nil || !hasChannelKey(s.Channels, chKey) {
 				delete(root.Channels, chKey)
 			}
 		}
 
 		// Filter operations
 		for opKey := range root.Operations {
-			if s.Operations == nil {
-				delete(root.Operations, opKey)
-				continue
-			}
-			if _, exists := s.Operations[opKey]; !exists {
+			if s.Operations == nil || !hasOperationKey(s.Operations, opKey) {
 				delete(root.Operations, opKey)
 			}
 		}
@@ -147,16 +150,23 @@ func mergeIntersection(specs ...*Document) *Document {
 	return root
 }
 
+func hasChannelKey(channels map[string]Channel, key string) bool {
+	_, ok := channels[key]
+	return ok
+}
+
+func hasOperationKey(ops map[string]Operation, key string) bool {
+	_, ok := ops[key]
+	return ok
+}
+
 func mergeDifference(specs ...*Document) *Document {
 	root := cloneDocument(specs[0])
 
 	for _, s := range specs[1:] {
-		// Remove channels present in subsequent specs
 		for chKey := range s.Channels {
 			delete(root.Channels, chKey)
 		}
-
-		// Remove operations present in subsequent specs
 		for opKey := range s.Operations {
 			delete(root.Operations, opKey)
 		}
@@ -212,71 +222,42 @@ func mergeOperation(existing *Operation, incoming Operation) {
 }
 
 func mergeComponents(dst *Components, src Components) {
-	if src.Schemas != nil {
-		if dst.Schemas == nil {
-			dst.Schemas = make(map[string]Schema)
-		}
-		for k, v := range src.Schemas {
-			if _, exists := dst.Schemas[k]; !exists {
-				dst.Schemas[k] = v
-			}
-		}
-	}
+	mergeGenericMap(&dst.Schemas, src.Schemas)
+	mergeGenericMap(&dst.Messages, src.Messages)
+	mergeGenericMap(&dst.Parameters, src.Parameters)
+	mergeGenericMap(&dst.SecuritySchemes, src.SecuritySchemes)
+	mergeGenericMap(&dst.ServerVariables, src.ServerVariables)
+	mergeGenericMap(&dst.CorrelationIDs, src.CorrelationIDs)
+	mergeGenericMap(&dst.Replies, src.Replies)
+	mergeGenericMap(&dst.OperationTraits, src.OperationTraits)
+	mergeGenericMap(&dst.MessageTraits, src.MessageTraits)
+	mergeGenericMap(&dst.Tags, src.Tags)
+}
 
-	if src.Messages != nil {
-		if dst.Messages == nil {
-			dst.Messages = make(map[string]Message)
-		}
-		for k, v := range src.Messages {
-			if _, exists := dst.Messages[k]; !exists {
-				dst.Messages[k] = v
-			}
+func mergeGenericMap[K comparable, V any](dst *map[K]V, src map[K]V) {
+	if src == nil {
+		return
+	}
+	if *dst == nil {
+		*dst = make(map[K]V)
+	}
+	for k, v := range src {
+		if _, exists := (*dst)[k]; !exists {
+			(*dst)[k] = v
 		}
 	}
+}
 
-	if src.Parameters != nil {
-		if dst.Parameters == nil {
-			dst.Parameters = make(map[string]Parameter)
-		}
-		for k, v := range src.Parameters {
-			if _, exists := dst.Parameters[k]; !exists {
-				dst.Parameters[k] = v
-			}
-		}
-	}
+func hasTag(tags []Tag, name string) bool {
+	return slices.ContainsFunc(tags, func(t Tag) bool {
+		return t.Name == name
+	})
+}
 
-	if src.SecuritySchemes != nil {
-		if dst.SecuritySchemes == nil {
-			dst.SecuritySchemes = make(map[string]SecurityScheme)
-		}
-		for k, v := range src.SecuritySchemes {
-			if _, exists := dst.SecuritySchemes[k]; !exists {
-				dst.SecuritySchemes[k] = v
-			}
-		}
-	}
-
-	if src.OperationTraits != nil {
-		if dst.OperationTraits == nil {
-			dst.OperationTraits = make(map[string]Operation)
-		}
-		for k, v := range src.OperationTraits {
-			if _, exists := dst.OperationTraits[k]; !exists {
-				dst.OperationTraits[k] = v
-			}
-		}
-	}
-
-	if src.MessageTraits != nil {
-		if dst.MessageTraits == nil {
-			dst.MessageTraits = make(map[string]Message)
-		}
-		for k, v := range src.MessageTraits {
-			if _, exists := dst.MessageTraits[k]; !exists {
-				dst.MessageTraits[k] = v
-			}
-		}
-	}
+func hasRef(refs []RefObject, ref string) bool {
+	return slices.ContainsFunc(refs, func(r RefObject) bool {
+		return r.Ref == ref
+	})
 }
 
 func cloneDocument(src *Document) *Document {
@@ -285,67 +266,33 @@ func cloneDocument(src *Document) *Document {
 	}
 
 	d := *src
+	d.Servers = maps.Clone(src.Servers)
+	d.Channels = maps.Clone(src.Channels)
+	d.Operations = maps.Clone(src.Operations)
+	d.Tags = slices.Clone(src.Tags)
 
-	if src.Servers != nil {
-		d.Servers = maps.Clone(src.Servers)
+	d.Components = Components{
+		Messages:        maps.Clone(src.Components.Messages),
+		Schemas:         maps.Clone(src.Components.Schemas),
+		Parameters:      maps.Clone(src.Components.Parameters),
+		SecuritySchemes: maps.Clone(src.Components.SecuritySchemes),
+		ServerVariables: maps.Clone(src.Components.ServerVariables),
+		CorrelationIDs:  maps.Clone(src.Components.CorrelationIDs),
+		Replies:         maps.Clone(src.Components.Replies),
+		OperationTraits: maps.Clone(src.Components.OperationTraits),
+		MessageTraits:   maps.Clone(src.Components.MessageTraits),
+		Tags:            maps.Clone(src.Components.Tags),
 	}
-	if src.Channels != nil {
-		d.Channels = maps.Clone(src.Channels)
-	}
-	if src.Operations != nil {
-		d.Operations = maps.Clone(src.Operations)
-	}
-	if src.Tags != nil {
-		d.Tags = slices.Clone(src.Tags)
-	}
-
-	d.Components = cloneComponents(src.Components)
 
 	return &d
 }
 
-func cloneComponents(src Components) Components {
-	c := src
-	if src.Schemas != nil {
-		c.Schemas = maps.Clone(src.Schemas)
-	}
-	if src.Messages != nil {
-		c.Messages = maps.Clone(src.Messages)
-	}
-	if src.Parameters != nil {
-		c.Parameters = maps.Clone(src.Parameters)
-	}
-	if src.SecuritySchemes != nil {
-		c.SecuritySchemes = maps.Clone(src.SecuritySchemes)
-	}
-	if src.ServerVariables != nil {
-		c.ServerVariables = maps.Clone(src.ServerVariables)
-	}
-	if src.CorrelationIDs != nil {
-		c.CorrelationIDs = maps.Clone(src.CorrelationIDs)
-	}
-	if src.Replies != nil {
-		c.Replies = maps.Clone(src.Replies)
-	}
-	if src.OperationTraits != nil {
-		c.OperationTraits = maps.Clone(src.OperationTraits)
-	}
-	if src.MessageTraits != nil {
-		c.MessageTraits = maps.Clone(src.MessageTraits)
-	}
-	if src.Tags != nil {
-		c.Tags = maps.Clone(src.Tags)
-	}
-
-	return c
-}
-
 func initNilComponents(c *Components) {
-	if c.Schemas == nil {
-		c.Schemas = make(map[string]Schema)
-	}
 	if c.Messages == nil {
 		c.Messages = make(map[string]Message)
+	}
+	if c.Schemas == nil {
+		c.Schemas = make(map[string]Schema)
 	}
 	if c.Parameters == nil {
 		c.Parameters = make(map[string]Parameter)
@@ -353,22 +300,22 @@ func initNilComponents(c *Components) {
 	if c.SecuritySchemes == nil {
 		c.SecuritySchemes = make(map[string]SecurityScheme)
 	}
+	if c.ServerVariables == nil {
+		c.ServerVariables = make(map[string]ServerVar)
+	}
+	if c.CorrelationIDs == nil {
+		c.CorrelationIDs = make(map[string]CorrelationID)
+	}
+	if c.Replies == nil {
+		c.Replies = make(map[string]OperationReply)
+	}
 	if c.OperationTraits == nil {
 		c.OperationTraits = make(map[string]Operation)
 	}
 	if c.MessageTraits == nil {
 		c.MessageTraits = make(map[string]Message)
 	}
-}
-
-func hasTag(tags []Tag, name string) bool {
-	return generic.Any(tags, func(t Tag) bool {
-		return t.Name == name
-	})
-}
-
-func hasRef(refs []RefObject, ref string) bool {
-	return generic.Any(refs, func(r RefObject) bool {
-		return r.Ref == ref
-	})
+	if c.Tags == nil {
+		c.Tags = make(map[string]Tag)
+	}
 }
