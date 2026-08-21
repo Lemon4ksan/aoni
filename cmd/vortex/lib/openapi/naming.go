@@ -7,7 +7,10 @@ package openapi
 import (
 	"fmt"
 	"regexp"
+	"slices"
 	"strings"
+
+	"github.com/lemon4ksan/foundation/generic"
 )
 
 var (
@@ -16,6 +19,8 @@ var (
 	reVersionPath    = regexp.MustCompile(`(?i)^v[0-9]+$`)
 	reTrailingVerb   = regexp.MustCompile(`(?i)_(get|post|put|delete|patch|options|head)$`)
 )
+
+var commonVerbs = []string{"Get", "Create", "Update", "Patch", "Delete", "List", "Fetch", "Find", "Head", "Options"}
 
 var initialisms = map[string]bool{
 	"ACL": true, "API": true, "ASCII": true,
@@ -58,30 +63,30 @@ func isHexHash(s string) bool {
 // SanitizeMethodName transforms raw operation IDs or URL routes into clean, idiomatic Go method names.
 func SanitizeMethodName(rawOpID, httpMethod, rawPath, serviceName string) string {
 	cleaned := strings.TrimSpace(rawOpID)
+	if cleaned == "" {
+		return DeriveMethodNameFromRoute(httpMethod, rawPath)
+	}
 
-	if cleaned != "" {
-		if reUglyVerbPrefix.MatchString(cleaned) && len(cleaned) > 5 {
-			cleaned = reUglyVerbPrefix.ReplaceAllString(cleaned, "Get")
+	if reUglyVerbPrefix.MatchString(cleaned) && len(cleaned) > 5 {
+		cleaned = reUglyVerbPrefix.ReplaceAllString(cleaned, "Get")
+	}
+
+	if serviceName != "" {
+		trimmedSvc := strings.TrimSuffix(strings.TrimSuffix(serviceName, "API"), "Service")
+		cleaned = strings.TrimPrefix(cleaned, serviceName+"_")
+		cleaned = strings.TrimPrefix(cleaned, serviceName)
+		if trimmedSvc != "" {
+			cleaned = strings.TrimPrefix(cleaned, trimmedSvc+"_")
+			cleaned = strings.TrimPrefix(cleaned, trimmedSvc)
 		}
+	}
 
-		if serviceName != "" {
-			trimmedSvc := strings.TrimSuffix(serviceName, "API")
-			trimmedSvc = strings.TrimSuffix(trimmedSvc, "Service")
-			cleaned = strings.TrimPrefix(cleaned, serviceName+"_")
-			cleaned = strings.TrimPrefix(cleaned, serviceName)
-			if trimmedSvc != "" {
-				cleaned = strings.TrimPrefix(cleaned, trimmedSvc+"_")
-				cleaned = strings.TrimPrefix(cleaned, trimmedSvc)
-			}
-		}
+	cleaned = reVersionSuffix.ReplaceAllString(cleaned, "")
+	cleaned = reTrailingVerb.ReplaceAllString(cleaned, "")
 
-		cleaned = reVersionSuffix.ReplaceAllString(cleaned, "")
-		cleaned = reTrailingVerb.ReplaceAllString(cleaned, "")
-
-		name := toPascalCase(cleaned)
-		if len(name) > 0 {
-			return name
-		}
+	name := toPascalCase(cleaned)
+	if len(name) > 0 {
+		return name
 	}
 
 	return DeriveMethodNameFromRoute(httpMethod, rawPath)
@@ -108,21 +113,7 @@ func DeriveMethodNameFromRoute(httpMethod, rawPath string) string {
 	}
 
 	verb := strings.ToUpper(httpMethod)
-	prefix := "Get"
-	switch verb {
-	case "POST":
-		prefix = "Create"
-	case "PUT":
-		prefix = "Update"
-	case "PATCH":
-		prefix = "Patch"
-	case "DELETE":
-		prefix = "Delete"
-	case "HEAD":
-		prefix = "Head"
-	case "OPTIONS":
-		prefix = "Options"
-	}
+	prefix := mapHTTPVerbPrefix(verb)
 
 	if len(significant) == 0 {
 		return prefix + "Root"
@@ -131,13 +122,30 @@ func DeriveMethodNameFromRoute(httpMethod, rawPath string) string {
 	joined := strings.Join(significant, "_")
 	pascal := toPascalCase(joined)
 
-	for _, v := range []string{"Get", "Create", "Update", "Patch", "Delete", "List", "Fetch", "Find", "Head", "Options"} {
-		if strings.HasPrefix(pascal, v) {
-			return pascal
-		}
+	if slices.ContainsFunc(commonVerbs, func(v string) bool { return strings.HasPrefix(pascal, v) }) {
+		return pascal
 	}
 
 	return prefix + pascal
+}
+
+func mapHTTPVerbPrefix(verb string) string {
+	switch verb {
+	case "POST":
+		return "Create"
+	case "PUT":
+		return "Update"
+	case "PATCH":
+		return "Patch"
+	case "DELETE":
+		return "Delete"
+	case "HEAD":
+		return "Head"
+	case "OPTIONS":
+		return "Options"
+	default:
+		return "Get"
+	}
 }
 
 func buildMethodName(pathStr, httpMethod string, op *Operation, used map[string]int) string {
@@ -160,7 +168,6 @@ func buildMethodName(pathStr, httpMethod string, op *Operation, used map[string]
 	}
 
 	used[base] = 1
-
 	return base
 }
 
@@ -184,48 +191,46 @@ func toCamelCase(s string) string {
 		return ""
 	}
 
-	var res string
 	for init := range initialisms {
 		if strings.HasPrefix(pascal, init) && len(pascal) > len(init) {
-			res = strings.ToLower(init) + pascal[len(init):]
-			break
+			return sanitizeKeywordName(strings.ToLower(init) + pascal[len(init):])
 		}
 	}
 
-	if res == "" {
-		res = strings.ToLower(pascal[:1]) + pascal[1:]
+	return sanitizeKeywordName(strings.ToLower(pascal[:1]) + pascal[1:])
+}
+
+func sanitizeKeywordName(res string) string {
+	if !goKeywords[res] {
+		return res
 	}
 
-	if goKeywords[res] {
-		switch res {
-		case "type":
-			return "typ"
-		case "select":
-			return "selected"
-		case "range":
-			return "rng"
-		case "map":
-			return "mapping"
-		case "func":
-			return "fn"
-		case "var":
-			return "variable"
-		case "const":
-			return "constant"
-		case "interface":
-			return "iface"
-		case "package":
-			return "pkg"
-		case "import":
-			return "imp"
-		case "default":
-			return "def"
-		default:
-			return res + "Param"
-		}
+	switch res {
+	case "type":
+		return "typ"
+	case "select":
+		return "selected"
+	case "range":
+		return "rng"
+	case "map":
+		return "mapping"
+	case "func":
+		return "fn"
+	case "var":
+		return "variable"
+	case "const":
+		return "constant"
+	case "interface":
+		return "iface"
+	case "package":
+		return "pkg"
+	case "import":
+		return "imp"
+	case "default":
+		return "def"
+	default:
+		return res + "Param"
 	}
-
-	return res
 }
 
 func splitWords(s string) []string {
@@ -241,7 +246,6 @@ func splitWords(s string) []string {
 				words = append(words, cur.String())
 				cur.Reset()
 			}
-
 			continue
 		}
 
@@ -266,10 +270,6 @@ func splitWords(s string) []string {
 }
 
 func toSnakeCase(s string) string {
-	words := splitWords(s)
-	for i, w := range words {
-		words[i] = strings.ToLower(w)
-	}
-
+	words := generic.Map(splitWords(s), strings.ToLower)
 	return strings.Join(words, "_")
 }

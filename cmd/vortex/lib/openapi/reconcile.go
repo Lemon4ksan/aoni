@@ -16,6 +16,8 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/lemon4ksan/foundation/generic"
+
 	"github.com/lemon4ksan/aoni/cmd/vortex/lib/ir"
 	"github.com/lemon4ksan/aoni/cmd/vortex/lib/parser"
 )
@@ -151,12 +153,9 @@ func (e *MergeEngine) ReconcileService(
 	var existingSvc *ir.ServiceIR
 	if existingRoot != nil && len(existingRoot.Services) > 0 {
 		if cfg.ServiceName != "" {
-			for _, s := range existingRoot.Services {
-				if strings.EqualFold(s.Name, cfg.ServiceName) {
-					existingSvc = s
-					break
-				}
-			}
+			existingSvc, _ = generic.Find(existingRoot.Services, func(s *ir.ServiceIR) bool {
+				return strings.EqualFold(s.Name, cfg.ServiceName)
+			})
 		}
 
 		if existingSvc == nil {
@@ -858,11 +857,14 @@ func normalizeRoutePath(p string) string {
 	return "/" + strings.Join(parts, "/")
 }
 
-func isManagedDirective(line string) bool {
-	trimmed := strings.TrimSpace(line)
-	trimmed = strings.TrimPrefix(trimmed, "//")
+var managedDirectives = []string{
+	"@get", "@post", "@put", "@delete", "@patch", "@head", "@options", "@connect", "@trace",
+	"@source", "@version", "@bind", "@unwrap", "@call", "@idempotent", "@coalesce", "@etag",
+	"@cache", "@sign", "@json", "@since", "@form", "@query", "@deprecated", "@header",
+}
 
-	trimmed = strings.TrimSpace(trimmed)
+func isManagedDirective(line string) bool {
+	trimmed := strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(line), "//"))
 	if !strings.HasPrefix(trimmed, "@") {
 		return false
 	}
@@ -872,13 +874,5 @@ func isManagedDirective(line string) bool {
 		return false
 	}
 
-	verb := strings.ToLower(fields[0])
-	switch verb {
-	case "@get", "@post", "@put", "@delete", "@patch", "@head", "@options", "@connect", "@trace",
-		"@source", "@version", "@bind", "@unwrap", "@call", "@idempotent", "@coalesce", "@etag",
-		"@cache", "@sign", "@json", "@since", "@form", "@query", "@deprecated", "@header":
-		return true
-	default:
-		return false
-	}
+	return slices.Contains(managedDirectives, strings.ToLower(fields[0]))
 }

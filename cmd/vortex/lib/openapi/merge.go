@@ -97,12 +97,9 @@ func mergeServers(root *Document, servers []Server) {
 }
 
 func hasServerURL(servers []Server, targetURL string) bool {
-	for _, s := range servers {
-		if s.URL == targetURL {
-			return true
-		}
-	}
-	return false
+	return slices.ContainsFunc(servers, func(s Server) bool {
+		return s.URL == targetURL
+	})
 }
 
 func mergeSchemas(root *Document, incomingComp *Components) {
@@ -239,16 +236,13 @@ func mergeIntersection(specs ...*Document) *Document {
 }
 
 func isOpInAllSpecs(specs []*Document, pathStr, method string) bool {
-	for _, other := range specs {
+	return generic.All(specs, func(other *Document) bool {
 		if other == nil || other.Paths == nil {
 			return false
 		}
 		item := other.Paths[pathStr]
-		if item == nil || getPathItemOp(item, method) == nil {
-			return false
-		}
-	}
-	return true
+		return item != nil && getPathItemOp(item, method) != nil
+	})
 }
 
 func mergeOpFromAllSpecs(specs []*Document, root *Document, op *Operation, pathStr, method string) {
@@ -379,12 +373,9 @@ func mergeOperationParams(existing *Operation, incomingParams []*Parameter) {
 }
 
 func hasParam(params []*Parameter, inLocation, name string) bool {
-	for _, ep := range params {
-		if ep != nil && ep.In == inLocation && ep.Name == name {
-			return true
-		}
-	}
-	return false
+	return slices.ContainsFunc(params, func(ep *Parameter) bool {
+		return ep != nil && ep.In == inLocation && ep.Name == name
+	})
 }
 
 func mergeOperationRequestBody(existing *Operation, incomingReqBody *RequestBody) {

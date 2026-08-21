@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/lemon4ksan/foundation/generic"
 	"gopkg.in/yaml.v3"
 )
 
@@ -204,8 +205,6 @@ func normalizeSwaggerOperations(doc *Document) {
 }
 
 func normalizeOperationParameters(op *Operation) {
-	var nonBodyParams []*Parameter
-
 	for _, p := range op.Parameters {
 		if p == nil {
 			continue
@@ -233,10 +232,11 @@ func normalizeOperationParameters(op *Operation) {
 			}
 		}
 		normalizeSchemaRefs(p.Schema)
-		nonBodyParams = append(nonBodyParams, p)
 	}
 
-	op.Parameters = nonBodyParams
+	op.Parameters = generic.Filter(op.Parameters, func(p *Parameter) bool {
+		return p != nil && p.In != "body"
+	})
 }
 
 func normalizeOperationResponses(op *Operation) {
