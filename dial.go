@@ -65,7 +65,7 @@ func (c *Client) DialContext(ctx context.Context, network, addr string) (net.Con
 // DialTLS establishes an encrypted L7 TLS or uTLS connection over L4 TCP.
 // It negotiates ALPN protocols ("h2", "http/1.1"), applies browser ClientHello emulation
 // (Chrome, Firefox, Safari), performs Encrypted Client Hello (ECH, RFC 9484) resolution,
-// supports 0-RTT Early Data (RFC 8446/9001), and validates SPKI certificate pins.
+// supports 0-RTT Early Data (RFC 8446/9001/9846), and validates SPKI certificate pins.
 //
 // Fingerprint Precedence:
 // If multiple TLS fingerprint options are configured, transport.UniversalDialer applies them

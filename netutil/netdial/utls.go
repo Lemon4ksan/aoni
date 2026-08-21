@@ -22,6 +22,7 @@ import (
 	"github.com/lemon4ksan/foundation/net/dns/wire"
 	utls "github.com/refraction-networking/utls"
 
+	"github.com/lemon4ksan/aoni/fingerprint/grease"
 	"github.com/lemon4ksan/aoni/fingerprint/ja4"
 	"github.com/lemon4ksan/aoni/netutil"
 	"github.com/lemon4ksan/aoni/netutil/cert"
@@ -228,7 +229,7 @@ func applyCertCompression(uConn *utls.UConn, algos []cert.CompressionAlgorithm) 
 
 	utlsAlgos := make([]utls.CertCompressionAlgo, len(algos))
 	for i, a := range algos {
-		utlsAlgos[i] = a.ToUTLS()
+		utlsAlgos[i] = cert.ToUTLS(a)
 	}
 
 	for _, ext := range uConn.Extensions {
@@ -408,9 +409,15 @@ func matchHostPattern(host, pinDomain string) bool {
 
 func parsePin(pin string) ([]byte, error) {
 	pin = strings.TrimSpace(pin)
-	if strings.HasPrefix(strings.ToLower(pin), "sha256/") {
+	lower := strings.ToLower(pin)
+
+	if strings.HasPrefix(lower, "pin-sha256=") {
+		pin = strings.TrimPrefix(pin, "pin-sha256=")
+	} else if strings.HasPrefix(lower, "sha256/") {
 		pin = pin[7:]
 	}
+
+	pin = strings.Trim(pin, "\"")
 
 	if b, err := base64.StdEncoding.DecodeString(pin); err == nil && len(b) == 32 {
 		return b, nil
@@ -464,8 +471,8 @@ func ExtractJA4FromUConn(uConn *utls.UConn) ja4.Report {
 	report := ja4.Report{
 		JA4:         fingerprint,
 		Protocol:    "t",
-		CipherCount: len(ja4.FilterGREASE(hello.CipherSuites)),
-		ExtCount:    len(ja4.FilterGREASE(extensions)),
+		CipherCount: len(grease.Filter(hello.CipherSuites)),
+		ExtCount:    len(grease.Filter(extensions)),
 		SNI:         sniStr,
 		ALPN:        alpnToken,
 	}

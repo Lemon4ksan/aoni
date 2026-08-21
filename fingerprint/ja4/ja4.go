@@ -15,13 +15,14 @@ import (
 	"sync"
 
 	"github.com/lemon4ksan/foundation/silicon/bytesconv"
+
+	"github.com/lemon4ksan/aoni/fingerprint/grease"
 )
 
 // ErrInvalidJA4Input indicates corrupted or truncated ClientHello byte payloads.
 var ErrInvalidJA4Input = errors.New("ja4: invalid input payload for fingerprint computation")
 
 const (
-	hashLen  = 12
 	hexTable = "0123456789abcdef"
 
 	extSNI                 uint16 = 0x0000
@@ -66,12 +67,6 @@ func releaseBuffer(buf *bytes.Buffer) {
 	}
 }
 
-// IsGREASE reports whether v matches a reserved TLS GREASE value (RFC 8701).
-// Executed in 1 CPU cycle using zero-alloc bitwise mask verification.
-func IsGREASE(v uint16) bool {
-	return (v&0x0f0f) == 0x0a0a && byte(v) == byte(v>>8)
-}
-
 // Report holds computed TLS (JA4) and HTTP (JA4H) fingerprints alongside TLS metadata.
 type Report struct {
 	JA4         string
@@ -98,10 +93,10 @@ func ComputeJA4(
 		sniChar = 'd'
 	}
 
-	filteredCiphers := FilterGREASE(cipherSuites)
+	filteredCiphers := grease.Filter(cipherSuites)
 	cipherCount := min(len(filteredCiphers), 99)
 
-	filteredExts := FilterGREASE(extensions)
+	filteredExts := grease.Filter(extensions)
 	extCount := min(len(filteredExts), 99)
 
 	alpn := computeALPN(alpnProtocols)
@@ -503,21 +498,9 @@ func writeHex4(buf *bytes.Buffer, v uint16) {
 	buf.WriteByte(hexTable[v&0x0f])
 }
 
-// FilterGREASE removes reserved TLS GREASE values from vals.
-func FilterGREASE(vals []uint16) []uint16 {
-	result := make([]uint16, 0, len(vals))
-	for _, v := range vals {
-		if !IsGREASE(v) {
-			result = append(result, v)
-		}
-	}
-
-	return result
-}
-
 // computeVersion extracts the highest non-GREASE TLS version code.
 func computeVersion(supportedVersions []uint16) string {
-	filtered := FilterGREASE(supportedVersions)
+	filtered := grease.Filter(supportedVersions)
 	if len(filtered) == 0 {
 		return "00"
 	}

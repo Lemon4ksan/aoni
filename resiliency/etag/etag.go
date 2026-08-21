@@ -3,130 +3,47 @@
 // license that can be found in the LICENSE file.
 
 // Package etag implements RFC 9111 conditional HTTP caching and 304 Not Modified automation.
+// Core implementation is located in [github.com/lemon4ksan/foundation/net/http/etag].
 package etag
 
 import (
-	"bytes"
-	"io"
-	"net/http"
-	"sync"
-
-	"github.com/lemon4ksan/foundation/generic"
+	fetag "github.com/lemon4ksan/foundation/net/http/etag"
 )
 
-type cachedETagEntry struct {
-	etag   string
-	status string
-	proto  string
-	header http.Header
-	body   []byte
-}
-
-const DefaultMaxEntries = 1024
+const DefaultMaxEntries = fetag.DefaultMaxEntries
 
 // Automaton manages ETag recording, If-None-Match header injection, and 304 body reconstruction.
-type Automaton struct {
-	mu         sync.RWMutex
-	maxEntries int
-	entries    map[string]cachedETagEntry
-}
+type Automaton = fetag.Automaton
 
 // NewAutomaton creates a new RFC 9111 [Automaton] instance with default capacity (1024).
 func NewAutomaton() *Automaton {
-	return NewAutomatonWithCapacity(DefaultMaxEntries)
+	return fetag.NewAutomaton()
 }
 
 // NewAutomatonWithCapacity creates a new RFC 9111 [Automaton] with the specified capacity limit.
 func NewAutomatonWithCapacity(maxEntries int) *Automaton {
-	if maxEntries <= 0 {
-		maxEntries = DefaultMaxEntries
-	}
-
-	return &Automaton{
-		maxEntries: maxEntries,
-		entries:    make(map[string]cachedETagEntry, maxEntries),
-	}
+	return fetag.NewAutomatonWithCapacity(maxEntries)
 }
 
 // DefaultAutomaton is the package-level shared ETag automaton instance.
-var DefaultAutomaton = NewAutomaton()
+var DefaultAutomaton = fetag.DefaultAutomaton
 
-// Record stores the ETag and response payload bytes for the specified cache key.
-func (a *Automaton) Record(key, etagVal string, resp *http.Response, bodyBytes []byte) {
-	if etagVal == "" || len(bodyBytes) == 0 {
-		return
-	}
-
-	a.mu.Lock()
-	defer a.mu.Unlock()
-
-	// Bound memory: evict an entry if capacity reached
-	if len(a.entries) >= a.maxEntries {
-		for k := range a.entries {
-			delete(a.entries, k)
-			break
-		}
-	}
-
-	a.entries[key] = cachedETagEntry{
-		etag:   etagVal,
-		status: resp.Status,
-		proto:  resp.Proto,
-		header: resp.Header.Clone(),
-		body:   bodyBytes,
-	}
+// StrongMatch checks whether two ETags match under strong comparison semantics (RFC 7232 §2.3.2).
+func StrongMatch(a, b string) bool {
+	return fetag.StrongMatch(a, b)
 }
 
-// GetETag returns the stored ETag for key, or empty string if not found.
-func (a *Automaton) GetETag(key string) string {
-	a.mu.RLock()
-	defer a.mu.RUnlock()
-
-	return a.entries[key].etag
+// WeakMatch checks whether two ETags match under weak comparison semantics (RFC 7232 §2.3.2).
+func WeakMatch(a, b string) bool {
+	return fetag.WeakMatch(a, b)
 }
 
-// Reconstruct304 returns a 200 OK http.Response populated with the previously cached payload bytes for key.
-// Returns nil if key is not found in the automaton cache.
-func (a *Automaton) Reconstruct304(key string) *http.Response {
-	a.mu.RLock()
-	entry, ok := a.entries[key]
-	a.mu.RUnlock()
-
-	if !ok {
-		return nil
-	}
-
-	return &http.Response{
-		StatusCode:    http.StatusOK,
-		Status:        "200 OK",
-		Proto:         entry.proto,
-		Header:        entry.header.Clone(),
-		Body:          io.NopCloser(bytes.NewReader(entry.body)),
-		ContentLength: int64(len(entry.body)),
-	}
+// IsWeak reports whether etagVal is a weak entity tag.
+func IsWeak(etagVal string) bool {
+	return fetag.IsWeak(etagVal)
 }
 
-// GetETagOptional returns the stored ETag wrapped in generic.Optional.
-func (a *Automaton) GetETagOptional(key string) generic.Optional[string] {
-	a.mu.RLock()
-	defer a.mu.RUnlock()
-
-	entry, ok := a.entries[key]
-	if !ok || entry.etag == "" {
-		return generic.None[string]()
-	}
-
-	return generic.Some(entry.etag)
-}
-
-// Reconstruct304Optional returns a reconstructed 200 OK http.Response wrapped in generic.Optional.
-//
-//nolint:bodyclose // Caller is responsible for closing the reconstructed response body.
-func (a *Automaton) Reconstruct304Optional(key string) generic.Optional[*http.Response] {
-	resp := a.Reconstruct304(key)
-	if resp == nil {
-		return generic.None[*http.Response]()
-	}
-
-	return generic.Some(resp)
+// Normalize strips whitespace and any leading "W/" or "w/" weak prefix.
+func Normalize(etagVal string) string {
+	return fetag.Normalize(etagVal)
 }

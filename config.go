@@ -710,7 +710,7 @@ type FingerprintConfig struct {
 	// AutoECH automatically resolves Encrypted Client Hello (ECH) keys via DNS HTTPS (Type 65 / RFC 9460) records.
 	AutoECH bool
 
-	// Enable0RTT enables TLS 1.3 / QUIC Early Data session resumption (RFC 8446 / RFC 9001).
+	// Enable0RTT enables TLS 1.3 / QUIC Early Data session resumption (RFC 8446 / RFC 9001 / RFC 9846).
 	//
 	// CAUTION: Replay Attack Vulnerability:
 	// 0-RTT data is susceptible to network replay attacks. Use primarily for idempotent GET/HEAD requests.

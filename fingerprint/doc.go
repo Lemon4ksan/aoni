@@ -10,6 +10,7 @@
 //
 // # Subpackages
 //
+//   - [github.com/lemon4ksan/aoni/fingerprint/grease]: RFC 8701 GREASE reserved values, identification, and filtering.
 //   - [github.com/lemon4ksan/aoni/fingerprint/h2]: HTTP/2 SETTINGS, PRIORITY, and HPACK header serialization.
 //   - [github.com/lemon4ksan/aoni/fingerprint/ja4]: Pure-Go JA4 and JA4H fingerprint calculation algorithms.
 //   - [github.com/lemon4ksan/aoni/fingerprint/p0f]: TCP/IP stack fingerprint signatures (TTL, DF, Window Size).

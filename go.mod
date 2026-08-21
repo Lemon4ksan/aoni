@@ -36,3 +36,5 @@ require (
 	github.com/pmezard/go-difflib v1.0.1-0.20181226105442-5d4384ee4fb2 // indirect
 	github.com/refraction-networking/utls v1.8.2
 )
+
+replace github.com/lemon4ksan/foundation => ../foundation

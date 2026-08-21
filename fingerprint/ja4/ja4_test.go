@@ -11,23 +11,25 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/lemon4ksan/aoni/fingerprint/grease"
 )
 
 func TestIsGREASE(t *testing.T) {
 	t.Parallel()
 
-	grease := []uint16{
+	greaseArr := []uint16{
 		0x0a0a, 0x1a1a, 0x2a2a, 0x3a3a, 0x4a4a, 0x5a5a, 0x6a6a, 0x7a7a,
 		0x8a8a, 0x9a9a, 0xaaaa, 0xbaba, 0xcaca, 0xdada, 0xeaea, 0xfafa,
 	}
 
-	for _, v := range grease {
-		assert.True(t, IsGREASE(v), "0x%04x should be GREASE", v)
+	for _, v := range greaseArr {
+		assert.True(t, grease.Is(v), "0x%04x should be GREASE", v)
 	}
 
 	notGREASE := []uint16{0x0000, 0x0001, 0x000d, 0x0010, 0x1301, 0xc02f, 0x0303, 0x0a0b}
 	for _, v := range notGREASE {
-		assert.False(t, IsGREASE(v), "0x%04x should not be GREASE", v)
+		assert.False(t, grease.Is(v), "0x%04x should not be GREASE", v)
 	}
 }
 

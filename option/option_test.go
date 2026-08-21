@@ -17,6 +17,7 @@ import (
 
 	"github.com/lemon4ksan/aoni"
 	"github.com/lemon4ksan/aoni/fingerprint/h2"
+	"github.com/lemon4ksan/aoni/netutil/hpkp"
 	"github.com/lemon4ksan/aoni/option"
 )
 
@@ -160,6 +161,18 @@ func TestOption_Fingerprint_And_Settings(t *testing.T) {
 
 	option.WithCertificatePin("example.com", "sha256/pin1")(cfg)
 	assert.Contains(t, cfg.Fingerprint.CertificatePins["example.com"], "sha256/pin1")
+
+	option.WithSPKIPin("example.com", "pin2")(cfg)
+	assert.Contains(t, cfg.Fingerprint.CertificatePins["example.com"], "pin2")
+
+	hpkpPolicy, err := hpkp.ParseHeader(`max-age=5000; pin-sha256="d6qzRu9zOECb90Uez27xWltNsj0e1Md7GkYYkVoZWmM="`)
+	require.NoError(t, err)
+	option.WithHPKPPolicy("api.example.com", hpkpPolicy)(cfg)
+	assert.Contains(
+		t,
+		cfg.Fingerprint.CertificatePins["api.example.com"],
+		"d6qzRu9zOECb90Uez27xWltNsj0e1Md7GkYYkVoZWmM=",
+	)
 }
 
 func TestOption_Baremetal_And_BlockOverrides(t *testing.T) {

@@ -12,6 +12,7 @@ package main
 
 import (
 	"bytes"
+	"cmp"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
@@ -26,11 +27,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/lemon4ksan/aoni/option"
-
 	"github.com/PuerkitoBio/goquery"
 	"github.com/lemon4ksan/aoni"
-	"github.com/lemon4ksan/foundation/generic"
+	"github.com/lemon4ksan/aoni/option"
 )
 
 var (
@@ -99,12 +98,12 @@ func parseAnubisChallenge(html string) (randomData, id string, difficulty int, e
 		return "", "", 0, errors.New("failed to extract challenge parameters")
 	}
 
-	return randomData, id, generic.Coalesce(payload.Rules.Difficulty, 4), nil
+	return randomData, id, cmp.Or(payload.Rules.Difficulty, 4), nil
 }
 
 func findPassChallengePath(html string) string {
 	match := rxChallengePath.FindString(html)
-	return generic.Coalesce(match, "/.within.website/x/cmd/anubis/api/pass-challenge")
+	return cmp.Or(match, "/.within.website/x/cmd/anubis/api/pass-challenge")
 }
 
 func main() {

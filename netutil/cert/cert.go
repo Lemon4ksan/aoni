@@ -14,23 +14,39 @@ import (
 	"time"
 
 	"github.com/lemon4ksan/foundation/generic"
+	fcert "github.com/lemon4ksan/foundation/net/tls/cert"
 	utls "github.com/refraction-networking/utls"
 )
 
-// CompressionAlgorithm specifies a certificate compression algorithm defined in RFC 8879.
-type CompressionAlgorithm uint16
+// ErrUnknownCompressionAlgo indicates an unrecognized TLS certificate compression algorithm name.
+var ErrUnknownCompressionAlgo = fcert.ErrUnknownCompressionAlgo
 
+// RFC 8879 IANA Registry Constants for TLS Certificate Compression.
 const (
-	// CertCompressionZlib specifies the zlib certificate compression algorithm.
-	CertCompressionZlib CompressionAlgorithm = 1
-	// CompressionBrotli specifies the Brotli certificate compression algorithm.
-	CompressionBrotli CompressionAlgorithm = 2
-	// CompressionZstd specifies the Zstandard certificate compression algorithm.
-	CompressionZstd CompressionAlgorithm = 3
+	ExtensionCompressCertificate   = fcert.ExtensionCompressCertificate
+	HandshakeCompressedCertificate = fcert.HandshakeCompressedCertificate
 )
 
+// CompressionAlgorithm specifies a certificate compression algorithm defined in RFC 8879 §7.3.
+type CompressionAlgorithm = fcert.CompressionAlgorithm
+
+const (
+	CertCompressionReserved = fcert.CertCompressionReserved
+	CertCompressionZlib     = fcert.CertCompressionZlib
+	CompressionZlib         = fcert.CompressionZlib
+	CertCompressionBrotli   = fcert.CertCompressionBrotli
+	CompressionBrotli       = fcert.CompressionBrotli
+	CertCompressionZstd     = fcert.CertCompressionZstd
+	CompressionZstd         = fcert.CompressionZstd
+)
+
+// ParseCompressionAlgorithm parses a string identifier ("zlib", "brotli", "zstd") into [CompressionAlgorithm].
+func ParseCompressionAlgorithm(name string) (CompressionAlgorithm, error) {
+	return fcert.ParseCompressionAlgorithm(name)
+}
+
 // ToUTLS maps the compression algorithm to its corresponding uTLS representation.
-func (a CompressionAlgorithm) ToUTLS() utls.CertCompressionAlgo {
+func ToUTLS(a CompressionAlgorithm) utls.CertCompressionAlgo {
 	switch a {
 	case CertCompressionZlib:
 		return utls.CertCompressionZlib

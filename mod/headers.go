@@ -10,13 +10,14 @@ import (
 	"strings"
 	"time"
 
+	fpkce "github.com/lemon4ksan/foundation/net/pkce"
 	"github.com/lemon4ksan/foundation/silicon/bytesconv"
 
 	"github.com/lemon4ksan/aoni"
 	"github.com/lemon4ksan/aoni/cookie"
 	"github.com/lemon4ksan/aoni/internal/core"
 	"github.com/lemon4ksan/aoni/internal/requestutil"
-	"github.com/lemon4ksan/aoni/netutil"
+	"github.com/lemon4ksan/aoni/netutil/hpkp"
 )
 
 // WithGRPCWebTimeout constructs an [aoni.RequestModifier] setting standard gRPC-Web timeout headers ("grpc-timeout").
@@ -116,12 +117,12 @@ func WithBasicAuth(username, password string) aoni.RequestModifier {
 // parameters for OAuth 2.0 authorization requests per RFC 7636 §4.3 and RFC 9700 §2.1.
 // If method is omitted or empty, S256 is used by default.
 func WithPKCE(verifier string, method ...string) aoni.RequestModifier {
-	m := netutil.CodeChallengeMethodS256
+	m := fpkce.MethodS256
 	if len(method) > 0 && method[0] != "" {
 		m = method[0]
 	}
 
-	challenge, err := netutil.ComputePKCEChallenge(verifier, m)
+	challenge, err := fpkce.ComputeChallenge(verifier, m)
 	if err != nil {
 		challenge = verifier
 	}
@@ -222,6 +223,51 @@ func WithNoCache() aoni.RequestModifier {
 // WithNoStore constructs an [aoni.RequestModifier] preventing response caching via "Cache-Control: no-store" (RFC 9111 §5.2.1.5).
 func WithNoStore() aoni.RequestModifier {
 	return WithHeader("Cache-Control", "no-store")
+}
+
+// ============================================================================
+// WEBSOCKET MODIFIERS (RFC 6455, RFC 7692, RFC 7936, RFC 8441)
+// ============================================================================
+
+// WithSecWebSocketProtocol constructs an [aoni.RequestModifier] requesting one or more WebSocket subprotocols
+// per RFC 6455 §11.3.4, RFC 7936 §2, and RFC 8441 §5.
+func WithSecWebSocketProtocol(protocols ...string) aoni.RequestModifier {
+	return WithHeader("Sec-WebSocket-Protocol", strings.Join(protocols, ", "))
+}
+
+// WithSecWebSocketExtensions constructs an [aoni.RequestModifier] requesting WebSocket extensions
+// per RFC 6455 §11.3.2, RFC 7692 §5, and RFC 8441 §5.
+func WithSecWebSocketExtensions(extensions ...string) aoni.RequestModifier {
+	return WithHeader("Sec-WebSocket-Extensions", strings.Join(extensions, ", "))
+}
+
+// WithSecWebSocketVersion constructs an [aoni.RequestModifier] setting the Sec-WebSocket-Version header (RFC 6455 §11.3.5 & RFC 8441 §5).
+func WithSecWebSocketVersion(version string) aoni.RequestModifier {
+	return WithHeader("Sec-WebSocket-Version", version)
+}
+
+// WithPermessageDeflate constructs an [aoni.RequestModifier] requesting the permessage-deflate compression extension
+// with optional parameters (RFC 7692 §7 & RFC 8441 §5).
+func WithPermessageDeflate(params ...string) aoni.RequestModifier {
+	if len(params) == 0 {
+		return WithHeader("Sec-WebSocket-Extensions", "permessage-deflate; client_max_window_bits")
+	}
+
+	return WithHeader("Sec-WebSocket-Extensions", "permessage-deflate; "+strings.Join(params, "; "))
+}
+
+// ============================================================================
+// PUBLIC KEY PINNING (HPKP) MODIFIERS (RFC 7469)
+// ============================================================================
+
+// WithPublicKeyPins constructs an [aoni.RequestModifier] attaching a Public-Key-Pins header value (RFC 7469 §2.1).
+func WithPublicKeyPins(value string) aoni.RequestModifier {
+	return WithHeader(hpkp.HeaderPublicKeyPins, value)
+}
+
+// WithPublicKeyPinsReportOnly constructs an [aoni.RequestModifier] attaching a Public-Key-Pins-Report-Only header value (RFC 7469 §2.1).
+func WithPublicKeyPinsReportOnly(value string) aoni.RequestModifier {
+	return WithHeader(hpkp.HeaderPublicKeyPinsReportOnly, value)
 }
 
 // ============================================================================

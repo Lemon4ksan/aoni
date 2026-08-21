@@ -14,11 +14,13 @@ import (
 	"sync"
 	"time"
 
+	fdns "github.com/lemon4ksan/foundation/net/dns"
 	"github.com/lemon4ksan/foundation/net/dns/wire"
 	"github.com/lemon4ksan/foundation/silicon/rand"
 
 	"github.com/lemon4ksan/aoni"
 	"github.com/lemon4ksan/aoni/fast"
+	"github.com/lemon4ksan/aoni/netutil/svcb"
 	"github.com/lemon4ksan/aoni/option"
 )
 
@@ -126,7 +128,7 @@ func (r *DoHResolver) LookupDNSRecords(ctx context.Context, host string) ([]wire
 	wg.Wait()
 
 	if err4 != nil && err6 != nil {
-		return nil, wrapDNSError(host, "DoH", r.Endpoint, err4)
+		return nil, fdns.WrapDNSError(host, "DoH", r.Endpoint, err4)
 	}
 
 	records := make([]wire.DNSRecord, 0, len(v4Records)+len(v6Records))
@@ -134,6 +136,30 @@ func (r *DoHResolver) LookupDNSRecords(ctx context.Context, host string) ([]wire
 	records = append(records, v6Records...)
 
 	return records, nil
+}
+
+// LookupHTTPS queries HTTPS resource records (RFC 9460 Type 65) over DoH.
+func (r *DoHResolver) LookupHTTPS(ctx context.Context, host string, port uint16) ([]*svcb.Record, error) {
+	qname := svcb.BuildHTTPSQueryName(host, port)
+
+	wireBytes, err := r.LookupWireRecord(ctx, qname, svcb.TypeHTTPS)
+	if err != nil {
+		return nil, fdns.WrapDNSError(host, "DoH", r.Endpoint, err)
+	}
+
+	return svcb.ParseResponseRecords(wireBytes, svcb.TypeHTTPS)
+}
+
+// LookupSVCB queries general-purpose SVCB resource records (RFC 9460 Type 64) over DoH.
+func (r *DoHResolver) LookupSVCB(ctx context.Context, scheme, service string, port uint16) ([]*svcb.Record, error) {
+	qname := svcb.BuildSVCBQueryName(scheme, service, port)
+
+	wireBytes, err := r.LookupWireRecord(ctx, qname, svcb.TypeSVCB)
+	if err != nil {
+		return nil, fdns.WrapDNSError(service, "DoH", r.Endpoint, err)
+	}
+
+	return svcb.ParseResponseRecords(wireBytes, svcb.TypeSVCB)
 }
 
 // LookupWireRecord queries a raw DNS wire format response over DoH for a specific query type.
@@ -156,10 +182,6 @@ func (r *DoHResolver) LookupWireRecord(ctx context.Context, host string, qtype u
 	req.SetContext(ctx)
 	req.SetHeader("Accept", DoHMediaType)
 
-	if r.Host != "" {
-		req.SetHeader("Host", r.Host)
-	}
-
 	if r.Method == DoHMethodGet {
 		encoded := base64.RawURLEncoding.EncodeToString(wireQuery)
 
@@ -170,6 +192,10 @@ func (r *DoHResolver) LookupWireRecord(ctx context.Context, host string, qtype u
 		req.SetURL(r.Endpoint)
 		req.SetHeader("Content-Type", DoHMediaType)
 		req.SetBodyBytes(wireQuery)
+	}
+
+	if r.Host != "" {
+		req.SetHeader("Host", r.Host)
 	}
 
 	resp, err := r.doer.Do(req)
@@ -204,10 +230,6 @@ func (r *DoHResolver) queryWire(ctx context.Context, host string, qtype uint16) 
 	req.SetContext(ctx)
 	req.SetHeader("Accept", DoHMediaType)
 
-	if r.Host != "" {
-		req.SetHeader("Host", r.Host)
-	}
-
 	if r.Method == DoHMethodGet {
 		encoded := base64.RawURLEncoding.EncodeToString(wireQuery)
 
@@ -218,6 +240,10 @@ func (r *DoHResolver) queryWire(ctx context.Context, host string, qtype uint16) 
 		req.SetURL(r.Endpoint)
 		req.SetHeader("Content-Type", DoHMediaType)
 		req.SetBodyBytes(wireQuery)
+	}
+
+	if r.Host != "" {
+		req.SetHeader("Host", r.Host)
 	}
 
 	resp, err := r.doer.Do(req)

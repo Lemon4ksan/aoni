@@ -26,7 +26,7 @@ func WithSessionCache(cache fingerprint.SessionCache) aoni.RequestModifier {
 	})
 }
 
-// WithCertificatePin constructs an [aoni.RequestModifier] pinning SHA-256 public key hashes for target domains.
+// WithCertificatePin constructs an [aoni.RequestModifier] pinning SHA-256 public key hashes for target domains (RFC 7469).
 func WithCertificatePin(domain, hash string) aoni.RequestModifier {
 	return Custom(func(req aoni.Request) {
 		cfg := getOrInitRequestConfig(req)
@@ -36,6 +36,11 @@ func WithCertificatePin(domain, hash string) aoni.RequestModifier {
 
 		cfg.CertificatePins[domain] = append(cfg.CertificatePins[domain], hash)
 	})
+}
+
+// WithSPKIPin constructs an [aoni.RequestModifier] pinning an SPKI SHA-256 fingerprint hash for target domain (RFC 7469 §2.4).
+func WithSPKIPin(domain, pin string) aoni.RequestModifier {
+	return WithCertificatePin(domain, pin)
 }
 
 // WithPadding constructs an [aoni.RequestModifier] injecting random packet padding headers to confuse DPI length analysis.

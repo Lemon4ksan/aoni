@@ -20,6 +20,7 @@ import (
 	"testing"
 	"time"
 
+	fdns "github.com/lemon4ksan/foundation/net/dns"
 	"github.com/lemon4ksan/foundation/net/dns/wire"
 	"github.com/quic-go/quic-go"
 	"github.com/stretchr/testify/assert"
@@ -294,7 +295,7 @@ func TestDoQResolver_HandshakeFailure(t *testing.T) {
 	_, err := resolver.LookupIPAddr(ctx, "example.com")
 	require.Error(t, err)
 
-	var resErr *ResolutionError
+	var resErr *fdns.ResolutionError
 	require.ErrorAs(t, err, &resErr)
 	assert.Equal(t, "DoQ", resErr.Resolver)
 	assert.ErrorIs(t, resErr.Err, ErrDoQHandshakeFailed)

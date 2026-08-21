@@ -15,13 +15,13 @@ import (
 	"time"
 
 	"github.com/lemon4ksan/foundation/generic"
+	fpkce "github.com/lemon4ksan/foundation/net/pkce"
 	"github.com/lemon4ksan/foundation/silicon/bytesconv"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/lemon4ksan/aoni/codec/decode"
 	"github.com/lemon4ksan/aoni/internal/core"
 	"github.com/lemon4ksan/aoni/internal/pipeline"
-	"github.com/lemon4ksan/aoni/netutil"
 )
 
 // DefaultClient is the shared, package-level [Client] instance used for direct single-line calls.
@@ -316,12 +316,12 @@ func WithBasicAuth(username, password string) RequestModifier {
 // parameters for OAuth 2.0 authorization requests per RFC 7636 §4.3 and RFC 9700 §2.1.
 // If method is omitted or empty, S256 is used by default.
 func WithPKCE(verifier string, method ...string) RequestModifier {
-	m := netutil.CodeChallengeMethodS256
+	m := fpkce.MethodS256
 	if len(method) > 0 && method[0] != "" {
 		m = method[0]
 	}
 
-	if challenge, err := netutil.ComputePKCEChallenge(verifier, m); err == nil {
+	if challenge, err := fpkce.ComputeChallenge(verifier, m); err == nil {
 		verifier = challenge
 	}
 

@@ -30,12 +30,41 @@ import (
 )
 
 const (
-	FrameContinuation = 0x0
-	FrameText         = 0x1
-	FrameBinary       = 0x2
-	FrameClose        = 0x8
-	FramePing         = 0x9
-	FramePong         = 0xA
+	// OpcodeContinuation (%x0) denotes a continuation frame (RFC 6455 §5.2 & §11.8).
+	OpcodeContinuation = 0x0
+
+	// OpcodeText (%x1) denotes a text frame encoded as UTF-8 (RFC 6455 §5.2 & §11.8).
+	OpcodeText = 0x1
+
+	// OpcodeBinary (%x2) denotes a binary frame (RFC 6455 §5.2 & §11.8).
+	OpcodeBinary = 0x2
+
+	// OpcodeClose (%x8) denotes a connection close control frame (RFC 6455 §5.2 & §11.8).
+	OpcodeClose = 0x8
+
+	// OpcodePing (%x9) denotes a ping control frame (RFC 6455 §5.2 & §11.8).
+	OpcodePing = 0x9
+
+	// OpcodePong (%xA) denotes a pong control frame (RFC 6455 §5.2 & §11.8).
+	OpcodePong = 0xA
+
+	// FrameContinuation is an alias for OpcodeContinuation (RFC 6455 §11.8).
+	FrameContinuation = OpcodeContinuation
+
+	// FrameText is an alias for OpcodeText (RFC 6455 §11.8).
+	FrameText = OpcodeText
+
+	// FrameBinary is an alias for OpcodeBinary (RFC 6455 §11.8).
+	FrameBinary = OpcodeBinary
+
+	// FrameClose is an alias for OpcodeClose (RFC 6455 §11.8).
+	FrameClose = OpcodeClose
+
+	// FramePing is an alias for OpcodePing (RFC 6455 §11.8).
+	FramePing = OpcodePing
+
+	// FramePong is an alias for OpcodePong (RFC 6455 §11.8).
+	FramePong = OpcodePong
 
 	maxWebSocketFrameSize    = 16 * 1024 * 1024
 	maxConsecutiveEmptyReads = 100
@@ -835,7 +864,8 @@ func (c *wsH2Conn) writeConnectHeaders(u *parsedURL, host string, req *http.Requ
 
 func isForbiddenH2ConnectHeader(key string) bool {
 	switch key {
-	case "upgrade", "connection", "host", "sec-websocket-key", "sec-websocket-accept":
+	case "upgrade", "connection", "host", "sec-websocket-key", "sec-websocket-accept",
+		"keep-alive", "proxy-connection", "transfer-encoding":
 		return true
 	default:
 		return false

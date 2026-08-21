@@ -486,3 +486,56 @@ func TestMod_SmartBody_And_Retry(t *testing.T) {
 		assert.Contains(t, string(req.body), `"name":"Woz"`)
 	})
 }
+
+func TestMod_WebSocketModifiers(t *testing.T) {
+	t.Parallel()
+
+	// RFC 6455 §11.3.4 & RFC 8441 §5: Sec-WebSocket-Protocol
+	req1 := newDummyRequest()
+	mod.WithSecWebSocketProtocol("chat", "superchat").Apply(req1)
+	assert.Equal(t, "chat, superchat", req1.Header("Sec-WebSocket-Protocol"))
+
+	// RFC 6455 §11.3.2 & RFC 8441 §5: Sec-WebSocket-Extensions
+	req2 := newDummyRequest()
+	mod.WithSecWebSocketExtensions("permessage-deflate", "client_max_window_bits").Apply(req2)
+	assert.Equal(t, "permessage-deflate, client_max_window_bits", req2.Header("Sec-WebSocket-Extensions"))
+
+	// RFC 6455 §11.3.5 & RFC 8441 §5: Sec-WebSocket-Version
+	req3 := newDummyRequest()
+	mod.WithSecWebSocketVersion("13").Apply(req3)
+	assert.Equal(t, "13", req3.Header("Sec-WebSocket-Version"))
+
+	// RFC 7692 §7 & RFC 8441 §5: WithPermessageDeflate defaults
+	req4 := newDummyRequest()
+	mod.WithPermessageDeflate().Apply(req4)
+	assert.Equal(t, "permessage-deflate; client_max_window_bits", req4.Header("Sec-WebSocket-Extensions"))
+
+	// RFC 7692 §7 & RFC 8441 §5: WithPermessageDeflate with custom params
+	req5 := newDummyRequest()
+	mod.WithPermessageDeflate("server_no_context_takeover", "client_no_context_takeover").Apply(req5)
+	assert.Equal(
+		t,
+		"permessage-deflate; server_no_context_takeover; client_no_context_takeover",
+		req5.Header("Sec-WebSocket-Extensions"),
+	)
+}
+
+func TestMod_HPKP(t *testing.T) {
+	t.Parallel()
+
+	req1 := newDummyRequest()
+	hpkpHeader := `max-age=3000; pin-sha256="d6qzRu9zOECb90Uez27xWltNsj0e1Md7GkYYkVoZWmM="`
+	mod.WithPublicKeyPins(hpkpHeader).Apply(req1)
+	assert.Equal(t, hpkpHeader, req1.Header("Public-Key-Pins"))
+
+	req2 := newDummyRequest()
+	hpkpROHeader := `pin-sha256="d6qzRu9zOECb90Uez27xWltNsj0e1Md7GkYYkVoZWmM="; report-uri="https://example.com/pkp"`
+	mod.WithPublicKeyPinsReportOnly(hpkpROHeader).Apply(req2)
+	assert.Equal(t, hpkpROHeader, req2.Header("Public-Key-Pins-Report-Only"))
+
+	req3 := newDummyRequest()
+	mod.WithSPKIPin("example.com", "d6qzRu9zOECb90Uez27xWltNsj0e1Md7GkYYkVoZWmM=").Apply(req3)
+	reqCfg := aoni.GetRequestConfig(req3.Context())
+	require.NotNil(t, reqCfg)
+	assert.Contains(t, reqCfg.CertificatePins["example.com"], "d6qzRu9zOECb90Uez27xWltNsj0e1Md7GkYYkVoZWmM=")
+}
