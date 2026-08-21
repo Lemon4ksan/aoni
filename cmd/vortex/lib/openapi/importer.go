@@ -6,9 +6,7 @@
 // and declarative Go contract generation for OpenAPI 2.0/3.0/3.1 and HAR specifications.
 package openapi
 
-import (
-	"fmt"
-)
+import "fmt"
 
 // ImportConfig controls how OpenAPI specifications are imported into aoni declarative contracts.
 type ImportConfig struct {
