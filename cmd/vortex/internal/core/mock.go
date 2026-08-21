@@ -13,7 +13,7 @@ import (
 	"path/filepath"
 
 	"github.com/lemon4ksan/aoni/cmd/vortex/internal/text"
-	"github.com/lemon4ksan/aoni/internal/codegen/builder"
+	"github.com/lemon4ksan/aoni/cmd/vortex/lib/builder"
 )
 
 // CmdMock generates zero-dependency in-memory mock test servers for API contracts.

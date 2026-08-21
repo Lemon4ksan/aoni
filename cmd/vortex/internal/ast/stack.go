@@ -15,7 +15,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/lemon4ksan/aoni/internal/codegen/diff"
+	"github.com/lemon4ksan/aoni/cmd/vortex/lib/diff"
 )
 
 // CmdStack provides snapshot stacking, stepping, and step-by-step AST evolution comparisons.

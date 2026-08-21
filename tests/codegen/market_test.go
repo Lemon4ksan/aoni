@@ -10,10 +10,10 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/lemon4ksan/aoni/internal/codegen/analysis"
-	"github.com/lemon4ksan/aoni/internal/codegen/emitter"
-	"github.com/lemon4ksan/aoni/internal/codegen/optimizer"
-	"github.com/lemon4ksan/aoni/internal/codegen/parser"
+	"github.com/lemon4ksan/aoni/cmd/vortex/lib/analysis"
+	"github.com/lemon4ksan/aoni/cmd/vortex/lib/emitter"
+	"github.com/lemon4ksan/aoni/cmd/vortex/lib/optimizer"
+	"github.com/lemon4ksan/aoni/cmd/vortex/lib/parser"
 )
 
 func TestSteamMarketGeneration(t *testing.T) {

@@ -18,8 +18,8 @@ import (
 
 	"github.com/lemon4ksan/aoni/cmd/vortex/internal/base"
 	"github.com/lemon4ksan/aoni/cmd/vortex/internal/text"
-	"github.com/lemon4ksan/aoni/internal/codegen/cache"
-	codeparser "github.com/lemon4ksan/aoni/internal/codegen/parser"
+	"github.com/lemon4ksan/aoni/cmd/vortex/lib/cache"
+	vparser "github.com/lemon4ksan/aoni/cmd/vortex/lib/parser"
 )
 
 // CmdSmoke performs rapid live connectivity and schema smoke checks on API contracts.
@@ -88,7 +88,7 @@ func (c *CmdSmoke) Run(ctx context.Context, args []string, stdout, stderr io.Wri
 
 	var results []smokeResult
 
-	p := codeparser.NewParser()
+	p := vparser.NewParser()
 
 	fmt.Fprintf(stdout, "Probing live endpoints across %d contract file(s)...\n\n", len(targetFiles))
 

@@ -18,9 +18,9 @@ import (
 	"github.com/getkin/kin-openapi/openapi3"
 
 	"github.com/lemon4ksan/aoni/cmd/vortex/internal/base"
-	"github.com/lemon4ksan/aoni/internal/codegen/jsbundle"
-	"github.com/lemon4ksan/aoni/internal/codegen/openapi"
-	"github.com/lemon4ksan/aoni/internal/codegen/pipeline"
+	"github.com/lemon4ksan/aoni/cmd/vortex/lib/jsbundle"
+	"github.com/lemon4ksan/aoni/cmd/vortex/lib/openapi"
+	"github.com/lemon4ksan/aoni/cmd/vortex/lib/pipeline"
 )
 
 type importOptions struct {

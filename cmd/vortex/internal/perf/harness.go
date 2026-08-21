@@ -13,7 +13,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/lemon4ksan/aoni/internal/codegen/builder"
+	"github.com/lemon4ksan/aoni/cmd/vortex/lib/builder"
 )
 
 // CmdHarness compiles and emits Unified Test & Bench Harnesses (api_harness.gen.go).

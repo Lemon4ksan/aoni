@@ -19,10 +19,10 @@ import (
 
 	"github.com/lemon4ksan/foundation/generic"
 
-	"github.com/lemon4ksan/aoni/internal/codegen/builder"
-	"github.com/lemon4ksan/aoni/internal/codegen/git"
-	"github.com/lemon4ksan/aoni/internal/codegen/ir"
-	codeparser "github.com/lemon4ksan/aoni/internal/codegen/parser"
+	"github.com/lemon4ksan/aoni/cmd/vortex/lib/builder"
+	"github.com/lemon4ksan/aoni/cmd/vortex/lib/git"
+	"github.com/lemon4ksan/aoni/cmd/vortex/lib/ir"
+	vparser "github.com/lemon4ksan/aoni/cmd/vortex/lib/parser"
 )
 
 // CmdLog renders an in-source API evolution timeline from @version, @since, and @deprecated tags, or real Git history.
@@ -80,7 +80,7 @@ func (c *CmdLog) Run(ctx context.Context, args []string, stdout, stderr io.Write
 		return c.runGitLog(ctx, files, *limitFlag, *jsonFlag, stdout)
 	}
 
-	p := codeparser.NewParser()
+	p := vparser.NewParser()
 
 	var allTimelines []fileTimeline
 

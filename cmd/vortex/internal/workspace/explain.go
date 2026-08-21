@@ -11,7 +11,7 @@ import (
 	"io"
 	"strings"
 
-	"github.com/lemon4ksan/aoni/internal/codegen/spec"
+	"github.com/lemon4ksan/aoni/cmd/vortex/lib/spec"
 )
 
 // CmdExplain outputs in-depth syntax, argument specifications, and examples for a directive.

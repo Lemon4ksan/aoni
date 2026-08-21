@@ -19,15 +19,15 @@ import (
 	"strings"
 
 	"github.com/lemon4ksan/aoni/cmd/vortex/internal/base"
-	"github.com/lemon4ksan/aoni/internal/codegen/builder"
-	"github.com/lemon4ksan/aoni/internal/codegen/cache"
-	"github.com/lemon4ksan/aoni/internal/codegen/diff"
-	"github.com/lemon4ksan/aoni/internal/codegen/git"
-	"github.com/lemon4ksan/aoni/internal/codegen/ir"
-	"github.com/lemon4ksan/aoni/internal/codegen/merge"
-	"github.com/lemon4ksan/aoni/internal/codegen/openapi"
-	codeparser "github.com/lemon4ksan/aoni/internal/codegen/parser"
-	"github.com/lemon4ksan/aoni/internal/codegen/project"
+	"github.com/lemon4ksan/aoni/cmd/vortex/lib/builder"
+	"github.com/lemon4ksan/aoni/cmd/vortex/lib/cache"
+	"github.com/lemon4ksan/aoni/cmd/vortex/lib/diff"
+	"github.com/lemon4ksan/aoni/cmd/vortex/lib/git"
+	"github.com/lemon4ksan/aoni/cmd/vortex/lib/ir"
+	"github.com/lemon4ksan/aoni/cmd/vortex/lib/merge"
+	"github.com/lemon4ksan/aoni/cmd/vortex/lib/openapi"
+	vparser "github.com/lemon4ksan/aoni/cmd/vortex/lib/parser"
+	"github.com/lemon4ksan/aoni/cmd/vortex/lib/project"
 )
 
 // CmdDiff compares local Go interface contracts against an external OpenAPI specification or Git ref.
@@ -197,7 +197,7 @@ func (c *CmdDiff) Run(ctx context.Context, args []string, stdout, stderr io.Writ
 		return errors.New("no Go source files found to compare against specification")
 	}
 
-	p := codeparser.NewParser()
+	p := vparser.NewParser()
 
 	var (
 		allServices []*ir.ServiceIR
@@ -304,7 +304,7 @@ func (c *CmdDiff) runGitDiff(
 		return errors.New("no Go contract files found to compare")
 	}
 
-	p := codeparser.NewParser()
+	p := vparser.NewParser()
 	reconciler := merge.NewReconciler()
 
 	fmt.Fprintf(stdout, "⚡ [vortex diff] Comparing working tree against '%s':\n\n", targetRef)
@@ -509,7 +509,7 @@ func (c *CmdDiff) runHARDifferential(
 	}
 
 	rt, _ := base.NewRuntime(rootDir)
-	p := codeparser.NewParser()
+	p := vparser.NewParser()
 
 	var (
 		allServices []*ir.ServiceIR

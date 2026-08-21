@@ -8,8 +8,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/lemon4ksan/aoni/internal/codegen/emitter"
-	"github.com/lemon4ksan/aoni/internal/codegen/parser"
+	"github.com/lemon4ksan/aoni/cmd/vortex/lib/emitter"
+	"github.com/lemon4ksan/aoni/cmd/vortex/lib/parser"
 	"github.com/stretchr/testify/require"
 )
 

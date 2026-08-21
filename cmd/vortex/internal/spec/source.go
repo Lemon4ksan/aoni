@@ -18,12 +18,12 @@ import (
 	"time"
 
 	"github.com/lemon4ksan/aoni/cmd/vortex/internal/base"
-	"github.com/lemon4ksan/aoni/internal/codegen/builder"
-	"github.com/lemon4ksan/aoni/internal/codegen/diff"
-	"github.com/lemon4ksan/aoni/internal/codegen/ingest"
-	"github.com/lemon4ksan/aoni/internal/codegen/openapi"
-	"github.com/lemon4ksan/aoni/internal/codegen/parser"
-	"github.com/lemon4ksan/aoni/internal/codegen/project"
+	"github.com/lemon4ksan/aoni/cmd/vortex/lib/builder"
+	"github.com/lemon4ksan/aoni/cmd/vortex/lib/diff"
+	"github.com/lemon4ksan/aoni/cmd/vortex/lib/ingest"
+	"github.com/lemon4ksan/aoni/cmd/vortex/lib/openapi"
+	"github.com/lemon4ksan/aoni/cmd/vortex/lib/parser"
+	"github.com/lemon4ksan/aoni/cmd/vortex/lib/project"
 )
 
 // CmdSource manages upstream API specification sources and schemas.

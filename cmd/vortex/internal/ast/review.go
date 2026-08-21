@@ -13,10 +13,10 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/lemon4ksan/aoni/internal/codegen/git"
-	"github.com/lemon4ksan/aoni/internal/codegen/merge"
-	codeparser "github.com/lemon4ksan/aoni/internal/codegen/parser"
-	"github.com/lemon4ksan/aoni/internal/codegen/project"
+	"github.com/lemon4ksan/aoni/cmd/vortex/lib/git"
+	"github.com/lemon4ksan/aoni/cmd/vortex/lib/merge"
+	vparser "github.com/lemon4ksan/aoni/cmd/vortex/lib/parser"
+	"github.com/lemon4ksan/aoni/cmd/vortex/lib/project"
 )
 
 // CmdReview audits incoming consumer proposal branches against local working contracts.
@@ -75,7 +75,7 @@ func (c *CmdReview) Run(ctx context.Context, args []string, stdout, stderr io.Wr
 		return errors.New("no contracts configured in .vortex.yml (run `vortex init` first)")
 	}
 
-	p := codeparser.NewParser()
+	p := vparser.NewParser()
 	reconciler := merge.NewReconciler()
 
 	fmt.Fprintf(stdout, "⚡ [vortex ast review] Auditing Proposal from %q\n\n", targetRef)

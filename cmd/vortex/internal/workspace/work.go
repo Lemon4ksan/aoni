@@ -18,7 +18,7 @@ import (
 
 	"github.com/lemon4ksan/aoni/cmd/vortex/internal/base"
 	"github.com/lemon4ksan/aoni/cmd/vortex/internal/text"
-	"github.com/lemon4ksan/aoni/internal/codegen/project"
+	"github.com/lemon4ksan/aoni/cmd/vortex/lib/project"
 )
 
 // CmdWork orchestrates multi-repo workspace operations (.vortex.work).

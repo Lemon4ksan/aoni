@@ -16,7 +16,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/lemon4ksan/aoni/internal/codegen/project"
+	"github.com/lemon4ksan/aoni/cmd/vortex/lib/project"
 )
 
 // CoverageStats records statement coverage counts and percentage metrics.

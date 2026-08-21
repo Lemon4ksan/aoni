@@ -15,7 +15,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/lemon4ksan/aoni/internal/codegen/builder"
+	"github.com/lemon4ksan/aoni/cmd/vortex/lib/builder"
 )
 
 var updateGolden = flag.Bool("update", false, "Update golden test files with latest generator output")

@@ -16,7 +16,7 @@ import (
 
 	"github.com/lemon4ksan/foundation/generic"
 
-	"github.com/lemon4ksan/aoni/internal/codegen/spec"
+	"github.com/lemon4ksan/aoni/cmd/vortex/lib/spec"
 )
 
 // CmdList displays the catalog of DSL directives and pipeline stages.

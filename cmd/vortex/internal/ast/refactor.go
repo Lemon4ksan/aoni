@@ -19,7 +19,7 @@ import (
 	"strings"
 
 	"github.com/lemon4ksan/aoni/cmd/vortex/internal/base"
-	"github.com/lemon4ksan/aoni/internal/codegen/pipeline"
+	"github.com/lemon4ksan/aoni/cmd/vortex/lib/pipeline"
 )
 
 func (c *Cmd) runEnum(
