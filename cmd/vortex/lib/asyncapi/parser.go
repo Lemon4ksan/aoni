@@ -14,9 +14,11 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-// ParseSpec parses, normalizes, and resolves traits for an AsyncAPI specification conforming to AsyncAPI 3.1.0.
+// ParseSpec parses, normalizes, and resolves traits for an AsyncAPI specification conforming to AsyncAPI 2.x and 3.x.
 //
-// Reference: AsyncAPI 3.1.0 §Document Object (https://www.asyncapi.com/docs/concepts/asyncapi-document)
+// References:
+//   - AsyncAPI 3.1.0 §Document Object (https://www.asyncapi.com/docs/concepts/asyncapi-document)
+//   - AsyncAPI 2.6.0 §AsyncAPI Object (https://v2.asyncapi.com/docs/reference/specification/v2.6.0#asyncapiObject)
 func ParseSpec(data []byte) (*Document, error) {
 	if len(data) == 0 {
 		return nil, errors.New("empty asyncapi specification data")
@@ -43,7 +45,7 @@ func ParseSpec(data []byte) (*Document, error) {
 	// 1. Normalize AsyncAPI 2.x publish/subscribe channels into 3.x operations model
 	normalizeAsyncAPI2(&doc)
 
-	// 2. Resolve traits merging mechanism (AsyncAPI 3.1.0 §Reusability with traits)
+	// 2. Resolve traits merging mechanism (AsyncAPI 3.1.0 & 2.6.0 §Traits Merge Mechanism)
 	applyTraits(&doc)
 
 	// 3. Extract channel address parameters from dynamic templates ({param})
@@ -62,8 +64,33 @@ func LoadFile(filename string) (*Document, error) {
 	return ParseSpec(data)
 }
 
+// normalizeAsyncAPI2 translates an AsyncAPI 2.x document into the unified AsyncAPI 3.x document model.
+//
+// References:
+//   - AsyncAPI 2.6.0 §Channel Item Object (https://v2.asyncapi.com/docs/reference/specification/v2.6.0#channelItemObject)
+//   - AsyncAPI 2.6.0 §Operation Object (https://v2.asyncapi.com/docs/reference/specification/v2.6.0#operationObject)
 func normalizeAsyncAPI2(doc *Document) {
-	if doc == nil || doc.Channels == nil {
+	if doc == nil {
+		return
+	}
+
+	// 1. Normalize Servers: 2.x 'url' -> 3.x 'host' and 'pathname'
+	for sKey, srv := range doc.Servers {
+		if srv.Host == "" && srv.URL != "" {
+			u := srv.URL
+			if idx := strings.Index(u, "://"); idx != -1 {
+				u = u[idx+3:]
+			}
+			parts := strings.SplitN(u, "/", 2)
+			srv.Host = parts[0]
+			if len(parts) > 1 && parts[1] != "" {
+				srv.Pathname = "/" + parts[1]
+			}
+			doc.Servers[sKey] = srv
+		}
+	}
+
+	if doc.Channels == nil {
 		return
 	}
 
@@ -79,42 +106,87 @@ func normalizeAsyncAPI2(doc *Document) {
 		}
 
 		// In AsyncAPI 2.x:
-		// `publish` means application publishes to channel (client receives messages -> action: send)
+		// `publish` means application publishes/consumes from channel (client receives messages -> action: send)
 		if ch.Publish != nil {
 			opID := ch.Publish.OperationID
 			if opID == "" {
 				opID = "on" + sanitizeIdentifier(channelPath)
 			}
 
+			messages := extractMessagesFrom2(ch.Publish.Message)
+
 			doc.Operations[opID] = Operation{
-				Action:      "send",
-				ChannelRef:  channelPath,
-				Summary:     ch.Publish.Summary,
-				Description: ch.Publish.Description,
+				Action:       "send",
+				ChannelRef:   channelPath,
+				Summary:      ch.Publish.Summary,
+				Description:  ch.Publish.Description,
+				Tags:         ch.Publish.Tags,
+				ExternalDocs: ch.Publish.ExternalDocs,
+				Bindings:     ch.Publish.Bindings,
+				Traits:       ch.Publish.Traits,
+				Messages:     messages,
 			}
 		}
 
-		// `subscribe` means application subscribes to channel (client sends messages -> action: receive)
+		// `subscribe` means application subscribes/produces to channel (client sends messages -> action: receive)
 		if ch.Subscribe != nil {
 			opID := ch.Subscribe.OperationID
 			if opID == "" {
 				opID = "send" + sanitizeIdentifier(channelPath)
 			}
 
+			messages := extractMessagesFrom2(ch.Subscribe.Message)
+
 			doc.Operations[opID] = Operation{
-				Action:      "receive",
-				ChannelRef:  channelPath,
-				Summary:     ch.Subscribe.Summary,
-				Description: ch.Subscribe.Description,
+				Action:       "receive",
+				ChannelRef:   channelPath,
+				Summary:      ch.Subscribe.Summary,
+				Description:  ch.Subscribe.Description,
+				Tags:         ch.Subscribe.Tags,
+				ExternalDocs: ch.Subscribe.ExternalDocs,
+				Bindings:     ch.Subscribe.Bindings,
+				Traits:       ch.Subscribe.Traits,
+				Messages:     messages,
 			}
 		}
 	}
 }
 
-// applyTraits applies operationTraits and messageTraits according to the AsyncAPI 3.1.0 merging mechanism:
+func extractMessagesFrom2(msgAny any) []RefObject {
+	if msgAny == nil {
+		return nil
+	}
+
+	var res []RefObject
+
+	if mMap, ok := msgAny.(map[string]any); ok {
+		if refStr, ok := mMap["$ref"].(string); ok && refStr != "" {
+			res = append(res, RefObject{Ref: refStr})
+			return res
+		}
+
+		// Check oneOf in 2.x
+		if oneOfList, ok := mMap["oneOf"].([]any); ok {
+			for _, item := range oneOfList {
+				if itemMap, ok := item.(map[string]any); ok {
+					if refStr, ok := itemMap["$ref"].(string); ok && refStr != "" {
+						res = append(res, RefObject{Ref: refStr})
+					}
+				}
+			}
+			return res
+		}
+	}
+
+	return res
+}
+
+// applyTraits applies operationTraits and messageTraits according to the AsyncAPI merging mechanism:
 // Traits are merged into the target object without overriding already defined properties.
 //
-// Reference: AsyncAPI 3.1.0 §Trait Merging Mechanism (https://www.asyncapi.com/docs/concepts/asyncapi-document/reusability-with-traits#trait-merging-mechanism)
+// References:
+//   - AsyncAPI 3.1.0 §Trait Merging Mechanism (https://www.asyncapi.com/docs/concepts/asyncapi-document/reusability-with-traits#trait-merging-mechanism)
+//   - AsyncAPI 2.6.0 §Operation Trait Object & §Message Trait Object
 func applyTraits(doc *Document) {
 	if doc == nil {
 		return
@@ -190,7 +262,9 @@ func applyTraits(doc *Document) {
 
 // extractAddressParameters parses {param} placeholders in channel addresses and populates channel.Parameters.
 //
-// Reference: AsyncAPI 3.1.0 §Parameters in Channel Address (https://www.asyncapi.com/docs/concepts/asyncapi-document/dynamic-channel-address)
+// References:
+//   - AsyncAPI 3.1.0 §Parameters in Channel Address (https://www.asyncapi.com/docs/concepts/asyncapi-document/dynamic-channel-address)
+//   - AsyncAPI 2.6.0 §Parameters Object (https://v2.asyncapi.com/docs/reference/specification/v2.6.0#parametersObject)
 func extractAddressParameters(doc *Document) {
 	if doc == nil || doc.Channels == nil {
 		return
@@ -206,7 +280,7 @@ func extractAddressParameters(doc *Document) {
 			ch.Parameters = make(map[string]Parameter)
 		}
 
-		// Find placeholders enclosed in curly braces like {userId}
+		// Find placeholders enclosed in curly braces like {userId} or {streetlightId}
 		for {
 			start := strings.Index(addr, "{")
 			if start == -1 {

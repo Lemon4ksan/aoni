@@ -237,6 +237,66 @@ channels:
 	)
 }
 
+func TestAsyncAPI_Import_v2_Complex(t *testing.T) {
+	specYaml := `
+asyncapi: 2.6.0
+info:
+  title: Fleet Tracking API
+  version: 2.6.0
+servers:
+  production:
+    url: mqtt.fleet.com/v2
+    protocol: mqtt
+channels:
+  vehicles/{vehicleId}/telemetry:
+    publish:
+      operationId: onVehicleTelemetry
+      summary: Stream telemetry metrics from connected vehicles
+      message:
+        $ref: '#/components/messages/VehicleTelemetry'
+components:
+  messages:
+    VehicleTelemetry:
+      name: VehicleTelemetry
+      summary: Real-time speed and coordinates
+      payload:
+        type: object
+        properties:
+          speed:
+            type: number
+            format: float
+          latitude:
+            type: number
+            format: double
+          longitude:
+            type: number
+            format: double
+`
+
+	res, err := asyncapi.Import(asyncapi.ImportConfig{
+		SpecData:    []byte(specYaml),
+		PackageName: "fleet",
+		ServiceName: "FleetAPI",
+	})
+	require.NoError(t, err)
+	require.NotNil(t, res)
+
+	code := string(res.ContractCode)
+	assert.Contains(t, code, "package fleet")
+	assert.Contains(t, code, `// @base_url "mqtt://mqtt.fleet.com/v2"`)
+	assert.Contains(t, code, "type FleetAPI interface")
+	assert.Contains(t, code, "OnVehicleTelemetry — Stream telemetry metrics from connected vehicles")
+	assert.Contains(
+		t,
+		code,
+		"OnVehicleTelemetry(ctx context.Context, vehicleId string, handler func(msg *VehicleTelemetryDTO)) (Subscription, error)",
+	)
+	assert.Contains(t, code, "type VehicleTelemetryDTO struct")
+	assert.Contains(t, code, "Speed     float32")
+	assert.Contains(t, code, "Latitude  float64")
+	assert.Contains(t, code, "Longitude float64")
+}
+
 func TestAsyncAPI_Import_RealWorldGeminiWS(t *testing.T) {
 	geminiPath := filepath.Join("..", "..", "..", "..", "asyncapi-spec", "examples", "websocket-gemini-asyncapi.yml")
 	if _, err := os.Stat(geminiPath); os.IsNotExist(err) {
@@ -263,3 +323,4 @@ func TestAsyncAPI_Import_RealWorldGeminiWS(t *testing.T) {
 		`SendMarketData(ctx context.Context, symbol string, handler func(msg *MarketDataDTO)) (Subscription, error)`,
 	)
 }
+
