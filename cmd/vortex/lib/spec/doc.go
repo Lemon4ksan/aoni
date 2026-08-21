@@ -3,7 +3,7 @@
 // license that can be found in the LICENSE file.
 
 // Package spec provides the canonical, self-documenting registry of all DSL directives,
-// argument specifications, declaration scopes, pipeline stages, and reference contract templates for aoni-gen.
+// argument specifications, declaration scopes, pipeline stages, and reference contract templates for vortex.
 //
 // It acts as the single source of truth (SSOT) shared across the semantic analyzer,
 // CLI documentation viewers, and code generation emitters.

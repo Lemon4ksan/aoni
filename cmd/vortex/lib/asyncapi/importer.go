@@ -21,6 +21,7 @@ type ImportConfig struct {
 	PackageName string
 	ServiceName string
 	OutputFile  string
+	MergeMode   MergeMode // "union", "intersect", "diff"
 }
 
 // ImportResult captures the outcome of an AsyncAPI import pass.
@@ -35,17 +36,12 @@ type ImportResult struct {
 //
 // Reference: AsyncAPI 3.1.0 Specification (https://www.asyncapi.com/docs/reference/specification/v3.1.0)
 func Import(cfg ImportConfig) (*ImportResult, error) {
-	var (
-		doc *Document
-		err error
-	)
-
-	if len(cfg.SpecData) > 0 {
-		doc, err = ParseSpec(cfg.SpecData)
-	} else {
-		doc, err = LoadFile(cfg.SpecFile)
+	mode := cfg.MergeMode
+	if mode == "" {
+		mode = MergeModeUnion
 	}
 
+	doc, err := LoadSpecWithMode(cfg.SpecFile, cfg.SpecData, mode)
 	if err != nil {
 		return nil, fmt.Errorf("loading asyncapi spec: %w", err)
 	}
