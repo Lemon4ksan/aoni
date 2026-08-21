@@ -5,13 +5,18 @@
 package cache
 
 import (
+	"cmp"
 	"encoding/json"
 	"fmt"
+	"maps"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/lemon4ksan/foundation/generic"
 )
 
 // SecretEntry represents a single credentials or session token stored in the local vault.
@@ -65,8 +70,6 @@ func (sc *SecretsConfig) GetHeaderEnv(name string) (string, bool) {
 		return "AUTH_TOKEN", true
 	case "proxy-authorization":
 		return "PROXY_AUTH_TOKEN", true
-	case "x-goog-api-key", "goog-api-key":
-		return "GOOGLE_API_KEY", true
 	}
 
 	// Heuristics for standard API keys and tokens
@@ -188,21 +191,25 @@ func LoadSecrets(startDir string) (*SecretsVault, string, error) {
 	}
 
 	defaultPath := filepath.Join(startDir, ".vortex", "cache", "secrets.json")
-
 	return NewSecretsVault(), defaultPath, nil
 }
 
 // Save persists the vault to disk.
 func (v *SecretsVault) Save(targetPath string) error {
-	v.mu.RLock()
-	defer v.mu.RUnlock()
-
 	dir := filepath.Dir(targetPath)
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return err
 	}
 
-	data, err := json.MarshalIndent(v, "", "  ")
+	var (
+		data []byte
+		err  error
+	)
+
+	generic.WithRLock(&v.mu, func() {
+		data, err = json.MarshalIndent(v, "", "  ")
+	})
+
 	if err != nil {
 		return err
 	}
@@ -217,85 +224,89 @@ func (v *SecretsVault) Set(key, value, origin string) {
 
 // SetWithTarget saves or updates a secret key-value pair with target mapping metadata.
 func (v *SecretsVault) SetWithTarget(key, value, origin, header, query, cookie string) {
-	v.mu.Lock()
-	defer v.mu.Unlock()
+	generic.WithLock(&v.mu, func() {
+		if v.Secrets == nil {
+			v.Secrets = make(map[string]SecretEntry)
+		}
 
-	if v.Secrets == nil {
-		v.Secrets = make(map[string]SecretEntry)
-	}
+		target := ""
+		switch {
+		case header != "":
+			target = "header:" + header
+		case query != "":
+			target = "query:" + query
+		case cookie != "":
+			target = "cookie:" + cookie
+		}
 
-	target := ""
-	switch {
-	case header != "":
-		target = "header:" + header
-	case query != "":
-		target = "query:" + query
-	case cookie != "":
-		target = "cookie:" + cookie
-	}
-
-	v.Secrets[key] = SecretEntry{
-		Key:       key,
-		Value:     value,
-		Masked:    maskSecret(value),
-		Origin:    origin,
-		Header:    header,
-		Query:     query,
-		Cookie:    cookie,
-		Target:    target,
-		UpdatedAt: time.Now(),
-	}
+		v.Secrets[key] = SecretEntry{
+			Key:       key,
+			Value:     value,
+			Masked:    maskSecret(value),
+			Origin:    origin,
+			Header:    header,
+			Query:     query,
+			Cookie:    cookie,
+			Target:    target,
+			UpdatedAt: time.Now(),
+		}
+	})
 }
 
 // Get retrieves a secret value by key.
 func (v *SecretsVault) Get(key string) (string, bool) {
-	v.mu.RLock()
-	defer v.mu.RUnlock()
+	var (
+		val string
+		ok  bool
+	)
 
-	if v.Secrets == nil {
-		return "", false
-	}
+	generic.WithRLock(&v.mu, func() {
+		if v.Secrets == nil {
+			return
+		}
+		entry, exists := v.Secrets[key]
+		if exists {
+			val = entry.Value
+			ok = true
+		}
+	})
 
-	entry, ok := v.Secrets[key]
-	if !ok {
-		return "", false
-	}
-
-	return entry.Value, true
+	return val, ok
 }
 
 // Delete removes a secret by key.
 func (v *SecretsVault) Delete(key string) bool {
-	v.mu.Lock()
-	defer v.mu.Unlock()
+	var exists bool
 
-	if v.Secrets == nil {
-		return false
-	}
-
-	_, exists := v.Secrets[key]
-	delete(v.Secrets, key)
+	generic.WithLock(&v.mu, func() {
+		if v.Secrets == nil {
+			return
+		}
+		_, exists = v.Secrets[key]
+		delete(v.Secrets, key)
+	})
 
 	return exists
 }
 
 // Clear purges all secrets.
 func (v *SecretsVault) Clear() {
-	v.mu.Lock()
-	defer v.mu.Unlock()
-
-	v.Secrets = make(map[string]SecretEntry)
+	generic.WithLock(&v.mu, func() {
+		v.Secrets = make(map[string]SecretEntry)
+	})
 }
 
-// All returns a copy of all secret entries.
+// All returns a copy of all secret entries sorted by key.
 func (v *SecretsVault) All() []SecretEntry {
-	v.mu.RLock()
-	defer v.mu.RUnlock()
+	var res []SecretEntry
 
-	res := make([]SecretEntry, 0, len(v.Secrets))
-	for _, entry := range v.Secrets {
-		res = append(res, entry)
-	}
+	generic.WithRLock(&v.mu, func() {
+		res = slices.Collect(maps.Values(v.Secrets))
+	})
+
+	slices.SortFunc(res, func(a, b SecretEntry) int {
+		return cmp.Compare(a.Key, b.Key)
+	})
 
 	return res
 }
@@ -310,7 +321,6 @@ func maskSecret(val string) string {
 		if len(token) > 10 {
 			return "Bearer " + token[:4] + "..." + token[len(token)-4:]
 		}
-
 		return "Bearer ********"
 	}
 
