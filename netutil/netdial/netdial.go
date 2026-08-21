@@ -489,6 +489,8 @@ func dialHTTPProxy(ctx context.Context, proxyURL *url.URL, forward *net.Dialer, 
 	}
 
 	target := net.JoinHostPort(host, port)
+	// RFC 9112 §3.2.3: The authority-form (host:port) is used exclusively for HTTP CONNECT requests.
+	// RFC 9112 §3.2: HTTP/1.1 client MUST send a Host header matching the target authority.
 	connectReqStr := "CONNECT " + target + " HTTP/1.1\r\nHost: " + target + "\r\n\r\n"
 
 	if _, err := conn.Write([]byte(connectReqStr)); err != nil {
@@ -498,8 +500,10 @@ func dialHTTPProxy(ctx context.Context, proxyURL *url.URL, forward *net.Dialer, 
 
 	br := bufio.NewReader(conn)
 
-	// Pass a Request with Method: CONNECT so http.ReadResponse
-	// recognizes that 2xx CONNECT responses contain no body.
+	// RFC 9112 §6.3 Rule 2: 2xx responses to CONNECT imply the connection becomes a raw tunnel
+	// immediately following the header section; message body and Transfer-Encoding are ignored.
+	// RFC 9931 §8: Proxy clients MUST wait for a 2xx response before forwarding TCP payload data
+	// to prevent Request Smuggling via optimistic protocol transitions.
 	connectReq := &http.Request{
 		Method: http.MethodConnect,
 		URL:    &url.URL{Host: target},
@@ -513,6 +517,8 @@ func dialHTTPProxy(ctx context.Context, proxyURL *url.URL, forward *net.Dialer, 
 
 	_ = resp.Body.Close()
 
+	// RFC 9931 §8: On CONNECT rejection, the connection MUST be closed immediately to prevent
+	// subsequent payload bytes from being misinterpreted as pipelined HTTP/1.1 requests.
 	if resp.StatusCode != http.StatusOK {
 		_ = conn.Close()
 		return nil, fmt.Errorf("%w: CONNECT rejected with status %s", ErrProxyConnectFailed, resp.Status)

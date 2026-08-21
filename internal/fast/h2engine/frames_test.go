@@ -53,7 +53,7 @@ func TestFrameHeaderParseHeaderSymmetry(t *testing.T) {
 	fh.flags = FlagEndHeaders | FlagEndStream
 	fh.stream = 13
 
-	var buf [DefaultFrameSize]byte
+	var buf [defaultFrameSize]byte
 	fh.parseHeader(buf[:])
 
 	parsedFH := AcquireFrameHeader()

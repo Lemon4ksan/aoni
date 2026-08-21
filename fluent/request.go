@@ -29,7 +29,6 @@ import (
 	"github.com/lemon4ksan/aoni/middleware"
 	"github.com/lemon4ksan/aoni/mod"
 	"github.com/lemon4ksan/aoni/netutil"
-	"github.com/lemon4ksan/aoni/netutil/digest"
 	"github.com/lemon4ksan/aoni/option"
 	"github.com/lemon4ksan/aoni/request"
 	"github.com/lemon4ksan/aoni/resiliency"
@@ -388,6 +387,18 @@ func (r *Request) SetDigestAuth(username, password string) *Request {
 	return r
 }
 
+// SetPKCE adds PKCE code_challenge and code_challenge_method parameters for OAuth 2.0 requests (RFC 7636 / RFC 9700).
+func (r *Request) SetPKCE(verifier string, method ...string) *Request {
+	r.appliedMods = append(r.appliedMods, mod.WithPKCE(verifier, method...))
+	return r
+}
+
+// SetPKCEVerifier adds the PKCE code_verifier parameter for OAuth 2.0 token requests (RFC 7636 / RFC 9700).
+func (r *Request) SetPKCEVerifier(verifier string) *Request {
+	r.appliedMods = append(r.appliedMods, mod.WithPKCEVerifier(verifier))
+	return r
+}
+
 // SetOutputFromHeader instructs the request to stream the downloaded file to targetDir using Content-Disposition filenames.
 func (r *Request) SetOutputFromHeader(targetDir string) *Request {
 	r.outputDirectory = targetDir
@@ -551,11 +562,7 @@ func (r *Request) Execute(method, path string) (*http.Response, error) {
 	}
 
 	if r.digestAuth != nil {
-		dt := &digest.Transport{
-			Username: r.digestAuth.username,
-			Password: r.digestAuth.password,
-		}
-		client = request.Configure(client, option.WithEngine(&http.Client{Transport: dt}))
+		client = request.Configure(client, option.WithDigestAuth(r.digestAuth.username, r.digestAuth.password))
 	}
 
 	var stackBuf [stackModCapacity]aoni.RequestModifier

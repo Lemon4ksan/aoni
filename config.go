@@ -41,7 +41,7 @@ const (
 	// for negotiating HTTP/3 over QUIC transport during TLS 1.3 handshakes (RFC 9114).
 	AlpnH3 = "h3"
 
-	// AlpnH2 specifies the ALPN token for negotiating HTTP/2 over TLS 1.2+ (RFC 7540/9113).
+	// AlpnH2 specifies the ALPN token for negotiating HTTP/2 over TLS 1.2+ (RFC 9113 §3.1 & §3.2).
 	AlpnH2 = "h2"
 
 	// AlpnHTTP specifies the ALPN token for negotiating classic HTTP/1.1 over TLS.
@@ -290,6 +290,15 @@ type EngineConfig struct {
 
 	// Protocols maps non-HTTP URL schemes (e.g. ProtocolFile, ProtocolFTP, ProtocolS3, ProtocolBlob) to custom RoundTrippers.
 	Protocols ProtocolMap
+
+	// DigestAuth configures RFC 7616 HTTP Digest Access Authentication credentials for automatic 401 challenge resolution.
+	DigestAuth *DigestAuthConfig
+}
+
+// DigestAuthConfig holds RFC 7616 HTTP Digest Access Authentication credentials.
+type DigestAuthConfig struct {
+	Username string
+	Password string
 }
 
 // ProtocolMap maps URL protocol schemes to custom [http.RoundTripper] handlers.
@@ -313,6 +322,7 @@ func (e EngineConfig) Clone() EngineConfig {
 	cloned.Protocols = e.Protocols.Clone()
 	cloned.ConnectionPool = clonePtr(e.ConnectionPool)
 	cloned.HTTP2Config = clonePtr(e.HTTP2Config)
+	cloned.DigestAuth = clonePtr(e.DigestAuth)
 
 	return cloned
 }
@@ -370,7 +380,7 @@ type HTTP2Config struct {
 	// PingTimeout defines the duration to wait for an HTTP/2 PING ACK before terminating the connection.
 	PingTimeout time.Duration
 
-	// AllowHTTP enables unencrypted HTTP/2 over cleartext TCP (h2c / Prior Knowledge, RFC 7540 §3.4).
+	// AllowHTTP enables unencrypted HTTP/2 over cleartext TCP (Starting HTTP/2 with Prior Knowledge, RFC 9113 §3.3).
 	// When true, allows HTTP/2 framing without TLS handshakes on trusted internal VPCs or local microservices.
 	AllowHTTP bool
 }

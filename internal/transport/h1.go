@@ -16,6 +16,7 @@ import (
 // ErrInvalidHeaderTerminator is returned when HTTP/1.1 header section terminators (\r\n\r\n) are missing or corrupted.
 var ErrInvalidHeaderTerminator = errors.New("transport: invalid or truncated HTTP header section")
 
+// RFC 9112 §2.1 & §2.2: Standard HTTP/1.1 CRLF line terminators.
 const (
 	lineTerminator    = "\r\n"
 	sectionTerminator = "\r\n\r\n"
@@ -42,7 +43,7 @@ func (c *HeaderOrderingConn) Write(b []byte) (int, error) {
 	return c.Conn.Write(b)
 }
 
-// ReorderHeaders reorders header lines in raw HTTP/1.1 wire byte buffers according to order with zero heap allocations.
+// ReorderHeaders reorders header lines in raw HTTP/1.1 wire byte buffers according to order with zero heap allocations (RFC 9112 §2.1 & §3.2).
 func ReorderHeaders(raw []byte, order []string) ([]byte, bool) {
 	headerBytes, body, ok := bytes.Cut(raw, bytesconv.S2B(sectionTerminator))
 	if !ok {

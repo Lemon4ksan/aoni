@@ -10,6 +10,7 @@ import (
 	stdio "io"
 	"mime"
 	"net/http"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -22,9 +23,12 @@ import (
 )
 
 var (
-	ErrConflictingContentLength  = errors.New("aoni: conflicting Content-Length headers detected")
+	// ErrConflictingContentLength signals multiple conflicting Content-Length headers (RFC 9112 §6.3).
+	ErrConflictingContentLength = errors.New("aoni: conflicting Content-Length headers detected")
+	// ErrConflictingLocationHeader signals conflicting Location headers in redirect responses.
 	ErrConflictingLocationHeader = errors.New("aoni: conflicting Location headers detected in response")
-	ErrHeaderInjectionDetected   = errors.New("aoni: CRLF control characters detected in response headers")
+	// ErrHeaderInjectionDetected signals CRLF or null control characters in response headers (RFC 9112 §2.2 & §11.1).
+	ErrHeaderInjectionDetected = errors.New("aoni: CRLF control characters detected in response headers")
 )
 
 func (p *Pipeline[Req, Resp]) postProcessResponse(
@@ -261,17 +265,15 @@ func validateTransferEncodingAndContentLength(resp *http.Response) error {
 	return nil
 }
 
-// validateHeaderInjections scans header keys and values for illegal CRLF and null control characters.
+// validateHeaderInjections scans header keys and values for illegal CRLF and null control characters (RFC 9112 §2.2 & §11.1).
 func validateHeaderInjections(resp *http.Response) error {
 	for k, vv := range resp.Header {
 		if containsControlChars(k) {
 			return ErrHeaderInjectionDetected
 		}
 
-		for i := 0; i < len(vv); i++ {
-			if containsControlChars(vv[i]) {
-				return ErrHeaderInjectionDetected
-			}
+		if slices.ContainsFunc(vv, containsControlChars) {
+			return ErrHeaderInjectionDetected
 		}
 	}
 

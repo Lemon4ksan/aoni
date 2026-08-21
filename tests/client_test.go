@@ -2729,4 +2729,73 @@ func TestClient_AuditFeatures(t *testing.T) {
 		require.NoError(t, err)
 		assert.Equal(t, "Hello, World! Aoni Peek Test", string(fullBody))
 	})
+
+	t.Run("digest_auth_client_option", func(t *testing.T) {
+		t.Parallel()
+
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			auth := r.Header.Get("Authorization")
+			if auth == "" {
+				w.Header().Set("WWW-Authenticate", `Digest realm="TestAPI", nonce="dcd98b7102dd2f0e8b11d0f600bfb0c093", qop="auth"`)
+				w.WriteHeader(http.StatusUnauthorized)
+				return
+			}
+
+			assert.Contains(t, auth, `username="admin"`)
+			assert.Contains(t, auth, `realm="TestAPI"`)
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte("digest-authorized"))
+		}))
+		t.Cleanup(server.Close)
+
+		client := aoni.New(
+			option.WithBaseURL(server.URL),
+			option.WithDigestAuth("admin", "secretpass"),
+		)
+
+		resp, err := client.Get(t.Context(), "/")
+		require.NoError(t, err)
+		defer resp.Body.Close()
+
+		body, err := io.ReadAll(resp.Body)
+		require.NoError(t, err)
+		assert.Equal(t, http.StatusOK, resp.StatusCode)
+		assert.Equal(t, "digest-authorized", string(body))
+	})
+
+	t.Run("pkce_facade_modifiers", func(t *testing.T) {
+		t.Parallel()
+
+		const (
+			verifier  = "dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk"
+			challenge = "E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM"
+		)
+
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			switch r.URL.Path {
+			case "/authorize":
+				assert.Equal(t, challenge, r.URL.Query().Get("code_challenge"))
+				assert.Equal(t, "S256", r.URL.Query().Get("code_challenge_method"))
+				w.WriteHeader(http.StatusOK)
+			case "/token":
+				assert.Equal(t, verifier, r.URL.Query().Get("code_verifier"))
+				w.WriteHeader(http.StatusOK)
+			default:
+				w.WriteHeader(http.StatusNotFound)
+			}
+		}))
+		t.Cleanup(server.Close)
+
+		client := aoni.New(option.WithBaseURL(server.URL))
+
+		respAuth, errAuth := client.Get(t.Context(), "/authorize", aoni.WithPKCE(verifier))
+		require.NoError(t, errAuth)
+		defer respAuth.Body.Close()
+		assert.Equal(t, http.StatusOK, respAuth.StatusCode)
+
+		respToken, errToken := client.Post(t.Context(), "/token", aoni.WithPKCEVerifier(verifier))
+		require.NoError(t, errToken)
+		defer respToken.Body.Close()
+		assert.Equal(t, http.StatusOK, respToken.StatusCode)
+	})
 }

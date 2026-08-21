@@ -30,9 +30,10 @@ import (
 	"github.com/lemon4ksan/aoni/telemetry"
 )
 
+// maxConsecutiveControlFrames bounds consecutive control frames to prevent denial of service (RFC 9113 §10.5).
 const maxConsecutiveControlFrames = 1000
 
-// FrameWithHeaders defines an interface for HTTP/2 frames that carry raw HPACK-encoded header fragments.
+// FrameWithHeaders defines an interface for HTTP/2 frames that carry raw HPACK-encoded header fragments (RFC 9113 §4.3).
 type FrameWithHeaders interface {
 	Headers() []byte
 }
@@ -47,7 +48,7 @@ type ConnOpts struct {
 	Settings            *Settings
 }
 
-// Conn manages a multiplexed HTTP/2 connection over a net.Conn socket.
+// Conn manages a multiplexed HTTP/2 connection over a net.Conn socket (RFC 9113 §3, §4, §5 & §6).
 type Conn struct {
 	c             net.Conn
 	br            *bufio.Reader
@@ -118,7 +119,7 @@ func NewConn(c net.Conn, opts ConnOpts) *Conn {
 
 	nc.windowCond = sync.NewCond(&nc.windowMu)
 	nc.current.Reset()
-	nc.serverS.Reset() // Initialize server settings with default maxStreams = 100 (RFC 7540)
+	nc.serverS.Reset() // Initialize server settings with default maxStreams = 100 (RFC 9113 §6.5.2)
 
 	if opts.Settings != nil {
 		opts.Settings.CopyTo(&nc.current)
@@ -617,8 +618,8 @@ func (c *Conn) writeRequest(ctx *Context) error {
 	}
 
 	if c.nextID >= (1<<31 - 1) {
-		// RFC 7540 §5.1.1: Stream identifiers must be 31-bit unsigned integers.
-		// When reaching 2^31-1, stream identifiers cannot be reused.
+		// RFC 9113 §5.1.1: Stream identifiers must be 31-bit unsigned integers.
+		// When reaching 2^31-1, stream identifiers cannot be reused and connection must close.
 		_ = c.Close()
 		return ErrStreamClosed
 	}
@@ -626,6 +627,7 @@ func (c *Conn) writeRequest(ctx *Context) error {
 	req := ctx.Request
 	hasBody := len(req.Body()) != 0
 
+	// RFC 9113 §5.1.1: Streams initiated by a client MUST use odd-numbered stream identifiers (1, 3, 5, ...).
 	id := c.nextID
 	c.nextID += 2
 	ctx.StreamID = id
@@ -1148,8 +1150,10 @@ func (c *Conn) updateStreamWindow(streamID uint32, inc int32) error {
 	return nil
 }
 
+// handleGoAway processes a received GOAWAY frame (RFC 9113 §6.8 & §8.7).
 func (c *Conn) handleGoAway(ga *GoAway) {
 	lastStreamID := ga.Stream()
+	// RFC 9113 §6.8 & §8.7: Streams with ID > lastStreamID were never processed and are safe for auto-retry.
 	c.purgeStreamsAfterID(lastStreamID, ErrGoAwayRetryable)
 
 	_ = c.Close()
@@ -1178,6 +1182,7 @@ func (c *Conn) writePing() error {
 	return err
 }
 
+// handleSettings applies incoming peer parameters and immediately emits an acknowledgment (RFC 9113 §6.5.3).
 func (c *Conn) handleSettings(st *Settings) {
 	st.CopyTo(&c.serverS)
 	c.serverStreamWindow += c.serverS.MaxWindowSize()
@@ -1191,6 +1196,7 @@ func (c *Conn) handleSettings(st *Settings) {
 	c.out <- fr
 }
 
+// handlePing replies to received PING frames with an identical payload and ACK bit set (RFC 9113 §6.7).
 func (c *Conn) handlePing(ping *Ping) {
 	fr := AcquireFrameHeader()
 
@@ -1262,14 +1268,16 @@ func (c *Conn) readStream(fr *FrameHeader, reqCtx *Context) error {
 	return nil
 }
 
+// handlePushPromise processes incoming server push promises (RFC 9113 §6.6 & §8.4).
 func (c *Conn) handlePushPromise(pp *PushPromise) error {
 	if !c.current.Push() {
 		return nil
 	}
 
 	promisedID := pp.stream
+	// RFC 9113 §5.1.1: Server-initiated streams MUST use even-numbered stream identifiers.
 	if promisedID == 0 || (promisedID%2 != 0) {
-		return NewGoAwayError(ProtocolError, "invalid promised stream id")
+		return NewGoAwayError(ProtocolError, "invalid promised stream id (RFC 9113 §5.1.1)")
 	}
 
 	pushReq := fasthttp.AcquireRequest()

@@ -84,12 +84,13 @@ func getLastChainExpiry(state *tls.ConnectionState) time.Time {
 	return lastChainExpiry
 }
 
+// getTLSVersionName maps the binary TLS version number to a human-readable protocol label (RFC 8996 / RFC 8446).
 func getTLSVersionName(version uint16) string {
 	switch version {
 	case tls.VersionTLS10:
-		return "TLS 1.0"
+		return "TLS 1.0" // Deprecated per RFC 8996 (Historic)
 	case tls.VersionTLS11:
-		return "TLS 1.1"
+		return "TLS 1.1" // Deprecated per RFC 8996 (Historic)
 	case tls.VersionTLS12:
 		return "TLS 1.2"
 	case tls.VersionTLS13:

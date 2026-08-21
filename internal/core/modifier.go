@@ -6,11 +6,10 @@ package core
 
 import (
 	"bytes"
-	"encoding/base64"
 	"io"
 	"net/http"
 
-	"github.com/lemon4ksan/foundation/silicon/bytesconv"
+	"github.com/lemon4ksan/aoni/netutil"
 )
 
 // ModifierType specifies the discrete operation type of a [RequestModifier] value.
@@ -55,10 +54,9 @@ func (m RequestModifier) Apply(req Request) {
 	case ModQuery, ModQueryAdd:
 		req.AddQueryParam(m.Key, m.Value)
 	case ModBearer:
-		req.SetHeader("Authorization", "Bearer "+m.Value)
+		req.SetHeader("Authorization", netutil.FormatBearerAuth(m.Value))
 	case ModBasicAuth:
-		encoded := base64.StdEncoding.EncodeToString(bytesconv.S2B(m.Key + ":" + m.Value))
-		req.SetHeader("Authorization", "Basic "+encoded)
+		req.SetHeader("Authorization", netutil.FormatBasicAuth(m.Key, m.Value))
 	case ModBodyBytes:
 		req.SetBodyBytes(m.Bytes)
 
@@ -123,10 +121,15 @@ func (m RequestModifier) ApplyStd(req *http.Request) {
 			req.Header = make(http.Header)
 		}
 
-		req.Header.Set("Authorization", "Bearer "+m.Value)
+		req.Header.Set("Authorization", netutil.FormatBearerAuth(m.Value))
 
 	case ModBasicAuth:
-		req.SetBasicAuth(m.Key, m.Value)
+		if req.Header == nil {
+			req.Header = make(http.Header)
+		}
+
+		req.Header.Set("Authorization", netutil.FormatBasicAuth(m.Key, m.Value))
+
 	case ModBodyBytes:
 		buf := m.Bytes
 		req.Body = io.NopCloser(bytes.NewReader(buf))

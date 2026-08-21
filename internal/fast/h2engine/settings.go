@@ -7,24 +7,46 @@ package h2engine
 var _ Frame = &Settings{}
 
 const (
-	defaultHeaderTableSize   uint32 = 4096
+	// defaultHeaderTableSize specifies the initial HPACK dynamic table size of 4,096 octets (RFC 9113 §4.3.1 & §6.5.2).
+	defaultHeaderTableSize uint32 = 4096
+
+	// defaultConcurrentStreams specifies the recommended initial concurrency limit of >= 100 streams (RFC 9113 §6.5.2).
 	defaultConcurrentStreams uint32 = 100
-	defaultWindowSize        uint32 = 1<<16 - 1
-	defaultDataFrameSize     uint32 = 1 << 14
-	maxFrameSize             uint32 = 1<<24 - 1
+
+	// defaultWindowSize specifies the initial flow-control window size of 65,535 octets (RFC 9113 §5.2.1, §6.5.2 & §6.9.2).
+	defaultWindowSize uint32 = 1<<16 - 1
+
+	// defaultDataFrameSize specifies the initial maximum frame payload size of 16,384 octets (2^14, RFC 9113 §4.2 & §6.5.2).
+	defaultDataFrameSize uint32 = 1 << 14
+
+	// maxFrameSize specifies the protocol maximum frame payload size of 16,777,215 octets (2^24 - 1, RFC 9113 §4.2 & §6.5.2).
+	maxFrameSize uint32 = 1<<24 - 1
 )
 
 const (
-	HeaderTableSize       uint16 = 0x1
-	EnablePush            uint16 = 0x2
-	MaxConcurrentStreams  uint16 = 0x3
-	MaxWindowSize         uint16 = 0x4
-	MaxFrameSize          uint16 = 0x5
-	MaxHeaderListSize     uint16 = 0x6
-	EnableConnectProtocol uint16 = 0x8 // RFC 8441: SETTINGS_ENABLE_CONNECT_PROTOCOL
+	// HeaderTableSize allows the sender to inform the peer of the maximum HPACK table size (RFC 9113 §6.5.2: SETTINGS_HEADER_TABLE_SIZE, 0x1).
+	HeaderTableSize uint16 = 0x1
+
+	// EnablePush enables or disables HTTP/2 server push (RFC 9113 §6.5.2 & §8.4: SETTINGS_ENABLE_PUSH, 0x2).
+	EnablePush uint16 = 0x2
+
+	// MaxConcurrentStreams limits the maximum number of concurrent active streams (RFC 9113 §6.5.2: SETTINGS_MAX_CONCURRENT_STREAMS, 0x3).
+	MaxConcurrentStreams uint16 = 0x3
+
+	// MaxWindowSize indicates the sender's initial stream-level flow-control window (RFC 9113 §6.5.2: SETTINGS_INITIAL_WINDOW_SIZE, 0x4).
+	MaxWindowSize uint16 = 0x4
+
+	// MaxFrameSize indicates the size of the largest frame payload willing to receive (RFC 9113 §6.5.2: SETTINGS_MAX_FRAME_SIZE, 0x5).
+	MaxFrameSize uint16 = 0x5
+
+	// MaxHeaderListSize advises the peer of the maximum uncompressed field section size (RFC 9113 §6.5.2: SETTINGS_MAX_HEADER_LIST_SIZE, 0x6).
+	MaxHeaderListSize uint16 = 0x6
+
+	// EnableConnectProtocol enables Extended CONNECT for WebSockets over HTTP/2 (RFC 8441 §3: SETTINGS_ENABLE_CONNECT_PROTOCOL, 0x8).
+	EnableConnectProtocol uint16 = 0x8
 )
 
-// Settings manages parameters negotiated between HTTP/2 endpoints.
+// Settings manages parameters negotiated between HTTP/2 endpoints (RFC 9113 §6.5).
 type Settings struct {
 	ack           bool
 	rawSettings   []byte
@@ -96,36 +118,43 @@ func (st *Settings) Read(payload []byte) error {
 func (st *Settings) applySetting(key uint16, val uint32) error {
 	switch key {
 	case HeaderTableSize:
+		// RFC 9113 §6.5.2: SETTINGS_HEADER_TABLE_SIZE
 		st.tableSize = val
 	case EnablePush:
+		// RFC 9113 §6.5.2: SETTINGS_ENABLE_PUSH values other than 0 or 1 MUST be treated as PROTOCOL_ERROR.
 		if val != 0 && val != 1 {
-			return NewGoAwayError(ProtocolError, "wrong value for SETTINGS_ENABLE_PUSH")
+			return NewGoAwayError(ProtocolError, "wrong value for SETTINGS_ENABLE_PUSH (RFC 9113 §6.5.2)")
 		}
 
 		st.enablePush = val != 0
 
 	case MaxConcurrentStreams:
+		// RFC 9113 §6.5.2: SETTINGS_MAX_CONCURRENT_STREAMS
 		st.maxStreams = val
 	case MaxWindowSize:
+		// RFC 9113 §6.5.2: Values above maximum flow-control window (2^31 - 1) MUST be treated as FLOW_CONTROL_ERROR.
 		if val > 1<<31-1 {
-			return NewGoAwayError(FlowControlError, "SETTINGS_INITIAL_WINDOW_SIZE above maximum")
+			return NewGoAwayError(FlowControlError, "SETTINGS_INITIAL_WINDOW_SIZE above maximum (RFC 9113 §6.5.2)")
 		}
 
 		st.windowSize = val
 
 	case MaxFrameSize:
+		// RFC 9113 §6.5.2: Values outside 2^14 (16,384) to 2^24-1 (16,777,215) MUST be treated as PROTOCOL_ERROR.
 		if val < 1<<14 || val > 1<<24-1 {
-			return NewGoAwayError(ProtocolError, "wrong value for SETTINGS_MAX_FRAME_SIZE")
+			return NewGoAwayError(ProtocolError, "wrong value for SETTINGS_MAX_FRAME_SIZE (RFC 9113 §6.5.2)")
 		}
 
 		st.frameSize = val
 
 	case MaxHeaderListSize:
+		// RFC 9113 §6.5.2: SETTINGS_MAX_HEADER_LIST_SIZE
 		st.headerSize = val
 
 	case EnableConnectProtocol:
+		// RFC 8441 §3: SETTINGS_ENABLE_CONNECT_PROTOCOL values other than 0 or 1 MUST be treated as PROTOCOL_ERROR.
 		if val != 0 && val != 1 {
-			return NewGoAwayError(ProtocolError, "wrong value for SETTINGS_ENABLE_CONNECT_PROTOCOL")
+			return NewGoAwayError(ProtocolError, "wrong value for SETTINGS_ENABLE_CONNECT_PROTOCOL (RFC 8441 §3)")
 		}
 
 		st.enableConnect = val == 1
@@ -164,13 +193,15 @@ func (st *Settings) appendSetting(key uint16, val uint32) {
 }
 
 func (st *Settings) Deserialize(fr *FrameHeader) error {
+	// RFC 9113 §6.5: A SETTINGS frame with length other than a multiple of 6 octets MUST be treated as FRAME_SIZE_ERROR.
 	if len(fr.payload)%6 != 0 {
-		return NewGoAwayError(FrameSizeError, "wrong payload for settings")
+		return NewGoAwayError(FrameSizeError, "wrong payload for settings (RFC 9113 §6.5)")
 	}
 
 	st.ack = fr.Flags().Has(FlagAck)
+	// RFC 9113 §6.5: Receipt of a SETTINGS frame with ACK flag set and length != 0 MUST be treated as FRAME_SIZE_ERROR.
 	if st.ack && len(fr.payload) > 0 {
-		return NewGoAwayError(FrameSizeError, "settings with ack and payload")
+		return NewGoAwayError(FrameSizeError, "settings with ack and payload (RFC 9113 §6.5)")
 	}
 
 	return st.Read(fr.payload)

@@ -688,13 +688,13 @@ const (
 	OpNotEqual CheckOperator = "!="
 )
 
-// PathIR represents a parsed URI path or dynamic header template with literal and variable segments.
+// PathIR represents a parsed RFC 6570 URI Template with literal and variable segments (RFC 6570 §2).
 type PathIR struct {
 	RawTemplate string
 	Segments    []PathSegmentIR
 }
 
-// PathSegmentIR represents an individual literal chunk or variable token in a path template.
+// PathSegmentIR represents an individual literal chunk or variable token in an RFC 6570 template (RFC 6570 §2.3).
 type PathSegmentIR struct {
 	IsVariable bool
 	Literal    string

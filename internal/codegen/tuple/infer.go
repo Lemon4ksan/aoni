@@ -224,7 +224,7 @@ func inferRawHeuristicName(val any, index int, path, methodContext string, usedN
 			return "URL", "string"
 		}
 
-		// 2. RFC 4122 — UUIDs (36 characters, 4 hyphens)
+		// 2. RFC 9562 (obsoletes RFC 4122) — UUIDs (36 characters, 4 hyphens)
 		if len(v) == 36 && strings.Count(v, "-") == 4 {
 			if !usedNames["UUID"] {
 				return "UUID", "string"

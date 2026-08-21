@@ -626,16 +626,28 @@ func (c *Client) resolveURL(path string) (*url.URL, error) {
 	return u, nil
 }
 
+// isAbsURL reports whether path begins with an absolute scheme identifier (RFC 3986 §3.1 & §4.3).
 func isAbsURL(path string) bool {
 	return len(path) >= 7 && (strings.HasPrefix(path, "http://") || strings.HasPrefix(path, "https://"))
 }
 
+// hasNoBaseURL reports whether no Base URI has been configured for relative reference resolution (RFC 3986 §5.1.4).
 func (c *Client) hasNoBaseURL() bool {
 	return c.cfg.Defaults.BaseURL == nil || c.cfg.Defaults.BaseURL.Host == ""
 }
 
-// resolveTargetURL resolves path against BaseURL using precomputed zero-allocation string buffers (engine.PreparedConfig).
-// Eliminates url.Parse and string formatting allocations for relative path resolutions on the hot path.
+// resolveTargetURL transforms a relative reference or absolute path against BaseURL (RFC 3986 §5).
+// It utilizes precomputed zero-allocation string buffers ([pipeline.PreparedConfig]) to eliminate
+// url.Parse and fmt.Sprintf allocations on the hot execution path.
+//
+// Protocol Resolution Rules (RFC 3986):
+//   - §4.3 (Absolute URI): If the path already has an absolute HTTP/HTTPS scheme, it bypasses BaseURL.
+//   - §5.1.4 (Default Base URI): If no BaseURL is configured, the path is passed unchanged.
+//   - §5.4 (Normal Resolution): Empty or root path ("" or "/") resolves to the Base URI.
+//   - §5.2.3 (Merge Paths): Absolute-path references (e.g. "/users") are prefixed with the base authority
+//     and base path prefix using zero-allocation slices.
+//   - §5.2.4 (Remove Dot Segments): Dot-segments and relative hierarchical paths (e.g. "../api")
+//     fallback to standard RFC 3986 reference resolution via [net/url.URL.ResolveReference].
 func (c *Client) resolveTargetURL(path string) (string, error) {
 	switch {
 	case isAbsURL(path) || c.hasNoBaseURL():
@@ -650,7 +662,7 @@ func (c *Client) resolveTargetURL(path string) (string, error) {
 	case path[0] == '/' && c.prepared.BaseURLTrimmedString != "":
 		return c.prepared.BaseURLTrimmedString + path, nil
 
-	default: // Non-standard or relative subpaths with dot-segments (e.g. "../api") resolve via RFC 3986 reference
+	default: // Relative subpaths with dot-segments (e.g. "../api") resolve via RFC 3986 §5.2 reference resolution
 		rel, err := furl.Parse(strings.TrimLeft(path, "/"))
 		if err != nil {
 			return "", &Error{Op: "invalid path", Err: ErrInvalidPath}

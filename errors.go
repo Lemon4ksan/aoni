@@ -45,13 +45,13 @@ var (
 	// ErrHedgingBodyNonRepeatable is returned when request hedging attempt cannot duplicate a non-replayable payload stream.
 	ErrHedgingBodyNonRepeatable = errors.New("aoni: request body cannot be duplicated for hedging")
 
-	// ErrConflictingContentLength is returned when a response carries multiple conflicting Content-Length headers (RFC 9112).
+	// ErrConflictingContentLength is returned when a response carries multiple conflicting Content-Length headers (RFC 9112 §6.3).
 	ErrConflictingContentLength = pipeline.ErrConflictingContentLength
 
 	// ErrConflictingLocationHeader is returned when a response carries multiple conflicting Location headers.
 	ErrConflictingLocationHeader = pipeline.ErrConflictingLocationHeader
 
-	// ErrHeaderInjectionDetected is returned when a response header contains CRLF control characters.
+	// ErrHeaderInjectionDetected is returned when a response header contains illegal CRLF/control characters (RFC 9112 §2.2 & §11.1).
 	ErrHeaderInjectionDetected = pipeline.ErrHeaderInjectionDetected
 
 	// ErrNotFound matches any HTTP 404 Not Found response when checked via [errors.Is].
@@ -317,21 +317,21 @@ func (e *APIError) IsClientError() bool {
 	return e != nil && e.StatusCode >= http.StatusBadRequest && e.StatusCode <= 499
 }
 
-// HTTPStatusCategory classifies HTTP status codes into their RFC 9110 standard families.
+// HTTPStatusCategory classifies HTTP status codes into their RFC 9110 standard families (§15).
 type HTTPStatusCategory uint8
 
 const (
 	// CategoryUnknown represents an unclassified or invalid HTTP status code.
 	CategoryUnknown HTTPStatusCategory = iota
-	// CategoryInformational represents 1xx Informational response status codes.
+	// CategoryInformational represents 1xx Informational response status codes (RFC 9110 §15.2).
 	CategoryInformational
-	// CategorySuccess represents 2xx Successful response status codes.
+	// CategorySuccess represents 2xx Successful response status codes (RFC 9110 §15.3).
 	CategorySuccess
-	// CategoryRedirection represents 3xx Redirection response status codes.
+	// CategoryRedirection represents 3xx Redirection response status codes (RFC 9110 §15.4).
 	CategoryRedirection
-	// CategoryClientError represents 4xx Client Error response status codes.
+	// CategoryClientError represents 4xx Client Error response status codes (RFC 9110 §15.5).
 	CategoryClientError
-	// CategoryServerError represents 5xx Server Error response status codes.
+	// CategoryServerError represents 5xx Server Error response status codes (RFC 9110 §15.6).
 	CategoryServerError
 )
 

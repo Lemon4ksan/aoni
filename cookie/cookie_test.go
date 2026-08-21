@@ -211,3 +211,35 @@ func TestProxyIsolatedJar_FindCookie_And_GetCookieValue(t *testing.T) {
 	missingValOpt := jar.GetCookieValue(u, "missing_setting")
 	assert.Equal(t, "default_setting", missingValOpt.ValueOr("default_setting"))
 }
+
+func TestValidateCookiePrefix(t *testing.T) {
+	t.Parallel()
+
+	// __Secure-
+	assert.True(t, cookie.ValidateCookiePrefix(cookie.Cookie{
+		Name:   "__Secure-id",
+		Value:  "val",
+		Secure: true,
+	}))
+	assert.False(t, cookie.ValidateCookiePrefix(cookie.Cookie{
+		Name:   "__Secure-id",
+		Value:  "val",
+		Secure: false,
+	}))
+
+	// __Host-
+	assert.True(t, cookie.ValidateCookiePrefix(cookie.Cookie{
+		Name:   "__Host-id",
+		Value:  "val",
+		Secure: true,
+		Path:   "/",
+		Domain: "",
+	}))
+	assert.False(t, cookie.ValidateCookiePrefix(cookie.Cookie{
+		Name:   "__Host-id",
+		Value:  "val",
+		Secure: true,
+		Path:   "/",
+		Domain: "example.com",
+	}))
+}

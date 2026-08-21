@@ -6,6 +6,7 @@ package aoni
 
 import (
 	"context"
+	"crypto/tls"
 	"errors"
 	"net"
 	"net/http"
@@ -16,6 +17,7 @@ import (
 	"github.com/lemon4ksan/aoni/fingerprint/h2"
 	"github.com/lemon4ksan/aoni/internal/pipeline"
 	"github.com/lemon4ksan/aoni/internal/std"
+	"github.com/lemon4ksan/aoni/netutil/digest"
 )
 
 // ErrNilURL is returned when attempting to route an outbound HTTP request
@@ -161,6 +163,10 @@ func newDefaultTransport() *http.Transport {
 			Timeout:   30 * time.Second,
 			KeepAlive: 30 * time.Second,
 		}).DialContext,
+		// RFC 8996 §4, §5 & RFC 7525 (BCP 195): Deprecating TLS 1.0 and TLS 1.1. Minimum version MUST be TLS 1.2.
+		TLSClientConfig: &tls.Config{
+			MinVersion: tls.VersionTLS12,
+		},
 		ForceAttemptHTTP2:     true,
 		MaxIdleConns:          100,
 		IdleConnTimeout:       90 * time.Second,
@@ -387,6 +393,7 @@ func applyEngineConfig(c *Client, eng EngineConfig) {
 
 	applyRedirectPolicy(httpClient, eng)
 	applyCookieJar(httpClient, eng.CookieJar)
+	applyDigestAuth(httpClient, eng.DigestAuth)
 	applyTransportOverrides(c, eng)
 }
 
@@ -412,6 +419,27 @@ func applyCookieJar(httpClient *http.Client, jar http.CookieJar) {
 	}
 
 	httpClient.Transport = &cookie.Transport{Next: baseTr, CookieJar: pJar}
+}
+
+func applyDigestAuth(httpClient *http.Client, digestCfg *DigestAuthConfig) {
+	if digestCfg == nil || digestCfg.Username == "" {
+		return
+	}
+
+	baseTr := httpClient.Transport
+	if baseTr == nil {
+		baseTr = http.DefaultTransport
+	}
+
+	if dt, ok := baseTr.(*digest.Transport); ok {
+		baseTr = dt.Unwrap()
+	}
+
+	httpClient.Transport = &digest.Transport{
+		Username:  digestCfg.Username,
+		Password:  digestCfg.Password,
+		Transport: baseTr,
+	}
 }
 
 func applyTransportOverrides(c *Client, eng EngineConfig) {

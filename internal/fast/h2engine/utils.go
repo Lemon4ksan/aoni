@@ -16,9 +16,11 @@ import (
 )
 
 var (
+	// http2Preface defines the 24-octet client connection preface string (RFC 9113 §3.4: "PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n").
 	http2Preface = []byte("PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n")
 	prefaceLen   = len(http2Preface)
 
+	// HTTP/2 Request & Response Pseudo-Headers (RFC 9113 §8.3, §8.3.1 & §8.3.2)
 	StringPath          = []byte(":path")
 	StringStatus        = []byte(":status")
 	StringAuthority     = []byte(":authority")
@@ -31,7 +33,7 @@ var (
 	StringHTTP2         = []byte("HTTP/2")
 )
 
-// ReadPreface verifies the connection initialisation preface.
+// ReadPreface verifies the 24-octet connection initialization preface from r (RFC 9113 §3.4).
 func ReadPreface(r io.Reader) bool {
 	b := make([]byte, prefaceLen)
 
@@ -40,13 +42,13 @@ func ReadPreface(r io.Reader) bool {
 	return err == nil && n == prefaceLen && bytes.Equal(b, http2Preface)
 }
 
-// WritePreface writes the HTTP/2 connection preface to w.
+// WritePreface writes the 24-octet HTTP/2 client connection preface to w (RFC 9113 §3.4).
 func WritePreface(w io.Writer) error {
 	_, err := w.Write(http2Preface)
 	return err
 }
 
-// PerformHandshake sends the preface, settings, and initial window update frames.
+// PerformHandshake sends the client connection preface, SETTINGS frame, and initial connection WINDOW_UPDATE (RFC 9113 §3.4, §6.5 & §6.9).
 func PerformHandshake(preface bool, bw *bufio.Writer, st *Settings, maxWin int32) error {
 	if preface {
 		if err := WritePreface(bw); err != nil {
@@ -179,6 +181,7 @@ func fasthttpResponseHeaders(dst *Headers, hp *HPACK, res *fasthttp.Response) {
 		res.Header.SetContentLength(len(res.Body()))
 	}
 
+	// RFC 9113 §8.2.2: Connection-specific headers (Connection, Transfer-Encoding) MUST NOT be sent in HTTP/2.
 	res.Header.Del("Connection")
 	res.Header.Del("Transfer-Encoding")
 

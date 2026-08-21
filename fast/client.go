@@ -8,7 +8,6 @@ package fast
 import (
 	"bytes"
 	"context"
-	"encoding/base64"
 	"io"
 	"net"
 	"net/http"
@@ -24,6 +23,7 @@ import (
 	"github.com/lemon4ksan/aoni"
 	"github.com/lemon4ksan/aoni/internal/experimental"
 	"github.com/lemon4ksan/aoni/internal/pipeline"
+	"github.com/lemon4ksan/aoni/netutil"
 	"github.com/lemon4ksan/aoni/netutil/power"
 	"github.com/lemon4ksan/aoni/telemetry"
 )
@@ -538,7 +538,9 @@ func (c *Client) resolveProtocolHandler(rawURL string) http.RoundTripper {
 	return c.cfg.Engine.Protocols[proto]
 }
 
+// resolveTargetFastURI resolves and sets the request URI using pre-parsed BaseURL bytes with zero allocations (RFC 3986 §3 & §5.2).
 func (c *Client) resolveTargetFastURI(fastReq *fasthttp.Request, path string) error {
+	// Zero-allocation fast path for absolute-path references (RFC 3986 §4.2 & §5.2.3).
 	if len(c.prepared.BaseURLHostBytes) > 0 && len(path) > 0 && path[0] == '/' && (len(path) < 2 || path[1] != '/') {
 		fastReq.URI().SetSchemeBytes(c.prepared.BaseURLSchemeBytes)
 		fastReq.URI().SetHostBytes(c.prepared.BaseURLHostBytes)
@@ -568,22 +570,21 @@ func (c *Client) resolveTargetFastURI(fastReq *fasthttp.Request, path string) er
 	return c.resolveTargetURLFastFallback(fastReq, path)
 }
 
-func (c *Client) resolveTargetURLFastFallback(fastReq *fasthttp.Request, path string) error {
-	var targetURL string
-
+// formatTargetURL computes the target URL string from path and BaseURL (RFC 3986 §5.2 & §5.3).
+func (c *Client) formatTargetURL(path string) (string, error) {
 	switch {
 	case len(path) >= 7 && (strings.HasPrefix(path, "http://") || strings.HasPrefix(path, "https://")):
-		targetURL = path
+		return path, nil
 	case c.prepared.BaseURLTrimmedString != "":
 		switch path == "" || path == "/" {
 		case true:
-			targetURL = c.prepared.BaseURLString
+			return c.prepared.BaseURLString, nil
 		case false:
 			if path[0] == '/' {
-				targetURL = c.prepared.BaseURLTrimmedString + path
-			} else {
-				targetURL = c.prepared.BaseURLTrimmedString + "/" + path
+				return c.prepared.BaseURLTrimmedString + path, nil
 			}
+
+			return c.prepared.BaseURLTrimmedString + "/" + path, nil
 		}
 
 	case c.cfg.Defaults.BaseURL != nil && c.cfg.Defaults.BaseURL.Host != "":
@@ -595,12 +596,20 @@ func (c *Client) resolveTargetURLFastFallback(fastReq *fasthttp.Request, path st
 			cleanPath = "/" + cleanPath
 		}
 
-		targetURL = base.Scheme + "://" + base.Host + basePath + cleanPath
+		return base.Scheme + "://" + base.Host + basePath + cleanPath, nil
 
 	case path == "":
-		return ErrTargetURLEmpty
-	default:
-		targetURL = path
+		return "", ErrTargetURLEmpty
+	}
+
+	return path, nil
+}
+
+// resolveTargetURLFastFallback formats target URL when fast-path byte slices cannot be directly applied (RFC 3986 §5.2 & §5.3).
+func (c *Client) resolveTargetURLFastFallback(fastReq *fasthttp.Request, path string) error {
+	targetURL, err := c.formatTargetURL(path)
+	if err != nil {
+		return err
 	}
 
 	fastReq.SetRequestURI(targetURL)
@@ -608,86 +617,43 @@ func (c *Client) resolveTargetURLFastFallback(fastReq *fasthttp.Request, path st
 	return nil
 }
 
+// resolveTargetURL resolves path against BaseURL and sets it into the generic request adapter (RFC 3986 §5.2).
 func (c *Client) resolveTargetURL(req aoni.Request, path string) error {
-	if fastReqAdapter, ok := req.(*Request); ok && len(c.prepared.BaseURLHostBytes) > 0 && len(path) > 0 &&
-		path[0] == '/' &&
-		(len(path) < 2 || path[1] != '/') {
-		fastReq := fastReqAdapter.req
-		fastReq.URI().SetSchemeBytes(c.prepared.BaseURLSchemeBytes)
-		fastReq.URI().SetHostBytes(c.prepared.BaseURLHostBytes)
-
-		if len(c.prepared.BaseURLCleanPathBytes) > 0 {
-			var stackBuf [256]byte
-
-			needed := len(c.prepared.BaseURLCleanPathBytes) + len(path)
-
-			var pathBuf []byte
-			if needed <= len(stackBuf) {
-				pathBuf = stackBuf[:0]
-			} else {
-				pathBuf = make([]byte, 0, needed)
-			}
-
-			pathBuf = append(pathBuf, c.prepared.BaseURLCleanPathBytes...)
-			pathBuf = append(pathBuf, path...)
-			fastReq.URI().SetPathBytes(pathBuf)
-		} else {
-			fastReq.URI().SetPathBytes(bytesconv.S2B(path))
+	if fastReqAdapter, ok := req.(*Request); ok {
+		if err := c.resolveTargetFastURI(fastReqAdapter.req, path); err != nil {
+			return err
 		}
+
+		c.applyUserinfoAuth(req, bytesconv.B2S(fastReqAdapter.req.URI().FullURI()))
 
 		return nil
 	}
 
-	var targetURL string
-	switch {
-	case len(path) >= 7 && (strings.HasPrefix(path, "http://") ||
-		strings.HasPrefix(path, "https://")):
-		targetURL = path
-	case c.prepared.BaseURLTrimmedString != "":
-		switch path == "" || path == "/" {
-		case true:
-			targetURL = c.prepared.BaseURLString
-		case false:
-			if path[0] == '/' {
-				targetURL = c.prepared.BaseURLTrimmedString + path
-			} else {
-				targetURL = c.prepared.BaseURLTrimmedString + "/" + path
-			}
-		}
-
-	case c.cfg.Defaults.BaseURL != nil && c.cfg.Defaults.BaseURL.Host != "":
-		base := c.cfg.Defaults.BaseURL
-		basePath := strings.TrimSuffix(base.Path, "/")
-
-		cleanPath := path
-		if cleanPath != "" && cleanPath[0] != '/' {
-			cleanPath = "/" + cleanPath
-		}
-
-		targetURL = base.Scheme + "://" + base.Host + basePath + cleanPath
-
-	case path == "":
-		return ErrTargetURLEmpty
-	default:
-		targetURL = path
+	targetURL, err := c.formatTargetURL(path)
+	if err != nil {
+		return err
 	}
 
 	req.SetURL(targetURL)
-
-	if strings.Contains(targetURL, "@") {
-		if parsed, err := url.Parse(targetURL); err == nil && parsed.User != nil {
-			username := parsed.User.Username()
-			password, _ := parsed.User.Password()
-			auth := username + ":" + password
-
-			basicAuth := "Basic " + base64.StdEncoding.EncodeToString(bytesconv.S2B(auth))
-			if req.Header("Authorization") == "" {
-				req.SetHeader("Authorization", basicAuth)
-			}
-		}
-	}
+	c.applyUserinfoAuth(req, targetURL)
 
 	return nil
+}
+
+// applyUserinfoAuth extracts embedded userinfo credentials and sets standard HTTP Basic Auth (RFC 3986 §3.2.1).
+func (c *Client) applyUserinfoAuth(req aoni.Request, targetURL string) {
+	if !strings.Contains(targetURL, "@") {
+		return
+	}
+
+	if parsed, err := url.Parse(targetURL); err == nil && parsed.User != nil {
+		username := parsed.User.Username()
+		password, _ := parsed.User.Password()
+
+		if req.Header("Authorization") == "" {
+			req.SetHeader("Authorization", netutil.FormatBasicAuth(username, password))
+		}
+	}
 }
 
 func (c *Client) executeWithRedirects(
@@ -963,6 +929,8 @@ func isHTTPSDowngrade(u1, u2 *fasthttp.URI) bool {
 	return bytes.EqualFold(u1.Scheme(), []byte("https")) && bytes.EqualFold(u2.Scheme(), []byte("http"))
 }
 
+// applyRedirectMethodAndBody changes request method to GET and scrubs representation/content headers
+// upon 301, 302, and 303 redirects per RFC 9110 §15.4 and §6.4.2.
 func applyRedirectMethodAndBody(statusCode int, req *fasthttp.Request) {
 	switch statusCode {
 	case fasthttp.StatusMovedPermanently, fasthttp.StatusFound, fasthttp.StatusSeeOther:
@@ -972,6 +940,10 @@ func applyRedirectMethodAndBody(statusCode int, req *fasthttp.Request) {
 			req.SetBody(nil)
 			req.Header.Del("Content-Type")
 			req.Header.Del("Content-Length")
+			req.Header.Del("Content-Encoding")
+			req.Header.Del("Content-Language")
+			req.Header.Del("Content-Location")
+			req.Header.Del("Digest")
 		}
 	}
 }

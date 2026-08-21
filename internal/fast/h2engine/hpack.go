@@ -15,17 +15,24 @@ import (
 )
 
 const (
-	indexByte   = 128
+	// indexByte represents the 1-bit MSB pattern (1xxxxxxx) for indexed header field representations (RFC 7541 §6.1).
+	indexByte = 128
+
+	// literalByte represents the 2-bit pattern (01xxxxxx) for literal header field with incremental indexing (RFC 7541 §6.2.1).
 	literalByte = 64
+
+	// noIndexByte represents the 4-bit pattern (0000xxxx / 0001xxxx) for literal header fields without indexing or never indexed (RFC 7541 §6.2.2 & §6.2.3).
 	noIndexByte = 240
-	maxIndex    = 62
+
+	// maxIndex marks the boundary index for dynamic table entries (RFC 7541 §2.3.3 & Appendix A: 61 static entries, dynamic starts at 62).
+	maxIndex = 62
 )
 
 var headerStorage = pool.NewPerPStorage(func() *HeaderField {
 	return &HeaderField{}
 })
 
-// HeaderField represents a key-value header entry inside HPACK tables.
+// HeaderField represents an HTTP header key-value pair inside HPACK static and dynamic indexing tables (RFC 7541 §1.3 & §2.3).
 type HeaderField struct {
 	key      []byte
 	value    []byte
@@ -52,6 +59,8 @@ func (hf *HeaderField) Reset() {
 	hf.value = nil
 	hf.sensible = false
 }
+
+// Size calculates the entry size in octets as len(name) + len(value) + 32 overhead (RFC 7541 §4.1).
 func (hf *HeaderField) Size() uint32       { return uint32(len(hf.key) + len(hf.value) + 32) } //nolint:gosec
 func (hf *HeaderField) Key() string        { return string(hf.key) }
 func (hf *HeaderField) Value() string      { return string(hf.value) }
@@ -143,7 +152,7 @@ var hpackPool = sync.Pool{
 	},
 }
 
-// HPACK manages header compression tables and HPACK encoding/decoding operations (RFC 7541).
+// HPACK manages static and dynamic header compression tables and HPACK encoding/decoding operations (RFC 7541).
 type HPACK struct {
 	DisableCompression  bool
 	DisableDynamicTable bool
@@ -181,8 +190,10 @@ func (hp *HPACK) releaseDynamic() {
 	hp.dynamic = hp.dynamic[:0]
 }
 
+// SetMaxTableSize updates the maximum dynamic table size capacity (RFC 7541 §4.2 & §6.3).
 func (hp *HPACK) SetMaxTableSize(size uint32) { hp.maxTableSize = size }
 
+// DynamicSize computes total dynamic table memory consumption in octets (RFC 7541 §4.1).
 func (hp *HPACK) DynamicSize() (n uint32) {
 	for _, hf := range hp.dynamic {
 		n += hf.Size()
@@ -191,6 +202,7 @@ func (hp *HPACK) DynamicSize() (n uint32) {
 	return n
 }
 
+// addDynamic inserts a new header field into the dynamic table with FIFO ordering and eviction (RFC 7541 §2.3.2 & §4.4).
 func (hp *HPACK) addDynamic(hf *HeaderField) {
 	hf2 := AcquireHeaderField()
 	hf.CopyTo(hf2)
@@ -198,6 +210,7 @@ func (hp *HPACK) addDynamic(hf *HeaderField) {
 	hp.shrink()
 }
 
+// shrink evicts oldest entries from the dynamic table until size is within maxTableSize limit (RFC 7541 §4.3 & §4.4).
 func (hp *HPACK) shrink() {
 	var n int
 
@@ -216,6 +229,7 @@ func (hp *HPACK) shrink() {
 	}
 }
 
+// peek resolves an 1-based index against the unified index address space (RFC 7541 §2.3.3: static 1..61, dynamic 62+).
 func (hp *HPACK) peek(n uint64) *HeaderField {
 	if n < maxIndex {
 		idx := int(n - 1)
@@ -362,21 +376,26 @@ func (hp *HPACK) search(hf *HeaderField) (n uint64, fullMatch bool) {
 	return n, false
 }
 
-// Next parses the next HPACK-encoded header field from byte stream b.
+// Next parses the next HPACK-encoded header field from byte stream b (RFC 7541 §3.2 & §6).
 func (hp *HPACK) Next(hf *HeaderField, b []byte) ([]byte, error) {
 	for len(b) > 0 {
 		c := b[0]
 		switch {
 		case c&indexByte == indexByte:
+			// RFC 7541 §6.1: Indexed Header Field Representation ('1' 1-bit prefix)
 			return hp.decodeIndexed(hf, b)
 		case c&literalByte == literalByte:
+			// RFC 7541 §6.2.1: Literal Header Field with Incremental Indexing ('01' 2-bit prefix)
 			return hp.decodeLiteralIndexed(hf, b)
 		case c&noIndexByte == 16:
+			// RFC 7541 §6.2.3: Literal Header Field Never Indexed ('0001' 4-bit prefix)
 			hf.sensible = true
 			return hp.decodeLiteralNoIndex(hf, b)
 		case c&noIndexByte == 0:
+			// RFC 7541 §6.2.2: Literal Header Field without Indexing ('0000' 4-bit prefix)
 			return hp.decodeLiteralNoIndex(hf, b)
 		case c&32 == 32:
+			// RFC 7541 §6.3: Dynamic Table Size Update ('001' 3-bit prefix)
 			var n uint64
 
 			b, n = readInt(5, b)
@@ -388,12 +407,18 @@ func (hp *HPACK) Next(hf *HeaderField, b []byte) ([]byte, error) {
 	return b, nil
 }
 
+// decodeIndexed decodes an indexed header field representation (RFC 7541 §6.1).
 func (hp *HPACK) decodeIndexed(hf *HeaderField, b []byte) ([]byte, error) {
 	b, n := readInt(7, b)
 
+	if n == 0 {
+		// RFC 7541 §6.1: Index value of 0 is not used and MUST be treated as a decoding error.
+		return b, NewError(FlowControlError, "index value of 0 is forbidden (RFC 7541 §6.1)")
+	}
+
 	hf2 := hp.peek(n)
 	if hf2 == nil {
-		return b, NewError(FlowControlError, fmt.Sprintf("index field not found: %d", n))
+		return b, NewError(FlowControlError, fmt.Sprintf("index field not found: %d (RFC 7541 §2.3.3)", n))
 	}
 
 	hf2.CopyTo(hf)
@@ -401,6 +426,7 @@ func (hp *HPACK) decodeIndexed(hf *HeaderField, b []byte) ([]byte, error) {
 	return b, nil
 }
 
+// decodeLiteralIndexed decodes a literal header field with incremental indexing (RFC 7541 §6.2.1).
 func (hp *HPACK) decodeLiteralIndexed(hf *HeaderField, b []byte) ([]byte, error) {
 	c := b[0]
 
@@ -453,6 +479,7 @@ func (hp *HPACK) decodeLiteralIndexed(hf *HeaderField, b []byte) ([]byte, error)
 	return b, nil
 }
 
+// decodeLiteralNoIndex decodes a literal header field without indexing or never indexed (RFC 7541 §6.2.2 & §6.2.3).
 func (hp *HPACK) decodeLiteralNoIndex(hf *HeaderField, b []byte) ([]byte, error) {
 	c := b[0]
 
@@ -508,11 +535,13 @@ func (hp *HPACK) AppendHeaderField(h *Headers, hf *HeaderField, store bool) {
 	h.rawHeaders = hp.AppendHeader(h.rawHeaders, hf, store)
 }
 
+// AppendHeader encodes hf into dst using the optimal HPACK binary representation (RFC 7541 §6).
 func (hp *HPACK) AppendHeader(dst []byte, hf *HeaderField, store bool) []byte {
 	c := !hp.DisableCompression
 	index, fullMatch := hp.search(hf)
 
 	if fullMatch {
+		// RFC 7541 §6.1: Indexed header field representation
 		dst = append(dst, indexByte)
 		return appendInt(dst, 7, index)
 	}
@@ -521,17 +550,20 @@ func (hp *HPACK) AppendHeader(dst []byte, hf *HeaderField, store bool) []byte {
 
 	switch {
 	case hf.sensible:
+		// RFC 7541 §6.2.3 & §7.1.3: Literal Header Field Never Indexed (protects confidential headers)
 		c = false
 		bits = 4
 
 		dst = append(dst, 16)
 
 	case !store || hp.DisableDynamicTable:
+		// RFC 7541 §6.2.2: Literal Header Field without Indexing
 		bits = 4
 
 		dst = append(dst, 0)
 
-	default: // Incremental indexing (0x40)
+	default:
+		// RFC 7541 §6.2.1: Literal Header Field with Incremental Indexing (0x40)
 		bits = 6
 
 		dst = append(dst, literalByte)
@@ -558,6 +590,7 @@ var bytePool = sync.Pool{
 	},
 }
 
+// readInt decodes an unsigned variable-length integer with an N-bit prefix (RFC 7541 §5.1).
 func readInt(n int, b []byte) ([]byte, uint64) {
 	if len(b) == 0 {
 		return b, 0
@@ -574,6 +607,11 @@ func readInt(n int, b []byte) ([]byte, uint64) {
 
 	for i < len(b) {
 		c := b[i]
+		if i > 10 {
+			// RFC 7541 §5.1 & §7.4: Integer encodings that exceed implementation limits MUST be bounded.
+			break
+		}
+
 		nn |= uint64(c&127) << ((i - 1) * 7)
 		i++
 
@@ -585,6 +623,7 @@ func readInt(n int, b []byte) ([]byte, uint64) {
 	return b[i:], nn + uint64(b0)
 }
 
+// appendInt encodes an unsigned variable-length integer index using an N-bit prefix into dst (RFC 7541 §5.1).
 func appendInt(dst []byte, bits uint8, index uint64) []byte {
 	if len(dst) == 0 {
 		dst = append(dst, 0)
@@ -610,6 +649,7 @@ func appendInt(dst []byte, bits uint8, index uint64) []byte {
 	return dst
 }
 
+// readString decodes an HPACK string literal representation with optional Huffman decoding (RFC 7541 §5.2).
 func readString(dst, b []byte) ([]byte, []byte, error) {
 	if len(b) == 0 {
 		return b, dst, ErrMalformedString
@@ -631,6 +671,7 @@ func readString(dst, b []byte) ([]byte, []byte, error) {
 	return b[n:], dst, nil
 }
 
+// appendString encodes a string literal with optional static Huffman coding and 7-bit length prefix (RFC 7541 §5.2).
 func appendString(dst, src []byte, encode bool) []byte {
 	var (
 		bufPtr  *[]byte
@@ -661,6 +702,7 @@ func appendString(dst, src []byte, encode bool) []byte {
 	return dst
 }
 
+// staticTable defines the 61 predefined HTTP/2 header field entries specified in RFC 7541 Appendix A.
 var staticTable = []*HeaderField{
 	{key: []byte(":authority")},
 	{key: []byte(":method"), value: []byte("GET")},

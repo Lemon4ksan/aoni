@@ -17,14 +17,14 @@ import (
 	"github.com/valyala/fasthttp"
 )
 
-const errCodeH3RequestCancelled = 0x10c
+const errCodeH3RequestCancelled = quic.StreamErrorCode(ErrCodeH3RequestCancelled)
 
 var dataBufPool = generic.NewPool(func() *[]byte {
 	b := make([]byte, 32768)
 	return &b
 })
 
-// ClientConn manages HTTP/3 frame exchanges over a quic.Conn session.
+// ClientConn manages HTTP/3 frame exchanges over a quic.Conn session (RFC 9114 §3, §4, §6 & §7).
 type ClientConn struct {
 	conn     *quic.Conn
 	qpack    *QPACKCodec
@@ -34,7 +34,7 @@ type ClientConn struct {
 	closed    chan struct{}
 }
 
-// NewClientConn initializes an HTTP/3 client connection and opens control streams.
+// NewClientConn initializes an HTTP/3 client connection and opens control streams (RFC 9114 §3.2 & §6.2.1).
 func NewClientConn(conn *quic.Conn, settings *Settings) (*ClientConn, error) {
 	if settings == nil {
 		settings = &Settings{
@@ -51,7 +51,7 @@ func NewClientConn(conn *quic.Conn, settings *Settings) (*ClientConn, error) {
 	}
 
 	if err := cc.setupControlStream(); err != nil {
-		_ = conn.CloseWithError(0x100, "failed control stream setup")
+		_ = conn.CloseWithError(quic.ApplicationErrorCode(ErrCodeH3NoError), "failed control stream setup")
 		return nil, err
 	}
 
@@ -112,7 +112,8 @@ func (cc *ClientConn) handleUnidirectionalStream(str *quic.ReceiveStream) {
 	case StreamTypeQPACKDecoder:
 		return
 	default:
-		str.CancelRead(0x103)
+		// RFC 9114 §6.2: Unknown unidirectional stream types MUST be aborted or discarded.
+		str.CancelRead(quic.StreamErrorCode(ErrCodeH3StreamCreationError))
 	}
 }
 
@@ -140,10 +141,14 @@ func (cc *ClientConn) readControlStream(r quicvarint.Reader) {
 			return
 		}
 
-		// RFC 9114 Section 6.2.1: The first frame on the control stream MUST be SETTINGS
+		// RFC 9114 §6.2.1: The first frame on the control stream MUST be SETTINGS
 		if firstFrame {
 			if frameType != FrameTypeSettings {
-				_ = cc.conn.CloseWithError(0x010a, "H3_MISSING_SETTINGS: first frame must be SETTINGS")
+				_ = cc.conn.CloseWithError(
+					quic.ApplicationErrorCode(ErrCodeH3MissingSettings),
+					"H3_MISSING_SETTINGS: first frame must be SETTINGS (RFC 9114 §6.2.1)",
+				)
+
 				return
 			}
 
@@ -155,9 +160,15 @@ func (cc *ClientConn) readControlStream(r quicvarint.Reader) {
 			st, err := DecodeSettings(r, payloadLen)
 			if err != nil {
 				if errors.Is(err, ErrH3SettingsError) {
-					_ = cc.conn.CloseWithError(0x0109, "H3_SETTINGS_ERROR: reserved H2 setting ID")
+					_ = cc.conn.CloseWithError(
+						quic.ApplicationErrorCode(ErrCodeH3SettingsError),
+						"H3_SETTINGS_ERROR: reserved H2 setting ID (RFC 9114 §7.2.4.1)",
+					)
 				} else {
-					_ = cc.conn.CloseWithError(0x0109, "H3_SETTINGS_ERROR: invalid settings payload")
+					_ = cc.conn.CloseWithError(
+						quic.ApplicationErrorCode(ErrCodeH3SettingsError),
+						"H3_SETTINGS_ERROR: invalid settings payload (RFC 9114 §7.2.4)",
+					)
 				}
 
 				return

@@ -5,7 +5,9 @@
 package mod
 
 import (
+	"fmt"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/lemon4ksan/foundation/silicon/bytesconv"
@@ -14,6 +16,7 @@ import (
 	"github.com/lemon4ksan/aoni/cookie"
 	"github.com/lemon4ksan/aoni/internal/core"
 	"github.com/lemon4ksan/aoni/internal/requestutil"
+	"github.com/lemon4ksan/aoni/netutil"
 )
 
 // WithGRPCWebTimeout constructs an [aoni.RequestModifier] setting standard gRPC-Web timeout headers ("grpc-timeout").
@@ -109,6 +112,40 @@ func WithBasicAuth(username, password string) aoni.RequestModifier {
 	}
 }
 
+// WithPKCE constructs an [aoni.RequestModifier] adding PKCE code_challenge and code_challenge_method
+// parameters for OAuth 2.0 authorization requests per RFC 7636 §4.3 and RFC 9700 §2.1.
+// If method is omitted or empty, S256 is used by default.
+func WithPKCE(verifier string, method ...string) aoni.RequestModifier {
+	m := netutil.CodeChallengeMethodS256
+	if len(method) > 0 && method[0] != "" {
+		m = method[0]
+	}
+
+	challenge, err := netutil.ComputePKCEChallenge(verifier, m)
+	if err != nil {
+		challenge = verifier
+	}
+
+	return aoni.RequestModifier{
+		Kind: core.ModCustom,
+		Fn: func(req aoni.Request) {
+			req.AddQueryParam("code_challenge", challenge)
+			req.AddQueryParam("code_challenge_method", m)
+		},
+	}
+}
+
+// WithPKCEVerifier constructs an [aoni.RequestModifier] adding the code_verifier parameter
+// for OAuth 2.0 token endpoint requests per RFC 7636 §4.5 and RFC 9700 §2.1.
+func WithPKCEVerifier(verifier string) aoni.RequestModifier {
+	return aoni.RequestModifier{
+		Kind: core.ModCustom,
+		Fn: func(req aoni.Request) {
+			req.AddQueryParam("code_verifier", verifier)
+		},
+	}
+}
+
 // WithUserAgent constructs an [aoni.RequestModifier] overriding the standard User-Agent header (RFC 9110 §10.1.5).
 func WithUserAgent(ua string) aoni.RequestModifier {
 	return WithHeader("User-Agent", ua)
@@ -139,9 +176,52 @@ func WithIfMatch(etag string) aoni.RequestModifier {
 	return WithHeader("If-Match", etag)
 }
 
-// WithIfModifiedSince constructs an [aoni.RequestModifier] setting the If-Modified-Since conditional header in HTTP-time format.
+// WithIfModifiedSince constructs an [aoni.RequestModifier] setting the If-Modified-Since conditional header (RFC 9110 §5.6.7 & §13.1.3).
 func WithIfModifiedSince(t time.Time) aoni.RequestModifier {
 	return WithHeader("If-Modified-Since", t.UTC().Format(http.TimeFormat))
+}
+
+// WithIfUnmodifiedSince constructs an [aoni.RequestModifier] setting the If-Unmodified-Since conditional header (RFC 9110 §5.6.7 & §13.1.4).
+func WithIfUnmodifiedSince(t time.Time) aoni.RequestModifier {
+	return WithHeader("If-Unmodified-Since", t.UTC().Format(http.TimeFormat))
+}
+
+// WithRange constructs an [aoni.RequestModifier] setting the Range header for byte-range requests (RFC 9110 §14.2).
+func WithRange(start, end int64) aoni.RequestModifier {
+	if start < 0 {
+		return WithHeader("Range", fmt.Sprintf("bytes=%d", start))
+	}
+
+	if end < 0 {
+		return WithHeader("Range", fmt.Sprintf("bytes=%d-", start))
+	}
+
+	return WithHeader("Range", fmt.Sprintf("bytes=%d-%d", start, end))
+}
+
+// WithIfRangeETag constructs an [aoni.RequestModifier] setting the If-Range header with an entity tag (RFC 9110 §13.1.5).
+func WithIfRangeETag(etag string) aoni.RequestModifier {
+	return WithHeader("If-Range", etag)
+}
+
+// WithIfRangeDate constructs an [aoni.RequestModifier] setting the If-Range header with an HTTP date (RFC 9110 §5.6.7 & §13.1.5).
+func WithIfRangeDate(t time.Time) aoni.RequestModifier {
+	return WithHeader("If-Range", t.UTC().Format(http.TimeFormat))
+}
+
+// WithCacheControl constructs an [aoni.RequestModifier] setting Cache-Control request directives (RFC 9111 §5.2.1).
+func WithCacheControl(directives ...string) aoni.RequestModifier {
+	return WithHeader("Cache-Control", strings.Join(directives, ", "))
+}
+
+// WithNoCache constructs an [aoni.RequestModifier] forcing cache revalidation via "Cache-Control: no-cache" (RFC 9111 §5.2.1.4).
+func WithNoCache() aoni.RequestModifier {
+	return WithHeader("Cache-Control", "no-cache")
+}
+
+// WithNoStore constructs an [aoni.RequestModifier] preventing response caching via "Cache-Control: no-store" (RFC 9111 §5.2.1.5).
+func WithNoStore() aoni.RequestModifier {
+	return WithHeader("Cache-Control", "no-store")
 }
 
 // ============================================================================

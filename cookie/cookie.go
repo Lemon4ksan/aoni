@@ -16,6 +16,13 @@ import (
 	impl "github.com/lemon4ksan/aoni/internal/cookie"
 )
 
+// MaxCookieAgeSeconds defines the maximum recommended cookie lifetime in seconds (400 days / 34,560,000s)
+// as mandated by RFC 6265bis §5.5.
+const (
+	MaxCookieAgeSeconds = impl.MaxCookieAgeSeconds
+	MaxCookieAgeLimit   = impl.MaxCookieAgeLimit
+)
+
 // Cookie represents a browser cookie structure formatted for JSON persistence,
 // including CHIPS (RFC 6265bis) Partitioned attributes and SameSite policies.
 //
@@ -27,12 +34,20 @@ import (
 // Struct values are pass-by-value DTOs; concurrent reads are safe after construction.
 type Cookie = impl.Cookie
 
-// ParseSetCookieHeader parses a raw 'Set-Cookie' header line into a structured [Cookie].
+// ParseSetCookieHeader parses a raw 'Set-Cookie' header line into a structured [Cookie] (RFC 6265 §5.2, RFC 6265bis §5.5 & §5.7).
 func ParseSetCookieHeader(headerVal, defaultDomain, defaultPath string) Cookie {
 	return impl.ParseSetCookieHeader(headerVal, defaultDomain, defaultPath)
 }
 
-// FromStd converts a standard [*http.Cookie] into a structured [Cookie].
+// ValidateCookiePrefix reports whether a cookie satisfies RFC 6265bis §4.1.3 & §5.4 cookie prefix rules:
+//   - "__Secure-": MUST have Secure=true.
+//   - "__Host-": MUST have Secure=true, Path="/", and empty Domain (host-only).
+//   - Nameless cookies whose value begins with "__Secure-" or "__Host-" MUST be rejected (RFC 6265bis §5.7 step 22).
+func ValidateCookiePrefix(c Cookie) bool {
+	return impl.ValidatePrefix(c)
+}
+
+// FromStd converts a standard [*http.Cookie] into a structured [Cookie] (RFC 6265 §5.3).
 func FromStd(c *http.Cookie, defaultDomain, defaultPath string) Cookie {
 	if c == nil {
 		return Cookie{}
@@ -133,7 +148,7 @@ func SortForBrowser(cookies []*http.Cookie) {
 	impl.SortForBrowser(cookies)
 }
 
-// BuildCookieHeader constructs an RFC 6265 compliant 'Cookie' request header string.
+// BuildCookieHeader constructs an RFC 6265 compliant 'Cookie' request header string (RFC 6265 §4.2.1 & §5.4).
 func BuildCookieHeader(cookies []*http.Cookie) string {
 	return impl.BuildCookieHeader(cookies)
 }

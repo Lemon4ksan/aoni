@@ -319,6 +319,43 @@ func TestQPACKForbiddenHeadersFilteringInEncode(t *testing.T) {
 	assert.False(t, hasAccept, "sec-websocket-accept header should be filtered out")
 }
 
+func TestRFC9204AppendixBExamples(t *testing.T) {
+	t.Parallel()
+
+	// RFC 9204 Appendix B.1: Literal Field Line with Static Name Reference
+	// Static table index 0 is ":authority".
+	// Encoded field section prefix: Required Insert Count = 0, Sign = 0, Delta Base = 0 -> 0x00, 0x00
+	// Literal with static name reference (RFC 9204 §4.5.4): '01' | 'N'=0 | 'T'=1 | Index=0 -> 0x50
+	// String literal for value "www.example.com" without Huffman: length 15 (0x0f), "www.example.com"
+	rawBlock := []byte{
+		0x00, 0x00, // Prefix: RIC=0, Base=0
+		0x50, // 0101 0000: Literal with static name ref (index 0 = :authority)
+		0x0f, // Length 15
+		'w', 'w', 'w', '.', 'e', 'x', 'a', 'm', 'p', 'l', 'e', '.', 'c', 'o', 'm',
+		0xd1, // 1101 0001: Indexed static field line (RFC 9204 §4.5.2): T=1, index 17 = ":method: GET"
+		0xd7, // 1101 0111: Indexed static field line (RFC 9204 §4.5.2): T=1, index 23 = ":scheme: https"
+	}
+
+	dec := qpack.NewDecoder()
+	decodeFn := dec.Decode(rawBlock)
+
+	fields := make(map[string]string)
+	for {
+		hf, err := decodeFn()
+		if errors.Is(err, io.EOF) {
+			break
+		}
+
+		require.NoError(t, err)
+
+		fields[hf.Name] = hf.Value
+	}
+
+	assert.Equal(t, "www.example.com", fields[":authority"])
+	assert.Equal(t, "GET", fields[":method"])
+	assert.Equal(t, "https", fields[":scheme"])
+}
+
 func BenchmarkQPACKEncodeRequestHeaders(b *testing.B) {
 	codec := NewQPACKCodec()
 

@@ -10,6 +10,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 	"time"
 
@@ -20,6 +21,7 @@ import (
 	"github.com/lemon4ksan/aoni/codec/decode"
 	"github.com/lemon4ksan/aoni/internal/core"
 	"github.com/lemon4ksan/aoni/internal/pipeline"
+	"github.com/lemon4ksan/aoni/netutil"
 )
 
 // DefaultClient is the shared, package-level [Client] instance used for direct single-line calls.
@@ -243,14 +245,12 @@ func FetchTyped[T any](
 ) (generic.TypedResult[T, *APIError], *http.Response) {
 	resp, err := DefaultClient.Get(ctx, path, mods...) //nolint:bodyclose
 	if err != nil {
-		var zero T
-		return AsTypedResult(zero, err), resp
+		return AsTypedResult(generic.Zero[T](), err), resp
 	}
 
 	target, decodeErr := decodeResponseTo[T](resp)
 	if decodeErr != nil {
-		var zero T
-		return AsTypedResult(zero, decodeErr), resp
+		return AsTypedResult(generic.Zero[T](), decodeErr), resp
 	}
 
 	return generic.SuccessTyped[T, *APIError](*target), resp
@@ -268,14 +268,13 @@ func Scoped[T any](client *Client, fn func(*Client) (T, error), opts ...ClientOp
 	defer scopedClient.Close()
 
 	if fn == nil {
-		var zero T
-		return zero, nil
+		return generic.Zero[T](), nil
 	}
 
 	return fn(scopedClient)
 }
 
-// WithHeader constructs an [aoni.RequestModifier] setting a single request header key to value.
+// WithHeader constructs an [RequestModifier] setting a single request header key to value.
 func WithHeader(key, value string) RequestModifier {
 	return RequestModifier{
 		Kind:  core.ModHeader,
@@ -284,7 +283,7 @@ func WithHeader(key, value string) RequestModifier {
 	}
 }
 
-// WithHeaders constructs an [aoni.RequestModifier] bulk-setting multiple HTTP request headers from a map.
+// WithHeaders constructs an [RequestModifier] bulk-setting multiple HTTP request headers from a map.
 func WithHeaders(headers map[string]string) RequestModifier {
 	return RequestModifier{
 		Kind: core.ModCustom,
@@ -296,7 +295,7 @@ func WithHeaders(headers map[string]string) RequestModifier {
 	}
 }
 
-// WithBearer constructs an [aoni.RequestModifier] setting an "Authorization: Bearer <token>" header (RFC 6750 §2.1).
+// WithBearer constructs an [RequestModifier] setting an "Authorization: Bearer <token>" header (RFC 6750 §2.1).
 func WithBearer(token string) RequestModifier {
 	return RequestModifier{
 		Kind:  core.ModBearer,
@@ -304,7 +303,7 @@ func WithBearer(token string) RequestModifier {
 	}
 }
 
-// WithBasicAuth constructs an [aoni.RequestModifier] setting HTTP Basic Authentication credentials (RFC 7617).
+// WithBasicAuth constructs an [RequestModifier] setting HTTP Basic Authentication credentials (RFC 7617).
 func WithBasicAuth(username, password string) RequestModifier {
 	return RequestModifier{
 		Kind:  core.ModBasicAuth,
@@ -313,7 +312,40 @@ func WithBasicAuth(username, password string) RequestModifier {
 	}
 }
 
-// WithTimeout constructs an [aoni.RequestModifier] attaching a deadline timeout to the request context.
+// WithPKCE constructs an [RequestModifier] adding PKCE code_challenge and code_challenge_method
+// parameters for OAuth 2.0 authorization requests per RFC 7636 §4.3 and RFC 9700 §2.1.
+// If method is omitted or empty, S256 is used by default.
+func WithPKCE(verifier string, method ...string) RequestModifier {
+	m := netutil.CodeChallengeMethodS256
+	if len(method) > 0 && method[0] != "" {
+		m = method[0]
+	}
+
+	if challenge, err := netutil.ComputePKCEChallenge(verifier, m); err == nil {
+		verifier = challenge
+	}
+
+	return RequestModifier{
+		Kind: core.ModCustom,
+		Fn: func(req Request) {
+			req.AddQueryParam("code_challenge", verifier)
+			req.AddQueryParam("code_challenge_method", m)
+		},
+	}
+}
+
+// WithPKCEVerifier constructs an [RequestModifier] adding the code_verifier parameter
+// for OAuth 2.0 token endpoint requests per RFC 7636 §4.5 and RFC 9700 §2.1.
+func WithPKCEVerifier(verifier string) RequestModifier {
+	return RequestModifier{
+		Kind: core.ModCustom,
+		Fn: func(req Request) {
+			req.AddQueryParam("code_verifier", verifier)
+		},
+	}
+}
+
+// WithTimeout constructs an [RequestModifier] attaching a deadline timeout to the request context.
 func WithTimeout(d time.Duration) RequestModifier {
 	return RequestModifier{
 		Kind: core.ModCustom,
@@ -325,7 +357,7 @@ func WithTimeout(d time.Duration) RequestModifier {
 	}
 }
 
-// WithRetry constructs an [aoni.RequestModifier] setting the maximum retry attempts for the request.
+// WithRetry constructs an [RequestModifier] setting the maximum retry attempts for the request.
 func WithRetry(attempts int) RequestModifier {
 	policy := core.RetryOverride{MaxAttempts: attempts}
 	if policy.MaxAttempts < 1 {
@@ -340,22 +372,61 @@ func WithRetry(attempts int) RequestModifier {
 	}
 }
 
-// WithUserAgent constructs an [aoni.RequestModifier] setting the User-Agent header (RFC 9110 §10.1.5).
+// WithUserAgent constructs an [RequestModifier] setting the User-Agent header (RFC 9110 §10.1.5).
 func WithUserAgent(ua string) RequestModifier {
 	return WithHeader("User-Agent", ua)
 }
 
-// WithContentType constructs an [aoni.RequestModifier] overriding the Content-Type header (RFC 9110 §8.3).
+// WithContentType constructs an [RequestModifier] overriding the Content-Type header (RFC 9110 §8.3).
 func WithContentType(ct string) RequestModifier {
 	return WithHeader("Content-Type", ct)
 }
 
-// WithAccept constructs an [aoni.RequestModifier] overriding the Accept header (RFC 9110 §12.5.1).
+// WithAccept constructs an [RequestModifier] overriding the Accept header (RFC 9110 §12.5.1).
 func WithAccept(accept string) RequestModifier {
 	return WithHeader("Accept", accept)
 }
 
-// WithBaseURL returns an [aoni.ClientOption] configuring the default base URL for all relative requests.
+// WithIfModifiedSince constructs an [RequestModifier] setting the If-Modified-Since header (RFC 9110 §5.6.7 & §13.1.3).
+func WithIfModifiedSince(t time.Time) RequestModifier {
+	return WithHeader("If-Modified-Since", t.UTC().Format(http.TimeFormat))
+}
+
+// WithIfUnmodifiedSince constructs an [RequestModifier] setting the If-Unmodified-Since header (RFC 9110 §5.6.7 & §13.1.4).
+func WithIfUnmodifiedSince(t time.Time) RequestModifier {
+	return WithHeader("If-Unmodified-Since", t.UTC().Format(http.TimeFormat))
+}
+
+// WithRange constructs an [RequestModifier] setting the Range header for byte-range requests (RFC 9110 §14.2).
+func WithRange(start, end int64) RequestModifier {
+	if start < 0 {
+		return WithHeader("Range", "bytes="+strconv.FormatInt(start, 10))
+	}
+
+	if end < 0 {
+		return WithHeader("Range", "bytes="+strconv.FormatInt(start, 10)+"-")
+	}
+
+	return WithHeader("Range", "bytes="+strconv.FormatInt(start, 10)+"-"+strconv.FormatInt(end, 10))
+}
+
+// WithCacheControl constructs an [RequestModifier] setting Cache-Control request directives (RFC 9111 §5.2.1).
+func WithCacheControl(directives ...string) RequestModifier {
+	return WithHeader("Cache-Control", strings.Join(directives, ", "))
+}
+
+// WithNoCache constructs an [RequestModifier] forcing cache revalidation via "Cache-Control: no-cache" (RFC 9111 §5.2.1.4).
+func WithNoCache() RequestModifier {
+	return WithHeader("Cache-Control", "no-cache")
+}
+
+// WithNoStore constructs an [RequestModifier] preventing response caching via "Cache-Control: no-store" (RFC 9111 §5.2.1.5).
+func WithNoStore() RequestModifier {
+	return WithHeader("Cache-Control", "no-store")
+}
+
+// WithBaseURL returns an [ClientOption] configuring the default Base URI for relative requests (RFC 3986 §5.1).
+// Ensures a trailing slash per RFC 3986 §5.2.3 to preserve hierarchical base path segments during relative path resolution.
 func WithBaseURL(raw string) ClientOption {
 	return func(cfg *Config) {
 		if raw == "" {
@@ -377,14 +448,14 @@ func WithBaseURL(raw string) ClientOption {
 	}
 }
 
-// WithClientTimeout returns an [aoni.ClientOption] configuring the default timeout duration for requests.
+// WithClientTimeout returns an [ClientOption] configuring the default timeout duration for requests.
 func WithClientTimeout(d time.Duration) ClientOption {
 	return func(cfg *Config) {
 		cfg.Engine.Timeout = d
 	}
 }
 
-// WithClientUserAgent returns an [aoni.ClientOption] setting the default User-Agent header for all requests.
+// WithClientUserAgent returns an [ClientOption] setting the default User-Agent header for all requests.
 func WithClientUserAgent(ua string) ClientOption {
 	return func(cfg *Config) {
 		if cfg.Defaults.Headers == nil {
@@ -395,28 +466,28 @@ func WithClientUserAgent(ua string) ClientOption {
 	}
 }
 
-// WithChrome returns an [aoni.ClientOption] setting the browser profile to Google Chrome.
+// WithChrome returns an [ClientOption] setting the browser profile to Google Chrome.
 func WithChrome() ClientOption {
 	return func(cfg *Config) {
 		cfg.Fingerprint.BrowserID = BrowserChrome
 	}
 }
 
-// WithFirefox returns an [aoni.ClientOption] setting the browser profile to Mozilla Firefox.
+// WithFirefox returns an [ClientOption] setting the browser profile to Mozilla Firefox.
 func WithFirefox() ClientOption {
 	return func(cfg *Config) {
 		cfg.Fingerprint.BrowserID = BrowserFirefox
 	}
 }
 
-// WithSafari returns an [aoni.ClientOption] setting the browser profile to Apple Safari.
+// WithSafari returns an [ClientOption] setting the browser profile to Apple Safari.
 func WithSafari() ClientOption {
 	return func(cfg *Config) {
 		cfg.Fingerprint.BrowserID = BrowserSafari
 	}
 }
 
-// WithSoftErrorDetector returns an [aoni.ClientOption] registering callbacks that sniff initial
+// WithSoftErrorDetector returns an [ClientOption] registering callbacks that sniff initial
 // response body bytes to catch application-level soft errors without draining or consuming the body stream.
 func WithSoftErrorDetector(detectors ...SoftErrorDetector) ClientOption {
 	return func(cfg *Config) {
@@ -424,14 +495,14 @@ func WithSoftErrorDetector(detectors ...SoftErrorDetector) ClientOption {
 	}
 }
 
-// WithBlockRedirectTo returns an [aoni.ClientOption] that halts redirects to matching URLs (e.g. "/login").
+// WithBlockRedirectTo returns an [ClientOption] that halts redirects to matching URLs (e.g. "/login").
 func WithBlockRedirectTo(patterns ...string) ClientOption {
 	return func(cfg *Config) {
 		cfg.Engine.CheckRedirect = BlockPathRedirectPolicy(patterns...)
 	}
 }
 
-// WithSmartBody constructs an [aoni.RequestModifier] that dynamically inspects and serializes arbitrary payloads.
+// WithSmartBody constructs an [RequestModifier] that dynamically inspects and serializes arbitrary payloads.
 //
 // # Serialization Matrix & Content-Type Resolution
 //

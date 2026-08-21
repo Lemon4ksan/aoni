@@ -21,7 +21,7 @@ import (
 )
 
 const (
-	// DefaultMASQUEPathPrefix specifies the RFC 9484 default well-known path for IP proxying.
+	// DefaultMASQUEPathPrefix specifies the well-known path prefix for IP proxying (RFC 9484, RFC 8615, RFC 8820 §2.3).
 	DefaultMASQUEPathPrefix = "/.well-known/masque/ip/"
 
 	// ConnectIPUpgradeToken specifies the RFC 9484 HTTP upgrade token.

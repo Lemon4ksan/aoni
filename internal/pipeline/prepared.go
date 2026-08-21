@@ -21,7 +21,7 @@ type PrecomputedHeader struct {
 }
 
 // PreparedConfig holds immutable precomputed configuration values, wire-format header blocks,
-// ALPN token slices, and client hint headers.
+// ALPN token slices, and pre-decomposed URI components (RFC 3986 §3).
 type PreparedConfig struct {
 	BaseURLTrimmedBytes       []byte
 	BaseURLCleanPathBytes     []byte
@@ -39,7 +39,8 @@ type PreparedConfig struct {
 	FastPathCapable           bool
 }
 
-// NewPreparedConfig constructs an immutable [PreparedConfig].
+// NewPreparedConfig constructs an immutable [PreparedConfig], pre-parsing the Base URI into its
+// scheme (§3.1), host/authority (§3.2), and clean path (§3.3) components for zero-allocation recomposition.
 func NewPreparedConfig(baseURL *url.URL, headers ...http.Header) PreparedConfig {
 	prep := PreparedConfig{
 		BaseURL:         baseURL,

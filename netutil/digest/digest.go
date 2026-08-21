@@ -19,6 +19,8 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+
+	"github.com/lemon4ksan/aoni/netutil"
 )
 
 var (
@@ -126,6 +128,20 @@ func (dt *Transport) RoundTrip(req *http.Request) (*http.Response, error) {
 	req2.Header.Set("Authorization", auth)
 
 	return tr.RoundTrip(req2)
+}
+
+// Unwrap returns the underlying wrapped [http.RoundTripper].
+func (dt *Transport) Unwrap() http.RoundTripper {
+	return dt.Transport
+}
+
+// CloneTransport creates a deep copy of the [Transport] wrapping the specified next [http.RoundTripper].
+func (dt *Transport) CloneTransport(next http.RoundTripper) http.RoundTripper {
+	return &Transport{
+		Username:  dt.Username,
+		Password:  dt.Password,
+		Transport: next,
+	}
 }
 
 func (dt *Transport) cloneReq(r *http.Request, first bool) *http.Request {
@@ -319,7 +335,7 @@ func (dc *digestChallenge) setValue(k, v string) error {
 		}
 
 	case "charset":
-		if strings.ToUpper(v) != "UTF-8" {
+		if v != "" && strings.ToUpper(v) != "UTF-8" {
 			return ErrDigestInvalidCharset
 		}
 	case "nc":
@@ -331,9 +347,10 @@ func (dc *digestChallenge) setValue(k, v string) error {
 		dc.nc = int(nc)
 
 	case "userhash":
-		dc.userHash = v
+		dc.userHash = strings.ToLower(v)
 	default:
-		return ErrDigestBadChallenge
+		// RFC 7616 §3.3: Unknown parameters MUST be ignored by recipients
+		return nil
 	}
 
 	return nil
@@ -438,13 +455,27 @@ func (dc *digestCredentials) ha2() string {
 func (dc *digestCredentials) String() string {
 	sl := make([]string, 0, 10)
 
-	// RFC 7616 Section 3.4.4: Compute userhash without mutating the original dc.username
-	displayUsername := dc.username
+	// RFC 7616 §3.4.4 & §4: Username formatting (userhash, standard quoted-string, or extended username*)
 	if dc.userHash == "true" {
-		displayUsername = dc.h(dc.username + ":" + dc.realm)
+		displayUsername := dc.h(dc.username + ":" + dc.realm)
+		sl = append(sl, `username="`+displayUsername+`"`)
+	} else {
+		isASCII := true
+		for _, r := range dc.username {
+			if r > 127 || r == '"' || r == '\\' {
+				isASCII = false
+				break
+			}
+		}
+
+		if isASCII {
+			sl = append(sl, `username="`+dc.username+`"`)
+		} else {
+			// RFC 7616 §3.4 & §4 & RFC 8187: Extended notation username*=UTF-8''...
+			sl = append(sl, "username*="+netutil.EncodeRFC8187(dc.username, ""))
+		}
 	}
 
-	sl = append(sl, `username="`+displayUsername+`"`)
 	sl = append(sl, `realm="`+dc.realm+`"`)
 	sl = append(sl, `nonce="`+dc.nonce+`"`)
 	sl = append(sl, `uri="`+dc.uri+`"`)
@@ -463,7 +494,7 @@ func (dc *digestCredentials) String() string {
 		sl = append(sl, `cnonce="`+dc.cnonce+`"`)
 	}
 
-	if dc.userHash == "true" {
+	if dc.userHash != "" {
 		sl = append(sl, "userhash="+dc.userHash)
 	}
 

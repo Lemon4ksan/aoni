@@ -69,6 +69,7 @@ func (r *dummyRequest) SetQueryParam(k, v string) {
 	r.httpReq.URL.RawQuery = q.Encode()
 }
 func (r *dummyRequest) SetQueryParamBytes(k, v []byte) { r.SetQueryParam(string(k), string(v)) }
+func (r *dummyRequest) QueryParam(key string) string   { return r.httpReq.URL.Query().Get(key) }
 func (r *dummyRequest) Header(key string) string       { return r.httpReq.Header.Get(key) }
 func (r *dummyRequest) HeaderBytes(key []byte) []byte {
 	return []byte(r.httpReq.Header.Get(string(key)))
@@ -190,8 +191,26 @@ func TestMod_HeadersAndAuthModifiers(t *testing.T) {
 
 		req2 := newDummyRequest()
 		mod.WithBasicAuth("admin", "secret123").Apply(req2)
-		assert.True(t, len(req2.Header("Authorization")) > 0)
-		assert.True(t, req2.Header("Authorization") != "Bearer secret-token-xyz")
+		assert.Equal(t, "Basic YWRtaW46c2VjcmV0MTIz", req2.Header("Authorization"))
+	})
+
+	t.Run("pkce_modifiers", func(t *testing.T) {
+		t.Parallel()
+
+		// Test Vector from RFC 7636 Appendix B
+		const (
+			verifier  = "dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk"
+			challenge = "E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM"
+		)
+
+		reqAuth := newDummyRequest()
+		mod.WithPKCE(verifier).Apply(reqAuth)
+		assert.Equal(t, challenge, reqAuth.QueryParam("code_challenge"))
+		assert.Equal(t, "S256", reqAuth.QueryParam("code_challenge_method"))
+
+		reqToken := newDummyRequest()
+		mod.WithPKCEVerifier(verifier).Apply(reqToken)
+		assert.Equal(t, verifier, reqToken.QueryParam("code_verifier"))
 	})
 
 	t.Run("dynamic_header", func(t *testing.T) {

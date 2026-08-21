@@ -29,7 +29,7 @@ import (
 const (
 	websocketMagicGUID = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"
 
-	// WellKnownPrefix specifies the RFC 5785 / RFC 8307 path prefix for well-known URIs.
+	// WellKnownPrefix specifies the well-known URI prefix per RFC 8615 and RFC 8820 §2.3 (RFC 8307 for WebSocket discovery).
 	WellKnownPrefix = "/.well-known/"
 )
 
@@ -311,6 +311,8 @@ func tryH2ExtendedConnect(
 	return wsConn, resp, true
 }
 
+// performHTTP1Handshake executes the HTTP/1.1 WebSocket Upgrade request and verifies 101 Switching Protocols.
+// RFC 9931 §6.2 & RFC 6455 §4.1: Clients MUST wait for 101 Switching Protocols confirmation before sending WebSocket frames.
 func performHTTP1Handshake(
 	ctx context.Context,
 	conn net.Conn,

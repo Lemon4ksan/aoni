@@ -97,7 +97,13 @@ func TestOption_Headers_And_Auth(t *testing.T) {
 
 		cfgBasic := &aoni.Config{}
 		option.WithBasicAuth("admin", "pass123")(cfgBasic)
-		assert.True(t, len(cfgBasic.Defaults.Headers.Get("Authorization")) > 0)
+		assert.Equal(t, "Basic YWRtaW46cGFzczEyMw==", cfgBasic.Defaults.Headers.Get("Authorization"))
+
+		cfgDigest := &aoni.Config{}
+		option.WithDigestAuth("user", "passwd")(cfgDigest)
+		require.NotNil(t, cfgDigest.Engine.DigestAuth)
+		assert.Equal(t, "user", cfgDigest.Engine.DigestAuth.Username)
+		assert.Equal(t, "passwd", cfgDigest.Engine.DigestAuth.Password)
 	})
 
 	t.Run("dynamic_header_function", func(t *testing.T) {

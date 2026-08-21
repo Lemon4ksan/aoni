@@ -669,6 +669,52 @@ func TestFluent_DigestAuth_RFC7616(t *testing.T) {
 	assert.Equal(t, "digest success!", string(body))
 }
 
+func TestFluent_PKCE_OAuth2(t *testing.T) {
+	t.Parallel()
+
+	const (
+		verifier  = "dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk"
+		challenge = "E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM"
+	)
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/authorize":
+			assert.Equal(t, challenge, r.URL.Query().Get("code_challenge"))
+			assert.Equal(t, "S256", r.URL.Query().Get("code_challenge_method"))
+			w.WriteHeader(http.StatusOK)
+		case "/token":
+			assert.Equal(t, verifier, r.URL.Query().Get("code_verifier"))
+			w.WriteHeader(http.StatusOK)
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	t.Cleanup(server.Close)
+
+	client := aoni.NewClient(server.Client(), option.WithBaseURL(server.URL))
+
+	// 1. Authorization Request with PKCE
+	respAuth, errAuth := fluent.R(client).
+		SetPKCE(verifier).
+		Get("/authorize")
+	require.NoError(t, errAuth)
+
+	defer respAuth.Body.Close()
+
+	assert.Equal(t, http.StatusOK, respAuth.StatusCode)
+
+	// 2. Token Exchange Request with PKCE Verifier
+	respToken, errToken := fluent.R(client).
+		SetPKCEVerifier(verifier).
+		Post("/token")
+	require.NoError(t, errToken)
+
+	defer respToken.Body.Close()
+
+	assert.Equal(t, http.StatusOK, respToken.StatusCode)
+}
+
 func TestFluent_Download_Shortcut(t *testing.T) {
 	t.Parallel()
 

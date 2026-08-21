@@ -5,7 +5,6 @@
 package option
 
 import (
-	"encoding/base64"
 	"encoding/json"
 	"net/http"
 	"net/url"
@@ -15,9 +14,14 @@ import (
 
 	"github.com/lemon4ksan/aoni"
 	"github.com/lemon4ksan/aoni/mod"
+	"github.com/lemon4ksan/aoni/netutil"
 )
 
-// WithBaseURL returns an [aoni.ClientOption] setting the default base URL for resolving relative request paths.
+// WithBaseURL returns an [aoni.ClientOption] setting the default Base URI for resolving relative request paths (RFC 3986 §5.1).
+//
+// In accordance with RFC 3986 §5.2.3 (Merge Paths) and §6.2.3 (Scheme-Based Normalization),
+// a trailing slash is ensured so that relative paths (e.g. "users") are resolved as subpaths
+// within the base directory rather than replacing the final path segment of the Base URI.
 func WithBaseURL(raw string) aoni.ClientOption {
 	return func(cfg *aoni.Config) {
 		if raw == "" {
@@ -110,45 +114,36 @@ func WithOrigin(origin string) aoni.ClientOption {
 	}
 }
 
-// WithBearer returns an [aoni.ClientOption] setting a default "Authorization: Bearer <token>" header.
+// WithBearer returns an [aoni.ClientOption] setting a default "Authorization: Bearer <token>" header (RFC 6750 §2.1).
 func WithBearer(token string) aoni.ClientOption {
 	return func(cfg *aoni.Config) {
 		if cfg.Defaults.Headers == nil {
 			cfg.Defaults.Headers = make(http.Header)
 		}
 
-		cfg.Defaults.Headers.Set("Authorization", "Bearer "+token)
+		cfg.Defaults.Headers.Set("Authorization", netutil.FormatBearerAuth(token))
 	}
 }
 
-// WithBasicAuth returns an [aoni.ClientOption] setting default HTTP Basic Authentication credentials.
+// WithBasicAuth returns an [aoni.ClientOption] setting default HTTP Basic Authentication credentials (RFC 7617).
 func WithBasicAuth(username, password string) aoni.ClientOption {
 	return func(cfg *aoni.Config) {
 		if cfg.Defaults.Headers == nil {
 			cfg.Defaults.Headers = make(http.Header)
 		}
 
-		totalLen := len(username) + 1 + len(password)
-		if totalLen <= 128 {
-			var buf [128]byte
+		cfg.Defaults.Headers.Set("Authorization", netutil.FormatBasicAuth(username, password))
+	}
+}
 
-			n := copy(buf[:], username)
-			buf[n] = ':'
-			copy(buf[n+1:], password)
-
-			cfg.Defaults.Headers.Set(
-				"Authorization",
-				"Basic "+base64.StdEncoding.EncodeToString(buf[:totalLen]),
-			)
-
-			return
+// WithDigestAuth returns an [aoni.ClientOption] enabling RFC 7616 HTTP Digest Access Authentication
+// for transparently resolving HTTP 401 Digest challenges.
+func WithDigestAuth(username, password string) aoni.ClientOption {
+	return func(cfg *aoni.Config) {
+		cfg.Engine.DigestAuth = &aoni.DigestAuthConfig{
+			Username: username,
+			Password: password,
 		}
-
-		auth := username + ":" + password
-		cfg.Defaults.Headers.Set(
-			"Authorization",
-			"Basic "+base64.StdEncoding.EncodeToString([]byte(auth)),
-		)
 	}
 }
 

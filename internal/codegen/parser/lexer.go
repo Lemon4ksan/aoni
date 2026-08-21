@@ -193,8 +193,8 @@ func unquote(s string) string {
 	return s
 }
 
-// ParsePathTemplate decomposes a URL template string like "/users/{id}/orders/{order_id:path_escape}"
-// into structured literal and variable segments.
+// ParsePathTemplate decomposes an RFC 6570 URI Template string (e.g. "/users/{id}/orders/{order_id:path_escape}")
+// into structured literal and variable segments (RFC 6570 §2 & §3.2).
 func ParsePathTemplate(tmpl string) *ir.PathIR {
 	pathIR := &ir.PathIR{
 		RawTemplate: tmpl,

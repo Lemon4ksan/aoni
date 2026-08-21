@@ -22,27 +22,27 @@ var bufferPool = sync.Pool{
 	},
 }
 
-// QPACKCodec manages zero-allocation QPACK header serialization and deserialization.
+// QPACKCodec manages zero-allocation QPACK header serialization and deserialization (RFC 9204 §2, §3 & §4).
 type QPACKCodec struct {
 	decoder *qpack.Decoder
 }
 
-// NewQPACKCodec instantiates a new QPACKCodec.
+// NewQPACKCodec instantiates a new QPACKCodec (RFC 9204 §2.2).
 func NewQPACKCodec() *QPACKCodec {
 	return &QPACKCodec{
 		decoder: qpack.NewDecoder(),
 	}
 }
 
-// WriteDecoderTable processes instructions received over the QPACK Encoder Stream.
+// WriteDecoderTable processes instructions received over the QPACK Encoder Stream (RFC 9204 §4.2 & §4.3).
 //
-// Note: Currently quic-go/qpack operates on static tables and does not expose
+// Note: Currently quic-go/qpack operates on static tables (RFC 9204 Appendix A) and does not expose
 // dynamic table instructions, so incoming bytes are safely consumed.
 func (q *QPACKCodec) WriteDecoderTable(_ []byte) error {
 	return nil
 }
 
-// EncodeRequestHeaders encodes a fasthttp request header into a QPACK block,
+// EncodeRequestHeaders encodes a fasthttp request header into a QPACK block (RFC 9204 §4.5),
 // strictly maintaining the specified orderedKeys sequence for Anti-DPI fingerprinting and RFC 9220 Extended CONNECT.
 func (q *QPACKCodec) EncodeRequestHeaders(w io.Writer, req *fasthttp.Request, orderedKeys []string) error {
 	buf := bufferPool.Get().(*bytes.Buffer)
@@ -94,6 +94,9 @@ func (q *QPACKCodec) EncodeRequestHeaders(w io.Writer, req *fasthttp.Request, or
 	return err
 }
 
+// isForbiddenH3Header checks if a header field is prohibited in HTTP/3 (RFC 9114 §4.1, §4.3 & §4.5).
+// Transfer-Encoding, Upgrade, Connection, and hop-by-hop headers MUST NOT be sent.
+// TE header is only permitted if its value is "trailers".
 func isForbiddenH3Header(key, val []byte) bool {
 	if len(key) == 0 || key[0] == ':' {
 		return true
@@ -197,8 +200,8 @@ func (q *QPACKCodec) encodeOrderedHeaders(enc *qpack.Encoder, req *fasthttp.Requ
 	})
 }
 
-// DecodeResponseHeaders parses a QPACK header block directly into fasthttp ResponseHeader,
-// returning the parsed status code and ignoring 1xx informational frames.
+// DecodeResponseHeaders parses a QPACK header block directly into fasthttp ResponseHeader (RFC 9204 §2.2 & §4.5),
+// returning the parsed status code and ignoring 1xx informational frames (RFC 9114 §4.1).
 func (q *QPACKCodec) DecodeResponseHeaders(headerBlock []byte, res *fasthttp.ResponseHeader) (int, error) {
 	decodeFn := q.decoder.Decode(headerBlock)
 
@@ -255,7 +258,7 @@ func (q *QPACKCodec) DecodeResponseHeaders(headerBlock []byte, res *fasthttp.Res
 	return statusCode, nil
 }
 
-// DecodeResponseTrailers decodes a QPACK header block containing response trailers into a key-value map.
+// DecodeResponseTrailers decodes a QPACK header block containing response trailers into a key-value map (RFC 9204 §2.2 & §4.5).
 func (q *QPACKCodec) DecodeResponseTrailers(headerBlock []byte) (map[string][]string, error) {
 	decodeFn := q.decoder.Decode(headerBlock)
 	trailers := make(map[string][]string)

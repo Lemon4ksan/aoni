@@ -22,7 +22,8 @@ import (
 	"github.com/lemon4ksan/aoni/internal/io"
 )
 
-// WithMultipart constructs an [aoni.RequestModifier] building an in-memory multipart/form-data request body.
+// WithMultipart constructs an [aoni.RequestModifier] building an in-memory multipart/form-data request body
+// conforming to RFC 7578 §4.1 (Boundary) and §4.2 (Content-Disposition: form-data).
 func WithMultipart(fields map[string]string, files map[string]stdio.Reader) aoni.RequestModifier {
 	return aoni.RequestModifier{
 		Kind: core.ModCustom,
@@ -80,6 +81,7 @@ func WithMultipart(fields map[string]string, files map[string]stdio.Reader) aoni
 	}
 }
 
+// MultipartField represents a discrete form part with metadata for structured multipart payloads (RFC 7578 §4.2 & §4.4).
 type MultipartField struct {
 	Name        string
 	Value       string
@@ -88,7 +90,7 @@ type MultipartField struct {
 	Reader      stdio.Reader
 }
 
-// WithMultipartFields accepts an ordered slice of form fields with support for duplicate names (RFC 7578 Section 5.2)
+// WithMultipartFields accepts an ordered slice of form fields with support for duplicate names (RFC 7578 §4.3 & §5.2).
 func WithMultipartFields(fields []MultipartField) aoni.RequestModifier {
 	return aoni.RequestModifier{
 		Kind: core.ModCustom,
@@ -153,7 +155,7 @@ func WithMultipartFields(fields []MultipartField) aoni.RequestModifier {
 	}
 }
 
-// WithStreamingMultipart constructs an [aoni.RequestModifier] streaming multipart/form-data via an asynchronous pipe without in-memory buffering.
+// WithStreamingMultipart constructs an [aoni.RequestModifier] streaming multipart/form-data via an asynchronous pipe without in-memory buffering (RFC 7578 §4.1–§4.4).
 func WithStreamingMultipart(fields map[string]string, files map[string]stdio.Reader) aoni.RequestModifier {
 	return aoni.RequestModifier{
 		Kind: core.ModCustom,
@@ -230,7 +232,8 @@ func detectMIMEAndReader(r stdio.Reader) (string, stdio.Reader) {
 	return "application/octet-stream", r
 }
 
-// createFormFileHeader builds a multipart MIME header with proper Content-Disposition and Content-Type.
+// createFormFileHeader builds a multipart MIME header with proper Content-Disposition and Content-Type (RFC 7578 §4.2 & §4.4).
+// Per RFC 7578 §4.2, filename* (RFC 5987/8187) MUST NOT be used in multipart/form-data.
 func createFormFileHeader(w *multipart.Writer, fieldname, filename, contentType string) (stdio.Writer, error) {
 	h := make(textproto.MIMEHeader)
 	h.Set("Content-Disposition",

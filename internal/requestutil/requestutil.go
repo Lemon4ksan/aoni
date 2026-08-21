@@ -128,6 +128,16 @@ func IsIdempotentMethod(method string) bool {
 	}
 }
 
+// IsSafeMethod reports whether the HTTP method is safe (read-only) according to RFC 9110 §9.2.1.
+func IsSafeMethod(method string) bool {
+	switch method {
+	case "GET", "HEAD", "OPTIONS", "TRACE":
+		return true
+	default:
+		return false
+	}
+}
+
 // TruncateBody limits output payload representations to maxBytes without unnecessary allocations.
 func TruncateBody(body []byte, maxBytes int) string {
 	limit := maxBytes
@@ -179,7 +189,7 @@ func IsStreamingResponse(resp *http.Response) bool {
 	return strings.Contains(contentType, "text/plain") && chunked && resp.ContentLength == -1
 }
 
-// SummarizeMultipartBody extracts form field names and file metadata from a multipart payload.
+// SummarizeMultipartBody extracts form field names and file metadata from a multipart/form-data payload (RFC 7578 §4.1–§4.2).
 func SummarizeMultipartBody(body []byte, contentType string) string {
 	if len(body) == 0 || contentType == "" {
 		return ""

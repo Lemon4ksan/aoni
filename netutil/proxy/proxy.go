@@ -46,9 +46,10 @@ func WithAwareSessionCache() aoni.ClientOption {
 	}
 }
 
-// Parse parses a raw proxy string into a structured [*url.URL].
-// If no scheme is present, it inspects standard port conventions (1080/9050 -> socks5h)
-// or defaults to "http". It performs zero blocking network I/O.
+// Parse parses a raw proxy string into a structured [*url.URL] (RFC 3986 §3).
+// If no scheme delimiter ("://") is present, it handles it as a suffix reference (RFC 3986 §4.5),
+// inspecting standard port conventions (1080/9050 -> socks5h) or defaulting to "http" (RFC 3986 §3.1).
+// It performs zero blocking network I/O.
 func Parse(proxyStr string) (*url.URL, error) {
 	if proxyStr == "" {
 		return nil, errors.New("empty proxy string")

@@ -581,6 +581,8 @@ func fastRespReset(resp *fasthttp.Response) {
 }
 
 // ensureConnectionTE ensures 'Connection: TE' is present if a 'TE' header is configured on the request.
+// RFC 9112 §7.4 / RFC 9110 §7.6.1: A sender of the TE header field MUST also include "TE" within the Connection
+// header field to prevent hop-by-hop forwarding by intermediaries that do not support its semantics.
 func ensureConnectionTE(req *fasthttp.Request) {
 	te := req.Header.Peek("TE")
 	if len(te) == 0 {

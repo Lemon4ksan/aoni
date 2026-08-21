@@ -197,7 +197,8 @@ func serializeDelimitedSlice(f *mapper.FieldSchema, fieldValue reflect.Value, va
 	return nil
 }
 
-// writeQueryKeyValuePair appends a URL-escaped key=value pair to sb using a stack-allocated buffer for zero allocations.
+// writeQueryKeyValuePair appends a percent-encoded key=value pair to sb using a stack-allocated buffer (RFC 3986 §2.1 & §3.4).
+// It encodes reserved delimiters while preserving unreserved characters (RFC 3986 §2.2 & §2.3) with zero heap allocations.
 func writeQueryKeyValuePair(sb *strings.Builder, key, value string, first *bool) {
 	if !*first {
 		sb.WriteByte('&')
