@@ -415,3 +415,158 @@ func TestDiscordImport(t *testing.T) {
 	require.Greater(t, res.BytesCount, 0)
 	t.Logf("Generated client: %d bytes, %d services, %d structs", res.BytesCount, res.ServicesCount, res.StructsCount)
 }
+
+func TestSwagger2_CompleteLifecycle(t *testing.T) {
+	swagger2YAML := `
+swagger: "2.0"
+info:
+  title: "Petstore Swagger 2.0"
+  version: "1.0.0"
+  description: "Demonstrating Swagger 2.0 full schema normalization"
+host: "petstore.swagger.io"
+basePath: "/v2"
+schemes:
+  - "https"
+consumes:
+  - "application/json"
+produces:
+  - "application/json"
+securityDefinitions:
+  petstore_auth:
+    type: "oauth2"
+    flow: "implicit"
+    authorizationUrl: "https://petstore.swagger.io/oauth/dialog"
+    scopes:
+      write:pets: "modify pets in your account"
+      read:pets: "read your pets"
+  api_key:
+    type: "apiKey"
+    name: "api_key"
+    in: "header"
+paths:
+  /pet/{petId}:
+    get:
+      tags:
+        - "pet"
+      summary: "Find pet by ID"
+      operationId: "getPetById"
+      parameters:
+        - name: "petId"
+          in: "path"
+          description: "ID of pet to return"
+          required: true
+          type: "integer"
+          format: "int64"
+      responses:
+        "200":
+          description: "successful operation"
+          schema:
+            $ref: "#/definitions/Pet"
+        "400":
+          description: "Invalid ID supplied"
+        "404":
+          description: "Pet not found"
+      security:
+        - api_key: []
+    post:
+      tags:
+        - "pet"
+      summary: "Updates a pet in the store with form data"
+      operationId: "updatePetWithForm"
+      consumes:
+        - "application/x-www-form-urlencoded"
+      parameters:
+        - name: "petId"
+          in: "path"
+          description: "ID of pet that needs to be updated"
+          required: true
+          type: "integer"
+          format: "int64"
+        - name: "body"
+          in: "body"
+          description: "Pet object that needs to be updated"
+          required: true
+          schema:
+            $ref: "#/definitions/Pet"
+      responses:
+        "200":
+          description: "Pet updated successfully"
+          schema:
+            $ref: "#/definitions/ApiResponse"
+definitions:
+  Pet:
+    type: "object"
+    required:
+      - "id"
+      - "name"
+    properties:
+      id:
+        type: "integer"
+        format: "int64"
+      name:
+        type: "string"
+        example: "doggie"
+      status:
+        type: "string"
+        description: "pet status in the store"
+        enum:
+          - "available"
+          - "pending"
+          - "sold"
+  ApiResponse:
+    type: "object"
+    properties:
+      code:
+        type: "integer"
+        format: "int32"
+      type:
+        type: "string"
+      message:
+        type: "string"
+`
+
+	doc, err := openapi.ParseSpec([]byte(swagger2YAML))
+	require.NoError(t, err)
+	require.NotNil(t, doc)
+
+	// Check Server upgrade
+	require.Len(t, doc.Servers, 1)
+	require.Equal(t, "https://petstore.swagger.io/v2", doc.Servers[0].URL)
+
+	// Check Components normalization
+	require.Contains(t, doc.Components.Schemas, "Pet")
+	require.Contains(t, doc.Components.Schemas, "ApiResponse")
+
+	// Check Security Schemes upgrade
+	require.Contains(t, doc.Components.SecuritySchemes, "petstore_auth")
+	secAuth := doc.Components.SecuritySchemes["petstore_auth"]
+	require.Equal(t, "oauth2", secAuth.Type)
+	require.NotNil(t, secAuth.Flows)
+	require.NotNil(t, secAuth.Flows.Implicit)
+	require.Equal(t, "https://petstore.swagger.io/oauth/dialog", secAuth.Flows.Implicit.AuthorizationURL)
+	require.Equal(t, "modify pets in your account", secAuth.Flows.Implicit.Scopes["write:pets"])
+
+	// Check RequestBody conversion
+	updateOp := doc.Paths["/pet/{petId}"].Post
+	require.NotNil(t, updateOp.RequestBody)
+	require.NotNil(t, updateOp.RequestBody.Content["application/json"])
+	require.Equal(t, "#/components/schemas/Pet", updateOp.RequestBody.Content["application/json"].Schema.Ref)
+
+	// Check Response conversion
+	getOp := doc.Paths["/pet/{petId}"].Get
+	require.NotNil(t, getOp.Responses["200"].Content["application/json"])
+	require.Equal(t, "#/components/schemas/Pet", getOp.Responses["200"].Content["application/json"].Schema.Ref)
+
+	// Generate contract code
+	code, err := openapi.GenerateContract(doc, openapi.ImportConfig{
+		PackageName: "petstore",
+		ServiceName: "PetstoreAPI",
+	})
+	require.NoError(t, err)
+	require.NotEmpty(t, code)
+	require.Contains(t, string(code), "type Pet struct")
+	require.Contains(t, string(code), "type APIResponse struct")
+	require.Contains(t, string(code), "GetPetByID(ctx context.Context, petID int64")
+	require.Contains(t, string(code), "UpdatePetWithForm(ctx context.Context, petID int64, req Pet")
+}
+

@@ -76,13 +76,30 @@ func normalizeSwagger2(doc *Document) {
 		}
 	}
 
-	// 2. Convert Definitions -> Components.Schemas
+	// 2. Ensure Components exist
 	if doc.Components == nil {
 		doc.Components = &Components{
-			Schemas: make(map[string]*Schema),
+			Schemas:         make(map[string]*Schema),
+			Responses:       make(map[string]*Response),
+			Parameters:      make(map[string]*Parameter),
+			SecuritySchemes: make(map[string]*SecurityScheme),
+		}
+	} else {
+		if doc.Components.Schemas == nil {
+			doc.Components.Schemas = make(map[string]*Schema)
+		}
+		if doc.Components.Responses == nil {
+			doc.Components.Responses = make(map[string]*Response)
+		}
+		if doc.Components.Parameters == nil {
+			doc.Components.Parameters = make(map[string]*Parameter)
+		}
+		if doc.Components.SecuritySchemes == nil {
+			doc.Components.SecuritySchemes = make(map[string]*SecurityScheme)
 		}
 	}
 
+	// 3. Convert Definitions -> Components.Schemas
 	if len(doc.Definitions) > 0 {
 		for name, schema := range doc.Definitions {
 			if schema != nil {
@@ -92,7 +109,59 @@ func normalizeSwagger2(doc *Document) {
 		}
 	}
 
-	// 3. Convert Operations parameters (in: body -> RequestBody)
+	// 4. Convert Parameters -> Components.Parameters
+	if len(doc.Parameters) > 0 {
+		for name, param := range doc.Parameters {
+			if param != nil {
+				normalizeSchemaRefs(param.Schema)
+				doc.Components.Parameters[name] = param
+			}
+		}
+	}
+
+	// 5. Convert Responses -> Components.Responses
+	if len(doc.Responses) > 0 {
+		for name, resp := range doc.Responses {
+			if resp != nil {
+				if resp.Schema != nil && len(resp.Content) == 0 {
+					normalizeSchemaRefs(resp.Schema)
+					resp.Content = map[string]*MediaType{
+						"application/json": {Schema: resp.Schema},
+					}
+				}
+				doc.Components.Responses[name] = resp
+			}
+		}
+	}
+
+	// 6. Convert SecurityDefinitions -> Components.SecuritySchemes
+	if len(doc.SecurityDefinitions) > 0 {
+		for name, sec := range doc.SecurityDefinitions {
+			if sec != nil {
+				if sec.Type == "oauth2" && sec.Flow != "" && sec.Flows == nil {
+					flow := &OAuthFlow{
+						AuthorizationURL: sec.AuthorizationURL,
+						TokenURL:         sec.TokenURL,
+						Scopes:           sec.Scopes,
+					}
+					sec.Flows = &OAuthFlows{}
+					switch sec.Flow {
+					case "implicit":
+						sec.Flows.Implicit = flow
+					case "password":
+						sec.Flows.Password = flow
+					case "application":
+						sec.Flows.ClientCredentials = flow
+					case "accessCode":
+						sec.Flows.AuthorizationCode = flow
+					}
+				}
+				doc.Components.SecuritySchemes[name] = sec
+			}
+		}
+	}
+
+	// 7. Convert Operations parameters (in: body -> RequestBody) and responses
 	for _, pathItem := range doc.Paths {
 		if pathItem == nil {
 			continue
@@ -111,6 +180,7 @@ func normalizeSwagger2(doc *Document) {
 
 				if p.In == "body" {
 					if op.RequestBody == nil {
+						normalizeSchemaRefs(p.Schema)
 						op.RequestBody = &RequestBody{
 							Description: p.Description,
 							Required:    p.Required,
@@ -122,6 +192,13 @@ func normalizeSwagger2(doc *Document) {
 						}
 					}
 				} else {
+					if p.Schema == nil && p.Type != "" {
+						p.Schema = &Schema{
+							Type:   TypeArray{p.Type},
+							Format: p.Format,
+							Items:  p.Items,
+						}
+					}
 					normalizeSchemaRefs(p.Schema)
 					nonBodyParams = append(nonBodyParams, p)
 				}
@@ -131,6 +208,14 @@ func normalizeSwagger2(doc *Document) {
 			// Normalize responses
 			for _, resp := range op.Responses {
 				if resp != nil {
+					if resp.Schema != nil && len(resp.Content) == 0 {
+						normalizeSchemaRefs(resp.Schema)
+						resp.Content = map[string]*MediaType{
+							"application/json": {
+								Schema: resp.Schema,
+							},
+						}
+					}
 					for _, media := range resp.Content {
 						if media != nil {
 							normalizeSchemaRefs(media.Schema)
