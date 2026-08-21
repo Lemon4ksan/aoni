@@ -12,13 +12,13 @@ import (
 	"strings"
 	"time"
 
+	fio "github.com/lemon4ksan/foundation/io"
 	"github.com/lemon4ksan/foundation/silicon/pool"
 
 	"github.com/lemon4ksan/aoni/fingerprint"
 	"github.com/lemon4ksan/aoni/fingerprint/ja4"
 	"github.com/lemon4ksan/aoni/fingerprint/p0f"
 	"github.com/lemon4ksan/aoni/internal/core"
-	"github.com/lemon4ksan/aoni/internal/io"
 	"github.com/lemon4ksan/aoni/netutil"
 	"github.com/lemon4ksan/aoni/netutil/fragment"
 	"github.com/lemon4ksan/aoni/netutil/netdial"
@@ -61,8 +61,8 @@ type RequestConfig struct {
 	TargetHost              string
 	ForceContentType        string
 	Label                   string
-	UploadProgress          io.ProgressFunc
-	DownloadProgress        io.ProgressFunc
+	UploadProgress          fio.ProgressFunc
+	DownloadProgress        fio.ProgressFunc
 	Capturer                any
 	BodyError               error
 	QueryError              error
@@ -214,7 +214,7 @@ func CloseResponse(resp *http.Response) {
 
 	_ = resp.Body.Close()
 
-	if rb, ok := io.UnwrapBody(resp.Body).(interface{ ReallyClose() }); ok {
+	if rb, ok := fio.UnwrapBody(resp.Body).(interface{ ReallyClose() }); ok {
 		rb.ReallyClose()
 	}
 

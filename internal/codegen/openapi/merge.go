@@ -6,6 +6,7 @@ package openapi
 
 import (
 	"bytes"
+	"cmp"
 	"fmt"
 	"go/ast"
 	"go/format"
@@ -13,7 +14,6 @@ import (
 	"go/token"
 	"path"
 	"slices"
-	"sort"
 	"strings"
 
 	"github.com/getkin/kin-openapi/openapi3"
@@ -233,12 +233,11 @@ func (e *MergeEngine) ReconcileService(
 	}
 
 	// Sort incoming operations by route for deterministic output
-	sort.Slice(incomingOps, func(i, j int) bool {
-		if incomingOps[i].rawPath == incomingOps[j].rawPath {
-			return incomingOps[i].httpMethod < incomingOps[j].httpMethod
-		}
-
-		return incomingOps[i].rawPath < incomingOps[j].rawPath
+	slices.SortFunc(incomingOps, func(a, b *incomingOperation) int {
+		return cmp.Or(
+			cmp.Compare(a.rawPath, b.rawPath),
+			cmp.Compare(a.httpMethod, b.httpMethod),
+		)
 	})
 
 	// 4. Reconcile methods
@@ -382,7 +381,7 @@ func (e *MergeEngine) ReconcileService(
 		}
 	}
 
-	sort.Strings(customImports)
+	slices.Sort(customImports)
 
 	for _, imp := range customImports {
 		fmt.Fprintf(&buf, "\t%q\n", imp)

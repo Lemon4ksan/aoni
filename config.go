@@ -1211,12 +1211,12 @@ func (c *Client) applyRequestConfigDefaults(cfg *RequestConfig) {
 
 	if len(c.cfg.Defaults.Decoders) > 0 {
 		if cfg.Decoders == nil {
-			cfg.Decoders = make(map[string]core.ResponseDecoder, len(c.cfg.Defaults.Decoders))
-		}
-
-		for k, v := range c.cfg.Defaults.Decoders {
-			if _, ok := cfg.Decoders[k]; !ok {
-				cfg.Decoders[k] = v
+			cfg.Decoders = maps.Clone(c.cfg.Defaults.Decoders)
+		} else {
+			for k, v := range c.cfg.Defaults.Decoders {
+				if _, ok := cfg.Decoders[k]; !ok {
+					cfg.Decoders[k] = v
+				}
 			}
 		}
 	}

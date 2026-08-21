@@ -9,6 +9,8 @@ import (
 	"io"
 	"net/http"
 
+	fio "github.com/lemon4ksan/foundation/io"
+
 	"github.com/lemon4ksan/aoni/netutil"
 )
 
@@ -178,4 +180,4 @@ func (m RequestModifier) ApplyStd(req *http.Request) {
 }
 
 // ProgressFunc is a callback invoked periodically to monitor stream upload or download progress.
-type ProgressFunc func(current, total int64)
+type ProgressFunc = fio.ProgressFunc

@@ -13,22 +13,22 @@ import (
 	"time"
 
 	"github.com/lemon4ksan/foundation/generic"
+	fio "github.com/lemon4ksan/foundation/io"
 	furl "github.com/lemon4ksan/foundation/net/url"
 	"github.com/lemon4ksan/foundation/silicon/pool"
 	frand "github.com/lemon4ksan/foundation/silicon/rand"
 
 	"github.com/lemon4ksan/aoni/internal/core"
-	aio "github.com/lemon4ksan/aoni/internal/io"
 	"github.com/lemon4ksan/aoni/internal/pipeline"
 	"github.com/lemon4ksan/aoni/netutil"
 	"github.com/lemon4ksan/aoni/netutil/netdial"
 	"github.com/lemon4ksan/aoni/telemetry"
 )
 
-// AsReplayable wraps an [io.ReadCloser] into a replayable stream ([aio.ReplayableBody])
+// AsReplayable wraps an [io.ReadCloser] into a replayable stream ([fio.ReplayableBody])
 // using in-memory byte buffers or tee-buffered fallbacks to support stream rewinding.
-func AsReplayable(rc io.ReadCloser) aio.ReplayableBody {
-	return aio.AsReplayable(rc)
+func AsReplayable(rc io.ReadCloser) fio.ReplayableBody {
+	return fio.AsReplayable(rc)
 }
 
 // ResponseTrace extracts fine-grained execution metrics and network timing details

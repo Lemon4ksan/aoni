@@ -8,7 +8,7 @@ import (
 	stdio "io"
 	"net/http"
 
-	"github.com/lemon4ksan/aoni/internal/io"
+	fio "github.com/lemon4ksan/foundation/io"
 )
 
 // StreamFilter defines a response body stream transformation filter.
@@ -92,13 +92,13 @@ func TranscodeStreamFilter() StreamFilter {
 }
 
 // ProgressStreamFilter returns a StreamFilter that invokes onProgress as response bytes are read.
-func ProgressStreamFilter(progress io.ProgressFunc) StreamFilter {
+func ProgressStreamFilter(progress fio.ProgressFunc) StreamFilter {
 	if progress == nil {
 		return nil
 	}
 
 	return func(r *http.Response, body stdio.ReadCloser) (stdio.ReadCloser, error) {
-		return &io.ProgressReader{
+		return &fio.ProgressReader{
 			Reader:     body,
 			Total:      r.ContentLength,
 			OnProgress: progress,

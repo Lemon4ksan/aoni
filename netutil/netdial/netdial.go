@@ -18,11 +18,11 @@ import (
 	"syscall"
 	"time"
 
+	fio "github.com/lemon4ksan/foundation/io"
 	"github.com/lemon4ksan/foundation/net/ip"
 	"github.com/lemon4ksan/foundation/net/proxy"
 
 	"github.com/lemon4ksan/aoni/fingerprint/p0f"
-	"github.com/lemon4ksan/aoni/internal/io"
 	"github.com/lemon4ksan/aoni/netutil/fragment"
 )
 
@@ -527,7 +527,7 @@ func dialHTTPProxy(ctx context.Context, proxyURL *url.URL, forward *net.Dialer, 
 	_ = conn.SetDeadline(time.Time{})
 
 	if br.Buffered() > 0 {
-		return &io.BufferedConn{Conn: conn, R: br}, nil
+		return &fio.BufferedConn{Conn: conn, R: br}, nil
 	}
 
 	return conn, nil

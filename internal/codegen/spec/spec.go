@@ -7,8 +7,9 @@
 package spec
 
 import (
+	"cmp"
 	"fmt"
-	"sort"
+	"slices"
 	"strings"
 )
 
@@ -1101,8 +1102,8 @@ func GenerateMarkdownTable() string {
 			continue
 		}
 
-		sort.Slice(directives, func(i, j int) bool {
-			return directives[i].Name < directives[j].Name
+		slices.SortFunc(directives, func(a, b *DirectiveDef) int {
+			return cmp.Compare(a.Name, b.Name)
 		})
 
 		title := string(scope)

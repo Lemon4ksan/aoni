@@ -241,13 +241,9 @@ func (b *RetryBuilder) ToOptions() (middleware.RetryOptions, core.RetryCondition
 	}
 
 	compositeCondition := func(resp aoni.Response, err error) bool {
-		for _, c := range conditions {
-			if c(resp, err) {
-				return true
-			}
-		}
-
-		return false
+		return slices.ContainsFunc(conditions, func(c core.RetryCondition) bool {
+			return c(resp, err)
+		})
 	}
 
 	return opts, compositeCondition

@@ -12,10 +12,12 @@ import (
 	"go/parser"
 	"go/token"
 	"os"
-	"sort"
+	"slices"
 	"strconv"
 	"strings"
 	"unicode"
+
+	"github.com/lemon4ksan/foundation/generic"
 )
 
 // EnumValue represents a single named enum variant.
@@ -107,29 +109,20 @@ func ExtractEnumsFromHAR(harBytes []byte, structName string) []EnumSpec {
 
 		// Candidate for []Enum if unique string values are between 2 and 30
 		if len(stringVals) >= 2 && len(stringVals) <= 30 {
-			var (
-				values []EnumValue
-				keys   []string
-			)
-
-			for k := range stringVals {
-				keys = append(keys, k)
-			}
-
-			sort.Strings(keys)
+			keys := generic.Keys(stringVals)
+			slices.Sort(keys)
 
 			enumName := "GenerationMethod"
 			if idx != 7 {
 				enumName = fmt.Sprintf("Field%dEnum", idx)
 			}
 
-			for _, k := range keys {
-				constName := enumName + toPascalCase(k)
-				values = append(values, EnumValue{
-					ConstName: constName,
+			values := generic.Map(keys, func(k string) EnumValue {
+				return EnumValue{
+					ConstName: enumName + toPascalCase(k),
 					RawValue:  k,
-				})
-			}
+				}
+			})
 
 			specs = append(specs, EnumSpec{
 				Name:             enumName,

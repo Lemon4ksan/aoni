@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"github.com/lemon4ksan/foundation/generic"
+	fio "github.com/lemon4ksan/foundation/io"
 	furl "github.com/lemon4ksan/foundation/net/url"
 	"google.golang.org/protobuf/proto"
 
@@ -25,7 +26,6 @@ import (
 	"github.com/lemon4ksan/aoni/codec"
 	"github.com/lemon4ksan/aoni/codec/decode"
 	"github.com/lemon4ksan/aoni/internal/core"
-	aio "github.com/lemon4ksan/aoni/internal/io"
 	"github.com/lemon4ksan/aoni/middleware"
 	"github.com/lemon4ksan/aoni/mod"
 	"github.com/lemon4ksan/aoni/netutil"
@@ -836,7 +836,7 @@ func writeDownloadedStream(outputFile string, resp *http.Response, previousSize 
 	}
 	defer outFile.Close()
 
-	_, err = aio.CopyZeroAlloc(outFile, resp.Body)
+	_, err = fio.CopyZeroAlloc(outFile, resp.Body)
 
 	return err
 }

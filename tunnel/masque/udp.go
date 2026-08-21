@@ -52,15 +52,9 @@ func DialUDPProxy(
 	}
 
 	host := parsed.Hostname()
+	port := generic.Coalesce(parsed.Port(), "443")
 
-	port := parsed.Port()
-	if port == "" {
-		port = "443"
-	}
-
-	addr := net.JoinHostPort(host, port)
-
-	conn, err := dialer.DialTLSForWS(ctx, addr)
+	conn, err := dialer.DialTLSForWS(ctx, net.JoinHostPort(host, port))
 	if err != nil {
 		return nil, nil, err
 	}

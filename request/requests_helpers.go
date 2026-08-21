@@ -17,12 +17,12 @@ import (
 	"os"
 	"strings"
 
+	fio "github.com/lemon4ksan/foundation/io"
 	"github.com/lemon4ksan/foundation/silicon/bytesconv"
 
 	"github.com/lemon4ksan/aoni"
 	"github.com/lemon4ksan/aoni/codec/decode"
 	"github.com/lemon4ksan/aoni/internal/core"
-	aio "github.com/lemon4ksan/aoni/internal/io"
 	"github.com/lemon4ksan/aoni/internal/requestutil"
 	"github.com/lemon4ksan/aoni/resiliency/challenge"
 	"github.com/lemon4ksan/aoni/telemetry"
@@ -61,21 +61,20 @@ func (d responseDecoder) ValidateState(resp *http.Response, decoder decode.Decod
 
 // ResolvePeekableReader returns a peekable reader for the response body.
 func ResolvePeekableReader(resp *http.Response) *bufio.Reader {
-	if b, ok := resp.Body.(*aio.BufioReadCloser); ok {
+	if b, ok := resp.Body.(*fio.BufioReadCloser); ok && b.Reader != nil {
 		return b.Reader
 	}
 
 	if br, ok := resp.Body.(interface{ BufioReader() *bufio.Reader }); ok {
-		return br.BufioReader()
+		if r := br.BufioReader(); r != nil {
+			return r
+		}
 	}
 
-	peekable := bufio.NewReader(resp.Body)
-	resp.Body = &aio.BufioReadCloser{
-		Reader: peekable,
-		Closer: resp.Body,
-	}
+	wrapped := fio.NewBufioReadCloser(resp.Body, resp.Body)
+	resp.Body = wrapped
 
-	return peekable
+	return wrapped.Reader
 }
 
 // DumpDiagnostics prints HTTP request and response diagnostic payloads to stderr or configured logger when debug mode is enabled.
@@ -310,7 +309,7 @@ func HandleResponse(resp *http.Response, target any, requester Requester) error 
 	}
 
 	if target == nil || resp.StatusCode == http.StatusNoContent {
-		_, _ = aio.CopyZeroAlloc(io.Discard, resp.Body)
+		_, _ = fio.CopyZeroAlloc(io.Discard, resp.Body)
 		return nil
 	}
 

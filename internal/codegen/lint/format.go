@@ -5,11 +5,12 @@
 package lint
 
 import (
+	"cmp"
 	"encoding/json"
 	"fmt"
 	"io"
 	"path/filepath"
-	"sort"
+	"slices"
 	"strings"
 )
 
@@ -140,12 +141,12 @@ func FormatReport(w io.Writer, target string, report *Report) {
 		stats = append(stats, ruleStat{ruleKey: k, count: v})
 	}
 
-	sort.Slice(stats, func(i, j int) bool {
-		if stats[i].count != stats[j].count {
-			return stats[i].count > stats[j].count
+	slices.SortFunc(stats, func(a, b ruleStat) int {
+		if a.count != b.count {
+			return cmp.Compare(b.count, a.count)
 		}
 
-		return stats[i].ruleKey < stats[j].ruleKey
+		return cmp.Compare(a.ruleKey, b.ruleKey)
 	})
 
 	for _, s := range stats {
@@ -159,20 +160,13 @@ func FormatReport(w io.Writer, target string, report *Report) {
 }
 
 func sortDiagnostics(diags []Diagnostic) {
-	sort.SliceStable(diags, func(i, j int) bool {
-		if diags[i].RuleID != diags[j].RuleID {
-			return diags[i].RuleID < diags[j].RuleID
-		}
-
-		if diags[i].FilePath != diags[j].FilePath {
-			return diags[i].FilePath < diags[j].FilePath
-		}
-
-		if diags[i].Line != diags[j].Line {
-			return diags[i].Line < diags[j].Line
-		}
-
-		return diags[i].Column < diags[j].Column
+	slices.SortStableFunc(diags, func(a, b Diagnostic) int {
+		return cmp.Or(
+			cmp.Compare(a.RuleID, b.RuleID),
+			cmp.Compare(a.FilePath, b.FilePath),
+			cmp.Compare(a.Line, b.Line),
+			cmp.Compare(a.Column, b.Column),
+		)
 	})
 }
 

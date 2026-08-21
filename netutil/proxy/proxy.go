@@ -74,13 +74,9 @@ type Config struct {
 
 // NewClient instantiates an [*http.Client] configured with proxy transport routing.
 func NewClient(cfg Config) (*http.Client, error) {
-	timeout := cfg.Timeout
-	if timeout == 0 {
-		timeout = 15 * time.Second
-	}
+	timeout := generic.Coalesce(cfg.Timeout, 15*time.Second)
 
 	var rt http.RoundTripper
-
 	switch {
 	case cfg.TransportFactory != nil:
 		var err error

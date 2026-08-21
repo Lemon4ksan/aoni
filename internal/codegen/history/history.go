@@ -13,7 +13,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"sort"
+	"slices"
 	"strings"
 	"time"
 
@@ -100,11 +100,9 @@ func List(rootDir string) ([]OpEntry, error) {
 		return nil, err
 	}
 
-	entries := make([]OpEntry, len(journal.Entries))
-	copy(entries, journal.Entries)
-
-	sort.Slice(entries, func(i, j int) bool {
-		return entries[i].CreatedAt.After(entries[j].CreatedAt)
+	entries := slices.Clone(journal.Entries)
+	slices.SortFunc(entries, func(a, b OpEntry) int {
+		return b.CreatedAt.Compare(a.CreatedAt)
 	})
 
 	return entries, nil

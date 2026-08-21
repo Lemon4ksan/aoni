@@ -5,11 +5,12 @@
 package lint
 
 import (
+	"cmp"
 	"fmt"
 	"go/ast"
 	"os"
 	"path/filepath"
-	"sort"
+	"slices"
 	"strings"
 
 	"github.com/lemon4ksan/aoni/internal/codegen/ir"
@@ -464,8 +465,8 @@ func (r *RuleCanonicalFormat) Run(pass *Pass) []Diagnostic {
 			return
 		}
 
-		isSorted := sort.SliceIsSorted(lines, func(i, j int) bool {
-			return directiveRank(lines[i]) < directiveRank(lines[j])
+		isSorted := slices.IsSortedFunc(lines, func(a, b string) int {
+			return cmp.Compare(directiveRank(a), directiveRank(b))
 		})
 
 		if !isSorted {
@@ -493,14 +494,11 @@ func (r *RuleCanonicalFormat) Run(pass *Pass) []Diagnostic {
 							return nil
 						}
 
-						var docLines []string
-						for i := startLine - 1; i < endLine; i++ {
-							docLines = append(docLines, srcLines[i])
-						}
+						docLines := slices.Clone(srcLines[startLine-1 : endLine])
 
 						origBlock := strings.Join(docLines, "\n")
-						sort.SliceStable(docLines, func(i, j int) bool {
-							return directiveRank(docLines[i]) < directiveRank(docLines[j])
+						slices.SortStableFunc(docLines, func(a, b string) int {
+							return cmp.Compare(directiveRank(a), directiveRank(b))
 						})
 						sortedBlock := strings.Join(docLines, "\n")
 

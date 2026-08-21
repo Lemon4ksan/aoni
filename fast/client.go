@@ -142,6 +142,7 @@ func (c *Client) With(opts ...aoni.ClientOption) *Client {
 	}
 
 	cloned.applyEngineConfig()
+
 	if !isCustomDialerSet(c.engine, c.defaultDial) {
 		cloned.applyCustomDialer()
 	}

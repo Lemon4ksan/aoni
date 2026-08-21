@@ -9,10 +9,10 @@ import (
 	"io"
 	"reflect"
 
+	fio "github.com/lemon4ksan/foundation/io"
 	"google.golang.org/protobuf/encoding/protojson"
 	"google.golang.org/protobuf/proto"
 
-	aio "github.com/lemon4ksan/aoni/internal/io"
 	"github.com/lemon4ksan/aoni/internal/pipeline"
 )
 
@@ -66,7 +66,7 @@ func (protoJSONDecoder) Decode(r io.Reader, target any) error {
 func copyToBuffer(r io.Reader) (*bytes.Buffer, error) {
 	buf := pipeline.GlobalBufferPool.Get()
 
-	if _, err := aio.CopyZeroAlloc(buf, r); err != nil {
+	if _, err := fio.CopyZeroAlloc(buf, r); err != nil {
 		pipeline.GlobalBufferPool.Put(buf)
 		return nil, err
 	}

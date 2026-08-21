@@ -5,7 +5,8 @@
 package probe
 
 import (
-	"sort"
+	"cmp"
+	"slices"
 	"sync"
 )
 
@@ -58,12 +59,16 @@ func (p *Predictor) Predict(openPorts []int, threshold float64) []PortPrediction
 		}
 	}
 
-	sort.Slice(predictions, func(i, j int) bool {
-		if predictions[i].Confidence != predictions[j].Confidence {
-			return predictions[i].Confidence > predictions[j].Confidence
+	slices.SortFunc(predictions, func(a, b PortPrediction) int {
+		if a.Confidence != b.Confidence {
+			if a.Confidence > b.Confidence {
+				return -1
+			}
+
+			return 1
 		}
 
-		return predictions[i].Port < predictions[j].Port
+		return cmp.Compare(a.Port, b.Port)
 	})
 
 	return predictions

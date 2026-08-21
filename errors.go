@@ -14,9 +14,9 @@ import (
 	"strings"
 
 	"github.com/lemon4ksan/foundation/generic"
+	fio "github.com/lemon4ksan/foundation/io"
 	"github.com/lemon4ksan/foundation/silicon/bytesconv"
 
-	"github.com/lemon4ksan/aoni/internal/io"
 	"github.com/lemon4ksan/aoni/internal/pipeline"
 )
 
@@ -35,10 +35,10 @@ var (
 	ErrMaxRedirectsExceeded = errors.New("aoni: maximum redirects limit exceeded")
 
 	// ErrResponseTooLarge indicates that response payload length exceeded configured bounds.
-	ErrResponseTooLarge = io.ErrResponseTooLarge
+	ErrResponseTooLarge = fio.ErrResponseTooLarge
 
 	// ErrBufferLimitExceeded indicates replayable buffer size exceeded memory threshold without disk backing.
-	ErrBufferLimitExceeded = io.ErrBufferLimitExceeded
+	ErrBufferLimitExceeded = fio.ErrBufferLimitExceeded
 
 	// ErrRedirectDomainForbidden is returned when a redirect target hostname is excluded by policy.
 	ErrRedirectDomainForbidden = errors.New("aoni: redirect domain not allowed")

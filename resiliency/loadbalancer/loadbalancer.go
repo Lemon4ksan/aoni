@@ -499,11 +499,12 @@ func (b *Balancer) SetWeight(backendURL string, weight int) bool {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 
-	for _, b := range b.backends {
-		if b.URL == backendURL {
-			b.Weight = weight
-			return true
-		}
+	idx := slices.IndexFunc(b.backends, func(be *Backend) bool {
+		return be.URL == backendURL
+	})
+	if idx != -1 {
+		b.backends[idx].Weight = weight
+		return true
 	}
 
 	return false

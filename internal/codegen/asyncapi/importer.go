@@ -8,8 +8,10 @@ import (
 	"bytes"
 	"fmt"
 	"go/format"
-	"sort"
+	"slices"
 	"strings"
+
+	"github.com/lemon4ksan/foundation/generic"
 )
 
 // ImportConfig configures translation of AsyncAPI specifications into declarative Go contracts.
@@ -95,12 +97,8 @@ func GenerateContract(doc *Document, cfg ImportConfig) ([]byte, error) {
 	fmt.Fprintf(&bodyBuf, "type %s interface {\n", serviceName)
 
 	// 2. Methods generation
-	opKeys := make([]string, 0, len(doc.Operations))
-	for k := range doc.Operations {
-		opKeys = append(opKeys, k)
-	}
-
-	sort.Strings(opKeys)
+	opKeys := generic.Keys(doc.Operations)
+	slices.Sort(opKeys)
 
 	for _, opKey := range opKeys {
 		op := doc.Operations[opKey]

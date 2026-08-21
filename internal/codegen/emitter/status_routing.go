@@ -7,9 +7,11 @@ package emitter
 import (
 	"bytes"
 	"fmt"
-	"sort"
+	"slices"
 	"strconv"
 	"strings"
+
+	"github.com/lemon4ksan/foundation/generic"
 
 	"github.com/lemon4ksan/aoni/internal/codegen/ir"
 )
@@ -127,33 +129,22 @@ func emitStatusMapCases(buf *bytes.Buffer, m *ir.MethodIR, zeroVal string) {
 		typeGroups[t.Name] = append(typeGroups[t.Name], code)
 	}
 
-	sortedTypeNames := make([]string, 0, len(typeGroups))
-	for typeName := range typeGroups {
-		sortedTypeNames = append(sortedTypeNames, typeName)
-	}
-
-	sort.Strings(sortedTypeNames)
+	sortedTypeNames := generic.Keys(typeGroups)
+	slices.Sort(sortedTypeNames)
 
 	for _, typeName := range sortedTypeNames {
 		codes := typeGroups[typeName]
-		sort.Ints(codes)
+		slices.Sort(codes)
 
-		codeStrs := make([]string, 0, len(codes))
-		for _, sc := range codes {
-			codeStrs = append(codeStrs, strconv.Itoa(sc))
-		}
+		codeStrs := generic.Map(codes, strconv.Itoa)
 
 		fmt.Fprintf(buf, "\tcase %s:\n", strings.Join(codeStrs, ", "))
 
 		cleanType := strings.TrimPrefix(typeName, "*")
 
-		is2xx := false
-		for _, sc := range codes {
-			if sc >= 200 && sc <= 299 {
-				is2xx = true
-				break
-			}
-		}
+		is2xx := slices.ContainsFunc(codes, func(sc int) bool {
+			return sc >= 200 && sc <= 299
+		})
 
 		if is2xx {
 			fmt.Fprintf(buf, "\t\tres, err := decode.JSON[%s](resp.Body)\n", cleanType)

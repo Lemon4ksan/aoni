@@ -18,9 +18,9 @@ import (
 	"os"
 	"reflect"
 	"slices"
-	"sort"
 	"strings"
 
+	"github.com/lemon4ksan/foundation/generic"
 	utls "github.com/refraction-networking/utls"
 
 	"github.com/lemon4ksan/aoni/fingerprint/grease"
@@ -235,7 +235,10 @@ func extTypeSet(exts []utls.TLSExtension) []string {
 		seen[t] = true
 	}
 
-	return sortedKeys(seen)
+	keys := generic.Keys(seen)
+	slices.Sort(keys)
+
+	return keys
 }
 
 func curvesFrom(exts []utls.TLSExtension) []uint16 {
@@ -321,20 +324,9 @@ func addedStr(a, b []string) []string {
 		}
 	}
 
-	sort.Strings(out)
+	slices.Sort(out)
 
 	return out
-}
-
-func sortedKeys(m map[string]bool) []string {
-	keys := make([]string, 0, len(m))
-	for k := range m {
-		keys = append(keys, k)
-	}
-
-	sort.Strings(keys)
-
-	return keys
 }
 
 func cipherName(c uint16) string {

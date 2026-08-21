@@ -7,8 +7,10 @@ package emitter
 import (
 	"bytes"
 	"fmt"
-	"sort"
+	"slices"
 	"strings"
+
+	"github.com/lemon4ksan/foundation/generic"
 
 	"github.com/lemon4ksan/aoni/internal/codegen/ir"
 )
@@ -94,12 +96,8 @@ func (t *ImportTracker) Render(buf *bytes.Buffer) {
 }
 
 func renderGroup(buf *bytes.Buffer, group map[string]string) {
-	keys := make([]string, 0, len(group))
-	for k := range group {
-		keys = append(keys, k)
-	}
-
-	sort.Strings(keys)
+	keys := generic.Keys(group)
+	slices.Sort(keys)
 
 	for _, k := range keys {
 		alias := group[k]

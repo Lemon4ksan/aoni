@@ -6,12 +6,13 @@ package perf
 
 import (
 	"bufio"
+	"cmp"
 	"context"
 	"flag"
 	"fmt"
 	"io"
 	"os"
-	"sort"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -228,16 +229,15 @@ func (c *CmdCover) analyzeCoverageProfile(stdout io.Writer, coverageFilePath, so
 	}
 
 	if sortBy == "percent" {
-		sort.Slice(rows, func(i, j int) bool {
-			if rows[i].Stats.Percent() == rows[j].Stats.Percent() {
-				return rows[i].Name < rows[j].Name
-			}
-
-			return rows[i].Stats.Percent() > rows[j].Stats.Percent()
+		slices.SortFunc(rows, func(a, b pkgRow) int {
+			return cmp.Or(
+				cmp.Compare(b.Stats.Percent(), a.Stats.Percent()),
+				cmp.Compare(a.Name, b.Name),
+			)
 		})
 	} else {
-		sort.Slice(rows, func(i, j int) bool {
-			return rows[i].Name < rows[j].Name
+		slices.SortFunc(rows, func(a, b pkgRow) int {
+			return cmp.Compare(a.Name, b.Name)
 		})
 	}
 

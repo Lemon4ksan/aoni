@@ -14,7 +14,6 @@ import (
 	"slices"
 	"time"
 
-	fctx "github.com/lemon4ksan/foundation/async/context"
 	flog "github.com/lemon4ksan/foundation/async/log"
 	"github.com/lemon4ksan/foundation/generic"
 	furl "github.com/lemon4ksan/foundation/net/url"
@@ -403,12 +402,7 @@ func (c *Client) HTTP() HTTPDoer {
 }
 
 func (c *Client) execute(req *http.Request, pipe PipelineConfig) (*http.Response, error) {
-	fastCtx := fctx.Wrap(req.Context())
-	if req.Context() != fastCtx {
-		req = req.WithContext(fastCtx)
-	}
-
-	return c.pipeline.Execute(fastCtx, req, c.engine, pipe.toInternal())
+	return c.pipeline.Execute(req.Context(), req, c.engine, pipe.toInternal())
 }
 
 // Config returns a clone DTO copy of the active client configuration.

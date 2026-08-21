@@ -19,13 +19,13 @@ import (
 	"sync/atomic"
 	"time"
 
+	fio "github.com/lemon4ksan/foundation/io"
 	"github.com/valyala/fasthttp"
 
 	"github.com/lemon4ksan/aoni/cookie"
 	"github.com/lemon4ksan/aoni/fingerprint"
 	"github.com/lemon4ksan/aoni/fingerprint/ja4"
 	"github.com/lemon4ksan/aoni/internal/core"
-	"github.com/lemon4ksan/aoni/internal/io"
 	"github.com/lemon4ksan/aoni/netutil/netdial"
 	"github.com/lemon4ksan/aoni/telemetry"
 )
@@ -44,20 +44,32 @@ func (p *Pipeline[Req, Resp]) prepareRequest(req any, tx *Tx) *http.Request {
 
 	stdReq = p.prepareRequestContext(req, stdReq)
 
-	stages := []PrepStage[Req, Resp]{
-		stageBeforeRequestHooks[Req, Resp],
-		stagePacketPadding[Req, Resp],
-		stageRefererHeader[Req, Resp],
-		stageRotateUserAgent[Req, Resp],
-		stageDPIJitter[Req, Resp],
-		stageRedactSensitiveData[Req, Resp],
-		stageUploadProgress[Req, Resp],
-		stageJA4Report[Req, Resp],
+	if len(p.defaults.BeforeRequest) > 0 {
+		stdReq = stageBeforeRequestHooks(p, stdReq, tx)
 	}
 
-	for _, stage := range stages {
-		stdReq = stage(p, stdReq, tx)
+	if p.fingerprint.PacketPadding != nil {
+		stdReq = stagePacketPadding(p, stdReq, tx)
 	}
+
+	if p.defaults.RefererAutomaton {
+		stdReq = stageRefererHeader(p, stdReq, tx)
+	}
+
+	if tx.Flags&FlagRotateUA != 0 {
+		stdReq = stageRotateUserAgent(p, stdReq, tx)
+	}
+
+	if tx.Flags&FlagDPIJitter != 0 && tx.DPIJitter != nil {
+		stdReq = stageDPIJitter(p, stdReq, tx)
+	}
+
+	if tx.Flags&FlagRedact != 0 && tx.Redact != nil {
+		stdReq = stageRedactSensitiveData(p, stdReq, tx)
+	}
+
+	stdReq = stageUploadProgress(p, stdReq, tx)
+	stdReq = stageJA4Report(p, stdReq, tx)
 
 	return stdReq
 }
@@ -113,7 +125,7 @@ func stageRedactSensitiveData[Req, Resp any](p *Pipeline[Req, Resp], req *http.R
 func stageUploadProgress[Req, Resp any](_ *Pipeline[Req, Resp], req *http.Request, _ *Tx) *http.Request {
 	cfg := GetRequestConfig(req.Context())
 	if cfg != nil && cfg.UploadProgress != nil && req.Body != nil && req.Body != http.NoBody {
-		progressReader := &io.ProgressReader{
+		progressReader := &fio.ProgressReader{
 			Reader:     req.Body,
 			Total:      req.ContentLength,
 			OnProgress: cfg.UploadProgress,
@@ -128,7 +140,7 @@ func stageUploadProgress[Req, Resp any](_ *Pipeline[Req, Resp], req *http.Reques
 					return nil, err
 				}
 
-				return &io.ProgressReader{
+				return &fio.ProgressReader{
 					Reader:     rc,
 					Total:      req.ContentLength,
 					OnProgress: cfg.UploadProgress,
@@ -377,7 +389,7 @@ func (p *Pipeline[Req, Resp]) applyDPIJitter(req *http.Request, cfg *DPIJitterCo
 	}
 
 	if req.Body != nil && req.Body != http.NoBody {
-		req.Body = &io.JitterReader{
+		req.Body = &fio.JitterReader{
 			ReadCloser: req.Body,
 			Delay:      delay,
 		}

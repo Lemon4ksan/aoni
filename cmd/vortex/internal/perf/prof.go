@@ -6,6 +6,7 @@ package perf
 
 import (
 	"bufio"
+	"cmp"
 	"context"
 	"encoding/json"
 	"errors"
@@ -17,7 +18,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"runtime"
-	"sort"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -251,30 +252,28 @@ func parseBenchmarkOutput(output string) []EndpointPerfRecord {
 func sortRecords(records []EndpointPerfRecord, sortKey string) {
 	switch strings.ToLower(sortKey) {
 	case "latency":
-		sort.Slice(records, func(i, j int) bool {
-			return records[i].NsPerOp < records[j].NsPerOp
+		slices.SortFunc(records, func(a, b EndpointPerfRecord) int {
+			return cmp.Compare(a.NsPerOp, b.NsPerOp)
 		})
 	case "allocs":
-		sort.Slice(records, func(i, j int) bool {
-			if records[i].AllocsPerOp == records[j].AllocsPerOp {
-				return records[i].BytesPerOp > records[j].BytesPerOp
-			}
-
-			return records[i].AllocsPerOp > records[j].AllocsPerOp
+		slices.SortFunc(records, func(a, b EndpointPerfRecord) int {
+			return cmp.Or(
+				cmp.Compare(b.AllocsPerOp, a.AllocsPerOp),
+				cmp.Compare(b.BytesPerOp, a.BytesPerOp),
+			)
 		})
 
 	case "name":
-		sort.Slice(records, func(i, j int) bool {
-			if records[i].Service == records[j].Service {
-				return records[i].Method < records[j].Method
-			}
-
-			return records[i].Service < records[j].Service
+		slices.SortFunc(records, func(a, b EndpointPerfRecord) int {
+			return cmp.Or(
+				cmp.Compare(a.Service, b.Service),
+				cmp.Compare(a.Method, b.Method),
+			)
 		})
 
 	default: // throughput
-		sort.Slice(records, func(i, j int) bool {
-			return records[i].ThroughputOpsS > records[j].ThroughputOpsS
+		slices.SortFunc(records, func(a, b EndpointPerfRecord) int {
+			return cmp.Compare(b.ThroughputOpsS, a.ThroughputOpsS)
 		})
 	}
 }

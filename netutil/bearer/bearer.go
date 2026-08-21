@@ -12,8 +12,8 @@ import (
 
 // Standard OAuth 2.0 Bearer error codes in WWW-Authenticate headers (RFC 6750 §3.1 & §6.2).
 const (
-	ErrInvalidRequest   = auth.ErrBearerInvalidRequest
-	ErrInvalidToken     = auth.ErrBearerInvalidToken
+	ErrInvalidRequest    = auth.ErrBearerInvalidRequest
+	ErrInvalidToken      = auth.ErrBearerInvalidToken
 	ErrInsufficientScope = auth.ErrBearerInsufficientScope
 )
 

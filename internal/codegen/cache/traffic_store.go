@@ -16,9 +16,11 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
-	"sort"
+	"slices"
 	"strings"
 	"time"
+
+	"github.com/lemon4ksan/foundation/generic"
 )
 
 // TrafficEntry represents a cached traffic session snapshot.
@@ -246,8 +248,8 @@ func ListTraffic(rootDir string) ([]TrafficEntry, error) {
 		}
 	}
 
-	sort.Slice(list, func(i, j int) bool {
-		return list[i].StoredAt.After(list[j].StoredAt)
+	slices.SortFunc(list, func(a, b TrafficEntry) int {
+		return b.StoredAt.Compare(a.StoredAt)
 	})
 
 	return list, nil
@@ -553,12 +555,8 @@ func extractHARMetadata(data []byte) ([]string, int) {
 		}
 	}
 
-	var origins []string
-	for o := range originMap {
-		origins = append(origins, o)
-	}
-
-	sort.Strings(origins)
+	origins := generic.Keys(originMap)
+	slices.Sort(origins)
 
 	return origins, count
 }

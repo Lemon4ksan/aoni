@@ -10,8 +10,10 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
-	"sort"
+	"slices"
 	"strings"
+
+	"github.com/lemon4ksan/foundation/generic"
 
 	"github.com/lemon4ksan/aoni/internal/codegen/builder"
 	"github.com/lemon4ksan/aoni/internal/codegen/cache"
@@ -128,12 +130,8 @@ func (t *TrafficPipeline) FillEnv(targetFiles []string, outFile string, fillFrom
 		vault = v
 	}
 
-	var varNames []string
-	for k := range varMap {
-		varNames = append(varNames, k)
-	}
-
-	sort.Strings(varNames)
+	varNames := generic.Keys(varMap)
+	slices.Sort(varNames)
 
 	var sb strings.Builder
 	sb.WriteString("# =============================================================================\n")

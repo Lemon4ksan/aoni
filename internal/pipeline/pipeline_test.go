@@ -21,6 +21,7 @@ import (
 	"time"
 
 	"github.com/lemon4ksan/foundation/generic"
+	fio "github.com/lemon4ksan/foundation/io"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -28,7 +29,6 @@ import (
 	"github.com/lemon4ksan/aoni/fingerprint"
 	"github.com/lemon4ksan/aoni/fingerprint/ja4"
 	"github.com/lemon4ksan/aoni/internal/core"
-	"github.com/lemon4ksan/aoni/internal/io"
 	"github.com/lemon4ksan/aoni/telemetry"
 )
 
@@ -123,8 +123,8 @@ func (r *mockRequest) ForEachHeader(fn func(key, value []byte) bool) {
 		}
 	}
 }
-func (r *mockRequest) SetBodyBytes(b []byte)          { r.body = b }
-func (r *mockRequest) BodyBytes() []byte              { return r.body }
+func (r *mockRequest) SetBodyBytes(b []byte) { r.body = b }
+func (r *mockRequest) BodyBytes() []byte     { return r.body }
 func (r *mockRequest) SetBodyStream(stdio.Reader, int64) {
 }
 func (r *mockRequest) BodyStream() stdio.Reader { return bytes.NewReader(r.body) }
@@ -361,7 +361,7 @@ func TestPipeline_ResponseSizeLimit(t *testing.T) {
 
 		_, err := pipe.Execute(t.Context(), req.HTTPRequest(), doer, pipeCfg)
 		require.Error(t, err)
-		assert.ErrorIs(t, err, io.ErrResponseTooLarge)
+		assert.ErrorIs(t, err, fio.ErrResponseTooLarge)
 	})
 
 	t.Run("exceeds_stream_bytes_fails_during_read", func(t *testing.T) {
@@ -386,7 +386,7 @@ func TestPipeline_ResponseSizeLimit(t *testing.T) {
 
 		_, readErr := stdio.ReadAll(resp.Body)
 		require.Error(t, readErr)
-		assert.ErrorIs(t, readErr, io.ErrResponseTooLarge)
+		assert.ErrorIs(t, readErr, fio.ErrResponseTooLarge)
 	})
 }
 

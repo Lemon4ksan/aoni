@@ -5,6 +5,7 @@
 package ast
 
 import (
+	"cmp"
 	"context"
 	"encoding/json"
 	"errors"
@@ -13,8 +14,10 @@ import (
 	"io"
 	"os"
 	"path/filepath"
-	"sort"
+	"slices"
 	"strings"
+
+	"github.com/lemon4ksan/foundation/generic"
 
 	"github.com/lemon4ksan/aoni/internal/codegen/builder"
 	"github.com/lemon4ksan/aoni/internal/codegen/git"
@@ -250,12 +253,12 @@ func (c *CmdLog) buildServiceTimeline(filePath string, svc *ir.ServiceIR) fileTi
 		}
 	}
 
-	for _, tv := range versionMap {
-		timeline.Versions = append(timeline.Versions, *tv)
-	}
+	timeline.Versions = generic.Map(generic.Values(versionMap), func(tv *timelineVersion) timelineVersion {
+		return *tv
+	})
 
-	sort.Slice(timeline.Versions, func(i, j int) bool {
-		return timeline.Versions[i].Version > timeline.Versions[j].Version
+	slices.SortFunc(timeline.Versions, func(a, b timelineVersion) int {
+		return cmp.Compare(b.Version, a.Version)
 	})
 
 	return timeline

@@ -5,15 +5,17 @@
 package ingest
 
 import (
+	"cmp"
 	"encoding/json"
 	"fmt"
 	"net/url"
-	"sort"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
 
 	"github.com/getkin/kin-openapi/openapi3"
+	"github.com/lemon4ksan/foundation/generic"
 )
 
 // HARLog models the top-level container of a W3C HAR 1.2 archive.
@@ -366,8 +368,8 @@ func HARToOpenAPI(data []byte) (*openapi3.T, error) {
 	}
 
 	if len(commonHeaders) > 0 {
-		sort.Slice(commonHeaders, func(i, j int) bool {
-			return commonHeaders[i]["name"] < commonHeaders[j]["name"]
+		slices.SortFunc(commonHeaders, func(a, b map[string]string) int {
+			return cmp.Compare(a["name"], b["name"])
 		})
 
 		if doc.Info.Extensions == nil {
@@ -582,12 +584,8 @@ func valueToSchema(v any) *openapi3.Schema {
 	case map[string]any:
 		obj := openapi3.NewObjectSchema()
 
-		keys := make([]string, 0, len(val))
-		for k := range val {
-			keys = append(keys, k)
-		}
-
-		sort.Strings(keys)
+		keys := generic.Keys(val)
+		slices.Sort(keys)
 
 		for _, k := range keys {
 			obj.Properties[k] = &openapi3.SchemaRef{Value: valueToSchema(val[k])}
@@ -615,12 +613,8 @@ func UnifyComponentsSchemas(doc *openapi3.T) {
 	sigToGroup := make(map[string]*schemaGroup)
 
 	// Collect schema names deterministically
-	names := make([]string, 0, len(doc.Components.Schemas))
-	for name := range doc.Components.Schemas {
-		names = append(names, name)
-	}
-
-	sort.Strings(names)
+	names := generic.Keys(doc.Components.Schemas)
+	slices.Sort(names)
 
 	for _, name := range names {
 		ref := doc.Components.Schemas[name]
@@ -693,12 +687,8 @@ func computeSchemaFingerprint(s *openapi3.Schema) string {
 		return ""
 	}
 
-	keys := make([]string, 0, len(s.Properties))
-	for k := range s.Properties {
-		keys = append(keys, k)
-	}
-
-	sort.Strings(keys)
+	keys := generic.Keys(s.Properties)
+	slices.Sort(keys)
 
 	var sb strings.Builder
 	for _, k := range keys {

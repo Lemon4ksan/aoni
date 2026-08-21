@@ -42,7 +42,7 @@ func (c *Client) DialContext(ctx context.Context, network, addr string) (net.Con
 
 	host, port := splitHostPortDefault(addr)
 
-	host, port = applyHostRewriteRules(ctx, host, port)
+	host, port = applyHostRewriteRules(aoni.HostRewriteRules(ctx), host, port)
 	if port == "80" && !strings.Contains(addr, ":") {
 		port = "443"
 	}
@@ -218,8 +218,7 @@ func splitHostPortDefault(addr string) (host, port string) {
 	return netutil.CleanHost(h), p
 }
 
-func applyHostRewriteRules(ctx context.Context, host, port string) (string, string) {
-	rules := aoni.HostRewriteRules(ctx)
+func applyHostRewriteRules(rules map[string]string, host, port string) (string, string) {
 	if len(rules) == 0 {
 		return host, port
 	}

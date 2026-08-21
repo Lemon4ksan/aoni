@@ -14,7 +14,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"sort"
+	"slices"
 	"strings"
 	"time"
 
@@ -251,8 +251,8 @@ func (c *CmdTag) runList(
 		}
 	}
 
-	sort.Slice(tags, func(i, j int) bool {
-		return tags[i].CreatedAt.After(tags[j].CreatedAt)
+	slices.SortFunc(tags, func(a, b TagEntry) int {
+		return b.CreatedAt.Compare(a.CreatedAt)
 	})
 
 	if jsonOut {

@@ -15,12 +15,12 @@ import (
 	"path/filepath"
 	"regexp"
 	"slices"
-	"sort"
 	"strings"
 
 	"github.com/getkin/kin-openapi/openapi2"
 	"github.com/getkin/kin-openapi/openapi2conv"
 	"github.com/getkin/kin-openapi/openapi3"
+	"github.com/lemon4ksan/foundation/generic"
 	"gopkg.in/yaml.v3"
 
 	"github.com/lemon4ksan/aoni/internal/codegen/cache"
@@ -877,7 +877,7 @@ func GenerateContract(spec *openapi3.T, cfg ImportConfig) ([]byte, error) {
 		}
 	}
 
-	sort.Strings(customImports)
+	slices.Sort(customImports)
 
 	for _, imp := range customImports {
 		fmt.Fprintf(&buf, "\t%q\n", imp)
@@ -955,7 +955,7 @@ func GenerateSplitContract(spec *openapi3.T, cfg ImportConfig) (apiSource, model
 		}
 	}
 
-	sort.Strings(customImports)
+	slices.Sort(customImports)
 
 	for _, imp := range customImports {
 		fmt.Fprintf(&apiBuf, "\t%q\n", imp)
@@ -997,7 +997,7 @@ func GenerateSplitContract(spec *openapi3.T, cfg ImportConfig) (apiSource, model
 			}
 		}
 
-		sort.Strings(modelCustomImports)
+		slices.Sort(modelCustomImports)
 
 		if hasTime || len(modelCustomImports) > 0 {
 			modelsBuf.WriteString("import (\n")
@@ -1046,12 +1046,8 @@ func resolveBaseURL(spec *openapi3.T, cfg ImportConfig) string {
 }
 
 func writeSchemas(buf *bytes.Buffer, schemas openapi3.Schemas, cfg ImportConfig) {
-	keys := make([]string, 0, len(schemas))
-	for k := range schemas {
-		keys = append(keys, k)
-	}
-
-	sort.Strings(keys)
+	keys := generic.Keys(schemas)
+	slices.Sort(keys)
 
 	for _, k := range keys {
 		ref := schemas[k]
@@ -1095,12 +1091,8 @@ func writeSchemaModel(buf *bytes.Buffer, rawName string, s *openapi3.Schema, cfg
 	fmt.Fprintf(buf, "// @aoni:dto casing=snake_case omitempty=true\n")
 	fmt.Fprintf(buf, "type %s struct {\n", name)
 
-	propKeys := make([]string, 0, len(s.Properties))
-	for pk := range s.Properties {
-		propKeys = append(propKeys, pk)
-	}
-
-	sort.Strings(propKeys)
+	propKeys := generic.Keys(s.Properties)
+	slices.Sort(propKeys)
 
 	requiredMap := make(map[string]bool, len(s.Required))
 	for _, req := range s.Required {
@@ -1318,12 +1310,8 @@ func writeServiceInterface(buf *bytes.Buffer, spec *openapi3.T, cfg ImportConfig
 
 	fmt.Fprintf(buf, "type %s interface {\n", serviceName)
 
-	pathKeys := make([]string, 0, len(spec.Paths.Map()))
-	for p := range spec.Paths.Map() {
-		pathKeys = append(pathKeys, p)
-	}
-
-	sort.Strings(pathKeys)
+	pathKeys := generic.Keys(spec.Paths.Map())
+	slices.Sort(pathKeys)
 
 	usedMethodNames := make(map[string]int)
 

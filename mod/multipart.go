@@ -15,11 +15,11 @@ import (
 	"slices"
 	"strings"
 
+	fio "github.com/lemon4ksan/foundation/io"
 	"github.com/lemon4ksan/foundation/silicon/offheap"
 
 	"github.com/lemon4ksan/aoni"
 	"github.com/lemon4ksan/aoni/internal/core"
-	"github.com/lemon4ksan/aoni/internal/io"
 )
 
 // WithMultipart constructs an [aoni.RequestModifier] building an in-memory multipart/form-data request body
@@ -64,7 +64,7 @@ func WithMultipart(fields map[string]string, files map[string]stdio.Reader) aoni
 					return
 				}
 
-				if _, err = io.CopyZeroAlloc(part, r); err != nil {
+				if _, err = fio.CopyZeroAlloc(part, r); err != nil {
 					getOrInitRequestConfig(req).BodyError = err
 					return
 				}
@@ -131,7 +131,7 @@ func WithMultipartFields(fields []MultipartField) aoni.RequestModifier {
 					}
 
 					if f.Reader != nil {
-						if _, err = io.CopyZeroAlloc(part, f.Reader); err != nil {
+						if _, err = fio.CopyZeroAlloc(part, f.Reader); err != nil {
 							getOrInitRequestConfig(req).BodyError = err
 							return
 						}
@@ -207,7 +207,7 @@ func streamMultipartPayload(
 
 			part, err := createFormFileHeader(writer, key, key, contentType)
 			if err == nil {
-				_, _ = io.CopyZeroAlloc(part, streamReader)
+				_, _ = fio.CopyZeroAlloc(part, streamReader)
 			}
 		}
 	}

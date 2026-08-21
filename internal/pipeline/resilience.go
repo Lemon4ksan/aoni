@@ -15,9 +15,9 @@ import (
 	"time"
 
 	"github.com/lemon4ksan/foundation/generic"
+	fio "github.com/lemon4ksan/foundation/io"
 
 	"github.com/lemon4ksan/aoni/cookie"
-	"github.com/lemon4ksan/aoni/internal/io"
 	"github.com/lemon4ksan/aoni/telemetry"
 )
 
@@ -388,7 +388,7 @@ func (p *Pipeline[Req, Resp]) handleHedgeWinner(
 
 	cleanup(winner)
 
-	res.resp.Body = &io.ContextCancelingReadCloser{
+	res.resp.Body = &fio.ContextCancelingReadCloser{
 		ReadCloser: res.resp.Body,
 		Cancel:     cancelWinner,
 	}

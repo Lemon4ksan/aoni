@@ -479,13 +479,9 @@ func performHTTP1Handshake(
 }
 
 func hasPermessageDeflateExtension(header http.Header) bool {
-	for _, ext := range header.Values("Sec-WebSocket-Extensions") {
-		if strings.Contains(ext, "permessage-deflate") {
-			return true
-		}
-	}
-
-	return false
+	return slices.ContainsFunc(header.Values("Sec-WebSocket-Extensions"), func(ext string) bool {
+		return strings.Contains(ext, "permessage-deflate")
+	})
 }
 
 func tokenContainsValue(header http.Header, name, value string) bool {

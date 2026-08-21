@@ -175,17 +175,6 @@ func HandshakeUTLS(
 
 	report := ExtractJA4FromUConn(uConn)
 
-	done := make(chan struct{})
-	defer close(done)
-
-	go func() {
-		select {
-		case <-ctx.Done():
-			_ = conn.Close()
-		case <-done:
-		}
-	}()
-
 	if deadline, ok := ctx.Deadline(); ok {
 		_ = conn.SetDeadline(deadline)
 	} else {
@@ -244,6 +233,17 @@ func applyCertCompression(uConn *utls.UConn, algos []cert.CompressionAlgorithm) 
 	})
 }
 
+func isECHExtension(ext utls.TLSExtension) bool {
+	switch ext.(type) {
+	case *utls.GREASEEncryptedClientHelloExtension,
+		*utls.UnimplementedECHExtension,
+		utls.EncryptedClientHelloExtension:
+		return true
+	default:
+		return false
+	}
+}
+
 func removeECHExtensions(exts []utls.TLSExtension, keepECH bool) []utls.TLSExtension {
 	if len(exts) == 0 {
 		return exts
@@ -255,12 +255,7 @@ func removeECHExtensions(exts []utls.TLSExtension, keepECH bool) []utls.TLSExten
 			continue
 		}
 
-		tStr := fmt.Sprintf("%T", ext)
-		isECH := strings.Contains(tStr, "EncryptedClientHello") ||
-			strings.Contains(tStr, "GREASEECH") ||
-			strings.Contains(tStr, "BoringGREASE")
-
-		if isECH && !keepECH {
+		if isECHExtension(ext) && !keepECH {
 			continue
 		}
 

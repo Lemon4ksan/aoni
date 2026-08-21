@@ -16,6 +16,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/lemon4ksan/foundation/generic"
+
 	"github.com/lemon4ksan/aoni"
 	"github.com/lemon4ksan/aoni/internal/requestutil"
 )
@@ -31,15 +33,8 @@ const (
 // BuildIPProxyURI constructs an RFC 9484 compliant IP Proxy URI using single-pass zero-allocation string builder.
 // Target can be an IP address/prefix, hostname, or "*" wildcard; ipproto can be an IP protocol number or "*" wildcard.
 func BuildIPProxyURI(host string, port int, target, ipproto string) string {
-	cleanTarget := strings.TrimSpace(target)
-	if cleanTarget == "" {
-		cleanTarget = "*"
-	}
-
-	cleanProto := strings.TrimSpace(ipproto)
-	if cleanProto == "" {
-		cleanProto = "*"
-	}
+	cleanTarget := generic.Coalesce(strings.TrimSpace(target), "*")
+	cleanProto := generic.Coalesce(strings.TrimSpace(ipproto), "*")
 
 	var portBuf [10]byte
 
@@ -92,15 +87,9 @@ func DialIPProxy(
 	}
 
 	host := parsed.Hostname()
+	port := generic.Coalesce(parsed.Port(), "443")
 
-	port := parsed.Port()
-	if port == "" {
-		port = "443"
-	}
-
-	addr := net.JoinHostPort(host, port)
-
-	conn, err := dialer.DialTLSForWS(ctx, addr)
+	conn, err := dialer.DialTLSForWS(ctx, net.JoinHostPort(host, port))
 	if err != nil {
 		return nil, nil, err
 	}

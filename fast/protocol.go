@@ -9,6 +9,7 @@ import (
 	"context"
 	"crypto/tls"
 	"io"
+	"maps"
 	"net"
 	"net/http"
 	"strconv"
@@ -86,16 +87,10 @@ func (c *altSvcCache) Clone() *altSvcCache {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 
-	cloned := newAltSvcCache()
-	for k, v := range c.hosts {
-		cloned.hosts[k] = v
+	return &altSvcCache{
+		hosts:  maps.Clone(c.hosts),
+		broken: maps.Clone(c.broken),
 	}
-
-	for k, v := range c.broken {
-		cloned.broken[k] = v
-	}
-
-	return cloned
 }
 
 // MarkH3Failed records a failed HTTP/3 connection attempt, applying exponential backoff from 5m up to 48h.

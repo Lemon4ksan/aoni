@@ -11,7 +11,7 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
-	"sort"
+	"slices"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -128,8 +128,8 @@ func TestLatencyProfile_Fast_Vs_StdHTTP(t *testing.T) {
 	stdDuration := time.Since(stdStart)
 
 	// 3. Compute metrics
-	sort.Slice(fastLatencies, func(i, j int) bool { return fastLatencies[i] < fastLatencies[j] })
-	sort.Slice(stdLatencies, func(i, j int) bool { return stdLatencies[i] < stdLatencies[j] })
+	slices.Sort(fastLatencies)
+	slices.Sort(stdLatencies)
 
 	fastRPS := float64(totalReqs) / fastDuration.Seconds()
 	stdRPS := float64(totalReqs) / stdDuration.Seconds()
