@@ -18,85 +18,78 @@ import (
 
 // GenerateContract translates an OpenAPI document into a clean, declarative aoni Go contract.
 func GenerateContract(spec *Document, cfg ImportConfig) ([]byte, error) {
-	pkgName := cfg.PackageName
-	if pkgName == "" {
-		pkgName = "api"
+	pkgName := generic.Coalesce(cfg.PackageName, "api")
+
+	var body bytes.Buffer
+	if err := writeServiceContract(&body, spec, cfg); err != nil {
+		return nil, err
 	}
+	writeModelsContract(&body, spec, cfg)
 
-	var bodyBuf bytes.Buffer
-	baseURL := resolveBaseURL(spec, cfg)
-
-	writeBaseURLConstant(&bodyBuf, baseURL, cfg.ServiceName)
-
-	if len(spec.Paths) > 0 {
-		if err := writeServiceInterface(&bodyBuf, spec, cfg, baseURL); err != nil {
-			return nil, err
-		}
-	}
-
-	if spec.Components != nil && len(spec.Components.Schemas) > 0 {
-		writeSchemas(&bodyBuf, spec.Components.Schemas, cfg)
-	}
-
-	var buf bytes.Buffer
-	fmt.Fprintf(&buf, "package %s\n\n", pkgName)
-	writeImports(&buf, bodyBuf.Bytes(), cfg.TypeMap, true)
-	buf.Write(bodyBuf.Bytes())
-
-	formatted, err := format.Source(buf.Bytes())
-	if err != nil {
-		return buf.Bytes(), fmt.Errorf("failed to format generated Go source: %w\nSource:\n%s", err, buf.String())
-	}
-
-	return formatted, nil
+	return formatSourceFile(pkgName, body.Bytes(), cfg.TypeMap, true)
 }
 
 // GenerateSplitContract generates separate api.go (interface) and models.go (DTOs) files.
 func GenerateSplitContract(spec *Document, cfg ImportConfig) (apiSource, modelsSource []byte, err error) {
-	pkgName := cfg.PackageName
-	if pkgName == "" {
-		pkgName = "api"
-	}
+	pkgName := generic.Coalesce(cfg.PackageName, "api")
 
-	// 1. API Contract (api.go)
 	var apiBody bytes.Buffer
-	baseURL := resolveBaseURL(spec, cfg)
-
-	writeBaseURLConstant(&apiBody, baseURL, cfg.ServiceName)
-
-	if len(spec.Paths) > 0 {
-		if err := writeServiceInterface(&apiBody, spec, cfg, baseURL); err != nil {
-			return nil, nil, err
-		}
+	if err := writeServiceContract(&apiBody, spec, cfg); err != nil {
+		return nil, nil, err
 	}
 
-	var apiBuf bytes.Buffer
-	fmt.Fprintf(&apiBuf, "package %s\n\n", pkgName)
-	writeImports(&apiBuf, apiBody.Bytes(), cfg.TypeMap, true)
-	apiBuf.Write(apiBody.Bytes())
-
-	apiSource, err = format.Source(apiBuf.Bytes())
+	apiSource, err = formatSourceFile(pkgName, apiBody.Bytes(), cfg.TypeMap, true)
 	if err != nil {
-		return nil, nil, fmt.Errorf("failed formatting api.go: %w\nSource:\n%s", err, apiBuf.String())
+		return nil, nil, fmt.Errorf("failed formatting api.go: %w", err)
 	}
 
-	// 2. Models DTOs (models.go)
-	if spec.Components != nil && len(spec.Components.Schemas) > 0 {
-		var modelsBody bytes.Buffer
-		writeSchemas(&modelsBody, spec.Components.Schemas, cfg)
+	var modelsBody bytes.Buffer
+	writeModelsContract(&modelsBody, spec, cfg)
 
-		var modelsBuf bytes.Buffer
-		fmt.Fprintf(&modelsBuf, "package %s\n\n", pkgName)
-		writeImports(&modelsBuf, modelsBody.Bytes(), cfg.TypeMap, false)
-		modelsBuf.Write(modelsBody.Bytes())
-
-		modelsSource, err = format.Source(modelsBuf.Bytes())
+	if modelsBody.Len() > 0 {
+		modelsSource, err = formatSourceFile(pkgName, modelsBody.Bytes(), cfg.TypeMap, false)
 		if err != nil {
-			return nil, nil, fmt.Errorf("failed formatting models.go: %w\nSource:\n%s", err, modelsBuf.String())
+			return nil, nil, fmt.Errorf("failed formatting models.go: %w", err)
 		}
 	}
 
 	return apiSource, modelsSource, nil
+}
+
+func writeServiceContract(buf *bytes.Buffer, spec *Document, cfg ImportConfig) error {
+	baseURL := resolveBaseURL(spec, cfg)
+	writeBaseURLConstant(buf, baseURL, cfg.ServiceName)
+
+	if len(spec.Paths) == 0 {
+		return nil
+	}
+
+	return writeServiceInterface(buf, spec, cfg, baseURL)
+}
+
+func writeModelsContract(buf *bytes.Buffer, spec *Document, cfg ImportConfig) {
+	if spec.Components == nil || len(spec.Components.Schemas) == 0 {
+		return
+	}
+	writeSchemas(buf, spec.Components.Schemas, cfg)
+}
+
+func formatSourceFile(pkgName string, body []byte, typeMap map[string]string, includeAoni bool) ([]byte, error) {
+	if len(body) == 0 {
+		return nil, nil
+	}
+
+	var buf bytes.Buffer
+	fmt.Fprintf(&buf, "package %s\n\n", pkgName)
+	writeImports(&buf, body, typeMap, includeAoni)
+	buf.Write(body)
+
+	formatted, err := format.Source(buf.Bytes())
+	if err != nil {
+		return buf.Bytes(), fmt.Errorf("failed formatting Go source: %w\nSource:\n%s", err, buf.String())
+	}
+
+	return formatted, nil
 }
 
 func writeBaseURLConstant(buf *bytes.Buffer, baseURL, serviceName string) {
