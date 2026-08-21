@@ -29,11 +29,19 @@ const (
 var httpMethods = []string{"GET", "POST", "PUT", "DELETE", "PATCH", "HEAD", "OPTIONS", "TRACE"}
 
 // MergeOpenAPISpecs combines multiple OpenAPI specifications into a unified specification using Union mode.
+//
+// References:
+//   - OpenAPI 3.1.0 §4.8.1 OpenAPI Object: https://spec.openapis.org/oas/v3.1.0#openapi-object
+//   - OpenAPI 3.1.0 §4.8.7 Components Object: https://spec.openapis.org/oas/v3.1.0#components-object
 func MergeOpenAPISpecs(specs ...*Document) *Document {
 	return MergeOpenAPISpecsWithMode(MergeModeUnion, specs...)
 }
 
 // MergeOpenAPISpecsWithMode combines multiple specifications using the chosen set operation (union, intersect, diff).
+//
+// References:
+//   - OpenAPI 3.1.0 §4.8.9 Path Item Object: https://spec.openapis.org/oas/v3.1.0#path-item-object
+//   - OpenAPI 3.1.0 §4.8.10 Operation Object: https://spec.openapis.org/oas/v3.1.0#operation-object
 func MergeOpenAPISpecsWithMode(mode MergeMode, specs ...*Document) *Document {
 	validSpecs := generic.Filter(specs, func(d *Document) bool {
 		return d != nil

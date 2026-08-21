@@ -14,6 +14,12 @@ import (
 	"github.com/lemon4ksan/foundation/generic"
 )
 
+// writeSchemas translates OpenAPI Component Schemas into typed Go DTO structs, enums, or type aliases.
+//
+// References:
+//   - OpenAPI 3.1.0 §4.8.7 Components Object: https://spec.openapis.org/oas/v3.1.0#components-object
+//   - OpenAPI 3.1.0 §4.8.24 Schema Object: https://spec.openapis.org/oas/v3.1.0#schema-object
+//   - Swagger 2.0 §5.17 Schema Object: https://swagger.io/specification/v2/#schema-object
 func writeSchemas(buf *bytes.Buffer, schemas map[string]*Schema, cfg ImportConfig) {
 	keys := generic.Keys(schemas)
 	slices.Sort(keys)
@@ -27,6 +33,11 @@ func writeSchemas(buf *bytes.Buffer, schemas map[string]*Schema, cfg ImportConfi
 	}
 }
 
+// writeSchemaModel dispatches schema generation to enum, primitive alias, or struct generator.
+//
+// References:
+//   - OpenAPI 3.1.0 §4.8.24 Schema Object: https://spec.openapis.org/oas/v3.1.0#schema-object
+//   - JSON Schema draft 2020-12 §Validation: https://json-schema.org/draft/2020-12/json-schema-validation.html
 func writeSchemaModel(buf *bytes.Buffer, rawName string, s *Schema, cfg ImportConfig) {
 	name := toPascalCase(rawName)
 
@@ -148,6 +159,12 @@ func shortTypeName(raw string) string {
 	return raw
 }
 
+// mapSchemaType maps an OpenAPI Schema data type and format into an idiomatic Go type.
+//
+// References:
+//   - OpenAPI 3.1.0 §4.8.24.1 Data Types: https://spec.openapis.org/oas/v3.1.0#data-types
+//   - Swagger 2.0 §5.18 Data Types: https://swagger.io/specification/v2/#data-types
+//   - RFC 3339 §Date and Time on the Internet: https://datatracker.ietf.org/doc/html/rfc3339
 func mapSchemaType(s *Schema, cfg ImportConfig) string {
 	if s == nil {
 		return "any"

@@ -14,11 +14,18 @@ import (
 )
 
 // LoadSpec loads an OpenAPI specification using default Union merge mode.
+//
+// References:
+//   - OpenAPI 3.1.0 Specification: https://spec.openapis.org/oas/v3.1.0
+//   - Swagger 2.0 Specification: https://swagger.io/specification/v2/
 func LoadSpec(filename string, data []byte) (*Document, error) {
 	return LoadSpecWithMode(filename, data, MergeModeUnion)
 }
 
 // LoadSpecWithMode loads and combines multiple specifications using the specified MergeMode (union, intersect, diff).
+//
+// References:
+//   - OpenAPI 3.1.0 §4.8.1 OpenAPI Object: https://spec.openapis.org/oas/v3.1.0#openapi-object
 func LoadSpecWithMode(filename string, data []byte, mode MergeMode) (*Document, error) {
 	if len(data) > 0 {
 		return loadSingleSpec(filename, data)

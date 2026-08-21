@@ -27,12 +27,17 @@ const (
 
 // MergeSpecs combines multiple AsyncAPI specifications using default Union mode.
 //
-// Reference: AsyncAPI 3.1.0 Multi-Document Merging
+// References:
+//   - AsyncAPI 3.1.0 §Multi-Document Merging: https://www.asyncapi.com/docs/concepts/asyncapi-document
+//   - AsyncAPI 3.1.0 §Components Object Reusability: https://www.asyncapi.com/docs/reference/specification/v3.1.0#components-object
 func MergeSpecs(specs ...*Document) *Document {
 	return MergeSpecsWithMode(MergeModeUnion, specs...)
 }
 
 // MergeSpecsWithMode combines multiple specifications using the chosen set operation (union, intersect, diff).
+//
+// References:
+//   - AsyncAPI 3.1.0 §Document Object: https://www.asyncapi.com/docs/reference/specification/v3.1.0#asyncapi-document-object
 func MergeSpecsWithMode(mode MergeMode, specs ...*Document) *Document {
 	validSpecs := generic.Filter(specs, func(d *Document) bool {
 		return d != nil
@@ -56,6 +61,11 @@ func MergeSpecsWithMode(mode MergeMode, specs ...*Document) *Document {
 	}
 }
 
+// mergeUnion computes the union A ∪ B of multiple AsyncAPI documents.
+//
+// References:
+//   - AsyncAPI 3.1.0 §Channels Object: https://www.asyncapi.com/docs/reference/specification/v3.1.0#channels-object
+//   - AsyncAPI 3.1.0 §Operations Object: https://www.asyncapi.com/docs/reference/specification/v3.1.0#operations-object
 func mergeUnion(specs ...*Document) *Document {
 	root := cloneDocument(specs[0])
 	ensureRootContainers(root)

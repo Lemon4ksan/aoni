@@ -28,6 +28,14 @@ type ExportConfig struct {
 }
 
 // ExportOpenAPI generates a standard OpenAPI 3.1 JSON or YAML document from aoni RootIR.
+//
+// References:
+//   - OpenAPI 3.1.0 Specification: https://spec.openapis.org/oas/v3.1.0
+//   - OpenAPI 3.1.0 §4.8.1 OpenAPI Object: https://spec.openapis.org/oas/v3.1.0#openapi-object
+//   - OpenAPI 3.1.0 §4.8.7 Components Object: https://spec.openapis.org/oas/v3.1.0#components-object
+//   - OpenAPI 3.1.0 §4.8.9 Path Item Object: https://spec.openapis.org/oas/v3.1.0#path-item-object
+//   - OpenAPI 3.1.0 §4.8.10 Operation Object: https://spec.openapis.org/oas/v3.1.0#operation-object
+//   - RFC 9110 §HTTP Semantics: https://datatracker.ietf.org/doc/html/rfc9110
 func ExportOpenAPI(root *ir.RootIR, cfg ExportConfig) ([]byte, error) {
 	if root == nil {
 		return nil, errors.New("root IR cannot be nil")

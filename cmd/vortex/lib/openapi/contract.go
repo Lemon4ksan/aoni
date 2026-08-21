@@ -17,6 +17,13 @@ import (
 )
 
 // GenerateContract translates an OpenAPI document into a clean, declarative aoni Go contract.
+//
+// References:
+//   - OpenAPI 3.1.0 §4.8.1 OpenAPI Object: https://spec.openapis.org/oas/v3.1.0#openapi-object
+//   - OpenAPI 3.1.0 §4.8.9 Path Item Object: https://spec.openapis.org/oas/v3.1.0#path-item-object
+//   - OpenAPI 3.1.0 §4.8.10 Operation Object: https://spec.openapis.org/oas/v3.1.0#operation-object
+//   - RFC 9110 §HTTP Semantics: https://datatracker.ietf.org/doc/html/rfc9110
+//   - RFC 6570 §URI Template: https://datatracker.ietf.org/doc/html/rfc6570
 func GenerateContract(spec *Document, cfg ImportConfig) ([]byte, error) {
 	pkgName := generic.Coalesce(cfg.PackageName, "api")
 
@@ -30,6 +37,10 @@ func GenerateContract(spec *Document, cfg ImportConfig) ([]byte, error) {
 }
 
 // GenerateSplitContract generates separate api.go (interface) and models.go (DTOs) files.
+//
+// References:
+//   - OpenAPI 3.1.0 §4.8.7 Components Object: https://spec.openapis.org/oas/v3.1.0#components-object
+//   - OpenAPI 3.1.0 §4.8.24 Schema Object: https://spec.openapis.org/oas/v3.1.0#schema-object
 func GenerateSplitContract(spec *Document, cfg ImportConfig) (apiSource, modelsSource []byte, err error) {
 	pkgName := generic.Coalesce(cfg.PackageName, "api")
 

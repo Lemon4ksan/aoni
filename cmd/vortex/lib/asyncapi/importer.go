@@ -34,7 +34,9 @@ type ImportResult struct {
 
 // Import loads an AsyncAPI specification and translates it into declarative Go contracts.
 //
-// Reference: AsyncAPI 3.1.0 Specification (https://www.asyncapi.com/docs/reference/specification/v3.1.0)
+// References:
+//   - AsyncAPI 3.1.0 Specification: https://www.asyncapi.com/docs/reference/specification/v3.1.0
+//   - AsyncAPI 2.6.0 Specification: https://v2.asyncapi.com/docs/reference/specification/v2.6.0
 func Import(cfg ImportConfig) (*ImportResult, error) {
 	mode := generic.Coalesce(cfg.MergeMode, MergeModeUnion)
 
@@ -58,7 +60,12 @@ func Import(cfg ImportConfig) (*ImportResult, error) {
 
 // GenerateContract translates an AsyncAPI document into a clean, declarative aoni Go contract.
 //
-// Reference: AsyncAPI 3.1.0 §Operations & §Channels
+// References:
+//   - AsyncAPI 3.1.0 §Operations Model: https://www.asyncapi.com/docs/reference/specification/v3.1.0#operations-object
+//   - AsyncAPI 3.1.0 §Channels Model: https://www.asyncapi.com/docs/reference/specification/v3.1.0#channels-object
+//   - RFC 6455 §WebSocket Protocol: https://datatracker.ietf.org/doc/html/rfc6455
+//   - RFC 8441 §Bootstrapping WebSockets with HTTP/2: https://datatracker.ietf.org/doc/html/rfc8441
+//   - W3C Server-Sent Events: https://www.w3.org/TR/eventsource/
 func GenerateContract(doc *Document, cfg ImportConfig) ([]byte, error) {
 	pkgName := generic.Coalesce(cfg.PackageName, "api")
 	serviceName := resolveServiceName(doc, cfg.ServiceName)
@@ -162,6 +169,11 @@ func resolveServerInfo(doc *Document) (baseURL, protocol string) {
 	return "", protocol
 }
 
+// emitOperationMethod translates an AsyncAPI operation into a typed Go interface method.
+//
+// References:
+//   - AsyncAPI 3.1.0 §Operation Object: https://www.asyncapi.com/docs/reference/specification/v3.1.0#operation-object
+//   - AsyncAPI 3.1.0 §Operation Reply Object: https://www.asyncapi.com/docs/reference/specification/v3.1.0#operation-reply-object
 func emitOperationMethod(buf *bytes.Buffer, doc *Document, opKey string, op Operation) {
 	methodName := generic.Coalesce(sanitizeIdentifier(opKey), "HandleEvent")
 
@@ -174,16 +186,19 @@ func emitOperationMethod(buf *bytes.Buffer, doc *Document, opKey string, op Oper
 	pathParams := extractTemplatePlaceholders(address)
 	payloadType := resolvePayloadType(doc, opKey, op)
 
+	// AsyncAPI 3.1.0 §Operation Reply Object -> @rpc pattern
 	if op.Reply != nil {
 		emitRPCMethod(buf, opKey, methodName, cleanAddress, payloadType, resolveReplyPayloadType(doc, opKey, op), pathParams)
 		return
 	}
 
+	// AsyncAPI 3.1.0 §Action (send = server sends to client -> @event subscription)
 	if op.Action == "send" || op.Action == "publish" {
 		emitEventSubscriptionMethod(buf, opKey, methodName, cleanAddress, payloadType, pathParams)
 		return
 	}
 
+	// AsyncAPI 3.1.0 §Action (receive = client sends to server -> @ws:emit)
 	emitWsEmitMethod(buf, opKey, methodName, cleanAddress, payloadType, pathParams)
 }
 
@@ -293,6 +308,11 @@ func extractTypeNameFromRef(ref string) string {
 	return sanitizeIdentifier(refKey) + "DTO"
 }
 
+// writeSchemas translates AsyncAPI Component Schemas and Message Payloads into Go DTO structs.
+//
+// References:
+//   - AsyncAPI 3.1.0 §Schema Object: https://www.asyncapi.com/docs/reference/specification/v3.1.0#schema-object
+//   - AsyncAPI 3.1.0 §Message Object: https://www.asyncapi.com/docs/reference/specification/v3.1.0#message-object
 func writeSchemas(buf *bytes.Buffer, doc *Document) {
 	if doc == nil {
 		return
@@ -362,6 +382,10 @@ func resolveMessageFieldType(propVal any) string {
 	return mapScalarTypeWithFormat(tStr, fmtStr)
 }
 
+// mapJSONSchemaType translates JSON Schema types to idiomatic Go types.
+//
+// References:
+//   - JSON Schema draft 2020-12 §Validation: https://json-schema.org/draft/2020-12/json-schema-validation.html#name-type
 func mapJSONSchemaType(s Schema) string {
 	switch s.Type {
 	case "string":

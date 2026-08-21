@@ -20,8 +20,9 @@ import (
 // ParseSpec parses, normalizes, and resolves traits for an AsyncAPI specification conforming to AsyncAPI 2.x and 3.x.
 //
 // References:
-//   - AsyncAPI 3.1.0 §Document Object (https://www.asyncapi.com/docs/concepts/asyncapi-document)
-//   - AsyncAPI 2.6.0 §AsyncAPI Object (https://v2.asyncapi.com/docs/reference/specification/v2.6.0#asyncapiObject)
+//   - AsyncAPI 3.1.0 §AsyncAPI Document Object: https://www.asyncapi.com/docs/reference/specification/v3.1.0#asyncapi-document-object
+//   - AsyncAPI 2.6.0 §AsyncAPI Object: https://v2.asyncapi.com/docs/reference/specification/v2.6.0#asyncapiObject
+//   - JSON Schema draft 2020-12 (AsyncAPI 3.1): https://json-schema.org/draft/2020-12/json-schema-core.html
 func ParseSpec(data []byte) (*Document, error) {
 	if len(data) == 0 {
 		return nil, errors.New("empty asyncapi specification data")
@@ -38,8 +39,13 @@ func ParseSpec(data []byte) (*Document, error) {
 		doc.AsyncAPI = detectAsyncAPIVersion(data)
 	}
 
+	// 1. Normalize AsyncAPI 2.x publish/subscribe channels into 3.x operations model
 	normalizeAsyncAPI2(&doc)
+
+	// 2. Resolve traits merging mechanism (AsyncAPI 3.1.0 & 2.6.0 §Traits Merge Mechanism)
 	applyTraits(&doc)
+
+	// 3. Extract channel address parameters from dynamic templates ({param})
 	extractAddressParameters(&doc)
 
 	return &doc, nil
@@ -65,6 +71,9 @@ func LoadSpec(filename string, data []byte) (*Document, error) {
 }
 
 // LoadSpecWithMode loads and combines multiple specifications using the specified MergeMode (union, intersect, diff).
+//
+// References:
+//   - AsyncAPI 3.1.0 §Multi-Document Composition: https://www.asyncapi.com/docs/concepts/asyncapi-document
 func LoadSpecWithMode(filename string, data []byte, mode MergeMode) (*Document, error) {
 	if len(data) > 0 {
 		return ParseSpec(data)
@@ -131,8 +140,9 @@ func loadSingleFile(filename string) (*Document, error) {
 // normalizeAsyncAPI2 translates an AsyncAPI 2.x document into the unified AsyncAPI 3.x document model.
 //
 // References:
-//   - AsyncAPI 2.6.0 §Channel Item Object (https://v2.asyncapi.com/docs/reference/specification/v2.6.0#channelItemObject)
-//   - AsyncAPI 2.6.0 §Operation Object (https://v2.asyncapi.com/docs/reference/specification/v2.6.0#operationObject)
+//   - AsyncAPI 2.6.0 §Channel Item Object: https://v2.asyncapi.com/docs/reference/specification/v2.6.0#channelItemObject
+//   - AsyncAPI 2.6.0 §Operation Object (Publish vs Subscribe semantics): https://v2.asyncapi.com/docs/reference/specification/v2.6.0#operationObject
+//   - AsyncAPI 3.1.0 §Operations Model (Action: send vs receive): https://www.asyncapi.com/docs/reference/specification/v3.1.0#operation-object
 func normalizeAsyncAPI2(doc *Document) {
 	if doc == nil {
 		return
@@ -151,6 +161,11 @@ func normalizeAsyncAPI2(doc *Document) {
 	normalizeChannelsAndOperations2(doc)
 }
 
+// normalizeServers2 upgrades AsyncAPI 2.6.0 Server URL string format into AsyncAPI 3.1.0 Host and Pathname structure.
+//
+// References:
+//   - AsyncAPI 2.6.0 §Server Object: https://v2.asyncapi.com/docs/reference/specification/v2.6.0#serverObject
+//   - AsyncAPI 3.1.0 §Server Object: https://www.asyncapi.com/docs/reference/specification/v3.1.0#server-object
 func normalizeServers2(doc *Document) {
 	for sKey, srv := range doc.Servers {
 		if srv.Host != "" || srv.URL == "" {
@@ -170,6 +185,11 @@ func normalizeServers2(doc *Document) {
 	}
 }
 
+// normalizeChannelsAndOperations2 converts AsyncAPI 2.x publish/subscribe channels into AsyncAPI 3.x action operations.
+//
+// References:
+//   - AsyncAPI 2.6.0 §Channel Item Object: https://v2.asyncapi.com/docs/reference/specification/v2.6.0#channelItemObject
+//   - AsyncAPI 3.1.0 §Operation Object: https://www.asyncapi.com/docs/reference/specification/v3.1.0#operation-object
 func normalizeChannelsAndOperations2(doc *Document) {
 	for channelPath, ch := range doc.Channels {
 		if ch.Address == "" {
@@ -247,11 +267,13 @@ func extractMessagesFrom2(msgAny any) []RefObject {
 	return res
 }
 
-// applyTraits applies operationTraits and messageTraits according to the AsyncAPI merging mechanism.
+// applyTraits applies operationTraits and messageTraits according to the AsyncAPI merging mechanism:
+// Traits are merged into the target object without overriding already defined properties.
 //
 // References:
-//   - AsyncAPI 3.1.0 §Trait Merging Mechanism (https://www.asyncapi.com/docs/concepts/asyncapi-document/reusability-with-traits#trait-merging-mechanism)
-//   - AsyncAPI 2.6.0 §Operation Trait Object & §Message Trait Object
+//   - AsyncAPI 3.1.0 §Trait Merging Mechanism: https://www.asyncapi.com/docs/concepts/asyncapi-document/reusability-with-traits#trait-merging-mechanism
+//   - AsyncAPI 2.6.0 §Operation Trait Object: https://v2.asyncapi.com/docs/reference/specification/v2.6.0#operationTraitObject
+//   - AsyncAPI 2.6.0 §Message Trait Object: https://v2.asyncapi.com/docs/reference/specification/v2.6.0#messageTraitObject
 func applyTraits(doc *Document) {
 	if doc == nil {
 		return
@@ -334,8 +356,9 @@ func mergeTraitHeaders(msg *Message, traitHeaders *Schema) {
 // extractAddressParameters parses {param} placeholders in channel addresses and populates channel.Parameters.
 //
 // References:
-//   - AsyncAPI 3.1.0 §Parameters in Channel Address (https://www.asyncapi.com/docs/concepts/asyncapi-document/dynamic-channel-address)
-//   - AsyncAPI 2.6.0 §Parameters Object (https://v2.asyncapi.com/docs/reference/specification/v2.6.0#parametersObject)
+//   - AsyncAPI 3.1.0 §Parameters in Channel Address: https://www.asyncapi.com/docs/concepts/asyncapi-document/dynamic-channel-address
+//   - AsyncAPI 2.6.0 §Parameters Object: https://v2.asyncapi.com/docs/reference/specification/v2.6.0#parametersObject
+//   - RFC 6570 §URI Template: https://datatracker.ietf.org/doc/html/rfc6570
 func extractAddressParameters(doc *Document) {
 	if doc == nil || doc.Channels == nil {
 		return
