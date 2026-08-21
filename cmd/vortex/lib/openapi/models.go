@@ -23,7 +23,6 @@ func writeSchemas(buf *bytes.Buffer, schemas map[string]*Schema, cfg ImportConfi
 		if s == nil {
 			continue
 		}
-
 		writeSchemaModel(buf, k, s, cfg)
 	}
 }
@@ -35,28 +34,42 @@ func writeSchemaModel(buf *bytes.Buffer, rawName string, s *Schema, cfg ImportCo
 		fmt.Fprintf(buf, "// %s — %s\n", name, strings.ReplaceAll(s.Description, "\n", " "))
 	}
 
-	if len(s.Enum) > 0 && (s.Type == nil || s.IsType("string")) {
-		fmt.Fprintf(buf, "type %s string\n\n", name)
-		fmt.Fprintf(buf, "const (\n")
-
-		for _, enumVal := range s.Enum {
-			valStr := fmt.Sprintf("%v", enumVal)
-			constName := name + toPascalCase(valStr)
-			fmt.Fprintf(buf, "\t%s %s = %q\n", constName, name, valStr)
-		}
-
-		fmt.Fprintf(buf, ")\n\n")
-
+	if isStringEnum(s) {
+		writeEnumModel(buf, name, s)
 		return
 	}
 
-	if s.Type != nil && !s.IsType("object") && len(s.Properties) == 0 {
+	if isPrimitiveAlias(s) {
 		goType := mapSchemaType(s, cfg)
 		fmt.Fprintf(buf, "type %s %s\n\n", name, goType)
 		return
 	}
 
-	// Struct DTO
+	writeStructModel(buf, name, s, cfg)
+}
+
+func isStringEnum(s *Schema) bool {
+	return len(s.Enum) > 0 && (len(s.Type) == 0 || s.IsType("string"))
+}
+
+func isPrimitiveAlias(s *Schema) bool {
+	return len(s.Type) > 0 && !s.IsType("object") && len(s.Properties) == 0
+}
+
+func writeEnumModel(buf *bytes.Buffer, name string, s *Schema) {
+	fmt.Fprintf(buf, "type %s string\n\n", name)
+	fmt.Fprintf(buf, "const (\n")
+
+	for _, enumVal := range s.Enum {
+		valStr := fmt.Sprintf("%v", enumVal)
+		constName := name + toPascalCase(valStr)
+		fmt.Fprintf(buf, "\t%s %s = %q\n", constName, name, valStr)
+	}
+
+	fmt.Fprintf(buf, ")\n\n")
+}
+
+func writeStructModel(buf *bytes.Buffer, name string, s *Schema, cfg ImportConfig) {
 	fmt.Fprintf(buf, "// @aoni:dto casing=snake_case omitempty=true\n")
 	fmt.Fprintf(buf, "type %s struct {\n", name)
 
@@ -73,47 +86,63 @@ func writeSchemaModel(buf *bytes.Buffer, rawName string, s *Schema, cfg ImportCo
 		if propSchema == nil {
 			continue
 		}
-
-		fieldName := toPascalCase(pk)
-		if fieldName == "" {
-			fieldName = "Field"
-		}
-
-		if fieldName == name {
-			fieldName += "Val"
-		}
-
-		fieldType := mapSchemaType(propSchema, cfg)
-		if propSchema.Ref != "" {
-			refName := toPascalCase(path.Base(propSchema.Ref))
-			if propSchema.Type != nil && propSchema.IsType("object") {
-				fieldType = "*" + refName
-			} else {
-				fieldType = refName
-			}
-		}
-
-		tag := fmt.Sprintf("`json:\"%s,omitempty\"`", pk)
-		if requiredMap[pk] {
-			tag = fmt.Sprintf("`json:\"%s\"`", pk)
-		}
-
-		if propSchema.Description != "" {
-			fmt.Fprintf(buf, "\t// %s\n", strings.ReplaceAll(propSchema.Description, "\n", " "))
-		}
-
-		fmt.Fprintf(buf, "\t%s %s %s\n", fieldName, fieldType, tag)
+		writeStructField(buf, name, pk, propSchema, requiredMap[pk], cfg)
 	}
 
 	fmt.Fprintf(buf, "}\n\n")
 }
 
+func writeStructField(buf *bytes.Buffer, structName, propKey string, propSchema *Schema, isRequired bool, cfg ImportConfig) {
+	fieldName := deriveFieldName(structName, propKey)
+	fieldType := deriveFieldType(propSchema, cfg)
+	tag := deriveFieldJSONTag(propKey, isRequired)
+
+	if propSchema.Description != "" {
+		fmt.Fprintf(buf, "\t// %s\n", strings.ReplaceAll(propSchema.Description, "\n", " "))
+	}
+
+	fmt.Fprintf(buf, "\t%s %s %s\n", fieldName, fieldType, tag)
+}
+
+func deriveFieldName(structName, propKey string) string {
+	fieldName := toPascalCase(propKey)
+	if fieldName == "" {
+		fieldName = "Field"
+	}
+	if fieldName == structName {
+		fieldName += "Val"
+	}
+	return fieldName
+}
+
+func deriveFieldType(propSchema *Schema, cfg ImportConfig) string {
+	if propSchema.Ref == "" {
+		return mapSchemaType(propSchema, cfg)
+	}
+
+	refName := toPascalCase(path.Base(propSchema.Ref))
+	if propSchema.IsType("object") {
+		return "*" + refName
+	}
+	return refName
+}
+
+func deriveFieldJSONTag(propKey string, isRequired bool) string {
+	if isRequired {
+		return fmt.Sprintf("`json:\"%s\"`", propKey)
+	}
+	return fmt.Sprintf("`json:\"%s,omitempty\"`", propKey)
+}
+
 func shortTypeName(raw string) string {
-	if idx := strings.LastIndex(raw, "/"); idx != -1 {
-		dotIdx := strings.LastIndex(raw, ".")
-		if dotIdx > idx {
-			return path.Base(raw[:dotIdx]) + "." + raw[dotIdx+1:]
-		}
+	idx := strings.LastIndex(raw, "/")
+	if idx == -1 {
+		return raw
+	}
+
+	dotIdx := strings.LastIndex(raw, ".")
+	if dotIdx > idx {
+		return path.Base(raw[:dotIdx]) + "." + raw[dotIdx+1:]
 	}
 
 	return raw
@@ -134,73 +163,81 @@ func mapSchemaType(s *Schema, cfg ImportConfig) string {
 		if len(s.Properties) > 0 {
 			return "map[string]any"
 		}
-
 		return "any"
 	}
 
-	primaryType := s.Type.Primary()
-
-	switch primaryType {
+	switch s.Type.Primary() {
 	case "string":
-		switch s.Format {
-		case "date-time":
-			return "time.Time"
-		case "date":
-			return "string"
-		case "binary", "byte":
-			return "[]byte"
-		default:
-			return "string"
-		}
-
+		return mapStringType(s.Format)
 	case "integer":
-		switch s.Format {
-		case "int64":
-			return "int64"
-		case "uint64":
-			return "uint64"
-		case "uint32", "uint":
-			return "uint32"
-		default:
-			return "int"
-		}
-
+		return mapIntegerType(s.Format)
 	case "number":
-		if s.Format == "float" {
-			return "float32"
-		}
-		return "float64"
-
+		return mapNumberType(s.Format)
 	case "boolean":
 		return "bool"
-
 	case "array":
-		if s.Items != nil {
-			if s.Items.Ref != "" {
-				return "[]" + toPascalCase(path.Base(s.Items.Ref))
-			}
-
-			return "[]" + mapSchemaType(s.Items, cfg)
-		}
-
-		return "[]any"
-
+		return mapArrayType(s.Items, cfg)
 	case "object":
-		if s.AdditionalProperties != nil {
-			valType := "any"
-			if apSchema, ok := s.AdditionalProperties.(*Schema); ok && apSchema != nil {
-				if apSchema.Ref != "" {
-					valType = toPascalCase(path.Base(apSchema.Ref))
-				} else {
-					valType = mapSchemaType(apSchema, cfg)
-				}
-			}
-			return "map[string]" + valType
-		}
-
-		return "map[string]any"
-
+		return mapObjectType(s.AdditionalProperties, cfg)
 	default:
 		return "any"
 	}
+}
+
+func mapStringType(format string) string {
+	switch format {
+	case "date-time":
+		return "time.Time"
+	case "binary", "byte":
+		return "[]byte"
+	default:
+		return "string"
+	}
+}
+
+func mapIntegerType(format string) string {
+	switch format {
+	case "int64":
+		return "int64"
+	case "uint64":
+		return "uint64"
+	case "uint32", "uint":
+		return "uint32"
+	default:
+		return "int"
+	}
+}
+
+func mapNumberType(format string) string {
+	if format == "float" {
+		return "float32"
+	}
+	return "float64"
+}
+
+func mapArrayType(items *Schema, cfg ImportConfig) string {
+	if items == nil {
+		return "[]any"
+	}
+	if items.Ref != "" {
+		return "[]" + toPascalCase(path.Base(items.Ref))
+	}
+	return "[]" + mapSchemaType(items, cfg)
+}
+
+func mapObjectType(additionalProps any, cfg ImportConfig) string {
+	if additionalProps == nil {
+		return "map[string]any"
+	}
+
+	apSchema, ok := additionalProps.(*Schema)
+	if !ok || apSchema == nil {
+		return "map[string]any"
+	}
+
+	if apSchema.Ref != "" {
+		return "map[string]" + toPascalCase(path.Base(apSchema.Ref))
+	}
+
+	return "map[string]" + mapSchemaType(apSchema, cfg)
 }

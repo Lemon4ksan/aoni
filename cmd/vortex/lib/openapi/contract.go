@@ -8,7 +8,6 @@ import (
 	"bytes"
 	"fmt"
 	"go/format"
-	"net/url"
 	"path"
 	"regexp"
 	"slices"
@@ -25,76 +24,25 @@ func GenerateContract(spec *Document, cfg ImportConfig) ([]byte, error) {
 	}
 
 	var bodyBuf bytes.Buffer
-
-	// 1. Base URL
 	baseURL := resolveBaseURL(spec, cfg)
-	if baseURL != "" {
-		constName := "BaseURL"
-		if cfg.ServiceName != "" && cfg.ServiceName != "API" {
-			constName = cfg.ServiceName + "BaseURL"
-		}
 
-		fmt.Fprintf(
-			&bodyBuf,
-			"// %s is the default API base endpoint.\nconst %s = %q\n\n",
-			constName,
-			constName,
-			baseURL,
-		)
-	}
+	writeBaseURLConstant(&bodyBuf, baseURL, cfg.ServiceName)
 
-	// 2. Generate Service Interface (API) at the TOP
 	if len(spec.Paths) > 0 {
 		if err := writeServiceInterface(&bodyBuf, spec, cfg, baseURL); err != nil {
 			return nil, err
 		}
 	}
 
-	// 3. Generate Schemas / Models (DTOs) BELOW the interface
 	if spec.Components != nil && len(spec.Components.Schemas) > 0 {
 		writeSchemas(&bodyBuf, spec.Components.Schemas, cfg)
 	}
 
 	var buf bytes.Buffer
 	fmt.Fprintf(&buf, "package %s\n\n", pkgName)
-
-	buf.WriteString("import (\n")
-	buf.WriteString("\t\"context\"\n")
-
-	if bytes.Contains(bodyBuf.Bytes(), []byte("time.Time")) {
-		buf.WriteString("\t\"time\"\n")
-	}
-
-	var customImports []string
-
-	for _, rawType := range cfg.TypeMap {
-		if idx := strings.LastIndex(rawType, "/"); idx != -1 {
-			dotIdx := strings.LastIndex(rawType, ".")
-			if dotIdx > idx {
-				pkgPath := rawType[:dotIdx]
-				short := path.Base(pkgPath) + "." + rawType[dotIdx+1:]
-
-				if bytes.Contains(bodyBuf.Bytes(), []byte(short)) {
-					if !slices.Contains(customImports, pkgPath) {
-						customImports = append(customImports, pkgPath)
-					}
-				}
-			}
-		}
-	}
-
-	slices.Sort(customImports)
-
-	for _, imp := range customImports {
-		fmt.Fprintf(&buf, "\t%q\n", imp)
-	}
-
-	buf.WriteString("\n\t\"github.com/lemon4ksan/aoni\"\n")
-	buf.WriteString(")\n\n")
-
+	writeImports(&buf, bodyBuf.Bytes(), cfg.TypeMap, true)
 	buf.Write(bodyBuf.Bytes())
 
-	// Format output with standard go/format
 	formatted, err := format.Source(buf.Bytes())
 	if err != nil {
 		return buf.Bytes(), fmt.Errorf("failed to format generated Go source: %w\nSource:\n%s", err, buf.String())
@@ -110,24 +58,11 @@ func GenerateSplitContract(spec *Document, cfg ImportConfig) (apiSource, modelsS
 		pkgName = "api"
 	}
 
-	// --- 1. API Contract (api.go) ---
+	// 1. API Contract (api.go)
 	var apiBody bytes.Buffer
-
 	baseURL := resolveBaseURL(spec, cfg)
-	if baseURL != "" {
-		constName := "BaseURL"
-		if cfg.ServiceName != "" && cfg.ServiceName != "API" {
-			constName = cfg.ServiceName + "BaseURL"
-		}
 
-		fmt.Fprintf(
-			&apiBody,
-			"// %s is the default API base endpoint.\nconst %s = %q\n\n",
-			constName,
-			constName,
-			baseURL,
-		)
-	}
+	writeBaseURLConstant(&apiBody, baseURL, cfg.ServiceName)
 
 	if len(spec.Paths) > 0 {
 		if err := writeServiceInterface(&apiBody, spec, cfg, baseURL); err != nil {
@@ -137,38 +72,7 @@ func GenerateSplitContract(spec *Document, cfg ImportConfig) (apiSource, modelsS
 
 	var apiBuf bytes.Buffer
 	fmt.Fprintf(&apiBuf, "package %s\n\n", pkgName)
-	apiBuf.WriteString("import (\n")
-	apiBuf.WriteString("\t\"context\"\n")
-
-	if bytes.Contains(apiBody.Bytes(), []byte("time.Time")) {
-		apiBuf.WriteString("\t\"time\"\n")
-	}
-
-	var customImports []string
-	for _, rawType := range cfg.TypeMap {
-		if idx := strings.LastIndex(rawType, "/"); idx != -1 {
-			dotIdx := strings.LastIndex(rawType, ".")
-			if dotIdx > idx {
-				pkgPath := rawType[:dotIdx]
-
-				short := path.Base(pkgPath) + "." + rawType[dotIdx+1:]
-				if bytes.Contains(apiBody.Bytes(), []byte(short)) {
-					if !slices.Contains(customImports, pkgPath) {
-						customImports = append(customImports, pkgPath)
-					}
-				}
-			}
-		}
-	}
-
-	slices.Sort(customImports)
-
-	for _, imp := range customImports {
-		fmt.Fprintf(&apiBuf, "\t%q\n", imp)
-	}
-
-	apiBuf.WriteString("\n\t\"github.com/lemon4ksan/aoni\"\n")
-	apiBuf.WriteString(")\n\n")
+	writeImports(&apiBuf, apiBody.Bytes(), cfg.TypeMap, true)
 	apiBuf.Write(apiBody.Bytes())
 
 	apiSource, err = format.Source(apiBuf.Bytes())
@@ -176,49 +80,14 @@ func GenerateSplitContract(spec *Document, cfg ImportConfig) (apiSource, modelsS
 		return nil, nil, fmt.Errorf("failed formatting api.go: %w\nSource:\n%s", err, apiBuf.String())
 	}
 
-	// --- 2. Models (models.go) ---
+	// 2. Models DTOs (models.go)
 	if spec.Components != nil && len(spec.Components.Schemas) > 0 {
 		var modelsBody bytes.Buffer
 		writeSchemas(&modelsBody, spec.Components.Schemas, cfg)
 
 		var modelsBuf bytes.Buffer
 		fmt.Fprintf(&modelsBuf, "package %s\n\n", pkgName)
-
-		hasTime := bytes.Contains(modelsBody.Bytes(), []byte("time.Time"))
-
-		var modelCustomImports []string
-		for _, rawType := range cfg.TypeMap {
-			if idx := strings.LastIndex(rawType, "/"); idx != -1 {
-				dotIdx := strings.LastIndex(rawType, ".")
-				if dotIdx > idx {
-					pkgPath := rawType[:dotIdx]
-
-					short := path.Base(pkgPath) + "." + rawType[dotIdx+1:]
-					if bytes.Contains(modelsBody.Bytes(), []byte(short)) {
-						if !slices.Contains(modelCustomImports, pkgPath) {
-							modelCustomImports = append(modelCustomImports, pkgPath)
-						}
-					}
-				}
-			}
-		}
-
-		slices.Sort(modelCustomImports)
-
-		if hasTime || len(modelCustomImports) > 0 {
-			modelsBuf.WriteString("import (\n")
-
-			if hasTime {
-				modelsBuf.WriteString("\t\"time\"\n")
-			}
-
-			for _, imp := range modelCustomImports {
-				fmt.Fprintf(&modelsBuf, "\t%q\n", imp)
-			}
-
-			modelsBuf.WriteString(")\n\n")
-		}
-
+		writeImports(&modelsBuf, modelsBody.Bytes(), cfg.TypeMap, false)
 		modelsBuf.Write(modelsBody.Bytes())
 
 		modelsSource, err = format.Source(modelsBuf.Bytes())
@@ -230,24 +99,75 @@ func GenerateSplitContract(spec *Document, cfg ImportConfig) (apiSource, modelsS
 	return apiSource, modelsSource, nil
 }
 
+func writeBaseURLConstant(buf *bytes.Buffer, baseURL, serviceName string) {
+	if baseURL == "" {
+		return
+	}
+
+	constName := "BaseURL"
+	if serviceName != "" && serviceName != "API" {
+		constName = serviceName + "BaseURL"
+	}
+
+	fmt.Fprintf(buf, "// %s is the default API base endpoint.\nconst %s = %q\n\n", constName, constName, baseURL)
+}
+
+func writeImports(buf *bytes.Buffer, body []byte, typeMap map[string]string, includeAoni bool) {
+	hasTime := bytes.Contains(body, []byte("time.Time"))
+	customImports := collectCustomImports(body, typeMap)
+
+	if !includeAoni && !hasTime && len(customImports) == 0 {
+		return
+	}
+
+	buf.WriteString("import (\n")
+	if includeAoni {
+		buf.WriteString("\t\"context\"\n")
+	}
+	if hasTime {
+		buf.WriteString("\t\"time\"\n")
+	}
+
+	for _, imp := range customImports {
+		fmt.Fprintf(buf, "\t%q\n", imp)
+	}
+
+	if includeAoni {
+		buf.WriteString("\n\t\"github.com/lemon4ksan/aoni\"\n")
+	}
+	buf.WriteString(")\n\n")
+}
+
+func collectCustomImports(body []byte, typeMap map[string]string) []string {
+	var imports []string
+	for _, rawType := range typeMap {
+		idx := strings.LastIndex(rawType, "/")
+		if idx == -1 {
+			continue
+		}
+		dotIdx := strings.LastIndex(rawType, ".")
+		if dotIdx <= idx {
+			continue
+		}
+
+		pkgPath := rawType[:dotIdx]
+		short := path.Base(pkgPath) + "." + rawType[dotIdx+1:]
+
+		if bytes.Contains(body, []byte(short)) && !slices.Contains(imports, pkgPath) {
+			imports = append(imports, pkgPath)
+		}
+	}
+	slices.Sort(imports)
+	return imports
+}
+
 func resolveBaseURL(spec *Document, cfg ImportConfig) string {
 	if cfg.BaseURL != "" {
 		return cfg.BaseURL
 	}
-
 	if len(spec.Servers) > 0 && spec.Servers[0].URL != "" {
-		raw := spec.Servers[0].URL
-		if strings.HasPrefix(raw, "/") {
-			return raw
-		}
-
-		if u, err := url.Parse(raw); err == nil && u.Scheme != "" {
-			return raw
-		}
-
-		return raw
+		return spec.Servers[0].URL
 	}
-
 	return ""
 }
 
@@ -257,142 +177,104 @@ func writeServiceInterface(buf *bytes.Buffer, spec *Document, cfg ImportConfig, 
 		serviceName = "API"
 	}
 
-	casing := "snake_case"
-	if spec.Info != nil && spec.Info.Extensions != nil {
-		if ext, ok := spec.Info.Extensions["x-vortex-casing"]; ok {
-			if cStr, ok := ext.(string); ok && cStr != "" {
-				casing = cStr
-			}
-		}
-	}
-
-	fmt.Fprintf(buf, "// %s provides the API client contract.\n//\n", serviceName)
-	fmt.Fprintf(buf, "// @aoni:service casing=%s\n", casing)
-
-	if spec.Info != nil {
-		if spec.Info.Version != "" {
-			fmt.Fprintf(buf, "// @version %q\n", spec.Info.Version)
-		}
-	}
-
-	if cfg.SpecFile != "" {
-		fmt.Fprintf(buf, "// @source %q\n", cfg.SpecFile)
-	}
-
-	if spec.Info != nil && spec.Info.Extensions != nil {
-		if ext, ok := spec.Info.Extensions["x-vortex-persona"]; ok {
-			if pStr, ok := ext.(string); ok && pStr != "" {
-				fmt.Fprintf(buf, "// @persona %q\n", pStr)
-			}
-		}
-
-		if ext, ok := spec.Info.Extensions["x-vortex-tlsspec"]; ok {
-			if tStr, ok := ext.(string); ok && tStr != "" {
-				fmt.Fprintf(buf, "// @tls_spec %q\n", tStr)
-			}
-		}
-
-		if ext, ok := spec.Info.Extensions["x-vortex-engine"]; ok {
-			if eStr, ok := ext.(string); ok && eStr != "" {
-				fmt.Fprintf(buf, "// @engine %s\n", eStr)
-			}
-		}
-
-		if headersRaw, ok := spec.Info.Extensions["x-vortex-headers"]; ok {
-			if hList, ok := headersRaw.([]map[string]string); ok {
-				for _, h := range hList {
-					if h["name"] != "" && h["value"] != "" {
-						fmt.Fprintf(buf, "// @header %q %q\n", h["name"], h["value"])
-					}
-				}
-			} else if hListAny, ok := headersRaw.([]any); ok {
-				for _, item := range hListAny {
-					if hMap, ok := item.(map[string]any); ok {
-						name, _ := hMap["name"].(string)
-
-						val, _ := hMap["value"].(string)
-						if name != "" && val != "" {
-							fmt.Fprintf(buf, "// @header %q %q\n", name, val)
-						}
-					}
-				}
-			}
-		}
-	}
-
-	if baseURL != "" {
-		fmt.Fprintf(buf, "// @base_url %q\n", baseURL)
-	}
-
+	writeServiceHeader(buf, spec, cfg, serviceName, baseURL)
 	fmt.Fprintf(buf, "type %s interface {\n", serviceName)
 
 	pathKeys := generic.Keys(spec.Paths)
 	slices.Sort(pathKeys)
 
 	usedMethodNames := make(map[string]int)
+	methods := []string{"GET", "POST", "PUT", "DELETE", "PATCH", "HEAD", "OPTIONS"}
 
 	for _, pathStr := range pathKeys {
 		pathItem := spec.Paths[pathStr]
-		if pathItem == nil {
-			continue
-		}
-
-		if !isPathAllowed(pathStr, cfg) {
+		if pathItem == nil || !isPathAllowed(pathStr, cfg) {
 			continue
 		}
 
 		ops := pathItem.OperationsMap()
-		methods := []string{"GET", "POST", "PUT", "DELETE", "PATCH", "HEAD", "OPTIONS"}
 		for _, httpMethod := range methods {
 			op := ops[httpMethod]
-			if op == nil {
+			if op == nil || (cfg.SkipDeprecated && op.Deprecated) {
 				continue
 			}
-
-			if cfg.SkipDeprecated && op.Deprecated {
-				continue
-			}
-
 			writeOperationMethod(buf, spec, pathStr, httpMethod, pathItem, op, cfg, usedMethodNames)
 		}
 	}
 
 	fmt.Fprintf(buf, "}\n")
-
 	return nil
 }
 
+func writeServiceHeader(buf *bytes.Buffer, spec *Document, cfg ImportConfig, serviceName, baseURL string) {
+	casing := "snake_case"
+	if ext := extString(spec.InfoExtensions(), "x-vortex-casing"); ext != "" {
+		casing = ext
+	}
+
+	fmt.Fprintf(buf, "// %s provides the API client contract.\n//\n", serviceName)
+	fmt.Fprintf(buf, "// @aoni:service casing=%s\n", casing)
+
+	if spec.Info != nil && spec.Info.Version != "" {
+		fmt.Fprintf(buf, "// @version %q\n", spec.Info.Version)
+	}
+
+	if cfg.SpecFile != "" {
+		fmt.Fprintf(buf, "// @source %q\n", cfg.SpecFile)
+	}
+
+	exts := spec.InfoExtensions()
+	if persona := extString(exts, "x-vortex-persona"); persona != "" {
+		fmt.Fprintf(buf, "// @persona %q\n", persona)
+	}
+	if tlsSpec := extString(exts, "x-vortex-tlsspec"); tlsSpec != "" {
+		fmt.Fprintf(buf, "// @tls_spec %q\n", tlsSpec)
+	}
+	if engine := extString(exts, "x-vortex-engine"); engine != "" {
+		fmt.Fprintf(buf, "// @engine %s\n", engine)
+	}
+
+	for _, h := range extHeaders(exts, "x-vortex-headers") {
+		if h.Name != "" && h.Value != "" {
+			fmt.Fprintf(buf, "// @header %q %q\n", h.Name, h.Value)
+		}
+	}
+
+	if baseURL != "" {
+		fmt.Fprintf(buf, "// @base_url %q\n", baseURL)
+	}
+}
+
+func (d *Document) InfoExtensions() map[string]any {
+	if d == nil || d.Info == nil {
+		return nil
+	}
+	return d.Info.Extensions
+}
+
 func isPathAllowed(pathStr string, cfg ImportConfig) bool {
-	if len(cfg.IncludePaths) > 0 {
-		matched := false
-		for _, pattern := range cfg.IncludePaths {
-			if re, err := regexp.Compile(pattern); err == nil && re.MatchString(pathStr) {
-				matched = true
-				break
-			}
-		}
-
-		if !matched {
-			return false
-		}
+	if len(cfg.IncludePaths) > 0 && !matchesAnyPattern(pathStr, cfg.IncludePaths) {
+		return false
 	}
-
-	if len(cfg.ExcludePaths) > 0 {
-		for _, pattern := range cfg.ExcludePaths {
-			if re, err := regexp.Compile(pattern); err == nil && re.MatchString(pathStr) {
-				return false
-			}
-		}
+	if len(cfg.ExcludePaths) > 0 && matchesAnyPattern(pathStr, cfg.ExcludePaths) {
+		return false
 	}
-
 	return true
+}
+
+func matchesAnyPattern(target string, patterns []string) bool {
+	for _, pattern := range patterns {
+		if re, err := regexp.Compile(pattern); err == nil && re.MatchString(target) {
+			return true
+		}
+	}
+	return false
 }
 
 func writeOperationMethod(
 	buf *bytes.Buffer,
 	spec *Document,
-	pathStr string,
-	httpMethod string,
+	pathStr, httpMethod string,
 	pathItem *PathItem,
 	op *Operation,
 	cfg ImportConfig,
@@ -400,7 +282,23 @@ func writeOperationMethod(
 ) {
 	methodName := buildMethodName(pathStr, httpMethod, op, usedNames)
 
-	// Documentation
+	writeOperationDocumentation(buf, methodName, op)
+	writeOperationDirectives(buf, pathStr, httpMethod, op, spec, pathItem)
+
+	params := extractOperationParameters(pathStr, pathItem, op)
+	isForm := isFormRequestBody(op)
+
+	if httpMethod != "GET" && !isForm && len(params.query) > 0 {
+		fmt.Fprintf(buf, "\t// @query casing=snake_case\n")
+	}
+
+	paramSig := buildParameterSignatures(params, op, isForm, httpMethod, cfg)
+	returnType := determineReturnType(op, cfg)
+
+	writeMethodSignature(buf, methodName, paramSig, returnType)
+}
+
+func writeOperationDocumentation(buf *bytes.Buffer, methodName string, op *Operation) {
 	summary := op.Summary
 	if summary == "" {
 		summary = op.Description
@@ -410,35 +308,21 @@ func writeOperationMethod(
 		fmt.Fprintf(buf, "\t// %s — %s\n\t//\n", methodName, strings.ReplaceAll(summary, "\n", " "))
 	}
 
-	if op.Extensions != nil {
-		if credsRaw, ok := op.Extensions["x-required-credentials"]; ok {
-			var credsList []string
-			if listStr, ok := credsRaw.([]string); ok {
-				credsList = listStr
-			} else if listAny, ok := credsRaw.([]any); ok {
-				for _, item := range listAny {
-					if s, ok := item.(string); ok {
-						credsList = append(credsList, s)
-					}
-				}
-			}
-
-			if len(credsList) > 0 {
-				fmt.Fprintf(buf, "\t// Security & Session Requirements (captured from traffic):\n")
-
-				for _, cred := range credsList {
-					fmt.Fprintf(buf, "\t//   - %s\n", cred)
-				}
-
-				fmt.Fprintf(buf, "\t//\n")
-			}
+	credsList := extStringList(op.Extensions, "x-required-credentials")
+	if len(credsList) > 0 {
+		fmt.Fprintf(buf, "\t// Security & Session Requirements (captured from traffic):\n")
+		for _, cred := range credsList {
+			fmt.Fprintf(buf, "\t//   - %s\n", cred)
 		}
+		fmt.Fprintf(buf, "\t//\n")
 	}
+}
 
-	// Route directive: // @get "path", // @post "path"
+func writeOperationDirectives(buf *bytes.Buffer, pathStr, httpMethod string, op *Operation, spec *Document, pathItem *PathItem) {
 	cleanPath := strings.TrimPrefix(pathStr, "/")
 	fmt.Fprintf(buf, "\t// @%s %q\n", strings.ToLower(httpMethod), cleanPath)
 
+	methodName := buildMethodName(pathStr, httpMethod, op, nil)
 	if op.OperationID != "" && op.OperationID != methodName {
 		fmt.Fprintf(buf, "\t// @bind %q\n", op.OperationID)
 	}
@@ -447,219 +331,185 @@ func writeOperationMethod(
 		fmt.Fprintf(buf, "\t// @deprecated\n")
 	}
 
-	if op.Extensions != nil {
-		if unwrap, ok := op.Extensions["x-vortex-unwrap"]; ok {
-			if uStr, ok := unwrap.(string); ok && uStr != "" {
-				fmt.Fprintf(buf, "\t// @unwrap %q\n", uStr)
-			}
-		}
+	writeMethodExtensionDirectives(buf, op.Extensions, spec)
 
-		if callFn, ok := op.Extensions["x-vortex-call"]; ok {
-			if cStr, ok := callFn.(string); ok && cStr != "" {
-				fmt.Fprintf(buf, "\t// @call %q\n", cStr)
-			}
-		}
+	if isFormRequestBody(op) {
+		fmt.Fprintf(buf, "\t// @form casing=snake_case\n")
+	}
+}
 
-		if idem, ok := op.Extensions["x-vortex-idempotent"]; ok {
-			if isIdem, ok := idem.(bool); ok && isIdem {
-				fmt.Fprintf(buf, "\t// @idempotent\n")
-			}
-		}
-
-		if coal, ok := op.Extensions["x-vortex-coalesce"]; ok {
-			if isCoal, ok := coal.(bool); ok && isCoal {
-				fmt.Fprintf(buf, "\t// @coalesce\n")
-			}
-		}
-
-		if etag, ok := op.Extensions["x-vortex-etag"]; ok {
-			if isETag, ok := etag.(bool); ok && isETag {
-				fmt.Fprintf(buf, "\t// @etag\n")
-			}
-		}
-
-		sinceVal := ""
-		if op.Extensions != nil {
-			if since, ok := op.Extensions["x-vortex-since"]; ok {
-				if sStr, ok := since.(string); ok && sStr != "" {
-					sinceVal = sStr
-				}
-			}
-		}
-		if sinceVal == "" && spec != nil && spec.Info != nil && spec.Info.Version != "" {
-			sinceVal = spec.Info.Version
-		}
-
-		if sinceVal != "" {
-			fmt.Fprintf(buf, "\t// @since %q\n", sinceVal)
-		}
-
-		if headersRaw, ok := op.Extensions["x-vortex-headers"]; ok {
-			seenMethodHeaders := make(map[string]bool)
-			if hList, ok := headersRaw.([]map[string]string); ok {
-				for _, h := range hList {
-					if h["name"] != "" && h["value"] != "" && !isGlobalHeader(spec, h["name"], h["value"]) {
-						headerKey := strings.ToLower(h["name"])
-						if !seenMethodHeaders[headerKey] {
-							seenMethodHeaders[headerKey] = true
-
-							fmt.Fprintf(buf, "\t// @header %q %q\n", h["name"], h["value"])
-						}
-					}
-				}
-			} else if hListAny, ok := headersRaw.([]any); ok {
-				for _, item := range hListAny {
-					if hMap, ok := item.(map[string]any); ok {
-						name, _ := hMap["name"].(string)
-
-						val, _ := hMap["value"].(string)
-						if name != "" && val != "" && !isGlobalHeader(spec, name, val) {
-							headerKey := strings.ToLower(name)
-							if !seenMethodHeaders[headerKey] {
-								seenMethodHeaders[headerKey] = true
-
-								fmt.Fprintf(buf, "\t// @header %q %q\n", name, val)
-							}
-						}
-					}
-				}
-			}
-		}
+func writeMethodExtensionDirectives(buf *bytes.Buffer, exts map[string]any, spec *Document) {
+	if exts == nil {
+		return
 	}
 
-	// Payload directive
-	isForm := false
-	if op.RequestBody != nil {
-		content := op.RequestBody.Content
-		if content["application/x-www-form-urlencoded"] != nil || content["multipart/form-data"] != nil {
-			isForm = true
+	if unwrap := extString(exts, "x-vortex-unwrap"); unwrap != "" {
+		fmt.Fprintf(buf, "\t// @unwrap %q\n", unwrap)
+	}
+	if callFn := extString(exts, "x-vortex-call"); callFn != "" {
+		fmt.Fprintf(buf, "\t// @call %q\n", callFn)
+	}
+	if extBool(exts, "x-vortex-idempotent") {
+		fmt.Fprintf(buf, "\t// @idempotent\n")
+	}
+	if extBool(exts, "x-vortex-coalesce") {
+		fmt.Fprintf(buf, "\t// @coalesce\n")
+	}
+	if extBool(exts, "x-vortex-etag") {
+		fmt.Fprintf(buf, "\t// @etag\n")
+	}
 
-			fmt.Fprintf(buf, "\t// @form casing=snake_case\n")
+	sinceVal := resolveSinceVersion(exts, spec)
+	if sinceVal != "" {
+		fmt.Fprintf(buf, "\t// @since %q\n", sinceVal)
+	}
+
+	writeMethodHeaders(buf, exts, spec)
+}
+
+func resolveSinceVersion(exts map[string]any, spec *Document) string {
+	if since := extString(exts, "x-vortex-since"); since != "" {
+		return since
+	}
+	if spec != nil && spec.Info != nil && spec.Info.Version != "" {
+		return spec.Info.Version
+	}
+	return ""
+}
+
+func writeMethodHeaders(buf *bytes.Buffer, exts map[string]any, spec *Document) {
+	seen := make(map[string]bool)
+	for _, h := range extHeaders(exts, "x-vortex-headers") {
+		if h.Name == "" || h.Value == "" || isGlobalHeader(spec, h.Name, h.Value) {
+			continue
+		}
+		headerKey := strings.ToLower(h.Name)
+		if !seen[headerKey] {
+			seen[headerKey] = true
+			fmt.Fprintf(buf, "\t// @header %q %q\n", h.Name, h.Value)
 		}
 	}
+}
 
-	// Collect parameters
-	params := extractOperationParameters(pathStr, pathItem, op)
-
-	// Emit @query casing=snake_case for non-GET methods with query parameters
-	if httpMethod != "GET" && !isForm && len(params.query) > 0 {
-		fmt.Fprintf(buf, "\t// @query casing=snake_case\n")
+func isFormRequestBody(op *Operation) bool {
+	if op == nil || op.RequestBody == nil {
+		return false
 	}
+	c := op.RequestBody.Content
+	return c["application/x-www-form-urlencoded"] != nil || c["multipart/form-data"] != nil
+}
 
-	var paramSig []string
-
-	paramSig = append(paramSig, "ctx context.Context")
+func buildParameterSignatures(
+	params operationParameters,
+	op *Operation,
+	isForm bool,
+	httpMethod string,
+	cfg ImportConfig,
+) []string {
+	var sigs []string
+	sigs = append(sigs, "ctx context.Context")
 
 	for _, p := range params.path {
 		pName := toCamelCase(p.Name)
-
-		pType := "string"
-		if cfg.TypeMap != nil {
-			if mapped, ok := cfg.TypeMap[p.Name]; ok {
-				pType = shortTypeName(mapped)
-			} else if mapped, ok := cfg.TypeMap[strings.ToLower(p.Name)]; ok {
-				pType = shortTypeName(mapped)
-			}
-		}
-
-		if pType == "string" && p.Schema != nil {
-			pType = mapSchemaType(p.Schema, cfg)
-		}
-
-		paramSig = append(paramSig, fmt.Sprintf("%s %s", pName, pType))
+		pType := resolveParamType(p, cfg)
+		sigs = append(sigs, fmt.Sprintf("%s %s", pName, pType))
 	}
 
 	for _, p := range params.query {
 		pName := toCamelCase(p.Name)
-
-		pType := "string"
-		if cfg.TypeMap != nil {
-			if mapped, ok := cfg.TypeMap[p.Name]; ok {
-				pType = shortTypeName(mapped)
-			} else if mapped, ok := cfg.TypeMap[strings.ToLower(p.Name)]; ok {
-				pType = shortTypeName(mapped)
-			}
-		}
-
-		if pType == "string" && p.Schema != nil {
-			pType = mapSchemaType(p.Schema, cfg)
-		}
-
+		pType := resolveParamType(p, cfg)
 		sig := fmt.Sprintf("%s %s", pName, pType)
 
 		expectedSnake := toSnakeCase(pName)
 		if p.Name != "" && (httpMethod != "GET" || (p.Name != expectedSnake && p.Name != pName)) {
 			sig += fmt.Sprintf(" // @query %q", p.Name)
 		}
-
-		paramSig = append(paramSig, sig)
+		sigs = append(sigs, sig)
 	}
 
-	// Request Body parameter if JSON
 	if !isForm && op.RequestBody != nil {
-		jsonContent := op.RequestBody.Content["application/json"]
-		if jsonContent != nil && jsonContent.Schema != nil {
-			bodyType := "any"
-			if jsonContent.Schema.Ref != "" {
-				bodyType = toPascalCase(path.Base(jsonContent.Schema.Ref))
-			} else {
-				bodyType = mapSchemaType(jsonContent.Schema, cfg)
-			}
-
-			paramSig = append(paramSig, "req "+bodyType)
+		if bodyParam := resolveRequestBodyParam(op.RequestBody, cfg); bodyParam != "" {
+			sigs = append(sigs, bodyParam)
 		}
 	}
 
-	paramSig = append(paramSig, "mods ...aoni.RequestModifier")
+	sigs = append(sigs, "mods ...aoni.RequestModifier")
+	return sigs
+}
 
-	// Determine return type
-	returnType := determineReturnType(op, cfg)
+func resolveParamType(p *Parameter, cfg ImportConfig) string {
+	if cfg.TypeMap != nil {
+		if mapped, ok := cfg.TypeMap[p.Name]; ok {
+			return shortTypeName(mapped)
+		}
+		if mapped, ok := cfg.TypeMap[strings.ToLower(p.Name)]; ok {
+			return shortTypeName(mapped)
+		}
+	}
 
-	hasComments := false
+	if p.Schema != nil {
+		return mapSchemaType(p.Schema, cfg)
+	}
+
+	return "string"
+}
+
+func resolveRequestBodyParam(reqBody *RequestBody, cfg ImportConfig) string {
+	jsonContent := reqBody.Content["application/json"]
+	if jsonContent == nil || jsonContent.Schema == nil {
+		return ""
+	}
+
+	if jsonContent.Schema.Ref != "" {
+		bodyType := toPascalCase(path.Base(jsonContent.Schema.Ref))
+		return "req " + bodyType
+	}
+
+	return "req " + mapSchemaType(jsonContent.Schema, cfg)
+}
+
+func writeMethodSignature(buf *bytes.Buffer, methodName string, paramSig []string, returnType string) {
+	hasComments := slices.ContainsFunc(paramSig, func(p string) bool {
+		return strings.Contains(p, "//")
+	})
+
+	isMultiline := len(paramSig) > 4 || hasComments
+
+	if isMultiline {
+		writeMultilineSignature(buf, methodName, paramSig, returnType)
+		return
+	}
+
+	writeSingleLineSignature(buf, methodName, paramSig, returnType)
+}
+
+func writeMultilineSignature(buf *bytes.Buffer, methodName string, paramSig []string, returnType string) {
+	fmt.Fprintf(buf, "\t%s(\n", methodName)
 	for _, p := range paramSig {
-		if strings.Contains(p, "//") {
-			hasComments = true
-			break
+		if idx := strings.Index(p, "//"); idx != -1 {
+			codePart := strings.TrimSpace(p[:idx])
+			commentPart := p[idx:]
+			fmt.Fprintf(buf, "\t\t%s, %s\n", codePart, commentPart)
+			continue
 		}
+		fmt.Fprintf(buf, "\t\t%s,\n", p)
 	}
 
-	if len(paramSig) > 4 || hasComments {
-		if returnType == "" {
-			fmt.Fprintf(buf, "\t%s(\n", methodName)
-
-			for _, p := range paramSig {
-				if idx := strings.Index(p, "//"); idx != -1 {
-					codePart := strings.TrimSpace(p[:idx])
-					commentPart := p[idx:]
-					fmt.Fprintf(buf, "\t\t%s, %s\n", codePart, commentPart)
-				} else {
-					fmt.Fprintf(buf, "\t\t%s,\n", p)
-				}
-			}
-
-			fmt.Fprintf(buf, "\t) error\n\n")
-		} else {
-			fmt.Fprintf(buf, "\t%s(\n", methodName)
-
-			for _, p := range paramSig {
-				if idx := strings.Index(p, "//"); idx != -1 {
-					codePart := strings.TrimSpace(p[:idx])
-					commentPart := p[idx:]
-					fmt.Fprintf(buf, "\t\t%s, %s\n", codePart, commentPart)
-				} else {
-					fmt.Fprintf(buf, "\t\t%s,\n", p)
-				}
-			}
-
-			fmt.Fprintf(buf, "\t) (%s, error)\n\n", returnType)
-		}
-	} else {
-		if returnType == "" {
-			fmt.Fprintf(buf, "\t%s(%s) error\n\n", methodName, strings.Join(paramSig, ", "))
-		} else {
-			fmt.Fprintf(buf, "\t%s(%s) (%s, error)\n\n", methodName, strings.Join(paramSig, ", "), returnType)
-		}
+	if returnType == "" {
+		fmt.Fprintf(buf, "\t) error\n\n")
+		return
 	}
+
+	fmt.Fprintf(buf, "\t) (%s, error)\n\n", returnType)
+}
+
+func writeSingleLineSignature(buf *bytes.Buffer, methodName string, paramSig []string, returnType string) {
+	paramsJoined := strings.Join(paramSig, ", ")
+	if returnType == "" {
+		fmt.Fprintf(buf, "\t%s(%s) error\n\n", methodName, paramsJoined)
+		return
+	}
+	fmt.Fprintf(buf, "\t%s(%s) (%s, error)\n\n", methodName, paramsJoined, returnType)
 }
 
 func determineReturnType(op *Operation, cfg ImportConfig) string {
@@ -674,13 +524,8 @@ func determineReturnType(op *Operation, cfg ImportConfig) string {
 	if resp == nil {
 		resp = op.Responses["default"]
 	}
-
-	if resp == nil {
+	if resp == nil || resp.Content == nil {
 		return ""
-	}
-
-	if resp.Content == nil {
-		return "map[string]any"
 	}
 
 	jsonContent := resp.Content["application/json"]
@@ -689,8 +534,7 @@ func determineReturnType(op *Operation, cfg ImportConfig) string {
 	}
 
 	if jsonContent.Schema.Ref != "" {
-		typeName := toPascalCase(path.Base(jsonContent.Schema.Ref))
-		return "*" + typeName
+		return "*" + toPascalCase(path.Base(jsonContent.Schema.Ref))
 	}
 
 	s := jsonContent.Schema
@@ -698,7 +542,6 @@ func determineReturnType(op *Operation, cfg ImportConfig) string {
 		if s.Items != nil && s.Items.Ref != "" {
 			return "[]*" + toPascalCase(path.Base(s.Items.Ref))
 		}
-
 		return "[]" + mapSchemaType(s.Items, cfg)
 	}
 
@@ -709,35 +552,76 @@ func determineReturnType(op *Operation, cfg ImportConfig) string {
 	return mapSchemaType(s, cfg)
 }
 
-func isGlobalHeader(spec *Document, name, val string) bool {
-	if spec == nil || spec.Info == nil || spec.Info.Extensions == nil {
+type HeaderEntry struct {
+	Name  string
+	Value string
+}
+
+func extString(exts map[string]any, key string) string {
+	if exts == nil {
+		return ""
+	}
+	v, _ := exts[key].(string)
+	return v
+}
+
+func extBool(exts map[string]any, key string) bool {
+	if exts == nil {
 		return false
 	}
+	v, _ := exts[key].(bool)
+	return v
+}
 
-	headersRaw, ok := spec.Info.Extensions["x-vortex-headers"]
-	if !ok {
-		return false
+func extStringList(exts map[string]any, key string) []string {
+	if exts == nil {
+		return nil
 	}
-
-	if hList, ok := headersRaw.([]map[string]string); ok {
-		for _, h := range hList {
-			if strings.EqualFold(h["name"], name) && h["value"] == val {
-				return true
+	switch raw := exts[key].(type) {
+	case []string:
+		return raw
+	case []any:
+		var res []string
+		for _, item := range raw {
+			if s, ok := item.(string); ok {
+				res = append(res, s)
 			}
 		}
-	} else if hListAny, ok := headersRaw.([]any); ok {
-		for _, item := range hListAny {
+		return res
+	default:
+		return nil
+	}
+}
+
+func extHeaders(exts map[string]any, key string) []HeaderEntry {
+	if exts == nil {
+		return nil
+	}
+
+	var res []HeaderEntry
+	switch raw := exts[key].(type) {
+	case []map[string]string:
+		for _, h := range raw {
+			res = append(res, HeaderEntry{Name: h["name"], Value: h["value"]})
+		}
+	case []any:
+		for _, item := range raw {
 			if hMap, ok := item.(map[string]any); ok {
 				n, _ := hMap["name"].(string)
 				v, _ := hMap["value"].(string)
-
-				if strings.EqualFold(n, name) && v == val {
-					return true
-				}
+				res = append(res, HeaderEntry{Name: n, Value: v})
 			}
 		}
 	}
+	return res
+}
 
+func isGlobalHeader(spec *Document, name, val string) bool {
+	for _, h := range extHeaders(spec.InfoExtensions(), "x-vortex-headers") {
+		if strings.EqualFold(h.Name, name) && h.Value == val {
+			return true
+		}
+	}
 	return false
 }
 
@@ -785,7 +669,11 @@ func extractOperationParameters(
 		}
 	}
 
-	// Ensure all {var} path segments from pathStr are represented in res.path
+	extractPathSegmentParams(pathStr, seen, &res.path)
+	return res
+}
+
+func extractPathSegmentParams(pathStr string, seen map[string]bool, pathParams *[]*Parameter) {
 	rem := pathStr
 	for {
 		start := strings.Index(rem, "{")
@@ -804,8 +692,7 @@ func extractOperationParameters(
 		key := "path:" + varName
 		if !seen[key] && !seen["path:"+strings.ToLower(varName)] {
 			seen[key] = true
-
-			res.path = append(res.path, &Parameter{
+			*pathParams = append(*pathParams, &Parameter{
 				Name:     varName,
 				In:       "path",
 				Required: true,
@@ -813,6 +700,4 @@ func extractOperationParameters(
 			})
 		}
 	}
-
-	return res
 }

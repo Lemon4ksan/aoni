@@ -23,11 +23,9 @@ func ParseSpec(data []byte) (*Document, error) {
 		return nil, errors.New("empty openapi specification data")
 	}
 
-	var rawNode yaml.Node
-	if err := yaml.Unmarshal(data, &rawNode); err != nil {
-		if errJSON := json.Unmarshal(data, &rawNode); errJSON != nil {
-			return nil, fmt.Errorf("failed to parse openapi specification: %w", err)
-		}
+	rawNode, err := parseYAMLOrJSONNode(data)
+	if err != nil {
+		return nil, err
 	}
 
 	var doc Document
@@ -35,48 +33,68 @@ func ParseSpec(data []byte) (*Document, error) {
 		return nil, fmt.Errorf("failed to decode openapi document: %w", err)
 	}
 
-	// Extract extensions from raw node
-	extractExtensions(&rawNode, &doc)
+	extractExtensions(rawNode, &doc)
 
-	// Normalize Swagger 2.0 into OpenAPI 3.x in-memory representation
-	if doc.Swagger != "" || strings.HasPrefix(doc.Swagger, "2.") {
+	if isSwagger2(&doc) {
 		normalizeSwagger2(&doc)
 	}
 
-	// Normalize Components
-	if doc.Components == nil {
-		doc.Components = &Components{
-			Schemas: make(map[string]*Schema),
-		}
-	} else if doc.Components.Schemas == nil {
-		doc.Components.Schemas = make(map[string]*Schema)
-	}
+	ensureComponents(&doc)
 
 	return &doc, nil
 }
 
-func normalizeSwagger2(doc *Document) {
-	// 1. Convert Host + BasePath + Schemes -> Servers
-	if len(doc.Servers) == 0 && (doc.Host != "" || doc.BasePath != "") {
-		scheme := "https"
-		if len(doc.Schemes) > 0 && doc.Schemes[0] != "" {
-			scheme = doc.Schemes[0]
-		}
-
-		serverURL := ""
-		if doc.Host != "" {
-			serverURL = scheme + "://" + doc.Host
-		}
-		if doc.BasePath != "" {
-			serverURL = strings.TrimSuffix(serverURL, "/") + "/" + strings.TrimPrefix(doc.BasePath, "/")
-		}
-
-		if serverURL != "" {
-			doc.Servers = []Server{{URL: serverURL}}
-		}
+func parseYAMLOrJSONNode(data []byte) (*yaml.Node, error) {
+	var node yaml.Node
+	if err := yaml.Unmarshal(data, &node); err == nil {
+		return &node, nil
 	}
 
-	// 2. Ensure Components exist
+	if err := json.Unmarshal(data, &node); err != nil {
+		return nil, fmt.Errorf("failed to parse openapi specification: %w", err)
+	}
+
+	return &node, nil
+}
+
+func isSwagger2(doc *Document) bool {
+	return doc.Swagger != "" || strings.HasPrefix(doc.Swagger, "2.")
+}
+
+func normalizeSwagger2(doc *Document) {
+	normalizeSwaggerServers(doc)
+	ensureComponents(doc)
+	normalizeSwaggerDefinitions(doc)
+	normalizeSwaggerParameters(doc)
+	normalizeSwaggerResponses(doc)
+	normalizeSwaggerSecurity(doc)
+	normalizeSwaggerOperations(doc)
+}
+
+func normalizeSwaggerServers(doc *Document) {
+	if len(doc.Servers) > 0 || (doc.Host == "" && doc.BasePath == "") {
+		return
+	}
+
+	scheme := "https"
+	if len(doc.Schemes) > 0 && doc.Schemes[0] != "" {
+		scheme = doc.Schemes[0]
+	}
+
+	serverURL := ""
+	if doc.Host != "" {
+		serverURL = scheme + "://" + doc.Host
+	}
+	if doc.BasePath != "" {
+		serverURL = strings.TrimSuffix(serverURL, "/") + "/" + strings.TrimPrefix(doc.BasePath, "/")
+	}
+
+	if serverURL != "" {
+		doc.Servers = []Server{{URL: serverURL}}
+	}
+}
+
+func ensureComponents(doc *Document) {
 	if doc.Components == nil {
 		doc.Components = &Components{
 			Schemas:         make(map[string]*Schema),
@@ -84,144 +102,159 @@ func normalizeSwagger2(doc *Document) {
 			Parameters:      make(map[string]*Parameter),
 			SecuritySchemes: make(map[string]*SecurityScheme),
 		}
-	} else {
-		if doc.Components.Schemas == nil {
-			doc.Components.Schemas = make(map[string]*Schema)
-		}
-		if doc.Components.Responses == nil {
-			doc.Components.Responses = make(map[string]*Response)
-		}
-		if doc.Components.Parameters == nil {
-			doc.Components.Parameters = make(map[string]*Parameter)
-		}
-		if doc.Components.SecuritySchemes == nil {
-			doc.Components.SecuritySchemes = make(map[string]*SecurityScheme)
-		}
+		return
 	}
 
-	// 3. Convert Definitions -> Components.Schemas
-	if len(doc.Definitions) > 0 {
-		for name, schema := range doc.Definitions {
-			if schema != nil {
-				normalizeSchemaRefs(schema)
-				doc.Components.Schemas[name] = schema
+	if doc.Components.Schemas == nil {
+		doc.Components.Schemas = make(map[string]*Schema)
+	}
+	if doc.Components.Responses == nil {
+		doc.Components.Responses = make(map[string]*Response)
+	}
+	if doc.Components.Parameters == nil {
+		doc.Components.Parameters = make(map[string]*Parameter)
+	}
+	if doc.Components.SecuritySchemes == nil {
+		doc.Components.SecuritySchemes = make(map[string]*SecurityScheme)
+	}
+}
+
+func normalizeSwaggerDefinitions(doc *Document) {
+	for name, schema := range doc.Definitions {
+		if schema == nil {
+			continue
+		}
+		normalizeSchemaRefs(schema)
+		doc.Components.Schemas[name] = schema
+	}
+}
+
+func normalizeSwaggerParameters(doc *Document) {
+	for name, param := range doc.Parameters {
+		if param == nil {
+			continue
+		}
+		normalizeSchemaRefs(param.Schema)
+		doc.Components.Parameters[name] = param
+	}
+}
+
+func normalizeSwaggerResponses(doc *Document) {
+	for name, resp := range doc.Responses {
+		if resp == nil {
+			continue
+		}
+		if resp.Schema != nil && len(resp.Content) == 0 {
+			normalizeSchemaRefs(resp.Schema)
+			resp.Content = map[string]*MediaType{
+				"application/json": {Schema: resp.Schema},
 			}
 		}
+		doc.Components.Responses[name] = resp
 	}
+}
 
-	// 4. Convert Parameters -> Components.Parameters
-	if len(doc.Parameters) > 0 {
-		for name, param := range doc.Parameters {
-			if param != nil {
-				normalizeSchemaRefs(param.Schema)
-				doc.Components.Parameters[name] = param
-			}
+func normalizeSwaggerSecurity(doc *Document) {
+	for name, sec := range doc.SecurityDefinitions {
+		if sec == nil {
+			continue
 		}
-	}
-
-	// 5. Convert Responses -> Components.Responses
-	if len(doc.Responses) > 0 {
-		for name, resp := range doc.Responses {
-			if resp != nil {
-				if resp.Schema != nil && len(resp.Content) == 0 {
-					normalizeSchemaRefs(resp.Schema)
-					resp.Content = map[string]*MediaType{
-						"application/json": {Schema: resp.Schema},
-					}
-				}
-				doc.Components.Responses[name] = resp
-			}
+		if sec.Type == "oauth2" && sec.Flow != "" && sec.Flows == nil {
+			sec.Flows = mapSwaggerOAuthFlow(sec)
 		}
+		doc.Components.SecuritySchemes[name] = sec
+	}
+}
+
+func mapSwaggerOAuthFlow(sec *SecurityScheme) *OAuthFlows {
+	flow := &OAuthFlow{
+		AuthorizationURL: sec.AuthorizationURL,
+		TokenURL:         sec.TokenURL,
+		Scopes:           sec.Scopes,
 	}
 
-	// 6. Convert SecurityDefinitions -> Components.SecuritySchemes
-	if len(doc.SecurityDefinitions) > 0 {
-		for name, sec := range doc.SecurityDefinitions {
-			if sec != nil {
-				if sec.Type == "oauth2" && sec.Flow != "" && sec.Flows == nil {
-					flow := &OAuthFlow{
-						AuthorizationURL: sec.AuthorizationURL,
-						TokenURL:         sec.TokenURL,
-						Scopes:           sec.Scopes,
-					}
-					sec.Flows = &OAuthFlows{}
-					switch sec.Flow {
-					case "implicit":
-						sec.Flows.Implicit = flow
-					case "password":
-						sec.Flows.Password = flow
-					case "application":
-						sec.Flows.ClientCredentials = flow
-					case "accessCode":
-						sec.Flows.AuthorizationCode = flow
-					}
-				}
-				doc.Components.SecuritySchemes[name] = sec
-			}
-		}
+	flows := &OAuthFlows{}
+	switch sec.Flow {
+	case "implicit":
+		flows.Implicit = flow
+	case "password":
+		flows.Password = flow
+	case "application":
+		flows.ClientCredentials = flow
+	case "accessCode":
+		flows.AuthorizationCode = flow
 	}
 
-	// 7. Convert Operations parameters (in: body -> RequestBody) and responses
+	return flows
+}
+
+func normalizeSwaggerOperations(doc *Document) {
 	for _, pathItem := range doc.Paths {
 		if pathItem == nil {
 			continue
 		}
-
 		for _, op := range pathItem.OperationsMap() {
 			if op == nil {
 				continue
 			}
+			normalizeOperationParameters(op)
+			normalizeOperationResponses(op)
+		}
+	}
+}
 
-			var nonBodyParams []*Parameter
-			for _, p := range op.Parameters {
-				if p == nil {
-					continue
-				}
+func normalizeOperationParameters(op *Operation) {
+	var nonBodyParams []*Parameter
 
-				if p.In == "body" {
-					if op.RequestBody == nil {
-						normalizeSchemaRefs(p.Schema)
-						op.RequestBody = &RequestBody{
-							Description: p.Description,
-							Required:    p.Required,
-							Content: map[string]*MediaType{
-								"application/json": {
-									Schema: p.Schema,
-								},
-							},
-						}
-					}
-				} else {
-					if p.Schema == nil && p.Type != "" {
-						p.Schema = &Schema{
-							Type:   TypeArray{p.Type},
-							Format: p.Format,
-							Items:  p.Items,
-						}
-					}
-					normalizeSchemaRefs(p.Schema)
-					nonBodyParams = append(nonBodyParams, p)
+	for _, p := range op.Parameters {
+		if p == nil {
+			continue
+		}
+
+		if p.In == "body" {
+			if op.RequestBody == nil {
+				normalizeSchemaRefs(p.Schema)
+				op.RequestBody = &RequestBody{
+					Description: p.Description,
+					Required:    p.Required,
+					Content: map[string]*MediaType{
+						"application/json": {Schema: p.Schema},
+					},
 				}
 			}
-			op.Parameters = nonBodyParams
+			continue
+		}
 
-			// Normalize responses
-			for _, resp := range op.Responses {
-				if resp != nil {
-					if resp.Schema != nil && len(resp.Content) == 0 {
-						normalizeSchemaRefs(resp.Schema)
-						resp.Content = map[string]*MediaType{
-							"application/json": {
-								Schema: resp.Schema,
-							},
-						}
-					}
-					for _, media := range resp.Content {
-						if media != nil {
-							normalizeSchemaRefs(media.Schema)
-						}
-					}
-				}
+		if p.Schema == nil && p.Type != "" {
+			p.Schema = &Schema{
+				Type:   TypeArray{p.Type},
+				Format: p.Format,
+				Items:  p.Items,
+			}
+		}
+		normalizeSchemaRefs(p.Schema)
+		nonBodyParams = append(nonBodyParams, p)
+	}
+
+	op.Parameters = nonBodyParams
+}
+
+func normalizeOperationResponses(op *Operation) {
+	for _, resp := range op.Responses {
+		if resp == nil {
+			continue
+		}
+
+		if resp.Schema != nil && len(resp.Content) == 0 {
+			normalizeSchemaRefs(resp.Schema)
+			resp.Content = map[string]*MediaType{
+				"application/json": {Schema: resp.Schema},
+			}
+		}
+
+		for _, media := range resp.Content {
+			if media != nil {
+				normalizeSchemaRefs(media.Schema)
 			}
 		}
 	}
@@ -254,16 +287,8 @@ func normalizeSchemaRefs(s *Schema) {
 }
 
 func extractExtensions(root *yaml.Node, doc *Document) {
-	if root == nil || root.Kind != yaml.DocumentNode && root.Kind != yaml.MappingNode {
-		return
-	}
-
-	mapNode := root
-	if root.Kind == yaml.DocumentNode && len(root.Content) > 0 {
-		mapNode = root.Content[0]
-	}
-
-	if mapNode.Kind != yaml.MappingNode {
+	mapNode := unwrapMappingNode(root)
+	if mapNode == nil {
 		return
 	}
 
@@ -271,25 +296,42 @@ func extractExtensions(root *yaml.Node, doc *Document) {
 		key := mapNode.Content[i].Value
 		valNode := mapNode.Content[i+1]
 
-		if key == "info" && doc.Info != nil && valNode.Kind == yaml.MappingNode {
-			doc.Info.Extensions = extractMapExtensions(valNode)
-		}
-
-		if key == "paths" && doc.Paths != nil && valNode.Kind == yaml.MappingNode {
-			extractPathsExtensions(valNode, doc.Paths)
+		switch key {
+		case "info":
+			if doc.Info != nil && valNode.Kind == yaml.MappingNode {
+				doc.Info.Extensions = extractMapExtensions(valNode)
+			}
+		case "paths":
+			if doc.Paths != nil && valNode.Kind == yaml.MappingNode {
+				extractPathsExtensions(valNode, doc.Paths)
+			}
 		}
 	}
+}
+
+func unwrapMappingNode(node *yaml.Node) *yaml.Node {
+	if node == nil {
+		return nil
+	}
+	if node.Kind == yaml.DocumentNode && len(node.Content) > 0 {
+		node = node.Content[0]
+	}
+	if node.Kind != yaml.MappingNode {
+		return nil
+	}
+	return node
 }
 
 func extractMapExtensions(mapNode *yaml.Node) map[string]any {
 	exts := make(map[string]any)
 	for i := 0; i < len(mapNode.Content)-1; i += 2 {
 		k := mapNode.Content[i].Value
-		if strings.HasPrefix(k, "x-") {
-			var val any
-			if err := mapNode.Content[i+1].Decode(&val); err == nil {
-				exts[k] = val
-			}
+		if !strings.HasPrefix(k, "x-") {
+			continue
+		}
+		var val any
+		if err := mapNode.Content[i+1].Decode(&val); err == nil {
+			exts[k] = val
 		}
 	}
 	return exts
@@ -300,19 +342,23 @@ func extractPathsExtensions(pathsNode *yaml.Node, paths map[string]*PathItem) {
 		pathStr := pathsNode.Content[i].Value
 		pathItemNode := pathsNode.Content[i+1]
 
-		pathItem, exists := paths[pathStr]
-		if !exists || pathItem == nil || pathItemNode.Kind != yaml.MappingNode {
+		pathItem := paths[pathStr]
+		if pathItem == nil || pathItemNode.Kind != yaml.MappingNode {
 			continue
 		}
 
-		for j := 0; j < len(pathItemNode.Content)-1; j += 2 {
-			method := strings.ToUpper(pathItemNode.Content[j].Value)
-			opNode := pathItemNode.Content[j+1]
+		extractOperationExtensions(pathItemNode, pathItem)
+	}
+}
 
-			op := getPathItemOp(pathItem, method)
-			if op != nil && opNode.Kind == yaml.MappingNode {
-				op.Extensions = extractMapExtensions(opNode)
-			}
+func extractOperationExtensions(pathItemNode *yaml.Node, pathItem *PathItem) {
+	for j := 0; j < len(pathItemNode.Content)-1; j += 2 {
+		method := strings.ToUpper(pathItemNode.Content[j].Value)
+		opNode := pathItemNode.Content[j+1]
+
+		op := getPathItemOp(pathItem, method)
+		if op != nil && opNode.Kind == yaml.MappingNode {
+			op.Extensions = extractMapExtensions(opNode)
 		}
 	}
 }

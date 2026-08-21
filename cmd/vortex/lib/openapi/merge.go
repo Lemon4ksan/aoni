@@ -26,6 +26,8 @@ const (
 	MergeModeDifference MergeMode = "diff"
 )
 
+var httpMethods = []string{"GET", "POST", "PUT", "DELETE", "PATCH", "HEAD", "OPTIONS", "TRACE"}
+
 // MergeOpenAPISpecs combines multiple OpenAPI specifications into a unified specification using Union mode.
 func MergeOpenAPISpecs(specs ...*Document) *Document {
 	return MergeOpenAPISpecsWithMode(MergeModeUnion, specs...)
@@ -57,10 +59,25 @@ func MergeOpenAPISpecsWithMode(mode MergeMode, specs ...*Document) *Document {
 
 func mergeUnion(specs ...*Document) *Document {
 	root := cloneDocument(specs[0])
+	ensureRootContainers(root)
+
+	for _, s := range specs[1:] {
+		if s == nil {
+			continue
+		}
+		mergeServers(root, s.Servers)
+		mergeSchemas(root, s.Components)
+		mergeInfoHeaders(root, s.Info)
+		mergePaths(root, s.Paths)
+	}
+
+	return root
+}
+
+func ensureRootContainers(root *Document) {
 	if root.Paths == nil {
 		root.Paths = make(map[string]*PathItem)
 	}
-
 	if root.Components == nil {
 		root.Components = &Components{
 			Schemas: make(map[string]*Schema),
@@ -68,107 +85,124 @@ func mergeUnion(specs ...*Document) *Document {
 	} else if root.Components.Schemas == nil {
 		root.Components.Schemas = make(map[string]*Schema)
 	}
+}
 
-	for _, s := range specs[1:] {
-		if s == nil {
+func mergeServers(root *Document, servers []Server) {
+	for _, srv := range servers {
+		if srv.URL == "" || hasServerURL(root.Servers, srv.URL) {
 			continue
 		}
+		root.Servers = append(root.Servers, srv)
+	}
+}
 
-		// 1. Merge Servers
-		for _, srv := range s.Servers {
-			hasServer := false
-			for _, existing := range root.Servers {
-				if existing.URL == srv.URL {
-					hasServer = true
-					break
-				}
-			}
+func hasServerURL(servers []Server, targetURL string) bool {
+	for _, s := range servers {
+		if s.URL == targetURL {
+			return true
+		}
+	}
+	return false
+}
 
-			if !hasServer && srv.URL != "" {
-				root.Servers = append(root.Servers, srv)
+func mergeSchemas(root *Document, incomingComp *Components) {
+	if incomingComp == nil || incomingComp.Schemas == nil {
+		return
+	}
+
+	for name, schema := range incomingComp.Schemas {
+		existingSchema, exists := root.Components.Schemas[name]
+		if exists && existingSchema != nil && schema != nil {
+			mergeSchema(existingSchema, schema)
+			continue
+		}
+		root.Components.Schemas[name] = schema
+	}
+}
+
+func mergeInfoHeaders(root *Document, incomingInfo *Info) {
+	if incomingInfo == nil || incomingInfo.Extensions == nil {
+		return
+	}
+
+	hRaw, ok := incomingInfo.Extensions["x-vortex-headers"]
+	if !ok {
+		return
+	}
+
+	ensureInfoExtensions(root)
+
+	existingHeaders, _ := root.Info.Extensions["x-vortex-headers"].([]map[string]string)
+	root.Info.Extensions["x-vortex-headers"] = mergeHeadersList(existingHeaders, hRaw)
+}
+
+func ensureInfoExtensions(root *Document) {
+	if root.Info == nil {
+		root.Info = &Info{
+			Title:   "Combined API Specification",
+			Version: "1.0.0",
+		}
+	}
+	if root.Info.Extensions == nil {
+		root.Info.Extensions = make(map[string]any)
+	}
+}
+
+func mergeHeadersList(existing []map[string]string, incoming any) []map[string]string {
+	headerMap := make(map[string]string)
+	for _, h := range existing {
+		headerMap[h["name"]] = h["value"]
+	}
+
+	switch inList := incoming.(type) {
+	case []map[string]string:
+		for _, h := range inList {
+			if _, exists := headerMap[h["name"]]; !exists {
+				headerMap[h["name"]] = h["value"]
+				existing = append(existing, h)
 			}
 		}
-
-		// 2. Merge Schemas
-		if s.Components != nil && s.Components.Schemas != nil {
-			for name, schema := range s.Components.Schemas {
-				if existingSchema, exists := root.Components.Schemas[name]; exists && existingSchema != nil && schema != nil {
-					mergeSchema(existingSchema, schema)
-				} else {
-					root.Components.Schemas[name] = schema
-				}
+	case []any:
+		for _, item := range inList {
+			hMap, isMap := item.(map[string]any)
+			if !isMap {
+				continue
 			}
-		}
-
-		// 3. Merge Headers in Info.Extensions["x-vortex-headers"]
-		if s.Info != nil && s.Info.Extensions != nil {
-			if hRaw, ok := s.Info.Extensions["x-vortex-headers"]; ok {
-				if root.Info == nil {
-					root.Info = &Info{
-						Title:   "Combined API Specification",
-						Version: "1.0.0",
-					}
-				}
-
-				if root.Info.Extensions == nil {
-					root.Info.Extensions = make(map[string]any)
-				}
-
-				existingHeaders, _ := root.Info.Extensions["x-vortex-headers"].([]map[string]string)
-				headerMap := make(map[string]string)
-
-				for _, h := range existingHeaders {
-					headerMap[h["name"]] = h["value"]
-				}
-
-				if incomingList, ok := hRaw.([]map[string]string); ok {
-					for _, h := range incomingList {
-						if _, exists := headerMap[h["name"]]; !exists {
-							headerMap[h["name"]] = h["value"]
-							existingHeaders = append(existingHeaders, h)
-						}
-					}
-				} else if incomingSlice, ok := hRaw.([]any); ok {
-					for _, item := range incomingSlice {
-						if hMap, isMap := item.(map[string]any); isMap {
-							name, _ := hMap["name"].(string)
-							val, _ := hMap["value"].(string)
-
-							if name != "" && val != "" {
-								if _, exists := headerMap[name]; !exists {
-									headerMap[name] = val
-									existingHeaders = append(existingHeaders, map[string]string{
-										"name":  name,
-										"value": val,
-									})
-								}
-							}
-						}
-					}
-				}
-
-				root.Info.Extensions["x-vortex-headers"] = existingHeaders
-			}
-		}
-
-		// 4. Merge Paths and Operations
-		if s.Paths != nil {
-			for pathStr, pathItem := range s.Paths {
-				if pathItem == nil {
-					continue
-				}
-
-				existingItem := root.Paths[pathStr]
-				if existingItem == nil {
-					root.Paths[pathStr] = pathItem
-				} else {
-					mergePathItem(existingItem, pathItem)
+			name, _ := hMap["name"].(string)
+			val, _ := hMap["value"].(string)
+			if name != "" && val != "" {
+				if _, exists := headerMap[name]; !exists {
+					headerMap[name] = val
+					existing = append(existing, map[string]string{
+						"name":  name,
+						"value": val,
+					})
 				}
 			}
 		}
 	}
 
-	return root
+	return existing
+}
+
+func mergePaths(root *Document, incomingPaths map[string]*PathItem) {
+	if incomingPaths == nil {
+		return
+	}
+
+	for pathStr, pathItem := range incomingPaths {
+		if pathItem == nil {
+			continue
+		}
+
+		existingItem := root.Paths[pathStr]
+		if existingItem == nil {
+			root.Paths[pathStr] = pathItem
+			continue
+		}
+
+		mergePathItem(existingItem, pathItem)
+	}
 }
 
 func mergeIntersection(specs ...*Document) *Document {
@@ -177,58 +211,23 @@ func mergeIntersection(specs ...*Document) *Document {
 		return root
 	}
 
-	methods := []string{"GET", "POST", "PUT", "DELETE", "PATCH", "HEAD", "OPTIONS"}
-
 	for pathStr, pathItem := range root.Paths {
 		if pathItem == nil {
 			continue
 		}
 
-		for _, m := range methods {
+		for _, m := range httpMethods {
 			op := getPathItemOp(pathItem, m)
 			if op == nil {
 				continue
 			}
 
-			// Check if this operation exists in ALL other specs
-			inAll := true
-			for _, otherSpec := range specs[1:] {
-				if otherSpec == nil || otherSpec.Paths == nil {
-					inAll = false
-					break
-				}
-
-				otherItem := otherSpec.Paths[pathStr]
-				if otherItem == nil || getPathItemOp(otherItem, m) == nil {
-					inAll = false
-					break
-				}
-			}
-
-			if inAll {
-				// Merge operation metadata from other specs
-				for _, otherSpec := range specs[1:] {
-					otherItem := otherSpec.Paths[pathStr]
-					if otherItem != nil {
-						if otherOp := getPathItemOp(otherItem, m); otherOp != nil {
-							mergeOperation(op, otherOp)
-						}
-					}
-
-					// Merge schemas
-					if otherSpec.Components != nil && otherSpec.Components.Schemas != nil {
-						for name, s := range otherSpec.Components.Schemas {
-							if existing, ok := root.Components.Schemas[name]; ok && existing != nil && s != nil {
-								mergeSchema(existing, s)
-							} else {
-								root.Components.Schemas[name] = s
-							}
-						}
-					}
-				}
-			} else {
+			if !isOpInAllSpecs(specs[1:], pathStr, m) {
 				setPathItemOp(pathItem, m, nil)
+				continue
 			}
+
+			mergeOpFromAllSpecs(specs[1:], root, op, pathStr, m)
 		}
 
 		if countPathItemOps(pathItem) == 0 {
@@ -239,13 +238,39 @@ func mergeIntersection(specs ...*Document) *Document {
 	return root
 }
 
+func isOpInAllSpecs(specs []*Document, pathStr, method string) bool {
+	for _, other := range specs {
+		if other == nil || other.Paths == nil {
+			return false
+		}
+		item := other.Paths[pathStr]
+		if item == nil || getPathItemOp(item, method) == nil {
+			return false
+		}
+	}
+	return true
+}
+
+func mergeOpFromAllSpecs(specs []*Document, root *Document, op *Operation, pathStr, method string) {
+	for _, other := range specs {
+		if other == nil || other.Paths == nil {
+			continue
+		}
+		otherItem := other.Paths[pathStr]
+		if otherItem != nil {
+			if otherOp := getPathItemOp(otherItem, method); otherOp != nil {
+				mergeOperation(op, otherOp)
+			}
+		}
+		mergeSchemas(root, other.Components)
+	}
+}
+
 func mergeDifference(specs ...*Document) *Document {
 	root := cloneDocument(specs[0])
 	if root == nil || root.Paths == nil {
 		return root
 	}
-
-	methods := []string{"GET", "POST", "PUT", "DELETE", "PATCH", "HEAD", "OPTIONS"}
 
 	for _, otherSpec := range specs[1:] {
 		if otherSpec == nil || otherSpec.Paths == nil {
@@ -262,7 +287,7 @@ func mergeDifference(specs ...*Document) *Document {
 				continue
 			}
 
-			for _, m := range methods {
+			for _, m := range httpMethods {
 				if getPathItemOp(otherItem, m) != nil {
 					setPathItemOp(rootItem, m, nil)
 				}
@@ -307,151 +332,134 @@ func countPathItemOps(p *PathItem) int {
 	}
 
 	count := 0
-	for _, m := range []string{"GET", "POST", "PUT", "DELETE", "PATCH", "HEAD", "OPTIONS", "TRACE"} {
+	for _, m := range httpMethods {
 		if getPathItemOp(p, m) != nil {
 			count++
 		}
 	}
-
 	return count
 }
 
 func mergePathItem(existing, incoming *PathItem) {
-	if incoming.Get != nil {
-		if existing.Get == nil {
-			existing.Get = incoming.Get
-		} else {
-			mergeOperation(existing.Get, incoming.Get)
+	mergeSubOp(&existing.Get, incoming.Get)
+	mergeSubOp(&existing.Post, incoming.Post)
+	mergeSubOp(&existing.Put, incoming.Put)
+	mergeSubOp(&existing.Delete, incoming.Delete)
+	mergeSubOp(&existing.Patch, incoming.Patch)
+	mergeSubOp(&existing.Head, incoming.Head)
+	mergeSubOp(&existing.Options, incoming.Options)
+	mergeSubOp(&existing.Trace, incoming.Trace)
+}
+
+func mergeSubOp(dst **Operation, incoming *Operation) {
+	if incoming == nil {
+		return
+	}
+	if *dst == nil {
+		*dst = incoming
+		return
+	}
+	mergeOperation(*dst, incoming)
+}
+
+func mergeOperation(existing, incoming *Operation) {
+	mergeOperationParams(existing, incoming.Parameters)
+	mergeOperationRequestBody(existing, incoming.RequestBody)
+	mergeOperationResponses(existing, incoming.Responses)
+	mergeOperationHeaders(existing, incoming.Extensions)
+}
+
+func mergeOperationParams(existing *Operation, incomingParams []*Parameter) {
+	for _, p := range incomingParams {
+		if p == nil || hasParam(existing.Parameters, p.In, p.Name) {
+			continue
+		}
+		existing.Parameters = append(existing.Parameters, p)
+	}
+}
+
+func hasParam(params []*Parameter, inLocation, name string) bool {
+	for _, ep := range params {
+		if ep != nil && ep.In == inLocation && ep.Name == name {
+			return true
 		}
 	}
-	if incoming.Post != nil {
-		if existing.Post == nil {
-			existing.Post = incoming.Post
-		} else {
-			mergeOperation(existing.Post, incoming.Post)
-		}
+	return false
+}
+
+func mergeOperationRequestBody(existing *Operation, incomingReqBody *RequestBody) {
+	if incomingReqBody == nil {
+		return
 	}
-	if incoming.Put != nil {
-		if existing.Put == nil {
-			existing.Put = incoming.Put
-		} else {
-			mergeOperation(existing.Put, incoming.Put)
-		}
+	if existing.RequestBody == nil {
+		existing.RequestBody = incomingReqBody
+		return
 	}
-	if incoming.Delete != nil {
-		if existing.Delete == nil {
-			existing.Delete = incoming.Delete
-		} else {
-			mergeOperation(existing.Delete, incoming.Delete)
-		}
+	if existing.RequestBody.Content == nil {
+		existing.RequestBody.Content = make(map[string]*MediaType)
 	}
-	if incoming.Patch != nil {
-		if existing.Patch == nil {
-			existing.Patch = incoming.Patch
-		} else {
-			mergeOperation(existing.Patch, incoming.Patch)
+
+	for mt, content := range incomingReqBody.Content {
+		existingContent := existing.RequestBody.Content[mt]
+		if existingContent == nil {
+			existing.RequestBody.Content[mt] = content
+			continue
 		}
-	}
-	if incoming.Head != nil {
-		if existing.Head == nil {
-			existing.Head = incoming.Head
-		} else {
-			mergeOperation(existing.Head, incoming.Head)
-		}
-	}
-	if incoming.Options != nil {
-		if existing.Options == nil {
-			existing.Options = incoming.Options
-		} else {
-			mergeOperation(existing.Options, incoming.Options)
+		if existingContent.Schema != nil && content.Schema != nil {
+			mergeSchema(existingContent.Schema, content.Schema)
 		}
 	}
 }
 
-func mergeOperation(existing, incoming *Operation) {
-	for _, p := range incoming.Parameters {
-		if p != nil {
-			hasParam := false
-			for _, ep := range existing.Parameters {
-				if ep != nil && ep.In == p.In && ep.Name == p.Name {
-					hasParam = true
-					break
-				}
+func mergeOperationResponses(existing *Operation, incomingResponses map[string]*Response) {
+	if incomingResponses == nil {
+		return
+	}
+	if existing.Responses == nil {
+		existing.Responses = make(map[string]*Response)
+	}
+
+	for statusStr, resp := range incomingResponses {
+		existingResp := existing.Responses[statusStr]
+		if existingResp == nil {
+			existing.Responses[statusStr] = resp
+			continue
+		}
+		if resp == nil {
+			continue
+		}
+		if existingResp.Content == nil {
+			existingResp.Content = make(map[string]*MediaType)
+		}
+		for mt, content := range resp.Content {
+			existingContent := existingResp.Content[mt]
+			if existingContent == nil {
+				existingResp.Content[mt] = content
+				continue
 			}
-			if !hasParam {
-				existing.Parameters = append(existing.Parameters, p)
+			if existingContent.Schema != nil && content.Schema != nil {
+				mergeSchema(existingContent.Schema, content.Schema)
 			}
 		}
 	}
+}
 
-	if incoming.RequestBody != nil {
-		if existing.RequestBody == nil {
-			existing.RequestBody = incoming.RequestBody
-		} else {
-			if existing.RequestBody.Content == nil {
-				existing.RequestBody.Content = make(map[string]*MediaType)
-			}
-			for mt, content := range incoming.RequestBody.Content {
-				existingContent := existing.RequestBody.Content[mt]
-				if existingContent == nil {
-					existing.RequestBody.Content[mt] = content
-				} else if existingContent.Schema != nil && content.Schema != nil {
-					mergeSchema(existingContent.Schema, content.Schema)
-				}
-			}
-		}
+func mergeOperationHeaders(existing *Operation, incomingExts map[string]any) {
+	if incomingExts == nil {
+		return
 	}
 
-	if incoming.Responses != nil {
-		if existing.Responses == nil {
-			existing.Responses = make(map[string]*Response)
-		}
-
-		for statusStr, resp := range incoming.Responses {
-			existingResp := existing.Responses[statusStr]
-			if existingResp == nil {
-				existing.Responses[statusStr] = resp
-			} else if resp != nil {
-				if existingResp.Content == nil {
-					existingResp.Content = make(map[string]*MediaType)
-				}
-				for mt, content := range resp.Content {
-					existingContent := existingResp.Content[mt]
-					if existingContent == nil {
-						existingResp.Content[mt] = content
-					} else if existingContent.Schema != nil && content.Schema != nil {
-						mergeSchema(existingContent.Schema, content.Schema)
-					}
-				}
-			}
-		}
+	inHeadersRaw, ok := incomingExts["x-vortex-headers"]
+	if !ok {
+		return
 	}
 
-	if incoming.Extensions != nil {
-		if inHeadersRaw, ok := incoming.Extensions["x-vortex-headers"]; ok {
-			if existing.Extensions == nil {
-				existing.Extensions = make(map[string]any)
-			}
-
-			existingHeaders, _ := existing.Extensions["x-vortex-headers"].([]map[string]string)
-			headerMap := make(map[string]string)
-
-			for _, h := range existingHeaders {
-				headerMap[h["name"]] = h["value"]
-			}
-
-			if inList, ok := inHeadersRaw.([]map[string]string); ok {
-				for _, h := range inList {
-					if _, exists := headerMap[h["name"]]; !exists {
-						headerMap[h["name"]] = h["value"]
-						existingHeaders = append(existingHeaders, h)
-					}
-				}
-			}
-
-			existing.Extensions["x-vortex-headers"] = existingHeaders
-		}
+	if existing.Extensions == nil {
+		existing.Extensions = make(map[string]any)
 	}
+
+	existingHeaders, _ := existing.Extensions["x-vortex-headers"].([]map[string]string)
+	existing.Extensions["x-vortex-headers"] = mergeHeadersList(existingHeaders, inHeadersRaw)
 }
 
 func mergeSchema(dst, src *Schema) {
@@ -468,11 +476,12 @@ func mergeSchema(dst, src *Schema) {
 	}
 
 	for k, v := range src.Properties {
-		if existingProp, ok := dst.Properties[k]; ok {
+		existingProp, ok := dst.Properties[k]
+		if ok {
 			mergeSchema(existingProp, v)
-		} else {
-			dst.Properties[k] = v
+			continue
 		}
+		dst.Properties[k] = v
 	}
 }
 

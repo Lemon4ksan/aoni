@@ -24,93 +24,91 @@ func LoadSpecWithMode(filename string, data []byte, mode MergeMode) (*Document, 
 		return loadSingleSpec(filename, data)
 	}
 
-	if strings.Contains(filename, ",") {
-		parts := strings.Split(filename, ",")
-
-		var allSpecs []*Document
-
-		for _, part := range parts {
-			part = strings.TrimSpace(part)
-			if part == "" {
-				continue
-			}
-
-			if strings.ContainsAny(part, "*?[]") {
-				matches, err := filepath.Glob(part)
-				if err != nil {
-					return nil, fmt.Errorf("invalid glob pattern %q: %w", part, err)
-				}
-
-				for _, match := range matches {
-					doc, lErr := loadSingleSpec(match, nil)
-					if lErr != nil {
-						return nil, fmt.Errorf("failed reading spec file %s: %w", match, lErr)
-					}
-
-					allSpecs = append(allSpecs, doc)
-				}
-			} else {
-				doc, lErr := loadSingleSpec(part, nil)
-				if lErr != nil {
-					return nil, fmt.Errorf("failed reading spec file %s: %w", part, lErr)
-				}
-
-				allSpecs = append(allSpecs, doc)
-			}
-		}
-
-		if len(allSpecs) == 0 {
-			return nil, fmt.Errorf("no valid specification files found in %q", filename)
-		}
-
-		return MergeOpenAPISpecsWithMode(mode, allSpecs...), nil
+	files, err := resolveSpecFiles(filename)
+	if err != nil {
+		return nil, err
 	}
 
-	if strings.ContainsAny(filename, "*?[]") {
-		matches, err := filepath.Glob(filename)
-		if err == nil && len(matches) > 0 {
-			var allSpecs []*Document
-			for _, match := range matches {
-				doc, lErr := loadSingleSpec(match, nil)
-				if lErr != nil {
-					return nil, fmt.Errorf("failed reading spec file %s: %w", match, lErr)
-				}
-
-				allSpecs = append(allSpecs, doc)
-			}
-
-			return MergeOpenAPISpecsWithMode(mode, allSpecs...), nil
-		}
+	if len(files) == 1 {
+		return loadSingleSpec(files[0], nil)
 	}
 
-	return loadSingleSpec(filename, nil)
+	var allSpecs []*Document
+	for _, f := range files {
+		doc, lErr := loadSingleSpec(f, nil)
+		if lErr != nil {
+			return nil, fmt.Errorf("failed reading spec file %s: %w", f, lErr)
+		}
+		allSpecs = append(allSpecs, doc)
+	}
+
+	return MergeOpenAPISpecsWithMode(mode, allSpecs...), nil
+}
+
+func resolveSpecFiles(target string) ([]string, error) {
+	parts := strings.Split(target, ",")
+	var result []string
+
+	for _, part := range parts {
+		clean := strings.TrimSpace(part)
+		if clean == "" {
+			continue
+		}
+
+		if strings.ContainsAny(clean, "*?[]") {
+			matches, err := filepath.Glob(clean)
+			if err != nil {
+				return nil, fmt.Errorf("invalid glob pattern %q: %w", clean, err)
+			}
+			result = append(result, matches...)
+			continue
+		}
+
+		result = append(result, clean)
+	}
+
+	if len(result) == 0 {
+		return nil, fmt.Errorf("no valid specification files found in %q", target)
+	}
+
+	return result, nil
 }
 
 func loadSingleSpec(filename string, data []byte) (*Document, error) {
-	if len(data) == 0 {
-		var err error
-
-		if strings.HasPrefix(filename, "cache:") {
-			cacheID := strings.TrimPrefix(filename, "cache:")
-
-			data, _, err = cache.GetTraffic(".", cacheID)
-			if err != nil {
-				return nil, fmt.Errorf("loading cached traffic %q: %w", cacheID, err)
-			}
-		} else {
-			data, err = os.ReadFile(filename)
-			if err != nil {
-				// Fallback: check traffic cache by ID or hash
-				if cData, _, cErr := cache.GetTraffic(".", filename); cErr == nil && len(cData) > 0 {
-					data = cData
-				} else if cData, _, cErr := cache.GetTraffic(".", strings.TrimSuffix(filename, ".har")); cErr == nil && len(cData) > 0 {
-					data = cData
-				} else {
-					return nil, fmt.Errorf("failed reading spec file %s: %w", filename, err)
-				}
-			}
-		}
+	if len(data) > 0 {
+		return ParseSpec(data)
 	}
 
-	return ParseSpec(data)
+	raw, err := readSpecBytes(filename)
+	if err != nil {
+		return nil, err
+	}
+
+	return ParseSpec(raw)
+}
+
+func readSpecBytes(filename string) ([]byte, error) {
+	if strings.HasPrefix(filename, "cache:") {
+		cacheID := strings.TrimPrefix(filename, "cache:")
+		data, _, err := cache.GetTraffic(".", cacheID)
+		if err != nil {
+			return nil, fmt.Errorf("loading cached traffic %q: %w", cacheID, err)
+		}
+		return data, nil
+	}
+
+	data, err := os.ReadFile(filename)
+	if err == nil {
+		return data, nil
+	}
+
+	// Fallback: check traffic cache by ID or filename without .har
+	if cData, _, cErr := cache.GetTraffic(".", filename); cErr == nil && len(cData) > 0 {
+		return cData, nil
+	}
+	if cData, _, cErr := cache.GetTraffic(".", strings.TrimSuffix(filename, ".har")); cErr == nil && len(cData) > 0 {
+		return cData, nil
+	}
+
+	return nil, fmt.Errorf("failed reading spec file %s: %w", filename, err)
 }
