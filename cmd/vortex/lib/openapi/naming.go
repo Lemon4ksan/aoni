@@ -22,6 +22,8 @@ var (
 
 var commonVerbs = []string{"Get", "Create", "Update", "Patch", "Delete", "List", "Fetch", "Find", "Head", "Options"}
 
+// Quirk (Effective Go / Go Code Review Comments): Words in names that are initialisms
+// or acronyms (e.g. "URL", "HTTP", "ID") must have a consistent case (all uppercase).
 var initialisms = map[string]bool{
 	"ACL": true, "API": true, "ASCII": true,
 	"CPU": true, "CSS": true, "DNS": true,
@@ -38,6 +40,8 @@ var initialisms = map[string]bool{
 	"XSS": true,
 }
 
+// Quirk (Go Language Specification §Keywords): Reserved Go keywords cannot be used
+// as identifiers (parameter or variable names) without causing compiler syntax errors.
 var goKeywords = map[string]bool{
 	"break": true, "case": true, "chan": true, "const": true, "continue": true,
 	"default": true, "defer": true, "else": true, "fallthrough": true, "for": true,
@@ -46,6 +50,7 @@ var goKeywords = map[string]bool{
 	"select": true, "struct": true, "switch": true, "type": true, "var": true,
 }
 
+// isHexHash detects auto-generated compiler hashes (e.g., "7f8b9c0d1e2f3a4b...") in operation IDs.
 func isHexHash(s string) bool {
 	if len(s) < 16 {
 		return false
@@ -61,6 +66,10 @@ func isHexHash(s string) bool {
 }
 
 // SanitizeMethodName transforms raw operation IDs or URL routes into clean, idiomatic Go method names.
+//
+// Quirk: Real-world OpenAPI specs generated from C# / Java / TypeScript frameworks often contain
+// redundant service name prefixes (e.g. "UserService_GetUser"), internal interface prefixes ("iGetUsers"),
+// or trailing HTTP verbs ("get_users_GET"). We normalize these to concise Go method names.
 func SanitizeMethodName(rawOpID, httpMethod, rawPath, serviceName string) string {
 	cleaned := strings.TrimSpace(rawOpID)
 	if cleaned == "" {
@@ -93,6 +102,10 @@ func SanitizeMethodName(rawOpID, httpMethod, rawPath, serviceName string) string
 }
 
 // DeriveMethodNameFromRoute generates an idiomatic method name from HTTP verb and route path.
+//
+// References:
+//   - RFC 9110 §HTTP Method Definitions: https://datatracker.ietf.org/doc/html/rfc9110#name-method-definitions
+//   - RFC 6570 §URI Template: https://datatracker.ietf.org/doc/html/rfc6570
 func DeriveMethodNameFromRoute(httpMethod, rawPath string) string {
 	cleanPath := strings.Trim(rawPath, "/")
 	parts := strings.Split(cleanPath, "/")
@@ -200,6 +213,11 @@ func toCamelCase(s string) string {
 	return sanitizeKeywordName(strings.ToLower(pascal[:1]) + pascal[1:])
 }
 
+// sanitizeKeywordName prevents Go keyword collisions in generated parameter names.
+//
+// Quirk: When an OpenAPI spec declares a parameter named "type", "select", "range", or "map",
+// emitting it directly in a Go parameter list (`type string`) causes a compilation error.
+// We map them to canonical idiomatic abbreviations.
 func sanitizeKeywordName(res string) string {
 	if !goKeywords[res] {
 		return res

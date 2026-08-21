@@ -36,6 +36,7 @@ func ParseSpec(data []byte) (*Document, error) {
 
 	extractExtensions(rawNode, &doc)
 
+	// In-memory zero-allocation migration from Swagger 2.0 to OpenAPI 3.x
 	if isSwagger2(&doc) {
 		normalizeSwagger2(&doc)
 	}
@@ -62,6 +63,7 @@ func isSwagger2(doc *Document) bool {
 	return doc.Swagger != "" || strings.HasPrefix(doc.Swagger, "2.")
 }
 
+// normalizeSwagger2 transforms legacy Swagger 2.0 AST structures into the unified OpenAPI 3.x AST.
 func normalizeSwagger2(doc *Document) {
 	normalizeSwaggerServers(doc)
 	ensureComponents(doc)
@@ -72,6 +74,11 @@ func normalizeSwagger2(doc *Document) {
 	normalizeSwaggerOperations(doc)
 }
 
+// normalizeSwaggerServers handles the Swagger 2.0 endpoint fragmentation quirk.
+//
+// Quirk (Swagger 2.0 §5.1): Swagger 2.0 specifies base URLs across three separate root fields:
+// 'host' ("api.example.com"), 'basePath' ("/v1"), and 'schemes' (["https"]).
+// OpenAPI 3.x consolidates these into the unified 'servers' array (`https://api.example.com/v1`).
 func normalizeSwaggerServers(doc *Document) {
 	if len(doc.Servers) > 0 || (doc.Host == "" && doc.BasePath == "") {
 		return
@@ -120,6 +127,10 @@ func ensureComponents(doc *Document) {
 	}
 }
 
+// normalizeSwaggerDefinitions relocates models from Swagger 2.0 'definitions' to OpenAPI 3.x 'components.schemas'.
+//
+// Quirk (Swagger 2.0 §5.17 vs OpenAPI 3.1 §4.8.7): Models in 2.0 are stored under root 'definitions'
+// and referenced via '#/definitions/{Model}'. OpenAPI 3.x requires '#/components/schemas/{Model}'.
 func normalizeSwaggerDefinitions(doc *Document) {
 	for name, schema := range doc.Definitions {
 		if schema == nil {
@@ -130,6 +141,7 @@ func normalizeSwaggerDefinitions(doc *Document) {
 	}
 }
 
+// normalizeSwaggerParameters migrates top-level reusable parameters into 'components.parameters'.
 func normalizeSwaggerParameters(doc *Document) {
 	for name, param := range doc.Parameters {
 		if param == nil {
@@ -140,6 +152,10 @@ func normalizeSwaggerParameters(doc *Document) {
 	}
 }
 
+// normalizeSwaggerResponses upgrades legacy 2.0 response schema wrappers into 3.x media type containers.
+//
+// Quirk (Swagger 2.0 §5.12 vs OpenAPI 3.1 §4.8.17): In Swagger 2.0, responses define schemas directly
+// via `response.schema`. In OpenAPI 3.x, responses encapsulate payloads in `response.content["application/json"].schema`.
 func normalizeSwaggerResponses(doc *Document) {
 	for name, resp := range doc.Responses {
 		if resp == nil {
@@ -155,6 +171,11 @@ func normalizeSwaggerResponses(doc *Document) {
 	}
 }
 
+// normalizeSwaggerSecurity maps legacy OAuth2 flow names to OpenAPI 3.x OAuthFlows.
+//
+// Quirk (Swagger 2.0 §5.23 vs OpenAPI 3.1 §4.8.27): OAuth2 flow identifiers were changed:
+//   - 'accessCode'  -> 'authorizationCode'
+//   - 'application' -> 'clientCredentials'
 func normalizeSwaggerSecurity(doc *Document) {
 	for name, sec := range doc.SecurityDefinitions {
 		if sec == nil {
@@ -204,6 +225,11 @@ func normalizeSwaggerOperations(doc *Document) {
 	}
 }
 
+// normalizeOperationParameters converts legacy `in: body` parameters to OpenAPI 3.x `RequestBody`.
+//
+// Quirk (Swagger 2.0 §5.9 vs OpenAPI 3.1 §4.8.13): Swagger 2.0 lacks a dedicated RequestBody entity,
+// placing payload schemas inside the parameter list with `in: "body"`. We synthesize a canonical
+// OpenAPI 3.x RequestBody with `application/json` content type and prune `in: body` from parameter list.
 func normalizeOperationParameters(op *Operation) {
 	for _, p := range op.Parameters {
 		if p == nil {
@@ -224,6 +250,8 @@ func normalizeOperationParameters(op *Operation) {
 			continue
 		}
 
+		// Quirk (Swagger 2.0 §5.9): In Swagger 2.0, primitive parameters use 'type' directly on Parameter
+		// rather than nested Schema. In OpenAPI 3, parameters always contain a Schema object.
 		if p.Schema == nil && p.Type != "" {
 			p.Schema = &Schema{
 				Type:   TypeArray{p.Type},
@@ -260,6 +288,7 @@ func normalizeOperationResponses(op *Operation) {
 	}
 }
 
+// normalizeSchemaRefs recursively rewrites '#/definitions/' references to '#/components/schemas/'.
 func normalizeSchemaRefs(s *Schema) {
 	if s == nil {
 		return
