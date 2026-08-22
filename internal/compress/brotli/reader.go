@@ -20,7 +20,21 @@ func (err decodeError) Error() string {
 var (
 	errExcessiveInput = errors.New("brotli: excessive input")
 	errInvalidState   = errors.New("brotli: invalid state")
+
+	// ErrDecompressionBomb is returned by Reader.Read when decompressed stream
+	// exceeds the configured maximum size limit (configured via SetMaxOutputSize).
+	ErrDecompressionBomb = errors.New(
+		"brotli: maximum decompressed output limit exceeded (decompression bomb detected)",
+	)
 )
+
+// SetMaxOutputSize configures a maximum allowed decompressed size (in bytes)
+// to defend against decompression bombs (zip bombs). If total decompressed bytes
+// exceed this limit, Read returns ErrDecompressionBomb.
+// Pass <= 0 to disable the limit (default).
+func (r *Reader) SetMaxOutputSize(maxBytes int64) {
+	r.maxOutputSize = maxBytes
+}
 
 // readBufSize is a "good" buffer size that avoids excessive round-trips
 // between C and Go but doesn't waste too much memory on buffering.
@@ -158,6 +172,23 @@ func (r *Reader) Reset(src io.Reader) error {
 	return nil
 }
 
+func (r *Reader) checkOutputLimit(n int) (int, error) {
+	if r.maxOutputSize > 0 && r.totalOutput+int64(n) > r.maxOutputSize {
+		allowed := int(r.maxOutputSize - r.totalOutput)
+		if allowed < 0 {
+			allowed = 0
+		}
+
+		r.totalOutput = r.maxOutputSize
+
+		return allowed, ErrDecompressionBomb
+	}
+
+	r.totalOutput += int64(n)
+
+	return n, nil
+}
+
 func (r *Reader) Read(p []byte) (n int, err error) {
 	if !r.hasMoreOutput() && len(r.in) == 0 {
 		m, readErr := r.src.Read(r.buf)
@@ -190,6 +221,15 @@ func (r *Reader) Read(p []byte) (n int, err error) {
 
 		switch result {
 		case decoderResultSuccess:
+			if n > 0 {
+				var limitErr error
+
+				n, limitErr = r.checkOutputLimit(n)
+				if limitErr != nil {
+					return n, limitErr
+				}
+			}
+
 			if len(r.in) > 0 {
 				return n, errExcessiveInput
 			}
@@ -203,6 +243,13 @@ func (r *Reader) Read(p []byte) (n int, err error) {
 				return 0, io.ErrShortBuffer
 			}
 
+			var limitErr error
+
+			n, limitErr = r.checkOutputLimit(n)
+			if limitErr != nil {
+				return n, limitErr
+			}
+
 			return n, nil
 
 		case decoderNeedsMoreInput:
@@ -214,6 +261,13 @@ func (r *Reader) Read(p []byte) (n int, err error) {
 
 		// Calling r.src.Read may block. Don't block if we have data to return.
 		if n > 0 {
+			var limitErr error
+
+			n, limitErr = r.checkOutputLimit(n)
+			if limitErr != nil {
+				return n, limitErr
+			}
+
 			return n, nil
 		}
 

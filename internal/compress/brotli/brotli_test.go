@@ -154,6 +154,35 @@ func TestBrotliReaderPoolAndCloser(t *testing.T) {
 	brotli.ReleaseReader(r)
 }
 
+func TestBrotliDecompressionBomb(t *testing.T) {
+	t.Parallel()
+
+	raw := []byte(strings.Repeat("A", 100000))
+	compressed := fasthttp.AppendBrotliBytes(nil, raw)
+
+	// Set limit to 1024 bytes (well below 100,000 bytes)
+	r := brotli.NewReader(bytes.NewReader(compressed))
+	r.SetMaxOutputSize(1024)
+
+	buf := make([]byte, 512)
+	total := 0
+
+	var readErr error
+
+	for {
+		n, err := r.Read(buf)
+		total += n
+
+		if err != nil {
+			readErr = err
+			break
+		}
+	}
+
+	assert.Equal(t, 1024, total)
+	assert.ErrorIs(t, readErr, brotli.ErrDecompressionBomb)
+}
+
 func BenchmarkBrotliDecompress(b *testing.B) {
 	data := []byte(strings.Repeat(
 		"<!DOCTYPE html><html><head><title>Benchmark Page</title></head><body>"+

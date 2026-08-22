@@ -120,6 +120,8 @@ type Reader struct {
 	}
 
 	// 64-bit / int fields
+	maxOutputSize         int64
+	totalOutput           int64
 	state                 int
 	loopCounter           int
 	pos                   int
@@ -205,6 +207,7 @@ func (s *Reader) initState() bool {
 	s.substateDecodeUint8 = stateDecodeUint8None
 	s.substateReadBlockLength = stateReadBlockLengthNone
 
+	s.totalOutput = 0
 	s.bufferLength = 0
 	s.loopCounter = 0
 	s.pos = 0
