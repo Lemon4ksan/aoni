@@ -42,35 +42,35 @@ type bitReaderState struct {
 	bytePos  uint
 }
 
-func bitReaderSaveState(from *bitReader, to *bitReaderState) {
-	to.val = from.val
-	to.bitPos = from.bitPos
-	to.input = from.input
-	to.inputLen = from.inputLen
-	to.bytePos = from.bytePos
+func (br *bitReader) saveState(to *bitReaderState) {
+	to.val = br.val
+	to.bitPos = br.bitPos
+	to.input = br.input
+	to.inputLen = br.inputLen
+	to.bytePos = br.bytePos
 }
 
-func bitReaderRestoreState(to *bitReader, from *bitReaderState) {
-	to.val = from.val
-	to.bitPos = from.bitPos
-	to.input = from.input
-	to.inputLen = from.inputLen
-	to.bytePos = from.bytePos
+func (br *bitReader) restoreState(from *bitReaderState) {
+	br.val = from.val
+	br.bitPos = from.bitPos
+	br.input = from.input
+	br.inputLen = from.inputLen
+	br.bytePos = from.bytePos
 }
 
-func getAvailableBits(br *bitReader) uint32 {
+func (br *bitReader) availableBits() uint32 {
 	return 64 - br.bitPos
 }
 
-func getRemainingBytes(br *bitReader) uint {
-	return uint(uint32(br.inputLen-br.bytePos) + (getAvailableBits(br) >> 3))
+func (br *bitReader) remainingBytes() uint {
+	return uint(uint32(br.inputLen-br.bytePos) + (br.availableBits() >> 3))
 }
 
-func checkInputAmount(br *bitReader, num uint) bool {
+func (br *bitReader) hasInput(num uint) bool {
 	return br.inputLen-br.bytePos >= num
 }
 
-func fillBitWindow(br *bitReader) {
+func (br *bitReader) fillBitWindow() {
 	if br.bitPos >= 32 {
 		br.val >>= 32
 		br.bitPos ^= 32
@@ -79,11 +79,7 @@ func fillBitWindow(br *bitReader) {
 	}
 }
 
-func fillBitWindow16(br *bitReader) {
-	fillBitWindow(br)
-}
-
-func pullByte(br *bitReader) bool {
+func (br *bitReader) pullByte() bool {
 	if br.bytePos == br.inputLen {
 		return false
 	}
@@ -96,38 +92,38 @@ func pullByte(br *bitReader) bool {
 	return true
 }
 
-func getBitsUnmasked(br *bitReader) uint64 {
+func (br *bitReader) bitsUnmasked() uint64 {
 	return br.val >> br.bitPos
 }
 
-func get16BitsUnmasked(br *bitReader) uint32 {
-	fillBitWindow(br)
-	return uint32(getBitsUnmasked(br))
+func (br *bitReader) get16BitsUnmasked() uint32 {
+	br.fillBitWindow()
+	return uint32(br.bitsUnmasked())
 }
 
-func getBits(br *bitReader, nBits uint32) uint32 {
-	fillBitWindow(br)
-	return uint32(getBitsUnmasked(br)) & bitMask(nBits)
+func (br *bitReader) getBits(nBits uint32) uint32 {
+	br.fillBitWindow()
+	return uint32(br.bitsUnmasked()) & bitMask(nBits)
 }
 
-func safeGetBits(br *bitReader, nBits uint32, val *uint32) bool {
-	for getAvailableBits(br) < nBits {
-		if !pullByte(br) {
+func (br *bitReader) safeGetBits(nBits uint32, val *uint32) bool {
+	for br.availableBits() < nBits {
+		if !br.pullByte() {
 			return false
 		}
 	}
 
-	*val = uint32(getBitsUnmasked(br)) & bitMask(nBits)
+	*val = uint32(br.bitsUnmasked()) & bitMask(nBits)
 
 	return true
 }
 
-func dropBits(br *bitReader, nBits uint32) {
+func (br *bitReader) dropBits(nBits uint32) {
 	br.bitPos += nBits
 }
 
-func bitReaderUnload(br *bitReader) {
-	unusedBytes := getAvailableBits(br) >> 3
+func (br *bitReader) unload() {
+	unusedBytes := br.availableBits() >> 3
 	unusedBits := unusedBytes << 3
 
 	br.bytePos -= uint(unusedBytes)
@@ -140,47 +136,57 @@ func bitReaderUnload(br *bitReader) {
 	br.bitPos += unusedBits
 }
 
-func takeBits(br *bitReader, nBits uint32, val *uint32) {
-	*val = uint32(getBitsUnmasked(br)) & bitMask(nBits)
-	dropBits(br, nBits)
+func (br *bitReader) takeBits(nBits uint32, val *uint32) {
+	*val = uint32(br.bitsUnmasked()) & bitMask(nBits)
+	br.dropBits(nBits)
 }
 
-func readBits(br *bitReader, nBits uint32) uint32 {
+func (br *bitReader) readBits(nBits uint32) uint32 {
 	var val uint32
 
-	fillBitWindow(br)
-	takeBits(br, nBits, &val)
+	br.fillBitWindow()
+	br.takeBits(nBits, &val)
 
 	return val
 }
 
-func safeReadBits(br *bitReader, nBits uint32, val *uint32) bool {
-	for getAvailableBits(br) < nBits {
-		if !pullByte(br) {
+func (br *bitReader) safeReadBits(nBits uint32, val *uint32) bool {
+	for br.availableBits() < nBits {
+		if !br.pullByte() {
 			return false
 		}
 	}
 
-	takeBits(br, nBits, val)
+	br.takeBits(nBits, val)
 
 	return true
 }
 
-func bitReaderJumpToByteBoundary(br *bitReader) bool {
-	padBitsCount := getAvailableBits(br) & 0x7
+func (br *bitReader) safeReadBitsMaybeZero(nBits uint32, val *uint32) bool {
+	if nBits != 0 {
+		return br.safeReadBits(nBits, val)
+	}
+
+	*val = 0
+
+	return true
+}
+
+func (br *bitReader) jumpToByteBoundary() bool {
+	padBitsCount := br.availableBits() & 0x7
 
 	var padBits uint32
 	if padBitsCount != 0 {
-		takeBits(br, padBitsCount, &padBits)
+		br.takeBits(padBitsCount, &padBits)
 	}
 
 	return padBits == 0
 }
 
-func copyBytes(dest []byte, br *bitReader, num uint) {
-	for getAvailableBits(br) >= 8 && num > 0 {
-		dest[0] = byte(getBitsUnmasked(br))
-		dropBits(br, 8)
+func (br *bitReader) copyBytes(dest []byte, num uint) {
+	for br.availableBits() >= 8 && num > 0 {
+		dest[0] = byte(br.bitsUnmasked())
+		br.dropBits(8)
 
 		dest = dest[1:]
 		num--
@@ -190,14 +196,14 @@ func copyBytes(dest []byte, br *bitReader, num uint) {
 	br.bytePos += num
 }
 
-func initBitReader(br *bitReader) {
+func (br *bitReader) init() {
 	br.val = 0
 	br.bitPos = 64
 }
 
-func warmupBitReader(br *bitReader) bool {
-	if getAvailableBits(br) == 0 {
-		if !pullByte(br) {
+func (br *bitReader) warmup() bool {
+	if br.availableBits() == 0 {
+		if !br.pullByte() {
 			return false
 		}
 	}

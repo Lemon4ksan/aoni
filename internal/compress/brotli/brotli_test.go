@@ -6,6 +6,7 @@ package brotli_test
 
 import (
 	"bytes"
+	"errors"
 	"io"
 	"strings"
 	"testing"
@@ -89,6 +90,7 @@ func TestBrotliChunkedReading(t *testing.T) {
 
 	r := brotli.NewReader(bytes.NewReader(compressed))
 	buf := make([]byte, 17) // prime chunk size
+
 	var out bytes.Buffer
 
 	for {
@@ -96,13 +98,69 @@ func TestBrotliChunkedReading(t *testing.T) {
 		if n > 0 {
 			out.Write(buf[:n])
 		}
+
 		if err != nil {
-			if err == io.EOF {
+			if errors.Is(err, io.EOF) {
 				break
 			}
+
 			require.NoError(t, err)
 		}
 	}
 
 	assert.Equal(t, data, out.String())
+}
+
+func BenchmarkBrotliDecompress(b *testing.B) {
+	data := []byte(strings.Repeat(
+		"<!DOCTYPE html><html><head><title>Benchmark Page</title></head><body>"+
+			"<h1>High Performance Brotli RFC 7932 Engine</h1><p>Zero allocation streaming decoder in Go.</p>"+
+			"</body></html>\n",
+		100,
+	))
+	compressed := fasthttp.AppendBrotliBytes(nil, data)
+
+	b.ReportAllocs()
+	b.SetBytes(int64(len(data)))
+	b.ResetTimer()
+
+	for i := 0; i < b.N; i++ {
+		r := brotli.NewReader(bytes.NewReader(compressed))
+
+		_, err := io.Copy(io.Discard, r)
+		if err != nil {
+			b.Fatal(err)
+		}
+	}
+}
+
+func BenchmarkBrotliDecompressReuse(b *testing.B) {
+	data := []byte(strings.Repeat(
+		"<!DOCTYPE html><html><head><title>Benchmark Page</title></head><body>"+
+			"<h1>High Performance Brotli RFC 7932 Engine</h1><p>Zero allocation streaming decoder in Go.</p>"+
+			"</body></html>\n",
+		100,
+	))
+	compressed := fasthttp.AppendBrotliBytes(nil, data)
+
+	r := brotli.NewReader(bytes.NewReader(compressed))
+	src := bytes.NewReader(compressed)
+	copyBuf := make([]byte, 32*1024)
+
+	b.ReportAllocs()
+	b.SetBytes(int64(len(data)))
+	b.ResetTimer()
+
+	for i := 0; i < b.N; i++ {
+		src.Reset(compressed)
+
+		if err := r.Reset(src); err != nil {
+			b.Fatal(err)
+		}
+
+		_, err := io.CopyBuffer(io.Discard, r, copyBuf)
+		if err != nil {
+			b.Fatal(err)
+		}
+	}
 }

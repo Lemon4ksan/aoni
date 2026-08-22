@@ -533,20 +533,16 @@ func shiftTransform(word []byte, wordLen int, parameter uint16) int {
 	}
 }
 
-func transformDictionaryWord(dst, word []byte, wordLen int, trans *transforms, transformIdx int) int {
+func (trans *transforms) transformWord(dst, word []byte, wordLen, transformIdx int) int {
 	idx := 0
 	prefix := trans.prefix(transformIdx)
 	tType := int(trans.transformType(transformIdx))
 	suffix := trans.suffix(transformIdx)
 
 	prefixLen := int(prefix[0])
-
-	prefix = prefix[1:]
-	for prefixLen > 0 {
-		dst[idx] = prefix[0]
-		idx++
-		prefix = prefix[1:]
-		prefixLen--
+	if prefixLen > 0 {
+		copy(dst[idx:], prefix[1:1+prefixLen])
+		idx += prefixLen
 	}
 
 	if tType <= transformOmitLast9 {
@@ -557,9 +553,9 @@ func transformDictionaryWord(dst, word []byte, wordLen int, trans *transforms, t
 		wordLen -= skip
 	}
 
-	for i := 0; i < wordLen; i++ {
-		dst[idx] = word[i]
-		idx++
+	if wordLen > 0 {
+		copy(dst[idx:], word[:wordLen])
+		idx += wordLen
 	}
 
 	switch tType {
@@ -588,13 +584,9 @@ func transformDictionaryWord(dst, word []byte, wordLen int, trans *transforms, t
 	}
 
 	suffixLen := int(suffix[0])
-
-	suffix = suffix[1:]
-	for suffixLen > 0 {
-		dst[idx] = suffix[0]
-		idx++
-		suffix = suffix[1:]
-		suffixLen--
+	if suffixLen > 0 {
+		copy(dst[idx:], suffix[1:1+suffixLen])
+		idx += suffixLen
 	}
 
 	return idx

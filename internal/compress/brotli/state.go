@@ -110,7 +110,7 @@ type Reader struct {
 	ringbuffer                []byte
 	ringbufferEnd             []byte
 	htreeCommand              []huffmanCode
-	contextLookup             []byte
+	contextLookup             contextLUT
 	contextMapSlice           []byte
 	distContextMapSlice       []byte
 	literalHgroup             huffmanTreeGroup
@@ -177,10 +177,10 @@ type Reader struct {
 	trivialLiteralContexts    [8]uint32
 }
 
-func decoderStateInit(s *Reader) bool {
+func (s *Reader) initState() bool {
 	s.errorCode = 0 /* BROTLI_DECODER_NO_ERROR */
 
-	initBitReader(&s.br)
+	s.br.init()
 	s.state = stateUninited
 	s.largeWindow = false
 	s.substateMetablockHeader = stateMetablockHeaderNone
@@ -211,8 +211,8 @@ func decoderStateInit(s *Reader) bool {
 
 	s.subLoopCounter = 0
 
-	cleanupCodes(s)
-	cleanupHTrees(s)
+	s.cleanupCodes()
+	s.cleanupHTrees()
 
 	s.isLastMetablock = 0
 	s.isUncompressed = 0
@@ -237,7 +237,7 @@ func decoderStateInit(s *Reader) bool {
 	return true
 }
 
-func decoderStateMetablockBegin(s *Reader) {
+func (s *Reader) metablockBegin() {
 	s.metaBlockRemainingLen = 0
 	s.blockLength[0] = 1 << 24
 	s.blockLength[1] = 1 << 24
@@ -260,29 +260,29 @@ func decoderStateMetablockBegin(s *Reader) {
 	s.distHtreeIndex = 0
 	s.contextLookup = nil
 
-	cleanupCodes(s)
-	cleanupHTrees(s)
+	s.cleanupCodes()
+	s.cleanupHTrees()
 }
 
-func decoderStateCleanupAfterMetablock(s *Reader) {
+func (s *Reader) cleanupAfterMetablock() {
 	s.contextModes = nil
 	s.contextMap = nil
 	s.distContextMap = nil
-	cleanupHTrees(s)
+	s.cleanupHTrees()
 }
 
-func decoderHuffmanTreeGroupInit(group *huffmanTreeGroup, alphabet_size, max_symbol, ntrees uint32) {
-	max_table_size := uint(kMaxHuffmanTableSize[(alphabet_size+31)>>5])
+func (group *huffmanTreeGroup) init(alphabetSize, maxSymbol, ntrees uint32) {
+	maxTableSize := uint(kMaxHuffmanTableSize[(alphabetSize+31)>>5])
 
-	group.alphabetSize = uint16(alphabet_size)
-	group.maxSymbol = uint16(max_symbol)
+	group.alphabetSize = uint16(alphabetSize)
+	group.maxSymbol = uint16(maxSymbol)
 	group.numHtrees = uint16(ntrees)
 
-	makeCodesBuffer(group, uint(ntrees)*max_table_size)
-	makeTreesBuffer(group, ntrees)
+	group.makeCodesBuffer(uint(ntrees) * maxTableSize)
+	group.makeTreesBuffer(ntrees)
 }
 
-func makeTreesBuffer(group *huffmanTreeGroup, treesLen uint32) {
+func (group *huffmanTreeGroup) makeTreesBuffer(treesLen uint32) {
 	if cap(group.htrees) < int(treesLen) {
 		group.htrees = make([][]huffmanCode, treesLen)
 		return
@@ -291,7 +291,7 @@ func makeTreesBuffer(group *huffmanTreeGroup, treesLen uint32) {
 	group.htrees = group.htrees[:treesLen]
 }
 
-func makeCodesBuffer(group *huffmanTreeGroup, codesLen uint) {
+func (group *huffmanTreeGroup) makeCodesBuffer(codesLen uint) {
 	if cap(group.codes) < int(codesLen) {
 		group.codes = make([]huffmanCode, codesLen)
 		return
@@ -300,13 +300,13 @@ func makeCodesBuffer(group *huffmanTreeGroup, codesLen uint) {
 	group.codes = group.codes[:codesLen]
 }
 
-func cleanupCodes(s *Reader) {
+func (s *Reader) cleanupCodes() {
 	clear(s.literalHgroup.codes)
 	clear(s.insertCopyHgroup.codes)
 	clear(s.distanceHgroup.codes)
 }
 
-func cleanupHTrees(s *Reader) {
+func (s *Reader) cleanupHTrees() {
 	clear(s.literalHgroup.htrees)
 	clear(s.insertCopyHgroup.htrees)
 	clear(s.distanceHgroup.htrees)

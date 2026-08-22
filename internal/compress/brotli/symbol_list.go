@@ -19,7 +19,3 @@ func (s symbolList) get(i int) uint16 {
 func (s symbolList) put(i int, val uint16) {
 	s.storage[i+s.offset] = val
 }
-
-func symbolListPut(s symbolList, i int, val uint16) {
-	s.put(i, val)
-}

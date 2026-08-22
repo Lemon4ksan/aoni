@@ -59,7 +59,7 @@ func (r *Reader) Reset(src io.Reader) error {
 		}
 	}
 
-	decoderStateInit(r)
+	r.initState()
 
 	r.src = src
 	if r.buf == nil {
@@ -70,7 +70,7 @@ func (r *Reader) Reset(src io.Reader) error {
 }
 
 func (r *Reader) Read(p []byte) (n int, err error) {
-	if !decoderHasMoreOutput(r) && len(r.in) == 0 {
+	if !r.hasMoreOutput() && len(r.in) == 0 {
 		m, readErr := r.src.Read(r.buf)
 		if m == 0 {
 			if readErr == io.EOF && r.state != stateDone {
@@ -91,12 +91,12 @@ func (r *Reader) Read(p []byte) (n int, err error) {
 	for {
 		var written uint
 
-		in_len := uint(len(r.in))
-		out_len := uint(len(p))
-		in_remaining := in_len
-		out_remaining := out_len
-		result := decoderDecompressStream(r, &in_remaining, &r.in, &out_remaining, &p)
-		written = out_len - out_remaining
+		inLen := uint(len(r.in))
+		outLen := uint(len(p))
+		inRemaining := inLen
+		outRemaining := outLen
+		result := r.decompressStream(&inRemaining, &r.in, &outRemaining, &p)
+		written = outLen - outRemaining
 		n = int(written)
 
 		switch result {
@@ -108,7 +108,7 @@ func (r *Reader) Read(p []byte) (n int, err error) {
 			return n, nil
 
 		case decoderResultError:
-			return n, decodeError(decoderGetErrorCode(r))
+			return n, decodeError(r.getErrorCode())
 		case decoderResultNeedsMoreOutput:
 			if n == 0 {
 				return 0, io.ErrShortBuffer
