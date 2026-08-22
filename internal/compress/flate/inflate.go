@@ -14,7 +14,6 @@ import (
 	"fmt"
 	"io"
 	"math/bits"
-	"sync"
 
 	"github.com/lemon4ksan/aoni/internal/compress/internal/regmask"
 )
@@ -79,11 +78,8 @@ var bitMask32 = [32]uint32{
 	0x1ffFFFF, 0x3ffFFFF, 0x7ffFFFF, 0xfffFFFF, 0x1fffFFFF, 0x3fffFFFF, 0x7fffFFFF,
 } // up to 32 bits
 
-// Initialize the fixedHuffmanDecoder only once upon first use.
-var (
-	fixedOnce           sync.Once
-	fixedHuffmanDecoder huffmanDecoder
-)
+// Precomputed fixed Huffman decoder (RFC 1951 section 3.2.6).
+var fixedHuffmanDecoder huffmanDecoder
 
 // A CorruptInputError reports the presence of corrupt input at a given offset.
 type CorruptInputError = flate.CorruptInputError
@@ -922,28 +918,26 @@ func makeReader(r io.Reader) Reader {
 	return bufio.NewReader(r)
 }
 
-func fixedHuffmanDecoderInit() {
-	fixedOnce.Do(func() {
-		// These come from the RFC section 3.2.6.
-		var bits [288]int
-		for i := range 144 {
-			bits[i] = 8
-		}
+func init() {
+	// These come from the RFC section 3.2.6.
+	var bits [288]int
+	for i := range 144 {
+		bits[i] = 8
+	}
 
-		for i := 144; i < 256; i++ {
-			bits[i] = 9
-		}
+	for i := 144; i < 256; i++ {
+		bits[i] = 9
+	}
 
-		for i := 256; i < 280; i++ {
-			bits[i] = 7
-		}
+	for i := 256; i < 280; i++ {
+		bits[i] = 7
+	}
 
-		for i := 280; i < 288; i++ {
-			bits[i] = 8
-		}
+	for i := 280; i < 288; i++ {
+		bits[i] = 8
+	}
 
-		fixedHuffmanDecoder.init(bits[:])
-	})
+	fixedHuffmanDecoder.init(bits[:])
 }
 
 func (f *decompressor) Reset(r io.Reader, dict []byte) error {
@@ -1053,8 +1047,6 @@ func WithResumeFrom(cp InflateCheckpoint) ReaderOpt {
 
 // NewReaderOpts returns new reader with provided options
 func NewReaderOpts(r io.Reader, opts ...ReaderOpt) io.ReadCloser {
-	fixedHuffmanDecoderInit()
-
 	var f decompressor
 
 	f.r = makeReader(r)

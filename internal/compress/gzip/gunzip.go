@@ -415,4 +415,10 @@ func (z *Reader) WriteTo(w io.Writer) (int64, error) {
 // Close closes the Reader. It does not close the underlying io.Reader.
 // In order for the GZIP checksum to be verified, the reader must be
 // fully consumed until the io.EOF.
-func (z *Reader) Close() error { return z.decompressor.Close() }
+func (z *Reader) Close() error {
+	if z.decompressor != nil {
+		return z.decompressor.Close()
+	}
+
+	return nil
+}

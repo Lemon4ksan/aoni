@@ -12,6 +12,7 @@ import (
 	"io"
 	"strings"
 
+	"github.com/lemon4ksan/foundation/generic"
 	"github.com/lemon4ksan/foundation/silicon/bytesconv"
 	"github.com/lemon4ksan/foundation/silicon/pool"
 
@@ -248,4 +249,34 @@ func IsCompressed(b []byte) bool {
 // MatchesEncoding reports whether encoding matches the specified algorithm (case-insensitive).
 func MatchesEncoding(headerEncoding []byte, algorithm string) bool {
 	return bytesconv.ContainsFoldASCII(headerEncoding, algorithm)
+}
+
+// GunzipResult decompresses a gzip payload returning a monadic [generic.Result].
+func GunzipResult(src []byte) generic.Result[[]byte] {
+	data, err := Gunzip(src, nil)
+	return generic.FromResult(data, err)
+}
+
+// InflateResult decompresses raw deflate payload returning a monadic [generic.Result].
+func InflateResult(src []byte) generic.Result[[]byte] {
+	data, err := Inflate(src, nil)
+	return generic.FromResult(data, err)
+}
+
+// UnzstdResult decompresses a Zstandard payload returning a monadic [generic.Result].
+func UnzstdResult(src []byte) generic.Result[[]byte] {
+	data, err := Unzstd(src, nil)
+	return generic.FromResult(data, err)
+}
+
+// UnbrotliResult decompresses a Brotli payload returning a monadic [generic.Result].
+func UnbrotliResult(src []byte) generic.Result[[]byte] {
+	data, err := Unbrotli(src, nil)
+	return generic.FromResult(data, err)
+}
+
+// DecompressResult decodes compressed src into a monadic [generic.Result] based on encoding.
+func DecompressResult(encoding string, src []byte) generic.Result[[]byte] {
+	data, err := Decompress(encoding, src, nil)
+	return generic.FromResult(data, err)
 }
