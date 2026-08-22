@@ -20,29 +20,30 @@ import (
 	"github.com/lemon4ksan/aoni/internal/compress/gzip"
 )
 
-func createGzipData(t *testing.T, payload []byte) []byte {
-	t.Helper()
+func createGzipData(t testing.TB, payload []byte) []byte {
+	if t != nil {
+		t.Helper()
+	}
 
 	var buf bytes.Buffer
 
 	w := stdgzip.NewWriter(&buf)
-	_, err := w.Write(payload)
-	require.NoError(t, err)
-	require.NoError(t, w.Close())
+	_, _ = w.Write(payload)
+	_ = w.Close()
 
 	return buf.Bytes()
 }
 
-func createDeflateData(t *testing.T, payload []byte) []byte {
-	t.Helper()
+func createDeflateData(t testing.TB, payload []byte) []byte {
+	if t != nil {
+		t.Helper()
+	}
 
 	var buf bytes.Buffer
 
-	w, err := flate.NewWriter(&buf, flate.DefaultCompression)
-	require.NoError(t, err)
-	_, err = w.Write(payload)
-	require.NoError(t, err)
-	require.NoError(t, w.Close())
+	w, _ := flate.NewWriter(&buf, flate.DefaultCompression)
+	_, _ = w.Write(payload)
+	_ = w.Close()
 
 	return buf.Bytes()
 }
@@ -224,5 +225,18 @@ func BenchmarkUnbrotli(b *testing.B) {
 
 	for i := 0; i < b.N; i++ {
 		_, _ = compress.Unbrotli(compressed, dst)
+	}
+}
+
+func BenchmarkInflate(b *testing.B) {
+	payload := []byte(strings.Repeat("Inflate benchmark payload for internal/compress flate decoder. ", 50))
+	compressed := createDeflateData(nil, payload)
+	dst := make([]byte, 0, len(payload))
+
+	b.ReportAllocs()
+	b.ResetTimer()
+
+	for i := 0; i < b.N; i++ {
+		_, _ = compress.Inflate(compressed, dst)
 	}
 }

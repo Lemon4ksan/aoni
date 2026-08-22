@@ -11,9 +11,9 @@ import (
 	"errors"
 	"io"
 	"strings"
-	"sync"
 
 	"github.com/lemon4ksan/foundation/silicon/bytesconv"
+	"github.com/lemon4ksan/foundation/silicon/pool"
 
 	"github.com/lemon4ksan/aoni/internal/compress/brotli"
 	"github.com/lemon4ksan/aoni/internal/compress/flate"
@@ -30,18 +30,22 @@ var (
 )
 
 var (
-	zstdDecoderPool = sync.Pool{
-		New: func() any {
-			dec, _ := zstd.NewReader(nil, zstd.WithDecoderConcurrency(1), zstd.WithDecoderLowmem(true))
-			return dec
-		},
-	}
+	zstdDecoderStorage = pool.NewPerPStorage(func() *zstd.Decoder {
+		dec, _ := zstd.NewReader(nil, zstd.WithDecoderConcurrency(1), zstd.WithDecoderLowmem(true))
+		return dec
+	})
 
-	gzipReaderPool = sync.Pool{
-		New: func() any {
-			return new(gzip.Reader)
-		},
-	}
+	gzipReaderStorage = pool.NewPerPStorage(func() *gzip.Reader {
+		return new(gzip.Reader)
+	})
+
+	flateReaderStorage = pool.NewPerPStorage(func() flate.Resetter {
+		return flate.NewReader(nil).(flate.Resetter)
+	})
+
+	bytesReaderStorage = pool.NewPerPStorage(func() *bytes.Reader {
+		return bytes.NewReader(nil)
+	})
 )
 
 // Decompress decodes compressed src into dst using the specified Content-Encoding algorithm.
@@ -67,10 +71,15 @@ func Decompress(encoding string, src, dst []byte) ([]byte, error) {
 
 // Gunzip decompresses a gzip payload (RFC 1952) from src into dst.
 func Gunzip(src, dst []byte) ([]byte, error) {
-	zr := gzipReaderPool.Get().(*gzip.Reader)
-	defer gzipReaderPool.Put(zr)
+	zr := gzipReaderStorage.Get()
+	defer gzipReaderStorage.Put(zr)
 
-	if err := zr.Reset(bytes.NewReader(src)); err != nil {
+	br := bytesReaderStorage.Get()
+	defer bytesReaderStorage.Put(br)
+
+	br.Reset(src)
+
+	if err := zr.Reset(br); err != nil {
 		return nil, err
 	}
 
@@ -78,14 +87,35 @@ func Gunzip(src, dst []byte) ([]byte, error) {
 
 	if dst == nil {
 		dst = make([]byte, 0, len(src)*2)
+	} else {
+		dst = dst[:0]
 	}
 
-	buf := bytes.NewBuffer(dst[:0])
-	if _, err := io.Copy(buf, zr); err != nil {
-		return nil, err
+	for {
+		if len(dst) == cap(dst) {
+			newCap := cap(dst) * 2
+			if newCap == 0 {
+				newCap = 1024
+			}
+
+			newDst := make([]byte, len(dst), newCap)
+			copy(newDst, dst)
+			dst = newDst
+		}
+
+		n, err := zr.Read(dst[len(dst):cap(dst)])
+		dst = dst[:len(dst)+n]
+
+		if err != nil {
+			if errors.Is(err, io.EOF) {
+				break
+			}
+
+			return nil, err
+		}
 	}
 
-	return buf.Bytes(), nil
+	return dst, nil
 }
 
 // Unbrotli decompresses a Brotli payload (RFC 7932) from src into dst.
@@ -95,34 +125,64 @@ func Unbrotli(src, dst []byte) ([]byte, error) {
 
 // Unzstd decompresses a Zstandard payload (RFC 8878) from src into dst with zero allocations.
 func Unzstd(src, dst []byte) ([]byte, error) {
-	dec := zstdDecoderPool.Get().(*zstd.Decoder)
-	defer zstdDecoderPool.Put(dec)
+	dec := zstdDecoderStorage.Get()
+	defer zstdDecoderStorage.Put(dec)
 
 	return dec.DecodeAll(src, dst)
 }
 
 // Inflate decompresses raw deflate payload (RFC 1951) from src into dst.
 func Inflate(src, dst []byte) ([]byte, error) {
-	fr := flate.NewReader(bytes.NewReader(src))
-	defer fr.Close()
+	fr := flateReaderStorage.Get()
+	defer flateReaderStorage.Put(fr)
 
-	if dst == nil {
-		dst = make([]byte, 0, len(src)*2)
-	}
+	br := bytesReaderStorage.Get()
+	defer bytesReaderStorage.Put(br)
 
-	buf := bytes.NewBuffer(dst[:0])
-	if _, err := io.Copy(buf, fr); err != nil {
+	br.Reset(src)
+
+	if err := fr.Reset(br, nil); err != nil {
 		return nil, err
 	}
 
-	return buf.Bytes(), nil
+	if dst == nil {
+		dst = make([]byte, 0, len(src)*2)
+	} else {
+		dst = dst[:0]
+	}
+
+	for {
+		if len(dst) == cap(dst) {
+			newCap := cap(dst) * 2
+			if newCap == 0 {
+				newCap = 1024
+			}
+
+			newDst := make([]byte, len(dst), newCap)
+			copy(newDst, dst)
+			dst = newDst
+		}
+
+		n, err := fr.(io.Reader).Read(dst[len(dst):cap(dst)])
+		dst = dst[:len(dst)+n]
+
+		if err != nil {
+			if errors.Is(err, io.EOF) {
+				break
+			}
+
+			return nil, err
+		}
+	}
+
+	return dst, nil
 }
 
 // AcquireZstdReader borrows a pooled [*zstd.Decoder] bound to r.
 func AcquireZstdReader(r io.Reader) (*zstd.Decoder, error) {
-	dec := zstdDecoderPool.Get().(*zstd.Decoder)
+	dec := zstdDecoderStorage.Get()
 	if err := dec.Reset(r); err != nil {
-		zstdDecoderPool.Put(dec)
+		zstdDecoderStorage.Put(dec)
 		return nil, err
 	}
 
@@ -133,15 +193,15 @@ func AcquireZstdReader(r io.Reader) (*zstd.Decoder, error) {
 func ReleaseZstdReader(dec *zstd.Decoder) {
 	if dec != nil {
 		_ = dec.Reset(nil)
-		zstdDecoderPool.Put(dec)
+		zstdDecoderStorage.Put(dec)
 	}
 }
 
 // AcquireGzipReader borrows a pooled [*gzip.Reader] bound to r.
 func AcquireGzipReader(r io.Reader) (*gzip.Reader, error) {
-	zr := gzipReaderPool.Get().(*gzip.Reader)
+	zr := gzipReaderStorage.Get()
 	if err := zr.Reset(r); err != nil {
-		gzipReaderPool.Put(zr)
+		gzipReaderStorage.Put(zr)
 		return nil, err
 	}
 
@@ -152,7 +212,7 @@ func AcquireGzipReader(r io.Reader) (*gzip.Reader, error) {
 func ReleaseGzipReader(zr *gzip.Reader) {
 	if zr != nil {
 		_ = zr.Close()
-		gzipReaderPool.Put(zr)
+		gzipReaderStorage.Put(zr)
 	}
 }
 

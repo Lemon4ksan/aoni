@@ -112,32 +112,32 @@ func (dd *dictDecoder) writeCopy(dist, length int) int {
 	endPos := min(dstPos+length, len(dd.hist))
 
 	// Copy non-overlapping section after destination position.
-	//
-	// This section is non-overlapping in that the copy length for this section
-	// is always less than or equal to the backwards distance. This can occur
-	// if a distance refers to data that wraps-around in the buffer.
-	// Thus, a backwards copy is performed here; that is, the exact bytes in
-	// the source prior to the copy is placed in the destination.
 	if srcPos < 0 {
 		srcPos += len(dd.hist)
 		dstPos += copy(dd.hist[dstPos:endPos], dd.hist[srcPos:])
 		srcPos = 0
 	}
 
-	// Copy possibly overlapping section before destination position.
-	//
-	// This section can overlap if the copy length for this section is larger
-	// than the backwards distance. This is allowed by LZ77 so that repeated
-	// strings can be succinctly represented using (dist, length) pairs.
-	// Thus, a forwards copy is performed here; that is, the bytes copied is
-	// possibly dependent on the resulting bytes in the destination as the copy
-	// progresses along. This is functionally equivalent to the following:
-	//
-	//	for i := 0; i < endPos-dstPos; i++ {
-	//		dd.hist[dstPos+i] = dd.hist[srcPos+i]
-	//	}
-	//	dstPos = endPos
-	//
+	// RLE fast path for distance 1
+	if dist == 1 && dstPos < endPos {
+		c := dd.hist[srcPos]
+		slice := dd.hist[dstPos:endPos]
+		for i := range slice {
+			slice[i] = c
+		}
+		dd.wrPos = endPos
+
+		return endPos - dstBase
+	}
+
+	// Non-overlapping fast path
+	if dstPos-srcPos >= endPos-dstPos {
+		copy(dd.hist[dstPos:endPos], dd.hist[srcPos:srcPos+(endPos-dstPos)])
+		dd.wrPos = endPos
+
+		return endPos - dstBase
+	}
+
 	for dstPos < endPos {
 		dstPos += copy(dd.hist[dstPos:endPos], dd.hist[srcPos:dstPos])
 	}
@@ -153,6 +153,8 @@ func (dd *dictDecoder) writeCopy(dist, length int) int {
 // This method is designed to be inlined for performance reasons.
 //
 // This invariant must be kept: 0 < dist <= histSize()
+//
+//go:inline
 func (dd *dictDecoder) tryWriteCopy(dist, length int) int {
 	dstPos := dd.wrPos
 
@@ -163,6 +165,26 @@ func (dd *dictDecoder) tryWriteCopy(dist, length int) int {
 
 	dstBase := dstPos
 	srcPos := dstPos - dist
+
+	// RLE fast path for single-byte repeats
+	if dist == 1 {
+		c := dd.hist[srcPos]
+		slice := dd.hist[dstPos:endPos]
+		for i := range slice {
+			slice[i] = c
+		}
+		dd.wrPos = endPos
+
+		return length
+	}
+
+	// Non-overlapping match copy
+	if dist >= length {
+		copy(dd.hist[dstPos:endPos], dd.hist[srcPos:srcPos+length])
+		dd.wrPos = endPos
+
+		return length
+	}
 
 	// Copy possibly overlapping section before destination position.
 loop:
