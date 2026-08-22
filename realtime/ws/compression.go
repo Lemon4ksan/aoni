@@ -10,8 +10,9 @@ import (
 	"io"
 	"sync"
 
-	"github.com/klauspost/compress/flate"
 	"github.com/lemon4ksan/foundation/generic"
+
+	"github.com/lemon4ksan/aoni/internal/compress/flate"
 )
 
 var (

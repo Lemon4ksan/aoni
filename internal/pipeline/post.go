@@ -14,12 +14,13 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/andybalholm/brotli"
-	"github.com/klauspost/compress/zstd"
 	"github.com/lemon4ksan/foundation/generic"
 	fio "github.com/lemon4ksan/foundation/io"
 	"github.com/lemon4ksan/foundation/text/encoding/htmlindex"
 	"github.com/lemon4ksan/foundation/text/transform"
+
+	"github.com/lemon4ksan/aoni/internal/compress/brotli"
+	"github.com/lemon4ksan/aoni/internal/compress/zstd"
 )
 
 var (

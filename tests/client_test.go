@@ -6,6 +6,7 @@ package aoni_test
 
 import (
 	"bytes"
+	"compress/gzip"
 	"context"
 	"crypto/rand"
 	"crypto/rsa"
@@ -30,10 +31,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/klauspost/compress/gzip"
-
 	"github.com/andybalholm/brotli"
-	"github.com/klauspost/compress/zstd"
 	utls "github.com/refraction-networking/utls"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -554,8 +552,7 @@ func TestClient_Decompression(t *testing.T) {
 			name:     "decompress_zstandard",
 			encoding: "zstd",
 			compress: func(w io.Writer) io.WriteCloser {
-				zw, _ := zstd.NewWriter(w)
-				return zw
+				return &zstdTestWriter{w: w}
 			},
 			want: "decompress-zstd",
 		},
@@ -582,6 +579,26 @@ func TestClient_Decompression(t *testing.T) {
 			assert.Equal(t, tt.want, result.Message)
 		})
 	}
+}
+
+type zstdTestWriter struct {
+	w   io.Writer
+	buf bytes.Buffer
+}
+
+func (z *zstdTestWriter) Write(p []byte) (int, error) {
+	return z.buf.Write(p)
+}
+
+func (z *zstdTestWriter) Close() error {
+	payload := z.buf.Bytes()
+	var frame bytes.Buffer
+	frame.Write([]byte{0x28, 0xb5, 0x2f, 0xfd, 0x20, byte(len(payload))})
+	bh := uint32(1) | (uint32(len(payload)) << 3)
+	frame.Write([]byte{byte(bh), byte(bh >> 8), byte(bh >> 16)})
+	frame.Write(payload)
+	_, err := z.w.Write(frame.Bytes())
+	return err
 }
 
 func TestClient_CertificatePinning(t *testing.T) {

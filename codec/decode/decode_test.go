@@ -13,13 +13,14 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/klauspost/compress/gzip"
 	"github.com/lemon4ksan/foundation/refkit"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/typepb"
 	"google.golang.org/protobuf/types/known/wrapperspb"
+
+	"github.com/lemon4ksan/aoni/internal/compress/gzip"
 )
 
 type errorReader struct{}

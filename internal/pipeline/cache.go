@@ -406,7 +406,7 @@ func extractVaryHeaders(req *http.Request, varyHeader string) map[string]string 
 	}
 
 	varyMap := make(map[string]string)
-	for hName := range headkit.Directives(varyHeader) {
+	for hName, _ := range headkit.Directives(varyHeader) {
 		if hName != "" && hName != "*" {
 			varyMap[hName] = req.Header.Get(hName)
 		}

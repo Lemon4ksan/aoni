@@ -20,16 +20,13 @@ const (
 // Cookie represents an HTTP cookie structure.
 type Cookie = fcookie.Cookie
 
-// CookieDTO is an alias for [Cookie].
-type CookieDTO = fcookie.CookieDTO
-
 // ParseSetCookieHeader parses a raw Set-Cookie header line with zero heap allocations.
 func ParseSetCookieHeader(headerVal, defaultDomain, defaultPath string) Cookie {
 	return fcookie.ParseSetCookieHeader(headerVal, defaultDomain, defaultPath)
 }
 
-// ParseCookieAttribute sets the corresponding field on [CookieDTO].
-func ParseCookieAttribute(key, val string, c *CookieDTO) {
+// ParseCookieAttribute sets the corresponding field on [Cookie].
+func ParseCookieAttribute(key, val string, c *Cookie) {
 	fcookie.ParseCookieAttribute(key, val, c)
 }
 

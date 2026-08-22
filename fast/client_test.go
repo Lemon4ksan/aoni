@@ -5,6 +5,7 @@
 package fast_test
 
 import (
+	"bytes"
 	"compress/gzip"
 	"context"
 	"io"
@@ -15,10 +16,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/andybalholm/brotli"
-	"github.com/klauspost/compress/zstd"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"github.com/valyala/fasthttp"
 
 	"github.com/lemon4ksan/aoni/fast"
 	"github.com/lemon4ksan/aoni/option"
@@ -202,14 +202,18 @@ func TestFastClient_Decompression_Gzip_Brotli_Zstd(t *testing.T) {
 			_ = gz.Close()
 		case "/br":
 			w.Header().Set("Content-Encoding", "br")
-			br := brotli.NewWriter(w)
-			_, _ = br.Write([]byte("uncompressed-brotli-payload"))
-			_ = br.Close()
+			brData := fasthttp.AppendBrotliBytes(nil, []byte("uncompressed-brotli-payload"))
+			_, _ = w.Write(brData)
 		case "/zstd":
 			w.Header().Set("Content-Encoding", "zstd")
-			zw, _ := zstd.NewWriter(w)
-			_, _ = zw.Write([]byte("uncompressed-zstd-payload"))
-			_ = zw.Close()
+			payload := []byte("uncompressed-zstd-payload")
+			// Raw single segment zstd frame
+			var buf bytes.Buffer
+			buf.Write([]byte{0x28, 0xb5, 0x2f, 0xfd, 0x20, byte(len(payload))})
+			bh := uint32(1) | (uint32(len(payload)) << 3)
+			buf.Write([]byte{byte(bh), byte(bh >> 8), byte(bh >> 16)})
+			buf.Write(payload)
+			_, _ = w.Write(buf.Bytes())
 		default:
 			w.WriteHeader(http.StatusNotFound)
 		}

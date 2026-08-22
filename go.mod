@@ -4,7 +4,6 @@ go 1.25.4
 
 require (
 	github.com/andybalholm/brotli v1.2.2
-	github.com/klauspost/compress v1.19.1
 	github.com/lemon4ksan/foundation v0.0.0-20260820045422-43e40082e954
 	github.com/pkg/sftp v1.13.11
 	github.com/quic-go/qpack v0.6.0
@@ -20,6 +19,7 @@ require (
 )
 
 require (
+	github.com/klauspost/compress v1.19.1 // indirect
 	github.com/kr/fs v0.1.0 // indirect
 	github.com/kr/text v0.2.0 // indirect
 	github.com/valyala/bytebufferpool v1.0.0 // indirect

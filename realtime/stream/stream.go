@@ -22,13 +22,13 @@ import (
 	"strings"
 	"time"
 
-	"github.com/klauspost/compress/gzip"
 	"github.com/lemon4ksan/foundation/generic"
 	"github.com/lemon4ksan/foundation/silicon/offheap"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/lemon4ksan/aoni"
 	"github.com/lemon4ksan/aoni/codec/decode"
+	"github.com/lemon4ksan/aoni/internal/compress/gzip"
 	"github.com/lemon4ksan/aoni/mod"
 	"github.com/lemon4ksan/aoni/request"
 )
