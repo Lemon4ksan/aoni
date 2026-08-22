@@ -98,9 +98,11 @@ func (s *Reader) ensureRingBuffer() bool {
 	}
 
 	spaceNeeded := int(s.newRingbufferSize) + int(kRingBufferWriteAheadSlack)
-	if len(s.ringbuffer) < spaceNeeded {
+	if cap(s.ringbuffer) < spaceNeeded {
 		oldRingbuffer = s.ringbuffer
 		s.ringbuffer = make([]byte, spaceNeeded)
+	} else {
+		s.ringbuffer = s.ringbuffer[:spaceNeeded]
 	}
 
 	s.ringbuffer[s.newRingbufferSize-2] = 0

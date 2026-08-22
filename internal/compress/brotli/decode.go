@@ -484,10 +484,10 @@ func (s *Reader) decompressStream(
 				s.numDirectDistanceCodes = numDistanceShortCodes + (bits << s.distancePostfixBits)
 				s.distancePostfixMask = int(bitMask(s.distancePostfixBits))
 
-				s.contextModes = make([]byte, uint(s.numBlockTypes[0]))
-				if s.contextModes == nil {
-					result = decoderErrorAllocContextModes
-					break
+				if cap(s.contextModes) < int(s.numBlockTypes[0]) {
+					s.contextModes = make([]byte, s.numBlockTypes[0])
+				} else {
+					s.contextModes = s.contextModes[:s.numBlockTypes[0]]
 				}
 
 				s.loopCounter = 0

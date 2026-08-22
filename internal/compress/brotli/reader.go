@@ -146,6 +146,10 @@ func (r *Reader) Reset(src io.Reader) error {
 		// undefined. Clear out everything but the buffers.
 		*r = Reader{
 			buf:            r.buf,
+			ringbuffer:     r.ringbuffer,
+			contextModes:   r.contextModes,
+			contextMap:     r.contextMap,
+			distContextMap: r.distContextMap,
 			blockTypeTrees: r.blockTypeTrees,
 			literalHgroup: huffmanTreeGroup{
 				htrees: r.literalHgroup.htrees,

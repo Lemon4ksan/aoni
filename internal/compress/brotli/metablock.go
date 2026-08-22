@@ -695,9 +695,10 @@ func (s *Reader) decodeContextMap(contextMapSize uint32, numHtrees *uint32, cont
 		(*numHtrees)++
 		s.contextIndex = 0
 
-		*contextMapArg = make([]byte, uint(contextMapSize))
-		if *contextMapArg == nil {
-			return decoderErrorAllocContextMap
+		if cap(*contextMapArg) < int(contextMapSize) {
+			*contextMapArg = make([]byte, contextMapSize)
+		} else {
+			*contextMapArg = (*contextMapArg)[:contextMapSize]
 		}
 
 		if *numHtrees <= 1 {

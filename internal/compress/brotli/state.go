@@ -268,9 +268,9 @@ func (s *Reader) metablockBegin() {
 	s.blockTypeRB[3] = 0
 	s.blockTypeRB[4] = 1
 	s.blockTypeRB[5] = 0
-	s.contextMap = nil
-	s.contextModes = nil
-	s.distContextMap = nil
+	s.contextMap = s.contextMap[:0]
+	s.contextModes = s.contextModes[:0]
+	s.distContextMap = s.distContextMap[:0]
 	s.contextMapSlice = nil
 	s.literalHtree = nil
 	s.distContextMapSlice = nil
@@ -282,9 +282,9 @@ func (s *Reader) metablockBegin() {
 }
 
 func (s *Reader) cleanupAfterMetablock() {
-	s.contextModes = nil
-	s.contextMap = nil
-	s.distContextMap = nil
+	s.contextModes = s.contextModes[:0]
+	s.contextMap = s.contextMap[:0]
+	s.distContextMap = s.distContextMap[:0]
 	s.cleanupHTrees()
 }
 
