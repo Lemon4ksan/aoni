@@ -616,11 +616,9 @@ Transform:
 */
 func inverseMoveToFrontTransform(v []byte, vLen uint32) {
 	var mtf [256]byte
-	for i := 1; i < 256; i++ {
+	for i := 0; i < 256; i++ {
 		mtf[i] = byte(i)
 	}
-
-	var mtf1 byte
 
 	/* Transform the input. */
 	for i := 0; uint32(i) < vLen; i++ {
@@ -628,14 +626,11 @@ func inverseMoveToFrontTransform(v []byte, vLen uint32) {
 		value := mtf[index]
 
 		v[i] = value
-		mtf1 = value
 
-		for index >= 1 {
-			index--
-			mtf[index+1] = mtf[index]
+		if index > 0 {
+			copy(mtf[1:index+1], mtf[:index])
+			mtf[0] = value
 		}
-
-		mtf[0] = mtf1
 	}
 }
 

@@ -638,19 +638,31 @@ CommandPostWrapCopy:
 		wrapGuard := s.ringbufferSize - pos
 		dist := s.distanceCode
 
-		for {
-			i--
-			if i < 0 {
-				break
+		if dist == 1 && wrapGuard >= i {
+			b := rb[(pos-1)&rbMask]
+			end := pos + i
+
+			for pos < end {
+				rb[pos] = b
+				pos++
 			}
 
-			rb[pos] = rb[(pos-dist)&rbMask]
-			pos++
+			i = 0
+		} else {
+			for {
+				i--
+				if i < 0 {
+					break
+				}
 
-			wrapGuard--
-			if wrapGuard == 0 {
-				s.state = stateCommandPostWrite2
-				goto saveStateAndReturn
+				rb[pos] = rb[(pos-dist)&rbMask]
+				pos++
+
+				wrapGuard--
+				if wrapGuard == 0 {
+					s.state = stateCommandPostWrite2
+					goto saveStateAndReturn
+				}
 			}
 		}
 	}
