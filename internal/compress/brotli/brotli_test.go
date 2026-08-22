@@ -40,6 +40,17 @@ func TestBrotliDecompression(t *testing.T) {
 			name: "empty_string",
 			data: "",
 		},
+		{
+			name: "large_html_payload",
+			data: strings.Repeat(
+				"<!DOCTYPE html><html><head><title>Test Page</title></head><body><h1>Hello World</h1><p>Lorem ipsum dolor sit amet, consectetur adipiscing elit.</p></body></html>\n",
+				300,
+			),
+		},
+		{
+			name: "binary_sequence",
+			data: string(bytes.Repeat([]byte{0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 255, 254, 253, 128, 64}, 1000)),
+		},
 	}
 
 	for _, tc := range testCases {
@@ -59,4 +70,39 @@ func TestBrotliDecompression(t *testing.T) {
 			assert.Equal(t, tc.data, string(decompressed2))
 		})
 	}
+}
+
+func TestBrotliInvalidData(t *testing.T) {
+	t.Parallel()
+
+	invalidPayload := []byte{0xDE, 0xAD, 0xBE, 0xEF, 0x01, 0x02}
+	r := brotli.NewReader(bytes.NewReader(invalidPayload))
+	_, err := io.ReadAll(r)
+	assert.Error(t, err)
+}
+
+func TestBrotliChunkedReading(t *testing.T) {
+	t.Parallel()
+
+	data := strings.Repeat("Testing chunked streaming decompression with various small buffer reads.", 50)
+	compressed := fasthttp.AppendBrotliBytes(nil, []byte(data))
+
+	r := brotli.NewReader(bytes.NewReader(compressed))
+	buf := make([]byte, 17) // prime chunk size
+	var out bytes.Buffer
+
+	for {
+		n, err := r.Read(buf)
+		if n > 0 {
+			out.Write(buf[:n])
+		}
+		if err != nil {
+			if err == io.EOF {
+				break
+			}
+			require.NoError(t, err)
+		}
+	}
+
+	assert.Equal(t, data, out.String())
 }
