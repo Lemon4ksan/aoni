@@ -8,6 +8,7 @@ package brotli
 import (
 	"errors"
 	"io"
+	"sync"
 )
 
 type decodeError int
@@ -26,11 +27,99 @@ var (
 // It is arbitrarily chosen to be equal to the constant used in io.Copy.
 const readBufSize = 32 * 1024
 
+var readerPool = sync.Pool{
+	New: func() any {
+		return new(Reader)
+	},
+}
+
+// AcquireReader borrows a pooled [*Reader] bound to src.
+func AcquireReader(src io.Reader) *Reader {
+	r := readerPool.Get().(*Reader)
+	_ = r.Reset(src)
+	return r
+}
+
+// ReleaseReader resets and returns r back to the internal pool.
+func ReleaseReader(r *Reader) {
+	if r != nil {
+		_ = r.Reset(nil)
+		readerPool.Put(r)
+	}
+}
+
 // NewReader creates a new Reader reading the given reader.
 func NewReader(src io.Reader) *Reader {
 	r := new(Reader)
 	_ = r.Reset(src)
 	return r
+}
+
+// Close closes the Reader and implements io.ReadCloser.
+func (r *Reader) Close() error {
+	r.src = nil
+	r.in = nil
+	return nil
+}
+
+// Decompress decompresses a Brotli payload (RFC 7932) from src into dst.
+func Decompress(dst, src []byte) ([]byte, error) {
+	if len(src) == 0 {
+		return dst[:0], nil
+	}
+
+	r := AcquireReader(nil)
+	defer ReleaseReader(r)
+
+	r.in = src
+
+	if cap(dst) == 0 {
+		dst = make([]byte, 0, len(src)*2)
+	} else {
+		dst = dst[:0]
+	}
+
+	for {
+		if len(dst) == cap(dst) {
+			newCap := cap(dst) * 2
+			if newCap < 1024 {
+				newCap = 1024
+			}
+
+			newDst := make([]byte, len(dst), newCap)
+			copy(newDst, dst)
+			dst = newDst
+		}
+
+		inRemaining := uint(len(r.in))
+		outCap := cap(dst) - len(dst)
+		outRemaining := uint(outCap)
+		outSlice := dst[len(dst):cap(dst)]
+
+		result := r.decompressStream(&inRemaining, &r.in, &outRemaining, &outSlice)
+		written := outCap - int(outRemaining)
+		dst = dst[:len(dst)+written]
+
+		switch result {
+		case decoderResultSuccess:
+			if len(r.in) > 0 {
+				return dst, errExcessiveInput
+			}
+
+			return dst, nil
+
+		case decoderResultError:
+			return dst, decodeError(r.getErrorCode())
+
+		case decoderResultNeedsMoreOutput:
+			continue
+
+		case decoderNeedsMoreInput:
+			if len(r.in) == 0 {
+				return dst, io.ErrUnexpectedEOF
+			}
+		}
+	}
 }
 
 // Reset discards the Reader's state and makes it equivalent to the result of

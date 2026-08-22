@@ -111,6 +111,49 @@ func TestBrotliChunkedReading(t *testing.T) {
 	assert.Equal(t, data, out.String())
 }
 
+func TestBrotliDecompressHelper(t *testing.T) {
+	t.Parallel()
+
+	raw := []byte("Standalone Brotli Decompress helper test with slice destination.")
+	compressed := fasthttp.AppendBrotliBytes(nil, raw)
+
+	// Test nil dst
+	decompressed, err := brotli.Decompress(nil, compressed)
+	require.NoError(t, err)
+	assert.Equal(t, raw, decompressed)
+
+	// Test preallocated dst
+	dst := make([]byte, 0, len(raw))
+	decompressed2, err := brotli.Decompress(dst, compressed)
+	require.NoError(t, err)
+	assert.Equal(t, raw, decompressed2)
+
+	// Test empty src
+	emptyDecompressed, err := brotli.Decompress(nil, nil)
+	require.NoError(t, err)
+	assert.Empty(t, emptyDecompressed)
+}
+
+func TestBrotliReaderPoolAndCloser(t *testing.T) {
+	t.Parallel()
+
+	raw := []byte("Testing AcquireReader, ReleaseReader, and Close (io.ReadCloser).")
+	compressed := fasthttp.AppendBrotliBytes(nil, raw)
+
+	r := brotli.AcquireReader(bytes.NewReader(compressed))
+
+	var rc io.ReadCloser = r
+
+	decompressed, err := io.ReadAll(rc)
+	require.NoError(t, err)
+	assert.Equal(t, raw, decompressed)
+
+	err = rc.Close()
+	require.NoError(t, err)
+
+	brotli.ReleaseReader(r)
+}
+
 func BenchmarkBrotliDecompress(b *testing.B) {
 	data := []byte(strings.Repeat(
 		"<!DOCTYPE html><html><head><title>Benchmark Page</title></head><body>"+
@@ -163,4 +206,122 @@ func BenchmarkBrotliDecompressReuse(b *testing.B) {
 			b.Fatal(err)
 		}
 	}
+}
+
+func BenchmarkCompare_SmallPayload_1KB(b *testing.B) {
+	data := []byte(`{"id": 42, "user": "aoni-architect", "status": "active", "meta": {"session": "xyz-123"}}`)
+	compressed := fasthttp.AppendBrotliBytes(nil, data)
+	dst := make([]byte, 0, len(data))
+
+	b.Run("fasthttp_unbrotli", func(b *testing.B) {
+		b.ReportAllocs()
+		b.SetBytes(int64(len(data)))
+		b.ResetTimer()
+
+		for i := 0; i < b.N; i++ {
+			var err error
+
+			dst, err = fasthttp.AppendUnbrotliBytes(dst[:0], compressed)
+			if err != nil {
+				b.Fatal(err)
+			}
+		}
+	})
+
+	b.Run("aoni_brotli_decompress", func(b *testing.B) {
+		b.ReportAllocs()
+		b.SetBytes(int64(len(data)))
+		b.ResetTimer()
+
+		for i := 0; i < b.N; i++ {
+			var err error
+
+			dst, err = brotli.Decompress(dst[:0], compressed)
+			if err != nil {
+				b.Fatal(err)
+			}
+		}
+	})
+}
+
+func BenchmarkCompare_MediumPayload_18KB(b *testing.B) {
+	data := []byte(strings.Repeat(
+		"<!DOCTYPE html><html><head><title>Benchmark Page</title></head><body>"+
+			"<h1>High Performance Brotli RFC 7932 Engine</h1><p>Zero allocation streaming decoder in Go.</p>"+
+			"</body></html>\n",
+		100,
+	))
+	compressed := fasthttp.AppendBrotliBytes(nil, data)
+	dst := make([]byte, 0, len(data))
+
+	b.Run("fasthttp_unbrotli", func(b *testing.B) {
+		b.ReportAllocs()
+		b.SetBytes(int64(len(data)))
+		b.ResetTimer()
+
+		for i := 0; i < b.N; i++ {
+			var err error
+
+			dst, err = fasthttp.AppendUnbrotliBytes(dst[:0], compressed)
+			if err != nil {
+				b.Fatal(err)
+			}
+		}
+	})
+
+	b.Run("aoni_brotli_decompress", func(b *testing.B) {
+		b.ReportAllocs()
+		b.SetBytes(int64(len(data)))
+		b.ResetTimer()
+
+		for i := 0; i < b.N; i++ {
+			var err error
+
+			dst, err = brotli.Decompress(dst[:0], compressed)
+			if err != nil {
+				b.Fatal(err)
+			}
+		}
+	})
+}
+
+func BenchmarkCompare_LargePayload_100KB(b *testing.B) {
+	data := []byte(strings.Repeat(
+		"<!DOCTYPE html><html><head><title>Large Benchmark Document</title></head><body>"+
+			"<article><section><p>Ultra high performance internet protocol engine for Go.</p></section></article>"+
+			"</body></html>\n",
+		450,
+	))
+	compressed := fasthttp.AppendBrotliBytes(nil, data)
+	dst := make([]byte, 0, len(data))
+
+	b.Run("fasthttp_unbrotli", func(b *testing.B) {
+		b.ReportAllocs()
+		b.SetBytes(int64(len(data)))
+		b.ResetTimer()
+
+		for i := 0; i < b.N; i++ {
+			var err error
+
+			dst, err = fasthttp.AppendUnbrotliBytes(dst[:0], compressed)
+			if err != nil {
+				b.Fatal(err)
+			}
+		}
+	})
+
+	b.Run("aoni_brotli_decompress", func(b *testing.B) {
+		b.ReportAllocs()
+		b.SetBytes(int64(len(data)))
+		b.ResetTimer()
+
+		for i := 0; i < b.N; i++ {
+			var err error
+
+			dst, err = brotli.Decompress(dst[:0], compressed)
+			if err != nil {
+				b.Fatal(err)
+			}
+		}
+	})
 }

@@ -5,6 +5,8 @@
 
 package brotli
 
+import "unsafe"
+
 // RFC 7932 Static Dictionary collection.
 type dictionary struct {
 	sizeBitsByLength [32]byte
@@ -31,7 +33,7 @@ var kBrotliDictionary = dictionary{
 		119872, 121280, 122016, 122784, 122784, 122784, 122784, 122784, 122784, 122784,
 	},
 	dataSize: uint(len(dictionaryDataString)),
-	data:     []byte(dictionaryDataString),
+	data:     unsafe.Slice(unsafe.StringData(dictionaryDataString), len(dictionaryDataString)),
 }
 
 func getDictionary() *dictionary {

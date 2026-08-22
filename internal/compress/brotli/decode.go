@@ -206,17 +206,12 @@ func (s *Reader) decodeMetaBlockLength() int {
 				return decoderNeedsMoreInput
 			}
 
-			if bits != 0 {
-				s.isLastMetablock = 1
-			} else {
-				s.isLastMetablock = 0
-			}
-
+			s.isLastMetablock = bits != 0
 			s.metaBlockRemainingLen = 0
-			s.isUncompressed = 0
+			s.isUncompressed = false
+			s.isMetadata = false
 
-			s.isMetadata = 0
-			if s.isLastMetablock == 0 {
+			if !s.isLastMetablock {
 				s.substateMetablockHeader = stateMetablockHeaderNibbles
 				break
 			}
@@ -244,11 +239,11 @@ func (s *Reader) decodeMetaBlockLength() int {
 				return decoderNeedsMoreInput
 			}
 
-			s.sizeNibbles = uint(byte(bits + 4))
+			s.sizeNibbles = byte(bits + 4)
 
 			s.loopCounter = 0
 			if bits == 3 {
-				s.isMetadata = 1
+				s.isMetadata = true
 				s.substateMetablockHeader = stateMetablockHeaderReserved
 				break
 			}
@@ -266,7 +261,7 @@ func (s *Reader) decodeMetaBlockLength() int {
 					return decoderNeedsMoreInput
 				}
 
-				if uint(i+1) == s.sizeNibbles && s.sizeNibbles > 4 && bits == 0 {
+				if byte(i+1) == s.sizeNibbles && s.sizeNibbles > 4 && bits == 0 {
 					return decoderErrorFormatExuberantNibble
 				}
 
@@ -278,16 +273,12 @@ func (s *Reader) decodeMetaBlockLength() int {
 			fallthrough
 
 		case stateMetablockHeaderUncompressed:
-			if s.isLastMetablock == 0 {
+			if !s.isLastMetablock {
 				if !br.safeReadBits(1, &bits) {
 					return decoderNeedsMoreInput
 				}
 
-				if bits != 0 {
-					s.isUncompressed = 1
-				} else {
-					s.isUncompressed = 0
-				}
+				s.isUncompressed = bits != 0
 			}
 
 			s.metaBlockRemainingLen++
@@ -318,7 +309,7 @@ func (s *Reader) decodeMetaBlockLength() int {
 				return decoderSuccess
 			}
 
-			s.sizeNibbles = uint(byte(bits))
+			s.sizeNibbles = byte(bits)
 			s.substateMetablockHeader = stateMetablockHeaderMetadata
 
 			fallthrough
@@ -332,7 +323,7 @@ func (s *Reader) decodeMetaBlockLength() int {
 					return decoderNeedsMoreInput
 				}
 
-				if uint(i+1) == s.sizeNibbles && s.sizeNibbles > 1 && bits == 0 {
+				if byte(i+1) == s.sizeNibbles && s.sizeNibbles > 1 && bits == 0 {
 					return decoderErrorFormatExuberantMetaNibble
 				}
 
@@ -994,7 +985,7 @@ Decodes a context map.
 func (s *Reader) decodeContextMap(contextMapSize uint32, numHtrees *uint32, contextMapArg *[]byte) int {
 	br := &s.br
 
-	switch int(s.substateContextMap) {
+	switch s.substateContextMap {
 	case stateContextMapNone:
 		result := s.decodeVarLenUint8(numHtrees)
 		if result != decoderSuccess {
@@ -1347,20 +1338,16 @@ func (s *Reader) writeRingBuffer(availableOut *uint, nextOut *[]byte, totalOut *
 		s.pos -= s.ringbufferSize
 
 		s.rbRoundtrips++
-		if uint(s.pos) != 0 {
-			s.shouldWrapRingbuffer = 1
-		} else {
-			s.shouldWrapRingbuffer = 0
-		}
+		s.shouldWrapRingbuffer = uint(s.pos) != 0
 	}
 
 	return decoderSuccess
 }
 
 func (s *Reader) wrapRingBuffer() {
-	if s.shouldWrapRingbuffer != 0 {
+	if s.shouldWrapRingbuffer {
 		copy(s.ringbuffer, s.ringbufferEnd[:uint(s.pos)])
-		s.shouldWrapRingbuffer = 0
+		s.shouldWrapRingbuffer = false
 	}
 }
 
@@ -1471,7 +1458,7 @@ func (s *Reader) calculateRingBufferSize() {
 	}
 
 	/* Metadata blocks do not touch ring buffer. */
-	if s.isMetadata != 0 {
+	if s.isMetadata {
 		return
 	}
 
@@ -1485,7 +1472,7 @@ func (s *Reader) calculateRingBufferSize() {
 		minSize = outputSize
 	}
 
-	if s.cannyRingbufferAllocation != 0 {
+	if s.cannyRingbufferAllocation {
 		for newRingbufferSize>>1 >= minSize {
 			newRingbufferSize >>= 1
 		}
@@ -2277,14 +2264,14 @@ func (s *Reader) decompressStream(
 				break
 			}
 
-			if s.isMetadata != 0 || s.isUncompressed != 0 {
+			if s.isMetadata || s.isUncompressed {
 				if !br.jumpToByteBoundary() {
 					result = decoderErrorFormatPadding1
 					break
 				}
 			}
 
-			if s.isMetadata != 0 {
+			if s.isMetadata {
 				s.state = stateMetadata
 				break
 			}
@@ -2296,7 +2283,7 @@ func (s *Reader) decompressStream(
 
 			s.calculateRingBufferSize()
 
-			if s.isUncompressed != 0 {
+			if s.isUncompressed {
 				s.state = stateUncompressed
 				break
 			}
@@ -2561,7 +2548,7 @@ func (s *Reader) decompressStream(
 
 			s.cleanupAfterMetablock()
 
-			if s.isLastMetablock == 0 {
+			if !s.isLastMetablock {
 				s.state = stateMetablockBegin
 				break
 			}

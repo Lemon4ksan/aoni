@@ -37,12 +37,6 @@ var (
 		},
 	}
 
-	brotliReaderPool = sync.Pool{
-		New: func() any {
-			return brotli.NewReader(nil)
-		},
-	}
-
 	gzipReaderPool = sync.Pool{
 		New: func() any {
 			return new(gzip.Reader)
@@ -96,23 +90,7 @@ func Gunzip(src, dst []byte) ([]byte, error) {
 
 // Unbrotli decompresses a Brotli payload (RFC 7932) from src into dst.
 func Unbrotli(src, dst []byte) ([]byte, error) {
-	br := brotliReaderPool.Get().(*brotli.Reader)
-	defer brotliReaderPool.Put(br)
-
-	if err := br.Reset(bytes.NewReader(src)); err != nil {
-		return nil, err
-	}
-
-	if dst == nil {
-		dst = make([]byte, 0, len(src)*2)
-	}
-
-	buf := bytes.NewBuffer(dst[:0])
-	if _, err := io.Copy(buf, br); err != nil {
-		return nil, err
-	}
-
-	return buf.Bytes(), nil
+	return brotli.Decompress(dst, src)
 }
 
 // Unzstd decompresses a Zstandard payload (RFC 8878) from src into dst with zero allocations.
@@ -180,21 +158,12 @@ func ReleaseGzipReader(zr *gzip.Reader) {
 
 // AcquireBrotliReader borrows a pooled [*brotli.Reader] bound to r.
 func AcquireBrotliReader(r io.Reader) (*brotli.Reader, error) {
-	br := brotliReaderPool.Get().(*brotli.Reader)
-	if err := br.Reset(r); err != nil {
-		brotliReaderPool.Put(br)
-		return nil, err
-	}
-
-	return br, nil
+	return brotli.AcquireReader(r), nil
 }
 
 // ReleaseBrotliReader returns br back to the pool.
 func ReleaseBrotliReader(br *brotli.Reader) {
-	if br != nil {
-		_ = br.Reset(nil)
-		brotliReaderPool.Put(br)
-	}
+	brotli.ReleaseReader(br)
 }
 
 // IsCompressed reports whether b contains compression magic bytes for gzip, brotli, or zstd.
