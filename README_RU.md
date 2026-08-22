@@ -150,7 +150,9 @@ option / mod ──┼
 | **Rate Limiter (Token Bucket)** | 85+ ns (`x/time`) | **23.8 ns** (`async/rate`) | **В 3.6 раза быстрее** | **0 B / 0 allocs** |
 | **SWAR `\r\n` сканер заголовков (1KB)** | 280+ ns (`bytes.Index`) | **114.4 ns** (`silicon/simd`) | **В 2.5 раза быстрее (~9 ГБ/с)** | **0 B / 0 allocs** (64-битные векторные блоки) |
 | **WhatWG Charset Resolver** | 45+ ns (`x/text`) | **19.2 ns** (`text/encoding`) | **В 2.3 раза быстрее** | **0 B / 0 allocs** |
-| **Декомпрессия Brotli (100KB)** | 91.9 µs / 136 B (`fasthttp`) | **80.2 µs / 72 B** (`compress/brotli`) | **1.09 ГБ/с (+14.6%)** | **-47% Памяти / 0ns Джиттер** (`PerPStorage` + SIMD) |
+| **Декомпрессия Brotli (100KB)** | 101.2 µs / 140 B (`fasthttp`) | **66.3 µs / 72 B** (`compress/brotli`) | **1.32 ГБ/с (+52.6%)** | **-48% Памяти / 0ns Джиттер** (`PerPStorage` + SIMD) |
+| **Декомпрессия Deflate (Inflate)** | 9.8 µs / 7.4 KB (`klauspost`) | **2.6 µs / 0 B** (`compress/flate`) | **В 3.69 раза быстрее** | **0 B / 0 allocs** (128-bit SIMD Wildcopy) |
+| **Декомпрессия Gzip (Gunzip)** | 10.5 µs / 7.6 KB (`klauspost`) | **3.6 µs / 0 B** (`compress/gzip`) | **В 2.88 раза быстрее** | **0 B / 0 allocs** (Zero-Alloc Stream) |
 
 > [!TIP]
 > **Почему `aoni` обгоняет `net/http` при параллельной нагрузке?**

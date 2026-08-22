@@ -8,7 +8,7 @@ require (
 	github.com/quic-go/qpack v0.6.0
 	github.com/quic-go/quic-go v0.61.0
 	github.com/stretchr/testify v1.11.1
-	github.com/valyala/fasthttp v1.73.0
+	github.com/valyala/fasthttp v1.67.0
 	github.com/valyala/fastrand v1.1.0
 	golang.org/x/crypto v0.55.0
 	golang.org/x/net v0.58.0
@@ -18,6 +18,7 @@ require (
 )
 
 require (
+	github.com/klauspost/compress v1.18.0 // indirect
 	github.com/kr/fs v0.1.0 // indirect
 	github.com/kr/text v0.2.0 // indirect
 	github.com/valyala/bytebufferpool v1.0.0 // indirect

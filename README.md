@@ -150,7 +150,9 @@ The underlying network plumbing in `aoni` is powered by pure-Go, zero-dependency
 | **Token Bucket Limiter** | 85+ ns (`x/time`) | **23.8 ns** (`async/rate`) | **3.6x Faster** | **0 B / 0 allocs** |
 | **SWAR `\r\n` Header Scan (1KB)** | 280+ ns (`bytes.Index`) | **114.4 ns** (`silicon/simd`) | **2.5x Faster (~9 GB/s)** | **0 B / 0 allocs** (64-bit vector chunking) |
 | **WhatWG Charset Resolver** | 45+ ns (`x/text`) | **19.2 ns** (`text/encoding`) | **2.3x Faster** | **0 B / 0 allocs** |
-| **Brotli Decompression (100KB)** | 91.9 µs / 136 B (`fasthttp`) | **80.2 µs / 72 B** (`compress/brotli`) | **1.09 GB/s (+14.6%)** | **-47% Memory / 0ns Jitter** (`PerPStorage` + SIMD) |
+| **Brotli Decompression (100KB)** | 101.2 µs / 140 B (`fasthttp`) | **66.3 µs / 72 B** (`compress/brotli`) | **1.32 GB/s (+52.6%)** | **-48% Memory / 0ns Jitter** (`PerPStorage` + SIMD) |
+| **Deflate Decompression (Inflate)** | 9.8 µs / 7.4 KB (`klauspost`) | **2.6 µs / 0 B** (`compress/flate`) | **3.69x Faster** | **0 B / 0 allocs** (128-bit SIMD Wildcopy) |
+| **Gzip Decompression (Gunzip)** | 10.5 µs / 7.6 KB (`klauspost`) | **3.6 µs / 0 B** (`compress/gzip`) | **2.88x Faster** | **0 B / 0 allocs** (Zero-Alloc Stream) |
 
 > [!TIP]
 > **Why does `aoni` outperform `net/http` under parallel load?**

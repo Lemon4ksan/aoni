@@ -11,6 +11,9 @@ import (
 	"strings"
 	"testing"
 
+	kpflate "github.com/klauspost/compress/flate"
+	kpgzip "github.com/klauspost/compress/gzip"
+	kpzstd "github.com/klauspost/compress/zstd"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/valyala/fasthttp"
@@ -291,6 +294,7 @@ func BenchmarkStdlibGunzip(b *testing.B) {
 	payload := []byte(strings.Repeat("Zero allocation decompression benchmark for aoni internal/compress. ", 50))
 
 	var buf bytes.Buffer
+
 	w := gzip.NewWriter(&buf)
 	_, _ = w.Write(payload)
 	_ = w.Close()
@@ -304,6 +308,7 @@ func BenchmarkStdlibGunzip(b *testing.B) {
 		if err != nil {
 			b.Fatal(err)
 		}
+
 		_, _ = io.ReadAll(r)
 		_ = r.Close()
 	}
@@ -320,5 +325,78 @@ func BenchmarkStdlibInflate(b *testing.B) {
 		r := flate.NewReader(bytes.NewReader(compressed))
 		_, _ = io.ReadAll(r)
 		_ = r.Close()
+	}
+}
+
+func BenchmarkKlauspostGunzip(b *testing.B) {
+	payload := []byte(strings.Repeat("Zero allocation decompression benchmark for aoni internal/compress. ", 50))
+
+	var buf bytes.Buffer
+
+	w := kpgzip.NewWriter(&buf)
+	_, _ = w.Write(payload)
+	_ = w.Close()
+	compressed := buf.Bytes()
+
+	zr, err := kpgzip.NewReader(bytes.NewReader(compressed))
+	if err != nil {
+		b.Fatal(err)
+	}
+
+	defer zr.Close()
+
+	r := bytes.NewReader(compressed)
+
+	b.ReportAllocs()
+	b.ResetTimer()
+
+	for i := 0; i < b.N; i++ {
+		r.Reset(compressed)
+		_ = zr.Reset(r)
+		_, _ = io.ReadAll(zr)
+	}
+}
+
+func BenchmarkKlauspostInflate(b *testing.B) {
+	payload := []byte(strings.Repeat("Inflate benchmark payload for internal/compress flate decoder. ", 50))
+	compressed := createDeflateData(nil, payload)
+
+	fr := kpflate.NewReader(bytes.NewReader(compressed))
+	defer fr.Close()
+
+	resetter, ok := fr.(kpflate.Resetter)
+	if !ok {
+		b.Fatal("not a resetter")
+	}
+
+	r := bytes.NewReader(compressed)
+
+	b.ReportAllocs()
+	b.ResetTimer()
+
+	for i := 0; i < b.N; i++ {
+		r.Reset(compressed)
+		_ = resetter.Reset(r, nil)
+		_, _ = io.ReadAll(fr)
+	}
+}
+
+func BenchmarkKlauspostUnzstd(b *testing.B) {
+	payload := []byte(strings.Repeat("Zstd benchmark payload for internal/compress decoder. ", 50))
+	compressed := createZstdRawBlock(payload)
+
+	dec, err := kpzstd.NewReader(nil)
+	if err != nil {
+		b.Fatal(err)
+	}
+	defer dec.Close()
+
+	dst := make([]byte, 0, len(payload))
+
+	b.ReportAllocs()
+	b.ResetTimer()
+
+	for i := 0; i < b.N; i++ {
+		_, _ = dec.DecodeAll(compressed, dst[:0])
 	}
 }
