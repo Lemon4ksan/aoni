@@ -1,55 +1,53 @@
-# Brotli Decompression Engine (RFC 7932)
+# brotli
 
-Autonomous, ultra-high-performance, zero-allocation Pure-Go implementation of the Brotli decompression algorithm (RFC 7932), tightly integrated with `github.com/lemon4ksan/foundation` silicon primitives.
+Package `brotli` provides a high-performance Pure-Go implementation of the Brotli decompression algorithm (RFC 7932).
 
----
+## Benchmarks
 
-## 📊 Comprehensive Benchmark Comparison
+Environment: `12th Gen Intel(R) Core(TM) i5-12400F`, `go version go1.25.4 windows/amd64`  
+Benchmark command: `go test -bench=BenchmarkCompare -benchmem ./internal/compress/brotli/...`
 
-All benchmarks executed on **12th Gen Intel(R) Core(TM) i5-12400F** under `go test -bench=Benchmark -benchmem`.
+| Payload Class | `fasthttp` (`andybalholm/brotli`) | `aoni/brotli` | Difference |
+|---|---|---|---|
+| **Small Payload (1 KB JSON)** | `1992 ns/op` (44.18 MB/s)<br>`120 B/op` (5 allocs) | **`1814 ns/op`** (48.50 MB/s)<br>**`72 B/op`** (3 allocs) | **+9.8% faster**<br>**-40.0% memory**<br>**-2 allocs/op** |
+| **Medium Payload (18 KB HTML)** | `22356 ns/op` (800.69 MB/s)<br>`122 B/op` (5 allocs) | **`16003 ns/op`** (1118.53 MB/s)<br>**`72 B/op`** (3 allocs) | **+39.7% faster**<br>**-41.0% memory**<br>**-2 allocs/op** |
+| **Large Payload (100 KB Data)** | `101254 ns/op` (862.18 MB/s)<br>`140 B/op` (5 allocs) | **`66351 ns/op`** (1315.74 MB/s)<br>**`72 B/op`** (3 allocs) | **+52.6% faster**<br>**-48.6% memory**<br>**1.32 GB/s wire speed** |
+| **Stream Reuse (`DecompressReuse`)** | `22314 ns/op` (802.18 MB/s) | **`15305 ns/op`** (1169.54 MB/s) | **+45.8% faster**<br>**1.17 GB/s** |
 
-### 1. Initial C-Style Port vs. Silicon-Optimized `aoni` Engine
+## Optimizations
 
-| Payload Class | Initial C-Style Port | `fasthttp` (`andybalholm/brotli`) | **`aoni` (Current Engine)** | Total Improvement vs Initial |
-|---|---|---|---|---|
-| **Small Payload (1 KB REST JSON)** | `2226 ns/op`<br>`121 B/op` (5 allocs)<br>39.54 MB/s | `1838 ns/op`<br>`120 B/op` (5 allocs)<br>47.87 MB/s | **`1814 ns/op`**<br>**`72 B/op` (3 allocs)**<br>**48.50 MB/s** | **+18.5% faster**<br>**-40.5% memory**<br>⚡ **-2 allocations/op** |
-| **Medium Payload (18 KB HTML)** | `22314 ns/op`<br>`124 B/op` (5 allocs)<br>802.18 MB/s | `20428 ns/op`<br>`120 B/op` (5 allocs)<br>876.25 MB/s | **`19000 ns/op`**<br>**`72 B/op` (3 allocs)**<br>**942.08 MB/s** | **+14.8% faster**<br>**-41.9% memory**<br>⚡ **-2 allocations/op** |
-| **Large Payload (100 KB Data)** | `90124 ns/op`<br>`135 B/op` (5 allocs)<br>968.67 MB/s | `91915 ns/op`<br>`136 B/op` (5 allocs)<br>949.79 MB/s | **`80209 ns/op`**<br>**`72 B/op` (3 allocs)**<br>**1088.40 MB/s** | **+11.0% faster**<br>**-46.7% memory**<br>⚡ **1.09 GB/s wire speed** |
-| **Pooled Reader Stream (`DecompressReuse`)** | `19992 ns/op`<br>895.35 MB/s | `22314 ns/op`<br>802.18 MB/s | **`16770 ns/op`**<br>**1067.38 MB/s** | **+19.2% faster**<br>⚡ **1.07 GB/s** |
-| **GC Jitter / Allocation Spikes** | High (GC-wave pool drops) | High (GC-wave pool drops) | **0ns Jitter (`PerPStorage`)** | **Zero GC eviction jitter** |
+- **Pipelined Register Decoding**: Unrolled symbol lookups in `command.go` execute in CPU registers without intermediate memory roundtrips.
+- **Per-P Worker Pooling**: Utilizes `pool.PerPStorage[*Reader]` to pin decoder instances to logical cores (`GOMAXPROCS`), avoiding GC collection cycles.
+- **64-bit SWAR Context Evaluation**: `detectTrivialLiteralBlockTypes` verifies 64-byte blocks in 8 branchless 64-bit word operations.
+- **Vectorized Memory Copies**: Constant 16-byte slice staging lowers to hardware 128-bit `MOVOU` instructions. Fast RLE loop for single-byte distance runs (`dist == 1`).
+- **Bounds Check Elimination**: Direct indexed lookups replace multi-stage slice headers in Huffman decoding routines.
+- **Decompression Bomb Protection**: Output budget limiting via `Reader.SetMaxOutputSize(maxBytes)`.
 
----
+## Usage
 
-## 🛠️ Architectural & Silicon Innovations
+### Stream Decoding
 
-### 1. Per-P Core Sharded Pooling (`foundation/silicon/pool.PerPStorage`)
-* Replaces standard `sync.Pool` with `pool.PerPStorage[*Reader]`.
-* Eliminates the **"GC-wave" penalty**: Readers remain pinned to logical CPU cores (`GOMAXPROCS`) and are never evicted during Go runtime garbage collection cycles.
-* Delivers flat, predictable P99/P99.9 latency under 100k–1M+ concurrent RPS.
+```go
+r := brotli.NewReader(compressedStream)
+defer r.Close()
 
-### 2. 64-bit SWAR / SIMD Context Detection (`foundation/silicon/simd`)
-* Vectorized `detectTrivialLiteralBlockTypes`: 64-byte context blocks are checked in **8 branchless 64-bit word instructions** (`diff |= word ^ sampleWord`) instead of nested byte loops.
+io.Copy(dst, r)
+```
 
-### 3. Hardware Vectorized Move-To-Front (MTF) Shifts
-* Replaced slow decremental byte-shifting loops in `inverseMoveToFrontTransform` with hardware slice copies (`copy(mtf[1:index+1], mtf[:index])`), with zero-shift fast path for `index == 0`.
+### Buffer Decompression
 
-### 4. 128-bit SIMD Match Copy Staging & Wildcopy
-* LZ77 match copy staging uses constant 16-byte slice copies (`copy(copyDst[16:32], copySrc[16:32])`), lowering directly to hardware `MOVOU` (128-bit SSE) instructions without calling `runtime.memmove`.
-* Fast RLE memset loop for single-byte distance runs (`dist == 1`).
+```go
+decompressed, err := brotli.Decompress(nil, compressedBytes)
+if err != nil {
+    return err
+}
+```
 
-### 5. Bounds Check Elimination (BCE) & Compiler Inlining
-* Direct indexed lookups (`table[extIdx]`) replace 3-stage slice reslicing in Huffman symbol decoders.
-* `//go:inline` annotations on all hot BitReader and Huffman symbol routines eliminate stack frame creation overhead.
+### Monadic Result API
 
-### 6. Decompression Bomb Defense (DoS Protection)
-* Configurable output cap via `Reader.SetMaxOutputSize(maxBytes int64)`.
-* Returns `ErrDecompressionBomb` immediately if uncompressed output exceeds the budget.
-
-### 7. Monadic Result API (`foundation/generic.Result[[]byte]`)
-* `brotli.DecodeResult(src)` enables single-line, type-safe decompression without error boilerplate:
 ```go
 res := brotli.DecodeResult(compressedBytes)
 if data, ok := res.Value(); ok {
-    // work with decompressed bytes
+    // process decompressed data
 }
 ```
