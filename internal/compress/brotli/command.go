@@ -617,12 +617,16 @@ CommandPostDecodeLiterals:
 		}
 
 		pos += i
-		if i > 16 {
-			if i > 32 {
-				copy(copyDst[16:], copySrc[16:][:uint(i-16)])
-			} else {
-				copy(copyDst[16:], copySrc[16:][:16])
-			}
+		switch {
+		case i <= 16:
+			// Already copied via initial 16-byte wildcopy
+		case i <= 32:
+			copy(copyDst[16:32], copySrc[16:32])
+		case i <= 48:
+			copy(copyDst[16:32], copySrc[16:32])
+			copy(copyDst[32:48], copySrc[32:48])
+		default:
+			copy(copyDst[16:], copySrc[16:i])
 		}
 	}
 

@@ -342,6 +342,7 @@ This method doesn't read data from the bit reader, BUT drops the amount of
 bits that correspond to the decoded symbol.
 bits MUST contain at least 15 (BROTLI_HUFFMAN_MAX_CODE_LENGTH) valid bits.
 */
+//go:inline
 func decodeSymbol(bits uint32, table []huffmanCode, br *bitReader) uint32 {
 	entry := table[bits&huffmanTableMask]
 	if entry.bits > huffmanTableBits {
@@ -359,6 +360,7 @@ func decodeSymbol(bits uint32, table []huffmanCode, br *bitReader) uint32 {
 Reads and decodes the next Huffman code from bit-stream.
 This method peeks 16 bits of input and drops 0 - 15 of them.
 */
+//go:inline
 func readSymbol(table []huffmanCode, br *bitReader) uint32 {
 	return decodeSymbol(br.get16BitsUnmasked(), table, br)
 }
@@ -422,6 +424,7 @@ func safeReadSymbol(table []huffmanCode, br *bitReader, result *uint32) bool {
 }
 
 /* Makes a look-up in first level Huffman table. Peeks 8 bits. */
+//go:inline
 func preloadSymbol(safe int, table []huffmanCode, br *bitReader, bits, value *uint32) {
 	if safe != 0 {
 		return
@@ -436,6 +439,7 @@ func preloadSymbol(safe int, table []huffmanCode, br *bitReader, bits, value *ui
 Decodes the next Huffman code using data prepared by PreloadSymbol.
 Reads 0 - 15 bits. Also peeks 8 following bits.
 */
+//go:inline
 func readPreloadedSymbol(table []huffmanCode, br *bitReader, bits, value *uint32) uint32 {
 	result := *value
 

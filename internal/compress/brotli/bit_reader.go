@@ -58,18 +58,22 @@ func (br *bitReader) restoreState(from *bitReaderState) {
 	br.bytePos = from.bytePos
 }
 
+//go:inline
 func (br *bitReader) availableBits() uint32 {
 	return 64 - br.bitPos
 }
 
+//go:inline
 func (br *bitReader) remainingBytes() uint {
 	return uint(uint32(br.inputLen-br.bytePos) + (br.availableBits() >> 3))
 }
 
+//go:inline
 func (br *bitReader) hasInput(num uint) bool {
 	return br.inputLen-br.bytePos >= num
 }
 
+//go:inline
 func (br *bitReader) fillBitWindow() {
 	if br.bitPos >= 32 {
 		br.val >>= 32
@@ -81,6 +85,7 @@ func (br *bitReader) fillBitWindow() {
 	}
 }
 
+//go:inline
 func (br *bitReader) pullByte() bool {
 	if br.bytePos == br.inputLen {
 		return false
@@ -94,15 +99,18 @@ func (br *bitReader) pullByte() bool {
 	return true
 }
 
+//go:inline
 func (br *bitReader) bitsUnmasked() uint64 {
 	return br.val >> br.bitPos
 }
 
+//go:inline
 func (br *bitReader) get16BitsUnmasked() uint32 {
 	br.fillBitWindow()
 	return uint32(br.bitsUnmasked())
 }
 
+//go:inline
 func (br *bitReader) getBits(nBits uint32) uint32 {
 	br.fillBitWindow()
 	return uint32(br.bitsUnmasked()) & bitMask(nBits)
@@ -120,6 +128,7 @@ func (br *bitReader) safeGetBits(nBits uint32, val *uint32) bool {
 	return true
 }
 
+//go:inline
 func (br *bitReader) dropBits(nBits uint32) {
 	br.bitPos += nBits
 }
@@ -138,11 +147,13 @@ func (br *bitReader) unload() {
 	br.bitPos += unusedBits
 }
 
+//go:inline
 func (br *bitReader) takeBits(nBits uint32, val *uint32) {
 	*val = uint32(br.bitsUnmasked()) & bitMask(nBits)
 	br.dropBits(nBits)
 }
 
+//go:inline
 func (br *bitReader) readBits(nBits uint32) uint32 {
 	var val uint32
 
