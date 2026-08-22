@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Lemon4ksan All rights reserved.
+// Use of this source code is governed by a BSD-style
+// license that can be found in the LICENSE file.
+
 package flate
 
 import "fmt"
@@ -28,9 +32,12 @@ func (e *fastEncL3) Encode(dst *tokens, src []byte) {
 			for i := range e.table[:] {
 				e.table[i] = tableEntryPrev{}
 			}
+
 			e.cur = maxMatchOffset
+
 			break
 		}
+
 		// Shift down everything in the table that isn't already too far away.
 		minOff := e.cur + int32(len(e.hist)) - maxMatchOffset
 		for i := range e.table[:] {
@@ -40,13 +47,16 @@ func (e *fastEncL3) Encode(dst *tokens, src []byte) {
 			} else {
 				v.Cur.offset = v.Cur.offset - e.cur + maxMatchOffset
 			}
+
 			if v.Prev.offset <= minOff {
 				v.Prev.offset = 0
 			} else {
 				v.Prev.offset = v.Prev.offset - e.cur + maxMatchOffset
 			}
+
 			e.table[i] = v
 		}
+
 		e.cur = maxMatchOffset
 	}
 
@@ -73,15 +83,19 @@ func (e *fastEncL3) Encode(dst *tokens, src []byte) {
 	cv := load6432(src, s)
 	for {
 		const skipLog = 7
+
 		nextS := s
+
 		var candidate tableEntry
 		for {
 			nextHash := hashLen(cv, tableBits, hashBytes)
 			s = nextS
+
 			nextS = s + 1 + (s-nextEmit)>>skipLog
 			if nextS > sLimit {
 				goto emitRemainder
 			}
+
 			candidates := e.table[nextHash]
 			now := load6432(src, nextS)
 
@@ -101,13 +115,16 @@ func (e *fastEncL3) Encode(dst *tokens, src []byte) {
 				if candidates.Prev.offset < minOffset || uint32(cv) != load3232(src, candidates.Prev.offset-e.cur) {
 					break
 				}
+
 				// Both match and are valid, pick longest.
 				offset := s - (candidate.offset - e.cur)
 				o2 := s - (candidates.Prev.offset - e.cur)
+
 				l1, l2 := matchLen(src[s+4:], src[s-offset+4:]), matchLen(src[s+4:], src[s-o2+4:])
 				if l2 > l1 {
 					candidate = candidates.Prev
 				}
+
 				break
 			} else {
 				// We only check if value mismatches.
@@ -117,6 +134,7 @@ func (e *fastEncL3) Encode(dst *tokens, src []byte) {
 					break
 				}
 			}
+
 			cv = now
 		}
 
@@ -143,6 +161,7 @@ func (e *fastEncL3) Encode(dst *tokens, src []byte) {
 				t--
 				l++
 			}
+
 			if nextEmit < s {
 				if false {
 					emitLiteral(dst, src[nextEmit:s])
@@ -157,6 +176,7 @@ func (e *fastEncL3) Encode(dst *tokens, src []byte) {
 
 			dst.AddMatchLong(l, uint32(s-t-baseMatchOffset))
 			s += l
+
 			nextEmit = s
 			if nextS >= s {
 				s = nextS + 1
@@ -173,6 +193,7 @@ func (e *fastEncL3) Encode(dst *tokens, src []byte) {
 						Cur:  tableEntry{offset: e.cur + t},
 					}
 				}
+
 				goto emitRemainder
 			}
 
@@ -181,8 +202,10 @@ func (e *fastEncL3) Encode(dst *tokens, src []byte) {
 				nextHash := hashLen(load6432(src, i), tableBits, hashBytes)
 				e.table[nextHash] = tableEntryPrev{
 					Prev: e.table[nextHash].Cur,
-					Cur:  tableEntry{offset: e.cur + i}}
+					Cur:  tableEntry{offset: e.cur + i},
+				}
 			}
+
 			// We could immediately start working at s now, but to improve
 			// compression we first update the hash table at s-2 to s.
 			x := load6432(src, s-2)
@@ -217,14 +240,17 @@ func (e *fastEncL3) Encode(dst *tokens, src []byte) {
 					// Found a match...
 					continue
 				}
+
 				candidate = candidates.Prev
 				if candidate.offset > minOffset && uint32(cv) == load3232(src, candidate.offset-e.cur) {
 					// Match at prev...
 					continue
 				}
 			}
+
 			cv = x >> 8
 			s++
+
 			break
 		}
 	}

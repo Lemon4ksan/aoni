@@ -33,6 +33,7 @@ func canonicalizeQueryParams(svc *ir.ServiceIR) {
 			if a.Location == ir.LocContext {
 				return -1
 			}
+
 			if b.Location == ir.LocContext {
 				return 1
 			}
@@ -59,6 +60,7 @@ func deduplicateHeaders(svc *ir.ServiceIR) {
 		}
 
 		seen := make(map[string]int) // HeaderKey (lowercase) -> index
+
 		var uniqueHeaders []ir.HeaderIR
 
 		for _, h := range m.Headers {

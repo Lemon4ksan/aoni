@@ -50,6 +50,7 @@ func LoadTrafficIndex(rootDir string) (*TrafficIndex, string, error) {
 		if os.IsNotExist(err) {
 			return &TrafficIndex{Entries: make(map[string]TrafficEntry)}, indexPath, nil
 		}
+
 		return nil, indexPath, err
 	}
 
@@ -122,6 +123,7 @@ func StoreTraffic(
 	}
 
 	blobPath := filepath.Join(trafficDir, hashStr+".har.gz")
+
 	compressedBytes, err := writeGzipBlob(blobPath, processedData)
 	if err != nil {
 		return nil, nil, err
@@ -155,15 +157,18 @@ func resolveSecretsConfig(configs []*SecretsConfig) *SecretsConfig {
 	if len(configs) > 0 && configs[0] != nil {
 		return configs[0]
 	}
+
 	return &SecretsConfig{}
 }
 
 func writeGzipBlob(blobPath string, data []byte) (int64, error) {
 	var compressedBuf bytes.Buffer
+
 	gw := gzip.NewWriter(&compressedBuf)
 	if _, err := gw.Write(data); err != nil {
 		return 0, fmt.Errorf("compressing traffic blob: %w", err)
 	}
+
 	if err := gw.Close(); err != nil {
 		return 0, err
 	}
@@ -179,10 +184,12 @@ func removeOriginalIfRequested(srcPath, blobPath string, moveOriginal bool) {
 	if !moveOriginal || srcPath == "" || srcPath == "-" {
 		return
 	}
+
 	absSrc, err := filepath.Abs(srcPath)
 	if err != nil {
 		return
 	}
+
 	absBlob, err := filepath.Abs(blobPath)
 	if err == nil && absSrc != absBlob {
 		_ = os.Remove(srcPath)
@@ -202,6 +209,7 @@ func GetTraffic(rootDir, idOrHash string) ([]byte, *TrafficEntry, error) {
 	}
 
 	blobPath := filepath.Join(rootDir, ".vortex", "cache", "traffic", matchedEntry.Hash+".har.gz")
+
 	decompressed, err := readGzipBlob(blobPath)
 	if err != nil {
 		return nil, nil, err
@@ -247,6 +255,7 @@ func readGzipBlob(blobPath string) ([]byte, error) {
 	if err != nil {
 		return nil, fmt.Errorf("reading decompressed traffic payload: %w", err)
 	}
+
 	return decompressed, nil
 }
 
@@ -258,6 +267,7 @@ func ListTraffic(rootDir string) ([]TrafficEntry, error) {
 	}
 
 	seenHash := make(map[string]bool)
+
 	var list []TrafficEntry
 
 	for _, e := range idx.Entries {
@@ -305,6 +315,7 @@ func PruneTraffic(rootDir string, olderThan time.Duration, all bool) (int, error
 	}
 
 	_ = idx.Save(indexPath)
+
 	return removedCount, nil
 }
 
@@ -324,6 +335,7 @@ func DeleteTrafficSession(rootDir, idOrHash string) (bool, error) {
 	_ = idx.Save(indexPath)
 
 	removeBlobIfNotReferenced(rootDir, idx, matchedHash)
+
 	return true, nil
 }
 
@@ -336,6 +348,7 @@ func findSessionKeyAndHash(idx *TrafficIndex, idOrHash string) (matchedKey, matc
 			return k, e.Hash
 		}
 	}
+
 	return "", ""
 }
 
@@ -345,6 +358,7 @@ func removeBlobIfNotReferenced(rootDir string, idx *TrafficIndex, hash string) {
 			return
 		}
 	}
+
 	blobPath := filepath.Join(rootDir, ".vortex", "cache", "traffic", hash+".har.gz")
 	_ = os.Remove(blobPath)
 }
@@ -369,6 +383,7 @@ func SanitizeHAR(data []byte, configs ...*SecretsConfig) ([]byte, map[string]Sec
 	}
 
 	extractedSecrets := make(map[string]SecretEntry)
+
 	var safeEntries []any
 
 	for _, item := range entries {
@@ -430,7 +445,8 @@ func sanitizeRequestHeaders(req map[string]any, sc *SecretsConfig, extractedSecr
 
 		if sc != nil {
 			if envVar, ok := sc.GetHeaderEnv(name); ok && envVar != "" && val != "" {
-				if strings.EqualFold(name, "authorization") && (strings.HasPrefix(val, "Bearer ") || strings.HasPrefix(val, "bearer ")) {
+				if strings.EqualFold(name, "authorization") &&
+					(strings.HasPrefix(val, "Bearer ") || strings.HasPrefix(val, "bearer ")) {
 					tokenVal := strings.TrimSpace(val[7:])
 					extractedSecrets[envVar] = SecretEntry{Key: envVar, Value: tokenVal, Header: name}
 					hMap["value"] = "Bearer ${" + envVar + "}"
@@ -483,11 +499,13 @@ func sanitizeResponse(resp map[string]any) {
 	if content, ok := resp["content"].(map[string]any); ok {
 		if text, ok := content["text"].(string); ok && text != "" {
 			enc, _ := content["encoding"].(string)
+
 			decomp := tryDecompressHARText(text, enc)
 			if decomp != "" && decomp != text {
 				content["text"] = decomp
 				content["size"] = len(decomp)
 				delete(content, "encoding")
+
 				decompressed = true
 			}
 		}
@@ -509,6 +527,7 @@ func sanitizeResponse(resp map[string]any) {
 		if strings.EqualFold(name, "set-cookie") {
 			continue
 		}
+
 		if decompressed && strings.EqualFold(name, "content-encoding") {
 			continue
 		}
@@ -607,6 +626,7 @@ func tryDecompressHARText(bodyText, encoding string) string {
 			if decomp := tryGunzip(dec); decomp != "" {
 				return decomp
 			}
+
 			return string(dec)
 		}
 	}
@@ -623,6 +643,7 @@ func tryDecompressHARText(bodyText, encoding string) string {
 		for i, r := range runes {
 			bin[i] = byte(r)
 		}
+
 		if decomp := tryGunzip(bin); decomp != "" {
 			return decomp
 		}
@@ -637,10 +658,12 @@ func tryGunzip(data []byte) string {
 		if err == nil {
 			decompressed, err := io.ReadAll(gzReader)
 			_ = gzReader.Close()
+
 			if err == nil {
 				return string(decompressed)
 			}
 		}
 	}
+
 	return ""
 }

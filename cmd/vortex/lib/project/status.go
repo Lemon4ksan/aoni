@@ -340,6 +340,7 @@ func (e *StatusEngine) Inspect(cfg *Config, contracts []ContractConfig) *StatusR
 		// 2. Check upstream drift if source is available
 		if status.Source != "" {
 			pSrc := pathkit.New(status.Source)
+
 			upstreamPath := pSrc.FilePath()
 			if pSrc.IsFile() && !pSrc.IsAbs() {
 				upstreamPath = filepath.Join(cfg.RootDir, upstreamPath)

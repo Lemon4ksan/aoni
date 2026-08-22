@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Lemon4ksan All rights reserved.
+// Use of this source code is governed by a BSD-style
+// license that can be found in the LICENSE file.
+
 // Package huff0 provides fast huffman encoding as used in zstd.
 //
 // See README.md at https://github.com/klauspost/compress/tree/master/huff0 for details.
@@ -126,6 +130,7 @@ func (s *Scratch) TransferCTable(src *Scratch) {
 	if cap(s.prevTable) < len(src.prevTable) {
 		s.prevTable = make(cTable, 0, maxSymbolValue+1)
 	}
+
 	s.prevTable = s.prevTable[:len(src.prevTable)]
 	copy(s.prevTable, src.prevTable)
 	s.prevTableLog = src.prevTableLog
@@ -135,41 +140,53 @@ func (s *Scratch) prepare(in []byte) (*Scratch, error) {
 	if len(in) > BlockSizeMax {
 		return nil, ErrTooBig
 	}
+
 	if s == nil {
 		s = &Scratch{}
 	}
+
 	if s.MaxSymbolValue == 0 {
 		s.MaxSymbolValue = maxSymbolValue
 	}
+
 	if s.TableLog == 0 {
 		s.TableLog = tableLogDefault
 	}
+
 	if s.TableLog > tableLogMax || s.TableLog < minTablelog {
 		return nil, fmt.Errorf(" invalid tableLog %d (%d -> %d)", s.TableLog, minTablelog, tableLogMax)
 	}
+
 	if s.MaxDecodedSize <= 0 || s.MaxDecodedSize > BlockSizeMax {
 		s.MaxDecodedSize = BlockSizeMax
 	}
+
 	if s.clearCount && s.maxCount == 0 {
 		for i := range s.count {
 			s.count[i] = 0
 		}
+
 		s.clearCount = false
 	}
+
 	if cap(s.Out) == 0 {
 		s.Out = make([]byte, 0, len(in))
 	}
+
 	s.Out = s.Out[:0]
 
 	s.OutTable = nil
+
 	s.OutData = nil
 	if cap(s.nodes) < huffNodesLen+1 {
 		s.nodes = make([]nodeElt, 0, huffNodesLen+1)
 	}
+
 	s.nodes = s.nodes[:0]
 	if s.fse == nil {
 		s.fse = &fse.Scratch{}
 	}
+
 	s.srcLen = len(in)
 
 	return s, nil
@@ -186,6 +203,7 @@ func (c cTable) write(s *Scratch) error {
 		maxSymbolValue = uint8(s.symbolLen - 1)
 		huffWeight     = s.huffWeight[:256]
 	)
+
 	const (
 		maxFSETableLog = 6
 	)
@@ -197,10 +215,12 @@ func (c cTable) write(s *Scratch) error {
 
 	// Acquire histogram for FSE.
 	hist := s.fse.Histogram()
+
 	hist = hist[:256]
 	for i := range hist[:16] {
 		hist[i] = 0
 	}
+
 	for n := range maxSymbolValue {
 		v := bitsToWeight[c[n].nBits] & 15
 		huffWeight[n] = v
@@ -210,31 +230,39 @@ func (c cTable) write(s *Scratch) error {
 	// FSE compress if feasible.
 	if maxSymbolValue >= 2 {
 		huffMaxCnt := uint32(0)
+
 		huffMax := uint8(0)
 		for i, v := range hist[:16] {
 			if v == 0 {
 				continue
 			}
+
 			huffMax = byte(i)
+
 			if v > huffMaxCnt {
 				huffMaxCnt = v
 			}
 		}
+
 		s.fse.HistogramFinished(huffMax, int(huffMaxCnt))
 		s.fse.TableLog = maxFSETableLog
+
 		b, err := fse.Compress(huffWeight[:maxSymbolValue], s.fse)
 		if err == nil && len(b) < int(s.symbolLen>>1) {
 			s.Out = append(s.Out, uint8(len(b)))
 			s.Out = append(s.Out, b...)
 			return nil
 		}
+
 		// Unable to compress (RLE/uncompressible)
 	}
+
 	// write raw values as 4-bits (max : 15)
 	if maxSymbolValue > (256 - 128) {
 		// should not happen : likely means source cannot be compressed
 		return ErrIncompressible
 	}
+
 	op := s.Out
 	// special case, pack weights 4 bits/weight.
 	op = append(op, 128|(maxSymbolValue-1))
@@ -243,7 +271,9 @@ func (c cTable) write(s *Scratch) error {
 	for n := uint16(0); n < uint16(maxSymbolValue); n += 2 {
 		op = append(op, (huffWeight[n]<<4)|huffWeight[n+1])
 	}
+
 	s.Out = op
+
 	return nil
 }
 
@@ -256,6 +286,7 @@ func (c cTable) estTableSize(s *Scratch) (sz int, err error) {
 		maxSymbolValue = uint8(s.symbolLen - 1)
 		huffWeight     = s.huffWeight[:256]
 	)
+
 	const (
 		maxFSETableLog = 6
 	)
@@ -267,10 +298,12 @@ func (c cTable) estTableSize(s *Scratch) (sz int, err error) {
 
 	// Acquire histogram for FSE.
 	hist := s.fse.Histogram()
+
 	hist = hist[:256]
 	for i := range hist[:16] {
 		hist[i] = 0
 	}
+
 	for n := range maxSymbolValue {
 		v := bitsToWeight[c[n].nBits] & 15
 		huffWeight[n] = v
@@ -280,32 +313,41 @@ func (c cTable) estTableSize(s *Scratch) (sz int, err error) {
 	// FSE compress if feasible.
 	if maxSymbolValue >= 2 {
 		huffMaxCnt := uint32(0)
+
 		huffMax := uint8(0)
 		for i, v := range hist[:16] {
 			if v == 0 {
 				continue
 			}
+
 			huffMax = byte(i)
+
 			if v > huffMaxCnt {
 				huffMaxCnt = v
 			}
 		}
+
 		s.fse.HistogramFinished(huffMax, int(huffMaxCnt))
 		s.fse.TableLog = maxFSETableLog
+
 		b, err := fse.Compress(huffWeight[:maxSymbolValue], s.fse)
 		if err == nil && len(b) < int(s.symbolLen>>1) {
 			sz += 1 + len(b)
 			return sz, nil
 		}
+
 		// Unable to compress (RLE/uncompressible)
 	}
+
 	// write raw values as 4-bits (max : 15)
 	if maxSymbolValue > (256 - 128) {
 		// should not happen : likely means source cannot be compressed
 		return 0, ErrIncompressible
 	}
+
 	// special case, pack weights 4 bits/weight.
 	sz += 1 + int(maxSymbolValue/2)
+
 	return sz, nil
 }
 
@@ -316,12 +358,14 @@ func (c cTable) estimateSize(hist []uint32) int {
 	for i, v := range c[:len(hist)] {
 		nbBits += uint32(v.nBits) * hist[i]
 	}
+
 	return int(nbBits >> 3)
 }
 
 // minSize returns the minimum possible size considering the shannon limit.
 func (s *Scratch) minSize(total int) int {
 	nbBits := float64(7)
+
 	fTotal := float64(total)
 	for _, v := range s.count[:s.symbolLen] {
 		n := float64(v)
@@ -329,6 +373,7 @@ func (s *Scratch) minSize(total int) int {
 			nbBits += math.Log2(fTotal/n) * n
 		}
 	}
+
 	return int(nbBits) >> 3
 }
 

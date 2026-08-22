@@ -43,16 +43,19 @@ func (dd *dictDecoder) init(size int, dict []byte) {
 	if cap(dd.hist) < size {
 		dd.hist = make([]byte, size)
 	}
+
 	dd.hist = dd.hist[:size]
 
 	if len(dict) > len(dd.hist) {
 		dict = dict[len(dict)-len(dd.hist):]
 	}
+
 	dd.wrPos = copy(dd.hist, dict)
 	if dd.wrPos == len(dd.hist) {
 		dd.wrPos = 0
 		dd.full = true
 	}
+
 	dd.rdPos = dd.wrPos
 }
 
@@ -61,6 +64,7 @@ func (dd *dictDecoder) histSize() int {
 	if dd.full {
 		return len(dd.hist)
 	}
+
 	return dd.wrPos
 }
 
@@ -139,6 +143,7 @@ func (dd *dictDecoder) writeCopy(dist, length int) int {
 	}
 
 	dd.wrPos = dstPos
+
 	return dstPos - dstBase
 }
 
@@ -150,21 +155,25 @@ func (dd *dictDecoder) writeCopy(dist, length int) int {
 // This invariant must be kept: 0 < dist <= histSize()
 func (dd *dictDecoder) tryWriteCopy(dist, length int) int {
 	dstPos := dd.wrPos
+
 	endPos := dstPos + length
 	if dstPos < dist || endPos > len(dd.hist) {
 		return 0
 	}
+
 	dstBase := dstPos
 	srcPos := dstPos - dist
 
 	// Copy possibly overlapping section before destination position.
 loop:
 	dstPos += copy(dd.hist[dstPos:endPos], dd.hist[srcPos:dstPos])
+
 	if dstPos < endPos {
 		goto loop // Avoid for-loop so that this function can be inlined
 	}
 
 	dd.wrPos = dstPos
+
 	return dstPos - dstBase
 }
 
@@ -175,6 +184,7 @@ func (dd *dictDecoder) appendWindow(dst []byte) []byte {
 		dst = append(dst, dd.hist[dd.wrPos:]...)
 		return append(dst, dd.hist[:dd.wrPos]...)
 	}
+
 	return append(dst, dd.hist[:dd.wrPos]...)
 }
 
@@ -184,11 +194,13 @@ func (dd *dictDecoder) appendWindow(dst []byte) []byte {
 func (dd *dictDecoder) readFlush() []byte {
 	toRead := dd.hist[dd.rdPos:dd.wrPos]
 	dd.flushed += int64(len(toRead))
+
 	dd.rdPos = dd.wrPos
 	if dd.wrPos == len(dd.hist) {
 		dd.wrPos, dd.rdPos = 0, 0
 		dd.full = true
 	}
+
 	return toRead
 }
 

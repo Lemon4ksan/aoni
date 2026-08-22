@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Lemon4ksan All rights reserved.
+// Use of this source code is governed by a BSD-style
+// license that can be found in the LICENSE file.
+
 //go:build (amd64 || arm64) && !appengine && !noasm && gc
 
 package zstd
@@ -97,12 +101,15 @@ func (s *sequenceDecs) useSafeDecodeSync() bool {
 	if s.maxSyncLen == 0 && cap(s.out)-len(s.out) < maxCompressedBlockSizeAlloc {
 		return true
 	}
+
 	if s.maxSyncLen > 0 && cap(s.out)-len(s.out)-compressedBlockOverAlloc < int(s.maxSyncLen) {
 		return true
 	}
+
 	if cap(s.literals) < len(s.literals)+compressedBlockOverAlloc {
 		return true
 	}
+
 	return false
 }
 
@@ -111,6 +118,7 @@ func (s *sequenceDecs) decodeSyncSimple(hist []byte) (bool, error) {
 	if len(s.dict) > 0 {
 		return false, nil
 	}
+
 	if s.maxSyncLen == 0 && cap(s.out)-len(s.out) < maxCompressedBlockSize {
 		return false, nil
 	}
@@ -165,8 +173,22 @@ func (s *sequenceDecs) decodeSyncSimple(hist []byte) (bool, error) {
 	case errorNotEnoughSpace:
 		size := ctx.outPosition + ctx.ll + ctx.ml
 		if debugDecoder {
-			println("msl:", s.maxSyncLen, "cap", cap(s.out), "bef:", startSize, "sz:", size-startSize, "mbs:", maxBlockSize, "outsz:", cap(s.out)-startSize)
+			println(
+				"msl:",
+				s.maxSyncLen,
+				"cap",
+				cap(s.out),
+				"bef:",
+				startSize,
+				"sz:",
+				size-startSize,
+				"mbs:",
+				maxBlockSize,
+				"outsz:",
+				cap(s.out)-startSize,
+			)
 		}
+
 		return true, fmt.Errorf("output bigger than max block size (%d)", maxBlockSize)
 
 	default:
@@ -177,6 +199,7 @@ func (s *sequenceDecs) decodeSyncSimple(hist []byte) (bool, error) {
 	if s.seqSize > maxBlockSize {
 		return true, fmt.Errorf("output bigger than max block size (%d)", maxBlockSize)
 	}
+
 	err := br.close()
 	if err != nil {
 		printf("Closing sequences: %v, %+v\n", err, *br)
@@ -223,6 +246,7 @@ func (s *sequenceDecs) decode(seqs []seqVals) error {
 
 	s.seqSize = 0
 	lte56bits := s.maxBits+s.offsets.fse.actualTableLog+s.matchLengths.fse.actualTableLog+s.litLengths.fse.actualTableLog <= 56
+
 	errCode := decodeAsm(s, br, &ctx, lte56bits)
 	if errCode != 0 {
 		i := len(seqs) - ctx.iteration - 1
@@ -254,13 +278,16 @@ func (s *sequenceDecs) decode(seqs []seqVals) error {
 	if s.seqSize > maxBlockSize {
 		return fmt.Errorf("output bigger than max block size (%d)", maxBlockSize)
 	}
+
 	if debugDecoder {
 		println("decode: ", br.remain(), "bits remain on stream. code:", errCode)
 	}
+
 	err := br.close()
 	if err != nil {
 		printf("Closing sequences: %v, %+v\n", err, *br)
 	}
+
 	return err
 }
 
@@ -277,7 +304,8 @@ func (s *sequenceDecs) executeSimple(seqs []seqVals, hist []byte) error {
 		printf("Execute %d seqs with literals: %d into %d bytes\n", len(seqs), len(s.literals), s.seqSize)
 	}
 
-	var t = len(s.out)
+	t := len(s.out)
+
 	out := s.out[:t+s.seqSize]
 
 	ctx := executeAsmContext{
@@ -299,17 +327,20 @@ func (s *sequenceDecs) executeSimple(seqs []seqVals, hist []byte) error {
 		return fmt.Errorf("match offset (%d) bigger than current history (%d)",
 			seqs[ctx.seqIndex].mo, ctx.outPosition+len(hist))
 	}
+
 	s.literals = s.literals[ctx.litPosition:]
 	t = ctx.outPosition
 
 	// Add final literals
 	copy(out[t:], s.literals)
+
 	if debugDecoder {
 		t += len(s.literals)
 		if t != len(out) {
 			panic(fmt.Errorf("length mismatch, want %d, got %d, ss: %d", len(out), t, s.seqSize))
 		}
 	}
+
 	s.out = out
 
 	return nil

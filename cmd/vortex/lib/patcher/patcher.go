@@ -71,6 +71,7 @@ func PatchBytes(src []byte, plan *merge.ReconcileResult) ([]byte, error) {
 		}
 
 		methodField := renderMethodField(mPlan.TargetMethod)
+
 		if iface.Methods == nil {
 			iface.Methods = &ast.FieldList{}
 		}

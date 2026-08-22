@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Lemon4ksan All rights reserved.
+// Use of this source code is governed by a BSD-style
+// license that can be found in the LICENSE file.
+
 //go:build amd64 && !appengine && !noasm && gc
 
 package zstd
@@ -38,11 +42,14 @@ func decodeAsm(s *sequenceDecs, br *bitReader, ctx *decodeAsmContext, lte56bits 
 		if lte56bits {
 			return sequenceDecs_decode_56_bmi2(s, br, ctx)
 		}
+
 		return sequenceDecs_decode_bmi2(s, br, ctx)
 	}
+
 	if lte56bits {
 		return sequenceDecs_decode_56_amd64(s, br, ctx)
 	}
+
 	return sequenceDecs_decode_amd64(s, br, ctx)
 }
 
@@ -74,11 +81,14 @@ func decodeSyncAsm(s *sequenceDecs, br *bitReader, ctx *decodeSyncAsmContext, sa
 		if safe {
 			return sequenceDecs_decodeSync_safe_bmi2(s, br, ctx)
 		}
+
 		return sequenceDecs_decodeSync_bmi2(s, br, ctx)
 	}
+
 	if safe {
 		return sequenceDecs_decodeSync_safe_amd64(s, br, ctx)
 	}
+
 	return sequenceDecs_decodeSync_amd64(s, br, ctx)
 }
 
@@ -101,5 +111,6 @@ func executeSimpleAsm(ctx *executeAsmContext, safe bool) bool {
 	if safe {
 		return sequenceDecs_executeSimple_safe_amd64(ctx)
 	}
+
 	return sequenceDecs_executeSimple_amd64(ctx)
 }

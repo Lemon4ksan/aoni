@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Lemon4ksan All rights reserved.
+// Use of this source code is governed by a BSD-style
+// license that can be found in the LICENSE file.
+
 // Package zstd provides decompression of zstandard files.
 //
 // For advanced usage and examples, go to the README: https://github.com/klauspost/compress/tree/master/zstd#zstd
@@ -8,33 +12,22 @@ import (
 	"errors"
 	"log"
 	"math"
-
-	"github.com/lemon4ksan/aoni/internal/compress/internal/le"
 )
 
 // enable debug printing
 const debug = false
 
-// enable encoding debug printing
-const debugEncoder = debug
-
 // enable decoding debug printing
 const debugDecoder = debug
 
-// Enable extra assertions.
-const debugAsserts = debug || false
-
-// print sequence details
-const debugSequences = false
-
-// print detailed matching information
-const debugMatches = false
-
-// force encoder to use predefined tables.
-const forcePreDef = false
+// debugAsserts controls internal invariant checks.
+const debugAsserts = false
 
 // zstdMinMatch is the minimum zstd match length.
 const zstdMinMatch = 3
+
+// print sequence details
+const debugSequences = false
 
 // fcsUnknown is used for unknown frame content size.
 const fcsUnknown = math.MaxUint64
@@ -89,33 +82,21 @@ var (
 	// Close has been called.
 	ErrDecoderClosed = errors.New("decoder used after Close")
 
-	// ErrEncoderClosed will be returned if the Encoder was used after
-	// Close has been called.
-	ErrEncoderClosed = errors.New("encoder used after Close")
-
 	// ErrDecoderNilInput is returned when a nil Reader was provided
 	// and an operation other than Reset/DecodeAll/Close was attempted.
 	ErrDecoderNilInput = errors.New("nil input provided as reader")
 )
 
 func println(a ...any) {
-	if debug || debugDecoder || debugEncoder {
+	if debug || debugDecoder {
 		log.Println(a...)
 	}
 }
 
 func printf(format string, a ...any) {
-	if debug || debugDecoder || debugEncoder {
+	if debug || debugDecoder {
 		log.Printf(format, a...)
 	}
-}
-
-func load3232(b []byte, i int32) uint32 {
-	return le.Load32(b, i)
-}
-
-func load6432(b []byte, i int32) uint64 {
-	return le.Load64(b, i)
 }
 
 type byter interface {

@@ -10,6 +10,7 @@ package flate
 import (
 	"bufio"
 	"compress/flate"
+	"errors"
 	"fmt"
 	"io"
 	"math/bits"
@@ -36,7 +37,40 @@ type lengthExtra struct {
 	length, extra uint8
 }
 
-var decCodeToLen = [32]lengthExtra{{length: 0x0, extra: 0x0}, {length: 0x1, extra: 0x0}, {length: 0x2, extra: 0x0}, {length: 0x3, extra: 0x0}, {length: 0x4, extra: 0x0}, {length: 0x5, extra: 0x0}, {length: 0x6, extra: 0x0}, {length: 0x7, extra: 0x0}, {length: 0x8, extra: 0x1}, {length: 0xa, extra: 0x1}, {length: 0xc, extra: 0x1}, {length: 0xe, extra: 0x1}, {length: 0x10, extra: 0x2}, {length: 0x14, extra: 0x2}, {length: 0x18, extra: 0x2}, {length: 0x1c, extra: 0x2}, {length: 0x20, extra: 0x3}, {length: 0x28, extra: 0x3}, {length: 0x30, extra: 0x3}, {length: 0x38, extra: 0x3}, {length: 0x40, extra: 0x4}, {length: 0x50, extra: 0x4}, {length: 0x60, extra: 0x4}, {length: 0x70, extra: 0x4}, {length: 0x80, extra: 0x5}, {length: 0xa0, extra: 0x5}, {length: 0xc0, extra: 0x5}, {length: 0xe0, extra: 0x5}, {length: 0xff, extra: 0x0}, {length: 0x0, extra: 0x0}, {length: 0x0, extra: 0x0}, {length: 0x0, extra: 0x0}}
+var decCodeToLen = [32]lengthExtra{
+	{length: 0x0, extra: 0x0},
+	{length: 0x1, extra: 0x0},
+	{length: 0x2, extra: 0x0},
+	{length: 0x3, extra: 0x0},
+	{length: 0x4, extra: 0x0},
+	{length: 0x5, extra: 0x0},
+	{length: 0x6, extra: 0x0},
+	{length: 0x7, extra: 0x0},
+	{length: 0x8, extra: 0x1},
+	{length: 0xa, extra: 0x1},
+	{length: 0xc, extra: 0x1},
+	{length: 0xe, extra: 0x1},
+	{length: 0x10, extra: 0x2},
+	{length: 0x14, extra: 0x2},
+	{length: 0x18, extra: 0x2},
+	{length: 0x1c, extra: 0x2},
+	{length: 0x20, extra: 0x3},
+	{length: 0x28, extra: 0x3},
+	{length: 0x30, extra: 0x3},
+	{length: 0x38, extra: 0x3},
+	{length: 0x40, extra: 0x4},
+	{length: 0x50, extra: 0x4},
+	{length: 0x60, extra: 0x4},
+	{length: 0x70, extra: 0x4},
+	{length: 0x80, extra: 0x5},
+	{length: 0xa0, extra: 0x5},
+	{length: 0xc0, extra: 0x5},
+	{length: 0xe0, extra: 0x5},
+	{length: 0xff, extra: 0x0},
+	{length: 0x0, extra: 0x0},
+	{length: 0x0, extra: 0x0},
+	{length: 0x0, extra: 0x0},
+}
 
 var bitMask32 = [32]uint32{
 	0, 1, 3, 7, 0xF, 0x1F, 0x3F, 0x7F, 0xFF,
@@ -46,8 +80,10 @@ var bitMask32 = [32]uint32{
 } // up to 32 bits
 
 // Initialize the fixedHuffmanDecoder only once upon first use.
-var fixedOnce sync.Once
-var fixedHuffmanDecoder huffmanDecoder
+var (
+	fixedOnce           sync.Once
+	fixedHuffmanDecoder huffmanDecoder
+)
 
 // A CorruptInputError reports the presence of corrupt input at a given offset.
 type CorruptInputError = flate.CorruptInputError
@@ -131,18 +167,24 @@ func (h *huffmanDecoder) init(lengths []int) bool {
 
 	// Count number of codes of each length,
 	// compute maxRead and max length.
-	var count [maxCodeLen]int
-	var min, max int
+	var (
+		count    [maxCodeLen]int
+		min, max int
+	)
+
 	for _, n := range lengths {
 		if n == 0 {
 			continue
 		}
+
 		if min == 0 || n < min {
 			min = n
 		}
+
 		if n > max {
 			max = n
 		}
+
 		count[n&maxCodeLenMask]++
 	}
 
@@ -158,6 +200,7 @@ func (h *huffmanDecoder) init(lengths []int) bool {
 	}
 
 	code := 0
+
 	var nextcode [maxCodeLen]int
 	for i := min; i <= max; i++ {
 		code <<= 1
@@ -170,10 +213,18 @@ func (h *huffmanDecoder) init(lengths []int) bool {
 	// Exception: To be compatible with zlib, we also need to
 	// accept degenerate single-code codings. See also
 	// TestDegenerateHuffmanCoding.
-	if code != 1<<uint(max) && !(code == 1 && max == 1) {
+	if code != 1<<uint(max) && (code != 1 || max != 1) {
 		if debugDecode {
-			fmt.Println("coding failed, code, max:", code, max, code == 1<<uint(max), code == 1 && max == 1, "(one should be true)")
+			fmt.Println(
+				"coding failed, code, max:",
+				code,
+				max,
+				code == 1<<uint(max),
+				code == 1 && max == 1,
+				"(one should be true)",
+			)
 		}
+
 		return false
 	}
 
@@ -195,13 +246,16 @@ func (h *huffmanDecoder) init(lengths []int) bool {
 		} else {
 			h.links = h.links[:huffmanNumChunks-link]
 		}
+
 		for j := uint(link); j < huffmanNumChunks; j++ {
 			reverse := int(bits.Reverse16(uint16(j)))
 			reverse >>= uint(16 - huffmanChunkBits)
 			off := j - uint(link)
+
 			if sanity && h.chunks[reverse] != 0 {
 				panic("impossible: overwriting existing chunk")
 			}
+
 			h.chunks[reverse] = uint16(off<<huffmanValueShift | (huffmanChunkBits + 1))
 			if cap(h.links[off]) < numLinks {
 				h.links[off] = make([]uint16, numLinks)
@@ -217,10 +271,12 @@ func (h *huffmanDecoder) init(lengths []int) bool {
 		if n == 0 {
 			continue
 		}
+
 		code := nextcode[n]
 		nextcode[n]++
 		chunk := uint16(i<<huffmanValueShift | n)
 		reverse := int(bits.Reverse16(uint16(code)))
+
 		reverse >>= uint(16 - n)
 		if n <= huffmanChunkBits {
 			for off := reverse; off < len(h.chunks); off += 1 << uint(n) {
@@ -232,6 +288,7 @@ func (h *huffmanDecoder) init(lengths []int) bool {
 				if sanity && h.chunks[off] != 0 {
 					panic("impossible: overwriting existing chunk")
 				}
+
 				h.chunks[off] = chunk
 			}
 		} else {
@@ -241,13 +298,16 @@ func (h *huffmanDecoder) init(lengths []int) bool {
 				// associated with a link table above.
 				panic("impossible: not an indirect chunk")
 			}
+
 			value := h.chunks[j] >> huffmanValueShift
 			linktab := h.links[value]
+
 			reverse >>= huffmanChunkBits
 			for off := reverse; off < len(linktab); off += 1 << uint(n-huffmanChunkBits) {
 				if sanity && linktab[off] != 0 {
 					panic("impossible: overwriting existing chunk")
 				}
+
 				linktab[off] = chunk
 			}
 		}
@@ -265,9 +325,11 @@ func (h *huffmanDecoder) init(lengths []int) bool {
 				if code == 1 && i%2 == 1 {
 					continue
 				}
+
 				panic("impossible: missing chunk")
 			}
 		}
+
 		for _, linktab := range h.links {
 			for _, chunk := range linktab {
 				if chunk == 0 {
@@ -357,14 +419,17 @@ func (f *decompressor) nextBlock() {
 			return
 		}
 	}
+
 	f.final = f.b&1 == 1
 	f.b >>= 1
 	typ := f.b & 3
 	f.b >>= 2
+
 	f.nb -= 1 + 2
 	switch typ {
 	case 0:
 		f.dataBlock()
+
 		if debugDecode {
 			fmt.Println("stored block")
 		}
@@ -373,25 +438,31 @@ func (f *decompressor) nextBlock() {
 		f.hl = &fixedHuffmanDecoder
 		f.hd = nil
 		f.huffmanBlockDecoder()
+
 		if debugDecode {
 			fmt.Println("predefinied huffman block")
 		}
+
 	case 2:
 		// compressed, dynamic Huffman tables
 		if f.err = f.readHuffman(); f.err != nil {
 			break
 		}
+
 		f.hl = &f.h1
 		f.hd = &f.h2
 		f.huffmanBlockDecoder()
+
 		if debugDecode {
 			fmt.Println("dynamic huffman block")
 		}
+
 	default:
 		// 3 is reserved.
 		if debugDecode {
 			fmt.Println("reserved data block encountered")
 		}
+
 		f.err = CorruptInputError(f.roffset)
 	}
 }
@@ -400,12 +471,15 @@ func (f *decompressor) Read(b []byte) (int, error) {
 	for {
 		if len(f.toRead) > 0 {
 			n := copy(b, f.toRead)
+
 			f.toRead = f.toRead[n:]
 			if len(f.toRead) == 0 {
 				return n, f.err
 			}
+
 			return n, nil
 		}
+
 		if f.err != nil {
 			return 0, f.err
 		}
@@ -421,29 +495,37 @@ func (f *decompressor) Read(b []byte) (int, error) {
 // WriteTo implements the io.WriteTo interface for io.Copy and friends.
 func (f *decompressor) WriteTo(w io.Writer) (int64, error) {
 	total := int64(0)
+
 	flushed := false
 	for {
 		if len(f.toRead) > 0 {
 			n, err := w.Write(f.toRead)
+
 			total += int64(n)
 			if err != nil {
 				f.err = err
 				return total, err
 			}
+
 			if n != len(f.toRead) {
 				return total, io.ErrShortWrite
 			}
+
 			f.toRead = f.toRead[:0]
 		}
+
 		if f.err != nil && flushed {
-			if f.err == io.EOF {
+			if errors.Is(f.err, io.EOF) {
 				return total, nil
 			}
+
 			return total, f.err
 		}
+
 		if f.err == nil {
 			f.doStep()
 		}
+
 		if len(f.toRead) == 0 && f.err != nil && !flushed {
 			f.toRead = f.dict.readFlush() // Flush what's left in case of error
 			flushed = true
@@ -452,9 +534,10 @@ func (f *decompressor) WriteTo(w io.Writer) (int64, error) {
 }
 
 func (f *decompressor) Close() error {
-	if f.err == io.EOF {
+	if errors.Is(f.err, io.EOF) {
 		return nil
 	}
+
 	return f.err
 }
 
@@ -470,21 +553,27 @@ func (f *decompressor) readHuffman() error {
 			return err
 		}
 	}
+
 	nlit := int(f.b&0x1F) + 257
 	if nlit > maxNumLit {
 		if debugDecode {
 			fmt.Println("nlit > maxNumLit", nlit)
 		}
+
 		return CorruptInputError(f.roffset)
 	}
+
 	f.b >>= 5
+
 	ndist := int(f.b&0x1F) + 1
 	if ndist > maxNumDist {
 		if debugDecode {
 			fmt.Println("ndist > maxNumDist", ndist)
 		}
+
 		return CorruptInputError(f.roffset)
 	}
+
 	f.b >>= 5
 	nclen := int(f.b&0xF) + 4
 	// numCodes is 19, so nclen is always valid.
@@ -498,17 +587,21 @@ func (f *decompressor) readHuffman() error {
 				return err
 			}
 		}
+
 		f.codebits[codeOrder[i]] = int(f.b & 0x7)
 		f.b >>= 3
 		f.nb -= 3
 	}
+
 	for i := nclen; i < len(codeOrder); i++ {
 		f.codebits[codeOrder[i]] = 0
 	}
+
 	if !f.h1.init(f.codebits[0:]) {
 		if debugDecode {
 			fmt.Println("init codebits failed")
 		}
+
 		return CorruptInputError(f.roffset)
 	}
 
@@ -519,29 +612,38 @@ func (f *decompressor) readHuffman() error {
 		if err != nil {
 			return err
 		}
+
 		if x < 16 {
 			// Actual length.
 			f.bits[i] = x
 			i++
 			continue
 		}
+
 		// Repeat previous length or zero.
-		var rep int
-		var nb uint
-		var b int
+		var (
+			rep int
+			nb  uint
+			b   int
+		)
+
 		switch x {
 		default:
 			return InternalError("unexpected length code")
 		case 16:
 			rep = 3
 			nb = 2
+
 			if i == 0 {
 				if debugDecode {
 					fmt.Println("i==0")
 				}
+
 				return CorruptInputError(f.roffset)
 			}
+
 			b = f.bits[i-1]
+
 		case 17:
 			rep = 3
 			nb = 3
@@ -551,23 +653,29 @@ func (f *decompressor) readHuffman() error {
 			nb = 7
 			b = 0
 		}
+
 		for f.nb < nb {
 			if err := f.moreBits(); err != nil {
 				if debugDecode {
 					fmt.Println("morebits:", err)
 				}
+
 				return err
 			}
 		}
+
 		rep += int(f.b & uint32(1<<(nb&regmask.Shift32ByUint)-1))
 		f.b >>= nb & regmask.Shift32ByUint
+
 		f.nb -= nb
 		if i+rep > n {
 			if debugDecode {
 				fmt.Println("i+rep > n", i, rep, n)
 			}
+
 			return CorruptInputError(f.roffset)
 		}
+
 		for j := 0; j < rep; j++ {
 			f.bits[i] = b
 			i++
@@ -578,6 +686,7 @@ func (f *decompressor) readHuffman() error {
 		if debugDecode {
 			fmt.Println("init2 failed")
 		}
+
 		return CorruptInputError(f.roffset)
 	}
 
@@ -588,6 +697,7 @@ func (f *decompressor) readHuffman() error {
 	if f.h1.maxRead < f.bits[endBlockMarker] {
 		f.h1.maxRead = f.bits[endBlockMarker]
 	}
+
 	if !f.final {
 		// If not the final block, the smallest block possible is
 		// a predefined table, BTYPE=01, with a single EOB marker.
@@ -618,19 +728,24 @@ func (f *decompressor) dataBlock() {
 
 	// Length then ones-complement of length.
 	nr, err := io.ReadFull(f.r, f.buf[offBytes:4])
+
 	f.roffset += int64(nr)
 	if err != nil {
 		f.err = noEOF(err)
 		return
 	}
+
 	n := uint16(f.buf[0]) | uint16(f.buf[1])<<8
+
 	nn := uint16(f.buf[2]) | uint16(f.buf[3])<<8
 	if nn != ^n {
 		if debugDecode {
 			ncomp := ^n
 			fmt.Println("uint16(nn) != uint16(^n)", nn, ncomp)
 		}
+
 		f.err = CorruptInputError(f.roffset)
+
 		return
 	}
 
@@ -640,6 +755,7 @@ func (f *decompressor) dataBlock() {
 		}
 
 		f.finishBlock()
+
 		return
 	}
 
@@ -659,6 +775,7 @@ func (f *decompressor) copyData() {
 	f.roffset += int64(cnt)
 	f.copyLen -= cnt
 	f.dict.writeMark(cnt)
+
 	if err != nil {
 		f.err = noEOF(err)
 		return
@@ -669,6 +786,7 @@ func (f *decompressor) copyData() {
 		f.step = copyData
 		return
 	}
+
 	f.finishBlock()
 }
 
@@ -721,9 +839,10 @@ func (f *decompressor) doStep() {
 
 // noEOF returns err, unless err == io.EOF, in which case it returns io.ErrUnexpectedEOF.
 func noEOF(e error) error {
-	if e == io.EOF {
+	if errors.Is(e, io.EOF) {
 		return io.ErrUnexpectedEOF
 	}
+
 	return e
 }
 
@@ -732,9 +851,11 @@ func (f *decompressor) moreBits() error {
 	if err != nil {
 		return noEOF(err)
 	}
+
 	f.roffset++
 	f.b |= uint32(c) << (f.nb & regmask.Shift32ByUint)
 	f.nb += 8
+
 	return nil
 }
 
@@ -757,28 +878,37 @@ func (f *decompressor) huffSym(h *huffmanDecoder) (int, error) {
 				f.nb = nb
 				return 0, noEOF(err)
 			}
+
 			f.roffset++
 			b |= uint32(c) << (nb & regmask.Shift32ByUint)
 			nb += 8
 		}
+
 		chunk := h.chunks[b&(huffmanNumChunks-1)]
+
 		n = uint(chunk & huffmanCountMask)
 		if n > huffmanChunkBits {
 			chunk = h.links[chunk>>huffmanValueShift][(b>>huffmanChunkBits)&h.linkMask]
 			n = uint(chunk & huffmanCountMask)
 		}
+
 		if n <= nb {
 			if n == 0 {
 				f.b = b
 				f.nb = nb
+
 				if debugDecode {
 					fmt.Println("huffsym: n==0")
 				}
+
 				f.err = CorruptInputError(f.roffset)
+
 				return 0, f.err
 			}
+
 			f.b = b >> (n & regmask.Shift32ByUint)
 			f.nb = nb - n
+
 			return int(chunk >> huffmanValueShift), nil
 		}
 	}
@@ -788,6 +918,7 @@ func makeReader(r io.Reader) Reader {
 	if rr, ok := r.(Reader); ok {
 		return rr
 	}
+
 	return bufio.NewReader(r)
 }
 
@@ -798,15 +929,19 @@ func fixedHuffmanDecoderInit() {
 		for i := range 144 {
 			bits[i] = 8
 		}
+
 		for i := 144; i < 256; i++ {
 			bits[i] = 9
 		}
+
 		for i := 256; i < 280; i++ {
 			bits[i] = 7
 		}
+
 		for i := 280; i < 288; i++ {
 			bits[i] = 8
 		}
+
 		fixedHuffmanDecoder.init(bits[:])
 	})
 }
@@ -822,6 +957,7 @@ func (f *decompressor) Reset(r io.Reader, dict []byte) error {
 		step:     nextBlock,
 	}
 	f.dict.init(maxMatchOffset, dict)
+
 	return nil
 }
 
@@ -838,6 +974,7 @@ func (f *decompressor) ResetCP(r io.Reader, cp InflateCheckpoint) error {
 		step:     nextBlock,
 		cpBuf:    f.cpBuf,
 	}
+
 	return f.applyCP(cp)
 }
 
@@ -851,16 +988,19 @@ func (f *decompressor) applyCP(cp InflateCheckpoint) error {
 	f.uncOffset = cp.UncompressedOffset
 	f.final = cp.Final
 	f.b = 0
+
 	f.nb = 0
 	if cp.BitOffset > 0 {
 		c, err := f.r.ReadByte()
 		if err != nil {
 			return noEOF(err)
 		}
+
 		f.roffset++
 		f.b = uint32(c) >> cp.BitOffset
 		f.nb = 8 - uint(cp.BitOffset)
 	}
+
 	return nil
 }
 
@@ -916,6 +1056,7 @@ func NewReaderOpts(r io.Reader, opts ...ReaderOpt) io.ReadCloser {
 	fixedHuffmanDecoderInit()
 
 	var f decompressor
+
 	f.r = makeReader(r)
 	f.bits = new([maxNumLit + maxNumDist]int)
 	f.codebits = new([numCodes]int)

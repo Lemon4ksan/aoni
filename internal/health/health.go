@@ -9,6 +9,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/lemon4ksan/foundation/generic"
 	"github.com/lemon4ksan/foundation/silicon/clock"
 	"golang.org/x/sys/cpu"
 )
@@ -68,17 +69,13 @@ func NewTracker(
 	onUnhealthy func(name string, fails uint32, retryAfter time.Duration),
 	onRecovered func(name string),
 ) *Tracker {
-	if maxFails == 0 {
-		maxFails = 3
-	}
-
 	if retryAfter <= 0 {
 		retryAfter = 10 * time.Second
 	}
 
 	return &Tracker{
 		name:        name,
-		maxFails:    maxFails,
+		maxFails:    generic.Coalesce(maxFails, 3),
 		retryAfter:  retryAfter,
 		onUnhealthy: onUnhealthy,
 		onRecovered: onRecovered,

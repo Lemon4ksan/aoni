@@ -28,6 +28,7 @@ func (b *bitReaderBytes) init(in []byte) error {
 	if len(in) < 1 {
 		return errors.New("corrupt stream: too short")
 	}
+
 	b.in = in
 	b.off = uint(len(in))
 	// The highest bit of the last byte indicates where to start
@@ -35,7 +36,9 @@ func (b *bitReaderBytes) init(in []byte) error {
 	if v == 0 {
 		return errors.New("corrupt stream, did not find end of stream")
 	}
+
 	b.bitsRead = 64
+
 	b.value = 0
 	if len(in) >= 8 {
 		b.fillFastStart()
@@ -43,7 +46,9 @@ func (b *bitReaderBytes) init(in []byte) error {
 		b.fill()
 		b.fill()
 	}
+
 	b.advance(8 - uint8(highBit32(uint32(v))))
+
 	return nil
 }
 
@@ -86,13 +91,16 @@ func (b *bitReaderBytes) fill() {
 	if b.bitsRead < 32 {
 		return
 	}
+
 	if b.off >= 4 {
 		low := le.Load32(b.in, b.off-4)
 		b.value |= uint64(low) << (b.bitsRead - 32)
 		b.bitsRead -= 32
 		b.off -= 4
+
 		return
 	}
+
 	for b.off > 0 {
 		b.value |= uint64(b.in[b.off-1]) << (b.bitsRead - 8)
 		b.bitsRead -= 8
@@ -116,9 +124,11 @@ func (b *bitReaderBytes) close() error {
 	if b.remaining() > 0 {
 		return fmt.Errorf("corrupt input: %d bits remain on stream", b.remaining())
 	}
+
 	if b.bitsRead > 64 {
 		return io.ErrUnexpectedEOF
 	}
+
 	return nil
 }
 
@@ -137,6 +147,7 @@ func (b *bitReaderShifted) init(in []byte) error {
 	if len(in) < 1 {
 		return errors.New("corrupt stream: too short")
 	}
+
 	b.in = in
 	b.off = uint(len(in))
 	// The highest bit of the last byte indicates where to start
@@ -144,7 +155,9 @@ func (b *bitReaderShifted) init(in []byte) error {
 	if v == 0 {
 		return errors.New("corrupt stream, did not find end of stream")
 	}
+
 	b.bitsRead = 64
+
 	b.value = 0
 	if len(in) >= 8 {
 		b.fillFastStart()
@@ -152,7 +165,9 @@ func (b *bitReaderShifted) init(in []byte) error {
 		b.fill()
 		b.fill()
 	}
+
 	b.advance(8 - uint8(highBit32(uint32(v))))
+
 	return nil
 }
 
@@ -192,13 +207,16 @@ func (b *bitReaderShifted) fill() {
 	if b.bitsRead < 32 {
 		return
 	}
+
 	if b.off > 4 {
 		low := le.Load32(b.in, b.off-4)
 		b.value |= uint64(low) << ((b.bitsRead - 32) & 63)
 		b.bitsRead -= 32
 		b.off -= 4
+
 		return
 	}
+
 	for b.off > 0 {
 		b.value |= uint64(b.in[b.off-1]) << ((b.bitsRead - 8) & 63)
 		b.bitsRead -= 8
@@ -217,8 +235,10 @@ func (b *bitReaderShifted) close() error {
 	if b.remaining() > 0 {
 		return fmt.Errorf("corrupt input: %d bits remain on stream", b.remaining())
 	}
+
 	if b.bitsRead > 64 {
 		return io.ErrUnexpectedEOF
 	}
+
 	return nil
 }

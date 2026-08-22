@@ -1,10 +1,9 @@
+// Copyright 2013 Google Inc. All Rights Reserved.
+// Copyright (c) 2026 Lemon4ksan All rights reserved.
+// Use of this source code is governed by a BSD-style
+// license that can be found in the LICENSE file.
+
 package brotli
-
-/* Copyright 2013 Google Inc. All Rights Reserved.
-
-   Distributed under MIT license.
-   See file LICENSE for detail or copy at https://opensource.org/licenses/MIT
-*/
 
 type prefixCodeRange struct {
 	offset uint32

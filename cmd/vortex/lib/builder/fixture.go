@@ -106,6 +106,7 @@ func matchRoute(pattern, actual string) bool {
 		if isRouteVariable(p) || isRouteVariable(a) {
 			return true
 		}
+
 		return strings.EqualFold(p, a)
 	})
 }
@@ -140,10 +141,12 @@ func LoadFixturesFromSource(rootDir, sourceSpec string) (map[string]*ir.MockFixt
 func loadSourceBytes(rootDir, src string) ([]byte, error) {
 	if strings.HasPrefix(src, "cache:") {
 		cacheID := strings.TrimPrefix(src, "cache:")
+
 		data, _, err := cache.GetTraffic(rootDir, cacheID)
 		if err != nil {
 			data, _, err = cache.GetTraffic(".", cacheID)
 		}
+
 		return data, err
 	}
 
@@ -151,6 +154,7 @@ func loadSourceBytes(rootDir, src string) ([]byte, error) {
 	if !filepath.IsAbs(filePath) && rootDir != "" {
 		filePath = filepath.Join(rootDir, filePath)
 	}
+
 	return os.ReadFile(filePath)
 }
 
@@ -192,6 +196,7 @@ func parseHAREntryFixture(entry ingest.HAREntry) (method, cleanPath string, fixt
 		if strings.EqualFold(h.Name, "content-type") {
 			contentType = h.Value
 		}
+
 		if strings.HasPrefix(strings.ToLower(h.Name), "grpc-") || strings.HasPrefix(strings.ToLower(h.Name), "x-") {
 			headers[h.Name] = h.Value
 		}
@@ -231,6 +236,7 @@ func tryDecompressPayload(bodyText, encoding string) string {
 			if decomp := tryGunzip(dec); decomp != "" {
 				return decomp
 			}
+
 			return string(dec)
 		}
 	}
@@ -247,6 +253,7 @@ func tryDecompressPayload(bodyText, encoding string) string {
 		for i, r := range runes {
 			bin[i] = byte(r)
 		}
+
 		if decomp := tryGunzip(bin); decomp != "" {
 			return decomp
 		}
@@ -261,11 +268,13 @@ func tryGunzip(data []byte) string {
 		if err == nil {
 			decompressed, err := io.ReadAll(gzReader)
 			_ = gzReader.Close()
+
 			if err == nil {
 				return string(decompressed)
 			}
 		}
 	}
+
 	return ""
 }
 
@@ -276,5 +285,6 @@ func normalizeFixturePath(p string) string {
 			parts[i] = "{var}"
 		}
 	}
+
 	return strings.Join(parts, "/")
 }

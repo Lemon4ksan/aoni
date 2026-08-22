@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Lemon4ksan All rights reserved.
+// Use of this source code is governed by a BSD-style
+// license that can be found in the LICENSE file.
+
 package flate
 
 import (
@@ -21,6 +25,7 @@ func (e *fastEncL1) Encode(dst *tokens, src []byte) {
 		minNonLiteralBlockSize = 1 + 1 + inputMargin
 		hashBytes              = 5
 	)
+
 	if debugDeflate && e.cur < 0 {
 		panic(fmt.Sprint("e.cur < 0: ", e.cur))
 	}
@@ -31,9 +36,12 @@ func (e *fastEncL1) Encode(dst *tokens, src []byte) {
 			for i := range e.table[:] {
 				e.table[i] = tableEntry{}
 			}
+
 			e.cur = maxMatchOffset
+
 			break
 		}
+
 		// Shift down everything in the table that isn't already too far away.
 		minOff := e.cur + int32(len(e.hist)) - maxMatchOffset
 		for i := range e.table[:] {
@@ -43,8 +51,10 @@ func (e *fastEncL1) Encode(dst *tokens, src []byte) {
 			} else {
 				v = v - e.cur + maxMatchOffset
 			}
+
 			e.table[i].offset = v
 		}
+
 		e.cur = maxMatchOffset
 	}
 
@@ -72,15 +82,22 @@ func (e *fastEncL1) Encode(dst *tokens, src []byte) {
 	cv := load6432(src, s)
 
 	for {
-		const skipLog = 5
-		const doEvery = 2
+		const (
+			skipLog = 5
+			doEvery = 2
+		)
 
 		nextS := s
-		var candidate tableEntry
-		var t int32
+
+		var (
+			candidate tableEntry
+			t         int32
+		)
+
 		for {
 			nextHash := hashLen(cv, tableBits, hashBytes)
 			candidate = e.table[nextHash]
+
 			nextS = s + doEvery + (s-nextEmit)>>skipLog
 			if nextS > sLimit {
 				goto emitRemainder
@@ -89,6 +106,7 @@ func (e *fastEncL1) Encode(dst *tokens, src []byte) {
 			now := load6432(src, nextS)
 			e.table[nextHash] = tableEntry{offset: s + e.cur}
 			nextHash = hashLen(now, tableBits, hashBytes)
+
 			t = candidate.offset - e.cur
 			if s-t < maxMatchOffset && uint32(cv) == load3232(src, t) {
 				e.table[nextHash] = tableEntry{offset: nextS + e.cur}
@@ -108,6 +126,7 @@ func (e *fastEncL1) Encode(dst *tokens, src []byte) {
 				e.table[nextHash] = tableEntry{offset: nextS + e.cur}
 				break
 			}
+
 			cv = now
 			s = nextS
 		}
@@ -128,6 +147,7 @@ func (e *fastEncL1) Encode(dst *tokens, src []byte) {
 				t--
 				l++
 			}
+
 			if nextEmit < s {
 				if false {
 					emitLiteral(dst, src[nextEmit:s])
@@ -148,6 +168,7 @@ func (e *fastEncL1) Encode(dst *tokens, src []byte) {
 				xoffset := uint32(s - t - baseMatchOffset)
 				xlength := l
 				oc := offsetCode(xoffset)
+
 				xoffset |= oc << 16
 				for xlength > 0 {
 					xl := xlength
@@ -158,6 +179,7 @@ func (e *fastEncL1) Encode(dst *tokens, src []byte) {
 							xl = 258 - baseMatchLength
 						}
 					}
+
 					xlength -= xl
 					xl -= baseMatchLength
 					dst.extraHist[lengthCodes1[uint8(xl)]]++
@@ -166,17 +188,21 @@ func (e *fastEncL1) Encode(dst *tokens, src []byte) {
 					dst.n++
 				}
 			}
+
 			s += l
+
 			nextEmit = s
 			if nextS >= s {
 				s = nextS + 1
 			}
+
 			if s >= sLimit {
 				// Index first pair after match end.
 				if int(s+l+8) < len(src) {
 					cv := load6432(src, s)
 					e.table[hashLen(cv, tableBits, hashBytes)] = tableEntry{offset: s + e.cur}
 				}
+
 				goto emitRemainder
 			}
 
@@ -210,6 +236,7 @@ emitRemainder:
 		if dst.n == 0 {
 			return
 		}
+
 		emitLiteral(dst, src[nextEmit:])
 	}
 }

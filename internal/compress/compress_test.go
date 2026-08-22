@@ -13,6 +13,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"github.com/valyala/fasthttp"
 
 	"github.com/lemon4ksan/aoni/internal/compress"
 	"github.com/lemon4ksan/aoni/internal/compress/flate"
@@ -21,22 +22,28 @@ import (
 
 func createGzipData(t *testing.T, payload []byte) []byte {
 	t.Helper()
+
 	var buf bytes.Buffer
+
 	w := stdgzip.NewWriter(&buf)
 	_, err := w.Write(payload)
 	require.NoError(t, err)
 	require.NoError(t, w.Close())
+
 	return buf.Bytes()
 }
 
 func createDeflateData(t *testing.T, payload []byte) []byte {
 	t.Helper()
+
 	var buf bytes.Buffer
+
 	w, err := flate.NewWriter(&buf, flate.DefaultCompression)
 	require.NoError(t, err)
 	_, err = w.Write(payload)
 	require.NoError(t, err)
 	require.NoError(t, w.Close())
+
 	return buf.Bytes()
 }
 
@@ -52,6 +59,7 @@ func createZstdRawBlock(payload []byte) []byte {
 	bh := uint32(1) | (uint32(len(payload)) << 3)
 	buf.Write([]byte{byte(bh), byte(bh >> 8), byte(bh >> 16)})
 	buf.Write(payload)
+
 	return buf.Bytes()
 }
 
@@ -103,6 +111,7 @@ func TestUnzstd(t *testing.T) {
 	// Test streaming zstd reader
 	zr, err := compress.AcquireZstdReader(bytes.NewReader(compressed))
 	require.NoError(t, err)
+
 	defer compress.ReleaseZstdReader(zr)
 
 	buf, err := io.ReadAll(zr)
@@ -118,6 +127,7 @@ func TestStreamingReaders(t *testing.T) {
 
 	zr, err := compress.AcquireGzipReader(bytes.NewReader(compressed))
 	require.NoError(t, err)
+
 	defer compress.ReleaseGzipReader(zr)
 
 	readBuf, err := io.ReadAll(zr)
@@ -147,9 +157,36 @@ func TestMatchesEncoding(t *testing.T) {
 	assert.False(t, compress.MatchesEncoding([]byte("deflate"), "zstd"))
 }
 
+func TestUnbrotli(t *testing.T) {
+	t.Parallel()
+
+	original := []byte("Brotli RFC 7932 decompression test payload in aoni internal/compress.")
+	compressed := fasthttp.AppendBrotliBytes(nil, original)
+
+	decompressed, err := compress.Unbrotli(compressed, nil)
+	require.NoError(t, err)
+	assert.Equal(t, original, decompressed)
+
+	viaDispatcher, err := compress.Decompress("br", compressed, nil)
+	require.NoError(t, err)
+	assert.Equal(t, original, viaDispatcher)
+
+	// Test streaming brotli reader
+	br, err := compress.AcquireBrotliReader(bytes.NewReader(compressed))
+	require.NoError(t, err)
+
+	defer compress.ReleaseBrotliReader(br)
+
+	buf, err := io.ReadAll(br)
+	require.NoError(t, err)
+	assert.Equal(t, original, buf)
+}
+
 func BenchmarkGunzip(b *testing.B) {
 	payload := []byte(strings.Repeat("Zero allocation decompression benchmark for aoni internal/compress. ", 50))
+
 	var buf bytes.Buffer
+
 	w := gzip.NewWriter(&buf)
 	_, _ = w.Write(payload)
 	_ = w.Close()
@@ -174,5 +211,18 @@ func BenchmarkUnzstd(b *testing.B) {
 
 	for i := 0; i < b.N; i++ {
 		_, _ = compress.Unzstd(compressed, dst)
+	}
+}
+
+func BenchmarkUnbrotli(b *testing.B) {
+	payload := []byte(strings.Repeat("Brotli benchmark payload for internal/compress decoder. ", 50))
+	compressed := fasthttp.AppendBrotliBytes(nil, payload)
+	dst := make([]byte, 0, len(payload))
+
+	b.ReportAllocs()
+	b.ResetTimer()
+
+	for i := 0; i < b.N; i++ {
+		_, _ = compress.Unbrotli(compressed, dst)
 	}
 }

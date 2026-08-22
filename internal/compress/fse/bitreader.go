@@ -26,6 +26,7 @@ func (b *bitReader) init(in []byte) error {
 	if len(in) < 1 {
 		return errors.New("corrupt stream: too short")
 	}
+
 	b.in = in
 	b.off = uint(len(in))
 	// The highest bit of the last byte indicates where to start
@@ -33,7 +34,9 @@ func (b *bitReader) init(in []byte) error {
 	if v == 0 {
 		return errors.New("corrupt stream, did not find end of stream")
 	}
+
 	b.bitsRead = 64
+
 	b.value = 0
 	if len(in) >= 8 {
 		b.fillFastStart()
@@ -41,7 +44,9 @@ func (b *bitReader) init(in []byte) error {
 		b.fill()
 		b.fill()
 	}
+
 	b.bitsRead += 8 - uint8(highBits(uint32(v)))
+
 	return nil
 }
 
@@ -50,6 +55,7 @@ func (b *bitReader) getBits(n uint8) uint16 {
 	if n == 0 || b.bitsRead >= 64 {
 		return 0
 	}
+
 	return b.getBitsFast(n)
 }
 
@@ -57,8 +63,10 @@ func (b *bitReader) getBits(n uint8) uint16 {
 // There are no checks if the buffer is filled.
 func (b *bitReader) getBitsFast(n uint8) uint16 {
 	const regMask = 64 - 1
+
 	v := uint16((b.value << (b.bitsRead & regMask)) >> ((regMask + 1 - n) & regMask))
 	b.bitsRead += n
+
 	return v
 }
 
@@ -68,6 +76,7 @@ func (b *bitReader) fillFast() {
 	if b.bitsRead < 32 {
 		return
 	}
+
 	// 2 bounds checks.
 	v := b.in[b.off-4:]
 	v = v[:4]
@@ -82,6 +91,7 @@ func (b *bitReader) fill() {
 	if b.bitsRead < 32 {
 		return
 	}
+
 	if b.off > 4 {
 		v := b.in[b.off-4:]
 		v = v[:4]
@@ -89,8 +99,10 @@ func (b *bitReader) fill() {
 		b.value = (b.value << 32) | uint64(low)
 		b.bitsRead -= 32
 		b.off -= 4
+
 		return
 	}
+
 	for b.off > 0 {
 		b.value = (b.value << 8) | uint64(b.in[b.off-1])
 		b.bitsRead -= 8
@@ -118,5 +130,6 @@ func (b *bitReader) close() error {
 	if b.bitsRead > 64 {
 		return io.ErrUnexpectedEOF
 	}
+
 	return nil
 }

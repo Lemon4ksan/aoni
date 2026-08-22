@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Lemon4ksan All rights reserved.
+// Use of this source code is governed by a BSD-style
+// license that can be found in the LICENSE file.
+
 package flate
 
 import "fmt"
@@ -29,9 +33,12 @@ func (e *fastEncL2) Encode(dst *tokens, src []byte) {
 			for i := range e.table[:] {
 				e.table[i] = tableEntry{}
 			}
+
 			e.cur = maxMatchOffset
+
 			break
 		}
+
 		// Shift down everything in the table that isn't already too far away.
 		minOff := e.cur + int32(len(e.hist)) - maxMatchOffset
 		for i := range e.table[:] {
@@ -41,8 +48,10 @@ func (e *fastEncL2) Encode(dst *tokens, src []byte) {
 			} else {
 				v = v - e.cur + maxMatchOffset
 			}
+
 			e.table[i].offset = v
 		}
+
 		e.cur = maxMatchOffset
 	}
 
@@ -70,18 +79,23 @@ func (e *fastEncL2) Encode(dst *tokens, src []byte) {
 	cv := load6432(src, s)
 	for {
 		// When should we start skipping if we haven't found matches in a long while.
-		const skipLog = 5
-		const doEvery = 2
+		const (
+			skipLog = 5
+			doEvery = 2
+		)
 
 		nextS := s
+
 		var candidate tableEntry
 		for {
 			nextHash := hashLen(cv, bTableBits, hashBytes)
 			s = nextS
+
 			nextS = s + doEvery + (s-nextEmit)>>skipLog
 			if nextS > sLimit {
 				goto emitRemainder
 			}
+
 			candidate = e.table[nextHash]
 			now := load6432(src, nextS)
 			e.table[nextHash] = tableEntry{offset: s + e.cur}
@@ -105,6 +119,7 @@ func (e *fastEncL2) Encode(dst *tokens, src []byte) {
 			if offset < maxMatchOffset && uint32(cv) == load3232(src, candidate.offset-e.cur) {
 				break
 			}
+
 			cv = now
 		}
 
@@ -134,6 +149,7 @@ func (e *fastEncL2) Encode(dst *tokens, src []byte) {
 				t--
 				l++
 			}
+
 			if nextEmit < s {
 				if false {
 					emitLiteral(dst, src[nextEmit:s])
@@ -148,6 +164,7 @@ func (e *fastEncL2) Encode(dst *tokens, src []byte) {
 
 			dst.AddMatchLong(l, uint32(s-t-baseMatchOffset))
 			s += l
+
 			nextEmit = s
 			if nextS >= s {
 				s = nextS + 1
@@ -159,6 +176,7 @@ func (e *fastEncL2) Encode(dst *tokens, src []byte) {
 					cv := load6432(src, s)
 					e.table[hashLen(cv, bTableBits, hashBytes)] = tableEntry{offset: s + e.cur}
 				}
+
 				goto emitRemainder
 			}
 

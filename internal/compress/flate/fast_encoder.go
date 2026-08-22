@@ -88,6 +88,7 @@ func (e *fastGen) addBlock(src []byte) int32 {
 			if cap(e.hist) < maxMatchOffset*2 {
 				panic("unexpected buffer size")
 			}
+
 			// Move down
 			offset := int32(len(e.hist)) - maxMatchOffset
 			// copy(e.hist[0:maxMatchOffset], e.hist[offset:])
@@ -96,8 +97,10 @@ func (e *fastGen) addBlock(src []byte) int32 {
 			e.hist = e.hist[:maxMatchOffset]
 		}
 	}
+
 	s := int32(len(e.hist))
 	e.hist = append(e.hist, src...)
+
 	return s
 }
 
@@ -141,18 +144,23 @@ func (e *fastGen) matchlen(s, t int, src []byte) int32 {
 		if t >= s {
 			panic(fmt.Sprint("t >=s:", t, s))
 		}
+
 		if int(s) >= len(src) {
 			panic(fmt.Sprint("s >= len(src):", s, len(src)))
 		}
+
 		if t < 0 {
 			panic(fmt.Sprint("t < 0:", t))
 		}
+
 		if s-t > maxMatchOffset {
 			panic(fmt.Sprint(s, "-", t, "(", s-t, ") > maxMatchLength (", maxMatchOffset, ")"))
 		}
 	}
+
 	a := src[s:min(s+maxMatchLength-4, len(src))]
 	b := src[t:]
+
 	return int32(matchLen(a, b))
 }
 
@@ -163,16 +171,20 @@ func (e *fastGen) matchlenLong(s, t int, src []byte) int32 {
 		if t >= s {
 			panic(fmt.Sprint("t >=s:", t, s))
 		}
+
 		if int(s) >= len(src) {
 			panic(fmt.Sprint("s >= len(src):", s, len(src)))
 		}
+
 		if t < 0 {
 			panic(fmt.Sprint("t < 0:", t))
 		}
+
 		if s-t > maxMatchOffset {
 			panic(fmt.Sprint(s, "-", t, "(", s-t, ") > maxMatchLength (", maxMatchOffset, ")"))
 		}
 	}
+
 	return int32(matchLen(src[s:], src[t:]))
 }
 
@@ -181,10 +193,12 @@ func (e *fastGen) Reset() {
 	if cap(e.hist) < allocHistory {
 		e.hist = make([]byte, 0, allocHistory)
 	}
+
 	// We offset current position so everything will be out of reach.
 	// If we are above the buffer reset it will be cleared anyway since len(hist) == 0.
 	if e.cur <= bufferReset {
 		e.cur += maxMatchOffset + int32(len(e.hist))
 	}
+
 	e.hist = e.hist[:0]
 }

@@ -107,25 +107,33 @@ func (s *Scratch) prepare(in []byte) (*Scratch, error) {
 	if s == nil {
 		s = &Scratch{}
 	}
+
 	if s.MaxSymbolValue == 0 {
 		s.MaxSymbolValue = 255
 	}
+
 	if s.TableLog == 0 {
 		s.TableLog = defaultTablelog
 	}
+
 	if s.TableLog > maxTableLog {
 		return nil, fmt.Errorf("tableLog (%d) > maxTableLog (%d)", s.TableLog, maxTableLog)
 	}
+
 	if cap(s.Out) == 0 {
 		s.Out = make([]byte, 0, len(in))
 	}
+
 	if s.clearCount && s.maxCount == 0 {
 		for i := range s.count {
 			s.count[i] = 0
 		}
+
 		s.clearCount = false
 	}
+
 	s.br.init(in)
+
 	if s.DecompressLimit == 0 {
 		// Max size 2GB.
 		s.DecompressLimit = (2 << 30) - 1

@@ -33,6 +33,7 @@ func (b byteReader) Uint32() uint32 {
 	v2 := uint32(b2[2])
 	v1 := uint32(b2[1])
 	v0 := uint32(b2[0])
+
 	return v0 | (v1 << 8) | (v2 << 16) | (v3 << 24)
 }
 

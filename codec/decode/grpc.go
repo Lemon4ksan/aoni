@@ -177,7 +177,7 @@ func verifyGRPCTrailer(trailerPayload []byte) error {
 func parseTrailerKeyValue(line []byte) (k, v []byte, ok bool) {
 	k, v, ok = bytes.Cut(line, []byte{':'})
 	if !ok {
-		return
+		return k, v, ok
 	}
 
 	return bytes.TrimSpace(k), bytes.TrimSpace(v), true

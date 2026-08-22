@@ -7,6 +7,7 @@ package flate
 import (
 	"bytes"
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"io"
 	"math"
@@ -140,14 +141,18 @@ func (t *tokens) Reset() {
 	if t.n == 0 {
 		return
 	}
+
 	t.n = 0
+
 	t.nFilled = 0
 	for i := range t.litHist[:] {
 		t.litHist[i] = 0
 	}
+
 	for i := range t.extraHist[:] {
 		t.extraHist[i] = 0
 	}
+
 	for i := range t.offHist[:] {
 		t.offHist[i] = 0
 	}
@@ -157,18 +162,21 @@ func (t *tokens) Fill() {
 	if t.n == 0 {
 		return
 	}
+
 	for i, v := range t.litHist[:] {
 		if v == 0 {
 			t.litHist[i] = 1
 			t.nFilled++
 		}
 	}
+
 	for i, v := range t.extraHist[:literalCount-256] {
 		if v == 0 {
 			t.nFilled++
 			t.extraHist[i] = 1
 		}
 	}
+
 	for i, v := range t.offHist[:offsetCodeCount] {
 		if v == 0 {
 			t.offHist[i] = 1
@@ -184,11 +192,13 @@ func indexTokens(in []token) tokens {
 
 func (t *tokens) indexTokens(in []token) {
 	t.Reset()
+
 	for _, tok := range in {
 		if tok < matchType {
 			t.AddLiteral(tok.literal())
 			continue
 		}
+
 		t.AddMatch(uint32(tok.length()), tok.offset()&matchOffsetOnlyMask)
 	}
 }
@@ -216,6 +226,7 @@ func mFastLog2(val float32) float32 {
 	ux += 127 << 23
 	uval := math.Float32frombits(uint32(ux))
 	log2 += ((-0.34484843)*uval+2.02466578)*uval - 0.67487759
+
 	return log2
 }
 
@@ -226,6 +237,7 @@ func (t *tokens) EstimatedBits() int {
 	shannon := float32(0)
 	bits := int(0)
 	nMatches := 0
+
 	total := int(t.n) + t.nFilled
 	if total > 0 {
 		invTotal := 1.0 / float32(total)
@@ -235,6 +247,7 @@ func (t *tokens) EstimatedBits() int {
 				shannon += atLeastOne(-mFastLog2(n*invTotal)) * n
 			}
 		}
+
 		// Just add 15 for EOB
 		shannon += 15
 		for i, v := range t.extraHist[1 : literalCount-256] {
@@ -246,6 +259,7 @@ func (t *tokens) EstimatedBits() int {
 			}
 		}
 	}
+
 	if nMatches > 0 {
 		invTotal := 1.0 / float32(nMatches)
 		for i, v := range t.offHist[:offsetCodeCount] {
@@ -256,20 +270,23 @@ func (t *tokens) EstimatedBits() int {
 			}
 		}
 	}
+
 	return int(shannon) + bits
 }
 
 // AddMatch adds a match to the tokens.
 // This function is very sensitive to inlining and right on the border.
-func (t *tokens) AddMatch(xlength uint32, xoffset uint32) {
+func (t *tokens) AddMatch(xlength, xoffset uint32) {
 	if debugDeflate {
 		if xlength >= maxMatchLength+baseMatchLength {
 			panic(fmt.Errorf("invalid length: %v", xlength))
 		}
+
 		if xoffset >= maxMatchOffset+baseMatchOffset {
 			panic(fmt.Errorf("invalid offset: %v", xoffset))
 		}
 	}
+
 	oCode := offsetCode(xoffset)
 	xoffset |= oCode << 16
 
@@ -287,7 +304,9 @@ func (t *tokens) AddMatchLong(xlength int32, xoffset uint32) {
 			panic(fmt.Errorf("invalid offset: %v", xoffset))
 		}
 	}
+
 	oc := offsetCode(xoffset)
+
 	xoffset |= oc << 16
 	for xlength > 0 {
 		xl := xlength
@@ -299,6 +318,7 @@ func (t *tokens) AddMatchLong(xlength int32, xoffset uint32) {
 				xl = 258 - baseMatchLength
 			}
 		}
+
 		xlength -= xl
 		xl -= baseMatchLength
 		t.extraHist[lengthCodes1[uint8(xl)]]++
@@ -320,30 +340,41 @@ func (t *tokens) Slice() []token {
 
 // VarInt returns the tokens as varint encoded bytes.
 func (t *tokens) VarInt() []byte {
-	var b = make([]byte, binary.MaxVarintLen32*int(t.n))
-	var off int
+	var (
+		b   = make([]byte, binary.MaxVarintLen32*int(t.n))
+		off int
+	)
+
 	for _, v := range t.tokens[:t.n] {
 		off += binary.PutUvarint(b[off:], uint64(v))
 	}
+
 	return b[:off]
 }
 
 // FromVarInt restores t to the varint encoded tokens provided.
 // Any data in t is removed.
 func (t *tokens) FromVarInt(b []byte) error {
-	var buf = bytes.NewReader(b)
-	var toks []token
+	var (
+		buf  = bytes.NewReader(b)
+		toks []token
+	)
+
 	for {
 		r, err := binary.ReadUvarint(buf)
-		if err == io.EOF {
+		if errors.Is(err, io.EOF) {
 			break
 		}
+
 		if err != nil {
 			return err
 		}
+
 		toks = append(toks, token(r))
 	}
+
 	t.indexTokens(toks)
+
 	return nil
 }
 
@@ -372,8 +403,10 @@ func offsetCode(off uint32) uint32 {
 			return offsetCodes[(off>>14)&255] + 28
 		}
 	}
+
 	if off < uint32(len(offsetCodes)) {
 		return offsetCodes[uint8(off)]
 	}
+
 	return offsetCodes14[uint8(off>>7)]
 }

@@ -165,13 +165,10 @@ func (p *Pipeline[Req, Resp]) tryGetFromCache(req *http.Request, cfg *CacheConfi
 		return nil
 	}
 
-	normURL := NormalizeCacheURL(req.URL.String(), cfg.NoVarySearch)
-	cookieHash := ComputeCookieIndicesHash(req, cfg.CookieIndices)
-
 	cachedData, err := cfg.Store.Get(req.Context(), CacheKey{
 		Method:     req.Method,
-		URL:        normURL,
-		CookieHash: cookieHash,
+		URL:        NormalizeCacheURL(req.URL.String(), cfg.NoVarySearch),
+		CookieHash: ComputeCookieIndicesHash(req, cfg.CookieIndices),
 	})
 	if err != nil {
 		return nil
@@ -293,16 +290,10 @@ func (p *Pipeline[Req, Resp]) saveToCache(req *http.Request, resp *http.Response
 		ttl = parsedTTL
 	}
 
-	effectiveConfig := resolveEffectiveNoVarySearch(resp, cfg)
-	normURL := NormalizeCacheURL(req.URL.String(), effectiveConfig)
-
-	effectiveCookieNames := resolveEffectiveCookieIndices(resp, cfg)
-	cookieHash := ComputeCookieIndicesHash(req, effectiveCookieNames)
-
 	_ = cfg.Store.Set(req.Context(), CacheKey{
 		Method:     req.Method,
-		URL:        normURL,
-		CookieHash: cookieHash,
+		URL:        NormalizeCacheURL(req.URL.String(), resolveEffectiveNoVarySearch(resp, cfg)),
+		CookieHash: ComputeCookieIndicesHash(req, resolveEffectiveCookieIndices(resp, cfg)),
 	}, cachedData, ttl)
 }
 
@@ -406,7 +397,7 @@ func extractVaryHeaders(req *http.Request, varyHeader string) map[string]string 
 	}
 
 	varyMap := make(map[string]string)
-	for hName, _ := range headkit.Directives(varyHeader) {
+	for hName := range headkit.Directives(varyHeader) {
 		if hName != "" && hName != "*" {
 			varyMap[hName] = req.Header.Get(hName)
 		}

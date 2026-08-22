@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Lemon4ksan All rights reserved.
+// Use of this source code is governed by a BSD-style
+// license that can be found in the LICENSE file.
+
 // Package cpuinfo gives runtime info about the current CPU.
 //
 // This is a very limited module meant for use internally
@@ -20,6 +24,7 @@ func HasBMI2() bool {
 func DisableBMI2() func() {
 	old := hasBMI2
 	hasBMI2 = false
+
 	return func() {
 		hasBMI2 = old
 	}
@@ -30,5 +35,7 @@ func HasBMI() bool {
 	return HasBMI1() && HasBMI2()
 }
 
-var hasBMI1 bool
-var hasBMI2 bool
+var (
+	hasBMI1 bool
+	hasBMI2 bool
+)

@@ -1,22 +1,25 @@
+// Copyright 2013 Google Inc. All Rights Reserved.
+// Copyright (c) 2026 Lemon4ksan All rights reserved.
+// Use of this source code is governed by a BSD-style
+// license that can be found in the LICENSE file.
+
 package brotli
 
-/* Copyright 2013 Google Inc. All Rights Reserved.
-
-   Distributed under MIT license.
-   See file LICENSE for detail or copy at https://opensource.org/licenses/MIT
-*/
-
-/* Utilities for building Huffman decoding tables. */
-
+// symbolList provides a memory-efficient indexed window over a symbol slice
+// used during Huffman decoding table construction.
 type symbolList struct {
 	storage []uint16
 	offset  int
 }
 
-func symbolListGet(sl symbolList, i int) uint16 {
-	return sl.storage[i+sl.offset]
+func (s symbolList) get(i int) uint16 {
+	return s.storage[i+s.offset]
 }
 
-func symbolListPut(sl symbolList, i int, val uint16) {
-	sl.storage[i+sl.offset] = val
+func (s symbolList) put(i int, val uint16) {
+	s.storage[i+s.offset] = val
+}
+
+func symbolListPut(s symbolList, i int, val uint16) {
+	s.put(i, val)
 }

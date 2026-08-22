@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Lemon4ksan All rights reserved.
+// Use of this source code is governed by a BSD-style
+// license that can be found in the LICENSE file.
+
 package flate
 
 import "fmt"
@@ -14,6 +18,7 @@ func (e *fastEncL6) Encode(dst *tokens, src []byte) {
 		minNonLiteralBlockSize = 1 + 1 + inputMargin
 		hashShortBytes         = 4
 	)
+
 	if debugDeflate && e.cur < 0 {
 		panic(fmt.Sprint("e.cur < 0: ", e.cur))
 	}
@@ -24,12 +29,16 @@ func (e *fastEncL6) Encode(dst *tokens, src []byte) {
 			for i := range e.table[:] {
 				e.table[i] = tableEntry{}
 			}
+
 			for i := range e.bTable[:] {
 				e.bTable[i] = tableEntryPrev{}
 			}
+
 			e.cur = maxMatchOffset
+
 			break
 		}
+
 		// Shift down everything in the table that isn't already too far away.
 		minOff := e.cur + int32(len(e.hist)) - maxMatchOffset
 		for i := range e.table[:] {
@@ -39,8 +48,10 @@ func (e *fastEncL6) Encode(dst *tokens, src []byte) {
 			} else {
 				v = v - e.cur + maxMatchOffset
 			}
+
 			e.table[i].offset = v
 		}
+
 		for i := range e.bTable[:] {
 			v := e.bTable[i]
 			if v.Cur.offset <= minOff {
@@ -54,8 +65,10 @@ func (e *fastEncL6) Encode(dst *tokens, src []byte) {
 					v.Prev.offset = v.Prev.offset - e.cur + maxMatchOffset
 				}
 			}
+
 			e.bTable[i] = v
 		}
+
 		e.cur = maxMatchOffset
 	}
 
@@ -84,20 +97,28 @@ func (e *fastEncL6) Encode(dst *tokens, src []byte) {
 	// Repeat MUST be > 1 and within range
 	repeat := int32(1)
 	for {
-		const skipLog = 7
-		const doEvery = 1
+		const (
+			skipLog = 7
+			doEvery = 1
+		)
 
 		nextS := s
-		var l int32
-		var t int32
+
+		var (
+			l int32
+			t int32
+		)
+
 		for {
 			nextHashS := hashLen(cv, tableBits, hashShortBytes)
 			nextHashL := hash7(cv, tableBits)
 			s = nextS
+
 			nextS = s + doEvery + (s-nextEmit)>>skipLog
 			if nextS > sLimit {
 				goto emitRemainder
 			}
+
 			// Fetch a short+long candidate
 			sCandidate := e.table[nextHashS]
 			lCandidate := e.bTable[nextHashL]
@@ -125,6 +146,7 @@ func (e *fastEncL6) Encode(dst *tokens, src []byte) {
 					t2 := lCandidate.Prev.offset - e.cur
 					if s-t2 < maxMatchOffset && uint32(cv) == load3232(src, t2) {
 						l = e.matchlen(int(s+4), int(t+4), src) + 4
+
 						ml1 := e.matchlen(int(s+4), int(t2+4), src) + 4
 						if ml1 > l {
 							t = t2
@@ -132,8 +154,10 @@ func (e *fastEncL6) Encode(dst *tokens, src []byte) {
 							break
 						}
 					}
+
 					break
 				}
+
 				// Current value did not match, but check if previous long value does.
 				t = lCandidate.Prev.offset - e.cur
 				if s-t < maxMatchOffset && uint32(cv) == load3232(src, t) {
@@ -141,6 +165,7 @@ func (e *fastEncL6) Encode(dst *tokens, src []byte) {
 					e.table[nextHashS] = tableEntry{offset: nextS + e.cur}
 					eLong := &e.bTable[nextHashL]
 					eLong.Cur, eLong.Prev = tableEntry{offset: nextS + e.cur}, eLong.Cur
+
 					break
 				}
 			}
@@ -160,6 +185,7 @@ func (e *fastEncL6) Encode(dst *tokens, src []byte) {
 
 				// Check repeat at s + repOff
 				const repOff = 1
+
 				t2 := s - repeat + repOff
 				if load3232(src, t2) == uint32(cv>>(8*repOff)) {
 					ml := e.matchlen(int(s+4+repOff), int(t2+4), src) + 4
@@ -184,6 +210,7 @@ func (e *fastEncL6) Encode(dst *tokens, src []byte) {
 							// This is ok, but check previous as well.
 						}
 					}
+
 					// If the previous long is a candidate, use that...
 					t2 = lCandidate.Prev.offset - e.cur
 					if nextS-t2 < maxMatchOffset && load3232(src, t2) == uint32(next) {
@@ -192,12 +219,15 @@ func (e *fastEncL6) Encode(dst *tokens, src []byte) {
 							t = t2
 							s = nextS
 							l = ml
+
 							break
 						}
 					}
 				}
+
 				break
 			}
+
 			cv = next
 		}
 
@@ -206,9 +236,10 @@ func (e *fastEncL6) Encode(dst *tokens, src []byte) {
 		// them as literal bytes.
 
 		// Extend the 4-byte match as long as possible.
-		if l == 0 {
+		switch l {
+		case 0:
 			l = e.matchlenLong(int(s+4), int(t+4), src) + 4
-		} else if l == maxMatchLength {
+		case maxMatchLength:
 			l += e.matchlenLong(int(s+l), int(t+l), src)
 		}
 
@@ -220,10 +251,12 @@ func (e *fastEncL6) Encode(dst *tokens, src []byte) {
 			// The skipped bytes are tested in Extend backwards,
 			// and still picked up as part of the match if they do.
 			const skipBeginning = 2
+
 			eLong := &e.bTable[hash7(load6432(src, sAt), tableBits)]
 			// Test current
 			t2 := eLong.Cur.offset - e.cur - l + skipBeginning
 			s2 := s + skipBeginning
+
 			off := s2 - t2
 			if off < maxMatchOffset {
 				if off > 0 && t2 >= 0 {
@@ -233,8 +266,10 @@ func (e *fastEncL6) Encode(dst *tokens, src []byte) {
 						s = s2
 					}
 				}
+
 				// Test next:
 				t2 = eLong.Prev.offset - e.cur - l + skipBeginning
+
 				off := s2 - t2
 				if off > 0 && off < maxMatchOffset && t2 >= 0 {
 					if l2 := e.matchlenLong(int(s2), int(t2), src); l2 > l {
@@ -252,6 +287,7 @@ func (e *fastEncL6) Encode(dst *tokens, src []byte) {
 			t--
 			l++
 		}
+
 		if nextEmit < s {
 			if false {
 				emitLiteral(dst, src[nextEmit:s])
@@ -263,13 +299,16 @@ func (e *fastEncL6) Encode(dst *tokens, src []byte) {
 				}
 			}
 		}
+
 		if false {
 			if t >= s {
 				panic(fmt.Sprintln("s-t", s, t))
 			}
+
 			if (s - t) > maxMatchOffset {
 				panic(fmt.Sprintln("mmo", s-t))
 			}
+
 			if l < baseMatchLength {
 				panic("bml")
 			}
@@ -278,6 +317,7 @@ func (e *fastEncL6) Encode(dst *tokens, src []byte) {
 		dst.AddMatchLong(l, uint32(s-t-baseMatchOffset))
 		repeat = s - t
 		s += l
+
 		nextEmit = s
 		if nextS >= s {
 			s = nextS + 1
@@ -291,6 +331,7 @@ func (e *fastEncL6) Encode(dst *tokens, src []byte) {
 				eLong := &e.bTable[hash7(cv, tableBits)]
 				eLong.Cur, eLong.Prev = tableEntry{offset: i + e.cur}, eLong.Cur
 			}
+
 			goto emitRemainder
 		}
 

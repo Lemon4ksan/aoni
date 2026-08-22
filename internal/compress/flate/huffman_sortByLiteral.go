@@ -18,6 +18,7 @@ func quickSort(data []literalNode, a, b, maxDepth int) {
 			heapSort(data, a, b)
 			return
 		}
+
 		maxDepth--
 		mlo, mhi := doPivot(data, a, b)
 		// Avoiding recursion on the larger subproblem guarantees
@@ -30,6 +31,7 @@ func quickSort(data []literalNode, a, b, maxDepth int) {
 			b = mlo // i.e., quickSort(data, a, mlo)
 		}
 	}
+
 	if b-a > 1 {
 		// Do ShellSort pass with gap 6
 		// It could be written in this simplified form cause b-a <= 12
@@ -38,9 +40,11 @@ func quickSort(data []literalNode, a, b, maxDepth int) {
 				data[i], data[i-6] = data[i-6], data[i]
 			}
 		}
+
 		insertionSort(data, a, b)
 	}
 }
+
 func heapSort(data []literalNode, a, b int) {
 	first := a
 	lo := 0
@@ -67,16 +71,20 @@ func siftDown(data []literalNode, lo, hi, first int) {
 		if child >= hi {
 			break
 		}
+
 		if child+1 < hi && data[first+child].literal < data[first+child+1].literal {
 			child++
 		}
+
 		if data[first+root].literal > data[first+child].literal {
 			return
 		}
+
 		data[first+root], data[first+child] = data[first+child], data[first+root]
 		root = child
 	}
 }
+
 func doPivot(data []literalNode, lo, hi int) (midlo, midhi int) {
 	m := int(uint(lo+hi) >> 1) // Written like this to avoid integer overflow.
 	if hi-lo > 40 {
@@ -86,6 +94,7 @@ func doPivot(data []literalNode, lo, hi int) (midlo, midhi int) {
 		medianOfThree(data, m, m-s, m+s)
 		medianOfThree(data, hi-1, hi-1-s, hi-1-2*s)
 	}
+
 	medianOfThree(data, lo, m, hi-1)
 
 	// Invariants are:
@@ -100,20 +109,25 @@ func doPivot(data []literalNode, lo, hi int) (midlo, midhi int) {
 
 	for ; a < c && data[a].literal < data[pivot].literal; a++ {
 	}
+
 	b := a
 	for {
 		for ; b < c && data[pivot].literal > data[b].literal; b++ { // data[b] <= pivot
 		}
+
 		for ; b < c && data[pivot].literal < data[c-1].literal; c-- { // data[c-1] > pivot
 		}
+
 		if b >= c {
 			break
 		}
+
 		// data[b] > pivot; data[c-1] <= pivot
 		data[b], data[c-1] = data[c-1], data[b]
 		b++
 		c--
 	}
+
 	// If hi-c<3 then there are duplicates (by property of median of nine).
 	// Let's be a bit more conservative, and set border to 5.
 	protect := hi-c < 5
@@ -125,10 +139,12 @@ func doPivot(data []literalNode, lo, hi int) (midlo, midhi int) {
 			c++
 			dups++
 		}
+
 		if data[b-1].literal > data[pivot].literal { // data[b-1] = pivot
 			b--
 			dups++
 		}
+
 		// m-lo = (hi-lo)/2 > 6
 		// b-lo > (hi-lo)*3/4-1 > 8
 		// ==> m < b ==> data[m] <= pivot
@@ -137,9 +153,11 @@ func doPivot(data []literalNode, lo, hi int) (midlo, midhi int) {
 			b--
 			dups++
 		}
+
 		// if at least 2 points are equal to pivot, assume skewed distribution
 		protect = dups > 1
 	}
+
 	if protect {
 		// Protect against a lot of duplicates
 		// Add invariant:
@@ -148,19 +166,24 @@ func doPivot(data []literalNode, lo, hi int) (midlo, midhi int) {
 		for {
 			for ; a < b && data[b-1].literal > data[pivot].literal; b-- { // data[b] == pivot
 			}
+
 			for ; a < b && data[a].literal < data[pivot].literal; a++ { // data[a] < pivot
 			}
+
 			if a >= b {
 				break
 			}
+
 			// data[a] == pivot; data[b-1] < pivot
 			data[a], data[b-1] = data[b-1], data[a]
 			a++
 			b--
 		}
 	}
+
 	// Swap pivot into middle
 	data[pivot], data[b-1] = data[b-1], data[pivot]
+
 	return b - 1, c
 }
 
@@ -180,6 +203,7 @@ func maxDepth(n int) int {
 	for i := n; i > 0; i >>= 1 {
 		depth++
 	}
+
 	return depth * 2
 }
 
@@ -189,6 +213,7 @@ func medianOfThree(data []literalNode, m1, m0, m2 int) {
 	if data[m1].literal < data[m0].literal {
 		data[m1], data[m0] = data[m0], data[m1]
 	}
+
 	// data[m0] <= data[m1]
 	if data[m2].literal < data[m1].literal {
 		data[m2], data[m1] = data[m1], data[m2]
@@ -197,5 +222,6 @@ func medianOfThree(data []literalNode, m1, m0, m2 int) {
 			data[m1], data[m0] = data[m0], data[m1]
 		}
 	}
+
 	// now data[m0] <= data[m1] <= data[m2]
 }

@@ -38,6 +38,7 @@ func (opt *Optimizer) Optimize(root *ir.RootIR) {
 		if svc == nil {
 			continue
 		}
+
 		for _, pass := range opt.passes {
 			pass(svc)
 		}

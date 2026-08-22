@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Lemon4ksan All rights reserved.
+// Use of this source code is governed by a BSD-style
+// license that can be found in the LICENSE file.
+
 //go:build (amd64 || arm64) && !appengine && !noasm && gc
 
 // This file contains the specialisation of Decoder.Decompress4X
@@ -32,6 +36,7 @@ func (d *Decoder) Decompress4X(dst, src []byte) ([]byte, error) {
 	if len(d.dt.single) == 0 {
 		return nil, errors.New("no table loaded")
 	}
+
 	if len(src) < 6+(4*1) {
 		return nil, errors.New("input too small")
 	}
@@ -49,12 +54,15 @@ func (d *Decoder) Decompress4X(dst, src []byte) ([]byte, error) {
 		if start+length >= len(src) {
 			return nil, errors.New("truncated input (or invalid offset)")
 		}
+
 		err := br[i].init(src[start : start+length])
 		if err != nil {
 			return nil, err
 		}
+
 		start += length
 	}
+
 	err := br[3].init(src[start:])
 	if err != nil {
 		return nil, err
@@ -66,13 +74,16 @@ func (d *Decoder) Decompress4X(dst, src []byte) ([]byte, error) {
 	out := dst
 	dstEvery := (dstSize + 3) / 4
 
-	const tlSize = 1 << tableLogMax
-	const tlMask = tlSize - 1
+	const (
+		tlSize = 1 << tableLogMax
+		tlMask = tlSize - 1
+	)
+
 	single := d.dt.single[:tlSize]
 
 	var decoded int
 
-	if len(out) > 4*4 && !(br[0].off < 4 || br[1].off < 4 || br[2].off < 4 || br[3].off < 4) {
+	if len(out) > 4*4 && (br[0].off >= 4 && br[1].off >= 4 && br[2].off >= 4 && br[3].off >= 4) {
 		ctx := decompress4xContext{
 			pbr:      &br,
 			peekBits: uint8((64 - d.actualTableLog) & 63), // see: bitReaderShifted.peekBitsFast()
@@ -97,9 +108,11 @@ func (d *Decoder) Decompress4X(dst, src []byte) ([]byte, error) {
 		offset := dstEvery * i
 		endsAt := min(offset+remainBytes, len(out))
 		br := &br[i]
+
 		bitsLeft := br.remaining()
 		for bitsLeft > 0 {
 			br.fill()
+
 			if offset >= endsAt {
 				return nil, errors.New("corruption detected: stream overrun 4")
 			}
@@ -113,18 +126,23 @@ func (d *Decoder) Decompress4X(dst, src []byte) ([]byte, error) {
 			out[offset] = uint8(v >> 8)
 			offset++
 		}
+
 		if offset != endsAt {
 			return nil, fmt.Errorf("corruption detected: short output block %d, end %d != %d", i, offset, endsAt)
 		}
+
 		decoded += offset - dstEvery*i
+
 		err = br.close()
 		if err != nil {
 			return nil, err
 		}
 	}
+
 	if dstSize != decoded {
 		return nil, errors.New("corruption detected: short output block")
 	}
+
 	return dst, nil
 }
 
@@ -147,16 +165,21 @@ func (d *Decoder) Decompress1X(dst, src []byte) ([]byte, error) {
 	if len(d.dt.single) == 0 {
 		return nil, errors.New("no table loaded")
 	}
+
 	var br bitReaderShifted
+
 	err := br.init(src)
 	if err != nil {
 		return dst, err
 	}
+
 	maxDecodedSize := cap(dst)
 	dst = dst[:maxDecodedSize]
 
-	const tlSize = 1 << tableLogMax
-	const tlMask = tlSize - 1
+	const (
+		tlSize = 1 << tableLogMax
+		tlMask = tlSize - 1
+	)
 
 	if maxDecodedSize >= 4 {
 		ctx := decompress1xContext{
@@ -168,6 +191,7 @@ func (d *Decoder) Decompress1X(dst, src []byte) ([]byte, error) {
 		}
 
 		decompress1x_main_loop_asm(&ctx)
+
 		if ctx.decoded == error_max_decoded_size_exeeded {
 			return nil, ErrMaxDecodedSizeExceeded
 		}
@@ -179,15 +203,19 @@ func (d *Decoder) Decompress1X(dst, src []byte) ([]byte, error) {
 	bitsLeft := uint8(br.off)*8 + 64 - br.bitsRead
 	for bitsLeft > 0 {
 		br.fill()
+
 		if len(dst) >= maxDecodedSize {
 			br.close()
 			return nil, ErrMaxDecodedSizeExceeded
 		}
+
 		v := d.dt.single[br.peekBitsFast(d.actualTableLog)&tlMask]
 		nBits := uint8(v.entry)
 		br.advance(nBits)
 		bitsLeft -= nBits
+
 		dst = append(dst, uint8(v.entry>>8))
 	}
+
 	return dst, br.close()
 }

@@ -42,7 +42,7 @@ func (h *history) reset() {
 	h.freeHuffDecoder()
 	h.huffTree = nil
 	h.dict = nil
-	//printf("history created: %+v (l: %d, c: %d)", *h, len(h.b), cap(h.b))
+	// printf("history created: %+v (l: %d, c: %d)", *h, len(h.b), cap(h.b))
 }
 
 func (h *history) freeHuffDecoder() {
@@ -58,6 +58,7 @@ func (h *history) setDict(dict *dict) {
 	if dict == nil {
 		return
 	}
+
 	h.dict = dict
 	h.decoders.litLengths = dict.llDec
 	h.decoders.offsets = dict.ofDec
@@ -103,6 +104,7 @@ func (h *history) ensureBlock() {
 	if avail >= h.windowSize || avail > maxCompressedBlockSize {
 		return
 	}
+
 	// Move data down so we only have window size left.
 	// We know we have less than window size in b at this point.
 	discard := len(h.b) - h.windowSize

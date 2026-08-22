@@ -38,6 +38,7 @@ func (o *decoderOptions) setDefault() {
 	if o.concurrent > 4 {
 		o.concurrent = 4
 	}
+
 	o.maxDecodedSize = 64 << 30
 }
 
@@ -49,7 +50,9 @@ func WithDecoderLowmem(b bool) DOption {
 		if o.resetOpt && b != o.lowMem {
 			return errors.New("WithDecoderLowmem cannot be changed on Reset")
 		}
+
 		o.lowMem = b
+
 		return nil
 	}
 }
@@ -70,14 +73,18 @@ func WithDecoderConcurrency(n int) DOption {
 		if n < 0 {
 			return errors.New("concurrency must be at least 0")
 		}
+
 		newVal := n
 		if n == 0 {
 			newVal = runtime.GOMAXPROCS(0)
 		}
+
 		if o.resetOpt && newVal != o.concurrent {
 			return errors.New("WithDecoderConcurrency cannot be changed on Reset")
 		}
+
 		o.concurrent = newVal
+
 		return nil
 	}
 }
@@ -92,10 +99,13 @@ func WithDecoderMaxMemory(n uint64) DOption {
 		if n == 0 {
 			return errors.New("WithDecoderMaxMemory must be at least 1")
 		}
+
 		if n > 1<<63 {
 			return errors.New("WithDecoderMaxmemory must be less than 1 << 63")
 		}
+
 		o.maxDecodedSize = n
+
 		return nil
 	}
 }
@@ -114,13 +124,16 @@ func WithDecoderDicts(dicts ...[]byte) DOption {
 		if o.dicts == nil {
 			o.dicts = make(map[uint32]*dict)
 		}
+
 		for _, b := range dicts {
 			d, err := loadDict(b)
 			if err != nil {
 				return err
 			}
+
 			o.dicts[d.id] = d
 		}
+
 		return nil
 	}
 }
@@ -133,10 +146,13 @@ func WithDecoderDictRaw(id uint32, content []byte) DOption {
 		if bits.UintSize > 32 && uint(len(content)) > dictMaxLength {
 			return fmt.Errorf("dictionary of size %d > 2GiB too large", len(content))
 		}
+
 		if o.dicts == nil {
 			o.dicts = make(map[uint32]*dict)
 		}
+
 		o.dicts[id] = &dict{id: id, content: content, offsets: [3]int{1, 4, 8}}
+
 		return nil
 	}
 }
@@ -152,10 +168,13 @@ func WithDecoderMaxWindow(size uint64) DOption {
 		if size < MinWindowSize {
 			return errors.New("WithMaxWindowSize must be at least 1KB, 1024 bytes")
 		}
+
 		if size > (1<<41)+7*(1<<38) {
 			return errors.New("WithMaxWindowSize must be less than (1<<41) + 7*(1<<38) ~ 3.75TB")
 		}
+
 		o.maxWindowSize = size
+
 		return nil
 	}
 }
@@ -183,7 +202,9 @@ func WithDecodeBuffersBelow(size int) DOption {
 		if o.resetOpt && size != o.decodeBufsBelow {
 			return errors.New("WithDecodeBuffersBelow cannot be changed on Reset")
 		}
+
 		o.decodeBufsBelow = size
+
 		return nil
 	}
 }
@@ -205,9 +226,11 @@ func WithDecoderDictDelete(ids ...uint32) DOption {
 		if len(ids) == 0 {
 			clear(o.dicts)
 		}
+
 		for _, id := range ids {
 			delete(o.dicts, id)
 		}
+
 		return nil
 	}
 }

@@ -135,6 +135,7 @@ func hasCompilationTargets(root *ir.RootIR) bool {
 	if root == nil {
 		return false
 	}
+
 	return len(root.Services) > 0 || len(root.Tuples) > 0 ||
 		len(root.Bitpacks) > 0 || len(root.Unions) > 0 ||
 		generic.Any(root.Structs, func(st *ir.StructIR) bool { return st.GenValueEncoder })
@@ -150,6 +151,7 @@ func (b *Builder) validateAnalysis(root *ir.RootIR, srcFile string) error {
 		errMsgs := generic.Map(errDiags, func(d analysis.Diagnostic) string {
 			return d.String()
 		})
+
 		return fmt.Errorf("analysis error in %s: %s", srcFile, strings.Join(errMsgs, "; "))
 	}
 
@@ -206,6 +208,7 @@ func (b *Builder) emitOptionalHarnessTests(root *ir.RootIR, targetOut string) {
 	if strings.HasSuffix(targetOut, ".go") && !strings.HasSuffix(targetOut, ".gen.go") {
 		testOut = strings.TrimSuffix(targetOut, ".go") + "_test.go"
 	}
+
 	_ = os.WriteFile(testOut, testCode, 0o600)
 }
 
@@ -292,9 +295,11 @@ func resolveOutputPath(srcFile, customOut, suffix string) string {
 	if customOut != "" {
 		return customOut
 	}
+
 	dir := filepath.Dir(srcFile)
 	base := filepath.Base(srcFile)
 	ext := filepath.Ext(base)
+
 	return filepath.Join(dir, strings.TrimSuffix(base, ext)+suffix)
 }
 
@@ -302,9 +307,11 @@ func writeGeneratedFile(targetPath string, code []byte, dryRun bool) error {
 	if dryRun {
 		return nil
 	}
+
 	if err := os.WriteFile(targetPath, code, 0o600); err != nil {
 		return fmt.Errorf("write %s: %w", targetPath, err)
 	}
+
 	return nil
 }
 
@@ -347,6 +354,7 @@ func (b *Builder) BuildFiles(ctx context.Context, files []string) ([]*Result, er
 			lastErr = err
 			continue
 		}
+
 		if res != nil {
 			results = append(results, res)
 		}
@@ -421,6 +429,7 @@ func CollectInputFiles(fileFlag string, args []string, opts ...CollectOptions) [
 	maxDepth, maxFiles := parseCollectLimits(opts)
 
 	var matched []string
+
 	seen := generic.NewSet[string]()
 
 	for _, target := range rawTargets {
@@ -475,6 +484,7 @@ func extractRawTargets(fileFlag string, args []string) []string {
 			}
 		}
 	}
+
 	return rawTargets
 }
 
@@ -506,10 +516,12 @@ func cleanRecursiveBase(target string) string {
 	baseDir := target
 	baseDir = strings.TrimSuffix(baseDir, "/...")
 	baseDir = strings.TrimSuffix(baseDir, `\...`)
+
 	baseDir = strings.TrimSuffix(baseDir, "...")
 	if baseDir == "" || baseDir == "." {
 		return "."
 	}
+
 	return baseDir
 }
 
@@ -541,6 +553,7 @@ func walkEligibleGoFiles(baseDir string, maxDepth, maxFiles int, seen generic.Se
 			if d.IsDir() {
 				return filepath.SkipDir
 			}
+
 			return nil
 		}
 
@@ -548,11 +561,13 @@ func walkEligibleGoFiles(baseDir string, maxDepth, maxFiles int, seen generic.Se
 			if isIgnoredDirectory(d.Name()) {
 				return filepath.SkipDir
 			}
+
 			return nil
 		}
 
 		if IsEligibleGoFile(path) && !seen.Has(path) {
 			seen.Add(path)
+
 			*matched = append(*matched, path)
 			if len(*matched) >= maxFiles {
 				return filepath.SkipAll
@@ -572,12 +587,14 @@ func QuickCheckCandidate(path string) bool {
 	defer f.Close()
 
 	buf := make([]byte, 65536)
+
 	n, err := f.Read(buf)
 	if err != nil && n == 0 {
 		return false
 	}
 
 	content := buf[:n]
+
 	return bytes.Contains(content, []byte("@aoni:service")) ||
 		bytes.Contains(content, []byte("@service")) ||
 		bytes.Contains(content, []byte("@aoni:endpoint")) ||
@@ -590,6 +607,7 @@ func IsEligibleGoFile(path string) bool {
 	if !strings.HasSuffix(path, ".go") {
 		return false
 	}
+
 	return !strings.HasSuffix(path, "_test.go") && !strings.HasSuffix(path, ".gen.go")
 }
 
@@ -634,6 +652,7 @@ func isUserHomeOrSystemDir(path string) bool {
 	}
 
 	clean := filepath.Clean(path)
+
 	home, err := os.UserHomeDir()
 	if err == nil && home != "" && clean == filepath.Clean(home) {
 		return true

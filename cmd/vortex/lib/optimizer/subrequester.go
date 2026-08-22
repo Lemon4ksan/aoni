@@ -129,5 +129,6 @@ func cleanGoIdentifier(s string) string {
 	}
 
 	res := strings.ToLower(b.String())
+
 	return generic.Coalesce(res, "sub")
 }

@@ -109,22 +109,28 @@ func (h *Header) Decode(in []byte) error {
 // The FirstBlock.OK will indicate if enough information was available to decode the first block header.
 func (h *Header) DecodeAndStrip(in []byte) (remain []byte, err error) {
 	*h = Header{}
+
 	if len(in) < 4 {
 		return nil, io.ErrUnexpectedEOF
 	}
+
 	h.HeaderSize += 4
+
 	b, in := in[:4], in[4:]
 	if string(b) != frameMagic {
 		if string(b[1:4]) != skippableFrameMagic || b[0]&0xf0 != 0x50 {
 			return nil, ErrMagicMismatch
 		}
+
 		if len(in) < 4 {
 			return nil, io.ErrUnexpectedEOF
 		}
+
 		h.HeaderSize += 4
 		h.Skippable = true
 		h.SkippableID = int(b[0] & 0xf)
 		h.SkippableSize = binary.LittleEndian.Uint32(in)
+
 		return in[4:], nil
 	}
 
@@ -133,9 +139,11 @@ func (h *Header) DecodeAndStrip(in []byte) (remain []byte, err error) {
 	if len(in) < 1 {
 		return nil, io.ErrUnexpectedEOF
 	}
+
 	fhd, in := in[0], in[1:]
 	h.HeaderSize++
 	h.SingleSegment = fhd&(1<<5) != 0
+
 	h.HasCheckSum = fhd&(1<<2) != 0
 	if fhd&(1<<3) != 0 {
 		return nil, errors.New("reserved bit set on frame header")
@@ -145,7 +153,9 @@ func (h *Header) DecodeAndStrip(in []byte) (remain []byte, err error) {
 		if len(in) < 1 {
 			return nil, io.ErrUnexpectedEOF
 		}
+
 		var wd byte
+
 		wd, in = in[0], in[1:]
 		h.HeaderSize++
 		windowLog := 10 + (wd >> 3)
@@ -160,10 +170,13 @@ func (h *Header) DecodeAndStrip(in []byte) (remain []byte, err error) {
 		if size == 3 {
 			size = 4
 		}
+
 		if len(in) < int(size) {
 			return nil, io.ErrUnexpectedEOF
 		}
+
 		b, in = in[:size], in[size:]
+
 		h.HeaderSize += int(size)
 		switch len(b) {
 		case 1:
@@ -178,6 +191,7 @@ func (h *Header) DecodeAndStrip(in []byte) (remain []byte, err error) {
 	// Read Frame_Content_Size
 	// https://github.com/facebook/zstd/blob/dev/doc/zstd_compression_format.md#frame_content_size
 	var fcsSize int
+
 	v := fhd >> 6
 	switch v {
 	case 0:
@@ -190,10 +204,13 @@ func (h *Header) DecodeAndStrip(in []byte) (remain []byte, err error) {
 
 	if fcsSize > 0 {
 		h.HasFCS = true
+
 		if len(in) < fcsSize {
 			return nil, io.ErrUnexpectedEOF
 		}
+
 		b, in = in[:fcsSize], in[fcsSize:]
+
 		h.HeaderSize += int(fcsSize)
 		switch len(b) {
 		case 1:
@@ -214,6 +231,7 @@ func (h *Header) DecodeAndStrip(in []byte) (remain []byte, err error) {
 	if len(in) < 3 {
 		return in, nil
 	}
+
 	tmp := in[:3]
 	bh := uint32(tmp[0]) | (uint32(tmp[1]) << 8) | (uint32(tmp[2]) << 16)
 	h.FirstBlock.Last = bh&1 != 0
@@ -238,6 +256,7 @@ func (h *Header) DecodeAndStrip(in []byte) (remain []byte, err error) {
 	}
 
 	h.FirstBlock.OK = true
+
 	return in, nil
 }
 
@@ -249,8 +268,10 @@ func (h *Header) AppendTo(dst []byte) ([]byte, error) {
 		magic[0] |= byte(h.SkippableID & 0xf)
 		dst = append(dst, magic[:]...)
 		f := h.SkippableSize
+
 		return append(dst, uint8(f), uint8(f>>8), uint8(f>>16), uint8(f>>24)), nil
 	}
+
 	f := frameHeader{
 		ContentSize:   h.FrameContentSize,
 		WindowSize:    uint32(h.WindowSize),
@@ -258,6 +279,7 @@ func (h *Header) AppendTo(dst []byte) ([]byte, error) {
 		Checksum:      h.HasCheckSum,
 		DictID:        h.DictionaryID,
 	}
+
 	return f.appendTo(dst), nil
 }
 
@@ -271,10 +293,12 @@ type frameHeader struct {
 
 func (f frameHeader) appendTo(dst []byte) []byte {
 	dst = append(dst, frameMagic...)
+
 	var fhd uint8
 	if f.Checksum {
 		fhd |= 1 << 2
 	}
+
 	if f.SingleSegment {
 		fhd |= 1 << 5
 	}
@@ -288,21 +312,26 @@ func (f frameHeader) appendTo(dst []byte) []byte {
 			dictIDContent = tmp[:1]
 		} else if f.DictID < 1<<16 {
 			fhd |= 2
+
 			binary.LittleEndian.PutUint16(tmp[:2], uint16(f.DictID))
 			dictIDContent = tmp[:2]
 		} else {
 			fhd |= 3
+
 			binary.LittleEndian.PutUint32(tmp[:4], f.DictID)
 			dictIDContent = tmp[:4]
 		}
 	}
+
 	var fcs uint8
 	if f.ContentSize >= 256 {
 		fcs++
 	}
+
 	if f.ContentSize >= 65536+256 {
 		fcs++
 	}
+
 	if f.ContentSize >= 0xffffffff {
 		fcs++
 	}
@@ -312,12 +341,15 @@ func (f frameHeader) appendTo(dst []byte) []byte {
 	dst = append(dst, fhd)
 	if !f.SingleSegment {
 		const winLogMin = 10
+
 		windowLog := (bits.Len32(f.WindowSize-1) - winLogMin) << 3
 		dst = append(dst, uint8(windowLog))
 	}
+
 	if f.DictID > 0 {
 		dst = append(dst, dictIDContent...)
 	}
+
 	switch fcs {
 	case 0:
 		if f.SingleSegment {
@@ -327,12 +359,28 @@ func (f frameHeader) appendTo(dst []byte) []byte {
 		f.ContentSize -= 256
 		dst = append(dst, uint8(f.ContentSize), uint8(f.ContentSize>>8))
 	case 2:
-		dst = append(dst, uint8(f.ContentSize), uint8(f.ContentSize>>8), uint8(f.ContentSize>>16), uint8(f.ContentSize>>24))
+		dst = append(
+			dst,
+			uint8(f.ContentSize),
+			uint8(f.ContentSize>>8),
+			uint8(f.ContentSize>>16),
+			uint8(f.ContentSize>>24),
+		)
 	case 3:
-		dst = append(dst, uint8(f.ContentSize), uint8(f.ContentSize>>8), uint8(f.ContentSize>>16), uint8(f.ContentSize>>24),
-			uint8(f.ContentSize>>32), uint8(f.ContentSize>>40), uint8(f.ContentSize>>48), uint8(f.ContentSize>>56))
+		dst = append(
+			dst,
+			uint8(f.ContentSize),
+			uint8(f.ContentSize>>8),
+			uint8(f.ContentSize>>16),
+			uint8(f.ContentSize>>24),
+			uint8(f.ContentSize>>32),
+			uint8(f.ContentSize>>40),
+			uint8(f.ContentSize>>48),
+			uint8(f.ContentSize>>56),
+		)
 	default:
 		panic("invalid fcs")
 	}
+
 	return dst
 }

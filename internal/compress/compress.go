@@ -79,6 +79,7 @@ func Gunzip(src, dst []byte) ([]byte, error) {
 	if err := zr.Reset(bytes.NewReader(src)); err != nil {
 		return nil, err
 	}
+
 	defer zr.Close()
 
 	if dst == nil {

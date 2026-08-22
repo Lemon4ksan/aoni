@@ -9,6 +9,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"maps"
 	"os"
 	"path/filepath"
 
@@ -61,10 +62,9 @@ func (s *JSONFileStorage) Save(key string, cookies []Cookie) error {
 
 	s.data.Mutate(func(d *fileStorageData) {
 		(*d)[key] = cookies
+
 		snapshot = make(fileStorageData, len(*d))
-		for k, v := range *d {
-			snapshot[k] = v
-		}
+		maps.Copy(snapshot, *d)
 	})
 
 	fileBytes, err := json.Marshal(snapshot)
@@ -186,7 +186,12 @@ func (s *SQLStorage) Save(key string, cookies []Cookie) error {
 
 // Load retrieves cookies associated with key from the SQL database.
 func (s *SQLStorage) Load(key string) ([]Cookie, error) {
-	row := s.db.QueryRowContext(context.Background(), `SELECT cookie_data FROM `+s.tableName+` WHERE proxy_key = ?`, key) //nolint:gosec
+	//nolint:gosec // Table name is validated internally
+	row := s.db.QueryRowContext(
+		context.Background(),
+		`SELECT cookie_data FROM `+s.tableName+` WHERE proxy_key = ?`,
+		key,
+	)
 
 	var dataStr string
 	if err := row.Scan(&dataStr); err != nil {

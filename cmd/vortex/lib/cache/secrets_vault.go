@@ -193,6 +193,7 @@ func LoadSecrets(startDir string) (*SecretsVault, string, error) {
 	}
 
 	defaultPath := filepath.Join(startDir, ".vortex", "cache", "secrets.json")
+
 	return NewSecretsVault(), defaultPath, nil
 }
 
@@ -266,6 +267,7 @@ func (v *SecretsVault) Get(key string) (string, bool) {
 		if v.Secrets == nil {
 			return
 		}
+
 		entry, exists := v.Secrets[key]
 		if exists {
 			val = entry.Value
@@ -284,6 +286,7 @@ func (v *SecretsVault) Delete(key string) bool {
 		if v.Secrets == nil {
 			return
 		}
+
 		_, exists = v.Secrets[key]
 		delete(v.Secrets, key)
 	})
@@ -322,6 +325,7 @@ func maskSecret(val string) string {
 		if len(token) > 10 {
 			return "Bearer " + token[:4] + "..." + token[len(token)-4:]
 		}
+
 		return "Bearer ********"
 	}
 

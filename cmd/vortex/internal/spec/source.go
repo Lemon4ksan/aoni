@@ -369,6 +369,7 @@ func (c *CmdSource) runFetch(ctx context.Context, stdout io.Writer, cfg *project
 		}
 
 		srcPath := pathkit.New(ct.Upstream.Source)
+
 		src := srcPath.String()
 		if srcPath.IsFile() {
 			// Local file - verify existence
@@ -465,6 +466,7 @@ func (c *CmdSource) runPing(ctx context.Context, stdout io.Writer, cfg *project.
 
 	for _, ct := range targets {
 		srcPath := pathkit.New(ct.Upstream.Source)
+
 		src := srcPath.String()
 		if srcPath.IsFile() {
 			localPath := srcPath.FilePath()
@@ -556,6 +558,7 @@ func (c *CmdSource) runDiff(ctx context.Context, stdout io.Writer, cfg *project.
 		}
 
 		pSrc := pathkit.New(ct.Upstream.Source)
+
 		srcPath := pSrc.String()
 		if pSrc.IsFile() && !pSrc.IsAbs() {
 			srcPath = filepath.Join(cfg.RootDir, pSrc.FilePath())

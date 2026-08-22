@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Lemon4ksan All rights reserved.
+// Use of this source code is governed by a BSD-style
+// license that can be found in the LICENSE file.
+
 // Package xxhash implements the 64-bit variant of xxHash (XXH64) as described
 // at http://cyan4973.github.io/xxHash/.
 // THIS IS VENDORED: Go to github.com/cespare/xxhash for original package.
@@ -73,8 +77,9 @@ func (d *Digest) Write(b []byte) (n int, err error) {
 	if d.n+n < 32 {
 		// This new data doesn't even fill the current block.
 		copy(memleft, b)
+
 		d.n += n
-		return
+		return n, err
 	}
 
 	if d.n > 0 {
@@ -105,12 +110,13 @@ func (d *Digest) Write(b []byte) (n int, err error) {
 	copy(d.mem[:], b)
 	d.n = len(b)
 
-	return
+	return n, err
 }
 
 // Sum appends the current hash to b and returns the resulting slice.
 func (d *Digest) Sum(b []byte) []byte {
 	s := d.Sum64()
+
 	return append(
 		b,
 		byte(s>>56),
@@ -147,11 +153,13 @@ func (d *Digest) Sum64() uint64 {
 		h ^= k1
 		h = rol27(h)*prime1 + prime4
 	}
+
 	if len(b) >= 4 {
 		h ^= uint64(u32(b[:4])) * prime1
 		h = rol23(h)*prime2 + prime3
 		b = b[4:]
 	}
+
 	for ; len(b) > 0; b = b[1:] {
 		h ^= uint64(b[0]) * prime5
 		h = rol11(h) * prime1
@@ -182,6 +190,7 @@ func (d *Digest) MarshalBinary() ([]byte, error) {
 	b = appendUint64(b, d.total)
 	b = append(b, d.mem[:d.n]...)
 	b = b[:len(b)+len(d.mem)-d.n]
+
 	return b, nil
 }
 
@@ -190,9 +199,11 @@ func (d *Digest) UnmarshalBinary(b []byte) error {
 	if len(b) < len(magic) || string(b[:len(magic)]) != magic {
 		return errors.New("xxhash: invalid hash state identifier")
 	}
+
 	if len(b) != marshaledSize {
 		return errors.New("xxhash: invalid hash state size")
 	}
+
 	b = b[len(magic):]
 	b, d.v1 = consumeUint64(b)
 	b, d.v2 = consumeUint64(b)
@@ -201,6 +212,7 @@ func (d *Digest) UnmarshalBinary(b []byte) error {
 	b, d.total = consumeUint64(b)
 	copy(d.mem[:], b)
 	d.n = int(d.total % uint64(len(d.mem)))
+
 	return nil
 }
 
@@ -222,6 +234,7 @@ func round(acc, input uint64) uint64 {
 	acc += input * prime2
 	acc = rol31(acc)
 	acc *= prime1
+
 	return acc
 }
 
@@ -229,6 +242,7 @@ func mergeRound(acc, val uint64) uint64 {
 	val = round(0, val)
 	acc ^= val
 	acc = acc*prime1 + prime4
+
 	return acc
 }
 

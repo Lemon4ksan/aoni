@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Lemon4ksan All rights reserved.
+// Use of this source code is governed by a BSD-style
+// license that can be found in the LICENSE file.
+
 package zstd
 
 import (
@@ -28,6 +32,7 @@ func (d *dict) ID() uint32 {
 	if d == nil {
 		return 0
 	}
+
 	return d.id
 }
 
@@ -36,6 +41,7 @@ func (d *dict) ContentSize() int {
 	if d == nil {
 		return 0
 	}
+
 	return len(d.content)
 }
 
@@ -44,6 +50,7 @@ func (d *dict) Content() []byte {
 	if d == nil {
 		return nil
 	}
+
 	return d.content
 }
 
@@ -52,6 +59,7 @@ func (d *dict) Offsets() [3]int {
 	if d == nil {
 		return [3]int{}
 	}
+
 	return d.offsets
 }
 
@@ -60,6 +68,7 @@ func (d *dict) LitEncoder() *huff0.Scratch {
 	if d == nil {
 		return nil
 	}
+
 	return d.litEnc
 }
 
@@ -70,14 +79,17 @@ func loadDict(b []byte) (*dict, error) {
 	if len(b) <= 8+(3*4) {
 		return nil, io.ErrUnexpectedEOF
 	}
+
 	d := dict{
 		llDec: sequenceDec{fse: &fseDecoder{}},
 		ofDec: sequenceDec{fse: &fseDecoder{}},
 		mlDec: sequenceDec{fse: &fseDecoder{}},
 	}
+
 	if string(b[:4]) != dictMagic {
 		return nil, ErrMagicMismatch
 	}
+
 	d.id = binary.LittleEndian.Uint32(b[4:8])
 	if d.id == 0 {
 		return nil, errors.New("dictionaries cannot have ID 0")
@@ -85,10 +97,12 @@ func loadDict(b []byte) (*dict, error) {
 
 	// Read literal table
 	var err error
+
 	d.litEnc, b, err = huff0.ReadTable(b[8:], nil)
 	if err != nil {
 		return nil, fmt.Errorf("loading literal table: %w", err)
 	}
+
 	d.litEnc.Reuse = huff0.ReusePolicyMust
 
 	br := byteReader{
@@ -99,26 +113,33 @@ func loadDict(b []byte) (*dict, error) {
 		if err := dec.readNCount(&br, uint16(maxTableSymbol[i])); err != nil {
 			return err
 		}
+
 		if br.overread() {
 			return io.ErrUnexpectedEOF
 		}
+
 		err = dec.transform(symbolTableX[i])
 		if err != nil {
 			return err
 		}
+
 		dec.preDefined = true
+
 		return nil
 	}
 
 	if err := readDec(tableOffsets, d.ofDec.fse); err != nil {
 		return nil, err
 	}
+
 	if err := readDec(tableMatchLengths, d.mlDec.fse); err != nil {
 		return nil, err
 	}
+
 	if err := readDec(tableLiteralLengths, d.llDec.fse); err != nil {
 		return nil, err
 	}
+
 	if br.remain() < 12 {
 		return nil, io.ErrUnexpectedEOF
 	}
@@ -129,13 +150,20 @@ func loadDict(b []byte) (*dict, error) {
 	br.advance(4)
 	d.offsets[2] = int(br.Uint32())
 	br.advance(4)
+
 	if d.offsets[0] <= 0 || d.offsets[1] <= 0 || d.offsets[2] <= 0 {
 		return nil, errors.New("invalid offset in dictionary")
 	}
+
 	d.content = make([]byte, br.remain())
 	copy(d.content, br.unread())
+
 	if d.offsets[0] > len(d.content) || d.offsets[1] > len(d.content) || d.offsets[2] > len(d.content) {
-		return nil, fmt.Errorf("initial offset bigger than dictionary content size %d, offsets: %v", len(d.content), d.offsets)
+		return nil, fmt.Errorf(
+			"initial offset bigger than dictionary content size %d, offsets: %v",
+			len(d.content),
+			d.offsets,
+		)
 	}
 
 	return &d, nil
@@ -148,8 +176,10 @@ func InspectDictionary(b []byte) (interface {
 	Content() []byte
 	Offsets() [3]int
 	LitEncoder() *huff0.Scratch
-}, error) {
+}, error,
+) {
 	initPredefined()
+
 	d, err := loadDict(b)
 	return d, err
 }

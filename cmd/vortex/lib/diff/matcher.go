@@ -38,6 +38,7 @@ func Compare(
 	if len(opts) > 0 {
 		opt = opts[0]
 	}
+
 	return CompareWithOptions(local, remoteDoc, localTarget, remoteTarget, opt)
 }
 

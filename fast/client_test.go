@@ -202,10 +202,12 @@ func TestFastClient_Decompression_Gzip_Brotli_Zstd(t *testing.T) {
 			_ = gz.Close()
 		case "/br":
 			w.Header().Set("Content-Encoding", "br")
+
 			brData := fasthttp.AppendBrotliBytes(nil, []byte("uncompressed-brotli-payload"))
 			_, _ = w.Write(brData)
 		case "/zstd":
 			w.Header().Set("Content-Encoding", "zstd")
+
 			payload := []byte("uncompressed-zstd-payload")
 			// Raw single segment zstd frame
 			var buf bytes.Buffer
@@ -214,6 +216,7 @@ func TestFastClient_Decompression_Gzip_Brotli_Zstd(t *testing.T) {
 			buf.Write([]byte{byte(bh), byte(bh >> 8), byte(bh >> 16)})
 			buf.Write(payload)
 			_, _ = w.Write(buf.Bytes())
+
 		default:
 			w.WriteHeader(http.StatusNotFound)
 		}

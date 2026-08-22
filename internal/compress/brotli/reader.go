@@ -1,3 +1,8 @@
+// Copyright 2013 Google Inc. All Rights Reserved.
+// Copyright (c) 2026 Lemon4ksan All rights reserved.
+// Use of this source code is governed by a BSD-style
+// license that can be found in the LICENSE file.
+
 package brotli
 
 import (
@@ -11,8 +16,10 @@ func (err decodeError) Error() string {
 	return "brotli: " + string(decoderErrorString(int(err)))
 }
 
-var errExcessiveInput = errors.New("brotli: excessive input")
-var errInvalidState = errors.New("brotli: invalid state")
+var (
+	errExcessiveInput = errors.New("brotli: excessive input")
+	errInvalidState   = errors.New("brotli: invalid state")
+)
 
 // readBufSize is a "good" buffer size that avoids excessive round-trips
 // between C and Go but doesn't waste too much memory on buffering.
@@ -22,7 +29,7 @@ const readBufSize = 32 * 1024
 // NewReader creates a new Reader reading the given reader.
 func NewReader(src io.Reader) *Reader {
 	r := new(Reader)
-	r.Reset(src)
+	_ = r.Reset(src)
 	return r
 }
 
@@ -31,32 +38,34 @@ func NewReader(src io.Reader) *Reader {
 // This permits reusing a Reader rather than allocating a new one.
 // Error is always nil
 func (r *Reader) Reset(src io.Reader) error {
-	if r.error_code < 0 {
+	if r.errorCode < 0 {
 		// There was an unrecoverable error, leaving the Reader's state
 		// undefined. Clear out everything but the buffers.
 		*r = Reader{
-			buf:              r.buf,
-			block_type_trees: r.block_type_trees,
-			literal_hgroup: huffmanTreeGroup{
-				htrees: r.literal_hgroup.htrees,
-				codes:  r.literal_hgroup.codes,
+			buf:            r.buf,
+			blockTypeTrees: r.blockTypeTrees,
+			literalHgroup: huffmanTreeGroup{
+				htrees: r.literalHgroup.htrees,
+				codes:  r.literalHgroup.codes,
 			},
-			distance_hgroup: huffmanTreeGroup{
-				htrees: r.distance_hgroup.htrees,
-				codes:  r.distance_hgroup.codes,
+			distanceHgroup: huffmanTreeGroup{
+				htrees: r.distanceHgroup.htrees,
+				codes:  r.distanceHgroup.codes,
 			},
-			insert_copy_hgroup: huffmanTreeGroup{
-				htrees: r.insert_copy_hgroup.htrees,
-				codes:  r.insert_copy_hgroup.codes,
+			insertCopyHgroup: huffmanTreeGroup{
+				htrees: r.insertCopyHgroup.htrees,
+				codes:  r.insertCopyHgroup.codes,
 			},
 		}
 	}
 
 	decoderStateInit(r)
+
 	r.src = src
 	if r.buf == nil {
 		r.buf = make([]byte, readBufSize)
 	}
+
 	return nil
 }
 
@@ -67,9 +76,11 @@ func (r *Reader) Read(p []byte) (n int, err error) {
 			if readErr == io.EOF && r.state != stateDone {
 				readErr = io.ErrUnexpectedEOF
 			}
+
 			// If readErr is `nil`, we just proxy underlying stream behavior.
 			return 0, readErr
 		}
+
 		r.in = r.buf[:m]
 	}
 
@@ -79,6 +90,7 @@ func (r *Reader) Read(p []byte) (n int, err error) {
 
 	for {
 		var written uint
+
 		in_len := uint(len(r.in))
 		out_len := uint(len(p))
 		in_remaining := in_len
@@ -92,14 +104,18 @@ func (r *Reader) Read(p []byte) (n int, err error) {
 			if len(r.in) > 0 {
 				return n, errExcessiveInput
 			}
+
 			return n, nil
+
 		case decoderResultError:
 			return n, decodeError(decoderGetErrorCode(r))
 		case decoderResultNeedsMoreOutput:
 			if n == 0 {
 				return 0, io.ErrShortBuffer
 			}
+
 			return n, nil
+
 		case decoderNeedsMoreInput:
 		}
 
@@ -119,8 +135,10 @@ func (r *Reader) Read(p []byte) (n int, err error) {
 			if err == io.EOF {
 				return 0, io.ErrUnexpectedEOF
 			}
+
 			return 0, err
 		}
+
 		r.in = r.buf[:encN]
 	}
 }

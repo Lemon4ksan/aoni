@@ -18,17 +18,21 @@ func matchLen(a, b []byte) (n int) {
 		if diff != 0 {
 			return n + bits.TrailingZeros64(diff)>>3
 		}
+
 		n += 8
 		left -= 8
 	}
 
 	a = a[n:]
+
 	b = b[n:]
 	for i := range a {
 		if a[i] != b[i] {
 			break
 		}
+
 		n++
 	}
+
 	return n
 }

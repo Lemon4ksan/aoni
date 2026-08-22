@@ -703,6 +703,7 @@ type mockBytesReader struct {
 
 func (m mockBytesReader) Read(p []byte) (n int, err error) {
 	copy(p, m.data)
+
 	if len(p) < len(m.data) {
 		return len(p), nil
 	}
@@ -729,6 +730,7 @@ func TestBytesReader_InspectAndReadAllSafe(t *testing.T) {
 	require.Equal(t, []byte("volatile_payload"), safeBytes)
 	// Mutate original to verify clone
 	volReader.data[0] = 'X'
+
 	require.Equal(t, byte('v'), safeBytes[0])
 
 	// 2. mockBytesReader with volatile=false
@@ -783,7 +785,9 @@ func TestFastPathDecoders_WithBytesReader(t *testing.T) {
 	// JSON fast path
 	t.Run("json_fast_path", func(t *testing.T) {
 		r := mockBytesReader{data: []byte(`{"name":"fast-json","port":9000}`), volatile: true}
+
 		var target ConfigSample
+
 		err := JSONDecoder.Decode(r, &target)
 		require.NoError(t, err)
 		require.Equal(t, "fast-json", target.Name)
@@ -791,23 +795,31 @@ func TestFastPathDecoders_WithBytesReader(t *testing.T) {
 
 		// Custom JSON with options
 		customDec := NewJSONDecoder(JSONDecoderConfig{DisallowUnknownFields: true})
+
 		var target2 ConfigSample
+
 		err = customDec.Decode(r, &target2)
 		require.NoError(t, err)
 		require.Equal(t, "fast-json", target2.Name)
 
 		// Empty JSON
 		emptyR := mockBytesReader{data: nil, volatile: true}
+
 		var emptyTarget ConfigSample
+
 		err = JSONDecoder.Decode(emptyR, &emptyTarget)
 		require.NoError(t, err)
 	})
 
 	// XML fast path
 	t.Run("xml_fast_path", func(t *testing.T) {
-		xmlData := append([]byte{0xEF, 0xBB, 0xBF}, []byte("<ConfigSample><Name>fast-xml</Name><Port>80</Port></ConfigSample>")...)
+		xmlData := append(
+			[]byte{0xEF, 0xBB, 0xBF},
+			[]byte("<ConfigSample><Name>fast-xml</Name><Port>80</Port></ConfigSample>")...)
 		r := mockBytesReader{data: xmlData, volatile: true}
+
 		var target ConfigSample
+
 		err := XMLDecoder.Decode(r, &target)
 		require.NoError(t, err)
 		require.Equal(t, "fast-xml", target.Name)
@@ -818,7 +830,9 @@ func TestFastPathDecoders_WithBytesReader(t *testing.T) {
 	t.Run("yaml_fast_path", func(t *testing.T) {
 		yamlData := append([]byte{0xEF, 0xBB, 0xBF}, []byte("name: fast-yaml\nport: 443\n")...)
 		r := mockBytesReader{data: yamlData, volatile: true}
+
 		var target ConfigSample
+
 		err := YAMLDecoder.Decode(r, &target)
 		require.NoError(t, err)
 		require.Equal(t, "fast-yaml", target.Name)
@@ -826,7 +840,9 @@ func TestFastPathDecoders_WithBytesReader(t *testing.T) {
 
 		// Custom YAML with KnownFields
 		customYDec := NewYAMLDecoder(YAMLDecoderConfig{KnownFields: true})
+
 		var target2 ConfigSample
+
 		err = customYDec.Decode(r, &target2)
 		require.NoError(t, err)
 		require.Equal(t, "fast-yaml", target2.Name)
@@ -836,7 +852,9 @@ func TestFastPathDecoders_WithBytesReader(t *testing.T) {
 	t.Run("raw_fast_path", func(t *testing.T) {
 		raw := []byte("binary_blob_sample")
 		r := mockBytesReader{data: raw, volatile: true}
+
 		var target []byte
+
 		err := RawDecoder.Decode(r, &target)
 		require.NoError(t, err)
 		require.Equal(t, raw, target)
@@ -848,18 +866,24 @@ func BenchmarkDecode_JSON_Stream_vs_BytesReader(b *testing.B) {
 
 	b.Run("Stream_bytes_Reader", func(b *testing.B) {
 		b.ReportAllocs()
+
 		for b.Loop() {
 			r := bytes.NewReader(payload)
+
 			var target ConfigSample
+
 			_ = json.NewDecoder(r).Decode(&target)
 		}
 	})
 
 	b.Run("BytesReader_FastPath", func(b *testing.B) {
 		br := mockBytesReader{data: payload, volatile: true}
+
 		b.ReportAllocs()
+
 		for b.Loop() {
 			var target ConfigSample
+
 			_ = JSONDecoder.Decode(br, &target)
 		}
 	})

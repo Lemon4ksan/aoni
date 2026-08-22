@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Lemon4ksan All rights reserved.
+// Use of this source code is governed by a BSD-style
+// license that can be found in the LICENSE file.
+
 package huff0
 
 import "errors"
@@ -18,32 +22,44 @@ func (s *Scratch) BuildCTable(count *[256]uint32) error {
 	if s == nil {
 		return errors.New("huff0: BuildCTable on nil Scratch")
 	}
+
 	if count == nil {
 		return errors.New("huff0: nil count passed to BuildCTable")
 	}
+
 	var err error
+
 	s, err = s.prepare(nil)
 	if err != nil {
 		return err
 	}
+
 	s.count = *count
-	var total, maxCount int
-	var symLen uint16
+
+	var (
+		total, maxCount int
+		symLen          uint16
+	)
+
 	for i, v := range s.count {
 		total += int(v)
 		if int(v) > maxCount {
 			maxCount = int(v)
 		}
+
 		if v != 0 {
 			symLen = uint16(i) + 1
 		}
 	}
+
 	if total == 0 {
 		return errors.New("huff0: empty histogram")
 	}
+
 	if symLen < 2 || maxCount == total {
 		return ErrUseRLE
 	}
+
 	// huff0's internal rank table assumes total ≤ BlockSizeMax (it uses
 	// highBit32(count+1) + 1 as a rank index into a fixed-size array).
 	// Histograms summed across multiple blocks can exceed that; scale the
@@ -54,43 +70,55 @@ func (s *Scratch) BuildCTable(count *[256]uint32) error {
 		for total>>shift > BlockSizeMax {
 			shift++
 		}
+
 		round := uint32(1<<shift) - 1
+
 		var newTotal, newMax int
 		for i, v := range s.count {
 			if v == 0 {
 				continue
 			}
+
 			scaled := (v + round) >> shift
 			if scaled == 0 {
 				scaled = 1
 			}
+
 			s.count[i] = scaled
+
 			newTotal += int(scaled)
 			if int(scaled) > newMax {
 				newMax = int(scaled)
 			}
 		}
+
 		total = newTotal
+
 		maxCount = newMax
 		if maxCount == total {
 			return ErrUseRLE
 		}
 	}
+
 	s.symbolLen = symLen
 	s.maxCount = maxCount
+
 	s.srcLen = total
 	if err := s.buildCTable(); err != nil {
 		return err
 	}
+
 	if cap(s.prevTable) < len(s.cTable) {
 		s.prevTable = make(cTable, 0, maxSymbolValue+1)
 	}
+
 	s.prevTable = s.prevTable[:len(s.cTable)]
 	copy(s.prevTable, s.cTable)
 	s.prevTableLog = s.actualTableLog
 	// Force the next Compress* to recount from real input.
 	s.clearCount = true
 	s.maxCount = 0
+
 	return nil
 }
 
@@ -102,17 +130,22 @@ func (s *Scratch) EstimateSize(hist *[256]uint32) int {
 	if s == nil || hist == nil || len(s.prevTable) == 0 {
 		return -1
 	}
+
 	pt := s.prevTable
+
 	nbBits := uint32(7)
 	for i, v := range hist {
 		if v == 0 {
 			continue
 		}
+
 		if i >= len(pt) || pt[i].nBits == 0 {
 			return -1
 		}
+
 		nbBits += uint32(pt[i].nBits) * v
 	}
+
 	return int(nbBits >> 3)
 }
 
@@ -122,15 +155,18 @@ func (s *Scratch) CanUseTable(hist *[256]uint32) bool {
 	if s == nil || hist == nil || len(s.prevTable) == 0 {
 		return false
 	}
+
 	pt := s.prevTable
 	for i, v := range hist {
 		if v == 0 {
 			continue
 		}
+
 		if i >= len(pt) || pt[i].nBits == 0 {
 			return false
 		}
 	}
+
 	return true
 }
 
@@ -142,27 +178,34 @@ func (s *Scratch) AppendTable(dst []byte) ([]byte, error) {
 	if s == nil || len(s.prevTable) == 0 {
 		return dst, errors.New("huff0: AppendTable with empty table")
 	}
+
 	// cTable.write reads s.actualTableLog, s.symbolLen, s.huffWeight, s.fse
 	// and writes into s.Out. Save/restore Out so we don't disturb in-flight
 	// compression buffers.
 	saveOut := s.Out
 	saveTL := s.actualTableLog
+
 	saveSL := s.symbolLen
 	if s.fse == nil {
 		// Lazily init in case AppendTable is called on a fresh Scratch.
 		if _, err := s.prepare(nil); err != nil {
 			return dst, err
 		}
+
 		saveOut = s.Out
 	}
+
 	s.Out = s.Out[:0]
 	s.actualTableLog = s.prevTableLog
+
 	s.symbolLen = uint16(len(s.prevTable))
 	if err := s.prevTable.write(s); err != nil {
 		s.Out, s.actualTableLog, s.symbolLen = saveOut, saveTL, saveSL
 		return dst, err
 	}
+
 	dst = append(dst, s.Out...)
 	s.Out, s.actualTableLog, s.symbolLen = saveOut, saveTL, saveSL
+
 	return dst, nil
 }

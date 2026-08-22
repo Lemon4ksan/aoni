@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Lemon4ksan All rights reserved.
+// Use of this source code is governed by a BSD-style
+// license that can be found in the LICENSE file.
+
 // We enable 64 bit LE platforms:
 
 //go:build (amd64 || arm64 || ppc64le || riscv64) && !nounsafe && !purego && !appengine
@@ -10,29 +14,29 @@ import (
 
 // Load8 will load from b at index i.
 func Load8[I Indexer](b []byte, i I) byte {
-	//return binary.LittleEndian.Uint16(b[i:])
-	//return *(*uint16)(unsafe.Pointer(&b[i]))
+	// return binary.LittleEndian.Uint16(b[i:])
+	// return *(*uint16)(unsafe.Pointer(&b[i]))
 	return *(*byte)(unsafe.Add(unsafe.Pointer(unsafe.SliceData(b)), i))
 }
 
 // Load16 will load from b at index i.
 func Load16[I Indexer](b []byte, i I) uint16 {
-	//return binary.LittleEndian.Uint16(b[i:])
-	//return *(*uint16)(unsafe.Pointer(&b[i]))
+	// return binary.LittleEndian.Uint16(b[i:])
+	// return *(*uint16)(unsafe.Pointer(&b[i]))
 	return *(*uint16)(unsafe.Add(unsafe.Pointer(unsafe.SliceData(b)), i))
 }
 
 // Load32 will load from b at index i.
 func Load32[I Indexer](b []byte, i I) uint32 {
-	//return binary.LittleEndian.Uint32(b[i:])
-	//return *(*uint32)(unsafe.Pointer(&b[i]))
+	// return binary.LittleEndian.Uint32(b[i:])
+	// return *(*uint32)(unsafe.Pointer(&b[i]))
 	return *(*uint32)(unsafe.Add(unsafe.Pointer(unsafe.SliceData(b)), i))
 }
 
 // Load64 will load from b at index i.
 func Load64[I Indexer](b []byte, i I) uint64 {
-	//return binary.LittleEndian.Uint64(b[i:])
-	//return *(*uint64)(unsafe.Pointer(&b[i]))
+	// return binary.LittleEndian.Uint64(b[i:])
+	// return *(*uint64)(unsafe.Pointer(&b[i]))
 	return *(*uint64)(unsafe.Add(unsafe.Pointer(unsafe.SliceData(b)), i))
 }
 

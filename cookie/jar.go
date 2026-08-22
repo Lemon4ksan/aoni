@@ -33,7 +33,7 @@ func WithProxyAddress(ctx context.Context, addr string) context.Context {
 // GetProxyAddress retrieves the active proxy URL string stored in the context.
 // Returns the proxy URL string if present; otherwise returns an empty string.
 func GetProxyAddress(ctx context.Context) string {
-	return asyncctx.GetOr[string](ctx, proxyCtxKey{}, "")
+	return asyncctx.GetOr(ctx, proxyCtxKey{}, "")
 }
 
 // WithPartitionKey returns a Context carrying a CHIPS (RFC 6265bis) top-level site partition key.
@@ -46,7 +46,7 @@ func WithPartitionKey(ctx context.Context, key string) context.Context {
 
 // GetPartitionKey retrieves the active CHIPS top-level site partition key from context.
 func GetPartitionKey(ctx context.Context) string {
-	return asyncctx.GetOr[string](ctx, partitionCtxKey{}, "")
+	return asyncctx.GetOr(ctx, partitionCtxKey{}, "")
 }
 
 type cookieKey struct {
@@ -106,6 +106,7 @@ func (p *ProxyIsolatedJar) GetJarForProxy(proxyURL string) http.CookieJar {
 	}
 
 	var jar http.CookieJar = baseJar
+
 	backend := p.backend.Get()
 
 	if backend != nil {
@@ -242,6 +243,7 @@ func (pj *PersistentJar) deleteMatching(name, domain string) bool {
 	for k := range pj.cookiesMap {
 		if k.name == name && normalizeDomain(k.domain) == normDomain {
 			delete(pj.cookiesMap, k)
+
 			deleted = true
 		}
 	}
@@ -255,6 +257,7 @@ func (pj *PersistentJar) purgeExpiredLocked(now time.Time) bool {
 	for k, c := range pj.cookiesMap {
 		if isExpiredCookie(c.Expires, c.MaxAge, now) {
 			delete(pj.cookiesMap, k)
+
 			changed = true
 		}
 	}

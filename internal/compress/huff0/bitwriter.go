@@ -24,12 +24,14 @@ func (b *bitWriter) addBits16Clean(value uint16, bits uint8) {
 // It will not check if there is space for them, so the caller must ensure that it has flushed recently.
 func (b *bitWriter) encSymbol(ct cTable, symbol byte) {
 	enc := ct[symbol]
+
 	b.bitContainer |= uint64(enc.val) << (b.nBits & 63)
 	if false {
 		if enc.nBits == 0 {
 			panic("nbits 0")
 		}
 	}
+
 	b.nBits += enc.nBits
 }
 
@@ -41,14 +43,17 @@ func (b *bitWriter) encTwoSymbols(ct cTable, av, bv byte) {
 	sh := b.nBits & 63
 	combined := uint64(encA.val) | (uint64(encB.val) << (encA.nBits & 63))
 	b.bitContainer |= combined << sh
+
 	if false {
 		if encA.nBits == 0 {
 			panic("nbitsA 0")
 		}
+
 		if encB.nBits == 0 {
 			panic("nbitsB 0")
 		}
 	}
+
 	b.nBits += encA.nBits + encB.nBits
 }
 
@@ -73,6 +78,7 @@ func (b *bitWriter) flush32() {
 	if b.nBits < 32 {
 		return
 	}
+
 	b.out = append(b.out,
 		byte(b.bitContainer),
 		byte(b.bitContainer>>8),
@@ -88,6 +94,7 @@ func (b *bitWriter) flushAlign() {
 	for i := range nbBytes {
 		b.out = append(b.out, byte(b.bitContainer>>(i*8)))
 	}
+
 	b.nBits = 0
 	b.bitContainer = 0
 }

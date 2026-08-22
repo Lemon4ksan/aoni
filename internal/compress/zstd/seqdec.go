@@ -29,8 +29,18 @@ func (s seq) String() string {
 		if s.offset == 0 {
 			return fmt.Sprint("litLen:", s.litLen, ", matchLen:", s.matchLen+zstdMinMatch, ", offset: INVALID (0)")
 		}
-		return fmt.Sprint("litLen:", s.litLen, ", matchLen:", s.matchLen+zstdMinMatch, ", offset:", s.offset, " (repeat)")
+
+		return fmt.Sprint(
+			"litLen:",
+			s.litLen,
+			", matchLen:",
+			s.matchLen+zstdMinMatch,
+			", offset:",
+			s.offset,
+			" (repeat)",
+		)
 	}
+
 	return fmt.Sprint("litLen:", s.litLen, ", matchLen:", s.matchLen+zstdMinMatch, ", offset:", s.offset-3, " (new)")
 }
 
@@ -55,7 +65,9 @@ func (s *sequenceDec) init(br *bitReader) error {
 	if s.fse == nil {
 		return errors.New("sequence decoder not defined")
 	}
+
 	s.state.init(br, s.fse.actualTableLog, s.fse.dt[:1<<s.fse.actualTableLog])
+
 	return nil
 }
 
@@ -81,35 +93,45 @@ func (s *sequenceDecs) initialize(br *bitReader, hist *history, out []byte) erro
 	if err := s.litLengths.init(br); err != nil {
 		return errors.New("litLengths:" + err.Error())
 	}
+
 	if err := s.offsets.init(br); err != nil {
 		return errors.New("offsets:" + err.Error())
 	}
+
 	if err := s.matchLengths.init(br); err != nil {
 		return errors.New("matchLengths:" + err.Error())
 	}
+
 	s.br = br
 	s.prevOffset = hist.recentOffsets
 	s.maxBits = s.litLengths.fse.maxBits + s.offsets.fse.maxBits + s.matchLengths.fse.maxBits
 	s.windowSize = hist.windowSize
 	s.out = out
+
 	s.dict = nil
 	if hist.dict != nil {
 		s.dict = hist.dict.content
 	}
+
 	return nil
 }
 
 func (s *sequenceDecs) freeDecoders() {
 	if f := s.litLengths.fse; f != nil && !f.preDefined {
 		fseDecoderPool.Put(f)
+
 		s.litLengths.fse = nil
 	}
+
 	if f := s.offsets.fse; f != nil && !f.preDefined {
 		fseDecoderPool.Put(f)
+
 		s.offsets.fse = nil
 	}
+
 	if f := s.matchLengths.fse; f != nil && !f.preDefined {
 		fseDecoderPool.Put(f)
+
 		s.matchLengths.fse = nil
 	}
 }
@@ -129,10 +151,18 @@ func (s *sequenceDecs) execute(seqs []seqVals, hist []byte) error {
 	}
 
 	if debugDecoder {
-		printf("Execute %d seqs with hist %d, dict %d, literals: %d into %d bytes\n", len(seqs), len(hist), len(s.dict), len(s.literals), s.seqSize)
+		printf(
+			"Execute %d seqs with hist %d, dict %d, literals: %d into %d bytes\n",
+			len(seqs),
+			len(hist),
+			len(s.dict),
+			len(s.literals),
+			s.seqSize,
+		)
 	}
 
-	var t = len(s.out)
+	t := len(s.out)
+
 	out := s.out[:t+s.seqSize]
 
 	for _, seq := range seqs {
@@ -150,8 +180,13 @@ func (s *sequenceDecs) execute(seqs []seqVals, hist []byte) error {
 			// we may be in dictionary.
 			dictO := len(s.dict) - (seq.mo - (t + len(hist)))
 			if dictO < 0 || dictO >= len(s.dict) {
-				return fmt.Errorf("match offset (%d) bigger than current history+dict (%d)", seq.mo, t+len(hist)+len(s.dict))
+				return fmt.Errorf(
+					"match offset (%d) bigger than current history+dict (%d)",
+					seq.mo,
+					t+len(hist)+len(s.dict),
+				)
 			}
+
 			end := dictO + seq.ml
 			if end > len(s.dict) {
 				n := len(s.dict) - dictO
@@ -181,6 +216,7 @@ func (s *sequenceDecs) execute(seqs []seqVals, hist []byte) error {
 				continue
 			}
 		}
+
 		// We must be in current buffer now
 		if seq.ml > 0 {
 			start := t - seq.mo
@@ -197,21 +233,21 @@ func (s *sequenceDecs) execute(seqs []seqVals, hist []byte) error {
 				dst = dst[:len(src)]
 				t += len(src)
 				// Destination is the space we just added.
-				for i := range src {
-					dst[i] = src[i]
-				}
+				copy(dst, src)
 			}
 		}
 	}
 
 	// Add final literals
 	copy(out[t:], s.literals)
+
 	if debugDecoder {
 		t += len(s.literals)
 		if t != len(out) {
 			panic(fmt.Errorf("length mismatch, want %d, got %d, ss: %d", len(out), t, s.seqSize))
 		}
 	}
+
 	s.out = out
 
 	return nil
@@ -236,11 +272,13 @@ func (s *sequenceDecs) decodeSync(hist []byte) error {
 	if debugDecoder {
 		println("decodeSync: decoding", seqs, "sequences", br.remain(), "bits remain on stream")
 	}
+
 	for i := seqs - 1; i >= 0; i-- {
 		if br.overread() {
 			printf("reading sequence %d, exceeded available data. Overread by %d\n", seqs-i, -br.remain())
 			return io.ErrUnexpectedEOF
 		}
+
 		var ll, mo, ml int
 		if br.cursor > 4+((maxOffsetBits+16+16)>>3) {
 			// inlined function:
@@ -248,16 +286,19 @@ func (s *sequenceDecs) decodeSync(hist []byte) error {
 
 			// Final will not read from stream.
 			var llB, mlB, moB uint8
+
 			ll, llB = llState.final()
 			ml, mlB = mlState.final()
 			mo, moB = ofState.final()
 
 			// extra bits are stored in reverse order.
 			br.fillFast()
+
 			mo += br.getBits(moB)
 			if s.maxBits > 32 {
 				br.fillFast()
 			}
+
 			ml += br.getBits(mlB)
 			ll += br.getBits(llB)
 
@@ -288,17 +329,20 @@ func (s *sequenceDecs) decodeSync(hist []byte) error {
 					if temp == 0 {
 						// 0 is not valid; input is corrupted; force offset to 1
 						println("WARNING: temp was 0")
+
 						temp = 1
 					}
 
 					if mo != 1 {
 						s.prevOffset[2] = s.prevOffset[1]
 					}
+
 					s.prevOffset[1] = s.prevOffset[0]
 					s.prevOffset[0] = temp
 					mo = temp
 				}
 			}
+
 			br.fillFast()
 		} else {
 			ll, mo, ml = s.next(br, llState, mlState, ofState)
@@ -312,10 +356,12 @@ func (s *sequenceDecs) decodeSync(hist []byte) error {
 		if ll > len(s.literals) {
 			return fmt.Errorf("unexpected literal count, want %d bytes, but only %d is available", ll, len(s.literals))
 		}
+
 		size := ll + ml + len(out)
 		if size-startSize > maxBlockSize {
 			return fmt.Errorf("output bigger than max block size (%d)", maxBlockSize)
 		}
+
 		if size > cap(out) {
 			// Not enough size, which can happen under high volume block streaming conditions
 			// but could be if destination slice is too small for sync operations.
@@ -327,9 +373,11 @@ func (s *sequenceDecs) decodeSync(hist []byte) error {
 			if used+addBytes > maxBlockSize {
 				addBytes = maxBlockSize - used
 			}
+
 			out = append(out, make([]byte, addBytes)...)
 			out = out[:len(out)-addBytes]
 		}
+
 		if ml > maxMatchLen {
 			return fmt.Errorf("match len (%d) bigger than max allowed length", ml)
 		}
@@ -344,14 +392,23 @@ func (s *sequenceDecs) decodeSync(hist []byte) error {
 
 		if mo > len(out)+len(hist) || mo > s.windowSize {
 			if len(s.dict) == 0 {
-				return fmt.Errorf("match offset (%d) bigger than current history (%d)", mo, len(out)+len(hist)-startSize)
+				return fmt.Errorf(
+					"match offset (%d) bigger than current history (%d)",
+					mo,
+					len(out)+len(hist)-startSize,
+				)
 			}
 
 			// we may be in dictionary.
 			dictO := len(s.dict) - (mo - (len(out) + len(hist)))
 			if dictO < 0 || dictO >= len(s.dict) {
-				return fmt.Errorf("match offset (%d) bigger than current history (%d)", mo, len(out)+len(hist)-startSize)
+				return fmt.Errorf(
+					"match offset (%d) bigger than current history (%d)",
+					mo,
+					len(out)+len(hist)-startSize,
+				)
 			}
+
 			end := dictO + ml
 			if end > len(s.dict) {
 				out = append(out, s.dict[dictO:]...)
@@ -378,6 +435,7 @@ func (s *sequenceDecs) decodeSync(hist []byte) error {
 				ml = 0
 			}
 		}
+
 		// We must be in current buffer now
 		if ml > 0 {
 			start := len(out) - mo
@@ -391,12 +449,12 @@ func (s *sequenceDecs) decodeSync(hist []byte) error {
 				src := out[start : start+ml]
 				// Destination is the space we just added.
 				dst := out[len(out)-ml:]
+
 				dst = dst[:len(src)]
-				for i := range src {
-					dst[i] = src[i]
-				}
+				copy(dst, src)
 			}
 		}
+
 		if i == 0 {
 			// This is the last sequence, so we shouldn't update state.
 			break
@@ -430,6 +488,7 @@ func (s *sequenceDecs) decodeSync(hist []byte) error {
 
 	// Add final literals
 	s.out = append(out, s.literals...)
+
 	return br.close()
 }
 
@@ -449,15 +508,18 @@ func (s *sequenceDecs) next(br *bitReader, llState, mlState, ofState decSymbol) 
 
 	// extra bits are stored in reverse order.
 	br.fill()
+
 	mo += br.getBits(moB)
 	if s.maxBits > 32 {
 		br.fill()
 	}
+
 	// matchlength+literal length, max 32 bits
 	ml += br.getBits(mlB)
 	ll += br.getBits(llB)
 	mo = s.adjustOffset(mo, ll, moB)
-	return
+
+	return ll, mo, ml
 }
 
 func (s *sequenceDecs) adjustOffset(offset, litLen int, offsetB uint8) int {
@@ -465,6 +527,7 @@ func (s *sequenceDecs) adjustOffset(offset, litLen int, offsetB uint8) int {
 		s.prevOffset[2] = s.prevOffset[1]
 		s.prevOffset[1] = s.prevOffset[0]
 		s.prevOffset[0] = offset
+
 		return offset
 	}
 
@@ -478,6 +541,7 @@ func (s *sequenceDecs) adjustOffset(offset, litLen int, offsetB uint8) int {
 	if offset == 0 {
 		return s.prevOffset[0]
 	}
+
 	var temp int
 	if offset == 3 {
 		temp = s.prevOffset[0] - 1
@@ -488,13 +552,16 @@ func (s *sequenceDecs) adjustOffset(offset, litLen int, offsetB uint8) int {
 	if temp == 0 {
 		// 0 is not valid; input is corrupted; force offset to 1
 		println("temp was 0")
+
 		temp = 1
 	}
 
 	if offset != 1 {
 		s.prevOffset[2] = s.prevOffset[1]
 	}
+
 	s.prevOffset[1] = s.prevOffset[0]
 	s.prevOffset[0] = temp
+
 	return temp
 }

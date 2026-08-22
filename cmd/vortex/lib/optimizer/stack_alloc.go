@@ -39,6 +39,7 @@ func estimateStackAllocations(svc *ir.ServiceIR) {
 		if m == nil {
 			continue
 		}
+
 		optimizeMethodStack(m, svc)
 	}
 }
@@ -99,6 +100,7 @@ func calculateModifierSlots(m *ir.MethodIR, svc *ir.ServiceIR) int {
 	if m.Decoder != "" && !isStandardCodec(m.Decoder) {
 		slots++
 	}
+
 	if m.Encoder != "" {
 		slots++
 	}
@@ -150,12 +152,15 @@ func alignStackMods(n int) int {
 	if n <= 4 {
 		return MinStackModsSize
 	}
+
 	if n <= 8 {
 		return 8
 	}
+
 	if n <= 16 {
 		return 16
 	}
+
 	return MaxStackModsSize
 }
 
@@ -163,14 +168,18 @@ func alignStackBuf(n int) int {
 	if n <= 64 {
 		return MinStackBufSize
 	}
+
 	if n <= 128 {
 		return 128
 	}
+
 	if n <= 256 {
 		return 256
 	}
+
 	if n <= 512 {
 		return 512
 	}
+
 	return MaxStackBufSize
 }

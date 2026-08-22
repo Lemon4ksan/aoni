@@ -13,6 +13,8 @@ import (
 	"sync"
 )
 
+const h2Preface = "PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n"
+
 var h2BufferPool = sync.Pool{
 	New: func() any {
 		return new(bytes.Buffer)
@@ -77,7 +79,6 @@ func (c *FramedConn) Write(b []byte) (int, error) {
 		return c.Conn.Write(b)
 	}
 
-	const h2Preface = "PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n"
 	if len(b) < 24 || !bytes.Equal(b[:24], []byte(h2Preface)) {
 		return c.Conn.Write(b)
 	}

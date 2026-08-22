@@ -21,7 +21,8 @@ var bitMask16 = [32]uint16{
 	0x3F, 0x7F, 0xFF, 0x1FF, 0x3FF, 0x7FF,
 	0xFFF, 0x1FFF, 0x3FFF, 0x7FFF, 0xFFFF, 0xFFFF,
 	0xFFFF, 0xFFFF, 0xFFFF, 0xFFFF, 0xFFFF, 0xFFFF,
-	0xFFFF, 0xFFFF} /* up to 16 bits */
+	0xFFFF, 0xFFFF,
+} /* up to 16 bits */
 
 // addBits16NC will add up to 16 bits.
 // It will not check if there is space for them,
@@ -46,6 +47,7 @@ func (b *bitWriter) addBits16ZeroNC(value uint16, bits uint8) {
 	if bits == 0 {
 		return
 	}
+
 	value <<= (16 - bits) & 15
 	value >>= (16 - bits) & 15
 	b.bitContainer |= uint64(value) << (b.nBits & 63)
@@ -74,6 +76,7 @@ func (b *bitWriter) flush() {
 			byte(b.bitContainer>>8),
 			byte(b.bitContainer>>16),
 		)
+
 	case 4:
 		b.out = append(b.out,
 			byte(b.bitContainer),
@@ -81,6 +84,7 @@ func (b *bitWriter) flush() {
 			byte(b.bitContainer>>16),
 			byte(b.bitContainer>>24),
 		)
+
 	case 5:
 		b.out = append(b.out,
 			byte(b.bitContainer),
@@ -89,6 +93,7 @@ func (b *bitWriter) flush() {
 			byte(b.bitContainer>>24),
 			byte(b.bitContainer>>32),
 		)
+
 	case 6:
 		b.out = append(b.out,
 			byte(b.bitContainer),
@@ -98,6 +103,7 @@ func (b *bitWriter) flush() {
 			byte(b.bitContainer>>32),
 			byte(b.bitContainer>>40),
 		)
+
 	case 7:
 		b.out = append(b.out,
 			byte(b.bitContainer),
@@ -108,6 +114,7 @@ func (b *bitWriter) flush() {
 			byte(b.bitContainer>>40),
 			byte(b.bitContainer>>48),
 		)
+
 	case 8:
 		b.out = append(b.out,
 			byte(b.bitContainer),
@@ -119,9 +126,11 @@ func (b *bitWriter) flush() {
 			byte(b.bitContainer>>48),
 			byte(b.bitContainer>>56),
 		)
+
 	default:
 		panic(fmt.Errorf("bits (%d) > 64", b.nBits))
 	}
+
 	b.bitContainer >>= v << 3
 	b.nBits &= 7
 }
@@ -131,6 +140,7 @@ func (b *bitWriter) flush32() {
 	if b.nBits < 32 {
 		return
 	}
+
 	b.out = append(b.out,
 		byte(b.bitContainer),
 		byte(b.bitContainer>>8),
@@ -146,6 +156,7 @@ func (b *bitWriter) flushAlign() {
 	for i := range nbBytes {
 		b.out = append(b.out, byte(b.bitContainer>>(i*8)))
 	}
+
 	b.nBits = 0
 	b.bitContainer = 0
 }

@@ -38,6 +38,7 @@ func (c *Client) setFastURI(fastReq *fasthttp.Request, path string) {
 	}
 
 	var stackBuf [256]byte
+
 	needed := len(c.prepared.BaseURLCleanPathBytes) + len(path)
 
 	var pathBuf []byte

@@ -70,7 +70,7 @@ var offsetExtraBits = [32]int8{
 var offsetCombined = [32]uint32{}
 
 func init() {
-	var offsetBase = [32]uint32{
+	offsetBase := [32]uint32{
 		/* normal deflate */
 		0x000000, 0x000001, 0x000002, 0x000003, 0x000004,
 		0x000006, 0x000008, 0x00000c, 0x000010, 0x000018,
@@ -88,6 +88,7 @@ func init() {
 		if offsetExtraBits[i] == 0 || offsetBase[i] > 0x006000 {
 			continue
 		}
+
 		offsetCombined[i] = uint32(offsetExtraBits[i]) | (offsetBase[i] << 8)
 	}
 }
@@ -163,6 +164,7 @@ func (w *huffmanBitWriter) reset(writer io.Writer) {
 func (w *huffmanBitWriter) canReuse(t *tokens) (ok bool) {
 	a := t.offHist[:offsetCodeCount]
 	b := w.offsetEncoding.codes
+
 	b = b[:len(a)]
 	for i, v := range a {
 		if v != 0 && b[i].zero() {
@@ -172,6 +174,7 @@ func (w *huffmanBitWriter) canReuse(t *tokens) (ok bool) {
 
 	a = t.extraHist[:literalCount-256]
 	b = w.literalEncoding.codes[256:literalCount]
+
 	b = b[:len(a)]
 	for i, v := range a {
 		if v != 0 && b[i].zero() {
@@ -180,12 +183,14 @@ func (w *huffmanBitWriter) canReuse(t *tokens) (ok bool) {
 	}
 
 	a = t.litHist[:256]
+
 	b = w.literalEncoding.codes[:len(a)]
 	for i, v := range a {
 		if v != 0 && b[i].zero() {
 			return false
 		}
 	}
+
 	return true
 }
 
@@ -194,26 +199,32 @@ func (w *huffmanBitWriter) flush() {
 		w.nbits = 0
 		return
 	}
+
 	if w.lastHeader > 0 {
 		// We owe an EOB
 		w.writeCode(w.literalEncoding.codes[endBlockMarker])
 		w.lastHeader = 0
 	}
+
 	n := w.nbytes
 	for w.nbits != 0 {
 		w.bytes[n] = byte(w.bits)
+
 		w.bits >>= 8
 		if w.nbits > 8 { // Avoid underflow
 			w.nbits -= 8
 		} else {
 			w.nbits = 0
 		}
+
 		n++
 	}
+
 	w.bits = 0
 	if n > 0 {
 		w.write(w.bytes[:n])
 	}
+
 	w.nbytes = 0
 }
 
@@ -221,11 +232,13 @@ func (w *huffmanBitWriter) write(b []byte) {
 	if w.err != nil {
 		return
 	}
+
 	_, w.err = w.writer.Write(b)
 }
 
 func (w *huffmanBitWriter) writeBits(b int32, nb uint8) {
 	w.bits |= uint64(b) << (w.nbits & 63)
+
 	w.nbits += nb
 	if w.nbits >= 48 {
 		w.writeOutBits()
@@ -236,20 +249,24 @@ func (w *huffmanBitWriter) writeBytes(bytes []byte) {
 	if w.err != nil {
 		return
 	}
+
 	n := w.nbytes
 	if w.nbits&7 != 0 {
 		w.err = InternalError("writeBytes with unfinished bits")
 		return
 	}
+
 	for w.nbits != 0 {
 		w.bytes[n] = byte(w.bits)
 		w.bits >>= 8
 		w.nbits -= 8
 		n++
 	}
+
 	if n != 0 {
 		w.write(w.bytes[:n])
 	}
+
 	w.nbytes = 0
 	w.write(bytes)
 }
@@ -266,10 +283,11 @@ func (w *huffmanBitWriter) writeBytes(bytes []byte) {
 //	numLiterals      The number of literals in literalEncoding
 //	numOffsets       The number of offsets in offsetEncoding
 //	litenc, offenc   The literal and offset encoder to use
-func (w *huffmanBitWriter) generateCodegen(numLiterals int, numOffsets int, litEnc, offEnc *huffmanEncoder) {
+func (w *huffmanBitWriter) generateCodegen(numLiterals, numOffsets int, litEnc, offEnc *huffmanEncoder) {
 	for i := range w.codegenFreq {
 		w.codegenFreq[i] = 0
 	}
+
 	// Note that we are using codegen both as a temporary variable for holding
 	// a copy of the frequencies, and as the place where we put the result.
 	// This is fine because the output is always shorter than the input used
@@ -285,10 +303,12 @@ func (w *huffmanBitWriter) generateCodegen(numLiterals int, numOffsets int, litE
 	for i := range cgnl {
 		cgnl[i] = offEnc.codes[i].len()
 	}
+
 	codegen[numLiterals+numOffsets] = badCode
 
 	size := codegen[0]
 	count := 1
+
 	outIndex := 0
 	for inIndex := 1; size != badCode; inIndex++ {
 		// INVARIANT: We have seen "count" copies of size that have not yet
@@ -298,11 +318,13 @@ func (w *huffmanBitWriter) generateCodegen(numLiterals int, numOffsets int, litE
 			count++
 			continue
 		}
+
 		// We need to generate codegen indicating "count" of size.
 		if size != 0 {
 			codegen[outIndex] = size
 			outIndex++
 			w.codegenFreq[size]++
+
 			count--
 			for count >= 3 {
 				n := min(6, count)
@@ -323,6 +345,7 @@ func (w *huffmanBitWriter) generateCodegen(numLiterals int, numOffsets int, litE
 				w.codegenFreq[18]++
 				count -= n
 			}
+
 			if count >= 3 {
 				// count >= 3 && count <= 10
 				codegen[outIndex] = 17
@@ -333,16 +356,19 @@ func (w *huffmanBitWriter) generateCodegen(numLiterals int, numOffsets int, litE
 				count = 0
 			}
 		}
+
 		count--
 		for ; count >= 0; count-- {
 			codegen[outIndex] = size
 			outIndex++
 			w.codegenFreq[size]++
 		}
+
 		// Set up invariant for next time through the loop.
 		size = nextSize
 		count = 1
 	}
+
 	// Marker indicating the end of the codegen.
 	codegen[outIndex] = badCode
 }
@@ -352,6 +378,7 @@ func (w *huffmanBitWriter) codegens() int {
 	for numCodegens > 4 && w.codegenFreq[codegenOrder[numCodegens-1]] == 0 {
 		numCodegens--
 	}
+
 	return numCodegens
 }
 
@@ -360,6 +387,7 @@ func (w *huffmanBitWriter) headerSize() (size, numCodegens int) {
 	for numCodegens > 4 && w.codegenFreq[codegenOrder[numCodegens-1]] == 0 {
 		numCodegens--
 	}
+
 	return 3 + 5 + 5 + 4 + (3 * numCodegens) +
 		w.codegenEncoding.bitLength(w.codegenFreq[:]) +
 		int(w.codegenFreq[16])*2 +
@@ -381,6 +409,7 @@ func (w *huffmanBitWriter) dynamicSize(litEnc, offEnc *huffmanEncoder, extraBits
 		litEnc.bitLength(w.literalFreq[:]) +
 		offEnc.bitLength(w.offsetFreq[:]) +
 		extraBits
+
 	return size, numCodegens
 }
 
@@ -391,9 +420,11 @@ func (w *huffmanBitWriter) extraBitSize() int {
 	for i, n := range w.literalFreq[257:literalCount] {
 		total += int(n) * int(lengthExtraBits[i&31])
 	}
+
 	for i, n := range w.offsetFreq[:offsetCodeCount] {
 		total += int(n) * int(offsetExtraBits[i&31])
 	}
+
 	return total
 }
 
@@ -412,15 +443,18 @@ func (w *huffmanBitWriter) storedSize(in []byte) (int, bool) {
 	if in == nil {
 		return 0, false
 	}
+
 	if len(in) <= maxStoreBlockSize {
 		return (len(in) + 5) * 8, true
 	}
+
 	return 0, false
 }
 
 func (w *huffmanBitWriter) writeCode(c hcode) {
 	// The function does not get inlined if we "& 63" the shift.
 	w.bits |= c.code64() << (w.nbits & 63)
+
 	w.nbits += c.len()
 	if w.nbits >= 48 {
 		w.writeOutBits()
@@ -443,6 +477,7 @@ func (w *huffmanBitWriter) writeOutBits() {
 			n = 0
 			return
 		}
+
 		w.write(w.bytes[:n])
 		n = 0
 	}
@@ -455,14 +490,16 @@ func (w *huffmanBitWriter) writeOutBits() {
 //	numLiterals  The number of literals specified in codegen
 //	numOffsets   The number of offsets specified in codegen
 //	numCodegens  The number of codegens used in codegen
-func (w *huffmanBitWriter) writeDynamicHeader(numLiterals int, numOffsets int, numCodegens int, isEof bool) {
+func (w *huffmanBitWriter) writeDynamicHeader(numLiterals, numOffsets, numCodegens int, isEof bool) {
 	if w.err != nil {
 		return
 	}
+
 	var firstBits int32 = 4
 	if isEof {
 		firstBits = 5
 	}
+
 	w.writeBits(firstBits, 3)
 	w.writeBits(int32(numLiterals-257), 5)
 	w.writeBits(int32(numOffsets-1), 5)
@@ -475,11 +512,14 @@ func (w *huffmanBitWriter) writeDynamicHeader(numLiterals int, numOffsets int, n
 
 	i := 0
 	for {
-		var codeWord = uint32(w.codegen[i])
+		codeWord := uint32(w.codegen[i])
+
 		i++
+
 		if codeWord == badCode {
 			break
 		}
+
 		w.writeCode(w.codegenEncoding.codes[codeWord])
 
 		switch codeWord {
@@ -503,6 +543,7 @@ func (w *huffmanBitWriter) writeStoredHeader(length int, isEof bool) {
 	if w.err != nil {
 		return
 	}
+
 	if w.lastHeader > 0 {
 		// We owe an EOB
 		w.writeCode(w.literalEncoding.codes[endBlockMarker])
@@ -515,6 +556,7 @@ func (w *huffmanBitWriter) writeStoredHeader(length int, isEof bool) {
 		// EOB: 7 bits, value: 0
 		w.writeBits(0, 7)
 		w.flush()
+
 		return
 	}
 
@@ -522,6 +564,7 @@ func (w *huffmanBitWriter) writeStoredHeader(length int, isEof bool) {
 	if isEof {
 		flag = 1
 	}
+
 	w.writeBits(flag, 3)
 	w.flush()
 	w.writeBits(int32(length), 16)
@@ -532,6 +575,7 @@ func (w *huffmanBitWriter) writeFixedHeader(isEof bool) {
 	if w.err != nil {
 		return
 	}
+
 	if w.lastHeader > 0 {
 		// We owe an EOB
 		w.writeCode(w.literalEncoding.codes[endBlockMarker])
@@ -543,6 +587,7 @@ func (w *huffmanBitWriter) writeFixedHeader(isEof bool) {
 	if isEof {
 		value = 3
 	}
+
 	w.writeBits(value, 3)
 }
 
@@ -557,14 +602,18 @@ func (w *huffmanBitWriter) writeBlock(tokens *tokens, eof bool, input []byte) {
 	}
 
 	tokens.AddEOB()
+
 	if w.lastHeader > 0 {
 		// We owe an EOB
 		w.writeCode(w.literalEncoding.codes[endBlockMarker])
 		w.lastHeader = 0
 	}
+
 	numLiterals, numOffsets := w.indexTokens(tokens, false)
 	w.generate()
+
 	var extraBits int
+
 	storedSize, storable := w.storedSize(input)
 	if storable {
 		extraBits = w.extraBitSize()
@@ -572,9 +621,12 @@ func (w *huffmanBitWriter) writeBlock(tokens *tokens, eof bool, input []byte) {
 
 	// Figure out smallest code.
 	// Fixed Huffman baseline.
-	var literalEncoding = fixedLiteralEncoding
-	var offsetEncoding = fixedOffsetEncoding
-	var size = math.MaxInt32
+	var (
+		literalEncoding = fixedLiteralEncoding
+		offsetEncoding  = fixedOffsetEncoding
+		size            = math.MaxInt32
+	)
+
 	if tokens.n < maxPredefinedTokens {
 		size = w.fixedSize(extraBits)
 	}
@@ -651,6 +703,7 @@ func (w *huffmanBitWriter) writeBlockDynamic(tokens *tokens, eof bool, input []b
 	ssize, storable := w.storedSize(input)
 
 	const usePrefs = true
+
 	if storable || w.lastHeader > 0 {
 		extraBits = w.extraBitSize()
 	}
@@ -672,6 +725,7 @@ func (w *huffmanBitWriter) writeBlockDynamic(tokens *tokens, eof bool, input []b
 		if newSize < reuseSize {
 			// Write the EOB we owe.
 			w.writeCode(w.literalEncoding.codes[endBlockMarker])
+
 			size = newSize
 			w.lastHeader = 0
 		} else {
@@ -686,14 +740,19 @@ func (w *huffmanBitWriter) writeBlockDynamic(tokens *tokens, eof bool, input []b
 					w.writeBytes(input)
 					return
 				}
+
 				w.writeFixedHeader(eof)
+
 				if !sync {
 					tokens.AddEOB()
 				}
+
 				w.writeTokens(tokens.Slice(), fixedLiteralEncoding.codes, fixedOffsetEncoding.codes)
+
 				return
 			}
 		}
+
 		// Check if we get a reasonable size decrease.
 		if storable && ssize <= size {
 			w.writeStoredHeader(len(input), eof)
@@ -706,6 +765,7 @@ func (w *huffmanBitWriter) writeBlockDynamic(tokens *tokens, eof bool, input []b
 	if w.lastHeader == 0 {
 		if fillReuse && !sync {
 			w.fillTokens()
+
 			numLiterals, numOffsets = maxNumLit, maxNumDist
 		} else {
 			w.literalFreq[endBlockMarker] = 1
@@ -718,10 +778,12 @@ func (w *huffmanBitWriter) writeBlockDynamic(tokens *tokens, eof bool, input []b
 		w.codegenEncoding.generate(w.codegenFreq[:], 7)
 
 		var numCodegens int
+
 		if fillReuse && !sync {
 			// Reindex for accurate size...
 			w.indexTokens(tokens, true)
 		}
+
 		size, numCodegens = w.dynamicSize(w.literalEncoding, w.offsetEncoding, extraBits)
 
 		// Store predefined, if we don't get a reasonable improvement.
@@ -733,11 +795,15 @@ func (w *huffmanBitWriter) writeBlockDynamic(tokens *tokens, eof bool, input []b
 					w.writeBytes(input)
 					return
 				}
+
 				w.writeFixedHeader(eof)
+
 				if !sync {
 					tokens.AddEOB()
 				}
+
 				w.writeTokens(tokens.Slice(), fixedLiteralEncoding.codes, fixedOffsetEncoding.codes)
+
 				return
 			}
 		}
@@ -751,15 +817,18 @@ func (w *huffmanBitWriter) writeBlockDynamic(tokens *tokens, eof bool, input []b
 
 		// Write Huffman table.
 		w.writeDynamicHeader(numLiterals, numOffsets, numCodegens, eof)
+
 		if !sync {
 			w.lastHeader, _ = w.headerSize()
 		}
+
 		w.lastHuffMan = false
 	}
 
 	if sync {
 		w.lastHeader = 0
 	}
+
 	// Write the tokens.
 	w.writeTokens(tokens.Slice(), w.literalEncoding.codes, w.offsetEncoding.codes)
 }
@@ -770,6 +839,7 @@ func (w *huffmanBitWriter) fillTokens() {
 			w.literalFreq[i] = 1
 		}
 	}
+
 	for i, v := range w.offsetFreq[:offsetCodeCount] {
 		if v == 0 {
 			w.offsetFreq[i] = 1
@@ -782,15 +852,16 @@ func (w *huffmanBitWriter) fillTokens() {
 // and offsetEncoding.
 // The number of literal and offset tokens is returned.
 func (w *huffmanBitWriter) indexTokens(t *tokens, alwaysEOB bool) (numLiterals, numOffsets int) {
-	//copy(w.literalFreq[:], t.litHist[:])
+	// copy(w.literalFreq[:], t.litHist[:])
 	*(*[256]uint16)(w.literalFreq[:]) = t.litHist
-	//copy(w.literalFreq[256:], t.extraHist[:])
+	// copy(w.literalFreq[256:], t.extraHist[:])
 	*(*[32]uint16)(w.literalFreq[256:]) = t.extraHist
 	w.offsetFreq = t.offHist
 
 	if t.n == 0 {
-		return
+		return numLiterals, numOffsets
 	}
+
 	if alwaysEOB {
 		w.literalFreq[endBlockMarker] = 1
 	}
@@ -800,18 +871,21 @@ func (w *huffmanBitWriter) indexTokens(t *tokens, alwaysEOB bool) (numLiterals, 
 	for w.literalFreq[numLiterals-1] == 0 {
 		numLiterals--
 	}
+
 	// get the number of offsets
 	numOffsets = len(w.offsetFreq)
 	for numOffsets > 0 && w.offsetFreq[numOffsets-1] == 0 {
 		numOffsets--
 	}
+
 	if numOffsets == 0 {
 		// We haven't found a single match. If we want to go with the dynamic encoding,
 		// we should count at least one offset to be sure that the offset huffman tree could be encoded.
 		w.offsetFreq[0] = 1
 		numOffsets = 1
 	}
-	return
+
+	return numLiterals, numOffsets
 }
 
 func (w *huffmanBitWriter) generate() {
@@ -825,6 +899,7 @@ func (w *huffmanBitWriter) writeTokens(tokens []token, leCodes, oeCodes []hcode)
 	if w.err != nil {
 		return
 	}
+
 	if len(tokens) == 0 {
 		return
 	}
@@ -847,29 +922,34 @@ func (w *huffmanBitWriter) writeTokens(tokens []token, leCodes, oeCodes []hcode)
 
 	for _, t := range tokens {
 		if t < 256 {
-			//w.writeCode(lits[t.literal()])
+			// w.writeCode(lits[t.literal()])
 			c := lits[t]
 			bits |= c.code64() << (nbits & 63)
+
 			nbits += c.len()
 			if nbits >= 48 {
 				le.Store64(w.bytes[:], nbytes, bits)
 				bits >>= 48
 				nbits -= 48
+
 				nbytes += 6
 				if nbytes >= bufferFlushSize {
 					if w.err != nil {
 						nbytes = 0
 						return
 					}
+
 					_, w.err = w.writer.Write(w.bytes[:nbytes])
 					nbytes = 0
 				}
 			}
+
 			continue
 		}
 
 		// Write the length
 		length := t.length()
+
 		lengthCode := lengthCode(length) & 31
 		if false {
 			w.writeCode(lengths[lengthCode])
@@ -877,17 +957,20 @@ func (w *huffmanBitWriter) writeTokens(tokens []token, leCodes, oeCodes []hcode)
 			// inlined
 			c := lengths[lengthCode]
 			bits |= c.code64() << (nbits & 63)
+
 			nbits += c.len()
 			if nbits >= 48 {
 				le.Store64(w.bytes[:], nbytes, bits)
 				bits >>= 48
 				nbits -= 48
+
 				nbytes += 6
 				if nbytes >= bufferFlushSize {
 					if w.err != nil {
 						nbytes = 0
 						return
 					}
+
 					_, w.err = w.writer.Write(w.bytes[:nbytes])
 					nbytes = 0
 				}
@@ -896,27 +979,32 @@ func (w *huffmanBitWriter) writeTokens(tokens []token, leCodes, oeCodes []hcode)
 
 		if lengthCode >= lengthExtraBitsMinCode {
 			extraLengthBits := lengthExtraBits[lengthCode]
-			//w.writeBits(extraLength, extraLengthBits)
+			// w.writeBits(extraLength, extraLengthBits)
 			extraLength := int32(length - lengthBase[lengthCode])
 			bits |= uint64(extraLength) << (nbits & 63)
+
 			nbits += extraLengthBits
 			if nbits >= 48 {
 				le.Store64(w.bytes[:], nbytes, bits)
 				bits >>= 48
 				nbits -= 48
+
 				nbytes += 6
 				if nbytes >= bufferFlushSize {
 					if w.err != nil {
 						nbytes = 0
 						return
 					}
+
 					_, w.err = w.writer.Write(w.bytes[:nbytes])
 					nbytes = 0
 				}
 			}
 		}
+
 		// Write the offset
 		offset := t.offset()
+
 		offsetCode := (offset >> 16) & 31
 		if false {
 			w.writeCode(offs[offsetCode])
@@ -924,17 +1012,20 @@ func (w *huffmanBitWriter) writeTokens(tokens []token, leCodes, oeCodes []hcode)
 			// inlined
 			c := offs[offsetCode]
 			bits |= c.code64() << (nbits & 63)
+
 			nbits += c.len()
 			if nbits >= 48 {
 				le.Store64(w.bytes[:], nbytes, bits)
 				bits >>= 48
 				nbits -= 48
+
 				nbytes += 6
 				if nbytes >= bufferFlushSize {
 					if w.err != nil {
 						nbytes = 0
 						return
 					}
+
 					_, w.err = w.writer.Write(w.bytes[:nbytes])
 					nbytes = 0
 				}
@@ -943,25 +1034,29 @@ func (w *huffmanBitWriter) writeTokens(tokens []token, leCodes, oeCodes []hcode)
 
 		if offsetCode >= offsetExtraBitsMinCode {
 			offsetComb := offsetCombined[offsetCode]
-			//w.writeBits(extraOffset, extraOffsetBits)
+			// w.writeBits(extraOffset, extraOffsetBits)
 			bits |= uint64((offset-(offsetComb>>8))&matchOffsetOnlyMask) << (nbits & 63)
+
 			nbits += uint8(offsetComb)
 			if nbits >= 48 {
 				le.Store64(w.bytes[:], nbytes, bits)
 				bits >>= 48
 				nbits -= 48
+
 				nbytes += 6
 				if nbytes >= bufferFlushSize {
 					if w.err != nil {
 						nbytes = 0
 						return
 					}
+
 					_, w.err = w.writer.Write(w.bytes[:nbytes])
 					nbytes = 0
 				}
 			}
 		}
 	}
+
 	// Restore...
 	w.bits, w.nbits, w.nbytes = bits, nbits, nbytes
 
@@ -993,52 +1088,65 @@ func (w *huffmanBitWriter) writeBlockHuff(eof bool, input []byte, sync bool) {
 	for i := range w.literalFreq[:] {
 		w.literalFreq[i] = 0
 	}
+
 	if !w.lastHuffMan {
 		for i := range w.offsetFreq[:] {
 			w.offsetFreq[i] = 0
 		}
 	}
 
-	const numLiterals = endBlockMarker + 1
-	const numOffsets = 1
+	const (
+		numLiterals = endBlockMarker + 1
+		numOffsets  = 1
+	)
 
 	// Add everything as literals
 	// We have to estimate the header size.
 	// Assume header is around 70 bytes:
 	// https://stackoverflow.com/a/25454430
 	const guessHeaderSizeBits = 70 * 8
+
 	histogram(input, w.literalFreq[:numLiterals])
+
 	ssize, storable := w.storedSize(input)
 	if storable && len(input) > 1024 {
 		// Quick check for incompressible content.
 		abs := float64(0)
 		avg := float64(len(input)) / 256
+
 		max := float64(len(input) * 2)
 		for _, v := range w.literalFreq[:256] {
 			diff := float64(v) - avg
+
 			abs += diff * diff
 			if abs > max {
 				break
 			}
 		}
+
 		if abs < max {
 			if debugDeflate {
 				fmt.Println("stored", abs, "<", max)
 			}
+
 			// No chance we can compress this...
 			w.writeStoredHeader(len(input), eof)
 			w.writeBytes(input)
+
 			return
 		}
 	}
+
 	w.literalFreq[endBlockMarker] = 1
 	w.tmpLitEncoding.generate(w.literalFreq[:numLiterals], 15)
+
 	estBits := w.tmpLitEncoding.canReuseBits(w.literalFreq[:numLiterals])
 	if estBits < math.MaxInt32 {
 		estBits += w.lastHeader
 		if w.lastHeader == 0 {
 			estBits += guessHeaderSizeBits
 		}
+
 		estBits += estBits >> w.logNewTablePenalty
 	}
 
@@ -1047,8 +1155,10 @@ func (w *huffmanBitWriter) writeBlockHuff(eof bool, input []byte, sync bool) {
 		if debugDeflate {
 			fmt.Println("stored,", ssize, "<=", estBits)
 		}
+
 		w.writeStoredHeader(len(input), eof)
 		w.writeBytes(input)
+
 		return
 	}
 
@@ -1057,8 +1167,17 @@ func (w *huffmanBitWriter) writeBlockHuff(eof bool, input []byte, sync bool) {
 
 		if estBits < reuseSize {
 			if debugDeflate {
-				fmt.Println("NOT reusing, reuse:", reuseSize/8, "> new:", estBits/8, "header est:", w.lastHeader/8, "bytes")
+				fmt.Println(
+					"NOT reusing, reuse:",
+					reuseSize/8,
+					"> new:",
+					estBits/8,
+					"header est:",
+					w.lastHeader/8,
+					"bytes",
+				)
 			}
+
 			// We owe an EOB
 			w.writeCode(w.literalEncoding.codes[endBlockMarker])
 			w.lastHeader = 0
@@ -1080,6 +1199,7 @@ func (w *huffmanBitWriter) writeBlockHuff(eof bool, input []byte, sync bool) {
 		// Huffman.
 		w.writeDynamicHeader(numLiterals, numOffsets, numCodegens, eof)
 		w.lastHuffMan = true
+
 		w.lastHeader, _ = w.headerSize()
 		if debugDeflate {
 			count += w.lastHeader
@@ -1094,28 +1214,34 @@ func (w *huffmanBitWriter) writeBlockHuff(eof bool, input []byte, sync bool) {
 	if debugDeflate {
 		count -= int(nbytes)*8 + int(nbits)
 	}
+
 	// Unroll, write 3 codes/loop.
 	// Fastest number of unrolls.
 	for len(input) > 3 {
 		// We must have at least 48 bits free.
 		if nbits >= 8 {
 			n := nbits >> 3
+
 			le.Store64(w.bytes[:], nbytes, bits)
 			bits >>= (n * 8) & 63
 			nbits -= n * 8
 			nbytes += n
 		}
+
 		if nbytes >= bufferFlushSize {
 			if w.err != nil {
 				nbytes = 0
 				return
 			}
+
 			if debugDeflate {
 				count += int(nbytes) * 8
 			}
+
 			_, w.err = w.writer.Write(w.bytes[:nbytes])
 			nbytes = 0
 		}
+
 		a, b := encoding[input[0]], encoding[input[1]]
 		bits |= a.code64() << (nbits & 63)
 		bits |= b.code64() << ((nbits + a.len()) & 63)
@@ -1132,19 +1258,23 @@ func (w *huffmanBitWriter) writeBlockHuff(eof bool, input []byte, sync bool) {
 			le.Store64(w.bytes[:], nbytes, bits)
 			bits >>= 48
 			nbits -= 48
+
 			nbytes += 6
 			if nbytes >= bufferFlushSize {
 				if w.err != nil {
 					nbytes = 0
 					return
 				}
+
 				if debugDeflate {
 					count += int(nbytes) * 8
 				}
+
 				_, w.err = w.writer.Write(w.bytes[:nbytes])
 				nbytes = 0
 			}
 		}
+
 		// Bitwriting inlined, ~30% speedup
 		c := encoding[t]
 		bits |= c.code64() << (nbits & 63)
@@ -1154,6 +1284,7 @@ func (w *huffmanBitWriter) writeBlockHuff(eof bool, input []byte, sync bool) {
 			count += int(c.len())
 		}
 	}
+
 	// Restore...
 	w.bits, w.nbits, w.nbytes = bits, nbits, nbytes
 
@@ -1161,6 +1292,7 @@ func (w *huffmanBitWriter) writeBlockHuff(eof bool, input []byte, sync bool) {
 		nb := count + int(nbytes)*8 + int(nbits)
 		fmt.Println("wrote", nb, "bits,", nb/8, "bytes.")
 	}
+
 	// Flush if needed to have space.
 	if w.nbits >= 48 {
 		w.writeOutBits()

@@ -21,7 +21,11 @@ var (
 	symbolTableX [3][]baseOffset
 
 	// maxTableSymbol is the biggest supported symbol for each table type
-	maxTableSymbol = [3]uint8{tableLiteralLengths: maxLiteralLengthSymbol, tableOffsets: maxOffsetLengthSymbol, tableMatchLengths: maxMatchLengthSymbol}
+	maxTableSymbol = [3]uint8{
+		tableLiteralLengths: maxLiteralLengthSymbol,
+		tableOffsets:        maxOffsetLengthSymbol,
+		tableMatchLengths:   maxMatchLengthSymbol,
+	}
 )
 
 type tableIndex uint8
@@ -48,6 +52,7 @@ func fillBase(dst []baseOffset, base uint32, bits ...uint8) {
 	if len(bits) != len(dst) {
 		panic(fmt.Sprintf("len(dst) (%d) != len(bits) (%d)", len(dst), len(bits)))
 	}
+
 	for i, bit := range bits {
 		if base > math.MaxInt32 {
 			panic("invalid decoding table, base overflows int32")
@@ -73,6 +78,7 @@ func initPredefined() {
 				addBits:  0,
 			}
 		}
+
 		fillBase(tmp[16:], 16, 1, 1, 1, 1, 2, 2, 3, 3, 4, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16)
 		symbolTableX[tableLiteralLengths] = tmp
 
@@ -85,6 +91,7 @@ func initPredefined() {
 				addBits:  0,
 			}
 		}
+
 		fillBase(tmp[32:], 35, 1, 1, 1, 1, 2, 2, 3, 3, 4, 4, 5, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16)
 		symbolTableX[tableMatchLengths] = tmp
 
@@ -94,7 +101,39 @@ func initPredefined() {
 			baseLine: 1,
 			addBits:  1,
 		}
-		fillBase(tmp[2:], 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30)
+		fillBase(
+			tmp[2:],
+			1,
+			2,
+			3,
+			4,
+			5,
+			6,
+			7,
+			8,
+			9,
+			10,
+			11,
+			12,
+			13,
+			14,
+			15,
+			16,
+			17,
+			18,
+			19,
+			20,
+			21,
+			22,
+			23,
+			24,
+			25,
+			26,
+			27,
+			28,
+			29,
+			30,
+		)
 		symbolTableX[tableOffsets] = tmp
 
 		// Fill predefined tables and transform them.
@@ -104,31 +143,40 @@ func initPredefined() {
 			switch tableIndex(i) {
 			case tableLiteralLengths:
 				f.actualTableLog = 6
-				copy(f.norm[:], []int16{4, 3, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 1, 1, 1,
+				copy(f.norm[:], []int16{
+					4, 3, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 1, 1, 1,
 					2, 2, 2, 2, 2, 2, 2, 2, 2, 3, 2, 1, 1, 1, 1, 1,
-					-1, -1, -1, -1})
+					-1, -1, -1, -1,
+				})
 				f.symbolLen = 36
+
 			case tableOffsets:
 				f.actualTableLog = 5
 				copy(f.norm[:], []int16{
 					1, 1, 1, 1, 1, 1, 2, 2, 2, 1, 1, 1, 1, 1, 1, 1,
-					1, 1, 1, 1, 1, 1, 1, 1, -1, -1, -1, -1, -1})
+					1, 1, 1, 1, 1, 1, 1, 1, -1, -1, -1, -1, -1,
+				})
 				f.symbolLen = 29
+
 			case tableMatchLengths:
 				f.actualTableLog = 6
 				copy(f.norm[:], []int16{
 					1, 4, 3, 2, 2, 2, 2, 2, 2, 1, 1, 1, 1, 1, 1, 1,
 					1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
 					1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, -1, -1,
-					-1, -1, -1, -1, -1})
+					-1, -1, -1, -1, -1,
+				})
 				f.symbolLen = 53
 			}
+
 			if err := f.buildDtable(); err != nil {
-				panic(fmt.Errorf("building table %v: %v", tableIndex(i), err))
+				panic(fmt.Errorf("building table %v: %w", tableIndex(i), err))
 			}
+
 			if err := f.transform(symbolTableX[i]); err != nil {
-				panic(fmt.Errorf("building table %v: %v", tableIndex(i), err))
+				panic(fmt.Errorf("building table %v: %w", tableIndex(i), err))
 			}
+
 			f.preDefined = true
 		}
 	})

@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Lemon4ksan All rights reserved.
+// Use of this source code is governed by a BSD-style
+// license that can be found in the LICENSE file.
+
 package flate
 
 import (
@@ -27,6 +31,7 @@ func (s *statelessWriter) Close() error {
 	if s.closed {
 		return nil
 	}
+
 	s.closed = true
 	// Emit EOF block
 	return StatelessDeflate(s.dst, nil, true, nil)
@@ -37,6 +42,7 @@ func (s *statelessWriter) Write(p []byte) (n int, err error) {
 	if err != nil {
 		return 0, err
 	}
+
 	return len(p), nil
 }
 
@@ -75,12 +81,14 @@ var tokensPool = sync.Pool{
 // Sending nil dictionary is perfectly fine.
 func StatelessDeflate(out io.Writer, in []byte, eof bool, dict []byte) error {
 	bw := bitWriterPool.Get().(*huffmanBitWriter)
+
 	bw.reset(out)
 	defer func() {
 		// don't keep a reference to our output
 		bw.reset(nil)
 		bitWriterPool.Put(bw)
 	}()
+
 	if eof && len(in) == 0 {
 		// Just write an EOF block.
 		// Could be faster...
@@ -98,6 +106,7 @@ func StatelessDeflate(out io.Writer, in []byte, eof bool, dict []byte) error {
 	var inDict []byte
 
 	dst := tokensPool.Get().(*tokens)
+
 	dst.Reset()
 	defer func() {
 		tokensPool.Put(dst)
@@ -112,8 +121,10 @@ func StatelessDeflate(out io.Writer, in []byte, eof bool, dict []byte) error {
 		} else if len(todo) > maxStatelessBlock-len(dict) {
 			todo = todo[:maxStatelessBlock-len(dict)]
 		}
+
 		inOrg := in
 		in = in[len(todo):]
+
 		uncompressed := todo
 		if len(dict) > 0 {
 			// combine dict and source
@@ -123,19 +134,23 @@ func StatelessDeflate(out io.Writer, in []byte, eof bool, dict []byte) error {
 			copy(combined[len(dict):], todo)
 			todo = combined
 		}
+
 		// Compress
 		if len(inDict) == 0 {
 			statelessEnc(dst, todo, int16(len(dict)))
 		} else {
 			statelessEnc(dst, inDict[:maxStatelessDict+len(todo)], maxStatelessDict)
 		}
+
 		isEof := eof && len(in) == 0
 
 		if dst.n == 0 {
 			bw.writeStoredHeader(len(uncompressed), isEof)
+
 			if bw.err != nil {
 				return bw.err
 			}
+
 			bw.writeBytes(uncompressed)
 		} else if int(dst.n) > len(uncompressed)-len(uncompressed)>>4 {
 			// If we removed less than 1/16th, huffman compress the block.
@@ -143,21 +158,27 @@ func StatelessDeflate(out io.Writer, in []byte, eof bool, dict []byte) error {
 		} else {
 			bw.writeBlockDynamic(dst, isEof, uncompressed, len(in) == 0)
 		}
+
 		if len(in) > 0 {
 			// Retain a dict if we have more
 			inDict = inOrg[len(uncompressed)-maxStatelessDict:]
 			dict = nil
+
 			dst.Reset()
 		}
+
 		if bw.err != nil {
 			return bw.err
 		}
 	}
+
 	if !eof {
 		// Align, only a stored block can do that.
 		bw.writeStoredHeader(0, false)
 	}
+
 	bw.flush()
+
 	return bw.err
 }
 
@@ -193,6 +214,7 @@ func statelessEnc(dst *tokens, src []byte, startAt int16) {
 		dst.n = 0
 		return
 	}
+
 	// Index until startAt
 	if startAt > 0 {
 		cv := load3232(src, 0)
@@ -213,14 +235,18 @@ func statelessEnc(dst *tokens, src []byte, startAt int16) {
 	cv := load3216(src, s)
 
 	for {
-		const skipLog = 5
-		const doEvery = 2
+		const (
+			skipLog = 5
+			doEvery = 2
+		)
 
 		nextS := s
+
 		var candidate tableEntry
 		for {
 			nextHash := hashSL(cv)
 			candidate = table[nextHash]
+
 			nextS = s + doEvery + (s-nextEmit)>>skipLog
 			if nextS > sLimit || nextS <= 0 {
 				goto emitRemainder
@@ -247,6 +273,7 @@ func statelessEnc(dst *tokens, src []byte, startAt int16) {
 				table[nextHash] = tableEntry{offset: nextS}
 				break
 			}
+
 			cv = uint32(now)
 			s = nextS
 		}
@@ -268,6 +295,7 @@ func statelessEnc(dst *tokens, src []byte, startAt int16) {
 				t--
 				l++
 			}
+
 			if nextEmit < s {
 				if false {
 					emitLiteral(dst, src[nextEmit:s])
@@ -283,10 +311,12 @@ func statelessEnc(dst *tokens, src []byte, startAt int16) {
 			// Save the match found
 			dst.AddMatchLong(int32(l), uint32(s-t-baseMatchOffset))
 			s += l
+
 			nextEmit = s
 			if nextS >= s {
 				s = nextS + 1
 			}
+
 			if s >= sLimit {
 				goto emitRemainder
 			}
@@ -320,6 +350,7 @@ emitRemainder:
 		if dst.n == 0 {
 			return
 		}
+
 		emitLiteral(dst, src[nextEmit:])
 	}
 }

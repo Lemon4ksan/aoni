@@ -97,6 +97,7 @@ func TestFastClient_CookieParity(t *testing.T) {
 	t.Parallel()
 
 	jar := cookie.NewProxyIsolatedJar()
+
 	client := fast.NewClient(option.WithCookieJar(jar))
 	defer client.CloseIdleConnections()
 
