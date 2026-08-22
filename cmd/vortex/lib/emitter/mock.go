@@ -24,7 +24,7 @@ func EmitMock(root *ir.RootIR) ([]byte, error) {
 	var bodyBuf bytes.Buffer
 
 	for _, svc := range root.Services {
-		if err := emitServiceMock(&bodyBuf, root, svc); err != nil {
+		if err := emitServiceMock(&bodyBuf, svc); err != nil {
 			return nil, err
 		}
 	}
@@ -116,7 +116,7 @@ func EmitMock(root *ir.RootIR) ([]byte, error) {
 	return formatted, nil
 }
 
-func emitServiceMock(buf *bytes.Buffer, root *ir.RootIR, svc *ir.ServiceIR) error {
+func emitServiceMock(buf *bytes.Buffer, svc *ir.ServiceIR) error {
 	mockServerName := svc.Name + "MockServer"
 	clientStructName := lowerFirst(svc.Name) + "Client"
 
@@ -216,7 +216,7 @@ func emitServiceMock(buf *bytes.Buffer, root *ir.RootIR, svc *ir.ServiceIR) erro
 	buf.WriteString("\t_ = parts\n\n")
 
 	for _, m := range svc.Methods {
-		emitMethodRouteMatch(buf, svc, m)
+		emitMethodRouteMatch(buf, m)
 	}
 
 	// Fallback 404
@@ -249,7 +249,7 @@ func renderMockHandlerSignature(m *ir.MethodIR) string {
 	return fmt.Sprintf("func(%s) (%s, error)", strings.Join(params, ", "), retType)
 }
 
-func emitMethodRouteMatch(buf *bytes.Buffer, svc *ir.ServiceIR, m *ir.MethodIR) {
+func emitMethodRouteMatch(buf *bytes.Buffer, m *ir.MethodIR) {
 	httpVerb := strings.ToUpper(m.HTTPMethod)
 	if httpVerb == "" {
 		httpVerb = "GET"

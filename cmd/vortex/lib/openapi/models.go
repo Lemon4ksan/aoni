@@ -53,7 +53,7 @@ func writeSchemaModel(buf *bytes.Buffer, rawName string, s *Schema, allSchemas m
 	}
 
 	if isUnionModel(s) {
-		writeUnionModel(buf, name, s, cfg)
+		writeUnionModel(buf, name, s)
 		return
 	}
 
@@ -96,7 +96,7 @@ func writeEnumModel(buf *bytes.Buffer, name string, s *Schema) {
 //
 // # References
 //   - OpenAPI 3.1.0 §4.8.25 Discriminator Object: https://spec.openapis.org/oas/v3.1.0#discriminator-object
-func writeUnionModel(buf *bytes.Buffer, name string, s *Schema, cfg ImportConfig) {
+func writeUnionModel(buf *bytes.Buffer, name string, s *Schema) {
 	fmt.Fprintf(buf, "// @aoni:union")
 
 	if s.Discriminator != nil && s.Discriminator.PropertyName != "" {

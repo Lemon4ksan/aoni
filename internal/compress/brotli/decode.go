@@ -1099,7 +1099,7 @@ Transform:
     Most of input values are 0 and 1. To reduce number of branches, we replace
     inner for loop with do-while.
 */
-func inverseMoveToFrontTransform(v []byte, v_len uint32, state *Reader) {
+func inverseMoveToFrontTransform(v []byte, v_len uint32) {
 	var (
 		mtf [256]byte
 		i   int
@@ -1323,7 +1323,7 @@ func decodeContextMap(context_map_size uint32, num_htrees *uint32, context_map_a
 		}
 
 		if bits != 0 {
-			inverseMoveToFrontTransform(*context_map_arg, context_map_size, s)
+			inverseMoveToFrontTransform(*context_map_arg, context_map_size)
 		}
 
 		s.substateContextMap = stateContextMapNone

@@ -70,7 +70,7 @@ func checkInputAmount(br *bitReader, num uint) bool {
 	return br.inputLen-br.bytePos >= num
 }
 
-func fillBitWindow(br *bitReader, nBits uint32) {
+func fillBitWindow(br *bitReader) {
 	if br.bitPos >= 32 {
 		br.val >>= 32
 		br.bitPos ^= 32
@@ -80,7 +80,7 @@ func fillBitWindow(br *bitReader, nBits uint32) {
 }
 
 func fillBitWindow16(br *bitReader) {
-	fillBitWindow(br, 17)
+	fillBitWindow(br)
 }
 
 func pullByte(br *bitReader) bool {
@@ -101,12 +101,12 @@ func getBitsUnmasked(br *bitReader) uint64 {
 }
 
 func get16BitsUnmasked(br *bitReader) uint32 {
-	fillBitWindow(br, 16)
+	fillBitWindow(br)
 	return uint32(getBitsUnmasked(br))
 }
 
 func getBits(br *bitReader, nBits uint32) uint32 {
-	fillBitWindow(br, nBits)
+	fillBitWindow(br)
 	return uint32(getBitsUnmasked(br)) & bitMask(nBits)
 }
 
@@ -148,7 +148,7 @@ func takeBits(br *bitReader, nBits uint32, val *uint32) {
 func readBits(br *bitReader, nBits uint32) uint32 {
 	var val uint32
 
-	fillBitWindow(br, nBits)
+	fillBitWindow(br)
 	takeBits(br, nBits, &val)
 
 	return val

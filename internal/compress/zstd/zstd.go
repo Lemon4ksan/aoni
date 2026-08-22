@@ -23,9 +23,6 @@ const debugDecoder = debug
 // debugAsserts controls internal invariant checks.
 const debugAsserts = false
 
-// zstdMinMatch is the minimum zstd match length.
-const zstdMinMatch = 3
-
 // print sequence details
 const debugSequences = false
 

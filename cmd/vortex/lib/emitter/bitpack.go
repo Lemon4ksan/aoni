@@ -36,19 +36,10 @@ func emitBitpack(buf *bytes.Buffer, tracker *ImportTracker, bp *ir.BitpackIR) {
 	fmt.Fprintf(buf, "// %sByteSize is the total byte length of packed %s.\n", name, name)
 	fmt.Fprintf(buf, "const %sByteSize = %d\n\n", name, totalBytes)
 
-	hasBools := false
-
-	for _, f := range bp.Fields {
-		if f.IsBool {
-			hasBools = true
-			break
-		}
-	}
-
 	if totalBits <= 64 {
-		emitBitpackSingleWord(buf, bp, endianOrder, hasBools)
+		emitBitpackSingleWord(buf, bp, endianOrder)
 	} else {
-		emitBitpackMultiWord(buf, bp, endianOrder, hasBools)
+		emitBitpackMultiWord(buf, bp, endianOrder)
 	}
 
 	// Pack(dst []byte) ([]byte, error)
@@ -101,7 +92,7 @@ func emitBitpack(buf *bytes.Buffer, tracker *ImportTracker, bp *ir.BitpackIR) {
 	emitBitpackBatchSlice(buf, bp)
 }
 
-func emitBitpackSingleWord(buf *bytes.Buffer, bp *ir.BitpackIR, endianOrder string, hasBools bool) {
+func emitBitpackSingleWord(buf *bytes.Buffer, bp *ir.BitpackIR, endianOrder string) {
 	name := bp.Name
 	totalBytes := bp.TotalBytes
 
@@ -249,7 +240,7 @@ func emitBitpackSingleWord(buf *bytes.Buffer, bp *ir.BitpackIR, endianOrder stri
 	fmt.Fprintf(buf, "}\n\n")
 }
 
-func emitBitpackMultiWord(buf *bytes.Buffer, bp *ir.BitpackIR, endianOrder string, hasBools bool) {
+func emitBitpackMultiWord(buf *bytes.Buffer, bp *ir.BitpackIR, endianOrder string) {
 	name := bp.Name
 	totalBytes := bp.TotalBytes
 	numWords := (bp.TotalBits + 63) / 64

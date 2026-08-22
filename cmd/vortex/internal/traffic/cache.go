@@ -541,7 +541,7 @@ func (c *Cmd) runExport(_ context.Context, args []string, stdout, stderr io.Writ
 	return nil
 }
 
-func (c *Cmd) runSecrets(_ context.Context, args []string, stdout, stderr io.Writer) error {
+func (c *Cmd) runSecrets(_ context.Context, args []string, stdout, _ io.Writer) error {
 	rootDir := c.getRootDir()
 
 	vault, vaultPath, err := cache.LoadSecrets(rootDir)

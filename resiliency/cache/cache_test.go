@@ -89,10 +89,10 @@ func TestInMemoryStore_ConcurrentAccess(t *testing.T) {
 
 	var wg sync.WaitGroup
 
-	for i := range goroutines {
+	for range goroutines {
 		wg.Add(1)
 
-		go func(idx int) {
+		go func() {
 			defer wg.Done()
 
 			key := "item"
@@ -100,7 +100,7 @@ func TestInMemoryStore_ConcurrentAccess(t *testing.T) {
 
 			_ = store.Set(ctx, key, val, 50*time.Millisecond)
 			_, _ = store.Get(ctx, key)
-		}(i)
+		}()
 	}
 
 	wg.Wait()

@@ -856,7 +856,6 @@ func handleDecryptedHTTPS(
 			bodyText, encoding, decompressed := decodePayloadForHAR(
 				respBodyBytes,
 				fwdResp.Header.Get("Content-Encoding"),
-				fwdResp.Header.Get("Content-Type"),
 			)
 			if decompressed {
 				var filtered []harNV
@@ -945,7 +944,7 @@ func installSystemRootCA(caFilePath string) func() {
 	return func() {}
 }
 
-func decodePayloadForHAR(data []byte, contentEncoding, contentType string) (string, string, bool) {
+func decodePayloadForHAR(data []byte, contentEncoding string) (string, string, bool) {
 	if len(data) == 0 {
 		return "", "", false
 	}

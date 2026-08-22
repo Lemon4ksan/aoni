@@ -207,7 +207,7 @@ func (c *CmdAutoPilot) scaffoldNewContract(
 	ctx context.Context,
 	cwd string,
 	reader *bufio.Reader,
-	stdout, stderr io.Writer,
+	stdout, _ io.Writer,
 ) error {
 	fmt.Fprintln(stdout, "\n? Choose contract template:")
 	fmt.Fprintln(stdout, "  [1] Declarative HTTP / REST Service (with @unwrap, @form, @referer)")

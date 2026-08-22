@@ -220,7 +220,7 @@ func DialDirectTCP(ctx context.Context, network, host, port string, opts DialOpt
 
 	orderedAddrs := orderHappyEyeballsAddrs(addrs)
 	if len(orderedAddrs) > 1 {
-		conn, err := dialHappyEyeballs(ctx, network, host, port, orderedAddrs, opts)
+		conn, err := dialHappyEyeballs(ctx, network, port, orderedAddrs, opts)
 		if err == nil {
 			if opts.FragmentConfig != nil {
 				return fragment.NewFragmentedConn(conn, opts.FragmentConfig), nil
@@ -315,7 +315,7 @@ func orderHappyEyeballsAddrs(addrs []net.IPAddr) []net.IPAddr {
 // dialHappyEyeballs performs staggered RFC 8305 connection racing across candidate IP addresses.
 func dialHappyEyeballs(
 	ctx context.Context,
-	network, host, port string,
+	network, port string,
 	addrs []net.IPAddr,
 	opts DialOptions,
 ) (net.Conn, error) {

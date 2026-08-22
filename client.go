@@ -215,7 +215,7 @@ func (c *Client) ensureRequestConfig(ctx context.Context, hasMods bool) context.
 		return ctx
 	}
 
-	if hasMods || len(c.cfg.Defaults.DefaultMods) > 0 || c.needsRequestConfig() {
+	if hasMods || len(c.cfg.Defaults.DefaultMods) > 0 || c.cfg.RequiresRequestContext() {
 		var cfg *pipeline.RequestConfig
 
 		ctx, cfg = pipeline.AllocRequestConfig(ctx)
@@ -527,50 +527,6 @@ func (c *Client) CloseIdleConnections() {
 	}
 }
 
-// needsRequestConfig reports whether active client defaults require attaching a RequestConfig DTO to request contexts.
-func (c *Client) needsRequestConfig() bool {
-	return c.cfg.Network.SocketController != nil ||
-		c.cfg.Fingerprint.TLSClientHelloSpecProvider != nil ||
-		len(c.cfg.Fingerprint.CertificatePins) > 0 ||
-		c.cfg.Fingerprint.P0fSignature != nil ||
-		c.cfg.Fingerprint.JA4Callback != nil ||
-		c.cfg.Defaults.QueryEncoder != nil ||
-		len(c.cfg.Defaults.Decoders) > 0 ||
-		c.cfg.Defaults.MultiReadThreshold > 0 ||
-		c.cfg.Network.SSRFGuard ||
-		c.cfg.Network.ProxyAddr != nil
-}
-
-// computeBaremetalEligible determines if the client configuration permits fast 0-alloc baremetal execution.
-func (c *Client) computeBaremetalEligible() bool {
-	if len(c.cfg.Defaults.DefaultMods) > 0 {
-		return false
-	}
-
-	if c.needsRequestConfig() {
-		return false
-	}
-
-	if c.cfg.Defaults.Inspector != nil || len(c.cfg.Defaults.BeforeRequest) > 0 ||
-		len(c.cfg.Defaults.AfterResponse) > 0 ||
-		len(c.cfg.Defaults.UARotationProfiles) > 0 {
-		return false
-	}
-
-	if c.cfg.Defaults.RefererAutomaton || c.cfg.Fingerprint.PacketPadding != nil {
-		return false
-	}
-
-	pipe := c.cfg.Defaults.Pipeline
-	if pipe.Decompress || pipe.Validate || pipe.Challenge || pipe.HAR != nil || pipe.Cache != nil ||
-		pipe.Hedging != nil ||
-		pipe.DPIJitter != nil {
-		return false
-	}
-
-	return true
-}
-
 // ensureUserAgent guarantees a default User-Agent header is set on client request defaults.
 func (c *Client) ensureUserAgent() {
 	if c.cfg.Defaults.Headers == nil {
@@ -596,7 +552,7 @@ func (c *Client) applyConfig(cfg Config) {
 	c.cfg = cfg
 	c.coreEngine = pipeline.NewEngine(cfg.Defaults.BaseURL, cfg.Defaults.Headers)
 	c.prepared = c.coreEngine.Prepared
-	c.baremetalEligible = c.computeBaremetalEligible()
+	c.baremetalEligible = c.cfg.IsBaremetalEligible()
 
 	applyEngineConfig(c, cfg.Engine)
 	c.applyDialers(c.Transport())

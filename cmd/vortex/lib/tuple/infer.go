@@ -147,7 +147,8 @@ func extractJSPBFields(arr []any, prefix, methodContext string, usedNames map[st
 }
 
 func inferHeuristicField(val any, index int, path, methodContext string, usedNames map[string]bool) InferredField {
-	name, goType := inferRawHeuristicName(val, index, path, methodContext, usedNames)
+	_ = methodContext
+	name, goType := inferRawHeuristicName(val, index, path, usedNames)
 
 	// Deduplicate name
 	finalName := name
@@ -172,11 +173,11 @@ func inferHeuristicField(val any, index int, path, methodContext string, usedNam
 	}
 }
 
-func inferRawHeuristicName(val any, index int, path, methodContext string, usedNames map[string]bool) (string, string) {
+func inferRawHeuristicName(val any, index int, path string, usedNames map[string]bool) (string, string) {
 	goType := inferGoType(val)
 	if val == nil {
 		if path != "" {
-			return pathToFieldName(path, "Val"), "any"
+			return pathToFieldName(path), "any"
 		}
 
 		return fmt.Sprintf("Field%d", index), "any"
@@ -185,7 +186,7 @@ func inferRawHeuristicName(val any, index int, path, methodContext string, usedN
 	switch v := val.(type) {
 	case bool:
 		if path != "" {
-			return pathToFieldName(path, "IsFlag"), "bool"
+			return pathToFieldName(path), "bool"
 		}
 
 		if !usedNames["IsEnabled"] {
@@ -284,7 +285,7 @@ func inferRawHeuristicName(val any, index int, path, methodContext string, usedN
 
 		// 8. Positional defaults
 		if path != "" {
-			return pathToFieldName(path, "Str"), "string"
+			return pathToFieldName(path), "string"
 		}
 
 		switch index {
@@ -332,7 +333,7 @@ func inferRawHeuristicName(val any, index int, path, methodContext string, usedN
 			}
 
 			if path != "" {
-				return pathToFieldName(path, "Int"), "int64"
+				return pathToFieldName(path), "int64"
 			}
 
 			if index == 0 {
@@ -353,7 +354,7 @@ func inferRawHeuristicName(val any, index int, path, methodContext string, usedN
 
 	case []any:
 		if path != "" {
-			return pathToFieldName(path, "List"), goType
+			return pathToFieldName(path), goType
 		}
 
 		if len(v) > 0 {
@@ -375,7 +376,7 @@ func inferRawHeuristicName(val any, index int, path, methodContext string, usedN
 	}
 
 	if path != "" {
-		return pathToFieldName(path, "Val"), goType
+		return pathToFieldName(path), goType
 	}
 
 	return fmt.Sprintf("Field%d", index), goType
@@ -390,6 +391,20 @@ func isHTTPStatusCode(code int) bool {
 	default:
 		return false
 	}
+}
+
+func pathToFieldName(path string) string {
+	parts := strings.Split(path, ".")
+
+	var b strings.Builder
+	b.WriteString("Val")
+
+	for _, p := range parts {
+		b.WriteString("_")
+		b.WriteString(p)
+	}
+
+	return b.String()
 }
 
 func isCommonPort(port int) bool {
@@ -410,20 +425,6 @@ func isCommonLocale(loc string) bool {
 	default:
 		return false
 	}
-}
-
-func pathToFieldName(path, suffix string) string {
-	parts := strings.Split(path, ".")
-
-	var b strings.Builder
-	b.WriteString("Val")
-
-	for _, p := range parts {
-		b.WriteString("_")
-		b.WriteString(p)
-	}
-
-	return b.String()
 }
 
 func inferGoType(val any) string {

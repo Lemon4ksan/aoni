@@ -233,6 +233,20 @@ func (c Config) Clone() Config {
 	}
 }
 
+// RequiresRequestContext reports whether any subsystem configuration requires attaching RequestConfig to request contexts.
+func (c Config) RequiresRequestContext() bool {
+	return c.Network.RequiresRequestContext() ||
+		c.Fingerprint.RequiresRequestContext() ||
+		c.Defaults.RequiresRequestContext()
+}
+
+// IsBaremetalEligible reports whether the entire client configuration permits fast 0-alloc baremetal execution.
+func (c Config) IsBaremetalEligible() bool {
+	return !c.RequiresRequestContext() &&
+		c.Fingerprint.IsBaremetalEligible() &&
+		c.Defaults.IsBaremetalEligible()
+}
+
 // BuildDialConfig converts the [Config] into a self-contained [transport.DialConfig] DTO for socket dialing.
 // Read-only and safe for concurrent use.
 func (c Config) BuildDialConfig(ctx context.Context) transport.DialConfig {
@@ -580,6 +594,11 @@ func (n NetworkConfig) Clone() NetworkConfig {
 	return cloned
 }
 
+// RequiresRequestContext reports whether network configurations require attaching RequestConfig to request contexts.
+func (n NetworkConfig) RequiresRequestContext() bool {
+	return n.SocketController != nil || n.SSRFGuard || n.ProxyAddr != nil
+}
+
 // HostRewriteConfig configures static DNS and Host header remapping rules.
 type HostRewriteConfig struct {
 	// Rules maps source hostnames (e.g. "api.example.com") to target addresses (e.g. "1.2.3.4:443").
@@ -785,6 +804,19 @@ func (f FingerprintConfig) ToPipelineFingerprint() pipeline.ClientFingerprint {
 	}
 }
 
+// RequiresRequestContext reports whether fingerprint settings require attaching RequestConfig to request contexts.
+func (f FingerprintConfig) RequiresRequestContext() bool {
+	return f.TLSClientHelloSpecProvider != nil ||
+		len(f.CertificatePins) > 0 ||
+		f.P0fSignature != nil ||
+		f.JA4Callback != nil
+}
+
+// IsBaremetalEligible reports whether fingerprint settings permit bypassing the pipeline.
+func (f FingerprintConfig) IsBaremetalEligible() bool {
+	return !f.RequiresRequestContext() && f.PacketPadding == nil
+}
+
 // ClientDefaults configures default headers, interceptor hooks, resource limits, decoders, and pipeline policies.
 type ClientDefaults struct {
 	// BaseURL is the default root endpoint used to resolve relative request paths (RFC 3986).
@@ -894,6 +926,23 @@ func (d ClientDefaults) Clone() ClientDefaults {
 	cloned.Pipeline = d.Pipeline.Clone()
 
 	return cloned
+}
+
+// RequiresRequestContext reports whether default configurations require attaching RequestConfig to request contexts.
+func (d ClientDefaults) RequiresRequestContext() bool {
+	return d.QueryEncoder != nil || len(d.Decoders) > 0 || d.MultiReadThreshold > 0
+}
+
+// IsBaremetalEligible reports whether default configurations permit bypassing the pipeline.
+func (d ClientDefaults) IsBaremetalEligible() bool {
+	return len(d.DefaultMods) == 0 &&
+		!d.RequiresRequestContext() &&
+		d.Inspector == nil &&
+		len(d.BeforeRequest) == 0 &&
+		len(d.AfterResponse) == 0 &&
+		len(d.UARotationProfiles) == 0 &&
+		!d.RefererAutomaton &&
+		!d.Pipeline.IsActive()
 }
 
 //nolint:bodyclose // Soft error detectors inspect responses without taking ownership of response lifecycle.
@@ -1084,6 +1133,12 @@ func (p PipelineConfig) Clone() PipelineConfig {
 	}
 
 	return cloned
+}
+
+// IsActive reports whether any pipeline stage or middleware interception is enabled.
+func (p PipelineConfig) IsActive() bool {
+	return p.Decompress || p.Validate || p.Challenge || p.HAR != nil || p.Cache != nil ||
+		p.Hedging != nil || p.DPIJitter != nil || p.ProxyFailover != nil || p.Inspect || p.RotateUA
 }
 
 // DPIJitterConfig configures randomized delay bounds applied between socket write operations

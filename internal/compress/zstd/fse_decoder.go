@@ -5,10 +5,8 @@
 package zstd
 
 import (
-	"encoding/binary"
 	"errors"
 	"fmt"
-	"io"
 )
 
 const (
@@ -41,11 +39,6 @@ type fseDecoder struct {
 	stateTable [256]uint16
 	norm       [maxSymbolValue + 1]int16
 	preDefined bool
-}
-
-// tableStep returns the next table index.
-func tableStep(tableSize uint32) uint32 {
-	return (tableSize >> 1) + (tableSize >> 3) + 3
 }
 
 // readNCount will read the symbol distribution so decoding tables can be constructed.
@@ -195,36 +188,9 @@ func (s *fseDecoder) readNCount(b *byteReader, maxSymbol uint16) error {
 		return fmt.Errorf("corruption detected (bitCount %d > 32)", bitCount)
 	}
 
-	if gotTotal != 1<<s.actualTableLog {
-		return fmt.Errorf("corruption detected (total %d != %d)", gotTotal, 1<<s.actualTableLog)
-	}
-
 	b.advance((bitCount + 7) >> 3)
 
 	return s.buildDtable()
-}
-
-func (s *fseDecoder) mustReadFrom(r io.Reader) {
-	fatalErr := func(err error) {
-		if err != nil {
-			panic(err)
-		}
-	}
-	// 	dt             [maxTablesize]decSymbol // Decompression table.
-	//	symbolLen      uint16                  // Length of active part of the symbol table.
-	//	actualTableLog uint8                   // Selected tablelog.
-	//	maxBits        uint8                   // Maximum number of additional bits
-	//	// used for table creation to avoid allocations.
-	//	stateTable [256]uint16
-	//	norm       [maxSymbolValue + 1]int16
-	//	preDefined bool
-	fatalErr(binary.Read(r, binary.LittleEndian, &s.dt))
-	fatalErr(binary.Read(r, binary.LittleEndian, &s.symbolLen))
-	fatalErr(binary.Read(r, binary.LittleEndian, &s.actualTableLog))
-	fatalErr(binary.Read(r, binary.LittleEndian, &s.maxBits))
-	fatalErr(binary.Read(r, binary.LittleEndian, &s.stateTable))
-	fatalErr(binary.Read(r, binary.LittleEndian, &s.norm))
-	fatalErr(binary.Read(r, binary.LittleEndian, &s.preDefined))
 }
 
 // decSymbol contains information about a state entry,
@@ -251,24 +217,6 @@ func (d decSymbol) newState() uint16 {
 
 func (d decSymbol) baselineInt() int {
 	return int(d >> 32)
-}
-
-func (d *decSymbol) setNBits(nBits uint8) {
-	const mask = 0xffffffffffffff00
-
-	*d = (*d & mask) | decSymbol(nBits)
-}
-
-func (d *decSymbol) setAddBits(addBits uint8) {
-	const mask = 0xffffffffffff00ff
-
-	*d = (*d & mask) | (decSymbol(addBits) << 8)
-}
-
-func (d *decSymbol) setNewState(state uint16) {
-	const mask = 0xffffffff0000ffff
-
-	*d = (*d & mask) | decSymbol(state)<<16
 }
 
 func (d *decSymbol) setExt(addBits uint8, baseline uint32) {

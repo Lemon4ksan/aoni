@@ -243,7 +243,7 @@ func (c *CmdStack) runRestore(args []string, stack *diff.DiffStack, stdout, stde
 	return nil
 }
 
-func (c *CmdStack) runClear(stack *diff.DiffStack, stdout, stderr io.Writer) error {
+func (c *CmdStack) runClear(stack *diff.DiffStack, stdout, _ io.Writer) error {
 	if err := stack.Clear(); err != nil {
 		return fmt.Errorf("clearing stack: %w", err)
 	}

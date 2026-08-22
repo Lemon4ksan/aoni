@@ -10,38 +10,8 @@ import (
 	"io"
 )
 
-type seq struct {
-	litLen   uint32
-	matchLen uint32
-	offset   uint32
-
-	// Codes are stored here for the encoder
-	// so they only have to be looked up once.
-	llCode, mlCode, ofCode uint8
-}
-
 type seqVals struct {
 	ll, ml, mo int
-}
-
-func (s seq) String() string {
-	if s.offset <= 3 {
-		if s.offset == 0 {
-			return fmt.Sprint("litLen:", s.litLen, ", matchLen:", s.matchLen+zstdMinMatch, ", offset: INVALID (0)")
-		}
-
-		return fmt.Sprint(
-			"litLen:",
-			s.litLen,
-			", matchLen:",
-			s.matchLen+zstdMinMatch,
-			", offset:",
-			s.offset,
-			" (repeat)",
-		)
-	}
-
-	return fmt.Sprint("litLen:", s.litLen, ", matchLen:", s.matchLen+zstdMinMatch, ", offset:", s.offset-3, " (new)")
 }
 
 type seqCompMode uint8

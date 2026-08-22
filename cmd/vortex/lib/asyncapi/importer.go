@@ -188,7 +188,7 @@ func emitOperationMethod(buf *bytes.Buffer, doc *Document, opKey string, op Oper
 	address := resolveChannelAddress(doc, op)
 	cleanAddress := strings.TrimPrefix(address, "/")
 	pathParams := extractTemplatePlaceholders(address)
-	payloadType := resolvePayloadType(doc, opKey, op)
+	payloadType := resolvePayloadType(opKey, op)
 
 	// AsyncAPI 3.1.0 §Operation Reply Object -> @rpc pattern
 	if op.Reply != nil {
@@ -198,7 +198,7 @@ func emitOperationMethod(buf *bytes.Buffer, doc *Document, opKey string, op Oper
 			methodName,
 			cleanAddress,
 			payloadType,
-			resolveReplyPayloadType(doc, opKey, op),
+			resolveReplyPayloadType(opKey, op),
 			pathParams,
 		)
 
@@ -300,7 +300,7 @@ func resolveChannelAddress(doc *Document, op Operation) string {
 	return ""
 }
 
-func resolvePayloadType(doc *Document, opKey string, op Operation) string {
+func resolvePayloadType(opKey string, op Operation) string {
 	for _, mRef := range op.Messages {
 		if mRef.Ref != "" {
 			return extractTypeNameFromRef(mRef.Ref)
@@ -310,7 +310,7 @@ func resolvePayloadType(doc *Document, opKey string, op Operation) string {
 	return sanitizeIdentifier(opKey) + "PayloadDTO"
 }
 
-func resolveReplyPayloadType(doc *Document, opKey string, op Operation) string {
+func resolveReplyPayloadType(opKey string, op Operation) string {
 	if op.Reply != nil {
 		for _, mRef := range op.Reply.Messages {
 			if mRef.Ref != "" {

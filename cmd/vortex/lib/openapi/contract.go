@@ -302,7 +302,7 @@ func writeOperationMethod(
 	methodName := buildMethodName(pathStr, httpMethod, op, usedNames)
 
 	writeOperationDocumentation(buf, methodName, op)
-	writeOperationDirectives(buf, pathStr, httpMethod, op, spec, pathItem)
+	writeOperationDirectives(buf, pathStr, httpMethod, op, spec)
 
 	params := extractOperationParameters(pathStr, pathItem, op)
 	isForm := isFormRequestBody(op)
@@ -344,7 +344,6 @@ func writeOperationDirectives(
 	pathStr, httpMethod string,
 	op *Operation,
 	spec *Document,
-	pathItem *PathItem,
 ) {
 	cleanPath := strings.TrimPrefix(pathStr, "/")
 	fmt.Fprintf(buf, "\t// @%s %q\n", strings.ToLower(httpMethod), cleanPath)
