@@ -286,3 +286,39 @@ func BenchmarkInflate(b *testing.B) {
 		_, _ = compress.Inflate(compressed, dst)
 	}
 }
+
+func BenchmarkStdlibGunzip(b *testing.B) {
+	payload := []byte(strings.Repeat("Zero allocation decompression benchmark for aoni internal/compress. ", 50))
+
+	var buf bytes.Buffer
+	w := gzip.NewWriter(&buf)
+	_, _ = w.Write(payload)
+	_ = w.Close()
+	compressed := buf.Bytes()
+
+	b.ReportAllocs()
+	b.ResetTimer()
+
+	for i := 0; i < b.N; i++ {
+		r, err := stdgzip.NewReader(bytes.NewReader(compressed))
+		if err != nil {
+			b.Fatal(err)
+		}
+		_, _ = io.ReadAll(r)
+		_ = r.Close()
+	}
+}
+
+func BenchmarkStdlibInflate(b *testing.B) {
+	payload := []byte(strings.Repeat("Inflate benchmark payload for internal/compress flate decoder. ", 50))
+	compressed := createDeflateData(nil, payload)
+
+	b.ReportAllocs()
+	b.ResetTimer()
+
+	for i := 0; i < b.N; i++ {
+		r := flate.NewReader(bytes.NewReader(compressed))
+		_, _ = io.ReadAll(r)
+		_ = r.Close()
+	}
+}

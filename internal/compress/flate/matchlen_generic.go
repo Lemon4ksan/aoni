@@ -13,6 +13,31 @@ import (
 // a must be the shortest of the two.
 func matchLen(a, b []byte) (n int) {
 	left := len(a)
+	for left >= 32 {
+		d0 := endian.Load64(a, n) ^ endian.Load64(b, n)
+		if d0 != 0 {
+			return n + bits.TrailingZeros64(d0)>>3
+		}
+
+		d1 := endian.Load64(a, n+8) ^ endian.Load64(b, n+8)
+		if d1 != 0 {
+			return n + 8 + bits.TrailingZeros64(d1)>>3
+		}
+
+		d2 := endian.Load64(a, n+16) ^ endian.Load64(b, n+16)
+		if d2 != 0 {
+			return n + 16 + bits.TrailingZeros64(d2)>>3
+		}
+
+		d3 := endian.Load64(a, n+24) ^ endian.Load64(b, n+24)
+		if d3 != 0 {
+			return n + 24 + bits.TrailingZeros64(d3)>>3
+		}
+
+		n += 32
+		left -= 32
+	}
+
 	for left >= 8 {
 		diff := endian.Load64(a, n) ^ endian.Load64(b, n)
 		if diff != 0 {

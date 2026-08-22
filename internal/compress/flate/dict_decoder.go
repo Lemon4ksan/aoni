@@ -4,6 +4,10 @@
 
 package flate
 
+import (
+	"github.com/lemon4ksan/foundation/silicon/endian"
+)
+
 // dictDecoder implements the LZ77 sliding dictionary as used in decompression.
 // LZ77 decompresses data through sequences of two forms of commands:
 //
@@ -178,9 +182,54 @@ func (dd *dictDecoder) tryWriteCopy(dist, length int) int {
 		return length
 	}
 
-	// Non-overlapping match copy
+	// Non-overlapping match copy with 64-bit and 128-bit wildcopy
 	if dist >= length {
+		if length <= 8 {
+			endian.Store64(dd.hist, dstPos, endian.Load64(dd.hist, srcPos))
+			dd.wrPos = endPos
+
+			return length
+		}
+
+		if length <= 16 && dist >= 16 {
+			endian.Store64(dd.hist, dstPos, endian.Load64(dd.hist, srcPos))
+			endian.Store64(dd.hist, dstPos+8, endian.Load64(dd.hist, srcPos+8))
+			dd.wrPos = endPos
+
+			return length
+		}
+
 		copy(dd.hist[dstPos:endPos], dd.hist[srcPos:srcPos+length])
+		dd.wrPos = endPos
+
+		return length
+	}
+
+	// 2-byte and 4-byte repeating pattern fast paths
+	if dist == 2 {
+		v := endian.Load16(dd.hist, srcPos)
+		for dstPos+2 <= endPos {
+			endian.Store16(dd.hist[dstPos:], v)
+			dstPos += 2
+		}
+		if dstPos < endPos {
+			dd.hist[dstPos] = byte(v)
+		}
+		dd.wrPos = endPos
+
+		return length
+	}
+
+	if dist == 4 {
+		v := endian.Load32(dd.hist, srcPos)
+		for dstPos+4 <= endPos {
+			endian.Store32(dd.hist[dstPos:], v)
+			dstPos += 4
+		}
+		for dstPos < endPos {
+			dd.hist[dstPos] = dd.hist[dstPos-4]
+			dstPos++
+		}
 		dd.wrPos = endPos
 
 		return length
