@@ -10,7 +10,7 @@ import (
 	"errors"
 	"io"
 
-	"github.com/lemon4ksan/aoni/internal/compress/internal/xxhash"
+	"github.com/lemon4ksan/aoni/internal/compress/zstd/xxhash"
 )
 
 type frameDec struct {

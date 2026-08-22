@@ -73,7 +73,7 @@ func DoToFast[Resp any](
 	}
 
 	result := new(Resp)
-	if err := decode.DecodePayload(resp.Header("Content-Type"), resp.UnsafeBodyBytes(), result); err != nil {
+	if err := decode.Payload(resp.Header("Content-Type"), resp.UnsafeBodyBytes(), result); err != nil {
 		return nil, err
 	}
 
@@ -99,7 +99,7 @@ func DoIntoFast[T any](
 		return &aoni.APIError{StatusCode: resp.StatusCode(), Body: resp.BodyBytes()}
 	}
 
-	return decode.DecodePayload(resp.Header("Content-Type"), resp.UnsafeBodyBytes(), target)
+	return decode.Payload(resp.Header("Content-Type"), resp.UnsafeBodyBytes(), target)
 }
 
 // GetFast executes a fast GET request, returning a pooled aoni.Response.

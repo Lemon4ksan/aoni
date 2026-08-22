@@ -2,8 +2,6 @@
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
-// Package extract provides zero-allocation byte slice scraping and boundary extraction utilities.
-// Core implementation is located in [github.com/lemon4ksan/foundation/text/extract].
 package extract
 
 import (
@@ -12,10 +10,17 @@ import (
 )
 
 var (
+	// ErrElementNotFound indicates that an HTML element matching the CSS selector could not be found.
 	ErrElementNotFound = fextract.ErrElementNotFound
+
+	// ErrBetweenNotFound indicates that the specified prefix or suffix boundary was not present in the byte slice.
 	ErrBetweenNotFound = fextract.ErrBetweenNotFound
-	ErrAttrNotFound    = fextract.ErrAttrNotFound
-	ErrRegexMismatch   = fextract.ErrRegexMismatch
+
+	// ErrAttrNotFound indicates that the requested attribute does not exist on the matched HTML element.
+	ErrAttrNotFound = fextract.ErrAttrNotFound
+
+	// ErrRegexMismatch indicates that the regular expression pattern did not match the input payload.
+	ErrRegexMismatch = fextract.ErrRegexMismatch
 )
 
 // Between slices a byte buffer between prefix and suffix boundaries with zero allocations.
@@ -23,17 +28,17 @@ func Between(src []byte, prefix, suffix string) ([]byte, error) {
 	return fextract.Between(src, prefix, suffix)
 }
 
-// BetweenResult slices byte buffer between boundaries and returns a Swift-inspired [generic.Result].
+// BetweenResult extracts bytes between prefix and suffix returning a generic.Result.
 func BetweenResult(src []byte, prefix, suffix string) generic.Result[[]byte] {
 	return fextract.BetweenResult(src, prefix, suffix)
 }
 
-// BetweenString extracts string content between prefix and suffix boundaries as a [generic.Result].
+// BetweenString extracts string between prefix and suffix returning a generic.Result.
 func BetweenString(src []byte, prefix, suffix string) generic.Result[string] {
 	return fextract.BetweenString(src, prefix, suffix)
 }
 
-// BetweenOptional extracts content between boundaries and returns an [generic.Optional].
+// BetweenOptional extracts string between prefix and suffix returning an optional.Optional.
 func BetweenOptional(src []byte, prefix, suffix string) generic.Optional[string] {
 	return fextract.BetweenOptional(src, prefix, suffix)
 }
@@ -43,17 +48,17 @@ func Attr(src []byte, css, attrName string) ([]byte, error) {
 	return fextract.Attr(src, css, attrName)
 }
 
-// AttrResult extracts an HTML attribute value as a Swift-inspired [generic.Result].
+// AttrResult parses an HTML element attribute returning a generic.Result.
 func AttrResult(src []byte, css, attrName string) generic.Result[[]byte] {
 	return fextract.AttrResult(src, css, attrName)
 }
 
-// AttrString extracts an HTML attribute string value as a [generic.Result].
+// AttrString parses an HTML element attribute returning a generic.Result[string].
 func AttrString(src []byte, css, attrName string) generic.Result[string] {
 	return fextract.AttrString(src, css, attrName)
 }
 
-// AttrOptional extracts an HTML attribute string value as a [generic.Optional].
+// AttrOptional parses an HTML element attribute returning an optional.Optional[string].
 func AttrOptional(src []byte, css, attrName string) generic.Optional[string] {
 	return fextract.AttrOptional(src, css, attrName)
 }
@@ -63,17 +68,17 @@ func Regex(src []byte, pattern string) ([]byte, error) {
 	return fextract.Regex(src, pattern)
 }
 
-// RegexResult searches pattern in src and returns capture group 1 as a [generic.Result].
+// RegexResult extracts regex capture group returning a generic.Result.
 func RegexResult(src []byte, pattern string) generic.Result[[]byte] {
 	return fextract.RegexResult(src, pattern)
 }
 
-// RegexString searches pattern in src and returns capture group 1 as a [generic.Result] string.
+// RegexString extracts regex capture group returning a generic.Result[string].
 func RegexString(src []byte, pattern string) generic.Result[string] {
 	return fextract.RegexString(src, pattern)
 }
 
-// RegexOptional searches pattern in src and returns capture group 1 as a [generic.Optional].
+// RegexOptional extracts regex capture group returning an optional.Optional[string].
 func RegexOptional(src []byte, pattern string) generic.Optional[string] {
 	return fextract.RegexOptional(src, pattern)
 }

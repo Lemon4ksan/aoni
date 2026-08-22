@@ -61,28 +61,20 @@ type Decoder interface {
 	Decode(reader io.Reader, target any) error
 }
 
-// DecodeTo decodes the payload from reader into a newly allocated instance of Target.
-func DecodeTo[Target any](d Decoder, reader io.Reader) (Target, error) {
-	var target Target
-
-	err := d.Decode(reader, &target)
-
-	return target, err
-}
-
-// DecodeResult decodes the payload from reader into a Swift-inspired [generic.Result].
-func DecodeResult[Target any](d Decoder, reader io.Reader) generic.Result[Target] {
-	var target Target
-	if err := d.Decode(reader, &target); err != nil {
-		return generic.Failure[Target](err)
+// To allocates a new instance of T and decodes payload data from reader using decoder.
+func To[T any](reader io.Reader, decoder Decoder) (T, error) {
+	var target T
+	if err := decoder.Decode(reader, &target); err != nil {
+		var zero T
+		return zero, err
 	}
 
-	return generic.Success(target)
+	return target, nil
 }
 
-// Result decodes the payload from reader into a Swift-inspired [generic.Result] using d.
-func Result[Target any](reader io.Reader, d Decoder) generic.Result[Target] {
-	return DecodeResult[Target](d, reader)
+// Result decodes the payload from reader using decoder into a [generic.Result].
+func Result[T any](reader io.Reader, decoder Decoder) generic.Result[T] {
+	return generic.FromResult(To[T](reader, decoder))
 }
 
 // DecoderFunc adapts a plain function signature to satisfy the [Decoder] interface.
@@ -161,17 +153,6 @@ func ByContentType(reader io.Reader, contentType string, target any) error {
 	return LookupDecoder(contentType).Decode(reader, target)
 }
 
-// To allocates a new instance of T and decodes payload data into it.
-func To[T any](reader io.Reader, decoder Decoder) (T, error) {
-	var target T
-	if err := decoder.Decode(reader, &target); err != nil {
-		var zero T
-		return zero, err
-	}
-
-	return target, nil
-}
-
 // IsRawDecoder reports whether decoder is the raw byte-slice decoder.
 func IsRawDecoder(decoder Decoder) bool {
 	_, ok := decoder.(rawDecoder)
@@ -239,10 +220,11 @@ func ProtoJSON[T any](reader io.Reader) (T, error) {
 // Raw reads the entire response stream into a raw byte slice.
 func Raw(reader io.Reader) ([]byte, error) {
 	var target []byte
+	if err := RawDecoder.Decode(reader, &target); err != nil {
+		return nil, err
+	}
 
-	err := RawDecoder.Decode(reader, &target)
-
-	return target, err
+	return target, nil
 }
 
 // WithRaw creates an [core.RequestModifier] that assigns [RawDecoder] for response parsing.
@@ -305,9 +287,9 @@ func WithGRPCWeb() core.RequestModifier {
 	}
 }
 
-// DecodePayload decodes rawBody into target based on contentType using auto-matched or default decoders.
+// Payload decodes rawBody into target based on contentType using auto-matched or default decoders.
 // Thread-safe for concurrent execution.
-func DecodePayload(contentType string, rawBody []byte, target any) error {
+func Payload(contentType string, rawBody []byte, target any) error {
 	if target == nil {
 		return nil
 	}

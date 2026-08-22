@@ -6,7 +6,7 @@ package flate
 import (
 	"math/bits"
 
-	"github.com/lemon4ksan/aoni/internal/compress/internal/le"
+	"github.com/lemon4ksan/foundation/silicon/endian"
 )
 
 // matchLen returns the maximum common prefix length of a and b.
@@ -14,7 +14,7 @@ import (
 func matchLen(a, b []byte) (n int) {
 	left := len(a)
 	for left >= 8 {
-		diff := le.Load64(a, n) ^ le.Load64(b, n)
+		diff := endian.Load64(a, n) ^ endian.Load64(b, n)
 		if diff != 0 {
 			return n + bits.TrailingZeros64(diff)>>3
 		}

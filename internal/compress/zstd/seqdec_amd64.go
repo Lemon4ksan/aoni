@@ -7,7 +7,7 @@
 package zstd
 
 import (
-	"github.com/lemon4ksan/aoni/internal/compress/internal/cpuinfo"
+	"github.com/lemon4ksan/foundation/silicon/cpukit"
 )
 
 // The shared decode/decodeSync/executeSimple wrappers and context structs live
@@ -38,7 +38,7 @@ func sequenceDecs_decode_56_bmi2(s *sequenceDecs, br *bitReader, ctx *decodeAsmC
 
 // decodeAsm runs the sequenceDecs decode loop, choosing the BMI2 / 56-bit variant.
 func decodeAsm(s *sequenceDecs, br *bitReader, ctx *decodeAsmContext, lte56bits bool) int {
-	if cpuinfo.HasBMI2() {
+	if cpukit.HasBMI2() {
 		if lte56bits {
 			return sequenceDecs_decode_56_bmi2(s, br, ctx)
 		}
@@ -77,7 +77,7 @@ func sequenceDecs_decodeSync_safe_bmi2(s *sequenceDecs, br *bitReader, ctx *deco
 
 // decodeSyncAsm runs the decodeSync loop, choosing the BMI2 / safe variant.
 func decodeSyncAsm(s *sequenceDecs, br *bitReader, ctx *decodeSyncAsmContext, safe bool) int {
-	if cpuinfo.HasBMI2() {
+	if cpukit.HasBMI2() {
 		if safe {
 			return sequenceDecs_decodeSync_safe_bmi2(s, br, ctx)
 		}

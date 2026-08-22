@@ -2,7 +2,6 @@
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
-// Package fast provides high-performance fasthttp engine adapters for [aoni.Request] and [aoni.Response].
 package fast
 
 import (
@@ -594,37 +593,57 @@ func (c *Client) SetCookies(u *url.URL, cookies []*http.Cookie) {
 	}
 }
 
-// FindCookie searches for a cookie by name for a given URL and returns it wrapped in a [generic.Optional].
-func (c *Client) FindCookie(u *url.URL, name string) generic.Optional[*http.Cookie] {
+// HasCookies reports whether the client cookie jar holds any active cookies for URL u.
+func (c *Client) HasCookies(u *url.URL) bool {
 	jar := c.cfg.Engine.CookieJar
 	if jar == nil || u == nil {
-		return generic.None[*http.Cookie]()
+		return false
+	}
+
+	return len(jar.Cookies(u)) > 0
+}
+
+// FindCookie searches for a cookie by name for a given URL and reports whether it was found.
+func (c *Client) FindCookie(u *url.URL, name string) (*http.Cookie, bool) {
+	jar := c.cfg.Engine.CookieJar
+	if jar == nil || u == nil {
+		return nil, false
 	}
 
 	if pJar, ok := jar.(*cookie.ProxyIsolatedJar); ok {
 		return pJar.FindCookie(u, name)
 	}
 
-	cookieObj, ok := generic.Find(jar.Cookies(u), func(ck *http.Cookie) bool {
+	return generic.Find(jar.Cookies(u), func(ck *http.Cookie) bool {
 		return ck != nil && ck.Name == name
 	})
-	if !ok {
-		return generic.None[*http.Cookie]()
-	}
-
-	return generic.Some(cookieObj)
 }
 
-// GetCookieValue retrieves the value of a named cookie as a [generic.Optional].
-func (c *Client) GetCookieValue(u *url.URL, name string) generic.Optional[string] {
-	cookieOpt := c.FindCookie(u, name)
-	if !cookieOpt.IsPresent() {
-		return generic.None[string]()
+// FindCookieOptional searches for a cookie by name for a given URL and returns it wrapped in a [generic.Optional].
+func (c *Client) FindCookieOptional(u *url.URL, name string) generic.Optional[*http.Cookie] {
+	if ck, ok := c.FindCookie(u, name); ok {
+		return generic.Some(ck)
 	}
 
-	val, _ := cookieOpt.Value()
+	return generic.None[*http.Cookie]()
+}
 
-	return generic.Some(val.Value)
+// GetCookieValue retrieves the value of a named cookie.
+func (c *Client) GetCookieValue(u *url.URL, name string) (string, bool) {
+	if ck, ok := c.FindCookie(u, name); ok && ck != nil {
+		return ck.Value, true
+	}
+
+	return "", false
+}
+
+// GetCookieValueOptional retrieves the value of a named cookie as a [generic.Optional].
+func (c *Client) GetCookieValueOptional(u *url.URL, name string) generic.Optional[string] {
+	if val, ok := c.GetCookieValue(u, name); ok {
+		return generic.Some(val)
+	}
+
+	return generic.None[string]()
 }
 
 // LogValue implements [slog.LogValuer] for structured telemetry logging.

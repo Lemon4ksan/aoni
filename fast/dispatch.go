@@ -30,7 +30,7 @@ func (c *Client) dispatchSingleRequest(
 ) (trailers map[string][]string, err error, autoReleased bool) {
 	sanitizeTraceHeaders(fastReq)
 
-	host := string(fastReq.URI().Host())
+	host := bytesconv.B2S(fastReq.URI().Host())
 	alpnMode := c.resolveALPNMode(ctx, fastReq)
 
 	staggerDelay := c.cfg.Network.HappyEyeballsDelay
@@ -350,7 +350,7 @@ func (c *Client) retry425TooEarly(
 	reqCfg := pipeline.GetOrInitRequestConfig(ctx)
 	reqCfg.Disable0RTT = true
 
-	host := string(fastReq.URI().Host())
+	host := bytesconv.B2S(fastReq.URI().Host())
 	c.removeH2Client(host)
 
 	fastReq.Header.Del("Early-Data")
@@ -366,7 +366,7 @@ func (c *Client) retry421Misdirected(
 	reqCfg := pipeline.GetOrInitRequestConfig(ctx)
 	reqCfg.DisableAltSvc = true
 
-	host := string(fastReq.URI().Host())
+	host := bytesconv.B2S(fastReq.URI().Host())
 	if c.protocolState.altSvc != nil {
 		c.protocolState.altSvc.MarkH3Failed(host)
 	}
@@ -383,8 +383,7 @@ func (c *Client) retry408Timeout(
 	fastReq *fasthttp.Request,
 	fastResp *fasthttp.Response,
 ) (trailers map[string][]string, err error, autoReleased bool) {
-	host := string(fastReq.URI().Host())
-	c.removeH2Client(host)
+	c.removeH2Client(bytesconv.B2S(fastReq.URI().Host()))
 	fastReq.SetConnectionClose()
 
 	return c.dispatchSingleRequest(ctx, fastReq, fastResp)

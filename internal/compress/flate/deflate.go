@@ -11,7 +11,7 @@ import (
 	"io"
 	"math"
 
-	"github.com/lemon4ksan/aoni/internal/compress/internal/le"
+	"github.com/lemon4ksan/foundation/silicon/endian"
 )
 
 const (
@@ -399,7 +399,7 @@ func (d *compressor) writeStoredBlock(buf []byte) error {
 // of the supplied slice.
 // The caller must ensure that len(b) >= 4.
 func hash4(b []byte) uint32 {
-	return hash4u(le.Load32(b, 0), hashBits)
+	return hash4u(endian.Load32(b, 0), hashBits)
 }
 
 // hash4 returns the hash of u to fit in a hash table with h bits.
@@ -415,7 +415,7 @@ func bulkHash4(b []byte, dst []uint32) {
 		return
 	}
 
-	hb := le.Load32(b, 0)
+	hb := endian.Load32(b, 0)
 
 	dst[0] = hash4u(hb, hashBits)
 

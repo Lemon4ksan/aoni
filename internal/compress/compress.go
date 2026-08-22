@@ -86,37 +86,7 @@ func Gunzip(src, dst []byte) ([]byte, error) {
 
 	defer zr.Close()
 
-	if dst == nil {
-		dst = make([]byte, 0, len(src)*2)
-	} else {
-		dst = dst[:0]
-	}
-
-	for {
-		if len(dst) == cap(dst) {
-			newCap := cap(dst) * 2
-			if newCap == 0 {
-				newCap = 1024
-			}
-
-			newDst := make([]byte, len(dst), newCap)
-			copy(newDst, dst)
-			dst = newDst
-		}
-
-		n, err := zr.Read(dst[len(dst):cap(dst)])
-		dst = dst[:len(dst)+n]
-
-		if err != nil {
-			if errors.Is(err, io.EOF) {
-				break
-			}
-
-			return nil, err
-		}
-	}
-
-	return dst, nil
+	return readAllSlice(zr, src, dst)
 }
 
 // Unbrotli decompresses a Brotli payload (RFC 7932) from src into dst.
@@ -146,6 +116,10 @@ func Inflate(src, dst []byte) ([]byte, error) {
 		return nil, err
 	}
 
+	return readAllSlice(fr.(io.Reader), src, dst)
+}
+
+func readAllSlice(r io.Reader, src, dst []byte) ([]byte, error) {
 	if dst == nil {
 		dst = make([]byte, 0, len(src)*2)
 	} else {
@@ -164,7 +138,7 @@ func Inflate(src, dst []byte) ([]byte, error) {
 			dst = newDst
 		}
 
-		n, err := fr.(io.Reader).Read(dst[len(dst):cap(dst)])
+		n, err := r.Read(dst[len(dst):cap(dst)])
 		dst = dst[:len(dst)+n]
 
 		if err != nil {

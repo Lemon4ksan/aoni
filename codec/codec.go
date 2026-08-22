@@ -2,7 +2,6 @@
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
-// Package codec defines high-level request body encoding, response body decoding, and generic unmarshaling facades.
 package codec
 
 import (
@@ -136,6 +135,11 @@ func To[T any](reader io.Reader, decoder Decoder) (T, error) {
 // Result unmarshals the response stream from reader into a Swift-inspired [generic.Result].
 func Result[T any](reader io.Reader, decoder Decoder) generic.Result[T] {
 	return decode.Result[T](reader, decoder)
+}
+
+// Payload decodes rawBody into target based on contentType using auto-matched or default decoders.
+func Payload(contentType string, rawBody []byte, target any) error {
+	return decode.Payload(contentType, rawBody, target)
 }
 
 // JSON parses response stream bytes into a typed instance of T.

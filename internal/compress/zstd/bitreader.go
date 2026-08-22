@@ -10,7 +10,7 @@ import (
 	"io"
 	"math/bits"
 
-	"github.com/lemon4ksan/aoni/internal/compress/internal/le"
+	"github.com/lemon4ksan/foundation/silicon/endian"
 )
 
 // bitReader reads a bitstream in reverse.
@@ -80,14 +80,14 @@ func (b *bitReader) fillFast() {
 	}
 
 	b.cursor -= 4
-	b.value = (b.value << 32) | uint64(le.Load32(b.in, b.cursor))
+	b.value = (b.value << 32) | uint64(endian.Load32(b.in, b.cursor))
 	b.bitsRead -= 32
 }
 
 // fillFastStart() assumes the bitreader is empty and there is at least 8 bytes to read.
 func (b *bitReader) fillFastStart() {
 	b.cursor -= 8
-	b.value = le.Load64(b.in, b.cursor)
+	b.value = endian.Load64(b.in, b.cursor)
 	b.bitsRead = 0
 }
 
@@ -99,7 +99,7 @@ func (b *bitReader) fill() {
 
 	if b.cursor >= 4 {
 		b.cursor -= 4
-		b.value = (b.value << 32) | uint64(le.Load32(b.in, b.cursor))
+		b.value = (b.value << 32) | uint64(endian.Load32(b.in, b.cursor))
 		b.bitsRead -= 32
 
 		return

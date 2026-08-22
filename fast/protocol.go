@@ -17,6 +17,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/lemon4ksan/foundation/silicon/bytesconv"
 	"github.com/lemon4ksan/foundation/silicon/clock"
 	"github.com/quic-go/quic-go"
 	"github.com/valyala/fasthttp"
@@ -227,7 +228,7 @@ func resolveALPNMode(ctx context.Context, cfg *aoni.Config, fastReq *fasthttp.Re
 	disableAltSvc := reqCfg != nil && reqCfg.DisableAltSvc
 
 	if bytes.EqualFold(fastReq.URI().Scheme(), []byte("https")) {
-		host := string(fastReq.URI().Host())
+		host := bytesconv.B2S(fastReq.URI().Host())
 		if host != "" && !disableAltSvc && altSvc != nil && altSvc.IsH3Supported(host) {
 			return aoni.AlpnH3
 		}
@@ -344,13 +345,17 @@ func (c *Client) cachePushedResponse(
 	fastResp *fasthttp.Response,
 	cacheCfg *aoni.CacheConfig,
 ) {
-	req, err := http.NewRequest(string(fastReq.Header.Method()), string(fastReq.URI().FullURI()), nil) //nolint:noctx
+	req, err := http.NewRequest(
+		bytesconv.B2S(fastReq.Header.Method()),
+		bytesconv.B2S(fastReq.URI().FullURI()),
+		nil,
+	) //nolint:noctx
 	if err != nil {
 		return
 	}
 
 	fastReq.Header.All()(func(k, v []byte) bool {
-		req.Header.Add(string(k), string(v))
+		req.Header.Add(bytesconv.B2S(k), bytesconv.B2S(v))
 		return true
 	})
 

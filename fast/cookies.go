@@ -182,10 +182,7 @@ func scrubSensitiveHeaders(req *fasthttp.Request, currentURI, nextURI *fasthttp.
 	req.Header.Del("Secret")
 	req.Header.Del("Private-Key")
 
-	host1 := string(currentURI.Host())
-	host2 := string(nextURI.Host())
-
-	if !isSameDomainOrSubdomain(host1, host2) {
+	if !isSameDomainOrSubdomain(bytesconv.B2S(currentURI.Host()), bytesconv.B2S(nextURI.Host())) {
 		req.Header.Del("Cookie")
 	}
 }

@@ -93,6 +93,29 @@ func TestProxyIsolatedCookieJar_DX_Methods(t *testing.T) {
 	jar1 := pJar.GetJarForProxy("http://proxy1.net")
 	assert.NotNil(t, jar1)
 	assert.Equal(t, cProxy1, jar1.Cookies(u))
+
+	// Test HasCookies, FindCookie, GetCookieValue on default unproxied jar
+	pJar.SetCookies(u, []*http.Cookie{cookie1})
+	assert.True(t, pJar.HasCookies(u))
+
+	foundCookie, found := pJar.FindCookie(u, "c1")
+	require.True(t, found)
+	assert.Equal(t, "v1", foundCookie.Value)
+
+	foundOpt := pJar.FindCookieOptional(u, "c1")
+	require.True(t, foundOpt.IsPresent())
+	assert.Equal(t, "v1", foundOpt.MustValue().Value)
+
+	val, ok := pJar.GetCookieValue(u, "c1")
+	require.True(t, ok)
+	assert.Equal(t, "v1", val)
+
+	valOpt := pJar.GetCookieValueOptional(u, "c1")
+	require.True(t, valOpt.IsPresent())
+	assert.Equal(t, "v1", valOpt.MustValue())
+
+	_, missing := pJar.FindCookie(u, "non_existent")
+	assert.False(t, missing)
 }
 
 func TestProxyIsolatedCookieJar_JanitorAndPurgeExpired(t *testing.T) {

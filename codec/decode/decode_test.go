@@ -13,6 +13,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/lemon4ksan/foundation/generic"
 	"github.com/lemon4ksan/foundation/refkit"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -616,23 +617,31 @@ func TestDecodeTo_And_DecodeResult(t *testing.T) {
 
 	payload := `{"name":"Coffee","price":5}`
 
-	t.Run("DecodeTo_Success", func(t *testing.T) {
-		item, err := DecodeTo[Item](JSONDecoder, strings.NewReader(payload))
+	t.Run("To_and_DecodeTo_Success", func(t *testing.T) {
+		item, err := To[Item](strings.NewReader(payload), JSONDecoder)
 		require.NoError(t, err)
 		assert.Equal(t, "Coffee", item.Name)
 		assert.Equal(t, 5, item.Price)
+
+		itemLegacy, err := To[Item](strings.NewReader(payload), JSONDecoder)
+		require.NoError(t, err)
+		assert.Equal(t, "Coffee", itemLegacy.Name)
 	})
 
-	t.Run("DecodeResult_Success", func(t *testing.T) {
-		res := DecodeResult[Item](JSONDecoder, strings.NewReader(payload))
+	t.Run("Result_Success", func(t *testing.T) {
+		res := Result[Item](strings.NewReader(payload), JSONDecoder)
 		assert.True(t, res.IsSuccess())
 		item, err := res.Unwrap()
 		require.NoError(t, err)
 		assert.Equal(t, "Coffee", item.Name)
+
+		resJSON := generic.FromResult(JSON[Item](strings.NewReader(payload)))
+		assert.True(t, resJSON.IsSuccess())
+		assert.Equal(t, "Coffee", resJSON.MustValue().Name)
 	})
 
-	t.Run("DecodeResult_Failure", func(t *testing.T) {
-		res := DecodeResult[Item](JSONDecoder, strings.NewReader(`{invalid_json`))
+	t.Run("Result_Failure", func(t *testing.T) {
+		res := Result[Item](strings.NewReader(`{invalid_json`), JSONDecoder)
 		assert.False(t, res.IsSuccess())
 	})
 }

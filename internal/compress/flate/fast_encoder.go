@@ -8,8 +8,7 @@ package flate
 import (
 	"fmt"
 
-	"github.com/lemon4ksan/aoni/internal/compress/internal/le"
-	"github.com/lemon4ksan/aoni/internal/compress/internal/regmask"
+	"github.com/lemon4ksan/foundation/silicon/endian"
 )
 
 type fastEnc interface {
@@ -60,11 +59,11 @@ const (
 )
 
 func load3232(b []byte, i int32) uint32 {
-	return le.Load32(b, i)
+	return endian.Load32(b, i)
 }
 
 func load6432(b []byte, i int32) uint64 {
-	return le.Load64(b, i)
+	return endian.Load64(b, i)
 }
 
 type tableEntry struct {
@@ -112,7 +111,7 @@ type tableEntryPrev struct {
 // hash7 returns the hash of the lowest 7 bytes of u to fit in a hash table with h bits.
 // Preferably h should be a constant and should always be <64.
 func hash7(u uint64, h uint8) uint32 {
-	return uint32(((u << (64 - 56)) * prime7bytes) >> ((64 - h) & regmask.Shift64ByUint8))
+	return uint32(((u << (64 - 56)) * prime7bytes) >> ((64 - h) & 63))
 }
 
 // hashLen returns a hash of the lowest mls bytes of with length output bits.

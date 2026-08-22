@@ -25,6 +25,7 @@ type customJSONDecoder struct {
 
 func (d customJSONDecoder) Decode(reader io.Reader, target any) error {
 	if data, _, ok := InspectBytes(reader); ok {
+		data = StripBOMBytes(data)
 		if len(data) == 0 {
 			return nil
 		}
@@ -41,7 +42,7 @@ func (d customJSONDecoder) Decode(reader io.Reader, target any) error {
 		return dec.Decode(target)
 	}
 
-	dec := json.NewDecoder(reader)
+	dec := json.NewDecoder(StripBOM(reader))
 	if d.cfg.DisallowUnknownFields {
 		dec.DisallowUnknownFields()
 	}
@@ -63,6 +64,7 @@ type jsonDecoder struct{}
 
 func (jsonDecoder) Decode(reader io.Reader, target any) error {
 	if data, _, ok := InspectBytes(reader); ok {
+		data = StripBOMBytes(data)
 		if len(data) == 0 {
 			return nil
 		}
@@ -70,5 +72,5 @@ func (jsonDecoder) Decode(reader io.Reader, target any) error {
 		return json.Unmarshal(data, target)
 	}
 
-	return json.NewDecoder(reader).Decode(target)
+	return json.NewDecoder(StripBOM(reader)).Decode(target)
 }

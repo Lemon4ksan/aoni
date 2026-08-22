@@ -9,7 +9,7 @@ import (
 	"io"
 	"math"
 
-	"github.com/lemon4ksan/aoni/internal/compress/internal/le"
+	"github.com/lemon4ksan/foundation/silicon/endian"
 )
 
 const (
@@ -469,7 +469,7 @@ func (w *huffmanBitWriter) writeOutBits() {
 	n := w.nbytes
 
 	// We overwrite, but faster...
-	le.Store64(w.bytes[:], n, bits)
+	endian.Store64(w.bytes[:], n, bits)
 	n += 6
 
 	if n >= bufferFlushSize {
@@ -928,7 +928,7 @@ func (w *huffmanBitWriter) writeTokens(tokens []token, leCodes, oeCodes []hcode)
 
 			nbits += c.len()
 			if nbits >= 48 {
-				le.Store64(w.bytes[:], nbytes, bits)
+				endian.Store64(w.bytes[:], nbytes, bits)
 				bits >>= 48
 				nbits -= 48
 
@@ -960,7 +960,7 @@ func (w *huffmanBitWriter) writeTokens(tokens []token, leCodes, oeCodes []hcode)
 
 			nbits += c.len()
 			if nbits >= 48 {
-				le.Store64(w.bytes[:], nbytes, bits)
+				endian.Store64(w.bytes[:], nbytes, bits)
 				bits >>= 48
 				nbits -= 48
 
@@ -985,7 +985,7 @@ func (w *huffmanBitWriter) writeTokens(tokens []token, leCodes, oeCodes []hcode)
 
 			nbits += extraLengthBits
 			if nbits >= 48 {
-				le.Store64(w.bytes[:], nbytes, bits)
+				endian.Store64(w.bytes[:], nbytes, bits)
 				bits >>= 48
 				nbits -= 48
 
@@ -1015,7 +1015,7 @@ func (w *huffmanBitWriter) writeTokens(tokens []token, leCodes, oeCodes []hcode)
 
 			nbits += c.len()
 			if nbits >= 48 {
-				le.Store64(w.bytes[:], nbytes, bits)
+				endian.Store64(w.bytes[:], nbytes, bits)
 				bits >>= 48
 				nbits -= 48
 
@@ -1039,7 +1039,7 @@ func (w *huffmanBitWriter) writeTokens(tokens []token, leCodes, oeCodes []hcode)
 
 			nbits += uint8(offsetComb)
 			if nbits >= 48 {
-				le.Store64(w.bytes[:], nbytes, bits)
+				endian.Store64(w.bytes[:], nbytes, bits)
 				bits >>= 48
 				nbits -= 48
 
@@ -1222,7 +1222,7 @@ func (w *huffmanBitWriter) writeBlockHuff(eof bool, input []byte, sync bool) {
 		if nbits >= 8 {
 			n := nbits >> 3
 
-			le.Store64(w.bytes[:], nbytes, bits)
+			endian.Store64(w.bytes[:], nbytes, bits)
 			bits >>= (n * 8) & 63
 			nbits -= n * 8
 			nbytes += n
@@ -1255,7 +1255,7 @@ func (w *huffmanBitWriter) writeBlockHuff(eof bool, input []byte, sync bool) {
 	// Remaining...
 	for _, t := range input {
 		if nbits >= 48 {
-			le.Store64(w.bytes[:], nbytes, bits)
+			endian.Store64(w.bytes[:], nbytes, bits)
 			bits >>= 48
 			nbits -= 48
 

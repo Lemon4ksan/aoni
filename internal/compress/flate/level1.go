@@ -7,7 +7,7 @@ package flate
 import (
 	"fmt"
 
-	"github.com/lemon4ksan/aoni/internal/compress/internal/le"
+	"github.com/lemon4ksan/foundation/silicon/endian"
 )
 
 // fastGen maintains the table for matches,
@@ -142,7 +142,7 @@ func (e *fastEncL1) Encode(dst *tokens, src []byte) {
 			l := e.matchlenLong(int(s+4), int(t+4), src) + 4
 
 			// Extend backwards
-			for t > 0 && s > nextEmit && le.Load8(src, t-1) == le.Load8(src, s-1) {
+			for t > 0 && s > nextEmit && endian.Load8(src, t-1) == endian.Load8(src, s-1) {
 				s--
 				t--
 				l++

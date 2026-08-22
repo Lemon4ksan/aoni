@@ -12,7 +12,7 @@ import (
 	"sync"
 
 	"github.com/lemon4ksan/aoni/internal/compress/huff0"
-	"github.com/lemon4ksan/aoni/internal/compress/internal/xxhash"
+	"github.com/lemon4ksan/aoni/internal/compress/zstd/xxhash"
 )
 
 type blockType uint8

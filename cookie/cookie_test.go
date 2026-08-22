@@ -192,23 +192,32 @@ func TestProxyIsolatedJar_FindCookie_And_GetCookieValue(t *testing.T) {
 		{Name: "theme", Value: "dark"},
 	})
 
-	// FindCookie
-	cOpt := jar.FindCookie(u, "auth_token")
-	require.True(t, cOpt.IsPresent())
-	c, ok := cOpt.Value()
+	// FindCookie (T, bool)
+	c, ok := jar.FindCookie(u, "auth_token")
 	require.True(t, ok)
 	assert.Equal(t, "secret-token-123", c.Value)
 
-	// Missing cookie
-	missingOpt := jar.FindCookie(u, "non_existent")
-	assert.False(t, missingOpt.IsPresent())
+	// FindCookieOptional
+	cOpt := jar.FindCookieOptional(u, "auth_token")
+	require.True(t, cOpt.IsPresent())
+	assert.Equal(t, "secret-token-123", cOpt.MustValue().Value)
 
-	// GetCookieValue
-	valOpt := jar.GetCookieValue(u, "theme")
+	// Missing cookie
+	_, missing := jar.FindCookie(u, "non_existent")
+	assert.False(t, missing)
+	assert.False(t, jar.FindCookieOptional(u, "non_existent").IsPresent())
+
+	// GetCookieValue (string, bool)
+	val, okVal := jar.GetCookieValue(u, "theme")
+	require.True(t, okVal)
+	assert.Equal(t, "dark", val)
+
+	// GetCookieValueOptional
+	valOpt := jar.GetCookieValueOptional(u, "theme")
 	require.True(t, valOpt.IsPresent())
 	assert.Equal(t, "dark", valOpt.ValueOr("light"))
 
-	missingValOpt := jar.GetCookieValue(u, "missing_setting")
+	missingValOpt := jar.GetCookieValueOptional(u, "missing_setting")
 	assert.Equal(t, "default_setting", missingValOpt.ValueOr("default_setting"))
 }
 

@@ -11,7 +11,7 @@ import (
 	"io"
 	"sync"
 
-	"github.com/lemon4ksan/aoni/internal/compress/internal/xxhash"
+	"github.com/lemon4ksan/aoni/internal/compress/zstd/xxhash"
 )
 
 // Decoder provides decoding of zstandard streams.

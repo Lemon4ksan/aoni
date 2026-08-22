@@ -96,41 +96,81 @@ func TestFastClient_HTTPVerbParity(t *testing.T) {
 func TestFastClient_CookieParity(t *testing.T) {
 	t.Parallel()
 
-	jar := cookie.NewProxyIsolatedJar()
-
-	client := fast.NewClient(option.WithCookieJar(jar))
-	defer client.CloseIdleConnections()
-
 	targetURL, err := url.Parse("https://example.com/api")
 	require.NoError(t, err)
 
-	// SetCookies
-	client.SetCookies(targetURL, []*http.Cookie{
+	testCookies := []*http.Cookie{
 		{Name: "session_id", Value: "abc123xyz", Path: "/"},
 		{Name: "role", Value: "admin", Path: "/"},
+	}
+
+	t.Run("fast.Client", func(t *testing.T) {
+		t.Parallel()
+
+		client := fast.NewClient(option.WithCookieJar(cookie.NewProxyIsolatedJar()))
+		defer client.CloseIdleConnections()
+
+		assert.False(t, client.HasCookies(targetURL))
+
+		client.SetCookies(targetURL, testCookies)
+		assert.True(t, client.HasCookies(targetURL))
+		assert.Len(t, client.Cookies(targetURL), 2)
+
+		// FindCookie
+		c, ok := client.FindCookie(targetURL, "session_id")
+		require.True(t, ok)
+		assert.Equal(t, "abc123xyz", c.Value)
+
+		cOpt := client.FindCookieOptional(targetURL, "session_id")
+		require.True(t, cOpt.IsPresent())
+		assert.Equal(t, "abc123xyz", cOpt.MustValue().Value)
+
+		_, missing := client.FindCookie(targetURL, "nonexistent")
+		assert.False(t, missing)
+
+		// GetCookieValue
+		val, okVal := client.GetCookieValue(targetURL, "role")
+		require.True(t, okVal)
+		assert.Equal(t, "admin", val)
+
+		valOpt := client.GetCookieValueOptional(targetURL, "role")
+		require.True(t, valOpt.IsPresent())
+		assert.Equal(t, "admin", valOpt.ValueOr("guest"))
 	})
 
-	// Cookies
-	cookies := client.Cookies(targetURL)
-	assert.Len(t, cookies, 2)
+	t.Run("aoni.Client", func(t *testing.T) {
+		t.Parallel()
 
-	// FindCookie
-	cookieOpt := client.FindCookie(targetURL, "session_id")
-	assert.True(t, cookieOpt.IsPresent())
-	c, _ := cookieOpt.Value()
-	assert.Equal(t, "abc123xyz", c.Value)
+		client := aoni.NewClient(option.WithCookieJar(cookie.NewProxyIsolatedJar()))
+		defer client.CloseIdleConnections()
 
-	missingOpt := client.FindCookie(targetURL, "nonexistent")
-	assert.False(t, missingOpt.IsPresent())
+		assert.False(t, client.HasCookies(targetURL))
 
-	// GetCookieValue
-	valOpt := client.GetCookieValue(targetURL, "role")
-	assert.True(t, valOpt.IsPresent())
-	val, _ := valOpt.Value()
-	assert.Equal(t, "admin", val)
+		client.SetCookies(targetURL, testCookies)
+		assert.True(t, client.HasCookies(targetURL))
+		assert.Len(t, client.Cookies(targetURL), 2)
 
-	missingValOpt := client.GetCookieValue(targetURL, "nonexistent")
-	assert.False(t, missingValOpt.IsPresent())
+		// FindCookie
+		c, ok := client.FindCookie(targetURL, "session_id")
+		require.True(t, ok)
+		assert.Equal(t, "abc123xyz", c.Value)
+
+		cOpt := client.FindCookieOptional(targetURL, "session_id")
+		require.True(t, cOpt.IsPresent())
+		assert.Equal(t, "abc123xyz", cOpt.MustValue().Value)
+
+		_, missing := client.FindCookie(targetURL, "nonexistent")
+		assert.False(t, missing)
+
+		// GetCookieValue
+		val, okVal := client.GetCookieValue(targetURL, "role")
+		require.True(t, okVal)
+		assert.Equal(t, "admin", val)
+
+		valOpt := client.GetCookieValueOptional(targetURL, "role")
+		require.True(t, valOpt.IsPresent())
+		assert.Equal(t, "admin", valOpt.ValueOr("guest"))
+	})
 }
 
 func TestFastClient_TelemetryParity(t *testing.T) {

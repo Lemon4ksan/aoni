@@ -101,3 +101,97 @@ func TestASTMultilineWrapping(t *testing.T) {
 		t.Errorf("expected multiline wrapped method, got:\n%s", src)
 	}
 }
+
+func TestASTGenericFindAndPredicates(t *testing.T) {
+	file := ast.NewFile("shop")
+	svc := file.NewService("ShopService")
+	svc.NewMethod("GetProduct", "GET", "products/{id}")
+
+	st := file.NewStruct("Product")
+	st.AddField("ID", "string", "id", true)
+
+	if !svc.HasMethods() {
+		t.Errorf("expected service to have methods")
+	}
+
+	if !st.HasFields() {
+		t.Errorf("expected struct to have fields")
+	}
+
+	foundSvc, ok := file.FindService("ShopService")
+	if !ok || foundSvc == nil || foundSvc.Name != "ShopService" {
+		t.Fatalf("expected to find ShopService")
+	}
+
+	foundSvcOpt, okOpt := file.FindServiceOptional("ShopService").Value()
+	if !okOpt || foundSvcOpt == nil || foundSvcOpt.Name != "ShopService" {
+		t.Fatalf("expected to find ShopService via Optional")
+	}
+
+	foundMethod, ok := foundSvc.FindMethod("GetProduct")
+	if !ok || foundMethod == nil || foundMethod.Name != "GetProduct" {
+		t.Fatalf("expected to find GetProduct method")
+	}
+
+	foundMethodOpt, okOpt := foundSvc.FindMethodOptional("GetProduct").Value()
+	if !okOpt || foundMethodOpt == nil || foundMethodOpt.Name != "GetProduct" {
+		t.Fatalf("expected to find GetProduct method via Optional")
+	}
+
+	foundStruct, ok := file.FindStruct("Product")
+	if !ok || foundStruct == nil || foundStruct.Name != "Product" {
+		t.Fatalf("expected to find Product struct")
+	}
+
+	foundStructOpt, okOpt := file.FindStructOptional("Product").Value()
+	if !okOpt || foundStructOpt == nil || foundStructOpt.Name != "Product" {
+		t.Fatalf("expected to find Product struct via Optional")
+	}
+
+	foundField, ok := foundStruct.FindField("ID")
+	if !ok || foundField == nil || foundField.Name != "ID" {
+		t.Fatalf("expected to find ID field")
+	}
+
+	foundFieldOpt, okOpt := foundStruct.FindFieldOptional("ID").Value()
+	if !okOpt || foundFieldOpt == nil || foundFieldOpt.Name != "ID" {
+		t.Fatalf("expected to find ID field via Optional")
+	}
+
+	// Tuples, Unions, Bitpacks
+	file.Tuples = append(file.Tuples, &ast.Tuple{Name: "Point"})
+	file.Unions = append(file.Unions, &ast.Union{Name: "Shape"})
+	file.Bitpacks = append(file.Bitpacks, &ast.Bitpack{Name: "Flags"})
+
+	if _, ok := file.FindTuple("Point"); !ok {
+		t.Errorf("expected to find Point tuple")
+	}
+
+	if opt := file.FindTupleOptional("Point"); !opt.IsPresent() {
+		t.Errorf("expected to find Point tuple via Optional")
+	}
+
+	if _, ok := file.FindUnion("Shape"); !ok {
+		t.Errorf("expected to find Shape union")
+	}
+
+	if opt := file.FindUnionOptional("Shape"); !opt.IsPresent() {
+		t.Errorf("expected to find Shape union via Optional")
+	}
+
+	if _, ok := file.FindBitpack("Flags"); !ok {
+		t.Errorf("expected to find Flags bitpack")
+	}
+
+	if opt := file.FindBitpackOptional("Flags"); !opt.IsPresent() {
+		t.Errorf("expected to find Flags bitpack via Optional")
+	}
+
+	if _, ok := file.FindService("NonExistent"); ok {
+		t.Errorf("expected false for non-existent service")
+	}
+
+	if _, ok := file.FindServiceOptional("NonExistent").Value(); ok {
+		t.Errorf("expected None for non-existent service optional")
+	}
+}

@@ -8,7 +8,7 @@
 package huff0
 
 import (
-	"github.com/lemon4ksan/aoni/internal/compress/internal/cpuinfo"
+	"github.com/lemon4ksan/foundation/silicon/cpukit"
 )
 
 // decompress4x_main_loop_amd64 is an x86 assembler implementation
@@ -45,7 +45,7 @@ func decompress4x_8b_main_loop_asm(ctx *decompress4xContext) {
 }
 
 func decompress1x_main_loop_asm(ctx *decompress1xContext) {
-	if cpuinfo.HasBMI2() {
+	if cpukit.HasBMI2() {
 		decompress1x_main_loop_bmi2(ctx)
 	} else {
 		decompress1x_main_loop_amd64(ctx)

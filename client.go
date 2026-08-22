@@ -17,6 +17,7 @@ import (
 	"github.com/lemon4ksan/foundation/generic"
 	furl "github.com/lemon4ksan/foundation/net/url"
 
+	"github.com/lemon4ksan/aoni/cookie"
 	"github.com/lemon4ksan/aoni/internal/core"
 	"github.com/lemon4ksan/aoni/internal/experimental"
 	"github.com/lemon4ksan/aoni/internal/pipeline"
@@ -89,6 +90,11 @@ type Client struct {
 // Background resources (such as power watchers or custom engines) should
 // be released via [Client.Close] when the client lifecycle terminates.
 func NewClient(doer any, opts ...ClientOption) *Client {
+	if opt, ok := doer.(ClientOption); ok { // seamless transition from fast client
+		opts = append([]ClientOption{opt}, opts...)
+		doer = nil
+	}
+
 	cfg := Config{
 		Defaults: ClientDefaults{
 			BaseURL:         &url.URL{},
@@ -427,6 +433,82 @@ func (c *Client) Network() NetworkConfig {
 // Fingerprint retrieves a clone DTO of TLS and HTTP/2 emulation settings.
 func (c *Client) Fingerprint() FingerprintConfig {
 	return c.cfg.Fingerprint.Clone()
+}
+
+// Jar returns the active [http.CookieJar] configured on the client, or nil if none is set.
+func (c *Client) Jar() http.CookieJar {
+	return c.cfg.Engine.CookieJar
+}
+
+// Cookies retrieves cookies from the active jar matching destination u.
+func (c *Client) Cookies(u *url.URL) []*http.Cookie {
+	jar := c.cfg.Engine.CookieJar
+	if jar == nil || u == nil {
+		return nil
+	}
+
+	return jar.Cookies(u)
+}
+
+// SetCookies injects cookies into the active cookie jar bound to destination u.
+func (c *Client) SetCookies(u *url.URL, cookies []*http.Cookie) {
+	jar := c.cfg.Engine.CookieJar
+	if jar != nil && u != nil && len(cookies) > 0 {
+		jar.SetCookies(u, cookies)
+	}
+}
+
+// HasCookies reports whether the client cookie jar holds any active cookies for URL u.
+func (c *Client) HasCookies(u *url.URL) bool {
+	jar := c.cfg.Engine.CookieJar
+	if jar == nil || u == nil {
+		return false
+	}
+
+	return len(jar.Cookies(u)) > 0
+}
+
+// FindCookie searches for a cookie by name for a given URL and reports whether it was found.
+func (c *Client) FindCookie(u *url.URL, name string) (*http.Cookie, bool) {
+	jar := c.cfg.Engine.CookieJar
+	if jar == nil || u == nil {
+		return nil, false
+	}
+
+	if pJar, ok := jar.(*cookie.ProxyIsolatedJar); ok {
+		return pJar.FindCookie(u, name)
+	}
+
+	return generic.Find(jar.Cookies(u), func(ck *http.Cookie) bool {
+		return ck != nil && ck.Name == name
+	})
+}
+
+// FindCookieOptional searches for a cookie by name for a given URL and returns it wrapped in a [generic.Optional].
+func (c *Client) FindCookieOptional(u *url.URL, name string) generic.Optional[*http.Cookie] {
+	if ck, ok := c.FindCookie(u, name); ok {
+		return generic.Some(ck)
+	}
+
+	return generic.None[*http.Cookie]()
+}
+
+// GetCookieValue retrieves the value of a named cookie.
+func (c *Client) GetCookieValue(u *url.URL, name string) (string, bool) {
+	if ck, ok := c.FindCookie(u, name); ok && ck != nil {
+		return ck.Value, true
+	}
+
+	return "", false
+}
+
+// GetCookieValueOptional retrieves the value of a named cookie as a [generic.Optional].
+func (c *Client) GetCookieValueOptional(u *url.URL, name string) generic.Optional[string] {
+	if val, ok := c.GetCookieValue(u, name); ok {
+		return generic.Some(val)
+	}
+
+	return generic.None[string]()
 }
 
 // Inspector yields the diagnostic [telemetry.TrafficInspector] if configured.

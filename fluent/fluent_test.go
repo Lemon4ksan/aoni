@@ -295,51 +295,69 @@ func TestFluent_ProtoAndGRPCWebShortcuts(t *testing.T) {
 
 	client := aoni.NewClient(server.Client(), option.WithBaseURL(server.URL))
 
-	t.Run("PostProtoResult", func(t *testing.T) {
-		res, resp := fluent.PostProtoResult[wrapperspb.StringValue](t.Context(), client, "/proto-post", input)
+	t.Run("PostProto", func(t *testing.T) {
+		var val wrapperspb.StringValue
+
+		resp, err := fluent.R(client).
+			SetContext(t.Context()).
+			SetProtoBody(input).
+			SetProtoResult(&val).
+			Post("/proto-post")
+
+		require.NoError(t, err)
 
 		require.NotNil(t, resp)
 		defer resp.Body.Close()
 
-		require.True(t, res.IsSuccess())
-		val, err := res.Unwrap()
-		require.NoError(t, err)
 		assert.Equal(t, "proto_fluent_response", val.GetValue())
 	})
 
-	t.Run("GetProtoResult", func(t *testing.T) {
-		res, resp := fluent.GetProtoResult[wrapperspb.StringValue](t.Context(), client, "/proto-get")
+	t.Run("GetProto", func(t *testing.T) {
+		var val wrapperspb.StringValue
+
+		resp, err := fluent.R(client).
+			SetContext(t.Context()).
+			SetProtoResult(&val).
+			Get("/proto-get")
+
+		require.NoError(t, err)
 
 		require.NotNil(t, resp)
 		defer resp.Body.Close()
 
-		require.True(t, res.IsSuccess())
-		val, err := res.Unwrap()
-		require.NoError(t, err)
 		assert.Equal(t, "proto_fluent_response", val.GetValue())
 	})
 
-	t.Run("PostGRPCWebResult", func(t *testing.T) {
-		res, resp := fluent.PostGRPCWebResult[wrapperspb.StringValue](t.Context(), client, "/grpc-post", input)
+	t.Run("PostGRPCWeb", func(t *testing.T) {
+		var val wrapperspb.StringValue
+
+		resp, err := fluent.R(client).
+			SetContext(t.Context()).
+			SetGRPCWebBody(input).
+			SetGRPCWebResult(&val).
+			Post("/grpc-post")
+
+		require.NoError(t, err)
 
 		require.NotNil(t, resp)
 		defer resp.Body.Close()
 
-		require.True(t, res.IsSuccess())
-		val, err := res.Unwrap()
-		require.NoError(t, err)
 		assert.Equal(t, "proto_fluent_response", val.GetValue())
 	})
 
-	t.Run("GetGRPCWebResult", func(t *testing.T) {
-		res, resp := fluent.GetGRPCWebResult[wrapperspb.StringValue](t.Context(), client, "/grpc-get")
+	t.Run("GetGRPCWeb", func(t *testing.T) {
+		var val wrapperspb.StringValue
+
+		resp, err := fluent.R(client).
+			SetContext(t.Context()).
+			SetGRPCWebResult(&val).
+			Get("/grpc-get")
+
+		require.NoError(t, err)
 
 		require.NotNil(t, resp)
 		defer resp.Body.Close()
 
-		require.True(t, res.IsSuccess())
-		val, err := res.Unwrap()
-		require.NoError(t, err)
 		assert.Equal(t, "proto_fluent_response", val.GetValue())
 	})
 }
@@ -853,44 +871,46 @@ func TestFluent_ResultMonadicAPI(t *testing.T) {
 
 	client := aoni.NewClient(server.Client(), option.WithBaseURL(server.URL))
 
-	t.Run("GetResult_Success", func(t *testing.T) {
-		res, resp := fluent.GetResult[userPayload](t.Context(), client, "/")
-		require.NotNil(t, resp)
-		assert.True(t, res.IsSuccess())
-		user, err := res.Unwrap()
+	t.Run("GetTo_And_FetchResult_Success", func(t *testing.T) {
+		user, resp, err := fluent.GetTo[userPayload](t.Context(), client, "/")
 		require.NoError(t, err)
+		require.NotNil(t, resp)
 		assert.Equal(t, 100, user.ID)
 		assert.Equal(t, "MonadicAlex", user.Name)
+
+		res, respResult := fluent.FetchResult[userPayload](t.Context(), client, http.MethodGet, "/")
+		require.NotNil(t, respResult)
+		assert.True(t, res.IsSuccess())
+		userRes, err := res.Unwrap()
+		require.NoError(t, err)
+		assert.Equal(t, 100, userRes.ID)
+		assert.Equal(t, "MonadicAlex", userRes.Name)
 	})
 
-	t.Run("PostResult_Success", func(t *testing.T) {
-		res, resp := fluent.PostResult[userPayload](t.Context(), client, "/", userPayload{ID: 100})
-		require.NotNil(t, resp)
-		assert.True(t, res.IsSuccess())
-		user, err := res.Unwrap()
+	t.Run("PostTo_Success", func(t *testing.T) {
+		user, resp, err := fluent.PostTo[userPayload](t.Context(), client, "/", userPayload{ID: 100})
 		require.NoError(t, err)
+		require.NotNil(t, resp)
 		assert.Equal(t, "MonadicAlex", user.Name)
 	})
 
-	t.Run("PutResult_Success", func(t *testing.T) {
-		res, resp := fluent.PutResult[userPayload](t.Context(), client, "/", userPayload{ID: 200})
-		require.NotNil(t, resp)
-		assert.True(t, res.IsSuccess())
-		user, err := res.Unwrap()
+	t.Run("PutTo_Success", func(t *testing.T) {
+		user, resp, err := fluent.PutTo[userPayload](t.Context(), client, "/", userPayload{ID: 200})
 		require.NoError(t, err)
+		require.NotNil(t, resp)
 		assert.Equal(t, "MonadicAlex", user.Name)
 	})
 
-	t.Run("DeleteResult_Success", func(t *testing.T) {
-		res, resp := fluent.DeleteResult[userPayload](t.Context(), client, "/")
+	t.Run("DeleteTo_Success", func(t *testing.T) {
+		_, resp, err := fluent.DeleteTo[userPayload](t.Context(), client, "/")
+		require.NoError(t, err)
 		require.NotNil(t, resp)
-		assert.True(t, res.IsSuccess())
 	})
 
-	t.Run("PatchResult_Success", func(t *testing.T) {
-		res, resp := fluent.PatchResult[userPayload](t.Context(), client, "/", userPayload{ID: 300})
+	t.Run("PatchTo_Success", func(t *testing.T) {
+		_, resp, err := fluent.PatchTo[userPayload](t.Context(), client, "/", userPayload{ID: 300})
+		require.NoError(t, err)
 		require.NotNil(t, resp)
-		assert.True(t, res.IsSuccess())
 	})
 
 	t.Run("FetchResult_ErrorRecover", func(t *testing.T) {
@@ -971,51 +991,69 @@ func TestFluent_XML_And_YAML_Symmetry(t *testing.T) {
 		assert.Equal(t, "YAMLUser", res.Name)
 	})
 
-	t.Run("PostXMLResult_And_GetXMLResult", func(t *testing.T) {
-		resPost, respPost := fluent.PostXMLResult[xmlPayload](t.Context(), client, "/xml", xmlPayload{ID: 10})
+	t.Run("PostXML_And_GetXML", func(t *testing.T) {
+		var valPost xmlPayload
+
+		respPost, errPost := fluent.R(client).
+			SetContext(t.Context()).
+			SetXMLBody(xmlPayload{ID: 10}).
+			SetXMLResult(&valPost).
+			Post("/xml")
+
+		require.NoError(t, errPost)
 
 		require.NotNil(t, respPost)
 		defer respPost.Body.Close()
 
-		require.True(t, resPost.IsSuccess())
-		valPost, err := resPost.Unwrap()
-		require.NoError(t, err)
 		assert.Equal(t, 42, valPost.ID)
 
-		resGet, respGet := fluent.GetXMLResult[xmlPayload](t.Context(), client, "/xml")
+		var valGet xmlPayload
+
+		respGet, errGet := fluent.R(client).
+			SetContext(t.Context()).
+			SetXMLResult(&valGet).
+			Get("/xml")
+
+		require.NoError(t, errGet)
 
 		require.NotNil(t, respGet)
 		defer respGet.Body.Close()
 
-		require.True(t, resGet.IsSuccess())
-		valGet, err := resGet.Unwrap()
-		require.NoError(t, err)
 		assert.Equal(t, "XMLUser", valGet.Name)
 	})
 
-	t.Run("PostYAMLResult_And_GetYAMLResult", func(t *testing.T) {
-		resPost, respPost := fluent.PostYAMLResult[yamlPayload](t.Context(), client, "/yaml", yamlPayload{ID: 20})
+	t.Run("PostYAML_And_GetYAML", func(t *testing.T) {
+		var valPost yamlPayload
+
+		respPost, errPost := fluent.R(client).
+			SetContext(t.Context()).
+			SetYAMLBody(yamlPayload{ID: 20}).
+			SetYAMLResult(&valPost).
+			Post("/yaml")
+
+		require.NoError(t, errPost)
 
 		require.NotNil(t, respPost)
 		defer respPost.Body.Close()
 
-		require.True(t, resPost.IsSuccess())
-		valPost, err := resPost.Unwrap()
-		require.NoError(t, err)
 		assert.Equal(t, 43, valPost.ID)
 
-		resGet, respGet := fluent.GetYAMLResult[yamlPayload](t.Context(), client, "/yaml")
+		var valGet yamlPayload
+
+		respGet, errGet := fluent.R(client).
+			SetContext(t.Context()).
+			SetYAMLResult(&valGet).
+			Get("/yaml")
+
+		require.NoError(t, errGet)
 
 		require.NotNil(t, respGet)
 		defer respGet.Body.Close()
 
-		require.True(t, resGet.IsSuccess())
-		valGet, err := resGet.Unwrap()
-		require.NoError(t, err)
 		assert.Equal(t, "YAMLUser", valGet.Name)
 	})
 
-	t.Run("zero_arg_R_and_Fetch", func(t *testing.T) {
+	t.Run("zero_arg_R_and_FetchResult", func(t *testing.T) {
 		t.Parallel()
 
 		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -1038,8 +1076,8 @@ func TestFluent_XML_And_YAML_Symmetry(t *testing.T) {
 		assert.Equal(t, 42, user.ID)
 		assert.Equal(t, "Apple", user.Name)
 
-		// 2. fluent.Fetch[T]
-		res, respFetch := fluent.Fetch[userPayload](t.Context(), server.URL)
+		// 2. fluent.FetchResult[T]
+		res, respFetch := fluent.FetchResult[userPayload](t.Context(), nil, http.MethodGet, server.URL)
 		require.NotNil(t, respFetch)
 		t.Cleanup(func() { respFetch.Body.Close() })
 		require.True(t, res.IsSuccess())

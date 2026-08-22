@@ -12,6 +12,7 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"sync"
 	"testing"
 	"time"
@@ -20,6 +21,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"github.com/valyala/fasthttp"
 
+	"github.com/lemon4ksan/aoni/cookie"
 	"github.com/lemon4ksan/aoni/fast"
 	"github.com/lemon4ksan/aoni/option"
 )
@@ -245,4 +247,50 @@ func TestFastClient_Decompression_Gzip_Brotli_Zstd(t *testing.T) {
 			assert.Equal(t, tt.expected, string(resp.BodyBytes()))
 		})
 	}
+}
+
+func TestFastClient_Cookies_Inspection(t *testing.T) {
+	t.Parallel()
+
+	jar := cookie.NewProxyIsolatedJar()
+
+	client := fast.NewClient(option.WithCookieJar(jar))
+	defer client.CloseIdleConnections()
+
+	u, err := url.Parse("https://example.com/test")
+	require.NoError(t, err)
+
+	assert.False(t, client.HasCookies(u))
+
+	client.SetCookies(u, []*http.Cookie{
+		{Name: "session_id", Value: "sess-999"},
+		{Name: "role", Value: "admin"},
+	})
+
+	assert.True(t, client.HasCookies(u))
+
+	// FindCookie (T, bool)
+	c, ok := client.FindCookie(u, "session_id")
+	require.True(t, ok)
+	assert.Equal(t, "sess-999", c.Value)
+
+	// FindCookieOptional
+	cOpt := client.FindCookieOptional(u, "session_id")
+	require.True(t, cOpt.IsPresent())
+	assert.Equal(t, "sess-999", cOpt.MustValue().Value)
+
+	// GetCookieValue (string, bool)
+	val, okVal := client.GetCookieValue(u, "role")
+	require.True(t, okVal)
+	assert.Equal(t, "admin", val)
+
+	// GetCookieValueOptional
+	valOpt := client.GetCookieValueOptional(u, "role")
+	require.True(t, valOpt.IsPresent())
+	assert.Equal(t, "admin", valOpt.ValueOr("guest"))
+
+	// Missing cookie
+	_, missing := client.FindCookie(u, "non_existent")
+	assert.False(t, missing)
+	assert.False(t, client.FindCookieOptional(u, "non_existent").IsPresent())
 }

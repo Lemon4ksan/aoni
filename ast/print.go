@@ -76,7 +76,7 @@ func Print(w io.Writer, f *File) error {
 	for _, svc := range f.Services {
 		renderWrappedDoc(w, svc.Doc, svc.Name, "provides client bindings", "", f.MaxLen)
 		fmt.Fprintf(w, "//\n")
-		fmt.Fprintf(w, "// @aoni:service casing=%s\n", defaultString(string(svc.Casing), "snake_case"))
+		fmt.Fprintf(w, "// @aoni:service casing=%s\n", generic.Coalesce(string(svc.Casing), "snake_case"))
 
 		if svc.Engine != "" && svc.Engine != EngineNetHTTP {
 			fmt.Fprintf(w, "// @engine %s\n", svc.Engine)
@@ -144,11 +144,9 @@ func renderMethod(w io.Writer, m *Method, maxLen int) {
 
 	var reqPart string
 	if len(m.Parameters) > 0 {
-		parts := make([]string, 0, len(m.Parameters))
-		for _, p := range m.Parameters {
-			parts = append(parts, fmt.Sprintf("%s %s", p.Name, p.Type))
-		}
-
+		parts := generic.Map(m.Parameters, func(p Parameter) string {
+			return fmt.Sprintf("%s %s", p.Name, p.Type)
+		})
 		reqPart = strings.Join(parts, ", ") + ", "
 	} else if m.RequestModel != "" {
 		reqType := m.RequestModel
@@ -321,24 +319,12 @@ func isAoniDirective(s string) bool {
 		return false
 	}
 
-	for _, p := range aoniDirectivePrefixes {
-		if strings.HasPrefix(s, p) {
-			return true
-		}
-	}
-
-	return false
+	return generic.Any(aoniDirectivePrefixes[:], func(p string) bool {
+		return strings.HasPrefix(s, p)
+	})
 }
 
 func isPrimitiveOrSlice(t string) bool {
 	return strings.HasPrefix(t, "[]") || strings.HasPrefix(t, "map[") ||
 		t == "string" || t == "int" || t == "int64" || t == "bool" || t == "float64" || t == "any"
-}
-
-func defaultString(val, def string) string {
-	if val == "" {
-		return def
-	}
-
-	return val
 }

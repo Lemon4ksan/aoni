@@ -121,7 +121,7 @@ func decodeResponseTo[T any](resp *http.Response) (*T, error) {
 		return nil, err
 	}
 
-	if err := decode.DecodePayload(contentType, bodyBytes, &target); err != nil {
+	if err := decode.Payload(contentType, bodyBytes, &target); err != nil {
 		return nil, err
 	}
 

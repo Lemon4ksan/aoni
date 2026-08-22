@@ -10,7 +10,7 @@ import (
 	"fmt"
 	"io"
 
-	"github.com/lemon4ksan/aoni/internal/compress/internal/le"
+	"github.com/lemon4ksan/foundation/silicon/endian"
 )
 
 // bitReader reads a bitstream in reverse.
@@ -72,7 +72,7 @@ func (b *bitReaderBytes) fillFast() {
 	}
 
 	// 2 bounds checks.
-	low := le.Load32(b.in, b.off-4)
+	low := endian.Load32(b.in, b.off-4)
 	b.value |= uint64(low) << (b.bitsRead - 32)
 	b.bitsRead -= 32
 	b.off -= 4
@@ -81,7 +81,7 @@ func (b *bitReaderBytes) fillFast() {
 // fillFastStart() assumes the bitReaderBytes is empty and there is at least 8 bytes to read.
 func (b *bitReaderBytes) fillFastStart() {
 	// Do single re-slice to avoid bounds checks.
-	b.value = le.Load64(b.in, b.off-8)
+	b.value = endian.Load64(b.in, b.off-8)
 	b.bitsRead = 0
 	b.off -= 8
 }
@@ -93,7 +93,7 @@ func (b *bitReaderBytes) fill() {
 	}
 
 	if b.off >= 4 {
-		low := le.Load32(b.in, b.off-4)
+		low := endian.Load32(b.in, b.off-4)
 		b.value |= uint64(low) << (b.bitsRead - 32)
 		b.bitsRead -= 32
 		b.off -= 4
@@ -189,7 +189,7 @@ func (b *bitReaderShifted) fillFast() {
 		return
 	}
 
-	low := le.Load32(b.in, b.off-4)
+	low := endian.Load32(b.in, b.off-4)
 	b.value |= uint64(low) << ((b.bitsRead - 32) & 63)
 	b.bitsRead -= 32
 	b.off -= 4
@@ -197,7 +197,7 @@ func (b *bitReaderShifted) fillFast() {
 
 // fillFastStart() assumes the bitReaderShifted is empty and there is at least 8 bytes to read.
 func (b *bitReaderShifted) fillFastStart() {
-	b.value = le.Load64(b.in, b.off-8)
+	b.value = endian.Load64(b.in, b.off-8)
 	b.bitsRead = 0
 	b.off -= 8
 }
@@ -209,7 +209,7 @@ func (b *bitReaderShifted) fill() {
 	}
 
 	if b.off > 4 {
-		low := le.Load32(b.in, b.off-4)
+		low := endian.Load32(b.in, b.off-4)
 		b.value |= uint64(low) << ((b.bitsRead - 32) & 63)
 		b.bitsRead -= 32
 		b.off -= 4

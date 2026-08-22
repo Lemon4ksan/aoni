@@ -14,11 +14,10 @@ import (
 	"fmt"
 	"io"
 	"math/bits"
-
-	"github.com/lemon4ksan/aoni/internal/compress/internal/regmask"
 )
 
 const (
+	shift32ByUint  = 31 // mask for variable 32-bit shift counts
 	maxCodeLen     = 16 // max length of Huffman code
 	maxCodeLenMask = 15 // mask for max length of Huffman code
 	// The next three numbers come from the RFC section 3.2.7, with the
@@ -660,8 +659,8 @@ func (f *decompressor) readHuffman() error {
 			}
 		}
 
-		rep += int(f.b & uint32(1<<(nb&regmask.Shift32ByUint)-1))
-		f.b >>= nb & regmask.Shift32ByUint
+		rep += int(f.b & uint32(1<<(nb&shift32ByUint)-1))
+		f.b >>= nb & shift32ByUint
 
 		f.nb -= nb
 		if i+rep > n {
@@ -849,7 +848,7 @@ func (f *decompressor) moreBits() error {
 	}
 
 	f.roffset++
-	f.b |= uint32(c) << (f.nb & regmask.Shift32ByUint)
+	f.b |= uint32(c) << (f.nb & shift32ByUint)
 	f.nb += 8
 
 	return nil
@@ -876,7 +875,7 @@ func (f *decompressor) huffSym(h *huffmanDecoder) (int, error) {
 			}
 
 			f.roffset++
-			b |= uint32(c) << (nb & regmask.Shift32ByUint)
+			b |= uint32(c) << (nb & shift32ByUint)
 			nb += 8
 		}
 
@@ -902,7 +901,7 @@ func (f *decompressor) huffSym(h *huffmanDecoder) (int, error) {
 				return 0, f.err
 			}
 
-			f.b = b >> (n & regmask.Shift32ByUint)
+			f.b = b >> (n & shift32ByUint)
 			f.nb = nb - n
 
 			return int(chunk >> huffmanValueShift), nil

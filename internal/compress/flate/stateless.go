@@ -9,7 +9,7 @@ import (
 	"math"
 	"sync"
 
-	"github.com/lemon4ksan/aoni/internal/compress/internal/le"
+	"github.com/lemon4ksan/foundation/silicon/endian"
 )
 
 const (
@@ -187,11 +187,11 @@ func hashSL(u uint32) uint32 {
 }
 
 func load3216(b []byte, i int16) uint32 {
-	return le.Load32(b, i)
+	return endian.Load32(b, i)
 }
 
 func load6416(b []byte, i int16) uint64 {
-	return le.Load64(b, i)
+	return endian.Load64(b, i)
 }
 
 func statelessEnc(dst *tokens, src []byte, startAt int16) {
