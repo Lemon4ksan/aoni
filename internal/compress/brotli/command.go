@@ -5,26 +5,33 @@
 
 package brotli
 
+import (
+	"unsafe"
+
+	"github.com/lemon4ksan/foundation/silicon/simd"
+)
+
 func (s *Reader) detectTrivialLiteralBlockTypes() {
-	for i := uint(0); i < 8; i++ {
-		s.trivialLiteralContexts[i] = 0
+	clear(s.trivialLiteralContexts[:])
+
+	numBlocks := s.numBlockTypes[0]
+	if numBlocks == 0 {
+		return
 	}
 
-	for i := uint(0); uint32(i) < s.numBlockTypes[0]; i++ {
+	for i := uint32(0); i < numBlocks; i++ {
 		offset := i << literalContextBits
+		block := s.contextMap[offset : offset+(1<<literalContextBits)]
+		sample := block[0]
+		sampleWord := simd.RepeatByte0x01 * uint64(sample)
 
-		var errVal uint
-
-		sample := uint(s.contextMap[offset])
-
-		for j := uint(0); j < 1<<literalContextBits; {
-			for k := 0; k < 4; k++ {
-				errVal |= uint(s.contextMap[offset+j]) ^ sample
-				j++
-			}
+		var diff uint64
+		for w := 0; w < 64; w += 8 {
+			word := *(*uint64)(unsafe.Pointer(&block[w]))
+			diff |= word ^ sampleWord
 		}
 
-		if errVal == 0 {
+		if diff == 0 {
 			s.trivialLiteralContexts[i>>5] |= 1 << (i & 31)
 		}
 	}
@@ -417,6 +424,10 @@ CommandInner:
 		p1 := rb[(pos-1)&rbMask]
 		p2 := rb[(pos-2)&rbMask]
 
+		lut := s.contextLookup
+		htrees := s.literalHgroup.htrees
+		cmap := s.contextMapSlice
+
 		for {
 			if safe == 0 && !br.hasInput(28) { /* 162 bits + 7 bytes */
 				s.state = stateCommandInner
@@ -437,10 +448,14 @@ CommandInner:
 				if s.trivialLiteralContext != 0 {
 					goto CommandInner
 				}
+
+				lut = s.contextLookup
+				htrees = s.literalHgroup.htrees
+				cmap = s.contextMapSlice
 			}
 
-			context := s.contextLookup.get(p1, p2)
-			hc = []huffmanCode(s.literalHgroup.htrees[s.contextMapSlice[context]])
+			context := lut.get(p1, p2)
+			hc = htrees[cmap[context]]
 
 			p2 = p1
 			if safe == 0 {
@@ -556,9 +571,9 @@ CommandPostDecodeLiterals:
 
 				wordLen := i
 				if transformIdx == int(trans.cutOffTransforms[0]) {
-					copy(s.ringbuffer[pos:], word[:uint(wordLen)])
+					copy(rb[pos:], word[:uint(wordLen)])
 				} else {
-					wordLen = trans.transformWord(s.ringbuffer[pos:], word, wordLen, transformIdx)
+					wordLen = trans.transformWord(rb[pos:], word, wordLen, transformIdx)
 				}
 
 				pos += wordLen
@@ -575,10 +590,10 @@ CommandPostDecodeLiterals:
 			return decoderErrorFormatDictionary
 		}
 	} else {
-		srcStart := (pos - s.distanceCode) & s.ringbufferMask
+		srcStart := (pos - s.distanceCode) & rbMask
 
-		copyDst := s.ringbuffer[pos:]
-		copySrc := s.ringbuffer[srcStart:]
+		copyDst := rb[pos:]
+		copySrc := rb[srcStart:]
 
 		dstEnd := pos + i
 		srcEnd := srcStart + i
@@ -621,13 +636,15 @@ CommandPostDecodeLiterals:
 CommandPostWrapCopy:
 	{
 		wrapGuard := s.ringbufferSize - pos
+		dist := s.distanceCode
+
 		for {
 			i--
 			if i < 0 {
 				break
 			}
 
-			s.ringbuffer[pos] = s.ringbuffer[(pos-s.distanceCode)&s.ringbufferMask]
+			rb[pos] = rb[(pos-dist)&rbMask]
 			pos++
 
 			wrapGuard--

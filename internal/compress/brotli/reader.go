@@ -8,7 +8,9 @@ package brotli
 import (
 	"errors"
 	"io"
-	"sync"
+
+	"github.com/lemon4ksan/foundation/generic"
+	"github.com/lemon4ksan/foundation/silicon/pool"
 )
 
 type decodeError int
@@ -41,25 +43,28 @@ func (r *Reader) SetMaxOutputSize(maxBytes int64) {
 // It is arbitrarily chosen to be equal to the constant used in io.Copy.
 const readBufSize = 32 * 1024
 
-var readerPool = sync.Pool{
-	New: func() any {
-		return new(Reader)
-	},
-}
+var readerStorage = pool.NewPerPStorage[*Reader](func() *Reader {
+	return new(Reader)
+})
 
-// AcquireReader borrows a pooled [*Reader] bound to src.
+// AcquireReader borrows a CPU-core local pooled [*Reader] bound to src with zero GC eviction jitter.
 func AcquireReader(src io.Reader) *Reader {
-	r := readerPool.Get().(*Reader)
+	r := readerStorage.Get()
 	_ = r.Reset(src)
 	return r
 }
 
-// ReleaseReader resets and returns r back to the internal pool.
+// ReleaseReader resets and returns r back to the CPU-core local storage.
 func ReleaseReader(r *Reader) {
 	if r != nil {
 		_ = r.Reset(nil)
-		readerPool.Put(r)
+		readerStorage.Put(r)
 	}
+}
+
+// DecodeResult decompresses a Brotli payload returning a monadic generic.Result[[]byte].
+func DecodeResult(src []byte) generic.Result[[]byte] {
+	return generic.FromResult(Decompress(nil, src))
 }
 
 // NewReader creates a new Reader reading the given reader.

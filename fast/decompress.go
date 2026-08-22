@@ -36,7 +36,7 @@ func decompressFastResponse(resp *fasthttp.Response) bool {
 		decompressed, err = resp.BodyGunzip()
 
 	case bytesconv.ContainsFoldASCII(encodingBytes, "br"):
-		decompressed, err = resp.BodyUnbrotli()
+		decompressed, err = compress.Unbrotli(body, nil)
 
 	case bytesconv.ContainsFoldASCII(encodingBytes, "zstd"):
 		decompressed, err = compress.Unzstd(body, nil)
