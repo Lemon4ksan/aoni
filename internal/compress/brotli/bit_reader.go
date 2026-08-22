@@ -21,6 +21,7 @@ var kBitMask = [33]uint32{
 
 const shortFillBitWindowRead = 4
 
+//go:inline
 func bitMask(n uint32) uint32 {
 	return kBitMask[n]
 }

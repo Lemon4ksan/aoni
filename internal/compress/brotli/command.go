@@ -395,6 +395,20 @@ CommandInner:
 			}
 
 			if safe == 0 {
+				for s.blockLength[0] >= 4 && i >= 4 && pos+4 <= s.ringbufferSize && br.hasInput(32) {
+					rb[pos] = byte(readPreloadedSymbol(s.literalHtree, br, &bits, &value))
+					rb[pos+1] = byte(readPreloadedSymbol(s.literalHtree, br, &bits, &value))
+					rb[pos+2] = byte(readPreloadedSymbol(s.literalHtree, br, &bits, &value))
+					rb[pos+3] = byte(readPreloadedSymbol(s.literalHtree, br, &bits, &value))
+					pos += 4
+					i -= 4
+					s.blockLength[0] -= 4
+				}
+
+				if i == 0 {
+					break
+				}
+
 				rb[pos] = byte(readPreloadedSymbol(s.literalHtree, br, &bits, &value))
 			} else {
 				var literal uint32
@@ -459,6 +473,26 @@ CommandInner:
 
 			p2 = p1
 			if safe == 0 {
+				for s.blockLength[0] >= 2 && i >= 2 && pos+2 <= s.ringbufferSize && br.hasInput(32) {
+					ctx0 := lut.get(p1, p2)
+					p2 = p1
+					p1 = byte(readSymbol(htrees[cmap[ctx0]], br))
+					rb[pos] = p1
+
+					ctx1 := lut.get(p1, p2)
+					p2 = p1
+					p1 = byte(readSymbol(htrees[cmap[ctx1]], br))
+					rb[pos+1] = p1
+
+					pos += 2
+					i -= 2
+					s.blockLength[0] -= 2
+				}
+
+				if i == 0 {
+					break
+				}
+
 				p1 = byte(readSymbol(hc, br))
 			} else {
 				var literal uint32
