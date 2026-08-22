@@ -282,6 +282,8 @@ func (s *Reader) processCommandsInternal(safe int) int {
 		result = decoderSuccess
 		br     = &s.br
 		hc     []huffmanCode
+		rb     = s.ringbuffer
+		rbMask = s.ringbufferMask
 	)
 
 	if safe == 0 && !br.hasInput(28) {
@@ -386,7 +388,7 @@ CommandInner:
 			}
 
 			if safe == 0 {
-				s.ringbuffer[pos] = byte(readPreloadedSymbol(s.literalHtree, br, &bits, &value))
+				rb[pos] = byte(readPreloadedSymbol(s.literalHtree, br, &bits, &value))
 			} else {
 				var literal uint32
 				if !safeReadSymbol(s.literalHtree, br, &literal) {
@@ -394,7 +396,7 @@ CommandInner:
 					goto saveStateAndReturn
 				}
 
-				s.ringbuffer[pos] = byte(literal)
+				rb[pos] = byte(literal)
 			}
 
 			s.blockLength[0]--
@@ -412,8 +414,8 @@ CommandInner:
 			}
 		}
 	} else {
-		p1 := s.ringbuffer[(pos-1)&s.ringbufferMask]
-		p2 := s.ringbuffer[(pos-2)&s.ringbufferMask]
+		p1 := rb[(pos-1)&rbMask]
+		p2 := rb[(pos-2)&rbMask]
 
 		for {
 			if safe == 0 && !br.hasInput(28) { /* 162 bits + 7 bytes */
@@ -453,7 +455,7 @@ CommandInner:
 				p1 = byte(literal)
 			}
 
-			s.ringbuffer[pos] = p1
+			rb[pos] = p1
 			s.blockLength[0]--
 
 			pos++

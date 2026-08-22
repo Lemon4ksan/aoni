@@ -74,7 +74,9 @@ func (br *bitReader) fillBitWindow() {
 	if br.bitPos >= 32 {
 		br.val >>= 32
 		br.bitPos ^= 32
-		br.val |= (uint64(binary.LittleEndian.Uint32(br.input[br.bytePos:]))) << 32
+		b := br.input[br.bytePos:]
+		_ = b[3]
+		br.val |= uint64(binary.LittleEndian.Uint32(b)) << 32
 		br.bytePos += 4
 	}
 }

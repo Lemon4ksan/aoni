@@ -331,16 +331,16 @@ bits that correspond to the decoded symbol.
 bits MUST contain at least 15 (BROTLI_HUFFMAN_MAX_CODE_LENGTH) valid bits.
 */
 func decodeSymbol(bits uint32, table []huffmanCode, br *bitReader) uint32 {
-	table = table[bits&huffmanTableMask:]
-	if table[0].bits > huffmanTableBits {
-		nbits := uint32(table[0].bits) - huffmanTableBits
+	entry := table[bits&huffmanTableMask]
+	if entry.bits > huffmanTableBits {
+		nbits := uint32(entry.bits) - huffmanTableBits
 		br.dropBits(huffmanTableBits)
-		table = table[uint32(table[0].value)+((bits>>huffmanTableBits)&bitMask(nbits)):]
+		entry = table[uint32(entry.value)+((bits>>huffmanTableBits)&bitMask(nbits))]
 	}
 
-	br.dropBits(uint32(table[0].bits))
+	br.dropBits(uint32(entry.bits))
 
-	return uint32(table[0].value)
+	return uint32(entry.value)
 }
 
 /*
@@ -369,11 +369,11 @@ func safeDecodeSymbol(table []huffmanCode, br *bitReader, result *uint32) bool {
 
 	val := uint32(br.bitsUnmasked())
 
-	table = table[val&huffmanTableMask:]
-	if table[0].bits <= huffmanTableBits {
-		if uint32(table[0].bits) <= availBits {
-			br.dropBits(uint32(table[0].bits))
-			*result = uint32(table[0].value)
+	entry := table[val&huffmanTableMask]
+	if entry.bits <= huffmanTableBits {
+		if uint32(entry.bits) <= availBits {
+			br.dropBits(uint32(entry.bits))
+			*result = uint32(entry.value)
 			return true
 		}
 
@@ -385,16 +385,16 @@ func safeDecodeSymbol(table []huffmanCode, br *bitReader, result *uint32) bool {
 	}
 
 	/* Speculatively drop HUFFMAN_TABLE_BITS. */
-	val = (val & bitMask(uint32(table[0].bits))) >> huffmanTableBits
+	val = (val & bitMask(uint32(entry.bits))) >> huffmanTableBits
 	availBits -= huffmanTableBits
 
-	table = table[uint32(table[0].value)+val:]
-	if availBits < uint32(table[0].bits) {
+	subTable := table[uint32(entry.value)+val:]
+	if availBits < uint32(subTable[0].bits) {
 		return false /* Not enough bits for the second level. */
 	}
 
-	br.dropBits(huffmanTableBits + uint32(table[0].bits))
-	*result = uint32(table[0].value)
+	br.dropBits(huffmanTableBits + uint32(subTable[0].bits))
+	*result = uint32(subTable[0].value)
 
 	return true
 }
@@ -415,9 +415,9 @@ func preloadSymbol(safe int, table []huffmanCode, br *bitReader, bits, value *ui
 		return
 	}
 
-	table = table[br.getBits(huffmanTableBits):]
-	*bits = uint32(table[0].bits)
-	*value = uint32(table[0].value)
+	entry := table[br.getBits(huffmanTableBits)]
+	*bits = uint32(entry.bits)
+	*value = uint32(entry.value)
 }
 
 /*
@@ -425,20 +425,17 @@ Decodes the next Huffman code using data prepared by PreloadSymbol.
 Reads 0 - 15 bits. Also peeks 8 following bits.
 */
 func readPreloadedSymbol(table []huffmanCode, br *bitReader, bits, value *uint32) uint32 {
-	var (
-		result = *value
-		ext    []huffmanCode
-	)
+	result := *value
 
 	if *bits > huffmanTableBits {
 		val := br.get16BitsUnmasked()
-		ext = table[val&huffmanTableMask:][*value:]
-
+		offset := val & huffmanTableMask
 		mask := bitMask(*bits - huffmanTableBits)
 		br.dropBits(huffmanTableBits)
-		ext = ext[(val>>huffmanTableBits)&mask:]
-		br.dropBits(uint32(ext[0].bits))
-		result = uint32(ext[0].value)
+		extIdx := offset + *value + ((val >> huffmanTableBits) & mask)
+		ext := table[extIdx]
+		br.dropBits(uint32(ext.bits))
+		result = uint32(ext.value)
 	} else {
 		br.dropBits(*bits)
 	}

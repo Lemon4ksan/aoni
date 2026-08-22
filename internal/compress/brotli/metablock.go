@@ -297,10 +297,10 @@ func (s *Reader) readSymbolCodeLengths(alphabetSize uint32) int {
 		}
 
 		br.fillBitWindow()
-		p := s.table[br.bitsUnmasked()&uint64(bitMask(huffmanMaxCodeLengthCodeLength)):]
-		br.dropBits(uint32(p[0].bits))
+		entry := s.table[br.bitsUnmasked()&uint64(bitMask(huffmanMaxCodeLengthCodeLength))]
+		br.dropBits(uint32(entry.bits))
 
-		codeLen := uint32(p[0].value)
+		codeLen := uint32(entry.value)
 		if codeLen < repeatPreviousCodeLength {
 			s.processSingleCodeLength(codeLen)
 		} else {
@@ -338,26 +338,26 @@ func (s *Reader) safeReadSymbolCodeLengths(alphabetSize uint32) int {
 			bits = uint32(br.bitsUnmasked())
 		}
 
-		p := s.table[bits&bitMask(huffmanMaxCodeLengthCodeLength):]
-		if uint32(p[0].bits) > availableBits {
+		entry := s.table[bits&bitMask(huffmanMaxCodeLengthCodeLength)]
+		if uint32(entry.bits) > availableBits {
 			getByte = true
 			continue
 		}
 
-		codeLen := uint32(p[0].value)
+		codeLen := uint32(entry.value)
 		if codeLen < repeatPreviousCodeLength {
-			br.dropBits(uint32(p[0].bits))
+			br.dropBits(uint32(entry.bits))
 			s.processSingleCodeLength(codeLen)
 		} else {
 			extraBits := codeLen - 14
-			repeatDelta := (bits >> p[0].bits) & bitMask(extraBits)
+			repeatDelta := (bits >> entry.bits) & bitMask(extraBits)
 
-			if availableBits < uint32(p[0].bits)+extraBits {
+			if availableBits < uint32(entry.bits)+extraBits {
 				getByte = true
 				continue
 			}
 
-			br.dropBits(uint32(p[0].bits) + extraBits)
+			br.dropBits(uint32(entry.bits) + extraBits)
 			s.processRepeatedCodeLength(codeLen, repeatDelta, alphabetSize)
 		}
 	}

@@ -144,5 +144,6 @@ func getContextLUT(mode int) contextLUT {
 }
 
 func (lut contextLUT) get(p1, p2 byte) byte {
+	_ = lut[511]
 	return lut[p1] | lut[256+int(p2)]
 }
