@@ -395,6 +395,20 @@ CommandInner:
 			}
 
 			if safe == 0 {
+				for s.blockLength[0] >= 8 && i >= 8 && pos+8 <= s.ringbufferSize && br.hasInput(40) {
+					rb[pos] = byte(readPreloadedSymbol(s.literalHtree, br, &bits, &value))
+					rb[pos+1] = byte(readPreloadedSymbol(s.literalHtree, br, &bits, &value))
+					rb[pos+2] = byte(readPreloadedSymbol(s.literalHtree, br, &bits, &value))
+					rb[pos+3] = byte(readPreloadedSymbol(s.literalHtree, br, &bits, &value))
+					rb[pos+4] = byte(readPreloadedSymbol(s.literalHtree, br, &bits, &value))
+					rb[pos+5] = byte(readPreloadedSymbol(s.literalHtree, br, &bits, &value))
+					rb[pos+6] = byte(readPreloadedSymbol(s.literalHtree, br, &bits, &value))
+					rb[pos+7] = byte(readPreloadedSymbol(s.literalHtree, br, &bits, &value))
+					pos += 8
+					i -= 8
+					s.blockLength[0] -= 8
+				}
+
 				for s.blockLength[0] >= 4 && i >= 4 && pos+4 <= s.ringbufferSize && br.hasInput(32) {
 					rb[pos] = byte(readPreloadedSymbol(s.literalHtree, br, &bits, &value))
 					rb[pos+1] = byte(readPreloadedSymbol(s.literalHtree, br, &bits, &value))
