@@ -281,12 +281,24 @@ func buildSimpleHuffmanTable(table []huffmanCode, rootBits int, val []uint16, nu
 		tableSize = 4
 
 	case 3:
-		for i := 0; i < 3; i++ {
-			for k := i + 1; k < 4; k++ {
-				if val[k] < val[i] {
-					val[k], val[i] = val[i], val[k]
-				}
-			}
+		if val[0] > val[1] {
+			val[0], val[1] = val[1], val[0]
+		}
+
+		if val[2] > val[3] {
+			val[2], val[3] = val[3], val[2]
+		}
+
+		if val[0] > val[2] {
+			val[0], val[2] = val[2], val[0]
+		}
+
+		if val[1] > val[3] {
+			val[1], val[3] = val[3], val[1]
+		}
+
+		if val[1] > val[2] {
+			val[1], val[2] = val[2], val[1]
 		}
 
 		table[0] = constructHuffmanCode(2, val[0])
