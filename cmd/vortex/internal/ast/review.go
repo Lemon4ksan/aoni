@@ -76,7 +76,6 @@ func (c *CmdReview) Run(ctx context.Context, args []string, stdout, stderr io.Wr
 	}
 
 	p := vparser.NewParser()
-	reconciler := merge.NewReconciler()
 
 	fmt.Fprintf(stdout, "⚡ [vortex ast review] Auditing Proposal from %q\n\n", targetRef)
 
@@ -100,7 +99,7 @@ func (c *CmdReview) Run(ctx context.Context, args []string, stdout, stderr io.Wr
 			continue
 		}
 
-		res, err := reconciler.Reconcile(nil, diskIR, remoteIR)
+		res, err := merge.Reconcile(nil, diskIR, remoteIR)
 		if err != nil {
 			continue
 		}

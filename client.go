@@ -5,7 +5,6 @@
 package aoni
 
 import (
-	"bytes"
 	"context"
 	"crypto/tls"
 	"log/slog"
@@ -17,7 +16,6 @@ import (
 	flog "github.com/lemon4ksan/foundation/async/log"
 	"github.com/lemon4ksan/foundation/generic"
 	furl "github.com/lemon4ksan/foundation/net/url"
-	"github.com/lemon4ksan/foundation/silicon/bytesconv"
 
 	"github.com/lemon4ksan/aoni/internal/core"
 	"github.com/lemon4ksan/aoni/internal/experimental"
@@ -211,13 +209,6 @@ func (c *Client) Request(
 }
 
 // ensureRequestConfig resolves or lazily allocates the per-request transaction container ([pipeline.RequestConfig]).
-//
-// Lifecycle & Zero-Alloc Invariants:
-//  1. Re-entrant Contexts: If ctx already carries a RequestConfig (e.g. from an outer retry loop,
-//     middleware, or SDK bridge), it enriches the existing container with client defaults without allocating memory.
-//  2. On-Demand Allocation: If the request carries modifiers, default client headers, or advanced network options
-//     (proxy, cert pinning, JA4), it acquires a pooled container from sync.Pool ([pipeline.AllocRequestConfig]).
-//  3. Minimalist Pass-Through: If no request-level configuration is required, ctx is returned untouched with 0 allocations.
 func (c *Client) ensureRequestConfig(ctx context.Context, hasMods bool) context.Context {
 	if cfg := pipeline.GetRequestConfig(ctx); cfg != nil {
 		c.applyRequestConfigDefaults(cfg)
@@ -239,7 +230,6 @@ func (c *Client) doPipeline(
 	method, path string,
 	mods []RequestModifier,
 ) (*http.Response, error) {
-	// Initialize or enrich the per-request transaction context from sync.Pool on demand
 	ctx = c.ensureRequestConfig(ctx, len(mods) > 0)
 
 	targetURL, err := c.resolveURL(path)
@@ -362,7 +352,7 @@ func (c *Client) Do(req Request) (Response, error) {
 		return nil, ErrNilRequest
 	}
 
-	httpReq, err := c.resolveHTTPRequest(req)
+	httpReq, err := ToStdRequest(req)
 	if err != nil {
 		return nil, err
 	}
@@ -602,43 +592,6 @@ func (c *Client) resolveURL(path string) (*url.URL, error) {
 	return u, nil
 }
 
-// resolveHTTPRequest converts a generic [Request] interface into a standard [*http.Request].
-// Uses zero-allocation bytesconv string conversions for header mappings.
-func (c *Client) resolveHTTPRequest(req Request) (*http.Request, error) {
-	if httpReq := req.HTTPRequest(); httpReq != nil {
-		return httpReq, nil
-	}
-
-	ctx := req.Context()
-	if ctx == nil {
-		ctx = context.Background()
-	}
-
-	body := req.BodyStream()
-	if body == nil {
-		if bb := req.BodyBytes(); len(bb) > 0 {
-			body = bytes.NewReader(bb)
-		}
-	}
-
-	httpReq, err := http.NewRequestWithContext(ctx, req.Method(), req.URL(), body)
-	if err != nil {
-		return nil, &Error{Op: "failed to create http request", Err: err}
-	}
-
-	req.ForEachHeader(func(k, v []byte) bool {
-		httpReq.Header.Add(bytesconv.B2S(k), bytesconv.B2S(v))
-		return true
-	})
-
-	if host := req.Header("Host"); host != "" {
-		httpReq.Host = host
-	}
-
-	return httpReq, nil
-}
-
-// applyConfig applies a Config DTO to the client instance, recreating internal engines and transport dialers.
 func (c *Client) applyConfig(cfg Config) {
 	c.cfg = cfg
 	c.coreEngine = pipeline.NewEngine(cfg.Defaults.BaseURL, cfg.Defaults.Headers)
@@ -683,8 +636,6 @@ func (c *Client) applyPowerManagement(enable bool) {
 	}
 }
 
-// applyDefaultHTTPHeader applies the default and precomputed HTTP headers to the request.
-// Allocates the header map with precise exact capacity upfront to prevent intermediate bucket rehashing.
 func (c *Client) applyDefaultHTTPHeader() http.Header {
 	headerCap := len(c.prepared.PrecomputedDefaultHeaders) + len(c.cfg.Defaults.Headers)
 	if headerCap == 0 {

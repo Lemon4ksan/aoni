@@ -48,8 +48,7 @@ type UpdateResponse struct {
 	root, err := p.ParseSource("api.go", []byte(src))
 	require.NoError(t, err)
 
-	em := emitter.NewEmitter()
-	codeBytes, err := em.Emit(root)
+	codeBytes, err := emitter.Emit(root)
 	require.NoError(t, err)
 
 	code := string(codeBytes)
@@ -84,8 +83,7 @@ type BoosterData struct {
 	root, err := p.ParseSource("api.go", []byte(src))
 	require.NoError(t, err)
 
-	em := emitter.NewEmitter()
-	codeBytes, err := em.Emit(root)
+	codeBytes, err := emitter.Emit(root)
 	require.NoError(t, err)
 
 	code := string(codeBytes)

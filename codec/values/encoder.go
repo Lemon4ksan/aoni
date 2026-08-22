@@ -12,7 +12,8 @@ import (
 	"strconv"
 	"strings"
 
-	foundation "github.com/lemon4ksan/foundation/net/url"
+	furl "github.com/lemon4ksan/foundation/net/url"
+	"github.com/lemon4ksan/foundation/refkit"
 	"github.com/lemon4ksan/foundation/silicon/bytesconv"
 	"google.golang.org/protobuf/encoding/protojson"
 	"google.golang.org/protobuf/proto"
@@ -38,16 +39,17 @@ func fillValues(s *mapper.StructSchema, v reflect.Value, values url.Values) erro
 
 // fillField serializes an individual struct field into url.Values based on tag rules and default values.
 func fillField(f *mapper.FieldSchema, fieldValue reflect.Value, values url.Values) error {
-	if fieldValue.Kind() == reflect.Pointer {
-		if fieldValue.IsNil() {
-			if f.DefaultVal != "" && f.Key != "" && f.Key != "-" {
-				values.Set(f.Key, f.DefaultVal)
-			}
-
-			return nil
+	if refkit.IsNil(fieldValue) {
+		if f.DefaultVal != "" && f.Key != "" && f.Key != "-" {
+			values.Set(f.Key, f.DefaultVal)
 		}
 
-		fieldValue = fieldValue.Elem()
+		return nil
+	}
+
+	fieldValue = refkit.DerefValue(fieldValue)
+	if !fieldValue.IsValid() {
+		return nil
 	}
 
 	if (f.IsAnonymous || f.IsInline) && fieldValue.Kind() == reflect.Struct {
@@ -71,7 +73,7 @@ func fillField(f *mapper.FieldSchema, fieldValue reflect.Value, values url.Value
 
 // shouldSkipZeroValue checks whether a zero-value field should be omitted or assigned its default value.
 func shouldSkipZeroValue(f *mapper.FieldSchema, fieldValue reflect.Value, values url.Values) bool {
-	if !fieldValue.IsZero() {
+	if !refkit.IsZero(fieldValue) {
 		return false
 	}
 
@@ -206,9 +208,9 @@ func writeQueryKeyValuePair(sb *strings.Builder, key, value string, first *bool)
 
 	var tmpBuf [64]byte
 
-	buf := foundation.AppendQueryEscapeString(tmpBuf[:0], key)
+	buf := furl.AppendQueryEscapeString(tmpBuf[:0], key)
 	buf = append(buf, '=')
-	buf = foundation.AppendQueryEscapeString(buf, value)
+	buf = furl.AppendQueryEscapeString(buf, value)
 
 	sb.Write(buf)
 

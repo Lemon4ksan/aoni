@@ -12,6 +12,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/lemon4ksan/foundation/generic"
 )
 
 // Format renders and formats the AST file as standard Go code.
@@ -37,8 +39,7 @@ func WriteFile(filename string, f *File) error {
 		return err
 	}
 
-	dir := filepath.Dir(filename)
-	if dir != "" && dir != "." {
+	if dir := filepath.Dir(filename); dir != "" && dir != "." {
 		if mkErr := os.MkdirAll(dir, 0o755); mkErr != nil {
 			return fmt.Errorf("creating directory %s: %w", dir, mkErr)
 		}
@@ -130,11 +131,7 @@ func renderMethod(w io.Writer, m *Method, maxLen int) {
 	renderWrappedDoc(w, m.Doc, m.Name, "calls "+m.Path, "\t", maxLen)
 	fmt.Fprintf(w, "\t//\n")
 
-	httpMethod := strings.ToLower(m.HTTPMethod)
-	if httpMethod == "" {
-		httpMethod = "get"
-	}
-
+	httpMethod := generic.Coalesce(strings.ToLower(m.HTTPMethod), "get")
 	fmt.Fprintf(w, "\t// @%s %q\n", httpMethod, m.Path)
 
 	if m.Form {
@@ -145,7 +142,7 @@ func renderMethod(w io.Writer, m *Method, maxLen int) {
 		fmt.Fprintf(w, "\t// @unwrap %q\n", m.UnwrapField)
 	}
 
-	reqPart := ""
+	var reqPart string
 	if len(m.Parameters) > 0 {
 		parts := make([]string, 0, len(m.Parameters))
 		for _, p := range m.Parameters {
@@ -162,16 +159,10 @@ func renderMethod(w io.Writer, m *Method, maxLen int) {
 		reqPart = fmt.Sprintf("req %s, ", reqType)
 	}
 
-	respType := m.ResponseModel
-	if respType == "" {
-		respType = "any"
-	}
-
+	respType := generic.Coalesce(m.ResponseModel, "any")
 	singleLine := fmt.Sprintf(
 		"\t%s(ctx context.Context, %smods ...aoni.RequestModifier) (%s, error)",
-		m.Name,
-		reqPart,
-		respType,
+		m.Name, reqPart, respType,
 	)
 
 	if len(singleLine) > maxLen && (len(m.Parameters) > 0 || m.RequestModel != "") {
@@ -206,20 +197,12 @@ func renderField(w io.Writer, f *Field, maxLen int) {
 
 	tagParts := []string{}
 	if f.JSONName != "" {
-		omit := ",omitempty"
-		if f.Required {
-			omit = ""
-		}
-
+		omit := generic.Ternary(f.Required, "", ",omitempty")
 		tagParts = append(tagParts, fmt.Sprintf("json:%q", f.JSONName+omit))
 	}
 
 	if f.URLName != "" {
-		omit := ",omitempty"
-		if f.Required {
-			omit = ""
-		}
-
+		omit := generic.Ternary(f.Required, "", ",omitempty")
 		tagParts = append(tagParts, fmt.Sprintf("url:%q", f.URLName+omit))
 	}
 
@@ -231,7 +214,7 @@ func renderField(w io.Writer, f *Field, maxLen int) {
 		tagParts = append(tagParts, f.CustomTags)
 	}
 
-	tagStr := ""
+	var tagStr string
 	if len(tagParts) > 0 {
 		tagStr = fmt.Sprintf(" `%s`", strings.Join(tagParts, " "))
 	}
@@ -253,11 +236,7 @@ func renderWrappedDoc(w io.Writer, doc []string, defaultName, defaultDesc, inden
 	}
 
 	prefixLen := len(indent) + 3 // indent + "// "
-
-	availableWidth := maxLen - prefixLen
-	if availableWidth < 40 {
-		availableWidth = 40
-	}
+	availableWidth := max(maxLen-prefixLen, 40)
 
 	for _, rawLine := range doc {
 		rawLine = strings.TrimSpace(rawLine)

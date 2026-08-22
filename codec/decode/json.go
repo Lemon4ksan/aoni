@@ -5,6 +5,7 @@
 package decode
 
 import (
+	"bytes"
 	"encoding/json"
 	"io"
 )
@@ -23,6 +24,23 @@ type customJSONDecoder struct {
 }
 
 func (d customJSONDecoder) Decode(reader io.Reader, target any) error {
+	if data, _, ok := InspectBytes(reader); ok {
+		if len(data) == 0 {
+			return nil
+		}
+
+		dec := json.NewDecoder(bytes.NewReader(data))
+		if d.cfg.DisallowUnknownFields {
+			dec.DisallowUnknownFields()
+		}
+
+		if d.cfg.UseNumber {
+			dec.UseNumber()
+		}
+
+		return dec.Decode(target)
+	}
+
 	dec := json.NewDecoder(reader)
 	if d.cfg.DisallowUnknownFields {
 		dec.DisallowUnknownFields()
@@ -40,9 +58,17 @@ func NewJSONDecoder(cfg JSONDecoderConfig) Decoder {
 	return customJSONDecoder{cfg: cfg}
 }
 
-// jsonDecoder parses response payload streams as standard JSON using [json.NewDecoder].
+// jsonDecoder parses response payload streams as standard JSON using [json.NewDecoder] or fast [json.Unmarshal].
 type jsonDecoder struct{}
 
 func (jsonDecoder) Decode(reader io.Reader, target any) error {
+	if data, _, ok := InspectBytes(reader); ok {
+		if len(data) == 0 {
+			return nil
+		}
+
+		return json.Unmarshal(data, target)
+	}
+
 	return json.NewDecoder(reader).Decode(target)
 }

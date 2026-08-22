@@ -40,7 +40,7 @@ func (r *RuleStaleCodegen) Run(pass *Pass) []Diagnostic {
 	// Optimize and generate expected code in-memory
 	optimizer.NewOptimizer().Optimize(pass.RootIR)
 
-	expectedCode, err := emitter.NewEmitter().Emit(pass.RootIR)
+	expectedCode, err := emitter.Emit(pass.RootIR)
 	if err != nil {
 		return nil
 	}

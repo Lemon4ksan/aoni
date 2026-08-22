@@ -58,14 +58,8 @@ type DirectiveDef struct {
 }
 
 // HasScope reports whether the directive is valid within the given declaration scope.
-func (d *DirectiveDef) HasScope(s Scope) bool {
-	for _, sc := range d.Scopes {
-		if sc == s {
-			return true
-		}
-	}
-
-	return false
+func (d DirectiveDef) HasScope(s Scope) bool {
+	return slices.Contains(d.Scopes, s)
 }
 
 // Registry is the canonical list of all directives and pipeline stages supported by aoni-gen.

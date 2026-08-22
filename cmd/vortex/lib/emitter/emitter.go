@@ -16,16 +16,8 @@ import (
 	"github.com/lemon4ksan/aoni/internal/version"
 )
 
-// Emitter translates Vortex RootIR into fully formatted, idiomatic Go source code.
-type Emitter struct{}
-
-// NewEmitter returns an initialized [Emitter] instance.
-func NewEmitter() *Emitter {
-	return &Emitter{}
-}
-
 // Emit compiles RootIR into formatted Go source code.
-func (e *Emitter) Emit(root *ir.RootIR) ([]byte, error) {
+func Emit(root *ir.RootIR) ([]byte, error) {
 	if root == nil {
 		return nil, errors.New("root IR cannot be nil")
 	}

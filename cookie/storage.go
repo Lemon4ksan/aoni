@@ -57,16 +57,17 @@ func NewJSONFileStorage(filePath string) *JSONFileStorage {
 // Save stores cookie slices under key and flushes the JSON payload to disk via atomic temp file swaps.
 // Creates parent directories if missing and atomically renames the temporary file to target path.
 func (s *JSONFileStorage) Save(key string, cookies []Cookie) error {
-	var (
-		fileBytes []byte
-		err       error
-	)
+	var snapshot fileStorageData
 
 	s.data.Mutate(func(d *fileStorageData) {
 		(*d)[key] = cookies
-		fileBytes, err = json.Marshal(*d)
+		snapshot = make(fileStorageData, len(*d))
+		for k, v := range *d {
+			snapshot[k] = v
+		}
 	})
 
+	fileBytes, err := json.Marshal(snapshot)
 	if err != nil {
 		return err
 	}
@@ -185,8 +186,7 @@ func (s *SQLStorage) Save(key string, cookies []Cookie) error {
 
 // Load retrieves cookies associated with key from the SQL database.
 func (s *SQLStorage) Load(key string) ([]Cookie, error) {
-	ctx := context.Background()
-	row := s.db.QueryRowContext(ctx, `SELECT cookie_data FROM `+s.tableName+` WHERE proxy_key = ?`, key) //nolint:gosec
+	row := s.db.QueryRowContext(context.Background(), `SELECT cookie_data FROM `+s.tableName+` WHERE proxy_key = ?`, key) //nolint:gosec
 
 	var dataStr string
 	if err := row.Scan(&dataStr); err != nil {

@@ -233,6 +233,43 @@ func (c Config) Clone() Config {
 	}
 }
 
+// BuildDialConfig converts the [Config] into a self-contained [transport.DialConfig] DTO for socket dialing.
+// Read-only and safe for concurrent use.
+func (c Config) BuildDialConfig(ctx context.Context) transport.DialConfig {
+	netProto := c.Network.Network.String()
+	if netProto == "" {
+		netProto = NetworkTCP.String()
+	}
+
+	return transport.DialConfig{
+		Network:            netProto,
+		DNSResolver:        c.Network.DNSResolver,
+		StackDriver:        c.Network.StackDriver,
+		L2Device:           c.Network.L2Device,
+		SourceRotator:      c.Network.SourceRotator,
+		HappyEyeballs:      c.Network.HappyEyeballsDelay,
+		SSRFGuard:          c.Network.SSRFGuard,
+		ProxyDNS:           c.Network.ProxyDNS,
+		P0fSignature:       c.Fingerprint.P0fSignature,
+		SocketController:   c.Network.SocketController,
+		FragmentConfig:     c.Network.FragmentConfig,
+		ProxyURL:           c.Network.ProxyAddr,
+		InsecureSkipVerify: GetInsecureSkipVerify(ctx) || c.Engine.InsecureSkipVerify,
+		SpecProvider:       c.Fingerprint.TLSClientHelloSpecProvider,
+		SessionCache:       c.Fingerprint.SessionCache,
+		CertificatePins:    c.Fingerprint.CertificatePins,
+		CertCompression:    c.Fingerprint.CertCompression,
+		HeaderOrder:        c.Fingerprint.HeaderOrder,
+		JA4Callback:        c.Fingerprint.JA4Callback,
+		AutoECH:            c.Fingerprint.AutoECH,
+		Enable0RTT:         c.Fingerprint.Enable0RTT,
+		ECHConfigList:      c.Fingerprint.ECHConfigList,
+		ConnFilters:        c.Network.ConnFilters,
+		TCPQuickACK:        c.Network.TCPQuickACK,
+		RegisteredIO:       c.Network.HasExperimental(ExpRIO),
+	}
+}
+
 // EngineConfig governs low-level HTTP execution engine parameters, connection pool boundaries,
 // socket I/O memory buffers, protocol-specific keep-alive probes, and redirect policies.
 //
@@ -859,6 +896,37 @@ func (d ClientDefaults) Clone() ClientDefaults {
 	return cloned
 }
 
+//nolint:bodyclose // Soft error detectors inspect responses without taking ownership of response lifecycle.
+func (d ClientDefaults) toInternalSoftErrorDetectors() []func(*http.Response, []byte) error {
+	if len(d.SoftErrorDetectors) == 0 {
+		return nil
+	}
+
+	res := make([]func(*http.Response, []byte) error, len(d.SoftErrorDetectors))
+	for i, det := range d.SoftErrorDetectors {
+		res[i] = det
+	}
+
+	return res
+}
+
+// toInternalProfiles translates public BrowserProfile slices to internal pipeline DTOs.
+func (d ClientDefaults) toInternalProfiles() []pipeline.BrowserProfile {
+	if len(d.UARotationProfiles) == 0 {
+		return nil
+	}
+
+	res := make([]pipeline.BrowserProfile, len(d.UARotationProfiles))
+	for i, p := range d.UARotationProfiles {
+		res[i] = pipeline.BrowserProfile{
+			UserAgent:   p.UserAgent,
+			ClientHints: p.ClientHints,
+		}
+	}
+
+	return res
+}
+
 // PipelineConfig coordinates the behavior, resilience policies, and evasion capabilities
 // of the 5-stage transaction execution pipeline.
 //
@@ -1304,37 +1372,6 @@ func (c *Client) toPipelineDefaults() pipeline.ClientDefaults {
 	}
 }
 
-//nolint:bodyclose // Soft error detectors inspect responses without taking ownership of response lifecycle.
-func (d ClientDefaults) toInternalSoftErrorDetectors() []func(*http.Response, []byte) error {
-	if len(d.SoftErrorDetectors) == 0 {
-		return nil
-	}
-
-	res := make([]func(*http.Response, []byte) error, len(d.SoftErrorDetectors))
-	for i, det := range d.SoftErrorDetectors {
-		res[i] = det
-	}
-
-	return res
-}
-
-// toInternalProfiles translates public BrowserProfile slices to internal pipeline DTOs.
-func (d ClientDefaults) toInternalProfiles() []pipeline.BrowserProfile {
-	if len(d.UARotationProfiles) == 0 {
-		return nil
-	}
-
-	res := make([]pipeline.BrowserProfile, len(d.UARotationProfiles))
-	for i, p := range d.UARotationProfiles {
-		res[i] = pipeline.BrowserProfile{
-			UserAgent:   p.UserAgent,
-			ClientHints: p.ClientHints,
-		}
-	}
-
-	return res
-}
-
 // ToInternal translates PipelineConfig into internal [pipeline.PipelineConfig] DTOs.
 func (p PipelineConfig) ToInternal() pipeline.PipelineConfig {
 	return p.toInternal()
@@ -1584,45 +1621,4 @@ func applyRedirectPolicy(httpClient *http.Client, eng EngineConfig) {
 // applyMSSLimit applies maximum segment size boundaries to TCP socket streams.
 func applyMSSLimit(conn net.Conn, mss int) net.Conn {
 	return transport.ApplyMSSLimit(conn, mss)
-}
-
-// BuildDialConfig converts the [Config] into a self-contained [transport.DialConfig] DTO for socket dialing.
-// Read-only and safe for concurrent use.
-func (c *Config) BuildDialConfig(ctx context.Context) transport.DialConfig {
-	if c == nil {
-		return transport.DialConfig{}
-	}
-
-	netProto := c.Network.Network.String()
-	if netProto == "" {
-		netProto = NetworkTCP.String()
-	}
-
-	return transport.DialConfig{
-		Network:            netProto,
-		DNSResolver:        c.Network.DNSResolver,
-		StackDriver:        c.Network.StackDriver,
-		L2Device:           c.Network.L2Device,
-		SourceRotator:      c.Network.SourceRotator,
-		HappyEyeballs:      c.Network.HappyEyeballsDelay,
-		SSRFGuard:          c.Network.SSRFGuard,
-		ProxyDNS:           c.Network.ProxyDNS,
-		P0fSignature:       c.Fingerprint.P0fSignature,
-		SocketController:   c.Network.SocketController,
-		FragmentConfig:     c.Network.FragmentConfig,
-		ProxyURL:           c.Network.ProxyAddr,
-		InsecureSkipVerify: GetInsecureSkipVerify(ctx) || c.Engine.InsecureSkipVerify,
-		SpecProvider:       c.Fingerprint.TLSClientHelloSpecProvider,
-		SessionCache:       c.Fingerprint.SessionCache,
-		CertificatePins:    c.Fingerprint.CertificatePins,
-		CertCompression:    c.Fingerprint.CertCompression,
-		HeaderOrder:        c.Fingerprint.HeaderOrder,
-		JA4Callback:        c.Fingerprint.JA4Callback,
-		AutoECH:            c.Fingerprint.AutoECH,
-		Enable0RTT:         c.Fingerprint.Enable0RTT,
-		ECHConfigList:      c.Fingerprint.ECHConfigList,
-		ConnFilters:        c.Network.ConnFilters,
-		TCPQuickACK:        c.Network.TCPQuickACK,
-		RegisteredIO:       c.Network.HasExperimental(ExpRIO),
-	}
 }

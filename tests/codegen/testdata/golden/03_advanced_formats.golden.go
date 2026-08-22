@@ -48,22 +48,18 @@ func (c *billingAPIClient) R() request.Requester {
 	return c.r
 }
 
-func (c *billingAPIClient) GetTransactions(ctx context.Context, from time.Time, to time.Time, statuses []string, categories []string, accountIDs []int64, includePending bool, compact bool, mods ...aoni.RequestModifier) (*TransactionList, error) {
-	var stackMods [8]aoni.RequestModifier
+func (c *billingAPIClient) GetTransactions(ctx context.Context, accountIDs []int64, categories []string, compact bool, from time.Time, includePending bool, statuses []string, to time.Time, mods ...aoni.RequestModifier) (*TransactionList, error) {
+	var stackMods [4]aoni.RequestModifier
 	allMods := stackMods[:0]
 
 	var qBuf [256]byte
 	qBytes := qBuf[:0]
-	qBytes = append(qBytes, "from="...)
-	qBytes = strconv.AppendInt(qBytes, from.UnixMilli(), 10)
-	qBytes = append(qBytes, "&to="...)
-	qBytes = append(qBytes, url.QueryEscape(to.Format("2006-01-02"))...)
-	qBytes = append(qBytes, "&statuses="...)
-	for idx, v := range statuses {
+	qBytes = append(qBytes, "accountIDs="...)
+	for idx, v := range accountIDs {
 		if idx > 0 {
 			qBytes = append(qBytes, ',')
 		}
-		qBytes = append(qBytes, url.QueryEscape(v)...)
+		qBytes = strconv.AppendInt(qBytes, int64(v), 10)
 	}
 	qBytes = append(qBytes, "&categories="...)
 	for idx, v := range categories {
@@ -72,21 +68,25 @@ func (c *billingAPIClient) GetTransactions(ctx context.Context, from time.Time, 
 		}
 		qBytes = append(qBytes, url.QueryEscape(v)...)
 	}
-	qBytes = append(qBytes, "&accountIDs="...)
-	for idx, v := range accountIDs {
-		if idx > 0 {
-			qBytes = append(qBytes, ',')
-		}
-		qBytes = strconv.AppendInt(qBytes, int64(v), 10)
-	}
+	qBytes = append(qBytes, "&compact="...)
+	qBytes = append(qBytes, url.QueryEscape(fmt.Sprint(compact))...)
+	qBytes = append(qBytes, "&from="...)
+	qBytes = strconv.AppendInt(qBytes, from.UnixMilli(), 10)
 	qBytes = append(qBytes, "&includePending="...)
 	if includePending {
 		qBytes = append(qBytes, '1')
 	} else {
 		qBytes = append(qBytes, '0')
 	}
-	qBytes = append(qBytes, "&compact="...)
-	qBytes = append(qBytes, url.QueryEscape(fmt.Sprint(compact))...)
+	qBytes = append(qBytes, "&statuses="...)
+	for idx, v := range statuses {
+		if idx > 0 {
+			qBytes = append(qBytes, ',')
+		}
+		qBytes = append(qBytes, url.QueryEscape(v)...)
+	}
+	qBytes = append(qBytes, "&to="...)
+	qBytes = append(qBytes, url.QueryEscape(to.Format("2006-01-02"))...)
 	allMods = append(allMods, mod.WithQuery(string(qBytes)))
 
 	if len(mods) > 0 {

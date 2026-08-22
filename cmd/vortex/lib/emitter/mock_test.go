@@ -53,8 +53,7 @@ func TestEmitter_EmitMock(t *testing.T) {
 		},
 	}
 
-	em := &emitter.Emitter{}
-	code, err := em.EmitMock(root)
+	code, err := emitter.EmitMock(root)
 	require.NoError(t, err)
 	require.NotEmpty(t, code)
 
@@ -98,8 +97,7 @@ func TestEmitter_EmitMock_WithFixtures(t *testing.T) {
 		},
 	}
 
-	em := &emitter.Emitter{}
-	code, err := em.EmitMock(root)
+	code, err := emitter.EmitMock(root)
 	require.NoError(t, err)
 	require.NotEmpty(t, code)
 

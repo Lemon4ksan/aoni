@@ -45,7 +45,7 @@ func (c *userAPIClient) R() request.Requester {
 }
 
 func (c *userAPIClient) GetUser(ctx context.Context, id string, mods ...aoni.RequestModifier) (*UserDTO, error) {
-	var stackMods [8]aoni.RequestModifier
+	var stackMods [4]aoni.RequestModifier
 	allMods := stackMods[:0]
 
 	allMods = append(allMods, mod.WithVar("id", id))

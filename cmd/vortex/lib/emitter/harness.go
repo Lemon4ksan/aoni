@@ -17,7 +17,7 @@ import (
 
 // EmitHarness generates a high-throughput, 100% zero-alloc test, load, and bench harness
 // for Porthack, native Go benchmarks, and continuous performance regression testing.
-func (e *Emitter) EmitHarness(root *ir.RootIR) ([]byte, error) {
+func EmitHarness(root *ir.RootIR) ([]byte, error) {
 	if root == nil || len(root.Services) == 0 {
 		return nil, errors.New("harness emitter: no services found in IR")
 	}
@@ -25,7 +25,7 @@ func (e *Emitter) EmitHarness(root *ir.RootIR) ([]byte, error) {
 	var bodyBuf bytes.Buffer
 
 	for _, svc := range root.Services {
-		if err := e.emitServiceHarness(&bodyBuf, root, svc); err != nil {
+		if err := emitServiceHarness(&bodyBuf, root, svc); err != nil {
 			return nil, err
 		}
 	}
@@ -100,7 +100,7 @@ type AttributionResult struct {
 	return formatted, nil
 }
 
-func (e *Emitter) emitServiceHarness(buf *bytes.Buffer, root *ir.RootIR, svc *ir.ServiceIR) error {
+func emitServiceHarness(buf *bytes.Buffer, root *ir.RootIR, svc *ir.ServiceIR) error {
 	feederName := svc.Name + "DataFeeder"
 	harnessName := svc.Name + "Harness"
 
@@ -137,7 +137,7 @@ func (e *Emitter) emitServiceHarness(buf *bytes.Buffer, root *ir.RootIR, svc *ir
 		fmt.Fprintf(buf, "\tif dst == nil { return }\n")
 
 		for _, fl := range st.Fields {
-			e.emitFieldFeeder(buf, fl, knownStructs)
+			emitFieldFeeder(buf, fl, knownStructs)
 		}
 
 		buf.WriteString("}\n\n")
@@ -167,7 +167,7 @@ func (e *Emitter) emitServiceHarness(buf *bytes.Buffer, root *ir.RootIR, svc *ir
 					continue
 				}
 
-				e.emitParamFeeder(buf, p, knownStructs)
+				emitParamFeeder(buf, p, knownStructs)
 			}
 
 			fmt.Fprintf(buf, "\treturn %s\n}\n\n", strings.Join(paramNames, ", "))
@@ -367,7 +367,7 @@ func (e *Emitter) emitServiceHarness(buf *bytes.Buffer, root *ir.RootIR, svc *ir
 }
 
 // EmitHarnessTests generates native Go benchmarks and fuzz targets into api_harness_test.go.
-func (e *Emitter) EmitHarnessTests(root *ir.RootIR) ([]byte, error) {
+func EmitHarnessTests(root *ir.RootIR) ([]byte, error) {
 	if root == nil || len(root.Services) == 0 {
 		return nil, errors.New("harness test emitter: no services found in IR")
 	}
@@ -440,7 +440,7 @@ func (e *Emitter) EmitHarnessTests(root *ir.RootIR) ([]byte, error) {
 }
 
 // EmitFuzz generates a compact, single-table panic-free wire defense fuzzer in api_fuzz_test.go.
-func (e *Emitter) EmitFuzz(root *ir.RootIR) ([]byte, error) {
+func EmitFuzz(root *ir.RootIR) ([]byte, error) {
 	if root == nil || len(root.Structs) == 0 {
 		return nil, errors.New("fuzz emitter: no structs found in IR")
 	}
@@ -483,7 +483,7 @@ func (e *Emitter) EmitFuzz(root *ir.RootIR) ([]byte, error) {
 	return formatted, nil
 }
 
-func (e *Emitter) emitFieldFeeder(buf *bytes.Buffer, fl *ir.FieldIR, knownStructs map[string]bool) {
+func emitFieldFeeder(buf *bytes.Buffer, fl *ir.FieldIR, knownStructs map[string]bool) {
 	goType := fl.Type.Name
 	fieldName := fl.GoName
 
@@ -520,7 +520,7 @@ func (e *Emitter) emitFieldFeeder(buf *bytes.Buffer, fl *ir.FieldIR, knownStruct
 	}
 }
 
-func (e *Emitter) emitParamFeeder(buf *bytes.Buffer, p *ir.ParamIR, knownStructs map[string]bool) {
+func emitParamFeeder(buf *bytes.Buffer, p *ir.ParamIR, knownStructs map[string]bool) {
 	goType := p.GoType.Name
 	paramName := p.GoName
 

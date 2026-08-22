@@ -68,8 +68,7 @@ func TestSocketGeneration(t *testing.T) {
 	assert.Equal(t, "int", svc.SocketConfig.OpCodeType)
 	assert.Equal(t, "uint64", svc.SocketConfig.JobIDType)
 
-	em := emitter.NewEmitter()
-	code, err := em.Emit(root)
+	code, err := emitter.Emit(root)
 	require.NoError(t, err)
 	require.NotEmpty(t, code)
 

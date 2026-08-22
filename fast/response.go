@@ -40,6 +40,14 @@ type fastBodyReadCloser struct {
 	once     sync.Once
 }
 
+func (b *fastBodyReadCloser) Bytes() (data []byte, volatile bool) {
+	if b.fastResp != nil {
+		return b.fastResp.Body(), true
+	}
+
+	return nil, false
+}
+
 func (b *fastBodyReadCloser) Close() error {
 	b.once.Do(func() {
 		fasthttp.ReleaseRequest(b.fastReq)
@@ -47,6 +55,28 @@ func (b *fastBodyReadCloser) Close() error {
 	})
 
 	return nil
+}
+
+type bytesReadCloser struct {
+	*bytes.Reader
+	raw      []byte
+	volatile bool
+}
+
+func (b *bytesReadCloser) Bytes() ([]byte, bool) {
+	return b.raw, b.volatile
+}
+
+func (b *bytesReadCloser) Close() error {
+	return nil
+}
+
+func newBytesReadCloser(data []byte, volatile bool) io.ReadCloser {
+	return &bytesReadCloser{
+		Reader:   bytes.NewReader(data),
+		raw:      data,
+		volatile: volatile,
+	}
 }
 
 // Response adapts a high-performance [*fasthttp.Response] to the unified [aoni.Response] contract.
@@ -206,7 +236,7 @@ func (f *Response) BodyStream() io.ReadCloser {
 		return io.NopCloser(stream)
 	}
 
-	return io.NopCloser(bytes.NewReader(f.BodyBytes()))
+	return newBytesReadCloser(f.UnsafeBodyBytes(), true)
 }
 
 // HTTPResponse converts fasthttp response adapter into standard *http.Response.
@@ -227,7 +257,7 @@ func (f *Response) HTTPResponse() *http.Response {
 		StatusCode:    f.resp.StatusCode(),
 		Status:        http.StatusText(f.resp.StatusCode()),
 		Header:        header,
-		Body:          io.NopCloser(bytes.NewReader(body)),
+		Body:          newBytesReadCloser(body, false),
 		ContentLength: int64(len(body)),
 	}
 }
@@ -393,7 +423,7 @@ func (r *PooledResponse) HTTPResponse() *http.Response {
 		StatusCode:    r.fastResp.StatusCode(),
 		Status:        http.StatusText(r.fastResp.StatusCode()),
 		Header:        header,
-		Body:          io.NopCloser(bytes.NewReader(body)),
+		Body:          newBytesReadCloser(body, false),
 		ContentLength: int64(len(body)),
 	}
 }

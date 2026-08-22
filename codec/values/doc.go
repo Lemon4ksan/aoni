@@ -20,13 +20,13 @@
 //
 // # Protocol Buffers Integration
 //
-// [StructToValues] natively supports [google.golang.org/protobuf/proto.Message] objects both as top-level arguments
+// [Encode] natively supports [google.golang.org/protobuf/proto.Message] objects both as top-level arguments
 // and as nested struct fields. Protobuf fields are serialized using [google.golang.org/protobuf/encoding/protojson]
 // with snake_case field preservation (`UseProtoNames: true`).
 //
 // # Advanced Query & Form Encoding
 //
-// [StructToValues] reflects Go structs and maps into standard [url.Values] using "url" or "json" tags,
+// [Encode] reflects Go structs and maps into standard [url.Values] using "url" or "json" tags,
 // resolving pointers and anonymous structures recursively with schema caching ([sync.Map]):
 //
 //  1. Custom Slice Delimiters:
@@ -55,10 +55,9 @@
 //
 //	import (
 //		"fmt"
-//	"github.com/lemon4ksan/aoni/codec/values"
-//	"google.golang.org/protobuf/types/known/wrapperspb"
-//
-// )
+//		"github.com/lemon4ksan/aoni/codec/values"
+//		"google.golang.org/protobuf/types/known/wrapperspb"
+//	)
 //
 //	type RequestParams struct {
 //		Name     string                    `url:"name"`
@@ -75,7 +74,7 @@
 //			Meta:     wrapperspb.String("production"),
 //		}
 //
-//		vals, err := values.StructToValues(p)
+//		vals, err := values.Encode(p)
 //		if err != nil {
 //			panic(err)
 //		}

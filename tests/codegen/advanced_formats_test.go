@@ -78,8 +78,7 @@ type ImportResponse struct {
 	opt := optimizer.NewOptimizer()
 	opt.Optimize(root)
 
-	em := emitter.NewEmitter()
-	code, err := em.Emit(root)
+	code, err := emitter.Emit(root)
 	require.NoError(t, err)
 	require.NotEmpty(t, code)
 

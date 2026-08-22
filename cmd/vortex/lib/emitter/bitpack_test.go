@@ -64,8 +64,7 @@ type ExtendedPacket struct {
 	require.True(t, ext.Fields[2].IsSigned)
 
 	// Emit Go code
-	em := emitter.NewEmitter()
-	genBytes, err := em.Emit(root)
+	genBytes, err := emitter.Emit(root)
 	require.NoError(t, err)
 
 	genFile := filepath.Join(tmpDir, "packet.gen.go")

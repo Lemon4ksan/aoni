@@ -19,6 +19,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/lemon4ksan/foundation/pathkit"
+
 	"github.com/lemon4ksan/aoni/cmd/vortex/lib/builder"
 	"github.com/lemon4ksan/aoni/cmd/vortex/lib/history"
 	"github.com/lemon4ksan/aoni/cmd/vortex/lib/ir"
@@ -204,10 +206,10 @@ func inferRawHeuristicName(val any, index int, path, methodContext string, usedN
 		lower := strings.ToLower(v)
 
 		// 1. RFC 3986 — URLs
-		if strings.HasPrefix(lower, "http://") || strings.HasPrefix(lower, "https://") {
-			if strings.HasSuffix(lower, ".png") || strings.HasSuffix(lower, ".jpg") ||
-				strings.HasSuffix(lower, ".jpeg") || strings.HasSuffix(lower, ".svg") ||
-				strings.HasSuffix(lower, ".webp") || strings.HasSuffix(lower, ".gif") {
+		p := pathkit.New(v)
+		if p.IsURL() {
+			ext := p.Ext()
+			if ext == ".png" || ext == ".jpg" || ext == ".jpeg" || ext == ".svg" || ext == ".webp" || ext == ".gif" {
 				if !usedNames["ImageURL"] {
 					return "ImageURL", "string"
 				}
@@ -221,7 +223,7 @@ func inferRawHeuristicName(val any, index int, path, methodContext string, usedN
 				return "EndpointURL", "string"
 			}
 
-			return "URL", "string"
+			return fmt.Sprintf("URL_%d", index), "string"
 		}
 
 		// 2. RFC 9562 (obsoletes RFC 4122) — UUIDs (36 characters, 4 hyphens)

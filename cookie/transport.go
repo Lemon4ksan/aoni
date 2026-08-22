@@ -6,7 +6,6 @@ package cookie
 
 import (
 	"net/http"
-	"strings"
 )
 
 // Transport intercepts HTTP transactions to manage proxy-isolated cookies.
@@ -30,13 +29,13 @@ func (t *Transport) RoundTrip(req *http.Request) (*http.Response, error) {
 		return resp, err
 	}
 
-	if len(resp.Header["Set-Cookie"]) > 0 {
-		jar := t.CookieJar.GetJar(reqToPass.Context())
-		if jar != nil {
-			if rc := resp.Cookies(); len(rc) > 0 {
-				jar.SetCookies(reqToPass.URL, rc)
-			}
-		}
+	setCookies := resp.Cookies()
+	if len(setCookies) == 0 {
+		return resp, nil
+	}
+
+	if jar := t.CookieJar.GetJar(reqToPass.Context()); jar != nil {
+		jar.SetCookies(reqToPass.URL, setCookies)
 	}
 
 	return resp, nil
@@ -85,13 +84,7 @@ func (t *Transport) setCookies(req *http.Request) *http.Request {
 		return reqClone
 	}
 
-	var sb strings.Builder
-	sb.Grow(len(existing) + 2 + len(cookieHeader))
-	sb.WriteString(existing)
-	sb.WriteString("; ")
-	sb.WriteString(cookieHeader)
-
-	reqClone.Header.Set("Cookie", sb.String())
+	reqClone.Header.Set("Cookie", existing+"; "+cookieHeader)
 
 	return reqClone
 }

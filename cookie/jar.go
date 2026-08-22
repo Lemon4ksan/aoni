@@ -17,7 +17,6 @@ import (
 	"github.com/lemon4ksan/foundation/generic"
 	"github.com/lemon4ksan/foundation/net/psl"
 	"github.com/lemon4ksan/foundation/silicon/clock"
-	"github.com/lemon4ksan/foundation/sync/keylock"
 )
 
 type (
@@ -63,21 +62,15 @@ type cookieKey struct {
 // Implements RFC 6265 cookie isolation augmented with per-proxy session segregation and RFC 6265bis CHIPS partitioning.
 //
 // Thread Safety & Concurrency:
-// 100% thread-safe for concurrent read and write operations. Uses double-checked locking via keylock.KeyMutex
-// to ensure zero allocation contention when lazily initializing cookie jars per proxy exit node.
+// 100% thread-safe for concurrent read and write operations via atomic [generic.ConcurrentMap].
 type ProxyIsolatedJar struct {
-	mu      sync.RWMutex
-	jars    map[string]http.CookieJar
-	km      keylock.KeyMutex[string]
-	backend Storage
+	jars    generic.ConcurrentMap[string, http.CookieJar]
+	backend generic.Safe[Storage]
 }
 
 // NewProxyIsolatedJar creates a new, thread-safe [ProxyIsolatedJar] ready for concurrent request execution.
-// Initializes internal concurrency locks and map storage for proxy-isolated jars.
 func NewProxyIsolatedJar() *ProxyIsolatedJar {
-	return &ProxyIsolatedJar{
-		jars: make(map[string]http.CookieJar),
-	}
+	return &ProxyIsolatedJar{}
 }
 
 // SetCookies satisfies the standard [http.CookieJar] interface.
@@ -99,27 +92,9 @@ func (p *ProxyIsolatedJar) Cookies(u *url.URL) []*http.Cookie {
 }
 
 // GetJarForProxy retrieves or lazily initializes an isolated [http.CookieJar] bound to the specified proxyURL.
-//
-// Thread Safety Invariant:
-// Thread-safe via double-checked read-write mutex lock and fine-grained per-proxy key locks.
+// Thread-safe and lock-free on cache hits via atomic [generic.ConcurrentMap].
 func (p *ProxyIsolatedJar) GetJarForProxy(proxyURL string) http.CookieJar {
-	p.mu.RLock()
-	jar, ok := p.jars[proxyURL]
-	p.mu.RUnlock()
-
-	if ok {
-		return jar
-	}
-
-	p.km.Lock(proxyURL)
-	defer p.km.Unlock(proxyURL)
-
-	p.mu.RLock()
-	jar, ok = p.jars[proxyURL]
-	backend := p.backend
-	p.mu.RUnlock()
-
-	if ok {
+	if jar, ok := p.jars.Load(proxyURL); ok {
 		return jar
 	}
 
@@ -130,25 +105,21 @@ func (p *ProxyIsolatedJar) GetJarForProxy(proxyURL string) http.CookieJar {
 		return nil
 	}
 
+	var jar http.CookieJar = baseJar
+	backend := p.backend.Get()
+
 	if backend != nil {
 		jar = p.initPersistentJar(proxyURL, baseJar, backend)
-	} else {
-		jar = baseJar
 	}
 
-	p.mu.Lock()
-	p.jars[proxyURL] = jar
-	p.mu.Unlock()
+	actual, _ := p.jars.LoadOrStore(proxyURL, jar)
 
-	return jar
+	return actual
 }
 
 // WithStorageBackend configures persistent storage for cookie jars and returns p.
 func (p *ProxyIsolatedJar) WithStorageBackend(backend Storage) *ProxyIsolatedJar {
-	p.mu.Lock()
-	p.backend = backend
-	p.mu.Unlock()
-
+	p.backend.Set(backend)
 	return p
 }
 
@@ -196,20 +167,13 @@ func (p *ProxyIsolatedJar) StartJanitor(ctx context.Context, interval time.Durat
 
 // PurgeExpired removes all expired cookies across all active proxy jars without holding global locks during backend I/O.
 func (p *ProxyIsolatedJar) PurgeExpired() {
-	p.mu.RLock()
-
-	persistentJars := make([]*PersistentJar, 0, len(p.jars))
-	for _, jar := range p.jars {
+	p.jars.Range(func(_ string, jar http.CookieJar) bool {
 		if pJar, ok := jar.(*PersistentJar); ok {
-			persistentJars = append(persistentJars, pJar)
+			pJar.purgeExpired()
 		}
-	}
 
-	p.mu.RUnlock()
-
-	for _, pJar := range persistentJars {
-		pJar.purgeExpired()
-	}
+		return true
+	})
 }
 
 func (p *ProxyIsolatedJar) initPersistentJar(proxyURL string, baseJar http.CookieJar, backend Storage) http.CookieJar {
@@ -232,11 +196,7 @@ func (p *ProxyIsolatedJar) initPersistentJar(proxyURL string, baseJar http.Cooki
 		key := cookieKey{domain: c.Domain, path: c.Path, name: c.Name, partitionKey: c.PartitionKey}
 		pJar.cookiesMap[key] = c
 
-		scheme := "http"
-		if c.Secure {
-			scheme = "https"
-		}
-
+		scheme := generic.Ternary(c.Secure, "https", "http")
 		domain := strings.TrimPrefix(c.Domain, ".")
 
 		u, parseErr := url.Parse(scheme + "://" + domain + c.Path)
@@ -267,6 +227,41 @@ type PersistentJar struct {
 	cookiesMap map[cookieKey]Cookie
 }
 
+func isExpiredCookie(expires time.Time, maxAge int, now time.Time) bool {
+	return (!expires.IsZero() && expires.Before(now)) || maxAge < 0
+}
+
+func normalizeDomain(domain string) string {
+	return strings.ToLower(strings.TrimPrefix(domain, "."))
+}
+
+func (pj *PersistentJar) deleteMatching(name, domain string) bool {
+	normDomain := normalizeDomain(domain)
+	deleted := false
+
+	for k := range pj.cookiesMap {
+		if k.name == name && normalizeDomain(k.domain) == normDomain {
+			delete(pj.cookiesMap, k)
+			deleted = true
+		}
+	}
+
+	return deleted
+}
+
+func (pj *PersistentJar) purgeExpiredLocked(now time.Time) bool {
+	changed := false
+
+	for k, c := range pj.cookiesMap {
+		if isExpiredCookie(c.Expires, c.MaxAge, now) {
+			delete(pj.cookiesMap, k)
+			changed = true
+		}
+	}
+
+	return changed
+}
+
 // Cookies returns non-expired cookies matching the target URL and partition key.
 func (pj *PersistentJar) Cookies(u *url.URL) []*http.Cookie {
 	cookies := pj.CookieJar.Cookies(u)
@@ -280,16 +275,8 @@ func (pj *PersistentJar) Cookies(u *url.URL) []*http.Cookie {
 
 	pj.mu.Lock()
 	for _, c := range cookies {
-		if (!c.Expires.IsZero() && c.Expires.Before(now)) || c.MaxAge < 0 {
-			for k := range pj.cookiesMap {
-				if k.name == c.Name &&
-					(k.domain == c.Domain || strings.TrimPrefix(k.domain, ".") == strings.TrimPrefix(c.Domain, ".")) {
-					delete(pj.cookiesMap, k)
-
-					hasExpired = true
-				}
-			}
-
+		if isExpiredCookie(c.Expires, c.MaxAge, now) {
+			hasExpired = pj.deleteMatching(c.Name, c.Domain) || hasExpired
 			continue
 		}
 
@@ -313,15 +300,7 @@ func (pj *PersistentJar) Cookies(u *url.URL) []*http.Cookie {
 func (pj *PersistentJar) purgeExpired() {
 	pj.mu.Lock()
 	now := clock.CoarseTime()
-	changed := false
-
-	for k, c := range pj.cookiesMap {
-		if (!c.Expires.IsZero() && c.Expires.Before(now)) || c.MaxAge < 0 {
-			delete(pj.cookiesMap, k)
-
-			changed = true
-		}
-	}
+	changed := pj.purgeExpiredLocked(now)
 
 	var list []Cookie
 	if changed && pj.backend != nil {
@@ -344,23 +323,12 @@ func (pj *PersistentJar) SetCookies(u *url.URL, cookies []*http.Cookie) {
 	changed := false
 
 	for _, c := range cookies {
-		rawDomain := generic.Coalesce(c.Domain, u.Hostname())
-		domain := strings.ToLower(rawDomain)
+		domain := strings.ToLower(generic.Coalesce(c.Domain, u.Hostname()))
 		path := generic.Coalesce(c.Path, "/")
-
 		key := cookieKey{domain: domain, path: path, name: c.Name}
 
-		isExpired := (!c.Expires.IsZero() && c.Expires.Before(now)) || c.MaxAge < 0
-		if isExpired {
-			for k := range pj.cookiesMap {
-				if k.name == c.Name &&
-					(k.domain == domain || strings.TrimPrefix(k.domain, ".") == strings.TrimPrefix(domain, ".")) {
-					delete(pj.cookiesMap, k)
-
-					changed = true
-				}
-			}
-
+		if isExpiredCookie(c.Expires, c.MaxAge, now) {
+			changed = pj.deleteMatching(c.Name, domain) || changed
 			continue
 		}
 
@@ -368,16 +336,12 @@ func (pj *PersistentJar) SetCookies(u *url.URL, cookies []*http.Cookie) {
 		changed = true
 	}
 
-	for k, c := range pj.cookiesMap {
-		if (!c.Expires.IsZero() && c.Expires.Before(now)) || c.MaxAge < 0 {
-			delete(pj.cookiesMap, k)
-
-			changed = true
-		}
+	if pj.purgeExpiredLocked(now) {
+		changed = true
 	}
 
 	var list []Cookie
-	if changed {
+	if changed && pj.backend != nil {
 		list = generic.Values(pj.cookiesMap)
 	}
 
@@ -394,9 +358,7 @@ func (p *ProxyIsolatedJar) FindCookie(u *url.URL, name string) generic.Optional[
 		return generic.None[*http.Cookie]()
 	}
 
-	cookies := p.Cookies(u)
-
-	c, ok := generic.Find(cookies, func(c *http.Cookie) bool {
+	c, ok := generic.Find(p.Cookies(u), func(c *http.Cookie) bool {
 		return c != nil && c.Name == name
 	})
 	if !ok {

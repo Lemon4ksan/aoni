@@ -18,6 +18,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/lemon4ksan/foundation/net/headkit"
 	"github.com/lemon4ksan/foundation/silicon/bytesconv"
 )
 
@@ -110,10 +111,9 @@ func ParseCookieIndicesHeader(header string) []string {
 	}
 
 	var names []string
-	for p := range strings.SplitSeq(header, ",") {
-		cleaned := strings.Trim(strings.TrimSpace(p), `"'`)
-		if cleaned != "" {
-			names = append(names, cleaned)
+	for k := range headkit.Directives(header) {
+		if k != "" {
+			names = append(names, k)
 		}
 	}
 
@@ -222,22 +222,16 @@ func matchVaryHeaders(req *http.Request, varyHeaders map[string]string) bool {
 
 // parseFreshnessLifetime calculates the freshness lifetime from s-maxage, max-age, or Expires (RFC 9111 §4.2.1 & §5.2.2).
 func parseFreshnessLifetime(resp *http.Response) (time.Duration, bool) {
-	cc := resp.Header.Get("Cache-Control")
-	for p := range strings.SplitSeq(cc, ",") {
-		p = strings.TrimSpace(p)
-		// s-maxage takes precedence over max-age for shared caches (RFC 9111 §5.2.2.10).
-		if strings.HasPrefix(p, "s-maxage=") {
-			if secs, err := strconv.ParseInt(p[9:], 10, 64); err == nil && secs >= 0 {
-				return time.Duration(secs) * time.Second, true
-			}
-		}
+	dm := headkit.ParseDirectives(resp.Header.Get("Cache-Control"))
 
-		// max-age explicit freshness lifetime (RFC 9111 §5.2.2.1).
-		if strings.HasPrefix(p, "max-age=") {
-			if secs, err := strconv.ParseInt(p[8:], 10, 64); err == nil && secs >= 0 {
-				return time.Duration(secs) * time.Second, true
-			}
-		}
+	// s-maxage takes precedence over max-age for shared caches (RFC 9111 §5.2.2.10).
+	if sMaxAge := dm.Duration("s-maxage", -1); sMaxAge >= 0 {
+		return sMaxAge, true
+	}
+
+	// max-age explicit freshness lifetime (RFC 9111 §5.2.2.1).
+	if maxAge := dm.Duration("max-age", -1); maxAge >= 0 {
+		return maxAge, true
 	}
 
 	// Expires header fallback (RFC 9111 §5.3).
@@ -257,8 +251,8 @@ func (p *Pipeline[Req, Resp]) saveToCache(req *http.Request, resp *http.Response
 		return
 	}
 
-	respCC := resp.Header.Get("Cache-Control")
-	if strings.Contains(respCC, "no-store") || strings.Contains(respCC, "private") {
+	dm := headkit.ParseDirectives(resp.Header.Get("Cache-Control"))
+	if dm.Has("no-store") || dm.Has("private") {
 		return
 	}
 
@@ -412,8 +406,7 @@ func extractVaryHeaders(req *http.Request, varyHeader string) map[string]string 
 	}
 
 	varyMap := make(map[string]string)
-	for p := range strings.SplitSeq(varyHeader, ",") {
-		hName := strings.TrimSpace(p)
+	for hName := range headkit.Directives(varyHeader) {
 		if hName != "" && hName != "*" {
 			varyMap[hName] = req.Header.Get(hName)
 		}

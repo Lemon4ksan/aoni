@@ -45,7 +45,7 @@ func (c *paymentAPIClient) R() request.Requester {
 }
 
 func (c *paymentAPIClient) GetInvoice(ctx context.Context, invoice_id string, mods ...aoni.RequestModifier) (*InvoiceDTO, error) {
-	var stackMods [8]aoni.RequestModifier
+	var stackMods [4]aoni.RequestModifier
 	allMods := stackMods[:0]
 
 	allMods = append(allMods, mod.WithVar("invoice_id", invoice_id))

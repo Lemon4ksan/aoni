@@ -58,8 +58,7 @@ type SteamShopAPI interface {
 	require.NoError(t, err)
 	require.NotNil(t, root)
 
-	em := emitter.NewEmitter()
-	codeBytes, err := em.Emit(root)
+	codeBytes, err := emitter.Emit(root)
 	require.NoError(t, err)
 
 	code := string(codeBytes)
@@ -115,8 +114,7 @@ type MonitoredAPI interface {
 	require.NoError(t, err)
 	require.NotNil(t, root)
 
-	em := emitter.NewEmitter()
-	codeBytes, err := em.Emit(root)
+	codeBytes, err := emitter.Emit(root)
 	require.NoError(t, err)
 
 	code := string(codeBytes)

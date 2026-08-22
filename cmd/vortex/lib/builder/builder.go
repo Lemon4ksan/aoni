@@ -64,7 +64,6 @@ type Builder struct {
 	parser    *parser.Parser
 	analyzer  *analysis.Analyzer
 	optimizer *optimizer.Optimizer
-	emitter   *emitter.Emitter
 }
 
 // New creates a new [Builder] configured with the provided [Config].
@@ -74,7 +73,6 @@ func New(cfg Config) *Builder {
 		parser:    parser.NewParser(),
 		analyzer:  analysis.NewAnalyzer(),
 		optimizer: optimizer.NewOptimizer(),
-		emitter:   emitter.NewEmitter(),
 	}
 }
 
@@ -105,7 +103,7 @@ func (b *Builder) BuildFile(ctx context.Context, srcFile, outFile string) (*Resu
 
 	b.optimizer.Optimize(root)
 
-	code, err := b.emitter.Emit(root)
+	code, err := emitter.Emit(root)
 	if err != nil {
 		return nil, fmt.Errorf("emit %s: %w", srcFile, err)
 	}
@@ -175,7 +173,7 @@ func (b *Builder) BuildHarness(ctx context.Context, srcFile, outFile string) (*R
 		return &Result{SourceFile: srcFile, Skipped: true}, nil
 	}
 
-	code, err := b.emitter.EmitHarness(root)
+	code, err := emitter.EmitHarness(root)
 	if err != nil {
 		return nil, fmt.Errorf("emit harness for %s: %w", srcFile, err)
 	}
@@ -199,7 +197,7 @@ func (b *Builder) BuildHarness(ctx context.Context, srcFile, outFile string) (*R
 }
 
 func (b *Builder) emitOptionalHarnessTests(root *ir.RootIR, targetOut string) {
-	testCode, err := b.emitter.EmitHarnessTests(root)
+	testCode, err := emitter.EmitHarnessTests(root)
 	if err != nil || len(testCode) == 0 {
 		return
 	}
@@ -228,7 +226,7 @@ func (b *Builder) BuildFuzz(ctx context.Context, srcFile, outFile string) (*Resu
 		return &Result{SourceFile: srcFile, Skipped: true}, nil
 	}
 
-	code, err := b.emitter.EmitFuzz(root)
+	code, err := emitter.EmitFuzz(root)
 	if err != nil {
 		return nil, fmt.Errorf("emit fuzz for %s: %w", srcFile, err)
 	}
@@ -271,7 +269,7 @@ func (b *Builder) BuildMock(ctx context.Context, srcFile, outFile string) (*Resu
 		}
 	}
 
-	code, err := b.emitter.EmitMock(root)
+	code, err := emitter.EmitMock(root)
 	if err != nil {
 		return nil, fmt.Errorf("emit mock for %s: %w", srcFile, err)
 	}

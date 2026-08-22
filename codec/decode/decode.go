@@ -8,14 +8,29 @@ import (
 	"bufio"
 	"bytes"
 	"io"
-	"reflect"
 	"strings"
 
 	"github.com/lemon4ksan/foundation/generic"
+	fio "github.com/lemon4ksan/foundation/io"
+	"github.com/lemon4ksan/foundation/net/headkit"
 	"github.com/lemon4ksan/foundation/silicon/bytesconv"
 
 	"github.com/lemon4ksan/aoni/internal/core"
 	"github.com/lemon4ksan/aoni/internal/pipeline"
+)
+
+// BytesReader is an alias for [fio.BytesReader].
+type BytesReader = fio.BytesReader
+
+var (
+	// InspectBytes attempts to extract contiguous payload bytes from r without allocations.
+	InspectBytes = fio.InspectBytes
+
+	// ReadAllSafe returns the payload bytes safely cloning only when volatile.
+	ReadAllSafe = fio.ReadAllSafe
+
+	// StripBOMBytes detects and strips Byte Order Marks (BOM) from a byte slice.
+	StripBOMBytes = fio.StripBOMBytes
 )
 
 var (
@@ -99,8 +114,12 @@ var bomUTF8 = []byte{0xEF, 0xBB, 0xBF}
 
 // normalizeContentType extracts the media type from a Content-Type header string (e.g. "application/json; charset=utf-8" -> "application/json").
 func normalizeContentType(contentType string) string {
-	mediaType, _, _ := strings.Cut(contentType, ";")
-	return strings.ToLower(strings.TrimSpace(mediaType))
+	mediaType, _, err := headkit.ParseMediaType(contentType)
+	if err != nil {
+		return ""
+	}
+
+	return mediaType
 }
 
 // LookupDecoder resolves a standard [Decoder] matching the provided MIME content type,
@@ -109,21 +128,28 @@ func LookupDecoder(contentType string) Decoder {
 	norm := normalizeContentType(contentType)
 
 	switch {
-	case bytesconv.EqualFoldASCII(norm, "application/json"), bytesconv.EqualFoldASCII(norm, "text/json"):
+	case bytesconv.EqualFoldASCII(norm, "application/json"),
+		bytesconv.EqualFoldASCII(norm, "text/json"),
+		strings.HasSuffix(norm, "+json"):
 		return JSONDecoder
-	case bytesconv.EqualFoldASCII(norm, "application/x-protobuf"),
-		bytesconv.EqualFoldASCII(norm, "application/protobuf"):
-		return ProtoDecoder
 	case bytesconv.EqualFoldASCII(norm, "application/grpc-web+proto"),
 		bytesconv.EqualFoldASCII(norm, "application/grpc-web"),
-		bytesconv.EqualFoldASCII(norm, "application/grpc-web-text"):
+		bytesconv.EqualFoldASCII(norm, "application/grpc-web-text"),
+		strings.HasPrefix(norm, "application/grpc-web"):
 		return GRPCWebDecoder
-	case bytesconv.EqualFoldASCII(norm, "application/xml"), bytesconv.EqualFoldASCII(norm, "text/xml"):
+	case bytesconv.EqualFoldASCII(norm, "application/x-protobuf"),
+		bytesconv.EqualFoldASCII(norm, "application/protobuf"),
+		strings.HasSuffix(norm, "+proto"):
+		return ProtoDecoder
+	case bytesconv.EqualFoldASCII(norm, "application/xml"),
+		bytesconv.EqualFoldASCII(norm, "text/xml"),
+		strings.HasSuffix(norm, "+xml"):
 		return XMLDecoder
 	case bytesconv.EqualFoldASCII(norm, "application/x-yaml"),
 		bytesconv.EqualFoldASCII(norm, "application/yaml"),
 		bytesconv.EqualFoldASCII(norm, "text/x-yaml"),
-		bytesconv.EqualFoldASCII(norm, "text/yaml"):
+		bytesconv.EqualFoldASCII(norm, "text/yaml"),
+		strings.HasSuffix(norm, "+yaml"):
 		return YAMLDecoder
 	default:
 		return RawDecoder
@@ -277,15 +303,6 @@ func WithGRPCWeb() core.RequestModifier {
 			pipeline.GetOrInitRequestConfig(req).Decoder = GRPCWebDecoder
 		},
 	}
-}
-
-// typeName extracts a string representation of target's concrete type for error reporting.
-func typeName(target any) string {
-	if target == nil {
-		return "<nil>"
-	}
-
-	return reflect.TypeOf(target).String()
 }
 
 // DecodePayload decodes rawBody into target based on contentType using auto-matched or default decoders.

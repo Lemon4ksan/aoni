@@ -20,16 +20,8 @@ import (
 	"github.com/lemon4ksan/aoni/cmd/vortex/lib/merge"
 )
 
-// Patcher performs non-destructive, surgical AST modifications on Go source files.
-type Patcher struct{}
-
-// NewPatcher creates an initialized Patcher instance.
-func NewPatcher() *Patcher {
-	return &Patcher{}
-}
-
 // PatchBytes applies semantic merge instructions directly onto Go source code bytes in-memory.
-func (p *Patcher) PatchBytes(src []byte, plan *merge.ReconcileResult) ([]byte, error) {
+func PatchBytes(src []byte, plan *merge.ReconcileResult) ([]byte, error) {
 	fset := token.NewFileSet()
 
 	fileNode, err := parser.ParseFile(fset, "", src, parser.ParseComments)
@@ -63,29 +55,34 @@ func (p *Patcher) PatchBytes(src []byte, plan *merge.ReconcileResult) ([]byte, e
 		}
 	}
 
-	// 1. Patch Methods into Interfaces
+	if plan == nil {
+		return src, nil
+	}
+
+	// 1. Apply Method Plans
 	for _, mPlan := range plan.MethodPlans {
+		if !mPlan.IsNew || mPlan.TargetMethod == nil {
+			continue
+		}
+
 		iface, exists := interfaces[mPlan.Service]
 		if !exists {
 			continue
 		}
 
-		if mPlan.IsNew {
-			newField := p.renderMethodField(mPlan.TargetMethod)
-
-			if iface.Methods == nil {
-				iface.Methods = &ast.FieldList{}
-			}
-
-			iface.Methods.List = append(iface.Methods.List, newField)
+		methodField := renderMethodField(mPlan.TargetMethod)
+		if iface.Methods == nil {
+			iface.Methods = &ast.FieldList{}
 		}
+
+		iface.Methods.List = append(iface.Methods.List, methodField)
 	}
 
-	// 2. Patch Structs and Fields
+	// 2. Apply Struct Plans
 	for _, sPlan := range plan.StructPlans {
-		if sPlan.IsNew {
-			newDecl := p.renderStructDecl(sPlan.Target)
-			fileNode.Decls = append(fileNode.Decls, newDecl)
+		if sPlan.IsNew && sPlan.Target != nil {
+			structDecl := renderStructDecl(sPlan.Target)
+			fileNode.Decls = append(fileNode.Decls, structDecl)
 			continue
 		}
 
@@ -95,7 +92,7 @@ func (p *Patcher) PatchBytes(src []byte, plan *merge.ReconcileResult) ([]byte, e
 		}
 
 		for _, nf := range sPlan.NewFields {
-			fieldNode := p.renderStructField(nf)
+			fieldNode := renderStructField(nf)
 
 			if st.Fields == nil {
 				st.Fields = &ast.FieldList{}
@@ -123,7 +120,7 @@ func (p *Patcher) PatchBytes(src []byte, plan *merge.ReconcileResult) ([]byte, e
 }
 
 // PatchFile reads a file from disk, applies surgical AST patches in-memory, and writes back cleanly.
-func (p *Patcher) PatchFile(targetPath string, plan *merge.ReconcileResult) error {
+func PatchFile(targetPath string, plan *merge.ReconcileResult) error {
 	cleanPath := filepath.Clean(targetPath)
 
 	data, err := os.ReadFile(cleanPath)
@@ -131,7 +128,7 @@ func (p *Patcher) PatchFile(targetPath string, plan *merge.ReconcileResult) erro
 		return fmt.Errorf("cannot read target file %s: %w", cleanPath, err)
 	}
 
-	patched, err := p.PatchBytes(data, plan)
+	patched, err := PatchBytes(data, plan)
 	if err != nil {
 		return err
 	}
@@ -139,7 +136,7 @@ func (p *Patcher) PatchFile(targetPath string, plan *merge.ReconcileResult) erro
 	return os.WriteFile(cleanPath, patched, 0o600)
 }
 
-func (p *Patcher) renderMethodField(m *ir.MethodIR) *ast.Field {
+func renderMethodField(m *ir.MethodIR) *ast.Field {
 	rawPath := ""
 	if m.Path != nil {
 		rawPath = m.Path.RawTemplate
@@ -172,7 +169,7 @@ func (p *Patcher) renderMethodField(m *ir.MethodIR) *ast.Field {
 
 	// 2. Explicit method parameters
 	for _, param := range m.Params {
-		paramType := p.parseTypeExpr(param.GoType.Name)
+		paramType := parseTypeExpr(param.GoType.Name)
 		params = append(params, &ast.Field{
 			Names: []*ast.Ident{ast.NewIdent(param.GoName)},
 			Type:  paramType,
@@ -199,11 +196,11 @@ func (p *Patcher) renderMethodField(m *ir.MethodIR) *ast.Field {
 		}
 
 		returns = append(returns, &ast.Field{
-			Type: p.parseTypeExpr(retTypeName),
+			Type: parseTypeExpr(retTypeName),
 		})
 	} else if m.Return == nil {
 		returns = append(returns, &ast.Field{
-			Type: p.parseTypeExpr("*json.RawMessage"),
+			Type: parseTypeExpr("*json.RawMessage"),
 		})
 	}
 
@@ -223,7 +220,7 @@ func (p *Patcher) renderMethodField(m *ir.MethodIR) *ast.Field {
 	}
 }
 
-func (p *Patcher) renderStructDecl(st *ir.StructIR) *ast.GenDecl {
+func renderStructDecl(st *ir.StructIR) *ast.GenDecl {
 	docComments := []*ast.Comment{
 		{
 			Text: fmt.Sprintf(
@@ -235,7 +232,7 @@ func (p *Patcher) renderStructDecl(st *ir.StructIR) *ast.GenDecl {
 
 	fields := make([]*ast.Field, 0, len(st.Fields))
 	for _, f := range st.Fields {
-		fields = append(fields, p.renderStructField(f))
+		fields = append(fields, renderStructField(f))
 	}
 
 	structType := &ast.StructType{
@@ -254,7 +251,7 @@ func (p *Patcher) renderStructDecl(st *ir.StructIR) *ast.GenDecl {
 	}
 }
 
-func (p *Patcher) renderStructField(f *ir.FieldIR) *ast.Field {
+func renderStructField(f *ir.FieldIR) *ast.Field {
 	tagValue := f.WireName
 	if tagValue == "" {
 		tagValue = strings.ToLower(f.GoName)
@@ -265,7 +262,7 @@ func (p *Patcher) renderStructField(f *ir.FieldIR) *ast.Field {
 		Value: fmt.Sprintf("`url:%q`", tagValue+",omitempty"),
 	}
 
-	typeExpr := p.parseTypeExpr(f.Type.Name)
+	typeExpr := parseTypeExpr(f.Type.Name)
 
 	return &ast.Field{
 		Names: []*ast.Ident{ast.NewIdent(f.GoName)},
@@ -274,7 +271,7 @@ func (p *Patcher) renderStructField(f *ir.FieldIR) *ast.Field {
 	}
 }
 
-func (p *Patcher) parseTypeExpr(typeName string) ast.Expr {
+func parseTypeExpr(typeName string) ast.Expr {
 	if typeName == "" {
 		return ast.NewIdent("string")
 	}

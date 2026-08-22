@@ -70,6 +70,8 @@ func (sc *SecretsConfig) GetHeaderEnv(name string) (string, bool) {
 		return "AUTH_TOKEN", true
 	case "proxy-authorization":
 		return "PROXY_AUTH_TOKEN", true
+	case "x-goog-api-key", "goog-api-key":
+		return "GOOGLE_API_KEY", true
 	}
 
 	// Heuristics for standard API keys and tokens
@@ -316,8 +318,7 @@ func maskSecret(val string) string {
 		return "********"
 	}
 
-	if strings.HasPrefix(val, "Bearer ") {
-		token := strings.TrimPrefix(val, "Bearer ")
+	if token, ok := strings.CutPrefix(val, "Bearer "); ok {
 		if len(token) > 10 {
 			return "Bearer " + token[:4] + "..." + token[len(token)-4:]
 		}

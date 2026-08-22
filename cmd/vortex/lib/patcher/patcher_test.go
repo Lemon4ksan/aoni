@@ -71,8 +71,7 @@ type UserAPI interface {
 		},
 	}
 
-	p := patcher.NewPatcher()
-	patched, err := p.PatchBytes([]byte(originalSource), plan)
+	patched, err := patcher.PatchBytes([]byte(originalSource), plan)
 	require.NoError(t, err)
 
 	patchedStr := string(patched)
@@ -112,8 +111,7 @@ type UserDTO struct {
 		},
 	}
 
-	p := patcher.NewPatcher()
-	patched, err := p.PatchBytes([]byte(originalSource), plan)
+	patched, err := patcher.PatchBytes([]byte(originalSource), plan)
 	require.NoError(t, err)
 
 	patchedStr := string(patched)
@@ -151,8 +149,7 @@ type Service interface {
 		},
 	}
 
-	p := patcher.NewPatcher()
-	err := p.PatchFile(filePath, plan)
+	err := patcher.PatchFile(filePath, plan)
 	require.NoError(t, err)
 
 	data, err := os.ReadFile(filePath)
@@ -169,7 +166,6 @@ func TestPatcher_InvalidGoSyntax_Error(t *testing.T) {
 
 	invalidSource := `package api ??? invalid go syntax`
 
-	p := patcher.NewPatcher()
-	_, err := p.PatchBytes([]byte(invalidSource), &merge.ReconcileResult{})
+	_, err := patcher.PatchBytes([]byte(invalidSource), &merge.ReconcileResult{})
 	assert.Error(t, err)
 }

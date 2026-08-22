@@ -41,11 +41,3 @@ type DriftItem = fdiff.DriftItem
 
 // DiffReport aggregates all detected discrepancies and summary metrics.
 type DiffReport = fdiff.DiffReport
-
-// DiffEngine performs semantic comparison between local Go contract IR and remote OpenAPI specifications.
-type DiffEngine struct{}
-
-// NewEngine creates an initialized DiffEngine instance.
-func NewEngine() *DiffEngine {
-	return &DiffEngine{}
-}

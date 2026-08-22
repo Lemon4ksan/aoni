@@ -5,12 +5,15 @@
 package std
 
 import (
+	"bytes"
+	"context"
 	"errors"
 	stdio "io"
 	"net/http"
 	"strconv"
 
 	"github.com/lemon4ksan/aoni/internal/core"
+	"github.com/lemon4ksan/foundation/silicon/bytesconv"
 )
 
 // ErrNilRequest is returned when attempting to execute a nil request.
@@ -155,4 +158,39 @@ func (a *RequestDoerAdapter) Do(req *http.Request) (*http.Response, error) {
 	}
 
 	return httpResp, nil
+}
+
+// ToHTTPRequest converts a generic [core.Request] interface into a standard [*http.Request].
+func ToHTTPRequest(req core.Request) (*http.Request, error) {
+	if httpReq := req.HTTPRequest(); httpReq != nil {
+		return httpReq, nil
+	}
+
+	ctx := req.Context()
+	if ctx == nil {
+		ctx = context.Background()
+	}
+
+	body := req.BodyStream()
+	if body == nil {
+		if bb := req.BodyBytes(); len(bb) > 0 {
+			body = bytes.NewReader(bb)
+		}
+	}
+
+	httpReq, err := http.NewRequestWithContext(ctx, req.Method(), req.URL(), body)
+	if err != nil {
+		return nil, err
+	}
+
+	req.ForEachHeader(func(k, v []byte) bool {
+		httpReq.Header.Add(bytesconv.B2S(k), bytesconv.B2S(v))
+		return true
+	})
+
+	if host := req.Header("Host"); host != "" {
+		httpReq.Host = host
+	}
+
+	return httpReq, nil
 }

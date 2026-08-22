@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/lemon4ksan/foundation/generic"
+	"github.com/lemon4ksan/foundation/pathkit"
 
 	"github.com/lemon4ksan/aoni/cmd/vortex/lib/ir"
 )
@@ -265,8 +266,8 @@ func emitKeywordHeader(buf *bytes.Buffer, tracker *ImportTracker, svc *ir.Servic
 	case "self":
 		if m.Path != nil {
 			targetURL := m.Path.RawTemplate
-			if baseURL != "" && !strings.HasPrefix(targetURL, "http://") && !strings.HasPrefix(targetURL, "https://") {
-				targetURL = baseURL + "/" + targetURL
+			if baseURL != "" && !pathkit.New(targetURL).IsURL() {
+				targetURL = pathkit.JoinURL(baseURL, targetURL)
 			}
 
 			fmt.Fprintf(buf, "\tallMods = append(allMods, mod.WithHeader(%q, %q))\n", h.Key, targetURL)
@@ -275,8 +276,8 @@ func emitKeywordHeader(buf *bytes.Buffer, tracker *ImportTracker, svc *ir.Servic
 	case "page":
 		if m.Path != nil {
 			pagePath := cleanPagePath(m.Path.RawTemplate)
-			if baseURL != "" && !strings.HasPrefix(pagePath, "http://") && !strings.HasPrefix(pagePath, "https://") {
-				pagePath = baseURL + "/" + pagePath
+			if baseURL != "" && !pathkit.New(pagePath).IsURL() {
+				pagePath = pathkit.JoinURL(baseURL, pagePath)
 			}
 
 			fmt.Fprintf(buf, "\tallMods = append(allMods, mod.WithHeader(%q, %q))\n", h.Key, pagePath)
@@ -285,9 +286,8 @@ func emitKeywordHeader(buf *bytes.Buffer, tracker *ImportTracker, svc *ir.Servic
 	case "parent":
 		if m.Path != nil {
 			parentPath := cleanParentPath(m.Path.RawTemplate)
-			if baseURL != "" && !strings.HasPrefix(parentPath, "http://") &&
-				!strings.HasPrefix(parentPath, "https://") {
-				parentPath = baseURL + "/" + parentPath
+			if baseURL != "" && !pathkit.New(parentPath).IsURL() {
+				parentPath = pathkit.JoinURL(baseURL, parentPath)
 			}
 
 			fmt.Fprintf(buf, "\tallMods = append(allMods, mod.WithHeader(%q, %q))\n", h.Key, parentPath)
@@ -326,8 +326,8 @@ func emitDynamicHeader(buf *bytes.Buffer, tracker *ImportTracker, svc *ir.Servic
 	for i, seg := range h.DynamicTemplate.Segments {
 		if !seg.IsVariable {
 			lit := seg.Literal
-			if i == 0 && baseURL != "" && !strings.HasPrefix(lit, "http://") && !strings.HasPrefix(lit, "https://") {
-				lit = baseURL + "/" + lit
+			if i == 0 && baseURL != "" && !pathkit.New(lit).IsURL() {
+				lit = pathkit.JoinURL(baseURL, lit)
 			}
 
 			fmt.Fprintf(buf, "\tref = append(ref, %q...)\n", lit)

@@ -26,18 +26,23 @@ type remoteOp struct {
 	responses    map[string]*openapi.Response
 }
 
-// Compare compares local RootIR against a loaded remote OpenAPI document with default options.
-func (e *DiffEngine) Compare(
+// Compare compares local RootIR against a loaded remote OpenAPI document with optional custom options.
+func Compare(
 	local *ir.RootIR,
 	remoteDoc *openapi.Document,
 	localTarget string,
 	remoteTarget string,
+	opts ...DiffOptions,
 ) *DiffReport {
-	return e.CompareWithOptions(local, remoteDoc, localTarget, remoteTarget, DiffOptions{})
+	var opt DiffOptions
+	if len(opts) > 0 {
+		opt = opts[0]
+	}
+	return CompareWithOptions(local, remoteDoc, localTarget, remoteTarget, opt)
 }
 
 // CompareWithOptions compares local RootIR against a loaded remote OpenAPI document with custom options.
-func (e *DiffEngine) CompareWithOptions(
+func CompareWithOptions(
 	local *ir.RootIR,
 	remoteDoc *openapi.Document,
 	localTarget string,
@@ -94,7 +99,7 @@ func (e *DiffEngine) CompareWithOptions(
 			}
 
 			matchedRemote[rop] = true
-			e.compareMethod(report, svc, m, rop, endpointDesc)
+			compareMethod(report, svc, m, rop, endpointDesc)
 		}
 	}
 
@@ -132,7 +137,7 @@ func (e *DiffEngine) CompareWithOptions(
 	return report
 }
 
-func (e *DiffEngine) compareMethod(
+func compareMethod(
 	report *DiffReport,
 	svc *ir.ServiceIR,
 	m *ir.MethodIR,
@@ -408,7 +413,7 @@ func indexRemoteOps(remoteDoc *openapi.Document) ([]*remoteOp, map[string]*remot
 }
 
 // CompareSpecs compares two OpenAPI/HAR/Swagger specification documents directly without requiring Go contract files.
-func (e *DiffEngine) CompareSpecs(
+func CompareSpecs(
 	baseDoc *openapi.Document,
 	headDoc *openapi.Document,
 	baseTarget string,
@@ -448,7 +453,7 @@ func (e *DiffEngine) CompareSpecs(
 		}
 
 		// Compare parameters across matching operations
-		e.compareSpecOperations(bOp, hOp, headTarget, report)
+		compareSpecOperations(bOp, hOp, headTarget, report)
 	}
 
 	// 2. Detect added endpoints in Head (GHOST / New routes)
@@ -471,7 +476,7 @@ func (e *DiffEngine) CompareSpecs(
 	return report
 }
 
-func (e *DiffEngine) compareSpecOperations(bOp, hOp *remoteOp, headTarget string, report *DiffReport) {
+func compareSpecOperations(bOp, hOp *remoteOp, headTarget string, report *DiffReport) {
 	endpointDesc := bOp.httpMethod + " " + bOp.rawPath
 
 	// 1. Check Query Parameters

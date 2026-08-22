@@ -23,7 +23,6 @@ import (
 
 	"github.com/lemon4ksan/foundation/generic"
 	"github.com/lemon4ksan/foundation/silicon/bytesconv"
-	fastrand "github.com/lemon4ksan/foundation/silicon/rand"
 
 	"github.com/lemon4ksan/aoni/fingerprint/ja4"
 	"github.com/lemon4ksan/aoni/internal/requestutil"
@@ -46,7 +45,7 @@ var correlationCounter uint64
 // GenerateCorrelationID generates a fast, monotonic Base36 correlation ID string.
 func GenerateCorrelationID() string {
 	seq := atomic.AddUint64(&correlationCounter, 1)
-	timestamp := uint64(time.Now().UnixMicro())*1000 + (uint64(fastrand.Intn(1000)) ^ (seq & 0x3ff))
+	timestamp := (uint64(time.Now().UnixMicro()) << 16) | (seq & 0xffff)
 
 	var buf [32]byte
 

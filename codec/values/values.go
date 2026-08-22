@@ -9,6 +9,7 @@ import (
 	"reflect"
 	"strings"
 
+	"github.com/lemon4ksan/foundation/refkit"
 	"google.golang.org/protobuf/proto"
 )
 
@@ -31,13 +32,9 @@ func Encode(v any) (url.Values, error) {
 		return protoToValues(pm)
 	}
 
-	val := reflect.ValueOf(v)
-	for val.Kind() == reflect.Pointer {
-		if val.IsNil() {
-			return make(url.Values), nil
-		}
-
-		val = val.Elem()
+	val := refkit.DerefValue(reflect.ValueOf(v))
+	if !val.IsValid() {
+		return make(url.Values), nil
 	}
 
 	if val.Kind() != reflect.Struct && val.Kind() != reflect.Map {
@@ -68,13 +65,9 @@ func EncodeInto(values url.Values, v any) error {
 		return nil
 	}
 
-	val := reflect.ValueOf(v)
-	for val.Kind() == reflect.Pointer {
-		if val.IsNil() {
-			return nil
-		}
-
-		val = val.Elem()
+	val := refkit.DerefValue(reflect.ValueOf(v))
+	if !val.IsValid() {
+		return nil
 	}
 
 	if val.Kind() == reflect.Map {
@@ -85,15 +78,7 @@ func EncodeInto(values url.Values, v any) error {
 				return err
 			}
 
-			elemVal := iter.Value()
-			for elemVal.Kind() == reflect.Interface || elemVal.Kind() == reflect.Pointer {
-				if elemVal.IsNil() {
-					break
-				}
-
-				elemVal = elemVal.Elem()
-			}
-
+			elemVal := refkit.DerefValue(iter.Value())
 			if !elemVal.IsValid() {
 				continue
 			}
@@ -217,11 +202,6 @@ func EncodeQueryString(v any, sb *strings.Builder) error {
 	}
 
 	return nil
-}
-
-// StructToValues converts structure v into [url.Values].
-func StructToValues(v any) (url.Values, error) {
-	return Encode(v)
 }
 
 // StructToQueryString serializes structure v into an RFC 3986 §3.4 URL query parameter string.

@@ -251,8 +251,7 @@ func (c *CmdDiff) Run(ctx context.Context, args []string, stdout, stderr io.Writ
 		isAdditive = true
 	}
 
-	engine := diff.NewEngine()
-	report := engine.CompareWithOptions(localRoot, doc, localDesc, filepath.Base(specFile), diff.DiffOptions{
+	report := diff.CompareWithOptions(localRoot, doc, localDesc, filepath.Base(specFile), diff.DiffOptions{
 		Additive: isAdditive,
 	})
 
@@ -305,7 +304,6 @@ func (c *CmdDiff) runGitDiff(
 	}
 
 	p := vparser.NewParser()
-	reconciler := merge.NewReconciler()
 
 	fmt.Fprintf(stdout, "⚡ [vortex diff] Comparing working tree against '%s':\n\n", targetRef)
 
@@ -332,7 +330,7 @@ func (c *CmdDiff) runGitDiff(
 			continue
 		}
 
-		res, recErr := reconciler.Reconcile(nil, diskIR, remoteIR)
+		res, recErr := merge.Reconcile(nil, diskIR, remoteIR)
 		if recErr != nil || len(res.Deltas) == 0 {
 			continue
 		}
@@ -379,8 +377,7 @@ func (c *CmdDiff) runSpecDiff(
 		return fmt.Errorf("failed loading target spec %q: %w", headSpec, err)
 	}
 
-	engine := diff.NewEngine()
-	report := engine.CompareSpecs(baseDoc, headDoc, baseSpec, headSpec)
+	report := diff.CompareSpecs(baseDoc, headDoc, baseSpec, headSpec)
 
 	if jsonOutput {
 		data, jErr := report.RenderJSON()

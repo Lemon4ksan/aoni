@@ -268,7 +268,7 @@ func WithFormBody(payload any) aoni.RequestModifier {
 				return
 			}
 
-			encoder := values.StructToValues
+			encoder := values.Encode
 			if cfg := aoni.GetRequestConfig(req.Context()); cfg != nil && cfg.QueryEncoder != nil {
 				encoder = cfg.QueryEncoder
 			}

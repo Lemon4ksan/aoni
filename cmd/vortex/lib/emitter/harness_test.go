@@ -72,8 +72,7 @@ func TestEmitter_Harness_Generation(t *testing.T) {
 		},
 	}
 
-	emit := emitter.NewEmitter()
-	code, err := emit.EmitHarness(root)
+	code, err := emitter.EmitHarness(root)
 	require.NoError(t, err)
 	assert.NotEmpty(t, code)
 
@@ -103,7 +102,7 @@ func TestEmitter_Harness_Generation(t *testing.T) {
 	require.NoError(t, parseErr, "Generated harness must be 100% syntactically valid Go code")
 
 	// Block 5: Native Benchmark Targets in companion test file
-	testCode, tErr := emit.EmitHarnessTests(root)
+	testCode, tErr := emitter.EmitHarnessTests(root)
 	require.NoError(t, tErr)
 	assert.NotEmpty(t, testCode)
 
@@ -115,7 +114,7 @@ func TestEmitter_Harness_Generation(t *testing.T) {
 	require.NoError(t, parseTestErr, "Generated harness test must be 100% syntactically valid Go code")
 
 	// Block 6: On-Demand Table Fuzzing Targets
-	fuzzCode, fErr := emit.EmitFuzz(root)
+	fuzzCode, fErr := emitter.EmitFuzz(root)
 	require.NoError(t, fErr)
 	assert.NotEmpty(t, fuzzCode)
 

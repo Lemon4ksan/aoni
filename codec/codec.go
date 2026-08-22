@@ -173,8 +173,8 @@ func Raw(reader io.Reader) ([]byte, error) {
 	return decode.Raw(reader)
 }
 
-// StructToValues encodes a struct into [url.Values] using `url` struct tags.
-var StructToValues = values.StructToValues
+// Encode encodes a struct into [url.Values] using `url` struct tags.
+var Encode = values.Encode
 
 // StructToQueryString converts a struct into a URL-encoded query parameter string.
 var StructToQueryString = values.StructToQueryString

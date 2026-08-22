@@ -18,7 +18,6 @@ import (
 	"github.com/lemon4ksan/foundation/silicon/bytesconv"
 	"github.com/valyala/fasthttp"
 
-	"github.com/lemon4ksan/aoni"
 	"github.com/lemon4ksan/aoni/cookie"
 	"github.com/lemon4ksan/aoni/netutil"
 )
@@ -168,13 +167,20 @@ func extractUserInfoAndSetAuth(req *fasthttp.Request) {
 
 // scrubSensitiveHeaders strips sensitive credentials and cookie headers upon cross-domain redirects per RFC 9110 §15.4.
 func scrubSensitiveHeaders(req *fasthttp.Request, currentURI, nextURI *fasthttp.URI) {
-	for _, h := range aoni.DefaultSensitiveHeaders {
-		req.Header.Del(h)
-	}
-
-	req.Header.Del("Cookie2")
+	req.Header.Del("Authorization")
+	req.Header.Del("Proxy-Authorization")
 	req.Header.Del("Proxy-Authenticate")
 	req.Header.Del("WWW-Authenticate")
+	req.Header.Del("Cookie2")
+	req.Header.Del("X-Api-Key")
+	req.Header.Del("X-Auth-Token")
+	req.Header.Del("X-Access-Token")
+	req.Header.Del("X-Secret")
+	req.Header.Del("X-Client-Secret")
+	req.Header.Del("Api-Key")
+	req.Header.Del("Token")
+	req.Header.Del("Secret")
+	req.Header.Del("Private-Key")
 
 	host1 := string(currentURI.Host())
 	host2 := string(nextURI.Host())

@@ -59,17 +59,9 @@ type ReconcileResult struct {
 	TargetRoot    *ir.RootIR        `json:"target_root"`
 }
 
-// Reconciler executes 3-way (or 2-way) in-memory AST reconciliation.
-type Reconciler struct{}
-
-// NewReconciler creates a ready-to-use Reconciler.
-func NewReconciler() *Reconciler {
-	return &Reconciler{}
-}
-
 // Reconcile compares OursIR (working copy) against TheirsIR (proposal branch),
 // using BaseIR (common git ancestor) when available.
-func (r *Reconciler) Reconcile(base, ours, theirs *ir.RootIR) (*ReconcileResult, error) {
+func Reconcile(base, ours, theirs *ir.RootIR) (*ReconcileResult, error) {
 	if ours == nil || theirs == nil {
 		return nil, errors.New("ours and theirs IR must not be nil")
 	}
@@ -116,7 +108,7 @@ func (r *Reconciler) Reconcile(base, ours, theirs *ir.RootIR) (*ReconcileResult,
 			continue
 		}
 
-		r.reconcileMethods(ourSvc, theirSvc, res)
+		reconcileMethods(ourSvc, theirSvc, res)
 	}
 
 	// 2. Reconcile Structs / DTOs
@@ -145,13 +137,13 @@ func (r *Reconciler) Reconcile(base, ours, theirs *ir.RootIR) (*ReconcileResult,
 			continue
 		}
 
-		r.reconcileStructFields(ourSt, theirSt, res)
+		reconcileStructFields(ourSt, theirSt, res)
 	}
 
 	return res, nil
 }
 
-func (r *Reconciler) reconcileMethods(ourSvc, theirSvc *ir.ServiceIR, res *ReconcileResult) {
+func reconcileMethods(ourSvc, theirSvc *ir.ServiceIR, res *ReconcileResult) {
 	ourMethodsByRoute := make(map[string]*ir.MethodIR)
 	ourMethodsByName := make(map[string]*ir.MethodIR)
 
@@ -243,7 +235,7 @@ func (r *Reconciler) reconcileMethods(ourSvc, theirSvc *ir.ServiceIR, res *Recon
 	}
 }
 
-func (r *Reconciler) reconcileStructFields(ourSt, theirSt *ir.StructIR, res *ReconcileResult) {
+func reconcileStructFields(ourSt, theirSt *ir.StructIR, res *ReconcileResult) {
 	ourFieldsByName := make(map[string]bool)
 	ourFieldsByWire := make(map[string]bool)
 

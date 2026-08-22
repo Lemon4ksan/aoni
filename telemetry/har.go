@@ -13,6 +13,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/lemon4ksan/foundation/net/headkit"
+
 	"github.com/lemon4ksan/aoni/internal/version"
 )
 
@@ -56,10 +58,8 @@ func (g *HARGenerator) Record(
 	}
 
 	reqHeaders := make([]HARHeaderField, 0, len(req.Header))
-	for k, v := range req.Header {
-		for _, val := range v {
-			reqHeaders = append(reqHeaders, HARHeaderField{Name: k, Value: val})
-		}
+	for k, val := range headkit.Flatten(req.Header) {
+		reqHeaders = append(reqHeaders, HARHeaderField{Name: k, Value: val})
 	}
 
 	var reqBodySize int64
@@ -88,10 +88,8 @@ func (g *HARGenerator) Record(
 	}
 
 	respHeaders := make([]HARHeaderField, 0, len(resp.Header))
-	for k, v := range resp.Header {
-		for _, val := range v {
-			respHeaders = append(respHeaders, HARHeaderField{Name: k, Value: val})
-		}
+	for k, val := range headkit.Flatten(resp.Header) {
+		respHeaders = append(respHeaders, HARHeaderField{Name: k, Value: val})
 	}
 
 	respCookies := make([]HARCookieField, 0, len(resp.Cookies()))

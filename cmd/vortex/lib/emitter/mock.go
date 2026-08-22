@@ -16,7 +16,7 @@ import (
 )
 
 // EmitMock generates a zero-dependency in-memory virtual test server for unit and integration testing.
-func (e *Emitter) EmitMock(root *ir.RootIR) ([]byte, error) {
+func EmitMock(root *ir.RootIR) ([]byte, error) {
 	if root == nil || len(root.Services) == 0 {
 		return nil, errors.New("mock emitter: no services found in IR")
 	}
@@ -24,7 +24,7 @@ func (e *Emitter) EmitMock(root *ir.RootIR) ([]byte, error) {
 	var bodyBuf bytes.Buffer
 
 	for _, svc := range root.Services {
-		if err := e.emitServiceMock(&bodyBuf, root, svc); err != nil {
+		if err := emitServiceMock(&bodyBuf, root, svc); err != nil {
 			return nil, err
 		}
 	}
@@ -116,7 +116,7 @@ func (e *Emitter) EmitMock(root *ir.RootIR) ([]byte, error) {
 	return formatted, nil
 }
 
-func (e *Emitter) emitServiceMock(buf *bytes.Buffer, root *ir.RootIR, svc *ir.ServiceIR) error {
+func emitServiceMock(buf *bytes.Buffer, root *ir.RootIR, svc *ir.ServiceIR) error {
 	mockServerName := svc.Name + "MockServer"
 	clientStructName := lowerFirst(svc.Name) + "Client"
 
@@ -129,7 +129,7 @@ func (e *Emitter) emitServiceMock(buf *bytes.Buffer, root *ir.RootIR, svc *ir.Se
 
 	// Handler fields
 	for _, m := range svc.Methods {
-		handlerSig := e.renderMockHandlerSignature(m)
+		handlerSig := renderMockHandlerSignature(m)
 		fmt.Fprintf(buf, "\ton%s %s\n", m.Name, handlerSig)
 	}
 
@@ -184,7 +184,7 @@ func (e *Emitter) emitServiceMock(buf *bytes.Buffer, root *ir.RootIR, svc *ir.Se
 
 	// 6. On<Method> Handlers and Call Counters
 	for _, m := range svc.Methods {
-		handlerSig := e.renderMockHandlerSignature(m)
+		handlerSig := renderMockHandlerSignature(m)
 		fmt.Fprintf(buf, "// On%s registers a mock handler for %s.\n", m.Name, m.Name)
 		fmt.Fprintf(buf, "func (m *%s) On%s(fn %s) *%s {\n", mockServerName, m.Name, handlerSig, mockServerName)
 		buf.WriteString("\tm.mu.Lock()\n")
@@ -216,7 +216,7 @@ func (e *Emitter) emitServiceMock(buf *bytes.Buffer, root *ir.RootIR, svc *ir.Se
 	buf.WriteString("\t_ = parts\n\n")
 
 	for _, m := range svc.Methods {
-		e.emitMethodRouteMatch(buf, svc, m)
+		emitMethodRouteMatch(buf, svc, m)
 	}
 
 	// Fallback 404
@@ -228,7 +228,7 @@ func (e *Emitter) emitServiceMock(buf *bytes.Buffer, root *ir.RootIR, svc *ir.Se
 	return nil
 }
 
-func (e *Emitter) renderMockHandlerSignature(m *ir.MethodIR) string {
+func renderMockHandlerSignature(m *ir.MethodIR) string {
 	var params []string
 
 	params = append(params, "ctx context.Context")
@@ -249,7 +249,7 @@ func (e *Emitter) renderMockHandlerSignature(m *ir.MethodIR) string {
 	return fmt.Sprintf("func(%s) (%s, error)", strings.Join(params, ", "), retType)
 }
 
-func (e *Emitter) emitMethodRouteMatch(buf *bytes.Buffer, svc *ir.ServiceIR, m *ir.MethodIR) {
+func emitMethodRouteMatch(buf *bytes.Buffer, svc *ir.ServiceIR, m *ir.MethodIR) {
 	httpVerb := strings.ToUpper(m.HTTPMethod)
 	if httpVerb == "" {
 		httpVerb = "GET"

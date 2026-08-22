@@ -52,6 +52,11 @@ func NewRequestDoerAdapter(doer RequestDoer) HTTPDoer {
 	return std.NewRequestDoerAdapter(doer)
 }
 
+// ToStdRequest converts a generic [Request] interface into a standard [*http.Request].
+func ToStdRequest(req Request) (*http.Request, error) {
+	return std.ToHTTPRequest(req)
+}
+
 type requesterLike interface {
 	Request(ctx context.Context, method, path string, mods ...RequestModifier) (*http.Response, error)
 }

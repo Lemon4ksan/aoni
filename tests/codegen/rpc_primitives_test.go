@@ -82,8 +82,7 @@ type SteamAccountAPI interface {
 	opt := optimizer.NewOptimizer()
 	opt.Optimize(root)
 
-	em := emitter.NewEmitter()
-	codeBytes, err := em.Emit(root)
+	codeBytes, err := emitter.Emit(root)
 	require.NoError(t, err)
 	require.NotEmpty(t, codeBytes)
 
@@ -170,8 +169,7 @@ type SocketAccountAPI interface {
 	opt := optimizer.NewOptimizer()
 	opt.Optimize(root)
 
-	em := emitter.NewEmitter()
-	codeBytes, err := em.Emit(root)
+	codeBytes, err := emitter.Emit(root)
 	require.NoError(t, err)
 	require.NotEmpty(t, codeBytes)
 

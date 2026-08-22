@@ -84,8 +84,7 @@ func TestReconciler_AdditiveNewMethod_And_Field(t *testing.T) {
 		},
 	}
 
-	rec := merge.NewReconciler()
-	res, err := rec.Reconcile(nil, ours, theirs)
+	res, err := merge.Reconcile(nil, ours, theirs)
 	require.NoError(t, err)
 
 	assert.Equal(t, 0, res.BreakingCount)
@@ -127,8 +126,7 @@ func TestReconciler_NewService_And_EmptyReconcile(t *testing.T) {
 		},
 	}
 
-	rec := merge.NewReconciler()
-	res, err := rec.Reconcile(nil, ours, theirs)
+	res, err := merge.Reconcile(nil, ours, theirs)
 	require.NoError(t, err)
 
 	assert.Equal(t, 1, res.AdditiveCount)
@@ -139,11 +137,10 @@ func TestReconciler_NewService_And_EmptyReconcile(t *testing.T) {
 func TestReconciler_NilIR_Error(t *testing.T) {
 	t.Parallel()
 
-	rec := merge.NewReconciler()
-	_, err := rec.Reconcile(nil, nil, &ir.RootIR{})
+	_, err := merge.Reconcile(nil, nil, &ir.RootIR{})
 	assert.Error(t, err)
 
-	_, err = rec.Reconcile(nil, &ir.RootIR{}, nil)
+	_, err = merge.Reconcile(nil, &ir.RootIR{}, nil)
 	assert.Error(t, err)
 }
 
@@ -177,8 +174,7 @@ func TestReconciler_NoDiff_Identical(t *testing.T) {
 		},
 	}
 
-	rec := merge.NewReconciler()
-	res, err := rec.Reconcile(nil, root, root)
+	res, err := merge.Reconcile(nil, root, root)
 	require.NoError(t, err)
 
 	assert.Equal(t, 0, res.AdditiveCount)

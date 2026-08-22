@@ -72,8 +72,6 @@ func (c *CmdAccept) Run(ctx context.Context, args []string, stdout, stderr io.Wr
 	}
 
 	p := vparser.NewParser()
-	reconciler := merge.NewReconciler()
-	astPatcher := patcher.NewPatcher()
 
 	fmt.Fprintf(stdout, "⚡ [vortex ast accept] Merging Proposal from %q into local master...\n\n", targetRef)
 
@@ -97,13 +95,13 @@ func (c *CmdAccept) Run(ctx context.Context, args []string, stdout, stderr io.Wr
 			continue
 		}
 
-		res, recErr := reconciler.Reconcile(nil, diskIR, remoteIR)
+		res, recErr := merge.Reconcile(nil, diskIR, remoteIR)
 		if recErr != nil || len(res.Deltas) == 0 {
 			continue
 		}
 
 		// Perform surgical AST patching
-		if patchErr := astPatcher.PatchFile(absPath, res); patchErr != nil {
+		if patchErr := patcher.PatchFile(absPath, res); patchErr != nil {
 			return fmt.Errorf("failed to patch %s: %w", ct.File, patchErr)
 		}
 

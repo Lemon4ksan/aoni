@@ -48,13 +48,13 @@ type MergeSummary struct {
 }
 
 // HasChanges reports whether any structural modifications occurred.
-func (s *MergeSummary) HasChanges() bool {
+func (s MergeSummary) HasChanges() bool {
 	return len(s.AddedMethods) > 0 || len(s.UpdatedMethods) > 0 ||
 		len(s.DeprecatedMethods) > 0 || len(s.PrunedMethods) > 0
 }
 
 // Render formats a human-readable terminal report of the merge.
-func (s *MergeSummary) Render(targetPath string) string {
+func (s MergeSummary) Render(targetPath string) string {
 	var sb strings.Builder
 	fmt.Fprintf(&sb, "⚡ [vortex merge] Merging %q into %q\n", s.SpecSource, targetPath)
 

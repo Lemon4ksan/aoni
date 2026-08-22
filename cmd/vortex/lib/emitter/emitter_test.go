@@ -115,8 +115,7 @@ func TestEmitter(t *testing.T) {
 		},
 	}
 
-	em := emitter.NewEmitter()
-	code, err := em.Emit(root)
+	code, err := emitter.Emit(root)
 	require.NoError(t, err)
 	require.NotEmpty(t, code)
 
@@ -221,8 +220,7 @@ func TestEmitter_MultiStatusUnionsAndStatusRouting(t *testing.T) {
 		},
 	}
 
-	em := emitter.NewEmitter()
-	code, err := em.Emit(root)
+	code, err := emitter.Emit(root)
 	require.NoError(t, err)
 	require.NotEmpty(t, code)
 

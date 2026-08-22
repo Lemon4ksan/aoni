@@ -7,10 +7,9 @@ package mapper
 
 import (
 	"reflect"
-	"slices"
-	"strings"
 
 	"github.com/lemon4ksan/foundation/generic"
+	"github.com/lemon4ksan/foundation/refkit"
 )
 
 // FieldSchema describes a pre-computed struct field index, tag options, and nested sub-schemas.
@@ -44,11 +43,8 @@ var DefaultSchemaCache = &SchemaCache{}
 
 // GetSchema returns or computes the cached [StructSchema] for type t.
 func (s *SchemaCache) GetSchema(t reflect.Type) *StructSchema {
-	if t.Kind() == reflect.Pointer {
-		t = t.Elem()
-	}
-
-	if t.Kind() != reflect.Struct {
+	t = refkit.DerefType(t)
+	if t == nil || t.Kind() != reflect.Struct {
 		return nil
 	}
 
@@ -64,11 +60,8 @@ func (s *SchemaCache) GetSchema(t reflect.Type) *StructSchema {
 
 // BuildStructSchema parses [reflect.Type] t and constructs a pre-computed [StructSchema].
 func BuildStructSchema(t reflect.Type) *StructSchema {
-	if t.Kind() == reflect.Pointer {
-		t = t.Elem()
-	}
-
-	if t.Kind() != reflect.Struct {
+	t = refkit.DerefType(t)
+	if t == nil || t.Kind() != reflect.Struct {
 		return nil
 	}
 
@@ -78,37 +71,26 @@ func BuildStructSchema(t reflect.Type) *StructSchema {
 	for i := range numField {
 		field := t.Field(i)
 		defaultVal := field.Tag.Get("default")
-
-		tag := field.Tag.Get("url")
-		if tag == "" {
-			tag = field.Tag.Get("json")
-		}
-
-		parts := strings.Split(tag, ",")
-		key := parts[0]
+		tag := refkit.GetTag(field, "url", "json")
 
 		fSchema := FieldSchema{
 			Index:       i,
 			Name:        field.Name,
-			Key:         key,
+			Key:         tag.Name,
 			DefaultVal:  defaultVal,
-			IsInline:    slices.Contains(parts[1:], "inline"),
+			IsInline:    tag.Has("inline"),
 			IsAnonymous: field.Anonymous,
-			OmitEmpty:   slices.Contains(parts[1:], "omitempty"),
-			HasComma:    slices.Contains(parts[1:], "comma"),
-			HasSpace:    slices.Contains(parts[1:], "space"),
-			HasPipe:     slices.Contains(parts[1:], "pipe"),
-			IsIgnored:   key == "-",
+			OmitEmpty:   tag.Has("omitempty"),
+			HasComma:    tag.Has("comma"),
+			HasSpace:    tag.Has("space"),
+			HasPipe:     tag.Has("pipe"),
+			IsIgnored:   tag.IsIgnored(),
 		}
 
-		fieldType := field.Type
-		if fieldType.Kind() == reflect.Pointer {
-			fieldType = fieldType.Elem()
-		}
-
-		if (field.Anonymous || fSchema.IsInline) && fieldType.Kind() == reflect.Struct {
+		fieldType := refkit.DerefType(field.Type)
+		if (field.Anonymous || fSchema.IsInline) && fieldType != nil && fieldType.Kind() == reflect.Struct {
 			fSchema.SubSchema = BuildStructSchema(fieldType)
-		} else if key == "" && !field.Anonymous && !fSchema.IsInline {
+		} else if tag.Name == "" && !field.Anonymous && !fSchema.IsInline {
 			fSchema.IsIgnored = true
 		}
 

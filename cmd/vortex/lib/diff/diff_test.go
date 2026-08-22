@@ -112,8 +112,7 @@ type StoreAPI interface {
 	doc, err := openapi.LoadSpec("spec.json", []byte(remoteSpecJSON))
 	require.NoError(t, err)
 
-	engine := diff.NewEngine()
-	report := engine.Compare(root, doc, "store/api.go", "spec.json")
+	report := diff.Compare(root, doc, "store/api.go", "spec.json")
 
 	require.NotNil(t, report)
 	require.False(t, report.HasBreaking())
@@ -157,8 +156,7 @@ type StoreAPI interface {
 	doc, err := openapi.LoadSpec("spec.json", []byte(remoteSpecJSON))
 	require.NoError(t, err)
 
-	engine := diff.NewEngine()
-	report := engine.Compare(root, doc, "store/api.go", "spec.json")
+	report := diff.Compare(root, doc, "store/api.go", "spec.json")
 
 	require.NotNil(t, report)
 	require.True(t, report.HasBreaking())
@@ -224,8 +222,7 @@ func TestDiff_SpecToSpecComparison(t *testing.T) {
 	headDoc, err := openapi.LoadSpec("head.json", []byte(headSpecJSON))
 	require.NoError(t, err)
 
-	engine := diff.NewEngine()
-	report := engine.CompareSpecs(baseDoc, headDoc, "base.json", "head.json")
+	report := diff.CompareSpecs(baseDoc, headDoc, "base.json", "head.json")
 
 	require.NotNil(t, report)
 	require.True(t, report.HasBreaking())

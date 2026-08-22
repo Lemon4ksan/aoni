@@ -12,6 +12,7 @@ import (
 	"strconv"
 
 	"github.com/lemon4ksan/aoni"
+	"github.com/lemon4ksan/aoni/codec/decode"
 	"github.com/lemon4ksan/aoni/option"
 )
 
@@ -131,6 +132,18 @@ func (t *Transport) RoundTrip(req *http.Request) (*http.Response, error) {
 type responseBodyCloser struct {
 	io.ReadCloser
 	resp aoni.Response
+}
+
+func (r *responseBodyCloser) Bytes() (data []byte, volatile bool) {
+	if r.resp != nil {
+		return r.resp.UnsafeBodyBytes(), true
+	}
+
+	if br, ok := r.ReadCloser.(decode.BytesReader); ok {
+		return br.Bytes()
+	}
+
+	return nil, false
 }
 
 func (r *responseBodyCloser) Close() error {

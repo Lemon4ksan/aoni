@@ -2251,7 +2251,7 @@ func TestValues_CustomUnmarshalersAndTags(t *testing.T) {
 			SpaceTags: []string{"foo", "bar"},
 		}
 
-		vals, err := values.StructToValues(p)
+		vals, err := values.Encode(p)
 		require.NoError(t, err)
 
 		assert.Equal(t, "go,rust,zig", vals.Get("comma_tags"))

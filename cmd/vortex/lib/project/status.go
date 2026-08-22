@@ -12,6 +12,8 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/lemon4ksan/foundation/pathkit"
+
 	"github.com/lemon4ksan/aoni/cmd/vortex/lib/diff"
 	"github.com/lemon4ksan/aoni/cmd/vortex/lib/git"
 	"github.com/lemon4ksan/aoni/cmd/vortex/lib/ingest"
@@ -253,7 +255,6 @@ func (e *StatusEngine) Inspect(cfg *Config, contracts []ContractConfig) *StatusR
 	}
 
 	p := parser.NewParser()
-	diffEngine := diff.NewEngine()
 
 	var (
 		staleServiceNames []string
@@ -338,9 +339,9 @@ func (e *StatusEngine) Inspect(cfg *Config, contracts []ContractConfig) *StatusR
 
 		// 2. Check upstream drift if source is available
 		if status.Source != "" {
-			upstreamPath := status.Source
-			if !filepath.IsAbs(upstreamPath) && !strings.HasPrefix(upstreamPath, "http://") &&
-				!strings.HasPrefix(upstreamPath, "https://") {
+			pSrc := pathkit.New(status.Source)
+			upstreamPath := pSrc.FilePath()
+			if pSrc.IsFile() && !pSrc.IsAbs() {
 				upstreamPath = filepath.Join(cfg.RootDir, upstreamPath)
 			}
 
@@ -349,7 +350,7 @@ func (e *StatusEngine) Inspect(cfg *Config, contracts []ContractConfig) *StatusR
 
 			if readErr == nil && (specFormat == ingest.FormatOpenAPI3 || specFormat == ingest.FormatSwagger2) {
 				if doc, docErr := openapi.LoadSpec(upstreamPath, nil); docErr == nil {
-					diffReport := diffEngine.Compare(root, doc, ct.File, status.Source)
+					diffReport := diff.Compare(root, doc, ct.File, status.Source)
 					status.UpstreamBreakingCount = diffReport.BreakingCount()
 					status.UpstreamDriftCount = diffReport.NonBreakingCount()
 					status.UpstreamGhostCount = diffReport.GhostCount()

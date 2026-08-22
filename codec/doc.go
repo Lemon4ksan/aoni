@@ -13,7 +13,7 @@
 // The package re-exports primary decoding and encoding facilities:
 //   - [Decoder]: Primary interface for response body stream parsers.
 //   - [JSONCodec], [ProtoCodec], [GRPCWebCodec]: Pre-packaged [Codec] strategies matching content types to decoders.
-//   - [StructToValues], [StructToQueryString]: High-performance struct reflection to [url.Values] query parameters.
+//   - [Encode], [StructToQueryString]: High-performance struct reflection to [url.Values] query parameters.
 //
 // Subpackages [github.com/lemon4ksan/aoni/codec/decode] and [github.com/lemon4ksan/aoni/codec/values]
 // remain available for fine-grained specialized type access.
