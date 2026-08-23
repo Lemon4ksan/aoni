@@ -35,21 +35,25 @@ func init() {
 
 func forceSetReceiveBuffer(c syscall.RawConn, bytes int) error {
 	var serr error
+
 	if err := c.Control(func(fd uintptr) {
 		serr = unix.SetsockoptInt(int(fd), unix.SOL_SOCKET, unix.SO_RCVBUFFORCE, bytes)
 	}); err != nil {
 		return err
 	}
+
 	return serr
 }
 
 func forceSetSendBuffer(c syscall.RawConn, bytes int) error {
 	var serr error
+
 	if err := c.Control(func(fd uintptr) {
 		serr = unix.SetsockoptInt(int(fd), unix.SOL_SOCKET, unix.SO_SNDBUFFORCE, bytes)
 	}); err != nil {
 		return err
 	}
+
 	return serr
 }
 
@@ -62,6 +66,7 @@ func parseIPv4PktInfo(body []byte) (ip netip.Addr, ifIndex uint32, ok bool) {
 	if len(body) != 12 {
 		return netip.Addr{}, 0, false
 	}
+
 	return netip.AddrFrom4(*(*[4]byte)(body[8:12])), binary.NativeEndian.Uint32(body), true
 }
 
@@ -71,22 +76,28 @@ func isGSOEnabled(conn syscall.RawConn) bool {
 	if kernelVersionMajor < 5 {
 		return false
 	}
+
 	disabled, err := strconv.ParseBool(os.Getenv("QUIC_GO_DISABLE_GSO"))
 	if err == nil && disabled {
 		return false
 	}
+
 	var serr error
+
 	if err := conn.Control(func(fd uintptr) {
 		_, serr = unix.GetsockoptInt(int(fd), unix.IPPROTO_UDP, unix.UDP_SEGMENT)
 	}); err != nil {
 		return false
 	}
+
 	return serr == nil
 }
 
 func appendUDPSegmentSizeMsg(b []byte, size uint16) []byte {
 	startLen := len(b)
+
 	const dataLen = 2 // payload is a uint16
+
 	b = append(b, make([]byte, unix.CmsgSpace(dataLen))...)
 	h := (*unix.Cmsghdr)(unsafe.Pointer(&b[startLen]))
 	h.Level = syscall.IPPROTO_UDP
@@ -96,6 +107,7 @@ func appendUDPSegmentSizeMsg(b []byte, size uint16) []byte {
 	// UnixRights uses the private `data` method, but I *think* this achieves the same goal.
 	offset := startLen + unix.CmsgSpace(0)
 	*(*uint16)(unsafe.Pointer(&b[offset])) = size
+
 	return b
 }
 
@@ -106,8 +118,9 @@ func isGSOError(err error) bool {
 		// which is a hard requirement of UDP_SEGMENT. See:
 		// https://git.kernel.org/pub/scm/docs/man-pages/man-pages.git/tree/man7/udp.7?id=806eabd74910447f21005160e90957bde4db0183#n228
 		// https://git.kernel.org/pub/scm/linux/kernel/git/torvalds/linux.git/tree/net/ipv4/udp.c?h=v6.2&id=c9c3395d5e3dcc6daee66c6908354d47bf98cb0c#n942
-		return serr.Err == unix.EIO
+		return errors.Is(serr.Err, unix.EIO)
 	}
+
 	return false
 }
 
@@ -117,8 +130,9 @@ func isGSOError(err error) bool {
 func isPermissionError(err error) bool {
 	var serr *os.SyscallError
 	if errors.As(err, &serr) {
-		return serr.Syscall == "sendmsg" && serr.Err == unix.EPERM
+		return serr.Syscall == "sendmsg" && errors.Is(serr.Err, unix.EPERM)
 	}
+
 	return false
 }
 
@@ -134,13 +148,14 @@ func isECNEnabled() bool {
 func kernelVersion() (major, minor int) {
 	var uname syscall.Utsname
 	if err := syscall.Uname(&uname); err != nil {
-		return
+		return 0, 0
 	}
 
 	var (
 		values    [2]int
 		value, vi int
 	)
+
 	for _, c := range uname.Release {
 		if '0' <= c && c <= '9' {
 			value = (value * 10) + int(c-'0')
@@ -149,9 +164,11 @@ func kernelVersion() (major, minor int) {
 			// If we see anything else, we are likely to mis-parse it.
 			values[vi] = value
 			vi++
+
 			if vi >= len(values) {
 				break
 			}
+
 			value = 0
 		}
 	}

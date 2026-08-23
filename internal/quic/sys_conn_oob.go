@@ -65,14 +65,18 @@ func newConn(c OOBCapablePacketConn, supportsDF bool) (*oobConn, error) {
 	if err != nil {
 		return nil, err
 	}
+
 	var needsPacketInfo bool
+
 	if udpAddr, ok := c.LocalAddr().(*net.UDPAddr); ok && udpAddr.IP.IsUnspecified() {
 		needsPacketInfo = true
 	}
+
 	// We don't know if this a IPv4-only, IPv6-only or a IPv4-and-IPv6 connection.
 	// Try enabling receiving of ECN and packet info for both IP versions.
 	// We expect at least one of those syscalls to succeed.
 	var errECNIPv4, errECNIPv6, errPIIPv4, errPIIPv6 error
+
 	if err := rawConn.Control(func(fd uintptr) {
 		errECNIPv4 = unix.SetsockoptInt(int(fd), unix.IPPROTO_IP, unix.IP_RECVTOS, 1)
 		errECNIPv6 = unix.SetsockoptInt(int(fd), unix.IPPROTO_IPV6, unix.IPV6_RECVTCLASS, 1)
@@ -84,6 +88,7 @@ func newConn(c OOBCapablePacketConn, supportsDF bool) (*oobConn, error) {
 	}); err != nil {
 		return nil, err
 	}
+
 	switch {
 	case errECNIPv4 == nil && errECNIPv6 == nil:
 		utils.DefaultLogger.Debugf("Activating reading of ECN bits for IPv4 and IPv6.")
@@ -94,6 +99,7 @@ func newConn(c OOBCapablePacketConn, supportsDF bool) (*oobConn, error) {
 	case errECNIPv4 != nil && errECNIPv6 != nil:
 		return nil, errors.New("activating ECN failed for both IPv4 and IPv6")
 	}
+
 	if needsPacketInfo {
 		switch {
 		case errPIIPv4 == nil && errPIIPv6 == nil:
@@ -122,6 +128,7 @@ func newConn(c OOBCapablePacketConn, supportsDF bool) (*oobConn, error) {
 		// preallocate the [][]byte
 		msgs[i].Buffers = make([][]byte, 1)
 	}
+
 	oobConn := &oobConn{
 		OOBCapablePacketConn: c,
 		batchConn:            bc,
@@ -133,9 +140,11 @@ func newConn(c OOBCapablePacketConn, supportsDF bool) (*oobConn, error) {
 			ECN: isECNEnabled(),
 		},
 	}
+
 	for i := range batchSize {
 		oobConn.messages[i].OOB = make([]byte, oobBufferSize)
 	}
+
 	return oobConn, nil
 }
 
@@ -151,12 +160,14 @@ func (c *oobConn) ReadPacket() (receivedPacket, error) {
 			c.buffers[i] = buffer
 			c.messages[i].Buffers[0] = c.buffers[i].Data
 		}
+
 		c.readPos = 0
 
 		n, err := c.batchConn.ReadBatch(c.messages, 0)
 		if n == 0 || err != nil {
 			return receivedPacket{}, err
 		}
+
 		c.messages = c.messages[:n]
 	}
 
@@ -165,24 +176,29 @@ func (c *oobConn) ReadPacket() (receivedPacket, error) {
 	c.readPos++
 
 	data := msg.OOB[:msg.NN]
+
 	p := receivedPacket{
 		remoteAddr: msg.Addr,
 		rcvTime:    monotime.Now(),
 		data:       msg.Buffers[0][:msg.N],
 		buffer:     buffer,
 	}
+
 	for len(data) > 0 {
 		hdr, body, remainder, err := unix.ParseOneSocketControlMessage(data)
 		if err != nil {
 			return receivedPacket{}, err
 		}
+
 		if hdr.Level == unix.IPPROTO_IP {
 			switch hdr.Type {
 			case msgTypeIPTOS:
 				if len(body) != 1 {
 					return receivedPacket{}, errors.New("invalid IPTOS size")
 				}
+
 				p.ecn = protocol.ParseECNHeaderBits(body[0] & ecnMask)
+
 			case ipv4PKTINFO:
 				ip, ifIndex, ok := parseIPv4PktInfo(body)
 				if ok {
@@ -196,19 +212,22 @@ func (c *oobConn) ReadPacket() (receivedPacket, error) {
 				}
 			}
 		}
+
 		if hdr.Level == unix.IPPROTO_IPV6 {
 			switch hdr.Type {
 			case unix.IPV6_TCLASS:
 				if len(body) != 4 {
 					return receivedPacket{}, errors.New("invalid IPV6_TCLASS size")
 				}
+
 				bits := uint8(binary.NativeEndian.Uint32(body)) & ecnMask
 				p.ecn = protocol.ParseECNHeaderBits(bits)
+
 			case unix.IPV6_PKTINFO:
 				// struct in6_pktinfo {
 				// 	struct in6_addr ipi6_addr;    /* src/dst IPv6 address */
 				// 	unsigned int    ipi6_ifindex; /* send/recv interface index */
-				// };
+				// 	// };
 				if len(body) == 20 {
 					p.info.addr = netip.AddrFrom16(*(*[16]byte)(body[:16])).Unmap()
 					p.info.ifIndex = binary.NativeEndian.Uint32(body[16:])
@@ -220,24 +239,35 @@ func (c *oobConn) ReadPacket() (receivedPacket, error) {
 				}
 			}
 		}
+
 		data = remainder
 	}
+
 	return p, nil
 }
 
 // WritePacket writes a new packet.
-func (c *oobConn) WritePacket(b []byte, addr net.Addr, packetInfoOOB []byte, gsoSize uint16, ecn protocol.ECN) (int, error) {
+func (c *oobConn) WritePacket(
+	b []byte,
+	addr net.Addr,
+	packetInfoOOB []byte,
+	gsoSize uint16,
+	ecn protocol.ECN,
+) (int, error) {
 	oob := packetInfoOOB
 	if gsoSize > 0 {
 		if !c.capabilities().GSO {
 			panic("GSO disabled")
 		}
+
 		oob = appendUDPSegmentSizeMsg(oob, gsoSize)
 	}
+
 	if ecn != protocol.ECNUnsupported {
 		if !c.capabilities().ECN {
 			panic("tried to send an ECN-marked packet although ECN is disabled")
 		}
+
 		if remoteUDPAddr, ok := addr.(*net.UDPAddr); ok {
 			if remoteUDPAddr.IP.To4() != nil {
 				oob = appendIPv4ECNMsg(oob, ecn)
@@ -246,7 +276,9 @@ func (c *oobConn) WritePacket(b []byte, addr net.Addr, packetInfoOOB []byte, gso
 			}
 		}
 	}
+
 	n, _, err := c.WriteMsgUDP(b, oob, addr.(*net.UDPAddr))
+
 	return n, err
 }
 
@@ -263,6 +295,7 @@ func (info *packetInfo) OOB() []byte {
 	if info == nil {
 		return nil
 	}
+
 	if info.addr.Is4() {
 		ip := info.addr.As4()
 		// struct in_pktinfo {
@@ -274,6 +307,7 @@ func (info *packetInfo) OOB() []byte {
 			Src:     ip[:],
 			IfIndex: int(info.ifIndex),
 		}
+
 		return cm.Marshal()
 	} else if info.addr.Is6() {
 		ip := info.addr.As16()
@@ -285,8 +319,10 @@ func (info *packetInfo) OOB() []byte {
 			Src:     ip[:],
 			IfIndex: int(info.ifIndex),
 		}
+
 		return cm.Marshal()
 	}
+
 	return nil
 }
 
@@ -301,12 +337,15 @@ func appendIPv4ECNMsg(b []byte, val protocol.ECN) []byte {
 	// UnixRights uses the private `data` method, but I *think* this achieves the same goal.
 	offset := startLen + unix.CmsgSpace(0)
 	b[offset] = val.ToHeaderBits()
+
 	return b
 }
 
 func appendIPv6ECNMsg(b []byte, val protocol.ECN) []byte {
 	startLen := len(b)
+
 	const dataLen = 4
+
 	b = append(b, make([]byte, unix.CmsgSpace(dataLen))...)
 	h := (*unix.Cmsghdr)(unsafe.Pointer(&b[startLen]))
 	h.Level = syscall.IPPROTO_IPV6
@@ -316,5 +355,6 @@ func appendIPv6ECNMsg(b []byte, val protocol.ECN) []byte {
 	// UnixRights uses the private `data` method, but I *think* this achieves the same goal.
 	offset := startLen + unix.CmsgSpace(0)
 	binary.NativeEndian.PutUint32(b[offset:offset+dataLen], uint32(val.ToHeaderBits()))
+
 	return b
 }

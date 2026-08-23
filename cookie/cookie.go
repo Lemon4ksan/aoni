@@ -208,6 +208,7 @@ func Import(jar http.CookieJar, u *url.URL, cookies []Cookie) {
 			sameSite = http.SameSiteNoneMode
 		}
 
+		//nolint:gosec // Reconstructing http.Cookie from imported Cookie model
 		return &http.Cookie{
 			Name:        c.Name,
 			Value:       c.Value,

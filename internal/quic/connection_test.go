@@ -1213,12 +1213,10 @@ func testConnectionReceivePrioritization(t *testing.T, handshakeComplete bool, n
 
 			events = append(events, "unpack")
 
-			return protocol.PacketNumber(
-					counter,
-				), protocol.PacketNumberLen2, protocol.KeyPhaseZero, []byte{
-					0,
-					1,
-				}, /* PADDING, PING */ nil
+			return protocol.PacketNumber(counter), protocol.PacketNumberLen2, protocol.KeyPhaseZero, []byte{
+				0,
+				1,
+			}, /* PADDING, PING */ nil
 		},
 	).
 		Times(numPackets)

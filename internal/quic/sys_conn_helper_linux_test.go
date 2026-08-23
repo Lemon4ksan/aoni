@@ -12,9 +12,8 @@ import (
 	"os"
 	"testing"
 
-	"golang.org/x/sys/unix"
-
 	"github.com/stretchr/testify/require"
+	"golang.org/x/sys/unix"
 )
 
 var (
@@ -29,7 +28,9 @@ func TestForcingReceiveBufferSize(t *testing.T) {
 
 	c, err := net.ListenPacket("udp", "127.0.0.1:0")
 	require.NoError(t, err)
+
 	defer c.Close()
+
 	syscallConn, err := c.(*net.UDPConn).SyscallConn()
 	require.NoError(t, err)
 
@@ -56,7 +57,9 @@ func TestForcingSendBufferSize(t *testing.T) {
 
 	c, err := net.ListenPacket("udp", "127.0.0.1:0")
 	require.NoError(t, err)
+
 	defer c.Close()
+
 	syscallConn, err := c.(*net.UDPConn).SyscallConn()
 	require.NoError(t, err)
 

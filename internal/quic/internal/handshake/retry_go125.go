@@ -46,11 +46,11 @@ var (
 func GetRetryIntegrityTag(retry []byte, origDestConnID protocol.ConnectionID, version protocol.Version) *[16]byte {
 	retryMutex.Lock()
 	defer retryMutex.Unlock()
+	defer retryBuf.Reset()
 
 	retryBuf.WriteByte(uint8(origDestConnID.Len()))
 	retryBuf.Write(origDestConnID.Bytes())
 	retryBuf.Write(retry)
-	defer retryBuf.Reset()
 
 	var tag [16]byte
 	var sealed []byte

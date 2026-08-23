@@ -12,18 +12,18 @@ import (
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/require"
 	"golang.org/x/net/ipv4"
 	"golang.org/x/sys/unix"
 
 	"github.com/lemon4ksan/aoni/internal/quic/internal/protocol"
-
-	"github.com/stretchr/testify/require"
 )
 
 func isIPv4(ip net.IP) bool { return ip.To4() != nil }
 
 func runSysConnServer(t *testing.T, network string, addr *net.UDPAddr) (*net.UDPAddr, <-chan receivedPacket) {
 	t.Helper()
+
 	udpConn, err := net.ListenUDP(network, addr)
 	require.NoError(t, err)
 	t.Cleanup(func() { udpConn.Close() })
@@ -39,9 +39,11 @@ func runSysConnServer(t *testing.T, network string, addr *net.UDPAddr) (*net.UDP
 			if err != nil {
 				return
 			}
+
 			packetChan <- p
 		}
 	}()
+
 	return udpConn.LocalAddr().(*net.UDPAddr), packetChan
 }
 
@@ -55,8 +57,10 @@ func sendUDPPacketWithECN(t *testing.T, network string, addr *net.UDPAddr, setEC
 	rawConn, err := conn.SyscallConn()
 	require.NoError(t, err)
 	require.NoError(t, rawConn.Control(func(fd uintptr) { setECN(fd) }))
+
 	_, err = conn.Write([]byte("foobar"))
 	require.NoError(t, err)
+
 	return conn.LocalAddr()
 }
 
@@ -149,11 +153,13 @@ func TestSendPacketsWithECNOnIPv4(t *testing.T) {
 
 	c, err := net.ListenUDP("udp4", nil)
 	require.NoError(t, err)
+
 	defer c.Close()
 
 	for _, val := range []protocol.ECN{protocol.ECNNon, protocol.ECT1, protocol.ECT0, protocol.ECNCE} {
 		_, _, err = c.WriteMsgUDP([]byte("foobar"), appendIPv4ECNMsg([]byte{}, val), addr)
 		require.NoError(t, err)
+
 		select {
 		case p := <-packetChan:
 			require.Equal(t, []byte("foobar"), p.data)
@@ -169,11 +175,13 @@ func TestSendPacketsWithECNOnIPv6(t *testing.T) {
 
 	c, err := net.ListenUDP("udp6", nil)
 	require.NoError(t, err)
+
 	defer c.Close()
 
 	for _, val := range []protocol.ECN{protocol.ECNNon, protocol.ECT1, protocol.ECT0, protocol.ECNCE} {
 		_, _, err = c.WriteMsgUDP([]byte("foobar"), appendIPv6ECNMsg([]byte{}, val), addr)
 		require.NoError(t, err)
+
 		select {
 		case p := <-packetChan:
 			require.Equal(t, []byte("foobar"), p.data)
@@ -190,7 +198,9 @@ func TestSysConnPacketInfoIPv4(t *testing.T) {
 
 	conn, err := net.DialUDP("udp4", nil, addr)
 	require.NoError(t, err)
+
 	defer conn.Close()
+
 	_, err = conn.Write([]byte("foobar"))
 	require.NoError(t, err)
 
@@ -202,6 +212,7 @@ func TestSysConnPacketInfoIPv4(t *testing.T) {
 		require.True(t, p.info.addr.IsValid())
 		require.True(t, isIPv4(p.info.addr.AsSlice()))
 		require.Equal(t, net.IPv4(127, 0, 0, 1).String(), p.info.addr.String())
+
 	case <-time.After(time.Second):
 		t.Fatal("timeout waiting for packet")
 	}
@@ -213,7 +224,9 @@ func TestSysConnPacketInfoIPv6(t *testing.T) {
 
 	conn, err := net.DialUDP("udp6", nil, addr)
 	require.NoError(t, err)
+
 	defer conn.Close()
+
 	_, err = conn.Write([]byte("foobar"))
 	require.NoError(t, err)
 
@@ -224,6 +237,7 @@ func TestSysConnPacketInfoIPv6(t *testing.T) {
 		require.Equal(t, conn.LocalAddr(), p.remoteAddr)
 		require.NotNil(t, p.info)
 		require.Equal(t, net.IPv6loopback, net.IP(p.info.addr.AsSlice()))
+
 	case <-time.After(time.Second):
 		t.Fatal("timeout waiting for packet")
 	}
@@ -235,7 +249,9 @@ func TestSysConnPacketInfoDualStack(t *testing.T) {
 	// IPv4
 	conn4, err := net.DialUDP("udp4", nil, &net.UDPAddr{IP: net.IPv4(127, 0, 0, 1), Port: addr.Port})
 	require.NoError(t, err)
+
 	defer conn4.Close()
+
 	_, err = conn4.Write([]byte("foobar"))
 	require.NoError(t, err)
 
@@ -252,7 +268,9 @@ func TestSysConnPacketInfoDualStack(t *testing.T) {
 	// IPv6
 	conn6, err := net.DialUDP("udp6", nil, addr)
 	require.NoError(t, err)
+
 	defer conn6.Close()
+
 	_, err = conn6.Write([]byte("foobar"))
 	require.NoError(t, err)
 
@@ -287,6 +305,7 @@ var _ batchConn = &mockBatchConn{}
 
 func (c *mockBatchConn) ReadBatch(ms []ipv4.Message, _ int) (int, error) {
 	require.Len(c.t, ms, batchSize)
+
 	for i := 0; i < c.numMsgRead; i++ {
 		require.Len(c.t, ms[i].Buffers, 1)
 		require.Len(c.t, ms[i].Buffers[0], protocol.MaxPacketBufferSize)
@@ -294,7 +313,9 @@ func (c *mockBatchConn) ReadBatch(ms []ipv4.Message, _ int) (int, error) {
 		ms[i].Buffers[0] = data
 		ms[i].N = len(data)
 	}
+
 	c.callCounter++
+
 	return c.numMsgRead, nil
 }
 
@@ -304,6 +325,7 @@ func TestReadsMultipleMessagesInOneBatch(t *testing.T) {
 	udpConn := newUDPConnLocalhost(t)
 	oobConn, err := newConn(udpConn, true)
 	require.NoError(t, err)
+
 	oobConn.batchConn = bc
 
 	for i := range batchSize + 1 {
@@ -311,6 +333,7 @@ func TestReadsMultipleMessagesInOneBatch(t *testing.T) {
 		require.NoError(t, err)
 		require.Equal(t, fmt.Sprintf("message %d", i), string(p.data))
 	}
+
 	require.Equal(t, 2, bc.callCounter)
 }
 
@@ -321,6 +344,7 @@ func TestSysConnSendGSO(t *testing.T) {
 
 	udpConn, err := net.ListenUDP("udp", &net.UDPAddr{IP: net.IPv4(127, 0, 0, 1), Port: 0})
 	require.NoError(t, err)
+
 	c := &oobRecordingConn{UDPConn: udpConn}
 	oobConn, err := newConn(c, true)
 	require.NoError(t, err)
@@ -332,6 +356,7 @@ func TestSysConnSendGSO(t *testing.T) {
 	oobMsg := c.oobs[0]
 	require.NotEmpty(t, oobMsg)
 	require.Equal(t, cap(oob), cap(oobMsg)) // check that it appended to oob
+
 	expected := appendUDPSegmentSizeMsg([]byte{}, 3)
 	// Check that the first control message is the OOB control message.
 	require.Equal(t, expected, oobMsg[:len(expected)])
