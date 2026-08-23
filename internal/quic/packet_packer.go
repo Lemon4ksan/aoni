@@ -548,7 +548,6 @@ func (p *packetPacker) PackCoalescedPacket(
 					oneRTTSealer.Overhead(),
 				)
 			}
-
 		} else if p.perspective == protocol.PerspectiveClient && !onlyAck { // 0-RTT packets can't contain ACK frames
 			var err error
 

@@ -245,3 +245,32 @@ func BenchmarkH2_HPACK_EncodeDecode(b *testing.B) {
 		hFrame.AppendHeaderField(hpEnc, hf, true)
 	}
 }
+
+func BenchmarkH3_FrameRoundtrip(b *testing.B) {
+	codec := h3engine.NewQPACKCodec()
+	req := fasthttp.AcquireRequest()
+	defer fasthttp.ReleaseRequest(req)
+
+	req.Header.SetMethod("POST")
+	req.SetRequestURI("https://api.example.com/v2/users")
+	req.Header.Set("content-type", "application/json")
+	req.Header.Set("x-aoni-version", "2.0.0")
+	req.Header.Set("user-agent", "aoni/2.0")
+
+	var respHeader fasthttp.ResponseHeader
+
+	b.ReportAllocs()
+	b.ResetTimer()
+
+	for b.Loop() {
+		p := codec.AcquireEncoder()
+		hdrBlock, err := codec.EncodeRequestHeadersPooled(p, req, nil)
+		if err != nil {
+			b.Fatalf("failed to encode: %v", err)
+		}
+
+		respHeader.Reset()
+		_, _ = codec.DecodeResponseHeaders(hdrBlock, &respHeader)
+		codec.ReleaseEncoder(p)
+	}
+}
