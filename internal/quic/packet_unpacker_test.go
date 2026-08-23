@@ -147,7 +147,8 @@ func testUnpackLongHeaderPacket(t *testing.T,
 		calls = append(calls, cs.EXPECT().Get0RTTOpener().Return(opener, nil))
 	}
 
-	calls = append(calls, []any{
+	calls = append(
+		calls,
 		opener.EXPECT().DecryptHeader(gomock.Any(), gomock.Any(), gomock.Any()),
 		opener.EXPECT().
 			DecodePacketNumber(protocol.PacketNumber(2), protocol.PacketNumberLen3).
@@ -155,7 +156,7 @@ func testUnpackLongHeaderPacket(t *testing.T,
 		opener.EXPECT().Open(gomock.Any(), payload, protocol.PacketNumber(1234), hdrRaw).Return(
 			decryptResult.decrypted, decryptResult.err,
 		),
-	}...)
+	)
 	gomock.InOrder(calls...)
 
 	packet, err := unpacker.UnpackLongHeader(hdr, data)
@@ -389,7 +390,8 @@ func TestUnpackHeaderDecryption(t *testing.T) {
 		opener.EXPECT().DecryptHeader(
 			[]byte{3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18},
 			&hdrRaw[0],
-			append(hdrRaw[len(hdrRaw)-2:], []byte{1, 2}...)).Do(func(_ []byte, firstByte *byte, pnBytes []byte) {
+			append(hdrRaw[len(hdrRaw)-2:], 1, 2),
+		).Do(func(_ []byte, firstByte *byte, pnBytes []byte) {
 			*firstByte ^= 0xff // invert the first byte back
 
 			for i := range pnBytes {

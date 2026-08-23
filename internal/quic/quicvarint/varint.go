@@ -153,18 +153,18 @@ func Append(b []byte, i uint64) []byte {
 	}
 
 	if i <= maxVarInt2 {
-		return append(b, []byte{uint8(i>>8) | 0x40, uint8(i)}...)
+		return append(b, uint8(i>>8)|0x40, uint8(i))
 	}
 
 	if i <= maxVarInt4 {
-		return append(b, []byte{uint8(i>>24) | 0x80, uint8(i >> 16), uint8(i >> 8), uint8(i)}...)
+		return append(b, uint8(i>>24)|0x80, uint8(i>>16), uint8(i>>8), uint8(i))
 	}
 
 	if i <= maxVarInt8 {
-		return append(b, []byte{
-			uint8(i>>56) | 0xc0, uint8(i >> 48), uint8(i >> 40), uint8(i >> 32),
-			uint8(i >> 24), uint8(i >> 16), uint8(i >> 8), uint8(i),
-		}...)
+		return append(b,
+			uint8(i>>56)|0xc0, uint8(i>>48), uint8(i>>40), uint8(i>>32),
+			uint8(i>>24), uint8(i>>16), uint8(i>>8), uint8(i),
+		)
 	}
 
 	panic(&varintLengthError{Num: i})

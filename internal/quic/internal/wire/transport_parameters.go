@@ -686,18 +686,17 @@ func (p *TransportParameters) String() string {
 
 	logParams = append(
 		logParams,
-		[]any{
-			p.InitialMaxStreamDataBidiLocal,
-			p.InitialMaxStreamDataBidiRemote,
-			p.InitialMaxStreamDataUni,
-			p.InitialMaxData,
-			p.MaxBidiStreamNum,
-			p.MaxUniStreamNum,
-			p.MaxIdleTimeout,
-			p.AckDelayExponent,
-			p.MaxAckDelay,
-			p.ActiveConnectionIDLimit,
-		}...)
+		p.InitialMaxStreamDataBidiLocal,
+		p.InitialMaxStreamDataBidiRemote,
+		p.InitialMaxStreamDataUni,
+		p.InitialMaxData,
+		p.MaxBidiStreamNum,
+		p.MaxUniStreamNum,
+		p.MaxIdleTimeout,
+		p.AckDelayExponent,
+		p.MaxAckDelay,
+		p.ActiveConnectionIDLimit,
+	)
 	if p.StatelessResetToken != nil { // the client never sends a stateless reset token
 		logString += ", StatelessResetToken: %#x"
 

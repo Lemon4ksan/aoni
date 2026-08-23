@@ -52,17 +52,20 @@ func TestParseNewConnectionIDInvalidConnIDLength(t *testing.T) {
 	) // sequence number
 	data = append(
 		data,
-		encodeVarInt(0xcafe)...) // retire prior to
+		encodeVarInt(0xcafe)...,
+	) // retire prior to
 	data = append(
 		data,
 		21,
 	) // connection ID length
 	data = append(
 		data,
-		[]byte{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21}...) // connection ID
+		[]byte{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21}...,
+	) // connection ID
 	data = append(
 		data,
-		[]byte("deadbeefdecafbad")...) // stateless reset token
+		[]byte("deadbeefdecafbad")...,
+	) // stateless reset token
 	_, _, err := parseNewConnectionIDFrame(data, protocol.Version1)
 	require.Equal(t, protocol.ErrInvalidConnectionIDLen, err)
 }
