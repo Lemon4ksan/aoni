@@ -84,13 +84,11 @@ func (c *Client) captureCookies(ctx context.Context, req *fasthttp.Request, resp
 	u := uriToURL(req.URI())
 
 	var cookies []*http.Cookie
-	resp.Header.Cookies()(func(key, value []byte) bool {
+	for key, value := range resp.Header.Cookies() {
 		if cookie := parseCookie(key, value); cookie != nil {
 			cookies = append(cookies, cookie)
 		}
-
-		return true
-	})
+	}
 
 	if len(cookies) > 0 {
 		jar.SetCookies(u, cookies)

@@ -5,16 +5,16 @@
 package h3engine
 
 import (
-	"bytes"
 	"context"
 	"errors"
 	"io"
 	"sync"
 
 	"github.com/lemon4ksan/foundation/generic"
-	"github.com/quic-go/quic-go"
-	"github.com/quic-go/quic-go/quicvarint"
 	"github.com/valyala/fasthttp"
+
+	"github.com/lemon4ksan/aoni/internal/quic"
+	"github.com/lemon4ksan/aoni/internal/quic/quicvarint"
 )
 
 const errCodeH3RequestCancelled = quic.StreamErrorCode(ErrCodeH3RequestCancelled)
@@ -234,41 +234,45 @@ func (cc *ClientConn) Do(
 }
 
 func (cc *ClientConn) sendRequest(str *quic.Stream, req *fasthttp.Request, headerOrder []string) error {
-	var headerBuf bytes.Buffer
-	if err := cc.qpack.EncodeRequestHeaders(&headerBuf, req, headerOrder); err != nil {
-		return err
-	}
+	p := cc.qpack.AcquireEncoder()
+	defer cc.qpack.ReleaseEncoder(p)
 
-	headerBlock := headerBuf.Bytes()
-
-	var frameHead []byte
-
-	frameHead = appendHeadersHeader(frameHead, uint64(len(headerBlock)))
-
-	if _, err := str.Write(frameHead); err != nil {
-		return err
-	}
-
-	if _, err := str.Write(headerBlock); err != nil {
+	headerBlock, err := cc.qpack.EncodeRequestHeadersPooled(p, req, headerOrder)
+	if err != nil {
 		return err
 	}
 
 	body := req.Body()
+
+	headLen := quicvarint.Len(FrameTypeHeaders) + quicvarint.Len(uint64(len(headerBlock)))
+
+	totalLen := headLen + len(headerBlock)
 	if len(body) > 0 {
-		var dataHead []byte
-
-		dataHead = appendDataHeader(dataHead, uint64(len(body)))
-
-		if _, err := str.Write(dataHead); err != nil {
-			return err
-		}
-
-		if _, err := str.Write(body); err != nil {
-			return err
-		}
+		totalLen += quicvarint.Len(FrameTypeData) + quicvarint.Len(uint64(len(body))) + len(body)
 	}
 
-	return nil
+	var (
+		stackOut [8192]byte
+		out      []byte
+	)
+
+	if totalLen <= len(stackOut) {
+		out = stackOut[:0]
+	} else {
+		out = make([]byte, 0, totalLen)
+	}
+
+	out = appendHeadersHeader(out, uint64(len(headerBlock)))
+
+	out = append(out, headerBlock...)
+	if len(body) > 0 {
+		out = appendDataHeader(out, uint64(len(body)))
+		out = append(out, body...)
+	}
+
+	_, err = str.Write(out)
+
+	return err
 }
 
 func (cc *ClientConn) readResponse(
@@ -277,6 +281,8 @@ func (cc *ClientConn) readResponse(
 ) (trailers map[string][]string, err error) {
 	r := quicvarint.NewReader(str)
 	headersParsed := false
+
+	var stackHeaderBuf [4096]byte
 
 	for {
 		frameType, payloadLen, err := ReadFrameHeader(r)
@@ -290,7 +296,13 @@ func (cc *ClientConn) readResponse(
 
 		switch frameType {
 		case FrameTypeHeaders:
-			headerBlock := make([]byte, payloadLen)
+			var headerBlock []byte
+			if payloadLen <= uint64(len(stackHeaderBuf)) {
+				headerBlock = stackHeaderBuf[:payloadLen]
+			} else {
+				headerBlock = make([]byte, payloadLen)
+			}
+
 			if _, err := io.ReadFull(r, headerBlock); err != nil {
 				return nil, err
 			}

@@ -11,8 +11,8 @@ import (
 	"io"
 	"strconv"
 
+	"github.com/lemon4ksan/foundation/silicon/rand"
 	"github.com/valyala/fasthttp"
-	"github.com/valyala/fastrand"
 )
 
 var (
@@ -133,7 +133,7 @@ func cutPadding(payload []byte, length int) ([]byte, error) {
 }
 
 func addPadding(b []byte) []byte {
-	n := int(fastrand.Uint32n(247)) + 9
+	n := int(rand.Uint32n(247)) + 9
 	nn := len(b)
 
 	b = resizeSlice(b, nn+n)
@@ -185,9 +185,8 @@ func fasthttpResponseHeaders(dst *Headers, hp *HPACK, res *fasthttp.Response) {
 	res.Header.Del("Connection")
 	res.Header.Del("Transfer-Encoding")
 
-	res.Header.All()(func(k, v []byte) bool {
+	for k, v := range res.Header.All() {
 		hf.SetBytes(toLowerCopy(k), v)
 		dst.AppendHeaderField(hp, hf, false)
-		return true
-	})
+	}
 }

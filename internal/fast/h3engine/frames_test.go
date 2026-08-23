@@ -8,7 +8,7 @@ import (
 	"bytes"
 	"testing"
 
-	"github.com/quic-go/quic-go/quicvarint"
+	"github.com/lemon4ksan/aoni/internal/quic/quicvarint"
 )
 
 func TestSettingsEncodeAndParse(t *testing.T) {

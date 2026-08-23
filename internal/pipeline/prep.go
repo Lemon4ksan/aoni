@@ -456,10 +456,9 @@ func convertRequestToStd(r core.Request) *http.Request {
 
 	if isFast {
 		if fastReq := fastAdapter.FastHTTPRequest(); fastReq != nil {
-			fastReq.Header.All()(func(k, v []byte) bool {
+			for k, v := range fastReq.Header.All() {
 				stdReq.Header.Add(string(k), string(v))
-				return true
-			})
+			}
 
 			if host := string(fastReq.Header.Peek("Host")); host != "" {
 				stdReq.Host = host

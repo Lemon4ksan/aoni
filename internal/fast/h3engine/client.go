@@ -12,8 +12,9 @@ import (
 	"sync"
 
 	"github.com/lemon4ksan/foundation/silicon/sysnet"
-	"github.com/quic-go/quic-go"
 	"github.com/valyala/fasthttp"
+
+	"github.com/lemon4ksan/aoni/internal/quic"
 )
 
 // Client manages connection pooling and multiplexing for HTTP/3 over QUIC.

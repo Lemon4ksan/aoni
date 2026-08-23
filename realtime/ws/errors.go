@@ -65,6 +65,17 @@ var (
 
 	// ErrFrameTooLarge indicates an incoming frame exceeded the maximum allowed memory buffer size.
 	ErrFrameTooLarge = errors.New("aoni/ws: frame payload exceeds maximum allowed size")
+
+	// ErrControlFrameFragmented indicates a control frame with FIN=0 was received (RFC 6455 §5.4).
+	ErrControlFrameFragmented = errors.New("aoni/ws: control frames must not be fragmented")
+
+	// ErrUnexpectedContinuationFrame indicates a continuation frame without prior data frame (RFC 6455 §5.4).
+	ErrUnexpectedContinuationFrame = errors.New("aoni/ws: unexpected continuation frame")
+
+	// ErrIncompleteFragmentation indicates a new data frame arrived before previous fragmentation finished (RFC 6455 §5.4).
+	ErrIncompleteFragmentation = errors.New(
+		"aoni/ws: received new data frame before completing previous fragmented message",
+	)
 )
 
 // CloseError represents an RFC 6455 WebSocket close frame error containing a status code and human-readable reason (RFC 6455 §7.1.5 & §7.1.6).

@@ -1958,3 +1958,83 @@ func TestRFC8441_ExtendedConnect_Rules(t *testing.T) {
 		)
 	}
 }
+
+func TestWebSocket_RFC6455_ContinuationFrames_Reassembly(t *testing.T) {
+	t.Parallel()
+
+	t.Run("three_fragment_text_message", func(t *testing.T) {
+		t.Parallel()
+
+		serverConn, clientConn := tcpPipe(t)
+		defer serverConn.Close()
+		defer clientConn.Close()
+
+		wsServer := WrapRawConn(serverConn, false)
+
+		go func() {
+			// Frame 1: Text, FIN=0, payload="Hello, "
+			p1 := []byte("Hello, ")
+			hdr1 := []byte{0x01, byte(len(p1))}
+			_, _ = clientConn.Write(append(hdr1, p1...))
+
+			// Frame 2: Continuation, FIN=0, payload="world"
+			p2 := []byte("world")
+			hdr2 := []byte{0x00, byte(len(p2))}
+			_, _ = clientConn.Write(append(hdr2, p2...))
+
+			// Frame 3: Continuation, FIN=1, payload="!"
+			p3 := []byte("!")
+			hdr3 := []byte{0x80, byte(len(p3))}
+			_, _ = clientConn.Write(append(hdr3, p3...))
+		}()
+
+		msgType, payload, err := wsServer.ReadMessage()
+		require.NoError(t, err)
+		assert.Equal(t, int(FrameText), msgType)
+		assert.Equal(t, "Hello, world!", string(payload))
+	})
+
+	t.Run("interleaved_ping_pong_during_fragmentation", func(t *testing.T) {
+		t.Parallel()
+
+		serverConn, clientConn := tcpPipe(t)
+		defer serverConn.Close()
+		defer clientConn.Close()
+
+		wsServer := WrapRawConn(serverConn, false)
+
+		go func() {
+			// Frame 1: Binary, FIN=0, payload=[0x01, 0x02]
+			_, _ = clientConn.Write([]byte{0x02, 0x02, 0x01, 0x02})
+
+			// Interleaved Ping: FIN=1, Opcode=9 (0x89)
+			_, _ = clientConn.Write([]byte{0x89, 0x04, 'p', 'i', 'n', 'g'})
+
+			// Frame 3: Continuation, FIN=1, payload=[0x03, 0x04]
+			_, _ = clientConn.Write([]byte{0x80, 0x02, 0x03, 0x04})
+		}()
+
+		msgType, payload, err := wsServer.ReadMessage()
+		require.NoError(t, err)
+		assert.Equal(t, int(FrameBinary), msgType)
+		assert.Equal(t, []byte{0x01, 0x02, 0x03, 0x04}, payload)
+	})
+
+	t.Run("unexpected_continuation_frame_error", func(t *testing.T) {
+		t.Parallel()
+
+		serverConn, clientConn := tcpPipe(t)
+		defer serverConn.Close()
+		defer clientConn.Close()
+
+		wsServer := WrapRawConn(serverConn, false)
+
+		go func() {
+			// Send Continuation frame (Opcode=0) without prior Text/Binary frame
+			_, _ = clientConn.Write([]byte{0x80, 0x04, 't', 'e', 's', 't'})
+		}()
+
+		_, _, err := wsServer.ReadMessage()
+		require.ErrorIs(t, err, ErrUnexpectedContinuationFrame)
+	})
+}

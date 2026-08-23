@@ -8,6 +8,7 @@ import (
 	"bytes"
 	"context"
 	"io"
+	"iter"
 	"net/http"
 	"slices"
 
@@ -185,6 +186,11 @@ func (f *Request) HeaderBytes(key []byte) []byte {
 	return f.req.Header.PeekBytes(key)
 }
 
+// Headers yields all header key-value pairs as an iterator.
+func (f *Request) Headers() iter.Seq2[[]byte, []byte] {
+	return f.req.Header.All()
+}
+
 // SetHeader sets header key to value.
 func (f *Request) SetHeader(key, value string) {
 	f.req.Header.Set(key, value)
@@ -218,13 +224,6 @@ func (f *Request) DelHeaderBytes(key []byte) {
 // ResetHeaders removes all headers from the request.
 func (f *Request) ResetHeaders() {
 	f.req.Header.Reset()
-}
-
-// ForEachHeader invokes fn for every header key-value pair in the request.
-func (f *Request) ForEachHeader(fn func(key, value []byte) bool) {
-	if f.req != nil {
-		f.req.Header.All()(fn)
-	}
 }
 
 // SetBodyBytes sets request body to a raw byte slice.

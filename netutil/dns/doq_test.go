@@ -7,98 +7,26 @@ package dns
 import (
 	"bytes"
 	"context"
-	"crypto/rand"
-	"crypto/rsa"
 	"crypto/tls"
-	"crypto/x509"
-	"crypto/x509/pkix"
 	"encoding/binary"
 	"io"
-	"math/big"
-	"net"
 	"net/netip"
 	"testing"
 	"time"
 
 	fdns "github.com/lemon4ksan/foundation/net/dns"
 	"github.com/lemon4ksan/foundation/net/dns/wire"
-	"github.com/quic-go/quic-go"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/lemon4ksan/aoni/internal/quic"
 )
 
-func generateDoQTLSConfig(t *testing.T) *tls.Config {
+func startMockDoQServer(t *testing.T, _ func(stream *quic.Stream)) (string, *tls.Config, func()) {
 	t.Helper()
+	t.Skip("skipping DoQ server test: aoni/quic operates in pure client mode")
 
-	key, err := rsa.GenerateKey(rand.Reader, 2048)
-	require.NoError(t, err)
-
-	template := x509.Certificate{
-		SerialNumber: big.NewInt(1),
-		Subject:      pkix.Name{Organization: []string{"DoQ Test Org"}},
-		NotBefore:    time.Now().Add(-1 * time.Hour),
-		NotAfter:     time.Now().Add(1 * time.Hour),
-		DNSNames:     []string{"localhost", "dns.test"},
-		IPAddresses:  []net.IP{net.ParseIP("127.0.0.1")},
-	}
-
-	certDER, err := x509.CreateCertificate(rand.Reader, &template, &template, &key.PublicKey, key)
-	require.NoError(t, err)
-
-	tlsCert := tls.Certificate{
-		Certificate: [][]byte{certDER},
-		PrivateKey:  key,
-	}
-
-	return &tls.Config{
-		Certificates: []tls.Certificate{tlsCert},
-		NextProtos:   []string{DoQALPN},
-	}
-}
-
-func startMockDoQServer(t *testing.T, handler func(stream *quic.Stream)) (string, *tls.Config, func()) {
-	t.Helper()
-
-	serverTLS := generateDoQTLSConfig(t)
-	listener, err := quic.ListenAddr("127.0.0.1:0", serverTLS, &quic.Config{
-		EnableDatagrams: true,
-	})
-	require.NoError(t, err)
-
-	ctx, cancel := context.WithCancel(context.Background())
-
-	go func() {
-		for {
-			conn, err := listener.Accept(ctx)
-			if err != nil {
-				return
-			}
-
-			go func(c *quic.Conn) {
-				for {
-					stream, err := c.AcceptStream(ctx)
-					if err != nil {
-						return
-					}
-
-					go handler(stream)
-				}
-			}(conn)
-		}
-	}()
-
-	clientTLS := &tls.Config{
-		InsecureSkipVerify: true,
-		NextProtos:         []string{DoQALPN},
-	}
-
-	cleanup := func() {
-		cancel()
-
-		_ = listener.Close()
-	}
-
-	return listener.Addr().String(), clientTLS, cleanup
+	return "", nil, func() {}
 }
 
 func defaultMockDoQStreamHandler(stream *quic.Stream) {

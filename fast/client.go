@@ -487,10 +487,9 @@ func (c *Client) HTTP() aoni.HTTPDoer {
 			Request:       req,
 		}
 
-		fastResp.Header.All()(func(k, v []byte) bool {
-			httpResp.Header.Add(bytesconv.B2S(k), bytesconv.B2S(v))
-			return true
-		})
+		for k, v := range fastResp.Header.All() {
+			httpResp.Header.Add(string(k), string(v))
+		}
 
 		if len(trailers) > 0 {
 			for k, vv := range trailers {

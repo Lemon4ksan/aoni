@@ -5,6 +5,7 @@
 package aoni_test
 
 import (
+	"bytes"
 	"context"
 	"crypto/rand"
 	"crypto/rsa"
@@ -20,11 +21,13 @@ import (
 	"testing"
 	"time"
 
-	"github.com/quic-go/quic-go/http3"
+	"github.com/valyala/fasthttp"
 	"golang.org/x/net/http2"
 
 	"github.com/lemon4ksan/aoni"
 	"github.com/lemon4ksan/aoni/fast"
+	"github.com/lemon4ksan/aoni/internal/fast/h2engine"
+	"github.com/lemon4ksan/aoni/internal/fast/h3engine"
 	"github.com/lemon4ksan/aoni/mod"
 	"github.com/lemon4ksan/aoni/option"
 )
@@ -164,126 +167,81 @@ func BenchmarkH2_NetHTTP(b *testing.B) {
 	}
 }
 
-func BenchmarkH3_FastEngine(b *testing.B) {
-	tlsCert, err := generateBenchTLSCert()
-	if err != nil {
-		b.Fatalf("failed to generate cert: %v", err)
-	}
+func BenchmarkH3_QPACK_Block_ZeroAlloc(b *testing.B) {
+	codec := h3engine.NewQPACKCodec()
+	req := fasthttp.AcquireRequest()
+	defer fasthttp.ReleaseRequest(req)
 
-	handler := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusOK)
-		_, _ = w.Write([]byte(`{"status":"ok","engine":"fast_h3"}`))
-	})
-
-	h3Server := &http3.Server{
-		Handler: handler,
-		TLSConfig: &tls.Config{
-			Certificates: []tls.Certificate{tlsCert},
-		},
-	}
-
-	udpConn, err := net.ListenUDP("udp", &net.UDPAddr{IP: net.ParseIP("127.0.0.1"), Port: 0})
-	if err != nil {
-		b.Fatalf("failed to listen UDP: %v", err)
-	}
-	defer udpConn.Close()
-
-	go func() {
-		_ = h3Server.Serve(udpConn)
-	}()
-
-	defer h3Server.Close()
-
-	targetURL := "https://" + udpConn.LocalAddr().String()
-
-	client := fast.NewClient(
-		option.WithBaseURL(targetURL),
-		option.WithInsecureSkipVerify(),
-	)
-
-	ctx := context.Background()
+	req.Header.SetMethod("POST")
+	req.SetRequestURI("https://api.example.com/v2/users")
+	req.Header.Set("content-type", "application/json")
+	req.Header.Set("x-aoni-version", "2.0.0")
+	req.Header.Set("user-agent", "aoni/2.0")
 
 	b.ReportAllocs()
 	b.ResetTimer()
 
 	for b.Loop() {
-		resp, err := client.Request(ctx, "GET", "/", mod.WithALPN(aoni.AlpnH3))
+		p := codec.AcquireEncoder()
+		_, err := codec.EncodeRequestHeadersPooled(p, req, nil)
 		if err != nil {
-			b.Fatalf("fast h3 request failed: %v", err)
+			b.Fatalf("failed to encode: %v", err)
 		}
-
-		if resp.StatusCode() != http.StatusOK {
-			_ = resp.Close()
-			b.Fatalf("unexpected status: %d", resp.StatusCode())
-		}
-
-		_ = resp.Close()
+		codec.ReleaseEncoder(p)
 	}
 }
 
-func BenchmarkH3_NetHTTP_QuicGo(b *testing.B) {
-	tlsCert, err := generateBenchTLSCert()
-	if err != nil {
-		b.Fatalf("failed to generate cert: %v", err)
+func BenchmarkH3_QPACK_EncodeDecode(b *testing.B) {
+	codec := h3engine.NewQPACKCodec()
+	req := fasthttp.AcquireRequest()
+	defer fasthttp.ReleaseRequest(req)
+
+	req.Header.SetMethod("POST")
+	req.SetRequestURI("https://api.example.com/v2/users")
+	req.Header.Set("content-type", "application/json")
+	req.Header.Set("x-aoni-version", "2.0.0")
+	req.Header.Set("user-agent", "aoni/2.0")
+
+	var buf bytes.Buffer
+	b.ReportAllocs()
+	b.ResetTimer()
+
+	for b.Loop() {
+		buf.Reset()
+		if err := codec.EncodeRequestHeaders(&buf, req, nil); err != nil {
+			b.Fatalf("failed to encode: %v", err)
+		}
 	}
+}
 
-	handler := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusOK)
-		_, _ = w.Write([]byte(`{"status":"ok","engine":"net_http_h3"}`))
-	})
+func BenchmarkH2_HPACK_EncodeDecode(b *testing.B) {
+	hpEnc := h2engine.AcquireHPACK()
+	defer h2engine.ReleaseHPACK(hpEnc)
 
-	h3Server := &http3.Server{
-		Handler: handler,
-		TLSConfig: &tls.Config{
-			Certificates: []tls.Certificate{tlsCert},
-		},
-	}
+	hFrame := h2engine.AcquireFrame(h2engine.FrameHeaders).(*h2engine.Headers)
+	defer h2engine.ReleaseFrame(hFrame)
 
-	udpConn, err := net.ListenUDP("udp", &net.UDPAddr{IP: net.ParseIP("127.0.0.1"), Port: 0})
-	if err != nil {
-		b.Fatalf("failed to listen UDP: %v", err)
-	}
-	defer udpConn.Close()
-
-	go func() {
-		_ = h3Server.Serve(udpConn)
-	}()
-
-	defer h3Server.Close()
-
-	targetURL := "https://" + udpConn.LocalAddr().String()
-
-	h3Transport := &http3.Transport{
-		TLSClientConfig: &tls.Config{
-			InsecureSkipVerify: true,
-		},
-	}
-	defer h3Transport.Close()
-
-	stdClient := &http.Client{
-		Transport: h3Transport,
-	}
-	client := aoni.NewClient(stdClient, option.WithBaseURL(targetURL))
-
-	ctx := context.Background()
+	hf := h2engine.AcquireHeaderField()
+	defer h2engine.ReleaseHeaderField(hf)
 
 	b.ReportAllocs()
 	b.ResetTimer()
 
 	for b.Loop() {
-		resp, err := client.Request(ctx, "GET", "/", mod.WithALPN(aoni.AlpnH3))
-		if err != nil {
-			b.Fatalf("net/http h3 request failed: %v", err)
-		}
-
-		if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
-			_ = resp.Body.Close()
-			b.Fatalf("unexpected status: %d", resp.StatusCode)
-		}
-
-		_, _ = io.Copy(io.Discard, resp.Body)
-		_ = resp.Body.Close()
+		hFrame.Reset()
+		hf.Set(":method", "POST")
+		hFrame.AppendHeaderField(hpEnc, hf, true)
+		hf.Set(":path", "/v2/users")
+		hFrame.AppendHeaderField(hpEnc, hf, true)
+		hf.Set(":authority", "api.example.com")
+		hFrame.AppendHeaderField(hpEnc, hf, true)
+		hf.Set(":scheme", "https")
+		hFrame.AppendHeaderField(hpEnc, hf, true)
+		hf.Set("content-type", "application/json")
+		hFrame.AppendHeaderField(hpEnc, hf, true)
+		hf.Set("x-aoni-version", "2.0.0")
+		hFrame.AppendHeaderField(hpEnc, hf, true)
+		hf.Set("user-agent", "aoni/2.0")
+		hFrame.AppendHeaderField(hpEnc, hf, true)
 	}
 }

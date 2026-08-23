@@ -1,0 +1,31 @@
+// Copyright (c) 2026 Lemon4ksan All rights reserved.
+// Use of this source code is governed by a BSD-style
+// license that can be found in the LICENSE file.
+
+package utils
+
+import (
+	"bufio"
+	"io"
+)
+
+type bufferedWriteCloser struct {
+	*bufio.Writer
+	io.Closer
+}
+
+// NewBufferedWriteCloser creates an io.WriteCloser from a bufio.Writer and an io.Closer
+func NewBufferedWriteCloser(writer *bufio.Writer, closer io.Closer) io.WriteCloser {
+	return &bufferedWriteCloser{
+		Writer: writer,
+		Closer: closer,
+	}
+}
+
+func (h bufferedWriteCloser) Close() error {
+	if err := h.Flush(); err != nil {
+		return err
+	}
+
+	return h.Closer.Close()
+}

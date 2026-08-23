@@ -81,7 +81,7 @@ func (c *Client) resolveTargetURL(req aoni.Request, path string) error {
 			return err
 		}
 
-		c.applyUserinfoAuth(req, bytesconv.B2S(fastReqAdapter.req.URI().FullURI()))
+		applyUserinfoAuth(req, bytesconv.B2S(fastReqAdapter.req.URI().FullURI()))
 
 		return nil
 	}
@@ -92,13 +92,13 @@ func (c *Client) resolveTargetURL(req aoni.Request, path string) error {
 	}
 
 	req.SetURL(targetURL)
-	c.applyUserinfoAuth(req, targetURL)
+	applyUserinfoAuth(req, targetURL)
 
 	return nil
 }
 
 // applyUserinfoAuth extracts embedded userinfo credentials and sets standard HTTP Basic Auth (RFC 3986 §3.2.1).
-func (c *Client) applyUserinfoAuth(req aoni.Request, targetURL string) {
+func applyUserinfoAuth(req aoni.Request, targetURL string) {
 	if !strings.Contains(targetURL, "@") {
 		return
 	}

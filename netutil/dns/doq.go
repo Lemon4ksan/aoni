@@ -17,8 +17,8 @@ import (
 
 	fdns "github.com/lemon4ksan/foundation/net/dns"
 	"github.com/lemon4ksan/foundation/net/dns/wire"
-	"github.com/quic-go/quic-go"
 
+	"github.com/lemon4ksan/aoni/internal/quic"
 	"github.com/lemon4ksan/aoni/netutil/svcb"
 )
 

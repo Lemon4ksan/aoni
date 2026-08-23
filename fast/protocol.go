@@ -19,7 +19,6 @@ import (
 
 	"github.com/lemon4ksan/foundation/silicon/bytesconv"
 	"github.com/lemon4ksan/foundation/silicon/clock"
-	"github.com/quic-go/quic-go"
 	"github.com/valyala/fasthttp"
 	"golang.org/x/sys/cpu"
 
@@ -27,6 +26,7 @@ import (
 	"github.com/lemon4ksan/aoni/internal/fast/h2engine"
 	"github.com/lemon4ksan/aoni/internal/fast/h3engine"
 	"github.com/lemon4ksan/aoni/internal/pipeline"
+	"github.com/lemon4ksan/aoni/internal/quic"
 	"github.com/lemon4ksan/aoni/netutil"
 )
 
@@ -345,19 +345,19 @@ func (c *Client) cachePushedResponse(
 	fastResp *fasthttp.Response,
 	cacheCfg *aoni.CacheConfig,
 ) {
-	req, err := http.NewRequest(
+	req, err := http.NewRequestWithContext(
+		context.Background(),
 		bytesconv.B2S(fastReq.Header.Method()),
 		bytesconv.B2S(fastReq.URI().FullURI()),
 		nil,
-	) //nolint:noctx
+	)
 	if err != nil {
 		return
 	}
 
-	fastReq.Header.All()(func(k, v []byte) bool {
-		req.Header.Add(bytesconv.B2S(k), bytesconv.B2S(v))
-		return true
-	})
+	for k, v := range fastReq.Header.All() {
+		req.Header.Add(string(k), string(v))
+	}
 
 	resp := &http.Response{
 		StatusCode: fastResp.StatusCode(),
@@ -365,13 +365,11 @@ func (c *Client) cachePushedResponse(
 		Body:       io.NopCloser(bytes.NewReader(fastResp.Body())),
 	}
 
-	fastResp.Header.All()(func(k, v []byte) bool {
+	for k, v := range fastResp.Header.All() {
 		resp.Header.Add(string(k), string(v))
-		return true
-	})
+	}
 
-	pipe := c.pipeline
-	if pipe != nil && cacheCfg != nil {
+	if c.pipeline != nil && cacheCfg != nil {
 		var nvs *pipeline.NoVarySearchConfig
 		if cacheCfg.NoVarySearch != nil {
 			nvs = &pipeline.NoVarySearchConfig{
@@ -381,7 +379,7 @@ func (c *Client) cachePushedResponse(
 			}
 		}
 
-		pipe.SavePushedResponseToCache(req, resp, &pipeline.CacheConfig{
+		c.pipeline.SavePushedResponseToCache(req, resp, &pipeline.CacheConfig{
 			Store:         cacheCfg.Store,
 			DefaultTTL:    cacheCfg.DefaultTTL,
 			NoVarySearch:  nvs,

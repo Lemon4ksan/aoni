@@ -400,6 +400,18 @@ func TestInboundServer_TLS_MITM(t *testing.T) {
 
 	assert.Equal(t, http.StatusOK, resp.StatusCode)
 	assert.Equal(t, "mitm_intercepted_ok", string(body))
+
+	// Second request to verify cached certificate reuse
+	resp2, err := client.Get(targetServer.URL + "/mitm-cached")
+	require.NoError(t, err)
+
+	defer resp2.Body.Close()
+
+	body2, err := io.ReadAll(resp2.Body)
+	require.NoError(t, err)
+
+	assert.Equal(t, http.StatusOK, resp2.StatusCode)
+	assert.Equal(t, "mitm_intercepted_ok", string(body2))
 }
 
 func TestInboundServer_ShutdownAndClose(t *testing.T) {

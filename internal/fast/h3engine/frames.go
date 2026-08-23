@@ -8,7 +8,7 @@ import (
 	"errors"
 	"io"
 
-	"github.com/quic-go/quic-go/quicvarint"
+	"github.com/lemon4ksan/aoni/internal/quic/quicvarint"
 )
 
 var ErrH3SettingsError = errors.New("aoni/h3engine: reserved H2 setting ID in H3 SETTINGS frame (RFC 9114 §7.2.4.1)")

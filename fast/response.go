@@ -132,14 +132,12 @@ func (f *Response) Header(key string) string {
 	}
 
 	if len(val) == 0 {
-		f.resp.Header.All()(func(k, v []byte) bool {
+		for k, v := range f.resp.Header.All() {
 			if bytesconv.EqualFoldASCII(bytesconv.B2S(k), key) {
 				val = v
-				return false
+				break
 			}
-
-			return true
-		})
+		}
 	}
 
 	return bytesconv.B2S(val)
@@ -161,11 +159,10 @@ func (f *Response) HeaderBytes(key []byte) []byte {
 // Headers yields all response headers as a canonical key-value map.
 func (f *Response) Headers() map[string][]string {
 	m := make(map[string][]string)
-	f.resp.Header.All()(func(k, v []byte) bool {
+	for k, v := range f.resp.Header.All() {
 		sk := requestutil.CanonicalHeaderKey(bytesconv.B2S(k))
 		m[sk] = append(m[sk], string(v))
-		return true
-	})
+	}
 
 	return m
 }
@@ -246,10 +243,9 @@ func (f *Response) HTTPResponse() *http.Response {
 	}
 
 	header := make(http.Header)
-	f.resp.Header.All()(func(k, v []byte) bool {
+	for k, v := range f.resp.Header.All() {
 		header.Add(string(k), string(v))
-		return true
-	})
+	}
 
 	body := slices.Clone(f.resp.Body())
 
@@ -412,10 +408,9 @@ func (r *PooledResponse) HTTPResponse() *http.Response {
 	}
 
 	header := make(http.Header)
-	r.fastResp.Header.All()(func(k, v []byte) bool {
-		header.Add(bytesconv.B2S(k), bytesconv.B2S(v))
-		return true
-	})
+	for k, v := range r.fastResp.Header.All() {
+		header.Add(string(k), string(v))
+	}
 
 	body := slices.Clone(r.fastResp.Body())
 

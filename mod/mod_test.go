@@ -7,6 +7,7 @@ package mod_test
 import (
 	"context"
 	"io"
+	"iter"
 	"net/http"
 	"net/url"
 	"strings"
@@ -85,11 +86,13 @@ func (r *dummyRequest) AddHeaderBytes(key, val []byte) {
 func (r *dummyRequest) DelHeader(key string)      { r.httpReq.Header.Del(key) }
 func (r *dummyRequest) DelHeaderBytes(key []byte) { r.httpReq.Header.Del(string(key)) }
 func (r *dummyRequest) ResetHeaders()             { r.httpReq.Header = make(http.Header) }
-func (r *dummyRequest) ForEachHeader(fn func(key, value []byte) bool) {
-	for k, vv := range r.httpReq.Header {
-		for _, v := range vv {
-			if !fn([]byte(k), []byte(v)) {
-				return
+func (r *dummyRequest) Headers() iter.Seq2[[]byte, []byte] {
+	return func(yield func([]byte, []byte) bool) {
+		for k, vv := range r.httpReq.Header {
+			for _, v := range vv {
+				if !yield([]byte(k), []byte(v)) {
+					return
+				}
 			}
 		}
 	}

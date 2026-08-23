@@ -16,9 +16,20 @@ import (
 	"github.com/valyala/fasthttp"
 )
 
-var bufferPool = sync.Pool{
+// PooledEncoder encapsulates a pooled buffer and QPACK encoder for zero-allocation serialization.
+type PooledEncoder struct {
+	buf *bytes.Buffer
+	enc *qpack.Encoder
+}
+
+var encoderPool = sync.Pool{
 	New: func() any {
-		return new(bytes.Buffer)
+		buf := new(bytes.Buffer)
+
+		return &PooledEncoder{
+			buf: buf,
+			enc: qpack.NewEncoder(buf),
+		}
 	},
 }
 
@@ -34,6 +45,22 @@ func NewQPACKCodec() *QPACKCodec {
 	}
 }
 
+// AcquireEncoder obtains a pooled QPACK encoder for zero-allocation encoding.
+func (q *QPACKCodec) AcquireEncoder() *PooledEncoder {
+	p := encoderPool.Get().(*PooledEncoder)
+	p.buf.Reset()
+	p.enc = qpack.NewEncoder(p.buf)
+
+	return p
+}
+
+// ReleaseEncoder returns a pooled QPACK encoder back to the memory pool.
+func (q *QPACKCodec) ReleaseEncoder(p *PooledEncoder) {
+	if p != nil {
+		encoderPool.Put(p)
+	}
+}
+
 // WriteDecoderTable processes instructions received over the QPACK Encoder Stream (RFC 9204 §4.2 & §4.3).
 //
 // Note: Currently quic-go/qpack operates on static tables (RFC 9204 Appendix A) and does not expose
@@ -42,15 +69,13 @@ func (q *QPACKCodec) WriteDecoderTable(_ []byte) error {
 	return nil
 }
 
-// EncodeRequestHeaders encodes a fasthttp request header into a QPACK block (RFC 9204 §4.5),
-// strictly maintaining the specified orderedKeys sequence for Anti-DPI fingerprinting and RFC 9220 Extended CONNECT.
-func (q *QPACKCodec) EncodeRequestHeaders(w io.Writer, req *fasthttp.Request, orderedKeys []string) error {
-	buf := bufferPool.Get().(*bytes.Buffer)
-
-	buf.Reset()
-	defer bufferPool.Put(buf)
-
-	enc := qpack.NewEncoder(buf)
+// EncodeRequestHeadersPooled encodes request headers into the pooled encoder's buffer with 0 heap allocations.
+func (q *QPACKCodec) EncodeRequestHeadersPooled(
+	p *PooledEncoder,
+	req *fasthttp.Request,
+	orderedKeys []string,
+) ([]byte, error) {
+	enc := p.enc
 
 	method := bytesconv.B2S(req.Header.Method())
 	_ = enc.WriteField(qpack.HeaderField{Name: ":method", Value: method})
@@ -66,9 +91,9 @@ func (q *QPACKCodec) EncodeRequestHeaders(w io.Writer, req *fasthttp.Request, or
 		q.encodeOrderedHeaders(enc, req, orderedKeys)
 	} else {
 		var stackKeyBuf [128]byte
-		req.Header.All()(func(k, v []byte) bool {
+		for k, v := range req.Header.All() {
 			if isForbiddenH3Header(k, v) {
-				return true
+				continue
 			}
 
 			var keyStr string
@@ -84,12 +109,24 @@ func (q *QPACKCodec) EncodeRequestHeaders(w io.Writer, req *fasthttp.Request, or
 			}
 
 			_ = enc.WriteField(qpack.HeaderField{Name: keyStr, Value: bytesconv.B2S(v)})
-
-			return true
-		})
+		}
 	}
 
-	_, err := w.Write(buf.Bytes())
+	return p.buf.Bytes(), nil
+}
+
+// EncodeRequestHeaders encodes a fasthttp request header into a QPACK block (RFC 9204 §4.5),
+// strictly maintaining the specified orderedKeys sequence for Anti-DPI fingerprinting and RFC 9220 Extended CONNECT.
+func (q *QPACKCodec) EncodeRequestHeaders(w io.Writer, req *fasthttp.Request, orderedKeys []string) error {
+	p := q.AcquireEncoder()
+	defer q.ReleaseEncoder(p)
+
+	block, err := q.EncodeRequestHeadersPooled(p, req, orderedKeys)
+	if err != nil {
+		return err
+	}
+
+	_, err = w.Write(block)
 
 	return err
 }
@@ -162,17 +199,24 @@ func (q *QPACKCodec) encodeOrderedHeaders(enc *qpack.Encoder, req *fasthttp.Requ
 		}
 	}
 
-	req.Header.All()(func(k, v []byte) bool {
+	for k, v := range req.Header.All() {
 		kStr := bytesconv.B2S(k)
 
 		if isForbiddenH3Header(k, v) {
-			return true
+			continue
 		}
 
-		for i := 0; i < numOrdered; i++ {
+		skip := false
+
+		for i := range numOrdered {
 			if (visitedBits&(1<<i)) != 0 && bytesconv.EqualFoldASCII(kStr, orderedKeys[i]) {
-				return true
+				skip = true
+				break
 			}
+		}
+
+		if skip {
+			continue
 		}
 
 		var (
@@ -195,9 +239,7 @@ func (q *QPACKCodec) encodeOrderedHeaders(enc *qpack.Encoder, req *fasthttp.Requ
 			Name:  keyStr,
 			Value: bytesconv.B2S(v),
 		})
-
-		return true
-	})
+	}
 }
 
 // DecodeResponseHeaders parses a QPACK header block directly into fasthttp ResponseHeader (RFC 9204 §2.2 & §4.5),

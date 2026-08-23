@@ -8,6 +8,7 @@ import (
 	"bytes"
 	"context"
 	stdio "io"
+	"iter"
 	"net/http"
 	"net/url"
 	"strings"
@@ -201,6 +202,24 @@ func (s *StdRequest) HeaderBytes(key []byte) []byte {
 	return bytesconv.S2B(s.Header(bytesconv.B2S(key)))
 }
 
+// Headers yields every header key-value pair in the request.
+func (s *StdRequest) Headers() iter.Seq2[[]byte, []byte] {
+	if s.req == nil || s.req.Header == nil {
+		return nil
+	}
+
+	return func(yield func([]byte, []byte) bool) {
+		for k, vv := range s.req.Header {
+			kB := bytesconv.S2B(k)
+			for _, v := range vv {
+				if !yield(kB, bytesconv.S2B(v)) {
+					return
+				}
+			}
+		}
+	}
+}
+
 // SetHeader sets or overrides the header value for key.
 func (s *StdRequest) SetHeader(key, value string) {
 	if s.req.Header == nil {
@@ -248,22 +267,6 @@ func (s *StdRequest) DelHeaderBytes(key []byte) {
 // ResetHeaders clears all headers from the request.
 func (s *StdRequest) ResetHeaders() {
 	s.req.Header = make(http.Header)
-}
-
-// ForEachHeader invokes fn for every header key-value pair in the request.
-func (s *StdRequest) ForEachHeader(fn func(key, value []byte) bool) {
-	if s.req == nil || s.req.Header == nil {
-		return
-	}
-
-	for k, vv := range s.req.Header {
-		kB := bytesconv.S2B(k)
-		for _, v := range vv {
-			if !fn(kB, bytesconv.S2B(v)) {
-				return
-			}
-		}
-	}
 }
 
 // SetBodyBytes sets the request body to body.

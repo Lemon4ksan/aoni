@@ -6,7 +6,7 @@
 package brotli
 
 import (
-	"unsafe"
+	"encoding/binary"
 
 	"github.com/lemon4ksan/foundation/silicon/simd"
 )
@@ -19,7 +19,7 @@ func (s *Reader) detectTrivialLiteralBlockTypes() {
 		return
 	}
 
-	for i := uint32(0); i < numBlocks; i++ {
+	for i := range numBlocks {
 		offset := i << literalContextBits
 		block := s.contextMap[offset : offset+(1<<literalContextBits)]
 		sample := block[0]
@@ -27,7 +27,7 @@ func (s *Reader) detectTrivialLiteralBlockTypes() {
 
 		var diff uint64
 		for w := 0; w < 64; w += 8 {
-			word := *(*uint64)(unsafe.Pointer(&block[w]))
+			word := binary.LittleEndian.Uint64(block[w : w+8])
 			diff |= word ^ sampleWord
 		}
 

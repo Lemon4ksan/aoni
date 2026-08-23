@@ -7,12 +7,12 @@ package mod
 import (
 	"bytes"
 	"encoding/binary"
-	"encoding/json"
 	"encoding/xml"
 	stdio "io"
 	"net/url"
 	"strings"
 
+	"github.com/lemon4ksan/foundation/codec/json"
 	"github.com/lemon4ksan/foundation/silicon/bytesconv"
 	"google.golang.org/protobuf/proto"
 	"gopkg.in/yaml.v3"

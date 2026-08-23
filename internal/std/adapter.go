@@ -184,10 +184,9 @@ func ToHTTPRequest(req core.Request) (*http.Request, error) {
 		return nil, err
 	}
 
-	req.ForEachHeader(func(k, v []byte) bool {
+	for k, v := range req.Headers() {
 		httpReq.Header.Add(bytesconv.B2S(k), bytesconv.B2S(v))
-		return true
-	})
+	}
 
 	if host := req.Header("Host"); host != "" {
 		httpReq.Host = host
