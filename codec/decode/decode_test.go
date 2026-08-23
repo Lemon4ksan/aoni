@@ -629,19 +629,19 @@ func TestDecodeTo_And_DecodeResult(t *testing.T) {
 	})
 
 	t.Run("Result_Success", func(t *testing.T) {
-		res := Result[Item](strings.NewReader(payload), JSONDecoder)
+		res := ToResult[Item](strings.NewReader(payload), JSONDecoder)
 		assert.True(t, res.IsSuccess())
 		item, err := res.Unwrap()
 		require.NoError(t, err)
 		assert.Equal(t, "Coffee", item.Name)
 
-		resJSON := generic.FromResult(JSON[Item](strings.NewReader(payload)))
+		resJSON := generic.ToResult(JSON[Item](strings.NewReader(payload)))
 		assert.True(t, resJSON.IsSuccess())
 		assert.Equal(t, "Coffee", resJSON.MustValue().Name)
 	})
 
 	t.Run("Result_Failure", func(t *testing.T) {
-		res := Result[Item](strings.NewReader(`{invalid_json`), JSONDecoder)
+		res := ToResult[Item](strings.NewReader(`{invalid_json`), JSONDecoder)
 		assert.False(t, res.IsSuccess())
 	})
 }

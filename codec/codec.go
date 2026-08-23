@@ -132,9 +132,14 @@ func To[T any](reader io.Reader, decoder Decoder) (T, error) {
 	return decode.To[T](reader, decoder)
 }
 
+// ToResult unmarshals the response stream from reader into a Swift-inspired [generic.Result].
+func ToResult[T any](reader io.Reader, decoder Decoder) generic.Result[T] {
+	return decode.ToResult[T](reader, decoder)
+}
+
 // Result unmarshals the response stream from reader into a Swift-inspired [generic.Result].
 func Result[T any](reader io.Reader, decoder Decoder) generic.Result[T] {
-	return decode.Result[T](reader, decoder)
+	return decode.ToResult[T](reader, decoder)
 }
 
 // Payload decodes rawBody into target based on contentType using auto-matched or default decoders.

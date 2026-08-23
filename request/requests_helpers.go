@@ -11,13 +11,13 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"mime"
 	"net/http"
 	"net/http/httputil"
 	"os"
 	"strings"
 
 	fio "github.com/lemon4ksan/foundation/io"
+	"github.com/lemon4ksan/foundation/net/headkit"
 	"github.com/lemon4ksan/foundation/silicon/bytesconv"
 
 	"github.com/lemon4ksan/aoni"
@@ -239,10 +239,7 @@ func (responseDecoder) checkMIMEType(resp *http.Response) error {
 		return nil
 	}
 
-	mediaType, _, err := mime.ParseMediaType(contentType)
-	if err != nil {
-		return nil //nolint:nilerr
-	}
+	mediaType := headkit.BaseMediaType(contentType)
 
 	if bytesconv.EqualFoldASCII(mediaType, "text/html") ||
 		bytesconv.EqualFoldASCII(mediaType, "application/xhtml+xml") {

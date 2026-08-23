@@ -76,21 +76,21 @@ func TestCodec_GenericHelpers(t *testing.T) {
 	t.Run("Result with generic.FromResult", func(t *testing.T) {
 		t.Parallel()
 
-		jsonRes := generic.FromResult(codec.JSON[TestUser](strings.NewReader(`{"name":"Alice","age":30}`)))
+		jsonRes := generic.ToResult(codec.JSON[TestUser](strings.NewReader(`{"name":"Alice","age":30}`)))
 		require.True(t, jsonRes.IsSuccess())
 		assert.Equal(t, "Alice", jsonRes.MustValue().Name)
 
-		xmlRes := generic.FromResult(
+		xmlRes := generic.ToResult(
 			codec.XML[TestUser](strings.NewReader(`<TestUser><Name>Bob</Name><Age>25</Age></TestUser>`)),
 		)
 		require.True(t, xmlRes.IsSuccess())
 		assert.Equal(t, "Bob", xmlRes.MustValue().Name)
 
-		yamlRes := generic.FromResult(codec.YAML[TestUser](strings.NewReader("name: Charlie\nage: 40\n")))
+		yamlRes := generic.ToResult(codec.YAML[TestUser](strings.NewReader("name: Charlie\nage: 40\n")))
 		require.True(t, yamlRes.IsSuccess())
 		assert.Equal(t, "Charlie", yamlRes.MustValue().Name)
 
-		rawRes := generic.FromResult(codec.Raw(strings.NewReader("binary stream")))
+		rawRes := generic.ToResult(codec.Raw(strings.NewReader("binary stream")))
 		require.True(t, rawRes.IsSuccess())
 		assert.Equal(t, []byte("binary stream"), rawRes.MustValue())
 	})

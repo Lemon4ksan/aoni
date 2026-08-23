@@ -64,7 +64,7 @@ func ReleaseReader(r *Reader) {
 
 // DecodeResult decompresses a Brotli payload returning a monadic generic.Result[[]byte].
 func DecodeResult(src []byte) generic.Result[[]byte] {
-	return generic.FromResult(Decompress(nil, src))
+	return generic.ToResult(Decompress(nil, src))
 }
 
 // NewReader creates a new Reader reading the given reader.

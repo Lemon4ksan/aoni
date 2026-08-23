@@ -5,7 +5,6 @@
 package decode
 
 import (
-	"bufio"
 	"bytes"
 	"io"
 	"strings"
@@ -31,6 +30,9 @@ var (
 
 	// StripBOMBytes detects and strips Byte Order Marks (BOM) from a byte slice.
 	StripBOMBytes = fio.StripBOMBytes
+
+	// StripBOM detects and discards UTF-8, UTF-16LE, and UTF-16BE Byte Order Marks (BOM) from reader.
+	StripBOM = fio.StripBOM
 )
 
 var (
@@ -72,9 +74,9 @@ func To[T any](reader io.Reader, decoder Decoder) (T, error) {
 	return target, nil
 }
 
-// Result decodes the payload from reader using decoder into a [generic.Result].
-func Result[T any](reader io.Reader, decoder Decoder) generic.Result[T] {
-	return generic.FromResult(To[T](reader, decoder))
+// ToResult decodes the payload from reader using decoder into a [generic.Result].
+func ToResult[T any](reader io.Reader, decoder Decoder) generic.Result[T] {
+	return generic.ToResult(To[T](reader, decoder))
 }
 
 // DecoderFunc adapts a plain function signature to satisfy the [Decoder] interface.
@@ -102,22 +104,10 @@ func LimitDecoder(decoder Decoder, maxBytes int64) Decoder {
 	}
 }
 
-var bomUTF8 = []byte{0xEF, 0xBB, 0xBF}
-
-// normalizeContentType extracts the media type from a Content-Type header string (e.g. "application/json; charset=utf-8" -> "application/json").
-func normalizeContentType(contentType string) string {
-	mediaType, _, err := headkit.ParseMediaType(contentType)
-	if err != nil {
-		return ""
-	}
-
-	return mediaType
-}
-
 // LookupDecoder resolves a standard [Decoder] matching the provided MIME content type,
 // falling back to [RawDecoder] if unsupported.
 func LookupDecoder(contentType string) Decoder {
-	norm := normalizeContentType(contentType)
+	norm := headkit.BaseMediaType(contentType)
 
 	switch {
 	case bytesconv.EqualFoldASCII(norm, "application/json"),
@@ -162,29 +152,6 @@ func IsRawDecoder(decoder Decoder) bool {
 // IsStructuredMediaType reports whether contentType matches a structured data MIME format (JSON, Proto, XML, YAML, gRPC-Web).
 func IsStructuredMediaType(contentType string) bool {
 	return !IsRawDecoder(LookupDecoder(contentType))
-}
-
-// StripBOM detects and discards UTF-8, UTF-16LE, and UTF-16BE Byte Order Marks (BOM) from reader.
-func StripBOM(reader io.Reader) io.Reader {
-	br, ok := reader.(*bufio.Reader)
-	if !ok {
-		br = bufio.NewReader(reader)
-	}
-
-	peek, err := br.Peek(3)
-	if err == nil && len(peek) >= 3 && bytes.HasPrefix(peek, bomUTF8) {
-		_, _ = br.Discard(3)
-		return br
-	}
-
-	peek, err = br.Peek(2)
-	if err == nil && len(peek) >= 2 {
-		if (peek[0] == 0xFE && peek[1] == 0xFF) || (peek[0] == 0xFF && peek[1] == 0xFE) {
-			_, _ = br.Discard(2)
-		}
-	}
-
-	return br
 }
 
 // JSON reads from reader and unmarshals JSON data into a newly allocated T.

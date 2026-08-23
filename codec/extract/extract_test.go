@@ -23,7 +23,7 @@ func TestBetween(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, "hello world", string(res))
 
-	resResult := generic.FromResult(extract.Between(src, "prefix:", ":suffix"))
+	resResult := generic.ToResult(extract.Between(src, "prefix:", ":suffix"))
 	require.True(t, resResult.IsSuccess())
 	assert.Equal(t, "hello world", string(resResult.MustValue()))
 
@@ -43,7 +43,7 @@ func TestAttr(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, "secret-123", string(val))
 
-	attrRes := generic.FromResult(extract.Attr(src, "#test-id", "data-token"))
+	attrRes := generic.ToResult(extract.Attr(src, "#test-id", "data-token"))
 	require.True(t, attrRes.IsSuccess())
 	assert.Equal(t, "secret-123", string(attrRes.MustValue()))
 
@@ -63,7 +63,7 @@ func TestRegex(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, "98765-abcd", string(val))
 
-	rxRes := generic.FromResult(extract.Regex(src, `SessionToken:\s*([0-9a-z-]+)`))
+	rxRes := generic.ToResult(extract.Regex(src, `SessionToken:\s*([0-9a-z-]+)`))
 	require.True(t, rxRes.IsSuccess())
 	assert.Equal(t, "98765-abcd", string(rxRes.MustValue()))
 

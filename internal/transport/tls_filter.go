@@ -136,6 +136,12 @@ func handshakeStandardTLS(
 		tlsCfg = cloned
 	}
 
+	if len(cfg.ALPNOverride) > 0 {
+		cloned := tlsCfg.Clone()
+		cloned.NextProtos = cfg.ALPNOverride
+		tlsCfg = cloned
+	}
+
 	if len(cfg.CertificatePins) > 0 {
 		cloned := tlsCfg.Clone()
 		if cloned.InsecureSkipVerify || net.ParseIP(host) != nil {
