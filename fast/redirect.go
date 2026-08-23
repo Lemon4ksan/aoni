@@ -69,7 +69,6 @@ func (c *Client) executeWithRedirects(
 
 		applyRedirectMethodAndBody(statusCode, fastReq)
 
-		method := bytes.Clone(fastReq.Header.Method())
 		nextURI := fasthttp.AcquireURI()
 		currentURI.CopyTo(nextURI)
 		nextURI.UpdateBytes(location)
@@ -85,10 +84,6 @@ func (c *Client) executeWithRedirects(
 		nextURI.CopyTo(fastReq.URI())
 		fastReq.Header.SetRequestURIBytes(nextURI.RequestURI())
 
-		if len(method) > 0 {
-			fastReq.Header.SetMethodBytes(method)
-		}
-
 		if host := nextURI.Host(); len(host) > 0 {
 			fastReq.Header.SetHostBytes(host)
 		}
@@ -100,7 +95,7 @@ func (c *Client) executeWithRedirects(
 		if isHTTPSDowngrade(currentURI, nextURI) {
 			fastReq.Header.Del("Referer")
 		} else {
-			fastReq.Header.SetBytesK(bytesconv.S2B("Referer"), string(currentURI.FullURI()))
+			fastReq.Header.SetBytesKV(bytesconv.S2B("Referer"), currentURI.FullURI())
 		}
 
 		if c.referer != nil {
@@ -133,7 +128,7 @@ func isHTTPSDowngrade(u1, u2 *fasthttp.URI) bool {
 func applyRedirectMethodAndBody(statusCode int, req *fasthttp.Request) {
 	switch statusCode {
 	case fasthttp.StatusMovedPermanently, fasthttp.StatusFound, fasthttp.StatusSeeOther:
-		method := string(req.Header.Method())
+		method := bytesconv.B2S(req.Header.Method())
 		if method != http.MethodGet && method != http.MethodHead {
 			req.Header.SetMethod(http.MethodGet)
 			req.SetBody(nil)

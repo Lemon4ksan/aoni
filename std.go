@@ -70,7 +70,7 @@ func (d requesterHTTPDoer) Do(req *http.Request) (*http.Response, error) {
 		return nil, ErrNilURL
 	}
 
-	var mods []RequestModifier
+	mods := make([]RequestModifier, 0, len(req.Header)+1)
 	for k, vv := range req.Header {
 		for _, v := range vv {
 			mods = append(mods, WithHeader(k, v))

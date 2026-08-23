@@ -115,7 +115,7 @@ func buildRawHeaderBlock(h http.Header) []byte {
 func extractClientHints(h http.Header) []byte {
 	var sb strings.Builder
 	for k, vals := range h {
-		if strings.HasPrefix(strings.ToLower(k), "sec-ch-ua") {
+		if len(k) >= 9 && strings.EqualFold(k[:9], "sec-ch-ua") {
 			for _, v := range vals {
 				sb.WriteString(k)
 				sb.WriteString(": ")

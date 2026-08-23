@@ -5,8 +5,8 @@
 package mod
 
 import (
-	"fmt"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -190,14 +190,14 @@ func WithIfUnmodifiedSince(t time.Time) aoni.RequestModifier {
 // WithRange constructs an [aoni.RequestModifier] setting the Range header for byte-range requests (RFC 9110 §14.2).
 func WithRange(start, end int64) aoni.RequestModifier {
 	if start < 0 {
-		return WithHeader("Range", fmt.Sprintf("bytes=%d", start))
+		return WithHeader("Range", "bytes="+strconv.FormatInt(start, 10))
 	}
 
 	if end < 0 {
-		return WithHeader("Range", fmt.Sprintf("bytes=%d-", start))
+		return WithHeader("Range", "bytes="+strconv.FormatInt(start, 10)+"-")
 	}
 
-	return WithHeader("Range", fmt.Sprintf("bytes=%d-%d", start, end))
+	return WithHeader("Range", "bytes="+strconv.FormatInt(start, 10)+"-"+strconv.FormatInt(end, 10))
 }
 
 // WithIfRangeETag constructs an [aoni.RequestModifier] setting the If-Range header with an entity tag (RFC 9110 §13.1.5).

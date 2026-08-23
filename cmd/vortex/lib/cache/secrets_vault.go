@@ -227,87 +227,81 @@ func (v *SecretsVault) Set(key, value, origin string) {
 
 // SetWithTarget saves or updates a secret key-value pair with target mapping metadata.
 func (v *SecretsVault) SetWithTarget(key, value, origin, header, query, cookie string) {
-	generic.WithLock(&v.mu, func() {
-		if v.Secrets == nil {
-			v.Secrets = make(map[string]SecretEntry)
-		}
+	v.mu.Lock()
+	defer v.mu.Unlock()
 
-		target := ""
-		switch {
-		case header != "":
-			target = "header:" + header
-		case query != "":
-			target = "query:" + query
-		case cookie != "":
-			target = "cookie:" + cookie
-		}
+	if v.Secrets == nil {
+		v.Secrets = make(map[string]SecretEntry)
+	}
 
-		v.Secrets[key] = SecretEntry{
-			Key:       key,
-			Value:     value,
-			Masked:    maskSecret(value),
-			Origin:    origin,
-			Header:    header,
-			Query:     query,
-			Cookie:    cookie,
-			Target:    target,
-			UpdatedAt: time.Now(),
-		}
-	})
+	target := ""
+	switch {
+	case header != "":
+		target = "header:" + header
+	case query != "":
+		target = "query:" + query
+	case cookie != "":
+		target = "cookie:" + cookie
+	}
+
+	v.Secrets[key] = SecretEntry{
+		Key:       key,
+		Value:     value,
+		Masked:    maskSecret(value),
+		Origin:    origin,
+		Header:    header,
+		Query:     query,
+		Cookie:    cookie,
+		Target:    target,
+		UpdatedAt: time.Now(),
+	}
 }
 
 // Get retrieves a secret value by key.
 func (v *SecretsVault) Get(key string) (string, bool) {
-	var (
-		val string
-		ok  bool
-	)
+	v.mu.RLock()
+	defer v.mu.RUnlock()
 
-	generic.WithRLock(&v.mu, func() {
-		if v.Secrets == nil {
-			return
-		}
+	if v.Secrets == nil {
+		return "", false
+	}
 
-		entry, exists := v.Secrets[key]
-		if exists {
-			val = entry.Value
-			ok = true
-		}
-	})
+	entry, exists := v.Secrets[key]
+	if exists {
+		return entry.Value, true
+	}
 
-	return val, ok
+	return "", false
 }
 
 // Delete removes a secret by key.
 func (v *SecretsVault) Delete(key string) bool {
-	var exists bool
+	v.mu.Lock()
+	defer v.mu.Unlock()
 
-	generic.WithLock(&v.mu, func() {
-		if v.Secrets == nil {
-			return
-		}
+	if v.Secrets == nil {
+		return false
+	}
 
-		_, exists = v.Secrets[key]
-		delete(v.Secrets, key)
-	})
+	_, exists := v.Secrets[key]
+	delete(v.Secrets, key)
 
 	return exists
 }
 
 // Clear purges all secrets.
 func (v *SecretsVault) Clear() {
-	generic.WithLock(&v.mu, func() {
-		v.Secrets = make(map[string]SecretEntry)
-	})
+	v.mu.Lock()
+	defer v.mu.Unlock()
+
+	v.Secrets = make(map[string]SecretEntry)
 }
 
 // All returns a copy of all secret entries sorted by key.
 func (v *SecretsVault) All() []SecretEntry {
-	var res []SecretEntry
-
-	generic.WithRLock(&v.mu, func() {
-		res = slices.Collect(maps.Values(v.Secrets))
-	})
+	v.mu.RLock()
+	res := slices.Collect(maps.Values(v.Secrets))
+	v.mu.RUnlock()
 
 	slices.SortFunc(res, func(a, b SecretEntry) int {
 		return cmp.Compare(a.Key, b.Key)

@@ -142,6 +142,8 @@ func extractUserInfoAndSetAuth(req *fasthttp.Request) {
 		pass := bytesconv.B2S(req.URI().Password())
 		encoded := base64.StdEncoding.EncodeToString(bytesconv.S2B(user + ":" + pass))
 		req.Header.Set("Authorization", "Basic "+encoded)
+		req.URI().SetUsernameBytes(nil)
+		req.URI().SetPasswordBytes(nil)
 
 		return
 	}

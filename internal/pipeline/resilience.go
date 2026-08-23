@@ -10,12 +10,12 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
-	"sync"
 	"sync/atomic"
 	"time"
 
 	"github.com/lemon4ksan/foundation/generic"
 	fio "github.com/lemon4ksan/foundation/io"
+	"github.com/lemon4ksan/foundation/silicon/pool"
 
 	"github.com/lemon4ksan/aoni/cookie"
 	"github.com/lemon4ksan/aoni/telemetry"
@@ -307,8 +307,8 @@ func (p *Pipeline[Req, Resp]) dispatchHedgingAttempts(
 
 	p.launchHedgeAttempt(ctx1, req, doer, resultsCh)
 
-	timer := time.NewTimer(delay)
-	defer timer.Stop()
+	timer := pool.AcquireTimer(delay)
+	defer pool.ReleaseTimer(timer)
 
 	var (
 		req2Started bool
@@ -421,20 +421,12 @@ func (p *Pipeline[Req, Resp]) buildHedgeContext(
 	ctx1, cancel1 := context.WithCancel(ctx)
 	ctx2, cancel2 := context.WithCancel(ctx)
 
-	var (
-		cleaned bool
-		mu      sync.Mutex
-	)
+	var cleaned atomic.Bool
 
 	cleanup := func(winner int) {
-		mu.Lock()
-		defer mu.Unlock()
-
-		if cleaned {
+		if !cleaned.CompareAndSwap(false, true) {
 			return
 		}
-
-		cleaned = true
 
 		switch winner {
 		case 1:

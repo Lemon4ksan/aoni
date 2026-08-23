@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/lemon4ksan/foundation/async/rate"
+	"github.com/lemon4ksan/foundation/silicon/pool"
 	"github.com/lemon4ksan/foundation/sync/limiter"
 
 	"github.com/lemon4ksan/aoni"
@@ -52,12 +53,13 @@ func LimitEnforcer(limiter *SlidingWindowLimiter) aoni.Middleware {
 					return next.Do(req)
 				}
 
-				timer := time.NewTimer(waitTime)
+				timer := pool.AcquireTimer(waitTime)
 				select {
 				case <-ctx.Done():
-					timer.Stop()
+					pool.ReleaseTimer(timer)
 					return nil, ErrSlidingWindowCanceled
 				case <-timer.C:
+					pool.ReleaseTimer(timer)
 				}
 			}
 		})

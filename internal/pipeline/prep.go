@@ -20,6 +20,7 @@ import (
 	"time"
 
 	fio "github.com/lemon4ksan/foundation/io"
+	"github.com/lemon4ksan/foundation/silicon/bytesconv"
 	"github.com/valyala/fasthttp"
 
 	"github.com/lemon4ksan/aoni/cookie"
@@ -284,7 +285,7 @@ func (p *Pipeline[Req, Resp]) prewarmTargetOrigin(ctx context.Context, targetURL
 		return
 	}
 
-	dialCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	dialCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
 	defer cancel()
 
 	host, port := u.Hostname(), u.Port()
@@ -326,20 +327,23 @@ func (p *Pipeline[Req, Resp]) prewarmTargetOrigin(ctx context.Context, targetURL
 	_ = conn.Close()
 }
 
-func (p *Pipeline[Req, Resp]) redactSensitiveData(req *http.Request, redact *RedactConfig) *http.Request {
-	headers := make(map[string]struct{}, len(redact.HeadersToRedact))
-	for _, h := range redact.HeadersToRedact {
-		headers[strings.ToLower(h)] = struct{}{}
-	}
+var defaultRedactHeaders = map[string]struct{}{
+	"authorization":       {},
+	"proxy-authorization": {},
+	"cookie":              {},
+	"set-cookie":          {},
+	"x-api-key":           {},
+}
 
-	if len(headers) == 0 {
-		headers = map[string]struct{}{
-			"authorization":       {},
-			"proxy-authorization": {},
-			"cookie":              {},
-			"set-cookie":          {},
-			"x-api-key":           {},
+func (p *Pipeline[Req, Resp]) redactSensitiveData(req *http.Request, redact *RedactConfig) *http.Request {
+	var headers map[string]struct{}
+	if len(redact.HeadersToRedact) > 0 {
+		headers = make(map[string]struct{}, len(redact.HeadersToRedact))
+		for _, h := range redact.HeadersToRedact {
+			headers[strings.ToLower(h)] = struct{}{}
 		}
+	} else {
+		headers = defaultRedactHeaders
 	}
 
 	ctx := req.Context()
@@ -408,6 +412,10 @@ func (p *Pipeline[Req, Resp]) applyPacketPadding(req *http.Request) {
 }
 
 func (p *Pipeline[Req, Resp]) applyRefererHeader(req *http.Request) {
+	if req.Header == nil {
+		req.Header = make(http.Header)
+	}
+
 	if req.Header.Get("Referer") != "" || p.defaults.RefererState == nil {
 		return
 	}
@@ -460,7 +468,7 @@ func convertRequestToStd(r core.Request) *http.Request {
 				stdReq.Header.Add(string(k), string(v))
 			}
 
-			if host := string(fastReq.Header.Peek("Host")); host != "" {
+			if host := bytesconv.B2S(fastReq.Header.Peek("Host")); host != "" {
 				stdReq.Host = host
 			}
 		}

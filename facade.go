@@ -556,7 +556,7 @@ func WithSmartBody(body any) RequestModifier {
 		return RequestModifier{
 			Kind:        core.ModBodyBytes,
 			ContentType: "application/x-www-form-urlencoded",
-			Bytes:       []byte(b.Encode()),
+			Bytes:       bytesconv.S2B(b.Encode()),
 		}
 
 	case io.Reader:

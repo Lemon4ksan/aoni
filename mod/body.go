@@ -133,7 +133,7 @@ func WithSmartBody(body any) aoni.RequestModifier {
 		return aoni.RequestModifier{
 			Kind:        core.ModBodyBytes,
 			ContentType: "text/plain; charset=utf-8",
-			Bytes:       []byte(s),
+			Bytes:       bytesconv.S2B(s),
 		}
 	}
 

@@ -258,11 +258,7 @@ func (p *Pipeline[Req, Resp]) saveToCache(req *http.Request, resp *http.Response
 		return
 	}
 
-	var bodyBuf bytes.Buffer
-
-	tee := io.TeeReader(resp.Body, &bodyBuf)
-
-	bodyBytes, readErr := io.ReadAll(tee)
+	bodyBytes, readErr := io.ReadAll(resp.Body)
 	if readErr != nil {
 		return
 	}

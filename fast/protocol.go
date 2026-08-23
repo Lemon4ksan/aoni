@@ -209,12 +209,16 @@ func resolveALPNMode(ctx context.Context, cfg *aoni.Config, fastReq *fasthttp.Re
 	reqCfg := aoni.GetRequestConfig(ctx)
 	if reqCfg != nil {
 		if len(reqCfg.Modifiers) > 0 && len(reqCfg.ALPNOverride) == 0 {
-			dummyReq := NewRequest(fastReq)
+			dummyFastReq := fasthttp.AcquireRequest()
+			dummyReq := NewRequest(dummyFastReq)
 			dummyReq.SetContext(ctx)
 
 			for _, m := range reqCfg.Modifiers {
 				m.Apply(dummyReq)
 			}
+
+			dummyReq.Release()
+			fasthttp.ReleaseRequest(dummyFastReq)
 		}
 
 		if len(reqCfg.ALPNOverride) > 0 {

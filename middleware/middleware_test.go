@@ -274,7 +274,28 @@ func TestRetryMiddleware_JitterFull(t *testing.T) {
 	t.Run("retry_with_aws_full_jitter_strategy", func(t *testing.T) {
 		t.Parallel()
 
-		m := &mockRetryDoer{statusCode: 502}
+		var (
+			mu    sync.Mutex
+			calls int
+		)
+
+		doer := aoni.DoerFunc(func(_ aoni.Request) (aoni.Response, error) {
+			mu.Lock()
+			calls++
+
+			status := 502
+			if calls >= 2 {
+				status = 200
+			}
+
+			mu.Unlock()
+
+			return aoni.NewStdResponse(&http.Response{
+				StatusCode: status,
+				Body:       io.NopCloser(strings.NewReader("")),
+			}), nil
+		})
+
 		opts := RetryOptions{
 			MaxRetries:     2,
 			Backoff:        10 * time.Millisecond,
@@ -285,25 +306,20 @@ func TestRetryMiddleware_JitterFull(t *testing.T) {
 			return resp != nil && resp.StatusCode() == 502
 		}
 
-		client := Retry(opts, condition)(m)
+		client := Retry(opts, condition)(doer)
 		httpReq, err := http.NewRequestWithContext(t.Context(), http.MethodGet, "http://localhost", nil)
 		require.NoError(t, err)
-
-		go func() {
-			time.Sleep(15 * time.Millisecond)
-			m.SetStatusCode(200)
-		}()
 
 		resp, err := client.Do(aoni.NewStdRequest(httpReq))
 		require.NoError(t, err)
 
 		t.Cleanup(func() { _ = resp.Close() })
 
-		m.mu.Lock()
-		calls := m.calls
-		m.mu.Unlock()
+		mu.Lock()
+		totalCalls := calls
+		mu.Unlock()
 
-		assert.GreaterOrEqual(t, calls, 2)
+		assert.GreaterOrEqual(t, totalCalls, 2)
 	})
 }
 

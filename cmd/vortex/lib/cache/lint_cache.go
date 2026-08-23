@@ -80,31 +80,28 @@ func (lc *LintCache) Save(rootDir string) error {
 
 // IsFresh checks if a file's content hash matches the cached hash with 0 issues.
 func (lc *LintCache) IsFresh(relPath string, content []byte) bool {
-	var isFresh bool
+	lc.mu.RLock()
+	defer lc.mu.RUnlock()
 
-	generic.WithRLock(&lc.mu, func() {
-		entry, exists := lc.Entries[filepath.ToSlash(relPath)]
-		if !exists {
-			isFresh = false
-			return
-		}
+	entry, exists := lc.Entries[filepath.ToSlash(relPath)]
+	if !exists {
+		return false
+	}
 
-		currentHash := HashBytes(content)
-		isFresh = entry.Hash == currentHash && entry.IssueCount == 0
-	})
-
-	return isFresh
+	currentHash := HashBytes(content)
+	return entry.Hash == currentHash && entry.IssueCount == 0
 }
 
 // Put records a validation result in the cache.
 func (lc *LintCache) Put(relPath string, content []byte, issueCount int) {
-	generic.WithLock(&lc.mu, func() {
-		lc.Entries[filepath.ToSlash(relPath)] = LintCacheEntry{
-			Hash:        HashBytes(content),
-			IssueCount:  issueCount,
-			ValidatedAt: time.Now(),
-		}
-	})
+	lc.mu.Lock()
+	defer lc.mu.Unlock()
+
+	lc.Entries[filepath.ToSlash(relPath)] = LintCacheEntry{
+		Hash:        HashBytes(content),
+		IssueCount:  issueCount,
+		ValidatedAt: time.Now(),
+	}
 }
 
 // HashBytes computes the SHA256 hex string of content.

@@ -10,7 +10,6 @@ import (
 	"log/slog"
 	"net/http"
 	"net/url"
-	"slices"
 	"time"
 
 	flog "github.com/lemon4ksan/foundation/async/log"
@@ -675,23 +674,14 @@ func (c *Client) applyPowerManagement(enable bool) {
 }
 
 func (c *Client) applyDefaultHTTPHeader() http.Header {
-	headerCap := len(c.prepared.PrecomputedDefaultHeaders) + len(c.cfg.Defaults.Headers)
-	if headerCap == 0 {
-		return nil
+	if len(c.prepared.PrecomputedDefaultHeaders) == 0 {
+		return make(http.Header)
 	}
 
-	reqHeader := make(http.Header, headerCap)
-	if len(c.prepared.PrecomputedDefaultHeaders) > 0 {
-		for i := range c.prepared.PrecomputedDefaultHeaders {
-			h := &c.prepared.PrecomputedDefaultHeaders[i]
-			reqHeader[h.Key] = h.Slice
-		}
-	}
-
-	if len(c.cfg.Defaults.Headers) > 0 {
-		for k, v := range c.cfg.Defaults.Headers {
-			reqHeader[k] = slices.Clone(v)
-		}
+	reqHeader := make(http.Header, len(c.prepared.PrecomputedDefaultHeaders))
+	for i := range c.prepared.PrecomputedDefaultHeaders {
+		h := &c.prepared.PrecomputedDefaultHeaders[i]
+		reqHeader[h.Key] = h.Slice
 	}
 
 	return reqHeader

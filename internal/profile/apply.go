@@ -5,12 +5,29 @@
 package profile
 
 import (
+	"sync"
+
 	utls "github.com/refraction-networking/utls"
 
 	"github.com/lemon4ksan/aoni"
 	"github.com/lemon4ksan/aoni/fingerprint/profiles"
 	"github.com/lemon4ksan/aoni/internal/pipeline"
 )
+
+var headerMapPool = sync.Pool{
+	New: func() any {
+		return make(map[string]string, 16)
+	},
+}
+
+func acquireHeaderMap() map[string]string {
+	return headerMapPool.Get().(map[string]string)
+}
+
+func releaseHeaderMap(m map[string]string) {
+	clear(m)
+	headerMapPool.Put(m)
+}
 
 // ApplyTLSVariantToConfig maps uTLS ClientHello specifications, presets, and QUIC TLS parameters
 // from a browser profile variant ([profiles.Variant]) into the target client configuration.
@@ -68,14 +85,10 @@ func ApplyProfileHeaders(req aoni.Request, variant *profiles.Variant, os profile
 	}
 
 	if variant.InsertHeaders != nil {
-		capHint := 8
+		headersMap := acquireHeaderMap()
+		defer releaseHeaderMap(headersMap)
 
 		stdReq := req.HTTPRequest()
-		if stdReq != nil {
-			capHint += len(stdReq.Header)
-		}
-
-		headersMap := make(map[string]string, capHint)
 		if stdReq != nil {
 			for k, v := range stdReq.Header {
 				if len(v) > 0 {

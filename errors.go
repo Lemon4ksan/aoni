@@ -5,7 +5,6 @@
 package aoni
 
 import (
-	"bytes"
 	"context"
 	"errors"
 	"log/slog"
@@ -216,13 +215,17 @@ func (e *APIError) Error() string {
 	limit := min(len(e.Body), 128)
 	bodySlice := e.Body[:limit]
 
-	cleanBody := bytes.Map(func(r rune) rune {
-		if r == '\n' || r == '\r' {
-			return ' '
+	var cleanBuf [128]byte
+	for i := 0; i < limit; i++ {
+		b := bodySlice[i]
+		if b == '\n' || b == '\r' {
+			cleanBuf[i] = ' '
+		} else {
+			cleanBuf[i] = b
 		}
+	}
 
-		return r
-	}, bodySlice)
+	cleanBody := cleanBuf[:limit]
 
 	var sb strings.Builder
 	sb.Grow(48 + len(cleanBody))
