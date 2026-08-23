@@ -105,3 +105,42 @@ func TestInMemoryStore_ConcurrentAccess(t *testing.T) {
 
 	wg.Wait()
 }
+
+type sampleUser struct {
+	ID   int
+	Name string
+}
+
+func TestGenericStore_Typed(t *testing.T) {
+	t.Parallel()
+
+	ctx := t.Context()
+	store := cache.New[int, sampleUser](20 * time.Millisecond)
+	t.Cleanup(store.Close)
+
+	user := sampleUser{ID: 42, Name: "Alice"}
+
+	// 1. Miss
+	_, err := store.Get(ctx, 42)
+	assert.ErrorIs(t, err, cache.ErrCacheMiss)
+
+	// 2. Set with TTL
+	err = store.Set(ctx, 42, user, 80*time.Millisecond)
+	require.NoError(t, err)
+
+	// 3. Hit
+	got, err := store.Get(ctx, 42)
+	require.NoError(t, err)
+	assert.Equal(t, user, got)
+
+	// 4. Hit via Optional
+	opt := store.GetOptional(ctx, 42)
+	assert.True(t, opt.IsPresent())
+	assert.Equal(t, user, opt.MustValue())
+
+	// 5. Expiration
+	time.Sleep(120 * time.Millisecond)
+
+	_, err = store.Get(ctx, 42)
+	assert.ErrorIs(t, err, cache.ErrCacheMiss)
+}

@@ -183,22 +183,6 @@ func TestBrotliDecompressionBomb(t *testing.T) {
 	assert.ErrorIs(t, readErr, brotli.ErrDecompressionBomb)
 }
 
-func TestBrotliDecodeResult(t *testing.T) {
-	t.Parallel()
-
-	raw := []byte("hello monadic brotli")
-	compressed := fasthttp.AppendBrotliBytes(nil, raw)
-
-	res := brotli.DecodeResult(compressed)
-	require.True(t, res.IsSuccess())
-	val, err := res.Unwrap()
-	require.NoError(t, err)
-	assert.Equal(t, raw, val)
-
-	badRes := brotli.DecodeResult([]byte{0xFF, 0xFF, 0xFF})
-	assert.False(t, badRes.IsSuccess())
-}
-
 func BenchmarkBrotliDecompress(b *testing.B) {
 	data := []byte(strings.Repeat(
 		"<!DOCTYPE html><html><head><title>Benchmark Page</title></head><body>"+

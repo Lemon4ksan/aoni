@@ -24,7 +24,7 @@ type (
 	FallbackFunc = core.FallbackFunc
 
 	// CacheStore defines the persistence contract for HTTP response caching backends (e.g. Memory, Redis).
-	CacheStore = cache.Store
+	CacheStore[K comparable, V any] = cache.Store[K, V]
 
 	// ChallengeSolver delegates WAF/DDoS challenge page resolution (e.g. Cloudflare JS/Captcha)
 	// to automated headless or external solver drivers.

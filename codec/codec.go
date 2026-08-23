@@ -127,18 +127,13 @@ var (
 	RawDecoder = decode.RawDecoder
 )
 
-// To unmarshals the response payload stream from reader into a newly allocated instance of T using decoder.
-func To[T any](reader io.Reader, decoder Decoder) (T, error) {
+// DecodeTo unmarshals the response payload stream from reader into a newly allocated instance of T using decoder.
+func DecodeTo[T any](reader io.Reader, decoder Decoder) (T, error) {
 	return decode.To[T](reader, decoder)
 }
 
-// ToResult unmarshals the response stream from reader into a Swift-inspired [generic.Result].
-func ToResult[T any](reader io.Reader, decoder Decoder) generic.Result[T] {
-	return decode.ToResult[T](reader, decoder)
-}
-
-// Result unmarshals the response stream from reader into a Swift-inspired [generic.Result].
-func Result[T any](reader io.Reader, decoder Decoder) generic.Result[T] {
+// DecodeToResult unmarshals the response stream from reader into a Swift-inspired [generic.Result].
+func DecodeToResult[T any](reader io.Reader, decoder Decoder) generic.Result[T] {
 	return decode.ToResult[T](reader, decoder)
 }
 

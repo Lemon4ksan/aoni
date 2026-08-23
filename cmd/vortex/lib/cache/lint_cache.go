@@ -89,6 +89,7 @@ func (lc *LintCache) IsFresh(relPath string, content []byte) bool {
 	}
 
 	currentHash := HashBytes(content)
+
 	return entry.Hash == currentHash && entry.IssueCount == 0
 }
 

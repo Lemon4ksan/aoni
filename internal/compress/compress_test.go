@@ -183,45 +183,6 @@ func TestUnbrotli(t *testing.T) {
 	assert.Equal(t, original, buf)
 }
 
-func TestMonadicDecompressResults(t *testing.T) {
-	t.Parallel()
-
-	original := []byte("Monadic decompression result test payload across all codecs.")
-
-	// Gzip
-	gzipData := createGzipData(t, original)
-	resGzip := compress.GunzipResult(gzipData)
-	assert.True(t, resGzip.IsSuccess())
-	assert.Equal(t, original, resGzip.MustValue())
-
-	// Inflate
-	deflateData := createDeflateData(t, original)
-	resDeflate := compress.InflateResult(deflateData)
-	assert.True(t, resDeflate.IsSuccess())
-	assert.Equal(t, original, resDeflate.MustValue())
-
-	// Zstd
-	zstdData := createZstdRawBlock(original)
-	resZstd := compress.UnzstdResult(zstdData)
-	assert.True(t, resZstd.IsSuccess())
-	assert.Equal(t, original, resZstd.MustValue())
-
-	// Brotli
-	brData := fasthttp.AppendBrotliBytes(nil, original)
-	resBrotli := compress.UnbrotliResult(brData)
-	assert.True(t, resBrotli.IsSuccess())
-	assert.Equal(t, original, resBrotli.MustValue())
-
-	// Dispatcher
-	resDisp := compress.DecompressResult("gzip", gzipData)
-	assert.True(t, resDisp.IsSuccess())
-	assert.Equal(t, original, resDisp.MustValue())
-
-	// Error path
-	errDisp := compress.DecompressResult("invalid", gzipData)
-	assert.False(t, errDisp.IsSuccess())
-}
-
 func TestGzipReaderNilSafety(t *testing.T) {
 	t.Parallel()
 

@@ -1197,7 +1197,7 @@ type RedactConfig struct {
 // CacheConfig configures RFC 9111 HTTP response caching and RFC 9211 No-Vary-Search normalization.
 type CacheConfig struct {
 	// Store provides the persistence backend (in-memory LRU, Redis, or disk) for cached payloads.
-	Store cache.Store
+	Store cache.Store[any, []byte]
 
 	// DefaultTTL sets the fallback cache expiration duration if no Cache-Control header is present.
 	DefaultTTL time.Duration

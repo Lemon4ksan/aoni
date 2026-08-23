@@ -24,7 +24,6 @@ Benchmark command: `go test -bench=Benchmark -benchmem ./internal/compress/...`
 - **Silicon Primitives (`foundation/silicon`)**: Codecs consume unified `cpukit` for CPU feature probes and `endian` for Little/Big Endian word loads and stores.
 - **Core-Pinned Per-P Pooling**: Reusable decompressors are pooled per logical CPU core via `pool.PerPStorage`, eliminating GC mark-and-sweep latency spikes.
 - **128-bit SIMD Wildcopy & SWAR**: Sub-16-byte dictionary lookups and prefix match evaluations execute in CPU registers without function call overhead.
-- **Monadic Result API**: Functional error propagation via `generic.Result[T]` alongside standard Go idioms.
 
 ## Usage
 
@@ -43,11 +42,3 @@ data, err := compress.Unbrotli(compressedBrotli, nil)
 data, err := compress.Decompress("gzip", compressedBytes, nil)
 ```
 
-### Monadic Result APIs
-
-```go
-res := compress.GunzipResult(compressedGzip)
-if res.IsSuccess() {
-    output := res.MustValue()
-}
-```

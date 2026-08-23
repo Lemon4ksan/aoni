@@ -66,7 +66,7 @@ func TestCodec_GenericHelpers(t *testing.T) {
 		t.Parallel()
 
 		r := strings.NewReader(`{"name":"Dave","age":20}`)
-		res := codec.Result[TestUser](r, codec.JSONDecoder)
+		res := codec.DecodeToResult[TestUser](r, codec.JSONDecoder)
 		require.True(t, res.IsSuccess())
 		val, err := res.Unwrap()
 		require.NoError(t, err)

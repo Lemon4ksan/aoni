@@ -9,7 +9,6 @@ import (
 	"errors"
 	"io"
 
-	"github.com/lemon4ksan/foundation/generic"
 	"github.com/lemon4ksan/foundation/silicon/pool"
 )
 
@@ -43,7 +42,7 @@ func (r *Reader) SetMaxOutputSize(maxBytes int64) {
 // It is arbitrarily chosen to be equal to the constant used in io.Copy.
 const readBufSize = 32 * 1024
 
-var readerStorage = pool.NewPerPStorage[*Reader](func() *Reader {
+var readerStorage = pool.NewPerPStorage(func() *Reader {
 	return new(Reader)
 })
 
@@ -60,11 +59,6 @@ func ReleaseReader(r *Reader) {
 		_ = r.Reset(nil)
 		readerStorage.Put(r)
 	}
-}
-
-// DecodeResult decompresses a Brotli payload returning a monadic generic.Result[[]byte].
-func DecodeResult(src []byte) generic.Result[[]byte] {
-	return generic.ToResult(Decompress(nil, src))
 }
 
 // NewReader creates a new Reader reading the given reader.
@@ -100,11 +94,7 @@ func Decompress(dst, src []byte) ([]byte, error) {
 
 	for {
 		if len(dst) == cap(dst) {
-			newCap := cap(dst) * 2
-			if newCap < 1024 {
-				newCap = 1024
-			}
-
+			newCap := max(cap(dst)*2, 1024)
 			newDst := make([]byte, len(dst), newCap)
 			copy(newDst, dst)
 			dst = newDst

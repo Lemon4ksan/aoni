@@ -20,33 +20,32 @@ import (
 // ErrCacheMiss is returned when a requested HTTP response is not found in the cache or has expired per RFC 9111 §3.
 var ErrCacheMiss = errors.New("aoni/cache: miss")
 
-// Store defines the persistence contract for HTTP response caching backends (e.g. Memory, Redis).
-type Store interface {
-	// Get retrieves cached payload by key.
-	Get(ctx context.Context, key any) ([]byte, error)
-	// Set stores cached payload by key with ttl expiration.
-	Set(ctx context.Context, key any, val []byte, ttl time.Duration) error
+// Store defines the persistence contract for strongly typed generic caching backends.
+type Store[K comparable, V any] interface {
+	// Get retrieves cached value by key.
+	Get(ctx context.Context, key K) (V, error)
+	// Set stores cached value by key with ttl expiration.
+	Set(ctx context.Context, key K, val V, ttl time.Duration) error
 }
 
-// InMemoryStore provides a thread-safe, in-memory cache backend with background janitor cleanup conforming to RFC 9111.
+// InMemoryStore provides a thread-safe, in-memory cache backend with background janitor cleanup.
 // All methods are safe for concurrent access across multiple goroutines.
-type InMemoryStore struct {
+type InMemoryStore[K comparable, V any] struct {
 	mu     sync.RWMutex
-	items  map[any]inMemoryEntry
+	items  map[K]genericEntry[V]
 	cancel context.CancelFunc
 }
 
-// inMemoryEntry stores cached payload bytes alongside its expiration timestamp.
-type inMemoryEntry struct {
-	value     []byte
+type genericEntry[V any] struct {
+	value     V
 	expiresAt time.Time
 }
 
-// NewInMemoryStore creates a new [InMemoryStore] with automatic background eviction.
-func NewInMemoryStore(cleanupInterval time.Duration) *InMemoryStore {
+// New creates a new generic [InMemoryStore] with automatic background eviction.
+func New[K comparable, V any](cleanupInterval time.Duration) *InMemoryStore[K, V] {
 	ctx, cancel := context.WithCancel(context.Background()) //nolint:gosec
-	store := &InMemoryStore{
-		items:  make(map[any]inMemoryEntry),
+	store := &InMemoryStore[K, V]{
+		items:  make(map[K]genericEntry[V]),
 		cancel: cancel,
 	}
 
@@ -57,36 +56,51 @@ func NewInMemoryStore(cleanupInterval time.Duration) *InMemoryStore {
 	return store
 }
 
-// Get retrieves a copy of cached bytes for key. Returns [ErrCacheMiss] if missing or expired.
-func (s *InMemoryStore) Get(_ context.Context, key any) ([]byte, error) {
+// NewInMemoryStore creates a new [InMemoryStore] configured for HTTP byte payloads.
+func NewInMemoryStore(cleanupInterval time.Duration) *InMemoryStore[any, []byte] {
+	return New[any, []byte](cleanupInterval)
+}
+
+// Get retrieves a copy of cached item for key. Returns [ErrCacheMiss] if missing or expired.
+func (s *InMemoryStore[K, V]) Get(_ context.Context, key K) (V, error) {
 	s.mu.RLock()
 	entry, ok := s.items[key]
 	s.mu.RUnlock()
 
 	if !ok || clock.CoarseTime().After(entry.expiresAt) {
-		return nil, ErrCacheMiss
+		var zero V
+		return zero, ErrCacheMiss
 	}
 
-	return slices.Clone(entry.value), nil
+	if b, isBytes := any(entry.value).([]byte); isBytes {
+		return any(slices.Clone(b)).(V), nil
+	}
+
+	return entry.value, nil
 }
 
-// GetOptional retrieves cached payload bytes for key as a [generic.Optional].
-func (s *InMemoryStore) GetOptional(ctx context.Context, key any) generic.Optional[[]byte] {
+// GetOptional retrieves cached payload for key as a [generic.Optional].
+func (s *InMemoryStore[K, V]) GetOptional(ctx context.Context, key K) generic.Optional[V] {
 	val, err := s.Get(ctx, key)
 	if err != nil {
-		return generic.None[[]byte]()
+		return generic.None[V]()
 	}
 
 	return generic.Some(val)
 }
 
 // Set stores value in memory with the specified ttl duration.
-func (s *InMemoryStore) Set(_ context.Context, key any, val []byte, ttl time.Duration) error {
+func (s *InMemoryStore[K, V]) Set(_ context.Context, key K, val V, ttl time.Duration) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	s.items[key] = inMemoryEntry{
-		value:     slices.Clone(val),
+	storedVal := val
+	if b, isBytes := any(val).([]byte); isBytes {
+		storedVal = any(slices.Clone(b)).(V)
+	}
+
+	s.items[key] = genericEntry[V]{
+		value:     storedVal,
 		expiresAt: clock.CoarseTime().Add(ttl),
 	}
 
@@ -94,7 +108,7 @@ func (s *InMemoryStore) Set(_ context.Context, key any, val []byte, ttl time.Dur
 }
 
 // startEvictionLoop runs a periodic timer to purge expired entries until context cancellation.
-func (s *InMemoryStore) startEvictionLoop(ctx context.Context, interval time.Duration) {
+func (s *InMemoryStore[K, V]) startEvictionLoop(ctx context.Context, interval time.Duration) {
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
 
@@ -109,7 +123,7 @@ func (s *InMemoryStore) startEvictionLoop(ctx context.Context, interval time.Dur
 }
 
 // purgeExpired scans and removes entries whose expiration timestamp is in the past.
-func (s *InMemoryStore) purgeExpired(now time.Time) {
+func (s *InMemoryStore[K, V]) purgeExpired(now time.Time) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -121,7 +135,7 @@ func (s *InMemoryStore) purgeExpired(now time.Time) {
 }
 
 // Close cancels the background janitor loop.
-func (s *InMemoryStore) Close() {
+func (s *InMemoryStore[K, V]) Close() {
 	if s.cancel != nil {
 		s.cancel()
 	}
