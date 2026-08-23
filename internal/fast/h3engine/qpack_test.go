@@ -10,10 +10,11 @@ import (
 	"io"
 	"testing"
 
-	"github.com/quic-go/qpack"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/valyala/fasthttp"
+
+	"github.com/lemon4ksan/aoni/internal/qpack"
 )
 
 func TestQPACKEncodeRequestHeaders(t *testing.T) {

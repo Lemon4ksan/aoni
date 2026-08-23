@@ -15,7 +15,6 @@ import (
 	"testing"
 	"time"
 
-	ossfuzzseeds "github.com/quic-go/go-ossfuzz-seeds"
 	"github.com/stretchr/testify/require"
 
 	"github.com/lemon4ksan/aoni/internal/quic/internal/protocol"
@@ -1109,8 +1108,6 @@ func benchmarkTransportParameters(b *testing.B, withPreferredAddress bool) {
 }
 
 func FuzzTransportParameters(f *testing.F) {
-	corpus := ossfuzzseeds.New(f)
-
 	savedParams := (&TransportParameters{
 		InitialMaxStreamDataBidiLocal:  1234,
 		InitialMaxStreamDataBidiRemote: 2345,
@@ -1162,7 +1159,7 @@ func FuzzTransportParameters(f *testing.F) {
 			},
 		}).Marshal(protocol.PerspectiveServer), savedParams},
 	} {
-		corpus.Add(seed.Data, seed.SavedData)
+		f.Add(seed.Data, seed.SavedData)
 	}
 
 	f.Fuzz(func(t *testing.T, data, savedData []byte) {

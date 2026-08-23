@@ -7,12 +7,12 @@ package cookie
 import (
 	"context"
 	"database/sql"
-	"encoding/json"
 	"errors"
 	"maps"
 	"os"
 	"path/filepath"
 
+	"github.com/lemon4ksan/foundation/codec/json"
 	"github.com/lemon4ksan/foundation/generic"
 )
 

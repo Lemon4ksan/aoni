@@ -13,7 +13,6 @@ import (
 	"testing"
 	"time"
 
-	ossfuzzseeds "github.com/quic-go/go-ossfuzz-seeds"
 	"github.com/stretchr/testify/require"
 
 	"github.com/lemon4ksan/aoni/internal/quic/internal/protocol"
@@ -891,8 +890,6 @@ func benchmarkFrames(b *testing.B, frames ...Frame) {
 }
 
 func FuzzFrames(f *testing.F) {
-	corpus := ossfuzzseeds.New(f)
-
 	const version = protocol.Version1
 
 	for _, s := range []struct {
@@ -909,7 +906,7 @@ func FuzzFrames(f *testing.F) {
 	} {
 		b, err := s.frame.Append(nil, version)
 		require.NoError(f, err)
-		corpus.Add(uint8(s.encLevel), uint16(protocol.MaxPacketBufferSize), b)
+		f.Add(uint8(s.encLevel), uint16(protocol.MaxPacketBufferSize), b)
 	}
 
 	for _, fr := range []Frame{
@@ -918,45 +915,46 @@ func FuzzFrames(f *testing.F) {
 		&StreamFrame{StreamID: 0x42, Data: []byte("foobar"), Fin: true},
 		&StreamFrame{StreamID: 0x1337, Offset: 0xcafe, Data: []byte("foobar")},
 		&StreamFrame{Offset: quicvarint.Max, Data: []byte("foo")}, // exceeds maximum offset
-		&AckFrame{AckRanges: []AckRange{{Smallest: 1, Largest: 0x13}}},
+		&StreamFrame{Offset: 0xcafe, DataLenPresent: true, Data: []byte("foobar")},
+		&AckFrame{AckRanges: []AckRange{{Smallest: 1, Largest: 10}}},
+		&AckFrame{DelayTime: 1337 * time.Millisecond, AckRanges: []AckRange{{Smallest: 1, Largest: 10}}},
 		&AckFrame{
-			AckRanges: []AckRange{{Smallest: 80, Largest: 100}, {Smallest: 1, Largest: 50}},
-			DelayTime: time.Millisecond,
-			ECT0:      42,
-			ECT1:      13,
-			ECNCE:     7,
+			AckRanges: []AckRange{
+				{Smallest: 15, Largest: 20},
+				{Smallest: 8, Largest: 12},
+				{Smallest: 1, Largest: 3},
+			},
 		},
-		&ResetStreamFrame{StreamID: 0x1337, ErrorCode: 0x42, FinalSize: 0xdead},
-		&StopSendingFrame{StreamID: 0x42, ErrorCode: 0x1337},
-		&CryptoFrame{Offset: 0x1337, Data: []byte("crypto data")},
-		&NewTokenFrame{Token: []byte("token")},
-		&MaxDataFrame{MaximumData: 0xcafe},
-		&MaxStreamDataFrame{StreamID: 0xdead, MaximumStreamData: 0xbeef},
-		&MaxStreamsFrame{Type: protocol.StreamTypeBidi, MaxStreamNum: 0x42},
-		&MaxStreamsFrame{Type: protocol.StreamTypeUni, MaxStreamNum: 0x42},
-		&DataBlockedFrame{MaximumData: 0x1234},
-		&StreamDataBlockedFrame{StreamID: 0xdead, MaximumStreamData: 0xbeef},
-		&StreamsBlockedFrame{Type: protocol.StreamTypeBidi, StreamLimit: 0x42},
-		&StreamsBlockedFrame{Type: protocol.StreamTypeUni, StreamLimit: 0x42},
+		&AckFrame{
+			AckRanges: []AckRange{{Smallest: 1, Largest: 10}},
+			ECT0:      13,
+			ECT1:      37,
+			ECNCE:     42,
+		},
+		&ResetStreamFrame{StreamID: 0x1337, ErrorCode: 0x42, FinalSize: 0x1234},
+		&StopSendingFrame{StreamID: 0x1337, ErrorCode: 0x42},
+		&CryptoFrame{Offset: 0x1337, Data: []byte("foobar")},
+		&NewTokenFrame{Token: []byte("foobar")},
+		&MaxDataFrame{MaximumData: 0x1337},
+		&MaxStreamDataFrame{StreamID: 0x1234, MaximumStreamData: 0x1337},
+		&MaxStreamsFrame{Type: protocol.StreamTypeBidi, MaxStreamNum: 0x1337},
+		&MaxStreamsFrame{Type: protocol.StreamTypeUni, MaxStreamNum: 0x1337},
+		&DataBlockedFrame{MaximumData: 0x1337},
+		&StreamDataBlockedFrame{StreamID: 0x1234, MaximumStreamData: 0x1337},
+		&StreamsBlockedFrame{Type: protocol.StreamTypeBidi, StreamLimit: 0x1337},
+		&StreamsBlockedFrame{Type: protocol.StreamTypeUni, StreamLimit: 0x1337},
 		&NewConnectionIDFrame{
-			SequenceNumber:      0x42,
-			ConnectionID:        protocol.ParseConnectionID([]byte{0xde, 0xad, 0xbe, 0xef}),
+			SequenceNumber:      0x1337,
+			ConnectionID:        protocol.ParseConnectionID([]byte{1, 2, 3, 4, 5}),
 			StatelessResetToken: protocol.StatelessResetToken{0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15},
 		},
-		&RetireConnectionIDFrame{SequenceNumber: 0x42},
+		&RetireConnectionIDFrame{SequenceNumber: 0x1337},
 		&PathChallengeFrame{Data: [8]byte{1, 2, 3, 4, 5, 6, 7, 8}},
 		&PathResponseFrame{Data: [8]byte{1, 2, 3, 4, 5, 6, 7, 8}},
-		&ConnectionCloseFrame{ErrorCode: 0x42, ReasonPhrase: "foobar"},
-		&ConnectionCloseFrame{IsApplicationError: true, ErrorCode: 0x42, ReasonPhrase: "foobar"},
+		&ConnectionCloseFrame{IsApplicationError: true, ErrorCode: 0x1337, ReasonPhrase: "foobar"},
+		&ConnectionCloseFrame{IsApplicationError: false, ErrorCode: 0x1337, FrameType: 0x42, ReasonPhrase: "foobar"},
 		&HandshakeDoneFrame{},
 		&DatagramFrame{Data: []byte("datagram")},
-		&ResetStreamFrame{StreamID: 0x1337, ReliableSize: 0x42, FinalSize: 0xdead},
-		&AckFrequencyFrame{
-			SequenceNumber:        0x42,
-			AckElicitingThreshold: 10,
-			RequestMaxAckDelay:    25 * time.Millisecond,
-			ReorderingThreshold:   5,
-		},
 		&ImmediateAckFrame{},
 	} {
 		b, err := fr.Append(nil, version)
@@ -970,7 +968,7 @@ func FuzzFrames(f *testing.F) {
 			maxSize = 128
 		}
 
-		corpus.Add(uint8(protocol.Encryption1RTT), maxSize, b)
+		f.Add(uint8(protocol.Encryption1RTT), maxSize, b)
 	}
 
 	f.Fuzz(func(t *testing.T, encLevelRaw uint8, maxSize uint16, data []byte) {

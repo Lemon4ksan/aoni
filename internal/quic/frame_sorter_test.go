@@ -12,7 +12,6 @@ import (
 	"slices"
 	"testing"
 
-	ossfuzzseeds "github.com/quic-go/go-ossfuzz-seeds"
 	"github.com/stretchr/testify/require"
 
 	"github.com/lemon4ksan/aoni/internal/quic/internal/protocol"
@@ -1563,7 +1562,6 @@ func FuzzFrameSorter(f *testing.F) {
 	// the small-cut path becomes unreachable. Keep them in sync.
 	require.Less(f, protocol.MinStreamFrameBufferSize, maxStreamLen)
 
-	corpus := ossfuzzseeds.New(f)
 	for _, seed := range [][]uint8{
 		{opPush, 0, 3, opPush, 3, 3, opPop, 0, 0},
 		{opPush, 6, 3, opPush, 0, 3, opPush, 3, 3, opPop, 0, 0},
@@ -1572,7 +1570,7 @@ func FuzzFrameSorter(f *testing.F) {
 		{opPush, 3, 3, opPush, 9, 3, opPush, 5, 10, opPush, 0, 3, opPop, 0, 0},
 		{opPush, 0, 6, opPeek, 0, 3, opPush, 6, 3, opPeek, 0, 9, opPush, 10, 3, opPeek, 0, 12},
 	} {
-		corpus.Add(seed)
+		f.Add(seed)
 	}
 
 	// use deterministic non-uniform data

@@ -17,8 +17,6 @@ import (
 	"testing"
 	"time"
 
-	ossfuzzseeds "github.com/quic-go/go-ossfuzz-seeds"
-
 	"github.com/lemon4ksan/aoni/internal/quic/internal/protocol"
 	"github.com/lemon4ksan/aoni/internal/quic/internal/qtls"
 	"github.com/lemon4ksan/aoni/internal/quic/internal/utils"
@@ -88,9 +86,7 @@ var fuzzSessionTicketKey = [32]byte{
 }
 
 func FuzzHandshake(f *testing.F) {
-	corpus := ossfuzzseeds.New(f)
-
-	corpus.Add(
+	f.Add(
 		uint8(0),    // cipherSuite
 		uint8(0),    // clientAuth
 		uint8(0xFF), // messageToReplace: won't match
@@ -103,7 +99,7 @@ func FuzzHandshake(f *testing.F) {
 		uint8(0),    // alpnMode
 		[]byte("foobar"),
 	)
-	corpus.Add(
+	f.Add(
 		uint8(2), // cipherSuite: ChaCha20
 		uint8(0), // clientAuth
 		uint8(1), // messageToReplace: ClientHello

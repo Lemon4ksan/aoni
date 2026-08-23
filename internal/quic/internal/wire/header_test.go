@@ -12,7 +12,6 @@ import (
 	mrand "math/rand/v2"
 	"testing"
 
-	ossfuzzseeds "github.com/quic-go/go-ossfuzz-seeds"
 	"github.com/stretchr/testify/require"
 
 	"github.com/lemon4ksan/aoni/internal/quic/internal/protocol"
@@ -622,8 +621,6 @@ func (discardLogger) Infof(string, ...any)           {}
 func (discardLogger) Debugf(string, ...any)          {}
 
 func FuzzHeaderParser(f *testing.F) {
-	corpus := ossfuzzseeds.New(f)
-
 	addLongHeader := func(hdr *ExtendedHeader) {
 		b, err := hdr.Append(nil, hdr.Version)
 		require.NoError(f, err)
@@ -636,7 +633,7 @@ func FuzzHeaderParser(f *testing.F) {
 			b = append(b, make([]byte, hdr.Length)...)
 		}
 
-		corpus.Add(uint8(hdr.DestConnectionID.Len()), b)
+		f.Add(uint8(hdr.DestConnectionID.Len()), b)
 	}
 
 	for _, v := range []protocol.Version{protocol.Version1, protocol.Version2} {
@@ -734,14 +731,14 @@ func FuzzHeaderParser(f *testing.F) {
 		protocol.KeyPhaseOne,
 	)
 	require.NoError(f, err)
-	corpus.Add(uint8(8), shortHdr)
+	f.Add(uint8(8), shortHdr)
 	// Version Negotiation packets
-	corpus.Add(uint8(0), ComposeVersionNegotiation(
+	f.Add(uint8(0), ComposeVersionNegotiation(
 		protocol.ArbitraryLenConnectionID([]byte{1, 2, 3, 4, 5, 6, 7, 8, 9, 10}),
 		protocol.ArbitraryLenConnectionID([]byte{1, 2, 3, 4, 5, 6, 7, 8}),
 		[]protocol.Version{0x1234, 0x5678, 0x9abc, 0xdef0},
 	))
-	corpus.Add(uint8(0), ComposeVersionNegotiation(
+	f.Add(uint8(0), ComposeVersionNegotiation(
 		protocol.ArbitraryLenConnectionID([]byte{1, 2, 3}),
 		protocol.ArbitraryLenConnectionID([]byte{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19}),
 		[]protocol.Version{0xdeadbeef},

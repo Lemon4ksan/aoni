@@ -234,6 +234,10 @@ func (cc *ClientConn) Do(
 }
 
 func (cc *ClientConn) sendRequest(str *quic.Stream, req *fasthttp.Request, headerOrder []string) error {
+	return cc.sendRequestTo(str, req, headerOrder)
+}
+
+func (cc *ClientConn) sendRequestTo(w io.Writer, req *fasthttp.Request, headerOrder []string) error {
 	p := cc.qpack.AcquireEncoder()
 	defer cc.qpack.ReleaseEncoder(p)
 
@@ -270,7 +274,7 @@ func (cc *ClientConn) sendRequest(str *quic.Stream, req *fasthttp.Request, heade
 		out = append(out, body...)
 	}
 
-	_, err = str.Write(out)
+	_, err = w.Write(out)
 
 	return err
 }
@@ -279,7 +283,14 @@ func (cc *ClientConn) readResponse(
 	str *quic.Stream,
 	resp *fasthttp.Response,
 ) (trailers map[string][]string, err error) {
-	r := quicvarint.NewReader(str)
+	return cc.readResponseFrom(str, resp)
+}
+
+func (cc *ClientConn) readResponseFrom(
+	reader io.Reader,
+	resp *fasthttp.Response,
+) (trailers map[string][]string, err error) {
+	r := quicvarint.NewReader(reader)
 	headersParsed := false
 
 	var stackHeaderBuf [4096]byte

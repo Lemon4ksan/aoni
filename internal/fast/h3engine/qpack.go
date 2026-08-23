@@ -12,8 +12,9 @@ import (
 	"sync"
 
 	"github.com/lemon4ksan/foundation/silicon/bytesconv"
-	"github.com/quic-go/qpack"
 	"github.com/valyala/fasthttp"
+
+	"github.com/lemon4ksan/aoni/internal/qpack"
 )
 
 // PooledEncoder encapsulates a pooled buffer and QPACK encoder for zero-allocation serialization.

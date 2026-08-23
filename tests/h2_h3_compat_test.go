@@ -15,7 +15,6 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"github.com/valyala/fasthttp"
 
 	"github.com/lemon4ksan/aoni/fast"
 	"github.com/lemon4ksan/aoni/internal/fast/h2engine"

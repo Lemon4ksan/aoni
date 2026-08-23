@@ -6,12 +6,12 @@ package values
 
 import (
 	"encoding"
-	"encoding/json"
 	"net/url"
 	"reflect"
 	"strconv"
 	"strings"
 
+	"github.com/lemon4ksan/foundation/codec/json"
 	furl "github.com/lemon4ksan/foundation/net/url"
 	"github.com/lemon4ksan/foundation/refkit"
 	"github.com/lemon4ksan/foundation/silicon/bytesconv"

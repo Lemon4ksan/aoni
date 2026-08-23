@@ -5,12 +5,12 @@
 package cookie
 
 import (
-	"encoding/json"
 	"net/http"
 	"net/url"
 	"slices"
 	"strings"
 
+	"github.com/lemon4ksan/foundation/codec/json"
 	"github.com/lemon4ksan/foundation/generic"
 	fcookie "github.com/lemon4ksan/foundation/net/cookie"
 	"github.com/lemon4ksan/foundation/silicon/bytesconv"
