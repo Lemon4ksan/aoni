@@ -175,7 +175,6 @@ func cloneFasthttpClient(c *fasthttp.Client) *fasthttp.Client {
 		TLSConfig:                     c.TLSConfig,
 		RetryIf:                       c.RetryIf, //nolint:staticcheck
 		RetryIfErr:                    c.RetryIfErr,
-		RetryIfErrUpstream:            c.RetryIfErrUpstream,
 		ConfigureClient:               c.ConfigureClient,
 		Name:                          c.Name,
 		MaxConnsPerHost:               c.MaxConnsPerHost,

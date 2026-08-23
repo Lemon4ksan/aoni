@@ -539,6 +539,7 @@ func (p *packetPacker) PackCoalescedPacket(
 			hdrLen := wire.ShortHeaderLen(connID, oneRTTPacketNumberLen)
 
 			oneRTTPayload = p.maybeGetShortHeaderPacket(oneRTTSealer, hdrLen, maxSize-size, onlyAck, now, v)
+
 			if oneRTTPayload.length > 0 {
 				size += p.shortHeaderPacketLength(
 					connID,
@@ -548,17 +549,21 @@ func (p *packetPacker) PackCoalescedPacket(
 					oneRTTSealer.Overhead(),
 				)
 			}
-		} else if p.perspective == protocol.PerspectiveClient && !onlyAck { // 0-RTT packets can't contain ACK frames
-			var err error
+		}
 
-			zeroRTTSealer, err = p.cryptoSetup.Get0RTTSealer()
-			if err != nil && !errors.Is(err, handshake.ErrKeysDropped) &&
-				!errors.Is(err, handshake.ErrKeysNotYetAvailable) {
-				return nil, err
+		// 0-RTT packets can't contain ACK frames.
+		if err != nil && p.perspective == protocol.PerspectiveClient && !onlyAck {
+			var err0RTT error
+
+			zeroRTTSealer, err0RTT = p.cryptoSetup.Get0RTTSealer()
+			if err0RTT != nil && !errors.Is(err0RTT, handshake.ErrKeysDropped) &&
+				!errors.Is(err0RTT, handshake.ErrKeysNotYetAvailable) {
+				return nil, err0RTT
 			}
 
 			if zeroRTTSealer != nil {
 				zeroRTTHdr, zeroRTTPayload = p.maybeGetAppDataPacketFor0RTT(zeroRTTSealer, maxSize-size, now, v)
+
 				if zeroRTTPayload.length > 0 {
 					size += p.longHeaderPacketLength(
 						zeroRTTHdr,
