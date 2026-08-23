@@ -58,6 +58,12 @@ type (
 	// RequestModifier is a composable, zero-allocation functional modifier applied to outgoing [Request] pipelines.
 	RequestModifier = core.RequestModifier
 
+	// Phase represents a specific discrete phase of the network request lifecycle.
+	Phase = core.Phase
+
+	// Error encapsulates a comprehensive, structured network failure across any transport layer.
+	Error = core.Error
+
 	// SoftErrorDetector inspects the response status, headers, and initial peeked body bytes
 	// for application-layer soft errors (e.g. HTTP 200 OK containing an HTML login or error message).
 	//
@@ -65,6 +71,35 @@ type (
 	// The peek buffer is captured non-destructively. If detector returns a non-nil error,
 	// request execution is aborted with that error without draining the body stream.
 	SoftErrorDetector func(resp *http.Response, peek []byte) error
+)
+
+const (
+	// PhaseUnknown indicates the failure occurred outside tracked request phases.
+	PhaseUnknown = core.PhaseUnknown
+
+	// PhaseDNS indicates failure during domain name resolution.
+	PhaseDNS = core.PhaseDNS
+
+	// PhaseProxyConnect indicates failure during proxy tunnel establishment (SOCKS5 / HTTP CONNECT).
+	PhaseProxyConnect = core.PhaseProxyConnect
+
+	// PhaseTCPConnect indicates failure during raw TCP / QUIC socket dial.
+	PhaseTCPConnect = core.PhaseTCPConnect
+
+	// PhaseTLSHandshake indicates failure during TLS negotiation, certificate validation, or ECH exchange.
+	PhaseTLSHandshake = core.PhaseTLSHandshake
+
+	// PhaseSendHeaders indicates failure while framing and writing request headers.
+	PhaseSendHeaders = core.PhaseSendHeaders
+
+	// PhaseSendBody indicates failure while streaming the request body.
+	PhaseSendBody = core.PhaseSendBody
+
+	// PhaseWaitResponse indicates failure while waiting for initial response headers / TTFB (e.g. server timeout).
+	PhaseWaitResponse = core.PhaseWaitResponse
+
+	// PhaseReadBody indicates failure while reading the incoming response stream payload.
+	PhaseReadBody = core.PhaseReadBody
 )
 
 // Execution & Middleware Contracts.
