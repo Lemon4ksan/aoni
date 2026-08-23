@@ -1718,9 +1718,6 @@ func testConnectionKeepAlive(t *testing.T, enable, expectKeepAlive bool) {
 
 		buf.Data = append(buf.Data, []byte("packet")...)
 
-		errChan := make(chan error, 1)
-		go func() { errChan <- tc.conn.run() }()
-
 		var unpackTime, packTime monotime.Time
 
 		done := make(chan struct{})
@@ -1739,8 +1736,9 @@ func testConnectionKeepAlive(t *testing.T, enable, expectKeepAlive bool) {
 			Return(shortHeaderPacket{}, errNothingToPack).
 			Times(2)
 
-		switch expectKeepAlive {
-		case true:
+		tc.connRunner.EXPECT().Remove(gomock.Any()).AnyTimes()
+
+		if expectKeepAlive {
 			// record the time of the keep-alive is sent
 			tc.packer.EXPECT().AppendPacket(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).DoAndReturn(
 				func(buffer *packetBuffer, count protocol.ByteCount, t monotime.Time, version protocol.Version) (shortHeaderPacket, error) {
@@ -1751,10 +1749,16 @@ func testConnectionKeepAlive(t *testing.T, enable, expectKeepAlive bool) {
 					return shortHeaderPacket{}, errNothingToPack
 				},
 			)
-			tc.conn.handlePacket(
-				receivedPacket{data: buf.Data, buffer: buf, rcvTime: monotime.Now(), remoteAddr: tc.remoteAddr},
-			)
+		}
 
+		errChan := make(chan error, 1)
+		go func() { errChan <- tc.conn.run() }()
+
+		tc.conn.handlePacket(
+			receivedPacket{data: buf.Data, buffer: buf, rcvTime: monotime.Now(), remoteAddr: tc.remoteAddr},
+		)
+
+		if expectKeepAlive {
 			select {
 			case <-done:
 				// the keep-alive packet should be sent after half the idle timeout
@@ -1763,16 +1767,7 @@ func testConnectionKeepAlive(t *testing.T, enable, expectKeepAlive bool) {
 				t.Fatal("timeout")
 			}
 
-		case false: // if keep-alives are disabled, the connection will run into an idle timeout
-			tc.connRunner.EXPECT().Remove(gomock.Any()).AnyTimes()
-			tc.conn.handlePacket(
-				receivedPacket{data: buf.Data, buffer: buf, rcvTime: monotime.Now(), remoteAddr: tc.remoteAddr},
-			)
-		}
-
-		// test teardown
-		if expectKeepAlive {
-			tc.connRunner.EXPECT().Remove(gomock.Any()).AnyTimes()
+			// test teardown
 			tc.conn.destroy(nil)
 		}
 
