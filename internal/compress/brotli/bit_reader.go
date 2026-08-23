@@ -93,7 +93,7 @@ func (br *bitReader) pullByte() bool {
 	}
 
 	br.val >>= 8
-	br.val |= (uint64(br.input[br.bytePos])) << 56
+	br.val |= uint64(br.input[br.bytePos]) << 56
 	br.bitPos -= 8
 	br.bytePos++
 

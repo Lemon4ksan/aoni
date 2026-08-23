@@ -824,7 +824,8 @@ func TestFastPathDecoders_WithBytesReader(t *testing.T) {
 	t.Run("xml_fast_path", func(t *testing.T) {
 		xmlData := append(
 			[]byte{0xEF, 0xBB, 0xBF},
-			[]byte("<ConfigSample><Name>fast-xml</Name><Port>80</Port></ConfigSample>")...)
+			[]byte("<ConfigSample><Name>fast-xml</Name><Port>80</Port></ConfigSample>")...,
+		)
 		r := mockBytesReader{data: xmlData, volatile: true}
 
 		var target ConfigSample

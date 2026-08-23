@@ -28,10 +28,12 @@ func initAEAD(key [16]byte) cipher.AEAD {
 	if err != nil {
 		panic(err)
 	}
+
 	aead, err := cipher.NewGCM(aes)
 	if err != nil {
 		panic(err)
 	}
+
 	return aead
 }
 
@@ -52,21 +54,28 @@ func GetRetryIntegrityTag(retry []byte, origDestConnID protocol.ConnectionID, ve
 	retryBuf.Write(origDestConnID.Bytes())
 	retryBuf.Write(retry)
 
-	var tag [16]byte
-	var sealed []byte
+	var (
+		tag    [16]byte
+		sealed []byte
+	)
+
 	if version == protocol.Version2 {
 		if retryAEADv2 == nil {
 			retryAEADv2 = initAEAD([16]byte{0x8f, 0xb4, 0xb0, 0x1b, 0x56, 0xac, 0x48, 0xe2, 0x60, 0xfb, 0xcb, 0xce, 0xad, 0x7c, 0xcc, 0x92})
 		}
+
 		sealed = retryAEADv2.Seal(tag[:0], retryNonceV2[:], nil, retryBuf.Bytes())
 	} else {
 		if retryAEADv1 == nil {
 			retryAEADv1 = initAEAD([16]byte{0xbe, 0x0c, 0x69, 0x0b, 0x9f, 0x66, 0x57, 0x5a, 0x1d, 0x76, 0x6b, 0x54, 0xe3, 0x68, 0xc8, 0x4e})
 		}
+
 		sealed = retryAEADv1.Seal(tag[:0], retryNonceV1[:], nil, retryBuf.Bytes())
 	}
+
 	if len(sealed) != 16 {
 		panic(fmt.Sprintf("unexpected Retry integrity tag length: %d", len(sealed)))
 	}
+
 	return &tag
 }

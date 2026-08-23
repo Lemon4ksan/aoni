@@ -1729,11 +1729,9 @@ func testConnectionKeepAlive(t *testing.T, enable, expectKeepAlive bool) {
 			func(t monotime.Time, bytes []byte) (protocol.PacketNumber, protocol.PacketNumberLen, protocol.KeyPhaseBit, []byte, error) {
 				unpackTime = monotime.Now()
 
-				return protocol.PacketNumber(
-						1,
-					), protocol.PacketNumberLen1, protocol.KeyPhaseZero, []byte{
-						0,
-					}, /* PADDING */ nil
+				return protocol.PacketNumber(1), protocol.PacketNumberLen1, protocol.KeyPhaseZero, []byte{
+					0,
+				}, /* PADDING */ nil
 			},
 		)
 		tc.packer.EXPECT().
