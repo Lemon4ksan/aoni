@@ -6,7 +6,7 @@ package pipeline_test
 
 import (
 	"errors"
-	stdio "io"
+	"io"
 	"net/http"
 	"strings"
 	"testing"
@@ -24,14 +24,14 @@ func TestStreamPipeline_Execution(t *testing.T) {
 		t.Parallel()
 
 		resp := &http.Response{
-			Body: stdio.NopCloser(strings.NewReader("hello")),
+			Body: io.NopCloser(strings.NewReader("hello")),
 		}
 
 		pipe := pipeline.NewStreamPipeline()
 		err := pipe.Execute(resp)
 		require.NoError(t, err)
 
-		buf, err := stdio.ReadAll(resp.Body)
+		buf, err := io.ReadAll(resp.Body)
 		require.NoError(t, err)
 		assert.Equal(t, "hello", string(buf))
 	})
@@ -39,38 +39,38 @@ func TestStreamPipeline_Execution(t *testing.T) {
 	t.Run("chained_filters_transform_stream", func(t *testing.T) {
 		t.Parallel()
 
-		filterUpper := func(_ *http.Response, body stdio.ReadCloser) (stdio.ReadCloser, error) {
-			buf, err := stdio.ReadAll(body)
+		filterUpper := func(_ *http.Response, body io.ReadCloser) (io.ReadCloser, error) {
+			buf, err := io.ReadAll(body)
 			if err != nil {
 				return nil, err
 			}
 
 			upper := strings.ToUpper(string(buf))
 
-			return stdio.NopCloser(strings.NewReader(upper)), nil
+			return io.NopCloser(strings.NewReader(upper)), nil
 		}
 
-		filterPrefix := func(_ *http.Response, body stdio.ReadCloser) (stdio.ReadCloser, error) {
-			buf, err := stdio.ReadAll(body)
+		filterPrefix := func(_ *http.Response, body io.ReadCloser) (io.ReadCloser, error) {
+			buf, err := io.ReadAll(body)
 			if err != nil {
 				return nil, err
 			}
 
 			prefixed := "PREFIX_" + string(buf)
 
-			return stdio.NopCloser(strings.NewReader(prefixed)), nil
+			return io.NopCloser(strings.NewReader(prefixed)), nil
 		}
 
 		pipe := pipeline.NewStreamPipeline(filterUpper, filterPrefix)
 
 		resp := &http.Response{
-			Body: stdio.NopCloser(strings.NewReader("data")),
+			Body: io.NopCloser(strings.NewReader("data")),
 		}
 
 		err := pipe.Execute(resp)
 		require.NoError(t, err)
 
-		buf, err := stdio.ReadAll(resp.Body)
+		buf, err := io.ReadAll(resp.Body)
 		require.NoError(t, err)
 		assert.Equal(t, "PREFIX_DATA", string(buf))
 	})
@@ -79,14 +79,14 @@ func TestStreamPipeline_Execution(t *testing.T) {
 		t.Parallel()
 
 		expectedErr := errors.New("filter error")
-		failFilter := func(_ *http.Response, _ stdio.ReadCloser) (stdio.ReadCloser, error) {
+		failFilter := func(_ *http.Response, _ io.ReadCloser) (io.ReadCloser, error) {
 			return nil, expectedErr
 		}
 
 		pipe := pipeline.NewStreamPipeline(failFilter)
 
 		resp := &http.Response{
-			Body: stdio.NopCloser(strings.NewReader("data")),
+			Body: io.NopCloser(strings.NewReader("data")),
 		}
 
 		err := pipe.Execute(resp)

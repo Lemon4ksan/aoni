@@ -248,6 +248,47 @@ func BenchmarkGunzip(b *testing.B) {
 	}
 }
 
+func TestNewReader_AllEncodings(t *testing.T) {
+	t.Parallel()
+
+	raw := []byte("Streaming decompression test across all RFC standard algorithms in aoni.")
+
+	tests := []struct {
+		encoding   string
+		compressed []byte
+	}{
+		{encoding: "gzip", compressed: createGzipData(t, raw)},
+		{encoding: "x-gzip", compressed: createGzipData(t, raw)},
+		{encoding: "br", compressed: fasthttp.AppendBrotliBytes(nil, raw)},
+		{encoding: "zstd", compressed: createZstdRawBlock(raw)},
+		{encoding: "deflate", compressed: createDeflateData(t, raw)},
+		{encoding: "identity", compressed: raw},
+		{encoding: "", compressed: raw},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.encoding, func(t *testing.T) {
+			t.Parallel()
+
+			r, err := compress.NewReader(tc.encoding, bytes.NewReader(tc.compressed))
+			require.NoError(t, err)
+
+			defer r.Close()
+
+			decompressed, err := io.ReadAll(r)
+			require.NoError(t, err)
+			assert.Equal(t, raw, decompressed)
+		})
+	}
+
+	// Error cases
+	_, err := compress.NewReader("unknown_codec", bytes.NewReader(raw))
+	assert.ErrorIs(t, err, compress.ErrUnsupportedEncoding)
+
+	_, err = compress.NewReader("gzip", nil)
+	assert.Error(t, err)
+}
+
 func BenchmarkUnzstd(b *testing.B) {
 	payload := []byte(strings.Repeat("Zstd benchmark payload for internal/compress decoder. ", 50))
 	compressed := createZstdRawBlock(payload)

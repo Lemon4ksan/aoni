@@ -8,7 +8,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
-	stdio "io"
+	"io"
 	"net/http"
 	"strconv"
 
@@ -55,7 +55,25 @@ func (a *HTTPDoerAdapter) Do(req core.Request) (core.Response, error) {
 
 	httpReq := req.HTTPRequest()
 	if httpReq == nil {
-		return nil, ErrNilRequest
+		var bodyReader io.Reader
+		if bs := req.BodyStream(); bs != nil {
+			bodyReader = bs
+		} else if bb := req.BodyBytes(); len(bb) > 0 {
+			bodyReader = bytes.NewReader(bb)
+		}
+
+		var err error
+
+		httpReq, err = http.NewRequestWithContext(req.Context(), req.Method(), req.URL(), bodyReader) //nolint:gosec
+		if err != nil {
+			return nil, err
+		}
+
+		if req.Headers() != nil {
+			for k, v := range req.Headers() {
+				httpReq.Header.Add(string(k), string(v))
+			}
+		}
 	}
 
 	resp, err := a.doer.Do(httpReq) //nolint:bodyclose
@@ -66,9 +84,9 @@ func (a *HTTPDoerAdapter) Do(req core.Request) (core.Response, error) {
 	return NewResponse(resp), nil
 }
 
-// ResponseBodyCloser decorates an [stdio.ReadCloser] stream and ensures the parent [core.Response] is released upon body close.
+// ResponseBodyCloser decorates an [io.ReadCloser] stream and ensures the parent [core.Response] is released upon body close.
 type ResponseBodyCloser struct {
-	stdio.ReadCloser
+	io.ReadCloser
 	Resp core.Response
 }
 

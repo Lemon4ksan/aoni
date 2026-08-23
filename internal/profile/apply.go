@@ -82,6 +82,13 @@ func ApplyProfileHeaders(req aoni.Request, variant *profiles.Variant, os profile
 					headersMap[k] = v[0]
 				}
 			}
+		} else if req.Headers() != nil {
+			for k, v := range req.Headers() {
+				kStr := string(k)
+				if _, exists := headersMap[kStr]; !exists {
+					headersMap[kStr] = string(v)
+				}
+			}
 		}
 
 		variant.InsertHeaders(headersMap, req.Method())

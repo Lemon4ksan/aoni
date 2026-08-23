@@ -110,13 +110,13 @@ func Decompress(dst, src []byte) ([]byte, error) {
 			dst = newDst
 		}
 
-		inRemaining := uint(len(r.in))
 		outCap := cap(dst) - len(dst)
-		outRemaining := uint(outCap)
-		outSlice := dst[len(dst):cap(dst)]
+		r.streamAvailIn = uint(len(r.in))
+		r.streamAvailOut = uint(outCap)
+		r.streamNextOut = dst[len(dst):cap(dst)]
 
-		result := r.decompressStream(&inRemaining, &r.in, &outRemaining, &outSlice)
-		written := outCap - int(outRemaining)
+		result := r.decompressStream(&r.streamAvailIn, &r.in, &r.streamAvailOut, &r.streamNextOut)
+		written := outCap - int(r.streamAvailOut)
 		dst = dst[:len(dst)+written]
 
 		switch result {
@@ -222,10 +222,11 @@ func (r *Reader) Read(p []byte) (n int, err error) {
 
 		inLen := uint(len(r.in))
 		outLen := uint(len(p))
-		inRemaining := inLen
-		outRemaining := outLen
-		result := r.decompressStream(&inRemaining, &r.in, &outRemaining, &p)
-		written = outLen - outRemaining
+		r.streamAvailIn = inLen
+		r.streamAvailOut = outLen
+		r.streamNextOut = p
+		result := r.decompressStream(&r.streamAvailIn, &r.in, &r.streamAvailOut, &r.streamNextOut)
+		written = outLen - r.streamAvailOut
 		n = int(written)
 
 		switch result {

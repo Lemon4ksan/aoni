@@ -16,7 +16,7 @@ import (
 	"github.com/lemon4ksan/foundation/silicon/bytesconv"
 	"google.golang.org/protobuf/proto"
 
-	"github.com/lemon4ksan/aoni/internal/compress/gzip"
+	"github.com/lemon4ksan/aoni/internal/compress"
 	"github.com/lemon4ksan/aoni/internal/transport"
 )
 
@@ -101,16 +101,9 @@ func processGRPCWebFrame(flags byte, payload []byte, msg proto.Message) (done bo
 
 // decompressProtoPayload decompresses a gzip-encoded Protobuf payload stream.
 func decompressProtoPayload(payload []byte) ([]byte, error) {
-	gzReader, err := gzip.NewReader(bytes.NewReader(payload))
+	decompressed, err := compress.Gunzip(payload, nil)
 	if err != nil {
 		return nil, &GRPCWebError{Op: "decompress", Err: err}
-	}
-
-	decompressed, err := io.ReadAll(gzReader)
-	_ = gzReader.Close()
-
-	if err != nil {
-		return nil, &GRPCWebError{Op: "read_decompressed", Err: err}
 	}
 
 	return decompressed, nil

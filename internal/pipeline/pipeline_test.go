@@ -10,7 +10,7 @@ import (
 	"context"
 	"crypto/tls"
 	"errors"
-	stdio "io"
+	"io"
 	"iter"
 	"net"
 	"net/http"
@@ -45,13 +45,13 @@ func (m *mockDoer) Do(req *http.Request) (*http.Response, error) {
 	return &http.Response{
 		StatusCode: http.StatusOK,
 		Header:     make(http.Header),
-		Body:       stdio.NopCloser(strings.NewReader("ok")),
+		Body:       io.NopCloser(strings.NewReader("ok")),
 		Request:    req,
 	}, nil
 }
 
 type reallyCloserBody struct {
-	stdio.Reader
+	io.Reader
 	reallyClosed bool
 }
 
@@ -128,9 +128,9 @@ func (r *mockRequest) Headers() iter.Seq2[[]byte, []byte] {
 }
 func (r *mockRequest) SetBodyBytes(b []byte) { r.body = b }
 func (r *mockRequest) BodyBytes() []byte     { return r.body }
-func (r *mockRequest) SetBodyStream(stdio.Reader, int64) {
+func (r *mockRequest) SetBodyStream(io.Reader, int64) {
 }
-func (r *mockRequest) BodyStream() stdio.Reader { return bytes.NewReader(r.body) }
+func (r *mockRequest) BodyStream() io.Reader { return bytes.NewReader(r.body) }
 func (r *mockRequest) HTTPRequest() *http.Request {
 	req, _ := http.NewRequestWithContext(r.ctx, r.method, r.urlStr, bytes.NewReader(r.body))
 	if req != nil {
@@ -181,7 +181,7 @@ func (m *mockSolver) Solve(_ context.Context, _ error, req *http.Request) (*http
 	return &http.Response{
 		StatusCode: http.StatusOK,
 		Header:     make(http.Header),
-		Body:       stdio.NopCloser(strings.NewReader("solved")),
+		Body:       io.NopCloser(strings.NewReader("solved")),
 		Request:    req,
 	}, nil
 }
@@ -252,7 +252,7 @@ func TestPipeline_Execute_FastPath(t *testing.T) {
 	doer := DoerFunc(func(req *http.Request) (*http.Response, error) {
 		return &http.Response{
 			StatusCode: http.StatusOK,
-			Body:       stdio.NopCloser(bytes.NewReader([]byte("fastpath_ok"))),
+			Body:       io.NopCloser(bytes.NewReader([]byte("fastpath_ok"))),
 			Request:    req,
 		}, nil
 	})
@@ -265,7 +265,7 @@ func TestPipeline_Execute_FastPath(t *testing.T) {
 
 	defer resp.Body.Close()
 
-	body, err := stdio.ReadAll(resp.Body)
+	body, err := io.ReadAll(resp.Body)
 	require.NoError(t, err)
 	assert.Equal(t, "fastpath_ok", string(body))
 }
@@ -354,7 +354,7 @@ func TestPipeline_ResponseSizeLimit(t *testing.T) {
 			return &http.Response{
 				StatusCode:    http.StatusOK,
 				ContentLength: 2048,
-				Body:          stdio.NopCloser(bytes.NewReader(bytes.Repeat([]byte("A"), 2048))),
+				Body:          io.NopCloser(bytes.NewReader(bytes.Repeat([]byte("A"), 2048))),
 				Request:       req,
 			}, nil
 		})
@@ -374,7 +374,7 @@ func TestPipeline_ResponseSizeLimit(t *testing.T) {
 			return &http.Response{
 				StatusCode:    http.StatusOK,
 				ContentLength: -1, // Chunked / Unknown size
-				Body:          stdio.NopCloser(bytes.NewReader(bytes.Repeat([]byte("B"), 2048))),
+				Body:          io.NopCloser(bytes.NewReader(bytes.Repeat([]byte("B"), 2048))),
 				Request:       req,
 			}, nil
 		})
@@ -387,7 +387,7 @@ func TestPipeline_ResponseSizeLimit(t *testing.T) {
 
 		defer resp.Body.Close()
 
-		_, readErr := stdio.ReadAll(resp.Body)
+		_, readErr := io.ReadAll(resp.Body)
 		require.Error(t, readErr)
 		assert.ErrorIs(t, readErr, fio.ErrResponseTooLarge)
 	})
@@ -408,11 +408,11 @@ func TestPipeline_DecompressionAndExplicitAcceptEncoding(t *testing.T) {
 	respAuto := &http.Response{
 		StatusCode: http.StatusOK,
 		Header:     http.Header{"Content-Encoding": []string{"gzip"}},
-		Body:       stdio.NopCloser(bytes.NewReader(gzBuf.Bytes())),
+		Body:       io.NopCloser(bytes.NewReader(gzBuf.Bytes())),
 	}
 
 	respDecompressed := pipeEngine.handleDecompressionAndTranscoding(reqAuto, respAuto)
-	bodyBytes, err := stdio.ReadAll(respDecompressed.Body)
+	bodyBytes, err := io.ReadAll(respDecompressed.Body)
 	require.NoError(t, err)
 	assert.Equal(t, "decompressed_data", string(bodyBytes))
 	assert.True(t, respDecompressed.Uncompressed)
@@ -424,11 +424,11 @@ func TestPipeline_DecompressionAndExplicitAcceptEncoding(t *testing.T) {
 	respExplicit := &http.Response{
 		StatusCode: http.StatusOK,
 		Header:     http.Header{"Content-Encoding": []string{"gzip"}},
-		Body:       stdio.NopCloser(bytes.NewReader(gzBuf.Bytes())),
+		Body:       io.NopCloser(bytes.NewReader(gzBuf.Bytes())),
 	}
 
 	respRaw := pipeEngine.handleDecompressionAndTranscoding(reqExplicit, respExplicit)
-	rawBytes, err := stdio.ReadAll(respRaw.Body)
+	rawBytes, err := io.ReadAll(respRaw.Body)
 	require.NoError(t, err)
 	assert.Equal(t, gzBuf.Bytes(), rawBytes, "Explicit Accept-Encoding should preserve compressed raw bytes")
 }
@@ -447,7 +447,7 @@ func TestPipeline_PostProcessResponse_Full(t *testing.T) {
 
 	respTooLarge := &http.Response{
 		ContentLength: 5000,
-		Body:          stdio.NopCloser(strings.NewReader("large body")),
+		Body:          io.NopCloser(strings.NewReader("large body")),
 	}
 	txSize := AcquireTx(t.Context())
 	txSize.SizeLimit = 1000
@@ -470,7 +470,7 @@ func TestPipeline_PostProcessResponse_Full(t *testing.T) {
 	respWAF := &http.Response{
 		StatusCode: http.StatusForbidden,
 		Header:     http.Header{"Content-Type": []string{"text/html"}},
-		Body:       stdio.NopCloser(strings.NewReader("<html>cf-challenge</html>")),
+		Body:       io.NopCloser(strings.NewReader("<html>cf-challenge</html>")),
 	}
 
 	reqWAF, _ := http.NewRequestWithContext(t.Context(), http.MethodGet, "http://waf.com", nil)
@@ -481,10 +481,10 @@ func TestPipeline_PostProcessResponse_Full(t *testing.T) {
 
 	respTranscode := &http.Response{
 		Header: http.Header{"Content-Type": []string{"application/json; charset=windows-1251"}},
-		Body:   stdio.NopCloser(strings.NewReader("\xef\xf0\xe8\xe2\xe5\xf2")),
+		Body:   io.NopCloser(strings.NewReader("\xef\xf0\xe8\xe2\xe5\xf2")),
 	}
 	respTranscode.Body = applyCharsetTranscoding(respTranscode, respTranscode.Body)
-	transcodedBytes, _ := stdio.ReadAll(respTranscode.Body)
+	transcodedBytes, _ := io.ReadAll(respTranscode.Body)
 	assert.Equal(t, "привет", string(transcodedBytes))
 	assert.NotContains(t, respTranscode.Header.Get("Content-Type"), "windows-1251")
 }
@@ -502,7 +502,7 @@ func TestPipeline_Hedging_IdempotencyAndBody(t *testing.T) {
 
 			return &http.Response{
 				StatusCode: http.StatusOK,
-				Body:       stdio.NopCloser(strings.NewReader("ok")),
+				Body:       io.NopCloser(strings.NewReader("ok")),
 				Request:    req,
 			}, nil
 		},
@@ -526,7 +526,7 @@ func TestPipeline_Hedging_IdempotencyAndBody(t *testing.T) {
 	postReqWithBody := &http.Request{
 		Method:  http.MethodPost,
 		URL:     postReq.URL,
-		Body:    stdio.NopCloser(strings.NewReader("non-repeatable body")),
+		Body:    io.NopCloser(strings.NewReader("non-repeatable body")),
 		GetBody: nil,
 	}
 
@@ -550,13 +550,13 @@ func TestPipeline_ProxyFailover_And_Hedging(t *testing.T) {
 			if strings.Contains(proxyAddr, "proxy1") {
 				return &http.Response{
 					StatusCode: http.StatusBadGateway,
-					Body:       stdio.NopCloser(strings.NewReader("")),
+					Body:       io.NopCloser(strings.NewReader("")),
 				}, nil
 			}
 
 			return &http.Response{
 				StatusCode: http.StatusOK,
-				Body:       stdio.NopCloser(strings.NewReader("proxy2 ok")),
+				Body:       io.NopCloser(strings.NewReader("proxy2 ok")),
 				Request:    req,
 			}, nil
 		},
@@ -594,7 +594,7 @@ func TestPipeline_Caching_Full(t *testing.T) {
 			"Cache-Control": []string{"max-age=60"},
 			"Vary":          []string{"Accept-Language"},
 		},
-		Body: stdio.NopCloser(strings.NewReader("cached payload data")),
+		Body: io.NopCloser(strings.NewReader("cached payload data")),
 	}
 
 	pipeEngine.saveToCache(req, respOriginal, cacheCfg)
@@ -602,7 +602,7 @@ func TestPipeline_Caching_Full(t *testing.T) {
 	cachedResp := pipeEngine.tryGetFromCache(req, cacheCfg)
 	require.NotNil(t, cachedResp)
 	assert.Equal(t, http.StatusOK, cachedResp.StatusCode)
-	cachedBody, _ := stdio.ReadAll(cachedResp.Body)
+	cachedBody, _ := io.ReadAll(cachedResp.Body)
 	assert.Equal(t, "cached payload data", string(cachedBody))
 
 	reqMismatch, _ := http.NewRequestWithContext(t.Context(), http.MethodGet, "http://example.com/cached-route", nil)
@@ -793,7 +793,7 @@ func TestPipeline_PhasePrep_Full(t *testing.T) {
 	assert.Equal(t, "Profile1", stdReq.Header.Get("Sec-CH-UA"))
 	assert.Equal(t, "injected", stdReq.Header.Get("X-Mod-Header"))
 
-	_, _ = stdio.ReadAll(stdReq.Body)
+	_, _ = io.ReadAll(stdReq.Body)
 
 	assert.Greater(t, uploadBytesRead, int64(0))
 
@@ -814,7 +814,7 @@ func TestPipeline_Cloudflare403WAF(t *testing.T) {
 		return &http.Response{
 			StatusCode: http.StatusForbidden,
 			Header:     hdr,
-			Body:       stdio.NopCloser(strings.NewReader("Cloudflare WAF Challenge")),
+			Body:       io.NopCloser(strings.NewReader("Cloudflare WAF Challenge")),
 			Request:    req,
 		}, nil
 	})
@@ -840,7 +840,7 @@ func TestPipeline_MisdirectedRequest421(t *testing.T) {
 		return &http.Response{
 			StatusCode: http.StatusMisdirectedRequest,
 			Header:     make(http.Header),
-			Body:       stdio.NopCloser(strings.NewReader("421 Misdirected Request")),
+			Body:       io.NopCloser(strings.NewReader("421 Misdirected Request")),
 			Request:    req,
 		}, nil
 	})
@@ -864,7 +864,7 @@ func TestPipeline_TooManyRequests429_RetryAfter(t *testing.T) {
 		return &http.Response{
 			StatusCode: http.StatusTooManyRequests,
 			Header:     hdr,
-			Body:       stdio.NopCloser(strings.NewReader("Rate Limited")),
+			Body:       io.NopCloser(strings.NewReader("Rate Limited")),
 			Request:    req,
 		}, nil
 	})
@@ -886,7 +886,7 @@ func TestPipeline_ServiceUnavailable503(t *testing.T) {
 		return &http.Response{
 			StatusCode: http.StatusServiceUnavailable,
 			Header:     make(http.Header),
-			Body:       stdio.NopCloser(strings.NewReader("503 Service Unavailable")),
+			Body:       io.NopCloser(strings.NewReader("503 Service Unavailable")),
 			Request:    req,
 		}, nil
 	})

@@ -28,7 +28,7 @@ import (
 
 	"github.com/lemon4ksan/aoni"
 	"github.com/lemon4ksan/aoni/codec/decode"
-	"github.com/lemon4ksan/aoni/internal/compress/gzip"
+	"github.com/lemon4ksan/aoni/internal/compress"
 	"github.com/lemon4ksan/aoni/mod"
 	"github.com/lemon4ksan/aoni/request"
 )
@@ -848,16 +848,9 @@ func decodeProtoPayload[T any](payload []byte, flags byte) (T, error) {
 	var zero T
 
 	if flags&0x01 != 0 {
-		gzReader, err := gzip.NewReader(bytes.NewReader(payload))
+		decompressed, err := compress.Gunzip(payload, nil)
 		if err != nil {
 			return zero, fmt.Errorf("aoni/stream: decompress gRPC-Web frame failed: %w", err)
-		}
-
-		decompressed, err := io.ReadAll(gzReader)
-		_ = gzReader.Close()
-
-		if err != nil {
-			return zero, fmt.Errorf("aoni/stream: read decompressed gRPC-Web payload failed: %w", err)
 		}
 
 		payload = decompressed

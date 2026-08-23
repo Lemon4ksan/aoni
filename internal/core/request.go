@@ -8,7 +8,7 @@ package core
 
 import (
 	"context"
-	stdio "io"
+	"io"
 	"iter"
 	"net/http"
 	"net/url"
@@ -46,8 +46,8 @@ type Request interface {
 	// Payload Body Operations
 	SetBodyBytes(body []byte)
 	BodyBytes() []byte
-	SetBodyStream(r stdio.Reader, contentLength int64)
-	BodyStream() stdio.Reader
+	SetBodyStream(r io.Reader, contentLength int64)
+	BodyStream() io.Reader
 
 	// Underlying Engine Requests
 	HTTPRequest() *http.Request

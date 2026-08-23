@@ -50,7 +50,7 @@ func NewQPACKCodec() *QPACKCodec {
 func (q *QPACKCodec) AcquireEncoder() *PooledEncoder {
 	p := encoderPool.Get().(*PooledEncoder)
 	p.buf.Reset()
-	p.enc = qpack.NewEncoder(p.buf)
+	p.enc.Reset(p.buf)
 
 	return p
 }

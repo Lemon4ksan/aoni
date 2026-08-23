@@ -26,22 +26,7 @@ func decompressFastResponse(resp *fasthttp.Response) bool {
 		return false
 	}
 
-	var (
-		decompressed []byte
-		err          error
-	)
-
-	switch {
-	case bytesconv.ContainsFoldASCII(encodingBytes, "gzip"):
-		decompressed, err = resp.BodyGunzip()
-
-	case bytesconv.ContainsFoldASCII(encodingBytes, "br"):
-		decompressed, err = compress.Unbrotli(body, nil)
-
-	case bytesconv.ContainsFoldASCII(encodingBytes, "zstd"):
-		decompressed, err = compress.Unzstd(body, nil)
-	}
-
+	decompressed, err := compress.Decompress(bytesconv.B2S(encodingBytes), body, nil)
 	if err == nil && len(decompressed) > 0 {
 		resp.SetBody(decompressed)
 		resp.Header.Del("Content-Encoding")

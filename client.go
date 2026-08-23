@@ -19,8 +19,8 @@ import (
 
 	"github.com/lemon4ksan/aoni/cookie"
 	"github.com/lemon4ksan/aoni/internal/core"
-	"github.com/lemon4ksan/aoni/internal/experimental"
 	"github.com/lemon4ksan/aoni/internal/pipeline"
+	"github.com/lemon4ksan/aoni/internal/sys"
 	"github.com/lemon4ksan/aoni/netutil/power"
 	"github.com/lemon4ksan/aoni/telemetry"
 )
@@ -642,7 +642,7 @@ func (c *Client) applyConfig(cfg Config) {
 	c.applyPowerManagement(cfg.Network.EnablePowerManagement)
 
 	if len(cfg.Network.CPUAffinityCores) > 0 {
-		experimental.ApplyCPUAffinity(cfg.Network.CPUAffinityCores)
+		sys.ApplyCPUAffinity(cfg.Network.CPUAffinityCores)
 	}
 
 	c.pipeline = pipeline.New(

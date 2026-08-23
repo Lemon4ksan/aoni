@@ -6,7 +6,7 @@ package pipeline
 
 import (
 	"context"
-	stdio "io"
+	"io"
 	"sync"
 	"time"
 )
@@ -21,7 +21,7 @@ type ExecutionCycle struct {
 	RedirectHops int                // Current count of followed HTTP redirect hops
 	MaxRedirects int                // Upper bound on followed HTTP redirects
 	mu           sync.Mutex         // Protects cleanupStack and counter state
-	cleanupStack []stdio.Closer     // Stack of resource closers released when Finish() is invoked
+	cleanupStack []io.Closer        // Stack of resource closers released when Finish() is invoked
 }
 
 // NewExecutionCycle instantiates an [ExecutionCycle] with deadline timeouts and redirect limits.
@@ -59,7 +59,7 @@ func NewExecutionCycle(
 		StartTime:    time.Now(),
 		MaxAttempts:  maxAttempts,
 		MaxRedirects: maxRedirects,
-		cleanupStack: make([]stdio.Closer, 0, 4),
+		cleanupStack: make([]io.Closer, 0, 4),
 	}
 
 	return cycle, ctx
@@ -80,7 +80,7 @@ func (c *ExecutionCycle) NextAttempt() bool {
 }
 
 // RegisterCleanup pushes a resource closer onto the cycle cleanup stack.
-func (c *ExecutionCycle) RegisterCleanup(closer stdio.Closer) {
+func (c *ExecutionCycle) RegisterCleanup(closer io.Closer) {
 	if closer == nil {
 		return
 	}

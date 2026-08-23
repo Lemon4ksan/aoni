@@ -9,7 +9,7 @@ import (
 	"context"
 	"crypto/tls"
 	"encoding/hex"
-	stdio "io"
+	"io"
 	"net"
 	"net/http"
 	"net/http/httptrace"
@@ -134,7 +134,7 @@ func stageUploadProgress[Req, Resp any](_ *Pipeline[Req, Resp], req *http.Reques
 
 		if req.GetBody != nil {
 			origGetBody := req.GetBody
-			req.GetBody = func() (stdio.ReadCloser, error) {
+			req.GetBody = func() (io.ReadCloser, error) {
 				rc, err := origGetBody()
 				if err != nil {
 					return nil, err
@@ -423,7 +423,7 @@ func convertRequestToStd(r core.Request) *http.Request {
 	}
 
 	var (
-		bodyReader stdio.Reader
+		bodyReader io.Reader
 		contentLen int64 = -1
 	)
 
@@ -463,6 +463,10 @@ func convertRequestToStd(r core.Request) *http.Request {
 			if host := string(fastReq.Header.Peek("Host")); host != "" {
 				stdReq.Host = host
 			}
+		}
+	} else if r.Headers() != nil {
+		for k, v := range r.Headers() {
+			stdReq.Header.Add(string(k), string(v))
 		}
 	}
 

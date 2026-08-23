@@ -13,7 +13,7 @@ import (
 
 	"golang.org/x/net/http2"
 
-	"github.com/lemon4ksan/aoni/internal/experimental"
+	"github.com/lemon4ksan/aoni/internal/sys"
 )
 
 // Engine is the central runtime execution engine orchestrator.
@@ -23,7 +23,7 @@ type Engine struct {
 	AltSvc     *AltSvcCache
 	Referer    *RefererAutomaton
 	BufferPool *BufferPool
-	Features   experimental.Features
+	Features   sys.Features
 }
 
 // NewEngine constructs a central execution [Engine].
@@ -39,7 +39,7 @@ func NewEngine(
 		AltSvc:     altSvc,
 		Referer:    NewRefererAutomaton(PolicyStrictOriginWhenCrossOrigin),
 		BufferPool: GlobalBufferPool,
-		Features:   experimental.InspectFeatures(),
+		Features:   sys.InspectFeatures(),
 	}
 }
 

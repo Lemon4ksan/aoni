@@ -22,7 +22,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/andybalholm/brotli"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/valyala/fasthttp"
@@ -780,7 +779,7 @@ func TestTransport_DecompressionFormats(t *testing.T) {
 		{
 			name:     "brotli_decompression",
 			encoding: "br",
-			compress: func(w io.Writer) io.WriteCloser { return brotli.NewWriter(w) },
+			compress: func(w io.Writer) io.WriteCloser { return &brotliTestWriter{w: w} },
 			want:     "compressed brotli payload",
 		},
 		{

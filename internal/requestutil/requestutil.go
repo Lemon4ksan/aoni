@@ -7,7 +7,7 @@ package requestutil
 
 import (
 	"bytes"
-	stdio "io"
+	"io"
 	"mime"
 	"mime/multipart"
 	"net/http"
@@ -206,7 +206,7 @@ func SummarizeMultipartBody(body []byte, contentType string) string {
 
 	for {
 		part, err := reader.NextPart()
-		if err == stdio.EOF || err != nil {
+		if err == io.EOF || err != nil {
 			break
 		}
 
@@ -221,7 +221,7 @@ func SummarizeMultipartBody(body []byte, contentType string) string {
 		}
 
 		var sb strings.Builder
-		if _, err := stdio.Copy(&sb, part); err == nil {
+		if _, err := io.Copy(&sb, part); err == nil {
 			parts = append(parts, name+"="+sb.String())
 		}
 	}

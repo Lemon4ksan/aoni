@@ -6,7 +6,7 @@ package pipeline
 
 import (
 	"context"
-	stdio "io"
+	"io"
 	"net/http"
 	"net/url"
 	"strings"
@@ -208,7 +208,7 @@ func CloseResponse(resp *http.Response) {
 	}
 
 	var buf [maxBodySlurpBytes]byte
-	if r, ok := resp.Body.(stdio.Reader); ok {
+	if r, ok := resp.Body.(io.Reader); ok {
 		_, _ = r.Read(buf[:])
 	}
 

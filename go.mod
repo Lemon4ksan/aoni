@@ -3,7 +3,6 @@ module github.com/lemon4ksan/aoni
 go 1.25.4
 
 require (
-	github.com/andybalholm/brotli v1.2.0
 	github.com/lemon4ksan/foundation v0.0.0-20260820045422-43e40082e954
 	github.com/pkg/sftp v1.13.11
 	github.com/refraction-networking/utls v1.8.2
@@ -25,6 +24,7 @@ require (
 )
 
 require (
+	github.com/andybalholm/brotli v1.2.0 // indirect
 	github.com/davecgh/go-spew v1.1.2-0.20180830191138-d8f796af33cc // indirect
 	github.com/klauspost/compress v1.18.0 // indirect
 	github.com/pmezard/go-difflib v1.0.1-0.20181226105442-5d4384ee4fb2 // indirect

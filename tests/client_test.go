@@ -31,10 +31,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/andybalholm/brotli"
 	utls "github.com/refraction-networking/utls"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"github.com/valyala/fasthttp"
 
 	"github.com/lemon4ksan/aoni"
 	"github.com/lemon4ksan/aoni/codec/decode"
@@ -545,7 +545,7 @@ func TestClient_Decompression(t *testing.T) {
 		{
 			name:     "decompress_brotli",
 			encoding: "br",
-			compress: func(w io.Writer) io.WriteCloser { return brotli.NewWriter(w) },
+			compress: func(w io.Writer) io.WriteCloser { return &brotliTestWriter{w: w} },
 			want:     "decompress-brotli",
 		},
 		{
@@ -579,6 +579,22 @@ func TestClient_Decompression(t *testing.T) {
 			assert.Equal(t, tt.want, result.Message)
 		})
 	}
+}
+
+type brotliTestWriter struct {
+	w   io.Writer
+	buf bytes.Buffer
+}
+
+func (b *brotliTestWriter) Write(p []byte) (int, error) {
+	return b.buf.Write(p)
+}
+
+func (b *brotliTestWriter) Close() error {
+	compressed := fasthttp.AppendBrotliBytes(nil, b.buf.Bytes())
+	_, err := b.w.Write(compressed)
+
+	return err
 }
 
 type zstdTestWriter struct {

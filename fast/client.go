@@ -21,8 +21,8 @@ import (
 
 	"github.com/lemon4ksan/aoni"
 	"github.com/lemon4ksan/aoni/cookie"
-	"github.com/lemon4ksan/aoni/internal/experimental"
 	"github.com/lemon4ksan/aoni/internal/pipeline"
+	"github.com/lemon4ksan/aoni/internal/sys"
 	"github.com/lemon4ksan/aoni/netutil/power"
 	"github.com/lemon4ksan/aoni/telemetry"
 )
@@ -107,7 +107,7 @@ func NewClient(opts ...aoni.ClientOption) *Client {
 	)
 
 	if len(c.cfg.Network.CPUAffinityCores) > 0 {
-		experimental.ApplyCPUAffinity(c.cfg.Network.CPUAffinityCores)
+		sys.ApplyCPUAffinity(c.cfg.Network.CPUAffinityCores)
 	}
 
 	c.nativeDoer.client = c

@@ -7,7 +7,7 @@ package pipeline
 import (
 	"bufio"
 	"errors"
-	stdio "io"
+	"io"
 	"mime"
 	"net/http"
 	"slices"
@@ -19,8 +19,7 @@ import (
 	"github.com/lemon4ksan/foundation/text/encoding/htmlindex"
 	"github.com/lemon4ksan/foundation/text/transform"
 
-	"github.com/lemon4ksan/aoni/internal/compress/brotli"
-	"github.com/lemon4ksan/aoni/internal/compress/zstd"
+	"github.com/lemon4ksan/aoni/internal/compress"
 )
 
 var (
@@ -384,7 +383,7 @@ func (p *Pipeline[Req, Resp]) validateResponse(resp *http.Response, tx *Tx) erro
 
 	if len(detectors) > 0 && resp.Body != nil {
 		peekBytes, err := PeekResponseBody(resp, 4096)
-		if err != nil && !errors.Is(err, stdio.EOF) {
+		if err != nil && !errors.Is(err, io.EOF) {
 			_ = resp.Body.Close()
 			return err
 		}
@@ -462,7 +461,7 @@ func (p *Pipeline[Req, Resp]) handleDecompressionAndTranscoding(req *http.Reques
 	var filters []StreamFilter
 
 	if !hasExplicitAcceptEncoding(req) {
-		filters = append(filters, func(r *http.Response, body stdio.ReadCloser) (stdio.ReadCloser, error) {
+		filters = append(filters, func(r *http.Response, body io.ReadCloser) (io.ReadCloser, error) {
 			decompressedBody, decompressed := applyContentDecompression(r, body)
 			if decompressed {
 				r.Uncompressed = true
@@ -472,14 +471,14 @@ func (p *Pipeline[Req, Resp]) handleDecompressionAndTranscoding(req *http.Reques
 		})
 	}
 
-	filters = append(filters, func(r *http.Response, body stdio.ReadCloser) (stdio.ReadCloser, error) {
+	filters = append(filters, func(r *http.Response, body io.ReadCloser) (io.ReadCloser, error) {
 		return applyCharsetTranscoding(r, body), nil
 	})
 
 	if cfg := GetRequestConfig(req.Context()); cfg != nil && cfg.DownloadProgress != nil {
 		progress := cfg.DownloadProgress
 
-		filters = append(filters, func(r *http.Response, body stdio.ReadCloser) (stdio.ReadCloser, error) {
+		filters = append(filters, func(r *http.Response, body io.ReadCloser) (io.ReadCloser, error) {
 			return &fio.ProgressReader{
 				Reader:     body,
 				Total:      r.ContentLength,
@@ -503,35 +502,20 @@ func hasExplicitAcceptEncoding(req *http.Request) bool {
 	return cfg != nil && cfg.HasExplicitAcceptEncoding
 }
 
-func applyContentDecompression(resp *http.Response, body stdio.ReadCloser) (stdio.ReadCloser, bool) {
+func applyContentDecompression(resp *http.Response, body io.ReadCloser) (io.ReadCloser, bool) {
 	encoding := resp.Header.Get("Content-Encoding")
-	switch encoding {
-	case "br":
-		resetDecompressedHeader(resp)
-
-		return &fio.DecompressReadCloser{
-			Reader: brotli.NewReader(body),
-			Closer: body,
-		}, true
-
-	case "zstd":
-		if zstdDec, err := zstd.NewReader(body); err == nil {
-			resetDecompressedHeader(resp)
-
-			return &fio.DecompressReadCloser{
-				Reader: zstdDec,
-				Closer: body,
-			}, true
-		}
-
-	case "gzip":
-		if gzReader, err := fio.NewPooledGzipReader(body); err == nil {
-			resetDecompressedHeader(resp)
-			return gzReader, true
-		}
+	if encoding == "" || strings.EqualFold(encoding, "identity") {
+		return body, false
 	}
 
-	return body, false
+	reader, err := compress.NewReader(encoding, body)
+	if err != nil {
+		return body, false
+	}
+
+	resetDecompressedHeader(resp)
+
+	return reader, true
 }
 
 func resetDecompressedHeader(resp *http.Response) {
@@ -540,7 +524,7 @@ func resetDecompressedHeader(resp *http.Response) {
 	resp.ContentLength = -1
 }
 
-func applyCharsetTranscoding(resp *http.Response, body stdio.ReadCloser) stdio.ReadCloser {
+func applyCharsetTranscoding(resp *http.Response, body io.ReadCloser) io.ReadCloser {
 	contentType := resp.Header.Get("Content-Type")
 	if contentType == "" {
 		return body
@@ -612,7 +596,7 @@ func (p *Pipeline[Req, Resp]) handleWAFChallenge(req *http.Request, resp *http.R
 		return resp, nil
 	}
 
-	bodyBytes, err := stdio.ReadAll(stdio.LimitReader(resp.Body, 100*1024))
+	bodyBytes, err := io.ReadAll(io.LimitReader(resp.Body, 100*1024))
 	if err != nil {
 		return resp, nil //nolint:nilerr
 	}

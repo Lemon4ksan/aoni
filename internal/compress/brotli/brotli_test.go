@@ -210,9 +210,8 @@ func BenchmarkBrotliDecompress(b *testing.B) {
 
 	b.ReportAllocs()
 	b.SetBytes(int64(len(data)))
-	b.ResetTimer()
 
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		r := brotli.NewReader(bytes.NewReader(compressed))
 
 		_, err := io.Copy(io.Discard, r)
@@ -237,9 +236,8 @@ func BenchmarkBrotliDecompressReuse(b *testing.B) {
 
 	b.ReportAllocs()
 	b.SetBytes(int64(len(data)))
-	b.ResetTimer()
 
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		src.Reset(compressed)
 
 		if err := r.Reset(src); err != nil {
@@ -256,14 +254,14 @@ func BenchmarkBrotliDecompressReuse(b *testing.B) {
 func BenchmarkCompare_SmallPayload_1KB(b *testing.B) {
 	data := []byte(`{"id": 42, "user": "aoni-architect", "status": "active", "meta": {"session": "xyz-123"}}`)
 	compressed := fasthttp.AppendBrotliBytes(nil, data)
-	dst := make([]byte, 0, len(data))
 
 	b.Run("fasthttp_unbrotli", func(b *testing.B) {
+		dst := make([]byte, 0, len(data))
+
 		b.ReportAllocs()
 		b.SetBytes(int64(len(data)))
-		b.ResetTimer()
 
-		for i := 0; i < b.N; i++ {
+		for b.Loop() {
 			var err error
 
 			dst, err = fasthttp.AppendUnbrotliBytes(dst[:0], compressed)
@@ -274,11 +272,12 @@ func BenchmarkCompare_SmallPayload_1KB(b *testing.B) {
 	})
 
 	b.Run("aoni_brotli_decompress", func(b *testing.B) {
+		dst := make([]byte, 0, len(data))
+
 		b.ReportAllocs()
 		b.SetBytes(int64(len(data)))
-		b.ResetTimer()
 
-		for i := 0; i < b.N; i++ {
+		for b.Loop() {
 			var err error
 
 			dst, err = brotli.Decompress(dst[:0], compressed)
@@ -297,14 +296,14 @@ func BenchmarkCompare_MediumPayload_18KB(b *testing.B) {
 		100,
 	))
 	compressed := fasthttp.AppendBrotliBytes(nil, data)
-	dst := make([]byte, 0, len(data))
 
 	b.Run("fasthttp_unbrotli", func(b *testing.B) {
+		dst := make([]byte, 0, len(data))
+
 		b.ReportAllocs()
 		b.SetBytes(int64(len(data)))
-		b.ResetTimer()
 
-		for i := 0; i < b.N; i++ {
+		for b.Loop() {
 			var err error
 
 			dst, err = fasthttp.AppendUnbrotliBytes(dst[:0], compressed)
@@ -315,11 +314,12 @@ func BenchmarkCompare_MediumPayload_18KB(b *testing.B) {
 	})
 
 	b.Run("aoni_brotli_decompress", func(b *testing.B) {
+		dst := make([]byte, 0, len(data))
+
 		b.ReportAllocs()
 		b.SetBytes(int64(len(data)))
-		b.ResetTimer()
 
-		for i := 0; i < b.N; i++ {
+		for b.Loop() {
 			var err error
 
 			dst, err = brotli.Decompress(dst[:0], compressed)
@@ -338,14 +338,14 @@ func BenchmarkCompare_LargePayload_100KB(b *testing.B) {
 		450,
 	))
 	compressed := fasthttp.AppendBrotliBytes(nil, data)
-	dst := make([]byte, 0, len(data))
 
 	b.Run("fasthttp_unbrotli", func(b *testing.B) {
+		dst := make([]byte, 0, len(data))
+
 		b.ReportAllocs()
 		b.SetBytes(int64(len(data)))
-		b.ResetTimer()
 
-		for i := 0; i < b.N; i++ {
+		for b.Loop() {
 			var err error
 
 			dst, err = fasthttp.AppendUnbrotliBytes(dst[:0], compressed)
@@ -356,11 +356,12 @@ func BenchmarkCompare_LargePayload_100KB(b *testing.B) {
 	})
 
 	b.Run("aoni_brotli_decompress", func(b *testing.B) {
+		dst := make([]byte, 0, len(data))
+
 		b.ReportAllocs()
 		b.SetBytes(int64(len(data)))
-		b.ResetTimer()
 
-		for i := 0; i < b.N; i++ {
+		for b.Loop() {
 			var err error
 
 			dst, err = brotli.Decompress(dst[:0], compressed)

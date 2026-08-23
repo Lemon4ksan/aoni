@@ -12,17 +12,9 @@ import (
 	"errors"
 	"io"
 	"net/http"
-	"sync"
 
 	"github.com/lemon4ksan/foundation/async/dedup"
 )
-
-// call represents an active or completed in-flight request.
-type call struct {
-	done chan struct{}
-	val  *cachedResponse
-	err  error
-}
 
 type cachedResponse struct {
 	statusCode int
@@ -34,15 +26,12 @@ type cachedResponse struct {
 
 // Group manages request coalescing and deduplication for concurrent in-flight operations.
 type Group struct {
-	mu sync.Mutex
-	m  map[string]*call
+	group dedup.Group[string, *cachedResponse]
 }
 
 // NewGroup creates a new request deduplication [Group].
 func NewGroup() *Group {
-	return &Group{
-		m: make(map[string]*call),
-	}
+	return &Group{}
 }
 
 // DefaultGroup is the package-level shared singleflight group.
@@ -51,63 +40,37 @@ var DefaultGroup = NewGroup()
 // Do executes and deduplicates fn by key. If a call with the same key is already in-flight,
 // the caller waits and shares the response body without initiating a second network transaction.
 func (g *Group) Do(ctx context.Context, key string, fn func() (*http.Response, error)) (*http.Response, error) {
-	g.mu.Lock()
-	if c, ok := g.m[key]; ok {
-		g.mu.Unlock()
-
-		select {
-		case <-ctx.Done():
-			return nil, ctx.Err()
-		case <-c.done:
-			if c.err != nil {
-				return nil, c.err
-			}
-
-			if c.val == nil {
-				return nil, errors.New("aoni/coalesce: nil response from coalesced call")
-			}
-
-			return c.val.toHTTPResponse(), nil
+	cached, err := g.group.Do(ctx, key, func(callCtx context.Context) (*cachedResponse, error) {
+		resp, fnErr := fn()
+		if fnErr != nil {
+			return nil, fnErr
 		}
-	}
 
-	c := &call{
-		done: make(chan struct{}),
-	}
-	g.m[key] = c
-	g.mu.Unlock()
+		if resp == nil {
+			return nil, errors.New("aoni/coalesce: nil response from handler")
+		}
 
-	defer func() {
-		g.mu.Lock()
-		delete(g.m, key)
-		g.mu.Unlock()
-		close(c.done)
-	}()
+		// Buffer response body so all waiting goroutines receive independent copies
+		bodyBytes, readErr := io.ReadAll(resp.Body)
+		_ = resp.Body.Close()
 
-	resp, err := fn()
+		if readErr != nil {
+			return nil, readErr
+		}
+
+		return &cachedResponse{
+			statusCode: resp.StatusCode,
+			status:     resp.Status,
+			proto:      resp.Proto,
+			header:     resp.Header.Clone(),
+			body:       bodyBytes,
+		}, nil
+	})
 	if err != nil {
-		c.err = err
 		return nil, err
 	}
 
-	// Buffer response body so all waiting goroutines receive independent copies
-	bodyBytes, readErr := io.ReadAll(resp.Body)
-	_ = resp.Body.Close()
-
-	if readErr != nil {
-		c.err = readErr
-		return nil, readErr
-	}
-
-	c.val = &cachedResponse{
-		statusCode: resp.StatusCode,
-		status:     resp.Status,
-		proto:      resp.Proto,
-		header:     resp.Header.Clone(),
-		body:       bodyBytes,
-	}
-
-	return c.val.toHTTPResponse(), nil
+	return cached.toHTTPResponse(), nil
 }
 
 func (cr *cachedResponse) toHTTPResponse() *http.Response {

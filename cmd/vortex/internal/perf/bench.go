@@ -30,7 +30,7 @@ import (
 	"github.com/lemon4ksan/aoni/fast"
 	"github.com/lemon4ksan/aoni/fingerprint/profiles"
 	"github.com/lemon4ksan/aoni/fingerprint/profiles/chrome"
-	"github.com/lemon4ksan/aoni/internal/experimental"
+	"github.com/lemon4ksan/aoni/internal/sys"
 )
 
 // BenchmarkReport represents structured benchmark results for CI/CD automation.
@@ -102,7 +102,7 @@ func (c *CmdBench) Run(ctx context.Context, args []string, stdout, stderr io.Wri
 		}()
 	}
 
-	feats := experimental.InspectFeatures()
+	feats := sys.InspectFeatures()
 
 	if !*jsonFlag {
 		fmt.Fprintln(stdout, "==========================================================================")

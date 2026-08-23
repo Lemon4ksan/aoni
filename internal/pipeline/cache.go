@@ -10,7 +10,7 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
-	stdio "io"
+	"io"
 	"net/http"
 	"net/url"
 	"slices"
@@ -196,7 +196,7 @@ func (p *Pipeline[Req, Resp]) tryGetFromCache(req *http.Request, cfg *CacheConfi
 	return &http.Response{
 		StatusCode:    cached.StatusCode,
 		Header:        respHeaders,
-		Body:          stdio.NopCloser(bytes.NewReader(bodyBytes)),
+		Body:          io.NopCloser(bytes.NewReader(bodyBytes)),
 		ContentLength: int64(len(bodyBytes)),
 		Request:       req,
 	}
@@ -260,15 +260,15 @@ func (p *Pipeline[Req, Resp]) saveToCache(req *http.Request, resp *http.Response
 
 	var bodyBuf bytes.Buffer
 
-	tee := stdio.TeeReader(resp.Body, &bodyBuf)
+	tee := io.TeeReader(resp.Body, &bodyBuf)
 
-	bodyBytes, readErr := stdio.ReadAll(tee)
+	bodyBytes, readErr := io.ReadAll(tee)
 	if readErr != nil {
 		return
 	}
 
 	_ = resp.Body.Close()
-	resp.Body = stdio.NopCloser(bytes.NewReader(bodyBytes))
+	resp.Body = io.NopCloser(bytes.NewReader(bodyBytes))
 
 	cached := CachedResponse{
 		StatusCode:  resp.StatusCode,

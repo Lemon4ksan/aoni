@@ -40,7 +40,7 @@ import (
 	"time"
 	"unicode/utf8"
 
-	"github.com/andybalholm/brotli"
+	"github.com/lemon4ksan/aoni/internal/compress/brotli"
 )
 
 // CmdRecord captures live HTTP/HTTPS traffic from applications into standard W3C HAR 1.2 files.

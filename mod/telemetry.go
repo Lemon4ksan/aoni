@@ -7,7 +7,7 @@ package mod
 import (
 	"bytes"
 	"fmt"
-	stdio "io"
+	"io"
 	"net/http"
 	"os"
 
@@ -76,7 +76,7 @@ func dumpStdRequest(stdReq *http.Request) {
 
 		_, _ = fio.CopyZeroAlloc(&buf, stdReq.Body)
 		body = buf.Bytes()
-		stdReq.Body = stdio.NopCloser(bytes.NewReader(body))
+		stdReq.Body = io.NopCloser(bytes.NewReader(body))
 	}
 
 	curl := telemetry.CurlFromRequest(stdReq, body)

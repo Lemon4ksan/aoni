@@ -5,7 +5,7 @@
 package pipeline
 
 import (
-	stdio "io"
+	"io"
 	"net/http"
 
 	fio "github.com/lemon4ksan/foundation/io"
@@ -14,7 +14,7 @@ import (
 // StreamFilter defines a response body stream transformation filter.
 // It receives the HTTP response metadata and current body reader stream,
 // returning a transformed body reader stream or error.
-type StreamFilter func(resp *http.Response, body stdio.ReadCloser) (stdio.ReadCloser, error)
+type StreamFilter func(resp *http.Response, body io.ReadCloser) (io.ReadCloser, error)
 
 // StreamPipeline encapsulates a sequential stream filter execution chain.
 type StreamPipeline struct {
@@ -70,7 +70,7 @@ func ExecuteStreamPipeline(resp *http.Response, filters []StreamFilter) error {
 
 // DecompressStreamFilter returns a StreamFilter that decompresses Brotli, Zstd, or Gzip payloads.
 func DecompressStreamFilter(req *http.Request) StreamFilter {
-	return func(r *http.Response, body stdio.ReadCloser) (stdio.ReadCloser, error) {
+	return func(r *http.Response, body io.ReadCloser) (io.ReadCloser, error) {
 		if hasExplicitAcceptEncoding(req) {
 			return body, nil
 		}
@@ -86,7 +86,7 @@ func DecompressStreamFilter(req *http.Request) StreamFilter {
 
 // TranscodeStreamFilter returns a StreamFilter that transcodes non-UTF-8 character sets to UTF-8.
 func TranscodeStreamFilter() StreamFilter {
-	return func(r *http.Response, body stdio.ReadCloser) (stdio.ReadCloser, error) {
+	return func(r *http.Response, body io.ReadCloser) (io.ReadCloser, error) {
 		return applyCharsetTranscoding(r, body), nil
 	}
 }
@@ -97,7 +97,7 @@ func ProgressStreamFilter(progress fio.ProgressFunc) StreamFilter {
 		return nil
 	}
 
-	return func(r *http.Response, body stdio.ReadCloser) (stdio.ReadCloser, error) {
+	return func(r *http.Response, body io.ReadCloser) (io.ReadCloser, error) {
 		return &fio.ProgressReader{
 			Reader:     body,
 			Total:      r.ContentLength,

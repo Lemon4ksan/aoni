@@ -21,6 +21,13 @@ func NewEncoder(w io.Writer) *Encoder {
 	}
 }
 
+// Reset resets the encoder state to write to w without allocations.
+func (e *Encoder) Reset(w io.Writer) {
+	e.w = w
+	e.buf = e.buf[:0]
+	e.wrotePrefix = false
+}
+
 // WriteField writes a single HeaderField to the output stream.
 func (e *Encoder) WriteField(hf HeaderField) error {
 	if !e.wrotePrefix {

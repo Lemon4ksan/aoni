@@ -191,6 +191,11 @@ type Reader struct {
 	shouldWrapRingbuffer      bool
 	cannyRingbufferAllocation bool
 	largeWindow               bool
+
+	// In-struct streaming fields to avoid local variable heap escape during decompressStream
+	streamAvailIn  uint
+	streamAvailOut uint
+	streamNextOut  []byte
 }
 
 func (s *Reader) initState() bool {

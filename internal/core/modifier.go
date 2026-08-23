@@ -6,10 +6,14 @@ package core
 
 import (
 	"bytes"
+	"context"
 	"io"
+	"iter"
 	"net/http"
+	"net/url"
 
 	fio "github.com/lemon4ksan/foundation/io"
+	"github.com/lemon4ksan/foundation/silicon/bytesconv"
 
 	"github.com/lemon4ksan/aoni/netutil"
 )
@@ -172,12 +176,156 @@ func (m RequestModifier) ApplyStd(req *http.Request) {
 
 	case ModCustom:
 		if m.Fn != nil {
-			r := NewStdRequest(req)
+			r := &stdReqAdapter{req: req}
 			m.Fn(r)
-			ReleaseStdRequest(r)
 		}
 	}
 }
+
+type stdReqAdapter struct {
+	req *http.Request
+}
+
+func (s *stdReqAdapter) Context() context.Context       { return s.req.Context() }
+func (s *stdReqAdapter) SetContext(ctx context.Context) { *s.req = *s.req.WithContext(ctx) }
+func (s *stdReqAdapter) Method() string                 { return s.req.Method }
+func (s *stdReqAdapter) SetMethod(m string)             { s.req.Method = m }
+func (s *stdReqAdapter) URL() string {
+	if s.req.URL == nil {
+		return ""
+	}
+
+	return s.req.URL.String()
+}
+
+func (s *stdReqAdapter) SetURL(u string) {
+	if parsed, err := url.Parse(u); err == nil {
+		s.req.URL = parsed
+		if parsed.Host != "" {
+			s.req.Host = parsed.Host
+		}
+	}
+}
+
+func (s *stdReqAdapter) Path() string {
+	if s.req.URL == nil {
+		return ""
+	}
+
+	return s.req.URL.Path
+}
+
+func (s *stdReqAdapter) SetPath(p string) {
+	if s.req.URL != nil {
+		s.req.URL.Path = p
+	}
+}
+
+func (s *stdReqAdapter) RawQuery() string {
+	if s.req.URL == nil {
+		return ""
+	}
+
+	return s.req.URL.RawQuery
+}
+
+func (s *stdReqAdapter) SetRawQuery(q string) {
+	if s.req.URL != nil {
+		s.req.URL.RawQuery = q
+	}
+}
+
+func (s *stdReqAdapter) AddQueryParam(k, v string) {
+	if s.req.URL == nil {
+		return
+	}
+
+	q := s.req.URL.Query()
+	q.Add(k, v)
+	s.req.URL.RawQuery = q.Encode()
+}
+
+func (s *stdReqAdapter) Header(k string) string {
+	if s.req.Header == nil {
+		return ""
+	}
+
+	return s.req.Header.Get(k)
+}
+
+func (s *stdReqAdapter) Headers() iter.Seq2[[]byte, []byte] {
+	return func(yield func([]byte, []byte) bool) {
+		if s.req == nil || s.req.Header == nil {
+			return
+		}
+
+		for k, vv := range s.req.Header {
+			kB := bytesconv.S2B(k)
+			for _, v := range vv {
+				if !yield(kB, bytesconv.S2B(v)) {
+					return
+				}
+			}
+		}
+	}
+}
+
+func (s *stdReqAdapter) SetHeader(k, v string) {
+	if s.req.Header == nil {
+		s.req.Header = make(http.Header)
+	}
+
+	s.req.Header.Set(k, v)
+}
+
+func (s *stdReqAdapter) AddHeader(k, v string) {
+	if s.req.Header == nil {
+		s.req.Header = make(http.Header)
+	}
+
+	s.req.Header.Add(k, v)
+}
+
+func (s *stdReqAdapter) DelHeader(k string) {
+	if s.req.Header != nil {
+		s.req.Header.Del(k)
+	}
+}
+
+func (s *stdReqAdapter) ResetHeaders() {
+	s.req.Header = make(http.Header)
+}
+
+func (s *stdReqAdapter) SetBodyBytes(b []byte) {
+	s.req.Body = io.NopCloser(bytes.NewReader(b))
+	s.req.ContentLength = int64(len(b))
+}
+
+func (s *stdReqAdapter) BodyBytes() []byte {
+	if s.req.Body == nil {
+		return nil
+	}
+
+	b, _ := io.ReadAll(s.req.Body)
+	s.req.Body = io.NopCloser(bytes.NewReader(b))
+
+	return b
+}
+
+func (s *stdReqAdapter) SetBodyStream(r io.Reader, cl int64) {
+	if rc, ok := r.(io.ReadCloser); ok {
+		s.req.Body = rc
+	} else if r != nil {
+		s.req.Body = io.NopCloser(r)
+	}
+
+	s.req.ContentLength = cl
+}
+func (s *stdReqAdapter) BodyStream() io.Reader      { return s.req.Body }
+func (s *stdReqAdapter) HTTPRequest() *http.Request { return s.req }
+func (s *stdReqAdapter) EngineRequest() any         { return s.req }
+
+var _ Request = (*stdReqAdapter)(nil)
 
 // ProgressFunc is a callback invoked periodically to monitor stream upload or download progress.
 type ProgressFunc = fio.ProgressFunc

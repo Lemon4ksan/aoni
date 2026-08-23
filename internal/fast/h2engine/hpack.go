@@ -9,7 +9,7 @@ import (
 	"fmt"
 	"sync"
 
-	rodata "github.com/lemon4ksan/foundation/net/http/rodata"
+	"github.com/lemon4ksan/foundation/net/http/rodata"
 	"github.com/lemon4ksan/foundation/silicon/pool"
 )
 

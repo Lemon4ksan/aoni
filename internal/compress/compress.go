@@ -201,6 +201,122 @@ func ReleaseBrotliReader(br *brotli.Reader) {
 	brotli.ReleaseReader(br)
 }
 
+// NewReader returns a pooled [io.ReadCloser] that decompresses data from r
+// using the specified Content-Encoding algorithm ("gzip", "br", "zstd", "deflate").
+// When Close is called, the underlying decompressor and buffers are automatically
+// returned to their pools, and r.Close() is called if r implements io.Closer.
+func NewReader(encoding string, r io.Reader) (io.ReadCloser, error) {
+	if r == nil {
+		return nil, errors.New("compress: nil reader")
+	}
+
+	enc := strings.ToLower(strings.TrimSpace(encoding))
+	switch enc {
+	case "gzip", "x-gzip":
+		zr := gzipReaderStorage.Get()
+		if err := zr.Reset(r); err != nil {
+			gzipReaderStorage.Put(zr)
+
+			return nil, err
+		}
+
+		return &decompressReadCloser{
+			reader: zr,
+			closer: closerOf(r),
+			release: func() {
+				_ = zr.Close()
+				gzipReaderStorage.Put(zr)
+			},
+		}, nil
+
+	case "br":
+		br := brotli.AcquireReader(r)
+
+		return &decompressReadCloser{
+			reader: br,
+			closer: closerOf(r),
+			release: func() {
+				brotli.ReleaseReader(br)
+			},
+		}, nil
+
+	case "zstd":
+		dec := zstdDecoderStorage.Get()
+		if err := dec.Reset(r); err != nil {
+			zstdDecoderStorage.Put(dec)
+
+			return nil, err
+		}
+
+		return &decompressReadCloser{
+			reader: dec,
+			closer: closerOf(r),
+			release: func() {
+				_ = dec.Reset(nil)
+				zstdDecoderStorage.Put(dec)
+			},
+		}, nil
+
+	case "deflate":
+		fr := flateReaderStorage.Get()
+		if err := fr.Reset(r, nil); err != nil {
+			flateReaderStorage.Put(fr)
+
+			return nil, err
+		}
+
+		return &decompressReadCloser{
+			reader: fr.(io.Reader),
+			closer: closerOf(r),
+			release: func() {
+				flateReaderStorage.Put(fr)
+			},
+		}, nil
+
+	case "", "identity":
+		if rc, ok := r.(io.ReadCloser); ok {
+			return rc, nil
+		}
+
+		return io.NopCloser(r), nil
+
+	default:
+		return nil, ErrUnsupportedEncoding
+	}
+}
+
+type decompressReadCloser struct {
+	reader  io.Reader
+	closer  io.Closer
+	release func()
+}
+
+func (d *decompressReadCloser) Read(p []byte) (int, error) {
+	return d.reader.Read(p)
+}
+
+func (d *decompressReadCloser) Close() error {
+	var err error
+	if d.closer != nil {
+		err = d.closer.Close()
+	}
+
+	if d.release != nil {
+		d.release()
+		d.release = nil
+	}
+
+	return err
+}
+
+func closerOf(r io.Reader) io.Closer {
+	if c, ok := r.(io.Closer); ok {
+		return c
+	}
+
+	return nil
+}
+
 // IsCompressed reports whether b contains compression magic bytes for gzip, brotli, or zstd.
 func IsCompressed(b []byte) bool {
 	if len(b) < 4 {
