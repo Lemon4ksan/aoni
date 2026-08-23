@@ -546,11 +546,8 @@ func TestProxyRotator_StickySession(t *testing.T) {
 		_, err = r.Do(req)
 		require.NoError(t, err)
 
-		r.mu.Lock()
-		entry := r.sessions["session-id-1"]
-		r.mu.Unlock()
-		require.NotNil(t, entry)
-		activeIdx := entry.clientIdx
+		activeIdx, ok := r.sessions.Get("session-id-1")
+		require.True(t, ok)
 
 		_, err = r.Do(req)
 		require.NoError(t, err)
@@ -580,9 +577,7 @@ func TestProxyRotator_StickySession(t *testing.T) {
 			assert.Equal(t, 2, m2.GetCalls())
 		}
 
-		r.mu.Lock()
-		r.sessions["session-id-1"].clientIdx = 999
-		r.mu.Unlock()
+		r.sessions.Set("session-id-1", 999, r.sessionTTL)
 
 		_, err = r.Do(req)
 		require.NoError(t, err)

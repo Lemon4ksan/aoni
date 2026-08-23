@@ -12,6 +12,7 @@ import (
 	"encoding/hex"
 	"io"
 	"net"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -181,13 +182,11 @@ func (s *Server) buildServerConfig() *ssh.ServerConfig {
 func (s *Server) setupPublicKeyCallback(config *ssh.ServerConfig) {
 	certChecker := &ssh.CertChecker{
 		IsUserAuthority: func(auth ssh.PublicKey) bool {
-			for _, caKey := range s.UserCAKeys {
-				if bytes.Equal(auth.Marshal(), caKey.Marshal()) {
-					return true
-				}
-			}
+			authBytes := auth.Marshal()
 
-			return false
+			return slices.ContainsFunc(s.UserCAKeys, func(caKey ssh.PublicKey) bool {
+				return bytes.Equal(authBytes, caKey.Marshal())
+			})
 		},
 	}
 

@@ -16,7 +16,7 @@ import (
 )
 
 // WithVar constructs an [aoni.RequestModifier] that interpolates a single URI template placeholder
-// (e.g. "{key}") with value according to RFC 6570 Level 1 URI Template variable expansion.
+// (e.g. "{key}") with a percent-encoded value according to RFC 6570 Level 1, RFC 3986 §2.1, and RFC 8820 §3.
 func WithVar(key string, value any) aoni.RequestModifier {
 	return aoni.RequestModifier{
 		Kind: core.ModCustom,
@@ -29,7 +29,8 @@ func WithVar(key string, value any) aoni.RequestModifier {
 }
 
 // WithVars constructs an [aoni.RequestModifier] replacing multiple path template placeholders using key-value pairs
-// per RFC 6570 URI Template variable substitution. Requires an even number of arguments (alternating key and value pairs).
+// per RFC 6570 URI Template variable substitution (RFC 8820 §3) and RFC 3986 §2.1 / §3.3 path segment encoding.
+// Requires an even number of arguments (alternating key and value pairs).
 func WithVars(pairs ...any) aoni.RequestModifier {
 	if len(pairs)%2 != 0 {
 		return aoni.RequestModifier{
@@ -52,7 +53,7 @@ func WithVars(pairs ...any) aoni.RequestModifier {
 	}
 }
 
-// WithBaseURL constructs an [aoni.RequestModifier] overriding the target request URL base (RFC 3986 §5).
+// WithBaseURL constructs an [aoni.RequestModifier] overriding the target request Base URI (RFC 3986 §5.1).
 func WithBaseURL(baseURL string) aoni.RequestModifier {
 	return aoni.RequestModifier{
 		Kind: core.ModCustom,
@@ -62,7 +63,7 @@ func WithBaseURL(baseURL string) aoni.RequestModifier {
 	}
 }
 
-// WithoutBaseURL constructs an [aoni.RequestModifier] resetting target request URL base to local path.
+// WithoutBaseURL constructs an [aoni.RequestModifier] resetting target request URL to the local path (RFC 3986 §5.1.4).
 func WithoutBaseURL() aoni.RequestModifier {
 	return aoni.RequestModifier{
 		Kind: core.ModCustom,
@@ -72,7 +73,7 @@ func WithoutBaseURL() aoni.RequestModifier {
 	}
 }
 
-// WithQuery constructs an [aoni.RequestModifier] appending query parameters to request URL.
+// WithQuery constructs an [aoni.RequestModifier] appending query parameters to the request URL (RFC 3986 §3.4).
 // Accepts either (key, value) pairs or a single struct/map query payload.
 func WithQuery(args ...any) aoni.RequestModifier {
 	if len(args) == 1 {
@@ -93,7 +94,7 @@ func WithQuery(args ...any) aoni.RequestModifier {
 	return aoni.RequestModifier{}
 }
 
-// WithQueryParams constructs an [aoni.RequestModifier] encoding structure or map query into URL query parameters.
+// WithQueryParams constructs an [aoni.RequestModifier] encoding structure or map query into URL query parameters (RFC 3986 §3.4).
 func WithQueryParams(query any) aoni.RequestModifier {
 	return aoni.RequestModifier{
 		Kind: core.ModCustom,
@@ -121,7 +122,7 @@ func WithQueryParams(query any) aoni.RequestModifier {
 	}
 }
 
-// resolveQueryString encodes query into URL query parameters using configured query encoder or default codec.
+// resolveQueryString encodes query into URL query parameters using configured query encoder or default codec (RFC 3986 §3.4).
 func resolveQueryString(req aoni.Request, query any) (string, error) {
 	if s, ok := query.(string); ok {
 		return s, nil

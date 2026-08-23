@@ -4,7 +4,8 @@
 
 package h2engine
 
-// HuffmanEncode compresses src bytes using static HPACK Huffman codes with BCE optimizations.
+// HuffmanEncode compresses src bytes using the canonical static HPACK Huffman code table (RFC 7541 §5.2 & Appendix B)
+// with BCE (Bounds Check Elimination) compiler optimizations.
 func HuffmanEncode(dst, src []byte) []byte {
 	nSrc := len(src)
 	if nSrc == 0 {
@@ -36,6 +37,7 @@ func HuffmanEncode(dst, src []byte) []byte {
 	}
 
 	if length > 0 {
+		// RFC 7541 §5.2: Pad incomplete byte using most significant bits of the EOS symbol
 		n := 8 - length
 		code = code<<n | (1<<n - 1)
 		dst = append(dst, byte(code))
@@ -44,7 +46,7 @@ func HuffmanEncode(dst, src []byte) []byte {
 	return dst
 }
 
-// HuffmanDecode decompresses HPACK Huffman encoded src bytes into dst.
+// HuffmanDecode decompresses HPACK Huffman encoded src bytes into dst using tree-based decoding (RFC 7541 §5.2 & Appendix B).
 func HuffmanDecode(dst, src []byte) []byte {
 	var (
 		cum  uint32
@@ -122,6 +124,7 @@ func (node *huffmanNode) add(sym byte, code uint32, length uint8) {
 	}
 }
 
+// huffmanCodes defines the canonical 256-symbol static Huffman code definitions aligned to LSB (RFC 7541 Appendix B).
 var huffmanCodes = [256]uint32{
 	0x1ff8, 0x7fffd8, 0xfffffe2, 0xfffffe3, 0xfffffe4, 0xfffffe5, 0xfffffe6, 0xfffffe7,
 	0xfffffe8, 0xffffea, 0x3ffffffc, 0xfffffe9, 0xfffffea, 0x3ffffffd, 0xfffffeb, 0xfffffec,
@@ -157,6 +160,7 @@ var huffmanCodes = [256]uint32{
 	0x7ffffeb, 0xffffffe, 0x7ffffec, 0x7ffffed, 0x7ffffee, 0x7ffffef, 0x7fffff0, 0x3ffffee,
 }
 
+// huffmanCodeLen defines bit lengths for each canonical Huffman code (RFC 7541 Appendix B).
 var huffmanCodeLen = [256]uint8{
 	13, 23, 28, 28, 28, 28, 28, 28, 28, 24, 30, 28, 28, 30, 28, 28,
 	28, 28, 28, 28, 28, 28, 30, 28, 28, 28, 28, 28, 28, 28, 28, 28,

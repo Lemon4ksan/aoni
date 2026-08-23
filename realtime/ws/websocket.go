@@ -26,11 +26,90 @@ import (
 	"github.com/lemon4ksan/aoni/internal/requestutil"
 )
 
+// Standard WebSocket Header Field Names per RFC 6455 §11.3.
 const (
-	websocketMagicGUID = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"
+	// HeaderSecWebSocketKey is the client nonce header (RFC 6455 §11.3.1).
+	HeaderSecWebSocketKey = "Sec-WebSocket-Key"
 
-	// WellKnownPrefix specifies the RFC 5785 / RFC 8307 path prefix for well-known URIs.
+	// HeaderSecWebSocketExtensions is the extension negotiation header (RFC 6455 §11.3.2).
+	HeaderSecWebSocketExtensions = "Sec-WebSocket-Extensions"
+
+	// HeaderSecWebSocketAccept is the server acceptance hash header (RFC 6455 §11.3.3).
+	HeaderSecWebSocketAccept = "Sec-WebSocket-Accept"
+
+	// HeaderSecWebSocketProtocol is the subprotocol selector header (RFC 6455 §11.3.4).
+	HeaderSecWebSocketProtocol = "Sec-WebSocket-Protocol"
+
+	// HeaderSecWebSocketVersion is the protocol version header (RFC 6455 §11.3.5).
+	HeaderSecWebSocketVersion = "Sec-WebSocket-Version"
+
+	// MagicGUID is the WebSocket handshake GUID constant defined in RFC 6455 §1.3 & §4.2.2.
+	MagicGUID = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"
+
+	// SupportedVersion is the standard WebSocket protocol version 13 (RFC 6455 §4.1.9 & §11.6).
+	SupportedVersion = "13"
+
+	websocketMagicGUID = MagicGUID
+
+	// WellKnownPrefix specifies the well-known URI prefix per RFC 8615 and RFC 8820 §2.3 (RFC 8307 for WebSocket discovery).
 	WellKnownPrefix = "/.well-known/"
+
+	// ExtensionPermessageDeflate is the registered WebSocket Per-Message Compression Extension name (RFC 7692 §9.1).
+	ExtensionPermessageDeflate = "permessage-deflate"
+
+	// ParamServerNoContextTakeover disables server-side LZ77 sliding window context takeover (RFC 7692 §7.1.1.1).
+	ParamServerNoContextTakeover = "server_no_context_takeover"
+
+	// ParamClientNoContextTakeover disables client-side LZ77 sliding window context takeover (RFC 7692 §7.1.1.2).
+	ParamClientNoContextTakeover = "client_no_context_takeover"
+
+	// ParamServerMaxWindowBits limits the server's LZ77 sliding window size to 2^w bytes (RFC 7692 §7.1.2.1).
+	ParamServerMaxWindowBits = "server_max_window_bits"
+
+	// ParamClientMaxWindowBits limits the client's LZ77 sliding window size to 2^w bytes (RFC 7692 §7.1.2.2).
+	ParamClientMaxWindowBits = "client_max_window_bits"
+)
+
+// Standard WebSocket Close Status Codes defined in RFC 6455 §7.4.1 & §11.7.
+const (
+	// StatusNormalClosure (1000) indicates normal closure; the purpose for which the connection was established has been fulfilled (RFC 6455 §7.4.1).
+	StatusNormalClosure = 1000
+
+	// StatusGoingAway (1001) indicates an endpoint is "going away", such as a server going down or browser navigation (RFC 6455 §7.4.1).
+	StatusGoingAway = 1001
+
+	// StatusProtocolError (1002) indicates an endpoint terminated the connection due to a protocol error (RFC 6455 §7.4.1).
+	StatusProtocolError = 1002
+
+	// StatusUnsupportedData (1003) indicates an endpoint received a data type it cannot accept (RFC 6455 §7.4.1).
+	StatusUnsupportedData = 1003
+
+	// StatusNoStatusRcvd (1005) is a reserved value indicating no status code was present in the Close frame (RFC 6455 §7.4.1).
+	// MUST NOT be set in a sent Close control frame.
+	StatusNoStatusRcvd = 1005
+
+	// StatusAbnormalClosure (1006) is a reserved value indicating abnormal closure without a Close frame (RFC 6455 §7.4.1).
+	// MUST NOT be set in a sent Close control frame.
+	StatusAbnormalClosure = 1006
+
+	// StatusInvalidFramePayloadData (1007) indicates non-UTF-8 or inconsistent data in a message (RFC 6455 §7.4.1 & §8.1).
+	StatusInvalidFramePayloadData = 1007
+
+	// StatusPolicyViolation (1008) indicates the endpoint received a message violating its policy (RFC 6455 §7.4.1).
+	StatusPolicyViolation = 1008
+
+	// StatusMessageTooBig (1009) indicates the received message is too large to process (RFC 6455 §7.4.1 & §10.4).
+	StatusMessageTooBig = 1009
+
+	// StatusMandatoryExtension (1010) indicates the client expected negotiated extensions not returned by the server (RFC 6455 §7.4.1).
+	StatusMandatoryExtension = 1010
+
+	// StatusInternalServerError (1011) indicates the server encountered an unexpected error preventing request fulfillment (RFC 6455 §7.4.1).
+	StatusInternalServerError = 1011
+
+	// StatusTLSHandshake (1015) is a reserved value indicating TLS handshake failure (RFC 6455 §7.4.1).
+	// MUST NOT be set in a sent Close control frame.
+	StatusTLSHandshake = 1015
 )
 
 // DialWebSocketConfig specifies I/O buffer sizes, subprotocols, and compression settings for WebSocket connections.
@@ -59,16 +138,12 @@ func IsValidSubprotocolToken(token string) bool {
 
 	for i := 0; i < len(token); i++ {
 		b := token[i]
-		if b <= 32 || b >= 127 || strings.IndexByte("()<>@,;:\\\"/[]?={} \t", char(b)) >= 0 {
+		if b <= 32 || b >= 127 || strings.IndexByte("()<>@,;:\\\"/[]?={} \t", b) >= 0 {
 			return false
 		}
 	}
 
 	return true
-}
-
-func char(b byte) byte {
-	return b
 }
 
 // BuildWellKnownURI constructs an RFC 8307 compliant well-known WebSocket URI.
@@ -103,6 +178,41 @@ func DialWellKnown(
 	}
 
 	return DialWebSocket(ctx, dialer, targetURL, mods...)
+}
+
+// DialWellKnownResult establishes a WebSocket connection to an RFC 8307 well-known URI yielding a Swift-inspired [generic.Result].
+func DialWellKnownResult(
+	ctx context.Context,
+	dialer aoni.WebSocketDialer,
+	scheme, host, suffix string,
+	mods ...aoni.RequestModifier,
+) (generic.Result[Conn], *http.Response) {
+	conn, resp, err := DialWellKnown(ctx, dialer, scheme, host, suffix, mods...)
+	if err != nil {
+		return generic.Failure[Conn](err), resp
+	}
+
+	return generic.Success(conn), resp
+}
+
+// ConnectWellKnown establishes an upgraded WebSocket connection to an RFC 8307 well-known URI.
+func ConnectWellKnown(
+	ctx context.Context,
+	dialer aoni.WebSocketDialer,
+	scheme, host, suffix string,
+	mods ...aoni.RequestModifier,
+) (Conn, *http.Response, error) {
+	return DialWellKnown(ctx, dialer, scheme, host, suffix, mods...)
+}
+
+// ConnectWellKnownResult establishes an upgraded WebSocket connection to an RFC 8307 well-known URI yielding a [generic.Result].
+func ConnectWellKnownResult(
+	ctx context.Context,
+	dialer aoni.WebSocketDialer,
+	scheme, host, suffix string,
+	mods ...aoni.RequestModifier,
+) (generic.Result[Conn], *http.Response) {
+	return DialWellKnownResult(ctx, dialer, scheme, host, suffix, mods...)
 }
 
 // DialWebSocket establishes an encrypted (wss://) or unencrypted (ws://) WebSocket connection
@@ -315,6 +425,8 @@ func tryH2ExtendedConnect(
 	return wsConn, resp, true
 }
 
+// performHTTP1Handshake executes the HTTP/1.1 WebSocket Upgrade request and verifies 101 Switching Protocols.
+// RFC 9931 §6.2 & RFC 6455 §4.1: Clients MUST wait for 101 Switching Protocols confirmation before sending WebSocket frames.
 func performHTTP1Handshake(
 	ctx context.Context,
 	conn net.Conn,
@@ -339,16 +451,21 @@ func performHTTP1Handshake(
 	}
 
 	if resp.StatusCode != http.StatusSwitchingProtocols {
-		return nil, nil, resp, "", false, ErrBadHandshake
+		return nil, nil, resp, "", false, fmt.Errorf("%w: status %d %s", ErrBadHandshake, resp.StatusCode, resp.Status)
 	}
 
 	if !tokenContainsValue(resp.Header, "Upgrade", "websocket") ||
 		!tokenContainsValue(resp.Header, "Connection", "upgrade") {
-		return nil, nil, resp, "", false, ErrBadHandshake
+		return nil, nil, resp, "", false, fmt.Errorf(
+			"%w: missing or invalid Upgrade/Connection headers (Upgrade: %q, Connection: %q)",
+			ErrBadHandshake,
+			resp.Header.Get("Upgrade"),
+			resp.Header.Get("Connection"),
+		)
 	}
 
 	if resp.Header.Get("Sec-WebSocket-Accept") != computeAcceptKey(challengeKey) {
-		return nil, nil, resp, "", false, ErrBadHandshake
+		return nil, nil, resp, "", false, fmt.Errorf("%w: Sec-WebSocket-Accept mismatch", ErrBadHandshake)
 	}
 
 	selectedSubprotocol := strings.TrimSpace(resp.Header.Get("Sec-WebSocket-Protocol"))
@@ -362,13 +479,9 @@ func performHTTP1Handshake(
 }
 
 func hasPermessageDeflateExtension(header http.Header) bool {
-	for _, ext := range header.Values("Sec-WebSocket-Extensions") {
-		if strings.Contains(ext, "permessage-deflate") {
-			return true
-		}
-	}
-
-	return false
+	return slices.ContainsFunc(header.Values("Sec-WebSocket-Extensions"), func(ext string) bool {
+		return strings.Contains(ext, "permessage-deflate")
+	})
 }
 
 func tokenContainsValue(header http.Header, name, value string) bool {
@@ -466,4 +579,41 @@ func ConnectResult(
 	mods ...aoni.RequestModifier,
 ) (generic.Result[Conn], *http.Response) {
 	return DialResult(ctx, dialer, targetURL, mods...)
+}
+
+// GenerateChallengeKey creates a cryptographically secure 16-byte random base64-encoded nonce (RFC 6455 §4.1.7).
+func GenerateChallengeKey() (string, error) {
+	return generateChallengeKey()
+}
+
+// ComputeAcceptKey calculates the expected Sec-WebSocket-Accept hash for challengeKey (RFC 6455 §1.3 & §4.2.2).
+func ComputeAcceptKey(challengeKey string) string {
+	return computeAcceptKey(challengeKey)
+}
+
+// WriteClose sends a Close frame with the specified status code and optional reason (RFC 6455 §5.5.1).
+func WriteClose(conn Conn, code int, reason string) error {
+	if conn == nil {
+		return ErrNilConnection
+	}
+
+	return conn.WriteMessage(FrameClose, FormatCloseMessage(code, reason))
+}
+
+// WritePing sends a Ping control frame with payload <= 125 bytes (RFC 6455 §5.5.2).
+func WritePing(conn Conn, data []byte) error {
+	if conn == nil {
+		return ErrNilConnection
+	}
+
+	return conn.WriteMessage(FramePing, data)
+}
+
+// WritePong sends an unsolicited or reply Pong control frame with payload <= 125 bytes (RFC 6455 §5.5.3).
+func WritePong(conn Conn, data []byte) error {
+	if conn == nil {
+		return ErrNilConnection
+	}
+
+	return conn.WriteMessage(FramePong, data)
 }

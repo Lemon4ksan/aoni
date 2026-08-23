@@ -18,11 +18,12 @@ import (
 	"os"
 	"reflect"
 	"slices"
-	"sort"
 	"strings"
 
+	"github.com/lemon4ksan/foundation/generic"
 	utls "github.com/refraction-networking/utls"
 
+	"github.com/lemon4ksan/aoni/fingerprint/grease"
 	"github.com/lemon4ksan/aoni/fingerprint/profiles"
 	"github.com/lemon4ksan/aoni/fingerprint/profiles/chrome"
 	"github.com/lemon4ksan/aoni/fingerprint/profiles/firefox"
@@ -139,9 +140,9 @@ func compareSpecs(reference, current utls.ClientHelloSpec) []string {
 	var diffs []string //nolint:prealloc
 
 	// Cipher suites (GREASE-filtered, set-comparison)
-	refCiphers := filterGREASEU16(reference.CipherSuites)
+	refCiphers := grease.Filter(reference.CipherSuites)
+	curCiphers := grease.Filter(current.CipherSuites)
 
-	curCiphers := filterGREASEU16(current.CipherSuites)
 	for _, c := range added16(refCiphers, curCiphers) {
 		diffs = append(diffs, diff(catCipher, "ADDED  ", fmt.Sprintf("0x%04x  %s", c, cipherName(c))))
 	}
@@ -163,8 +164,8 @@ func compareSpecs(reference, current utls.ClientHelloSpec) []string {
 	}
 
 	// Supported curves (GREASE-filtered)
-	refCurves := filterGREASEU16(curvesFrom(reference.Extensions))
-	curCurves := filterGREASEU16(curvesFrom(current.Extensions))
+	refCurves := grease.Filter(curvesFrom(reference.Extensions))
+	curCurves := grease.Filter(curvesFrom(current.Extensions))
 
 	for _, c := range added16(refCurves, curCurves) {
 		diffs = append(diffs, diff(catCurve, "ADDED  ", fmt.Sprintf("%d  %s", c, curveName(c))))
@@ -234,7 +235,10 @@ func extTypeSet(exts []utls.TLSExtension) []string {
 		seen[t] = true
 	}
 
-	return sortedKeys(seen)
+	keys := generic.Keys(seen)
+	slices.Sort(keys)
+
+	return keys
 }
 
 func curvesFrom(exts []utls.TLSExtension) []uint16 {
@@ -280,28 +284,11 @@ func alpnFrom(exts []utls.TLSExtension) []string {
 func versionsFrom(exts []utls.TLSExtension) []uint16 {
 	for _, ext := range exts {
 		if sv, ok := ext.(*utls.SupportedVersionsExtension); ok {
-			return filterGREASEU16(sv.Versions)
+			return grease.Filter(sv.Versions)
 		}
 	}
 
 	return nil
-}
-
-// isGREASE reports whether v is a TLS GREASE value (RFC 8701).
-func isGREASE(v uint16) bool {
-	lo := v & 0xff
-	return lo == v>>8 && lo&0x0f == 0x0a
-}
-
-func filterGREASEU16(in []uint16) []uint16 {
-	out := make([]uint16, 0, len(in))
-	for _, v := range in {
-		if !isGREASE(v) {
-			out = append(out, v)
-		}
-	}
-
-	return out
 }
 
 // added16 returns elements in 'a' that are not in 'b' (a − b), sorted.
@@ -337,20 +324,9 @@ func addedStr(a, b []string) []string {
 		}
 	}
 
-	sort.Strings(out)
+	slices.Sort(out)
 
 	return out
-}
-
-func sortedKeys(m map[string]bool) []string {
-	keys := make([]string, 0, len(m))
-	for k := range m {
-		keys = append(keys, k)
-	}
-
-	sort.Strings(keys)
-
-	return keys
 }
 
 func cipherName(c uint16) string {

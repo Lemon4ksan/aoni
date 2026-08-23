@@ -7,6 +7,7 @@ package extract_test
 import (
 	"testing"
 
+	"github.com/lemon4ksan/foundation/generic"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -21,6 +22,10 @@ func TestBetween(t *testing.T) {
 	res, err := extract.Between(src, "prefix:", ":suffix")
 	require.NoError(t, err)
 	assert.Equal(t, "hello world", string(res))
+
+	resResult := generic.ToResult(extract.Between(src, "prefix:", ":suffix"))
+	require.True(t, resResult.IsSuccess())
+	assert.Equal(t, "hello world", string(resResult.MustValue()))
 
 	_, err = extract.Between(src, "missing:", ":suffix")
 	assert.ErrorIs(t, err, extract.ErrBetweenNotFound)
@@ -38,6 +43,10 @@ func TestAttr(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, "secret-123", string(val))
 
+	attrRes := generic.ToResult(extract.Attr(src, "#test-id", "data-token"))
+	require.True(t, attrRes.IsSuccess())
+	assert.Equal(t, "secret-123", string(attrRes.MustValue()))
+
 	_, err = extract.Attr(src, "#missing-id", "data-token")
 	assert.ErrorIs(t, err, extract.ErrElementNotFound)
 
@@ -53,6 +62,10 @@ func TestRegex(t *testing.T) {
 	val, err := extract.Regex(src, `SessionToken:\s*([0-9a-z-]+)`)
 	require.NoError(t, err)
 	assert.Equal(t, "98765-abcd", string(val))
+
+	rxRes := generic.ToResult(extract.Regex(src, `SessionToken:\s*([0-9a-z-]+)`))
+	require.True(t, rxRes.IsSuccess())
+	assert.Equal(t, "98765-abcd", string(rxRes.MustValue()))
 
 	_, err = extract.Regex(src, `NonMatching:\s*(\d+)`)
 	assert.ErrorIs(t, err, extract.ErrRegexMismatch)

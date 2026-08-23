@@ -18,8 +18,8 @@ import (
 	"strings"
 
 	"github.com/lemon4ksan/aoni/cmd/vortex/internal/base"
-	"github.com/lemon4ksan/aoni/internal/codegen/git"
-	codeparser "github.com/lemon4ksan/aoni/internal/codegen/parser"
+	"github.com/lemon4ksan/aoni/cmd/vortex/lib/git"
+	vparser "github.com/lemon4ksan/aoni/cmd/vortex/lib/parser"
 )
 
 // CmdBlame inspects and displays contract and method provenance.
@@ -108,7 +108,7 @@ func (c *CmdBlame) Run(ctx context.Context, args []string, stdout, stderr io.Wri
 	}
 
 	// 2. Vortex Semantic IR Parsing
-	vortexParser := codeparser.NewParser()
+	vortexParser := vparser.NewParser()
 	irRoot, _ := vortexParser.ParseFile(targetFile)
 
 	// 3. Git Blame Resolution

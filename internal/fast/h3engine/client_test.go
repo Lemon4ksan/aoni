@@ -8,11 +8,11 @@ import (
 	"crypto/tls"
 	"testing"
 
-	"github.com/quic-go/quic-go"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	"github.com/lemon4ksan/aoni/internal/fast/h3engine"
+	"github.com/lemon4ksan/aoni/internal/quic"
 )
 
 func TestH3Client_InitializationAndClose(t *testing.T) {

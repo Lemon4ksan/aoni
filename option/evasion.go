@@ -24,6 +24,7 @@ import (
 	"github.com/lemon4ksan/aoni/internal/profile"
 	"github.com/lemon4ksan/aoni/mod"
 	"github.com/lemon4ksan/aoni/netutil/cert"
+	"github.com/lemon4ksan/aoni/netutil/hpkp"
 	"github.com/lemon4ksan/aoni/netutil/proxy"
 )
 
@@ -188,7 +189,7 @@ func WithSessionCache(cache fingerprint.SessionCache) aoni.ClientOption {
 	}
 }
 
-// With0RTT enables TLS 1.3 and QUIC 0-RTT (Early Data) session resumption (RFC 9001 / RFC 8446)
+// With0RTT enables TLS 1.3 and QUIC 0-RTT (Early Data) session resumption (RFC 9001 / RFC 8446 / RFC 9846)
 // to send initial request payloads in the first packet, reducing connection setup latency to zero RTTs.
 //
 // Security Note:
@@ -230,7 +231,7 @@ func WithCertificatePin(domain, hash string) aoni.ClientOption {
 	}
 }
 
-// WithCertificatePins returns an [aoni.ClientOption] registering a map of domain certificate pins globally.
+// WithCertificatePins returns an [aoni.ClientOption] registering a map of domain certificate pins globally (RFC 7469).
 func WithCertificatePins(pins map[string][]string) aoni.ClientOption {
 	return func(cfg *aoni.Config) {
 		if cfg.Fingerprint.CertificatePins == nil {
@@ -239,6 +240,28 @@ func WithCertificatePins(pins map[string][]string) aoni.ClientOption {
 
 		for domain, hashes := range pins {
 			cfg.Fingerprint.CertificatePins[domain] = append(cfg.Fingerprint.CertificatePins[domain], hashes...)
+		}
+	}
+}
+
+// WithSPKIPin returns an [aoni.ClientOption] pinning an SPKI SHA-256 fingerprint hash globally for domain (RFC 7469 §2.4).
+func WithSPKIPin(domain, pin string) aoni.ClientOption {
+	return WithCertificatePin(domain, pin)
+}
+
+// WithHPKPPolicy returns an [aoni.ClientOption] registering all pins from an RFC 7469 [hpkp.Policy] for domain.
+func WithHPKPPolicy(domain string, policy *hpkp.Policy) aoni.ClientOption {
+	return func(cfg *aoni.Config) {
+		if policy == nil || len(policy.Pins) == 0 {
+			return
+		}
+
+		if cfg.Fingerprint.CertificatePins == nil {
+			cfg.Fingerprint.CertificatePins = make(map[string][]string)
+		}
+
+		for _, pin := range policy.Pins {
+			cfg.Fingerprint.CertificatePins[domain] = append(cfg.Fingerprint.CertificatePins[domain], pin.Fingerprint)
 		}
 	}
 }

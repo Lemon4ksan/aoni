@@ -13,12 +13,12 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/lemon4ksan/aoni/internal/codegen/builder"
-	"github.com/lemon4ksan/aoni/internal/codegen/git"
-	"github.com/lemon4ksan/aoni/internal/codegen/merge"
-	codeparser "github.com/lemon4ksan/aoni/internal/codegen/parser"
-	"github.com/lemon4ksan/aoni/internal/codegen/patcher"
-	"github.com/lemon4ksan/aoni/internal/codegen/project"
+	"github.com/lemon4ksan/aoni/cmd/vortex/lib/builder"
+	"github.com/lemon4ksan/aoni/cmd/vortex/lib/git"
+	"github.com/lemon4ksan/aoni/cmd/vortex/lib/merge"
+	vparser "github.com/lemon4ksan/aoni/cmd/vortex/lib/parser"
+	"github.com/lemon4ksan/aoni/cmd/vortex/lib/patcher"
+	"github.com/lemon4ksan/aoni/cmd/vortex/lib/project"
 )
 
 // CmdAccept merges proposed changes from a consumer Git branch into the local master contracts.
@@ -71,9 +71,7 @@ func (c *CmdAccept) Run(ctx context.Context, args []string, stdout, stderr io.Wr
 		return errors.New("no contracts configured in .vortex.yml (run `vortex init` first)")
 	}
 
-	p := codeparser.NewParser()
-	reconciler := merge.NewReconciler()
-	astPatcher := patcher.NewPatcher()
+	p := vparser.NewParser()
 
 	fmt.Fprintf(stdout, "⚡ [vortex ast accept] Merging Proposal from %q into local master...\n\n", targetRef)
 
@@ -97,13 +95,13 @@ func (c *CmdAccept) Run(ctx context.Context, args []string, stdout, stderr io.Wr
 			continue
 		}
 
-		res, recErr := reconciler.Reconcile(nil, diskIR, remoteIR)
+		res, recErr := merge.Reconcile(nil, diskIR, remoteIR)
 		if recErr != nil || len(res.Deltas) == 0 {
 			continue
 		}
 
 		// Perform surgical AST patching
-		if patchErr := astPatcher.PatchFile(absPath, res); patchErr != nil {
+		if patchErr := patcher.PatchFile(absPath, res); patchErr != nil {
 			return fmt.Errorf("failed to patch %s: %w", ct.File, patchErr)
 		}
 

@@ -41,29 +41,17 @@ func (fb *FrameBuffer) Reset() {
 }
 
 // Len returns the current length of the frame buffer.
-func (fb *FrameBuffer) Len() int {
-	if fb == nil {
-		return 0
-	}
-
+func (fb FrameBuffer) Len() int {
 	return len(fb.B)
 }
 
 // Bytes returns the underlying byte slice.
-func (fb *FrameBuffer) Bytes() []byte {
-	if fb == nil {
-		return nil
-	}
-
+func (fb FrameBuffer) Bytes() []byte {
 	return fb.B
 }
 
 // Equal checks equality against raw byte slices or another FrameBuffer.
-func (fb *FrameBuffer) Equal(other any) bool {
-	if fb == nil {
-		return other == nil
-	}
-
+func (fb FrameBuffer) Equal(other any) bool {
 	switch v := other.(type) {
 	case *FrameBuffer:
 		if v == nil {
@@ -72,6 +60,8 @@ func (fb *FrameBuffer) Equal(other any) bool {
 
 		return bytes.Equal(fb.B, v.B)
 
+	case FrameBuffer:
+		return bytes.Equal(fb.B, v.B)
 	case []byte:
 		return bytes.Equal(fb.B, v)
 	}

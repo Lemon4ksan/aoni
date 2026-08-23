@@ -19,6 +19,7 @@ import (
 	"time"
 
 	asyncctx "github.com/lemon4ksan/foundation/async/context"
+	"github.com/lemon4ksan/foundation/pathkit"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/lemon4ksan/aoni"
@@ -142,8 +143,7 @@ func InvokeFast[Resp any](
 
 // normalizeMethodPath guarantees that the gRPC method path starts with a leading slash.
 func normalizeMethodPath(fullMethod string) string {
-	if !strings.HasPrefix(fullMethod, "/") && !strings.HasPrefix(fullMethod, "http://") &&
-		!strings.HasPrefix(fullMethod, "https://") {
+	if !strings.HasPrefix(fullMethod, "/") && !pathkit.New(fullMethod).IsURL() {
 		return "/" + fullMethod
 	}
 

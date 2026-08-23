@@ -63,16 +63,19 @@ func ApplyMSSLimit(conn net.Conn, mss int) net.Conn {
 		return conn
 	}
 
-	if tc, ok := conn.(*net.TCPConn); ok {
-		raw, err := tc.SyscallConn()
-		if err != nil {
-			return conn
-		}
-
-		_ = raw.Control(func(fd uintptr) {
-			sysnet.SetTCPMaxSeg(fd, mss)
-		})
+	tc, ok := conn.(*net.TCPConn)
+	if !ok {
+		return conn
 	}
+
+	raw, err := tc.SyscallConn()
+	if err != nil {
+		return conn
+	}
+
+	_ = raw.Control(func(fd uintptr) {
+		sysnet.SetTCPMaxSeg(fd, mss)
+	})
 
 	return conn
 }

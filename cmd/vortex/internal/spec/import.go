@@ -15,12 +15,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/getkin/kin-openapi/openapi3"
-
 	"github.com/lemon4ksan/aoni/cmd/vortex/internal/base"
-	"github.com/lemon4ksan/aoni/internal/codegen/jsbundle"
-	"github.com/lemon4ksan/aoni/internal/codegen/openapi"
-	"github.com/lemon4ksan/aoni/internal/codegen/pipeline"
+	"github.com/lemon4ksan/aoni/cmd/vortex/lib/jsbundle"
+	"github.com/lemon4ksan/aoni/cmd/vortex/lib/openapi"
+	"github.com/lemon4ksan/aoni/cmd/vortex/lib/pipeline"
 )
 
 type importOptions struct {
@@ -448,7 +446,7 @@ func runOpenAPIImport(_ context.Context, opts *importOptions, stdout io.Writer) 
 	return generateAndWriteContract(doc, opts, stdout)
 }
 
-func reconcileExistingContract(existingSrc []byte, doc *openapi3.T, opts *importOptions, stdout io.Writer) error {
+func reconcileExistingContract(existingSrc []byte, doc *openapi.Document, opts *importOptions, stdout io.Writer) error {
 	mergeEngine := openapi.NewMergeEngine()
 	mCfg := openapi.MergeConfig{
 		SpecFile:       opts.inputSpec,
@@ -479,7 +477,7 @@ func reconcileExistingContract(existingSrc []byte, doc *openapi3.T, opts *import
 	return nil
 }
 
-func generateAndWriteContract(doc *openapi3.T, opts *importOptions, stdout io.Writer) error {
+func generateAndWriteContract(doc *openapi.Document, opts *importOptions, stdout io.Writer) error {
 	cfg := openapi.ImportConfig{
 		SpecFile:       opts.inputSpec,
 		PackageName:    opts.targetPkg,

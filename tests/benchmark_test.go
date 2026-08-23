@@ -405,7 +405,7 @@ func BenchmarkQueryEncoding_Aoni(b *testing.B) {
 	b.ReportAllocs()
 
 	for b.Loop() {
-		vals, err := values.StructToValues(params)
+		vals, err := values.Encode(params)
 		if err != nil {
 			b.Fatal(err)
 		}

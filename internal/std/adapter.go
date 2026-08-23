@@ -5,10 +5,14 @@
 package std
 
 import (
+	"bytes"
+	"context"
 	"errors"
-	stdio "io"
+	"io"
 	"net/http"
 	"strconv"
+
+	"github.com/lemon4ksan/foundation/silicon/bytesconv"
 
 	"github.com/lemon4ksan/aoni/internal/core"
 )
@@ -51,7 +55,25 @@ func (a *HTTPDoerAdapter) Do(req core.Request) (core.Response, error) {
 
 	httpReq := req.HTTPRequest()
 	if httpReq == nil {
-		return nil, ErrNilRequest
+		var bodyReader io.Reader
+		if bs := req.BodyStream(); bs != nil {
+			bodyReader = bs
+		} else if bb := req.BodyBytes(); len(bb) > 0 {
+			bodyReader = bytes.NewReader(bb)
+		}
+
+		var err error
+
+		httpReq, err = http.NewRequestWithContext(req.Context(), req.Method(), req.URL(), bodyReader) //nolint:gosec
+		if err != nil {
+			return nil, err
+		}
+
+		if req.Headers() != nil {
+			for k, v := range req.Headers() {
+				httpReq.Header.Add(string(k), string(v))
+			}
+		}
 	}
 
 	resp, err := a.doer.Do(httpReq) //nolint:bodyclose
@@ -62,9 +84,9 @@ func (a *HTTPDoerAdapter) Do(req core.Request) (core.Response, error) {
 	return NewResponse(resp), nil
 }
 
-// ResponseBodyCloser decorates an [stdio.ReadCloser] stream and ensures the parent [core.Response] is released upon body close.
+// ResponseBodyCloser decorates an [io.ReadCloser] stream and ensures the parent [core.Response] is released upon body close.
 type ResponseBodyCloser struct {
-	stdio.ReadCloser
+	io.ReadCloser
 	Resp core.Response
 }
 
@@ -155,4 +177,38 @@ func (a *RequestDoerAdapter) Do(req *http.Request) (*http.Response, error) {
 	}
 
 	return httpResp, nil
+}
+
+// ToHTTPRequest converts a generic [core.Request] interface into a standard [*http.Request].
+func ToHTTPRequest(req core.Request) (*http.Request, error) {
+	if httpReq := req.HTTPRequest(); httpReq != nil {
+		return httpReq, nil
+	}
+
+	ctx := req.Context()
+	if ctx == nil {
+		ctx = context.Background()
+	}
+
+	body := req.BodyStream()
+	if body == nil {
+		if bb := req.BodyBytes(); len(bb) > 0 {
+			body = bytes.NewReader(bb)
+		}
+	}
+
+	httpReq, err := http.NewRequestWithContext(ctx, req.Method(), req.URL(), body)
+	if err != nil {
+		return nil, err
+	}
+
+	for k, v := range req.Headers() {
+		httpReq.Header.Add(bytesconv.B2S(k), bytesconv.B2S(v))
+	}
+
+	if host := req.Header("Host"); host != "" {
+		httpReq.Host = host
+	}
+
+	return httpReq, nil
 }

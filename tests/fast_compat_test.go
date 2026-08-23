@@ -22,8 +22,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/andybalholm/brotli"
-	"github.com/klauspost/compress/zstd"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/valyala/fasthttp"
@@ -781,15 +779,14 @@ func TestTransport_DecompressionFormats(t *testing.T) {
 		{
 			name:     "brotli_decompression",
 			encoding: "br",
-			compress: func(w io.Writer) io.WriteCloser { return brotli.NewWriter(w) },
+			compress: func(w io.Writer) io.WriteCloser { return &brotliTestWriter{w: w} },
 			want:     "compressed brotli payload",
 		},
 		{
 			name:     "zstd_decompression",
 			encoding: "zstd",
 			compress: func(w io.Writer) io.WriteCloser {
-				zw, _ := zstd.NewWriter(w)
-				return zw
+				return &zstdTestWriter{w: w}
 			},
 			want: "compressed zstd payload",
 		},

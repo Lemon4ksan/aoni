@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/lemon4ksan/foundation/generic"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -65,11 +66,52 @@ func TestCodec_GenericHelpers(t *testing.T) {
 		t.Parallel()
 
 		r := strings.NewReader(`{"name":"Dave","age":20}`)
-		res := codec.Result[TestUser](r, codec.JSONDecoder)
+		res := codec.DecodeToResult[TestUser](r, codec.JSONDecoder)
 		require.True(t, res.IsSuccess())
 		val, err := res.Unwrap()
 		require.NoError(t, err)
 		assert.Equal(t, "Dave", val.Name)
+	})
+
+	t.Run("Result with generic.FromResult", func(t *testing.T) {
+		t.Parallel()
+
+		jsonRes := generic.ToResult(codec.JSON[TestUser](strings.NewReader(`{"name":"Alice","age":30}`)))
+		require.True(t, jsonRes.IsSuccess())
+		assert.Equal(t, "Alice", jsonRes.MustValue().Name)
+
+		xmlRes := generic.ToResult(
+			codec.XML[TestUser](strings.NewReader(`<TestUser><Name>Bob</Name><Age>25</Age></TestUser>`)),
+		)
+		require.True(t, xmlRes.IsSuccess())
+		assert.Equal(t, "Bob", xmlRes.MustValue().Name)
+
+		yamlRes := generic.ToResult(codec.YAML[TestUser](strings.NewReader("name: Charlie\nage: 40\n")))
+		require.True(t, yamlRes.IsSuccess())
+		assert.Equal(t, "Charlie", yamlRes.MustValue().Name)
+
+		rawRes := generic.ToResult(codec.Raw(strings.NewReader("binary stream")))
+		require.True(t, rawRes.IsSuccess())
+		assert.Equal(t, []byte("binary stream"), rawRes.MustValue())
+	})
+
+	t.Run("Values encoding", func(t *testing.T) {
+		t.Parallel()
+
+		type Filter struct {
+			Query string `url:"q"`
+			Page  int    `url:"page"`
+		}
+
+		f := Filter{Query: "test", Page: 2}
+		encoded, err := codec.Encode(f)
+		require.NoError(t, err)
+		assert.Equal(t, "test", encoded.Get("q"))
+		assert.Equal(t, "2", encoded.Get("page"))
+
+		qs, err := codec.StructToQueryString(f)
+		require.NoError(t, err)
+		assert.Equal(t, "q=test&page=2", qs)
 	})
 }
 

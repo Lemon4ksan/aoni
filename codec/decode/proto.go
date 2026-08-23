@@ -6,23 +6,32 @@ package decode
 
 import (
 	"bytes"
-	stdio "io"
+	"io"
 	"reflect"
 
+	fio "github.com/lemon4ksan/foundation/io"
+	"github.com/lemon4ksan/foundation/refkit"
 	"google.golang.org/protobuf/encoding/protojson"
 	"google.golang.org/protobuf/proto"
 
-	"github.com/lemon4ksan/aoni/internal/io"
 	"github.com/lemon4ksan/aoni/internal/pipeline"
 )
 
 // protoDecoder unmarshals binary Protocol Buffer response streams into [proto.Message] targets.
 type protoDecoder struct{}
 
-func (protoDecoder) Decode(r stdio.Reader, target any) error {
+func (protoDecoder) Decode(r io.Reader, target any) error {
 	msg, err := castOrResolveProto(target)
 	if err != nil {
 		return err
+	}
+
+	if data, _, ok := InspectBytes(r); ok {
+		if err := proto.Unmarshal(data, msg); err != nil {
+			return &Error{Format: "proto", Target: refkit.FullTypeName(msg), Err: err}
+		}
+
+		return nil
 	}
 
 	buf, err := copyToBuffer(r)
@@ -32,7 +41,7 @@ func (protoDecoder) Decode(r stdio.Reader, target any) error {
 	defer pipeline.GlobalBufferPool.Put(buf)
 
 	if err := proto.Unmarshal(buf.Bytes(), msg); err != nil {
-		return &Error{Format: "proto", Target: typeName(msg), Err: err}
+		return &Error{Format: "proto", Target: refkit.FullTypeName(msg), Err: err}
 	}
 
 	return nil
@@ -41,10 +50,20 @@ func (protoDecoder) Decode(r stdio.Reader, target any) error {
 // protoJSONDecoder unmarshals JSON response streams into [proto.Message] targets using protojson options.
 type protoJSONDecoder struct{}
 
-func (protoJSONDecoder) Decode(r stdio.Reader, target any) error {
+func (protoJSONDecoder) Decode(r io.Reader, target any) error {
 	msg, err := castOrResolveProto(target)
 	if err != nil {
 		return err
+	}
+
+	opts := protojson.UnmarshalOptions{DiscardUnknown: true}
+
+	if data, _, ok := InspectBytes(r); ok {
+		if err := opts.Unmarshal(data, msg); err != nil {
+			return &Error{Format: "protojson", Target: refkit.FullTypeName(msg), Err: err}
+		}
+
+		return nil
 	}
 
 	buf, err := copyToBuffer(r)
@@ -53,20 +72,18 @@ func (protoJSONDecoder) Decode(r stdio.Reader, target any) error {
 	}
 	defer pipeline.GlobalBufferPool.Put(buf)
 
-	opts := protojson.UnmarshalOptions{DiscardUnknown: true}
-
 	if err := opts.Unmarshal(buf.Bytes(), msg); err != nil {
-		return &Error{Format: "protojson", Target: typeName(msg), Err: err}
+		return &Error{Format: "protojson", Target: refkit.FullTypeName(msg), Err: err}
 	}
 
 	return nil
 }
 
 // copyToBuffer streams r contents into a pooled byte buffer using zero-allocation copying.
-func copyToBuffer(r stdio.Reader) (*bytes.Buffer, error) {
+func copyToBuffer(r io.Reader) (*bytes.Buffer, error) {
 	buf := pipeline.GlobalBufferPool.Get()
 
-	if _, err := io.CopyZeroAlloc(buf, r); err != nil {
+	if _, err := fio.CopyZeroAlloc(buf, r); err != nil {
 		pipeline.GlobalBufferPool.Put(buf)
 		return nil, err
 	}
@@ -82,15 +99,19 @@ func castOrResolveProto(target any) (proto.Message, error) {
 
 	val := reflect.ValueOf(target)
 	if val.Kind() == reflect.Pointer && !val.IsNil() {
-		elem := val.Elem()
-		if elem.Kind() == reflect.Pointer && elem.IsNil() && elem.CanSet() {
-			elem.Set(reflect.New(elem.Type().Elem()))
+		elem, _ := refkit.EnsureAlloc(val.Elem())
+		if elem.IsValid() && elem.CanAddr() {
+			if msg, ok := elem.Addr().Interface().(proto.Message); ok {
+				return msg, nil
+			}
+		}
 
+		if elem.IsValid() && elem.CanInterface() {
 			if msg, ok := elem.Interface().(proto.Message); ok {
 				return msg, nil
 			}
 		}
 	}
 
-	return nil, &Error{Format: "proto", Target: typeName(target), Err: ErrInvalidProtoTarget}
+	return nil, &Error{Format: "proto", Target: refkit.TypeName(target), Err: ErrInvalidProtoTarget}
 }

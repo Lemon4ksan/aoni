@@ -13,12 +13,15 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/klauspost/compress/gzip"
+	"github.com/lemon4ksan/foundation/generic"
+	"github.com/lemon4ksan/foundation/refkit"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/typepb"
 	"google.golang.org/protobuf/types/known/wrapperspb"
+
+	"github.com/lemon4ksan/aoni/internal/compress/gzip"
 )
 
 type errorReader struct{}
@@ -496,9 +499,9 @@ func TestStripBOM(t *testing.T) {
 func TestTypeName(t *testing.T) {
 	t.Parallel()
 
-	assert.Equal(t, "<nil>", typeName(nil))
-	assert.Equal(t, "int", typeName(42))
-	assert.Equal(t, "*string", typeName(new(string)))
+	assert.Equal(t, "<nil>", refkit.FullTypeName(nil))
+	assert.Equal(t, "int", refkit.FullTypeName(42))
+	assert.Equal(t, "*string", refkit.FullTypeName(new(string)))
 }
 
 func TestGenericHelpersAndModifiers(t *testing.T) {
@@ -614,23 +617,284 @@ func TestDecodeTo_And_DecodeResult(t *testing.T) {
 
 	payload := `{"name":"Coffee","price":5}`
 
-	t.Run("DecodeTo_Success", func(t *testing.T) {
-		item, err := DecodeTo[Item](JSONDecoder, strings.NewReader(payload))
+	t.Run("To_and_DecodeTo_Success", func(t *testing.T) {
+		item, err := To[Item](strings.NewReader(payload), JSONDecoder)
 		require.NoError(t, err)
 		assert.Equal(t, "Coffee", item.Name)
 		assert.Equal(t, 5, item.Price)
+
+		itemLegacy, err := To[Item](strings.NewReader(payload), JSONDecoder)
+		require.NoError(t, err)
+		assert.Equal(t, "Coffee", itemLegacy.Name)
 	})
 
-	t.Run("DecodeResult_Success", func(t *testing.T) {
-		res := DecodeResult[Item](JSONDecoder, strings.NewReader(payload))
+	t.Run("Result_Success", func(t *testing.T) {
+		res := ToResult[Item](strings.NewReader(payload), JSONDecoder)
 		assert.True(t, res.IsSuccess())
 		item, err := res.Unwrap()
 		require.NoError(t, err)
 		assert.Equal(t, "Coffee", item.Name)
+
+		resJSON := generic.ToResult(JSON[Item](strings.NewReader(payload)))
+		assert.True(t, resJSON.IsSuccess())
+		assert.Equal(t, "Coffee", resJSON.MustValue().Name)
 	})
 
-	t.Run("DecodeResult_Failure", func(t *testing.T) {
-		res := DecodeResult[Item](JSONDecoder, strings.NewReader(`{invalid_json`))
+	t.Run("Result_Failure", func(t *testing.T) {
+		res := ToResult[Item](strings.NewReader(`{invalid_json`), JSONDecoder)
 		assert.False(t, res.IsSuccess())
+	})
+}
+
+type ConfigSample struct {
+	Name    string   `yaml:"name"`
+	Port    int      `yaml:"port"`
+	Enabled bool     `yaml:"enabled"`
+	Tags    []string `yaml:"tags"`
+}
+
+func TestYAMLDecoder(t *testing.T) {
+	yamlStr := `name: aoni-service
+port: 8080
+enabled: true
+tags:
+  - fast
+  - stealth
+`
+
+	// 1. Test generic YAML[T]
+	cfg, err := YAML[ConfigSample](strings.NewReader(yamlStr))
+	require.NoError(t, err)
+	require.Equal(t, "aoni-service", cfg.Name)
+	require.Equal(t, 8080, cfg.Port)
+	require.True(t, cfg.Enabled)
+	require.Equal(t, []string{"fast", "stealth"}, cfg.Tags)
+
+	// 2. Test UnmarshalYAML
+	var cfg2 ConfigSample
+
+	err = UnmarshalYAML([]byte(yamlStr), &cfg2)
+	require.NoError(t, err)
+	require.Equal(t, "aoni-service", cfg2.Name)
+
+	// 3. Test LookupDecoder for YAML MIME types
+	for _, mime := range []string{"application/x-yaml", "application/yaml", "text/yaml", "text/x-yaml"} {
+		d := LookupDecoder(mime)
+		require.Equal(t, YAMLDecoder, d)
+
+		var res ConfigSample
+
+		err := ByContentType(strings.NewReader(yamlStr), mime, &res)
+		require.NoError(t, err)
+		require.Equal(t, "aoni-service", res.Name)
+	}
+
+	// 4. Test BOM Stripping with YAML
+	bomYAML := append([]byte{0xEF, 0xBB, 0xBF}, []byte(yamlStr)...)
+	cfgBOM, err := YAML[ConfigSample](bytes.NewReader(bomYAML))
+	require.NoError(t, err)
+	require.Equal(t, "aoni-service", cfgBOM.Name)
+
+	// 5. Test Custom YAML Decoder with KnownFields
+	customDec := NewYAMLDecoder(YAMLDecoderConfig{KnownFields: true})
+	badYAML := "name: test\nunknown_field: true\n"
+
+	var target ConfigSample
+
+	err = customDec.Decode(strings.NewReader(badYAML), &target)
+	require.Error(t, err)
+}
+
+type mockBytesReader struct {
+	data     []byte
+	volatile bool
+}
+
+func (m mockBytesReader) Read(p []byte) (n int, err error) {
+	copy(p, m.data)
+
+	if len(p) < len(m.data) {
+		return len(p), nil
+	}
+
+	return len(m.data), io.EOF
+}
+
+func (m mockBytesReader) Bytes() ([]byte, bool) {
+	return m.data, m.volatile
+}
+
+func TestBytesReader_InspectAndReadAllSafe(t *testing.T) {
+	t.Parallel()
+
+	// 1. mockBytesReader with volatile=true
+	volReader := mockBytesReader{data: []byte("volatile_payload"), volatile: true}
+	data, vol, ok := InspectBytes(volReader)
+	require.True(t, ok)
+	require.True(t, vol)
+	require.Equal(t, []byte("volatile_payload"), data)
+
+	safeBytes, err := ReadAllSafe(volReader)
+	require.NoError(t, err)
+	require.Equal(t, []byte("volatile_payload"), safeBytes)
+	// Mutate original to verify clone
+	volReader.data[0] = 'X'
+
+	require.Equal(t, byte('v'), safeBytes[0])
+
+	// 2. mockBytesReader with volatile=false
+	nonVolReader := mockBytesReader{data: []byte("heap_payload"), volatile: false}
+	data2, vol2, ok2 := InspectBytes(nonVolReader)
+	require.True(t, ok2)
+	require.False(t, vol2)
+	require.Equal(t, []byte("heap_payload"), data2)
+
+	safeBytes2, err := ReadAllSafe(nonVolReader)
+	require.NoError(t, err)
+	require.Equal(t, []byte("heap_payload"), safeBytes2)
+
+	// 3. bytes.Buffer
+	buf := bytes.NewBufferString("buffer_payload")
+	data3, vol3, ok3 := InspectBytes(buf)
+	require.True(t, ok3)
+	require.False(t, vol3)
+	require.Equal(t, []byte("buffer_payload"), data3)
+
+	// 4. nil reader
+	data4, vol4, ok4 := InspectBytes(nil)
+	require.False(t, ok4)
+	require.False(t, vol4)
+	require.Nil(t, data4)
+
+	// 5. standard strings.Reader (fallback)
+	plain := strings.NewReader("stream_fallback")
+	_, _, ok5 := InspectBytes(plain)
+	require.False(t, ok5)
+
+	safeBytes5, err := ReadAllSafe(plain)
+	require.NoError(t, err)
+	require.Equal(t, []byte("stream_fallback"), safeBytes5)
+}
+
+func TestStripBOMBytes(t *testing.T) {
+	t.Parallel()
+
+	assert.Equal(t, []byte("hello"), StripBOMBytes([]byte{0xEF, 0xBB, 0xBF, 'h', 'e', 'l', 'l', 'o'}))
+	assert.Equal(t, []byte("world"), StripBOMBytes([]byte{0xFE, 0xFF, 'w', 'o', 'r', 'l', 'd'}))
+	assert.Equal(t, []byte("test"), StripBOMBytes([]byte{0xFF, 0xFE, 't', 'e', 's', 't'}))
+	assert.Equal(t, []byte("plain"), StripBOMBytes([]byte("plain")))
+	assert.Empty(t, StripBOMBytes(nil))
+	assert.Equal(t, []byte("a"), StripBOMBytes([]byte("a")))
+	assert.Equal(t, []byte("ab"), StripBOMBytes([]byte("ab")))
+}
+
+func TestFastPathDecoders_WithBytesReader(t *testing.T) {
+	t.Parallel()
+
+	// JSON fast path
+	t.Run("json_fast_path", func(t *testing.T) {
+		r := mockBytesReader{data: []byte(`{"name":"fast-json","port":9000}`), volatile: true}
+
+		var target ConfigSample
+
+		err := JSONDecoder.Decode(r, &target)
+		require.NoError(t, err)
+		require.Equal(t, "fast-json", target.Name)
+		require.Equal(t, 9000, target.Port)
+
+		// Custom JSON with options
+		customDec := NewJSONDecoder(JSONDecoderConfig{DisallowUnknownFields: true})
+
+		var target2 ConfigSample
+
+		err = customDec.Decode(r, &target2)
+		require.NoError(t, err)
+		require.Equal(t, "fast-json", target2.Name)
+
+		// Empty JSON
+		emptyR := mockBytesReader{data: nil, volatile: true}
+
+		var emptyTarget ConfigSample
+
+		err = JSONDecoder.Decode(emptyR, &emptyTarget)
+		require.NoError(t, err)
+	})
+
+	// XML fast path
+	t.Run("xml_fast_path", func(t *testing.T) {
+		xmlData := append(
+			[]byte{0xEF, 0xBB, 0xBF},
+			[]byte("<ConfigSample><Name>fast-xml</Name><Port>80</Port></ConfigSample>")...,
+		)
+		r := mockBytesReader{data: xmlData, volatile: true}
+
+		var target ConfigSample
+
+		err := XMLDecoder.Decode(r, &target)
+		require.NoError(t, err)
+		require.Equal(t, "fast-xml", target.Name)
+		require.Equal(t, 80, target.Port)
+	})
+
+	// YAML fast path
+	t.Run("yaml_fast_path", func(t *testing.T) {
+		yamlData := append([]byte{0xEF, 0xBB, 0xBF}, []byte("name: fast-yaml\nport: 443\n")...)
+		r := mockBytesReader{data: yamlData, volatile: true}
+
+		var target ConfigSample
+
+		err := YAMLDecoder.Decode(r, &target)
+		require.NoError(t, err)
+		require.Equal(t, "fast-yaml", target.Name)
+		require.Equal(t, 443, target.Port)
+
+		// Custom YAML with KnownFields
+		customYDec := NewYAMLDecoder(YAMLDecoderConfig{KnownFields: true})
+
+		var target2 ConfigSample
+
+		err = customYDec.Decode(r, &target2)
+		require.NoError(t, err)
+		require.Equal(t, "fast-yaml", target2.Name)
+	})
+
+	// Raw fast path
+	t.Run("raw_fast_path", func(t *testing.T) {
+		raw := []byte("binary_blob_sample")
+		r := mockBytesReader{data: raw, volatile: true}
+
+		var target []byte
+
+		err := RawDecoder.Decode(r, &target)
+		require.NoError(t, err)
+		require.Equal(t, raw, target)
+	})
+}
+
+func BenchmarkDecode_JSON_Stream_vs_BytesReader(b *testing.B) {
+	payload := []byte(`{"name":"aoni-bench","port":8080,"enabled":true,"tags":["fast","stealth"]}`)
+
+	b.Run("Stream_bytes_Reader", func(b *testing.B) {
+		b.ReportAllocs()
+
+		for b.Loop() {
+			r := bytes.NewReader(payload)
+
+			var target ConfigSample
+
+			_ = json.NewDecoder(r).Decode(&target)
+		}
+	})
+
+	b.Run("BytesReader_FastPath", func(b *testing.B) {
+		br := mockBytesReader{data: payload, volatile: true}
+
+		b.ReportAllocs()
+
+		for b.Loop() {
+			var target ConfigSample
+
+			_ = JSONDecoder.Decode(br, &target)
+		}
 	})
 }

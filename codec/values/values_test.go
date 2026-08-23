@@ -156,7 +156,7 @@ func TestProtobufIntegration(t *testing.T) {
 		t.Parallel()
 
 		msg := &typepb.Option{Name: "proto_query_test"}
-		v, err := StructToValues(msg)
+		v, err := Encode(msg)
 		require.NoError(t, err)
 		assert.Equal(t, "proto_query_test", v.Get("name"))
 	})
@@ -174,7 +174,7 @@ func TestProtobufIntegration(t *testing.T) {
 			Meta:  &typepb.Option{Name: "nested_proto_val"},
 		}
 
-		v, err := StructToValues(req)
+		v, err := Encode(req)
 		require.NoError(t, err)
 		assert.Equal(t, "aoni", v.Get("q"))
 		assert.JSONEq(t, `{"name":"nested_proto_val"}`, v.Get("meta"))
@@ -222,14 +222,14 @@ func TestStructToQueryString(t *testing.T) {
 	})
 }
 
-func TestStructToValues_UnsupportedKind(t *testing.T) {
+func TestEncode_UnsupportedKind(t *testing.T) {
 	t.Parallel()
 
 	type InvalidStruct struct {
 		Ch chan int `url:"ch"`
 	}
 
-	_, err := StructToValues(InvalidStruct{Ch: make(chan int)})
+	_, err := Encode(InvalidStruct{Ch: make(chan int)})
 	assert.Error(t, err)
 
 	var valErr *ValueError

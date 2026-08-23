@@ -210,11 +210,42 @@ func processInterceptedRequest(
 }
 
 func generateDynamicCert(srv *Server, host string) (*tls.Certificate, error) {
-	if srv.RootCACert != nil {
-		return generateCertFromRoot(srv.RootCACert, host)
+	if cached, ok := srv.certCache.Load(host); ok {
+		return cached.(*tls.Certificate), nil
 	}
 
-	privKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	var (
+		cert *tls.Certificate
+		err  error
+	)
+
+	if srv.RootCACert != nil {
+		cert, err = generateCertFromRoot(srv, srv.RootCACert, host)
+	} else {
+		cert, err = generateSelfSignedCert(srv, host)
+	}
+
+	if err != nil {
+		return nil, err
+	}
+
+	srv.certCache.Store(host, cert)
+
+	return cert, nil
+}
+
+func getLeafKey(srv *Server) (*ecdsa.PrivateKey, error) {
+	if srv.sharedLeafKey != nil {
+		if k, ok := srv.sharedLeafKey.(*ecdsa.PrivateKey); ok {
+			return k, nil
+		}
+	}
+
+	return ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+}
+
+func generateSelfSignedCert(srv *Server, host string) (*tls.Certificate, error) {
+	privKey, err := getLeafKey(srv)
 	if err != nil {
 		return nil, err
 	}
@@ -245,8 +276,8 @@ func generateDynamicCert(srv *Server, host string) (*tls.Certificate, error) {
 	}, nil
 }
 
-func generateCertFromRoot(root *tls.Certificate, host string) (*tls.Certificate, error) {
-	privKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+func generateCertFromRoot(srv *Server, root *tls.Certificate, host string) (*tls.Certificate, error) {
+	privKey, err := getLeafKey(srv)
 	if err != nil {
 		return nil, err
 	}

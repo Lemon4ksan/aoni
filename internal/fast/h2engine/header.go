@@ -13,30 +13,42 @@ import (
 )
 
 const (
-	DefaultFrameSize = 9
-	defaultMaxLen    = 1 << 14
+	// defaultFrameSize specifies the mandatory 9-octet HTTP/2 frame header length (RFC 9113 §4.1).
+	defaultFrameSize = 9
+
+	// defaultMaxLen specifies the default initial maximum frame payload length of 16,384 octets (2^14, RFC 9113 §4.2).
+	defaultMaxLen = 1 << 14
 )
 
 const (
-	FlagAck        FrameFlags = 0x1
-	FlagEndStream  FrameFlags = 0x1
+	// FlagAck indicates that the frame acknowledges receipt of a SETTINGS or PING frame (RFC 9113 §6.5 & §6.7).
+	FlagAck FrameFlags = 0x1
+
+	// FlagEndStream indicates that this frame is the last that the endpoint will send for the stream (RFC 9113 §6.1 & §6.2).
+	FlagEndStream FrameFlags = 0x1
+
+	// FlagEndHeaders indicates that this frame contains an entire field block (RFC 9113 §6.2, §6.6 & §6.10).
 	FlagEndHeaders FrameFlags = 0x4
-	FlagPadded     FrameFlags = 0x8
-	FlagPriority   FrameFlags = 0x20
+
+	// FlagPadded indicates that the Pad Length field and frame padding are present (RFC 9113 §6.1, §6.2 & §6.6).
+	FlagPadded FrameFlags = 0x8
+
+	// FlagPriority indicates that the priority fields are present in a HEADERS frame (RFC 9113 §6.2, deprecated per §5.3.2).
+	FlagPriority FrameFlags = 0x20
 )
 
 var frameHeaderPool = sync.Pool{
 	New: func() any { return &FrameHeader{} },
 }
 
-// FrameHeader encapsulates the fixed 9-byte wire header and payload of an HTTP/2 frame.
+// FrameHeader encapsulates the fixed 9-octet wire header and payload of an HTTP/2 frame (RFC 9113 §4.1 & §4.2).
 type FrameHeader struct {
 	length    int
 	kind      FrameType
 	flags     FrameFlags
 	stream    uint32
 	maxLen    uint32
-	rawHeader [DefaultFrameSize]byte
+	rawHeader [defaultFrameSize]byte
 	payload   []byte
 	fr        Frame
 	arena     *offheap.Arena
@@ -120,13 +132,13 @@ func ReadFrameFromWithSize(br *bufio.Reader, max uint32) (*FrameHeader, error) {
 }
 
 func (f *FrameHeader) readFrom(br *bufio.Reader) (int64, error) {
-	header, err := br.Peek(DefaultFrameSize)
+	header, err := br.Peek(defaultFrameSize)
 	if err != nil {
 		return -1, err
 	}
 
-	_, _ = br.Discard(DefaultFrameSize)
-	rn := int64(DefaultFrameSize)
+	_, _ = br.Discard(defaultFrameSize)
+	rn := int64(defaultFrameSize)
 
 	f.parseValues(header)
 

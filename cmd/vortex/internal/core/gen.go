@@ -13,7 +13,7 @@ import (
 	"time"
 
 	"github.com/lemon4ksan/aoni/cmd/vortex/internal/base"
-	"github.com/lemon4ksan/aoni/internal/codegen/builder"
+	"github.com/lemon4ksan/aoni/cmd/vortex/lib/builder"
 )
 
 // CmdGen compiles and generates zero-allocation Go client facades from AST contracts.

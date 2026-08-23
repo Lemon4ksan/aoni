@@ -11,19 +11,38 @@ import (
 	"github.com/lemon4ksan/foundation/silicon/offheap"
 )
 
-// FrameType identifies the protocol function of an HTTP/2 frame (RFC 7540 Section 6).
+// FrameType identifies the protocol function of an HTTP/2 frame (RFC 9113 Section 6).
 type FrameType uint8
 
 const (
-	FrameData         FrameType = 0x0
-	FrameHeaders      FrameType = 0x1
-	FramePriority     FrameType = 0x2
-	FrameResetStream  FrameType = 0x3
-	FrameSettings     FrameType = 0x4
-	FramePushPromise  FrameType = 0x5
-	FramePing         FrameType = 0x6
-	FrameGoAway       FrameType = 0x7
+	// FrameData conveys arbitrary, variable-length sequences of octets associated with a stream (RFC 9113 §6.1).
+	FrameData FrameType = 0x0
+
+	// FrameHeaders carries a field block fragment and opens a stream (RFC 9113 §6.2).
+	FrameHeaders FrameType = 0x1
+
+	// FramePriority specifies stream dependency and weight (RFC 9113 §6.3, deprecated per §5.3.2).
+	FramePriority FrameType = 0x2
+
+	// FrameResetStream signals immediate termination of an individual stream (RFC 9113 §6.4).
+	FrameResetStream FrameType = 0x3
+
+	// FrameSettings conveys configuration parameters and constraints on connection behavior (RFC 9113 §6.5).
+	FrameSettings FrameType = 0x4
+
+	// FramePushPromise notifies the peer in advance of server-initiated streams (RFC 9113 §6.6).
+	FramePushPromise FrameType = 0x5
+
+	// FramePing measures round-trip time and verifies connection liveness (RFC 9113 §6.7).
+	FramePing FrameType = 0x6
+
+	// FrameGoAway initiates connection shutdown or reports fatal connection-level errors (RFC 9113 §6.8).
+	FrameGoAway FrameType = 0x7
+
+	// FrameWindowUpdate implements stream and connection-level flow control credits (RFC 9113 §6.9).
 	FrameWindowUpdate FrameType = 0x8
+
+	// FrameContinuation extends a sequence of field block fragments (RFC 9113 §6.10).
 	FrameContinuation FrameType = 0x9
 )
 

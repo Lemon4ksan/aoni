@@ -11,10 +11,10 @@ import (
 
 var (
 	// ErrSpoofedSourceAddress is returned when a packet's source address violates BCP 38 / BCP 84 ingress filtering.
-	ErrSpoofedSourceAddress = errors.New("aoni masque: ingress filter blocked spoofed source address")
+	ErrSpoofedSourceAddress = errors.New("aoni/masque: ingress filter blocked spoofed source address")
 
 	// ErrMartianAddress is returned when a packet contains a reserved, unroutable Martian address (RFC 2827).
-	ErrMartianAddress = errors.New("aoni masque: packet contains reserved martian address")
+	ErrMartianAddress = errors.New("aoni/masque: packet contains reserved martian address")
 )
 
 // ValidateIngressSourceAddress verifies that srcAddr belongs to one of allowedPrefixes per BCP 38 / BCP 84 (RFC 2827/3704/8704).

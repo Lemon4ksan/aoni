@@ -9,6 +9,7 @@ import (
 	"context"
 	"io"
 	"net"
+	"slices"
 	"strconv"
 
 	"github.com/lemon4ksan/aoni/netutil/netdial"
@@ -92,7 +93,7 @@ func handshakeSOCKS5Auth(srv *Server, conn net.Conn, br *bufio.Reader) error {
 		return err
 	}
 
-	if !containsMethod(methods, socksAuthUserPass) {
+	if !slices.Contains(methods, socksAuthUserPass) {
 		_, _ = conn.Write([]byte{socks5Version, socksAuthNoAccept})
 		return ErrAuthFailed
 	}
@@ -102,16 +103,6 @@ func handshakeSOCKS5Auth(srv *Server, conn net.Conn, br *bufio.Reader) error {
 	}
 
 	return authenticateUserPass(srv, conn, br)
-}
-
-func containsMethod(methods []byte, target byte) bool {
-	for _, m := range methods {
-		if m == target {
-			return true
-		}
-	}
-
-	return false
 }
 
 func authenticateUserPass(srv *Server, conn net.Conn, br *bufio.Reader) error {

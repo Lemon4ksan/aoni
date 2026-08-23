@@ -11,7 +11,7 @@ import (
 	"io"
 
 	"github.com/lemon4ksan/aoni/cmd/vortex/internal/base"
-	"github.com/lemon4ksan/aoni/internal/codegen/pipeline"
+	"github.com/lemon4ksan/aoni/cmd/vortex/lib/pipeline"
 )
 
 // CmdEnv scans Go contracts for referenced environment variables and generates .env templates.

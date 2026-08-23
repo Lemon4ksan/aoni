@@ -7,25 +7,29 @@ package aoni
 import (
 	"context"
 	"crypto/tls"
+	"io"
 	"net/http"
 	"net/url"
 	"time"
 
 	"github.com/lemon4ksan/foundation/generic"
+	fio "github.com/lemon4ksan/foundation/io"
+	furl "github.com/lemon4ksan/foundation/net/url"
 	"github.com/lemon4ksan/foundation/silicon/pool"
-	fastrand "github.com/lemon4ksan/foundation/silicon/rand"
+	frand "github.com/lemon4ksan/foundation/silicon/rand"
 
 	"github.com/lemon4ksan/aoni/internal/core"
-	"github.com/lemon4ksan/aoni/internal/io"
 	"github.com/lemon4ksan/aoni/internal/pipeline"
 	"github.com/lemon4ksan/aoni/netutil"
 	"github.com/lemon4ksan/aoni/netutil/netdial"
 	"github.com/lemon4ksan/aoni/telemetry"
 )
 
-// AsReplayable wraps an io.ReadCloser into a replayable stream ([io.ReplayableBody])
+// AsReplayable wraps an [io.ReadCloser] into a replayable stream ([fio.ReplayableBody])
 // using in-memory byte buffers or tee-buffered fallbacks to support stream rewinding.
-var AsReplayable = io.AsReplayable
+func AsReplayable(rc io.ReadCloser) fio.ReplayableBody {
+	return fio.AsReplayable(rc)
+}
 
 // ResponseTrace extracts fine-grained execution metrics and network timing details
 // ([telemetry.TraceInfo]) captured during request execution from the response context.
@@ -36,8 +40,7 @@ func ResponseTrace(resp *http.Response) *telemetry.TraceInfo {
 		return nil
 	}
 
-	cfg := GetRequestConfig(resp.Request.Context())
-	if cfg != nil {
+	if cfg := GetRequestConfig(resp.Request.Context()); cfg != nil {
 		return cfg.TraceInfo
 	}
 
@@ -47,8 +50,7 @@ func ResponseTrace(resp *http.Response) *telemetry.TraceInfo {
 // HostRewriteRules extracts per-request hostname-to-IP/host remapping rules from the context.
 // Returns nil if no host rewrite rules are attached to the request context.
 func HostRewriteRules(ctx context.Context) map[string]string {
-	cfg := GetRequestConfig(ctx)
-	if cfg != nil && cfg.HostRewrite != nil {
+	if cfg := GetRequestConfig(ctx); cfg != nil && cfg.HostRewrite != nil {
 		return cfg.HostRewrite.Rules
 	}
 
@@ -79,8 +81,7 @@ func WithContextModifier(ctx context.Context, mods ...RequestModifier) context.C
 
 // ContextModifiers retrieves all per-request [RequestModifier] closures stored in the context.
 func ContextModifiers(ctx context.Context) []RequestModifier {
-	cfg := GetRequestConfig(ctx)
-	if cfg != nil {
+	if cfg := GetRequestConfig(ctx); cfg != nil {
 		return cfg.Modifiers
 	}
 
@@ -141,7 +142,7 @@ func ApplyTCPDelay(ctx context.Context) error {
 
 	delay := r.Min
 	if window > 0 {
-		delay += fastrand.Jitter(window)
+		delay += frand.Jitter(window)
 	}
 
 	if delay <= 0 {
@@ -176,12 +177,11 @@ func GetConnMetadata(ctx context.Context, key string) generic.Optional[any] {
 
 // GetResponseValidator retrieves the per-request response validation callback from context.
 func GetResponseValidator(ctx context.Context) func(resp *http.Response) error {
-	cfg := GetRequestConfig(ctx)
-	if cfg == nil {
-		return nil
+	if cfg := GetRequestConfig(ctx); cfg != nil {
+		return cfg.ResponseValidator
 	}
 
-	return cfg.ResponseValidator
+	return nil
 }
 
 // GetCacheTTL retrieves the per-request HTTP response caching TTL duration from context.
@@ -206,8 +206,7 @@ func GetTimeoutOverride(ctx context.Context) generic.Optional[time.Duration] {
 
 // GetDNSResolverOverride retrieves the per-request DNS resolver override from context.
 func GetDNSResolverOverride(ctx context.Context) netdial.DNSResolver {
-	cfg := GetRequestConfig(ctx)
-	if cfg != nil {
+	if cfg := GetRequestConfig(ctx); cfg != nil {
 		return cfg.DNSResolver
 	}
 
@@ -229,7 +228,7 @@ func GetRetryOverride(ctx context.Context) generic.Optional[core.RetryOverride] 
 func ProxyFuncWithOverride(base func(*http.Request) (*url.URL, error)) func(*http.Request) (*url.URL, error) {
 	return func(req *http.Request) (*url.URL, error) {
 		if raw, ok := GetProxyOverride(req.Context()).Value(); ok && raw != "" {
-			return url.Parse(raw)
+			return furl.Parse(raw)
 		}
 
 		if base != nil {

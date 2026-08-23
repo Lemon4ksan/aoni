@@ -12,8 +12,8 @@ import (
 	"os"
 	"strings"
 
-	"github.com/lemon4ksan/aoni/internal/codegen/history"
-	"github.com/lemon4ksan/aoni/internal/codegen/project"
+	"github.com/lemon4ksan/aoni/cmd/vortex/lib/history"
+	"github.com/lemon4ksan/aoni/cmd/vortex/lib/project"
 )
 
 // CmdUndo reverts the latest contract modifying operation or a specific op-id.

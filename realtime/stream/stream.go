@@ -22,13 +22,13 @@ import (
 	"strings"
 	"time"
 
-	"github.com/klauspost/compress/gzip"
 	"github.com/lemon4ksan/foundation/generic"
 	"github.com/lemon4ksan/foundation/silicon/offheap"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/lemon4ksan/aoni"
 	"github.com/lemon4ksan/aoni/codec/decode"
+	"github.com/lemon4ksan/aoni/internal/compress"
 	"github.com/lemon4ksan/aoni/mod"
 	"github.com/lemon4ksan/aoni/request"
 )
@@ -115,6 +115,11 @@ func (s *Stream) Response() *http.Response {
 	return s.resp
 }
 
+// Unwrap returns the underlying raw [*http.Response].
+func (s *Stream) Unwrap() any {
+	return s.resp
+}
+
 // IterSSE returns an iter.Seq2 range-over-func iterator over Server-Sent Events in s (Go 1.23+).
 func IterSSE[T any](s *Stream) iter.Seq2[T, error] {
 	return StreamSSE[T](s).All()
@@ -193,15 +198,9 @@ func dispatchSSEEvent[T any](ctx context.Context, ev SSEEvent, out chan<- T) err
 		return nil
 	}
 
-	var val T
-	if sse, ok := any(ev).(T); ok {
-		val = sse
-	} else if s, ok := any(ev.Data).(T); ok {
-		val = s
-	} else {
-		if err := json.Unmarshal([]byte(ev.Data), &val); err != nil {
-			return fmt.Errorf("aoni/stream: unmarshal sse failed: %w", err)
-		}
+	val, err := decodeSSEPayload[T](ev)
+	if err != nil {
+		return err
 	}
 
 	select {
@@ -210,6 +209,23 @@ func dispatchSSEEvent[T any](ctx context.Context, ev SSEEvent, out chan<- T) err
 	case out <- val:
 		return nil
 	}
+}
+
+func decodeSSEPayload[T any](ev SSEEvent) (T, error) {
+	if sse, ok := any(ev).(T); ok {
+		return sse, nil
+	}
+
+	if s, ok := any(ev.Data).(T); ok {
+		return s, nil
+	}
+
+	var val T
+	if err := json.Unmarshal([]byte(ev.Data), &val); err != nil {
+		return val, fmt.Errorf("aoni/stream: unmarshal sse failed: %w", err)
+	}
+
+	return val, nil
 }
 
 // SSEReader provides sequential decoded access to W3C Server-Sent Event streams.
@@ -247,16 +263,9 @@ func (r *SSEReader[T]) Next() generic.Result[T] {
 		return generic.Failure[T](err)
 	}
 
-	var val T
-
-	if sse, ok := any(event).(T); ok {
-		return generic.Success(sse)
-	} else if s, ok := any(event.Data).(T); ok {
-		return generic.Success(s)
-	}
-
-	if err := json.Unmarshal([]byte(event.Data), &val); err != nil {
-		return generic.Failure[T](fmt.Errorf("aoni/stream: unmarshal sse failed: %w", err))
+	val, err := decodeSSEPayload[T](event)
+	if err != nil {
+		return generic.Failure[T](err)
 	}
 
 	return generic.Success(val)
@@ -803,25 +812,20 @@ func readNextGRPCWebFrame[T any](reader io.Reader) (val T, done bool, err error)
 
 	var payload []byte
 	if length >= 16*1024 {
-		offBuf, err := offheap.NewBuffer(int(length))
-		if err == nil {
+		offBuf, bufErr := offheap.NewBuffer(int(length))
+		if bufErr == nil {
 			defer offBuf.Release()
 
 			payload = offBuf.Bytes()[:length]
-			if _, rErr := io.ReadFull(reader, payload); rErr != nil {
-				return zero, false, rErr
-			}
-		} else {
-			payload = make([]byte, length)
-			if _, rErr := io.ReadFull(reader, payload); rErr != nil {
-				return zero, false, rErr
-			}
 		}
-	} else {
+	}
+
+	if payload == nil {
 		payload = make([]byte, length)
-		if _, rErr := io.ReadFull(reader, payload); rErr != nil {
-			return zero, false, rErr
-		}
+	}
+
+	if _, rErr := io.ReadFull(reader, payload); rErr != nil {
+		return zero, false, rErr
 	}
 
 	if flags&0x80 != 0 {
@@ -844,16 +848,9 @@ func decodeProtoPayload[T any](payload []byte, flags byte) (T, error) {
 	var zero T
 
 	if flags&0x01 != 0 {
-		gzReader, err := gzip.NewReader(bytes.NewReader(payload))
+		decompressed, err := compress.Gunzip(payload, nil)
 		if err != nil {
 			return zero, fmt.Errorf("aoni/stream: decompress gRPC-Web frame failed: %w", err)
-		}
-
-		decompressed, err := io.ReadAll(gzReader)
-		_ = gzReader.Close()
-
-		if err != nil {
-			return zero, fmt.Errorf("aoni/stream: read decompressed gRPC-Web payload failed: %w", err)
 		}
 
 		payload = decompressed

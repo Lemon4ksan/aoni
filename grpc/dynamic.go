@@ -69,10 +69,7 @@ func (d *DynamicInvoker) InvokeJSON(
 		return "", err
 	}
 
-	path := fullMethod
-	if !strings.HasPrefix(path, "/") && !strings.HasPrefix(path, "http://") && !strings.HasPrefix(path, "https://") {
-		path = "/" + path
-	}
+	path := normalizeMethodPath(fullMethod)
 
 	grpcMods := make([]aoni.RequestModifier, 0, len(mods)+4)
 	grpcMods = append(grpcMods,

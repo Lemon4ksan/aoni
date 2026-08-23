@@ -7,6 +7,7 @@ package transport
 import (
 	"context"
 	"crypto/tls"
+	"crypto/x509"
 	"net"
 
 	"github.com/lemon4ksan/aoni/netutil"
@@ -130,6 +131,49 @@ func handshakeStandardTLS(
 	}
 
 	if cfg.InsecureSkipVerify {
+		cloned := tlsCfg.Clone()
+		cloned.InsecureSkipVerify = true
+		tlsCfg = cloned
+	}
+
+	if len(cfg.ALPNOverride) > 0 {
+		cloned := tlsCfg.Clone()
+		cloned.NextProtos = cfg.ALPNOverride
+		tlsCfg = cloned
+	}
+
+	if len(cfg.CertificatePins) > 0 {
+		cloned := tlsCfg.Clone()
+		if cloned.InsecureSkipVerify || net.ParseIP(host) != nil {
+			cloned.InsecureSkipVerify = true
+			cloned.VerifyPeerCertificate = func(rawCerts [][]byte, _ [][]*x509.Certificate) error {
+				return netdial.VerifyCertificatePins(host, cfg.CertificatePins, rawCerts)
+			}
+		} else {
+			origVerify := cloned.VerifyPeerCertificate
+
+			//nolint:gosec // VerifyPeerCertificate is chained to enforce dynamic domain certificate pinning.
+			cloned.VerifyPeerCertificate = func(rawCerts [][]byte, verifiedChains [][]*x509.Certificate) error {
+				if origVerify != nil {
+					if err := origVerify(rawCerts, verifiedChains); err != nil {
+						return err
+					}
+				}
+
+				return netdial.VerifyCertificatePins(host, cfg.CertificatePins, rawCerts)
+			}
+		}
+
+		tlsCfg = cloned
+	}
+
+	if tlsCfg.ServerName == "" && !tlsCfg.InsecureSkipVerify && tlsCfg.VerifyPeerCertificate == nil {
+		cloned := tlsCfg.Clone()
+		cloned.ServerName = host
+		tlsCfg = cloned
+	}
+
+	if tlsCfg.VerifyPeerCertificate != nil && tlsCfg.ServerName == "" && !tlsCfg.InsecureSkipVerify {
 		cloned := tlsCfg.Clone()
 		cloned.InsecureSkipVerify = true
 		tlsCfg = cloned

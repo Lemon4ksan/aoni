@@ -11,6 +11,8 @@ import (
 	"net/http"
 	"strings"
 	"time"
+
+	"github.com/lemon4ksan/aoni/netutil/netdial"
 )
 
 // NewUnixTransport creates an [http.RoundTripper] bound to a local Unix domain socket path.
@@ -18,7 +20,7 @@ func NewUnixTransport(socketPath string) *http.Transport {
 	return &http.Transport{
 		DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
 			dialer := &net.Dialer{Timeout: 10 * time.Second}
-			return dialer.DialContext(ctx, "unix", socketPath)
+			return dialer.DialContext(ctx, netdial.NetworkUnix.String(), socketPath)
 		},
 		DisableKeepAlives: false,
 	}

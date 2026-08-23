@@ -22,7 +22,7 @@ const (
 	// ConnectUDPUpgradeToken specifies the RFC 9298 HTTP upgrade token.
 	ConnectUDPUpgradeToken = "connect-udp"
 
-	// DefaultUDPPathPrefix specifies the RFC 9298 default well-known path for UDP proxying.
+	// DefaultUDPPathPrefix specifies the well-known path prefix for UDP proxying (RFC 9298, RFC 8615, RFC 8820 §2.3).
 	DefaultUDPPathPrefix = "/.well-known/masque/udp/"
 )
 
@@ -52,15 +52,9 @@ func DialUDPProxy(
 	}
 
 	host := parsed.Hostname()
+	port := generic.Coalesce(parsed.Port(), "443")
 
-	port := parsed.Port()
-	if port == "" {
-		port = "443"
-	}
-
-	addr := net.JoinHostPort(host, port)
-
-	conn, err := dialer.DialTLSForWS(ctx, addr)
+	conn, err := dialer.DialTLSForWS(ctx, net.JoinHostPort(host, port))
 	if err != nil {
 		return nil, nil, err
 	}
@@ -89,6 +83,8 @@ func DialUDPProxy(
 }
 
 // performCONNECTUDPHandshake executes the HTTP upgrade request and validates the 101/200 response headers.
+// RFC 9931 §6.3 (updating RFC 9298 §5): Clients MUST NOT send UDP packets optimistically in HTTP/1.x;
+// handshake response confirmation (101 Switching Protocols / 200 OK) is strictly required before sending datagrams.
 func performCONNECTUDPHandshake(
 	ctx context.Context,
 	conn net.Conn,

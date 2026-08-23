@@ -11,10 +11,10 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/lemon4ksan/aoni/internal/codegen/analysis"
-	"github.com/lemon4ksan/aoni/internal/codegen/emitter"
-	"github.com/lemon4ksan/aoni/internal/codegen/optimizer"
-	parserpkg "github.com/lemon4ksan/aoni/internal/codegen/parser"
+	"github.com/lemon4ksan/aoni/cmd/vortex/lib/analysis"
+	"github.com/lemon4ksan/aoni/cmd/vortex/lib/emitter"
+	"github.com/lemon4ksan/aoni/cmd/vortex/lib/optimizer"
+	parserpkg "github.com/lemon4ksan/aoni/cmd/vortex/lib/parser"
 )
 
 func TestRPCPrimitives_RPC_Notify_Event(t *testing.T) {
@@ -82,8 +82,7 @@ type SteamAccountAPI interface {
 	opt := optimizer.NewOptimizer()
 	opt.Optimize(root)
 
-	em := emitter.NewEmitter()
-	codeBytes, err := em.Emit(root)
+	codeBytes, err := emitter.Emit(root)
 	require.NoError(t, err)
 	require.NotEmpty(t, codeBytes)
 
@@ -170,8 +169,7 @@ type SocketAccountAPI interface {
 	opt := optimizer.NewOptimizer()
 	opt.Optimize(root)
 
-	em := emitter.NewEmitter()
-	codeBytes, err := em.Emit(root)
+	codeBytes, err := emitter.Emit(root)
 	require.NoError(t, err)
 	require.NotEmpty(t, codeBytes)
 

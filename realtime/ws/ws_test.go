@@ -8,6 +8,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/tls"
+	"encoding/base64"
 	"encoding/binary"
 	"errors"
 	"fmt"
@@ -1578,6 +1579,32 @@ func TestRFC8307_DialWellKnown(t *testing.T) {
 	n, err := conn.Read(buf)
 	require.NoError(t, err)
 	assert.Equal(t, "well-known test", string(buf[:n]))
+
+	// Test ConnectWellKnown
+	conn2, resp2, err := ConnectWellKnown(t.Context(), client, "ws", host, "my-service-2")
+	require.NoError(t, err)
+	require.NotNil(t, resp2)
+
+	_ = conn2.Close()
+
+	// Test DialWellKnownResult and ConnectWellKnownResult
+	res1, resp3 := DialWellKnownResult(t.Context(), client, "ws", host, "my-service-3")
+	require.True(t, res1.IsSuccess())
+	require.NotNil(t, resp3)
+
+	c1, err := res1.Unwrap()
+	require.NoError(t, err)
+
+	_ = c1.Close()
+
+	res2, resp4 := ConnectWellKnownResult(t.Context(), client, "ws", host, "my-service-4")
+	require.True(t, res2.IsSuccess())
+	require.NotNil(t, resp4)
+
+	c2, err := res2.Unwrap()
+	require.NoError(t, err)
+
+	_ = c2.Close()
 }
 
 func TestRFC7936_Subprotocols(t *testing.T) {
@@ -1590,6 +1617,11 @@ func TestRFC7936_Subprotocols(t *testing.T) {
 		assert.False(t, ValidateSubprotocol([]string{"chat", "v1"}, "v2"))
 		assert.True(t, ValidateSubprotocol(nil, "chat"))
 		assert.True(t, ValidateSubprotocol([]string{"chat"}, ""))
+
+		// RFC 7936 §2: Case-sensitive matching ("chat" != "CHAT", "graphql-ws" != "GraphQL-WS")
+		assert.False(t, ValidateSubprotocol([]string{"chat", "v1"}, "CHAT"))
+		assert.False(t, ValidateSubprotocol([]string{"graphql-ws"}, "GraphQL-WS"))
+		assert.True(t, ValidateSubprotocol([]string{"GraphQL-WS"}, "GraphQL-WS"))
 	})
 
 	t.Run("IsValidSubprotocolToken", func(t *testing.T) {
@@ -1662,6 +1694,25 @@ func TestRFC7936_SubprotocolHandshake(t *testing.T) {
 
 func TestRFC7692_PermessageDeflate(t *testing.T) {
 	t.Parallel()
+
+	// RFC 7692 Constants verification
+	assert.Equal(t, "permessage-deflate", ExtensionPermessageDeflate)
+	assert.Equal(t, "server_no_context_takeover", ParamServerNoContextTakeover)
+	assert.Equal(t, "client_no_context_takeover", ParamClientNoContextTakeover)
+	assert.Equal(t, "server_max_window_bits", ParamServerMaxWindowBits)
+	assert.Equal(t, "client_max_window_bits", ParamClientMaxWindowBits)
+
+	t.Run("rfc7692_section_7_2_3_1_vector", func(t *testing.T) {
+		t.Parallel()
+
+		// RFC 7692 §7.2.3.1 official test vector:
+		// "Hello" compressed and stripped of trailing 0x00 0x00 0xff 0xff:
+		// 0xf2 0x48 0xcd 0xc9 0xc9 0x07 0x00
+		rfcVectorCompressed := []byte{0xf2, 0x48, 0xcd, 0xc9, 0xc9, 0x07, 0x00}
+		decompressed, err := decompressNoContextTakeover(rfcVectorCompressed)
+		require.NoError(t, err)
+		assert.Equal(t, "Hello", string(decompressed))
+	})
 
 	t.Run("compress_decompress_roundtrip", func(t *testing.T) {
 		t.Parallel()
@@ -1779,4 +1830,211 @@ func TestDialResult_And_ReadMessageResult(t *testing.T) {
 	// Read on nil
 	res := ReadMessageResult(nil)
 	assert.False(t, res.IsSuccess())
+}
+
+func TestWebSocket_RFC6455_Handshake_AcceptKey(t *testing.T) {
+	t.Parallel()
+
+	// RFC 6455 §1.3 official test vector:
+	// Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==
+	// Sec-WebSocket-Accept: s3pPLMBiTxaQ9kYGzzhZRbK+xOo=
+	const (
+		clientKey      = "dGhlIHNhbXBsZSBub25jZQ=="
+		expectedAccept = "s3pPLMBiTxaQ9kYGzzhZRbK+xOo="
+	)
+
+	actualAccept := ComputeAcceptKey(clientKey)
+	assert.Equal(t, expectedAccept, actualAccept)
+
+	// Verify generated challenge key format (RFC 6455 §4.1.7: 16-byte base64-encoded nonce)
+	key, err := GenerateChallengeKey()
+	require.NoError(t, err)
+	require.NotEmpty(t, key)
+
+	decoded, err := base64.StdEncoding.DecodeString(key)
+	require.NoError(t, err)
+	assert.Len(t, decoded, 16)
+}
+
+func TestWebSocket_RFC6455_CloseStatus_And_Messages(t *testing.T) {
+	t.Parallel()
+
+	// Standard status codes verification (RFC 6455 §7.4.1)
+	assert.Equal(t, 1000, StatusNormalClosure)
+	assert.Equal(t, 1001, StatusGoingAway)
+	assert.Equal(t, 1002, StatusProtocolError)
+	assert.Equal(t, 1003, StatusUnsupportedData)
+	assert.Equal(t, 1005, StatusNoStatusRcvd)
+	assert.Equal(t, 1006, StatusAbnormalClosure)
+	assert.Equal(t, 1007, StatusInvalidFramePayloadData)
+	assert.Equal(t, 1008, StatusPolicyViolation)
+	assert.Equal(t, 1009, StatusMessageTooBig)
+	assert.Equal(t, 1010, StatusMandatoryExtension)
+	assert.Equal(t, 1011, StatusInternalServerError)
+	assert.Equal(t, 1015, StatusTLSHandshake)
+
+	// Format and Parse Close Message (RFC 6455 §5.5.1 & §7.1.6)
+	msg := FormatCloseMessage(StatusNormalClosure, "session completed normally")
+	require.Len(t, msg, 2+len("session completed normally"))
+
+	code, reason := ParseCloseMessage(msg)
+	assert.Equal(t, StatusNormalClosure, code)
+	assert.Equal(t, "session completed normally", reason)
+
+	// Empty payload parse
+	emptyCode, emptyReason := ParseCloseMessage(nil)
+	assert.Equal(t, StatusNoStatusRcvd, emptyCode)
+	assert.Empty(t, emptyReason)
+
+	// CloseError and IsCloseError
+	closeErr := &CloseError{Code: StatusGoingAway, Reason: "server shutting down"}
+	assert.Contains(t, closeErr.Error(), "1001")
+	assert.Contains(t, closeErr.Error(), "server shutting down")
+
+	assert.True(t, IsCloseError(closeErr, StatusGoingAway))
+	assert.False(t, IsCloseError(closeErr, StatusNormalClosure))
+	assert.True(t, IsCloseError(closeErr))
+}
+
+func TestWebSocket_RFC6455_Opcodes(t *testing.T) {
+	t.Parallel()
+
+	// Verify RFC 6455 §5.2 & §11.8 opcodes
+	assert.Equal(t, 0x0, OpcodeContinuation)
+	assert.Equal(t, 0x1, OpcodeText)
+	assert.Equal(t, 0x2, OpcodeBinary)
+	assert.Equal(t, 0x8, OpcodeClose)
+	assert.Equal(t, 0x9, OpcodePing)
+	assert.Equal(t, 0xA, OpcodePong)
+
+	assert.Equal(t, OpcodeContinuation, FrameContinuation)
+	assert.Equal(t, OpcodeText, FrameText)
+	assert.Equal(t, OpcodeBinary, FrameBinary)
+	assert.Equal(t, OpcodeClose, FrameClose)
+	assert.Equal(t, OpcodePing, FramePing)
+	assert.Equal(t, OpcodePong, FramePong)
+}
+
+func TestRFC8441_ExtendedConnect_Rules(t *testing.T) {
+	t.Parallel()
+
+	// RFC 8441 §5: Forbidden HTTP/1.1 headers in Extended CONNECT
+	forbidden := []string{
+		"connection",
+		"upgrade",
+		"sec-websocket-key",
+		"sec-websocket-accept",
+		"host",
+		"keep-alive",
+		"proxy-connection",
+		"transfer-encoding",
+	}
+
+	for _, h := range forbidden {
+		assert.True(
+			t,
+			isForbiddenH2ConnectHeader(h),
+			"header %q must be forbidden in H2 Extended CONNECT (RFC 8441 §5)",
+			h,
+		)
+	}
+
+	// Allowed headers in Extended CONNECT
+	allowed := []string{
+		"sec-websocket-protocol",
+		"sec-websocket-extensions",
+		"sec-websocket-version",
+		"origin",
+		"authorization",
+		"cookie",
+	}
+
+	for _, h := range allowed {
+		assert.False(
+			t,
+			isForbiddenH2ConnectHeader(h),
+			"header %q must be allowed in H2 Extended CONNECT (RFC 8441 §5)",
+			h,
+		)
+	}
+}
+
+func TestWebSocket_RFC6455_ContinuationFrames_Reassembly(t *testing.T) {
+	t.Parallel()
+
+	t.Run("three_fragment_text_message", func(t *testing.T) {
+		t.Parallel()
+
+		serverConn, clientConn := tcpPipe(t)
+		defer serverConn.Close()
+		defer clientConn.Close()
+
+		wsServer := WrapRawConn(serverConn, false)
+
+		go func() {
+			// Frame 1: Text, FIN=0, payload="Hello, "
+			p1 := []byte("Hello, ")
+			hdr1 := []byte{0x01, byte(len(p1))}
+			_, _ = clientConn.Write(append(hdr1, p1...))
+
+			// Frame 2: Continuation, FIN=0, payload="world"
+			p2 := []byte("world")
+			hdr2 := []byte{0x00, byte(len(p2))}
+			_, _ = clientConn.Write(append(hdr2, p2...))
+
+			// Frame 3: Continuation, FIN=1, payload="!"
+			p3 := []byte("!")
+			hdr3 := []byte{0x80, byte(len(p3))}
+			_, _ = clientConn.Write(append(hdr3, p3...))
+		}()
+
+		msgType, payload, err := wsServer.ReadMessage()
+		require.NoError(t, err)
+		assert.Equal(t, int(FrameText), msgType)
+		assert.Equal(t, "Hello, world!", string(payload))
+	})
+
+	t.Run("interleaved_ping_pong_during_fragmentation", func(t *testing.T) {
+		t.Parallel()
+
+		serverConn, clientConn := tcpPipe(t)
+		defer serverConn.Close()
+		defer clientConn.Close()
+
+		wsServer := WrapRawConn(serverConn, false)
+
+		go func() {
+			// Frame 1: Binary, FIN=0, payload=[0x01, 0x02]
+			_, _ = clientConn.Write([]byte{0x02, 0x02, 0x01, 0x02})
+
+			// Interleaved Ping: FIN=1, Opcode=9 (0x89)
+			_, _ = clientConn.Write([]byte{0x89, 0x04, 'p', 'i', 'n', 'g'})
+
+			// Frame 3: Continuation, FIN=1, payload=[0x03, 0x04]
+			_, _ = clientConn.Write([]byte{0x80, 0x02, 0x03, 0x04})
+		}()
+
+		msgType, payload, err := wsServer.ReadMessage()
+		require.NoError(t, err)
+		assert.Equal(t, int(FrameBinary), msgType)
+		assert.Equal(t, []byte{0x01, 0x02, 0x03, 0x04}, payload)
+	})
+
+	t.Run("unexpected_continuation_frame_error", func(t *testing.T) {
+		t.Parallel()
+
+		serverConn, clientConn := tcpPipe(t)
+		defer serverConn.Close()
+		defer clientConn.Close()
+
+		wsServer := WrapRawConn(serverConn, false)
+
+		go func() {
+			// Send Continuation frame (Opcode=0) without prior Text/Binary frame
+			_, _ = clientConn.Write([]byte{0x80, 0x04, 't', 'e', 's', 't'})
+		}()
+
+		_, _, err := wsServer.ReadMessage()
+		require.ErrorIs(t, err, ErrUnexpectedContinuationFrame)
+	})
 }

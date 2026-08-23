@@ -117,16 +117,17 @@ Under high concurrent load across multiple CPU cores, Go's memory allocator (`mc
 
 | Metric | Standard `net/http` | `aoni` (Standard) | `aoni` + `fast.Bridge` | `aoni/fast` (Native) | Performance Delta |
 | :--- | :---: | :---: | :---: | :---: | :---: |
-| **GET JSON Unmarshaling (`GetTo[T]`)** | 53,912 ns | 54,824 ns | **13,249 ns** | **4,908 ns** | **⚡ 11.0x Faster (Native) / 4.1x (Bridge)** |
-| **Raw Request Execution (`c.Request`)** | 7,002 ns | **6,167 ns** | **5,802 ns** | **4,118 ns** | **⚡ 1.7x Faster / 2.7x Less RAM** |
-| **Multipart Form Upload** | 297,413 ns | — | — | **103,769 ns** | **⚡ 2.9x Faster / 4.5x Less RAM (121KB vs 547KB)** |
-| **Heap Memory Footprint (`B/op`)** | 6,990 B | **6,167 B** | **6,630 B** | **363 B** | **⚡ 19.3x Lighter Memory Footprint** |
-| **Heap Allocations (`allocs/op`)** | 78 allocs | **68 allocs** | **51 allocs** | **8 allocs** | **⚡ -70 Allocs (Native) / -27 Allocs (Bridge)** |
-| **HTTP/2 Latency (`ns/op`)** | 83,372 ns | 83,372 ns | **74,532 ns** | **74,532 ns** | **⚡ 2.0x Less H2 RAM (5.0KB vs 10.1KB)** |
+| **GET JSON Unmarshaling (`GetTo[T]`)** | 53,912 ns | 54,824 ns | **10,948 ns** | **4,887 ns** | **⚡ 11.0x Faster (Native) / 4.9x (Bridge)** |
+| **Raw Request Execution (`c.Request`)** | 7,002 ns | **6,167 ns** | **5,500 ns** | **4,011 ns** | **⚡ 1.7x Faster / 2.7x Less RAM** |
+| **Multipart Form Upload** | 273,999 ns | — | — | **102,539 ns** | **⚡ 2.7x Faster / 4.5x Less RAM (120KB vs 546KB)** |
+| **Heap Memory Footprint (`B/op`)** | 6,990 B | **6,165 B** | **5,928 B** | **362 B** | **⚡ 19.3x Lighter Memory Footprint** |
+| **Heap Allocations (`allocs/op`)** | 78 allocs | **68 allocs** | **48 allocs** | **8 allocs** | **⚡ -70 Allocs (Native) / -30 Allocs (Bridge)** |
+| **HTTP/2 Latency (`ns/op`)** | 80,979 ns | 80,979 ns | **67,441 ns** | **67,441 ns** | **⚡ 1.95x Less H2 RAM (5.0KB vs 9.8KB)** |
+| **HTTP/3 QPACK Block Framing** | ~2,500 ns / 120 B | — | — | **379.5 ns / 0 B** | **⚡ 6.5x Faster (0 B / 0 allocs)** |
 | **HTTP/3 QUIC Latency (`ns/op`)** | 128,980 ns | 128,980 ns | **124,447 ns** | **124,447 ns** | **⚡ 2.01x Less QUIC RAM (12.0KB vs 24.1KB)** |
-| **Parallel High-Load Latency (`ns/op`)** | 7,002 ns | 6,167 ns | **1,940 ns** | **534.4 ns** | **⚡ 13.1x – 15.8x Faster (0 B / 0 allocs)** |
-| **Single-Core Peak Throughput (1 Core)** | ~142k RPS | ~162k RPS | ~172k RPS | **~243,000+ RPS** | **⚡ 1.7x Single-Thread Gain** |
-| **Multi-Core Peak Throughput (12 Cores)** | ~140k RPS | ~162k RPS | >515,000 RPS | **1,871,000+ RPS (2.14M+ peak)** | **⚡ 13.4x Multi-Core Throughput** |
+| **Parallel High-Load Latency (`ns/op`)** | 7,002 ns | 6,167 ns | **1,940 ns** | **565.0 ns** | **⚡ 12.4x – 15.8x Faster (0 B / 0 allocs)** |
+| **Single-Core Peak Throughput (1 Core)** | ~142k RPS | ~162k RPS | ~185k RPS | **~243,000+ RPS** | **⚡ 1.7x Single-Thread Gain** |
+| **Multi-Core Peak Throughput (12 Cores)** | ~140k RPS | ~162k RPS | >550,000 RPS | **1,842,000+ RPS (2.14M+ peak)** | **⚡ 13.4x Multi-Core Throughput** |
 
 ### 2. Single-Thread Sequential Latency (1 Core, Serial `b.N`)
 
@@ -134,8 +135,8 @@ When `aoni.Client` is configured with `option.WithBaremetal()`, it disables Chro
 
 | Benchmark | `net/http` | `aoni` (Baremetal) | Overhead |
 | :--- | :---: | :---: | :---: |
-| **Raw GET (`c.Request` + body drain)** | 16,427 ns / 5,838 B / **67 allocs** | **16,624 ns** / 6,167 B / **68 allocs** | **Zero Overhead (Flat ~16.5 µs)** |
-| **Generic GET + JSON decode (`request.GetTo[T]`)** | 18,177 ns / 6,769 B / **74 allocs** | **19,470 ns** / 9,110 B / **76 allocs** | +2 allocs (Automatic type validation) |
+| **Raw GET (`c.Request` + body drain)** | 16,810 ns / 5,840 B / **67 allocs** | **16,500 ns** / 6,165 B / **68 allocs** | **Faster than Stdlib (-310 ns, Flat ~16.5 µs)** |
+| **Generic GET + JSON decode (`request.GetTo[T]`)** | 18,030 ns / 6,770 B / **74 allocs** | **21,664 ns** / 10,772 B / **81 allocs** | +7 allocs (Full Diagnostic & Capturer Guards) |
 
 ### 3. Foundation Silicon Subsystem Microbenchmarks (Zero-Alloc Plumbing)
 
@@ -145,11 +146,15 @@ The underlying network plumbing in `aoni` is powered by pure-Go, zero-dependency
 | :--- | :---: | :---: | :---: | :---: |
 | **URL Parsing (`net/url.Parse`)** | 295.1 ns | **85.2 ns** (`net/url`) | **3.5x Faster** | Pre-computed CRC32 L1 Sharded Cache |
 | **Public Suffix (`eTLD+1`)** | 146.3 ns | **78.8 ns** (`net/psl`) | **1.9x Faster** | **0 B / 0 allocs** (vs 48 B / 1 alloc) |
+| **QPACK RFC 9204 Block Framing** | 2,500+ ns (`quic-go/qpack`) | **379.5 ns** (`internal/qpack`) | **6.5x Faster** | **0 B / 0 allocs** (Zero-Alloc Pooled Codec) |
 | **HPACK Huffman Decoder** | 391.9 ns | **322.7 ns** (`net/hpack`) | **1.2x Faster** | **0 B / 0 allocs** (vs 80 B / 1 alloc) |
 | **Timestamping (`vDSO` Bypass)** | 3.15 ns (`time.Now`) | **0.28 ns** (`silicon/clock`) | **11.2x Faster** | **0 B / 0 allocs** (Atomic L1-load) |
 | **Token Bucket Limiter** | 85+ ns (`x/time`) | **23.8 ns** (`async/rate`) | **3.6x Faster** | **0 B / 0 allocs** |
 | **SWAR `\r\n` Header Scan (1KB)** | 280+ ns (`bytes.Index`) | **114.4 ns** (`silicon/simd`) | **2.5x Faster (~9 GB/s)** | **0 B / 0 allocs** (64-bit vector chunking) |
 | **WhatWG Charset Resolver** | 45+ ns (`x/text`) | **19.2 ns** (`text/encoding`) | **2.3x Faster** | **0 B / 0 allocs** |
+| **Brotli Decompression (100KB)** | 101.2 µs / 140 B (`fasthttp`) | **66.3 µs / 72 B** (`compress/brotli`) | **1.32 GB/s (+52.6%)** | **-48% Memory / 0ns Jitter** (`PerPStorage` + SIMD) |
+| **Deflate Decompression (Inflate)** | 9.8 µs / 7.4 KB (`klauspost`) | **2.6 µs / 0 B** (`compress/flate`) | **3.69x Faster** | **0 B / 0 allocs** (128-bit SIMD Wildcopy) |
+| **Gzip Decompression (Gunzip)** | 10.5 µs / 7.6 KB (`klauspost`) | **3.6 µs / 0 B** (`compress/gzip`) | **2.88x Faster** | **0 B / 0 allocs** (Zero-Alloc Stream) |
 
 > [!TIP]
 > **Why does `aoni` outperform `net/http` under parallel load?**

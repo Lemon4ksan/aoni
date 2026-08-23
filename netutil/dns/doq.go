@@ -8,14 +8,29 @@ import (
 	"context"
 	"crypto/tls"
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"io"
 	"net"
 	"sync"
 	"time"
 
+	fdns "github.com/lemon4ksan/foundation/net/dns"
 	"github.com/lemon4ksan/foundation/net/dns/wire"
-	"github.com/quic-go/quic-go"
+
+	"github.com/lemon4ksan/aoni/internal/quic"
+	"github.com/lemon4ksan/aoni/netutil/svcb"
+)
+
+var (
+	// ErrDoQHandshakeFailed indicates that the quic connection handshake failed.
+	ErrDoQHandshakeFailed = errors.New("aoni: dns: quic connection handshake failed")
+
+	// ErrDoQStreamClosed indicates that the quic stream closed prematurely.
+	ErrDoQStreamClosed = errors.New("aoni: dns: quic stream closed prematurely")
+
+	// ErrDoQInvalidMessage indicates that the doq message response is invalid.
+	ErrDoQInvalidMessage = errors.New("aoni: dns: invalid doq message response")
 )
 
 const (
@@ -51,7 +66,7 @@ func NewDoQResolver(endpoint, host string) *DoQResolver {
 func (r *DoQResolver) LookupIPAddr(ctx context.Context, host string) ([]net.IPAddr, error) {
 	records, err := r.LookupDNSRecords(ctx, host)
 	if err != nil {
-		return nil, wrapDNSError(host, "DoQ", r.Endpoint, err)
+		return nil, fdns.WrapDNSError(host, "DoQ", r.Endpoint, err)
 	}
 
 	addrs := make([]net.IPAddr, len(records))
@@ -94,6 +109,30 @@ func (r *DoQResolver) LookupDNSRecords(ctx context.Context, host string) ([]wire
 	records = append(records, v6Records...)
 
 	return records, nil
+}
+
+// LookupHTTPS queries HTTPS resource records (RFC 9460 Type 65) over DoQ.
+func (r *DoQResolver) LookupHTTPS(ctx context.Context, host string, port uint16) ([]*svcb.Record, error) {
+	qname := svcb.BuildHTTPSQueryName(host, port)
+
+	wireBytes, err := r.LookupWireRecord(ctx, qname, svcb.TypeHTTPS)
+	if err != nil {
+		return nil, fdns.WrapDNSError(host, "DoQ", r.Endpoint, err)
+	}
+
+	return svcb.ParseResponseRecords(wireBytes, svcb.TypeHTTPS)
+}
+
+// LookupSVCB queries general-purpose SVCB resource records (RFC 9460 Type 64) over DoQ.
+func (r *DoQResolver) LookupSVCB(ctx context.Context, scheme, service string, port uint16) ([]*svcb.Record, error) {
+	qname := svcb.BuildSVCBQueryName(scheme, service, port)
+
+	wireBytes, err := r.LookupWireRecord(ctx, qname, svcb.TypeSVCB)
+	if err != nil {
+		return nil, fdns.WrapDNSError(service, "DoQ", r.Endpoint, err)
+	}
+
+	return svcb.ParseResponseRecords(wireBytes, svcb.TypeSVCB)
 }
 
 // LookupWireRecord queries a raw DNS wire format response over DoQ for a specific query type.

@@ -290,7 +290,7 @@ Attestation Oracles can be defined programmatically in Go using `internal/codege
 package main
 
 import (
-    "github.com/lemon4ksan/aoni/internal/codegen/oracle/spec"
+    "github.com/lemon4ksan/aoni/cmd/vortex/lib/oracle/spec"
 )
 
 var TurnstileOracleSpec = spec.OracleSpec{

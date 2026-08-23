@@ -6,19 +6,19 @@ package pipeline
 
 import (
 	"context"
-	stdio "io"
+	"io"
 	"net/http"
 	"net/url"
 	"strings"
 	"time"
 
+	fio "github.com/lemon4ksan/foundation/io"
 	"github.com/lemon4ksan/foundation/silicon/pool"
 
 	"github.com/lemon4ksan/aoni/fingerprint"
 	"github.com/lemon4ksan/aoni/fingerprint/ja4"
 	"github.com/lemon4ksan/aoni/fingerprint/p0f"
 	"github.com/lemon4ksan/aoni/internal/core"
-	"github.com/lemon4ksan/aoni/internal/io"
 	"github.com/lemon4ksan/aoni/netutil"
 	"github.com/lemon4ksan/aoni/netutil/fragment"
 	"github.com/lemon4ksan/aoni/netutil/netdial"
@@ -55,13 +55,14 @@ type RedactConfigCtxKey struct{}
 
 // RequestConfig aggregates request-scoped options and transport overrides.
 type RequestConfig struct {
+	Network                 string
 	Decoder                 core.ResponseDecoder
 	ErrorModel              any
 	TargetHost              string
 	ForceContentType        string
 	Label                   string
-	UploadProgress          io.ProgressFunc
-	DownloadProgress        io.ProgressFunc
+	UploadProgress          fio.ProgressFunc
+	DownloadProgress        fio.ProgressFunc
 	Capturer                any
 	BodyError               error
 	QueryError              error
@@ -75,6 +76,7 @@ type RequestConfig struct {
 	ProxyAddr               *url.URL
 	DNSResolver             netdial.DNSResolver
 	ResponseValidator       func(resp *http.Response) error
+	SoftErrorDetectors      []func(*http.Response, []byte) error
 	RetryPolicy             *core.RetryOverride
 	P0fSignature            *p0f.Signature
 	SessionCache            fingerprint.SessionCache
@@ -206,13 +208,13 @@ func CloseResponse(resp *http.Response) {
 	}
 
 	var buf [maxBodySlurpBytes]byte
-	if r, ok := resp.Body.(stdio.Reader); ok {
+	if r, ok := resp.Body.(io.Reader); ok {
 		_, _ = r.Read(buf[:])
 	}
 
 	_ = resp.Body.Close()
 
-	if rb, ok := io.UnwrapBody(resp.Body).(interface{ ReallyClose() }); ok {
+	if rb, ok := fio.UnwrapBody(resp.Body).(interface{ ReallyClose() }); ok {
 		rb.ReallyClose()
 	}
 

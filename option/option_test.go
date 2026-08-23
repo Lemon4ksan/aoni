@@ -17,6 +17,7 @@ import (
 
 	"github.com/lemon4ksan/aoni"
 	"github.com/lemon4ksan/aoni/fingerprint/h2"
+	"github.com/lemon4ksan/aoni/netutil/hpkp"
 	"github.com/lemon4ksan/aoni/option"
 )
 
@@ -97,7 +98,13 @@ func TestOption_Headers_And_Auth(t *testing.T) {
 
 		cfgBasic := &aoni.Config{}
 		option.WithBasicAuth("admin", "pass123")(cfgBasic)
-		assert.True(t, len(cfgBasic.Defaults.Headers.Get("Authorization")) > 0)
+		assert.Equal(t, "Basic YWRtaW46cGFzczEyMw==", cfgBasic.Defaults.Headers.Get("Authorization"))
+
+		cfgDigest := &aoni.Config{}
+		option.WithDigestAuth("user", "passwd")(cfgDigest)
+		require.NotNil(t, cfgDigest.Engine.DigestAuth)
+		assert.Equal(t, "user", cfgDigest.Engine.DigestAuth.Username)
+		assert.Equal(t, "passwd", cfgDigest.Engine.DigestAuth.Password)
 	})
 
 	t.Run("dynamic_header_function", func(t *testing.T) {
@@ -154,6 +161,18 @@ func TestOption_Fingerprint_And_Settings(t *testing.T) {
 
 	option.WithCertificatePin("example.com", "sha256/pin1")(cfg)
 	assert.Contains(t, cfg.Fingerprint.CertificatePins["example.com"], "sha256/pin1")
+
+	option.WithSPKIPin("example.com", "pin2")(cfg)
+	assert.Contains(t, cfg.Fingerprint.CertificatePins["example.com"], "pin2")
+
+	hpkpPolicy, err := hpkp.ParseHeader(`max-age=5000; pin-sha256="d6qzRu9zOECb90Uez27xWltNsj0e1Md7GkYYkVoZWmM="`)
+	require.NoError(t, err)
+	option.WithHPKPPolicy("api.example.com", hpkpPolicy)(cfg)
+	assert.Contains(
+		t,
+		cfg.Fingerprint.CertificatePins["api.example.com"],
+		"d6qzRu9zOECb90Uez27xWltNsj0e1Md7GkYYkVoZWmM=",
+	)
 }
 
 func TestOption_Baremetal_And_BlockOverrides(t *testing.T) {
@@ -238,4 +257,35 @@ func TestOption_FromVortexCache_And_Env(t *testing.T) {
 
 	assert.Equal(t, "Bearer env_secret_token_abc", cfg2.Defaults.Headers.Get("Authorization"))
 	assert.Equal(t, "my-custom-value", cfg2.Defaults.Headers.Get("X-Custom"))
+}
+
+func TestOption_WithNetwork(t *testing.T) {
+	t.Parallel()
+
+	cfg := &aoni.Config{}
+	option.WithNetwork(aoni.NetworkUnix)(cfg)
+	assert.Equal(t, aoni.NetworkUnix, cfg.Network.Network)
+
+	option.WithNetworkString("unixgram")(cfg)
+	assert.Equal(t, aoni.NetworkUnixGram, cfg.Network.Network)
+
+	assert.True(t, aoni.NetworkTCP.IsTCP())
+	assert.True(t, aoni.NetworkTCP4.IsTCP())
+	assert.True(t, aoni.NetworkTCP6.IsTCP())
+	assert.False(t, aoni.NetworkUDP.IsTCP())
+
+	assert.True(t, aoni.NetworkUDP.IsUDP())
+	assert.True(t, aoni.NetworkUDP4.IsUDP())
+	assert.True(t, aoni.NetworkUDP6.IsUDP())
+	assert.False(t, aoni.NetworkTCP.IsUDP())
+
+	assert.True(t, aoni.NetworkUnix.IsUnix())
+	assert.True(t, aoni.NetworkUnixGram.IsUnix())
+	assert.True(t, aoni.NetworkUnixPacket.IsUnix())
+	assert.False(t, aoni.NetworkTCP.IsUnix())
+
+	assert.True(t, aoni.NetworkIP.IsIP())
+	assert.True(t, aoni.NetworkIP4.IsIP())
+	assert.True(t, aoni.NetworkIP6.IsIP())
+	assert.False(t, aoni.NetworkTCP.IsIP())
 }

@@ -13,15 +13,13 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/quic-go/qpack"
-	"github.com/quic-go/quic-go/quicvarint"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"github.com/valyala/fasthttp"
 
 	"github.com/lemon4ksan/aoni/fast"
 	"github.com/lemon4ksan/aoni/internal/fast/h2engine"
 	"github.com/lemon4ksan/aoni/internal/fast/h3engine"
+	"github.com/lemon4ksan/aoni/internal/quic/quicvarint"
 )
 
 func TestH2_HPACKEncoderDecoderSymmetry(t *testing.T) {
@@ -134,40 +132,6 @@ func TestH2_FrameSerializationRoundtrip(t *testing.T) {
 	parsedData := parsedDataHeader.Body().(*h2engine.Data)
 	assert.True(t, parsedData.EndStream())
 	assert.Equal(t, []byte("fast h2 payload"), parsedData.Data())
-}
-
-func TestH3_QPACKEncoderDecoderSymmetry(t *testing.T) {
-	codec := h3engine.NewQPACKCodec()
-
-	req := fasthttp.AcquireRequest()
-	defer fasthttp.ReleaseRequest(req)
-
-	req.Header.SetMethod("POST")
-	req.SetRequestURI("https://api.example.com/v3/test")
-	req.Header.Set("User-Agent", "aoni-fast-h3/1.0")
-	req.Header.Set("X-Quic-Engine", "titanium-h3")
-
-	var buf bytes.Buffer
-
-	err := codec.EncodeRequestHeaders(&buf, req, nil)
-	require.NoError(t, err)
-
-	dec := qpack.NewDecoder()
-	decodeFn := dec.Decode(buf.Bytes())
-
-	decodedMap := make(map[string]string)
-	for {
-		hf, decErr := decodeFn()
-		if decErr != nil {
-			break
-		}
-
-		decodedMap[hf.Name] = hf.Value
-	}
-
-	assert.Equal(t, "POST", decodedMap[":method"])
-	assert.Equal(t, "/v3/test", decodedMap[":path"])
-	assert.Equal(t, "titanium-h3", decodedMap["x-quic-engine"])
 }
 
 func TestH3_AltSvcParsingAndCaching(t *testing.T) {

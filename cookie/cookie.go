@@ -5,15 +5,22 @@
 package cookie
 
 import (
-	"encoding/json"
 	"net/http"
 	"net/url"
 	"slices"
 	"strings"
 
+	"github.com/lemon4ksan/foundation/codec/json"
+	"github.com/lemon4ksan/foundation/generic"
+	fcookie "github.com/lemon4ksan/foundation/net/cookie"
 	"github.com/lemon4ksan/foundation/silicon/bytesconv"
+)
 
-	impl "github.com/lemon4ksan/aoni/internal/cookie"
+// MaxCookieAgeSeconds defines the maximum recommended cookie lifetime in seconds (400 days / 34,560,000s)
+// as mandated by RFC 6265bis §5.5.
+const (
+	MaxCookieAgeSeconds = fcookie.MaxCookieAgeSeconds
+	MaxCookieAgeLimit   = fcookie.MaxCookieAgeLimit
 )
 
 // Cookie represents a browser cookie structure formatted for JSON persistence,
@@ -25,28 +32,29 @@ import (
 //
 // Thread Safety:
 // Struct values are pass-by-value DTOs; concurrent reads are safe after construction.
-type Cookie = impl.Cookie
+type Cookie = fcookie.Cookie
 
-// ParseSetCookieHeader parses a raw 'Set-Cookie' header line into a structured [Cookie].
+// ParseSetCookieHeader parses a raw 'Set-Cookie' header line into a structured [Cookie] (RFC 6265 §5.2, RFC 6265bis §5.5 & §5.7).
 func ParseSetCookieHeader(headerVal, defaultDomain, defaultPath string) Cookie {
-	return impl.ParseSetCookieHeader(headerVal, defaultDomain, defaultPath)
+	return fcookie.ParseSetCookieHeader(headerVal, defaultDomain, defaultPath)
 }
 
-// FromStd converts a standard [*http.Cookie] into a structured [Cookie].
+// ValidateCookiePrefix reports whether a cookie satisfies RFC 6265bis §4.1.3 & §5.4 cookie prefix rules:
+//   - "__Secure-": MUST have Secure=true.
+//   - "__Host-": MUST have Secure=true, Path="/", and empty Domain (host-only).
+//   - Nameless cookies whose value begins with "__Secure-" or "__Host-" MUST be rejected (RFC 6265bis §5.7 step 22).
+func ValidateCookiePrefix(c Cookie) bool {
+	return fcookie.ValidatePrefix(c)
+}
+
+// FromStd converts a standard [*http.Cookie] into a structured [Cookie] (RFC 6265 §5.3).
 func FromStd(c *http.Cookie, defaultDomain, defaultPath string) Cookie {
 	if c == nil {
 		return Cookie{}
 	}
 
-	domain := c.Domain
-	if domain == "" {
-		domain = defaultDomain
-	}
-
-	path := c.Path
-	if path == "" {
-		path = defaultPath
-	}
+	domain := generic.Coalesce(c.Domain, defaultDomain)
+	path := generic.Coalesce(c.Path, defaultPath)
 
 	return Cookie{
 		Name:     c.Name,
@@ -62,7 +70,7 @@ func FromStd(c *http.Cookie, defaultDomain, defaultPath string) Cookie {
 
 // PathMatch reports whether reqPath matches cookiePath according to RFC 6265 §5.1.4.
 func PathMatch(reqPath, cookiePath string) bool {
-	return impl.PathMatch(reqPath, cookiePath)
+	return fcookie.PathMatch(reqPath, cookiePath)
 }
 
 // FilterForRequest filters a slice of cookies, returning only those matching destination u per RFC 6265 §5.1.4.
@@ -71,19 +79,11 @@ func FilterForRequest(cookies []*http.Cookie, u *url.URL) []*http.Cookie {
 		return nil
 	}
 
-	reqPath := u.Path
-	if reqPath == "" {
-		reqPath = "/"
-	}
+	reqPath := generic.Coalesce(u.Path, "/")
 
-	filtered := make([]*http.Cookie, 0, len(cookies))
-	for _, c := range cookies {
-		if PathMatch(reqPath, c.Path) {
-			filtered = append(filtered, c)
-		}
-	}
-
-	return filtered
+	return generic.Filter(cookies, func(c *http.Cookie) bool {
+		return PathMatch(reqPath, c.Path)
+	})
 }
 
 // Mirror copies specified cookies by name from sourceURL to each destination URL in targetURLs inside jar.
@@ -97,24 +97,16 @@ func Mirror(jar http.CookieJar, sourceURL *url.URL, targetURLs []*url.URL, cooki
 		return
 	}
 
-	toMirror := make([]*http.Cookie, 0, len(cookieNames))
+	var toMirror []*http.Cookie
 	if len(cookieNames) > 8 {
-		nameMap := make(map[string]struct{}, len(cookieNames))
-		for _, name := range cookieNames {
-			nameMap[name] = struct{}{}
-		}
-
-		for _, c := range cookies {
-			if _, ok := nameMap[c.Name]; ok {
-				toMirror = append(toMirror, c)
-			}
-		}
+		nameSet := generic.NewSet(cookieNames...)
+		toMirror = generic.Filter(cookies, func(c *http.Cookie) bool {
+			return nameSet.Has(c.Name)
+		})
 	} else {
-		for _, c := range cookies {
-			if slices.Contains(cookieNames, c.Name) {
-				toMirror = append(toMirror, c)
-			}
-		}
+		toMirror = generic.Filter(cookies, func(c *http.Cookie) bool {
+			return slices.Contains(cookieNames, c.Name)
+		})
 	}
 
 	if len(toMirror) == 0 {
@@ -130,12 +122,12 @@ func Mirror(jar http.CookieJar, sourceURL *url.URL, targetURLs []*url.URL, cooki
 
 // SortForBrowser sorts cookies in-place according to RFC 6265 §5.4 (longest path length first).
 func SortForBrowser(cookies []*http.Cookie) {
-	impl.SortForBrowser(cookies)
+	fcookie.SortForBrowser(cookies)
 }
 
-// BuildCookieHeader constructs an RFC 6265 compliant 'Cookie' request header string.
+// BuildCookieHeader constructs an RFC 6265 compliant 'Cookie' request header string (RFC 6265 §4.2.1 & §5.4).
 func BuildCookieHeader(cookies []*http.Cookie) string {
-	return impl.BuildCookieHeader(cookies)
+	return fcookie.BuildCookieHeader(cookies)
 }
 
 // ExportNetscape exports cookies formatted as a standard Netscape HTTP Cookie File (cookies.txt).
@@ -144,7 +136,7 @@ func ExportNetscape(jar http.CookieJar, u *url.URL) string {
 		return ""
 	}
 
-	return impl.ExportNetscape(jar.Cookies(u), u.Hostname())
+	return fcookie.ExportNetscape(jar.Cookies(u), u.Hostname())
 }
 
 // Export converts cookies for u from jar into exported [Cookie] structures.
@@ -158,9 +150,8 @@ func Export(jar http.CookieJar, u *url.URL) []Cookie {
 		return nil
 	}
 
-	exported := make([]Cookie, len(rawCookies))
-	for i, c := range rawCookies {
-		sameSiteStr := ""
+	return generic.Map(rawCookies, func(c *http.Cookie) Cookie {
+		var sameSiteStr string
 		switch c.SameSite {
 		case http.SameSiteLaxMode:
 			sameSiteStr = "Lax"
@@ -170,21 +161,19 @@ func Export(jar http.CookieJar, u *url.URL) []Cookie {
 			sameSiteStr = "None"
 		}
 
-		exported[i] = Cookie{
+		return Cookie{
 			Name:        c.Name,
 			Value:       c.Value,
-			Domain:      c.Domain,
+			Domain:      strings.ToLower(c.Domain),
 			Path:        c.Path,
 			Expires:     c.Expires,
 			HTTPOnly:    c.HttpOnly,
 			Secure:      c.Secure,
-			MaxAge:      c.MaxAge,
 			SameSite:    sameSiteStr,
+			MaxAge:      c.MaxAge,
 			Partitioned: c.Partitioned,
 		}
-	}
-
-	return exported
+	})
 }
 
 // ExportJSON serializes exported cookies for u into a JSON string.
@@ -208,8 +197,7 @@ func Import(jar http.CookieJar, u *url.URL, cookies []Cookie) {
 		return
 	}
 
-	httpCookies := make([]*http.Cookie, len(cookies))
-	for i, c := range cookies {
+	httpCookies := generic.Map(cookies, func(c Cookie) *http.Cookie {
 		var sameSite http.SameSite
 		switch c.SameSite {
 		case "Lax":
@@ -220,7 +208,8 @@ func Import(jar http.CookieJar, u *url.URL, cookies []Cookie) {
 			sameSite = http.SameSiteNoneMode
 		}
 
-		httpCookies[i] = &http.Cookie{ //nolint:gosec
+		//nolint:gosec // Reconstructing http.Cookie from imported Cookie model
+		return &http.Cookie{
 			Name:        c.Name,
 			Value:       c.Value,
 			Domain:      c.Domain,
@@ -228,11 +217,11 @@ func Import(jar http.CookieJar, u *url.URL, cookies []Cookie) {
 			Expires:     c.Expires,
 			HttpOnly:    c.HTTPOnly,
 			Secure:      c.Secure,
-			MaxAge:      c.MaxAge,
 			SameSite:    sameSite,
+			MaxAge:      c.MaxAge,
 			Partitioned: c.Partitioned,
 		}
-	}
+	})
 
 	jar.SetCookies(u, httpCookies)
 }

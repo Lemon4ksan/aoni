@@ -8,30 +8,31 @@ import (
 	"bytes"
 	"context"
 	"errors"
-	stdio "io"
+	"io"
 	"mime/multipart"
 	"net/http"
 	"net/textproto"
 	"slices"
 	"strings"
 
+	fio "github.com/lemon4ksan/foundation/io"
 	"github.com/lemon4ksan/foundation/silicon/offheap"
 
 	"github.com/lemon4ksan/aoni"
 	"github.com/lemon4ksan/aoni/internal/core"
-	"github.com/lemon4ksan/aoni/internal/io"
 )
 
-// WithMultipart constructs an [aoni.RequestModifier] building an in-memory multipart/form-data request body.
-func WithMultipart(fields map[string]string, files map[string]stdio.Reader) aoni.RequestModifier {
+// WithMultipart constructs an [aoni.RequestModifier] building an in-memory multipart/form-data request body
+// conforming to RFC 7578 §4.1 (Boundary) and §4.2 (Content-Disposition: form-data).
+func WithMultipart(fields map[string]string, files map[string]io.Reader) aoni.RequestModifier {
 	return aoni.RequestModifier{
 		Kind: core.ModCustom,
 		Fn: func(req aoni.Request) {
 			offBuf, err := offheap.NewBuffer(64 * 1024)
 
 			var (
-				body     stdio.Writer = &bytes.Buffer{}
-				getBytes              = func() []byte {
+				body     io.Writer = &bytes.Buffer{}
+				getBytes           = func() []byte {
 					return body.(*bytes.Buffer).Bytes()
 				}
 			)
@@ -63,7 +64,7 @@ func WithMultipart(fields map[string]string, files map[string]stdio.Reader) aoni
 					return
 				}
 
-				if _, err = io.CopyZeroAlloc(part, r); err != nil {
+				if _, err = fio.CopyZeroAlloc(part, r); err != nil {
 					getOrInitRequestConfig(req).BodyError = err
 					return
 				}
@@ -80,15 +81,16 @@ func WithMultipart(fields map[string]string, files map[string]stdio.Reader) aoni
 	}
 }
 
+// MultipartField represents a discrete form part with metadata for structured multipart payloads (RFC 7578 §4.2 & §4.4).
 type MultipartField struct {
 	Name        string
 	Value       string
 	Filename    string
 	ContentType string
-	Reader      stdio.Reader
+	Reader      io.Reader
 }
 
-// WithMultipartFields accepts an ordered slice of form fields with support for duplicate names (RFC 7578 Section 5.2)
+// WithMultipartFields accepts an ordered slice of form fields with support for duplicate names (RFC 7578 §4.3 & §5.2).
 func WithMultipartFields(fields []MultipartField) aoni.RequestModifier {
 	return aoni.RequestModifier{
 		Kind: core.ModCustom,
@@ -96,8 +98,8 @@ func WithMultipartFields(fields []MultipartField) aoni.RequestModifier {
 			offBuf, err := offheap.NewBuffer(64 * 1024)
 
 			var (
-				body     stdio.Writer = &bytes.Buffer{}
-				getBytes              = func() []byte {
+				body     io.Writer = &bytes.Buffer{}
+				getBytes           = func() []byte {
 					return body.(*bytes.Buffer).Bytes()
 				}
 			)
@@ -129,7 +131,7 @@ func WithMultipartFields(fields []MultipartField) aoni.RequestModifier {
 					}
 
 					if f.Reader != nil {
-						if _, err = io.CopyZeroAlloc(part, f.Reader); err != nil {
+						if _, err = fio.CopyZeroAlloc(part, f.Reader); err != nil {
 							getOrInitRequestConfig(req).BodyError = err
 							return
 						}
@@ -153,12 +155,12 @@ func WithMultipartFields(fields []MultipartField) aoni.RequestModifier {
 	}
 }
 
-// WithStreamingMultipart constructs an [aoni.RequestModifier] streaming multipart/form-data via an asynchronous pipe without in-memory buffering.
-func WithStreamingMultipart(fields map[string]string, files map[string]stdio.Reader) aoni.RequestModifier {
+// WithStreamingMultipart constructs an [aoni.RequestModifier] streaming multipart/form-data via an asynchronous pipe without in-memory buffering (RFC 7578 §4.1–§4.4).
+func WithStreamingMultipart(fields map[string]string, files map[string]io.Reader) aoni.RequestModifier {
 	return aoni.RequestModifier{
 		Kind: core.ModCustom,
 		Fn: func(req aoni.Request) {
-			pr, pw := stdio.Pipe()
+			pr, pw := io.Pipe()
 
 			writer := multipart.NewWriter(pw)
 			if cfg := getOrInitRequestConfig(req); cfg.MultipartBoundary != "" {
@@ -177,10 +179,10 @@ func WithStreamingMultipart(fields map[string]string, files map[string]stdio.Rea
 // streamMultipartPayload continuously encodes and streams multipart fields and files through pw.
 func streamMultipartPayload(
 	ctx context.Context,
-	pw *stdio.PipeWriter,
+	pw *io.PipeWriter,
 	writer *multipart.Writer,
 	fields map[string]string,
-	files map[string]stdio.Reader,
+	files map[string]io.Reader,
 ) {
 	defer pw.Close()
 	defer writer.Close()
@@ -205,33 +207,34 @@ func streamMultipartPayload(
 
 			part, err := createFormFileHeader(writer, key, key, contentType)
 			if err == nil {
-				_, _ = io.CopyZeroAlloc(part, streamReader)
+				_, _ = fio.CopyZeroAlloc(part, streamReader)
 			}
 		}
 	}
 }
 
 // detectMIMEAndReader peeks at the first 512 bytes of r on the stack to sniff Content-Type.
-func detectMIMEAndReader(r stdio.Reader) (string, stdio.Reader) {
+func detectMIMEAndReader(r io.Reader) (string, io.Reader) {
 	var buf [512]byte
 
-	n, err := stdio.ReadFull(r, buf[:])
+	n, err := io.ReadFull(r, buf[:])
 	if n > 0 {
 		contentType := http.DetectContentType(buf[:n])
-		reader := stdio.MultiReader(bytes.NewReader(buf[:n]), r)
+		reader := io.MultiReader(bytes.NewReader(buf[:n]), r)
 
 		return contentType, reader
 	}
 
-	if err != nil && !errors.Is(err, stdio.EOF) && !errors.Is(err, stdio.ErrUnexpectedEOF) {
+	if err != nil && !errors.Is(err, io.EOF) && !errors.Is(err, io.ErrUnexpectedEOF) {
 		return "application/octet-stream", r
 	}
 
 	return "application/octet-stream", r
 }
 
-// createFormFileHeader builds a multipart MIME header with proper Content-Disposition and Content-Type.
-func createFormFileHeader(w *multipart.Writer, fieldname, filename, contentType string) (stdio.Writer, error) {
+// createFormFileHeader builds a multipart MIME header with proper Content-Disposition and Content-Type (RFC 7578 §4.2 & §4.4).
+// Per RFC 7578 §4.2, filename* (RFC 5987/8187) MUST NOT be used in multipart/form-data.
+func createFormFileHeader(w *multipart.Writer, fieldname, filename, contentType string) (io.Writer, error) {
 	h := make(textproto.MIMEHeader)
 	h.Set("Content-Disposition",
 		"form-data; name=\""+escapeQuotes(fieldname)+"\"; filename=\""+escapeQuotes(filename)+"\"")

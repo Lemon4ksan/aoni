@@ -57,12 +57,13 @@ func TestInspectTLSChain(t *testing.T) {
 		t.Parallel()
 
 		cert := &x509.Certificate{
-			Raw:          []byte("dummy cert raw bytes"),
-			Subject:      pkix.Name{CommonName: "example.com"},
-			Issuer:       pkix.Name{CommonName: "Example CA"},
-			DNSNames:     []string{"example.com", "www.example.com"},
-			SerialNumber: big.NewInt(12345),
-			NotAfter:     time.Now().Add(30 * 24 * time.Hour),
+			Raw:                     []byte("dummy cert raw bytes"),
+			RawSubjectPublicKeyInfo: []byte("spki test bytes"),
+			Subject:                 pkix.Name{CommonName: "example.com"},
+			Issuer:                  pkix.Name{CommonName: "Example CA"},
+			DNSNames:                []string{"example.com", "www.example.com"},
+			SerialNumber:            big.NewInt(12345),
+			NotAfter:                time.Now().Add(30 * 24 * time.Hour),
 		}
 
 		state := &tls.ConnectionState{
@@ -79,6 +80,9 @@ func TestInspectTLSChain(t *testing.T) {
 		assert.Contains(t, info.Issuer, "Example CA")
 		assert.Contains(t, info.DNSNames, "example.com")
 		assert.NotEmpty(t, info.FingerprintSHA256)
+		assert.NotEmpty(t, info.SPKIFingerprint)
+		assert.NotEmpty(t, info.SPKIPin)
+		assert.Len(t, info.SPKIPins, 1)
 		assert.GreaterOrEqual(t, info.DaysUntilExpiry, 29)
 	})
 }

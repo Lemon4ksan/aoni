@@ -9,6 +9,7 @@ import (
 	"context"
 	"crypto/tls"
 	"io"
+	"maps"
 	"net"
 	"net/http"
 	"strconv"
@@ -16,8 +17,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/lemon4ksan/foundation/silicon/bytesconv"
 	"github.com/lemon4ksan/foundation/silicon/clock"
-	"github.com/quic-go/quic-go"
 	"github.com/valyala/fasthttp"
 	"golang.org/x/sys/cpu"
 
@@ -25,6 +26,7 @@ import (
 	"github.com/lemon4ksan/aoni/internal/fast/h2engine"
 	"github.com/lemon4ksan/aoni/internal/fast/h3engine"
 	"github.com/lemon4ksan/aoni/internal/pipeline"
+	"github.com/lemon4ksan/aoni/internal/quic"
 	"github.com/lemon4ksan/aoni/netutil"
 )
 
@@ -86,16 +88,10 @@ func (c *altSvcCache) Clone() *altSvcCache {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 
-	cloned := newAltSvcCache()
-	for k, v := range c.hosts {
-		cloned.hosts[k] = v
+	return &altSvcCache{
+		hosts:  maps.Clone(c.hosts),
+		broken: maps.Clone(c.broken),
 	}
-
-	for k, v := range c.broken {
-		cloned.broken[k] = v
-	}
-
-	return cloned
 }
 
 // MarkH3Failed records a failed HTTP/3 connection attempt, applying exponential backoff from 5m up to 48h.
@@ -206,19 +202,23 @@ func parseMaxAge(headerVal string) time.Duration {
 }
 
 func (c *Client) resolveALPNMode(ctx context.Context, fastReq *fasthttp.Request) string {
-	return resolveALPNMode(ctx, &c.config, fastReq, c.protocolState.altSvc)
+	return resolveALPNMode(ctx, &c.cfg, fastReq, c.protocolState.altSvc)
 }
 
 func resolveALPNMode(ctx context.Context, cfg *aoni.Config, fastReq *fasthttp.Request, altSvc *altSvcCache) string {
 	reqCfg := aoni.GetRequestConfig(ctx)
 	if reqCfg != nil {
 		if len(reqCfg.Modifiers) > 0 && len(reqCfg.ALPNOverride) == 0 {
-			dummyReq := NewRequest(fastReq)
+			dummyFastReq := fasthttp.AcquireRequest()
+			dummyReq := NewRequest(dummyFastReq)
 			dummyReq.SetContext(ctx)
 
 			for _, m := range reqCfg.Modifiers {
 				m.Apply(dummyReq)
 			}
+
+			dummyReq.Release()
+			fasthttp.ReleaseRequest(dummyFastReq)
 		}
 
 		if len(reqCfg.ALPNOverride) > 0 {
@@ -232,7 +232,7 @@ func resolveALPNMode(ctx context.Context, cfg *aoni.Config, fastReq *fasthttp.Re
 	disableAltSvc := reqCfg != nil && reqCfg.DisableAltSvc
 
 	if bytes.EqualFold(fastReq.URI().Scheme(), []byte("https")) {
-		host := string(fastReq.URI().Host())
+		host := bytesconv.B2S(fastReq.URI().Host())
 		if host != "" && !disableAltSvc && altSvc != nil && altSvc.IsH3Supported(host) {
 			return aoni.AlpnH3
 		}
@@ -254,11 +254,11 @@ func resolveALPNMode(ctx context.Context, cfg *aoni.Config, fastReq *fasthttp.Re
 func (c *Client) getH3Client() *h3engine.Client {
 	c.protocolState.h3Once.Do(func() {
 		tlsCfg := &tls.Config{
-			InsecureSkipVerify: c.config.Engine.InsecureSkipVerify, //nolint:gosec
-			ClientSessionCache: netutil.ResolveStdSessionCache(c.config.Fingerprint.SessionCache),
+			InsecureSkipVerify: c.cfg.Engine.InsecureSkipVerify, //nolint:gosec
+			ClientSessionCache: netutil.ResolveStdSessionCache(c.cfg.Fingerprint.SessionCache),
 		}
 
-		if spec := c.config.Fingerprint.TLSQUICClientHelloSpec; spec != nil && len(spec.CipherSuites) > 0 {
+		if spec := c.cfg.Fingerprint.TLSQUICClientHelloSpec; spec != nil && len(spec.CipherSuites) > 0 {
 			tlsCfg.CipherSuites = spec.CipherSuites
 		}
 
@@ -266,7 +266,7 @@ func (c *Client) getH3Client() *h3engine.Client {
 			EnableDatagrams: true,
 		}
 
-		if h3s := c.config.Fingerprint.H3Settings; h3s != nil {
+		if h3s := c.cfg.Fingerprint.H3Settings; h3s != nil {
 			quicCfg.InitialStreamReceiveWindow = h3s.InitialStreamReceiveWindow
 			quicCfg.MaxStreamReceiveWindow = h3s.MaxStreamReceiveWindow
 			quicCfg.InitialConnectionReceiveWindow = h3s.InitialConnectionReceiveWindow
@@ -302,8 +302,8 @@ func (c *Client) getH2Client(host string) *h2engine.Client {
 	}
 
 	var h2s *h2engine.Settings
-	if c.config.Fingerprint.H2Settings != nil {
-		s := c.config.Fingerprint.H2Settings
+	if c.cfg.Fingerprint.H2Settings != nil {
+		s := c.cfg.Fingerprint.H2Settings
 		h2s = &h2engine.Settings{}
 		h2s.SetHeaderTableSize(s.HeaderTableSize)
 		h2s.SetPush(s.EnablePush == 1)
@@ -314,15 +314,15 @@ func (c *Client) getH2Client(host string) *h2engine.Client {
 	}
 
 	var onRTTCallback func(time.Duration)
-	if c.config.Network.DynamicHedging != nil && c.config.Network.DynamicHedging.Tracker != nil {
-		tracker := c.config.Network.DynamicHedging.Tracker
+	if c.cfg.Network.DynamicHedging != nil && c.cfg.Network.DynamicHedging.Tracker != nil {
+		tracker := c.cfg.Network.DynamicHedging.Tracker
 		onRTTCallback = func(rtt time.Duration) {
 			tracker.Record(rtt)
 		}
 	}
 
 	var pushHandler func(pushReq *fasthttp.Request, pushResp *fasthttp.Response)
-	if cacheCfg := c.config.Defaults.Pipeline.Cache; cacheCfg != nil && cacheCfg.Store != nil {
+	if cacheCfg := c.cfg.Defaults.Pipeline.Cache; cacheCfg != nil && cacheCfg.Store != nil {
 		pushHandler = func(pushReq *fasthttp.Request, pushResp *fasthttp.Response) {
 			c.cachePushedResponse(pushReq, pushResp, cacheCfg)
 		}
@@ -335,8 +335,8 @@ func (c *Client) getH2Client(host string) *h2engine.Client {
 		Settings:      h2s,
 	})
 
-	if len(c.config.Fingerprint.HeaderOrder) > 0 {
-		cl.SetOrderedHeaders(c.config.Fingerprint.HeaderOrder)
+	if len(c.cfg.Fingerprint.HeaderOrder) > 0 {
+		cl.SetOrderedHeaders(c.cfg.Fingerprint.HeaderOrder)
 	}
 
 	c.protocolState.h2Clients[host] = cl
@@ -349,15 +349,19 @@ func (c *Client) cachePushedResponse(
 	fastResp *fasthttp.Response,
 	cacheCfg *aoni.CacheConfig,
 ) {
-	req, err := http.NewRequest(string(fastReq.Header.Method()), string(fastReq.URI().FullURI()), nil) //nolint:noctx
+	req, err := http.NewRequestWithContext(
+		context.Background(),
+		bytesconv.B2S(fastReq.Header.Method()),
+		bytesconv.B2S(fastReq.URI().FullURI()),
+		nil,
+	)
 	if err != nil {
 		return
 	}
 
-	fastReq.Header.All()(func(k, v []byte) bool {
+	for k, v := range fastReq.Header.All() {
 		req.Header.Add(string(k), string(v))
-		return true
-	})
+	}
 
 	resp := &http.Response{
 		StatusCode: fastResp.StatusCode(),
@@ -365,13 +369,11 @@ func (c *Client) cachePushedResponse(
 		Body:       io.NopCloser(bytes.NewReader(fastResp.Body())),
 	}
 
-	fastResp.Header.All()(func(k, v []byte) bool {
+	for k, v := range fastResp.Header.All() {
 		resp.Header.Add(string(k), string(v))
-		return true
-	})
+	}
 
-	pipe := c.pipeline
-	if pipe != nil && cacheCfg != nil {
+	if c.pipeline != nil && cacheCfg != nil {
 		var nvs *pipeline.NoVarySearchConfig
 		if cacheCfg.NoVarySearch != nil {
 			nvs = &pipeline.NoVarySearchConfig{
@@ -381,7 +383,7 @@ func (c *Client) cachePushedResponse(
 			}
 		}
 
-		pipe.SavePushedResponseToCache(req, resp, &pipeline.CacheConfig{
+		c.pipeline.SavePushedResponseToCache(req, resp, &pipeline.CacheConfig{
 			Store:         cacheCfg.Store,
 			DefaultTTL:    cacheCfg.DefaultTTL,
 			NoVarySearch:  nvs,

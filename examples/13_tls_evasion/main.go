@@ -15,12 +15,11 @@ import (
 	"log"
 	"time"
 
+	"github.com/lemon4ksan/aoni"
 	"github.com/lemon4ksan/aoni/mod"
 	"github.com/lemon4ksan/aoni/netutil/dns"
 	"github.com/lemon4ksan/aoni/option"
 	"github.com/lemon4ksan/aoni/request"
-
-	"github.com/lemon4ksan/aoni"
 )
 
 type Response struct {
@@ -45,7 +44,7 @@ func main() {
 			"httpbin.org": "httpbin.org",
 		}),
 		// Use DNS-over-TLS resolver to prevent ISP DNS snooping
-		option.WithDNSResolver(dns.NewDoTResolver("1.1.1.1", "cloudflare-dns.com")),
+		option.WithDNSResolver(dns.NewDoTResolver("1.1.1.1:853", "cloudflare-dns.com")),
 		// Force HTTP/1.1 to avoid HTTP/2 fingerprinting
 		option.WithConnectionPool(aoni.ConnectionPoolConfig{
 			MaxIdleConns:        10,

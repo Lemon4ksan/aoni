@@ -7,6 +7,7 @@ package mod_test
 import (
 	"context"
 	"io"
+	"iter"
 	"net/http"
 	"net/url"
 	"strings"
@@ -69,6 +70,7 @@ func (r *dummyRequest) SetQueryParam(k, v string) {
 	r.httpReq.URL.RawQuery = q.Encode()
 }
 func (r *dummyRequest) SetQueryParamBytes(k, v []byte) { r.SetQueryParam(string(k), string(v)) }
+func (r *dummyRequest) QueryParam(key string) string   { return r.httpReq.URL.Query().Get(key) }
 func (r *dummyRequest) Header(key string) string       { return r.httpReq.Header.Get(key) }
 func (r *dummyRequest) HeaderBytes(key []byte) []byte {
 	return []byte(r.httpReq.Header.Get(string(key)))
@@ -81,9 +83,20 @@ func (r *dummyRequest) AddHeader(key, val string) { r.httpReq.Header.Add(key, va
 func (r *dummyRequest) AddHeaderBytes(key, val []byte) {
 	r.httpReq.Header.Add(string(key), string(val))
 }
-func (r *dummyRequest) DelHeader(key string)                 { r.httpReq.Header.Del(key) }
-func (r *dummyRequest) DelHeaderBytes(key []byte)            { r.httpReq.Header.Del(string(key)) }
-func (r *dummyRequest) ResetHeaders()                        { r.httpReq.Header = make(http.Header) }
+func (r *dummyRequest) DelHeader(key string)      { r.httpReq.Header.Del(key) }
+func (r *dummyRequest) DelHeaderBytes(key []byte) { r.httpReq.Header.Del(string(key)) }
+func (r *dummyRequest) ResetHeaders()             { r.httpReq.Header = make(http.Header) }
+func (r *dummyRequest) Headers() iter.Seq2[[]byte, []byte] {
+	return func(yield func([]byte, []byte) bool) {
+		for k, vv := range r.httpReq.Header {
+			for _, v := range vv {
+				if !yield([]byte(k), []byte(v)) {
+					return
+				}
+			}
+		}
+	}
+}
 func (r *dummyRequest) SetBodyBytes(b []byte)                { r.body = b }
 func (r *dummyRequest) BodyBytes() []byte                    { return r.body }
 func (r *dummyRequest) SetBodyStream(rdr io.Reader, _ int64) { r.bodyRdr = rdr }
@@ -190,8 +203,26 @@ func TestMod_HeadersAndAuthModifiers(t *testing.T) {
 
 		req2 := newDummyRequest()
 		mod.WithBasicAuth("admin", "secret123").Apply(req2)
-		assert.True(t, len(req2.Header("Authorization")) > 0)
-		assert.True(t, req2.Header("Authorization") != "Bearer secret-token-xyz")
+		assert.Equal(t, "Basic YWRtaW46c2VjcmV0MTIz", req2.Header("Authorization"))
+	})
+
+	t.Run("pkce_modifiers", func(t *testing.T) {
+		t.Parallel()
+
+		// Test Vector from RFC 7636 Appendix B
+		const (
+			verifier  = "dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk"
+			challenge = "E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM"
+		)
+
+		reqAuth := newDummyRequest()
+		mod.WithPKCE(verifier).Apply(reqAuth)
+		assert.Equal(t, challenge, reqAuth.QueryParam("code_challenge"))
+		assert.Equal(t, "S256", reqAuth.QueryParam("code_challenge_method"))
+
+		reqToken := newDummyRequest()
+		mod.WithPKCEVerifier(verifier).Apply(reqToken)
+		assert.Equal(t, verifier, reqToken.QueryParam("code_verifier"))
 	})
 
 	t.Run("dynamic_header", func(t *testing.T) {
@@ -369,6 +400,24 @@ func TestMod_ProtocolAndNetworkModifiers(t *testing.T) {
 		assert.True(t, cfg.InsecureSkipVerify)
 		assert.True(t, cfg.ProxyDNS)
 	})
+
+	t.Run("with_network", func(t *testing.T) {
+		t.Parallel()
+
+		req1 := newDummyRequest()
+		mod.WithNetwork(aoni.NetworkUnix).Apply(req1)
+
+		cfg1 := aoni.GetRequestConfig(req1.Context())
+		require.NotNil(t, cfg1)
+		assert.Equal(t, "unix", cfg1.Network)
+
+		req2 := newDummyRequest()
+		mod.WithNetworkString("tcp4").Apply(req2)
+
+		cfg2 := aoni.GetRequestConfig(req2.Context())
+		require.NotNil(t, cfg2)
+		assert.Equal(t, "tcp4", cfg2.Network)
+	})
 }
 
 func TestMod_TelemetryAndTracingModifiers(t *testing.T) {
@@ -448,4 +497,57 @@ func TestMod_SmartBody_And_Retry(t *testing.T) {
 		assert.Equal(t, 3, cfg.RetryPolicy.MaxAttempts)
 		assert.Contains(t, string(req.body), `"name":"Woz"`)
 	})
+}
+
+func TestMod_WebSocketModifiers(t *testing.T) {
+	t.Parallel()
+
+	// RFC 6455 §11.3.4 & RFC 8441 §5: Sec-WebSocket-Protocol
+	req1 := newDummyRequest()
+	mod.WithSecWebSocketProtocol("chat", "superchat").Apply(req1)
+	assert.Equal(t, "chat, superchat", req1.Header("Sec-WebSocket-Protocol"))
+
+	// RFC 6455 §11.3.2 & RFC 8441 §5: Sec-WebSocket-Extensions
+	req2 := newDummyRequest()
+	mod.WithSecWebSocketExtensions("permessage-deflate", "client_max_window_bits").Apply(req2)
+	assert.Equal(t, "permessage-deflate, client_max_window_bits", req2.Header("Sec-WebSocket-Extensions"))
+
+	// RFC 6455 §11.3.5 & RFC 8441 §5: Sec-WebSocket-Version
+	req3 := newDummyRequest()
+	mod.WithSecWebSocketVersion("13").Apply(req3)
+	assert.Equal(t, "13", req3.Header("Sec-WebSocket-Version"))
+
+	// RFC 7692 §7 & RFC 8441 §5: WithPermessageDeflate defaults
+	req4 := newDummyRequest()
+	mod.WithPermessageDeflate().Apply(req4)
+	assert.Equal(t, "permessage-deflate; client_max_window_bits", req4.Header("Sec-WebSocket-Extensions"))
+
+	// RFC 7692 §7 & RFC 8441 §5: WithPermessageDeflate with custom params
+	req5 := newDummyRequest()
+	mod.WithPermessageDeflate("server_no_context_takeover", "client_no_context_takeover").Apply(req5)
+	assert.Equal(
+		t,
+		"permessage-deflate; server_no_context_takeover; client_no_context_takeover",
+		req5.Header("Sec-WebSocket-Extensions"),
+	)
+}
+
+func TestMod_HPKP(t *testing.T) {
+	t.Parallel()
+
+	req1 := newDummyRequest()
+	hpkpHeader := `max-age=3000; pin-sha256="d6qzRu9zOECb90Uez27xWltNsj0e1Md7GkYYkVoZWmM="`
+	mod.WithPublicKeyPins(hpkpHeader).Apply(req1)
+	assert.Equal(t, hpkpHeader, req1.Header("Public-Key-Pins"))
+
+	req2 := newDummyRequest()
+	hpkpROHeader := `pin-sha256="d6qzRu9zOECb90Uez27xWltNsj0e1Md7GkYYkVoZWmM="; report-uri="https://example.com/pkp"`
+	mod.WithPublicKeyPinsReportOnly(hpkpROHeader).Apply(req2)
+	assert.Equal(t, hpkpROHeader, req2.Header("Public-Key-Pins-Report-Only"))
+
+	req3 := newDummyRequest()
+	mod.WithSPKIPin("example.com", "d6qzRu9zOECb90Uez27xWltNsj0e1Md7GkYYkVoZWmM=").Apply(req3)
+	reqCfg := aoni.GetRequestConfig(req3.Context())
+	require.NotNil(t, reqCfg)
+	assert.Contains(t, reqCfg.CertificatePins["example.com"], "d6qzRu9zOECb90Uez27xWltNsj0e1Md7GkYYkVoZWmM=")
 }

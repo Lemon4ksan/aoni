@@ -9,18 +9,20 @@ import (
 	"bytes"
 	"encoding/base64"
 	"errors"
-	stdio "io"
+	"io"
 
-	"github.com/klauspost/compress/gzip"
+	"github.com/lemon4ksan/foundation/generic"
+	"github.com/lemon4ksan/foundation/refkit"
 	"github.com/lemon4ksan/foundation/silicon/bytesconv"
 	"google.golang.org/protobuf/proto"
 
+	"github.com/lemon4ksan/aoni/internal/compress"
 	"github.com/lemon4ksan/aoni/internal/transport"
 )
 
 type grpcWebDecoder struct{}
 
-func (grpcWebDecoder) Decode(r stdio.Reader, target any) error {
+func (grpcWebDecoder) Decode(r io.Reader, target any) error {
 	msg, err := castOrResolveProto(target)
 	if err != nil {
 		return err
@@ -28,7 +30,7 @@ func (grpcWebDecoder) Decode(r stdio.Reader, target any) error {
 
 	br := bufio.NewReader(r)
 
-	var reader stdio.Reader = br
+	var reader io.Reader = br
 	if peek, err := br.Peek(5); err == nil && IsBase64Header(peek) {
 		reader = base64.NewDecoder(base64.StdEncoding, br)
 	}
@@ -37,14 +39,14 @@ func (grpcWebDecoder) Decode(r stdio.Reader, target any) error {
 }
 
 // readGRPCWebFrames sequentially reads 5-byte length-prefixed frames from reader and unmarshals payload data into msg.
-func readGRPCWebFrames(reader stdio.Reader, msg proto.Message) error {
+func readGRPCWebFrames(reader io.Reader, msg proto.Message) error {
 	var payloadRead bool
 
 	framer := transport.NewLengthPrefixedFramer(0)
 	for {
 		flags, payload, err := framer.ReadFrame(reader)
 		if err != nil {
-			if errors.Is(err, stdio.EOF) {
+			if errors.Is(err, io.EOF) {
 				return nil
 			}
 
@@ -52,12 +54,10 @@ func readGRPCWebFrames(reader stdio.Reader, msg proto.Message) error {
 				return nil
 			}
 
-			op := "read_header"
-			if errors.Is(err, transport.ErrTruncatedPayload) {
-				op = "read_payload"
+			return &GRPCWebError{
+				Op:  generic.Ternary(errors.Is(err, transport.ErrTruncatedPayload), "read_payload", "read_header"),
+				Err: ErrInvalidGRPCWebFrame,
 			}
-
-			return &GRPCWebError{Op: op, Err: ErrInvalidGRPCWebFrame}
 		}
 
 		done, err := processGRPCWebFrame(flags, payload, msg)
@@ -93,7 +93,7 @@ func processGRPCWebFrame(flags byte, payload []byte, msg proto.Message) (done bo
 	}
 
 	if err := proto.Unmarshal(payload, msg); err != nil {
-		return false, &Error{Format: "grpc-web", Target: typeName(msg), Err: err}
+		return false, &Error{Format: "grpc-web", Target: refkit.FullTypeName(msg), Err: err}
 	}
 
 	return false, nil
@@ -101,16 +101,9 @@ func processGRPCWebFrame(flags byte, payload []byte, msg proto.Message) (done bo
 
 // decompressProtoPayload decompresses a gzip-encoded Protobuf payload stream.
 func decompressProtoPayload(payload []byte) ([]byte, error) {
-	gzReader, err := gzip.NewReader(bytes.NewReader(payload))
+	decompressed, err := compress.Gunzip(payload, nil)
 	if err != nil {
 		return nil, &GRPCWebError{Op: "decompress", Err: err}
-	}
-
-	decompressed, err := stdio.ReadAll(gzReader)
-	_ = gzReader.Close()
-
-	if err != nil {
-		return nil, &GRPCWebError{Op: "read_decompressed", Err: err}
 	}
 
 	return decompressed, nil
@@ -174,13 +167,13 @@ func verifyGRPCTrailer(trailerPayload []byte) error {
 }
 
 // parseTrailerKeyValue splits a raw trailer line by ':' and trims leading/trailing whitespace without allocations.
-func parseTrailerKeyValue(line []byte) (keyBytes, valBytes []byte, ok bool) {
-	idx := bytes.IndexByte(line, ':')
-	if idx < 0 {
-		return nil, nil, false
+func parseTrailerKeyValue(line []byte) (k, v []byte, ok bool) {
+	k, v, ok = bytes.Cut(line, []byte{':'})
+	if !ok {
+		return k, v, ok
 	}
 
-	return bytes.TrimSpace(line[:idx]), bytes.TrimSpace(line[idx+1:]), true
+	return bytes.TrimSpace(k), bytes.TrimSpace(v), true
 }
 
 // IsBase64Header checks whether frame prefix matches Base64 text-encoded gRPC-Web stream.

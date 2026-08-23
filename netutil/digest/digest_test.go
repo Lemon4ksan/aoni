@@ -6,6 +6,8 @@ package digest_test
 
 import (
 	"crypto/md5" //nolint:gosec
+	"crypto/sha256"
+	"crypto/sha512"
 	"encoding/hex"
 	"fmt"
 	"io"
@@ -229,4 +231,110 @@ func TestDigestAuth_ErrorPaths(t *testing.T) {
 			assert.Contains(t, err.Error(), tt.expectedErrSubstr)
 		})
 	}
+}
+
+func TestRFC7616_Section3_9_1_TestVectors(t *testing.T) {
+	t.Parallel()
+
+	// RFC 7616 §3.9.1 parameters
+	const (
+		username = "Mufasa"
+		password = "Circle of Life"
+		realm    = "http-auth@example.org"
+		uri      = "/dir/index.html"
+		nonce    = "7ypf/xlj9XXwfDPEoM4URrv/xwf94BcCAzFZH4GiTo0v"
+		opaque   = "FQhe/qaU925kfnzjCev0ciny7QMkPqMAFRtzCUYo5tdS"
+		cnonce   = "f2/wE4q74E6zIJEtWaHKaf5wv/H5QzzpXusqGemxURZJ"
+		nc       = "00000001"
+		qop      = "auth"
+	)
+
+	// MD5 Vector Verification
+	// A1 = Mufasa:http-auth@example.org:Circle of Life
+	// H(A1) = md5(Mufasa:http-auth@example.org:Circle of Life) = 939e7578ed9e3c518a452acee763bce9
+	// A2 = GET:/dir/index.html
+	// H(A2) = md5(GET:/dir/index.html) = 39da92e336e6e7ca48000850491d746d
+	// response = md5(939e7578ed9e3c518a452acee763bce9:7ypf/xlj9XXwfDPEoM4URrv/xwf94BcCAzFZH4GiTo0v:00000001:f2/wE4q74E6zIJEtWaHKaf5wv/H5QzzpXusqGemxURZJ:auth:39da92e336e6e7ca48000850491d746d)
+	// Expected MD5 response: 8ca523f5e9506fed4657c9700eebdbec
+	ha1MD5 := hex.EncodeToString(func() []byte {
+		h := md5.New() //nolint:gosec
+		h.Write([]byte(username + ":" + realm + ":" + password))
+		return h.Sum(nil)
+	}())
+	ha2MD5 := hex.EncodeToString(func() []byte {
+		h := md5.New() //nolint:gosec
+		h.Write([]byte("GET:" + uri))
+		return h.Sum(nil)
+	}())
+	respMD5 := hex.EncodeToString(func() []byte {
+		h := md5.New() //nolint:gosec
+		h.Write([]byte(ha1MD5 + ":" + nonce + ":" + nc + ":" + cnonce + ":" + qop + ":" + ha2MD5))
+		return h.Sum(nil)
+	}())
+	assert.Equal(t, "8ca523f5e9506fed4657c9700eebdbec", respMD5)
+
+	// SHA-256 Vector Verification (RFC 7616 §3.9.1)
+	// Expected SHA-256 response: 753927fa0e85d155564e2e272a28d1802ca10daf4496794697cf8db5856cb6c1
+	ha1SHA256 := hex.EncodeToString(func() []byte {
+		h := sha256.New()
+		h.Write([]byte(username + ":" + realm + ":" + password))
+		return h.Sum(nil)
+	}())
+	ha2SHA256 := hex.EncodeToString(func() []byte {
+		h := sha256.New()
+		h.Write([]byte("GET:" + uri))
+		return h.Sum(nil)
+	}())
+	respSHA256 := hex.EncodeToString(func() []byte {
+		h := sha256.New()
+		h.Write([]byte(ha1SHA256 + ":" + nonce + ":" + nc + ":" + cnonce + ":" + qop + ":" + ha2SHA256))
+		return h.Sum(nil)
+	}())
+	assert.Equal(t, "753927fa0e85d155564e2e272a28d1802ca10daf4496794697cf8db5856cb6c1", respSHA256)
+}
+
+func TestRFC7616_Section3_9_2_TestVectors(t *testing.T) {
+	t.Parallel()
+
+	// RFC 7616 §3.9.2: SHA-512-256, Unicode username "Jäsøn Doe" (per RFC Erratum 4897)
+	const (
+		username = "Jäsøn Doe"
+		password = "Secret, or not?"
+		realm    = "api@example.org"
+		uri      = "/doe.json"
+		nonce    = "5TsQWLVdgBdmrQ0XsxbDODV+57QdFR34I9HAbC/RVvkK"
+		cnonce   = "NTg6RKcb9boFIAS3KrFK9BGeh+iDa/sm6jUMp2wds69v"
+		nc       = "00000001"
+		qop      = "auth"
+	)
+
+	// Userhash calculation: hex(sha512_256("Jäsøn Doe:api@example.org"))
+	// Verified via RFC 7616 Erratum 4897
+	userhash := hex.EncodeToString(func() []byte {
+		h := sha512.New512_256()
+		h.Write([]byte(username + ":" + realm))
+		return h.Sum(nil)
+	}())
+	assert.Equal(t, "793263caabb707a56211940d90411ea4a575adeccb7e360aeb624ed06ece9b0b", userhash)
+
+	// Response calculation:
+	// A1 = Jäsøn Doe:api@example.org:Secret, or not?
+	// A2 = GET:/doe.json
+	// Verified via RFC 7616 Erratum 4897
+	ha1 := hex.EncodeToString(func() []byte {
+		h := sha512.New512_256()
+		h.Write([]byte(username + ":" + realm + ":" + password))
+		return h.Sum(nil)
+	}())
+	ha2 := hex.EncodeToString(func() []byte {
+		h := sha512.New512_256()
+		h.Write([]byte("GET:" + uri))
+		return h.Sum(nil)
+	}())
+	resp := hex.EncodeToString(func() []byte {
+		h := sha512.New512_256()
+		h.Write([]byte(ha1 + ":" + nonce + ":" + nc + ":" + cnonce + ":" + qop + ":" + ha2))
+		return h.Sum(nil)
+	}())
+	assert.Equal(t, "3798d4131c277846293534c3edc11bd8a5e4cdcbff78b05db9d95eeb1cec68a5", resp)
 }

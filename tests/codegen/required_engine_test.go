@@ -10,8 +10,8 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/lemon4ksan/aoni/internal/codegen/emitter"
-	"github.com/lemon4ksan/aoni/internal/codegen/parser"
+	"github.com/lemon4ksan/aoni/cmd/vortex/lib/emitter"
+	"github.com/lemon4ksan/aoni/cmd/vortex/lib/parser"
 )
 
 // @aoni:service
@@ -31,8 +31,7 @@ func TestRequiredEngineAndRequester(t *testing.T) {
 	root, err := p.ParseFile("required_engine_test.go")
 	require.NoError(t, err)
 
-	emit := emitter.NewEmitter()
-	code, err := emit.Emit(root)
+	code, err := emitter.Emit(root)
 	require.NoError(t, err)
 
 	codeStr := string(code)

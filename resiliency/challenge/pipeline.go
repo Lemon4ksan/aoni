@@ -7,6 +7,8 @@ package challenge
 import (
 	"errors"
 	"net/http"
+
+	"github.com/lemon4ksan/foundation/generic"
 )
 
 // ChallengePair associates a [Detector] with its corresponding [Solver].
@@ -23,12 +25,9 @@ type ChallengePipeline struct {
 
 // NewPipeline constructs a [ChallengePipeline] from registered detector-solver pairs.
 func NewPipeline(pairs ...ChallengePair) *ChallengePipeline {
-	filtered := make([]ChallengePair, 0, len(pairs))
-	for _, p := range pairs {
-		if p.Detector != nil && p.Solver != nil {
-			filtered = append(filtered, p)
-		}
-	}
+	filtered := generic.Filter(pairs, func(p ChallengePair) bool {
+		return p.Detector != nil && p.Solver != nil
+	})
 
 	return &ChallengePipeline{pairs: filtered}
 }
@@ -56,24 +55,39 @@ func (p *ChallengePipeline) SolveCascading(req *http.Request, resp *http.Respons
 		matched := false
 		for _, pair := range p.pairs {
 			detected, err := pair.Detector(currentResp)
-			if detected {
-				ctx := req.Context()
+			if !detected {
+				continue
+			}
 
-				newResp, solveErr := pair.Solver.Solve(ctx, err, req)
-				if solveErr != nil {
-					return true, nil, solveErr
+			ctx := req.Context()
+			oldBody := currentResp.Body
+
+			newResp, solveErr := pair.Solver.Solve(ctx, err, req)
+			if solveErr != nil {
+				if oldBody != nil {
+					_ = oldBody.Close()
 				}
 
-				if newResp != nil {
-					currentResp = newResp
-					wasSolved = true
-					matched = true
+				return true, nil, solveErr
+			}
 
-					break
+			if newResp == nil {
+				if oldBody != nil {
+					_ = oldBody.Close()
 				}
 
 				return true, nil, errors.New("aoni: challenge detected but solver returned nil response")
 			}
+
+			if oldBody != nil && oldBody != newResp.Body {
+				_ = oldBody.Close()
+			}
+
+			currentResp = newResp
+			wasSolved = true
+			matched = true
+
+			break
 		}
 
 		if !matched {

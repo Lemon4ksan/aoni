@@ -1,0 +1,669 @@
+// Copyright (c) 2026 Lemon4ksan All rights reserved.
+// Use of this source code is governed by a BSD-style
+// license that can be found in the LICENSE file.
+
+package cache
+
+import (
+	"bytes"
+	"compress/gzip"
+	"crypto/sha256"
+	"encoding/base64"
+	"encoding/hex"
+	"encoding/json"
+	"fmt"
+	"io"
+	"net/url"
+	"os"
+	"path/filepath"
+	"slices"
+	"strings"
+	"time"
+
+	"github.com/lemon4ksan/foundation/generic"
+)
+
+// TrafficEntry represents a cached traffic session snapshot.
+type TrafficEntry struct {
+	ID              string    `json:"id"`
+	OriginalFile    string    `json:"original_file"`
+	Hash            string    `json:"hash"`
+	Origins         []string  `json:"origins"`
+	SizeBytes       int64     `json:"size_bytes"`
+	CompressedBytes int64     `json:"compressed_bytes"`
+	Sanitized       bool      `json:"sanitized"`
+	EndpointCount   int       `json:"endpoint_count"`
+	StoredAt        time.Time `json:"stored_at"`
+}
+
+// TrafficIndex stores the catalog of cached traffic captures in .vortex/cache/traffic/index.json.
+type TrafficIndex struct {
+	Entries map[string]TrafficEntry `json:"entries"`
+}
+
+// LoadTrafficIndex loads the traffic index from the root directory.
+func LoadTrafficIndex(rootDir string) (*TrafficIndex, string, error) {
+	indexPath := filepath.Join(rootDir, ".vortex", "cache", "traffic", "index.json")
+
+	data, err := os.ReadFile(indexPath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return &TrafficIndex{Entries: make(map[string]TrafficEntry)}, indexPath, nil
+		}
+
+		return nil, indexPath, err
+	}
+
+	var idx TrafficIndex
+	if err := json.Unmarshal(data, &idx); err != nil {
+		return nil, indexPath, fmt.Errorf("parsing traffic index: %w", err)
+	}
+
+	if idx.Entries == nil {
+		idx.Entries = make(map[string]TrafficEntry)
+	}
+
+	return &idx, indexPath, nil
+}
+
+// Save persists the traffic index to disk.
+func (idx *TrafficIndex) Save(indexPath string) error {
+	dir := filepath.Dir(indexPath)
+	if err := os.MkdirAll(dir, 0o750); err != nil {
+		return err
+	}
+
+	data, err := json.MarshalIndent(idx, "", "  ")
+	if err != nil {
+		return err
+	}
+
+	return os.WriteFile(indexPath, data, 0o600)
+}
+
+// StoreTraffic compresses and archives a HAR payload into .vortex/cache/traffic/<hash>.har.gz.
+func StoreTraffic(
+	rootDir, srcPath string,
+	data []byte,
+	moveOriginal, sanitize bool,
+	configs ...*SecretsConfig,
+) (*TrafficEntry, map[string]SecretEntry, error) {
+	idx, indexPath, err := LoadTrafficIndex(rootDir)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	sc := resolveSecretsConfig(configs)
+	extractedSecrets := make(map[string]SecretEntry)
+	processedData := data
+
+	if sanitize {
+		sanitized, sec, sanErr := SanitizeHAR(data, sc)
+		if sanErr == nil && len(sanitized) > 0 {
+			processedData = sanitized
+			extractedSecrets = sec
+		}
+	}
+
+	sum := sha256.Sum256(processedData)
+	hashStr := hex.EncodeToString(sum[:])
+	shortHash := hashStr[:12]
+
+	origins, epCount := extractHARMetadata(processedData)
+	baseName := filepath.Base(srcPath)
+
+	entryID := strings.TrimSuffix(baseName, filepath.Ext(baseName))
+	if entryID == "" || entryID == "." {
+		entryID = shortHash
+	}
+
+	trafficDir := filepath.Join(rootDir, ".vortex", "cache", "traffic")
+	if err := os.MkdirAll(trafficDir, 0o750); err != nil {
+		return nil, nil, err
+	}
+
+	blobPath := filepath.Join(trafficDir, hashStr+".har.gz")
+
+	compressedBytes, err := writeGzipBlob(blobPath, processedData)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	entry := TrafficEntry{
+		ID:              entryID,
+		OriginalFile:    baseName,
+		Hash:            hashStr,
+		Origins:         origins,
+		SizeBytes:       int64(len(processedData)),
+		CompressedBytes: compressedBytes,
+		Sanitized:       sanitize,
+		EndpointCount:   epCount,
+		StoredAt:        time.Now(),
+	}
+
+	idx.Entries[entryID] = entry
+	idx.Entries[shortHash] = entry
+
+	if err := idx.Save(indexPath); err != nil {
+		return nil, nil, err
+	}
+
+	removeOriginalIfRequested(srcPath, blobPath, moveOriginal)
+
+	return &entry, extractedSecrets, nil
+}
+
+func resolveSecretsConfig(configs []*SecretsConfig) *SecretsConfig {
+	if len(configs) > 0 && configs[0] != nil {
+		return configs[0]
+	}
+
+	return &SecretsConfig{}
+}
+
+func writeGzipBlob(blobPath string, data []byte) (int64, error) {
+	var compressedBuf bytes.Buffer
+
+	gw := gzip.NewWriter(&compressedBuf)
+	if _, err := gw.Write(data); err != nil {
+		return 0, fmt.Errorf("compressing traffic blob: %w", err)
+	}
+
+	if err := gw.Close(); err != nil {
+		return 0, err
+	}
+
+	if err := os.WriteFile(blobPath, compressedBuf.Bytes(), 0o600); err != nil {
+		return 0, fmt.Errorf("writing compressed traffic blob: %w", err)
+	}
+
+	return int64(compressedBuf.Len()), nil
+}
+
+func removeOriginalIfRequested(srcPath, blobPath string, moveOriginal bool) {
+	if !moveOriginal || srcPath == "" || srcPath == "-" {
+		return
+	}
+
+	absSrc, err := filepath.Abs(srcPath)
+	if err != nil {
+		return
+	}
+
+	absBlob, err := filepath.Abs(blobPath)
+	if err == nil && absSrc != absBlob {
+		_ = os.Remove(srcPath)
+	}
+}
+
+// GetTraffic retrieves and decompresses a cached traffic session by ID or hash prefix.
+func GetTraffic(rootDir, idOrHash string) ([]byte, *TrafficEntry, error) {
+	idx, _, err := LoadTrafficIndex(rootDir)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	matchedEntry := findTrafficEntry(idx, idOrHash)
+	if matchedEntry == nil {
+		return nil, nil, fmt.Errorf("vortex: traffic session %q not found in cache", idOrHash)
+	}
+
+	blobPath := filepath.Join(rootDir, ".vortex", "cache", "traffic", matchedEntry.Hash+".har.gz")
+
+	decompressed, err := readGzipBlob(blobPath)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	return decompressed, matchedEntry, nil
+}
+
+func findTrafficEntry(idx *TrafficIndex, idOrHash string) *TrafficEntry {
+	// 1. Exact ID or hash match first
+	for k, e := range idx.Entries {
+		if k == idOrHash || strings.EqualFold(e.ID, idOrHash) || strings.HasPrefix(e.Hash, idOrHash) {
+			entryCopy := e
+			return &entryCopy
+		}
+	}
+
+	// 2. Substring match fallback
+	for _, e := range idx.Entries {
+		if strings.Contains(strings.ToLower(e.ID), strings.ToLower(idOrHash)) {
+			entryCopy := e
+			return &entryCopy
+		}
+	}
+
+	return nil
+}
+
+func readGzipBlob(blobPath string) ([]byte, error) {
+	f, err := os.Open(blobPath)
+	if err != nil {
+		return nil, fmt.Errorf("reading cached traffic blob: %w", err)
+	}
+	defer f.Close()
+
+	gr, err := gzip.NewReader(f)
+	if err != nil {
+		return nil, fmt.Errorf("decompressing traffic blob: %w", err)
+	}
+	defer gr.Close()
+
+	decompressed, err := io.ReadAll(gr)
+	if err != nil {
+		return nil, fmt.Errorf("reading decompressed traffic payload: %w", err)
+	}
+
+	return decompressed, nil
+}
+
+// ListTraffic returns all cached traffic sessions sorted by storage date descending.
+func ListTraffic(rootDir string) ([]TrafficEntry, error) {
+	idx, _, err := LoadTrafficIndex(rootDir)
+	if err != nil {
+		return nil, err
+	}
+
+	seenHash := make(map[string]bool)
+
+	var list []TrafficEntry
+
+	for _, e := range idx.Entries {
+		if !seenHash[e.Hash] {
+			seenHash[e.Hash] = true
+			list = append(list, e)
+		}
+	}
+
+	slices.SortFunc(list, func(a, b TrafficEntry) int {
+		return b.StoredAt.Compare(a.StoredAt)
+	})
+
+	return list, nil
+}
+
+// PruneTraffic removes old or unreferenced traffic captures.
+func PruneTraffic(rootDir string, olderThan time.Duration, all bool) (int, error) {
+	idx, indexPath, err := LoadTrafficIndex(rootDir)
+	if err != nil {
+		return 0, err
+	}
+
+	cutoff := time.Now().Add(-olderThan)
+	removedCount := 0
+	seenHash := make(map[string]bool)
+
+	var toDelete []string
+
+	for k, e := range idx.Entries {
+		if all || (olderThan > 0 && e.StoredAt.Before(cutoff)) {
+			toDelete = append(toDelete, k)
+
+			if !seenHash[e.Hash] {
+				seenHash[e.Hash] = true
+				blobPath := filepath.Join(rootDir, ".vortex", "cache", "traffic", e.Hash+".har.gz")
+				_ = os.Remove(blobPath)
+				removedCount++
+			}
+		}
+	}
+
+	for _, k := range toDelete {
+		delete(idx.Entries, k)
+	}
+
+	_ = idx.Save(indexPath)
+
+	return removedCount, nil
+}
+
+// DeleteTrafficSession removes a single traffic session by ID, filename, or hash.
+func DeleteTrafficSession(rootDir, idOrHash string) (bool, error) {
+	idx, indexPath, err := LoadTrafficIndex(rootDir)
+	if err != nil {
+		return false, err
+	}
+
+	matchedKey, matchedHash := findSessionKeyAndHash(idx, idOrHash)
+	if matchedKey == "" {
+		return false, nil
+	}
+
+	delete(idx.Entries, matchedKey)
+	_ = idx.Save(indexPath)
+
+	removeBlobIfNotReferenced(rootDir, idx, matchedHash)
+
+	return true, nil
+}
+
+func findSessionKeyAndHash(idx *TrafficIndex, idOrHash string) (matchedKey, matchedHash string) {
+	for k, e := range idx.Entries {
+		if k == idOrHash || e.Hash == idOrHash ||
+			strings.EqualFold(e.ID, idOrHash) ||
+			strings.EqualFold(e.OriginalFile, idOrHash) ||
+			strings.HasPrefix(k, idOrHash) || strings.HasPrefix(e.Hash, idOrHash) {
+			return k, e.Hash
+		}
+	}
+
+	return "", ""
+}
+
+func removeBlobIfNotReferenced(rootDir string, idx *TrafficIndex, hash string) {
+	for _, e := range idx.Entries {
+		if e.Hash == hash {
+			return
+		}
+	}
+
+	blobPath := filepath.Join(rootDir, ".vortex", "cache", "traffic", hash+".har.gz")
+	_ = os.Remove(blobPath)
+}
+
+// SanitizeHAR masks sensitive credentials and scrubs static assets from HAR JSON bytes.
+func SanitizeHAR(data []byte, configs ...*SecretsConfig) ([]byte, map[string]SecretEntry, error) {
+	sc := resolveSecretsConfig(configs)
+
+	var harDoc map[string]any
+	if err := json.Unmarshal(data, &harDoc); err != nil {
+		return nil, nil, err
+	}
+
+	logObj, ok := harDoc["log"].(map[string]any)
+	if !ok {
+		return data, nil, nil
+	}
+
+	entries, ok := logObj["entries"].([]any)
+	if !ok {
+		return data, nil, nil
+	}
+
+	extractedSecrets := make(map[string]SecretEntry)
+
+	var safeEntries []any
+
+	for _, item := range entries {
+		entry, ok := item.(map[string]any)
+		if !ok {
+			continue
+		}
+
+		req, ok := entry["request"].(map[string]any)
+		if !ok {
+			continue
+		}
+
+		rawURL, _ := req["url"].(string)
+		if isIgnoredEndpointURL(rawURL) {
+			continue
+		}
+
+		sanitizeRequestHeaders(req, sc, extractedSecrets)
+		sanitizeRequestQuery(req, sc, extractedSecrets)
+		req["cookies"] = []any{}
+
+		if resp, ok := entry["response"].(map[string]any); ok {
+			sanitizeResponse(resp)
+		}
+
+		safeEntries = append(safeEntries, entry)
+	}
+
+	logObj["entries"] = safeEntries
+
+	cleaned, err := json.Marshal(harDoc)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	return cleaned, extractedSecrets, nil
+}
+
+func sanitizeRequestHeaders(req map[string]any, sc *SecretsConfig, extractedSecrets map[string]SecretEntry) {
+	headers, ok := req["headers"].([]any)
+	if !ok {
+		return
+	}
+
+	var safeHeaders []any
+	for _, h := range headers {
+		hMap, ok := h.(map[string]any)
+		if !ok {
+			continue
+		}
+
+		name, _ := hMap["name"].(string)
+		val, _ := hMap["value"].(string)
+
+		if strings.HasPrefix(name, ":") || strings.EqualFold(name, "cookie") {
+			continue
+		}
+
+		if sc != nil {
+			if envVar, ok := sc.GetHeaderEnv(name); ok && envVar != "" && val != "" {
+				if strings.EqualFold(name, "authorization") &&
+					(strings.HasPrefix(val, "Bearer ") || strings.HasPrefix(val, "bearer ")) {
+					tokenVal := strings.TrimSpace(val[7:])
+					extractedSecrets[envVar] = SecretEntry{Key: envVar, Value: tokenVal, Header: name}
+					hMap["value"] = "Bearer ${" + envVar + "}"
+				} else {
+					extractedSecrets[envVar] = SecretEntry{Key: envVar, Value: val, Header: name}
+					hMap["value"] = "${" + envVar + "}"
+				}
+			}
+		}
+
+		safeHeaders = append(safeHeaders, hMap)
+	}
+
+	req["headers"] = safeHeaders
+}
+
+func sanitizeRequestQuery(req map[string]any, sc *SecretsConfig, extractedSecrets map[string]SecretEntry) {
+	qParams, ok := req["queryString"].([]any)
+	if !ok {
+		return
+	}
+
+	var safeQuery []any
+	for _, q := range qParams {
+		qMap, ok := q.(map[string]any)
+		if !ok {
+			continue
+		}
+
+		qName, _ := qMap["name"].(string)
+		qVal, _ := qMap["value"].(string)
+
+		if sc != nil {
+			if envVar, ok := sc.GetQueryEnv(qName); ok && envVar != "" && qVal != "" {
+				extractedSecrets[envVar] = SecretEntry{Key: envVar, Value: qVal, Query: qName}
+				qMap["value"] = "${" + envVar + "}"
+			}
+		}
+
+		safeQuery = append(safeQuery, qMap)
+	}
+
+	req["queryString"] = safeQuery
+}
+
+func sanitizeResponse(resp map[string]any) {
+	resp["cookies"] = []any{}
+
+	decompressed := false
+	if content, ok := resp["content"].(map[string]any); ok {
+		if text, ok := content["text"].(string); ok && text != "" {
+			enc, _ := content["encoding"].(string)
+
+			decomp := tryDecompressHARText(text, enc)
+			if decomp != "" && decomp != text {
+				content["text"] = decomp
+				content["size"] = len(decomp)
+				delete(content, "encoding")
+
+				decompressed = true
+			}
+		}
+	}
+
+	respHeaders, ok := resp["headers"].([]any)
+	if !ok {
+		return
+	}
+
+	var safeRespHeaders []any
+	for _, h := range respHeaders {
+		hMap, ok := h.(map[string]any)
+		if !ok {
+			continue
+		}
+
+		name, _ := hMap["name"].(string)
+		if strings.EqualFold(name, "set-cookie") {
+			continue
+		}
+
+		if decompressed && strings.EqualFold(name, "content-encoding") {
+			continue
+		}
+
+		safeRespHeaders = append(safeRespHeaders, hMap)
+	}
+
+	resp["headers"] = safeRespHeaders
+}
+
+func extractHARMetadata(data []byte) ([]string, int) {
+	var harDoc map[string]any
+	if err := json.Unmarshal(data, &harDoc); err != nil {
+		return nil, 0
+	}
+
+	logObj, ok := harDoc["log"].(map[string]any)
+	if !ok {
+		return nil, 0
+	}
+
+	entries, ok := logObj["entries"].([]any)
+	if !ok {
+		return nil, 0
+	}
+
+	originMap := make(map[string]bool)
+	count := 0
+
+	for _, item := range entries {
+		entry, ok := item.(map[string]any)
+		if !ok {
+			continue
+		}
+
+		req, ok := entry["request"].(map[string]any)
+		if !ok {
+			continue
+		}
+
+		rawURL, _ := req["url"].(string)
+		if u, err := url.Parse(rawURL); err == nil && u.Host != "" {
+			originMap[u.Host] = true
+			count++
+		}
+	}
+
+	origins := generic.Keys(originMap)
+	slices.Sort(origins)
+
+	return origins, count
+}
+
+func isIgnoredEndpointURL(rawURL string) bool {
+	lowerURL := strings.ToLower(rawURL)
+
+	u, err := url.Parse(rawURL)
+	if err != nil {
+		return false
+	}
+
+	lowerPath := strings.ToLower(u.Path)
+
+	staticExts := []string{
+		".js", ".mjs", ".css", ".png", ".jpg", ".jpeg", ".gif", ".svg",
+		".ico", ".woff", ".woff2", ".ttf", ".eot", ".webp", ".map",
+	}
+	for _, ext := range staticExts {
+		if strings.HasSuffix(lowerPath, ext) {
+			return true
+		}
+	}
+
+	noisePatterns := []string{
+		"/csi", "/log", "/gen_204", "/survey/", "/collect", "/analytics",
+		"google-analytics.com", "googletagmanager.com", "fonts.googleapis.com",
+		"fonts.gstatic.com", "cookienotificationbar", "/a/acg8",
+	}
+	for _, p := range noisePatterns {
+		if strings.Contains(lowerPath, p) || strings.Contains(lowerURL, p) {
+			return true
+		}
+	}
+
+	return false
+}
+
+func tryDecompressHARText(bodyText, encoding string) string {
+	if bodyText == "" {
+		return ""
+	}
+
+	// 1. Try base64
+	if strings.EqualFold(encoding, "base64") {
+		if dec, err := base64.StdEncoding.DecodeString(bodyText); err == nil {
+			if decomp := tryGunzip(dec); decomp != "" {
+				return decomp
+			}
+
+			return string(dec)
+		}
+	}
+
+	// 2. Try raw UTF-8 bytes gunzip
+	if decomp := tryGunzip([]byte(bodyText)); decomp != "" {
+		return decomp
+	}
+
+	// 3. Try latin-1 / binary string rune-to-byte gunzip
+	runes := []rune(bodyText)
+	if len(runes) >= 2 && runes[0] == 0x1f && (runes[1] == 0x8b || runes[1] == '\b' || runes[1] == 0xef) {
+		bin := make([]byte, len(runes))
+		for i, r := range runes {
+			bin[i] = byte(r)
+		}
+
+		if decomp := tryGunzip(bin); decomp != "" {
+			return decomp
+		}
+	}
+
+	return bodyText
+}
+
+func tryGunzip(data []byte) string {
+	if len(data) >= 2 && data[0] == 0x1f && data[1] == 0x8b {
+		gzReader, err := gzip.NewReader(bytes.NewReader(data))
+		if err == nil {
+			decompressed, err := io.ReadAll(gzReader)
+			_ = gzReader.Close()
+
+			if err == nil {
+				return string(decompressed)
+			}
+		}
+	}
+
+	return ""
+}

@@ -6,7 +6,7 @@ package fluent
 
 import (
 	"context"
-	stdio "io"
+	"io"
 	"maps"
 	"net/http"
 	"net/url"
@@ -14,22 +14,21 @@ import (
 	"path/filepath"
 	"slices"
 	"strconv"
-	"strings"
 	"sync"
 	"time"
 
 	"github.com/lemon4ksan/foundation/generic"
+	fio "github.com/lemon4ksan/foundation/io"
+	furl "github.com/lemon4ksan/foundation/net/url"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/lemon4ksan/aoni"
 	"github.com/lemon4ksan/aoni/codec"
 	"github.com/lemon4ksan/aoni/codec/decode"
 	"github.com/lemon4ksan/aoni/internal/core"
-	"github.com/lemon4ksan/aoni/internal/io"
 	"github.com/lemon4ksan/aoni/middleware"
 	"github.com/lemon4ksan/aoni/mod"
 	"github.com/lemon4ksan/aoni/netutil"
-	"github.com/lemon4ksan/aoni/netutil/digest"
 	"github.com/lemon4ksan/aoni/option"
 	"github.com/lemon4ksan/aoni/request"
 	"github.com/lemon4ksan/aoni/resiliency"
@@ -106,7 +105,7 @@ type Request struct {
 	queryParams       url.Values
 	pathParams        map[string]string
 	formFields        map[string]string
-	formFiles         map[string]stdio.Reader
+	formFiles         map[string]io.Reader
 	expectedStatuses  []int
 	downloadProgress  aoni.ProgressFunc
 	uploadProgress    aoni.ProgressFunc
@@ -288,9 +287,9 @@ func (r *Request) SetFormField(key, value string) *Request {
 }
 
 // SetFormFile attaches a stream reader as a file part in multipart/form-data requests.
-func (r *Request) SetFormFile(fieldname string, reader stdio.Reader) *Request {
+func (r *Request) SetFormFile(fieldname string, reader io.Reader) *Request {
 	if r.formFiles == nil {
-		r.formFiles = make(map[string]stdio.Reader, 2)
+		r.formFiles = make(map[string]io.Reader, 2)
 	}
 
 	r.formFiles[fieldname] = reader
@@ -385,6 +384,18 @@ func (r *Request) SetBasicAuth(username, password string) *Request {
 // SetDigestAuth configures RFC 7616 Digest Access Authentication credentials.
 func (r *Request) SetDigestAuth(username, password string) *Request {
 	r.digestAuth = &digestAuth{username: username, password: password}
+	return r
+}
+
+// SetPKCE adds PKCE code_challenge and code_challenge_method parameters for OAuth 2.0 requests (RFC 7636 / RFC 9700).
+func (r *Request) SetPKCE(verifier string, method ...string) *Request {
+	r.appliedMods = append(r.appliedMods, mod.WithPKCE(verifier, method...))
+	return r
+}
+
+// SetPKCEVerifier adds the PKCE code_verifier parameter for OAuth 2.0 token requests (RFC 7636 / RFC 9700).
+func (r *Request) SetPKCEVerifier(verifier string) *Request {
+	r.appliedMods = append(r.appliedMods, mod.WithPKCEVerifier(verifier))
 	return r
 }
 
@@ -543,7 +554,7 @@ func (r *Request) Execute(method, path string) (*http.Response, error) {
 
 	defer r.Release()
 
-	finalPath := interpolatePathParams(path, r.pathParams)
+	finalPath := furl.BuildPath(path, r.pathParams, nil)
 
 	ctx := r.ctx
 	if ctx == nil {
@@ -551,11 +562,7 @@ func (r *Request) Execute(method, path string) (*http.Response, error) {
 	}
 
 	if r.digestAuth != nil {
-		dt := &digest.Transport{
-			Username: r.digestAuth.username,
-			Password: r.digestAuth.password,
-		}
-		client = request.Configure(client, option.WithEngine(&http.Client{Transport: dt}))
+		client = request.Configure(client, option.WithDigestAuth(r.digestAuth.username, r.digestAuth.password))
 	}
 
 	var stackBuf [stackModCapacity]aoni.RequestModifier
@@ -682,7 +689,7 @@ func (r *Request) appendQueryAndBodyModifiers(mods []aoni.RequestModifier) []aon
 	case r.yamlBody != nil:
 		mods = append(mods, mod.WithYAMLBody(r.yamlBody))
 	case r.body != nil:
-		if reader, ok := r.body.(stdio.Reader); ok {
+		if reader, ok := r.body.(io.Reader); ok {
 			mods = append(mods, mod.WithBody(reader))
 		} else {
 			mods = append(mods, mod.WithJSONBody(r.body))
@@ -829,7 +836,7 @@ func writeDownloadedStream(outputFile string, resp *http.Response, previousSize 
 	}
 	defer outFile.Close()
 
-	_, err = io.CopyZeroAlloc(outFile, resp.Body)
+	_, err = fio.CopyZeroAlloc(outFile, resp.Body)
 
 	return err
 }
@@ -915,45 +922,4 @@ func (r *Request) Trace(path string) (*http.Response, error) {
 // Connect executes a CONNECT request against path.
 func (r *Request) Connect(path string) (*http.Response, error) {
 	return r.Execute(http.MethodConnect, path)
-}
-
-// interpolatePathParams replaces {param} placeholders in rawPath with URL-escaped values from params.
-func interpolatePathParams(rawPath string, params map[string]string) string {
-	if len(params) == 0 || strings.IndexByte(rawPath, '{') == -1 {
-		return rawPath
-	}
-
-	var sb strings.Builder
-	sb.Grow(len(rawPath) + 16)
-
-	for {
-		start := strings.IndexByte(rawPath, '{')
-		if start == -1 {
-			sb.WriteString(rawPath)
-			break
-		}
-
-		end := strings.IndexByte(rawPath[start:], '}')
-		if end == -1 {
-			sb.WriteString(rawPath)
-			break
-		}
-
-		end += start
-
-		sb.WriteString(rawPath[:start])
-		paramName := rawPath[start+1 : end]
-
-		if val, ok := params[paramName]; ok {
-			sb.WriteString(url.PathEscape(val))
-		} else {
-			sb.WriteByte('{')
-			sb.WriteString(paramName)
-			sb.WriteByte('}')
-		}
-
-		rawPath = rawPath[end+1:]
-	}
-
-	return sb.String()
 }

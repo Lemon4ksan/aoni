@@ -9,7 +9,7 @@ import (
 	"context"
 	"crypto/tls"
 	"encoding/hex"
-	stdio "io"
+	"io"
 	"net"
 	"net/http"
 	"net/http/httptrace"
@@ -19,13 +19,14 @@ import (
 	"sync/atomic"
 	"time"
 
+	fio "github.com/lemon4ksan/foundation/io"
+	"github.com/lemon4ksan/foundation/silicon/bytesconv"
 	"github.com/valyala/fasthttp"
 
 	"github.com/lemon4ksan/aoni/cookie"
 	"github.com/lemon4ksan/aoni/fingerprint"
 	"github.com/lemon4ksan/aoni/fingerprint/ja4"
 	"github.com/lemon4ksan/aoni/internal/core"
-	"github.com/lemon4ksan/aoni/internal/io"
 	"github.com/lemon4ksan/aoni/netutil/netdial"
 	"github.com/lemon4ksan/aoni/telemetry"
 )
@@ -44,20 +45,32 @@ func (p *Pipeline[Req, Resp]) prepareRequest(req any, tx *Tx) *http.Request {
 
 	stdReq = p.prepareRequestContext(req, stdReq)
 
-	stages := []PrepStage[Req, Resp]{
-		stageBeforeRequestHooks[Req, Resp],
-		stagePacketPadding[Req, Resp],
-		stageRefererHeader[Req, Resp],
-		stageRotateUserAgent[Req, Resp],
-		stageDPIJitter[Req, Resp],
-		stageRedactSensitiveData[Req, Resp],
-		stageUploadProgress[Req, Resp],
-		stageJA4Report[Req, Resp],
+	if len(p.defaults.BeforeRequest) > 0 {
+		stdReq = stageBeforeRequestHooks(p, stdReq, tx)
 	}
 
-	for _, stage := range stages {
-		stdReq = stage(p, stdReq, tx)
+	if p.fingerprint.PacketPadding != nil {
+		stdReq = stagePacketPadding(p, stdReq, tx)
 	}
+
+	if p.defaults.RefererAutomaton {
+		stdReq = stageRefererHeader(p, stdReq, tx)
+	}
+
+	if tx.Flags&FlagRotateUA != 0 {
+		stdReq = stageRotateUserAgent(p, stdReq, tx)
+	}
+
+	if tx.Flags&FlagDPIJitter != 0 && tx.DPIJitter != nil {
+		stdReq = stageDPIJitter(p, stdReq, tx)
+	}
+
+	if tx.Flags&FlagRedact != 0 && tx.Redact != nil {
+		stdReq = stageRedactSensitiveData(p, stdReq, tx)
+	}
+
+	stdReq = stageUploadProgress(p, stdReq, tx)
+	stdReq = stageJA4Report(p, stdReq, tx)
 
 	return stdReq
 }
@@ -113,7 +126,7 @@ func stageRedactSensitiveData[Req, Resp any](p *Pipeline[Req, Resp], req *http.R
 func stageUploadProgress[Req, Resp any](_ *Pipeline[Req, Resp], req *http.Request, _ *Tx) *http.Request {
 	cfg := GetRequestConfig(req.Context())
 	if cfg != nil && cfg.UploadProgress != nil && req.Body != nil && req.Body != http.NoBody {
-		progressReader := &io.ProgressReader{
+		progressReader := &fio.ProgressReader{
 			Reader:     req.Body,
 			Total:      req.ContentLength,
 			OnProgress: cfg.UploadProgress,
@@ -122,13 +135,13 @@ func stageUploadProgress[Req, Resp any](_ *Pipeline[Req, Resp], req *http.Reques
 
 		if req.GetBody != nil {
 			origGetBody := req.GetBody
-			req.GetBody = func() (stdio.ReadCloser, error) {
+			req.GetBody = func() (io.ReadCloser, error) {
 				rc, err := origGetBody()
 				if err != nil {
 					return nil, err
 				}
 
-				return &io.ProgressReader{
+				return &fio.ProgressReader{
 					Reader:     rc,
 					Total:      req.ContentLength,
 					OnProgress: cfg.UploadProgress,
@@ -272,7 +285,7 @@ func (p *Pipeline[Req, Resp]) prewarmTargetOrigin(ctx context.Context, targetURL
 		return
 	}
 
-	dialCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	dialCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
 	defer cancel()
 
 	host, port := u.Hostname(), u.Port()
@@ -290,7 +303,7 @@ func (p *Pipeline[Req, Resp]) prewarmTargetOrigin(ctx context.Context, targetURL
 		HappyEyeballs: 250 * time.Millisecond,
 	}
 
-	conn, err := netdial.DialL4(dialCtx, "tcp", targetAddr, dialOpts)
+	conn, err := netdial.DialL4(dialCtx, netdial.NetworkTCP.String(), targetAddr, dialOpts)
 	if err != nil {
 		return
 	}
@@ -314,20 +327,23 @@ func (p *Pipeline[Req, Resp]) prewarmTargetOrigin(ctx context.Context, targetURL
 	_ = conn.Close()
 }
 
-func (p *Pipeline[Req, Resp]) redactSensitiveData(req *http.Request, redact *RedactConfig) *http.Request {
-	headers := make(map[string]struct{}, len(redact.HeadersToRedact))
-	for _, h := range redact.HeadersToRedact {
-		headers[strings.ToLower(h)] = struct{}{}
-	}
+var defaultRedactHeaders = map[string]struct{}{
+	"authorization":       {},
+	"proxy-authorization": {},
+	"cookie":              {},
+	"set-cookie":          {},
+	"x-api-key":           {},
+}
 
-	if len(headers) == 0 {
-		headers = map[string]struct{}{
-			"authorization":       {},
-			"proxy-authorization": {},
-			"cookie":              {},
-			"set-cookie":          {},
-			"x-api-key":           {},
+func (p *Pipeline[Req, Resp]) redactSensitiveData(req *http.Request, redact *RedactConfig) *http.Request {
+	var headers map[string]struct{}
+	if len(redact.HeadersToRedact) > 0 {
+		headers = make(map[string]struct{}, len(redact.HeadersToRedact))
+		for _, h := range redact.HeadersToRedact {
+			headers[strings.ToLower(h)] = struct{}{}
 		}
+	} else {
+		headers = defaultRedactHeaders
 	}
 
 	ctx := req.Context()
@@ -377,7 +393,7 @@ func (p *Pipeline[Req, Resp]) applyDPIJitter(req *http.Request, cfg *DPIJitterCo
 	}
 
 	if req.Body != nil && req.Body != http.NoBody {
-		req.Body = &io.JitterReader{
+		req.Body = &fio.JitterReader{
 			ReadCloser: req.Body,
 			Delay:      delay,
 		}
@@ -396,15 +412,15 @@ func (p *Pipeline[Req, Resp]) applyPacketPadding(req *http.Request) {
 }
 
 func (p *Pipeline[Req, Resp]) applyRefererHeader(req *http.Request) {
+	if req.Header == nil {
+		req.Header = make(http.Header)
+	}
+
 	if req.Header.Get("Referer") != "" || p.defaults.RefererState == nil {
 		return
 	}
 
-	p.defaults.RefererState.Mu.Lock()
-	lastURL := p.defaults.RefererState.LastURL
-	p.defaults.RefererState.Mu.Unlock()
-
-	if lastURL != "" {
+	if lastURL := p.defaults.RefererState.LastURL.Get(); lastURL != "" {
 		req.Header.Set("Referer", lastURL)
 	}
 }
@@ -415,7 +431,7 @@ func convertRequestToStd(r core.Request) *http.Request {
 	}
 
 	var (
-		bodyReader stdio.Reader
+		bodyReader io.Reader
 		contentLen int64 = -1
 	)
 
@@ -448,14 +464,17 @@ func convertRequestToStd(r core.Request) *http.Request {
 
 	if isFast {
 		if fastReq := fastAdapter.FastHTTPRequest(); fastReq != nil {
-			fastReq.Header.All()(func(k, v []byte) bool {
+			for k, v := range fastReq.Header.All() {
 				stdReq.Header.Add(string(k), string(v))
-				return true
-			})
+			}
 
-			if host := string(fastReq.Header.Peek("Host")); host != "" {
+			if host := bytesconv.B2S(fastReq.Header.Peek("Host")); host != "" {
 				stdReq.Host = host
 			}
+		}
+	} else if r.Headers() != nil {
+		for k, v := range r.Headers() {
+			stdReq.Header.Add(string(k), string(v))
 		}
 	}
 

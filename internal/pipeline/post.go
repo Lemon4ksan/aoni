@@ -5,25 +5,30 @@
 package pipeline
 
 import (
+	"bufio"
 	"errors"
-	stdio "io"
+	"io"
 	"mime"
 	"net/http"
+	"slices"
 	"strconv"
 	"strings"
 
-	"github.com/andybalholm/brotli"
-	"github.com/klauspost/compress/zstd"
+	"github.com/lemon4ksan/foundation/generic"
+	fio "github.com/lemon4ksan/foundation/io"
 	"github.com/lemon4ksan/foundation/text/encoding/htmlindex"
 	"github.com/lemon4ksan/foundation/text/transform"
 
-	"github.com/lemon4ksan/aoni/internal/io"
+	"github.com/lemon4ksan/aoni/internal/compress"
 )
 
 var (
-	ErrConflictingContentLength  = errors.New("aoni: conflicting Content-Length headers detected")
+	// ErrConflictingContentLength signals multiple conflicting Content-Length headers (RFC 9112 §6.3).
+	ErrConflictingContentLength = errors.New("aoni: conflicting Content-Length headers detected")
+	// ErrConflictingLocationHeader signals conflicting Location headers in redirect responses.
 	ErrConflictingLocationHeader = errors.New("aoni: conflicting Location headers detected in response")
-	ErrHeaderInjectionDetected   = errors.New("aoni: CRLF control characters detected in response headers")
+	// ErrHeaderInjectionDetected signals CRLF or null control characters in response headers (RFC 9112 §2.2 & §11.1).
+	ErrHeaderInjectionDetected = errors.New("aoni: CRLF control characters detected in response headers")
 )
 
 func (p *Pipeline[Req, Resp]) postProcessResponse(
@@ -31,23 +36,46 @@ func (p *Pipeline[Req, Resp]) postProcessResponse(
 	resp *http.Response,
 	tx *Tx,
 ) (*http.Response, error) {
-	stages := []PostStage[Req, Resp]{
-		stageValidateSmuggling[Req, Resp],
-		stageDecompressAndTranscode[Req, Resp],
-		stageCacheStorage[Req, Resp],
-		stageSizeLimit[Req, Resp],
-		stageWAFChallenge[Req, Resp],
-		stageValidateResponse[Req, Resp],
-		stageRefererStateUpdate[Req, Resp],
-		stageMultiReadBuffering[Req, Resp],
+	var err error
+
+	resp, err = stageValidateSmuggling(p, stdReq, resp, tx)
+	if err != nil {
+		return nil, err
 	}
 
-	var err error
-	for _, stage := range stages {
-		resp, err = stage(p, stdReq, resp, tx)
-		if err != nil {
-			return nil, err
-		}
+	resp, err = stageDecompressAndTranscode(p, stdReq, resp, tx)
+	if err != nil {
+		return nil, err
+	}
+
+	resp, err = stageCacheStorage(p, stdReq, resp, tx)
+	if err != nil {
+		return nil, err
+	}
+
+	resp, err = stageSizeLimit(p, stdReq, resp, tx)
+	if err != nil {
+		return nil, err
+	}
+
+	resp, err = stageWAFChallenge(p, stdReq, resp, tx)
+	if err != nil {
+		return nil, err
+	}
+
+	resp, err = stageValidateResponse(p, stdReq, resp, tx)
+	if err != nil {
+		return nil, err
+	}
+
+	resp, err = stageRefererStateUpdate(p, stdReq, resp, tx)
+	if err != nil {
+		return nil, err
+	}
+
+	resp, err = stageMultiReadBuffering(p, stdReq, resp, tx)
+	if err != nil {
+		return nil, err
 	}
 
 	return resp, nil
@@ -59,14 +87,16 @@ func stageValidateSmuggling[Req, Resp any](
 	resp *http.Response,
 	tx *Tx,
 ) (*http.Response, error) {
-	if tx.Flags&FlagValidate != 0 {
-		if err := validateResponseSmugglingGuards(resp); err != nil {
-			if resp != nil && resp.Body != nil {
-				_ = resp.Body.Close()
-			}
+	if tx.Flags&FlagValidate == 0 {
+		return resp, nil
+	}
 
-			return nil, err
+	if err := validateResponseSmugglingGuards(resp); err != nil {
+		if resp != nil && resp.Body != nil {
+			_ = resp.Body.Close()
 		}
+
+		return nil, err
 	}
 
 	return resp, nil
@@ -79,8 +109,10 @@ func stageDecompressAndTranscode[Req, Resp any](
 	tx *Tx,
 ) (*http.Response, error) {
 	if tx.Flags&FlagDecompress != 0 {
-		resp = p.handleDecompressionAndTranscoding(stdReq, resp)
-	} else if resp != nil && resp.Body != nil {
+		return p.handleDecompressionAndTranscoding(stdReq, resp), nil
+	}
+
+	if resp != nil && resp.Body != nil {
 		resp.Body = applyCharsetTranscoding(resp, resp.Body)
 	}
 
@@ -93,12 +125,14 @@ func stageCacheStorage[Req, Resp any](
 	resp *http.Response,
 	tx *Tx,
 ) (*http.Response, error) {
-	if tx.Flags&FlagCache != 0 && tx.Cache != nil {
-		if stdReq.Method == http.MethodGet {
-			p.saveToCache(stdReq, resp, tx.Cache)
-		} else {
-			p.invalidateCache(stdReq, resp, tx.Cache)
-		}
+	if tx.Flags&FlagCache == 0 || tx.Cache == nil {
+		return resp, nil
+	}
+
+	if stdReq.Method == http.MethodGet {
+		p.saveToCache(stdReq, resp, tx.Cache)
+	} else {
+		p.invalidateCache(stdReq, resp, tx.Cache)
 	}
 
 	return resp, nil
@@ -110,10 +144,12 @@ func stageSizeLimit[Req, Resp any](
 	resp *http.Response,
 	tx *Tx,
 ) (*http.Response, error) {
-	if tx.SizeLimit > 0 {
-		if limitErr := p.limitResponseSize(resp, tx.SizeLimit); limitErr != nil {
-			return nil, limitErr
-		}
+	if tx.SizeLimit <= 0 {
+		return resp, nil
+	}
+
+	if limitErr := p.limitResponseSize(resp, tx.SizeLimit); limitErr != nil {
+		return nil, limitErr
 	}
 
 	return resp, nil
@@ -125,11 +161,11 @@ func stageWAFChallenge[Req, Resp any](
 	resp *http.Response,
 	tx *Tx,
 ) (*http.Response, error) {
-	if tx.Flags&FlagChallenge != 0 {
-		return p.handleWAFChallenge(stdReq, resp)
+	if tx.Flags&FlagChallenge == 0 {
+		return resp, nil
 	}
 
-	return resp, nil
+	return p.handleWAFChallenge(stdReq, resp)
 }
 
 func stageValidateResponse[Req, Resp any](
@@ -138,10 +174,12 @@ func stageValidateResponse[Req, Resp any](
 	resp *http.Response,
 	tx *Tx,
 ) (*http.Response, error) {
-	if tx.Flags&FlagValidate != 0 {
-		if valErr := p.validateResponse(resp, tx); valErr != nil {
-			return nil, valErr
-		}
+	if tx.Flags&FlagValidate == 0 {
+		return resp, nil
+	}
+
+	if valErr := p.validateResponse(resp, tx); valErr != nil {
+		return nil, valErr
 	}
 
 	return resp, nil
@@ -154,9 +192,7 @@ func stageRefererStateUpdate[Req, Resp any](
 	_ *Tx,
 ) (*http.Response, error) {
 	if p.defaults.RefererAutomaton && p.defaults.RefererState != nil && stdReq != nil && stdReq.URL != nil {
-		p.defaults.RefererState.Mu.Lock()
-		p.defaults.RefererState.LastURL = stdReq.URL.String()
-		p.defaults.RefererState.Mu.Unlock()
+		p.defaults.RefererState.LastURL.Set(stdReq.URL.String())
 	}
 
 	return resp, nil
@@ -168,10 +204,12 @@ func stageMultiReadBuffering[Req, Resp any](
 	resp *http.Response,
 	tx *Tx,
 ) (*http.Response, error) {
-	if resp != nil && resp.Body != nil {
-		if bufErr := p.applyMultiReadBuffering(resp, tx); bufErr != nil {
-			return nil, bufErr
-		}
+	if resp == nil || resp.Body == nil {
+		return resp, nil
+	}
+
+	if bufErr := p.applyMultiReadBuffering(resp, tx); bufErr != nil {
+		return nil, bufErr
 	}
 
 	return resp, nil
@@ -250,17 +288,15 @@ func validateTransferEncodingAndContentLength(resp *http.Response) error {
 	return nil
 }
 
-// validateHeaderInjections scans header keys and values for illegal CRLF and null control characters.
+// validateHeaderInjections scans header keys and values for illegal CRLF and null control characters (RFC 9112 §2.2 & §11.1).
 func validateHeaderInjections(resp *http.Response) error {
 	for k, vv := range resp.Header {
 		if containsControlChars(k) {
 			return ErrHeaderInjectionDetected
 		}
 
-		for i := 0; i < len(vv); i++ {
-			if containsControlChars(vv[i]) {
-				return ErrHeaderInjectionDetected
-			}
+		if slices.ContainsFunc(vv, containsControlChars) {
+			return ErrHeaderInjectionDetected
 		}
 	}
 
@@ -290,7 +326,7 @@ func (p *Pipeline[Req, Resp]) limitResponseSize(resp *http.Response, maxSize int
 
 	if resp.ContentLength > maxSize {
 		_ = resp.Body.Close()
-		return io.ErrResponseTooLarge
+		return fio.ErrResponseTooLarge
 	}
 
 	cl := resp.ContentLength
@@ -309,10 +345,10 @@ func (p *Pipeline[Req, Resp]) limitResponseSize(resp *http.Response, maxSize int
 
 	if cl > maxSize {
 		_ = resp.Body.Close()
-		return io.ErrResponseTooLarge
+		return fio.ErrResponseTooLarge
 	}
 
-	resp.Body = &io.LimitCheckingReadCloser{
+	resp.Body = &fio.LimitCheckingReadCloser{
 		ReadCloser: resp.Body,
 		Limit:      maxSize,
 	}
@@ -340,7 +376,52 @@ func (p *Pipeline[Req, Resp]) validateResponse(resp *http.Response, tx *Tx) erro
 		}
 	}
 
+	detectors := tx.SoftErrorDetectors
+	if len(detectors) == 0 {
+		detectors = p.defaults.SoftErrorDetectors
+	}
+
+	if len(detectors) > 0 && resp.Body != nil {
+		peekBytes, err := PeekResponseBody(resp, 4096)
+		if err != nil && !errors.Is(err, io.EOF) {
+			_ = resp.Body.Close()
+			return err
+		}
+
+		for _, detector := range detectors {
+			if detector != nil {
+				if dErr := detector(resp, peekBytes); dErr != nil {
+					_ = resp.Body.Close()
+					return dErr
+				}
+			}
+		}
+	}
+
 	return nil
+}
+
+// PeekResponseBody reads up to n bytes from resp.Body without consuming or draining the stream.
+func PeekResponseBody(resp *http.Response, n int) ([]byte, error) {
+	if resp == nil || resp.Body == nil || n <= 0 {
+		return nil, nil
+	}
+
+	if b, ok := resp.Body.(*fio.BufioReadCloser); ok {
+		return b.Peek(n)
+	}
+
+	if br, ok := resp.Body.(interface{ BufioReader() *bufio.Reader }); ok {
+		return br.BufioReader().Peek(n)
+	}
+
+	peekable := bufio.NewReader(resp.Body)
+	resp.Body = &fio.BufioReadCloser{
+		Reader: peekable,
+		Closer: resp.Body,
+	}
+
+	return peekable.Peek(n)
 }
 
 func (p *Pipeline[Req, Resp]) applyMultiReadBuffering(resp *http.Response, tx *Tx) error {
@@ -361,13 +442,13 @@ func (p *Pipeline[Req, Resp]) applyMultiReadBuffering(resp *http.Response, tx *T
 		return nil
 	}
 
-	mBody, err := io.NewMultiReadBody(resp.Body, threshold, disableDisk)
+	mBody, err := fio.NewMultiReadBody(resp.Body, threshold, disableDisk)
 	if err != nil {
 		_ = resp.Body.Close()
 		return err
 	}
 
-	resp.Body = &io.ResponseBodyReadCloser{ReadCloser: mBody}
+	resp.Body = &fio.ResponseBodyReadCloser{ReadCloser: mBody}
 
 	return nil
 }
@@ -380,7 +461,7 @@ func (p *Pipeline[Req, Resp]) handleDecompressionAndTranscoding(req *http.Reques
 	var filters []StreamFilter
 
 	if !hasExplicitAcceptEncoding(req) {
-		filters = append(filters, func(r *http.Response, body stdio.ReadCloser) (stdio.ReadCloser, error) {
+		filters = append(filters, func(r *http.Response, body io.ReadCloser) (io.ReadCloser, error) {
 			decompressedBody, decompressed := applyContentDecompression(r, body)
 			if decompressed {
 				r.Uncompressed = true
@@ -390,15 +471,15 @@ func (p *Pipeline[Req, Resp]) handleDecompressionAndTranscoding(req *http.Reques
 		})
 	}
 
-	filters = append(filters, func(r *http.Response, body stdio.ReadCloser) (stdio.ReadCloser, error) {
+	filters = append(filters, func(r *http.Response, body io.ReadCloser) (io.ReadCloser, error) {
 		return applyCharsetTranscoding(r, body), nil
 	})
 
 	if cfg := GetRequestConfig(req.Context()); cfg != nil && cfg.DownloadProgress != nil {
 		progress := cfg.DownloadProgress
 
-		filters = append(filters, func(r *http.Response, body stdio.ReadCloser) (stdio.ReadCloser, error) {
-			return &io.ProgressReader{
+		filters = append(filters, func(r *http.Response, body io.ReadCloser) (io.ReadCloser, error) {
+			return &fio.ProgressReader{
 				Reader:     body,
 				Total:      r.ContentLength,
 				OnProgress: progress,
@@ -421,35 +502,20 @@ func hasExplicitAcceptEncoding(req *http.Request) bool {
 	return cfg != nil && cfg.HasExplicitAcceptEncoding
 }
 
-func applyContentDecompression(resp *http.Response, body stdio.ReadCloser) (stdio.ReadCloser, bool) {
+func applyContentDecompression(resp *http.Response, body io.ReadCloser) (io.ReadCloser, bool) {
 	encoding := resp.Header.Get("Content-Encoding")
-	switch encoding {
-	case "br":
-		resetDecompressedHeader(resp)
-
-		return &io.DecompressReadCloser{
-			Reader: brotli.NewReader(body),
-			Closer: body,
-		}, true
-
-	case "zstd":
-		if zstdDec, err := zstd.NewReader(body); err == nil {
-			resetDecompressedHeader(resp)
-
-			return &io.DecompressReadCloser{
-				Reader: zstdDec,
-				Closer: body,
-			}, true
-		}
-
-	case "gzip":
-		if gzReader, err := io.NewPooledGzipReader(body); err == nil {
-			resetDecompressedHeader(resp)
-			return gzReader, true
-		}
+	if encoding == "" || strings.EqualFold(encoding, "identity") {
+		return body, false
 	}
 
-	return body, false
+	reader, err := compress.NewReader(encoding, body)
+	if err != nil {
+		return body, false
+	}
+
+	resetDecompressedHeader(resp)
+
+	return reader, true
 }
 
 func resetDecompressedHeader(resp *http.Response) {
@@ -458,18 +524,9 @@ func resetDecompressedHeader(resp *http.Response) {
 	resp.ContentLength = -1
 }
 
-func applyCharsetTranscoding(resp *http.Response, body stdio.ReadCloser) stdio.ReadCloser {
-	if resp == nil || body == nil {
-		return body
-	}
-
+func applyCharsetTranscoding(resp *http.Response, body io.ReadCloser) io.ReadCloser {
 	contentType := resp.Header.Get("Content-Type")
 	if contentType == "" {
-		return body
-	}
-
-	lower := strings.ToLower(contentType)
-	if !strings.Contains(lower, "charset=") || strings.Contains(lower, "charset=utf-8") {
 		return body
 	}
 
@@ -478,8 +535,8 @@ func applyCharsetTranscoding(resp *http.Response, body stdio.ReadCloser) stdio.R
 		return body
 	}
 
-	charset := strings.ToLower(params["charset"])
-	if charset == "" || charset == "utf-8" || charset == "utf8" {
+	charset, ok := params["charset"]
+	if !ok || strings.EqualFold(charset, "utf-8") || strings.EqualFold(charset, "us-ascii") {
 		return body
 	}
 
@@ -488,21 +545,47 @@ func applyCharsetTranscoding(resp *http.Response, body stdio.ReadCloser) stdio.R
 		return body
 	}
 
-	const suffix = "; charset=utf-8"
+	params["charset"] = "utf-8"
 
-	totalLen := len(mediaType) + len(suffix)
-	if totalLen <= 64 {
-		var buf [64]byte
+	keys := generic.Keys(params)
+	slices.Sort(keys)
 
-		n := copy(buf[:], mediaType)
-		copy(buf[n:], suffix)
-
-		resp.Header.Set("Content-Type", string(buf[:totalLen]))
-	} else {
-		resp.Header.Set("Content-Type", mediaType+suffix)
+	var totalLen int
+	for _, k := range keys {
+		totalLen += len(k) + len(params[k]) + 3 // 3 for "; ", "="
 	}
 
-	return &io.DecompressReadCloser{
+	if totalLen < 128 {
+		var (
+			buf [128]byte
+			off int
+		)
+
+		off += copy(buf[off:], mediaType)
+		for _, k := range keys {
+			off += copy(buf[off:], "; ")
+			off += copy(buf[off:], k)
+			off += copy(buf[off:], "=")
+			off += copy(buf[off:], params[k])
+		}
+
+		resp.Header.Set("Content-Type", string(buf[:off]))
+	} else {
+		var b strings.Builder
+		b.Grow(len(mediaType) + totalLen)
+		b.WriteString(mediaType)
+
+		for _, k := range keys {
+			b.WriteString("; ")
+			b.WriteString(k)
+			b.WriteString("=")
+			b.WriteString(params[k])
+		}
+
+		resp.Header.Set("Content-Type", b.String())
+	}
+
+	return &fio.DecompressReadCloser{
 		Reader: transform.NewReader(body, enc.NewDecoder()),
 		Closer: body,
 	}
@@ -513,12 +596,12 @@ func (p *Pipeline[Req, Resp]) handleWAFChallenge(req *http.Request, resp *http.R
 		return resp, nil
 	}
 
-	bodyBytes, err := stdio.ReadAll(stdio.LimitReader(resp.Body, 100*1024))
+	bodyBytes, err := io.ReadAll(io.LimitReader(resp.Body, 100*1024))
 	if err != nil {
 		return resp, nil //nolint:nilerr
 	}
 
-	buffered := &io.ExplicitBufferedBody{
+	buffered := &fio.ExplicitBufferedBody{
 		Prefix: bodyBytes,
 		Stream: resp.Body,
 	}

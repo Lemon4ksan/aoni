@@ -10,25 +10,23 @@ import (
 	"crypto/tls"
 	"errors"
 	"fmt"
-	"net"
 	"net/http"
 	"net/url"
 	"slices"
-	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
 
-	"github.com/lemon4ksan/foundation/async/log"
+	flog "github.com/lemon4ksan/foundation/async/log"
 	"github.com/lemon4ksan/foundation/generic"
-	"github.com/lemon4ksan/foundation/silicon/clock"
+	fproxy "github.com/lemon4ksan/foundation/net/proxy"
+	"github.com/lemon4ksan/foundation/silicon/trie"
 	"golang.org/x/sys/cpu"
 
 	"github.com/lemon4ksan/aoni"
 	"github.com/lemon4ksan/aoni/cookie"
 	"github.com/lemon4ksan/aoni/internal/core"
 	"github.com/lemon4ksan/aoni/internal/health"
-	"github.com/lemon4ksan/aoni/netutil/trie"
 )
 
 var (
@@ -46,64 +44,16 @@ func WithAwareSessionCache() aoni.ClientOption {
 	}
 }
 
-// Parse parses a raw proxy string into a structured [*url.URL].
-// If no scheme is present, it inspects standard port conventions (1080/9050 -> socks5h)
-// or defaults to "http". It performs zero blocking network I/O.
+// Parse parses a raw proxy string into a structured [*url.URL] (RFC 3986 §3).
+// Core implementation is located in [github.com/lemon4ksan/foundation/net/proxy].
 func Parse(proxyStr string) (*url.URL, error) {
-	if proxyStr == "" {
-		return nil, errors.New("empty proxy string")
-	}
-
-	if strings.Contains(proxyStr, "://") {
-		return url.Parse(proxyStr)
-	}
-
-	u, err := url.Parse("http://" + proxyStr)
-	if err != nil {
-		return nil, err
-	}
-
-	_, portStr, err := net.SplitHostPort(u.Host)
-	if err != nil {
-		portStr = ""
-	}
-
-	scheme := "http"
-	switch portStr {
-	case "1080", "1081", "9050", "9051", "10808":
-		scheme = "socks5h"
-	}
-
-	u.Scheme = scheme
-
-	return u, nil
+	return fproxy.Parse(proxyStr)
 }
 
 // ProbeProxy actively tests an endpoint to determine if it speaks SOCKS5, HTTP CONNECT, or other protocols.
+// Core implementation is located in [github.com/lemon4ksan/foundation/net/proxy].
 func ProbeProxy(ctx context.Context, addr string) (string, error) {
-	dialer := net.Dialer{Timeout: 500 * time.Millisecond}
-
-	conn, err := dialer.DialContext(ctx, "tcp", addr)
-	if err != nil {
-		return "", err
-	}
-	defer conn.Close()
-
-	_ = conn.SetDeadline(time.Now().Add(300 * time.Millisecond))
-
-	_, err = conn.Write([]byte{0x05, 0x01, 0x00})
-	if err != nil {
-		return "http", nil
-	}
-
-	resp := make([]byte, 2)
-
-	n, err := conn.Read(resp)
-	if err == nil && n == 2 && resp[0] == 0x05 {
-		return "socks5h", nil
-	}
-
-	return "http", nil
+	return fproxy.ProbeProxy(ctx, addr)
 }
 
 // WithClient pairs an [aoni.HTTPDoer] client with its associated exit proxy URL.
@@ -123,13 +73,9 @@ type Config struct {
 
 // NewClient instantiates an [*http.Client] configured with proxy transport routing.
 func NewClient(cfg Config) (*http.Client, error) {
-	timeout := cfg.Timeout
-	if timeout == 0 {
-		timeout = 15 * time.Second
-	}
+	timeout := generic.Coalesce(cfg.Timeout, 15*time.Second)
 
 	var rt http.RoundTripper
-
 	switch {
 	case cfg.TransportFactory != nil:
 		var err error
@@ -204,50 +150,31 @@ type trackedClient struct {
 	client          aoni.HTTPDoer
 	proxyURL        string
 	tracker         *health.Tracker
-	domainMu        sync.RWMutex
-	domainCooldowns map[string]time.Time
+	domainCooldowns *generic.Cache[string, struct{}]
 }
 
 func (tc *trackedClient) IsDomainCooledDown(domain string) bool {
-	tc.domainMu.RLock()
-	defer tc.domainMu.RUnlock()
-
 	if tc.domainCooldowns == nil {
 		return false
 	}
 
-	cooldownUntil, exists := tc.domainCooldowns[domain]
+	_, exists := tc.domainCooldowns.Get(domain)
 
-	return exists && time.Now().Before(cooldownUntil)
+	return exists
 }
 
 func (tc *trackedClient) PutDomainInCooldown(domain string, duration time.Duration) {
-	tc.domainMu.Lock()
-	defer tc.domainMu.Unlock()
-
 	if tc.domainCooldowns == nil {
-		tc.domainCooldowns = make(map[string]time.Time)
+		tc.domainCooldowns = generic.NewCache[string, struct{}]()
 	}
 
-	now := time.Now()
-	for d, until := range tc.domainCooldowns {
-		if now.After(until) {
-			delete(tc.domainCooldowns, d)
-		}
-	}
-
-	tc.domainCooldowns[domain] = now.Add(duration)
-}
-
-type sessionEntry struct {
-	clientIdx int
-	lastSeen  time.Time
+	tc.domainCooldowns.Set(domain, struct{}{}, duration)
 }
 
 // Rotator balances requests across a pool of proxy clients, supporting sticky sessions, health probing, and domain cooldowns.
 type Rotator struct {
 	stickyKeyFunc StickyKeyFunc
-	sessions      map[string]*sessionEntry
+	sessions      *generic.Cache[string, int]
 	clients       []*trackedClient
 	ctx           context.Context
 	cancel        context.CancelFunc
@@ -272,7 +199,7 @@ func NewRotator(cfg RotatorConfig, clients ...WithClient) (*Rotator, error) {
 	cfg.RetryAfter = generic.Coalesce(cfg.RetryAfter, 30*time.Second)
 
 	if cfg.Logger == nil {
-		cfg.Logger = log.Discard
+		cfg.Logger = flog.Discard
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -280,7 +207,7 @@ func NewRotator(cfg RotatorConfig, clients ...WithClient) (*Rotator, error) {
 		ctx:        ctx,
 		cancel:     cancel,
 		cfg:        cfg,
-		sessions:   make(map[string]*sessionEntry),
+		sessions:   generic.NewCache[string, int](),
 		sessionTTL: 24 * time.Hour,
 	}
 
@@ -337,7 +264,7 @@ func (r *Rotator) WithStickySessions(f StickyKeyFunc) *Rotator {
 		cancel:        r.cancel,
 		clients:       make([]*trackedClient, len(r.clients)),
 		cfg:           r.cfg,
-		sessions:      make(map[string]*sessionEntry),
+		sessions:      generic.NewCache[string, int](),
 		sessionTTL:    r.sessionTTL,
 		stickyKeyFunc: f,
 	}
@@ -410,9 +337,7 @@ func (r *Rotator) ResetDomainCooldowns() {
 	r.mu.RUnlock()
 
 	for _, tc := range clients {
-		tc.domainMu.Lock()
-		clear(tc.domainCooldowns)
-		tc.domainMu.Unlock()
+		tc.domainCooldowns = generic.NewCache[string, struct{}]()
 	}
 }
 
@@ -427,7 +352,7 @@ func (r *Rotator) UpdateClients(clients ...WithClient) {
 	r.mu.Lock()
 	r.clients = tracked
 	r.current.Store(0)
-	r.sessions = make(map[string]*sessionEntry)
+	r.sessions = generic.NewCache[string, int]()
 	r.mu.Unlock()
 }
 
@@ -542,7 +467,7 @@ func (r *Rotator) setupClient(cp WithClient) *trackedClient {
 	tc := &trackedClient{
 		client:          cp.Client,
 		proxyURL:        cp.ProxyURL,
-		domainCooldowns: make(map[string]time.Time),
+		domainCooldowns: generic.NewCache[string, struct{}](),
 	}
 
 	tc.tracker = health.NewTracker(cp.ProxyURL, r.cfg.MaxFails, r.cfg.RetryAfter,
@@ -576,12 +501,9 @@ func (r *Rotator) isProxyFault(resp *http.Response, err error) bool {
 }
 
 func (r *Rotator) getStickyClientIndex(sessionID string) int {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-
-	if val, ok := r.sessions[sessionID]; ok {
-		val.lastSeen = time.Now()
-		return val.clientIdx
+	if val, ok := r.sessions.Get(sessionID); ok {
+		r.sessions.Set(sessionID, val, r.sessionTTL)
+		return val
 	}
 
 	return -1
@@ -595,32 +517,27 @@ func (r *Rotator) executeWithProxy(req *http.Request, tc *trackedClient) (*http.
 }
 
 func (r *Rotator) handleProxyResult(tc *trackedClient, resp *http.Response, err error, domain string) bool {
-	if !r.isProxyFault(resp, err) {
-		tc.tracker.MarkSuccess()
+	if r.isProxyFault(resp, err) {
+		tc.tracker.MarkFailed()
 
-		if err == nil && resp != nil && resp.StatusCode == http.StatusForbidden {
-			tc.PutDomainInCooldown(domain, 10*time.Minute)
+		if resp != nil {
+			_ = resp.Body.Close()
 		}
 
-		return true
+		return false
 	}
 
-	tc.tracker.MarkFailed()
+	tc.tracker.MarkSuccess()
 
-	if resp != nil {
-		_ = resp.Body.Close()
+	if err == nil && resp != nil && resp.StatusCode == http.StatusForbidden {
+		tc.PutDomainInCooldown(domain, 10*time.Minute)
 	}
 
-	return false
+	return true
 }
 
 func (r *Rotator) saveSession(sessionID string, idx int) {
-	r.mu.Lock()
-	r.sessions[sessionID] = &sessionEntry{
-		clientIdx: idx,
-		lastSeen:  time.Now(),
-	}
-	r.mu.Unlock()
+	r.sessions.Set(sessionID, idx, r.sessionTTL)
 }
 
 func (r *Rotator) healthCheckLoop() {
@@ -666,26 +583,8 @@ func (r *Rotator) checkHealth(tc *trackedClient) {
 }
 
 func (r *Rotator) cleanupSessionsLoop() {
-	ticker := time.NewTicker(1 * time.Hour)
-	defer ticker.Stop()
-
-	for {
-		select {
-		case <-r.ctx.Done():
-			return
-		case <-ticker.C:
-			r.mu.Lock()
-
-			now := clock.CoarseTime()
-			for k, v := range r.sessions {
-				if now.Sub(v.lastSeen) > r.sessionTTL {
-					delete(r.sessions, k)
-				}
-			}
-
-			r.mu.Unlock()
-		}
-	}
+	// Periodic no-op loop respecting context cancellation, as generic.Cache lazily purges on Get
+	<-r.ctx.Done()
 }
 
 // DomainProxyRouter maps domain patterns (e.g., "*.google.com", "api.target.com") to target proxy URLs

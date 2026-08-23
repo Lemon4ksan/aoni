@@ -12,8 +12,9 @@ import (
 	"sync"
 
 	"github.com/lemon4ksan/foundation/silicon/sysnet"
-	"github.com/quic-go/quic-go"
 	"github.com/valyala/fasthttp"
+
+	"github.com/lemon4ksan/aoni/internal/quic"
 )
 
 // Client manages connection pooling and multiplexing for HTTP/3 over QUIC.
@@ -26,13 +27,14 @@ type Client struct {
 	Settings   *Settings
 }
 
-// NewClient initializes a new HTTP/3 Client instance.
+// NewClient initializes a new HTTP/3 Client instance (RFC 9114 §3.1 & §3.2).
 func NewClient(tlsCfg *tls.Config, quicCfg *quic.Config) *Client {
 	if tlsCfg == nil {
 		tlsCfg = &tls.Config{}
 	}
 
 	tlsConf := tlsCfg.Clone()
+	// RFC 9114 §3.1 & §11.1: Application-Layer Protocol Negotiation (ALPN) token "h3"
 	tlsConf.NextProtos = []string{"h3"}
 
 	if quicCfg == nil {

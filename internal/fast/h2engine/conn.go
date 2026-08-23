@@ -26,12 +26,14 @@ import (
 	"github.com/valyala/fasthttp"
 	"golang.org/x/sys/cpu"
 
+	"github.com/lemon4ksan/aoni/netutil/netdial"
 	"github.com/lemon4ksan/aoni/telemetry"
 )
 
+// maxConsecutiveControlFrames bounds consecutive control frames to prevent denial of service (RFC 9113 §10.5).
 const maxConsecutiveControlFrames = 1000
 
-// FrameWithHeaders defines an interface for HTTP/2 frames that carry raw HPACK-encoded header fragments.
+// FrameWithHeaders defines an interface for HTTP/2 frames that carry raw HPACK-encoded header fragments (RFC 9113 §4.3).
 type FrameWithHeaders interface {
 	Headers() []byte
 }
@@ -46,7 +48,20 @@ type ConnOpts struct {
 	Settings            *Settings
 }
 
-// Conn manages a multiplexed HTTP/2 connection over a net.Conn socket.
+const (
+	streamTableSize = 2048
+	streamTableMask = streamTableSize - 1
+	streamMaxProbes = 8
+	streamNumShards = 16
+	streamShardMask = streamNumShards - 1
+)
+
+type streamShard struct {
+	mu       sync.RWMutex
+	overflow map[uint32]*Context
+}
+
+// Conn manages a multiplexed HTTP/2 connection over a net.Conn socket (RFC 9113 §3, §4, §5 & §6).
 type Conn struct {
 	c             net.Conn
 	br            *bufio.Reader
@@ -58,13 +73,11 @@ type Conn struct {
 	onPushPromise func(pushReq *fasthttp.Request, pushResp *fasthttp.Response)
 	lastErr       error
 	orderedKeys   []string
+	windowCond    *sync.Cond
 
-	windowCond *sync.Cond
-	windowMu   sync.Mutex
-	inMu       sync.Mutex // Protects in channel send and close
-	writeMu    sync.Mutex // Protects concurrent writes to bw
-
-	_ cpu.CacheLinePad
+	writeMu  sync.Mutex
+	inMu     sync.Mutex
+	windowMu sync.Mutex
 
 	// Hot atomic counters isolated on their own 64-byte cache lines
 	serverWindow             int32
@@ -78,11 +91,10 @@ type Conn struct {
 
 	_ cpu.CacheLinePad
 
-	current     Settings
-	serverS     Settings
-	reqStreams  [1024]atomic.Pointer[Context]
-	reqMu       sync.RWMutex
-	reqOverflow map[uint32]*Context
+	current    Settings
+	serverS    Settings
+	reqStreams [streamTableSize]atomic.Pointer[Context]
+	reqShards  [streamNumShards]streamShard
 
 	in           chan *Context
 	out          chan *FrameHeader
@@ -117,7 +129,7 @@ func NewConn(c net.Conn, opts ConnOpts) *Conn {
 
 	nc.windowCond = sync.NewCond(&nc.windowMu)
 	nc.current.Reset()
-	nc.serverS.Reset() // Initialize server settings with default maxStreams = 100 (RFC 7540)
+	nc.serverS.Reset() // Initialize server settings with default maxStreams = 100 (RFC 9113 §6.5.2)
 
 	if opts.Settings != nil {
 		opts.Settings.CopyTo(&nc.current)
@@ -138,50 +150,65 @@ func (c *Conn) SetOrderedHeaders(keys []string) {
 }
 
 func (c *Conn) getStream(streamID uint32) *Context {
-	idx := (streamID / 2) % 1024
-	if ctx := c.reqStreams[idx].Load(); ctx != nil && ctx.StreamID == streamID {
-		return ctx
+	baseIdx := int((streamID / 2) & streamTableMask)
+	for i := range streamMaxProbes {
+		idx := (baseIdx + i) & streamTableMask
+		if ctx := c.reqStreams[idx].Load(); ctx != nil && ctx.StreamID == streamID {
+			return ctx
+		}
 	}
 
-	c.reqMu.RLock()
-	ctx := c.reqOverflow[streamID]
-	c.reqMu.RUnlock()
+	shardIdx := int((streamID / 2) & streamShardMask)
+	shard := &c.reqShards[shardIdx]
+	shard.mu.RLock()
+	ctx := shard.overflow[streamID]
+	shard.mu.RUnlock()
 
 	return ctx
 }
 
 func (c *Conn) storeStream(ctx *Context) {
-	idx := (ctx.StreamID / 2) % 1024
-	if c.reqStreams[idx].CompareAndSwap(nil, ctx) {
-		return
+	baseIdx := int((ctx.StreamID / 2) & streamTableMask)
+	for i := range streamMaxProbes {
+		idx := (baseIdx + i) & streamTableMask
+		if c.reqStreams[idx].CompareAndSwap(nil, ctx) {
+			return
+		}
 	}
 
-	c.reqMu.Lock()
-	if c.reqOverflow == nil {
-		c.reqOverflow = make(map[uint32]*Context, 16)
+	shardIdx := int((ctx.StreamID / 2) & streamShardMask)
+	shard := &c.reqShards[shardIdx]
+	shard.mu.Lock()
+	if shard.overflow == nil {
+		shard.overflow = make(map[uint32]*Context, 8)
 	}
 
-	c.reqOverflow[ctx.StreamID] = ctx
-	c.reqMu.Unlock()
+	shard.overflow[ctx.StreamID] = ctx
+	shard.mu.Unlock()
 }
 
 func (c *Conn) deleteStream(streamID uint32) {
-	idx := (streamID / 2) % 1024
-	if cur := c.reqStreams[idx].Load(); cur != nil && cur.StreamID == streamID {
-		c.reqStreams[idx].Store(nil)
-		return
+	baseIdx := int((streamID / 2) & streamTableMask)
+	for i := range streamMaxProbes {
+		idx := (baseIdx + i) & streamTableMask
+		if cur := c.reqStreams[idx].Load(); cur != nil && cur.StreamID == streamID {
+			c.reqStreams[idx].Store(nil)
+			return
+		}
 	}
 
-	c.reqMu.Lock()
-	if c.reqOverflow != nil {
-		delete(c.reqOverflow, streamID)
+	shardIdx := int((streamID / 2) & streamShardMask)
+	shard := &c.reqShards[shardIdx]
+	shard.mu.Lock()
+	if shard.overflow != nil {
+		delete(shard.overflow, streamID)
 	}
 
-	c.reqMu.Unlock()
+	shard.mu.Unlock()
 }
 
 func (c *Conn) broadcastErrorToAllStreams(err error) {
-	for i := 0; i < 1024; i++ {
+	for i := range streamTableSize {
 		if ctx := c.reqStreams[i].Load(); ctx != nil {
 			select {
 			case ctx.Err <- err:
@@ -190,22 +217,25 @@ func (c *Conn) broadcastErrorToAllStreams(err error) {
 		}
 	}
 
-	c.reqMu.RLock()
+	for i := range streamNumShards {
+		shard := &c.reqShards[i]
+		shard.mu.RLock()
 
-	for _, ctx := range c.reqOverflow {
-		if ctx != nil {
-			select {
-			case ctx.Err <- err:
-			default:
+		for _, ctx := range shard.overflow {
+			if ctx != nil {
+				select {
+				case ctx.Err <- err:
+				default:
+				}
 			}
 		}
-	}
 
-	c.reqMu.RUnlock()
+		shard.mu.RUnlock()
+	}
 }
 
 func (c *Conn) purgeStreamsAfterID(lastStreamID uint32, err error) {
-	for i := 0; i < 1024; i++ {
+	for i := range streamTableSize {
 		if ctx := c.reqStreams[i].Load(); ctx != nil && ctx.StreamID > lastStreamID {
 			c.reqStreams[i].Store(nil)
 
@@ -216,19 +246,23 @@ func (c *Conn) purgeStreamsAfterID(lastStreamID uint32, err error) {
 		}
 	}
 
-	c.reqMu.Lock()
-	for streamID, ctx := range c.reqOverflow {
-		if ctx != nil && streamID > lastStreamID {
-			delete(c.reqOverflow, streamID)
+	for i := range streamNumShards {
+		shard := &c.reqShards[i]
+		shard.mu.Lock()
 
-			select {
-			case ctx.Err <- err:
-			default:
+		for streamID, ctx := range shard.overflow {
+			if ctx != nil && streamID > lastStreamID {
+				delete(shard.overflow, streamID)
+
+				select {
+				case ctx.Err <- err:
+				default:
+				}
 			}
 		}
-	}
 
-	c.reqMu.Unlock()
+		shard.mu.Unlock()
+	}
 }
 
 // CancelStream terminates an active HTTP/2 stream by transmitting an RST_STREAM frame.
@@ -368,6 +402,10 @@ func (c *Conn) sendSettingsAck() {
 
 // CanOpenStream reports whether the client can open new concurrent streams.
 func (c *Conn) CanOpenStream() bool {
+	if atomic.LoadUint32(&c.nextID) >= (1<<31 - 1) {
+		return false
+	}
+
 	return atomic.LoadInt32(&c.openStreams) < int32(c.serverS.maxStreams) //nolint:gosec
 }
 
@@ -389,7 +427,7 @@ func (c *Conn) Write(r *Context) error {
 	case c.in <- r:
 		return nil
 	default:
-		return ErrNotAvailableStreams
+		return ErrNoAvailableStreams
 	}
 }
 
@@ -486,7 +524,7 @@ func (c *Conn) selectWriteEvent(pingChan <-chan time.Time) (bool, error) {
 		if err := c.writeRequest(ctx); err != nil {
 			ctx.Err <- err
 
-			if errors.Is(err, ErrNotAvailableStreams) {
+			if errors.Is(err, ErrNoAvailableStreams) {
 				return false, nil
 			}
 
@@ -608,14 +646,21 @@ func (c *Conn) waitExpectContinue(ctx *Context) {
 
 func (c *Conn) writeRequest(ctx *Context) error {
 	if !c.CanOpenStream() {
-		return ErrNotAvailableStreams
+		return ErrNoAvailableStreams
+	}
+
+	// RFC 9113 §5.1.1: Streams initiated by a client MUST use odd-numbered stream identifiers (1, 3, 5, ...).
+	id := atomic.AddUint32(&c.nextID, 2) - 2
+	if id >= (1<<31 - 1) {
+		// RFC 9113 §5.1.1: Stream identifiers must be 31-bit unsigned integers.
+		// When reaching 2^31-1, stream identifiers cannot be reused and connection must close.
+		_ = c.Close()
+		return ErrStreamClosed
 	}
 
 	req := ctx.Request
 	hasBody := len(req.Body()) != 0
 
-	id := c.nextID
-	c.nextID += 2
 	ctx.StreamID = id
 	ctx.SetState(streamOpen)
 
@@ -888,23 +933,21 @@ func (c *Conn) encodeRequestHeaders(h *Headers, req *fasthttp.Request) {
 			enc.AppendHeaderField(h, hf, true)
 		}
 
-		req.Header.All()(func(k, v []byte) bool {
+		for k, v := range req.Header.All() {
 			if isForbiddenH2Header(k, v) {
-				return true
+				continue
 			}
 
 			hf.SetBytes(toLowerCopy(k), v)
 			enc.AppendHeaderField(h, hf, false)
-
-			return true
-		})
+		}
 	}
 }
 
 func getFastHTTPCookieHeader(req *fasthttp.Request) []byte {
 	var sb strings.Builder
 
-	req.Header.Cookies()(func(key, value []byte) bool {
+	for key, value := range req.Header.Cookies() {
 		if sb.Len() > 0 {
 			sb.WriteString("; ")
 		}
@@ -912,9 +955,7 @@ func getFastHTTPCookieHeader(req *fasthttp.Request) []byte {
 		sb.Write(key)
 		sb.WriteByte('=')
 		sb.Write(value)
-
-		return true
-	})
+	}
 
 	if sb.Len() > 0 {
 		return bytesconv.S2B(sb.String())
@@ -932,17 +973,13 @@ func getFastHTTPCookieHeader(req *fasthttp.Request) []byte {
 }
 
 func peekHeaderCaseInsensitive(req *fasthttp.Request, key string) []byte {
-	var found []byte
-	req.Header.All()(func(k, v []byte) bool {
+	for k, v := range req.Header.All() {
 		if bytesconv.EqualFoldASCII(bytesconv.B2S(k), key) {
-			found = v
-			return false
+			return v
 		}
+	}
 
-		return true
-	})
-
-	return found
+	return nil
 }
 
 func (c *Conn) appendOrderedHeaders(h *Headers, req *fasthttp.Request, hf *HeaderField) {
@@ -975,24 +1012,29 @@ func (c *Conn) appendOrderedHeaders(h *Headers, req *fasthttp.Request, hf *Heade
 		}
 	}
 
-	req.Header.All()(func(k, v []byte) bool {
+	for k, v := range req.Header.All() {
 		if isForbiddenH2Header(k, v) {
-			return true
+			continue
 		}
 
 		kStr := bytesconv.B2S(k)
-		for i := 0; i < numOrdered; i++ {
+		skip := false
+
+		for i := range numOrdered {
 			if (visitedBits&(1<<i)) != 0 && bytesconv.EqualFoldASCII(kStr, c.orderedKeys[i]) {
-				return true
+				skip = true
+				break
 			}
+		}
+
+		if skip {
+			continue
 		}
 
 		hf.SetKeyBytes(bytesconv.AppendToLower(nil, k))
 		hf.SetValueBytes(v)
 		c.enc.AppendHeaderField(h, hf, false)
-
-		return true
-	})
+	}
 }
 
 func (c *Conn) readNext() (*FrameHeader, error) {
@@ -1136,8 +1178,10 @@ func (c *Conn) updateStreamWindow(streamID uint32, inc int32) error {
 	return nil
 }
 
+// handleGoAway processes a received GOAWAY frame (RFC 9113 §6.8 & §8.7).
 func (c *Conn) handleGoAway(ga *GoAway) {
 	lastStreamID := ga.Stream()
+	// RFC 9113 §6.8 & §8.7: Streams with ID > lastStreamID were never processed and are safe for auto-retry.
 	c.purgeStreamsAfterID(lastStreamID, ErrGoAwayRetryable)
 
 	_ = c.Close()
@@ -1166,6 +1210,7 @@ func (c *Conn) writePing() error {
 	return err
 }
 
+// handleSettings applies incoming peer parameters and immediately emits an acknowledgment (RFC 9113 §6.5.3).
 func (c *Conn) handleSettings(st *Settings) {
 	st.CopyTo(&c.serverS)
 	c.serverStreamWindow += c.serverS.MaxWindowSize()
@@ -1179,6 +1224,7 @@ func (c *Conn) handleSettings(st *Settings) {
 	c.out <- fr
 }
 
+// handlePing replies to received PING frames with an identical payload and ACK bit set (RFC 9113 §6.7).
 func (c *Conn) handlePing(ping *Ping) {
 	fr := AcquireFrameHeader()
 
@@ -1250,14 +1296,16 @@ func (c *Conn) readStream(fr *FrameHeader, reqCtx *Context) error {
 	return nil
 }
 
+// handlePushPromise processes incoming server push promises (RFC 9113 §6.6 & §8.4).
 func (c *Conn) handlePushPromise(pp *PushPromise) error {
 	if !c.current.Push() {
 		return nil
 	}
 
 	promisedID := pp.stream
+	// RFC 9113 §5.1.1: Server-initiated streams MUST use even-numbered stream identifiers.
 	if promisedID == 0 || (promisedID%2 != 0) {
-		return NewGoAwayError(ProtocolError, "invalid promised stream id")
+		return NewGoAwayError(ProtocolError, "invalid promised stream id (RFC 9113 §5.1.1)")
 	}
 
 	pushReq := fasthttp.AcquireRequest()
@@ -1538,7 +1586,7 @@ func (d *Dialer) tryDial(ctx context.Context) (net.Conn, error) {
 	} else {
 		var dialer net.Dialer
 
-		c, err = dialer.DialContext(ctx, "tcp", d.Addr)
+		c, err = dialer.DialContext(ctx, netdial.NetworkTCP.String(), d.Addr)
 	}
 
 	if err != nil {

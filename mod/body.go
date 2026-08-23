@@ -7,12 +7,12 @@ package mod
 import (
 	"bytes"
 	"encoding/binary"
-	"encoding/json"
 	"encoding/xml"
-	stdio "io"
+	"io"
 	"net/url"
 	"strings"
 
+	"github.com/lemon4ksan/foundation/codec/json"
 	"github.com/lemon4ksan/foundation/silicon/bytesconv"
 	"google.golang.org/protobuf/proto"
 	"gopkg.in/yaml.v3"
@@ -23,7 +23,7 @@ import (
 )
 
 // WithBody constructs an [aoni.RequestModifier] replacing the request body with the provided stream reader.
-func WithBody(r stdio.Reader) aoni.RequestModifier {
+func WithBody(r io.Reader) aoni.RequestModifier {
 	if r == nil {
 		return aoni.RequestModifier{}
 	}
@@ -100,7 +100,7 @@ func WithJSON(payload any) aoni.RequestModifier {
 // WithSmartBody constructs an [aoni.RequestModifier] that automatically detects the payload type:
 //   - proto.Message -> Protobuf payload with application/x-protobuf
 //   - url.Values -> URL-encoded form payload with application/x-www-form-urlencoded
-//   - stdio.Reader -> Streamed request body
+//   - io.Reader -> Streamed request body
 //   - []byte -> Raw byte slice payload
 //   - string -> UTF-8 text payload with text/plain; charset=utf-8
 //   - Struct / Map / Slice -> JSON-marshaled payload with application/json
@@ -121,7 +121,7 @@ func WithSmartBody(body any) aoni.RequestModifier {
 		return WithFormValues(uv)
 	}
 
-	if r, ok := body.(stdio.Reader); ok {
+	if r, ok := body.(io.Reader); ok {
 		return WithBody(r)
 	}
 
@@ -133,7 +133,7 @@ func WithSmartBody(body any) aoni.RequestModifier {
 		return aoni.RequestModifier{
 			Kind:        core.ModBodyBytes,
 			ContentType: "text/plain; charset=utf-8",
-			Bytes:       []byte(s),
+			Bytes:       bytesconv.S2B(s),
 		}
 	}
 
@@ -262,13 +262,13 @@ func WithFormBody(payload any) aoni.RequestModifier {
 				return
 			}
 
-			if r, ok := payload.(stdio.Reader); ok {
+			if r, ok := payload.(io.Reader); ok {
 				req.SetBodyStream(r, -1)
 				req.SetHeader("Content-Type", "application/x-www-form-urlencoded")
 				return
 			}
 
-			encoder := values.StructToValues
+			encoder := values.Encode
 			if cfg := aoni.GetRequestConfig(req.Context()); cfg != nil && cfg.QueryEncoder != nil {
 				encoder = cfg.QueryEncoder
 			}

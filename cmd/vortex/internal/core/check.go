@@ -17,9 +17,9 @@ import (
 	"strings"
 
 	"github.com/lemon4ksan/aoni/cmd/vortex/internal/base"
-	"github.com/lemon4ksan/aoni/internal/codegen/cache"
-	"github.com/lemon4ksan/aoni/internal/codegen/lint"
-	codeparser "github.com/lemon4ksan/aoni/internal/codegen/parser"
+	"github.com/lemon4ksan/aoni/cmd/vortex/lib/cache"
+	"github.com/lemon4ksan/aoni/cmd/vortex/lib/lint"
+	vparser "github.com/lemon4ksan/aoni/cmd/vortex/lib/parser"
 )
 
 // CmdCheck performs static contract validation and applies automated fixes.
@@ -111,7 +111,7 @@ func (c *CmdCheck) Run(ctx context.Context, args []string, stdout, stderr io.Wri
 	}
 
 	engine := lint.NewEngine(reg)
-	p := codeparser.NewParser()
+	p := vparser.NewParser()
 	fset := token.NewFileSet()
 
 	lintCache, _ := cache.LoadLintCache(rootDir)

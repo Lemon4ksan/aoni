@@ -5,20 +5,26 @@
 package h3engine
 
 import (
-	"bytes"
 	"context"
 	"errors"
 	"io"
 	"sync"
 
-	"github.com/quic-go/quic-go"
-	"github.com/quic-go/quic-go/quicvarint"
+	"github.com/lemon4ksan/foundation/generic"
 	"github.com/valyala/fasthttp"
+
+	"github.com/lemon4ksan/aoni/internal/quic"
+	"github.com/lemon4ksan/aoni/internal/quic/quicvarint"
 )
 
-const errCodeH3RequestCancelled = 0x10c
+const errCodeH3RequestCancelled = quic.StreamErrorCode(ErrCodeH3RequestCancelled)
 
-// ClientConn manages HTTP/3 frame exchanges over a quic.Conn session.
+var dataBufPool = generic.NewPool(func() *[]byte {
+	b := make([]byte, 32768)
+	return &b
+})
+
+// ClientConn manages HTTP/3 frame exchanges over a quic.Conn session (RFC 9114 §3, §4, §6 & §7).
 type ClientConn struct {
 	conn     *quic.Conn
 	qpack    *QPACKCodec
@@ -28,7 +34,7 @@ type ClientConn struct {
 	closed    chan struct{}
 }
 
-// NewClientConn initializes an HTTP/3 client connection and opens control streams.
+// NewClientConn initializes an HTTP/3 client connection and opens control streams (RFC 9114 §3.2 & §6.2.1).
 func NewClientConn(conn *quic.Conn, settings *Settings) (*ClientConn, error) {
 	if settings == nil {
 		settings = &Settings{
@@ -45,7 +51,7 @@ func NewClientConn(conn *quic.Conn, settings *Settings) (*ClientConn, error) {
 	}
 
 	if err := cc.setupControlStream(); err != nil {
-		_ = conn.CloseWithError(0x100, "failed control stream setup")
+		_ = conn.CloseWithError(quic.ApplicationErrorCode(ErrCodeH3NoError), "failed control stream setup")
 		return nil, err
 	}
 
@@ -106,7 +112,8 @@ func (cc *ClientConn) handleUnidirectionalStream(str *quic.ReceiveStream) {
 	case StreamTypeQPACKDecoder:
 		return
 	default:
-		str.CancelRead(0x103)
+		// RFC 9114 §6.2: Unknown unidirectional stream types MUST be aborted or discarded.
+		str.CancelRead(quic.StreamErrorCode(ErrCodeH3StreamCreationError))
 	}
 }
 
@@ -134,10 +141,14 @@ func (cc *ClientConn) readControlStream(r quicvarint.Reader) {
 			return
 		}
 
-		// RFC 9114 Section 6.2.1: The first frame on the control stream MUST be SETTINGS
+		// RFC 9114 §6.2.1: The first frame on the control stream MUST be SETTINGS
 		if firstFrame {
 			if frameType != FrameTypeSettings {
-				_ = cc.conn.CloseWithError(0x010a, "H3_MISSING_SETTINGS: first frame must be SETTINGS")
+				_ = cc.conn.CloseWithError(
+					quic.ApplicationErrorCode(ErrCodeH3MissingSettings),
+					"H3_MISSING_SETTINGS: first frame must be SETTINGS (RFC 9114 §6.2.1)",
+				)
+
 				return
 			}
 
@@ -149,9 +160,15 @@ func (cc *ClientConn) readControlStream(r quicvarint.Reader) {
 			st, err := DecodeSettings(r, payloadLen)
 			if err != nil {
 				if errors.Is(err, ErrH3SettingsError) {
-					_ = cc.conn.CloseWithError(0x0109, "H3_SETTINGS_ERROR: reserved H2 setting ID")
+					_ = cc.conn.CloseWithError(
+						quic.ApplicationErrorCode(ErrCodeH3SettingsError),
+						"H3_SETTINGS_ERROR: reserved H2 setting ID (RFC 9114 §7.2.4.1)",
+					)
 				} else {
-					_ = cc.conn.CloseWithError(0x0109, "H3_SETTINGS_ERROR: invalid settings payload")
+					_ = cc.conn.CloseWithError(
+						quic.ApplicationErrorCode(ErrCodeH3SettingsError),
+						"H3_SETTINGS_ERROR: invalid settings payload (RFC 9114 §7.2.4)",
+					)
 				}
 
 				return
@@ -217,49 +234,66 @@ func (cc *ClientConn) Do(
 }
 
 func (cc *ClientConn) sendRequest(str *quic.Stream, req *fasthttp.Request, headerOrder []string) error {
-	var headerBuf bytes.Buffer
-	if err := cc.qpack.EncodeRequestHeaders(&headerBuf, req, headerOrder); err != nil {
-		return err
-	}
+	return cc.sendRequestTo(str, req, headerOrder)
+}
 
-	headerBlock := headerBuf.Bytes()
+func (cc *ClientConn) sendRequestTo(w io.Writer, req *fasthttp.Request, headerOrder []string) error {
+	p := cc.qpack.AcquireEncoder()
+	defer cc.qpack.ReleaseEncoder(p)
 
-	var frameHead []byte
-
-	frameHead = appendHeadersHeader(frameHead, uint64(len(headerBlock)))
-
-	if _, err := str.Write(frameHead); err != nil {
-		return err
-	}
-
-	if _, err := str.Write(headerBlock); err != nil {
+	headerBlock, err := cc.qpack.EncodeRequestHeadersPooled(p, req, headerOrder)
+	if err != nil {
 		return err
 	}
 
 	body := req.Body()
+
+	headLen := quicvarint.Len(FrameTypeHeaders) + quicvarint.Len(uint64(len(headerBlock)))
+
+	totalLen := headLen + len(headerBlock)
 	if len(body) > 0 {
-		var dataHead []byte
-
-		dataHead = appendDataHeader(dataHead, uint64(len(body)))
-
-		if _, err := str.Write(dataHead); err != nil {
-			return err
-		}
-
-		if _, err := str.Write(body); err != nil {
-			return err
-		}
+		totalLen += quicvarint.Len(FrameTypeData) + quicvarint.Len(uint64(len(body))) + len(body)
 	}
 
-	return nil
+	var (
+		stackOut [8192]byte
+		out      []byte
+	)
+
+	if totalLen <= len(stackOut) {
+		out = stackOut[:0]
+	} else {
+		out = make([]byte, 0, totalLen)
+	}
+
+	out = appendHeadersHeader(out, uint64(len(headerBlock)))
+
+	out = append(out, headerBlock...)
+	if len(body) > 0 {
+		out = appendDataHeader(out, uint64(len(body)))
+		out = append(out, body...)
+	}
+
+	_, err = w.Write(out)
+
+	return err
 }
 
 func (cc *ClientConn) readResponse(
 	str *quic.Stream,
 	resp *fasthttp.Response,
 ) (trailers map[string][]string, err error) {
-	r := quicvarint.NewReader(str)
+	return cc.readResponseFrom(str, resp)
+}
+
+func (cc *ClientConn) readResponseFrom(
+	reader io.Reader,
+	resp *fasthttp.Response,
+) (trailers map[string][]string, err error) {
+	r := quicvarint.NewReader(reader)
 	headersParsed := false
+
+	var stackHeaderBuf [4096]byte
 
 	for {
 		frameType, payloadLen, err := ReadFrameHeader(r)
@@ -273,7 +307,13 @@ func (cc *ClientConn) readResponse(
 
 		switch frameType {
 		case FrameTypeHeaders:
-			headerBlock := make([]byte, payloadLen)
+			var headerBlock []byte
+			if payloadLen <= uint64(len(stackHeaderBuf)) {
+				headerBlock = stackHeaderBuf[:payloadLen]
+			} else {
+				headerBlock = make([]byte, payloadLen)
+			}
+
 			if _, err := io.ReadFull(r, headerBlock); err != nil {
 				return nil, err
 			}
@@ -300,7 +340,8 @@ func (cc *ClientConn) readResponse(
 			}
 
 			lr := io.LimitReader(r, int64(payloadLen)) //nolint:gosec
-			buf := make([]byte, min(payloadLen, 32768))
+			bufPtr := dataBufPool.Get()
+			buf := *bufPtr
 
 			for {
 				n, rErr := lr.Read(buf)
@@ -313,9 +354,12 @@ func (cc *ClientConn) readResponse(
 				}
 
 				if rErr != nil {
+					dataBufPool.Put(bufPtr)
 					return nil, rErr
 				}
 			}
+
+			dataBufPool.Put(bufPtr)
 
 		default:
 			if _, err := io.CopyN(io.Discard, r, int64(payloadLen)); err != nil { //nolint:gosec

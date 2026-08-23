@@ -6,13 +6,14 @@ package values
 
 import (
 	"encoding"
-	"encoding/json"
 	"net/url"
 	"reflect"
 	"strconv"
 	"strings"
 
-	foundation "github.com/lemon4ksan/foundation/net/url"
+	"github.com/lemon4ksan/foundation/codec/json"
+	furl "github.com/lemon4ksan/foundation/net/url"
+	"github.com/lemon4ksan/foundation/refkit"
 	"github.com/lemon4ksan/foundation/silicon/bytesconv"
 	"google.golang.org/protobuf/encoding/protojson"
 	"google.golang.org/protobuf/proto"
@@ -38,16 +39,17 @@ func fillValues(s *mapper.StructSchema, v reflect.Value, values url.Values) erro
 
 // fillField serializes an individual struct field into url.Values based on tag rules and default values.
 func fillField(f *mapper.FieldSchema, fieldValue reflect.Value, values url.Values) error {
-	if fieldValue.Kind() == reflect.Pointer {
-		if fieldValue.IsNil() {
-			if f.DefaultVal != "" && f.Key != "" && f.Key != "-" {
-				values.Set(f.Key, f.DefaultVal)
-			}
-
-			return nil
+	if refkit.IsNil(fieldValue) {
+		if f.DefaultVal != "" && f.Key != "" && f.Key != "-" {
+			values.Set(f.Key, f.DefaultVal)
 		}
 
-		fieldValue = fieldValue.Elem()
+		return nil
+	}
+
+	fieldValue = refkit.DerefValue(fieldValue)
+	if !fieldValue.IsValid() {
+		return nil
 	}
 
 	if (f.IsAnonymous || f.IsInline) && fieldValue.Kind() == reflect.Struct {
@@ -71,7 +73,7 @@ func fillField(f *mapper.FieldSchema, fieldValue reflect.Value, values url.Value
 
 // shouldSkipZeroValue checks whether a zero-value field should be omitted or assigned its default value.
 func shouldSkipZeroValue(f *mapper.FieldSchema, fieldValue reflect.Value, values url.Values) bool {
-	if !fieldValue.IsZero() {
+	if !refkit.IsZero(fieldValue) {
 		return false
 	}
 
@@ -166,9 +168,10 @@ func serializeSlice(f *mapper.FieldSchema, fieldValue reflect.Value, values url.
 // serializeDelimitedSlice joins slice element values with a configured delimiter (comma, space, or pipe).
 func serializeDelimitedSlice(f *mapper.FieldSchema, fieldValue reflect.Value, values url.Values) error {
 	sep := ","
-	if f.HasSpace {
+	switch {
+	case f.HasSpace:
 		sep = " "
-	} else if f.HasPipe {
+	case f.HasPipe:
 		sep = "|"
 	}
 
@@ -196,7 +199,8 @@ func serializeDelimitedSlice(f *mapper.FieldSchema, fieldValue reflect.Value, va
 	return nil
 }
 
-// writeQueryKeyValuePair appends a URL-escaped key=value pair to sb using a stack-allocated buffer for zero allocations.
+// writeQueryKeyValuePair appends a percent-encoded key=value pair to sb using a stack-allocated buffer (RFC 3986 §2.1 & §3.4).
+// It encodes reserved delimiters while preserving unreserved characters (RFC 3986 §2.2 & §2.3) with zero heap allocations.
 func writeQueryKeyValuePair(sb *strings.Builder, key, value string, first *bool) {
 	if !*first {
 		sb.WriteByte('&')
@@ -204,9 +208,9 @@ func writeQueryKeyValuePair(sb *strings.Builder, key, value string, first *bool)
 
 	var tmpBuf [64]byte
 
-	buf := foundation.AppendQueryEscapeString(tmpBuf[:0], key)
+	buf := furl.AppendQueryEscapeString(tmpBuf[:0], key)
 	buf = append(buf, '=')
-	buf = foundation.AppendQueryEscapeString(buf, value)
+	buf = furl.AppendQueryEscapeString(buf, value)
 
 	sb.Write(buf)
 

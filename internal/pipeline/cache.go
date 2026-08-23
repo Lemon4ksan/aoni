@@ -10,7 +10,7 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
-	stdio "io"
+	"io"
 	"net/http"
 	"net/url"
 	"slices"
@@ -18,6 +18,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/lemon4ksan/foundation/net/headkit"
 	"github.com/lemon4ksan/foundation/silicon/bytesconv"
 )
 
@@ -110,10 +111,9 @@ func ParseCookieIndicesHeader(header string) []string {
 	}
 
 	var names []string
-	for p := range strings.SplitSeq(header, ",") {
-		cleaned := strings.Trim(strings.TrimSpace(p), `"'`)
-		if cleaned != "" {
-			names = append(names, cleaned)
+	for k := range headkit.Directives(header) {
+		if k != "" {
+			names = append(names, k)
 		}
 	}
 
@@ -154,6 +154,7 @@ func shouldIgnoreQueryParam(key string, cfg *NoVarySearchConfig) bool {
 	return false
 }
 
+// tryGetFromCache retrieves a cached response if valid, matching Vary headers and computing the Age header (RFC 9111 §4).
 func (p *Pipeline[Req, Resp]) tryGetFromCache(req *http.Request, cfg *CacheConfig) *http.Response {
 	if req.Method != http.MethodGet || cfg == nil || cfg.Store == nil {
 		return nil
@@ -164,13 +165,10 @@ func (p *Pipeline[Req, Resp]) tryGetFromCache(req *http.Request, cfg *CacheConfi
 		return nil
 	}
 
-	normURL := NormalizeCacheURL(req.URL.String(), cfg.NoVarySearch)
-	cookieHash := ComputeCookieIndicesHash(req, cfg.CookieIndices)
-
 	cachedData, err := cfg.Store.Get(req.Context(), CacheKey{
 		Method:     req.Method,
-		URL:        normURL,
-		CookieHash: cookieHash,
+		URL:        NormalizeCacheURL(req.URL.String(), cfg.NoVarySearch),
+		CookieHash: ComputeCookieIndicesHash(req, cfg.CookieIndices),
 	})
 	if err != nil {
 		return nil
@@ -181,6 +179,7 @@ func (p *Pipeline[Req, Resp]) tryGetFromCache(req *http.Request, cfg *CacheConfi
 		return nil
 	}
 
+	// Validate Vary header field constraints per RFC 9111 §4.1.
 	if !matchVaryHeaders(req, cached.VaryHeaders) {
 		return nil
 	}
@@ -188,6 +187,7 @@ func (p *Pipeline[Req, Resp]) tryGetFromCache(req *http.Request, cfg *CacheConfi
 	bodyBytes, _ := base64.StdEncoding.DecodeString(cached.BodyBase64)
 
 	respHeaders := http.Header(cached.Header).Clone()
+	// Generate mandatory Age header for cached responses per RFC 9111 §4.2.3 & §5.1.
 	if !cached.CachedAt.IsZero() {
 		ageSeconds := int64(time.Since(cached.CachedAt).Seconds())
 		respHeaders.Set("Age", strconv.FormatInt(max(ageSeconds, 0), 10))
@@ -196,12 +196,13 @@ func (p *Pipeline[Req, Resp]) tryGetFromCache(req *http.Request, cfg *CacheConfi
 	return &http.Response{
 		StatusCode:    cached.StatusCode,
 		Header:        respHeaders,
-		Body:          stdio.NopCloser(bytes.NewReader(bodyBytes)),
+		Body:          io.NopCloser(bytes.NewReader(bodyBytes)),
 		ContentLength: int64(len(bodyBytes)),
 		Request:       req,
 	}
 }
 
+// matchVaryHeaders verifies that incoming request headers match stored Vary headers (RFC 9111 §4.1).
 func matchVaryHeaders(req *http.Request, varyHeaders map[string]string) bool {
 	if len(varyHeaders) == 0 {
 		return true
@@ -216,23 +217,21 @@ func matchVaryHeaders(req *http.Request, varyHeaders map[string]string) bool {
 	return true
 }
 
+// parseFreshnessLifetime calculates the freshness lifetime from s-maxage, max-age, or Expires (RFC 9111 §4.2.1 & §5.2.2).
 func parseFreshnessLifetime(resp *http.Response) (time.Duration, bool) {
-	cc := resp.Header.Get("Cache-Control")
-	for p := range strings.SplitSeq(cc, ",") {
-		p = strings.TrimSpace(p)
-		if strings.HasPrefix(p, "s-maxage=") {
-			if secs, err := strconv.ParseInt(p[9:], 10, 64); err == nil && secs >= 0 {
-				return time.Duration(secs) * time.Second, true
-			}
-		}
+	dm := headkit.ParseDirectives(resp.Header.Get("Cache-Control"))
 
-		if strings.HasPrefix(p, "max-age=") {
-			if secs, err := strconv.ParseInt(p[8:], 10, 64); err == nil && secs >= 0 {
-				return time.Duration(secs) * time.Second, true
-			}
-		}
+	// s-maxage takes precedence over max-age for shared caches (RFC 9111 §5.2.2.10).
+	if sMaxAge := dm.Duration("s-maxage", -1); sMaxAge >= 0 {
+		return sMaxAge, true
 	}
 
+	// max-age explicit freshness lifetime (RFC 9111 §5.2.2.1).
+	if maxAge := dm.Duration("max-age", -1); maxAge >= 0 {
+		return maxAge, true
+	}
+
+	// Expires header fallback (RFC 9111 §5.3).
 	if exp := resp.Header.Get("Expires"); exp != "" {
 		if t, err := http.ParseTime(exp); err == nil {
 			return max(time.Until(t), 0), true
@@ -242,14 +241,15 @@ func parseFreshnessLifetime(resp *http.Response) (time.Duration, bool) {
 	return 0, false
 }
 
+// saveToCache stores an eligible HTTP response in the cache store per RFC 9111 §3.
 func (p *Pipeline[Req, Resp]) saveToCache(req *http.Request, resp *http.Response, cfg *CacheConfig) {
 	if req.Method != http.MethodGet || resp == nil || resp.StatusCode != http.StatusOK || cfg == nil ||
 		cfg.Store == nil {
 		return
 	}
 
-	respCC := resp.Header.Get("Cache-Control")
-	if strings.Contains(respCC, "no-store") || strings.Contains(respCC, "private") {
+	dm := headkit.ParseDirectives(resp.Header.Get("Cache-Control"))
+	if dm.Has("no-store") || dm.Has("private") {
 		return
 	}
 
@@ -258,17 +258,13 @@ func (p *Pipeline[Req, Resp]) saveToCache(req *http.Request, resp *http.Response
 		return
 	}
 
-	var bodyBuf bytes.Buffer
-
-	tee := stdio.TeeReader(resp.Body, &bodyBuf)
-
-	bodyBytes, readErr := stdio.ReadAll(tee)
+	bodyBytes, readErr := io.ReadAll(resp.Body)
 	if readErr != nil {
 		return
 	}
 
 	_ = resp.Body.Close()
-	resp.Body = stdio.NopCloser(bytes.NewReader(bodyBytes))
+	resp.Body = io.NopCloser(bytes.NewReader(bodyBytes))
 
 	cached := CachedResponse{
 		StatusCode:  resp.StatusCode,
@@ -290,16 +286,10 @@ func (p *Pipeline[Req, Resp]) saveToCache(req *http.Request, resp *http.Response
 		ttl = parsedTTL
 	}
 
-	effectiveConfig := resolveEffectiveNoVarySearch(resp, cfg)
-	normURL := NormalizeCacheURL(req.URL.String(), effectiveConfig)
-
-	effectiveCookieNames := resolveEffectiveCookieIndices(resp, cfg)
-	cookieHash := ComputeCookieIndicesHash(req, effectiveCookieNames)
-
 	_ = cfg.Store.Set(req.Context(), CacheKey{
 		Method:     req.Method,
-		URL:        normURL,
-		CookieHash: cookieHash,
+		URL:        NormalizeCacheURL(req.URL.String(), resolveEffectiveNoVarySearch(resp, cfg)),
+		CookieHash: ComputeCookieIndicesHash(req, resolveEffectiveCookieIndices(resp, cfg)),
 	}, cachedData, ttl)
 }
 
@@ -382,6 +372,7 @@ func parseHeaderParamsList(paramsStr string) []string {
 	return params
 }
 
+// invalidateCache purges stored GET responses upon successful execution of unsafe HTTP methods (RFC 9111 §4.4).
 func (p *Pipeline[Req, Resp]) invalidateCache(req *http.Request, resp *http.Response, cfg *CacheConfig) {
 	if cfg == nil || cfg.Store == nil || resp == nil || resp.StatusCode >= 400 {
 		return
@@ -395,14 +386,14 @@ func (p *Pipeline[Req, Resp]) invalidateCache(req *http.Request, resp *http.Resp
 	}
 }
 
+// extractVaryHeaders captures nominated request headers required for subsequent cache lookups (RFC 9111 §4.1).
 func extractVaryHeaders(req *http.Request, varyHeader string) map[string]string {
 	if varyHeader == "" {
 		return nil
 	}
 
 	varyMap := make(map[string]string)
-	for p := range strings.SplitSeq(varyHeader, ",") {
-		hName := strings.TrimSpace(p)
+	for hName := range headkit.Directives(varyHeader) {
 		if hName != "" && hName != "*" {
 			varyMap[hName] = req.Header.Get(hName)
 		}

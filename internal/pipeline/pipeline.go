@@ -8,6 +8,7 @@ package pipeline
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"time"
 
@@ -15,6 +16,7 @@ import (
 	"golang.org/x/sys/cpu"
 
 	"github.com/lemon4ksan/aoni/internal/core"
+	"github.com/lemon4ksan/aoni/telemetry"
 )
 
 // Pipeline orchestrates the complete HTTP transaction lifecycle across generic Request and Response engines.
@@ -168,7 +170,7 @@ func (p *Pipeline[Req, Resp]) executeStandardFastPath(
 			p.defaults.Inspector.Capture(stdReq, nil, err, traceInfo)
 		}
 
-		return nil, err
+		return nil, p.enrichError(stdReq, err, traceInfo, time.Since(startTime))
 	}
 
 	resp, err = p.postProcessResponse(stdReq, resp, tx) //nolint:bodyclose
@@ -186,7 +188,7 @@ func (p *Pipeline[Req, Resp]) executeStandardFastPath(
 	}
 
 	if err != nil {
-		return nil, err
+		return nil, p.enrichError(stdReq, err, traceInfo, time.Since(startTime))
 	}
 
 	p.finalizeJA4Report(tx)
@@ -252,5 +254,79 @@ func (p *Pipeline[Req, Resp]) finalizeJA4Report(tx *Tx) {
 		if store.Report.JA4H != "" {
 			store.Target.JA4.JA4H = store.Report.JA4H
 		}
+	}
+}
+
+func (p *Pipeline[Req, Resp]) enrichError(
+	req *http.Request,
+	err error,
+	traceInfo *telemetry.TraceInfo,
+	duration time.Duration,
+) error {
+	if err == nil {
+		return nil
+	}
+
+	var coreErr *core.Error
+	if errors.As(err, &coreErr) {
+		if coreErr.URL == "" && req != nil && req.URL != nil {
+			coreErr.URL = req.URL.String()
+		}
+
+		if coreErr.Op == "" && req != nil {
+			coreErr.Op = req.Method
+		}
+
+		if coreErr.Duration == 0 {
+			coreErr.Duration = duration
+		}
+
+		return err
+	}
+
+	phase := core.PhaseWaitResponse
+
+	var (
+		remoteAddr string
+		isReused   bool
+		protocol   string
+	)
+
+	if traceInfo != nil {
+		remoteAddr = traceInfo.RemoteAddr
+		isReused = traceInfo.IsReused
+
+		if traceInfo.GotConn.IsZero() {
+			if traceInfo.TLSStart.IsZero() {
+				phase = core.PhaseTCPConnect
+			} else {
+				phase = core.PhaseTLSHandshake
+			}
+		}
+
+		if traceInfo.TLSState != nil {
+			protocol = traceInfo.TLSState.NegotiatedProtocol
+		}
+	}
+
+	op := ""
+	urlStr := ""
+
+	if req != nil {
+		op = req.Method
+		if req.URL != nil {
+			urlStr = req.URL.String()
+		}
+	}
+
+	return &core.Error{
+		Op:         op,
+		URL:        urlStr,
+		Phase:      phase,
+		Protocol:   protocol,
+		RemoteAddr: remoteAddr,
+		IsReused:   isReused,
+		Duration:   duration,
+		Err:        err,
 	}
 }

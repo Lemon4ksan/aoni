@@ -20,8 +20,8 @@ import (
 	"github.com/lemon4ksan/aoni/cmd/vortex/internal/base"
 	"github.com/lemon4ksan/aoni/cmd/vortex/internal/inspector"
 	"github.com/lemon4ksan/aoni/cmd/vortex/internal/text"
-	"github.com/lemon4ksan/aoni/internal/codegen/cache"
-	"github.com/lemon4ksan/aoni/internal/codegen/project"
+	"github.com/lemon4ksan/aoni/cmd/vortex/lib/cache"
+	"github.com/lemon4ksan/aoni/cmd/vortex/lib/project"
 )
 
 func (c *Cmd) getRootDir() string {
@@ -541,7 +541,7 @@ func (c *Cmd) runExport(_ context.Context, args []string, stdout, stderr io.Writ
 	return nil
 }
 
-func (c *Cmd) runSecrets(_ context.Context, args []string, stdout, stderr io.Writer) error {
+func (c *Cmd) runSecrets(_ context.Context, args []string, stdout, _ io.Writer) error {
 	rootDir := c.getRootDir()
 
 	vault, vaultPath, err := cache.LoadSecrets(rootDir)

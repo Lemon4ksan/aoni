@@ -6,7 +6,7 @@ package std
 
 import (
 	"bytes"
-	stdio "io"
+	"io"
 	"net/http"
 
 	"github.com/lemon4ksan/foundation/silicon/bytesconv"
@@ -15,7 +15,7 @@ import (
 	"github.com/lemon4ksan/aoni/internal/core"
 )
 
-var stdResponseStorage = pool.NewPerPStorage(func() *Response {
+var responseStorage = pool.NewPerPStorage(func() *Response {
 	return &Response{}
 })
 
@@ -30,7 +30,7 @@ type Response struct {
 // Postconditions:
 //   - The returned response must be released via [ReleaseResponse] to prevent pool leaks.
 func NewResponse(resp *http.Response) *Response {
-	r := stdResponseStorage.Get()
+	r := responseStorage.Get()
 	r.resp = resp
 	r.body = nil
 
@@ -45,7 +45,7 @@ func ReleaseResponse(r *Response) {
 
 	r.resp = nil
 	r.body = nil
-	stdResponseStorage.Put(r)
+	responseStorage.Put(r)
 }
 
 // StatusCode returns the HTTP response status code, or 0 if response is nil.
@@ -130,14 +130,14 @@ func (s *Response) BodyBytes() []byte {
 		return nil
 	}
 
-	b, err := stdio.ReadAll(s.resp.Body)
+	b, err := io.ReadAll(s.resp.Body)
 	if err != nil {
 		return nil
 	}
 
 	_ = s.resp.Body.Close()
 	s.body = b
-	s.resp.Body = stdio.NopCloser(bytes.NewReader(b))
+	s.resp.Body = io.NopCloser(bytes.NewReader(b))
 
 	return b
 }
@@ -171,8 +171,8 @@ func (s *Response) Unsafe() UnsafeAccess {
 	return UnsafeAccess{resp: s}
 }
 
-// BodyStream yields response body stream [stdio.ReadCloser].
-func (s *Response) BodyStream() stdio.ReadCloser {
+// BodyStream yields response body stream [io.ReadCloser].
+func (s *Response) BodyStream() io.ReadCloser {
 	if s.resp == nil {
 		return nil
 	}
@@ -206,15 +206,16 @@ func (s *Response) SetUncompressed(v bool) {
 	}
 }
 
-// Close closes response body stream.
+// Close closes the response body stream and releases the response adapter to the pool.
 func (s *Response) Close() error {
+	var err error
 	if s.resp != nil && s.resp.Body != nil {
-		return s.resp.Body.Close()
+		err = s.resp.Body.Close()
 	}
 
 	ReleaseResponse(s)
 
-	return nil
+	return err
 }
 
 // Ensure Response implements core.Response.

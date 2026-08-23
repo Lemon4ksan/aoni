@@ -12,7 +12,7 @@ import (
 	"strings"
 	"time"
 
-	foundation "github.com/lemon4ksan/foundation/net/url"
+	furl "github.com/lemon4ksan/foundation/net/url"
 	"github.com/lemon4ksan/foundation/silicon/bytesconv"
 	"github.com/lemon4ksan/foundation/silicon/pool"
 	"github.com/valyala/fasthttp"
@@ -30,10 +30,10 @@ func (c *Client) dispatchSingleRequest(
 ) (trailers map[string][]string, err error, autoReleased bool) {
 	sanitizeTraceHeaders(fastReq)
 
-	host := string(fastReq.URI().Host())
+	host := bytesconv.B2S(fastReq.URI().Host())
 	alpnMode := c.resolveALPNMode(ctx, fastReq)
 
-	staggerDelay := c.config.Network.HappyEyeballsDelay
+	staggerDelay := c.cfg.Network.HappyEyeballsDelay
 	if alpnMode == aoni.AlpnH3 && c.shouldRaceProtocols(ctx) {
 		return c.raceProtocolHandshakes(ctx, host, fastReq, fastResp, staggerDelay)
 	}
@@ -203,7 +203,7 @@ func (c *Client) tryDispatchH3(
 ) (map[string][]string, error, bool) {
 	h3 := c.getH3Client()
 
-	tr, err := h3.Do(ctx, fastReq, fastResp, c.config.Fingerprint.HeaderOrder)
+	tr, err := h3.Do(ctx, fastReq, fastResp, c.cfg.Fingerprint.HeaderOrder)
 	if err != nil {
 		if c.protocolState.altSvc != nil {
 			c.protocolState.altSvc.MarkH3Failed(host)
@@ -235,7 +235,7 @@ func (c *Client) tryDispatchH2(
 	h2Cl := c.getH2Client(host)
 
 	tr, err := h2Cl.DoWithTrailers(ctx, fastReq, fastResp)
-	if err != nil && c.config.Fingerprint.BrowserID != aoni.BrowserNone {
+	if err != nil && c.cfg.Fingerprint.BrowserID != aoni.BrowserNone {
 		c.removeH2Client(host)
 		fastResp.Reset()
 
@@ -350,7 +350,7 @@ func (c *Client) retry425TooEarly(
 	reqCfg := pipeline.GetOrInitRequestConfig(ctx)
 	reqCfg.Disable0RTT = true
 
-	host := string(fastReq.URI().Host())
+	host := bytesconv.B2S(fastReq.URI().Host())
 	c.removeH2Client(host)
 
 	fastReq.Header.Del("Early-Data")
@@ -366,7 +366,7 @@ func (c *Client) retry421Misdirected(
 	reqCfg := pipeline.GetOrInitRequestConfig(ctx)
 	reqCfg.DisableAltSvc = true
 
-	host := string(fastReq.URI().Host())
+	host := bytesconv.B2S(fastReq.URI().Host())
 	if c.protocolState.altSvc != nil {
 		c.protocolState.altSvc.MarkH3Failed(host)
 	}
@@ -383,8 +383,7 @@ func (c *Client) retry408Timeout(
 	fastReq *fasthttp.Request,
 	fastResp *fasthttp.Response,
 ) (trailers map[string][]string, err error, autoReleased bool) {
-	host := string(fastReq.URI().Host())
-	c.removeH2Client(host)
+	c.removeH2Client(bytesconv.B2S(fastReq.URI().Host()))
 	fastReq.SetConnectionClose()
 
 	return c.dispatchSingleRequest(ctx, fastReq, fastResp)
@@ -506,8 +505,8 @@ func (c *Client) setupFastHTTPSchemeAndHost(
 
 func (c *Client) configureFastHTTPProxy(ctx context.Context, req *fasthttp.Request, isHTTPS bool) {
 	var proxyURL *url.URL
-	if c.config.Network.ProxyAddr != nil {
-		proxyURL = c.config.Network.ProxyAddr
+	if c.cfg.Network.ProxyAddr != nil {
+		proxyURL = c.cfg.Network.ProxyAddr
 	}
 
 	if reqCfg := aoni.GetRequestConfig(ctx); reqCfg != nil && reqCfg.ProxyAddr != nil {
@@ -515,7 +514,7 @@ func (c *Client) configureFastHTTPProxy(ctx context.Context, req *fasthttp.Reque
 	}
 
 	if rawProxy, ok := aoni.GetProxyOverride(ctx).Value(); ok && rawProxy != "" {
-		if parsed, parseErr := foundation.Parse(rawProxy); parseErr == nil {
+		if parsed, parseErr := furl.Parse(rawProxy); parseErr == nil {
 			proxyURL = parsed
 		}
 	}
@@ -531,8 +530,8 @@ func (c *Client) doFastHTTPEngine(ctx context.Context, req *fasthttp.Request, re
 		return c.engine.DoDeadline(req, resp, deadline)
 	}
 
-	if c.config.Engine.Timeout > 0 {
-		return c.engine.DoTimeout(req, resp, c.config.Engine.Timeout)
+	if c.cfg.Engine.Timeout > 0 {
+		return c.engine.DoTimeout(req, resp, c.cfg.Engine.Timeout)
 	}
 
 	return c.engine.Do(req, resp)
@@ -581,6 +580,8 @@ func fastRespReset(resp *fasthttp.Response) {
 }
 
 // ensureConnectionTE ensures 'Connection: TE' is present if a 'TE' header is configured on the request.
+// RFC 9112 §7.4 / RFC 9110 §7.6.1: A sender of the TE header field MUST also include "TE" within the Connection
+// header field to prevent hop-by-hop forwarding by intermediaries that do not support its semantics.
 func ensureConnectionTE(req *fasthttp.Request) {
 	te := req.Header.Peek("TE")
 	if len(te) == 0 {

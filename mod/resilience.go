@@ -65,6 +65,20 @@ func WithResponseValidator(fn func(resp *http.Response) error) aoni.RequestModif
 	})
 }
 
+// WithSoftErrorDetector constructs an [aoni.RequestModifier] attaching soft error detection callbacks.
+//
+//nolint:bodyclose // Soft error detectors inspect responses without taking ownership of response lifecycle.
+func WithSoftErrorDetector(detectors ...aoni.SoftErrorDetector) aoni.RequestModifier {
+	return Custom(func(req aoni.Request) {
+		cfg := getOrInitRequestConfig(req)
+		for _, det := range detectors {
+			if det != nil {
+				cfg.SoftErrorDetectors = append(cfg.SoftErrorDetectors, det)
+			}
+		}
+	})
+}
+
 // WithMultiReadThreshold constructs an [aoni.RequestModifier] configuring RAM buffering bounds for replayable reads.
 func WithMultiReadThreshold(threshold int64) aoni.RequestModifier {
 	return Custom(func(req aoni.Request) {

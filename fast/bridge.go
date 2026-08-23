@@ -12,6 +12,7 @@ import (
 	"strconv"
 
 	"github.com/lemon4ksan/aoni"
+	"github.com/lemon4ksan/aoni/codec/decode"
 	"github.com/lemon4ksan/aoni/option"
 )
 
@@ -48,6 +49,16 @@ func NewTransport(c *Client) *Transport {
 type Transport struct {
 	client           *Client
 	noRedirectClient *Client
+}
+
+// Unwrap returns the underlying fast [*Client].
+func (t *Transport) Unwrap() *Client {
+	return t.client
+}
+
+// Client returns the underlying fast [*Client].
+func (t *Transport) Client() *Client {
+	return t.client
 }
 
 // RoundTrip satisfies [http.RoundTripper], executing standard requests over fasthttp.
@@ -121,6 +132,18 @@ func (t *Transport) RoundTrip(req *http.Request) (*http.Response, error) {
 type responseBodyCloser struct {
 	io.ReadCloser
 	resp aoni.Response
+}
+
+func (r *responseBodyCloser) Bytes() (data []byte, volatile bool) {
+	if r.resp != nil {
+		return r.resp.UnsafeBodyBytes(), true
+	}
+
+	if br, ok := r.ReadCloser.(decode.BytesReader); ok {
+		return br.Bytes()
+	}
+
+	return nil, false
 }
 
 func (r *responseBodyCloser) Close() error {

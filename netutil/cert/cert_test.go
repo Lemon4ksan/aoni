@@ -134,3 +134,42 @@ func TestCertWatcher_InvalidFiles(t *testing.T) {
 	_, err := cert.NewWatcher("/nonexistent/cert.pem", "/nonexistent/key.pem", 50*time.Millisecond)
 	require.Error(t, err)
 }
+
+func TestRFC8879_CompressionAlgorithms(t *testing.T) {
+	t.Parallel()
+
+	assert.Equal(t, uint16(27), cert.ExtensionCompressCertificate)
+	assert.Equal(t, uint8(25), cert.HandshakeCompressedCertificate)
+
+	tests := []struct {
+		algo       cert.CompressionAlgorithm
+		name       string
+		valid      bool
+		parsedName string
+	}{
+		{cert.CertCompressionZlib, "zlib", true, "zlib"},
+		{cert.CertCompressionBrotli, "brotli", true, "brotli"},
+		{cert.CertCompressionZstd, "zstd", true, "zstd"},
+		{cert.CompressionAlgorithm(999), "unknown(999)", false, ""},
+	}
+
+	for _, tt := range tests {
+		assert.Equal(t, tt.name, tt.algo.String())
+		assert.Equal(t, tt.valid, tt.algo.IsValid())
+
+		if tt.valid {
+			parsed, err := cert.ParseCompressionAlgorithm(tt.parsedName)
+			require.NoError(t, err)
+			assert.Equal(t, tt.algo, parsed)
+		}
+	}
+
+	// Alias parsing test
+	parsedBr, err := cert.ParseCompressionAlgorithm("br")
+	require.NoError(t, err)
+	assert.Equal(t, cert.CertCompressionBrotli, parsedBr)
+
+	// Unknown algorithm error test
+	_, err = cert.ParseCompressionAlgorithm("lz4")
+	require.ErrorIs(t, err, cert.ErrUnknownCompressionAlgo)
+}

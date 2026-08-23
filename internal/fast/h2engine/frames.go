@@ -10,7 +10,7 @@ import (
 	"time"
 )
 
-// Continuation carries extended header block fragments across HTTP/2 frame boundaries.
+// Continuation carries extended header block fragments across HTTP/2 frame boundaries (RFC 9113 §6.10).
 type Continuation struct {
 	endHeaders bool
 	rawHeaders []byte
@@ -45,7 +45,7 @@ func (c *Continuation) Serialize(fr *FrameHeader) {
 	fr.setPayload(c.rawHeaders)
 }
 
-// Data encapsulates streaming payload bytes transmitted over an open HTTP/2 stream.
+// Data encapsulates streaming payload bytes transmitted over an open HTTP/2 stream (RFC 9113 §6.1).
 type Data struct {
 	endStream  bool
 	hasPadding bool
@@ -96,7 +96,7 @@ func (d *Data) Serialize(fr *FrameHeader) {
 	fr.setPayload(d.b)
 }
 
-// GoAway signals connection shutdown or fatal protocol violations.
+// GoAway signals connection shutdown or fatal connection-level protocol violations (RFC 9113 §6.8).
 type GoAway struct {
 	stream uint32
 	code   ErrorCode
@@ -136,7 +136,7 @@ func (ga *GoAway) Serialize(fr *FrameHeader) {
 	fr.payload = append(fr.payload, ga.data...)
 }
 
-// Headers carries HPACK-compressed HTTP metadata.
+// Headers carries HPACK-compressed HTTP metadata and optionally opens/terminates streams (RFC 9113 §6.2).
 type Headers struct {
 	hasPadding bool
 	stream     uint32
@@ -234,7 +234,7 @@ func (h *Headers) Serialize(frh *FrameHeader) {
 	frh.payload = append(frh.payload[:0], h.rawHeaders...)
 }
 
-// Ping verifies connection liveness and measures round-trip time.
+// Ping verifies connection liveness and measures round-trip time with an 8-octet opaque payload (RFC 9113 §6.7).
 type Ping struct {
 	ack  bool
 	data [8]byte
@@ -275,7 +275,7 @@ func (p *Ping) Serialize(fr *FrameHeader) {
 	fr.setPayload(p.data[:])
 }
 
-// Priority specifies stream dependencies and weighting parameters.
+// Priority specifies stream dependencies and weighting parameters (RFC 9113 §6.3, deprecated per §5.3.2).
 type Priority struct {
 	stream uint32
 	weight byte
@@ -289,7 +289,7 @@ func (pry *Priority) Weight() byte            { return pry.weight }
 func (pry *Priority) SetWeight(w byte)        { pry.weight = w }
 
 func (pry *Priority) Deserialize(fr *FrameHeader) error {
-	if len(fr.payload) < 5 {
+	if len(fr.payload) != 5 {
 		return ErrMissingBytes
 	}
 
@@ -304,7 +304,7 @@ func (pry *Priority) Serialize(fr *FrameHeader) {
 	fr.payload = append(fr.payload, pry.weight)
 }
 
-// PushPromise notifies peers of server-initiated streams.
+// PushPromise notifies peers in advance of server-initiated streams (RFC 9113 §6.6 & §8.4).
 type PushPromise struct {
 	pad    bool
 	ended  bool
@@ -354,7 +354,7 @@ func (pp *PushPromise) Serialize(fr *FrameHeader) {
 	fr.payload = append(fr.payload[:0], pp.header...)
 }
 
-// RstStream terminates an active stream prematurely with an explicit error code.
+// RstStream terminates an active stream prematurely with an explicit 32-bit error code (RFC 9113 §6.4).
 type RstStream struct {
 	code ErrorCode
 }
@@ -366,7 +366,7 @@ func (rst *RstStream) Reset()                 { rst.code = 0 }
 func (rst *RstStream) Error() error           { return rst.code }
 
 func (rst *RstStream) Deserialize(fr *FrameHeader) error {
-	if len(fr.payload) < 4 {
+	if len(fr.payload) != 4 {
 		return ErrMissingBytes
 	}
 
@@ -380,7 +380,7 @@ func (rst *RstStream) Serialize(fr *FrameHeader) {
 	fr.length = 4
 }
 
-// WindowUpdate adjusts connection or stream-level flow control capacity.
+// WindowUpdate adjusts connection or stream-level flow control capacity (RFC 9113 §6.9).
 type WindowUpdate struct {
 	increment int
 }
@@ -391,12 +391,16 @@ func (wu *WindowUpdate) Increment() int       { return wu.increment }
 func (wu *WindowUpdate) SetIncrement(inc int) { wu.increment = inc }
 
 func (wu *WindowUpdate) Deserialize(fr *FrameHeader) error {
-	if len(fr.payload) < 4 {
+	if len(fr.payload) != 4 {
 		wu.increment = 0
 		return ErrMissingBytes
 	}
 
 	wu.increment = int(bytesToUint32(fr.payload) & (1<<31 - 1))
+	if wu.increment == 0 {
+		// RFC 9113 §6.9: Flow-control window increment of 0 MUST be treated as a stream or connection error.
+		return ErrInvalidWindowIncrement
+	}
 
 	return nil
 }

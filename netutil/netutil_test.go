@@ -132,6 +132,133 @@ func TestExtractSanitizedFilename(t *testing.T) {
 	assert.Equal(t, "downloaded_file", emptyHeader)
 }
 
+func TestParseContentDisposition_RFC6266(t *testing.T) {
+	t.Parallel()
+
+	// RFC 6266 Section 5 examples
+	// Example 1: Attachment with simple filename
+	ex1 := netutil.ParseContentDisposition("Attachment; filename=example.html")
+	assert.Equal(t, "attachment", ex1.Type)
+	assert.Equal(t, "example.html", ex1.Filename)
+
+	// Example 2: Inline with quoted filename
+	ex2 := netutil.ParseContentDisposition(`INLINE; FILENAME="an example.html"`)
+	assert.Equal(t, "inline", ex2.Type)
+	assert.Equal(t, "an example.html", ex2.Filename)
+
+	// Example 3: RFC 5987 / 8187 filename* precedence over fallback filename
+	ex3 := netutil.ParseContentDisposition(`attachment; filename="EURO rates"; filename*=utf-8''%e2%82%ac%20rates.pdf`)
+	assert.Equal(t, "attachment", ex3.Type)
+	assert.Equal(t, "€ rates.pdf", ex3.Filename)
+
+	// Unknown disposition type fallback to "attachment" (RFC 6266 §4.2)
+	ex4 := netutil.ParseContentDisposition(`unknown_type; filename="archive.zip"`)
+	assert.Equal(t, "unknown_type", ex4.Type)
+	assert.Equal(t, "archive.zip", ex4.Filename)
+
+	// Path traversal stripping in filename (RFC 6266 §4.3)
+	ex5 := netutil.ParseContentDisposition(`attachment; filename="../../secrets/passwords.txt"`)
+	assert.Equal(t, "passwords.txt", ex5.Filename)
+}
+
+func TestFormatContentDisposition_RFC6266(t *testing.T) {
+	t.Parallel()
+
+	// ASCII filename
+	hdr1 := netutil.FormatContentDisposition("attachment", "document.pdf")
+	assert.Equal(t, `attachment; filename="document.pdf"`, hdr1)
+
+	// Non-ASCII filename produces RFC 5987 filename* with ASCII fallback
+	hdr2 := netutil.FormatContentDisposition("attachment", "отчёт 2026.pdf")
+	assert.Contains(t, hdr2, `filename=`)
+	assert.Contains(t, hdr2, `filename*=UTF-8''`)
+
+	// Empty filename
+	hdr3 := netutil.FormatContentDisposition("inline", "")
+	assert.Equal(t, "inline", hdr3)
+}
+
+func TestRFC8187_Encode_Decode(t *testing.T) {
+	t.Parallel()
+
+	// RFC 8187 §3.2.3 Example 1: utf-8'en'%C2%A3%20rates
+	cs, lang, val, err := netutil.DecodeRFC8187("utf-8'en'%C2%A3%20rates")
+	require.NoError(t, err)
+	assert.Equal(t, "utf-8", cs)
+	assert.Equal(t, "en", lang)
+	assert.Equal(t, "£ rates", val)
+
+	// RFC 8187 §3.2.3 Example 2: UTF-8''%c2%a3%20and%20%e2%82%ac%20rates
+	cs2, lang2, val2, err2 := netutil.DecodeRFC8187("UTF-8''%c2%a3%20and%20%e2%82%ac%20rates")
+	require.NoError(t, err2)
+	assert.Equal(t, "utf-8", cs2)
+	assert.Empty(t, lang2)
+	assert.Equal(t, "£ and € rates", val2)
+
+	// Encode test matching RFC 8187 §3.2.1
+	encodedWithLang := netutil.EncodeRFC8187("£ rates", "en")
+	assert.Equal(t, "UTF-8'en'%C2%A3%20rates", encodedWithLang)
+
+	encodedNoLang := netutil.EncodeRFC8187("£ and € rates", "")
+	assert.Equal(t, "UTF-8''%C2%A3%20and%20%E2%82%AC%20rates", encodedNoLang)
+
+	// DecodeRFC8187Value convenience helper
+	assert.Equal(t, "£ and € rates", netutil.DecodeRFC8187Value(encodedNoLang))
+}
+
+func TestIsWindowsReservedName(t *testing.T) {
+	t.Parallel()
+
+	assert.True(t, netutil.IsWindowsReservedName("CON"))
+	assert.True(t, netutil.IsWindowsReservedName("con.txt"))
+	assert.True(t, netutil.IsWindowsReservedName("PRN.pdf"))
+	assert.True(t, netutil.IsWindowsReservedName("aux"))
+	assert.True(t, netutil.IsWindowsReservedName("NUL.tar.gz"))
+	assert.True(t, netutil.IsWindowsReservedName("COM1.dat"))
+	assert.True(t, netutil.IsWindowsReservedName("LPT9.png"))
+
+	assert.False(t, netutil.IsWindowsReservedName("contract.pdf"))
+	assert.False(t, netutil.IsWindowsReservedName("console.log"))
+	assert.False(t, netutil.IsWindowsReservedName("constant.go"))
+}
+
+func TestISO88591ToUTF8(t *testing.T) {
+	t.Parallel()
+
+	// Latin-1 byte \xE9 is 'é', \xF1 is 'ñ', \xA9 is '©'
+	latin1 := "\xE9l\xE9phant \xA9"
+	utf8Str := netutil.ISO88591ToUTF8(latin1)
+	assert.Equal(t, "éléphant ©", utf8Str)
+}
+
+func TestIsRFC8187AttrChar(t *testing.T) {
+	t.Parallel()
+
+	assert.True(t, netutil.IsRFC8187AttrChar('a'))
+	assert.True(t, netutil.IsRFC8187AttrChar('Z'))
+	assert.True(t, netutil.IsRFC8187AttrChar('9'))
+	assert.True(t, netutil.IsRFC8187AttrChar('!'))
+	assert.True(t, netutil.IsRFC8187AttrChar('#'))
+	assert.True(t, netutil.IsRFC8187AttrChar('$'))
+	assert.True(t, netutil.IsRFC8187AttrChar('&'))
+	assert.True(t, netutil.IsRFC8187AttrChar('+'))
+	assert.True(t, netutil.IsRFC8187AttrChar('-'))
+	assert.True(t, netutil.IsRFC8187AttrChar('.'))
+	assert.True(t, netutil.IsRFC8187AttrChar('^'))
+	assert.True(t, netutil.IsRFC8187AttrChar('_'))
+	assert.True(t, netutil.IsRFC8187AttrChar('`'))
+	assert.True(t, netutil.IsRFC8187AttrChar('|'))
+	assert.True(t, netutil.IsRFC8187AttrChar('~'))
+
+	// Excluded from attr-char
+	assert.False(t, netutil.IsRFC8187AttrChar('*'))
+	assert.False(t, netutil.IsRFC8187AttrChar('\''))
+	assert.False(t, netutil.IsRFC8187AttrChar('%'))
+	assert.False(t, netutil.IsRFC8187AttrChar(' '))
+	assert.False(t, netutil.IsRFC8187AttrChar('"'))
+	assert.False(t, netutil.IsRFC8187AttrChar('/'))
+}
+
 func TestWriteTrackingConn(t *testing.T) {
 	t.Parallel()
 

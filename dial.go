@@ -17,6 +17,15 @@ import (
 	"github.com/lemon4ksan/aoni/internal/transport"
 )
 
+// resolveNetwork returns the configured network protocol string or falls back to "tcp".
+func (c *Client) resolveNetwork() string {
+	if c.cfg.Network.Network != "" {
+		return c.cfg.Network.Network.String()
+	}
+
+	return NetworkTCP.String()
+}
+
 // Dial establishes an unencrypted L4 TCP socket connection to addr using a default 15-second timeout.
 // It acts as a convenience wrapper around DialContext using context.Background.
 // Safe for concurrent use across multiple goroutines.
@@ -24,7 +33,7 @@ func (c *Client) Dial(addr string) (net.Conn, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
 
-	return c.DialContext(ctx, "tcp", addr)
+	return c.DialContext(ctx, c.resolveNetwork(), addr)
 }
 
 // DialContext establishes a raw L4 TCP socket connection applying active proxy tunneling,
@@ -47,7 +56,7 @@ func (c *Client) DialContext(ctx context.Context, network, addr string) (net.Con
 
 	conn, err := dialer.DialContext(ctx, network, addr, dialCfg)
 	if err == nil {
-		sysnet.TuneSocketConnWithFlags(conn, uint64(c.network.ExperimentalFlags))
+		sysnet.TuneSocketConnWithFlags(conn, uint64(c.cfg.Network.ExperimentalFlags))
 	}
 
 	return conn, err
@@ -56,7 +65,7 @@ func (c *Client) DialContext(ctx context.Context, network, addr string) (net.Con
 // DialTLS establishes an encrypted L7 TLS or uTLS connection over L4 TCP.
 // It negotiates ALPN protocols ("h2", "http/1.1"), applies browser ClientHello emulation
 // (Chrome, Firefox, Safari), performs Encrypted Client Hello (ECH, RFC 9484) resolution,
-// supports 0-RTT Early Data (RFC 8446/9001), and validates SPKI certificate pins.
+// supports 0-RTT Early Data (RFC 8446/9001/9846), and validates SPKI certificate pins.
 //
 // Fingerprint Precedence:
 // If multiple TLS fingerprint options are configured, transport.UniversalDialer applies them
@@ -84,10 +93,10 @@ func (c *Client) DialTLS(ctx context.Context, network, addr string) (net.Conn, e
 // Safe for concurrent use across multiple goroutines.
 func (c *Client) DialTLSForWS(ctx context.Context, addr string) (net.Conn, error) {
 	if tr := c.Transport(); tr != nil && tr.DialTLSContext != nil {
-		return tr.DialTLSContext(ctx, "tcp", addr)
+		return tr.DialTLSContext(ctx, NetworkTCP.String(), addr)
 	}
 
-	return c.DialTLS(ctx, "tcp", addr)
+	return c.DialTLS(ctx, NetworkTCP.String(), addr)
 }
 
 // DialPlainForWS establishes an unencrypted raw TCP socket connection for WebSocket upgrades,
@@ -96,16 +105,7 @@ func (c *Client) DialTLSForWS(ctx context.Context, addr string) (net.Conn, error
 // function before applying WebSocket payload fragmentation wrappers.
 // Safe for concurrent use across multiple goroutines.
 func (c *Client) DialPlainForWS(ctx context.Context, addr string) (net.Conn, error) {
-	if tr := c.Transport(); tr != nil && tr.DialContext != nil {
-		conn, err := tr.DialContext(ctx, "tcp", addr)
-		if err != nil {
-			return nil, err
-		}
-
-		return c.applyWSFragmentation(ctx, conn), nil
-	}
-
-	conn, err := c.DialContext(ctx, "tcp", addr)
+	conn, err := c.dialPlainWSBase(ctx, addr)
 	if err != nil {
 		return nil, err
 	}
@@ -113,10 +113,18 @@ func (c *Client) DialPlainForWS(ctx context.Context, addr string) (net.Conn, err
 	return c.applyWSFragmentation(ctx, conn), nil
 }
 
+func (c *Client) dialPlainWSBase(ctx context.Context, addr string) (net.Conn, error) {
+	if tr := c.Transport(); tr != nil && tr.DialContext != nil {
+		return tr.DialContext(ctx, NetworkTCP.String(), addr)
+	}
+
+	return c.DialContext(ctx, NetworkTCP.String(), addr)
+}
+
 // applyWSFragmentation decorates a raw socket with TCP payload write-chunking if configured.
 func (c *Client) applyWSFragmentation(ctx context.Context, conn net.Conn) net.Conn {
 	if cfg := GetRequestConfig(ctx); cfg != nil && cfg.Fragment != nil {
-		return applyFragmentation(conn, *cfg.Fragment)
+		return transport.ApplyFragmentation(conn, *cfg.Fragment)
 	}
 
 	return conn
@@ -136,10 +144,10 @@ func (c *Client) applyDialers(tr *http.Transport) {
 // buildDialConfig constructs a self-contained transport.DialConfig DTO by merging
 // client-level defaults with per-request context overrides extracted via GetRequestConfig.
 func (c *Client) buildDialConfig(ctx context.Context) transport.DialConfig {
-	cfgDTO := c.snapshotConfig()
+	cfgDTO := c.cfg.Clone()
 	cfg := cfgDTO.BuildDialConfig(ctx)
-	cfg.InterfaceName = c.network.InterfaceName
-	cfg.SocketMark = c.network.SocketMark
+	cfg.InterfaceName = c.cfg.Network.InterfaceName
+	cfg.SocketMark = c.cfg.Network.SocketMark
 	cfg.BaseTLSConfig = c.resolveBaseTLSConfig(ctx)
 	cfg.HelloID = c.resolveHelloID()
 	cfg.ApplyRequestOverrides(GetRequestConfig(ctx))
@@ -161,17 +169,19 @@ func (c *Client) resolveBaseTLSConfig(ctx context.Context) *tls.Config {
 // resolveHelloID maps the active BrowserID preset (Chrome, Firefox, Safari) to its
 // corresponding uTLS HelloID auto-preset, or returns the explicitly set TLSClientHelloID.
 func (c *Client) resolveHelloID() *utls.ClientHelloID {
-	f := c.fingerprint
+	f := c.cfg.Fingerprint
 	if f.TLSClientHelloID != nil {
 		return f.TLSClientHelloID
 	}
 
 	switch f.BrowserID {
+	case BrowserChrome:
+		return &utls.HelloChrome_Auto
 	case BrowserFirefox:
 		return &utls.HelloFirefox_Auto
 	case BrowserSafari:
 		return &utls.HelloSafari_Auto
 	default:
-		return &utls.HelloChrome_Auto
+		return nil
 	}
 }

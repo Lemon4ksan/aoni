@@ -14,14 +14,15 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
+	fio "github.com/lemon4ksan/foundation/io"
 	"github.com/lemon4ksan/foundation/net/ip"
 	"github.com/lemon4ksan/foundation/net/proxy"
 
 	"github.com/lemon4ksan/aoni/fingerprint/p0f"
-	"github.com/lemon4ksan/aoni/internal/io"
 	"github.com/lemon4ksan/aoni/netutil/fragment"
 )
 
@@ -33,6 +34,72 @@ var (
 	// ErrProxyConnectFailed is returned when the proxy connection fails.
 	ErrProxyConnectFailed = errors.New("aoni/netdial: proxy connection failed")
 )
+
+// Network represents an L4 transport or IPC socket network protocol (e.g. "tcp", "unix").
+type Network string
+
+const (
+	// NetworkTCP represents Transmission Control Protocol over IPv4 or IPv6 ("tcp").
+	NetworkTCP Network = "tcp"
+
+	// NetworkTCP4 represents Transmission Control Protocol restricted to IPv4 ("tcp4").
+	NetworkTCP4 Network = "tcp4"
+
+	// NetworkTCP6 represents Transmission Control Protocol restricted to IPv6 ("tcp6").
+	NetworkTCP6 Network = "tcp6"
+
+	// NetworkUDP represents User Datagram Protocol over IPv4 or IPv6 ("udp").
+	NetworkUDP Network = "udp"
+
+	// NetworkUDP4 represents User Datagram Protocol restricted to IPv4 ("udp4").
+	NetworkUDP4 Network = "udp4"
+
+	// NetworkUDP6 represents User Datagram Protocol restricted to IPv6 ("udp6").
+	NetworkUDP6 Network = "udp6"
+
+	// NetworkIP represents raw IP protocol over IPv4 or IPv6 ("ip").
+	NetworkIP Network = "ip"
+
+	// NetworkIP4 represents raw IP protocol restricted to IPv4 ("ip4").
+	NetworkIP4 Network = "ip4"
+
+	// NetworkIP6 represents raw IP protocol restricted to IPv6 ("ip6").
+	NetworkIP6 Network = "ip6"
+
+	// NetworkUnix represents Unix domain stream socket ("unix").
+	NetworkUnix Network = "unix"
+
+	// NetworkUnixGram represents Unix domain datagram socket ("unixgram").
+	NetworkUnixGram Network = "unixgram"
+
+	// NetworkUnixPacket represents Unix domain sequenced packet socket ("unixpacket").
+	NetworkUnixPacket Network = "unixpacket"
+)
+
+// String returns the network protocol string value.
+func (n Network) String() string {
+	return string(n)
+}
+
+// IsTCP reports whether the network is a TCP variant ("tcp", "tcp4", "tcp6").
+func (n Network) IsTCP() bool {
+	return n == NetworkTCP || n == NetworkTCP4 || n == NetworkTCP6
+}
+
+// IsUDP reports whether the network is a UDP variant ("udp", "udp4", "udp6").
+func (n Network) IsUDP() bool {
+	return n == NetworkUDP || n == NetworkUDP4 || n == NetworkUDP6
+}
+
+// IsUnix reports whether the network is a Unix domain socket variant ("unix", "unixgram", "unixpacket").
+func (n Network) IsUnix() bool {
+	return n == NetworkUnix || n == NetworkUnixGram || n == NetworkUnixPacket
+}
+
+// IsIP reports whether the network is a raw IP socket variant ("ip", "ip4", "ip6").
+func (n Network) IsIP() bool {
+	return n == NetworkIP || n == NetworkIP4 || n == NetworkIP6
+}
 
 // SocketController is an interface for controlling socket operations.
 type SocketController interface {
@@ -85,7 +152,7 @@ func DialL4(ctx context.Context, network, addr string, opts DialOptions) (net.Co
 		return DialProxy(ctx, opts.ProxyURL, host, port, opts)
 	}
 
-	if strings.HasPrefix(addr, "unix://") || network == "unix" {
+	if strings.HasPrefix(addr, "unix://") || network == NetworkUnix.String() {
 		return dialUnixSocket(ctx, addr, opts)
 	}
 
@@ -151,13 +218,25 @@ func DialDirectTCP(ctx context.Context, network, host, port string, opts DialOpt
 		return nil, fmt.Errorf("aoni/netdial: no IP addresses found for host %s", host)
 	}
 
+	orderedAddrs := orderHappyEyeballsAddrs(addrs)
+	if len(orderedAddrs) > 1 {
+		conn, err := dialHappyEyeballs(ctx, network, port, orderedAddrs, opts)
+		if err == nil {
+			if opts.FragmentConfig != nil {
+				return fragment.NewFragmentedConn(conn, opts.FragmentConfig), nil
+			}
+
+			return conn, nil
+		}
+	}
+
 	ipTimeout := 3 * time.Second
 	if opts.HappyEyeballs > 0 {
 		ipTimeout = opts.HappyEyeballs
 	}
 
 	var lastErr error
-	for _, address := range addrs {
+	for _, address := range orderedAddrs {
 		if opts.SSRFGuard && ip.IsPrivateIP(address.IP) {
 			lastErr = fmt.Errorf("%w: %s", ErrSSRFBlocked, address.IP.String())
 			continue
@@ -192,6 +271,152 @@ func DialDirectTCP(ctx context.Context, network, host, port string, opts DialOpt
 	}
 
 	return nil, fmt.Errorf("aoni/netdial: all IP connections failed for %s: %w", host, lastErr)
+}
+
+// orderHappyEyeballsAddrs sorts IP addresses per RFC 8305 §4: interleaving IPv6 and IPv4 families.
+func orderHappyEyeballsAddrs(addrs []net.IPAddr) []net.IPAddr {
+	if len(addrs) <= 1 {
+		return addrs
+	}
+
+	var v6, v4 []net.IPAddr
+	for _, a := range addrs {
+		if a.IP.To4() != nil {
+			v4 = append(v4, a)
+		} else {
+			v6 = append(v6, a)
+		}
+	}
+
+	if len(v6) == 0 {
+		return v4
+	}
+
+	if len(v4) == 0 {
+		return v6
+	}
+
+	interleaved := make([]net.IPAddr, 0, len(addrs))
+
+	maxLen := max(len(v6), len(v4))
+	for i := range maxLen {
+		if i < len(v6) {
+			interleaved = append(interleaved, v6[i])
+		}
+
+		if i < len(v4) {
+			interleaved = append(interleaved, v4[i])
+		}
+	}
+
+	return interleaved
+}
+
+// dialHappyEyeballs performs staggered RFC 8305 connection racing across candidate IP addresses.
+func dialHappyEyeballs(
+	ctx context.Context,
+	network, port string,
+	addrs []net.IPAddr,
+	opts DialOptions,
+) (net.Conn, error) {
+	staggerDelay := opts.HappyEyeballs
+	if staggerDelay <= 0 {
+		staggerDelay = 300 * time.Millisecond
+	}
+
+	type dialResult struct {
+		conn net.Conn
+		err  error
+	}
+
+	raceCtx, raceCancel := context.WithCancel(ctx)
+	defer raceCancel()
+
+	results := make(chan dialResult, len(addrs))
+
+	var wg sync.WaitGroup
+
+	for i, address := range addrs {
+		if opts.SSRFGuard && ip.IsPrivateIP(address.IP) {
+			continue
+		}
+
+		if i > 0 {
+			timer := time.NewTimer(staggerDelay)
+			select {
+			case <-raceCtx.Done():
+				timer.Stop()
+				return nil, raceCtx.Err()
+			case <-timer.C:
+			case res := <-results:
+				timer.Stop()
+
+				if res.conn != nil {
+					return res.conn, nil
+				}
+			}
+		}
+
+		target := net.JoinHostPort(address.IP.String(), port)
+
+		wg.Add(1)
+
+		go func(targetAddr string) {
+			defer wg.Done()
+
+			dialer := &net.Dialer{
+				Timeout: 10 * time.Second,
+			}
+			if opts.SourceRotator != nil {
+				dialer.LocalAddr = &net.TCPAddr{IP: opts.SourceRotator.Next()}
+			}
+
+			dialer.Control = buildSocketControl(opts)
+
+			conn, err := dialer.DialContext(raceCtx, network, targetAddr)
+			if err != nil {
+				results <- dialResult{err: err}
+				return
+			}
+
+			if raceCtx.Err() != nil {
+				_ = conn.Close()
+				return
+			}
+
+			results <- dialResult{conn: conn}
+		}(target)
+	}
+
+	var lastErr error
+	for range addrs {
+		select {
+		case res := <-results:
+			if res.conn != nil {
+				raceCancel()
+
+				go func() {
+					wg.Wait()
+					close(results)
+
+					for r := range results {
+						if r.conn != nil {
+							_ = r.conn.Close()
+						}
+					}
+				}()
+
+				return res.conn, nil
+			}
+
+			lastErr = res.err
+
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		}
+	}
+
+	return nil, lastErr
 }
 
 // DialProxy establishes a network socket connection through a SOCKS5 or HTTP CONNECT proxy.
@@ -232,7 +457,7 @@ func dialUnixSocket(ctx context.Context, addr string, opts DialOptions) (net.Con
 		dialer.Control = buildSocketControl(opts)
 	}
 
-	return dialer.DialContext(ctx, "unix", socketPath)
+	return dialer.DialContext(ctx, NetworkUnix.String(), socketPath)
 }
 
 func dialSocks5(ctx context.Context, proxyURL *url.URL, forward proxy.Dialer, host, port string) (net.Conn, error) {
@@ -245,25 +470,27 @@ func dialSocks5(ctx context.Context, proxyURL *url.URL, forward proxy.Dialer, ho
 		}
 	}
 
-	socksDialer, err := proxy.SOCKS5("tcp", proxyURL.Host, auth, forward)
+	socksDialer, err := proxy.SOCKS5(NetworkTCP.String(), proxyURL.Host, auth, forward)
 	if err != nil {
 		return nil, fmt.Errorf("%w: create socks5 dialer: %w", ErrProxyConnectFailed, err)
 	}
 
 	if cd, ok := socksDialer.(proxy.ContextDialer); ok {
-		return cd.DialContext(ctx, "tcp", net.JoinHostPort(host, port))
+		return cd.DialContext(ctx, NetworkTCP.String(), net.JoinHostPort(host, port))
 	}
 
-	return socksDialer.Dial("tcp", net.JoinHostPort(host, port))
+	return socksDialer.Dial(NetworkTCP.String(), net.JoinHostPort(host, port))
 }
 
 func dialHTTPProxy(ctx context.Context, proxyURL *url.URL, forward *net.Dialer, host, port string) (net.Conn, error) {
-	conn, err := forward.DialContext(ctx, "tcp", proxyURL.Host)
+	conn, err := forward.DialContext(ctx, NetworkTCP.String(), proxyURL.Host)
 	if err != nil {
 		return nil, fmt.Errorf("%w: dial proxy %s: %w", ErrProxyConnectFailed, proxyURL.Host, err)
 	}
 
 	target := net.JoinHostPort(host, port)
+	// RFC 9112 §3.2.3: The authority-form (host:port) is used exclusively for HTTP CONNECT requests.
+	// RFC 9112 §3.2: HTTP/1.1 client MUST send a Host header matching the target authority.
 	connectReqStr := "CONNECT " + target + " HTTP/1.1\r\nHost: " + target + "\r\n\r\n"
 
 	if _, err := conn.Write([]byte(connectReqStr)); err != nil {
@@ -273,8 +500,10 @@ func dialHTTPProxy(ctx context.Context, proxyURL *url.URL, forward *net.Dialer, 
 
 	br := bufio.NewReader(conn)
 
-	// Pass a Request with Method: CONNECT so http.ReadResponse
-	// recognizes that 2xx CONNECT responses contain no body.
+	// RFC 9112 §6.3 Rule 2: 2xx responses to CONNECT imply the connection becomes a raw tunnel
+	// immediately following the header section; message body and Transfer-Encoding are ignored.
+	// RFC 9931 §8: Proxy clients MUST wait for a 2xx response before forwarding TCP payload data
+	// to prevent Request Smuggling via optimistic protocol transitions.
 	connectReq := &http.Request{
 		Method: http.MethodConnect,
 		URL:    &url.URL{Host: target},
@@ -288,6 +517,8 @@ func dialHTTPProxy(ctx context.Context, proxyURL *url.URL, forward *net.Dialer, 
 
 	_ = resp.Body.Close()
 
+	// RFC 9931 §8: On CONNECT rejection, the connection MUST be closed immediately to prevent
+	// subsequent payload bytes from being misinterpreted as pipelined HTTP/1.1 requests.
 	if resp.StatusCode != http.StatusOK {
 		_ = conn.Close()
 		return nil, fmt.Errorf("%w: CONNECT rejected with status %s", ErrProxyConnectFailed, resp.Status)
@@ -296,7 +527,7 @@ func dialHTTPProxy(ctx context.Context, proxyURL *url.URL, forward *net.Dialer, 
 	_ = conn.SetDeadline(time.Time{})
 
 	if br.Buffered() > 0 {
-		return &io.BufferedConn{Conn: conn, R: br}, nil
+		return &fio.BufferedConn{Conn: conn, R: br}, nil
 	}
 
 	return conn, nil

@@ -4,7 +4,11 @@
 
 package ws
 
-import "errors"
+import (
+	"encoding/binary"
+	"errors"
+	"fmt"
+)
 
 var (
 	// ErrBadHandshake indicates the server rejected the WebSocket handshake
@@ -61,4 +65,72 @@ var (
 
 	// ErrFrameTooLarge indicates an incoming frame exceeded the maximum allowed memory buffer size.
 	ErrFrameTooLarge = errors.New("aoni/ws: frame payload exceeds maximum allowed size")
+
+	// ErrControlFrameFragmented indicates a control frame with FIN=0 was received (RFC 6455 §5.4).
+	ErrControlFrameFragmented = errors.New("aoni/ws: control frames must not be fragmented")
+
+	// ErrUnexpectedContinuationFrame indicates a continuation frame without prior data frame (RFC 6455 §5.4).
+	ErrUnexpectedContinuationFrame = errors.New("aoni/ws: unexpected continuation frame")
+
+	// ErrIncompleteFragmentation indicates a new data frame arrived before previous fragmentation finished (RFC 6455 §5.4).
+	ErrIncompleteFragmentation = errors.New(
+		"aoni/ws: received new data frame before completing previous fragmented message",
+	)
 )
+
+// CloseError represents an RFC 6455 WebSocket close frame error containing a status code and human-readable reason (RFC 6455 §7.1.5 & §7.1.6).
+type CloseError struct {
+	Code   int
+	Reason string
+}
+
+func (e *CloseError) Error() string {
+	if e.Reason != "" {
+		return fmt.Sprintf("aoni/ws: close %d: %s", e.Code, e.Reason)
+	}
+
+	return fmt.Sprintf("aoni/ws: close %d", e.Code)
+}
+
+// FormatCloseMessage constructs a standard 2-byte big-endian status code followed by an optional UTF-8 reason string (RFC 6455 §5.5.1).
+func FormatCloseMessage(code int, reason string) []byte {
+	if code == 0 && reason == "" {
+		return nil
+	}
+
+	buf := make([]byte, 2+len(reason))
+	binary.BigEndian.PutUint16(buf[:2], uint16(code))
+	copy(buf[2:], reason)
+
+	return buf
+}
+
+// ParseCloseMessage parses an incoming Close frame payload into a 2-byte status code and UTF-8 reason string (RFC 6455 §5.5.1 & §7.1.6).
+func ParseCloseMessage(payload []byte) (code int, reason string) {
+	if len(payload) < 2 {
+		return StatusNoStatusRcvd, ""
+	}
+
+	code = int(binary.BigEndian.Uint16(payload[:2]))
+	reason = string(payload[2:])
+
+	return code, reason
+}
+
+// IsCloseError reports whether err is a [CloseError] matching any of the specified target status codes (RFC 6455 §7.4).
+func IsCloseError(err error, codes ...int) bool {
+	var ce *CloseError
+	if errors.As(err, &ce) {
+		if len(codes) == 0 {
+			return true
+		}
+
+		for _, c := range codes {
+			if ce.Code == c {
+				return true
+			}
+		}
+	}
+
+	return false
+}

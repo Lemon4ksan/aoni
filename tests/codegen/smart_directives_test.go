@@ -8,8 +8,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/lemon4ksan/aoni/internal/codegen/emitter"
-	"github.com/lemon4ksan/aoni/internal/codegen/parser"
+	"github.com/lemon4ksan/aoni/cmd/vortex/lib/emitter"
+	"github.com/lemon4ksan/aoni/cmd/vortex/lib/parser"
 	"github.com/stretchr/testify/require"
 )
 
@@ -58,8 +58,7 @@ type SteamShopAPI interface {
 	require.NoError(t, err)
 	require.NotNil(t, root)
 
-	em := emitter.NewEmitter()
-	codeBytes, err := em.Emit(root)
+	codeBytes, err := emitter.Emit(root)
 	require.NoError(t, err)
 
 	code := string(codeBytes)
@@ -71,7 +70,7 @@ type SteamShopAPI interface {
 	require.Contains(t, code, `ref = strconv.AppendUint(ref, uint64(appID), 10)`)
 	require.Contains(t, code, `ref = append(ref, url.PathEscape(marketHashName)...)`)
 	require.Contains(t, code, `mod.WithHeader("Referer", string(ref))`)
-	require.Contains(t, code, `getter, ok := any(c.r).(interface{ SessionID(string) string })`)
+	require.Contains(t, code, `getter, ok := aoni.UnwrapAs[interface{ SessionID(string) string }](c.r)`)
 	require.Contains(t, code, `formBytes = append(formBytes, "&sessionid="...)`)
 
 	// Verify Search has :page referer ("https://steamcommunity.com/market/search") and :cors headers
@@ -115,8 +114,7 @@ type MonitoredAPI interface {
 	require.NoError(t, err)
 	require.NotNil(t, root)
 
-	em := emitter.NewEmitter()
-	codeBytes, err := em.Emit(root)
+	codeBytes, err := emitter.Emit(root)
 	require.NoError(t, err)
 
 	code := string(codeBytes)

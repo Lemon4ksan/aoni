@@ -2,9 +2,9 @@
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
-// Package ast provides a public, programmatic Abstract Syntax Tree (AST) for constructing,
-// inspecting, transforming, and rendering Aoni declarative API contracts.
 package ast
+
+import "github.com/lemon4ksan/foundation/generic"
 
 // ProtocolKind identifies the underlying transport protocol.
 type ProtocolKind string
@@ -157,4 +157,126 @@ type BitpackField struct {
 	Name     string
 	BitWidth int
 	Doc      []string
+}
+
+// FindService searches for a service node by name.
+func (f *File) FindService(name string) (*Service, bool) {
+	if f == nil {
+		return nil, false
+	}
+
+	return generic.Find(f.Services, func(s *Service) bool {
+		return s != nil && s.Name == name
+	})
+}
+
+// FindServiceOptional returns FindService wrapped in a [generic.Optional].
+func (f *File) FindServiceOptional(name string) generic.Optional[*Service] {
+	return generic.From(f.FindService(name))
+}
+
+// FindStruct searches for a struct DTO node by name.
+func (f *File) FindStruct(name string) (*Struct, bool) {
+	if f == nil {
+		return nil, false
+	}
+
+	return generic.Find(f.Structs, func(s *Struct) bool {
+		return s != nil && s.Name == name
+	})
+}
+
+// FindStructOptional returns FindStruct wrapped in a [generic.Optional].
+func (f *File) FindStructOptional(name string) generic.Optional[*Struct] {
+	return generic.From(f.FindStruct(name))
+}
+
+// FindTuple searches for a tuple node by name.
+func (f *File) FindTuple(name string) (*Tuple, bool) {
+	if f == nil {
+		return nil, false
+	}
+
+	return generic.Find(f.Tuples, func(t *Tuple) bool {
+		return t != nil && t.Name == name
+	})
+}
+
+// FindTupleOptional returns FindTuple wrapped in a [generic.Optional].
+func (f *File) FindTupleOptional(name string) generic.Optional[*Tuple] {
+	return generic.From(f.FindTuple(name))
+}
+
+// FindUnion searches for a union node by name.
+func (f *File) FindUnion(name string) (*Union, bool) {
+	if f == nil {
+		return nil, false
+	}
+
+	return generic.Find(f.Unions, func(u *Union) bool {
+		return u != nil && u.Name == name
+	})
+}
+
+// FindUnionOptional returns FindUnion wrapped in a [generic.Optional].
+func (f *File) FindUnionOptional(name string) generic.Optional[*Union] {
+	return generic.From(f.FindUnion(name))
+}
+
+// FindBitpack searches for a bitpack node by name.
+func (f *File) FindBitpack(name string) (*Bitpack, bool) {
+	if f == nil {
+		return nil, false
+	}
+
+	return generic.Find(f.Bitpacks, func(b *Bitpack) bool {
+		return b != nil && b.Name == name
+	})
+}
+
+// FindBitpackOptional returns FindBitpack wrapped in a [generic.Optional].
+func (f *File) FindBitpackOptional(name string) generic.Optional[*Bitpack] {
+	return generic.From(f.FindBitpack(name))
+}
+
+// FindMethod searches for a method by name on the service interface.
+func (s *Service) FindMethod(name string) (*Method, bool) {
+	if s == nil {
+		return nil, false
+	}
+
+	return generic.Find(s.Methods, func(m *Method) bool {
+		return m != nil && m.Name == name
+	})
+}
+
+// FindMethodOptional returns FindMethod wrapped in a [generic.Optional].
+func (s *Service) FindMethodOptional(name string) generic.Optional[*Method] {
+	return generic.From(s.FindMethod(name))
+}
+
+// HasMethods reports whether the service defines at least one endpoint method.
+func (s *Service) HasMethods() bool {
+	return s != nil && len(s.Methods) > 0
+}
+
+// FindField searches for a struct field by name.
+func (s *Struct) FindField(name string) (*Field, bool) {
+	if s == nil {
+		return nil, false
+	}
+
+	return generic.Find(s.Fields, func(f *Field) bool {
+		return f != nil && f.Name == name
+	})
+}
+
+// FindFieldOptional returns FindField wrapped in a [generic.Optional].
+func (s *Struct) FindFieldOptional(name string) generic.Optional[*Field] {
+	return generic.From(s.FindField(name))
+}
+
+// HasFields reports whether the struct defines at least one field.
+func (s *Struct) HasFields() bool {
+	return s != nil && len(s.Fields) > 0
 }

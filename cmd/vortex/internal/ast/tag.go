@@ -14,13 +14,13 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"sort"
+	"slices"
 	"strings"
 	"time"
 
 	"github.com/lemon4ksan/aoni/cmd/vortex/internal/base"
-	"github.com/lemon4ksan/aoni/internal/codegen/parser"
-	"github.com/lemon4ksan/aoni/internal/codegen/project"
+	"github.com/lemon4ksan/aoni/cmd/vortex/lib/parser"
+	"github.com/lemon4ksan/aoni/cmd/vortex/lib/project"
 )
 
 // CmdTag manages API contract release versions and SemVer snapshots.
@@ -251,8 +251,8 @@ func (c *CmdTag) runList(
 		}
 	}
 
-	sort.Slice(tags, func(i, j int) bool {
-		return tags[i].CreatedAt.After(tags[j].CreatedAt)
+	slices.SortFunc(tags, func(a, b TagEntry) int {
+		return b.CreatedAt.Compare(a.CreatedAt)
 	})
 
 	if jsonOut {

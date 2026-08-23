@@ -5,21 +5,23 @@
 package fast_test
 
 import (
+	"bytes"
 	"compress/gzip"
 	"context"
 	"io"
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"sync"
 	"testing"
 	"time"
 
-	"github.com/andybalholm/brotli"
-	"github.com/klauspost/compress/zstd"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"github.com/valyala/fasthttp"
 
+	"github.com/lemon4ksan/aoni/cookie"
 	"github.com/lemon4ksan/aoni/fast"
 	"github.com/lemon4ksan/aoni/option"
 )
@@ -202,14 +204,21 @@ func TestFastClient_Decompression_Gzip_Brotli_Zstd(t *testing.T) {
 			_ = gz.Close()
 		case "/br":
 			w.Header().Set("Content-Encoding", "br")
-			br := brotli.NewWriter(w)
-			_, _ = br.Write([]byte("uncompressed-brotli-payload"))
-			_ = br.Close()
+
+			brData := fasthttp.AppendBrotliBytes(nil, []byte("uncompressed-brotli-payload"))
+			_, _ = w.Write(brData)
 		case "/zstd":
 			w.Header().Set("Content-Encoding", "zstd")
-			zw, _ := zstd.NewWriter(w)
-			_, _ = zw.Write([]byte("uncompressed-zstd-payload"))
-			_ = zw.Close()
+
+			payload := []byte("uncompressed-zstd-payload")
+			// Raw single segment zstd frame
+			var buf bytes.Buffer
+			buf.Write([]byte{0x28, 0xb5, 0x2f, 0xfd, 0x20, byte(len(payload))})
+			bh := uint32(1) | (uint32(len(payload)) << 3)
+			buf.Write([]byte{byte(bh), byte(bh >> 8), byte(bh >> 16)})
+			buf.Write(payload)
+			_, _ = w.Write(buf.Bytes())
+
 		default:
 			w.WriteHeader(http.StatusNotFound)
 		}
@@ -238,4 +247,50 @@ func TestFastClient_Decompression_Gzip_Brotli_Zstd(t *testing.T) {
 			assert.Equal(t, tt.expected, string(resp.BodyBytes()))
 		})
 	}
+}
+
+func TestFastClient_Cookies_Inspection(t *testing.T) {
+	t.Parallel()
+
+	jar := cookie.NewProxyIsolatedJar()
+
+	client := fast.NewClient(option.WithCookieJar(jar))
+	defer client.CloseIdleConnections()
+
+	u, err := url.Parse("https://example.com/test")
+	require.NoError(t, err)
+
+	assert.False(t, client.HasCookies(u))
+
+	client.SetCookies(u, []*http.Cookie{
+		{Name: "session_id", Value: "sess-999"},
+		{Name: "role", Value: "admin"},
+	})
+
+	assert.True(t, client.HasCookies(u))
+
+	// FindCookie (T, bool)
+	c, ok := client.FindCookie(u, "session_id")
+	require.True(t, ok)
+	assert.Equal(t, "sess-999", c.Value)
+
+	// FindCookieOptional
+	cOpt := client.FindCookieOptional(u, "session_id")
+	require.True(t, cOpt.IsPresent())
+	assert.Equal(t, "sess-999", cOpt.MustValue().Value)
+
+	// GetCookieValue (string, bool)
+	val, okVal := client.GetCookieValue(u, "role")
+	require.True(t, okVal)
+	assert.Equal(t, "admin", val)
+
+	// GetCookieValueOptional
+	valOpt := client.GetCookieValueOptional(u, "role")
+	require.True(t, valOpt.IsPresent())
+	assert.Equal(t, "admin", valOpt.ValueOr("guest"))
+
+	// Missing cookie
+	_, missing := client.FindCookie(u, "non_existent")
+	assert.False(t, missing)
+	assert.False(t, client.FindCookieOptional(u, "non_existent").IsPresent())
 }

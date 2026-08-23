@@ -14,6 +14,7 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/lemon4ksan/foundation/generic"
 	"github.com/lemon4ksan/foundation/silicon/bytesconv"
 
 	"github.com/lemon4ksan/aoni"
@@ -55,10 +56,7 @@ func WithSignHMAC(secret string) aoni.RequestModifier {
 
 // WithSignHMACConfig constructs an [aoni.RequestModifier] applying custom HMAC request signing.
 func WithSignHMACConfig(cfg SignHMACConfig) aoni.RequestModifier {
-	headerName := cfg.HeaderName
-	if headerName == "" {
-		headerName = "X-Signature"
-	}
+	headerName := generic.Coalesce(cfg.HeaderName, "X-Signature")
 
 	return aoni.RequestModifier{
 		Kind: core.ModCustom,

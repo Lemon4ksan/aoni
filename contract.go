@@ -5,32 +5,42 @@
 package aoni
 
 import (
+	"net/http"
+
 	"github.com/lemon4ksan/foundation/generic"
 
 	"github.com/lemon4ksan/aoni/internal/core"
 )
 
 // Universal Protocol Atoms.
+//
+// These core contracts bridge disparate networking paradigms (net/http, fasthttp, and gRPC)
+// into a unified, type-safe, profile-driven architecture conforming strictly to RFC 9110.
 type (
 	// Request represents a unified, zero-allocation HTTP request abstraction conforming to RFC 9110.
-	// It unifies net/http, fasthttp, and gRPC-Web request payloads under a single thread-safe interface.
+	// It homogenizes standard net/http, fasthttp, and gRPC-Web request representations under a single,
+	// high-throughput contract with zero heap allocations on hot paths.
 	Request = core.Request
 
+	// HeaderIterator is implemented by high-performance Request instances to support zero-allocation header traversal.
+	HeaderIterator = core.HeaderIterator
+
 	// Response represents a unified, high-performance HTTP response abstraction conforming to RFC 9110.
-	// Provides zero-copy byte access, pooled memory recycling, and structured decoding facilities.
+	// Provides zero-copy byte access, pooled memory recycling ([Response.Close]), and structured decoding facilities.
 	Response = core.Response
 
 	// RequestDoer is the universal execution contract for processing unified [Request] transactions.
-	// Implemented by [Client], [fast.Client], middlewares, load balancers, and transport adapters.
+	// It is implemented by [*Client], [*fast.Client], middleware decorators, load balancers, and transport bridges.
 	RequestDoer = core.RequestDoer
 
-	// DoerFunc is an adapter allowing the use of ordinary functions as [RequestDoer] execution handlers.
+	// DoerFunc is an adapter allowing ordinary functions to satisfy the [RequestDoer] execution contract.
 	DoerFunc = core.DoerFunc
 
-	// ResponseDecoder deserializes an HTTP response body stream into a target Go data structure.
+	// ResponseDecoder deserializes an HTTP response body stream into a target Go data structure
+	// based on the response Content-Type (e.g. JSON, XML, Protobuf, gRPC-Web).
 	ResponseDecoder = core.ResponseDecoder
 
-	// BaseResponse defines the envelope contract for structured API responses (e.g. status code, error message).
+	// BaseResponse defines the envelope contract for structured API responses (e.g. status code, business errors).
 	BaseResponse = core.BaseResponse
 
 	// BaseResponseProvider yields an envelope instance used for structured response unwrapping.
@@ -47,6 +57,49 @@ type (
 
 	// RequestModifier is a composable, zero-allocation functional modifier applied to outgoing [Request] pipelines.
 	RequestModifier = core.RequestModifier
+
+	// Phase represents a specific discrete phase of the network request lifecycle.
+	Phase = core.Phase
+
+	// Error encapsulates a comprehensive, structured network failure across any transport layer.
+	Error = core.Error
+
+	// SoftErrorDetector inspects the response status, headers, and initial peeked body bytes
+	// for application-layer soft errors (e.g. HTTP 200 OK containing an HTML login or error message).
+	//
+	// Non-Destructive Invariant:
+	// The peek buffer is captured non-destructively. If detector returns a non-nil error,
+	// request execution is aborted with that error without draining the body stream.
+	SoftErrorDetector func(resp *http.Response, peek []byte) error
+)
+
+const (
+	// PhaseUnknown indicates the failure occurred outside tracked request phases.
+	PhaseUnknown = core.PhaseUnknown
+
+	// PhaseDNS indicates failure during domain name resolution.
+	PhaseDNS = core.PhaseDNS
+
+	// PhaseProxyConnect indicates failure during proxy tunnel establishment (SOCKS5 / HTTP CONNECT).
+	PhaseProxyConnect = core.PhaseProxyConnect
+
+	// PhaseTCPConnect indicates failure during raw TCP / QUIC socket dial.
+	PhaseTCPConnect = core.PhaseTCPConnect
+
+	// PhaseTLSHandshake indicates failure during TLS negotiation, certificate validation, or ECH exchange.
+	PhaseTLSHandshake = core.PhaseTLSHandshake
+
+	// PhaseSendHeaders indicates failure while framing and writing request headers.
+	PhaseSendHeaders = core.PhaseSendHeaders
+
+	// PhaseSendBody indicates failure while streaming the request body.
+	PhaseSendBody = core.PhaseSendBody
+
+	// PhaseWaitResponse indicates failure while waiting for initial response headers / TTFB (e.g. server timeout).
+	PhaseWaitResponse = core.PhaseWaitResponse
+
+	// PhaseReadBody indicates failure while reading the incoming response stream payload.
+	PhaseReadBody = core.PhaseReadBody
 )
 
 // Execution & Middleware Contracts.
@@ -61,11 +114,61 @@ type (
 	// WebSocketDialer establishes RFC 6455 / RFC 8441 WebSocket connections over TCP, TLS, or HTTP/2 Extended CONNECT.
 	WebSocketDialer = core.WebSocketDialer
 
-	// Configurable represents any execution client capable of immutably applying [ClientOption] layers.
-	Configurable interface {
-		With(opts ...ClientOption) RequestDoer
+	// Configurable is a protocol representing any entity capable of immutably applying [ClientOption] layers.
+	Configurable[T any] interface {
+		With(opts ...ClientOption) T
+	}
+
+	// Unwrapper is a protocol representing any wrapper entity capable of revealing its underlying wrapped object.
+	Unwrapper[T any] interface {
+		Unwrap() T
 	}
 )
+
+// UnwrapAs traverses nested decorator chains until an instance of target type T is discovered.
+//
+// Onion-Peeling Mechanics:
+// In deeply layered architectures (e.g. RoundTripper -> Telemetry -> Retry -> CookieJar -> Transport),
+// UnwrapAs unwinds layers recursively via zero-allocation type assertions,
+// returning the inner instance and true if found, or the zero value of T and false.
+func UnwrapAs[T any](target any) (T, bool) {
+	for curr := target; curr != nil; {
+		if typed, ok := curr.(T); ok {
+			return typed, true
+		}
+
+		next := unwrapNext(curr)
+		if next == nil || next == curr {
+			break
+		}
+
+		curr = next
+	}
+
+	return generic.Zero[T](), false
+}
+
+func unwrapNext(curr any) any {
+	switch u := curr.(type) {
+	case interface{ Unwrap() *Client }:
+		return u.Unwrap()
+	case interface{ Unwrap() HTTPDoer }:
+		return u.Unwrap()
+	case interface{ Unwrap() http.RoundTripper }:
+		return u.Unwrap()
+	case interface{ Unwrap() any }:
+		return u.Unwrap()
+	case interface{ Unwrap() error }:
+		return u.Unwrap()
+	default:
+		return nil
+	}
+}
+
+// ConfigureAs applies [ClientOption] layers to any target conforming to the [Configurable[T]] protocol.
+func ConfigureAs[T any](target Configurable[T], opts ...ClientOption) T {
+	return target.With(opts...)
+}
 
 // Configure applies [ClientOption] layers to any execution engine.
 func Configure(doer any, opts ...ClientOption) RequestDoer {
@@ -89,6 +192,10 @@ func Configure(doer any, opts ...ClientOption) RequestDoer {
 		return c.With(opts...)
 	}
 
+	if conf, ok := doer.(Configurable[RequestDoer]); ok {
+		return conf.With(opts...)
+	}
+
 	type optionApplier interface {
 		ApplyOptions(opts ...ClientOption) RequestDoer
 	}
@@ -96,11 +203,13 @@ func Configure(doer any, opts ...ClientOption) RequestDoer {
 		return a.ApplyOptions(opts...)
 	}
 
-	type withRequestDoer interface {
-		With(opts ...ClientOption) RequestDoer
+	type withAny interface {
+		With(opts ...ClientOption) any
 	}
-	if w, ok := doer.(withRequestDoer); ok {
-		return w.With(opts...)
+	if w, ok := doer.(withAny); ok {
+		if res, ok := w.With(opts...).(RequestDoer); ok {
+			return res
+		}
 	}
 
 	return NewClient(doer, opts...)
@@ -116,7 +225,5 @@ func AcquireRequest(doer any) (Request, func()) {
 		return r, func() { factory.ReleaseRequest(r) }
 	}
 
-	stdReq := NewStdRequest(nil)
-
-	return stdReq, noopReleaseFunc
+	return NewStdRequest(nil), noopReleaseFunc
 }

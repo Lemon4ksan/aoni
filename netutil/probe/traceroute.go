@@ -16,6 +16,8 @@ import (
 	"golang.org/x/net/icmp"
 	"golang.org/x/net/ipv4"
 	"golang.org/x/net/ipv6"
+
+	"github.com/lemon4ksan/aoni/netutil/netdial"
 )
 
 // TraceMode defines the strategy used for traceroute path discovery.
@@ -170,7 +172,7 @@ func probeHop(
 	defer cancel()
 
 	start := time.Now()
-	conn, err := dialer.DialContext(hopCtx, "tcp", targetAddr)
+	conn, err := dialer.DialContext(hopCtx, netdial.NetworkTCP.String(), targetAddr)
 	rtt := time.Since(start)
 
 	if err == nil {

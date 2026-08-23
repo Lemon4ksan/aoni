@@ -14,8 +14,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/lemon4ksan/foundation/net/ip"
-	foundationurl "github.com/lemon4ksan/foundation/net/url"
+	"github.com/lemon4ksan/foundation/generic"
+	fip "github.com/lemon4ksan/foundation/net/ip"
+	furl "github.com/lemon4ksan/foundation/net/url"
 	utls "github.com/refraction-networking/utls"
 
 	"github.com/lemon4ksan/aoni/fingerprint"
@@ -40,7 +41,7 @@ const (
 	// for negotiating HTTP/3 over QUIC transport during TLS 1.3 handshakes (RFC 9114).
 	AlpnH3 = "h3"
 
-	// AlpnH2 specifies the ALPN token for negotiating HTTP/2 over TLS 1.2+ (RFC 7540/9113).
+	// AlpnH2 specifies the ALPN token for negotiating HTTP/2 over TLS 1.2+ (RFC 9113 §3.1 & §3.2).
 	AlpnH2 = "h2"
 
 	// AlpnHTTP specifies the ALPN token for negotiating classic HTTP/1.1 over TLS.
@@ -48,11 +49,137 @@ const (
 
 	// DefaultUserAgent defines the fallback Chrome/Windows User-Agent header used
 	// when no browser persona or custom User-Agent is declared.
-	DefaultUserAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+	DefaultUserAgent = fingerprint.DefaultUserAgent
 
-	// RedirectLimitUnset is a special value that indicates using the default redirect limit.
+	// RedirectLimitDefault is the default redirect limit, which is 10.
+	RedirectLimitDefault = -1
+
+	// RedirectLimitUnset is a special value that indicates bypassing redirect policy check.
 	RedirectLimitUnset = -2
 )
+
+// Network represents an L4 transport or IPC socket network protocol (e.g. "tcp", "unix").
+type Network string
+
+const (
+	// NetworkTCP represents Transmission Control Protocol over IPv4 or IPv6 ("tcp").
+	NetworkTCP Network = "tcp"
+
+	// NetworkTCP4 represents Transmission Control Protocol restricted to IPv4 ("tcp4").
+	NetworkTCP4 Network = "tcp4"
+
+	// NetworkTCP6 represents Transmission Control Protocol restricted to IPv6 ("tcp6").
+	NetworkTCP6 Network = "tcp6"
+
+	// NetworkUDP represents User Datagram Protocol over IPv4 or IPv6 ("udp").
+	NetworkUDP Network = "udp"
+
+	// NetworkUDP4 represents User Datagram Protocol restricted to IPv4 ("udp4").
+	NetworkUDP4 Network = "udp4"
+
+	// NetworkUDP6 represents User Datagram Protocol restricted to IPv6 ("udp6").
+	NetworkUDP6 Network = "udp6"
+
+	// NetworkIP represents raw IP protocol over IPv4 or IPv6 ("ip").
+	NetworkIP Network = "ip"
+
+	// NetworkIP4 represents raw IP protocol restricted to IPv4 ("ip4").
+	NetworkIP4 Network = "ip4"
+
+	// NetworkIP6 represents raw IP protocol restricted to IPv6 ("ip6").
+	NetworkIP6 Network = "ip6"
+
+	// NetworkUnix represents Unix domain stream socket ("unix").
+	NetworkUnix Network = "unix"
+
+	// NetworkUnixGram represents Unix domain datagram socket ("unixgram").
+	NetworkUnixGram Network = "unixgram"
+
+	// NetworkUnixPacket represents Unix domain sequenced packet socket ("unixpacket").
+	NetworkUnixPacket Network = "unixpacket"
+)
+
+// String returns the network protocol string value.
+func (n Network) String() string {
+	return string(n)
+}
+
+// IsTCP reports whether the network is a TCP variant ("tcp", "tcp4", "tcp6").
+func (n Network) IsTCP() bool {
+	return n == NetworkTCP || n == NetworkTCP4 || n == NetworkTCP6
+}
+
+// IsUDP reports whether the network is a UDP variant ("udp", "udp4", "udp6").
+func (n Network) IsUDP() bool {
+	return n == NetworkUDP || n == NetworkUDP4 || n == NetworkUDP6
+}
+
+// IsUnix reports whether the network is a Unix domain socket variant ("unix", "unixgram", "unixpacket").
+func (n Network) IsUnix() bool {
+	return n == NetworkUnix || n == NetworkUnixGram || n == NetworkUnixPacket
+}
+
+// IsIP reports whether the network is a raw IP socket variant ("ip", "ip4", "ip6").
+func (n Network) IsIP() bool {
+	return n == NetworkIP || n == NetworkIP4 || n == NetworkIP6
+}
+
+// Protocol represents a URL scheme protocol (e.g. ProtocolHTTP, ProtocolHTTPS, ProtocolFile, ProtocolFTP, ProtocolS3, ProtocolWS).
+type Protocol string
+
+const (
+	// ProtocolHTTP represents unencrypted Hypertext Transfer Protocol ("http").
+	ProtocolHTTP Protocol = "http"
+
+	// ProtocolHTTPS represents encrypted Hypertext Transfer Protocol over TLS ("https").
+	ProtocolHTTPS Protocol = "https"
+
+	// ProtocolFile represents local filesystem URI scheme ("file").
+	ProtocolFile Protocol = "file"
+
+	// ProtocolFTP represents File Transfer Protocol ("ftp").
+	ProtocolFTP Protocol = "ftp"
+
+	// ProtocolS3 represents Amazon Simple Storage Service scheme ("s3").
+	ProtocolS3 Protocol = "s3"
+
+	// ProtocolBlob represents Azure Blob or browser Blob scheme ("blob").
+	ProtocolBlob Protocol = "blob"
+
+	// ProtocolIPFS represents InterPlanetary File System scheme ("ipfs").
+	ProtocolIPFS Protocol = "ipfs"
+
+	// ProtocolWS represents RFC 6455 unencrypted WebSocket scheme ("ws").
+	ProtocolWS Protocol = "ws"
+
+	// ProtocolWSS represents RFC 6455 encrypted WebSocket over TLS scheme ("wss").
+	ProtocolWSS Protocol = "wss"
+)
+
+// String returns the string representation of Protocol.
+func (p Protocol) String() string {
+	return string(p)
+}
+
+// IsHTTP reports whether the protocol is standard HTTP ("http") or HTTPS ("https").
+func (p Protocol) IsHTTP() bool {
+	return p == ProtocolHTTP || p == ProtocolHTTPS
+}
+
+// IsSecure reports whether the protocol is an encrypted scheme ("https", "wss").
+func (p Protocol) IsSecure() bool {
+	return p == ProtocolHTTPS || p == ProtocolWSS
+}
+
+// IsWebSocket reports whether the protocol is WebSocket ("ws") or Secure WebSocket ("wss").
+func (p Protocol) IsWebSocket() bool {
+	return p == ProtocolWS || p == ProtocolWSS
+}
+
+// IsStandardHTTP reports whether the protocol belongs to standard Web HTTP/WS traffic.
+func (p Protocol) IsStandardHTTP() bool {
+	return p.IsHTTP() || p.IsWebSocket()
+}
 
 // ConnFilter defines a stream transformation codec evaluated during socket dialing.
 // See [transport.ConnFilter].
@@ -106,55 +233,147 @@ func (c Config) Clone() Config {
 	}
 }
 
-// EngineConfig configures settings applied directly to the underlying HTTP execution engine
-// (typically standard *http.Client or fast.Client) rather than transport layers.
+// RequiresRequestContext reports whether any subsystem configuration requires attaching RequestConfig to request contexts.
+func (c Config) RequiresRequestContext() bool {
+	return c.Network.RequiresRequestContext() ||
+		c.Fingerprint.RequiresRequestContext() ||
+		c.Defaults.RequiresRequestContext()
+}
+
+// IsBaremetalEligible reports whether the entire client configuration permits fast 0-alloc baremetal execution.
+func (c Config) IsBaremetalEligible() bool {
+	return !c.RequiresRequestContext() &&
+		c.Fingerprint.IsBaremetalEligible() &&
+		c.Defaults.IsBaremetalEligible()
+}
+
+// BuildDialConfig converts the [Config] into a self-contained [transport.DialConfig] DTO for socket dialing.
+// Read-only and safe for concurrent use.
+func (c Config) BuildDialConfig(ctx context.Context) transport.DialConfig {
+	netProto := c.Network.Network.String()
+	if netProto == "" {
+		netProto = NetworkTCP.String()
+	}
+
+	return transport.DialConfig{
+		Network:            netProto,
+		DNSResolver:        c.Network.DNSResolver,
+		StackDriver:        c.Network.StackDriver,
+		L2Device:           c.Network.L2Device,
+		SourceRotator:      c.Network.SourceRotator,
+		HappyEyeballs:      c.Network.HappyEyeballsDelay,
+		SSRFGuard:          c.Network.SSRFGuard,
+		ProxyDNS:           c.Network.ProxyDNS,
+		P0fSignature:       c.Fingerprint.P0fSignature,
+		SocketController:   c.Network.SocketController,
+		FragmentConfig:     c.Network.FragmentConfig,
+		ProxyURL:           c.Network.ProxyAddr,
+		InsecureSkipVerify: GetInsecureSkipVerify(ctx) || c.Engine.InsecureSkipVerify,
+		SpecProvider:       c.Fingerprint.TLSClientHelloSpecProvider,
+		SessionCache:       c.Fingerprint.SessionCache,
+		CertificatePins:    c.Fingerprint.CertificatePins,
+		CertCompression:    c.Fingerprint.CertCompression,
+		HeaderOrder:        c.Fingerprint.HeaderOrder,
+		JA4Callback:        c.Fingerprint.JA4Callback,
+		AutoECH:            c.Fingerprint.AutoECH,
+		Enable0RTT:         c.Fingerprint.Enable0RTT,
+		ECHConfigList:      c.Fingerprint.ECHConfigList,
+		ConnFilters:        c.Network.ConnFilters,
+		TCPQuickACK:        c.Network.TCPQuickACK,
+		RegisteredIO:       c.Network.HasExperimental(ExpRIO),
+	}
+}
+
+// EngineConfig governs low-level HTTP execution engine parameters, connection pool boundaries,
+// socket I/O memory buffers, protocol-specific keep-alive probes, and redirect policies.
+//
+// These settings apply directly to the underlying HTTP execution handler (standard [*http.Client]
+// or [fast.Client]) rather than dial-level transport layers.
 type EngineConfig struct {
-	// CookieJar handles HTTP cookie persistence. If nil, cookies are ignored.
-	// For proxy-isolated cookie storage, use [cookie.ProxyIsolatedJar].
+	// CookieJar manages HTTP cookie persistence and RFC 6265 lifecycle policies across transactions.
+	//
+	// Security & Proxy Isolation:
+	// If nil, cookies received in Set-Cookie response headers are discarded immediately.
+	// For multi-tenant or rotating proxy architectures, use [cookie.ProxyIsolatedJar] to prevent
+	// session identification and cross-proxy cookie leakage.
 	CookieJar http.CookieJar
 
-	// CustomEngine overrides default engine creation with a custom HTTPDoer implementation.
+	// CustomEngine overrides default engine instantiation with a custom [HTTPDoer] execution handler.
+	// Useful for dependency injection, recorded replay fixtures, or specialized in-memory engines.
 	CustomEngine HTTPDoer
 
-	// ConnectionPool configures keep-alive connection boundaries and socket buffer limits.
+	// ConnectionPool configures keep-alive socket boundaries, host limits, and I/O buffer allocations.
+	// If nil, standard library transport defaults (MaxIdleConns=100, IdleConnTimeout=90s) are applied.
 	ConnectionPool *ConnectionPoolConfig
 
-	// HTTP2Config configures low-level HTTP/2 protocol timeouts and HTTP cleartext fallback.
+	// HTTP2Config configures low-level HTTP/2 protocol timeouts, PING keep-alives, and cleartext h2c.
+	// If nil, default HTTP/2 protocol parameters are inherited from Go runtime transport.
 	HTTP2Config *HTTP2Config
 
-	// Timeout sets the maximum end-to-end execution time for an entire HTTP transaction,
-	// including dial, TLS handshake, request write, server processing, and body read.
-	// Set to 0 for no timeout.
+	// Timeout specifies the maximum end-to-end execution time for an entire HTTP transaction,
+	// spanning DNS lookup, TCP dial, TLS handshake, request serialization, server processing, and body read.
+	//
+	// Invariant:
+	// A timeout of 0 disables client-level timeouts, leaving deadline control exclusively to [context.Context].
 	Timeout time.Duration
 
-	// RedirectLimit sets the maximum number of HTTP redirects followed automatically.
-	//   - Default (> 0): Follows up to N redirects with cross-origin header scrubbing.
-	//   - 0: Disables automatic redirect following (returns 3xx response directly).
-	//   - Negative (-2): Uses default limit (10 redirects).
+	// RedirectLimit enforces the maximum allowable HTTP redirect hops followed automatically (RFC 9110 §15.4).
+	//
+	// Operational Modes:
+	//   - Default (> 0): Automatically follows up to N redirects with cross-origin credential scrubbing.
+	//   - 0: Disables automatic redirect following, returning 3xx responses directly to the caller.
+	//   - [RedirectLimitDefault] (-1): Applies the standard browser limit (10 redirects).
+	//   - [RedirectLimitUnset] (-2): Fully disables redirect limits, following redirects unconditionally.
 	RedirectLimit int
 
-	// InsecureSkipVerify bypasses TLS server certificate and hostname verification.
-	// WARNING: Enabling this exposes outgoing connections to Man-in-the-Middle (MitM) attacks.
+	// InsecureSkipVerify controls whether the client verifies the server's certificate chain and host name.
+	//
+	// CAUTION: Man-in-the-Middle (MitM) Vulnerability:
+	// When true, crypto/tls accepts any certificate presented by the server and any host name in that certificate.
+	// This should ONLY be used in controlled development, local proxy sniffing, or self-signed staging environments.
 	InsecureSkipVerify bool
 
-	// CheckRedirect overrides default redirect handling logic with a custom policy.
-	// If set, takes precedence over RedirectLimit.
+	// CheckRedirect overrides default redirect handling logic with a custom policy function.
+	//
+	// Precedence Invariant:
+	// If non-nil, CheckRedirect takes precedence over [EngineConfig.RedirectLimit].
 	CheckRedirect func(req *http.Request, via []*http.Request) error
 
-	// Protocols maps non-HTTP URL schemes (e.g. "file", "ftp", "s3") to custom RoundTrippers.
-	Protocols map[string]http.RoundTripper
+	// Protocols maps non-HTTP URL schemes (e.g. ProtocolFile, ProtocolFTP, ProtocolS3, ProtocolBlob) to custom RoundTrippers.
+	Protocols ProtocolMap
+
+	// DigestAuth configures RFC 7616 HTTP Digest Access Authentication credentials for automatic 401 challenge resolution.
+	DigestAuth *DigestAuthConfig
+}
+
+// DigestAuthConfig holds RFC 7616 HTTP Digest Access Authentication credentials.
+type DigestAuthConfig struct {
+	Username string
+	Password string
+}
+
+// ProtocolMap maps URL protocol schemes to custom [http.RoundTripper] handlers.
+type ProtocolMap map[Protocol]http.RoundTripper
+
+// Clone creates a memory-isolated copy of the protocol handler map.
+func (p ProtocolMap) Clone() ProtocolMap {
+	if p == nil {
+		return nil
+	}
+
+	cloned := make(ProtocolMap, len(p))
+	maps.Copy(cloned, p)
+
+	return cloned
 }
 
 // Clone creates a deep copy of EngineConfig and its nested maps and pointers.
 func (e EngineConfig) Clone() EngineConfig {
 	cloned := e
-	if e.Protocols != nil {
-		cloned.Protocols = make(map[string]http.RoundTripper, len(e.Protocols))
-		maps.Copy(cloned.Protocols, e.Protocols)
-	}
-
+	cloned.Protocols = e.Protocols.Clone()
 	cloned.ConnectionPool = clonePtr(e.ConnectionPool)
 	cloned.HTTP2Config = clonePtr(e.HTTP2Config)
+	cloned.DigestAuth = clonePtr(e.DigestAuth)
 
 	return cloned
 }
@@ -162,62 +381,80 @@ func (e EngineConfig) Clone() EngineConfig {
 // ConnectionPoolConfig configures HTTP/1.1 and HTTP/2 keep-alive connection boundaries,
 // host limits, and socket I/O memory buffer allocations.
 type ConnectionPoolConfig struct {
-	// IdleConnTimeout is the maximum time an idle keep-alive connection remains open.
-	// Default: 90 seconds.
+	// IdleConnTimeout defines the maximum idle duration an unused keep-alive socket remains cached in the pool.
+	//
+	// Pool Janitor Mechanics:
+	// Once an idle connection exceeds this threshold, background pool janitors close the socket
+	// to prevent holding open stale kernel file descriptors. Default: 90 seconds.
 	IdleConnTimeout time.Duration
 
-	// ResponseHeaderTimeout is the maximum time to wait for a server's response headers
+	// ResponseHeaderTimeout sets the maximum time allowed to wait for a server's response headers
 	// after writing the complete request payload.
+	//
+	// Stalled Connection Detection:
+	// Prevents goroutines from hanging indefinitely when backend servers accept TCP requests but fail to reply.
+	// Set to 0 for unlimited.
 	ResponseHeaderTimeout time.Duration
 
-	// MaxIdleConns sets the maximum number of idle keep-alive connections across all hosts.
+	// MaxIdleConns sets the maximum number of idle keep-alive connections across all target hosts.
 	// Default: 100.
 	MaxIdleConns int
 
-	// MaxIdleConnsPerHost sets the maximum number of idle keep-alive connections per host.
-	// Default: 2 (stdlib) or higher for high-throughput clients.
+	// MaxIdleConnsPerHost sets the maximum number of idle keep-alive connections maintained per host.
+	// Default: 2 (stdlib standard) or higher for high-throughput clients.
 	MaxIdleConnsPerHost int
 
-	// MaxConnsPerHost limits the total active (busy + idle) connections per host.
+	// MaxConnsPerHost bounds the total active (busy + idle) connections permitted per target host.
+	//
+	// Rate Throttling & Resource Protection:
+	// When active connections reach this limit, subsequent dials block until existing sockets return to the pool.
 	// Set to 0 for unlimited.
 	MaxConnsPerHost int
 
-	// ReadBufferSize sets the size of the read buffer allocated per connection socket (bytes).
+	// ReadBufferSize sets the size of the OS read buffer allocated per connection socket (bytes).
+	// Default: 4KB (4096 bytes). Larger buffers (e.g. 64KB) optimize high-throughput payload streaming.
 	ReadBufferSize int
 
-	// WriteBufferSize sets the size of the write buffer allocated per connection socket (bytes).
+	// WriteBufferSize sets the size of the OS write buffer allocated per connection socket (bytes).
+	// Default: 4KB (4096 bytes). Larger buffers reduce write syscall frequency during large multipart uploads.
 	WriteBufferSize int
 }
 
-// HTTP2Config configures low-level HTTP/2 protocol health checks and transport options.
+// HTTP2Config configures low-level HTTP/2 framing, PING keep-alive health probes, and cleartext h2c.
 type HTTP2Config struct {
-	// ReadIdleTimeout is the duration of client inactivity before sending an HTTP/2 PING frame.
+	// ReadIdleTimeout specifies client inactivity duration before transmitting an HTTP/2 PING frame.
+	//
+	// Keep-Alive Liveness Probing:
+	// Periodically tests whether the remote edge node is responsive, detecting half-open TCP connections.
 	ReadIdleTimeout time.Duration
 
-	// PingTimeout is the time to wait for an HTTP/2 PING ACK before closing the connection.
+	// PingTimeout defines the duration to wait for an HTTP/2 PING ACK before terminating the connection.
 	PingTimeout time.Duration
 
-	// AllowHTTP enables unencrypted HTTP/2 over cleartext TCP (h2c / Prior Knowledge).
+	// AllowHTTP enables unencrypted HTTP/2 over cleartext TCP (Starting HTTP/2 with Prior Knowledge, RFC 9113 §3.3).
+	// When true, allows HTTP/2 framing without TLS handshakes on trusted internal VPCs or local microservices.
 	AllowHTTP bool
 }
 
 // QUICMigrationConfig controls QUIC Connection Migration parameters (RFC 9000 §9).
-// Connection migration allows HTTP/3 streams to survive client IP/interface changes
-// (e.g. switching from Wi-Fi to Cellular) without breaking active transfers.
+//
+// Zero-Disruption Network Switching:
+// Connection migration allows HTTP/3 streams to survive client IP and network interface changes
+// (e.g. switching from Wi-Fi to Cellular or roaming across base stations) without breaking active transfers.
 type QUICMigrationConfig struct {
-	// KeepAlivePeriod is the interval for sending QUIC PING frames to maintain NAT bindings.
+	// KeepAlivePeriod defines the interval for transmitting QUIC PING frames to preserve NAT traversal bindings.
 	KeepAlivePeriod time.Duration
 
-	// MaxIdleTimeout is the duration of QUIC inactivity before closing the connection.
+	// MaxIdleTimeout sets the duration of QUIC inactivity before gracefully closing the connection.
 	MaxIdleTimeout time.Duration
 
-	// InitialPacketSize sets the initial QUIC UDP packet size in bytes (RFC 9000 §14.1 requires >= 1200).
+	// InitialPacketSize sets the initial QUIC UDP datagram size in bytes (RFC 9000 §14.1 requires >= 1200).
 	InitialPacketSize uint16
 
-	// EnableMigration toggles QUIC connection migration across network path changes.
+	// EnableMigration toggles QUIC connection migration across network path and IP changes.
 	EnableMigration bool
 
-	// DisablePathMTUDiscovery disables Path MTU Discovery (PMTUD) over QUIC UDP sockets.
+	// DisablePathMTUDiscovery disables dynamic Path MTU Discovery (PMTUD) over QUIC UDP sockets.
 	DisablePathMTUDiscovery bool
 }
 
@@ -254,18 +491,25 @@ const (
 	ExpBusyPoll
 )
 
-// NetworkConfig configures L3/L4 transport parameters, proxy routing, DNS resolution,
-// dual-stack IPv4/IPv6 racing, SSRF guards, and socket controllers.
+// NetworkConfig configures L3/L4 transport parameters, proxy routing, custom DNS resolution,
+// dual-stack IPv4/IPv6 racing (Happy Eyeballs v2 / RFC 8305), SSRF guards, and kernel socket options.
 type NetworkConfig struct {
-	// ProxyAddr specifies a single static proxy endpoint (HTTP, HTTPS, SOCKS5, SOCKS5h).
+	// Network specifies the default network protocol used for socket dialing.
+	// Supported options: [NetworkTCP], [NetworkTCP4], [NetworkTCP6], [NetworkUnix].
+	// Defaults to [NetworkTCP] if unset.
+	Network Network
+
+	// ProxyAddr specifies a static proxy endpoint URL (HTTP, HTTPS, SOCKS5, SOCKS5h).
 	// Takes precedence if TransportProxy is nil.
 	ProxyAddr *url.URL
 
 	// TransportProxy is a dynamic proxy resolution function evaluated per request.
-	// Takes precedence over ProxyAddr if both are defined.
+	// Takes precedence over ProxyAddr if both are defined, enabling dynamic proxy rotation.
 	TransportProxy func(*http.Request) (*url.URL, error)
 
-	// DNSResolver overrides system DNS resolution with custom DoH, DoT, DoQ, or static resolvers.
+	// DNSResolver overrides the host operating system's DNS resolver with high-performance
+	// custom DNS over HTTPS (DoH / RFC 8484), DNS over TLS (DoT / RFC 7858), DNS over QUIC (DoQ / RFC 9250),
+	// or static in-memory DNS tables.
 	DNSResolver netutil.DNSResolver
 
 	// StackDriver provides an optional custom user-space L3/L4 network stack driver.
@@ -274,54 +518,58 @@ type NetworkConfig struct {
 	// L2Device provides an optional Data Link Layer (Ethernet) device interface for raw frame I/O.
 	L2Device netdial.L2Device
 
-	// SourceRotator manages round-robin rotation across multiple local egress IP addresses.
-	SourceRotator *ip.SourceIPRotator
+	// SourceRotator manages round-robin or least-used rotation across multiple local egress IP addresses.
+	SourceRotator *fip.SourceIPRotator
 
-	// DynamicHedging configures RTT percentile-based speculative request hedging to eliminate tail latency.
+	// DynamicHedging configures real-time EWMA latency-based speculative request hedging to eliminate tail latency.
 	DynamicHedging *telemetry.DynamicHedgingConfig
 
-	// SocketController provides a low-level callback to manipulate socket file descriptors (fd)
-	// before TCP SYN packets are transmitted.
+	// SocketController provides a low-level callback invoked immediately after socket creation,
+	// allowing arbitrary manipulation of raw file descriptors (fd) via setsockopt before TCP SYN transmission.
 	SocketController netutil.SocketController
 
-	// FragmentConfig configures TCP payload write chunking to evade DPI rate/pattern inspection.
+	// FragmentConfig configures TCP payload write-chunking to evade Deep Packet Inspection (DPI) pattern signatures.
 	FragmentConfig *fragment.Config
 
-	// HostRewrite configures static hostname-to-IP/host remapping rules.
+	// HostRewrite configures static hostname-to-IP/host remapping rules, overriding DNS resolution for specific domains.
 	HostRewrite *netutil.HostRewriteConfig
 
 	// ConnFilters registers custom stream codec filters evaluated during socket dialing.
 	ConnFilters []ConnFilter
 
-	// HappyEyeballsDelay sets the IPv4/IPv6 connection racing delay (RFC 8305).
+	// HappyEyeballsDelay defines the head-start delay between IPv6 and IPv4 connection attempts (RFC 8305 §5).
+	// The client attempts IPv6 first, launching a concurrent IPv4 dial after this delay if IPv6 has not connected.
 	// Default: 300ms.
 	HappyEyeballsDelay time.Duration
 
-	// HedgingDelay sets the fixed delay before launching a speculative secondary request.
+	// HedgingDelay sets the fixed fallback duration before launching a secondary speculative request.
 	HedgingDelay time.Duration
 
-	// InterfaceName binds outgoing sockets to a specific network interface (e.g. "eth0", "wg0").
+	// InterfaceName binds outgoing sockets to a designated network interface (e.g. "eth0", "wlan0", "wg0").
 	InterfaceName string
 
-	// SocketMark sets a Linux netfilter socket mark (SO_MARK) for policy-based routing.
+	// SocketMark sets a Linux netfilter socket mark (SO_MARK) for kernel policy-based routing tables.
 	SocketMark uint32
 
-	// ProxyDNS forces DNS resolution to occur remotely on the proxy server (SOCKS5h / HTTP CONNECT).
+	// ProxyDNS forces hostname resolution to execute remotely on the proxy server (SOCKS5h / HTTP CONNECT).
+	// Prevents local DNS leaks when operating through privacy tunnels.
 	ProxyDNS bool
 
-	// SSRFGuard blocks requests targeting private, loopback, link-local, or CGNAT IP ranges.
+	// SSRFGuard actively inspects resolved IP addresses, blocking outgoing requests to private (RFC 1918),
+	// loopback (127.0.0.0/8), link-local (169.254.0.0/16), and Carrier-Grade NAT (100.64.0.0/10) subnets.
 	SSRFGuard bool
 
-	// TCPQuickACK enables TCP quick ACK socket option.
+	// TCPQuickACK enables the TCP_QUICKACK socket option on Linux, disabling delayed ACKs for lower latency.
 	TCPQuickACK bool
 
-	// EnablePowerManagement monitors OS sleep/resume transitions and purges zombie connections.
+	// EnablePowerManagement attaches an OS power lifecycle watcher that purges stale keep-alive connections
+	// upon laptop sleep/wake transitions, preventing silent 15-second write timeouts on dead sockets.
 	EnablePowerManagement bool
 
-	// ExperimentalFlags consolidates all opt-in hardware and OS experimental features under a single bitmask.
+	// ExperimentalFlags consolidates opt-in hardware and OS experimental accelerations (io_uring, SIMD, RIO, TCP Fast Open).
 	ExperimentalFlags ExperimentalFlag
 
-	// CPUAffinityCores locks worker OS threads to designated CPU core indices.
+	// CPUAffinityCores locks network worker OS threads to designated CPU core indices to eliminate thread migration overhead.
 	CPUAffinityCores []int
 }
 
@@ -344,6 +592,11 @@ func (n NetworkConfig) Clone() NetworkConfig {
 	}
 
 	return cloned
+}
+
+// RequiresRequestContext reports whether network configurations require attaching RequestConfig to request contexts.
+func (n NetworkConfig) RequiresRequestContext() bool {
+	return n.SocketController != nil || n.SSRFGuard || n.ProxyAddr != nil
 }
 
 // HostRewriteConfig configures static DNS and Host header remapping rules.
@@ -380,72 +633,143 @@ func (b BrowserID) String() string {
 	}
 }
 
-// BrowserProfile holds user-agent strings and Client Hints headers for profile rotation.
+// ClientHintsMap maps W3C Client Hints header keys (e.g. "Sec-CH-UA-Platform") to string values.
+type ClientHintsMap map[string]string
+
+// Clone creates a memory-isolated copy of the client hints map.
+func (c ClientHintsMap) Clone() ClientHintsMap {
+	if c == nil {
+		return nil
+	}
+
+	cloned := make(ClientHintsMap, len(c))
+	maps.Copy(cloned, c)
+
+	return cloned
+}
+
+// BrowserProfile holds user-agent strings and synchronized Client Hints headers
+// for realistic browser persona emulation and profile rotation.
 type BrowserProfile struct {
-	UserAgent   string
-	ClientHints map[string]string
+	// UserAgent is the exact browser User-Agent header string.
+	UserAgent string
+
+	// ClientHints maps W3C Client Hints header keys (e.g. "Sec-CH-UA", "Sec-CH-UA-Platform", "Sec-CH-UA-Mobile")
+	// to their corresponding browser version strings to match the declared User-Agent.
+	ClientHints ClientHintsMap
+}
+
+// Clone creates a deep copy of BrowserProfile and its ClientHints map.
+func (b BrowserProfile) Clone() BrowserProfile {
+	return BrowserProfile{
+		UserAgent:   b.UserAgent,
+		ClientHints: b.ClientHints.Clone(),
+	}
+}
+
+// CertificatePinMap maps domain patterns (e.g. "*.example.com") to expected SHA-256 SPKI fingerprint hashes.
+type CertificatePinMap map[string][]string
+
+// Clone creates a memory-isolated deep copy of the certificate pin map.
+func (c CertificatePinMap) Clone() CertificatePinMap {
+	if c == nil {
+		return nil
+	}
+
+	cloned := make(CertificatePinMap, len(c))
+	for k, v := range c {
+		cloned[k] = slices.Clone(v)
+	}
+
+	return cloned
+}
+
+// DecoderMap maps MIME content types (e.g. "application/json", "application/xml") to response body decoders.
+type DecoderMap map[string]ResponseDecoder
+
+// Clone creates a memory-isolated copy of the decoder map.
+func (d DecoderMap) Clone() DecoderMap {
+	if d == nil {
+		return nil
+	}
+
+	cloned := make(DecoderMap, len(d))
+	maps.Copy(cloned, d)
+
+	return cloned
 }
 
 // FingerprintConfig controls TLS ClientHello emulation, HTTP/2 SETTINGS frames,
 // header order serialization, p0f OS stack spoofing, and ECH/0-RTT features.
 //
-// TLS Emulation Precedence:
-// When multiple TLS fingerprint options are set, the engine evaluates them in order:
-//  1. TLSClientHelloSpecProvider (explicit uTLS ClientHelloSpec builder)
-//  2. TLSClientHelloID (specific uTLS ClientHelloID preset)
+// # TLS Emulation Precedence
+//
+// When multiple TLS fingerprint options are configured, the transport layer evaluates them
+// in the following strict hierarchical order:
+//  1. TLSClientHelloSpecProvider (explicit dynamic uTLS ClientHelloSpec builder)
+//  2. TLSClientHelloID (specific uTLS ClientHelloID preset, e.g. HelloChrome_120)
 //  3. BrowserID (predefined high-level browser profile)
 type FingerprintConfig struct {
-	// BrowserID specifies a predefined browser fingerprint profile.
+	// BrowserID specifies a predefined browser fingerprint profile (Chrome, Firefox, Safari).
 	BrowserID BrowserID
 
 	// TLSClientHelloID overrides BrowserID with a specific uTLS ClientHelloID preset.
 	TLSClientHelloID *utls.ClientHelloID
 
-	// TLSClientHelloSpecProvider overrides BrowserID and TLSClientHelloID
-	// with a dynamically generated uTLS ClientHelloSpec.
+	// TLSClientHelloSpecProvider dynamically generates a uTLS ClientHelloSpec for each connection,
+	// allowing fine-grained control over TLS extensions, cipher suites, supported curves, and ALPN tokens.
 	TLSClientHelloSpecProvider fingerprint.ClientHelloSpecProvider
 
-	// TLSQUICClientHelloSpec configures cipher suites for HTTP/3 QUIC handshakes.
+	// TLSQUICClientHelloSpec configures TLS cipher suites and transport parameters for HTTP/3 QUIC handshakes.
 	TLSQUICClientHelloSpec *utls.ClientHelloSpec
 
-	// HeaderOrder defines the exact HTTP/1.1 or HTTP/2 header key serialization sequence.
+	// HeaderOrder specifies the exact HTTP/1.1 or HTTP/2 header key serialization sequence.
+	//
+	// L7 Fingerprint Evasion:
+	// Modern WAFs calculate JA4H and header hashes based on header ordering (e.g. :method, :authority, :scheme, :path).
+	// HeaderOrder ensures outgoing headers strictly match genuine browser serialization order.
 	HeaderOrder []string
 
-	// H2Settings overrides default HTTP/2 SETTINGS and PRIORITY frame parameters.
+	// H2Settings overrides default HTTP/2 SETTINGS and PRIORITY frame parameters
+	// (HEADER_TABLE_SIZE, INITIAL_WINDOW_SIZE, MAX_FRAME_SIZE, MAX_CONCURRENT_STREAMS) to mirror target browsers.
 	H2Settings *h2.Settings
 
-	// H3Settings overrides default QUIC/HTTP/3 flow control receive window limits.
+	// H3Settings overrides default QUIC/HTTP/3 flow control receive window limits and QPACK settings.
 	H3Settings *h3.Settings
 
-	// P0fSignature spoofs TCP/IP stack parameters (TTL, Window Size, MSS, SYN options).
+	// P0fSignature spoofs L3/L4 TCP/IP stack parameters (TTL, Window Size, MSS, SYN packet options)
+	// to defeat passive OS fingerprinting systems (p0f / SYN packet analyzers).
 	P0fSignature *p0f.Signature
 
-	// PacketPadding adds random-length padding headers to disrupt DPI packet length analysis.
+	// PacketPadding injects randomized HTTP header padding to disguise exact payload byte lengths against DPI analysis.
 	PacketPadding *fingerprint.PaddingConfig
 
-	// CertificatePins maps domain patterns to expected SHA-256 SPKI fingerprint hashes.
-	CertificatePins map[string][]string
+	// CertificatePins maps domain patterns to expected SHA-256 Subject Public Key Info (SPKI) hashes (RFC 7469).
+	// Connections to pinned domains are terminated immediately if the server's certificate SPKI does not match.
+	CertificatePins CertificatePinMap
 
-	// CertCompression specifies RFC 8879 certificate compression algorithms (Brotli, Zstd, Zlib).
+	// CertCompression specifies RFC 8879 certificate compression algorithms (Brotli, Zstd, Zlib) for TLS handshakes.
 	CertCompression []cert.CompressionAlgorithm
 
 	// ECHConfigList contains raw RFC 9484 Encrypted Client Hello configuration bytes.
 	ECHConfigList []byte
 
-	// SessionCache handles proxy-isolated TLS session ticket resumption.
+	// SessionCache manages proxy-isolated TLS session ticket resumption across reconnects.
 	SessionCache fingerprint.SessionCache
 
-	// JA4Callback receives calculated JA4 fingerprint reports after TLS handshakes.
+	// JA4Callback is a post-handshake hook invoked with calculated JA4/JA4H fingerprint reports.
 	JA4Callback func(ja4.Report)
 
-	// H2Configurer customizes x/net/http2 transport settings.
+	// H2Configurer allows direct customization of low-level x/net/http2 transport configurations.
 	H2Configurer fingerprint.HTTP2Configurer
 
-	// AutoECH automatically resolves ECH keys via DNS HTTPS (Type 65) records.
+	// AutoECH automatically resolves Encrypted Client Hello (ECH) keys via DNS HTTPS (Type 65 / RFC 9460) records.
 	AutoECH bool
 
-	// Enable0RTT enables TLS 1.3 / QUIC Early Data session resumption (RFC 8446 / RFC 9001).
-	// WARNING: 0-RTT data is susceptible to replay attacks; use primarily for idempotent requests.
+	// Enable0RTT enables TLS 1.3 / QUIC Early Data session resumption (RFC 8446 / RFC 9001 / RFC 9846).
+	//
+	// CAUTION: Replay Attack Vulnerability:
+	// 0-RTT data is susceptible to network replay attacks. Use primarily for idempotent GET/HEAD requests.
 	Enable0RTT bool
 }
 
@@ -456,6 +780,7 @@ func (f FingerprintConfig) Clone() FingerprintConfig {
 	cloned.H2Settings = clonePtr(f.H2Settings)
 	cloned.H3Settings = clonePtr(f.H3Settings)
 	cloned.PacketPadding = clonePtr(f.PacketPadding)
+	cloned.CertificatePins = f.CertificatePins.Clone()
 
 	if len(f.HeaderOrder) > 0 {
 		cloned.HeaderOrder = slices.Clone(f.HeaderOrder)
@@ -469,15 +794,6 @@ func (f FingerprintConfig) Clone() FingerprintConfig {
 		cloned.ECHConfigList = slices.Clone(f.ECHConfigList)
 	}
 
-	if len(f.CertificatePins) > 0 {
-		pinsCopy := make(map[string][]string, len(f.CertificatePins))
-		for k, v := range f.CertificatePins {
-			pinsCopy[k] = slices.Clone(v)
-		}
-
-		cloned.CertificatePins = pinsCopy
-	}
-
 	return cloned
 }
 
@@ -488,52 +804,71 @@ func (f FingerprintConfig) ToPipelineFingerprint() pipeline.ClientFingerprint {
 	}
 }
 
-// ClientDefaults configures default headers, hooks, limits, decoders, and pipeline policies.
+// RequiresRequestContext reports whether fingerprint settings require attaching RequestConfig to request contexts.
+func (f FingerprintConfig) RequiresRequestContext() bool {
+	return f.TLSClientHelloSpecProvider != nil ||
+		len(f.CertificatePins) > 0 ||
+		f.P0fSignature != nil ||
+		f.JA4Callback != nil
+}
+
+// IsBaremetalEligible reports whether fingerprint settings permit bypassing the pipeline.
+func (f FingerprintConfig) IsBaremetalEligible() bool {
+	return !f.RequiresRequestContext() && f.PacketPadding == nil
+}
+
+// ClientDefaults configures default headers, interceptor hooks, resource limits, decoders, and pipeline policies.
 type ClientDefaults struct {
 	// BaseURL is the default root endpoint used to resolve relative request paths (RFC 3986).
+	// Relative subpaths (e.g. "/users/1") are resolved against BaseURL with zero allocations.
 	BaseURL *url.URL
 
-	// Headers are default HTTP headers sent with every request unless overridden.
+	// Headers are default HTTP headers sent with every outgoing request unless explicitly overridden.
 	Headers http.Header
 
-	// MaxResponseSize caps response body reads in bytes to prevent OOM errors.
-	// Set to <= 0 for unlimited. Default: 10MB.
+	// MaxResponseSize caps response body reads in bytes to prevent Out-Of-Memory (OOM) crashes.
+	// Set to <= 0 for unlimited. Default: 10MB (10 * 1024 * 1024 bytes).
 	MaxResponseSize int64
 
-	// MultiReadThreshold sets the RAM buffering limit before spilling over to temporary disk files.
+	// MultiReadThreshold sets the RAM buffering boundary (in bytes) before spilling over to temporary disk files.
+	// Enables replayable/rewindable stream reading ([io.Seeker]) without unbounded heap growth.
 	MultiReadThreshold int64
 
-	// MultiReadDisableDisk forces memory-only buffering, failing if MultiReadThreshold is exceeded.
+	// MultiReadDisableDisk forces in-memory-only buffering, failing if MultiReadThreshold is exceeded.
 	MultiReadDisableDisk bool
 
-	// RefererAutomaton automatically tracks and attaches Referer headers across sequential requests.
+	// RefererAutomaton automatically tracks and attaches realistic browser Referer headers across sequential requests.
 	RefererAutomaton bool
 
 	// Pipeline holds transaction execution policies (Retry, Cache, Hedging, WAF, Jitter).
 	Pipeline PipelineConfig
 
-	// BeforeRequest hooks run sequentially before dispatching an HTTP request.
+	// BeforeRequest hooks execute sequentially immediately before an HTTP request is dispatched on the wire.
 	BeforeRequest []func(req *http.Request)
 
-	// AfterResponse hooks run sequentially after receiving an HTTP response or error.
+	// AfterResponse hooks execute sequentially immediately after receiving an HTTP response or transport error.
 	AfterResponse []func(resp *http.Response, err error)
 
-	// ResponseValidator validates response status codes and headers before body unmarshaling.
+	// ResponseValidator validates response status codes and headers before structured unmarshaling begins.
 	ResponseValidator func(*http.Response) error
 
-	// OnPanic handles panics occurring inside request execution pipelines.
+	// SoftErrorDetectors inspects initial body bytes non-destructively for application-level soft errors
+	// (e.g. HTTP 200 OK responses containing HTML login pages or JSON business error payloads).
+	SoftErrorDetectors []SoftErrorDetector
+
+	// OnPanic handles panics occurring inside request execution pipelines or middleware chains.
 	OnPanic func(ctx context.Context, err any, stack []byte)
 
-	// BaseResponse provides an envelope factory function for structured API response unwrapping.
+	// BaseResponse provides an envelope factory function used for structured API response unwrapping.
 	BaseResponse func() BaseResponse
 
-	// ChallengeSolver delegates WAF/DDoS challenge solving (e.g. Cloudflare) to external drivers.
+	// ChallengeSolver delegates Anti-DDoS and WAF challenge solving (e.g. Cloudflare Turnstile) to external drivers.
 	ChallengeSolver challenge.Solver
 
-	// ChallengeDetector determines whether an HTTP response represents a WAF/DDoS challenge.
+	// ChallengeDetector determines whether an HTTP response represents a WAF/DDoS challenge page.
 	ChallengeDetector challenge.Detector
 
-	// Inspector captures and records request traces for real-time diagnostic inspection.
+	// Inspector captures and records request traces for real-time diagnostic telemetry inspection.
 	Inspector telemetry.TrafficInspector
 
 	// HeadersCookieJar provides a fallback cookie jar implementation.
@@ -542,16 +877,16 @@ type ClientDefaults struct {
 	// QueryEncoder marshals structs or maps into URL query parameters.
 	QueryEncoder QueryEncoder
 
-	// Decoders maps MIME content types (e.g. "application/json") to response body decoders.
-	Decoders map[string]ResponseDecoder
+	// Decoders maps MIME content types (e.g. "application/json", "application/protobuf") to response body decoders.
+	Decoders DecoderMap
 
 	// Logger receives structured diagnostic log events.
 	Logger core.Logger
 
-	// DefaultMods holds default functional request modifiers applied to every request.
+	// DefaultMods holds default functional request modifiers applied to every outgoing request.
 	DefaultMods []RequestModifier
 
-	// UARotationProfiles holds user agents and Client Hints for automatic User-Agent rotation.
+	// UARotationProfiles holds user agents and Client Hints for automatic browser persona rotation.
 	UARotationProfiles []BrowserProfile
 }
 
@@ -560,7 +895,7 @@ func (d ClientDefaults) Clone() ClientDefaults {
 	cloned := d
 
 	if d.BaseURL != nil {
-		cloned.BaseURL = cloneURL(d.BaseURL)
+		cloned.BaseURL = furl.CloneURL(d.BaseURL)
 	}
 
 	if d.Headers != nil {
@@ -579,13 +914,13 @@ func (d ClientDefaults) Clone() ClientDefaults {
 		cloned.DefaultMods = slices.Clone(d.DefaultMods)
 	}
 
-	if d.Decoders != nil {
-		cloned.Decoders = make(map[string]ResponseDecoder, len(d.Decoders))
-		maps.Copy(cloned.Decoders, d.Decoders)
-	}
+	cloned.Decoders = d.Decoders.Clone()
 
 	if len(d.UARotationProfiles) > 0 {
-		cloned.UARotationProfiles = slices.Clone(d.UARotationProfiles)
+		cloned.UARotationProfiles = make([]BrowserProfile, len(d.UARotationProfiles))
+		for i, p := range d.UARotationProfiles {
+			cloned.UARotationProfiles[i] = p.Clone()
+		}
 	}
 
 	cloned.Pipeline = d.Pipeline.Clone()
@@ -593,45 +928,164 @@ func (d ClientDefaults) Clone() ClientDefaults {
 	return cloned
 }
 
-// PipelineConfig configures pipeline execution rules and resilience policies.
+// RequiresRequestContext reports whether default configurations require attaching RequestConfig to request contexts.
+func (d ClientDefaults) RequiresRequestContext() bool {
+	return d.QueryEncoder != nil || len(d.Decoders) > 0 || d.MultiReadThreshold > 0
+}
+
+// IsBaremetalEligible reports whether default configurations permit bypassing the pipeline.
+func (d ClientDefaults) IsBaremetalEligible() bool {
+	return len(d.DefaultMods) == 0 &&
+		!d.RequiresRequestContext() &&
+		d.Inspector == nil &&
+		len(d.BeforeRequest) == 0 &&
+		len(d.AfterResponse) == 0 &&
+		len(d.UARotationProfiles) == 0 &&
+		!d.RefererAutomaton &&
+		!d.Pipeline.IsActive()
+}
+
+//nolint:bodyclose // Soft error detectors inspect responses without taking ownership of response lifecycle.
+func (d ClientDefaults) toInternalSoftErrorDetectors() []func(*http.Response, []byte) error {
+	if len(d.SoftErrorDetectors) == 0 {
+		return nil
+	}
+
+	res := make([]func(*http.Response, []byte) error, len(d.SoftErrorDetectors))
+	for i, det := range d.SoftErrorDetectors {
+		res[i] = det
+	}
+
+	return res
+}
+
+// toInternalProfiles translates public BrowserProfile slices to internal pipeline DTOs.
+func (d ClientDefaults) toInternalProfiles() []pipeline.BrowserProfile {
+	if len(d.UARotationProfiles) == 0 {
+		return nil
+	}
+
+	res := make([]pipeline.BrowserProfile, len(d.UARotationProfiles))
+	for i, p := range d.UARotationProfiles {
+		res[i] = pipeline.BrowserProfile{
+			UserAgent:   p.UserAgent,
+			ClientHints: p.ClientHints,
+		}
+	}
+
+	return res
+}
+
+// PipelineConfig coordinates the behavior, resilience policies, and evasion capabilities
+// of the 5-stage transaction execution pipeline.
+//
+// # Architectural Pipeline Stages
+//
+// Every HTTP transaction executed by an aoni client passes through five deterministic stages:
+//  1. Stage 1 (Preparation & Modifiers): Encodes bodies, injects headers, binds context metadata.
+//  2. Stage 2 (Middleware & Telemetry): Enforces circuit breaking, retries, hedging, and HAR logging.
+//  3. Stage 3 (Protocol Engine & Janitors): Dispatches to standard or Fast engine, manages Alt-Svc cache.
+//  4. Stage 4 (L4/L7 Transport): uTLS evasion, Happy Eyeballs v3 racing, proxy failover, socket tuning.
+//  5. Stage 5 (Decoders & Resilience): Decompression, soft-error sniffing, structured unmarshaling.
+//
+// PipelineConfig governs which stages are active and configures their memory bounds and thresholds.
 type PipelineConfig struct {
-	// DPIJitter configures packet write delay jitter to bypass DPI rate inspection.
+	// DPIJitter configures randomized microsecond-scale write delay jitter between TCP segments.
+	//
+	// Deep Packet Inspection (DPI) evasion:
+	// Stateful firewalls and ISP middleboxes classify automated traffic not only by TLS ClientHello
+	// signatures, but also by inter-packet arrival times (IAT) and TCP packet sizing.
+	// DPIJitter disrupts ML-based timing analysis by injecting controlled entropy into socket writes.
+	// If nil, socket writes proceed at full silicon line speed with 0 delay.
 	DPIJitter *DPIJitterConfig
 
-	// ProxyFailover configures proxy rotation and automatic retry targets.
+	// ProxyFailover coordinates automatic proxy endpoint rotation and retry failover.
+	//
+	// Distributed Resiliency:
+	// When active proxies experience silent TCP drops, rate limiting (HTTP 429), or egress bans,
+	// ProxyFailover rotates to the next healthy proxy candidate across retries without failing the parent request.
+	// If nil, proxy failover is disabled.
 	ProxyFailover *ProxyFailoverConfig
 
-	// Hedging configures speculative secondary requests to cut tail latency.
+	// Hedging configures speculative parallel request dispatching to eliminate p99 tail latency.
+	//
+	// The "Tail at Scale" Paradigm:
+	// If an initial request has not returned headers within the configured percentile RTT (e.g. p95),
+	// a secondary speculative request is launched concurrently. The first socket to deliver valid headers
+	// wins the race, and the losing socket is cancelled immediately to preserve bandwidth.
+	// If nil, speculative hedging is disabled.
 	Hedging *HedgingConfig
 
-	// Cache configures HTTP response caching parameters.
+	// Cache configures RFC 9111 HTTP response caching and RFC 9211 No-Vary-Search normalization.
+	//
+	// Zero-Roundtrip Performance:
+	// Evaluates Cache-Control, ETag, and Last-Modified directives against memory, Redis, or disk storage,
+	// serving cached payloads with 0 network latency and transparently issuing 304 conditional validations.
+	// If nil, response caching is bypassed.
 	Cache *CacheConfig
 
-	// HAR configures HAR 1.2 transaction logging.
+	// HAR configures W3C HTTP Archive (HAR 1.2) transaction recording.
+	//
+	// Forensic Diagnostics & Auditing:
+	// Captures nanosecond-accurate connection timings (DNS, TCP, TLS, TTFB), unredacted or sanitized headers,
+	// and request/response sizes for export to Chrome DevTools or corporate compliance archives.
+	// If nil, HAR tracking is disabled.
 	HAR *HARConfig
 
-	// Redact configures sensitive header and payload key sanitization for logging.
+	// Redact configures sensitive authentication header and JSON payload key sanitization.
+	//
+	// Data Loss Prevention (DLP):
+	// Strips bearer tokens, API keys, passwords, and session cookies from telemetry logs, HAR files,
+	// and debug dumps before they leave memory.
+	// If nil, default sensitive headers (Authorization, Cookie, X-Api-Key) are redacted.
 	Redact *RedactConfig
 
-	// SizeLimit sets maximum allowable response body size in bytes.
+	// SizeLimit establishes the maximum permissible response body size in bytes.
+	//
+	// Out-Of-Memory (OOM) Defense:
+	// Protects the runtime from decompression bombs, malicious endless chunked streams, and accidental
+	// gigabyte downloads by bounding body reads with an [io.LimitReader]. Exceeding this boundary
+	// terminates the stream immediately with an error before heap exhaustion occurs.
+	// Set to <= 0 for unlimited body streaming. Default: 10MB (10 * 1024 * 1024 bytes).
 	SizeLimit int64
 
-	// MultiReadThreshold sets RAM buffering threshold for replayable stream reads.
+	// MultiReadThreshold defines the RAM buffering capacity (in bytes) for rewindable response streams.
+	//
+	// Tiered RAM-to-Disk Spilling:
+	// Responses smaller than MultiReadThreshold are buffered completely in pooled memory ([sync.Pool]).
+	// Payloads exceeding this threshold transparently spill over to temporary disk files, enabling unlimited
+	// stream rewindability ([io.Seeker]) without exhausting server memory.
+	// Set to 0 to disable memory caching and force direct streaming.
 	MultiReadThreshold int64
 
-	// RotateUA enables automatic User-Agent and Client Hints rotation.
+	// RotateUA enables automatic User-Agent and Client Hints rotation across sequential transactions.
+	//
+	// Anti-Clustering Evasion:
+	// Prevents edge WAFs from clustering requests from the same client session by rotating browser
+	// personas while maintaining synchronized TLS ClientHello profiles.
 	RotateUA bool
 
-	// Inspect enables real-time traffic inspection and dashboard telemetry.
+	// Inspect enables real-time transaction broadcasting to the embedded Web Inspector telemetry dashboard.
+	// When true, all request/response pairs are mirrored over WebSockets to the diagnostic inspector UI.
 	Inspect bool
 
-	// Decompress enables transparent response body decompression (Gzip, Brotli, Zstd).
+	// Decompress enables transparent RFC 9110 response body decompression.
+	//
+	// Multi-Codec Acceleration:
+	// Automatically negotiates and decompresses "gzip", "deflate", "br" (Brotli), and "zstd" (Zstandard)
+	// payload streams using zero-allocation streaming decoders.
 	Decompress bool
 
-	// Validate enables automatic response validation checking.
+	// Validate enforces application-level status code and header integrity checks before body unmarshaling.
+	// When true, responses with unexpected non-2xx status codes or invalid content types are rejected early.
 	Validate bool
 
-	// Challenge enables automatic WAF/DDoS challenge detection and solving.
+	// Challenge enables autonomous Anti-DDoS and WAF challenge detection and solving.
+	//
+	// Autonomous Bypass:
+	// Detects HTTP 403/503 challenge pages (Cloudflare Turnstile, AWS WAF, Akamai), pauses the execution
+	// pipeline, invokes the registered [challenge.Solver], and automatically retries the original request
+	// with acquired clearance cookies and authorization headers.
 	Challenge bool
 }
 
@@ -652,7 +1106,11 @@ func (p PipelineConfig) Clone() PipelineConfig {
 		cloned.Hedging = &h
 	}
 
-	cloned.Cache = clonePtr(p.Cache)
+	if p.Cache != nil {
+		c := p.Cache.Clone()
+		cloned.Cache = &c
+	}
+
 	cloned.HAR = clonePtr(p.HAR)
 
 	if p.Redact != nil {
@@ -677,54 +1135,69 @@ func (p PipelineConfig) Clone() PipelineConfig {
 	return cloned
 }
 
-// DPIJitterConfig configures randomized delay bounds applied between socket writes
-// to confuse Deep Packet Inspection (DPI) rate and timing analysis.
+// IsActive reports whether any pipeline stage or middleware interception is enabled.
+func (p PipelineConfig) IsActive() bool {
+	return p.Decompress || p.Validate || p.Challenge || p.HAR != nil || p.Cache != nil ||
+		p.Hedging != nil || p.DPIJitter != nil || p.ProxyFailover != nil || p.Inspect || p.RotateUA
+}
+
+// DPIJitterConfig configures randomized delay bounds applied between socket write operations
+// to evade Deep Packet Inspection (DPI) inter-packet arrival time (IAT) analysis.
 type DPIJitterConfig struct {
+	// MinDelay is the minimum sleep duration injected between socket write operations.
 	MinDelay time.Duration
+
+	// MaxDelay is the maximum sleep duration injected between socket write operations.
 	MaxDelay time.Duration
 }
 
-// ProxyFailoverConfig configures proxy pool rotation and automatic failover
-// when a proxy node fails or returns gateway errors.
+// ProxyFailoverConfig configures proxy pool health monitoring and automatic failover.
 type ProxyFailoverConfig struct {
-	Proxies    []string
+	// Proxies is the ordered list of proxy endpoint candidate URLs.
+	Proxies []string
+
+	// RetryLimit sets the maximum number of alternative proxies tried before failing the transaction.
 	RetryLimit int
 }
 
-// HedgingConfig configures speculative secondary requests dispatched after a delay
-// if the initial request has not completed, drastically reducing p99 tail latency.
+// HedgingConfig configures speculative secondary request dispatching to eliminate tail latency.
 type HedgingConfig struct {
-	// DynamicHedging enables adaptive percentile RTT hedging delay calculation.
+	// DynamicHedging enables adaptive percentile RTT hedging delay calculation based on EWMA metrics.
 	DynamicHedging *telemetry.DynamicHedgingConfig
 
-	// DefaultDelay is the fixed delay before launching a secondary request.
+	// DefaultDelay is the fixed fallback delay before launching a secondary speculative request.
 	DefaultDelay time.Duration
 
-	// MaxRequestsPerSecond caps total hedged requests per second.
+	// MaxRequestsPerSecond caps the total number of speculative requests dispatched per second to prevent self-DDoS.
 	MaxRequestsPerSecond int
 
-	// AllowNonReadOnly permits request hedging for non-idempotent HTTP methods (POST/PUT/DELETE).
-	// WARNING: Enabling this may cause duplicate mutations on the server.
+	// AllowNonReadOnly permits request hedging for non-idempotent HTTP methods (POST/PUT/DELETE/PATCH).
+	// WARNING: Enabling this for non-idempotent operations may result in duplicate database mutations.
 	AllowNonReadOnly bool
 }
 
-// HARConfig configures HAR 1.2 transaction recording for session exports.
+// HARConfig configures W3C HAR 1.2 transaction recording.
 type HARConfig struct {
+	// Tracker manages active transaction recording and HAR export generation.
 	Tracker telemetry.HARTracker
 }
 
-// RedactConfig configures sensitive header and JSON payload key sanitization
-// to prevent credential leakage in log files or traffic dumps.
+// RedactConfig configures sensitive header and JSON payload key sanitization rules.
 type RedactConfig struct {
-	Headers          map[string]struct{}
-	HeadersToRedact  []string
+	// Headers defines exact-match header names to sanitize (stored as a fast lookup set).
+	Headers map[string]struct{}
+
+	// HeadersToRedact defines header names or patterns to redact from logs and HAR traces.
+	HeadersToRedact []string
+
+	// JSONKeysToRedact defines JSON field names to redact from logged request/response payloads.
 	JSONKeysToRedact []string
 }
 
-// CacheConfig configures HTTP response caching using RFC 9211 No-Vary-Search normalization.
+// CacheConfig configures RFC 9111 HTTP response caching and RFC 9211 No-Vary-Search normalization.
 type CacheConfig struct {
-	// Store provides the persistence backend for cached response payloads.
-	Store cache.Store
+	// Store provides the persistence backend (in-memory LRU, Redis, or disk) for cached payloads.
+	Store cache.Store[any, []byte]
 
 	// DefaultTTL sets the fallback cache expiration duration if no Cache-Control header is present.
 	DefaultTTL time.Duration
@@ -736,6 +1209,21 @@ type CacheConfig struct {
 	CookieIndices []string
 }
 
+// Clone creates a deep copy of CacheConfig and its nested structures.
+func (c CacheConfig) Clone() CacheConfig {
+	cloned := c
+	if c.NoVarySearch != nil {
+		nv := c.NoVarySearch.Clone()
+		cloned.NoVarySearch = &nv
+	}
+
+	if len(c.CookieIndices) > 0 {
+		cloned.CookieIndices = slices.Clone(c.CookieIndices)
+	}
+
+	return cloned
+}
+
 // NoVarySearchConfig configures RFC 9211 No-Vary-Search URL query parameter normalization.
 // Normalization strips marketing/tracking parameters (e.g. utm_source, gclid) to maximize cache hit rates.
 type NoVarySearchConfig struct {
@@ -745,8 +1233,22 @@ type NoVarySearchConfig struct {
 	IgnoreAllParams bool
 }
 
-func cloneURL(u *url.URL) *url.URL {
-	return foundationurl.CloneURL(u)
+// Clone creates a deep copy of NoVarySearchConfig and its header/param slices.
+func (n NoVarySearchConfig) Clone() NoVarySearchConfig {
+	cloned := n
+	if len(n.VaryByHeaders) > 0 {
+		cloned.VaryByHeaders = slices.Clone(n.VaryByHeaders)
+	}
+
+	if len(n.IgnoreParams) > 0 {
+		cloned.IgnoreParams = slices.Clone(n.IgnoreParams)
+	}
+
+	if len(n.ExceptParams) > 0 {
+		cloned.ExceptParams = slices.Clone(n.ExceptParams)
+	}
+
+	return cloned
 }
 
 func clonePtr[T any](p *T) *T {
@@ -754,9 +1256,7 @@ func clonePtr[T any](p *T) *T {
 		return nil
 	}
 
-	val := *p
-
-	return &val
+	return generic.Ptr(*p)
 }
 
 // RequestConfig aggregates request-scoped execution options, transport overrides,
@@ -781,83 +1281,83 @@ func CloseResponse(resp *http.Response) {
 
 func (c *Client) applyRequestConfigDefaults(cfg *RequestConfig) {
 	if !cfg.SSRFGuard {
-		cfg.SSRFGuard = c.network.SSRFGuard
+		cfg.SSRFGuard = c.cfg.Network.SSRFGuard
 	}
 
 	if !cfg.ProxyDNS {
-		cfg.ProxyDNS = c.network.ProxyDNS
+		cfg.ProxyDNS = c.cfg.Network.ProxyDNS
 	}
 
 	if !cfg.MultiReadDisableDisk {
-		cfg.MultiReadDisableDisk = c.defaults.MultiReadDisableDisk
+		cfg.MultiReadDisableDisk = c.cfg.Defaults.MultiReadDisableDisk
 	}
 
 	if cfg.HappyEyeballsDelay == 0 {
-		cfg.HappyEyeballsDelay = c.network.HappyEyeballsDelay
+		cfg.HappyEyeballsDelay = c.cfg.Network.HappyEyeballsDelay
 	}
 
 	if cfg.MultiReadThreshold == 0 {
-		cfg.MultiReadThreshold = c.defaults.MultiReadThreshold
+		cfg.MultiReadThreshold = c.cfg.Defaults.MultiReadThreshold
 	}
 
 	if cfg.ProxyAddr == nil {
-		cfg.ProxyAddr = c.network.ProxyAddr
+		cfg.ProxyAddr = c.cfg.Network.ProxyAddr
 	}
 
 	if cfg.P0fSignature == nil {
-		cfg.P0fSignature = c.fingerprint.P0fSignature
+		cfg.P0fSignature = c.cfg.Fingerprint.P0fSignature
 	}
 
 	if cfg.SessionCache == nil {
-		cfg.SessionCache = c.fingerprint.SessionCache
+		cfg.SessionCache = c.cfg.Fingerprint.SessionCache
 	}
 
 	if cfg.PacketPadding == nil {
-		cfg.PacketPadding = c.fingerprint.PacketPadding
+		cfg.PacketPadding = c.cfg.Fingerprint.PacketPadding
 	}
 
 	if cfg.SocketController == nil {
-		cfg.SocketController = c.network.SocketController
+		cfg.SocketController = c.cfg.Network.SocketController
 	}
 
 	if cfg.ClientHelloSpecProvider == nil {
-		cfg.ClientHelloSpecProvider = c.fingerprint.TLSClientHelloSpecProvider
+		cfg.ClientHelloSpecProvider = c.cfg.Fingerprint.TLSClientHelloSpecProvider
 	}
 
 	if cfg.JA4Callback == nil {
-		cfg.JA4Callback = c.fingerprint.JA4Callback
+		cfg.JA4Callback = c.cfg.Fingerprint.JA4Callback
 	}
 
-	if cfg.QueryEncoder == nil && c.defaults.QueryEncoder != nil {
-		cfg.QueryEncoder = c.defaults.QueryEncoder
+	if cfg.QueryEncoder == nil && c.cfg.Defaults.QueryEncoder != nil {
+		cfg.QueryEncoder = c.cfg.Defaults.QueryEncoder
 	}
 
-	if len(c.defaults.Decoders) > 0 {
+	if len(c.cfg.Defaults.Decoders) > 0 {
 		if cfg.Decoders == nil {
-			cfg.Decoders = make(map[string]core.ResponseDecoder, len(c.defaults.Decoders))
-		}
-
-		for k, v := range c.defaults.Decoders {
-			if _, ok := cfg.Decoders[k]; !ok {
-				cfg.Decoders[k] = v
+			cfg.Decoders = maps.Clone(c.cfg.Defaults.Decoders)
+		} else {
+			for k, v := range c.cfg.Defaults.Decoders {
+				if _, ok := cfg.Decoders[k]; !ok {
+					cfg.Decoders[k] = v
+				}
 			}
 		}
 	}
 
-	if len(c.fingerprint.CertificatePins) > 0 {
+	if len(c.cfg.Fingerprint.CertificatePins) > 0 {
 		c.mergeCertificatePins(cfg)
 	}
 }
 
 // mergeCertificatePins merges client-level SHA-256 certificate pins into a per-request config.
 func (c *Client) mergeCertificatePins(cfg *RequestConfig) {
-	for domain, hashes := range c.fingerprint.CertificatePins {
+	for domain, hashes := range c.cfg.Fingerprint.CertificatePins {
 		if len(hashes) == 0 {
 			continue
 		}
 
 		if cfg.CertificatePins == nil {
-			cfg.CertificatePins = make(map[string][]string, len(c.fingerprint.CertificatePins))
+			cfg.CertificatePins = make(map[string][]string, len(c.cfg.Fingerprint.CertificatePins))
 		}
 
 		existing := cfg.CertificatePins[domain]
@@ -882,23 +1382,23 @@ func (c *Client) resolvePipeline(req *http.Request) PipelineConfig {
 		return pipelineToAoniConfig(p)
 	}
 
-	pipe := c.defaults.Pipeline
-	if !pipe.RotateUA && len(c.defaults.UARotationProfiles) > 0 {
+	pipe := c.cfg.Defaults.Pipeline
+	if !pipe.RotateUA && len(c.cfg.Defaults.UARotationProfiles) > 0 {
 		pipe.RotateUA = true
 	}
 
 	if pipe.SizeLimit == 0 {
-		pipe.SizeLimit = c.defaults.MaxResponseSize
+		pipe.SizeLimit = c.cfg.Defaults.MaxResponseSize
 	}
 
-	if !pipe.Inspect && c.defaults.Inspector != nil {
+	if !pipe.Inspect && c.cfg.Defaults.Inspector != nil {
 		pipe.Inspect = true
 	}
 
-	if pipe.Hedging == nil && (c.network.HedgingDelay > 0 || c.network.DynamicHedging != nil) {
+	if pipe.Hedging == nil && (c.cfg.Network.HedgingDelay > 0 || c.cfg.Network.DynamicHedging != nil) {
 		pipe.Hedging = &HedgingConfig{
-			DefaultDelay:   c.network.HedgingDelay,
-			DynamicHedging: c.network.DynamicHedging,
+			DefaultDelay:   c.cfg.Network.HedgingDelay,
+			DynamicHedging: c.cfg.Network.DynamicHedging,
 		}
 	}
 
@@ -906,39 +1406,25 @@ func (c *Client) resolvePipeline(req *http.Request) PipelineConfig {
 }
 
 // toPipelineDefaults maps ClientDefaults into internal pipeline.ClientDefaults DTOs.
+//
+//nolint:bodyclose // SoftErrorDetectors and ResponseValidator inspect responses without taking ownership of response lifecycle.
 func (c *Client) toPipelineDefaults() pipeline.ClientDefaults {
 	return pipeline.ClientDefaults{
-		Headers:              c.defaults.Headers,
-		BeforeRequest:        c.defaults.BeforeRequest,
-		AfterResponse:        c.defaults.AfterResponse,
-		Inspector:            c.defaults.Inspector,
-		ResponseValidator:    c.defaults.ResponseValidator,
-		ChallengeDetector:    c.defaults.ChallengeDetector,
-		ChallengeSolver:      c.defaults.ChallengeSolver,
-		UARotationProfiles:   c.defaults.toInternalProfiles(),
+		Headers:              c.cfg.Defaults.Headers,
+		BeforeRequest:        c.cfg.Defaults.BeforeRequest,
+		AfterResponse:        c.cfg.Defaults.AfterResponse,
+		Inspector:            c.cfg.Defaults.Inspector,
+		ResponseValidator:    c.cfg.Defaults.ResponseValidator,
+		SoftErrorDetectors:   c.cfg.Defaults.toInternalSoftErrorDetectors(),
+		ChallengeDetector:    c.cfg.Defaults.ChallengeDetector,
+		ChallengeSolver:      c.cfg.Defaults.ChallengeSolver,
+		UARotationProfiles:   c.cfg.Defaults.toInternalProfiles(),
 		RefererState:         c.referer,
-		MaxResponseSize:      c.defaults.MaxResponseSize,
-		MultiReadThreshold:   c.defaults.MultiReadThreshold,
-		MultiReadDisableDisk: c.defaults.MultiReadDisableDisk,
-		RefererAutomaton:     c.defaults.RefererAutomaton,
+		MaxResponseSize:      c.cfg.Defaults.MaxResponseSize,
+		MultiReadThreshold:   c.cfg.Defaults.MultiReadThreshold,
+		MultiReadDisableDisk: c.cfg.Defaults.MultiReadDisableDisk,
+		RefererAutomaton:     c.cfg.Defaults.RefererAutomaton,
 	}
-}
-
-// toInternalProfiles translates public BrowserProfile slices to internal pipeline DTOs.
-func (d ClientDefaults) toInternalProfiles() []pipeline.BrowserProfile {
-	if len(d.UARotationProfiles) == 0 {
-		return nil
-	}
-
-	res := make([]pipeline.BrowserProfile, len(d.UARotationProfiles))
-	for i, p := range d.UARotationProfiles {
-		res[i] = pipeline.BrowserProfile{
-			UserAgent:   p.UserAgent,
-			ClientHints: p.ClientHints,
-		}
-	}
-
-	return res
 }
 
 // ToInternal translates PipelineConfig into internal [pipeline.PipelineConfig] DTOs.
@@ -1101,12 +1587,35 @@ func AllowedDomainsRedirectPolicy(allowedDomains ...string) func(req *http.Reque
 
 		host := strings.ToLower(strings.TrimSuffix(req.URL.Hostname(), "."))
 		for _, domainPattern := range allowedDomains {
-			if foundationurl.MatchDomainPattern(host, domainPattern) {
+			if furl.MatchDomainPattern(host, domainPattern) {
 				return nil
 			}
 		}
 
 		return &Error{Op: "redirect", Target: host, Err: ErrRedirectDomainForbidden}
+	}
+}
+
+// BlockPathRedirectPolicy constructs an [http.Client.CheckRedirect] policy function
+// that immediately halts and fails fast if the redirect URL matches any blocked substring or pattern.
+func BlockPathRedirectPolicy(blockedPatterns ...string) func(req *http.Request, via []*http.Request) error {
+	return func(req *http.Request, via []*http.Request) error {
+		if len(via) >= 10 {
+			return &Error{Op: "redirect", Err: ErrMaxRedirectsExceeded}
+		}
+
+		if req.URL == nil {
+			return nil
+		}
+
+		rawURL := req.URL.String()
+		for _, pattern := range blockedPatterns {
+			if strings.Contains(rawURL, pattern) {
+				return &Error{Op: "redirect", Target: rawURL, Err: ErrRedirectBlocked}
+			}
+		}
+
+		return DefaultRedirectPolicy(10)(req, via)
 	}
 }
 
@@ -1133,7 +1642,7 @@ func DefaultRedirectPolicy(
 			headersToScrub = DefaultSensitiveHeaders
 		}
 
-		if foundationurl.IsCrossOrigin(req.URL, via[0].URL) {
+		if furl.IsCrossOrigin(req.URL, via[0].URL) {
 			for _, h := range headersToScrub {
 				req.Header.Del(h)
 			}
@@ -1150,64 +1659,21 @@ func applyRedirectPolicy(httpClient *http.Client, eng EngineConfig) {
 		return
 	}
 
-	limit := eng.RedirectLimit
-	if limit == RedirectLimitUnset {
-		return
-	}
-
-	switch {
-	case limit == 0:
+	switch eng.RedirectLimit {
+	case 0:
 		httpClient.CheckRedirect = func(req *http.Request, via []*http.Request) error {
 			return http.ErrUseLastResponse
 		}
-	case limit > 0:
-		httpClient.CheckRedirect = DefaultRedirectPolicy(limit)
-	default:
+	case -1:
 		httpClient.CheckRedirect = DefaultRedirectPolicy(10)
+	case RedirectLimitUnset:
+		return
+	default:
+		httpClient.CheckRedirect = DefaultRedirectPolicy(eng.RedirectLimit)
 	}
 }
 
 // applyMSSLimit applies maximum segment size boundaries to TCP socket streams.
 func applyMSSLimit(conn net.Conn, mss int) net.Conn {
 	return transport.ApplyMSSLimit(conn, mss)
-}
-
-// applyFragmentation applies TCP write payload fragmentation to socket streams.
-func applyFragmentation(conn net.Conn, cfg fragment.Config) net.Conn {
-	return transport.ApplyFragmentation(conn, cfg)
-}
-
-// BuildDialConfig converts the [Config] into a self-contained [transport.DialConfig] DTO for socket dialing.
-// Read-only and safe for concurrent use.
-func (c *Config) BuildDialConfig(ctx context.Context) transport.DialConfig {
-	if c == nil {
-		return transport.DialConfig{}
-	}
-
-	return transport.DialConfig{
-		DNSResolver:        c.Network.DNSResolver,
-		StackDriver:        c.Network.StackDriver,
-		L2Device:           c.Network.L2Device,
-		SourceRotator:      c.Network.SourceRotator,
-		HappyEyeballs:      c.Network.HappyEyeballsDelay,
-		SSRFGuard:          c.Network.SSRFGuard,
-		ProxyDNS:           c.Network.ProxyDNS,
-		P0fSignature:       c.Fingerprint.P0fSignature,
-		SocketController:   c.Network.SocketController,
-		FragmentConfig:     c.Network.FragmentConfig,
-		ProxyURL:           c.Network.ProxyAddr,
-		InsecureSkipVerify: GetInsecureSkipVerify(ctx) || c.Engine.InsecureSkipVerify,
-		SpecProvider:       c.Fingerprint.TLSClientHelloSpecProvider,
-		SessionCache:       c.Fingerprint.SessionCache,
-		CertificatePins:    c.Fingerprint.CertificatePins,
-		CertCompression:    c.Fingerprint.CertCompression,
-		HeaderOrder:        c.Fingerprint.HeaderOrder,
-		JA4Callback:        c.Fingerprint.JA4Callback,
-		AutoECH:            c.Fingerprint.AutoECH,
-		Enable0RTT:         c.Fingerprint.Enable0RTT,
-		ECHConfigList:      c.Fingerprint.ECHConfigList,
-		ConnFilters:        c.Network.ConnFilters,
-		TCPQuickACK:        c.Network.TCPQuickACK,
-		RegisteredIO:       c.Network.HasExperimental(ExpRIO),
-	}
 }

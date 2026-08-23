@@ -14,8 +14,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/lemon4ksan/aoni/internal/codegen/history"
-	"github.com/lemon4ksan/aoni/internal/codegen/project"
+	"github.com/lemon4ksan/aoni/cmd/vortex/lib/history"
+	"github.com/lemon4ksan/aoni/cmd/vortex/lib/project"
 )
 
 // CmdHistory inspects the operation history journal.

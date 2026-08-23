@@ -11,7 +11,7 @@ import (
 	"io"
 	"os"
 
-	"github.com/lemon4ksan/aoni/internal/codegen/spec"
+	"github.com/lemon4ksan/aoni/cmd/vortex/lib/spec"
 )
 
 // CmdExample scaffolds ready-made contract templates.

@@ -11,19 +11,20 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
 	"time"
 
+	"github.com/lemon4ksan/foundation/pathkit"
+
 	"github.com/lemon4ksan/aoni/cmd/vortex/internal/base"
-	"github.com/lemon4ksan/aoni/internal/codegen/builder"
-	"github.com/lemon4ksan/aoni/internal/codegen/diff"
-	"github.com/lemon4ksan/aoni/internal/codegen/ingest"
-	"github.com/lemon4ksan/aoni/internal/codegen/openapi"
-	"github.com/lemon4ksan/aoni/internal/codegen/parser"
-	"github.com/lemon4ksan/aoni/internal/codegen/project"
+	"github.com/lemon4ksan/aoni/cmd/vortex/lib/builder"
+	"github.com/lemon4ksan/aoni/cmd/vortex/lib/diff"
+	"github.com/lemon4ksan/aoni/cmd/vortex/lib/ingest"
+	"github.com/lemon4ksan/aoni/cmd/vortex/lib/openapi"
+	"github.com/lemon4ksan/aoni/cmd/vortex/lib/parser"
+	"github.com/lemon4ksan/aoni/cmd/vortex/lib/project"
 )
 
 // CmdSource manages upstream API specification sources and schemas.
@@ -367,17 +368,19 @@ func (c *CmdSource) runFetch(ctx context.Context, stdout io.Writer, cfg *project
 			continue
 		}
 
-		src := ct.Upstream.Source
-		if !strings.HasPrefix(src, "http://") && !strings.HasPrefix(src, "https://") {
+		srcPath := pathkit.New(ct.Upstream.Source)
+
+		src := srcPath.String()
+		if srcPath.IsFile() {
 			// Local file - verify existence
-			localPath := src
-			if !filepath.IsAbs(localPath) {
+			localPath := srcPath.FilePath()
+			if !srcPath.IsAbs() {
 				localPath = filepath.Join(cfg.RootDir, localPath)
 			}
 
 			if fi, err := os.Stat(localPath); err == nil {
 				fmt.Fprintf(stdout, "✔ Verified local schema %s (%s, %.1f KB)\n",
-					ct.Name, filepath.ToSlash(src), float64(fi.Size())/1024)
+					ct.Name, src, float64(fi.Size())/1024)
 			} else {
 				fmt.Fprintf(stdout, "❌ Local schema file not found for %s: %s\n", ct.Name, localPath)
 			}
@@ -462,10 +465,12 @@ func (c *CmdSource) runPing(ctx context.Context, stdout io.Writer, cfg *project.
 	client := &http.Client{Timeout: 5 * time.Second}
 
 	for _, ct := range targets {
-		src := ct.Upstream.Source
-		if !strings.HasPrefix(src, "http://") && !strings.HasPrefix(src, "https://") {
-			localPath := src
-			if !filepath.IsAbs(localPath) {
+		srcPath := pathkit.New(ct.Upstream.Source)
+
+		src := srcPath.String()
+		if srcPath.IsFile() {
+			localPath := srcPath.FilePath()
+			if !srcPath.IsAbs() {
 				localPath = filepath.Join(cfg.RootDir, localPath)
 			}
 
@@ -474,7 +479,7 @@ func (c *CmdSource) runPing(ctx context.Context, stdout io.Writer, cfg *project.
 					stdout,
 					"✔ %-14s [LOCAL]    %s (%.1f KB)\n",
 					ct.Name,
-					filepath.ToSlash(src),
+					src,
 					float64(fi.Size())/1024,
 				)
 			} else {
@@ -538,7 +543,6 @@ func (c *CmdSource) runDiff(ctx context.Context, stdout io.Writer, cfg *project.
 	}
 
 	p := parser.NewParser()
-	diffEngine := diff.NewEngine()
 
 	for _, ct := range targets {
 		if ct.Upstream == nil || ct.Upstream.Source == "" {
@@ -553,10 +557,11 @@ func (c *CmdSource) runDiff(ctx context.Context, stdout io.Writer, cfg *project.
 			continue
 		}
 
-		srcPath := ct.Upstream.Source
-		if !filepath.IsAbs(srcPath) && !strings.HasPrefix(srcPath, "http://") &&
-			!strings.HasPrefix(srcPath, "https://") {
-			srcPath = filepath.Join(cfg.RootDir, srcPath)
+		pSrc := pathkit.New(ct.Upstream.Source)
+
+		srcPath := pSrc.String()
+		if pSrc.IsFile() && !pSrc.IsAbs() {
+			srcPath = filepath.Join(cfg.RootDir, pSrc.FilePath())
 		}
 
 		rawBytes, readErr := readSourceBytes(ctx, srcPath)
@@ -573,7 +578,7 @@ func (c *CmdSource) runDiff(ctx context.Context, stdout io.Writer, cfg *project.
 				continue
 			}
 
-			report := diffEngine.Compare(root, doc, ct.File, ct.Upstream.Source)
+			report := diff.Compare(root, doc, ct.File, ct.Upstream.Source)
 			fmt.Fprintf(stdout, "\n● Contract %s (%s vs %s):\n", ct.Name, ct.File, ct.Upstream.Source)
 			fmt.Fprint(stdout, report.Render(true))
 		} else {
@@ -635,14 +640,11 @@ func (c *CmdSource) runSync(ctx context.Context, stdout io.Writer, cfg *project.
 }
 
 func readSourceBytes(ctx context.Context, src string) ([]byte, error) {
-	if strings.HasPrefix(src, "http://") || strings.HasPrefix(src, "https://") {
-		if _, err := url.Parse(src); err != nil {
-			return nil, err
-		}
-
+	p := pathkit.New(src)
+	if p.IsURL() {
 		client := &http.Client{Timeout: 10 * time.Second}
 
-		req, err := http.NewRequestWithContext(ctx, http.MethodGet, src, nil)
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, p.String(), nil)
 		if err != nil {
 			return nil, err
 		}
@@ -656,7 +658,7 @@ func readSourceBytes(ctx context.Context, src string) ([]byte, error) {
 		return io.ReadAll(resp.Body)
 	}
 
-	return os.ReadFile(src)
+	return os.ReadFile(p.FilePath())
 }
 
 func truncateString(s string, maxLen int) string {

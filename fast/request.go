@@ -8,6 +8,7 @@ import (
 	"bytes"
 	"context"
 	"io"
+	"iter"
 	"net/http"
 	"slices"
 
@@ -183,6 +184,11 @@ func (f *Request) Header(key string) string {
 // HeaderBytes yields direct access to internal header buffer bytes.
 func (f *Request) HeaderBytes(key []byte) []byte {
 	return f.req.Header.PeekBytes(key)
+}
+
+// Headers yields all header key-value pairs as an iterator.
+func (f *Request) Headers() iter.Seq2[[]byte, []byte] {
+	return f.req.Header.All()
 }
 
 // SetHeader sets header key to value.

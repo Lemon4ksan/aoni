@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/lemon4ksan/foundation/async/fsm"
+	"github.com/lemon4ksan/foundation/generic"
 
 	"github.com/lemon4ksan/aoni/realtime/ws"
 )
@@ -395,10 +396,7 @@ func (s *Conn) dispatchPacket(pkt *sioPacket) {
 		return
 	}
 
-	nsp := pkt.Namespace
-	if nsp == "" {
-		nsp = s.namespace
-	}
+	nsp := generic.Coalesce(pkt.Namespace, s.namespace)
 
 	s.mu.RLock()
 

@@ -7,10 +7,10 @@ package fast
 import (
 	"context"
 	"net"
-	"reflect"
 	"strings"
 	"sync"
 	"time"
+	"unsafe"
 
 	utls "github.com/refraction-networking/utls"
 	"github.com/valyala/fasthttp"
@@ -26,7 +26,12 @@ func (c *Client) Dial(addr string) (net.Conn, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
 
-	return c.DialContext(ctx, "tcp", addr)
+	network := aoni.NetworkTCP.String()
+	if c.cfg.Network.Network != "" {
+		network = c.cfg.Network.Network.String()
+	}
+
+	return c.DialContext(ctx, network, addr)
 }
 
 // DialContext establishes a raw L4 TCP connection or uTLS socket using the provided request context.
@@ -37,7 +42,7 @@ func (c *Client) DialContext(ctx context.Context, network, addr string) (net.Con
 
 	host, port := splitHostPortDefault(addr)
 
-	host, port = applyHostRewriteRules(ctx, host, port)
+	host, port = applyHostRewriteRules(aoni.HostRewriteRules(ctx), host, port)
 	if port == "80" && !strings.Contains(addr, ":") {
 		port = "443"
 	}
@@ -55,7 +60,7 @@ func (c *Client) DialContext(ctx context.Context, network, addr string) (net.Con
 }
 
 func (c *Client) isTLSEnabled() bool {
-	f := c.config.Fingerprint
+	f := c.cfg.Fingerprint
 
 	return f.BrowserID != aoni.BrowserNone ||
 		f.TLSClientHelloID != nil ||
@@ -105,38 +110,40 @@ func (c *Client) IsHTTPSTarget(addr string) bool {
 }
 
 func (c *Client) resolveHelloID() *utls.ClientHelloID {
-	f := c.config.Fingerprint
+	f := c.cfg.Fingerprint
 	if f.TLSClientHelloID != nil {
 		return f.TLSClientHelloID
 	}
 
 	switch f.BrowserID {
+	case aoni.BrowserChrome:
+		return &utls.HelloChrome_Auto
 	case aoni.BrowserFirefox:
 		return &utls.HelloFirefox_Auto
 	case aoni.BrowserSafari:
 		return &utls.HelloSafari_Auto
 	default:
-		return &utls.HelloChrome_Auto
+		return nil
 	}
 }
 
 // DialTLSForWS establishes an encrypted TLS socket connection for WebSockets using active uTLS profiles.
 func (c *Client) DialTLSForWS(ctx context.Context, addr string) (net.Conn, error) {
-	return c.DialTLSContext(ctx, "tcp", addr)
+	return c.DialTLSContext(ctx, aoni.NetworkTCP.String(), addr)
 }
 
 // DialPlainForWS establishes a raw TCP socket connection applying active proxy and SSRF guards for WebSockets.
 func (c *Client) DialPlainForWS(ctx context.Context, addr string) (net.Conn, error) {
-	return c.DialContext(ctx, "tcp", addr)
+	return c.DialContext(ctx, aoni.NetworkTCP.String(), addr)
 }
 
 func (c *Client) buildDialConfig(ctx context.Context) transport.DialConfig {
 	reqCfg := aoni.GetRequestConfig(ctx)
 
-	cfg := c.config.BuildDialConfig(ctx)
+	cfg := c.cfg.BuildDialConfig(ctx)
 	cfg.HelloID = c.resolveHelloID()
-	cfg.InterfaceName = c.config.Network.InterfaceName
-	cfg.SocketMark = c.config.Network.SocketMark
+	cfg.InterfaceName = c.cfg.Network.InterfaceName
+	cfg.SocketMark = c.cfg.Network.SocketMark
 
 	cfg.ApplyRequestOverrides(reqCfg)
 
@@ -168,7 +175,6 @@ func cloneFasthttpClient(c *fasthttp.Client) *fasthttp.Client {
 		TLSConfig:                     c.TLSConfig,
 		RetryIf:                       c.RetryIf, //nolint:staticcheck
 		RetryIfErr:                    c.RetryIfErr,
-		RetryIfErrUpstream:            c.RetryIfErrUpstream,
 		ConfigureClient:               c.ConfigureClient,
 		Name:                          c.Name,
 		MaxConnsPerHost:               c.MaxConnsPerHost,
@@ -199,7 +205,7 @@ func isCustomDialerSet(engine *fasthttp.Client, defaultDial func(string) (net.Co
 		return true
 	}
 
-	return reflect.ValueOf(engine.Dial).Pointer() != reflect.ValueOf(defaultDial).Pointer()
+	return *(*uintptr)(unsafe.Pointer(&engine.Dial)) != *(*uintptr)(unsafe.Pointer(&defaultDial))
 }
 
 func splitHostPortDefault(addr string) (host, port string) {
@@ -211,8 +217,7 @@ func splitHostPortDefault(addr string) (host, port string) {
 	return netutil.CleanHost(h), p
 }
 
-func applyHostRewriteRules(ctx context.Context, host, port string) (string, string) {
-	rules := aoni.HostRewriteRules(ctx)
+func applyHostRewriteRules(rules map[string]string, host, port string) (string, string) {
 	if len(rules) == 0 {
 		return host, port
 	}

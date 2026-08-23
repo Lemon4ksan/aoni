@@ -5,17 +5,34 @@
 package decode
 
 import (
-	"bufio"
 	"bytes"
-	stdio "io"
-	"reflect"
+	"io"
 	"strings"
 
 	"github.com/lemon4ksan/foundation/generic"
+	fio "github.com/lemon4ksan/foundation/io"
+	"github.com/lemon4ksan/foundation/net/headkit"
 	"github.com/lemon4ksan/foundation/silicon/bytesconv"
 
 	"github.com/lemon4ksan/aoni/internal/core"
 	"github.com/lemon4ksan/aoni/internal/pipeline"
+)
+
+// BytesReader is an alias for [fio.BytesReader].
+type BytesReader = fio.BytesReader
+
+var (
+	// InspectBytes attempts to extract contiguous payload bytes from r without allocations.
+	InspectBytes = fio.InspectBytes
+
+	// ReadAllSafe returns the payload bytes safely cloning only when volatile.
+	ReadAllSafe = fio.ReadAllSafe
+
+	// StripBOMBytes detects and strips Byte Order Marks (BOM) from a byte slice.
+	StripBOMBytes = fio.StripBOMBytes
+
+	// StripBOM detects and discards UTF-8, UTF-16LE, and UTF-16BE Byte Order Marks (BOM) from reader.
+	StripBOM = fio.StripBOM
 )
 
 var (
@@ -43,38 +60,30 @@ var (
 
 // Decoder defines the contract for unmarshaling response payload streams into Go structures.
 type Decoder interface {
-	Decode(reader stdio.Reader, target any) error
+	Decode(reader io.Reader, target any) error
 }
 
-// DecodeTo decodes the payload from reader into a newly allocated instance of Target.
-func DecodeTo[Target any](d Decoder, reader stdio.Reader) (Target, error) {
-	var target Target
-
-	err := d.Decode(reader, &target)
-
-	return target, err
-}
-
-// DecodeResult decodes the payload from reader into a Swift-inspired [generic.Result].
-func DecodeResult[Target any](d Decoder, reader stdio.Reader) generic.Result[Target] {
-	var target Target
-	if err := d.Decode(reader, &target); err != nil {
-		return generic.Failure[Target](err)
+// To allocates a new instance of T and decodes payload data from reader using decoder.
+func To[T any](reader io.Reader, decoder Decoder) (T, error) {
+	var target T
+	if err := decoder.Decode(reader, &target); err != nil {
+		var zero T
+		return zero, err
 	}
 
-	return generic.Success(target)
+	return target, nil
 }
 
-// Result decodes the payload from reader into a Swift-inspired [generic.Result] using d.
-func Result[Target any](reader stdio.Reader, d Decoder) generic.Result[Target] {
-	return DecodeResult[Target](d, reader)
+// ToResult decodes the payload from reader using decoder into a [generic.Result].
+func ToResult[T any](reader io.Reader, decoder Decoder) generic.Result[T] {
+	return generic.ToResult(To[T](reader, decoder))
 }
 
 // DecoderFunc adapts a plain function signature to satisfy the [Decoder] interface.
-type DecoderFunc func(reader stdio.Reader, target any) error
+type DecoderFunc func(reader io.Reader, target any) error
 
 // Decode executes the underlying function to parse reader data into target.
-func (f DecoderFunc) Decode(reader stdio.Reader, target any) error {
+func (f DecoderFunc) Decode(reader io.Reader, target any) error {
 	return f(reader, target)
 }
 
@@ -83,8 +92,8 @@ type limitDecoder struct {
 	maxBytes int64
 }
 
-func (l limitDecoder) Decode(reader stdio.Reader, target any) error {
-	return l.decoder.Decode(stdio.LimitReader(reader, l.maxBytes), target)
+func (l limitDecoder) Decode(reader io.Reader, target any) error {
+	return l.decoder.Decode(io.LimitReader(reader, l.maxBytes), target)
 }
 
 // LimitDecoder caps response payload input stream consumption at maxBytes.
@@ -95,35 +104,34 @@ func LimitDecoder(decoder Decoder, maxBytes int64) Decoder {
 	}
 }
 
-var bomUTF8 = []byte{0xEF, 0xBB, 0xBF}
-
-// normalizeContentType extracts the media type from a Content-Type header string (e.g. "application/json; charset=utf-8" -> "application/json").
-func normalizeContentType(contentType string) string {
-	mediaType, _, _ := strings.Cut(contentType, ";")
-	return strings.ToLower(strings.TrimSpace(mediaType))
-}
-
 // LookupDecoder resolves a standard [Decoder] matching the provided MIME content type,
 // falling back to [RawDecoder] if unsupported.
 func LookupDecoder(contentType string) Decoder {
-	norm := normalizeContentType(contentType)
+	norm := headkit.BaseMediaType(contentType)
 
 	switch {
-	case bytesconv.EqualFoldASCII(norm, "application/json"), bytesconv.EqualFoldASCII(norm, "text/json"):
+	case bytesconv.EqualFoldASCII(norm, "application/json"),
+		bytesconv.EqualFoldASCII(norm, "text/json"),
+		strings.HasSuffix(norm, "+json"):
 		return JSONDecoder
-	case bytesconv.EqualFoldASCII(norm, "application/x-protobuf"),
-		bytesconv.EqualFoldASCII(norm, "application/protobuf"):
-		return ProtoDecoder
 	case bytesconv.EqualFoldASCII(norm, "application/grpc-web+proto"),
 		bytesconv.EqualFoldASCII(norm, "application/grpc-web"),
-		bytesconv.EqualFoldASCII(norm, "application/grpc-web-text"):
+		bytesconv.EqualFoldASCII(norm, "application/grpc-web-text"),
+		strings.HasPrefix(norm, "application/grpc-web"):
 		return GRPCWebDecoder
-	case bytesconv.EqualFoldASCII(norm, "application/xml"), bytesconv.EqualFoldASCII(norm, "text/xml"):
+	case bytesconv.EqualFoldASCII(norm, "application/x-protobuf"),
+		bytesconv.EqualFoldASCII(norm, "application/protobuf"),
+		strings.HasSuffix(norm, "+proto"):
+		return ProtoDecoder
+	case bytesconv.EqualFoldASCII(norm, "application/xml"),
+		bytesconv.EqualFoldASCII(norm, "text/xml"),
+		strings.HasSuffix(norm, "+xml"):
 		return XMLDecoder
 	case bytesconv.EqualFoldASCII(norm, "application/x-yaml"),
 		bytesconv.EqualFoldASCII(norm, "application/yaml"),
 		bytesconv.EqualFoldASCII(norm, "text/x-yaml"),
-		bytesconv.EqualFoldASCII(norm, "text/yaml"):
+		bytesconv.EqualFoldASCII(norm, "text/yaml"),
+		strings.HasSuffix(norm, "+yaml"):
 		return YAMLDecoder
 	default:
 		return RawDecoder
@@ -131,19 +139,8 @@ func LookupDecoder(contentType string) Decoder {
 }
 
 // ByContentType selects a registered decoder matching the MIME type in contentType.
-func ByContentType(reader stdio.Reader, contentType string, target any) error {
+func ByContentType(reader io.Reader, contentType string, target any) error {
 	return LookupDecoder(contentType).Decode(reader, target)
-}
-
-// To allocates a new instance of T and decodes payload data into it.
-func To[T any](reader stdio.Reader, decoder Decoder) (T, error) {
-	var target T
-	if err := decoder.Decode(reader, &target); err != nil {
-		var zero T
-		return zero, err
-	}
-
-	return target, nil
 }
 
 // IsRawDecoder reports whether decoder is the raw byte-slice decoder.
@@ -152,66 +149,49 @@ func IsRawDecoder(decoder Decoder) bool {
 	return ok
 }
 
-// StripBOM detects and discards UTF-8, UTF-16LE, and UTF-16BE Byte Order Marks (BOM) from reader.
-func StripBOM(reader stdio.Reader) stdio.Reader {
-	br, ok := reader.(*bufio.Reader)
-	if !ok {
-		br = bufio.NewReader(reader)
-	}
-
-	peek, err := br.Peek(3)
-	if err == nil && len(peek) >= 3 && bytes.HasPrefix(peek, bomUTF8) {
-		_, _ = br.Discard(3)
-		return br
-	}
-
-	peek, err = br.Peek(2)
-	if err == nil && len(peek) >= 2 {
-		if (peek[0] == 0xFE && peek[1] == 0xFF) || (peek[0] == 0xFF && peek[1] == 0xFE) {
-			_, _ = br.Discard(2)
-		}
-	}
-
-	return br
+// IsStructuredMediaType reports whether contentType matches a structured data MIME format (JSON, Proto, XML, YAML, gRPC-Web).
+func IsStructuredMediaType(contentType string) bool {
+	return !IsRawDecoder(LookupDecoder(contentType))
 }
 
 // JSON reads from reader and unmarshals JSON data into a newly allocated T.
-func JSON[T any](reader stdio.Reader) (T, error) {
+func JSON[T any](reader io.Reader) (T, error) {
 	return To[T](reader, JSONDecoder)
 }
 
 // XML reads from reader and unmarshals XML data into a newly allocated T.
-func XML[T any](reader stdio.Reader) (T, error) {
+func XML[T any](reader io.Reader) (T, error) {
 	return To[T](reader, XMLDecoder)
 }
 
 // YAML reads from reader and unmarshals YAML data into a newly allocated T.
-func YAML[T any](reader stdio.Reader) (T, error) {
+func YAML[T any](reader io.Reader) (T, error) {
 	return To[T](reader, YAMLDecoder)
 }
 
 // Proto reads from reader and unmarshals binary Protocol Buffer data into a newly allocated T.
-func Proto[T any](reader stdio.Reader) (T, error) {
+func Proto[T any](reader io.Reader) (T, error) {
 	return To[T](reader, ProtoDecoder)
 }
 
 // GRPCWeb reads from reader and unmarshals gRPC-Web framed data into a newly allocated T.
-func GRPCWeb[T any](reader stdio.Reader) (T, error) {
+func GRPCWeb[T any](reader io.Reader) (T, error) {
 	return To[T](reader, GRPCWebDecoder)
 }
 
 // ProtoJSON reads from reader and unmarshals JSON data into a newly allocated Protobuf message T.
-func ProtoJSON[T any](reader stdio.Reader) (T, error) {
+func ProtoJSON[T any](reader io.Reader) (T, error) {
 	return To[T](reader, ProtoJSONDecoder)
 }
 
 // Raw reads the entire response stream into a raw byte slice.
-func Raw(reader stdio.Reader) ([]byte, error) {
+func Raw(reader io.Reader) ([]byte, error) {
 	var target []byte
+	if err := RawDecoder.Decode(reader, &target); err != nil {
+		return nil, err
+	}
 
-	err := RawDecoder.Decode(reader, &target)
-
-	return target, err
+	return target, nil
 }
 
 // WithRaw creates an [core.RequestModifier] that assigns [RawDecoder] for response parsing.
@@ -274,18 +254,9 @@ func WithGRPCWeb() core.RequestModifier {
 	}
 }
 
-// typeName extracts a string representation of target's concrete type for error reporting.
-func typeName(target any) string {
-	if target == nil {
-		return "<nil>"
-	}
-
-	return reflect.TypeOf(target).String()
-}
-
-// DecodePayload decodes rawBody into target based on contentType using auto-matched or default decoders.
+// Payload decodes rawBody into target based on contentType using auto-matched or default decoders.
 // Thread-safe for concurrent execution.
-func DecodePayload(contentType string, rawBody []byte, target any) error {
+func Payload(contentType string, rawBody []byte, target any) error {
 	if target == nil {
 		return nil
 	}

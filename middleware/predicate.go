@@ -7,7 +7,7 @@ package middleware
 import (
 	"bytes"
 	"encoding/json"
-	stdio "io"
+	"io"
 	"net/http"
 	"strings"
 
@@ -45,7 +45,7 @@ func And(conditions ...core.RetryCondition) core.RetryCondition {
 func newSyntheticResponse(
 	statusCode int,
 	contentType string,
-	bodyReader stdio.Reader,
+	bodyReader io.Reader,
 	contentLength int64,
 	req aoni.Request,
 ) aoni.Response {
@@ -60,7 +60,7 @@ func newSyntheticResponse(
 	return std.NewResponse(&http.Response{
 		StatusCode:    statusCode,
 		Header:        header,
-		Body:          stdio.NopCloser(bodyReader),
+		Body:          io.NopCloser(bodyReader),
 		ContentLength: contentLength,
 		Request:       httpReq,
 	})

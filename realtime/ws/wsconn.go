@@ -30,12 +30,41 @@ import (
 )
 
 const (
-	FrameContinuation = 0x0
-	FrameText         = 0x1
-	FrameBinary       = 0x2
-	FrameClose        = 0x8
-	FramePing         = 0x9
-	FramePong         = 0xA
+	// OpcodeContinuation (%x0) denotes a continuation frame (RFC 6455 §5.2 & §11.8).
+	OpcodeContinuation = 0x0
+
+	// OpcodeText (%x1) denotes a text frame encoded as UTF-8 (RFC 6455 §5.2 & §11.8).
+	OpcodeText = 0x1
+
+	// OpcodeBinary (%x2) denotes a binary frame (RFC 6455 §5.2 & §11.8).
+	OpcodeBinary = 0x2
+
+	// OpcodeClose (%x8) denotes a connection close control frame (RFC 6455 §5.2 & §11.8).
+	OpcodeClose = 0x8
+
+	// OpcodePing (%x9) denotes a ping control frame (RFC 6455 §5.2 & §11.8).
+	OpcodePing = 0x9
+
+	// OpcodePong (%xA) denotes a pong control frame (RFC 6455 §5.2 & §11.8).
+	OpcodePong = 0xA
+
+	// FrameContinuation is an alias for OpcodeContinuation (RFC 6455 §11.8).
+	FrameContinuation = OpcodeContinuation
+
+	// FrameText is an alias for OpcodeText (RFC 6455 §11.8).
+	FrameText = OpcodeText
+
+	// FrameBinary is an alias for OpcodeBinary (RFC 6455 §11.8).
+	FrameBinary = OpcodeBinary
+
+	// FrameClose is an alias for OpcodeClose (RFC 6455 §11.8).
+	FrameClose = OpcodeClose
+
+	// FramePing is an alias for OpcodePing (RFC 6455 §11.8).
+	FramePing = OpcodePing
+
+	// FramePong is an alias for OpcodePong (RFC 6455 §11.8).
+	FramePong = OpcodePong
 
 	maxWebSocketFrameSize    = 16 * 1024 * 1024
 	maxConsecutiveEmptyReads = 100
@@ -56,21 +85,24 @@ type Conn interface {
 }
 
 type wsRawConn struct {
-	base        net.Conn
-	br          *bufio.Reader // Buffered reader for socket read syscall reduction
-	subprotocol string
-	isClient    bool
-	compress    bool // RFC 7692 permessage-deflate negotiated flag
-	reader      io.Reader
-	payloadBuf  []byte                   // Reusable zero-alloc read payload buffer
-	readHdr     [maxFrameHeaderSize]byte // Fixed-size header buffer avoiding escape analysis
-	readMask    [4]byte                  // Reusable mask buffer for zero-alloc reading
-	writeHdr    [maxFrameHeaderSize]byte // Fixed-size header buffer for zero-alloc writing
-	writeMask   [4]byte                  // Reusable mask buffer for zero-alloc writing
-	writeBuf    []byte                   // Reusable write buffer (protected by writeMu)
-	closed      chan struct{}
-	writeMu     chan struct{}
-	once        sync.Once
+	base         net.Conn
+	br           *bufio.Reader // Buffered reader for socket read syscall reduction
+	subprotocol  string
+	isClient     bool
+	compress     bool // RFC 7692 permessage-deflate negotiated flag
+	reader       io.Reader
+	payloadBuf   []byte                   // Reusable zero-alloc read payload buffer
+	fragOpcode   byte                     // Ongoing fragmented message opcode (FrameText or FrameBinary)
+	fragBuf      []byte                   // Reusable buffer for accumulating fragmented frames
+	fragCompress bool                     // Whether initial fragment had RSV1 (permessage-deflate) set
+	readHdr      [maxFrameHeaderSize]byte // Fixed-size header buffer avoiding escape analysis
+	readMask     [4]byte                  // Reusable mask buffer for zero-alloc reading
+	writeHdr     [maxFrameHeaderSize]byte // Fixed-size header buffer for zero-alloc writing
+	writeMask    [4]byte                  // Reusable mask buffer for zero-alloc writing
+	writeBuf     []byte                   // Reusable write buffer (protected by writeMu)
+	closed       chan struct{}
+	writeMu      chan struct{}
+	once         sync.Once
 }
 
 // WrapRawConn wraps a net.Conn into a zero-alloc ws.Conn using default buffer sizes.
@@ -150,14 +182,9 @@ func (c *wsRawConn) processNextFrame() error {
 		}
 
 		switch opcode {
-		case FrameBinary, FrameText, FrameContinuation:
+		case FrameBinary, FrameText:
 			c.reader = bytes.NewReader(payload)
 			return nil
-		case FrameClose:
-			return io.EOF
-		case FramePing:
-			_ = c.writeFrame(FramePong, payload)
-		case FramePong:
 		}
 	}
 
@@ -214,6 +241,7 @@ func (c *wsRawConn) unlockWrite() {
 	c.writeMu <- struct{}{}
 }
 
+func (c *wsRawConn) Unwrap() any                        { return c.base }
 func (c *wsRawConn) UnderlyingConn() any                { return c.base }
 func (c *wsRawConn) LocalAddr() net.Addr                { return c.base.LocalAddr() }
 func (c *wsRawConn) RemoteAddr() net.Addr               { return c.base.RemoteAddr() }
@@ -275,56 +303,153 @@ func (c *wsRawConn) ReadFrameHeaderPOD(arena *offheap.Arena) (*WSFrameHeaderPOD,
 	return hdr, nil
 }
 
-// readFrame reads and parses an incoming frame using bufio.Reader for syscall reduction and handles RFC 7692 decompression.
-func (c *wsRawConn) readFrame() (byte, []byte, error) {
+// readRawFrame parses an incoming physical WebSocket frame header and payload from the wire (RFC 6455 §5.2).
+func (c *wsRawConn) readRawFrame() (opcode byte, fin, rsv1 bool, payload []byte, err error) {
 	if _, err := io.ReadFull(c.br, c.readHdr[:2]); err != nil {
-		return 0, nil, err
+		return 0, false, false, nil, err
 	}
 
 	// Check RSV2 and RSV3 bits (MUST be 0)
 	if (c.readHdr[0] & 0x30) != 0 {
-		return 0, nil, ErrReservedBitsSet
+		return 0, false, false, nil, ErrReservedBitsSet
 	}
 
-	rsv1 := (c.readHdr[0] & 0x40) != 0
-	opcode := c.readHdr[0] & 0x0f
+	fin = (c.readHdr[0] & 0x80) != 0
+	rsv1 = (c.readHdr[0] & 0x40) != 0
+	opcode = c.readHdr[0] & 0x0f
 	masked := c.readHdr[1]&0x80 != 0
 	basicLen := c.readHdr[1] & 0x7f
 
 	if rsv1 && !c.compress {
-		return 0, nil, ErrReservedBitsSet
+		return 0, false, false, nil, ErrReservedBitsSet
 	}
 
 	length, err := c.parseExtendedPayloadLength(basicLen)
 	if err != nil {
-		return 0, nil, err
+		return 0, false, false, nil, err
 	}
 
 	if opcode >= FrameClose {
 		if rsv1 {
-			return 0, nil, ErrReservedBitsSet
+			return 0, false, false, nil, ErrReservedBitsSet
+		}
+
+		if !fin {
+			return 0, false, false, nil, ErrControlFrameFragmented
 		}
 
 		if length > 125 {
-			return 0, nil, ErrControlFrameTooLarge
+			return 0, false, false, nil, ErrControlFrameTooLarge
 		}
 	}
 
-	payload, err := c.readFramePayloadZeroAlloc(length, masked)
+	payload, err = c.readFramePayloadZeroAlloc(length, masked)
 	if err != nil {
-		return 0, nil, err
+		return 0, false, false, nil, err
 	}
 
-	if rsv1 && c.compress {
-		decompressed, decErr := decompressNoContextTakeover(payload)
-		if decErr != nil {
-			return 0, nil, decErr
+	return opcode, fin, rsv1, payload, nil
+}
+
+// readFrame reads and parses an incoming logical message, reassembling fragmented frames (RFC 6455 §5.4),
+// handling interleaved control frames (RFC 6455 §5.5), and performing RFC 7692 decompression.
+func (c *wsRawConn) readFrame() (byte, []byte, error) {
+	for range maxConsecutiveEmptyReads {
+		opcode, fin, rsv1, payload, err := c.readRawFrame()
+		if err != nil {
+			return 0, nil, err
 		}
 
-		return opcode, decompressed, nil
+		// Control frames (RFC 6455 §5.4 & §5.5)
+		if opcode >= FrameClose {
+			switch opcode {
+			case FrameClose:
+				// RFC 6455 §5.5.1: Close frame echo protocol.
+				closeCode := []byte{0x03, 0xe8}
+				if len(payload) >= 2 {
+					closeCode = payload[:2]
+				}
+
+				_ = c.writeFrame(FrameClose, closeCode)
+				_ = c.Close()
+
+				return 0, nil, io.EOF
+
+			case FramePing:
+				_ = c.writeFrame(FramePong, payload)
+				continue
+
+			case FramePong:
+				continue
+
+			default:
+				continue
+			}
+		}
+
+		// RFC 6455 §5.4: Continuation frame processing
+		if opcode == FrameContinuation {
+			if c.fragOpcode == 0 {
+				return 0, nil, ErrUnexpectedContinuationFrame
+			}
+
+			c.fragBuf = append(c.fragBuf, payload...)
+
+			if fin {
+				finalOpcode := c.fragOpcode
+				c.fragOpcode = 0
+				finalPayload := c.fragBuf
+
+				if c.fragCompress {
+					c.fragCompress = false
+
+					decompressed, decErr := decompressNoContextTakeover(finalPayload)
+					if decErr != nil {
+						return 0, nil, decErr
+					}
+
+					return finalOpcode, decompressed, nil
+				}
+
+				return finalOpcode, finalPayload, nil
+			}
+
+			continue
+		}
+
+		// Initial Data Frame (FrameText or FrameBinary)
+		if c.fragOpcode != 0 {
+			return 0, nil, ErrIncompleteFragmentation
+		}
+
+		if fin {
+			// Fast path for single unfragmented frame (99.9% of messages) - 0 copy, 0 alloc
+			if rsv1 && c.compress {
+				decompressed, decErr := decompressNoContextTakeover(payload)
+				if decErr != nil {
+					return 0, nil, decErr
+				}
+
+				return opcode, decompressed, nil
+			}
+
+			return opcode, payload, nil
+		}
+
+		// Start fragmented message accumulation
+		c.fragOpcode = opcode
+
+		c.fragCompress = (rsv1 && c.compress)
+		if cap(c.fragBuf) < len(payload)*2 {
+			c.fragBuf = make([]byte, 0, len(payload)*2)
+		} else {
+			c.fragBuf = c.fragBuf[:0]
+		}
+
+		c.fragBuf = append(c.fragBuf, payload...)
 	}
 
-	return opcode, payload, nil
+	return 0, nil, io.EOF
 }
 
 func (c *wsRawConn) parseExtendedPayloadLength(basicLen byte) (uint64, error) {
@@ -655,6 +780,7 @@ func (c *wsH2Conn) WriteMessage(messageType int, data []byte) error {
 	return err
 }
 
+func (c *wsH2Conn) Unwrap() any                        { return c.base }
 func (c *wsH2Conn) UnderlyingConn() any                { return c.base }
 func (c *wsH2Conn) LocalAddr() net.Addr                { return c.base.LocalAddr() }
 func (c *wsH2Conn) RemoteAddr() net.Addr               { return c.base.RemoteAddr() }
@@ -822,7 +948,8 @@ func (c *wsH2Conn) writeConnectHeaders(u *parsedURL, host string, req *http.Requ
 
 func isForbiddenH2ConnectHeader(key string) bool {
 	switch key {
-	case "upgrade", "connection", "host", "sec-websocket-key", "sec-websocket-accept":
+	case "upgrade", "connection", "host", "sec-websocket-key", "sec-websocket-accept",
+		"keep-alive", "proxy-connection", "transfer-encoding":
 		return true
 	default:
 		return false

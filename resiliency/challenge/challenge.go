@@ -106,7 +106,8 @@ func isHTMLContentType(contentType string) bool {
 		return false
 	}
 
-	return mediaType == "text/html" || mediaType == "application/xhtml+xml"
+	return bytesconv.EqualFoldASCII(mediaType, "text/html") ||
+		bytesconv.EqualFoldASCII(mediaType, "application/xhtml+xml")
 }
 
 // hasHTMLTags checks whether prefix starts with common HTML doctype or root tags.

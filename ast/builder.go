@@ -4,6 +4,8 @@
 
 package ast
 
+import "github.com/lemon4ksan/foundation/generic"
+
 // NewFile initializes a new File AST with default imports and default 120 max line length.
 func NewFile(pkgName string) *File {
 	return &File{
@@ -24,10 +26,8 @@ func (f *File) WithMaxLen(n int) *File {
 
 // AddImport appends an import dependency.
 func (f *File) AddImport(path, alias string) *File {
-	for _, imp := range f.Imports {
-		if imp.Path == path {
-			return f
-		}
+	if generic.Any(f.Imports, func(imp Import) bool { return imp.Path == path }) {
+		return f
 	}
 
 	f.Imports = append(f.Imports, Import{Path: path, Alias: alias})

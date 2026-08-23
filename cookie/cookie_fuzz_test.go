@@ -85,8 +85,8 @@ func FuzzProxyIsolatedJar(f *testing.F) {
 		}
 
 		jar.SetCookies(u, cookies)
-		_ = jar.FindCookie(u, cookieName)
-		_ = jar.GetCookieValue(u, cookieName)
+		_, _ = jar.FindCookie(u, cookieName)
+		_, _ = jar.GetCookieValue(u, cookieName)
 		_ = jar.Cookies(u)
 	})
 }

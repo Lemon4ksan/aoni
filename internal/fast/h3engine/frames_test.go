@@ -8,7 +8,7 @@ import (
 	"bytes"
 	"testing"
 
-	"github.com/quic-go/quic-go/quicvarint"
+	"github.com/lemon4ksan/aoni/internal/quic/quicvarint"
 )
 
 func TestSettingsEncodeAndParse(t *testing.T) {
@@ -37,6 +37,15 @@ func TestSettingsEncodeAndParse(t *testing.T) {
 
 	if int(payloadLen) != r.Len() {
 		t.Fatalf("payload length mismatch: header specifies %d, remaining buffer is %d", payloadLen, r.Len())
+	}
+
+	parsed, err := DecodeSettings(r, payloadLen)
+	if err != nil {
+		t.Fatalf("DecodeSettings failed: %v", err)
+	}
+
+	if !parsed.EnableConnect {
+		t.Errorf("expected EnableConnect to be true per RFC 9220 §3 (SETTINGS_ENABLE_CONNECT_PROTOCOL=0x08)")
 	}
 }
 

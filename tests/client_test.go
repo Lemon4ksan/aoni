@@ -6,6 +6,7 @@ package aoni_test
 
 import (
 	"bytes"
+	"compress/gzip"
 	"context"
 	"crypto/rand"
 	"crypto/rsa"
@@ -30,13 +31,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/klauspost/compress/gzip"
-
-	"github.com/andybalholm/brotli"
-	"github.com/klauspost/compress/zstd"
 	utls "github.com/refraction-networking/utls"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"github.com/valyala/fasthttp"
 
 	"github.com/lemon4ksan/aoni"
 	"github.com/lemon4ksan/aoni/codec/decode"
@@ -547,15 +545,14 @@ func TestClient_Decompression(t *testing.T) {
 		{
 			name:     "decompress_brotli",
 			encoding: "br",
-			compress: func(w io.Writer) io.WriteCloser { return brotli.NewWriter(w) },
+			compress: func(w io.Writer) io.WriteCloser { return &brotliTestWriter{w: w} },
 			want:     "decompress-brotli",
 		},
 		{
 			name:     "decompress_zstandard",
 			encoding: "zstd",
 			compress: func(w io.Writer) io.WriteCloser {
-				zw, _ := zstd.NewWriter(w)
-				return zw
+				return &zstdTestWriter{w: w}
 			},
 			want: "decompress-zstd",
 		},
@@ -582,6 +579,42 @@ func TestClient_Decompression(t *testing.T) {
 			assert.Equal(t, tt.want, result.Message)
 		})
 	}
+}
+
+type brotliTestWriter struct {
+	w   io.Writer
+	buf bytes.Buffer
+}
+
+func (b *brotliTestWriter) Write(p []byte) (int, error) {
+	return b.buf.Write(p)
+}
+
+func (b *brotliTestWriter) Close() error {
+	compressed := fasthttp.AppendBrotliBytes(nil, b.buf.Bytes())
+	_, err := b.w.Write(compressed)
+
+	return err
+}
+
+type zstdTestWriter struct {
+	w   io.Writer
+	buf bytes.Buffer
+}
+
+func (z *zstdTestWriter) Write(p []byte) (int, error) {
+	return z.buf.Write(p)
+}
+
+func (z *zstdTestWriter) Close() error {
+	payload := z.buf.Bytes()
+	var frame bytes.Buffer
+	frame.Write([]byte{0x28, 0xb5, 0x2f, 0xfd, 0x20, byte(len(payload))})
+	bh := uint32(1) | (uint32(len(payload)) << 3)
+	frame.Write([]byte{byte(bh), byte(bh >> 8), byte(bh >> 16)})
+	frame.Write(payload)
+	_, err := z.w.Write(frame.Bytes())
+	return err
 }
 
 func TestClient_CertificatePinning(t *testing.T) {
@@ -2251,7 +2284,7 @@ func TestValues_CustomUnmarshalersAndTags(t *testing.T) {
 			SpaceTags: []string{"foo", "bar"},
 		}
 
-		vals, err := values.StructToValues(p)
+		vals, err := values.Encode(p)
 		require.NoError(t, err)
 
 		assert.Equal(t, "go,rust,zig", vals.Get("comma_tags"))
@@ -2518,15 +2551,31 @@ func TestClient_AuditFeatures(t *testing.T) {
 
 		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			w.Header().Set("Content-Type", "application/json")
-			if r.Method == http.MethodPost {
+			switch r.Method {
+			case http.MethodPost:
 				var u sampleUser
 				_ = json.NewDecoder(r.Body).Decode(&u)
 				u.Admin = true
 				_ = json.NewEncoder(w).Encode(u)
 				return
+			case http.MethodPut:
+				var u sampleUser
+				_ = json.NewDecoder(r.Body).Decode(&u)
+				u.Role = "Updated " + u.Role
+				_ = json.NewEncoder(w).Encode(u)
+				return
+			case http.MethodPatch:
+				var u sampleUser
+				_ = json.NewDecoder(r.Body).Decode(&u)
+				u.Name = "Patched " + u.Name
+				_ = json.NewEncoder(w).Encode(u)
+				return
+			case http.MethodDelete:
+				_ = json.NewEncoder(w).Encode(sampleUser{Name: "Deleted", Role: "None"})
+				return
+			default:
+				_ = json.NewEncoder(w).Encode(sampleUser{Name: "Steve", Role: "Visionary"})
 			}
-
-			_ = json.NewEncoder(w).Encode(sampleUser{Name: "Steve", Role: "Visionary"})
 		}))
 		t.Cleanup(server.Close)
 
@@ -2543,7 +2592,25 @@ func TestClient_AuditFeatures(t *testing.T) {
 		assert.Equal(t, "Woz", created.Name)
 		assert.True(t, created.Admin)
 
-		// 3. aoni.Fetch returning Result[T]
+		// 3. aoni.PutTo with smart body
+		updated, err := aoni.PutTo[sampleUser](t.Context(), server.URL, sampleUser{Name: "Woz", Role: "Architect"})
+		require.NoError(t, err)
+		require.NotNil(t, updated)
+		assert.Equal(t, "Updated Architect", updated.Role)
+
+		// 4. aoni.PatchTo with smart body
+		patched, err := aoni.PatchTo[sampleUser](t.Context(), server.URL, sampleUser{Name: "Woz", Role: "Fellow"})
+		require.NoError(t, err)
+		require.NotNil(t, patched)
+		assert.Equal(t, "Patched Woz", patched.Name)
+
+		// 5. aoni.DeleteTo
+		deleted, err := aoni.DeleteTo[sampleUser](t.Context(), server.URL)
+		require.NoError(t, err)
+		require.NotNil(t, deleted)
+		assert.Equal(t, "Deleted", deleted.Name)
+
+		// 6. aoni.Fetch returning Result[T]
 		res, resp := aoni.Fetch[sampleUser](t.Context(), server.URL)
 		require.NotNil(t, resp)
 		assert.True(t, res.IsSuccess())
@@ -2565,5 +2632,203 @@ func TestClient_AuditFeatures(t *testing.T) {
 		client := aoni.New(aoni.WithBaseURL("https://api.apple.com"), aoni.WithChrome())
 		cVal := client.LogValue()
 		assert.NotEmpty(t, cVal.Group())
+	})
+
+	t.Run("http_status_predicates_and_errors_is", func(t *testing.T) {
+		t.Parallel()
+
+		err404 := &aoni.APIError{StatusCode: http.StatusNotFound}
+		assert.True(t, err404.IsNotFound())
+		assert.True(t, aoni.IsNotFound(err404))
+		assert.True(t, errors.Is(err404, aoni.ErrNotFound))
+		assert.False(t, aoni.IsUnauthorized(err404))
+
+		err401 := &aoni.APIError{StatusCode: http.StatusUnauthorized}
+		assert.True(t, err401.IsUnauthorized())
+		assert.True(t, aoni.IsUnauthorized(err401))
+		assert.True(t, errors.Is(err401, aoni.ErrUnauthorized))
+
+		err403 := &aoni.APIError{StatusCode: http.StatusForbidden}
+		assert.True(t, err403.IsForbidden())
+		assert.True(t, aoni.IsForbidden(err403))
+		assert.True(t, errors.Is(err403, aoni.ErrForbidden))
+
+		err429 := &aoni.APIError{StatusCode: http.StatusTooManyRequests}
+		assert.True(t, err429.IsTooManyRequests())
+		assert.True(t, err429.IsRateLimited())
+		assert.True(t, aoni.IsRateLimited(err429))
+		assert.True(t, aoni.IsTooManyRequests(err429))
+		assert.True(t, errors.Is(err429, aoni.ErrRateLimited))
+
+		err409 := &aoni.APIError{StatusCode: http.StatusConflict}
+		assert.True(t, err409.IsConflict())
+		assert.True(t, aoni.IsConflict(err409))
+		assert.True(t, errors.Is(err409, aoni.ErrConflict))
+
+		err400 := &aoni.APIError{StatusCode: http.StatusBadRequest}
+		assert.True(t, err400.IsBadRequest())
+		assert.True(t, aoni.IsBadRequest(err400))
+		assert.True(t, errors.Is(err400, aoni.ErrBadRequest))
+
+		err408 := &aoni.APIError{StatusCode: http.StatusRequestTimeout}
+		assert.True(t, err408.IsTimeout())
+		assert.True(t, aoni.IsTimeout(err408))
+		assert.True(t, aoni.IsTimeout(context.DeadlineExceeded))
+		assert.True(t, errors.Is(err408, aoni.ErrTimeout))
+
+		err500 := &aoni.APIError{StatusCode: http.StatusInternalServerError}
+		assert.True(t, err500.IsServerError())
+		assert.True(t, aoni.IsServerError(err500))
+		assert.True(t, errors.Is(err500, aoni.ErrServerError))
+
+		err422 := &aoni.APIError{StatusCode: http.StatusUnprocessableEntity}
+		assert.True(t, err422.IsClientError())
+		assert.True(t, aoni.IsClientError(err422))
+		assert.True(t, errors.Is(err422, aoni.ErrClientError))
+	})
+
+	t.Run("soft_error_detector_and_peek", func(t *testing.T) {
+		t.Parallel()
+
+		errSessionExpired := errors.New("steam: session expired")
+
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(`<html><body><script>g_steamID = false;</script><h1>Login Required</h1></body></html>`))
+		}))
+		t.Cleanup(server.Close)
+
+		client := aoni.New(
+			aoni.WithBaseURL(server.URL),
+			aoni.WithSoftErrorDetector(func(_ *http.Response, peek []byte) error {
+				if bytes.Contains(peek, []byte("g_steamID = false;")) {
+					return errSessionExpired
+				}
+				return nil
+			}),
+		)
+
+		resp, err := client.Get(t.Context(), "/")
+		require.Error(t, err)
+		assert.ErrorIs(t, err, errSessionExpired)
+		assert.Nil(t, resp)
+	})
+
+	t.Run("block_path_redirect_policy", func(t *testing.T) {
+		t.Parallel()
+
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.URL.Path == "/protected" {
+				http.Redirect(w, r, "/login/home", http.StatusFound)
+				return
+			}
+			w.WriteHeader(http.StatusOK)
+		}))
+		t.Cleanup(server.Close)
+
+		client := aoni.New(
+			aoni.WithBaseURL(server.URL),
+			aoni.WithBlockRedirectTo("/login"),
+		)
+
+		resp, err := client.Get(t.Context(), "/protected")
+		require.Error(t, err)
+		assert.ErrorIs(t, err, aoni.ErrRedirectBlocked)
+		if resp != nil && resp.Body != nil {
+			_ = resp.Body.Close()
+		}
+	})
+
+	t.Run("peek_response_facade", func(t *testing.T) {
+		t.Parallel()
+
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte("Hello, World! Aoni Peek Test"))
+		}))
+		t.Cleanup(server.Close)
+
+		client := aoni.New(aoni.WithBaseURL(server.URL))
+		resp, err := client.Get(t.Context(), "/")
+		require.NoError(t, err)
+		defer resp.Body.Close()
+
+		peekBytes, err := aoni.PeekResponse(resp, 5)
+		require.NoError(t, err)
+		assert.Equal(t, "Hello", string(peekBytes))
+
+		// Ensure body can still be fully read
+		fullBody, err := io.ReadAll(resp.Body)
+		require.NoError(t, err)
+		assert.Equal(t, "Hello, World! Aoni Peek Test", string(fullBody))
+	})
+
+	t.Run("digest_auth_client_option", func(t *testing.T) {
+		t.Parallel()
+
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			auth := r.Header.Get("Authorization")
+			if auth == "" {
+				w.Header().Set("WWW-Authenticate", `Digest realm="TestAPI", nonce="dcd98b7102dd2f0e8b11d0f600bfb0c093", qop="auth"`)
+				w.WriteHeader(http.StatusUnauthorized)
+				return
+			}
+
+			assert.Contains(t, auth, `username="admin"`)
+			assert.Contains(t, auth, `realm="TestAPI"`)
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte("digest-authorized"))
+		}))
+		t.Cleanup(server.Close)
+
+		client := aoni.New(
+			option.WithBaseURL(server.URL),
+			option.WithDigestAuth("admin", "secretpass"),
+		)
+
+		resp, err := client.Get(t.Context(), "/")
+		require.NoError(t, err)
+		defer resp.Body.Close()
+
+		body, err := io.ReadAll(resp.Body)
+		require.NoError(t, err)
+		assert.Equal(t, http.StatusOK, resp.StatusCode)
+		assert.Equal(t, "digest-authorized", string(body))
+	})
+
+	t.Run("pkce_facade_modifiers", func(t *testing.T) {
+		t.Parallel()
+
+		const (
+			verifier  = "dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk"
+			challenge = "E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM"
+		)
+
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			switch r.URL.Path {
+			case "/authorize":
+				assert.Equal(t, challenge, r.URL.Query().Get("code_challenge"))
+				assert.Equal(t, "S256", r.URL.Query().Get("code_challenge_method"))
+				w.WriteHeader(http.StatusOK)
+			case "/token":
+				assert.Equal(t, verifier, r.URL.Query().Get("code_verifier"))
+				w.WriteHeader(http.StatusOK)
+			default:
+				w.WriteHeader(http.StatusNotFound)
+			}
+		}))
+		t.Cleanup(server.Close)
+
+		client := aoni.New(option.WithBaseURL(server.URL))
+
+		respAuth, errAuth := client.Get(t.Context(), "/authorize", aoni.WithPKCE(verifier))
+		require.NoError(t, errAuth)
+		defer respAuth.Body.Close()
+		assert.Equal(t, http.StatusOK, respAuth.StatusCode)
+
+		respToken, errToken := client.Post(t.Context(), "/token", aoni.WithPKCEVerifier(verifier))
+		require.NoError(t, errToken)
+		defer respToken.Body.Close()
+		assert.Equal(t, http.StatusOK, respToken.StatusCode)
 	})
 }

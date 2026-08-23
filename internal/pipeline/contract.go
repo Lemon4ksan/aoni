@@ -8,8 +8,9 @@ package pipeline
 import (
 	"context"
 	"net/http"
-	"sync"
 	"time"
+
+	"github.com/lemon4ksan/foundation/generic"
 
 	"github.com/lemon4ksan/aoni/fingerprint"
 	"github.com/lemon4ksan/aoni/fingerprint/ja4"
@@ -213,6 +214,7 @@ type ClientDefaults struct {
 	AfterResponse        []func(resp *http.Response, err error)
 	Inspector            telemetry.TrafficInspector
 	ResponseValidator    func(*http.Response) error
+	SoftErrorDetectors   []func(*http.Response, []byte) error
 	ChallengeDetector    func(*http.Response) (bool, error)
 	ChallengeSolver      challenge.Solver
 	UARotationProfiles   []BrowserProfile
@@ -229,8 +231,7 @@ type BrowserProfile struct {
 }
 
 type RefererState struct {
-	Mu      sync.Mutex
-	LastURL string
+	LastURL generic.Safe[string]
 }
 
 type ClientFingerprint struct {

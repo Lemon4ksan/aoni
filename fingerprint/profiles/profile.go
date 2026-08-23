@@ -6,6 +6,8 @@
 package profiles
 
 import (
+	"cmp"
+	"slices"
 	"sync"
 
 	utls "github.com/refraction-networking/utls"
@@ -141,24 +143,19 @@ func (hc *HeaderCache) SortByOrder(headers []HeaderEntry, method string, isMobil
 	result := make([]HeaderEntry, len(headers))
 	copy(result, headers)
 
-	for i := range result {
-		for j := i + 1; j < len(result); j++ {
-			posI, okI := order[result[i].Name]
-			posJ, okJ := order[result[j].Name]
-
-			if !okI {
-				posI = 999
-			}
-
-			if !okJ {
-				posJ = 999
-			}
-
-			if posI > posJ {
-				result[i], result[j] = result[j], result[i]
-			}
+	slices.SortStableFunc(result, func(a, b HeaderEntry) int {
+		posA := 999
+		if p, ok := order[a.Name]; ok {
+			posA = p
 		}
-	}
+
+		posB := 999
+		if p, ok := order[b.Name]; ok {
+			posB = p
+		}
+
+		return cmp.Compare(posA, posB)
+	})
 
 	return result
 }

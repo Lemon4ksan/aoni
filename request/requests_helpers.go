@@ -10,19 +10,19 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	stdio "io"
-	"mime"
+	"io"
 	"net/http"
 	"net/http/httputil"
 	"os"
 	"strings"
 
+	fio "github.com/lemon4ksan/foundation/io"
+	"github.com/lemon4ksan/foundation/net/headkit"
 	"github.com/lemon4ksan/foundation/silicon/bytesconv"
 
 	"github.com/lemon4ksan/aoni"
 	"github.com/lemon4ksan/aoni/codec/decode"
 	"github.com/lemon4ksan/aoni/internal/core"
-	"github.com/lemon4ksan/aoni/internal/io"
 	"github.com/lemon4ksan/aoni/internal/requestutil"
 	"github.com/lemon4ksan/aoni/resiliency/challenge"
 	"github.com/lemon4ksan/aoni/telemetry"
@@ -45,7 +45,7 @@ func (d responseDecoder) ValidateState(resp *http.Response, decoder decode.Decod
 
 	if resp.StatusCode < http.StatusBadRequest {
 		contentType := resp.Header.Get("Content-Type")
-		if contentType == "" || isStructuredDataMIME(contentType) {
+		if contentType == "" || decode.IsStructuredMediaType(contentType) {
 			return nil
 		}
 	}
@@ -59,61 +59,22 @@ func (d responseDecoder) ValidateState(resp *http.Response, decoder decode.Decod
 	return d.checkMIMEType(resp)
 }
 
-// isStructuredDataMIME reports whether contentType matches common structured payload MIME types (JSON, Protobuf, gRPC-Web).
-func isStructuredDataMIME(contentType string) bool {
-	if len(contentType) >= 16 && bytesconv.EqualFoldASCII(contentType[:16], "application/json") {
-		return true
-	}
-
-	if len(contentType) >= 9 && bytesconv.EqualFoldASCII(contentType[:9], "text/json") {
-		return true
-	}
-
-	if len(contentType) >= 20 && bytesconv.EqualFoldASCII(contentType[:20], "application/x-protobuf") {
-		return true
-	}
-
-	if len(contentType) >= 20 && bytesconv.EqualFoldASCII(contentType[:20], "application/protobuf") {
-		return true
-	}
-
-	if len(contentType) >= 24 && bytesconv.EqualFoldASCII(contentType[:24], "application/grpc-web+proto") {
-		return true
-	}
-
-	mediaType, _, _ := strings.Cut(contentType, ";")
-	mediaType = strings.TrimSpace(mediaType)
-
-	return bytesconv.EqualFoldASCII(mediaType, "application/json") ||
-		bytesconv.EqualFoldASCII(mediaType, "text/json") ||
-		bytesconv.EqualFoldASCII(mediaType, "application/x-protobuf") ||
-		bytesconv.EqualFoldASCII(mediaType, "application/protobuf") ||
-		bytesconv.EqualFoldASCII(mediaType, "application/grpc-web+proto") ||
-		bytesconv.EqualFoldASCII(mediaType, "application/xml") ||
-		bytesconv.EqualFoldASCII(mediaType, "text/xml") ||
-		bytesconv.EqualFoldASCII(mediaType, "application/x-yaml") ||
-		bytesconv.EqualFoldASCII(mediaType, "application/yaml") ||
-		bytesconv.EqualFoldASCII(mediaType, "text/x-yaml") ||
-		bytesconv.EqualFoldASCII(mediaType, "text/yaml")
-}
-
 // ResolvePeekableReader returns a peekable reader for the response body.
 func ResolvePeekableReader(resp *http.Response) *bufio.Reader {
-	if b, ok := resp.Body.(*io.BufioReadCloser); ok {
+	if b, ok := resp.Body.(*fio.BufioReadCloser); ok && b.Reader != nil {
 		return b.Reader
 	}
 
 	if br, ok := resp.Body.(interface{ BufioReader() *bufio.Reader }); ok {
-		return br.BufioReader()
+		if r := br.BufioReader(); r != nil {
+			return r
+		}
 	}
 
-	peekable := bufio.NewReader(resp.Body)
-	resp.Body = &io.BufioReadCloser{
-		Reader: peekable,
-		Closer: resp.Body,
-	}
+	wrapped := fio.NewBufioReadCloser(resp.Body, resp.Body)
+	resp.Body = wrapped
 
-	return peekable
+	return wrapped.Reader
 }
 
 // DumpDiagnostics prints HTTP request and response diagnostic payloads to stderr or configured logger when debug mode is enabled.
@@ -179,7 +140,7 @@ func (responseDecoder) SetCapturer(resp *http.Response) bool {
 
 // DecodeAPIError converts non-2xx HTTP responses into structured [*aoni.APIError] instances.
 func (responseDecoder) DecodeAPIError(resp *http.Response) error {
-	bodyBytes, _ := stdio.ReadAll(stdio.LimitReader(resp.Body, 1024*1024))
+	bodyBytes, _ := io.ReadAll(io.LimitReader(resp.Body, 1024*1024))
 	apiErr := &aoni.APIError{StatusCode: resp.StatusCode, Body: bodyBytes}
 
 	if resp.Request != nil {
@@ -205,7 +166,7 @@ func (responseDecoder) DecodeSuccess(
 		br.SetData(target)
 
 		if err := decoder.Decode(resp.Body, br); err != nil {
-			if errors.Is(err, stdio.EOF) {
+			if errors.Is(err, io.EOF) {
 				return nil
 			}
 
@@ -220,7 +181,7 @@ func (responseDecoder) DecodeSuccess(
 	}
 
 	err := decoder.Decode(resp.Body, target)
-	if errors.Is(err, stdio.EOF) {
+	if errors.Is(err, io.EOF) {
 		return nil
 	}
 
@@ -231,25 +192,23 @@ func (responseDecoder) DecodeSuccess(
 func extractBaseResponse(requester Requester, resp *http.Response) aoni.BaseResponse {
 	if resp != nil && resp.Request != nil {
 		if cfg := aoni.GetRequestConfig(resp.Request.Context()); cfg != nil {
-			if cfg.DisableBaseResponse {
+			switch {
+			case cfg.DisableBaseResponse:
 				return nil
-			}
-
-			if cfg.BaseResponseOverride != nil {
+			case cfg.BaseResponseOverride != nil:
 				return cfg.BaseResponseOverride()
 			}
 		}
 	}
 
-	if client, ok := requester.(*aoni.Client); ok {
-		return client.BaseResponse()
+	switch r := requester.(type) {
+	case *aoni.Client:
+		return r.BaseResponse()
+	case aoni.BaseResponseProvider:
+		return r.BaseResponse()
+	default:
+		return nil
 	}
-
-	if provider, ok := requester.(aoni.BaseResponseProvider); ok {
-		return provider.BaseResponse()
-	}
-
-	return nil
 }
 
 // dumpMultipart generates a summarized diagnostic dump for multipart/form-data requests.
@@ -264,7 +223,7 @@ func (responseDecoder) dumpMultipart(req *http.Request) []byte {
 		return nil
 	}
 
-	bodyBytes, _ := stdio.ReadAll(stdio.LimitReader(bodyRc, 256*1024))
+	bodyBytes, _ := io.ReadAll(io.LimitReader(bodyRc, 256*1024))
 	_ = bodyRc.Close()
 
 	return []byte(
@@ -280,10 +239,7 @@ func (responseDecoder) checkMIMEType(resp *http.Response) error {
 		return nil
 	}
 
-	mediaType, _, err := mime.ParseMediaType(contentType)
-	if err != nil {
-		return nil //nolint:nilerr
-	}
+	mediaType := headkit.BaseMediaType(contentType)
 
 	if bytesconv.EqualFoldASCII(mediaType, "text/html") ||
 		bytesconv.EqualFoldASCII(mediaType, "application/xhtml+xml") {
@@ -296,7 +252,7 @@ func (responseDecoder) checkMIMEType(resp *http.Response) error {
 // checkHTML peeks into the response body stream to detect HTML error or Cloudflare challenge pages.
 func (responseDecoder) checkHTML(buf *bufio.Reader) error {
 	peekBytes, err := buf.Peek(128)
-	if (err != nil && err != stdio.EOF) || len(peekBytes) == 0 {
+	if (err != nil && err != io.EOF) || len(peekBytes) == 0 {
 		return nil
 	}
 
@@ -350,7 +306,7 @@ func HandleResponse(resp *http.Response, target any, requester Requester) error 
 	}
 
 	if target == nil || resp.StatusCode == http.StatusNoContent {
-		_, _ = io.CopyZeroAlloc(stdio.Discard, resp.Body)
+		_, _ = fio.CopyZeroAlloc(io.Discard, resp.Body)
 		return nil
 	}
 
@@ -425,12 +381,12 @@ func resolveDecoder(resp *http.Response) decode.Decoder {
 }
 
 // validateAndMarshal validates that payload is not a modifier and encodes it to JSON if required.
-func validateAndMarshal(payload any) (stdio.Reader, error) {
+func validateAndMarshal(payload any) (io.Reader, error) {
 	if _, ok := payload.(aoni.RequestModifier); ok {
 		return nil, ErrModifierAsBody
 	}
 
-	if r, ok := payload.(stdio.Reader); ok {
+	if r, ok := payload.(io.Reader); ok {
 		return r, nil
 	}
 

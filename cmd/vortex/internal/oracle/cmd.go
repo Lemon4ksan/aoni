@@ -13,8 +13,8 @@ import (
 	"path/filepath"
 
 	"github.com/lemon4ksan/aoni/cmd/vortex/internal/base"
-	"github.com/lemon4ksan/aoni/internal/codegen/oracle/gen"
-	"github.com/lemon4ksan/aoni/internal/codegen/oracle/spec"
+	"github.com/lemon4ksan/aoni/cmd/vortex/lib/oracle/gen"
+	"github.com/lemon4ksan/aoni/cmd/vortex/lib/oracle/spec"
 )
 
 // Cmd compiles declarative browser attestation oracle specifications into JS sidecars and Go contracts.

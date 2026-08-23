@@ -2,29 +2,29 @@
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
-// Package fast provides high-performance fasthttp engine adapters for [aoni.Request] and [aoni.Response].
 package fast
 
 import (
 	"bytes"
 	"context"
-	"encoding/base64"
-	"io"
+	"crypto/tls"
+	"log/slog"
 	"net"
 	"net/http"
 	"net/url"
 	"strings"
 	"time"
 
-	"github.com/klauspost/compress/zstd"
 	"github.com/lemon4ksan/foundation/generic"
 	"github.com/lemon4ksan/foundation/silicon/bytesconv"
 	"github.com/valyala/fasthttp"
 
 	"github.com/lemon4ksan/aoni"
-	"github.com/lemon4ksan/aoni/internal/experimental"
+	"github.com/lemon4ksan/aoni/cookie"
 	"github.com/lemon4ksan/aoni/internal/pipeline"
+	"github.com/lemon4ksan/aoni/internal/sys"
 	"github.com/lemon4ksan/aoni/netutil/power"
+	"github.com/lemon4ksan/aoni/telemetry"
 )
 
 // Client encapsulates an ultra-high-performance multi-protocol client
@@ -37,18 +37,38 @@ import (
 // Achieves zero heap allocations on hot execution paths by recycling internal request/response buffers
 // via sync.Pool. Callers MUST NOT retain or mutate byte slices obtained from unsafe body accessors beyond request lifecycle.
 type Client struct {
-	engine        *fasthttp.Client
-	pipeline      *pipeline.Pipeline[aoni.Request, aoni.Response]
-	defaultDial   func(string) (net.Conn, error)
-	config        aoni.Config
-	powerWatcher  *power.Watcher
-	referer       *pipeline.RefererState
+	// engine encapsulates the underlying fasthttp.Client providing extreme-throughput HTTP/1.1 socket pooling.
+	engine *fasthttp.Client
+
+	// pipeline coordinates the 5-stage middleware, retry, hedging, and telemetry execution chain.
+	pipeline *pipeline.Pipeline[aoni.Request, aoni.Response]
+
+	// defaultDial holds the default network dialing function.
+	defaultDial func(string) (net.Conn, error)
+
+	// cfg is the immutable configuration snapshot for this client instance.
+	cfg aoni.Config
+
+	// powerWatcher listens for OS sleep/wake transitions to purge stale socket connections.
+	powerWatcher *power.Watcher
+
+	// referer tracks session navigation history to generate realistic Referer headers.
+	referer *pipeline.RefererState
+
+	// activeTargets tracks live in-flight hosts for connection throttling.
 	activeTargets targetTracker
 
+	// protocolState manages Alt-Svc cache, HTTP/2/3 availability, and protocol racing states.
 	protocolState protocolState
-	coreEngine    *pipeline.Engine
-	prepared      pipeline.PreparedConfig
-	nativeDoer    fastNativeDoer
+
+	// coreEngine holds precomputed URL prefixes and immutable header byte representations.
+	coreEngine *pipeline.Engine
+
+	// prepared caches zero-allocation byte slices for fast-path URI matching.
+	prepared pipeline.PreparedConfig
+
+	// nativeDoer adapts fasthttp request execution into the generic pipeline.
+	nativeDoer fastNativeDoer
 }
 
 // NewClient instantiates a multi-protocol ultra-high-throughput [Client] wrapping fasthttp, uTLS,
@@ -58,7 +78,7 @@ type Client struct {
 func NewClient(opts ...aoni.ClientOption) *Client {
 	c := &Client{
 		engine: defaultFasthttpClient(),
-		config: aoni.Config{
+		cfg: aoni.Config{
 			Defaults: aoni.ClientDefaults{
 				Headers: make(http.Header),
 			},
@@ -69,25 +89,25 @@ func NewClient(opts ...aoni.ClientOption) *Client {
 
 	for _, opt := range opts {
 		if opt != nil {
-			opt(&c.config)
+			opt(&c.cfg)
 		}
 	}
 
 	c.applyEngineConfig()
 	c.applyCustomDialer()
-	c.applyPowerManagement(c.config.Network.EnablePowerManagement)
+	c.applyPowerManagement(c.cfg.Network.EnablePowerManagement)
 
-	c.coreEngine = pipeline.NewEngine(c.config.Defaults.BaseURL, c.config.Defaults.Headers)
+	c.coreEngine = pipeline.NewEngine(c.cfg.Defaults.BaseURL, c.cfg.Defaults.Headers)
 	c.prepared = c.coreEngine.Prepared
-	c.prepared.FastPathCapable = (c.config.Engine.CookieJar == nil && c.config.Defaults.Inspector == nil)
+	c.prepared.FastPathCapable = (c.cfg.Engine.CookieJar == nil && c.cfg.Defaults.Inspector == nil)
 
 	c.pipeline = pipeline.NewGeneric[aoni.Request, aoni.Response](
-		toPipelineDefaults(c.config.Defaults, c.referer),
-		c.config.Fingerprint.ToPipelineFingerprint(),
+		toPipelineDefaults(c.cfg.Defaults, c.referer),
+		c.cfg.Fingerprint.ToPipelineFingerprint(),
 	)
 
-	if len(c.config.Network.CPUAffinityCores) > 0 {
-		experimental.ApplyCPUAffinity(c.config.Network.CPUAffinityCores)
+	if len(c.cfg.Network.CPUAffinityCores) > 0 {
+		sys.ApplyCPUAffinity(c.cfg.Network.CPUAffinityCores)
 	}
 
 	c.nativeDoer.client = c
@@ -95,22 +115,25 @@ func NewClient(opts ...aoni.ClientOption) *Client {
 	return c
 }
 
-// With produces a deep-copied [Client] with the provided functional options applied.
-func (c *Client) With(opts ...aoni.ClientOption) *Client {
-	clonedEngine := cloneFasthttpClient(c.engine)
+// Clone creates an exact, memory-isolated duplicate of the current [Client] contract.
+//
+// It is an alias for c.With(), guaranteeing that the returned client is an independent
+// contract with zero shared mutable state, preventing cross-goroutine interference.
+func (c *Client) Clone() *Client {
+	return c.With()
+}
 
-	clonedReferer := &pipeline.RefererState{}
-	if c.referer != nil {
-		c.referer.Mu.Lock()
-		clonedReferer.LastURL = c.referer.LastURL
-		c.referer.Mu.Unlock()
+// With derives a brand new, fully autonomous [Client] contract with the provided functional options applied.
+func (c *Client) With(opts ...aoni.ClientOption) *Client {
+	if len(opts) == 0 {
+		return c
 	}
 
 	cloned := &Client{
-		engine:        clonedEngine,
+		engine:        cloneFasthttpClient(c.engine),
 		defaultDial:   c.defaultDial,
-		config:        c.config.Clone(),
-		referer:       clonedReferer,
+		cfg:           c.cfg.Clone(),
+		referer:       c.referer,
 		protocolState: c.protocolState.Clone(),
 	}
 
@@ -118,7 +141,7 @@ func (c *Client) With(opts ...aoni.ClientOption) *Client {
 
 	for _, opt := range opts {
 		if opt != nil {
-			opt(&cloned.config)
+			opt(&cloned.cfg)
 		}
 	}
 
@@ -128,15 +151,15 @@ func (c *Client) With(opts ...aoni.ClientOption) *Client {
 		cloned.applyCustomDialer()
 	}
 
-	cloned.applyPowerManagement(cloned.config.Network.EnablePowerManagement)
+	cloned.applyPowerManagement(cloned.cfg.Network.EnablePowerManagement)
 
-	cloned.coreEngine = pipeline.NewEngine(cloned.config.Defaults.BaseURL, cloned.config.Defaults.Headers)
+	cloned.coreEngine = pipeline.NewEngine(cloned.cfg.Defaults.BaseURL, cloned.cfg.Defaults.Headers)
 	cloned.prepared = cloned.coreEngine.Prepared
-	cloned.prepared.FastPathCapable = (cloned.config.Engine.CookieJar == nil && cloned.config.Defaults.Inspector == nil)
+	cloned.prepared.FastPathCapable = (cloned.cfg.Engine.CookieJar == nil && cloned.cfg.Defaults.Inspector == nil)
 
 	cloned.pipeline = pipeline.NewGeneric[aoni.Request, aoni.Response](
-		toPipelineDefaults(cloned.config.Defaults, cloned.referer),
-		cloned.config.Fingerprint.ToPipelineFingerprint(),
+		toPipelineDefaults(cloned.cfg.Defaults, cloned.referer),
+		cloned.cfg.Fingerprint.ToPipelineFingerprint(),
 	)
 
 	return cloned
@@ -147,13 +170,63 @@ func (c *Client) ApplyOptions(opts ...aoni.ClientOption) aoni.RequestDoer {
 	return c.With(opts...)
 }
 
+// Get executes an HTTP GET request along the high-performance fasthttp pipeline.
+func (c *Client) Get(ctx context.Context, path string, mods ...aoni.RequestModifier) (aoni.Response, error) {
+	return c.Request(ctx, http.MethodGet, path, mods...)
+}
+
+// Post executes an HTTP POST request along the high-performance fasthttp pipeline.
+func (c *Client) Post(ctx context.Context, path string, mods ...aoni.RequestModifier) (aoni.Response, error) {
+	return c.Request(ctx, http.MethodPost, path, mods...)
+}
+
+// Put executes an HTTP PUT request along the high-performance fasthttp pipeline.
+func (c *Client) Put(ctx context.Context, path string, mods ...aoni.RequestModifier) (aoni.Response, error) {
+	return c.Request(ctx, http.MethodPut, path, mods...)
+}
+
+// Patch executes an HTTP PATCH request along the high-performance fasthttp pipeline.
+func (c *Client) Patch(ctx context.Context, path string, mods ...aoni.RequestModifier) (aoni.Response, error) {
+	return c.Request(ctx, http.MethodPatch, path, mods...)
+}
+
+// Delete executes an HTTP DELETE request along the high-performance fasthttp pipeline.
+func (c *Client) Delete(ctx context.Context, path string, mods ...aoni.RequestModifier) (aoni.Response, error) {
+	return c.Request(ctx, http.MethodDelete, path, mods...)
+}
+
+// Head executes an HTTP HEAD request along the high-performance fasthttp pipeline.
+func (c *Client) Head(ctx context.Context, path string, mods ...aoni.RequestModifier) (aoni.Response, error) {
+	return c.Request(ctx, http.MethodHead, path, mods...)
+}
+
+// Options executes an HTTP OPTIONS request along the high-performance fasthttp pipeline.
+func (c *Client) Options(ctx context.Context, path string, mods ...aoni.RequestModifier) (aoni.Response, error) {
+	return c.Request(ctx, http.MethodOptions, path, mods...)
+}
+
+// DoBaremetal executes a fast-path request bypassing middleware and pipeline layers.
+func (c *Client) DoBaremetal(ctx context.Context, method, path string) (aoni.Response, error) {
+	fastReq, fastResp := acquireFastPair()
+	fastReq.Header.SetMethodBytes(getMethodBytes(method))
+
+	if err := c.resolveTargetFastURI(fastReq, path); err != nil {
+		releaseFastPair(fastReq, fastResp)
+
+		return nil, err
+	}
+
+	for i := range c.prepared.PrecomputedDefaultHeaders {
+		h := &c.prepared.PrecomputedDefaultHeaders[i]
+		if len(fastReq.Header.PeekBytes(h.KeyBytes)) == 0 {
+			fastReq.Header.SetBytesKV(h.KeyBytes, h.ValBytes)
+		}
+	}
+
+	return c.executeFastPath(fastReq, fastResp)
+}
+
 // Request executes an HTTP request across HTTP/1.1, native HTTP/2, or native HTTP/3.
-//
-// Preconditions:
-//   - ctx MUST NOT be nil (pass [context.Background] if no timeout is desired).
-//   - method SHOULD be a standard HTTP method ("GET", "POST", etc.) or custom string.
-//
-// Yields an [aoni.Response] contract backed by pooled response memory.
 func (c *Client) Request(
 	ctx context.Context,
 	method, path string,
@@ -323,10 +396,6 @@ func (c *Client) Do(req aoni.Request) (aoni.Response, error) {
 }
 
 // Close shuts down idle TCP/TLS/H2/H3 connections and releases internal janitor background goroutines.
-//
-// Thread Safety & Cleanup Contract:
-//   - Thread-safe; safe to call concurrently or during client shutdown.
-//   - Releases internal ring buffer pools, idle H2 connections, and background power management watchers.
 func (c *Client) Close() {
 	if c.coreEngine != nil {
 		c.coreEngine.Close()
@@ -418,10 +487,9 @@ func (c *Client) HTTP() aoni.HTTPDoer {
 			Request:       req,
 		}
 
-		fastResp.Header.All()(func(k, v []byte) bool {
-			httpResp.Header.Add(bytesconv.B2S(k), bytesconv.B2S(v))
-			return true
-		})
+		for k, v := range fastResp.Header.All() {
+			httpResp.Header.Add(string(k), string(v))
+		}
 
 		if len(trailers) > 0 {
 			for k, vv := range trailers {
@@ -436,24 +504,69 @@ func (c *Client) HTTP() aoni.HTTPDoer {
 }
 
 // AcquireRequest satisfies [aoni.RequestFactory] by acquiring a pooled [Request] instance.
-// Safe for concurrent invocation across arbitrary goroutines.
-// Callers MUST release the acquired request via [Client.ReleaseRequest] or [Request.Release] when finished.
-// Yields a zero-allocation pooled [Request] ready for payload initialization.
 func (c *Client) AcquireRequest() aoni.Request {
 	return NewRequest(nil)
 }
 
 // ReleaseRequest satisfies [aoni.RequestFactory] by returning req back to the [sync.Pool] memory pool.
-// The request object is zeroed out and returned to the pool. Callers MUST NOT reference req after releasing.
 func (c *Client) ReleaseRequest(req aoni.Request) {
 	if fastReq, ok := req.(*Request); ok {
 		fastReq.Release()
 	}
 }
 
+// Unwrap returns the underlying [*fasthttp.Client] engine instance.
+func (c *Client) Unwrap() *fasthttp.Client {
+	return c.engine
+}
+
 // Config returns a copy of active client configurations.
 func (c *Client) Config() aoni.Config {
-	return c.config
+	return c.cfg.Clone()
+}
+
+// Defaults returns a copy of the default client configuration block.
+func (c *Client) Defaults() aoni.ClientDefaults {
+	return c.cfg.Defaults.Clone()
+}
+
+// Network returns a copy of the active network configuration block.
+func (c *Client) Network() aoni.NetworkConfig {
+	return c.cfg.Network.Clone()
+}
+
+// Fingerprint returns a copy of the TLS/HTTP fingerprint configuration block.
+func (c *Client) Fingerprint() aoni.FingerprintConfig {
+	return c.cfg.Fingerprint.Clone()
+}
+
+// EngineConfig returns the underlying transport engine configuration parameters.
+func (c *Client) EngineConfig() aoni.EngineConfig {
+	return c.cfg.Engine
+}
+
+// BaseURL returns the configured base target URL, or nil if unset.
+func (c *Client) BaseURL() *url.URL {
+	return c.cfg.Defaults.BaseURL
+}
+
+// BrowserID returns the active browser impersonation identity profile.
+func (c *Client) BrowserID() aoni.BrowserID {
+	return c.cfg.Fingerprint.BrowserID
+}
+
+// Inspector returns the configured network traffic inspector, or nil if unset.
+func (c *Client) Inspector() telemetry.TrafficInspector {
+	return c.cfg.Defaults.Inspector
+}
+
+// TLSConfig returns the configured TLS configuration parameters, or nil if unset.
+func (c *Client) TLSConfig() *tls.Config {
+	if c.engine != nil && c.engine.TLSConfig != nil {
+		return c.engine.TLSConfig.Clone()
+	}
+
+	return nil
 }
 
 // Engine returns the underlying [*fasthttp.Client] engine instance.
@@ -461,8 +574,94 @@ func (c *Client) Engine() *fasthttp.Client {
 	return c.engine
 }
 
+// Cookies retrieves non-expired cookies matching destination u from the active cookie jar.
+func (c *Client) Cookies(u *url.URL) []*http.Cookie {
+	jar := c.cfg.Engine.CookieJar
+	if jar == nil || u == nil {
+		return nil
+	}
+
+	return jar.Cookies(u)
+}
+
+// SetCookies injects cookies into the active cookie jar bound to destination u.
+func (c *Client) SetCookies(u *url.URL, cookies []*http.Cookie) {
+	jar := c.cfg.Engine.CookieJar
+	if jar != nil && u != nil && len(cookies) > 0 {
+		jar.SetCookies(u, cookies)
+	}
+}
+
+// HasCookies reports whether the client cookie jar holds any active cookies for URL u.
+func (c *Client) HasCookies(u *url.URL) bool {
+	jar := c.cfg.Engine.CookieJar
+	if jar == nil || u == nil {
+		return false
+	}
+
+	return len(jar.Cookies(u)) > 0
+}
+
+// FindCookie searches for a cookie by name for a given URL and reports whether it was found.
+func (c *Client) FindCookie(u *url.URL, name string) (*http.Cookie, bool) {
+	jar := c.cfg.Engine.CookieJar
+	if jar == nil || u == nil {
+		return nil, false
+	}
+
+	if pJar, ok := jar.(*cookie.ProxyIsolatedJar); ok {
+		return pJar.FindCookie(u, name)
+	}
+
+	return generic.Find(jar.Cookies(u), func(ck *http.Cookie) bool {
+		return ck != nil && ck.Name == name
+	})
+}
+
+// FindCookieOptional searches for a cookie by name for a given URL and returns it wrapped in a [generic.Optional].
+func (c *Client) FindCookieOptional(u *url.URL, name string) generic.Optional[*http.Cookie] {
+	if ck, ok := c.FindCookie(u, name); ok {
+		return generic.Some(ck)
+	}
+
+	return generic.None[*http.Cookie]()
+}
+
+// GetCookieValue retrieves the value of a named cookie.
+func (c *Client) GetCookieValue(u *url.URL, name string) (string, bool) {
+	if ck, ok := c.FindCookie(u, name); ok && ck != nil {
+		return ck.Value, true
+	}
+
+	return "", false
+}
+
+// GetCookieValueOptional retrieves the value of a named cookie as a [generic.Optional].
+func (c *Client) GetCookieValueOptional(u *url.URL, name string) generic.Optional[string] {
+	if val, ok := c.GetCookieValue(u, name); ok {
+		return generic.Some(val)
+	}
+
+	return generic.None[string]()
+}
+
+// LogValue implements [slog.LogValuer] for structured telemetry logging.
+func (c *Client) LogValue() slog.Value {
+	baseURLStr := ""
+	if c.cfg.Defaults.BaseURL != nil {
+		baseURLStr = c.cfg.Defaults.BaseURL.String()
+	}
+
+	return slog.GroupValue(
+		slog.String("engine", "fasthttp"),
+		slog.String("base_url", baseURLStr),
+		slog.String("browser", c.cfg.Fingerprint.BrowserID.String()),
+		slog.Duration("timeout", c.cfg.Engine.Timeout),
+	)
+}
+
 func (c *Client) resolveProtocolHandler(rawURL string) http.RoundTripper {
-	if len(c.config.Engine.Protocols) == 0 {
+	if len(c.cfg.Engine.Protocols) == 0 {
 		return nil
 	}
 
@@ -471,268 +670,21 @@ func (c *Client) resolveProtocolHandler(rawURL string) http.RoundTripper {
 		return nil
 	}
 
-	normScheme := strings.ToLower(strings.TrimSpace(scheme))
-	if normScheme == "http" || normScheme == "https" || normScheme == "ws" || normScheme == "wss" {
+	proto := aoni.Protocol(strings.ToLower(strings.TrimSpace(scheme)))
+	if proto.IsStandardHTTP() {
 		return nil
 	}
 
-	return c.config.Engine.Protocols[normScheme]
-}
-
-func (c *Client) resolveTargetFastURI(fastReq *fasthttp.Request, path string) error {
-	if len(c.prepared.BaseURLHostBytes) > 0 && len(path) > 0 && path[0] == '/' && (len(path) < 2 || path[1] != '/') {
-		fastReq.URI().SetSchemeBytes(c.prepared.BaseURLSchemeBytes)
-		fastReq.URI().SetHostBytes(c.prepared.BaseURLHostBytes)
-
-		if len(c.prepared.BaseURLCleanPathBytes) > 0 {
-			var stackBuf [256]byte
-
-			needed := len(c.prepared.BaseURLCleanPathBytes) + len(path)
-
-			var pathBuf []byte
-			if needed <= len(stackBuf) {
-				pathBuf = stackBuf[:0]
-			} else {
-				pathBuf = make([]byte, 0, needed)
-			}
-
-			pathBuf = append(pathBuf, c.prepared.BaseURLCleanPathBytes...)
-			pathBuf = append(pathBuf, path...)
-			fastReq.URI().SetPathBytes(pathBuf)
-		} else {
-			fastReq.URI().SetPathBytes(bytesconv.S2B(path))
-		}
-
-		return nil
-	}
-
-	return c.resolveTargetURLFastFallback(fastReq, path)
-}
-
-func (c *Client) resolveTargetURLFastFallback(fastReq *fasthttp.Request, path string) error {
-	var targetURL string
-
-	switch {
-	case len(path) >= 7 && (strings.HasPrefix(path, "http://") || strings.HasPrefix(path, "https://")):
-		targetURL = path
-	case c.prepared.BaseURLTrimmedString != "":
-		switch path == "" || path == "/" {
-		case true:
-			targetURL = c.prepared.BaseURLString
-		case false:
-			if path[0] == '/' {
-				targetURL = c.prepared.BaseURLTrimmedString + path
-			} else {
-				targetURL = c.prepared.BaseURLTrimmedString + "/" + path
-			}
-		}
-
-	case c.config.Defaults.BaseURL != nil && c.config.Defaults.BaseURL.Host != "":
-		base := c.config.Defaults.BaseURL
-		basePath := strings.TrimSuffix(base.Path, "/")
-
-		cleanPath := path
-		if cleanPath != "" && cleanPath[0] != '/' {
-			cleanPath = "/" + cleanPath
-		}
-
-		targetURL = base.Scheme + "://" + base.Host + basePath + cleanPath
-
-	case path == "":
-		return ErrTargetURLEmpty
-	default:
-		targetURL = path
-	}
-
-	fastReq.SetRequestURI(targetURL)
-
-	return nil
-}
-
-func (c *Client) resolveTargetURL(req aoni.Request, path string) error {
-	if fastReqAdapter, ok := req.(*Request); ok && len(c.prepared.BaseURLHostBytes) > 0 && len(path) > 0 &&
-		path[0] == '/' &&
-		(len(path) < 2 || path[1] != '/') {
-		fastReq := fastReqAdapter.req
-		fastReq.URI().SetSchemeBytes(c.prepared.BaseURLSchemeBytes)
-		fastReq.URI().SetHostBytes(c.prepared.BaseURLHostBytes)
-
-		if len(c.prepared.BaseURLCleanPathBytes) > 0 {
-			var stackBuf [256]byte
-
-			needed := len(c.prepared.BaseURLCleanPathBytes) + len(path)
-
-			var pathBuf []byte
-			if needed <= len(stackBuf) {
-				pathBuf = stackBuf[:0]
-			} else {
-				pathBuf = make([]byte, 0, needed)
-			}
-
-			pathBuf = append(pathBuf, c.prepared.BaseURLCleanPathBytes...)
-			pathBuf = append(pathBuf, path...)
-			fastReq.URI().SetPathBytes(pathBuf)
-		} else {
-			fastReq.URI().SetPathBytes(bytesconv.S2B(path))
-		}
-
-		return nil
-	}
-
-	var targetURL string
-	switch {
-	case len(path) >= 7 && (strings.HasPrefix(path, "http://") ||
-		strings.HasPrefix(path, "https://")):
-		targetURL = path
-	case c.prepared.BaseURLTrimmedString != "":
-		switch path == "" || path == "/" {
-		case true:
-			targetURL = c.prepared.BaseURLString
-		case false:
-			if path[0] == '/' {
-				targetURL = c.prepared.BaseURLTrimmedString + path
-			} else {
-				targetURL = c.prepared.BaseURLTrimmedString + "/" + path
-			}
-		}
-
-	case c.config.Defaults.BaseURL != nil && c.config.Defaults.BaseURL.Host != "":
-		base := c.config.Defaults.BaseURL
-		basePath := strings.TrimSuffix(base.Path, "/")
-
-		cleanPath := path
-		if cleanPath != "" && cleanPath[0] != '/' {
-			cleanPath = "/" + cleanPath
-		}
-
-		targetURL = base.Scheme + "://" + base.Host + basePath + cleanPath
-
-	case path == "":
-		return ErrTargetURLEmpty
-	default:
-		targetURL = path
-	}
-
-	req.SetURL(targetURL)
-
-	if strings.Contains(targetURL, "@") {
-		if parsed, err := url.Parse(targetURL); err == nil && parsed.User != nil {
-			username := parsed.User.Username()
-			password, _ := parsed.User.Password()
-			auth := username + ":" + password
-
-			basicAuth := "Basic " + base64.StdEncoding.EncodeToString(bytesconv.S2B(auth))
-			if req.Header("Authorization") == "" {
-				req.SetHeader("Authorization", basicAuth)
-			}
-		}
-	}
-
-	return nil
-}
-
-func (c *Client) executeWithRedirects(
-	ctx context.Context,
-	fastReq *fasthttp.Request,
-	fastResp *fasthttp.Response,
-) (trailers map[string][]string, err error, autoReleased bool) {
-	redirectLimit := c.config.Engine.RedirectLimit
-	if redirectLimit < 0 {
-		redirectLimit = 10
-	}
-
-	if redirectLimit == 0 {
-		c.applyCookies(ctx, fastReq)
-		extractUserInfoAndSetAuth(fastReq)
-
-		trailers, err, autoReleased = c.dispatchSingleRequest(ctx, fastReq, fastResp)
-		if err == nil {
-			c.captureCookies(ctx, fastReq, fastResp)
-		}
-
-		return trailers, err, autoReleased
-	}
-
-	currentURI := fasthttp.AcquireURI()
-	defer fasthttp.ReleaseURI(currentURI)
-
-	var redirectsFollowed int
-
-	for {
-		c.applyCookies(ctx, fastReq)
-		fastReq.URI().CopyTo(currentURI)
-		extractUserInfoAndSetAuth(fastReq)
-
-		trailers, err, autoReleased = c.dispatchSingleRequest(ctx, fastReq, fastResp)
-		if err != nil {
-			return nil, err, autoReleased
-		}
-
-		c.captureCookies(ctx, fastReq, fastResp)
-
-		statusCode := fastResp.StatusCode()
-		if !isRedirectStatus(statusCode) {
-			return trailers, nil, false
-		}
-
-		location := fastResp.Header.Peek("Location")
-		if len(location) == 0 {
-			return trailers, nil, false
-		}
-
-		redirectsFollowed++
-		if redirectsFollowed > redirectLimit {
-			return nil, ErrMaxRedirectsExceeded, false
-		}
-
-		applyRedirectMethodAndBody(statusCode, fastReq)
-
-		method := bytes.Clone(fastReq.Header.Method())
-		nextURI := fasthttp.AcquireURI()
-		currentURI.CopyTo(nextURI)
-		nextURI.UpdateBytes(location)
-
-		if len(nextURI.Scheme()) == 0 {
-			nextURI.SetSchemeBytes(currentURI.Scheme())
-		}
-
-		if len(nextURI.Host()) == 0 {
-			nextURI.SetHostBytes(currentURI.Host())
-		}
-
-		nextURI.CopyTo(fastReq.URI())
-		fastReq.Header.SetRequestURIBytes(nextURI.RequestURI())
-
-		if len(method) > 0 {
-			fastReq.Header.SetMethodBytes(method)
-		}
-
-		if host := nextURI.Host(); len(host) > 0 {
-			fastReq.Header.SetHostBytes(host)
-		}
-
-		if !isSameHost(currentURI, nextURI) {
-			scrubSensitiveHeaders(fastReq, currentURI, nextURI)
-		}
-
-		if isHTTPSDowngrade(currentURI, nextURI) {
-			fastReq.Header.Del("Referer")
-		} else {
-			fastReq.Header.SetBytesK(bytesconv.S2B("Referer"), string(currentURI.FullURI()))
-		}
-
-		fasthttp.ReleaseURI(nextURI)
-		fastResp.Reset()
-	}
+	return c.cfg.Engine.Protocols[proto]
 }
 
 func (c *Client) applyEngineConfig() {
-	if c.config.Engine.Timeout > 0 {
-		c.engine.ReadTimeout = c.config.Engine.Timeout
-		c.engine.WriteTimeout = c.config.Engine.Timeout
+	if c.cfg.Engine.Timeout > 0 {
+		c.engine.ReadTimeout = c.cfg.Engine.Timeout
+		c.engine.WriteTimeout = c.cfg.Engine.Timeout
 	}
 
-	if c.config.Engine.InsecureSkipVerify {
+	if c.cfg.Engine.InsecureSkipVerify {
 		c.engine.TLSConfig = nil
 	}
 
@@ -740,8 +692,9 @@ func (c *Client) applyEngineConfig() {
 }
 
 func (c *Client) applyCustomDialer() {
-	c.defaultDial = c.Dial
-	c.engine.Dial = c.Dial
+	d := c.Dial
+	c.defaultDial = d
+	c.engine.Dial = d
 	c.engine.DialDualStack = true
 }
 
@@ -800,23 +753,23 @@ func (c *Client) resolvePipeline(ctx context.Context) pipeline.PipelineConfig {
 		return reqPipe
 	}
 
-	pipe := c.config.Defaults.Pipeline
-	if !pipe.RotateUA && len(c.config.Defaults.UARotationProfiles) > 0 {
+	pipe := c.cfg.Defaults.Pipeline
+	if !pipe.RotateUA && len(c.cfg.Defaults.UARotationProfiles) > 0 {
 		pipe.RotateUA = true
 	}
 
 	if pipe.SizeLimit == 0 {
-		pipe.SizeLimit = c.config.Defaults.MaxResponseSize
+		pipe.SizeLimit = c.cfg.Defaults.MaxResponseSize
 	}
 
-	if !pipe.Inspect && c.config.Defaults.Inspector != nil {
+	if !pipe.Inspect && c.cfg.Defaults.Inspector != nil {
 		pipe.Inspect = true
 	}
 
-	if pipe.Hedging == nil && (c.config.Network.HedgingDelay > 0 || c.config.Network.DynamicHedging != nil) {
+	if pipe.Hedging == nil && (c.cfg.Network.HedgingDelay > 0 || c.cfg.Network.DynamicHedging != nil) {
 		pipe.Hedging = &aoni.HedgingConfig{
-			DefaultDelay:   c.config.Network.HedgingDelay,
-			DynamicHedging: c.config.Network.DynamicHedging,
+			DefaultDelay:   c.cfg.Network.HedgingDelay,
+			DynamicHedging: c.cfg.Network.DynamicHedging,
 		}
 	}
 
@@ -881,107 +834,6 @@ func getMethodBytes(method string) []byte {
 		return methodHeadBytes
 	default:
 		return bytesconv.S2B(method)
-	}
-}
-
-func isRedirectStatus(code int) bool {
-	return code == fasthttp.StatusMovedPermanently ||
-		code == fasthttp.StatusFound ||
-		code == fasthttp.StatusSeeOther ||
-		code == fasthttp.StatusTemporaryRedirect ||
-		code == fasthttp.StatusPermanentRedirect
-}
-
-func isSameHost(u1, u2 *fasthttp.URI) bool {
-	return bytes.EqualFold(u1.Host(), u2.Host())
-}
-
-func isHTTPSDowngrade(u1, u2 *fasthttp.URI) bool {
-	return bytes.EqualFold(u1.Scheme(), []byte("https")) && bytes.EqualFold(u2.Scheme(), []byte("http"))
-}
-
-func applyRedirectMethodAndBody(statusCode int, req *fasthttp.Request) {
-	switch statusCode {
-	case fasthttp.StatusMovedPermanently, fasthttp.StatusFound, fasthttp.StatusSeeOther:
-		method := string(req.Header.Method())
-		if method != http.MethodGet && method != http.MethodHead {
-			req.Header.SetMethod(http.MethodGet)
-			req.SetBody(nil)
-			req.Header.Del("Content-Type")
-			req.Header.Del("Content-Length")
-		}
-	}
-}
-
-var zstdDecoderPool = generic.NewPool(func() *zstd.Decoder {
-	dec, _ := zstd.NewReader(nil)
-	return dec
-})
-
-func decompressFastResponse(resp *fasthttp.Response) bool {
-	enforceContentLengthTruncation(resp)
-
-	encodingBytes := resp.Header.ContentEncoding()
-	if len(encodingBytes) == 0 {
-		return false
-	}
-
-	body := resp.Body()
-	if len(body) == 0 {
-		return false
-	}
-
-	var (
-		decompressed []byte
-		err          error
-	)
-
-	switch {
-	case bytesconv.ContainsFoldASCII(encodingBytes, "gzip"):
-		decompressed, err = resp.BodyGunzip()
-
-	case bytesconv.ContainsFoldASCII(encodingBytes, "br"):
-		decompressed, err = resp.BodyUnbrotli()
-
-	case bytesconv.ContainsFoldASCII(encodingBytes, "zstd"):
-		if dec := zstdDecoderPool.Get(); dec != nil {
-			decompressed, err = dec.DecodeAll(body, nil)
-			zstdDecoderPool.Put(dec)
-		}
-	}
-
-	if err == nil && len(decompressed) > 0 {
-		resp.SetBody(decompressed)
-		resp.Header.Del("Content-Encoding")
-		resp.Header.Del("Content-Length")
-
-		return true
-	}
-
-	return false
-}
-
-func enforceContentLengthTruncation(resp *fasthttp.Response) {
-	if resp == nil {
-		return
-	}
-
-	cl := resp.Header.ContentLength()
-	if cl < 0 {
-		return
-	}
-
-	if !resp.IsBodyStream() {
-		body := resp.Body()
-		if len(body) > cl {
-			resp.SetBody(body[:cl])
-		}
-
-		return
-	}
-
-	if stream := resp.BodyStream(); stream != nil {
-		resp.SetBodyStream(io.LimitReader(stream, int64(cl)), cl)
 	}
 }
 

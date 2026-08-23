@@ -12,10 +12,10 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/lemon4ksan/aoni/internal/codegen/analysis"
-	"github.com/lemon4ksan/aoni/internal/codegen/emitter"
-	"github.com/lemon4ksan/aoni/internal/codegen/optimizer"
-	parserpkg "github.com/lemon4ksan/aoni/internal/codegen/parser"
+	"github.com/lemon4ksan/aoni/cmd/vortex/lib/analysis"
+	"github.com/lemon4ksan/aoni/cmd/vortex/lib/emitter"
+	"github.com/lemon4ksan/aoni/cmd/vortex/lib/optimizer"
+	parserpkg "github.com/lemon4ksan/aoni/cmd/vortex/lib/parser"
 )
 
 func TestFullSteamMarketGeneration(t *testing.T) {
@@ -363,8 +363,7 @@ type GiftDetailsResponse struct {
 	opt := optimizer.NewOptimizer()
 	opt.Optimize(root)
 
-	em := emitter.NewEmitter()
-	code, err := em.Emit(root)
+	code, err := emitter.Emit(root)
 	if err != nil {
 		t.Fatalf("Emit error: %v\nSource:\n%s", err, string(code))
 	}

@@ -6,14 +6,18 @@ package mod
 
 import (
 	"net/http"
+	"strconv"
+	"strings"
 	"time"
 
+	fpkce "github.com/lemon4ksan/foundation/net/pkce"
 	"github.com/lemon4ksan/foundation/silicon/bytesconv"
 
 	"github.com/lemon4ksan/aoni"
 	"github.com/lemon4ksan/aoni/cookie"
 	"github.com/lemon4ksan/aoni/internal/core"
 	"github.com/lemon4ksan/aoni/internal/requestutil"
+	"github.com/lemon4ksan/aoni/netutil/hpkp"
 )
 
 // WithGRPCWebTimeout constructs an [aoni.RequestModifier] setting standard gRPC-Web timeout headers ("grpc-timeout").
@@ -109,6 +113,40 @@ func WithBasicAuth(username, password string) aoni.RequestModifier {
 	}
 }
 
+// WithPKCE constructs an [aoni.RequestModifier] adding PKCE code_challenge and code_challenge_method
+// parameters for OAuth 2.0 authorization requests per RFC 7636 §4.3 and RFC 9700 §2.1.
+// If method is omitted or empty, S256 is used by default.
+func WithPKCE(verifier string, method ...string) aoni.RequestModifier {
+	m := fpkce.MethodS256
+	if len(method) > 0 && method[0] != "" {
+		m = method[0]
+	}
+
+	challenge, err := fpkce.ComputeChallenge(verifier, m)
+	if err != nil {
+		challenge = verifier
+	}
+
+	return aoni.RequestModifier{
+		Kind: core.ModCustom,
+		Fn: func(req aoni.Request) {
+			req.AddQueryParam("code_challenge", challenge)
+			req.AddQueryParam("code_challenge_method", m)
+		},
+	}
+}
+
+// WithPKCEVerifier constructs an [aoni.RequestModifier] adding the code_verifier parameter
+// for OAuth 2.0 token endpoint requests per RFC 7636 §4.5 and RFC 9700 §2.1.
+func WithPKCEVerifier(verifier string) aoni.RequestModifier {
+	return aoni.RequestModifier{
+		Kind: core.ModCustom,
+		Fn: func(req aoni.Request) {
+			req.AddQueryParam("code_verifier", verifier)
+		},
+	}
+}
+
 // WithUserAgent constructs an [aoni.RequestModifier] overriding the standard User-Agent header (RFC 9110 §10.1.5).
 func WithUserAgent(ua string) aoni.RequestModifier {
 	return WithHeader("User-Agent", ua)
@@ -139,9 +177,97 @@ func WithIfMatch(etag string) aoni.RequestModifier {
 	return WithHeader("If-Match", etag)
 }
 
-// WithIfModifiedSince constructs an [aoni.RequestModifier] setting the If-Modified-Since conditional header in HTTP-time format.
+// WithIfModifiedSince constructs an [aoni.RequestModifier] setting the If-Modified-Since conditional header (RFC 9110 §5.6.7 & §13.1.3).
 func WithIfModifiedSince(t time.Time) aoni.RequestModifier {
 	return WithHeader("If-Modified-Since", t.UTC().Format(http.TimeFormat))
+}
+
+// WithIfUnmodifiedSince constructs an [aoni.RequestModifier] setting the If-Unmodified-Since conditional header (RFC 9110 §5.6.7 & §13.1.4).
+func WithIfUnmodifiedSince(t time.Time) aoni.RequestModifier {
+	return WithHeader("If-Unmodified-Since", t.UTC().Format(http.TimeFormat))
+}
+
+// WithRange constructs an [aoni.RequestModifier] setting the Range header for byte-range requests (RFC 9110 §14.2).
+func WithRange(start, end int64) aoni.RequestModifier {
+	if start < 0 {
+		return WithHeader("Range", "bytes="+strconv.FormatInt(start, 10))
+	}
+
+	if end < 0 {
+		return WithHeader("Range", "bytes="+strconv.FormatInt(start, 10)+"-")
+	}
+
+	return WithHeader("Range", "bytes="+strconv.FormatInt(start, 10)+"-"+strconv.FormatInt(end, 10))
+}
+
+// WithIfRangeETag constructs an [aoni.RequestModifier] setting the If-Range header with an entity tag (RFC 9110 §13.1.5).
+func WithIfRangeETag(etag string) aoni.RequestModifier {
+	return WithHeader("If-Range", etag)
+}
+
+// WithIfRangeDate constructs an [aoni.RequestModifier] setting the If-Range header with an HTTP date (RFC 9110 §5.6.7 & §13.1.5).
+func WithIfRangeDate(t time.Time) aoni.RequestModifier {
+	return WithHeader("If-Range", t.UTC().Format(http.TimeFormat))
+}
+
+// WithCacheControl constructs an [aoni.RequestModifier] setting Cache-Control request directives (RFC 9111 §5.2.1).
+func WithCacheControl(directives ...string) aoni.RequestModifier {
+	return WithHeader("Cache-Control", strings.Join(directives, ", "))
+}
+
+// WithNoCache constructs an [aoni.RequestModifier] forcing cache revalidation via "Cache-Control: no-cache" (RFC 9111 §5.2.1.4).
+func WithNoCache() aoni.RequestModifier {
+	return WithHeader("Cache-Control", "no-cache")
+}
+
+// WithNoStore constructs an [aoni.RequestModifier] preventing response caching via "Cache-Control: no-store" (RFC 9111 §5.2.1.5).
+func WithNoStore() aoni.RequestModifier {
+	return WithHeader("Cache-Control", "no-store")
+}
+
+// ============================================================================
+// WEBSOCKET MODIFIERS (RFC 6455, RFC 7692, RFC 7936, RFC 8441)
+// ============================================================================
+
+// WithSecWebSocketProtocol constructs an [aoni.RequestModifier] requesting one or more WebSocket subprotocols
+// per RFC 6455 §11.3.4, RFC 7936 §2, and RFC 8441 §5.
+func WithSecWebSocketProtocol(protocols ...string) aoni.RequestModifier {
+	return WithHeader("Sec-WebSocket-Protocol", strings.Join(protocols, ", "))
+}
+
+// WithSecWebSocketExtensions constructs an [aoni.RequestModifier] requesting WebSocket extensions
+// per RFC 6455 §11.3.2, RFC 7692 §5, and RFC 8441 §5.
+func WithSecWebSocketExtensions(extensions ...string) aoni.RequestModifier {
+	return WithHeader("Sec-WebSocket-Extensions", strings.Join(extensions, ", "))
+}
+
+// WithSecWebSocketVersion constructs an [aoni.RequestModifier] setting the Sec-WebSocket-Version header (RFC 6455 §11.3.5 & RFC 8441 §5).
+func WithSecWebSocketVersion(version string) aoni.RequestModifier {
+	return WithHeader("Sec-WebSocket-Version", version)
+}
+
+// WithPermessageDeflate constructs an [aoni.RequestModifier] requesting the permessage-deflate compression extension
+// with optional parameters (RFC 7692 §7 & RFC 8441 §5).
+func WithPermessageDeflate(params ...string) aoni.RequestModifier {
+	if len(params) == 0 {
+		return WithHeader("Sec-WebSocket-Extensions", "permessage-deflate; client_max_window_bits")
+	}
+
+	return WithHeader("Sec-WebSocket-Extensions", "permessage-deflate; "+strings.Join(params, "; "))
+}
+
+// ============================================================================
+// PUBLIC KEY PINNING (HPKP) MODIFIERS (RFC 7469)
+// ============================================================================
+
+// WithPublicKeyPins constructs an [aoni.RequestModifier] attaching a Public-Key-Pins header value (RFC 7469 §2.1).
+func WithPublicKeyPins(value string) aoni.RequestModifier {
+	return WithHeader(hpkp.HeaderPublicKeyPins, value)
+}
+
+// WithPublicKeyPinsReportOnly constructs an [aoni.RequestModifier] attaching a Public-Key-Pins-Report-Only header value (RFC 7469 §2.1).
+func WithPublicKeyPinsReportOnly(value string) aoni.RequestModifier {
+	return WithHeader(hpkp.HeaderPublicKeyPinsReportOnly, value)
 }
 
 // ============================================================================

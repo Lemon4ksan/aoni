@@ -5,7 +5,7 @@
 package aoni
 
 import (
-	stdio "io"
+	"io"
 	"net"
 	"testing"
 
@@ -50,11 +50,11 @@ func TestFragmentedConn_Write(t *testing.T) {
 	}()
 
 	buf := make([]byte, 2)
-	n, err := stdio.ReadFull(c2, buf)
+	n, err := io.ReadFull(c2, buf)
 	require.NoError(t, err)
 	assert.Equal(t, "te", string(buf[:n]))
 
-	n, err = stdio.ReadFull(c2, buf)
+	n, err = io.ReadFull(c2, buf)
 	require.NoError(t, err)
 	assert.Equal(t, "st", string(buf[:n]))
 

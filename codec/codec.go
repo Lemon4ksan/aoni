@@ -2,12 +2,11 @@
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
-// Package codec defines high-level request body encoding, response body decoding, and generic unmarshaling facades.
 package codec
 
 import (
 	"errors"
-	stdio "io"
+	"io"
 
 	"github.com/lemon4ksan/foundation/generic"
 	"google.golang.org/protobuf/proto"
@@ -128,53 +127,58 @@ var (
 	RawDecoder = decode.RawDecoder
 )
 
-// To unmarshals the response payload stream from reader into a newly allocated instance of T using decoder.
-func To[T any](reader stdio.Reader, decoder Decoder) (T, error) {
+// DecodeTo unmarshals the response payload stream from reader into a newly allocated instance of T using decoder.
+func DecodeTo[T any](reader io.Reader, decoder Decoder) (T, error) {
 	return decode.To[T](reader, decoder)
 }
 
-// Result unmarshals the response stream from reader into a Swift-inspired [generic.Result].
-func Result[T any](reader stdio.Reader, decoder Decoder) generic.Result[T] {
-	return decode.Result[T](reader, decoder)
+// DecodeToResult unmarshals the response stream from reader into a Swift-inspired [generic.Result].
+func DecodeToResult[T any](reader io.Reader, decoder Decoder) generic.Result[T] {
+	return decode.ToResult[T](reader, decoder)
+}
+
+// Payload decodes rawBody into target based on contentType using auto-matched or default decoders.
+func Payload(contentType string, rawBody []byte, target any) error {
+	return decode.Payload(contentType, rawBody, target)
 }
 
 // JSON parses response stream bytes into a typed instance of T.
-func JSON[T any](reader stdio.Reader) (T, error) {
+func JSON[T any](reader io.Reader) (T, error) {
 	return decode.JSON[T](reader)
 }
 
 // XML parses XML response stream bytes into a typed instance of T.
-func XML[T any](reader stdio.Reader) (T, error) {
+func XML[T any](reader io.Reader) (T, error) {
 	return decode.XML[T](reader)
 }
 
 // YAML parses YAML response stream bytes into a typed instance of T.
-func YAML[T any](reader stdio.Reader) (T, error) {
+func YAML[T any](reader io.Reader) (T, error) {
 	return decode.YAML[T](reader)
 }
 
 // Proto parses binary Protocol Buffer stream bytes into a typed [proto.Message] instance.
-func Proto[T any](reader stdio.Reader) (T, error) {
+func Proto[T any](reader io.Reader) (T, error) {
 	return decode.Proto[T](reader)
 }
 
 // GRPCWeb extracts and parses Protobuf payloads from 5-byte gRPC-Web framed streams.
-func GRPCWeb[T any](reader stdio.Reader) (T, error) {
+func GRPCWeb[T any](reader io.Reader) (T, error) {
 	return decode.GRPCWeb[T](reader)
 }
 
 // ProtoJSON parses JSON response streams into typed Protobuf messages via protojson.
-func ProtoJSON[T any](reader stdio.Reader) (T, error) {
+func ProtoJSON[T any](reader io.Reader) (T, error) {
 	return decode.ProtoJSON[T](reader)
 }
 
 // Raw reads the entire response stream into a raw byte slice.
-func Raw(reader stdio.Reader) ([]byte, error) {
+func Raw(reader io.Reader) ([]byte, error) {
 	return decode.Raw(reader)
 }
 
-// StructToValues encodes a struct into [url.Values] using `url` struct tags.
-var StructToValues = values.StructToValues
+// Encode encodes a struct into [url.Values] using `url` struct tags.
+var Encode = values.Encode
 
 // StructToQueryString converts a struct into a URL-encoded query parameter string.
 var StructToQueryString = values.StructToQueryString

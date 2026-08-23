@@ -13,7 +13,7 @@ import (
 	"os"
 
 	"github.com/lemon4ksan/aoni/cmd/vortex/internal/base"
-	"github.com/lemon4ksan/aoni/internal/codegen/project"
+	"github.com/lemon4ksan/aoni/cmd/vortex/lib/project"
 )
 
 // CmdStatus implements the `vortex status` 360-degree API guardian dashboard command.

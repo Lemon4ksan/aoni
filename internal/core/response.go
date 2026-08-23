@@ -5,7 +5,7 @@
 package core
 
 import (
-	stdio "io"
+	"io"
 	"net/http"
 )
 
@@ -25,7 +25,7 @@ type Response interface {
 
 	BodyBytes() []byte
 	UnsafeBodyBytes() []byte
-	BodyStream() stdio.ReadCloser
+	BodyStream() io.ReadCloser
 
 	HTTPResponse() *http.Response
 	EngineResponse() any
@@ -37,7 +37,7 @@ type Response interface {
 
 // ResponseDecoder defines the contract for unmarshaling response payload streams into Go structures.
 type ResponseDecoder interface {
-	Decode(reader stdio.Reader, target any) error
+	Decode(reader io.Reader, target any) error
 }
 
 // BaseResponse is the interface implemented by structured envelope responses

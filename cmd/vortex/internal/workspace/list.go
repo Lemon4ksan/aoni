@@ -5,15 +5,18 @@
 package workspace
 
 import (
+	"cmp"
 	"context"
 	"encoding/json"
 	"flag"
 	"fmt"
 	"io"
-	"sort"
+	"slices"
 	"strings"
 
-	"github.com/lemon4ksan/aoni/internal/codegen/spec"
+	"github.com/lemon4ksan/foundation/generic"
+
+	"github.com/lemon4ksan/aoni/cmd/vortex/lib/spec"
 )
 
 // CmdList displays the catalog of DSL directives and pipeline stages.
@@ -103,14 +106,14 @@ func (c *CmdList) Run(_ context.Context, args []string, stdout, stderr io.Writer
 			continue
 		}
 
-		sort.Slice(directives, func(i, j int) bool {
-			return directives[i].Name < directives[j].Name
+		slices.SortFunc(directives, func(a, b *spec.DirectiveDef) int {
+			return cmp.Compare(a.Name, b.Name)
 		})
 
-		title := scopeTitles[s]
-		if title == "" {
-			title = fmt.Sprintf("◆ %s Scope", strings.ToUpper(string(s)[:1])+string(s)[1:])
-		}
+		title := generic.Coalesce(
+			scopeTitles[s],
+			fmt.Sprintf("◆ %s Scope", strings.ToUpper(string(s)[:1])+string(s)[1:]),
+		)
 
 		fmt.Fprintln(stdout, title)
 		fmt.Fprintln(stdout, strings.Repeat("─", 90))

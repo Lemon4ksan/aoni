@@ -12,6 +12,8 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/lemon4ksan/foundation/generic"
+
 	"github.com/lemon4ksan/aoni"
 	"github.com/lemon4ksan/aoni/request"
 )
@@ -68,14 +70,8 @@ type Client struct {
 
 // NewClient creates a new Oracle sidecar client.
 func NewClient(baseURL string) *Client {
-	if baseURL == "" {
-		baseURL = DefaultBaseURL
-	}
-
-	baseURL = strings.TrimRight(baseURL, "/")
-
 	return &Client{
-		baseURL: baseURL,
+		baseURL: strings.TrimRight(generic.Coalesce(baseURL, DefaultBaseURL), "/"),
 		client:  aoni.NewClient(nil),
 	}
 }

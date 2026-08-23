@@ -15,7 +15,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/lemon4ksan/aoni/internal/codegen/diff"
+	"github.com/lemon4ksan/aoni/cmd/vortex/lib/diff"
 )
 
 // CmdStack provides snapshot stacking, stepping, and step-by-step AST evolution comparisons.
@@ -243,7 +243,7 @@ func (c *CmdStack) runRestore(args []string, stack *diff.DiffStack, stdout, stde
 	return nil
 }
 
-func (c *CmdStack) runClear(stack *diff.DiffStack, stdout, stderr io.Writer) error {
+func (c *CmdStack) runClear(stack *diff.DiffStack, stdout, _ io.Writer) error {
 	if err := stack.Clear(); err != nil {
 		return fmt.Errorf("clearing stack: %w", err)
 	}

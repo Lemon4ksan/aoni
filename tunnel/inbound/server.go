@@ -8,6 +8,10 @@ package inbound
 import (
 	"bufio"
 	"context"
+	"crypto"
+	"crypto/ecdsa"
+	"crypto/elliptic"
+	"crypto/rand"
 	"crypto/tls"
 	"fmt"
 	"net"
@@ -20,12 +24,14 @@ import (
 
 // Server represents a high-performance, mixed SOCKS5 and HTTP/HTTPS inbound proxy server.
 type Server struct {
-	Addr       string
-	Engine     aoni.RequestDoer
-	CA         *ca.CA
-	RootCACert *tls.Certificate
-	Auth       func(username, password string) bool
-	EnableMITM bool
+	Addr          string
+	Engine        aoni.RequestDoer
+	CA            *ca.CA
+	RootCACert    *tls.Certificate
+	Auth          func(username, password string) bool
+	EnableMITM    bool
+	certCache     sync.Map
+	sharedLeafKey crypto.PrivateKey
 
 	listener net.Listener
 	mu       sync.RWMutex
@@ -36,9 +42,12 @@ type Server struct {
 
 // NewServer creates a new inbound proxy Server with optional functional settings.
 func NewServer(addr string, opts ...Option) (*Server, error) {
+	leafKey, _ := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+
 	srv := &Server{
-		Addr: addr,
-		done: make(chan struct{}),
+		Addr:          addr,
+		done:          make(chan struct{}),
+		sharedLeafKey: leafKey,
 	}
 
 	for _, opt := range opts {

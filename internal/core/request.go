@@ -8,7 +8,8 @@ package core
 
 import (
 	"context"
-	stdio "io"
+	"io"
+	"iter"
 	"net/http"
 	"net/url"
 )
@@ -36,6 +37,7 @@ type Request interface {
 
 	// Header Operations
 	Header(key string) string
+	Headers() iter.Seq2[[]byte, []byte]
 	SetHeader(key, value string)
 	AddHeader(key, value string)
 	DelHeader(key string)
@@ -44,8 +46,8 @@ type Request interface {
 	// Payload Body Operations
 	SetBodyBytes(body []byte)
 	BodyBytes() []byte
-	SetBodyStream(r stdio.Reader, contentLength int64)
-	BodyStream() stdio.Reader
+	SetBodyStream(r io.Reader, contentLength int64)
+	BodyStream() io.Reader
 
 	// Underlying Engine Requests
 	HTTPRequest() *http.Request
@@ -59,6 +61,11 @@ type RequestFactory interface {
 	AcquireRequest() Request
 	// ReleaseRequest releases a pooled [Request] instance back to the memory pool.
 	ReleaseRequest(req Request)
+}
+
+// HeaderIterator is implemented by high-performance Request instances to support zero-allocation header traversal.
+type HeaderIterator interface {
+	EachHeader(fn func(key, value []byte) bool)
 }
 
 // QueryEncoder marshals arbitrary structures or maps into [url.Values].

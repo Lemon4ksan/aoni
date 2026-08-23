@@ -14,9 +14,9 @@ import (
 	"path/filepath"
 
 	"github.com/lemon4ksan/aoni/cmd/vortex/internal/base"
-	"github.com/lemon4ksan/aoni/internal/codegen/ir"
-	"github.com/lemon4ksan/aoni/internal/codegen/openapi"
-	"github.com/lemon4ksan/aoni/internal/codegen/parser"
+	"github.com/lemon4ksan/aoni/cmd/vortex/lib/ir"
+	"github.com/lemon4ksan/aoni/cmd/vortex/lib/openapi"
+	"github.com/lemon4ksan/aoni/cmd/vortex/lib/parser"
 )
 
 func (c *Cmd) runExport(_ context.Context, args []string, stdout, stderr io.Writer) error {

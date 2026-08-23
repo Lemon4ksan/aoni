@@ -13,19 +13,18 @@ import (
 	"net/http"
 	"net/url"
 
-	foundation "github.com/lemon4ksan/foundation/net/url"
+	impl "github.com/lemon4ksan/foundation/net/cookie"
+	furl "github.com/lemon4ksan/foundation/net/url"
 	"github.com/lemon4ksan/foundation/silicon/bytesconv"
 	"github.com/valyala/fasthttp"
 
-	"github.com/lemon4ksan/aoni"
 	"github.com/lemon4ksan/aoni/cookie"
-	impl "github.com/lemon4ksan/aoni/internal/cookie"
 	"github.com/lemon4ksan/aoni/netutil"
 )
 
 // applyCookies populates outbound fasthttp request headers with matching cookies from the active jar.
 func (c *Client) applyCookies(ctx context.Context, req *fasthttp.Request) {
-	jar := c.config.Engine.CookieJar
+	jar := c.cfg.Engine.CookieJar
 	if jar == nil {
 		return
 	}
@@ -69,7 +68,7 @@ func (c *Client) applyCookies(ctx context.Context, req *fasthttp.Request) {
 
 // captureCookies extracts response Set-Cookie headers and saves valid cookies to the active jar.
 func (c *Client) captureCookies(ctx context.Context, req *fasthttp.Request, resp *fasthttp.Response) {
-	jar := c.config.Engine.CookieJar
+	jar := c.cfg.Engine.CookieJar
 	if jar == nil {
 		return
 	}
@@ -85,13 +84,11 @@ func (c *Client) captureCookies(ctx context.Context, req *fasthttp.Request, resp
 	u := uriToURL(req.URI())
 
 	var cookies []*http.Cookie
-	resp.Header.Cookies()(func(key, value []byte) bool {
+	for key, value := range resp.Header.Cookies() {
 		if cookie := parseCookie(key, value); cookie != nil {
 			cookies = append(cookies, cookie)
 		}
-
-		return true
-	})
+	}
 
 	if len(cookies) > 0 {
 		jar.SetCookies(u, cookies)
@@ -145,6 +142,8 @@ func extractUserInfoAndSetAuth(req *fasthttp.Request) {
 		pass := bytesconv.B2S(req.URI().Password())
 		encoded := base64.StdEncoding.EncodeToString(bytesconv.S2B(user + ":" + pass))
 		req.Header.Set("Authorization", "Basic "+encoded)
+		req.URI().SetUsernameBytes(nil)
+		req.URI().SetPasswordBytes(nil)
 
 		return
 	}
@@ -168,18 +167,22 @@ func extractUserInfoAndSetAuth(req *fasthttp.Request) {
 
 // scrubSensitiveHeaders strips sensitive credentials and cookie headers upon cross-domain redirects per RFC 9110 §15.4.
 func scrubSensitiveHeaders(req *fasthttp.Request, currentURI, nextURI *fasthttp.URI) {
-	for _, h := range aoni.DefaultSensitiveHeaders {
-		req.Header.Del(h)
-	}
-
-	req.Header.Del("Cookie2")
+	req.Header.Del("Authorization")
+	req.Header.Del("Proxy-Authorization")
 	req.Header.Del("Proxy-Authenticate")
 	req.Header.Del("WWW-Authenticate")
+	req.Header.Del("Cookie2")
+	req.Header.Del("X-Api-Key")
+	req.Header.Del("X-Auth-Token")
+	req.Header.Del("X-Access-Token")
+	req.Header.Del("X-Secret")
+	req.Header.Del("X-Client-Secret")
+	req.Header.Del("Api-Key")
+	req.Header.Del("Token")
+	req.Header.Del("Secret")
+	req.Header.Del("Private-Key")
 
-	host1 := string(currentURI.Host())
-	host2 := string(nextURI.Host())
-
-	if !isSameDomainOrSubdomain(host1, host2) {
+	if !isSameDomainOrSubdomain(bytesconv.B2S(currentURI.Host()), bytesconv.B2S(nextURI.Host())) {
 		req.Header.Del("Cookie")
 	}
 }
@@ -189,7 +192,7 @@ func isSameDomainOrSubdomain(h1, h2 string) bool {
 	clean1 := netutil.CleanHost(h1)
 	clean2 := netutil.CleanHost(h2)
 
-	return foundation.IsSameDomainOrSubdomain(clean1, clean2)
+	return furl.IsSameDomainOrSubdomain(clean1, clean2)
 }
 
 func uriToURL(uri *fasthttp.URI) *url.URL {

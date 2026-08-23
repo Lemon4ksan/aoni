@@ -111,3 +111,55 @@ func TestHPACKDynamicTableShrinking(t *testing.T) {
 		t.Fatalf("dynamic table size (%d) exceeded max size limit (100)", hp.DynamicSize())
 	}
 }
+
+// TestRFC7541AppendixCExamples validates HPACK encoding/decoding against official RFC 7541 Appendix C test vectors.
+func TestRFC7541AppendixCExamples(t *testing.T) {
+	// C.1.1: 10 with 5-bit prefix -> 0x0a (binary: 00001010)
+	buf := appendInt(nil, 5, 10)
+	if len(buf) != 1 || buf[0] != 0x0a {
+		t.Fatalf("RFC 7541 C.1.1 failed: got %x, want 0a", buf)
+	}
+
+	_, val := readInt(5, buf)
+	if val != 10 {
+		t.Fatalf("RFC 7541 C.1.1 readInt failed: got %d, want 10", val)
+	}
+
+	// C.1.2: 1337 with 5-bit prefix -> 0x1f, 0x9a, 0x0a
+	buf = appendInt(nil, 5, 1337)
+
+	expected1337 := []byte{0x1f, 0x9a, 0x0a}
+	if !bytes.Equal(buf, expected1337) {
+		t.Fatalf("RFC 7541 C.1.2 failed: got %x, want %x", buf, expected1337)
+	}
+
+	_, val = readInt(5, buf)
+	if val != 1337 {
+		t.Fatalf("RFC 7541 C.1.2 readInt failed: got %d, want 1337", val)
+	}
+
+	// C.1.3: 42 on 8-bit boundary -> 0x2a
+	buf = appendInt(nil, 8, 42)
+	if len(buf) != 1 || buf[0] != 0x2a {
+		t.Fatalf("RFC 7541 C.1.3 failed: got %x, want 2a", buf)
+	}
+
+	_, val = readInt(8, buf)
+	if val != 42 {
+		t.Fatalf("RFC 7541 C.1.3 readInt failed: got %d, want 42", val)
+	}
+
+	// C.2.4: Indexed Header Field (:method: GET) -> index 2 -> 0x82
+	hp := AcquireHPACK()
+	defer ReleaseHPACK(hp)
+
+	hf := AcquireHeaderField()
+	defer ReleaseHeaderField(hf)
+
+	hf.Set(":method", "GET")
+
+	enc := hp.AppendHeader(nil, hf, false)
+	if len(enc) != 1 || enc[0] != 0x82 {
+		t.Fatalf("RFC 7541 C.2.4 failed: got %x, want 82", enc)
+	}
+}

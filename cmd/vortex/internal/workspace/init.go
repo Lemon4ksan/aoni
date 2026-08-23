@@ -14,10 +14,10 @@ import (
 	"strings"
 
 	"github.com/lemon4ksan/aoni/cmd/vortex/internal/base"
-	"github.com/lemon4ksan/aoni/internal/codegen/asyncapi"
-	"github.com/lemon4ksan/aoni/internal/codegen/openapi"
-	"github.com/lemon4ksan/aoni/internal/codegen/project"
-	"github.com/lemon4ksan/aoni/internal/codegen/spec"
+	"github.com/lemon4ksan/aoni/cmd/vortex/lib/asyncapi"
+	"github.com/lemon4ksan/aoni/cmd/vortex/lib/openapi"
+	"github.com/lemon4ksan/aoni/cmd/vortex/lib/project"
+	"github.com/lemon4ksan/aoni/cmd/vortex/lib/spec"
 )
 
 // CmdInit initializes a .vortex.yml workspace or scaffolds a new API package from templates/specs.

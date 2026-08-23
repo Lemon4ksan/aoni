@@ -72,6 +72,14 @@ func TestVerifyCertificatePins(t *testing.T) {
 		assert.NoError(t, err)
 	})
 
+	t.Run("rfc7469_pin_sha256_format", func(t *testing.T) {
+		t.Parallel()
+
+		pins := map[string][]string{"api.example.com": {`pin-sha256="` + correctPinBase64 + `"`}}
+		err := netdial.VerifyCertificatePins("api.example.com", pins, rawCerts)
+		assert.NoError(t, err)
+	})
+
 	t.Run("pin_mismatch_returns_error", func(t *testing.T) {
 		t.Parallel()
 

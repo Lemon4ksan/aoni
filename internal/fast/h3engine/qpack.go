@@ -12,45 +12,71 @@ import (
 	"sync"
 
 	"github.com/lemon4ksan/foundation/silicon/bytesconv"
-	"github.com/quic-go/qpack"
 	"github.com/valyala/fasthttp"
+
+	"github.com/lemon4ksan/aoni/internal/qpack"
 )
 
-var bufferPool = sync.Pool{
+// PooledEncoder encapsulates a pooled buffer and QPACK encoder for zero-allocation serialization.
+type PooledEncoder struct {
+	buf *bytes.Buffer
+	enc *qpack.Encoder
+}
+
+var encoderPool = sync.Pool{
 	New: func() any {
-		return new(bytes.Buffer)
+		buf := new(bytes.Buffer)
+
+		return &PooledEncoder{
+			buf: buf,
+			enc: qpack.NewEncoder(buf),
+		}
 	},
 }
 
-// QPACKCodec manages zero-allocation QPACK header serialization and deserialization.
+// QPACKCodec manages zero-allocation QPACK header serialization and deserialization (RFC 9204 §2, §3 & §4).
 type QPACKCodec struct {
 	decoder *qpack.Decoder
 }
 
-// NewQPACKCodec instantiates a new QPACKCodec.
+// NewQPACKCodec instantiates a new QPACKCodec (RFC 9204 §2.2).
 func NewQPACKCodec() *QPACKCodec {
 	return &QPACKCodec{
 		decoder: qpack.NewDecoder(),
 	}
 }
 
-// WriteDecoderTable processes instructions received over the QPACK Encoder Stream.
+// AcquireEncoder obtains a pooled QPACK encoder for zero-allocation encoding.
+func (q *QPACKCodec) AcquireEncoder() *PooledEncoder {
+	p := encoderPool.Get().(*PooledEncoder)
+	p.buf.Reset()
+	p.enc.Reset(p.buf)
+
+	return p
+}
+
+// ReleaseEncoder returns a pooled QPACK encoder back to the memory pool.
+func (q *QPACKCodec) ReleaseEncoder(p *PooledEncoder) {
+	if p != nil {
+		encoderPool.Put(p)
+	}
+}
+
+// WriteDecoderTable processes instructions received over the QPACK Encoder Stream (RFC 9204 §4.2 & §4.3).
 //
-// Note: Currently quic-go/qpack operates on static tables and does not expose
+// Note: Currently quic-go/qpack operates on static tables (RFC 9204 Appendix A) and does not expose
 // dynamic table instructions, so incoming bytes are safely consumed.
 func (q *QPACKCodec) WriteDecoderTable(_ []byte) error {
 	return nil
 }
 
-// EncodeRequestHeaders encodes a fasthttp request header into a QPACK block,
-// strictly maintaining the specified orderedKeys sequence for Anti-DPI fingerprinting and RFC 9220 Extended CONNECT.
-func (q *QPACKCodec) EncodeRequestHeaders(w io.Writer, req *fasthttp.Request, orderedKeys []string) error {
-	buf := bufferPool.Get().(*bytes.Buffer)
-
-	buf.Reset()
-	defer bufferPool.Put(buf)
-
-	enc := qpack.NewEncoder(buf)
+// EncodeRequestHeadersPooled encodes request headers into the pooled encoder's buffer with 0 heap allocations.
+func (q *QPACKCodec) EncodeRequestHeadersPooled(
+	p *PooledEncoder,
+	req *fasthttp.Request,
+	orderedKeys []string,
+) ([]byte, error) {
+	enc := p.enc
 
 	method := bytesconv.B2S(req.Header.Method())
 	_ = enc.WriteField(qpack.HeaderField{Name: ":method", Value: method})
@@ -66,9 +92,9 @@ func (q *QPACKCodec) EncodeRequestHeaders(w io.Writer, req *fasthttp.Request, or
 		q.encodeOrderedHeaders(enc, req, orderedKeys)
 	} else {
 		var stackKeyBuf [128]byte
-		req.Header.All()(func(k, v []byte) bool {
+		for k, v := range req.Header.All() {
 			if isForbiddenH3Header(k, v) {
-				return true
+				continue
 			}
 
 			var keyStr string
@@ -84,16 +110,31 @@ func (q *QPACKCodec) EncodeRequestHeaders(w io.Writer, req *fasthttp.Request, or
 			}
 
 			_ = enc.WriteField(qpack.HeaderField{Name: keyStr, Value: bytesconv.B2S(v)})
-
-			return true
-		})
+		}
 	}
 
-	_, err := w.Write(buf.Bytes())
+	return p.buf.Bytes(), nil
+}
+
+// EncodeRequestHeaders encodes a fasthttp request header into a QPACK block (RFC 9204 §4.5),
+// strictly maintaining the specified orderedKeys sequence for Anti-DPI fingerprinting and RFC 9220 Extended CONNECT.
+func (q *QPACKCodec) EncodeRequestHeaders(w io.Writer, req *fasthttp.Request, orderedKeys []string) error {
+	p := q.AcquireEncoder()
+	defer q.ReleaseEncoder(p)
+
+	block, err := q.EncodeRequestHeadersPooled(p, req, orderedKeys)
+	if err != nil {
+		return err
+	}
+
+	_, err = w.Write(block)
 
 	return err
 }
 
+// isForbiddenH3Header checks if a header field is prohibited in HTTP/3 (RFC 9114 §4.1, §4.3 & §4.5).
+// Transfer-Encoding, Upgrade, Connection, and hop-by-hop headers MUST NOT be sent.
+// TE header is only permitted if its value is "trailers".
 func isForbiddenH3Header(key, val []byte) bool {
 	if len(key) == 0 || key[0] == ':' {
 		return true
@@ -159,17 +200,24 @@ func (q *QPACKCodec) encodeOrderedHeaders(enc *qpack.Encoder, req *fasthttp.Requ
 		}
 	}
 
-	req.Header.All()(func(k, v []byte) bool {
+	for k, v := range req.Header.All() {
 		kStr := bytesconv.B2S(k)
 
 		if isForbiddenH3Header(k, v) {
-			return true
+			continue
 		}
 
-		for i := 0; i < numOrdered; i++ {
+		skip := false
+
+		for i := range numOrdered {
 			if (visitedBits&(1<<i)) != 0 && bytesconv.EqualFoldASCII(kStr, orderedKeys[i]) {
-				return true
+				skip = true
+				break
 			}
+		}
+
+		if skip {
+			continue
 		}
 
 		var (
@@ -192,13 +240,11 @@ func (q *QPACKCodec) encodeOrderedHeaders(enc *qpack.Encoder, req *fasthttp.Requ
 			Name:  keyStr,
 			Value: bytesconv.B2S(v),
 		})
-
-		return true
-	})
+	}
 }
 
-// DecodeResponseHeaders parses a QPACK header block directly into fasthttp ResponseHeader,
-// returning the parsed status code and ignoring 1xx informational frames.
+// DecodeResponseHeaders parses a QPACK header block directly into fasthttp ResponseHeader (RFC 9204 §2.2 & §4.5),
+// returning the parsed status code and ignoring 1xx informational frames (RFC 9114 §4.1).
 func (q *QPACKCodec) DecodeResponseHeaders(headerBlock []byte, res *fasthttp.ResponseHeader) (int, error) {
 	decodeFn := q.decoder.Decode(headerBlock)
 
@@ -255,7 +301,7 @@ func (q *QPACKCodec) DecodeResponseHeaders(headerBlock []byte, res *fasthttp.Res
 	return statusCode, nil
 }
 
-// DecodeResponseTrailers decodes a QPACK header block containing response trailers into a key-value map.
+// DecodeResponseTrailers decodes a QPACK header block containing response trailers into a key-value map (RFC 9204 §2.2 & §4.5).
 func (q *QPACKCodec) DecodeResponseTrailers(headerBlock []byte) (map[string][]string, error) {
 	decodeFn := q.decoder.Decode(headerBlock)
 	trailers := make(map[string][]string)

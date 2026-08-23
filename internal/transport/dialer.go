@@ -35,6 +35,7 @@ var (
 // It contains ZERO references to high-level client or request structures.
 type DialConfig struct {
 	// L4 / Network Options
+	Network              string
 	ProxyURL             *url.URL
 	DNSResolver          netdial.DNSResolver
 	StackDriver          netdial.RawStackDriver
@@ -166,7 +167,12 @@ func (d *UniversalDialer) DialTLSContext(ctx context.Context, network, addr stri
 func (d *UniversalDialer) DialH2(ctx context.Context, addr string, cfg DialConfig) (net.Conn, error) {
 	cfg.ALPNOverride = []string{"h2", "http/1.1"}
 
-	conn, err := d.DialTLSContext(ctx, "tcp", addr, cfg)
+	network := cfg.Network
+	if network == "" {
+		network = "tcp"
+	}
+
+	conn, err := d.DialTLSContext(ctx, network, addr, cfg)
 	if err != nil {
 		return nil, err
 	}

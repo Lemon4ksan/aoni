@@ -7,13 +7,14 @@ package mod
 import (
 	"bytes"
 	"fmt"
-	stdio "io"
+	"io"
 	"net/http"
 	"os"
 
+	fio "github.com/lemon4ksan/foundation/io"
+
 	"github.com/lemon4ksan/aoni"
 	"github.com/lemon4ksan/aoni/fingerprint/ja4"
-	"github.com/lemon4ksan/aoni/internal/io"
 	"github.com/lemon4ksan/aoni/internal/pipeline"
 	"github.com/lemon4ksan/aoni/telemetry"
 )
@@ -73,9 +74,9 @@ func dumpStdRequest(stdReq *http.Request) {
 	if stdReq.Body != nil && stdReq.Body != http.NoBody {
 		var buf bytes.Buffer
 
-		_, _ = io.CopyZeroAlloc(&buf, stdReq.Body)
+		_, _ = fio.CopyZeroAlloc(&buf, stdReq.Body)
 		body = buf.Bytes()
-		stdReq.Body = stdio.NopCloser(bytes.NewReader(body))
+		stdReq.Body = io.NopCloser(bytes.NewReader(body))
 	}
 
 	curl := telemetry.CurlFromRequest(stdReq, body)

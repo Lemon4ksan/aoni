@@ -40,6 +40,14 @@ type fastBodyReadCloser struct {
 	once     sync.Once
 }
 
+func (b *fastBodyReadCloser) Bytes() (data []byte, volatile bool) {
+	if b.fastResp != nil {
+		return b.fastResp.Body(), true
+	}
+
+	return nil, false
+}
+
 func (b *fastBodyReadCloser) Close() error {
 	b.once.Do(func() {
 		fasthttp.ReleaseRequest(b.fastReq)
@@ -47,6 +55,28 @@ func (b *fastBodyReadCloser) Close() error {
 	})
 
 	return nil
+}
+
+type bytesReadCloser struct {
+	*bytes.Reader
+	raw      []byte
+	volatile bool
+}
+
+func (b *bytesReadCloser) Bytes() ([]byte, bool) {
+	return b.raw, b.volatile
+}
+
+func (b *bytesReadCloser) Close() error {
+	return nil
+}
+
+func newBytesReadCloser(data []byte, volatile bool) io.ReadCloser {
+	return &bytesReadCloser{
+		Reader:   bytes.NewReader(data),
+		raw:      data,
+		volatile: volatile,
+	}
 }
 
 // Response adapts a high-performance [*fasthttp.Response] to the unified [aoni.Response] contract.
@@ -102,14 +132,12 @@ func (f *Response) Header(key string) string {
 	}
 
 	if len(val) == 0 {
-		f.resp.Header.All()(func(k, v []byte) bool {
+		for k, v := range f.resp.Header.All() {
 			if bytesconv.EqualFoldASCII(bytesconv.B2S(k), key) {
 				val = v
-				return false
+				break
 			}
-
-			return true
-		})
+		}
 	}
 
 	return bytesconv.B2S(val)
@@ -131,11 +159,10 @@ func (f *Response) HeaderBytes(key []byte) []byte {
 // Headers yields all response headers as a canonical key-value map.
 func (f *Response) Headers() map[string][]string {
 	m := make(map[string][]string)
-	f.resp.Header.All()(func(k, v []byte) bool {
+	for k, v := range f.resp.Header.All() {
 		sk := requestutil.CanonicalHeaderKey(bytesconv.B2S(k))
 		m[sk] = append(m[sk], string(v))
-		return true
-	})
+	}
 
 	return m
 }
@@ -206,7 +233,7 @@ func (f *Response) BodyStream() io.ReadCloser {
 		return io.NopCloser(stream)
 	}
 
-	return io.NopCloser(bytes.NewReader(f.BodyBytes()))
+	return newBytesReadCloser(f.UnsafeBodyBytes(), true)
 }
 
 // HTTPResponse converts fasthttp response adapter into standard *http.Response.
@@ -216,10 +243,9 @@ func (f *Response) HTTPResponse() *http.Response {
 	}
 
 	header := make(http.Header)
-	f.resp.Header.All()(func(k, v []byte) bool {
+	for k, v := range f.resp.Header.All() {
 		header.Add(string(k), string(v))
-		return true
-	})
+	}
 
 	body := slices.Clone(f.resp.Body())
 
@@ -227,7 +253,7 @@ func (f *Response) HTTPResponse() *http.Response {
 		StatusCode:    f.resp.StatusCode(),
 		Status:        http.StatusText(f.resp.StatusCode()),
 		Header:        header,
-		Body:          io.NopCloser(bytes.NewReader(body)),
+		Body:          newBytesReadCloser(body, false),
 		ContentLength: int64(len(body)),
 	}
 }
@@ -382,10 +408,9 @@ func (r *PooledResponse) HTTPResponse() *http.Response {
 	}
 
 	header := make(http.Header)
-	r.fastResp.Header.All()(func(k, v []byte) bool {
-		header.Add(bytesconv.B2S(k), bytesconv.B2S(v))
-		return true
-	})
+	for k, v := range r.fastResp.Header.All() {
+		header.Add(string(k), string(v))
+	}
 
 	body := slices.Clone(r.fastResp.Body())
 
@@ -393,7 +418,7 @@ func (r *PooledResponse) HTTPResponse() *http.Response {
 		StatusCode:    r.fastResp.StatusCode(),
 		Status:        http.StatusText(r.fastResp.StatusCode()),
 		Header:        header,
-		Body:          io.NopCloser(bytes.NewReader(body)),
+		Body:          newBytesReadCloser(body, false),
 		ContentLength: int64(len(body)),
 	}
 }

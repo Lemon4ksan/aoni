@@ -10,8 +10,8 @@ import (
 	"io"
 
 	"github.com/lemon4ksan/aoni/cmd/vortex/internal/text"
-	"github.com/lemon4ksan/aoni/internal/codegen/diff"
-	"github.com/lemon4ksan/aoni/internal/codegen/lint"
+	"github.com/lemon4ksan/aoni/cmd/vortex/lib/diff"
+	"github.com/lemon4ksan/aoni/cmd/vortex/lib/lint"
 )
 
 // Reporter provides unified output formatting for diffs, diagnostics, and codegen summaries.

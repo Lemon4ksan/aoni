@@ -8,9 +8,8 @@ package request
 import (
 	"context"
 	"errors"
-	stdio "io"
+	"io"
 	"net/http"
-	"reflect"
 
 	"github.com/lemon4ksan/foundation/generic"
 
@@ -41,18 +40,22 @@ type Unwrapper interface {
 }
 
 // UnwrapClient peels away all [Unwrapper] decorator layers from r and returns the innermost [*aoni.Client].
-func UnwrapClient(r Requester) (c *aoni.Client) {
-	for {
+func UnwrapClient(r Requester) *aoni.Client {
+	for r != nil {
 		if client, ok := r.(*aoni.Client); ok {
 			return client
 		}
 
-		u, ok := r.(Unwrapper)
-		if !ok {
-			break
+		if u, ok := r.(Unwrapper); ok {
+			r = u.Unwrap()
+			continue
 		}
 
-		r = u.Unwrap()
+		if client, ok := aoni.UnwrapAs[*aoni.Client](r); ok {
+			return client
+		}
+
+		break
 	}
 
 	return nil
@@ -698,7 +701,8 @@ func DoToEx[Resp any](
 
 // decodeResponseTo unmarshals resp payload into a newly allocated instance of Resp.
 func decodeResponseTo[Resp any](resp *http.Response, c Requester) (*Resp, error) {
-	if reflect.TypeFor[Resp]() == reflect.TypeFor[NoResponse]() {
+	var zero *Resp
+	if _, ok := any(zero).(*NoResponse); ok {
 		return nil, HandleResponse(resp, nil, c)
 	}
 
@@ -740,7 +744,7 @@ const stackModCapacity = 16
 
 func withJSONBodyMods(
 	stackBuf *[stackModCapacity]aoni.RequestModifier,
-	bodyReader stdio.Reader,
+	bodyReader io.Reader,
 	mods []aoni.RequestModifier,
 ) []aoni.RequestModifier {
 	total := 3 + len(mods)

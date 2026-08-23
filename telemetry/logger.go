@@ -39,6 +39,24 @@ func NewSlogAdapter(l *slog.Logger) *SlogAdapter {
 	return &SlogAdapter{logger: l}
 }
 
+// Unwrap returns the underlying [*slog.Logger].
+func (s *SlogAdapter) Unwrap() any {
+	if s == nil {
+		return nil
+	}
+
+	return s.logger
+}
+
+// Logger returns the underlying [*slog.Logger].
+func (s *SlogAdapter) Logger() *slog.Logger {
+	if s == nil {
+		return nil
+	}
+
+	return s.logger
+}
+
 func (s *SlogAdapter) Log(ctx context.Context, level LogLevel, msg string, keysAndValues ...any) {
 	if s == nil || s.logger == nil {
 		return

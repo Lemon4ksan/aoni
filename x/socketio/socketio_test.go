@@ -14,6 +14,7 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -1363,11 +1364,11 @@ func TestNamespaceSocket_EmitBinary(t *testing.T) {
 
 			switch {
 			case strings.Contains(string(data), "51-/admin,"):
-				headerData = append([]byte(nil), data...)
+				headerData = slices.Clone(data)
 			case msgType == ws.FrameBinary:
-				attachmentData = append([]byte(nil), data...)
+				attachmentData = slices.Clone(data)
 			case len(data) > 0 && data[0] == 'b':
-				attachmentData = append([]byte(nil), data[1:]...)
+				attachmentData = slices.Clone(data[1:])
 			}
 		}
 
