@@ -54,10 +54,6 @@ func getCipherSuite(id uint16) cipherSuite {
 }
 
 func aeadAESGCMTLS13(key, nonceMask []byte) cipher.AEAD {
-	if fips140.Enabled() {
-		return aeadAESGCMTLS13FIPS140(key, nonceMask)
-	}
-
 	if len(nonceMask) != aeadNonceLength {
 		panic("tls: internal error: wrong nonce length")
 	}
