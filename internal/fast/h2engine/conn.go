@@ -292,6 +292,8 @@ func (c *Conn) CancelStream(ctx *Context) {
 		default:
 		}
 	}
+
+	c.broadcastWindowUpdate()
 }
 
 // Close gracefully terminates the HTTP/2 connection.
