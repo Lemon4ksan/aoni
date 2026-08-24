@@ -6,7 +6,7 @@ package probe
 
 import (
 	"net"
-	"strings"
+	"net/netip"
 )
 
 // CDNProvider represents a recognized Cloud / CDN network provider.
@@ -26,51 +26,42 @@ func CheckCDN(ip net.IP) (isCDN bool, provider CDNProvider) {
 		return false, CDNUnknown
 	}
 
-	ipStr := ip.String()
+	if addr, ok := netip.AddrFromSlice(ip); ok {
+		return CheckCDNAddr(addr.Unmap())
+	}
 
-	// Heuristic CIDR checks for popular CDN edge nodes
-	switch {
-	case isCloudflareIP(ip):
-		return true, CDNCloudflare
-	case isAkamaiIP(ipStr):
-		return true, CDNAkamai
-	case isFastlyIP(ipStr):
-		return true, CDNFastly
-	default:
+	return false, CDNUnknown
+}
+
+// CheckCDNAddr detects if a [netip.Addr] belongs to known CDN or WAF edge networks with 0 heap allocations.
+func CheckCDNAddr(addr netip.Addr) (isCDN bool, provider CDNProvider) {
+	if !addr.IsValid() {
 		return false, CDNUnknown
 	}
-}
 
-func isCloudflareIP(ip net.IP) bool {
-	// IPv4 Cloudflare CIDR range checks (103.21.244.0/22, 104.16.0.0/13, 172.64.0.0/13, etc.)
-	ip4 := ip.To4()
-	if ip4 == nil {
-		return false
+	addr = addr.Unmap()
+	if addr.Is4() {
+		b := addr.As4()
+
+		// Cloudflare IPv4 CIDRs: 104.16.0.0/13, 172.64.0.0/13, 162.158.0.0/15, 198.41.128.0/17, 103.21.244.0/22
+		if (b[0] == 104 && (b[1] >= 16 && b[1] <= 31)) ||
+			(b[0] == 172 && (b[1] >= 64 && b[1] <= 127)) ||
+			(b[0] == 162 && (b[1] == 158 || b[1] == 159)) ||
+			(b[0] == 198 && b[1] == 41) ||
+			(b[0] == 103 && b[1] == 21 && (b[2] >= 244 && b[2] <= 247)) {
+			return true, CDNCloudflare
+		}
+
+		// Akamai IPv4: 23.0.0.0/8, 104.64.0.0/10
+		if b[0] == 23 || (b[0] == 104 && (b[1] >= 64 && b[1] <= 127)) {
+			return true, CDNAkamai
+		}
+
+		// Fastly IPv4: 151.101.0.0/16, 199.27.72.0/21
+		if (b[0] == 151 && b[1] == 101) || (b[0] == 199 && b[1] == 27) {
+			return true, CDNFastly
+		}
 	}
 
-	if ip4[0] == 104 && (ip4[1] >= 16 && ip4[1] <= 31) {
-		return true
-	}
-
-	if ip4[0] == 172 && (ip4[1] >= 64 && ip4[1] <= 127) {
-		return true
-	}
-
-	if ip4[0] == 162 && ip4[1] == 158 {
-		return true
-	}
-
-	if ip4[0] == 198 && ip4[1] == 41 {
-		return true
-	}
-
-	return false
-}
-
-func isAkamaiIP(ipStr string) bool {
-	return strings.HasPrefix(ipStr, "23.") || strings.HasPrefix(ipStr, "104.64.")
-}
-
-func isFastlyIP(ipStr string) bool {
-	return strings.HasPrefix(ipStr, "151.101.") || strings.HasPrefix(ipStr, "199.27.")
+	return false, CDNUnknown
 }

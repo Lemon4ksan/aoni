@@ -10,6 +10,7 @@ import (
 	"crypto/x509/pkix"
 	"math/big"
 	"net"
+	"net/netip"
 	"testing"
 	"time"
 
@@ -38,11 +39,40 @@ func TestCheckCDN(t *testing.T) {
 		isCDN, provider := probe.CheckCDN(net.ParseIP(tt.ip))
 		assert.Equalf(t, tt.expected, isCDN, "IP: %s", tt.ip)
 		assert.Equalf(t, tt.provider, provider, "IP: %s", tt.ip)
+
+		addr, _ := netip.ParseAddr(tt.ip)
+		isCDNAddr, providerAddr := probe.CheckCDNAddr(addr)
+		assert.Equalf(t, tt.expected, isCDNAddr, "Addr: %s", tt.ip)
+		assert.Equalf(t, tt.provider, providerAddr, "Addr: %s", tt.ip)
 	}
 
 	isCDN, provider := probe.CheckCDN(nil)
 	assert.False(t, isCDN)
 	assert.Equal(t, probe.CDNUnknown, provider)
+
+	isCDNAddr, providerAddr := probe.CheckCDNAddr(netip.Addr{})
+	assert.False(t, isCDNAddr)
+	assert.Equal(t, probe.CDNUnknown, providerAddr)
+}
+
+func BenchmarkCheckCDNAddr(b *testing.B) {
+	addr, _ := netip.ParseAddr("104.16.1.1")
+	b.ReportAllocs()
+	b.ResetTimer()
+
+	for b.Loop() {
+		_, _ = probe.CheckCDNAddr(addr)
+	}
+}
+
+func BenchmarkCheckCDN_LegacyIP(b *testing.B) {
+	ip := net.ParseIP("104.16.1.1")
+	b.ReportAllocs()
+	b.ResetTimer()
+
+	for b.Loop() {
+		_, _ = probe.CheckCDN(ip)
+	}
 }
 
 func TestInspectTLSChain(t *testing.T) {
