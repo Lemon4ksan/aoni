@@ -202,3 +202,33 @@ func BenchmarkHTTP1_Pipelining_Batch50(b *testing.B) {
 		}
 	}
 }
+
+func BenchmarkHTTP1_Serial_Batch50(b *testing.B) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/plain")
+		_, _ = w.Write([]byte("OK"))
+	}))
+	defer ts.Close()
+
+	hc := &h1engine.HostClient{
+		Addr: ts.Listener.Addr().String(),
+	}
+
+	req := h1engine.AcquireRequest()
+	req.Header.SetMethod("GET")
+	req.SetRequestURI(ts.URL)
+	resp := h1engine.AcquireResponse()
+	defer h1engine.ReleaseRequest(req)
+	defer h1engine.ReleaseResponse(resp)
+
+	b.ResetTimer()
+	b.ReportAllocs()
+
+	for b.Loop() {
+		for range 50 {
+			if err := hc.Do(req, resp); err != nil {
+				b.Fatalf("serial error: %v", err)
+			}
+		}
+	}
+}
