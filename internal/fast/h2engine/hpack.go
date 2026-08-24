@@ -7,7 +7,6 @@ package h2engine
 import (
 	"bytes"
 	"fmt"
-	"sync"
 
 	"github.com/lemon4ksan/foundation/net/http/rodata"
 	"github.com/lemon4ksan/foundation/silicon/pool"
@@ -138,14 +137,12 @@ func (hf *HeaderField) AppendBytes(dst []byte) []byte {
 	return dst
 }
 
-var hpackPool = sync.Pool{
-	New: func() any {
-		return &HPACK{
-			maxTableSize: defaultHeaderTableSize,
-			dynamic:      make([]*HeaderField, 0, 16),
-		}
-	},
-}
+var hpackStorage = pool.NewPerPStorage(func() *HPACK {
+	return &HPACK{
+		maxTableSize: defaultHeaderTableSize,
+		dynamic:      make([]*HeaderField, 0, 16),
+	}
+})
 
 // HPACK manages static and dynamic header compression tables and HPACK encoding/decoding operations (RFC 7541).
 type HPACK struct {
@@ -153,11 +150,12 @@ type HPACK struct {
 	DisableDynamicTable bool
 	dynamic             []*HeaderField
 	maxTableSize        uint32
+	dynamicSize         uint32
 }
 
 // AcquireHPACK retrieves an initialized HPACK context from memory pools.
 func AcquireHPACK() *HPACK {
-	hp := hpackPool.Get().(*HPACK)
+	hp := hpackStorage.Get()
 	hp.Reset()
 
 	return hp
@@ -166,13 +164,14 @@ func AcquireHPACK() *HPACK {
 // ReleaseHPACK returns an HPACK context to memory pools after clearing dynamic state.
 func ReleaseHPACK(hp *HPACK) {
 	if hp != nil {
-		hpackPool.Put(hp)
+		hpackStorage.Put(hp)
 	}
 }
 
 func (hp *HPACK) Reset() {
 	hp.releaseDynamic()
 	hp.maxTableSize = defaultHeaderTableSize
+	hp.dynamicSize = 0
 	hp.DisableCompression = false
 	hp.DisableDynamicTable = false
 }
@@ -183,18 +182,20 @@ func (hp *HPACK) releaseDynamic() {
 	}
 
 	hp.dynamic = hp.dynamic[:0]
+	hp.dynamicSize = 0
 }
 
 // SetMaxTableSize updates the maximum dynamic table size capacity (RFC 7541 §4.2 & §6.3).
-func (hp *HPACK) SetMaxTableSize(size uint32) { hp.maxTableSize = size }
+func (hp *HPACK) SetMaxTableSize(size uint32) {
+	hp.maxTableSize = size
+	if hp.dynamicSize > size {
+		hp.shrink()
+	}
+}
 
 // DynamicSize computes total dynamic table memory consumption in octets (RFC 7541 §4.1).
-func (hp *HPACK) DynamicSize() (n uint32) {
-	for _, hf := range hp.dynamic {
-		n += hf.Size()
-	}
-
-	return n
+func (hp *HPACK) DynamicSize() uint32 {
+	return hp.dynamicSize
 }
 
 // addDynamic inserts a new header field into the dynamic table with FIFO ordering and eviction (RFC 7541 §2.3.2 & §4.4).
@@ -202,6 +203,7 @@ func (hp *HPACK) addDynamic(hf *HeaderField) {
 	hf2 := AcquireHeaderField()
 	hf.CopyTo(hf2)
 	hp.dynamic = append(hp.dynamic, hf2)
+	hp.dynamicSize += hf2.Size()
 	hp.shrink()
 }
 
@@ -209,10 +211,8 @@ func (hp *HPACK) addDynamic(hf *HeaderField) {
 func (hp *HPACK) shrink() {
 	var n int
 
-	tableSize := hp.DynamicSize()
-
-	for n = 0; n < len(hp.dynamic) && tableSize > hp.maxTableSize; n++ {
-		tableSize -= hp.dynamic[n].Size()
+	for n = 0; n < len(hp.dynamic) && hp.dynamicSize > hp.maxTableSize; n++ {
+		hp.dynamicSize -= hp.dynamic[n].Size()
 	}
 
 	if n != 0 {
@@ -562,12 +562,10 @@ func (hp *HPACK) AppendHeader(dst []byte, hf *HeaderField, store bool) []byte {
 	return dst
 }
 
-var bytePool = sync.Pool{
-	New: func() any {
-		b := make([]byte, 0, 128)
-		return &b
-	},
-}
+var byteStorage = pool.NewPerPStorage(func() *[]byte {
+	b := make([]byte, 0, 512)
+	return &b
+})
 
 // readInt decodes an unsigned variable-length integer with an N-bit prefix (RFC 7541 §5.1).
 func readInt(n int, b []byte) ([]byte, uint64) {
@@ -653,14 +651,17 @@ func readString(dst, b []byte) ([]byte, []byte, error) {
 // appendString encodes a string literal with optional static Huffman coding and 7-bit length prefix (RFC 7541 §5.2).
 func appendString(dst, src []byte, encode bool) []byte {
 	var (
-		bufPtr  *[]byte
-		payload []byte
+		bufPtr   *[]byte
+		payload  []byte
+		stackBuf [512]byte
 	)
 
 	if !encode {
 		payload = src
+	} else if len(src) <= 256 {
+		payload = HuffmanEncode(stackBuf[:0], src)
 	} else {
-		bufPtr = bytePool.Get().(*[]byte)
+		bufPtr = byteStorage.Get()
 		payload = HuffmanEncode((*bufPtr)[:0], src)
 	}
 
@@ -672,8 +673,10 @@ func appendString(dst, src []byte, encode bool) []byte {
 	dst = append(dst, payload...)
 
 	if encode {
-		*bufPtr = payload
-		bytePool.Put(bufPtr)
+		if bufPtr != nil {
+			*bufPtr = payload
+			byteStorage.Put(bufPtr)
+		}
 
 		dst[hBitIdx] |= 0x80
 	}
