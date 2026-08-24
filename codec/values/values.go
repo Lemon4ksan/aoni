@@ -120,85 +120,18 @@ func EncodeQueryString(v any, sb *strings.Builder) error {
 		return nil
 	}
 
-	if qe, ok := v.(QueryEncoder); ok {
-		first := true
-
-		for k, list := range qe.EncodeValues() {
-			for _, item := range list {
-				writeQueryKeyValuePair(sb, k, item, &first)
-			}
-		}
-
-		return nil
+	vals, err := Encode(v)
+	if err != nil {
+		return err
 	}
 
-	val := reflect.ValueOf(v)
-	for val.Kind() == reflect.Pointer {
-		if val.IsNil() {
-			return nil
+	encoded := vals.Encode()
+	if len(encoded) > 0 {
+		if sb.Len() > 0 {
+			sb.WriteByte('&')
 		}
 
-		val = val.Elem()
-	}
-
-	if val.Kind() != reflect.Struct {
-		vals, err := Encode(v)
-		if err != nil {
-			return err
-		}
-
-		encoded := vals.Encode()
-		if len(encoded) > 0 {
-			if sb.Len() > 0 {
-				sb.WriteByte('&')
-			}
-
-			sb.WriteString(encoded)
-		}
-
-		return nil
-	}
-
-	s := getStructSchema(val.Type())
-	first := sb.Len() == 0
-
-	for i := range s.Fields {
-		f := &s.Fields[i]
-		fieldVal := val.Field(f.Index)
-
-		if fieldVal.Kind() == reflect.Pointer {
-			if fieldVal.IsNil() {
-				if f.DefaultVal != "" && f.Key != "" && f.Key != "-" {
-					writeQueryKeyValuePair(sb, f.Key, f.DefaultVal, &first)
-				}
-
-				continue
-			}
-
-			fieldVal = fieldVal.Elem()
-		}
-
-		if f.IsIgnored || f.Key == "" || f.Key == "-" {
-			continue
-		}
-
-		if fieldVal.IsZero() {
-			if f.DefaultVal != "" {
-				writeQueryKeyValuePair(sb, f.Key, f.DefaultVal, &first)
-				continue
-			}
-
-			if f.OmitEmpty {
-				continue
-			}
-		}
-
-		strVal, err := toString(fieldVal)
-		if err != nil {
-			return &ValueError{Field: f.Name, Err: err}
-		}
-
-		writeQueryKeyValuePair(sb, f.Key, strVal, &first)
+		sb.WriteString(encoded)
 	}
 
 	return nil
