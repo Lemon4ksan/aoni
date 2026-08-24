@@ -13,7 +13,7 @@ import (
 	"time"
 
 	"github.com/lemon4ksan/foundation/testkit/gomock"
-	"github.com/stretchr/testify/require"
+	"github.com/lemon4ksan/foundation/testkit/require"
 
 	"github.com/lemon4ksan/aoni/internal/quic/internal/mocks"
 	"github.com/lemon4ksan/aoni/internal/quic/internal/monotime"

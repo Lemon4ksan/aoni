@@ -13,8 +13,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
+	"github.com/lemon4ksan/foundation/testkit/assert"
+	"github.com/lemon4ksan/foundation/testkit/require"
 
 	"github.com/lemon4ksan/aoni/netutil/probe"
 )
@@ -36,8 +36,8 @@ func TestCheckCDN(t *testing.T) {
 
 	for _, tt := range tests {
 		isCDN, provider := probe.CheckCDN(net.ParseIP(tt.ip))
-		assert.Equal(t, tt.expected, isCDN, "IP: %s", tt.ip)
-		assert.Equal(t, tt.provider, provider, "IP: %s", tt.ip)
+		assert.Equalf(t, tt.expected, isCDN, "IP: %s", tt.ip)
+		assert.Equalf(t, tt.provider, provider, "IP: %s", tt.ip)
 	}
 
 	isCDN, provider := probe.CheckCDN(nil)

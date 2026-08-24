@@ -1,4 +1,4 @@
-// Copyright (c) 2026 Lemon4ksan All rights reserved.
+﻿// Copyright (c) 2026 Lemon4ksan All rights reserved.
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
@@ -33,8 +33,8 @@ import (
 
 	"github.com/lemon4ksan/aoni/internal/fast/h1engine"
 	utls "github.com/refraction-networking/utls"
-	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
+	"github.com/lemon4ksan/foundation/testkit/assert"
+	"github.com/lemon4ksan/foundation/testkit/require"
 
 	"github.com/lemon4ksan/aoni"
 	"github.com/lemon4ksan/aoni/codec/decode"
@@ -2051,7 +2051,7 @@ func TestRFC6265_CookiePathMatching(t *testing.T) {
 			t.Parallel()
 
 			got := cookie.PathMatch(tt.reqPath, tt.cookiePath)
-			assert.Equal(t, tt.wantMatch, got, "PathMatch(%q, %q)", tt.reqPath, tt.cookiePath)
+			assert.Equalf(t, tt.wantMatch, got, "PathMatch(%q, %q)", tt.reqPath, tt.cookiePath)
 		})
 	}
 }
@@ -2095,7 +2095,7 @@ func TestRFC9112_ConflictingContentLengthHeaders(t *testing.T) {
 
 		isConflictingCLErr := errors.Is(err, aoni.ErrConflictingContentLength) ||
 			strings.Contains(err.Error(), "multiple Content-Length headers")
-		assert.True(t, isConflictingCLErr, "expected conflicting Content-Length error, got: %v", err)
+		assert.Truef(t, isConflictingCLErr, "expected conflicting Content-Length error, got: %v", err)
 	})
 }
 
@@ -2264,7 +2264,7 @@ func TestValues_CustomUnmarshalersAndTags(t *testing.T) {
 		for _, tt := range tests {
 			var bi values.BoolInt
 			err := json.Unmarshal([]byte(tt.input), &bi)
-			require.NoError(t, err, "input: %s", tt.input)
+			require.NoErrorf(t, err, "input: %s", tt.input)
 			assert.Equal(t, tt.want, bool(bi))
 		}
 	})

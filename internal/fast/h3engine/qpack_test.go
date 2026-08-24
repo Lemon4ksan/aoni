@@ -10,8 +10,8 @@ import (
 	"io"
 	"testing"
 
-	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
+	"github.com/lemon4ksan/foundation/testkit/assert"
+	"github.com/lemon4ksan/foundation/testkit/require"
 
 	"github.com/lemon4ksan/aoni/internal/fast/h1engine"
 	"github.com/lemon4ksan/aoni/internal/qpack"
@@ -232,13 +232,13 @@ func TestIsForbiddenH3Header(t *testing.T) {
 	}
 
 	for _, h := range forbidden {
-		assert.True(
+		assert.Truef(
 			t,
 			isForbiddenH3Header([]byte(h), []byte("val")),
 			"isForbiddenH3Header byte slice should return true for %s",
 			h,
 		)
-		assert.True(
+		assert.Truef(
 			t,
 			isForbiddenH3HeaderStr(h, []byte("val")),
 			"isForbiddenH3HeaderStr string should return true for %s",
@@ -255,13 +255,13 @@ func TestIsForbiddenH3Header(t *testing.T) {
 	}
 
 	for _, h := range allowed {
-		assert.False(
+		assert.Falsef(
 			t,
 			isForbiddenH3Header([]byte(h), []byte("val")),
 			"isForbiddenH3Header byte slice should return false for %s",
 			h,
 		)
-		assert.False(
+		assert.Falsef(
 			t,
 			isForbiddenH3HeaderStr(h, []byte("val")),
 			"isForbiddenH3HeaderStr string should return false for %s",
@@ -371,10 +371,9 @@ func BenchmarkQPACKEncodeRequestHeaders(b *testing.B) {
 
 	var buf bytes.Buffer
 
-	b.ResetTimer()
 	b.ReportAllocs()
 
-	for range b.N {
+	for b.Loop() {
 		buf.Reset()
 		_ = codec.EncodeRequestHeaders(&buf, req, nil)
 	}
@@ -393,10 +392,9 @@ func BenchmarkQPACKDecodeResponseHeaders(b *testing.B) {
 
 	var respHeader h1engine.ResponseHeader
 
-	b.ResetTimer()
 	b.ReportAllocs()
 
-	for range b.N {
+	for b.Loop() {
 		respHeader.Reset()
 		_, _ = codec.DecodeResponseHeaders(encoded, &respHeader)
 	}

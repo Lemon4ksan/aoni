@@ -7,8 +7,8 @@ package h2engine_test
 import (
 	"testing"
 
-	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
+	"github.com/lemon4ksan/foundation/testkit/assert"
+	"github.com/lemon4ksan/foundation/testkit/require"
 
 	"github.com/lemon4ksan/aoni/internal/fast/h2engine"
 )
@@ -28,7 +28,7 @@ func TestConnectionFramePool_AcquireRelease_POD(t *testing.T) {
 
 	for _, ft := range podTypes {
 		fr := pool.AcquireFrame(ft)
-		require.NotNil(t, fr, "AcquireFrame(%v) must return non-nil", ft)
+		require.NotNilf(t, fr, "AcquireFrame(%v) must return non-nil", ft)
 		assert.Equal(t, ft, fr.Type(), "returned frame must have correct type")
 		pool.ReleaseFrame(fr)
 	}
@@ -52,7 +52,7 @@ func TestConnectionFramePool_AcquireRelease_NonPOD(t *testing.T) {
 
 	for _, ft := range nonPOD {
 		fr := pool.AcquireFrame(ft)
-		require.NotNil(t, fr, "non-POD type %v must still be allocatable", ft)
+		require.NotNilf(t, fr, "non-POD type %v must still be allocatable", ft)
 		assert.Equal(t, ft, fr.Type())
 		pool.ReleaseFrame(fr)
 	}

@@ -12,8 +12,8 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
+	"github.com/lemon4ksan/foundation/testkit/assert"
+	"github.com/lemon4ksan/foundation/testkit/require"
 
 	"github.com/lemon4ksan/aoni/netutil/proxy"
 )
@@ -125,7 +125,7 @@ func TestProxy_RetryCondition(t *testing.T) {
 
 		for _, code := range faultCodes {
 			resp := &customResponseAdapter{statusCode: code}
-			assert.True(t, cond(resp, nil), "status code %d should trigger proxy retry", code)
+			assert.Truef(t, cond(resp, nil), "status code %d should trigger proxy retry", code)
 		}
 
 		okResp := &customResponseAdapter{statusCode: http.StatusOK}

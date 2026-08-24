@@ -7,7 +7,7 @@ package ackhandler
 import (
 	"testing"
 
-	"github.com/stretchr/testify/require"
+	"github.com/lemon4ksan/foundation/testkit/require"
 
 	"github.com/lemon4ksan/aoni/internal/quic/internal/wire"
 )
@@ -52,7 +52,7 @@ func TestIsFrameTypeAckEliciting(t *testing.T) {
 	}
 
 	for ft, expected := range testCases {
-		require.Equal(t, expected, IsFrameTypeAckEliciting(ft), "unexpected result for frame type 0x%x", ft)
+		require.Equalf(t, expected, IsFrameTypeAckEliciting(ft), "unexpected result for frame type 0x%x", ft)
 	}
 }
 

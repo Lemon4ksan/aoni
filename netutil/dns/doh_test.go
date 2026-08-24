@@ -19,8 +19,8 @@ import (
 	"testing"
 
 	"github.com/lemon4ksan/foundation/net/dns/wire"
-	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
+	"github.com/lemon4ksan/foundation/testkit/assert"
+	"github.com/lemon4ksan/foundation/testkit/require"
 
 	"github.com/lemon4ksan/aoni"
 	"github.com/lemon4ksan/aoni/netutil/dns"

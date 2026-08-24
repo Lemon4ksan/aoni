@@ -9,7 +9,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/stretchr/testify/require"
+	"github.com/lemon4ksan/foundation/testkit/require"
 )
 
 func TestDiffStack_Lifecycle(t *testing.T) {

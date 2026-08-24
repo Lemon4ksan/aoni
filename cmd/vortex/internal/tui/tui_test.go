@@ -9,8 +9,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
+	"github.com/lemon4ksan/foundation/testkit/assert"
+	"github.com/lemon4ksan/foundation/testkit/require"
 
 	"github.com/lemon4ksan/aoni/cmd/vortex/internal/tui"
 )
@@ -76,7 +76,7 @@ func TestTUI_Box_PixelPerfectBorders(t *testing.T) {
 	// In monospaced terminal, every line of the box MUST have the exact same visible width!
 	for i, l := range lines {
 		w := tui.VisibleWidth(l)
-		assert.Equal(t, 64, w, "Line %d (%q) visual width %d != 64", i, l, w)
+		assert.Equalf(t, 64, w, "Line %d (%q) visual width %d != 64", i, l, w)
 	}
 }
 
@@ -106,7 +106,7 @@ func TestTUI_BarAndTaxDecomposition(t *testing.T) {
 
 	for idx, cl := range cardLines {
 		w := tui.VisibleWidth(cl)
-		assert.Equal(t, firstW, w, "Tax line %d visual width %d != %d", idx, w, firstW)
+		assert.Equalf(t, firstW, w, "Tax line %d visual width %d != %d", idx, w, firstW)
 	}
 }
 

@@ -225,8 +225,6 @@ Under strict RFC 3986 §5.2 rules:
 | `https://api.com/v1` | `users/1` | `https://api.com/v1/users/1` | Auto-appends boundary slash |
 | `https://api.com/v1/` | `https://other.com/auth` | `https://other.com/auth` | Absolute URL bypasses BaseURL completely |
 
----
-
 ## 9. Socket-Level DPI Evasion (Fragmentation & CDN Padding)
 
 Deep Packet Inspection (DPI) firewalls inspect initial TCP segment boundaries and ClientHello byte lengths to detect automated scraping clients. `aoni` mitigates statistical packet length analysis by segmenting ClientHello payloads into micro-chunks and injecting randomized CDN tracing headers.

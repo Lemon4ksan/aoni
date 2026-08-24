@@ -13,7 +13,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/stretchr/testify/require"
+	"github.com/lemon4ksan/foundation/testkit/require"
 
 	"github.com/lemon4ksan/aoni/cmd/vortex/lib/analysis"
 	"github.com/lemon4ksan/aoni/cmd/vortex/lib/builder"
@@ -183,7 +183,7 @@ func TestOpenAPI_ImportAndExport(t *testing.T) {
 
 	diags := analyzer.Analyze(root)
 	for _, d := range diags {
-		require.NotEqual(
+		require.NotEqualf(
 			t,
 			analysis.SeverityError,
 			d.Severity,

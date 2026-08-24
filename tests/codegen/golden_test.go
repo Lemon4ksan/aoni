@@ -12,8 +12,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
+	"github.com/lemon4ksan/foundation/testkit/assert"
+	"github.com/lemon4ksan/foundation/testkit/require"
 
 	"github.com/lemon4ksan/aoni/cmd/vortex/lib/builder"
 )
@@ -43,7 +43,7 @@ func TestGolden_Contracts(t *testing.T) {
 			})
 
 			res, err := b.BuildFile(context.Background(), srcFile, "")
-			require.NoError(t, err, "Generator must succeed on %s", srcFile)
+			require.NoErrorf(t, err, "Generator must succeed on %s", srcFile)
 			require.NotEmpty(t, res.Code, "Emitted code must not be empty")
 
 			if *updateGolden {
@@ -61,7 +61,7 @@ func TestGolden_Contracts(t *testing.T) {
 			}
 			require.NoError(t, err)
 
-			assert.Equal(
+			assert.Equalf(
 				t,
 				string(goldenBytes),
 				string(res.Code),

@@ -22,9 +22,9 @@ import (
 
 	"github.com/lemon4ksan/foundation/borrow"
 	"github.com/lemon4ksan/foundation/net/hpack"
+	"github.com/lemon4ksan/foundation/testkit/assert"
+	"github.com/lemon4ksan/foundation/testkit/require"
 	utls "github.com/refraction-networking/utls"
-	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
 	"golang.org/x/net/http2"
 
 	"github.com/lemon4ksan/aoni"
@@ -1630,12 +1630,12 @@ func TestRFC7936_Subprotocols(t *testing.T) {
 
 		valid := []string{"chat", "graphql-ws", "v1.0", "sip", "wamp.2.json"}
 		for _, v := range valid {
-			assert.True(t, IsValidSubprotocolToken(v), "should be valid: %s", v)
+			assert.Truef(t, IsValidSubprotocolToken(v), "should be valid: %s", v)
 		}
 
 		invalid := []string{"", "chat ", "chat\t", "chat\n", "chat(v1)", "a,b", "foo/bar", "a{b}", "a<b"}
 		for _, inv := range invalid {
-			assert.False(t, IsValidSubprotocolToken(inv), "should be invalid: %s", inv)
+			assert.Falsef(t, IsValidSubprotocolToken(inv), "should be invalid: %s", inv)
 		}
 	})
 }
@@ -1802,12 +1802,12 @@ func TestIsForbiddenH2ConnectHeader(t *testing.T) {
 
 	forbidden := []string{"upgrade", "connection", "host", "sec-websocket-key", "sec-websocket-accept"}
 	for _, h := range forbidden {
-		assert.True(t, isForbiddenH2ConnectHeader(h), "header %s should be forbidden", h)
+		assert.Truef(t, isForbiddenH2ConnectHeader(h), "header %s should be forbidden", h)
 	}
 
 	allowed := []string{"authorization", "user-agent", "cookie", "x-custom-header"}
 	for _, h := range allowed {
-		assert.False(t, isForbiddenH2ConnectHeader(h), "header %s should be allowed", h)
+		assert.Falsef(t, isForbiddenH2ConnectHeader(h), "header %s should be allowed", h)
 	}
 }
 
@@ -1932,7 +1932,7 @@ func TestRFC8441_ExtendedConnect_Rules(t *testing.T) {
 	}
 
 	for _, h := range forbidden {
-		assert.True(
+		assert.Truef(
 			t,
 			isForbiddenH2ConnectHeader(h),
 			"header %q must be forbidden in H2 Extended CONNECT (RFC 8441 §5)",
@@ -1951,7 +1951,7 @@ func TestRFC8441_ExtendedConnect_Rules(t *testing.T) {
 	}
 
 	for _, h := range allowed {
-		assert.False(
+		assert.Falsef(
 			t,
 			isForbiddenH2ConnectHeader(h),
 			"header %q must be allowed in H2 Extended CONNECT (RFC 8441 §5)",

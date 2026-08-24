@@ -11,7 +11,7 @@ import (
 	"math/rand/v2"
 	"testing"
 
-	"github.com/stretchr/testify/require"
+	"github.com/lemon4ksan/foundation/testkit/require"
 )
 
 func TestLimits(t *testing.T) {

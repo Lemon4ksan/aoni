@@ -13,7 +13,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/stretchr/testify/require"
+	"github.com/lemon4ksan/foundation/testkit/require"
 
 	"github.com/lemon4ksan/aoni/internal/quic/internal/protocol"
 	"github.com/lemon4ksan/aoni/internal/quic/internal/qerr"
@@ -1048,7 +1048,7 @@ func FuzzFrames(f *testing.F) {
 					require.Equal(t, orig, append(slices.Clone(split.Data), f.Data...), "split STREAM frame data")
 					split.PutBack()
 				} else {
-					require.True(
+					require.Truef(
 						t,
 						needsSplit || f.Length(version) <= size,
 						"STREAM longer than maxSize but not split: len=%d maxSize=%d",
@@ -1065,7 +1065,7 @@ func FuzzFrames(f *testing.F) {
 					require.LessOrEqual(t, split.Length(version), size, "split CRYPTO frame")
 					require.Equal(t, orig, append(slices.Clone(split.Data), f.Data...), "split CRYPTO frame data")
 				} else {
-					require.True(
+					require.Truef(
 						t,
 						needsSplit || f.Length(version) <= size,
 						"CRYPTO longer than maxSize but not split: len=%d maxSize=%d",

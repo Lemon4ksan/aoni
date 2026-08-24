@@ -19,9 +19,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/lemon4ksan/foundation/testkit/assert"
+	"github.com/lemon4ksan/foundation/testkit/require"
 	pkgsftp "github.com/pkg/sftp"
-	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
 	golangssh "golang.org/x/crypto/ssh"
 
 	"github.com/lemon4ksan/aoni/tunnel/ssh"

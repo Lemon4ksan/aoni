@@ -12,8 +12,8 @@ import (
 	"testing"
 
 	"github.com/lemon4ksan/foundation/borrow"
-	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
+	"github.com/lemon4ksan/foundation/testkit/assert"
+	"github.com/lemon4ksan/foundation/testkit/require"
 
 	"github.com/lemon4ksan/aoni/internal/compress/brotli"
 	"github.com/lemon4ksan/aoni/internal/fast/h1engine"

@@ -1,4 +1,4 @@
-// Copyright (c) 2026 Lemon4ksan All rights reserved.
+﻿// Copyright (c) 2026 Lemon4ksan All rights reserved.
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
@@ -12,7 +12,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/stretchr/testify/require"
+	"github.com/lemon4ksan/foundation/testkit/require"
 	"golang.org/x/net/ipv4"
 	"golang.org/x/sys/unix"
 

@@ -10,7 +10,7 @@ import (
 	"net"
 	"testing"
 
-	"github.com/stretchr/testify/require"
+	"github.com/lemon4ksan/foundation/testkit/require"
 )
 
 func TestWindowsConn(t *testing.T) {

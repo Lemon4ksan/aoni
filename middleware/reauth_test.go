@@ -14,8 +14,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
+	"github.com/lemon4ksan/foundation/testkit/assert"
+	"github.com/lemon4ksan/foundation/testkit/require"
 
 	"github.com/lemon4ksan/aoni"
 	"github.com/lemon4ksan/aoni/middleware"
@@ -77,11 +77,14 @@ func TestReAuthMiddleware_SingleflightConcurrent(t *testing.T) {
 	var wg sync.WaitGroup
 	wg.Add(concurrency)
 
+	startGate := make(chan struct{})
 	errs := make([]error, concurrency)
 
 	for i := range concurrency {
 		go func(idx int) {
 			defer wg.Done()
+
+			<-startGate
 
 			resp, err := client.Get(t.Context(), "/")
 			if err != nil {
@@ -96,10 +99,11 @@ func TestReAuthMiddleware_SingleflightConcurrent(t *testing.T) {
 		}(i)
 	}
 
+	close(startGate)
 	wg.Wait()
 
 	for i, err := range errs {
-		require.NoError(t, err, "worker %d failed", i)
+		require.NoErrorf(t, err, "worker %d failed", i)
 	}
 
 	// Exactly 1 refresh must run despite 10 concurrent requests failing simultaneously

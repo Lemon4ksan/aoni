@@ -8,7 +8,7 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/stretchr/testify/require"
+	"github.com/lemon4ksan/foundation/testkit/require"
 )
 
 func TestStreamError(t *testing.T) {

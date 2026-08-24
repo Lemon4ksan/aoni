@@ -1,4 +1,4 @@
-// Copyright (c) 2026 Lemon4ksan All rights reserved.
+﻿// Copyright (c) 2026 Lemon4ksan All rights reserved.
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
@@ -10,7 +10,7 @@ import (
 
 	"github.com/lemon4ksan/aoni/cmd/vortex/lib/emitter"
 	"github.com/lemon4ksan/aoni/cmd/vortex/lib/parser"
-	"github.com/stretchr/testify/require"
+	"github.com/lemon4ksan/foundation/testkit/require"
 )
 
 func TestSmartDirectives_RefererAndPresets(t *testing.T) {

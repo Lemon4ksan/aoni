@@ -7,7 +7,7 @@ package h3_test
 import (
 	"testing"
 
-	"github.com/stretchr/testify/assert"
+	"github.com/lemon4ksan/foundation/testkit/assert"
 
 	"github.com/lemon4ksan/aoni/fingerprint/h3"
 )

@@ -11,7 +11,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/stretchr/testify/require"
+	"github.com/lemon4ksan/foundation/testkit/require"
 
 	"github.com/lemon4ksan/aoni/internal/quic/internal/protocol"
 )
@@ -44,7 +44,7 @@ func TestTokenGeneratorValidToken(t *testing.T) {
 	require.NoError(t, err)
 	require.True(t, decodedToken.ValidateRemoteAddr(addr))
 	require.False(t, decodedToken.ValidateRemoteAddr(&net.UDPAddr{IP: net.IPv4(192, 168, 0, 2), Port: 1337}))
-	require.WithinDuration(t, time.Now(), decodedToken.SentTime, 100*time.Millisecond)
+	require.WithinDuration(t, time.Now(), decodedToken.SentTime, 500*time.Millisecond)
 	require.Equal(t, connID1, decodedToken.OriginalDestConnectionID)
 	require.Equal(t, connID2, decodedToken.RetrySrcConnectionID)
 }

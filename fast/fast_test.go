@@ -9,7 +9,7 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/stretchr/testify/assert"
+	"github.com/lemon4ksan/foundation/testkit/assert"
 
 	"github.com/lemon4ksan/aoni"
 	"github.com/lemon4ksan/aoni/internal/fast/h1engine"

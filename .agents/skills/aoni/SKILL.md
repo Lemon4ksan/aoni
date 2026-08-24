@@ -4,13 +4,9 @@ description: >-
   Authoritative architectural guide, code patterns, and operational rules for building
   high-performance, resilient HTTP/WebSocket clients and services using the Aoni networking engine.
   Use when writing network requests, service constructors, API wrappers, or TLS evasion code.
----
-
 # Aoni High-Performance Networking Engine Guide
 
 **`aoni`** is a unified, ultra-high-performance Internet Protocol engine for Go. It consolidates modern IETF RFC standards, Chromium-grade resilience, JA4/TLS stealth fingerprinting, and zero-allocation data paths into a single profile-driven architecture.
-
----
 
 ## 1. Core Engineering Manifesto & Dual Engines
 
@@ -28,8 +24,6 @@ type RequestDoer interface {
     Do(req *http.Request) (*http.Response, error)
 }
 ```
-
----
 
 ## 2. Canonical Service Constructor Pattern (Golden Standard)
 
@@ -72,8 +66,6 @@ func NewService(doer aoni.RequestDoer, opts ...option.Option) *Service {
 }
 ```
 
----
-
 ## 3. Strict Rules for AI Assistants
 
 1. **NO DIRECT `net/http` CLIENTS**:
@@ -88,8 +80,6 @@ func NewService(doer aoni.RequestDoer, opts ...option.Option) *Service {
 4. **ALWAYS CLOSE RESPONSE BODIES**:
    - When handling raw `*http.Response`, always write `defer resp.Body.Close()`.
 
----
-
 ## 4. Request Modifiers & Payloads Cheatsheet
 
 Import: `"github.com/lemon4ksan/aoni/mod"`
@@ -103,8 +93,6 @@ Operation | Idiomatic Code
 **Headers & Bearer Token** | `request.Get(ctx, s.req, "profile", mod.WithHeader("X-Tenant", id), mod.WithBearer(token))`
 **Per-Request Timeout** | `request.Get(ctx, s.req, "health", mod.WithTimeout(2*time.Second))`
 **Multipart File Upload** | `request.Post(ctx, s.req, "upload", nil, mod.WithMultipartFile("avatar", "pic.png", reader))`
-
----
 
 ## 5. Idiomatic Error Classification
 
@@ -138,8 +126,6 @@ if err != nil {
 }
 ```
 
----
-
 ## 6. Real-Time Protocols (WebSockets & SSE)
 
 Import: `"github.com/lemon4ksan/aoni/realtime"`
@@ -172,8 +158,6 @@ for event := range stream.Events() {
 	fmt.Printf("Event %s: %s\n", event.Type, event.Data)
 }
 ```
-
----
 
 ## 7. TLS Fingerprinting & Browser Evasion
 

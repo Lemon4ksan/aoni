@@ -10,7 +10,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/stretchr/testify/require"
+	"github.com/lemon4ksan/foundation/testkit/require"
 
 	"github.com/lemon4ksan/aoni/cmd/vortex/lib/emitter"
 	"github.com/lemon4ksan/aoni/cmd/vortex/lib/parser"
@@ -227,7 +227,7 @@ func BenchmarkPacketHeader_BatchUnpack(b *testing.B) {
 	cmd := exec.Command("go", "test", "-v", "-bench=.", "-benchmem", ".")
 	cmd.Dir = tmpDir
 	out, err := cmd.CombinedOutput()
-	require.NoError(t, err, "go test failed:\n%s", string(out))
+	require.NoErrorf(t, err, "go test failed:\n%s", string(out))
 	require.Contains(t, string(out), "PASS")
 	t.Logf("Benchmark Results:\n%s", string(out))
 }

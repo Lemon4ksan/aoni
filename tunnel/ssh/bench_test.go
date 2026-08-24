@@ -22,8 +22,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/lemon4ksan/foundation/testkit/require"
 	"github.com/pkg/sftp"
-	"github.com/stretchr/testify/require"
 	stdssh "golang.org/x/crypto/ssh"
 
 	"github.com/lemon4ksan/aoni/tunnel/ssh"

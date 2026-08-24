@@ -4,15 +4,11 @@ description: >-
   Expert guide, reference, and operational playbook for the Vortex Zero-Allocation API Toolchain.
   Use when designing, writing, validating, modifying, or compiling @aoni API contracts, .vortex.yml configurations,
   declarative REST/WebSocket/SSE/Socket clients, test mocks, and polyglot SDKs.
----
-
 # Vortex API Guardian & AST Toolchain Guide
 
 **`vortex`** is the official zero-allocation AST-driven code generator, linter, and OpenAPI 3.1 toolchain for Go projects using the **Aoni** networking engine.
 
 It transforms declarative Go interfaces into high-throughput, compile-time optimized HTTP, WebSocket, SSE, and Socket clients running at line speed with 0 heap allocations on hot paths.
-
----
 
 ## 1. Quick Start & Daily CLI Workflow
 
@@ -27,8 +23,6 @@ Command | Purpose | Common Flags
 `vortex init` | Scaffolds a new API package or initializes `.vortex.yml` workspace configuration. | `[name]`, `-tpl=rest|ws|sse|stealth`, `--git`
 `vortex spec import` | Ingests OpenAPI 3.x, Swagger 2.0, or HAR session files with 3-way AST merge. | `-spec=openapi.json`, `-out=pkg/api/api.go`, `--add`
 `vortex clean` | Removes generated artifacts and cache databases while preserving core code. | `--dry-run`, `--all`
-
----
 
 ## 2. Workspace Configuration (`.vortex.yml`)
 
@@ -87,8 +81,6 @@ contracts:
         out: mobile/Sources/API/Chat.swift
 ```
 
----
-
 ## 3. Declarative Go Contract Specification (`@aoni` Directives)
 
 A contract is written as a Go interface tagged with `@aoni` doc comments.
@@ -139,8 +131,6 @@ type CreateUserRequest struct {
 }
 ```
 
----
-
 ## 4. Directive Catalog
 
 ### Service Scope (Interface Declarations)
@@ -187,8 +177,6 @@ Directive | Arguments | Description
 `@tuple` | `[endian=...]` | Declares compact binary tuple encoding.
 `@union` | `discriminator=field`| Declares a tagged polymorphic union type.
 
----
-
 ## 5. Golden Rules for Writing Contracts
 
 1. **Method Signatures**:
@@ -199,8 +187,6 @@ Directive | Arguments | Description
    - Return pointer to DTO `(*UserDTO, error)` or primitive/map types to allow pooled decoders.
 3. **No Low-Level Logic in Interface**:
    - Interfaces must stay 100% declarative. Vortex generates the entire execution body automatically.
-
----
 
 ## 6. Troubleshooting & Quick Fixes
 
