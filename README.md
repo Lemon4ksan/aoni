@@ -101,11 +101,11 @@ userResp, resp, err := fluent.PostGRPCWebTo[pb.UserResponse](ctx, client, "/User
 ```
                ┌──► aoni.Client (100% net/http compatibility & middleware chain)
 option / mod ──┼
-               └──► fast.Client (2.14M+ RPS multi-core, zero-alloc fasthttp + H2/H3)
+               └──► fast.Client (2.14M+ RPS multi-core, native zero-alloc H1/H2/H3 engine)
 ```
 
 * **Standard `aoni.Client`**: Use when 100% Go standard library compatibility and `net/http` middleware interoperability are required.
-* **Native `fast.Client`**: Use when raw silicon throughput and zero-allocation memory geometry are required.
+* **Native `fast.Client`**: Use when raw silicon throughput, 100% scoped borrow geometry, and zero-allocation memory performance are required.
 
 ## Performance Profile & Benchmarks
 
@@ -113,25 +113,26 @@ To evaluate the execution pipeline fairly, benchmarks are divided into two categ
 
 ### 1. Multi-Core Parallel Throughput (12 CPU Cores, `b.RunParallel`, PGO-Optimized)
 
-Under high concurrent load across multiple CPU cores, Go's memory allocator (`mcache`/`mcentral`) experiences lock contention. Because `aoni` performs **12 fewer allocations** per request than standard `net/http` (66 vs 78 allocs), it scales significantly better, delivering **10% lower latency** in standard mode and **3.4x to 18x higher performance** in bridge/native modes.
+Under high concurrent load across multiple CPU cores, Go's memory allocator (`mcache`/`mcentral`) experiences lock contention. Because `aoni` performs **12 fewer allocations** per request than standard `net/http` (66 vs 78 allocs), it scales significantly better, delivering **10% lower latency** in standard mode and **3.4x to 36x higher performance** in bridge/native modes.
 
 | Metric | Standard `net/http` | `aoni` (Standard) | `aoni` + `fast.Bridge` | `aoni/fast` (Native) | Performance Delta |
 | :--- | :---: | :---: | :---: | :---: | :---: |
-| **GET JSON Unmarshaling (`GetTo[T]`)** | 53,912 ns | 54,824 ns | **10,948 ns** | **4,887 ns** | **⚡ 11.0x Faster (Native) / 4.9x (Bridge)** |
+| **GET JSON Zero-Copy (`JSONNoCopy`)** | 127,905 ns | 54,824 ns | **10,948 ns** | **3,542 ns** | **⚡ 36.1x Faster (3.5 µs, 51 B, 2 allocs)** |
+| **GET JSON Standard (`GetTo[T]`)** | 127,905 ns | 54,824 ns | **10,948 ns** | **5,407 ns** | **⚡ 23.6x Faster (Native) / 11.6x (Bridge)** |
 | **Raw Request Execution (`c.Request`)** | 7,002 ns | **6,167 ns** | **5,500 ns** | **4,011 ns** | **⚡ 1.7x Faster / 2.7x Less RAM** |
 | **Multipart Form Upload** | 273,999 ns | — | — | **102,539 ns** | **⚡ 2.7x Faster / 4.5x Less RAM (120KB vs 546KB)** |
-| **Heap Memory Footprint (`B/op`)** | 6,990 B | **6,165 B** | **5,928 B** | **362 B** | **⚡ 19.3x Lighter Memory Footprint** |
-| **Heap Allocations (`allocs/op`)** | 78 allocs | **68 allocs** | **48 allocs** | **8 allocs** | **⚡ -70 Allocs (Native) / -30 Allocs (Bridge)** |
+| **Heap Memory Footprint (`B/op`)** | 6,990 B | **6,165 B** | **5,928 B** | **51 B – 362 B** | **⚡ Up to 140x Lighter Memory Footprint** |
+| **Heap Allocations (`allocs/op`)** | 78 allocs | **68 allocs** | **48 allocs** | **2 – 8 allocs** | **⚡ -76 Allocs (Zero-Copy) / -70 Allocs (Native)** |
 | **HTTP/2 Latency (`ns/op`)** | 80,979 ns | 80,979 ns | **67,441 ns** | **67,441 ns** | **⚡ 1.95x Less H2 RAM (5.0KB vs 9.8KB)** |
 | **HTTP/3 QPACK Block Framing** | ~2,500 ns / 120 B | — | — | **379.5 ns / 0 B** | **⚡ 6.5x Faster (0 B / 0 allocs)** |
 | **HTTP/3 QUIC Latency (`ns/op`)** | 128,980 ns | 128,980 ns | **124,447 ns** | **124,447 ns** | **⚡ 2.01x Less QUIC RAM (12.0KB vs 24.1KB)** |
-| **Parallel High-Load Latency (`ns/op`)** | 7,002 ns | 6,167 ns | **1,940 ns** | **565.0 ns** | **⚡ 12.4x – 15.8x Faster (0 B / 0 allocs)** |
+| **Parallel High-Load Latency (`ns/op`)** | 7,002 ns | 6,167 ns | **1,940 ns** | **578.3 ns** | **⚡ 12.4x – 15.8x Faster (0 B / 0 allocs)** |
 | **Single-Core Peak Throughput (1 Core)** | ~142k RPS | ~162k RPS | ~185k RPS | **~243,000+ RPS** | **⚡ 1.7x Single-Thread Gain** |
-| **Multi-Core Peak Throughput (12 Cores)** | ~140k RPS | ~162k RPS | >550,000 RPS | **1,842,000+ RPS (2.14M+ peak)** | **⚡ 13.4x Multi-Core Throughput** |
+| **Multi-Core Peak Throughput (12 Cores)** | ~140k RPS | ~162k RPS | >550,000 RPS | **1,910,000+ RPS (2.05M+ peak)** | **⚡ 13.6x Multi-Core Throughput** |
 
 ### 2. Single-Thread Sequential Latency (1 Core, Serial `b.N`)
 
-When `aoni.Client` is configured with `option.WithBaremetal()`, it disables Chromium-grade pipeline guards (WAF challenge detection, decompression, response validation) and takes a dedicated fast path. Both clients execute serially in a single thread against the same `fasthttputil.InmemoryListener` transport.
+When `aoni.Client` is configured with `option.WithBaremetal()`, it disables Chromium-grade pipeline guards (WAF challenge detection, decompression, response validation) and takes a dedicated fast path. Both clients execute serially in a single thread against the same in-memory listener transport.
 
 | Benchmark | `net/http` | `aoni` (Baremetal) | Overhead |
 | :--- | :---: | :---: | :---: |
