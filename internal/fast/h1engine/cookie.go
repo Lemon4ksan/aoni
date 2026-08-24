@@ -6,6 +6,7 @@ package h1engine
 
 import (
 	"bytes"
+	"encoding/binary"
 	"errors"
 	"io"
 	"net/http"
@@ -729,7 +730,15 @@ func caseInsensitiveCompare(a, b []byte) bool {
 	if len(a) != len(b) {
 		return false
 	}
-	for i := range a {
+	i := 0
+	for ; i+8 <= len(a); i += 8 {
+		va := binary.LittleEndian.Uint64(a[i:])
+		vb := binary.LittleEndian.Uint64(b[i:])
+		if (va | 0x2020202020202020) != (vb | 0x2020202020202020) {
+			return false
+		}
+	}
+	for ; i < len(a); i++ {
 		if a[i]|0x20 != b[i]|0x20 {
 			return false
 		}

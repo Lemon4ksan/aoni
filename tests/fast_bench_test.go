@@ -244,6 +244,42 @@ func BenchmarkGET_JSON_FastClient(b *testing.B) {
 	}
 }
 
+func BenchmarkGET_JSON_FastClient_ZeroCopy(b *testing.B) {
+	ln := setupFastBenchServer()
+	defer ln.Close()
+
+	fastClient := fast.NewClient(
+		option.WithBaseURL("http://inmemory"),
+		option.WithTimeout(5*time.Second),
+	)
+
+	fastClient.Engine().Dial = func(_ string) (net.Conn, error) {
+		return ln.Dial()
+	}
+
+	ctx := context.Background()
+
+	b.ReportAllocs()
+	b.ResetTimer()
+
+	for b.Loop() {
+		var user fastBenchUser
+		resp, err := fastClient.Request(ctx, "GET", "/user")
+		if err != nil {
+			b.Fatalf("fast request failed: %v", err)
+		}
+
+		if pr, ok := resp.(*fast.PooledResponse); ok {
+			_ = pr.JSONNoCopy(&user)
+		}
+		_ = resp.Close()
+
+		if user.ID != 42 {
+			b.Fatalf("expected ID 42, got %d", user.ID)
+		}
+	}
+}
+
 func BenchmarkGET_JSON_StdClient(b *testing.B) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")

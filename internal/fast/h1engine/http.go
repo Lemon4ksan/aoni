@@ -19,6 +19,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/lemon4ksan/foundation/silicon/pool"
 	"github.com/valyala/bytebufferpool"
 )
 
@@ -1742,41 +1743,41 @@ func (w *statsWriter) WriteString(s string) (int, error) {
 	return n, err
 }
 
+var statsWriterStorage = pool.NewPerPStorage(func() *statsWriter {
+	return &statsWriter{}
+})
+
 func acquireStatsWriter(w io.Writer) *statsWriter {
-	v := statsWriterPool.Get()
-	if v == nil {
-		return &statsWriter{
-			w: w,
-		}
-	}
-	sw := v.(*statsWriter) //nolint:forcetypeassert
+	sw := statsWriterStorage.Get()
 	sw.w = w
+	sw.bytesWritten = 0
 	return sw
 }
 
 func releaseStatsWriter(sw *statsWriter) {
-	sw.w = nil
-	sw.bytesWritten = 0
-	statsWriterPool.Put(sw)
+	if sw != nil {
+		sw.w = nil
+		sw.bytesWritten = 0
+		statsWriterStorage.Put(sw)
+	}
 }
 
-var statsWriterPool sync.Pool
+var bufioWriterStorage = pool.NewPerPStorage(func() *bufio.Writer {
+	return bufio.NewWriter(nil)
+})
 
 func acquireBufioWriter(w io.Writer) *bufio.Writer {
-	v := bufioWriterPool.Get()
-	if v == nil {
-		return bufio.NewWriter(w)
-	}
-	bw := v.(*bufio.Writer) //nolint:forcetypeassert
+	bw := bufioWriterStorage.Get()
 	bw.Reset(w)
 	return bw
 }
 
 func releaseBufioWriter(bw *bufio.Writer) {
-	bufioWriterPool.Put(bw)
+	if bw != nil {
+		bw.Reset(nil)
+		bufioWriterStorage.Put(bw)
+	}
 }
-
-var bufioWriterPool sync.Pool
 
 func (req *Request) onlyMultipartForm() bool {
 	return req.multipartForm != nil && (req.body == nil || len(req.body.B) == 0)
