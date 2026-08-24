@@ -17,10 +17,10 @@ import (
 
 	"github.com/lemon4ksan/foundation/generic"
 	"github.com/lemon4ksan/foundation/silicon/bytesconv"
-	"github.com/valyala/fasthttp"
 
 	"github.com/lemon4ksan/aoni"
 	"github.com/lemon4ksan/aoni/cookie"
+	"github.com/lemon4ksan/aoni/internal/fast/h1engine"
 	"github.com/lemon4ksan/aoni/internal/pipeline"
 	"github.com/lemon4ksan/aoni/internal/sys"
 	"github.com/lemon4ksan/aoni/netutil/power"
@@ -37,8 +37,8 @@ import (
 // Achieves zero heap allocations on hot execution paths by recycling internal request/response buffers
 // via sync.Pool. Callers MUST NOT retain or mutate byte slices obtained from unsafe body accessors beyond request lifecycle.
 type Client struct {
-	// engine encapsulates the underlying fasthttp.Client providing extreme-throughput HTTP/1.1 socket pooling.
-	engine *fasthttp.Client
+	// engine encapsulates the underlying h1engine.Client providing extreme-throughput HTTP/1.1 socket pooling.
+	engine *h1engine.Client
 
 	// pipeline coordinates the 5-stage middleware, retry, hedging, and telemetry execution chain.
 	pipeline *pipeline.Pipeline[aoni.Request, aoni.Response]
@@ -294,21 +294,21 @@ func (c *Client) Request(
 	)
 }
 
-func acquireFastPair() (*fasthttp.Request, *fasthttp.Response) {
-	return fasthttp.AcquireRequest(), fasthttp.AcquireResponse()
+func acquireFastPair() (*h1engine.Request, *h1engine.Response) {
+	return h1engine.AcquireRequest(), h1engine.AcquireResponse()
 }
 
-func releaseFastPair(req *fasthttp.Request, resp *fasthttp.Response) {
+func releaseFastPair(req *h1engine.Request, resp *h1engine.Response) {
 	if req != nil {
-		fasthttp.ReleaseRequest(req)
+		h1engine.ReleaseRequest(req)
 	}
 
 	if resp != nil {
-		fasthttp.ReleaseResponse(resp)
+		h1engine.ReleaseResponse(resp)
 	}
 }
 
-func (c *Client) executeFastPath(fastReq *fasthttp.Request, fastResp *fasthttp.Response) (aoni.Response, error) {
+func (c *Client) executeFastPath(fastReq *h1engine.Request, fastResp *h1engine.Response) (aoni.Response, error) {
 	err := c.engine.Do(fastReq, fastResp)
 	if err != nil {
 		releaseFastPair(fastReq, fastResp)
@@ -328,7 +328,7 @@ type fastNativeDoer struct {
 }
 
 func (f *fastNativeDoer) Do(req aoni.Request) (aoni.Response, error) {
-	fastReq, ok := req.EngineRequest().(*fasthttp.Request)
+	fastReq, ok := req.EngineRequest().(*h1engine.Request)
 	if !ok || fastReq == nil {
 		if stdReqObj := req.HTTPRequest(); stdReqObj != nil {
 			stdResp, err := f.client.HTTP().Do(stdReqObj) //nolint:bodyclose
@@ -357,13 +357,13 @@ func (f *fastNativeDoer) Do(req aoni.Request) (aoni.Response, error) {
 		return aoni.NewStdResponse(stdResp), nil //nolint:bodyclose
 	}
 
-	fastResp := fasthttp.AcquireResponse()
+	fastResp := h1engine.AcquireResponse()
 	ctx := req.Context()
 
 	trailers, err, autoReleased := f.client.executeWithRedirects(ctx, fastReq, fastResp)
 	if err != nil {
 		if !autoReleased {
-			fasthttp.ReleaseResponse(fastResp)
+			h1engine.ReleaseResponse(fastResp)
 		}
 
 		return nil, err
@@ -515,8 +515,8 @@ func (c *Client) ReleaseRequest(req aoni.Request) {
 	}
 }
 
-// Unwrap returns the underlying [*fasthttp.Client] engine instance.
-func (c *Client) Unwrap() *fasthttp.Client {
+// Unwrap returns the underlying [*h1engine.Client] engine instance.
+func (c *Client) Unwrap() *h1engine.Client {
 	return c.engine
 }
 
@@ -569,8 +569,8 @@ func (c *Client) TLSConfig() *tls.Config {
 	return nil
 }
 
-// Engine returns the underlying [*fasthttp.Client] engine instance.
-func (c *Client) Engine() *fasthttp.Client {
+// Engine returns the underlying [*h1engine.Client] engine instance.
+func (c *Client) Engine() *h1engine.Client {
 	return c.engine
 }
 

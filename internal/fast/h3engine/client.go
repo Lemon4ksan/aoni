@@ -2,7 +2,7 @@
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
-// Package h3engine provides HTTP/3 client functionality using fasthttp.
+// Package h3engine provides HTTP/3 client functionality using h1engine.
 package h3engine
 
 import (
@@ -13,8 +13,8 @@ import (
 
 	"github.com/lemon4ksan/foundation/borrow"
 	"github.com/lemon4ksan/foundation/silicon/sysnet"
-	"github.com/valyala/fasthttp"
 
+	"github.com/lemon4ksan/aoni/internal/fast/h1engine"
 	"github.com/lemon4ksan/aoni/internal/quic"
 )
 
@@ -51,11 +51,11 @@ func NewClient(tlsCfg *tls.Config, quicCfg *quic.Config) *Client {
 	}
 }
 
-// Do executes a fasthttp.Request over HTTP/3 to the destination server, writing response into resp and returning trailers.
+// Do executes a h1engine.Request over HTTP/3 to the destination server, writing response into resp and returning trailers.
 func (c *Client) Do(
 	ctx context.Context,
-	req *fasthttp.Request,
-	resp *fasthttp.Response,
+	req *h1engine.Request,
+	resp *h1engine.Response,
 	headerOrder []string,
 ) (map[string][]string, error) {
 	host := string(req.URI().Host())
@@ -73,11 +73,11 @@ func (c *Client) Do(
 	return trailers, err
 }
 
-// DoScoped executes a fasthttp.Request over HTTP/3 with response body memory allocated from the provided borrow.Scope.
+// DoScoped executes a h1engine.Request over HTTP/3 with response body memory allocated from the provided borrow.Scope.
 func (c *Client) DoScoped(
 	ctx context.Context,
-	req *fasthttp.Request,
-	resp *fasthttp.Response,
+	req *h1engine.Request,
+	resp *h1engine.Response,
 	headerOrder []string,
 	s *borrow.Scope,
 ) (map[string][]string, error) {

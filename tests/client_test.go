@@ -31,10 +31,10 @@ import (
 	"testing"
 	"time"
 
+	"github.com/lemon4ksan/aoni/internal/fast/h1engine"
 	utls "github.com/refraction-networking/utls"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"github.com/valyala/fasthttp"
 
 	"github.com/lemon4ksan/aoni"
 	"github.com/lemon4ksan/aoni/codec/decode"
@@ -591,7 +591,7 @@ func (b *brotliTestWriter) Write(p []byte) (int, error) {
 }
 
 func (b *brotliTestWriter) Close() error {
-	compressed := fasthttp.AppendBrotliBytes(nil, b.buf.Bytes())
+	compressed := h1engine.AppendBrotliBytes(nil, b.buf.Bytes())
 	_, err := b.w.Write(compressed)
 
 	return err

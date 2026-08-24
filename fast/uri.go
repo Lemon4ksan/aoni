@@ -10,14 +10,14 @@ import (
 
 	furl "github.com/lemon4ksan/foundation/net/url"
 	"github.com/lemon4ksan/foundation/silicon/bytesconv"
-	"github.com/valyala/fasthttp"
 
 	"github.com/lemon4ksan/aoni"
+	"github.com/lemon4ksan/aoni/internal/fast/h1engine"
 	"github.com/lemon4ksan/aoni/netutil"
 )
 
 // resolveTargetFastURI resolves and sets the request URI using pre-parsed BaseURL bytes with zero allocations (RFC 3986 §3 & §5.2).
-func (c *Client) resolveTargetFastURI(fastReq *fasthttp.Request, path string) error {
+func (c *Client) resolveTargetFastURI(fastReq *h1engine.Request, path string) error {
 	// Zero-allocation fast path for absolute-path references (RFC 3986 §4.2 & §5.2.3).
 	if len(c.prepared.BaseURLHostBytes) > 0 && len(path) > 0 && path[0] == '/' && (len(path) < 2 || path[1] != '/') {
 		c.setFastURI(fastReq, path)
@@ -27,7 +27,7 @@ func (c *Client) resolveTargetFastURI(fastReq *fasthttp.Request, path string) er
 	return c.resolveTargetURLFastFallback(fastReq, path)
 }
 
-func (c *Client) setFastURI(fastReq *fasthttp.Request, path string) {
+func (c *Client) setFastURI(fastReq *h1engine.Request, path string) {
 	fastReq.URI().SetSchemeBytes(c.prepared.BaseURLSchemeBytes)
 	fastReq.URI().SetHostBytes(c.prepared.BaseURLHostBytes)
 
@@ -63,7 +63,7 @@ func (c *Client) formatTargetURL(path string) (string, error) {
 }
 
 // resolveTargetURLFastFallback formats target URL when fast-path byte slices cannot be directly applied (RFC 3986 §5.2 & §5.3).
-func (c *Client) resolveTargetURLFastFallback(fastReq *fasthttp.Request, path string) error {
+func (c *Client) resolveTargetURLFastFallback(fastReq *h1engine.Request, path string) error {
 	targetURL, err := c.formatTargetURL(path)
 	if err != nil {
 		return err

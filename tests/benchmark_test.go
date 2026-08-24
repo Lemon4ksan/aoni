@@ -20,7 +20,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/valyala/fasthttp/fasthttputil"
+	"github.com/lemon4ksan/aoni/internal/fast/h1engine"
 
 	"github.com/lemon4ksan/aoni"
 	"github.com/lemon4ksan/aoni/codec/decode"
@@ -44,12 +44,12 @@ type queryParams struct {
 	Limit int    `url:"limit,omitempty"`
 }
 
-// setupInmemoryStdServer starts an in-memory net/http server over fasthttputil.InmemoryListener
+// setupInmemoryStdServer starts an in-memory net/http server over h1engine.InmemoryListener
 // and returns a pre-configured *http.Client that routes connections to it.
-func setupInmemoryStdServer(b *testing.B, handler http.Handler) (*fasthttputil.InmemoryListener, *http.Client) {
+func setupInmemoryStdServer(b *testing.B, handler http.Handler) (*h1engine.InmemoryListener, *http.Client) {
 	b.Helper()
 
-	ln := fasthttputil.NewInmemoryListener()
+	ln := h1engine.NewInmemoryListener()
 	srv := &http.Server{Handler: handler}
 
 	go func() { _ = srv.Serve(ln) }()
@@ -610,11 +610,8 @@ func BenchmarkGET_JSON_Aoni_UnsafeDisableFlags(b *testing.B) {
 }
 
 func BenchmarkGET_JSON_Fast_Aoni_UnsafeDisableFlags(b *testing.B) {
-	ln, srv := setupFastBenchServer()
-	defer func() {
-		_ = srv.Shutdown()
-		_ = ln.Close()
-	}()
+	ln := setupFastBenchServer()
+	defer ln.Close()
 
 	client := fast.NewClient(
 		option.WithBaseURL("http://inmemory"),
@@ -650,11 +647,8 @@ func BenchmarkGET_JSON_Fast_Aoni_UnsafeDisableFlags(b *testing.B) {
 }
 
 func BenchmarkGET_JSON_Fast_Aoni_Minimal(b *testing.B) {
-	ln, srv := setupFastBenchServer()
-	defer func() {
-		_ = srv.Shutdown()
-		_ = ln.Close()
-	}()
+	ln := setupFastBenchServer()
+	defer ln.Close()
 
 	client := fast.NewClient(
 		option.WithBaseURL("http://inmemory"),

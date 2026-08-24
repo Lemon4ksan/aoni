@@ -168,7 +168,7 @@ Every package must adhere to a standardized file layout:
 ### 4.4 Import Grouping Order
 Imports must be grouped in exactly 3 sections separated by empty lines, enforced by `gci`:
 1. Standard library packages (`"context"`, `"net/http"`, `"time"`).
-2. Third-party dependency packages (`"github.com/valyala/fasthttp"`, `"github.com/quic-go/quic-go"`).
+2. Third-party dependency packages (`"github.com/refraction-networking/utls"`, `"github.com/stretchr/testify"`).
 3. Internal repository packages (`"github.com/lemon4ksan/aoni"`, `"github.com/lemon4ksan/aoni/option"`).
 
 ## 5. Documentation & Commenting Style

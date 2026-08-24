@@ -65,18 +65,37 @@ func (c *CmdAutoPilot) Run(ctx context.Context, _ []string, stdout, stderr io.Wr
 
 	if cfg != nil && len(cfg.Contracts) > 0 {
 		for _, ct := range cfg.Contracts {
+			if ct.File == "" {
+				name := ct.Name
+				if name == "" {
+					name = "unnamed contract"
+				}
+
+				missingContracts = append(missingContracts, name+" (missing target path)")
+
+				continue
+			}
+
 			targetPath := ct.File
 			if !filepath.IsAbs(targetPath) {
 				targetPath = filepath.Join(rootDir, targetPath)
 			}
 
-			if _, sErr := os.Stat(targetPath); sErr != nil {
+			fi, sErr := os.Stat(targetPath)
+			if sErr != nil || fi.IsDir() {
 				name := ct.Name
 				if name == "" {
 					name = ct.File
 				}
 
-				missingContracts = append(missingContracts, fmt.Sprintf("%s (%s)", name, ct.File))
+				if fi != nil && fi.IsDir() {
+					missingContracts = append(
+						missingContracts,
+						fmt.Sprintf("%s (%s is a directory, expected .go file)", name, ct.File),
+					)
+				} else {
+					missingContracts = append(missingContracts, fmt.Sprintf("%s (%s)", name, ct.File))
+				}
 			} else {
 				activeContracts = append(activeContracts, targetPath)
 			}

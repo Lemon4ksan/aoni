@@ -406,10 +406,48 @@ type ExportConfig struct {
 	} `yaml:"openapi,omitempty"`
 }
 
+// Validate verifies the syntactic and structural invariants of the workspace configuration.
+func (cfg *Config) Validate() error {
+	if cfg == nil {
+		return errors.New("nil configuration")
+	}
+
+	for i, ct := range cfg.Contracts {
+		name := ct.Name
+		if name == "" {
+			name = fmt.Sprintf("contract #%d", i+1)
+		}
+
+		if ct.File == "" && ct.Dir == "" {
+			return fmt.Errorf(
+				"contract %q is missing required target path. Please specify either 'dir: pkg/...' or 'file: pkg/.../api.go'",
+				name,
+			)
+		}
+
+		cleanFile := filepath.Clean(ct.File)
+		if cleanFile == "." || cleanFile == "" {
+			return fmt.Errorf(
+				"contract %q has invalid empty file path. Please specify either 'dir: pkg/...' or 'file: pkg/.../api.go'",
+				name,
+			)
+		}
+	}
+
+	return nil
+}
+
 // Normalize fills in implicit defaults for contracts based on folder conventions.
 func (cfg *Config) Normalize() {
 	for i := range cfg.Contracts {
 		ct := &cfg.Contracts[i]
+
+		// If user specified a directory in File (e.g. 'pkg/telegram' without '.go')
+		if ct.File != "" && !strings.HasSuffix(ct.File, ".go") && ct.Dir == "" {
+			ct.Dir = ct.File
+			ct.File = filepath.ToSlash(filepath.Join(ct.Dir, "api.go"))
+		}
+
 		if ct.File == "" && ct.Dir != "" {
 			ct.File = filepath.ToSlash(filepath.Join(ct.Dir, "api.go"))
 		}
@@ -418,7 +456,7 @@ func (cfg *Config) Normalize() {
 			ct.Dir = filepath.ToSlash(filepath.Dir(ct.File))
 		}
 
-		if ct.Package == "" && ct.Dir != "" {
+		if ct.Package == "" && ct.Dir != "" && ct.Dir != "." {
 			ct.Package = filepath.Base(ct.Dir)
 		}
 
@@ -426,7 +464,7 @@ func (cfg *Config) Normalize() {
 			ct.Name = strings.ToUpper(ct.Package[:1]) + ct.Package[1:]
 		}
 
-		if ct.Gen == "" && ct.File != "" {
+		if ct.Gen == "" && ct.File != "" && ct.File != "." {
 			ct.Gen = strings.TrimSuffix(ct.File, ".go") + ".gen.go"
 		}
 
@@ -532,6 +570,10 @@ func Load(startDir string) (*Config, error) {
 		}
 
 		cfg.Normalize()
+
+		if err := cfg.Validate(); err != nil {
+			return nil, fmt.Errorf("validating %s: %w", configPath, err)
+		}
 
 		return &cfg, nil
 	}

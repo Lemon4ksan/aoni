@@ -14,9 +14,9 @@ import (
 	"github.com/lemon4ksan/foundation/borrow"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"github.com/valyala/fasthttp"
 
 	"github.com/lemon4ksan/aoni/internal/compress/brotli"
+	"github.com/lemon4ksan/aoni/internal/fast/h1engine"
 )
 
 func TestBrotliDecompression(t *testing.T) {
@@ -57,7 +57,7 @@ func TestBrotliDecompression(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			compressed := fasthttp.AppendBrotliBytes(nil, []byte(tc.data))
+			compressed := h1engine.AppendBrotliBytes(nil, []byte(tc.data))
 
 			r := brotli.NewReader(bytes.NewReader(compressed))
 			decompressed, err := io.ReadAll(r)
@@ -87,7 +87,7 @@ func TestBrotliChunkedReading(t *testing.T) {
 	t.Parallel()
 
 	data := strings.Repeat("Testing chunked streaming decompression with various small buffer reads.", 50)
-	compressed := fasthttp.AppendBrotliBytes(nil, []byte(data))
+	compressed := h1engine.AppendBrotliBytes(nil, []byte(data))
 
 	r := brotli.NewReader(bytes.NewReader(compressed))
 	buf := make([]byte, 17) // prime chunk size
@@ -116,7 +116,7 @@ func TestBrotliDecompressHelper(t *testing.T) {
 	t.Parallel()
 
 	raw := []byte("Standalone Brotli Decompress helper test with slice destination.")
-	compressed := fasthttp.AppendBrotliBytes(nil, raw)
+	compressed := h1engine.AppendBrotliBytes(nil, raw)
 
 	// Test nil dst
 	decompressed, err := brotli.Decompress(nil, compressed)
@@ -139,7 +139,7 @@ func TestBrotliReaderPoolAndCloser(t *testing.T) {
 	t.Parallel()
 
 	raw := []byte("Testing AcquireReader, ReleaseReader, and Close (io.ReadCloser).")
-	compressed := fasthttp.AppendBrotliBytes(nil, raw)
+	compressed := h1engine.AppendBrotliBytes(nil, raw)
 
 	r := brotli.AcquireReader(bytes.NewReader(compressed))
 
@@ -159,7 +159,7 @@ func TestBrotliDecompressionBomb(t *testing.T) {
 	t.Parallel()
 
 	raw := []byte(strings.Repeat("A", 100000))
-	compressed := fasthttp.AppendBrotliBytes(nil, raw)
+	compressed := h1engine.AppendBrotliBytes(nil, raw)
 
 	// Set limit to 1024 bytes (well below 100,000 bytes)
 	r := brotli.NewReader(bytes.NewReader(compressed))
@@ -191,7 +191,7 @@ func BenchmarkBrotliDecompress(b *testing.B) {
 			"</body></html>\n",
 		100,
 	))
-	compressed := fasthttp.AppendBrotliBytes(nil, data)
+	compressed := h1engine.AppendBrotliBytes(nil, data)
 
 	b.ReportAllocs()
 	b.SetBytes(int64(len(data)))
@@ -213,7 +213,7 @@ func BenchmarkBrotliDecompressReuse(b *testing.B) {
 			"</body></html>\n",
 		100,
 	))
-	compressed := fasthttp.AppendBrotliBytes(nil, data)
+	compressed := h1engine.AppendBrotliBytes(nil, data)
 
 	r := brotli.NewReader(bytes.NewReader(compressed))
 	src := bytes.NewReader(compressed)
@@ -243,7 +243,7 @@ func BenchmarkBrotliDecompressScoped(b *testing.B) {
 			"</body></html>\n",
 		100,
 	))
-	compressed := fasthttp.AppendBrotliBytes(nil, data)
+	compressed := h1engine.AppendBrotliBytes(nil, data)
 
 	b.ReportAllocs()
 	b.SetBytes(int64(len(data)))
@@ -266,7 +266,7 @@ func BenchmarkBrotliDecompressScoped(b *testing.B) {
 
 func BenchmarkCompare_SmallPayload_1KB(b *testing.B) {
 	data := []byte(`{"id": 42, "user": "aoni-architect", "status": "active", "meta": {"session": "xyz-123"}}`)
-	compressed := fasthttp.AppendBrotliBytes(nil, data)
+	compressed := h1engine.AppendBrotliBytes(nil, data)
 
 	b.Run("fasthttp_unbrotli", func(b *testing.B) {
 		dst := make([]byte, 0, len(data))
@@ -277,7 +277,7 @@ func BenchmarkCompare_SmallPayload_1KB(b *testing.B) {
 		for b.Loop() {
 			var err error
 
-			dst, err = fasthttp.AppendUnbrotliBytes(dst[:0], compressed)
+			dst, err = h1engine.AppendUnbrotliBytes(dst[:0], compressed)
 			if err != nil {
 				b.Fatal(err)
 			}
@@ -308,7 +308,7 @@ func BenchmarkCompare_MediumPayload_18KB(b *testing.B) {
 			"</body></html>\n",
 		100,
 	))
-	compressed := fasthttp.AppendBrotliBytes(nil, data)
+	compressed := h1engine.AppendBrotliBytes(nil, data)
 
 	b.Run("fasthttp_unbrotli", func(b *testing.B) {
 		dst := make([]byte, 0, len(data))
@@ -319,7 +319,7 @@ func BenchmarkCompare_MediumPayload_18KB(b *testing.B) {
 		for b.Loop() {
 			var err error
 
-			dst, err = fasthttp.AppendUnbrotliBytes(dst[:0], compressed)
+			dst, err = h1engine.AppendUnbrotliBytes(dst[:0], compressed)
 			if err != nil {
 				b.Fatal(err)
 			}
@@ -350,7 +350,7 @@ func BenchmarkCompare_LargePayload_100KB(b *testing.B) {
 			"</body></html>\n",
 		450,
 	))
-	compressed := fasthttp.AppendBrotliBytes(nil, data)
+	compressed := h1engine.AppendBrotliBytes(nil, data)
 
 	b.Run("fasthttp_unbrotli", func(b *testing.B) {
 		dst := make([]byte, 0, len(data))
@@ -361,7 +361,7 @@ func BenchmarkCompare_LargePayload_100KB(b *testing.B) {
 		for b.Loop() {
 			var err error
 
-			dst, err = fasthttp.AppendUnbrotliBytes(dst[:0], compressed)
+			dst, err = h1engine.AppendUnbrotliBytes(dst[:0], compressed)
 			if err != nil {
 				b.Fatal(err)
 			}

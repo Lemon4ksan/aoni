@@ -40,6 +40,7 @@ func (c *CmdInit) Run(ctx context.Context, args []string, stdout, stderr io.Writ
 	var (
 		forceFlag        bool
 		forceF           bool
+		gitFlag          bool
 		dirFlag          string
 		templateFlag     string
 		templateTpl      string
@@ -59,6 +60,7 @@ func (c *CmdInit) Run(ctx context.Context, args []string, stdout, stderr io.Writ
 
 	base.BoolVar(fs, &forceFlag, "force", "", false, "Overwrite existing configuration/contract files")
 	base.BoolVar(fs, &forceF, "f", "", false, "Alias for --force")
+	base.BoolVar(fs, &gitFlag, "git", "", false, "Synchronize .gitignore and .gitattributes for generated files")
 	base.StringVar(fs, &dirFlag, "dir", "", "", "Target workspace directory (default: current repository root)")
 	base.StringVar(
 		fs,
@@ -243,6 +245,25 @@ func (c *CmdInit) Run(ctx context.Context, args []string, stdout, stderr io.Writ
 		} else if targetPkgOrPath == "." || targetPkgOrPath == "./..." {
 			targetPkgOrPath = ""
 		}
+	}
+
+	if gitFlag {
+		giUpdated, _ := project.EnsureGitignore(targetDir)
+		gaUpdated, _ := project.EnsureGitattributes(targetDir)
+
+		if giUpdated {
+			fmt.Fprintln(stdout, "✔ Updated .gitignore with generated file patterns (*_mock.gen.go, .vortex/)")
+		} else {
+			fmt.Fprintln(stdout, "✔ .gitignore is up-to-date")
+		}
+
+		if gaUpdated {
+			fmt.Fprintln(stdout, "✔ Updated .gitattributes with linguist-generated markers")
+		} else {
+			fmt.Fprintln(stdout, "✔ .gitattributes is up-to-date")
+		}
+
+		return nil
 	}
 
 	// If neither package, template, nor from flag was provided, perform workspace discovery and .vortex.yml initialization

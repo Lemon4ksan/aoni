@@ -5,6 +5,8 @@
 package openapi_test
 
 import (
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -651,4 +653,42 @@ components:
 	require.Regexp(t, regexp.MustCompile(`PetType\s+string\s+`+"`"+`json:"petType"`+"`"), codeStr)
 	require.Regexp(t, regexp.MustCompile(`Dog\s+\*Dog\s+`+"`"+`json:"dog,omitempty"`+"`"), codeStr)
 	require.Regexp(t, regexp.MustCompile(`Pet\s+\*Pet\s+`+"`"+`json:"pet,omitempty"`+"`"), codeStr)
+}
+
+func TestOpenAPI_RemoteSpecAndOfflineCache(t *testing.T) {
+	origWd, _ := os.Getwd()
+	defer func() { _ = os.Chdir(origWd) }()
+
+	tempDir := t.TempDir()
+
+	require.NoError(t, os.Chdir(tempDir))
+
+	serverHitCount := 0
+
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		serverHitCount++
+
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(sampleSwaggerJSON))
+	}))
+	defer ts.Close()
+
+	// 1. First load: hits server and caches snapshot
+	doc, err := openapi.LoadSpec(ts.URL+"/swagger.json", nil)
+	require.NoError(t, err)
+	require.NotNil(t, doc)
+	require.NotNil(t, doc.Info)
+	require.Equal(t, "Backpack.tf API", doc.Info.Title)
+	require.Equal(t, 1, serverHitCount)
+
+	// 2. Shut down server to simulate offline / network outage
+	serverURL := ts.URL + "/swagger.json"
+	ts.Close()
+
+	// 3. Second load: falls back to offline cache
+	docOffline, err := openapi.LoadSpec(serverURL, nil)
+	require.NoError(t, err)
+	require.NotNil(t, docOffline)
+	require.NotNil(t, docOffline.Info)
+	require.Equal(t, "Backpack.tf API", docOffline.Info.Title)
 }

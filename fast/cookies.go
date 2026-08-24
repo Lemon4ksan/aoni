@@ -16,14 +16,14 @@ import (
 	impl "github.com/lemon4ksan/foundation/net/cookie"
 	furl "github.com/lemon4ksan/foundation/net/url"
 	"github.com/lemon4ksan/foundation/silicon/bytesconv"
-	"github.com/valyala/fasthttp"
 
 	"github.com/lemon4ksan/aoni/cookie"
+	"github.com/lemon4ksan/aoni/internal/fast/h1engine"
 	"github.com/lemon4ksan/aoni/netutil"
 )
 
 // applyCookies populates outbound fasthttp request headers with matching cookies from the active jar.
-func (c *Client) applyCookies(ctx context.Context, req *fasthttp.Request) {
+func (c *Client) applyCookies(ctx context.Context, req *h1engine.Request) {
 	jar := c.cfg.Engine.CookieJar
 	if jar == nil {
 		return
@@ -67,7 +67,7 @@ func (c *Client) applyCookies(ctx context.Context, req *fasthttp.Request) {
 }
 
 // captureCookies extracts response Set-Cookie headers and saves valid cookies to the active jar.
-func (c *Client) captureCookies(ctx context.Context, req *fasthttp.Request, resp *fasthttp.Response) {
+func (c *Client) captureCookies(ctx context.Context, req *h1engine.Request, resp *h1engine.Response) {
 	jar := c.cfg.Engine.CookieJar
 	if jar == nil {
 		return
@@ -131,7 +131,7 @@ func parseCookie(_, value []byte) *http.Cookie {
 }
 
 // extractUserInfoAndSetAuth inspects URI credentials and constructs HTTP Basic Authorization headers if missing.
-func extractUserInfoAndSetAuth(req *fasthttp.Request) {
+func extractUserInfoAndSetAuth(req *h1engine.Request) {
 	if len(req.Header.Peek("Authorization")) > 0 {
 		return
 	}
@@ -166,7 +166,7 @@ func extractUserInfoAndSetAuth(req *fasthttp.Request) {
 }
 
 // scrubSensitiveHeaders strips sensitive credentials and cookie headers upon cross-domain redirects per RFC 9110 §15.4.
-func scrubSensitiveHeaders(req *fasthttp.Request, currentURI, nextURI *fasthttp.URI) {
+func scrubSensitiveHeaders(req *h1engine.Request, currentURI, nextURI *h1engine.URI) {
 	req.Header.Del("Authorization")
 	req.Header.Del("Proxy-Authorization")
 	req.Header.Del("Proxy-Authenticate")
@@ -195,7 +195,7 @@ func isSameDomainOrSubdomain(h1, h2 string) bool {
 	return furl.IsSameDomainOrSubdomain(clean1, clean2)
 }
 
-func uriToURL(uri *fasthttp.URI) *url.URL {
+func uriToURL(uri *h1engine.URI) *url.URL {
 	return &url.URL{
 		Scheme:   bytesconv.B2S(uri.Scheme()),
 		Host:     bytesconv.B2S(uri.Host()),

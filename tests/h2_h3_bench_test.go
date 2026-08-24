@@ -21,7 +21,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/valyala/fasthttp"
+	"github.com/lemon4ksan/aoni/internal/fast/h1engine"
 	"golang.org/x/net/http2"
 
 	"github.com/lemon4ksan/aoni"
@@ -169,8 +169,8 @@ func BenchmarkH2_NetHTTP(b *testing.B) {
 
 func BenchmarkH3_QPACK_Block_ZeroAlloc(b *testing.B) {
 	codec := h3engine.NewQPACKCodec()
-	req := fasthttp.AcquireRequest()
-	defer fasthttp.ReleaseRequest(req)
+	req := h1engine.AcquireRequest()
+	defer h1engine.ReleaseRequest(req)
 
 	req.Header.SetMethod("POST")
 	req.SetRequestURI("https://api.example.com/v2/users")
@@ -193,8 +193,8 @@ func BenchmarkH3_QPACK_Block_ZeroAlloc(b *testing.B) {
 
 func BenchmarkH3_QPACK_EncodeDecode(b *testing.B) {
 	codec := h3engine.NewQPACKCodec()
-	req := fasthttp.AcquireRequest()
-	defer fasthttp.ReleaseRequest(req)
+	req := h1engine.AcquireRequest()
+	defer h1engine.ReleaseRequest(req)
 
 	req.Header.SetMethod("POST")
 	req.SetRequestURI("https://api.example.com/v2/users")
@@ -248,8 +248,8 @@ func BenchmarkH2_HPACK_EncodeDecode(b *testing.B) {
 
 func BenchmarkH3_FrameRoundtrip(b *testing.B) {
 	codec := h3engine.NewQPACKCodec()
-	req := fasthttp.AcquireRequest()
-	defer fasthttp.ReleaseRequest(req)
+	req := h1engine.AcquireRequest()
+	defer h1engine.ReleaseRequest(req)
 
 	req.Header.SetMethod("POST")
 	req.SetRequestURI("https://api.example.com/v2/users")
@@ -257,7 +257,7 @@ func BenchmarkH3_FrameRoundtrip(b *testing.B) {
 	req.Header.Set("x-aoni-version", "2.0.0")
 	req.Header.Set("user-agent", "aoni/2.0")
 
-	var respHeader fasthttp.ResponseHeader
+	var respHeader h1engine.ResponseHeader
 
 	b.ReportAllocs()
 	b.ResetTimer()

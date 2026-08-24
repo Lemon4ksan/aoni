@@ -13,7 +13,7 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/valyala/fasthttp"
+	"github.com/lemon4ksan/aoni/internal/fast/h1engine"
 )
 
 const DefaultPingInterval = 15 * time.Second
@@ -31,14 +31,14 @@ const (
 type ClientOpts struct {
 	PingInterval  time.Duration
 	OnRTT         func(time.Duration)
-	OnPushPromise func(pushReq *fasthttp.Request, pushResp *fasthttp.Response)
+	OnPushPromise func(pushReq *h1engine.Request, pushResp *h1engine.Response)
 	Settings      *Settings
 }
 
 // Context maps a fasthttp request/response pair to an asynchronous stream execution.
 type Context struct {
-	Request       *fasthttp.Request
-	Response      *fasthttp.Response
+	Request       *h1engine.Request
+	Response      *h1engine.Response
 	Err           chan error
 	Trailers      map[string][]string
 	StreamID      uint32
@@ -61,7 +61,7 @@ func (ctx *Context) SetState(s streamState) {
 type Client struct {
 	d             *Dialer
 	onRTT         func(time.Duration)
-	onPushPromise func(pushReq *fasthttp.Request, pushResp *fasthttp.Response)
+	onPushPromise func(pushReq *h1engine.Request, pushResp *h1engine.Response)
 	lck           sync.Mutex
 	conns         list.List
 	orderedKeys   []string
@@ -123,7 +123,7 @@ func (cl *Client) createConn(ctx context.Context) (*Conn, error) {
 //
 // Postconditions:
 //   - Retries transparently up to 3 times on new connections when GOAWAY is received.
-func (cl *Client) Do(ctx context.Context, req *fasthttp.Request, res *fasthttp.Response) error {
+func (cl *Client) Do(ctx context.Context, req *h1engine.Request, res *h1engine.Response) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
@@ -143,8 +143,8 @@ func (cl *Client) Do(ctx context.Context, req *fasthttp.Request, res *fasthttp.R
 // DoWithTrailers executes req over an available HTTP/2 stream and returns captured response trailers.
 func (cl *Client) DoWithTrailers(
 	ctx context.Context,
-	req *fasthttp.Request,
-	res *fasthttp.Response,
+	req *h1engine.Request,
+	res *h1engine.Response,
 ) (map[string][]string, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
@@ -164,8 +164,8 @@ func (cl *Client) DoWithTrailers(
 
 func (cl *Client) doOnceWithTrailers(
 	ctx context.Context,
-	req *fasthttp.Request,
-	res *fasthttp.Response,
+	req *h1engine.Request,
+	res *h1engine.Response,
 ) (map[string][]string, error) {
 	conn, err := cl.selectConn(ctx)
 	if err != nil {
@@ -193,7 +193,7 @@ func (cl *Client) doOnceWithTrailers(
 	}
 }
 
-func (cl *Client) doOnce(ctx context.Context, req *fasthttp.Request, res *fasthttp.Response) error {
+func (cl *Client) doOnce(ctx context.Context, req *h1engine.Request, res *h1engine.Response) error {
 	conn, err := cl.selectConn(ctx)
 	if err != nil {
 		return err

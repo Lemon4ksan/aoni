@@ -22,9 +22,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/lemon4ksan/aoni/internal/fast/h1engine"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"github.com/valyala/fasthttp"
 
 	"github.com/lemon4ksan/aoni"
 	"github.com/lemon4ksan/aoni/fast"
@@ -603,8 +603,8 @@ func TestHeader_RequestModifiers(t *testing.T) {
 func TestRequest_URLAndQueryParams(t *testing.T) {
 	t.Parallel()
 
-	fastReq := fasthttp.AcquireRequest()
-	t.Cleanup(func() { fasthttp.ReleaseRequest(fastReq) })
+	fastReq := h1engine.AcquireRequest()
+	t.Cleanup(func() { h1engine.ReleaseRequest(fastReq) })
 
 	req := fast.NewRequest(fastReq)
 	req.SetURL("http://example.com/api/v1/search?q=aoni&page=1")
@@ -625,8 +625,8 @@ func TestRequest_URLAndQueryParams(t *testing.T) {
 func TestRequest_HeaderMutations(t *testing.T) {
 	t.Parallel()
 
-	fastReq := fasthttp.AcquireRequest()
-	t.Cleanup(func() { fasthttp.ReleaseRequest(fastReq) })
+	fastReq := h1engine.AcquireRequest()
+	t.Cleanup(func() { h1engine.ReleaseRequest(fastReq) })
 
 	req := fast.NewRequest(fastReq)
 	req.SetHeader("X-Api-Key", "secret-key-123")
@@ -645,8 +645,8 @@ func TestRequest_HeaderMutations(t *testing.T) {
 func TestRequest_BodyBytesAndStream(t *testing.T) {
 	t.Parallel()
 
-	fastReq := fasthttp.AcquireRequest()
-	t.Cleanup(func() { fasthttp.ReleaseRequest(fastReq) })
+	fastReq := h1engine.AcquireRequest()
+	t.Cleanup(func() { h1engine.ReleaseRequest(fastReq) })
 
 	req := fast.NewRequest(fastReq)
 
@@ -664,8 +664,8 @@ func TestRequest_BodyBytesAndStream(t *testing.T) {
 func TestResponse_ContractAndHeaders(t *testing.T) {
 	t.Parallel()
 
-	fastResp := fasthttp.AcquireResponse()
-	t.Cleanup(func() { fasthttp.ReleaseResponse(fastResp) })
+	fastResp := h1engine.AcquireResponse()
+	t.Cleanup(func() { h1engine.ReleaseResponse(fastResp) })
 
 	fastResp.SetStatusCode(http.StatusCreated)
 	fastResp.Header.Set("Content-Type", "application/json")
@@ -969,8 +969,8 @@ func TestFastClient_WithCloningAndIsolation(t *testing.T) {
 func TestFastClient_PooledResponseLifecycle(t *testing.T) {
 	t.Parallel()
 
-	fastReq := fasthttp.AcquireRequest()
-	fastResp := fasthttp.AcquireResponse()
+	fastReq := h1engine.AcquireRequest()
+	fastResp := h1engine.AcquireResponse()
 
 	fastResp.SetStatusCode(http.StatusOK)
 	fastResp.SetBodyString("pooled-data")

@@ -16,12 +16,12 @@ import (
 
 	"github.com/lemon4ksan/foundation/borrow"
 	"github.com/lemon4ksan/foundation/silicon/pool"
-	"github.com/valyala/fasthttp"
 
 	"github.com/lemon4ksan/aoni/internal/compress/brotli"
 	"github.com/lemon4ksan/aoni/internal/compress/flate"
 	"github.com/lemon4ksan/aoni/internal/compress/gzip"
 	"github.com/lemon4ksan/aoni/internal/compress/zstd"
+	"github.com/lemon4ksan/aoni/internal/fast/h1engine"
 )
 
 const (
@@ -887,16 +887,16 @@ func Brotli(src, dst []byte, level ...int) ([]byte, error) {
 		return dst[:0], nil
 	}
 
-	lvl := fasthttp.CompressBrotliDefaultCompression
+	lvl := h1engine.CompressBrotliDefaultCompression
 	if len(level) > 0 {
 		lvl = level[0]
 	}
 
 	if cap(dst) == 0 {
-		return fasthttp.AppendBrotliBytesLevel(nil, src, lvl), nil
+		return h1engine.AppendBrotliBytesLevel(nil, src, lvl), nil
 	}
 
-	return fasthttp.AppendBrotliBytesLevel(dst[:0], src, lvl), nil
+	return h1engine.AppendBrotliBytesLevel(dst[:0], src, lvl), nil
 }
 
 // BrotliScoped compresses src using Brotli into a zero-allocation scoped buffer bound to s.

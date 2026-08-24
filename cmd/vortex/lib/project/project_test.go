@@ -312,3 +312,60 @@ func TestProject_EnsureGitattributes(t *testing.T) {
 	require.Contains(t, string(content2), "*.png binary")
 	require.Contains(t, string(content2), "linguist-generated=true")
 }
+
+func TestProject_StatusRenderAlignment(t *testing.T) {
+	report := &project.StatusReport{
+		WorkspaceRoot: "D:/CodingProjects/g-man",
+		TotalMethods:  268,
+		TotalDTOs:     55,
+		Contracts: []project.ContractStatus{
+			{
+				Name:         "WebAPI",
+				File:         "pkg/steam/webapi/api.go",
+				MethodsCount: 169,
+				DTOsCount:    44,
+			},
+			{
+				Name:         "Inventory",
+				File:         "pkg/steam/community/inventory/api.go",
+				MethodsCount: 3,
+				DTOsCount:    2,
+			},
+			{
+				Name:         "Market",
+				File:         "pkg/steam/community/market/api.go",
+				MethodsCount: 17,
+			},
+			{
+				Name:           "Notifications",
+				File:           "pkg/steam/sys/notifications/api.go",
+				MethodsCount:   10,
+				IsGenStale:     true,
+				GenStaleReason: "api.gen.go is STALE",
+			},
+		},
+	}
+
+	rendered := report.Render(false)
+
+	// Check headers and summary
+	require.Contains(t, rendered, "⚡ Vortex API Guardian")
+	require.Contains(t, rendered, "Workspace: D:/CodingProjects/g-man (4 services, 268 methods)")
+	require.Contains(t, rendered, "● Contracts & Generated Code:")
+
+	// Check rows
+	require.Contains(t, rendered, "WebAPI")
+	require.Contains(t, rendered, "(pkg/steam/webapi)")
+	require.Contains(t, rendered, "169 methods, 44 DTOs")
+	require.Contains(t, rendered, "100% in sync")
+
+	require.Contains(t, rendered, "Notifications")
+	require.Contains(t, rendered, "(pkg/steam/sys/notifications)")
+	require.Contains(t, rendered, "10 methods")
+	require.Contains(t, rendered, "api.gen.go is STALE")
+
+	// Check color rendering
+	colored := report.Render(true)
+	require.Contains(t, colored, "WebAPI")
+	require.Contains(t, colored, "Notifications")
+}

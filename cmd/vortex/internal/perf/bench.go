@@ -23,13 +23,12 @@ import (
 	"github.com/lemon4ksan/foundation/net/url"
 	"github.com/lemon4ksan/foundation/silicon/simd"
 	"github.com/lemon4ksan/foundation/silicon/sysnet"
-	"github.com/valyala/fasthttp"
-	"github.com/valyala/fasthttp/fasthttputil"
 	"golang.org/x/sys/cpu"
 
 	"github.com/lemon4ksan/aoni/fast"
 	"github.com/lemon4ksan/aoni/fingerprint/profiles"
 	"github.com/lemon4ksan/aoni/fingerprint/profiles/chrome"
+	"github.com/lemon4ksan/aoni/internal/fast/h1engine"
 	"github.com/lemon4ksan/aoni/internal/sys"
 )
 
@@ -151,12 +150,12 @@ func (c *CmdBench) Run(ctx context.Context, args []string, stdout, stderr io.Wri
 
 			var local int64
 			for j := 0; j < chunkPool; j++ {
-				req := fasthttp.AcquireRequest()
+				req := h1engine.AcquireRequest()
 				req.SetRequestURI("https://api.example.com/v1/orders/99482?filter=active")
 				req.Header.SetMethod("POST")
 				req.Header.Set("User-Agent", "aoni/1.0")
 				req.Header.Set("Content-Type", "application/json")
-				fasthttp.ReleaseRequest(req)
+				h1engine.ReleaseRequest(req)
 
 				local++
 			}
@@ -218,16 +217,38 @@ func (c *CmdBench) Run(ctx context.Context, args []string, stdout, stderr io.Wri
 	}
 
 	// 3. fast.Client In-Memory Pipe
-	ln := fasthttputil.NewInmemoryListener()
+	ln := h1engine.NewInmemoryListener()
 	defer ln.Close()
 
-	srv := &fasthttp.Server{
-		Handler: func(ctx *fasthttp.RequestCtx) {
-			ctx.SetStatusCode(fasthttp.StatusOK)
-			ctx.SetBodyString(`{"status":"ok","code":200}`)
-		},
-	}
-	go func() { _ = srv.Serve(ln) }()
+	go func() {
+		respBytes := []byte(
+			"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: 29\r\nConnection: keep-alive\r\n\r\n{\"status\":\"ok\",\"code\":200}",
+		)
+
+		for {
+			c, err := ln.Accept()
+			if err != nil {
+				return
+			}
+
+			go func(conn net.Conn) {
+				defer conn.Close()
+
+				buf := make([]byte, 1024)
+
+				for {
+					n, err := conn.Read(buf)
+					if err != nil || n == 0 {
+						return
+					}
+
+					if _, err := conn.Write(respBytes); err != nil {
+						return
+					}
+				}
+			}(c)
+		}
+	}()
 
 	fastClient := fast.NewClient()
 
@@ -250,18 +271,18 @@ func (c *CmdBench) Run(ctx context.Context, args []string, stdout, stderr io.Wri
 
 			var local int64
 			for j := 0; j < chunkFast; j++ {
-				req := fasthttp.AcquireRequest()
-				resp := fasthttp.AcquireResponse()
+				req := h1engine.AcquireRequest()
+				resp := h1engine.AcquireResponse()
 
 				req.SetRequestURI("http://inmemory/benchmark")
-				req.Header.SetMethod(fasthttp.MethodGet)
+				req.Header.SetMethod(h1engine.MethodGet)
 
-				if err := fastClient.Engine().Do(req, resp); err == nil && resp.StatusCode() == fasthttp.StatusOK {
+				if err := fastClient.Engine().Do(req, resp); err == nil && resp.StatusCode() == h1engine.StatusOK {
 					local++
 				}
 
-				fasthttp.ReleaseRequest(req)
-				fasthttp.ReleaseResponse(resp)
+				h1engine.ReleaseRequest(req)
+				h1engine.ReleaseResponse(resp)
 			}
 
 			atomic.AddInt64(&fastOps, local)
@@ -385,8 +406,8 @@ func (c *CmdBench) Run(ctx context.Context, args []string, stdout, stderr io.Wri
 
 			var local int64
 			for j := 0; j < chunkNet; j++ {
-				req := fasthttp.AcquireRequest()
-				resp := fasthttp.AcquireResponse()
+				req := h1engine.AcquireRequest()
+				resp := h1engine.AcquireResponse()
 
 				req.SetRequestURI(ts.URL)
 
@@ -394,8 +415,8 @@ func (c *CmdBench) Run(ctx context.Context, args []string, stdout, stderr io.Wri
 					local++
 				}
 
-				fasthttp.ReleaseResponse(resp)
-				fasthttp.ReleaseRequest(req)
+				h1engine.ReleaseResponse(resp)
+				h1engine.ReleaseRequest(req)
 			}
 
 			atomic.AddInt64(&netOps, local)

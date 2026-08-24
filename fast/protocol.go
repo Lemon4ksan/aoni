@@ -19,10 +19,10 @@ import (
 
 	"github.com/lemon4ksan/foundation/silicon/bytesconv"
 	"github.com/lemon4ksan/foundation/silicon/clock"
-	"github.com/valyala/fasthttp"
 	"golang.org/x/sys/cpu"
 
 	"github.com/lemon4ksan/aoni"
+	"github.com/lemon4ksan/aoni/internal/fast/h1engine"
 	"github.com/lemon4ksan/aoni/internal/fast/h2engine"
 	"github.com/lemon4ksan/aoni/internal/fast/h3engine"
 	"github.com/lemon4ksan/aoni/internal/pipeline"
@@ -201,15 +201,15 @@ func parseMaxAge(headerVal string) time.Duration {
 	return maxAge
 }
 
-func (c *Client) resolveALPNMode(ctx context.Context, fastReq *fasthttp.Request) string {
+func (c *Client) resolveALPNMode(ctx context.Context, fastReq *h1engine.Request) string {
 	return resolveALPNMode(ctx, &c.cfg, fastReq, c.protocolState.altSvc)
 }
 
-func resolveALPNMode(ctx context.Context, cfg *aoni.Config, fastReq *fasthttp.Request, altSvc *altSvcCache) string {
+func resolveALPNMode(ctx context.Context, cfg *aoni.Config, fastReq *h1engine.Request, altSvc *altSvcCache) string {
 	reqCfg := aoni.GetRequestConfig(ctx)
 	if reqCfg != nil {
 		if len(reqCfg.Modifiers) > 0 && len(reqCfg.ALPNOverride) == 0 {
-			dummyFastReq := fasthttp.AcquireRequest()
+			dummyFastReq := h1engine.AcquireRequest()
 			dummyReq := NewRequest(dummyFastReq)
 			dummyReq.SetContext(ctx)
 
@@ -218,7 +218,7 @@ func resolveALPNMode(ctx context.Context, cfg *aoni.Config, fastReq *fasthttp.Re
 			}
 
 			dummyReq.Release()
-			fasthttp.ReleaseRequest(dummyFastReq)
+			h1engine.ReleaseRequest(dummyFastReq)
 		}
 
 		if len(reqCfg.ALPNOverride) > 0 {
@@ -321,9 +321,9 @@ func (c *Client) getH2Client(host string) *h2engine.Client {
 		}
 	}
 
-	var pushHandler func(pushReq *fasthttp.Request, pushResp *fasthttp.Response)
+	var pushHandler func(pushReq *h1engine.Request, pushResp *h1engine.Response)
 	if cacheCfg := c.cfg.Defaults.Pipeline.Cache; cacheCfg != nil && cacheCfg.Store != nil {
-		pushHandler = func(pushReq *fasthttp.Request, pushResp *fasthttp.Response) {
+		pushHandler = func(pushReq *h1engine.Request, pushResp *h1engine.Response) {
 			c.cachePushedResponse(pushReq, pushResp, cacheCfg)
 		}
 	}
@@ -345,8 +345,8 @@ func (c *Client) getH2Client(host string) *h2engine.Client {
 }
 
 func (c *Client) cachePushedResponse(
-	fastReq *fasthttp.Request,
-	fastResp *fasthttp.Response,
+	fastReq *h1engine.Request,
+	fastResp *h1engine.Response,
 	cacheCfg *aoni.CacheConfig,
 ) {
 	req, err := http.NewRequestWithContext(

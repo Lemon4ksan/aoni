@@ -10,9 +10,9 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
-	"github.com/valyala/fasthttp"
 
 	"github.com/lemon4ksan/aoni"
+	"github.com/lemon4ksan/aoni/internal/fast/h1engine"
 	"github.com/lemon4ksan/aoni/mod"
 	"github.com/lemon4ksan/aoni/option"
 )
@@ -53,8 +53,8 @@ func TestH2_ALPNResolutionAndHeaderOrdering(t *testing.T) {
 		},
 	}
 
-	fastReq := fasthttp.AcquireRequest()
-	defer fasthttp.ReleaseRequest(fastReq)
+	fastReq := h1engine.AcquireRequest()
+	defer h1engine.ReleaseRequest(fastReq)
 
 	mode := resolveALPNMode(context.Background(), cfg, fastReq, nil)
 	assert.Equal(t, aoni.AlpnH2, mode)
@@ -64,8 +64,8 @@ func TestH3_ForceHTTP3ContextModifier(t *testing.T) {
 	ctx := context.Background()
 	ctxH3 := aoni.WithContextModifier(ctx, mod.WithForceHTTP3())
 
-	fastReq := fasthttp.AcquireRequest()
-	defer fasthttp.ReleaseRequest(fastReq)
+	fastReq := h1engine.AcquireRequest()
+	defer h1engine.ReleaseRequest(fastReq)
 
 	cfg := &aoni.Config{}
 	mode := resolveALPNMode(ctxH3, cfg, fastReq, nil)
@@ -76,7 +76,7 @@ func TestResolveALPNMode(t *testing.T) {
 	ctx := context.Background()
 	cfg := &aoni.Config{}
 
-	if mode := resolveALPNMode(ctx, cfg, &fasthttp.Request{}, nil); mode != aoni.AlpnHTTP {
+	if mode := resolveALPNMode(ctx, cfg, &h1engine.Request{}, nil); mode != aoni.AlpnHTTP {
 		t.Errorf("got ALPN mode %q, want %q", mode, aoni.AlpnHTTP)
 	}
 
@@ -86,12 +86,12 @@ func TestResolveALPNMode(t *testing.T) {
 		},
 	}
 
-	if mode := resolveALPNMode(ctx, cfgH2, &fasthttp.Request{}, nil); mode != aoni.AlpnH2 {
+	if mode := resolveALPNMode(ctx, cfgH2, &h1engine.Request{}, nil); mode != aoni.AlpnH2 {
 		t.Errorf("got ALPN mode %q, want %q", mode, aoni.AlpnH2)
 	}
 
 	ctxH3 := aoni.WithContextModifier(ctx, mod.WithForceHTTP3())
-	if mode := resolveALPNMode(ctxH3, cfg, &fasthttp.Request{}, nil); mode != aoni.AlpnH3 {
+	if mode := resolveALPNMode(ctxH3, cfg, &h1engine.Request{}, nil); mode != aoni.AlpnH3 {
 		t.Errorf("got context ALPN mode %q, want %q", mode, aoni.AlpnH3)
 	}
 }
@@ -99,8 +99,8 @@ func TestResolveALPNMode(t *testing.T) {
 func TestResponse_JSON_And_String(t *testing.T) {
 	t.Parallel()
 
-	fastResp := fasthttp.AcquireResponse()
-	defer fasthttp.ReleaseResponse(fastResp)
+	fastResp := h1engine.AcquireResponse()
+	defer h1engine.ReleaseResponse(fastResp)
 
 	fastResp.SetBodyString(`{"name":"aoni-fast","rps":1870000}`)
 
@@ -131,8 +131,8 @@ func TestResponse_JSON_And_String(t *testing.T) {
 }
 
 func BenchmarkResponse_JSON(b *testing.B) {
-	fastResp := fasthttp.AcquireResponse()
-	defer fasthttp.ReleaseResponse(fastResp)
+	fastResp := h1engine.AcquireResponse()
+	defer h1engine.ReleaseResponse(fastResp)
 
 	fastResp.SetBodyString(`{"name":"aoni-fast","rps":1870000,"status":"active"}`)
 
@@ -154,8 +154,8 @@ func BenchmarkResponse_JSON(b *testing.B) {
 }
 
 func BenchmarkResponse_JSONNoCopy(b *testing.B) {
-	fastResp := fasthttp.AcquireResponse()
-	defer fasthttp.ReleaseResponse(fastResp)
+	fastResp := h1engine.AcquireResponse()
+	defer h1engine.ReleaseResponse(fastResp)
 
 	fastResp.SetBodyString(`{"name":"aoni-fast","rps":1870000,"status":"active"}`)
 

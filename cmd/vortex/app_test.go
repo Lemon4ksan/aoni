@@ -1986,3 +1986,66 @@ type Req struct {
 	require.Contains(t, string(restored), "Field4 int")
 	require.Contains(t, string(restored), "RPCMethod1")
 }
+
+func TestApp_Doctor(t *testing.T) {
+	tempDir := t.TempDir()
+	pkgDir := filepath.Join(tempDir, "pkg", "docdemo")
+	require.NoError(t, os.MkdirAll(pkgDir, 0o750))
+
+	apiSrc := `package docdemo
+
+import (
+	"context"
+	"github.com/lemon4ksan/aoni"
+)
+
+// @aoni:service
+type DocDemoAPI interface {
+	// @get "check"
+	Check(ctx context.Context, mods ...aoni.RequestModifier) (map[string]any, error)
+}
+`
+	require.NoError(t, os.WriteFile(filepath.Join(pkgDir, "api.go"), []byte(apiSrc), 0o600))
+	require.NoError(t, os.WriteFile(filepath.Join(pkgDir, "api.gen.go"), []byte("package docdemo\n"), 0o600))
+
+	var stdout, stderr bytes.Buffer
+
+	app := newTestApp(&stdout, &stderr)
+
+	// 1. Run doctor on clean workspace
+	err := app.Run(context.Background(), []string{"doctor", "-dir=" + tempDir})
+	require.NoError(t, err)
+	require.Contains(t, stdout.String(), "Vortex Doctor")
+	require.Contains(t, stdout.String(), "Go Toolchain")
+
+	// 2. Run doctor with --json
+	stdout.Reset()
+
+	err = app.Run(context.Background(), []string{"doctor", "-json", "-dir=" + tempDir})
+	require.NoError(t, err)
+	require.Contains(t, stdout.String(), `"workspace_root"`)
+	require.Contains(t, stdout.String(), `"go_version"`)
+
+	// 3. Run doctor --fix
+	stdout.Reset()
+
+	err = app.Run(context.Background(), []string{"doctor", "--fix", "-dir=" + tempDir})
+	require.NoError(t, err)
+	require.FileExists(t, filepath.Join(tempDir, ".gitignore"))
+	require.FileExists(t, filepath.Join(tempDir, ".gitattributes"))
+}
+
+func TestApp_Init_Git(t *testing.T) {
+	tempDir := t.TempDir()
+
+	var stdout, stderr bytes.Buffer
+
+	app := newTestApp(&stdout, &stderr)
+
+	err := app.Run(context.Background(), []string{"init", "--git", "-dir=" + tempDir})
+	require.NoError(t, err)
+	require.Contains(t, stdout.String(), "Updated .gitignore")
+	require.Contains(t, stdout.String(), "Updated .gitattributes")
+	require.FileExists(t, filepath.Join(tempDir, ".gitignore"))
+	require.FileExists(t, filepath.Join(tempDir, ".gitattributes"))
+}

@@ -13,8 +13,8 @@ import (
 	"github.com/lemon4ksan/foundation/borrow"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"github.com/valyala/fasthttp"
 
+	"github.com/lemon4ksan/aoni/internal/fast/h1engine"
 	"github.com/lemon4ksan/aoni/internal/qpack"
 	"github.com/lemon4ksan/aoni/internal/quic"
 	"github.com/lemon4ksan/aoni/internal/quic/quicvarint"
@@ -27,8 +27,8 @@ func TestSendRequest_HeadersAndBody(t *testing.T) {
 		qpack: NewQPACKCodec(),
 	}
 
-	req := fasthttp.AcquireRequest()
-	defer fasthttp.ReleaseRequest(req)
+	req := h1engine.AcquireRequest()
+	defer h1engine.ReleaseRequest(req)
 
 	req.Header.SetMethod("POST")
 	req.SetRequestURI("https://api.example.com/upload")
@@ -95,8 +95,8 @@ func TestSendRequest_HeadersOnly(t *testing.T) {
 		qpack: NewQPACKCodec(),
 	}
 
-	req := fasthttp.AcquireRequest()
-	defer fasthttp.ReleaseRequest(req)
+	req := h1engine.AcquireRequest()
+	defer h1engine.ReleaseRequest(req)
 
 	req.Header.SetMethod("GET")
 	req.SetRequestURI("https://example.com/status")
@@ -147,8 +147,8 @@ func TestReadResponse_Success(t *testing.T) {
 	streamBuf.Write(appendDataHeader(nil, uint64(len(payload))))
 	streamBuf.Write(payload)
 
-	resp := fasthttp.AcquireResponse()
-	defer fasthttp.ReleaseResponse(resp)
+	resp := h1engine.AcquireResponse()
+	defer h1engine.ReleaseResponse(resp)
 
 	trailers, err := cc.readResponseFrom(&streamBuf, resp)
 	require.NoError(t, err)
@@ -193,8 +193,8 @@ func TestReadResponse_MultiChunkData(t *testing.T) {
 	streamBuf.Write(appendDataHeader(nil, uint64(len(chunk3))))
 	streamBuf.Write(chunk3)
 
-	resp := fasthttp.AcquireResponse()
-	defer fasthttp.ReleaseResponse(resp)
+	resp := h1engine.AcquireResponse()
+	defer h1engine.ReleaseResponse(resp)
 
 	_, err := cc.readResponseFrom(&streamBuf, resp)
 	require.NoError(t, err)
@@ -237,8 +237,8 @@ func TestReadResponse_WithTrailers(t *testing.T) {
 	streamBuf.Write(appendHeadersHeader(nil, uint64(len(tBlock))))
 	streamBuf.Write(tBlock)
 
-	resp := fasthttp.AcquireResponse()
-	defer fasthttp.ReleaseResponse(resp)
+	resp := h1engine.AcquireResponse()
+	defer h1engine.ReleaseResponse(resp)
 
 	trailers, err := cc.readResponseFrom(&streamBuf, resp)
 	require.NoError(t, err)
@@ -283,8 +283,8 @@ func TestReadResponse_Informational100Continue(t *testing.T) {
 	streamBuf.Write(appendDataHeader(nil, uint64(len(payload))))
 	streamBuf.Write(payload)
 
-	resp := fasthttp.AcquireResponse()
-	defer fasthttp.ReleaseResponse(resp)
+	resp := h1engine.AcquireResponse()
+	defer h1engine.ReleaseResponse(resp)
 
 	_, err := cc.readResponseFrom(&streamBuf, resp)
 	require.NoError(t, err)
@@ -307,8 +307,8 @@ func TestReadResponse_UnexpectedDataBeforeHeaders(t *testing.T) {
 	streamBuf.Write(appendDataHeader(nil, 10))
 	streamBuf.Write([]byte("0123456789"))
 
-	resp := fasthttp.AcquireResponse()
-	defer fasthttp.ReleaseResponse(resp)
+	resp := h1engine.AcquireResponse()
+	defer h1engine.ReleaseResponse(resp)
 
 	_, err := cc.readResponseFrom(&streamBuf, resp)
 	require.Error(t, err)
@@ -341,8 +341,8 @@ func TestReadResponse_UnknownFrameDiscarded(t *testing.T) {
 	streamBuf.Write(appendHeadersHeader(nil, uint64(len(hBlock))))
 	streamBuf.Write(hBlock)
 
-	resp := fasthttp.AcquireResponse()
-	defer fasthttp.ReleaseResponse(resp)
+	resp := h1engine.AcquireResponse()
+	defer h1engine.ReleaseResponse(resp)
 
 	_, err := cc.readResponseFrom(&streamBuf, resp)
 	require.NoError(t, err)
@@ -397,8 +397,8 @@ func TestSendRequest_LargePayload_Pooled(t *testing.T) {
 		qpack: NewQPACKCodec(),
 	}
 
-	req := fasthttp.AcquireRequest()
-	defer fasthttp.ReleaseRequest(req)
+	req := h1engine.AcquireRequest()
+	defer h1engine.ReleaseRequest(req)
 
 	req.Header.SetMethod("POST")
 	req.SetRequestURI("https://example.com/upload")
@@ -450,8 +450,8 @@ func TestReadResponse_LargeHeaders_Pooled(t *testing.T) {
 	streamBuf.Write(appendDataHeader(nil, uint64(len(body))))
 	streamBuf.Write(body)
 
-	resp := fasthttp.AcquireResponse()
-	defer fasthttp.ReleaseResponse(resp)
+	resp := h1engine.AcquireResponse()
+	defer h1engine.ReleaseResponse(resp)
 
 	_, err := cc.readResponseFrom(&streamBuf, resp)
 	require.NoError(t, err)
@@ -486,8 +486,8 @@ func TestDoScoped_Execution(t *testing.T) {
 	streamBuf.Write(appendDataHeader(nil, uint64(len(body))))
 	streamBuf.Write(body)
 
-	resp := fasthttp.AcquireResponse()
-	defer fasthttp.ReleaseResponse(resp)
+	resp := h1engine.AcquireResponse()
+	defer h1engine.ReleaseResponse(resp)
 
 	_, err := cc.readResponseScoped(&streamBuf, resp, scope)
 	require.NoError(t, err)

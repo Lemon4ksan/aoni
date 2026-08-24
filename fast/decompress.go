@@ -8,12 +8,12 @@ import (
 	"io"
 
 	"github.com/lemon4ksan/foundation/silicon/bytesconv"
-	"github.com/valyala/fasthttp"
 
 	"github.com/lemon4ksan/aoni/internal/compress"
+	"github.com/lemon4ksan/aoni/internal/fast/h1engine"
 )
 
-func decompressFastResponse(resp *fasthttp.Response) bool {
+func decompressFastResponse(resp *h1engine.Response) bool {
 	enforceContentLengthTruncation(resp)
 
 	encodingBytes := resp.Header.ContentEncoding()
@@ -38,7 +38,7 @@ func decompressFastResponse(resp *fasthttp.Response) bool {
 	return false
 }
 
-func enforceContentLengthTruncation(resp *fasthttp.Response) {
+func enforceContentLengthTruncation(resp *h1engine.Response) {
 	if resp == nil {
 		return
 	}

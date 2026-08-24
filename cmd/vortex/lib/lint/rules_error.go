@@ -193,6 +193,16 @@ func (r *RuleMissingHTTPMethod) Run(pass *Pass) []Diagnostic {
 				target := fmt.Sprintf("%s.%s", svc.Name, m.Name)
 				line, col := pass.FindNodePosition(svc.Name, m.Name)
 
+				suggestion := "Annotate method with `@get /path` or appropriate HTTP verb"
+				if svc.Source != "" {
+					suggestion = fmt.Sprintf(
+						"Upstream OpenAPI source detected (%s). Run `vortex spec import -spec=%s -out=%s` to scaffold annotations, or annotate method with `@get /path`",
+						svc.Source,
+						svc.Source,
+						pass.FilePath,
+					)
+				}
+
 				diags = append(diags, Diagnostic{
 					RuleID:     r.ID(),
 					RuleName:   r.Name(),
@@ -203,7 +213,7 @@ func (r *RuleMissingHTTPMethod) Run(pass *Pass) []Diagnostic {
 					Line:       line,
 					Column:     col,
 					Message:    "Missing HTTP method directive (e.g. @get, @post, @put, @delete)",
-					Suggestion: "Annotate method with `@get /path` or appropriate HTTP verb",
+					Suggestion: suggestion,
 				})
 			}
 		}

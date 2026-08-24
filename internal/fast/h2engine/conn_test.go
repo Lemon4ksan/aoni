@@ -14,13 +14,13 @@ import (
 	"testing"
 	"time"
 
-	"github.com/valyala/fasthttp"
+	"github.com/lemon4ksan/aoni/internal/fast/h1engine"
 )
 
 func runMockH2Server(
 	t *testing.T,
 	serverConn net.Conn,
-	handler func(req *fasthttp.Request, resp *fasthttp.Response, rawHeaders []string),
+	handler func(req *h1engine.Request, resp *h1engine.Response, rawHeaders []string),
 ) {
 	br := bufio.NewReader(serverConn)
 	bw := bufio.NewWriter(serverConn)
@@ -78,8 +78,8 @@ func runMockH2Server(
 			streamID := fr.Stream()
 
 			hFrame := fr.Body().(FrameWithHeaders)
-			req := &fasthttp.Request{}
-			resp := &fasthttp.Response{}
+			req := &h1engine.Request{}
+			resp := &h1engine.Response{}
 
 			hf := AcquireHeaderField()
 			b := hFrame.Headers()
@@ -176,7 +176,7 @@ func TestClientServerEndToEnd(t *testing.T) {
 		}
 		defer serverConn.Close()
 
-		runMockH2Server(t, serverConn, func(req *fasthttp.Request, resp *fasthttp.Response, _ []string) {
+		runMockH2Server(t, serverConn, func(req *h1engine.Request, resp *h1engine.Response, _ []string) {
 			if string(req.Header.Method()) != "GET" {
 				t.Errorf("server: method mismatch: got %s, want GET", req.Header.Method())
 			}
@@ -195,11 +195,11 @@ func TestClientServerEndToEnd(t *testing.T) {
 
 	client := NewClient(dialer, ClientOpts{PingInterval: 5 * time.Second})
 
-	req := fasthttp.AcquireRequest()
-	resp := fasthttp.AcquireResponse()
+	req := h1engine.AcquireRequest()
+	resp := h1engine.AcquireResponse()
 
-	defer fasthttp.ReleaseRequest(req)
-	defer fasthttp.ReleaseResponse(resp)
+	defer h1engine.ReleaseRequest(req)
+	defer h1engine.ReleaseResponse(resp)
 
 	req.Header.SetMethod("GET")
 	req.SetRequestURI("https://example.com/test")
@@ -238,7 +238,7 @@ func TestOrderedHeadersSequenceOnWire(t *testing.T) {
 		}
 		defer serverConn.Close()
 
-		runMockH2Server(t, serverConn, func(_ *fasthttp.Request, resp *fasthttp.Response, rawHeaders []string) {
+		runMockH2Server(t, serverConn, func(_ *h1engine.Request, resp *h1engine.Response, rawHeaders []string) {
 			mu.Lock()
 			capturedHeaders = slices.Clone(rawHeaders)
 			mu.Unlock()
@@ -257,11 +257,11 @@ func TestOrderedHeadersSequenceOnWire(t *testing.T) {
 	client := NewClient(dialer, ClientOpts{PingInterval: 5 * time.Second})
 	client.SetOrderedHeaders(orderedKeys)
 
-	req := fasthttp.AcquireRequest()
-	resp := fasthttp.AcquireResponse()
+	req := h1engine.AcquireRequest()
+	resp := h1engine.AcquireResponse()
 
-	defer fasthttp.ReleaseRequest(req)
-	defer fasthttp.ReleaseResponse(resp)
+	defer h1engine.ReleaseRequest(req)
+	defer h1engine.ReleaseResponse(resp)
 
 	req.Header.SetMethod("GET")
 	req.SetRequestURI("https://example.com/test")

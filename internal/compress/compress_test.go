@@ -14,11 +14,11 @@ import (
 	"github.com/lemon4ksan/foundation/borrow"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"github.com/valyala/fasthttp"
 
 	"github.com/lemon4ksan/aoni/internal/compress"
 	"github.com/lemon4ksan/aoni/internal/compress/flate"
 	"github.com/lemon4ksan/aoni/internal/compress/gzip"
+	"github.com/lemon4ksan/aoni/internal/fast/h1engine"
 )
 
 func createGzipData(t testing.TB, payload []byte) []byte {
@@ -159,7 +159,7 @@ func TestUnbrotli(t *testing.T) {
 	t.Parallel()
 
 	original := []byte("Brotli RFC 7932 decompression test payload in aoni internal/compress.")
-	compressed := fasthttp.AppendBrotliBytes(nil, original)
+	compressed := h1engine.AppendBrotliBytes(nil, original)
 
 	decompressed, err := compress.Unbrotli(compressed, nil)
 	require.NoError(t, err)
@@ -217,7 +217,7 @@ func TestNewReader_AllEncodings(t *testing.T) {
 	}{
 		{encoding: "gzip", compressed: createGzipData(t, raw)},
 		{encoding: "x-gzip", compressed: createGzipData(t, raw)},
-		{encoding: "br", compressed: fasthttp.AppendBrotliBytes(nil, raw)},
+		{encoding: "br", compressed: h1engine.AppendBrotliBytes(nil, raw)},
 		{encoding: "zstd", compressed: createZstdRawBlock(raw)},
 		{encoding: "deflate", compressed: createDeflateData(t, raw)},
 		{encoding: "identity", compressed: raw},
@@ -262,7 +262,7 @@ func BenchmarkUnzstd(b *testing.B) {
 
 func BenchmarkUnbrotli(b *testing.B) {
 	payload := []byte(strings.Repeat("Brotli benchmark payload for internal/compress decoder. ", 50))
-	compressed := fasthttp.AppendBrotliBytes(nil, payload)
+	compressed := h1engine.AppendBrotliBytes(nil, payload)
 	dst := make([]byte, 0, len(payload))
 
 	b.ReportAllocs()
@@ -334,7 +334,7 @@ func TestDecompressScoped_AllEncodings(t *testing.T) {
 		compressed []byte
 	}{
 		{encoding: "gzip", compressed: createGzipData(t, raw)},
-		{encoding: "br", compressed: fasthttp.AppendBrotliBytes(nil, raw)},
+		{encoding: "br", compressed: h1engine.AppendBrotliBytes(nil, raw)},
 		{encoding: "zstd", compressed: createZstdRawBlock(raw)},
 		{encoding: "deflate", compressed: createDeflateData(t, raw)},
 	}

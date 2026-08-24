@@ -13,8 +13,8 @@ import (
 	"github.com/lemon4ksan/foundation/borrow"
 	"github.com/lemon4ksan/foundation/generic"
 	"github.com/lemon4ksan/foundation/silicon/pool"
-	"github.com/valyala/fasthttp"
 
+	"github.com/lemon4ksan/aoni/internal/fast/h1engine"
 	"github.com/lemon4ksan/aoni/internal/quic"
 	"github.com/lemon4ksan/aoni/internal/quic/quicvarint"
 )
@@ -191,11 +191,11 @@ func (cc *ClientConn) handleGoAway(r quicvarint.Reader, payloadLen uint64) {
 	_ = cc.Close()
 }
 
-// Do executes a fasthttp.Request over a QUIC stream and populates fasthttp.Response and captured trailers.
+// Do executes a h1engine.Request over a QUIC stream and populates h1engine.Response and captured trailers.
 func (cc *ClientConn) Do(
 	ctx context.Context,
-	req *fasthttp.Request,
-	resp *fasthttp.Response,
+	req *h1engine.Request,
+	resp *h1engine.Response,
 	headerOrder []string,
 ) (map[string][]string, error) {
 	if err := ctx.Err(); err != nil {
@@ -228,11 +228,11 @@ func (cc *ClientConn) Do(
 	return cc.readResponse(str, resp)
 }
 
-// DoScoped executes a fasthttp.Request over a QUIC stream and scopes response body allocations to s.
+// DoScoped executes a h1engine.Request over a QUIC stream and scopes response body allocations to s.
 func (cc *ClientConn) DoScoped(
 	ctx context.Context,
-	req *fasthttp.Request,
-	resp *fasthttp.Response,
+	req *h1engine.Request,
+	resp *h1engine.Response,
 	headerOrder []string,
 	s *borrow.Scope,
 ) (map[string][]string, error) {
@@ -268,17 +268,17 @@ func (cc *ClientConn) DoScoped(
 
 func (cc *ClientConn) readResponseScoped(
 	reader io.Reader,
-	resp *fasthttp.Response,
+	resp *h1engine.Response,
 	_ *borrow.Scope,
 ) (trailers map[string][]string, err error) {
 	return cc.readResponseFrom(reader, resp)
 }
 
-func (cc *ClientConn) sendRequest(str *quic.Stream, req *fasthttp.Request, headerOrder []string) error {
+func (cc *ClientConn) sendRequest(str *quic.Stream, req *h1engine.Request, headerOrder []string) error {
 	return cc.sendRequestTo(str, req, headerOrder)
 }
 
-func (cc *ClientConn) sendRequestTo(w io.Writer, req *fasthttp.Request, headerOrder []string) error {
+func (cc *ClientConn) sendRequestTo(w io.Writer, req *h1engine.Request, headerOrder []string) error {
 	p := cc.qpack.AcquireEncoder()
 	defer cc.qpack.ReleaseEncoder(p)
 
@@ -334,14 +334,14 @@ func (cc *ClientConn) sendRequestTo(w io.Writer, req *fasthttp.Request, headerOr
 
 func (cc *ClientConn) readResponse(
 	str *quic.Stream,
-	resp *fasthttp.Response,
+	resp *h1engine.Response,
 ) (trailers map[string][]string, err error) {
 	return cc.readResponseFrom(str, resp)
 }
 
 func (cc *ClientConn) readResponseFrom(
 	reader io.Reader,
-	resp *fasthttp.Response,
+	resp *h1engine.Response,
 ) (trailers map[string][]string, err error) {
 	r := quicvarint.NewReader(reader)
 	headersParsed := false

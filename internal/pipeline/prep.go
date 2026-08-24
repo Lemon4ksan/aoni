@@ -21,12 +21,12 @@ import (
 
 	fio "github.com/lemon4ksan/foundation/io"
 	"github.com/lemon4ksan/foundation/silicon/bytesconv"
-	"github.com/valyala/fasthttp"
 
 	"github.com/lemon4ksan/aoni/cookie"
 	"github.com/lemon4ksan/aoni/fingerprint"
 	"github.com/lemon4ksan/aoni/fingerprint/ja4"
 	"github.com/lemon4ksan/aoni/internal/core"
+	"github.com/lemon4ksan/aoni/internal/fast/h1engine"
 	"github.com/lemon4ksan/aoni/netutil/netdial"
 	"github.com/lemon4ksan/aoni/telemetry"
 )
@@ -435,7 +435,7 @@ func convertRequestToStd(r core.Request) *http.Request {
 		contentLen int64 = -1
 	)
 
-	fastAdapter, isFast := r.(interface{ FastHTTPRequest() *fasthttp.Request })
+	fastAdapter, isFast := r.(interface{ FastHTTPRequest() *h1engine.Request })
 	if isFast {
 		if fastReq := fastAdapter.FastHTTPRequest(); fastReq != nil {
 			if cl := fastReq.Header.ContentLength(); cl > 0 {
