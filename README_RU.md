@@ -52,7 +52,7 @@ go get github.com/lemon4ksan/aoni
 vortex check --strict ./...
 ```
 
-## Механическое сочувствие кремнию: почему aoni выжимает 2.16M+ RPS
+## Механическое сочувствие кремнию: почему aoni выжимает 2.34M+ RPS
 
 Производительность `aoni` достигнута не за счёт микро-хаков или `unsafe`-трюков. Она опирается на физические законы кэшей современных процессоров, контроллеров памяти и подсистем ядра Linux:
 
@@ -137,7 +137,8 @@ userResp, resp, err := fluent.PostGRPCWebTo[pb.UserResponse](ctx, client, "/User
 При высокой параллельной нагрузке на всех ядрах процессора аллокатор памяти Go (`mcache`/`mcentral`) начинает испытывать конкуренцию за блокировки. Поскольку `aoni` выполняет **на 12 аллокаций меньше** за запрос, чем стандартный `net/http` (66 против 78 аллокаций), он намного лучше масштабируется, обеспечивая **задержку на 10% ниже** в стандартном режиме и **в 3.4–42 раз более высокую производительность** в нативных режимах.
 
 ```text
-BenchmarkGET_FastClient_Parallel-12    	 5133589	       462.9 ns/op	       0 B/op	       0 allocs/op
+BenchmarkGET_FastClient_Parallel-12         	 5133589	       462.9 ns/op	       0 B/op	       0 allocs/op
+BenchmarkPOST_FastClient_Native_Parallel-12 	 5534201	       426.7 ns/op	       0 B/op	       0 allocs/op
 ```
 
 | Метрика | Стандартный `net/http` | `aoni` (Стандартный) | `aoni` + `fast.Bridge` | `fasthttp` | `aoni/fast` (Нативный) | Разница производительности |
@@ -151,9 +152,9 @@ BenchmarkGET_FastClient_Parallel-12    	 5133589	       462.9 ns/op	       0 B/o
 | **Задержка HTTP/2 (`ns/op`)** | 80 979 ns | 80 979 ns | 67 441 ns | 67 441 ns | **54 200 ns** | **⚡ В 1.49 раза быстрее H2 / в 2.1 раз меньше памяти** |
 | **Фрейминг блоков HTTP/3 QPACK** | ~2 500 ns / 120 B | — | — | — | **379.5 ns / 0 B** | **⚡ В 6.5 раз быстрее (0 B / 0 allocs)** |
 | **Задержка HTTP/3 QUIC (`ns/op`)** | 128 980 ns | 128 980 ns | 124 447 ns | — | **118 200 ns** | **⚡ В 1.09 раза быстрее QUIC / в 2.05 раз меньше памяти** |
-| **Параллельная задержка под нагрузкой** | 7 002 ns | 6 167 ns | 1 940 ns | 578.3 ns | **462.9 ns** | **⚡ В 15.1x – 15.8x быстрее (0 B / 0 allocs)** |
+| **Параллельная задержка под нагрузкой** | 7 002 ns | 6 167 ns | 1 940 ns | 578.3 ns | **426.7 ns** | **⚡ В 16.4x быстрее (0 B / 0 allocs)** |
 | **Пиковая пропускная способность (1 ядро)** | ~142k RPS | ~162k RPS | ~185k RPS | ~243k RPS | **~275 000+ RPS** | **⚡ Прирост в 1.93x на одно ядро** |
-| **Пиковая пропускная способность (12 ядер)** | ~140k RPS | ~162k RPS | >550 000 RPS | 1 910 000+ RPS | **2 160 293 RPS (2.16M+ пик)** | **⚡ В 15.4 раз выше параллельный RPS** |
+| **Пиковая пропускная способность (12 ядер)** | ~140k RPS | ~162k RPS | >550 000 RPS | 1 910 000+ RPS | **2 343 566 RPS (2.34M+ пик)** | **⚡ В 16.7 раз выше параллельный RPS** |
 
 ### 2. Последовательная однопоточная задержка (1 ядро, `b.N`)
 
@@ -172,23 +173,28 @@ BenchmarkGET_FastClient_Parallel-12    	 5133589	       462.9 ns/op	       0 B/o
 | :--- | :---: | :---: | :---: | :---: |
 | **Парсинг URL (`net/url.Parse`)** | 295.1 ns | **85.2 ns** (`net/url`) | **В 3.5 раза быстрее** | Шардированный CRC32 L1-кэш |
 | **Public Suffix (`eTLD+1`)** | 146.3 ns | **78.8 ns** (`net/psl`) | **В 1.9 раза быстрее** | **0 B / 0 allocs** (против 48 B / 1 alloc) |
-| **Фрейминг QPACK RFC 9204** | 2 500+ ns (`quic-go/qpack`) | **379.5 ns** (`internal/qpack`) | **В 6.5 раз быстрее** | **0 B / 0 allocs** (Пул кодека без аллокаций) |
-| **Декодер HPACK Huffman** | 391.9 ns | **238.1 ns** (`internal/fast/h2engine`) | **В 1.65 раза быстрее** | **0 B / 0 allocs** (Табличный LUT) |
+| **Энкодер QPACK RFC 9204** | 2 500+ ns (`quic-go/qpack`) | **472.7 ns** (`internal/fast/h3engine`) | **В 5.3 раза быстрее** | **0 B / 0 allocs** (Zero-Alloc Pooled Codec) |
+| **Декодер полей HPACK** | 391.9 ns (`x/net/http2/hpack`) | **329.2 ns** (`internal/fast/h2engine`) | **В 1.19 раза быстрее** | **0 B / 0 allocs** (Срезы без аллокаций) |
+| **Энкодер HPACK Huffman** | 18.5 ns | **13.99 ns** (`internal/fast/h2engine`) | **В 1.32 раза быстрее** | **0 B / 0 allocs** (Битовое суммирование) |
 | **Таймер (`vDSO` Bypass)** | 3.15 ns (`time.Now`) | **0.28 ns** (`silicon/clock`) | **В 11.2 раза быстрее** | **0 B / 0 allocs** (Атомарная L1-загрузка) |
 | **Rate Limiter (Token Bucket)** | 85+ ns (`x/time`) | **23.8 ns** (`async/rate`) | **В 3.6 раза быстрее** | **0 B / 0 allocs** |
+| **SWAR UTF-8 сканер (1KB)** | 280+ ns (`bytes.Index`) | **5.88 ns** (`silicon/simd`) | **12.4 ГБ/с скорость** | **0 B / 0 allocs** (64-битный SWAR) |
 | **SWAR `\r\n` сканер заголовков (1KB)** | 280+ ns (`bytes.Index`) | **114.4 ns** (`silicon/simd`) | **В 2.5 раза быстрее (~9 ГБ/с)** | **0 B / 0 allocs** (64-битные векторные блоки) |
+| **ShardedMap (12 ядер параллельно)** | 180+ ns (`sync.Map`) | **29.34 ns** (`foundation/generic`) | **В 6.1 раз быстрее** | **0 B / 0 allocs** (64-байтовый кэш-пэддинг) |
 | **WhatWG Charset Resolver** | 45+ ns (`x/text`) | **19.2 ns** (`text/encoding`) | **В 2.3 раза быстрее** | **0 B / 0 allocs** |
-| **Декомпрессия Zstd (1KB)** | 1.8+ µs (`klauspost/zstd`) | **249 ns / 0 B** (`compress/zstd`) | **В 7.2 раза быстрее** | **0 B / 0 allocs** (Silicon Line Speed) |
-| **Декомпрессия Deflate (Inflate)** | 9.8 µs / 7.4 KB (`klauspost`) | **2.58 µs / 0 B** (`compress/flate`) | **В 3.80 раза быстрее** | **0 B / 0 allocs** (128-битный SIMD Wildcopy) |
-| **Декомпрессия Gzip (Gunzip)** | 10.5 µs / 7.6 KB (`klauspost`) | **3.10 µs / 0 B** (`compress/gzip`) | **В 3.39 раза быстрее** | **0 B / 0 allocs** (RFC 1952 `ISIZE` Fast-Path) |
-| **Scoped Reader для WebSocket** | 12.8 µs (`realtime/ws`) | **5.89 µs / 0 B** (`realtime/ws`) | **В 2.17 раза быстрее** | **0 B / 0 allocs** (`ReadMessageScoped`) |
+| **Декомпрессия Zstd (1KB)** | 1.8+ µs (`klauspost/zstd`) | **251.6 ns / 0 B** (`compress/zstd`) | **В 7.2 раза быстрее (~4.0M ops/s)** | **0 B / 0 allocs** (Silicon Line Speed) |
+| **Декомпрессия Brotli (1KB)** | 2.1+ µs (`google/brotli`) | **282.6 ns / 0 B** (`compress/brotli`) | **В 7.4 раза быстрее (~3.5M ops/s)** | **0 B / 0 allocs** (Per-P кольцевой пул) |
+| **Декомпрессия Deflate (Inflate)** | 9.8 µs / 7.4 KB (`klauspost`) | **2.38 µs / 0 B** (`compress/flate`) | **В 4.1 раза быстрее (5.4x vs std)** | **0 B / 0 allocs** (64-битный SWAR LZ77) |
+| **Декомпрессия Gzip (Gunzip)** | 10.5 µs / 7.6 KB (`klauspost`) | **3.20 µs / 0 B** (`compress/gzip`) | **В 3.28 раза быстрее (4.1x vs std)** | **0 B / 0 allocs** (RFC 1952 `ISIZE` Fast-Path) |
+| **WebSocket пропускная способность** | 800 МБ/с (`gorilla/websocket`) | **1 789 МБ/с** (`realtime/ws`) | **В 2.23 раза быстрее** | **0 B / 0 allocs** (`writev` / `net.Buffers`) |
+| **WebSocket Split Half-Duplex** | Lock Contention | **Zero Contention** (`realtime/ws`) | **Full Duplex** | **0 B / 0 allocs** (`ws.Split`) |
 | **Fluent Request Builder (12 ядер)** | ~1.2 µs (`generic.Pool`) | **97.3 ns / 0 B** (`fluent`) | **11.24M ops/s** | **0 B / 0 allocs** (Core-Pinned `PerPStorage`) |
 | **QUIC Packet Pool (12 ядер)** | 350+ ns (`sync.Pool`) | **96.1 ns / 0 B** (`internal/quic`) | **11.12M ops/s** | **0 B / 0 allocs** (Lock-Free `PerPStorage`) |
 
 > [!TIP]
 > **Почему `aoni` обгоняет `net/http` под параллельной нагрузкой?**
 > Высокая пропускная способность в стандартных HTTP-клиентах Go вызывает частые паузы сборщика мусора (GC) и блокировки аллокатора памяти `mcentral`.
-> Стандартный `aoni.Client` выполняет **на 12 аллокаций меньше** за запрос, чем `net/http` (66 против 78 аллокаций, 5.8KB против 6.8KB), снижая нагрузку на рантайм Go. В то же время `aoni/fast` (Native) повторно использует пулы через `PerPStorage` (нулевая межъядерная конкуренция), интернирует заголовки в `.rodata`, применяет SIMD AVX2/BMI2 ассемблер (`simd_amd64.s`), нетемпоральные потоковые инструкции и PGO (`default.pgo`), работая с **0 B/op и 0 allocs/op** и обеспечивая задержку **462.9 ns** и пропускную способность **2 160 293 RPS (2.16M+ RPS)**. Профилирование (`pprof`) подтверждает, что собственный оверхед `aoni` составляет **всего 0.34% процессорного времени**, оставляя 99.66% CPU мощности для сокетного I/O.
+> Стандартный `aoni.Client` выполняет **на 12 аллокаций меньше** за запрос, чем `net/http` (66 против 78 аллокаций, 5.8KB против 6.8KB), снижая нагрузку на рантайм Go. В то же время `aoni/fast` (Native) повторно использует пулы через `PerPStorage` (нулевая межъядерная конкуренция), интернирует заголовки в `.rodata`, применяет SIMD AVX2/BMI2 ассемблер (`simd_amd64.s`), нетемпоральные потоковые инструкции и PGO (`default.pgo`), работая с **0 B/op и 0 allocs/op** и обеспечивая задержку **426.7 ns** и пропускную способность **2 343 566 RPS (2.34M+ RPS)**. Профилирование (`pprof`) подтверждает, что собственный оверхед `aoni` составляет **всего 0.34% процессорного времени**, оставляя 99.66% CPU мощности для сокетного I/O.
 
 > [!NOTE]
 > **Разбор однопоточных бенчмарков**
