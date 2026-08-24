@@ -6,7 +6,8 @@ package quic
 
 import (
 	"fmt"
-	"sync"
+
+	"github.com/lemon4ksan/foundation/sync/spinlock"
 
 	"github.com/lemon4ksan/aoni/internal/quic/internal/monotime"
 	"github.com/lemon4ksan/aoni/internal/quic/internal/protocol"
@@ -18,7 +19,7 @@ type connectionFlowController struct {
 	receiveFlowController
 
 	// Protects send-side state, which TryWriteAll can access from application goroutines.
-	sendMutex     sync.Mutex
+	sendMutex     spinlock.SpinLock
 	bytesSent     protocol.ByteCount
 	sendWindow    protocol.ByteCount
 	lastBlockedAt protocol.ByteCount

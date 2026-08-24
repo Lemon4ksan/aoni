@@ -23,6 +23,7 @@ import (
 	"github.com/lemon4ksan/foundation/silicon/bytesconv"
 	"github.com/lemon4ksan/foundation/silicon/ringbuf"
 	"github.com/lemon4ksan/foundation/silicon/sysnet"
+	"github.com/lemon4ksan/foundation/sync/spinlock"
 	"golang.org/x/sys/cpu"
 
 	"github.com/lemon4ksan/aoni/internal/fast/h1engine"
@@ -77,7 +78,7 @@ type Conn struct {
 
 	writeMu  sync.Mutex
 	inMu     sync.Mutex
-	windowMu sync.Mutex
+	windowMu spinlock.SpinLock
 
 	// Hot atomic counters isolated on their own 64-byte cache lines
 	serverWindow             int32
