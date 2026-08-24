@@ -17,7 +17,6 @@ import (
 	"strings"
 	"sync"
 	"time"
-	"unicode/utf8"
 
 	"github.com/lemon4ksan/foundation/borrow"
 	"github.com/lemon4ksan/foundation/generic"
@@ -197,7 +196,7 @@ func (c *wsRawConn) Write(b []byte) (int, error) {
 	c.lockWrite()
 	defer c.unlockWrite()
 
-	opcode := generic.Ternary(utf8.Valid(b), byte(FrameText), byte(FrameBinary))
+	opcode := generic.Ternary(simd.ValidUTF8(b), byte(FrameText), byte(FrameBinary))
 	if err := c.writeFrame(opcode, b); err != nil {
 		_ = c.Close()
 		return 0, err
@@ -576,11 +575,13 @@ func (c *wsRawConn) writeFrame(opcode byte, payload []byte) error {
 		return c.writeMaskedFrameZeroAlloc(c.writeHdr[:hdrLen], payload)
 	}
 
-	if _, err := c.base.Write(c.writeHdr[:hdrLen]); err != nil {
+	if len(payload) == 0 {
+		_, err := c.base.Write(c.writeHdr[:hdrLen])
 		return err
 	}
 
-	_, err = c.base.Write(payload)
+	buffers := net.Buffers{c.writeHdr[:hdrLen], payload}
+	_, err = buffers.WriteTo(c.base)
 
 	return err
 }
