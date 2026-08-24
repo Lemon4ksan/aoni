@@ -5,47 +5,14 @@
 package optimizer
 
 import (
-	"cmp"
-	"slices"
 	"strings"
 
 	"github.com/lemon4ksan/aoni/cmd/vortex/lib/ir"
 )
 
-// canonicalizeQueryParams deterministically sorts query parameters by WireKey.
+// canonicalizeQueryParams preserves original parameter order to match the Go interface contract.
 func canonicalizeQueryParams(svc *ir.ServiceIR) {
-	if svc == nil {
-		return
-	}
-
-	for _, m := range svc.Methods {
-		if m == nil {
-			continue
-		}
-
-		// Stable sort parameters by location first, then by WireKey for query parameters
-		slices.SortStableFunc(m.Params, func(a, b *ir.ParamIR) int {
-			if a == nil || b == nil {
-				return 0
-			}
-
-			// Keep context as the very first parameter always
-			if a.Location == ir.LocContext {
-				return -1
-			}
-
-			if b.Location == ir.LocContext {
-				return 1
-			}
-
-			// Sort query params alphabetically by wire key
-			if a.Location == ir.LocQuery && b.Location == ir.LocQuery {
-				return cmp.Compare(a.WireKey, b.WireKey)
-			}
-
-			return 0
-		})
-	}
+	// No-op: parameter order in Go methods must strictly match the Go interface declaration.
 }
 
 // deduplicateHeaders removes redundant duplicate headers on the same method.

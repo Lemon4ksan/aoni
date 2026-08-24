@@ -175,10 +175,10 @@ func TestOptimizer_QueryCanonicalization(t *testing.T) {
 	require.Equal(t, "ctx", params[0].GoName)
 	require.Equal(t, ir.LocContext, params[0].Location)
 
-	// Sorted alphabetically by WireKey
-	require.Equal(t, "apple", params[1].WireKey)
-	require.Equal(t, "mango", params[2].WireKey)
-	require.Equal(t, "zebra", params[3].WireKey)
+	// Preserves declaration order to match Go interface contract
+	require.Equal(t, "zebra", params[1].WireKey)
+	require.Equal(t, "apple", params[2].WireKey)
+	require.Equal(t, "mango", params[3].WireKey)
 }
 
 func TestOptimizer_HeaderDeduplication(t *testing.T) {

@@ -258,6 +258,30 @@ func writeServiceHeader(buf *bytes.Buffer, spec *Document, cfg ImportConfig, ser
 	if baseURL != "" {
 		fmt.Fprintf(buf, "// @base_url %q\n", baseURL)
 	}
+
+	if spec.Components != nil && len(spec.Components.SecuritySchemes) > 0 {
+		schemeNames := generic.Keys(spec.Components.SecuritySchemes)
+		slices.Sort(schemeNames)
+		for _, name := range schemeNames {
+			scheme := spec.Components.SecuritySchemes[name]
+			if scheme == nil {
+				continue
+			}
+
+			switch strings.ToLower(scheme.Type) {
+			case "apikey":
+				if scheme.In != "" && scheme.Name != "" {
+					fmt.Fprintf(buf, "// @auth %s=%q name=%q\n", scheme.In, scheme.Name, name)
+				}
+			case "http":
+				if strings.EqualFold(scheme.Scheme, "bearer") {
+					fmt.Fprintf(buf, "// @auth bearer name=%q\n", name)
+				} else if strings.EqualFold(scheme.Scheme, "basic") {
+					fmt.Fprintf(buf, "// @auth basic name=%q\n", name)
+				}
+			}
+		}
+	}
 }
 
 func (d *Document) InfoExtensions() map[string]any {
