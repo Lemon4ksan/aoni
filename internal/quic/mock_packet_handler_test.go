@@ -13,7 +13,7 @@ import (
 	reflect "reflect"
 
 	qerr "github.com/lemon4ksan/aoni/internal/quic/internal/qerr"
-	gomock "github.com/lemon4ksan/aoni/internal/mock/gomock"
+	gomock "github.com/lemon4ksan/foundation/testkit/gomock"
 )
 
 // MockPacketHandler is a mock of PacketHandler interface.

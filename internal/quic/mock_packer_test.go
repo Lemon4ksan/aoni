@@ -16,7 +16,7 @@ import (
 	monotime "github.com/lemon4ksan/aoni/internal/quic/internal/monotime"
 	protocol "github.com/lemon4ksan/aoni/internal/quic/internal/protocol"
 	qerr "github.com/lemon4ksan/aoni/internal/quic/internal/qerr"
-	gomock "github.com/lemon4ksan/aoni/internal/mock/gomock"
+	gomock "github.com/lemon4ksan/foundation/testkit/gomock"
 )
 
 // MockPacker is a mock of Packer interface.

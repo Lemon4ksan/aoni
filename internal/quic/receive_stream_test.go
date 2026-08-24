@@ -13,10 +13,10 @@ import (
 	"testing/synctest"
 	"time"
 
+	"github.com/lemon4ksan/foundation/testkit/gomock"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/lemon4ksan/aoni/internal/mock/gomock"
 	"github.com/lemon4ksan/aoni/internal/quic/internal/monotime"
 	"github.com/lemon4ksan/aoni/internal/quic/internal/protocol"
 	"github.com/lemon4ksan/aoni/internal/quic/internal/utils"

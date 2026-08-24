@@ -15,7 +15,7 @@ import (
 
 	handshake "github.com/lemon4ksan/aoni/internal/quic/internal/handshake"
 	protocol "github.com/lemon4ksan/aoni/internal/quic/internal/protocol"
-	gomock "github.com/lemon4ksan/aoni/internal/mock/gomock"
+	gomock "github.com/lemon4ksan/foundation/testkit/gomock"
 )
 
 // MockCryptoSetup is a mock of CryptoSetup interface.

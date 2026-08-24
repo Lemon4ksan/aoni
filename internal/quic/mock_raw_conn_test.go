@@ -15,7 +15,7 @@ import (
 	time "time"
 
 	protocol "github.com/lemon4ksan/aoni/internal/quic/internal/protocol"
-	gomock "github.com/lemon4ksan/aoni/internal/mock/gomock"
+	gomock "github.com/lemon4ksan/foundation/testkit/gomock"
 )
 
 // MockRawConn is a mock of RawConn interface.

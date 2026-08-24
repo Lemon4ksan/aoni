@@ -14,7 +14,7 @@ import (
 
 	ackhandler "github.com/lemon4ksan/aoni/internal/quic/internal/ackhandler"
 	monotime "github.com/lemon4ksan/aoni/internal/quic/internal/monotime"
-	gomock "github.com/lemon4ksan/aoni/internal/mock/gomock"
+	gomock "github.com/lemon4ksan/foundation/testkit/gomock"
 )
 
 // MockStreamControlFrameGetter is a mock of StreamControlFrameGetter interface.
