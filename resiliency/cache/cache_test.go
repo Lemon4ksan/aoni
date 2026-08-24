@@ -144,3 +144,78 @@ func TestGenericStore_Typed(t *testing.T) {
 	_, err = store.Get(ctx, 42)
 	assert.ErrorIs(t, err, cache.ErrCacheMiss)
 }
+
+func TestShardedStore_SetGetEviction(t *testing.T) {
+	t.Parallel()
+
+	ctx := t.Context()
+	store := cache.NewShardedStore[string, []byte](20 * time.Millisecond)
+	t.Cleanup(store.Close)
+
+	key := "user:999"
+	val := []byte(`{"id":999,"name":"Sharded User"}`)
+
+	// Miss
+	_, err := store.Get(ctx, key)
+	assert.ErrorIs(t, err, cache.ErrCacheMiss)
+
+	// Set with 80ms TTL
+	err = store.Set(ctx, key, val, 80*time.Millisecond)
+	require.NoError(t, err)
+
+	// Hit via Get, GetDirect, and GetOptional
+	got, err := store.Get(ctx, key)
+	require.NoError(t, err)
+	assert.Equal(t, string(val), string(got))
+
+	gotDirect, err := store.GetDirect(ctx, key)
+	require.NoError(t, err)
+	assert.Equal(t, val, gotDirect)
+
+	opt := store.GetOptional(ctx, key)
+	assert.True(t, opt.IsPresent())
+	assert.Equal(t, string(val), string(opt.MustValue()))
+
+	// Expiration
+	time.Sleep(120 * time.Millisecond)
+
+	_, err = store.Get(ctx, key)
+	assert.ErrorIs(t, err, cache.ErrCacheMiss)
+}
+
+func BenchmarkInMemoryStore_Parallel(b *testing.B) {
+	ctx := b.Context()
+	store := cache.NewInMemoryStore(0)
+	defer store.Close()
+
+	val := []byte("cached-payload-content")
+	_ = store.Set(ctx, "bench-key", val, time.Hour)
+
+	b.ReportAllocs()
+	b.ResetTimer()
+
+	b.RunParallel(func(pb *testing.PB) {
+		for pb.Next() {
+			_, _ = store.Get(ctx, "bench-key")
+		}
+	})
+}
+
+func BenchmarkShardedStore_Parallel(b *testing.B) {
+	ctx := b.Context()
+	store := cache.NewShardedStore[string, []byte](0)
+	defer store.Close()
+
+	val := []byte("cached-payload-content")
+	_ = store.Set(ctx, "bench-key", val, time.Hour)
+
+	b.ReportAllocs()
+	b.ResetTimer()
+
+	b.RunParallel(func(pb *testing.PB) {
+		for pb.Next() {
+			_, _ = store.GetDirect(ctx, "bench-key")
+		}
+	})
+}
+
