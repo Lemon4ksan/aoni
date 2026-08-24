@@ -494,15 +494,26 @@ func generateChallengeKey() (string, error) {
 		return "", fmt.Errorf("aoni/ws: generate key: %w", err)
 	}
 
-	return base64.StdEncoding.EncodeToString(nonce[:]), nil
+	var keyBuf [24]byte
+	base64.StdEncoding.Encode(keyBuf[:], nonce[:])
+
+	return string(keyBuf[:]), nil
+}
+
+// ComputeAcceptKeyBytes computes the RFC 6455 Sec-WebSocket-Accept value directly into dst with 0 allocations.
+func ComputeAcceptKeyBytes(challengeKey []byte, dst *[28]byte) {
+	var input [64]byte
+	n := copy(input[:], challengeKey)
+	n += copy(input[n:], websocketMagicGUID)
+	sum := sha1.Sum(input[:n]) //nolint:gosec
+	base64.StdEncoding.Encode(dst[:], sum[:])
 }
 
 func computeAcceptKey(challengeKey string) string {
-	h := sha1.New() //nolint:gosec
-	_, _ = h.Write(bytesconv.S2B(challengeKey))
-	_, _ = h.Write(bytesconv.S2B(websocketMagicGUID))
+	var dst [28]byte
+	ComputeAcceptKeyBytes(bytesconv.S2B(challengeKey), &dst)
 
-	return base64.StdEncoding.EncodeToString(h.Sum(nil))
+	return string(dst[:])
 }
 
 // Message represents a received WebSocket message frame.

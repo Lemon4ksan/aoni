@@ -14,12 +14,11 @@ import (
 	"path/filepath"
 	"slices"
 	"strconv"
-	"sync"
 	"time"
 
-	"github.com/lemon4ksan/foundation/generic"
 	fio "github.com/lemon4ksan/foundation/io"
 	furl "github.com/lemon4ksan/foundation/net/url"
+	"github.com/lemon4ksan/foundation/silicon/pool"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/lemon4ksan/aoni"
@@ -36,13 +35,18 @@ import (
 )
 
 type typedRequestPool struct {
-	pool *generic.Pool[Request]
+	storage *pool.PerPStorage[*Request]
 }
 
 func newTypedRequestPool() *typedRequestPool {
 	return &typedRequestPool{
-		pool: generic.NewPool(func() *Request {
-			return &Request{}
+		storage: pool.NewPerPStorage(func() *Request {
+			return &Request{
+				appliedMods:      make([]aoni.RequestModifier, 0, 8),
+				expectedStatuses: make([]int, 0, 4),
+				headerEntries:    make([]headerEntry, 0, 8),
+				queryEntries:     make([]queryParamEntry, 0, 8),
+			}
 		}),
 	}
 }
@@ -51,24 +55,20 @@ func newTypedRequestPool() *typedRequestPool {
 func (p *typedRequestPool) Get(doer any) *Request {
 	reqClient := request.AsRequester(doer)
 
-	r := p.pool.Get()
-	if r == nil {
-		r = &Request{}
-	}
-
+	r := p.storage.Get()
 	r.client = reqClient
 
 	return r
 }
 
-// Put recycles a [Request] instance back to the free-list pool after resetting fields.
+// Put recycles a [Request] instance back to the core-pinned storage after resetting fields.
 func (p *typedRequestPool) Put(r *Request) {
 	if r == nil {
 		return
 	}
 
 	r.Reset()
-	p.pool.Put(r)
+	p.storage.Put(r)
 }
 
 var requestPool = newTypedRequestPool()
@@ -191,14 +191,12 @@ func (r *Request) Reset() {
 	clear(r.formFiles)
 }
 
-var headerPool = sync.Pool{
-	New: func() any {
-		return make(http.Header, 8)
-	},
-}
+var headerStorage = pool.NewPerPStorage(func() http.Header {
+	return make(http.Header, 8)
+})
 
 func acquireHeader() http.Header {
-	return headerPool.Get().(http.Header)
+	return headerStorage.Get()
 }
 
 func releaseHeader(h http.Header) {
@@ -207,7 +205,7 @@ func releaseHeader(h http.Header) {
 	}
 
 	clear(h)
-	headerPool.Put(h)
+	headerStorage.Put(h)
 }
 
 // Release resets the request builder and returns it to the free-list pool.

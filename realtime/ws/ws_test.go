@@ -20,6 +20,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/lemon4ksan/foundation/borrow"
 	"github.com/lemon4ksan/foundation/net/hpack"
 	utls "github.com/refraction-networking/utls"
 	"github.com/stretchr/testify/assert"
@@ -2037,4 +2038,103 @@ func TestWebSocket_RFC6455_ContinuationFrames_Reassembly(t *testing.T) {
 		_, _, err := wsServer.ReadMessage()
 		require.ErrorIs(t, err, ErrUnexpectedContinuationFrame)
 	})
+}
+
+func TestComputeAcceptKey_RFC6455Vector(t *testing.T) {
+	t.Parallel()
+
+	// RFC 6455 Section 1.3 test vector:
+	// Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==
+	// Sec-WebSocket-Accept: s3pPLMBiTxaQ9kYGzzhZRbK+xOo=
+	challengeKey := "dGhlIHNhbXBsZSBub25jZQ=="
+	expectedAccept := "s3pPLMBiTxaQ9kYGzzhZRbK+xOo="
+
+	accept := computeAcceptKey(challengeKey)
+	assert.Equal(t, expectedAccept, accept)
+
+	var dst [28]byte
+	ComputeAcceptKeyBytes([]byte(challengeKey), &dst)
+	assert.Equal(t, expectedAccept, string(dst[:]))
+}
+
+func TestWSRawConn_ReadMessageScoped(t *testing.T) {
+	t.Parallel()
+
+	serverConn, clientConn := tcpPipe(t)
+	defer serverConn.Close()
+	defer clientConn.Close()
+
+	wsServer := WrapRawConn(serverConn, false)
+	wsClient := WrapRawConn(clientConn, true)
+
+	go func() {
+		_ = wsClient.WriteMessage(FrameText, []byte("scoped message payload"))
+	}()
+
+	scope := borrow.AcquireScope()
+	defer scope.Release()
+
+	msgType, payload, err := wsServer.ReadMessageScoped(scope)
+	require.NoError(t, err)
+	assert.Equal(t, int(FrameText), msgType)
+	assert.Equal(t, "scoped message payload", string(payload))
+}
+
+func BenchmarkComputeAcceptKey(b *testing.B) {
+	challengeKey := "dGhlIHNhbXBsZSBub25jZQ=="
+	keyBytes := []byte(challengeKey)
+	var dst [28]byte
+
+	b.Run("String", func(b *testing.B) {
+		b.ReportAllocs()
+		for b.Loop() {
+			_ = computeAcceptKey(challengeKey)
+		}
+	})
+
+	b.Run("BytesZeroAlloc", func(b *testing.B) {
+		b.ReportAllocs()
+		for b.Loop() {
+			ComputeAcceptKeyBytes(keyBytes, &dst)
+		}
+	})
+}
+
+func BenchmarkWS_ReadMessageScoped(b *testing.B) {
+	serverConn, clientConn := tcpPipe(&testing.T{})
+	defer serverConn.Close()
+	defer clientConn.Close()
+
+	wsServer := WrapRawConn(serverConn, false)
+	wsClient := WrapRawConn(clientConn, true)
+
+	payload := make([]byte, 1024)
+	for i := range payload {
+		payload[i] = byte(i)
+	}
+
+	go func() {
+		for {
+			if err := wsClient.WriteMessage(FrameBinary, payload); err != nil {
+				return
+			}
+		}
+	}()
+
+	scope := borrow.AcquireScope()
+	defer scope.Release()
+
+	b.SetBytes(int64(len(payload)))
+	b.ReportAllocs()
+	b.ResetTimer()
+
+	for b.Loop() {
+		scope := borrow.AcquireScope()
+		_, _, err := wsServer.ReadMessageScoped(scope)
+		if err != nil {
+			scope.Release()
+			b.Fatal(err)
+		}
+		scope.Release()
+	}
 }

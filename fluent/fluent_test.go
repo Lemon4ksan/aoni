@@ -1123,6 +1123,22 @@ func BenchmarkFluent_BuilderOnly(b *testing.B) {
 	}
 }
 
+func BenchmarkFluent_BuilderParallel(b *testing.B) {
+	client := aoni.NewClient(nil)
+
+	b.ReportAllocs()
+	b.ResetTimer()
+
+	b.RunParallel(func(pb *testing.PB) {
+		for pb.Next() {
+			r := fluent.R(client).
+				SetHeader("X-Test", "parallel").
+				SetQueryParam("core", "pinned")
+			r.Release()
+		}
+	})
+}
+
 func BenchmarkFluent_RequestCreation(b *testing.B) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusOK)
