@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"slices"
 
+	"github.com/lemon4ksan/foundation/borrow"
 	"github.com/lemon4ksan/foundation/silicon/bytesconv"
 	"github.com/lemon4ksan/foundation/silicon/pool"
 	"golang.org/x/sys/cpu"
@@ -241,6 +242,42 @@ func (f *Request) SetBodyBytes(body []byte) {
 // BodyBytes yields direct access to internal fasthttp request body byte slice.
 func (f *Request) BodyBytes() []byte {
 	return f.req.Body()
+}
+
+// BodyScoped borrows the request body without memory allocation into the given scope.
+func (f *Request) BodyScoped(s *borrow.Scope) borrow.Bytes {
+	if f == nil || f.req == nil {
+		return borrow.Bytes{}
+	}
+
+	return f.req.BodyScoped(s)
+}
+
+// ReadBodyScoped executes fn with the underlying request body buffer borrowed for the duration of the call.
+func (f *Request) ReadBodyScoped(fn func([]byte) error) error {
+	if f == nil || f.req == nil {
+		return io.EOF
+	}
+
+	return f.req.ReadBodyScoped(fn)
+}
+
+// HeaderScoped borrows the header value associated with key into the given scope.
+func (f *Request) HeaderScoped(s *borrow.Scope, key string) borrow.Bytes {
+	if f == nil || f.req == nil {
+		return borrow.Bytes{}
+	}
+
+	return f.req.Header.PeekScoped(s, key)
+}
+
+// CookieScoped borrows the cookie value associated with key into the given scope.
+func (f *Request) CookieScoped(s *borrow.Scope, key string) borrow.Bytes {
+	if f == nil || f.req == nil {
+		return borrow.Bytes{}
+	}
+
+	return f.req.Header.CookieScoped(s, key)
 }
 
 // SetBodyStream assigns a streaming reader as request body and sets up rewind capabilities if supported.

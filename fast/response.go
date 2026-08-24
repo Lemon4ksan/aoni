@@ -14,6 +14,7 @@ import (
 	"sync/atomic"
 	"unsafe"
 
+	"github.com/lemon4ksan/foundation/borrow"
 	"github.com/lemon4ksan/foundation/codec/json"
 	"github.com/lemon4ksan/foundation/silicon/bytesconv"
 	"github.com/lemon4ksan/foundation/silicon/offheap"
@@ -221,6 +222,60 @@ func (u UnsafeAccess) String() string {
 // Unsafe returns an [UnsafeAccess] accessor for explicit zero-copy operations.
 func (f *Response) Unsafe() UnsafeAccess {
 	return UnsafeAccess{resp: f}
+}
+
+// BodyScoped borrows the response body without memory allocation into the given scope.
+func (f *Response) BodyScoped(s *borrow.Scope) borrow.Bytes {
+	if f == nil || f.resp == nil {
+		return borrow.Bytes{}
+	}
+
+	return f.resp.BodyScoped(s)
+}
+
+// ReadBodyScoped executes fn with the underlying response body buffer borrowed for the duration of the call.
+func (f *Response) ReadBodyScoped(fn func([]byte) error) error {
+	if f == nil || f.resp == nil {
+		return io.EOF
+	}
+
+	return f.resp.ReadBodyScoped(fn)
+}
+
+// HeaderScoped borrows the header value associated with key into the given scope.
+func (f *Response) HeaderScoped(s *borrow.Scope, key string) borrow.Bytes {
+	if f == nil || f.resp == nil {
+		return borrow.Bytes{}
+	}
+
+	return f.resp.Header.PeekScoped(s, key)
+}
+
+// CookieScoped borrows the cookie value associated with key into the given scope.
+func (f *Response) CookieScoped(s *borrow.Scope, key string) borrow.Bytes {
+	if f == nil || f.resp == nil {
+		return borrow.Bytes{}
+	}
+
+	return f.resp.Header.CookieScoped(s, key)
+}
+
+// TrailerScoped borrows the trailer value associated with key into the given scope.
+func (f *Response) TrailerScoped(s *borrow.Scope, key string) borrow.Bytes {
+	if f == nil || f.resp == nil {
+		return borrow.Bytes{}
+	}
+
+	return f.resp.Header.TrailerScoped(s, key)
+}
+
+// ReadStreamScoped reads from the response body stream chunk by chunk, passing each borrowed slice to fn.
+func (f *Response) ReadStreamScoped(s *borrow.Scope, fn func(chunk borrow.Bytes) error) error {
+	if f == nil || f.resp == nil {
+		return io.EOF
+	}
+
+	return f.resp.ReadStreamScoped(s, fn)
 }
 
 // String returns a zero-allocation string view over volatile response body memory.

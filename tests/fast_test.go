@@ -16,6 +16,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/lemon4ksan/foundation/borrow"
 	"github.com/lemon4ksan/aoni/internal/fast/h1engine"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -593,4 +594,67 @@ func TestFast_Resiliency_LoadBalancer(t *testing.T) {
 	assert.Equal(t, 2, hits["server-1"])
 	assert.Equal(t, 2, hits["server-2"])
 	assert.NoError(t, balancer.Close())
+}
+
+func TestFast_ScopedBorrow(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("X-Custom-Header", "aoni-borrow-test")
+		w.Header().Set("Set-Cookie", "auth_token=secret_12345; Path=/")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"message":"zero-alloc-borrow","status":"ok"}`))
+	}))
+	t.Cleanup(ts.Close)
+
+	client := fast.NewClient()
+	req := client.AcquireRequest()
+	defer client.ReleaseRequest(req)
+
+	req.SetURL(ts.URL)
+	req.SetMethod("GET")
+
+	scope := borrow.AcquireScope()
+	defer scope.Release()
+
+	resp, err := client.Do(req)
+	require.NoError(t, err)
+	defer resp.Close()
+
+	var (
+		headerVal borrow.Bytes
+		cookieVal borrow.Bytes
+		bodyVal   borrow.Bytes
+	)
+
+	if pr, isPooled := resp.(*fast.PooledResponse); isPooled {
+		headerVal = pr.HeaderScoped(scope, "X-Custom-Header")
+		cookieVal = pr.CookieScoped(scope, "auth_token")
+		bodyVal = pr.BodyScoped(scope)
+	} else if fr, isDirect := resp.(*fast.Response); isDirect {
+		headerVal = fr.HeaderScoped(scope, "X-Custom-Header")
+		cookieVal = fr.CookieScoped(scope, "auth_token")
+		bodyVal = fr.BodyScoped(scope)
+	} else {
+		t.Fatalf("unexpected response type: %T", resp)
+	}
+
+	assert.Equal(t, "aoni-borrow-test", string(headerVal.AsSlice()))
+	assert.Equal(t, "secret_12345", string(cookieVal.AsSlice()))
+	assert.Equal(t, `{"message":"zero-alloc-borrow","status":"ok"}`, string(bodyVal.AsSlice()))
+
+	// Test ReadBodyScoped
+	var captured string
+	var readErr error
+	if pr, isPooled := resp.(*fast.PooledResponse); isPooled {
+		readErr = pr.ReadBodyScoped(func(b []byte) error {
+			captured = string(b)
+			return nil
+		})
+	} else if fr, isDirect := resp.(*fast.Response); isDirect {
+		readErr = fr.ReadBodyScoped(func(b []byte) error {
+			captured = string(b)
+			return nil
+		})
+	}
+	require.NoError(t, readErr)
+	assert.Equal(t, `{"message":"zero-alloc-borrow","status":"ok"}`, captured)
 }
