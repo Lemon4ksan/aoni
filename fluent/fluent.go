@@ -9,6 +9,7 @@ import (
 	"context"
 	"net/http"
 
+	"github.com/lemon4ksan/foundation/borrow"
 	"github.com/lemon4ksan/foundation/generic"
 
 	"github.com/lemon4ksan/aoni"
@@ -66,6 +67,49 @@ func GetTo[T any](
 	mods ...aoni.RequestModifier,
 ) (T, *http.Response, error) {
 	return FetchTo[T](ctx, c, http.MethodGet, path, mods...)
+}
+
+// FetchScoped executes a request with method, path, and optional modifiers, passing the decoded response
+// into fn within an active [borrow.Scope].
+func FetchScoped[T any](
+	ctx context.Context,
+	c any,
+	method, path string,
+	fn func(scope *borrow.Scope, val T, resp *http.Response) error,
+	mods ...aoni.RequestModifier,
+) error {
+	var target T
+
+	resp, err := R(c).
+		SetContext(ctx).
+		SetResult(&target).
+		Apply(mods...).
+		Execute(method, path)
+	if err != nil {
+		return err
+	}
+
+	if resp != nil && resp.Body != nil {
+		defer func() {
+			_ = resp.Body.Close()
+		}()
+	}
+
+	scope := borrow.AcquireScope()
+	defer scope.Release()
+
+	return fn(scope, target, resp)
+}
+
+// GetScoped dispatches a GET request and passes the decoded response T to fn within an active [borrow.Scope].
+func GetScoped[T any](
+	ctx context.Context,
+	c any,
+	path string,
+	fn func(scope *borrow.Scope, val T, resp *http.Response) error,
+	mods ...aoni.RequestModifier,
+) error {
+	return FetchScoped[T](ctx, c, http.MethodGet, path, fn, mods...)
 }
 
 // PostTo dispatches a POST request with payload body and unmarshals the 2xx response into T.

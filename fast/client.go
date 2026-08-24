@@ -8,6 +8,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/tls"
+	"errors"
 	"log/slog"
 	"net"
 	"net/http"
@@ -15,6 +16,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/lemon4ksan/foundation/borrow"
 	"github.com/lemon4ksan/foundation/generic"
 	"github.com/lemon4ksan/foundation/silicon/bytesconv"
 
@@ -393,6 +395,64 @@ func (c *Client) Do(req aoni.Request) (aoni.Response, error) {
 	ctx := req.Context()
 
 	return c.pipeline.Execute(ctx, req, &c.nativeDoer, c.resolvePipeline(ctx))
+}
+
+// DoPipeline executes a batch of pipelined HTTP/1.1 requests over a single connection in FIFO order (RFC 9112 §9.3.2, RFC 9110 §9.2.2).
+//
+// All requests are written continuously to the connection write buffer in a single batch, minimizing round-trips and syscalls.
+// The responses slice must have the same length as reqs.
+func (c *Client) DoPipeline(ctx context.Context, reqs []*Request, resps []*Response) error {
+	if len(reqs) == 0 {
+		return nil
+	}
+
+	if len(reqs) != len(resps) {
+		return errors.New("aoni/fast: length of reqs and resps must match")
+	}
+
+	h1Reqs := make([]*h1engine.Request, len(reqs))
+	h1Resps := make([]*h1engine.Response, len(resps))
+
+	for i := range reqs {
+		if reqs[i] == nil {
+			return errors.New("aoni/fast: nil request in pipeline batch")
+		}
+
+		if resps[i] == nil {
+			return errors.New("aoni/fast: nil response in pipeline batch")
+		}
+
+		h1Reqs[i] = reqs[i].req
+		h1Resps[i] = resps[i].resp
+	}
+
+	return c.engine.DoPipeline(h1Reqs, h1Resps)
+}
+
+// DoScoped executes request req within a zero-allocation borrow scope, passing the response to fn.
+// Memory backing the response is safely recycled when fn returns.
+func (c *Client) DoScoped(
+	ctx context.Context,
+	req aoni.Request,
+	fn func(scope *borrow.Scope, resp aoni.Response) error,
+) error {
+	if req == nil {
+		return errors.New("aoni/fast: nil request")
+	}
+
+	resp, err := c.Do(req)
+	if err != nil {
+		return err
+	}
+
+	defer func() {
+		_ = resp.Close()
+	}()
+
+	scope := borrow.AcquireScope()
+	defer scope.Release()
+
+	return fn(scope, resp)
 }
 
 // Close shuts down idle TCP/TLS/H2/H3 connections and releases internal janitor background goroutines.

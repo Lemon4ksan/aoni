@@ -577,6 +577,50 @@ func (c *Client) Do(req *Request, resp *Response) error {
 	return hc.Do(req, resp)
 }
 
+// DoPipeline executes a batch of pipelined requests targeting the same host in FIFO order (RFC 9112 §9.3.2).
+func (c *Client) DoPipeline(reqs []*Request, resps []*Response) error {
+	return c.DoPipelineTimeout(reqs, resps, 0)
+}
+
+// DoPipelineTimeout executes a batch of pipelined requests with a timeout in FIFO order (RFC 9112 §9.3.2).
+func (c *Client) DoPipelineTimeout(reqs []*Request, resps []*Response, timeout time.Duration) error {
+	if len(reqs) == 0 {
+		return nil
+	}
+
+	if len(reqs) != len(resps) {
+		return errors.New("h1engine: length of reqs and resps must match")
+	}
+
+	firstReq := reqs[0]
+	if firstReq == nil {
+		return errors.New("h1engine: nil request in pipeline batch")
+	}
+
+	uri := firstReq.URI()
+	if uri == nil {
+		return ErrorInvalidURI
+	}
+
+	host := uri.Host()
+	isTLS := uri.isHTTPS()
+
+	c.mOnce.Do(func() {
+		c.m = make(map[string]*HostClient)
+		c.ms = make(map[string]*HostClient)
+	})
+
+	hc, err := c.hostClient(host, isTLS)
+	if err != nil {
+		return err
+	}
+
+	atomic.AddInt32(&hc.pendingClientRequests, 1)
+	defer atomic.AddInt32(&hc.pendingClientRequests, -1)
+
+	return hc.DoPipelineTimeout(reqs, resps, timeout)
+}
+
 func (c *Client) hostClient(host []byte, isTLS bool) (*HostClient, error) {
 	m := c.m
 	if isTLS {
@@ -1625,6 +1669,118 @@ func (c *HostClient) Do(req *Request, resp *Response) error {
 // instances.
 func (c *HostClient) PendingRequests() int {
 	return int(atomic.LoadInt32(&c.pendingRequests))
+}
+
+// DoPipeline executes a batch of pipelined requests over a single connection in FIFO order (RFC 9112 §9.3.2, RFC 9110 §9.2.2).
+//
+// All requests are written continuously to the connection write buffer before responses are read.
+// The responses slice must have the same length as reqs.
+func (c *HostClient) DoPipeline(reqs []*Request, resps []*Response) error {
+	return c.DoPipelineTimeout(reqs, resps, 0)
+}
+
+// DoPipelineTimeout executes a batch of pipelined requests with a timeout over a single connection.
+func (c *HostClient) DoPipelineTimeout(reqs []*Request, resps []*Response, timeout time.Duration) error {
+	if len(reqs) == 0 {
+		return nil
+	}
+
+	if len(reqs) != len(resps) {
+		return errors.New("h1engine: length of reqs and resps must match")
+	}
+
+	for _, req := range reqs {
+		if req == nil {
+			return errors.New("h1engine: nil request in pipeline batch")
+		}
+
+		if c.IsTLS != req.URI().isHTTPS() {
+			return ErrHostClientRedirectToDifferentScheme
+		}
+	}
+
+	for _, resp := range resps {
+		if resp == nil {
+			return errors.New("h1engine: nil response in pipeline batch")
+		}
+	}
+
+	cc, err := c.AcquireConn(timeout, false)
+	if err != nil {
+		return err
+	}
+
+	if timeout > 0 {
+		deadline := time.Now().Add(timeout)
+		if err := cc.c.SetDeadline(deadline); err != nil {
+			_ = cc.c.Close()
+			c.ReleaseConn(cc)
+			return err
+		}
+	}
+
+	userAgentOld := c.Name
+	if userAgentOld == "" && !c.NoDefaultUserAgentHeader {
+		userAgentOld = defaultUserAgent
+	}
+
+	bw := c.AcquireWriter(cc.c)
+	for _, req := range reqs {
+		req.URI().DisablePathNormalizing = c.DisablePathNormalizing
+		if len(req.Header.UserAgent()) == 0 && userAgentOld != "" {
+			req.Header.userAgent = append(req.Header.userAgent[:0], userAgentOld...)
+		}
+
+		if err := req.Write(bw); err != nil {
+			c.ReleaseWriter(bw)
+			c.CloseConn(cc)
+			return fmt.Errorf("h1engine: pipeline request write failed: %w", err)
+		}
+	}
+
+	if err := bw.Flush(); err != nil {
+		c.ReleaseWriter(bw)
+		c.CloseConn(cc)
+		return fmt.Errorf("h1engine: pipeline socket flush failed: %w", err)
+	}
+	c.ReleaseWriter(bw)
+
+	br := c.AcquireReader(cc.c)
+	for i, resp := range resps {
+		customSkipBody := resp.SkipBody
+		customStreamBody := resp.StreamBody || c.StreamResponseBody
+
+		resp.Reset()
+		resp.SkipBody = customSkipBody
+		resp.StreamBody = customStreamBody
+
+		if err := resp.ReadLimitBody(br, c.MaxResponseBodySize); err != nil {
+			c.ReleaseReader(br)
+			c.CloseConn(cc)
+			return fmt.Errorf("h1engine: pipeline response [%d] read failed: %w", i, err)
+		}
+
+		if resp.ConnectionClose() {
+			if i < len(resps)-1 {
+				c.ReleaseReader(br)
+				c.CloseConn(cc)
+				return errors.New("h1engine: server closed connection before completing pipeline batch")
+			}
+		}
+	}
+	c.ReleaseReader(br)
+
+	if timeout > 0 {
+		_ = cc.c.SetDeadline(time.Time{})
+	}
+
+	if resps[len(resps)-1].ConnectionClose() {
+		c.CloseConn(cc)
+	} else {
+		c.ReleaseConn(cc)
+	}
+
+	return nil
 }
 
 func isIdempotent(req *Request) bool {
