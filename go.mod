@@ -2,8 +2,6 @@ module github.com/lemon4ksan/aoni
 
 go 1.25.4
 
-replace github.com/lemon4ksan/foundation => ../foundation
-
 require (
 	github.com/lemon4ksan/foundation v0.0.0-20260824084055-d1144fe7221d
 	github.com/pkg/sftp v1.13.11
