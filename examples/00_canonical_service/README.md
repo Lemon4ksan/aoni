@@ -2,8 +2,6 @@
 
 This directory demonstrates the **Golden Standard & Canonical Architectural Blueprint** for writing service clients and API wrappers in Go using the **Aoni** networking engine.
 
----
-
 ## 🎯 Key Architectural Pillars Demonstrated
 
 1. **Decoupled Engine via `aoni.RequestDoer`**:
@@ -19,8 +17,6 @@ This directory demonstrates the **Golden Standard & Canonical Architectural Blue
 4. **Idiomatic Error Classification (`aoni.Is*`)**:
    - Evaluates HTTP response errors using typed helpers (`aoni.IsNotFound`, `aoni.IsUnauthorized`, `aoni.IsRateLimited`, `aoni.IsForbidden`).
 
----
-
 ## 📁 File Structure
 
 File | Purpose
@@ -29,8 +25,6 @@ File | Purpose
 [`models.go`](models.go) | Typed DTO structs (`UserDTO`, `CreateUserRequest`, `LoginResponse`).
 [`methods.go`](methods.go) | Implementation of REST endpoints (GET, POST JSON, POST Form, Query).
 [`main.go`](main.go) | Self-contained runnable demonstration running against a test HTTP mock.
-
----
 
 ## 🏃 Running the Example
 

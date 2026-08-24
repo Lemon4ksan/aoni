@@ -13,8 +13,8 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/require"
-	"go.uber.org/mock/gomock"
 
+	"github.com/lemon4ksan/aoni/internal/mock/gomock"
 	"github.com/lemon4ksan/aoni/internal/quic/internal/mocks"
 	"github.com/lemon4ksan/aoni/internal/quic/internal/monotime"
 	"github.com/lemon4ksan/aoni/internal/quic/internal/protocol"
