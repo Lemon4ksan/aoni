@@ -152,9 +152,12 @@ The underlying network plumbing in `aoni` is powered by pure-Go, zero-dependency
 | **Token Bucket Limiter** | 85+ ns (`x/time`) | **23.8 ns** (`async/rate`) | **3.6x Faster** | **0 B / 0 allocs** |
 | **SWAR `\r\n` Header Scan (1KB)** | 280+ ns (`bytes.Index`) | **114.4 ns** (`silicon/simd`) | **2.5x Faster (~9 GB/s)** | **0 B / 0 allocs** (64-bit vector chunking) |
 | **WhatWG Charset Resolver** | 45+ ns (`x/text`) | **19.2 ns** (`text/encoding`) | **2.3x Faster** | **0 B / 0 allocs** |
-| **Brotli Decompression (100KB)** | 101.2 µs / 140 B (`fasthttp`) | **66.3 µs / 72 B** (`compress/brotli`) | **1.32 GB/s (+52.6%)** | **-48% Memory / 0ns Jitter** (`PerPStorage` + SIMD) |
-| **Deflate Decompression (Inflate)** | 9.8 µs / 7.4 KB (`klauspost`) | **2.6 µs / 0 B** (`compress/flate`) | **3.69x Faster** | **0 B / 0 allocs** (128-bit SIMD Wildcopy) |
-| **Gzip Decompression (Gunzip)** | 10.5 µs / 7.6 KB (`klauspost`) | **3.6 µs / 0 B** (`compress/gzip`) | **2.88x Faster** | **0 B / 0 allocs** (Zero-Alloc Stream) |
+| **Zstd Decompression (1KB)** | 1.8+ µs (`klauspost/zstd`) | **249 ns / 0 B** (`compress/zstd`) | **7.2x Faster** | **0 B / 0 allocs** (Silicon Line Speed) |
+| **Deflate Decompression (Inflate)** | 9.8 µs / 7.4 KB (`klauspost`) | **2.58 µs / 0 B** (`compress/flate`) | **3.80x Faster (5.4x vs std)** | **0 B / 0 allocs** (128-bit SIMD Wildcopy) |
+| **Gzip Decompression (Gunzip)** | 10.5 µs / 7.6 KB (`klauspost`) | **3.10 µs / 0 B** (`compress/gzip`) | **3.39x Faster (4.1x vs std)** | **0 B / 0 allocs** (RFC 1952 `ISIZE` Fast-Path) |
+| **WebSocket Scoped Reader** | 12.8 µs (`realtime/ws`) | **5.89 µs / 0 B** (`realtime/ws`) | **2.17x Faster** | **0 B / 0 allocs** (`ReadMessageScoped`) |
+| **Fluent Request Builder (12 Cores)** | ~1.2 µs (`generic.Pool`) | **97.3 ns / 0 B** (`fluent`) | **11.24M ops/s** | **0 B / 0 allocs** (Core-Pinned `PerPStorage`) |
+| **QUIC Packet Pool (12 Cores)** | 350+ ns (`sync.Pool`) | **96.1 ns / 0 B** (`internal/quic`) | **11.12M ops/s** | **0 B / 0 allocs** (Lock-Free `PerPStorage`) |
 
 > [!TIP]
 > **Why does `aoni` outperform `net/http` under parallel load?**

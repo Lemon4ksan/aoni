@@ -152,9 +152,12 @@ option / mod ──┼
 | **Rate Limiter (Token Bucket)** | 85+ ns (`x/time`) | **23.8 ns** (`async/rate`) | **В 3.6 раза быстрее** | **0 B / 0 allocs** |
 | **SWAR `\r\n` сканер заголовков (1KB)** | 280+ ns (`bytes.Index`) | **114.4 ns** (`silicon/simd`) | **В 2.5 раза быстрее (~9 ГБ/с)** | **0 B / 0 allocs** (64-битные векторные блоки) |
 | **WhatWG Charset Resolver** | 45+ ns (`x/text`) | **19.2 ns** (`text/encoding`) | **В 2.3 раза быстрее** | **0 B / 0 allocs** |
-| **Декомпрессия Brotli (100KB)** | 101.2 µs / 140 B (`fasthttp`) | **66.3 µs / 72 B** (`compress/brotli`) | **1.32 ГБ/с (+52.6%)** | **-48% Памяти / 0ns Джиттер** (`PerPStorage` + SIMD) |
-| **Декомпрессия Deflate (Inflate)** | 9.8 µs / 7.4 KB (`klauspost`) | **2.6 µs / 0 B** (`compress/flate`) | **В 3.69 раза быстрее** | **0 B / 0 allocs** (128-bit SIMD Wildcopy) |
-| **Декомпрессия Gzip (Gunzip)** | 10.5 µs / 7.6 KB (`klauspost`) | **3.6 µs / 0 B** (`compress/gzip`) | **В 2.88 раза быстрее** | **0 B / 0 allocs** (Zero-Alloc Stream) |
+| **Декомпрессия Zstd (1KB)** | 1.8+ µs (`klauspost/zstd`) | **249 ns / 0 B** (`compress/zstd`) | **В 7.2 раза быстрее** | **0 B / 0 allocs** (Silicon Line Speed) |
+| **Декомпрессия Deflate (Inflate)** | 9.8 µs / 7.4 KB (`klauspost`) | **2.58 µs / 0 B** (`compress/flate`) | **В 3.80 раза быстрее (5.4x vs std)** | **0 B / 0 allocs** (128-bit SIMD Wildcopy) |
+| **Декомпрессия Gzip (Gunzip)** | 10.5 µs / 7.6 KB (`klauspost`) | **3.10 µs / 0 B** (`compress/gzip`) | **В 3.39 раза быстрее (4.1x vs std)** | **0 B / 0 allocs** (RFC 1952 `ISIZE` Fast-Path) |
+| **Scoped-чтение WebSocket** | 12.8 µs (`realtime/ws`) | **5.89 µs / 0 B** (`realtime/ws`) | **В 2.17 раза быстрее** | **0 B / 0 allocs** (`ReadMessageScoped`) |
+| **Fluent Request Builder (12 ядер)** | ~1.2 µs (`generic.Pool`) | **97.3 ns / 0 B** (`fluent`) | **11.24 млн запросов/сек** | **0 B / 0 allocs** (Core-Pinned `PerPStorage`) |
+| **Пул QUIC-датаграмм (12 ядер)** | 350+ ns (`sync.Pool`) | **96.1 ns / 0 B** (`internal/quic`) | **11.12 млн пакетов/сек** | **0 B / 0 allocs** (Lock-Free `PerPStorage`) |
 
 > [!TIP]
 > **Почему `aoni` обгоняет `net/http` при параллельной нагрузке?**
