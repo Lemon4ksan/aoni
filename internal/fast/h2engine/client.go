@@ -140,6 +140,61 @@ func (cl *Client) Do(ctx context.Context, req *h1engine.Request, res *h1engine.R
 	return ErrGoAwayRetryable
 }
 
+// DoBatch executes a batch of requests concurrently over the multiplexed HTTP/2 connection.
+func (cl *Client) DoBatch(ctx context.Context, reqs []*h1engine.Request, resps []*h1engine.Response) error {
+	if len(reqs) == 0 {
+		return nil
+	}
+
+	if len(reqs) != len(resps) {
+		return errors.New("h2engine: length of reqs and resps must match")
+	}
+
+	conn, err := cl.selectConn(ctx)
+	if err != nil {
+		return err
+	}
+
+	type result struct {
+		idx int
+		err error
+	}
+
+	resCh := make(chan result, len(reqs))
+	for i := range reqs {
+		reqCtx := &Context{
+			Request:  reqs[i],
+			Response: resps[i],
+			Err:      make(chan error, 1),
+		}
+
+		if err := conn.Write(reqCtx); err != nil {
+			return ErrGoAwayRetryable
+		}
+
+		go func(idx int, rCtx *Context) {
+			select {
+			case <-ctx.Done():
+				conn.CancelStream(rCtx)
+
+				resCh <- result{idx: idx, err: ctx.Err()}
+			case err := <-rCtx.Err:
+				resCh <- result{idx: idx, err: err}
+			}
+		}(i, reqCtx)
+	}
+
+	var firstErr error
+	for range reqs {
+		res := <-resCh
+		if res.err != nil && firstErr == nil {
+			firstErr = res.err
+		}
+	}
+
+	return firstErr
+}
+
 // DoWithTrailers executes req over an available HTTP/2 stream and returns captured response trailers.
 func (cl *Client) DoWithTrailers(
 	ctx context.Context,

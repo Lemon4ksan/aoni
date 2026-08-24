@@ -455,6 +455,104 @@ func (c *Client) DoScoped(
 	return fn(scope, resp)
 }
 
+// DoBatch executes a batch of requests across the optimal protocol channel (H1 Pipelining, H2 multiplexed streams, or H3 QUIC streams).
+func (c *Client) DoBatch(ctx context.Context, reqs []*Request, resps []*Response) error {
+	if len(reqs) == 0 {
+		return nil
+	}
+
+	if len(reqs) != len(resps) {
+		return errors.New("aoni/fast: length of reqs and resps must match")
+	}
+
+	for i := range reqs {
+		if reqs[i] == nil {
+			return errors.New("aoni/fast: nil request in batch")
+		}
+
+		if resps[i] == nil {
+			return errors.New("aoni/fast: nil response in batch")
+		}
+
+		if u := reqs[i].URL(); u != "" {
+			_ = c.resolveTargetURL(reqs[i], u)
+		}
+	}
+
+	firstReq := reqs[0].req
+
+	uri := firstReq.URI()
+	if uri == nil {
+		return errors.New("aoni/fast: invalid URI in first request of batch")
+	}
+
+	host := string(uri.Host())
+	isHTTPS := bytes.EqualFold(uri.Scheme(), []byte("https"))
+
+	h1Reqs := make([]*h1engine.Request, len(reqs))
+	h1Resps := make([]*h1engine.Response, len(resps))
+
+	for i := range reqs {
+		h1Reqs[i] = reqs[i].req
+		h1Resps[i] = resps[i].resp
+	}
+
+	if isHTTPS && c.protocolState.altSvc != nil && c.protocolState.altSvc.IsH3Supported(host) {
+		h3Cl := c.getH3Client()
+		if h3Cl != nil {
+			err := h3Cl.DoBatch(ctx, h1Reqs, h1Resps, c.cfg.Fingerprint.HeaderOrder)
+			if err == nil {
+				return nil
+			}
+		}
+	}
+
+	alpnMode := resolveALPNMode(ctx, &c.cfg, firstReq, c.protocolState.altSvc)
+	if alpnMode == aoni.AlpnH2 || (isHTTPS && c.cfg.Fingerprint.H2Settings != nil) {
+		h2Cl := c.getH2Client(host)
+		if h2Cl != nil {
+			err := h2Cl.DoBatch(ctx, h1Reqs, h1Resps)
+			if err == nil {
+				return nil
+			}
+		}
+	}
+
+	return c.engine.DoPipeline(h1Reqs, h1Resps)
+}
+
+// DoBatchScoped executes a batch of requests within an active [borrow.Scope], passing the responses slice to fn.
+func (c *Client) DoBatchScoped(
+	ctx context.Context,
+	reqs []*Request,
+	fn func(scope *borrow.Scope, resps []*Response) error,
+) error {
+	if len(reqs) == 0 {
+		return nil
+	}
+
+	resps := make([]*Response, len(reqs))
+
+	for i := range reqs {
+		resps[i] = NewResponse(nil)
+	}
+
+	defer func() {
+		for i := range resps {
+			resps[i].Release()
+		}
+	}()
+
+	if err := c.DoBatch(ctx, reqs, resps); err != nil {
+		return err
+	}
+
+	scope := borrow.AcquireScope()
+	defer scope.Release()
+
+	return fn(scope, resps)
+}
+
 // Close shuts down idle TCP/TLS/H2/H3 connections and releases internal janitor background goroutines.
 func (c *Client) Close() {
 	if c.coreEngine != nil {

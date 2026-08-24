@@ -8,6 +8,7 @@ package h3engine
 import (
 	"context"
 	"crypto/tls"
+	"errors"
 	"net"
 	"sync"
 
@@ -94,6 +95,58 @@ func (c *Client) DoScoped(
 	}
 
 	return trailers, err
+}
+
+// DoBatch executes a batch of requests concurrently over the multiplexed HTTP/3 QUIC connection.
+func (c *Client) DoBatch(
+	ctx context.Context,
+	reqs []*h1engine.Request,
+	resps []*h1engine.Response,
+	headerOrder []string,
+) error {
+	if len(reqs) == 0 {
+		return nil
+	}
+
+	if len(reqs) != len(resps) {
+		return errors.New("h3engine: length of reqs and resps must match")
+	}
+
+	host := string(reqs[0].URI().Host())
+
+	cc, err := c.getConn(ctx, host)
+	if err != nil {
+		return err
+	}
+
+	type result struct {
+		idx int
+		err error
+	}
+
+	resCh := make(chan result, len(reqs))
+
+	for i := range reqs {
+		go func(idx int) {
+			_, err := cc.Do(ctx, reqs[idx], resps[idx], headerOrder)
+
+			resCh <- result{idx: idx, err: err}
+		}(i)
+	}
+
+	var firstErr error
+	for range reqs {
+		res := <-resCh
+		if res.err != nil && firstErr == nil {
+			firstErr = res.err
+		}
+	}
+
+	if firstErr != nil {
+		c.removeConn(host)
+	}
+
+	return firstErr
 }
 
 func (c *Client) getConn(ctx context.Context, host string) (*ClientConn, error) {

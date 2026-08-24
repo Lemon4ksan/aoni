@@ -1858,6 +1858,63 @@ func (req *Request) Write(w *bufio.Writer) error {
 	return err
 }
 
+// WriteVectored writes the request headers and body directly to conn via net.Buffers (vectored I/O)
+// without intermediate copying into a bufio.Writer.
+func (req *Request) WriteVectored(conn net.Conn) error {
+	if len(req.Header.Host()) == 0 || req.parsedURI {
+		uri := req.URI()
+		host := uri.Host()
+		if len(req.Header.Host()) == 0 {
+			if len(host) == 0 {
+				return errRequestHostRequired
+			}
+			req.Header.SetHostBytes(host)
+		} else if !req.UseHostHeader {
+			req.Header.SetHostBytes(host)
+		}
+		req.Header.SetRequestURIBytes(uri.RequestURI())
+	}
+
+	if req.bodyStream != nil {
+		bw := acquireBufioWriter(conn)
+		err := req.writeBodyStream(bw)
+		if err == nil {
+			err = bw.Flush()
+		}
+		releaseBufioWriter(bw)
+		return err
+	}
+
+	body := req.bodyBytes()
+	var err error
+	if req.onlyMultipartForm() {
+		body, err = marshalMultipartForm(req.multipartForm, req.multipartFormBoundary)
+		if err != nil {
+			return fmt.Errorf("error when marshaling multipart form: %w", err)
+		}
+		req.Header.SetMultipartFormBoundary(req.multipartFormBoundary)
+	}
+
+	hasBody := false
+	if len(body) == 0 {
+		body = req.postArgs.QueryString()
+	}
+	if len(body) != 0 || !req.Header.ignoreBody() {
+		hasBody = true
+		req.Header.SetContentLength(len(body))
+	}
+
+	headerBytes := req.Header.Header()
+	if !hasBody || len(body) == 0 {
+		_, err = conn.Write(headerBytes)
+		return err
+	}
+
+	bufs := net.Buffers{headerBytes, body}
+	_, err = bufs.WriteTo(conn)
+	return err
+}
+
 // WriteGzip writes response with gzipped body to w.
 //
 // The method gzips response body and sets 'Content-Encoding: gzip'
