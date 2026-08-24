@@ -25,6 +25,7 @@ import (
 
 	"github.com/lemon4ksan/aoni"
 	"github.com/lemon4ksan/aoni/realtime/ws"
+	"github.com/lemon4ksan/foundation/borrow"
 )
 
 func int64Ptr(i int64) *int64 {
@@ -1114,6 +1115,17 @@ func (m *mockSizeLimitConn) ReadMessageTo(b []byte) (int, int, error) {
 
 func (m *mockSizeLimitConn) ReadMessage() (int, []byte, error) {
 	return ws.FrameText, []byte(strings.Repeat("a", maxEIOPacketSize+10)), nil
+}
+
+func (m *mockSizeLimitConn) ReadMessageScoped(scope *borrow.Scope) (int, []byte, error) {
+	data := []byte(strings.Repeat("a", maxEIOPacketSize+10))
+	if scope != nil {
+		buf := scope.AllocBytes(len(data))
+		copy(buf.AsSlice(), data)
+		return ws.FrameText, buf.AsSlice(), nil
+	}
+
+	return ws.FrameText, data, nil
 }
 
 func (m *mockSizeLimitConn) WriteMessage(messageType int, data []byte) error { return nil }

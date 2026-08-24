@@ -4,7 +4,7 @@ go 1.25.4
 
 require (
 	github.com/lemon4ksan/aoni v0.6.2-0.20260819102008-70f4d6102d54
-	github.com/lemon4ksan/foundation v0.0.0-20260820045422-43e40082e954
+	github.com/lemon4ksan/foundation v0.0.0-20260824084055-d1144fe7221d
 	github.com/oschwald/maxminddb-golang/v2 v2.4.1
 	github.com/stretchr/testify v1.11.1
 )
@@ -27,4 +27,3 @@ require (
 
 replace github.com/lemon4ksan/aoni => ../
 
-replace github.com/lemon4ksan/foundation => ../../foundation
