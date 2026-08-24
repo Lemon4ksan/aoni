@@ -46,6 +46,16 @@ func HuffmanEncode(dst, src []byte) []byte {
 	return dst
 }
 
+// HuffmanEncodeLength calculates the exact byte length of src when Huffman encoded without allocating.
+func HuffmanEncodeLength(src []byte) int {
+	var bits uint64
+	for _, b := range src {
+		bits += uint64(huffmanCodeLen[b])
+	}
+
+	return int((bits + 7) / 8)
+}
+
 // HuffmanDecode decompresses HPACK Huffman encoded src bytes into dst using flat table-driven decoding (RFC 7541 §5.2 & Appendix B).
 func HuffmanDecode(dst, src []byte) []byte {
 	nSrc := len(src)

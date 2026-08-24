@@ -7,6 +7,8 @@ package qpack
 import (
 	"errors"
 	"io"
+
+	"github.com/lemon4ksan/foundation/silicon/bytesconv"
 )
 
 var (
@@ -121,5 +123,5 @@ func readString(data []byte) (string, int, error) {
 		return s, totalConsumed, nil
 	}
 
-	return string(raw), totalConsumed, nil
+	return bytesconv.B2S(raw), totalConsumed, nil
 }

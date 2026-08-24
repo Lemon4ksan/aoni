@@ -281,7 +281,7 @@ func (q *QPACKCodec) DecodeResponseHeaders(headerBlock []byte, res *h1engine.Res
 			return true
 		}
 
-		res.Add(hf.Name, hf.Value)
+		res.AddBytesKV(bytesconv.S2B(hf.Name), bytesconv.S2B(hf.Value))
 
 		return true
 	})

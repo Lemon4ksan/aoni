@@ -107,7 +107,7 @@ func (hf *HeaderField) SetKeyBytes(key []byte) {
 		return
 	}
 
-	hf.key = append([]byte(nil), key...)
+	hf.key = append(hf.key[:0], key...)
 }
 
 func (hf *HeaderField) SetValueBytes(value []byte) {
@@ -116,20 +116,20 @@ func (hf *HeaderField) SetValueBytes(value []byte) {
 		return
 	}
 
-	hf.value = append([]byte(nil), value...)
+	hf.value = append(hf.value[:0], value...)
 }
 
 func (hf *HeaderField) CopyTo(other *HeaderField) {
 	if ik := rodata.InternKeyBytes(hf.key); ik != nil {
 		other.key = ik
 	} else {
-		other.key = append([]byte(nil), hf.key...)
+		other.key = append(other.key[:0], hf.key...)
 	}
 
 	if iv := rodata.InternValueBytes(hf.value); iv != nil {
 		other.value = iv
 	} else {
-		other.value = append([]byte(nil), hf.value...)
+		other.value = append(other.value[:0], hf.value...)
 	}
 
 	other.sensible = hf.sensible

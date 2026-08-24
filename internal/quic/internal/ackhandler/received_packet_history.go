@@ -32,6 +32,7 @@ func newReceivedPacketHistory() *receivedPacketHistory {
 		deletedBelow: protocol.InvalidPacketNumber,
 	}
 	h.ranges = h.inline[:0]
+
 	return h
 }
 
