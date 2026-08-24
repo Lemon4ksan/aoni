@@ -456,3 +456,65 @@ func BenchmarkGET_FastClient_Parallel(b *testing.B) {
 		}
 	})
 }
+
+func BenchmarkPOST_FastClient_Parallel(b *testing.B) {
+	ln := setupFastBenchServer()
+	defer ln.Close()
+
+	fastClient := fast.NewClient(
+		option.WithBaseURL("http://inmemory"),
+		option.WithTimeout(5*time.Second),
+	)
+	fastClient.Engine().Dial = func(_ string) (net.Conn, error) {
+		return ln.Dial()
+	}
+	ctx := context.Background()
+	payload := []byte(`{"message":"hello world from vectored io benchmark"}`)
+
+	b.ReportAllocs()
+	b.ResetTimer()
+
+	b.RunParallel(func(pb *testing.PB) {
+		for pb.Next() {
+			resp, err := fastClient.Request(ctx, "POST", "/submit", mod.WithBodyBytes(payload))
+			if err != nil {
+				b.Fatalf("fast post request failed: %v", err)
+			}
+			_ = resp.Close()
+		}
+	})
+}
+
+func BenchmarkPOST_FastClient_Native_Parallel(b *testing.B) {
+	ln := setupFastBenchServer()
+	defer ln.Close()
+
+	engine := &h1engine.HostClient{
+		Addr: "inmemory",
+		Dial: func(_ string) (net.Conn, error) {
+			return ln.Dial()
+		},
+	}
+
+	payload := []byte(`{"message":"hello world from vectored io benchmark"}`)
+
+	b.ReportAllocs()
+	b.ResetTimer()
+
+	b.RunParallel(func(pb *testing.PB) {
+		req := h1engine.AcquireRequest()
+		resp := h1engine.AcquireResponse()
+		defer h1engine.ReleaseRequest(req)
+		defer h1engine.ReleaseResponse(resp)
+
+		req.Header.SetMethod("POST")
+		req.SetRequestURI("http://inmemory/submit")
+		req.SetBody(payload)
+
+		for pb.Next() {
+			if err := engine.Do(req, resp); err != nil {
+				b.Fatalf("fast native post failed: %v", err)
+			}
+		}
+	})
+}
