@@ -101,7 +101,7 @@ userResp, resp, err := fluent.PostGRPCWebTo[pb.UserResponse](ctx, client, "/User
 ```
                ┌──► aoni.Client (100% net/http compatibility & middleware chain)
 option / mod ──┼
-               └──► fast.Client (2.14M+ RPS multi-core, native zero-alloc H1/H2/H3 engine)
+               └──► fast.Client (2.16M+ RPS multi-core, native zero-alloc H1/H2/H3 engine)
 ```
 
 * **Standard `aoni.Client`**: Use when 100% Go standard library compatibility and `net/http` middleware interoperability are required.
@@ -115,6 +115,10 @@ To evaluate the execution pipeline fairly, benchmarks are divided into two categ
 
 Under high concurrent load across multiple CPU cores, Go's memory allocator (`mcache`/`mcentral`) experiences lock contention. Because `aoni` performs **12 fewer allocations** per request than standard `net/http` (66 vs 78 allocs), it scales significantly better, delivering **10% lower latency** in standard mode and **3.4x to 36x higher performance** in bridge/native modes.
 
+```text
+BenchmarkGET_FastClient_Parallel-12    	 5133589	       462.9 ns/op	       0 B/op	       0 allocs/op
+```
+
 | Metric | Standard `net/http` | `aoni` (Standard) | `aoni` + `fast.Bridge` | `aoni/fast` (Native) | Performance Delta |
 | :--- | :---: | :---: | :---: | :---: | :---: |
 | **GET JSON Zero-Copy (`JSONNoCopy`)** | 127,905 ns | 54,824 ns | **10,948 ns** | **3,542 ns** | **⚡ 36.1x Faster (3.5 µs, 51 B, 2 allocs)** |
@@ -126,9 +130,9 @@ Under high concurrent load across multiple CPU cores, Go's memory allocator (`mc
 | **HTTP/2 Latency (`ns/op`)** | 80,979 ns | 80,979 ns | **67,441 ns** | **67,441 ns** | **⚡ 1.95x Less H2 RAM (5.0KB vs 9.8KB)** |
 | **HTTP/3 QPACK Block Framing** | ~2,500 ns / 120 B | — | — | **379.5 ns / 0 B** | **⚡ 6.5x Faster (0 B / 0 allocs)** |
 | **HTTP/3 QUIC Latency (`ns/op`)** | 128,980 ns | 128,980 ns | **124,447 ns** | **124,447 ns** | **⚡ 2.01x Less QUIC RAM (12.0KB vs 24.1KB)** |
-| **Parallel High-Load Latency (`ns/op`)** | 7,002 ns | 6,167 ns | **1,940 ns** | **578.3 ns** | **⚡ 12.4x – 15.8x Faster (0 B / 0 allocs)** |
+| **Parallel High-Load Latency (`ns/op`)** | 7,002 ns | 6,167 ns | **1,940 ns** | **462.9 ns** | **⚡ 15.1x – 15.8x Faster (0 B / 0 allocs)** |
 | **Single-Core Peak Throughput (1 Core)** | ~142k RPS | ~162k RPS | ~185k RPS | **~243,000+ RPS** | **⚡ 1.7x Single-Thread Gain** |
-| **Multi-Core Peak Throughput (12 Cores)** | ~140k RPS | ~162k RPS | >550,000 RPS | **1,910,000+ RPS (2.05M+ peak)** | **⚡ 13.6x Multi-Core Throughput** |
+| **Multi-Core Peak Throughput (12 Cores)** | ~140k RPS | ~162k RPS | >550,000 RPS | **2,160,293 RPS (2.16M+ peak)** | **⚡ 15.4x Multi-Core Throughput** |
 
 ### 2. Single-Thread Sequential Latency (1 Core, Serial `b.N`)
 
@@ -148,7 +152,7 @@ The underlying network plumbing in `aoni` is powered by pure-Go, zero-dependency
 | **URL Parsing (`net/url.Parse`)** | 295.1 ns | **85.2 ns** (`net/url`) | **3.5x Faster** | Pre-computed CRC32 L1 Sharded Cache |
 | **Public Suffix (`eTLD+1`)** | 146.3 ns | **78.8 ns** (`net/psl`) | **1.9x Faster** | **0 B / 0 allocs** (vs 48 B / 1 alloc) |
 | **QPACK RFC 9204 Block Framing** | 2,500+ ns (`quic-go/qpack`) | **379.5 ns** (`internal/qpack`) | **6.5x Faster** | **0 B / 0 allocs** (Zero-Alloc Pooled Codec) |
-| **HPACK Huffman Decoder** | 391.9 ns | **322.7 ns** (`net/hpack`) | **1.2x Faster** | **0 B / 0 allocs** (vs 80 B / 1 alloc) |
+| **HPACK Huffman Decoder** | 391.9 ns | **238.1 ns** (`internal/fast/h2engine`) | **1.65x Faster** | **0 B / 0 allocs** (Table-Driven LUT) |
 | **Timestamping (`vDSO` Bypass)** | 3.15 ns (`time.Now`) | **0.28 ns** (`silicon/clock`) | **11.2x Faster** | **0 B / 0 allocs** (Atomic L1-load) |
 | **Token Bucket Limiter** | 85+ ns (`x/time`) | **23.8 ns** (`async/rate`) | **3.6x Faster** | **0 B / 0 allocs** |
 | **SWAR `\r\n` Header Scan (1KB)** | 280+ ns (`bytes.Index`) | **114.4 ns** (`silicon/simd`) | **2.5x Faster (~9 GB/s)** | **0 B / 0 allocs** (64-bit vector chunking) |
@@ -163,7 +167,7 @@ The underlying network plumbing in `aoni` is powered by pure-Go, zero-dependency
 > [!TIP]
 > **Why does `aoni` outperform `net/http` under parallel load?**
 > High throughput in standard Go HTTP clients triggers frequent Garbage Collection (GC) pauses and `mcentral` memory allocator lock contention.
-> Standard `aoni.Client` performs **12 fewer allocations** per request than `net/http` (66 vs 78 allocs, 5.8KB vs 6.8KB), reducing runtime allocator pressure under multi-threaded execution. Meanwhile, `aoni/fast` (Native) recycles pooled buffers via `PerPStorage` (zero inter-core lock contention), leverages static `.rodata` header interning, SIMD AVX2/BMI2 hardware assembly (`simd_amd64.s`), non-temporal streaming stores, and Profile-Guided Optimization (`default.pgo`), operating with **0 B/op and 0 allocs/op** to deliver flat sub-microsecond tail latency (`534.4 ns ± 1%`) and **2.14M+ RPS throughput**. CPU profiling (`pprof`) confirms that `aoni`'s own wrapper logic consumes **only 0.34% of total CPU cycles**, leaving 99.66% of CPU headroom dedicated entirely to network socket I/O.
+> Standard `aoni.Client` performs **12 fewer allocations** per request than `net/http` (66 vs 78 allocs, 5.8KB vs 6.8KB), reducing runtime allocator pressure under multi-threaded execution. Meanwhile, `aoni/fast` (Native) recycles pooled buffers via `PerPStorage` (zero inter-core lock contention), leverages static `.rodata` header interning, SIMD AVX2/BMI2 hardware assembly (`simd_amd64.s`), non-temporal streaming stores, and Profile-Guided Optimization (`default.pgo`), operating with **0 B/op and 0 allocs/op** to deliver flat sub-microsecond tail latency (`462.9 ns ± 1%`) and **2,160,293 RPS (2.16M+ RPS) throughput**. CPU profiling (`pprof`) confirms that `aoni`'s own wrapper logic consumes **only 0.34% of total CPU cycles**, leaving 99.66% of CPU headroom dedicated entirely to network socket I/O.
 
 > [!NOTE]
 > **Demystifying the Single-Threaded Benchmark Performance**
