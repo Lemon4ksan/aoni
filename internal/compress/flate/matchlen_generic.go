@@ -64,7 +64,7 @@ func matchLenGeneric(a, b []byte) (n int) {
 	return n
 }
 
-// ExportMatchLen exports matchLen for benchmark and unit testing.
-func ExportMatchLen(a, b []byte) int {
+// MatchLen exports matchLen for benchmark and unit testing.
+func MatchLen(a, b []byte) int {
 	return matchLen(a, b)
 }

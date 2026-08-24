@@ -59,13 +59,13 @@ func TestMatchLen_Comprehensive(t *testing.T) {
 	s2 := []byte("The quick brown fox jumps over the lazy dog 1234567890abcdefghijklmnopqrstuvwxyz")
 
 	// Full match
-	assert.Equal(t, len(s1), flate.ExportMatchLen(s1, s2))
+	assert.Equal(t, len(s1), flate.MatchLen(s1, s2))
 
 	// Prefix mismatch at various offsets
-	for i := 0; i < len(s1); i++ {
+	for i := range s1 {
 		s2Copy := append([]byte(nil), s2...)
 		s2Copy[i] ^= 0xFF
-		assert.Equal(t, i, flate.ExportMatchLen(s1, s2Copy))
+		assert.Equal(t, i, flate.MatchLen(s1, s2Copy))
 	}
 }
 
@@ -79,6 +79,6 @@ func BenchmarkMatchLen_AVX2(b *testing.B) {
 	b.ResetTimer()
 
 	for b.Loop() {
-		_ = flate.ExportMatchLen(s1, s2)
+		_ = flate.MatchLen(s1, s2)
 	}
 }

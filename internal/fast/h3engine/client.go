@@ -178,6 +178,9 @@ func (c *Client) getConn(ctx context.Context, host string) (*ClientConn, error) 
 	}
 
 	batchConn := sysnet.NewBatchUDPConn(udpConn)
+	_ = batchConn.SetGSO(1200)
+	_ = batchConn.SetGRO(true)
+
 	tr := &quic.Transport{Conn: batchConn}
 
 	udpAddr, err := net.ResolveUDPAddr("udp", host)
