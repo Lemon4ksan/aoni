@@ -12,7 +12,7 @@ import (
 	"io"
 	"strings"
 
-	"github.com/lemon4ksan/foundation/silicon/bytesconv"
+	"github.com/lemon4ksan/foundation/borrow"
 	"github.com/lemon4ksan/foundation/silicon/pool"
 
 	"github.com/lemon4ksan/aoni/internal/compress/brotli"
@@ -69,6 +69,27 @@ func Decompress(encoding string, src, dst []byte) ([]byte, error) {
 	}
 }
 
+// DecompressScoped decodes compressed src directly into a zero-allocation scoped buffer
+// bound to the lifetime of s.
+func DecompressScoped(s *borrow.Scope, encoding string, src []byte) (borrow.Bytes, error) {
+	if len(src) == 0 {
+		return borrow.Bytes{}, nil
+	}
+
+	switch strings.ToLower(strings.TrimSpace(encoding)) {
+	case "gzip", "x-gzip":
+		return GunzipScoped(s, src)
+	case "br":
+		return UnbrotliScoped(s, src)
+	case "zstd":
+		return UnzstdScoped(s, src)
+	case "deflate":
+		return InflateScoped(s, src)
+	default:
+		return borrow.Bytes{}, ErrUnsupportedEncoding
+	}
+}
+
 // Gunzip decompresses a gzip payload (RFC 1952) from src into dst.
 func Gunzip(src, dst []byte) ([]byte, error) {
 	zr := gzipReaderStorage.Get()
@@ -88,9 +109,33 @@ func Gunzip(src, dst []byte) ([]byte, error) {
 	return readAllSlice(zr, src, dst)
 }
 
+// GunzipScoped decompresses a gzip payload directly into a zero-allocation scoped buffer.
+func GunzipScoped(s *borrow.Scope, src []byte) (borrow.Bytes, error) {
+	zr := gzipReaderStorage.Get()
+	defer gzipReaderStorage.Put(zr)
+
+	br := bytesReaderStorage.Get()
+	defer bytesReaderStorage.Put(br)
+
+	br.Reset(src)
+
+	if err := zr.Reset(br); err != nil {
+		return borrow.Bytes{}, err
+	}
+
+	defer zr.Close()
+
+	return readAllSliceScoped(s, zr, src)
+}
+
 // Unbrotli decompresses a Brotli payload (RFC 7932) from src into dst.
 func Unbrotli(src, dst []byte) ([]byte, error) {
 	return brotli.Decompress(dst, src)
+}
+
+// UnbrotliScoped decompresses a Brotli payload directly into a zero-allocation scoped buffer.
+func UnbrotliScoped(s *borrow.Scope, src []byte) (borrow.Bytes, error) {
+	return brotli.DecompressScoped(s, src)
 }
 
 // Unzstd decompresses a Zstandard payload (RFC 8878) from src into dst with zero allocations.
@@ -99,6 +144,43 @@ func Unzstd(src, dst []byte) ([]byte, error) {
 	defer zstdDecoderStorage.Put(dec)
 
 	return dec.DecodeAll(src, dst)
+}
+
+// UnzstdScoped decompresses a Zstandard payload directly into a zero-allocation scoped buffer.
+func UnzstdScoped(s *borrow.Scope, src []byte) (borrow.Bytes, error) {
+	if len(src) == 0 {
+		return borrow.Bytes{}, nil
+	}
+
+	if s == nil {
+		raw, err := Unzstd(src, nil)
+		if err != nil {
+			return borrow.Bytes{}, err
+		}
+
+		return borrow.NewBytes(raw, nil), nil
+	}
+
+	dec := zstdDecoderStorage.Get()
+	defer zstdDecoderStorage.Put(dec)
+
+	initCap := max(len(src)*2, 1024)
+	b := s.AllocBytes(initCap)
+	dst := b.AsSlice()[:0]
+
+	decompressed, err := dec.DecodeAll(src, dst)
+	if err != nil {
+		return borrow.Bytes{}, err
+	}
+
+	if len(decompressed) > cap(dst) {
+		newB := s.AllocBytes(len(decompressed))
+		copy(newB.AsSlice(), decompressed)
+
+		return newB, nil
+	}
+
+	return b.Slice(0, len(decompressed)), nil
 }
 
 // Inflate decompresses raw deflate payload (RFC 1951) from src into dst.
@@ -116,6 +198,23 @@ func Inflate(src, dst []byte) ([]byte, error) {
 	}
 
 	return readAllSlice(fr.(io.Reader), src, dst)
+}
+
+// InflateScoped decompresses raw deflate payload directly into a zero-allocation scoped buffer.
+func InflateScoped(s *borrow.Scope, src []byte) (borrow.Bytes, error) {
+	fr := flateReaderStorage.Get()
+	defer flateReaderStorage.Put(fr)
+
+	br := bytesReaderStorage.Get()
+	defer bytesReaderStorage.Put(br)
+
+	br.Reset(src)
+
+	if err := fr.Reset(br, nil); err != nil {
+		return borrow.Bytes{}, err
+	}
+
+	return readAllSliceScoped(s, fr.(io.Reader), src)
 }
 
 func readAllSlice(r io.Reader, src, dst []byte) ([]byte, error) {
@@ -152,11 +251,51 @@ func readAllSlice(r io.Reader, src, dst []byte) ([]byte, error) {
 	return dst, nil
 }
 
+func readAllSliceScoped(s *borrow.Scope, r io.Reader, src []byte) (borrow.Bytes, error) {
+	if s == nil {
+		raw, err := readAllSlice(r, src, nil)
+		if err != nil {
+			return borrow.Bytes{}, err
+		}
+
+		return borrow.NewBytes(raw, nil), nil
+	}
+
+	initCap := max(len(src)*2, 1024)
+	b := s.AllocBytes(initCap)
+	dst := b.AsSlice()[:0]
+
+	for {
+		if len(dst) == cap(dst) {
+			newCap := max(cap(dst)*2, 1024)
+			newB := s.AllocBytes(newCap)
+			newDst := newB.AsSlice()[:len(dst)]
+			copy(newDst, dst)
+			dst = newDst
+			b = newB
+		}
+
+		n, err := r.Read(dst[len(dst):cap(dst)])
+		dst = dst[:len(dst)+n]
+
+		if err != nil {
+			if errors.Is(err, io.EOF) {
+				break
+			}
+
+			return borrow.Bytes{}, err
+		}
+	}
+
+	return b.Slice(0, len(dst)), nil
+}
+
 // AcquireZstdReader borrows a pooled [*zstd.Decoder] bound to r.
 func AcquireZstdReader(r io.Reader) (*zstd.Decoder, error) {
 	dec := zstdDecoderStorage.Get()
 	if err := dec.Reset(r); err != nil {
 		zstdDecoderStorage.Put(dec)
+
 		return nil, err
 	}
 
@@ -176,6 +315,7 @@ func AcquireGzipReader(r io.Reader) (*gzip.Reader, error) {
 	zr := gzipReaderStorage.Get()
 	if err := zr.Reset(r); err != nil {
 		gzipReaderStorage.Put(zr)
+
 		return nil, err
 	}
 
@@ -258,8 +398,12 @@ func NewReader(encoding string, r io.Reader) (io.ReadCloser, error) {
 
 	case "deflate":
 		fr := flateReaderStorage.Get()
+		br := bytesReaderStorage.Get()
+		br.Reset(nil)
+
 		if err := fr.Reset(r, nil); err != nil {
 			flateReaderStorage.Put(fr)
+			bytesReaderStorage.Put(br)
 
 			return nil, err
 		}
@@ -269,14 +413,11 @@ func NewReader(encoding string, r io.Reader) (io.ReadCloser, error) {
 			closer: closerOf(r),
 			release: func() {
 				flateReaderStorage.Put(fr)
+				bytesReaderStorage.Put(br)
 			},
 		}, nil
 
-	case "", "identity":
-		if rc, ok := r.(io.ReadCloser); ok {
-			return rc, nil
-		}
-
+	case "identity", "":
 		return io.NopCloser(r), nil
 
 	default:
@@ -295,17 +436,16 @@ func (d *decompressReadCloser) Read(p []byte) (int, error) {
 }
 
 func (d *decompressReadCloser) Close() error {
-	var err error
-	if d.closer != nil {
-		err = d.closer.Close()
-	}
-
 	if d.release != nil {
 		d.release()
 		d.release = nil
 	}
 
-	return err
+	if d.closer != nil {
+		return d.closer.Close()
+	}
+
+	return nil
 }
 
 func closerOf(r io.Reader) io.Closer {
@@ -316,26 +456,30 @@ func closerOf(r io.Reader) io.Closer {
 	return nil
 }
 
-// IsCompressed reports whether b contains compression magic bytes for gzip, brotli, or zstd.
-func IsCompressed(b []byte) bool {
-	if len(b) < 4 {
+// IsCompressed checks magic header bytes to detect gzip or zstd compressed payloads.
+func IsCompressed(data []byte) bool {
+	if len(data) < 2 {
 		return false
 	}
 
-	// Gzip magic (0x1f, 0x8b)
-	if b[0] == 0x1f && b[1] == 0x8b {
+	// Gzip magic: 0x1f, 0x8b
+	if data[0] == 0x1f && data[1] == 0x8b {
 		return true
 	}
 
-	// Zstd magic (0x28, 0xb5, 0x2f, 0xfd)
-	if b[0] == 0x28 && b[1] == 0xb5 && b[2] == 0x2f && b[3] == 0xfd {
+	// Zstd magic: 0x28, 0xb5, 0x2f, 0xfd
+	if len(data) >= 4 && data[0] == 0x28 && data[1] == 0xb5 && data[2] == 0x2f && data[3] == 0xfd {
 		return true
 	}
 
 	return false
 }
 
-// MatchesEncoding reports whether encoding matches the specified algorithm (case-insensitive).
-func MatchesEncoding(headerEncoding []byte, algorithm string) bool {
-	return bytesconv.ContainsFoldASCII(headerEncoding, algorithm)
+// MatchesEncoding reports whether enc is present within the Content-Encoding header value.
+func MatchesEncoding(headerValue []byte, enc string) bool {
+	if len(headerValue) == 0 || len(enc) == 0 {
+		return false
+	}
+
+	return strings.Contains(strings.ToLower(string(headerValue)), strings.ToLower(enc))
 }

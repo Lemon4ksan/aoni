@@ -11,6 +11,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/lemon4ksan/foundation/borrow"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/valyala/fasthttp"
@@ -49,14 +50,10 @@ func createDeflateData(t testing.TB, payload []byte) []byte {
 }
 
 func createZstdRawBlock(payload []byte) []byte {
-	// Frame Header with SingleSegment=true, ContentSize=len(payload)
-	// Magic: 0x28, 0xb5, 0x2f, 0xfd
-	// FHD: 0x20 (Single_Segment=1)
-	// FCS: len(payload) as 1 byte (if < 256)
-	// Raw Block Header: last_block=1 (bit 0), block_type=raw (bits 1-2 = 0), block_size = len(payload) (bits 3-23)
-	// Block Size Header = 1 | (len(payload) << 3) as 3 bytes LE
 	var buf bytes.Buffer
-	buf.Write([]byte{0x28, 0xb5, 0x2f, 0xfd, 0x20, byte(len(payload))})
+	// Frame Header: Magic 4B, FHD 1B (SingleSegment=0), Window_Descriptor 1B (0x20 = 256KB window)
+	buf.Write([]byte{0x28, 0xb5, 0x2f, 0xfd, 0x00, 0x20})
+	// Block Header: last_block=1 (bit 0), block_type=raw (0), block_size = len(payload) (bits 3-23)
 	bh := uint32(1) | (uint32(len(payload)) << 3)
 	buf.Write([]byte{byte(bh), byte(bh >> 8), byte(bh >> 16)})
 	buf.Write(payload)
@@ -324,5 +321,80 @@ func BenchmarkStdlibInflate(b *testing.B) {
 		r := flate.NewReader(bytes.NewReader(compressed))
 		_, _ = io.ReadAll(r)
 		_ = r.Close()
+	}
+}
+
+func TestDecompressScoped_AllEncodings(t *testing.T) {
+	t.Parallel()
+
+	raw := []byte("Zero allocation scoped decompression test across all RFC standard algorithms in aoni.")
+
+	tests := []struct {
+		encoding   string
+		compressed []byte
+	}{
+		{encoding: "gzip", compressed: createGzipData(t, raw)},
+		{encoding: "br", compressed: fasthttp.AppendBrotliBytes(nil, raw)},
+		{encoding: "zstd", compressed: createZstdRawBlock(raw)},
+		{encoding: "deflate", compressed: createDeflateData(t, raw)},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.encoding, func(t *testing.T) {
+			t.Parallel()
+
+			s := borrow.AcquireScope()
+			defer s.Release()
+
+			decompressed, err := compress.DecompressScoped(s, tc.encoding, tc.compressed)
+			require.NoError(t, err)
+			assert.Equal(t, raw, decompressed.AsSlice())
+		})
+	}
+}
+
+func BenchmarkDecompressScoped_Gzip(b *testing.B) {
+	payload := []byte(strings.Repeat("Zero allocation gzip scoped decompression in aoni. ", 50))
+	compressed := createGzipData(nil, payload)
+
+	b.ReportAllocs()
+	b.ResetTimer()
+
+	s := borrow.AcquireScope()
+	defer s.Release()
+
+	for b.Loop() {
+		res, err := compress.GunzipScoped(s, compressed)
+		if err != nil {
+			b.Fatal(err)
+		}
+
+		_ = res
+
+		s.Release()
+		s = borrow.AcquireScope()
+	}
+}
+
+func BenchmarkDecompressScoped_Zstd(b *testing.B) {
+	payload := []byte(strings.Repeat("Zero allocation zstd scoped decompression in aoni. ", 50))
+	compressed := createZstdRawBlock(payload)
+
+	b.ReportAllocs()
+	b.ResetTimer()
+
+	s := borrow.AcquireScope()
+	defer s.Release()
+
+	for b.Loop() {
+		res, err := compress.UnzstdScoped(s, compressed)
+		if err != nil {
+			b.Fatal(err)
+		}
+
+		_ = res
+
+		s.Release()
+		s = borrow.AcquireScope()
 	}
 }

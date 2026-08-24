@@ -9,6 +9,7 @@ import (
 	"errors"
 	"io"
 
+	"github.com/lemon4ksan/foundation/borrow"
 	"github.com/lemon4ksan/foundation/silicon/pool"
 )
 
@@ -126,6 +127,71 @@ func Decompress(dst, src []byte) ([]byte, error) {
 		case decoderNeedsMoreInput:
 			if len(r.in) == 0 {
 				return dst, io.ErrUnexpectedEOF
+			}
+		}
+	}
+}
+
+// DecompressScoped decompresses a Brotli payload directly into a zero-allocation scoped buffer.
+func DecompressScoped(s *borrow.Scope, src []byte) (borrow.Bytes, error) {
+	if s == nil {
+		raw, err := Decompress(nil, src)
+		if err != nil {
+			return borrow.Bytes{}, err
+		}
+
+		return borrow.NewBytes(raw, nil), nil
+	}
+
+	if len(src) == 0 {
+		return borrow.Bytes{}, nil
+	}
+
+	r := AcquireReader(nil)
+	defer ReleaseReader(r)
+
+	r.in = src
+
+	initCap := max(len(src)*2, 1024)
+	b := s.AllocBytes(initCap)
+	dst := b.AsSlice()[:0]
+
+	for {
+		if len(dst) == cap(dst) {
+			newCap := max(cap(dst)*2, 1024)
+			newB := s.AllocBytes(newCap)
+			newDst := newB.AsSlice()[:len(dst)]
+			copy(newDst, dst)
+			dst = newDst
+			b = newB
+		}
+
+		outCap := cap(dst) - len(dst)
+		r.streamAvailIn = uint(len(r.in))
+		r.streamAvailOut = uint(outCap)
+		r.streamNextOut = dst[len(dst):cap(dst)]
+
+		result := r.decompressStream(&r.streamAvailIn, &r.in, &r.streamAvailOut, &r.streamNextOut)
+		written := outCap - int(r.streamAvailOut)
+		dst = dst[:len(dst)+written]
+
+		switch result {
+		case decoderResultSuccess:
+			if len(r.in) > 0 {
+				return b.Slice(0, len(dst)), errExcessiveInput
+			}
+
+			return b.Slice(0, len(dst)), nil
+
+		case decoderResultError:
+			return b.Slice(0, len(dst)), decodeError(r.getErrorCode())
+
+		case decoderResultNeedsMoreOutput:
+			continue
+
+		case decoderNeedsMoreInput:
+			if len(r.in) == 0 {
+				return b.Slice(0, len(dst)), io.ErrUnexpectedEOF
 			}
 		}
 	}

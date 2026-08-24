@@ -219,15 +219,15 @@ func (s *Reader) initState() bool {
 	s.rbRoundtrips = 0
 	s.partialPosOut = 0
 
-	clear(s.blockTypeTrees)
+	s.blockTypeTrees = s.blockTypeTrees[:0]
 	s.blockLenTrees = nil
 	s.ringbufferSize = 0
 	s.newRingbufferSize = 0
 	s.ringbufferMask = 0
 
-	s.contextMap = nil
-	s.contextModes = nil
-	s.distContextMap = nil
+	s.contextMap = s.contextMap[:0]
+	s.contextModes = s.contextModes[:0]
+	s.distContextMap = s.distContextMap[:0]
 	s.contextMapSlice = nil
 	s.distContextMapSlice = nil
 

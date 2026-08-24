@@ -11,6 +11,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/lemon4ksan/foundation/borrow"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/valyala/fasthttp"
@@ -232,6 +233,34 @@ func BenchmarkBrotliDecompressReuse(b *testing.B) {
 		if err != nil {
 			b.Fatal(err)
 		}
+	}
+}
+
+func BenchmarkBrotliDecompressScoped(b *testing.B) {
+	data := []byte(strings.Repeat(
+		"<!DOCTYPE html><html><head><title>Benchmark Page</title></head><body>"+
+			"<h1>High Performance Brotli RFC 7932 Engine</h1><p>Zero allocation streaming decoder in Go.</p>"+
+			"</body></html>\n",
+		100,
+	))
+	compressed := fasthttp.AppendBrotliBytes(nil, data)
+
+	b.ReportAllocs()
+	b.SetBytes(int64(len(data)))
+
+	s := borrow.AcquireScope()
+	defer s.Release()
+
+	for b.Loop() {
+		res, err := brotli.DecompressScoped(s, compressed)
+		if err != nil {
+			b.Fatal(err)
+		}
+
+		_ = res
+
+		s.Release()
+		s = borrow.AcquireScope()
 	}
 }
 

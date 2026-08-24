@@ -257,3 +257,126 @@ func Clean(cond bool) int {
 	leakRule := &lint.RuleBorrowLinearLeak{}
 	require.Empty(t, runBorrowRule(t, leakRule, src))
 }
+
+func TestRuleBorrowUseAfterRelease_InterproceduralMoves(t *testing.T) {
+	t.Parallel()
+
+	src := `package test
+
+// @borrow:moves(buf)
+func consumeBuffer(buf borrow.Bytes) {
+	buf.Release()
+}
+
+func Process(buf borrow.Bytes) {
+	consumeBuffer(buf)
+	println(string(buf.AsSlice()))
+}`
+
+	rule := &lint.RuleBorrowUseAfterRelease{}
+	diags := runBorrowRule(t, rule, src)
+	require.NotEmpty(t, diags, "must detect use after inter-procedural move")
+	require.Equal(t, "B002", diags[0].RuleID)
+}
+
+func TestRuleBorrowMultipleMutable_DisjointFields(t *testing.T) {
+	t.Parallel()
+
+	// Disjoint field borrowing is allowed (no diagnostic)
+	srcAllowed := `package test
+
+type Order struct {
+	Header borrow.Cell[string]
+	Items  borrow.Cell[[]int]
+}
+
+func Process(order *Order) {
+	h := order.Header.BorrowMut()
+	items := order.Items.BorrowMut()
+	_ = h
+	_ = items
+}`
+
+	rule := &lint.RuleBorrowMultipleMutable{}
+	diagsAllowed := runBorrowRule(t, rule, srcAllowed)
+	require.Empty(t, diagsAllowed, "disjoint field borrows must be allowed without error")
+
+	// Same field borrowing violates exclusivity (triggers B003)
+	srcConflict := `package test
+
+type Order struct {
+	Header borrow.Cell[string]
+}
+
+func ProcessConflict(order *Order) {
+	h1 := order.Header.BorrowMut()
+	h2 := order.Header.BorrowMut()
+	_ = h1
+	_ = h2
+}`
+
+	diagsConflict := runBorrowRule(t, rule, srcConflict)
+	require.NotEmpty(t, diagsConflict, "must detect multiple mutable borrows on the same struct field")
+	require.Equal(t, "B003", diagsConflict[0].RuleID)
+}
+
+func TestRuleBorrowMultipleMutable_FreezeUnfreeze(t *testing.T) {
+	t.Parallel()
+
+	// Mutation while frozen triggers B003
+	srcFrozenMutation := `package test
+
+func HandleFreeze(mutBuf *borrow.Mut[[]byte]) {
+	reader := mutBuf.Freeze()
+	_ = reader
+	mutBuf.Write([]byte("danger"))
+}`
+
+	rule := &lint.RuleBorrowMultipleMutable{}
+	diags := runBorrowRule(t, rule, srcFrozenMutation)
+	require.NotEmpty(t, diags, "must detect mutation of buffer while frozen by active read handle")
+	require.Equal(t, "B003", diags[0].RuleID)
+
+	// Clean: Unfreeze restores mutation rights
+	srcCleanUnfreeze := `package test
+
+func HandleUnfreeze(mutBuf *borrow.Mut[[]byte]) {
+	reader := mutBuf.Freeze()
+	_ = reader
+	mutBuf.Unfreeze(reader)
+	mutBuf.Write([]byte("safe"))
+}`
+
+	diagsClean := runBorrowRule(t, rule, srcCleanUnfreeze)
+	require.Empty(t, diagsClean, "unfreeze must restore mutation rights without errors")
+}
+
+func TestRuleBorrowGlobalEscape(t *testing.T) {
+	t.Parallel()
+
+	srcEscape := `package test
+
+var GlobalBuffer []byte
+
+func Process(b borrow.Bytes) {
+	GlobalBuffer = b.AsSlice()
+}`
+
+	rule := &lint.RuleBorrowGlobalEscape{}
+	diags := runBorrowRule(t, rule, srcEscape)
+	require.NotEmpty(t, diags, "must detect escape into package-level variable")
+	require.Equal(t, "B010", diags[0].RuleID)
+
+	srcClean := `package test
+
+var GlobalBuffer []byte
+
+func ProcessClean(b borrow.Bytes) {
+	local := b.AsSlice()
+	println(len(local))
+}`
+
+	diagsClean := runBorrowRule(t, rule, srcClean)
+	require.Empty(t, diagsClean, "local use of borrowed slice must not trigger B010")
+}
+

@@ -170,7 +170,7 @@ func (r *RuleBorrowEscape) Run(pass *Pass) []Diagnostic {
 	return diags
 }
 
-// RuleBorrowUseAfterRelease (B002) flags usage of resources after .Release() or .Move() using path-sensitive CFG.
+// RuleBorrowUseAfterRelease (B002) flags usage of resources after .Release(), .Move(), or @borrow:moves function calls.
 type RuleBorrowUseAfterRelease struct{}
 
 func (r *RuleBorrowUseAfterRelease) ID() string                { return "B002" }
@@ -188,6 +188,7 @@ func (r *RuleBorrowUseAfterRelease) Run(pass *Pass) []Diagnostic {
 	}
 
 	var diags []Diagnostic
+	summaries := parsePackageSummaries(pass.ASTFile)
 
 	for _, decl := range pass.ASTFile.Decls {
 		fn, ok := decl.(*ast.FuncDecl)
@@ -196,6 +197,17 @@ func (r *RuleBorrowUseAfterRelease) Run(pass *Pass) []Diagnostic {
 		}
 
 		borrowVars := make(map[string]bool)
+
+		// Check parameters
+		if fn.Type != nil && fn.Type.Params != nil {
+			for _, param := range fn.Type.Params.List {
+				if isBorrowType(exprToString(param.Type)) {
+					for _, name := range param.Names {
+						borrowVars[name.Name] = true
+					}
+				}
+			}
+		}
 
 		// Identify borrow variables
 		ast.Inspect(fn.Body, func(n ast.Node) bool {
@@ -245,7 +257,7 @@ func (r *RuleBorrowUseAfterRelease) Run(pass *Pass) []Diagnostic {
 						}
 					}
 
-					// Check for call to x.Release() or x.Move()
+					// 1. Check for call to x.Release() or x.Move()
 					ast.Inspect(node, func(inner ast.Node) bool {
 						if call, ok := inner.(*ast.CallExpr); ok {
 							if sel, ok := call.Fun.(*ast.SelectorExpr); ok {
@@ -253,6 +265,28 @@ func (r *RuleBorrowUseAfterRelease) Run(pass *Pass) []Diagnostic {
 									if ident, ok := sel.X.(*ast.Ident); ok && borrowVars[ident.Name] {
 										pos := pass.FileSet.Position(sel.Pos())
 										releasedAt[ident.Name] = pos.Line
+									}
+								}
+							}
+
+							// 2. Check for inter-procedural @borrow:moves function calls
+							calleeName := exprToString(call.Fun)
+							if sum, exists := summaries[calleeName]; exists {
+								if sum.MovesAll {
+									for _, arg := range call.Args {
+										place := parsePlacePath(arg)
+										if borrowVars[place.Root] {
+											pos := pass.FileSet.Position(call.Pos())
+											releasedAt[place.Root] = pos.Line
+										}
+									}
+								} else {
+									for idx, arg := range call.Args {
+										place := parsePlacePath(arg)
+										if borrowVars[place.Root] && (sum.MovesIndices[idx] || sum.MovesParams[place.Root]) {
+											pos := pass.FileSet.Position(call.Pos())
+											releasedAt[place.Root] = pos.Line
+										}
 									}
 								}
 							}
@@ -315,7 +349,7 @@ func (r *RuleBorrowUseAfterRelease) Run(pass *Pass) []Diagnostic {
 	return diags
 }
 
-// RuleBorrowMultipleMutable (B003) flags multiple concurrent mutable borrows along the same execution path.
+// RuleBorrowMultipleMutable (B003) flags multiple concurrent mutable borrows or mutation while frozen.
 type RuleBorrowMultipleMutable struct{}
 
 func (r *RuleBorrowMultipleMutable) ID() string                { return "B003" }
@@ -324,7 +358,7 @@ func (r *RuleBorrowMultipleMutable) Category() Category        { return Category
 func (r *RuleBorrowMultipleMutable) DefaultSeverity() Severity { return SeverityError }
 func (r *RuleBorrowMultipleMutable) IsFixable() bool           { return false }
 func (r *RuleBorrowMultipleMutable) Description() string {
-	return "Detects multiple active mutable borrows violating Aliasing XOR Mutability along execution paths"
+	return "Detects multiple active mutable borrows violating Aliasing XOR Mutability or mutations while frozen"
 }
 
 func (r *RuleBorrowMultipleMutable) Run(pass *Pass) []Diagnostic {
@@ -344,10 +378,102 @@ func (r *RuleBorrowMultipleMutable) Run(pass *Pass) []Diagnostic {
 		reported := make(map[string]bool)
 
 		g.WalkPaths(func(path []*cfg.Block) {
-			mutBorrows := make(map[string][]token.Pos)
+			type activeLoan struct {
+				place PlacePath
+				pos   token.Pos
+				isMut bool
+			}
+
+			var loans []activeLoan
+			frozenBy := make(map[string]string)     // target.Raw -> reader handle
+			frozenPos := make(map[string]token.Pos) // target.Raw -> freeze pos
 
 			for _, block := range path {
 				for _, node := range block.Nodes {
+					// 1. Detect Freeze assignment: reader := mutBuf.Freeze()
+					if assign, ok := node.(*ast.AssignStmt); ok {
+						for i, rhs := range assign.Rhs {
+							if call, ok := rhs.(*ast.CallExpr); ok {
+								if sel, ok := call.Fun.(*ast.SelectorExpr); ok && sel.Sel.Name == "Freeze" {
+									targetPlace := parsePlacePath(sel.X)
+									if i < len(assign.Lhs) {
+										if readerIdent, ok := assign.Lhs[i].(*ast.Ident); ok {
+											frozenBy[targetPlace.Raw] = readerIdent.Name
+											frozenPos[targetPlace.Raw] = sel.Pos()
+										}
+									}
+								}
+							}
+						}
+					}
+
+					// 2. Detect Unfreeze: mutBuf.Unfreeze(reader)
+					ast.Inspect(node, func(inner ast.Node) bool {
+						if call, ok := inner.(*ast.CallExpr); ok {
+							if sel, ok := call.Fun.(*ast.SelectorExpr); ok && sel.Sel.Name == "Unfreeze" {
+								targetPlace := parsePlacePath(sel.X)
+								delete(frozenBy, targetPlace.Raw)
+								delete(frozenPos, targetPlace.Raw)
+							}
+						}
+						return true
+					})
+
+					// 3. Detect mutation operations while frozen
+					ast.Inspect(node, func(inner ast.Node) bool {
+						call, ok := inner.(*ast.CallExpr)
+						if !ok {
+							return true
+						}
+
+						sel, ok := call.Fun.(*ast.SelectorExpr)
+						if !ok {
+							return true
+						}
+
+						targetPlace := parsePlacePath(sel.X)
+						if reader, isFrozen := frozenBy[targetPlace.Raw]; isFrozen {
+							methodName := sel.Sel.Name
+							if methodName == "BorrowMut" || methodName == "MustBorrowMut" ||
+								methodName == "Write" || methodName == "Set" || methodName == "Put" ||
+								methodName == "Mutate" || methodName == "Append" {
+								pos := pass.FileSet.Position(sel.Pos())
+								frzPos := pass.FileSet.Position(frozenPos[targetPlace.Raw])
+								key := fmt.Sprintf("freeze:%s:%d:%d", targetPlace.Raw, frzPos.Line, pos.Line)
+								if !reported[key] {
+									reported[key] = true
+									msg := fmt.Sprintf(
+										"cannot mutate %q while frozen by active read handle %q (frozen at line %d)",
+										targetPlace.Raw,
+										reader,
+										frzPos.Line,
+									)
+									sug := fmt.Sprintf(
+										"Call '%s.Unfreeze(%s)' or release read handle before mutating",
+										targetPlace.Raw,
+										reader,
+									)
+
+									diags = append(diags, Diagnostic{
+										RuleID:     r.ID(),
+										RuleName:   r.Name(),
+										Severity:   r.DefaultSeverity(),
+										Category:   r.Category(),
+										Target:     targetPlace.Raw,
+										Message:    msg,
+										FilePath:   pass.FilePath,
+										Line:       pos.Line,
+										Column:     pos.Column,
+										Suggestion: sug,
+									})
+								}
+							}
+						}
+
+						return true
+					})
+
+					// 4. Track Borrow / BorrowMut with Disjoint Field Borrowing
 					ast.Inspect(node, func(n ast.Node) bool {
 						call, ok := n.(*ast.CallExpr)
 						if !ok {
@@ -359,43 +485,54 @@ func (r *RuleBorrowMultipleMutable) Run(pass *Pass) []Diagnostic {
 							return true
 						}
 
-						if sel.Sel.Name == "BorrowMut" || sel.Sel.Name == "MustBorrowMut" {
-							target := exprToString(sel.X)
-							mutBorrows[target] = append(mutBorrows[target], sel.Pos())
+						isMut := sel.Sel.Name == "BorrowMut" || sel.Sel.Name == "MustBorrowMut"
+						isRef := sel.Sel.Name == "Borrow" || sel.Sel.Name == "MustBorrow"
+						if !isMut && !isRef {
+							return true
 						}
+
+						targetPlace := parsePlacePath(sel.X)
+
+						for _, prev := range loans {
+							if prev.place.ConflictsWith(targetPlace) {
+								if prev.isMut || isMut {
+									firstPos := pass.FileSet.Position(prev.pos)
+									secondPos := pass.FileSet.Position(sel.Pos())
+									key := fmt.Sprintf("mut:%s:%d:%d", targetPlace.Raw, firstPos.Line, secondPos.Line)
+
+									if !reported[key] {
+										reported[key] = true
+										msg := fmt.Sprintf(
+											"multiple active mutable borrows on %q along execution path (first borrow at line %d)",
+											targetPlace.Raw,
+											firstPos.Line,
+										)
+
+										diags = append(diags, Diagnostic{
+											RuleID:     r.ID(),
+											RuleName:   r.Name(),
+											Severity:   r.DefaultSeverity(),
+											Category:   r.Category(),
+											Target:     targetPlace.Raw,
+											Message:    msg,
+											FilePath:   pass.FilePath,
+											Line:       secondPos.Line,
+											Column:     secondPos.Column,
+											Suggestion: "Freeze the previous borrow with '.Freeze()' or release it before borrowing again",
+										})
+									}
+								}
+							}
+						}
+
+						loans = append(loans, activeLoan{
+							place: targetPlace,
+							pos:   sel.Pos(),
+							isMut: isMut,
+						})
 
 						return true
 					})
-				}
-			}
-
-			for target, positions := range mutBorrows {
-				if len(positions) > 1 {
-					secondPos := pass.FileSet.Position(positions[1])
-					firstPos := pass.FileSet.Position(positions[0])
-					key := fmt.Sprintf("%s:%d:%d", target, firstPos.Line, secondPos.Line)
-
-					if !reported[key] {
-						reported[key] = true
-						msg := fmt.Sprintf(
-							"multiple active mutable borrows on %q along execution path (first borrow at line %d)",
-							target,
-							firstPos.Line,
-						)
-
-						diags = append(diags, Diagnostic{
-							RuleID:     r.ID(),
-							RuleName:   r.Name(),
-							Severity:   r.DefaultSeverity(),
-							Category:   r.Category(),
-							Target:     target,
-							Message:    msg,
-							FilePath:   pass.FilePath,
-							Line:       secondPos.Line,
-							Column:     secondPos.Column,
-							Suggestion: "Freeze the previous borrow with '.Freeze()' or release it before borrowing again",
-						})
-					}
 				}
 			}
 		})
@@ -1079,16 +1216,310 @@ func (r *RuleBorrowClosureEscape) Run(pass *Pass) []Diagnostic {
 	return diags
 }
 
+// RuleBorrowGlobalEscape (B010) flags escaping borrowed zero-copy handles or slices into package-level variables.
+type RuleBorrowGlobalEscape struct{}
+
+func (r *RuleBorrowGlobalEscape) ID() string                { return "B010" }
+func (r *RuleBorrowGlobalEscape) Name() string              { return "borrow-global-escape" }
+func (r *RuleBorrowGlobalEscape) Category() Category        { return CategoryBorrow }
+func (r *RuleBorrowGlobalEscape) DefaultSeverity() Severity { return SeverityError }
+func (r *RuleBorrowGlobalEscape) IsFixable() bool           { return false }
+func (r *RuleBorrowGlobalEscape) Description() string {
+	return "Prohibits borrowed zero-copy handles or slices from escaping into package-level global variables or structures"
+}
+
+func (r *RuleBorrowGlobalEscape) Run(pass *Pass) []Diagnostic {
+	if pass.ASTFile == nil {
+		return nil
+	}
+
+	var diags []Diagnostic
+
+	// 1. Collect all package-level variables
+	globalVars := make(map[string]bool)
+	for _, decl := range pass.ASTFile.Decls {
+		gen, ok := decl.(*ast.GenDecl)
+		if !ok || gen.Tok != token.VAR {
+			continue
+		}
+
+		for _, spec := range gen.Specs {
+			vspec, ok := spec.(*ast.ValueSpec)
+			if !ok {
+				continue
+			}
+
+			for _, name := range vspec.Names {
+				globalVars[name.Name] = true
+			}
+		}
+	}
+
+	if len(globalVars) == 0 {
+		return nil
+	}
+
+	for _, decl := range pass.ASTFile.Decls {
+		fn, ok := decl.(*ast.FuncDecl)
+		if !ok || fn.Body == nil {
+			continue
+		}
+
+		borrowVars := make(map[string]bool)
+
+		if fn.Type != nil && fn.Type.Params != nil {
+			for _, param := range fn.Type.Params.List {
+				if isBorrowType(exprToString(param.Type)) {
+					for _, name := range param.Names {
+						borrowVars[name.Name] = true
+					}
+				}
+			}
+		}
+
+		ast.Inspect(fn.Body, func(n ast.Node) bool {
+			if assign, ok := n.(*ast.AssignStmt); ok {
+				for i, rhs := range assign.Rhs {
+					if isBorrowExpr(exprToString(rhs)) {
+						if i < len(assign.Lhs) {
+							if ident, ok := assign.Lhs[i].(*ast.Ident); ok {
+								borrowVars[ident.Name] = true
+							}
+						}
+					}
+				}
+			}
+
+			return true
+		})
+
+		if len(borrowVars) == 0 {
+			continue
+		}
+
+		ast.Inspect(fn.Body, func(n ast.Node) bool {
+			assign, ok := n.(*ast.AssignStmt)
+			if !ok {
+				return true
+			}
+
+			for i, lhs := range assign.Lhs {
+				targetPlace := parsePlacePath(lhs)
+				if globalVars[targetPlace.Root] {
+					if i < len(assign.Rhs) {
+						rhs := assign.Rhs[i]
+						rhsStr := exprToString(rhs)
+						for bVar := range borrowVars {
+							if strings.Contains(rhsStr, bVar) {
+								pos := pass.FileSet.Position(assign.Pos())
+								msg := fmt.Sprintf(
+									"borrowed handle %q escapes local lifetime into package-level variable %q",
+									bVar,
+									targetPlace.Raw,
+								)
+								sug := fmt.Sprintf(
+									"Clone '%s.Clone()' or copy bytes into a newly allocated slice before storing in global state",
+									bVar,
+								)
+
+								diags = append(diags, Diagnostic{
+									RuleID:     r.ID(),
+									RuleName:   r.Name(),
+									Severity:   r.DefaultSeverity(),
+									Category:   r.Category(),
+									Target:     targetPlace.Raw,
+									Message:    msg,
+									FilePath:   pass.FilePath,
+									Line:       pos.Line,
+									Column:     pos.Column,
+									Suggestion: sug,
+								})
+							}
+						}
+					}
+				}
+			}
+
+			return true
+		})
+	}
+
+	return diags
+}
+
+// PlacePath models a memory location projection (e.g., "order.Header" or "buffer")
+// inspired by rustc_borrowck MIR Place projections.
+type PlacePath struct {
+	Root     string
+	Segments []string
+	Raw      string
+}
+
+func parsePlacePath(expr ast.Expr) PlacePath {
+	if expr == nil {
+		return PlacePath{}
+	}
+
+	raw := exprToString(expr)
+	var segments []string
+	curr := expr
+
+	for {
+		switch e := curr.(type) {
+		case *ast.SelectorExpr:
+			segments = append([]string{e.Sel.Name}, segments...)
+			curr = e.X
+		case *ast.Ident:
+			return PlacePath{
+				Root:     e.Name,
+				Segments: segments,
+				Raw:      raw,
+			}
+		case *ast.ParenExpr:
+			curr = e.X
+		case *ast.StarExpr:
+			curr = e.X
+		case *ast.UnaryExpr:
+			curr = e.X
+		default:
+			return PlacePath{
+				Root:     raw,
+				Segments: segments,
+				Raw:      raw,
+			}
+		}
+	}
+}
+
+// ConflictsWith reports whether two place projections alias or overlap in memory.
+func (p PlacePath) ConflictsWith(other PlacePath) bool {
+	if p.Root == "" || other.Root == "" {
+		return false
+	}
+
+	if p.Root != other.Root {
+		return false
+	}
+
+	// If either is the entire root (no subfield segments), they conflict
+	if len(p.Segments) == 0 || len(other.Segments) == 0 {
+		return true
+	}
+
+	minLen := len(p.Segments)
+	if len(other.Segments) < minLen {
+		minLen = len(other.Segments)
+	}
+
+	for i := 0; i < minLen; i++ {
+		if p.Segments[i] != other.Segments[i] {
+			// Disjoint field projections on the same root struct
+			return false
+		}
+	}
+
+	// Same prefix or identical path -> conflict
+	return true
+}
+
+// Inter-procedural summary utilities.
+
+type funcSummary struct {
+	MovesAll     bool
+	MovesIndices map[int]bool
+	MovesParams  map[string]bool
+	ReadsParams  map[string]bool
+}
+
+func parsePackageSummaries(file *ast.File) map[string]funcSummary {
+	summaries := make(map[string]funcSummary)
+	if file == nil {
+		return summaries
+	}
+
+	for _, decl := range file.Decls {
+		fn, ok := decl.(*ast.FuncDecl)
+		if !ok || fn.Name == nil {
+			continue
+		}
+
+		funcName := fn.Name.Name
+		sum := funcSummary{
+			MovesIndices: make(map[int]bool),
+			MovesParams:  make(map[string]bool),
+			ReadsParams:  make(map[string]bool),
+		}
+
+		if fn.Doc != nil {
+			for _, comment := range fn.Doc.List {
+				text := strings.TrimSpace(comment.Text)
+				if strings.Contains(text, "@borrow:moves") || strings.Contains(text, "@borrow:move") {
+					sum.MovesAll = true
+					if idx := strings.Index(text, "("); idx != -1 {
+						if endIdx := strings.Index(text[idx:], ")"); endIdx != -1 {
+							paramList := text[idx+1 : idx+endIdx]
+							sum.MovesAll = false
+							for _, p := range strings.Split(paramList, ",") {
+								pName := strings.TrimSpace(p)
+								if pName != "" {
+									sum.MovesParams[pName] = true
+								}
+							}
+						}
+					}
+				}
+
+				if strings.Contains(text, "@borrow:reads") || strings.Contains(text, "@borrow:read") {
+					if idx := strings.Index(text, "("); idx != -1 {
+						if endIdx := strings.Index(text[idx:], ")"); endIdx != -1 {
+							paramList := text[idx+1 : idx+endIdx]
+							for _, p := range strings.Split(paramList, ",") {
+								pName := strings.TrimSpace(p)
+								if pName != "" {
+									sum.ReadsParams[pName] = true
+								}
+							}
+						}
+					}
+				}
+			}
+		}
+
+		if fn.Type != nil && fn.Type.Params != nil {
+			paramIdx := 0
+			for _, field := range fn.Type.Params.List {
+				for _, name := range field.Names {
+					if sum.MovesParams[name.Name] {
+						sum.MovesIndices[paramIdx] = true
+					}
+					paramIdx++
+				}
+			}
+		}
+
+		if sum.MovesAll || len(sum.MovesIndices) > 0 || len(sum.MovesParams) > 0 || len(sum.ReadsParams) > 0 {
+			summaries[funcName] = sum
+		}
+	}
+
+	return summaries
+}
+
 // Helper utilities for AST parsing in borrow rules.
 
 func isBorrowExpr(expr string) bool {
 	return strings.Contains(expr, "borrow.NewBytes") ||
+		strings.Contains(expr, "borrow.NewBox") ||
+		strings.Contains(expr, "borrow.Alloc") ||
 		strings.Contains(expr, "AllocBytes") ||
+		strings.Contains(expr, "AllocMut") ||
 		strings.Contains(expr, "Borrow") ||
 		strings.Contains(expr, "BorrowMut") ||
+		strings.Contains(expr, "MustBorrow") ||
+		strings.Contains(expr, "MustBorrowMut") ||
 		strings.Contains(expr, "BodyUnsafe") ||
 		strings.Contains(expr, "BodyBytes") ||
-		strings.Contains(expr, "borrow.NewBox")
+		strings.Contains(expr, "Freeze")
 }
 
 func isBorrowType(typeStr string) bool {
@@ -1096,6 +1527,8 @@ func isBorrowType(typeStr string) bool {
 		strings.Contains(typeStr, "borrow.Ref") ||
 		strings.Contains(typeStr, "borrow.Mut") ||
 		strings.Contains(typeStr, "borrow.Box") ||
+		strings.Contains(typeStr, "borrow.Cell") ||
+		strings.Contains(typeStr, "borrow.OwnedBytes") ||
 		strings.Contains(typeStr, "UnsafeBytes")
 }
 
