@@ -262,6 +262,7 @@ func writeServiceHeader(buf *bytes.Buffer, spec *Document, cfg ImportConfig, ser
 	if spec.Components != nil && len(spec.Components.SecuritySchemes) > 0 {
 		schemeNames := generic.Keys(spec.Components.SecuritySchemes)
 		slices.Sort(schemeNames)
+
 		for _, name := range schemeNames {
 			scheme := spec.Components.SecuritySchemes[name]
 			if scheme == nil {
@@ -389,28 +390,26 @@ func writeOperationDirectives(
 }
 
 func writeMethodExtensionDirectives(buf *bytes.Buffer, exts map[string]any, spec *Document) {
-	if exts == nil {
-		return
-	}
+	if exts != nil {
+		if unwrap := extString(exts, "x-vortex-unwrap"); unwrap != "" {
+			fmt.Fprintf(buf, "\t// @unwrap %q\n", unwrap)
+		}
 
-	if unwrap := extString(exts, "x-vortex-unwrap"); unwrap != "" {
-		fmt.Fprintf(buf, "\t// @unwrap %q\n", unwrap)
-	}
+		if callFn := extString(exts, "x-vortex-call"); callFn != "" {
+			fmt.Fprintf(buf, "\t// @call %q\n", callFn)
+		}
 
-	if callFn := extString(exts, "x-vortex-call"); callFn != "" {
-		fmt.Fprintf(buf, "\t// @call %q\n", callFn)
-	}
+		if extBool(exts, "x-vortex-idempotent") {
+			fmt.Fprintf(buf, "\t// @idempotent\n")
+		}
 
-	if extBool(exts, "x-vortex-idempotent") {
-		fmt.Fprintf(buf, "\t// @idempotent\n")
-	}
+		if extBool(exts, "x-vortex-coalesce") {
+			fmt.Fprintf(buf, "\t// @coalesce\n")
+		}
 
-	if extBool(exts, "x-vortex-coalesce") {
-		fmt.Fprintf(buf, "\t// @coalesce\n")
-	}
-
-	if extBool(exts, "x-vortex-etag") {
-		fmt.Fprintf(buf, "\t// @etag\n")
+		if extBool(exts, "x-vortex-etag") {
+			fmt.Fprintf(buf, "\t// @etag\n")
+		}
 	}
 
 	sinceVal := resolveSinceVersion(exts, spec)
@@ -418,12 +417,20 @@ func writeMethodExtensionDirectives(buf *bytes.Buffer, exts map[string]any, spec
 		fmt.Fprintf(buf, "\t// @since %q\n", sinceVal)
 	}
 
-	writeMethodHeaders(buf, exts, spec)
+	if exts != nil {
+		writeMethodHeaders(buf, exts, spec)
+	}
 }
 
 func resolveSinceVersion(exts map[string]any, spec *Document) string {
-	if since := extString(exts, "x-vortex-since"); since != "" {
-		return since
+	if exts != nil {
+		if since := extString(exts, "x-vortex-since"); since != "" {
+			return since
+		}
+
+		if since := extString(exts, "x-since"); since != "" {
+			return since
+		}
 	}
 
 	if spec != nil && spec.Info != nil && spec.Info.Version != "" {

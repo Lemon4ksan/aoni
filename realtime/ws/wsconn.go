@@ -420,13 +420,17 @@ func (c *wsRawConn) readFrameScoped(scope *borrow.Scope) (byte, []byte, error) {
 				if c.fragCompress {
 					c.fragCompress = false
 
-					var decompressed []byte
-					var decErr error
+					var (
+						decompressed []byte
+						decErr       error
+					)
+
 					if scope != nil {
 						decompressed, decErr = decompressNoContextTakeoverScoped(finalPayload, scope)
 					} else {
 						decompressed, decErr = decompressNoContextTakeover(finalPayload)
 					}
+
 					if decErr != nil {
 						return 0, nil, decErr
 					}
@@ -437,6 +441,7 @@ func (c *wsRawConn) readFrameScoped(scope *borrow.Scope) (byte, []byte, error) {
 				if scope != nil {
 					borrowed := scope.AllocBytes(len(finalPayload))
 					copy(borrowed.AsSlice(), finalPayload)
+
 					return finalOpcode, borrowed.AsSlice(), nil
 				}
 
@@ -454,13 +459,17 @@ func (c *wsRawConn) readFrameScoped(scope *borrow.Scope) (byte, []byte, error) {
 		if fin {
 			// Fast path for single unfragmented frame (99.9% of messages) - 0 copy, 0 alloc
 			if rsv1 && c.compress {
-				var decompressed []byte
-				var decErr error
+				var (
+					decompressed []byte
+					decErr       error
+				)
+
 				if scope != nil {
 					decompressed, decErr = decompressNoContextTakeoverScoped(payload, scope)
 				} else {
 					decompressed, decErr = decompressNoContextTakeover(payload)
 				}
+
 				if decErr != nil {
 					return 0, nil, decErr
 				}
@@ -818,6 +827,7 @@ func (c *wsH2Conn) ReadMessageTo(buf []byte) (int, int, error) {
 
 func (c *wsH2Conn) ReadMessageScoped(scope *borrow.Scope) (int, []byte, error) {
 	var stackBuf [4096]byte
+
 	n, err := c.Read(stackBuf[:])
 	if err != nil {
 		return 0, nil, err
@@ -826,6 +836,7 @@ func (c *wsH2Conn) ReadMessageScoped(scope *borrow.Scope) (int, []byte, error) {
 	if scope != nil {
 		borrowed := scope.AllocBytes(n)
 		copy(borrowed.AsSlice(), stackBuf[:n])
+
 		return FrameText, borrowed.AsSlice(), nil
 	}
 

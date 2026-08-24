@@ -203,10 +203,13 @@ func (r *DoQResolver) queryStreamRecords(ctx context.Context, host string, qtype
 }
 
 func sendDoQQuery(stream *quic.Stream, wireQuery []byte) error {
-	var stackBuf [512]byte
+	var (
+		stackBuf [512]byte
+		buf      []byte
+	)
 
 	totalLen := 2 + len(wireQuery)
-	var buf []byte
+
 	if totalLen <= len(stackBuf) {
 		buf = stackBuf[:totalLen]
 	} else {

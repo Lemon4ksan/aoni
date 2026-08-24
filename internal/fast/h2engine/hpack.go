@@ -656,11 +656,12 @@ func appendString(dst, src []byte, encode bool) []byte {
 		stackBuf [512]byte
 	)
 
-	if !encode {
+	switch {
+	case !encode:
 		payload = src
-	} else if len(src) <= 256 {
+	case len(src) <= 256:
 		payload = HuffmanEncode(stackBuf[:0], src)
-	} else {
+	default:
 		bufPtr = byteStorage.Get()
 		payload = HuffmanEncode((*bufPtr)[:0], src)
 	}

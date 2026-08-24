@@ -185,6 +185,7 @@ func TestShardedStore_SetGetEviction(t *testing.T) {
 
 func BenchmarkInMemoryStore_Parallel(b *testing.B) {
 	ctx := b.Context()
+
 	store := cache.NewInMemoryStore(0)
 	defer store.Close()
 
@@ -203,6 +204,7 @@ func BenchmarkInMemoryStore_Parallel(b *testing.B) {
 
 func BenchmarkShardedStore_Parallel(b *testing.B) {
 	ctx := b.Context()
+
 	store := cache.NewShardedStore[string, []byte](0)
 	defer store.Close()
 
@@ -218,4 +220,3 @@ func BenchmarkShardedStore_Parallel(b *testing.B) {
 		}
 	})
 }
-

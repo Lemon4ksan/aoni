@@ -70,12 +70,14 @@ func (r *twoSliceReader) Read(p []byte) (int, error) {
 // stripping trailing 0x00 0x00 0xFF 0xFF bytes after flushing.
 func compressNoContextTakeover(src []byte) ([]byte, error) {
 	buf := compressBufferStorage.Get()
-	buf.Reset()
 	defer compressBufferStorage.Put(buf)
 
+	buf.Reset()
+
 	fw := flateWriterStorage.Get()
-	fw.Reset(buf)
 	defer flateWriterStorage.Put(fw)
+
+	fw.Reset(buf)
 
 	if _, err := fw.Write(src); err != nil {
 		return nil, fmt.Errorf("%w: %w", ErrFlateCompressFailed, err)
@@ -115,8 +117,9 @@ func decompressNoContextTakeover(src []byte) ([]byte, error) {
 	}
 
 	outBuf := decompressBufferStorage.Get()
-	*outBuf = (*outBuf)[:0]
 	defer decompressBufferStorage.Put(outBuf)
+
+	*outBuf = (*outBuf)[:0]
 
 	var chunk [4096]byte
 	for {
@@ -124,10 +127,12 @@ func decompressNoContextTakeover(src []byte) ([]byte, error) {
 		if n > 0 {
 			*outBuf = append(*outBuf, chunk[:n]...)
 		}
+
 		if err != nil {
 			if err == io.EOF {
 				break
 			}
+
 			return nil, fmt.Errorf("%w: %w", ErrFlateDecompressFailed, err)
 		}
 	}
@@ -156,8 +161,9 @@ func decompressNoContextTakeoverScoped(src []byte, scope *borrow.Scope) ([]byte,
 	}
 
 	outBuf := decompressBufferStorage.Get()
-	*outBuf = (*outBuf)[:0]
 	defer decompressBufferStorage.Put(outBuf)
+
+	*outBuf = (*outBuf)[:0]
 
 	var chunk [4096]byte
 	for {
@@ -165,10 +171,12 @@ func decompressNoContextTakeoverScoped(src []byte, scope *borrow.Scope) ([]byte,
 		if n > 0 {
 			*outBuf = append(*outBuf, chunk[:n]...)
 		}
+
 		if err != nil {
 			if err == io.EOF {
 				break
 			}
+
 			return nil, fmt.Errorf("%w: %w", ErrFlateDecompressFailed, err)
 		}
 	}
@@ -176,6 +184,7 @@ func decompressNoContextTakeoverScoped(src []byte, scope *borrow.Scope) ([]byte,
 	if scope != nil {
 		borrowed := scope.AllocBytes(len(*outBuf))
 		copy(borrowed.AsSlice(), *outBuf)
+
 		return borrowed.AsSlice(), nil
 	}
 

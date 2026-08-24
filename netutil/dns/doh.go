@@ -260,8 +260,11 @@ func buildDoHGetURL(endpoint string, wireQuery []byte) string {
 	prefixLen := len(endpoint) + len("?dns=")
 	totalLen := prefixLen + encodedLen
 
-	var stackBuf [1024]byte
-	var b []byte
+	var (
+		stackBuf [1024]byte
+		b        []byte
+	)
+
 	if totalLen <= len(stackBuf) {
 		b = stackBuf[:totalLen]
 	} else {

@@ -503,14 +503,17 @@ func generateChallengeKey() (string, error) {
 // ComputeAcceptKeyBytes computes the RFC 6455 Sec-WebSocket-Accept value directly into dst with 0 allocations.
 func ComputeAcceptKeyBytes(challengeKey []byte, dst *[28]byte) {
 	var input [64]byte
+
 	n := copy(input[:], challengeKey)
 	n += copy(input[n:], websocketMagicGUID)
 	sum := sha1.Sum(input[:n]) //nolint:gosec
+
 	base64.StdEncoding.Encode(dst[:], sum[:])
 }
 
 func computeAcceptKey(challengeKey string) string {
 	var dst [28]byte
+
 	ComputeAcceptKeyBytes(bytesconv.S2B(challengeKey), &dst)
 
 	return string(dst[:])

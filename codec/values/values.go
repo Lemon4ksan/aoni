@@ -120,18 +120,135 @@ func EncodeQueryString(v any, sb *strings.Builder) error {
 		return nil
 	}
 
-	vals, err := Encode(v)
-	if err != nil {
-		return err
-	}
+	if qe, ok := v.(QueryEncoder); ok {
+		first := sb.Len() == 0
 
-	encoded := vals.Encode()
-	if len(encoded) > 0 {
-		if sb.Len() > 0 {
-			sb.WriteByte('&')
+		for k, list := range qe.EncodeValues() {
+			for _, item := range list {
+				writeQueryKeyValuePair(sb, k, item, &first)
+			}
 		}
 
-		sb.WriteString(encoded)
+		return nil
+	}
+
+	val := reflect.ValueOf(v)
+	for val.Kind() == reflect.Pointer {
+		if val.IsNil() {
+			return nil
+		}
+
+		val = val.Elem()
+	}
+
+	if val.Kind() != reflect.Struct {
+		vals, err := Encode(v)
+		if err != nil {
+			return err
+		}
+
+		encoded := vals.Encode()
+		if len(encoded) > 0 {
+			if sb.Len() > 0 {
+				sb.WriteByte('&')
+			}
+
+			sb.WriteString(encoded)
+		}
+
+		return nil
+	}
+
+	s := getStructSchema(val.Type())
+	first := sb.Len() == 0
+
+	for i := range s.Fields {
+		f := &s.Fields[i]
+		fieldVal := val.Field(f.Index)
+
+		if fieldVal.Kind() == reflect.Pointer {
+			if fieldVal.IsNil() {
+				if f.DefaultVal != "" && f.Key != "" && f.Key != "-" {
+					writeQueryKeyValuePair(sb, f.Key, f.DefaultVal, &first)
+				}
+
+				continue
+			}
+
+			fieldVal = fieldVal.Elem()
+		}
+
+		if f.IsIgnored || f.Key == "" || f.Key == "-" {
+			continue
+		}
+
+		if fieldVal.IsZero() {
+			if f.DefaultVal != "" {
+				writeQueryKeyValuePair(sb, f.Key, f.DefaultVal, &first)
+				continue
+			}
+
+			if f.OmitEmpty {
+				continue
+			}
+		}
+
+		if fieldVal.Kind() == reflect.Slice || fieldVal.Kind() == reflect.Array {
+			if f.HasComma || f.HasSpace || f.HasPipe {
+				sep := ","
+				switch {
+				case f.HasSpace:
+					sep = " "
+				case f.HasPipe:
+					sep = "|"
+				}
+
+				var sliceSb strings.Builder
+
+				for j := range fieldVal.Len() {
+					elem := derefPointer(fieldVal.Index(j))
+					if !elem.IsValid() {
+						continue
+					}
+
+					str, err := toString(elem)
+					if err != nil {
+						return &ValueError{Field: f.Name, Index: j, Err: err}
+					}
+
+					if j > 0 {
+						sliceSb.WriteString(sep)
+					}
+
+					sliceSb.WriteString(str)
+				}
+
+				writeQueryKeyValuePair(sb, f.Key, sliceSb.String(), &first)
+			} else {
+				for j := range fieldVal.Len() {
+					elem := derefPointer(fieldVal.Index(j))
+					if !elem.IsValid() {
+						continue
+					}
+
+					str, err := toString(elem)
+					if err != nil {
+						return &ValueError{Field: f.Name, Index: j, Err: err}
+					}
+
+					writeQueryKeyValuePair(sb, f.Key, str, &first)
+				}
+			}
+
+			continue
+		}
+
+		strVal, err := toString(fieldVal)
+		if err != nil {
+			return &ValueError{Field: f.Name, Err: err}
+		}
+
+		writeQueryKeyValuePair(sb, f.Key, strVal, &first)
 	}
 
 	return nil

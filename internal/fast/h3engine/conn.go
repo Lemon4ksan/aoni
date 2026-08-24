@@ -112,6 +112,7 @@ func (cc *ClientConn) readUnidirectionalStreams() {
 
 func (cc *ClientConn) handleUnidirectionalStream(str *quic.ReceiveStream) {
 	r := quicvarint.NewReader(str)
+
 	streamType, err := quicvarint.Read(r)
 	if err != nil {
 		return
@@ -305,10 +306,12 @@ func (cc *ClientConn) sendRequestTo(w io.Writer, req *fasthttp.Request, headerOr
 		out = stackOut[:0]
 	} else {
 		heapBuf = h3RequestStorage.Get()
+
 		b := (*heapBuf)[:0]
 		if cap(b) < totalLen {
 			b = make([]byte, 0, totalLen)
 		}
+
 		out = b
 		defer func() {
 			*heapBuf = out[:0]
@@ -366,12 +369,14 @@ func (cc *ClientConn) readResponseFrom(
 				headerBlock = stackHeaderBuf[:payloadLen]
 			} else {
 				heapHeaderBuf = h3HeaderBlockStorage.Get()
+
 				b := (*heapHeaderBuf)[:0]
 				if uint64(cap(b)) < payloadLen {
 					b = make([]byte, payloadLen)
 				} else {
 					b = b[:payloadLen]
 				}
+
 				headerBlock = b
 			}
 
@@ -380,24 +385,29 @@ func (cc *ClientConn) readResponseFrom(
 					*heapHeaderBuf = (*heapHeaderBuf)[:0]
 					h3HeaderBlockStorage.Put(heapHeaderBuf)
 				}
+
 				return nil, err
 			}
 
 			if headersParsed {
 				trailers, err = cc.qpack.DecodeResponseTrailers(headerBlock)
+
 				if heapHeaderBuf != nil {
 					*heapHeaderBuf = (*heapHeaderBuf)[:0]
 					h3HeaderBlockStorage.Put(heapHeaderBuf)
 				}
+
 				if err != nil {
 					return nil, err
 				}
 			} else {
 				statusCode, err := cc.qpack.DecodeResponseHeaders(headerBlock, &resp.Header)
+
 				if heapHeaderBuf != nil {
 					*heapHeaderBuf = (*heapHeaderBuf)[:0]
 					h3HeaderBlockStorage.Put(heapHeaderBuf)
 				}
+
 				if err != nil {
 					return nil, err
 				}

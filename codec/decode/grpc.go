@@ -52,6 +52,7 @@ func readGRPCWebFramesBytes(data []byte, msg proto.Message) error {
 		flags := data[0]
 		length := binary.BigEndian.Uint32(data[1:5])
 		data = data[5:]
+
 		if uint32(len(data)) < length {
 			if payloadRead {
 				return nil

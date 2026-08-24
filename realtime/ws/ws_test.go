@@ -2083,10 +2083,12 @@ func TestWSRawConn_ReadMessageScoped(t *testing.T) {
 func BenchmarkComputeAcceptKey(b *testing.B) {
 	challengeKey := "dGhlIHNhbXBsZSBub25jZQ=="
 	keyBytes := []byte(challengeKey)
+
 	var dst [28]byte
 
 	b.Run("String", func(b *testing.B) {
 		b.ReportAllocs()
+
 		for b.Loop() {
 			_ = computeAcceptKey(challengeKey)
 		}
@@ -2094,6 +2096,7 @@ func BenchmarkComputeAcceptKey(b *testing.B) {
 
 	b.Run("BytesZeroAlloc", func(b *testing.B) {
 		b.ReportAllocs()
+
 		for b.Loop() {
 			ComputeAcceptKeyBytes(keyBytes, &dst)
 		}
@@ -2130,11 +2133,13 @@ func BenchmarkWS_ReadMessageScoped(b *testing.B) {
 
 	for b.Loop() {
 		scope := borrow.AcquireScope()
+
 		_, _, err := wsServer.ReadMessageScoped(scope)
 		if err != nil {
 			scope.Release()
 			b.Fatal(err)
 		}
+
 		scope.Release()
 	}
 }

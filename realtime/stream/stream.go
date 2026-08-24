@@ -23,6 +23,7 @@ import (
 	"time"
 
 	"github.com/lemon4ksan/foundation/generic"
+	"github.com/lemon4ksan/foundation/refkit"
 	"github.com/lemon4ksan/foundation/silicon/offheap"
 	"google.golang.org/protobuf/proto"
 
@@ -877,14 +878,14 @@ func resolveProtoTargetInstance(targetPtr any) (proto.Message, error) {
 
 	val := reflect.ValueOf(targetPtr)
 	if val.Kind() == reflect.Pointer && !val.IsNil() {
-		elem := val.Elem()
-		if msg, ok := elem.Interface().(proto.Message); ok {
-			return msg, nil
+		elem, _ := refkit.EnsureAlloc(val.Elem())
+		if elem.IsValid() && elem.CanAddr() {
+			if msg, ok := elem.Addr().Interface().(proto.Message); ok {
+				return msg, nil
+			}
 		}
 
-		if elem.Kind() == reflect.Pointer && elem.IsNil() && elem.CanSet() {
-			elem.Set(reflect.New(elem.Type().Elem()))
-
+		if elem.IsValid() && elem.CanInterface() {
 			if msg, ok := elem.Interface().(proto.Message); ok {
 				return msg, nil
 			}

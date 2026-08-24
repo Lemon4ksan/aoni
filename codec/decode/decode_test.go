@@ -904,6 +904,7 @@ func BenchmarkDecode_GRPCWeb_FastPath(b *testing.B) {
 	protoBytes, _ := proto.Marshal(protoMsg)
 
 	var frame [5]byte
+
 	frame[0] = 0x00
 	binary.BigEndian.PutUint32(frame[1:5], uint32(len(protoBytes)))
 
@@ -915,7 +916,7 @@ func BenchmarkDecode_GRPCWeb_FastPath(b *testing.B) {
 
 	for b.Loop() {
 		var target wrapperspb.StringValue
+
 		_ = GRPCWebDecoder.Decode(br, &target)
 	}
 }
-

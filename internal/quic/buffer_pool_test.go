@@ -50,13 +50,16 @@ func TestBufferPoolSplitting(t *testing.T) {
 func TestBufferPoolParallel(t *testing.T) {
 	t.Parallel()
 
-	const workers = 32
-	const iterations = 500
+	const (
+		workers    = 32
+		iterations = 500
+	)
 
 	done := make(chan struct{}, workers)
 	for i := 0; i < workers; i++ {
 		go func() {
 			defer func() { done <- struct{}{} }()
+
 			for j := 0; j < iterations; j++ {
 				buf := getPacketBuffer()
 				buf.Data = append(buf.Data, []byte("data")...)

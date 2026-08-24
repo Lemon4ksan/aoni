@@ -156,8 +156,10 @@ func (s *InMemoryStore[K, V]) Close() {
 	}
 }
 
-const numShards = 32
-const shardMask = numShards - 1
+const (
+	numShards = 32
+	shardMask = numShards - 1
+)
 
 // ShardedStore provides a partitioned, lock-striped in-memory cache backend
 // reducing lock contention across multiple CPU cores by distributing keys across 32 independent shards.

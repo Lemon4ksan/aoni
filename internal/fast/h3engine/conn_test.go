@@ -407,9 +407,11 @@ func TestSendRequest_LargePayload_Pooled(t *testing.T) {
 	for i := range largeBody {
 		largeBody[i] = byte(i % 256)
 	}
+
 	req.SetBody(largeBody)
 
 	var buf bytes.Buffer
+
 	err := cc.sendRequestTo(&buf, req, nil)
 	require.NoError(t, err)
 	assert.Greater(t, buf.Len(), 32768)
@@ -426,8 +428,11 @@ func TestReadResponse_LargeHeaders_Pooled(t *testing.T) {
 
 	// Build large headers block (> 4 KB) to trigger pooled storage
 	var qpackBuf bytes.Buffer
+
 	enc := qpack.NewEncoder(&qpackBuf)
+
 	_ = enc.WriteField(qpack.HeaderField{Name: ":status", Value: "200"})
+
 	for i := 0; i < 100; i++ {
 		_ = enc.WriteField(qpack.HeaderField{
 			Name:  "x-custom-large-header-" + string(rune('a'+(i%26))),
@@ -464,9 +469,13 @@ func TestDoScoped_Execution(t *testing.T) {
 		qpack: NewQPACKCodec(),
 	}
 
-	var streamBuf bytes.Buffer
-	var qpackBuf bytes.Buffer
+	var (
+		streamBuf bytes.Buffer
+		qpackBuf  bytes.Buffer
+	)
+
 	enc := qpack.NewEncoder(&qpackBuf)
+
 	_ = enc.WriteField(qpack.HeaderField{Name: ":status", Value: "200"})
 	hBlock := qpackBuf.Bytes()
 

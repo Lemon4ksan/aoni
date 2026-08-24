@@ -836,10 +836,18 @@ func (cfg *Config) SaveTo(filePath string) error {
 		}
 	}
 
-	data, err := yaml.Marshal(&compactCfg)
-	if err != nil {
+	var buf bytes.Buffer
+
+	enc := yaml.NewEncoder(&buf)
+	enc.SetIndent(2)
+
+	if err := enc.Encode(&compactCfg); err != nil {
 		return fmt.Errorf("marshaling configuration: %w", err)
 	}
+
+	_ = enc.Close()
+
+	data := buf.Bytes()
 
 	header := []byte(
 		"# .vortex.yml — Vortex API Guardian Workspace Configuration\n# Documentation: https://github.com/lemon4ksan/aoni\n\n",
@@ -1112,12 +1120,18 @@ func LoadWork(workDir string) (*WorkConfig, error) {
 
 // SaveWork writes a WorkConfig to disk.
 func SaveWork(filePath string, wc *WorkConfig) error {
-	data, err := yaml.Marshal(wc)
-	if err != nil {
+	var buf bytes.Buffer
+
+	enc := yaml.NewEncoder(&buf)
+	enc.SetIndent(2)
+
+	if err := enc.Encode(wc); err != nil {
 		return fmt.Errorf("marshal work config: %w", err)
 	}
 
-	return os.WriteFile(filePath, data, 0o600)
+	_ = enc.Close()
+
+	return os.WriteFile(filePath, buf.Bytes(), 0o600)
 }
 
 // AutoDiscoverWorkspaces scans subdirectories of parentDir to find directories containing .vortex.yml.

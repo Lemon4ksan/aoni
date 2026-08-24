@@ -417,10 +417,10 @@ func TestParseGRPCWebStream(t *testing.T) {
 	s, err := stream.Get(t.Context(), client, "/")
 	require.NoError(t, err)
 
-	out, errs := stream.ParseGRPCWebStream[wrapperspb.StringValue](t.Context(), s)
+	out, errs := stream.ParseGRPCWebStream[*wrapperspb.StringValue](t.Context(), s)
 
 	var msgs []string
-	for val := range out { //nolint:govet
+	for val := range out {
 		msgs = append(msgs, val.GetValue())
 	}
 
