@@ -6,14 +6,14 @@ package h1engine
 
 import (
 	"bytes"
+	"compress/zlib"
 	"fmt"
 	"io"
 	"io/fs"
 	"sync"
 
-	"github.com/klauspost/compress/flate"
-	"github.com/klauspost/compress/gzip"
-	"github.com/klauspost/compress/zlib"
+	"github.com/lemon4ksan/aoni/internal/compress/flate"
+	"github.com/lemon4ksan/aoni/internal/compress/gzip"
 	"github.com/lemon4ksan/aoni/internal/fast/h1engine/stackless"
 	"github.com/valyala/bytebufferpool"
 )
