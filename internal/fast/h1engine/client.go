@@ -3431,17 +3431,20 @@ func (t *transport) RoundTrip(hc *HostClient, req *Request, resp *Response) (ret
 		resetConnection = true
 	}
 
-	bw := hc.AcquireWriter(conn)
-	err = req.Write(bw)
+	if req.bodyStream == nil {
+		err = req.WriteVectored(conn)
+	} else {
+		bw := hc.AcquireWriter(conn)
+		err = req.Write(bw)
+		if err == nil {
+			err = bw.Flush()
+		}
+		hc.ReleaseWriter(bw)
+	}
 
 	if resetConnection {
 		req.Header.ResetConnectionClose()
 	}
-
-	if err == nil {
-		err = bw.Flush()
-	}
-	hc.ReleaseWriter(bw)
 
 	// Return ErrTimeout on any timeout.
 	if x, ok := err.(interface{ Timeout() bool }); ok && x.Timeout() {

@@ -1910,11 +1910,8 @@ func (req *Request) WriteVectored(conn net.Conn) error {
 		return err
 	}
 
-	if _, err = conn.Write(headerBytes); err != nil {
-		return err
-	}
-
-	_, err = conn.Write(body)
+	bufs := net.Buffers{headerBytes, body}
+	_, err = bufs.WriteTo(conn)
 	return err
 }
 

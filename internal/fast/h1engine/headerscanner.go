@@ -5,7 +5,6 @@
 package h1engine
 
 import (
-	"bytes"
 	"errors"
 	"fmt"
 
@@ -35,24 +34,24 @@ type headerScanner struct {
 
 func (s *headerScanner) next() bool {
 	if !s.initialized {
-		if bytes.HasPrefix(s.b, strCRLF) {
+		if simd.MatchCRLF(s.b) {
 			s.r = 2
 			return false
 		}
 
 		if s.blockEnd >= 4 && s.blockEnd <= len(s.b) &&
-			bytes.Equal(s.b[s.blockEnd-4:s.blockEnd], strCRLFCRLF) {
+			simd.MatchCRLFCRLF(s.b[s.blockEnd-4:s.blockEnd]) {
 			// The caller already found the end of the block, no need to
 			// search for it again. The first CRLFCRLF can only sit at
 			// blockEnd-4 since readRawHeaders stops at the first blank line.
 			s.b = s.b[:s.blockEnd]
 		} else {
-			i := bytes.Index(s.b, strCRLFCRLF)
+			i := simd.IndexCRLFCRLF(s.b)
 			if i < 0 {
 				s.err = ErrNeedMore
 				return false
 			}
-			s.b = s.b[:i+4]
+			s.b = s.b[:i]
 		}
 		if len(s.b) > 0 && (s.b[0] == ' ' || s.b[0] == '\t') {
 			s.err = errors.New("invalid headers, headers cannot start with space or tab")

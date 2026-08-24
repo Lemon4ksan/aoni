@@ -2891,31 +2891,25 @@ func validateRequestURI(method, requestURI []byte) error {
 }
 
 func readRawHeaders(dst, buf []byte) ([]byte, int, error) {
-	n := simd.IndexByteVector(buf, nChar)
-	if n < 0 {
+	if len(buf) == 0 {
 		return dst[:0], 0, ErrNeedMore
 	}
-	if (n == 1 && buf[0] == rChar) || n == 0 {
-		// empty headers
-		return dst, n + 1, nil
+
+	// Fast check for empty headers block: "\r\n" or "\n"
+	if simd.MatchCRLF(buf) {
+		return dst, 2, nil
+	}
+	if buf[0] == nChar {
+		return dst, 1, nil
 	}
 
-	n++
-	b := buf
-	m := n
-	for {
-		b = b[m:]
-		m = simd.IndexByteVector(b, nChar)
-		if m < 0 {
-			return dst, 0, ErrNeedMore
-		}
-		m++
-		n += m
-		if (m == 2 && b[0] == rChar) || m == 1 {
-			dst = append(dst, buf[:n]...)
-			return dst, n, nil
-		}
+	idx := simd.IndexCRLFCRLF(buf)
+	if idx < 0 {
+		return dst, 0, ErrNeedMore
 	}
+
+	dst = append(dst, buf[:idx]...)
+	return dst, idx, nil
 }
 
 func (h *ResponseHeader) parseHeaders(buf []byte) (int, error) {
