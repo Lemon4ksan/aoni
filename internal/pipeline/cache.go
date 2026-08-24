@@ -9,7 +9,6 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/hex"
-	"encoding/json"
 	"io"
 	"net/http"
 	"net/url"
@@ -18,6 +17,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/lemon4ksan/foundation/codec/json"
 	"github.com/lemon4ksan/foundation/net/headkit"
 	"github.com/lemon4ksan/foundation/silicon/bytesconv"
 )

@@ -380,3 +380,132 @@ func ProcessClean(b borrow.Bytes) {
 	require.Empty(t, diagsClean, "local use of borrowed slice must not trigger B010")
 }
 
+func TestRuleBorrowMultipleMutable_SeparationLogicSlices(t *testing.T) {
+	t.Parallel()
+
+	rule := &lint.RuleBorrowMultipleMutable{}
+
+	// Disjoint intervals [0, 1024) and [1024, 2048) do NOT conflict (Separation Logic P * Q)
+	srcDisjoint := `package test
+
+func HandleDisjoint(buf *borrow.Mut[[]byte]) {
+	left := buf.SliceMut(0, 1024).BorrowMut()
+	right := buf.SliceMut(1024, 2048).BorrowMut()
+	_ = left
+	_ = right
+}`
+
+	diagsClean := runBorrowRule(t, rule, srcDisjoint)
+	require.Empty(t, diagsClean, "provably non-overlapping slice intervals must not trigger B003")
+
+	// Overlapping intervals [0, 1024) and [512, 1536) DO conflict
+	srcOverlapping := `package test
+
+func HandleOverlapping(buf *borrow.Mut[[]byte]) {
+	first := buf.SliceMut(0, 1024).BorrowMut()
+	second := buf.SliceMut(512, 1536).BorrowMut()
+	_ = first
+	_ = second
+}`
+
+	diags := runBorrowRule(t, rule, srcOverlapping)
+	require.NotEmpty(t, diags, "overlapping slice intervals must be flagged by B003")
+	require.Equal(t, "B003", diags[0].RuleID)
+}
+
+func TestRuleBorrowEscape_StructuredConcurrency(t *testing.T) {
+	t.Parallel()
+
+	rule := &lint.RuleBorrowEscape{}
+
+	// Goroutine bounded by sync.WaitGroup (Structured Concurrency) is safe
+	srcStructured := `package test
+
+import "sync"
+
+func ProcessStructured(b borrow.Bytes) {
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		println(len(b.AsSlice()))
+	}()
+	wg.Wait()
+}`
+
+	diagsClean := runBorrowRule(t, rule, srcStructured)
+	require.Empty(t, diagsClean, "goroutine bounded by sync.WaitGroup must not trigger B001")
+
+	// Unsynchronized escaping goroutine is dangerous
+	srcUnstructured := `package test
+
+func ProcessUnstructured(b borrow.Bytes) {
+	go func() {
+		println(len(b.AsSlice()))
+	}()
+}`
+
+	diags := runBorrowRule(t, rule, srcUnstructured)
+	require.NotEmpty(t, diags, "unsynchronized goroutine escaping borrow must trigger B001")
+	require.Equal(t, "B001", diags[0].RuleID)
+}
+
+func TestRuleBorrowTypestate(t *testing.T) {
+	t.Parallel()
+
+	rule := &lint.RuleBorrowTypestate{}
+
+	// Double Release violation
+	srcDoubleRelease := `package test
+
+func HandleDoubleRelease(b *borrow.Box[int]) {
+	b.Release()
+	b.Release()
+}`
+
+	diags := runBorrowRule(t, rule, srcDoubleRelease)
+	require.NotEmpty(t, diags, "double release must trigger B011")
+	require.Equal(t, "B011", diags[0].RuleID)
+
+	// Operation on Released handle
+	srcUseAfterRelease := `package test
+
+func HandleUseAfterRelease(b *borrow.Box[int]) {
+	b.Release()
+	b.Write(42)
+}`
+
+	diagsOp := runBorrowRule(t, rule, srcUseAfterRelease)
+	require.NotEmpty(t, diagsOp, "calling method on released resource must trigger B011")
+	require.Equal(t, "B011", diagsOp[0].RuleID)
+
+	// Valid lifecycle
+	srcClean := `package test
+
+func HandleClean(b *borrow.Box[int]) {
+	b.Write(42)
+	b.Release()
+}`
+
+	diagsClean := runBorrowRule(t, rule, srcClean)
+	require.Empty(t, diagsClean, "valid typestate transitions must produce no errors")
+}
+
+func TestRuleBorrowLinearLeak_Fix(t *testing.T) {
+	t.Parallel()
+
+	rule := &lint.RuleBorrowLinearLeak{}
+	require.True(t, rule.IsFixable(), "B004 rule must be fixable")
+
+	srcLeak := `package test
+
+func Leak() {
+	box := borrow.NewBox(100)
+	_ = box
+}`
+
+	diags := runBorrowRule(t, rule, srcLeak)
+	require.NotEmpty(t, diags)
+	require.NotNil(t, diags[0].Fix)
+	require.Contains(t, diags[0].Fix.Description, "box.Release()")
+}

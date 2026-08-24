@@ -11,6 +11,7 @@ import (
 	"net"
 	"sync"
 
+	"github.com/lemon4ksan/foundation/borrow"
 	"github.com/lemon4ksan/foundation/silicon/sysnet"
 	"github.com/valyala/fasthttp"
 
@@ -65,6 +66,29 @@ func (c *Client) Do(
 	}
 
 	trailers, err := cc.Do(ctx, req, resp, headerOrder)
+	if err != nil {
+		c.removeConn(host)
+	}
+
+	return trailers, err
+}
+
+// DoScoped executes a fasthttp.Request over HTTP/3 with response body memory allocated from the provided borrow.Scope.
+func (c *Client) DoScoped(
+	ctx context.Context,
+	req *fasthttp.Request,
+	resp *fasthttp.Response,
+	headerOrder []string,
+	s *borrow.Scope,
+) (map[string][]string, error) {
+	host := string(req.URI().Host())
+
+	cc, err := c.getConn(ctx, host)
+	if err != nil {
+		return nil, err
+	}
+
+	trailers, err := cc.DoScoped(ctx, req, resp, headerOrder, s)
 	if err != nil {
 		c.removeConn(host)
 	}

@@ -3,7 +3,7 @@ module github.com/lemon4ksan/aoni
 go 1.25.4
 
 require (
-	github.com/lemon4ksan/foundation v0.0.0-20260824081326-bea6225a4a35
+	github.com/lemon4ksan/foundation v0.0.0-20260824084055-d1144fe7221d
 	github.com/pkg/sftp v1.13.11
 	github.com/refraction-networking/utls v1.8.2
 	github.com/stretchr/testify v1.11.1

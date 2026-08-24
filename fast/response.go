@@ -14,6 +14,7 @@ import (
 	"sync/atomic"
 	"unsafe"
 
+	"github.com/lemon4ksan/foundation/codec/json"
 	"github.com/lemon4ksan/foundation/silicon/bytesconv"
 	"github.com/lemon4ksan/foundation/silicon/offheap"
 	"github.com/lemon4ksan/foundation/silicon/pool"
@@ -220,6 +221,43 @@ func (u UnsafeAccess) String() string {
 // Unsafe returns an [UnsafeAccess] accessor for explicit zero-copy operations.
 func (f *Response) Unsafe() UnsafeAccess {
 	return UnsafeAccess{resp: f}
+}
+
+// String returns a zero-allocation string view over volatile response body memory.
+func (f *Response) String() string {
+	if f == nil || f.resp == nil {
+		return ""
+	}
+
+	return bytesconv.B2S(f.resp.Body())
+}
+
+// JSON decodes the response payload directly into v using the silicon-grade foundation/codec/json engine.
+func (f *Response) JSON(v any) error {
+	if f == nil || f.resp == nil {
+		return io.EOF
+	}
+
+	body := f.resp.Body()
+	if len(body) == 0 {
+		return io.EOF
+	}
+
+	return json.Unmarshal(body, v)
+}
+
+// JSONNoCopy decodes the response payload into v referencing string fields directly without copying.
+func (f *Response) JSONNoCopy(v any) error {
+	if f == nil || f.resp == nil {
+		return io.EOF
+	}
+
+	body := f.resp.Body()
+	if len(body) == 0 {
+		return io.EOF
+	}
+
+	return json.UnmarshalNoCopy(body, v)
 }
 
 // BodyStream yields an [io.ReadCloser] wrapping the response body stream or bytes.

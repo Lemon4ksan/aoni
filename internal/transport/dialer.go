@@ -14,6 +14,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/lemon4ksan/foundation/generic"
 	"github.com/lemon4ksan/foundation/net/ip"
 	utls "github.com/refraction-networking/utls"
 
@@ -167,10 +168,7 @@ func (d *UniversalDialer) DialTLSContext(ctx context.Context, network, addr stri
 func (d *UniversalDialer) DialH2(ctx context.Context, addr string, cfg DialConfig) (net.Conn, error) {
 	cfg.ALPNOverride = []string{"h2", "http/1.1"}
 
-	network := cfg.Network
-	if network == "" {
-		network = "tcp"
-	}
+	network := generic.Coalesce(cfg.Network, "tcp")
 
 	conn, err := d.DialTLSContext(ctx, network, addr, cfg)
 	if err != nil {

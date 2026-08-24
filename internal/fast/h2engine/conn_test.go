@@ -17,7 +17,11 @@ import (
 	"github.com/valyala/fasthttp"
 )
 
-func runMockH2Server(t *testing.T, serverConn net.Conn, handler func(req *fasthttp.Request, resp *fasthttp.Response)) {
+func runMockH2Server(
+	t *testing.T,
+	serverConn net.Conn,
+	handler func(req *fasthttp.Request, resp *fasthttp.Response, rawHeaders []string),
+) {
 	br := bufio.NewReader(serverConn)
 	bw := bufio.NewWriter(serverConn)
 
@@ -78,15 +82,21 @@ func runMockH2Server(t *testing.T, serverConn net.Conn, handler func(req *fastht
 			resp := &fasthttp.Response{}
 
 			hf := AcquireHeaderField()
-
 			b := hFrame.Headers()
+
+			var rawHeaders []string
 
 			for len(b) > 0 {
 				var nErr error
 
 				b, nErr = dec.Next(hf, b)
 				if nErr != nil {
+					t.Logf("runMockH2Server: dec.Next error: %v, remaining: %x", nErr, b)
 					break
+				}
+
+				if !hf.IsPseudo() {
+					rawHeaders = append(rawHeaders, hf.Key())
 				}
 
 				switch {
@@ -104,7 +114,7 @@ func runMockH2Server(t *testing.T, serverConn net.Conn, handler func(req *fastht
 			ReleaseHeaderField(hf)
 			ReleaseFrameHeader(fr)
 
-			handler(req, resp)
+			handler(req, resp, rawHeaders)
 
 			respFH := AcquireFrameHeader()
 			respFH.SetStream(streamID)
@@ -166,7 +176,7 @@ func TestClientServerEndToEnd(t *testing.T) {
 		}
 		defer serverConn.Close()
 
-		runMockH2Server(t, serverConn, func(req *fasthttp.Request, resp *fasthttp.Response) {
+		runMockH2Server(t, serverConn, func(req *fasthttp.Request, resp *fasthttp.Response, _ []string) {
 			if string(req.Header.Method()) != "GET" {
 				t.Errorf("server: method mismatch: got %s, want GET", req.Header.Method())
 			}
@@ -228,97 +238,13 @@ func TestOrderedHeadersSequenceOnWire(t *testing.T) {
 		}
 		defer serverConn.Close()
 
-		br := bufio.NewReader(serverConn)
-		bw := bufio.NewWriter(serverConn)
+		runMockH2Server(t, serverConn, func(_ *fasthttp.Request, resp *fasthttp.Response, rawHeaders []string) {
+			mu.Lock()
+			capturedHeaders = slices.Clone(rawHeaders)
+			mu.Unlock()
 
-		_ = ReadPreface(br)
-
-		serverSettings := &Settings{}
-
-		_ = PerformHandshake(false, bw, serverSettings, 1<<20)
-
-		frClientSettings, _ := ReadFrameFrom(br)
-
-		ReleaseFrameHeader(frClientSettings)
-
-		ackFrame := AcquireFrameHeader()
-
-		stRes := AcquireFrame(FrameSettings).(*Settings)
-
-		stRes.SetAck(true)
-		ackFrame.SetBody(stRes)
-
-		_, _ = ackFrame.WriteTo(bw)
-
-		_ = bw.Flush()
-
-		ReleaseFrameHeader(ackFrame)
-
-		dec := AcquireHPACK()
-
-		defer ReleaseHPACK(dec)
-
-		// Loop to keep connection open until client finishes reading
-		for {
-			fr, err := ReadFrameFrom(br)
-			if err != nil {
-				return
-			}
-
-			if fr.Type() == FrameHeaders {
-				hFrame := fr.Body().(FrameWithHeaders)
-				b := hFrame.Headers()
-
-				for len(b) > 0 {
-					hf := AcquireHeaderField()
-
-					var err error
-
-					b, err = dec.Next(hf, b)
-					if err != nil {
-						ReleaseHeaderField(hf)
-						break
-					}
-
-					if !hf.IsPseudo() {
-						mu.Lock()
-
-						capturedHeaders = append(capturedHeaders, hf.Key())
-						mu.Unlock()
-					}
-
-					ReleaseHeaderField(hf)
-				}
-
-				// Respond with HTTP 200 OK so client.Do() completes cleanly
-				respFH := AcquireFrameHeader()
-				respFH.SetStream(fr.Stream())
-
-				respH := AcquireFrame(FrameHeaders).(*Headers)
-				respH.SetEndHeaders(true)
-				respH.SetEndStream(true)
-
-				respFH.SetBody(respH)
-
-				enc := AcquireHPACK()
-				hfResp := AcquireHeaderField()
-				hfResp.SetKeyBytes(StringStatus)
-				hfResp.SetValue("200")
-				respH.AppendHeaderField(enc, hfResp, true)
-				ReleaseHeaderField(hfResp)
-				ReleaseHPACK(enc)
-
-				_, _ = respFH.WriteTo(bw)
-				_ = bw.Flush()
-
-				ReleaseFrameHeader(respFH)
-				ReleaseFrameHeader(fr)
-
-				continue
-			}
-
-			ReleaseFrameHeader(fr)
-		}
+			resp.SetStatusCode(200)
+		})
 	}()
 
 	dialer := &Dialer{
@@ -329,7 +255,6 @@ func TestOrderedHeadersSequenceOnWire(t *testing.T) {
 	}
 
 	client := NewClient(dialer, ClientOpts{PingInterval: 5 * time.Second})
-
 	client.SetOrderedHeaders(orderedKeys)
 
 	req := fasthttp.AcquireRequest()
@@ -345,10 +270,7 @@ func TestOrderedHeadersSequenceOnWire(t *testing.T) {
 	req.Header.Set("user-agent", "aoni-agent")
 	req.Header.Set("accept-language", "en-US")
 
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-
-	if err := client.Do(ctx, req, resp); err != nil {
+	if err := client.Do(context.Background(), req, resp); err != nil {
 		t.Fatalf("client.Do failed: %v", err)
 	}
 

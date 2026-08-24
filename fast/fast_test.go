@@ -95,3 +95,83 @@ func TestResolveALPNMode(t *testing.T) {
 		t.Errorf("got context ALPN mode %q, want %q", mode, aoni.AlpnH3)
 	}
 }
+
+func TestResponse_JSON_And_String(t *testing.T) {
+	t.Parallel()
+
+	fastResp := fasthttp.AcquireResponse()
+	defer fasthttp.ReleaseResponse(fastResp)
+
+	fastResp.SetBodyString(`{"name":"aoni-fast","rps":1870000}`)
+
+	resp := NewResponse(fastResp)
+	defer resp.Release()
+
+	assert.Equal(t, `{"name":"aoni-fast","rps":1870000}`, resp.String())
+
+	var data struct {
+		Name string `json:"name"`
+		RPS  int    `json:"rps"`
+	}
+
+	err := resp.JSON(&data)
+	assert.NoError(t, err)
+	assert.Equal(t, "aoni-fast", data.Name)
+	assert.Equal(t, 1870000, data.RPS)
+
+	var dataNoCopy struct {
+		Name string `json:"name"`
+		RPS  int    `json:"rps"`
+	}
+
+	errNoCopy := resp.JSONNoCopy(&dataNoCopy)
+	assert.NoError(t, errNoCopy)
+	assert.Equal(t, "aoni-fast", dataNoCopy.Name)
+	assert.Equal(t, 1870000, dataNoCopy.RPS)
+}
+
+func BenchmarkResponse_JSON(b *testing.B) {
+	fastResp := fasthttp.AcquireResponse()
+	defer fasthttp.ReleaseResponse(fastResp)
+
+	fastResp.SetBodyString(`{"name":"aoni-fast","rps":1870000,"status":"active"}`)
+
+	resp := NewResponse(fastResp)
+	defer resp.Release()
+
+	var data struct {
+		Name   string `json:"name"`
+		RPS    int    `json:"rps"`
+		Status string `json:"status"`
+	}
+
+	b.ReportAllocs()
+	b.ResetTimer()
+
+	for b.Loop() {
+		_ = resp.JSON(&data)
+	}
+}
+
+func BenchmarkResponse_JSONNoCopy(b *testing.B) {
+	fastResp := fasthttp.AcquireResponse()
+	defer fasthttp.ReleaseResponse(fastResp)
+
+	fastResp.SetBodyString(`{"name":"aoni-fast","rps":1870000,"status":"active"}`)
+
+	resp := NewResponse(fastResp)
+	defer resp.Release()
+
+	var data struct {
+		Name   string `json:"name"`
+		RPS    int    `json:"rps"`
+		Status string `json:"status"`
+	}
+
+	b.ReportAllocs()
+	b.ResetTimer()
+
+	for b.Loop() {
+		_ = resp.JSONNoCopy(&data)
+	}
+}

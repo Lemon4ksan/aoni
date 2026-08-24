@@ -84,8 +84,7 @@ func (hf *HeaderField) SetKey(key string) {
 		return
 	}
 
-	hf.key = nil
-	hf.key = append(hf.key, key...)
+	hf.key = []byte(key)
 }
 
 func (hf *HeaderField) SetValue(value string) {
@@ -94,8 +93,7 @@ func (hf *HeaderField) SetValue(value string) {
 		return
 	}
 
-	hf.value = nil
-	hf.value = append(hf.value, value...)
+	hf.value = []byte(value)
 }
 
 func (hf *HeaderField) SetKeyBytes(key []byte) {
@@ -104,8 +102,7 @@ func (hf *HeaderField) SetKeyBytes(key []byte) {
 		return
 	}
 
-	hf.key = nil
-	hf.key = append(hf.key, key...)
+	hf.key = append([]byte(nil), key...)
 }
 
 func (hf *HeaderField) SetValueBytes(value []byte) {
@@ -114,21 +111,20 @@ func (hf *HeaderField) SetValueBytes(value []byte) {
 		return
 	}
 
-	hf.value = nil
-	hf.value = append(hf.value, value...)
+	hf.value = append([]byte(nil), value...)
 }
 
 func (hf *HeaderField) CopyTo(other *HeaderField) {
 	if ik := rodata.InternKeyBytes(hf.key); ik != nil {
 		other.key = ik
 	} else {
-		other.key = append(other.key[:0], hf.key...)
+		other.key = append([]byte(nil), hf.key...)
 	}
 
 	if iv := rodata.InternValueBytes(hf.value); iv != nil {
 		other.value = iv
 	} else {
-		other.value = append(other.value[:0], hf.value...)
+		other.value = append([]byte(nil), hf.value...)
 	}
 
 	other.sensible = hf.sensible
@@ -434,6 +430,8 @@ func (hp *HPACK) decodeLiteralIndexed(hf *HeaderField, b []byte) ([]byte, error)
 		err error
 	)
 
+	var stackBuf [512]byte
+
 	if c != 64 {
 		b, n = readInt(6, b)
 
@@ -445,34 +443,24 @@ func (hp *HPACK) decodeLiteralIndexed(hf *HeaderField, b []byte) ([]byte, error)
 		hf.SetKeyBytes(hf2.KeyBytes())
 	} else {
 		b = b[1:]
-		bufPtr := bytePool.Get().(*[]byte)
-		dst := (*bufPtr)[:0]
+		dst := stackBuf[:0]
 
-		b, dst, err = readString(dst[:0], b)
+		b, dst, err = readString(dst, b)
 		if err != nil {
-			*bufPtr = dst
-			bytePool.Put(bufPtr)
 			return b, err
 		}
 
 		hf.SetKeyBytes(dst)
-		*bufPtr = dst
-		bytePool.Put(bufPtr)
 	}
 
-	bufPtr := bytePool.Get().(*[]byte)
-	dst := (*bufPtr)[:0]
+	dst := stackBuf[:0]
 
 	b, dst, err = readString(dst, b)
 	if err != nil {
-		*bufPtr = dst
-		bytePool.Put(bufPtr)
 		return b, err
 	}
 
 	hf.SetValueBytes(dst)
-	*bufPtr = dst
-	bytePool.Put(bufPtr)
 	hp.addDynamic(hf)
 
 	return b, nil
@@ -487,6 +475,8 @@ func (hp *HPACK) decodeLiteralNoIndex(hf *HeaderField, b []byte) ([]byte, error)
 		err error
 	)
 
+	var stackBuf [512]byte
+
 	if c&15 != 0 {
 		b, n = readInt(4, b)
 
@@ -498,34 +488,24 @@ func (hp *HPACK) decodeLiteralNoIndex(hf *HeaderField, b []byte) ([]byte, error)
 		hf.SetKeyBytes(hf2.key)
 	} else {
 		b = b[1:]
-		bufPtr := bytePool.Get().(*[]byte)
-		dst := (*bufPtr)[:0]
+		dst := stackBuf[:0]
 
 		b, dst, err = readString(dst, b)
 		if err != nil {
-			*bufPtr = dst
-			bytePool.Put(bufPtr)
 			return b, err
 		}
 
 		hf.SetKeyBytes(dst)
-		*bufPtr = dst
-		bytePool.Put(bufPtr)
 	}
 
-	bufPtr := bytePool.Get().(*[]byte)
-	dst := (*bufPtr)[:0]
+	dst := stackBuf[:0]
 
 	b, dst, err = readString(dst, b)
 	if err != nil {
-		*bufPtr = dst
-		bytePool.Put(bufPtr)
 		return b, err
 	}
 
 	hf.SetValueBytes(dst)
-	*bufPtr = dst
-	bytePool.Put(bufPtr)
 
 	return b, nil
 }

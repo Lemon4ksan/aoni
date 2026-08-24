@@ -9,7 +9,6 @@ import (
 	"bufio"
 	"context"
 	"crypto/tls"
-	"encoding/json"
 	"fmt"
 	"io"
 	"net"
@@ -19,6 +18,7 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/lemon4ksan/foundation/codec/json"
 	"github.com/lemon4ksan/foundation/generic"
 	"golang.org/x/net/http2"
 

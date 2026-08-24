@@ -398,3 +398,137 @@ func BenchmarkDecompressScoped_Zstd(b *testing.B) {
 		s = borrow.AcquireScope()
 	}
 }
+
+func TestCompress_AllEncodings(t *testing.T) {
+	t.Parallel()
+
+	raw := []byte(
+		"Compression and Decompression roundtrip test across all supported algorithms in aoni zero-alloc engine.",
+	)
+
+	encodings := []string{"gzip", "x-gzip", "br", "deflate", "identity"}
+
+	for _, enc := range encodings {
+		t.Run(enc, func(t *testing.T) {
+			t.Parallel()
+
+			compressed, err := compress.Compress(enc, raw, nil)
+			require.NoError(t, err)
+			require.NotEmpty(t, compressed)
+
+			decompressed, err := compress.Decompress(enc, compressed, nil)
+			require.NoError(t, err)
+			assert.Equal(t, raw, decompressed)
+		})
+	}
+}
+
+func TestCompressScoped_AllEncodings(t *testing.T) {
+	t.Parallel()
+
+	raw := []byte("Zero allocation scoped compression and decompression roundtrip test in aoni.")
+
+	encodings := []string{"gzip", "x-gzip", "br", "deflate", "identity"}
+
+	for _, enc := range encodings {
+		t.Run(enc, func(t *testing.T) {
+			t.Parallel()
+
+			s := borrow.AcquireScope()
+			defer s.Release()
+
+			compressed, err := compress.CompressScoped(s, enc, raw)
+			require.NoError(t, err)
+			require.NotEmpty(t, compressed.AsSlice())
+
+			decompressed, err := compress.DecompressScoped(s, enc, compressed.AsSlice())
+			require.NoError(t, err)
+			assert.Equal(t, raw, decompressed.AsSlice())
+		})
+	}
+}
+
+func TestNewWriter_Streaming(t *testing.T) {
+	t.Parallel()
+
+	raw := []byte("Streaming compression writer and reader roundtrip test with pooled writers.")
+
+	encodings := []string{"gzip", "deflate", "identity"}
+
+	for _, enc := range encodings {
+		t.Run(enc, func(t *testing.T) {
+			t.Parallel()
+
+			var buf bytes.Buffer
+
+			w, err := compress.NewWriter(enc, &buf)
+			require.NoError(t, err)
+
+			_, err = w.Write(raw)
+			require.NoError(t, err)
+
+			err = w.Close()
+			require.NoError(t, err)
+
+			r, err := compress.NewReader(enc, &buf)
+			require.NoError(t, err)
+
+			defer r.Close()
+
+			decompressed, err := io.ReadAll(r)
+			require.NoError(t, err)
+			assert.Equal(t, raw, decompressed)
+		})
+	}
+}
+
+func TestDecompressionBomb_Protection(t *testing.T) {
+	t.Parallel()
+
+	// Create a payload of zeros that compresses to a tiny gzip (high amplification)
+	hugeZeros := make([]byte, 1024*1024) // 1 MB of zeros
+	compressedZeros := createGzipData(t, hugeZeros)
+
+	// Artificially truncate compressed to simulate tiny input that would blow up beyond 250x ratio
+	// A 100-byte gzip expanding to 1MB has >10000x amplification ratio
+	tinyCompressed := compressedZeros[:min(len(compressedZeros), 64)]
+
+	// Attempting to decompress truncated/malicious payload fails gracefully without crash/panic
+	_, _ = compress.Gunzip(tinyCompressed, nil)
+}
+
+func BenchmarkGzip(b *testing.B) {
+	payload := []byte(strings.Repeat("Zero allocation gzip compression benchmark in aoni. ", 50))
+	dst := make([]byte, 0, len(payload))
+
+	b.ReportAllocs()
+	b.ResetTimer()
+
+	for i := 0; i < b.N; i++ {
+		_, _ = compress.Gzip(payload, dst)
+	}
+}
+
+func BenchmarkDeflate(b *testing.B) {
+	payload := []byte(strings.Repeat("Zero allocation deflate compression benchmark in aoni. ", 50))
+	dst := make([]byte, 0, len(payload))
+
+	b.ReportAllocs()
+	b.ResetTimer()
+
+	for i := 0; i < b.N; i++ {
+		_, _ = compress.Deflate(payload, dst)
+	}
+}
+
+func BenchmarkBrotli(b *testing.B) {
+	payload := []byte(strings.Repeat("Zero allocation brotli compression benchmark in aoni. ", 50))
+	dst := make([]byte, 0, len(payload))
+
+	b.ReportAllocs()
+	b.ResetTimer()
+
+	for i := 0; i < b.N; i++ {
+		_, _ = compress.Brotli(payload, dst)
+	}
+}

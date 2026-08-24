@@ -10,6 +10,7 @@ import (
 	"io"
 	"testing"
 
+	"github.com/lemon4ksan/foundation/borrow"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/valyala/fasthttp"
@@ -387,4 +388,100 @@ func TestClient_ConnectionPoolAndRemoval(t *testing.T) {
 
 	err := client.Close()
 	assert.NoError(t, err)
+}
+
+func TestSendRequest_LargePayload_Pooled(t *testing.T) {
+	t.Parallel()
+
+	cc := &ClientConn{
+		qpack: NewQPACKCodec(),
+	}
+
+	req := fasthttp.AcquireRequest()
+	defer fasthttp.ReleaseRequest(req)
+
+	req.Header.SetMethod("POST")
+	req.SetRequestURI("https://example.com/upload")
+	// 32 KB body to exceed stack 8 KB buffer and trigger pooled storage
+	largeBody := make([]byte, 32768)
+	for i := range largeBody {
+		largeBody[i] = byte(i % 256)
+	}
+	req.SetBody(largeBody)
+
+	var buf bytes.Buffer
+	err := cc.sendRequestTo(&buf, req, nil)
+	require.NoError(t, err)
+	assert.Greater(t, buf.Len(), 32768)
+}
+
+func TestReadResponse_LargeHeaders_Pooled(t *testing.T) {
+	t.Parallel()
+
+	cc := &ClientConn{
+		qpack: NewQPACKCodec(),
+	}
+
+	var streamBuf bytes.Buffer
+
+	// Build large headers block (> 4 KB) to trigger pooled storage
+	var qpackBuf bytes.Buffer
+	enc := qpack.NewEncoder(&qpackBuf)
+	_ = enc.WriteField(qpack.HeaderField{Name: ":status", Value: "200"})
+	for i := 0; i < 100; i++ {
+		_ = enc.WriteField(qpack.HeaderField{
+			Name:  "x-custom-large-header-" + string(rune('a'+(i%26))),
+			Value: "some-repeated-value-that-fills-space-0123456789-abcdefghijklmnopqrstuvwxyz",
+		})
+	}
+
+	hBlock := qpackBuf.Bytes()
+	require.Greater(t, len(hBlock), 4096)
+
+	streamBuf.Write(appendHeadersHeader(nil, uint64(len(hBlock))))
+	streamBuf.Write(hBlock)
+
+	body := []byte("large headers body")
+	streamBuf.Write(appendDataHeader(nil, uint64(len(body))))
+	streamBuf.Write(body)
+
+	resp := fasthttp.AcquireResponse()
+	defer fasthttp.ReleaseResponse(resp)
+
+	_, err := cc.readResponseFrom(&streamBuf, resp)
+	require.NoError(t, err)
+	assert.Equal(t, 200, resp.StatusCode())
+	assert.Equal(t, "large headers body", string(resp.Body()))
+}
+
+func TestDoScoped_Execution(t *testing.T) {
+	t.Parallel()
+
+	scope := borrow.AcquireScope()
+	defer scope.Release()
+
+	cc := &ClientConn{
+		qpack: NewQPACKCodec(),
+	}
+
+	var streamBuf bytes.Buffer
+	var qpackBuf bytes.Buffer
+	enc := qpack.NewEncoder(&qpackBuf)
+	_ = enc.WriteField(qpack.HeaderField{Name: ":status", Value: "200"})
+	hBlock := qpackBuf.Bytes()
+
+	streamBuf.Write(appendHeadersHeader(nil, uint64(len(hBlock))))
+	streamBuf.Write(hBlock)
+
+	body := []byte("scoped body content")
+	streamBuf.Write(appendDataHeader(nil, uint64(len(body))))
+	streamBuf.Write(body)
+
+	resp := fasthttp.AcquireResponse()
+	defer fasthttp.ReleaseResponse(resp)
+
+	_, err := cc.readResponseScoped(&streamBuf, resp, scope)
+	require.NoError(t, err)
+	assert.Equal(t, 200, resp.StatusCode())
+	assert.Equal(t, "scoped body content", string(resp.Body()))
 }

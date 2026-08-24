@@ -88,7 +88,7 @@ func Decompress(dst, src []byte) ([]byte, error) {
 	r.in = src
 
 	if cap(dst) == 0 {
-		dst = make([]byte, 0, len(src)*2)
+		dst = make([]byte, 0, max(len(src)*4, 4096))
 	} else {
 		dst = dst[:0]
 	}
@@ -152,7 +152,7 @@ func DecompressScoped(s *borrow.Scope, src []byte) (borrow.Bytes, error) {
 
 	r.in = src
 
-	initCap := max(len(src)*2, 1024)
+	initCap := max(len(src)*4, 4096)
 	b := s.AllocBytes(initCap)
 	dst := b.AsSlice()[:0]
 

@@ -87,6 +87,7 @@ func DefaultRegistry() *Registry {
 		&RuleBorrowAliasInvalidation{},
 		&RuleBorrowClosureEscape{},
 		&RuleBorrowGlobalEscape{},
+		&RuleBorrowTypestate{},
 	)
 
 	return reg

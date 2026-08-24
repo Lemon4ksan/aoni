@@ -163,3 +163,46 @@ func TestRFC7541AppendixCExamples(t *testing.T) {
 		t.Fatalf("RFC 7541 C.2.4 failed: got %x, want 82", enc)
 	}
 }
+
+func BenchmarkHPACK_Encode(b *testing.B) {
+	hp := AcquireHPACK()
+	defer ReleaseHPACK(hp)
+
+	hf := AcquireHeaderField()
+	defer ReleaseHeaderField(hf)
+
+	hf.Set("user-agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
+
+	dst := make([]byte, 0, 256)
+
+	b.ReportAllocs()
+	b.ResetTimer()
+
+	for b.Loop() {
+		_ = hp.AppendHeader(dst[:0], hf, true)
+	}
+}
+
+func BenchmarkHPACK_Decode(b *testing.B) {
+	hpEnc := AcquireHPACK()
+	defer ReleaseHPACK(hpEnc)
+
+	hpDec := AcquireHPACK()
+	defer ReleaseHPACK(hpDec)
+
+	hf := AcquireHeaderField()
+	defer ReleaseHeaderField(hf)
+
+	hf.Set("user-agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
+	encoded := hpEnc.AppendHeader(nil, hf, true)
+
+	target := AcquireHeaderField()
+	defer ReleaseHeaderField(target)
+
+	b.ReportAllocs()
+	b.ResetTimer()
+
+	for b.Loop() {
+		_, _ = hpDec.Next(target, encoded)
+	}
+}

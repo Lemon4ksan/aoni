@@ -6,7 +6,6 @@ package h3engine
 
 import (
 	"bytes"
-	"errors"
 	"io"
 	"strconv"
 	"sync"
@@ -246,27 +245,18 @@ func (q *QPACKCodec) encodeOrderedHeaders(enc *qpack.Encoder, req *fasthttp.Requ
 // DecodeResponseHeaders parses a QPACK header block directly into fasthttp ResponseHeader (RFC 9204 §2.2 & §4.5),
 // returning the parsed status code and ignoring 1xx informational frames (RFC 9114 §4.1).
 func (q *QPACKCodec) DecodeResponseHeaders(headerBlock []byte, res *fasthttp.ResponseHeader) (int, error) {
-	decodeFn := q.decoder.Decode(headerBlock)
-
 	var (
 		hasStatus  bool
 		statusCode int
+		parseErr   error
 	)
 
-	for {
-		hf, err := decodeFn()
-		if errors.Is(err, io.EOF) {
-			break
-		}
-
-		if err != nil {
-			return 0, ErrQPACKDecompressFailed
-		}
-
+	err := q.decoder.DecodeFields(headerBlock, func(hf qpack.HeaderField) bool {
 		if hf.Name == ":status" {
-			code, parseErr := strconv.Atoi(hf.Value)
-			if parseErr != nil {
-				return 0, parseErr
+			code, err := strconv.Atoi(hf.Value)
+			if err != nil {
+				parseErr = err
+				return false
 			}
 
 			statusCode = code
@@ -276,22 +266,31 @@ func (q *QPACKCodec) DecodeResponseHeaders(headerBlock []byte, res *fasthttp.Res
 
 			hasStatus = true
 
-			continue
+			return true
 		}
 
 		if hf.IsPseudo() {
-			continue
+			return true
 		}
 
 		if hf.Name == "content-length" {
-			if clen, parseErr := strconv.Atoi(hf.Value); parseErr == nil {
+			if clen, err := strconv.Atoi(hf.Value); err == nil {
 				res.SetContentLength(clen)
 			}
 
-			continue
+			return true
 		}
 
 		res.Add(hf.Name, hf.Value)
+
+		return true
+	})
+	if err != nil {
+		return 0, ErrQPACKDecompressFailed
+	}
+
+	if parseErr != nil {
+		return 0, parseErr
 	}
 
 	if !hasStatus {
@@ -303,24 +302,19 @@ func (q *QPACKCodec) DecodeResponseHeaders(headerBlock []byte, res *fasthttp.Res
 
 // DecodeResponseTrailers decodes a QPACK header block containing response trailers into a key-value map (RFC 9204 §2.2 & §4.5).
 func (q *QPACKCodec) DecodeResponseTrailers(headerBlock []byte) (map[string][]string, error) {
-	decodeFn := q.decoder.Decode(headerBlock)
 	trailers := make(map[string][]string)
 
-	for {
-		hf, err := decodeFn()
-		if errors.Is(err, io.EOF) {
-			break
-		}
-
-		if err != nil {
-			return nil, ErrQPACKDecompressFailed
-		}
-
+	err := q.decoder.DecodeFields(headerBlock, func(hf qpack.HeaderField) bool {
 		if hf.IsPseudo() {
-			continue
+			return true
 		}
 
 		trailers[hf.Name] = append(trailers[hf.Name], hf.Value)
+
+		return true
+	})
+	if err != nil {
+		return nil, ErrQPACKDecompressFailed
 	}
 
 	return trailers, nil

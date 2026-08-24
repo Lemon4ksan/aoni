@@ -46,3 +46,43 @@ func TestBufferPoolSplitting(t *testing.T) {
 	buf.Decrement()
 	require.Panics(t, func() { buf.Decrement() })
 }
+
+func TestBufferPoolParallel(t *testing.T) {
+	t.Parallel()
+
+	const workers = 32
+	const iterations = 500
+
+	done := make(chan struct{}, workers)
+	for i := 0; i < workers; i++ {
+		go func() {
+			defer func() { done <- struct{}{} }()
+			for j := 0; j < iterations; j++ {
+				buf := getPacketBuffer()
+				buf.Data = append(buf.Data, []byte("data")...)
+				buf.Release()
+
+				lbuf := getLargePacketBuffer()
+				lbuf.Data = append(lbuf.Data, []byte("largedata")...)
+				lbuf.Release()
+			}
+		}()
+	}
+
+	for i := 0; i < workers; i++ {
+		<-done
+	}
+}
+
+func BenchmarkBufferPool_Parallel(b *testing.B) {
+	b.ReportAllocs()
+	b.ResetTimer()
+
+	b.RunParallel(func(pb *testing.PB) {
+		for pb.Next() {
+			buf := getPacketBuffer()
+			buf.Data = append(buf.Data, 0x01, 0x02, 0x03, 0x04)
+			buf.Release()
+		}
+	})
+}
