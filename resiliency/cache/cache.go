@@ -172,6 +172,7 @@ type ShardedStore[K comparable, V any] struct {
 type cacheShard[K comparable, V any] struct {
 	mu    sync.RWMutex
 	items map[K]genericEntry[V]
+	_     [32]byte // Cache-line padding isolating 64-byte L1 cache lines across CPU cores
 }
 
 // NewShardedStore creates a partitioned [ShardedStore] with 32 lock-striped shards and automatic background eviction.
