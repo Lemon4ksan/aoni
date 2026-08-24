@@ -12,6 +12,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/lemon4ksan/foundation/borrow"
 )
 
 func TestH1Engine_ClientDo(t *testing.T) {
@@ -216,6 +218,143 @@ func BenchmarkHeaderParse_ResponseHeader_SIMD(b *testing.B) {
 		h.Reset()
 		if _, err := h.parse(testHeaderRaw1KB); err != nil {
 			b.Fatal(err)
+		}
+	}
+}
+
+func BenchmarkCookie_Scoped(b *testing.B) {
+	scope := borrow.AcquireScope()
+	defer scope.Release()
+
+	var c Cookie
+	c.SetKey("session_id")
+	c.SetValue("xyz_987654321_secure_token")
+	c.SetDomain("api.aoni.dev")
+	c.SetPath("/v1/auth")
+
+	b.ReportAllocs()
+	b.ResetTimer()
+
+	for b.Loop() {
+		k := c.KeyScoped(scope)
+		v := c.ValueScoped(scope)
+		d := c.DomainScoped(scope)
+		p := c.PathScoped(scope)
+		if len(k.AsSlice()) == 0 || len(v.AsSlice()) == 0 || len(d.AsSlice()) == 0 || len(p.AsSlice()) == 0 {
+			b.Fatal("empty cookie field")
+		}
+	}
+}
+
+func BenchmarkCookie_LegacyAlloc(b *testing.B) {
+	var c Cookie
+	c.SetKey("session_id")
+	c.SetValue("xyz_987654321_secure_token")
+	c.SetDomain("api.aoni.dev")
+	c.SetPath("/v1/auth")
+
+	b.ReportAllocs()
+	b.ResetTimer()
+
+	for b.Loop() {
+		k := string(c.Key())
+		v := string(c.Value())
+		d := string(c.Domain())
+		p := string(c.Path())
+		if len(k) == 0 || len(v) == 0 || len(d) == 0 || len(p) == 0 {
+			b.Fatal("empty cookie field")
+		}
+	}
+}
+
+func BenchmarkURI_Scoped(b *testing.B) {
+	scope := borrow.AcquireScope()
+	defer scope.Release()
+
+	u := AcquireURI()
+	defer ReleaseURI(u)
+	u.Parse(nil, []byte("https://user:pass@api.aoni.dev:8443/v1/users/42/transactions?limit=50&offset=100#details"))
+
+	b.ReportAllocs()
+	b.ResetTimer()
+
+	for b.Loop() {
+		host := u.HostScoped(scope)
+		scheme := u.SchemeScoped(scope)
+		path := u.PathScoped(scope)
+		query := u.QueryScoped(scope)
+		full := u.FullURIScoped(scope)
+		if len(host.AsSlice()) == 0 || len(scheme.AsSlice()) == 0 || len(path.AsSlice()) == 0 || len(query.AsSlice()) == 0 || len(full.AsSlice()) == 0 {
+			b.Fatal("empty uri field")
+		}
+	}
+}
+
+func BenchmarkURI_LegacyAlloc(b *testing.B) {
+	u := AcquireURI()
+	defer ReleaseURI(u)
+	u.Parse(nil, []byte("https://user:pass@api.aoni.dev:8443/v1/users/42/transactions?limit=50&offset=100#details"))
+
+	b.ReportAllocs()
+	b.ResetTimer()
+
+	for b.Loop() {
+		host := string(u.Host())
+		scheme := string(u.Scheme())
+		path := string(u.Path())
+		query := string(u.QueryString())
+		full := string(u.FullURI())
+		if len(host) == 0 || len(scheme) == 0 || len(path) == 0 || len(query) == 0 || len(full) == 0 {
+			b.Fatal("empty uri field")
+		}
+	}
+}
+
+func BenchmarkFullPipeline_ScopedBorrow(b *testing.B) {
+	scope := borrow.AcquireScope()
+	defer scope.Release()
+
+	resp := AcquireResponse()
+	defer ReleaseResponse(resp)
+	if _, err := resp.Header.parse(testHeaderRaw1KB); err != nil {
+		b.Fatal(err)
+	}
+	resp.SetBodyString(`{"id":42,"username":"admin","status":"authenticated","role":"superadmin"}`)
+
+	b.ReportAllocs()
+	b.ResetTimer()
+
+	for b.Loop() {
+		contentType := resp.Header.PeekScoped(scope, "Content-Type")
+		server := resp.Header.PeekScoped(scope, "Server")
+		etag := resp.Header.PeekScoped(scope, "ETag")
+		body := resp.BodyScoped(scope)
+
+		if len(contentType.AsSlice()) == 0 || len(server.AsSlice()) == 0 || len(etag.AsSlice()) == 0 || len(body.AsSlice()) == 0 {
+			b.Fatal("empty pipeline field")
+		}
+	}
+}
+
+func BenchmarkFullPipeline_LegacyCopy(b *testing.B) {
+	resp := AcquireResponse()
+	defer ReleaseResponse(resp)
+	if _, err := resp.Header.parse(testHeaderRaw1KB); err != nil {
+		b.Fatal(err)
+	}
+	resp.SetBodyString(`{"id":42,"username":"admin","status":"authenticated","role":"superadmin"}`)
+
+	b.ReportAllocs()
+	b.ResetTimer()
+
+	for b.Loop() {
+		contentType := string(resp.Header.Peek("Content-Type"))
+		server := string(resp.Header.Peek("Server"))
+		etag := string(resp.Header.Peek("ETag"))
+		body := append([]byte(nil), resp.Body()...)
+
+		if len(contentType) == 0 || len(server) == 0 || len(etag) == 0 || len(body) == 0 {
+			b.Fatal("empty pipeline field")
 		}
 	}
 }
