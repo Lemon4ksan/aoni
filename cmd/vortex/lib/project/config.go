@@ -29,6 +29,7 @@ type Config struct {
 	Contracts  []ContractConfig `yaml:"contracts"`
 	Secrets    SecretsConfig    `yaml:"secrets,omitempty"`
 	Lint       LintConfig       `yaml:"lint,omitempty"`
+	Borrow     BorrowConfig     `yaml:"borrow,omitempty"`
 	Formatting FormattingConfig `yaml:"formatting,omitempty"`
 	Ignore     []string         `yaml:"ignore,omitempty"`
 	Export     ExportConfig     `yaml:"export,omitempty"`
@@ -188,6 +189,88 @@ type LintConfig struct {
 	Ignore  []string            `yaml:"ignore,omitempty"`
 	Enable  []string            `yaml:"enable,omitempty"`
 	Rules   map[string]RuleOpts `yaml:"rules,omitempty"`
+	Borrow  BorrowConfig        `yaml:"borrow,omitempty"`
+}
+
+// BorrowConfig controls zero-copy borrow checker validation rules and target file patterns.
+type BorrowConfig struct {
+	Enabled bool     `yaml:"enabled,omitempty"`
+	Include []string `yaml:"include,omitempty"`
+	Files   []string `yaml:"files,omitempty"`
+	Exclude []string `yaml:"exclude,omitempty"`
+}
+
+// ShouldCheckBorrow reports whether borrow checking is globally enabled and whether a given file matches.
+func (cfg *Config) ShouldCheckBorrow(filePath string) bool {
+	if cfg == nil {
+		return false
+	}
+
+	borrowCfg := cfg.Lint.Borrow
+	if !borrowCfg.Enabled {
+		borrowCfg = cfg.Borrow
+	}
+
+	if !borrowCfg.Enabled {
+		return false
+	}
+
+	return borrowCfg.Matches(filePath)
+}
+
+// Matches checks whether filePath matches the include/files and exclude filters.
+func (b *BorrowConfig) Matches(filePath string) bool {
+	if b == nil || !b.Enabled {
+		return false
+	}
+
+	normPath := filepath.ToSlash(filePath)
+
+	// Check exclude patterns
+	for _, pattern := range b.Exclude {
+		pattern = filepath.ToSlash(pattern)
+
+		if matched, _ := filepath.Match(pattern, filepath.Base(normPath)); matched {
+			return false
+		}
+
+		if matched, _ := filepath.Match(pattern, normPath); matched {
+			return false
+		}
+
+		sub := strings.Trim(pattern, "*")
+		if sub != "" && strings.Contains(normPath, sub) {
+			return false
+		}
+	}
+
+	// If no include/files patterns specified, all Go files are checked
+	patterns := make([]string, 0, len(b.Include)+len(b.Files))
+	patterns = append(patterns, b.Include...)
+	patterns = append(patterns, b.Files...)
+
+	if len(patterns) == 0 {
+		return true
+	}
+
+	for _, pattern := range patterns {
+		pattern = filepath.ToSlash(pattern)
+
+		if matched, _ := filepath.Match(pattern, filepath.Base(normPath)); matched {
+			return true
+		}
+
+		if matched, _ := filepath.Match(pattern, normPath); matched {
+			return true
+		}
+
+		sub := strings.Trim(pattern, "*")
+		if sub != "" && strings.Contains(normPath, sub) {
+			return true
+		}
+	}
+
+	return false
 }
 
 // AllIgnoredRules returns a deduplicated list of all globally ignored lint rules.

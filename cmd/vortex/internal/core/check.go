@@ -52,6 +52,7 @@ func (c *CmdCheck) Run(ctx context.Context, args []string, stdout, stderr io.Wri
 		disableFlag  = fs.String("disable", "", "Comma-separated list of rule IDs/names to disable")
 		enableFlag   = fs.String("enable", "", "Comma-separated list of rule IDs/names to enable")
 		strictFlag   = fs.Bool("strict", false, "Treat warnings as errors")
+		borrowFlag   = fs.Bool("borrow", false, "Enable Rust-grade zero-copy borrow checker validation")
 		noCacheFlag  = fs.Bool("no-cache", false, "Disable incremental validation cache")
 		dirFlag      = fs.String("dir", "", "Target workspace directory (default: current root)")
 		maxDepthFlag = fs.Int("max-depth", 6, "Maximum directory search depth (0 for unlimited)")
@@ -151,7 +152,12 @@ func (c *CmdCheck) Run(ctx context.Context, args []string, stdout, stderr io.Wri
 			continue
 		}
 
-		hasTargets := len(root.Services) > 0 || len(root.Tuples) > 0 || len(root.Bitpacks) > 0 ||
+		isBorrowTarget := *borrowFlag
+		if !isBorrowTarget && rt.Config != nil {
+			isBorrowTarget = rt.Config.ShouldCheckBorrow(relFile)
+		}
+
+		hasTargets := isBorrowTarget || len(root.Services) > 0 || len(root.Tuples) > 0 || len(root.Bitpacks) > 0 ||
 			len(root.UnrecognizedDirectives) > 0 || len(root.Unions) > 0
 
 		if !hasTargets {
