@@ -13,6 +13,7 @@ import (
 	"time"
 
 	flog "github.com/lemon4ksan/foundation/async/log"
+	"github.com/lemon4ksan/foundation/borrow"
 	"github.com/lemon4ksan/foundation/generic"
 	furl "github.com/lemon4ksan/foundation/net/url"
 
@@ -274,6 +275,70 @@ func (c *Client) doPipeline(
 	}
 
 	return resp, nil
+}
+
+// DoScoped executes an aoni Request within an auto-releasing [borrow.Scope] context.
+// The response stream is automatically closed upon callback completion,
+// guaranteeing zero memory leaks and safe buffer recycling.
+func (c *Client) DoScoped(
+	req Request,
+	fn func(s *borrow.Scope, resp Response) error,
+) error {
+	resp, err := c.Do(req)
+	if err != nil {
+		return err
+	}
+
+	defer func() {
+		_ = resp.Close()
+	}()
+
+	scope := borrow.NewScope()
+	defer scope.Release()
+
+	return fn(scope, resp)
+}
+
+// RequestScoped executes an HTTP request within an auto-releasing [borrow.Scope] context.
+func (c *Client) RequestScoped(
+	ctx context.Context,
+	method, path string,
+	fn func(s *borrow.Scope, resp *http.Response) error,
+	mods ...RequestModifier,
+) error {
+	resp, err := c.Request(ctx, method, path, mods...)
+	if err != nil {
+		return err
+	}
+
+	defer func() {
+		_ = resp.Body.Close()
+	}()
+
+	scope := borrow.NewScope()
+	defer scope.Release()
+
+	return fn(scope, resp)
+}
+
+// GetScoped executes an HTTP GET request within an auto-releasing [borrow.Scope] context.
+func (c *Client) GetScoped(
+	ctx context.Context,
+	path string,
+	fn func(s *borrow.Scope, resp *http.Response) error,
+	mods ...RequestModifier,
+) error {
+	return c.RequestScoped(ctx, http.MethodGet, path, fn, mods...)
+}
+
+// PostScoped executes an HTTP POST request within an auto-releasing [borrow.Scope] context.
+func (c *Client) PostScoped(
+	ctx context.Context,
+	path string,
+	fn func(s *borrow.Scope, resp *http.Response) error,
+	mods ...RequestModifier,
+) error {
+	return c.RequestScoped(ctx, http.MethodPost, path, fn, mods...)
 }
 
 // Get executes an HTTP GET request against path with optional per-request modifiers.

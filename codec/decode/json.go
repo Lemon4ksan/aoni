@@ -7,6 +7,7 @@ package decode
 import (
 	"io"
 
+	"github.com/lemon4ksan/foundation/borrow"
 	"github.com/lemon4ksan/foundation/codec/json"
 )
 
@@ -72,4 +73,41 @@ func (jsonDecoder) Decode(reader io.Reader, target any) error {
 	}
 
 	return json.NewDecoder(StripBOM(reader)).Decode(target)
+}
+
+// JSONScoped parses JSON response payload into a type T allocated within the specified [borrow.Scope].
+// Employs NoCopy: true parsing to avoid string allocations for fields referencing the underlying buffer.
+func JSONScoped[T any](reader io.Reader, scope *borrow.Scope) (*T, error) {
+	target := borrow.Alloc[T](scope).Get()
+
+	if data, _, ok := InspectBytes(reader); ok {
+		data = StripBOMBytes(data)
+		if len(data) == 0 {
+			return target, nil
+		}
+
+		err := json.UnmarshalWithConfig(data, target, json.DecoderConfig{NoCopy: true})
+		if err != nil {
+			return nil, err
+		}
+
+		return target, nil
+	}
+
+	data, err := io.ReadAll(StripBOM(reader))
+	if err != nil {
+		return nil, err
+	}
+
+	data = StripBOMBytes(data)
+	if len(data) == 0 {
+		return target, nil
+	}
+
+	err = json.UnmarshalWithConfig(data, target, json.DecoderConfig{NoCopy: true})
+	if err != nil {
+		return nil, err
+	}
+
+	return target, nil
 }
