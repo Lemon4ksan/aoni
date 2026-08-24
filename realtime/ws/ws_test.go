@@ -2143,3 +2143,33 @@ func BenchmarkWS_ReadMessageScoped(b *testing.B) {
 		scope.Release()
 	}
 }
+
+func TestWS_Split(t *testing.T) {
+	serverConn, clientConn := tcpPipe(t)
+	defer serverConn.Close()
+	defer clientConn.Close()
+
+	wsServer := WrapRawConn(serverConn, false)
+	wsClient := WrapRawConn(clientConn, true)
+
+	sReader, sWriter := Split(wsServer)
+	cReader, cWriter := Split(wsClient)
+
+	// Client writes, Server reads
+	err := cWriter.WriteMessage(FrameText, []byte("ping from split writer"))
+	assert.NoError(t, err)
+
+	op, msg, err := sReader.ReadMessage()
+	assert.NoError(t, err)
+	assert.Equal(t, FrameText, op)
+	assert.Equal(t, []byte("ping from split writer"), msg)
+
+	// Server writes, Client reads
+	err = sWriter.WriteMessage(FrameText, []byte("pong from server split writer"))
+	assert.NoError(t, err)
+
+	op, msg, err = cReader.ReadMessage()
+	assert.NoError(t, err)
+	assert.Equal(t, FrameText, op)
+	assert.Equal(t, []byte("pong from server split writer"), msg)
+}

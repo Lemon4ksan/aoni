@@ -85,6 +85,48 @@ type Conn interface {
 	CloseChan() <-chan struct{}
 }
 
+// WSReader represents a dedicated read-only half of a WebSocket connection.
+type WSReader interface {
+	ReadMessage() (messageType int, payload []byte, err error)
+	ReadMessageTo(buf []byte) (messageType, n int, err error)
+	ReadMessageScoped(scope *borrow.Scope) (messageType int, payload []byte, err error)
+}
+
+// WSWriter represents a dedicated write-only half of a WebSocket connection.
+type WSWriter interface {
+	WriteMessage(messageType int, data []byte) error
+}
+
+type wsReadHalf struct {
+	conn Conn
+}
+
+func (r *wsReadHalf) ReadMessage() (int, []byte, error) {
+	return r.conn.ReadMessage()
+}
+
+func (r *wsReadHalf) ReadMessageTo(buf []byte) (int, int, error) {
+	return r.conn.ReadMessageTo(buf)
+}
+
+func (r *wsReadHalf) ReadMessageScoped(scope *borrow.Scope) (int, []byte, error) {
+	return r.conn.ReadMessageScoped(scope)
+}
+
+type wsWriteHalf struct {
+	conn Conn
+}
+
+func (w *wsWriteHalf) WriteMessage(messageType int, data []byte) error {
+	return w.conn.WriteMessage(messageType, data)
+}
+
+// Split splits a WebSocket connection into independent reader and writer half-connections,
+// enabling zero-contention full-duplex communication across concurrent goroutines.
+func Split(c Conn) (WSReader, WSWriter) {
+	return &wsReadHalf{conn: c}, &wsWriteHalf{conn: c}
+}
+
 type wsRawConn struct {
 	base         net.Conn
 	br           *bufio.Reader // Buffered reader for socket read syscall reduction
