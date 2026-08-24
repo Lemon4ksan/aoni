@@ -128,24 +128,26 @@ func Split(c Conn) (WSReader, WSWriter) {
 }
 
 type wsRawConn struct {
-	base         net.Conn
-	br           *bufio.Reader // Buffered reader for socket read syscall reduction
-	subprotocol  string
-	isClient     bool
-	compress     bool // RFC 7692 permessage-deflate negotiated flag
-	reader       io.Reader
-	payloadBuf   []byte                   // Reusable zero-alloc read payload buffer
-	fragOpcode   byte                     // Ongoing fragmented message opcode (FrameText or FrameBinary)
-	fragBuf      []byte                   // Reusable buffer for accumulating fragmented frames
-	fragCompress bool                     // Whether initial fragment had RSV1 (permessage-deflate) set
-	readHdr      [maxFrameHeaderSize]byte // Fixed-size header buffer avoiding escape analysis
-	readMask     [4]byte                  // Reusable mask buffer for zero-alloc reading
-	writeHdr     [maxFrameHeaderSize]byte // Fixed-size header buffer for zero-alloc writing
-	writeMask    [4]byte                  // Reusable mask buffer for zero-alloc writing
-	writeBuf     []byte                   // Reusable write buffer (protected by writeMu)
-	closed       chan struct{}
-	writeMu      chan struct{}
-	once         sync.Once
+	base          net.Conn
+	br            *bufio.Reader // Buffered reader for socket read syscall reduction
+	subprotocol   string
+	isClient      bool
+	compress      bool // RFC 7692 permessage-deflate negotiated flag
+	reader        io.Reader
+	payloadBuf    []byte                   // Reusable zero-alloc read payload buffer
+	fragOpcode    byte                     // Ongoing fragmented message opcode (FrameText or FrameBinary)
+	fragBuf       []byte                   // Reusable buffer for accumulating fragmented frames
+	fragCompress  bool                     // Whether initial fragment had RSV1 (permessage-deflate) set
+	readHdr       [maxFrameHeaderSize]byte // Fixed-size header buffer avoiding escape analysis
+	readMask      [4]byte                  // Reusable mask buffer for zero-alloc reading
+	writeHdr      [maxFrameHeaderSize]byte // Fixed-size header buffer for zero-alloc writing
+	writeMask     [4]byte                  // Reusable mask buffer for zero-alloc writing
+	writeBuf      []byte                   // Reusable write buffer (protected by writeMu)
+	compressBuf   []byte                   // Reusable zero-alloc RFC 7692 deflate compression buffer
+	decompressBuf []byte                   // Reusable zero-alloc RFC 7692 inflate decompression buffer
+	closed        chan struct{}
+	writeMu       chan struct{}
+	once          sync.Once
 }
 
 // WrapRawConn wraps a net.Conn into a zero-alloc ws.Conn using default buffer sizes.
@@ -508,7 +510,8 @@ func (c *wsRawConn) readFrameScoped(scope *borrow.Scope) (byte, []byte, error) {
 				if scope != nil {
 					decompressed, decErr = decompressNoContextTakeoverScoped(payload, scope)
 				} else {
-					decompressed, decErr = decompressNoContextTakeover(payload)
+					c.decompressBuf, decErr = decompressNoContextTakeoverTo(c.decompressBuf, payload)
+					decompressed = c.decompressBuf
 				}
 
 				if decErr != nil {
@@ -603,11 +606,12 @@ func (c *wsRawConn) writeFrame(opcode byte, payload []byte) error {
 	)
 
 	if c.compress && (opcode == FrameText || opcode == FrameBinary) {
-		payload, err = compressNoContextTakeover(payload)
+		c.compressBuf, err = compressNoContextTakeoverTo(c.compressBuf, payload)
 		if err != nil {
 			return err
 		}
 
+		payload = c.compressBuf
 		compressed = true
 	}
 

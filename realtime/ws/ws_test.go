@@ -1790,6 +1790,47 @@ func TestRFC7692_PermessageDeflate_EndToEnd(t *testing.T) {
 	assert.Equal(t, string(testMsg), string(buf[:n]))
 }
 
+func BenchmarkWS_PermessageDeflate(b *testing.B) {
+	clientConn, serverConn := tcpPipeBench(b)
+	defer clientConn.Close()
+	defer serverConn.Close()
+
+	c := WrapRawConn(clientConn, true).(*wsRawConn)
+	s := WrapRawConn(serverConn, false).(*wsRawConn)
+	c.compress = true
+	s.compress = true
+
+	payload := []byte("hello compressed websocket message permessage-deflate rfc7692 1234567890")
+	b.SetBytes(int64(len(payload)))
+
+	ch := make(chan struct{}, 256)
+	done := make(chan struct{})
+
+	go func() {
+		for range ch {
+			_ = c.WriteMessage(FrameText, payload)
+		}
+
+		close(done)
+	}()
+
+	b.ReportAllocs()
+	b.ResetTimer()
+
+	for range b.N {
+		ch <- struct{}{}
+
+		_, _, err := s.ReadMessage()
+		if err != nil {
+			b.Fatal(err)
+		}
+	}
+
+	b.StopTimer()
+	close(ch)
+	<-done
+}
+
 func TestParseWSURL_PathTraversal(t *testing.T) {
 	t.Parallel()
 

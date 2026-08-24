@@ -35,6 +35,10 @@ var (
 		buf := make([]byte, 0, 4096)
 		return &buf
 	})
+
+	twoSliceReaderStorage = pool.NewPerPStorage(func() *twoSliceReader {
+		return new(twoSliceReader)
+	})
 )
 
 type twoSliceReader struct {
@@ -69,6 +73,11 @@ func (r *twoSliceReader) Read(p []byte) (int, error) {
 // compressNoContextTakeover compresses payload bytes per RFC 7692 Section 7.2.1,
 // stripping trailing 0x00 0x00 0xFF 0xFF bytes after flushing.
 func compressNoContextTakeover(src []byte) ([]byte, error) {
+	return compressNoContextTakeoverTo(nil, src)
+}
+
+// compressNoContextTakeoverTo compresses payload bytes per RFC 7692 Section 7.2.1 directly into dst.
+func compressNoContextTakeoverTo(dst, src []byte) ([]byte, error) {
 	buf := compressBufferStorage.Get()
 	defer compressBufferStorage.Put(buf)
 
@@ -92,22 +101,34 @@ func compressNoContextTakeover(src []byte) ([]byte, error) {
 		raw = raw[:len(raw)-4]
 	}
 
-	out := make([]byte, len(raw))
-	copy(out, raw)
+	if cap(dst) < len(raw) {
+		dst = make([]byte, len(raw))
+	} else {
+		dst = dst[:len(raw)]
+	}
 
-	return out, nil
+	copy(dst, raw)
+
+	return dst, nil
 }
 
 // decompressNoContextTakeover decompresses payload bytes per RFC 7692 Section 7.2.2,
 // appending 0x00 0x00 0xFF 0xFF 0x01 0x00 0x00 0xFF 0xFF sync flush tail before decoding.
 func decompressNoContextTakeover(src []byte) ([]byte, error) {
-	var r twoSliceReader
+	return decompressNoContextTakeoverTo(nil, src)
+}
+
+// decompressNoContextTakeoverTo decompresses payload bytes per RFC 7692 Section 7.2.2 directly into dst.
+func decompressNoContextTakeoverTo(dst, src []byte) ([]byte, error) {
+	r := twoSliceReaderStorage.Get()
+	defer twoSliceReaderStorage.Put(r)
+
 	r.Reset(src, wsTail[:])
 
 	fr := flateReaderStorage.Get()
 	defer flateReaderStorage.Put(fr)
 
-	if err := fr.Reset(&r, nil); err != nil {
+	if err := fr.Reset(r, nil); err != nil {
 		return nil, fmt.Errorf("%w: %w", ErrFlateDecompressFailed, err)
 	}
 
@@ -116,16 +137,13 @@ func decompressNoContextTakeover(src []byte) ([]byte, error) {
 		return nil, ErrFlateDecompressFailed
 	}
 
-	outBuf := decompressBufferStorage.Get()
-	defer decompressBufferStorage.Put(outBuf)
-
-	*outBuf = (*outBuf)[:0]
+	dst = dst[:0]
 
 	var chunk [4096]byte
 	for {
 		n, err := readCloser.Read(chunk[:])
 		if n > 0 {
-			*outBuf = append(*outBuf, chunk[:n]...)
+			dst = append(dst, chunk[:n]...)
 		}
 
 		if err != nil {
@@ -137,21 +155,20 @@ func decompressNoContextTakeover(src []byte) ([]byte, error) {
 		}
 	}
 
-	res := make([]byte, len(*outBuf))
-	copy(res, *outBuf)
-
-	return res, nil
+	return dst, nil
 }
 
 // decompressNoContextTakeoverScoped decompresses payload bytes into arena memory bound to scope.
 func decompressNoContextTakeoverScoped(src []byte, scope *borrow.Scope) ([]byte, error) {
-	var r twoSliceReader
+	r := twoSliceReaderStorage.Get()
+	defer twoSliceReaderStorage.Put(r)
+
 	r.Reset(src, wsTail[:])
 
 	fr := flateReaderStorage.Get()
 	defer flateReaderStorage.Put(fr)
 
-	if err := fr.Reset(&r, nil); err != nil {
+	if err := fr.Reset(r, nil); err != nil {
 		return nil, fmt.Errorf("%w: %w", ErrFlateDecompressFailed, err)
 	}
 
