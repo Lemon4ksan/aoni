@@ -34,6 +34,8 @@ var headerStorage = pool.NewPerPStorage(func() *HeaderField {
 type HeaderField struct {
 	key      []byte
 	value    []byte
+	keyBuf   []byte
+	valBuf   []byte
 	sensible bool
 	static   bool
 }
@@ -59,8 +61,10 @@ func (hf *HeaderField) Reset() {
 		return
 	}
 
-	hf.key = hf.key[:0]
-	hf.value = hf.value[:0]
+	hf.key = nil
+	hf.value = nil
+	hf.keyBuf = hf.keyBuf[:0]
+	hf.valBuf = hf.valBuf[:0]
 	hf.sensible = false
 }
 
@@ -89,7 +93,8 @@ func (hf *HeaderField) SetKey(key string) {
 		return
 	}
 
-	hf.key = []byte(key)
+	hf.keyBuf = append(hf.keyBuf[:0], key...)
+	hf.key = hf.keyBuf
 }
 
 func (hf *HeaderField) SetValue(value string) {
@@ -98,7 +103,8 @@ func (hf *HeaderField) SetValue(value string) {
 		return
 	}
 
-	hf.value = []byte(value)
+	hf.valBuf = append(hf.valBuf[:0], value...)
+	hf.value = hf.valBuf
 }
 
 func (hf *HeaderField) SetKeyBytes(key []byte) {
@@ -107,7 +113,8 @@ func (hf *HeaderField) SetKeyBytes(key []byte) {
 		return
 	}
 
-	hf.key = append(hf.key[:0], key...)
+	hf.keyBuf = append(hf.keyBuf[:0], key...)
+	hf.key = hf.keyBuf
 }
 
 func (hf *HeaderField) SetValueBytes(value []byte) {
@@ -116,20 +123,23 @@ func (hf *HeaderField) SetValueBytes(value []byte) {
 		return
 	}
 
-	hf.value = append(hf.value[:0], value...)
+	hf.valBuf = append(hf.valBuf[:0], value...)
+	hf.value = hf.valBuf
 }
 
 func (hf *HeaderField) CopyTo(other *HeaderField) {
 	if ik := rodata.InternKeyBytes(hf.key); ik != nil {
 		other.key = ik
 	} else {
-		other.key = append(other.key[:0], hf.key...)
+		other.keyBuf = append(other.keyBuf[:0], hf.key...)
+		other.key = other.keyBuf
 	}
 
 	if iv := rodata.InternValueBytes(hf.value); iv != nil {
 		other.value = iv
 	} else {
-		other.value = append(other.value[:0], hf.value...)
+		other.valBuf = append(other.valBuf[:0], hf.value...)
+		other.value = other.valBuf
 	}
 
 	other.sensible = hf.sensible
