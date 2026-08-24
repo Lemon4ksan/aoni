@@ -8,6 +8,8 @@ import (
 	"encoding/binary"
 	"fmt"
 	"time"
+
+	"github.com/lemon4ksan/foundation/silicon/clock"
 )
 
 // Continuation carries extended header block fragments across HTTP/2 frame boundaries (RFC 9113 §6.10).
@@ -249,7 +251,7 @@ func (p *Ping) SetData(b []byte)            { copy(p.data[:], b) }
 func (p *Ping) Write(b []byte) (int, error) { copy(p.data[:], b); return len(b), nil }
 
 func (p *Ping) SetCurrentTime() {
-	binary.BigEndian.PutUint64(p.data[:], uint64(time.Now().UnixNano()))
+	binary.BigEndian.PutUint64(p.data[:], uint64(clock.CoarseNowNano()))
 }
 
 func (p *Ping) DataAsTime() time.Time {
