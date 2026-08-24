@@ -46,56 +46,119 @@ func HuffmanEncode(dst, src []byte) []byte {
 	return dst
 }
 
-// HuffmanDecode decompresses HPACK Huffman encoded src bytes into dst using tree-based decoding (RFC 7541 §5.2 & Appendix B).
+// HuffmanDecode decompresses HPACK Huffman encoded src bytes into dst using flat table-driven decoding (RFC 7541 §5.2 & Appendix B).
 func HuffmanDecode(dst, src []byte) []byte {
+	nSrc := len(src)
+	if nSrc == 0 {
+		return dst
+	}
+
 	var (
 		cum  uint32
 		bits uint8
 	)
 
-	root := rootHuffmanNode
+	currNode := 0
+	table := flatHuffmanTable
 
-	for _, b := range src {
-		cum = cum<<8 | uint32(b)
+	for i := 0; i < nSrc; i++ {
+		cum = cum<<8 | uint32(src[i])
 		bits += 8
 
 		for bits >= 8 {
-			root = root.sub[byte(cum>>(bits-8))] //nolint:gosec
-			if root == nil {
-				return dst
-			}
+			entry := table[currNode][byte(cum>>(bits-8))]
+			if !entry.isLeaf {
+				if entry.next == 0 && currNode != 0 {
+					return dst
+				}
 
-			if root.sub != nil {
+				currNode = int(entry.next)
 				bits -= 8
 			} else {
-				bits -= root.codeLen
-				dst = append(dst, root.sym)
-				root = rootHuffmanNode
+				bits -= entry.codeLen
+				dst = append(dst, entry.sym)
+				currNode = 0
 			}
 		}
 	}
 
+	cum &= (1 << bits) - 1
+
 	for bits > 0 {
-		root = root.sub[byte(cum<<(8-bits))] //nolint:gosec
-		if root == nil || root.sub != nil || root.codeLen > bits {
+		entry := table[currNode][byte(cum<<(8-bits))]
+		if !entry.isLeaf || entry.codeLen > bits {
 			break
 		}
 
-		dst = append(dst, root.sym)
-		bits -= root.codeLen
-		root = rootHuffmanNode
+		dst = append(dst, entry.sym)
+		bits -= entry.codeLen
+		cum &= (1 << bits) - 1
+		currNode = 0
 	}
 
 	return dst
 }
 
-var rootHuffmanNode = func() *huffmanNode {
-	node := &huffmanNode{sub: make([]*huffmanNode, 256)}
+type huffmanTableEntry struct {
+	next    uint16
+	codeLen uint8
+	sym     byte
+	isLeaf  bool
+}
+
+var flatHuffmanTable = func() [][]huffmanTableEntry {
+	root := &huffmanNode{sub: make([]*huffmanNode, 256)}
 	for i, code := range huffmanCodes {
-		node.add(byte(i), code, huffmanCodeLen[i])
+		root.add(byte(i), code, huffmanCodeLen[i])
 	}
 
-	return node
+	var flat [][]huffmanTableEntry
+
+	nodeMap := make(map[*huffmanNode]uint16)
+
+	var register func(n *huffmanNode) uint16
+
+	register = func(n *huffmanNode) uint16 {
+		if n == nil {
+			return 0
+		}
+
+		if idx, ok := nodeMap[n]; ok {
+			return idx
+		}
+
+		idx := uint16(len(flat))
+		nodeMap[n] = idx
+
+		flat = append(flat, make([]huffmanTableEntry, 256))
+
+		for i := 0; i < 256; i++ {
+			sub := n.sub[i]
+			if sub == nil {
+				continue
+			}
+
+			if sub.sub != nil {
+				subIdx := register(sub)
+				flat[idx][i] = huffmanTableEntry{
+					next:   subIdx,
+					isLeaf: false,
+				}
+			} else {
+				flat[idx][i] = huffmanTableEntry{
+					sym:     sub.sym,
+					codeLen: sub.codeLen,
+					isLeaf:  true,
+				}
+			}
+		}
+
+		return idx
+	}
+
+	register(root)
+
+	return flat
 }()
 
 type huffmanNode struct {

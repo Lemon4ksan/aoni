@@ -35,6 +35,7 @@ type HeaderField struct {
 	key      []byte
 	value    []byte
 	sensible bool
+	static   bool
 }
 
 // AcquireHeaderField retrieves a recycled HeaderField from memory pools.
@@ -44,7 +45,7 @@ func AcquireHeaderField() *HeaderField {
 
 // ReleaseHeaderField clears and returns a HeaderField to memory pools.
 func ReleaseHeaderField(hf *HeaderField) {
-	if hf != nil {
+	if hf != nil && !hf.static {
 		hf.Reset()
 		headerStorage.Put(hf)
 	}
@@ -52,9 +53,14 @@ func ReleaseHeaderField(hf *HeaderField) {
 
 func (hf *HeaderField) String() string { return string(hf.AppendBytes(nil)) }
 func (hf *HeaderField) Empty() bool    { return len(hf.key) == 0 && len(hf.value) == 0 }
+
 func (hf *HeaderField) Reset() {
-	hf.key = nil
-	hf.value = nil
+	if hf.static {
+		return
+	}
+
+	hf.key = hf.key[:0]
+	hf.value = hf.value[:0]
 	hf.sensible = false
 }
 
@@ -683,6 +689,12 @@ func appendString(dst, src []byte, encode bool) []byte {
 	}
 
 	return dst
+}
+
+func init() {
+	for _, hf := range staticTable {
+		hf.static = true
+	}
 }
 
 // staticTable defines the 61 predefined HTTP/2 header field entries specified in RFC 7541 Appendix A.

@@ -206,3 +206,28 @@ func BenchmarkHPACK_Decode(b *testing.B) {
 		_, _ = hpDec.Next(target, encoded)
 	}
 }
+
+func BenchmarkHuffman_Encode(b *testing.B) {
+	src := []byte("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
+	dst := make([]byte, 0, 128)
+
+	b.ReportAllocs()
+	b.ResetTimer()
+
+	for b.Loop() {
+		_ = HuffmanEncode(dst[:0], src)
+	}
+}
+
+func BenchmarkHuffman_Decode(b *testing.B) {
+	src := []byte("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
+	encoded := HuffmanEncode(nil, src)
+	dst := make([]byte, 0, 128)
+
+	b.ReportAllocs()
+	b.ResetTimer()
+
+	for b.Loop() {
+		_ = HuffmanDecode(dst[:0], encoded)
+	}
+}
