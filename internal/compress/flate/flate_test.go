@@ -1,4 +1,4 @@
-﻿// Copyright (c) 2026 Lemon4ksan All rights reserved.
+// Copyright (c) 2026 Lemon4ksan All rights reserved.
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
@@ -50,4 +50,35 @@ func TestFlateStateless(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, data, decompressed)
 	require.NoError(t, r.Close())
+}
+
+func TestMatchLen_Comprehensive(t *testing.T) {
+	t.Parallel()
+
+	s1 := []byte("The quick brown fox jumps over the lazy dog 1234567890abcdefghijklmnopqrstuvwxyz")
+	s2 := []byte("The quick brown fox jumps over the lazy dog 1234567890abcdefghijklmnopqrstuvwxyz")
+
+	// Full match
+	assert.Equal(t, len(s1), flate.ExportMatchLen(s1, s2))
+
+	// Prefix mismatch at various offsets
+	for i := 0; i < len(s1); i++ {
+		s2Copy := append([]byte(nil), s2...)
+		s2Copy[i] ^= 0xFF
+		assert.Equal(t, i, flate.ExportMatchLen(s1, s2Copy))
+	}
+}
+
+func BenchmarkMatchLen_AVX2(b *testing.B) {
+	s1 := []byte(strings.Repeat("abcdefghijklmnopqrstuvwxyz123456", 10))
+	s2 := []byte(strings.Repeat("abcdefghijklmnopqrstuvwxyz123456", 10))
+	s2[250] = 'Z' // Mismatch at byte 250
+
+	b.SetBytes(250)
+	b.ReportAllocs()
+	b.ResetTimer()
+
+	for b.Loop() {
+		_ = flate.ExportMatchLen(s1, s2)
+	}
 }

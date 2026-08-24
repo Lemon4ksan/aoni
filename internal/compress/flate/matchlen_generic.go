@@ -11,9 +11,9 @@ import (
 	"github.com/lemon4ksan/foundation/silicon/endian"
 )
 
-// matchLen returns the maximum common prefix length of a and b.
+// matchLenGeneric returns the maximum common prefix length of a and b using 64-bit SWAR.
 // a must be the shortest of the two.
-func matchLen(a, b []byte) (n int) {
+func matchLenGeneric(a, b []byte) (n int) {
 	left := len(a)
 	for left >= 32 {
 		d0 := endian.Load64(a, n) ^ endian.Load64(b, n)
@@ -62,4 +62,9 @@ func matchLen(a, b []byte) (n int) {
 	}
 
 	return n
+}
+
+// ExportMatchLen exports matchLen for benchmark and unit testing.
+func ExportMatchLen(a, b []byte) int {
+	return matchLen(a, b)
 }
