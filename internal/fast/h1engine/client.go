@@ -19,6 +19,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/lemon4ksan/foundation/silicon/clock"
 	"github.com/lemon4ksan/foundation/silicon/pool"
 	"golang.org/x/sys/cpu"
 )
@@ -1816,7 +1817,7 @@ func (c *HostClient) doNonNilReqResp(req *Request, resp *Response) (bool, error)
 		return false, ErrHostClientRedirectToDifferentScheme
 	}
 
-	atomic.StoreUint32(&c.lastUseTime, uint32(time.Now().Unix()-startTimeUnix)) // #nosec G115
+	atomic.StoreUint32(&c.lastUseTime, uint32(clock.CoarseNowUnix()-startTimeUnix)) // #nosec G115
 
 	// Free up resources occupied by response before sending the request,
 	// so the GC may reclaim these resources (e.g. response body).
@@ -2153,7 +2154,7 @@ func acquireClientConn(conn net.Conn) *clientConn {
 	}
 	cc := v.(*clientConn) //nolint:forcetypeassert
 	cc.c = conn
-	cc.createdTime = time.Now()
+	cc.createdTime = clock.CoarseTime()
 	return cc
 }
 
@@ -2166,7 +2167,7 @@ func releaseClientConn(cc *clientConn) {
 var clientConnPool sync.Pool
 
 func (c *HostClient) ReleaseConn(cc *clientConn) {
-	cc.lastUseTime = time.Now()
+	cc.lastUseTime = clock.CoarseTime()
 	if c.MaxConnWaitTimeout <= 0 {
 		c.connsLock.Lock()
 		c.conns = append(c.conns, cc)
