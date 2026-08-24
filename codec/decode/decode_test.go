@@ -898,3 +898,24 @@ func BenchmarkDecode_JSON_Stream_vs_BytesReader(b *testing.B) {
 		}
 	})
 }
+
+func BenchmarkDecode_GRPCWeb_FastPath(b *testing.B) {
+	protoMsg := &wrapperspb.StringValue{Value: "aoni gRPC-Web zero allocation payload"}
+	protoBytes, _ := proto.Marshal(protoMsg)
+
+	var frame [5]byte
+	frame[0] = 0x00
+	binary.BigEndian.PutUint32(frame[1:5], uint32(len(protoBytes)))
+
+	fullPayload := append(frame[:], protoBytes...)
+	br := mockBytesReader{data: fullPayload, volatile: true}
+
+	b.ReportAllocs()
+	b.ResetTimer()
+
+	for b.Loop() {
+		var target wrapperspb.StringValue
+		_ = GRPCWebDecoder.Decode(br, &target)
+	}
+}
+

@@ -8,6 +8,7 @@ import (
 	"bufio"
 	"bytes"
 	"encoding/base64"
+	"encoding/binary"
 	"errors"
 	"io"
 
@@ -28,6 +29,12 @@ func (grpcWebDecoder) Decode(r io.Reader, target any) error {
 		return err
 	}
 
+	if data, _, ok := InspectBytes(r); ok {
+		if !IsBase64Header(data) {
+			return readGRPCWebFramesBytes(data, msg)
+		}
+	}
+
 	br := bufio.NewReader(r)
 
 	var reader io.Reader = br
@@ -36,6 +43,42 @@ func (grpcWebDecoder) Decode(r io.Reader, target any) error {
 	}
 
 	return readGRPCWebFrames(reader, msg)
+}
+
+func readGRPCWebFramesBytes(data []byte, msg proto.Message) error {
+	var payloadRead bool
+
+	for len(data) >= 5 {
+		flags := data[0]
+		length := binary.BigEndian.Uint32(data[1:5])
+		data = data[5:]
+		if uint32(len(data)) < length {
+			if payloadRead {
+				return nil
+			}
+
+			return &GRPCWebError{
+				Op:  "read_payload",
+				Err: ErrInvalidGRPCWebFrame,
+			}
+		}
+
+		payload := data[:length]
+		data = data[length:]
+
+		done, err := processGRPCWebFrame(flags, payload, msg)
+		if err != nil {
+			return err
+		}
+
+		if done {
+			return nil
+		}
+
+		payloadRead = true
+	}
+
+	return nil
 }
 
 // readGRPCWebFrames sequentially reads 5-byte length-prefixed frames from reader and unmarshals payload data into msg.
