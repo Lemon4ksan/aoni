@@ -21,15 +21,18 @@ type interval struct {
 // It generates ACK ranges which can be used to assemble an ACK frame.
 // It does not store packet contents.
 type receivedPacketHistory struct {
+	inline [4]interval
 	ranges []interval // maximum length: protocol.MaxNumAckRanges
 
 	deletedBelow protocol.PacketNumber
 }
 
 func newReceivedPacketHistory() *receivedPacketHistory {
-	return &receivedPacketHistory{
+	h := &receivedPacketHistory{
 		deletedBelow: protocol.InvalidPacketNumber,
 	}
+	h.ranges = h.inline[:0]
+	return h
 }
 
 // ReceivedPacket registers a packet with PacketNumber p and updates the ranges
