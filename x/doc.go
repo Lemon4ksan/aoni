@@ -9,4 +9,5 @@
 //
 //   - [github.com/lemon4ksan/aoni/x/socketio]: Full client implementation for Socket.IO v5 / Engine.IO v4 over aoni WebSockets.
 //   - [github.com/lemon4ksan/aoni/x/geoip]: Fast MaxMind MMDB GeoIP2 / GeoLite2 geolocation database lookup.
+//   - [github.com/lemon4ksan/aoni/x/otel]: Zero-dependency pure-Go OpenTelemetry (W3C TraceContext & OTLP/HTTP) distributed tracing engine.
 package x
