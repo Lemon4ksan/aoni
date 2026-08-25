@@ -17,13 +17,14 @@ import (
 	"testing"
 	"time"
 
-	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
+	"github.com/lemon4ksan/foundation/testkit/assert"
+	"github.com/lemon4ksan/foundation/testkit/require"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/wrapperspb"
 
 	"github.com/lemon4ksan/aoni"
 	"github.com/lemon4ksan/aoni/codec"
+	"github.com/lemon4ksan/aoni/fast"
 	"github.com/lemon4ksan/aoni/fluent"
 	"github.com/lemon4ksan/aoni/option"
 	"github.com/lemon4ksan/aoni/resiliency"
@@ -1109,6 +1110,35 @@ func TestFluent_XML_And_YAML_Symmetry(t *testing.T) {
 	})
 }
 
+func BenchmarkFluent_BuilderOnly(b *testing.B) {
+	client := aoni.NewClient(nil)
+
+	b.ReportAllocs()
+
+	for b.Loop() {
+		r := fluent.R(client).
+			SetHeader("X-Test", "bench").
+			SetQueryParam("key", "val")
+		r.Release()
+	}
+}
+
+func BenchmarkFluent_BuilderParallel(b *testing.B) {
+	client := aoni.NewClient(nil)
+
+	b.ReportAllocs()
+	b.ResetTimer()
+
+	b.RunParallel(func(pb *testing.PB) {
+		for pb.Next() {
+			r := fluent.R(client).
+				SetHeader("X-Test", "parallel").
+				SetQueryParam("core", "pinned")
+			r.Release()
+		}
+	})
+}
+
 func BenchmarkFluent_RequestCreation(b *testing.B) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusOK)
@@ -1120,9 +1150,34 @@ func BenchmarkFluent_RequestCreation(b *testing.B) {
 	b.ReportAllocs()
 
 	for b.Loop() {
-		_, _ = fluent.R(client).
+		resp, _ := fluent.R(client).
 			SetHeader("X-Test", "bench").
 			SetQueryParam("key", "val").
 			Get("/")
+		if resp != nil && resp.Body != nil {
+			_ = resp.Body.Close()
+		}
+	}
+}
+
+func BenchmarkFluent_FastClient(b *testing.B) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer server.Close()
+
+	client := fast.NewClient(option.WithBaseURL(server.URL))
+	defer client.Close()
+
+	b.ReportAllocs()
+
+	for b.Loop() {
+		resp, _ := fluent.R(client).
+			SetHeader("X-Test", "bench").
+			SetQueryParam("key", "val").
+			Get("/")
+		if resp != nil && resp.Body != nil {
+			_ = resp.Body.Close()
+		}
 	}
 }

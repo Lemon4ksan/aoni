@@ -2,18 +2,20 @@
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
-// Package h3engine provides HTTP/3 client functionality using fasthttp.
+// Package h3engine provides HTTP/3 client functionality using h1engine.
 package h3engine
 
 import (
 	"context"
 	"crypto/tls"
+	"errors"
 	"net"
 	"sync"
 
+	"github.com/lemon4ksan/foundation/borrow"
 	"github.com/lemon4ksan/foundation/silicon/sysnet"
-	"github.com/valyala/fasthttp"
 
+	"github.com/lemon4ksan/aoni/internal/fast/h1engine"
 	"github.com/lemon4ksan/aoni/internal/quic"
 )
 
@@ -50,11 +52,11 @@ func NewClient(tlsCfg *tls.Config, quicCfg *quic.Config) *Client {
 	}
 }
 
-// Do executes a fasthttp.Request over HTTP/3 to the destination server, writing response into resp and returning trailers.
+// Do executes a h1engine.Request over HTTP/3 to the destination server, writing response into resp and returning trailers.
 func (c *Client) Do(
 	ctx context.Context,
-	req *fasthttp.Request,
-	resp *fasthttp.Response,
+	req *h1engine.Request,
+	resp *h1engine.Response,
 	headerOrder []string,
 ) (map[string][]string, error) {
 	host := string(req.URI().Host())
@@ -70,6 +72,81 @@ func (c *Client) Do(
 	}
 
 	return trailers, err
+}
+
+// DoScoped executes a h1engine.Request over HTTP/3 with response body memory allocated from the provided borrow.Scope.
+func (c *Client) DoScoped(
+	ctx context.Context,
+	req *h1engine.Request,
+	resp *h1engine.Response,
+	headerOrder []string,
+	s *borrow.Scope,
+) (map[string][]string, error) {
+	host := string(req.URI().Host())
+
+	cc, err := c.getConn(ctx, host)
+	if err != nil {
+		return nil, err
+	}
+
+	trailers, err := cc.DoScoped(ctx, req, resp, headerOrder, s)
+	if err != nil {
+		c.removeConn(host)
+	}
+
+	return trailers, err
+}
+
+// DoBatch executes a batch of requests concurrently over the multiplexed HTTP/3 QUIC connection.
+func (c *Client) DoBatch(
+	ctx context.Context,
+	reqs []*h1engine.Request,
+	resps []*h1engine.Response,
+	headerOrder []string,
+) error {
+	if len(reqs) == 0 {
+		return nil
+	}
+
+	if len(reqs) != len(resps) {
+		return errors.New("h3engine: length of reqs and resps must match")
+	}
+
+	host := string(reqs[0].URI().Host())
+
+	cc, err := c.getConn(ctx, host)
+	if err != nil {
+		return err
+	}
+
+	type result struct {
+		idx int
+		err error
+	}
+
+	resCh := make(chan result, len(reqs))
+
+	for i := range reqs {
+		go func(idx int) {
+			_, err := cc.Do(ctx, reqs[idx], resps[idx], headerOrder)
+
+			resCh <- result{idx: idx, err: err}
+		}(i)
+	}
+
+	var firstErr error
+	for range reqs {
+		res := <-resCh
+		if res.err != nil && firstErr == nil {
+			firstErr = res.err
+		}
+	}
+
+	if firstErr != nil {
+		c.removeConn(host)
+	}
+
+	return firstErr
 }
 
 func (c *Client) getConn(ctx context.Context, host string) (*ClientConn, error) {
@@ -101,6 +178,9 @@ func (c *Client) getConn(ctx context.Context, host string) (*ClientConn, error) 
 	}
 
 	batchConn := sysnet.NewBatchUDPConn(udpConn)
+	_ = batchConn.SetGSO(1200)
+	_ = batchConn.SetGRO(true)
+
 	tr := &quic.Transport{Conn: batchConn}
 
 	udpAddr, err := net.ResolveUDPAddr("udp", host)

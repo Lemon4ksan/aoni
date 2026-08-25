@@ -31,10 +31,10 @@ import (
 	"testing"
 	"time"
 
+	"github.com/lemon4ksan/aoni/internal/fast/h1engine"
+	"github.com/lemon4ksan/foundation/testkit/assert"
+	"github.com/lemon4ksan/foundation/testkit/require"
 	utls "github.com/refraction-networking/utls"
-	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
-	"github.com/valyala/fasthttp"
 
 	"github.com/lemon4ksan/aoni"
 	"github.com/lemon4ksan/aoni/codec/decode"
@@ -591,7 +591,7 @@ func (b *brotliTestWriter) Write(p []byte) (int, error) {
 }
 
 func (b *brotliTestWriter) Close() error {
-	compressed := fasthttp.AppendBrotliBytes(nil, b.buf.Bytes())
+	compressed := h1engine.AppendBrotliBytes(nil, b.buf.Bytes())
 	_, err := b.w.Write(compressed)
 
 	return err
@@ -2051,7 +2051,7 @@ func TestRFC6265_CookiePathMatching(t *testing.T) {
 			t.Parallel()
 
 			got := cookie.PathMatch(tt.reqPath, tt.cookiePath)
-			assert.Equal(t, tt.wantMatch, got, "PathMatch(%q, %q)", tt.reqPath, tt.cookiePath)
+			assert.Equalf(t, tt.wantMatch, got, "PathMatch(%q, %q)", tt.reqPath, tt.cookiePath)
 		})
 	}
 }
@@ -2095,7 +2095,7 @@ func TestRFC9112_ConflictingContentLengthHeaders(t *testing.T) {
 
 		isConflictingCLErr := errors.Is(err, aoni.ErrConflictingContentLength) ||
 			strings.Contains(err.Error(), "multiple Content-Length headers")
-		assert.True(t, isConflictingCLErr, "expected conflicting Content-Length error, got: %v", err)
+		assert.Truef(t, isConflictingCLErr, "expected conflicting Content-Length error, got: %v", err)
 	})
 }
 
@@ -2264,7 +2264,7 @@ func TestValues_CustomUnmarshalersAndTags(t *testing.T) {
 		for _, tt := range tests {
 			var bi values.BoolInt
 			err := json.Unmarshal([]byte(tt.input), &bi)
-			require.NoError(t, err, "input: %s", tt.input)
+			require.NoErrorf(t, err, "input: %s", tt.input)
 			assert.Equal(t, tt.want, bool(bi))
 		}
 	})

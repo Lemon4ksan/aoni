@@ -5,6 +5,7 @@
 package lint
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
 )
@@ -107,7 +108,13 @@ func (e *Engine) Run(pass *Pass) (*Report, error) {
 	}
 
 	activeRules := e.registry.ActiveRules()
+	hasBorrow := len(pass.SourceBytes) > 0 && bytes.Contains(pass.SourceBytes, []byte("borrow"))
+
 	for _, rule := range activeRules {
+		if rule.Category() == CategoryBorrow && !hasBorrow {
+			continue
+		}
+
 		diags := rule.Run(pass)
 		for _, d := range diags {
 			// Check suppression

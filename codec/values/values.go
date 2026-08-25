@@ -121,7 +121,7 @@ func EncodeQueryString(v any, sb *strings.Builder) error {
 	}
 
 	if qe, ok := v.(QueryEncoder); ok {
-		first := true
+		first := sb.Len() == 0
 
 		for k, list := range qe.EncodeValues() {
 			for _, item := range list {
@@ -191,6 +191,56 @@ func EncodeQueryString(v any, sb *strings.Builder) error {
 			if f.OmitEmpty {
 				continue
 			}
+		}
+
+		if fieldVal.Kind() == reflect.Slice || fieldVal.Kind() == reflect.Array {
+			if f.HasComma || f.HasSpace || f.HasPipe {
+				sep := ","
+				switch {
+				case f.HasSpace:
+					sep = " "
+				case f.HasPipe:
+					sep = "|"
+				}
+
+				var sliceSb strings.Builder
+
+				for j := range fieldVal.Len() {
+					elem := derefPointer(fieldVal.Index(j))
+					if !elem.IsValid() {
+						continue
+					}
+
+					str, err := toString(elem)
+					if err != nil {
+						return &ValueError{Field: f.Name, Index: j, Err: err}
+					}
+
+					if j > 0 {
+						sliceSb.WriteString(sep)
+					}
+
+					sliceSb.WriteString(str)
+				}
+
+				writeQueryKeyValuePair(sb, f.Key, sliceSb.String(), &first)
+			} else {
+				for j := range fieldVal.Len() {
+					elem := derefPointer(fieldVal.Index(j))
+					if !elem.IsValid() {
+						continue
+					}
+
+					str, err := toString(elem)
+					if err != nil {
+						return &ValueError{Field: f.Name, Index: j, Err: err}
+					}
+
+					writeQueryKeyValuePair(sb, f.Key, str, &first)
+				}
+			}
+
+			continue
 		}
 
 		strVal, err := toString(fieldVal)

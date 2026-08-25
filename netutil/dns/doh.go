@@ -183,10 +183,8 @@ func (r *DoHResolver) LookupWireRecord(ctx context.Context, host string, qtype u
 	req.SetHeader("Accept", DoHMediaType)
 
 	if r.Method == DoHMethodGet {
-		encoded := base64.RawURLEncoding.EncodeToString(wireQuery)
-
 		req.SetMethod(http.MethodGet)
-		req.SetURL(r.Endpoint + "?dns=" + encoded)
+		req.SetURL(buildDoHGetURL(r.Endpoint, wireQuery))
 	} else {
 		req.SetMethod(http.MethodPost)
 		req.SetURL(r.Endpoint)
@@ -231,10 +229,8 @@ func (r *DoHResolver) queryWire(ctx context.Context, host string, qtype uint16) 
 	req.SetHeader("Accept", DoHMediaType)
 
 	if r.Method == DoHMethodGet {
-		encoded := base64.RawURLEncoding.EncodeToString(wireQuery)
-
 		req.SetMethod(http.MethodGet)
-		req.SetURL(r.Endpoint + "?dns=" + encoded)
+		req.SetURL(buildDoHGetURL(r.Endpoint, wireQuery))
 	} else {
 		req.SetMethod(http.MethodPost)
 		req.SetURL(r.Endpoint)
@@ -257,4 +253,27 @@ func (r *DoHResolver) queryWire(ctx context.Context, host string, qtype uint16) 
 	}
 
 	return wire.ParseDNSResponseRecords(resp.BodyBytes(), queryID)
+}
+
+func buildDoHGetURL(endpoint string, wireQuery []byte) string {
+	encodedLen := base64.RawURLEncoding.EncodedLen(len(wireQuery))
+	prefixLen := len(endpoint) + len("?dns=")
+	totalLen := prefixLen + encodedLen
+
+	var (
+		stackBuf [1024]byte
+		b        []byte
+	)
+
+	if totalLen <= len(stackBuf) {
+		b = stackBuf[:totalLen]
+	} else {
+		b = make([]byte, totalLen)
+	}
+
+	copy(b, endpoint)
+	copy(b[len(endpoint):], "?dns=")
+	base64.RawURLEncoding.Encode(b[prefixLen:], wireQuery)
+
+	return string(b)
 }

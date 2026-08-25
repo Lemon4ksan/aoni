@@ -1,3 +1,4 @@
+// Copyright (c) 2016 the quic-go authors. All rights reserved.
 // Copyright (c) 2026 Lemon4ksan All rights reserved.
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
@@ -5,7 +6,7 @@
 package quic
 
 import (
-	"sync"
+	"github.com/lemon4ksan/foundation/silicon/pool"
 
 	"github.com/lemon4ksan/aoni/internal/quic/internal/protocol"
 )
@@ -62,22 +63,29 @@ func (b *packetBuffer) Cap() protocol.ByteCount { return protocol.ByteCount(cap(
 
 func (b *packetBuffer) putBack() {
 	if cap(b.Data) == protocol.MaxPacketBufferSize {
-		bufferPool.Put(b)
+		packetBufferStorage.Put(b)
 		return
 	}
 
 	if cap(b.Data) == protocol.MaxLargePacketBufferSize {
-		largeBufferPool.Put(b)
+		largePacketBufferStorage.Put(b)
 		return
 	}
 
 	panic("putPacketBuffer called with packet of wrong size!")
 }
 
-var bufferPool, largeBufferPool sync.Pool
+var (
+	packetBufferStorage = pool.NewPerPStorage(func() *packetBuffer {
+		return &packetBuffer{Data: make([]byte, 0, protocol.MaxPacketBufferSize)}
+	})
+	largePacketBufferStorage = pool.NewPerPStorage(func() *packetBuffer {
+		return &packetBuffer{Data: make([]byte, 0, protocol.MaxLargePacketBufferSize)}
+	})
+)
 
 func getPacketBuffer() *packetBuffer {
-	buf := bufferPool.Get().(*packetBuffer)
+	buf := packetBufferStorage.Get()
 	buf.refCount = 1
 	buf.Data = buf.Data[:0]
 
@@ -85,18 +93,9 @@ func getPacketBuffer() *packetBuffer {
 }
 
 func getLargePacketBuffer() *packetBuffer {
-	buf := largeBufferPool.Get().(*packetBuffer)
+	buf := largePacketBufferStorage.Get()
 	buf.refCount = 1
 	buf.Data = buf.Data[:0]
 
 	return buf
-}
-
-func init() {
-	bufferPool.New = func() any {
-		return &packetBuffer{Data: make([]byte, 0, protocol.MaxPacketBufferSize)}
-	}
-	largeBufferPool.New = func() any {
-		return &packetBuffer{Data: make([]byte, 0, protocol.MaxLargePacketBufferSize)}
-	}
 }

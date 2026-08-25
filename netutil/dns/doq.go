@@ -203,14 +203,23 @@ func (r *DoQResolver) queryStreamRecords(ctx context.Context, host string, qtype
 }
 
 func sendDoQQuery(stream *quic.Stream, wireQuery []byte) error {
-	var lengthBuf [2]byte
-	binary.BigEndian.PutUint16(lengthBuf[:], uint16(len(wireQuery)))
+	var (
+		stackBuf [512]byte
+		buf      []byte
+	)
 
-	if _, err := stream.Write(lengthBuf[:]); err != nil {
-		return err
+	totalLen := 2 + len(wireQuery)
+
+	if totalLen <= len(stackBuf) {
+		buf = stackBuf[:totalLen]
+	} else {
+		buf = make([]byte, totalLen)
 	}
 
-	if _, err := stream.Write(wireQuery); err != nil {
+	binary.BigEndian.PutUint16(buf[:2], uint16(len(wireQuery)))
+	copy(buf[2:], wireQuery)
+
+	if _, err := stream.Write(buf); err != nil {
 		return err
 	}
 

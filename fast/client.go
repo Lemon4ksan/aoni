@@ -8,6 +8,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/tls"
+	"errors"
 	"log/slog"
 	"net"
 	"net/http"
@@ -15,12 +16,13 @@ import (
 	"strings"
 	"time"
 
+	"github.com/lemon4ksan/foundation/borrow"
 	"github.com/lemon4ksan/foundation/generic"
 	"github.com/lemon4ksan/foundation/silicon/bytesconv"
-	"github.com/valyala/fasthttp"
 
 	"github.com/lemon4ksan/aoni"
 	"github.com/lemon4ksan/aoni/cookie"
+	"github.com/lemon4ksan/aoni/internal/fast/h1engine"
 	"github.com/lemon4ksan/aoni/internal/pipeline"
 	"github.com/lemon4ksan/aoni/internal/sys"
 	"github.com/lemon4ksan/aoni/netutil/power"
@@ -37,8 +39,8 @@ import (
 // Achieves zero heap allocations on hot execution paths by recycling internal request/response buffers
 // via sync.Pool. Callers MUST NOT retain or mutate byte slices obtained from unsafe body accessors beyond request lifecycle.
 type Client struct {
-	// engine encapsulates the underlying fasthttp.Client providing extreme-throughput HTTP/1.1 socket pooling.
-	engine *fasthttp.Client
+	// engine encapsulates the underlying h1engine.Client providing extreme-throughput HTTP/1.1 socket pooling.
+	engine *h1engine.Client
 
 	// pipeline coordinates the 5-stage middleware, retry, hedging, and telemetry execution chain.
 	pipeline *pipeline.Pipeline[aoni.Request, aoni.Response]
@@ -294,21 +296,21 @@ func (c *Client) Request(
 	)
 }
 
-func acquireFastPair() (*fasthttp.Request, *fasthttp.Response) {
-	return fasthttp.AcquireRequest(), fasthttp.AcquireResponse()
+func acquireFastPair() (*h1engine.Request, *h1engine.Response) {
+	return h1engine.AcquireRequest(), h1engine.AcquireResponse()
 }
 
-func releaseFastPair(req *fasthttp.Request, resp *fasthttp.Response) {
+func releaseFastPair(req *h1engine.Request, resp *h1engine.Response) {
 	if req != nil {
-		fasthttp.ReleaseRequest(req)
+		h1engine.ReleaseRequest(req)
 	}
 
 	if resp != nil {
-		fasthttp.ReleaseResponse(resp)
+		h1engine.ReleaseResponse(resp)
 	}
 }
 
-func (c *Client) executeFastPath(fastReq *fasthttp.Request, fastResp *fasthttp.Response) (aoni.Response, error) {
+func (c *Client) executeFastPath(fastReq *h1engine.Request, fastResp *h1engine.Response) (aoni.Response, error) {
 	err := c.engine.Do(fastReq, fastResp)
 	if err != nil {
 		releaseFastPair(fastReq, fastResp)
@@ -328,7 +330,7 @@ type fastNativeDoer struct {
 }
 
 func (f *fastNativeDoer) Do(req aoni.Request) (aoni.Response, error) {
-	fastReq, ok := req.EngineRequest().(*fasthttp.Request)
+	fastReq, ok := req.EngineRequest().(*h1engine.Request)
 	if !ok || fastReq == nil {
 		if stdReqObj := req.HTTPRequest(); stdReqObj != nil {
 			stdResp, err := f.client.HTTP().Do(stdReqObj) //nolint:bodyclose
@@ -357,13 +359,13 @@ func (f *fastNativeDoer) Do(req aoni.Request) (aoni.Response, error) {
 		return aoni.NewStdResponse(stdResp), nil //nolint:bodyclose
 	}
 
-	fastResp := fasthttp.AcquireResponse()
+	fastResp := h1engine.AcquireResponse()
 	ctx := req.Context()
 
 	trailers, err, autoReleased := f.client.executeWithRedirects(ctx, fastReq, fastResp)
 	if err != nil {
 		if !autoReleased {
-			fasthttp.ReleaseResponse(fastResp)
+			h1engine.ReleaseResponse(fastResp)
 		}
 
 		return nil, err
@@ -393,6 +395,162 @@ func (c *Client) Do(req aoni.Request) (aoni.Response, error) {
 	ctx := req.Context()
 
 	return c.pipeline.Execute(ctx, req, &c.nativeDoer, c.resolvePipeline(ctx))
+}
+
+// DoPipeline executes a batch of pipelined HTTP/1.1 requests over a single connection in FIFO order (RFC 9112 §9.3.2, RFC 9110 §9.2.2).
+//
+// All requests are written continuously to the connection write buffer in a single batch, minimizing round-trips and syscalls.
+// The responses slice must have the same length as reqs.
+func (c *Client) DoPipeline(ctx context.Context, reqs []*Request, resps []*Response) error {
+	if len(reqs) == 0 {
+		return nil
+	}
+
+	if len(reqs) != len(resps) {
+		return errors.New("aoni/fast: length of reqs and resps must match")
+	}
+
+	h1Reqs := make([]*h1engine.Request, len(reqs))
+	h1Resps := make([]*h1engine.Response, len(resps))
+
+	for i := range reqs {
+		if reqs[i] == nil {
+			return errors.New("aoni/fast: nil request in pipeline batch")
+		}
+
+		if resps[i] == nil {
+			return errors.New("aoni/fast: nil response in pipeline batch")
+		}
+
+		h1Reqs[i] = reqs[i].req
+		h1Resps[i] = resps[i].resp
+	}
+
+	return c.engine.DoPipeline(h1Reqs, h1Resps)
+}
+
+// DoScoped executes request req within a zero-allocation borrow scope, passing the response to fn.
+// Memory backing the response is safely recycled when fn returns.
+func (c *Client) DoScoped(
+	ctx context.Context,
+	req aoni.Request,
+	fn func(scope *borrow.Scope, resp aoni.Response) error,
+) error {
+	if req == nil {
+		return errors.New("aoni/fast: nil request")
+	}
+
+	resp, err := c.Do(req)
+	if err != nil {
+		return err
+	}
+
+	defer func() {
+		_ = resp.Close()
+	}()
+
+	scope := borrow.AcquireScope()
+	defer scope.Release()
+
+	return fn(scope, resp)
+}
+
+// DoBatch executes a batch of requests across the optimal protocol channel (H1 Pipelining, H2 multiplexed streams, or H3 QUIC streams).
+func (c *Client) DoBatch(ctx context.Context, reqs []*Request, resps []*Response) error {
+	if len(reqs) == 0 {
+		return nil
+	}
+
+	if len(reqs) != len(resps) {
+		return errors.New("aoni/fast: length of reqs and resps must match")
+	}
+
+	for i := range reqs {
+		if reqs[i] == nil {
+			return errors.New("aoni/fast: nil request in batch")
+		}
+
+		if resps[i] == nil {
+			return errors.New("aoni/fast: nil response in batch")
+		}
+
+		if u := reqs[i].URL(); u != "" {
+			_ = c.resolveTargetURL(reqs[i], u)
+		}
+	}
+
+	firstReq := reqs[0].req
+
+	uri := firstReq.URI()
+	if uri == nil {
+		return errors.New("aoni/fast: invalid URI in first request of batch")
+	}
+
+	host := string(uri.Host())
+	isHTTPS := bytes.EqualFold(uri.Scheme(), []byte("https"))
+
+	h1Reqs := make([]*h1engine.Request, len(reqs))
+	h1Resps := make([]*h1engine.Response, len(resps))
+
+	for i := range reqs {
+		h1Reqs[i] = reqs[i].req
+		h1Resps[i] = resps[i].resp
+	}
+
+	if isHTTPS && c.protocolState.altSvc != nil && c.protocolState.altSvc.IsH3Supported(host) {
+		h3Cl := c.getH3Client()
+		if h3Cl != nil {
+			err := h3Cl.DoBatch(ctx, h1Reqs, h1Resps, c.cfg.Fingerprint.HeaderOrder)
+			if err == nil {
+				return nil
+			}
+		}
+	}
+
+	alpnMode := resolveALPNMode(ctx, &c.cfg, firstReq, c.protocolState.altSvc)
+	if alpnMode == aoni.AlpnH2 || (isHTTPS && c.cfg.Fingerprint.H2Settings != nil) {
+		h2Cl := c.getH2Client(host)
+		if h2Cl != nil {
+			err := h2Cl.DoBatch(ctx, h1Reqs, h1Resps)
+			if err == nil {
+				return nil
+			}
+		}
+	}
+
+	return c.engine.DoPipeline(h1Reqs, h1Resps)
+}
+
+// DoBatchScoped executes a batch of requests within an active [borrow.Scope], passing the responses slice to fn.
+func (c *Client) DoBatchScoped(
+	ctx context.Context,
+	reqs []*Request,
+	fn func(scope *borrow.Scope, resps []*Response) error,
+) error {
+	if len(reqs) == 0 {
+		return nil
+	}
+
+	resps := make([]*Response, len(reqs))
+
+	for i := range reqs {
+		resps[i] = NewResponse(nil)
+	}
+
+	defer func() {
+		for i := range resps {
+			resps[i].Release()
+		}
+	}()
+
+	if err := c.DoBatch(ctx, reqs, resps); err != nil {
+		return err
+	}
+
+	scope := borrow.AcquireScope()
+	defer scope.Release()
+
+	return fn(scope, resps)
 }
 
 // Close shuts down idle TCP/TLS/H2/H3 connections and releases internal janitor background goroutines.
@@ -515,8 +673,8 @@ func (c *Client) ReleaseRequest(req aoni.Request) {
 	}
 }
 
-// Unwrap returns the underlying [*fasthttp.Client] engine instance.
-func (c *Client) Unwrap() *fasthttp.Client {
+// Unwrap returns the underlying [*h1engine.Client] engine instance.
+func (c *Client) Unwrap() *h1engine.Client {
 	return c.engine
 }
 
@@ -569,8 +727,8 @@ func (c *Client) TLSConfig() *tls.Config {
 	return nil
 }
 
-// Engine returns the underlying [*fasthttp.Client] engine instance.
-func (c *Client) Engine() *fasthttp.Client {
+// Engine returns the underlying [*h1engine.Client] engine instance.
+func (c *Client) Engine() *h1engine.Client {
 	return c.engine
 }
 

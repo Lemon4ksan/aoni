@@ -6,14 +6,13 @@ package h3engine
 
 import (
 	"bytes"
-	"errors"
 	"io"
 	"strconv"
 	"sync"
 
 	"github.com/lemon4ksan/foundation/silicon/bytesconv"
-	"github.com/valyala/fasthttp"
 
+	"github.com/lemon4ksan/aoni/internal/fast/h1engine"
 	"github.com/lemon4ksan/aoni/internal/qpack"
 )
 
@@ -73,7 +72,7 @@ func (q *QPACKCodec) WriteDecoderTable(_ []byte) error {
 // EncodeRequestHeadersPooled encodes request headers into the pooled encoder's buffer with 0 heap allocations.
 func (q *QPACKCodec) EncodeRequestHeadersPooled(
 	p *PooledEncoder,
-	req *fasthttp.Request,
+	req *h1engine.Request,
 	orderedKeys []string,
 ) ([]byte, error) {
 	enc := p.enc
@@ -118,7 +117,7 @@ func (q *QPACKCodec) EncodeRequestHeadersPooled(
 
 // EncodeRequestHeaders encodes a fasthttp request header into a QPACK block (RFC 9204 §4.5),
 // strictly maintaining the specified orderedKeys sequence for Anti-DPI fingerprinting and RFC 9220 Extended CONNECT.
-func (q *QPACKCodec) EncodeRequestHeaders(w io.Writer, req *fasthttp.Request, orderedKeys []string) error {
+func (q *QPACKCodec) EncodeRequestHeaders(w io.Writer, req *h1engine.Request, orderedKeys []string) error {
 	p := q.AcquireEncoder()
 	defer q.ReleaseEncoder(p)
 
@@ -180,7 +179,7 @@ func isForbiddenH3HeaderStr(key string, val []byte) bool {
 	return false
 }
 
-func (q *QPACKCodec) encodeOrderedHeaders(enc *qpack.Encoder, req *fasthttp.Request, orderedKeys []string) {
+func (q *QPACKCodec) encodeOrderedHeaders(enc *qpack.Encoder, req *h1engine.Request, orderedKeys []string) {
 	var visitedBits uint64
 
 	numOrdered := min(len(orderedKeys), 64)
@@ -245,28 +244,19 @@ func (q *QPACKCodec) encodeOrderedHeaders(enc *qpack.Encoder, req *fasthttp.Requ
 
 // DecodeResponseHeaders parses a QPACK header block directly into fasthttp ResponseHeader (RFC 9204 §2.2 & §4.5),
 // returning the parsed status code and ignoring 1xx informational frames (RFC 9114 §4.1).
-func (q *QPACKCodec) DecodeResponseHeaders(headerBlock []byte, res *fasthttp.ResponseHeader) (int, error) {
-	decodeFn := q.decoder.Decode(headerBlock)
-
+func (q *QPACKCodec) DecodeResponseHeaders(headerBlock []byte, res *h1engine.ResponseHeader) (int, error) {
 	var (
 		hasStatus  bool
 		statusCode int
+		parseErr   error
 	)
 
-	for {
-		hf, err := decodeFn()
-		if errors.Is(err, io.EOF) {
-			break
-		}
-
-		if err != nil {
-			return 0, ErrQPACKDecompressFailed
-		}
-
+	err := q.decoder.DecodeFields(headerBlock, func(hf qpack.HeaderField) bool {
 		if hf.Name == ":status" {
-			code, parseErr := strconv.Atoi(hf.Value)
-			if parseErr != nil {
-				return 0, parseErr
+			code, err := strconv.Atoi(hf.Value)
+			if err != nil {
+				parseErr = err
+				return false
 			}
 
 			statusCode = code
@@ -276,22 +266,31 @@ func (q *QPACKCodec) DecodeResponseHeaders(headerBlock []byte, res *fasthttp.Res
 
 			hasStatus = true
 
-			continue
+			return true
 		}
 
 		if hf.IsPseudo() {
-			continue
+			return true
 		}
 
 		if hf.Name == "content-length" {
-			if clen, parseErr := strconv.Atoi(hf.Value); parseErr == nil {
+			if clen, err := strconv.Atoi(hf.Value); err == nil {
 				res.SetContentLength(clen)
 			}
 
-			continue
+			return true
 		}
 
-		res.Add(hf.Name, hf.Value)
+		res.AddBytesKV(bytesconv.S2B(hf.Name), bytesconv.S2B(hf.Value))
+
+		return true
+	})
+	if err != nil {
+		return 0, ErrQPACKDecompressFailed
+	}
+
+	if parseErr != nil {
+		return 0, parseErr
 	}
 
 	if !hasStatus {
@@ -303,24 +302,19 @@ func (q *QPACKCodec) DecodeResponseHeaders(headerBlock []byte, res *fasthttp.Res
 
 // DecodeResponseTrailers decodes a QPACK header block containing response trailers into a key-value map (RFC 9204 §2.2 & §4.5).
 func (q *QPACKCodec) DecodeResponseTrailers(headerBlock []byte) (map[string][]string, error) {
-	decodeFn := q.decoder.Decode(headerBlock)
 	trailers := make(map[string][]string)
 
-	for {
-		hf, err := decodeFn()
-		if errors.Is(err, io.EOF) {
-			break
-		}
-
-		if err != nil {
-			return nil, ErrQPACKDecompressFailed
-		}
-
+	err := q.decoder.DecodeFields(headerBlock, func(hf qpack.HeaderField) bool {
 		if hf.IsPseudo() {
-			continue
+			return true
 		}
 
 		trailers[hf.Name] = append(trailers[hf.Name], hf.Value)
+
+		return true
+	})
+	if err != nil {
+		return nil, ErrQPACKDecompressFailed
 	}
 
 	return trailers, nil

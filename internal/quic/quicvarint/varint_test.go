@@ -11,7 +11,7 @@ import (
 	"math/rand/v2"
 	"testing"
 
-	"github.com/stretchr/testify/require"
+	"github.com/lemon4ksan/foundation/testkit/require"
 )
 
 func TestLimits(t *testing.T) {
@@ -131,7 +131,7 @@ func TestVarintEncoding(t *testing.T) {
 
 	t.Run("panics when given a too large number (> 62 bit)", func(t *testing.T) {
 		require.PanicsWithError(t,
-			fmt.Sprintf("value doesn't fit into 62 bits: %d", maxVarInt8+1),
+			fmt.Sprintf("value doesn't fit into 62 bits: %d", uint64(maxVarInt8+1)),
 			func() { Append(nil, maxVarInt8+1) },
 		)
 	})
@@ -212,7 +212,7 @@ func TestLen(t *testing.T) {
 
 	t.Run("panics on too large number", func(t *testing.T) {
 		require.PanicsWithError(t,
-			fmt.Sprintf("value doesn't fit into 62 bits: %d", maxVarInt8+1),
+			fmt.Sprintf("value doesn't fit into 62 bits: %d", uint64(maxVarInt8+1)),
 			func() { Len(maxVarInt8 + 1) },
 		)
 	})

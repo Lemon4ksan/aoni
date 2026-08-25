@@ -11,6 +11,22 @@ import (
 	"fmt"
 )
 
+func tableStep(tableSize uint32) uint32 {
+	return (tableSize >> 1) + (tableSize >> 3) + 3
+}
+
+func (d *decSymbol) setAddBits(addBits uint8) {
+	*d = (*d &^ 0xff00) | (decSymbol(addBits) << 8)
+}
+
+func (d *decSymbol) setNBits(nBits uint8) {
+	*d = (*d &^ 0xff) | decSymbol(nBits)
+}
+
+func (d *decSymbol) setNewState(newState uint16) {
+	*d = (*d &^ 0xffff0000) | (decSymbol(newState) << 16)
+}
+
 // buildDtable will build the decoding table.
 func (s *fseDecoder) buildDtable() error {
 	tableSize := uint32(1 << s.actualTableLog)

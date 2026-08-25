@@ -8,7 +8,7 @@ import (
 	"net/netip"
 	"testing"
 
-	"github.com/stretchr/testify/assert"
+	"github.com/lemon4ksan/foundation/testkit/assert"
 )
 
 func TestExtractSrcIP(t *testing.T) {

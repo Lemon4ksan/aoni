@@ -14,8 +14,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
+	"github.com/lemon4ksan/foundation/testkit/assert"
+	"github.com/lemon4ksan/foundation/testkit/require"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/wrapperspb"
 
@@ -417,10 +417,10 @@ func TestParseGRPCWebStream(t *testing.T) {
 	s, err := stream.Get(t.Context(), client, "/")
 	require.NoError(t, err)
 
-	out, errs := stream.ParseGRPCWebStream[wrapperspb.StringValue](t.Context(), s)
+	out, errs := stream.ParseGRPCWebStream[*wrapperspb.StringValue](t.Context(), s)
 
 	var msgs []string
-	for val := range out { //nolint:govet
+	for val := range out {
 		msgs = append(msgs, val.GetValue())
 	}
 

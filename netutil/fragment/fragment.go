@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/lemon4ksan/foundation/silicon/bytesconv"
+	"github.com/lemon4ksan/foundation/silicon/clock"
 )
 
 // Config configures write chunking and inter-chunk delays for TCP packet fragmentation.
@@ -135,8 +136,8 @@ func (c *FragmentedConn) Write(b []byte) (n int, err error) {
 func (c *FragmentedConn) resolveChunkSize() int {
 	if c.MinChunkSize > 0 && c.MaxChunkSize > c.MinChunkSize {
 		diff := c.MaxChunkSize - c.MinChunkSize
-		ns := time.Now().UnixNano()
-		return c.MinChunkSize + int(ns%int64(diff))
+		ns := clock.RDTSC()
+		return c.MinChunkSize + int(ns%uint64(diff))
 	}
 
 	return c.ChunkSize
@@ -149,8 +150,8 @@ func (c *FragmentedConn) sleepWithJitter() {
 
 	delay := c.MaxDelay
 	if c.MinDelay > 0 && c.MaxDelay > c.MinDelay {
-		diff := int64(c.MaxDelay - c.MinDelay)
-		ns := time.Now().UnixNano()
+		diff := uint64(c.MaxDelay - c.MinDelay)
+		ns := clock.RDTSC()
 		delay = c.MinDelay + time.Duration(ns%diff)
 	}
 

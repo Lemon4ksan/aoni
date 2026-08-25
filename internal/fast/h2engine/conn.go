@@ -23,9 +23,10 @@ import (
 	"github.com/lemon4ksan/foundation/silicon/bytesconv"
 	"github.com/lemon4ksan/foundation/silicon/ringbuf"
 	"github.com/lemon4ksan/foundation/silicon/sysnet"
-	"github.com/valyala/fasthttp"
+	"github.com/lemon4ksan/foundation/sync/spinlock"
 	"golang.org/x/sys/cpu"
 
+	"github.com/lemon4ksan/aoni/internal/fast/h1engine"
 	"github.com/lemon4ksan/aoni/netutil/netdial"
 	"github.com/lemon4ksan/aoni/telemetry"
 )
@@ -44,7 +45,7 @@ type ConnOpts struct {
 	DisablePingChecking bool
 	OnDisconnect        func(ctx context.Context, c *Conn)
 	OnRTT               func(time.Duration)
-	OnPushPromise       func(pushReq *fasthttp.Request, pushResp *fasthttp.Response)
+	OnPushPromise       func(pushReq *h1engine.Request, pushResp *h1engine.Response)
 	Settings            *Settings
 }
 
@@ -70,14 +71,14 @@ type Conn struct {
 	dec           *HPACK
 	onDisconnect  func(ctx context.Context, c *Conn)
 	onRTT         func(time.Duration)
-	onPushPromise func(pushReq *fasthttp.Request, pushResp *fasthttp.Response)
+	onPushPromise func(pushReq *h1engine.Request, pushResp *h1engine.Response)
 	lastErr       error
 	orderedKeys   []string
 	windowCond    *sync.Cond
 
 	writeMu  sync.Mutex
 	inMu     sync.Mutex
-	windowMu sync.Mutex
+	windowMu spinlock.SpinLock
 
 	// Hot atomic counters isolated on their own 64-byte cache lines
 	serverWindow             int32
@@ -292,6 +293,8 @@ func (c *Conn) CancelStream(ctx *Context) {
 		default:
 		}
 	}
+
+	c.broadcastWindowUpdate()
 }
 
 // Close gracefully terminates the HTTP/2 connection.
@@ -627,7 +630,7 @@ func (c *Conn) readLoop() {
 	}
 }
 
-func isExpectContinue(req *fasthttp.Request) bool {
+func isExpectContinue(req *h1engine.Request) bool {
 	expect := req.Header.Peek("Expect")
 	return bytes.EqualFold(expect, []byte("100-continue"))
 }
@@ -863,7 +866,7 @@ func isForbiddenH2HeaderStr(key string) bool {
 
 var defaultPseudoOrder = [4]string{":method", ":authority", ":scheme", ":path"}
 
-func (c *Conn) encodeRequestHeaders(h *Headers, req *fasthttp.Request) {
+func (c *Conn) encodeRequestHeaders(h *Headers, req *h1engine.Request) {
 	hf := AcquireHeaderField()
 	defer ReleaseHeaderField(hf)
 
@@ -944,7 +947,7 @@ func (c *Conn) encodeRequestHeaders(h *Headers, req *fasthttp.Request) {
 	}
 }
 
-func getFastHTTPCookieHeader(req *fasthttp.Request) []byte {
+func getFastHTTPCookieHeader(req *h1engine.Request) []byte {
 	var sb strings.Builder
 
 	for key, value := range req.Header.Cookies() {
@@ -972,7 +975,7 @@ func getFastHTTPCookieHeader(req *fasthttp.Request) []byte {
 	return nil
 }
 
-func peekHeaderCaseInsensitive(req *fasthttp.Request, key string) []byte {
+func peekHeaderCaseInsensitive(req *h1engine.Request, key string) []byte {
 	for k, v := range req.Header.All() {
 		if bytesconv.EqualFoldASCII(bytesconv.B2S(k), key) {
 			return v
@@ -982,7 +985,7 @@ func peekHeaderCaseInsensitive(req *fasthttp.Request, key string) []byte {
 	return nil
 }
 
-func (c *Conn) appendOrderedHeaders(h *Headers, req *fasthttp.Request, hf *HeaderField) {
+func (c *Conn) appendOrderedHeaders(h *Headers, req *h1engine.Request, hf *HeaderField) {
 	var visitedBits uint64
 
 	numOrdered := min(len(c.orderedKeys), 64)
@@ -1308,20 +1311,20 @@ func (c *Conn) handlePushPromise(pp *PushPromise) error {
 		return NewGoAwayError(ProtocolError, "invalid promised stream id (RFC 9113 §5.1.1)")
 	}
 
-	pushReq := fasthttp.AcquireRequest()
+	pushReq := h1engine.AcquireRequest()
 	if err := c.decodePushHeaders(pp.header, pushReq); err != nil {
-		fasthttp.ReleaseRequest(pushReq)
+		h1engine.ReleaseRequest(pushReq)
 		return err
 	}
 
 	method := string(pushReq.Header.Method())
 	if method != "GET" && method != "HEAD" {
-		fasthttp.ReleaseRequest(pushReq)
+		h1engine.ReleaseRequest(pushReq)
 		c.resetStream(promisedID, StreamCanceled)
 		return nil
 	}
 
-	pushResp := fasthttp.AcquireResponse()
+	pushResp := h1engine.AcquireResponse()
 	errCh := make(chan error, 1)
 
 	ctx := &Context{
@@ -1339,7 +1342,7 @@ func (c *Conn) handlePushPromise(pp *PushPromise) error {
 	return nil
 }
 
-func (c *Conn) decodePushHeaders(headerBlock []byte, pushReq *fasthttp.Request) error {
+func (c *Conn) decodePushHeaders(headerBlock []byte, pushReq *h1engine.Request) error {
 	hf := AcquireHeaderField()
 	defer ReleaseHeaderField(hf)
 
@@ -1374,14 +1377,14 @@ func (c *Conn) decodePushHeaders(headerBlock []byte, pushReq *fasthttp.Request) 
 	return nil
 }
 
-func (c *Conn) awaitPushedResponse(ctx *Context, pushReq *fasthttp.Request, pushResp *fasthttp.Response) {
+func (c *Conn) awaitPushedResponse(ctx *Context, pushReq *h1engine.Request, pushResp *h1engine.Response) {
 	err := <-ctx.Err
 	if err == nil && c.onPushPromise != nil {
 		c.onPushPromise(pushReq, pushResp)
 	}
 
-	fasthttp.ReleaseRequest(pushReq)
-	fasthttp.ReleaseResponse(pushResp)
+	h1engine.ReleaseRequest(pushReq)
+	h1engine.ReleaseResponse(pushResp)
 }
 
 func (c *Conn) resetStream(streamID uint32, code ErrorCode) {
@@ -1459,7 +1462,7 @@ func (c *Conn) updateWindow(streamID uint32, size int) {
 
 const defaultMaxHeaderListSize = 10 * 1024 * 1024
 
-func (c *Conn) readHeader(b []byte, res *fasthttp.Response) (int, error) {
+func (c *Conn) readHeader(b []byte, res *h1engine.Response) (int, error) {
 	hf := AcquireHeaderField()
 	defer ReleaseHeaderField(hf)
 
@@ -1526,8 +1529,8 @@ type Dialer struct {
 	Addr           string
 	TLSConfig      *tls.Config
 	PingInterval   time.Duration
-	NetDial        fasthttp.DialFunc
-	RawDial        fasthttp.DialFunc
+	NetDial        h1engine.DialFunc
+	RawDial        h1engine.DialFunc
 	RawDialContext func(ctx context.Context, addr string) (net.Conn, error)
 }
 

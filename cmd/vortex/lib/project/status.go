@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 
 	"github.com/lemon4ksan/foundation/pathkit"
@@ -88,16 +89,65 @@ func (r *StatusReport) HasIssues() bool {
 
 // Render formats a colored, human-readable terminal dashboard.
 func (r *StatusReport) Render(color bool) string {
+	if color && (os.Getenv("NO_COLOR") != "" || os.Getenv("TERM") == "dumb") {
+		color = false
+	}
+
 	var sb strings.Builder
-	sb.WriteString("⚡ Vortex API Guardian\n")
-	fmt.Fprintf(&sb, "Workspace: %s (%d services, %d methods)\n\n", r.WorkspaceRoot, len(r.Contracts), r.TotalMethods)
+	sb.WriteString(ansiBold(color, ansiCyan(color, "⚡ Vortex API Guardian")) + "\n")
+	fmt.Fprintf(&sb, "Workspace: %s %s\n\n",
+		r.WorkspaceRoot,
+		ansiDim(color, fmt.Sprintf("(%d services, %d methods)", len(r.Contracts), r.TotalMethods)),
+	)
 
 	if len(r.Contracts) == 0 {
 		sb.WriteString("No service contracts detected. Run `vortex init` to configure workspace.\n")
 		return sb.String()
 	}
 
-	sb.WriteString("● Contracts & Generated Code:\n")
+	sb.WriteString(ansiBold(color, "● Contracts & Generated Code:") + "\n")
+
+	maxNameWidth := 0
+	maxPathWidth := 0
+	maxMethodsDigits := 1
+	maxDTOsDigits := 1
+	hasAnyDTOs := false
+	hasAnyVersion := false
+	maxVerWidth := 0
+
+	for _, c := range r.Contracts {
+		if len(c.Name) > maxNameWidth {
+			maxNameWidth = len(c.Name)
+		}
+
+		pathStr := "(" + filepath.ToSlash(filepath.Dir(c.File)) + ")"
+		if len(pathStr) > maxPathWidth {
+			maxPathWidth = len(pathStr)
+		}
+
+		mDigits := len(strconv.Itoa(c.MethodsCount))
+		if mDigits > maxMethodsDigits {
+			maxMethodsDigits = mDigits
+		}
+
+		if c.DTOsCount > 0 {
+			hasAnyDTOs = true
+
+			dDigits := len(strconv.Itoa(c.DTOsCount))
+			if dDigits > maxDTOsDigits {
+				maxDTOsDigits = dDigits
+			}
+		}
+
+		if c.Version != "" {
+			hasAnyVersion = true
+
+			verLen := len(fmt.Sprintf("[%s]", c.Version))
+			if verLen > maxVerWidth {
+				maxVerWidth = verLen
+			}
+		}
+	}
 
 	for _, c := range r.Contracts {
 		statusIcon := "✔"
@@ -108,24 +158,74 @@ func (r *StatusReport) Render(color bool) string {
 			statusDesc = c.GenStaleReason
 		}
 
-		verInfo := ""
-		if c.Version != "" {
-			verInfo = fmt.Sprintf("[%s]", c.Version)
+		iconStyled := statusIcon
+		if color {
+			if c.IsGenStale {
+				iconStyled = ansiYellow(color, statusIcon)
+			} else {
+				iconStyled = ansiGreen(color, statusIcon)
+			}
 		}
 
-		dtoInfo := ""
-		if c.DTOsCount > 0 {
-			dtoInfo = fmt.Sprintf(", %d DTOs", c.DTOsCount)
+		namePadded := fmt.Sprintf("%-*s", maxNameWidth, c.Name)
+
+		pathStr := "(" + filepath.ToSlash(filepath.Dir(c.File)) + ")"
+
+		pathPadded := fmt.Sprintf("%-*s", maxPathWidth, pathStr)
+		if color {
+			pathPadded = ansiDim(color, pathPadded)
 		}
 
-		fmt.Fprintf(&sb, "  %s %-10s (%-22s) %2d methods%s  %s %s\n",
-			statusIcon,
-			c.Name,
-			filepath.ToSlash(filepath.Dir(c.File)),
-			c.MethodsCount,
-			dtoInfo,
-			verInfo,
-			statusDesc)
+		methodsPart := fmt.Sprintf("%*d methods", maxMethodsDigits, c.MethodsCount)
+
+		var metricsPart string
+		if hasAnyDTOs {
+			if c.DTOsCount > 0 {
+				metricsPart = fmt.Sprintf("%s, %*d DTOs", methodsPart, maxDTOsDigits, c.DTOsCount)
+			} else {
+				metricsPart = methodsPart + strings.Repeat(" ", 2+maxDTOsDigits+5)
+			}
+		} else {
+			metricsPart = methodsPart
+		}
+
+		descStyled := statusDesc
+		if color {
+			if c.IsGenStale {
+				descStyled = ansiYellow(color, statusDesc)
+			} else {
+				descStyled = ansiGreen(color, statusDesc)
+			}
+		}
+
+		if hasAnyVersion {
+			verStr := ""
+			if c.Version != "" {
+				verStr = fmt.Sprintf("[%s]", c.Version)
+			}
+
+			verPadded := fmt.Sprintf("%-*s", maxVerWidth, verStr)
+			if color && verStr != "" {
+				verPadded = ansiCyan(color, verStr) + strings.Repeat(" ", maxVerWidth-len(verStr))
+			}
+
+			fmt.Fprintf(&sb, "  %s %s  %s  %s  %s  %s\n",
+				iconStyled,
+				namePadded,
+				pathPadded,
+				metricsPart,
+				verPadded,
+				descStyled,
+			)
+		} else {
+			fmt.Fprintf(&sb, "  %s %s  %s  %s  %s\n",
+				iconStyled,
+				namePadded,
+				pathPadded,
+				metricsPart,
+				descStyled,
+			)
+		}
 	}
 
 	sb.WriteString("\n")
@@ -140,34 +240,55 @@ func (r *StatusReport) Render(color bool) string {
 	}
 
 	if hasUpstream {
-		sb.WriteString("● Upstream Drift (OpenAPI / External):\n")
+		sb.WriteString(ansiBold(color, "● Upstream Drift (OpenAPI / External):") + "\n")
+
+		maxUpstreamNameWidth := 0
+		for _, c := range r.Contracts {
+			if c.Source != "" && len(c.Name) > maxUpstreamNameWidth {
+				maxUpstreamNameWidth = len(c.Name)
+			}
+		}
 
 		for _, c := range r.Contracts {
 			if c.Source == "" {
 				continue
 			}
 
+			namePadded := fmt.Sprintf("%-*s", maxUpstreamNameWidth, c.Name)
+
 			switch {
 			case c.UpstreamBreakingCount > 0:
-				fmt.Fprintf(
-					&sb,
-					"  🔴 %s: %d BREAKING drift(s) detected with %s\n",
-					c.Name,
-					c.UpstreamBreakingCount,
-					c.Source,
-				)
+				desc := fmt.Sprintf("%d BREAKING drift(s) detected with %s", c.UpstreamBreakingCount, c.Source)
+				if color {
+					desc = ansiRed(color, desc)
+				}
+
+				fmt.Fprintf(&sb, "  🔴 %s  %s\n", namePadded, desc)
 
 			case c.UpstreamDriftCount > 0 || c.UpstreamGhostCount > 0:
-				fmt.Fprintf(
-					&sb,
-					"  🟡 %s: %d non-breaking update(s) available in %s\n",
-					c.Name,
+				desc := fmt.Sprintf(
+					"%d non-breaking update(s) available in %s",
 					c.UpstreamDriftCount+c.UpstreamGhostCount,
 					c.Source,
 				)
+				if color {
+					desc = ansiYellow(color, desc)
+				}
+
+				fmt.Fprintf(&sb, "  🟡 %s  %s\n", namePadded, desc)
 
 			default:
-				fmt.Fprintf(&sb, "  ✔ %s: Up-to-date with %s (0 drift)\n", c.Name, c.Source)
+				icon := "✔"
+				if color {
+					icon = ansiGreen(color, "✔")
+				}
+
+				desc := fmt.Sprintf("Up-to-date with %s (0 drift)", c.Source)
+				if color {
+					desc = ansiGreen(color, desc)
+				}
+
+				fmt.Fprintf(&sb, "  %s  %s  %s\n", icon, namePadded, desc)
 			}
 		}
 
@@ -184,7 +305,24 @@ func (r *StatusReport) Render(color bool) string {
 	}
 
 	if hasPlugins {
-		sb.WriteString("● Polyglot Targets:\n")
+		sb.WriteString(ansiBold(color, "● Polyglot Targets:") + "\n")
+
+		maxTargetName := 0
+
+		maxTargetOut := 0
+		for _, c := range r.Contracts {
+			for _, p := range c.Plugins {
+				targetName := strings.ToUpper(p.Name) + " SDK"
+				if len(targetName) > maxTargetName {
+					maxTargetName = len(targetName)
+				}
+
+				outStr := "(" + p.Out + ")"
+				if len(outStr) > maxTargetOut {
+					maxTargetOut = len(outStr)
+				}
+			}
+		}
 
 		for _, c := range r.Contracts {
 			for _, p := range c.Plugins {
@@ -196,7 +334,30 @@ func (r *StatusReport) Render(color bool) string {
 					status = "Stale (rebuild required)"
 				}
 
-				fmt.Fprintf(&sb, "  %s %s SDK (%s) ... %s\n", icon, strings.ToUpper(p.Name), p.Out, status)
+				iconStyled := icon
+
+				statusStyled := status
+				if color {
+					if p.IsStale {
+						iconStyled = ansiYellow(color, "⚠")
+						statusStyled = ansiYellow(color, status)
+					} else {
+						iconStyled = ansiGreen(color, "✔")
+						statusStyled = ansiGreen(color, status)
+					}
+				}
+
+				targetName := strings.ToUpper(p.Name) + " SDK"
+				targetPadded := fmt.Sprintf("%-*s", maxTargetName, targetName)
+
+				outStr := "(" + p.Out + ")"
+
+				outPadded := fmt.Sprintf("%-*s", maxTargetOut, outStr)
+				if color {
+					outPadded = ansiDim(color, outPadded)
+				}
+
+				fmt.Fprintf(&sb, "  %s %s  %s  %s\n", iconStyled, targetPadded, outPadded, statusStyled)
 			}
 		}
 
@@ -204,33 +365,84 @@ func (r *StatusReport) Render(color bool) string {
 	}
 
 	if len(r.Proposals) > 0 {
-		sb.WriteString("● Incoming Consumer Proposals (Git Branches):\n")
+		sb.WriteString(ansiBold(color, "● Incoming Consumer Proposals (Git Branches):") + "\n")
+
+		maxPropName := 0
+
+		maxAuthor := 0
+		for _, prop := range r.Proposals {
+			if len(prop.Name) > maxPropName {
+				maxPropName = len(prop.Name)
+			}
+
+			author := "@" + prop.Author
+			if len(author) > maxAuthor {
+				maxAuthor = len(author)
+			}
+		}
 
 		for _, prop := range r.Proposals {
 			remoteTag := ""
 			if prop.IsRemote {
 				remoteTag = " [remote]"
+				if color {
+					remoteTag = ansiCyan(color, " [remote]")
+				}
 			}
 
-			fmt.Fprintf(&sb, "  🔵 %-28s by @%-14s (%s)%s\n", prop.Name, prop.Author, prop.Date, remoteTag)
+			propPadded := fmt.Sprintf("%-*s", maxPropName, prop.Name)
+			author := "@" + prop.Author
+			authorPadded := fmt.Sprintf("%-*s", maxAuthor, author)
+
+			dateStr := fmt.Sprintf("(%s)", prop.Date)
+			if color {
+				dateStr = ansiDim(color, dateStr)
+			}
+
+			fmt.Fprintf(&sb, "  🔵 %s  by %s  %s%s\n", propPadded, authorPadded, dateStr, remoteTag)
 		}
 
 		sb.WriteString("\n")
 	}
 
 	if len(r.NextActions) > 0 {
-		sb.WriteString("───────────────────────────────────────────────────────────────────\n")
-		sb.WriteString("Next Actions:\n")
+		sb.WriteString(ansiDim(color, "───────────────────────────────────────────────────────────────────") + "\n")
+		sb.WriteString(ansiBold(color, ansiYellow(color, "Next Actions:")) + "\n")
 
 		for _, action := range r.NextActions {
-			fmt.Fprintf(&sb, "  ↳ %s\n", action)
+			arrow := "↳"
+			if color {
+				arrow = ansiCyan(color, "↳")
+			}
+
+			fmt.Fprintf(&sb, "  %s %s\n", arrow, action)
 		}
 	} else {
-		sb.WriteString("✨ All systems nominal. Network layer is 100% synchronized.\n")
+		msg := "✨ All systems nominal. Network layer is 100% synchronized.\n"
+		if color {
+			msg = ansiBold(color, ansiGreen(color, "✨ All systems nominal. Network layer is 100% synchronized.\n"))
+		}
+
+		sb.WriteString(msg)
 	}
 
 	return sb.String()
 }
+
+func ansi(color bool, code, text string) string {
+	if !color || text == "" {
+		return text
+	}
+
+	return code + text + "\033[0m"
+}
+
+func ansiBold(color bool, text string) string   { return ansi(color, "\033[1m", text) }
+func ansiDim(color bool, text string) string    { return ansi(color, "\033[2m", text) }
+func ansiGreen(color bool, text string) string  { return ansi(color, "\033[32m", text) }
+func ansiYellow(color bool, text string) string { return ansi(color, "\033[33m", text) }
+func ansiRed(color bool, text string) string    { return ansi(color, "\033[31m", text) }
+func ansiCyan(color bool, text string) string   { return ansi(color, "\033[36m", text) }
 
 // RenderJSON serializes the status report into JSON bytes.
 func (r *StatusReport) RenderJSON() ([]byte, error) {

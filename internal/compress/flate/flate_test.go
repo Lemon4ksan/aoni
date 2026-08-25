@@ -10,8 +10,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
+	"github.com/lemon4ksan/foundation/testkit/assert"
+	"github.com/lemon4ksan/foundation/testkit/require"
 
 	"github.com/lemon4ksan/aoni/internal/compress/flate"
 )
@@ -36,18 +36,64 @@ func TestFlateWriterAndReader(t *testing.T) {
 	require.NoError(t, r.Close())
 }
 
-func TestFlateStateless(t *testing.T) {
+func TestFlateLevels(t *testing.T) {
 	t.Parallel()
 
-	data := []byte("Stateless flate compression test.")
-	var buf bytes.Buffer
+	levels := []int{
+		flate.NoCompression,
+		flate.BestSpeed,
+		2,
+		flate.DefaultCompression,
+		flate.BestCompression,
+		flate.HuffmanOnly,
+	}
 
-	err := flate.StatelessDeflate(&buf, data, true, nil)
-	require.NoError(t, err)
+	data := []byte(strings.Repeat("Flate multi-level compression verification string. ", 15))
 
-	r := flate.NewReader(&buf)
-	decompressed, err := io.ReadAll(r)
-	require.NoError(t, err)
-	assert.Equal(t, data, decompressed)
-	require.NoError(t, r.Close())
+	for _, lvl := range levels {
+		var buf bytes.Buffer
+		w, err := flate.NewWriter(&buf, lvl)
+		require.NoError(t, err)
+
+		_, err = w.Write(data)
+		require.NoError(t, err)
+		require.NoError(t, w.Close())
+
+		r := flate.NewReader(&buf)
+		decompressed, err := io.ReadAll(r)
+		require.NoError(t, err)
+		assert.Equal(t, data, decompressed)
+		require.NoError(t, r.Close())
+	}
+}
+
+func TestMatchLen_Comprehensive(t *testing.T) {
+	t.Parallel()
+
+	s1 := []byte("The quick brown fox jumps over the lazy dog 1234567890abcdefghijklmnopqrstuvwxyz")
+	s2 := []byte("The quick brown fox jumps over the lazy dog 1234567890abcdefghijklmnopqrstuvwxyz")
+
+	// Full match
+	assert.Equal(t, len(s1), flate.MatchLen(s1, s2))
+
+	// Prefix mismatch at various offsets
+	for i := range s1 {
+		s2Copy := append([]byte(nil), s2...)
+		s2Copy[i] ^= 0xFF
+		assert.Equal(t, i, flate.MatchLen(s1, s2Copy))
+	}
+}
+
+func BenchmarkMatchLen_AVX2(b *testing.B) {
+	s1 := []byte(strings.Repeat("abcdefghijklmnopqrstuvwxyz123456", 10))
+	s2 := []byte(strings.Repeat("abcdefghijklmnopqrstuvwxyz123456", 10))
+	s2[250] = 'Z' // Mismatch at byte 250
+
+	b.SetBytes(250)
+	b.ReportAllocs()
+	b.ResetTimer()
+
+	for b.Loop() {
+		_ = flate.MatchLen(s1, s2)
+	}
 }

@@ -8,7 +8,7 @@ import (
 	"net/netip"
 	"testing"
 
-	"github.com/stretchr/testify/assert"
+	"github.com/lemon4ksan/foundation/testkit/assert"
 )
 
 func TestIsMartianAddr(t *testing.T) {
@@ -28,7 +28,7 @@ func TestIsMartianAddr(t *testing.T) {
 
 	for _, ipStr := range martians {
 		addr := netip.MustParseAddr(ipStr)
-		assert.True(t, IsMartianAddr(addr), "addr %s should be martian", ipStr)
+		assert.Truef(t, IsMartianAddr(addr), "addr %s should be martian", ipStr)
 	}
 
 	routable := []string{
@@ -42,7 +42,7 @@ func TestIsMartianAddr(t *testing.T) {
 
 	for _, ipStr := range routable {
 		addr := netip.MustParseAddr(ipStr)
-		assert.False(t, IsMartianAddr(addr), "addr %s should NOT be martian", ipStr)
+		assert.Falsef(t, IsMartianAddr(addr), "addr %s should NOT be martian", ipStr)
 	}
 
 	assert.True(t, IsMartianAddr(netip.Addr{}), "invalid zero netip.Addr should be martian")

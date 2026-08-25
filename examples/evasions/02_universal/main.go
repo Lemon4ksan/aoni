@@ -20,8 +20,6 @@ import (
 
 	"github.com/PuerkitoBio/goquery"
 	"github.com/lemon4ksan/aoni"
-	"github.com/lemon4ksan/aoni/profiles"
-	"github.com/lemon4ksan/aoni/profiles/chrome"
 	"github.com/mxschmitt/playwright-go"
 )
 
@@ -145,7 +143,7 @@ func run(ctx context.Context, targetURL string) error {
 	})
 
 	client := aoni.NewClient(nil,
-		option.WithBrowserProfile(aoni.BrowserChrome, profiles.Windows),
+		option.WithChrome(),
 		option.WithCookieJar(jar),
 		option.WithRefererAutomaton(true),
 		option.WithTCPDelay(150*time.Millisecond, 400*time.Millisecond),

@@ -11,8 +11,8 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
+	"github.com/lemon4ksan/foundation/testkit/assert"
+	"github.com/lemon4ksan/foundation/testkit/require"
 	golangagent "golang.org/x/crypto/ssh/agent"
 
 	"github.com/lemon4ksan/aoni/tunnel/ssh/agent"

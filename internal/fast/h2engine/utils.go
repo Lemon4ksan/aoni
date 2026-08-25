@@ -12,7 +12,8 @@ import (
 	"strconv"
 
 	"github.com/lemon4ksan/foundation/silicon/rand"
-	"github.com/valyala/fasthttp"
+
+	"github.com/lemon4ksan/aoni/internal/fast/h1engine"
 )
 
 var (
@@ -167,8 +168,8 @@ func toLowerCopy(b []byte) []byte {
 	return out
 }
 
-// fasthttpResponseHeaders serializes response status and headers from a fasthttp.Response into HPACK-encoded header fields.
-func fasthttpResponseHeaders(dst *Headers, hp *HPACK, res *fasthttp.Response) {
+// fasthttpResponseHeaders serializes response status and headers from a h1engine.Response into HPACK-encoded header fields.
+func fasthttpResponseHeaders(dst *Headers, hp *HPACK, res *h1engine.Response) {
 	hf := AcquireHeaderField()
 	defer ReleaseHeaderField(hf)
 

@@ -10,7 +10,7 @@ import (
 
 	"github.com/lemon4ksan/aoni/cmd/vortex/lib/emitter"
 	"github.com/lemon4ksan/aoni/cmd/vortex/lib/parser"
-	"github.com/stretchr/testify/require"
+	"github.com/lemon4ksan/foundation/testkit/require"
 )
 
 func TestSmartDirectives_RefererAndPresets(t *testing.T) {

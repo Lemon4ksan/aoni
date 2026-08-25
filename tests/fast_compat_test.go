@@ -18,13 +18,14 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
 
-	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
-	"github.com/valyala/fasthttp"
+	"github.com/lemon4ksan/aoni/internal/fast/h1engine"
+	"github.com/lemon4ksan/foundation/testkit/assert"
+	"github.com/lemon4ksan/foundation/testkit/require"
 
 	"github.com/lemon4ksan/aoni"
 	"github.com/lemon4ksan/aoni/fast"
@@ -212,20 +213,22 @@ func TestFastClient_RedirectMethods(t *testing.T) {
 			t.Parallel()
 
 			var (
+				mu             sync.Mutex
 				receivedMethod string
-				ts             *httptest.Server
 			)
 
-			ts = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				if r.URL.Path == "/target" {
+					mu.Lock()
 					receivedMethod = r.Method
+					mu.Unlock()
 
 					w.WriteHeader(http.StatusOK)
 
 					return
 				}
 
-				http.Redirect(w, r, ts.URL+"/target", tt.statusCode)
+				http.Redirect(w, r, "/target", tt.statusCode)
 			}))
 			t.Cleanup(ts.Close)
 
@@ -237,7 +240,11 @@ func TestFastClient_RedirectMethods(t *testing.T) {
 
 			resp.Close()
 
-			assert.Equal(t, tt.wantMethod, receivedMethod)
+			mu.Lock()
+			method := receivedMethod
+			mu.Unlock()
+
+			assert.Equal(t, tt.wantMethod, method)
 		})
 	}
 }
@@ -246,10 +253,15 @@ func TestFastClient_RedirectMethods(t *testing.T) {
 func TestFastClient_CrossDomainHeaderScrubbing(t *testing.T) {
 	t.Parallel()
 
-	var targetHeaders http.Header
+	var (
+		mu            sync.Mutex
+		targetHeaders http.Header
+	)
 
 	targetServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
 		targetHeaders = r.Header.Clone()
+		mu.Unlock()
 
 		w.WriteHeader(http.StatusOK)
 	}))
@@ -270,21 +282,30 @@ func TestFastClient_CrossDomainHeaderScrubbing(t *testing.T) {
 
 	resp.Close()
 
+	mu.Lock()
+	th := targetHeaders.Clone()
+	mu.Unlock()
+
 	// Sensitive auth and cookies must be stripped across domains
-	assert.Empty(t, targetHeaders.Get("Authorization"))
-	assert.Empty(t, targetHeaders.Get("Cookie"))
+	assert.Empty(t, th.Get("Authorization"))
+	assert.Empty(t, th.Get("Cookie"))
 	// Non-sensitive custom header preserved
-	assert.Equal(t, "aoni", targetHeaders.Get("X-Custom-App"))
+	assert.Equal(t, "aoni", th.Get("X-Custom-App"))
 }
 
 // TestFastClient_HTTPSDowngradeRefererStripping tests Referer stripping on HTTPS->HTTP downgrade.
 func TestFastClient_HTTPSDowngradeRefererStripping(t *testing.T) {
 	t.Parallel()
 
-	var receivedReferer string
+	var (
+		mu              sync.Mutex
+		receivedReferer string
+	)
 
 	httpServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
 		receivedReferer = r.Header.Get("Referer")
+		mu.Unlock()
 
 		w.WriteHeader(http.StatusOK)
 	}))
@@ -307,18 +328,27 @@ func TestFastClient_HTTPSDowngradeRefererStripping(t *testing.T) {
 
 	resp.Close()
 
+	mu.Lock()
+	ref := receivedReferer
+	mu.Unlock()
+
 	// Referer must be stripped on HTTPS to HTTP downgrade
-	assert.Empty(t, receivedReferer)
+	assert.Empty(t, ref)
 }
 
 // TestFastClient_UserInfoBasicAuth tests username/password extraction from URL.
 func TestFastClient_UserInfoBasicAuth(t *testing.T) {
 	t.Parallel()
 
-	var authHeader string
+	var (
+		mu         sync.Mutex
+		authHeader string
+	)
 
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
 		authHeader = r.Header.Get("Authorization")
+		mu.Unlock()
 
 		w.WriteHeader(http.StatusOK)
 	}))
@@ -335,8 +365,12 @@ func TestFastClient_UserInfoBasicAuth(t *testing.T) {
 
 	resp.Close()
 
+	mu.Lock()
+	auth := authHeader
+	mu.Unlock()
+
 	expectedAuth := "Basic " + base64.StdEncoding.EncodeToString([]byte("admin:secret123"))
-	assert.Equal(t, expectedAuth, authHeader)
+	assert.Equal(t, expectedAuth, auth)
 }
 
 // TestFastClient_CookieJarIntegration tests cookie parsing, storage, and transmission across requests.
@@ -603,8 +637,8 @@ func TestHeader_RequestModifiers(t *testing.T) {
 func TestRequest_URLAndQueryParams(t *testing.T) {
 	t.Parallel()
 
-	fastReq := fasthttp.AcquireRequest()
-	t.Cleanup(func() { fasthttp.ReleaseRequest(fastReq) })
+	fastReq := h1engine.AcquireRequest()
+	t.Cleanup(func() { h1engine.ReleaseRequest(fastReq) })
 
 	req := fast.NewRequest(fastReq)
 	req.SetURL("http://example.com/api/v1/search?q=aoni&page=1")
@@ -625,8 +659,8 @@ func TestRequest_URLAndQueryParams(t *testing.T) {
 func TestRequest_HeaderMutations(t *testing.T) {
 	t.Parallel()
 
-	fastReq := fasthttp.AcquireRequest()
-	t.Cleanup(func() { fasthttp.ReleaseRequest(fastReq) })
+	fastReq := h1engine.AcquireRequest()
+	t.Cleanup(func() { h1engine.ReleaseRequest(fastReq) })
 
 	req := fast.NewRequest(fastReq)
 	req.SetHeader("X-Api-Key", "secret-key-123")
@@ -645,8 +679,8 @@ func TestRequest_HeaderMutations(t *testing.T) {
 func TestRequest_BodyBytesAndStream(t *testing.T) {
 	t.Parallel()
 
-	fastReq := fasthttp.AcquireRequest()
-	t.Cleanup(func() { fasthttp.ReleaseRequest(fastReq) })
+	fastReq := h1engine.AcquireRequest()
+	t.Cleanup(func() { h1engine.ReleaseRequest(fastReq) })
 
 	req := fast.NewRequest(fastReq)
 
@@ -664,8 +698,8 @@ func TestRequest_BodyBytesAndStream(t *testing.T) {
 func TestResponse_ContractAndHeaders(t *testing.T) {
 	t.Parallel()
 
-	fastResp := fasthttp.AcquireResponse()
-	t.Cleanup(func() { fasthttp.ReleaseResponse(fastResp) })
+	fastResp := h1engine.AcquireResponse()
+	t.Cleanup(func() { h1engine.ReleaseResponse(fastResp) })
 
 	fastResp.SetStatusCode(http.StatusCreated)
 	fastResp.Header.Set("Content-Type", "application/json")
@@ -969,8 +1003,8 @@ func TestFastClient_WithCloningAndIsolation(t *testing.T) {
 func TestFastClient_PooledResponseLifecycle(t *testing.T) {
 	t.Parallel()
 
-	fastReq := fasthttp.AcquireRequest()
-	fastResp := fasthttp.AcquireResponse()
+	fastReq := h1engine.AcquireRequest()
+	fastResp := h1engine.AcquireResponse()
 
 	fastResp.SetStatusCode(http.StatusOK)
 	fastResp.SetBodyString("pooled-data")

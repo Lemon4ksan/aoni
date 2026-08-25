@@ -20,10 +20,11 @@ import (
 	"testing"
 	"time"
 
+	"github.com/lemon4ksan/foundation/borrow"
 	"github.com/lemon4ksan/foundation/net/hpack"
+	"github.com/lemon4ksan/foundation/testkit/assert"
+	"github.com/lemon4ksan/foundation/testkit/require"
 	utls "github.com/refraction-networking/utls"
-	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
 	"golang.org/x/net/http2"
 
 	"github.com/lemon4ksan/aoni"
@@ -1629,12 +1630,12 @@ func TestRFC7936_Subprotocols(t *testing.T) {
 
 		valid := []string{"chat", "graphql-ws", "v1.0", "sip", "wamp.2.json"}
 		for _, v := range valid {
-			assert.True(t, IsValidSubprotocolToken(v), "should be valid: %s", v)
+			assert.Truef(t, IsValidSubprotocolToken(v), "should be valid: %s", v)
 		}
 
 		invalid := []string{"", "chat ", "chat\t", "chat\n", "chat(v1)", "a,b", "foo/bar", "a{b}", "a<b"}
 		for _, inv := range invalid {
-			assert.False(t, IsValidSubprotocolToken(inv), "should be invalid: %s", inv)
+			assert.Falsef(t, IsValidSubprotocolToken(inv), "should be invalid: %s", inv)
 		}
 	})
 }
@@ -1789,6 +1790,47 @@ func TestRFC7692_PermessageDeflate_EndToEnd(t *testing.T) {
 	assert.Equal(t, string(testMsg), string(buf[:n]))
 }
 
+func BenchmarkWS_PermessageDeflate(b *testing.B) {
+	clientConn, serverConn := tcpPipeBench(b)
+	defer clientConn.Close()
+	defer serverConn.Close()
+
+	c := WrapRawConn(clientConn, true).(*wsRawConn)
+	s := WrapRawConn(serverConn, false).(*wsRawConn)
+	c.compress = true
+	s.compress = true
+
+	payload := []byte("hello compressed websocket message permessage-deflate rfc7692 1234567890")
+	b.SetBytes(int64(len(payload)))
+
+	ch := make(chan struct{}, 256)
+	done := make(chan struct{})
+
+	go func() {
+		for range ch {
+			_ = c.WriteMessage(FrameText, payload)
+		}
+
+		close(done)
+	}()
+
+	b.ReportAllocs()
+	b.ResetTimer()
+
+	for range b.N {
+		ch <- struct{}{}
+
+		_, _, err := s.ReadMessage()
+		if err != nil {
+			b.Fatal(err)
+		}
+	}
+
+	b.StopTimer()
+	close(ch)
+	<-done
+}
+
 func TestParseWSURL_PathTraversal(t *testing.T) {
 	t.Parallel()
 
@@ -1801,12 +1843,12 @@ func TestIsForbiddenH2ConnectHeader(t *testing.T) {
 
 	forbidden := []string{"upgrade", "connection", "host", "sec-websocket-key", "sec-websocket-accept"}
 	for _, h := range forbidden {
-		assert.True(t, isForbiddenH2ConnectHeader(h), "header %s should be forbidden", h)
+		assert.Truef(t, isForbiddenH2ConnectHeader(h), "header %s should be forbidden", h)
 	}
 
 	allowed := []string{"authorization", "user-agent", "cookie", "x-custom-header"}
 	for _, h := range allowed {
-		assert.False(t, isForbiddenH2ConnectHeader(h), "header %s should be allowed", h)
+		assert.Falsef(t, isForbiddenH2ConnectHeader(h), "header %s should be allowed", h)
 	}
 }
 
@@ -1931,7 +1973,7 @@ func TestRFC8441_ExtendedConnect_Rules(t *testing.T) {
 	}
 
 	for _, h := range forbidden {
-		assert.True(
+		assert.Truef(
 			t,
 			isForbiddenH2ConnectHeader(h),
 			"header %q must be forbidden in H2 Extended CONNECT (RFC 8441 §5)",
@@ -1950,7 +1992,7 @@ func TestRFC8441_ExtendedConnect_Rules(t *testing.T) {
 	}
 
 	for _, h := range allowed {
-		assert.False(
+		assert.Falsef(
 			t,
 			isForbiddenH2ConnectHeader(h),
 			"header %q must be allowed in H2 Extended CONNECT (RFC 8441 §5)",
@@ -2037,4 +2079,138 @@ func TestWebSocket_RFC6455_ContinuationFrames_Reassembly(t *testing.T) {
 		_, _, err := wsServer.ReadMessage()
 		require.ErrorIs(t, err, ErrUnexpectedContinuationFrame)
 	})
+}
+
+func TestComputeAcceptKey_RFC6455Vector(t *testing.T) {
+	t.Parallel()
+
+	// RFC 6455 Section 1.3 test vector:
+	// Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==
+	// Sec-WebSocket-Accept: s3pPLMBiTxaQ9kYGzzhZRbK+xOo=
+	challengeKey := "dGhlIHNhbXBsZSBub25jZQ=="
+	expectedAccept := "s3pPLMBiTxaQ9kYGzzhZRbK+xOo="
+
+	accept := computeAcceptKey(challengeKey)
+	assert.Equal(t, expectedAccept, accept)
+
+	var dst [28]byte
+	ComputeAcceptKeyBytes([]byte(challengeKey), &dst)
+	assert.Equal(t, expectedAccept, string(dst[:]))
+}
+
+func TestWSRawConn_ReadMessageScoped(t *testing.T) {
+	t.Parallel()
+
+	serverConn, clientConn := tcpPipe(t)
+	defer serverConn.Close()
+	defer clientConn.Close()
+
+	wsServer := WrapRawConn(serverConn, false)
+	wsClient := WrapRawConn(clientConn, true)
+
+	go func() {
+		_ = wsClient.WriteMessage(FrameText, []byte("scoped message payload"))
+	}()
+
+	scope := borrow.AcquireScope()
+	defer scope.Release()
+
+	msgType, payload, err := wsServer.ReadMessageScoped(scope)
+	require.NoError(t, err)
+	assert.Equal(t, int(FrameText), msgType)
+	assert.Equal(t, "scoped message payload", string(payload))
+}
+
+func BenchmarkComputeAcceptKey(b *testing.B) {
+	challengeKey := "dGhlIHNhbXBsZSBub25jZQ=="
+	keyBytes := []byte(challengeKey)
+
+	var dst [28]byte
+
+	b.Run("String", func(b *testing.B) {
+		b.ReportAllocs()
+
+		for b.Loop() {
+			_ = computeAcceptKey(challengeKey)
+		}
+	})
+
+	b.Run("BytesZeroAlloc", func(b *testing.B) {
+		b.ReportAllocs()
+
+		for b.Loop() {
+			ComputeAcceptKeyBytes(keyBytes, &dst)
+		}
+	})
+}
+
+func BenchmarkWS_ReadMessageScoped(b *testing.B) {
+	serverConn, clientConn := tcpPipe(&testing.T{})
+	defer serverConn.Close()
+	defer clientConn.Close()
+
+	wsServer := WrapRawConn(serverConn, false)
+	wsClient := WrapRawConn(clientConn, true)
+
+	payload := make([]byte, 1024)
+	for i := range payload {
+		payload[i] = byte(i)
+	}
+
+	go func() {
+		for {
+			if err := wsClient.WriteMessage(FrameBinary, payload); err != nil {
+				return
+			}
+		}
+	}()
+
+	scope := borrow.AcquireScope()
+	defer scope.Release()
+
+	b.SetBytes(int64(len(payload)))
+	b.ReportAllocs()
+	b.ResetTimer()
+
+	for b.Loop() {
+		scope := borrow.AcquireScope()
+
+		_, _, err := wsServer.ReadMessageScoped(scope)
+		if err != nil {
+			scope.Release()
+			b.Fatal(err)
+		}
+
+		scope.Release()
+	}
+}
+
+func TestWS_Split(t *testing.T) {
+	serverConn, clientConn := tcpPipe(t)
+	defer serverConn.Close()
+	defer clientConn.Close()
+
+	wsServer := WrapRawConn(serverConn, false)
+	wsClient := WrapRawConn(clientConn, true)
+
+	sReader, sWriter := Split(wsServer)
+	cReader, cWriter := Split(wsClient)
+
+	// Client writes, Server reads
+	err := cWriter.WriteMessage(FrameText, []byte("ping from split writer"))
+	assert.NoError(t, err)
+
+	op, msg, err := sReader.ReadMessage()
+	assert.NoError(t, err)
+	assert.Equal(t, FrameText, op)
+	assert.Equal(t, []byte("ping from split writer"), msg)
+
+	// Server writes, Client reads
+	err = sWriter.WriteMessage(FrameText, []byte("pong from server split writer"))
+	assert.NoError(t, err)
+
+	op, msg, err = cReader.ReadMessage()
+	assert.NoError(t, err)
+	assert.Equal(t, FrameText, op)
+	assert.Equal(t, []byte("pong from server split writer"), msg)
 }

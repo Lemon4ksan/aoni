@@ -15,8 +15,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/valyala/fasthttp"
-	"github.com/valyala/fasthttp/fasthttputil"
+	"github.com/lemon4ksan/aoni/internal/fast/h1engine"
 
 	"github.com/lemon4ksan/aoni"
 	"github.com/lemon4ksan/aoni/fast"
@@ -31,22 +30,33 @@ type fastBenchUser struct {
 	Email string `json:"email"`
 }
 
-func setupFastBenchServer() (*fasthttputil.InmemoryListener, *fasthttp.Server) {
-	ln := fasthttputil.NewInmemoryListener()
-	srv := &fasthttp.Server{
-		DisableHeaderNamesNormalizing: true,
-		Handler: func(ctx *fasthttp.RequestCtx) {
-			ctx.SetContentType("application/json")
-			ctx.SetStatusCode(fasthttp.StatusOK)
-			ctx.SetBodyString(`{"id":42,"name":"Benchmark User","email":"bench@aoni.dev"}`)
-		},
-	}
+func setupFastBenchServer() *h1engine.InmemoryListener {
+	ln := h1engine.NewInmemoryListener()
+	respBytes := []byte("HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: 58\r\nConnection: keep-alive\r\n\r\n{\"id\":42,\"name\":\"Benchmark User\",\"email\":\"bench@aoni.dev\"}")
 
 	go func() {
-		_ = srv.Serve(ln)
+		for {
+			c, err := ln.Accept()
+			if err != nil {
+				return
+			}
+			go func(conn net.Conn) {
+				defer conn.Close()
+				buf := make([]byte, 1024)
+				for {
+					n, err := conn.Read(buf)
+					if err != nil || n == 0 {
+						return
+					}
+					if _, err := conn.Write(respBytes); err != nil {
+						return
+					}
+				}
+			}(c)
+		}
 	}()
 
-	return ln, srv
+	return ln
 }
 
 func BenchmarkClient_Get_Fast(b *testing.B) {
@@ -122,14 +132,14 @@ func BenchmarkClient_Get_RawFastHTTP(b *testing.B) {
 	}))
 	defer ts.Close()
 
-	c := &fasthttp.Client{}
+	c := &h1engine.Client{}
 
 	b.ResetTimer()
 	b.ReportAllocs()
 
 	b.RunParallel(func(pb *testing.PB) {
-		req := fasthttp.AcquireRequest()
-		resp := fasthttp.AcquireResponse()
+		req := h1engine.AcquireRequest()
+		resp := h1engine.AcquireResponse()
 
 		req.SetRequestURI(ts.URL)
 
@@ -143,8 +153,8 @@ func BenchmarkClient_Get_RawFastHTTP(b *testing.B) {
 			req.SetRequestURI(ts.URL)
 		}
 
-		fasthttp.ReleaseRequest(req)
-		fasthttp.ReleaseResponse(resp)
+		h1engine.ReleaseRequest(req)
+		h1engine.ReleaseResponse(resp)
 	})
 }
 
@@ -176,8 +186,8 @@ func BenchmarkClient_Get_BridgeStdClient(b *testing.B) {
 }
 
 func BenchmarkFastAdapter_ZeroAllocations(b *testing.B) {
-	fastReq := fasthttp.AcquireRequest()
-	defer fasthttp.ReleaseRequest(fastReq)
+	fastReq := h1engine.AcquireRequest()
+	defer h1engine.ReleaseRequest(fastReq)
 
 	fastReq.SetRequestURI("http://api.example.com/v1/users")
 
@@ -198,11 +208,8 @@ func BenchmarkFastAdapter_ZeroAllocations(b *testing.B) {
 }
 
 func BenchmarkGET_JSON_FastClient(b *testing.B) {
-	ln, srv := setupFastBenchServer()
-	defer func() {
-		_ = srv.Shutdown()
-		_ = ln.Close()
-	}()
+	ln := setupFastBenchServer()
+	defer ln.Close()
 
 	fastClient := fast.NewClient(
 		option.WithBaseURL("http://inmemory"),
@@ -228,6 +235,42 @@ func BenchmarkGET_JSON_FastClient(b *testing.B) {
 		if err := json.Unmarshal(resp.BodyBytes(), &user); err != nil {
 			_ = resp.Close()
 			b.Fatalf("decode failed: %v", err)
+		}
+		_ = resp.Close()
+
+		if user.ID != 42 {
+			b.Fatalf("expected ID 42, got %d", user.ID)
+		}
+	}
+}
+
+func BenchmarkGET_JSON_FastClient_ZeroCopy(b *testing.B) {
+	ln := setupFastBenchServer()
+	defer ln.Close()
+
+	fastClient := fast.NewClient(
+		option.WithBaseURL("http://inmemory"),
+		option.WithTimeout(5*time.Second),
+	)
+
+	fastClient.Engine().Dial = func(_ string) (net.Conn, error) {
+		return ln.Dial()
+	}
+
+	ctx := context.Background()
+
+	b.ReportAllocs()
+	b.ResetTimer()
+
+	for b.Loop() {
+		var user fastBenchUser
+		resp, err := fastClient.Request(ctx, "GET", "/user")
+		if err != nil {
+			b.Fatalf("fast request failed: %v", err)
+		}
+
+		if pr, ok := resp.(*fast.PooledResponse); ok {
+			_ = pr.JSONNoCopy(&user)
 		}
 		_ = resp.Close()
 
@@ -265,11 +308,8 @@ func BenchmarkGET_JSON_StdClient(b *testing.B) {
 }
 
 func BenchmarkPOST_JSON_FastClient(b *testing.B) {
-	ln, srv := setupFastBenchServer()
-	defer func() {
-		_ = srv.Shutdown()
-		_ = ln.Close()
-	}()
+	ln := setupFastBenchServer()
+	defer ln.Close()
 
 	fastClient := fast.NewClient(
 		option.WithBaseURL("http://inmemory"),
@@ -303,8 +343,8 @@ func BenchmarkPOST_JSON_FastClient(b *testing.B) {
 
 func BenchmarkModifiers_FastVsStd(b *testing.B) {
 	b.Run("FastRequest_Adapter", func(b *testing.B) {
-		fastReq := fasthttp.AcquireRequest()
-		defer fasthttp.ReleaseRequest(fastReq)
+		fastReq := h1engine.AcquireRequest()
+		defer h1engine.ReleaseRequest(fastReq)
 		fastReq.SetRequestURI("http://api.example.com/v1/resource")
 
 		req := fast.NewRequest(fastReq)
@@ -359,11 +399,8 @@ func BenchmarkGET_JSON_Standard_NetHTTP(b *testing.B) {
 }
 
 func BenchmarkGET_JSON_Aoni_FastBridged(b *testing.B) {
-	ln, srv := setupFastBenchServer()
-	defer func() {
-		_ = srv.Shutdown()
-		_ = ln.Close()
-	}()
+	ln := setupFastBenchServer()
+	defer ln.Close()
 
 	fastClient := fast.NewClient(
 		option.WithBaseURL("http://inmemory"),
@@ -394,11 +431,8 @@ func BenchmarkGET_JSON_Aoni_FastBridged(b *testing.B) {
 }
 
 func BenchmarkGET_FastClient_Parallel(b *testing.B) {
-	ln, srv := setupFastBenchServer()
-	defer func() {
-		_ = srv.Shutdown()
-		_ = ln.Close()
-	}()
+	ln := setupFastBenchServer()
+	defer ln.Close()
 
 	fastClient := fast.NewClient(
 		option.WithBaseURL("http://inmemory"),
@@ -419,6 +453,68 @@ func BenchmarkGET_FastClient_Parallel(b *testing.B) {
 				b.Fatalf("fast parallel request failed: %v", err)
 			}
 			_ = resp.Close()
+		}
+	})
+}
+
+func BenchmarkPOST_FastClient_Parallel(b *testing.B) {
+	ln := setupFastBenchServer()
+	defer ln.Close()
+
+	fastClient := fast.NewClient(
+		option.WithBaseURL("http://inmemory"),
+		option.WithTimeout(5*time.Second),
+	)
+	fastClient.Engine().Dial = func(_ string) (net.Conn, error) {
+		return ln.Dial()
+	}
+	ctx := context.Background()
+	payload := []byte(`{"message":"hello world from vectored io benchmark"}`)
+
+	b.ReportAllocs()
+	b.ResetTimer()
+
+	b.RunParallel(func(pb *testing.PB) {
+		for pb.Next() {
+			resp, err := fastClient.Request(ctx, "POST", "/submit", mod.WithBodyBytes(payload))
+			if err != nil {
+				b.Fatalf("fast post request failed: %v", err)
+			}
+			_ = resp.Close()
+		}
+	})
+}
+
+func BenchmarkPOST_FastClient_Native_Parallel(b *testing.B) {
+	ln := setupFastBenchServer()
+	defer ln.Close()
+
+	engine := &h1engine.HostClient{
+		Addr: "inmemory",
+		Dial: func(_ string) (net.Conn, error) {
+			return ln.Dial()
+		},
+	}
+
+	payload := []byte(`{"message":"hello world from vectored io benchmark"}`)
+
+	b.ReportAllocs()
+	b.ResetTimer()
+
+	b.RunParallel(func(pb *testing.PB) {
+		req := h1engine.AcquireRequest()
+		resp := h1engine.AcquireResponse()
+		defer h1engine.ReleaseRequest(req)
+		defer h1engine.ReleaseResponse(resp)
+
+		req.Header.SetMethod("POST")
+		req.SetRequestURI("http://inmemory/submit")
+		req.SetBody(payload)
+
+		for pb.Next() {
+			if err := engine.Do(req, resp); err != nil {
+				b.Fatalf("fast native post failed: %v", err)
+			}
 		}
 	})
 }

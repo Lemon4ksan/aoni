@@ -336,9 +336,12 @@ func (s *Reader) decompressStream(
 		case stateInitialize:
 			s.maxBackwardDistance = (1 << s.windowBits) - windowGap
 
-			if s.blockTypeTrees == nil {
+			reqBlockTypeTreesLen := 3 * (huffmanMaxSize258 + huffmanMaxSize26)
+			if cap(s.blockTypeTrees) < reqBlockTypeTreesLen {
 				/* Allocate memory for both block_type_trees and block_len_trees. */
-				s.blockTypeTrees = make([]huffmanCode, (3 * (huffmanMaxSize258 + huffmanMaxSize26)))
+				s.blockTypeTrees = make([]huffmanCode, reqBlockTypeTreesLen)
+			} else {
+				s.blockTypeTrees = s.blockTypeTrees[:reqBlockTypeTreesLen]
 			}
 
 			s.blockLenTrees = s.blockTypeTrees[3*huffmanMaxSize258:]

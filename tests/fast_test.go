@@ -8,7 +8,6 @@ import (
 	"context"
 	"fmt"
 	"io"
-	"net"
 	"net/http"
 	"net/http/httptest"
 	"slices"
@@ -17,10 +16,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
-	"github.com/valyala/fasthttp"
-	"github.com/valyala/fasthttp/fasthttputil"
+	"github.com/lemon4ksan/aoni/internal/fast/h1engine"
+	"github.com/lemon4ksan/foundation/borrow"
+	"github.com/lemon4ksan/foundation/testkit/assert"
+	"github.com/lemon4ksan/foundation/testkit/require"
 
 	"github.com/lemon4ksan/aoni"
 	"github.com/lemon4ksan/aoni/fast"
@@ -196,8 +195,8 @@ func TestFastResponseAdapter(t *testing.T) {
 func TestFastRequest_Contract(t *testing.T) {
 	t.Parallel()
 
-	fastReq := fasthttp.AcquireRequest()
-	t.Cleanup(func() { fasthttp.ReleaseRequest(fastReq) })
+	fastReq := h1engine.AcquireRequest()
+	t.Cleanup(func() { h1engine.ReleaseRequest(fastReq) })
 
 	req := fast.NewRequest(fastReq)
 	require.NotNil(t, req.FastHTTPRequest())
@@ -253,8 +252,8 @@ func TestFastRequest_UnifiedModifiers(t *testing.T) {
 		mod.WithQuery(map[string]string{"page": "1"}),
 	}
 
-	fastReq := fasthttp.AcquireRequest()
-	t.Cleanup(func() { fasthttp.ReleaseRequest(fastReq) })
+	fastReq := h1engine.AcquireRequest()
+	t.Cleanup(func() { h1engine.ReleaseRequest(fastReq) })
 	fastReq.SetRequestURI("http://localhost/test")
 
 	fReq := fast.NewRequest(fastReq)
@@ -273,8 +272,8 @@ func TestFastRequest_UnifiedModifiers(t *testing.T) {
 func TestFastResponse_Contract(t *testing.T) {
 	t.Parallel()
 
-	fastRespStruct := fasthttp.AcquireResponse()
-	t.Cleanup(func() { fasthttp.ReleaseResponse(fastRespStruct) })
+	fastRespStruct := h1engine.AcquireResponse()
+	t.Cleanup(func() { h1engine.ReleaseResponse(fastRespStruct) })
 
 	fastRespStruct.SetStatusCode(http.StatusAccepted)
 	fastRespStruct.Header.Set("X-Fast-Resp", "fast-val")
@@ -337,41 +336,26 @@ func TestClientHTTP1Execution(t *testing.T) {
 func TestFastBridge_StdClient(t *testing.T) {
 	t.Parallel()
 
-	ln := fasthttputil.NewInmemoryListener()
-	srv := &fasthttp.Server{
-		Handler: func(ctx *fasthttp.RequestCtx) {
-			ctx.SetStatusCode(fasthttp.StatusOK)
-			ctx.Response.Header.Set("X-Bridge-Engine", "fasthttp")
-			ctx.SetBodyString(`{"bridged":true}`)
-		},
-	}
-
-	go func() {
-		_ = srv.Serve(ln)
-	}()
-
-	t.Cleanup(func() {
-		_ = srv.Shutdown()
-		_ = ln.Close()
-	})
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("X-Bridge-Engine", "h1engine")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"bridged":true}`))
+	}))
+	defer ts.Close()
 
 	fastClient := fast.NewClient(option.WithTimeout(5 * time.Second))
-	fastClient.Engine().Dial = func(_ string) (net.Conn, error) {
-		return ln.Dial()
-	}
-
 	stdClient := fast.NewStdClient(fastClient)
 
-	req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, "http://inmemory/test", nil)
+	req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, ts.URL+"/test", nil)
 	require.NoError(t, err)
 
 	resp, err := stdClient.Do(req)
 	require.NoError(t, err)
 
-	t.Cleanup(func() { _ = resp.Body.Close() })
+	defer resp.Body.Close()
 
 	assert.Equal(t, http.StatusOK, resp.StatusCode)
-	assert.Equal(t, "fasthttp", resp.Header.Get("X-Bridge-Engine"))
+	assert.Equal(t, "h1engine", resp.Header.Get("X-Bridge-Engine"))
 
 	body, err := io.ReadAll(resp.Body)
 	require.NoError(t, err)
@@ -421,33 +405,19 @@ func TestFastClient_MiddlewareChain(t *testing.T) {
 
 	var attempts int
 
-	ln := fasthttputil.NewInmemoryListener()
-	srv := &fasthttp.Server{
-		Handler: func(ctx *fasthttp.RequestCtx) {
-			attempts++
-			if attempts < 3 {
-				ctx.SetStatusCode(fasthttp.StatusServiceUnavailable)
-				return
-			}
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		attempts++
+		if attempts < 3 {
+			w.WriteHeader(http.StatusServiceUnavailable)
+			return
+		}
 
-			ctx.SetStatusCode(fasthttp.StatusOK)
-			ctx.SetBodyString(`{"success":true}`)
-		},
-	}
-
-	go func() {
-		_ = srv.Serve(ln)
-	}()
-
-	t.Cleanup(func() {
-		_ = srv.Shutdown()
-		_ = ln.Close()
-	})
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"success":true}`))
+	}))
+	defer ts.Close()
 
 	fastClient := fast.NewClient(option.WithTimeout(5 * time.Second))
-	fastClient.Engine().Dial = func(_ string) (net.Conn, error) {
-		return ln.Dial()
-	}
 
 	chained := middleware.Chain(
 		fastClient,
@@ -458,10 +428,10 @@ func TestFastClient_MiddlewareChain(t *testing.T) {
 		middleware.RateLimit(100, 10),
 	)
 
-	req := fast.NewRequest(fasthttp.AcquireRequest())
+	req := fast.NewRequest(h1engine.AcquireRequest())
 	t.Cleanup(req.Release)
 
-	req.SetURL("http://inmemory/test")
+	req.SetURL(ts.URL + "/test")
 	req.SetMethod(http.MethodGet)
 
 	resp, err := chained.Do(req)
@@ -624,4 +594,67 @@ func TestFast_Resiliency_LoadBalancer(t *testing.T) {
 	assert.Equal(t, 2, hits["server-1"])
 	assert.Equal(t, 2, hits["server-2"])
 	assert.NoError(t, balancer.Close())
+}
+
+func TestFast_ScopedBorrow(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("X-Custom-Header", "aoni-borrow-test")
+		w.Header().Set("Set-Cookie", "auth_token=secret_12345; Path=/")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"message":"zero-alloc-borrow","status":"ok"}`))
+	}))
+	t.Cleanup(ts.Close)
+
+	client := fast.NewClient()
+	req := client.AcquireRequest()
+	defer client.ReleaseRequest(req)
+
+	req.SetURL(ts.URL)
+	req.SetMethod("GET")
+
+	scope := borrow.AcquireScope()
+	defer scope.Release()
+
+	resp, err := client.Do(req)
+	require.NoError(t, err)
+	defer resp.Close()
+
+	var (
+		headerVal borrow.Bytes
+		cookieVal borrow.Bytes
+		bodyVal   borrow.Bytes
+	)
+
+	if pr, isPooled := resp.(*fast.PooledResponse); isPooled {
+		headerVal = pr.HeaderScoped(scope, "X-Custom-Header")
+		cookieVal = pr.CookieScoped(scope, "auth_token")
+		bodyVal = pr.BodyScoped(scope)
+	} else if fr, isDirect := resp.(*fast.Response); isDirect {
+		headerVal = fr.HeaderScoped(scope, "X-Custom-Header")
+		cookieVal = fr.CookieScoped(scope, "auth_token")
+		bodyVal = fr.BodyScoped(scope)
+	} else {
+		t.Fatalf("unexpected response type: %T", resp)
+	}
+
+	assert.Equal(t, "aoni-borrow-test", string(headerVal.AsSlice()))
+	assert.Equal(t, "secret_12345", string(cookieVal.AsSlice()))
+	assert.Equal(t, `{"message":"zero-alloc-borrow","status":"ok"}`, string(bodyVal.AsSlice()))
+
+	// Test ReadBodyScoped
+	var captured string
+	var readErr error
+	if pr, isPooled := resp.(*fast.PooledResponse); isPooled {
+		readErr = pr.ReadBodyScoped(func(b []byte) error {
+			captured = string(b)
+			return nil
+		})
+	} else if fr, isDirect := resp.(*fast.Response); isDirect {
+		readErr = fr.ReadBodyScoped(func(b []byte) error {
+			captured = string(b)
+			return nil
+		})
+	}
+	require.NoError(t, readErr)
+	assert.Equal(t, `{"message":"zero-alloc-borrow","status":"ok"}`, captured)
 }

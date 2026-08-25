@@ -14,7 +14,7 @@ import (
 	time "time"
 
 	protocol "github.com/lemon4ksan/aoni/internal/quic/internal/protocol"
-	gomock "go.uber.org/mock/gomock"
+	gomock "github.com/lemon4ksan/foundation/testkit/gomock"
 )
 
 // MockConnRunner is a mock of ConnRunner interface.

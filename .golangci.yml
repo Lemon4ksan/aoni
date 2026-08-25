@@ -103,3 +103,4 @@ linters:
       - "examples/.*"
       - "tests/.*"
       - "internal/compress/(flate|fse|huff0|internal|zstd|gzip)/.*"
+      - "internal/fast/h1engine/.*"

@@ -1,1 +1,24 @@
 * text=auto eol=lf
+
+# Go & Protocol Buffers LF Normalization
+* text=auto eol=lf
+*.go text eol=lf
+*.proto text eol=lf
+
+# Compressed archives & binary blobs
+*.har.gz binary linguist-generated=true
+
+# GitHub & GitLab Linguist — Collapse generated code in PR reviews and exclude from stats
+*.gen.go linguist-generated=true
+*_mock.gen.go linguist-generated=true
+*_harness.gen.go linguist-generated=true
+*.pb.go linguist-generated=true
+*_aoni.pb.go linguist-generated=true
+
+# Vortex System State, History Journal, Traffic Cache & Upstream Bundles
+.vortex/** linguist-generated=true
+.vortex/history/** linguist-generated=true
+.vortex/cache/** linguist-generated=true
+.vortex/upstream/** linguist-generated=true linguist-vendored=true
+.vortex/upstream/js/** linguist-generated=true linguist-vendored=true
+.vortex/tags.json linguist-generated=true

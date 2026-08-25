@@ -155,10 +155,10 @@ func (a *WintunAdapter) ReceivePacket() ([]byte, error) {
 
 		var size uint32
 
-		r1, _, _ := procWintunReceivePacket.Call(a.sessionHandle, uintptr(unsafe.Pointer(&size)))
+		r1, _, _ := syscall.SyscallN(procWintunReceivePacket.Addr(), a.sessionHandle, uintptr(unsafe.Pointer(&size)))
 		if r1 != 0 {
-			//nolint:govet // r1 points to C/driver memory allocated by wintun.dll outside Go GC heap
-			return unsafe.Slice((*byte)(unsafe.Pointer(r1)), size), nil
+			p := *(*unsafe.Pointer)(unsafe.Pointer(&r1))
+			return unsafe.Slice((*byte)(p), size), nil
 		}
 
 		// Wait on OS wait-event if ring buffer is currently empty
@@ -173,7 +173,7 @@ func (a *WintunAdapter) ReleaseReceivePacket(pkt []byte) {
 	}
 
 	ptr := uintptr(unsafe.Pointer(&pkt[0]))
-	_, _, _ = procWintunReleaseReceivePacket.Call(a.sessionHandle, ptr)
+	_, _, _ = syscall.SyscallN(procWintunReleaseReceivePacket.Addr(), a.sessionHandle, ptr)
 }
 
 // SendPacket allocates ring capacity and writes an IP packet back to the Windows network stack.
@@ -184,16 +184,16 @@ func (a *WintunAdapter) SendPacket(packet []byte) error {
 
 	size := uintptr(len(packet))
 
-	r1, _, errCall := procWintunAllocateSendPacket.Call(a.sessionHandle, size)
+	r1, _, errCall := syscall.SyscallN(procWintunAllocateSendPacket.Addr(), a.sessionHandle, size)
 	if r1 == 0 {
 		return fmt.Errorf("aoni tun: allocate send packet failed: %w", errCall)
 	}
 
-	//nolint:govet // r1 points to C/driver memory allocated by wintun.dll outside Go GC heap
-	dst := unsafe.Slice((*byte)(unsafe.Pointer(r1)), len(packet))
+	p := *(*unsafe.Pointer)(unsafe.Pointer(&r1))
+	dst := unsafe.Slice((*byte)(p), len(packet))
 	copy(dst, packet)
 
-	_, _, _ = procWintunSendPacket.Call(a.sessionHandle, r1)
+	_, _, _ = syscall.SyscallN(procWintunSendPacket.Addr(), a.sessionHandle, r1)
 
 	return nil
 }

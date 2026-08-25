@@ -10,6 +10,7 @@ package dns
 import (
 	"context"
 	"net"
+	"net/netip"
 	"time"
 
 	"github.com/lemon4ksan/foundation/generic"
@@ -166,4 +167,19 @@ func LookupIPAddrResult(ctx context.Context, r Resolver, host string) generic.Re
 // LookupFirstIP returns the first resolved IP wrapped in a [generic.Optional].
 func LookupFirstIP(ctx context.Context, r Resolver, host string) generic.Optional[net.IP] {
 	return fdns.LookupFirstIP(ctx, r, host)
+}
+
+// LookupNetIP resolves a hostname into a slice of zero-allocation [netip.Addr] value objects.
+func LookupNetIP(ctx context.Context, r Resolver, host string) ([]netip.Addr, error) {
+	return fdns.LookupNetIP(ctx, r, host)
+}
+
+// LookupNetIPResult executes a hostname lookup and returns a [generic.Result] containing [netip.Addr] slices.
+func LookupNetIPResult(ctx context.Context, r Resolver, host string) generic.Result[[]netip.Addr] {
+	return fdns.LookupNetIPResult(ctx, r, host)
+}
+
+// LookupFirstNetIP returns the first resolved [netip.Addr] wrapped in a [generic.Optional].
+func LookupFirstNetIP(ctx context.Context, r Resolver, host string) generic.Optional[netip.Addr] {
+	return fdns.LookupFirstNetIP(ctx, r, host)
 }

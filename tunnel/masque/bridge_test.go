@@ -14,8 +14,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
+	"github.com/lemon4ksan/foundation/testkit/assert"
+	"github.com/lemon4ksan/foundation/testkit/require"
 )
 
 type bridgeMockAdapter struct {
@@ -218,11 +218,13 @@ func TestBridgeTUNWithOptions_MTULimit(t *testing.T) {
 
 	adapter.InjectReadPacket(overPkt)
 
-	time.Sleep(30 * time.Millisecond)
+	var written []byte
+	require.Eventually(t, func() bool {
+		written = adapter.GetWrittenBytes()
+		return len(written) > 0
+	}, time.Second, 10*time.Millisecond)
 
 	// Adapter should have received ICMP Packet Too Big response
-	written := adapter.GetWrittenBytes()
-	require.NotEmpty(t, written)
 	assert.Equal(t, byte(0x45), written[0])
 	assert.Equal(t, byte(3), written[20]) // ICMP Type 3
 	assert.Equal(t, byte(4), written[21]) // ICMP Code 4

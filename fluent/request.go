@@ -14,12 +14,11 @@ import (
 	"path/filepath"
 	"slices"
 	"strconv"
-	"sync"
 	"time"
 
-	"github.com/lemon4ksan/foundation/generic"
 	fio "github.com/lemon4ksan/foundation/io"
 	furl "github.com/lemon4ksan/foundation/net/url"
+	"github.com/lemon4ksan/foundation/silicon/pool"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/lemon4ksan/aoni"
@@ -36,13 +35,18 @@ import (
 )
 
 type typedRequestPool struct {
-	pool *generic.Pool[Request]
+	storage *pool.PerPStorage[*Request]
 }
 
 func newTypedRequestPool() *typedRequestPool {
 	return &typedRequestPool{
-		pool: generic.NewPool(func() *Request {
-			return &Request{}
+		storage: pool.NewPerPStorage(func() *Request {
+			return &Request{
+				appliedMods:      make([]aoni.RequestModifier, 0, 8),
+				expectedStatuses: make([]int, 0, 4),
+				headerEntries:    make([]headerEntry, 0, 8),
+				queryEntries:     make([]queryParamEntry, 0, 8),
+			}
 		}),
 	}
 }
@@ -51,30 +55,36 @@ func newTypedRequestPool() *typedRequestPool {
 func (p *typedRequestPool) Get(doer any) *Request {
 	reqClient := request.AsRequester(doer)
 
-	r := p.pool.Get()
-	if r == nil {
-		r = &Request{}
-	}
-
+	r := p.storage.Get()
 	r.client = reqClient
 
 	return r
 }
 
-// Put recycles a [Request] instance back to the free-list pool after resetting fields.
+// Put recycles a [Request] instance back to the core-pinned storage after resetting fields.
 func (p *typedRequestPool) Put(r *Request) {
 	if r == nil {
 		return
 	}
 
 	r.Reset()
-	p.pool.Put(r)
+	p.storage.Put(r)
 }
 
 var requestPool = newTypedRequestPool()
 
 func acquireRequest(doer any) *Request {
 	return requestPool.Get(doer)
+}
+
+type headerEntry struct {
+	key string
+	val string
+}
+
+type queryParamEntry struct {
+	key string
+	val string
 }
 
 // Request is a pooled request builder offering a chainable, fluent configuration API.
@@ -102,7 +112,9 @@ type Request struct {
 	basicAuth         *basicAuth
 	digestAuth        *digestAuth
 	headers           http.Header
+	headerEntries     []headerEntry
 	queryParams       url.Values
+	queryEntries      []queryParamEntry
 	pathParams        map[string]string
 	formFields        map[string]string
 	formFiles         map[string]io.Reader
@@ -159,6 +171,8 @@ func (r *Request) Reset() {
 	r.traceInfo = nil
 	r.appliedMods = r.appliedMods[:0]
 	r.expectedStatuses = r.expectedStatuses[:0]
+	r.headerEntries = r.headerEntries[:0]
+	r.queryEntries = r.queryEntries[:0]
 	r.timeout = 0
 	r.retryOverride = nil
 	r.useProtoDecoder = false
@@ -177,14 +191,12 @@ func (r *Request) Reset() {
 	clear(r.formFiles)
 }
 
-var headerPool = sync.Pool{
-	New: func() any {
-		return make(http.Header, 8)
-	},
-}
+var headerStorage = pool.NewPerPStorage(func() http.Header {
+	return make(http.Header, 8)
+})
 
 func acquireHeader() http.Header {
-	return headerPool.Get().(http.Header)
+	return headerStorage.Get()
 }
 
 func releaseHeader(h http.Header) {
@@ -193,7 +205,7 @@ func releaseHeader(h http.Header) {
 	}
 
 	clear(h)
-	headerPool.Put(h)
+	headerStorage.Put(h)
 }
 
 // Release resets the request builder and returns it to the free-list pool.
@@ -210,6 +222,11 @@ func (r *Request) Release() {
 func (r *Request) Header() http.Header {
 	if r.headers == nil {
 		r.headers = acquireHeader()
+		for i := range r.headerEntries {
+			r.headers.Add(r.headerEntries[i].key, r.headerEntries[i].val)
+		}
+
+		r.headerEntries = r.headerEntries[:0]
 	}
 
 	return r.headers
@@ -223,23 +240,28 @@ func (r *Request) SetContext(ctx context.Context) *Request {
 
 // SetHeader sets an HTTP header key-value pair.
 func (r *Request) SetHeader(header, value string) *Request {
-	if r.headers == nil {
-		r.headers = acquireHeader()
+	if r.headers != nil {
+		r.headers.Set(header, value)
+		return r
 	}
 
-	r.headers.Set(header, value)
+	r.headerEntries = append(r.headerEntries, headerEntry{key: header, val: value})
 
 	return r
 }
 
 // SetHeaders bulk-sets HTTP headers from a map.
 func (r *Request) SetHeaders(headers map[string]string) *Request {
-	if r.headers == nil {
-		r.headers = acquireHeader()
+	if r.headers != nil {
+		for k, v := range headers {
+			r.headers.Set(k, v)
+		}
+
+		return r
 	}
 
 	for k, v := range headers {
-		r.headers.Set(k, v)
+		r.headerEntries = append(r.headerEntries, headerEntry{key: k, val: v})
 	}
 
 	return r
@@ -247,23 +269,28 @@ func (r *Request) SetHeaders(headers map[string]string) *Request {
 
 // SetQueryParam appends a URL query parameter key-value pair.
 func (r *Request) SetQueryParam(param, value string) *Request {
-	if r.queryParams == nil {
-		r.queryParams = make(url.Values, 4)
+	if r.queryParams != nil {
+		r.queryParams.Add(param, value)
+		return r
 	}
 
-	r.queryParams.Add(param, value)
+	r.queryEntries = append(r.queryEntries, queryParamEntry{key: param, val: value})
 
 	return r
 }
 
 // SetQueryParams bulk-sets URL query parameters from a map.
 func (r *Request) SetQueryParams(params map[string]string) *Request {
-	if r.queryParams == nil {
-		r.queryParams = make(url.Values, len(params))
+	if r.queryParams != nil {
+		for k, v := range params {
+			r.queryParams.Add(k, v)
+		}
+
+		return r
 	}
 
 	for k, v := range params {
-		r.queryParams.Add(k, v)
+		r.queryEntries = append(r.queryEntries, queryParamEntry{key: k, val: v})
 	}
 
 	return r
@@ -624,7 +651,7 @@ const stackModCapacity = 16
 
 // buildModifiers constructs value modifiers for headers, auth, body serialization, decoding, and telemetry.
 func (r *Request) buildModifiers(stackBuf *[stackModCapacity]aoni.RequestModifier) []aoni.RequestModifier {
-	estimatedCap := len(r.headers) + len(r.appliedMods) + 12
+	estimatedCap := len(r.headerEntries) + len(r.headers) + len(r.queryEntries) + len(r.appliedMods) + 12
 
 	var mods []aoni.RequestModifier
 	if estimatedCap <= stackModCapacity {
@@ -649,6 +676,12 @@ func (r *Request) buildModifiers(stackBuf *[stackModCapacity]aoni.RequestModifie
 }
 
 func (r *Request) appendHeaderAndAuthModifiers(mods []aoni.RequestModifier) []aoni.RequestModifier {
+	if len(r.headerEntries) > 0 {
+		for i := range r.headerEntries {
+			mods = append(mods, mod.WithHeader(r.headerEntries[i].key, r.headerEntries[i].val))
+		}
+	}
+
 	if len(r.headers) > 0 {
 		for k, v := range r.headers {
 			for _, val := range v {
@@ -669,6 +702,12 @@ func (r *Request) appendHeaderAndAuthModifiers(mods []aoni.RequestModifier) []ao
 }
 
 func (r *Request) appendQueryAndBodyModifiers(mods []aoni.RequestModifier) []aoni.RequestModifier {
+	if len(r.queryEntries) > 0 {
+		for i := range r.queryEntries {
+			mods = append(mods, mod.WithQuery(r.queryEntries[i].key, r.queryEntries[i].val))
+		}
+	}
+
 	if len(r.queryParams) > 0 {
 		mods = append(mods, mod.WithQuery(r.queryParams))
 	}

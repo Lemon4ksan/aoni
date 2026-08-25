@@ -50,7 +50,7 @@ var commandGroups = []commandGroup{
 	{
 		Title: "Workspace Management",
 		Commands: []string{
-			"init", "status", "config", "clean", "completion", "explain", "example", "list", "work",
+			"init", "status", "doctor", "config", "clean", "completion", "explain", "example", "list", "work",
 		},
 	},
 }

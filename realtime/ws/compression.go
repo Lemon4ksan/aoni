@@ -8,58 +8,85 @@ import (
 	"bytes"
 	"fmt"
 	"io"
-	"sync"
 
-	"github.com/lemon4ksan/foundation/generic"
+	"github.com/lemon4ksan/foundation/borrow"
+	"github.com/lemon4ksan/foundation/silicon/pool"
 
 	"github.com/lemon4ksan/aoni/internal/compress/flate"
 )
 
 var (
-	flateReaderPool = sync.Pool{
-		New: func() any {
-			return flate.NewReader(nil)
-		},
-	}
+	wsTail = [9]byte{0x00, 0x00, 0xff, 0xff, 0x01, 0x00, 0x00, 0xff, 0xff}
 
-	flateWriterPool = generic.NewPool(func() *flate.Writer {
+	flateReaderStorage = pool.NewPerPStorage(func() flate.Resetter {
+		return flate.NewReader(nil).(flate.Resetter)
+	})
+
+	flateWriterStorage = pool.NewPerPStorage(func() *flate.Writer {
 		w, _ := flate.NewWriter(nil, flate.DefaultCompression)
 		return w
 	})
 
-	compressBufferPool = generic.NewPool(func() *bytes.Buffer {
+	compressBufferStorage = pool.NewPerPStorage(func() *bytes.Buffer {
 		return bytes.NewBuffer(make([]byte, 0, 4096))
 	})
+
+	decompressBufferStorage = pool.NewPerPStorage(func() *[]byte {
+		buf := make([]byte, 0, 4096)
+		return &buf
+	})
+
+	twoSliceReaderStorage = pool.NewPerPStorage(func() *twoSliceReader {
+		return new(twoSliceReader)
+	})
 )
+
+type twoSliceReader struct {
+	s1  []byte
+	s2  []byte
+	off int
+}
+
+func (r *twoSliceReader) Reset(s1, s2 []byte) {
+	r.s1 = s1
+	r.s2 = s2
+	r.off = 0
+}
+
+func (r *twoSliceReader) Read(p []byte) (int, error) {
+	if r.off < len(r.s1) {
+		n := copy(p, r.s1[r.off:])
+		r.off += n
+		return n, nil
+	}
+
+	off2 := r.off - len(r.s1)
+	if off2 < len(r.s2) {
+		n := copy(p, r.s2[off2:])
+		r.off += n
+		return n, nil
+	}
+
+	return 0, io.EOF
+}
 
 // compressNoContextTakeover compresses payload bytes per RFC 7692 Section 7.2.1,
 // stripping trailing 0x00 0x00 0xFF 0xFF bytes after flushing.
 func compressNoContextTakeover(src []byte) ([]byte, error) {
-	buf := compressBufferPool.Get()
-	if buf == nil {
-		buf = bytes.NewBuffer(make([]byte, 0, max(len(src), 1024)))
-	} else {
-		buf.Reset()
-	}
+	return compressNoContextTakeoverTo(nil, src)
+}
 
-	defer func() {
-		buf.Reset()
-		compressBufferPool.Put(buf)
-	}()
+// compressNoContextTakeoverTo compresses payload bytes per RFC 7692 Section 7.2.1 directly into dst.
+func compressNoContextTakeoverTo(dst, src []byte) ([]byte, error) {
+	buf := compressBufferStorage.Get()
+	defer compressBufferStorage.Put(buf)
 
-	fw := flateWriterPool.Get()
-	if fw == nil {
-		var err error
+	buf.Reset()
 
-		fw, err = flate.NewWriter(buf, flate.DefaultCompression)
-		if err != nil {
-			return nil, fmt.Errorf("%w: %w", ErrFlateCompressFailed, err)
-		}
-	} else {
-		fw.Reset(buf)
-	}
+	fw := flateWriterStorage.Get()
+	defer flateWriterStorage.Put(fw)
 
-	defer flateWriterPool.Put(fw)
+	fw.Reset(buf)
 
 	if _, err := fw.Write(src); err != nil {
 		return nil, fmt.Errorf("%w: %w", ErrFlateCompressFailed, err)
@@ -74,35 +101,112 @@ func compressNoContextTakeover(src []byte) ([]byte, error) {
 		raw = raw[:len(raw)-4]
 	}
 
-	out := make([]byte, len(raw))
-	copy(out, raw)
+	if cap(dst) < len(raw) {
+		dst = make([]byte, len(raw))
+	} else {
+		dst = dst[:len(raw)]
+	}
 
-	return out, nil
+	copy(dst, raw)
+
+	return dst, nil
 }
 
 // decompressNoContextTakeover decompresses payload bytes per RFC 7692 Section 7.2.2,
 // appending 0x00 0x00 0xFF 0xFF 0x01 0x00 0x00 0xFF 0xFF sync flush tail before decoding.
 func decompressNoContextTakeover(src []byte) ([]byte, error) {
-	tail := []byte{0x00, 0x00, 0xff, 0xff, 0x01, 0x00, 0x00, 0xff, 0xff}
-	r := io.MultiReader(bytes.NewReader(src), bytes.NewReader(tail))
+	return decompressNoContextTakeoverTo(nil, src)
+}
 
-	fr, ok := flateReaderPool.Get().(io.ReadCloser)
-	if !ok || fr == nil {
-		fr = flate.NewReader(r)
-	} else if resetter, ok := fr.(flate.Resetter); ok {
-		_ = resetter.Reset(r, nil)
-	} else {
-		fr = flate.NewReader(r)
-	}
+// decompressNoContextTakeoverTo decompresses payload bytes per RFC 7692 Section 7.2.2 directly into dst.
+func decompressNoContextTakeoverTo(dst, src []byte) ([]byte, error) {
+	r := twoSliceReaderStorage.Get()
+	defer twoSliceReaderStorage.Put(r)
 
-	defer flateReaderPool.Put(fr)
+	r.Reset(src, wsTail[:])
 
-	out, err := io.ReadAll(fr)
-	_ = fr.Close()
+	fr := flateReaderStorage.Get()
+	defer flateReaderStorage.Put(fr)
 
-	if err != nil {
+	if err := fr.Reset(r, nil); err != nil {
 		return nil, fmt.Errorf("%w: %w", ErrFlateDecompressFailed, err)
 	}
 
-	return out, nil
+	readCloser, ok := fr.(io.ReadCloser)
+	if !ok {
+		return nil, ErrFlateDecompressFailed
+	}
+
+	dst = dst[:0]
+
+	var chunk [4096]byte
+	for {
+		n, err := readCloser.Read(chunk[:])
+		if n > 0 {
+			dst = append(dst, chunk[:n]...)
+		}
+
+		if err != nil {
+			if err == io.EOF {
+				break
+			}
+
+			return nil, fmt.Errorf("%w: %w", ErrFlateDecompressFailed, err)
+		}
+	}
+
+	return dst, nil
+}
+
+// decompressNoContextTakeoverScoped decompresses payload bytes into arena memory bound to scope.
+func decompressNoContextTakeoverScoped(src []byte, scope *borrow.Scope) ([]byte, error) {
+	r := twoSliceReaderStorage.Get()
+	defer twoSliceReaderStorage.Put(r)
+
+	r.Reset(src, wsTail[:])
+
+	fr := flateReaderStorage.Get()
+	defer flateReaderStorage.Put(fr)
+
+	if err := fr.Reset(r, nil); err != nil {
+		return nil, fmt.Errorf("%w: %w", ErrFlateDecompressFailed, err)
+	}
+
+	readCloser, ok := fr.(io.ReadCloser)
+	if !ok {
+		return nil, ErrFlateDecompressFailed
+	}
+
+	outBuf := decompressBufferStorage.Get()
+	defer decompressBufferStorage.Put(outBuf)
+
+	*outBuf = (*outBuf)[:0]
+
+	var chunk [4096]byte
+	for {
+		n, err := readCloser.Read(chunk[:])
+		if n > 0 {
+			*outBuf = append(*outBuf, chunk[:n]...)
+		}
+
+		if err != nil {
+			if err == io.EOF {
+				break
+			}
+
+			return nil, fmt.Errorf("%w: %w", ErrFlateDecompressFailed, err)
+		}
+	}
+
+	if scope != nil {
+		borrowed := scope.AllocBytes(len(*outBuf))
+		copy(borrowed.AsSlice(), *outBuf)
+
+		return borrowed.AsSlice(), nil
+	}
+
+	res := make([]byte, len(*outBuf))
+	copy(res, *outBuf)
+
+	return res, nil
 }

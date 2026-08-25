@@ -13,10 +13,11 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/lemon4ksan/foundation/borrow"
 	"github.com/lemon4ksan/foundation/generic"
 	"github.com/lemon4ksan/foundation/refkit"
-	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
+	"github.com/lemon4ksan/foundation/testkit/assert"
+	"github.com/lemon4ksan/foundation/testkit/require"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/typepb"
 	"google.golang.org/protobuf/types/known/wrapperspb"
@@ -897,4 +898,64 @@ func BenchmarkDecode_JSON_Stream_vs_BytesReader(b *testing.B) {
 			_ = JSONDecoder.Decode(br, &target)
 		}
 	})
+}
+
+func BenchmarkDecode_GRPCWeb_FastPath(b *testing.B) {
+	protoMsg := &wrapperspb.StringValue{Value: "aoni gRPC-Web zero allocation payload"}
+	protoBytes, _ := proto.Marshal(protoMsg)
+
+	var frame [5]byte
+
+	frame[0] = 0x00
+	binary.BigEndian.PutUint32(frame[1:5], uint32(len(protoBytes)))
+
+	fullPayload := append(frame[:], protoBytes...)
+	br := mockBytesReader{data: fullPayload, volatile: true}
+
+	b.ReportAllocs()
+	b.ResetTimer()
+
+	for b.Loop() {
+		var target wrapperspb.StringValue
+
+		_ = GRPCWebDecoder.Decode(br, &target)
+	}
+}
+
+func TestJSONScoped(t *testing.T) {
+	t.Parallel()
+
+	type User struct {
+		Name string `json:"name"`
+		Age  int    `json:"age"`
+	}
+
+	scope := borrow.NewScope()
+	defer scope.Release()
+
+	payload := []byte(`{"name":"Aoni","age":42}`)
+	user, err := JSONScoped[User](bytes.NewReader(payload), scope)
+	require.NoError(t, err)
+	assert.Equal(t, "Aoni", user.Name)
+	assert.Equal(t, 42, user.Age)
+}
+
+func BenchmarkJSONScoped(b *testing.B) {
+	payload := []byte(`{"name":"Aoni High Performance Reactor","age":42}`)
+	br := mockBytesReader{data: payload, volatile: true}
+
+	scope := borrow.NewScope()
+	defer scope.Release()
+
+	type User struct {
+		Name string `json:"name"`
+		Age  int    `json:"age"`
+	}
+
+	b.ReportAllocs()
+	b.ResetTimer()
+
+	for b.Loop() {
+		_, _ = JSONScoped[User](br, scope)
+	}
 }

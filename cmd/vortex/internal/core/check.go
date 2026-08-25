@@ -14,7 +14,9 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
+	"sync"
 
 	"github.com/lemon4ksan/aoni/cmd/vortex/internal/base"
 	"github.com/lemon4ksan/aoni/cmd/vortex/lib/cache"
@@ -52,6 +54,7 @@ func (c *CmdCheck) Run(ctx context.Context, args []string, stdout, stderr io.Wri
 		disableFlag  = fs.String("disable", "", "Comma-separated list of rule IDs/names to disable")
 		enableFlag   = fs.String("enable", "", "Comma-separated list of rule IDs/names to enable")
 		strictFlag   = fs.Bool("strict", false, "Treat warnings as errors")
+		borrowFlag   = fs.Bool("borrow", false, "Enable Rust-grade zero-copy borrow checker validation")
 		noCacheFlag  = fs.Bool("no-cache", false, "Disable incremental validation cache")
 		dirFlag      = fs.String("dir", "", "Target workspace directory (default: current root)")
 		maxDepthFlag = fs.Int("max-depth", 6, "Maximum directory search depth (0 for unlimited)")
@@ -111,83 +114,127 @@ func (c *CmdCheck) Run(ctx context.Context, args []string, stdout, stderr io.Wri
 	}
 
 	engine := lint.NewEngine(reg)
-	p := vparser.NewParser()
-	fset := token.NewFileSet()
-
 	lintCache, _ := cache.LoadLintCache(rootDir)
 
-	var reports []*lint.Report
+	type fileResult struct {
+		report   *lint.Report
+		relFile  string
+		srcBytes []byte
+		err      error
+	}
 
-	for _, file := range files {
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		default:
-		}
+	numWorkers := max(min(runtime.GOMAXPROCS(0), len(files)), 1)
+	jobs := make(chan string, len(files))
+	results := make(chan fileResult, len(files))
 
-		if abs, err := filepath.Abs(file); err == nil {
-			file = abs
-		}
+	var wg sync.WaitGroup
+	for range numWorkers {
+		wg.Go(func() {
+			workerParser := vparser.NewParser()
+			workerFset := token.NewFileSet()
 
-		srcBytes, err := os.ReadFile(file)
-		if err != nil {
-			continue
-		}
+			for file := range jobs {
+				select {
+				case <-ctx.Done():
+					return
+				default:
+				}
 
-		relFile, _ := filepath.Rel(rootDir, file)
+				if abs, err := filepath.Abs(file); err == nil {
+					file = abs
+				}
 
-		// Fast cache check
-		if !*noCacheFlag && !*fixFlag && lintCache.IsFresh(relFile, srcBytes) {
-			continue
-		}
+				srcBytes, err := os.ReadFile(file)
+				if err != nil {
+					continue
+				}
 
-		astFile, err := parser.ParseFile(fset, file, srcBytes, parser.ParseComments)
-		if err != nil {
-			continue
-		}
+				relFile, _ := filepath.Rel(rootDir, file)
 
-		root, err := p.ParseFile(file)
-		if err != nil {
-			continue
-		}
+				// Fast cache check
+				if !*noCacheFlag && !*fixFlag && lintCache.IsFresh(relFile, srcBytes) {
+					continue
+				}
 
-		hasTargets := len(root.Services) > 0 || len(root.Tuples) > 0 || len(root.Bitpacks) > 0 ||
-			len(root.UnrecognizedDirectives) > 0 || len(root.Unions) > 0
+				astFile, err := parser.ParseFile(workerFset, file, srcBytes, parser.ParseComments)
+				if err != nil {
+					continue
+				}
 
-		if !hasTargets {
-			for _, st := range root.Structs {
-				if st.GenValueEncoder {
-					hasTargets = true
-					break
+				root, err := workerParser.ParseFile(file)
+				if err != nil {
+					continue
+				}
+
+				isBorrowTarget := *borrowFlag
+				if !isBorrowTarget && rt.Config != nil {
+					isBorrowTarget = rt.Config.ShouldCheckBorrow(relFile)
+				}
+
+				hasTargets := isBorrowTarget ||
+					len(root.Services) > 0 ||
+					len(root.Tuples) > 0 ||
+					len(root.Bitpacks) > 0 ||
+					len(root.UnrecognizedDirectives) > 0 ||
+					len(root.Unions) > 0
+
+				if !hasTargets {
+					for _, st := range root.Structs {
+						if st.GenValueEncoder {
+							hasTargets = true
+							break
+						}
+					}
+				}
+
+				if !hasTargets {
+					continue
+				}
+
+				pass := &lint.Pass{
+					RootIR:      root,
+					FileSet:     workerFset,
+					ASTFile:     astFile,
+					SourceBytes: srcBytes,
+					FilePath:    file,
+					RootDir:     rootDir,
+					Ignores:     lint.ParseIgnores(workerFset, astFile),
+				}
+
+				report, err := engine.Run(pass)
+				results <- fileResult{
+					report:   report,
+					relFile:  relFile,
+					srcBytes: srcBytes,
+					err:      err,
 				}
 			}
-		}
+		})
+	}
 
-		if !hasTargets {
+	for _, file := range files {
+		jobs <- file
+	}
+
+	close(jobs)
+
+	wg.Wait()
+	close(results)
+
+	var reports []*lint.Report
+	for res := range results {
+		if res.err != nil {
+			fmt.Fprintf(stderr, "vortex check: error checking %s: %v\n", res.relFile, res.err)
 			continue
 		}
 
-		pass := &lint.Pass{
-			RootIR:      root,
-			FileSet:     fset,
-			ASTFile:     astFile,
-			SourceBytes: srcBytes,
-			FilePath:    file,
-			RootDir:     rootDir,
-			Ignores:     lint.ParseIgnores(fset, astFile),
-		}
+		if res.report != nil {
+			if !*noCacheFlag {
+				lintCache.Put(res.relFile, res.srcBytes, len(res.report.Diagnostics))
+			}
 
-		report, err := engine.Run(pass)
-		if err != nil {
-			fmt.Fprintf(stderr, "vortex check: error checking %s: %v\n", file, err)
-			continue
+			reports = append(reports, res.report)
 		}
-
-		if !*noCacheFlag {
-			lintCache.Put(relFile, srcBytes, len(report.Diagnostics))
-		}
-
-		reports = append(reports, report)
 	}
 
 	if *breakingOnlyFlag {

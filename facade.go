@@ -6,7 +6,6 @@ package aoni
 
 import (
 	"context"
-	"encoding/json"
 	"io"
 	"net/http"
 	"net/url"
@@ -14,6 +13,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/lemon4ksan/foundation/codec/json"
 	"github.com/lemon4ksan/foundation/generic"
 	fpkce "github.com/lemon4ksan/foundation/net/pkce"
 	"github.com/lemon4ksan/foundation/silicon/bytesconv"

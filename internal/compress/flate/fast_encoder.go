@@ -18,22 +18,11 @@ type fastEnc interface {
 }
 
 func newFastEnc(level int) fastEnc {
-	switch level {
-	case 1:
+	if level <= 1 {
 		return &fastEncL1{fastGen: fastGen{cur: maxStoreBlockSize}}
-	case 2:
-		return &fastEncL2{fastGen: fastGen{cur: maxStoreBlockSize}}
-	case 3:
-		return &fastEncL3{fastGen: fastGen{cur: maxStoreBlockSize}}
-	case 4:
-		return &fastEncL4{fastGen: fastGen{cur: maxStoreBlockSize}}
-	case 5:
-		return &fastEncL5{fastGen: fastGen{cur: maxStoreBlockSize}}
-	case 6:
-		return &fastEncL6{fastGen: fastGen{cur: maxStoreBlockSize}}
-	default:
-		panic("invalid level specified")
 	}
+
+	return &fastEncL2{fastGen: fastGen{cur: maxStoreBlockSize}}
 }
 
 const (
@@ -43,6 +32,7 @@ const (
 	baseMatchOffset = 1              // The smallest match offset
 	baseMatchLength = 3              // The smallest match length per the RFC section 3.2.5
 	maxMatchOffset  = 1 << 15        // The largest match offset
+	maxMatchLength  = 258            // The longest match length per the RFC section 3.2.5
 
 	bTableBits   = 17                                               // Bits used in the big tables
 	bTableSize   = 1 << bTableBits                                  // Size of the table

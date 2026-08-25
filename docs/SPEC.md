@@ -169,8 +169,6 @@ Reason            ::= [^\r\n]*
 | `@aoni:union (or @union)` | — | Generates discriminator-based polymorphism and JSON unmarshaling for tagged unions. |
 | `@aoni:bitpack (or @bitpack)` | `endian="little\|big"` | Generates SIMD-accelerated zero-allocation binary bitfield packing (Pack/Unpack/PackUint64/UnpackUint64). |
 
----
-
 ## 5. Compile-Time Optimization Pipeline
 
 Vortex includes an AST optimization pass (`internal/codegen/optimizer`) executed before code emission:
@@ -203,8 +201,6 @@ Vortex includes an AST optimization pass (`internal/codegen/optimizer`) executed
 1. **Zero Heap Allocations on Hot Paths**: Method calls with stack-sized arguments allocate `0 B/op`.
 2. **Deterministic Connection Sharing**: Subrequesters prevent redundant TCP handshakes and TLS negotiations.
 3. **Idempotent AST Transformations**: Passes run deterministically without state corruption.
-
----
 
 ## 6. Contract Inspector & Linter (`vortex check`)
 

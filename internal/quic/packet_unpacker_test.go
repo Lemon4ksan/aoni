@@ -1,3 +1,4 @@
+// Copyright (c) 2016 the quic-go authors. All rights reserved.
 // Copyright (c) 2026 Lemon4ksan All rights reserved.
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
@@ -9,8 +10,8 @@ import (
 	"slices"
 	"testing"
 
-	"github.com/stretchr/testify/require"
-	"go.uber.org/mock/gomock"
+	"github.com/lemon4ksan/foundation/testkit/gomock"
+	"github.com/lemon4ksan/foundation/testkit/require"
 
 	"github.com/lemon4ksan/aoni/internal/quic/internal/handshake"
 	"github.com/lemon4ksan/aoni/internal/quic/internal/mocks"

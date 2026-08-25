@@ -73,6 +73,7 @@ type Requester interface {
 // Subscriber defines the universal contract for subscribing to inbound binary events.
 type Subscriber interface {
 	// Subscribe binds an event receiver for the specified event ID and returns an unsubscribe cleanup func.
+	//vortex:ignore any-param-boxing
 	Subscribe(eventID any, handler func(raw []byte)) (unsubscribe func())
 }
 
@@ -81,9 +82,11 @@ type Transport interface {
 	Subscriber
 
 	// Invoke executes a request-response RPC over the wire.
+	//vortex:ignore any-param-boxing
 	Invoke(ctx context.Context, op any, payload []byte) (response []byte, err error)
 
 	// Notify sends a one-way message without waiting for a reply.
+	//vortex:ignore any-param-boxing
 	Notify(ctx context.Context, op any, payload []byte) error
 }
 

@@ -31,8 +31,6 @@ import (
 	"github.com/lemon4ksan/aoni/option"
 
 	"github.com/lemon4ksan/aoni"
-	"github.com/lemon4ksan/aoni/profiles"
-	"github.com/lemon4ksan/aoni/profiles/firefox"
 	"github.com/mxschmitt/playwright-go"
 )
 
@@ -324,8 +322,7 @@ func run(ctx context.Context, targetURL string) error {
 	// - Headers (User-Agent, Accept-Language, Origin, Referer) align with the automated context.
 	// - TCP Delays prevent triggering rate-limiting heuristics.
 	client := aoni.NewClient(nil,
-		option.WithTLSFingerprint(aoni.BrowserFirefox),
-		option.WithBrowserProfile(aoni.BrowserFirefox, profiles.Windows),
+		option.WithFirefox(),
 		option.WithCookieJar(jar),
 		option.WithHeader("Accept-Language", "ru-RU,ru;q=0.9,en;q=0.8"),
 		option.WithRefererAutomaton(true),

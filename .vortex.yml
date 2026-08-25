@@ -3,8 +3,24 @@
 
 version: 1
 defaults:
-    casing: snake_case
-    engine: fast
+  casing: snake_case
+  engine: fast
+
+lint:
+  strict: false
+  disable:
+    - "E001"
+  borrow:
+    enabled: true
+    include:
+      - "internal/compress"
+      - "internal/fast"
+      - "internal/quic"
+      - "fast"
+      - "fluent"
+      - "request"
+
 contracts:
-    - name: 001API
-      file: internal/001/api.go
+  - name: 001API
+    file: internal/001/api.go
+

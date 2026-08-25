@@ -16,7 +16,7 @@ import (
 	monotime "github.com/lemon4ksan/aoni/internal/quic/internal/monotime"
 	protocol "github.com/lemon4ksan/aoni/internal/quic/internal/protocol"
 	wire "github.com/lemon4ksan/aoni/internal/quic/internal/wire"
-	gomock "go.uber.org/mock/gomock"
+	gomock "github.com/lemon4ksan/foundation/testkit/gomock"
 )
 
 // MockSentPacketHandler is a mock of SentPacketHandler interface.

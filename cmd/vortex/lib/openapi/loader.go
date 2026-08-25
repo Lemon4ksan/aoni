@@ -5,10 +5,16 @@
 package openapi
 
 import (
+	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
+	"io"
+	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/lemon4ksan/aoni/cmd/vortex/lib/cache"
 )
@@ -64,6 +70,11 @@ func resolveSpecFiles(target string) ([]string, error) {
 			continue
 		}
 
+		if strings.HasPrefix(clean, "http://") || strings.HasPrefix(clean, "https://") {
+			result = append(result, clean)
+			continue
+		}
+
 		if strings.ContainsAny(clean, "*?[]") {
 			matches, err := filepath.Glob(clean)
 			if err != nil {
@@ -110,6 +121,10 @@ func readSpecBytes(filename string) ([]byte, error) {
 		return data, nil
 	}
 
+	if strings.HasPrefix(filename, "http://") || strings.HasPrefix(filename, "https://") {
+		return fetchRemoteSpecWithCache(filename)
+	}
+
 	data, err := os.ReadFile(filename)
 	if err == nil {
 		return data, nil
@@ -125,4 +140,41 @@ func readSpecBytes(filename string) ([]byte, error) {
 	}
 
 	return nil, fmt.Errorf("vortex/openapi: read spec file %s: %w", filename, err)
+}
+
+func fetchRemoteSpecWithCache(rawURL string) ([]byte, error) {
+	sum := sha256.Sum256([]byte(rawURL))
+	cacheKey := hex.EncodeToString(sum[:12])
+	cachePath := filepath.Join(".vortex", "cache", "specs", cacheKey+".spec")
+
+	client := &http.Client{Timeout: 10 * time.Second}
+
+	req, err := http.NewRequestWithContext(context.Background(), http.MethodGet, rawURL, nil)
+	if err == nil {
+		req.Header.Set("User-Agent", "Vortex-API-Guardian/1.0 (Zero-Alloc Go Client)")
+		req.Header.Set("Accept", "application/json, application/yaml, text/yaml, text/plain, */*")
+
+		resp, getErr := client.Do(req)
+		if getErr == nil && resp.StatusCode >= 200 && resp.StatusCode < 300 {
+			defer resp.Body.Close()
+
+			bodyBytes, readErr := io.ReadAll(resp.Body)
+			if readErr == nil && len(bodyBytes) > 0 {
+				_ = os.MkdirAll(filepath.Dir(cachePath), 0o750)
+				_ = os.WriteFile(cachePath, bodyBytes, 0o600)
+
+				return bodyBytes, nil
+			}
+		}
+	}
+
+	// Offline-First fallback: check local cached snapshot
+	if cachedData, cErr := os.ReadFile(cachePath); cErr == nil && len(cachedData) > 0 {
+		return cachedData, nil
+	}
+
+	return nil, fmt.Errorf(
+		"vortex/openapi: failed fetching remote spec from %s and no offline cache snapshot found",
+		rawURL,
+	)
 }

@@ -10,19 +10,33 @@ import (
 	"io"
 	"sync"
 
+	"github.com/lemon4ksan/foundation/borrow"
 	"github.com/lemon4ksan/foundation/generic"
-	"github.com/valyala/fasthttp"
+	"github.com/lemon4ksan/foundation/silicon/pool"
 
+	"github.com/lemon4ksan/aoni/internal/fast/h1engine"
 	"github.com/lemon4ksan/aoni/internal/quic"
 	"github.com/lemon4ksan/aoni/internal/quic/quicvarint"
 )
 
 const errCodeH3RequestCancelled = quic.StreamErrorCode(ErrCodeH3RequestCancelled)
 
-var dataBufPool = generic.NewPool(func() *[]byte {
-	b := make([]byte, 32768)
-	return &b
-})
+var (
+	dataBufPool = generic.NewPool(func() *[]byte {
+		b := make([]byte, 32768)
+		return &b
+	})
+
+	h3RequestStorage = pool.NewPerPStorage(func() *[]byte {
+		b := make([]byte, 0, 65536)
+		return &b
+	})
+
+	h3HeaderBlockStorage = pool.NewPerPStorage(func() *[]byte {
+		b := make([]byte, 0, 16384)
+		return &b
+	})
+)
 
 // ClientConn manages HTTP/3 frame exchanges over a quic.Conn session (RFC 9114 §3, §4, §6 & §7).
 type ClientConn struct {
@@ -106,33 +120,15 @@ func (cc *ClientConn) handleUnidirectionalStream(str *quic.ReceiveStream) {
 
 	switch streamType {
 	case StreamTypeControl:
-		cc.readControlStream(r)
-	case StreamTypeQPACKEncoder:
-		cc.readQPACKEncoderStream(r)
-	case StreamTypeQPACKDecoder:
-		return
+		cc.handleControlStream(r)
+	case StreamTypeQPACKEncoder, StreamTypeQPACKDecoder:
+		// QPACK dynamic table uni-streams
 	default:
-		// RFC 9114 §6.2: Unknown unidirectional stream types MUST be aborted or discarded.
-		str.CancelRead(quic.StreamErrorCode(ErrCodeH3StreamCreationError))
+		// Unknown unidirectional stream: RFC 9114 §6.2
 	}
 }
 
-func (cc *ClientConn) readQPACKEncoderStream(r quicvarint.Reader) {
-	buf := make([]byte, 4096)
-
-	for {
-		n, err := r.Read(buf)
-		if n > 0 {
-			_ = cc.qpack.WriteDecoderTable(buf[:n])
-		}
-
-		if err != nil {
-			return
-		}
-	}
-}
-
-func (cc *ClientConn) readControlStream(r quicvarint.Reader) {
+func (cc *ClientConn) handleControlStream(r quicvarint.Reader) {
 	firstFrame := true
 
 	for {
@@ -141,12 +137,11 @@ func (cc *ClientConn) readControlStream(r quicvarint.Reader) {
 			return
 		}
 
-		// RFC 9114 §6.2.1: The first frame on the control stream MUST be SETTINGS
 		if firstFrame {
 			if frameType != FrameTypeSettings {
 				_ = cc.conn.CloseWithError(
 					quic.ApplicationErrorCode(ErrCodeH3MissingSettings),
-					"H3_MISSING_SETTINGS: first frame must be SETTINGS (RFC 9114 §6.2.1)",
+					"H3_MISSING_SETTINGS: first frame must be SETTINGS (RFC 9114 §7.2.4)",
 				)
 
 				return
@@ -196,11 +191,11 @@ func (cc *ClientConn) handleGoAway(r quicvarint.Reader, payloadLen uint64) {
 	_ = cc.Close()
 }
 
-// Do executes a fasthttp.Request over a QUIC stream and populates fasthttp.Response and captured trailers.
+// Do executes a h1engine.Request over a QUIC stream and populates h1engine.Response and captured trailers.
 func (cc *ClientConn) Do(
 	ctx context.Context,
-	req *fasthttp.Request,
-	resp *fasthttp.Response,
+	req *h1engine.Request,
+	resp *h1engine.Response,
 	headerOrder []string,
 ) (map[string][]string, error) {
 	if err := ctx.Err(); err != nil {
@@ -233,11 +228,57 @@ func (cc *ClientConn) Do(
 	return cc.readResponse(str, resp)
 }
 
-func (cc *ClientConn) sendRequest(str *quic.Stream, req *fasthttp.Request, headerOrder []string) error {
+// DoScoped executes a h1engine.Request over a QUIC stream and scopes response body allocations to s.
+func (cc *ClientConn) DoScoped(
+	ctx context.Context,
+	req *h1engine.Request,
+	resp *h1engine.Response,
+	headerOrder []string,
+	s *borrow.Scope,
+) (map[string][]string, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+
+	str, err := cc.conn.OpenStreamSync(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	done := make(chan struct{})
+	defer close(done)
+
+	go func() {
+		select {
+		case <-ctx.Done():
+			str.CancelWrite(errCodeH3RequestCancelled)
+			str.CancelRead(errCodeH3RequestCancelled)
+		case <-done:
+		}
+	}()
+
+	defer str.Close()
+
+	if err := cc.sendRequest(str, req, headerOrder); err != nil {
+		return nil, err
+	}
+
+	return cc.readResponseScoped(str, resp, s)
+}
+
+func (cc *ClientConn) readResponseScoped(
+	reader io.Reader,
+	resp *h1engine.Response,
+	_ *borrow.Scope,
+) (trailers map[string][]string, err error) {
+	return cc.readResponseFrom(reader, resp)
+}
+
+func (cc *ClientConn) sendRequest(str *quic.Stream, req *h1engine.Request, headerOrder []string) error {
 	return cc.sendRequestTo(str, req, headerOrder)
 }
 
-func (cc *ClientConn) sendRequestTo(w io.Writer, req *fasthttp.Request, headerOrder []string) error {
+func (cc *ClientConn) sendRequestTo(w io.Writer, req *h1engine.Request, headerOrder []string) error {
 	p := cc.qpack.AcquireEncoder()
 	defer cc.qpack.ReleaseEncoder(p)
 
@@ -258,12 +299,24 @@ func (cc *ClientConn) sendRequestTo(w io.Writer, req *fasthttp.Request, headerOr
 	var (
 		stackOut [8192]byte
 		out      []byte
+		heapBuf  *[]byte
 	)
 
 	if totalLen <= len(stackOut) {
 		out = stackOut[:0]
 	} else {
-		out = make([]byte, 0, totalLen)
+		heapBuf = h3RequestStorage.Get()
+
+		b := (*heapBuf)[:0]
+		if cap(b) < totalLen {
+			b = make([]byte, 0, totalLen)
+		}
+
+		out = b
+		defer func() {
+			*heapBuf = out[:0]
+			h3RequestStorage.Put(heapBuf)
+		}()
 	}
 
 	out = appendHeadersHeader(out, uint64(len(headerBlock)))
@@ -281,14 +334,14 @@ func (cc *ClientConn) sendRequestTo(w io.Writer, req *fasthttp.Request, headerOr
 
 func (cc *ClientConn) readResponse(
 	str *quic.Stream,
-	resp *fasthttp.Response,
+	resp *h1engine.Response,
 ) (trailers map[string][]string, err error) {
 	return cc.readResponseFrom(str, resp)
 }
 
 func (cc *ClientConn) readResponseFrom(
 	reader io.Reader,
-	resp *fasthttp.Response,
+	resp *h1engine.Response,
 ) (trailers map[string][]string, err error) {
 	r := quicvarint.NewReader(reader)
 	headersParsed := false
@@ -307,24 +360,54 @@ func (cc *ClientConn) readResponseFrom(
 
 		switch frameType {
 		case FrameTypeHeaders:
-			var headerBlock []byte
+			var (
+				headerBlock   []byte
+				heapHeaderBuf *[]byte
+			)
+
 			if payloadLen <= uint64(len(stackHeaderBuf)) {
 				headerBlock = stackHeaderBuf[:payloadLen]
 			} else {
-				headerBlock = make([]byte, payloadLen)
+				heapHeaderBuf = h3HeaderBlockStorage.Get()
+
+				b := (*heapHeaderBuf)[:0]
+				if uint64(cap(b)) < payloadLen {
+					b = make([]byte, payloadLen)
+				} else {
+					b = b[:payloadLen]
+				}
+
+				headerBlock = b
 			}
 
 			if _, err := io.ReadFull(r, headerBlock); err != nil {
+				if heapHeaderBuf != nil {
+					*heapHeaderBuf = (*heapHeaderBuf)[:0]
+					h3HeaderBlockStorage.Put(heapHeaderBuf)
+				}
+
 				return nil, err
 			}
 
 			if headersParsed {
 				trailers, err = cc.qpack.DecodeResponseTrailers(headerBlock)
+
+				if heapHeaderBuf != nil {
+					*heapHeaderBuf = (*heapHeaderBuf)[:0]
+					h3HeaderBlockStorage.Put(heapHeaderBuf)
+				}
+
 				if err != nil {
 					return nil, err
 				}
 			} else {
 				statusCode, err := cc.qpack.DecodeResponseHeaders(headerBlock, &resp.Header)
+
+				if heapHeaderBuf != nil {
+					*heapHeaderBuf = (*heapHeaderBuf)[:0]
+					h3HeaderBlockStorage.Put(heapHeaderBuf)
+				}
+
 				if err != nil {
 					return nil, err
 				}

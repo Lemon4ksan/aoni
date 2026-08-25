@@ -7,7 +7,7 @@ package spec_test
 import (
 	"testing"
 
-	"github.com/stretchr/testify/require"
+	"github.com/lemon4ksan/foundation/testkit/require"
 
 	"github.com/lemon4ksan/aoni/cmd/vortex/lib/spec"
 )
@@ -23,7 +23,7 @@ func TestSpecRegistry(t *testing.T) {
 		require.NotEmpty(t, d.Description)
 		require.NotEmpty(t, d.Example)
 
-		require.False(t, seen[d.Name], "duplicate directive name: %s", d.Name)
+		require.Falsef(t, seen[d.Name], "duplicate directive name: %s", d.Name)
 		seen[d.Name] = true
 
 		// Lookup by exact name and with leading @
@@ -46,7 +46,7 @@ func TestSpecRegistry(t *testing.T) {
 
 	for _, s := range scopes {
 		list := spec.ByScope(s)
-		require.NotEmpty(t, list, "scope %s should not be empty", s)
+		require.NotEmptyf(t, list, "scope %s should not be empty", s)
 
 		for _, d := range list {
 			require.True(t, d.HasScope(s))
@@ -70,7 +70,7 @@ func TestExamples(t *testing.T) {
 	kinds := []string{"http", "ws", "socket", "pipeline"}
 	for _, k := range kinds {
 		ex := spec.LookupExample(k)
-		require.NotNil(t, ex, "example %s not found", k)
+		require.NotNilf(t, ex, "example %s not found", k)
 		require.NotEmpty(t, ex.Title)
 		require.NotEmpty(t, ex.Description)
 		require.NotEmpty(t, ex.SourceCode)

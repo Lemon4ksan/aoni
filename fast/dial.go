@@ -13,9 +13,9 @@ import (
 	"unsafe"
 
 	utls "github.com/refraction-networking/utls"
-	"github.com/valyala/fasthttp"
 
 	"github.com/lemon4ksan/aoni"
+	"github.com/lemon4ksan/aoni/internal/fast/h1engine"
 	"github.com/lemon4ksan/aoni/internal/transport"
 	"github.com/lemon4ksan/aoni/netutil"
 )
@@ -154,8 +154,8 @@ func (c *Client) buildDialConfig(ctx context.Context) transport.DialConfig {
 	return cfg
 }
 
-func defaultFasthttpClient() *fasthttp.Client {
-	return &fasthttp.Client{
+func defaultFasthttpClient() *h1engine.Client {
+	return &h1engine.Client{
 		ReadTimeout:         0,
 		WriteTimeout:        0,
 		MaxConnsPerHost:     512,
@@ -163,17 +163,16 @@ func defaultFasthttpClient() *fasthttp.Client {
 	}
 }
 
-func cloneFasthttpClient(c *fasthttp.Client) *fasthttp.Client {
+func cloneFasthttpClient(c *h1engine.Client) *h1engine.Client {
 	if c == nil {
-		return &fasthttp.Client{}
+		return &h1engine.Client{}
 	}
 
-	return &fasthttp.Client{
+	return &h1engine.Client{
 		Transport:                     c.Transport,
 		DialTimeout:                   c.DialTimeout,
 		Dial:                          c.Dial,
 		TLSConfig:                     c.TLSConfig,
-		RetryIf:                       c.RetryIf, //nolint:staticcheck
 		RetryIfErr:                    c.RetryIfErr,
 		ConfigureClient:               c.ConfigureClient,
 		Name:                          c.Name,
@@ -196,7 +195,7 @@ func cloneFasthttpClient(c *fasthttp.Client) *fasthttp.Client {
 	}
 }
 
-func isCustomDialerSet(engine *fasthttp.Client, defaultDial func(string) (net.Conn, error)) bool {
+func isCustomDialerSet(engine *h1engine.Client, defaultDial func(string) (net.Conn, error)) bool {
 	if engine == nil || engine.Dial == nil {
 		return false
 	}

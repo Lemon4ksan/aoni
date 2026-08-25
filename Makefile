@@ -13,11 +13,11 @@ RESET := \033[0m
 
 test: ## Run quick unit tests
 	@printf "$(CYAN)Running unit tests...$(RESET)\n"
-	go test -v -timeout 30s $(PKG)
+	go test -timeout 30s $(PKG)
 
 race: ## Run unit tests with race detector enabled
 	@printf "$(CYAN)Running tests with race detector...$(RESET)\n"
-	go test -v -race -timeout 60s $(PKG)
+	go test -race -timeout 60s $(PKG)
 
 bench: ## Run silicon hardware inspection and microsecond benchmark suite
 	@printf "$(CYAN)Running aoni silicon benchmark...$(RESET)\n"

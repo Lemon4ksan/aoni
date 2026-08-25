@@ -13,7 +13,7 @@ import (
 	reflect "reflect"
 
 	handshake "github.com/lemon4ksan/aoni/internal/quic/internal/handshake"
-	gomock "go.uber.org/mock/gomock"
+	gomock "github.com/lemon4ksan/foundation/testkit/gomock"
 )
 
 // MockSealingManager is a mock of SealingManager interface.

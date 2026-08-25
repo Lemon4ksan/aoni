@@ -9,7 +9,7 @@ import (
 	"go/token"
 	"testing"
 
-	"github.com/stretchr/testify/require"
+	"github.com/lemon4ksan/foundation/testkit/require"
 
 	"github.com/lemon4ksan/aoni/cmd/vortex/lib/analysis"
 	"github.com/lemon4ksan/aoni/cmd/vortex/lib/emitter"
@@ -124,7 +124,7 @@ type UploadAvatarResponse struct {
 	for _, d := range diags {
 		println("DIAG: " + d.Target + ": " + d.Message)
 	}
-	require.False(t, analysis.HasErrors(diags), "Diagnostics: %v", diags)
+	require.Falsef(t, analysis.HasErrors(diags), "Diagnostics: %v", diags)
 
 	opt := optimizer.NewOptimizer()
 	opt.Optimize(root)
@@ -140,7 +140,7 @@ type UploadAvatarResponse struct {
 		println("PARSE ERR: " + parseErr.Error())
 		println("CODE:\n" + string(code))
 	}
-	require.NoError(t, parseErr, "PARSE ERR: %v", parseErr)
+	require.NoErrorf(t, parseErr, "PARSE ERR: %v", parseErr)
 
 	codeStr := string(code)
 

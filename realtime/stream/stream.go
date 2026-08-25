@@ -11,7 +11,6 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/binary"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -22,7 +21,10 @@ import (
 	"strings"
 	"time"
 
+	"github.com/lemon4ksan/foundation/codec/json"
 	"github.com/lemon4ksan/foundation/generic"
+	"github.com/lemon4ksan/foundation/refkit"
+	"github.com/lemon4ksan/foundation/silicon/bytesconv"
 	"github.com/lemon4ksan/foundation/silicon/offheap"
 	"google.golang.org/protobuf/proto"
 
@@ -221,7 +223,9 @@ func decodeSSEPayload[T any](ev SSEEvent) (T, error) {
 	}
 
 	var val T
-	if err := json.Unmarshal([]byte(ev.Data), &val); err != nil {
+
+	dataBytes := bytesconv.S2B(ev.Data)
+	if err := json.UnmarshalNoCopy(dataBytes, &val); err != nil {
 		return val, fmt.Errorf("aoni/stream: unmarshal sse failed: %w", err)
 	}
 
@@ -877,14 +881,14 @@ func resolveProtoTargetInstance(targetPtr any) (proto.Message, error) {
 
 	val := reflect.ValueOf(targetPtr)
 	if val.Kind() == reflect.Pointer && !val.IsNil() {
-		elem := val.Elem()
-		if msg, ok := elem.Interface().(proto.Message); ok {
-			return msg, nil
+		elem, _ := refkit.EnsureAlloc(val.Elem())
+		if elem.IsValid() && elem.CanAddr() {
+			if msg, ok := elem.Addr().Interface().(proto.Message); ok {
+				return msg, nil
+			}
 		}
 
-		if elem.Kind() == reflect.Pointer && elem.IsNil() && elem.CanSet() {
-			elem.Set(reflect.New(elem.Type().Elem()))
-
+		if elem.IsValid() && elem.CanInterface() {
 			if msg, ok := elem.Interface().(proto.Message); ok {
 				return msg, nil
 			}
@@ -911,14 +915,14 @@ func GetResult(
 
 // NDJSONReader provides sequential decoded access to newline-delimited JSON streams.
 type NDJSONReader[T any] struct {
-	dec    *json.Decoder
+	br     *bufio.Reader
 	closer io.Closer
 }
 
 // NewNDJSONReader wraps reader with a typed [NDJSONReader].
 func NewNDJSONReader[T any](r io.ReadCloser) *NDJSONReader[T] {
 	return &NDJSONReader[T]{
-		dec:    json.NewDecoder(r),
+		br:     bufio.NewReader(r),
 		closer: r,
 	}
 }
@@ -935,16 +939,33 @@ func StreamNDJSON[T any](s *Stream) *NDJSONReader[T] {
 // Next decodes the next JSON record in the stream as a [generic.Result].
 // When the stream finishes normally, it returns a Failure wrapping [io.EOF].
 func (r *NDJSONReader[T]) Next() generic.Result[T] {
-	if r == nil || r.dec == nil {
+	if r == nil || r.br == nil {
 		return generic.Failure[T](io.EOF)
 	}
 
-	var val T
-	if err := r.dec.Decode(&val); err != nil {
-		return generic.Failure[T](err)
-	}
+	for {
+		line, err := r.br.ReadBytes('\n')
+		if err != nil && len(line) == 0 {
+			return generic.Failure[T](err)
+		}
 
-	return generic.Success(val)
+		trimmed := bytes.TrimSpace(line)
+		if len(trimmed) == 0 {
+			if err != nil {
+				return generic.Failure[T](err)
+			}
+
+			continue
+		}
+
+		var val T
+
+		if unmarshalErr := json.UnmarshalNoCopy(trimmed, &val); unmarshalErr != nil {
+			return generic.Failure[T](unmarshalErr)
+		}
+
+		return generic.Success(val)
+	}
 }
 
 // All returns a Go 1.23+ range-over-func iterator over all decoded records in the NDJSON stream.

@@ -12,8 +12,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/stretchr/testify/require"
-	"go.uber.org/mock/gomock"
+	"github.com/lemon4ksan/foundation/testkit/gomock"
+	"github.com/lemon4ksan/foundation/testkit/require"
 
 	"github.com/lemon4ksan/aoni/internal/quic/internal/mocks"
 	"github.com/lemon4ksan/aoni/internal/quic/internal/monotime"

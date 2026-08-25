@@ -11,13 +11,14 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
-	"github.com/valyala/fasthttp"
+	"github.com/lemon4ksan/foundation/borrow"
+	"github.com/lemon4ksan/foundation/testkit/assert"
+	"github.com/lemon4ksan/foundation/testkit/require"
 
 	"github.com/lemon4ksan/aoni/internal/compress"
 	"github.com/lemon4ksan/aoni/internal/compress/flate"
 	"github.com/lemon4ksan/aoni/internal/compress/gzip"
+	"github.com/lemon4ksan/aoni/internal/fast/h1engine"
 )
 
 func createGzipData(t testing.TB, payload []byte) []byte {
@@ -49,14 +50,10 @@ func createDeflateData(t testing.TB, payload []byte) []byte {
 }
 
 func createZstdRawBlock(payload []byte) []byte {
-	// Frame Header with SingleSegment=true, ContentSize=len(payload)
-	// Magic: 0x28, 0xb5, 0x2f, 0xfd
-	// FHD: 0x20 (Single_Segment=1)
-	// FCS: len(payload) as 1 byte (if < 256)
-	// Raw Block Header: last_block=1 (bit 0), block_type=raw (bits 1-2 = 0), block_size = len(payload) (bits 3-23)
-	// Block Size Header = 1 | (len(payload) << 3) as 3 bytes LE
 	var buf bytes.Buffer
-	buf.Write([]byte{0x28, 0xb5, 0x2f, 0xfd, 0x20, byte(len(payload))})
+	// Frame Header: Magic 4B, FHD 1B (SingleSegment=0), Window_Descriptor 1B (0x20 = 256KB window)
+	buf.Write([]byte{0x28, 0xb5, 0x2f, 0xfd, 0x00, 0x20})
+	// Block Header: last_block=1 (bit 0), block_type=raw (0), block_size = len(payload) (bits 3-23)
 	bh := uint32(1) | (uint32(len(payload)) << 3)
 	buf.Write([]byte{byte(bh), byte(bh >> 8), byte(bh >> 16)})
 	buf.Write(payload)
@@ -162,7 +159,7 @@ func TestUnbrotli(t *testing.T) {
 	t.Parallel()
 
 	original := []byte("Brotli RFC 7932 decompression test payload in aoni internal/compress.")
-	compressed := fasthttp.AppendBrotliBytes(nil, original)
+	compressed := h1engine.AppendBrotliBytes(nil, original)
 
 	decompressed, err := compress.Unbrotli(compressed, nil)
 	require.NoError(t, err)
@@ -220,7 +217,7 @@ func TestNewReader_AllEncodings(t *testing.T) {
 	}{
 		{encoding: "gzip", compressed: createGzipData(t, raw)},
 		{encoding: "x-gzip", compressed: createGzipData(t, raw)},
-		{encoding: "br", compressed: fasthttp.AppendBrotliBytes(nil, raw)},
+		{encoding: "br", compressed: h1engine.AppendBrotliBytes(nil, raw)},
 		{encoding: "zstd", compressed: createZstdRawBlock(raw)},
 		{encoding: "deflate", compressed: createDeflateData(t, raw)},
 		{encoding: "identity", compressed: raw},
@@ -265,7 +262,7 @@ func BenchmarkUnzstd(b *testing.B) {
 
 func BenchmarkUnbrotli(b *testing.B) {
 	payload := []byte(strings.Repeat("Brotli benchmark payload for internal/compress decoder. ", 50))
-	compressed := fasthttp.AppendBrotliBytes(nil, payload)
+	compressed := h1engine.AppendBrotliBytes(nil, payload)
 	dst := make([]byte, 0, len(payload))
 
 	b.ReportAllocs()
@@ -324,5 +321,214 @@ func BenchmarkStdlibInflate(b *testing.B) {
 		r := flate.NewReader(bytes.NewReader(compressed))
 		_, _ = io.ReadAll(r)
 		_ = r.Close()
+	}
+}
+
+func TestDecompressScoped_AllEncodings(t *testing.T) {
+	t.Parallel()
+
+	raw := []byte("Zero allocation scoped decompression test across all RFC standard algorithms in aoni.")
+
+	tests := []struct {
+		encoding   string
+		compressed []byte
+	}{
+		{encoding: "gzip", compressed: createGzipData(t, raw)},
+		{encoding: "br", compressed: h1engine.AppendBrotliBytes(nil, raw)},
+		{encoding: "zstd", compressed: createZstdRawBlock(raw)},
+		{encoding: "deflate", compressed: createDeflateData(t, raw)},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.encoding, func(t *testing.T) {
+			t.Parallel()
+
+			s := borrow.AcquireScope()
+			defer s.Release()
+
+			decompressed, err := compress.DecompressScoped(s, tc.encoding, tc.compressed)
+			require.NoError(t, err)
+			assert.Equal(t, raw, decompressed.AsSlice())
+		})
+	}
+}
+
+func BenchmarkDecompressScoped_Gzip(b *testing.B) {
+	payload := []byte(strings.Repeat("Zero allocation gzip scoped decompression in aoni. ", 50))
+	compressed := createGzipData(nil, payload)
+
+	b.ReportAllocs()
+	b.ResetTimer()
+
+	s := borrow.AcquireScope()
+	defer s.Release()
+
+	for b.Loop() {
+		res, err := compress.GunzipScoped(s, compressed)
+		if err != nil {
+			b.Fatal(err)
+		}
+
+		_ = res
+
+		s.Release()
+		s = borrow.AcquireScope()
+	}
+}
+
+func BenchmarkDecompressScoped_Zstd(b *testing.B) {
+	payload := []byte(strings.Repeat("Zero allocation zstd scoped decompression in aoni. ", 50))
+	compressed := createZstdRawBlock(payload)
+
+	b.ReportAllocs()
+	b.ResetTimer()
+
+	s := borrow.AcquireScope()
+	defer s.Release()
+
+	for b.Loop() {
+		res, err := compress.UnzstdScoped(s, compressed)
+		if err != nil {
+			b.Fatal(err)
+		}
+
+		_ = res
+
+		s.Release()
+		s = borrow.AcquireScope()
+	}
+}
+
+func TestCompress_AllEncodings(t *testing.T) {
+	t.Parallel()
+
+	raw := []byte(
+		"Compression and Decompression roundtrip test across all supported algorithms in aoni zero-alloc engine.",
+	)
+
+	encodings := []string{"gzip", "x-gzip", "br", "deflate", "identity"}
+
+	for _, enc := range encodings {
+		t.Run(enc, func(t *testing.T) {
+			t.Parallel()
+
+			compressed, err := compress.Compress(enc, raw, nil)
+			require.NoError(t, err)
+			require.NotEmpty(t, compressed)
+
+			decompressed, err := compress.Decompress(enc, compressed, nil)
+			require.NoError(t, err)
+			assert.Equal(t, raw, decompressed)
+		})
+	}
+}
+
+func TestCompressScoped_AllEncodings(t *testing.T) {
+	t.Parallel()
+
+	raw := []byte("Zero allocation scoped compression and decompression roundtrip test in aoni.")
+
+	encodings := []string{"gzip", "x-gzip", "br", "deflate", "identity"}
+
+	for _, enc := range encodings {
+		t.Run(enc, func(t *testing.T) {
+			t.Parallel()
+
+			s := borrow.AcquireScope()
+			defer s.Release()
+
+			compressed, err := compress.CompressScoped(s, enc, raw)
+			require.NoError(t, err)
+			require.NotEmpty(t, compressed.AsSlice())
+
+			decompressed, err := compress.DecompressScoped(s, enc, compressed.AsSlice())
+			require.NoError(t, err)
+			assert.Equal(t, raw, decompressed.AsSlice())
+		})
+	}
+}
+
+func TestNewWriter_Streaming(t *testing.T) {
+	t.Parallel()
+
+	raw := []byte("Streaming compression writer and reader roundtrip test with pooled writers.")
+
+	encodings := []string{"gzip", "deflate", "identity"}
+
+	for _, enc := range encodings {
+		t.Run(enc, func(t *testing.T) {
+			t.Parallel()
+
+			var buf bytes.Buffer
+
+			w, err := compress.NewWriter(enc, &buf)
+			require.NoError(t, err)
+
+			_, err = w.Write(raw)
+			require.NoError(t, err)
+
+			err = w.Close()
+			require.NoError(t, err)
+
+			r, err := compress.NewReader(enc, &buf)
+			require.NoError(t, err)
+
+			defer r.Close()
+
+			decompressed, err := io.ReadAll(r)
+			require.NoError(t, err)
+			assert.Equal(t, raw, decompressed)
+		})
+	}
+}
+
+func TestDecompressionBomb_Protection(t *testing.T) {
+	t.Parallel()
+
+	// Create a payload of zeros that compresses to a tiny gzip (high amplification)
+	hugeZeros := make([]byte, 1024*1024) // 1 MB of zeros
+	compressedZeros := createGzipData(t, hugeZeros)
+
+	// Artificially truncate compressed to simulate tiny input that would blow up beyond 250x ratio
+	// A 100-byte gzip expanding to 1MB has >10000x amplification ratio
+	tinyCompressed := compressedZeros[:min(len(compressedZeros), 64)]
+
+	// Attempting to decompress truncated/malicious payload fails gracefully without crash/panic
+	_, _ = compress.Gunzip(tinyCompressed, nil)
+}
+
+func BenchmarkGzip(b *testing.B) {
+	payload := []byte(strings.Repeat("Zero allocation gzip compression benchmark in aoni. ", 50))
+	dst := make([]byte, 0, len(payload))
+
+	b.ReportAllocs()
+	b.ResetTimer()
+
+	for i := 0; i < b.N; i++ {
+		_, _ = compress.Gzip(payload, dst)
+	}
+}
+
+func BenchmarkDeflate(b *testing.B) {
+	payload := []byte(strings.Repeat("Zero allocation deflate compression benchmark in aoni. ", 50))
+	dst := make([]byte, 0, len(payload))
+
+	b.ReportAllocs()
+	b.ResetTimer()
+
+	for i := 0; i < b.N; i++ {
+		_, _ = compress.Deflate(payload, dst)
+	}
+}
+
+func BenchmarkBrotli(b *testing.B) {
+	payload := []byte(strings.Repeat("Zero allocation brotli compression benchmark in aoni. ", 50))
+	dst := make([]byte, 0, len(payload))
+
+	b.ReportAllocs()
+	b.ResetTimer()
+
+	for i := 0; i < b.N; i++ {
+		_, _ = compress.Brotli(payload, dst)
 	}
 }

@@ -28,3 +28,27 @@ profile.cov
 
 # Example output
 *.json
+
+# Environment & secrets
+.env
+.env.local
+.vortex/cache/secrets.json
+.vortex/cache/linter.json
+
+# Binaries
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+
+# Test & profiling artifacts
+*.out
+*.prof
+*.sarif
+coverage.*
+
+# Vortex generated mocks & harnesses
+*_mock.gen.go
+*_harness.gen.go
+.vortex/

@@ -17,8 +17,8 @@ import (
 	"strings"
 	"sync"
 	"time"
-	"unicode/utf8"
 
+	"github.com/lemon4ksan/foundation/borrow"
 	"github.com/lemon4ksan/foundation/generic"
 	"github.com/lemon4ksan/foundation/net/hpack"
 	"github.com/lemon4ksan/foundation/silicon/offheap"
@@ -78,31 +78,76 @@ type Conn interface {
 	net.Conn
 	ReadMessage() (messageType int, payload []byte, err error)
 	ReadMessageTo(buf []byte) (messageType, n int, err error)
+	ReadMessageScoped(scope *borrow.Scope) (messageType int, payload []byte, err error)
 	WriteMessage(messageType int, data []byte) error
 	Subprotocol() string
 	UnderlyingConn() any
 	CloseChan() <-chan struct{}
 }
 
+// WSReader represents a dedicated read-only half of a WebSocket connection.
+type WSReader interface {
+	ReadMessage() (messageType int, payload []byte, err error)
+	ReadMessageTo(buf []byte) (messageType, n int, err error)
+	ReadMessageScoped(scope *borrow.Scope) (messageType int, payload []byte, err error)
+}
+
+// WSWriter represents a dedicated write-only half of a WebSocket connection.
+type WSWriter interface {
+	WriteMessage(messageType int, data []byte) error
+}
+
+type wsReadHalf struct {
+	conn Conn
+}
+
+func (r *wsReadHalf) ReadMessage() (int, []byte, error) {
+	return r.conn.ReadMessage()
+}
+
+func (r *wsReadHalf) ReadMessageTo(buf []byte) (int, int, error) {
+	return r.conn.ReadMessageTo(buf)
+}
+
+func (r *wsReadHalf) ReadMessageScoped(scope *borrow.Scope) (int, []byte, error) {
+	return r.conn.ReadMessageScoped(scope)
+}
+
+type wsWriteHalf struct {
+	conn Conn
+}
+
+func (w *wsWriteHalf) WriteMessage(messageType int, data []byte) error {
+	return w.conn.WriteMessage(messageType, data)
+}
+
+// Split splits a WebSocket connection into independent reader and writer half-connections,
+// enabling zero-contention full-duplex communication across concurrent goroutines.
+func Split(c Conn) (WSReader, WSWriter) {
+	return &wsReadHalf{conn: c}, &wsWriteHalf{conn: c}
+}
+
 type wsRawConn struct {
-	base         net.Conn
-	br           *bufio.Reader // Buffered reader for socket read syscall reduction
-	subprotocol  string
-	isClient     bool
-	compress     bool // RFC 7692 permessage-deflate negotiated flag
-	reader       io.Reader
-	payloadBuf   []byte                   // Reusable zero-alloc read payload buffer
-	fragOpcode   byte                     // Ongoing fragmented message opcode (FrameText or FrameBinary)
-	fragBuf      []byte                   // Reusable buffer for accumulating fragmented frames
-	fragCompress bool                     // Whether initial fragment had RSV1 (permessage-deflate) set
-	readHdr      [maxFrameHeaderSize]byte // Fixed-size header buffer avoiding escape analysis
-	readMask     [4]byte                  // Reusable mask buffer for zero-alloc reading
-	writeHdr     [maxFrameHeaderSize]byte // Fixed-size header buffer for zero-alloc writing
-	writeMask    [4]byte                  // Reusable mask buffer for zero-alloc writing
-	writeBuf     []byte                   // Reusable write buffer (protected by writeMu)
-	closed       chan struct{}
-	writeMu      chan struct{}
-	once         sync.Once
+	base          net.Conn
+	br            *bufio.Reader // Buffered reader for socket read syscall reduction
+	subprotocol   string
+	isClient      bool
+	compress      bool // RFC 7692 permessage-deflate negotiated flag
+	reader        io.Reader
+	payloadBuf    []byte                   // Reusable zero-alloc read payload buffer
+	fragOpcode    byte                     // Ongoing fragmented message opcode (FrameText or FrameBinary)
+	fragBuf       []byte                   // Reusable buffer for accumulating fragmented frames
+	fragCompress  bool                     // Whether initial fragment had RSV1 (permessage-deflate) set
+	readHdr       [maxFrameHeaderSize]byte // Fixed-size header buffer avoiding escape analysis
+	readMask      [4]byte                  // Reusable mask buffer for zero-alloc reading
+	writeHdr      [maxFrameHeaderSize]byte // Fixed-size header buffer for zero-alloc writing
+	writeMask     [4]byte                  // Reusable mask buffer for zero-alloc writing
+	writeBuf      []byte                   // Reusable write buffer (protected by writeMu)
+	compressBuf   []byte                   // Reusable zero-alloc RFC 7692 deflate compression buffer
+	decompressBuf []byte                   // Reusable zero-alloc RFC 7692 inflate decompression buffer
+	closed        chan struct{}
+	writeMu       chan struct{}
+	once          sync.Once
 }
 
 // WrapRawConn wraps a net.Conn into a zero-alloc ws.Conn using default buffer sizes.
@@ -195,7 +240,7 @@ func (c *wsRawConn) Write(b []byte) (int, error) {
 	c.lockWrite()
 	defer c.unlockWrite()
 
-	opcode := generic.Ternary(utf8.Valid(b), byte(FrameText), byte(FrameBinary))
+	opcode := generic.Ternary(simd.ValidUTF8(b), byte(FrameText), byte(FrameBinary))
 	if err := c.writeFrame(opcode, b); err != nil {
 		_ = c.Close()
 		return 0, err
@@ -224,6 +269,16 @@ func (c *wsRawConn) ReadMessageTo(buf []byte) (int, int, error) {
 	n := copy(buf, payload)
 
 	return int(opcode), n, nil
+}
+
+// ReadMessageScoped reads the next message payload into arena memory bound to scope.
+func (c *wsRawConn) ReadMessageScoped(scope *borrow.Scope) (int, []byte, error) {
+	opcode, payload, err := c.readFrameScoped(scope)
+	if err != nil {
+		return 0, nil, err
+	}
+
+	return int(opcode), payload, nil
 }
 
 func (c *wsRawConn) WriteMessage(messageType int, data []byte) error {
@@ -354,6 +409,11 @@ func (c *wsRawConn) readRawFrame() (opcode byte, fin, rsv1 bool, payload []byte,
 // readFrame reads and parses an incoming logical message, reassembling fragmented frames (RFC 6455 §5.4),
 // handling interleaved control frames (RFC 6455 §5.5), and performing RFC 7692 decompression.
 func (c *wsRawConn) readFrame() (byte, []byte, error) {
+	return c.readFrameScoped(nil)
+}
+
+// readFrameScoped reads and parses an incoming logical message, allocating payload into scope if provided.
+func (c *wsRawConn) readFrameScoped(scope *borrow.Scope) (byte, []byte, error) {
 	for range maxConsecutiveEmptyReads {
 		opcode, fin, rsv1, payload, err := c.readRawFrame()
 		if err != nil {
@@ -403,12 +463,29 @@ func (c *wsRawConn) readFrame() (byte, []byte, error) {
 				if c.fragCompress {
 					c.fragCompress = false
 
-					decompressed, decErr := decompressNoContextTakeover(finalPayload)
+					var (
+						decompressed []byte
+						decErr       error
+					)
+
+					if scope != nil {
+						decompressed, decErr = decompressNoContextTakeoverScoped(finalPayload, scope)
+					} else {
+						decompressed, decErr = decompressNoContextTakeover(finalPayload)
+					}
+
 					if decErr != nil {
 						return 0, nil, decErr
 					}
 
 					return finalOpcode, decompressed, nil
+				}
+
+				if scope != nil {
+					borrowed := scope.AllocBytes(len(finalPayload))
+					copy(borrowed.AsSlice(), finalPayload)
+
+					return finalOpcode, borrowed.AsSlice(), nil
 				}
 
 				return finalOpcode, finalPayload, nil
@@ -425,12 +502,29 @@ func (c *wsRawConn) readFrame() (byte, []byte, error) {
 		if fin {
 			// Fast path for single unfragmented frame (99.9% of messages) - 0 copy, 0 alloc
 			if rsv1 && c.compress {
-				decompressed, decErr := decompressNoContextTakeover(payload)
+				var (
+					decompressed []byte
+					decErr       error
+				)
+
+				if scope != nil {
+					decompressed, decErr = decompressNoContextTakeoverScoped(payload, scope)
+				} else {
+					c.decompressBuf, decErr = decompressNoContextTakeoverTo(c.decompressBuf, payload)
+					decompressed = c.decompressBuf
+				}
+
 				if decErr != nil {
 					return 0, nil, decErr
 				}
 
 				return opcode, decompressed, nil
+			}
+
+			if scope != nil {
+				borrowed := scope.AllocBytes(len(payload))
+				copy(borrowed.AsSlice(), payload)
+				return opcode, borrowed.AsSlice(), nil
 			}
 
 			return opcode, payload, nil
@@ -512,11 +606,12 @@ func (c *wsRawConn) writeFrame(opcode byte, payload []byte) error {
 	)
 
 	if c.compress && (opcode == FrameText || opcode == FrameBinary) {
-		payload, err = compressNoContextTakeover(payload)
+		c.compressBuf, err = compressNoContextTakeoverTo(c.compressBuf, payload)
 		if err != nil {
 			return err
 		}
 
+		payload = c.compressBuf
 		compressed = true
 	}
 
@@ -526,11 +621,13 @@ func (c *wsRawConn) writeFrame(opcode byte, payload []byte) error {
 		return c.writeMaskedFrameZeroAlloc(c.writeHdr[:hdrLen], payload)
 	}
 
-	if _, err := c.base.Write(c.writeHdr[:hdrLen]); err != nil {
+	if len(payload) == 0 {
+		_, err := c.base.Write(c.writeHdr[:hdrLen])
 		return err
 	}
 
-	_, err = c.base.Write(payload)
+	buffers := net.Buffers{c.writeHdr[:hdrLen], payload}
+	_, err = buffers.WriteTo(c.base)
 
 	return err
 }
@@ -773,6 +870,27 @@ func (c *wsH2Conn) ReadMessageTo(buf []byte) (int, int, error) {
 	}
 
 	return FrameText, n, nil
+}
+
+func (c *wsH2Conn) ReadMessageScoped(scope *borrow.Scope) (int, []byte, error) {
+	var stackBuf [4096]byte
+
+	n, err := c.Read(stackBuf[:])
+	if err != nil {
+		return 0, nil, err
+	}
+
+	if scope != nil {
+		borrowed := scope.AllocBytes(n)
+		copy(borrowed.AsSlice(), stackBuf[:n])
+
+		return FrameText, borrowed.AsSlice(), nil
+	}
+
+	b := make([]byte, n)
+	copy(b, stackBuf[:n])
+
+	return FrameText, b, nil
 }
 
 func (c *wsH2Conn) WriteMessage(messageType int, data []byte) error {

@@ -75,6 +75,19 @@ func DefaultRegistry() *Registry {
 		&RuleDuplicateOperationID{},
 		&RuleDeprecatedTargetValidation{},
 		&RuleMirrorGhostMethod{},
+
+		// 5. Borrow Checker (B) - Zero-copy lifetime & affine ownership
+		&RuleBorrowEscape{},
+		&RuleBorrowUseAfterRelease{},
+		&RuleBorrowMultipleMutable{},
+		&RuleBorrowLinearLeak{},
+		&RuleBorrowUnsafeEscape{},
+		&RuleBorrowLoopCarried{},
+		&RuleBorrowReturnEscape{},
+		&RuleBorrowAliasInvalidation{},
+		&RuleBorrowClosureEscape{},
+		&RuleBorrowGlobalEscape{},
+		&RuleBorrowTypestate{},
 	)
 
 	return reg

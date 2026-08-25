@@ -1,3 +1,4 @@
+// Copyright (c) 2016 the quic-go authors. All rights reserved.
 // Copyright (c) 2026 Lemon4ksan All rights reserved.
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
@@ -5,8 +6,9 @@
 package quic
 
 import (
-	"sync"
 	"time"
+
+	"github.com/lemon4ksan/foundation/sync/spinlock"
 
 	"github.com/lemon4ksan/aoni/internal/quic/internal/monotime"
 	"github.com/lemon4ksan/aoni/internal/quic/internal/protocol"
@@ -14,8 +16,8 @@ import (
 )
 
 type receiveFlowController struct {
-	//nolint:structcheck // The mutex is used both by the stream and the connection flow controller
-	mutex                sync.Mutex
+	//nolint:structcheck // The spinlock is used both by the stream and the connection flow controller
+	mutex                spinlock.SpinLock
 	bytesRead            protocol.ByteCount
 	highestReceived      protocol.ByteCount
 	receiveWindow        protocol.ByteCount

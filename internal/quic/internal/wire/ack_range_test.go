@@ -7,7 +7,7 @@ package wire
 import (
 	"testing"
 
-	"github.com/stretchr/testify/require"
+	"github.com/lemon4ksan/foundation/testkit/require"
 )
 
 func TestAckRangeLength(t *testing.T) {

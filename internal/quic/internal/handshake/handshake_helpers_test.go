@@ -11,7 +11,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/stretchr/testify/require"
+	"github.com/lemon4ksan/foundation/testkit/require"
 )
 
 func splitHexString(t *testing.T, s string) (slice []byte) {

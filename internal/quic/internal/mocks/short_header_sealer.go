@@ -13,7 +13,7 @@ import (
 	reflect "reflect"
 
 	protocol "github.com/lemon4ksan/aoni/internal/quic/internal/protocol"
-	gomock "go.uber.org/mock/gomock"
+	gomock "github.com/lemon4ksan/foundation/testkit/gomock"
 )
 
 // MockShortHeaderSealer is a mock of ShortHeaderSealer interface.

@@ -19,6 +19,7 @@ func Commands(runner base.AppRunner) []base.Command {
 		&CmdExplain{},
 		&CmdExample{},
 		&CmdList{},
+		&CmdDoctor{},
 		&CmdWork{runner: runner},
 	}
 }

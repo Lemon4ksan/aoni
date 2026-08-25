@@ -10,10 +10,10 @@ import (
 	"io"
 	"testing"
 
-	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
-	"github.com/valyala/fasthttp"
+	"github.com/lemon4ksan/foundation/testkit/assert"
+	"github.com/lemon4ksan/foundation/testkit/require"
 
+	"github.com/lemon4ksan/aoni/internal/fast/h1engine"
 	"github.com/lemon4ksan/aoni/internal/qpack"
 )
 
@@ -22,8 +22,8 @@ func TestQPACKEncodeRequestHeaders(t *testing.T) {
 
 	codec := NewQPACKCodec()
 
-	req := fasthttp.AcquireRequest()
-	defer fasthttp.ReleaseRequest(req)
+	req := h1engine.AcquireRequest()
+	defer h1engine.ReleaseRequest(req)
 
 	req.Header.SetMethod("POST")
 	req.SetRequestURI("https://api.example.com/v1/data")
@@ -80,8 +80,8 @@ func TestQPACKOrderedHeadersSequence(t *testing.T) {
 
 	codec := NewQPACKCodec()
 
-	req := fasthttp.AcquireRequest()
-	defer fasthttp.ReleaseRequest(req)
+	req := h1engine.AcquireRequest()
+	defer h1engine.ReleaseRequest(req)
 
 	req.Header.SetMethod("GET")
 	req.SetRequestURI("https://example.com/test")
@@ -140,7 +140,7 @@ func TestQPACKDecodeResponseHeaders(t *testing.T) {
 	_ = enc.WriteField(qpack.HeaderField{Name: "content-type", Value: "application/json"})
 	_ = enc.WriteField(qpack.HeaderField{Name: "content-length", Value: "128"})
 
-	var respHeader fasthttp.ResponseHeader
+	var respHeader h1engine.ResponseHeader
 
 	if _, err := codec.DecodeResponseHeaders(buf.Bytes(), &respHeader); err != nil {
 		t.Fatalf("DecodeResponseHeaders failed: %v", err)
@@ -170,7 +170,7 @@ func TestQPACKDecodeResponseMissingStatus(t *testing.T) {
 
 	_ = enc.WriteField(qpack.HeaderField{Name: "content-type", Value: "text/plain"})
 
-	var respHeader fasthttp.ResponseHeader
+	var respHeader h1engine.ResponseHeader
 
 	_, err := codec.DecodeResponseHeaders(buf.Bytes(), &respHeader)
 	if !errors.Is(err, ErrMissingStatusHeader) {
@@ -183,8 +183,8 @@ func TestQPACKEncodeExtendedCONNECTProtocolHeader(t *testing.T) {
 
 	codec := NewQPACKCodec()
 
-	req := fasthttp.AcquireRequest()
-	defer fasthttp.ReleaseRequest(req)
+	req := h1engine.AcquireRequest()
+	defer h1engine.ReleaseRequest(req)
 
 	req.Header.SetMethod("CONNECT")
 	req.SetRequestURI("https://example.com/ws")
@@ -232,13 +232,13 @@ func TestIsForbiddenH3Header(t *testing.T) {
 	}
 
 	for _, h := range forbidden {
-		assert.True(
+		assert.Truef(
 			t,
 			isForbiddenH3Header([]byte(h), []byte("val")),
 			"isForbiddenH3Header byte slice should return true for %s",
 			h,
 		)
-		assert.True(
+		assert.Truef(
 			t,
 			isForbiddenH3HeaderStr(h, []byte("val")),
 			"isForbiddenH3HeaderStr string should return true for %s",
@@ -255,13 +255,13 @@ func TestIsForbiddenH3Header(t *testing.T) {
 	}
 
 	for _, h := range allowed {
-		assert.False(
+		assert.Falsef(
 			t,
 			isForbiddenH3Header([]byte(h), []byte("val")),
 			"isForbiddenH3Header byte slice should return false for %s",
 			h,
 		)
-		assert.False(
+		assert.Falsef(
 			t,
 			isForbiddenH3HeaderStr(h, []byte("val")),
 			"isForbiddenH3HeaderStr string should return false for %s",
@@ -275,8 +275,8 @@ func TestQPACKForbiddenHeadersFilteringInEncode(t *testing.T) {
 
 	codec := NewQPACKCodec()
 
-	req := fasthttp.AcquireRequest()
-	defer fasthttp.ReleaseRequest(req)
+	req := h1engine.AcquireRequest()
+	defer h1engine.ReleaseRequest(req)
 
 	req.Header.SetMethod("GET")
 	req.SetRequestURI("https://example.com/ws")
@@ -360,8 +360,8 @@ func TestRFC9204AppendixBExamples(t *testing.T) {
 func BenchmarkQPACKEncodeRequestHeaders(b *testing.B) {
 	codec := NewQPACKCodec()
 
-	req := fasthttp.AcquireRequest()
-	defer fasthttp.ReleaseRequest(req)
+	req := h1engine.AcquireRequest()
+	defer h1engine.ReleaseRequest(req)
 
 	req.Header.SetMethod("CONNECT")
 	req.SetRequestURI("https://example.com/ws")
@@ -371,10 +371,9 @@ func BenchmarkQPACKEncodeRequestHeaders(b *testing.B) {
 
 	var buf bytes.Buffer
 
-	b.ResetTimer()
 	b.ReportAllocs()
 
-	for range b.N {
+	for b.Loop() {
 		buf.Reset()
 		_ = codec.EncodeRequestHeaders(&buf, req, nil)
 	}
@@ -391,12 +390,11 @@ func BenchmarkQPACKDecodeResponseHeaders(b *testing.B) {
 	_ = enc.WriteField(qpack.HeaderField{Name: "sec-websocket-protocol", Value: "chat.v1"})
 	encoded := buf.Bytes()
 
-	var respHeader fasthttp.ResponseHeader
+	var respHeader h1engine.ResponseHeader
 
-	b.ResetTimer()
 	b.ReportAllocs()
 
-	for range b.N {
+	for b.Loop() {
 		respHeader.Reset()
 		_, _ = codec.DecodeResponseHeaders(encoded, &respHeader)
 	}
