@@ -150,6 +150,12 @@ func (r *RuleBorrowEscape) Run(pass *Pass) []Diagnostic {
 					})
 				}
 
+			case *ast.CallExpr:
+				// Structured Concurrency check for wg.Go(func() { ... }) or g.Go(func() error { ... })
+				if isStructuredScopedCall(fn, node) {
+					return false // Scoped goroutine strictly bounded by matching Wait(); safe from escaping
+				}
+
 			case *ast.SendStmt:
 				valName := exprToString(node.Value)
 				if borrowedVars[valName] {
@@ -174,6 +180,23 @@ func (r *RuleBorrowEscape) Run(pass *Pass) []Diagnostic {
 	}
 
 	return diags
+}
+
+func isStructuredScopedCall(fn *ast.FuncDecl, callExpr *ast.CallExpr) bool {
+	if fn == nil || fn.Body == nil || callExpr == nil {
+		return false
+	}
+
+	sel, ok := callExpr.Fun.(*ast.SelectorExpr)
+	if !ok || sel.Sel.Name != "Go" {
+		return false
+	}
+
+	if ident, ok := sel.X.(*ast.Ident); ok {
+		return hasMatchingWait(fn.Body, ident.Name)
+	}
+
+	return false
 }
 
 func isStructuredScopedGoroutine(fn *ast.FuncDecl, goStmt *ast.GoStmt) bool {
@@ -211,8 +234,16 @@ func isStructuredScopedGoroutine(fn *ast.FuncDecl, goStmt *ast.GoStmt) bool {
 		return false
 	}
 
+	return hasMatchingWait(fn.Body, wgName)
+}
+
+func hasMatchingWait(body *ast.BlockStmt, wgName string) bool {
+	if body == nil || wgName == "" {
+		return false
+	}
+
 	var hasWait bool
-	ast.Inspect(fn.Body, func(n ast.Node) bool {
+	ast.Inspect(body, func(n ast.Node) bool {
 		call, ok := n.(*ast.CallExpr)
 		if !ok {
 			return true
@@ -1744,15 +1775,16 @@ func isBorrowExpr(expr string) bool {
 	return strings.Contains(expr, "borrow.NewBytes") ||
 		strings.Contains(expr, "borrow.NewBox") ||
 		strings.Contains(expr, "borrow.Alloc") ||
-		strings.Contains(expr, "AllocBytes") ||
-		strings.Contains(expr, "AllocMut") ||
-		strings.Contains(expr, "Borrow") ||
-		strings.Contains(expr, "BorrowMut") ||
-		strings.Contains(expr, "MustBorrow") ||
-		strings.Contains(expr, "MustBorrowMut") ||
-		strings.Contains(expr, "BodyUnsafe") ||
-		strings.Contains(expr, "BodyBytes") ||
-		strings.Contains(expr, "Freeze")
+		strings.Contains(expr, "borrow.Borrow") ||
+		strings.Contains(expr, ".AllocBytes(") ||
+		strings.Contains(expr, ".AllocMut(") ||
+		strings.Contains(expr, ".Borrow(") ||
+		strings.Contains(expr, ".BorrowMut(") ||
+		strings.Contains(expr, ".MustBorrow(") ||
+		strings.Contains(expr, ".MustBorrowMut(") ||
+		strings.Contains(expr, ".BodyUnsafe(") ||
+		strings.Contains(expr, ".BodyBytes(") ||
+		strings.Contains(expr, ".Freeze(")
 }
 
 func isBorrowType(typeStr string) bool {

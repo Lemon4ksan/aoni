@@ -77,6 +77,8 @@ func (jsonDecoder) Decode(reader io.Reader, target any) error {
 
 // JSONScoped parses JSON response payload into a type T allocated within the specified [borrow.Scope].
 // Employs NoCopy: true parsing to avoid string allocations for fields referencing the underlying buffer.
+//
+//vortex:ignore borrow-must-release
 func JSONScoped[T any](reader io.Reader, scope *borrow.Scope) (*T, error) {
 	target := borrow.Alloc[T](scope).Get()
 
