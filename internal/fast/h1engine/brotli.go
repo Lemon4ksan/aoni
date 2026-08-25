@@ -29,30 +29,46 @@ func releaseBrotliReader(zr *brotli.Reader) {
 
 // AppendBrotliBytesLevel appends brotlied src to dst using valid RFC 7932 uncompressed meta-blocks.
 func AppendBrotliBytesLevel(dst, src []byte, _ int) []byte {
-	if len(src) == 0 {
+	n := len(src)
+	if n == 0 {
 		return append(dst, 0x06)
 	}
 
-	for len(src) > 0 {
-		chunkLen := len(src)
-		if chunkLen > 65536 {
-			chunkLen = 65536
-		}
+	l := uint32(n - 1)
 
-		chunk := src[:chunkLen]
-		src = src[chunkLen:]
-
-		header := (uint32(chunkLen-1) << 4) | (1 << 20)
-		b0 := byte(header & 0xFF)
-		b1 := byte((header >> 8) & 0xFF)
-		b2 := byte((header >> 16) & 0xFF)
+	switch {
+	case n <= 65536:
+		// WBITS=24 (0x0F), ISLAST=0, MNIBBLES=00, MLEN (16 bits), ISUNCOMPRESSED=1
+		b0 := byte(0x0F | ((l & 1) << 7))
+		b1 := byte(l >> 1)
+		b2 := byte((l >> 9) | 0x80)
 
 		dst = append(dst, b0, b1, b2)
-		dst = append(dst, chunk...)
-	}
+		dst = append(dst, src...)
+		return append(dst, 0x03)
 
-	dst = append(dst, 0x03)
-	return dst
+	case n <= 1048576:
+		// WBITS=24 (0x0F), ISLAST=0, MNIBBLES=01 (0x20), MLEN (20 bits), ISUNCOMPRESSED=1 (0x08)
+		b0 := byte(0x2F | ((l & 1) << 7))
+		b1 := byte(l >> 1)
+		b2 := byte(l >> 9)
+		b3 := byte((l >> 17) | 0x08)
+
+		dst = append(dst, b0, b1, b2, b3)
+		dst = append(dst, src...)
+		return append(dst, 0x03)
+
+	default:
+		// WBITS=24 (0x0F), ISLAST=0, MNIBBLES=10 (0x40), MLEN (24 bits), ISUNCOMPRESSED=1 (0x80)
+		b0 := byte(0x4F | ((l & 1) << 7))
+		b1 := byte(l >> 1)
+		b2 := byte(l >> 9)
+		b3 := byte((l >> 17) | 0x80)
+
+		dst = append(dst, b0, b1, b2, b3)
+		dst = append(dst, src...)
+		return append(dst, 0x03)
+	}
 }
 
 // WriteBrotliLevel writes p to w.
