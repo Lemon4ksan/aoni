@@ -6,8 +6,11 @@ package main
 
 import (
 	"bytes"
+	"context"
+	"io"
 	"runtime/cgo"
 	"sync"
+	"sync/atomic"
 	"time"
 	"unsafe"
 
@@ -17,6 +20,7 @@ import (
 	"github.com/lemon4ksan/aoni/fast"
 	"github.com/lemon4ksan/aoni/internal/fast/h1engine"
 	"github.com/lemon4ksan/aoni/option"
+	"github.com/lemon4ksan/aoni/realtime/ws"
 )
 
 // Constants matching include/aoni.h error and profile definitions.
@@ -28,6 +32,7 @@ const (
 	AONIErrInvalidParam   int32 = -4
 	AONIErrClientNil      int32 = -5
 	AONIErrOutOfMemory    int32 = -6
+	AONIErrStreamClosed   int32 = -7
 
 	AONIBrowserNone    uint8 = 0
 	AONIBrowserChrome  uint8 = 1
@@ -71,6 +76,37 @@ type Config struct {
 	EnableHTTP3     uint8
 	_               uint8 // alignment padding
 	ProxyURL        *byte
+}
+
+// StreamConfig represents the memory layout of C aoni_stream_config_t in pure Go.
+type StreamConfig struct {
+	StreamID    uint64
+	URL         *byte
+	URLLen      uintptr
+	Method      *byte
+	MethodLen   uintptr
+	HeadersRaw  *byte
+	HeadersLen  uintptr
+	IsWebSocket uint8
+}
+
+// StreamHandler defines Go-level callbacks matching C function pointers.
+type StreamHandler struct {
+	OnOpen  func(streamID uint64, statusCode int32, userData unsafe.Pointer)
+	OnData  func(streamID uint64, data []byte, isBinary int32, userData unsafe.Pointer)
+	OnClose func(streamID uint64, code int32, reason string, userData unsafe.Pointer)
+	OnError func(streamID uint64, errCode int32, msg string, userData unsafe.Pointer)
+}
+
+// StreamSession manages an active bidirectional stream (WebSocket, SSE, Streaming gRPC).
+type StreamSession struct {
+	StreamID uint64
+	UserData unsafe.Pointer
+	Handler  StreamHandler
+	WSConn   ws.Conn
+	Body     io.ReadCloser
+	Cancel   context.CancelFunc
+	Closed   atomic.Bool
 }
 
 // Version returns the version string of the library.
@@ -291,6 +327,181 @@ func FreeTaskOffHeap(t *Task) {
 	t.RespBufPtr = nil
 	t.RespBufCap = 0
 	t.RespBufLen = 0
+}
+
+// StartStream initiates an asynchronous full-duplex stream (WebSocket or HTTP SSE/gRPC chunk stream).
+func StartStream(client *fast.Client, cfg *StreamConfig, handler StreamHandler, userData unsafe.Pointer) *StreamSession {
+	if client == nil || cfg == nil || cfg.URL == nil || cfg.URLLen == 0 {
+		if handler.OnError != nil {
+			handler.OnError(0, AONIErrInvalidParam, "invalid stream configuration", userData)
+		}
+		return nil
+	}
+
+	urlBytes := unsafe.Slice(cfg.URL, int(cfg.URLLen))
+	urlStr := string(urlBytes)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	sess := &StreamSession{
+		StreamID: cfg.StreamID,
+		UserData: userData,
+		Handler:  handler,
+		Cancel:   cancel,
+	}
+
+	if cfg.IsWebSocket != 0 {
+		// Mode A: Full-Duplex WebSocket
+		go func() {
+			wsConn, resp, err := ws.DialWebSocket(ctx, client, urlStr)
+			if err != nil {
+				sess.Closed.Store(true)
+				if handler.OnError != nil {
+					handler.OnError(cfg.StreamID, AONIErrNetwork, err.Error(), userData)
+				}
+				return
+			}
+			sess.WSConn = wsConn
+
+			statusCode := int32(101)
+			if resp != nil {
+				statusCode = int32(resp.StatusCode)
+			}
+			if handler.OnOpen != nil {
+				handler.OnOpen(cfg.StreamID, statusCode, userData)
+			}
+
+			for {
+				msgType, data, readErr := wsConn.ReadMessage()
+				if readErr != nil {
+					if !sess.Closed.Swap(true) {
+						if handler.OnClose != nil {
+							handler.OnClose(cfg.StreamID, 1000, readErr.Error(), userData)
+						}
+					}
+					return
+				}
+
+				isBinary := int32(0)
+				if msgType == ws.OpcodeBinary {
+					isBinary = 1
+				}
+
+				if handler.OnData != nil {
+					handler.OnData(cfg.StreamID, data, isBinary, userData)
+				}
+			}
+		}()
+	} else {
+		// Mode B: HTTP SSE / Chunked Stream / Streaming gRPC
+		go func() {
+			req := fast.NewRequest(nil)
+			defer req.Release()
+
+			if cfg.Method != nil && cfg.MethodLen > 0 {
+				mBytes := unsafe.Slice(cfg.Method, int(cfg.MethodLen))
+				req.SetMethodBytes(mBytes)
+			} else {
+				req.SetMethod("GET")
+			}
+
+			req.SetURIBytes(urlBytes)
+
+			if cfg.HeadersRaw != nil && cfg.HeadersLen > 0 {
+				hBytes := unsafe.Slice(cfg.HeadersRaw, int(cfg.HeadersLen))
+				parseRawHeaders(hBytes, req)
+			}
+
+			resp, err := client.Do(req)
+			if err != nil {
+				sess.Closed.Store(true)
+				if handler.OnError != nil {
+					handler.OnError(cfg.StreamID, AONIErrNetwork, err.Error(), userData)
+				}
+				return
+			}
+
+			bodyStream := resp.BodyStream()
+			if bodyStream == nil {
+				sess.Closed.Store(true)
+				if handler.OnError != nil {
+					handler.OnError(cfg.StreamID, AONIErrNetwork, "no stream body available", userData)
+				}
+				return
+			}
+			sess.Body = bodyStream
+
+			if handler.OnOpen != nil {
+				handler.OnOpen(cfg.StreamID, int32(resp.StatusCode()), userData)
+			}
+
+			buf := make([]byte, 32*1024)
+			for {
+				n, readErr := bodyStream.Read(buf)
+				if n > 0 && handler.OnData != nil {
+					handler.OnData(cfg.StreamID, buf[:n], 0, userData)
+				}
+				if readErr != nil {
+					if !sess.Closed.Swap(true) {
+						if readErr == io.EOF {
+							if handler.OnClose != nil {
+								handler.OnClose(cfg.StreamID, 0, "EOF", userData)
+							}
+						} else if handler.OnError != nil {
+							handler.OnError(cfg.StreamID, AONIErrNetwork, readErr.Error(), userData)
+						}
+					}
+					_ = bodyStream.Close()
+					return
+				}
+			}
+		}()
+	}
+
+	return sess
+}
+
+// Send writes payload or WebSocket message to the active stream.
+func (s *StreamSession) Send(data []byte, isBinary int32) int32 {
+	if s == nil || s.Closed.Load() {
+		return AONIErrStreamClosed
+	}
+
+	if s.WSConn != nil {
+		opcode := ws.OpcodeText
+		if isBinary != 0 {
+			opcode = ws.OpcodeBinary
+		}
+		err := s.WSConn.WriteMessage(opcode, data)
+		if err != nil {
+			return AONIErrNetwork
+		}
+		return AONIOk
+	}
+
+	return AONIErrInvalidParam
+}
+
+// Close terminates stream and releases underlying connections.
+func (s *StreamSession) Close(code int32, reason string) {
+	if s == nil || s.Closed.Swap(true) {
+		return
+	}
+
+	if s.Cancel != nil {
+		s.Cancel()
+	}
+
+	if s.WSConn != nil {
+		_ = s.WSConn.Close()
+	}
+
+	if s.Body != nil {
+		_ = s.Body.Close()
+	}
+
+	if s.Handler.OnClose != nil {
+		s.Handler.OnClose(s.StreamID, code, reason, s.UserData)
+	}
 }
 
 func parseRawHeaders(data []byte, req *fast.Request) {

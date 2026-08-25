@@ -7,7 +7,24 @@
 package main
 
 /*
+#include <stdlib.h>
 #include "../../include/aoni.h"
+
+static inline void invoke_cb_on_open(aoni_cb_on_open_t fn, uint64_t stream_id, int32_t status_code, void* user_data) {
+    if (fn) fn(stream_id, status_code, user_data);
+}
+
+static inline void invoke_cb_on_data(aoni_cb_on_data_t fn, uint64_t stream_id, const uint8_t* data, size_t len, int32_t is_binary, void* user_data) {
+    if (fn) fn(stream_id, data, len, is_binary, user_data);
+}
+
+static inline void invoke_cb_on_close(aoni_cb_on_close_t fn, uint64_t stream_id, int32_t code, const char* reason, void* user_data) {
+    if (fn) fn(stream_id, code, reason, user_data);
+}
+
+static inline void invoke_cb_on_error(aoni_cb_on_error_t fn, uint64_t stream_id, int32_t err_code, const char* message, void* user_data) {
+    if (fn) fn(stream_id, err_code, message, user_data);
+}
 */
 import "C"
 
@@ -95,7 +112,6 @@ func aoni_client_batch_do(clientPtr unsafe.Pointer, tasks *C.aoni_task_t, count 
 
 	taskList := unsafe.Slice((*Task)(unsafe.Pointer(tasks)), int(count))
 
-	// Resolve any arena handles in tasks
 	for i := range taskList {
 		if taskList[i].Arena != nil {
 			aHandle := cgo.Handle(uintptr(taskList[i].Arena))
@@ -106,6 +122,117 @@ func aoni_client_batch_do(clientPtr unsafe.Pointer, tasks *C.aoni_task_t, count 
 	}
 
 	DoBatchTasks(client, taskList)
+}
+
+// aoni_stream_connect initiates a full-duplex stream (WebSocket / SSE / Streaming gRPC).
+//
+//export aoni_stream_connect
+func aoni_stream_connect(
+	clientPtr unsafe.Pointer,
+	cfg *C.aoni_stream_config_t,
+	callbacks *C.aoni_stream_callbacks_t,
+	userData unsafe.Pointer,
+) unsafe.Pointer {
+	if clientPtr == nil || cfg == nil {
+		return nil
+	}
+
+	handle := cgo.Handle(uintptr(clientPtr))
+	client, ok := handle.Value().(*fast.Client)
+	if !ok || client == nil {
+		return nil
+	}
+
+	goCfg := (*StreamConfig)(unsafe.Pointer(cfg))
+
+	var handler StreamHandler
+	if callbacks != nil {
+		cb := *callbacks
+		if cb.on_open != nil {
+			handler.OnOpen = func(streamID uint64, statusCode int32, ud unsafe.Pointer) {
+				C.invoke_cb_on_open(cb.on_open, C.uint64_t(streamID), C.int32_t(statusCode), ud)
+			}
+		}
+		if cb.on_data != nil {
+			handler.OnData = func(streamID uint64, data []byte, isBinary int32, ud unsafe.Pointer) {
+				var dataPtr *C.uint8_t
+				if len(data) > 0 {
+					dataPtr = (*C.uint8_t)(unsafe.Pointer(&data[0]))
+				}
+				C.invoke_cb_on_data(cb.on_data, C.uint64_t(streamID), dataPtr, C.size_t(len(data)), C.int32_t(isBinary), ud)
+			}
+		}
+		if cb.on_close != nil {
+			handler.OnClose = func(streamID uint64, code int32, reason string, ud unsafe.Pointer) {
+				var cReason *C.char
+				if reason != "" {
+					cReason = C.CString(reason)
+					defer C.free(unsafe.Pointer(cReason))
+				}
+				C.invoke_cb_on_close(cb.on_close, C.uint64_t(streamID), C.int32_t(code), cReason, ud)
+			}
+		}
+		if cb.on_error != nil {
+			handler.OnError = func(streamID uint64, errCode int32, msg string, ud unsafe.Pointer) {
+				var cMsg *C.char
+				if msg != "" {
+					cMsg = C.CString(msg)
+					defer C.free(unsafe.Pointer(cMsg))
+				}
+				C.invoke_cb_on_error(cb.on_error, C.uint64_t(streamID), C.int32_t(errCode), cMsg, ud)
+			}
+		}
+	}
+
+	sess := StartStream(client, goCfg, handler, userData)
+	if sess == nil {
+		return nil
+	}
+
+	sHandle := cgo.NewHandle(sess)
+	return unsafe.Pointer(uintptr(sHandle))
+}
+
+// aoni_stream_send transmits raw data or a WebSocket frame over the active stream.
+//
+//export aoni_stream_send
+func aoni_stream_send(streamPtr unsafe.Pointer, data *C.uint8_t, length C.size_t, isBinary C.int32_t) C.int32_t {
+	if streamPtr == nil {
+		return C.int32_t(AONIErrStreamClosed)
+	}
+
+	handle := cgo.Handle(uintptr(streamPtr))
+	sess, ok := handle.Value().(*StreamSession)
+	if !ok || sess == nil {
+		return C.int32_t(AONIErrStreamClosed)
+	}
+
+	var dataSlice []byte
+	if data != nil && length > 0 {
+		dataSlice = unsafe.Slice((*byte)(unsafe.Pointer(data)), int(length))
+	}
+
+	return C.int32_t(sess.Send(dataSlice, int32(isBinary)))
+}
+
+// aoni_stream_close terminates the stream session and releases resources.
+//
+//export aoni_stream_close
+func aoni_stream_close(streamPtr unsafe.Pointer, code C.int32_t, reason *C.char) {
+	if streamPtr == nil {
+		return
+	}
+
+	handle := cgo.Handle(uintptr(streamPtr))
+	sess, ok := handle.Value().(*StreamSession)
+	if ok && sess != nil {
+		var reasonStr string
+		if reason != nil {
+			reasonStr = C.GoString(reason)
+		}
+		sess.Close(int32(code), reasonStr)
+	}
+	handle.Delete()
 }
 
 // aoni_arena_create provisions a GC-invisible off-heap OS memory arena (mmap / VirtualAlloc).

@@ -10,7 +10,9 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
+	"time"
 	"unsafe"
 
 	"github.com/lemon4ksan/foundation/silicon/offheap"
@@ -187,7 +189,7 @@ func TestBridgeBufferOverflow(t *testing.T) {
 }
 
 func TestBridgeOffHeapAutoAllocation(t *testing.T) {
-	expectedPayload := strings.Repeat("AONI_OFFHEAP_TEST_PAYLOAD_1234567890_", 200) // ~7.4 KB
+	expectedPayload := strings.Repeat("AONI_OFFHEAP_TEST_PAYLOAD_1234567890_", 200)
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
@@ -202,7 +204,6 @@ func TestBridgeOffHeapAutoAllocation(t *testing.T) {
 
 	urlStr := server.URL
 
-	// Pass resp_buf_ptr = nil -> asks libaoni to allocate in Off-Heap
 	task := Task{
 		TaskID:     1001,
 		URL:        unsafe.StringData(urlStr),
@@ -229,7 +230,6 @@ func TestBridgeOffHeapAutoAllocation(t *testing.T) {
 		t.Fatal("received payload does not match expected off-heap content")
 	}
 
-	// Free task offheap buffer
 	FreeTaskOffHeap(&task)
 	if task.RespBufPtr != nil || task._InternalHandle != nil {
 		t.Fatal("expected cleaned up task fields after FreeTaskOffHeap")
@@ -249,7 +249,6 @@ func TestBridgeOffHeapArenaBatch(t *testing.T) {
 		t.Fatal("failed to create client")
 	}
 
-	// Create 2MB Off-Heap Arena directly from OS kernel
 	arena, err := offheap.NewArena(2 * 1024 * 1024)
 	if err != nil {
 		t.Fatalf("failed to allocate off-heap arena: %v", err)
@@ -287,8 +286,92 @@ func TestBridgeOffHeapArenaBatch(t *testing.T) {
 		}
 	}
 
-	// Single-cycle reset
 	arena.Reset()
+}
+
+func TestBridgeStreamSSE(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		flusher, ok := w.(http.Flusher)
+		if !ok {
+			http.Error(w, "streaming not supported", http.StatusInternalServerError)
+			return
+		}
+
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.WriteHeader(http.StatusOK)
+		flusher.Flush()
+
+		for i := 1; i <= 3; i++ {
+			_, _ = fmt.Fprintf(w, "data: chunk-%d\n\n", i)
+			flusher.Flush()
+			time.Sleep(10 * time.Millisecond)
+		}
+	}))
+	defer server.Close()
+
+	client := NewClientFromConfig(nil)
+	if client == nil {
+		t.Fatal("failed to create client")
+	}
+
+	var mu sync.Mutex
+	var received []string
+	opened := false
+	closed := false
+	done := make(chan struct{})
+
+	urlStr := server.URL
+	cfg := StreamConfig{
+		StreamID:    777,
+		URL:         unsafe.StringData(urlStr),
+		URLLen:      uintptr(len(urlStr)),
+		IsWebSocket: 0,
+	}
+
+	handler := StreamHandler{
+		OnOpen: func(streamID uint64, statusCode int32, userData unsafe.Pointer) {
+			mu.Lock()
+			opened = true
+			mu.Unlock()
+		},
+		OnData: func(streamID uint64, data []byte, isBinary int32, userData unsafe.Pointer) {
+			mu.Lock()
+			received = append(received, string(data))
+			mu.Unlock()
+		},
+		OnClose: func(streamID uint64, code int32, reason string, userData unsafe.Pointer) {
+			mu.Lock()
+			closed = true
+			mu.Unlock()
+			close(done)
+		},
+	}
+
+	sess := StartStream(client, &cfg, handler, nil)
+	if sess == nil {
+		t.Fatal("expected non-nil StreamSession")
+	}
+
+	select {
+	case <-done:
+	case <-time.After(3 * time.Second):
+		t.Fatal("timed out waiting for stream completion")
+	}
+
+	mu.Lock()
+	defer mu.Unlock()
+
+	if !opened {
+		t.Fatal("expected stream to be opened")
+	}
+	if !closed {
+		t.Fatal("expected stream to be closed")
+	}
+
+	fullPayload := strings.Join(received, "")
+	if !strings.Contains(fullPayload, "data: chunk-1") || !strings.Contains(fullPayload, "data: chunk-3") {
+		t.Fatalf("unexpected stream content: %q", fullPayload)
+	}
 }
 
 func TestBytePtrToStringSafety(t *testing.T) {

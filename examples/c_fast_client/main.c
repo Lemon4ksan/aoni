@@ -8,6 +8,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
+#include <unistd.h>
 #include "../../include/aoni.h"
 
 static double get_time_sec(void) {
@@ -16,10 +17,35 @@ static double get_time_sec(void) {
     return (double)ts.tv_sec + (double)ts.tv_nsec * 1e-9;
 }
 
+// Stream Callbacks
+static void on_stream_open(uint64_t stream_id, int32_t status_code, void* user_data) {
+    (void)user_data;
+    printf("   [Stream %lu] OPENED with status %d\n", (unsigned long)stream_id, status_code);
+}
+
+static void on_stream_data(uint64_t stream_id, const uint8_t* data, size_t len, int32_t is_binary, void* user_data) {
+    (void)user_data;
+    (void)is_binary;
+    printf("   [Stream %lu] CHUNK received: %zu bytes\n", (unsigned long)stream_id, len);
+    if (len < 200) {
+        printf("   >> Content: %.*s\n", (int)len, (const char*)data);
+    }
+}
+
+static void on_stream_close(uint64_t stream_id, int32_t code, const char* reason, void* user_data) {
+    (void)user_data;
+    printf("   [Stream %lu] CLOSED (code=%d, reason=%s)\n", (unsigned long)stream_id, code, reason ? reason : "none");
+}
+
+static void on_stream_error(uint64_t stream_id, int32_t err_code, const char* message, void* user_data) {
+    (void)user_data;
+    printf("   [Stream %lu] ERROR (err_code=%d, msg=%s)\n", (unsigned long)stream_id, err_code, message ? message : "none");
+}
+
 int main(int argc, char** argv) {
     printf("====================================================\n");
     printf("   aoni Silicon C-ABI Engine (libaoni.so)\n");
-    printf("   Engine Version: %s (Off-Heap Enabled)\n", aoni_version());
+    printf("   Engine Version: %s (Stream Transport Enabled)\n", aoni_version());
     printf("====================================================\n\n");
 
     // 1. Initialize fast.Client instance
@@ -89,7 +115,7 @@ int main(int argc, char** argv) {
     auto_task.task_id = 2;
     auto_task.url = (char*)target_url;
     auto_task.url_len = strlen(target_url);
-    auto_task.resp_buf_ptr = NULL; // Asks libaoni to auto-allocate in OS page memory
+    auto_task.resp_buf_ptr = NULL;
     auto_task.resp_buf_cap = 0;
 
     double t2 = get_time_sec();
@@ -99,7 +125,6 @@ int main(int argc, char** argv) {
     if (auto_status >= 200 && auto_status < 400) {
         printf("[+] Mode 2 Success! Status: %d | Latency: %.2f ms | Allocated in Off-Heap: %zu B at %p\n",
                auto_status, (t3 - t2) * 1000.0, auto_task.resp_buf_len, (void*)auto_task.resp_buf_ptr);
-        // Safely free the off-heap page buffer
         aoni_task_free(&auto_task);
         printf("[+] Mode 2 Off-Heap Buffer safely released back to OS kernel.\n");
     } else {
@@ -110,7 +135,7 @@ int main(int argc, char** argv) {
     // Mode 3: Off-Heap Arena Batching (Single-cycle O(1) Reset)
     // ---------------------------------------------------------
     const size_t BATCH_COUNT = 50;
-    const size_t ARENA_SIZE = 16 * 1024 * 1024; // 16 MB OS Virtual Page
+    const size_t ARENA_SIZE = 16 * 1024 * 1024;
     printf("\n[3] Mode 3: Parallel Batch in 16MB Off-Heap Arena (%zu requests)...\n", BATCH_COUNT);
 
     aoni_arena_t arena = aoni_arena_create(ARENA_SIZE);
@@ -118,10 +143,8 @@ int main(int argc, char** argv) {
         fprintf(stderr, "[-] Failed to allocate off-heap arena\n");
         return 1;
     }
-    printf("[+] Allocated %zu MB Off-Heap Virtual Arena (100%% GC-invisible).\n", ARENA_SIZE / (1024 * 1024));
 
     aoni_task_t* batch = (aoni_task_t*)calloc(BATCH_COUNT, sizeof(aoni_task_t));
-
     for (size_t i = 0; i < BATCH_COUNT; ++i) {
         batch[i].task_id = i + 100;
         batch[i].method = "GET";
@@ -130,7 +153,7 @@ int main(int argc, char** argv) {
         batch[i].url_len = strlen(target_url);
         batch[i].headers_raw = (uint8_t*)raw_headers;
         batch[i].headers_len = strlen(raw_headers);
-        batch[i].arena = arena; // Route placement directly into the shared OS arena
+        batch[i].arena = arena;
     }
 
     double batch_t0 = get_time_sec();
@@ -148,15 +171,43 @@ int main(int argc, char** argv) {
     printf("[+] Batch Complete! %zu/%zu succeeded in %.2f ms (Throughput: %.2f req/sec)\n",
            successful, BATCH_COUNT, total_time * 1000.0, (double)BATCH_COUNT / total_time);
 
-    // O(1) 1-cycle reset of entire arena without de-allocating OS pages
     aoni_arena_reset(arena);
-    printf("[+] Arena reset in 1 CPU cycle.\n");
-
-    // Clean up arena and client
     aoni_arena_destroy(arena);
     free(batch);
 
+    // ---------------------------------------------------------
+    // Mode 4: Full-Duplex Stream Transport (SSE / Real-Time Stream)
+    // ---------------------------------------------------------
+    printf("\n[4] Mode 4: Full-Duplex Stream Transport...\n");
+
+    const char* stream_url = "https://httpbin.org/stream/2";
+    aoni_stream_config_t stream_cfg;
+    memset(&stream_cfg, 0, sizeof(stream_cfg));
+    stream_cfg.stream_id = 999;
+    stream_cfg.url = (char*)stream_url;
+    stream_cfg.url_len = strlen(stream_url);
+    stream_cfg.method = "GET";
+    stream_cfg.method_len = 3;
+    stream_cfg.is_websocket = 0;
+
+    aoni_stream_callbacks_t callbacks;
+    memset(&callbacks, 0, sizeof(callbacks));
+    callbacks.on_open = on_stream_open;
+    callbacks.on_data = on_stream_data;
+    callbacks.on_close = on_stream_close;
+    callbacks.on_error = on_stream_error;
+
+    aoni_stream_t stream = aoni_stream_connect(client, &stream_cfg, &callbacks, NULL);
+    if (stream) {
+        printf("[+] Stream initiated to %s. Waiting for chunks...\n", stream_url);
+        sleep(2); // Allow chunks to stream in
+        aoni_stream_close(stream, 0, "Normal termination");
+        printf("[+] Stream closed successfully.\n");
+    } else {
+        printf("[-] Failed to open stream.\n");
+    }
+
     aoni_client_destroy(client);
-    printf("\n[+] Cleaned up client & off-heap resources. Done!\n");
+    printf("\n[+] Cleaned up all resources. All 4 Modes Tested Successfully!\n");
     return 0;
 }

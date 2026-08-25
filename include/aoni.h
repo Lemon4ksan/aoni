@@ -24,6 +24,7 @@ extern "C" {
 #define AONI_ERR_INVALID_PARAM  -4
 #define AONI_ERR_CLIENT_NIL     -5
 #define AONI_ERR_OUT_OF_MEMORY  -6
+#define AONI_ERR_STREAM_CLOSED  -7
 
 /*
  * Browser Profile Constants
@@ -33,11 +34,39 @@ extern "C" {
 #define AONI_BROWSER_FIREFOX    2
 #define AONI_BROWSER_SAFARI     3
 
-/* Opaque pointer to an aoni fast.Client instance */
+/* Opaque handles */
 typedef void* aoni_client_t;
-
-/* Opaque pointer to an off-heap OS memory arena (mmap / VirtualAlloc) */
 typedef void* aoni_arena_t;
+typedef void* aoni_stream_t;
+
+/*
+ * Stream Callbacks
+ */
+typedef void (*aoni_cb_on_open_t)(uint64_t stream_id, int32_t status_code, void* user_data);
+typedef void (*aoni_cb_on_data_t)(uint64_t stream_id, const uint8_t* data, size_t len, int32_t is_binary, void* user_data);
+typedef void (*aoni_cb_on_close_t)(uint64_t stream_id, int32_t code, const char* reason, void* user_data);
+typedef void (*aoni_cb_on_error_t)(uint64_t stream_id, int32_t err_code, const char* message, void* user_data);
+
+typedef struct {
+    aoni_cb_on_open_t  on_open;
+    aoni_cb_on_data_t  on_data;
+    aoni_cb_on_close_t on_close;
+    aoni_cb_on_error_t on_error;
+} aoni_stream_callbacks_t;
+
+/*
+ * Stream Configuration (WebSocket, SSE, Streaming gRPC)
+ */
+typedef struct {
+    uint64_t       stream_id;     /* User-defined stream identifier */
+    char*          url;           /* Target URL (e.g. "wss://..." or "https://.../stream") */
+    size_t         url_len;       /* Length of URL */
+    char*          method;        /* "GET", "POST" (NULL defaults to "GET") */
+    size_t         method_len;    /* Length of method */
+    uint8_t*       headers_raw;   /* Custom raw headers ("Sec-WebSocket-Protocol: v1\r\n") */
+    size_t         headers_len;   /* Length of headers */
+    uint8_t        is_websocket;  /* 1 = WebSocket (RFC 6455 / RFC 8441 H2 CONNECT), 0 = HTTP/SSE stream */
+} aoni_stream_config_t;
 
 /*
  * Task descriptor representing an HTTP request & pre-allocated response slot.
@@ -96,10 +125,17 @@ aoni_client_t aoni_client_create(aoni_config_t* config);
 void          aoni_client_destroy(aoni_client_t client);
 
 /*
- * Request Execution
+ * One-Shot Request Execution
  */
 int32_t       aoni_client_do(aoni_client_t client, aoni_task_t* task);
 void          aoni_client_batch_do(aoni_client_t client, aoni_task_t* tasks, size_t count);
+
+/*
+ * Full-Duplex Stream Transport (WebSockets, SSE, Streaming gRPC)
+ */
+aoni_stream_t aoni_stream_connect(aoni_client_t client, aoni_stream_config_t* config, aoni_stream_callbacks_t* callbacks, void* user_data);
+int32_t       aoni_stream_send(aoni_stream_t stream, uint8_t* data, size_t len, int32_t is_binary);
+void          aoni_stream_close(aoni_stream_t stream, int32_t code, char* reason);
 
 /*
  * Off-Heap Arena & Memory Management (0% Go GC Overhead)
