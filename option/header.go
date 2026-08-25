@@ -5,6 +5,7 @@
 package option
 
 import (
+	"crypto"
 	"encoding/json"
 	"net/http"
 	"net/url"
@@ -15,6 +16,8 @@ import (
 	"github.com/lemon4ksan/aoni"
 	"github.com/lemon4ksan/aoni/mod"
 	"github.com/lemon4ksan/aoni/netutil"
+	"github.com/lemon4ksan/aoni/netutil/dpop"
+	"github.com/lemon4ksan/aoni/netutil/httpsig"
 )
 
 // WithBaseURL returns an [aoni.ClientOption] setting the default Base URI for resolving relative request paths (RFC 3986 §5.1).
@@ -151,6 +154,22 @@ func WithDigestAuth(username, password string) aoni.ClientOption {
 			Username: username,
 			Password: password,
 		}
+	}
+}
+
+// WithHTTPSignature returns an [aoni.ClientOption] applying an RFC 9421 HTTP Message Signature
+// to every outbound request.
+func WithHTTPSignature(sigCfg httpsig.SignConfig) aoni.ClientOption {
+	return func(cfg *aoni.Config) {
+		cfg.Defaults.DefaultMods = append(cfg.Defaults.DefaultMods, mod.WithHTTPSignature(sigCfg))
+	}
+}
+
+// WithDPoPToken returns an [aoni.ClientOption] setting a default DPoP-bound access token
+// ("Authorization: DPoP <token>") and calculating the DPoP Proof JWT per RFC 9449 §7.1.
+func WithDPoPToken(accessToken string, privKey crypto.PrivateKey, opts ...dpop.ProofOptions) aoni.ClientOption {
+	return func(cfg *aoni.Config) {
+		cfg.Defaults.DefaultMods = append(cfg.Defaults.DefaultMods, mod.WithDPoPToken(accessToken, privKey, opts...))
 	}
 }
 

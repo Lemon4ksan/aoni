@@ -5,6 +5,8 @@
 package option_test
 
 import (
+	"crypto/ed25519"
+	"crypto/rand"
 	"net/http"
 	"net/url"
 	"os"
@@ -18,7 +20,9 @@ import (
 	"github.com/lemon4ksan/aoni"
 	"github.com/lemon4ksan/aoni/fingerprint/h2"
 	"github.com/lemon4ksan/aoni/netutil/dict"
+	"github.com/lemon4ksan/aoni/netutil/dpop"
 	"github.com/lemon4ksan/aoni/netutil/hpkp"
+	"github.com/lemon4ksan/aoni/netutil/httpsig"
 	"github.com/lemon4ksan/aoni/option"
 )
 
@@ -302,4 +306,33 @@ func TestOption_DictionaryCompression(t *testing.T) {
 
 	option.WithDisableDictionaryCompression(true)(cfg)
 	assert.True(t, cfg.Defaults.DisableDictionaryCompression)
+}
+
+func TestOption_WithHTTPSignature(t *testing.T) {
+	t.Parallel()
+
+	_, priv, err := ed25519.GenerateKey(rand.Reader)
+	require.NoError(t, err)
+
+	signer, err := httpsig.NewEd25519Signer("key1", priv)
+	require.NoError(t, err)
+
+	cfg := &aoni.Config{}
+	option.WithHTTPSignature(httpsig.SignConfig{
+		Signer: signer,
+	})(cfg)
+
+	assert.Equal(t, 1, len(cfg.Defaults.DefaultMods))
+}
+
+func TestOption_WithDPoPToken(t *testing.T) {
+	t.Parallel()
+
+	_, priv, err := ed25519.GenerateKey(rand.Reader)
+	require.NoError(t, err)
+
+	cfg := &aoni.Config{}
+	option.WithDPoPToken("access-token-123", priv, dpop.ProofOptions{Nonce: "nonce-1"})(cfg)
+
+	assert.Equal(t, 1, len(cfg.Defaults.DefaultMods))
 }
