@@ -87,3 +87,19 @@ func TestW3C_TraceID_SpanID_Generation(t *testing.T) {
 		t.Fatal("subsequent span IDs must be uniquely random")
 	}
 }
+
+func BenchmarkTraceParentFormat(b *testing.B) {
+	sc := NewSpanContext(NewTraceID(), NewSpanID(), FlagSampled, "", false)
+	b.ReportAllocs()
+	for b.Loop() {
+		_ = sc.TraceParent()
+	}
+}
+
+func BenchmarkTraceParentParse(b *testing.B) {
+	rawHeader := "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01"
+	b.ReportAllocs()
+	for b.Loop() {
+		_, _ = ParseTraceParent(rawHeader)
+	}
+}

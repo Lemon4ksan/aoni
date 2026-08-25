@@ -9,17 +9,14 @@ import (
 	"time"
 
 	"github.com/lemon4ksan/aoni"
+	"github.com/lemon4ksan/foundation/generic"
 )
 
 // NewMiddleware constructs an [aoni.Middleware] that automatically creates OpenTelemetry client Spans,
 // populates standard HTTP Semantic Conventions, injects W3C traceparent headers, and records execution status.
 func NewMiddleware(opts ...Option) aoni.Middleware {
 	cfg := DefaultConfig()
-	for _, opt := range opts {
-		if opt != nil {
-			opt(&cfg)
-		}
-	}
+	generic.ApplyOptions(&cfg, opts...)
 
 	if cfg.Tracer == nil {
 		cfg.Tracer = NewTracer("aoni-client")

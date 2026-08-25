@@ -33,7 +33,13 @@ func TestOTLPHTTPExporter_Export(t *testing.T) {
 			t.Errorf("failed to read body: %v", err)
 		}
 
-		var payload otlpRoot
+		var payload struct {
+			ResourceSpans []struct {
+				ScopeSpans []struct {
+					Spans []any `json:"spans"`
+				} `json:"scopeSpans"`
+			} `json:"resourceSpans"`
+		}
 		if err := json.Unmarshal(body, &payload); err != nil {
 			t.Errorf("invalid OTLP JSON payload received: %v", err)
 		}

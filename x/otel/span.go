@@ -8,6 +8,9 @@ import (
 	"context"
 	"sync"
 	"time"
+
+	"github.com/lemon4ksan/foundation/silicon/clock"
+	"github.com/lemon4ksan/foundation/silicon/pool"
 )
 
 // StatusCode represents the OpenTelemetry canonical span status code.
@@ -75,24 +78,32 @@ type Span struct {
 	mu                sync.RWMutex
 }
 
-var spanPool = sync.Pool{
-	New: func() any {
-		return &Span{
+var spanStorage = pool.NewPerPStorage[*Span](func() *Span {
+	return &Span{
+		attributes: make([]Attribute, 0, 16),
+		events:     make([]Event, 0, 8),
+	}
+})
+
+// acquireSpan retrieves an empty [Span] from the core-pinned PerP storage ring.
+func acquireSpan(tracer *Tracer, name string, sc, parentSc SpanContext, kind SpanKind, startTime time.Time) *Span {
+	s := spanStorage.Get()
+	if s == nil {
+		s = &Span{
 			attributes: make([]Attribute, 0, 16),
 			events:     make([]Event, 0, 8),
 		}
-	},
-}
-
-// acquireSpan retrieves an empty [Span] from the memory pool.
-func acquireSpan(tracer *Tracer, name string, sc, parentSc SpanContext, kind SpanKind, startTime time.Time) *Span {
-	s := spanPool.Get().(*Span)
+	}
 	s.tracer = tracer
 	s.name = name
 	s.spanContext = sc
 	s.parentSpanContext = parentSc
 	s.kind = kind
-	s.startTime = startTime
+	if startTime.IsZero() {
+		s.startTime = clock.CoarseTime()
+	} else {
+		s.startTime = startTime
+	}
 	s.endTime = time.Time{}
 	s.status = StatusUnset
 	s.statusDesc = ""
@@ -102,7 +113,7 @@ func acquireSpan(tracer *Tracer, name string, sc, parentSc SpanContext, kind Spa
 	return s
 }
 
-// releaseSpan resets and returns s to the memory pool.
+// releaseSpan resets and returns s to the core-pinned PerP storage ring.
 func releaseSpan(s *Span) {
 	if s == nil {
 		return
@@ -116,7 +127,7 @@ func releaseSpan(s *Span) {
 	s.attributes = s.attributes[:0]
 	s.events = s.events[:0]
 	s.mu.Unlock()
-	spanPool.Put(s)
+	spanStorage.Put(s)
 }
 
 // Name returns the span operation name.

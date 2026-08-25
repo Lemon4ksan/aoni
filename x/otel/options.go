@@ -9,6 +9,7 @@ import (
 	"net/url"
 
 	"github.com/lemon4ksan/aoni"
+	"github.com/lemon4ksan/foundation/generic"
 )
 
 // Config holds settings for the OpenTelemetry client middleware.
@@ -22,7 +23,7 @@ type Config struct {
 }
 
 // Option applies configuration to [Config].
-type Option func(*Config)
+type Option = generic.Option[*Config]
 
 // DefaultConfig returns the default middleware configuration.
 func DefaultConfig() Config {

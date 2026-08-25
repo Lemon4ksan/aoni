@@ -263,6 +263,7 @@ BenchmarkH3_QPACK_Block_ZeroAlloc-12        	 2896362	       418.7 ns/op	       
 | **Обход TLS-анализа (JA3/JA4/JA4H/p0f)** | ✗ | ✗ | **✓ (Имперсонация Chrome, Firefox, Safari на чистом Go)** |
 | **Поддержка Unix Domain Sockets** | ⚠️ (Вручную) | ✗ | **✓ (Нативная схема `unix://`)** |
 | **L3/L4 & MASQUE Туннели** | ✗ | ✗ | **✓ (Wintun, Darwin utun, /dev/net/tun, MASQUE RFC 9298)** |
+| **OpenTelemetry и W3C Трейсинг** | ✗ (Тяжелый 50+ dep SDK) | ✗ | **✓ (`github.com/lemon4ksan/aoni/x/otel` — 0 deps, 29ns W3C)** |
 | **Клиент Socket.IO / Engine.IO v4** | ✗ | ✗ | **✓ (`github.com/lemon4ksan/aoni/x/socketio`)** |
 | **Изоляция сессий и кук по прокси** | ✗ | ✗ | **✓ (`ProxyIsolatedJar` RFC 6265)** |
 
@@ -283,7 +284,7 @@ aoni/
 ├── realtime/     // WebSocket поверх H2 CONNECT (RFC 8441), SSE и NDJSON потоки
 ├── resiliency/   // Локальное кэширование, детекторы и солверы WAF-челленджей, балансировщики
 ├── telemetry/    // Генераторы HAR, трекеры задержки EWMA, хуки трассировки и cURL-экспортеры
-└── x/            // Расширения и вспомогательные протоколы (x/socketio, x/geoip)
+└── x/            // Расширения и вспомогательные протоколы (x/otel, x/socketio, x/geoip)
 ```
 
 ## Реальные примеры и интеграции

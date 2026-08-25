@@ -8,6 +8,8 @@ import (
 	"context"
 	"sync"
 	"time"
+
+	"github.com/lemon4ksan/foundation/generic"
 )
 
 // Sampler decides whether a new trace span should be sampled and exported.
@@ -63,7 +65,7 @@ type StartConfig struct {
 }
 
 // StartOption applies configuration to [StartConfig].
-type StartOption func(*StartConfig)
+type StartOption = generic.Option[*StartConfig]
 
 // WithSpanKind configures the [SpanKind] for the span.
 func WithSpanKind(kind SpanKind) StartOption {
@@ -97,7 +99,7 @@ type Tracer struct {
 }
 
 // TracerOption configures a [Tracer].
-type TracerOption func(*Tracer)
+type TracerOption = generic.Option[*Tracer]
 
 // WithTracerServiceName sets the logical service name reported in Resource telemetry.
 func WithTracerServiceName(name string) TracerOption {
@@ -129,11 +131,7 @@ func NewTracer(name string, opts ...TracerOption) *Tracer {
 		serviceName: name,
 		sampler:     AlwaysSampleSampler{},
 	}
-	for _, opt := range opts {
-		if opt != nil {
-			opt(t)
-		}
-	}
+	generic.ApplyOptions(t, opts...)
 	return t
 }
 
@@ -155,11 +153,7 @@ func (t *Tracer) Start(ctx context.Context, spanName string, opts ...StartOption
 		Kind:      SpanKindInternal,
 		StartTime: time.Now(),
 	}
-	for _, opt := range opts {
-		if opt != nil {
-			opt(&cfg)
-		}
-	}
+	generic.ApplyOptions(&cfg, opts...)
 
 	var parentSc SpanContext
 	if parentSpan := SpanFromContext(ctx); parentSpan != nil {

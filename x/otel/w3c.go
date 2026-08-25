@@ -6,9 +6,10 @@ package otel
 
 import (
 	"crypto/rand"
-	"encoding/hex"
 	"errors"
 	"strings"
+
+	"github.com/lemon4ksan/foundation/silicon/hex"
 )
 
 // Standard W3C TraceContext Header Names.
@@ -42,7 +43,10 @@ func (f TraceFlags) IsSampled() bool {
 
 // String formats the trace flags as a 2-character hex string.
 func (f TraceFlags) String() string {
-	return hex.EncodeToString([]byte{byte(f)})
+	var buf [2]byte
+	var src = [1]byte{byte(f)}
+	hex.Encode(buf[:], src[:])
+	return string(buf[:])
 }
 
 // TraceID is a unique 16-byte identifier representing a distributed trace.
@@ -68,8 +72,7 @@ func ParseTraceID(s string) (TraceID, error) {
 		return id, ErrInvalidTraceID
 	}
 
-	n, err := hex.Decode(id[:], []byte(s))
-	if err != nil || n != 16 {
+	if !hex.Decode32(&id, s) {
 		return id, ErrInvalidTraceID
 	}
 
@@ -87,7 +90,9 @@ func (t TraceID) IsValid() bool {
 
 // String encodes the TraceID as a 32-character lowercase hex string.
 func (t TraceID) String() string {
-	return hex.EncodeToString(t[:])
+	var buf [32]byte
+	hex.Encode16(&buf, t)
+	return string(buf[:])
 }
 
 // SpanID is a unique 8-byte identifier representing a single operation within a trace.
@@ -113,8 +118,7 @@ func ParseSpanID(s string) (SpanID, error) {
 		return id, ErrInvalidSpanID
 	}
 
-	n, err := hex.Decode(id[:], []byte(s))
-	if err != nil || n != 8 {
+	if !hex.Decode16(&id, s) {
 		return id, ErrInvalidSpanID
 	}
 
@@ -132,7 +136,9 @@ func (s SpanID) IsValid() bool {
 
 // String encodes the SpanID as a 16-character lowercase hex string.
 func (s SpanID) String() string {
-	return hex.EncodeToString(s[:])
+	var buf [16]byte
+	hex.Encode8(&buf, s)
+	return string(buf[:])
 }
 
 // SpanContext carries immutable identification information about a Span across process boundaries.
@@ -202,13 +208,21 @@ func (sc SpanContext) TraceParent() string {
 	buf[1] = '0'
 	buf[2] = '-'
 
-	hex.Encode(buf[3:35], sc.traceID[:])
+	var traceBuf [32]byte
+	hex.Encode16(&traceBuf, sc.traceID)
+	copy(buf[3:35], traceBuf[:])
 	buf[35] = '-'
 
-	hex.Encode(buf[36:52], sc.spanID[:])
+	var spanBuf [16]byte
+	hex.Encode8(&spanBuf, sc.spanID)
+	copy(buf[36:52], spanBuf[:])
 	buf[52] = '-'
 
-	hex.Encode(buf[53:55], []byte{byte(sc.traceFlags)})
+	var flagsBuf [2]byte
+	var flagsSrc = [1]byte{byte(sc.traceFlags)}
+	hex.Encode(flagsBuf[:], flagsSrc[:])
+	buf[53] = flagsBuf[0]
+	buf[54] = flagsBuf[1]
 
 	return string(buf[:])
 }
@@ -225,48 +239,41 @@ func ParseTraceParent(header string) (SpanContext, error) {
 		return SpanContext{}, ErrInvalidTraceParent
 	}
 
-	parts := strings.Split(header, "-")
-	if len(parts) < 4 {
+	// Direct index checking for hyphens
+	if header[2] != '-' || header[35] != '-' || header[52] != '-' {
 		return SpanContext{}, ErrInvalidTraceParent
 	}
 
-	version := parts[0]
-	if len(version) != 2 || (version == "ff") {
+	version := header[:2]
+	if version == "ff" {
 		return SpanContext{}, ErrInvalidTraceParent
 	}
 
-	// Version 00 must be exactly 4 parts and 55 characters total
-	if version == "00" && (len(parts) != 4 || len(header) != 55) {
+	// Version 00 must be exactly 55 characters total
+	if version == "00" && len(header) != 55 {
 		return SpanContext{}, ErrInvalidTraceParent
 	}
 
-	traceIDStr := parts[1]
-	spanIDStr := parts[2]
-	flagsStr := parts[3]
-
-	if len(traceIDStr) != 32 || len(spanIDStr) != 16 || len(flagsStr) != 2 {
+	var traceID TraceID
+	if !hex.Decode32(&traceID, header[3:35]) || !traceID.IsValid() {
 		return SpanContext{}, ErrInvalidTraceParent
 	}
 
-	traceID, err := ParseTraceID(traceIDStr)
-	if err != nil {
+	var spanID SpanID
+	if !hex.Decode16(&spanID, header[36:52]) || !spanID.IsValid() {
 		return SpanContext{}, ErrInvalidTraceParent
 	}
 
-	spanID, err := ParseSpanID(spanIDStr)
-	if err != nil {
-		return SpanContext{}, ErrInvalidTraceParent
-	}
-
-	flagsBytes, err := hex.DecodeString(flagsStr)
-	if err != nil || len(flagsBytes) != 1 {
+	f1, ok1 := hex.FromHexChar(header[53])
+	f2, ok2 := hex.FromHexChar(header[54])
+	if !ok1 || !ok2 {
 		return SpanContext{}, ErrInvalidTraceParent
 	}
 
 	return SpanContext{
 		traceID:    traceID,
 		spanID:     spanID,
-		traceFlags: TraceFlags(flagsBytes[0]),
+		traceFlags: TraceFlags((f1 << 4) | f2),
 		remote:     true,
 	}, nil
 }

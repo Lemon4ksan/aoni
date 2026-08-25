@@ -263,6 +263,7 @@ Across 5,570,000 parallel transactions, zero dynamic bytes were allocated to the
 | **TLS Evasion (JA3/JA4/JA4H/p0f)** | ✗ | ✗ | **✓ (Pure-Go Chrome, Firefox, Safari Impersonation)** |
 | **Unix Domain Socket Support** | ⚠️ (Manual) | ✗ | **✓ (Native `unix://`)** |
 | **L3/L4 & MASQUE Tunnels** | ✗ | ✗ | **✓ (Wintun, Darwin utun, /dev/net/tun, MASQUE RFC 9298)** |
+| **OpenTelemetry & W3C Tracing** | ✗ (Heavy 50+ dep SDK) | ✗ | **✓ (`github.com/lemon4ksan/aoni/x/otel` — 0 deps, 29ns W3C)** |
 | **Socket.IO / Engine.IO v4 Client** | ✗ | ✗ | **✓ (`github.com/lemon4ksan/aoni/x/socketio`)** |
 | **Proxy & Session Isolation** | ✗ | ✗ | **✓ (`ProxyIsolatedJar` RFC 6265)** |
 
@@ -283,7 +284,7 @@ aoni/
 ├── realtime/     // WebSocket over H2 CONNECT (RFC 8441), SSE & NDJSON streams
 ├── resiliency/   // Local HTTP response caching, WAF challenge detectors & solvers, load balancers
 ├── telemetry/    // HAR generators, EWMA latency trackers, tracing hooks & cURL exporters
-└── x/            // Extensions & supplementary protocols (x/socketio, x/geoip)
+└── x/            // Extensions & supplementary protocols (x/otel, x/socketio, x/geoip)
 ```
 
 ## Real-World Case Studies & Integrations

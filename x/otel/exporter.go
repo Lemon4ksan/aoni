@@ -7,13 +7,14 @@ package otel
 import (
 	"bytes"
 	"context"
-	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"net/http"
 	"strconv"
 	"sync"
 	"time"
+
+	"github.com/lemon4ksan/foundation/generic"
 )
 
 // Exporter receives completed Spans and dispatches them to a telemetry backend.
@@ -114,7 +115,7 @@ type OTLPHTTPExporter struct {
 }
 
 // OTLPOption configures an [OTLPHTTPExporter].
-type OTLPOption func(*OTLPHTTPExporter)
+type OTLPOption = generic.Option[*OTLPHTTPExporter]
 
 // WithBatchSize sets maximum spans per HTTP export request.
 func WithBatchSize(size int) OTLPOption {
@@ -132,6 +133,16 @@ func WithHTTPClient(client *http.Client) OTLPOption {
 			e.httpClient = client
 		}
 	}
+}
+
+// NewExporter creates an OTLP/HTTP exporter targeting endpoint (alias for [NewOTLPHTTPExporter]).
+func NewExporter(endpoint string, opts ...OTLPOption) *OTLPHTTPExporter {
+	return NewOTLPHTTPExporter(endpoint, opts...)
+}
+
+// NewHTTPExporter creates an OTLP/HTTP exporter targeting endpoint (alias for [NewOTLPHTTPExporter]).
+func NewHTTPExporter(endpoint string, opts ...OTLPOption) *OTLPHTTPExporter {
+	return NewOTLPHTTPExporter(endpoint, opts...)
 }
 
 // NewOTLPHTTPExporter creates an exporter targeting an OTLP/HTTP endpoint (e.g. "http://localhost:4318").
@@ -158,11 +169,7 @@ func NewOTLPHTTPExporter(endpoint string, opts ...OTLPOption) *OTLPHTTPExporter 
 		timeout:   5 * time.Second,
 	}
 
-	for _, opt := range opts {
-		if opt != nil {
-			opt(e)
-		}
-	}
+	generic.ApplyOptions(e, opts...)
 
 	e.wg.Add(1)
 	go e.worker()
@@ -279,159 +286,142 @@ func (e *OTLPHTTPExporter) Shutdown(_ context.Context) error {
 	return nil
 }
 
-// OTLP JSON Schema definitions.
-type otlpRoot struct {
-	ResourceSpans []otlpResourceSpans `json:"resourceSpans"`
-}
-
-type otlpResourceSpans struct {
-	ScopeSpans []otlpScopeSpans `json:"scopeSpans"`
-}
-
-type otlpScopeSpans struct {
-	Scope otlpScope  `json:"scope"`
-	Spans []otlpSpan `json:"spans"`
-}
-
-type otlpScope struct {
-	Name    string `json:"name"`
-	Version string `json:"version"`
-}
-
-type otlpSpan struct {
-	TraceID           string         `json:"traceId"`
-	SpanID            string         `json:"spanId"`
-	ParentSpanID      string         `json:"parentSpanId,omitempty"`
-	Name              string         `json:"name"`
-	Kind              int            `json:"kind"`
-	StartTimeUnixNano string         `json:"startTimeUnixNano"`
-	EndTimeUnixNano   string         `json:"endTimeUnixNano"`
-	Attributes        []otlpKeyValue `json:"attributes,omitempty"`
-	Events            []otlpEvent    `json:"events,omitempty"`
-	Status            otlpStatus     `json:"status"`
-}
-
-type otlpKeyValue struct {
-	Key   string          `json:"key"`
-	Value otlpAnyValueRaw `json:"value"`
-}
-
-type otlpAnyValueRaw struct {
-	StringValue *string  `json:"stringValue,omitempty"`
-	IntValue    *string  `json:"intValue,omitempty"`
-	DoubleValue *float64 `json:"doubleValue,omitempty"`
-	BoolValue   *bool    `json:"boolValue,omitempty"`
-}
-
-type otlpEvent struct {
-	TimeUnixNano string         `json:"timeUnixNano"`
-	Name         string         `json:"name"`
-	Attributes   []otlpKeyValue `json:"attributes,omitempty"`
-}
-
-type otlpStatus struct {
-	Message string `json:"message,omitempty"`
-	Code    int    `json:"code"`
+var jsonBufferPool = sync.Pool{
+	New: func() any {
+		return bytes.NewBuffer(make([]byte, 0, 4096))
+	},
 }
 
 func buildOTLPJSON(batch []*SpanSnapshot) []byte {
-	otSpans := make([]otlpSpan, 0, len(batch))
+	buf := jsonBufferPool.Get().(*bytes.Buffer)
+	buf.Reset()
 
-	for _, s := range batch {
+	buf.WriteString(`{"resourceSpans":[{"scopeSpans":[{"scope":{"name":"github.com/lemon4ksan/aoni/x/otel","version":"1.0.0"},"spans":[`)
+
+	for i, s := range batch {
 		if s == nil {
 			continue
 		}
-
-		span := otlpSpan{
-			TraceID:           s.SpanContext.TraceID().String(),
-			SpanID:            s.SpanContext.SpanID().String(),
-			Name:              s.Name,
-			Kind:              int(s.Kind),
-			StartTimeUnixNano: strconv.FormatInt(s.StartTime.UnixNano(), 10),
-			EndTimeUnixNano:   strconv.FormatInt(s.EndTime.UnixNano(), 10),
-			Status: otlpStatus{
-				Code:    int(s.Status),
-				Message: s.StatusDescription,
-			},
+		if i > 0 {
+			buf.WriteByte(',')
 		}
+
+		buf.WriteString(`{"traceId":"`)
+		buf.WriteString(s.SpanContext.TraceID().String())
+		buf.WriteString(`","spanId":"`)
+		buf.WriteString(s.SpanContext.SpanID().String())
+		buf.WriteString(`"`)
 
 		if s.ParentSpanContext.IsValid() {
-			span.ParentSpanID = s.ParentSpanContext.SpanID().String()
+			buf.WriteString(`,"parentSpanId":"`)
+			buf.WriteString(s.ParentSpanContext.SpanID().String())
+			buf.WriteString(`"`)
 		}
+
+		buf.WriteString(`,"name":`)
+		writeJSONString(buf, s.Name)
+		buf.WriteString(`,"kind":`)
+		buf.WriteString(strconv.Itoa(int(s.Kind)))
+		buf.WriteString(`,"startTimeUnixNano":"`)
+		buf.WriteString(strconv.FormatInt(s.StartTime.UnixNano(), 10))
+		buf.WriteString(`","endTimeUnixNano":"`)
+		buf.WriteString(strconv.FormatInt(s.EndTime.UnixNano(), 10))
+		buf.WriteString(`"`)
+
+		// Status
+		buf.WriteString(`,"status":{"code":`)
+		buf.WriteString(strconv.Itoa(int(s.Status)))
+		if s.StatusDescription != "" {
+			buf.WriteString(`,"message":`)
+			writeJSONString(buf, s.StatusDescription)
+		}
+		buf.WriteString(`}`)
 
 		// Attributes
 		if len(s.Attributes) > 0 {
-			span.Attributes = make([]otlpKeyValue, 0, len(s.Attributes))
-			for _, a := range s.Attributes {
-				span.Attributes = append(span.Attributes, convertKeyValue(a.Key, a.Value))
+			buf.WriteString(`,"attributes":[`)
+			for j, a := range s.Attributes {
+				if j > 0 {
+					buf.WriteByte(',')
+				}
+				writeOTLPAttribute(buf, a.Key, a.Value)
 			}
+			buf.WriteString(`]`)
 		}
 
 		// Events
 		if len(s.Events) > 0 {
-			span.Events = make([]otlpEvent, 0, len(s.Events))
-			for _, ev := range s.Events {
-				evAttrs := make([]otlpKeyValue, 0, len(ev.Attributes))
-				for _, ea := range ev.Attributes {
-					evAttrs = append(evAttrs, convertKeyValue(ea.Key, ea.Value))
+			buf.WriteString(`,"events":[`)
+			for j, ev := range s.Events {
+				if j > 0 {
+					buf.WriteByte(',')
 				}
-				span.Events = append(span.Events, otlpEvent{
-					TimeUnixNano: strconv.FormatInt(ev.Timestamp.UnixNano(), 10),
-					Name:         ev.Name,
-					Attributes:   evAttrs,
-				})
+				buf.WriteString(`{"timeUnixNano":"`)
+				buf.WriteString(strconv.FormatInt(ev.Timestamp.UnixNano(), 10))
+				buf.WriteString(`","name":`)
+				writeJSONString(buf, ev.Name)
+				if len(ev.Attributes) > 0 {
+					buf.WriteString(`,"attributes":[`)
+					for k, ea := range ev.Attributes {
+						if k > 0 {
+							buf.WriteByte(',')
+						}
+						writeOTLPAttribute(buf, ea.Key, ea.Value)
+					}
+					buf.WriteString(`]`)
+				}
+				buf.WriteString(`}`)
 			}
+			buf.WriteString(`]`)
 		}
 
-		otSpans = append(otSpans, span)
+		buf.WriteByte('}')
 	}
 
-	root := otlpRoot{
-		ResourceSpans: []otlpResourceSpans{
-			{
-				ScopeSpans: []otlpScopeSpans{
-					{
-						Scope: otlpScope{
-							Name:    "github.com/lemon4ksan/aoni/x/otel",
-							Version: "1.0.0",
-						},
-						Spans: otSpans,
-					},
-				},
-			},
-		},
-	}
+	buf.WriteString(`]}]}]}`)
 
-	data, _ := json.Marshal(root)
-	return data
+	res := make([]byte, buf.Len())
+	copy(res, buf.Bytes())
+	jsonBufferPool.Put(buf)
+	return res
 }
 
-func convertKeyValue(key string, val any) otlpKeyValue {
-	kv := otlpKeyValue{Key: key}
+func writeJSONString(buf *bytes.Buffer, s string) {
+	b, _ := json.Marshal(s)
+	buf.Write(b)
+}
+
+func writeOTLPAttribute(buf *bytes.Buffer, key string, val any) {
+	buf.WriteString(`{"key":`)
+	writeJSONString(buf, key)
+	buf.WriteString(`,"value":{`)
 	switch v := val.(type) {
 	case string:
-		kv.Value.StringValue = &v
+		buf.WriteString(`"stringValue":`)
+		writeJSONString(buf, v)
 	case int:
-		s := strconv.Itoa(v)
-		kv.Value.IntValue = &s
+		buf.WriteString(`"intValue":"`)
+		buf.WriteString(strconv.Itoa(v))
+		buf.WriteString(`"`)
 	case int64:
-		s := strconv.FormatInt(v, 10)
-		kv.Value.IntValue = &s
+		buf.WriteString(`"intValue":"`)
+		buf.WriteString(strconv.FormatInt(v, 10))
+		buf.WriteString(`"`)
 	case float64:
-		kv.Value.DoubleValue = &v
+		buf.WriteString(`"doubleValue":`)
+		buf.WriteString(strconv.FormatFloat(v, 'f', -1, 64))
 	case bool:
-		kv.Value.BoolValue = &v
+		if v {
+			buf.WriteString(`"boolValue":true`)
+		} else {
+			buf.WriteString(`"boolValue":false`)
+		}
 	case fmt.Stringer:
-		s := v.String()
-		kv.Value.StringValue = &s
+		buf.WriteString(`"stringValue":`)
+		writeJSONString(buf, v.String())
 	default:
-		s := fmt.Sprintf("%v", v)
-		kv.Value.StringValue = &s
+		buf.WriteString(`"stringValue":`)
+		writeJSONString(buf, fmt.Sprintf("%v", v))
 	}
-	return kv
-}
-
-// FastHexEncode encodes src into a lowercase hex string.
-func FastHexEncode(src []byte) string {
-	return hex.EncodeToString(src)
+	buf.WriteString(`}}`)
 }

@@ -594,8 +594,8 @@ func TestBackoffJitterBounds(t *testing.T) {
 	for range 50 {
 		b := newBackoff(cfg)
 		d := b.Next()
-		assert.True(t, d >= 0, "duration must be non-negative: %v", d)
-		assert.True(t, d <= 2*time.Second, "duration must not exceed 2x base: %v", d)
+		assert.Truef(t, d >= 0, "duration must be non-negative: %v", d)
+		assert.Truef(t, d <= 2*time.Second, "duration must not exceed 2x base: %v", d)
 	}
 }
 
