@@ -76,6 +76,11 @@ func (br *bitReader) hasInput(num uint) bool {
 
 //go:inline
 func (br *bitReader) fillBitWindow() {
+	if hasVectorBitReader && br.hasInput(4) {
+		br.vectorFillBitWindow()
+		return
+	}
+
 	if br.bitPos >= 32 {
 		br.val >>= 32
 		br.bitPos ^= 32
