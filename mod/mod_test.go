@@ -557,3 +557,18 @@ func TestMod_PrivateToken(t *testing.T) {
 	mod.WithPrivateStateToken("pst-sample-payload").Apply(req3)
 	assert.Equal(t, "pst-sample-payload", req3.Header("Sec-Private-State-Token"))
 }
+
+func TestMod_WebPush(t *testing.T) {
+	t.Parallel()
+
+	req := newDummyRequest()
+	mod.WithWebPushTTL(60 * time.Second).Apply(req)
+	mod.WithWebPushUrgency("high").Apply(req)
+	mod.WithWebPushTopic("news-alert").Apply(req)
+	mod.WithVAPIDAuth("vapid t=jwt123, k=pub123").Apply(req)
+
+	assert.Equal(t, "60", req.Header("TTL"))
+	assert.Equal(t, "high", req.Header("Urgency"))
+	assert.Equal(t, "news-alert", req.Header("Topic"))
+	assert.Equal(t, "vapid t=jwt123, k=pub123", req.Header("Authorization"))
+}

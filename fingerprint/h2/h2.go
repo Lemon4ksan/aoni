@@ -223,7 +223,12 @@ func NewFramedTransport(base *http.Transport, settings Settings, orderedKeys ...
 		return ft
 	}
 
-	_, _ = http2.ConfigureTransports(base)
+	func() {
+		defer func() {
+			_ = recover()
+		}()
+		_, _ = http2.ConfigureTransports(base)
+	}()
 
 	return ft
 }

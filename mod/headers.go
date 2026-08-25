@@ -326,3 +326,28 @@ func WithPrivateToken(token string) aoni.RequestModifier {
 func WithPrivateStateToken(token string) aoni.RequestModifier {
 	return WithHeader(privacypass.HeaderSecPrivateStateToken, token)
 }
+
+// WithWebPushTTL constructs an [aoni.RequestModifier] setting RFC 8030 WebPush TTL retention header in seconds.
+func WithWebPushTTL(d time.Duration) aoni.RequestModifier {
+	seconds := int64(d.Seconds())
+	if seconds < 0 {
+		seconds = 0
+	}
+
+	return WithHeader("TTL", strconv.FormatInt(seconds, 10))
+}
+
+// WithWebPushUrgency constructs an [aoni.RequestModifier] setting RFC 8030 WebPush Urgency header.
+func WithWebPushUrgency(urgency string) aoni.RequestModifier {
+	return WithHeader("Urgency", urgency)
+}
+
+// WithWebPushTopic constructs an [aoni.RequestModifier] setting RFC 8030 WebPush correlation Topic header.
+func WithWebPushTopic(topic string) aoni.RequestModifier {
+	return WithHeader("Topic", topic)
+}
+
+// WithVAPIDAuth constructs an [aoni.RequestModifier] injecting an RFC 8292 VAPID Authorization header ("Authorization: vapid t=..., k=...").
+func WithVAPIDAuth(vapidAuth string) aoni.RequestModifier {
+	return WithHeader("Authorization", vapidAuth)
+}

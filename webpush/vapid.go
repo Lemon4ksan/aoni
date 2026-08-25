@@ -94,7 +94,6 @@ func (k *VAPIDKeys) PrivateKeyBase64() string {
 	}
 
 	dBytes := k.PrivateKey.D.Bytes()
-	// Pad to 32 bytes if needed
 	if len(dBytes) < 32 {
 		padded := make([]byte, 32)
 		copy(padded[32-len(dBytes):], dBytes)
@@ -183,7 +182,6 @@ func (k *VAPIDKeys) AuthorizationHeader(endpoint string, subject string, ttl tim
 
 func decodeBase64URL(s string) ([]byte, error) {
 	s = strings.TrimSpace(s)
-	// Add padding if missing
 	if m := len(s) % 4; m != 0 {
 		s += strings.Repeat("=", 4-m)
 	}
