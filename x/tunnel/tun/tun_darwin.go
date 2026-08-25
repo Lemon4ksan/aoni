@@ -27,10 +27,10 @@ const (
 
 var (
 	// ErrDarwinUtunFailed indicates that utun interface creation failed on macOS.
-	ErrDarwinUtunFailed = errors.New("aoni/tun: failed to create macOS utun interface")
+	ErrDarwinUtunFailed = errors.New("aoni/x/tun: failed to create macOS utun interface")
 
 	// ErrInvalidUtunName indicates an interface name that does not match utun[0-9]+ format.
-	ErrInvalidUtunName = errors.New("aoni/tun: interface name must match utun[0-9]+")
+	ErrInvalidUtunName = errors.New("aoni/x/tun: interface name must match utun[0-9]+")
 )
 
 type ctlInfo struct {

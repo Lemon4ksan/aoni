@@ -6,7 +6,6 @@ package main
 
 import (
 	"context"
-	"database/sql"
 	"errors"
 	"fmt"
 	"io"
@@ -61,21 +60,12 @@ func main() {
 	defer cancel()
 
 	// ==========================================
-	// PHASE 1: SQLite Cookie DB & DNS Resolvers
+	// PHASE 1: Atomic Cookie Storage & DNS Resolvers
 	// ==========================================
 
-	// Open the isolated sqlite3 cookie database.
-	db, err := sql.Open("sqlite3", "./aoni_secure_cookies.db")
-	if err != nil {
-		log.Fatalf("Cookie DB connection error: %v", err)
-	}
-	defer db.Close()
-
-	sqlStorage := cookie.NewSQLStorage(db)
-	// Init schema works but uses dummy no-op driver statements here.
-	_ = sqlStorage.InitSchema()
-
-	cookieJar := cookie.NewProxyIsolatedJar().WithStorageBackend(sqlStorage)
+	// Use atomic JSON file storage for proxy-isolated cookies.
+	fileStorage := cookie.NewJSONFileStorage("./aoni_secure_cookies.json")
+	cookieJar := cookie.NewProxyIsolatedJar().WithStorageBackend(fileStorage)
 
 	// High-speed race DNS resolver.
 	raceResolver := dns.NewFastRaceResolver(

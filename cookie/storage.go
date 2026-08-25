@@ -5,8 +5,6 @@
 package cookie
 
 import (
-	"context"
-	"database/sql"
 	"errors"
 	"maps"
 	"os"
@@ -116,96 +114,4 @@ func writeDataAtomically(filePath string, data []byte) error {
 	}
 
 	return os.Rename(tmpName, filePath) //nolint:gosec
-}
-
-// SQLStorage implements [Storage] backed by an SQL database (*sql.DB).
-// The provided *sql.DB handle MUST be thread-safe for concurrent operations across goroutines.
-type SQLStorage struct {
-	db        *sql.DB
-	tableName string
-}
-
-// NewSQLStorage instantiates an [SQLStorage] instance using the provided database handle.
-func NewSQLStorage(db *sql.DB) *SQLStorage {
-	return &SQLStorage{
-		db:        db,
-		tableName: "aoni_cookies",
-	}
-}
-
-// InitSchema constructs the required table schema if it does not exist.
-func (s *SQLStorage) InitSchema() error {
-	//nolint:gosec
-	query := `CREATE TABLE IF NOT EXISTS ` + s.tableName + ` (
-		proxy_key TEXT PRIMARY KEY,
-		cookie_data TEXT
-	);`
-	_, err := s.db.ExecContext(context.Background(), query)
-
-	return err
-}
-
-// Save persists cookies associated with key into the SQL database.
-func (s *SQLStorage) Save(key string, cookies []Cookie) error {
-	jsonData, err := json.Marshal(cookies)
-	if err != nil {
-		return err
-	}
-
-	ctx := context.Background()
-
-	tx, err := s.db.BeginTx(ctx, nil)
-	if err != nil {
-		return err
-	}
-
-	defer func() { _ = tx.Rollback() }()
-
-	if _, err := tx.ExecContext( //nolint:gosec
-		ctx,
-		`DELETE FROM `+s.tableName+` WHERE proxy_key = ?`, //nolint:gosec
-		key,
-	); err != nil {
-		return err
-	}
-
-	if len(cookies) > 0 {
-		//nolint:gosec
-		if _, err := tx.ExecContext(
-			ctx,
-			`INSERT INTO `+s.tableName+` (proxy_key, cookie_data) VALUES (?, ?)`,
-			key,
-			string(jsonData),
-		); err != nil {
-			return err
-		}
-	}
-
-	return tx.Commit()
-}
-
-// Load retrieves cookies associated with key from the SQL database.
-func (s *SQLStorage) Load(key string) ([]Cookie, error) {
-	//nolint:gosec // Table name is validated internally
-	row := s.db.QueryRowContext(
-		context.Background(),
-		`SELECT cookie_data FROM `+s.tableName+` WHERE proxy_key = ?`,
-		key,
-	)
-
-	var dataStr string
-	if err := row.Scan(&dataStr); err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			return nil, nil
-		}
-
-		return nil, err
-	}
-
-	var cookies []Cookie
-	if err := json.Unmarshal([]byte(dataStr), &cookies); err != nil {
-		return nil, ErrInvalidCookieData
-	}
-
-	return cookies, nil
 }

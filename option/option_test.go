@@ -21,7 +21,6 @@ import (
 	"github.com/lemon4ksan/aoni/fingerprint/h2"
 	"github.com/lemon4ksan/aoni/netutil/dict"
 	"github.com/lemon4ksan/aoni/netutil/dpop"
-	"github.com/lemon4ksan/aoni/netutil/hpkp"
 	"github.com/lemon4ksan/aoni/netutil/httpsig"
 	"github.com/lemon4ksan/aoni/option"
 )
@@ -170,13 +169,20 @@ func TestOption_Fingerprint_And_Settings(t *testing.T) {
 	option.WithSPKIPin("example.com", "pin2")(cfg)
 	assert.Contains(t, cfg.Fingerprint.CertificatePins["example.com"], "pin2")
 
-	hpkpPolicy, err := hpkp.ParseHeader(`max-age=5000; pin-sha256="d6qzRu9zOECb90Uez27xWltNsj0e1Md7GkYYkVoZWmM="`)
-	require.NoError(t, err)
-	option.WithHPKPPolicy("api.example.com", hpkpPolicy)(cfg)
+	option.WithPinnedSPKI(
+		"api.example.com",
+		`pin-sha256="d6qzRu9zOECb90Uez27xWltNsj0e1Md7GkYYkVoZWmM="`,
+		"E9CZ9INDbd+2eRQozYqqbQ2yXLVKB9+xcprMF+44U1g=",
+	)(cfg)
 	assert.Contains(
 		t,
 		cfg.Fingerprint.CertificatePins["api.example.com"],
 		"d6qzRu9zOECb90Uez27xWltNsj0e1Md7GkYYkVoZWmM=",
+	)
+	assert.Contains(
+		t,
+		cfg.Fingerprint.CertificatePins["api.example.com"],
+		"E9CZ9INDbd+2eRQozYqqbQ2yXLVKB9+xcprMF+44U1g=",
 	)
 }
 

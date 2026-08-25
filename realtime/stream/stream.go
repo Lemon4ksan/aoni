@@ -960,12 +960,22 @@ func (r *NDJSONReader[T]) Next() generic.Result[T] {
 
 		var val T
 
-		if unmarshalErr := json.UnmarshalNoCopy(trimmed, &val); unmarshalErr != nil {
+		if unmarshalErr := safeUnmarshalJSON(trimmed, &val); unmarshalErr != nil {
 			return generic.Failure[T](unmarshalErr)
 		}
 
 		return generic.Success(val)
 	}
+}
+
+func safeUnmarshalJSON(data []byte, val any) (err error) {
+	defer func() {
+		if r := recover(); r != nil {
+			err = fmt.Errorf("aoni/stream: malformed json payload: %v", r)
+		}
+	}()
+
+	return json.UnmarshalNoCopy(data, val)
 }
 
 // All returns a Go 1.23+ range-over-func iterator over all decoded records in the NDJSON stream.

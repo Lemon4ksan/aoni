@@ -24,8 +24,8 @@ import (
 	"github.com/lemon4ksan/aoni/internal/profile"
 	"github.com/lemon4ksan/aoni/mod"
 	"github.com/lemon4ksan/aoni/netutil/cert"
-	"github.com/lemon4ksan/aoni/netutil/hpkp"
 	"github.com/lemon4ksan/aoni/netutil/proxy"
+	"github.com/lemon4ksan/aoni/netutil/spki"
 )
 
 // WithChrome applies a production-grade, zero-configuration Chrome profile (DX)
@@ -246,13 +246,13 @@ func WithCertificatePins(pins map[string][]string) aoni.ClientOption {
 
 // WithSPKIPin returns an [aoni.ClientOption] pinning an SPKI SHA-256 fingerprint hash globally for domain (RFC 7469 §2.4).
 func WithSPKIPin(domain, pin string) aoni.ClientOption {
-	return WithCertificatePin(domain, pin)
+	return WithCertificatePin(domain, spki.NormalizePin(pin))
 }
 
-// WithHPKPPolicy returns an [aoni.ClientOption] registering all pins from an RFC 7469 [hpkp.Policy] for domain.
-func WithHPKPPolicy(domain string, policy *hpkp.Policy) aoni.ClientOption {
+// WithPinnedSPKI returns an [aoni.ClientOption] registering multiple RFC 7469 §2.4 SPKI SHA-256 fingerprint pins for domain.
+func WithPinnedSPKI(domain string, pins ...string) aoni.ClientOption {
 	return func(cfg *aoni.Config) {
-		if policy == nil || len(policy.Pins) == 0 {
+		if len(pins) == 0 {
 			return
 		}
 
@@ -260,8 +260,10 @@ func WithHPKPPolicy(domain string, policy *hpkp.Policy) aoni.ClientOption {
 			cfg.Fingerprint.CertificatePins = make(map[string][]string)
 		}
 
-		for _, pin := range policy.Pins {
-			cfg.Fingerprint.CertificatePins[domain] = append(cfg.Fingerprint.CertificatePins[domain], pin.Fingerprint)
+		for _, pin := range pins {
+			if norm := spki.NormalizePin(pin); norm != "" {
+				cfg.Fingerprint.CertificatePins[domain] = append(cfg.Fingerprint.CertificatePins[domain], norm)
+			}
 		}
 	}
 }

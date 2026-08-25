@@ -10,6 +10,7 @@ import (
 	"github.com/lemon4ksan/aoni"
 	"github.com/lemon4ksan/aoni/fingerprint"
 	"github.com/lemon4ksan/aoni/fingerprint/p0f"
+	"github.com/lemon4ksan/aoni/netutil/spki"
 )
 
 // WithP0fSignature constructs an [aoni.RequestModifier] setting p0f TCP stack signature parameters.
@@ -40,7 +41,7 @@ func WithCertificatePin(domain, hash string) aoni.RequestModifier {
 
 // WithSPKIPin constructs an [aoni.RequestModifier] pinning an SPKI SHA-256 fingerprint hash for target domain (RFC 7469 §2.4).
 func WithSPKIPin(domain, pin string) aoni.RequestModifier {
-	return WithCertificatePin(domain, pin)
+	return WithCertificatePin(domain, spki.NormalizePin(pin))
 }
 
 // WithPadding constructs an [aoni.RequestModifier] injecting random packet padding headers to confuse DPI length analysis.

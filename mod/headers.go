@@ -17,7 +17,6 @@ import (
 	"github.com/lemon4ksan/aoni/cookie"
 	"github.com/lemon4ksan/aoni/internal/core"
 	"github.com/lemon4ksan/aoni/internal/requestutil"
-	"github.com/lemon4ksan/aoni/netutil/hpkp"
 )
 
 // WithGRPCWebTimeout constructs an [aoni.RequestModifier] setting standard gRPC-Web timeout headers ("grpc-timeout").
@@ -254,20 +253,6 @@ func WithPermessageDeflate(params ...string) aoni.RequestModifier {
 	}
 
 	return WithHeader("Sec-WebSocket-Extensions", "permessage-deflate; "+strings.Join(params, "; "))
-}
-
-// ============================================================================
-// PUBLIC KEY PINNING (HPKP) MODIFIERS (RFC 7469)
-// ============================================================================
-
-// WithPublicKeyPins constructs an [aoni.RequestModifier] attaching a Public-Key-Pins header value (RFC 7469 §2.1).
-func WithPublicKeyPins(value string) aoni.RequestModifier {
-	return WithHeader(hpkp.HeaderPublicKeyPins, value)
-}
-
-// WithPublicKeyPinsReportOnly constructs an [aoni.RequestModifier] attaching a Public-Key-Pins-Report-Only header value (RFC 7469 §2.1).
-func WithPublicKeyPinsReportOnly(value string) aoni.RequestModifier {
-	return WithHeader(hpkp.HeaderPublicKeyPinsReportOnly, value)
 }
 
 // ============================================================================

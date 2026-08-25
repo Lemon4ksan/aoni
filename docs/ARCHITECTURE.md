@@ -53,7 +53,7 @@ The core networking citadel, strictly locked to immutable IETF RFC and Chromium 
 - **L3/L4 Encrypted Tunneling & Network Perimeter (`tunnel/`)**:
   - `tunnel/ssh` (RFC 4251–4254): Multi-hop SSH jump hosts, dynamic SOCKS5 forwarding, reverse SSH gateway with TLS SNI routing, and embedded PTY/SFTP servers.
   - `tunnel/masque` (RFC 9298): CONNECT-UDP / CONNECT-IP encapsulation over HTTP/3.
-  - `tunnel/tun`: High-throughput L3 virtual network interface (Wintun/TUN) adapter.
+  - `tunnel/tun`: Generic cross-platform L3 virtual network interface adapter interface (OS drivers in `aoni/x/tunnel/tun`).
   - `tunnel/inbound`: Dual HTTP/SOCKS5 sniffing proxy server with automatic protocol detection.
 
 ### Tier 3: `vortex` (Developer Toolchain & Observability)

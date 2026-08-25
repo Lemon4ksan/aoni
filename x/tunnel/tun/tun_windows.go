@@ -32,13 +32,13 @@ var (
 
 var (
 	// ErrWintunNotLoaded indicates that wintun.dll is missing from the system path.
-	ErrWintunNotLoaded = errors.New("aoni/tun: wintun.dll not found in application or system directory")
+	ErrWintunNotLoaded = errors.New("aoni/x/tun: wintun.dll not found in application or system directory")
 
 	// ErrAdapterCreationFailed indicates WintunCreateAdapter failed to register the virtual interface.
-	ErrAdapterCreationFailed = errors.New("aoni/tun: failed to create wintun network adapter")
+	ErrAdapterCreationFailed = errors.New("aoni/x/tun: failed to create wintun network adapter")
 
 	// ErrSessionCreationFailed indicates WintunStartSession failed to allocate ring-buffers.
-	ErrSessionCreationFailed = errors.New("aoni/tun: failed to start wintun session")
+	ErrSessionCreationFailed = errors.New("aoni/x/tun: failed to start wintun session")
 )
 
 const defaultRingCapacity uint32 = 0x400000 // 4MB Ring Buffer Capacity

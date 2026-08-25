@@ -22,10 +22,10 @@ const (
 
 var (
 	// ErrLinuxTunOpenFailed indicates that /dev/net/tun could not be opened.
-	ErrLinuxTunOpenFailed = errors.New("aoni/tun: failed to open /dev/net/tun")
+	ErrLinuxTunOpenFailed = errors.New("aoni/x/tun: failed to open /dev/net/tun")
 
 	// ErrLinuxIoctlFailed indicates that TUNSETIFF ioctl registration failed.
-	ErrLinuxIoctlFailed = errors.New("aoni/tun: TUNSETIFF ioctl failed")
+	ErrLinuxIoctlFailed = errors.New("aoni/x/tun: TUNSETIFF ioctl failed")
 )
 
 type ifreq struct {

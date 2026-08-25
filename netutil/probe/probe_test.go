@@ -119,31 +119,11 @@ func TestInspectTLSChain(t *testing.T) {
 	})
 }
 
-func TestPredictor(t *testing.T) {
+func TestRunConnectionDiagnostics_Nil(t *testing.T) {
 	t.Parallel()
 
-	predictor := probe.NewPredictor()
-	require.NotNil(t, predictor)
-
-	predictions := predictor.Predict([]int{80}, 0.10)
-	require.NotEmpty(t, predictions)
-
-	found443 := false
-	for _, pred := range predictions {
-		if pred.Port == 443 {
-			found443 = true
-
-			assert.Greater(t, pred.Confidence, 0.5)
-		}
-	}
-
-	assert.True(t, found443, "Predictor should recommend port 443 when port 80 is open")
-}
-
-func TestPortScan_Helpers(t *testing.T) {
-	t.Parallel()
-
-	assert.NotEmpty(t, probe.Top20Ports)
-	assert.Contains(t, probe.Top20Ports, 80)
-	assert.Contains(t, probe.Top20Ports, 443)
+	report := probe.RunConnectionDiagnostics(nil, "example.com")
+	require.NotNil(t, report)
+	assert.Equal(t, "example.com", report.Target)
+	assert.Nil(t, report.TLSInfo)
 }

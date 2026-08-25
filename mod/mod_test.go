@@ -532,22 +532,12 @@ func TestMod_WebSocketModifiers(t *testing.T) {
 	)
 }
 
-func TestMod_HPKP(t *testing.T) {
+func TestMod_SPKIPin(t *testing.T) {
 	t.Parallel()
 
-	req1 := newDummyRequest()
-	hpkpHeader := `max-age=3000; pin-sha256="d6qzRu9zOECb90Uez27xWltNsj0e1Md7GkYYkVoZWmM="`
-	mod.WithPublicKeyPins(hpkpHeader).Apply(req1)
-	assert.Equal(t, hpkpHeader, req1.Header("Public-Key-Pins"))
-
-	req2 := newDummyRequest()
-	hpkpROHeader := `pin-sha256="d6qzRu9zOECb90Uez27xWltNsj0e1Md7GkYYkVoZWmM="; report-uri="https://example.com/pkp"`
-	mod.WithPublicKeyPinsReportOnly(hpkpROHeader).Apply(req2)
-	assert.Equal(t, hpkpROHeader, req2.Header("Public-Key-Pins-Report-Only"))
-
-	req3 := newDummyRequest()
-	mod.WithSPKIPin("example.com", "d6qzRu9zOECb90Uez27xWltNsj0e1Md7GkYYkVoZWmM=").Apply(req3)
-	reqCfg := aoni.GetRequestConfig(req3.Context())
+	req := newDummyRequest()
+	mod.WithSPKIPin("example.com", `pin-sha256="d6qzRu9zOECb90Uez27xWltNsj0e1Md7GkYYkVoZWmM="`).Apply(req)
+	reqCfg := aoni.GetRequestConfig(req.Context())
 	require.NotNil(t, reqCfg)
 	assert.Contains(t, reqCfg.CertificatePins["example.com"], "d6qzRu9zOECb90Uez27xWltNsj0e1Md7GkYYkVoZWmM=")
 }

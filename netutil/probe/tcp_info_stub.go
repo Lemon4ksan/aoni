@@ -10,5 +10,5 @@ import "net"
 
 // GetTCPInfo is a stub for non-Linux operating systems.
 func GetTCPInfo(_ net.Conn) (*TCPInfo, error) {
-	return nil, ErrPMTUDiscoveryFailed
+	return nil, ErrUnsupportedPlatform
 }

@@ -6,16 +6,8 @@ package probe
 
 import "errors"
 
-var (
-	// ErrSocketNotTCP indicates that a diagnostic operation requires an active TCP connection.
-	ErrSocketNotTCP = errors.New("aoni/probe: connection is not a TCP socket")
+// ErrSocketNotTCP indicates that a diagnostic operation requires an active TCP connection.
+var ErrSocketNotTCP = errors.New("aoni/probe: connection is not a TCP socket")
 
-	// ErrPMTUDiscoveryFailed is returned when Path MTU discovery fails or is unsupported on the host OS.
-	ErrPMTUDiscoveryFailed = errors.New("aoni/probe: failed to discover path MTU")
-
-	// ErrICMPEchoFailed is returned when an ICMP or UDP ping request fails to receive an echo response.
-	ErrICMPEchoFailed = errors.New("aoni/probe: icmp echo request failed")
-
-	// ErrTracerouteTimeout is returned when a traceroute hop probe times out without a response.
-	ErrTracerouteTimeout = errors.New("aoni/probe: traceroute probe timed out")
-)
+// ErrUnsupportedPlatform is returned when a diagnostic feature is not supported on the host OS.
+var ErrUnsupportedPlatform = errors.New("aoni/probe: diagnostic operation unsupported on this platform")

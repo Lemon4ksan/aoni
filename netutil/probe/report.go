@@ -2,73 +2,49 @@
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
-// Package probe provides network diagnostic utilities including ping, traceroute, and TLS chain inspection.
+// Package probe provides focused network diagnostic utilities including TLS chain inspection,
+// CDN IP detection, and kernel TCP connection metrics.
 package probe
 
 import (
-	"context"
 	"crypto/tls"
 	"net"
-	"time"
 )
 
-// FullReport aggregates Path MTU, Ping latency, Traceroute hops, open ports, CDN detection, and Hardware OUI.
+// FullReport aggregates TLS certificate chain details, CDN detection, and TCP connection metrics for an active connection.
 type FullReport struct {
 	Target      string
 	IP          net.IP
 	IsCDN       bool
 	CDNProvider CDNProvider
-	Hardware    *HardwareInfo
-	Ping        *PingResult
-	PMTU        *PathMTUInfo
-	Traceroute  *TracerouteResult
 	TLSInfo     *CertChainInfo
-	OpenPorts   []OpenPortResult
-	Predictions []PortPrediction
+	TCPInfo     *TCPInfo
 }
 
-// RunFullDiagnostics executes a complete L3/L4/L7 diagnostic sequence against target.
-func RunFullDiagnostics(ctx context.Context, conn net.Conn, target string, port int) *FullReport {
+// RunConnectionDiagnostics extracts TLS chain info, CDN metadata, and TCP socket stats from an active connection.
+func RunConnectionDiagnostics(conn net.Conn, target string) *FullReport {
 	report := &FullReport{
 		Target: target,
 	}
 
-	if pingRes, err := Ping(ctx, target, 2*time.Second); err == nil {
-		report.Ping = pingRes
-		report.IP = pingRes.IP
+	if conn == nil {
+		return report
+	}
 
-		report.IsCDN, report.CDNProvider = CheckCDN(pingRes.IP)
-
-		if hw, err := ResolveHardwareInfo(pingRes.IP.String()); err == nil {
-			report.Hardware = hw
+	if remoteAddr := conn.RemoteAddr(); remoteAddr != nil {
+		if tcpAddr, ok := remoteAddr.(*net.TCPAddr); ok {
+			report.IP = tcpAddr.IP
+			report.IsCDN, report.CDNProvider = CheckCDN(tcpAddr.IP)
 		}
 	}
 
-	if conn != nil {
-		if pmtu, err := DiscoverPathMTU(conn); err == nil {
-			report.PMTU = pmtu
-		}
-
-		if tc, ok := conn.(*tls.Conn); ok {
-			state := tc.ConnectionState()
-			report.TLSInfo = InspectTLSChain(&state)
-		}
+	if tc, ok := conn.(*tls.Conn); ok {
+		state := tc.ConnectionState()
+		report.TLSInfo = InspectTLSChain(&state)
 	}
 
-	if traceRes, err := Traceroute(ctx, target, port, 20, 1*time.Second); err == nil {
-		report.Traceroute = traceRes
-	}
-
-	if openPorts, err := ScanPorts(ctx, target, Top20Ports, 1*time.Second, 20); err == nil {
-		report.OpenPorts = openPorts
-
-		openPortNumbers := make([]int, 0, len(openPorts))
-		for _, op := range openPorts {
-			openPortNumbers = append(openPortNumbers, op.Port)
-		}
-
-		predictor := NewPredictor()
-		report.Predictions = predictor.Predict(openPortNumbers, 0.20)
+	if tcpInfo, err := GetTCPInfo(conn); err == nil {
+		report.TCPInfo = tcpInfo
 	}
 
 	return report

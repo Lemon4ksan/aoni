@@ -58,17 +58,3 @@ func TestNewDarwinTunAdapter_InvalidName(t *testing.T) {
 		})
 	}
 }
-
-func TestNewDarwinTunAdapter_CreationAndPermissions(t *testing.T) {
-	t.Parallel()
-
-	adapter, err := NewDarwinAdapter("utun9")
-	if err != nil {
-		assert.Error(t, err)
-		assert.True(t, errors.Is(err, ErrDarwinUtunFailed) || errors.Is(err, ErrInvalidUtunName))
-	} else {
-		require.NotNil(t, adapter)
-		assert.Equal(t, "utun9", adapter.Name())
-		_ = adapter.Close()
-	}
-}

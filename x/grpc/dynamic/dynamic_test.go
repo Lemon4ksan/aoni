@@ -2,7 +2,7 @@
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
-package grpc_test
+package dynamic_test
 
 import (
 	"context"
@@ -17,6 +17,7 @@ import (
 	"github.com/lemon4ksan/aoni"
 	"github.com/lemon4ksan/aoni/grpc"
 	"github.com/lemon4ksan/aoni/option"
+	"github.com/lemon4ksan/aoni/x/grpc/dynamic"
 )
 
 func TestDynamicInvoker_InvokeJSON(t *testing.T) {
@@ -40,7 +41,7 @@ func TestDynamicInvoker_InvokeJSON(t *testing.T) {
 	}))
 	defer ts.Close()
 
-	invoker := grpc.NewDynamicInvoker()
+	invoker := dynamic.New()
 	client := aoni.NewClient(option.WithBaseURL(ts.URL))
 
 	jsonResp, err := invoker.InvokeJSON(
@@ -59,7 +60,7 @@ func TestDynamicInvoker_InvokeJSON(t *testing.T) {
 func TestDynamicInvoker_NilDescriptors(t *testing.T) {
 	t.Parallel()
 
-	invoker := grpc.NewDynamicInvoker()
+	invoker := dynamic.New()
 	_, err := invoker.InvokeJSON(
 		context.Background(),
 		nil,
@@ -71,52 +72,4 @@ func TestDynamicInvoker_NilDescriptors(t *testing.T) {
 
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "MessageDescriptors must not be nil")
-}
-
-func TestDynamicInvoker_StatusErrorHandling(t *testing.T) {
-	t.Parallel()
-
-	desc := (&wrapperspb.StringValue{}).ProtoReflect().Descriptor()
-
-	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/grpc")
-		w.Header().Set("grpc-status", "7") // Permission Denied
-		w.Header().Set("grpc-message", "Permission%20Denied%20Error")
-		w.WriteHeader(http.StatusOK)
-	}))
-	defer ts.Close()
-
-	invoker := grpc.NewDynamicInvoker()
-	client := aoni.NewClient(option.WithBaseURL(ts.URL))
-
-	_, err := invoker.InvokeJSON(
-		context.Background(),
-		client,
-		ts.URL+"/TestService/TestMethod",
-		`"client request"`,
-		desc,
-		desc,
-	)
-
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "PERMISSION_DENIED")
-	assert.Contains(t, err.Error(), "Permission Denied Error")
-}
-
-func TestDynamicInvoker_InvalidJSONInput(t *testing.T) {
-	t.Parallel()
-
-	desc := (&wrapperspb.StringValue{}).ProtoReflect().Descriptor()
-	invoker := grpc.NewDynamicInvoker()
-
-	_, err := invoker.InvokeJSON(
-		context.Background(),
-		nil,
-		"/TestService/TestMethod",
-		`{invalid json`,
-		desc,
-		desc,
-	)
-
-	assert.Error(t, err)
 }

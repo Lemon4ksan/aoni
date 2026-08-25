@@ -10,7 +10,7 @@ import (
 	"encoding/hex"
 	"time"
 
-	"github.com/lemon4ksan/aoni/netutil/hpkp"
+	"github.com/lemon4ksan/aoni/netutil/spki"
 )
 
 // CertChainInfo holds detailed diagnostic metadata for an inspected TLS certificate chain.
@@ -44,12 +44,12 @@ func InspectTLSChain(state *tls.ConnectionState) *CertChainInfo {
 	fp := sha256.Sum256(leaf.Raw)
 	fingerprint := hex.EncodeToString(fp[:])
 
-	spkiFP := hpkp.ComputeSPKIFingerprint(leaf)
-	spkiPin := hpkp.ComputeSPKIPin(leaf)
+	spkiFP := spki.ComputeSPKIFingerprint(leaf)
+	spkiPin := spki.ComputeSPKIPin(leaf)
 
 	allPins := make([]string, 0, len(state.PeerCertificates))
 	for _, cert := range state.PeerCertificates {
-		if p := hpkp.ComputeSPKIPin(cert); p != "" {
+		if p := spki.ComputeSPKIPin(cert); p != "" {
 			allPins = append(allPins, p)
 		}
 	}
