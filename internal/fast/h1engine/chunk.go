@@ -5,6 +5,7 @@
 package h1engine
 
 import (
+	"bufio"
 	"unsafe"
 )
 
@@ -16,6 +17,11 @@ func ParseHexUint(src []byte) (int, int, error) {
 	}
 
 	return parseHexUintFallback(src)
+}
+
+// ReadBodyChunked decodes an HTTP/1.1 chunked stream from r into dst (RFC 9112 §7.1).
+func ReadBodyChunked(r *bufio.Reader, maxBodySize int, dst []byte) ([]byte, error) {
+	return readBodyChunked(r, maxBodySize, dst)
 }
 
 // FormatHexUint writes the hex representation of val into buf.

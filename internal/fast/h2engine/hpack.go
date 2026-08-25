@@ -387,6 +387,26 @@ func (hp *HPACK) search(hf *HeaderField) (n uint64, fullMatch bool) {
 	return n, false
 }
 
+// DecodeAll decodes all header fields from b into dst slice.
+func (hp *HPACK) DecodeAll(dst []*HeaderField, b []byte) ([]*HeaderField, error) {
+	for len(b) > 0 {
+		hf := AcquireHeaderField()
+		rem, err := hp.Next(hf, b)
+		if err != nil {
+			ReleaseHeaderField(hf)
+			return dst, err
+		}
+		if hf.Empty() {
+			ReleaseHeaderField(hf)
+		} else {
+			dst = append(dst, hf)
+		}
+		b = rem
+	}
+
+	return dst, nil
+}
+
 // Next parses the next HPACK-encoded header field from byte stream b (RFC 7541 §3.2 & §6).
 func (hp *HPACK) Next(hf *HeaderField, b []byte) ([]byte, error) {
 	for len(b) > 0 {
