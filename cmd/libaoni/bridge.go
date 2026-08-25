@@ -116,7 +116,7 @@ type StreamSession struct {
 }
 
 // Version returns the version string of the library.
-const Version = "1.0.0-silicon"
+const Version = aoni.Version + "-silicon"
 
 var arenaMutex sync.Mutex
 
