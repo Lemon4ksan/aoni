@@ -46,6 +46,8 @@ func newTypedRequestPool() *typedRequestPool {
 				expectedStatuses: make([]int, 0, 4),
 				headerEntries:    make([]headerEntry, 0, 8),
 				queryEntries:     make([]queryParamEntry, 0, 8),
+				pathParams:       make(map[string]string, 4),
+				formFields:       make(map[string]string, 4),
 			}
 		}),
 	}

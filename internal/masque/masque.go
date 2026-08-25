@@ -16,7 +16,7 @@ var (
 	ErrMTUTooSmall     = errors.New("aoni/masque: mtu below protocol minimum")
 )
 
-// BuildICMPPacketTooBig4 constructs an ICMPv4 Fragmentation Needed packet.
+// BuildICMPPacketTooBig4 constructs an ICMPv4 Fragmentation Needed packet (RFC 1191 / RFC 4884 / RFC 792 / RFC 9484 §7.2.1).
 func BuildICMPPacketTooBig4(packet []byte, nextHopMTU uint16) ([]byte, error) {
 	if len(packet) < 20 || (packet[0]>>4) != 4 {
 		return nil, ErrInvalidIPHeader
@@ -62,7 +62,7 @@ func BuildICMPPacketTooBig4(packet []byte, nextHopMTU uint16) ([]byte, error) {
 	return out, nil
 }
 
-// BuildICMPPacketTooBig6 constructs an ICMPv6 Packet Too Big packet.
+// BuildICMPPacketTooBig6 constructs an ICMPv6 Packet Too Big packet (RFC 4443 §3.2 / RFC 8200 / RFC 9484 §7.2.1).
 func BuildICMPPacketTooBig6(packet []byte, nextHopMTU uint32) ([]byte, error) {
 	if len(packet) < 40 || (packet[0]>>4) != 6 {
 		return nil, ErrInvalidIPHeader
@@ -101,7 +101,7 @@ func BuildICMPPacketTooBig6(packet []byte, nextHopMTU uint32) ([]byte, error) {
 	return out, nil
 }
 
-// CalculateInternetChecksum calculates standard 16-bit 1's complement Internet Checksum.
+// CalculateInternetChecksum calculates standard 16-bit 1's complement Internet Checksum (RFC 1071).
 func CalculateInternetChecksum(b []byte) uint16 {
 	var sum uint32
 
@@ -120,7 +120,7 @@ func CalculateInternetChecksum(b []byte) uint16 {
 	return ^uint16(sum)
 }
 
-// CalculateICMPv6Checksum calculates ICMPv6 checksum with IPv6 pseudo-header.
+// CalculateICMPv6Checksum calculates ICMPv6 checksum with IPv6 pseudo-header (RFC 4443 & RFC 8200 §8.1).
 func CalculateICMPv6Checksum(srcIP, dstIP netip.Addr, icmpMessage []byte) uint16 {
 	var ph [40]byte
 
@@ -153,7 +153,7 @@ func CalculateICMPv6Checksum(srcIP, dstIP netip.Addr, icmpMessage []byte) uint16
 	return ^uint16(sum)
 }
 
-// EncodeVarintSlice encodes v into b using QUIC variable-length integer encoding (RFC 9000).
+// EncodeVarintSlice encodes v into b using QUIC variable-length integer encoding (RFC 9000 §16 / RFC 9297 §1.1).
 func EncodeVarintSlice(v uint64, b []byte) int {
 	switch {
 	case v < 1<<6:
@@ -171,7 +171,7 @@ func EncodeVarintSlice(v uint64, b []byte) int {
 	}
 }
 
-// EncodeVarint encodes val as a QUIC-style variable length integer (RFC 9000).
+// EncodeVarint encodes val as a QUIC-style variable length integer (RFC 9000 §16).
 func EncodeVarint(val uint64) []byte {
 	switch {
 	case val <= 63:

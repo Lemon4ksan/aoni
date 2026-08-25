@@ -15,6 +15,7 @@ import (
 	asyncctx "github.com/lemon4ksan/foundation/async/context"
 	"github.com/lemon4ksan/foundation/generic"
 	"github.com/lemon4ksan/foundation/net/psl"
+	"github.com/lemon4ksan/foundation/silicon/bytesconv"
 	"github.com/lemon4ksan/foundation/silicon/clock"
 )
 
@@ -235,11 +236,11 @@ func normalizeDomain(domain string) string {
 }
 
 func deleteMatchingCookie(m map[cookieKey]Cookie, name, domain string) bool {
-	normDomain := normalizeDomain(domain)
+	normDomain := strings.TrimPrefix(domain, ".")
 	deleted := false
 
 	for k := range m {
-		if k.name == name && normalizeDomain(k.domain) == normDomain {
+		if k.name == name && bytesconv.EqualFoldASCII(strings.TrimPrefix(k.domain, "."), normDomain) {
 			delete(m, k)
 
 			deleted = true

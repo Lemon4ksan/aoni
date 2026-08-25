@@ -50,6 +50,7 @@ func readGRPCWebFramesBytes(data []byte, msg proto.Message) error {
 
 	for len(data) >= 5 {
 		flags := data[0]
+		_ = data[4]
 		length := binary.BigEndian.Uint32(data[1:5])
 		data = data[5:]
 
@@ -58,10 +59,7 @@ func readGRPCWebFramesBytes(data []byte, msg proto.Message) error {
 				return nil
 			}
 
-			return &GRPCWebError{
-				Op:  "read_payload",
-				Err: ErrInvalidGRPCWebFrame,
-			}
+			return grpcWebReadPayloadErr()
 		}
 
 		payload := data[:length]
@@ -98,10 +96,7 @@ func readGRPCWebFrames(reader io.Reader, msg proto.Message) error {
 				return nil
 			}
 
-			return &GRPCWebError{
-				Op:  generic.Ternary(errors.Is(err, transport.ErrTruncatedPayload), "read_payload", "read_header"),
-				Err: ErrInvalidGRPCWebFrame,
-			}
+			return grpcWebReadHeaderErr(generic.Ternary(errors.Is(err, transport.ErrTruncatedPayload), "read_payload", "read_header"))
 		}
 
 		done, err := processGRPCWebFrame(flags, payload, msg)
@@ -137,7 +132,7 @@ func processGRPCWebFrame(flags byte, payload []byte, msg proto.Message) (done bo
 	}
 
 	if err := proto.Unmarshal(payload, msg); err != nil {
-		return false, &Error{Format: "grpc-web", Target: refkit.FullTypeName(msg), Err: err}
+		return false, grpcWebFormatErr(msg, err)
 	}
 
 	return false, nil
@@ -199,12 +194,7 @@ func verifyGRPCTrailer(trailerPayload []byte) error {
 	}
 
 	if statusCode != "" && statusCode != "0" {
-		return &GRPCWebError{
-			StatusCode:    statusCode,
-			StatusMsg:     statusMsg,
-			StatusDetails: statusDetails,
-			Err:           ErrGRPCWebStatusError,
-		}
+		return grpcWebStatusErr(statusCode, statusMsg, statusDetails)
 	}
 
 	return nil
@@ -212,12 +202,43 @@ func verifyGRPCTrailer(trailerPayload []byte) error {
 
 // parseTrailerKeyValue splits a raw trailer line by ':' and trims leading/trailing whitespace without allocations.
 func parseTrailerKeyValue(line []byte) (k, v []byte, ok bool) {
-	k, v, ok = bytes.Cut(line, []byte{':'})
-	if !ok {
-		return k, v, ok
+	idx := bytes.IndexByte(line, ':')
+	if idx < 0 {
+		return nil, nil, false
 	}
 
-	return bytes.TrimSpace(k), bytes.TrimSpace(v), true
+	return bytes.TrimSpace(line[:idx]), bytes.TrimSpace(line[idx+1:]), true
+}
+
+//go:noinline
+func grpcWebReadPayloadErr() error {
+	return &GRPCWebError{
+		Op:  "read_payload",
+		Err: ErrInvalidGRPCWebFrame,
+	}
+}
+
+//go:noinline
+func grpcWebReadHeaderErr(op string) error {
+	return &GRPCWebError{
+		Op:  op,
+		Err: ErrInvalidGRPCWebFrame,
+	}
+}
+
+//go:noinline
+func grpcWebFormatErr(msg proto.Message, err error) error {
+	return &Error{Format: "grpc-web", Target: refkit.FullTypeName(msg), Err: err}
+}
+
+//go:noinline
+func grpcWebStatusErr(statusCode, statusMsg string, statusDetails []byte) error {
+	return &GRPCWebError{
+		StatusCode:    statusCode,
+		StatusMsg:     statusMsg,
+		StatusDetails: statusDetails,
+		Err:           ErrGRPCWebStatusError,
+	}
 }
 
 // IsBase64Header checks whether frame prefix matches Base64 text-encoded gRPC-Web stream.

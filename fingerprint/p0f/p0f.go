@@ -124,7 +124,7 @@ func Parse(sig string) (*Signature, error) {
 
 	s.IPVersion = parts[0]
 	if s.IPVersion != "4" && s.IPVersion != "6" && s.IPVersion != "*" {
-		return nil, fmt.Errorf("p0f: invalid IP version %q", s.IPVersion)
+		return nil, p0fInvalidIPVersionErr(s.IPVersion)
 	}
 
 	ttlStr := parts[1]
@@ -135,14 +135,14 @@ func Parse(sig string) (*Signature, error) {
 
 	ttl, err := strconv.Atoi(ttlStr)
 	if err != nil {
-		return nil, fmt.Errorf("p0f: invalid TTL %q: %w", parts[1], err)
+		return nil, p0fFieldErr("TTL", parts[1], err)
 	}
 
 	s.TTL = ttl
 
 	ipOptLen, err := strconv.Atoi(parts[2])
 	if err != nil {
-		return nil, fmt.Errorf("p0f: invalid IP option length %q: %w", parts[2], err)
+		return nil, p0fFieldErr("IP option length", parts[2], err)
 	}
 
 	s.IPOptLen = ipOptLen
@@ -152,7 +152,7 @@ func Parse(sig string) (*Signature, error) {
 	} else {
 		mss, err := strconv.Atoi(parts[3])
 		if err != nil {
-			return nil, fmt.Errorf("p0f: invalid MSS %q: %w", parts[3], err)
+			return nil, p0fFieldErr("MSS", parts[3], err)
 		}
 
 		s.MSS = mss
@@ -195,12 +195,12 @@ func parseWindow(field string, s *Signature) error {
 
 	parts := strings.Split(field, ",")
 	if len(parts) != 2 {
-		return fmt.Errorf("p0f: invalid window field %q", field)
+		return p0fFieldMsgErr("invalid window field", field)
 	}
 
 	scale, err := strconv.Atoi(parts[1])
 	if err != nil {
-		return fmt.Errorf("p0f: invalid window scale %q: %w", parts[1], err)
+		return p0fFieldErr("window scale", parts[1], err)
 	}
 
 	s.WindowScale = scale
@@ -212,7 +212,7 @@ func parseWindow(field string, s *Signature) error {
 
 		multiplier, err := strconv.Atoi(strings.TrimPrefix(wsStr, "mss*"))
 		if err != nil {
-			return fmt.Errorf("p0f: invalid MSS multiplier %q: %w", wsStr, err)
+			return p0fFieldMsgErr("invalid MSS multiplier", wsStr)
 		}
 
 		s.WindowSize = multiplier
@@ -222,7 +222,7 @@ func parseWindow(field string, s *Signature) error {
 
 		multiplier, err := strconv.Atoi(strings.TrimPrefix(wsStr, "mtu*"))
 		if err != nil {
-			return fmt.Errorf("p0f: invalid MTU multiplier %q: %w", wsStr, err)
+			return p0fFieldMsgErr("invalid MTU multiplier", wsStr)
 		}
 
 		s.WindowSize = multiplier
@@ -230,7 +230,7 @@ func parseWindow(field string, s *Signature) error {
 	default:
 		ws, err := strconv.Atoi(wsStr)
 		if err != nil {
-			return fmt.Errorf("p0f: invalid window size %q: %w", wsStr, err)
+			return p0fFieldErr("window size", wsStr, err)
 		}
 
 		s.WindowType = WindowNormal
@@ -238,6 +238,21 @@ func parseWindow(field string, s *Signature) error {
 	}
 
 	return nil
+}
+
+//go:noinline
+func p0fInvalidIPVersionErr(v string) error {
+	return fmt.Errorf("p0f: invalid IP version %q", v)
+}
+
+//go:noinline
+func p0fFieldErr(field, val string, err error) error {
+	return fmt.Errorf("p0f: invalid %s %q: %w", field, val, err)
+}
+
+//go:noinline
+func p0fFieldMsgErr(msg, val string) error {
+	return fmt.Errorf("p0f: %s %q", msg, val)
 }
 
 // MustParse parses a p0f signature string and panics on error.

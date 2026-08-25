@@ -9,7 +9,6 @@ package fast
 import (
 	"bytes"
 	"context"
-	"encoding/base64"
 	"net/http"
 	"net/url"
 
@@ -140,8 +139,7 @@ func extractUserInfoAndSetAuth(req *h1engine.Request) {
 	if len(uBytes) > 0 {
 		user := bytesconv.B2S(uBytes)
 		pass := bytesconv.B2S(req.URI().Password())
-		encoded := base64.StdEncoding.EncodeToString(bytesconv.S2B(user + ":" + pass))
-		req.Header.Set("Authorization", "Basic "+encoded)
+		req.Header.Set("Authorization", netutil.FormatBasicAuth(user, pass))
 		req.URI().SetUsernameBytes(nil)
 		req.URI().SetPasswordBytes(nil)
 
@@ -157,8 +155,7 @@ func extractUserInfoAndSetAuth(req *h1engine.Request) {
 	if parsed, err := url.Parse(bytesconv.B2S(rawURI)); err == nil && parsed.User != nil {
 		user := parsed.User.Username()
 		pass, _ := parsed.User.Password()
-		encoded := base64.StdEncoding.EncodeToString(bytesconv.S2B(user + ":" + pass))
-		req.Header.Set("Authorization", "Basic "+encoded)
+		req.Header.Set("Authorization", netutil.FormatBasicAuth(user, pass))
 	}
 
 	req.URI().SetUsername("")

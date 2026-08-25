@@ -130,15 +130,28 @@ func ValidateSubprotocol(requested []string, selected string) bool {
 	return slices.Contains(requested, selected)
 }
 
+var validTokenTable = func() (tbl [256]bool) {
+	for b := 0; b < 256; b++ {
+		if b > 32 && b < 127 && strings.IndexByte("()<>@,;:\\\"/[]?={} \t", byte(b)) < 0 {
+			tbl[b] = true
+		}
+	}
+
+	return tbl
+}()
+
 // IsValidSubprotocolToken checks whether a token complies with RFC 2616 ABNF token rules.
 func IsValidSubprotocolToken(token string) bool {
-	if token == "" {
+	n := len(token)
+	if n == 0 {
 		return false
 	}
 
-	for i := 0; i < len(token); i++ {
-		b := token[i]
-		if b <= 32 || b >= 127 || strings.IndexByte("()<>@,;:\\\"/[]?={} \t", b) >= 0 {
+	_ = token[n-1]
+	_ = validTokenTable[255]
+
+	for i := 0; i < n; i++ {
+		if !validTokenTable[token[i]] {
 			return false
 		}
 	}
