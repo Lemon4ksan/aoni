@@ -169,6 +169,15 @@ func (f *Response) Headers() map[string][]string {
 	return m
 }
 
+// RawHeaders returns serialized raw HTTP response headers without heap allocations.
+func (f *Response) RawHeaders() []byte {
+	if f == nil || f.resp == nil {
+		return nil
+	}
+
+	return f.resp.Header.Header()
+}
+
 // SetTrailers registers HTTP trailers captured during frame execution.
 func (f *Response) SetTrailers(trailers map[string][]string) {
 	f.trailers = trailers

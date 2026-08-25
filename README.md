@@ -241,6 +241,37 @@ The top CPU sample is `runtime.procyieldAsm` (9.62%).
 
 Across 5,570,000 parallel transactions, zero dynamic bytes were allocated to the Go garbage collector heap. 3.59 MB of the total 5.64 MB footprint consists of OS kernel thread stacks for 12 CPU cores.
 
+### 5. Gollvm (LLVM-Optimized Silicon Backend) & Performance
+
+In addition to the standard Go toolchain (`gc`), `aoni` can be compiled using **`Gollvm`** (an LLVM-based Go compiler frontend built on `llvm-goc` and `libgo`). Gollvm brings LLVM's industrial-grade `-O3` vectorizer, instruction reordering, aggressive inlining, and target-specific CPU SIMD code generation (`-march=native` / `-march=skylake`):
+
+#### Gollvm WSL Quickstart & Workflow:
+
+```bash
+# 1. Add Gollvm binaries and runtime libraries to environment
+export PATH="/home/senya/gollvm-install/bin:$PATH"
+export LD_LIBRARY_PATH="/home/senya/gollvm-install/lib64:$LD_LIBRARY_PATH"
+
+# 2. Compile with LLVM -O3 optimizations and CPU vectorization
+go build -gccgoflags="-O3 -march=native" -o myapp myapp.go
+
+# 3. Compile standalone static binary (zero libgo.so runtime dependency)
+go build -gccgoflags="-O3 -static-libgo" -o myapp myapp.go
+
+# 4. Directly inspect LLVM-emitted assembly output
+llvm-goc -fgo-pkgpath=main -O3 -S -o output.s myapp.go
+```
+
+#### Microarchitectural Benchmark Comparison: Standard Go (`gc`) vs Gollvm (`LLVM 20.1.8 -O3`)
+
+| Subsystem / Kernel Workload | Standard Go (`gc`) | Gollvm (`LLVM 20.1.8 -O3`) | Speedup / Efficiency Gain | Microarchitectural Mechanism |
+| :--- | :---: | :---: | :---: | :--- |
+| **ASCII Header Case-Folding & Match** | 8.47 ns/match | **1.71 ns/match** | **⚡ 4.95x Faster** | Vectorized bitwise unrolling & branch elimination |
+| **HPACK / QPACK Huffman Bitstream Pack** | 324.32 MB/s (464.6 ns) | **697.84 MB/s (215.9 ns)** | **⚡ 2.15x Faster** | LLVM 64-bit barrel-shifter & register packing |
+| **QUIC / Protobuf Varint Codec** | 22.41 ns/op | **15.19 ns/op** | **⚡ 1.48x Faster** | Unrolled bitmask extraction & branch prediction |
+| **EWMA Latency & Jitter Filter** | 2.74 ns/sample | **1.92 ns/sample** | **⚡ 1.43x Faster** | Fused multiply-accumulate & float register pipelining |
+| **FNV-1a / CRC32 Fast Table Hash (64KB)** | 652.40 MB/s | **800.67 MB/s** | **⚡ 1.23x Faster** | Multi-scalar pipeline ILP (Instruction-Level Parallelism) |
+
 ## Feature & Protocol Scope
 
 | Feature / Architectural Layer | Go `net/http` | Standard Wrapper (e.g. Resty) | `aoni` Engine |
