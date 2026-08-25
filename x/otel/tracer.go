@@ -158,6 +158,8 @@ func (t *Tracer) Start(ctx context.Context, spanName string, opts ...StartOption
 	var parentSc SpanContext
 	if parentSpan := SpanFromContext(ctx); parentSpan != nil {
 		parentSc = parentSpan.SpanContext()
+	} else {
+		parentSc = RemoteSpanContextFromContext(ctx)
 	}
 
 	var traceID TraceID

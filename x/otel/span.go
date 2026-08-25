@@ -298,10 +298,14 @@ func (s *Span) EndWithTime(endTime time.Time) {
 	}
 }
 
-// Context key for storing active Span.
+// Context key for storing active Span or remote SpanContext.
 type contextKey struct{}
+type remoteContextKey struct{}
 
-var activeSpanKey = contextKey{}
+var (
+	activeSpanKey        = contextKey{}
+	remoteSpanContextKey = remoteContextKey{}
+)
 
 // ContextWithSpan returns a new context carrying the given active [*Span].
 func ContextWithSpan(ctx context.Context, span *Span) context.Context {
@@ -309,6 +313,19 @@ func ContextWithSpan(ctx context.Context, span *Span) context.Context {
 		ctx = context.Background()
 	}
 	return context.WithValue(ctx, activeSpanKey, span)
+}
+
+// ContextWithSpanContext returns a new context carrying the given remote or explicit [SpanContext].
+func ContextWithSpanContext(ctx context.Context, sc SpanContext) context.Context {
+	return ContextWithRemoteSpanContext(ctx, sc)
+}
+
+// ContextWithRemoteSpanContext returns a new context carrying a remote [SpanContext].
+func ContextWithRemoteSpanContext(ctx context.Context, sc SpanContext) context.Context {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	return context.WithValue(ctx, remoteSpanContextKey, sc)
 }
 
 // SpanFromContext retrieves the active [*Span] from ctx, or nil if none exists.
@@ -322,10 +339,24 @@ func SpanFromContext(ctx context.Context) *Span {
 	return nil
 }
 
+// RemoteSpanContextFromContext retrieves the propagated remote [SpanContext] from ctx, or a zero SpanContext.
+func RemoteSpanContextFromContext(ctx context.Context) SpanContext {
+	if ctx == nil {
+		return SpanContext{}
+	}
+	if sc, ok := ctx.Value(remoteSpanContextKey).(SpanContext); ok {
+		return sc
+	}
+	return SpanContext{}
+}
+
 // TraceIDFromContext returns the 32-hex TraceID from ctx if an active span exists, or empty string.
 func TraceIDFromContext(ctx context.Context) string {
 	if span := SpanFromContext(ctx); span != nil {
 		return span.SpanContext().TraceID().String()
+	}
+	if sc := RemoteSpanContextFromContext(ctx); sc.IsValid() {
+		return sc.TraceID().String()
 	}
 	return ""
 }
