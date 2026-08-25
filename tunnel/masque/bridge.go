@@ -18,19 +18,19 @@ import (
 	"github.com/lemon4ksan/aoni/tunnel/tun"
 )
 
-// BridgeOptions configures BCP 38 ingress filtering, MTU boundaries, and MSS clamping.
+// BridgeOptions configures BCP 38 / RFC 2827 ingress filtering (RFC 9484 §11), MTU boundaries (RFC 9484 §10.1), and MSS clamping (RFC 9293).
 type BridgeOptions struct {
 	AllowedPrefixes []netip.Prefix
 	MaxMTU          int
 }
 
-// BridgeTUN connects a Layer 3 TUN adapter to a MASQUE connect-ip session.
+// BridgeTUN connects a Layer 3 TUN adapter to a MASQUE connect-ip session per RFC 9484.
 func BridgeTUN(ctx context.Context, adapter tun.Adapter, masqueConn net.Conn) error {
 	return BridgeTUNWithOptions(ctx, adapter, masqueConn, BridgeOptions{})
 }
 
-// BridgeTUNWithOptions connects a TUN adapter to a MASQUE tunnel while enforcing BCP 38 uRPF,
-// PMTUD ICMP signaling, and TCP SYN MSS clamping.
+// BridgeTUNWithOptions connects a TUN adapter to a MASQUE tunnel while enforcing BCP 38 / RFC 2827 uRPF (RFC 9484 §11),
+// PMTUD ICMP Packet Too Big signaling (RFC 9484 §7.2.1 & §10.1), and TCP SYN MSS clamping (RFC 9293).
 func BridgeTUNWithOptions(
 	ctx context.Context,
 	adapter tun.Adapter,
@@ -189,8 +189,8 @@ func forwardMasqueToAdapter(
 	})
 }
 
-// ClampTCPMSSInPlace inspects TCP SYN packets and overwrites the MSS option
-// if it exceeds the calculated maximum MSS for the tunnel MTU.
+// ClampTCPMSSInPlace inspects TCP SYN packets and overwrites the MSS option (RFC 9293 / RFC 879)
+// if it exceeds the calculated maximum MSS for the tunnel MTU (RFC 9484 §10.1).
 func ClampTCPMSSInPlace(packet []byte, maxMTU int) {
 	if len(packet) < 20 || maxMTU <= 40 {
 		return
@@ -281,7 +281,7 @@ func updateMSSOption(options []byte, maxMSS uint16) bool {
 	return false
 }
 
-// recalculateTCPChecksum recomputes and writes the TCP pseudo-header and payload checksum in-place.
+// recalculateTCPChecksum recomputes and writes the TCP pseudo-header and payload checksum in-place (RFC 9293 & RFC 1071).
 func recalculateTCPChecksum(packet []byte, version byte, ipHdrLen int) {
 	tcpHdr := packet[ipHdrLen:]
 	tcpLen := len(packet) - ipHdrLen

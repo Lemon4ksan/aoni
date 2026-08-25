@@ -18,12 +18,14 @@ var (
 	ErrMTUTooSmall = impl.ErrMTUTooSmall
 )
 
-// BuildICMPPacketTooBig4 constructs an RFC 1191 / RFC 4884 ICMPv4 "Fragmentation Needed" error packet (Type 3, Code 4).
+// BuildICMPPacketTooBig4 constructs an RFC 1191 / RFC 4884 / RFC 792 ICMPv4 "Fragmentation Needed" error packet (Type 3, Code 4)
+// for signaling PMTU limits per RFC 9484 Section 7.2.1 (Error Signalling) & Section 10.1 (MTU Considerations).
 func BuildICMPPacketTooBig4(packet []byte, nextHopMTU uint16) ([]byte, error) {
 	return impl.BuildICMPPacketTooBig4(packet, nextHopMTU)
 }
 
-// BuildICMPPacketTooBig6 constructs an RFC 4443 ICMPv6 "Packet Too Big" error packet (Type 2, Code 0).
+// BuildICMPPacketTooBig6 constructs an RFC 4443 Section 3.2 ICMPv6 "Packet Too Big" error packet (Type 2, Code 0)
+// for signaling PMTU limits per RFC 9484 Section 7.2.1 (Error Signalling) & Section 10.1 (MTU Considerations).
 func BuildICMPPacketTooBig6(packet []byte, nextHopMTU uint32) ([]byte, error) {
 	return impl.BuildICMPPacketTooBig6(packet, nextHopMTU)
 }

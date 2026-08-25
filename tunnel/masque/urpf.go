@@ -17,7 +17,8 @@ var (
 	ErrMartianAddress = errors.New("aoni/masque: packet contains reserved martian address")
 )
 
-// ValidateIngressSourceAddress verifies that srcAddr belongs to one of allowedPrefixes per BCP 38 / BCP 84 (RFC 2827/3704/8704).
+// ValidateIngressSourceAddress verifies that srcAddr belongs to one of allowedPrefixes
+// per RFC 9484 Section 11 (Security Considerations) and BCP 38 / BCP 84 (RFC 2827 / RFC 3704 / RFC 8704).
 //
 // Preconditions:
 //   - If allowedPrefixes is empty, validation passes by default (no static prefix constraints).
@@ -40,7 +41,7 @@ func ValidateIngressSourceAddress(srcAddr netip.Addr, allowedPrefixes []netip.Pr
 	return ErrSpoofedSourceAddress
 }
 
-// IsMartianAddr reports whether addr belongs to reserved, unroutable Martian address ranges per BCP 38 (RFC 2827).
+// IsMartianAddr reports whether addr belongs to reserved, unroutable Martian address ranges per BCP 38 (RFC 2827) and RFC 6890.
 func IsMartianAddr(addr netip.Addr) bool {
 	if !addr.IsValid() || addr.IsUnspecified() || addr.IsLoopback() || addr.IsMulticast() {
 		return true

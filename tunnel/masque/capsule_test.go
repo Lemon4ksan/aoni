@@ -357,3 +357,192 @@ func TestDecodeAddressAssignPayloadPODSlab(t *testing.T) {
 		assert.Empty(t, entries)
 	})
 }
+
+func TestEncodeDecodeAddressRequestCapsule(t *testing.T) {
+	t.Parallel()
+
+	t.Run("empty entries returns ErrEmptyAddressRequest", func(t *testing.T) {
+		t.Parallel()
+
+		var buf [256]byte
+
+		_, err := EncodeAddressRequestCapsule(nil, buf[:])
+		assert.ErrorIs(t, err, ErrEmptyAddressRequest)
+	})
+
+	t.Run("valid IPv4 and IPv6 requested addresses", func(t *testing.T) {
+		t.Parallel()
+
+		reqs := []RequestedAddress{
+			{
+				Addr:         netip.MustParseAddr("10.0.0.1"),
+				RequestID:    1,
+				IPVersion:    4,
+				PrefixLength: 32,
+			},
+			{
+				Addr:         netip.MustParseAddr("2001:db8::1"),
+				RequestID:    2,
+				IPVersion:    6,
+				PrefixLength: 64,
+			},
+		}
+
+		var buf [512]byte
+
+		n, err := EncodeAddressRequestCapsule(reqs, buf[:])
+		require.NoError(t, err)
+		assert.Greater(t, n, 0)
+
+		// Capsule Header
+		capsuleType, nType, err := DecodeVarint(buf[:n])
+		require.NoError(t, err)
+		assert.Equal(t, CapsuleAddressRequest, capsuleType)
+
+		payloadLen, nLen, err := DecodeVarint(buf[nType:n])
+		require.NoError(t, err)
+		assert.Equal(t, uint64(n-nType-nLen), payloadLen)
+
+		payload := buf[nType+nLen : n]
+		decoded, err := DecodeAddressRequestPayload(payload)
+		require.NoError(t, err)
+		require.Len(t, decoded, 2)
+
+		assert.Equal(t, uint64(1), decoded[0].RequestID)
+		assert.Equal(t, byte(4), decoded[0].IPVersion)
+		assert.Equal(t, "10.0.0.1", decoded[0].Addr.String())
+		assert.Equal(t, byte(32), decoded[0].PrefixLength)
+
+		assert.Equal(t, uint64(2), decoded[1].RequestID)
+		assert.Equal(t, byte(6), decoded[1].IPVersion)
+		assert.Equal(t, "2001:db8::1", decoded[1].Addr.String())
+		assert.Equal(t, byte(64), decoded[1].PrefixLength)
+	})
+
+	t.Run("invalid IP version error on encode", func(t *testing.T) {
+		t.Parallel()
+
+		reqs := []RequestedAddress{
+			{
+				Addr:      netip.MustParseAddr("10.0.0.1"),
+				RequestID: 1,
+				IPVersion: 9, // Invalid
+			},
+		}
+
+		var buf [256]byte
+
+		_, err := EncodeAddressRequestCapsule(reqs, buf[:])
+		assert.ErrorIs(t, err, ErrInvalidCapsule)
+	})
+}
+
+func TestEncodeDecodeRouteAdvertisementCapsule(t *testing.T) {
+	t.Parallel()
+
+	t.Run("valid IPv4 and IPv6 route advertisement ranges", func(t *testing.T) {
+		t.Parallel()
+
+		routes := []IPAddressRange{
+			{
+				StartIP:    netip.MustParseAddr("192.168.1.0"),
+				EndIP:      netip.MustParseAddr("192.168.1.255"),
+				IPVersion:  4,
+				IPProtocol: 6, // TCP
+			},
+			{
+				StartIP:    netip.MustParseAddr("2001:db8::1"),
+				EndIP:      netip.MustParseAddr("2001:db8::ffff"),
+				IPVersion:  6,
+				IPProtocol: 17, // UDP
+			},
+		}
+
+		var buf [512]byte
+
+		n, err := EncodeRouteAdvertisementCapsule(routes, buf[:])
+		require.NoError(t, err)
+		assert.Greater(t, n, 0)
+
+		capsuleType, nType, err := DecodeVarint(buf[:n])
+		require.NoError(t, err)
+		assert.Equal(t, CapsuleRouteAdvertisement, capsuleType)
+
+		payloadLen, nLen, err := DecodeVarint(buf[nType:n])
+		require.NoError(t, err)
+		assert.Equal(t, uint64(n-nType-nLen), payloadLen)
+
+		payload := buf[nType+nLen : n]
+		decoded, err := DecodeRouteAdvertisementPayload(payload)
+		require.NoError(t, err)
+		require.Len(t, decoded, 2)
+
+		assert.Equal(t, byte(4), decoded[0].IPVersion)
+		assert.Equal(t, "192.168.1.0", decoded[0].StartIP.String())
+		assert.Equal(t, "192.168.1.255", decoded[0].EndIP.String())
+		assert.Equal(t, byte(6), decoded[0].IPProtocol)
+
+		assert.Equal(t, byte(6), decoded[1].IPVersion)
+		assert.Equal(t, "2001:db8::1", decoded[1].StartIP.String())
+		assert.Equal(t, "2001:db8::ffff", decoded[1].EndIP.String())
+		assert.Equal(t, byte(17), decoded[1].IPProtocol)
+	})
+
+	t.Run("invalid IP version error on encode", func(t *testing.T) {
+		t.Parallel()
+
+		routes := []IPAddressRange{
+			{
+				StartIP:   netip.MustParseAddr("10.0.0.1"),
+				EndIP:     netip.MustParseAddr("10.0.0.2"),
+				IPVersion: 3, // Invalid
+			},
+		}
+
+		var buf [256]byte
+
+		_, err := EncodeRouteAdvertisementCapsule(routes, buf[:])
+		assert.ErrorIs(t, err, ErrInvalidCapsule)
+	})
+
+	t.Run("truncated route advertisement payload error", func(t *testing.T) {
+		t.Parallel()
+
+		// Tag 4 with incomplete bytes
+		_, err := DecodeRouteAdvertisementPayload([]byte{4, 10, 0, 0})
+		assert.ErrorIs(t, err, ErrInvalidCapsule)
+	})
+}
+
+func TestEncodeAddressAssignCapsule(t *testing.T) {
+	t.Parallel()
+
+	entries := []AssignedAddress{
+		{
+			Addr:         netip.MustParseAddr("172.16.0.2"),
+			RequestID:    42,
+			IPVersion:    4,
+			PrefixLength: 24,
+		},
+	}
+
+	var buf [256]byte
+
+	n := EncodeAddressAssignCapsule(entries, buf[:])
+	assert.Greater(t, n, 0)
+
+	capsuleType, nType, err := DecodeVarint(buf[:n])
+	require.NoError(t, err)
+	assert.Equal(t, CapsuleAddressAssign, capsuleType)
+
+	payloadLen, nLen, err := DecodeVarint(buf[nType:n])
+	require.NoError(t, err)
+	assert.Equal(t, uint64(n-nType-nLen), payloadLen)
+
+	decoded, err := DecodeAddressAssignPayload(buf[nType+nLen : n])
+	require.NoError(t, err)
+	require.Len(t, decoded, 1)
+	assert.Equal(t, uint64(42), decoded[0].RequestID)
+	assert.Equal(t, "172.16.0.2", decoded[0].Addr.String())
+	assert.Equal(t, byte(24), decoded[0].PrefixLength)
+}

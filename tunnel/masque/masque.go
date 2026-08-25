@@ -23,14 +23,16 @@ import (
 )
 
 const (
-	// DefaultMASQUEPathPrefix specifies the well-known path prefix for IP proxying (RFC 9484, RFC 8615, RFC 8820 §2.3).
+	// DefaultMASQUEPathPrefix specifies the well-known path prefix for IP proxying
+	// per RFC 9484 Section 3 & Section 12.2 (MASQUE URI Suffixes Registry), RFC 8615, RFC 8820 §2.3.
 	DefaultMASQUEPathPrefix = "/.well-known/masque/ip/"
 
-	// ConnectIPUpgradeToken specifies the RFC 9484 HTTP upgrade token.
+	// ConnectIPUpgradeToken specifies the RFC 9484 Section 4 HTTP upgrade token ("connect-ip").
 	ConnectIPUpgradeToken = "connect-ip"
 )
 
-// BuildIPProxyURI constructs an RFC 9484 compliant IP Proxy URI using single-pass zero-allocation string builder.
+// BuildIPProxyURI constructs an RFC 9484 compliant IP Proxy URI using single-pass zero-allocation string builder
+// per RFC 9484 Section 3 (Configuration of Clients) and Section 4.6 (Limiting Request Scope, Figure 6).
 // Target can be an IP address/prefix, hostname, or "*" wildcard; ipproto can be an IP protocol number or "*" wildcard.
 func BuildIPProxyURI(host string, port int, target, ipproto string) string {
 	cleanTarget := generic.Coalesce(strings.TrimSpace(target), "*")
@@ -74,7 +76,8 @@ func BuildIPProxyURI(host string, port int, target, ipproto string) string {
 	return sb.String()
 }
 
-// DialIPProxy establishes an IP tunneling connection over HTTP/1.1 or HTTP/2 Extended CONNECT.
+// DialIPProxy establishes an IP tunneling connection over HTTP/1.1 Upgrade (RFC 9484 §4.2/§4.3)
+// or HTTP/2 Extended CONNECT (RFC 9484 §4.4/§4.5 & RFC 8441).
 func DialIPProxy(
 	ctx context.Context,
 	dialer aoni.WebSocketDialer,
@@ -117,7 +120,7 @@ func DialIPProxy(
 	return conn, resp, nil
 }
 
-// performCONNECTIPHandshake transmits the HTTP upgrade request and validates the 101/200 response headers.
+// performCONNECTIPHandshake transmits the HTTP upgrade request and validates the 101/200 response headers (RFC 9484 §4.2/§4.3 & §4.4/§4.5).
 func performCONNECTIPHandshake(
 	ctx context.Context,
 	conn net.Conn,
