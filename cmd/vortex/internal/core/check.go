@@ -171,7 +171,10 @@ func (c *CmdCheck) Run(ctx context.Context, args []string, stdout, stderr io.Wri
 					isBorrowTarget = rt.Config.ShouldCheckBorrow(relFile)
 				}
 
-				hasTargets := isBorrowTarget || len(root.Services) > 0 || len(root.Tuples) > 0 || len(root.Bitpacks) > 0 ||
+				hasTargets := isBorrowTarget ||
+					len(root.Services) > 0 ||
+					len(root.Tuples) > 0 ||
+					len(root.Bitpacks) > 0 ||
 					len(root.UnrecognizedDirectives) > 0 ||
 					len(root.Unions) > 0
 
