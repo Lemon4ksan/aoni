@@ -7,7 +7,7 @@ package webtransport
 // WebTransport HTTP Upgrade Token (draft-ietf-webtrans-http3-16 §3.2 & §9.1).
 const (
 	// ConnectProtocolWebTransport is the HTTP Extended CONNECT :protocol token for WebTransport over HTTP/3.
-	ConnectProtocolWebTransport = "webtransport-h3"
+	ConnectProtocolWebTransport = "webtransport"
 )
 
 // HTTP Header Fields for Application Protocol Negotiation (draft-ietf-webtrans-http3-16 §3.3 & §9.7).

@@ -151,6 +151,22 @@ func (s *Server) RouteIncomingBidi(stream *quic.Stream) error {
 	return nil
 }
 
+// RouteIncomingBidiWithID routes an incoming bidirectional stream whose frame type was already consumed.
+func (s *Server) RouteIncomingBidiWithID(stream *quic.Stream, sessID uint64) error {
+	s.mu.RLock()
+	sess, ok := s.sessions[sessID]
+	s.mu.RUnlock()
+
+	if !ok || sess == nil {
+		_ = stream.Close()
+		return ErrStreamRejected
+	}
+
+	sess.EnqueueBidiStream(newIncomingStream(stream, sessID, uint64(stream.StreamID())))
+
+	return nil
+}
+
 // RouteIncomingUni routes an incoming unidirectional stream to its corresponding session.
 func (s *Server) RouteIncomingUni(stream *quic.ReceiveStream) error {
 	sType, _, err := readVarintFromReceiveStream(stream)
